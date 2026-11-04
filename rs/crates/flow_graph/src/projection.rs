@@ -13,6 +13,7 @@ use flow_syntax::{lisp, macros, value as fvalue};
 use param::{KindView, Value as PValue};
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
 type S = Syntax;
 pub type Path = Vec<String>;
@@ -338,7 +339,8 @@ pub fn same_graph(a: &w::Workspace, b: &w::Workspace, name: &str) -> bool {
     let (Some(x), Some(y)) = (graph_of(a, name), graph_of(b, name)) else {
         return false;
     };
-    if !(std::ptr::eq(a.ops.as_ptr(), b.ops.as_ptr())
+    // OCaml's `[]` is one immediate value, so two workspaces with no ops are physically equal too
+    if !(((a.ops.is_empty() && b.ops.is_empty()) || Arc::ptr_eq(&a.ops, &b.ops))
         && x.context == y.context
         && s::equal(&x.form, &y.form)
         && a.macros.len() == b.macros.len()

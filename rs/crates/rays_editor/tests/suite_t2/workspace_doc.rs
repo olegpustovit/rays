@@ -317,7 +317,7 @@ fn part_projection_reuse() {
     let phases = sample(&mut || renamed = Some(doc::edit(&catalog(), &ws, &Op::Rename { node: s(&["other", "b"]), to_: "moved".into() }).unwrap()));
     let renamed = renamed.unwrap();
     assert_eq!(flow_syntax::phase_timer::calls(&phases, "project"), 0, "a rename projected every graph to prune layout");
-    // BACKLOG (editor suite t2): same_graph(g) is false in Rust, ops are compared by Vec pointer (OCaml: shared list)
+    assert!(projection::same_graph(&ws.checked, &renamed.checked, "g"), "a rename elsewhere invalidated an untouched graph");
     assert!(!projection::same_graph(&ws.checked, &renamed.checked, "other"), "projection invalidation ignored lexical graph content");
     assert!(
         renamed.layout.at[&s(&["g", "a"])] == (120., 48.) && renamed.layout.at.contains_key(&s(&["g", ":count"])) && renamed.layout.at[&s(&["other", "moved"])] == (240., 96.) && !renamed.layout.at.contains_key(&s(&["other", "b"])),

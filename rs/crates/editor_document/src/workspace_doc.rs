@@ -533,6 +533,14 @@ fn checker_for(ops: Vec<FlowOp>, library: bool) -> Box<flow_edit::Checker> {
     Box::new(move |catalog: &Catalog, forms: &[S]| fsc::check_workspace(&ops, library, None, catalog, forms))
 }
 
+/// An edit's checked workspace carries the document's ops Arc: the edit checked against those ops, and
+/// `same_graph` compares them by identity (OCaml shares the list across edits).
+// ponytail: flow_check builds a fresh ops Arc from the slice it is given; swap it here instead of threading the Arc through check.
+fn keep_ops(t: &T, (source, mut checked): (Vec<S>, Workspace)) -> (Vec<S>, Workspace) {
+    checked.ops = t.checked.ops.clone();
+    (source, checked)
+}
+
 fn edit_unchecked(catalog: &Catalog, t: &T, op: &Op) -> R<T> {
     let key = |change: &Change| {
         let mut k = change.path.clone();
@@ -559,7 +567,7 @@ fn edit_unchecked(catalog: &Catalog, t: &T, op: &Op) -> R<T> {
     let checker = checker_for((*t.checked.ops).clone(), t.fragment);
     let result = flow_edit::apply_checked_with(&t.checked.ops, t.fragment, Some(&*checker), catalog, &t.source, op)?;
     let prune = !matches!(op, Op::SetArg { .. } | Op::SetInputDefault { .. } | Op::SetNote { .. } | Op::ToggleBypass { .. });
-    Ok(commit(t, &|p| flow_edit::remap(op, p), false, prune, result))
+    Ok(commit(t, &|p| flow_edit::remap(op, p), false, prune, keep_ops(t, result)))
 }
 
 /// `run` on a document whose imported forms the edit neither names nor rewrites.
@@ -639,7 +647,7 @@ pub fn edit_layout(catalog: &Catalog, t: &T, op: &layout_edit::Op) -> R<T> {
     guarded(t, &layout_edit::paths(op), &mut || {
         let checker = checker_for((*t.checked.ops).clone(), t.fragment);
         let result = layout_edit::apply_checked(&t.checked.ops, t.fragment, Some(&*checker), catalog, &t.source, op)?;
-        Ok(commit(t, &|p| layout_edit::remap(op, p), layout_edit::merges(op), layout_edit::changes_nodes(op), result))
+        Ok(commit(t, &|p| layout_edit::remap(op, p), layout_edit::merges(op), layout_edit::changes_nodes(op), keep_ops(t, result)))
     })
 }
 

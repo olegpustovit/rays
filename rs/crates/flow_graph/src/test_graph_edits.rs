@@ -1,8 +1,33 @@
 // Port of lib/flow_graph/test_graph_edits.ml.
-use crate::flow_edit::{apply_checked, ArgKey, Loop, Op};
+use crate::flow_edit::{apply_checked, apply_checked_with, ArgKey, Loop, Op};
 use crate::projection as p;
 use crate::test_support::*;
 use flow_syntax::syntax::Syntax;
+use std::sync::Arc;
+
+#[test]
+fn same_graph_keys_on_the_shared_ops() {
+    let src = parse("(workspace w (graph g :context host (let* [a 1.0] a)) (graph other :context host (let* [b 2.0] b)))");
+    let rename = Op::Rename { node: path(&["other", "b"]), to_: "moved".into() };
+    // no ops on both sides: OCaml's `[]` is one value, so the graphs are the same
+    assert!(p::same_graph(&check(&src), &check(&src), "g"));
+    // the editor's ops: one list, checked into the base workspace
+    let mut user = flow_check::op::find(&[], "array/float", &flow_syntax::context::value()).unwrap();
+    user.name = "test/float".into();
+    let ops = Arc::new(vec![user]);
+    let base = match flow_check::workspace::check(&ops, false, false, None, &catalog(), &src) {
+        (Some(ws), ds) if ds.is_empty() => ws,
+        (_, ds) => panic!("{}", show(&ds)),
+    };
+    // an edit that leaves the ops alone keeps their Arc (the editor's pipeline): `g` is unchanged, `other` is not
+    let (_, mut edited) = apply_checked(&catalog(), &src, &rename).unwrap();
+    edited.ops = base.ops.clone();
+    assert!(p::same_graph(&base, &edited, "g"));
+    assert!(!p::same_graph(&base, &edited, "other"));
+    // the same ops checked as a new list are a different list, as in OCaml, even with equal contents
+    let (_, fresh) = apply_checked_with(&Arc::new((*ops).clone()), false, None, &catalog(), &src, &rename).unwrap();
+    assert!(!p::same_graph(&base, &fresh, "g"));
+}
 
 fn source(body: &str) -> Vec<Syntax> {
     parse(&format!("(workspace w (graph g :context host (let* {})))", body))
