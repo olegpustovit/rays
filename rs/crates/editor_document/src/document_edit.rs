@@ -92,7 +92,7 @@ pub fn text_edit(imports: Option<&[(String, String)]>, factories: Option<&[Facto
     let workspace = &doc.workspace.ws;
     let catalog = catalog_of(factories).map_err(|d| vec![d])?;
     let options = TextOptions {
-        ops: Some(workspace.checked.ops.clone()),
+        ops: Some((*workspace.checked.ops).clone()),
         imports: imports.map(|i| i.to_vec()).unwrap_or_else(|| workspace_doc::import_texts(workspace)),
         inputs: (*workspace.inputs).clone(),
         settings: Some(workspace.settings.clone()),

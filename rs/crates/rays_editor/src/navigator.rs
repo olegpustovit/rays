@@ -376,7 +376,7 @@ fn search(state: &State, pa: &Params, defs: &[&Graph], chains: &Chains, counts: 
     let q = pxui_shell::kit::ocaml_trim(&state.query).to_owned();
     let mut acc: Vec<Row> = Vec::new();
     let ws = &pa.workspace;
-    for g in &ws.graphs {
+    for g in ws.graphs.iter() {
         if contains(&q, &g.name) {
             acc.push(graph_row(pa, g, group_of(g.context).to_owned()));
         }

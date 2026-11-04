@@ -112,7 +112,7 @@ fn fixture(ty: &Ty, reducer: &str, over: Option<Op>, seed: Option<&str>) -> Fixt
     let mut ws = workspace(&format!("data (probe/data) s (reduce {reducer} {seed} data)"), &[source(ty)], &format!("(fn [(uv : vec2)] {body})"));
     // Exercise the compiler's independent declaration guard even for an unchecked extension.
     if let Some(op) = over {
-        ws.ops.insert(0, op);
+        std::sync::Arc::make_mut(&mut ws.ops).insert(0, op);
     }
     let ev = ok(e::r#static(&ws, true, None));
     let (_, records) = ev.records.iter().find(|(p, _)| p == &vec!["g".to_string(), "tested".to_string()]).unwrap();

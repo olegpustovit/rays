@@ -18,20 +18,21 @@ fn is_context_op(name: &str) -> bool {
 /// Rewrite every term bottom-up: `select` may replace a term first (its replacement is then
 /// walked), `transform` sees each rebuilt term. Checked terms are trees here, so no sharing memo
 /// is needed. `helpers` false leaves a helper call's inlined body alone.
-fn term_once(select: &dyn Fn(&Term) -> Term, transform: &dyn Fn(Term) -> Term, helpers: bool, t: &Term) -> Term {
-    let t = select(t);
+fn term_once(select: &dyn Fn(&Term) -> Option<Term>, transform: &dyn Fn(Term) -> Term, helpers: bool, t: &Term) -> Term {
+    let owned;
+    let t = match select(t) { Some(replaced) => { owned = replaced; &owned } None => t };
     let walk = |child: &Term| term_once(select, transform, helpers, child);
     let rebuilt = match &t.node {
         Node::CallFn { fn_name, args, body } if !helpers => Term {
             node: Node::CallFn { fn_name: fn_name.clone(), args: args.iter().map(&walk).collect(), body: body.clone() },
             ..t.clone()
         },
-        _ => w::map_children(&walk, &t),
+        _ => w::map_children(&walk, t),
     };
     transform(rebuilt)
 }
 
-fn map(select: &dyn Fn(&Term) -> Term, helpers: bool, transform: &dyn Fn(Term) -> Term, graph: &Graph) -> Graph {
+fn map(select: &dyn Fn(&Term) -> Option<Term>, helpers: bool, transform: &dyn Fn(Term) -> Term, graph: &Graph) -> Graph {
     let body = term_once(select, transform, helpers, &graph.body);
     let inputs = graph
         .inputs
@@ -41,8 +42,8 @@ fn map(select: &dyn Fn(&Term) -> Term, helpers: bool, transform: &dyn Fn(Term) -
     Graph { body, inputs, ..graph.clone() }
 }
 
-fn keep(t: &Term) -> Term {
-    t.clone()
+fn keep(_: &Term) -> Option<Term> {
+    None
 }
 
 fn pattern_names(pattern: &Pattern) -> Vec<String> {
@@ -126,7 +127,7 @@ impl Scan {
     }
 
     fn scan(&self, bindings: &[(String, Value)], body: &Term, graph: &Graph) {
-        let select = |t: &Term| -> Term {
+        let select_full = |t: &Term| -> Term {
             match &t.node {
                 Node::If(test, yes, no) => match self.known(bindings, test) {
                     Some(Value::Bool(true)) => (**yes).clone(),
@@ -229,6 +230,7 @@ impl Scan {
             }
             t
         };
+        let select = |t: &Term| Some(select_full(t));
         map(&select, true, &record, &Graph { body: body.clone(), inputs: Vec::new(), ..graph.clone() });
     }
 }
@@ -427,7 +429,7 @@ fn scoped_forms(ws: &Workspace, leading: Vec<Syntax>, skip: &str, root: Option<&
     match root {
         Some(definition) => walk_node(ws, &st, definition),
         None => {
-            for g in &ws.graphs {
+            for g in ws.graphs.iter() {
                 walk_graph(ws, &st, g);
             }
         }
@@ -525,7 +527,7 @@ pub fn declaration_source(checked: &Workspace, root: &NodeDefinition) -> String 
 /// kernels, instead of the whole library.
 pub fn kernel_source(checked: &Workspace) -> String {
     let leading: Vec<Syntax> = checked.graphs.iter().map(|g| g.form.clone()).collect();
-    let mut forms = checked.source.clone();
+    let mut forms = (*checked.source).clone();
     forms.extend(scoped_forms(checked, leading, "", None));
     forms_digest(&forms)
 }

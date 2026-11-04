@@ -966,7 +966,7 @@ pub fn qualify_workspace(options: &QualifyOptions, workspace: &w::Workspace) -> 
         t: Tables { roots, index: HashMap::new(), callable_owners: HashMap::new() },
         called: HashMap::new(),
     };
-    for graph in &workspace.defs { walker.callable(&vec![format!("def:{}", graph.name)], &graph.body); }
+    for graph in workspace.defs.iter() { walker.callable(&vec![format!("def:{}", graph.name)], &graph.body); }
     for collect in [true, false] {
         walker.collect = collect;
         walker.called.clear();
@@ -980,7 +980,7 @@ pub fn qualify_workspace(options: &QualifyOptions, workspace: &w::Workspace) -> 
     }
     let q = Arc::new(Qualifier {
         t: walker.t,
-        ops: workspace.ops.clone(),
+        ops: (*workspace.ops).clone(),
         gpu: gpu.clone(),
         accepted: Mutex::new(HashMap::new()),
         outcomes: Mutex::new(HashMap::new()),
@@ -3125,7 +3125,7 @@ mod tests {
         let mut counterfeit = flow_check::op::find(&[], "image/map", &context::image()).expect("image/map");
         counterfeit.category = "Counterfeit image map".into();
         let mut counterfeited = shared.clone();
-        counterfeited.ops.insert(0, counterfeit);
+        Arc::make_mut(&mut counterfeited.ops).insert(0, counterfeit);
         let (qualified, _, _) = qualify(None, Gpu::default(), &counterfeited);
         assert!(!qualified.approx.contains(&p(&["img", "a"])));
         assert!(reasons_of(&qualified, &p(&["img", "a"])).iter().any(|d| d.code == "E_GPU_FORM"));

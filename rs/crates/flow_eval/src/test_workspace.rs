@@ -849,7 +849,7 @@ fn sketch_checks_match_the_ocaml_oracle() {
                     None => text.push_str("NONE\n"),
                     Some(w) => {
                         text.push_str(&format!("W {} graphs={} defs={} macros={} nodes={}\n", w.name, w.graphs.len(), w.defs.len(), w.macros.len(), w.nodes.len()));
-                        for g in &w.graphs { text.push_str(&format!("G {} {} {}\n", g.name, context::name(g.context), ty::to_string(&g.body.ty))); }
+                        for g in w.graphs.iter() { text.push_str(&format!("G {} {} {}\n", g.name, context::name(g.context), ty::to_string(&g.body.ty))); }
                         for p in &w.live { text.push_str(&format!("L {}\n", path_s(p))); }
                         for p in &w.invariant { text.push_str(&format!("I {}\n", path_s(p))); }
                         for p in &w.approx { text.push_str(&format!("A {}\n", path_s(p))); }

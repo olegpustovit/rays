@@ -275,11 +275,11 @@ pub fn patch(catalog: &Catalog, workspace: &Workspace, op: &Op) -> Option<R<(Wor
     let old_value = literal(&expr).map(|l| l.1)?;
     let new_value = literal(&argument.form).map(|l| l.1)?;
     let workspace = Workspace {
-        source,
-        graphs: workspace.graphs.iter().map(graph).collect(),
-        defs: workspace.defs.iter().map(graph).collect(),
+        source: source.into(),
+        graphs: workspace.graphs.iter().map(graph).collect::<Vec<_>>().into(),
+        defs: workspace.defs.iter().map(graph).collect::<Vec<_>>().into(),
         packed_roots: workspace.packed_roots.iter().map(|(form, path)| (remap_form(form).0, path.clone())).collect(),
-        macros: workspace.macros.iter().map(|f| forms.get(&f.id).cloned().unwrap_or_else(|| f.clone())).collect(),
+        macros: workspace.macros.iter().map(|f| forms.get(&f.id).cloned().unwrap_or_else(|| f.clone())).collect::<Vec<_>>().into(),
         ..workspace.clone()
     };
     let names = fn_names(&workspace.graphs.iter().chain(workspace.defs.iter()).collect::<Vec<_>>());

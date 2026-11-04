@@ -201,7 +201,7 @@ static FACTS_HOOK: LazyLock<RwLock<Arc<dyn Fn(&dyn Fn(i64)->Option<Node>, i64)->
 static LIVE_KERNELS_HOOK: LazyLock<RwLock<Arc<dyn Fn(&[Node])->bool + Send + Sync>>> = LazyLock::new(|| RwLock::new(Arc::new(|_|true)));
 
 #[derive(Clone)]
-struct ClosureData { params: Vec<(W::Pattern, Option<Ty>)>, replayable: bool, body: Arc<Term>, env: BTreeMap<String, Value>, zone: Path, calls: i64, at: ExecCtx }
+struct ClosureData { params: Vec<(W::Pattern, Option<Ty>)>, replayable: bool, body: Arc<Term>, env: Arc<BTreeMap<String, Value>>, zone: Path, calls: i64, at: ExecCtx }
 #[derive(Clone)]
 struct NamedData { name: String, calls: i64 }
 #[derive(Clone)]
@@ -252,13 +252,13 @@ impl Arena {
     }
 }
 #[derive(Clone)]
-struct ExecCtx { arena: i64, inst: i64, prefix: Path, base: Path, route: Vec<String>, iter: Vec<i64>, depth: usize, record: bool, data: bool, geometry: bool, host: bool, context: Context, card: Option<String> }
+struct ExecCtx { arena: i64, inst: i64, prefix: Arc<Path>, base: Arc<Path>, route: Vec<String>, iter: Arc<Vec<i64>>, depth: usize, record: bool, data: bool, geometry: bool, host: bool, context: Context, card: Option<String> }
 #[derive(Clone)]
-struct Env { values: BTreeMap<String,Value> }
+struct Env { values: Arc<BTreeMap<String,Value>> }
 impl Env {
-    fn empty() -> Self { Self { values:BTreeMap::new() } }
+    fn empty() -> Self { Self { values: Arc::new(BTreeMap::new()) } }
     fn get(&self, name:&str)->Option<Value>{self.values.get(name).cloned()}
-    fn bind(&mut self,name:String,value:Value){self.values.insert(name,value);}
+    fn bind(&mut self,name:String,value:Value){Arc::make_mut(&mut self.values).insert(name,value);}
 }
 
 fn new_fid()->FnId{FnId(NEXT_FID.fetch_add(1,Ordering::Relaxed))}
@@ -282,29 +282,26 @@ fn residual_id(a: &mut Arena, residual: ResidualData) -> ResidualId {
     a.residuals.insert(id, residual);
     id
 }
-fn root_ctx(a:&Arena)->ExecCtx{ExecCtx{arena:a.id,inst:-1,prefix:Vec::new(),base:Vec::new(),route:Vec::new(),iter:Vec::new(),depth:0,record:true,data:false,geometry:false,host:false,context:flow_syntax::context::host(),card:None}}
-fn site(c:&ExecCtx)->Path{let mut p=c.prefix.clone();p.extend(c.base.clone());p.extend(c.route.iter().cloned());p}
+fn root_ctx(a:&Arena)->ExecCtx{ExecCtx{arena:a.id,inst:-1,prefix:Arc::new(Vec::new()),base:Arc::new(Vec::new()),route:Vec::new(),iter:Arc::new(Vec::new()),depth:0,record:true,data:false,geometry:false,host:false,context:flow_syntax::context::host(),card:None}}
+fn site(c:&ExecCtx)->Path{let mut p=(*c.prefix).clone();p.extend(c.base.iter().cloned());p.extend(c.route.iter().cloned());p}
+fn eval_sub(a: &mut Arena, c: &ExecCtx, seg: String, env: &Env, t: &Term) -> Result<Value, Diagnostic> {
+    if t.path.is_some() { eval_at(a, c, env, t) } else { eval_at(a, &sub(c, seg), env, t) }
+}
 fn sub(c:&ExecCtx,seg:String)->ExecCtx{let mut c=c.clone();c.route.push(seg);c}
-fn note(a:&mut Arena,c:&ExecCtx,path:Path,v:Value){if a.record&&c.record{let e=a.records.entry(path).or_default();if e.len()<MAX_ITERATIONS{e.push((c.iter.clone(),v));}}}
+fn note(a:&mut Arena,c:&ExecCtx,path:Path,v:Value){if a.record&&c.record{let e=a.records.entry(path).or_default();if e.len()<MAX_ITERATIONS{e.push(((*c.iter).clone(),v));}}}
 fn named_args(a: &mut Arena, c: &ExecCtx, env: &Env, args: &[(String, Term)]) -> Result<Vec<(String, Value)>, Diagnostic> {
-    let mut counts = HashMap::<String, usize>::new();
-    let mut routes = Vec::with_capacity(args.len());
-    for (name, term) in args {
-        let count = counts.entry(name.clone()).or_default();
-        let route = if *count == 0 { name.clone() } else { format!("{}#{}", name, *count) };
-        *count += 1;
-        routes.push(route);
-    }
-    let mut values = args.iter().map(|(name, _)| (name.clone(), Value::No_geo)).collect::<Vec<_>>();
-    for index in 0..args.len() {
-        values[index].1 = eval_at(a, &sub(c, routes[index].clone()), env, &args[index].1)?;
+    let mut values = Vec::with_capacity(args.len());
+    for (index, (name, term)) in args.iter().enumerate() {
+        let count = args[..index].iter().filter(|(other, _)| other == name).count();
+        let route = if count == 0 { name.clone() } else { format!("{}#{}", name, count) };
+        values.push((name.clone(), eval_sub(a, c, route, env, term)?));
     }
     Ok(values)
 }
 fn mk_node(a:&mut Arena,c:&ExecCtx,authored:i64,ty:Ty,kind:String,args:Vec<(String,Value)>)->Result<Value,Diagnostic>{
     if c.data{return eval_error("E_ARRAY_TYPE","Packed-array functions produce data, not graph nodes.")}
     if a.time.is_some(){return Err(errorf("E_LIVE_GEOMETRY",format!("{} makes geometry; geometry cannot be created while evaluating a live value.",kind)))}
-    let i=a.nodes.len() as i64;let node=Node{id:i,inst:c.inst,site:site(c),iter:c.iter.clone(),kind,ty:ty.clone(),args,error:None};
+    let i=a.nodes.len() as i64;let node=Node{id:i,inst:c.inst,site:site(c),iter:(*c.iter).clone(),kind,ty:ty.clone(),args,error:None};
     a.nodes.push(node);a.authored.push(authored);Ok(Value::Deferred(ty,i))
 }
 fn context_result(ctx:Context)->Ty{flow_syntax::context::result(ctx)}
@@ -414,7 +411,7 @@ fn capture_env(term: &Term, env: &Env) -> BTreeMap<String, Value> {
     free_names(term).into_iter().filter_map(|name| env.get(&name).map(|value| (name, value))).collect()
 }
 
-fn eval_at(a:&mut Arena,c:&ExecCtx,env:&Env,t:&Term)->Result<Value,Diagnostic>{let owned;let c=match &t.path{Some(p)=>{owned=ExecCtx{arena:c.arena,inst:c.inst,prefix:c.prefix.clone(),base:p.clone(),route:Vec::new(),iter:c.iter.clone(),depth:c.depth,record:c.record,data:c.data,geometry:c.geometry,host:c.host,context:c.context.clone(),card:c.card.clone()};&owned},None=>c};let r=eval_raw(a,&c,env,t).and_then(|v| if a.time.is_some() { concrete(a, v) } else { Ok(v) }).map_err(|e|add_span(e,t));match r{
+fn eval_at(a:&mut Arena,c:&ExecCtx,env:&Env,t:&Term)->Result<Value,Diagnostic>{let owned;let c=match &t.path{Some(p)=>{owned=ExecCtx{arena:c.arena,inst:c.inst,prefix:c.prefix.clone(),base:Arc::new(p.clone()),route:Vec::new(),iter:c.iter.clone(),depth:c.depth,record:c.record,data:c.data,geometry:c.geometry,host:c.host,context:c.context.clone(),card:c.card.clone()};&owned},None=>c};let r=eval_raw(a,&c,env,t).and_then(|v| if a.time.is_some() { concrete(a, v) } else { Ok(v) }).map_err(|e|add_span(e,t));match r{
     Ok(v)=>{if a.record&&c.record{if let Some(p)=&t.path{note(a,&c,p.clone(),v.clone());}}Ok(v)},
     Err(d) if d.code == "$NEEDS_TIME" => {
         if a.time.is_some() { Err(error("E_EVAL", "A live value was needed while evaluating dynamically.")) }
@@ -439,7 +436,7 @@ fn force_res(a: &mut Arena, id: ResidualId) -> Result<Value, Diagnostic> {
 }
 fn execute_residual(a: &mut Arena, id: ResidualId) -> Result<Value, Diagnostic> {
     let residual = get_res(a, id)?;
-    let env = Env { values: residual.env };
+    let env = Env { values: Arc::new(residual.env) };
     if residual.previous {
         if let TermNode::State { init, zone, .. } = &residual.term.node {
             return state_previous(a, &residual.ctx, &env, zone, init);
@@ -506,8 +503,8 @@ fn inline_node(a: &mut Arena, c: &ExecCtx, _authored: i64, original: &W::NodeDef
     };
     let live = args.iter().any(|(_, value)| live_in(value, a));
     let mut context = c.clone();
-    context.prefix = site(c);
-    context.base = vec![format!("node:{}", definition.kind.qualified)];
+    context.prefix = Arc::new(site(c));
+    context.base = Arc::new(vec![format!("node:{}", definition.kind.qualified)]);
     context.route.clear();
     context.depth += 1;
     context.record = false;
@@ -527,7 +524,7 @@ fn inline_node(a: &mut Arena, c: &ExecCtx, _authored: i64, original: &W::NodeDef
         } else if let Some(value) = parameters.iter().find(|(arg_name, _)| arg_name == name).or_else(|| args.iter().find(|(arg_name, _)| arg_name == name)).map(|(_, value)| value.clone()) {
             value
         } else if let Some(default) = default {
-            eval_at(a, &sub(&context, name.clone()), &env, default)?
+            eval_sub(a, &context, name.clone(), &env, default)?
         } else {
             Value::No_geo
         };
@@ -664,23 +661,24 @@ fn eval_raw(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Value, Di
                 }
                 args = flattened;
             }
-            match a.workspace.nodes.iter().find(|definition| definition.kind.qualified == *kind).cloned() {
-                Some(definition) => inline_node(a, c, t.form.id, &definition, &args, t),
+            let workspace = a.workspace.clone();
+            match workspace.nodes.iter().find(|definition| definition.kind.qualified == *kind) {
+                Some(definition) => inline_node(a, c, t.form.id, definition, &args, t),
                 None => catalog_call(a, c, t.form.id, kind.clone(), ctx.clone(), args),
             }
         }
         TermNode::Op { op: name, args, .. } if (name == "and" || name == "or") && args.len() == 2 => {
             let (first_name, first_term) = &args[0];
-            let first = eval_at(a, &sub(c, first_name.clone()), env, first_term)?;
+            let first = eval_sub(a, c, first_name.clone(), env, first_term)?;
             if let Value::Bool(value) = &first {
                 if *value == (name == "or") { return Ok(Value::Bool(*value)); }
             }
             let (second_name, second_term) = &args[1];
-            let second = eval_at(a, &sub(c, second_name.clone()), env, second_term)?;
+            let second = eval_sub(a, c, second_name.clone(), env, second_term)?;
             apply_op(a, c, t.form.id, name, &[(args[0].0.clone(), first), (second_name.clone(), second)])
         }
         TermNode::Op { op: name, args, skip } if name == "live?" && args.len() == 1 => {
-            Ok(Value::Bool(is_live_value(&eval_at(a, &sub(c, args[0].0.clone()), env, &args[0].1)?)))
+            Ok(Value::Bool(is_live_value(&eval_sub(a, c, args[0].0.clone(), env, &args[0].1)?)))
         }
         TermNode::Op { op: name, args, skip } => {
             let values = if name == "scene/merge" && !skip.is_empty() {
@@ -696,7 +694,7 @@ fn eval_raw(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Value, Di
                     kept.push((arg_name.clone(), route, term));
                 }
                 let mut values = kept.iter().map(|(name, _, _)| (name.clone(), Value::No_geo)).collect::<Vec<_>>();
-                for index in 0..kept.len() { values[index].1 = eval_at(a, &sub(c, kept[index].1.clone()), env, kept[index].2)?; }
+                for index in 0..kept.len() { values[index].1 = eval_sub(a, c, kept[index].1.clone(), env, kept[index].2)?; }
                 values
             } else {
                 named_args(a, c, env, args)?
@@ -705,7 +703,7 @@ fn eval_raw(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Value, Di
         }
         TermNode::CallFn { fn_name, args, body } => {
             let mut values = vec![Value::No_geo; args.len()];
-            for index in 0..args.len() { values[index] = eval_at(a, &sub(c, format!("a{}", index)), env, &args[index])?; }
+            for index in 0..args.len() { values[index] = eval_sub(a, c, format!("a{}", index), env, &args[index])?; }
             match env.get(fn_name) {
                 Some(Value::Fn(id)) => call_fn(a, c, id, &values, body.as_deref()),
                 _ => apply_def(a, c, fn_name, &values, body.as_deref()),
@@ -751,15 +749,15 @@ fn eval_raw(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Value, Di
             }
         }
         TermNode::If(test, yes, no) => {
-            let test = eval_at(a, &sub(c, "if".into()), env, test)?;
-            if truth(&concrete(a, test)?)? { eval_at(a, &sub(c, "then".into()), env, yes) } else { eval_at(a, &sub(c, "else".into()), env, no) }
+            let test = eval_sub(a, c, "if".into(), env, test)?;
+            if truth(&concrete(a, test)?)? { eval_sub(a, c, "then".into(), env, yes) } else { eval_sub(a, c, "else".into(), env, no) }
         }
         TermNode::Cond(arms, default) => {
             for (i, (test, body)) in arms.iter().enumerate() {
                 let context = sub(c, format!("test{}", i));
-                if truth(&eval_concrete(a, &context, env, test)?)? { return eval_at(a, &sub(c, format!("arm{}", i)), env, body); }
+                if truth(&eval_concrete(a, &context, env, test)?)? { return eval_sub(a, c, format!("arm{}", i), env, body); }
             }
-            eval_at(a, &sub(c, "else".into()), env, default)
+            eval_sub(a, c, "else".into(), env, default)
         }
         TermNode::Case(subject, arms, default) => {
             let value = eval_concrete(a, &sub(c, "case".into()), env, subject)?;
@@ -775,19 +773,19 @@ fn eval_raw(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Value, Di
                         _ => false,
                     }
                 };
-                if matches { return eval_at(a, &sub(c, format!("arm{}", i)), env, body); }
+                if matches { return eval_sub(a, c, format!("arm{}", i), env, body); }
             }
-            eval_at(a, &sub(c, "else".into()), env, default)
+            eval_sub(a, c, "else".into(), env, default)
         }
         TermNode::Fn { params, body, zone, capture } => {
             if let Some(original) = capture {
                 let Value::Fn(id) = eval_at(a, c, env, original)? else { return eval_error("E_TYPE", "A function port requires a function."); };
                 match get_fn(a, id)? {
                     Function::Closure(closure) => { let mut closure = (*closure).clone(); { closure.params = params.clone(); closure.body = Arc::new(body.as_ref().clone()); a.functions.insert(id, Function::Closure(Arc::new(closure))); Ok(Value::Fn(id)) } }
-                    Function::Named(named) => Ok(Value::Fn(closure_id(a, Function::Closure(Arc::new(ClosureData { params: params.clone(), replayable: false, body: Arc::new(body.as_ref().clone()), env: BTreeMap::new(), zone: zone.clone(), calls: named.calls, at: c.clone() }))))),
+                    Function::Named(named) => Ok(Value::Fn(closure_id(a, Function::Closure(Arc::new(ClosureData { params: params.clone(), replayable: false, body: Arc::new(body.as_ref().clone()), env: Arc::new(BTreeMap::new()), zone: zone.clone(), calls: named.calls, at: c.clone() }))))),
                 }
             } else {
-                Ok(Value::Fn(closure_id(a, Function::Closure(Arc::new(ClosureData { params: params.clone(), replayable: true, body: Arc::new(body.as_ref().clone()), env: capture_env(body, env), zone: zone.clone(), calls: 0, at: c.clone() })))))
+                Ok(Value::Fn(closure_id(a, Function::Closure(Arc::new(ClosureData { params: params.clone(), replayable: true, body: Arc::new(body.as_ref().clone()), env: Arc::new(capture_env(body, env)), zone: zone.clone(), calls: 0, at: c.clone() })))))
             }
         }
         TermNode::Hof(kind, terms) => {
@@ -796,19 +794,19 @@ fn eval_raw(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Value, Di
         }
         TermNode::ListLit(terms) => {
             let mut values = Vec::with_capacity(terms.len());
-            for (i, term) in terms.iter().enumerate() { values.push(eval_at(a, &sub(c, i.to_string()), env, term)?); }
+            for (i, term) in terms.iter().enumerate() { values.push(eval_sub(a, c, i.to_string(), env, term)?); }
             Ok(join_list(values))
         }
         TermNode::Record(fields) => {
             let mut values = Vec::with_capacity(fields.len());
-            for (name, term) in fields { values.push((name.clone(), eval_at(a, &sub(c, name.clone()), env, term)?)); }
+            for (name, term) in fields { values.push((name.clone(), eval_sub(a, c, name.clone(), env, term)?)); }
             Ok(Value::Record(values))
         }
         TermNode::Get(record, name) => field(eval_concrete(a, c, env, record)?, name, "value"),
         TermNode::Assoc(record, updates) => {
             let Value::Record(mut fields) = eval_concrete(a, c, env, record)? else { return eval_error("E_TYPE", "assoc updates a record."); };
             for (name, term) in updates {
-                let value = eval_at(a, &sub(c, name.clone()), env, term)?;
+                let value = eval_sub(a, c, name.clone(), env, term)?;
                 if let Some((_, old)) = fields.iter().find(|(key, _)| key == name) {
                     let value = coerce_like(a, old, &value)?;
                     if let Some(slot) = fields.iter_mut().find(|(key, _)| key == name) { slot.1 = value; }
@@ -839,7 +837,7 @@ fn eval_raw(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Value, Di
             if values.len() > MAX_ITERATIONS { return eval_error("E_ITER_BOUND", "concat exceeds 4,096 elements."); }
             Ok(join_list(values))
         }
-        TermNode::Bypass(call) => match W::bypass_input(call) { Some(input) => coerce(&t.ty, &eval_at(a, &sub(c, "bypass".into()), env, &input)?), None => Err(error("E_BYPASS", "Nothing to pass through.")) },
+        TermNode::Bypass(call) => match W::bypass_input(call) { Some(input) => coerce(&t.ty, &eval_sub(a, c, "bypass".into(), env, &input)?), None => Err(error("E_BYPASS", "Nothing to pass through.")) },
         TermNode::Expanded { body, .. } => eval_at(a, c, env, body),
         TermNode::WithError(protected, mapper) => eval_with_error(a, c, env, protected, mapper),
         TermNode::ErrorRows { rows, policy, mapper } => eval_error_rows(a, c, env, rows, *policy, mapper),
@@ -877,7 +875,7 @@ fn eval_with_error(a: &mut Arena, c: &ExecCtx, env: &Env, protected: &Term, mapp
     if a.time.is_none() { return need_time(); }
     // OCaml runs both inside Value.with_error: an error raised while evaluating the protected term or the mapper is mapped / inherits the envelope
     let guarded = (|| -> Result<Value, Diagnostic> {
-        let protected = eval_at(a, &sub(c, "0".into()), env, protected)?;
+        let protected = eval_sub(a, c, "0".into(), env, protected)?;
         match concrete_data(a, protected)? {
             Value::Deferred(ty, id) if flow_syntax::ty::is_cooked(&ty) => {
                 let source = Value::Source("$core/complete".into(), ty.clone(), vec![("value".into(), Value::Deferred(ty, id))]);
@@ -907,7 +905,7 @@ fn eval_error_rows(a: &mut Arena, c: &ExecCtx, env: &Env, rows: &Term, policy: W
     let policy_name = match policy { W::DiagnosticPolicy::First => "first", W::DiagnosticPolicy::RangeLast => "range-last" };
     let rows = if a.time.is_none() {
         if c.card.is_none() || policy != W::DiagnosticPolicy::First { return need_time(); }
-        match eval_at(a, &sub(c, "0".into()), env, rows)? {
+        match eval_sub(a, c, "0".into(), env, rows)? {
             Value::Int_array(values) => Value::Int_array(values),
             Value::Residual(id) => {
                 let residual = get_res(a, id)?;
@@ -915,7 +913,7 @@ fn eval_error_rows(a: &mut Arena, c: &ExecCtx, env: &Env, rows: &Term, policy: W
                     TermNode::Op { op, args, .. } if op == "exact" && args.len() == 1 => args[0].1.clone(),
                     _ => residual.term,
                 };
-                let bindings = Env { values: residual.env };
+                let bindings = Env { values: Arc::new(residual.env) };
                 let needed = residual_id(a, ResidualData { env: capture_env(&term, &bindings), term, ctx: residual.ctx, previous: false, live: None });
                 match current_residual_handlers().and_then(|handlers| handlers.bulk_needed).and_then(|bulk| call_with_snapshot(a, needed, &|id| bulk(id))) {
                     Some(Value::Int_array(values)) => Value::Int_array(values),
@@ -925,7 +923,7 @@ fn eval_error_rows(a: &mut Arena, c: &ExecCtx, env: &Env, rows: &Term, policy: W
             _ => return need_time(),
         }
     } else {
-        let value = eval_at(a, &sub(c, "0".into()), env, rows)?;
+        let value = eval_sub(a, c, "0".into(), env, rows)?;
         concrete_data(a, value)?
     };
     let Some(first) = value::error_row_index(&rows, None, None)? else { return Ok(Value::No_geo); };
@@ -995,7 +993,7 @@ fn apply_op(a: &mut Arena, c: &ExecCtx, authored: i64, name: &str, values: &[(St
     if a.time.is_none() && op.live { return need_time(); }
     let frame = a.time.clone().unwrap_or_else(|| input::at_time(0.0));
     let mut typed = Vec::with_capacity(values.len());
-    let args = values.iter().map(|(name, value)| {
+    for (name, value) in values.iter() {
         let ty = value::ty_of(value);
         let literal = match value {
             Value::Int(n) => Some(param::Value::Int(*n)),
@@ -1004,14 +1002,14 @@ fn apply_op(a: &mut Arena, c: &ExecCtx, authored: i64, name: &str, values: &[(St
             Value::Text(bytes) => Some(param::Value::Text(bytes.clone())),
             _ => None,
         };
-        typed.push((name.clone(), ty.clone(), literal));
-        (name.clone(), value.clone())
-    }).collect::<Vec<_>>();
+        typed.push((name.clone(), ty, literal));
+    }
+    let args = &values;
     let ty = op::result_type(&op, &typed)?;
     let result = {
         let cell = RefCell::new(&mut *a);
         let node = |kind: &str, args: &[(String, Value)]| mk_node(&mut cell.borrow_mut(), c, authored, ty.clone(), kind.to_owned(), args.to_vec());
-        (op.body)(&frame, &node, &args)?
+        (op.body)(&frame, &node, args)?
     };
     if a.time.is_none() {
         if matches!(&result, Value::Source(..)) {
@@ -1022,7 +1020,7 @@ fn apply_op(a: &mut Arena, c: &ExecCtx, authored: i64, name: &str, values: &[(St
     }
     Ok(result)
 }
-fn apply_def(a:&mut Arena,c:&ExecCtx,name:&str,vals:&[Value],body:Option<&Term>)->Result<Value,Diagnostic>{let graph=a.workspace.defs.iter().find(|g|g.name==name).ok_or_else(||errorf("E_UNKNOWN",format!("Unknown function {}.",name)))?.clone();if c.depth>=MAX_DEPTH{return eval_error("E_DEPTH","Call depth exceeds 64.")}let mut cx=c.clone();cx.prefix=site(c);cx.base=vec![format!("def:{}",name)];cx.route.clear();cx.depth+=1;let mut env=Env::empty();for(i,(n,ty,default))in graph.inputs.iter().enumerate(){let v=if let Some(v)=vals.get(i){coerce(ty,v)?}else if let Some(t)=default{eval_at(a,&sub(&cx,n.clone()),&env,t)?}else{return Err(errorf("E_ARGS",format!("{} needs :{}.",name,n)))};let mut p=cx.base.clone();p.push(format!(":{}",n));note(a,&cx,p,v.clone());env.bind(n.clone(),v)}eval_at(a,&cx,&env,body.unwrap_or(&graph.body))}
+fn apply_def(a:&mut Arena,c:&ExecCtx,name:&str,vals:&[Value],body:Option<&Term>)->Result<Value,Diagnostic>{let workspace=a.workspace.clone();let graph=workspace.defs.iter().find(|g|g.name==name).ok_or_else(||errorf("E_UNKNOWN",format!("Unknown function {}.",name)))?;if c.depth>=MAX_DEPTH{return eval_error("E_DEPTH","Call depth exceeds 64.")}let mut cx=c.clone();cx.prefix=Arc::new(site(c));cx.base=Arc::new(vec![format!("def:{}",name)]);cx.route.clear();cx.depth+=1;let mut env=Env::empty();for(i,(n,ty,default))in graph.inputs.iter().enumerate(){let v=if let Some(v)=vals.get(i){coerce(ty,v)?}else if let Some(t)=default{eval_at(a,&sub(&cx,n.clone()),&env,t)?}else{return Err(errorf("E_ARGS",format!("{} needs :{}.",name,n)))};let mut p=(*cx.base).clone();p.push(format!(":{}",n));note(a,&cx,p,v.clone());env.bind(n.clone(),v)}eval_at(a,&cx,&env,body.unwrap_or(&graph.body))}
 fn call_fn(a: &mut Arena, c: &ExecCtx, id: FnId, values: &[Value], body: Option<&Term>) -> Result<Value, Diagnostic> {
     match get_fn(a, id)? {
         Function::Closure(closure) => {
@@ -1034,9 +1032,9 @@ fn call_fn(a: &mut Arena, c: &ExecCtx, id: FnId, values: &[Value], body: Option<
             let mut context = c.clone();
             context.inst = closure.at.inst;
             context.prefix = closure.at.prefix.clone();
-            context.base = closure.zone.clone();
+            context.base = Arc::new(closure.zone.clone());
             context.route.clear();
-            context.iter.push(index);
+            Arc::make_mut(&mut context.iter).push(index);
             context.depth += 1;
             let mut env = Env { values: closure.env.clone() };
             for ((pattern, ty), value) in closure.params.iter().zip(values) {
@@ -1053,7 +1051,7 @@ fn call_fn(a: &mut Arena, c: &ExecCtx, id: FnId, values: &[Value], body: Option<
             a.functions.insert(id, Function::Named(named.clone()));
             if a.workspace.defs.iter().any(|graph| graph.name == named.name) {
                 let mut context = c.clone();
-                context.iter.push(index);
+                Arc::make_mut(&mut context.iter).push(index);
                 return apply_def(a, &context, &named.name, values, body);
             }
             if let Some(operation) = op::find_ref(&a.workspace.ops, &named.name, &c.context) {
@@ -1099,7 +1097,8 @@ fn value_key(value: &Value) -> String {
     stable_digest(&value::key_of(&|id| id.0, value))
 }
 fn graph_value(a: &mut Arena, c: &ExecCtx, name: &str, over: &[(String, Value)], record: bool) -> Result<Value, Diagnostic> {
-    let graph = a.workspace.graphs.iter().find(|graph| graph.name == name).cloned().ok_or_else(|| errorf("E_UNKNOWN_GRAPH", format!("Unknown graph reference: {}.", name)))?;
+    let workspace = a.workspace.clone();
+    let graph = workspace.graphs.iter().find(|graph| graph.name == name).ok_or_else(|| errorf("E_UNKNOWN_GRAPH", format!("Unknown graph reference: {}.", name)))?;
     let mut seen = BTreeSet::new();
     let mut coerced: Vec<(String, Value)> = Vec::with_capacity(over.len());
     for (input, value) in over {
@@ -1124,7 +1123,7 @@ fn graph_value(a: &mut Arena, c: &ExecCtx, name: &str, over: &[(String, Value)],
     a.cells[instance as usize].result = value.clone();
     Ok(value)
 }
-fn eval_graph_body(a:&mut Arena,c:&ExecCtx,g:&Graph,over:&[(String,Value)],record:bool,inst:i64)->Result<(Value,Vec<(String,Value)>),Diagnostic>{let mut cx=c.clone();cx.inst=inst;cx.prefix.clear();cx.base=vec![g.name.clone()];cx.route.clear();cx.iter.clear();cx.depth+=1;cx.record=record;cx.context=g.context.clone();cx.host=g.context==flow_syntax::context::host();let mut env=Env::empty();let mut ins=Vec::new();for(n,ty,default)in &g.inputs{let v=if let Some((_,v))=over.iter().find(|(k,_)|k==n){coerce(ty,v)?}else if let Some(t)=default{coerce(ty,&eval_at(a,&sub(&cx,n.clone()),&env,t)?)?}else{return Err(errorf("E_INPUT_DEFAULT",format!("Graph input {} of {} needs a default.",n,g.name)))};let mut p=vec![g.name.clone(),format!(":{}",n)];note(a,&cx,p.clone(),v.clone());env.bind(n.clone(),v.clone());ins.push((n.clone(),v));}let v=eval_at(a,&cx,&env,&g.body)?;Ok((v,ins))}
+fn eval_graph_body(a:&mut Arena,c:&ExecCtx,g:&Graph,over:&[(String,Value)],record:bool,inst:i64)->Result<(Value,Vec<(String,Value)>),Diagnostic>{let mut cx=c.clone();cx.inst=inst;cx.prefix=Arc::new(Vec::new());cx.base=Arc::new(vec![g.name.clone()]);cx.route.clear();cx.iter=Arc::new(Vec::new());cx.depth+=1;cx.record=record;cx.context=g.context.clone();cx.host=g.context==flow_syntax::context::host();let mut env=Env::empty();let mut ins=Vec::new();for(n,ty,default)in &g.inputs{let v=if let Some((_,v))=over.iter().find(|(k,_)|k==n){coerce(ty,v)?}else if let Some(t)=default{coerce(ty,&eval_at(a,&sub(&cx,n.clone()),&env,t)?)?}else{return Err(errorf("E_INPUT_DEFAULT",format!("Graph input {} of {} needs a default.",n,g.name)))};let mut p=vec![g.name.clone(),format!(":{}",n)];note(a,&cx,p.clone(),v.clone());env.bind(n.clone(),v.clone());ins.push((n.clone(),v));}let v=eval_at(a,&cx,&env,&g.body)?;Ok((v,ins))}
 fn state_plane(a: &Arena, c: &ExecCtx) -> Result<(State, i64), Diagnostic> {
     let state = a.state.clone().ok_or_else(|| error("E_STATE", "State is not available."))?;
     let frame = a.time.as_ref().map_or(0, |frame| if c.host { frame.tick } else { frame.frame });
@@ -1132,9 +1131,9 @@ fn state_plane(a: &Arena, c: &ExecCtx) -> Result<(State, i64), Diagnostic> {
     Ok((state, frame))
 }
 fn state_key(c: &ExecCtx, zone: &[String]) -> StateKey {
-    let mut path = c.prefix.clone();
+    let mut path = (*c.prefix).clone();
     path.extend(zone.to_vec());
-    StateKey { instance: c.inst, path, iter: c.iter.clone() }
+    StateKey { instance: c.inst, path, iter: (*c.iter).clone() }
 }
 fn begin_frame(state: &mut StateData, source: &str, frame: i64) {
     if state.source != source || state.frame.is_some_and(|old| frame < old) {
@@ -1366,7 +1365,7 @@ fn eval_hof_work(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, kind: &W::H
         }
         W::HofKind::Reduce => {
             if rest.len() != 2 { return eval_error("E_ARITY", "reduce takes an initial value and list."); }
-            let mut accumulator = eval_at(a, &sub(c, "init".into()), env, &rest[0])?;
+            let mut accumulator = eval_sub(a, c, "init".into(), env, &rest[0])?;
             let (values, count) = eval_sequence(a, c, env, &rest[1], "l0".into())?;
             for index in 0..count {
                 check_packed_block(a, &mut iter, packed, saved_steps)?;
@@ -1378,8 +1377,8 @@ fn eval_hof_work(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, kind: &W::H
         }
         W::HofKind::Iterate => {
             if rest.len() < 2 || rest.len() > 3 { return eval_error("E_ARITY", "iterate takes an initial value, count and optional stop function."); }
-            let mut accumulator = eval_at(a, &sub(c, "init".into()), env, &rest[0])?;
-            let count_term = eval_at(a, &sub(c, "n".into()), env, &rest[1])?;
+            let mut accumulator = eval_sub(a, c, "init".into(), env, &rest[0])?;
+            let count_term = eval_sub(a, c, "n".into(), env, &rest[1])?;
             let count = int_value(&concrete(a, count_term)?)?;
             let stop = if let Some(term) = rest.get(2) {
                 match eval_concrete(a, &sub(c, "until".into()), env, term)? { Value::Fn(function) => Some(function), _ => return eval_error("E_TYPE", "Expected a function.") }
@@ -1458,9 +1457,9 @@ fn eval_loop(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, kind: &W::LoopK
     let mut accumulators = Vec::with_capacity(accs.len());
     for (_, init) in accs {
         let mut context = c.clone();
-        context.base = zone.clone();
+        context.base = Arc::new(zone.clone());
         context.route.clear();
-        accumulators.push(eval_at(a, &sub(&context, "init".into()), env, init)?);
+        accumulators.push(eval_sub(a, &context, "init".into(), env, init)?);
     }
     let first = {
         let (pattern, source) = &clauses[0];
@@ -1508,9 +1507,9 @@ fn eval_loop(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, kind: &W::LoopK
         }
         let ordinal = *count;
         let mut cx = c.clone();
-        cx.base = zone.clone();
+        cx.base = Arc::new(zone.clone());
         cx.route.clear();
-        cx.iter.push(ordinal as i64);
+        Arc::make_mut(&mut cx.iter).push(ordinal as i64);
         // OCaml matches the skip tuples against the iteration path: the outer iteration plus this flat ordinal.
         let skipped = skip.iter().any(|indices| indices.iter().copied().map(|index| index as i64).eq(cx.iter.iter().copied()));
         let mut local = env.clone();
@@ -1559,7 +1558,7 @@ fn eval_geometry_loop(a: &mut Arena, c: &ExecCtx, env: &Env, pattern: &W::Patter
     let points = operation == "sop/point_list";
     let key = fields.iter().find(|(name, _)| name == "key").map(|(_, value)| value.clone());
     let mut context = c.clone();
-    context.iter.push(0);
+    Arc::make_mut(&mut context.iter).push(0);
     context.geometry = true;
     let element_name = element_key(zone);
     let lo = a.nodes.len() as i64;
@@ -1610,7 +1609,7 @@ pub fn static_with(workspace: &Workspace, record: bool, inputs: Option<&[(String
     let arena = Arena::new(workspace, record, budget.unwrap_or(MAX_STEPS));
     let (graphs, root) = { let arena = arena.lock().unwrap(); (arena.workspace.graphs.clone(), root_ctx(&arena)) };
     let mut results = Vec::with_capacity(graphs.len());
-    for graph in &graphs {
+    for graph in graphs.iter() {
         let overrides = inputs.and_then(|inputs| inputs.iter().find(|(name, _)| name == &graph.name)).map_or(&[][..], |(_, values)| values.as_slice());
         let mut arena = arena.lock().unwrap();
         let value = graph_value(&mut arena, &root, &graph.name, overrides, true)?;
@@ -1893,7 +1892,7 @@ fn structure_value(
                     structure_term(out, &closure.body);
                     structure_path(out, &closure.zone);
                     structure_context(out, &closure.at);
-                    for (name, value) in &closure.env {
+                    for (name, value) in closure.env.iter() {
                         structure_bytes(out, name.as_bytes());
                         structure_value(out, value, arena, seen_residuals, seen_functions, next);
                     }
@@ -1979,7 +1978,7 @@ fn map_function(site: Option<(i64, Path, Vec<i64>)>, path: Option<Path>, signatu
         env.insert(name, value.clone());
     }
     let mut context = closure.at.clone();
-    if let Some((instance, prefix, iter)) = site { context.inst = instance; context.prefix = prefix; context.base.clear(); context.route.clear(); context.iter = iter; }
+    if let Some((instance, prefix, iter)) = site { context.inst = instance; context.prefix = Arc::new(prefix); context.base = Arc::new(Vec::new()); context.route.clear(); context.iter = Arc::new(iter); }
     context.data = true;
     context.record = false;
     let term = Term { path, ty: Ty::Array(Box::new(result)), node: TermNode::Hof(W::HofKind::Map, terms), form };
@@ -2137,8 +2136,8 @@ pub mod Residual {
         let residual = get_res(&arena, id)?;
         Ok(View {
             term: residual.term, bindings: residual.env.into_iter().collect(), site: site(&residual.ctx),
-            owner: residual.ctx.base, iter: residual.ctx.iter, instance: residual.ctx.inst,
-            prefix: residual.ctx.prefix, previous: residual.previous, host: residual.ctx.host,
+            owner: (*residual.ctx.base).clone(), iter: (*residual.ctx.iter).clone(), instance: residual.ctx.inst,
+            prefix: (*residual.ctx.prefix).clone(), previous: residual.previous, host: residual.ctx.host,
             geometry: residual.ctx.geometry, context: residual.ctx.context,
         })
     }
@@ -2154,7 +2153,7 @@ pub mod Residual {
     pub fn function_bindings(id: FnId) -> Vec<(String, Value)> {
         arena_for_function(id).and_then(|arena| {
             let arena = arena.lock().ok()?;
-            match arena.functions.get(&id)? { Function::Closure(closure) => Some(closure.env.clone().into_iter().collect()), Function::Named(_) => Some(Vec::new()) }
+            match arena.functions.get(&id)? { Function::Closure(closure) => Some(closure.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect()), Function::Named(_) => Some(Vec::new()) }
         }).unwrap_or_default()
     }
     pub fn function_id(id: FnId) -> i64 { id.0 }
@@ -2166,7 +2165,7 @@ pub mod Residual {
     pub fn function_origin(id: FnId) -> Option<(i64, Path, Path)> {
         let arena = arena_for_function(id)?;
         let arena = arena.lock().ok()?;
-        match arena.functions.get(&id)? { Function::Closure(closure) => Some((closure.at.inst, closure.at.prefix.clone(), closure.zone.clone())), Function::Named(_) => None }
+        match arena.functions.get(&id)? { Function::Closure(closure) => Some((closure.at.inst, (*closure.at.prefix).clone(), closure.zone.clone())), Function::Named(_) => None }
     }
     pub fn function_name(id: FnId) -> Option<String> {
         let arena = arena_for_function(id)?;
@@ -2207,7 +2206,7 @@ pub mod Residual {
     }
     fn state_location(residual: &ResidualData, instance: i64, path: Path, iter: Vec<i64>, host: bool) -> ExecCtx {
         let mut context = residual.ctx.clone();
-        context.inst = instance; context.prefix = path; context.iter = iter; context.host = host;
+        context.inst = instance; context.prefix = Arc::new(path); context.iter = Arc::new(iter); context.host = host;
         context
     }
     pub fn state_read(id: ResidualId, instance: i64, path: Path, iter: Vec<i64>, host: bool, init: &dyn Fn() -> Value) -> Result<Value, Diagnostic> {
@@ -2248,7 +2247,7 @@ pub mod Residual {
         super::state_write(&mut arena, &context, &Vec::new(), value)
     }
     pub fn residual_ops(id: ResidualId) -> Vec<op::Op> {
-        arena_for_residual(&id).and_then(|arena| arena.lock().ok().map(|arena| arena.workspace.ops.clone())).unwrap_or_default()
+        arena_for_residual(&id).and_then(|arena| arena.lock().ok().map(|arena| (*arena.workspace.ops).clone())).unwrap_or_default()
     }
     pub fn residual_authored_key(id: ResidualId) -> Option<String> {
         arena_for_residual(&id).map(|arena| authored_key(&arena.lock().unwrap().workspace))
@@ -2269,7 +2268,7 @@ pub mod Residual {
         arena.memo.clear();
         let residual = get_res(&arena, id)?;
         let saved = arena.state.as_ref().map(fork_state);
-        let result = eval_concrete(&mut arena, &residual.ctx, &Env { values: residual.env }, term);
+        let result = eval_concrete(&mut arena, &residual.ctx, &Env { values: Arc::new(residual.env) }, term);
         // a term evaluated at its own frame (a compile-time capture) must not move the frame a bound live walk is on
         if prior_time.is_some() { arena.time = prior_time; }
         if result.is_err() { if let (Some(state), Some(saved)) = (arena.state.as_ref(), saved.as_ref()) { restore_state(state, saved); } }
@@ -2292,8 +2291,8 @@ pub mod Residual {
         let residual = get_res(&arena, id)?;
         let mut context = residual.ctx;
         context.inst = instance;
-        context.prefix = prefix;
-        let closure = ClosureData { params, replayable: true, body: Arc::new(body), env: bindings.into_iter().collect(), zone, calls: 0, at: context };
+        context.prefix = Arc::new(prefix);
+        let closure = ClosureData { params, replayable: true, body: Arc::new(body), env: Arc::new(bindings.into_iter().collect()), zone, calls: 0, at: context };
         Ok(closure_id(&mut arena, Function::Closure(Arc::new(closure))))
     }
 }
@@ -2342,7 +2341,7 @@ fn rewrite_value(
             functions.insert(*id, copy);
             HOME_FN.lock().unwrap().insert(copy.0, arena.id);
             arena.functions.insert(copy, Function::Closure(Arc::new(closure.clone())));
-            closure.env = closure.env.into_iter().map(|(name, value)| (name, rewrite_value(arena, &value, replace, fresh, retarget, residuals, functions))).collect();
+            closure.env = Arc::new(Arc::unwrap_or_clone(closure.env).into_iter().map(|(name, value)| (name, rewrite_value(arena, &value, replace, fresh, retarget, residuals, functions))).collect());
             arena.functions.insert(copy, Function::Closure(Arc::new(closure)));
             Value::Fn(copy)
         }
@@ -2378,7 +2377,7 @@ fn remap_value(arena: &mut Arena, value: &Value, sources: &[(i64, i64)], residua
             if !functions.insert(*id) { return value.clone(); }
             if let Some(Function::Closure(closure)) = arena.functions.get(id).cloned() {
                 let mut closure = unshare(closure);
-                closure.env = closure.env.into_iter().map(|(name, value)| (name, remap_value(arena, &value, sources, residuals, functions))).collect();
+                closure.env = Arc::new(Arc::unwrap_or_clone(closure.env).into_iter().map(|(name, value)| (name, remap_value(arena, &value, sources, residuals, functions))).collect());
                 arena.functions.insert(*id, Function::Closure(Arc::new(closure)));
             }
             value.clone()
@@ -2404,7 +2403,7 @@ pub mod Host {
         let mut arena = arena.lock().unwrap();
         if let Some(Function::Closure(closure)) = arena.functions.get(&function).cloned() {
             let mut closure = unshare(closure);
-            closure.env = closure.env.into_iter().map(|(name, value)| (name, replace(&value))).collect();
+            closure.env = Arc::new(Arc::unwrap_or_clone(closure.env).into_iter().map(|(name, value)| (name, replace(&value))).collect());
             arena.functions.insert(function, Function::Closure(Arc::new(closure)));
         }
         function
@@ -2436,9 +2435,9 @@ pub mod Host {
         let arena = arena.lock().ok()?;
         match arena.functions.get(&function)? {
             Function::Closure(closure) => {
-                let mut path = closure.at.prefix.clone();
+                let mut path = (*closure.at.prefix).clone();
                 path.extend(closure.zone.clone());
-                Some((path, closure.at.iter.clone()))
+                Some((path, (*closure.at.iter).clone()))
             }
             Function::Named(_) => None,
         }
@@ -2467,8 +2466,8 @@ pub mod Host {
             let residual = get_res(&data, id)?;
             let TermNode::Hof(W::HofKind::Map, terms) = &residual.term.node else { return Err(error("E_TYPE", "A map probe needs a checked map.")); };
             let Some(function_term) = terms.first() else { return Err(error("E_TYPE", "A map probe needs a checked map.")); };
-            let Value::Fn(function) = eval_concrete(&mut data, &residual.ctx, &Env { values: residual.env.clone() }, function_term)? else { return Err(error("E_TYPE", "Expected a function.")); };
-            let env = Env { values: residual.env };
+            let Value::Fn(function) = eval_concrete(&mut data, &residual.ctx, &Env { values: Arc::new(residual.env.clone()) }, function_term)? else { return Err(error("E_TYPE", "Expected a function.")); };
+            let env = Env { values: Arc::new(residual.env) };
             let mut lists = Vec::with_capacity(terms.len().saturating_sub(1));
             for (index, term) in terms.iter().skip(1).enumerate() { lists.push(eval_sequence(&mut data, &residual.ctx, &env, term, format!("l{}", index))?.0); }
             let count = if lists.is_empty() { 0 } else { lists.iter().map(v_len).min().unwrap_or(0) };
@@ -2518,11 +2517,11 @@ mod tests {
         let graph_form = (*form()).clone();
         Workspace {
             name: "test".into(),
-            graphs: vec![Graph { name: "g".into(), context: flow_syntax::context::value(), inputs: Vec::new(), body, form: graph_form.clone() }],
-            defs: Vec::new(), nodes: Vec::new(), macros: Vec::new(), source: vec![graph_form],
+            graphs: vec![Graph { name: "g".into(), context: flow_syntax::context::value(), inputs: Vec::new(), body, form: graph_form.clone() }].into(),
+            defs: Vec::new().into(), nodes: Vec::new().into(), macros: Vec::new().into(), source: vec![graph_form].into(),
             live: BTreeSet::new(), invariant: BTreeSet::new(), approx: BTreeSet::new(),
             packed: Vec::new(), packed_roots: Vec::new(), approx_reasons: Vec::new(),
-            kind_fns: Vec::new(), ops: Vec::new(),
+            kind_fns: Vec::new(), ops: Vec::new().into(),
         }
     }
     #[test]

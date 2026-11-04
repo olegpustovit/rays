@@ -265,13 +265,13 @@ fn prune(checked: &Workspace, catalog: &Catalog, layout: &lbp::T) -> lbp::T {
             }
         }
     }
-    for g in &checked.graphs {
+    for g in checked.graphs.iter() {
         match projection::of_graph_with(&|_| false, catalog, checked, &g.name) {
             Ok(sc) => scope(&mut known, &sc),
             Err(_) => return layout.clone(),
         }
     }
-    for g in &checked.defs {
+    for g in checked.defs.iter() {
         match projection::of_graph_with(&|_| false, catalog, checked, &format!("def:{}", g.name)) {
             Ok(sc) => scope(&mut known, &sc),
             Err(_) => return layout.clone(),
@@ -551,12 +551,12 @@ fn edit_unchecked(catalog: &Catalog, t: &T, op: &Op) -> R<T> {
                 None => change,
             };
             edits.insert(key(&change), change);
-            let source = checked.source.clone();
+            let source = (*checked.source).clone();
             return Ok(T { checked: Arc::new(checked), source, literal: Some(Literal { base, edits }), ..t.clone() });
         }
         _ => {}
     }
-    let checker = checker_for(t.checked.ops.clone(), t.fragment);
+    let checker = checker_for((*t.checked.ops).clone(), t.fragment);
     let result = flow_edit::apply_checked_with(&t.checked.ops, t.fragment, Some(&*checker), catalog, &t.source, op)?;
     let prune = !matches!(op, Op::SetArg { .. } | Op::SetInputDefault { .. } | Op::SetNote { .. } | Op::ToggleBypass { .. });
     Ok(commit(t, &|p| flow_edit::remap(op, p), false, prune, result))
@@ -637,7 +637,7 @@ pub fn edit(catalog: &Catalog, t: &T, op: &Op) -> R<T> {
 /// One layout gesture, atomically, as `edit`: layout keys follow `layout_edit::remap`.
 pub fn edit_layout(catalog: &Catalog, t: &T, op: &layout_edit::Op) -> R<T> {
     guarded(t, &layout_edit::paths(op), &mut || {
-        let checker = checker_for(t.checked.ops.clone(), t.fragment);
+        let checker = checker_for((*t.checked.ops).clone(), t.fragment);
         let result = layout_edit::apply_checked(&t.checked.ops, t.fragment, Some(&*checker), catalog, &t.source, op)?;
         Ok(commit(t, &|p| layout_edit::remap(op, p), layout_edit::merges(op), layout_edit::changes_nodes(op), result))
     })

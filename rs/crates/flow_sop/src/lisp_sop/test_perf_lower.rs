@@ -35,3 +35,29 @@ fn perf_lower_transform() { eprintln!("PERF transform: {}", time("(workspace w (
 #[test]
 #[ignore = "benchmark"]
 fn perf_lower_sphere() { eprintln!("PERF sphere: {}", time("(workspace w (graph g :context sop (sop/uv_sphere :radius 0.5)))")); }
+#[test]
+#[ignore = "benchmark"]
+fn perf_loop() { for _ in 0..12 { eprintln!("PERF loop: {}", time("(workspace w (graph g :context sop (sop/transform (sop/box) :translate [1 0 0])))")); } }
+#[test]
+#[ignore = "benchmark"]
+fn perf_check_loop() {
+    let forms = parse("(workspace w (graph g :context sop (sop/transform (sop/box) :translate [1 0 0])))");
+    let factories = sop::nodes::factories();
+    let cat = catalog::of_factories(crate::manifest::VERSION, &[], None, &factories).unwrap();
+    for _ in 0..15 { let t = Instant::now(); let _ = catalog::check_workspace(ops::all(), false, None, &cat, &forms); eprintln!("PERF check {:.3}", t.elapsed().as_secs_f64()); }
+}
+#[test]
+#[ignore = "benchmark"]
+fn perf_check_phases() {
+    let forms = parse("(workspace w (graph g :context sop (sop/transform (sop/box) :translate [1 0 0])))");
+    let factories = sop::nodes::factories();
+    let cat = catalog::of_factories(crate::manifest::VERSION, &[], None, &factories).unwrap();
+    for round in 0..2 {
+        let start = Instant::now();
+        let guard = flow_syntax::phase_timer::SampleGuard::start_with_clock(Box::new(move || start.elapsed().as_secs_f64()));
+        let _ = catalog::check_workspace(ops::all(), false, None, &cat, &forms);
+        let t = guard.finish();
+        eprintln!("PERF phases round {round} total {:.3}", t.total);
+        for e in t.entries.iter().take(12) { eprintln!("PERF   {} calls {} {:.3}", e.phase, e.calls, e.seconds); }
+    }
+}

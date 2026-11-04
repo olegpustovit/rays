@@ -632,7 +632,7 @@ fn nested_root(under: bool, v: &E) -> bool {
 
 /// E_SCENE_ROOT, E_SCENE_WORLD, E_SCENE_CAMERA over every scene graph of the workspace.
 fn check_scene(workspace: &workspace_doc::T, plan: &Plan) -> R<()> {
-    for g in &workspace.checked.graphs {
+    for g in workspace.checked.graphs.iter() {
         let Some(instance) = plan.instances.iter().find(|i| i.default && i.graph == g.name) else { continue };
         if g.context != context::scene() {
             continue;

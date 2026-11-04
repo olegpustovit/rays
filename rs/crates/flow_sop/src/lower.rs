@@ -1766,12 +1766,12 @@ pub fn build_call(
     let mut graphs = vec![body.clone()];
     graphs.extend(validations.iter().cloned());
     let library = Workspace {
-        graphs,
+        graphs: graphs.into(),
         defs: (env.def_context_use)()
             .into_iter()
             .filter_map(|(def, uses)| if !reached_has(&def) { None } else { Some(if uses { ck::specialize(None, context, label, &def).unwrap_or_else(|_| def.clone()) } else { def }) })
-            .collect(),
-        nodes: checked.nodes.iter().filter(|d| d.kind.qualified != definition.kind.qualified).cloned().collect(),
+            .collect::<Vec<_>>().into(),
+        nodes: checked.nodes.iter().filter(|d| d.kind.qualified != definition.kind.qualified).cloned().collect::<Vec<_>>().into(),
         ..checked.clone()
     };
     let overrides: Vec<(String, Vec<(String, Value)>)> = library
@@ -1780,7 +1780,7 @@ pub fn build_call(
         .map(|g| (g.name.clone(), parameters.iter().chain(functions.iter()).filter(|(name, _)| g.inputs.iter().any(|(input, _, _)| input == name)).cloned().collect()))
         .collect();
     let invalid_parameter = |code: &str, message: &str| -> String { if code == "E_PARAM" { message.to_owned() } else { format!("{code}: {message}") } };
-    let validated = E::r#static(&Workspace { graphs: validations.clone(), ..library.clone() }, false, Some(&overrides[1..]));
+    let validated = E::r#static(&Workspace { graphs: validations.clone().into(), ..library.clone() }, false, Some(&overrides[1..]));
     match validated {
         Err(d) => return Err(invalid_parameter(&d.code, &d.message)),
         Ok(validated) => {
@@ -1799,7 +1799,7 @@ pub fn build_call(
         let (body_overrides, kernel_bindings, aliases): (_, Vec<(FnId, i64)>, Vec<(usize, Vec<(i64, i64)>)>) = if forwarded.is_empty() {
             (overrides[0].clone(), Vec::new(), Vec::new())
         } else {
-            let forwarded_evaluation = E::r#static(&Workspace { graphs: vec![body.clone()], ..library.clone() }, false, Some(&[overrides[0].clone()]))?;
+            let forwarded_evaluation = E::r#static(&Workspace { graphs: vec![body.clone()].into(), ..library.clone() }, false, Some(&[overrides[0].clone()]))?;
             let marker = |name: &str| -> R<i64> {
                 match get(&forwarded_evaluation.plan.instances[0].inputs, name) {
                     Some(Value::Deferred(_, source)) => Ok(*source),
@@ -1870,8 +1870,8 @@ pub fn build_call(
             call_factories,
             vec![body_overrides],
             Workspace {
-                graphs: vec![call],
-                defs: checked.defs.iter().filter(|def| reached_has(def)).cloned().collect(),
+                graphs: vec![call].into(),
+                defs: checked.defs.iter().filter(|def| reached_has(def)).cloned().collect::<Vec<_>>().into(),
                 nodes: checked.nodes.clone(),
                 ..library.clone()
             },
@@ -3821,14 +3821,14 @@ impl HostRun {
         let library = if catalog || overrides.iter().any(|(_, v)| callable(v)) {
             (**checked).clone()
         } else {
-            Workspace { defs: Vec::new(), nodes: Vec::new(), packed: Vec::new(), packed_roots: Vec::new(), ..(**checked).clone() }
+            Workspace { defs: Vec::new().into(), nodes: Vec::new().into(), packed: Vec::new(), packed_roots: Vec::new(), ..(**checked).clone() }
         };
         let mut factories = capture_factories;
         factories.extend(self.env.factories.iter().cloned());
         let lowered = lower_checked(
             factories,
             Options { reference: self.env.reference, gpu: self.env.gpu.clone(), strict_body: true, inputs: Some(vec![(graph.name.clone(), overrides)]), ..Options::default() },
-            Workspace { graphs: vec![graph], ..library },
+            Workspace { graphs: vec![graph].into(), ..library },
         )?;
         match lowered.graphs.as_slice() {
             [graph] => match graph.root {

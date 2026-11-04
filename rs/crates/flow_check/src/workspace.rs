@@ -3,6 +3,7 @@ use flow_syntax::{context, lisp, macros, syntax::{self, Node as SNode, Syntax}, 
 use param::{self, FieldView, KindView};
 use rays_diagnostic::{self as diagnostic, Diagnostic, Severity, Span};
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 use std::rc::Rc;
 
 trait SyntaxArguments {
@@ -51,6 +52,28 @@ pub enum LoopKind { For, Fold, Scan, Sum }
 pub enum HofKind { Map, Filter, Reduce, SortBy, Iterate }
 
 fn fields(xs: &[(String, Term)], out: &mut Vec<Term>) { out.extend(xs.iter().map(|(_, t)| t.clone())); }
+/// Borrowed children, in the order of `children`.
+pub fn children_ref(term: &Term) -> Vec<&Term> {
+    let mut out: Vec<&Term> = Vec::new();
+    match &term.node {
+        Node::Lit(_) | Node::Text(_) | Node::Nil | Node::Time | Node::RefBinding(_, _) | Node::FnRef(_) => (),
+        Node::Vec(ts) | Node::Hof(_, ts) | Node::ListLit(ts) | Node::Str(ts) | Node::ListOp(_, ts) => out.extend(ts.iter()),
+        Node::Call { args, .. } | Node::Op { args, .. } | Node::GraphRef { inputs: args, .. } | Node::Record(args) => out.extend(args.iter().map(|(_, t)| t)),
+        Node::CallFn { args, body, .. } => { out.extend(args.iter()); if let Some(t) = body { out.push(t); } },
+        Node::Let(bs, b) => { for (_, t) in bs { out.push(t); } out.push(b); },
+        Node::State { init, step, .. } => { out.push(init); out.push(step); },
+        Node::Loop { accs, clauses, body, .. } => { for (_, t) in accs.iter().chain(clauses) { out.push(t); } out.push(body); },
+        Node::WithError(a, b) => { out.push(a); out.push(b); },
+        Node::ErrorRows { rows, mapper, .. } => { out.push(rows); out.push(mapper); },
+        Node::If(a, b, c) => { out.push(a); out.push(b); out.push(c); },
+        Node::Cond(arms, d) => { for (a, b) in arms { out.push(a); out.push(b); } out.push(d); },
+        Node::Case(v, arms, d) => { out.push(v); out.extend(arms.iter().map(|(_, t)| t)); out.push(d); },
+        Node::Fn { body, capture, .. } => { out.push(body); if let Some(t) = capture { out.push(t); } },
+        Node::Get(t, _) | Node::Bypass(t) | Node::Expanded { body: t, .. } => out.push(t),
+        Node::Assoc(t, fs) => { out.push(t); out.extend(fs.iter().map(|(_, t)| t)); },
+    }
+    out
+}
 pub fn children(term: &Term) -> Vec<Term> {
     let mut out = Vec::new();
     match &term.node {
@@ -106,9 +129,9 @@ pub struct NodeDefinition { pub kind:catalog::Kind, pub slots:Vec<catalog::Slot>
 pub enum PackedForm { Candidate(Paths), Refused(Vec<Diagnostic>) }
 #[derive(Clone)]
 pub struct Workspace {
-    pub name:String, pub graphs:Vec<Graph>, pub defs:Vec<Graph>, pub nodes:Vec<NodeDefinition>, pub macros:Vec<Syntax>, pub source:Vec<Syntax>,
+    pub name:String, pub graphs:Arc<Vec<Graph>>, pub defs:Arc<Vec<Graph>>, pub nodes:Arc<Vec<NodeDefinition>>, pub macros:Arc<Vec<Syntax>>, pub source:Arc<Vec<Syntax>>,
     pub live:Paths, pub invariant:Paths, pub approx:Paths, pub packed:Vec<(Path,PackedForm)>, pub packed_roots:Vec<(Syntax,Path)>,
-    pub approx_reasons:Vec<(Path,Vec<Diagnostic>)>, pub kind_fns:Vec<(String,(String,Context,Vec<catalog::Slot>))>, pub ops:Vec<op::Op>,
+    pub approx_reasons:Vec<(Path,Vec<Diagnostic>)>, pub kind_fns:Vec<(String,(String,Context,Vec<catalog::Slot>))>, pub ops:Arc<Vec<op::Op>>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OpSignature { pub pos:Vec<(String,Ty)>,pub opt:Vec<(String,Ty)>,pub rest:Option<(String,Ty)>,pub kw:Vec<(String,Ty)> }
@@ -132,7 +155,7 @@ pub fn skip_tuples(form:&Syntax)->Option<Vec<Vec<usize>>>{
     match &form.node { SNode::Vec(xs)=>xs.iter().map(tuple).collect(),_=>None }
 }
 
-pub fn kind_calls(term:&Term)->Vec<String>{let mut out=BTreeSet::new();let mut stack=vec![term.clone()];while let Some(t)=stack.pop(){if let Node::Call{kind,..}=&t.node{out.insert(kind.clone());}stack.extend(children(&t));}out.into_iter().collect()}
+pub fn kind_calls(term:&Term)->Vec<String>{let mut out=BTreeSet::new();let mut stack=vec![term];while let Some(t)=stack.pop(){if let Node::Call{kind,..}=&t.node{out.insert(kind.clone());}stack.extend(children_ref(t));}out.into_iter().collect()}
 pub fn bypass_input_ref(term:&Term)->Option<&Term>{
     let entries:Vec<&Term>=match &term.node{Node::Call{args,..}|Node::Op{args,..}=>args.iter().map(|(_,t)|t).collect(),Node::CallFn{args,..}=>args.iter().collect(),_=>Vec::new()};
     match &term.form.node{
@@ -2635,12 +2658,12 @@ impl Checker {
     }
 
     fn contains_body_context_op(term: &Term) -> bool {
-        let mut todo = vec![term.clone()];
+        let mut todo = vec![term];
         while let Some(term) = todo.pop() {
             if matches!(&term.node, Node::Op { op, .. } if BODY_CONTEXT_OPS.contains(&op.as_str())) {
                 return true;
             }
-            todo.extend(children(&term));
+            todo.extend(children_ref(term));
         }
         false
     }
@@ -2716,28 +2739,29 @@ impl Checker {
         self.error(&form.form, code, message);
     }
     fn check_node_cycles(&mut self) {
-        let definitions = self.nodes.iter().map(|node| (node.kind.qualified.clone(), node.clone())).collect::<BTreeMap<_, _>>();
+        let definitions = self.nodes.iter().enumerate().map(|(index, node)| (node.kind.qualified.clone(), index)).collect::<BTreeMap<_, _>>();
         fn visit(
             checker: &mut Checker,
             name: &str,
             stack: &mut Vec<String>,
             visited: &mut BTreeSet<String>,
-            definitions: &BTreeMap<String, NodeDefinition>,
+            definitions: &BTreeMap<String, usize>,
         ) {
             if let Some(position) = stack.iter().position(|entry| entry == name) {
-                if let Some(node) = definitions.get(name) {
+                if let Some(&index) = definitions.get(name) {
                     let mut cycle = stack[position..].to_vec();
                     cycle.push(name.to_owned());
-                    checker.error(&node.body.form, "E_RECURSION", &format!("Recursive node call: {}.", cycle.join(" → ")));
+                    let form = checker.nodes[index].body.form.clone();
+                    checker.error(&form, "E_RECURSION", &format!("Recursive node call: {}.", cycle.join(" → ")));
                 }
                 return;
             }
             if !visited.insert(name.to_owned()) {
                 return;
             }
-            let Some(node) = definitions.get(name) else { return };
+            let Some(&index) = definitions.get(name) else { return };
             stack.push(name.to_owned());
-            for called in kind_calls(&node.body.body) {
+            for called in kind_calls(&checker.nodes[index].body.body) {
                 if definitions.contains_key(&called) {
                     visit(checker, &called, stack, visited, definitions);
                 }
@@ -3063,11 +3087,11 @@ pub fn check(
     packed_roots.sort_by(|(a, p),(b, q)| p.cmp(q).then(a.id.cmp(&b.id)));
     let workspace = Workspace {
         name: name.clone(),
-        graphs: graph_names.iter().filter_map(|name| checker.graph_terms.get(name).cloned()).collect(),
-        defs: def_names.iter().filter_map(|name| checker.def_terms.get(name).cloned()).collect(),
-        nodes: checker.nodes,
-        macros: checker.macro_forms,
-        source: forms.to_vec(),
+        graphs: graph_names.iter().filter_map(|name| checker.graph_terms.get(name).cloned()).collect::<Vec<_>>().into(),
+        defs: def_names.iter().filter_map(|name| checker.def_terms.get(name).cloned()).collect::<Vec<_>>().into(),
+        nodes: checker.nodes.into(),
+        macros: checker.macro_forms.into(),
+        source: forms.to_vec().into(),
         live: checker.live,
         invariant: checker.invariant,
         approx: Paths::new(),
@@ -3075,7 +3099,7 @@ pub fn check(
         packed_roots,
         approx_reasons,
         kind_fns: checker.kind_fns.into_iter().collect(),
-        ops: checker.ops,
+        ops: checker.ops.into(),
     };
     (Some(workspace), diagnostics)
 }

@@ -1297,7 +1297,7 @@ pub fn of_graph_with(folded: &dyn Fn(&[String]) -> bool, catalog: &Catalog, work
     let catalog = Catalog { version: catalog.version, kinds };
     let g = find_graph(workspace, name).ok_or_else(|| format!("Projection.of_graph: no graph {}", name))?;
     let root = vec![if workspace.defs.iter().any(|d| std::ptr::eq(d, g)) { format!("def:{}", g.name) } else { g.name.clone() }];
-    let macros_list = workspace.macros.clone();
+    let macros_list = (*workspace.macros).clone();
     let macros: Vec<(String, S)> = macros_list
         .iter()
         .filter_map(|m| match s::children(m).get(1).map(|x| &x.node) {
@@ -1308,7 +1308,7 @@ pub fn of_graph_with(folded: &dyn Fn(&[String]) -> bool, catalog: &Catalog, work
     let mut c = Cx {
         catalog,
         ctx: g.context,
-        ops: workspace.ops.clone(),
+        ops: (*workspace.ops).clone(),
         graphs: workspace.graphs.iter().map(graph_info).collect(),
         defs: workspace.defs.iter().map(graph_info).collect(),
         macros,

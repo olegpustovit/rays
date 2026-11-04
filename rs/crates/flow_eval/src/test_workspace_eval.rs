@@ -65,7 +65,7 @@ fn walk(f: &mut dyn FnMut(&W::Term), x: &W::Term) {
 pub fn ty_at(ws: &W::Workspace, path: &[&str]) -> String {
     let want = Some(p(path));
     let mut found = None;
-    for g in ws.graphs.iter().chain(&ws.defs) { walk(&mut |x| { if x.path == want { found = Some(ty::to_string(&x.ty)); } }, &g.body); }
+    for g in ws.graphs.iter().chain(ws.defs.iter()) { walk(&mut |x| { if x.path == want { found = Some(ty::to_string(&x.ty)); } }, &g.body); }
     found.unwrap_or_else(|| panic!("no term at {}", path.join("/")))
 }
 
@@ -89,7 +89,7 @@ fn the_fixtures_run_deterministically_with_unique_plan_keys() {
         assert_eq!(a.authored.len(), a.plan.nodes.len());
         let mut forms = HashSet::new();
         fn remember(f: &Syntax, forms: &mut HashSet<i64>) { forms.insert(f.id as i64); for c in syntax::children(f) { remember(&c, forms); } }
-        for f in &ws.source { remember(f, &mut forms); }
+        for f in ws.source.iter() { remember(f, &mut forms); }
         assert!(a.authored.iter().all(|id| *id == 0 || forms.contains(id)), "{name}");
         assert_eq!(a.authored, static_ws(&ws).authored, "{name}");
         let keys = a.plan.nodes.iter().map(|n| (n.inst, n.site.clone(), n.iter.clone())).collect::<Vec<_>>();

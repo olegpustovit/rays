@@ -65,7 +65,7 @@ pub fn for_node(checked: &Workspace, definition: &NodeDefinition) -> Vec<(String
             };
             let graph_name = graph.name.clone();
             let mut one = checked.clone();
-            one.graphs = vec![graph];
+            one.graphs = vec![graph].into();
             let one = Arc::new(one);
             let normalize: Normalizer = Arc::new(move |raw: &[u8]| {
                 let _untimed = phase_timer::without();
@@ -115,10 +115,10 @@ fn normalize_node(workspace: &Workspace, node: &NodeDefinition) -> Result<NodeDe
 /// calls to such nodes.
 fn normalize_defaults(workspace: &Workspace) -> Result<Workspace, Diagnostic> {
     let mut nodes = Vec::with_capacity(workspace.nodes.len());
-    for node in &workspace.nodes {
+    for node in workspace.nodes.iter() {
         nodes.push(normalize_node(workspace, node)?);
     }
-    Ok(Workspace { nodes, ..workspace.clone() })
+    Ok(Workspace { nodes: nodes.into(), ..workspace.clone() })
 }
 
 struct Hooks {
@@ -278,10 +278,10 @@ pub fn checked(workspace: Workspace) -> Result<Workspace, Diagnostic> {
     let graphs = workspace.graphs.iter().map(|g| walk_graph(&hooks, g)).collect::<Result<Vec<_>, _>>()?;
     let defs = workspace.defs.iter().map(|g| walk_graph(&hooks, g)).collect::<Result<Vec<_>, _>>()?;
     let mut nodes = Vec::with_capacity(workspace.nodes.len());
-    for node in &workspace.nodes {
+    for node in workspace.nodes.iter() {
         nodes.push(NodeDefinition { body: walk_graph(&hooks, &node.body)?, ..node.clone() });
     }
-    Ok(Workspace { graphs, defs, nodes, ..workspace })
+    Ok(Workspace { graphs: graphs.into(), defs: defs.into(), nodes: nodes.into(), ..workspace })
 }
 
 #[cfg(test)]

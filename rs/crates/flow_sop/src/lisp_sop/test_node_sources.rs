@@ -41,10 +41,10 @@ fn an_explicit_library_is_pruned_to_what_the_workspace_reaches() {
     let sources = parse("(defnode sop/selected_fixture [(geo : geometry)] geo)");
     // An explicit library is pruned to what the workspace reaches; library:true checks all of it.
     let workspace = checked(catalog::check_workspace(&[], false, Some(&sources), &cat, &authored));
-    assert!(workspace.nodes.is_empty() && workspace.source == authored);
+    assert!(workspace.nodes.is_empty() && *workspace.source == authored);
     let workspace = checked(catalog::check_workspace(&[], true, Some(&sources), &cat, &authored));
     assert_eq!(workspace.nodes.iter().map(|n| n.kind.qualified.clone()).collect::<Vec<_>>(), vec!["sop/selected_fixture".to_owned()]);
-    assert!(workspace.source == authored);
+    assert!(*workspace.source == authored);
 }
 
 #[test]
@@ -180,7 +180,7 @@ fn embedded_fixture_checks_edits_and_round_trips_the_manifest() {
     kinds.extend(cat.kinds.clone());
     let cat = Catalog { kinds, ..cat };
     let workspace = checked(catalog::check_workspace(&[], false, Some(&forms), &cat, &authored));
-    assert!(workspace.source == authored);
+    assert!(*workspace.source == authored);
     assert_eq!(workspace.nodes.len(), 1);
     let graph = &workspace.graphs[0];
     let source_graph = *syntax::children(&authored[0]).last().unwrap();
@@ -189,7 +189,7 @@ fn embedded_fixture_checks_edits_and_round_trips_the_manifest() {
     let checker_forms = forms.clone();
     let checker = move |c: &Catalog, s: &[Syntax]| catalog::check_workspace(&[], false, Some(&checker_forms), c, s);
     let (edited, checked_edit) = ok(flow_graph::flow_edit::apply_checked_with(&[], false, Some(&checker), &cat, &authored, &EditOp::SetNote { node: vec!["g".to_owned(), "@result".to_owned()], text: "kept note".to_owned() }));
-    assert!(checked_edit.source == edited);
+    assert!(*checked_edit.source == edited);
     assert_eq!(checked_edit.nodes.len(), 1);
     let saved = flow_syntax::lisp::print(&edited).0;
     assert!(syntax::children(&edited[0]).iter().all(|form| syntax::head(form) != Some("defnode")));

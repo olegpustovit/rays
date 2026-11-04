@@ -603,7 +603,7 @@ fn order(layers: &[g::Node]) -> Vec<i64> {
 fn owned(workspace: &workspace_doc::T) -> Vec<String> {
     let c = &workspace.checked;
     let mut out: Vec<String> = c.graphs.iter().chain(c.defs.iter()).map(|gr| gr.name.clone()).collect();
-    for m in &c.macros {
+    for m in c.macros.iter() {
         if let Node::List(items) = &m.node {
             if items.len() >= 2 {
                 if let Node::Sym(n) = &items[1].node {
