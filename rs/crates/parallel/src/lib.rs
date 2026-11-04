@@ -201,8 +201,11 @@ fn pool() -> Result<&'static Pool, String> {
 }
 
 extern "C" fn shutdown_at_exit() {
-    if let Ok(pool) = &*POOL {
-        shutdown_pool(pool);
+    // Runs during process teardown, after the main thread's thread-locals may be gone: it must not
+    // touch thread-locals or `thread::current()`, and must not force the pool to initialize.
+    // Setting the stop flag is enough; the idle workers exit on their own and the OS reaps them.
+    if let Some(Ok(pool)) = LazyLock::get(&POOL) {
+        stop_workers(&pool.shared);
     }
 }
 
