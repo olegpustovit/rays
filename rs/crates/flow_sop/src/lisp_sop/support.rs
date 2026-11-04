@@ -103,3 +103,37 @@ pub fn case_text(name: &str) -> String {
     };
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
+
+/// `Rdk_test_support.get_ok` / `get_string_ok`.
+pub fn fixture_ok<A, E: ToString>(r: Result<A, E>) -> A {
+    r.unwrap_or_else(|e| panic!("{}", e.to_string()))
+}
+
+/// `Plane_generators.grid ~connectivity:Grid_quads ~columns ~rows ~size ()`: a quad grid in the XY plane.
+pub fn fixture_grid(columns: i64, rows: i64, size: f64) -> geo::T {
+    let stride = columns + 1;
+    let (mut x, mut y) = (Vec::new(), Vec::new());
+    for j in 0..=rows {
+        for i in 0..=columns {
+            x.push((i as f64 / columns as f64 - 0.5) * size);
+            y.push((j as f64 / rows as f64 - 0.5) * size);
+        }
+    }
+    let z = vec![0.0; x.len()];
+    let (mut vp, mut offsets) = (Vec::new(), vec![0i64]);
+    for j in 0..rows {
+        for i in 0..columns {
+            let a = j * stride + i;
+            vp.extend_from_slice(&[a, a + 1, a + 1 + stride, a + stride]);
+            offsets.push(vp.len() as i64);
+        }
+    }
+    let positions = fixture_ok(rdk::packed::Float3::of_owned(x, y, z).map_err(|e| rdk::error::to_string(&e)));
+    let topology = fixture_ok(rdk::topology::polygons_owned(stride * (rows + 1), vp, offsets).map_err(|e| rdk::error::to_string(&e)));
+    fixture_ok(geo::create(positions, topology, None, None, None).map_err(|e| rdk::error::to_string(&e)))
+}
+
+/// `RAYS_SLOW=1`: the exhaustive halves of a test (every grain, the reference tier).
+pub fn slow_matrix() -> bool {
+    std::env::var("RAYS_SLOW").as_deref() == Ok("1")
+}

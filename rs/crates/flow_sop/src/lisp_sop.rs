@@ -166,6 +166,10 @@ fn _unused(_: &payload::T) {}
 #[cfg(test)]
 mod support;
 #[cfg(test)]
+mod test_concat;
+#[cfg(test)]
+mod test_planes;
+#[cfg(test)]
 mod test_iterate;
 #[cfg(test)]
 mod test_settle;
