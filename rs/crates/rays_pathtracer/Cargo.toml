@@ -1,0 +1,63 @@
+[package]
+name = "rays_pathtracer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "rays_pathtracer"
+path = "src/lib.rs"
+
+[dependencies]
+rays = { path = "../rays" }
+ogpu = { path = "../ogpu" }
+ogpu_core = { path = "../ogpu_core" }
+renderer = { path = "../renderer" }
+runtime_resources = { path = "../runtime_resources" }
+rays_math = { path = "../rays_math" }
+flow_syntax = { path = "../flow_syntax" }
+flow_check = { path = "../flow_check" }
+flow_eval = { path = "../flow_eval" }
+flow_ir = { path = "../flow_ir" }
+flow_gpu = { path = "../flow_gpu" }
+flow_shader = { path = "../flow_shader" }
+input = { path = "../input" }
+rays_diagnostic = { path = "../rays_diagnostic" }
+cfmt = { path = "../cfmt" }
+param = { path = "../param" }
+
+[dev-dependencies]
+ogpu_mock = { path = "../ogpu_mock" }
+
+[target.'cfg(windows)'.dev-dependencies]
+ogpu_vulkan = { path = "../ogpu_vulkan" }
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+ogpu_metal = { path = "../ogpu_metal" }
+
+# libtest never gives a test the process main thread, which SDL-backed resource operations need: these
+# targets run their cases from their own main (tests/common/window.rs), one device per process, Vulkan
+# validation fatal; `cargo t` runs the gpu_* targets in parallel.
+[[test]]
+name = "gpu_film"
+harness = false
+
+[[test]]
+name = "gpu_pathtracer"
+harness = false
+
+[[test]]
+name = "gpu_world"
+harness = false
+
+[[test]]
+name = "gpu_scene"
+harness = false
+
+[[test]]
+name = "gpu_lisp"
+harness = false
+
+[[test]]
+name = "gpu_parity"
+harness = false
