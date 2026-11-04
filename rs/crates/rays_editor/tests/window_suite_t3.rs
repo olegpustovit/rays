@@ -65,6 +65,7 @@ macro_rules! slow_case {
 
 /// A case that fails on a product difference recorded in parity_backlog.md: skipped, with the reason, unless
 /// `T3_RUN_KNOWN=1`.
+#[allow(unused_macros)] // no case is a known failure at the moment
 macro_rules! known_fail {
     ($name:ident, $path:path, $reason:expr) => {
         fn $name() {
@@ -100,8 +101,8 @@ gpu_case!(cook_barriers, cook_t::barriers);
 gpu_case!(cook_close_joins, cook_t::close_joins);
 
 slow_case!(probe_off_display, probe_t::off_display, PERF3);
-known_fail!(probe_budget, probe_t::budget, "Probe::counts answers [] for map-lambda zones (g/ys#0); parity_backlog.md suite t3");
-known_fail!(probe_compiled_inputs, probe_t::compiled_inputs, "Probe::counts answers [] for map-lambda zones (g/ys#0); parity_backlog.md suite t3");
+gpu_case!(probe_budget, probe_t::budget);
+gpu_case!(probe_compiled_inputs, probe_t::compiled_inputs);
 slow_case!(probe_live, probe_t::live, PERF3);
 slow_case!(probe_branches_garland, probe_t::branches_garland, "slow lowering: perf3 (the garland evaluates for 20 s in a debug build)");
 

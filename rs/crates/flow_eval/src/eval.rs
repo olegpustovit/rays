@@ -1739,11 +1739,25 @@ fn sequence_item(value: &Value, index: usize) -> Result<Value, Diagnostic> {
 fn eval_hof(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, kind: &W::HofKind, function_term: &Term, rest: &[Term]) -> Result<Value, Diagnostic> {
     let function = eval_concrete(a, &sub(c, "f".into()), env, function_term)?;
     let Value::Fn(function) = function else { return eval_error("E_TYPE", "Expected a function."); };
+    // OCaml records a map's `~calls` (where its closure's call count starts, and the map) before the frame test below gives way.
+    let calls = if matches!(kind, W::HofKind::Map) && a.record && c.record && matches!(&term.ty, Ty::Array(_)) {
+        match own_fn(a, &function).cloned() {
+            Some(Function::Closure(closure)) => {
+                let id = map_residual(a, c, term, env);
+                let offset = function_call_offset(a, function);
+                let mut path = closure.zone.clone();
+                path.push("~calls".into());
+                note(a, c, path, Value::Record(vec![("offset".into(), Value::Int(offset)), ("call".into(), Value::Residual(id))]));
+                Some(id)
+            }
+            _ => None,
+        }
+    } else { None };
     // A function that reads the frame is live whichever elements read it: walking until one does could spend the static budget on a branch that leaves it unread.
     if a.time.is_none() && read_value(a, &Value::Fn(function), true, &mut BTreeSet::new(), &mut HashSet::new(), &mut HashSet::new()) { return need_time(); }
     let packed = matches!(&term.ty, Ty::Array(_)) || rest.iter().any(|term| matches!(&term.ty, Ty::Array(_)));
     let saved_steps = a.step_count;
-    let result = eval_hof_work(a, c, env, term, kind, function, rest, packed, saved_steps);
+    let result = eval_hof_work(a, c, env, term, kind, function, rest, packed, saved_steps, calls);
     if packed { a.step_count = saved_steps; }
     result
 }
@@ -1771,30 +1785,22 @@ fn function_replayable(a: &Arena, function: FnId) -> bool {
     matches!(own_fn(a, &function), Some(Function::Closure(closure)) if closure.replayable)
 }
 // The host's map request and its finish run with the arena lent; finish runs on every exit of the walk.
-fn eval_map(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, function: FnId, sources: &[Term], packed: bool, saved_steps: usize, iter: &mut usize) -> Result<Value, Diagnostic> {
+fn eval_map(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, function: FnId, sources: &[Term], packed: bool, saved_steps: usize, iter: &mut usize, calls: Option<ResidualId>) -> Result<Value, Diagnostic> {
     let mut progress = MapProgress { finish: None, head: 0, tail: 0, completed: false };
-    let result = eval_map_walk(a, c, env, term, function, sources, packed, saved_steps, iter, &mut progress);
+    let result = eval_map_walk(a, c, env, term, function, sources, packed, saved_steps, iter, &mut progress, calls);
     if let Some(finish) = progress.finish.take() { lend(a, || finish(progress.head, progress.tail, progress.completed)); }
     result
 }
-fn eval_map_walk(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, function: FnId, sources: &[Term], packed: bool, saved_steps: usize, iter: &mut usize, progress: &mut MapProgress) -> Result<Value, Diagnostic> {
+fn eval_map_walk(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, function: FnId, sources: &[Term], packed: bool, saved_steps: usize, iter: &mut usize, progress: &mut MapProgress, calls: Option<ResidualId>) -> Result<Value, Diagnostic> {
     let mut caller = Caller::new(a, c);
     let mut lists = Vec::with_capacity(sources.len());
     for (index, source) in sources.iter().enumerate() { lists.push(eval_sequence(a, c, env, source, Seg::Index("l", index))?); }
     let count = if lists.is_empty() { 0 } else { lists.iter().map(|(_, count)| *count).min().unwrap_or(0) };
     let numeric = !matches!(&term.ty, Ty::Array(element) if **element == Ty::Text) && !sources.iter().any(|source| matches!(&source.ty, Ty::Array(element) if **element == Ty::Text));
     let static_map = a.time.is_none() && packed && numeric;
-    let id = if static_map || (a.record && c.record && matches!(&term.ty, Ty::Array(_))) { Some(map_residual(a, c, term, env)) } else { None };
+    let id = if static_map || (a.record && c.record && matches!(&term.ty, Ty::Array(_))) { Some(calls.unwrap_or_else(|| map_residual(a, c, term, env))) } else { None };
     if static_map {
         if let Some(map) = current_residual_handlers().and_then(|handlers| handlers.map) { let at = site(c); progress.finish = Some(lend(a, || outside_handler(|| map(&at, term, count)))); }
-    }
-    if let (Some(id), Some(Function::Closure(closure))) = (id, own_fn(a, &function).cloned()) {
-        if a.record && c.record && matches!(&term.ty, Ty::Array(_)) {
-            let offset = function_call_offset(a, function);
-            let mut path = closure.zone.clone();
-            path.push("~calls".into());
-            note(a, c, path, Value::Record(vec![("offset".into(), Value::Int(offset)), ("call".into(), Value::Residual(id))]));
-        }
     }
     let mut large = static_map && count > MAX_ITERATIONS && matches!(&term.ty, Ty::Array(_));
     if large {
@@ -1856,11 +1862,11 @@ fn eval_map_walk(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, function: F
     progress.completed = true;
     Ok(result)
 }
-fn eval_hof_work(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, kind: &W::HofKind, function: FnId, rest: &[Term], packed: bool, saved_steps: usize) -> Result<Value, Diagnostic> {
+fn eval_hof_work(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, kind: &W::HofKind, function: FnId, rest: &[Term], packed: bool, saved_steps: usize, calls: Option<ResidualId>) -> Result<Value, Diagnostic> {
     let mut caller = Caller::new(a, c);
     let mut iter = 0usize;
     match kind {
-        W::HofKind::Map => eval_map(a, c, env, term, function, rest, packed, saved_steps, &mut iter),
+        W::HofKind::Map => eval_map(a, c, env, term, function, rest, packed, saved_steps, &mut iter, calls),
         W::HofKind::Filter => {
             if rest.len() != 1 { return eval_error("E_ARITY", "filter takes one list."); }
             let (values, count) = eval_sequence(a, c, env, &rest[0], "l0".into())?;
