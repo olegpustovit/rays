@@ -133,8 +133,16 @@ fn state_branch_laziness_and_shared_fixture_snapshot() {
         assert!(same, "state branch laziness differs at t={time}");
         assert!(state_dump(&core_state) == state_dump(&reference_state), "state branch changed inactive state at t={time}");
     }
-    let _ = ts::fixtures(Some(trace()), 1024);
-    let _ = ts::vector_fixtures(Some(trace()), 1024);
+    // OCaml evaluates the elements of a list literal right to left, so the snapshot holds the last
+    // fixture of Test_program.fixtures / vector_fixtures first; compile them in that order.
+    let array = "(array/range 1024)";
+    let traced = |fusion: bool, body: String| { ts::compile_with(Some(trace()), fusion, "", &body); };
+    traced(true, format!("(map (fn [x] (noise3 [(* x 0.02) t 0.25] :seed 31 :octaves 3)) {array})"));
+    traced(true, format!("(map (fn [x] (if (< x t) (+ x 1) (- x 1))) {array})"));
+    traced(true, format!("(map (fn [x] (+ (* x 2) t)) {array})"));
+    traced(false, format!("(let* [offset [t 1 2 3]]\n     (map (fn [(p : vec4)] (+ p offset)) (map (fn [x] [x 1 2 3]) {array})))"));
+    traced(false, format!("(map (fn [(p : vec2)] [p.y p.x t 1])\n     (map (fn [x] [x (+ x 1)]) {array}))"));
+    traced(true, format!("(map (fn [x] [x (+ x t)]) {array})"));
     if let Err(message) = region_snapshot::finish("test_program") {
         panic!("{message}");
     }
