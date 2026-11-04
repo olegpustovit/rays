@@ -224,9 +224,7 @@ fn with_node(form: &Syntax, node: Node, span: Span) -> Syntax {
         id: form.id,
         node,
         span,
-        notes: form.notes.clone(),
-        meta: form.meta.clone(),
-        tail: form.tail.clone(),
+        trivia: form.trivia.clone(),
     }
 }
 

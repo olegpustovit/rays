@@ -11,15 +11,60 @@ pub enum QuoteKind {
     Splice,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone)]
 pub struct Syntax {
     pub id: Id,
     pub node: Node,
     pub span: Span,
+    /// Comments, metadata and trailing comments: absent for the common form that has none.
+    pub trivia: Option<Box<Trivia>>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Trivia {
     pub notes: Vec<String>,
     pub meta: Vec<String>,
     pub tail: Vec<String>,
 }
+
+impl Syntax {
+    pub fn notes(&self) -> &[String] {
+        self.trivia.as_ref().map_or(&[], |t| &t.notes)
+    }
+    pub fn meta(&self) -> &[String] {
+        self.trivia.as_ref().map_or(&[], |t| &t.meta)
+    }
+    pub fn tail(&self) -> &[String] {
+        self.trivia.as_ref().map_or(&[], |t| &t.tail)
+    }
+    pub fn notes_mut(&mut self) -> &mut Vec<String> {
+        &mut self.trivia.get_or_insert_with(Default::default).notes
+    }
+    pub fn meta_mut(&mut self) -> &mut Vec<String> {
+        &mut self.trivia.get_or_insert_with(Default::default).meta
+    }
+    pub fn tail_mut(&mut self) -> &mut Vec<String> {
+        &mut self.trivia.get_or_insert_with(Default::default).tail
+    }
+    /// The trivia of the three lists, or none when all are empty.
+    pub fn trivia_of(notes: Vec<String>, meta: Vec<String>, tail: Vec<String>) -> Option<Box<Trivia>> {
+        if notes.is_empty() && meta.is_empty() && tail.is_empty() { None } else { Some(Box::new(Trivia { notes, meta, tail })) }
+    }
+}
+
+impl std::fmt::Debug for Syntax {
+    // the field layout the printed form always had, so structure keys and goldens do not move
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Syntax").field("id", &self.id).field("node", &self.node).field("span", &self.span).field("notes", &self.notes()).field("meta", &self.meta()).field("tail", &self.tail()).finish()
+    }
+}
+
+impl PartialEq for Syntax {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id && self.node == other.node && self.span == other.span && self.notes() == other.notes() && self.meta() == other.meta() && self.tail() == other.tail()
+    }
+}
+impl Eq for Syntax {}
 
 /// The children of a list, vector or map form: one shared run, so cloning a `Syntax` is O(1).
 /// Reads go through `Deref` as a `Vec`; a write (`DerefMut`) copies the run first when it is shared.
@@ -243,7 +288,7 @@ fn parse_inner(source: &str) -> Result<Vec<Syntax>, Diagnostic> {
             ));
         }
         match token.kind {
-            TokenKind::Word(node) => Ok(Syntax { id: fresh(next_id), node, span: token.span, notes, meta: Vec::new(), tail: Vec::new() }),
+            TokenKind::Word(node) => Ok(Syntax { id: fresh(next_id), node, span: token.span, trivia: Syntax::trivia_of(notes, Vec::new(), Vec::new()) }),
             TokenKind::Open(c) => { let id = fresh(next_id); parse_group(source, tokens, at, next_id, token.span.clone(), c, id, notes, depth) }
             TokenKind::Prefix(kind) => {
                 let id = fresh(next_id);
@@ -254,9 +299,7 @@ fn parse_inner(source: &str) -> Result<Vec<Syntax>, Diagnostic> {
                     id,
                     span: Span { start: token.span.start, finish: inner.span.finish },
                     node: Node::Quote(kind, std::sync::Arc::new(inner)),
-                    notes,
-                    meta: Vec::new(),
-                    tail: Vec::new(),
+                    trivia: Syntax::trivia_of(notes, Vec::new(), Vec::new()),
                 })
             }
             TokenKind::Meta(name) => {
@@ -266,7 +309,7 @@ fn parse_inner(source: &str) -> Result<Vec<Syntax>, Diagnostic> {
                     return Err(fail(source, token.span.start, token.span.finish, "E_UNEXPECTED", "Metadata needs a form after it"));
                 }
                 let mut inner = parse_form(source, tokens, at, next_id, notes, depth + 1)?;
-                inner.meta.insert(0, name);
+                inner.meta_mut().insert(0, name);
                 inner.span.start = token.span.start;
                 Ok(inner)
             }
@@ -300,14 +343,14 @@ fn parse_inner(source: &str) -> Result<Vec<Syntax>, Diagnostic> {
                         '[' => Node::Vec(items.into()),
                         _ => Node::Map(items.into()),
                     };
-                    let whole = Syntax { id, node, span: span.clone(), notes: notes.clone(), meta: Vec::new(), tail: tail.clone() };
+                    let whole = Syntax { id, node, span: span.clone(), trivia: Syntax::trivia_of(notes.clone(), Vec::new(), tail.clone()) };
                     return match &whole.node {
                         Node::List(forms) if matches!(forms.first().map(|form| &form.node), Some(Node::Sym(head)) if head == "->") => {
                             if forms.len() == 1 {
                                 Err(fail(source, opening.start, opening.finish, "E_THREAD", "-> needs a value to thread"))
                             } else if forms.len() == 2 {
                                 let mut value = forms[1].clone();
-                                value.notes = [notes, value.notes].concat();
+                                *value.notes_mut() = [notes, value.notes().to_vec()].concat();
                                 Ok(value)
                             } else {
                                 let mut result = forms[1].clone();
@@ -330,8 +373,8 @@ fn parse_inner(source: &str) -> Result<Vec<Syntax>, Diagnostic> {
                                     result.node = Node::List(next_parts.into());
                                     if index + 1 == steps.len() {
                                         result.id = id;
-                                        result.notes = [notes.clone(), result.notes].concat();
-                                        result.tail = [tail.clone(), result.tail].concat();
+                                        *result.notes_mut() = [notes.clone(), result.notes().to_vec()].concat();
+                                        *result.tail_mut() = [tail.clone(), result.tail().to_vec()].concat();
                                         result.span = span.clone();
                                     }
                                 }
@@ -364,7 +407,7 @@ fn parse_inner(source: &str) -> Result<Vec<Syntax>, Diagnostic> {
             if !leading.is_empty() {
                 if let Some(last) = forms.last_mut() {
                     if matches!(&last.node, Node::List(_) | Node::Vec(_) | Node::Map(_)) {
-                        last.tail.extend(leading);
+                        last.tail_mut().extend(leading);
                     }
                 }
             }
@@ -379,13 +422,13 @@ pub fn make(node: Node) -> Syntax {
 }
 
 pub fn make_with(node: Node, notes: Vec<String>, meta: Vec<String>) -> Syntax {
-    Syntax { id: 0, node, span: Span { start: 0, finish: 0 }, notes, meta, tail: Vec::new() }
+    Syntax { id: 0, node, span: Span { start: 0, finish: 0 }, trivia: Syntax::trivia_of(notes, meta, Vec::new()) }
 }
 
 pub fn equal(a: &Syntax, b: &Syntax) -> bool {
-    a.notes == b.notes
-        && a.meta == b.meta
-        && a.tail == b.tail
+    a.notes() == b.notes()
+        && a.meta() == b.meta()
+        && a.tail() == b.tail()
         && match (&a.node, &b.node) {
             (Node::Sym(x), Node::Sym(y)) | (Node::Kw(x), Node::Kw(y)) | (Node::Num(x), Node::Num(y)) => x == y,
             (Node::Str(x), Node::Str(y)) => x == y,
@@ -502,7 +545,7 @@ pub fn memory_bytes(forms: &[Syntax]) -> usize {
         values.iter().map(|value| 3 + value.len() / 8).sum()
     }
     fn form_bytes(form: &Syntax) -> usize {
-        13 + strings(&form.notes) + strings(&form.meta) + strings(&form.tail)
+        13 + strings(&form.notes()) + strings(&form.meta()) + strings(&form.tail())
             + match &form.node {
                 Node::Sym(text) | Node::Kw(text) | Node::Num(text) => 3 + text.len() / 8,
                 Node::Str(text) => 3 + text.len() / 8,
@@ -565,17 +608,17 @@ mod tests {
         assert!(matches!(&symbols[2].node, Node::Quote(QuoteKind::Unquote, _)));
 
         let forms = parse(";; head\n; second\n(a ; on b\n b\n  ;\n c ; trailing\n )\n; after\n(d)\n; end\n").unwrap();
-        assert_eq!(forms[0].notes, vec!["head".to_owned(), "second".to_owned()]);
-        assert_eq!(forms[0].tail, vec!["trailing".to_owned()]);
+        assert_eq!(forms[0].notes(), vec!["head".to_owned(), "second".to_owned()]);
+        assert_eq!(forms[0].tail(), vec!["trailing".to_owned()]);
         let Node::List(children) = &forms[0].node else { panic!("expected list"); };
-        assert_eq!(children[1].notes, vec!["on b".to_owned()]);
-        assert_eq!(children[2].notes, vec!["".to_owned()]);
-        assert_eq!(forms[1].notes, vec!["after".to_owned()]);
-        assert_eq!(forms[1].tail, vec!["end".to_owned()]);
-        assert_eq!(one("(a ; end\n)").tail, vec!["end".to_owned()]);
+        assert_eq!(children[1].notes(), vec!["on b".to_owned()]);
+        assert_eq!(children[2].notes(), vec!["".to_owned()]);
+        assert_eq!(forms[1].notes(), vec!["after".to_owned()]);
+        assert_eq!(forms[1].tail(), vec!["end".to_owned()]);
+        assert_eq!(one("(a ; end\n)").tail(), vec!["end".to_owned()]);
         let Node::List(children) = one("(f ; c\n ' ; d\n x)").node else { panic!("expected list"); };
-        assert_eq!(children[1].notes, vec!["c".to_owned(), "d".to_owned()]);
-        assert!(matches!(&children[1].node, Node::Quote(QuoteKind::Plain, inner) if inner.notes.is_empty()));
+        assert_eq!(children[1].notes(), vec!["c".to_owned(), "d".to_owned()]);
+        assert!(matches!(&children[1].node, Node::Quote(QuoteKind::Plain, inner) if inner.notes().is_empty()));
     }
 
     #[test]
@@ -584,7 +627,7 @@ mod tests {
         let form = one(source);
         let Node::List(children) = &form.node else { panic!("expected list"); };
         let metadata_form = &children[1];
-        assert_eq!(metadata_form.meta, ["bypass", "x"]);
+        assert_eq!(metadata_form.meta(), ["bypass", "x"]);
         assert_eq!(&source[metadata_form.span.start as usize..metadata_form.span.finish as usize], "^:bypass ^:x (b c)");
 
         let form = one("(a [b c] 'd)");
@@ -688,3 +731,7 @@ mod tests {
         }
     }
 }
+
+// A form is one node of the tree every Lisp text becomes: keep it small (id, node, span, trivia pointer).
+const _: () = assert!(std::mem::size_of::<Syntax>() <= 64);
+const _: () = assert!(std::mem::size_of::<Node>() <= 32);

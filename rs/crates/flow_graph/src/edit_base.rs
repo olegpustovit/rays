@@ -382,9 +382,9 @@ pub fn set_sub(e: &S, sub: &[i64], v: S) -> R<S> {
 
 /// `v`, with the notes of `old` when it has none.
 pub fn keep_notes(old: &S, v: S) -> S {
-    if v.notes.is_empty() {
+    if v.notes().is_empty() {
         let mut v = v;
-        v.notes = old.notes.clone();
+        *v.notes_mut() = old.notes().to_vec();
         v
     } else {
         v
@@ -743,7 +743,7 @@ pub struct Scope {
 }
 
 pub fn scope_of(e: &S) -> Option<Scope> {
-    if !e.meta.is_empty() {
+    if !e.meta().is_empty() {
         return None;
     }
     if let Node::List(l) = &e.node {
@@ -889,7 +889,7 @@ pub fn find_pair(sc: &Scope, leaf: &str) -> Option<usize> {
 }
 
 pub fn is_zone(e: &S) -> bool {
-    e.meta.is_empty() && matches!(head_sym(e), Some("for" | "fold" | "scan" | "sum" | "state" | "fn"))
+    e.meta().is_empty() && matches!(head_sym(e), Some("for" | "fold" | "scan" | "sum" | "state" | "fn"))
 }
 
 pub fn last_child(e: &S) -> R<S> {

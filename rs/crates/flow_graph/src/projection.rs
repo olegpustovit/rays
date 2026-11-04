@@ -816,7 +816,7 @@ fn head_label(e: &S) -> String {
 // ---- nodes, zones and scopes ----
 
 fn scope_form(e: &S) -> Option<(Vec<(S, S)>, S)> {
-    if !e.meta.is_empty() {
+    if !e.meta().is_empty() {
         return None;
     }
     if let SNode::List(l) = &e.node {
@@ -832,7 +832,7 @@ fn scope_form(e: &S) -> Option<(Vec<(S, S)>, S)> {
 }
 
 fn zone_kind(e: &S) -> Option<ZoneKind> {
-    if !e.meta.is_empty() {
+    if !e.meta().is_empty() {
         return None;
     }
     match s::head(e) {
@@ -1156,10 +1156,10 @@ fn node_of(c: &Cx, folded: &dyn Fn(&[String]) -> bool, visible: &[String], expr:
         outputs: if nested_leaf.is_none() { outputs(&pat.cloned(), &ty) } else { Vec::new() },
         ty,
         note: match pat {
-            Some(pt) if !pt.notes.is_empty() => Some(pt.notes.join("\n")),
+            Some(pt) if !pt.notes().is_empty() => Some(pt.notes().join("\n")),
             _ => None,
         },
-        bypass: e.meta.iter().any(|m| m == "bypass"),
+        bypass: e.meta().iter().any(|m| m == "bypass"),
         macro_,
         lens,
         live: c.live.contains(&p),

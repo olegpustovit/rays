@@ -472,17 +472,17 @@ pub fn print(t: &T) -> (String, lisp::Spans) {
     for name in names {
         let old = remaining.iter().position(|f| head(f) == Some(name)).map(|i| remaining.remove(i));
         let mut notes = carried.clone();
-        notes.extend(old.as_ref().map(|f| f.notes.clone()).unwrap_or_default());
-        let tail = old.as_ref().map(|f| f.tail.clone()).unwrap_or_default();
+        notes.extend(old.as_ref().map(|f| f.notes().to_vec()).unwrap_or_default());
+        let tail = old.as_ref().map(|f| f.tail().to_vec()).unwrap_or_default();
         let chosen = if name == "view" || name == "import" {
             old
         } else {
-            fresh.iter().find(|(n, _)| *n == name).and_then(|(_, f)| f.clone()).map(|f| S { tail: tail.clone(), ..f })
+            fresh.iter().find(|(n, _)| *n == name).and_then(|(_, f)| f.clone()).map(|mut f| { *f.tail_mut() = tail.clone(); f })
         };
         match chosen {
             Some(f) => {
                 carried.clear();
-                forms.push(S { notes, ..f });
+                { let mut f = f; *f.notes_mut() = notes; forms.push(f); }
             }
             None => {
                 carried = notes;
@@ -507,7 +507,7 @@ pub fn print(t: &T) -> (String, lisp::Spans) {
     let mut forms = forms;
     if !carried.is_empty() {
         if let Some(last) = forms.last_mut() {
-            last.tail.extend(carried);
+            last.tail_mut().extend(carried);
         }
     }
     lisp::print(&forms)

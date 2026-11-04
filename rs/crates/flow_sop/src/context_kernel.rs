@@ -469,11 +469,11 @@ fn put_form(buffer: &mut Vec<u8>, x: &Syntax) {
     }
 }
 fn put_library_free(buffer: &mut Vec<u8>, x: &Syntax) {
-    if !x.notes.is_empty() {
-        put_all(buffer, &x.notes);
+    if !x.notes().is_empty() {
+        put_all(buffer, &x.notes());
     }
-    if !x.meta.is_empty() {
-        put_all(buffer, &x.meta);
+    if !x.meta().is_empty() {
+        put_all(buffer, &x.meta());
     }
     match &x.node {
         SNode::Sym(s) => put_atom(buffer, b's', s.as_bytes()),
@@ -503,8 +503,8 @@ fn put_library_free(buffer: &mut Vec<u8>, x: &Syntax) {
             put_form(buffer, inner);
         }
     }
-    if !x.tail.is_empty() {
-        put_all(buffer, &x.tail);
+    if !x.tail().is_empty() {
+        put_all(buffer, &x.tail());
     }
     buffer.push(b')');
 }

@@ -97,7 +97,7 @@ fn prefix(kind: QuoteKind) -> &'static str {
 
 fn meta_pre(form: &Syntax) -> String {
     let mut text = String::new();
-    for meta in &form.meta {
+    for meta in form.meta() {
         text.push_str("^:");
         text.push_str(meta);
         text.push(' ');
@@ -161,7 +161,7 @@ fn newline_comments(lines: &[String], column: usize) -> String {
 }
 
 fn note_at(form: &Syntax, column: usize) -> String {
-    newline_comments(&form.notes, column)
+    newline_comments(&form.notes(), column)
 }
 
 fn with_notes(form: &Syntax, column: usize, text: String) -> String {
@@ -171,7 +171,7 @@ fn with_notes(form: &Syntax, column: usize, text: String) -> String {
 }
 
 fn own(form: &Syntax) -> bool {
-    !form.tail.is_empty() || kids(form).iter().any(|child| !child.notes.is_empty())
+    !form.tail().is_empty() || kids(form).iter().any(|child| !child.notes().is_empty())
 }
 
 fn deep(form: &Syntax) -> bool {
@@ -179,8 +179,8 @@ fn deep(form: &Syntax) -> bool {
 }
 
 fn end_notes(form: &Syntax, column: usize) -> String {
-    if form.tail.is_empty() { String::new() }
-    else { format!("\n{}{}", spaces(column), newline_comments(&form.tail, column)) }
+    if form.tail().is_empty() { String::new() }
+    else { format!("\n{}{}", spaces(column), newline_comments(&form.tail(), column)) }
 }
 
 fn threadable(form: &Syntax) -> bool {
@@ -253,7 +253,7 @@ fn core(form: &Syntax, indent: usize) -> String {
                         let key_text = pp(key, column);
                         let mut pair = note_at(key, column);
                         pair.push_str(&key_text);
-                        if !value.notes.is_empty() {
+                        if !value.notes().is_empty() {
                             pair.push('\n');
                             pair.push_str(&spaces(column + 2));
                             pair.push_str(&note_at(value, column + 2));
@@ -271,7 +271,7 @@ fn core(form: &Syntax, indent: usize) -> String {
                 }
                 let (open, close) = if is_vector { ("[", "]") } else { ("{", "}") };
                 let mut text = String::from(open);
-                if forms.first().is_some_and(|child| !child.notes.is_empty()) {
+                if forms.first().is_some_and(|child| !child.notes().is_empty()) {
                     text.push('\n');
                     text.push_str(&spaces(column));
                 }
@@ -287,14 +287,14 @@ fn core(form: &Syntax, indent: usize) -> String {
             let bind_forms = ["let*", "for", "sum"];
             let is_vec_at = |index: usize| index < len && matches!(&forms[index].node, Node::Vec(_));
             let vec_len = |index: usize| match &forms[index].node { Node::Vec(values) => values.len(), _ => 0 };
-            let slots_plain = |n: usize| forms.get(1..n).unwrap_or(&[]).iter().all(|child| child.notes.is_empty());
+            let slots_plain = |n: usize| forms.get(1..n).unwrap_or(&[]).iter().all(|child| child.notes().is_empty());
             let slots_flat = |n: usize| slots_plain(n) && forms.get(1..n).unwrap_or(&[]).iter().all(|child| !deep(child));
             let special = ["graph", "defn", "defmacro"].contains(&call_head);
             let (start, steps) = spine(form);
             if steps.len() >= 3 {
                 let column = indent + 4;
                 let last = steps.len() - 1;
-                let mut text = if start.notes.is_empty() { "(-> ".to_owned() } else { format!("(->\n{}{}", spaces(column), note_at(&start, column)) };
+                let mut text = if start.notes().is_empty() { "(-> ".to_owned() } else { format!("(->\n{}{}", spaces(column), note_at(&start, column)) };
                 text.push_str(&pp(&start, column));
                 for (i, step) in steps.iter().enumerate() {
                     text.push('\n');
@@ -343,10 +343,10 @@ fn core(form: &Syntax, indent: usize) -> String {
                 text.push_str(&end_notes(form, indent + 2));
                 text.push(')');
                 text
-            } else if call_head == "if" && len == 4 && forms[0].notes.is_empty() {
+            } else if call_head == "if" && len == 4 && forms[0].notes().is_empty() {
                 let column = indent + 4;
                 let mut text = String::from("(if");
-                if !forms[1].notes.is_empty() {
+                if !forms[1].notes().is_empty() {
                     text.push('\n'); text.push_str(&spaces(column)); text.push_str(&note_at(&forms[1], column));
                 } else { text.push(' '); }
                 text.push_str(&pp(&forms[1], column));
@@ -376,13 +376,13 @@ fn core(form: &Syntax, indent: usize) -> String {
                 text.push_str(&end_notes(form, indent + 2));
                 text.push(')');
                 text
-            } else if ((call_head == "cond" && len >= 1) || (call_head == "case" && len >= 2)) && forms[0].notes.is_empty() {
+            } else if ((call_head == "cond" && len >= 1) || (call_head == "case" && len >= 2)) && forms[0].notes().is_empty() {
                 let column = indent + 2;
                 let first = if call_head == "case" { 2 } else { 1 };
                 let mut text = if call_head == "case" {
                     let selector = &forms[1];
                     let mut prefix_text = String::from("(case");
-                    if !selector.notes.is_empty() {
+                    if !selector.notes().is_empty() {
                         prefix_text.push('\n'); prefix_text.push_str(&spaces(column)); prefix_text.push_str(&note_at(selector, column));
                         prefix_text.push_str(&pp(selector, column));
                     } else { prefix_text.push(' '); prefix_text.push_str(&pp(selector, indent + 6)); }
@@ -396,7 +396,7 @@ fn core(form: &Syntax, indent: usize) -> String {
                     row.push_str(&test_text);
                     if i + 1 < len {
                         let value = &forms[i + 1];
-                        if !value.notes.is_empty() || test_text.contains('\n') {
+                        if !value.notes().is_empty() || test_text.contains('\n') {
                             row.push('\n'); row.push_str(&spaces(column + 2)); row.push_str(&note_at(value, column + 2)); row.push_str(&pp(value, column + 2));
                         } else {
                             row.push(' '); row.push_str(&pp(value, column + visible_width(&test_text) + 1));
@@ -421,19 +421,19 @@ fn core(form: &Syntax, indent: usize) -> String {
                     }
                 }
                 let head_text = flat_(&forms[0]);
-                if units.is_empty() && form.tail.is_empty() {
+                if units.is_empty() && form.tail().is_empty() {
                     flat
                 } else if own(form) {
                     let column = indent + 2;
                     let mut text = String::from("(");
-                    if !forms[0].notes.is_empty() { text.push_str(&note_at(&forms[0], indent + 1)); }
+                    if !forms[0].notes().is_empty() { text.push_str(&note_at(&forms[0], indent + 1)); }
                     text.push_str(&head_text);
                     for unit in &units {
                         text.push('\n'); text.push_str(&spaces(column));
                         if unit.len() == 2 {
                             let key = unit[0]; let value = unit[1];
                             text.push_str(&note_at(key, column)); text.push_str(&flat_(key));
-                            if !value.notes.is_empty() {
+                            if !value.notes().is_empty() {
                                 text.push('\n'); text.push_str(&spaces(column + 2)); text.push_str(&note_at(value, column + 2)); text.push_str(&pp(value, column + 2));
                             } else {
                                 text.push(' '); text.push_str(&pp(value, column + visible_width(&flat_(key)) + 1));
@@ -478,7 +478,7 @@ fn binding_vector(form: &Syntax, column: usize) -> String {
         row.push_str(&name_text);
         if i + 1 < values.len() {
             let value = &values[i + 1];
-            if !value.notes.is_empty() {
+            if !value.notes().is_empty() {
                 row.push('\n'); row.push_str(&spaces(column + 3)); row.push_str(&note_at(value, column + 3)); row.push_str(&pp(value, column + 3));
             } else {
                 row.push(' '); row.push_str(&pp(value, column + 2 + visible_width(&name_text)));
@@ -488,12 +488,12 @@ fn binding_vector(form: &Syntax, column: usize) -> String {
         rows.push(row);
     }
     let mut text = String::from("[");
-    if values.first().is_some_and(|value| !value.notes.is_empty()) {
+    if values.first().is_some_and(|value| !value.notes().is_empty()) {
         text.push('\n'); text.push_str(&spaces(column + 1));
     }
     text.push_str(&rows.join(&format!("\n{}", spaces(column + 1))));
-    if !form.tail.is_empty() {
-        text.push('\n'); text.push_str(&spaces(column + 1)); text.push_str(&newline_comments(&form.tail, column + 1));
+    if !form.tail().is_empty() {
+        text.push('\n'); text.push_str(&spaces(column + 1)); text.push_str(&newline_comments(&form.tail(), column + 1));
     }
     text.push(']');
     wrap(form, &text)
@@ -554,7 +554,7 @@ pub fn patch_atoms(current: &(String, Spans), values: &[Syntax]) -> Option<(Stri
             Node::Sym(name) => matches!(name.as_str(), "true" | "false"),
             _ => false,
         };
-        let span = if atom && value.meta.is_empty() && value.id != 0 { by_id.get(&value.id).copied() } else { None }?;
+        let span = if atom && value.meta().is_empty() && value.id != 0 { by_id.get(&value.id).copied() } else { None }?;
         edits.push(((*span).clone(), flat(value)));
     }
     edits.sort_by_key(|(span, _)| span.start);
@@ -646,7 +646,7 @@ mod tests {
             printed("(workspace w ; a\n (graph g :context sop (sop/box)) (defn h :context value [(x : float)] x)\n ; trailing\n)"),
             "(workspace w\n\n  ; a\n  (graph g :context sop\n    (sop/box))\n\n  (defn h :context value [(x : float)]\n    x)\n  ; trailing\n  )\n"
         );
-        let control = Syntax { node: Node::Str(vec![1, 2, 3]), id: 0, span: rays_diagnostic::Span { start: 0, finish: 0 }, notes: Vec::new(), meta: Vec::new(), tail: Vec::new() };
+        let control = Syntax { node: Node::Str(vec![1, 2, 3]), id: 0, span: rays_diagnostic::Span { start: 0, finish: 0 }, trivia: None };
         let text = flat(&control);
         assert!(!text.bytes().any(|byte| (1..=3).contains(&byte)));
         assert_eq!(parse(&text).unwrap()[0].node, Node::Str(vec![1, 2, 3]));
@@ -720,7 +720,7 @@ mod tests {
         assert!(patch_atoms(&(text.clone(), spans.clone()), &[a.clone(), a.clone()]).is_none());
         assert!(patch_atoms(&(text.clone(), spans.clone()), &[Syntax { id: 0, node: Node::Num("2".into()), ..a.clone() }]).is_none());
         assert!(patch_atoms(&(text.clone(), spans.clone()), &[Syntax { node: Node::Num("1e999".into()), ..a.clone() }]).is_none());
-        assert!(patch_atoms(&(text.clone(), spans.clone()), &[Syntax { meta: vec!["bypass".into()], ..a.clone() }]).is_none());
+        assert!(patch_atoms(&(text.clone(), spans.clone()), &[Syntax { trivia: Syntax::trivia_of(Vec::new(), vec!["bypass".into()], Vec::new()), ..a.clone() }]).is_none());
         assert!(patch_atoms(&(text, spans), &[root.clone()]).is_none());
     }
 

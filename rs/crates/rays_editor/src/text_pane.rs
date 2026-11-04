@@ -782,7 +782,7 @@ fn closure(root: &S, top: &str) -> Option<S> {
             form(base + 3, Node::Sym(top.to_owned())),
         ].into()),
     );
-    out.notes = vec![
+    *out.notes_mut() = vec![
         note,
         "Selection patches named bindings; omitted bindings stay. Change the result in Graph or Document.".to_owned(),
     ];
@@ -843,8 +843,8 @@ fn selection_form(source: &[S], path: &[String], form: &S) -> Result<S, Diagnost
         .map(|(p, old)| match patches.iter().find(|(q, _)| q.node == p.node) {
             Some((_, v)) if printed_of(old) != printed_of(v) => {
                 let mut v = (*v).clone();
-                if v.notes.is_empty() {
-                    v.notes = old.notes.clone();
+                if v.notes().is_empty() {
+                    *v.notes_mut() = old.notes().to_vec();
                 }
                 ((*p).clone(), v)
             }
@@ -958,7 +958,7 @@ fn atoms(old: &S, next: &S) -> Option<Vec<S>> {
     if s::equal(old, next) {
         return Some(Vec::new());
     }
-    if old.id != next.id || old.notes != next.notes || old.meta != next.meta || old.tail != next.tail {
+    if old.id != next.id || old.notes() != next.notes() || old.meta() != next.meta() || old.tail() != next.tail() {
         return None;
     }
     match (&old.node, &next.node) {

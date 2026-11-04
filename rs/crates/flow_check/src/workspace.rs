@@ -565,8 +565,8 @@ impl Checker {
      if self.steps > 400_000 * (self.count + self.children).max(1) {
          return self.fail_term(form, "E_BUDGET", "The workspace is too large to check: call-site typing exceeded its budget. Reduce nested function calls.");
      }
-     let mut result = if !form.meta.is_empty() {
-         if let Some(metadata) = form.meta.iter().find(|name| name.as_str() != "bypass") {
+     let mut result = if !form.meta().is_empty() {
+         if let Some(metadata) = form.meta().iter().find(|name| name.as_str() != "bypass") {
              self.fail_term(form, "E_META", &format!("Unknown metadata ^:{metadata}. The only metadata is ^:bypass."))
          } else {
              self.bypass(cx, form)
@@ -610,7 +610,7 @@ impl Checker {
      };
      if head == "if" && items.len() == 4 {
          let mut plain = form.clone();
-         plain.meta.clear();
+         plain.meta_mut().clear();
          let (_, checked) = self.infer_plain(cx, &plain);
          let (mut branch, mut value) = self.branch(cx, "then", &items[2]);
          branch.ty = checked.ty.clone();
@@ -627,7 +627,7 @@ impl Checker {
          return self.fail_term(form, "E_BYPASS", &format!("can't bypass {head}: it has no positional input to pass through."));
      }
      let mut plain = form.clone();
-     plain.meta.clear();
+     plain.meta_mut().clear();
      let (call, value) = self.infer_plain(cx, &plain);
      let Some(input) = bypass_input(&call) else {
          return self.fail_term(form, "E_BYPASS", &format!("can't bypass {head}: only operator and function calls pass an input through."));
@@ -872,7 +872,7 @@ impl Checker {
  fn binding(&mut self, cx: &Cx, x: &Syntax, id: Path) -> (Term, Info) {
      let mut inner = cx.clone();
      inner.path = id.clone();
-     let head = match &x.node { SNode::List(items) if x.meta.is_empty() => match items.first().map(|h| &h.node) { Some(SNode::Sym(h)) => Some((h.as_str(), &items[1..])), _ => None }, _ => None };
+     let head = match &x.node { SNode::List(items) if x.meta().is_empty() => match items.first().map(|h| &h.node) { Some(SNode::Sym(h)) => Some((h.as_str(), &items[1..])), _ => None }, _ => None };
      let (mut term, mut value) = match head {
          Some((h @ ("for" | "fold" | "scan" | "sum"), args)) => self.zone(&inner, x, h, args, Some(id.clone())),
          Some(("let*", args)) => self.let_scope(&inner, x, args, id.clone()),
@@ -894,7 +894,7 @@ impl Checker {
  fn body(&mut self, cx: &Cx, form: &Syntax) -> (Term, Info) {
      if let SNode::List(items) = &form.node {
          if items.first().is_some_and(|head| matches!(&head.node, SNode::Sym(name) if name == "let*"))
-             && form.meta.is_empty()
+             && form.meta().is_empty()
          {
              return self.let_scope(cx, form, &items[1..], cx.path.clone());
          }
@@ -938,7 +938,7 @@ impl Checker {
    "quote"|"quasiquote"|"unquote"|"unquote-splicing"=>self.fail_term(f,"E_QUOTE",&format!("{name} belongs in a defmacro template (`…).")),"workspace"|"graph"|"defn"|"defnode"|"defmacro"=>self.fail_term(f,"E_FORM",&format!("{name} is a top-level form of a workspace.")),
    _=>self.call_named(cx,f,name,args)
  }}
- fn let_scope(&mut self,cx:&Cx,f:&Syntax,args:&[Syntax],base:Path)->(Term,Info){if args.len()!=2{return self.fail_term(f,"E_LET","let* needs [name expression …] and one result.")}let SNode::Vec(bs)=&args[0].node else{return self.fail_term(f,"E_LET","let* needs [name expression …] and one result.")};if bs.len()%2!=0{return self.fail_term(f,"E_LET","let* needs [name expression …] and one result.")}let mut env=(*cx.env).clone();let mut out=Vec::new();let mut seen=BTreeSet::new();for pair in bs.chunks_exact(2){let p=&pair[0];if !self.check_pattern(cx,p,&mut seen,&env,"let*" ){continue}let mut path=base.clone();path.push(Self::pattern_key(p));let mut inner=cx.clone();inner.env=Rc::new(env.clone());inner.path=path.clone();inner.zbody=false;let(t,v)=if pair[1].meta.is_empty()&&matches!((&p.node,&pair[1].node),(SNode::Sym(_),SNode::List(xs)) if xs.first().is_some_and(|h|matches!(&h.node,SNode::Sym(s) if s=="fn"))){self.make_fn(&inner,&pair[1],&pair[1].node_as_args(),Self::pattern_key(p).as_str(),Some(path.clone()))}else{self.binding(&inner,&pair[1],path.clone())};let mut t=t;t.path=Some(path.clone());self.mark(path.clone(),&v);if cx.zbody&&!cx.zone.is_some_and(|z|v.vary.contains(&z)){self.invariant.insert(path.clone());}{let mut bcx=cx.clone();bcx.path=base.clone();self.bind(&bcx,p,v.clone(),"",&mut env);}out.push((Self::pattern(p),t));}let mut inner=cx.clone();inner.env=Rc::new(env);inner.zbody=false;let(t,v)=self.result_in(&inner,&args[1],&base);(make_term(f,v.ty.clone(),Node::Let(out,Box::new(t))),v)}
+ fn let_scope(&mut self,cx:&Cx,f:&Syntax,args:&[Syntax],base:Path)->(Term,Info){if args.len()!=2{return self.fail_term(f,"E_LET","let* needs [name expression …] and one result.")}let SNode::Vec(bs)=&args[0].node else{return self.fail_term(f,"E_LET","let* needs [name expression …] and one result.")};if bs.len()%2!=0{return self.fail_term(f,"E_LET","let* needs [name expression …] and one result.")}let mut env=(*cx.env).clone();let mut out=Vec::new();let mut seen=BTreeSet::new();for pair in bs.chunks_exact(2){let p=&pair[0];if !self.check_pattern(cx,p,&mut seen,&env,"let*" ){continue}let mut path=base.clone();path.push(Self::pattern_key(p));let mut inner=cx.clone();inner.env=Rc::new(env.clone());inner.path=path.clone();inner.zbody=false;let(t,v)=if pair[1].meta().is_empty()&&matches!((&p.node,&pair[1].node),(SNode::Sym(_),SNode::List(xs)) if xs.first().is_some_and(|h|matches!(&h.node,SNode::Sym(s) if s=="fn"))){self.make_fn(&inner,&pair[1],&pair[1].node_as_args(),Self::pattern_key(p).as_str(),Some(path.clone()))}else{self.binding(&inner,&pair[1],path.clone())};let mut t=t;t.path=Some(path.clone());self.mark(path.clone(),&v);if cx.zbody&&!cx.zone.is_some_and(|z|v.vary.contains(&z)){self.invariant.insert(path.clone());}{let mut bcx=cx.clone();bcx.path=base.clone();self.bind(&bcx,p,v.clone(),"",&mut env);}out.push((Self::pattern(p),t));}let mut inner=cx.clone();inner.env=Rc::new(env);inner.zbody=false;let(t,v)=self.result_in(&inner,&args[1],&base);(make_term(f,v.ty.clone(),Node::Let(out,Box::new(t))),v)}
  fn pattern_key(p:&Syntax)->String{if let SNode::Sym(s)=&p.node{s.clone()}else{lisp::flat(p)}}
  fn list(&mut self,cx:&Cx,f:&Syntax,args:&[Syntax])->(Term,Info){let mut ts=Vec::new();let mut vs=Vec::new();let mut elem=Ty::Any;for a in args{let(t,v)=self.infer(cx,a);self.no_fn(a,&v.ty,"A list element");elem=ty::join(&elem,&v.ty).unwrap_or_else(||{self.error(a,"E_TYPE",&format!("List elements share one type; got {} and {}.",show(&elem),show(&v.ty)));elem.clone()});ts.push(t);vs.push(v)}let mut v=Info::derive(Ty::List(Box::new(elem.clone())),&vs);v.len=Some(args.len());(make_term(f,Ty::List(Box::new(elem)),Node::ListLit(ts)),v)}
  fn concat(&mut self,cx:&Cx,f:&Syntax,args:&[Syntax])->(Term,Info){let mut ts=Vec::new();let mut vs=Vec::new();let mut el=Ty::Any;let mut len=Some(0usize);for a in args{let(t,v)=self.infer(cx,a);if let Some(e)=ty::elem(&v.ty){el=ty::join(&el,&e).unwrap_or_else(||{self.error(a,"E_TYPE","concat joins lists of one type.");el.clone()});}else{self.error(a,"E_TYPE",&format!("concat joins lists; got {}.",show(&v.ty)));}len=match(len,v.len){(Some(x),Some(y))=>x.checked_add(y),_=>None};ts.push(t);vs.push(v)}let ty=Ty::List(Box::new(el));let mut v=Info::derive(ty.clone(),&vs);v.len=len;(make_term(f,ty,Node::ListOp("concat".into(),ts)),v)}
@@ -2521,7 +2521,7 @@ impl Checker {
     }
 
     fn metadata(&mut self, form: &Syntax, allowed: &[&str]) {
-        for metadata in &form.meta {
+        for metadata in form.meta() {
             if !allowed.contains(&metadata.as_str()) {
                 self.warn(form, "W_UNKNOWN_META", &format!("Unknown metadata ^:{metadata} here; it is ignored."));
             }
@@ -3103,3 +3103,5 @@ pub fn check(
     };
     (Some(workspace), diagnostics)
 }
+// Measured with the shared-children Syntax; a grown Term multiplies across every checked node.
+const _: () = assert!(std::mem::size_of::<Term>() <= 176);

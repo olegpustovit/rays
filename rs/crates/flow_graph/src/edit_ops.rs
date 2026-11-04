@@ -38,7 +38,7 @@ pub fn fold_into(src: &[S], node: &[String]) -> R<Vec<S>> {
         }
         // the binding's note goes with it
         let mut moved = e.clone();
-        moved.notes = p.notes.iter().chain(e.notes.iter()).cloned().collect();
+        *moved.notes_mut() = p.notes().iter().chain(e.notes().iter()).cloned().collect();
         let rep = |x: &S| replace_ref(&name, &moved, x);
         let ps: Vec<(S, S)> = others.iter().map(|(q, x)| (q.clone(), rep(x))).collect();
         let res = rep(&sc.res);
@@ -813,10 +813,10 @@ fn toggle_bypass(src: &[S], node: &[String]) -> R<Vec<S>> {
             _ => return Err(fail("Only an operator or function call can be bypassed.")),
         }
         let mut e2 = e.clone();
-        if e.meta.iter().any(|m| m == "bypass") {
-            e2.meta = e.meta.iter().filter(|m| *m != "bypass").cloned().collect();
+        if e.meta().iter().any(|m| m == "bypass") {
+            *e2.meta_mut() = e.meta().iter().filter(|m| *m != "bypass").cloned().collect();
         } else {
-            e2.meta.push("bypass".to_owned());
+            e2.meta_mut().push("bypass".to_owned());
         }
         set_node(sx, &leaf, e2)
     })
@@ -827,7 +827,7 @@ fn set_note(src: &[S], node: &[String], text: &str) -> R<Vec<S>> {
     if let [root] = node {
         return with_root(src, root, &mut |r| {
             let mut r = r.clone();
-            r.notes = notes.clone();
+            *r.notes_mut() = notes.clone();
             Ok(r)
         });
     }
@@ -838,18 +838,18 @@ fn set_note(src: &[S], node: &[String], text: &str) -> R<Vec<S>> {
     edit_scope(src, &sp, &mut |sx| match scope_of(sx) {
         Some(sc) if leaf == "@result" => {
             let mut res = sc.res.clone();
-            res.notes = notes.clone();
+            *res.notes_mut() = notes.clone();
             Ok(rebuild(&sc, &sc.ps, res))
         }
         Some(sc) => {
             let j = first_pair_index(&sc, &leaf)?;
             let mut ps = sc.ps.clone();
-            ps[j].0.notes = notes.clone();
+            *ps[j].0.notes_mut() = notes.clone();
             Ok(rebuild(&sc, &ps, sc.res.clone()))
         }
         None if leaf == "@result" => {
             let mut r = sx.clone();
-            r.notes = notes.clone();
+            *r.notes_mut() = notes.clone();
             Ok(r)
         }
         None => Err(fail("Notes attach to named bindings.")),
@@ -866,7 +866,7 @@ fn add_item(src: &[S], node: &[String]) -> R<Vec<S>> {
                 let args = &l[1..];
                 let strip = |x: &S| {
                     let mut x = x.clone();
-                    x.notes = Vec::new();
+                    *x.notes_mut() = Vec::new();
                     x
                 };
                 let v = if h == "str" {
@@ -1002,7 +1002,7 @@ fn duplicate(src: &[S], nodes: &[Path]) -> R<Vec<S>> {
                 Node::Sym(n) => {
                     let fr = names.iter().find(|(k, _)| k == n).map(|x| x.1.clone()).ok_or_else(|| fail("The edit failed: Not_found"))?;
                     let mut np = with_node(p, Node::Sym(fr));
-                    np.notes = Vec::new();
+                    *np.notes_mut() = Vec::new();
                     copies.push((np, rename_all(e)));
                 }
                 _ => return Err(fail("Only a named node can be duplicated.")),
@@ -1477,7 +1477,7 @@ pub fn arg_of(e: &S, key: &ArgKey) -> Option<S> {
 /// The node calls written in the inputs of a call, with the input each is written in.
 pub fn nested_nodes(e: &S) -> Vec<(ArgKey, S)> {
     match &e.node {
-        Node::List(l) if !l.is_empty() && (!e.meta.is_empty() || !is_zone(e)) => {
+        Node::List(l) if !l.is_empty() && (!e.meta().is_empty() || !is_zone(e)) => {
             let args = s::attribute_args(head_sym(e).unwrap_or(""), &l[1..]);
             let mut out: Vec<(ArgKey, S)> = positional(&args).into_iter().enumerate().map(|(i, a)| (ArgKey::Pos(i as i64), a)).collect();
             out.extend(keywords(&args).into_iter().map(|(k, v)| (ArgKey::Kw(k), v)));

@@ -61,7 +61,7 @@ fn check_meshes(lowered: &flow_sop::lower::T) -> Result<(), Diagnostic> {
 /// The checked document and every diagnostic to print; `allow` is `^:allow-warnings`.
 pub fn check_text(imports: Vec<(String, String)>, text: &str, lower: bool) -> Result<(Option<doc::T>, Vec<Diagnostic>, bool), Fail> {
     let allow = match s::parse(text) {
-        Ok(forms) => forms.iter().any(|f| s::head(f) == Some("workspace") && f.meta.iter().any(|m| m == "allow-warnings")),
+        Ok(forms) => forms.iter().any(|f| s::head(f) == Some("workspace") && f.meta().iter().any(|m| m == "allow-warnings")),
         Err(_) => false,
     };
     let catalog = catalog()?;

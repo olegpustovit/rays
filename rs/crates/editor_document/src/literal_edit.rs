@@ -68,7 +68,7 @@ fn float_of_string_opt(text: &str) -> Option<f64> {
 type Lit = (Ty, E, TNode);
 
 fn literal(form: &S) -> Option<Lit> {
-    if !form.meta.is_empty() {
+    if !form.meta().is_empty() {
         return None;
     }
     match &form.node {
@@ -146,7 +146,7 @@ fn fn_names(graphs: &[&Graph]) -> HashSet<String> {
 }
 
 fn plain(form: &S) -> bool {
-    form.notes.is_empty() && form.tail.is_empty() && s::children(form).iter().all(|c| plain(c))
+    form.notes().is_empty() && form.tail().is_empty() && s::children(form).iter().all(|c| plain(c))
 }
 
 fn patch_source(source: &[S], before: &S, after: &S) -> (Vec<S>, HashMap<i64, S>) {
@@ -179,7 +179,7 @@ fn patch_source(source: &[S], before: &S, after: &S) -> (Vec<S>, HashMap<i64, S>
         let value = S {
             id: old.id,
             node,
-            notes: if value.notes.is_empty() && keep_notes { old.notes.clone() } else { value.notes.clone() },
+            trivia: S::trivia_of(if value.notes().is_empty() && keep_notes { old.notes().to_vec() } else { value.notes().to_vec() }, value.meta().to_vec(), value.tail().to_vec()),
             span: Span { start, finish },
             ..value.clone()
         };
@@ -211,7 +211,7 @@ pub fn patch(catalog: &Catalog, workspace: &Workspace, op: &Op) -> Option<R<(Wor
     let Op::SetArg { node: path, key: ArgKey::Kw(field), sub, value } = op else { return None };
     let expr = arg_text(&workspace.source, path, &ArgKey::Kw(field.clone()))?;
     let before = child(&expr, sub)?;
-    if before.id == 0 || literal(&expr).is_none() || (!sub.is_empty() && !before.notes.is_empty()) || !plain(value) {
+    if before.id == 0 || literal(&expr).is_none() || (!sub.is_empty() && !before.notes().is_empty()) || !plain(value) {
         return None;
     }
     let (ty, _, _) = literal(&before)?;

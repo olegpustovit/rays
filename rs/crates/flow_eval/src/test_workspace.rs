@@ -504,7 +504,7 @@ fn the_other_contexts() {
 #[test]
 fn ir_shapes_notes_and_reporting() {
     let ws = good("(workspace w\n  ; a helper\n  (defn f :context value [(x : float 2.0) (y : float 1.0)] (+ x y))\n  (graph g :context value [(n : int 3)]\n    (let* [; loop\n           s (sum [i (range n)] (f :y i))\n           l (map (fn [k] (* k 2)) (range 3))\n           c (cond (< s 1) 1 :else 2)\n           k (case n 1 \"a\" :else \"b\")]\n      (+ s (+ (count l) c)))))");
-    assert_eq!(ws.defs[0].form.notes, vec!["a helper".to_owned()]);
+    assert_eq!(ws.defs[0].form.notes(), vec!["a helper".to_owned()]);
     match &ws.graphs[0].body.node {
         W::Node::Let(bs, _) if bs.len() == 4 => {
             let (s, l, c, k) = (&bs[0].1, &bs[1].1, &bs[2].1, &bs[3].1);
@@ -658,15 +658,15 @@ fn check_cjs_macros() {
 fn check_cjs_notes_and_metadata() {
     let noted = "; lead\n(workspace w\n  ; a helper\n  (defn f :context value [(x : float)] (* x 2))\n  (graph g :context value\n    (let* [; first\n           a 1\n           ; the pattern\n           [b c] (list 1 2)\n           q (f a)]\n      ; result note\n      (+ a (+ b (* c q)))))\n  ; tail\n  )";
     let ws = one(noted);
-    assert!(ws.notes == vec!["lead".to_owned()] && ws.tail == vec!["tail".to_owned()]);
+    assert!(ws.notes() == vec!["lead".to_owned()] && ws.tail() == vec!["tail".to_owned()]);
     let defn = workspace_children(noted).into_iter().find(|x| head_is("defn", x)).unwrap();
-    assert_eq!(defn.notes, vec!["a helper".to_owned()]);
+    assert_eq!(defn.notes(), vec!["a helper".to_owned()]);
     let graph = workspace_children(noted).into_iter().find(|x| head_is("graph", x)).unwrap();
     match &graph.node {
         SN::List(xs) if xs.len() == 5 => match &xs[4].node {
             SN::List(l) if l.len() == 3 => match &l[1].node {
                 SN::Vec(v) if v.len() >= 3 => {
-                    assert!(v[0].notes == vec!["first".to_owned()] && v[2].notes == vec!["the pattern".to_owned()] && l[2].notes == vec!["result note".to_owned()]);
+                    assert!(v[0].notes() == vec!["first".to_owned()] && v[2].notes() == vec!["the pattern".to_owned()] && l[2].notes() == vec!["result note".to_owned()]);
                 }
                 other => panic!("{other:?}"),
             },
@@ -683,7 +683,7 @@ fn check_cjs_notes_and_metadata() {
         let node = match &y.node { SN::List(l) => SN::List(map(l).into()), SN::Vec(l) => SN::Vec(map(l).into()), SN::Map(l) => SN::Map(map(l).into()), n => n.clone() };
         let mut out = y.clone();
         out.node = node;
-        if matches!(&y.node, SN::Sym(k) if k == key) { out.notes = notes.to_vec(); }
+        if matches!(&y.node, SN::Sym(k) if k == key) { *out.notes_mut() = notes.to_vec(); }
         out
     }
     let x = one(&val("(let* [a 1 b 2] b)"));
