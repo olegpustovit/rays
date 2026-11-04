@@ -3210,8 +3210,8 @@ enum Kind {
     Lit(Value),
     Local(usize, Vec<String>),
     Outer(String, Vec<String>),
-    Op { op: OpRef, args: Vec<Code>, names: Vec<(String, Value)> },
-    AndOr { or: bool, op: OpRef, first: Box<Code>, second: Box<Code>, names: [String; 2] },
+    Op { op: OpRef, args: Vec<Code>, names: Vec<(String, Value)>, named: Vec<bool> },
+    AndOr { or: bool, op: OpRef, first: Box<Code>, second: Box<Code>, names: Vec<(String, Value)>, named: Vec<bool> },
     If(Box<Code>, Box<Code>, Box<Code>),
     Cond(Vec<(Code, Code)>, Box<Code>),
     Case(Box<Code>, Vec<(Value, Code)>, Box<Code>),
@@ -3240,6 +3240,11 @@ enum CodePlan { Walk(Stamp), Run(Box<Compiled>) }
 const COMPILE_MIN_NODES: usize = 4;
 
 fn op_at(workspace: &Workspace, op: OpRef) -> &op::Op { match op { OpRef::Extra(i) => &workspace.ops[i], OpRef::Builtin(i) => &op::all()[i] } }
+// Which arguments `op::result_type` reads (the positional and optional ones), found once per compiled call site.
+fn op_named(workspace: &Workspace, op: OpRef, args: &[(String, Term)]) -> Vec<bool> {
+    let found = op_at(workspace, op);
+    args.iter().map(|(name, _)| found.signature.pos.iter().chain(found.signature.opt.iter()).any(|(n, _)| n == name)).collect()
+}
 struct Compiler { workspace: Arc<Workspace>, context: Context, scope: Vec<(String, usize)>, slots: usize, nodes: usize, steps: Vec<Step> }
 impl Compiler {
     fn op(&self, a: &mut Arena, name: &str) -> Option<OpRef> {
@@ -3277,7 +3282,7 @@ impl Compiler {
                 let op = self.op(a, name)?;
                 let seg = Seg::Owned(intern(a, &args[0].0)); let first = Box::new(self.term(a, &args[0].1, Some(seg))?);
                 let seg = Seg::Owned(intern(a, &args[1].0)); let second = Box::new(self.term(a, &args[1].1, Some(seg))?);
-                Kind::AndOr { or: name == "or", op, first, second, names: [args[0].0.clone(), args[1].0.clone()] }
+                { let named = op_named(&self.workspace, op, &args[..2]); Kind::AndOr { or: name == "or", op, first, second, names: vec![(args[0].0.clone(), Value::No_geo), (args[1].0.clone(), Value::No_geo)], named } }
             }
             TermNode::Op { op: name, args, skip } if skip.is_empty() && name != "live?" => {
                 let op = self.op(a, name)?;
@@ -3287,7 +3292,7 @@ impl Compiler {
                     let seg = if count == 0 { Seg::Owned(intern(a, arg)) } else { format!("{}#{}", arg, count).into() };
                     code.push(self.term(a, term, Some(seg))?);
                 }
-                Kind::Op { op, args: code, names: args.iter().map(|(name, _)| (name.clone(), Value::No_geo)).collect() }
+                Kind::Op { op, args: code, names: args.iter().map(|(name, _)| (name.clone(), Value::No_geo)).collect(), named: op_named(&self.workspace, op, args) }
             }
             TermNode::If(test, yes, no) => {
                 let test = self.term(a, test, Some("if".into()))?;
@@ -3377,8 +3382,10 @@ impl Run {
         if at > a.budget { return Err(Abandon); }
         Ok(())
     }
-    fn done(&mut self, path: &Option<Path>, value: Value) -> Result<Value, Abandon> {
-        if is_live_value(&value) { return Err(Abandon); }
+    // A value made by compiled code is plain by construction (operators, literals, slots of such values); one read from the enclosing
+    // scope is checked.
+    fn done(&mut self, path: &Option<Path>, value: Value, outside: bool) -> Result<Value, Abandon> {
+        if outside && is_live_value(&value) { return Err(Abandon); }
         if self.record { if let Some(path) = path { self.notes.push((path.clone(), value.clone())); } }
         Ok(value)
     }
@@ -3418,14 +3425,14 @@ impl Run {
             }
         }
     }
-    fn apply(&mut self, a: &Arena, op: OpRef, values: &[(String, Value)]) -> Result<Value, Abandon> {
+    fn apply(&mut self, a: &Arena, op: OpRef, values: &[(String, Value)], named: &[bool]) -> Result<Value, Abandon> {
         let found = op_at(&self.workspace, op);
         (found.check)(values).map_err(|_| Abandon)?;
         let mut types: [Ty; 4] = [Ty::Any, Ty::Any, Ty::Any, Ty::Any];
         let mut count = 0;
         let mut spilled = Vec::new();
-        for (name, value) in values {
-            if !found.signature.pos.iter().chain(found.signature.opt.iter()).any(|(n, _)| n == name) { continue; }
+        for ((_, value), named) in values.iter().zip(named) {
+            if !named { continue; }
             if count < 4 { types[count] = value::ty_of(value); } else { if count == 4 { spilled.extend(types.iter().cloned()); } spilled.push(value::ty_of(value)); }
             count += 1;
         }
@@ -3544,6 +3551,7 @@ impl Run {
     fn eval(&mut self, a: &mut Arena, code: &mut Code) -> Result<Value, Abandon> {
         self.step(a)?;
         let Code { path, kind } = code;
+        let outside = matches!(kind, Kind::Outer(..));
         let value = match kind {
             Kind::Lit(value) => value.clone(),
             Kind::Local(slot, fields) => {
@@ -3553,22 +3561,27 @@ impl Run {
                 let env = &self.frames.last().expect("a frame").env;
                 if fields.is_empty() { env.get(name).ok_or(Abandon)? } else { Self::fields(env.get_ref(name).ok_or(Abandon)?, fields)? }
             }
-            Kind::Op { op, args, names } => {
+            Kind::Op { op, args, names, named } => {
                 let mut values = std::mem::take(names);
                 for (index, arg) in args.iter_mut().enumerate() {
                     match self.eval(a, arg) { Ok(value) => values[index].1 = value, Err(abandon) => { *names = values; return Err(abandon); } }
                 }
-                let result = self.apply(a, *op, &values);
+                let result = self.apply(a, *op, &values, named);
                 for entry in values.iter_mut() { entry.1 = Value::No_geo; }
                 *names = values;
                 result?
             }
-            Kind::AndOr { or, op, first, second, names } => {
+            Kind::AndOr { or, op, first, second, names, named } => {
                 let left = self.eval(a, first)?;
-                if let Value::Bool(value) = &left { if *value == *or { return self.done(path, Value::Bool(*value)); } }
+                if let Value::Bool(value) = &left { if *value == *or { return self.done(path, Value::Bool(*value), false); } }
                 let right = self.eval(a, second)?;
-                let values = [(names[0].clone(), left), (names[1].clone(), right)];
-                self.apply(a, *op, &values)?
+                let mut values = std::mem::take(names);
+                values[0].1 = left;
+                values[1].1 = right;
+                let result = self.apply(a, *op, &values, named);
+                for entry in values.iter_mut() { entry.1 = Value::No_geo; }
+                *names = values;
+                result?
             }
             Kind::If(test, yes, no) => {
                 let test = self.eval(a, test)?;
@@ -3647,7 +3660,7 @@ impl Run {
                 }
             }
         };
-        self.done(path, value)
+        self.done(path, value, outside)
     }
 }
 // `call_fn` of a closure whose body compiles, run compiled (None: call it walking).
@@ -3666,6 +3679,8 @@ impl Caller {
         }) }
     }
     fn call(&mut self, a: &mut Arena, id: FnId, values: &[Value], body: Option<&Term>) -> Option<Result<Value, Diagnostic>> {
+        // arguments from the walker may be live; compiled code takes only plain ones
+        if values.iter().any(is_live_value) { return None; }
         let run = self.run.as_mut()?;
         let body = body.map(|body| shared_term(a, body));
         run.base = a.step_count;
