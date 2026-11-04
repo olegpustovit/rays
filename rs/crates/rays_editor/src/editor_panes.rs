@@ -1,0 +1,950 @@
+//! Port of lib/rays_editor/editor_panes.ml: the graph pane's projection, the panel instances (every
+//! leaf draws with its own list, text pane or outline), start keywords, graph naming and the
+//! per-panel draw functions of a frame. Bundle C; the model chain below it is bundle D.
+//!
+//! The OCaml labelled arguments of the `draw_*` functions are positional here, in the order the
+//! OCaml signature lists them.
+#![allow(non_camel_case_types)]
+
+use editor_core::panels::{self as panels, Panel};
+use editor_document::document::{self as doc_mod, Level};
+use editor_document::kind_graph;
+use flow_graph::flow_edit::{self as fe, ArgKey};
+use flow_graph::probe;
+use flow_graph::projection as p;
+use flow_sop::lower;
+use flow_syntax::context;
+use flow_syntax::syntax::{Node as SNode, Syntax};
+use pxui::ui::Ui;
+use pxui::ui::UiBox;
+use pxui_graph::node_menu;
+
+
+use pxui_graph::scope_state as scope;
+use pxui_shell::kit::{self, ButtonOpts};
+use pxui_shell::layout::{self, Leaf};
+use pxui_shell::timeline_bar;
+use pxui_shell::tree;
+use rays::frame;
+
+use crate::bars;
+use crate::cook;
+use crate::editor_commands::action;
+use crate::editor_inspect::{compiled_at, compiled_node, kind, probes_of, same_lowered, scene, spreadsheet_source};
+use crate::editor_model::*;
+use crate::editor_shell::*;
+use crate::lisp_text;
+use crate::navigator;
+use crate::panel_map;
+use crate::pick;
+use crate::selection;
+use crate::spreadsheet;
+use crate::text_pane;
+use crate::timeline;
+
+type S = Syntax;
+pub type Key = Vec<String>;
+
+pub fn stored_projection(value: &t) -> projection {
+    match level_map_find(pane_views(value), pane_level(value)) {
+        Some(p) => p,
+        None => match pane_level(value) {
+            Level::Scene => List_view,
+            Level::Inside(id) if kind(value, id).as_deref() == Some("geometry") => Graph_view,
+            Level::Inside(_) => List_view,
+        },
+    }
+}
+
+/// Any of the panels that hold the graph pane's views is on screen.
+pub fn graph_family(value: &t) -> bool {
+    has_panel(value, &Panel::Graph) || has_panel(value, &Panel::List) || has_panel(value, &Panel::Lisp)
+}
+
+/// What the graph panel shows: the view it says, whatever other panels the layout has.
+pub fn projection_of(value: &t) -> projection {
+    stored_projection(value)
+}
+
+/// Which keys the focused panel takes: the list's and the text pane's own panels, else the graph
+/// panel's projection.
+pub fn listing(value: &t) -> bool {
+    value.focus == Panel::List || (value.focus != Panel::Lisp && projection_of(value) == List_view)
+}
+pub fn texting(value: &t) -> bool {
+    value.focus == Panel::Lisp || (value.focus != Panel::List && projection_of(value) == Text_view)
+}
+
+// ---- panel instances: every leaf draws, with its own list, text pane or outline ----
+
+pub fn fresh_local() -> local {
+    local { rows: tree::create(), code: text_pane::initial(), nav: navigator::initial(), sheet_owner: 0 }
+}
+
+pub fn local_of(value: &t, key: &Key) -> local {
+    match value.locals.iter().find(|(k, _)| k == key) {
+        Some((_, l)) => l.clone(),
+        None => fresh_local(),
+    }
+}
+
+/// The panels' own states are kept for the 64 panels last drawn or changed (the latest first): a
+/// bound on what layouts that came and went leave behind.
+pub const LOCALS_CAPACITY: usize = 64;
+
+pub fn put_local(key: &Key, f: &dyn Fn(local) -> local, locals: &[(Key, local)]) -> Vec<(Key, local)> {
+    let current = match locals.iter().find(|(k, _)| k == key) {
+        Some((_, l)) => l.clone(),
+        None => fresh_local(),
+    };
+    let mut out = vec![(key.clone(), f(current))];
+    out.extend(locals.iter().filter(|(k, _)| k != key).take(LOCALS_CAPACITY - 1).cloned());
+    out
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Host_kind {
+    List,
+    Text,
+    Outline,
+}
+
+/// A panel that holds a list, a text pane or an outline: its key, leaf path, panel and what it holds.
+pub type Host = (Key, layout::Path, Panel, Host_kind);
+
+/// The open panels that hold a list, a text pane or an outline: a graph panel holds the one its
+/// view shows.
+pub fn panel_hosts(value: &t) -> Vec<Host> {
+    let mut out = Vec::new();
+    for (path, panel) in panels::leaves(&shell_tree(value, &value.workspace)) {
+        if !visible(&value.workspace, &panel) || panel_state(value, &path).collapsed {
+            continue;
+        }
+        let key = panel_key(&value.doc, &path);
+        let kind = match &panel {
+            Panel::List => Some(Host_kind::List),
+            Panel::Lisp => Some(Host_kind::Text),
+            Panel::Outline => Some(Host_kind::Outline),
+            Panel::Graph => match projection_of(&as_pane(value, (&key, &path))) {
+                List_view => Some(Host_kind::List),
+                Text_view => Some(Host_kind::Text),
+                Graph_view => None,
+            },
+            Panel::View(_) | Panel::Canvas(_) | Panel::Inspector | Panel::Spreadsheet | Panel::Timeline => None,
+        };
+        if let Some(kind) = kind {
+            out.push((key, path, panel, kind));
+        }
+    }
+    out
+}
+
+/// The editor as the graph panel a leaf shows has it: a graph leaf its own, a leaf tied by `:of`
+/// that panel's, any other the pane in use.
+pub fn shown_as(value: &t, (key, path, panel): (&Key, &layout::Path, &Panel)) -> t {
+    if *panel == Panel::Graph {
+        as_pane(value, (key, path))
+    } else {
+        match tied(value, path) {
+            Some(target) => as_pane(value, (&target.0, &target.1)),
+            None => value.clone(),
+        }
+    }
+}
+
+/// `tree`, `text` and `outline` follow the focus like the graph pane does: each belongs to the
+/// focused panel of its kind, else to the one it was, else to the first one open; the panel left
+/// keeps its own in `locals`.
+pub fn follow_hosts(value: t, focus_path: Option<&layout::Path>, hosts: &[Host]) -> t {
+    let focused = focus_path.map(|p| panel_key(&value.doc, p));
+    let pick = |kind: Host_kind, current: &Option<Key>| -> Option<Key> {
+        let keys: Vec<&Key> = hosts.iter().filter(|(_, _, _, k)| *k == kind).map(|(key, ..)| key).collect();
+        match (&focused, current) {
+            (Some(key), _) if keys.contains(&key) => Some(key.clone()),
+            (_, Some(key)) if keys.contains(&key) => current.clone(),
+            _ => keys.first().map(|k| (*k).clone()),
+        }
+    };
+    // `set` records the new owner, `save` puts the live state into the old owner's local, `load` the new owner's
+    let value = {
+        let target = pick(Host_kind::List, &value.list_at);
+        let current = value.list_at.clone();
+        match (target, current) {
+            (None, _) => value,
+            (Some(t), Some(c)) if t == c => value,
+            (Some(t), None) => t_set_list(value, Some(t)),
+            (Some(key), Some(old)) => {
+                let mut v = value;
+                let saved = v.tree.clone();
+                v.locals = put_local(&old, &|l| local { rows: saved.clone(), ..l }, &v.locals);
+                let v = t_set_list(v, Some(key.clone()));
+                let mut v = v;
+                v.tree = local_of(&v, &key).rows;
+                v
+            }
+        }
+    };
+    let value = {
+        let target = pick(Host_kind::Text, &value.text_at);
+        let current = value.text_at.clone();
+        match (target, current) {
+            (None, _) => value,
+            (Some(t), Some(c)) if t == c => value,
+            (Some(t), None) => {
+                let mut v = value;
+                v.text_at = Some(t);
+                v
+            }
+            (Some(key), Some(old)) => {
+                let mut v = value;
+                let saved = v.text.clone();
+                v.locals = put_local(&old, &|l| local { code: saved.clone(), ..l }, &v.locals);
+                v.text_at = Some(key.clone());
+                v.text = local_of(&v, &key).code;
+                v
+            }
+        }
+    };
+    let target = pick(Host_kind::Outline, &value.outline_at);
+    let current = value.outline_at.clone();
+    match (target, current) {
+        (None, _) => value,
+        (Some(t), Some(c)) if t == c => value,
+        (Some(t), None) => {
+            let mut v = value;
+            v.outline_at = Some(t);
+            v
+        }
+        (Some(key), Some(old)) => {
+            let mut v = value;
+            let saved = v.outline.clone();
+            v.locals = put_local(&old, &|l| local { nav: saved.clone(), ..l }, &v.locals);
+            v.outline_at = Some(key.clone());
+            v.outline = local_of(&v, &key).nav;
+            v
+        }
+    }
+}
+
+fn t_set_list(mut v: t, at: Option<Key>) -> t {
+    v.list_at = at;
+    v
+}
+
+/// The start keywords of the document, by panel key.
+pub fn start_of(doc: &doc_mod::T) -> started {
+    match &doc.shell {
+        None => started { on: None, views: vec![], tabs: vec![] },
+        Some(s) => {
+            let keyed = |l: &Vec<(panels::Path, String)>| -> Vec<(Key, String)> { l.iter().map(|(path, v)| (panel_key(doc, path), v.clone())).collect() };
+            started { on: s.start.focus.as_ref().map(|p| panel_key(doc, p)), views: keyed(&s.start.graph_views), tabs: keyed(&s.start.tabs) }
+        }
+    }
+}
+
+/// The editor follows a start keyword when its value in the text changed (flow.md 11.11): on
+/// opening, a reload, a preset, an edit, undo. What did not change is left as the user has it.
+pub fn follow_start(value: t) -> t {
+    let now = start_of(&value.doc);
+    let was = value.started.clone();
+    if now == was {
+        return value;
+    }
+    let leaves = panels::leaves(&shell_tree(&value, &value.workspace));
+    let path_of = |value: &t, key: &Key| -> Option<(layout::Path, Panel)> {
+        leaves.iter().find(|(path, _)| panel_key(&value.doc, path) == *key).cloned()
+    };
+    let changed = |now: &[(Key, String)], was: &[(Key, String)]| -> Vec<(Key, String)> {
+        now.iter().filter(|(key, v)| was.iter().find(|(k, _)| k == key).map(|(_, w)| w) != Some(v)).cloned().collect()
+    };
+    let mut value = value;
+    if let Some(key) = &now.on {
+        if now.on != was.on {
+            if let Some((path, panel)) = path_of(&value, key) {
+                value.focus = panel;
+                value.focus_path = Some(path);
+            }
+        }
+    }
+    for (key, view) in changed(&now.views, &was.views) {
+        let view = match view.as_str() {
+            "list" => List_view,
+            "text" => Text_view,
+            _ => Graph_view,
+        };
+        if panel_map::key(&value.panes).as_ref() == Some(&key) {
+            value = with_pane(value, &|pane| graph_pane { views: level_map_add(pane.views.clone(), pane.at, view), ..pane.clone() });
+        } else if let Some((path, _)) = path_of(&value, &key) {
+            let pane = panel_map::active(&as_pane(&value, (&key, &path)).panes).clone();
+            let pane = graph_pane { views: level_map_add(pane.views.clone(), pane.at, view), ..pane };
+            value.panes = panel_map::set(&key, pane, value.panes.clone());
+        }
+    }
+    for (key, tab) in changed(&now.tabs, &was.tabs) {
+        let tab = match tab.as_str() {
+            "graph" => text_pane::Tab::Graph,
+            "document" => text_pane::Tab::Document,
+            _ => text_pane::Tab::Selection,
+        };
+        if value.text_at.as_ref() == Some(&key) || value.text_at.is_none() {
+            value.text.tab = tab;
+        } else {
+            value.locals = put_local(&key, &|l| local { code: text_pane::State { tab, ..l.code.clone() }, ..l }, &value.locals);
+        }
+    }
+    value.started = now;
+    value
+}
+
+/// The workspace graph the pane shows with zones and selectors: the one a `(ui/graph "name")` panel
+/// names, else the one the outline picked, else the graph of the geometry object opened (the one
+/// its network was lowered from, else the `sop` graph its label names), of the World opened, or the
+/// scene graph at the scene level. A level without such a graph shows its list only.
+/// The lowered sop graph a geometry object instantiates, by its network.
+pub fn graph_of_object(value: &t, id: i64) -> Option<String> {
+    doc_mod::object_graph(&value.doc, id)
+}
+
+pub fn graph_name(value: &t) -> Option<String> {
+    let ws = &value.doc.workspace.ws;
+    let exists = |name: &str| -> bool {
+        ws.checked.graphs.iter().any(|g| g.name == name)
+            || (name.len() > 4 && &name[..4] == "def:" && ws.checked.defs.iter().any(|g| format!("def:{}", g.name) == name))
+    };
+    // the graph the pane's own leaf pins
+    let named: Option<String> = value.doc.shell.as_ref().and_then(|s| graph_path(value).and_then(|path| s.named.iter().find(|(p_, _)| *p_ == path).map(|(_, n)| n.clone())));
+    let chosen = if pane_shown(value).is_some() { pane_shown(value).cloned() } else { named };
+    match (chosen, pane_level(value)) {
+        (Some(name), _) if exists(&name) => Some(name),
+        (_, Level::Inside(id)) if kind(value, id).as_deref() == Some("geometry") => match graph_of_object(value, id) {
+            Some(name) => Some(name),
+            None => kind_graph::find(&scene(value), id).and_then(|node| if exists(&node.label) { Some(node.label.clone()) } else { None }),
+        },
+        (_, Level::Inside(id)) if kind(value, id).as_deref() == Some("world") => {
+            ws.checked.graphs.iter().find_map(|g| if g.context == context::world() { Some(g.name.clone()) } else { None })
+        }
+        (_, Level::Scene) => ws.checked.graphs.iter().find_map(|g| if g.context == context::scene() { Some(g.name.clone()) } else { None }),
+        _ => None,
+    }
+}
+
+/// For the crash report and tests: the graph of every graph panel, and the floating windows.
+pub fn graph_panels(value: &t) -> String {
+    graph_leaves(value)
+        .iter()
+        .map(|leaf| graph_name(&as_pane(value, (&leaf.0, &leaf.1))).unwrap_or_else(|| "-".to_owned()))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+pub fn windows(value: &t) -> String {
+    panels::leaves(&shell_tree(value, &value.workspace))
+        .iter()
+        .filter_map(|(path, panel)| panel_state(value, path).window.map(|(x, y, w, h)| format!("{} {} {} {} {}", panels::name(panel).to_lowercase(), x, y, w, h)))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Every panel by its key's last name, the focused one starred, with what is its own: a text
+/// pane's tab and draft, a list's focus, folds and filter, an outline's search.
+pub fn panels_line(value: &t) -> String {
+    let hosts = panel_hosts(value);
+    panels::leaves(&shell_tree(value, &value.workspace))
+        .iter()
+        .map(|(path, panel)| {
+            let key = panel_key(&value.doc, path);
+            let name = format!(
+                "{} {}{}",
+                panels::name(panel).to_lowercase(),
+                key.last().cloned().unwrap_or_default(),
+                if value.focus == *panel && value.focus_path.as_ref() == Some(path) { "*" } else { "" }
+            );
+            let own = hosts.iter().find_map(|(k, p_, _, kind)| if *k == key && p_ == path { Some(*kind) } else { None });
+            match own {
+                Some(Host_kind::Text) => format!("{}: {}", name, text_pane::summary(&if Some(&key) == value.text_at.as_ref() { value.text.clone() } else { local_of(value, &key).code })),
+                Some(Host_kind::List) => format!("{}: {}", name, tree::summary(&if Some(&key) == value.list_at.as_ref() { value.tree.clone() } else { local_of(value, &key).rows })),
+                Some(Host_kind::Outline) => format!(
+                    "{}: search {:?}",
+                    name,
+                    navigator::query(&if Some(&key) == value.outline_at.as_ref() { value.outline.clone() } else { local_of(value, &key).nav })
+                ),
+                None => name,
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+/// Follow a reference: the pane shows `graph`, and `u` comes back to what it showed.
+pub fn remember(value: t) -> t {
+    with_pane(value, &|pane| {
+        let mut route = vec![(pane.at, pane.shown.clone())];
+        route.extend(pane.route.iter().take(31).cloned());
+        graph_pane { route, ..pane.clone() }
+    })
+}
+
+pub fn go(value: t, graph: &str) -> t {
+    if graph_name(&value).as_deref() == Some(graph) {
+        value
+    } else {
+        with_pane(remember(value), &|pane| graph_pane { shown: Some(graph.to_owned()), ..pane.clone() })
+    }
+}
+
+fn reference(ws_graphs: &[flow_check::workspace::Graph], e: &S) -> Option<String> {
+    if let SNode::List(items) = &e.node {
+        if let [S { node: SNode::Sym(r), .. }, S { node: SNode::Sym(name), .. }] = items.as_slice() {
+            if r == "ref" && ws_graphs.iter().any(|g| g.name == *name) {
+                return Some(name.clone());
+            }
+        }
+    }
+    None
+}
+
+/// What the selected node of the graph pane references: the graph its `(ref name)` names, the
+/// `:material` of a sop/material first (a material node follows to its surface).
+pub fn follow_target(value: &t, path: Option<&[String]>) -> Option<String> {
+    let ws = &value.doc.workspace.ws;
+    let graphs: &[flow_check::workspace::Graph] = &ws.checked.graphs;
+    let selected: Vec<Vec<String>> = match path {
+        Some(p_) => vec![p_.to_vec()],
+        None => scope::selected(pane_view(value)),
+    };
+    match selected.as_slice() {
+        [path] if graph_name(value).is_some() => {
+            let arg = |key: ArgKey| fe::arg_text(&ws.source, path, &key).and_then(|e| reference(graphs, &e));
+            if let Some(found) = arg(ArgKey::Kw("material".to_owned())) {
+                return Some(found);
+            }
+            match fe::arg_text(&ws.source, path, &ArgKey::Whole) {
+                Some(S { node: SNode::List(items), .. }) => match items.as_slice() {
+                    [S { node: SNode::Sym(h), .. }, ..] if ws.checked.defs.iter().any(|d| d.name == *h) => Some(format!("def:{h}")),
+                    [_, args @ ..] => args.iter().find_map(|a| reference(graphs, a)),
+                    _ => None,
+                },
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// `follow_target`, else the graph of the object selected in the list.
+pub fn peek_target(value: &t) -> Option<String> {
+    if let Some(found) = follow_target(value, None) {
+        return Some(found);
+    }
+    selection::selected(pane_selection(value)).and_then(|id| if kind(value, id).as_deref() == Some("geometry") { graph_of_object(value, id) } else { None })
+}
+
+/// `i` in a viewport with nothing selected follows to the scene it shows: the graph its
+/// `(ref scene)` names, else the first scene graph.
+pub fn viewport_target(value: &t) -> Option<String> {
+    let ws = &value.doc.workspace.ws;
+    match &value.focus {
+        Panel::View(key) if selection::selected(pane_selection(value)).is_none() => {
+            let named = value.doc.shell.as_ref().and_then(|shell| {
+                shell.preview_sources.iter().find(|(k, _)| k == key).and_then(|(_, src)| match &src.scene_ref {
+                    Some(S { node: SNode::List(items), .. }) => match items.as_slice() {
+                        [S { node: SNode::Sym(r), .. }, S { node: SNode::Sym(name), .. }] if r == "ref" => Some(name.clone()),
+                        _ => None,
+                    },
+                    _ => None,
+                })
+            });
+            named.or_else(|| ws.checked.graphs.iter().find_map(|g| if g.context == context::scene() { Some(g.name.clone()) } else { None }))
+        }
+        _ => None,
+    }
+}
+
+/// The route taken, as the graph header shows it: scene > shards > cobalt (the last three).
+pub fn route(value: &t) -> String {
+    let mut names: Vec<String> = pane_route(value)
+        .iter()
+        .rev()
+        .filter_map(|(at, shown)| {
+            let (at, shown) = (*at, shown.clone());
+            graph_name(&with_pane(value.clone(), &|pane| graph_pane { at, shown: shown.clone(), ..pane.clone() }))
+        })
+        .collect();
+    names.extend(graph_name(value));
+    let skip = names.len().saturating_sub(3);
+    names.into_iter().skip(skip).collect::<Vec<_>>().join(" > ")
+}
+
+pub fn scope_name(value: &t) -> Option<String> {
+    if projection_of(value) == Graph_view { graph_name(value) } else { None }
+}
+
+/// The lowered node of the node selected in the graph pane, at the iteration its zones probe.
+pub fn scope_node(value: &t) -> Option<(Vec<String>, sop::node::T)> {
+    let laid = pane_laid(value)?;
+    let records = laid.records.as_ref()?;
+    let selected = scope::selected(pane_view(value));
+    let [path] = selected.as_slice() else { return None };
+    scope_name(value)?;
+    let n = p::find(&laid.scope, path)?;
+    let node_id = compiled_at(value, &probe::chains(&laid.scope), records, &n.path)?;
+    compiled_node(value, node_id).map(|node| (n.path.clone(), node))
+}
+
+/// The tags the selected node highlights at the probes, with the cache to keep.
+pub fn lit_tags(value: &t) -> (pick::Set, Option<lit_cache>) {
+    let lowered = &value.doc.workspace.lowered;
+    let selected = scope::selected(pane_view(value));
+    match (pane_laid(value), selected.as_slice()) {
+        (Some(laid), [site]) if scope_name(value).is_some() => {
+            if let Some(c) = &value.lit {
+                if c.site == *site && c.at == value.probes && same_lowered(&c.lowered, lowered) && c.scope == *laid.scope {
+                    return (c.tags.clone(), value.lit.clone());
+                }
+            }
+            let iter = probes_of(value, &probe::chains(&laid.scope), site);
+            let tags: pick::Set = lower::tags(lowered, site, &iter).into_iter().collect();
+            (tags.clone(), Some(lit_cache { site: site.clone(), at: value.probes.clone(), lowered: lowered.clone(), scope: (*laid.scope).clone(), tags }))
+        }
+        _ => (pick::Set::new(), None),
+    }
+}
+
+/// The nodes of the pane's graph that the last failed cook names, each with its diagnostic's code
+/// (the pane draws the sheet's failed state on them).
+pub fn failed_nodes(value: &t) -> Vec<(Vec<String>, String)> {
+    let failed = cook::failed_node(&value.cook);
+    match (failed, pane_laid(value)) {
+        (Some((code, node_id)), Some(laid)) if scope_name(value).is_some() && laid.records.is_some() => {
+            fn nodes(s: &p::Scope, out: &mut Vec<p::Node>) {
+                for n in &s.nodes {
+                    out.push(n.clone());
+                    if let Some(z) = &n.zone {
+                        nodes(&z.scope, out);
+                    }
+                }
+            }
+            let mut all = Vec::new();
+            nodes(&laid.scope, &mut all);
+            let chains = probe::chains(&laid.scope);
+            let records = laid.records.as_ref().unwrap();
+            all.iter().filter(|n| compiled_at(value, &chains, records, &n.path) == Some(node_id)).map(|n| (n.path.clone(), code.clone())).collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Where a leaf's root box and the leaf are, by its path.
+pub type Root_at<'a> = &'a dyn Fn(&layout::Path) -> Option<(Leaf, UiBox)>;
+
+/// The lists of every list host: the in-use one draws the live rows, the others their cached ones.
+/// Returns the tree, the intents and the locals.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_list_panes(
+    ui: &mut Ui,
+    shortcut_frame: &frame::t,
+    value: &t,
+    hosted: &[Host],
+    root_at: Root_at,
+    pane_of: &dyn Fn(&Host) -> t,
+    in_use: &dyn Fn(&t) -> bool,
+    title_of: &dyn Fn(&t) -> String,
+    rows: &[tree::Row],
+    columns: &[String],
+    host_rows: &[(Key, (Vec<tree::Row>, Vec<String>))],
+    selected: &dyn Fn() -> Vec<i64>,
+    tree_state: tree::Tree,
+    intents: Vec<tree::Intent>,
+    locals: Vec<(Key, local)>,
+) -> (tree::Tree, Vec<tree::Intent>, Vec<(Key, local)>) {
+    let (mut tree_state, mut intents, mut locals) = (tree_state, intents, locals);
+    for host in hosted {
+        let (key, path, _, _) = host;
+        let Some((leaf, root)) = root_at(path) else { continue };
+        let pane = pane_of(host);
+        let mine = in_use(&pane);
+        let (rows_now, columns_now): (Vec<tree::Row>, Vec<String>) = if mine {
+            (rows.to_vec(), columns.to_vec())
+        } else {
+            host_rows.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone()).expect("host rows")
+        };
+        let selected_now: Vec<i64> = if mine { selected() } else { selection::selected_nodes(pane_selection(&pane)).to_vec() };
+        let title = title_of(&pane);
+        let draw = |ui: &mut Ui, state: tree::Tree| -> (tree::Tree, Vec<tree::Intent>) {
+            let mut result = None;
+            on_sheet(ui, leaf.floating, &mut |ui| {
+                ui.within(&root, &mut |ui| {
+                    result = Some(tree::update(state.clone(), ui, shortcut_frame, leaf.body, &title, &columns_now, &rows_now, &selected_now));
+                });
+            });
+            result.expect("tree drawn")
+        };
+        if Some(key) == value.list_at.as_ref() {
+            let (t_, emitted) = draw(ui, tree_state.clone());
+            tree_state = t_;
+            if mine {
+                intents.extend(emitted);
+            }
+        } else {
+            let (state, emitted) = draw(ui, local_of(value, key).rows);
+            if mine {
+                intents.extend(emitted);
+            }
+            locals = put_local(key, &|l| local { rows: state.clone(), ..l }, &locals);
+        }
+    }
+    (tree_state, intents, locals)
+}
+
+/// The text panes: the one in use and the others, each with what it showed.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_text_panes(
+    ui: &mut Ui,
+    frame_: &frame::t,
+    value: &t,
+    root_at: Root_at,
+    header_slots: &dyn Fn(&Leaf) -> Vec<Option<f64>>,
+    text_host: &Option<Host>,
+    text_shown: &Option<text_pane::Shown>,
+    text: text_pane::State,
+    other_texts: Vec<(Key, layout::Path, text_pane::State, text_pane::Shown)>,
+    locals: Vec<(Key, local)>,
+) -> (text_pane::State, Vec<text_pane::Intent>, Vec<(Key, local)>, Vec<(Key, text_pane::Shown, Vec<text_pane::Intent>)>) {
+    let names = completion_names(value);
+    let vocab = value.lisp_vocab.force();
+    let view_text = |ui: &mut Ui, path: &layout::Path, state: &text_pane::State, shown: &text_pane::Shown| -> Vec<text_pane::Intent> {
+        match root_at(path) {
+            Some((leaf, root)) => {
+                let tabs_right = header_slots(&leaf).last().cloned().flatten();
+                let mut out = Vec::new();
+                ui.within(&root, &mut |ui| {
+                    out = text_pane::view(ui, leaf.body, tabs_right, vocab, &names, frame_.input.t, state, shown);
+                });
+                out
+            }
+            None => Vec::new(),
+        }
+    };
+    let text_intents = match (text_shown, text_host) {
+        (Some(shown), Some((_, path, _, _))) => view_text(ui, path, &text, shown),
+        _ => Vec::new(),
+    };
+    let mut locals = locals;
+    let mut texts = Vec::new();
+    for (key, path, state, shown) in other_texts {
+        locals = put_local(&key, &|l| local { code: state.clone(), ..l }, &locals);
+        let intents = view_text(ui, &path, &state, &shown);
+        // OCaml folds with a cons: the last pane drawn comes first
+        texts.insert(0, (key, shown, intents));
+    }
+    (text, text_intents, locals, texts)
+}
+
+/// The outline panels.
+pub fn draw_outline_panes(
+    ui: &mut Ui,
+    value: &t,
+    hosted: &[Host],
+    root_at: Root_at,
+    params_of: &dyn Fn(&t) -> navigator::Params,
+    outline: navigator::State,
+    locals: Vec<(Key, local)>,
+) -> (navigator::State, Vec<navigator::Intent>, Vec<(Key, local)>) {
+    let (mut outline, mut intents, mut locals) = (outline, Vec::new(), locals);
+    for (key, path, _, _) in hosted {
+        let Some((leaf, root)) = root_at(path) else { continue };
+        let params = params_of(value);
+        let draw = |ui: &mut Ui, state: &navigator::State| -> (navigator::State, Vec<navigator::Intent>) {
+            let mut result = None;
+            on_sheet(ui, leaf.floating, &mut |ui| {
+                ui.within(&root, &mut |ui| {
+                    result = Some(navigator::view(state, ui, leaf.body, &params));
+                });
+            });
+            result.expect("outline drawn")
+        };
+        if Some(key) == value.outline_at.as_ref() {
+            let (o, emitted) = draw(ui, &outline);
+            outline = o;
+            intents.extend(emitted);
+        } else {
+            let (state, emitted) = draw(ui, &local_of(value, key).nav);
+            intents.extend(emitted);
+            locals = put_local(key, &|l| local { nav: state.clone(), ..l }, &locals);
+        }
+    }
+    (outline, intents, locals)
+}
+
+/// The spreadsheet panels: each remembers which object's sheet it shows.
+pub fn draw_spreadsheet_panes(ui: &mut Ui, value: &t, panes: &[(Leaf, UiBox)], locals: Vec<(Key, local)>) -> Vec<(Key, local)> {
+    let mut locals = locals;
+    for (leaf, root) in panes {
+        let key = panel_key(&value.doc, &leaf.path);
+        let pane = shown_as(value, (&key, &leaf.path, &leaf.panel));
+        let owner = local_of(&t_with_locals(value, &locals), &key).sheet_owner;
+        let mut changed = None;
+        ui.within(root, &mut |ui| {
+            changed = spreadsheet::view(ui, leaf.body, owner, spreadsheet_source(&pane));
+        });
+        if let Some(sheet_owner) = changed {
+            locals = put_local(&key, &|local_| local { sheet_owner, ..local_ }, &locals);
+        }
+    }
+    locals
+}
+
+fn t_with_locals(value: &t, locals: &[(Key, local)]) -> t {
+    let mut v = value.clone();
+    v.locals = locals.to_vec();
+    v
+}
+
+/// The keys down this frame that were not down in the last: the edges panes act on.
+pub fn pressed_keys(value: &t, frame_: &frame::t) -> Vec<input::Key> {
+    frame_.input.keys.iter().filter(|k| !value.held_keys.contains(k)).cloned().collect()
+}
+
+/// The graph panes that are not the one in use: those showing a graph update their canvas.
+pub fn draw_other_graph_panes(
+    ui: &mut Ui,
+    shortcut_frame: &frame::t,
+    value: &t,
+    other_panes: &[(Key, layout::Path, t)],
+    roots: &[(Leaf, UiBox)],
+) -> Vec<(Key, graph_pane)> {
+    let mut out = Vec::new();
+    for (key, path, pane) in other_panes {
+        let active = panel_map::active(&pane.panes).clone();
+        match roots.iter().find(|(leaf, _)| leaf.path == *path) {
+            Some((leaf, hosted)) if leaf.body.3 > 0 => {
+                let (x, y, width, height) = leaf.body;
+                let view = if stored_projection(pane) == Graph_view && graph_name(pane).is_some() {
+                    let mut result = None;
+                    ui.within(hosted, &mut |ui| {
+                        let theme = ui.theme();
+                        let theme = if leaf.floating { sheet_theme(&theme) } else { theme };
+                        let v = scope::with_guide(false, pane_view(pane).clone());
+                        let v = scope::with_theme(theme, v);
+                        let v = scope::with_bounds(x, y, width.max(1), height.max(1), v);
+                        result = Some(pxui_graph::scope_pane::update(&pressed_keys(value, shortcut_frame), v, ui, shortcut_frame).0);
+                    });
+                    result.expect("pane updated")
+                } else {
+                    pane_view(pane).clone()
+                };
+                out.push((key.clone(), graph_pane { view, ..active }));
+            }
+            _ => out.push((key.clone(), active)),
+        }
+    }
+    out
+}
+
+/// What the graph header's tools and views ask this frame.
+pub type Header_asks = (Option<action>, Option<action>, Option<projection>);
+
+/// The graph header: its toolbar, the Graph / List / Text views, and a viewport's render tabs.
+pub fn draw_graph_header(
+    ui: &mut Ui,
+    value: &t,
+    g: &layout::Geometry,
+    graph_host: &Option<Leaf>,
+    header_slots: &dyn Fn(&Leaf) -> Vec<Option<f64>>,
+    tools_from: &dyn Fn(&Leaf) -> f64,
+) -> Header_asks {
+    let tool_action = match graph_host {
+        Some(leaf) if projection_of(value) == Graph_view && has_panel(value, &Panel::Graph) => {
+            let tools_scope = scope_name(value).is_some();
+            let has_selection = !scope::selected(pane_view(value)).is_empty();
+            let enabled = move |tool: bars::Tool| tool == bars::Tool::Outline || (tools_scope && (tool == bars::Tool::Add || has_selection));
+            match bars::graph_tools(!has_panel(value, &Panel::Outline), ui, leaf.header, tools_from(leaf), &enabled) {
+                Some(bars::Tool::Add) => Some(action::Add_node),
+                Some(bars::Tool::Repeat) => Some(action::Scope_command(scope::Command::Wrap_repeat)),
+                Some(bars::Tool::Iterate) => Some(action::Scope_command(scope::Command::Wrap_iterate)),
+                Some(bars::Tool::Fn) => Some(action::Scope_command(scope::Command::Make_fn)),
+                Some(bars::Tool::Macro) => Some(action::Scope_command(scope::Command::Make_macro)),
+                Some(bars::Tool::Defn) => Some(action::Scope_command(scope::Command::Make_defn)),
+                Some(bars::Tool::Outline) => Some(action::Panel_split_at(leaf.path.clone(), panels::Axis::H, 0.7, Panel::Outline)),
+                None => None,
+            }
+        }
+        _ => None,
+    };
+    let view_pick = match graph_host {
+        Some(leaf) if has_panel(value, &Panel::Graph) => {
+            let (_, hy, _, hh) = leaf.header;
+            let active = match projection_of(value) {
+                Graph_view => 0,
+                List_view => 1,
+                Text_view => 2,
+            };
+            let slot = header_slots(leaf).first().cloned().flatten();
+            slot.and_then(|right| {
+                kit::segments(ui, "workspace-view", right, hy as f64 + ((hh - 20) as f64 / 2.0), &["Graph".to_owned(), "List".to_owned(), "Text".to_owned()], active).0
+            })
+            .map(|i| [Graph_view, List_view, Text_view][i as usize])
+        }
+        _ => None,
+    };
+    let view_action = match (active_view(value, g), &value.view_tools) {
+        (Some(leaf), Some((looks, mode))) if leaf.header.3 > 0 => {
+            let (hx, hy, hw, hh) = leaf.header;
+            let from = hx as f64 + tools_from(&leaf);
+            let modes = ["Solid".to_owned(), "Wire".to_owned(), "Traced".to_owned()];
+            let seg_w = modes.iter().fold(24.0, |w, label| w + ui.text_width(None, label));
+            let look_w = kit::button_width(ui, Some("C"), false, "Look through");
+            let ty = hy as f64 + ((hh - 20) as f64 / 2.0);
+            let frame_w = kit::button_width(ui, Some("F"), false, "Frame");
+            if from + seg_w + 8.0 + look_w + 8.0 + frame_w < (hx + hw - 36) as f64 {
+                bars::rule(ui, "workspace-view-rule", leaf.header, from - hx as f64);
+                let render = match kit::segments(ui, "workspace-render", from + seg_w, ty, &modes, *mode).0 {
+                    Some(i) if i != *mode => Some(action::Render_mode(i)),
+                    _ => None,
+                };
+                let look = kit::button(ui, "workspace-look", (from + seg_w + 8.0, ty), look_w, &ButtonOpts { active: *looks, hint: Some("C".to_owned()), ..Default::default() }, "Look through");
+                let framed = kit::button(ui, "workspace-frame", (from + seg_w + 8.0 + look_w + 8.0, ty), frame_w, &ButtonOpts { hint: Some("F".to_owned()), ..Default::default() }, "Frame");
+                if framed {
+                    Some(action::Frame_camera)
+                } else if look {
+                    Some(action::Look_through)
+                } else {
+                    render
+                }
+            } else {
+                None
+            }
+        }
+        _ => None,
+    };
+    (tool_action, view_action, view_pick)
+}
+
+/// What the graph pane gave back: its body bounds, the pane, its changes, the menu and the pick.
+pub type Graph_pane_result = (layout::Bounds, scope::t, Vec<scope::Change>, Option<node_menu::t>, Option<String>);
+
+/// Draw the graph pane and its node menu. `open_menu` opens the menu at a point, for the pane's view.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_graph_pane(
+    ui: &mut Ui,
+    frame_: &frame::t,
+    value: &t,
+    shortcut_frame: &frame::t,
+    scope_view: scope::t,
+    scope_active: bool,
+    guide: bool,
+    carry_lit: Vec<(Vec<String>, String)>,
+    carry_hot: Option<(Vec<String>, bool)>,
+    graph_root: &UiBox,
+    graph_host: &Option<Leaf>,
+    workspace: &shell,
+    menu: Option<node_menu::t>,
+    open_menu: &dyn Fn(Option<&scope::t>, &t, (i64, i64)) -> Option<node_menu::t>,
+) -> Graph_pane_result {
+    let graph_body = match graph_host {
+        Some(leaf) => leaf.body,
+        None => (0, 0, 0, 0),
+    };
+    let (gx, gy, gw, gh) = graph_body;
+    let mut scope_view = scope_view;
+    let mut scope_frame_changes = Vec::new();
+    if !scope_active {
+        scope_view = scope::suspend(scope_view);
+    } else {
+        let failed = failed_nodes(value);
+        let pressed = pressed_keys(value, shortcut_frame);
+        let mut result = None;
+        let start = scope_view.clone();
+        ui.within(graph_root, &mut |ui| {
+            let theme = ui.theme();
+            let theme = match graph_host {
+                Some(leaf) if leaf.floating => sheet_theme(&theme),
+                _ => theme,
+            };
+            let v = scope::with_guide(guide, start.clone());
+            let v = scope::with_failed(failed.clone(), v);
+            let v = scope::with_theme(theme, v);
+            let v = scope::with_bounds(gx, gy, gw.max(1), gh.max(1), v);
+            let v = scope::with_carry(carry_lit.clone(), carry_hot.clone(), v);
+            result = Some(pxui_graph::scope_pane::update(&pressed, v, ui, shortcut_frame));
+        });
+        let (v, changes) = result.expect("scope updated");
+        scope_view = v;
+        scope_frame_changes = changes;
+    }
+    let mut menu = menu;
+    if menu.is_none() {
+        let at = scope_frame_changes.iter().find_map(|c| match c {
+            scope::Change::Menu_requested(x, y) => Some((*x as i64, *y as i64)),
+            _ => None,
+        });
+        if let Some(at) = at {
+            menu = open_menu(Some(&scope_view), value, at);
+        }
+    }
+    let mut menu_pick = None;
+    if let Some(m) = menu.take() {
+        let status_y = geometry(value, workspace, frame_).status_at.1;
+        let mut result = None;
+        ui.within(graph_root, &mut |ui| {
+            result = Some(node_menu::update(m.clone(), ui, (0, 0, frame_.input.size.0, status_y)));
+        });
+        let (next, picked) = result.expect("menu updated");
+        menu = next;
+        menu_pick = picked;
+    }
+    (graph_body, scope_view, scope_frame_changes, menu, menu_pick)
+}
+
+/// The timeline panes' bars and the strip's context menu: the playback intents and the layout ones.
+pub fn draw_timeline_pane(
+    ui: &mut Ui,
+    timeline_: &timeline::t,
+    max_frame: i64,
+    slots: &[(layout::Bounds, UiBox, bool)],
+    timeline_root: &Option<(Leaf, UiBox)>,
+    strip_bounds: layout::Bounds,
+) -> (Vec<timeline_intent>, Vec<pxui_shell::chrome::Intent>) {
+    let mut intents = Vec::new();
+    for (bounds, boxed, edge) in slots {
+        if bounds.3 <= 0 {
+            continue;
+        }
+        let playing = timeline::mode(timeline_) == timeline::Mode::Playing;
+        ui.within(boxed, &mut |ui| {
+            intents.extend(timeline_bar::draw(ui, *bounds, *edge, playing, timeline::frame(timeline_), timeline::time(timeline_), max_frame));
+        });
+    }
+    let mut strip_playback: Vec<timeline_intent> = Vec::new();
+    let mut strip_layout: Vec<pxui_shell::chrome::Intent> = Vec::new();
+    if let Some((_, boxed)) = timeline_root {
+        if strip_bounds.3 > 0 {
+            ui.within(boxed, &mut |ui| {
+                if let Some((x, y)) = ui.context_at(boxed) {
+                    ui.set_text_state(boxed, Some(format!("{} {}", cfmt::g(x, 6), cfmt::g(y, 6))));
+                }
+                let state = ui.text_state(boxed).map(|s| s.split(' ').map(|x| x.to_owned()).collect::<Vec<_>>());
+                if let Some(parts) = state {
+                    if let [x, y] = parts.as_slice() {
+                        if let (Ok(x), Ok(y)) = (x.parse::<f64>(), y.parse::<f64>()) {
+                            let playing = timeline::mode(timeline_) == timeline::Mode::Playing;
+                            let items = vec![(if playing { "Pause" } else { "Play" }.to_owned(), true), ("Stop".to_owned(), true), ("Hide timeline".to_owned(), true)];
+                            let result = ui.context_menu((x, y), &Default::default(), "timeline-context", &items);
+                            if !matches!(result, pxui::ui::MenuResult::Open) {
+                                ui.set_text_state(boxed, None);
+                                match result {
+                                    pxui::ui::MenuResult::Pick(0) => strip_playback.push(timeline_intent::Pause_toggle),
+                                    pxui::ui::MenuResult::Pick(1) => strip_playback.push(timeline_intent::Stop_playback),
+                                    pxui::ui::MenuResult::Pick(2) => strip_layout.push(pxui_shell::chrome::Intent::Toggle(vec![usize::MAX])),
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    }
+    intents.extend(strip_playback);
+    (intents, strip_layout)
+}
