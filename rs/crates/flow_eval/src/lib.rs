@@ -12,3 +12,5 @@ mod test_state;
 mod test_array;
 #[cfg(test)]
 mod test_workspace_eval;
+#[cfg(test)]
+mod test_reentrant;

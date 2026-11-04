@@ -120,7 +120,7 @@ slow_case!(pick_flat_loops, pick_t::flat_loops, "two more editors of the same ki
 
 gpu_case!(packed_exploded_view, packed_t::exploded_view);
 slow_case!(packed_boolean_fracture, packed_t::boolean_fracture, "Boolean fracture cook in a debug build");
-slow_case!(materials_face_materials, materials_t::face_materials_preserve_explosion, "FAILS: the exploded surface is not displaced (parity_backlog.md, editor suite t3); also 10 s");
+gpu_case!(materials_face_materials, materials_t::face_materials_preserve_explosion);
 slow_case!(materials_refs, materials_t::material_refs, PERF3);
 slow_case!(materials_follow, materials_t::follow_tests, "24 s in a debug build: lowering and editor frames (perf3)");
 gpu_case!(textpane_graph_drafts, textpane_t::graph_drafts);

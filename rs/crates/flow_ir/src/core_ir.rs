@@ -1727,6 +1727,6 @@ mod tests {
     fn literal_round_trip() {
         let v = Value::Record(vec![("a".into(), Value::Vec3(1.0, 2.0, 3.0)), ("b".into(), Value::List(Arc::new(vec![Value::Int(1)])))]);
         assert_eq!(value_of_literal(&literal_of_value(&v).unwrap()), v);
-        assert!(literal_of_value(&Value::Fn(value::FnId(0))).is_none());
+        assert!(literal_of_value(&Value::Fn(value::FnId(0, 0))).is_none());
     }
 }

@@ -43,7 +43,7 @@ fn sample(name: &str, ty: &Ty) -> Value {
         Ty::Named(_) => nominal(ty).unwrap_or_else(|| Value::Deferred(ty.clone(), 0)),
         Ty::Any => Value::Float(1.5),
         Ty::Record(fs) => Value::Record(fs.iter().map(|(n, t)| (n.clone(), sample(n, t))).collect()),
-        Ty::Fn(_) => Value::Fn(FnId(0)),
+        Ty::Fn(_) => Value::Fn(FnId(0, 0)),
     }
 }
 fn literal_of(v: &Value) -> Option<param::Value> {
@@ -179,7 +179,7 @@ fn contexts_checks_and_custom_kinds() {
     rejects("ui/split-at", vec![na("ratio", Value::Float(1.))]);
     rejects("ui/tile", vec![]);
     rejects("ui/switch", vec![na("panel", sample("", &ty::panel())), na("active", Value::Int(1))]);
-    (find("ui/graph", context::editor()).check)(&[na("view", Value::Residual(ResidualId(0)))]).unwrap();
+    (find("ui/graph", context::editor()).check)(&[na("view", Value::Residual(ResidualId(0, 0)))]).unwrap();
     let e = empty();
     let (ws, ds) = wcheck(&[], &e, "(workspace w (graph g :context material (material/standard)))");
     assert!(ws.is_some() && !ds.iter().any(|d| d.severity == Severity::ErrorSeverity));

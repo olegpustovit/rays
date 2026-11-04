@@ -907,8 +907,7 @@ impl Qualifier {
             let packed = packed::compile(&packed::CompileOptions::default(), residual, &view.term)?;
             let (_, site, _) = packed::site(&packed);
             if !self.packed_sites.iter().any(|(path, candidate)| *path == site && *candidate) { return None; }
-            // the site is read before preparing inputs: preparation re-enters the evaluator, which may
-            // drop this call's residual snapshot (flow_eval), after which a view would deadlock
+            // the site is read before preparing inputs, which re-enters the evaluator
             let (_, site_path, site_iter) = packed::site(&packed);
             let fast = self.gpu.fast;
             let count = packed::static_count(&packed).unwrap_or(0);

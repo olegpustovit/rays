@@ -2,10 +2,24 @@ use crate::{packed_ops, ty::{self, Ty}};
 use rays_diagnostic::{Diagnostic, Severity};
 use std::sync::{Arc, LazyLock, Mutex, Weak};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct FnId(pub i64);
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct ResidualId(pub i64);
+/// A function / residual value: its id and the evaluation (arena) it lives in. OCaml's value carries its
+/// record, so it can never resolve in another evaluation; the home does the same here. Equality, hashing
+/// and printing are by id alone (the OCaml key of a residual is its rid), so ids minted deterministically
+/// per plan stay cache keys across evaluations.
+#[derive(Clone, Copy)]
+pub struct FnId(pub i64, pub i64);
+#[derive(Clone, Copy)]
+pub struct ResidualId(pub i64, pub i64);
+macro_rules! by_id {
+    ($t:ident) => {
+        impl PartialEq for $t { fn eq(&self, other: &Self) -> bool { self.0 == other.0 } }
+        impl Eq for $t {}
+        impl std::hash::Hash for $t { fn hash<H: std::hash::Hasher>(&self, state: &mut H) { self.0.hash(state) } }
+        impl std::fmt::Debug for $t { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{}({})", stringify!($t), self.0) } }
+    };
+}
+by_id!(FnId);
+by_id!(ResidualId);
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
