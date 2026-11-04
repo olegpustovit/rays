@@ -1666,6 +1666,9 @@ struct Run {
     t: T,
     live: Live,
     state: State,
+    /// no state was supplied: `state` is a private default, so the reference interpreter keeps the residual's own
+    /// (OCaml scopes `with_live`'s state; the arena here would keep the private one and strand the caller's writes)
+    ambient: bool,
     elems: Option<Vec<(String, Value)>>,
     resolve: Option<Resolve>,
     measure: Option<Measure>,
@@ -1674,6 +1677,10 @@ struct Run {
     column_source: Option<ColumnSource>,
     expected_count: Option<usize>,
     in_scope: bool,
+}
+
+fn run_state(run: &Run) -> Option<&State> {
+    if run.ambient { None } else { Some(&run.state) }
 }
 
 fn seconds_since(measure: &Measure, started: f64) -> f64 {
@@ -3791,7 +3798,7 @@ fn eval_term(run: &Run, residual: ResidualId, term: &Term) -> Result<Value, Diag
     if let Some(on_walk) = &run.on_walk {
         on_walk();
     }
-    let result = E::Residual::eval_term(residual, term, &run.live, Some(&run.state), run.elems.as_deref(), run.resolve.clone());
+    let result = E::Residual::eval_term(residual, term, &run.live, run_state(run), run.elems.as_deref(), run.resolve.clone());
     match take_pending() {
         Some(d) => Err(d),
         None => result,
@@ -3858,6 +3865,7 @@ fn evaluate_once(run: &Run, dispatch: &Option<Dispatch>, residual: ResidualId, t
                 t: program,
                 live: run.live.clone(),
                 state: run.state.clone(),
+                ambient: run.ambient,
                 elems: run.elems.clone(),
                 resolve: run.resolve.clone(),
                 measure: run.measure.clone(),
@@ -3883,7 +3891,7 @@ fn force_values(run: &Run, value: &Value, residual: &dyn Fn(ResidualId) -> Resul
     if !E::is_live(value) {
         return Ok(value.clone());
     }
-    let reference = |v: &Value| E::Host::force_reference(v, &run.live, Some(&run.state), run.elems.as_deref(), run.resolve.clone());
+    let reference = |v: &Value| E::Host::force_reference(v, &run.live, run_state(run), run.elems.as_deref(), run.resolve.clone());
     match value {
         Value::Residual(r) => {
             let forced = residual(*r)?;
@@ -4046,7 +4054,7 @@ fn reference_observed(run: &Run, on_walk: Option<&Arc<dyn Fn() + Send + Sync>>) 
     if let Some(f) = on_walk.or(run.on_walk.as_ref()) {
         f();
     }
-    E::Residual::eval_term(run.t.residual, &run.t.term, &run.live, Some(&run.state), run.elems.as_deref(), run.resolve.clone())
+    E::Residual::eval_term(run.t.residual, &run.t.term, &run.live, run_state(run), run.elems.as_deref(), run.resolve.clone())
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -4070,6 +4078,7 @@ fn make_run(t: &T, live: &Live, o: &ForceOptions, column_source: Option<ColumnSo
         t: t.clone(),
         live: live.clone(),
         state: o.state.clone().unwrap_or_else(E::create_state),
+        ambient: o.state.is_none(),
         elems: o.elems.clone(),
         resolve: o.resolve.clone(),
         measure: o.measure.clone(),
@@ -4512,6 +4521,7 @@ pub mod host {
             t: pv.t.clone(),
             live: pv.live.clone(),
             state: pv.state.clone(),
+            ambient: false,
             elems: None,
             resolve: resolve.clone(),
             measure: pv.measure.clone(),
