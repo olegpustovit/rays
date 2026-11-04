@@ -10,3 +10,4 @@ rdk_geom = { path = "../rdk_geom" }
 rdk_ops = { path = "../rdk_ops" }
 rays_math = { path = "../rays_math" }
 parallel = { path = "../parallel" }
+cfmt = { path = "../cfmt" }

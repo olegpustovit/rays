@@ -1,6 +1,8 @@
 use std::collections::HashSet;
+use std::sync::Mutex;
 
-use rdk_core::{attribute, attribute_pattern, cancel, error, geometry, group, packed};
+use rdk_core::{attribute, attribute_pattern, cancel, error, geometry, group, packed, support};
+use crate::subdivide_refine::{AFloats, AInts};
 
 use crate::fuse_rules::{AttributeMethod, AttributeRule, GroupRule};
 
@@ -32,14 +34,6 @@ fn core_fail(failure: error::T) -> error::T {
     } else {
         fail(error::message(&failure).to_owned())
     }
-}
-
-fn poll_all(cancel_value: Option<&cancel::T>, count: usize) -> Result<(), error::T> {
-    // ponytail: serial; each point writes only its own slot, so the parallel original gives the same output.
-    for point in 0..count {
-        cancel::poll(cancel_value, point as i64, 4095)?;
-    }
-    Ok(())
 }
 
 fn compile_attribute_rules(rules: &[AttributeRule]) -> Result<Vec<CompiledAttributeRule>, error::T> {
@@ -135,55 +129,59 @@ fn validate_weight(target: &geometry::T, rule: &CompiledAttributeRule) -> Result
     }
 }
 
-fn mapped_f64(cancel_value: Option<&cancel::T>, destinations: &[i64], source: &[f64], target: &[f64]) -> Result<Vec<f64>, error::T> {
-    poll_all(cancel_value, destinations.len())?;
-    let mut output = source.to_vec();
-    for (point, &destination) in destinations.iter().enumerate() {
+fn mapped_f64(cancel_value: Option<&cancel::T>, grain: i64, destinations: &[i64], source: &[f64], target: &[f64]) -> Result<Vec<f64>, error::T> {
+    let output = AFloats::from_slice(source);
+    support::parallel_for(cancel_value, grain, destinations.len() as i64, &|point| {
+        let destination = destinations[point as usize];
         if destination >= 0 {
-            output[point] = target[destination as usize];
+            output.set(point, target[destination as usize]);
         }
-    }
-    Ok(output)
+        Ok(())
+    })?;
+    Ok(output.into_vec())
 }
 
-fn mapped_i64(cancel_value: Option<&cancel::T>, destinations: &[i64], source: &[i64], target: &[i64]) -> Result<Vec<i64>, error::T> {
-    poll_all(cancel_value, destinations.len())?;
-    let mut output = source.to_vec();
-    for (point, &destination) in destinations.iter().enumerate() {
+fn mapped_i64(cancel_value: Option<&cancel::T>, grain: i64, destinations: &[i64], source: &[i64], target: &[i64]) -> Result<Vec<i64>, error::T> {
+    let output = AInts::from_slice(source);
+    support::parallel_for(cancel_value, grain, destinations.len() as i64, &|point| {
+        let destination = destinations[point as usize];
         if destination >= 0 {
-            output[point] = target[destination as usize];
+            output.set(point, target[destination as usize]);
         }
-    }
-    Ok(output)
+        Ok(())
+    })?;
+    Ok(output.into_vec())
 }
 
-fn mapped_string(cancel_value: Option<&cancel::T>, destinations: &[i64], source: &[String], target: &[String]) -> Result<Vec<String>, error::T> {
-    poll_all(cancel_value, destinations.len())?;
-    let mut output = source.to_vec();
-    for (point, &destination) in destinations.iter().enumerate() {
+fn mapped_string(cancel_value: Option<&cancel::T>, grain: i64, destinations: &[i64], source: &[String], target: &[String]) -> Result<Vec<String>, error::T> {
+    let output: Vec<Mutex<String>> = source.iter().map(|value| Mutex::new(value.clone())).collect();
+    support::parallel_for(cancel_value, grain, destinations.len() as i64, &|point| {
+        let destination = destinations[point as usize];
         if destination >= 0 {
-            output[point] = target[destination as usize].clone();
+            *output[point as usize].lock().unwrap() = target[destination as usize].clone();
         }
-    }
-    Ok(output)
+        Ok(())
+    })?;
+    Ok(output.into_iter().map(|slot| slot.into_inner().unwrap()).collect())
 }
 
-fn scalar_int_array(cancel_value: Option<&cancel::T>, destinations: &[i64], source: &[i64], target: &[i64]) -> Result<packed::IntArray::T, error::T> {
+fn scalar_int_array(cancel_value: Option<&cancel::T>, grain: i64, destinations: &[i64], source: &[i64], target: &[i64]) -> Result<packed::IntArray::T, error::T> {
     let count = destinations.len();
     let offsets: Vec<i64> = (0..=count as i64).collect();
-    let values = mapped_i64(cancel_value, destinations, source, target)?;
+    let values = mapped_i64(cancel_value, grain, destinations, source, target)?;
     Ok(packed::IntArray::View::create_validated_owned(offsets, values))
 }
 
-fn scalar_float_array(cancel_value: Option<&cancel::T>, destinations: &[i64], source: &[f64], target: &[f64]) -> Result<packed::FloatArray::T, error::T> {
+fn scalar_float_array(cancel_value: Option<&cancel::T>, grain: i64, destinations: &[i64], source: &[f64], target: &[f64]) -> Result<packed::FloatArray::T, error::T> {
     let count = destinations.len();
     let offsets: Vec<i64> = (0..=count as i64).collect();
-    let values = mapped_f64(cancel_value, destinations, source, target)?;
+    let values = mapped_f64(cancel_value, grain, destinations, source, target)?;
     Ok(packed::FloatArray::View::create_validated_owned(offsets, values))
 }
 
 fn mapped_int_rows(
     cancel_value: Option<&cancel::T>,
+    grain: i64,
     destinations: &[i64],
     source: &packed::IntArray::T,
     target: &packed::IntArray::T,
@@ -204,23 +202,28 @@ fn mapped_int_rows(
         }
         offsets[point + 1] = offsets[point] + length;
     }
-    let mut values = vec![0i64; offsets[count] as usize];
-    for point in 0..count {
-        cancel::poll(cancel_value, point as i64, 4095)?;
+    let values = AInts::new(offsets[count], 0);
+    support::parallel_for(cancel_value, grain, count as i64, &|point| {
+        let point = point as usize;
         let destination = destinations[point];
         let (input, first, last) = if destination < 0 {
             (&source.values, source.offsets[point], source.offsets[point + 1])
         } else {
             (&target.values, target.offsets[destination as usize], target.offsets[destination as usize + 1])
         };
-        let at = offsets[point] as usize;
-        values[at..at + (last - first) as usize].copy_from_slice(&input[first as usize..last as usize]);
-    }
+        let at = offsets[point];
+        for (k, &value) in input[first as usize..last as usize].iter().enumerate() {
+            values.set(at + k as i64, value);
+        }
+        Ok(())
+    })?;
+    let values = values.into_vec();
     Ok(packed::IntArray::View::create_validated_owned(offsets, values))
 }
 
 fn mapped_float_rows(
     cancel_value: Option<&cancel::T>,
+    grain: i64,
     destinations: &[i64],
     source: &packed::FloatArray::T,
     target: &packed::FloatArray::T,
@@ -241,23 +244,28 @@ fn mapped_float_rows(
         }
         offsets[point + 1] = offsets[point] + length;
     }
-    let mut values = vec![0.0f64; offsets[count] as usize];
-    for point in 0..count {
-        cancel::poll(cancel_value, point as i64, 4095)?;
+    let values = AFloats::new(offsets[count], 0.0);
+    support::parallel_for(cancel_value, grain, count as i64, &|point| {
+        let point = point as usize;
         let destination = destinations[point];
         let (input, first, last) = if destination < 0 {
             (&source.values, source.offsets[point], source.offsets[point + 1])
         } else {
             (&target.values, target.offsets[destination as usize], target.offsets[destination as usize + 1])
         };
-        let at = offsets[point] as usize;
-        values[at..at + (last - first) as usize].copy_from_slice(&input[first as usize..last as usize]);
-    }
+        let at = offsets[point];
+        for (k, &value) in input[first as usize..last as usize].iter().enumerate() {
+            values.set(at + k as i64, value);
+        }
+        Ok(())
+    })?;
+    let values = values.into_vec();
     Ok(packed::FloatArray::View::create_validated_owned(offsets, values))
 }
 
 fn apply_attribute(
     cancel_value: Option<&cancel::T>,
+    grain: i64,
     destinations: &[i64],
     target: &geometry::T,
     rule: &CompiledAttributeRule,
@@ -278,16 +286,16 @@ fn apply_attribute(
     let target_storage = attribute::View::storage(&target_attribute).map_err(core_fail)?;
     let storage = match (source_storage, target_storage) {
         (attribute::Storage::Float(s), attribute::Storage::Float(t)) if concatenate(method) => {
-            attribute::Storage::FloatArray(scalar_float_array(cancel_value, destinations, s, t)?)
+            attribute::Storage::FloatArray(scalar_float_array(cancel_value, grain, destinations, s, t)?)
         }
         (attribute::Storage::Int(s), attribute::Storage::Int(t)) if concatenate(method) => {
-            attribute::Storage::IntArray(scalar_int_array(cancel_value, destinations, s, t)?)
+            attribute::Storage::IntArray(scalar_int_array(cancel_value, grain, destinations, s, t)?)
         }
         (attribute::Storage::Float(s), attribute::Storage::Float(t)) => {
-            attribute::Storage::Float(mapped_f64(cancel_value, destinations, s, t)?)
+            attribute::Storage::Float(mapped_f64(cancel_value, grain, destinations, s, t)?)
         }
         (attribute::Storage::Int(s), attribute::Storage::Int(t)) => {
-            attribute::Storage::Int(mapped_i64(cancel_value, destinations, s, t)?)
+            attribute::Storage::Int(mapped_i64(cancel_value, grain, destinations, s, t)?)
         }
         (attribute::Storage::Text(s), attribute::Storage::Text(t)) => {
             let supported = selection(method)
@@ -299,7 +307,7 @@ fn apply_attribute(
             if !supported {
                 return Err(incompatible());
             }
-            attribute::Storage::Text(mapped_string(cancel_value, destinations, s, t)?)
+            attribute::Storage::Text(mapped_string(cancel_value, grain, destinations, s, t)?)
         }
         (attribute::Storage::Float2(s), attribute::Storage::Float2(t)) => {
             if concatenate(method) {
@@ -309,8 +317,8 @@ fn apply_attribute(
             let t = packed::Float2::View::view(t);
             attribute::Storage::Float2(
                 packed::Float2::of_owned(
-                    mapped_f64(cancel_value, destinations, &s.x, &t.x)?,
-                    mapped_f64(cancel_value, destinations, &s.y, &t.y)?,
+                    mapped_f64(cancel_value, grain, destinations, &s.x, &t.x)?,
+                    mapped_f64(cancel_value, grain, destinations, &s.y, &t.y)?,
                 )
                 .map_err(core_fail)?,
             )
@@ -323,9 +331,9 @@ fn apply_attribute(
             let t = packed::Float3::View::view(t).map_err(core_fail)?;
             attribute::Storage::Float3(
                 packed::Float3::View::of_owned_exn(
-                    mapped_f64(cancel_value, destinations, &s.x, &t.x)?,
-                    mapped_f64(cancel_value, destinations, &s.y, &t.y)?,
-                    mapped_f64(cancel_value, destinations, &s.z, &t.z)?,
+                    mapped_f64(cancel_value, grain, destinations, &s.x, &t.x)?,
+                    mapped_f64(cancel_value, grain, destinations, &s.y, &t.y)?,
+                    mapped_f64(cancel_value, grain, destinations, &s.z, &t.z)?,
                 )
                 .map_err(core_fail)?,
             )
@@ -338,10 +346,10 @@ fn apply_attribute(
             let t = packed::Float4::View::view(t);
             attribute::Storage::Float4(
                 packed::Float4::of_owned(
-                    mapped_f64(cancel_value, destinations, &s.x, &t.x)?,
-                    mapped_f64(cancel_value, destinations, &s.y, &t.y)?,
-                    mapped_f64(cancel_value, destinations, &s.z, &t.z)?,
-                    mapped_f64(cancel_value, destinations, &s.w, &t.w)?,
+                    mapped_f64(cancel_value, grain, destinations, &s.x, &t.x)?,
+                    mapped_f64(cancel_value, grain, destinations, &s.y, &t.y)?,
+                    mapped_f64(cancel_value, grain, destinations, &s.z, &t.z)?,
+                    mapped_f64(cancel_value, grain, destinations, &s.w, &t.w)?,
                 )
                 .map_err(core_fail)?,
             )
@@ -349,12 +357,12 @@ fn apply_attribute(
         (attribute::Storage::IntArray(s), attribute::Storage::IntArray(t))
             if concatenate(method) || selection(method) =>
         {
-            attribute::Storage::IntArray(mapped_int_rows(cancel_value, destinations, s, t)?)
+            attribute::Storage::IntArray(mapped_int_rows(cancel_value, grain, destinations, s, t)?)
         }
         (attribute::Storage::FloatArray(s), attribute::Storage::FloatArray(t))
             if concatenate(method) || selection(method) =>
         {
-            attribute::Storage::FloatArray(mapped_float_rows(cancel_value, destinations, s, t)?)
+            attribute::Storage::FloatArray(mapped_float_rows(cancel_value, grain, destinations, s, t)?)
         }
         _ => return Err(incompatible()),
     };
@@ -438,7 +446,7 @@ pub fn apply(
         }
         match find_attribute_rule(&attribute_rules, attribute::name(&item)) {
             None => attributes.push(item),
-            Some(rule) => attributes.push(apply_attribute(cancel_value, destinations, target, &attribute_rules[rule], &item)?),
+            Some(rule) => attributes.push(apply_attribute(cancel_value, grain, destinations, target, &attribute_rules[rule], &item)?),
         }
     }
     let groups = apply_groups(grain, &group_rules, destinations, source, target)?;
@@ -523,5 +531,32 @@ mod tests {
         };
         let failure = apply(None, 1, &[weighted], &[], &[0, 0, 0], &source, &target).err().unwrap();
         assert!(error::message(&failure).contains("requires a weight attribute"));
+    }
+
+    #[test]
+    fn parallel_exact() {
+        let n = 40_000i64;
+        let build = |salt: i64| {
+            let z = vec![0.0; n as usize];
+            let g = geom(&(0..n).map(|p| p as f64).collect::<Vec<_>>(), &z, &z, &[], &[0], None);
+            let g = with_attr(&g, Owner::Point, "f", Storage::Float((0..n).map(|p| (p + salt) as f64 * 0.5).collect()));
+            let g = with_attr(&g, Owner::Point, "i", Storage::Int((0..n).map(|p| p * 3 + salt).collect()));
+            let g = with_attr(&g, Owner::Point, "t", Storage::Text((0..n).map(|p| format!("s{}", p + salt)).collect()));
+            let offsets: Vec<i64> = std::iter::once(0).chain((1..=n).scan(0, |at, p| { *at += p % 4; Some(*at) })).collect();
+            let values: Vec<f64> = (0..offsets[n as usize]).map(|v| v as f64 + salt as f64).collect();
+            let rows = packed::FloatArray::View::create_validated_owned(offsets, values);
+            with_attr(&g, Owner::Point, "r", Storage::FloatArray(rows))
+        };
+        let (source, target) = (build(0), build(1_000_000));
+        let destinations: Vec<i64> = (0..n).map(|p| if p % 3 == 0 { -1 } else { (p * 7919) % n }).collect();
+        let rules: Vec<AttributeRule> = ["f", "i", "t", "r"]
+            .iter()
+            .map(|pattern| AttributeRule { pattern: (*pattern).to_owned(), method: AttributeMethod::LeastPoint, weight_attribute: None })
+            .collect();
+        let signature = same_at_one_and_four(&|| {
+            let out = apply(None, 512, &rules, &[], &destinations, &source, &target).unwrap();
+            geometry::attributes(&out).iter().map(attribute_signature).collect::<Vec<_>>()
+        });
+        assert_eq!(signature.len(), 4);
     }
 }

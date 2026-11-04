@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use rays_math::hash;
-use rdk_core::{attribute_pattern, cancel, error, geometry, group, packed, topology};
+use crate::subdivide_refine::{ABytes, AInts};
+use rdk_core::{attribute_pattern, cancel, error, geometry, group, packed, support, topology};
 use rdk_geom::point_grid::float_max;
 
 use crate::attribute_lifecycle;
@@ -150,11 +151,10 @@ pub fn delete_degenerate(
     let positions = packed::Float3::View::view(geometry::positions(geometry_value))?;
     let topology_value = geometry::topology(geometry_value);
     let view = topology::View::view(topology_value)?;
-    let mut flags = vec![0u8; primitive_count as usize];
-    // ponytail: serial primitive loops; each primitive touches only its own flag, so output equals the parallel original.
+    let flags = ABytes::new(primitive_count, 0);
     if topology::all_triangles(topology_value)? {
-        for primitive in 0..primitive_count as usize {
-            cancel::poll(cancel_value, primitive as i64, 4095)?;
+        support::parallel_for(cancel_value, params.grain, primitive_count, &|primitive| {
+            let primitive = primitive as usize;
             let first = view.primitive_offsets[primitive] as usize;
             if selected(primitive)
                 && clean_triangle_is_degenerate(
@@ -165,17 +165,18 @@ pub fn delete_degenerate(
                     view.vertex_points[first + 2] as usize,
                 )
             {
-                flags[primitive] = 1;
+                flags.set(primitive as i64, 1);
             }
-        }
+            Ok(())
+        })?;
     } else {
-        for primitive in 0..primitive_count as usize {
-            cancel::poll(cancel_value, primitive as i64, 4095)?;
+        support::parallel_for(cancel_value, params.grain, primitive_count, &|primitive| {
+            let primitive = primitive as usize;
             let first = view.primitive_offsets[primitive];
             let last = view.primitive_offsets[primitive + 1];
             let kind = view.primitive_kinds[primitive];
             if !selected(primitive) {
-                continue;
+                return Ok(());
             }
             if kind == 0 {
                 let (mut sb, mut sc, mut sd) = (0.0f64, 0.0f64, 0.0f64);
@@ -236,7 +237,7 @@ pub fn delete_degenerate(
                         flag = 1;
                     }
                 }
-                flags[primitive] = flag;
+                flags.set(primitive as i64, flag);
             } else {
                 let size = last - first;
                 let edges = size - 1 + if kind == 1 { 0 } else { 1 };
@@ -247,11 +248,13 @@ pub fn delete_degenerate(
                     length += clean_point_distance(&positions, a, b);
                 }
                 if !length.is_finite() || length <= epsilon {
-                    flags[primitive] = 1;
+                    flags.set(primitive as i64, 1);
                 }
             }
-        }
+            Ok(())
+        })?;
     }
+    let flags = flags.into_vec();
     if flags.iter().all(|&flag| flag == 0) {
         return Ok(geometry_value.clone());
     }
@@ -276,13 +279,15 @@ fn delete_nan_points(
     if point_count == 0 {
         return Ok(geometry_value.clone());
     }
-    let mut flags = vec![0u8; point_count as usize];
-    for point in 0..point_count as usize {
-        cancel::poll(cancel_value.as_deref(), point as i64, 16_383)?;
+    let flags = ABytes::new(point_count, 0);
+    support::parallel_for(cancel_value.as_deref(), grain, point_count, &|point| {
+        let point = point as usize;
         if positions.x[point].is_nan() || positions.y[point].is_nan() || positions.z[point].is_nan() {
-            flags[point] = 1;
+            flags.set(point as i64, 1);
         }
-    }
+        Ok(())
+    })?;
+    let flags = flags.into_vec();
     if flags.iter().all(|&flag| flag == 0) {
         return Ok(geometry_value.clone());
     }
@@ -337,10 +342,10 @@ fn delete_overlaps_general(
 ) -> Result<geometry::T, error::T> {
     let view = topology::View::view(geometry::topology(geometry_value))?;
     let primitive_count = geometry::primitive_count(geometry_value) as usize;
-    let mut sizes = vec![0i64; primitive_count];
-    let mut starts = vec![0i64; primitive_count];
-    let mut directions = vec![1i64; primitive_count];
-    let mut hashes = vec![0i64; primitive_count];
+    let sizes = AInts::new(primitive_count as i64, 0);
+    let starts = AInts::new(primitive_count as i64, 0);
+    let directions = AInts::new(primitive_count as i64, 1);
+    let hashes = AInts::new(primitive_count as i64, 0);
     let polygon_count = (0..primitive_count).filter(|&p| view.primitive_kinds[p] == 0).count() as i64;
     if polygon_count == 0 {
         return Ok(geometry_value.clone());
@@ -348,37 +353,42 @@ fn delete_overlaps_general(
     if polygon_count > MAX_ARRAY_LENGTH / 4 {
         return Err(message_error("Rdk_mesh.Clean.clean: overlap table exceeds array limits"));
     }
-    for primitive in 0..primitive_count {
-        cancel::poll(cancel_value.as_deref(), primitive as i64, 4_095)?;
+    support::parallel_for(cancel_value.as_deref(), grain, primitive_count as i64, &|primitive| {
+        let primitive = primitive as usize;
         if view.primitive_kinds[primitive] != 0 {
-            continue;
+            return Ok(());
         }
         let first = view.primitive_offsets[primitive];
         let size = view.primitive_offsets[primitive + 1] - first;
-        starts[primitive] = clean_minimal_rotation(&view, first, size, 1);
+        let mut start = clean_minimal_rotation(&view, first, size, 1);
+        let mut direction = 1i64;
         let reverse_start = clean_minimal_rotation(&view, first, size, -1);
         let mut offset = 0i64;
         let mut comparison = 0i64;
         while offset < size && comparison == 0 {
-            let a = clean_cycle_point(&view, first, size, starts[primitive], 1, offset);
+            let a = clean_cycle_point(&view, first, size, start, 1, offset);
             let b = clean_cycle_point(&view, first, size, reverse_start, -1, offset);
             comparison = if a < b { -1 } else if a > b { 1 } else { 0 };
             offset += 1;
         }
         if comparison > 0 {
-            starts[primitive] = reverse_start;
-            directions[primitive] = -1;
+            start = reverse_start;
+            direction = -1;
         }
         let mut hash_value = 17 ^ size;
         for offset in 0..size {
             hash_value = hash::mix(
                 hash_value,
-                clean_cycle_point(&view, first, size, starts[primitive], directions[primitive], offset),
+                clean_cycle_point(&view, first, size, start, direction, offset),
             ) & OCAML_MAX_INT;
         }
-        hashes[primitive] = hash_value;
-        sizes[primitive] = size;
-    }
+        starts.set(primitive as i64, start);
+        directions.set(primitive as i64, direction);
+        hashes.set(primitive as i64, hash_value);
+        sizes.set(primitive as i64, size);
+        Ok(())
+    })?;
+    let (sizes, starts, directions, hashes) = (sizes.into_vec(), starts.into_vec(), directions.into_vec(), hashes.into_vec());
     let capacity = table_capacity(polygon_count);
     let mut table = vec![-1i64; capacity];
     let mask = (capacity - 1) as i64;
@@ -447,12 +457,12 @@ fn delete_triangle_overlaps(
         return Err(message_error("Rdk_mesh.Clean.clean: overlap table exceeds array limits"));
     }
     let count = primitive_count as usize;
-    let mut first_points = vec![0i64; count];
-    let mut second_points = vec![0i64; count];
-    let mut third_points = vec![0i64; count];
-    let mut hashes = vec![0i64; count];
-    for primitive in 0..count {
-        cancel::poll(cancel_value.as_deref(), primitive as i64, 4_095)?;
+    let first_points = AInts::new(count as i64, 0);
+    let second_points = AInts::new(count as i64, 0);
+    let third_points = AInts::new(count as i64, 0);
+    let hashes = AInts::new(count as i64, 0);
+    support::parallel_for(cancel_value.as_deref(), grain, count as i64, &|primitive| {
+        let primitive = primitive as usize;
         let first = view.primitive_offsets[primitive] as usize;
         let (p0, p1, p2) = (view.vertex_points[first], view.vertex_points[first + 1], view.vertex_points[first + 2]);
         let (low, high) = if p0 <= p1 { (p0, p1) } else { (p1, p0) };
@@ -463,11 +473,14 @@ fn delete_triangle_overlaps(
         } else {
             (low, p2, high)
         };
-        first_points[primitive] = a;
-        second_points[primitive] = b;
-        third_points[primitive] = c;
-        hashes[primitive] = hash::mix(hash::mix(hash::mix(17 ^ 3, a), b), c) & OCAML_MAX_INT;
-    }
+        first_points.set(primitive as i64, a);
+        second_points.set(primitive as i64, b);
+        third_points.set(primitive as i64, c);
+        hashes.set(primitive as i64, hash::mix(hash::mix(hash::mix(17 ^ 3, a), b), c) & OCAML_MAX_INT);
+        Ok(())
+    })?;
+    let (first_points, second_points, third_points, hashes) =
+        (first_points.into_vec(), second_points.into_vec(), third_points.into_vec(), hashes.into_vec());
     let capacity = table_capacity(primitive_count);
     let mut table = vec![-1i64; capacity];
     let mask = (capacity - 1) as i64;
@@ -868,5 +881,47 @@ mod tests {
         let wrong = group::init(None, group::Owner::Point, "pick", 6, &|_| true).unwrap();
         let bad = DeleteDegenerateParams { cancel: None, grain: 1, primitives: Some(wrong), epsilon: 1e-9 };
         assert!(delete_degenerate(&bad, &g).is_err());
+    }
+
+    #[test]
+    fn parallel_exact() {
+        for quads in [false, true] {
+            let g = grid(120, 120, 2.0, quads);
+            let (x, y, z) = positions(&g);
+            let (vp, offsets, _) = topo(&g);
+            let mut x = x;
+            for p in (0..x.len()).step_by(997) {
+                x[p] = f64::NAN;
+            }
+            let (mut new_vp, mut new_offsets) = (Vec::new(), vec![0i64]);
+            for prim in 0..offsets.len() - 1 {
+                let corners = &vp[offsets[prim] as usize..offsets[prim + 1] as usize];
+                new_vp.extend_from_slice(corners);
+                new_offsets.push(new_vp.len() as i64);
+                if prim % 7 == 0 {
+                    let mut rotated = corners.to_vec();
+                    rotated.rotate_left(1);
+                    new_vp.extend(rotated);
+                    new_offsets.push(new_vp.len() as i64);
+                }
+                if prim % 11 == 0 {
+                    let (a, b) = (corners[0], corners[1]);
+                    new_vp.extend(if quads { vec![a, b, a, b] } else { vec![a, a, b] });
+                    new_offsets.push(new_vp.len() as i64);
+                }
+            }
+            let source = geom(&x, &y, &z, &new_vp, &new_offsets, None);
+            for policy in [OverlapPolicy::KeepFirstOverlap, OverlapPolicy::DeleteOverlapPairs] {
+                let params = Params {
+                    grain: 512,
+                    remove_nan_points: true,
+                    overlaps: Some(policy),
+                    reverse_winding: true,
+                    ..base()
+                };
+                let out = exact_at_one_and_four(&|| run(&params, &source).unwrap());
+                assert!(geometry::primitive_count(&out) < geometry::primitive_count(&source));
+            }
+        }
     }
 }

@@ -1,7 +1,9 @@
+use crate::subdivide_refine::{ABytes, AInts};
 use rdk_core::{
-    cancel, error, geometry, group, packed, polygon_triangulation, topology, topology_remap,
+    cancel, error, geometry, group, packed, polygon_triangulation, support, topology, topology_remap,
 };
 use rdk_geom::point_grid::float_max;
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 
 const MAX_ARRAY_LENGTH: i64 = (1i64 << 54) - 1;
 const PREFIX: &str = "Rdk_mesh.Triangulate.triangulate: ";
@@ -103,37 +105,49 @@ fn triangulate(
         None => true,
         Some(selection) => group::cardinality(selection) == primitive_count as i64,
     };
-    let mut collapsed_removals = vec![0u8; primitive_count];
-    let mut primitive_bases = vec![1i64; primitive_count + 1];
-    primitive_bases[0] = 0;
-    let mut vertex_bases = if full_selection { Vec::new() } else { vec![0i64; primitive_count + 1] };
-    let mut first_selected_curve = i64::MAX;
-    let mut changes = false;
-    for primitive in 0..primitive_count {
-        cancel::poll(cancel_value, primitive as i64, 1023)?;
-        let size = view.primitive_offsets[primitive + 1] - view.primitive_offsets[primitive];
-        if !selected(primitive) {
-            vertex_bases[primitive + 1] = size;
-        } else if view.primitive_kinds[primitive] != 0 {
+    let collapsed_removals = ABytes::new(primitive_count as i64, 0);
+    let primitive_bases = AInts::new(primitive_count as i64 + 1, 1);
+    primitive_bases.set(0, 0);
+    let vertex_bases = AInts::new(if full_selection { 0 } else { primitive_count as i64 + 1 }, 0);
+    let first_selected_curve = AtomicI64::new(i64::MAX);
+    let changes = AtomicBool::new(false);
+    let average_size = if primitive_count == 0 {
+        1
+    } else {
+        (topology::vertex_count(topology_value) / primitive_count as i64).max(1)
+    };
+    let primitive_grain = (grain / average_size).max(1);
+    support::parallel_for(cancel_value, primitive_grain, primitive_count as i64, &|primitive| {
+        let index = primitive as usize;
+        let size = view.primitive_offsets[index + 1] - view.primitive_offsets[index];
+        if !selected(index) {
+            vertex_bases.set(primitive + 1, size);
+        } else if view.primitive_kinds[index] != 0 {
             if !full_selection {
-                vertex_bases[primitive + 1] = size;
+                vertex_bases.set(primitive + 1, size);
             }
-            first_selected_curve = first_selected_curve.min(primitive as i64);
+            first_selected_curve.fetch_min(primitive, Ordering::Relaxed);
         } else if size == 3 {
             if !full_selection {
-                vertex_bases[primitive + 1] = 3;
+                vertex_bases.set(primitive + 1, 3);
             }
         } else {
-            changes = true;
-            let removed = collapsed_quad_removed(&positions, &view, primitive);
-            collapsed_removals[primitive] = (removed + 1) as u8;
+            changes.store(true, Ordering::Relaxed);
+            let removed = collapsed_quad_removed(&positions, &view, index);
+            collapsed_removals.set(primitive, (removed + 1) as u8);
             let triangles = if removed >= 0 { 1 } else { size - 2 };
-            primitive_bases[primitive + 1] = triangles;
+            primitive_bases.set(primitive + 1, triangles);
             if !full_selection {
-                vertex_bases[primitive + 1] = triangles * 3;
+                vertex_bases.set(primitive + 1, triangles * 3);
             }
         }
-    }
+        Ok(())
+    })?;
+    let first_selected_curve = first_selected_curve.load(Ordering::Relaxed);
+    let changes = changes.load(Ordering::Relaxed);
+    let collapsed_removals = collapsed_removals.into_vec();
+    let mut primitive_bases = primitive_bases.into_vec();
+    let mut vertex_bases = vertex_bases.into_vec();
     if first_selected_curve != i64::MAX {
         return Err(fail(format!(
             "{PREFIX}primitive {first_selected_curve} is a curve, not a polygon"
@@ -164,67 +178,73 @@ fn triangulate(
     if output_primitives >= MAX_ARRAY_LENGTH {
         return Err(too_big());
     }
-    let mut output_vertices = vec![0i64; output_vertex_count as usize];
-    let mut vertex_map = vec![0i64; output_vertex_count as usize];
-    let mut output_offsets = vec![0i64; output_primitives as usize + 1];
-    let mut output_kinds = vec![0u8; output_primitives as usize];
-    let mut primitive_map = vec![0i64; output_primitives as usize];
-    let mut scratch = polygon_triangulation::create_scratch();
-    let mut failure: Option<usize> = None;
-    // ponytail: serial primitive loop; blocks of the original write disjoint ranges, so output is identical.
-    for primitive in 0..primitive_count {
-        cancel::poll(cancel_value, primitive as i64, 1023)?;
-        let source_first = view.primitive_offsets[primitive];
-        let source_last = view.primitive_offsets[primitive + 1];
-        let output_primitive = primitive_bases[primitive];
-        let output_vertex =
-            if full_selection { primitive_bases[primitive] * 3 } else { vertex_bases[primitive] };
-        let source_size = source_last - source_first;
-        if !selected(primitive) || source_size == 3 {
-            output_offsets[output_primitive as usize] = output_vertex;
-            output_kinds[output_primitive as usize] = view.primitive_kinds[primitive];
-            primitive_map[output_primitive as usize] = primitive as i64;
-            for local in 0..source_size {
-                output_vertices[(output_vertex + local) as usize] =
-                    view.vertex_points[(source_first + local) as usize];
-                vertex_map[(output_vertex + local) as usize] = source_first + local;
-            }
-        } else if collapsed_removals[primitive] != 0 {
-            let removed = i64::from(collapsed_removals[primitive]) - 1;
-            let remaining = |ordinal: i64| if ordinal < removed { ordinal } else { ordinal + 1 };
-            let olds = [
-                source_first + remaining(0),
-                source_first + remaining(1),
-                source_first + remaining(2),
-            ];
-            for (corner, &old) in olds.iter().enumerate() {
-                output_vertices[output_vertex as usize + corner] = view.vertex_points[old as usize];
-                vertex_map[output_vertex as usize + corner] = old;
-            }
-            output_offsets[output_primitive as usize] = output_vertex;
-            primitive_map[output_primitive as usize] = primitive as i64;
-        } else {
-            let mut emit = |triangle: i64, a: i64, b: i64, c: i64| {
-                let vertex = (output_vertex + triangle * 3) as usize;
-                let target = (output_primitive + triangle) as usize;
-                for (corner, &old) in [a, b, c].iter().enumerate() {
-                    output_vertices[vertex + corner] = view.vertex_points[old as usize];
-                    vertex_map[vertex + corner] = old;
+    let output_vertices = AInts::new(output_vertex_count, 0);
+    let vertex_map = AInts::new(output_vertex_count, 0);
+    let output_offsets = AInts::new(output_primitives + 1, 0);
+    let output_kinds = ABytes::new(output_primitives, 0);
+    let primitive_map = AInts::new(output_primitives, 0);
+    let first_failure = AtomicI64::new(i64::MAX);
+    support::run_indexed_ranges(primitive_grain, primitive_count as i64, &|_, first, last| {
+        let mut scratch = polygon_triangulation::create_scratch();
+        for primitive in first as usize..last as usize {
+            cancel::poll(cancel_value, primitive as i64, 1023)?;
+            let source_first = view.primitive_offsets[primitive];
+            let source_last = view.primitive_offsets[primitive + 1];
+            let output_primitive = primitive_bases[primitive];
+            let output_vertex =
+                if full_selection { primitive_bases[primitive] * 3 } else { vertex_bases[primitive] };
+            let source_size = source_last - source_first;
+            if !selected(primitive) || source_size == 3 {
+                output_offsets.set(output_primitive, output_vertex);
+                output_kinds.set(output_primitive, view.primitive_kinds[primitive]);
+                primitive_map.set(output_primitive, primitive as i64);
+                for local in 0..source_size {
+                    output_vertices.set(output_vertex + local, view.vertex_points[(source_first + local) as usize]);
+                    vertex_map.set(output_vertex + local, source_first + local);
                 }
-                output_offsets[target] = vertex as i64;
-                primitive_map[target] = primitive as i64;
-            };
-            if polygon_triangulation::primitive(
-                cancel_value, &positions, &view, Some(&mut scratch), primitive as i64, &mut emit,
-            )
-            .is_err()
-            {
-                failure = Some(primitive);
-                break;
+            } else if collapsed_removals[primitive] != 0 {
+                let removed = i64::from(collapsed_removals[primitive]) - 1;
+                let remaining = |ordinal: i64| if ordinal < removed { ordinal } else { ordinal + 1 };
+                let olds = [
+                    source_first + remaining(0),
+                    source_first + remaining(1),
+                    source_first + remaining(2),
+                ];
+                for (corner, &old) in olds.iter().enumerate() {
+                    output_vertices.set(output_vertex + corner as i64, view.vertex_points[old as usize]);
+                    vertex_map.set(output_vertex + corner as i64, old);
+                }
+                output_offsets.set(output_primitive, output_vertex);
+                primitive_map.set(output_primitive, primitive as i64);
+            } else if (primitive as i64) < first_failure.load(Ordering::Relaxed) {
+                let mut emit = |triangle: i64, a: i64, b: i64, c: i64| {
+                    let vertex = output_vertex + triangle * 3;
+                    let target = output_primitive + triangle;
+                    for (corner, &old) in [a, b, c].iter().enumerate() {
+                        output_vertices.set(vertex + corner as i64, view.vertex_points[old as usize]);
+                        vertex_map.set(vertex + corner as i64, old);
+                    }
+                    output_offsets.set(target, vertex);
+                    primitive_map.set(target, primitive as i64);
+                };
+                if polygon_triangulation::primitive(
+                    cancel_value, &positions, &view, Some(&mut scratch), primitive as i64, &mut emit,
+                )
+                .is_err()
+                {
+                    first_failure.fetch_min(primitive as i64, Ordering::Relaxed);
+                }
             }
         }
-    }
-    output_offsets[output_primitives as usize] = output_vertex_count;
+        Ok(())
+    })?;
+    output_offsets.set(output_primitives, output_vertex_count);
+    let failure = Some(first_failure.load(Ordering::Relaxed)).filter(|&p| p != i64::MAX).map(|p| p as usize);
+    let output_vertices = output_vertices.into_vec();
+    let vertex_map = vertex_map.into_vec();
+    let output_offsets = output_offsets.into_vec();
+    let output_kinds = output_kinds.into_vec();
+    let primitive_map = primitive_map.into_vec();
     if let Some(primitive) = failure {
         let mut scratch = polygon_triangulation::create_scratch();
         return match polygon_triangulation::primitive(
@@ -344,5 +364,19 @@ mod tests {
         let selection = group::init(None, group::Owner::Primitive, "polys", 2, &|p| p == 0).unwrap();
         let out = run(&Params { primitives: Some(selection), ..params() }, &mixed).unwrap();
         assert_eq!(topo(&out).2, vec![0, 0, 1]);
+    }
+
+    #[test]
+    fn parallel_exact() {
+        let g = grid(200, 200, 2.0, true);
+        let count = topology::primitive_count(geometry::topology(&g));
+        let full = exact_at_one_and_four(&|| run(&Params { cancel: None, grain: None, primitives: None }, &g).unwrap());
+        assert_eq!(topology::primitive_count(geometry::topology(&full)), count * 2);
+        let odd: Vec<i64> = (0..count).filter(|p| p % 3 == 0).collect();
+        let selection = group::ordered(group::Owner::Primitive, "odd", count, &odd).unwrap();
+        let some = exact_at_one_and_four(&|| {
+            run(&Params { cancel: None, grain: None, primitives: Some(selection.clone()) }, &g).unwrap()
+        });
+        assert_eq!(topology::primitive_count(geometry::topology(&some)), count + odd.len() as i64);
     }
 }

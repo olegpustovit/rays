@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use rdk_core::{attribute, attribute_pattern, cancel, error, geometry, group, packed, ragged_ops};
+use crate::subdivide_refine::{AFloats, AInts};
+use rdk_core::{attribute, attribute_pattern, cancel, error, geometry, group, packed, ragged_ops, support};
+use std::sync::Mutex;
 use rdk_geom::point_clusters::Clusters;
 use rdk_geom::point_grid::{float_max, float_min};
 
@@ -88,15 +90,11 @@ fn core_fail(failure: error::T) -> error::T {
 
 fn run(
     cancel_value: Option<&cancel::T>,
+    grain: i64,
     count: i64,
-    operation: &mut dyn FnMut(i64) -> Result<(), error::T>,
+    operation: &(dyn Fn(i64) -> Result<(), error::T> + Sync),
 ) -> Result<(), error::T> {
-    // ponytail: serial loop; the parallel original writes one output slot per index, so results are identical.
-    for index in 0..count {
-        cancel::poll(cancel_value, index, 4095)?;
-        operation(index)?;
-    }
-    Ok(())
+    support::parallel_for(cancel_value, grain, count, operation)
 }
 
 fn needs_weight(method: AttributeMethod) -> bool {
@@ -372,10 +370,6 @@ fn sort_range_string(values: &mut [String], points: &mut [i64], first: usize, la
     }
 }
 
-fn member_slots_f64(clusters: &Clusters, source: &[f64]) -> Vec<f64> {
-    clusters.members.iter().map(|&point| source[point as usize]).collect()
-}
-
 fn sorted_float(
     cancel_value: Option<&cancel::T>,
     grain: i64,
@@ -383,16 +377,16 @@ fn sorted_float(
     source: &[f64],
     method: AttributeMethod,
 ) -> Result<Vec<f64>, error::T> {
-    let mut values = member_slots_f64(clusters, source);
-    let mut points = clusters.members.clone();
-    let mut output = vec![0.0; clusters.count as usize];
-    run(cancel_value, clusters.count, &mut |cluster| {
-        let _ = grain;
+    let output = AFloats::new(clusters.count, 0.0);
+    run(cancel_value, grain, clusters.count, &|cluster| {
         let first = clusters.offsets[cluster as usize] as usize;
         let last = clusters.offsets[cluster as usize + 1] as usize;
+        let mut values: Vec<f64> = clusters.members[first..last].iter().map(|&point| source[point as usize]).collect();
+        let mut points = clusters.members[first..last].to_vec();
+        let (first, last) = (0usize, last - first);
         sort_range_f64(&mut values, &mut points, first, last);
         if method == AttributeMethod::Median {
-            output[cluster as usize] = values[first + (last - first) / 2];
+            output.set(cluster, values[first + (last - first) / 2]);
         } else {
             let mut best_count = 0usize;
             let mut best_value = values[first];
@@ -407,28 +401,30 @@ fn sorted_float(
                     run_first = slot;
                 }
             }
-            output[cluster as usize] = best_value;
+            output.set(cluster, best_value);
         }
         Ok(())
     })?;
-    Ok(output)
+    Ok(output.into_vec())
 }
 
 fn sorted_int(
     cancel_value: Option<&cancel::T>,
+    grain: i64,
     clusters: &Clusters,
     source: &[i64],
     method: AttributeMethod,
 ) -> Result<Vec<i64>, error::T> {
-    let mut values: Vec<i64> = clusters.members.iter().map(|&point| source[point as usize]).collect();
-    let mut points = clusters.members.clone();
-    let mut output = vec![0i64; clusters.count as usize];
-    run(cancel_value, clusters.count, &mut |cluster| {
+    let output = AInts::new(clusters.count, 0);
+    run(cancel_value, grain, clusters.count, &|cluster| {
         let first = clusters.offsets[cluster as usize] as usize;
         let last = clusters.offsets[cluster as usize + 1] as usize;
+        let mut values: Vec<i64> = clusters.members[first..last].iter().map(|&point| source[point as usize]).collect();
+        let mut points = clusters.members[first..last].to_vec();
+        let (first, last) = (0usize, last - first);
         sort_range_i64(&mut values, &mut points, first, last);
         if method == AttributeMethod::Median {
-            output[cluster as usize] = values[first + (last - first) / 2];
+            output.set(cluster, values[first + (last - first) / 2]);
         } else {
             let mut best_count = 0usize;
             let mut best_value = values[first];
@@ -443,29 +439,30 @@ fn sorted_int(
                     run_first = slot;
                 }
             }
-            output[cluster as usize] = best_value;
+            output.set(cluster, best_value);
         }
         Ok(())
     })?;
-    Ok(output)
+    Ok(output.into_vec())
 }
 
 fn sorted_text(
     cancel_value: Option<&cancel::T>,
+    grain: i64,
     clusters: &Clusters,
     source: &[String],
     method: AttributeMethod,
 ) -> Result<Vec<String>, error::T> {
-    let mut values: Vec<String> =
-        clusters.members.iter().map(|&point| source[point as usize].clone()).collect();
-    let mut points = clusters.members.clone();
-    let mut output = vec![String::new(); clusters.count as usize];
-    run(cancel_value, clusters.count, &mut |cluster| {
+    let output: Vec<Mutex<String>> = (0..clusters.count).map(|_| Mutex::new(String::new())).collect();
+    run(cancel_value, grain, clusters.count, &|cluster| {
         let first = clusters.offsets[cluster as usize] as usize;
         let last = clusters.offsets[cluster as usize + 1] as usize;
+        let mut values: Vec<String> = clusters.members[first..last].iter().map(|&point| source[point as usize].clone()).collect();
+        let mut points = clusters.members[first..last].to_vec();
+        let (first, last) = (0usize, last - first);
         sort_range_string(&mut values, &mut points, first, last);
         if method == AttributeMethod::Median {
-            output[cluster as usize] = values[first + (last - first) / 2].clone();
+            *output[cluster as usize].lock().unwrap() = values[first + (last - first) / 2].clone();
         } else {
             let mut best_count = 0usize;
             let mut best_value = values[first].clone();
@@ -480,11 +477,11 @@ fn sorted_text(
                     run_first = slot;
                 }
             }
-            output[cluster as usize] = best_value;
+            *output[cluster as usize].lock().unwrap() = best_value;
         }
         Ok(())
     })?;
-    Ok(output)
+    Ok(output.into_iter().map(|slot| slot.into_inner().unwrap()).collect())
 }
 
 fn weight_values(geometry_value: &geometry::T, name: &str) -> Result<Vec<f64>, error::T> {
@@ -595,8 +592,8 @@ fn reduce_float(
     if method == AttributeMethod::Mode || method == AttributeMethod::Median {
         return sorted_float(cancel_value, grain, clusters, source, method);
     }
-    let mut output = vec![0.0; clusters.count as usize];
-    run(cancel_value, clusters.count, &mut |cluster| {
+    let output = AFloats::new(clusters.count, 0.0);
+    run(cancel_value, grain, clusters.count, &|cluster| {
         let cluster = cluster as usize;
         let first = clusters.offsets[cluster] as usize;
         let last = clusters.offsets[cluster + 1] as usize;
@@ -661,10 +658,10 @@ fn reduce_float(
         if !value.is_finite() {
             return Err(fail(format!("attribute {name:?} reduction is non-finite in cluster {cluster}")));
         }
-        output[cluster] = value;
+        output.set(cluster as i64, value);
         Ok(())
     })?;
-    Ok(output)
+    Ok(output.into_vec())
 }
 
 fn checked_add(name: &str, cluster: usize, left: i64, right: i64) -> Result<i64, error::T> {
@@ -697,6 +694,7 @@ fn int_of_float_checked(name: &str, cluster: usize, value: f64) -> Result<i64, e
 
 fn reduce_int(
     cancel_value: Option<&cancel::T>,
+    grain: i64,
     name: &str,
     clusters: &Clusters,
     source: &[i64],
@@ -707,10 +705,10 @@ fn reduce_int(
         return Ok(select_i64(source, &mapping));
     }
     if method == AttributeMethod::Mode || method == AttributeMethod::Median {
-        return sorted_int(cancel_value, clusters, source, method);
+        return sorted_int(cancel_value, grain, clusters, source, method);
     }
-    let mut output = vec![0i64; clusters.count as usize];
-    run(cancel_value, clusters.count, &mut |cluster| {
+    let output = AInts::new(clusters.count, 0);
+    run(cancel_value, grain, clusters.count, &|cluster| {
         let cluster = cluster as usize;
         let first = clusters.offsets[cluster] as usize;
         let last = clusters.offsets[cluster + 1] as usize;
@@ -785,20 +783,21 @@ fn reduce_int(
             }
             _ => return Err(fail("reduction method is handled before the cluster loop".to_owned())),
         };
-        output[cluster] = value;
+        output.set(cluster as i64, value);
         Ok(())
     })?;
-    Ok(output)
+    Ok(output.into_vec())
 }
 
 fn concatenate_text(
     cancel_value: Option<&cancel::T>,
+    grain: i64,
     clusters: &Clusters,
     source: &[String],
     ordered_members: &[i64],
 ) -> Result<Vec<String>, error::T> {
-    let mut output = vec![String::new(); clusters.count as usize];
-    run(cancel_value, clusters.count, &mut |cluster| {
+    let output: Vec<Mutex<String>> = (0..clusters.count).map(|_| Mutex::new(String::new())).collect();
+    run(cancel_value, grain, clusters.count, &|cluster| {
         let first = clusters.offsets[cluster as usize] as usize;
         let last = clusters.offsets[cluster as usize + 1] as usize;
         let mut length = 0i64;
@@ -814,14 +813,15 @@ fn concatenate_text(
             bytes.extend_from_slice(source[ordered_members[slot] as usize].as_bytes());
         }
         // Concatenating whole UTF-8 strings stays UTF-8; arbitrary OCaml bytes are not expected here.
-        output[cluster as usize] = String::from_utf8_lossy(&bytes).into_owned();
+        *output[cluster as usize].lock().unwrap() = String::from_utf8_lossy(&bytes).into_owned();
         Ok(())
     })?;
-    Ok(output)
+    Ok(output.into_iter().map(|slot| slot.into_inner().unwrap()).collect())
 }
 
 fn reduce_text(
     cancel_value: Option<&cancel::T>,
+    grain: i64,
     name: &str,
     clusters: &Clusters,
     source: &[String],
@@ -833,7 +833,7 @@ fn reduce_text(
         return Ok(select_string(source, &mapping));
     }
     match method {
-        AttributeMethod::Mode | AttributeMethod::Median => sorted_text(cancel_value, clusters, source, method),
+        AttributeMethod::Mode | AttributeMethod::Median => sorted_text(cancel_value, grain, clusters, source, method),
         AttributeMethod::Minimum | AttributeMethod::Maximum => Ok((0..clusters.count as usize)
             .map(|cluster| {
                 let first = clusters.offsets[cluster] as usize;
@@ -854,7 +854,7 @@ fn reduce_text(
             })
             .collect()),
         AttributeMethod::Concatenate | AttributeMethod::ConcatenateWeightOrder => {
-            concatenate_text(cancel_value, clusters, source, ordered_members)
+            concatenate_text(cancel_value, grain, clusters, source, ordered_members)
         }
         _ => Err(fail(format!("attribute {name:?} method is unsupported for text storage"))),
     }
@@ -862,21 +862,23 @@ fn reduce_text(
 
 fn weighted_order(
     cancel_value: Option<&cancel::T>,
+    grain: i64,
     clusters: &Clusters,
     weights: &[f64],
 ) -> Result<Vec<i64>, error::T> {
-    let mut values = member_slots_f64(clusters, weights);
-    let mut points = clusters.members.clone();
-    run(cancel_value, clusters.count, &mut |cluster| {
-        sort_range_f64(
-            &mut values,
-            &mut points,
-            clusters.offsets[cluster as usize] as usize,
-            clusters.offsets[cluster as usize + 1] as usize,
-        );
+    let points = AInts::new(clusters.members.len() as i64, 0);
+    run(cancel_value, grain, clusters.count, &|cluster| {
+        let first = clusters.offsets[cluster as usize] as usize;
+        let last = clusters.offsets[cluster as usize + 1] as usize;
+        let mut values: Vec<f64> = clusters.members[first..last].iter().map(|&point| weights[point as usize]).collect();
+        let mut order = clusters.members[first..last].to_vec();
+        sort_range_f64(&mut values, &mut order, 0, last - first);
+        for (offset, &point) in order.iter().enumerate() {
+            points.set((first + offset) as i64, point);
+        }
         Ok(())
     })?;
-    Ok(points)
+    Ok(points.into_vec())
 }
 
 fn output_offsets(clusters: &Clusters, compact: bool, cluster_lengths: &[i64]) -> Result<Vec<i64>, error::T> {
@@ -1019,12 +1021,13 @@ fn concatenate_float_rows(
 
 fn ordered_members(
     cancel_value: Option<&cancel::T>,
+    grain: i64,
     clusters: &Clusters,
     method: AttributeMethod,
     weights: Option<&[f64]>,
 ) -> Result<Vec<i64>, error::T> {
     if method == AttributeMethod::ConcatenateWeightOrder {
-        weighted_order(cancel_value, clusters, weights.expect("weights"))
+        weighted_order(cancel_value, grain, clusters, weights.expect("weights"))
     } else {
         Ok(clusters.members.clone())
     }
@@ -1053,7 +1056,7 @@ fn reduced_attribute(
         }
     }
     let weights: Option<&[f64]> = rule.weight.as_ref().map(|w| weights_cache[w].as_slice());
-    let ordered = ordered_members(cancel_value, clusters, method, weights)?;
+    let ordered = ordered_members(cancel_value, grain, clusters, method, weights)?;
     let plane_float = |source: &[f64]| -> Result<Vec<f64>, error::T> {
         Ok(expand_f64(
             clusters,
@@ -1062,7 +1065,7 @@ fn reduced_attribute(
         ))
     };
     let plane_int = |source: &[i64]| -> Result<Vec<i64>, error::T> {
-        Ok(expand_i64(clusters, compact, reduce_int(cancel_value, &name, clusters, source, method, weights)?))
+        Ok(expand_i64(clusters, compact, reduce_int(cancel_value, grain, &name, clusters, source, method, weights)?))
     };
     let concat_scalar_message = || fail(format!("attribute {name:?} concatenate requires scalar or array storage"));
     let storage = match attribute::View::storage(item).map_err(core_fail)? {
@@ -1077,7 +1080,7 @@ fn reduced_attribute(
         attribute::Storage::Text(values) => attribute::Storage::Text(expand_string(
             clusters,
             compact,
-            reduce_text(cancel_value, &name, clusters, values, method, weights, &ordered)?,
+            reduce_text(cancel_value, grain, &name, clusters, values, method, weights, &ordered)?,
         )),
         attribute::Storage::Float2(values) => {
             if is_concatenate(method) {
@@ -1574,5 +1577,46 @@ mod tests {
         sort_range_f64(&mut values, &mut points, 0, 4);
         assert_eq!(values, vec![1.0, 1.0, 2.0, 3.0]);
         assert_eq!(points, vec![0, 2, 1, 3], "ties order by point index");
+    }
+
+    #[test]
+    fn parallel_exact() {
+        use AttributeMethod::*;
+        let (n, k) = (30_000i64, 10_000i64);
+        let mut members = Vec::new();
+        let mut offsets = vec![0i64];
+        for cluster in 0..k {
+            for j in 0..n / k {
+                members.push(cluster + j * k);
+            }
+            offsets.push(members.len() as i64);
+        }
+        let big = Clusters {
+            count: k,
+            of_point: (0..n).map(|p| p % k).collect(),
+            offsets,
+            members,
+            representatives: (0..k).collect(),
+        };
+        let z = vec![0.0; n as usize];
+        let g = geom(&(0..n).map(|p| p as f64).collect::<Vec<_>>(), &z, &z, &[], &[0], None);
+        let g = with_attr(&g, Owner::Point, "f", Storage::Float((0..n).map(|p| ((p * 7919) % 101) as f64 * 0.37).collect()));
+        let g = with_attr(&g, Owner::Point, "i", Storage::Int((0..n).map(|p| (p * 31) % 17).collect()));
+        let g = with_attr(&g, Owner::Point, "t", Storage::Text((0..n).map(|p| format!("t{}", (p * 13) % 29)).collect()));
+        let g = with_attr(&g, Owner::Point, "w", Storage::Float((0..n).map(|p| 1.0 + (p % 5) as f64).collect()));
+        for method in [Average, Median, Mode, Sum, SumSquares, RootMeanSquare, WeightedAverage, ConcatenateWeightOrder] {
+            let patterns: &[&str] = if matches!(method, Mode | Median | ConcatenateWeightOrder) { &["f", "i", "t"] } else { &["f", "i"] };
+            let rules: Vec<AttributeRule> = patterns
+                .iter()
+                .map(|pattern| AttributeRule { pattern: (*pattern).to_owned(), method, weight_attribute: Some("w".to_owned()) })
+                .collect();
+            let signature = same_at_one_and_four(&|| {
+                match apply(None, 256, DefaultAttributes::KeepFirst, &rules, &[], true, true, &big, &g) {
+                    Ok((attributes, _)) => attributes.iter().map(attribute_signature).collect::<Vec<_>>(),
+                    Err(failure) => panic!("{method:?}: {}", error::message(&failure)),
+                }
+            });
+            assert!(!signature.is_empty(), "{method:?}");
+        }
     }
 }

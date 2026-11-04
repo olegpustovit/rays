@@ -1,8 +1,10 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use crate::subdivide_refine::{AFloats, AInts};
 
 use rdk_core::{
-    attribute, cancel, edge_group, error, face_normals, geometry, group, packed, topology,
+    attribute, cancel, edge_group, error, face_normals, geometry, group, packed, support, topology,
     topology_edge_lookup, topology_index, topology_remap,
 };
 
@@ -188,17 +190,17 @@ fn run_default(
     let output_points = source_vertices * 2;
     let output_vertices = source_vertices * 6;
     let output_primitives = source_primitives * 2 + source_vertices;
-    let mut px = vec![0.0f64; output_points];
-    let mut py = vec![0.0f64; output_points];
-    let mut pz = vec![0.0f64; output_points];
-    let mut point_map = vec![0i64; output_points];
-    let mut vertex_points = vec![0i64; output_vertices];
-    let mut vertex_map = vec![0i64; output_vertices];
-    let mut primitive_offsets = vec![0i64; output_primitives + 1];
-    let mut primitive_map = vec![0i64; output_primitives];
+    let px = AFloats::new(output_points as i64, 0.0);
+    let py = AFloats::new(output_points as i64, 0.0);
+    let pz = AFloats::new(output_points as i64, 0.0);
+    let point_map = AInts::new(output_points as i64, 0);
+    let vertex_points = AInts::new(output_vertices as i64, 0);
+    let vertex_map = AInts::new(output_vertices as i64, 0);
+    let primitive_offsets = AInts::new(output_primitives as i64 + 1, 0);
+    let primitive_map = AInts::new(output_primitives as i64, 0);
     let primitive_kinds = vec![0u8; output_primitives];
-    for primitive in 0..source_primitives {
-        cancel::poll(cancel_ref, primitive as i64, 255)?;
+    support::parallel_for(cancel_ref, grain, source_primitives as i64, &|primitive| {
+        let primitive = primitive as usize;
         let first = view.primitive_offsets[primitive] as usize;
         let last = view.primitive_offsets[primitive + 1] as usize;
         let count = last - first;
@@ -228,43 +230,47 @@ fn run_default(
             let vertex = first + local;
             let point = view.vertex_points[vertex] as usize;
             let bottom = vertex * 2;
-            px[bottom] = positions.x[point];
-            py[bottom] = positions.y[point];
-            pz[bottom] = positions.z[point];
-            px[bottom + 1] = positions.x[point] + dx;
-            py[bottom + 1] = positions.y[point] + dy;
-            pz[bottom + 1] = positions.z[point] + dz;
-            point_map[bottom] = point as i64;
-            point_map[bottom + 1] = point as i64;
+            px.set((bottom) as i64, positions.x[point]);
+            py.set((bottom) as i64, positions.y[point]);
+            pz.set((bottom) as i64, positions.z[point]);
+            px.set((bottom + 1) as i64, positions.x[point] + dx);
+            py.set((bottom + 1) as i64, positions.y[point] + dy);
+            pz.set((bottom + 1) as i64, positions.z[point] + dz);
+            point_map.set((bottom) as i64, point as i64);
+            point_map.set((bottom + 1) as i64, point as i64);
             let reversed_vertex = first + count - local - 1;
-            vertex_points[output_vertex + local] = (reversed_vertex * 2) as i64;
-            vertex_map[output_vertex + local] = reversed_vertex as i64;
-            vertex_points[output_vertex + count + local] = (vertex * 2 + 1) as i64;
-            vertex_map[output_vertex + count + local] = vertex as i64;
+            vertex_points.set((output_vertex + local) as i64, (reversed_vertex * 2) as i64);
+            vertex_map.set((output_vertex + local) as i64, reversed_vertex as i64);
+            vertex_points.set((output_vertex + count + local) as i64, (vertex * 2 + 1) as i64);
+            vertex_map.set((output_vertex + count + local) as i64, vertex as i64);
         }
-        primitive_offsets[output_primitive] = output_vertex as i64;
-        primitive_offsets[output_primitive + 1] = (output_vertex + count) as i64;
-        primitive_map[output_primitive] = primitive as i64;
-        primitive_map[output_primitive + 1] = primitive as i64;
+        primitive_offsets.set((output_primitive) as i64, output_vertex as i64);
+        primitive_offsets.set((output_primitive + 1) as i64, (output_vertex + count) as i64);
+        primitive_map.set((output_primitive) as i64, primitive as i64);
+        primitive_map.set((output_primitive + 1) as i64, primitive as i64);
         for local in 0..count {
             let next = (local + 1) % count;
             let current_vertex = first + local;
             let next_vertex = first + next;
             let output = output_vertex + 2 * count + local * 4;
             let output_side = output_primitive + 2 + local;
-            vertex_points[output] = (current_vertex * 2) as i64;
-            vertex_points[output + 1] = (next_vertex * 2) as i64;
-            vertex_points[output + 2] = (next_vertex * 2 + 1) as i64;
-            vertex_points[output + 3] = (current_vertex * 2 + 1) as i64;
-            vertex_map[output] = current_vertex as i64;
-            vertex_map[output + 1] = next_vertex as i64;
-            vertex_map[output + 2] = next_vertex as i64;
-            vertex_map[output + 3] = current_vertex as i64;
-            primitive_offsets[output_side] = output as i64;
-            primitive_map[output_side] = primitive as i64;
+            vertex_points.set((output) as i64, (current_vertex * 2) as i64);
+            vertex_points.set((output + 1) as i64, (next_vertex * 2) as i64);
+            vertex_points.set((output + 2) as i64, (next_vertex * 2 + 1) as i64);
+            vertex_points.set((output + 3) as i64, (current_vertex * 2 + 1) as i64);
+            vertex_map.set((output) as i64, current_vertex as i64);
+            vertex_map.set((output + 1) as i64, next_vertex as i64);
+            vertex_map.set((output + 2) as i64, next_vertex as i64);
+            vertex_map.set((output + 3) as i64, current_vertex as i64);
+            primitive_offsets.set((output_side) as i64, output as i64);
+            primitive_map.set((output_side) as i64, primitive as i64);
         }
-    }
-    primitive_offsets[output_primitives] = output_vertices as i64;
+        Ok(())
+    })?;
+    primitive_offsets.set(output_primitives as i64, output_vertices as i64);
+    let (px, py, pz) = (px.into_vec(), py.into_vec(), pz.into_vec());
+    let (point_map, vertex_points, vertex_map) = (point_map.into_vec(), vertex_points.into_vec(), vertex_map.into_vec());
+    let (primitive_offsets, primitive_map) = (primitive_offsets.into_vec(), primitive_map.into_vec());
     let output_positions = packed::Float3::View::of_owned_exn(px, py, pz)?;
     let output_topology = topology::View::create_validated_owned(
         output_points as i64,
@@ -541,22 +547,28 @@ fn run_general(
                 }
             }
         }
-        let mut invalid_direction = false;
-        for association in 0..association_count {
-            cancel::poll(cancel_ref, association as i64, 16_383)?;
+        let invalid_direction = AtomicBool::new(false);
+        let (dir_x, dir_y, dir_z) =
+            (AFloats::from_slice(&direction_x), AFloats::from_slice(&direction_y), AFloats::from_slice(&direction_z));
+        support::parallel_for(cancel_ref, grain, association_count as i64, &|association| {
+            let association = association as usize;
             let (x, y, z) = (direction_x[association], direction_y[association], direction_z[association]);
             let scale = x.abs().max(y.abs().max(z.abs()));
             if scale == 0.0 || !scale.is_finite() {
-                invalid_direction = true;
+                invalid_direction.store(true, Ordering::Relaxed);
             } else {
                 let (x, y, z) = (x / scale, y / scale, z / scale);
                 let inverse = 1.0 / (x * x + y * y + z * z).sqrt();
-                direction_x[association] = x * inverse;
-                direction_y[association] = y * inverse;
-                direction_z[association] = z * inverse;
+                dir_x.set(association as i64, x * inverse);
+                dir_y.set(association as i64, y * inverse);
+                dir_z.set(association as i64, z * inverse);
             }
-        }
-        if invalid_direction {
+            Ok(())
+        })?;
+        direction_x = dir_x.into_vec();
+        direction_y = dir_y.into_vec();
+        direction_z = dir_z.into_vec();
+        if invalid_direction.load(Ordering::Relaxed) {
             return Err(fail("Rdk_mesh.Poly_extrude.poly_extrude: selected point normals cancel to zero"));
         }
     }
@@ -582,31 +594,33 @@ fn run_general(
     let output_primitives = base_primitives + front_primitives + side_primitives;
     let output_vertices = base_vertices + front_vertices + side_vertices;
     let positions = packed::Float3::View::view(geometry::positions(geometry_value))?;
-    let mut px = vec![0.0f64; output_points];
-    let mut py = vec![0.0f64; output_points];
-    let mut pz = vec![0.0f64; output_points];
-    let mut point_map = vec![0i64; output_points];
-    px[..source_points].copy_from_slice(&positions.x[..source_points]);
-    py[..source_points].copy_from_slice(&positions.y[..source_points]);
-    pz[..source_points].copy_from_slice(&positions.z[..source_points]);
+    let px = AFloats::new(output_points as i64, 0.0);
+    let py = AFloats::new(output_points as i64, 0.0);
+    let pz = AFloats::new(output_points as i64, 0.0);
+    let point_map = AInts::new(output_points as i64, 0);
     for point in 0..source_points {
-        point_map[point] = point as i64;
+        px.set(point as i64, positions.x[point]);
+        py.set(point as i64, positions.y[point]);
+        pz.set(point as i64, positions.z[point]);
+        point_map.set(point as i64, point as i64);
     }
     let new_point_count = output_points - source_points;
-    for local in 0..new_point_count {
-        cancel::poll(cancel_ref, local as i64, 16_383)?;
+    support::parallel_for(cancel_ref, grain, new_point_count as i64, &|local| {
+        let local = local as usize;
         let association = local / divisions_u;
         let layer = local % divisions_u + 1;
         let point = association_sources[association] as usize;
         let t = layer as f64 / divisions as f64;
         let output = source_points + local;
-        px[output] = positions.x[point] + distance * t * direction_x[association];
-        py[output] = positions.y[point] + distance * t * direction_y[association];
-        pz[output] = positions.z[point] + distance * t * direction_z[association];
-        point_map[output] = point as i64;
-    }
-    let mut vertex_points = vec![0i64; output_vertices];
-    let mut vertex_map = vec![0i64; output_vertices];
+        px.set(output as i64, positions.x[point] + distance * t * direction_x[association]);
+        py.set(output as i64, positions.y[point] + distance * t * direction_y[association]);
+        pz.set(output as i64, positions.z[point] + distance * t * direction_z[association]);
+        point_map.set(output as i64, point as i64);
+        Ok(())
+    })?;
+    let (px, py, pz, point_map) = (px.into_vec(), py.into_vec(), pz.into_vec(), point_map.into_vec());
+    let vertex_points = AInts::new(output_vertices as i64, 0);
+    let vertex_map = AInts::new(output_vertices as i64, 0);
     let mut primitive_offsets = vec![0i64; output_primitives + 1];
     let mut primitive_map = vec![0i64; output_primitives];
     let mut primitive_kinds = vec![0u8; output_primitives];
@@ -659,8 +673,8 @@ fn run_general(
         }
     }
     primitive_offsets[output_primitives] = output_vertices as i64;
-    for primitive in 0..source_primitives {
-        cancel::poll(cancel_ref, primitive as i64, 4_095)?;
+    support::parallel_for(cancel_ref, grain, source_primitives as i64, &|primitive| {
+        let primitive = primitive as usize;
         let first = topology_view.primitive_offsets[primitive] as usize;
         let last = topology_view.primitive_offsets[primitive + 1] as usize;
         let base = base_index[primitive];
@@ -668,8 +682,8 @@ fn run_general(
             let output = primitive_offsets[base as usize] as usize;
             for vertex in first..last {
                 let local = vertex - first;
-                vertex_points[output + local] = topology_view.vertex_points[vertex];
-                vertex_map[output + local] = vertex as i64;
+                vertex_points.set((output + local) as i64, topology_view.vertex_points[vertex]);
+                vertex_map.set((output + local) as i64, vertex as i64);
             }
         }
         let front = front_index[primitive];
@@ -680,12 +694,12 @@ fn run_general(
                 let local = vertex - first;
                 let point = topology_view.vertex_points[vertex];
                 let association = pair_find(&association_table, component, point)?;
-                vertex_points[output + local] =
-                    (source_points + association * divisions_u + divisions_u - 1) as i64;
-                vertex_map[output + local] = vertex as i64;
+                vertex_points.set((output + local) as i64, (source_points + association * divisions_u + divisions_u - 1) as i64);
+                vertex_map.set((output + local) as i64, vertex as i64);
             }
         }
-    }
+        Ok(())
+    })?;
     let layer_point = |point: i64, association: usize, layer: usize| -> i64 {
         if layer == 0 {
             point
@@ -694,8 +708,8 @@ fn run_general(
         }
     };
     if output_side {
-        for boundary in 0..boundary_count {
-            cancel::poll(cancel_ref, boundary as i64, 4_095)?;
+        support::parallel_for(cancel_ref, grain, boundary_count as i64, &|boundary| {
+            let boundary = boundary as usize;
             let vertex = boundary_vertices[boundary];
             let next = index_view.next_vertex[vertex] as usize;
             let primitive = index_view.primitive_of_vertex[vertex] as usize;
@@ -706,17 +720,19 @@ fn run_general(
             let next_association = pair_find(&association_table, component, next_point)?;
             for division in 0..divisions_u {
                 let output = side_first_vertex + (boundary * divisions_u + division) * 4;
-                vertex_points[output] = layer_point(point, association, division);
-                vertex_points[output + 1] = layer_point(next_point, next_association, division);
-                vertex_points[output + 2] = layer_point(next_point, next_association, division + 1);
-                vertex_points[output + 3] = layer_point(point, association, division + 1);
-                vertex_map[output] = vertex as i64;
-                vertex_map[output + 1] = next as i64;
-                vertex_map[output + 2] = next as i64;
-                vertex_map[output + 3] = vertex as i64;
+                vertex_points.set(output as i64, layer_point(point, association, division));
+                vertex_points.set(output as i64 + 1, layer_point(next_point, next_association, division));
+                vertex_points.set(output as i64 + 2, layer_point(next_point, next_association, division + 1));
+                vertex_points.set(output as i64 + 3, layer_point(point, association, division + 1));
+                vertex_map.set(output as i64, vertex as i64);
+                vertex_map.set(output as i64 + 1, next as i64);
+                vertex_map.set(output as i64 + 2, next as i64);
+                vertex_map.set(output as i64 + 3, vertex as i64);
             }
-        }
+            Ok(())
+        })?;
     }
+    let (vertex_points, vertex_map) = (vertex_points.into_vec(), vertex_map.into_vec());
     let output_positions = packed::Float3::View::of_owned_exn(px, py, pz)?;
     let output_topology = topology::View::create_validated_owned(
         output_points as i64,
@@ -989,5 +1005,18 @@ mod tests {
         p.grain = Some(0);
         expect_code(run(&p, &quad), "invalid_argument");
         expect_code(run(&Params::new(f64::NAN), &quad), "invalid_geometry");
+    }
+
+    #[test]
+    fn default_extrude_parallel_exact() {
+        use crate::compact_points::fixtures::exact_at_one_and_four;
+        let dense = grid(60, 40);
+        let build = || {
+            let mut p = Params::new(0.5);
+            p.grain = Some(100);
+            run(&p, &dense).unwrap()
+        };
+        let out = exact_at_one_and_four(&build);
+        assert_eq!(geometry::primitive_count(&out), geometry::primitive_count(&dense) * 2 + geometry::vertex_count(&dense));
     }
 }

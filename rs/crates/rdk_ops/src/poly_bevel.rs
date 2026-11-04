@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
+use crate::subdivide_refine::{AFloats, AInts};
 use rdk_core::{
-    attribute, cancel, edge_group, error, face_normals, geometry, group, packed, ragged_ops, topology,
+    attribute, cancel, edge_group, error, face_normals, geometry, group, packed, ragged_ops, support, topology,
     topology_edge_lookup, topology_index, topology_remap,
 };
 
@@ -644,9 +645,11 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
         }
     }
     let corner_storage = corner_point.clone();
+    let (pxa, pya, pza) = (AFloats::from_slice(&px), AFloats::from_slice(&py), AFloats::from_slice(&pz));
+    let pma = AInts::from_slice(&point_map);
     if touched_count > 0 {
-        for vertex in 0..vertex_count {
-            cancel::poll(cancel_ref, vertex as i64, 16_383)?;
+        support::parallel_for(cancel_ref, grain, vertex_count as i64, &|vertex| {
+            let vertex = vertex as usize;
             let output = corner_storage[vertex];
             if output >= 0 {
                 let output = output as usize;
@@ -673,12 +676,13 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
                         "{PREFIX}: corner position for vertex {vertex} is not finite"
                     )));
                 }
-                px[output] = x;
-                py[output] = y;
-                pz[output] = z;
-                point_map[output] = point as i64;
+                pxa.set(output as i64, x);
+                pya.set(output as i64, y);
+                pza.set(output as i64, z);
+                pma.set(output as i64, point as i64);
             }
-        }
+            Ok(())
+        })?;
     }
     for vertex in 0..vertex_count {
         if corner_storage[vertex] >= 0 {
@@ -714,8 +718,8 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
         }
     };
     if divisions_u > 1 && selected_count > 0 {
-        for edge in 0..edge_count {
-            cancel::poll(cancel_ref, edge as i64, 4_095)?;
+        support::parallel_for(cancel_ref, (grain / (2 * (divisions - 1)).max(1)).max(1), edge_count as i64, &|edge| {
+            let edge = edge as usize;
             if edge_selected(edge as i64) {
                 for endpoint in 0..2 {
                     for layer in 1..divisions_u {
@@ -726,18 +730,18 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
                         let source_point = topology_view.vertex_points[side0] as usize;
                         let t = layer as f64 / divisions as f64;
                         let one = 1.0 - t;
-                        let lx = one * px[q0] + t * px[q1];
-                        let ly = one * py[q0] + t * py[q1];
-                        let lz = one * pz[q0] + t * pz[q1];
+                        let lx = one * pxa.get(q0 as i64) + t * pxa.get(q1 as i64);
+                        let ly = one * pya.get(q0 as i64) + t * pya.get(q1 as i64);
+                        let lz = one * pza.get(q0 as i64) + t * pza.get(q1 as i64);
                         let (x, y, z) = match params.shape {
                             Shape::BevelChamfer => (lx, ly, lz),
                             Shape::BevelRound { convexity } => {
-                                let ax = px[q0] - positions.x[source_point];
-                                let ay = py[q0] - positions.y[source_point];
-                                let az = pz[q0] - positions.z[source_point];
-                                let bx = px[q1] - positions.x[source_point];
-                                let by = py[q1] - positions.y[source_point];
-                                let bz = pz[q1] - positions.z[source_point];
+                                let ax = pxa.get(q0 as i64) - positions.x[source_point];
+                                let ay = pya.get(q0 as i64) - positions.y[source_point];
+                                let az = pza.get(q0 as i64) - positions.z[source_point];
+                                let bx = pxa.get(q1 as i64) - positions.x[source_point];
+                                let by = pya.get(q1 as i64) - positions.y[source_point];
+                                let bz = pza.get(q1 as i64) - positions.z[source_point];
                                 let al = length3(ax, ay, az);
                                 let bl = length3(bx, by, bz);
                                 let dot = if al == 0.0 || bl == 0.0 {
@@ -755,9 +759,9 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
                                             / denominator
                                     }
                                 };
-                                let rx = arc(px[q0], px[q1], positions.x[source_point]);
-                                let ry = arc(py[q0], py[q1], positions.y[source_point]);
-                                let rz = arc(pz[q0], pz[q1], positions.z[source_point]);
+                                let rx = arc(pxa.get(q0 as i64), pxa.get(q1 as i64), positions.x[source_point]);
+                                let ry = arc(pya.get(q0 as i64), pya.get(q1 as i64), positions.y[source_point]);
+                                let rz = arc(pza.get(q0 as i64), pza.get(q1 as i64), positions.z[source_point]);
                                 (
                                     lx + convexity * (rx - lx),
                                     ly + convexity * (ry - ly),
@@ -765,15 +769,17 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
                                 )
                             }
                         };
-                        px[output] = x;
-                        py[output] = y;
-                        pz[output] = z;
-                        point_map[output] = source_point as i64;
+                        pxa.set(output as i64, x);
+                        pya.set(output as i64, y);
+                        pza.set(output as i64, z);
+                        pma.set(output as i64, source_point as i64);
                     }
                 }
             }
-        }
+            Ok(())
+        })?;
     }
+    let (mut px, mut py, mut pz, mut point_map) = (pxa.into_vec(), pya.into_vec(), pza.into_vec(), pma.into_vec());
     let mut skip_corner_point = vec![false; point_count];
     for point in 0..point_count {
         let first = index.point_edge_offsets[point] as usize;
@@ -925,10 +931,10 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
     let strip_vertices = selected_count * divisions_u * 4;
     let output_primitives = primitive_count + strip_primitives + patch_count;
     let output_vertices = base_vertices + strip_vertices + patch_vertices;
-    let mut vertex_points = vec![0i64; output_vertices];
-    let mut vertex_left = vec![0i64; output_vertices];
-    let mut vertex_right = vec![0i64; output_vertices];
-    let mut vertex_weight = vec![0.0f64; output_vertices];
+    let vertex_points = AInts::new(output_vertices as i64, 0);
+    let vertex_left = AInts::new(output_vertices as i64, 0);
+    let vertex_right = AInts::new(output_vertices as i64, 0);
+    let vertex_weight = AFloats::new(output_vertices as i64, 0.0);
     let mut primitive_offsets = vec![0i64; output_primitives + 1];
     let mut primitive_kinds = vec![0u8; output_primitives];
     let mut primitive_map = vec![0i64; output_primitives];
@@ -939,34 +945,37 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
         primitive_map[primitive] = primitive as i64;
         primitive_kinds[primitive] = topology_view.primitive_kinds[primitive];
     }
-    for primitive in 0..primitive_count {
-        cancel::poll(cancel_ref, primitive as i64, 4_095)?;
+    support::parallel_for(cancel_ref, grain, primitive_count as i64, &|primitive| {
+        let primitive = primitive as usize;
         let first = topology_view.primitive_offsets[primitive] as usize;
         let last = topology_view.primitive_offsets[primitive + 1] as usize;
-        let mut output = base_offsets[primitive];
+        let mut output = base_offsets[primitive] as i64;
         for vertex in first..last {
-            vertex_points[output] = base_point(vertex);
-            vertex_left[output] = vertex as i64;
-            vertex_right[output] = vertex as i64;
+            vertex_points.set(output, base_point(vertex));
+            vertex_left.set(output, vertex as i64);
+            vertex_right.set(output, vertex as i64);
             output += 1;
             let next = index.next_vertex[vertex];
             let count = insert_count[vertex];
             if count > 0 {
-                vertex_points[output] = insert_point0[vertex];
-                vertex_left[output] = vertex as i64;
-                vertex_right[output] = next;
-                vertex_weight[output] = insert_weight0[vertex];
+                vertex_points.set(output, insert_point0[vertex]);
+                vertex_left.set(output, vertex as i64);
+                vertex_right.set(output, next);
+                vertex_weight.set(output, insert_weight0[vertex]);
                 output += 1;
             }
             if count > 1 {
-                vertex_points[output] = insert_point1[vertex];
-                vertex_left[output] = vertex as i64;
-                vertex_right[output] = next;
-                vertex_weight[output] = insert_weight1[vertex];
+                vertex_points.set(output, insert_point1[vertex]);
+                vertex_left.set(output, vertex as i64);
+                vertex_right.set(output, next);
+                vertex_weight.set(output, insert_weight1[vertex]);
                 output += 1;
             }
         }
-    }
+        Ok(())
+    })?;
+    let (mut vertex_points, mut vertex_left, mut vertex_right, mut vertex_weight) =
+        (vertex_points.into_vec(), vertex_left.into_vec(), vertex_right.into_vec(), vertex_weight.into_vec());
     let strip_first_primitive = primitive_count;
     let strip_first_vertex = base_vertices;
     for edge in 0..edge_count {

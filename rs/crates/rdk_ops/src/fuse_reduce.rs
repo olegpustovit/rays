@@ -1,4 +1,5 @@
-use rdk_core::{attribute, cancel, edge_group, error, geometry, packed, topology, topology_index};
+use crate::subdivide_refine::{AFloats, AInts};
+use rdk_core::{attribute, cancel, edge_group, error, geometry, packed, support, topology, topology_index};
 use rdk_geom::point_clusters::Clusters;
 use rdk_geom::point_grid::{float_max, float_min};
 
@@ -42,20 +43,38 @@ fn fail(message: String) -> error::T {
         .unwrap_or_else(|e| e)
 }
 
-fn average_plane(clusters: &Clusters, source: &[f64]) -> Vec<f64> {
-    (0..clusters.count as usize).map(|cluster| average_float(clusters, source, cluster)).collect()
+fn average_plane(
+    cancel_value: Option<&cancel::T>,
+    grain: i64,
+    clusters: &Clusters,
+    source: &[f64],
+) -> Result<Vec<f64>, error::T> {
+    let output = AFloats::new(clusters.count, 0.0);
+    support::parallel_for(cancel_value, (grain / 8).max(1), clusters.count, &|cluster| {
+        output.set(cluster, average_float(clusters, source, cluster as usize));
+        Ok(())
+    })?;
+    Ok(output.into_vec())
 }
 
-fn sorted_reduction(clusters: &Clusters, source: &[f64], median: bool) -> Vec<f64> {
-    let mut values: Vec<f64> = clusters.members.iter().map(|&point| source[point as usize]).collect();
-    let mut points = clusters.members.clone();
-    let mut output = vec![0.0; clusters.count as usize];
-    for cluster in 0..clusters.count as usize {
+fn sorted_reduction(
+    cancel_value: Option<&cancel::T>,
+    grain: i64,
+    clusters: &Clusters,
+    source: &[f64],
+    median: bool,
+) -> Result<Vec<f64>, error::T> {
+    let output = AFloats::new(clusters.count, 0.0);
+    support::parallel_for(cancel_value, (grain / 8).max(1), clusters.count, &|cluster| {
+        let cluster = cluster as usize;
         let first = clusters.offsets[cluster] as usize;
         let last = clusters.offsets[cluster + 1] as usize;
+        let mut values: Vec<f64> = clusters.members[first..last].iter().map(|&point| source[point as usize]).collect();
+        let mut points = clusters.members[first..last].to_vec();
+        let (first, last) = (0usize, last - first);
         sort_range_f64(&mut values, &mut points, first, last);
         if median {
-            output[cluster] = values[first + (last - first) / 2];
+            output.set(cluster as i64, values[first + (last - first) / 2]);
         } else {
             let mut best_count = 0usize;
             let mut best_first_point = i64::MAX;
@@ -73,14 +92,17 @@ fn sorted_reduction(clusters: &Clusters, source: &[f64], median: bool) -> Vec<f6
                     run_first = slot;
                 }
             }
-            output[cluster] = best_value;
+            output.set(cluster as i64, best_value);
         }
-    }
+        Ok(())
+    })?;
     let _ = compare_float_entry;
-    output
+    Ok(output.into_vec())
 }
 
 fn numeric_reduction(
+    cancel_value: Option<&cancel::T>,
+    grain: i64,
     clusters: &Clusters,
     source: &[f64],
     position: Position,
@@ -91,15 +113,16 @@ fn numeric_reduction(
         Position::GreatestPoint => Ok((0..clusters.count as usize)
             .map(|cluster| source[clusters.members[clusters.offsets[cluster + 1] as usize - 1] as usize])
             .collect()),
-        Position::Average => Ok(average_plane(clusters, source)),
-        Position::Median => Ok(sorted_reduction(clusters, source, true)),
-        Position::Mode => Ok(sorted_reduction(clusters, source, false)),
+        Position::Average => average_plane(cancel_value, grain, clusters, source),
+        Position::Median => sorted_reduction(cancel_value, grain, clusters, source, true),
+        Position::Mode => sorted_reduction(cancel_value, grain, clusters, source, false),
         Position::MinimumWeight | Position::MaximumWeight => {
             Err(fail("Rdk.Fuse_reduce.fuse: weight positions select a point before reduction".to_owned()))
         }
         _ => {
-            let mut output = vec![0.0; clusters.count as usize];
-            for cluster in 0..clusters.count as usize {
+            let output = AFloats::new(clusters.count, 0.0);
+            support::parallel_for(cancel_value, (grain / 8).max(1), clusters.count, &|cluster| {
+                let cluster = cluster as usize;
                 let first = clusters.offsets[cluster] as usize;
                 let last = clusters.offsets[cluster + 1] as usize;
                 let item = |slot: usize| source[clusters.members[slot] as usize];
@@ -162,9 +185,10 @@ fn numeric_reduction(
                         }
                     }
                 }
-                output[cluster] = value;
-            }
-            Ok(output)
+                output.set(cluster as i64, value);
+                Ok(())
+            })?;
+            Ok(output.into_vec())
         }
     }
 }
@@ -266,7 +290,7 @@ fn reduce(
     let cluster_plane = |source: &[f64]| -> Result<Vec<f64>, error::T> {
         match &selected {
             Some(mapping) => Ok(select_f64(source, mapping)),
-            None => numeric_reduction(clusters, source, params.position, weights.as_deref()),
+            None => numeric_reduction(cancel_value, params.grain, clusters, source, params.position, weights.as_deref()),
         }
     };
     let px = expand_f64(clusters, compact, cluster_plane(&positions.x)?);
@@ -288,11 +312,12 @@ fn reduce(
     let output_topology = if !compact && !rewire {
         source_topology_value.clone()
     } else {
-        let mut vertex_points = vec![0i64; geometry::vertex_count(geometry_value) as usize];
-        for vertex in 0..vertex_points.len() {
-            cancel::poll(cancel_value, vertex as i64, 16383)?;
-            vertex_points[vertex] = point_map[source_topology.vertex_points[vertex] as usize];
-        }
+        let vertex_points = AInts::new(geometry::vertex_count(geometry_value), 0);
+        support::parallel_for(cancel_value, params.grain, geometry::vertex_count(geometry_value), &|vertex| {
+            vertex_points.set(vertex, point_map[source_topology.vertex_points[vertex as usize] as usize]);
+            Ok(())
+        })?;
+        let vertex_points = vertex_points.into_vec();
         topology::View::create_validated_owned(
             if compact { clusters.count } else { source_count as i64 },
             vertex_points,
@@ -470,5 +495,37 @@ mod tests {
         cancel::cancel(&token);
         let failure = apply(Some(&token), &params(Position::First, true, true), &clusters(), &line()).err().unwrap();
         assert_eq!(error::code(&failure), "cancelled");
+    }
+
+    #[test]
+    fn parallel_exact_at_scale() {
+        let (n, k) = (30_000i64, 10_000i64);
+        let mut members = Vec::new();
+        let mut offsets = vec![0i64];
+        for cluster in 0..k {
+            for j in 0..n / k {
+                members.push(cluster + j * k);
+            }
+            offsets.push(members.len() as i64);
+        }
+        let big = Clusters {
+            count: k,
+            of_point: (0..n).map(|p| p % k).collect(),
+            offsets,
+            members,
+            representatives: (0..k).collect(),
+        };
+        let x: Vec<f64> = (0..n).map(|p| ((p * 7919) % 101) as f64 * 0.37).collect();
+        let y: Vec<f64> = (0..n).map(|p| ((p * 31) % 17) as f64).collect();
+        let z: Vec<f64> = (0..n).map(|p| (p % 5) as f64 * 0.25).collect();
+        let g = geom(&x, &y, &z, &[0, 1, 2], &[0, 3], None);
+        let g = with_attr(&g, Owner::Point, "w", Storage::Float((0..n).map(|p| 1.0 + (p % 5) as f64).collect()));
+        for position in [Position::Average, Position::Median, Position::Mode, Position::Sum, Position::RootMeanSquare, Position::WeightedAverage] {
+            let mut p = params(position, true, true);
+            p.grain = 256;
+            p.weight_attribute = Some("w".to_owned());
+            let out = exact_at_one_and_four(&|| apply(None, &p, &big, &g).unwrap());
+            assert_eq!(geometry::point_count(&out), k, "{position:?}");
+        }
     }
 }

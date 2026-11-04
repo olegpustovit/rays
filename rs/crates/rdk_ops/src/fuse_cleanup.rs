@@ -1,5 +1,6 @@
+use crate::subdivide_refine::{ABytes, AInts};
 use rdk_core::{
-    attribute, cancel, edge_group, error, geometry, group, packed, topology, topology_index, topology_remap,
+    attribute, cancel, edge_group, error, geometry, group, packed, support, topology, topology_index, topology_remap,
 };
 
 const OCAML_MAX_INT: i64 = (1i64 << 62) - 1;
@@ -92,11 +93,10 @@ pub fn apply_with_mapping(
     if !remove_degenerate_primitives && !remove_all_unused_points {
         return Ok((geometry_value.clone(), (0..source_points as i64).collect()));
     }
-    let mut keep_vertex = vec![false; source_vertices];
-    let mut retained_counts = vec![0i64; source_primitives];
-    // ponytail: serial primitive loops; every primitive writes only its own slots, so results match the parallel original.
-    for primitive in 0..source_primitives {
-        cancel::poll(cancel_value, primitive as i64, 4095)?;
+    let keep_vertex = ABytes::new(source_vertices as i64, 0);
+    let retained_counts = AInts::new(source_primitives as i64, 0);
+    support::parallel_for(cancel_value, grain, source_primitives as i64, &|primitive| {
+        let primitive = primitive as usize;
         let first = source.primitive_offsets[primitive];
         let last = source.primitive_offsets[primitive + 1];
         if remove_degenerate_primitives {
@@ -107,7 +107,7 @@ pub fn apply_with_mapping(
             for vertex in first..last {
                 let point = source.vertex_points[vertex as usize];
                 if retained == 0 || point != previous_point {
-                    keep_vertex[vertex as usize] = true;
+                    keep_vertex.set(vertex, 1);
                     if retained == 0 {
                         first_vertex = vertex;
                     }
@@ -121,19 +121,22 @@ pub fn apply_with_mapping(
                 && retained > 1
                 && source.vertex_points[first_vertex as usize] == source.vertex_points[last_vertex as usize]
             {
-                keep_vertex[last_vertex as usize] = false;
+                keep_vertex.set(last_vertex, 0);
                 retained -= 1;
             }
             if retained >= minimum_vertices(kind) {
-                retained_counts[primitive] = retained;
+                retained_counts.set(primitive as i64, retained);
             }
         } else {
-            retained_counts[primitive] = last - first;
+            retained_counts.set(primitive as i64, last - first);
             for vertex in first..last {
-                keep_vertex[vertex as usize] = true;
+                keep_vertex.set(vertex, 1);
             }
         }
-    }
+        Ok(())
+    })?;
+    let keep_vertex = keep_vertex.into_vec();
+    let retained_counts = retained_counts.into_vec();
     let mut primitive_target = vec![-1i64; source_primitives];
     let mut output_vertex_first = vec![0i64; source_primitives];
     let mut output_primitives = 0i64;
@@ -151,29 +154,34 @@ pub fn apply_with_mapping(
             output_vertices += count;
         }
     }
-    let mut vertex_map = vec![0i64; output_vertices as usize];
-    let mut primitive_map = vec![0i64; output_primitives as usize];
-    let mut vertex_points = vec![0i64; output_vertices as usize];
-    let mut primitive_offsets = vec![0i64; output_primitives as usize + 1];
-    let mut primitive_kinds = vec![0u8; output_primitives as usize];
-    for primitive in 0..source_primitives {
-        cancel::poll(cancel_value, primitive as i64, 4095)?;
+    let vertex_map = AInts::new(output_vertices, 0);
+    let primitive_map = AInts::new(output_primitives, 0);
+    let vertex_points = AInts::new(output_vertices, 0);
+    let primitive_offsets = AInts::new(output_primitives + 1, 0);
+    let primitive_kinds = ABytes::new(output_primitives, 0);
+    support::parallel_for(cancel_value, grain, source_primitives as i64, &|primitive| {
+        let primitive = primitive as usize;
         let target = primitive_target[primitive];
         if target >= 0 {
-            let target = target as usize;
-            let mut output = output_vertex_first[primitive] as usize;
-            primitive_map[target] = primitive as i64;
-            primitive_kinds[target] = source.primitive_kinds[primitive];
+            let mut output = output_vertex_first[primitive];
+            primitive_map.set(target, primitive as i64);
+            primitive_kinds.set(target, source.primitive_kinds[primitive]);
             for vertex in source.primitive_offsets[primitive]..source.primitive_offsets[primitive + 1] {
-                if keep_vertex[vertex as usize] {
-                    vertex_map[output] = vertex;
-                    vertex_points[output] = source.vertex_points[vertex as usize];
+                if keep_vertex[vertex as usize] != 0 {
+                    vertex_map.set(output, vertex);
+                    vertex_points.set(output, source.vertex_points[vertex as usize]);
                     output += 1;
                 }
             }
-            primitive_offsets[target + 1] = output as i64;
+            primitive_offsets.set(target + 1, output);
         }
-    }
+        Ok(())
+    })?;
+    let vertex_map = vertex_map.into_vec();
+    let primitive_map = primitive_map.into_vec();
+    let vertex_points = vertex_points.into_vec();
+    let primitive_offsets = primitive_offsets.into_vec();
+    let primitive_kinds = primitive_kinds.into_vec();
     let (point_map, old_to_new): (Vec<i64>, Vec<i64>) =
         if !remove_all_unused_points && !remove_unused_points_from_degenerate_primitives {
             ((0..source_points as i64).collect(), (0..source_points as i64).collect())
@@ -213,15 +221,20 @@ pub fn apply_with_mapping(
     if point_identity && !topology_changed {
         return Ok((geometry_value.clone(), old_to_new));
     }
-    if !point_identity {
-        for vertex in 0..output_vertices as usize {
-            let point = old_to_new[vertex_points[vertex] as usize];
+    let vertex_points = if point_identity {
+        vertex_points
+    } else {
+        let remapped = AInts::new(output_vertices, 0);
+        support::parallel_for(cancel_value, grain, output_vertices, &|vertex| {
+            let point = old_to_new[vertex_points[vertex as usize] as usize];
             if point < 0 {
                 return Err(fail("cleanup retained a deleted point"));
             }
-            vertex_points[vertex] = point;
-        }
-    }
+            remapped.set(vertex, point);
+            Ok(())
+        })?;
+        remapped.into_vec()
+    };
     let output_topology = topology::View::create_validated_owned(
         point_map.len() as i64,
         vertex_points,
@@ -357,5 +370,33 @@ mod tests {
         let token = cancel::create();
         cancel::cancel(&token);
         assert_eq!(error::code(&apply(Some(&token), 1, true, false, false, &source).err().unwrap()), "cancelled");
+    }
+
+    #[test]
+    fn parallel_exact() {
+        // 1500 copies of the degenerate fixture: 6000 primitives cross the grain of 64 many times.
+        let copies = 1500i64;
+        let (mut x, mut vp, mut offsets, mut kinds) = (Vec::new(), Vec::new(), vec![0i64], Vec::new());
+        let one_vp = [0i64, 0, 1, 2, 0, 1, 2, 0, 3, 3, 3, 4, 4];
+        let one_offsets = [4i64, 8, 11, 13];
+        for copy in 0..copies {
+            x.extend((0..6).map(|p| (copy * 6 + p) as f64));
+            vp.extend(one_vp.iter().map(|p| p + copy * 6));
+            offsets.extend(one_offsets.iter().map(|o| o + copy * 13));
+            kinds.extend([PrimitiveKind::Polygon, PrimitiveKind::Polygon, PrimitiveKind::Polygon, PrimitiveKind::OpenPolyline]);
+        }
+        let zeros = vec![0.0; x.len()];
+        let g = geom(&x, &zeros, &zeros, &vp, &offsets, Some(kinds));
+        let g = with_attr(&g, Owner::Point, "pid", Storage::Int((0..x.len() as i64).collect()));
+        let g = with_attr(&g, Owner::Vertex, "vid", Storage::Int((0..vp.len() as i64).collect()));
+        let mappings = std::sync::Mutex::new(Vec::new());
+        let one_four = exact_at_one_and_four(&|| {
+            let (out, map) = apply_with_mapping(None, 64, true, true, false, &g).unwrap();
+            mappings.lock().unwrap().push(map);
+            out
+        });
+        let maps = mappings.into_inner().unwrap();
+        assert!(maps[0] == maps[1], "point mapping drift");
+        assert_eq!(geometry::point_count(&one_four), 4 * copies);
     }
 }

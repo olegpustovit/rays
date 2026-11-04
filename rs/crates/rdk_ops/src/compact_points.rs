@@ -1,5 +1,6 @@
+use crate::subdivide_refine::AInts;
 use rdk_core::{
-    attribute, cancel, error, geometry, group, packed, topology, topology_remap,
+    attribute, cancel, error, geometry, group, packed, support, topology, topology_remap,
 };
 
 fn make(operation: &str, code: &str, message: String) -> error::T {
@@ -45,8 +46,13 @@ fn compact(
     let py = topology_remap::select_float(cancel_value, grain, None, &new_to_old, &positions.y)?;
     let pz = topology_remap::select_float(cancel_value, grain, None, &new_to_old, &positions.z)?;
     let positions = packed::Float3::View::of_owned_exn(px, py, pz)?;
-    // ponytail: serial remap of vertex points; the result is the same as the parallel loop.
-    let vertex_points: Vec<i64> = source.vertex_points.iter().map(|&p| old_to_new[p as usize]).collect();
+    let vertex_count = source.vertex_points.len() as i64;
+    let remapped = AInts::new(vertex_count, 0);
+    support::parallel_for(cancel_value, grain, vertex_count, &|vertex| {
+        remapped.set(vertex, old_to_new[source.vertex_points[vertex as usize] as usize]);
+        Ok(())
+    })?;
+    let vertex_points = remapped.into_vec();
     let new_topology = topology::View::create_validated_owned(
         retained,
         vertex_points,
@@ -254,6 +260,75 @@ pub mod fixtures {
         }
     }
 
+    /// Runs `work` under `domains` worker domains and returns its geometry.
+    pub fn at_domains(domains: i64, work: &(dyn Fn() -> geometry::T + Sync)) -> geometry::T {
+        let slot: std::sync::Mutex<Option<geometry::T>> = std::sync::Mutex::new(None);
+        parallel::run_unit(Some(domains), &|| {
+            *slot.lock().unwrap() = Some(work());
+            Ok(())
+        })
+        .unwrap();
+        slot.into_inner().unwrap().unwrap()
+    }
+
+    /// The one-domain result of `work`, after asserting four domains give the same geometry.
+    pub fn exact_at_one_and_four(work: &(dyn Fn() -> geometry::T + Sync)) -> geometry::T {
+        let one = at_domains(1, work);
+        let four = at_domains(4, work);
+        assert!(geometry_signature(&one) == geometry_signature(&four), "one/four-domain output drift");
+        one
+    }
+
+    /// Runs `work` under `domains` worker domains and returns its value.
+    pub fn at_domains_any<T: Send>(domains: i64, work: &(dyn Fn() -> T + Sync)) -> T {
+        let slot: std::sync::Mutex<Option<T>> = std::sync::Mutex::new(None);
+        parallel::run_unit(Some(domains), &|| {
+            *slot.lock().unwrap() = Some(work());
+            Ok(())
+        })
+        .unwrap();
+        slot.into_inner().unwrap().unwrap()
+    }
+
+    /// The one-domain value of `work`, after asserting four domains give an equal value.
+    pub fn same_at_one_and_four<T: Send + PartialEq>(work: &(dyn Fn() -> T + Sync)) -> T {
+        let one = at_domains_any(1, work);
+        let four = at_domains_any(4, work);
+        assert!(one == four, "one/four-domain output drift");
+        one
+    }
+
+    /// Bit-exact text of positions, topology, attributes and groups (NaN-safe, unlike `geometry_equal`).
+    pub fn geometry_signature(g: &geometry::T) -> String {
+        let (x, y, z) = positions(g);
+        let bits = |v: &Vec<f64>| v.iter().map(|f| f.to_bits()).collect::<Vec<_>>();
+        let attributes: Vec<String> = geometry::attributes(g).iter().map(|a| format!("{:?}{}", attribute::owner(a), attribute_signature(a))).collect();
+        let groups: Vec<String> = geometry::groups(g)
+            .iter()
+            .map(|g| format!("{}:{:?}", group::name(g), (0..group::length(g)).filter(|&e| group::mem(e, g)).collect::<Vec<_>>()))
+            .collect();
+        format!("{:?}{:?}{:?}{:?}{attributes:?}{groups:?}", bits(&x), bits(&y), bits(&z), topo(g))
+    }
+
+    /// Exact text of a stored attribute (floats as bit patterns) for equality checks.
+    pub fn attribute_signature(item: &attribute::T) -> String {
+        let storage = match attribute::View::storage(item).unwrap() {
+            attribute::Storage::Float(v) => format!("{:?}", v.iter().map(|x| x.to_bits()).collect::<Vec<_>>()),
+            attribute::Storage::Int(v) => format!("{v:?}"),
+            attribute::Storage::Text(v) => format!("{v:?}"),
+            attribute::Storage::FloatArray(a) => {
+                let v = packed::FloatArray::View::view(a);
+                format!("{:?}{:?}", v.offsets, v.values.iter().map(|x| x.to_bits()).collect::<Vec<_>>())
+            }
+            attribute::Storage::IntArray(a) => {
+                let v = packed::IntArray::View::view(a);
+                format!("{:?}{:?}", v.offsets, v.values)
+            }
+            _ => "other".to_owned(),
+        };
+        format!("{}:{storage}", attribute::name(item))
+    }
+
     pub fn geometry_equal(left: &geometry::T, right: &geometry::T) -> bool {
         if positions(left) != positions(right) || topo(left) != topo(right) {
             return false;
@@ -322,5 +397,19 @@ mod tests {
         let failure = err(run(Some(&token), None, &g));
         assert_eq!(error::code(&failure), "cancelled");
         assert_eq!(error::code(&err(run(None, Some(0), &g))), "invalid_geometry");
+    }
+
+    #[test]
+    fn parallel_exact() {
+        let g = grid(150, 150, 2.0, true);
+        let (x, y, z) = positions(&g);
+        let (vertex_points, offsets, _) = topo(&g);
+        let shift = |v: &Vec<f64>| std::iter::once(9.0).chain(v.iter().copied()).collect::<Vec<f64>>();
+        let vp: Vec<i64> = vertex_points.iter().map(|p| p + 1).collect();
+        let g = geom(&shift(&x), &shift(&y), &shift(&z), &vp, &offsets, None);
+        let count = geometry::point_count(&g);
+        let g = with_attr(&g, Owner::Point, "id", Storage::Int((0..count).collect()));
+        let out = exact_at_one_and_four(&|| run(None, Some(1000), &g).unwrap());
+        assert_eq!(geometry::point_count(&out), count - 1);
     }
 }

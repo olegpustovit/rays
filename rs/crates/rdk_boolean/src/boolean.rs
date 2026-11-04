@@ -874,6 +874,9 @@ mod tests {
         let mut params = front(overlap);
         params.seam_points = SeamPoints::SplitSeamPoints;
         let split = run(&params, &left).unwrap();
+        let split_one = with_domains(1, &|| signature(&run(&params, &left).unwrap()));
+        let split_four = with_domains(4, &|| signature(&run(&params, &left).unwrap()));
+        assert!(split_one == split_four, "split seam points differ between domain counts");
         assert!(
             geometry::point_count(&split) > geometry::point_count(&shared)
                 && geometry::primitive_count(&split) == geometry::primitive_count(&shared),

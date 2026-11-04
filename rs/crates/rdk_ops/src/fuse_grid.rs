@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use rdk_core::{attribute, cancel, error, geometry, group, packed};
+use crate::subdivide_refine::AFloats;
+use rdk_core::{attribute, cancel, error, geometry, group, packed, support};
 use rdk_geom::point_clusters::{self, Clusters};
 use rdk_geom::point_snap;
 
@@ -437,18 +438,17 @@ fn fuse_advanced(params: &Params, geometry_value: &geometry::T) -> Result<geomet
     let output = if moved == 0 {
         geometry_value.clone()
     } else {
-        let mut x = source.x.to_vec();
-        let mut y = source.y.to_vec();
-        let mut z = source.z.to_vec();
-        for point in 0..count as usize {
-            cancel::poll(cancel_value, point as i64, 4095)?;
-            let destination = destinations[point];
+        let (x, y, z) = (AFloats::from_slice(&source.x), AFloats::from_slice(&source.y), AFloats::from_slice(&source.z));
+        support::parallel_for(cancel_value, grain, count, &|point| {
+            let destination = destinations[point as usize];
             if destination >= 0 {
-                x[point] = target_positions.x[destination as usize];
-                y[point] = target_positions.y[destination as usize];
-                z[point] = target_positions.z[destination as usize];
+                x.set(point, target_positions.x[destination as usize]);
+                y.set(point, target_positions.y[destination as usize]);
+                z.set(point, target_positions.z[destination as usize]);
             }
-        }
+            Ok(())
+        })?;
+        let (x, y, z) = (x.into_vec(), y.into_vec(), z.into_vec());
         let moved_geometry =
             geometry::with_positions(packed::Float3::View::of_owned_exn(x, y, z)?, geometry_value)?;
         let moved_geometry = geometry::without_attribute(attribute::Owner::Point, "N", &moved_geometry);

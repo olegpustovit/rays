@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
+use crate::subdivide_refine::{ABytes, AFloats, AInts};
 use rdk_core::{
-    attribute, cancel, edge_group, element_selection, error, geometry, group, packed, ragged_ops,
+    attribute, cancel, edge_group, element_selection, error, geometry, group, packed, ragged_ops, support,
     topology, topology_index,
 };
 use rdk_geom::contour_triangulation;
@@ -754,15 +755,14 @@ fn fast_plan(
     grain: i64,
     primitive_count: usize,
 ) -> Result<Option<(usize, Vec<i64>, Vec<i64>)>, error::T> {
-    let _ = grain;
     if ctx.fill || !ctx.primitive_kinds.iter().all(|&kind| kind == 0) {
         return Ok(None);
     }
     let slots = if ctx.keep == Keep::All { 2 } else { 1 };
     let candidate_count = primitive_count * slots;
-    let mut candidate_corners = vec![0i64; candidate_count];
-    for candidate in 0..candidate_count {
-        ctx.poll(candidate, 4095)?;
+    let candidate_corners = AInts::new(candidate_count as i64, 0);
+    support::parallel_for(ctx.cancel_ref(), (grain / 8).max(1), candidate_count as i64, &|candidate| {
+        let candidate = candidate as usize;
         let primitive = candidate / slots;
         let side = match ctx.keep {
             Keep::Above => 0,
@@ -773,7 +773,7 @@ fn fast_plan(
         let last = ctx.primitive_offsets[primitive + 1] as usize;
         if !ctx.primitive_selected(primitive) {
             if slots == 1 || candidate % slots == 0 {
-                candidate_corners[candidate] = (last - first) as i64;
+                candidate_corners.set(candidate as i64, (last - first) as i64);
             }
         } else {
             let arity = last - first;
@@ -794,7 +794,7 @@ fn fast_plan(
                 (first..last).any(|vertex| ctx.classified_distance[ctx.vertex_points[vertex] as usize] < 0.0)
             };
             if repeated {
-                candidate_corners[candidate] = -1;
+                candidate_corners.set(candidate as i64, -1);
             } else if enabled {
                 let mut count: i64 = 0;
                 let mut inside_runs = 0;
@@ -812,16 +812,21 @@ fn fast_plan(
                     }
                     previous = current;
                 }
-                candidate_corners[candidate] = if inside_runs > 1 {
-                    -1
-                } else if count >= 3 {
-                    count
-                } else {
-                    0
-                };
+                candidate_corners.set(
+                    candidate as i64,
+                    if inside_runs > 1 {
+                        -1
+                    } else if count >= 3 {
+                        count
+                    } else {
+                        0
+                    },
+                );
             }
         }
-    }
+        Ok(())
+    })?;
+    let mut candidate_corners = candidate_corners.into_vec();
     if candidate_corners.iter().any(|&count| count < 0) {
         return Ok(None);
     }
@@ -844,37 +849,51 @@ fn fast_plan(
 
 fn fill_fast_plan(
     ctx: &Ctx,
+    grain: i64,
     b: &mut Builder,
     slots: usize,
     candidate_output: &[i64],
 ) -> Result<(), error::T> {
-    for (candidate, &encoded) in candidate_output.iter().enumerate() {
+    let total = b.tokens.len() as i64;
+    let output_count = b.kinds.len() as i64;
+    let tokens = AInts::new(total, 0);
+    let corner_a = AInts::new(total, -1);
+    let corner_b = AInts::new(total, -1);
+    let corner_t = AFloats::new(total, 0.0);
+    let kinds = ABytes::new(output_count, 0);
+    let primitive_source = AInts::new(output_count, -1);
+    let primitive_side = AInts::new(output_count, 0);
+    let primitive_clipped = ABytes::new(output_count, 0);
+    let primitive_cap = ABytes::new(output_count, 0);
+    let offsets = &b.offsets;
+    support::parallel_for(ctx.cancel_ref(), (grain / 8).max(1), candidate_output.len() as i64, &|candidate| {
+        let candidate = candidate as usize;
+        let encoded = candidate_output[candidate];
         if encoded <= 0 {
-            continue;
+            return Ok(());
         }
-        ctx.poll(candidate, 4095)?;
         let output = (encoded - 1) as usize;
         let primitive = candidate / slots;
         let first = ctx.primitive_offsets[primitive] as usize;
         let last = ctx.primitive_offsets[primitive + 1] as usize;
-        let mut at = b.offsets[output] as usize;
+        let mut at = offsets[output] as usize;
         if !ctx.primitive_selected(primitive) {
             for vertex in first..last {
                 let point = ctx.vertex_points[vertex] as usize;
-                b.tokens[at] = ctx.passthrough_token(point);
-                b.corner_a[at] = vertex as i64;
-                b.corner_b[at] = vertex as i64;
-                b.corner_t[at] = 0.0;
+                tokens.set(at as i64, (ctx.passthrough_token(point)) as i64);
+                corner_a.set(at as i64, vertex as i64);
+                corner_b.set(at as i64, vertex as i64);
+                corner_t.set(at as i64, 0.0);
                 at += 1;
             }
-            if at as i64 != b.offsets[output + 1] {
+            if at as i64 != offsets[output + 1] {
                 return Err(fail("Rdk.Plane_clip.clip: passthrough plan/fill disagreement"));
             }
-            b.kinds[output] = 0;
-            b.primitive_source[output] = primitive as i64;
-            b.primitive_side[output] = -1;
-            b.primitive_clipped[output] = false;
-            b.primitive_cap[output] = false;
+            kinds.set(output as i64, 0);
+            primitive_source.set(output as i64, primitive as i64);
+            primitive_side.set(output as i64, -1);
+            primitive_clipped.set(output as i64, u8::from(false));
+            primitive_cap.set(output as i64, 0);
         } else {
             let side = match ctx.keep {
                 Keep::Above => 0,
@@ -903,45 +922,55 @@ fn fill_fast_plan(
                         let previous_distance = ctx.classified_distance[previous_point];
                         let current_distance = value;
                         if previous_distance == 0.0 {
-                            b.tokens[at] = ctx.token(side, previous_point);
-                            b.corner_a[at] = previous as i64;
-                            b.corner_b[at] = previous as i64;
+                            tokens.set(at as i64, (ctx.token(side, previous_point)) as i64);
+                            corner_a.set(at as i64, previous as i64);
+                            corner_b.set(at as i64, previous as i64);
                         } else if current_distance == 0.0 {
-                            b.tokens[at] = ctx.token(side, current_point);
-                            b.corner_a[at] = current as i64;
-                            b.corner_b[at] = current as i64;
+                            tokens.set(at as i64, (ctx.token(side, current_point)) as i64);
+                            corner_a.set(at as i64, current as i64);
+                            corner_b.set(at as i64, current as i64);
                         } else {
                             let denominator = ctx.raw_distance[current_point] - ctx.raw_distance[previous_point];
                             if denominator == 0.0 || !denominator.is_finite() {
                                 return Err(fail("Rdk.Plane_clip.clip: unstable plane intersection"));
                             }
-                            b.tokens[at] = ctx.edge_token(side, previous)?;
-                            b.corner_a[at] = previous as i64;
-                            b.corner_b[at] = current as i64;
-                            b.corner_t[at] = clamp01(-ctx.raw_distance[previous_point] / denominator);
+                            tokens.set(at as i64, (ctx.edge_token(side, previous)?) as i64);
+                            corner_a.set(at as i64, previous as i64);
+                            corner_b.set(at as i64, current as i64);
+                            corner_t.set(at as i64, clamp01(-ctx.raw_distance[previous_point] / denominator));
                         }
                         at += 1;
                     }
                     if current_inside {
-                        b.tokens[at] = ctx.token(side, current_point);
-                        b.corner_a[at] = current as i64;
-                        b.corner_b[at] = current as i64;
-                        b.corner_t[at] = 0.0;
+                        tokens.set(at as i64, (ctx.token(side, current_point)) as i64);
+                        corner_a.set(at as i64, current as i64);
+                        corner_b.set(at as i64, current as i64);
+                        corner_t.set(at as i64, 0.0);
                         at += 1;
                     }
                 }
                 previous = current;
             }
-            if at as i64 != b.offsets[output + 1] {
+            if at as i64 != offsets[output + 1] {
                 return Err(fail("Rdk.Plane_clip.clip: polygon plan/fill disagreement"));
             }
-            b.kinds[output] = 0;
-            b.primitive_source[output] = primitive as i64;
-            b.primitive_side[output] = side as i64;
-            b.primitive_clipped[output] = has_positive && has_negative;
-            b.primitive_cap[output] = false;
+            kinds.set(output as i64, 0);
+            primitive_source.set(output as i64, primitive as i64);
+            primitive_side.set(output as i64, side as i64);
+            primitive_clipped.set(output as i64, u8::from(has_positive && has_negative));
+            primitive_cap.set(output as i64, 0);
         }
-    }
+        Ok(())
+    })?;
+    b.tokens = tokens.into_vec().into_iter().map(|token| token as usize).collect();
+    b.corner_a = corner_a.into_vec();
+    b.corner_b = corner_b.into_vec();
+    b.corner_t = corner_t.into_vec();
+    b.kinds = kinds.into_vec();
+    b.primitive_source = primitive_source.into_vec();
+    b.primitive_side = primitive_side.into_vec();
+    b.primitive_clipped = primitive_clipped.into_vec().into_iter().map(|flag| flag != 0).collect();
+    b.primitive_cap = primitive_cap.into_vec().into_iter().map(|flag| flag != 0).collect();
     Ok(())
 }
 
@@ -1348,23 +1377,42 @@ fn trace_caps(
     Ok(())
 }
 
-fn float_plane(source: &[f64], a: &[i64], b: &[i64], t: &[f64]) -> Vec<f64> {
-    let mut output = vec![0.0; a.len()];
-    for index in 0..a.len() {
-        if a[index] >= 0 {
-            let sa = source[a[index] as usize];
-            let sb = source[b[index] as usize];
-            output[index] = sa + (sb - sa) * t[index];
+fn float_plane(
+    cancel_ref: Option<&cancel::T>,
+    grain: i64,
+    source: &[f64],
+    a: &[i64],
+    b: &[i64],
+    t: &[f64],
+) -> Result<Vec<f64>, error::T> {
+    let output = AFloats::new(a.len() as i64, 0.0);
+    support::parallel_for(cancel_ref, grain, a.len() as i64, &|index| {
+        let at = index as usize;
+        if a[at] >= 0 {
+            let sa = source[a[at] as usize];
+            let sb = source[b[at] as usize];
+            output.set(index, sa + (sb - sa) * t[at]);
         }
-    }
-    output
+        Ok(())
+    })?;
+    Ok(output.into_vec())
 }
 
-fn nearest_plane(source: &[f64], primitive_source: &[i64]) -> Vec<f64> {
-    primitive_source
-        .iter()
-        .map(|&input| if input >= 0 { source[input as usize] } else { 0.0 })
-        .collect()
+fn nearest_plane(
+    cancel_ref: Option<&cancel::T>,
+    grain: i64,
+    source: &[f64],
+    primitive_source: &[i64],
+) -> Result<Vec<f64>, error::T> {
+    let output = AFloats::new(primitive_source.len() as i64, 0.0);
+    support::parallel_for(cancel_ref, grain, primitive_source.len() as i64, &|index| {
+        let input = primitive_source[index as usize];
+        if input >= 0 {
+            output.set(index, source[input as usize]);
+        }
+        Ok(())
+    })?;
+    Ok(output.into_vec())
 }
 
 pub fn clip(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
@@ -1473,10 +1521,10 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
             },
         }
     };
-    let mut raw_distance = vec![0.0f64; point_count];
-    let mut classified_distance = vec![0.0f64; point_count];
-    for point in 0..point_count {
-        cancel::poll(cancel_ref, point as i64, 4095)?;
+    let raw_distance = AFloats::new(point_count as i64, 0.0);
+    let classified_distance = AFloats::new(point_count as i64, 0.0);
+    support::parallel_for(cancel_ref, grain, point_count as i64, &|point| {
+        let point = point as usize;
         let (x, y, z) = (positions.x[point], positions.y[point], positions.z[point]);
         if !(x.is_finite() && y.is_finite() && z.is_finite()) {
             return Err(fail("Rdk.Plane_clip.clip: point positions must be finite"));
@@ -1493,9 +1541,12 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
         if !value.is_finite() {
             return Err(fail("Rdk.Plane_clip.clip: signed plane distance overflowed"));
         }
-        raw_distance[point] = value;
-        classified_distance[point] = if value.abs() <= snapping_tolerance { 0.0 } else { value };
-    }
+        raw_distance.set(point as i64, value);
+        classified_distance.set(point as i64, if value.abs() <= snapping_tolerance { 0.0 } else { value });
+        Ok(())
+    })?;
+    let raw_distance = raw_distance.into_vec();
+    let classified_distance = classified_distance.into_vec();
     let source_topology = geometry::topology(geometry_value);
     let topology_view = topology::View::view(source_topology)?;
     let source_index = topology_index::create(cancel_ref, source_topology)?;
@@ -1518,10 +1569,10 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
     let (affected_points, shared_points): (Option<Vec<u8>>, Option<Vec<u8>>) = match &primitive_selection {
         None => (None, None),
         Some(_) => {
-            let mut affected = vec![0u8; point_count];
-            let mut shared = vec![0u8; point_count];
-            for point in 0..point_count {
-                cancel::poll(cancel_ref, point as i64, 4095)?;
+            let affected = ABytes::new(point_count as i64, 0);
+            let shared = ABytes::new(point_count as i64, 0);
+            support::parallel_for(cancel_ref, grain, point_count as i64, &|point| {
+                let point = point as usize;
                 let mut has_selected = false;
                 let mut has_unselected = false;
                 let mut at = index_view.point_offsets[point] as usize;
@@ -1536,12 +1587,15 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
                     at += 1;
                 }
                 if has_selected {
-                    affected[point] = 1;
+                    affected.set(point as i64, 1);
                 }
                 if has_selected && has_unselected {
-                    shared[point] = 1;
+                    shared.set(point as i64, 1);
                 }
-            }
+                Ok(())
+            })?;
+            let mut affected = affected.into_vec();
+            let shared = shared.into_vec();
             if let Some(element_selection::T::SelectedPoints(selected)) = &params.selection {
                 for point in 0..point_count {
                     if group::mem(point as i64, selected) {
@@ -1653,7 +1707,7 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
             builder.primitive_side = vec![0; output_count];
             builder.primitive_clipped = vec![false; output_count];
             builder.primitive_cap = vec![false; output_count];
-            fill_fast_plan(&ctx, &mut builder, slots, &candidate_output)?;
+            fill_fast_plan(&ctx, grain, &mut builder, slots, &candidate_output)?;
         }
         None => {
             for primitive in 0..primitive_count {
@@ -1708,45 +1762,45 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
         }
     }
     let output_point_count = point_token.len();
-    let mut point_source_a = vec![0i64; output_point_count];
-    let mut point_source_b = vec![0i64; output_point_count];
-    let mut point_source_t = vec![0.0f64; output_point_count];
-    let mut px = vec![0.0f64; output_point_count];
-    let mut py = vec![0.0f64; output_point_count];
-    let mut pz = vec![0.0f64; output_point_count];
-    for output in 0..output_point_count {
-        cancel::poll(cancel_ref, output as i64, 4095)?;
+    let n = output_point_count as i64;
+    let (point_source_a, point_source_b, point_source_t) = (AInts::new(n, 0), AInts::new(n, 0), AFloats::new(n, 0.0));
+    let (px, py, pz) = (AFloats::new(n, 0.0), AFloats::new(n, 0.0), AFloats::new(n, 0.0));
+    support::parallel_for(cancel_ref, grain, n, &|output| {
+        let output = output as usize;
         let value = point_token[output];
         if ctx.is_passthrough_token(value) {
             let point = ctx.passthrough_point(value);
-            point_source_a[output] = point as i64;
-            point_source_b[output] = point as i64;
-            px[output] = positions.x[point];
-            py[output] = positions.y[point];
-            pz[output] = positions.z[point];
+            point_source_a.set(output as i64, point as i64);
+            point_source_b.set(output as i64, point as i64);
+            px.set(output as i64, positions.x[point]);
+            py.set(output as i64, positions.y[point]);
+            pz.set(output as i64, positions.z[point]);
         } else {
             let base = ctx.base_of_token(value);
             if base < point_count {
-                point_source_a[output] = base as i64;
-                point_source_b[output] = base as i64;
+                point_source_a.set(output as i64, base as i64);
+                point_source_b.set(output as i64, base as i64);
                 let projection = ctx.projection(base);
-                px[output] = positions.x[base] - projection * nx;
-                py[output] = positions.y[base] - projection * ny;
-                pz[output] = positions.z[base] - projection * nz;
+                px.set(output as i64, positions.x[base] - projection * nx);
+                py.set(output as i64, positions.y[base] - projection * ny);
+                pz.set(output as i64, positions.z[base] - projection * nz);
             } else {
                 let edge = base - point_count;
                 let a = index_view.edge_a[edge] as usize;
                 let c = index_view.edge_b[edge] as usize;
                 let t = clamp01(-ctx.raw_distance[a] / (ctx.raw_distance[c] - ctx.raw_distance[a]));
-                point_source_a[output] = a as i64;
-                point_source_b[output] = c as i64;
-                point_source_t[output] = t;
-                px[output] = positions.x[a] + (positions.x[c] - positions.x[a]) * t;
-                py[output] = positions.y[a] + (positions.y[c] - positions.y[a]) * t;
-                pz[output] = positions.z[a] + (positions.z[c] - positions.z[a]) * t;
+                point_source_a.set(output as i64, a as i64);
+                point_source_b.set(output as i64, c as i64);
+                point_source_t.set(output as i64, t);
+                px.set(output as i64, positions.x[a] + (positions.x[c] - positions.x[a]) * t);
+                py.set(output as i64, positions.y[a] + (positions.y[c] - positions.y[a]) * t);
+                pz.set(output as i64, positions.z[a] + (positions.z[c] - positions.z[a]) * t);
             }
         }
-    }
+        Ok(())
+    })?;
+    let (point_source_a, point_source_b, point_source_t) = (point_source_a.into_vec(), point_source_b.into_vec(), point_source_t.into_vec());
+    let (px, py, pz) = (px.into_vec(), py.into_vec(), pz.into_vec());
     let corner_count = builder.corner_count();
     let primitive_total = builder.kinds.len();
     let output_vertex_points: Vec<i64> = builder.tokens.iter().map(|&token| token_to_point[token]).collect();
@@ -1774,7 +1828,7 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
             attribute::Owner::Primitive => {
                 let storage = match storage {
                     attribute::Storage::Float(values) => {
-                        attribute::Storage::Float(nearest_plane(values, primitive_source))
+                        attribute::Storage::Float(nearest_plane(cancel_ref, grain, values, primitive_source)?)
                     }
                     attribute::Storage::Int(values) => attribute::Storage::Int(
                         primitive_source
@@ -1800,25 +1854,25 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
                     attribute::Storage::Float2(values) => {
                         let values = packed::Float2::View::view(values);
                         attribute::Storage::Float2(packed::Float2::of_owned(
-                            nearest_plane(&values.x, primitive_source),
-                            nearest_plane(&values.y, primitive_source),
+                            nearest_plane(cancel_ref, grain, &values.x, primitive_source)?,
+                            nearest_plane(cancel_ref, grain, &values.y, primitive_source)?,
                         )?)
                     }
                     attribute::Storage::Float3(values) => {
                         let values = packed::Float3::View::view(values)?;
                         attribute::Storage::Float3(packed::Float3::View::of_owned_exn(
-                            nearest_plane(&values.x, primitive_source),
-                            nearest_plane(&values.y, primitive_source),
-                            nearest_plane(&values.z, primitive_source),
+                            nearest_plane(cancel_ref, grain, &values.x, primitive_source)?,
+                            nearest_plane(cancel_ref, grain, &values.y, primitive_source)?,
+                            nearest_plane(cancel_ref, grain, &values.z, primitive_source)?,
                         )?)
                     }
                     attribute::Storage::Float4(values) => {
                         let values = packed::Float4::View::view(values);
                         attribute::Storage::Float4(packed::Float4::of_owned(
-                            nearest_plane(&values.x, primitive_source),
-                            nearest_plane(&values.y, primitive_source),
-                            nearest_plane(&values.z, primitive_source),
-                            nearest_plane(&values.w, primitive_source),
+                            nearest_plane(cancel_ref, grain, &values.x, primitive_source)?,
+                            nearest_plane(cancel_ref, grain, &values.y, primitive_source)?,
+                            nearest_plane(cancel_ref, grain, &values.z, primitive_source)?,
+                            nearest_plane(cancel_ref, grain, &values.w, primitive_source)?,
                         )?)
                     }
                 };
@@ -1847,9 +1901,9 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
                 };
                 let nearest_mapping: Vec<i64> = (0..count).map(nearest_index).collect();
                 let is_normal = name == "N";
-                let plane = |values: &[f64]| float_plane(values, mapping_a, mapping_b, mapping_t);
+                let plane = |values: &[f64]| float_plane(cancel_ref, grain, values, mapping_a, mapping_b, mapping_t);
                 let storage = match storage {
-                    attribute::Storage::Float(values) => attribute::Storage::Float(plane(values)),
+                    attribute::Storage::Float(values) => attribute::Storage::Float(plane(values)?),
                     attribute::Storage::Int(values) => attribute::Storage::Int(
                         nearest_mapping
                             .iter()
@@ -1873,13 +1927,13 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
                     ),
                     attribute::Storage::Float2(values) => {
                         let values = packed::Float2::View::view(values);
-                        attribute::Storage::Float2(packed::Float2::of_owned(plane(&values.x), plane(&values.y))?)
+                        attribute::Storage::Float2(packed::Float2::of_owned(plane(&values.x)?, plane(&values.y)?)?)
                     }
                     attribute::Storage::Float3(values) => {
                         let values = packed::Float3::View::view(values)?;
-                        let mut x = plane(&values.x);
-                        let mut y = plane(&values.y);
-                        let mut z = plane(&values.z);
+                        let mut x = plane(&values.x)?;
+                        let mut y = plane(&values.y)?;
+                        let mut z = plane(&values.z)?;
                         if is_normal {
                             for index in 0..count {
                                 let cap_side = if owner == attribute::Owner::Point { -1 } else { corner_cap_side[index] };
@@ -1904,10 +1958,10 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
                     attribute::Storage::Float4(values) => {
                         let values = packed::Float4::View::view(values);
                         attribute::Storage::Float4(packed::Float4::of_owned(
-                            plane(&values.x),
-                            plane(&values.y),
-                            plane(&values.z),
-                            plane(&values.w),
+                            plane(&values.x)?,
+                            plane(&values.y)?,
+                            plane(&values.z)?,
+                            plane(&values.w)?,
                         )?)
                     }
                 };
@@ -1958,11 +2012,11 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
             }
             Some(_) => {}
             None => {
-                let mut vx = vec![0.0f64; corner_count];
-                let mut vy = vec![0.0f64; corner_count];
-                let mut vz = vec![0.0f64; corner_count];
-                for primitive in 0..primitive_total {
-                    cancel::poll(cancel_ref, primitive as i64, 1023)?;
+                let vx = AFloats::new(corner_count as i64, 0.0);
+                let vy = AFloats::new(corner_count as i64, 0.0);
+                let vz = AFloats::new(corner_count as i64, 0.0);
+                support::parallel_for(cancel_ref, (grain / 8).max(1), primitive_total as i64, &|primitive| {
+                    let primitive = primitive as usize;
                     if builder.kinds[primitive] == 0 {
                         let first = builder.offsets[primitive] as usize;
                         let last = builder.offsets[primitive + 1] as usize;
@@ -1978,13 +2032,15 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
                         let length: f64 = (sx * sx + sy * sy + sz * sz).sqrt();
                         if length > 1e-20 {
                             for corner in first..last {
-                                vx[corner] = sx / length;
-                                vy[corner] = sy / length;
-                                vz[corner] = sz / length;
+                                vx.set(corner as i64, sx / length);
+                                vy.set(corner as i64, sy / length);
+                                vz.set(corner as i64, sz / length);
                             }
                         }
                     }
-                }
+                    Ok(())
+                })?;
+                let (vx, vy, vz) = (vx.into_vec(), vy.into_vec(), vz.into_vec());
                 attributes.push(attribute::create_key_owned(
                     &attribute::normal(attribute::Owner::Vertex),
                     attribute::Storage::Float3(packed::Float3::View::of_owned_exn(vx, vy, vz)?),
@@ -2895,5 +2951,95 @@ mod tests {
         expect_code(clip(&p, &merge(&[outer.clone(), overlap_a, overlap_b])), "invalid_geometry");
         let same = merge(&[outer, bx((0.0, -0.3, 0.0), 2.0, 2.0), bx((0.0, 0.3, 0.0), 2.0, 2.0)]);
         expect_code(clip(&p, &same), "invalid_geometry");
+    }
+
+    #[test]
+    fn parallel_exact_at_scale() {
+        use crate::compact_points::fixtures as fx;
+        use rdk_core::attribute::{Owner, Storage};
+        let g = fx::grid(150, 150, 2.0, true);
+        let n = geometry::point_count(&g);
+        let g = fx::with_attr(&g, Owner::Point, "id", Storage::Int((0..n).collect()));
+        let g = fx::with_attr(&g, Owner::Point, "w", Storage::Float((0..n).map(|p| (p % 97) as f64 * 0.125).collect()));
+        let g = fx::with_attr(&g, Owner::Point, "N", fx::float3_attr(vec![0.3; n as usize], vec![0.4; n as usize], vec![0.5; n as usize]));
+        let primitives = geometry::primitive_count(&g);
+        let selected = group::init(None, group::Owner::Primitive, "half", primitives, &|p| p % 3 != 0).unwrap();
+        for keep in [Keep::Above, Keep::Below, Keep::All] {
+            for use_selection in [false, true] {
+                let build = || {
+                    let mut p = Params::new(rays_math::vec3::create(0.013, 0.0, 0.0), unit_x());
+                    p.grain = 256;
+                    p.keep = keep;
+                    p.selection = use_selection.then(|| element_selection::T::SelectedPrimitives(selected.clone()));
+                    clip(&p, &g).unwrap()
+                };
+                let one = fx::exact_at_one_and_four(&build);
+                assert!(geometry::primitive_count(&one) > 0, "{keep:?}");
+            }
+        }
+    }
+
+    /// `cargo test -p rdk_ops bench_parallel_sites -- --ignored --nocapture`: one-domain versus all-domain wall time.
+    #[test]
+    #[ignore]
+    fn bench_parallel_sites() {
+        use crate::compact_points::fixtures as fx;
+        use rdk_core::attribute::{Owner, Storage};
+        use std::time::Instant;
+        let g = fx::grid(700, 700, 2.0, true);
+        let n = geometry::point_count(&g);
+        let g = fx::with_attr(&g, Owner::Point, "w", Storage::Float((0..n).map(|p| (p % 97) as f64).collect()));
+        let domains = parallel::recommended_domains();
+        let time = |label: &str, work: &(dyn Fn() + Sync)| {
+            let mut line = format!("{label:<26}");
+            for d in [1, domains] {
+                let slot = std::sync::Mutex::new(0.0f64);
+                parallel::run_unit(Some(d), &|| {
+                    work(); // warm
+                    let start = Instant::now();
+                    work();
+                    *slot.lock().unwrap() = start.elapsed().as_secs_f64() * 1000.0;
+                    Ok(())
+                })
+                .unwrap();
+                line += &format!("  {d:>2} domains {:>9.1} ms", slot.into_inner().unwrap());
+            }
+            println!("{line}");
+        };
+        time("triangulate (quads)", &|| {
+            let _ = crate::triangulate::run(&crate::triangulate::Params { cancel: None, grain: None, primitives: None }, &g).unwrap();
+        });
+        time("plane_clip keep=All", &|| {
+            let mut p = Params::new(rays_math::vec3::create(0.013, 0.0, 0.0), unit_x());
+            p.keep = Keep::All;
+            let _ = clip(&p, &g).unwrap();
+        });
+        time("poly_extrude (default)", &|| {
+            let _ = crate::poly_extrude::run(&crate::poly_extrude::Params::new(0.5), &g).unwrap();
+        });
+        let dup = {
+            let (x, y, z) = fx::positions(&g);
+            let (vp, offsets, _) = fx::topo(&g);
+            let mut nvp = vp.clone();
+            let mut noff = offsets.clone();
+            for prim in 0..offsets.len() - 1 {
+                if prim % 5 == 0 {
+                    nvp.extend_from_slice(&vp[offsets[prim] as usize..offsets[prim + 1] as usize]);
+                    noff.push(nvp.len() as i64);
+                }
+            }
+            fx::geom(&x, &y, &z, &nvp, &noff, None)
+        };
+        time("clean (overlaps)", &|| {
+            let mut p = crate::clean::Params {
+                cancel: None, grain: 16_384, epsilon: 1e-12, remove_degenerate: true, consolidate_distance: None,
+                overlaps: Some(crate::clean::OverlapPolicy::KeepFirstOverlap), reverse_winding: false,
+                remove_nan_points: true, remove_unused_points: false, delete_unused_groups: false,
+                point_attributes: None, vertex_attributes: None, primitive_attributes: None, detail_attributes: None,
+                point_groups: None, vertex_groups: None, primitive_groups: None, edge_groups: None,
+            };
+            p.grain = 16_384;
+            let _ = crate::clean::run(&p, &dup).unwrap();
+        });
     }
 }

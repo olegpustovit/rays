@@ -3,7 +3,7 @@
 //! identical); BVH query scratch is local to each query so queries share no mutable state.
 use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use rdk_core::{cancel, error};
 use rdk_geom::implicit_point::{self, AxisRayTriangle, SymbolicRayTriangle};
@@ -782,16 +782,23 @@ fn build_inner(
     let constraints_value = complex::View::constraints(c);
     let shells = weiler::shell_count(weiler_value);
     let facets = complex::facet_count(c);
-    let left_components = if options.track_left {
-        Some(build_components(cancel_value, constraints_value, Side::Left)?)
-    } else {
-        None
+    let left_slot: Mutex<Option<Result<Option<Components>, Fail>>> = Mutex::new(None);
+    let right_slot: Mutex<Option<Result<Option<Components>, Fail>>> = Mutex::new(None);
+    let build_side = |track: bool, side: Side, slot: &Mutex<Option<Result<Option<Components>, Fail>>>| {
+        let built = if track { build_components(cancel_value, constraints_value, side).map(Some) } else { Ok(None) };
+        *slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(built);
+        Ok(())
     };
-    let right_components = if options.track_right {
-        Some(build_components(cancel_value, constraints_value, Side::Right)?)
-    } else {
-        None
+    parallel::both_unit(
+        &|| build_side(options.track_left, Side::Left, &left_slot),
+        &|| build_side(options.track_right, Side::Right, &right_slot),
+    )
+    .map_err(|message| Fail::Invalid(message))?;
+    let take = |slot: Mutex<Option<Result<Option<Components>, Fail>>>| {
+        slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner).expect("both_unit ran both sides")
     };
+    let left_components = take(left_slot)?;
+    let right_components = take(right_slot)?;
     let mut counts = vec![0_i64; shells as usize];
     for facet in 0..facets {
         let (negative, positive) = shells_of(weiler_value, facet);

@@ -1,7 +1,7 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use rdk_core::{
-    attribute, attribute_pattern, cancel, element_selection, error, geometry, group, packed, topology,
+    attribute, attribute_pattern, cancel, element_selection, error, geometry, group, packed, support, topology,
     topology_index,
 };
 use rdk_geom::point_grid::float_max;
@@ -9,6 +9,7 @@ use rdk_geom::surface_index::View::RayDirections;
 use rdk_geom::surface_index::{self, RayDirectionMode, RaySurfaceHit};
 
 use crate::attribute_ops;
+use crate::subdivide_refine::{ABytes, AFloats, AInts};
 use crate::attribute_transfer::Unmatched;
 use crate::deform;
 
@@ -335,6 +336,18 @@ fn combine_samples(
     }
 }
 
+struct RangeOutputs<'a> {
+    primitives: &'a mut [i64],
+    triangles: &'a mut [i64],
+    barycentric_a: &'a mut [f64],
+    barycentric_b: &'a mut [f64],
+    barycentric_c: &'a mut [f64],
+    distances: &'a mut [f64],
+    direction_signs: &'a mut [i64],
+    hit_counts: &'a mut [i64],
+    normals: Option<(&'a mut [f64], &'a mut [f64], &'a mut [f64])>,
+}
+
 struct SampleOutputs<'a> {
     primitives: &'a mut [i64],
     triangles: &'a mut [i64],
@@ -398,7 +411,6 @@ fn raycast_samples_into(
             return Err(invalid("Surface_index: ray selection must match query points"));
         }
     }
-    let mut normals = normals;
     if let Some((x, y, z)) = &normals {
         if x.len() < query_count || y.len() < query_count || z.len() < query_count {
             return Err(invalid("Surface_index: sampled ray normal arrays are too short"));
@@ -407,9 +419,36 @@ fn raycast_samples_into(
     let queries = packed::Float3::View::view(queries)?;
     let samples_u = samples as usize;
     let range_count = query_count.div_ceil(grain as usize);
-    for range in 0..range_count {
-        let first = range * grain as usize;
-        let last = query_count.min(first + grain as usize);
+    let chunk = grain as usize;
+    let mut primitives = out.primitives[..query_count].chunks_mut(chunk);
+    let mut triangles = out.triangles[..query_count].chunks_mut(chunk);
+    let mut barycentric_a = out.barycentric_a[..query_count].chunks_mut(chunk);
+    let mut barycentric_b = out.barycentric_b[..query_count].chunks_mut(chunk);
+    let mut barycentric_c = out.barycentric_c[..query_count].chunks_mut(chunk);
+    let mut distances = out.distances[..query_count].chunks_mut(chunk);
+    let mut direction_signs = out.direction_signs[..query_count].chunks_mut(chunk);
+    let mut hit_counts = out.hit_counts[..query_count].chunks_mut(chunk);
+    let mut normal_chunks = normals.map(|(x, y, z)| {
+        (x[..query_count].chunks_mut(chunk), y[..query_count].chunks_mut(chunk), z[..query_count].chunks_mut(chunk))
+    });
+    let mut parts: Vec<Mutex<RangeOutputs>> = Vec::with_capacity(range_count);
+    for _ in 0..range_count {
+        parts.push(Mutex::new(RangeOutputs {
+            primitives: primitives.next().unwrap(),
+            triangles: triangles.next().unwrap(),
+            barycentric_a: barycentric_a.next().unwrap(),
+            barycentric_b: barycentric_b.next().unwrap(),
+            barycentric_c: barycentric_c.next().unwrap(),
+            distances: distances.next().unwrap(),
+            direction_signs: direction_signs.next().unwrap(),
+            hit_counts: hit_counts.next().unwrap(),
+            normals: normal_chunks.as_mut().map(|(x, y, z)| (x.next().unwrap(), y.next().unwrap(), z.next().unwrap())),
+        }));
+    }
+    support::run_indexed_ranges(grain, query_count as i64, &|range, first, last| {
+        let (first, last) = (first as usize, last as usize);
+        let mut guard = parts[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let part = &mut *guard;
         // Scratch is per range, as in the OCaml worker: its `combined` slots carry over between
         // queries of one range.
         let result_count = samples_u * 2;
@@ -423,14 +462,14 @@ fn raycast_samples_into(
         let mut combined = Combined { counts: [0; 2], distances: [f64::INFINITY; 2], selected: [-1; 2] };
         for query in first..last {
             cancel::poll(cancel_ref, query as i64, 4095)?;
-            out.primitives[query] = -1;
-            out.triangles[query] = -1;
-            out.barycentric_a[query] = 0.0;
-            out.barycentric_b[query] = 0.0;
-            out.barycentric_c[query] = 0.0;
-            out.distances[query] = f64::INFINITY;
-            out.direction_signs[query] = 0;
-            out.hit_counts[query] = 0;
+            part.primitives[query - first] = -1;
+            part.triangles[query - first] = -1;
+            part.barycentric_a[query - first] = 0.0;
+            part.barycentric_b[query - first] = 0.0;
+            part.barycentric_c[query - first] = 0.0;
+            part.distances[query - first] = f64::INFINITY;
+            part.direction_signs[query - first] = 0;
+            part.hit_counts[query - first] = 0;
             let selected_query = match selection {
                 None => true,
                 Some(item) => group::mem(query as i64, item),
@@ -504,21 +543,21 @@ fn raycast_samples_into(
             if selected >= 0 {
                 let integer = selected as usize * 2;
                 let floating = selected as usize * 4;
-                out.primitives[query] = integer_results[integer];
-                out.triangles[query] = integer_results[integer + 1];
-                out.barycentric_a[query] = float_results[floating + 1];
-                out.barycentric_b[query] = float_results[floating + 2];
-                out.barycentric_c[query] = float_results[floating + 3];
-                out.distances[query] = combined.distances[chosen];
-                out.hit_counts[query] = combined.counts[chosen];
-                out.direction_signs[query] = match direction_mode {
+                part.primitives[query - first] = integer_results[integer];
+                part.triangles[query - first] = integer_results[integer + 1];
+                part.barycentric_a[query - first] = float_results[floating + 1];
+                part.barycentric_b[query - first] = float_results[floating + 2];
+                part.barycentric_c[query - first] = float_results[floating + 3];
+                part.distances[query - first] = combined.distances[chosen];
+                part.hit_counts[query - first] = combined.counts[chosen];
+                part.direction_signs[query - first] = match direction_mode {
                     RayDirectionMode::RayReverse => -1,
                     RayDirectionMode::RayForward => 1,
                     RayDirectionMode::RayBidirectionalClosest | RayDirectionMode::RayBidirectionalFarthest => {
                         if chosen == 0 { 1 } else { -1 }
                     }
                 };
-                if let Some((nx_out, ny_out, nz_out)) = normals.as_mut() {
+                if let Some((nx_out, ny_out, nz_out)) = part.normals.as_mut() {
                     let (mut nx, mut ny, mut nz) = (0.0f64, 0.0f64, 0.0f64);
                     if combine == Combine::RayAverage {
                         let base = chosen * samples_u;
@@ -540,19 +579,19 @@ fn raycast_samples_into(
                         ny *= inverse;
                         nz *= inverse;
                     } else {
-                        surface_index::View::triangle_normal_into(value, out.triangles[query], &mut normal);
+                        surface_index::View::triangle_normal_into(value, part.triangles[query - first], &mut normal);
                         nx = normal[0];
                         ny = normal[1];
                         nz = normal[2];
                     }
-                    nx_out[query] = nx;
-                    ny_out[query] = ny;
-                    nz_out[query] = nz;
+                    nx_out[query - first] = nx;
+                    ny_out[query - first] = ny;
+                    nz_out[query - first] = nz;
                 }
             }
         }
-    }
-    Ok(())
+        Ok(())
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -581,10 +620,10 @@ fn raycast_average_drivers_into(
         return Err(fail("invalid_parameter", "Surface_index: average ray driver arrays do not match queries"));
     }
     let queries = packed::Float3::View::view(queries)?;
-    let range_count = query_count.div_ceil(grain as usize);
-    for range in 0..range_count {
-        let first = range * grain as usize;
-        let last = query_count.min(first + grain as usize);
+    let numbers = AInts::from_slice(vertex_numbers);
+    let weights = AFloats::from_slice(vertex_weights);
+    support::run_indexed_ranges(grain, query_count as i64, &|_, first, last| {
+        let (first, last) = (first as usize, last as usize);
         let mut scratch = [0.0f64; 8];
         let mut node_stack = [0i64; 65];
         let mut integer_results = [-1i64; 2];
@@ -626,12 +665,12 @@ fn raycast_average_drivers_into(
                     )?;
                     if integer_results[0] >= 0 {
                         let triangle = integer_results[1];
-                        vertex_numbers[at] = surface_index::View::triangle_vertex(value, triangle, 0);
-                        vertex_numbers[at + 1] = surface_index::View::triangle_vertex(value, triangle, 1);
-                        vertex_numbers[at + 2] = surface_index::View::triangle_vertex(value, triangle, 2);
-                        vertex_weights[at] = float_results[1] * scale;
-                        vertex_weights[at + 1] = float_results[2] * scale;
-                        vertex_weights[at + 2] = float_results[3] * scale;
+                        numbers.set(at as i64, surface_index::View::triangle_vertex(value, triangle, 0));
+                        numbers.set((at + 1) as i64, surface_index::View::triangle_vertex(value, triangle, 1));
+                        numbers.set((at + 2) as i64, surface_index::View::triangle_vertex(value, triangle, 2));
+                        weights.set(at as i64, float_results[1] * scale);
+                        weights.set((at + 1) as i64, float_results[2] * scale);
+                        weights.set((at + 2) as i64, float_results[3] * scale);
                         at += 3;
                     }
                 }
@@ -640,7 +679,10 @@ fn raycast_average_drivers_into(
                 }
             }
         }
-    }
+        Ok(())
+    })?;
+    vertex_numbers.copy_from_slice(&numbers.into_vec());
+    vertex_weights.copy_from_slice(&weights.into_vec());
     Ok(())
 }
 
@@ -898,15 +940,17 @@ fn run_inner(
     let source_positions = packed::Float3::View::view(geometry::positions(source))?;
     let collision_positions = packed::Float3::View::view(geometry::positions(collision))?;
     let collision_topology = topology::View::view(geometry::topology(collision))?;
-    let mut px = source_positions.x.to_vec();
-    let mut py = source_positions.y.to_vec();
-    let mut pz = source_positions.z.to_vec();
+    let px = AFloats::from_slice(&source_positions.x);
+    let py = AFloats::from_slice(&source_positions.y);
+    let pz = AFloats::from_slice(&source_positions.z);
     let range_count = if point_count == 0 { 0 } else { point_count.div_ceil(grain as usize) };
-    let mut errors = vec![-1i64; range_count];
-    let mut changed = vec![false; range_count];
-    for range in 0..range_count {
-        let first = range * grain as usize;
-        let last = point_count.min(first + grain as usize);
+    let errors = AInts::new(range_count as i64, -1);
+    let changed = ABytes::new(range_count as i64, 0);
+    let normal_cells = normal_planes
+        .take()
+        .map(|(x, y, z)| (AFloats::from_slice(&x), AFloats::from_slice(&y), AFloats::from_slice(&z)));
+    support::run_indexed_ranges(grain, point_count as i64, &|range, first, last| {
+        let (first, last) = (first as usize, last as usize);
         let mut normal = [0.0f64; 3];
         for point in first..last {
             cancel::poll(cancel_ref, point as i64, 4095)?;
@@ -955,9 +999,9 @@ fn run_inner(
                 )
             };
             normal = [0.0; 3];
-            if let Some((output_x, output_y, output_z)) = normal_planes.as_mut() {
+            if let Some((output_x, output_y, output_z)) = normal_cells.as_ref() {
                 if samples > 1 {
-                    normal = [output_x[point], output_y[point], output_z[point]];
+                    normal = [output_x.get(point as i64), output_y.get(point as i64), output_z.get(point as i64)];
                     let length = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
                     if length > 0.0 {
                         normal[0] /= length;
@@ -977,27 +1021,32 @@ fn run_inner(
                     normal[0] *= inverse;
                     normal[1] *= inverse;
                     normal[2] *= inverse;
-                    output_x[point] = normal[0];
-                    output_y[point] = normal[1];
-                    output_z[point] = normal[2];
+                    output_x.set(point as i64, normal[0]);
+                    output_y.set(point as i64, normal[1]);
+                    output_z.set(point as i64, normal[2]);
                 }
             }
             let x = source_positions.x[point] + scale * (hx - source_positions.x[point]) + lift * normal[0];
             let y = source_positions.y[point] + scale * (hy - source_positions.y[point]) + lift * normal[1];
             let z = source_positions.z[point] + scale * (hz - source_positions.z[point]) + lift * normal[2];
             if !(x.is_finite() && y.is_finite() && z.is_finite()) {
-                errors[range] = point as i64;
+                errors.set(range, point as i64);
             } else {
-                px[point] = x;
-                py[point] = y;
-                pz[point] = z;
+                px.set(point as i64, x);
+                py.set(point as i64, y);
+                pz.set(point as i64, z);
                 if x != source_positions.x[point] || y != source_positions.y[point] || z != source_positions.z[point] {
-                    changed[range] = true;
+                    changed.set(range, 1);
                 }
             }
         }
         let _ = normal;
-    }
+        Ok(())
+    })?;
+    normal_planes = normal_cells.map(|(x, y, z)| (x.into_vec(), y.into_vec(), z.into_vec()));
+    let errors = errors.into_vec();
+    let changed = changed.into_vec();
+    let (px, py, pz) = (px.into_vec(), py.into_vec(), pz.into_vec());
     if let Some(point) = errors.iter().find(|&&point| point >= 0) {
         return Err(fail(
             "non_finite_output",
@@ -1160,7 +1209,7 @@ fn run_inner(
         (Some(_), Some(item)) => vec![item.clone()],
         _ => Vec::new(),
     };
-    let changed_positions = changed.iter().any(|&flag| flag);
+    let changed_positions = changed.iter().any(|&flag| flag != 0);
     let target = if changed_positions {
         let t = geometry::without_attribute(attribute::Owner::Point, "N", source);
         geometry::without_attribute(attribute::Owner::Vertex, "N", &t)
@@ -1667,5 +1716,33 @@ mod tests {
         let token = cancel::create();
         cancel::cancel(&token);
         expect_code(run(Some(&token), &base(), &source, &collision), "cancelled");
+    }
+
+    #[test]
+    fn parallel_exact() {
+        use crate::compact_points::fixtures::exact_at_one_and_four;
+        let side = 80usize;
+        let values: Vec<(f64, f64, f64)> = (0..side * side)
+            .map(|k| ((k % side) as f64 * 0.05 - 2.0, 1.0 + (k % 7) as f64 * 0.1, (k / side) as f64 * 0.05 - 2.0))
+            .collect();
+        let source = source_points(&values);
+        let collision = plane(6.0, 0.0);
+        for (samples, combine) in [(1, Combine::RayAverage), (8, Combine::RayAverage), (8, Combine::RayMedian)] {
+            let mut p = base();
+            p.grain = 256;
+            p.direction = down();
+            p.samples = samples;
+            p.combine = combine;
+            p.jitter_scale = 0.2;
+            p.seed = 5;
+            p.lift = 0.01;
+            p.distance_attribute = Some("dist".to_owned());
+            p.primitive_attribute = Some("hit_prim".to_owned());
+            p.source_vertex_numbers_attribute = Some("hit_vertices".to_owned());
+            p.source_vertex_weights_attribute = Some("hit_weights".to_owned());
+            p.normal_attribute = Some("hit_N".to_owned());
+            let out = exact_at_one_and_four(&|| ray(&p, &source, &collision).unwrap());
+            assert!(point_float(&out, "dist").iter().any(|&d| d > 0.0));
+        }
     }
 }

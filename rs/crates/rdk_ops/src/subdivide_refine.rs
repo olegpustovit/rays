@@ -138,6 +138,9 @@ impl AInts {
     pub fn new(count: i64, fill: i64) -> AInts {
         AInts { values: (0..count).map(|_| AtomicI64::new(fill)).collect() }
     }
+    pub fn from_slice(values: &[i64]) -> AInts {
+        AInts { values: values.iter().map(|value| AtomicI64::new(*value)).collect() }
+    }
     pub fn get(&self, index: i64) -> i64 {
         self.values[index as usize].load(Ordering::Relaxed)
     }

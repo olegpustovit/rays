@@ -12,6 +12,7 @@ use rdk_core::{
     topology_index, topology_remap,
 };
 use rdk_geom::implicit_point;
+use rdk_ops::subdivide_refine::AFloats;
 use rdk_geom::predicates::{self, Sign};
 use rdk_geom::surface_index;
 use rdk_ops::{deletion, dissolve, edge_collapse, fuse_reduce};
@@ -87,32 +88,6 @@ fn float_compare(a: f64, b: f64) -> Ordering {
         if b.is_nan() { Ordering::Equal } else { Ordering::Less }
     } else {
         Ordering::Greater
-    }
-}
-
-/// C `printf("%.17g")` for a finite or infinite value (the cfmt crate cannot link beside this crate's
-/// dependencies on the Windows GNU toolchain: its `ldexp` import collides with the UCRT one).
-fn printf_g17(value: f64) -> String {
-    if value.is_nan() {
-        return "nan".to_owned();
-    }
-    if value.is_infinite() {
-        return if value < 0. { "-inf".to_owned() } else { "inf".to_owned() };
-    }
-    let scientific = format!("{:.16e}", value);
-    let (mantissa, exponent) = scientific.split_once('e').unwrap_or((&scientific, "0"));
-    let exponent: i32 = exponent.parse().unwrap_or(0);
-    let trim = |text: &str| -> String {
-        if text.contains('.') {
-            text.trim_end_matches('0').trim_end_matches('.').to_owned()
-        } else {
-            text.to_owned()
-        }
-    };
-    if (-4..17).contains(&exponent) {
-        trim(&format!("{:.*}", (16 - exponent) as usize, value))
-    } else {
-        format!("{}e{}{:02}", trim(mantissa), if exponent < 0 { '-' } else { '+' }, exponent.abs())
     }
 }
 
@@ -649,8 +624,8 @@ fn verify_extracted_contacts(
                 "surface_self_intersection",
                 &format!(
                     "rounded Boolean triangles {first} and {second} intersect away from ordinary shared topology (minimum edge lengths {} and {})",
-                    printf_g17(first_min),
-                    printf_g17(second_min)
+                    cfmt::g(first_min, 17),
+                    cfmt::g(second_min, 17)
                 ),
             )
         }
@@ -681,8 +656,8 @@ fn verify_constraint_contacts(
             "surface_self_intersection",
             &format!(
                 "rounded Boolean triangles {first} and {second} intersect away from ordinary shared topology (minimum edge lengths {} and {})",
-                printf_g17(first_min),
-                printf_g17(second_min)
+                cfmt::g(first_min, 17),
+                cfmt::g(second_min, 17)
             ),
         );
     }
@@ -2080,12 +2055,12 @@ pub fn split_seam_points(cancel: Cancel<'_>, grain: i64, cleanup: &Cleanup) -> R
             );
             let source_positions = positions_view(geometry_value)?;
             let select = |source: &[f64]| -> Result<Vec<f64>, error::T> {
-                let mut values = Vec::with_capacity(point_map.len());
-                for (output, point) in point_map.iter().enumerate() {
-                    cancel::poll(cx(cancel), output as i64, 4095)?;
-                    values.push(source[u(*point)]);
-                }
-                Ok(values)
+                let values = AFloats::new(point_map.len() as i64, 0.0);
+                support::parallel_for(cx(cancel), grain, point_map.len() as i64, &|output| {
+                    values.set(output, source[u(point_map[output as usize])]);
+                    Ok(())
+                })?;
+                Ok(values.into_vec())
             };
             let positions = packed::Float3::View::of_owned_exn(
                 select(&source_positions.x)?,
@@ -2440,13 +2415,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn printf_g17_matches_c() {
-        assert_eq!(printf_g17(0.1), "0.10000000000000001");
-        assert_eq!(printf_g17(1.0), "1");
-        assert_eq!(printf_g17(0.0), "0");
-        assert_eq!(printf_g17(1.5e-10), "1.5e-10");
-        assert_eq!(printf_g17(2.5e20), "2.5e+20");
-        assert_eq!(printf_g17(f64::INFINITY), "inf");
+    fn cfmt_g17_matches_c() {
+        assert_eq!(cfmt::g(0.1, 17), "0.10000000000000001");
+        assert_eq!(cfmt::g(1.0, 17), "1");
+        assert_eq!(cfmt::g(0.0, 17), "0");
+        assert_eq!(cfmt::g(1.5e-10, 17), "1.5e-10");
+        assert_eq!(cfmt::g(2.5e20, 17), "2.5e+20");
+        assert_eq!(cfmt::g(f64::INFINITY, 17), "inf");
     }
 
     #[test]

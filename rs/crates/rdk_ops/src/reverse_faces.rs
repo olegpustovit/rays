@@ -1,4 +1,5 @@
-use rdk_core::{attribute, cancel, error, geometry, group, topology, topology_remap};
+use crate::subdivide_refine::AInts;
+use rdk_core::{attribute, cancel, error, geometry, group, support, topology, topology_remap};
 
 fn make(operation: &str, code: &str, message: String) -> error::T {
     error::make(operation.to_owned(), code.to_owned(), message, None).unwrap_or_else(|e| e)
@@ -61,15 +62,20 @@ fn reverse(
         None => true,
         Some(selection) => group::cardinality(selection) == primitive_count as i64,
     };
-    let mut vertex_points: Vec<i64> =
-        if full_selection { vec![0; vertex_count] } else { source.vertex_points.to_vec() };
-    let mut vertex_map: Vec<i64> =
-        if full_selection { vec![0; vertex_count] } else { (0..vertex_count as i64).collect() };
-    // ponytail: serial primitive loop; the parallel original writes disjoint ranges, so the result is identical.
-    for primitive in 0..primitive_count {
-        cancel::poll(cancel_value, primitive as i64, 1023)?;
+    let vertex_points = AInts::new(vertex_count as i64, 0);
+    let vertex_map = AInts::new(vertex_count as i64, 0);
+    if !full_selection {
+        for vertex in 0..vertex_count {
+            vertex_points.set(vertex as i64, source.vertex_points[vertex]);
+            vertex_map.set(vertex as i64, vertex as i64);
+        }
+    }
+    let average_primitive_size = if primitive_count == 0 { 1 } else { (vertex_count / primitive_count).max(1) };
+    let primitive_grain = (grain / average_primitive_size as i64).max(1);
+    support::parallel_for(cancel_value, primitive_grain, primitive_count as i64, &|primitive| {
+        let primitive = primitive as usize;
         if !selected(primitive) {
-            continue;
+            return Ok(());
         }
         let first = source.primitive_offsets[primitive];
         let count = source.primitive_offsets[primitive + 1] - first;
@@ -82,12 +88,15 @@ fn reverse(
                 Operation::ReverseVertices => count - local - 1,
                 Operation::ShiftVertices(_) => (local + shift) % count,
             };
-            let vertex = (first + local) as usize;
+            let vertex = first + local;
             let old_vertex = first + old_local;
-            vertex_points[vertex] = source.vertex_points[old_vertex as usize];
-            vertex_map[vertex] = old_vertex;
+            vertex_points.set(vertex, source.vertex_points[old_vertex as usize]);
+            vertex_map.set(vertex, old_vertex);
         }
-    }
+        Ok(())
+    })?;
+    let vertex_points = vertex_points.into_vec();
+    let vertex_map = vertex_map.into_vec();
     let new_topology = topology::View::create_validated_owned(
         geometry::point_count(geometry_value),
         vertex_points,
@@ -183,5 +192,15 @@ mod tests {
         let failure = err(run(Some(&token), &grid(1, 1, 1.0, true)));
         assert_eq!(error::code(&failure), "cancelled");
         assert_eq!(error::operation(&failure), "reverse");
+    }
+
+    #[test]
+    fn parallel_exact() {
+        let g = grid(200, 200, 2.0, true);
+        let n = geometry::topology(&g);
+        let corners = topology::vertex_count(n);
+        let g = with_attr(&g, Owner::Vertex, "corner", Storage::Int((0..corners).collect()));
+        let out = exact_at_one_and_four(&|| run(None, &g).unwrap());
+        assert_ne!(topo(&out).0, topo(&g).0);
     }
 }

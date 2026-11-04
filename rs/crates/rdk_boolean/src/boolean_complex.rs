@@ -5,7 +5,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use rdk_core::{cancel, error, geometry};
+use rdk_core::{cancel, error, geometry, support};
+use rdk_ops::subdivide_refine::AInts;
 use rdk_geom::implicit_point::{self, Construction};
 
 use crate::boolean_constraints::{self as constraints_mod, Side};
@@ -235,6 +236,74 @@ fn poll(cancel_value: Option<&cancel::T>, index: i64, mask: i64) -> Result<(), e
     cancel::poll(cancel_value, index, mask).map_err(|_| fail("cancelled", "Boolean complex assembly was cancelled"))
 }
 
+/// Sorts `values` by `compare_points`: sorted runs of 2048 in parallel, then pairwise merges of
+/// doubling width, as the OCaml `parallel_sort_indices`. The comparator is total, so the result is
+/// the same as any other sort.
+fn parallel_sort_indices(
+    cancel_value: Option<&cancel::T>,
+    token_points: &[implicit_point::T],
+    values: Vec<i64>,
+) -> Result<Vec<i64>, error::T> {
+    let count = values.len();
+    let run_size = 2_048usize;
+    let mut values = values;
+    if count < run_size * 2 {
+        values.sort_by(|&l, &r| compare_points(token_points, l, r));
+        return Ok(values);
+    }
+    let mut source = AInts::from_slice(&values);
+    let mut destination = AInts::new(count as i64, 0);
+    let runs = count.div_ceil(run_size);
+    support::parallel_for(cancel_value, 1, runs as i64, &|run| {
+        cancel::check_opt(cancel_value)?;
+        let first = run as usize * run_size;
+        let length = run_size.min(count - first);
+        let mut local: Vec<i64> = (0..length).map(|at| source.get((first + at) as i64)).collect();
+        local.sort_by(|&l, &r| compare_points(token_points, l, r));
+        for (at, value) in local.into_iter().enumerate() {
+            source.set((first + at) as i64, value);
+        }
+        Ok(())
+    })?;
+    let mut width = run_size;
+    while width < count {
+        let span = width * 2;
+        let merges = count.div_ceil(span);
+        support::parallel_for(cancel_value, 1, merges as i64, &|merge| {
+            cancel::check_opt(cancel_value)?;
+            let first = merge as usize * span;
+            let middle = count.min(first + width);
+            let last = count.min(first + span);
+            let (mut left, mut right, mut output) = (first, middle, first);
+            while left < middle && right < last {
+                let (a, b) = (source.get(left as i64), source.get(right as i64));
+                if compare_points(token_points, a, b) != std::cmp::Ordering::Greater {
+                    destination.set(output as i64, a);
+                    left += 1;
+                } else {
+                    destination.set(output as i64, b);
+                    right += 1;
+                }
+                output += 1;
+            }
+            while left < middle {
+                destination.set(output as i64, source.get(left as i64));
+                left += 1;
+                output += 1;
+            }
+            while right < last {
+                destination.set(output as i64, source.get(right as i64));
+                right += 1;
+                output += 1;
+            }
+            Ok(())
+        })?;
+        std::mem::swap(&mut source, &mut destination);
+        width = span;
+    }
+    Ok(source.into_vec())
+}
+
 fn merge_orders(token_points: &[implicit_point::T], first: &[i64], second: &[i64]) -> Vec<i64> {
     let mut output = Vec::with_capacity(first.len() + second.len());
     let (mut left, mut right) = (0usize, 0usize);
@@ -459,11 +528,9 @@ pub fn build(
     // Constraint points are already exact-coordinate sorted and unique by the constraint planner.
     // Sort only the explicit-source prefix and the face-local constructions, then merge the runs.
     // The comparator is total (index tie-break), so any sort yields the same order.
-    let mut source_order: Vec<i64> = (0..source_point_count as i64).collect();
-    source_order.sort_by(|&l, &r| compare_points(&token_points, l, r));
+    let source_order = parallel_sort_indices(cancel_value, &token_points, (0..source_point_count as i64).collect())?;
     let constraint_order: Vec<i64> = (source_point_count as i64..global_point_count as i64).collect();
-    let mut local_order: Vec<i64> = (global_point_count as i64..token_count as i64).collect();
-    local_order.sort_by(|&l, &r| compare_points(&token_points, l, r));
+    let local_order = parallel_sort_indices(cancel_value, &token_points, (global_point_count as i64..token_count as i64).collect())?;
     let token_order = merge_orders(&token_points, &merge_orders(&token_points, &source_order, &constraint_order), &local_order);
     let mut vertex_of_token = vec![0i64; token_count];
     let mut vertices: Vec<implicit_point::T> = Vec::new();
@@ -784,6 +851,31 @@ mod tests {
         match build(Some(&token), &constraints, &refinement) {
             Err(e) => assert_eq!(error::code(&e), "cancelled"),
             Ok(_) => panic!("cancelled Boolean complex assembly completed"),
+        }
+    }
+
+    #[test]
+    fn parallel_sort_matches_sequential_sort() {
+        // 9000 points with many exact duplicates: more than four 2048-runs and several merge passes.
+        let n = 9_000usize;
+        let coordinate = |k: usize, salt: usize| ((k * 7919 + salt) % 211) as f64;
+        let source = implicit_point::source(
+            (0..n).map(|k| coordinate(k, 1)).collect(),
+            (0..n).map(|k| coordinate(k, 2)).collect(),
+            (0..n).map(|k| coordinate(k, 3)).collect(),
+        )
+        .unwrap();
+        let points: Vec<implicit_point::T> = (0..n as i64).map(|k| implicit_point::explicit(&source, k).unwrap()).collect();
+        let mut expected: Vec<i64> = (0..n as i64).collect();
+        expected.sort_by(|&l, &r| compare_points(&points, l, r));
+        for domains in [1, 4] {
+            let slot: Mutex<Option<Vec<i64>>> = Mutex::new(None);
+            parallel::run_unit(Some(domains), &|| {
+                *slot.lock().unwrap() = Some(parallel_sort_indices(None, &points, (0..n as i64).collect()).unwrap());
+                Ok(())
+            })
+            .unwrap();
+            assert!(slot.into_inner().unwrap().unwrap() == expected, "parallel sort differs at {domains} domains");
         }
     }
 }

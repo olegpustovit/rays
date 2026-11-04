@@ -6,7 +6,8 @@ use std::sync::Arc;
 
 use rdk_core::packed;
 use rdk_core::topology::PrimitiveKind;
-use rdk_core::{cancel, error, geometry, topology, topology_index};
+use rdk_core::{cancel, error, geometry, support, topology, topology_index};
+use rdk_ops::subdivide_refine::AInts;
 use rdk_geom::implicit_point;
 use rdk_geom::linear_piece_index;
 use rdk_geom::predicates::{self, SegmentSegment};
@@ -654,7 +655,16 @@ fn build_inner(
 ) -> Result<T, Fail> {
     cancel::check_opt(cancel_value)?;
     let facets = complex::facet_count(c);
-    let facet_masks: Vec<i64> = (0..facets).map(|facet| facet_mask(c, facet)).collect();
+    let facet_masks: Vec<i64> = if facets < options.parallel_cutoff {
+        (0..facets).map(|facet| facet_mask(c, facet)).collect()
+    } else {
+        let masks = AInts::new(facets, 0);
+        support::parallel_for(cancel_value, options.grain, facets, &|facet| {
+            masks.set(facet, facet_mask(c, facet));
+            Ok(())
+        })?;
+        masks.into_vec()
+    };
     let constraints_value = complex::View::constraints(c);
     let index_of = |geometry_value: &geometry::T| -> Result<topology_index::View::View, Fail> {
         let index = topology_index::create(cancel_value, geometry::topology(geometry_value))?;
@@ -1049,5 +1059,36 @@ mod tests {
             slot.into_inner().unwrap().unwrap()
         };
         assert!(run(1) && run(4), "scale seam verification failed or differs across domain counts");
+    }
+
+    #[test]
+    fn facet_mask_parallel_path_matches_serial() {
+        let value = pipeline(
+            &triangle(&[(0., 0., 0.), (4., 0., 0.), (2., 4., 0.)]),
+            &triangle(&[(0., 3., 0.), (4., 3., 0.), (2., -1., 0.)]),
+            false,
+            false,
+        );
+        let signature = |built: &T| -> Vec<u64> {
+            let mut bits = Vec::new();
+            for part in [curves(built), coincident(built)] {
+                let positions = packed::Float3::View::view(geometry::positions(part)).unwrap();
+                bits.extend(positions.x.iter().chain(positions.y.iter()).chain(positions.z.iter()).map(|v| v.to_bits()));
+                bits.push(geometry::primitive_count(part) as u64);
+            }
+            bits
+        };
+        let run = |domains: i64, cutoff: i64| {
+            let slot: Mutex<Option<Vec<u64>>> = Mutex::new(None);
+            parallel::run_unit(Some(domains), &|| {
+                let options = Params { grain: 1, parallel_cutoff: cutoff, ..params() };
+                *slot.lock().unwrap() = Some(signature(&build(None, &options, &value).unwrap()));
+                Ok(())
+            })
+            .unwrap();
+            slot.into_inner().unwrap().unwrap()
+        };
+        let serial = run(1, 1_000_000);
+        assert!(serial == run(1, 1) && serial == run(4, 1), "parallel facet masks differ from the serial path");
     }
 }
