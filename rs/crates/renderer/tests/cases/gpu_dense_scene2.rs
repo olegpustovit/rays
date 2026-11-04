@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 use ::renderer::renderer::{self, Native};
 use scene_command::render_ir::{self, Blend, Command, Geometry, Rect, RenderIr, Transform};
 use std::rc::Rc;
@@ -137,6 +137,4 @@ fn gpu_dense_scene2_2x() {
     run(2)
 }
 
-fn main() {
-    common::window::run(&[("gpu_dense_scene2_1x", gpu_dense_scene2_1x), ("gpu_dense_scene2_2x", gpu_dense_scene2_2x)]);
-}
+pub const CASES: &[(&str, fn())] = &[("gpu_dense_scene2_1x", gpu_dense_scene2_1x), ("gpu_dense_scene2_2x", gpu_dense_scene2_2x)];

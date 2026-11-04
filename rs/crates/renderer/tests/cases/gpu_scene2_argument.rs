@@ -1,8 +1,8 @@
 //! lib/renderer/test_scene2_argument.ml on an offscreen renderer (the window run is
 //! window_scene2_argument.rs); both share tests/scene2_argument_body.
-mod common;
-mod scene2_argument_body;
-use common::get;
+use crate::common;
+use crate::scene2_argument_body;
+use crate::common::get;
 use renderer::renderer;
 
 fn gpu_scene2_argument() {
@@ -16,6 +16,4 @@ fn gpu_scene2_argument() {
     assert_eq!(get(ogpu::impl_::live_handles()), before, "scene2 retained argument live-handle delta");
 }
 
-fn main() {
-    common::window::run(&[("gpu_scene2_argument", gpu_scene2_argument)]);
-}
+pub const CASES: &[(&str, fn())] = &[("gpu_scene2_argument", gpu_scene2_argument)];

@@ -3,8 +3,8 @@
 //! 65 and 100,000 instances, at 1x and 2x density. Inputs are multiples of 1/8 so that binary32 sums
 //! such as x + width are exact; see specification/marks.md. Every channel is compared.
 //! The OCaml loop over (density, kind) is split into one test fn per pair so each stays under 5 s.
-mod common;
-use common::get;
+use crate::common;
+use crate::common::get;
 use ogpu::backend::{self, Buffer, Device};
 use ogpu::pipeline::Blend;
 use ogpu::render_pass::{Comparison, Cull, Load, Primitive};
@@ -377,8 +377,7 @@ fn gpu_marks_line_2x() { if common::gpu() { parity(2, Kind::Line) } }
 fn gpu_marks_indirect_1x() { if common::gpu() { indirect(1) } }
 fn gpu_marks_indirect_2x() { if common::gpu() { indirect(2) } }
 
-fn main() {
-    common::window::run(&[
+pub const CASES: &[(&str, fn())] = &[
         ("gpu_marks_rect_1x", gpu_marks_rect_1x),
         ("gpu_marks_circle_1x", gpu_marks_circle_1x),
         ("gpu_marks_line_1x", gpu_marks_line_1x),
@@ -387,5 +386,4 @@ fn main() {
         ("gpu_marks_line_2x", gpu_marks_line_2x),
         ("gpu_marks_indirect_1x", gpu_marks_indirect_1x),
         ("gpu_marks_indirect_2x", gpu_marks_indirect_2x),
-    ]);
-}
+    ];

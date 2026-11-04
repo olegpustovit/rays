@@ -1,6 +1,6 @@
 // A real window: Vulkan frames 1/2/60/600 and a resize, zero handle delta. A missing window or
 // device is a skip, as in the OCaml test.
-mod common;
+use crate::common;
 use ::renderer::renderer::{self, family, Native};
 use ::renderer::scene_execution::{self, new_bytes, geometry_draw, mesh, mesh_key, state};
 use ogpu::render_pass::{Comparison, Cull, Load, Primitive};
@@ -68,6 +68,4 @@ fn window_runtime_render() {
     println!("renderer: Vulkan frames 1/2/60/600 and resize, zero delta");
 }
 
-fn main() {
-    common::window::run(&[("window_runtime_render", window_runtime_render)]);
-}
+pub const CASES: &[(&str, fn())] = &[("window_runtime_render", window_runtime_render)];

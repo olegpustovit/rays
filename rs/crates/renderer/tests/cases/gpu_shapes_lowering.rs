@@ -1,8 +1,8 @@
 // A published Ui_batch reaches the GPU without another copy on the way. The OCaml test also
 // asserted bytes allocated per instance (Gc.allocated_bytes); Rust has no such counter, so only
 // the pixel assertions are ported (see the report).
-mod common;
-use common::get;
+use crate::common;
+use crate::common::get;
 use ::renderer::renderer::{self, Native};
 use scene_command::render_ir::{self as ir, Blend, Command};
 use scene_command::ui_batch::Builder;
@@ -51,6 +51,4 @@ fn gpu_shapes_lowering() {
     println!("Shapes lowering: a {}-instance batch painted {} pixels, identical on the second frame", COUNT, painted);
 }
 
-fn main() {
-    common::window::run(&[("gpu_shapes_lowering", gpu_shapes_lowering)]);
-}
+pub const CASES: &[(&str, fn())] = &[("gpu_shapes_lowering", gpu_shapes_lowering)];

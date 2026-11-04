@@ -56,6 +56,7 @@ struct TestCase {
     executable: PathBuf,
     crate_name: String,
     name: String,
+    more: Vec<String>,
 }
 
 struct TestOutcome {
@@ -254,6 +255,7 @@ fn run_tests(
 
     let mut ordinary = Vec::new();
     let mut serial = Vec::new();
+    let mut gpu = Vec::new();
     let mut order = 0;
     for executable in executables {
         let mut list = Command::new(&executable.path);
@@ -331,28 +333,29 @@ fn run_tests(
                 executable: executable.path.clone(),
                 crate_name: executable.crate_name.clone(),
                 name: test,
+                more: Vec::new(),
             };
             order += 1;
             // A harness=false target named window_*/gpu_* (e.g. tests/window_fonts.rs) serializes all its cases.
-            let target_serial = case
-                .executable
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with("window_") || name.starts_with("gpu_"));
-            if target_serial || is_serial_test(&case.name) {
+            let target = case.executable.file_name().and_then(|name| name.to_str()).unwrap_or("");
+            // gpu_* targets are offscreen: one process each, run in parallel with the others.
+            if target.starts_with("gpu_") {
+                gpu.push(case);
+            } else if target.starts_with("window_") || is_serial_test(&case.name) {
                 serial.push(case);
             } else {
                 ordinary.push(case);
             }
         }
     }
+    ordinary.extend(group_by_executable(gpu));
     let workers = thread::available_parallelism().map_or(1, |count| count.get());
     let mut failure_code = 0;
     let outcomes = run_test_batch(ordinary, workers, args, run_started, timeout);
     if record_outcomes(outcomes, timings, &mut failure_code) {
         return report_whole_timeout(run_started);
     }
-    for case in serial {
+    for case in group_by_executable(serial) {
         if remaining(run_started, timeout).is_some_and(|remaining| remaining.is_zero()) {
             return report_whole_timeout(run_started);
         }
@@ -366,6 +369,18 @@ fn run_tests(
     } else {
         failure_code
     }
+}
+
+// One process per executable: a gpu_/window_ target shares its device across its cases.
+fn group_by_executable(cases: Vec<TestCase>) -> Vec<TestCase> {
+    let mut groups: Vec<TestCase> = Vec::new();
+    for case in cases {
+        match groups.last_mut() {
+            Some(g) if g.executable == case.executable => g.more.push(case.name),
+            _ => groups.push(case),
+        }
+    }
+    groups
 }
 
 fn is_serial_test(name: &str) -> bool {
@@ -442,8 +457,10 @@ fn run_test_case(
     let test_started = Instant::now();
     let mut command = Command::new(&case.executable);
     command.args(&args.test_args).arg("--exact").arg(&case.name);
+    command.args(&case.more);
+    let cases = 1 + case.more.len() as u32;
     let (elapsed, failure_code, whole_timeout) =
-        match run_command(&mut command, run_started, timeout, Some(args.test_timeout), false) {
+        match run_command(&mut command, run_started, timeout, Some(args.test_timeout * cases), false) {
             Ok(RunResult::Finished(output)) => (
                 test_started.elapsed(),
                 if output.status.success() {
@@ -481,7 +498,7 @@ fn run_test_case(
         order: case.order,
         timing: TestTiming {
             crate_name: case.crate_name,
-            test: case.name,
+            test: if case.more.is_empty() { case.name } else { format!("{} (+{} more)", case.name, case.more.len()) },
             elapsed,
         },
         failure_code,

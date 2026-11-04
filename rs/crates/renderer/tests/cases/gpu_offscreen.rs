@@ -1,8 +1,8 @@
 //! Port of lib/renderer/test_offscreen.ml, split into independent test fns (one process each).
 //! Not ported: the raising resolver (Rust has no catchable exception across the resolver), the
 //! Gc allocated/promoted-word ceilings (no OCaml GC), the `ps` RSS tool (Mem.phys_footprint only).
-mod common;
-use common::get;
+use crate::common;
+use crate::common::get;
 use renderer::renderer;
 use ::renderer::renderer::Native;
 use ::renderer::renderer_retained_plans::resource as res;
@@ -339,13 +339,11 @@ fn gpu_offscreen_eviction() {
     get(renderer::destroy(&e));
 }
 
-fn main() {
-    common::window::run(&[
+pub const CASES: &[(&str, fn())] = &[
         ("gpu_offscreen_clear_resize", gpu_offscreen_clear_resize),
         ("gpu_offscreen_retained", gpu_offscreen_retained),
         ("gpu_offscreen_transactions", gpu_offscreen_transactions),
         ("gpu_offscreen_labels", gpu_offscreen_labels),
         ("gpu_offscreen_large_image", gpu_offscreen_large_image),
         ("gpu_offscreen_eviction", gpu_offscreen_eviction),
-    ]);
-}
+    ];

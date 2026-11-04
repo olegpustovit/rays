@@ -20,14 +20,16 @@ pub fn run(tests: &[(&str, fn())]) {
         if !filters.is_empty() && !filters.iter().any(|f| f == name) {
             continue;
         }
+        let started = std::time::Instant::now();
         match std::panic::catch_unwind(test) {
-            Ok(()) => println!("test {name} ... ok"),
+            Ok(()) => println!("test {name} ... ok ({:.2}s)", started.elapsed().as_secs_f64()),
             Err(_) => {
                 println!("test {name} ... FAILED");
                 failed += 1;
             }
         }
     }
+    super::release_keepalive();
     if failed > 0 {
         std::process::exit(101);
     }

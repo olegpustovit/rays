@@ -1,6 +1,6 @@
 // The PXUI instance pipeline must light exactly the pixels the Scene2 triangle path lights for the
 // design kit's square fills, 1-point strokes, and axis-aligned marker lines, at 1x and 2x density.
-mod common;
+use crate::common;
 use ::renderer::renderer::{self, Native};
 use scene_command::render_ir::{self, Command};
 use scene_command::{shape2, ui_batch};
@@ -106,6 +106,4 @@ fn gpu_ui_pipeline_2x() {
     run(2)
 }
 
-fn main() {
-    common::window::run(&[("gpu_ui_pipeline_1x", gpu_ui_pipeline_1x), ("gpu_ui_pipeline_2x", gpu_ui_pipeline_2x)]);
-}
+pub const CASES: &[(&str, fn())] = &[("gpu_ui_pipeline_1x", gpu_ui_pipeline_1x), ("gpu_ui_pipeline_2x", gpu_ui_pipeline_2x)];

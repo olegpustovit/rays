@@ -1,6 +1,6 @@
 // GPU marks: exact native parity under transform, clip, six blends, Retina and stale
 // output/update/lease guards. One test fn per density.
-mod common;
+use crate::common;
 use ::renderer::renderer::{self, marks_source, Native};
 use ::renderer::scene_execution::{self, new_bytes};
 use ogpu::backend as b;
@@ -162,6 +162,4 @@ fn gpu_draw_2x() {
     run(2)
 }
 
-fn main() {
-    common::window::run(&[("gpu_draw_1x", gpu_draw_1x), ("gpu_draw_2x", gpu_draw_2x)]);
-}
+pub const CASES: &[(&str, fn())] = &[("gpu_draw_1x", gpu_draw_1x), ("gpu_draw_2x", gpu_draw_2x)];

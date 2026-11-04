@@ -2,8 +2,8 @@
 //! kept: a run of more than 64 CPU sets is one draw (shorter runs keep their own, by design: a
 //! changing member must not re-upload its neighbours), and a set drawn by the Marks family never
 //! merges with a Ui_batch set but keeps its place in the order. Pixels equal one big batch.
-mod common;
-use common::get;
+use crate::common;
+use crate::common::get;
 use ::renderer::renderer::{self, marks_source, Native};
 use ::renderer::scene_execution::{self, new_bytes};
 use scene_command::render_ir::{self, Command};
@@ -157,6 +157,4 @@ fn gpu_batch_merge() {
     assert_eq!(get(ogpu::impl_::live_handles()), baseline, "batch merge handle delta");
 }
 
-fn main() {
-    common::window::run(&[("gpu_batch_merge", gpu_batch_merge)]);
-}
+pub const CASES: &[(&str, fn())] = &[("gpu_batch_merge", gpu_batch_merge)];

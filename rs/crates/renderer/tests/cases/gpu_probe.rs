@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 use renderer::renderer;
 
 fn gpu_probe() {
@@ -13,6 +13,4 @@ fn gpu_probe() {
     common::get(renderer::destroy(&value));
 }
 
-fn main() {
-    common::window::run(&[("gpu_probe", gpu_probe)]);
-}
+pub const CASES: &[(&str, fn())] = &[("gpu_probe", gpu_probe)];

@@ -1,6 +1,6 @@
 #![allow(non_camel_case_types)]
-mod common;
-use common::get;
+use crate::common;
+use crate::common::get;
 use ogpu::backend::{self, Buffer};
 use ogpu::error;
 use ogpu::pipeline::Blend;
@@ -318,11 +318,9 @@ fn gpu_scene3_resident_colors4() {
     resident_colors(4);
 }
 
-fn main() {
-    common::window::run(&[
+pub const CASES: &[(&str, fn())] = &[
         ("gpu_scene3_shared_mesh_and_instances", gpu_scene3_shared_mesh_and_instances),
         ("gpu_scene3_device_indices_and_white", gpu_scene3_device_indices_and_white),
         ("gpu_scene3_resident_colors3", gpu_scene3_resident_colors3),
         ("gpu_scene3_resident_colors4", gpu_scene3_resident_colors4),
-    ]);
-}
+    ];

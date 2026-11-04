@@ -25,63 +25,26 @@ ogpu_mock = { path = "../ogpu_mock" }
 ogpu_vulkan = { path = "../ogpu_vulkan" }
 
 # Resource operations (and so Renderer.destroy) need the SDL main thread, which libtest never gives a
-# test: these targets' own main runs them (tests/common/window.rs). GPU tests are gpu_*, tests that
-# open a window are window_*.
+# test: these targets' own main runs their cases (tests/common/window.rs) in one process on one device
+# each; the gpu_* targets are offscreen and run in parallel, window_all opens windows and runs alone.
 
 [[test]]
-name = "gpu_probe"
+name = "gpu_marks_1x"
 harness = false
 
 [[test]]
-name = "gpu_draw"
+name = "gpu_marks_2x"
 harness = false
 
 [[test]]
-name = "gpu_offscreen"
+name = "gpu_offscreen_etc"
 harness = false
 
 [[test]]
-name = "gpu_scene2_coordinates"
+name = "gpu_scene_etc"
 harness = false
 
 [[test]]
-name = "gpu_dense_scene2"
-harness = false
-
-[[test]]
-name = "gpu_ui_pipeline"
-harness = false
-
-[[test]]
-name = "gpu_marks_native"
-harness = false
-
-[[test]]
-name = "gpu_batch_merge"
-harness = false
-
-[[test]]
-name = "gpu_shapes_lowering"
-harness = false
-
-[[test]]
-name = "gpu_scene2_argument"
-harness = false
-
-[[test]]
-name = "gpu_scene3_instances"
-harness = false
-
-
-[[test]]
-name = "window_runtime_render"
-harness = false
-
-[[test]]
-name = "window_scene3_lighting"
-harness = false
-
-[[test]]
-name = "window_scene2_argument"
+name = "window_all"
 harness = false
 

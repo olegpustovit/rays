@@ -1,6 +1,6 @@
 //! Port of lib/renderer/test_scene2_coordinates.ml: 1x and 2x density as separate test fns.
-mod common;
-use common::get;
+use crate::common;
+use crate::common::get;
 use renderer::renderer;
 use ::renderer::renderer::Native;
 use scene_command::render_ir::{self, Command, Geometry, Rect};
@@ -120,6 +120,4 @@ fn gpu_scene2_coordinates_2x() {
     run(64, 32, 128, 64, 2);
 }
 
-fn main() {
-    common::window::run(&[("gpu_scene2_coordinates_1x", gpu_scene2_coordinates_1x), ("gpu_scene2_coordinates_2x", gpu_scene2_coordinates_2x)]);
-}
+pub const CASES: &[(&str, fn())] = &[("gpu_scene2_coordinates_1x", gpu_scene2_coordinates_1x), ("gpu_scene2_coordinates_2x", gpu_scene2_coordinates_2x)];

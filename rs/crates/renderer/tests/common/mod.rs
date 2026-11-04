@@ -5,18 +5,31 @@
 
 use ogpu::error::{self, Error, ErrorKind};
 
+thread_local! {
+    static KEEP: std::cell::RefCell<Option<::renderer::renderer::gpu>> = const { std::cell::RefCell::new(None) };
+}
+
+pub fn release_keepalive() {
+    if let Some(lease) = KEEP.with(|k| k.borrow_mut().take()) {
+        ::renderer::renderer::release_gpu(&lease);
+    }
+}
+
 #[cfg(windows)]
 pub fn gpu() -> bool {
+    if KEEP.with(|k| k.borrow().is_some()) {
+        return true;
+    }
     use ogpu::impl_::Impl;
     ogpu::impl_::select(Impl {
         backend: ogpu_vulkan::impl_::BACKEND.to_owned(),
         create_driver: Box::new(|| ogpu_vulkan::backend::create_with_validation((true, true))),
         live_handles: Box::new(ogpu_vulkan::impl_::live_handles),
     });
-    let probe = ogpu::backend::create_device(ogpu::impl_::create_driver().expect("selected"));
-    match probe {
-        Ok(device) => {
-            let _ = ogpu::backend::destroy_device(&device);
+    // The lease keeps the shared headless device alive across the target's cases (released by window::run).
+    match ::renderer::renderer::acquire_gpu() {
+        Ok(lease) => {
+            KEEP.with(|k| *k.borrow_mut() = Some(lease));
             true
         }
         Err(e) if e.kind == ErrorKind::NoAdapter => {

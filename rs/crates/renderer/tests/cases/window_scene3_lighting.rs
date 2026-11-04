@@ -1,6 +1,6 @@
 #![allow(non_camel_case_types)]
-mod common;
-use common::get;
+use crate::common;
+use crate::common::get;
 use ogpu::error::ErrorKind;
 use ogpu::pipeline::Blend;
 use ogpu::render_pass::{Comparison, Cull, Load, Primitive};
@@ -186,6 +186,4 @@ fn window_scene3_lighting() {
     println!("runtime Scene3 lighting: ambient/directional frames1/2/60/600");
 }
 
-fn main() {
-    common::window::run(&[("window_scene3_lighting", window_scene3_lighting)]);
-}
+pub const CASES: &[(&str, fn())] = &[("window_scene3_lighting", window_scene3_lighting)];
