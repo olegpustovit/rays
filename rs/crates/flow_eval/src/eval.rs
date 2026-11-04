@@ -332,7 +332,7 @@ struct Arena {
     nodes: Shared<Vec<Node>>, authored: Vec<i64>, cells: Shared<Vec<GraphCell>>, cache: Shared<HashMap<String,usize>>, states: Shared<Vec<Value>>, records: Shared<BTreeMap<Path, Vec<(Vec<i64>,Value)>>>,
     observed: Vec<ResidualId>, res_log: Shared<Vec<ResidualId>>, fn_log: Shared<Vec<FnId>>, approx: u64, policies: Shared<HashMap<String, Option<Arc<InlineParameterPolicy>>>>,
     record: bool, time: Option<Frame>, resolve: Option<Arc<dyn Fn(&Value)->Result<Value,Diagnostic> + Send + Sync>>,
-    state: Option<State>, elems: BTreeMap<String,Value>, step_count: usize, budget: usize, fn_calls: Shared<IdMap<FnId, i64>>, memo: Shared<IdMap<ResidualId, Value>>, interrupt: Option<Interrupt>, owns_index: bool, lent: u32, bases: Shared<AddrMap<Arc<Path>>>, ops_seen: Shared<AddrMap<(String, &'static str, OpRef)>>, names: Shared<AddrMap<Arc<str>>>, arg_pool: Shared<AddrMap<Vec<(String, Value)>>>, routes: Shared<AddrMap<(usize, Seg, Route)>>, plans: Shared<AddrMap<CodePlan>>, terms: Shared<AddrMap<(Stamp, Arc<Term>)>>, frees: Shared<AddrMap<(Stamp, Arc<Vec<String>>)>>,
+    state: Option<State>, elems: BTreeMap<String,Value>, step_count: usize, budget: usize, fn_calls: Shared<IdMap<FnId, i64>>, memo: Shared<IdMap<ResidualId, Value>>, interrupt: Option<Interrupt>, owns_index: bool, lent: u32, bases: Shared<AddrMap<Arc<Path>>>, ops_seen: Shared<AddrMap<(String, &'static str, OpRef)>>, names: Shared<AddrMap<Arc<str>>>, arg_pool: Shared<AddrMap<Vec<(String, Value)>>>, routes: Shared<AddrMap<(usize, Seg, Route)>>, plans: Shared<AddrMap<CodePlan>>, fn_plans: Shared<AddrMap<CodePlan>>, terms: Shared<AddrMap<(Stamp, Arc<Term>)>>, frees: Shared<AddrMap<(Stamp, Arc<Vec<String>>)>>,
 }
 static EMPTY_WORKSPACE: LazyLock<Shared<Workspace>> = LazyLock::new(|| Shared::new(Workspace {
     name: String::new(), graphs: Vec::new().into(), defs: Vec::new().into(), nodes: Vec::new().into(), macros: Vec::new().into(), source: Vec::new().into(),
@@ -346,7 +346,7 @@ impl Arena {
             nodes: Shared::default(), authored: Vec::new(), cells: Shared::default(), cache: Shared::default(),
             states: Shared::default(), records: Shared::default(), observed: Vec::new(), res_log: Shared::default(), fn_log: Shared::default(), approx: 0, policies: Shared::default(), record,
             time: None, resolve: None, state: Some(State::default()), elems: BTreeMap::new(), step_count: 0,
-            budget, fn_calls: Shared::default(), memo: Shared::default(), interrupt, owns_index, lent: 0, bases: Shared::default(), ops_seen: Shared::default(), names: Shared::default(), arg_pool: Shared::default(), routes: Shared::default(), plans: Shared::default(), terms: Shared::default(), frees: Shared::default(),
+            budget, fn_calls: Shared::default(), memo: Shared::default(), interrupt, owns_index, lent: 0, bases: Shared::default(), ops_seen: Shared::default(), names: Shared::default(), arg_pool: Shared::default(), routes: Shared::default(), plans: Shared::default(), fn_plans: Shared::default(), terms: Shared::default(), frees: Shared::default(),
         }
     }
     /// What stands in for an arena while it is lent (never read: `owns_index` false marks it).
@@ -1519,6 +1519,7 @@ fn apply_op_in(a: &mut Arena, c: &ExecCtx, authored: i64, name: &str, values: &m
 }
 fn apply_def(a:&mut Arena,c:&ExecCtx,name:&str,vals:&[Value],body:Option<&Term>)->Result<Value,Diagnostic>{let workspace=a.workspace.clone();let graph=workspace.defs.iter().find(|g|g.name==name).ok_or_else(||errorf("E_UNKNOWN",format!("Unknown function {}.",name)))?;if c.depth>=MAX_DEPTH{return eval_error("E_DEPTH","Call depth exceeds 64.")}let mut cx=c.clone();cx.prefix=Arc::new(site(c));cx.base=Arc::new(vec![format!("def:{}",name)]);cx.route = Route(None);cx.depth+=1;let mut env=Env::empty();for(i,(n,ty,default))in graph.inputs.iter().enumerate(){let v=if let Some(v)=vals.get(i){coerce(ty,v)?}else if let Some(t)=default{eval_at(a,&sub(&cx,n.clone().into()),&env,t)?}else{return Err(errorf("E_ARGS",format!("{} needs :{}.",name,n)))};if a.record&&cx.record{let mut p=(*cx.base).clone();p.push(format!(":{}",n));note(a,&cx,p,v.clone());}env.bind(intern(a,n),v)}eval_at(a,&cx,&env,body.unwrap_or(&graph.body))}
 fn call_fn(a: &mut Arena, c: &ExecCtx, id: FnId, values: &[Value], body: Option<&Term>) -> Result<Value, Diagnostic> {
+    if let Some(result) = call_compiled(a, c, id, values, body) { return result; }
     match get_fn(a, id)? {
         Function::Closure(closure) => {
             if closure.params.len() != values.len() {
@@ -3161,14 +3162,17 @@ fn dependent_fast(value: &Value, frame: bool) -> bool {
 }
 
 // ---- compiled pure expressions ----
-// A subtree of plain value arithmetic (literals, bound names, scalar value operators, let, if, cond, case, vectors) is compiled once per arena
-// into `Code`: names bound inside it are numbered slots, operators are resolved with their argument lists spelled once, and it runs without
-// contexts, routes or residual handling. It is exactly the walker's evaluation of those terms: the same steps (counted and budgeted), the same
-// records, the same operator calls in the same order. Anything else the walker would do differently (a live or residual value, an error, an
-// interrupt, the budget, a node or data source made by an operator) abandons the compiled run before it changes anything, and the walker
-// evaluates the term instead, from the same state.
+// A subtree of plain value code (literals, bound names, scalar value operators, let, if, cond, case, vectors, calls of local closures and
+// the closures it makes) is compiled once per arena into `Code`: names bound inside it are numbered slots, operators are resolved with their
+// argument lists spelled once, and it runs without contexts, routes or residual handling. It is exactly the walker's evaluation of those
+// terms: the same steps (counted and budgeted), the same records, the same operator calls in the same order, the same call counts and
+// closures (a closure's context is rebuilt from its route when it is made). Anything else the walker would do differently (a live or
+// residual value, an error, an interrupt, the budget, a node or data source made by an operator, a call it cannot run) abandons the
+// compiled run: the call counts and closures it changed are put back, and the walker evaluates the term instead, from the same state.
 #[derive(Clone)]
-enum Code {
+struct Code { path: Option<Path>, kind: Kind }
+#[derive(Clone)]
+enum Kind {
     Lit(Value),
     Local(usize, Vec<String>),
     Outer(String, Vec<String>),
@@ -3179,98 +3183,140 @@ enum Code {
     Case(Box<Code>, Vec<(Value, Code)>, Box<Code>),
     Let(Vec<(usize, Code)>, Box<Code>),
     Vec(Vec<Code>),
+    Call { callee: Callee, args: Vec<Code>, def: Option<Box<DefCall>>, body: Option<Arc<Term>> },
+    MakeFn(Box<MakeFn>),
 }
-// One compiled term: its code with the record path of each node (pre-order, as the walker visits them), the context its operators were
-// resolved in, and how many slots its lets use.
 #[derive(Clone)]
-struct Compiled { code: Code, paths: Vec<Option<Path>>, context: &'static str, slots: usize, stamp: Stamp }
+enum Callee { Local(usize), Outer(String) }
+// A call the walker sends to `apply_def` when its name is not a bound function: the definition, the body it runs, and the route to the call.
+#[derive(Clone)]
+struct DefCall { name: String, body: Arc<Term>, inputs: Vec<(String, Ty)>, steps: Arc<Vec<Step>> }
+// A closure made by compiled code: what the walker's `Fn` arm puts in it, with the route from the frame's context to the term.
+#[derive(Clone)]
+struct MakeFn { params: Vec<(W::Pattern, Option<Ty>)>, body: Arc<Term>, zone: Path, captures: Vec<(String, Option<usize>)>, steps: Vec<Step> }
+#[derive(Clone)]
+enum Step { Base(Path), Seg(Seg) }
+// One compiled term (or closure body): its code, the context its operators were resolved in, its slots, and how its runs went.
+#[derive(Clone)]
+struct Compiled { code: Code, context: &'static str, slots: usize, stamp: Stamp, params: Vec<(W::Pattern, Option<Ty>)>, runs: u32, abandons: u32 }
 #[derive(Clone)]
 enum CodePlan { Walk(Stamp), Run(Box<Compiled>) }
 const COMPILE_MIN_NODES: usize = 4;
 
 fn op_at(workspace: &Workspace, op: OpRef) -> &op::Op { match op { OpRef::Extra(i) => &workspace.ops[i], OpRef::Builtin(i) => &op::all()[i] } }
-fn op_deep(found: &op::Op, name: &str) -> bool {
-    let declared = found.signature.pos.iter().chain(&found.signature.opt).chain(&found.signature.kw).find(|(arg, _)| arg == name).map(|(_, ty)| ty)
-        .or_else(|| found.signature.rest.as_ref().filter(|(arg, _)| arg == name).map(|(_, ty)| ty));
-    declared.is_some_and(|ty| matches!(ty, Ty::List(_) | Ty::Record(_)) && data_type(ty))
-}
-struct Compiler { workspace: Arc<Workspace>, context: Context, scope: Vec<(String, usize)>, slots: usize, paths: Vec<Option<Path>> }
+struct Compiler { workspace: Arc<Workspace>, context: Context, scope: Vec<(String, usize)>, slots: usize, nodes: usize, steps: Vec<Step> }
 impl Compiler {
     fn op(&self, a: &mut Arena, name: &str) -> Option<OpRef> {
         let workspace = self.workspace.clone();
         let found = find_op(a, &workspace, name, &self.context)?;
         let scalar = matches!(&found.shape, op::Shape::Scalar) && found.ctx == flow_syntax::context::value() && !found.live && found.out_args.is_none()
-            && found.name != "equal?" && found.name != "live?" && !W::BODY_CONTEXT_OPS.contains(&found.name.as_str());
+            && found.name != "live?" && !W::BODY_CONTEXT_OPS.contains(&found.name.as_str());
         if !scalar { return None; }
         let index_in = |table: &[op::Op]| { let start = table.as_ptr() as usize; let at = found as *const op::Op as usize; (at >= start && at < start + table.len() * std::mem::size_of::<op::Op>()).then(|| (at - start) / std::mem::size_of::<op::Op>()) };
         index_in(&workspace.ops).map(OpRef::Extra).or_else(|| index_in(op::all()).map(OpRef::Builtin))
     }
-    fn term(&mut self, a: &mut Arena, t: &Term) -> Option<Code> {
-        self.paths.push(t.path.clone());
+    // A child entered as the walker enters it: `eval_at` (no segment) or `eval_sub` under a segment.
+    fn term(&mut self, a: &mut Arena, t: &Term, seg: Option<Seg>) -> Option<Code> {
+        let pushed = match (&t.path, seg) { (Some(path), _) => { self.steps.push(Step::Base(path.clone())); true } (None, Some(seg)) => { self.steps.push(Step::Seg(seg)); true } (None, None) => false };
+        let kind = self.kind(a, t);
+        if pushed { self.steps.pop(); }
+        Some(Code { path: t.path.clone(), kind: kind? })
+    }
+    fn kind(&mut self, a: &mut Arena, t: &Term) -> Option<Kind> {
+        self.nodes += 1;
         Some(match &t.node {
-            TermNode::Lit(param::Value::Int(n)) => Code::Lit(Value::Int(*n)),
-            TermNode::Lit(param::Value::Float(n)) => Code::Lit(Value::Float(*n)),
-            TermNode::Lit(param::Value::Bool(v)) => Code::Lit(Value::Bool(*v)),
-            TermNode::Text(bytes) => Code::Lit(Value::Text(bytes.clone())),
-            TermNode::Nil => Code::Lit(Value::No_geo),
+            TermNode::Lit(param::Value::Int(n)) => Kind::Lit(Value::Int(*n)),
+            TermNode::Lit(param::Value::Float(n)) => Kind::Lit(Value::Float(*n)),
+            TermNode::Lit(param::Value::Bool(v)) => Kind::Lit(Value::Bool(*v)),
+            TermNode::Text(bytes) => Kind::Lit(Value::Text(bytes.clone())),
+            TermNode::Nil => Kind::Lit(Value::No_geo),
             TermNode::RefBinding(name, fields) => {
                 if name.starts_with("$elem:") { return None; }
                 match self.scope.iter().rev().find(|(bound, _)| bound == name) {
-                    Some((_, slot)) => Code::Local(*slot, fields.clone()),
-                    None => Code::Outer(name.clone(), fields.clone()),
+                    Some((_, slot)) => Kind::Local(*slot, fields.clone()),
+                    None => Kind::Outer(name.clone(), fields.clone()),
                 }
             }
             TermNode::Op { op: name, args, skip } if skip.is_empty() && (name == "and" || name == "or") && args.len() == 2 => {
                 let op = self.op(a, name)?;
-                let found = op_at(&self.workspace, op);
-                if op_deep(found, &args[0].0) || op_deep(found, &args[1].0) { return None; }
-                let first = Box::new(self.term(a, &args[0].1)?);
-                let second = Box::new(self.term(a, &args[1].1)?);
-                Code::AndOr { or: name == "or", op, first, second, names: [args[0].0.clone(), args[1].0.clone()] }
+                let seg = Seg::Owned(intern(a, &args[0].0)); let first = Box::new(self.term(a, &args[0].1, Some(seg))?);
+                let seg = Seg::Owned(intern(a, &args[1].0)); let second = Box::new(self.term(a, &args[1].1, Some(seg))?);
+                Kind::AndOr { or: name == "or", op, first, second, names: [args[0].0.clone(), args[1].0.clone()] }
             }
             TermNode::Op { op: name, args, skip } if skip.is_empty() && name != "live?" => {
                 let op = self.op(a, name)?;
-                let found = op_at(&self.workspace, op);
-                if args.iter().any(|(arg, _)| op_deep(found, arg)) { return None; }
                 let mut code = Vec::with_capacity(args.len());
-                for (_, term) in args { code.push(self.term(a, term)?); }
-                Code::Op { op, args: code, names: args.iter().map(|(name, _)| (name.clone(), Value::No_geo)).collect() }
+                for (index, (arg, term)) in args.iter().enumerate() {
+                    let count = args[..index].iter().filter(|(other, _)| other == arg).count();
+                    let seg = if count == 0 { Seg::Owned(intern(a, arg)) } else { format!("{}#{}", arg, count).into() };
+                    code.push(self.term(a, term, Some(seg))?);
+                }
+                Kind::Op { op, args: code, names: args.iter().map(|(name, _)| (name.clone(), Value::No_geo)).collect() }
             }
             TermNode::If(test, yes, no) => {
-                let test = self.term(a, test)?;
-                let yes = self.term(a, yes)?;
-                Code::If(Box::new(test), Box::new(yes), Box::new(self.term(a, no)?))
+                let test = self.term(a, test, Some("if".into()))?;
+                let yes = self.term(a, yes, Some("then".into()))?;
+                Kind::If(Box::new(test), Box::new(yes), Box::new(self.term(a, no, Some("else".into()))?))
             }
             TermNode::Cond(arms, default) => {
                 let mut code = Vec::with_capacity(arms.len());
-                for (test, body) in arms { let test = self.term(a, test)?; code.push((test, self.term(a, body)?)); }
-                Code::Cond(code, Box::new(self.term(a, default)?))
+                for (index, (test, body)) in arms.iter().enumerate() {
+                    let test = self.term(a, test, Some(Seg::Index("test", index)))?;
+                    code.push((test, self.term(a, body, Some(Seg::Index("arm", index)))?));
+                }
+                Kind::Cond(code, Box::new(self.term(a, default, Some("else".into()))?))
             }
             TermNode::Case(subject, arms, default) => {
-                let subject = Box::new(self.term(a, subject)?);
+                let subject = Box::new(self.term(a, subject, Some("case".into()))?);
                 let mut code = Vec::with_capacity(arms.len());
-                for (literal, body) in arms { let literal = literal_case(literal).ok()?; code.push((literal, self.term(a, body)?)); }
-                Code::Case(subject, code, Box::new(self.term(a, default)?))
+                for (index, (literal, body)) in arms.iter().enumerate() { let literal = literal_case(literal).ok()?; code.push((literal, self.term(a, body, Some(Seg::Index("arm", index)))?)); }
+                Kind::Case(subject, code, Box::new(self.term(a, default, Some("else".into()))?))
             }
             TermNode::Let(bindings, body) => {
                 let depth = self.scope.len();
                 let mut code = Vec::with_capacity(bindings.len());
                 for (pattern, term) in bindings {
                     let W::Pattern::Name(name) = pattern else { self.scope.truncate(depth); return None; };
-                    let Some(value) = self.term(a, term) else { self.scope.truncate(depth); return None; };
+                    let Some(value) = self.term(a, term, None) else { self.scope.truncate(depth); return None; };
                     let slot = self.slots;
                     self.slots += 1;
                     self.scope.push((name.clone(), slot));
                     code.push((slot, value));
                 }
-                let body = self.term(a, body);
+                let body = self.term(a, body, None);
                 self.scope.truncate(depth);
-                Code::Let(code, Box::new(body?))
+                Kind::Let(code, Box::new(body?))
             }
             TermNode::Vec(terms) if (2..=4).contains(&terms.len()) => {
                 let mut code = Vec::with_capacity(terms.len());
-                for term in terms { code.push(self.term(a, term)?); }
-                Code::Vec(code)
+                for (index, term) in terms.iter().enumerate() { code.push(self.term(a, term, Some(Seg::Index("", index)))?); }
+                Kind::Vec(code)
+            }
+            TermNode::CallFn { fn_name, args, body } => {
+                let callee = match self.scope.iter().rev().find(|(bound, _)| bound == fn_name) { Some((_, slot)) => Callee::Local(*slot), None => Callee::Outer(fn_name.clone()) };
+                let def = if matches!(callee, Callee::Local(_)) { None } else {
+                    let workspace = self.workspace.clone();
+                    match workspace.defs.iter().find(|graph| graph.name == *fn_name) {
+                        Some(graph) if graph.inputs.len() == args.len() => {
+                            let body = shared_term(a, body.as_deref().unwrap_or(&graph.body));
+                            Some(Box::new(DefCall { name: fn_name.clone(), body, inputs: graph.inputs.iter().map(|(name, ty, _)| (name.clone(), ty.clone())).collect(), steps: Arc::new(self.steps.clone()) }))
+                        }
+                        Some(_) => return None,
+                        None => None,
+                    }
+                };
+                // the checker's body for this call site (a specialized closure body), run with the closure's own parameters and captures
+                let body = body.as_deref().map(|body| shared_term(a, body));
+                let mut code = Vec::with_capacity(args.len());
+                for (index, term) in args.iter().enumerate() { code.push(self.term(a, term, Some(Seg::Index("a", index)))?); }
+                Kind::Call { callee, args: code, def, body }
+            }
+            TermNode::Fn { params, body, zone, capture: None } => {
+                let captures = free_names(body).into_iter().map(|name| {
+                    let slot = self.scope.iter().rev().find(|(bound, _)| *bound == name).map(|(_, slot)| *slot);
+                    (name, slot)
+                }).collect();
+                Kind::MakeFn(Box::new(MakeFn { params: params.clone(), body: shared_term(a, body), zone: zone.clone(), captures, steps: self.steps.clone() }))
             }
             _ => return None,
         })
@@ -3279,20 +3325,21 @@ impl Compiler {
 
 // Why a compiled run gives way to the walker.
 struct Abandon;
-struct Run { workspace: Arc<Workspace>, slots: Vec<Value>, steps: usize, base: usize, notes: Vec<(usize, Value)>, record: bool, node: usize }
+enum Undo { Calls(FnId, Option<i64>), Closure(FnId) }
+enum Root { Ctx(ExecCtx), Call { closure: Arc<ClosureData>, index: i64 }, Def { name: String, caller: usize, steps: Arc<Vec<Step>> } }
+struct CallFrame { slots: Vec<Value>, env: Env, root: Root }
+struct Run { workspace: Arc<Workspace>, frames: Vec<CallFrame>, steps: usize, base: usize, depth: usize, notes: Vec<(Path, Value)>, record: bool, undo: Vec<Undo>, context: Context }
 impl Run {
-    fn step(&mut self, a: &Arena) -> Result<usize, Abandon> {
+    fn step(&mut self, a: &Arena) -> Result<(), Abandon> {
         self.steps += 1;
         let at = self.base + self.steps;
         if at % PACKED_BLOCK == 0 && a.interrupt.as_ref().is_some_and(|stop| stop()) { return Err(Abandon); }
         if at > a.budget { return Err(Abandon); }
-        let node = self.node;
-        self.node += 1;
-        Ok(node)
+        Ok(())
     }
-    fn done(&mut self, node: usize, value: Value, paths: &[Option<Path>]) -> Result<Value, Abandon> {
+    fn done(&mut self, path: &Option<Path>, value: Value) -> Result<Value, Abandon> {
         if is_live_value(&value) { return Err(Abandon); }
-        if self.record && paths[node].is_some() { self.notes.push((node, value.clone())); }
+        if self.record { if let Some(path) = path { self.notes.push((path.clone(), value.clone())); } }
         Ok(value)
     }
     fn fields(value: Value, name: &str, fields: &[String]) -> Result<Value, Abandon> {
@@ -3304,6 +3351,29 @@ impl Run {
             path = format!("{}.{}", path, field_name);
         }
         Ok(value)
+    }
+    // The context of frame `k`, as the walker's would be: the entry context, or a call's (`call_fn`) over its caller's.
+    fn root_ctx(&self, a: &mut Arena, k: usize) -> ExecCtx {
+        match &self.frames[k].root {
+            Root::Ctx(context) => context.clone(),
+            Root::Def { name, caller, steps } => {
+                let mut context = self.root_ctx(a, *caller);
+                for step in steps.iter() { match step { Step::Base(path) => { context.base = base_of(a, path); context.route = Route(None); } Step::Seg(seg) => context = sub(&context, seg.clone()) } }
+                let mut cx = context.clone();
+                cx.prefix = Arc::new(site(&context)); cx.base = Arc::new(vec![format!("def:{}", name)]); cx.route = Route(None); cx.depth += 1;
+                cx
+            }
+            Root::Call { closure, index } => {
+                let mut context = self.root_ctx(a, k - 1);
+                context.inst = closure.at.inst;
+                context.prefix = closure.at.prefix.clone();
+                context.base = base_of(a, &closure.zone);
+                context.route = Route(None);
+                Arc::make_mut(&mut context.iter).push(*index);
+                context.depth += 1;
+                context
+            }
+        }
     }
     fn apply(&mut self, a: &Arena, op: OpRef, values: &[(String, Value)]) -> Result<Value, Abandon> {
         let found = op_at(&self.workspace, op);
@@ -3326,49 +3396,145 @@ impl Run {
         if matches!(result, Value::Source(..)) || is_live_value(&result) { return Err(Abandon); }
         Ok(result)
     }
-    fn eval(&mut self, a: &Arena, env: &Env, code: &mut Code, paths: &[Option<Path>]) -> Result<Value, Abandon> {
-        let node = self.step(a)?;
-        let value = match code {
-            Code::Lit(value) => value.clone(),
-            Code::Local(slot, fields) => {
-                let value = self.slots[*slot].clone();
+    fn call(&mut self, a: &mut Arena, function: Value, values: Vec<Value>, body: Option<&Arc<Term>>) -> Result<Value, Abandon> {
+        if self.record { return Err(Abandon); }
+        let Value::Fn(id) = function else { return Err(Abandon); };
+        if id.1 != a.id { return Err(Abandon); }
+        let Some(Function::Closure(closure)) = a.functions.get(&id).cloned() else { return Err(Abandon); };
+        if closure.params.len() != values.len() || self.depth + 1 > MAX_DEPTH { return Err(Abandon); }
+        let body = body.unwrap_or(&closure.body).clone();
+        let key = Arc::as_ptr(&body) as usize;
+        let mut compiled = match a.fn_plans.remove(&key) {
+            Some(CodePlan::Run(compiled)) if compiled.stamp.is(&body) && compiled.params == closure.params => compiled,
+            Some(CodePlan::Walk(stamp)) if stamp.is(&body) => { a.fn_plans.insert(key, CodePlan::Walk(stamp)); return Err(Abandon); }
+            _ => {
+                let mut compiler = Compiler { workspace: self.workspace.clone(), context: self.context.clone(), scope: Vec::new(), slots: 0, nodes: 0, steps: Vec::new() };
+                let mut ok = true;
+                for (pattern, _) in closure.params.iter() {
+                    match pattern { W::Pattern::Name(name) => { compiler.scope.push((name.clone(), compiler.slots)); compiler.slots += 1; } _ => { ok = false } }
+                }
+                match ok.then(|| compiler.term(a, &body, None)).flatten() {
+                    Some(code) => Box::new(Compiled { code, context: self.context.as_str(), slots: compiler.slots, stamp: Stamp::of(&body), params: closure.params.clone(), runs: 0, abandons: 0 }),
+                    None => { a.fn_plans.insert(key, CodePlan::Walk(Stamp::of(&body))); return Err(Abandon); }
+                }
+            }
+        };
+        if compiled.context != self.context.as_str() { a.fn_plans.insert(key, CodePlan::Run(compiled)); return Err(Abandon); }
+        let previous = a.fn_calls.get(&id).copied();
+        let index = previous.unwrap_or(closure.calls);
+        self.undo.push(Undo::Calls(id, previous));
+        a.fn_calls.insert(id, index + 1);
+        let mut slots = vec![Value::No_geo; compiled.slots];
+        for (slot, ((_, ty), value)) in closure.params.iter().zip(values).enumerate() {
+            slots[slot] = match ty { Some(ty) => match coerce(ty, &value) { Ok(value) => value, Err(_) => { a.fn_plans.insert(key, CodePlan::Run(compiled)); return Err(Abandon); } }, None => value };
+        }
+        self.frames.push(CallFrame { slots, env: Env::of(closure.env.clone()), root: Root::Call { closure: closure.clone(), index } });
+        self.depth += 1;
+        let result = self.eval(a, &mut compiled.code);
+        self.depth -= 1;
+        self.frames.pop();
+        a.fn_plans.insert(key, CodePlan::Run(compiled));
+        result
+    }
+    // `apply_def` for a definition with all its inputs given: a frame of its inputs, under `def:<name>` at the call's site.
+    fn call_def(&mut self, a: &mut Arena, def: &DefCall, values: Vec<Value>) -> Result<Value, Abandon> {
+        if self.record || self.depth >= MAX_DEPTH { return Err(Abandon); }
+        let key = Arc::as_ptr(&def.body) as usize;
+        let same = |compiled: &Compiled| compiled.stamp.is(&def.body) && compiled.params.len() == def.inputs.len()
+            && compiled.params.iter().zip(&def.inputs).all(|((pattern, _), (name, _))| matches!(pattern, W::Pattern::Name(n) if n == name));
+        let mut compiled = match a.fn_plans.remove(&key) {
+            Some(CodePlan::Run(compiled)) if same(&compiled) => compiled,
+            Some(CodePlan::Walk(stamp)) if stamp.is(&def.body) => { a.fn_plans.insert(key, CodePlan::Walk(stamp)); return Err(Abandon); }
+            _ => {
+                let mut compiler = Compiler { workspace: self.workspace.clone(), context: self.context.clone(), scope: Vec::new(), slots: 0, nodes: 0, steps: Vec::new() };
+                for (name, _) in &def.inputs { compiler.scope.push((name.clone(), compiler.slots)); compiler.slots += 1; }
+                match compiler.term(a, &def.body, None) {
+                    Some(code) => Box::new(Compiled { code, context: self.context.as_str(), slots: compiler.slots, stamp: Stamp::of(&def.body), params: def.inputs.iter().map(|(name, ty)| (W::Pattern::Name(name.clone()), Some(ty.clone()))).collect(), runs: 0, abandons: 0 }),
+                    None => { a.fn_plans.insert(key, CodePlan::Walk(Stamp::of(&def.body))); return Err(Abandon); }
+                }
+            }
+        };
+        if compiled.context != self.context.as_str() { a.fn_plans.insert(key, CodePlan::Run(compiled)); return Err(Abandon); }
+        let mut slots = vec![Value::No_geo; compiled.slots];
+        for (slot, ((_, ty), value)) in def.inputs.iter().zip(values).enumerate() {
+            match coerce(ty, &value) { Ok(value) => slots[slot] = value, Err(_) => { a.fn_plans.insert(key, CodePlan::Run(compiled)); return Err(Abandon); } }
+        }
+        let caller = self.frames.len() - 1;
+        self.frames.push(CallFrame { slots, env: Env::empty(), root: Root::Def { name: def.name.clone(), caller, steps: def.steps.clone() } });
+        self.depth += 1;
+        let result = self.eval(a, &mut compiled.code);
+        self.depth -= 1;
+        self.frames.pop();
+        a.fn_plans.insert(key, CodePlan::Run(compiled));
+        result
+    }
+    fn make_fn(&mut self, a: &mut Arena, made: &MakeFn) -> Value {
+        let top = self.frames.len() - 1;
+        let mut context = self.root_ctx(a, top);
+        for step in &made.steps {
+            match step { Step::Base(path) => { context.base = base_of(a, path); context.route = Route(None); } Step::Seg(seg) => context = sub(&context, seg.clone()) }
+        }
+        let frame = &self.frames[top];
+        let env: BTreeMap<String, Value> = made.captures.iter().filter_map(|(name, slot)| match slot { Some(slot) => Some((name.clone(), frame.slots[*slot].clone())), None => frame.env.get(name).map(|value| (name.clone(), value)) }).collect();
+        let id = closure_id(a, Function::Closure(Arc::new(ClosureData { params: made.params.clone(), replayable: true, body: made.body.clone(), env: Arc::new(env), zone: made.zone.clone(), calls: 0, at: context })));
+        self.undo.push(Undo::Closure(id));
+        Value::Fn(id)
+    }
+    // Put back what a run that gave way changed: call counts and the closures it made.
+    fn undo_into(&mut self, a: &mut Arena) {
+        for undo in self.undo.drain(..).rev() {
+            match undo {
+                Undo::Calls(id, Some(count)) => { a.fn_calls.insert(id, count); }
+                Undo::Calls(id, None) => { a.fn_calls.remove(&id); }
+                Undo::Closure(id) => { a.functions.remove(&id); if a.fn_log.last() == Some(&id) { a.fn_log.pop(); } }
+            }
+        }
+    }
+    fn local(&self, slot: usize) -> Value { self.frames.last().expect("a frame").slots[slot].clone() }
+    fn eval(&mut self, a: &mut Arena, code: &mut Code) -> Result<Value, Abandon> {
+        self.step(a)?;
+        let Code { path, kind } = code;
+        let value = match kind {
+            Kind::Lit(value) => value.clone(),
+            Kind::Local(slot, fields) => {
+                let value = self.local(*slot);
                 if fields.is_empty() { value } else { Self::fields(value, "", fields)? }
             }
-            Code::Outer(name, fields) => {
-                let value = env.get(name).ok_or(Abandon)?;
+            Kind::Outer(name, fields) => {
+                let value = self.frames.last().expect("a frame").env.get(name).ok_or(Abandon)?;
                 if fields.is_empty() { value } else { Self::fields(value, name, fields)? }
             }
-            Code::Op { op, args, names } => {
+            Kind::Op { op, args, names } => {
                 let mut values = std::mem::take(names);
                 for (index, arg) in args.iter_mut().enumerate() {
-                    match self.eval(a, env, arg, paths) { Ok(value) => values[index].1 = value, Err(abandon) => { *names = values; return Err(abandon); } }
+                    match self.eval(a, arg) { Ok(value) => values[index].1 = value, Err(abandon) => { *names = values; return Err(abandon); } }
                 }
                 let result = self.apply(a, *op, &values);
                 for entry in values.iter_mut() { entry.1 = Value::No_geo; }
                 *names = values;
                 result?
             }
-            Code::AndOr { or, op, first, second, names } => {
-                let left = self.eval(a, env, first, paths)?;
-                if let Value::Bool(value) = &left { if *value == *or { return self.done(node, Value::Bool(*value), paths); } }
-                let right = self.eval(a, env, second, paths)?;
+            Kind::AndOr { or, op, first, second, names } => {
+                let left = self.eval(a, first)?;
+                if let Value::Bool(value) = &left { if *value == *or { return self.done(path, Value::Bool(*value)); } }
+                let right = self.eval(a, second)?;
                 let values = [(names[0].clone(), left), (names[1].clone(), right)];
                 self.apply(a, *op, &values)?
             }
-            Code::If(test, yes, no) => {
-                let test = self.eval(a, env, test, paths)?;
-                if truth(&test).map_err(|_| Abandon)? { self.eval(a, env, yes, paths)? } else { self.eval(a, env, no, paths)? }
+            Kind::If(test, yes, no) => {
+                let test = self.eval(a, test)?;
+                if truth(&test).map_err(|_| Abandon)? { self.eval(a, yes)? } else { self.eval(a, no)? }
             }
-            Code::Cond(arms, default) => {
+            Kind::Cond(arms, default) => {
                 let mut chosen = None;
                 for (index, (test, _)) in arms.iter_mut().enumerate() {
-                    let test = self.eval(a, env, test, paths)?;
+                    let test = self.eval(a, test)?;
                     if truth(&test).map_err(|_| Abandon)? { chosen = Some(index); break; }
                 }
-                match chosen { Some(index) => self.eval(a, env, &mut arms[index].1, paths)?, None => self.eval(a, env, default, paths)? }
+                match chosen { Some(index) => self.eval(a, &mut arms[index].1)?, None => self.eval(a, default)? }
             }
-            Code::Case(subject, arms, default) => {
-                let value = self.eval(a, env, subject, paths)?;
+            Kind::Case(subject, arms, default) => {
+                let value = self.eval(a, subject)?;
                 let mut chosen = None;
                 for (index, (literal, _)) in arms.iter().enumerate() {
                     let matches = if matches!(&value, Value::Bool(_)) || matches!(literal, Value::Bool(_)) {
@@ -3383,19 +3549,50 @@ impl Run {
                     };
                     if matches { chosen = Some(index); break; }
                 }
-                match chosen { Some(index) => self.eval(a, env, &mut arms[index].1, paths)?, None => self.eval(a, env, default, paths)? }
+                match chosen { Some(index) => self.eval(a, &mut arms[index].1)?, None => self.eval(a, default)? }
             }
-            Code::Let(bindings, body) => {
-                for (slot, term) in bindings.iter_mut() { let value = self.eval(a, env, term, paths)?; self.slots[*slot] = value; }
-                self.eval(a, env, body, paths)?
+            Kind::Let(bindings, body) => {
+                for (slot, term) in bindings.iter_mut() { let value = self.eval(a, term)?; self.frames.last_mut().expect("a frame").slots[*slot] = value; }
+                self.eval(a, body)?
             }
-            Code::Vec(terms) => {
+            Kind::Vec(terms) => {
                 let mut values = [0.0; 4];
-                for (index, term) in terms.iter_mut().enumerate() { values[index] = num(&self.eval(a, env, term, paths)?).map_err(|_| Abandon)?; }
+                for (index, term) in terms.iter_mut().enumerate() { values[index] = num(&self.eval(a, term)?).map_err(|_| Abandon)?; }
                 match terms.len() { 2 => Value::Vec2(values[0], values[1]), 3 => Value::Vec3(values[0], values[1], values[2]), _ => Value::Vec4(values[0], values[1], values[2], values[3]) }
             }
+            Kind::Call { callee, args, def, body } => {
+                let mut values = Vec::with_capacity(args.len());
+                for arg in args.iter_mut() { values.push(self.eval(a, arg)?); }
+                let function = match callee {
+                    Callee::Local(slot) => Some(self.local(*slot)),
+                    Callee::Outer(name) => self.frames.last().expect("a frame").env.get(name),
+                };
+                match (function, def) {
+                    (Some(function @ Value::Fn(_)), _) => self.call(a, function, values, body.as_ref())?,
+                    (Some(_), None) | (None, None) => return Err(Abandon),
+                    (_, Some(def)) => self.call_def(a, def, values)?,
+                }
+            }
+            Kind::MakeFn(made) => self.make_fn(a, made),
         };
-        self.done(node, value, paths)
+        self.done(path, value)
+    }
+}
+// `call_fn` of a closure whose body compiles, run compiled (None: call it walking).
+fn call_compiled(a: &mut Arena, c: &ExecCtx, id: FnId, values: &[Value], body: Option<&Term>) -> Option<Result<Value, Diagnostic>> {
+    if a.record && c.record { return None; }
+    let body = body.map(|body| shared_term(a, body));
+    let mut run = Run {
+        workspace: a.workspace.0.clone(), frames: vec![CallFrame { slots: Vec::new(), env: Env::empty(), root: Root::Ctx(c.clone()) }],
+        steps: 0, base: a.step_count, depth: c.depth, notes: Vec::new(), record: false, undo: Vec::new(), context: c.context.clone(),
+    };
+    match run.call(a, Value::Fn(id), values.to_vec(), body.as_ref()) {
+        Ok(value) => {
+            a.step_count += run.steps;
+            EVAL_STEPS.fetch_add(run.steps as u64, Ordering::Relaxed);
+            Some(Ok(value))
+        }
+        Err(Abandon) => { run.undo_into(a); None }
     }
 }
 // The walker's evaluation of `t`, run compiled when `t` is a pure subtree (None: walk it).
@@ -3406,25 +3603,34 @@ fn run_compiled(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Option<Resul
         Some(CodePlan::Walk(at)) if at.is(t) => { a.plans.insert(key, CodePlan::Walk(at)); return None; }
         Some(CodePlan::Run(compiled)) if compiled.stamp.is(t) && compiled.context == c.context.as_str() => compiled,
         _ => {
-            let mut compiler = Compiler { workspace: a.workspace.0.clone(), context: c.context.clone(), scope: Vec::new(), slots: 0, paths: Vec::new() };
-            match compiler.term(a, t) {
-                Some(code) if compiler.paths.len() >= COMPILE_MIN_NODES => Box::new(Compiled { code, paths: compiler.paths, context: c.context.as_str(), slots: compiler.slots, stamp: Stamp::of(t) }),
+            let mut compiler = Compiler { workspace: a.workspace.0.clone(), context: c.context.clone(), scope: Vec::new(), slots: 0, nodes: 0, steps: Vec::new() };
+            match compiler.term(a, t, None) {
+                Some(code) if compiler.nodes >= COMPILE_MIN_NODES => Box::new(Compiled { code, context: c.context.as_str(), slots: compiler.slots, stamp: Stamp::of(t), params: Vec::new(), runs: 0, abandons: 0 }),
                 _ => { a.plans.insert(key, CodePlan::Walk(Stamp::of(t))); return None; }
             }
         }
     };
-    let Compiled { code, paths, slots, .. } = &mut *compiled;
-    let mut run = Run { workspace: a.workspace.0.clone(), slots: vec![Value::No_geo; *slots], steps: 0, base: a.step_count, notes: Vec::new(), record: a.record && c.record, node: 0 };
-    let outcome = run.eval(a, env, code, paths);
+    let mut run = Run {
+        workspace: a.workspace.0.clone(), frames: vec![CallFrame { slots: vec![Value::No_geo; compiled.slots], env: env.clone(), root: Root::Ctx(c.clone()) }],
+        steps: 0, base: a.step_count, depth: c.depth, notes: Vec::new(), record: a.record && c.record, undo: Vec::new(), context: c.context.clone(),
+    };
+    let outcome = run.eval(a, &mut compiled.code);
+    compiled.runs += 1;
     let result = match outcome {
         Ok(value) => {
             a.step_count += run.steps;
             EVAL_STEPS.fetch_add(run.steps as u64, Ordering::Relaxed);
-            for (node, value) in std::mem::take(&mut run.notes) { if let Some(path) = &paths[node] { note(a, c, path.clone(), value); } }
+            for (path, value) in std::mem::take(&mut run.notes) { note(a, c, path, value); }
             Some(Ok(value))
         }
-        Err(Abandon) => None,
+        Err(Abandon) => {
+           
+            run.undo_into(a);
+            compiled.abandons += 1;
+            None
+        }
     };
-    a.plans.insert(key, CodePlan::Run(compiled));
+    // a term that keeps giving way is walked from now on
+    if compiled.abandons >= 3 && compiled.abandons * 2 > compiled.runs { a.plans.insert(key, CodePlan::Walk(Stamp::of(t))); } else { a.plans.insert(key, CodePlan::Run(compiled)); }
     result
 }
