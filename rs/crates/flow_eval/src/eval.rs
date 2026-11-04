@@ -1278,7 +1278,7 @@ fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Valu
             if let Some(original) = capture {
                 let Value::Fn(id) = eval_at(a, c, env, original)? else { return eval_error("E_TYPE", "A function port requires a function."); };
                 match get_fn(a, id)? {
-                    Function::Closure(closure) => { let mut closure = (*closure).clone(); { closure.params = params.clone(); closure.body = Arc::new(body.as_ref().clone()); a.functions.insert(id, Function::Closure(Arc::new(closure))); Ok(Value::Fn(id)) } }
+                    Function::Closure(closure) => { let mut closure = (*closure).clone(); { closure.params = params.clone(); closure.body = shared_term(a, body); a.functions.insert(id, Function::Closure(Arc::new(closure))); Ok(Value::Fn(id)) } }
                     Function::Named(named) => { let body = shared_term(a, body); Ok(Value::Fn(closure_id(a, Function::Closure(Arc::new(ClosureData { params: params.clone(), replayable: false, body, env: Arc::new(BTreeMap::new()), zone: zone.clone(), calls: named.calls, at: c.clone() }))))) },
                 }
             } else {
@@ -3208,6 +3208,8 @@ enum Kind {
     Vec(Vec<Code>),
     Call { callee: Callee, args: Vec<Code>, def: Option<Box<DefCall>>, body: Option<Arc<Term>> },
     MakeFn(Box<MakeFn>),
+    // a function port: the captured function takes this term's parameters and body
+    PortFn(Box<Code>, Box<MakeFn>),
 }
 #[derive(Clone)]
 enum Callee { Local(usize), Outer(String) }
@@ -3334,6 +3336,10 @@ impl Compiler {
                 for (index, term) in args.iter().enumerate() { code.push(self.term(a, term, Some(Seg::Index("a", index)))?); }
                 Kind::Call { callee, args: code, def, body }
             }
+            TermNode::Fn { params, body, zone, capture: Some(original) } => {
+                let original = Box::new(self.term(a, original, None)?);
+                Kind::PortFn(original, Box::new(MakeFn { params: params.clone(), body: shared_term(a, body), zone: zone.clone(), captures: Vec::new(), steps: self.steps.clone() }))
+            }
             TermNode::Fn { params, body, zone, capture: None } => {
                 let captures = free_names(body).into_iter().map(|name| {
                     let slot = self.scope.iter().rev().find(|(bound, _)| *bound == name).map(|(_, slot)| *slot);
@@ -3348,7 +3354,7 @@ impl Compiler {
 
 // Why a compiled run gives way to the walker.
 struct Abandon;
-enum Undo { Calls(FnId, Option<i64>), Closure(FnId) }
+enum Undo { Calls(FnId, Option<i64>), Closure(FnId), Replace(FnId, Function) }
 enum Root { Ctx(ExecCtx), Call { closure: Arc<ClosureData>, index: i64 }, Def { name: String, caller: usize, steps: Arc<Vec<Step>> } }
 struct CallFrame { slots: Vec<Value>, env: Env, root: Root }
 struct Run { workspace: Arc<Workspace>, frames: Vec<CallFrame>, steps: usize, base: usize, depth: usize, notes: Vec<(Path, Value)>, record: bool, undo: Vec<Undo>, context: Context }
@@ -3510,6 +3516,7 @@ impl Run {
                 Undo::Calls(id, Some(count)) => { a.fn_calls.insert(id, count); }
                 Undo::Calls(id, None) => { a.fn_calls.remove(&id); }
                 Undo::Closure(id) => { a.functions.remove(&id); if a.fn_log.last() == Some(&id) { a.fn_log.pop(); } }
+                Undo::Replace(id, function) => { a.functions.insert(id, function); }
             }
         }
     }
@@ -3597,6 +3604,29 @@ impl Run {
                 }
             }
             Kind::MakeFn(made) => self.make_fn(a, made),
+            Kind::PortFn(original, made) => {
+                let Value::Fn(id) = self.eval(a, original)? else { return Err(Abandon); };
+                if id.1 != a.id { return Err(Abandon); }
+                match a.functions.get(&id).cloned() {
+                    Some(Function::Closure(closure)) => {
+                        let mut ported = (*closure).clone();
+                        ported.params = made.params.clone();
+                        ported.body = made.body.clone();
+                        self.undo.push(Undo::Replace(id, Function::Closure(closure)));
+                        a.functions.insert(id, Function::Closure(Arc::new(ported)));
+                        Value::Fn(id)
+                    }
+                    Some(Function::Named(named)) => {
+                        let top = self.frames.len() - 1;
+                        let mut context = self.root_ctx(a, top);
+                        for step in &made.steps { match step { Step::Base(path) => { context.base = base_of(a, path); context.route = Route(None); } Step::Seg(seg) => context = sub(&context, seg.clone()) } }
+                        let id = closure_id(a, Function::Closure(Arc::new(ClosureData { params: made.params.clone(), replayable: false, body: made.body.clone(), env: Arc::new(BTreeMap::new()), zone: made.zone.clone(), calls: named.calls, at: context })));
+                        self.undo.push(Undo::Closure(id));
+                        Value::Fn(id)
+                    }
+                    None => return Err(Abandon),
+                }
+            }
         };
         self.done(path, value)
     }
