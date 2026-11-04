@@ -599,7 +599,18 @@ fn stage_ops()->Vec<Op>{
     });
     let mut trace=value_op("scene/trace",vec![("scene",Ty::Int),("origin",Ty::Vec3),("dir",Ty::Vec3),("tmin",Ty::Float),("tmax",Ty::Float),("time",Ty::Float)],vec![],None,vec![],scene_ty,"Scene",body);trace.live=true;ops.insert(0,trace);ops
 }
-fn contains_fn(v:&Value)->bool{match v{Value::Fn(_)=>true,Value::List(xs)=>xs.iter().any(contains_fn),Value::Record(f)|Value::Struct(_,_,f)|Value::Source(_,_,f)=>f.iter().any(|(_,v)|contains_fn(v)),_=>false}}
+// OCaml `=`: structural, left to right; it raises only when it meets two closures, so `(equal? f nil)` is false.
+fn eq_fn(a:&Value,b:&Value)->Option<bool>{
+    let fields=|f:&[(String,Value)],g:&[(String,Value)]|{if f.len()!=g.len(){return Some(false)}for((n,x),(m,y))in f.iter().zip(g){if n!=m{return Some(false)}match eq_fn(x,y){Some(true)=>{}other=>return other}}Some(true)};
+    match(a,b){
+        (Value::Fn(_),Value::Fn(_))=>None,
+        (Value::List(x),Value::List(y))=>{if x.len()!=y.len(){return Some(false)}for(p,q)in x.iter().zip(y.iter()){match eq_fn(p,q){Some(true)=>{}other=>return other}}Some(true)}
+        (Value::Record(f),Value::Record(g))=>fields(f,g),
+        (Value::Struct(n,t,f),Value::Struct(m,u,g))=>if n!=m||t!=u{Some(false)}else{fields(f,g)},
+        (Value::Source(n,t,f),Value::Source(m,u,g))=>if n!=m||t!=u{Some(false)}else{fields(f,g)},
+        _=>Some(a==b),
+    }
+}
 fn float_div(a:f64,b:f64)->f64{if b==0.{0.}else{a/b}}
 fn float_mod(a:f64,b:f64)->f64{if b==0.{0.}else{(a%b+b)%b}}
 fn binary_op(name:&'static str,operation:fn(f64,f64)->f64)->Op{
@@ -669,7 +680,7 @@ fn special_value_ops()->Vec<Op>{
     ops.push(value_op("and",vec![("a",Ty::Bool),("b",Ty::Bool)],vec![],None,vec![],Ty::Bool,"Compare",Arc::new(|_,_,a|Ok(Value::Bool(truthy(a.get_arg("a")?)?&&truthy(a.get_arg("b")?)?)))));
     ops.push(value_op("or",vec![("a",Ty::Bool),("b",Ty::Bool)],vec![],None,vec![],Ty::Bool,"Compare",Arc::new(|_,_,a|Ok(Value::Bool(truthy(a.get_arg("a")?)?||truthy(a.get_arg("b")?)?)))));
     ops.push(value_op("not",vec![("a",Ty::Bool)],vec![],None,vec![],Ty::Bool,"Compare",Arc::new(|_,_,a|Ok(Value::Bool(!truthy(a.get_arg("a")?)?)))));
-    ops.push(value_op("equal?",vec![("a",Ty::Any),("b",Ty::Any)],vec![],None,vec![],Ty::Bool,"Compare",Arc::new(|_,_,a|{let left=a.get_arg("a")?;let right=a.get_arg("b")?;if contains_fn(left)||contains_fn(right){return Err(fail("E_TYPE","Functions cannot be compared."))}Ok(Value::Bool(left==right))})));
+    ops.push(value_op("equal?",vec![("a",Ty::Any),("b",Ty::Any)],vec![],None,vec![],Ty::Bool,"Compare",Arc::new(|_,_,a|{let left=a.get_arg("a")?;let right=a.get_arg("b")?;match eq_fn(left,right){Some(b)=>Ok(Value::Bool(b)),None=>Err(fail("E_TYPE","Functions cannot be compared."))}})));
     ops.push(value_op("live?",vec![("value",Ty::Any)],vec![],None,vec![],Ty::Bool,"Compare",Arc::new(|_,_,_|Ok(Value::Bool(false)))));
     ops.push(value_op("fma",vec![("a",Ty::Float),("b",Ty::Float),("c",Ty::Float)],vec![],None,vec![],Ty::Float,"Math",Arc::new(|_,_,a|Ok(Value::Float(fin("fma",rays_math::fma::fma(fin("fma",num(a.get_arg("a")?)?)?,fin("fma",num(a.get_arg("b")?)?)?,fin("fma",num(a.get_arg("c")?)?)?))?)))));
     ops.push(value_op("float/next_after",vec![("x",Ty::Float),("y",Ty::Float)],vec![],None,vec![],Ty::Float,"Math",Arc::new(|_,_,a|{

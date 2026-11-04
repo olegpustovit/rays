@@ -442,6 +442,21 @@ fn eval_error(code: &str, message: &str) -> Result<Value, Diagnostic> {
 }
 fn need_time() -> Result<Value, Diagnostic> { Err(error("$NEEDS_TIME", "")) }
 fn force_res(a: &mut Arena, id: ResidualId) -> Result<Value, Diagnostic> {
+    // a residual a closure carried in from another evaluation (a library body called with the graph's function) is forced where it lives
+    if !a.residuals.contains_key(&id) && HOME_RESIDUAL.lock().unwrap().get(&id.0).is_some_and(|home| *home != a.id) {
+        if let Some(home) = arena_for_residual(&id) {
+            let mut home = home.lock().unwrap();
+            // it reads cooked sources through the evaluation that is forcing it
+            let (time, state, resolve, elems) = (home.time.clone(), home.state.clone(), home.resolve.clone(), home.elems.clone());
+            home.time = a.time.clone();
+            home.state = a.state.clone();
+            home.resolve = a.resolve.clone();
+            home.elems = a.elems.clone();
+            let forced = force_res(&mut home, id);
+            (home.time, home.state, home.resolve, home.elems) = (time, state, resolve, elems);
+            return forced;
+        }
+    }
     if let Some(value) = a.memo.get(&id) { return Ok(value.clone()); }
     let value = execute_residual(a, id)?;
     a.memo.insert(id, value.clone());
@@ -491,9 +506,8 @@ fn eval_concrete(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term) -> Result<V
 }
 fn geometry_ids(value: &Value, out: &mut Vec<i64>) {
     match value {
-        Value::Deferred(ty, id) if flow_syntax::ty::is_geometry(ty) => out.push(*id),
+        Value::Deferred(ty, id) if flow_syntax::ty::is_cooked(ty) => out.push(*id),
         Value::List(values) => for value in values.iter() { geometry_ids(value, out); },
-        Value::Record(fields) | Value::Struct(_, _, fields) | Value::Source(_, _, fields) => for (_, value) in fields { geometry_ids(value, out); },
         _ => (),
     }
 }
@@ -1860,10 +1874,10 @@ fn structure_path(out: &mut String, path: &[String]) {
     out.push(';');
 }
 fn structure_context(out: &mut String, context: &ExecCtx) {
-    out.push_str(&format!("{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+    out.push_str(&format!("{}:{}:{}:{}:{}:{}:{}:{}:{}",
         context.inst, context.depth, context.iter.iter().map(i64::to_string).collect::<Vec<_>>().join(","),
         context.record as u8, context.data as u8, context.geometry as u8, context.host as u8,
-        context.card.as_deref().unwrap_or(""), context.context.as_str(), context.arena));
+        context.card.as_deref().unwrap_or(""), context.context.as_str()));
     structure_path(out, &context.prefix);
     structure_path(out, &context.base);
     structure_path(out, &context.route.to_vec());

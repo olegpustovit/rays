@@ -116,8 +116,19 @@ pub struct T {
 fn fail(code: &str, message: &str) -> Diagnostic {
     port::error(code, message)
 }
+thread_local! {
+    static LAST_BUILD_FAILURE: std::cell::RefCell<Option<Diagnostic>> = const { std::cell::RefCell::new(None) };
+}
+/// A factory build fails with text only (`Edit_graph` factories return `Result<_, string>`); OCaml raises
+/// the diagnostic through them, so remember it here and let `edit_r` hand it back (code and span kept).
+// ponytail: one slot per thread, matched by message; a build and its `edit_r` run on one thread.
+fn keep_diagnostic(d: Diagnostic) -> String {
+    let message = d.message.clone();
+    LAST_BUILD_FAILURE.with(|slot| *slot.borrow_mut() = Some(d));
+    message
+}
 fn edit_r<A>(r: Result<A, String>) -> R<A> {
-    r.map_err(|message| fail("E_LOWER", &message))
+    r.map_err(|message| LAST_BUILD_FAILURE.with(|slot| slot.borrow_mut().take()).filter(|d| d.message == message).unwrap_or_else(|| fail("E_LOWER", &message)))
 }
 /// A geometry lookup by plan id over the cooked inputs of a node.
 fn lookup(geometries: Vec<rdk::geometry::T>, sources: Vec<i64>) -> ak::GeometryLookup {
@@ -1959,7 +1970,10 @@ pub fn build_call(
         };
         let gpu = env.gpu.clone();
         let network = graph.network.clone();
+        // the body's nodes read residuals and functions of the library lowering's evaluation: keep it as long as they live
+        let keep = Arc::new(lowered);
         let body_fn: Arc<dyn Fn(&sctx::T) -> R<node::T> + Send + Sync> = Arc::new(move |context: &sctx::T| {
+            let _keep = &keep;
             if !driven {
                 return Ok(compiled.clone());
             }
@@ -4431,7 +4445,7 @@ impl Lowerer {
                             let rebuild: node::RebuildFn = Arc::new(move |_label: &str, inputs: &[node::T], changed: &[param::Value]| {
                                 // new inputs keep the card; a new value is an edit of its text
                                 if changed == values_c.iter().map(|(_, v)| v.clone()).collect::<Vec<_>>().as_slice() {
-                                    let rebuilt = build_c(inputs).map_err(|d| d.message)?;
+                                    let rebuilt = build_c(inputs).map_err(keep_diagnostic)?;
                                     Ok(attach(rebuilt, &schema_c, values_c.clone(), &build_c))
                                 } else {
                                     Err("An inlined card is edited through its text".to_owned())
@@ -4449,7 +4463,7 @@ impl Lowerer {
             edit::factory_args("flow_card", &key, &["Flow"]),
             sources.len(),
             Arc::new(move |inputs: &[node::T]| {
-                let n = build_inner(inputs).map_err(|d| d.message)?;
+                let n = build_inner(inputs).map_err(keep_diagnostic)?;
                 Ok(schema_fn(n, inputs))
             }),
         );
@@ -4526,7 +4540,7 @@ impl Lowerer {
                 let factory = edit::factory(
                     edit::factory_args(geometry_arrays_key(&operation), geometry_arrays_label(&operation), &["Flow", "Topology"]),
                     sources.len(),
-                    Arc::new(move |inputs: &[node::T]| this.get().arrays_node(Some(&node_c), None, false, None, None, &op_c, &args_c, &sources_c, inputs).map_err(|d| d.message)),
+                    Arc::new(move |inputs: &[node::T]| this.get().arrays_node(Some(&node_c), None, false, None, None, &op_c, &args_c, &sources_c, inputs).map_err(keep_diagnostic)),
                 );
                 Ok(plain(factory, &sources))
             }
@@ -4541,7 +4555,7 @@ impl Lowerer {
                 let factory = edit::factory(
                     edit::factory_args("flow.with_group", "Write group", &["Flow"]),
                     sources.len(),
-                    Arc::new(move |inputs: &[node::T]| this.get().grp_node(Some(&node_c), None, None, &args_c, &sources_c, inputs).map_err(|d| d.message)),
+                    Arc::new(move |inputs: &[node::T]| this.get().grp_node(Some(&node_c), None, None, &args_c, &sources_c, inputs).map_err(keep_diagnostic)),
                 );
                 Ok(plain(factory, &sources))
             }
@@ -4594,7 +4608,7 @@ impl Lowerer {
                 let factory = edit::factory(
                     edit::factory_args("flow.with_attr", "Write attribute", &["Flow"]),
                     sources.len(),
-                    Arc::new(move |inputs: &[node::T]| this.get().attr_node(Some(&node_c), o.clone(), &name, &values, &sources_c, inputs).map_err(|d| d.message)),
+                    Arc::new(move |inputs: &[node::T]| this.get().attr_node(Some(&node_c), o.clone(), &name, &values, &sources_c, inputs).map_err(keep_diagnostic)),
                 );
                 Ok(Prepared {
                     cid,
@@ -4858,12 +4872,12 @@ impl Lowerer {
         for id in &z.order {
             let n = &this.plan.nodes[*id as usize];
             let step = (|| -> R<()> {
-                let p = this.prepare(n)?;
-                if n.kind == "zone/element"
-                    || is_zone(&n.kind)
-                    || !p.dynamic.is_empty()
+                let special = n.kind == "zone/element" || is_zone(&n.kind);
+                let p = if special { None } else { Some(this.prepare(n)?) };
+                if special
+                    || p.as_ref().is_some_and(|p| !p.dynamic.is_empty())
                     || kernel_data(n).is_some_and(|d| E::is_live(&d))
-                    || !p.kernels.is_empty()
+                    || p.as_ref().is_some_and(|p| !p.kernels.is_empty())
                     || this.deps(n)?.iter().any(|d| varies.contains(d))
                 {
                     varies.insert(*id);

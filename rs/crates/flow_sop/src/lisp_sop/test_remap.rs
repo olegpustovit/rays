@@ -576,7 +576,7 @@ fn outputs_are_owned_untaken_branches_are_not_evaluated_and_live_maps_follow_tim
 }
 
 #[test]
-#[ignore = "slow lowering: perf agent"]
+#[ignore = "slow lowering: debug build, over 5 s alone (a single sop/uv_sphere lowers in 3.3 s, a box in 0.15 s; see test_perf_lower)"]
 fn strict_public_defnode_computes_maps_through_typed_kernels() {
     // The strict public defnode path computes the maps through genuine typed integer kernels, then
     // transfers raw source payload without numeric reads.

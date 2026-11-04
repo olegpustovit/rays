@@ -512,7 +512,7 @@ fn public_geometry_folds_and_collecting_forms_are_refused() {
 }
 
 #[test]
-#[ignore = "slow lowering: perf agent"]
+#[ignore = "slow lowering: debug build, over 5 s alone (a single sop/uv_sphere lowers in 3.3 s, a box in 0.15 s; see test_perf_lower)"]
 fn cooked_folds_traverse_inventory() {
     let groups: Vec<group::T> = (0..5001).map(|i| ok(group::init(None, group::Owner::Point, &format!("entry_{i}"), 0, &|_| unreachable!()))).collect();
     let geometry = ok(geo::create(geo::positions(&fixtures()[0]).clone(), ok(topology::empty(0)), None, Some(groups), None));

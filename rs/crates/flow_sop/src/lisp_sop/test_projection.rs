@@ -3,7 +3,6 @@
 //!
 //! The OCaml catalog is `Editor_document.Kinds.catalog`; flow_sop cannot depend on editor_document,
 //! so `catalog()` is the factory catalog alone. The ten fixtures that are sop-only sketches run;
-//! `bloom` and `variations` (scene/world/settings/ui graphs) are `#[ignore = "needs editor_document"]`.
 use super::support::*;
 use crate::{catalog as fcat, lisp_sop, port};
 use flow_check::catalog::Catalog;
@@ -17,7 +16,7 @@ use param::Value;
 const SOP_ONLY: [&str; 10] = ["facade", "garland", "kit", "orrery", "rosette", "sunflower", "tiles", "tree", "tunnel", "wave"];
 
 fn catalog() -> Catalog {
-    fcat::of_factories(1, &[], None, &lisp_sop::factories()).unwrap()
+    editor_document::kinds::catalog(1, &lisp_sop::factories()).unwrap()
 }
 
 fn workspace_of(text: &str) -> w::Workspace {
@@ -147,7 +146,6 @@ fn snapshots() {
 }
 
 #[test]
-#[ignore = "needs editor_document"]
 fn snapshots_of_the_scene_fixtures() {
     check_snapshot("bloom");
     check_snapshot("variations");
@@ -174,7 +172,6 @@ fn rows_of_a_keyword_first_call() {
 }
 
 #[test]
-#[ignore = "needs editor_document"]
 fn rows_of_the_bloom_zone_calls_and_macros() {
     let w = load("bloom");
     // a zone: rail with the loop variable, captures, and the yield
@@ -307,7 +304,6 @@ fn flags() {
 }
 
 #[test]
-#[ignore = "needs editor_document"]
 fn bloom_has_no_live_node() {
     let w = load("bloom");
     for g in graph_names(&w) {
@@ -439,7 +435,6 @@ fn layout() {
 }
 
 #[test]
-#[ignore = "needs editor_document"]
 fn layout_of_the_scene_fixtures() {
     layout_of(&load("bloom"), "bloom");
     layout_of(&load("variations"), "variations");

@@ -4,9 +4,8 @@
 //!
 //! The OCaml catalog is `Editor_document.Kinds.catalog`; flow_sop cannot depend on editor_document,
 //! so `catalog()` is the factory catalog alone and the tests that write a `scene/`, `world/` or
-//! `ui/` kind are `#[ignore = "needs editor_document"]`.
 use super::support::*;
-use crate::{catalog as fcat, lisp_sop, manifest};
+use crate::{lisp_sop, manifest};
 use flow_check::catalog::Catalog;
 use flow_graph::flow_edit::{self as e, ArgKey, Loop, Op};
 use flow_graph::projection as p;
@@ -14,7 +13,7 @@ use flow_syntax::syntax::{self as s, Node, Syntax};
 use flow_syntax::{lisp, ty};
 
 fn catalog() -> Catalog {
-    fcat::of_factories(1, &[], None, &lisp_sop::factories()).unwrap()
+    editor_document::kinds::catalog(1, &lisp_sop::factories()).unwrap()
 }
 
 fn canon(forms: &[Syntax]) -> String {
@@ -195,7 +194,6 @@ fn part2_connect_disconnect_input_defaults() {
 
 // the shared-name case writes scene/* kinds, which only editor_document declares
 #[test]
-#[ignore = "needs editor_document"]
 fn part2_set_arg_beside_a_self_named_graph_ref() {
     // a binding named like the graph it [ref]s does not read itself: no cycle on reorder
     let shared = |fov: &str| {
@@ -532,7 +530,6 @@ fn part9_lists_and_records() {
 }
 
 #[test]
-#[ignore = "needs editor_document"]
 fn part9_items_follow_keywords_in_a_scene_merge() {
     // the items are the positional arguments wherever the keywords are written, and :skip follows them
     let merged = "(workspace w\n  (graph g :context sop (sop/box))\n  (graph scene :context scene\n    (let* [a (scene/geometry (ref g)) b (scene/light) c (scene/light) all (scene/merge :skip [0] a b c)] all)))";
@@ -628,7 +625,6 @@ fn part10b_duplicate() {
 }
 
 #[test]
-#[ignore = "needs editor_document"]
 fn part10b_scene_and_world_graphs() {
     // a keyword before the positional argument is still an argument of the call
     let mixed = "(workspace w\n  (graph world :context world\n    (world/sun :name \"w\" (world/sky :name \"s\"))))";
@@ -684,7 +680,6 @@ fn part11_atomic_refusals_and_labels() {
 }
 
 #[test]
-#[ignore = "needs editor_document"]
 fn part12_the_fixtures_notes_survive_edits_round_trip() {
     let names = ["bloom", "facade", "garland", "kit", "orrery", "rosette", "sunflower", "tiles", "tree", "tunnel", "variations", "wave"];
     for name in names {

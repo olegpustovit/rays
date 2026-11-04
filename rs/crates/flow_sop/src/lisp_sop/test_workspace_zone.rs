@@ -117,7 +117,7 @@ fn verify(source: &str, site: &[&str], iter: &[i64], choices: &[Vec<i64>], expec
 }
 
 #[test]
-#[ignore = "slow lowering: perf agent"]
+#[ignore = "slow lowering: debug build, over 5 s alone (a single sop/uv_sphere lowers in 3.3 s, a box in 0.15 s; see test_perf_lower)"]
 fn previews_resolve_a_template_at_the_selected_tuple() {
     verify(
         r#"(workspace preview (graph g :context sop
@@ -135,7 +135,7 @@ fn previews_resolve_a_template_at_the_selected_tuple() {
 }
 
 #[test]
-#[ignore = "slow lowering: perf agent"]
+#[ignore = "slow lowering: debug build, over 5 s alone (a single sop/uv_sphere lowers in 3.3 s, a box in 0.15 s; see test_perf_lower)"]
 fn previews_resolve_nested_templates() {
     verify(
         r#"(workspace preview (graph g :context sop
@@ -166,7 +166,7 @@ fn previews_resolve_nested_templates() {
 }
 
 #[test]
-#[ignore = "slow lowering: perf agent (1-3 s alone, over 5 s under the runner's parallelism)"]
+#[ignore = "slow lowering: debug build, 1.7-4 s alone (a single sop/uv_sphere lowers in 3.3 s, a box in 0.15 s; see test_perf_lower)"]
 fn previews_resolve_piece_templates() {
     verify(
         r#"(workspace preview (graph g :context sop
@@ -230,7 +230,7 @@ fn a_same_session_never_reuses_a_zone_result_across_divergent_fold_histories() {
 }
 
 #[test]
-#[ignore = "slow lowering: perf agent (1-3 s alone, over 5 s under the runner's parallelism)"]
+#[ignore = "slow lowering: debug build, 1.7-4 s alone (a single sop/uv_sphere lowers in 3.3 s, a box in 0.15 s; see test_perf_lower)"]
 fn live_previews_and_frame_folds_agree_across_domains() {
     let (lowered, graph, target) = live_preview_lowered();
     let play = |domains: i64| -> Vec<Vec<u8>> {
@@ -320,7 +320,7 @@ fn a_captured_fold_accumulates_in_the_zone_and_is_exact_across_domains() {
 }
 
 #[test]
-#[ignore = "slow lowering: perf agent (1-3 s alone, over 5 s under the runner's parallelism)"]
+#[ignore = "slow lowering: debug build, 1.7-4 s alone (a single sop/uv_sphere lowers in 3.3 s, a box in 0.15 s; see test_perf_lower)"]
 fn a_frame_fold_inside_a_geometry_worker_is_refused() {
     let nested = r#"(workspace invalid (graph g :context sop
     (let* [bed (sop/curve (list [0 0 0]))]
@@ -341,7 +341,7 @@ fn session_cook(graph: &lower::Graph, domains: i64) -> geo::T {
 }
 
 #[test]
-#[ignore = "slow lowering: perf agent"]
+#[ignore = "slow lowering: debug build, over 5 s alone (a single sop/uv_sphere lowers in 3.3 s, a box in 0.15 s; see test_perf_lower)"]
 fn a_garden_zone_cooks_deterministically_with_provenance() {
     let lowered = lower_source(&garden("(sop/merge bed dots)", 4));
     let graph = lowered.graphs[0].clone();
@@ -380,7 +380,7 @@ fn a_garden_zone_cooks_deterministically_with_provenance() {
 }
 
 #[test]
-#[ignore = "slow lowering: perf agent"]
+#[ignore = "slow lowering: debug build, over 5 s alone (a single sop/uv_sphere lowers in 3.3 s, a box in 0.15 s; see test_perf_lower)"]
 fn moving_one_point_recooks_only_its_element() {
     // cache hits after moving one point: the collection is a grid whose point 5 moves
     let source = r#"
@@ -415,7 +415,7 @@ fn moving_one_point_recooks_only_its_element() {
 // is what the same graph gives with t replaced by a number; the elements' copies share their
 // template's volatile slot, so the cache does not churn
 #[test]
-#[ignore = "slow lowering: perf agent"]
+#[ignore = "slow lowering: debug build, over 5 s alone (a single sop/uv_sphere lowers in 3.3 s, a box in 0.15 s; see test_perf_lower)"]
 fn a_live_zone_body_follows_t_and_shares_one_volatile_slot() {
     let buzz = |t_text: &str| {
         lower_source(&format!(
@@ -453,7 +453,7 @@ fn a_live_zone_body_follows_t_and_shares_one_volatile_slot() {
 }
 
 #[test]
-#[ignore = "slow lowering: perf agent (1-3 s alone, over 5 s under the runner's parallelism)"]
+#[ignore = "slow lowering: debug build, 1.7-4 s alone (a single sop/uv_sphere lowers in 3.3 s, a box in 0.15 s; see test_perf_lower)"]
 fn pieces_are_primitives_and_keys_order_the_elements() {
     let pieces = lower_source(
         r#"

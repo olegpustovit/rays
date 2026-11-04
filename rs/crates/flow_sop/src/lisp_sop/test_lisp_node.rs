@@ -570,7 +570,7 @@ fn exact_lisp_geometry_bytes_are_equal_across_interpreter_domains_and_grain() {
 }
 
 #[test]
-#[ignore = "slow lowering: perf agent (1-3 s alone, over 5 s under the runner's parallelism)"]
+#[ignore = "slow lowering: debug build, 1.7-4 s alone (a single sop/uv_sphere lowers in 3.3 s, a box in 0.15 s; see test_perf_lower)"]
 fn typed_function_slots_keep_their_callable_and_captures() {
     for (keyword, call) in [("", "(sop/function_slot field)"), (":keyword true", "(sop/function_slot :field field)")] {
         with_session(&mut |s| {
@@ -583,7 +583,7 @@ fn typed_function_slots_keep_their_callable_and_captures() {
 }
 
 #[test]
-#[ignore = "disconnected_input: image-typed defnode slot lowers without its input; see parity_backlog.md"]
+#[ignore = "slow lowering (2.8 s alone in debug; was failing, fixed): see test-times.md; RAYS_SLOW"]
 fn typed_image_slots_keep_their_cooked_pixels() {
     for (keyword, call) in [
         ("", r#"(sop/image_slot (sop/grid :columns 2 :rows 2 :uv_attribute "uv") (image/noise :width 2 :height 2))"#),
@@ -599,7 +599,7 @@ fn typed_image_slots_keep_their_cooked_pixels() {
 }
 
 #[test]
-#[ignore = "slow lowering: perf agent (1-3 s alone, over 5 s under the runner's parallelism)"]
+#[ignore = "slow lowering: debug build, 1.7-4 s alone (a single sop/uv_sphere lowers in 3.3 s, a box in 0.15 s; see test_perf_lower)"]
 fn a_distinct_local_function_is_not_replaced_by_forwarding() {
     with_session(&mut |s| {
         let body = "(let* [local (fn [p] (- (length (+ p [0.25 0.0 0.0])) 0.45))]\n    (sop/merge\n      (sop/iso_surface :field field :resolution [4 4 4])\n      (sop/iso_surface :field local :resolution [4 4 4])))";
@@ -612,7 +612,7 @@ fn a_distinct_local_function_is_not_replaced_by_forwarding() {
 }
 
 #[test]
-#[ignore = "slow lowering: perf agent (1-3 s alone, over 5 s under the runner's parallelism)"]
+#[ignore = "slow lowering: debug build, 1.7-4 s alone (a single sop/uv_sphere lowers in 3.3 s, a box in 0.15 s; see test_perf_lower)"]
 fn a_function_slot_keeps_its_outer_cooked_geometry_capture() {
     with_session(&mut |s| {
         let body = |call: &str| format!("(let* [base (sop/line :kind \"Points\" :points 1 :origin [0.7 0.0 0.0])\n         sample {{:radius (array/sum (sop/attr base :P))}}\n         field (fn [p] (- (length p) sample.radius.x))] {call})");
@@ -624,7 +624,6 @@ fn a_function_slot_keeps_its_outer_cooked_geometry_capture() {
 }
 
 #[test]
-#[ignore = "E_RESIDUAL_ID Residual belongs to an expired evaluation: a closure handed from a library arena to a graph of another arena (graph_input_fits now looks it up in its home arena, but the library arena is dropped before the cook); see parity_backlog.md"]
 fn a_map_function_slot_keeps_its_separate_outer_geometry_capture() {
     let body = |call: &str| format!("(let* [base (sop/line :kind \"Points\" :points 1 :origin [0.7 0.2 -0.1])\n      sample {{:offset (array/sum (sop/attr base :P))}}\n      field (fn [p] (+ p sample.offset))\n      geo (sop/grid :columns 2 :rows 2)] {call})");
     let mut native = Vec::new();
@@ -647,7 +646,6 @@ fn a_map_function_slot_keeps_its_separate_outer_geometry_capture() {
 }
 
 #[test]
-#[ignore = "cook refusal arrives as E_LOWER message-only: the node factory build (lower.rs grp/attr_node .map_err(|d| d.message) then edit_r) drops E_KERNEL_FORM code and span; see parity_backlog.md"]
 fn a_numeric_body_without_a_packed_kernel_is_refused_not_interpreted() {
     let source = r#"(workspace refused
     (defnode sop/unsupported_map [(geo : geometry)]
@@ -678,7 +676,7 @@ fn a_numeric_body_without_a_packed_kernel_is_refused_not_interpreted() {
 const GRID_PREFIX: &str = "(let* [base (sop/line :kind \"Points\" :points 1 :origin [0.7 0.2 -0.1])\n    sample {:offset (array/sum (sop/attr base :P))}\n    field (fn [p] (+ p sample.offset))\n    other (fn [p] (- p sample.offset))\n    geo (sop/grid :columns 2 :rows 2)]";
 
 #[test]
-#[ignore = "flow_check E_TYPE Functions cannot be compared (optional/rest callable slot); not root-caused, see parity_backlog.md"]
+#[ignore = "slow lowering (2.3 s alone in debug; was failing, fixed): see test-times.md; RAYS_SLOW"]
 fn optional_and_rest_callable_slots_keep_bytes_and_cache() {
     with_session(&mut |s| {
         let prefix = |call: &str| format!("{GRID_PREFIX} {call})");
@@ -707,7 +705,7 @@ fn optional_and_rest_callable_slots_keep_bytes_and_cache() {
 }
 
 #[test]
-#[ignore = "disconnected_input: image-typed defnode slot lowers without its input; see parity_backlog.md"]
+#[ignore = "slow lowering (3.9 s alone in debug; was failing, fixed): see test-times.md; RAYS_SLOW"]
 fn optional_and_rest_image_slots_keep_bytes() {
     with_session(&mut |s| {
         let prefix = |call: &str| format!("(let* [geo (sop/grid :columns 2 :rows 2 :uv_attribute \"uv\")\n    picture (image/noise :width 2 :height 2)] {call})");
@@ -734,7 +732,6 @@ fn lower_prev(previous: Option<&lower::T>, factories: Option<Vec<edit::Factory>>
 }
 
 #[test]
-#[ignore = "cache: a call-site parameter edit recooks an unchanged Lisp sibling (misses 4 hits 3); not root-caused, see parity_backlog.md"]
 fn call_site_and_helper_edits_invalidate_only_what_depends_on_them() {
     let source = |amount: &str, helper: &str| {
         format!(
@@ -806,7 +803,7 @@ fn cone_source(extra: &str, v: &[&str; 9]) -> String {
 }
 
 #[test]
-#[ignore = "slow lowering: perf agent"]
+#[ignore = "slow lowering: debug build, over 5 s alone (a single sop/uv_sphere lowers in 3.3 s, a box in 0.15 s; see test_perf_lower)"]
 fn declaration_cones_invalidate_exactly_the_edited_dependencies() {
     let initial = CONE_INITIAL;
     for domains in [1i64, 8] {

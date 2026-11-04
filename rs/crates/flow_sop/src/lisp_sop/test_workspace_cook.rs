@@ -3,7 +3,6 @@
 //!
 //! The OCaml catalog and `Lower.workspace ~extra` carry `Editor_document.Kinds`; flow_sop cannot
 //! depend on editor_document, so the fixtures that write scene/world/settings/ui kinds (`bloom`,
-//! `variations`) are `#[ignore = "needs editor_document"]`. OCaml's `RAYS_SLOW=1` sections are
 //! `#[ignore = "slow ..."]` tests here (lowering costs 0.5-1 s per sphere-like node).
 use super::support::*;
 use crate::{catalog as fcat, lisp_sop, lower, operators};
@@ -24,7 +23,7 @@ fn factories() -> Vec<Factory> {
 }
 
 fn catalog_of(factories: &[Factory]) -> Catalog {
-    fcat::of_factories(1, &[], None, factories).unwrap()
+    editor_document::kinds::catalog(1, factories).unwrap()
 }
 
 fn diag(d: rays_diagnostic::Diagnostic) -> String {
@@ -42,7 +41,12 @@ fn merge(nodes: &[node::T]) -> node::T {
 }
 
 fn lower_forms(options: lower::Options, forms: &[Syntax]) -> lower::T {
-    lower::workspace(Some(factories()), Vec::new(), options, forms).unwrap_or_else(|d| panic!("{}", diag(d)))
+    let cat = catalog_of(&factories());
+    let checked = match fcat::check_workspace(operators::all(), false, None, &cat, forms) {
+        (Some(c), _) => c,
+        (None, ds) => panic!("{}", ds.into_iter().map(diag).collect::<Vec<_>>().join("; ")),
+    };
+    lower::of_checked(Some(factories()), options, &checked).unwrap_or_else(|d| panic!("{}", diag(d)))
 }
 
 fn lower_case(name: &str) -> lower::T {
@@ -131,7 +135,7 @@ fn image_noise_lowers_cooks_and_edits() {
 // register L16: a skipped iteration makes no node; the others keep compiled ids, plan keys and
 // provenance, so the cook keeps hitting its cache
 #[test]
-#[ignore = "slow lowering: perf agent (1-3 s alone, over 5 s under the runner's parallelism)"]
+#[ignore = "slow lowering: debug build, 1.7-4 s alone (a single sop/uv_sphere lowers in 3.3 s, a box in 0.15 s; see test_perf_lower)"]
 fn skips() {
     let text = |skip: &str| format!("(workspace w (graph g :context sop (sop/merge (for [i (range 4)] {skip}(sop/transform (sop/box) :translate [i 0 0])))))");
     let lower_text = |previous: Option<&lower::T>, source: &str| {
@@ -444,7 +448,7 @@ fn the_other_sop_fixtures_lower_and_cook() {
 }
 
 #[test]
-#[ignore = "needs editor_document"]
+#[ignore = "slow lowering: over 5 s alone in debug (sphere lowers in 3.3 s; see test_perf_lower)"]
 fn variations_fixture_lowers_and_cooks() {
     check_fixture("variations", true);
 }
@@ -490,7 +494,7 @@ fn wave_pending_parameters_and_stable_compiled_ids() {
 }
 
 #[test]
-#[ignore = "needs editor_document"]
+#[ignore = "slow lowering: 2 uv_sphere petals per bloom case, over 5 s alone in debug (sphere lowers in 3.3 s; see test_perf_lower)"]
 fn bloom_node_counts_and_provenance() {
     // Bloom (3 petals, the ref override 2): flower is 3 petals of (uv_sphere, transform, set_color,
     // transform), a merge, the heart (uv_sphere, set_color) and the result merge; the ref override

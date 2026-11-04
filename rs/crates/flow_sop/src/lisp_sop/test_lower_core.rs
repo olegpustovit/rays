@@ -48,7 +48,6 @@ fn merge_inputs_carry_provenance_tags() {
 }
 
 #[test]
-#[ignore = "still failing after the positional (sop/curve (list ...)) fix; see parity_backlog.md"]
 fn a_live_curve_is_pending_and_volatile() {
     let l = lowered("(workspace w (graph g :context sop (sop/curve (list [0.0 0.0 (* t 1.0)] [1.0 0.0 0.0]))))");
     assert_eq!(l.pending.len(), 1, "the live points drive is a pending parameter");
@@ -61,7 +60,7 @@ fn a_live_curve_is_pending_and_volatile() {
     assert!(lower::status(&l, 0.0125).unwrap().starts_with("t 1 live · 0 cached · frame cook 12.5 ms"));
     assert!(l.graphs[0].network.drives.values().len() == 1);
     // a static graph has nothing pending and no status
-    let s = lowered("(workspace w (graph g :context sop (sop/curve :points [[0.0 0.0 0.0] [1.0 0.0 0.0]])))");
+    let s = lowered("(workspace w (graph g :context sop (sop/curve (list [0.0 0.0 0.0] [1.0 0.0 0.0]))))");
     assert!(s.pending.is_empty() && lower::status(&s, 0.0).is_none());
     assert!(!lower::is_volatile(&s)(s.graphs[0].root.unwrap()));
 }

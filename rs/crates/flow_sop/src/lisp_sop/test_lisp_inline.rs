@@ -25,7 +25,7 @@ fn run_chain(body: &str) -> (Vec<u8>, usize, Vec<u8>) {
 }
 
 #[test]
-#[ignore = "slow lowering: perf agent (1-3 s alone, over 5 s under the runner's parallelism)"]
+#[ignore = "slow lowering: debug build, 1.7-4 s alone (a single sop/uv_sphere lowers in 3.3 s, a box in 0.15 s; see test_perf_lower)"]
 fn chained_bodies_are_one_program_and_equal_the_factory_node() {
     for (name, body) in [
         ("set_orient > color_by_height", "(sop/color_by_height (sop/set_orient (sop/grid :counts \"Point counts\" :connectivity \"Points\" :columns 1025 :rows 2) :x 0.5))"),
@@ -103,7 +103,7 @@ fn step_b_body_errors_cook_refusals_lower() {
 /// Step C: a body that reaches its cook context lowers as its own node, specialized per context;
 /// the same card with the context branch untaken inlines.
 #[test]
-#[ignore = "slow lowering: perf agent (1-3 s alone, over 5 s under the runner's parallelism)"]
+#[ignore = "slow lowering: debug build, 1.7-4 s alone (a single sop/uv_sphere lowers in 3.3 s, a box in 0.15 s; see test_perf_lower)"]
 fn step_c_context_reaching_bodies_and_live_arguments_inline() {
     for (call, inlines) in [
         ("(sop/noise_displace (sop/line :points 9) :context_seed true :amplitude 0.5)", true),
@@ -128,7 +128,7 @@ fn step_c_context_reaching_bodies_and_live_arguments_inline() {
 /// Frame-driven arguments inline: a live vec3 group is its components, and a check of a live value
 /// is made as the card cooks, with the diagnostic the written-out call refuses or fails with.
 #[test]
-#[ignore = "slow lowering: perf agent"]
+#[ignore = "slow lowering: debug build, over 5 s alone (a single sop/uv_sphere lowers in 3.3 s, a box in 0.15 s; see test_perf_lower)"]
 fn frame_driven_arguments_inline_and_fail_as_the_call() {
     let text = |call: &str| format!("(workspace f (graph g :context sop (sop/attribute_noise (sop/grid :rows 5 :columns 7) {call})))");
     for (live, written, inlines) in [
@@ -159,7 +159,7 @@ fn frame_driven_arguments_inline_and_fail_as_the_call() {
 
 /// A driven transform inlines: its identity and singular tests are the write's data.
 #[test]
-#[ignore = "slow lowering: perf agent"]
+#[ignore = "slow lowering: debug build, over 5 s alone (a single sop/uv_sphere lowers in 3.3 s, a box in 0.15 s; see test_perf_lower)"]
 fn a_driven_transform_inlines_as_the_call() {
     let text = |input: &str, call: &str| format!("(workspace x (graph g :context sop (sop/transform {input} {call})))");
     let grid = "(sop/grid :rows 5 :columns 7)".to_owned();
@@ -187,7 +187,7 @@ fn a_driven_transform_inlines_as_the_call() {
 
 /// Recomputed normals are sop/normals' face-area bytes, gathered per point (or vertex).
 #[test]
-#[ignore = "slow lowering: perf agent"]
+#[ignore = "slow lowering: debug build, over 5 s alone (a single sop/uv_sphere lowers in 3.3 s, a box in 0.15 s; see test_perf_lower)"]
 fn recomputed_normals_are_sop_normals_face_area_bytes() {
     for (input, owner) in [
         ("(sop/grid :rows 5 :columns 7)", "point"),
@@ -210,7 +210,7 @@ fn recomputed_normals_are_sop_normals_face_area_bytes() {
 /// Step E2: a cooked-data argument (a count of the cooked input) inlines; the body reads it as a
 /// value resolved once per cook, in time linear in the points.
 #[test]
-#[ignore = "slow lowering: perf agent (1-3 s alone, over 5 s under the runner's parallelism)"]
+#[ignore = "slow lowering: debug build, 1.7-4 s alone (a single sop/uv_sphere lowers in 3.3 s, a box in 0.15 s; see test_perf_lower)"]
 fn cooked_data_arguments_resolve_once_per_cook() {
     let text = |amplitude: &str, points: i64| format!("(workspace e (graph g :context sop (let* [g (sop/line :points {points})] (sop/noise_displace g :amplitude {amplitude}))))");
     for points in [9i64, 4096] {

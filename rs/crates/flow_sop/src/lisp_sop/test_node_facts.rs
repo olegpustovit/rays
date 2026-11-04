@@ -73,7 +73,7 @@ fn fixture() -> geo::T {
 }
 
 #[test]
-#[ignore = "slow lowering: perf agent"]
+#[ignore = "slow lowering: debug build, over 5 s alone (a single sop/uv_sphere lowers in 3.3 s, a box in 0.15 s; see test_perf_lower)"]
 fn declared_preserved_topology_holds_at_one_and_eight_domains() {
     let native = sop::nodes::factories();
     let lowered = lower::workspace(Some(native.clone()), Vec::new(), lower::Options::default(), &parse("(workspace facts (graph unused :context value 0.0))")).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
