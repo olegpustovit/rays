@@ -1,4 +1,4 @@
-//! Tests for lowering_a / shell_eval_a: the lowering parts of lib/rays_editor/test/test_editor_document.ml
+﻿//! Tests for lowering_a / shell_eval_a: the lowering parts of lib/rays_editor/test/test_editor_document.ml
 //! and test_fast_path.ml, plus the module's own checks. The parts of those files that drive the
 //! editor UI (delete-all through real events) or `Scene_sync` (camera write-back) are not here.
 use crate::document::{self, Home};
@@ -287,7 +287,7 @@ fn names(v: &[&str]) -> Vec<String> {
 }
 
 #[test]
-#[ignore = "upstream: flow_sop::lower::of_checked hangs on sop/uv_sphere and exact map fn (parity_backlog: static-map deadlock)"]
+#[ignore = "upstream: flow_eval static evaluation of sop/uv_sphere (gpu_sea, orrery) takes 20-40 s per lowering in a debug build, not a deadlock (parity_backlog: flow_eval static_with cost)"]
 fn fast_path_literal_scrub_with_closure() {
     let doc = lower(None, &ws_of_text(SEA));
     same_as_full("initial", &doc);
@@ -297,7 +297,7 @@ fn fast_path_literal_scrub_with_closure() {
 }
 
 #[test]
-#[ignore = "upstream: flow_sop lowering of gpu_sea (uv_sphere, exact map fn) hangs (parity_backlog: static-map deadlock)"]
+#[ignore = "upstream: flow_eval static evaluation of sop/uv_sphere (gpu_sea, orrery) takes 20-40 s per lowering in a debug build, not a deadlock (parity_backlog: flow_eval static_with cost)"]
 fn fast_path_inline_scrubs_gpu_sea() {
     let waves = names(&["sea", "waves"]);
     scrubs(
@@ -315,7 +315,7 @@ fn fast_path_inline_scrubs_gpu_sea() {
 }
 
 #[test]
-#[ignore = "upstream: flow_sop lowering of ws_orrery hangs or exceeds 5 s in a debug build (parity_backlog: static-map deadlock)"]
+#[ignore = "upstream: flow_eval static evaluation of sop/uv_sphere (gpu_sea, orrery) takes 20-40 s per lowering in a debug build, not a deadlock (parity_backlog: flow_eval static_with cost)"]
 fn fast_path_inline_scrubs_orrery() {
     let base = names(&["orrery", "base"]);
     let sun = names(&["orrery", "sun"]);

@@ -1141,11 +1141,11 @@ pub fn of_workspace(options: &Options, workspace: &workspace_doc::T) -> R<docume
         preview_sources: e.preview_sources,
         switch: e.switch,
     });
-    // ponytail: OCaml's `lazy`; computed eagerly (one read of the settings graph per lowering)
-    let fast_now = match plan_window(&workspace, &lowered.plan) {
+    let (fast_ws, fast_plan) = (workspace.clone(), lowered.plan.clone());
+    let fast = document::LazyBool::new(Arc::new(move || match plan_window(&fast_ws, &fast_plan) {
         Ok(w) => w.fast,
         Err(_) => true,
-    };
+    }));
     let factories_for_catalog = factories.clone();
     Ok(document::T {
         scene,
@@ -1164,7 +1164,7 @@ pub fn of_workspace(options: &Options, workspace: &workspace_doc::T) -> R<docume
             ws: workspace,
             lowered,
             catalog: document::LazyCatalog::new(Arc::new(move || kinds::catalog(flow_sop::manifest::VERSION, &factories_for_catalog))),
-            fast: document::LazyBool::forced(fast_now),
+            fast,
         },
     })
 }

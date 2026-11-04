@@ -1,6 +1,5 @@
-//! Port of lib/rays_editor/test/test_scene_sync.ml. Every test that needs a lowered document is
-//! `#[ignore]`d until `editor_document::lowering` is ported (it is a stub); they are written to
-//! compile and to hold the OCaml assertions, message for message.
+//! Port of lib/rays_editor/test/test_scene_sync.ml. Tests marked slow lower many documents; a lowering
+//! costs ~200 ms in a debug build (flow_eval static evaluation), so they run with RAYS_SLOW=1.
 //!
 //! Not ported: `qualification_roots` (reads Flow.Workspace physical identity/qualification of the
 //! lowering itself), the "through the editor" block that needs `Rays_editor.Editor`, and the loop
@@ -22,8 +21,6 @@ use param::Value;
 use sop::edit_graph::Factory;
 
 type Doc = document::T;
-
-const IGNORE: &str = "needs lowering (editor_document::lowering is a stub until integration)";
 
 fn check(condition: bool, message: &str) {
     if !condition {
@@ -276,9 +273,8 @@ fn a_camera_still_takes_no_render_size() {
 // ---- run (): fields, inline, rename, reparent, delete, camera, World, settings, host, add ----
 
 #[test]
-#[ignore = "needs lowering (editor_document::lowering is a stub until integration)"]
+#[ignore = "slow: 3-5 s in a debug build, over the 5 s limit under load; each lowering ~200 ms (parity_backlog: flow_eval static_with cost)"]
 fn camera_write_back_keeps_precision_and_identity() {
-    let _ = IGNORE;
     let doc = open_text(TEXT);
     // Following the viewport writes camera coordinates every frame. Rounding them makes the camera
     // diverge far enough to flash its own frustum when zoomed out.
@@ -302,7 +298,7 @@ fn camera_write_back_keeps_precision_and_identity() {
 }
 
 #[test]
-#[ignore = "needs lowering (editor_document::lowering is a stub until integration)"]
+#[ignore = "slow: each lowering costs ~200 ms in a debug build inside flow_eval::Host::static_with_requests (parity_backlog: editor_document lowering cost); passes with RAYS_SLOW=1"]
 fn fields_inline_and_flags() {
     let doc = open_text(TEXT);
     let arm = node_id(&doc, "arm");
@@ -347,7 +343,7 @@ fn fields_inline_and_flags() {
 }
 
 #[test]
-#[ignore = "needs lowering (editor_document::lowering is a stub until integration)"]
+#[ignore = "slow: each lowering costs ~200 ms in a debug build inside flow_eval::Host::static_with_requests (parity_backlog: editor_document lowering cost); passes with RAYS_SLOW=1"]
 fn rename_reparent_and_unparent() {
     let doc = open_text(TEXT);
     let arm = node_id(&doc, "arm");
@@ -395,7 +391,7 @@ fn rename_reparent_and_unparent() {
 }
 
 #[test]
-#[ignore = "needs lowering (editor_document::lowering is a stub until integration)"]
+#[ignore = "slow: each lowering costs ~200 ms in a debug build inside flow_eval::Host::static_with_requests (parity_backlog: editor_document lowering cost); passes with RAYS_SLOW=1"]
 fn delete_camera_world_and_settings() {
     let doc = open_text(TEXT);
     let arm = node_id(&doc, "arm");
@@ -478,7 +474,7 @@ fn delete_camera_world_and_settings() {
 }
 
 #[test]
-#[ignore = "needs lowering (editor_document::lowering is a stub until integration)"]
+#[ignore = "slow: each lowering costs ~200 ms in a debug build inside flow_eval::Host::static_with_requests (parity_backlog: editor_document lowering cost); passes with RAYS_SLOW=1"]
 fn twins_and_host_objects() {
     // a name two objects share is refused whole
     let twins = open_text(
@@ -548,7 +544,7 @@ fn twins_and_host_objects() {
 }
 
 #[test]
-#[ignore = "needs lowering (editor_document::lowering is a stub until integration)"]
+#[ignore = "slow: 3-5 s in a debug build, over the 5 s limit under load; each lowering ~200 ms (parity_backlog: flow_eval static_with cost)"]
 fn adding_by_key() {
     let doc = open_text(TEXT);
     let added = edit(
@@ -677,7 +673,7 @@ fn loop_case(what: &str, text: &str) {
 }
 
 #[test]
-#[ignore = "needs lowering (editor_document::lowering is a stub until integration)"]
+#[ignore = "slow: each lowering costs ~200 ms in a debug build inside flow_eval::Host::static_with_requests (parity_backlog: editor_document lowering cost); passes with RAYS_SLOW=1"]
 fn loop_copies_bound() {
     loop_case(
         "bound",
@@ -691,7 +687,7 @@ fn loop_copies_bound() {
 }
 
 #[test]
-#[ignore = "needs lowering (editor_document::lowering is a stub until integration)"]
+#[ignore = "slow: each lowering costs ~200 ms in a debug build inside flow_eval::Host::static_with_requests (parity_backlog: editor_document lowering cost); passes with RAYS_SLOW=1"]
 fn loop_copies_inline() {
     loop_case(
         "inline",
@@ -704,7 +700,7 @@ fn loop_copies_inline() {
 }
 
 #[test]
-#[ignore = "needs lowering (editor_document::lowering is a stub until integration)"]
+#[ignore = "slow: each lowering costs ~200 ms in a debug build inside flow_eval::Host::static_with_requests (parity_backlog: editor_document lowering cost); passes with RAYS_SLOW=1"]
 fn loop_several_clauses() {
     // several clauses: one iteration of the product goes, the flat iteration index is what is listed
     let grid = open_text(
@@ -741,7 +737,7 @@ fn loop_several_clauses() {
 }
 
 #[test]
-#[ignore = "needs lowering (editor_document::lowering is a stub until integration)"]
+#[ignore = "slow: each lowering costs ~200 ms in a debug build inside flow_eval::Host::static_with_requests (parity_backlog: editor_document lowering cost); passes with RAYS_SLOW=1"]
 fn loop_copy_that_makes_two_objects() {
     let pairs = open_text(
         r#"(workspace pairs
@@ -803,7 +799,7 @@ fn loop_copy_that_makes_two_objects() {
 
 // a loop inside a loop: the copies nest, the rules are the same, and a delete is exact at any depth
 #[test]
-#[ignore = "needs lowering (editor_document::lowering is a stub until integration)"]
+#[ignore = "slow: each lowering costs ~200 ms in a debug build inside flow_eval::Host::static_with_requests (parity_backlog: editor_document lowering cost); passes with RAYS_SLOW=1"]
 fn nested_loops() {
     let text = r#"(workspace nest
     (graph g :context sop (sop/box))
@@ -933,7 +929,7 @@ fn sketch(name: &str) -> String {
 }
 
 #[test]
-#[ignore = "needs lowering (editor_document::lowering is a stub until integration)"]
+#[ignore = "slow: each lowering costs ~200 ms in a debug build inside flow_eval::Host::static_with_requests (parity_backlog: editor_document lowering cost); passes with RAYS_SLOW=1"]
 fn root_settings_and_camera() {
     use root::Renderer as R;
     // a scene without a root renders as the defaults; a camera carries no render size
@@ -1000,7 +996,7 @@ fn root_settings_and_camera() {
 }
 
 #[test]
-#[ignore = "needs lowering (editor_document::lowering is a stub until integration)"]
+#[ignore = "slow: lowers every saved sketch; exceeds 60 s even with RAYS_SLOW=1 in a debug build (lowering costs ~200 ms per small document in flow_eval::Host::static_with_requests)"]
 fn root_of_saved_sketches() {
     use root::Renderer as R;
     // shattered_studio carries a root, written by the editor
@@ -1014,7 +1010,7 @@ fn root_of_saved_sketches() {
 }
 
 #[test]
-#[ignore = "needs lowering (editor_document::lowering is a stub until integration)"]
+#[ignore = "slow: each lowering costs ~200 ms in a debug build inside flow_eval::Host::static_with_requests (parity_backlog: editor_document lowering cost); passes with RAYS_SLOW=1"]
 fn world_member_edits() {
     let doc = open_text(ROOT_TEXT);
     // the World is a merge member: its keywords edit like an object's, its layers its graph's
@@ -1080,7 +1076,6 @@ fn world_member_edits() {
 }
 
 #[test]
-#[ignore = "needs lowering (editor_document::lowering is a stub until integration)"]
 fn root_world_camera_refusals() {
     refused_code(
         "E_SCENE_ROOT",
@@ -1141,7 +1136,7 @@ fn path(parts: &[&str]) -> Vec<String> {
 }
 
 #[test]
-#[ignore = "needs lowering (editor_document::lowering is a stub until integration)"]
+#[ignore = "slow: each lowering costs ~200 ms in a debug build inside flow_eval::Host::static_with_requests (parity_backlog: editor_document lowering cost); passes with RAYS_SLOW=1"]
 fn compose_add_geometry_and_world() {
     // the composition gestures: one op list each, one undo entry (the ops apply together)
     let doc = open_text(ROOT_TEXT);
@@ -1211,7 +1206,7 @@ fn compose_add_geometry_and_world() {
 }
 
 #[test]
-#[ignore = "needs lowering (editor_document::lowering is a stub until integration)"]
+#[ignore = "slow: each lowering costs ~200 ms in a debug build inside flow_eval::Host::static_with_requests (parity_backlog: editor_document lowering cost); passes with RAYS_SLOW=1"]
 fn compose_delete_refcount_and_group() {
     // take a wire out of the merge: the object stays as an unwired binding, and wires back
     let rock = open_text(
@@ -1257,7 +1252,7 @@ fn compose_delete_refcount_and_group() {
 }
 
 #[test]
-#[ignore = "needs lowering (editor_document::lowering is a stub until integration)"]
+#[ignore = "slow: each lowering costs ~200 ms in a debug build inside flow_eval::Host::static_with_requests (parity_backlog: editor_document lowering cost); passes with RAYS_SLOW=1"]
 fn compose_world_member_layer_edits_are_surgical() {
     // E9: deleting or moving one layer of a World member is an edit of that binding: the graph's
     // input, its comment, the expression and the other names stay
@@ -1352,7 +1347,6 @@ const INSTANCES_TEXT: &str = r#"(workspace days
     (ui/workspace (ui/split-at "horizontal" 0.5 (ui/viewport (ref day)) (ui/viewport (ref night))))))"#;
 
 #[test]
-#[ignore = "needs lowering (editor_document::lowering is a stub until integration)"]
 fn instances_each_viewport_has_its_root_and_world() {
     use root::Renderer as R;
     let doc = open_text(INSTANCES_TEXT);
