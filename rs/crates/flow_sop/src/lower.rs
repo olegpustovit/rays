@@ -5458,6 +5458,7 @@ fn finish(lowerer: &Arc<Lowerer>) -> R<T> {
 
 /// One lowering of an already-qualified-by-`lower_checked` workspace (the OCaml `lower_checked`).
 pub fn lower_checked(factories: Vec<Factory>, o: Options, checked: Workspace) -> R<T> {
+    let _phase = flow_syntax::phase_timer::measure("lower");
     let lowerer = make_lowerer(factories, o, checked)?;
     finish(&lowerer)
 }

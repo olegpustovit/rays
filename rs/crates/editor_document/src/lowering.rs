@@ -912,8 +912,6 @@ pub fn of_workspace(options: &Options, workspace: &workspace_doc::T) -> R<docume
                     inputs: Some((*workspace.inputs).clone()),
                     ..Default::default()
                 };
-                // ponytail: OCaml measures "lower" inside Flow_sop.Lower.lower_checked; flow_sop is not this suite's to edit, so the editor path measures it here
-                let _phase = flow_syntax::phase_timer::measure("lower");
                 lower_mod::of_checked(Some(factories.clone()), o, &workspace.checked)
             };
             let lowered = lower(&gpu)?;
