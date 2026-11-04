@@ -21,4 +21,4 @@ pub mod topology_kernel;
 pub mod topology_kernel_impl;
 pub mod attribute_kernel;
 pub mod lower;
-#[cfg(test)] pub mod lisp_sop;
+#[cfg(any(test, feature = "test-support"))] pub mod lisp_sop;

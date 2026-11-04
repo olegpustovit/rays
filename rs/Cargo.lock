@@ -472,6 +472,9 @@ dependencies = [
  "flow_syntax",
  "input",
  "mem",
+ "ogpu",
+ "ogpu_metal",
+ "ogpu_vulkan",
  "rays_diagnostic",
  "rays_editor",
  "sop",
@@ -526,6 +529,7 @@ dependencies = [
  "rdk_rays",
  "renderer",
  "runtime_input",
+ "runtime_resources",
  "sdl3",
  "sop",
 ]

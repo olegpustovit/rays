@@ -43,6 +43,8 @@ flow_gpu = { path = "../flow_gpu" }
 ogpu = { path = "../ogpu" }
 ogpu_vulkan = { path = "../ogpu_vulkan" }
 renderer = { path = "../renderer" }
+flow_sop = { path = "../flow_sop", features = ["test-support"] }
+runtime_resources = { path = "../runtime_resources" }
 
 # Window/GPU suites (see rs/port/rays_editor_plan.md) are added per bundle, each
 #   [[test]] name = "window_editor_<x>" / "gpu_editor_<x>"  harness = false
