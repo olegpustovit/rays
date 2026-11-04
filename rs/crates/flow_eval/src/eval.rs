@@ -55,8 +55,27 @@ impl Drop for ResidualSnapshotScope {
         ACTIVE_RESIDUAL_SNAPSHOTS.with(|snapshots| { if let Some(snapshot) = snapshots.borrow_mut().last_mut() { snapshot.remove(&self.id); } });
     }
 }
+// Arena ids whose Mutex this thread holds while a host callback runs. OCaml has no lock, so a callback may read the arena it is called from;
+// here the callback reads the snapshot instead and registry scans must not block on the held original.
+thread_local! { static SHADOWED_ARENAS: RefCell<Vec<i64>> = const { RefCell::new(Vec::new()) }; }
+fn snapshot_find(pred: &dyn Fn(&Arena) -> bool) -> Option<Arc<Mutex<Arena>>> {
+    ACTIVE_RESIDUAL_SNAPSHOTS.with(|snapshots| snapshots.borrow().iter().rev().find_map(|scope| scope.values().find(|arena| arena.try_lock().ok().is_some_and(|arena| pred(&arena))).cloned()))
+}
+fn registry_find(pred: &dyn Fn(&Arena) -> bool) -> Option<Arc<Mutex<Arena>>> {
+    let arenas = ARENAS.lock().ok()?;
+    arenas.iter().find_map(|(id, weak)| {
+        if SHADOWED_ARENAS.with(|shadowed| shadowed.borrow().contains(id)) { return None; }
+        let arena = weak.upgrade()?;
+        let found = arena.lock().ok().is_some_and(|arena| pred(&arena));
+        found.then_some(arena)
+    })
+}
 fn call_with_snapshot(a: &Arena, id: ResidualId, callback: &dyn Fn(ResidualId) -> Option<Value>) -> Option<Value> {
     let snapshot = Arc::new(Mutex::new(a.clone()));
+    SHADOWED_ARENAS.with(|shadowed| shadowed.borrow_mut().push(a.id));
+    struct Unshadow;
+    impl Drop for Unshadow { fn drop(&mut self) { SHADOWED_ARENAS.with(|shadowed| { shadowed.borrow_mut().pop(); }); } }
+    let _unshadow = Unshadow;
     ACTIVE_RESIDUAL_SNAPSHOTS.with(|snapshots| {
         if let Some(scope) = snapshots.borrow_mut().last_mut() { scope.insert(id, snapshot); }
     });
@@ -779,6 +798,8 @@ fn eval_raw(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Value, Di
             for (i, term) in terms.iter().enumerate() {
                 let context = sub(c, i.to_string());
                 let value = eval_concrete(a, &context, env, term)?;
+                // OCaml shows through `concrete`: captured fields of a record are forced first.
+                let value = concrete_data(a, value)?;
                 bytes.extend(value::show_with(&|value| value.clone(), &value));
             }
             Ok(Value::Text(bytes))
@@ -1598,15 +1619,19 @@ fn force_general(value: &Value, live: &Frame, state: Option<&State>, elems: Opti
     match value {
         Value::Residual(id) => {
             let arena = arena_for_residual(id).ok_or_else(|| error("E_RESIDUAL_ID", "Residual belongs to an expired evaluation."))?;
-            let mut arena = arena.lock().unwrap();
-            arena.time = Some(live.clone());
-            arena.state = state.cloned().or(arena.state.clone());
-            arena.resolve = resolve;
-            arena.elems = elems.unwrap_or(&[]).iter().cloned().collect();
-            arena.step_count = 0;
-            arena.fn_calls.clear();
-            arena.memo.clear();
-            execute_residual(&mut arena, *id)
+            let forced = {
+                let mut arena = arena.lock().unwrap();
+                arena.time = Some(live.clone());
+                arena.state = state.cloned().or(arena.state.clone());
+                arena.resolve = resolve.clone();
+                arena.elems = elems.unwrap_or(&[]).iter().cloned().collect();
+                arena.step_count = 0;
+                arena.fn_calls.clear();
+                arena.memo.clear();
+                execute_residual(&mut arena, *id)?
+            };
+            // OCaml's `go (force_res c r)`: a result that still holds residuals (captured record fields) is forced again.
+            if is_live_value(&forced) { force_general(&forced, live, state, elems, resolve) } else { Ok(forced) }
         }
         Value::Source(..) | Value::Struct(_, Ty::Array(_), _) => {
             let arena = arena_for_value(value);
@@ -1642,12 +1667,7 @@ fn resolve_source_with(resolve: &Arc<dyn Fn(&Value) -> Result<Value, Diagnostic>
 }
 fn arena_for_residual(id: &ResidualId) -> Option<Arc<Mutex<Arena>>> {
     if let Some(arena) = active_residual_snapshot(id) { return Some(arena); }
-    let arenas = ARENAS.lock().ok()?;
-    arenas.values().find_map(|weak| {
-        let arena = weak.upgrade()?;
-        let found = arena.lock().ok().is_some_and(|arena| arena.residuals.contains_key(id));
-        found.then_some(arena)
-    })
+    snapshot_find(&|arena| arena.residuals.contains_key(id)).or_else(|| registry_find(&|arena| arena.residuals.contains_key(id)))
 }
 pub fn residual_eval(id: ResidualId, live: &Frame, state: Option<&State>) -> Result<Value, Diagnostic> {
     let arena = arena_for_residual(&id).ok_or_else(|| error("E_RESIDUAL_ID", "Residual belongs to an expired evaluation."))?;
@@ -1872,13 +1892,7 @@ fn workspace_source_key(workspace: &Workspace) -> String {
 }
 pub fn element_key(zone:&Path)->String{format!("$elem:{}",zone.join("/"))}
 fn arena_for_function(id: FnId) -> Option<Arc<Mutex<Arena>>> {
-    if let Some(arena) = ACTIVE_RESIDUAL_SNAPSHOTS.with(|snapshots| snapshots.borrow().iter().rev().find_map(|scope| scope.values().find(|arena| arena.lock().ok().is_some_and(|arena| arena.functions.contains_key(&id))).cloned())) { return Some(arena); }
-    let arenas = ARENAS.lock().ok()?;
-    arenas.values().find_map(|weak| {
-        let arena = weak.upgrade()?;
-        let found = arena.lock().ok().is_some_and(|arena| arena.functions.contains_key(&id));
-        found.then_some(arena)
-    })
+    snapshot_find(&|arena| arena.functions.contains_key(&id)).or_else(|| registry_find(&|arena| arena.functions.contains_key(&id)))
 }
 fn map_function(site: Option<(i64, Path, Vec<i64>)>, path: Option<Path>, signature: &FnSignature, function: FnId, arrays: &[Value]) -> Result<Value, Diagnostic> {
     let arena = arena_for_function(function).ok_or_else(|| error("E_FUNCTION_ID", "Function belongs to an expired evaluation."))?;
@@ -2194,6 +2208,10 @@ pub mod Residual {
         arena.state = state.cloned().or(arena.state.clone());
         arena.elems = elems.unwrap_or(&[]).iter().cloned().collect();
         arena.resolve = resolve;
+        // OCaml's with_live builds a fresh live state per call: no memo, step count or call counts survive a previous time.
+        arena.step_count = 0;
+        arena.fn_calls.clear();
+        arena.memo.clear();
         let residual = get_res(&arena, id)?;
         eval_concrete(&mut arena, &residual.ctx, &Env { values: residual.env }, term)
     }
