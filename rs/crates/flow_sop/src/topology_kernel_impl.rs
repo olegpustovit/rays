@@ -486,6 +486,8 @@ fn host_topology(point_count: i64, vertices: &[i64], offsets: &[i64], kinds: &[i
 enum StaticKey {
     Floats(Weak<Vec<f64>>),
     Ints(Weak<Vec<i64>>),
+    // a lazy residual is the physical value OCaml compares with ==: stable across frames, so its id and home arena
+    Residual(i64, i64),
 }
 struct StaticTopology {
     key: StaticKey,
@@ -498,6 +500,7 @@ fn key_matches(key: &StaticKey, value: &Value) -> bool {
     match (key, value) {
         (StaticKey::Floats(weak), Value::Float_array(a) | Value::Vec2_array(a) | Value::Vec3_array(a) | Value::Vec4_array(a)) => alive(weak, a),
         (StaticKey::Ints(weak), Value::Int_array(a)) => weak.upgrade().is_some_and(|k| Arc::ptr_eq(&k, a)),
+        (StaticKey::Residual(id, home), Value::Residual(r)) => r.0 == *id && r.1 == *home,
         _ => false,
     }
 }
@@ -505,12 +508,14 @@ fn key_dead(key: &StaticKey) -> bool {
     match key {
         StaticKey::Floats(weak) => weak.strong_count() == 0,
         StaticKey::Ints(weak) => weak.strong_count() == 0,
+        StaticKey::Residual(..) => false,
     }
 }
 fn key_of(value: &Value) -> Option<StaticKey> {
     match value {
         Value::Float_array(a) | Value::Vec2_array(a) | Value::Vec3_array(a) | Value::Vec4_array(a) => Some(StaticKey::Floats(Arc::downgrade(a))),
         Value::Int_array(a) => Some(StaticKey::Ints(Arc::downgrade(a))),
+        Value::Residual(r) => Some(StaticKey::Residual(r.0, r.1)),
         _ => None,
     }
 }
@@ -534,6 +539,11 @@ fn keep_static(key: &Value, point_count: i64, topology: topology::T) {
     // ponytail: 64 meshes, oldest dropped
     if all.len() >= 64 {
         all.remove(0);
+    }
+    // ponytail: a residual key never dies, so only the 4 newest keep their host topology
+    while all.iter().filter(|e| matches!(e.key, StaticKey::Residual(..))).count() >= 4 {
+        let at = all.iter().position(|e| matches!(e.key, StaticKey::Residual(..))).unwrap();
+        all.remove(at);
     }
     all.push(StaticTopology { key: stored, point_count, topology });
 }
@@ -1431,5 +1441,29 @@ mod integration {
             Value::Source("sop/edges".into(), Ty::Array(Box::new(Ty::Int)), vec![("geometry".into(), handle(7)), ("component".into(), text("unknown"))]),
             "E_DATA_SOURCE",
         );
+    }
+}
+
+#[cfg(test)]
+mod static_residual {
+    use super::*;
+
+    // A static mesh's vertex_points is a lazy residual (same id every frame): its host topology must
+    // be found again, or each frame reads the whole topology back from the device (swarm: 10+ GB).
+    #[test]
+    fn residual_key_hits_across_frames() {
+        let key = Value::Residual(value::ResidualId(9_001, 3));
+        let again = Value::Residual(value::ResidualId(9_001, 3));
+        let other_arena = Value::Residual(value::ResidualId(9_001, 4));
+        assert!(!static_cached(&key));
+        let topology = topology::create_owned(3, vec![0, 1, 2], vec![0, 3], vec![topology::PrimitiveKind::Polygon]).unwrap();
+        keep_static(&key, 3, topology);
+        assert!(static_cached(&again));
+        assert!(!static_cached(&other_arena));
+        for i in 0..10 {
+            keep_static(&Value::Residual(value::ResidualId(9_100 + i, 3)), 3, topology::create_owned(3, vec![0, 1, 2], vec![0, 3], vec![topology::PrimitiveKind::Polygon]).unwrap());
+        }
+        let held = STATIC_TOPOLOGIES.lock().unwrap().iter().filter(|e| matches!(e.key, StaticKey::Residual(..))).count();
+        assert!(held <= 4, "residual keys never die, so they are capped: {held}");
     }
 }

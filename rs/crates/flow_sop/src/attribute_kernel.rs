@@ -1088,24 +1088,24 @@ fn resident_read(geometry: &GeometryLookup, value: &Value) -> Option<(Value, i64
 
 /// The placeholder of point P or a point vec3 attribute `name` that a device still holds unread,
 /// or `None`: asked without materialising it.
-pub fn resident_vec3(g: &geometry::T, name: &str) -> Option<Vec<f64>> {
+pub fn resident_vec3(g: &geometry::T, name: &str) -> Option<Arc<Vec<f64>>> {
     let holder = if name == "P" {
         Float3::holder(geometry::positions(g))
     } else {
         geometry::find_attribute(Owner::Point, name, g).and_then(|a| attribute::holder(&a))
     }?;
     match resident_of(&holder)? {
-        (Value::Vec3_array(placeholder), count) if count == geometry::point_count(g) => Some(placeholder.to_vec()),
+        (Value::Vec3_array(placeholder), count) if count == geometry::point_count(g) => Some(placeholder),
         _ => None,
     }
 }
 
 /// Unread point Cd placeholder and its component width (3 or 4), without materialisation.
-pub fn resident_color(g: &geometry::T) -> Option<(Vec<f64>, usize)> {
+pub fn resident_color(g: &geometry::T) -> Option<(Arc<Vec<f64>>, usize)> {
     let holder = geometry::find_attribute(Owner::Point, "Cd", g).and_then(|a| attribute::holder(&a))?;
     match resident_of(&holder)? {
-        (Value::Vec3_array(p), count) if count == geometry::point_count(g) => Some((p.to_vec(), 3)),
-        (Value::Vec4_array(p), count) if count == geometry::point_count(g) => Some((p.to_vec(), 4)),
+        (Value::Vec3_array(p), count) if count == geometry::point_count(g) => Some((p, 3)),
+        (Value::Vec4_array(p), count) if count == geometry::point_count(g) => Some((p, 4)),
         _ => None,
     }
 }

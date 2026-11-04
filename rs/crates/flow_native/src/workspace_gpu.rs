@@ -1099,9 +1099,7 @@ pub fn display(t_: &t, geometry: &rdk::geometry::T) -> Option<(String, bool, Opt
     };
     let topology = rdk::geometry::topology(geometry);
     let bound = (|| -> Result<(String, bool, Option<i64>, i64, Box<dyn Fn()>), String> {
-        // ponytail: `resident_vec3` returns a copy, so the pool cannot find the holder by identity
-        // and this refuses (host display) until flow_sop returns the placeholder's own `Arc`.
-        let buffer = pin(&Arc::new(positions.clone()))?;
+        let buffer = pin(&positions)?;
         let normals = match rdk::geometry::find_attribute(rdk::attribute::Owner::Point, "N", geometry) {
             None if rdk::geometry::primitive_count(geometry) == 0 => None,
             None if rdk::topology::resident(topology) => return Err("Resident topology without authored normals requires the host display.".to_owned()),
@@ -1115,14 +1113,14 @@ pub fn display(t_: &t, geometry: &rdk::geometry::T) -> Option<(String, bool, Opt
                 }
             }
             Some(_) => match flow_sop::attribute_kernel::resident_vec3(geometry, "N") {
-                Some(value) => Some(pin(&Arc::new(value))?),
+                Some(value) => Some(pin(&value)?),
                 None => return Err("Point normals are not an unread resident vec3 stream.".to_owned()),
             },
         };
         let colors = match rdk::geometry::find_attribute(rdk::attribute::Owner::Point, "Cd", geometry) {
             None => None,
             Some(_) => match flow_sop::attribute_kernel::resident_color(geometry) {
-                Some((value, width)) => Some((pin(&Arc::new(value))?, width as i64)),
+                Some((value, width)) => Some((pin(&value)?, width as i64)),
                 None => return Err("Point colours are not an unread resident float3/float4 stream.".to_owned()),
             },
         };
