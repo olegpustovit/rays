@@ -2355,12 +2355,21 @@ fn structure_context(out: &mut String, context: &ExecCtx) {
     structure_path(out, &context.base);
     structure_path(out, &context.route.to_vec());
 }
+// OCaml's `structure` term: the form spells an authored term (its id and flat text); a library form's id alone names it; a synthetic
+// term (form 0) spells its node kind and children.
 fn structure_term(out: &mut String, term: &Term) {
-    out.push('T');
-    out.push_str(&format!("{}:{}:{:?}", term.form.id, ty::to_string(&term.ty), term.path));
-    structure_bytes(out, format!("{:?}", term.node).as_bytes());
-    if term.form.id < flow_syntax::syntax::LIBRARY_BASE || term.form.id == 0 {
+    out.push('t');
+    out.push_str(&term.form.id.to_string());
+    structure_bytes(out, term.path.as_ref().map_or_else(|| "-".to_owned(), |path| path.join("/")).as_bytes());
+    structure_bytes(out, ty::to_string(&term.ty).as_bytes());
+    if term.form.id < flow_syntax::syntax::LIBRARY_BASE {
         structure_bytes(out, flow_syntax::lisp::flat(&term.form).as_bytes());
+        if term.form.id == 0 {
+            out.push_str(&format!("{:?}", std::mem::discriminant(&term.node)));
+            out.push('(');
+            for child in children(term) { structure_term(out, child); }
+            out.push(')');
+        }
     }
 }
 fn structure_value(
@@ -2421,6 +2430,7 @@ fn structure_value(
     }
 }
 pub fn structure(value: &Value) -> String {
+    let _phase = flow_syntax::phase_timer::measure("structure");
     let mut output = String::new();
     let mut seen_residuals = HashMap::new();
     let mut seen_functions = HashMap::new();
@@ -2846,10 +2856,11 @@ fn rewrite_value(
             let Some(home) = slot_of(id.1) else { return value.clone(); };
             let Some(mut residual) = peek(&home, |arena| arena.residuals.get(id).cloned()) else { return value.clone(); };
             let original_bindings = residual.env.iter().map(|(name, value)| (name.clone(), value.clone())).collect::<Vec<_>>();
-            let (term, overrides) = retarget(&residual.term, &original_bindings).unwrap_or_else(|| ((*residual.term).clone(), Vec::new()));
+            // an unretargeted copy shares its term (one term, not one per copy along a write chain)
+            let (term, overrides) = retarget(&residual.term, &original_bindings).map(|(term, overrides)| (Arc::new(term), overrides)).unwrap_or_else(|| (residual.term.clone(), Vec::new()));
             let copy = ResidualId(fresh(), id.1);
             residuals.insert(*id, copy);
-            residual.term = Arc::new(term);
+            residual.term = term;
             let names = overrides.iter().map(|(name, _)| name.clone()).collect::<BTreeSet<_>>();
             let mut env = BTreeMap::new();
             for (name, value) in residual.env {
