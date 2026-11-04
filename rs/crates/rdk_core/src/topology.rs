@@ -825,3 +825,277 @@ mod deferred_tests {
         assert!(!resident(&value));
     }
 }
+
+#[cfg(test)]
+mod ported_rdk_tests {
+    //! Port of `check_topology_validation` and `check_deferred_topology` from lib/rdk/test_rdk.ml.
+    //! Not ported: the one/four/eight-domain loops (Rust validation is sequential), the
+    //! ownership-transfer identity checks (a `Vec` is moved), and the "released topology" thunk
+    //! (a Rust materialiser returns `T`, it cannot raise).
+    use super::*;
+    use crate::packed::Deferred::Holder;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Mutex;
+
+    const INVALID: &str = "Topology: vertex references an invalid point";
+
+    fn message(result: Result<T, error::T>) -> String {
+        match result {
+            Ok(_) => "ok".to_owned(),
+            Err(failure) => error::message(&failure).to_owned(),
+        }
+    }
+
+    #[test]
+    fn invalid_vertices_are_rejected_at_every_block_boundary() {
+        for count in [0_usize, 3, 32767, 32768, 65535, 65536, 65537, 131073] {
+            for polygon in [false, true] {
+                let construct = |bad: &[usize]| {
+                    let mut vertices: Vec<i64> = (0..count as i64).collect();
+                    for &index in bad {
+                        vertices[index] = count as i64;
+                    }
+                    let offsets = if count == 0 { vec![0] } else { vec![0, count as i64] };
+                    if polygon {
+                        polygons_owned(count as i64, vertices, offsets)
+                    } else {
+                        let kinds = if count == 0 { vec![] } else { vec![PrimitiveKind::OpenPolyline] };
+                        create_owned(count as i64, vertices, offsets, kinds)
+                    }
+                };
+                let built = construct(&[]).unwrap();
+                let view = View::view(&built).unwrap();
+                assert_eq!(view.point_count, count as i64);
+                assert_eq!(view.vertex_points.len(), count);
+                if count > 0 {
+                    let mut indices = vec![0, 65535.min(count - 1), 65536.min(count - 1), count - 1];
+                    indices.sort_unstable();
+                    indices.dedup();
+                    for &index in &indices {
+                        assert_eq!(message(construct(&[index])), INVALID, "invalid vertex {index} of {count}");
+                    }
+                    assert_eq!(message(construct(&indices)), INVALID, "simultaneous invalid blocks of {count}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn simultaneous_invalid_validation_precedence() {
+        let count = 131073_usize;
+        let mut vertices: Vec<i64> = (0..count as i64).collect();
+        vertices[0] = -1;
+        vertices[65536] = count as i64;
+        let c = count as i64;
+        let expect = |text: &str, point_count: i64, vertices: &[i64], offsets: Vec<i64>, kinds: Vec<PrimitiveKind>| {
+            assert_eq!(
+                message(create_owned(point_count, vertices.to_vec(), offsets, kinds)),
+                text,
+                "topology simultaneous-invalid validation precedence"
+            );
+        };
+        expect("Topology: point count is negative", -1, &vertices, vec![], vec![]);
+        expect("Topology: primitive offsets must contain the initial zero", c, &vertices, vec![], vec![]);
+        expect("Topology: first primitive offset must be zero", c, &vertices, vec![1, c - 1], vec![]);
+        expect("Topology: final primitive offset must equal vertex count", c, &vertices, vec![0, c - 1], vec![]);
+        expect("Topology: primitive kind count must match primitive count", c, &vertices, vec![0, c], vec![]);
+        let offsets = vec![0, c, c - 1, c];
+        let kinds = vec![PrimitiveKind::Polygon; 3];
+        expect(INVALID, c, &vertices, offsets.clone(), kinds.clone());
+        vertices[0] = 0;
+        vertices[65536] = 65536;
+        expect("Topology: primitive offsets are not ordered", c, &vertices, offsets, kinds);
+        expect(
+            "Topology: primitive has too few vertices for its kind",
+            c,
+            &vertices,
+            vec![0, 1, c],
+            vec![PrimitiveKind::Polygon; 2],
+        );
+    }
+
+    struct TestHolder;
+    impl Holder for TestHolder {}
+
+    /// 2 x 2 quad grid over 9 points (the OCaml `Plane_generators.grid ~connectivity:Grid_quads`).
+    fn grid_quads() -> T {
+        let mut vertices = Vec::new();
+        for row in 0..2_i64 {
+            for column in 0..2_i64 {
+                let p = row * 3 + column;
+                vertices.extend([p, p + 1, p + 4, p + 3]);
+            }
+        }
+        polygons_owned(9, vertices, vec![0, 4, 8, 12, 16]).unwrap()
+    }
+
+    fn counted(
+        owned: &T,
+        reads: &Arc<AtomicUsize>,
+        shape: Option<(PrimitiveKind, i64)>,
+        holder: Option<Arc<dyn Holder>>,
+        release: Option<Deferred::Release>,
+    ) -> T {
+        let (reads, owned_copy) = (Arc::clone(reads), owned.clone());
+        deferred(
+            shape,
+            holder,
+            release,
+            point_count(owned),
+            vertex_count(owned),
+            primitive_count(owned),
+            Arc::new(move || {
+                reads.fetch_add(1, Ordering::SeqCst);
+                owned_copy.clone()
+            }),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn deferred_metadata_materialises_once_and_drops_its_holder() {
+        let owned = grid_quads();
+        let expected = View::view(&owned).unwrap();
+        let reads = Arc::new(AtomicUsize::new(0));
+        let releases: Arc<Mutex<Vec<bool>>> = Arc::new(Mutex::new(Vec::new()));
+        let log = Arc::clone(&releases);
+        let holder_value: Arc<dyn Holder> = Arc::new(TestHolder);
+        let topology = counted(
+            &owned,
+            &reads,
+            Some((PrimitiveKind::Polygon, 4)),
+            Some(Arc::clone(&holder_value)),
+            Some(Arc::new(move |held| log.lock().unwrap().push(held))),
+        );
+        let id = data_id(&topology);
+        assert_eq!(point_count(&topology), point_count(&owned));
+        assert_eq!(vertex_count(&topology), vertex_count(&owned));
+        assert_eq!(primitive_count(&topology), primitive_count(&owned));
+        assert_eq!(payload_bytes(&topology), payload_bytes(&owned));
+        assert!(!all_triangles(&topology).unwrap());
+        assert!(resident(&topology));
+        assert!(Arc::ptr_eq(&holder_value, &holder(&topology).unwrap()));
+        assert_eq!(reads.load(Ordering::SeqCst), 0, "metadata forced the payload");
+        let release = releaser(&topology).unwrap();
+        release(true);
+        std::thread::scope(|scope| {
+            for _ in 0..4 {
+                scope.spawn(|| {
+                    for _ in 0..16 {
+                        let view = View::view(&topology).unwrap();
+                        assert_eq!(view.vertex_points, expected.vertex_points, "racing topology readers differ");
+                        assert_eq!(view.primitive_offsets, expected.primitive_offsets);
+                    }
+                });
+            }
+        });
+        assert_eq!(reads.load(Ordering::SeqCst), 1, "deferred topology must materialise once");
+        assert!(!resident(&topology));
+        assert!(holder(&topology).is_none() && releaser(&topology).is_none());
+        assert_eq!(data_id(&topology), id);
+        assert_eq!(*releases.lock().unwrap(), vec![true]);
+        release(false);
+        assert_eq!(*releases.lock().unwrap(), vec![true, false], "retained release handle changed contract");
+        assert_eq!(point_of_vertex(&topology, 2).unwrap(), point_of_vertex(&owned, 2).unwrap());
+        assert_eq!(primitive_vertex_range(&topology, 1).unwrap(), primitive_vertex_range(&owned, 1).unwrap());
+        assert_eq!(primitive_size(&topology, 1).unwrap(), 4);
+        assert_eq!(primitive_kind(&topology, 1).unwrap(), PrimitiveKind::Polygon);
+    }
+
+    #[test]
+    fn deferred_topology_feeds_cpu_consumers_with_one_read() {
+        let owned = grid_quads();
+        let point_expected = crate::point_index::View::view(&crate::point_index::create(None, &owned).unwrap());
+        let edge_expected = crate::topology_index::View::view(&crate::topology_index::create(None, &owned).unwrap());
+        for _ in 0..2 {
+            let reads = Arc::new(AtomicUsize::new(0));
+            let topology = counted(&owned, &reads, None, None, None);
+            let points = crate::point_index::View::view(&crate::point_index::create(None, &topology).unwrap());
+            assert_eq!(points.point_offsets, point_expected.point_offsets, "deferred point incidence");
+            assert_eq!(points.point_vertices, point_expected.point_vertices);
+            assert_eq!(reads.load(Ordering::SeqCst), 1);
+            let reads = Arc::new(AtomicUsize::new(0));
+            let topology = counted(&owned, &reads, None, None, None);
+            let edges = crate::topology_index::View::view(&crate::topology_index::create(None, &topology).unwrap());
+            assert_eq!(edges.edge_a, edge_expected.edge_a, "deferred edge incidence");
+            assert_eq!(edges.edge_b, edge_expected.edge_b);
+            assert_eq!(edges.opposite_vertex, edge_expected.opposite_vertex);
+            assert_eq!(reads.load(Ordering::SeqCst), 1);
+        }
+    }
+
+    #[test]
+    fn deferred_shape_empty_mismatch_and_invalid_metadata() {
+        let triangles = polygons_owned(4, vec![0, 1, 2, 0, 2, 3], vec![0, 3, 6]).unwrap();
+        let reads = Arc::new(AtomicUsize::new(0));
+        let topology = counted(&triangles, &reads, Some((PrimitiveKind::Polygon, 3)), None, None);
+        assert!(all_triangles(&topology).unwrap() && reads.load(Ordering::SeqCst) == 0, "triangle shape forced payload");
+        View::view(&topology).unwrap();
+        assert_eq!(reads.load(Ordering::SeqCst), 1);
+        let owned = grid_quads();
+        let mismatch = deferred(None, None, None, 0, 0, 0, {
+            let owned = owned.clone();
+            Arc::new(move || owned.clone())
+        })
+        .unwrap();
+        assert!(View::view(&mismatch).is_err(), "deferred topology accepted changing counts");
+        let bad_shape = counted(&owned, &Arc::new(AtomicUsize::new(0)), Some((PrimitiveKind::OpenPolyline, 4)), None, None);
+        assert!(View::view(&bad_shape).is_err(), "deferred topology accepted changing shape");
+        let empty_reads = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&empty_reads);
+        let empty = deferred(
+            Some((PrimitiveKind::Polygon, 3)),
+            None,
+            None,
+            0,
+            0,
+            0,
+            Arc::new(move || {
+                counter.fetch_add(1, Ordering::SeqCst);
+                super::empty(0).unwrap()
+            }),
+        )
+        .unwrap();
+        assert!(all_triangles(&empty).unwrap());
+        assert_eq!(payload_bytes(&empty), 8);
+        assert_eq!(empty_reads.load(Ordering::SeqCst), 0, "empty topology metadata forced payload");
+        assert_eq!(&*View::view(&empty).unwrap().primitive_offsets, &[0]);
+        assert_eq!(empty_reads.load(Ordering::SeqCst), 1);
+        let unread_reads = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&unread_reads);
+        let unread = deferred(
+            None,
+            None,
+            Some(Arc::new(|_held| {})),
+            0,
+            0,
+            0,
+            Arc::new(move || {
+                counter.fetch_add(1, Ordering::SeqCst);
+                super::empty(0).unwrap()
+            }),
+        )
+        .unwrap();
+        releaser(&unread).unwrap()(false);
+        assert_eq!(unread_reads.load(Ordering::SeqCst), 0, "release materialised unread topology");
+        for (points, vertices, primitives, shape) in [
+            (-1, 0, 0, None),
+            (0, -1, 0, None),
+            (0, 0, -1, None),
+            (1, 1, 0, None),
+            (4, 4, 1, Some((PrimitiveKind::Polygon, 2))),
+            (4, 4, 1, Some((PrimitiveKind::Polygon, 3))),
+        ] {
+            let result = deferred(
+                shape,
+                None,
+                None,
+                points,
+                vertices,
+                primitives,
+                Arc::new(|| panic!("invalid metadata invoked its materialiser")),
+            );
+            assert!(result.is_err(), "deferred topology accepted invalid metadata");
+        }
+    }
+}

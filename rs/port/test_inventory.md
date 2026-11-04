@@ -2,7 +2,7 @@
 
 Scope: all 432 `lib/**/test_*.ml` files (365 at depth `lib/<x>/`, 67 nested). Generated from a name and comment scan of `rs/` (`target/` excluded).
 
-**Summary: PORTED 224, PARTIAL 48, MISSING 160 (432 files).**
+**Summary: PORTED 233, STUB 55, PARTIAL 45, MISSING 96, rdk verified 2026-11-04 (432 files).**
 
 Method:
 - PORTED: a Rust file with the same basename (or a `tests/` file without the `test_` prefix), or a Rust comment or `##` backlog header naming the file, or a same-named module containing `#[cfg(test)]`. The last kind is a name-only match: 48 PORTED rows, unverified.
@@ -16,7 +16,6 @@ Method:
 | Library | Missing cases | Missing files |
 |---|---:|---:|
 | rays_editor | 280 | 13 |
-| rdk | 197 | 64 |
 | flow_gpu | 181 | 5 |
 | flow_sop | 117 | 9 |
 | scene_execution | 78 | 6 |
@@ -31,9 +30,9 @@ Method:
 | rays_math | 18 | 2 |
 | scene_command | 17 | 3 |
 
-Total MISSING cases: 1240.
+Total MISSING cases: 1043 (rdk row removed, see "rdk verification").
 
-## MISSING (160 files, sorted by library, then cases)
+## MISSING (96 files, sorted by library, then cases)
 
 | Library | File | Cases | Basis |
 |---|---|---:|---|
@@ -106,70 +105,6 @@ Total MISSING cases: 1240.
 | rays_editor | `lib/rays_editor/test/test_text.ml` | 0 | checks |
 | rays_math | `lib/rays_math/test_color.ml` | 16 | checks |
 | rays_math | `lib/rays_math/test_clock.ml` | 2 | checks |
-| rdk | `lib/rdk/test_fuse.ml` | 35 | checks |
-| rdk | `lib/rdk/test_clip.ml` | 29 | checks |
-| rdk | `lib/rdk/test_rdk_sources.ml` | 21 | checks |
-| rdk | `lib/rdk/test_support/test_geometry_comparison.ml` | 8 | checks |
-| rdk | `lib/rdk/test_attribute_fade.ml` | 7 | checks |
-| rdk | `lib/rdk/test_point_split.ml` | 5 | checks |
-| rdk | `lib/rdk/test_sweep.ml` | 5 | checks |
-| rdk | `lib/rdk/test_connectivity.ml` | 3 | test fns |
-| rdk | `lib/rdk/test_edge_cusp.ml` | 3 | checks |
-| rdk | `lib/rdk/test_edge_divide.ml` | 3 | checks |
-| rdk | `lib/rdk/test_edge_equalize.ml` | 3 | checks |
-| rdk | `lib/rdk/test_edge_flip.ml` | 3 | checks |
-| rdk | `lib/rdk/test_edge_relax.ml` | 3 | checks |
-| rdk | `lib/rdk/test_edge_straighten.ml` | 3 | checks |
-| rdk | `lib/rdk/test_extract_centroid.ml` | 3 | checks |
-| rdk | `lib/rdk/test_group_backface.ml` | 3 | checks |
-| rdk | `lib/rdk/test_group_bounds.ml` | 3 | checks |
-| rdk | `lib/rdk/test_group_edge_depth.ml` | 3 | checks |
-| rdk | `lib/rdk/test_group_non_planar.ml` | 3 | checks |
-| rdk | `lib/rdk/test_group_normal.ml` | 3 | checks |
-| rdk | `lib/rdk/test_group_unshared.ml` | 3 | checks |
-| rdk | `lib/rdk/test_groups_from_name.ml` | 3 | checks |
-| rdk | `lib/rdk/test_platonic.ml` | 3 | checks |
-| rdk | `lib/rdk/test_point_jitter.ml` | 3 | checks |
-| rdk | `lib/rdk/test_soft_transform.ml` | 3 | test fns |
-| rdk | `lib/rdk/test_attribute_composite.ml` | 2 | checks |
-| rdk | `lib/rdk/test_blast_by_attribute.ml` | 2 | checks |
-| rdk | `lib/rdk/test_circle_from_edges.ml` | 2 | checks |
-| rdk | `lib/rdk/test_crease.ml` | 2 | checks |
-| rdk | `lib/rdk/test_distance_along_geometry.ml` | 2 | checks |
-| rdk | `lib/rdk/test_distance_from_target.ml` | 2 | checks |
-| rdk | `lib/rdk/test_extract_point_curve.ml` | 2 | checks |
-| rdk | `lib/rdk/test_group_catalog.ml` | 2 | test fns |
-| rdk | `lib/rdk/test_group_edge_angle.ml` | 2 | checks |
-| rdk | `lib/rdk/test_group_random.ml` | 2 | checks |
-| rdk | `lib/rdk/test_polyframe.ml` | 2 | checks |
-| rdk | `lib/rdk/test_polywire.ml` | 2 | checks |
-| rdk | `lib/rdk/test_resample.ml` | 2 | checks |
-| rdk | `lib/rdk/test_separate_pieces.ml` | 2 | checks |
-| rdk | `lib/rdk/test_group_range_connectivity.ml` | 1 | checks |
-| rdk | `lib/rdk/test_laplacian.ml` | 1 | checks |
-| rdk | `lib/rdk/test_motion.ml` | 1 | checks |
-| rdk | `lib/rdk/test_transform.ml` | 1 | test fns |
-| rdk | `lib/rdk/test_tube.ml` | 1 | checks |
-| rdk | `lib/rdk/test_attribute_copy.ml` | 0 | checks |
-| rdk | `lib/rdk/test_blend_shapes.ml` | 0 | checks |
-| rdk | `lib/rdk/test_circle.ml` | 0 | checks |
-| rdk | `lib/rdk/test_duplicate.ml` | 0 | checks |
-| rdk | `lib/rdk/test_ends.ml` | 0 | checks |
-| rdk | `lib/rdk/test_group_boundary.ml` | 0 | checks |
-| rdk | `lib/rdk/test_group_find_path.ml` | 0 | checks |
-| rdk | `lib/rdk/test_group_promote_boundary.ml` | 0 | checks |
-| rdk | `lib/rdk/test_instances.ml` | 0 | checks |
-| rdk | `lib/rdk/test_match_size.ml` | 0 | checks |
-| rdk | `lib/rdk/test_normals.ml` | 0 | checks |
-| rdk | `lib/rdk/test_point_generate.ml` | 0 | checks |
-| rdk | `lib/rdk/test_poly_bridge.ml` | 0 | checks |
-| rdk | `lib/rdk/test_poly_loft.ml` | 0 | checks |
-| rdk | `lib/rdk/test_rdk_misc.ml` | 0 | checks |
-| rdk | `lib/rdk/test_reverse.ml` | 0 | checks |
-| rdk | `lib/rdk/test_revolve.ml` | 0 | checks |
-| rdk | `lib/rdk/test_rewire_vertices.ml` | 0 | checks |
-| rdk | `lib/rdk/test_skin.ml` | 0 | checks |
-| rdk | `lib/rdk/test_spiral.ml` | 0 | checks |
 | renderer | `lib/renderer/test_batch_merge.ml` | 9 | checks |
 | renderer | `lib/renderer/test_dense_scene2.ml` | 9 | checks |
 | renderer | `lib/renderer/test_scene3_instances.ml` | 9 | checks |
@@ -198,7 +133,7 @@ Total MISSING cases: 1240.
 | sdl3_ttf | `lib/sdl3_ttf/test_sdl3_ttf.ml` | 0 | checks |
 | sdl3_ttf | `lib/sdl3_ttf/test_sdl3_ttf_discovery_failure.ml` | 0 | checks |
 
-## PARTIAL (48 files)
+## PARTIAL (45 files)
 
 | Library | File | Note |
 |---|---|---|
@@ -245,9 +180,6 @@ Total MISSING cases: 1240.
 | rays_editor | `lib/rays_editor/test/test_workspace_ir.ml` | backlog: static part only |
 | rays_editor | `lib/rays_editor/test/test_workspace_shell.ml` | backlog: run_native and window sections not ported; several cases SKIPPED |
 | rays_editor | `lib/rays_editor/test/test_workspace_start.ml` | header: errors only ported (start/reload path) |
-| rdk | `lib/rdk/test_distance_from_geometry.ml` | header: one check of the file ported |
-| rdk | `lib/rdk/test_rdk.ml` | header: only the quad/extrude bridge checks ported |
-| rdk | `lib/rdk/test_rdk_attributes.ml` | header: one check of the file ported |
 | sop | `lib/sop/test_parallel_exact.ml` | header: session-level core only |
 | sop | `lib/sop/test_sop.ml` | header: only the parts that need no sop/group_edges (or packed-vs-reference) ported |
 
@@ -256,3 +188,14 @@ Total MISSING cases: 1240.
 - Name matching is textual. A module with a different name (e.g. an rdk `group_ops.rs` holding a port) is invisible to the scan and shows as MISSING. Verify the largest MISSING rows before planning work.
 - The rdk and rays_editor counts dominate. rdk tests are mostly `let run ()` scripts with `check` helpers, so their cases are a proxy.
 - 48 PORTED rows are the name-only `#[cfg(test)]` match. Re-verify those first.
+
+## rdk verification (2026-11-04)
+
+All 64 rdk rows were MISSING by name. Checked against `lib/rdk/dune`'s `test_main` and the Rust `rdk_*` crates:
+
+- 47 files are stubs: `let run () = print_endline "... passed"`, no assertion on product code (attribute_composite, attribute_copy, attribute_fade, blast_by_attribute, blend_shapes, circle, circle_from_edges, crease, distance_along_geometry, distance_from_target, duplicate, edge_divide, edge_equalize, edge_flip, ends, extract_centroid, extract_point_curve, group_{backface,boundary,bounds,edge_angle,edge_depth,find_path,non_planar,normal,promote_boundary,random,range_connectivity,unshared}, groups_from_name, laplacian, match_size, motion, normals, platonic, point_generate, point_split, poly_bridge, poly_loft, polyframe, polywire, resample, reverse, revolve, rewire_vertices, separate_pieces, skin, spiral, sweep, tube). Their cases counted in this table were helper-function checks that never run.
+- 7 more are stubs with unused helpers (`_`-prefixed values, a cancel token, no assertion): edge_cusp, edge_relax, edge_straighten, point_jitter (one `Group.init` self-check), plus edge_divide/equalize/flip above. 12 OCaml modules they would exercise (scatter, spiral, polywire, sweep, crease, duplicate, edge_ops, extract_point_curve, laplacian, motion, revolve, sweep_modeling) have no Rust file; accepted Lisp nodes replace them.
+- `test_support/test_geometry_comparison.ml` tests the OCaml-only `close_geometry` ulp comparator; Rust compares with `geometry_signature`. No port.
+- 9 files assert for real. Already ported under other names: clip (`plane_clip.rs`, 11 of 11 sections), connectivity (`rdk_core/analysis.rs`), fuse (`fuse_grid.rs` and `fuse_*.rs`), group_catalog (`group_ops.rs`), instances (`instance_copy.rs`), soft_transform and transform (`transform_ops.rs`). Gaps found and ported now: connectivity validation and sentinels; fuse one/four-domain target and rule exactness; rdk_sources pattern/rewrite suite (`attribute_pattern.rs`); rdk_misc tuple blur (`attribute_blur.rs`).
+- The 3 PARTIAL rdk rows are complete: test_rdk (topology validation and deferred topology in `rdk_core/topology.rs`, group/extrude remap in `rdk_rays/tests.rs`), test_rdk_attributes (surface-index extras in `rdk_geom/surface_index.rs`; the transfer half was already in `attribute_transfer.rs`), test_distance_from_geometry (curve reference and domain exactness in `transform_ops.rs`).
+- Not ported on purpose: the million-point range kernel (`Geometry.generate_point_ranges`, sequential in Rust, covered by `point_range_generator_keeps_fixed_plane_lengths`); the OCaml minor-heap class-bit regression; the "released topology still materialised" thunk (a Rust materialiser returns a value, it cannot raise); one/four/eight-domain loops over topology validation (sequential in Rust).

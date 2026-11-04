@@ -278,3 +278,29 @@ fn geometry_view_reads() {
     assert_eq!(hit.unwrap().1, 1);
     assert!(geometry_view::points_of_nothing().is_ok());
 }
+
+/// Remaining checks of `run` in lib/rdk/test_rdk.ml: packed group cardinality and difference, and
+/// the extrude's point-group remap, canonical-P refusal and undersized-polygon refusal.
+#[test]
+fn groups_extrude_remap_and_construction_refusals() {
+    use rdk_core::group;
+    let even = group::init(None, group::Owner::Point, "even", 4, &|i| i & 1 == 0).unwrap();
+    let all = group::init(None, group::Owner::Point, "all", 4, &|_| true).unwrap();
+    let odd = group::difference(&all, &even).unwrap();
+    assert!(group::cardinality(&odd) == 2 && !group::mem(0, &odd) && group::mem(1, &odd), "packed group difference");
+    assert_eq!(group::cardinality(&even), 2, "packed group cardinality");
+    let base = quad();
+    let source = geometry::create(geometry::positions(&base).clone(), geometry::topology(&base).clone(), None, Some(vec![even]), None).unwrap();
+    let extruded = poly_extrude::run(&poly_extrude::Params::new(2.0), &source).unwrap();
+    match geometry::find_group(group::Owner::Point, "even", &extruded) {
+        Some(found) if group::cardinality(&found) == 4 => {}
+        _ => panic!("poly extrude point group remap"),
+    }
+    let positions = geometry::positions(&base).clone();
+    let reserved = attribute::create_owned("P", Owner::Point, Storage::Float3(positions.clone())).unwrap();
+    assert!(
+        geometry::create(positions, geometry::topology(&base).clone(), Some(vec![reserved]), None, None).is_err(),
+        "duplicate canonical P was accepted"
+    );
+    assert!(topology::polygons_owned(2, vec![0, 1], vec![0, 2]).is_err(), "undersized polygon was accepted");
+}

@@ -1099,4 +1099,100 @@ mod tests {
         assert!(near(xs(&out)[0], 0.0005));
         let _ = topology::point_count;
     }
+
+    /// `check_target_parallel_exact` of lib/rdk/test_fuse.ml at a smaller size: target Fuse and
+    /// attribute/group rules give byte-identical geometry at one and four domains.
+    #[test]
+    fn target_fuse_and_rules_are_exact_across_domains() {
+        let target = grid(59, 39, 4.2, false);
+        let (tx, ty, tz) = positions(&target);
+        let (vp, offsets, _) = topo(&target);
+        let source = geom(
+            &tx.iter().map(|v| v + 0.013).collect::<Vec<_>>(),
+            &ty.iter().map(|v| v - 0.017).collect::<Vec<_>>(),
+            &tz.iter().map(|v| v + 0.009).collect::<Vec<_>>(),
+            &vp,
+            &offsets,
+            None,
+        );
+        let run = |domains: i64| {
+            at_domains(domains, &|| {
+                fuse(
+                    &Params {
+                        grain: 64,
+                        target: Some(target.clone()),
+                        using: point_snap::Using::ClosestTargetPoint,
+                        tolerance: 0.05,
+                        fuse_points: false,
+                        snapped_group: Some("snapped".to_owned()),
+                        snapped_destination_attribute: Some("destination".to_owned()),
+                        ..base()
+                    },
+                    &source,
+                )
+                .unwrap()
+            })
+        };
+        let (one, four) = (run(1), run(4));
+        assert_eq!(geometry_signature(&one), geometry_signature(&four), "one/four-domain target Fuse output differs");
+        let snapped = ints(Owner::Point, "destination", &one);
+        assert!(snapped.iter().all(|&d| d >= 0), "every shifted point snaps to its own target");
+
+        // Two stacked copies linked by a closest-target snap that modifies the target.
+        let half = geometry::point_count(&target);
+        let (x, y, z) = positions(&target);
+        let (x2, y2): (Vec<f64>, Vec<f64>) = (x.iter().map(|v| v + 0.013).collect(), y.iter().map(|v| v - 0.017).collect());
+        let both = |a: &Vec<f64>, b: &Vec<f64>| a.iter().chain(b.iter()).copied().collect::<Vec<f64>>();
+        let mut all_vp = vp.clone();
+        all_vp.extend(vp.iter().map(|v| v + half));
+        let mut all_offsets = offsets.clone();
+        let base_len = *offsets.last().unwrap();
+        all_offsets.extend(offsets.iter().skip(1).map(|o| o + base_len));
+        let linked = geom(&both(&x, &x2), &both(&y, &y2), &both(&z, &z.clone()), &all_vp, &all_offsets, None);
+        let total = geometry::point_count(&linked);
+        let linked = with_attr(&linked, Owner::Point, "rule_weight", Storage::Float((0..total).map(|p| if p < half { 1.0 } else { 3.0 }).collect()));
+        let linked = with_attr(&linked, Owner::Point, "rule_value", Storage::Float((0..total).map(|p| ((p % half) as f64 * 0.013).sin()).collect()));
+        let linked = with_attr(&linked, Owner::Point, "rule_id", Storage::Int((0..total).map(|p| p % 17).collect()));
+        let linked = with_attr(
+            &linked,
+            Owner::Point,
+            "rule_text",
+            Storage::Text((0..total).map(|p| if p < half { "q" } else { "t" }.to_owned()).collect()),
+        );
+        let linked = geometry::with_group(point_group("rule_group", total, &|p| p & 1 == 0), &linked).unwrap();
+        let rules_run = |domains: i64| {
+            at_domains(domains, &|| {
+                fuse(
+                    &Params {
+                        grain: 257,
+                        selection: Some(point_group("queries", total, &|p| p < half)),
+                        target_selection: Some(point_group("targets", total, &|p| p >= half)),
+                        modify_target: true,
+                        using: point_snap::Using::ClosestTargetPoint,
+                        tolerance: 0.05,
+                        attribute_rules: vec![
+                            AttributeRule {
+                                pattern: "rule_value".to_owned(),
+                                method: fuse_rules::AttributeMethod::WeightedAverage,
+                                weight_attribute: Some("rule_weight".to_owned()),
+                            },
+                            AttributeRule { pattern: "rule_id".to_owned(), method: fuse_rules::AttributeMethod::Mode, weight_attribute: None },
+                            AttributeRule {
+                                pattern: "rule_text".to_owned(),
+                                method: fuse_rules::AttributeMethod::ConcatenateWeightOrder,
+                                weight_attribute: Some("rule_weight".to_owned()),
+                            },
+                        ],
+                        group_rules: vec![GroupRule { group_pattern: "rule_group".to_owned(), group_method: fuse_rules::GroupMethod::MostCommon }],
+                        ..base()
+                    },
+                    &linked,
+                )
+                .unwrap()
+            })
+        };
+        let (rules_one, rules_four) = (rules_run(1), rules_run(4));
+        assert_eq!(geometry_signature(&rules_one), geometry_signature(&rules_four), "one/four-domain Fuse rule output differs");
+        assert!(geometry::find_group(group::Owner::Point, "rule_group", &rules_one).is_some(), "parallel Fuse rule group missing");
+    }
 }

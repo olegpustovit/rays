@@ -523,3 +523,122 @@ mod tests {
         assert_eq!(rewrite(&rule, "é"), Some(vec![0xa9, 0xc3]));
     }
 }
+
+#[cfg(test)]
+mod sources_tests {
+    //! Port of the `patterns` section of lib/rdk/test_rdk_sources.ml. The OCaml minor-heap
+    //! (ocamlopt 5.3.0 arm64 clobbered class bit) regression has no Rust counterpart.
+    use super::*;
+
+    fn reference_glob(glob: &[u8], name: &[u8]) -> bool {
+        let (gl, nl) = (glob.len(), name.len());
+        let mut m = vec![vec![false; nl + 1]; gl + 1];
+        m[gl][nl] = true;
+        for g in (0..gl).rev() {
+            for n in (0..=nl).rev() {
+                m[g][n] = match glob[g] {
+                    b'*' => m[g + 1][n] || (n < nl && m[g][n + 1]),
+                    b'?' => n < nl && m[g + 1][n + 1],
+                    literal => n < nl && literal == name[n] && m[g + 1][n + 1],
+                };
+            }
+        }
+        m[0][0]
+    }
+
+    fn words(alphabet: &[u8], max_length: usize) -> Vec<String> {
+        let mut values = vec![String::new()];
+        let mut frontier = vec![String::new()];
+        for _ in 0..max_length {
+            frontier = frontier
+                .iter()
+                .flat_map(|p| alphabet.iter().map(move |&c| format!("{p}{}", c as char)))
+                .collect();
+            values.extend(frontier.iter().cloned());
+        }
+        values
+    }
+
+    fn expect_pattern(source: &str, included: &[&str], excluded: &[&str]) {
+        let pattern = compile(source).unwrap();
+        for name in included {
+            assert!(matches(&pattern, name), "attribute pattern {source:?} did not include {name:?}");
+        }
+        for name in excluded {
+            assert!(!matches(&pattern, name), "attribute pattern {source:?} did not exclude {name:?}");
+        }
+    }
+
+    #[test]
+    fn glob_terms_exclusions_classes_and_escapes() {
+        expect_pattern("", &["Cd", "N", "anything"], &[]);
+        expect_pattern("Cd pscale", &["Cd", "pscale"], &["N", "Cdx"]);
+        expect_pattern("* ^tmp* ^N Cd", &["Cd", "width"], &["N", "tmp1"]);
+        expect_pattern("^tmp* ^N N", &["Cd", "N"], &["tmp_cache"]);
+        expect_pattern(
+            "foo? value[0-2] kind[!0-9]",
+            &["foo1", "value0", "value2", "kindx"],
+            &["foo", "foooo", "value3", "kind7"],
+        );
+        expect_pattern(r"literal\* has\ space \^caret", &["literal*", "has space", "^caret"], &["literalX", "has"]);
+        for invalid in ["^", "bad\\", "[abc", "[]", "[z-a]"] {
+            assert!(compile(invalid).is_err(), "accepted malformed attribute pattern {invalid:?}");
+        }
+        let compiled = compile(r"[fa]* ^[a-b]x \[z]").unwrap();
+        assert!(matches(&compiled, "f") && matches(&compiled, "alpha") && matches(&compiled, "[z]"));
+        assert!(!matches(&compiled, "g"));
+    }
+
+    #[test]
+    fn exhaustive_glob_and_rewrite_match_the_reference() {
+        let names = words(b"ab", 5);
+        for glob in words(b"ab*?", 5).into_iter().filter(|g| !g.is_empty()) {
+            let compiled = compile(&glob).unwrap();
+            let rule = compile_rewrite(&glob, &glob).unwrap();
+            for name in &names {
+                let expected = reference_glob(glob.as_bytes(), name.as_bytes());
+                assert_eq!(matches(&compiled, name), expected, "pattern/reference disagreement for {glob:?} and {name:?}");
+                let want = expected.then(|| name.as_bytes().to_vec());
+                assert_eq!(rewrite(&rule, name), want, "rewrite/reference disagreement for {glob:?} and {name:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn rewrites_and_rewrite_sets() {
+        let expect = |source: &str, replacement: &str, name: &str, expected: Option<&str>| {
+            let rule = compile_rewrite(source, replacement).unwrap();
+            assert_eq!(
+                rewrite(&rule, name),
+                expected.map(|text| text.as_bytes().to_vec()),
+                "attribute rewrite {source:?} -> {replacement:?} failed for {name:?}"
+            );
+        };
+        expect("instance*", "my*instance", "instancepoint", Some("mypointinstance"));
+        expect("*_alpha_*", "*_beta_*", "lamp_alpha_matt", Some("lamp_beta_matt"));
+        expect("*_???", "old_???_*", "lamp_esr", Some("old_esr_lamp"));
+        expect("kind[ab]", "class?", "kinda", Some("classa"));
+        expect(r"literal\**", "escaped_*", "literal*tail", Some("escaped_tail"));
+        expect("instance*", "my*instance", "other", None);
+        for (source, replacement) in [("a*", "plain"), ("a b", "c d"), ("^a*", "b*"), ("a*", "")] {
+            assert!(compile_rewrite(source, replacement).is_err(), "accepted invalid rewrite {source:?} -> {replacement:?}");
+        }
+        let set = |source: &str, replacement: &str, name: &str, expected: Option<&str>| {
+            let rules = compile_rewrite_set(source, replacement).unwrap();
+            assert_eq!(
+                rewrite_set(&rules, name),
+                expected.map(|text| text.as_bytes().to_vec()),
+                "attribute rewrite set {source:?} -> {replacement:?} failed for {name:?}"
+            );
+        };
+        set("foo* bar? ^bar_tmp", "out* short_?", "foo_tail", Some("out_tail"));
+        set("foo* bar? ^bar_tmp", "out* short_?", "bar7", Some("short_7"));
+        set("* foo*", "all_* exact*", "foo_tail", Some("exact_tail"));
+        for (source, replacement) in [("foo* bar*", "only_*"), ("^tmp*", "renamed_*"), ("foo* ^tmp*", "one_* two_*")] {
+            assert!(
+                compile_rewrite_set(source, replacement).is_err(),
+                "accepted invalid rewrite set {source:?} -> {replacement:?}"
+            );
+        }
+    }
+}

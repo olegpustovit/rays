@@ -357,6 +357,37 @@ mod tests {
         assert_eq!(err_code(attribute_ops::blur_points(&cancelled, &g)), "cancelled");
     }
 
+    /// `lib/rdk/test_rdk_misc.ml`: the tuple planes of a float2 and a float4 attribute blur together.
+    #[test]
+    fn tuple_attributes_blur_plane_by_plane() {
+        let g = add_values(Point, "value", vec![0.0, 10.0, 0.0], &path(3));
+        let uv = attribute::Storage::Float2(packed::Float2::of_owned(vec![0.0, 10.0, 0.0], vec![2.0, 4.0, 2.0]).unwrap());
+        let color = attribute::Storage::Float4(
+            packed::Float4::of_owned(
+                vec![0.0, 1.0, 0.0],
+                vec![0.0, 2.0, 0.0],
+                vec![0.0, 3.0, 0.0],
+                vec![1.0, 1.0, 1.0],
+            )
+            .unwrap(),
+        );
+        let g = add_storage(Point, "f_uv", uv, &g);
+        let g = add_storage(Point, "f_color", color, &g);
+        let blurred = attribute_ops::blur_points(&params("f_*", 1, Mode::Laplacian(1.0)), &g).unwrap();
+        let uv = match attribute::storage(&find(Point, "f_uv", &blurred)).unwrap() {
+            attribute::Storage::Float2(values) => packed::Float2::View::view(&values),
+            _ => panic!("Attribute Blur float2 storage"),
+        };
+        let color = match attribute::storage(&find(Point, "f_color", &blurred)).unwrap() {
+            attribute::Storage::Float4(values) => packed::Float4::View::view(&values),
+            _ => panic!("Attribute Blur float4 storage"),
+        };
+        assert_eq!(uv.x.to_vec(), vec![10.0, 0.0, 10.0]);
+        assert_eq!(uv.y.to_vec(), vec![4.0, 2.0, 4.0]);
+        assert_eq!(color.z.to_vec(), vec![3.0, 0.0, 3.0]);
+        assert_eq!(color.w.to_vec(), vec![1.0, 1.0, 1.0]);
+    }
+
     #[test]
     fn blur_is_exact_across_domains() {
         let count = 5_000_i64;

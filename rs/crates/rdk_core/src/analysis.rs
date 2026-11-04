@@ -343,6 +343,51 @@ mod tests {
         assert_eq!(classes, vec![0, 1]);
         assert_eq!(count, 2);
     }
+
+    /// The rest of lib/rdk/test_connectivity.ml: unmasked point mode, the primitive sentinel,
+    /// point seams and the validation errors.
+    #[test]
+    fn modes_sentinels_point_seams_and_validation() {
+        let geometry_value = two_quads();
+        let (classes, count) = classify_connectivity(None, None, None, attribute::Owner::Point, &geometry_value).unwrap();
+        assert_eq!((classes, count), (vec![0; 6], 1), "edge-connected point connectivity");
+        let right = group::init(Some(1), group::Owner::Primitive, "right", 2, &|primitive| primitive == 1).unwrap();
+        let (classes, count) =
+            classify_connectivity(Some(&right), None, None, attribute::Owner::Primitive, &geometry_value).unwrap();
+        assert_eq!((classes, count), (vec![-1, 0], 1), "excluded primitives retain the minus-one sentinel");
+
+        let topology_value = geometry::topology(&geometry_value);
+        let index = topology_index::create(None, topology_value).unwrap();
+        let seam = |topology_value: &topology::T, index: &topology_index::T| {
+            edge_group::init(Some(1), topology_value, index, "seam", &|edge| {
+                topology_index::edge_points(index, edge).map_or(false, |points| points == (1, 4))
+            })
+            .unwrap()
+        };
+        let seams = seam(topology_value, &index);
+        let (classes, count) =
+            classify_connectivity(None, None, Some(&seams), attribute::Owner::Point, &geometry_value).unwrap();
+        assert!(classes.len() as i64 == geometry::point_count(&geometry_value) && count == 1, "point seam classification");
+
+        let code = |result: Result<(Vec<i64>, i64), error::T>| error::code(&result.unwrap_err()).to_owned();
+        let point_group = group::init(Some(1), group::Owner::Point, "points", 6, &|_| true).unwrap();
+        let wrong_length = group::init(Some(1), group::Owner::Primitive, "bad", 1, &|_| true).unwrap();
+        assert_eq!(
+            code(classify_connectivity(None, Some(&point_group), None, attribute::Owner::Primitive, &geometry_value)),
+            "invalid_connectivity"
+        );
+        assert_eq!(
+            code(classify_connectivity(Some(&wrong_length), None, None, attribute::Owner::Primitive, &geometry_value)),
+            "invalid_connectivity"
+        );
+        let unrelated = two_quads();
+        let unrelated_topology = geometry::topology(&unrelated);
+        let unrelated_seam = seam(unrelated_topology, &topology_index::create(None, unrelated_topology).unwrap());
+        assert_eq!(
+            code(classify_connectivity(None, None, Some(&unrelated_seam), attribute::Owner::Primitive, &geometry_value)),
+            "invalid_connectivity"
+        );
+    }
     #[test]
     fn signed_volume_matches_oriented_tetrahedron() {
         let topology_value = topology::polygons_owned(

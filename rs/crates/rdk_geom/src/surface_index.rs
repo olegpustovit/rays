@@ -2102,3 +2102,43 @@ mod ported_tests {
         assert_eq!(many, one, "disjoint-topology candidates differ across scheduling grains");
     }
 }
+
+#[cfg(test)]
+mod attribute_suite_tests {
+    //! The surface-index checks of lib/rdk/test_rdk_attributes.ml that lib/rdk/test_surface_index.ml
+    //! does not cover (the transfer half is ported in rdk_ops/attribute_transfer.rs).
+    use super::*;
+
+    fn single_polygon(x: Vec<f64>, y: Vec<f64>) -> geometry::T {
+        let count = x.len() as i64;
+        let positions = packed::Float3::View::of_owned_exn(x, y, vec![0.0; count as usize]).unwrap();
+        let topo = topology::polygons_owned(count, (0..count).collect(), vec![0, count]).unwrap();
+        geometry::create(positions, topo, None, None, None).unwrap()
+    }
+
+    #[test]
+    fn degenerate_tiny_concave_and_self_intersecting_polygons() {
+        let collinear = single_polygon(vec![0.0, 1.0, 2.0], vec![0.0; 3]);
+        assert_eq!(error::code(&create(None, None, None, None, None, &collinear).err().unwrap()), "invalid_surface");
+        // exact non-collinear triangle whose area underflows to a subnormal
+        let tiny = single_polygon(vec![0.0, 1e-100, 0.0], vec![0.0, 0.0, 1e-100]);
+        assert_eq!(triangle_count(&create(None, None, None, None, None, &tiny).unwrap()), 1);
+        let concave = single_polygon(vec![0.0, 2.0, 2.0, 1.0, 0.0], vec![0.0, 0.0, 2.0, 1.0, 2.0]);
+        let index = create(None, None, None, None, None, &concave).unwrap();
+        assert_eq!(triangle_count(&index), 3, "concave polygon triangle cardinality");
+        let hit = raycast(&index, rays_math::vec3::create(0.4, 1.4, 0.75), rays_math::vec3::create(0.0, 0.0, -1.0))
+            .unwrap()
+            .expect("concave polygon interior was missed");
+        assert!(hit.primitive == 0 && (hit.distance - 0.75).abs() <= 1e-14);
+        let bow_tie = single_polygon(vec![0.0, 2.0, 0.0, 2.0], vec![0.0, 2.0, 2.0, 0.0]);
+        assert_eq!(error::code(&create(None, None, None, None, None, &bow_tie).err().unwrap()), "invalid_surface");
+    }
+
+    #[test]
+    fn cancelled_construction_reports_cancelled() {
+        let token = cancel::create();
+        cancel::cancel(&token);
+        let square = single_polygon(vec![0.0, 1.0, 1.0, 0.0], vec![0.0, 0.0, 1.0, 1.0]);
+        assert_eq!(error::code(&create(Some(&token), None, None, None, None, &square).err().unwrap()), "cancelled");
+    }
+}

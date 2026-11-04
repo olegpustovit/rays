@@ -1366,4 +1366,60 @@ mod tests {
         };
         assert_eq!(failure_code(distance_from_geometry(&stopped, &source)), "cancelled");
     }
+
+    /// Remaining checks of `test_errors_cancellation_and_parallel` in lib/rdk/test_distance_from_geometry.ml
+    /// (the curve as surface reference, and one/four-domain exactness on a smaller dense fixture).
+    #[test]
+    fn distance_from_geometry_curve_reference_and_domain_exactness() {
+        let source = points_geometry(&[(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)]);
+        let curve = crate::line_geometry::polyline(
+            &crate::line_geometry::Params { closed: false },
+            &[(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)],
+        )
+        .unwrap();
+        let params = |reference: &geometry::T, kind, cancel| DistanceFromGeometryParams {
+            cancel,
+            grain: Some(257),
+            affected: None,
+            reference_selection: None,
+            reference_kind: kind,
+            falloff: SoftTransformFalloff::SoftCubic,
+            radius: DistanceAlongRadius::DistanceFixed(4.0),
+            distance_attribute: Some("distance".to_owned()),
+            mask_attribute: Some("mask".to_owned()),
+            reference: reference.clone(),
+        };
+        use DistanceFromGeometryReference::*;
+        assert_eq!(
+            failure_code(distance_from_geometry(&params(&curve, DistanceReferencePrimitives, None), &source)),
+            "invalid_distance",
+            "curve surface reference"
+        );
+        let mut row = Vec::new();
+        for j in 0..40 {
+            for i in 0..60 {
+                row.push((i as f64 * 0.33 - 10.0, 1.5, j as f64 * 0.5 - 10.0));
+            }
+        }
+        let dense = points_geometry(&row);
+        let surface = grid(24, 24, 20.0);
+        let count = geometry::point_count(&dense);
+        let affected = point_group("affected", count, &|point| point % 3 != 0);
+        for kind in [DistanceReferencePoints, DistanceReferencePrimitives] {
+            let run = |domains: i64| {
+                let slot = std::sync::Mutex::new(None);
+                parallel::run_unit(Some(domains), &|| {
+                    let mut p = params(&surface, kind, None);
+                    p.affected = Some(element_selection::T::SelectedPoints(affected.clone()));
+                    *slot.lock().unwrap() = Some(distance_from_geometry(&p, &dense).unwrap());
+                    Ok(())
+                })
+                .unwrap();
+                slot.into_inner().unwrap().unwrap()
+            };
+            let (one, four) = (run(1), run(4));
+            assert_eq!(float_attribute("distance", &one), float_attribute("distance", &four));
+            assert_eq!(float_attribute("mask", &one), float_attribute("mask", &four));
+        }
+    }
 }
