@@ -218,7 +218,7 @@ extern "C" int32_t caml_rays_metal_compute_pipeline_create_descriptor(
         return rays_metal_set_error(message, "compute-pipeline label is not valid UTF-8");
       MTLComputePipelineDescriptor *descriptor = [[MTLComputePipelineDescriptor alloc] init];
       descriptor.computeFunction = function;
-      descriptor.label = label;
+      if (label != nil) descriptor.label = label;
       MTLAutoreleasedComputePipelineReflection reflection = nil;
       NSError *error = nil;
       MTLPipelineOption options = wants_reflection
@@ -337,7 +337,7 @@ extern "C" int32_t caml_rays_metal_compiler_create_render_pipeline(
             ![compiler.device supportsTextureSampleCount:static_cast<NSUInteger>(raw_sample_count)])
           return rays_metal_set_error(message, "Metal render sample count is unsupported");
         MTL4RenderPipelineDescriptor *descriptor = [[MTL4RenderPipelineDescriptor alloc] init];
-        descriptor.label = label;
+        if (label != nil) descriptor.label = label;
         MTL4LibraryFunctionDescriptor *vertex = [[MTL4LibraryFunctionDescriptor alloc] init];
         vertex.library = library;
         vertex.name = vertex_name;

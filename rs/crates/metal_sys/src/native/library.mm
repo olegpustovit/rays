@@ -8,14 +8,14 @@ extern "C" void caml_rays_metal_free_bytes(char *bytes);
 
 static uint64_t argument_resource_device(id object, int32_t tag) {
     switch (tag) {
-        case 0: return ((__bridge id<MTLBuffer>)object).device.registryID;
-        case 1: return ((__bridge id<MTLTexture>)object).device.registryID;
-        case 2: return ((__bridge id<MTLSamplerState>)object).device.registryID;
-        case 3: return ((__bridge id<MTLAccelerationStructure>)object).device.registryID;
-        case 4: return ((__bridge id<MTLIndirectCommandBuffer>)object).device.registryID;
-        case 7: return ((__bridge id<MTLRenderPipelineState>)object).device.registryID;
-        case 8: return ((__bridge id<MTLComputePipelineState>)object).device.registryID;
-        case 9: return ((__bridge id<MTLDepthStencilState>)object).device.registryID;
+        case 0: return ((id<MTLBuffer>)object).device.registryID;
+        case 1: return ((id<MTLTexture>)object).device.registryID;
+        case 2: return ((id<MTLSamplerState>)object).device.registryID;
+        case 3: return ((id<MTLAccelerationStructure>)object).device.registryID;
+        case 4: return ((id<MTLIndirectCommandBuffer>)object).device.registryID;
+        case 7: return ((id<MTLRenderPipelineState>)object).device.registryID;
+        case 8: return ((id<MTLComputePipelineState>)object).device.registryID;
+        case 9: return ((id<MTLDepthStencilState>)object).device.registryID;
         default: return 0;
     }
 }

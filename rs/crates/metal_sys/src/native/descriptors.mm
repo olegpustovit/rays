@@ -68,7 +68,7 @@ extern "C" int32_t caml_rays_metal_sampler_create(MetalHandle *device_handle,
     else if (s->support_argument_buffers) return rays_metal_set_unavailable(message, "sampler argument-buffer support requires macOS 13 or newer");
     NSString *label = raw_label ? [NSString stringWithUTF8String:raw_label] : nil;
     if (raw_label && label == nil) return rays_metal_set_error(message, "sampler label is not valid UTF-8");
-    descriptor.label = label;
+    if (label != nil) descriptor.label = label;
     id<MTLSamplerState> sampler = [device newSamplerStateWithDescriptor:descriptor];
     if (sampler == nil || sampler.device.registryID != device.registryID) return rays_metal_set_error(message, "Metal rejected the sampler descriptor");
     *output = rays_metal_handle_new((__bridge void *)sampler, KIND_SAMPLER);
@@ -101,7 +101,7 @@ extern "C" int32_t caml_rays_metal_depth_stencil_create(MetalHandle *device_hand
     if (s->has_back_face_stencil) { descriptor.backFaceStencil = make_face(s->back_face_stencil); if (descriptor.backFaceStencil == nil) return rays_metal_set_error(message, "invalid back stencil descriptor"); }
     NSString *label = raw_label ? [NSString stringWithUTF8String:raw_label] : nil;
     if (raw_label && label == nil) return rays_metal_set_error(message, "depth/stencil label is not valid UTF-8");
-    descriptor.label = label;
+    if (label != nil) descriptor.label = label;
     id<MTLDepthStencilState> state = [device newDepthStencilStateWithDescriptor:descriptor];
     if (state == nil || state.device.registryID != device.registryID) return rays_metal_set_error(message, "Metal rejected the depth/stencil descriptor");
     *output = rays_metal_handle_new((__bridge void *)state, KIND_DEPTH_STENCIL);

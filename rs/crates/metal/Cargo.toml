@@ -7,3 +7,8 @@ license.workspace = true
 [dependencies]
 metal_sys = { path = "../metal_sys" }
 native_layer_token = { path = "../native_layer_token" }
+
+# Metal handles are main-thread only and the tests count process-wide handles: their own main runs them.
+[[test]]
+name = "gpu_metal"
+harness = false
