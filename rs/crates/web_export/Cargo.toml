@@ -1,0 +1,23 @@
+[package]
+name = "web_export"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+flow_syntax = { path = "../flow_syntax" }
+flow_check = { path = "../flow_check" }
+flow_eval = { path = "../flow_eval" }
+flow_ir = { path = "../flow_ir" }
+flow_web = { path = "../flow_web" }
+flow_shader = { path = "../flow_shader" }
+flow_sop = { path = "../flow_sop" }
+editor_document = { path = "../editor_document" }
+sop = { path = "../sop" }
+input = { path = "../input" }
+param = { path = "../param" }
+scene_command = { path = "../scene_command" }
+sdl3_image = { path = "../sdl3_image" }
+rays_diagnostic = { path = "../rays_diagnostic" }
+
+

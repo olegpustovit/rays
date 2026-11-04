@@ -1,0 +1,13 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>audio</title>
+<style>html, body { margin: 0; height: 100%; background: #080a10; } canvas { display: block; width: 100%; height: 100%; }</style>
+<!-- This page needs cross-origin isolation (Cross-Origin-Opener-Policy: same-origin and
+     Cross-Origin-Embedder-Policy: require-corp) for its worker pool; `npx serve DIR` sends them from serve.json. -->
+<canvas id="canvas"></canvas>
+<script type="module">
+import { start } from "./runtime/runtime.js";
+import * as program from "./program.js";
+const data = await (await fetch("data.bin")).arrayBuffer();
+await start(document.getElementById("canvas"), program, { data });
+</script>
