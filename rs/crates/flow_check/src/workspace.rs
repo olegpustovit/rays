@@ -214,9 +214,6 @@ fn marker(path: &[String], name: &str) -> Path {
 
 fn num_param(source: &str) -> Option<param::Value> {
     let number = syntax::number_value(source)?;
-    if !number.is_finite() {
-        return None;
-    }
     if !source.contains('.') && !source.contains('e') && !source.contains('E') {
         if let Ok(value) = source.parse::<i64>() {
             const MIN: i64 = -(1_i64 << 62);
@@ -2293,7 +2290,62 @@ impl Checker {
      v.approx = kind == HofKind::Map && packed_array(&out) && inputs_fit && lists.iter().all(|(_, _, l)| packed_array(&l.ty)) && eligible;
      (make_term(x, out, Node::Hof(kind, terms)), v)
  }
- fn iterate(&mut self,cx:&Cx,f:&Syntax,forms:&[Syntax])->(Term,Info){if forms.len()!=3&&forms.len()!=5{return self.fail_term(f,"E_ARITY","iterate is (iterate n init (fn [x] body)) with optional :until.")}let(n,nv)=self.input(cx,&forms[0],"0");if !ty::fits(&nv.ty,&Ty::Int)&&nv.ty!=Ty::Any{self.error(&forms[0],"E_TYPE","iterate's count is an int.")}let(init,iv)=self.input(cx,&forms[1],"1");let(ft,fv)=self.fn_value(cx,&forms[2],"iterate");let arg=Arg{key:None,form:forms[1].clone(),term:init.clone(),info:iv.clone()};let(body,bv)=self.apply_callable(cx,f,&fv,std::slice::from_ref(&arg));if !ty::fits(&bv.ty,&iv.ty){self.error(f,"E_TYPE","iterate's function returns the input type.")}let mut terms=vec![ft,init,n];let mut vs=vec![nv,iv.clone(),fv,bv.clone()];if forms.len()==5{if !matches!(&forms[3].node,SNode::Kw(k) if k=="until"){self.error(&forms[3],"E_ARGS","iterate's optional clause is :until.")}let(gt,gv)=self.fn_value(cx,&forms[4],"iterate :until");let next=Arg{key:None,form:forms[1].clone(),term:body,info:bv.clone()};let(_,uv)=self.apply_callable(cx,f,&gv,&[arg,next]);if !ty::fits(&uv.ty,&Ty::Bool){self.error(&forms[4],"E_TYPE","iterate's :until returns bool.")}terms.push(gt);vs.push(gv);vs.push(uv)}let out=ty::join(&iv.ty,&bv.ty).unwrap_or(iv.ty);if shape_ty(&out){self.error(f,"E_ARRAY_TYPE","iterate carries data; it cannot create graph nodes.")}self.add_root(f,cx.path.clone(),Some(err("E_GPU_FORM","GPU kernels require collecting maps.".into(),Some(f.span.clone()))));let mut v=Info::derive(out.clone(),&vs);v.packed.insert(cx.path.clone());(make_term(f,out,Node::Hof(HofKind::Iterate,terms)),v)}
+ fn iterate(&mut self, cx: &Cx, f: &Syntax, forms: &[Syntax]) -> (Term, Info) {
+     let until_form = match forms {
+         [_, _, _] => None,
+         [_, _, _, k, g] if matches!(&k.node, SNode::Kw(k) if k == "until") => Some(g),
+         _ => return self.fail_term(f, "E_ARITY", "iterate is (iterate n init (fn [x] body)) with an optional :until (fn [prev next] bool)."),
+     };
+     let (n_form, init_form, f_form) = (&forms[0], &forms[1], &forms[2]);
+     let (nt, nv) = self.input(cx, n_form, "0");
+     if !ty::fits(&nv.ty, &Ty::Int) && nv.ty != Ty::Any {
+         self.error(n_form, "E_TYPE", &format!("iterate's count is an int; got {}.", show(&nv.ty)));
+     }
+     let (it, iv) = self.input(cx, init_form, "1");
+     self.no_fn(f, &iv.ty, "The iterate value");
+     let fn_term = |s: &mut Self, key: &str, form: &Syntax| if syntax::head(form) == Some("fn") { s.input(cx, form, key) } else { s.fn_value(cx, form, "iterate") };
+     let (ft, fv) = fn_term(self, "2", f_form);
+     let plain = |v: &Info| { let mut v = v.clone(); v.live_len = false; v.len = None; v.callable = None; v };
+     let arg_iv = self.value_arg(f, &plain(&iv));
+     let (result, rv) = self.apply_callable(cx, f, &fv, std::slice::from_ref(&arg_iv));
+     self.no_fn(f, &rv.ty, "The iterate result");
+     if !ty::fits(&rv.ty, &iv.ty) {
+         self.error(f, "E_TYPE", &format!("iterate's function must return the value type {}; it returns {}.", show(&iv.ty), show(&rv.ty)));
+     }
+     let ty = ty::join(&iv.ty, &rv.ty).unwrap_or(iv.ty.clone());
+     if shape_ty(&ty) { self.error(f, "E_ARRAY_TYPE", "iterate carries data; it cannot create graph nodes."); }
+     let ft = match fv.callable.as_deref() {
+         Some(Callable::Op(_) | Callable::Kind(_)) => ft,
+         _ => self.instantiate_fn(cx, &Arg { key: None, form: f_form.clone(), term: ft, info: fv.clone() }, &FnSignature { params: vec![iv.ty.clone()], result: rv.ty.clone() }, false).term,
+     };
+     let until = until_form.map(|g| {
+         let (gt, gv) = fn_term(self, ":until", g);
+         let arg_rv = self.value_arg(f, &plain(&rv));
+         let (_, uv) = self.apply_callable(cx, f, &gv, &[arg_iv.clone(), arg_rv]);
+         if !ty::fits(&uv.ty, &Ty::Bool) { self.error(g, "E_TYPE", &format!("iterate's :until returns bool; it returns {}.", show(&uv.ty))); }
+         let gt = match gv.callable.as_deref() {
+             Some(Callable::Op(_) | Callable::Kind(_)) => gt,
+             _ => self.instantiate_fn(cx, &Arg { key: None, form: g.clone(), term: gt, info: gv.clone() }, &FnSignature { params: vec![iv.ty.clone(), rv.ty.clone()], result: Ty::Bool }, false).term,
+         };
+         (gt, gv, uv)
+     });
+     let specialized = match &result.node { Node::CallFn { body: Some(body), .. } => (**body).clone(), _ => result.clone() };
+     let mut vals = vec![fv.clone(), rv.clone(), iv.clone(), nv.clone()];
+     if let Some((_, gv, uv)) = &until { vals.push(gv.clone()); vals.push(uv.clone()); }
+     let mut v = Info::derive(ty.clone(), &vals);
+     self.add_root(f, cx.path.clone(), Some(err("E_GPU_FORM", "GPU kernels require collecting maps.".into(), Some(f.span.clone()))));
+     self.link_body(&specialized, &cx.path);
+     match fv.callable.as_deref() {
+         Some(Callable::Local(c)) => { let cid = c.path.clone(); self.link_path(cid, &cx.path); }
+         Some(Callable::Def(def)) => self.link_path(vec![format!("def:{def}")], &cx.path),
+         _ => (),
+     }
+     let mut terms = vec![ft, it, nt];
+     if let Some((gt, _, _)) = &until { terms.push(gt.clone()); }
+     v.live_len = false;
+     v.packed = [cx.path.clone()].into_iter().collect();
+     (make_term(f, ty, Node::Hof(HofKind::Iterate, terms)), v)
+ }
  fn need(&mut self, a: &Arg, what: &str, want: &Ty) -> bool {
      if ty::fits(&a.info.ty, want) || (a.info.ty == Ty::Fn(None) && a.info.callable.is_none() && matches!(want, Ty::Fn(_))) { return true; }
      self.error(&a.form, "E_TYPE", &format!("{what}: expected {}, got {}.", show(want), show(&a.info.ty)));

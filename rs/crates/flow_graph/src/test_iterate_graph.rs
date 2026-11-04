@@ -9,11 +9,6 @@ use flow_syntax::ty::Ty;
 fn first(v: &Value) -> f64 {
     match v {
         Value::Float_array(a) => a[0],
-        // flow_eval sometimes (run to run) hands back the same numbers as a List; the OCaml always packs them
-        Value::List(l) => match l.first() {
-            Some(Value::Float(f)) => *f,
-            _ => panic!("not a float array: {:?}", v),
-        },
         _ => panic!("not a float array: {:?}", v),
     }
 }

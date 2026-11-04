@@ -411,7 +411,7 @@ fn constant_vector_constructors_match_element_builder_bits() {
     }
 }
 
-fn capture(f: impl FnOnce() -> Result<Value, Diagnostic>) -> Result<Value, (String, String)> { f().map_err(|d| (d.code, d.message)) }
+fn capture(f: &dyn Fn() -> Result<Value, Diagnostic>) -> Result<Value, (String, String)> { f().map_err(|d| (d.code, d.message)) }
 
 #[test]
 fn constant_array_descriptors_match_dense_constructor_errors() {
@@ -419,8 +419,8 @@ fn constant_array_descriptors_match_dense_constructor_errors() {
         let o = find(name, context::value());
         for count in [0i64, 1, 7, -1] {
             let args = vec![na("count", Value::Int(count)), na("value", fill.clone())];
-            let actual = capture(|| op::constant_array_descriptor(name, &args));
-            let expected = capture(|| (o.body)(&input::at_time(0.), &no_node, &args));
+            let actual = capture(&|| op::constant_array_descriptor(name, &args));
+            let expected = capture(&|| (o.body)(&input::at_time(0.), &no_node, &args));
             match (actual, expected) {
                 (Err(a), Err(b)) => assert_eq!(a, b),
                 (Ok(Value::Source(_, ty, f)), Ok(data)) => {
@@ -433,8 +433,8 @@ fn constant_array_descriptors_match_dense_constructor_errors() {
         }
         for fill in [t("wrong"), Value::Float(f64::NAN)] {
             let args = vec![na("count", Value::Int(1)), na("value", fill)];
-            let actual = capture(|| op::constant_array_descriptor(name, &args));
-            let expected = capture(|| (o.body)(&input::at_time(0.), &no_node, &args));
+            let actual = capture(&|| op::constant_array_descriptor(name, &args));
+            let expected = capture(&|| (o.body)(&input::at_time(0.), &no_node, &args));
             assert!(expected.is_err());
             assert_eq!(actual, expected);
         }
@@ -443,16 +443,16 @@ fn constant_array_descriptors_match_dense_constructor_errors() {
     for count in [max_floatarray_length / 4 + 1] {
         let args = vec![na("count", Value::Int(count)), na("value", t("unused"))];
         let o = find("array/vec4", context::value());
-        let expected = capture(|| (o.body)(&input::at_time(0.), &no_node, &args));
+        let expected = capture(&|| (o.body)(&input::at_time(0.), &no_node, &args));
         assert!(expected.is_err());
-        assert_eq!(capture(|| op::constant_array_descriptor("array/vec4", &args)), expected);
+        assert_eq!(capture(&|| op::constant_array_descriptor("array/vec4", &args)), expected);
     }
     match op::constant_array_descriptor("array/vec4", &[na("count", Value::Int(0)), na("value", t("unused"))]) {
         Ok(Value::Source(_, _, f)) => assert_eq!(f, vec![na("count", Value::Int(0)), na("value", Value::Vec4(0., 0., 0., 0.))]),
         other => panic!("{other:?}"),
     }
     for args in [vec![], vec![na("count", Value::Int(1)), na("count", Value::Int(1))], vec![na("count", Value::Int(1)), na("extra", Value::Int(0))]] {
-        match capture(|| op::constant_array_descriptor("array/vec4", &args)) { Err((c, _)) => assert_eq!(c, "E_ARRAY_TYPE"), other => panic!("{other:?}") }
+        match capture(&|| op::constant_array_descriptor("array/vec4", &args)) { Err((c, _)) => assert_eq!(c, "E_ARRAY_TYPE"), other => panic!("{other:?}") }
     }
 }
 

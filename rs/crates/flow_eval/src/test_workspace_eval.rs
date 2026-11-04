@@ -46,14 +46,14 @@ pub fn err(src: &str, code: &str, text: &str) {
     }
 }
 pub fn records(src: &str, time: f64) -> Records { run_rec(&check(src), time).records }
-pub fn recs<'a>(rs: &'a Records, path: &[&str]) -> &'a Vec<(Vec<i64>, Value)> {
+pub fn recs(rs: &Records, path: &[&str]) -> Vec<(Vec<i64>, Value)> {
     let p: Vec<String> = path.iter().map(|s| s.to_string()).collect();
-    &rs.iter().find(|(q, _)| *q == p).unwrap_or_else(|| panic!("no records at {}", path.join("/"))).1
+    rs.iter().find(|(q, _)| *q == p).unwrap_or_else(|| panic!("no records at {}", path.join("/"))).1.clone()
 }
 pub fn first_at(rs: &Records, path: &[&str]) -> Value { recs(rs, path)[0].1.clone() }
 pub fn bound(src: &str, name: &str) -> Value { first_at(&records(src, 0.), &["g", name]) }
-pub fn nodes_of<'a>(r: &'a Eval, kind: &str) -> Vec<&'a Node> { r.plan.nodes.iter().filter(|n| n.kind == kind).collect() }
-pub fn count_of(r: &Eval, kind: &str) -> usize { nodes_of(r, kind).len() }
+pub trait PlanNodes { fn nodes_of(&self, kind: &str) -> Vec<&Node>; }impl PlanNodes for Eval { fn nodes_of(&self, kind: &str) -> Vec<&Node> { self.plan.nodes.iter().filter(|n| n.kind == kind).collect() } }
+pub fn count_of(r: &Eval, kind: &str) -> usize { r.nodes_of(kind).len() }
 fn p(parts: &[&str]) -> Vec<String> { parts.iter().map(|s| s.to_string()).collect() }
 
 fn walk(f: &mut dyn FnMut(&W::Term), x: &W::Term) {
@@ -193,15 +193,15 @@ fn function_values() {
     }
     let ws = check("(workspace w\n      (defmacro panel [color]\n        `(draw/image (image/map (fn [uv#] ~color) :width 2 :height 2)))\n      (graph g :context draw\n        (draw/merge (panel [1 0 0 1]) (panel [0 1 0 1]) (panel [0 0 1 1]))))");
     let evaluated = static_rec(&ws);
-    let images = nodes_of(&evaluated, "image/map");
+    let images = evaluated.nodes_of("image/map");
     let sites = images.iter().map(|n| (n.inst, n.site.clone(), n.iter.clone())).collect::<BTreeSet<_>>();
     assert!(images.len() == 3 && sites.len() == 3);
     let ws = check(&sop("(let* [cs (map (fn [x] (sop/box :size x)) (list 1 2))] (sop/merge cs))"));
     assert!(ty_at(&ws, &["g", "cs"]) == "list:geometry" && ty_at(&ws, &["g", "cs#0", "@result"]) == "geometry");
     let r = run_ws(&check(&sop("(let* [mk (fn [r] (sop/box :size r)) cs (map mk (list 0.1 0.2 0.3))] (sop/merge cs))")), 0.);
-    assert_eq!(nodes_of(&r, "sop/box").iter().map(|n| (n.site.clone(), n.iter.clone())).collect::<Vec<_>>(), (0..3).map(|k| (p(&["g", "mk", "@result"]), vec![k])).collect::<Vec<_>>());
+    assert_eq!(r.nodes_of("sop/box").iter().map(|n| (n.site.clone(), n.iter.clone())).collect::<Vec<_>>(), (0..3).map(|k| (p(&["g", "mk", "@result"]), vec![k])).collect::<Vec<_>>());
     let r = run_ws(&check(&sop("(let* [unused (list (count (map (fn [x] (sop/box :size x)) (list 0.1))) (count (map (fn [x] (sop/box :size x)) (list 0.2))))] (sop/box))")), 0.);
-    let sites = nodes_of(&r, "sop/box").iter().map(|n| (n.site.clone(), n.iter.clone())).collect::<Vec<_>>();
+    let sites = r.nodes_of("sop/box").iter().map(|n| (n.site.clone(), n.iter.clone())).collect::<Vec<_>>();
     assert!(sites.len() == 3 && sites.iter().collect::<BTreeSet<_>>().len() == 3);
     is("(workspace w (defn twice :context value [(x : float)] (* x 2)) (graph g :context value (+ (reduce + 0 (map twice (list 1 2 3))) (first (map sin (list 0))))))", Value::Int(12));
     is(&value("(reduce + 0 (list 0.5 0.25))"), Value::Float(0.75));
@@ -209,7 +209,7 @@ fn function_values() {
     let r = run_ws(&check(&format!("(workspace w {ring} (defn mark :context sop [(i : int)] (sop/box :size (* 0.1 (+ i 1)))) (graph g :context sop (sop/merge (ring :n 3 :make mark) (let* [mk (fn [i] (sop/box))] (ring :n 2 :make mk)))))")), 0.);
     assert!(count_of(&r, "sop/box") == 5 && count_of(&r, "sop/merge") == 3);
     // the two ring call sites are distinct subtrees; mk's two calls are iterations 0 and 1
-    let mut iters = nodes_of(&r, "sop/box").iter().map(|n| n.iter.clone()).collect::<Vec<_>>();
+    let mut iters = r.nodes_of("sop/box").iter().map(|n| n.iter.clone()).collect::<Vec<_>>();
     iters.sort();
     assert_eq!(iters, vec![vec![0], vec![0], vec![1], vec![1], vec![2]]);
     is("(workspace w (defn tot :context value [(xs : (list float)) (r : {:k float})] (* r.k (reduce + 0 xs))) (graph g :context value (tot (list 1 2) {:k 2 :extra 1})))", Value::Int(6));
@@ -267,7 +267,7 @@ fn records_literal_get_assoc() {
     let _ = (good, bad_text, run_in);
 }
 
-fn arg_of<'a>(n: &'a Node, k: &str) -> &'a Value { &n.args.iter().find(|(name, _)| name == k).unwrap_or_else(|| panic!("no arg {k}")).1 }
+trait NodeArgs { fn arg_of(&self, k: &str) -> &Value; }impl NodeArgs for Node { fn arg_of(&self, k: &str) -> &Value { &self.args.iter().find(|(name, _)| name == k).unwrap_or_else(|| panic!("no arg {k}")).1 } }
 
 #[test]
 fn records_values_and_accumulators() {
@@ -285,8 +285,8 @@ fn cond_case_str_macros_bypass() {
     is(&value("(case true false 1 true 2 :else 0)"), Value::Int(2));
     assert_eq!(bound(&value("(let* [s (str \"a\" 1 2.5 true [1 2 3] 1.23456 (list 1 2) {:a 1} (/ 1 3))] 1)"), "s"), t("a12.5true[1 2 3]1.2346[1 2]{:a 1}0.3333"));
     let r = run_ws(&check(&sop("(sop/blast (sop/group_bounds (sop/box) :name (str \"floor_\" 2)) :group (str \"floor_\" 2))")), 0.);
-    assert_eq!(*arg_of(nodes_of(&r, "sop/blast")[0], "group"), t("floor_2"));
-    assert_eq!(*arg_of(nodes_of(&r, "sop/group_bounds")[0], "name"), t("floor_2"));
+    assert_eq!(*(r.nodes_of("sop/blast")[0]).arg_of("group"), t("floor_2"));
+    assert_eq!(*(r.nodes_of("sop/group_bounds")[0]).arg_of("name"), t("floor_2"));
     let radial = "(defmacro radial [i n body] `(sop/merge (for [~i (range ~n)] (sop/transform ~body :rotate [0 (* (/ ~i ~n) 6.2832) 0]))))";
     let r = run_rec(&check(&format!("(workspace w {radial} (graph g :context sop (let* [ring (radial k 12 (sop/box :size (+ 0.1 (* k 0.01))))] ring)))")), 0.);
     assert_eq!(count_of(&r, "sop/transform"), 12);
@@ -321,7 +321,7 @@ fn live_values_and_the_split_evaluation() {
     let ws = check(&sop("(let* [n 5] (sop/merge (for [i (range n)] (sop/box :size 0.1 :center [(+ i (sin t)) 0 0]))))"));
     let (a, b) = (run_ws(&ws, 0.), run_ws(&ws, 1.2));
     assert!(count_of(&a, "sop/box") == 5 && count_of(&b, "sop/box") == 5);
-    let centre = |r: &Eval| arg_of(nodes_of(r, "sop/box")[2], "center").clone();
+    let centre = |r: &Eval| (r.nodes_of("sop/box")[2]).arg_of("center").clone();
     assert!(centre(&a) == Value::Vec3(2., 0., 0.) && centre(&b) != centre(&a));
     let ws = check(&std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../sketches/ws_orrery.rays")).unwrap());
     let n = |time: f64| run_ws(&ws, time).plan.nodes.len();
@@ -330,18 +330,22 @@ fn live_values_and_the_split_evaluation() {
 
 #[test]
 fn residuals_force_by_time() {
+    // the 40-deep shared chain recurses deeply in a debug build (like the OCaml native stack, not the default 2 MB test thread)
+    std::thread::Builder::new().stack_size(64 << 20).spawn(residuals_force_by_time_body).unwrap().join().unwrap();
+}
+fn residuals_force_by_time_body() {
     let ws = check(&sop("(let* [a (sop/box) s (* t 2) b (sop/transform a :translate [s 0 0] :uniform_scale 2)] b)"));
     let r = static_ws(&ws);
-    let n = nodes_of(&r, "sop/transform")[0];
-    match (arg_of(n, "translate"), arg_of(n, "uniform_scale")) {
+    let n = r.nodes_of("sop/transform")[0];
+    match ((n).arg_of("translate"), (n).arg_of("uniform_scale")) {
         (Value::Residual(res), Value::Int(2)) => {
-            assert!(is_live(arg_of(n, "translate")));
+            assert!(is_live((n).arg_of("translate")));
             assert_eq!(residual_eval(*res, &input::at_time(3.), None), Ok(Value::Vec3(6., 0., 0.)));
             assert_eq!(residual_eval(*res, &input::at_time(0.5), None), Ok(Value::Vec3(1., 0., 0.)));
         }
         _ => panic!("translate is not a residual"),
     }
-    assert_eq!(force(arg_of(n, "translate"), &input::at_time(1.), None), Ok(Value::Vec3(2., 0., 0.)));
+    assert_eq!(force((n).arg_of("translate"), &input::at_time(1.), None), Ok(Value::Vec3(2., 0., 0.)));
     assert_eq!(force(&Value::Int(4), &input::at_time(1.), None), Ok(Value::Int(4)));
     let at = |src: &str, time: f64| g_value_at(src, time);
     let live_of = |src: &str| result(&static_ws(&check(src)), "g");
@@ -383,7 +387,7 @@ fn named_arguments_and_residual_capture() {
     }
     let source = sop(&format!("(sop/merge {})", (0..17).map(|i| format!("(sop/box :center [{i} 0 0])")).collect::<Vec<_>>().join(" ")));
     let evaluation = static_ws(&check(&source));
-    let nodes = nodes_of(&evaluation, "sop/box");
+    let nodes = evaluation.nodes_of("sop/box");
     assert_eq!(nodes.len(), 17);
     let keys = nodes.iter().map(|n| (n.inst, n.site.clone(), n.iter.clone())).collect::<BTreeSet<_>>();
     assert_eq!(keys.len(), 17);
@@ -487,7 +491,7 @@ fn l2_l4_l5_product_order_empty_results_ints() {
     is(&value("(count (for [i (range 0)] i))"), Value::Int(0));
     let r = run_ws(&check(&sop("(sop/merge (for [i (range 0)] (sop/box)))")), 0.);
     // merge of nothing: one merge node with no inputs
-    assert!(count_of(&r, "sop/merge") == 1 && nodes_of(&r, "sop/merge")[0].args.is_empty());
+    assert!(count_of(&r, "sop/merge") == 1 && r.nodes_of("sop/merge")[0].args.is_empty());
     assert_eq!(bound(&value("(let* [z (range 3)] 1)"), "z"), ints(&[0, 1, 2]));
     assert_eq!(bound(&value("(let* [z (linspace 0 1 3)] 1)"), "z"), Value::List(vec![Value::Float(0.), Value::Float(0.5), Value::Float(1.)]));
     assert_eq!(bound(&value("(let* [z (linspace 2 5 1)] 1)"), "z"), Value::List(vec![Value::Float(2.)]));
@@ -512,9 +516,9 @@ fn l6_l14_accumulators_and_ref_overrides() {
     let r = static_ws(&ws);
     // a with its default, a with n=3
     assert_eq!(r.plan.instances.len(), 3);
-    assert_eq!(nodes_of(&r, "sop/box").iter().map(|n| n.inst).collect::<Vec<_>>(), vec![0, 2]);
+    assert_eq!(r.nodes_of("sop/box").iter().map(|n| n.inst).collect::<Vec<_>>(), vec![0, 2]);
     // the two refs with the same tuple wire the same node
-    let merge = nodes_of(&r, "sop/merge")[0];
+    let merge = r.nodes_of("sop/merge")[0];
     let ids = merge.args.iter().map(|(_, v)| match v { Value::Deferred(Ty::Named(n), id) if n == "geometry" => *id, o => panic!("merge inputs: {o:?}") }).collect::<Vec<_>>();
     assert!(ids.len() == 4 && ids[0] == ids[3] && ids[1] == ids[2] && ids[0] != ids[1]);
     let ws = check("(workspace w (graph g :context value [(n : float 2)] (* n 3)))");
@@ -540,14 +544,14 @@ fn w5_records_are_bounded() {
 fn wave_curves_carry_live_points() {
     let ws = check(&std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../sketches/ws_wave.rays")).unwrap());
     let s = static_ws(&ws);
-    let curves = nodes_of(&s, "sop/curve");
+    let curves = s.nodes_of("sop/curve");
     assert_eq!(curves.len(), 6);
-    match arg_of(curves[0], "points") {
+    match (curves[0]).arg_of("points") {
         Value::List(pts) => assert!(pts.len() == 90 && is_live(&Value::List(pts.clone()))),
         _ => panic!("points"),
     }
     let r = run_ws(&ws, 0.5);
-    match arg_of(nodes_of(&r, "sop/curve")[0], "points") {
+    match (r.nodes_of("sop/curve")[0]).arg_of("points") {
         Value::List(pts) => assert!(pts.iter().all(|p| matches!(p, Value::Vec3(..)))),
         _ => panic!("points"),
     }
@@ -557,13 +561,13 @@ fn wave_curves_carry_live_points() {
 fn w8_for_over_point_list_is_a_zone_node() {
     let ws = check(&sop("(let* [g (sop/grid) spots (sop/scatter g :count 5 :seed 3) dot (sop/box)\n      dots (for [p (sop/point_list spots :key \"id\")] (sop/transform dot :translate p))\n      result (sop/merge g dots)] result)"));
     let s = static_ws(&ws);
-    let zone = nodes_of(&s, "zone/points")[0];
-    let (lo, hi) = match (arg_of(zone, "lo"), arg_of(zone, "hi")) { (Value::Int(a), Value::Int(b)) => (*a, *b), _ => panic!("range") };
+    let zone = s.nodes_of("zone/points")[0];
+    let (lo, hi) = match ((zone).arg_of("lo"), (zone).arg_of("hi")) { (Value::Int(a), Value::Int(b)) => (*a, *b), _ => panic!("range") };
     assert_eq!(hi - lo, 1);
-    assert_eq!(*arg_of(zone, "key"), t("id"));
+    assert_eq!(*(zone).arg_of("key"), t("id"));
     // the element is a residual, forced with the element bound
-    let tr = nodes_of(&s, "sop/transform")[0];
-    let p = arg_of(tr, "translate");
+    let tr = s.nodes_of("sop/transform")[0];
+    let p = (tr).arg_of("translate");
     assert!(is_live(p));
     let key = element_key(&vec!["g".to_owned(), "dots".to_owned()]);
     match force_with(p, &input::at_time(0.), None, Some(&[(key, Value::Vec3(1., 2., 3.))]), None) {
@@ -589,11 +593,11 @@ fn l16_skip_leaves_iterations_out() {
     zs("(for [i (range 2)] (for [j (range 2)] (for [k (range 2)] :skip [[1 0 1] [0 1 0]] (+ (* 100 i) (+ (* 10 j) k)))))", Value::List(vec![Value::List(vec![ints(&[0, 1]), ints(&[11])]), Value::List(vec![ints(&[100]), ints(&[110, 111])])]));
     let all = run_ws(&check(&sop("(sop/merge (for [i (range 4)] (sop/box :size (+ 1 i))))")), 0.);
     let some = run_ws(&check(&sop("(sop/merge (for [i (range 4)] :skip [2] (sop/box :size (+ 1 i))))")), 0.);
-    let keys = |r: &Eval| nodes_of(r, "sop/box").iter().map(|n| (n.site.clone(), n.iter.clone())).collect::<Vec<_>>();
+    let keys = |r: &Eval| r.nodes_of("sop/box").iter().map(|n| (n.site.clone(), n.iter.clone())).collect::<Vec<_>>();
     assert!(count_of(&all, "sop/box") == 4 && count_of(&some, "sop/box") == 3);
     assert_eq!(keys(&some), keys(&all).into_iter().filter(|(_, it)| *it != vec![2]).collect::<Vec<_>>());
-    for n in nodes_of(&some, "sop/box") {
-        let twin = nodes_of(&all, "sop/box").into_iter().find(|m| m.site == n.site && m.iter == n.iter).unwrap();
+    for n in some.nodes_of("sop/box") {
+        let twin = all.nodes_of("sop/box").into_iter().find(|m| m.site == n.site && m.iter == n.iter).unwrap();
         assert_eq!(n.args, twin.args);
     }
     let rs = records(&value("(let* [xs (for [i (range 4)] :skip [2] (* i 2))] (count xs))"), 0.);
@@ -639,7 +643,7 @@ fn image_constructors_preserve_live_arguments() {
     ] {
         let evaluated = static_ws(&check(&format!("(workspace w (graph drawing :context draw (draw/background \"#000000\")) (graph g :context image {body}))")));
         let id = match result(&evaluated, "g") { Value::Deferred(ty_, id) if ty_ == ty::image() => id, _ => panic!("live image constructor did not create a deferred image node") };
-        let argument = arg_of(&evaluated.plan.nodes[id as usize], field).clone();
+        let argument = (&evaluated.plan.nodes[id as usize]).arg_of(field).clone();
         assert!(is_live(&argument), "{body}");
         assert_eq!(force(&argument, &input::at_time(2.), None), Ok(expected), "{body}");
     }
@@ -777,3 +781,30 @@ fn static_bulk_maps() {
     assert_eq!(*asked.lock().unwrap(), 0);
 }
 fn arc_data(v: &Value) -> std::sync::Arc<Vec<f64>> { match v { Value::Float_array(d) | Value::Vec2_array(d) | Value::Vec3_array(d) | Value::Vec4_array(d) => d.clone(), _ => panic!("packed") } }
+
+// Regression for shared evaluator state: `iterate` over a packed map must give the same packed result on every run and every thread,
+// a residual must outlive other threads' evaluations (the arena ring is per thread), and free names must not be served from a freed
+// term's address (the cache compares the term).
+#[test]
+fn evaluation_is_deterministic_across_runs_and_threads() {
+    let iterate = "(workspace w (graph g :context host (let* [seed (array/float 4 1.0) r (iterate 3 seed (fn [p] (map (fn [x] (* x 0.5)) p)))] r)))";
+    let expected = Value::Float_array(std::sync::Arc::new(vec![0.125; 4]));
+    let residual = {
+        let ws = check(&value("(let* [a t b (+ a a)] (+ b b))"));
+        match result(&static_ws(&ws), "g") { Value::Residual(id) => id, other => panic!("live value expected, got {other:?}") }
+    };
+    let threads: Vec<_> = (0..8).map(|k| {
+        let expected = expected.clone();
+        std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
+            for i in 0..40 {
+                let ws = check(iterate);
+                assert_eq!(result(&run_ws(&ws, 0.), "g"), expected, "thread {k} run {i}");
+                // churn: more arenas than the ring keeps, over terms that reuse addresses and form ids
+                let other = check(&format!("(workspace w (graph g :context host (let* [f (fn [x] (+ x (+ {i}.0 t))) m (map f (list 1.0 2.0))] m)))"));
+                assert!(matches!(result(&run_ws(&other, 1.), "g"), Value::List(_)), "thread {k} run {i}");
+            }
+        }).unwrap()
+    }).collect();
+    for thread in threads { thread.join().unwrap(); }
+    assert_eq!(residual_eval(residual, &input::at_time(2.), None), Ok(Value::Float(8.)));
+}

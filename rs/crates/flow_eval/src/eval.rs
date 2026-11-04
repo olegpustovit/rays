@@ -160,8 +160,11 @@ pub struct Eval {
 }
 pub type T = Eval;
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct StateKey { instance: i64, path: Path, iter: Vec<i64> }
+// instance, then path, then iter: the OCaml compare of the key tuple
+impl Ord for StateKey { fn cmp(&self, other: &Self) -> std::cmp::Ordering { self.instance.cmp(&other.instance).then_with(|| self.path.cmp(&other.path)).then_with(|| self.iter.cmp(&other.iter)) } }
+impl PartialOrd for StateKey { fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> { Some(self.cmp(other)) } }
 #[derive(Clone, Debug, Default)]
 struct StatePlane { source: String, frame: Option<i64>, before: BTreeMap<StateKey, Value>, next: BTreeMap<StateKey, Value>, epoch: i64 }
 #[derive(Clone, Debug, Default)]
@@ -178,8 +181,9 @@ static FREE_NAMES_CACHE: LazyLock<Mutex<HashMap<String, BTreeSet<String>>>> = La
 type Interrupt = Arc<dyn Fn() -> bool + Send + Sync>;
 static INTERRUPTS: LazyLock<Mutex<HashMap<std::thread::ThreadId, Interrupt>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 static ARENAS: LazyLock<Mutex<HashMap<i64, Weak<Mutex<Arena>>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
-// ponytail: OCaml keeps an arena alive through any value that points into it; ids here do not, so the 64 newest arenas stay alive so a value outliving its Eval still resolves. Raise or key by owner if an editor drops that many.
-static RECENT_ARENAS: LazyLock<Mutex<std::collections::VecDeque<Arc<Mutex<Arena>>>>> = LazyLock::new(|| Mutex::new(std::collections::VecDeque::new()));
+// ponytail: OCaml keeps an arena alive through any value that points into it; ids here do not, so each thread keeps its 64 newest arenas alive so a value
+// outliving its Eval still resolves.  Per thread, not global: a shared ring let unrelated threads evict an arena a test still used.  Key by owner instead if 64 is not enough.
+thread_local! { static RECENT_ARENAS: RefCell<std::collections::VecDeque<Arc<Mutex<Arena>>>> = const { RefCell::new(std::collections::VecDeque::new()) }; }
 static SOURCE_HOOK: LazyLock<RwLock<Arc<dyn Fn(&dyn Fn(i64)->Option<Node>, &Value)->Option<Value> + Send + Sync>>> = LazyLock::new(|| RwLock::new(Arc::new(|_,_|None)));
 static FACTS_HOOK: LazyLock<RwLock<Arc<dyn Fn(&dyn Fn(i64)->Option<Node>, i64)->String + Send + Sync>>> = LazyLock::new(|| RwLock::new(Arc::new(|_,_|String::new())));
 static LIVE_KERNELS_HOOK: LazyLock<RwLock<Arc<dyn Fn(&[Node])->bool + Send + Sync>>> = LazyLock::new(|| RwLock::new(Arc::new(|_|true)));
@@ -214,7 +218,7 @@ impl Arena {
             budget, fn_calls: HashMap::new(), memo: HashMap::new(), interrupt,
         }));
         ARENAS.lock().unwrap().insert(id, Arc::downgrade(&arena));
-        { let mut recent = RECENT_ARENAS.lock().unwrap(); recent.push_back(arena.clone()); if recent.len() > 64 { recent.pop_front(); } }
+        RECENT_ARENAS.with(|recent| { let mut recent = recent.borrow_mut(); recent.push_back(arena.clone()); if recent.len() > 64 { recent.pop_front(); } });
         arena
     }
 }
@@ -386,6 +390,12 @@ fn eval_error(code: &str, message: &str) -> Result<Value, Diagnostic> {
     Err(error(code, message))
 }
 fn need_time() -> Result<Value, Diagnostic> { Err(error("$NEEDS_TIME", "")) }
+fn force_res(a: &mut Arena, id: ResidualId) -> Result<Value, Diagnostic> {
+    if let Some(value) = a.memo.get(&id) { return Ok(value.clone()); }
+    let value = execute_residual(a, id)?;
+    a.memo.insert(id, value.clone());
+    Ok(value)
+}
 fn execute_residual(a: &mut Arena, id: ResidualId) -> Result<Value, Diagnostic> {
     let residual = get_res(a, id)?;
     let env = Env { values: residual.env };
@@ -416,7 +426,7 @@ fn kernel_value(a: &Arena, id: ResidualId, ty: &Ty) -> Option<Value> {
 }
 fn concrete(a: &mut Arena, value: Value) -> Result<Value, Diagnostic> {
     match value {
-        Value::Residual(id) => if a.time.is_none() { need_time() } else { execute_residual(a, id) },
+        Value::Residual(id) => if a.time.is_none() { need_time() } else { force_res(a, id) },
         Value::Source(..) | Value::Struct(_, Ty::Array(_), _) => {
             if a.time.is_none() { return need_time(); }
             resolve_source(a, &value)
@@ -1940,15 +1950,16 @@ struct HeldArray {
 static HELD_ARRAYS: LazyLock<Mutex<HashMap<usize, HeldArray>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 pub mod Device {
     use super::*;
-    pub fn add(placeholder: &Value, read: Arc<dyn Fn() -> Value + Send + Sync>) {
+    pub fn add(placeholder: &Value, read: Arc<dyn Fn() -> Value + Send + Sync>) -> Result<(), Diagnostic> {
         let data = match placeholder {
             Value::Float_array(data) | Value::Vec2_array(data) | Value::Vec3_array(data) | Value::Vec4_array(data) => data,
-            _ => panic!("Eval.Device.add expects a packed float array"),
+            _ => return Err(error("E_INVALID_ARGUMENT", "Eval.Device.add")),
         };
         let key = Arc::as_ptr(data) as usize;
         let mut held = HELD_ARRAYS.lock().unwrap();
         held.retain(|_, entry| entry.data.strong_count() != 0);
         held.insert(key, HeldArray { data: Arc::downgrade(data), read });
+        Ok(())
     }
     fn reader(data: &Arc<Vec<f64>>) -> Option<Arc<dyn Fn() -> Value + Send + Sync>> {
         if data.len() > 4 { return None; }

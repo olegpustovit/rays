@@ -112,10 +112,23 @@ fn bad(form: &Syntax, message: &str) -> Diagnostic {
     )
 }
 
-fn tagged<'a>(form: &'a Syntax, tag: &'static str) -> Result<&'a [Syntax], Diagnostic> {
+// methods, not free fns: a method's output borrows from `self` without a lifetime parameter
+trait Tags {
+    fn tagged(&self, tag: &'static str) -> Result<&[Syntax], Diagnostic>;
+    fn one(&self, tag: &'static str) -> Result<&Syntax, Diagnostic>;
+}
+impl Tags for Syntax {
+    fn tagged(&self, tag: &'static str) -> Result<&[Syntax], Diagnostic> {
+        let form = self;
     match list(form) {
         Some(items) if items.first().and_then(symbol) == Some(tag) => Ok(&items[1..]),
         _ => Err(bad(form, &format!("Expected ({tag} …) in Flow manifest"))),
+    }
+    }
+    fn one(&self, tag: &'static str) -> Result<&Syntax, Diagnostic> {
+        let form = self;
+        let fields = form.tagged(tag)?;
+        if fields.len() == 1 { Ok(&fields[0]) } else { Err(bad(form, &format!("{tag} needs one value"))) }
     }
 }
 
@@ -167,11 +180,6 @@ fn boolean(form: &Syntax) -> Result<bool, Diagnostic> {
     }
 }
 
-fn one<'a>(form: &'a Syntax, tag: &'static str) -> Result<&'a Syntax, Diagnostic> {
-    let fields = tagged(form, tag)?;
-    if fields.len() == 1 { Ok(&fields[0]) } else { Err(bad(form, &format!("{tag} needs one value"))) }
-}
-
 fn optional_integer(form: &Syntax) -> Result<Option<i64>, Diagnostic> {
     if word(form)? == "nil" { Ok(None) } else { integer(form).map(Some) }
 }
@@ -181,7 +189,7 @@ fn optional_float(form: &Syntax) -> Result<Option<f64>, Diagnostic> {
 }
 
 fn strings(form: &Syntax, tag: &'static str) -> Result<Vec<String>, Diagnostic> {
-    tagged(form, tag)?.iter().map(string).collect()
+    form.tagged(tag)?.iter().map(string).collect()
 }
 
 fn property(fields: &[Syntax], parent: &Syntax, tag: &'static str) -> Result<Syntax, Diagnostic> {
@@ -211,8 +219,8 @@ fn kind_view(form: &Syntax) -> Result<KindView, Diagnostic> {
         [head] if symbol(head) == Some("bool") => Ok(KindView::Toggle),
         [head] if symbol(head) == Some("text") => Ok(KindView::Text),
         [head, soft, hard] if symbol(head) == Some("int") || symbol(head) == Some("float") => {
-            let softs = tagged(soft, "soft")?;
-            let hards = tagged(hard, "hard")?;
+            let softs = soft.tagged("soft")?;
+            let hards = hard.tagged("hard")?;
             if softs.len() != 2 || hards.len() != 2 { return Err(bad(form, "Malformed numeric range in Flow manifest")); }
             if symbol(head) == Some("int") {
                 Ok(KindView::Integer(param::IntRange {
@@ -232,7 +240,7 @@ fn kind_view(form: &Syntax) -> Result<KindView, Diagnostic> {
 }
 
 fn field(form: &Syntax) -> Result<FieldView, Diagnostic> {
-    let values = tagged(form, "field")?;
+    let values = form.tagged("field")?;
     if values.len() < 7 { return Err(bad(form, "Malformed field in Flow manifest")); }
     let (name, label, folder, kind_form, default_form, primary_form, vec3_form) =
         (&values[0], &values[1], &values[2], &values[3], &values[4], &values[5], &values[6]);
@@ -262,14 +270,14 @@ fn field(form: &Syntax) -> Result<FieldView, Diagnostic> {
         }
     }
     let default = literal(default_form)?;
-    let vec3 = match tagged(vec3_form, "vec3")? {
+    let vec3 = match vec3_form.tagged("vec3")? {
         [] => None,
         [name, index] => Some((string(name)?, integer(index)?)),
         _ => return Err(bad(vec3_form, "Malformed Vec3 group in Flow manifest")),
     };
     Ok(FieldView {
         name: string(name)?, label: string(label)?, description, folder: strings(folder, "folder")?, impact,
-        primary: boolean(one(primary_form, "primary")?)?, unit, vec3, kind: kind_view(kind_form)?,
+        primary: boolean(primary_form.one("primary")?)?, unit, vec3, kind: kind_view(kind_form)?,
         default: default.clone(), current: default,
     })
 }
@@ -290,7 +298,7 @@ fn port_type(form: &Syntax) -> Result<PortType, Diagnostic> {
 }
 
 fn slot(form: &Syntax) -> Result<Slot, Diagnostic> {
-    let values = tagged(form, "slot")?;
+    let values = form.tagged("slot")?;
     if values.len() < 2 || values.len() > 3 { return Err(bad(form, "Malformed slot in Flow manifest")); }
     let ty = if values.len() == 2 { None } else {
         match ty::of_string(&type_name(&values[2])?) {
@@ -306,7 +314,7 @@ fn slot(form: &Syntax) -> Result<Slot, Diagnostic> {
 }
 
 fn facts(form: &Syntax) -> Result<KernelFacts, Diagnostic> {
-    let fields = tagged(form, "facts")?;
+    let fields = form.tagged("facts")?;
     let mut names = Vec::with_capacity(fields.len());
     for field in fields {
         match list(field).and_then(|items| items.first()) {
@@ -320,19 +328,19 @@ fn facts(form: &Syntax) -> Result<KernelFacts, Diagnostic> {
         return Err(bad(form, "Kernel facts require cook-mode, elementwise, exact, reads, topology and writes exactly once"));
     }
     let cook = property(fields, form, "cook-mode")?;
-    match tagged(&cook, "cook-mode")? {
+    match cook.tagged("cook-mode")? {
         [mode] if ["generator", "generic"].contains(&word(mode)?.as_str()) => (),
         [mode, index] if ["duplicate-input", "in-place", "instance-input", "passthrough"].contains(&word(mode)?.as_str()) && integer(index)? >= 0 => (),
         _ => return Err(bad(form, "Invalid cook mode in kernel facts")),
     }
     let elements_form = property(fields, form, "elementwise")?;
-    let elements = word(one(&elements_form, "elementwise")?)?;
+    let elements = word(elements_form.one("elementwise")?)?;
     let elementwise = match elements.as_str() {
         "points" => KernelElements::Points, "primitives" => KernelElements::Primitives,
         "none" => KernelElements::Irregular, _ => return Err(bad(form, "Invalid elementwise class in kernel facts")),
     };
     let topology_form = property(fields, form, "topology")?;
-    let topology = word(one(&topology_form, "topology")?)?;
+    let topology = word(topology_form.one("topology")?)?;
     let preserves_topology = match topology.as_str() {
         "preserved" => true, "changed" => false, _ => return Err(bad(form, "Invalid topology class in kernel facts")),
     };
@@ -346,22 +354,22 @@ fn facts(form: &Syntax) -> Result<KernelFacts, Diagnostic> {
     let exact_form = property(fields, form, "exact")?;
     Ok(KernelFacts {
         elementwise, reads, writes, preserves_topology,
-        exact: boolean(one(&exact_form, "exact")?)?,
+        exact: boolean(exact_form.one("exact")?)?,
     })
 }
 
 fn kind(form: &Syntax) -> Result<Kind, Diagnostic> {
-    let values = tagged(form, "kind")?;
+    let values = form.tagged("kind")?;
     if values.is_empty() { return Err(bad(form, "Malformed kind in Flow manifest")); }
     let qualified = string(&values[0])?;
     let properties = &values[1..];
     let get = |tag: &'static str| property(properties, form, tag);
     let key_form = get("key")?;
-    let key = string(one(&key_form, "key")?)?;
+    let key = string(key_form.one("key")?)?;
     let operation_form = get("operation")?;
-    let _operation = string(one(&operation_form, "operation")?)?;
+    let _operation = string(operation_form.one("operation")?)?;
     let label_form = get("label")?;
-    let _label = string(one(&label_form, "label")?)?;
+    let _label = string(label_form.one("label")?)?;
     let category_form = get("category")?;
     let _category = strings(&category_form, "category")?;
     let facts_forms: Vec<&Syntax> = properties.iter().filter(|item| list(item).and_then(|xs| xs.first()).and_then(symbol) == Some("facts")).collect();
@@ -369,9 +377,9 @@ fn kind(form: &Syntax) -> Result<Kind, Diagnostic> {
         [] => None, [value] => Some(facts(value)?), _ => return Err(bad(form, "Duplicate kernel facts")),
     };
     let slots_form = get("slots")?;
-    let slots: Vec<Slot> = tagged(&slots_form, "slots")?.iter().map(slot).collect::<Result<_, _>>()?;
+    let slots: Vec<Slot> = slots_form.tagged("slots")?.iter().map(slot).collect::<Result<_, _>>()?;
     let fields_form = get("fields")?;
-    let fields: Vec<FieldView> = tagged(&fields_form, "fields")?.iter().map(field).collect::<Result<_, _>>()?;
+    let fields: Vec<FieldView> = fields_form.tagged("fields")?.iter().map(field).collect::<Result<_, _>>()?;
     let keyword_forms: Vec<&Syntax> = properties.iter().filter(|item| list(item).and_then(|xs| xs.first()).and_then(symbol) == Some("keyword-inputs")).collect();
     let keywords = match keyword_forms.as_slice() {
         [] => Vec::new(), [value] => strings(value, "keyword-inputs")?, _ => return Err(bad(form, "Duplicate keyword inputs")),
@@ -395,8 +403,8 @@ fn kind(form: &Syntax) -> Result<Kind, Diagnostic> {
     if parameters.iter().any(|parameter| keywords.contains(&parameter.name)) { return Err(bad(form, "Keyword input clashes with a scalar parameter")); }
     let mut outputs = Vec::new();
     let outputs_form = get("outputs")?;
-    for output in tagged(&outputs_form, "outputs")? {
-        match tagged(output, "output")? {
+    for output in outputs_form.tagged("outputs")? {
+        match output.tagged("output")? {
             [name, ty] => outputs.push((string(name)?, port_type(ty)?)),
             _ => return Err(bad(output, "Malformed output in Flow manifest")),
         }
@@ -419,19 +427,19 @@ pub fn catalog_of_manifest(source: &str) -> Result<(Catalog, String), Diagnostic
     let forms = flow_syntax::syntax::parse(source)?;
     if forms.len() != 1 { return Err(rays_diagnostic::error("E_CATALOG".into(), "Flow manifest needs one top-level form".into(), None, None, None, Vec::new(), Vec::new())); }
     let root = &forms[0];
-    let values = tagged(root, "flow_manifest")?;
+    let values = root.tagged("flow_manifest")?;
     if values.len() != 3 { return Err(bad(root, "Flow manifest needs version, digest and kinds")); }
-    let version = integer(one(&values[0], "version")?)?;
-    let digest_form = one(&values[1], "digest")?;
+    let version = integer(values[0].one("version")?)?;
+    let digest_form = values[1].one("digest")?;
     let digest = string(digest_form)?;
     if version < 0 { return Err(bad(root, "Negative Flow catalog version")); }
     if digest.len() != 32 || !digest.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)) {
         return Err(bad(root, "Flow manifest digest must be 32 lowercase hex digits"));
     }
-    let kind_forms = tagged(&values[2], "kinds")?;
+    let kind_forms = values[2].tagged("kinds")?;
     let mut linked = Vec::new();
     for form in kind_forms {
-        let fields = tagged(form, "kind")?;
+        let fields = form.tagged("kind")?;
         if let Some(name) = fields.first() {
             if string(name)?.starts_with("sop/") { linked.push(raw(source, form)?); }
         }
@@ -752,7 +760,7 @@ mod test_catalog {
         Kind { qualified: "sop/transform".into(), context: context::sop(), slots: vec![Slot { name: "in0".into(), required: true, rest: false, ty: None }], parameters: vec![], outputs: vec![("geo".into(), PortType::Geometry)], facts: None }
     }
     fn catalog() -> Catalog { Catalog { version: 202609, kinds: vec![boxk(), transform()] } }
-    fn code<T>(r: &Result<T, (String, String)>) -> String { match r { Err((c, _)) => c.clone(), Ok(_) => "ok".into() } }
+    fn code(r: &Result<Kind, (String, String)>) -> String { match r { Err((c, _)) => c.clone(), Ok(_) => "ok".into() } }
 
     #[test]
     fn parameter_validation_of_function_and_image_ports() {

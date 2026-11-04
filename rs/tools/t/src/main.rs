@@ -542,7 +542,9 @@ fn parse_args(args: impl Iterator<Item = OsString>) -> Result<Args, String> {
     let mut target_dir = None;
     let mut test_args = Vec::new();
     let mut ignored = false;
-    let mut test_timeout = TEST_TIMEOUT;
+    // RAYS_SLOW=1 enables the slow tests (AGENTS.md); they get the slow profile's per-test limit.
+    let mut test_timeout =
+        if env::var("RAYS_SLOW").is_ok_and(|value| value == "1") { SLOW_TEST_TIMEOUT } else { TEST_TIMEOUT };
 
     while let Some(arg) = args.next() {
         let text = arg

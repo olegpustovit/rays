@@ -70,9 +70,15 @@ fn num(v: &Value) -> Result<f64, Diagnostic> { value::num(v) }
 fn fin(name: &str, n: f64) -> Result<f64, Diagnostic> { value::fin(name, n) }
 fn wrap63(n:i64)->i64{((n as u64&0x7fff_ffff_ffff_ffff)<<1) as i64>>1}
 fn truthy(v: &Value) -> Result<bool, Diagnostic> { value::truthy(v) }
-fn get<'a>(args: &'a Args, name: &'static str) -> Result<&'a Value, Diagnostic> { args.iter().find(|(n,_)| n == name).map(|(_,v)| v).ok_or_else(|| failf("E_ARITY", format!("Missing operator input {name}."))) }
+trait ArgLookup {
+    fn get_arg(&self, name: &'static str) -> Result<&Value, Diagnostic>;
+    fn opt_arg(&self, name: &'static str) -> Option<&Value>;
+}
+impl ArgLookup for Args {
+    fn get_arg(&self, name: &'static str) -> Result<&Value, Diagnostic> { self.iter().find(|(n,_)| n == name).map(|(_,v)| v).ok_or_else(|| failf("E_ARITY", format!("Missing operator input {name}."))) }
+    fn opt_arg(&self, name: &'static str) -> Option<&Value> { self.iter().find(|(n,_)| n == name).map(|(_,v)| v) }
+}
 fn has(args: &Args, name: &str) -> bool { args.iter().any(|(n,_)| n == name) }
-fn opt<'a>(args: &'a Args, name: &'static str) -> Option<&'a Value> { args.iter().find(|(n,_)| n == name).map(|(_,v)| v) }
 fn named_ty(name: &str) -> Ty { Ty::Named(name.to_owned()) }
 fn arr(ty: Ty) -> Ty { Ty::Array(Box::new(ty)) }
 fn list(ty: Ty) -> Ty { Ty::List(Box::new(ty)) }
@@ -88,9 +94,12 @@ fn mk(name: &str, ctx: Context, signature: Signature, out: Out, body: Body) -> O
 fn with_defaults(mut op: Op, category: &str) -> Op { op.category=category.into(); op }
 fn output_const(ty: Ty) -> Out { Arc::new(move |_| Ok(ty.clone())) }
 fn range_error(message: &str) -> Diagnostic { fail("E_RANGE", message) }
-fn literal<'a>(args: &'a [(String,Ty,Option<param::Value>)], key: &'static str) -> Option<&'a param::Value> { args.iter().find(|(n,_,_)| n == key).and_then(|(_,_,v)|v.as_ref()) }
+trait Literals { fn literal_arg(&self, key: &'static str) -> Option<&param::Value>; }
+impl Literals for [(String,Ty,Option<param::Value>)] {
+    fn literal_arg(&self, key: &'static str) -> Option<&param::Value> { self.iter().find(|(n,_,_)| n == key).and_then(|(_,_,v)|v.as_ref()) }
+}
 fn one_of(args: &Args, key: &'static str, what: &str, choices: &[String]) -> Result<(), Diagnostic> {
-    if let Some(v)=opt(args,key) { if matches!(v,Value::Residual(_)) { return Ok(()) }
+    if let Some(v)=args.opt_arg(key) { if matches!(v,Value::Residual(_)) { return Ok(()) }
       match text_string(v) { Ok(s) if choices.iter().any(|c| c==s) => Ok(()), _ => Err(range_error(&format!("{what} is {}.",choices.join(", ")))) }
     } else { Ok(()) }
 }
@@ -282,8 +291,8 @@ pub fn check_noise_fractal(lacunarity:f64,gain:f64)->Result<(),Diagnostic>{
     if !(0.<=gain&&gain<=1.){return Err(fail("E_NOISE_RANGE","Noise gain is 0 to 1."))} Ok(())
 }
 pub fn noise_settings(args:&Args)->Result<(i64,i64,f64,f64),Diagnostic>{
-    let integer=|key:&'static str,default|opt(args,key).map(int_of).unwrap_or(Ok(default));
-    let number=|key:&'static str,default|opt(args,key).map(num).unwrap_or(Ok(default));
+    let integer=|key:&'static str,default|args.opt_arg(key).map(int_of).unwrap_or(Ok(default));
+    let number=|key:&'static str,default|args.opt_arg(key).map(num).unwrap_or(Ok(default));
     let (seed,octaves,lacunarity,gain)=(integer("seed",0)?,integer("octaves",1)?,number("lacunarity",2.)?,number("gain",0.5)?);
     check_noise_octaves(octaves)?;check_noise_fractal(lacunarity,gain)?;Ok((seed,octaves,lacunarity,gain))
 }
@@ -301,7 +310,7 @@ fn color_value(c:rays_math::color::T)->Value{
 }
 fn noise_op()->Op{
     let mut op=mk("noise3",context::value(),signature(vec![("position",Ty::Vec3)],vec![],None,vec![("seed",Ty::Int),("octaves",Ty::Int),("lacunarity",Ty::Float),("gain",Ty::Float)]),output_const(Ty::Float),Arc::new(|_,_,args|{
-        let (x,y,z)=match get(args,"position")?{Value::Vec3(x,y,z)=>(*x,*y,*z),_=>return Err(fail("E_TYPE","noise3 takes a vec3 position."))};
+        let (x,y,z)=match args.get_arg("position")?{Value::Vec3(x,y,z)=>(*x,*y,*z),_=>return Err(fail("E_TYPE","noise3 takes a vec3 position."))};
         fin("noise3 position",x)?;fin("noise3 position",y)?;fin("noise3 position",z)?;
         let(seed,octaves,lacunarity,gain)=noise_settings(args)?;let noise=noise_table(seed);
         let result=if octaves==1{rays_math::noise::sample3(&noise,x,y,z)}else if lacunarity==2.&&gain==0.5{rays_math::noise::fbm3(Some(octaves),&noise,x,y,z).map_err(|e|fail("E_NOISE_RANGE",&e))?}else{let mut scratch=rays_math::noise::create_fbm3_scratch();rays_math::noise::fbm3_with_scratch(&mut scratch,&noise,octaves,lacunarity,gain,x,y,z)};
@@ -355,9 +364,9 @@ fn frame_ops()->Vec<Op>{
     let frame_ty=rec(vec![("t",Ty::Float),("dt",Ty::Float),("index",Ty::Int),("width",Ty::Int),("height",Ty::Int),("pointer",Ty::Vec3),("buttons",list(Ty::Text)),("keys",list(Ty::Text)),("events",list(rec(vec![("kind",Ty::Text),("key",Ty::Text),("button",Ty::Text),("position",Ty::Vec3),("delta",Ty::Vec3),("text",Ty::Text),("start",Ty::Int),("length",Ty::Int),("paths",list(Ty::Text)),("error",Ty::Text),("id",Ty::Int),("width",Ty::Int),("height",Ty::Int),("phase",Ty::Text),("time",Ty::Float),("scale",Ty::Float)])))]);
     let specs=vec![("frame/input",vec![],frame_ty),("frame/dt",vec![],Ty::Float),("frame/index",vec![],Ty::Int),("frame/width",vec![],Ty::Int),("frame/height",vec![],Ty::Int),("pointer/x",vec![],Ty::Float),("pointer/y",vec![],Ty::Float)];
     let mut out=specs.into_iter().map(|(name,pos,ty)|{let body:Body=Arc::new(move |f,_,_|Ok(match name{"frame/input"=>frame_value(f),"frame/dt"=>Value::Float(f.dt),"frame/index"=>Value::Int(f.frame),"frame/width"=>Value::Int(f.size.0),"frame/height"=>Value::Int(f.size.1),"pointer/x"=>Value::Float(f.pointer.0),_=>Value::Float(f.pointer.1)}));let mut op=value_op(name,pos,vec![],None,vec![],ty,"Frame",body);op.live=true;op}).collect::<Vec<_>>();
-    let down_body:Body=Arc::new(|f,_,args|{let button=if let Some(v)=opt(args,"button"){let s=text_string(v)?;if !["left","right","middle","x1","x2"].contains(&s){return Err(fail("E_RANGE","Pointer button is left, right, middle, x1 or x2."))}s}else{"left"};Ok(Value::Bool(f.buttons.iter().any(|b|input::button_name(*b)==button)))});
+    let down_body:Body=Arc::new(|f,_,args|{let button=if let Some(v)=args.opt_arg("button"){let s=text_string(v)?;if !["left","right","middle","x1","x2"].contains(&s){return Err(fail("E_RANGE","Pointer button is left, right, middle, x1 or x2."))}s}else{"left"};Ok(Value::Bool(f.buttons.iter().any(|b|input::button_name(*b)==button)))});
     let mut down=value_op("pointer/down",vec![],vec![("button",Ty::Text)],None,vec![],Ty::Bool,"Frame",down_body);down.live=true;out.push(down);
-    let key_body:Body=Arc::new(|f,_,args|{let key=text_string(get(args,"key")?)?;Ok(Value::Bool(f.keys.iter().any(|k|input::key_name(*k)==key)))});
+    let key_body:Body=Arc::new(|f,_,args|{let key=text_string(args.get_arg("key")?)?;Ok(Value::Bool(f.keys.iter().any(|k|input::key_name(*k)==key)))});
     let mut key=value_op("key/down",vec![("key",Ty::Text)],vec![],None,vec![],Ty::Bool,"Frame",key_body);key.live=true;out.push(key);out
 }
 fn bytes_split(source:&[u8],separator:&[u8])->Vec<Vec<u8>>{
@@ -404,9 +413,9 @@ fn text_repr(bytes:&[u8])->Vec<u8>{
 fn array_descriptor(name:&str,args:&Args)->Result<Value,Diagnostic>{
     let (ty,default)=match name{"array/int"=>(Ty::Int,Value::Int(0)),"array/text"=>(Ty::Text,text("")),"array/float"=>(Ty::Float,Value::Float(0.)),"array/vec3"=>(Ty::Vec3,Value::Vec3(0.,0.,0.)),"array/vec4"=>(Ty::Vec4,Value::Vec4(0.,0.,0.,0.)),_=>return Err(fail("E_ARRAY_TYPE","Unknown constant array constructor."))};
     if args.iter().any(|(k,_)|k!="count"&&k!="value")||args.len()!=args.iter().map(|(k,_)|k).collect::<std::collections::HashSet<_>>().len(){return Err(fail("E_ARRAY_TYPE","Malformed constant array constructor arguments."))}
-    let Some(count_value)=opt(args,"count") else{return Err(fail("E_ARRAY_TYPE","Constant array constructor needs count."))};
+    let Some(count_value)=args.opt_arg("count") else{return Err(fail("E_ARRAY_TYPE","Constant array constructor needs count."))};
     let count=checked_count(name,count_value,MAX_WOSIZE)?;
-    let value=opt(args,"value").unwrap_or(&default);
+    let value=args.opt_arg("value").unwrap_or(&default);
     let width=match ty{Ty::Vec2=>2,Ty::Vec3=>3,Ty::Vec4=>4,_=>1};
     if matches!(ty,Ty::Float|Ty::Vec2|Ty::Vec3|Ty::Vec4)&&count>MAX_WOSIZE/width{return Err(fail("E_ARRAY_RANGE","Array length is outside native storage bounds."))}
     let made=value::array_init(&ty,count.min(1) as i64,&|_|value.clone())?;
@@ -432,54 +441,54 @@ fn scatter_type(ts:&[Ty])->Result<Ty,Diagnostic>{
 fn array_ops()->Vec<Op>{
     let mut ops=Vec::new();
     let max=op_with("array/max_length",context::value(),vec![],vec![],None,vec![("type",Ty::Text)],Ty::Int,"Array",Arc::new(|_,_,args|{
-        let kind=match opt(args,"type"){None=>"float",Some(v)=>text_string(v)?};let cap=array_limit(kind).ok_or_else(||fail("E_ARRAY_TYPE","Array capacity type is the literal int, text, float, vec2, vec3 or vec4."))?;Ok(Value::Int(cap as i64))
+        let kind=match args.opt_arg("type"){None=>"float",Some(v)=>text_string(v)?};let cap=array_limit(kind).ok_or_else(||fail("E_ARRAY_TYPE","Array capacity type is the literal int, text, float, vec2, vec3 or vec4."))?;Ok(Value::Int(cap as i64))
     }));
     let mut max=max;max.choices=vec![("type".into(),["float","int","text","vec2","vec3","vec4"].iter().map(|s|(*s).into()).collect())];
-    max.out_args=Some(Arc::new(|args|{if let Some(param::Value::Text(k))=literal(args,"type"){if std::str::from_utf8(k).ok().and_then(array_limit).is_none(){return Err(fail("E_ARRAY_TYPE","Array capacity type is the literal int, text, float, vec2, vec3 or vec4."))}}else if literal(args,"type").is_some(){return Err(fail("E_ARRAY_TYPE","Array capacity type is the literal int, text, float, vec2, vec3 or vec4."))}Ok(Ty::Int)}));ops.push(max);
+    max.out_args=Some(Arc::new(|args|{if args.iter().any(|(n,_,_)|n=="type"){match args.literal_arg("type"){Some(param::Value::Text(k)) if std::str::from_utf8(k).ok().and_then(array_limit).is_some()=>(),_=>return Err(fail("E_ARRAY_TYPE","Array capacity type is the literal int, text, float, vec2, vec3 or vec4."))}}Ok(Ty::Int)}));ops.push(max);
     let range_body:Body=Arc::new(|_,_,args|{
-        let ty=match opt(args,"type"){None=>Ty::Float,Some(v) if text_string(v)?=="int"=>Ty::Int,Some(v) if text_string(v)?=="float"=>Ty::Float,_=>return Err(fail("E_ARRAY_TYPE","array/range type is float or int."))};
-        let count=checked_count("array/range",get(args,"count")?,MAX_WOSIZE)?;
+        let ty=match args.opt_arg("type"){None=>Ty::Float,Some(v) if text_string(v)?=="int"=>Ty::Int,Some(v) if text_string(v)?=="float"=>Ty::Float,_=>return Err(fail("E_ARRAY_TYPE","array/range type is float or int."))};
+        let count=checked_count("array/range",args.get_arg("count")?,MAX_WOSIZE)?;
         if ty==Ty::Int{Ok(Value::Int_array(Arc::new((0..count).map(|i|i as i64).collect())))}else{Ok(Value::Float_array(Arc::new((0..count).map(|i|i as f64).collect())))}
     });
     let mut range=op_with("array/range",context::value(),vec![("count",Ty::Int)],vec![],None,vec![("type",Ty::Text)],arr(Ty::Float),"Array",range_body);
     range.choices=vec![("type".into(),vec!["float".into(),"int".into()])];
-    range.out_args=Some(Arc::new(|args|match literal(args,"type"){None=>Ok(arr(Ty::Float)),Some(param::Value::Text(t)) if t.as_slice()==b"int"=>Ok(arr(Ty::Int)),Some(param::Value::Text(t)) if t.as_slice()==b"float"=>Ok(arr(Ty::Float)),_=>Err(fail("E_ARRAY_TYPE","Array range type is the literal int or float."))}));
+    range.out_args=Some(Arc::new(|args|match args.literal_arg("type"){None=>Ok(arr(Ty::Float)),Some(param::Value::Text(t)) if t.as_slice()==b"int"=>Ok(arr(Ty::Int)),Some(param::Value::Text(t)) if t.as_slice()==b"float"=>Ok(arr(Ty::Float)),_=>Err(fail("E_ARRAY_TYPE","Array range type is the literal int or float."))}));
     ops.push(range);
     for (name,ty,default,limit) in [("array/int",Ty::Int,Value::Int(0),MAX_WOSIZE),("array/text",Ty::Text,text(""),MAX_WOSIZE),("array/float",Ty::Float,Value::Float(0.),MAX_WOSIZE),("array/vec3",Ty::Vec3,Value::Vec3(0.,0.,0.),MAX_WOSIZE),("array/vec4",Ty::Vec4,Value::Vec4(0.,0.,0.,0.),MAX_WOSIZE)]{
         let value_ty=ty.clone();let output_ty=ty.clone();
-        let body:Body=Arc::new(move |_,_,args|{let n=checked_count(name,get(args,"count")?,limit)?;let fill=opt(args,"value").unwrap_or(&default);array_constructor(ty.clone(),n,fill)});
+        let body:Body=Arc::new(move |_,_,args|{let n=checked_count(name,args.get_arg("count")?,limit)?;let fill=args.opt_arg("value").unwrap_or(&default);array_constructor(ty.clone(),n,fill)});
         ops.push(op_with(name,context::value(),vec![("count",Ty::Int)],vec![("value",value_ty)],None,vec![],arr(output_ty),"Array",body));
     }
-    ops.push(value_op("array/count",vec![("array",arr(Ty::Any))],vec![],None,vec![],Ty::Int,"Array",Arc::new(|_,_,a|Ok(Value::Int(value::array_length(get(a,"array")?)? as i64)))));
+    ops.push(value_op("array/count",vec![("array",arr(Ty::Any))],vec![],None,vec![],Ty::Int,"Array",Arc::new(|_,_,a|Ok(Value::Int(value::array_length(a.get_arg("array")?)? as i64)))));
     let nth:Out=Arc::new(|ts|match ts.first(){Some(Ty::Array(t))=>Ok(t.as_ref().clone()),_=>Ok(Ty::Any)});
-    ops.push(with_defaults(mk("array/nth",context::value(),signature(vec![("array",arr(Ty::Any)),("index",Ty::Int)],vec![],None,vec![]),nth,Arc::new(|_,_,a|{let i=checked_count("array/nth",get(a,"index")?,MAX_WOSIZE)?;value::array_get(get(a,"array")?,i as i64)})),"Array"));
+    ops.push(with_defaults(mk("array/nth",context::value(),signature(vec![("array",arr(Ty::Any)),("index",Ty::Int)],vec![],None,vec![]),nth,Arc::new(|_,_,a|{let i=checked_count("array/nth",a.get_arg("index")?,MAX_WOSIZE)?;value::array_get(a.get_arg("array")?,i as i64)})),"Array"));
     let slice_out:Out=Arc::new(|ts|Ok(ts.first().filter(|t|matches!(t,Ty::Array(_))).cloned().unwrap_or(arr(Ty::Any))));
     ops.push(with_defaults(mk("array/slice",context::value(),signature(vec![("array",arr(Ty::Any)),("first",Ty::Int),("count",Ty::Int)],vec![],None,vec![]),slice_out,Arc::new(|_,_,a|{
-        let source=get(a,"array")?;let first=checked_count("array/slice",get(a,"first")?,isize::MAX as usize)?;let count=checked_count("array/slice",get(a,"count")?,isize::MAX as usize)?;let n=value::array_length(source)?;if first>n||count>n-first{return Err(fail("E_ARRAY_RANGE","An array slice must be within its source."))}
+        let source=a.get_arg("array")?;let first=checked_count("array/slice",a.get_arg("first")?,isize::MAX as usize)?;let count=checked_count("array/slice",a.get_arg("count")?,isize::MAX as usize)?;let n=value::array_length(source)?;if first>n||count>n-first{return Err(fail("E_ARRAY_RANGE","An array slice must be within its source."))}
         match source{Value::Int_array(x)=>Ok(Value::Int_array(Arc::new(x[first..first+count].to_vec()))),Value::Text_array(x)=>Ok(Value::Text_array(Arc::new(x[first..first+count].to_vec()))),Value::Float_array(x)=>Ok(Value::Float_array(Arc::new(x[first..first+count].to_vec()))),Value::Vec2_array(x)=>Ok(Value::Vec2_array(Arc::new(x[first*2..(first+count)*2].to_vec()))),Value::Vec3_array(x)=>Ok(Value::Vec3_array(Arc::new(x[first*3..(first+count)*3].to_vec()))),Value::Vec4_array(x)=>Ok(Value::Vec4_array(Arc::new(x[first*4..(first+count)*4].to_vec()))),_=>Err(fail("E_TYPE","Expected a packed array."))}
     })),"Array"));
     let concat_out:Out=Arc::new(|ts|Ok(ts.first().filter(|t|matches!(t,Ty::Array(_))).cloned().unwrap_or(arr(Ty::Any))));
-    ops.push(with_defaults(mk("array/concat",context::value(),signature(vec![("first",arr(Ty::Any)),("second",arr(Ty::Any))],vec![],None,vec![]),concat_out,Arc::new(|_,_,a|{let x=get(a,"first")?;let y=get(a,"second")?;macro_rules! cat{($v:ident)=>{if let (Value::$v(a),Value::$v(b))=(x,y){let mut c=(**a).clone();c.extend_from_slice(b);return Ok(Value::$v(Arc::new(c)))}}}cat!(Int_array);cat!(Text_array);cat!(Float_array);cat!(Vec2_array);cat!(Vec3_array);cat!(Vec4_array);Err(fail("E_ARRAY_TYPE","Concatenated arrays must have the same element type."))})),"Array"));
+    ops.push(with_defaults(mk("array/concat",context::value(),signature(vec![("first",arr(Ty::Any)),("second",arr(Ty::Any))],vec![],None,vec![]),concat_out,Arc::new(|_,_,a|{let x=a.get_arg("first")?;let y=a.get_arg("second")?;concat_arrays(x,y)})),"Array"));
     let sum_out:Out=Arc::new(|ts|match ts.first(){Some(Ty::Array(t))=>Ok(t.as_ref().clone()),Some(Ty::Any)=>Ok(Ty::Any),_=>Ok(Ty::Any)});
-    ops.push(with_defaults(mk("array/sum",context::value(),signature(vec![("array",arr(Ty::Any))],vec![],None,vec![]),sum_out,Arc::new(|_,_,a|{let xs=get(a,"array")?;if matches!(xs,Value::Text_array(_)){return Err(fail("E_TYPE","array/sum adds numbers or matching-width vectors."))}if let Value::Int_array(values)=xs{let mut sum=0i64;for v in values.iter(){sum=packed_ops::integer_apply(packed_ops::Integer::Iadd,sum,*v)?}return Ok(Value::Int(sum))}let n=value::array_length(xs)?;let mut sum=match xs{Value::Int_array(_)=>Value::Int(0),Value::Vec2_array(_)=>Value::Vec2(0.,0.),Value::Vec3_array(_)=>Value::Vec3(0.,0.,0.),Value::Vec4_array(_)=>Value::Vec4(0.,0.,0.,0.),_=>Value::Float(0.)};for i in 0..n{sum=value::arith("array/sum",&|x,y|x+y,&sum,&value::array_get(xs,i as i64)?)?}Ok(sum)})),"Array"));
+    ops.push(with_defaults(mk("array/sum",context::value(),signature(vec![("array",arr(Ty::Any))],vec![],None,vec![]),sum_out,Arc::new(|_,_,a|{let xs=a.get_arg("array")?;if matches!(xs,Value::Text_array(_)){return Err(fail("E_TYPE","array/sum adds numbers or matching-width vectors."))}if let Value::Int_array(values)=xs{let mut sum=0i64;for v in values.iter(){sum=packed_ops::integer_apply(packed_ops::Integer::Iadd,sum,*v)?}return Ok(Value::Int(sum))}let n=value::array_length(xs)?;let mut sum=match xs{Value::Int_array(_)=>Value::Int(0),Value::Vec2_array(_)=>Value::Vec2(0.,0.),Value::Vec3_array(_)=>Value::Vec3(0.,0.,0.),Value::Vec4_array(_)=>Value::Vec4(0.,0.,0.,0.),_=>Value::Float(0.)};for i in 0..n{sum=value::arith("array/sum",&|x,y|x+y,&sum,&value::array_get(xs,i as i64)?)?}Ok(sum)})),"Array"));
     for (name,op) in [("array/min",Reduction::Minimum),("array/max",Reduction::Maximum)]{
         let out:Out=Arc::new(|ts|match ts.first(){Some(Ty::Array(t)) if matches!(t.as_ref(),Ty::Int|Ty::Float|Ty::Vec2|Ty::Vec3|Ty::Vec4|Ty::Any)=>Ok(t.as_ref().clone()),_=>Err(fail("E_ARRAY_TYPE","Array reductions need int, float or vector arrays."))});
-        ops.push(with_defaults(mk(name,context::value(),signature(vec![("array",arr(Ty::Any))],vec![],None,vec![]),out,Arc::new(move |_,_,a|reduce_array(None,op,None,get(a,"array")?))),"Array"));
+        ops.push(with_defaults(mk(name,context::value(),signature(vec![("array",arr(Ty::Any))],vec![],None,vec![]),out,Arc::new(move |_,_,a|reduce_array(None,op,None,a.get_arg("array")?))),"Array"));
     }
     for (name,op) in [("array/segment_sum",Reduction::Sum),("array/segment_min",Reduction::Minimum),("array/segment_max",Reduction::Maximum)]{
         let out:Out=Arc::new(|ts|match ts.first(){Some(Ty::Array(t)) if matches!(t.as_ref(),Ty::Int|Ty::Float|Ty::Vec2|Ty::Vec3|Ty::Vec4|Ty::Any)=>Ok(arr(t.as_ref().clone())),_=>Err(fail("E_ARRAY_TYPE","Array reductions need int, float or vector arrays."))});
-        ops.push(with_defaults(mk(name,context::value(),signature(vec![("values",arr(Ty::Any)),("offsets",arr(Ty::Int))],vec![],None,vec![]),out,Arc::new(move |_,_,a|reduce_array(None,op,Some(get(a,"offsets")?),get(a,"values")?))),"Array"));
+        ops.push(with_defaults(mk(name,context::value(),signature(vec![("values",arr(Ty::Any)),("offsets",arr(Ty::Int))],vec![],None,vec![]),out,Arc::new(move |_,_,a|reduce_array(None,op,Some(a.get_arg("offsets")?),a.get_arg("values")?))),"Array"));
     }
     let argmax_out:Out=Arc::new(|ts|match ts.first(){Some(Ty::Array(t)) if matches!(t.as_ref(),Ty::Int|Ty::Float|Ty::Any)=>Ok(arr(Ty::Int)),_=>Err(fail("E_ARRAY_TYPE","array/segment_argmax needs an int or float array."))});
-    ops.push(with_defaults(mk("array/segment_argmax",context::value(),signature(vec![("values",arr(Ty::Any)),("offsets",arr(Ty::Int))],vec![],None,vec![]),argmax_out,Arc::new(|_,_,a|segment_argmax(None,get(a,"offsets")?,get(a,"values")?))),"Array"));
+    ops.push(with_defaults(mk("array/segment_argmax",context::value(),signature(vec![("values",arr(Ty::Any)),("offsets",arr(Ty::Int))],vec![],None,vec![]),argmax_out,Arc::new(|_,_,a|segment_argmax(None,a.get_arg("offsets")?,a.get_arg("values")?))),"Array"));
     let scatter_out:Out=Arc::new(|ts|scatter_type(ts));
-    ops.push(with_defaults(mk("array/scatter_add",context::value(),signature(vec![("indices",arr(Ty::Int)),("values",arr(Ty::Any)),("size",Ty::Int)],vec![],None,vec![]),scatter_out,Arc::new(|_,_,a|scatter_add(get(a,"indices")?,get(a,"values")?,get(a,"size")?))),"Array"));
-    ops.push(value_op("array/compact",vec![("mask",arr(Ty::Int))],vec![],None,vec![],arr(Ty::Int),"Array",Arc::new(|_,_,a|{let Value::Int_array(mask)=get(a,"mask")? else{return Err(fail("E_ARRAY_TYPE","Compaction needs an integer mask array."))};if mask.iter().any(|x|*x!=0&&*x!=1){return Err(fail("E_ARRAY_MASK","Compact mask entries must be 0 or 1."))}Ok(Value::Int_array(Arc::new(mask.iter().enumerate().filter_map(|(i,x)|if *x==1{Some(i as i64)}else{None}).collect())))})));
-    ops.push(value_op("array/scan_sum",vec![("array",arr(Ty::Int))],vec![],None,vec![],arr(Ty::Int),"Array",Arc::new(|_,_,a|{let Value::Int_array(xs)=get(a,"array")? else{return Err(fail("E_ARRAY_TYPE","Prefix sum needs an integer array."))};if xs.len()>=MAX_WOSIZE{return Err(fail("E_ARRAY_RANGE","Scan output length is outside native storage bounds."))}let mut out=Vec::with_capacity(xs.len()+1);let mut sum=0i64;out.push(sum);for x in xs.iter(){sum=packed_ops::integer_apply(packed_ops::Integer::Iadd,sum,*x)?;out.push(sum)}Ok(Value::Int_array(Arc::new(out)))})));
+    ops.push(with_defaults(mk("array/scatter_add",context::value(),signature(vec![("indices",arr(Ty::Int)),("values",arr(Ty::Any)),("size",Ty::Int)],vec![],None,vec![]),scatter_out,Arc::new(|_,_,a|scatter_add(a.get_arg("indices")?,a.get_arg("values")?,a.get_arg("size")?))),"Array"));
+    ops.push(value_op("array/compact",vec![("mask",arr(Ty::Int))],vec![],None,vec![],arr(Ty::Int),"Array",Arc::new(|_,_,a|{let Value::Int_array(mask)=a.get_arg("mask")? else{return Err(fail("E_ARRAY_TYPE","Compaction needs an integer mask array."))};if mask.iter().any(|x|*x!=0&&*x!=1){return Err(fail("E_ARRAY_MASK","Compact mask entries must be 0 or 1."))}Ok(Value::Int_array(Arc::new(mask.iter().enumerate().filter_map(|(i,x)|if *x==1{Some(i as i64)}else{None}).collect())))})));
+    ops.push(value_op("array/scan_sum",vec![("array",arr(Ty::Int))],vec![],None,vec![],arr(Ty::Int),"Array",Arc::new(|_,_,a|{let Value::Int_array(xs)=a.get_arg("array")? else{return Err(fail("E_ARRAY_TYPE","Prefix sum needs an integer array."))};if xs.len()>=MAX_WOSIZE{return Err(fail("E_ARRAY_RANGE","Scan output length is outside native storage bounds."))}let mut out=Vec::with_capacity(xs.len()+1);let mut sum=0i64;out.push(sum);for x in xs.iter(){sum=packed_ops::integer_apply(packed_ops::Integer::Iadd,sum,*x)?;out.push(sum)}Ok(Value::Int_array(Arc::new(out)))})));
     let grade_out:Out=Arc::new(|ts|grade_type(ts));
-    ops.push(with_defaults(mk("array/grade",context::value(),signature(vec![("keys",arr(Ty::Any))],vec![],None,vec![("descending",Ty::Bool)]),grade_out,Arc::new(|_,_,a|grade(get(a,"keys")?,opt(a,"descending").map(truthy).transpose()?.unwrap_or(false))),),"Array"));
+    ops.push(with_defaults(mk("array/grade",context::value(),signature(vec![("keys",arr(Ty::Any))],vec![],None,vec![("descending",Ty::Bool)]),grade_out,Arc::new(|_,_,a|grade(a.get_arg("keys")?,a.opt_arg("descending").map(truthy).transpose()?.unwrap_or(false))),),"Array"));
     let index_out:Out=Arc::new(|ts|index_type(ts));
-    ops.push(with_defaults(mk("array/index_of",context::value(),signature(vec![("keys",arr(Ty::Any)),("queries",arr(Ty::Any))],vec![],None,vec![]),index_out,Arc::new(|_,_,a|index_of(get(a,"keys")?,get(a,"queries")?))),"Array"));
+    ops.push(with_defaults(mk("array/index_of",context::value(),signature(vec![("keys",arr(Ty::Any)),("queries",arr(Ty::Any))],vec![],None,vec![]),index_out,Arc::new(|_,_,a|index_of(a.get_arg("keys")?,a.get_arg("queries")?))),"Array"));
     let mut ordered=Vec::with_capacity(ops.len());
     for name in ["array/max_length","array/range","array/int","array/text","array/float","array/vec3","array/vec4","array/count","array/nth","array/slice","array/concat","array/sum","array/grade","array/index_of","array/compact","array/scan_sum","array/scatter_add","array/min","array/max","array/segment_sum","array/segment_min","array/segment_max","array/segment_argmax"]{
         if let Some(index)=ops.iter().position(|op|op.name==name){ordered.push(ops.remove(index));}
@@ -533,7 +542,7 @@ fn image_ops()->Vec<Op>{
     ];
     specs.into_iter().map(|(name,pos,kw,_)|{
         let body:Body=if name=="image/noise"{Arc::new(move |_,node,args|{
-            let frequency=opt(args,"frequency").or_else(||opt(args,"freq")).cloned();
+            let frequency=args.opt_arg("frequency").or_else(||args.opt_arg("freq")).cloned();
             let mut out=Vec::with_capacity(args.len());
             if let Some(value)=frequency{out.push(("frequency".into(),value));}
             out.extend(args.iter().filter(|(n,_)|n!="freq"&&n!="frequency").cloned());
@@ -566,9 +575,9 @@ fn stage_ops()->Vec<Op>{
     ].into_iter().map(|(name,pos,out)|{let mut op=value_op(name,pos,vec![],None,vec![],out,"Raster",Arc::new(move |_,_,_|Err(fail("E_GPU_STAGE",&format!("{name} runs only in a fragment stage.")))));op.live=true;op}).collect::<Vec<_>>();
     let scene_ty=rec(vec![("t",Ty::Float),("prim",Ty::Int),("u",Ty::Float),("v",Ty::Float),("normal",Ty::Vec3),("hit",Ty::Bool),("instance",Ty::Int)]);
     let body:Body=Arc::new(|_,_,args|{
-        let origin=vec3(get(args,"origin")?)?;let dir=vec3(get(args,"dir")?)?;
-        let input=[origin.0,origin.1,origin.2,dir.0,dir.1,dir.2,fin("scene/trace",num(get(args,"tmin")?)?)?,fin("scene/trace",num(get(args,"tmax")?)?)?,fin("scene/trace",num(get(args,"time")?)?)?];
-        let h=ray_host::query(int_of(get(args,"scene")?)?,&input)?;
+        let origin=vec3(args.get_arg("origin")?)?;let dir=vec3(args.get_arg("dir")?)?;
+        let input=[origin.0,origin.1,origin.2,dir.0,dir.1,dir.2,fin("scene/trace",num(args.get_arg("tmin")?)?)?,fin("scene/trace",num(args.get_arg("tmax")?)?)?,fin("scene/trace",num(args.get_arg("time")?)?)?];
+        let h=ray_host::query(int_of(args.get_arg("scene")?)?,&input)?;
         Ok(Value::Record(vec![("t".into(),Value::Float(h.t)),("prim".into(),Value::Int(h.prim)),("u".into(),Value::Float(h.u)),("v".into(),Value::Float(h.v)),("normal".into(),Value::Vec3(h.nx,h.ny,h.nz)),("hit".into(),Value::Bool(h.hit)),("instance".into(),Value::Int(h.instance))]))
     });
     let mut trace=value_op("scene/trace",vec![("scene",Ty::Int),("origin",Ty::Vec3),("dir",Ty::Vec3),("tmin",Ty::Float),("tmax",Ty::Float),("time",Ty::Float)],vec![],None,vec![],scene_ty,"Scene",body);trace.live=true;ops.insert(0,trace);ops
@@ -577,7 +586,7 @@ fn contains_fn(v:&Value)->bool{match v{Value::Fn(_)=>true,Value::List(xs)=>xs.it
 fn float_div(a:f64,b:f64)->f64{if b==0.{0.}else{a/b}}
 fn float_mod(a:f64,b:f64)->f64{if b==0.{0.}else{(a%b+b)%b}}
 fn binary_op(name:&'static str,operation:fn(f64,f64)->f64)->Op{
-    let body:Body=Arc::new(move |_,_,a|{if a.len()!=2{return Err(failf("E_ARITY",format!("{name} got the wrong number of inputs.")))}value::arith(name,&operation,get(a,"a")?,get(a,"b")?)});
+    let body:Body=Arc::new(move |_,_,a|{if a.len()!=2{return Err(failf("E_ARITY",format!("{name} got the wrong number of inputs.")))}value::arith(name,&operation,a.get_arg("a")?,a.get_arg("b")?)});
     let mut op=value_op(name,vec![("a",Ty::Float),("b",Ty::Float)],vec![],None,vec![],Ty::Float,"Math",body);
     op.out=Arc::new(move |ts|{
         if let Some(t)=ts.iter().find(|t|matches!(t,Ty::Vec2|Ty::Vec3|Ty::Vec4)){Ok(t.clone())}
@@ -593,14 +602,14 @@ fn unary_math_ops()->Vec<Op>{
         ("exp",f64::exp),("sin",f64::sin),("cos",f64::cos),("abs",f64::abs),
     ];
     for (name,f) in entries{
-        let body:Body=Arc::new(move |_,_,a|{let x=num(get(a,"x")?)?;Ok(Value::Float(fin(name,f(x))?))});
+        let body:Body=Arc::new(move |_,_,a|{let x=num(a.get_arg("x")?)?;Ok(Value::Float(fin(name,f(x))?))});
         let mut op=value_op(name,vec![("x",Ty::Float)],vec![],None,vec![],Ty::Float,"Math",body);
-        if name=="abs"{op.out=Arc::new(|ts|Ok(if ts.first()==Some(&Ty::Int){Ty::Int}else{Ty::Float}));op.body=Arc::new(|_,_,a|match get(a,"x")?{Value::Int(x)=>Ok(Value::Int(if *x==-(1i64<<62){*x}else if *x<0{x.wrapping_neg()}else{*x})),v=>Ok(Value::Float(num(v)?.abs()))})}
+        if name=="abs"{op.out=Arc::new(|ts|Ok(if ts.first()==Some(&Ty::Int){Ty::Int}else{Ty::Float}));op.body=Arc::new(|_,_,a|match a.get_arg("x")?{Value::Int(x)=>Ok(Value::Int(if *x==-(1i64<<62){*x}else if *x<0{x.wrapping_neg()}else{*x})),v=>Ok(Value::Float(num(v)?.abs()))})}
         ops.push(op)
     }
-    let sqrt=value_op("sqrt",vec![("x",Ty::Float)],vec![],None,vec![],Ty::Float,"Math",Arc::new(|_,_,a|Ok(Value::Float(num(get(a,"x")?)?.abs().sqrt()))));ops.push(sqrt);
+    let sqrt=value_op("sqrt",vec![("x",Ty::Float)],vec![],None,vec![],Ty::Float,"Math",Arc::new(|_,_,a|Ok(Value::Float(num(a.get_arg("x")?)?.abs().sqrt()))));ops.push(sqrt);
     for (name,rounding,out_ty) in [("floor",0,Ty::Int),("ceil",1,Ty::Int),("round",2,Ty::Int),("int",3,Ty::Int),("float",4,Ty::Float)]{
-        let body:Body=Arc::new(move |_,_,a|{let x=num(get(a,"x")?)?;Ok(if rounding==4{Value::Float(x)}else{Value::Int(value::to_int(name,match rounding{0=>x.floor(),1=>x.ceil(),2=>x.round(),_=>x.trunc()})?)})});
+        let body:Body=Arc::new(move |_,_,a|{let x=num(a.get_arg("x")?)?;Ok(if rounding==4{Value::Float(x)}else{Value::Int(value::to_int(name,match rounding{0=>x.floor(),1=>x.ceil(),2=>x.round(),_=>x.trunc()})?)})});
         ops.push(value_op(name,vec![("x",Ty::Float)],vec![],None,vec![],out_ty,"Convert",body));
     }
     ops
@@ -621,112 +630,112 @@ fn ldexp(value:f64,exponent:i64)->f64{
 }
 fn ldexp_op()->Op{
     value_op("ldexp",vec![("a",Ty::Float),("b",Ty::Float)],vec![],None,vec![],Ty::Float,"Math",Arc::new(|_,_,a|{
-        let exponent=value::to_int("ldexp",num(get(a,"b")?)?.trunc())?;
-        Ok(Value::Float(fin("ldexp",ldexp(num(get(a,"a")?)?,exponent))?))
+        let exponent=value::to_int("ldexp",num(a.get_arg("b")?)?.trunc())?;
+        Ok(Value::Float(fin("ldexp",ldexp(num(a.get_arg("a")?)?,exponent))?))
     }))
 }
 fn special_value_ops()->Vec<Op>{
     let mut ops=Vec::new();
     for (name,f) in [("atan2",f64::atan2 as fn(f64,f64)->f64),("hypot",f64::hypot)]{
-        ops.push(value_op(name,vec![("a",Ty::Float),("b",Ty::Float)],vec![],None,vec![],Ty::Float,"Math",Arc::new(move |_,_,a|Ok(Value::Float(fin(name,f(num(get(a,"a")?)?,num(get(a,"b")?)?))?)))));
+        ops.push(value_op(name,vec![("a",Ty::Float),("b",Ty::Float)],vec![],None,vec![],Ty::Float,"Math",Arc::new(move |_,_,a|Ok(Value::Float(fin(name,f(num(a.get_arg("a")?)?,num(a.get_arg("b")?)?))?)))));
     }
     ops.push(ldexp_op());
     for (name,fun) in [("+",(|a:f64,b:f64|a+b) as fn(f64,f64)->f64),("-",|a:f64,b:f64|a-b),("*",|a:f64,b:f64|a*b),("/",float_div),("mod",float_mod),("pow",|a:f64,b:f64|a.abs().powf(b)),("min",f64::min),("max",f64::max)]{ops.push(binary_op(name,fun))}
     for (operation,name) in [(packed_ops::Integer::Iadd,"int/add"),(packed_ops::Integer::Isub,"int/sub"),(packed_ops::Integer::Imul,"int/mul"),(packed_ops::Integer::Idiv,"int/div"),(packed_ops::Integer::Imod,"int/mod"),(packed_ops::Integer::Iand,"int/and"),(packed_ops::Integer::Ior,"int/or"),(packed_ops::Integer::Ixor,"int/xor"),(packed_ops::Integer::Ishl,"int/shl"),(packed_ops::Integer::Ishr,"int/shr")]{
-        ops.push(value_op(name,vec![("a",Ty::Int),("b",Ty::Int)],vec![],None,vec![],Ty::Int,"Integer",Arc::new(move |_,_,a|Ok(Value::Int(packed_ops::integer_apply(operation,int_of(get(a,"a")?)?,int_of(get(a,"b")?)?)?)))));
+        ops.push(value_op(name,vec![("a",Ty::Int),("b",Ty::Int)],vec![],None,vec![],Ty::Int,"Integer",Arc::new(move |_,_,a|Ok(Value::Int(packed_ops::integer_apply(operation,int_of(a.get_arg("a")?)?,int_of(a.get_arg("b")?)?)?)))));
     }
     for (operation,name) in [(packed_ops::Comparison::Ilt,"int/lt"),(packed_ops::Comparison::Ile,"int/le"),(packed_ops::Comparison::Igt,"int/gt"),(packed_ops::Comparison::Ige,"int/ge"),(packed_ops::Comparison::Ieq,"int/eq")]{
-        ops.push(value_op(name,vec![("a",Ty::Int),("b",Ty::Int)],vec![],None,vec![],Ty::Bool,"Integer",Arc::new(move |_,_,a|Ok(Value::Bool(packed_ops::comparison_apply(operation,int_of(get(a,"a")?)?,int_of(get(a,"b")?)?))))));
+        ops.push(value_op(name,vec![("a",Ty::Int),("b",Ty::Int)],vec![],None,vec![],Ty::Bool,"Integer",Arc::new(move |_,_,a|Ok(Value::Bool(packed_ops::comparison_apply(operation,int_of(a.get_arg("a")?)?,int_of(a.get_arg("b")?)?))))));
     }
     let compares:[(&str,fn(f64,f64)->bool);5]=[("<",|a,b|a<b),(">",|a,b|a>b),("<=",|a,b|a<=b),(">=",|a,b|a>=b),("=",|a,b|a==b)];
-    for (name,pred) in compares{ops.push(value_op(name,vec![("a",Ty::Float),("b",Ty::Float)],vec![],None,vec![],Ty::Bool,"Compare",Arc::new(move |_,_,a|Ok(Value::Bool(pred(num(get(a,"a")?)?,num(get(a,"b")?)?))))));}
-    ops.push(value_op("and",vec![("a",Ty::Bool),("b",Ty::Bool)],vec![],None,vec![],Ty::Bool,"Compare",Arc::new(|_,_,a|Ok(Value::Bool(truthy(get(a,"a")?)?&&truthy(get(a,"b")?)?)))));
-    ops.push(value_op("or",vec![("a",Ty::Bool),("b",Ty::Bool)],vec![],None,vec![],Ty::Bool,"Compare",Arc::new(|_,_,a|Ok(Value::Bool(truthy(get(a,"a")?)?||truthy(get(a,"b")?)?)))));
-    ops.push(value_op("not",vec![("a",Ty::Bool)],vec![],None,vec![],Ty::Bool,"Compare",Arc::new(|_,_,a|Ok(Value::Bool(!truthy(get(a,"a")?)?)))));
-    ops.push(value_op("equal?",vec![("a",Ty::Any),("b",Ty::Any)],vec![],None,vec![],Ty::Bool,"Compare",Arc::new(|_,_,a|{let left=get(a,"a")?;let right=get(a,"b")?;if contains_fn(left)||contains_fn(right){return Err(fail("E_TYPE","Functions cannot be compared."))}Ok(Value::Bool(left==right))})));
+    for (name,pred) in compares{ops.push(value_op(name,vec![("a",Ty::Float),("b",Ty::Float)],vec![],None,vec![],Ty::Bool,"Compare",Arc::new(move |_,_,a|Ok(Value::Bool(pred(num(a.get_arg("a")?)?,num(a.get_arg("b")?)?))))));}
+    ops.push(value_op("and",vec![("a",Ty::Bool),("b",Ty::Bool)],vec![],None,vec![],Ty::Bool,"Compare",Arc::new(|_,_,a|Ok(Value::Bool(truthy(a.get_arg("a")?)?&&truthy(a.get_arg("b")?)?)))));
+    ops.push(value_op("or",vec![("a",Ty::Bool),("b",Ty::Bool)],vec![],None,vec![],Ty::Bool,"Compare",Arc::new(|_,_,a|Ok(Value::Bool(truthy(a.get_arg("a")?)?||truthy(a.get_arg("b")?)?)))));
+    ops.push(value_op("not",vec![("a",Ty::Bool)],vec![],None,vec![],Ty::Bool,"Compare",Arc::new(|_,_,a|Ok(Value::Bool(!truthy(a.get_arg("a")?)?)))));
+    ops.push(value_op("equal?",vec![("a",Ty::Any),("b",Ty::Any)],vec![],None,vec![],Ty::Bool,"Compare",Arc::new(|_,_,a|{let left=a.get_arg("a")?;let right=a.get_arg("b")?;if contains_fn(left)||contains_fn(right){return Err(fail("E_TYPE","Functions cannot be compared."))}Ok(Value::Bool(left==right))})));
     ops.push(value_op("live?",vec![("value",Ty::Any)],vec![],None,vec![],Ty::Bool,"Compare",Arc::new(|_,_,_|Ok(Value::Bool(false)))));
-    ops.push(value_op("fma",vec![("a",Ty::Float),("b",Ty::Float),("c",Ty::Float)],vec![],None,vec![],Ty::Float,"Math",Arc::new(|_,_,a|Ok(Value::Float(fin("fma",rays_math::fma::fma(fin("fma",num(get(a,"a")?)?)?,fin("fma",num(get(a,"b")?)?)?,fin("fma",num(get(a,"c")?)?)?))?)))));
+    ops.push(value_op("fma",vec![("a",Ty::Float),("b",Ty::Float),("c",Ty::Float)],vec![],None,vec![],Ty::Float,"Math",Arc::new(|_,_,a|Ok(Value::Float(fin("fma",rays_math::fma::fma(fin("fma",num(a.get_arg("a")?)?)?,fin("fma",num(a.get_arg("b")?)?)?,fin("fma",num(a.get_arg("c")?)?)?))?)))));
     ops.push(value_op("float/next_after",vec![("x",Ty::Float),("y",Ty::Float)],vec![],None,vec![],Ty::Float,"Math",Arc::new(|_,_,a|{
-        let x=fin("float/next_after",num(get(a,"x")?)?)?;let y=fin("float/next_after",num(get(a,"y")?)?)?;
+        let x=fin("float/next_after",num(a.get_arg("x")?)?)?;let y=fin("float/next_after",num(a.get_arg("y")?)?)?;
         let result=if x==y{y}else if x==0.{f64::from_bits(1|(y.to_bits()&0x8000_0000_0000_0000))}else{let bits=x.to_bits();f64::from_bits(if (y>x)==(x>0.){bits+1}else{bits-1})};
         Ok(Value::Float(fin("float/next_after",result)?))
     })));
     for (name,checked_fma) in [("float/mul_checked",false),("float/fma_checked",true)]{
         let params=if checked_fma{vec![("a",Ty::Float),("b",Ty::Float),("c",Ty::Float)]}else{vec![("a",Ty::Float),("b",Ty::Float)]};
         let out=rec(vec![("value",Ty::Float),("valid",Ty::Bool)]);
-        ops.push(value_op(name,params,vec![],None,vec![],out,"Math",Arc::new(move |_,_,a|{let av=fin(name,num(get(a,"a")?)?)?;let bv=fin(name,num(get(a,"b")?)?)?;let v=if checked_fma{rays_math::fma::fma(av,bv,fin(name,num(get(a,"c")?)?)?)}else{av*bv};let valid=v.is_finite();Ok(Value::Record(vec![("value".into(),Value::Float(if valid{v}else{0.})),("valid".into(),Value::Bool(valid))]))})));
+        ops.push(value_op(name,params,vec![],None,vec![],out,"Math",Arc::new(move |_,_,a|{let av=fin(name,num(a.get_arg("a")?)?)?;let bv=fin(name,num(a.get_arg("b")?)?)?;let v=if checked_fma{rays_math::fma::fma(av,bv,fin(name,num(a.get_arg("c")?)?)?)}else{av*bv};let valid=v.is_finite();Ok(Value::Record(vec![("value".into(),Value::Float(if valid{v}else{0.})),("valid".into(),Value::Bool(valid))]))})));
     }
-    ops.push(value_op("rand/at",vec![("seed",Ty::Int),("index",Ty::Int)],vec![],None,vec![],Ty::Float,"Random",Arc::new(|_,_,a|Ok(Value::Float(packed_ops::rand_at(int_of(get(a,"seed")?)?,int_of(get(a,"index")?)?))))));
-    ops.push(value_op("dot",vec![("a",Ty::Vec3),("b",Ty::Vec3)],vec![],None,vec![],Ty::Float,"Vector",Arc::new(|_,_,a|{let x=vec3(get(a,"a")?)?;let y=vec3(get(a,"b")?)?;Ok(Value::Float(fin("dot",x.0*y.0+x.1*y.1+x.2*y.2)?))})));
-    ops.push(value_op("cross",vec![("a",Ty::Vec3),("b",Ty::Vec3)],vec![],None,vec![],Ty::Vec3,"Vector",Arc::new(|_,_,a|{let(x,y,z)=vec3(get(a,"a")?)?;let(u,v,w)=vec3(get(a,"b")?)?;Ok(Value::Vec3(fin("cross",rays_math::fma::fma(-z,v,y*w))?,fin("cross",rays_math::fma::fma(-x,w,z*u))?,fin("cross",rays_math::fma::fma(-y,u,x*v))?))})));
-    ops.push(value_op("normalize",vec![("vector",Ty::Vec3)],vec![],None,vec![],Ty::Vec3,"Vector",Arc::new(|_,_,a|{let(x,y,z)=vec3(get(a,"vector")?)?;let l=fin("normalize",(x*x+y*y+z*z).sqrt())?;if l==0.{Ok(Value::Vec3(0.,0.,0.))}else{Ok(Value::Vec3(fin("normalize",x/l)?,fin("normalize",y/l)?,fin("normalize",z/l)?))}})));
-    ops.push(value_op("length",vec![("vector",Ty::Vec3)],vec![],None,vec![],Ty::Float,"Vector",Arc::new(|_,_,a|{let(x,y,z)=match get(a,"vector")?{Value::Vec3(x,y,z)=>(*x,*y,*z),_=>return Err(fail("E_TYPE","length needs a vec3."))};Ok(Value::Float(fin("length",(x*x+y*y+z*z).sqrt())?))})));
-    ops.push(value_op("value/hsv",vec![("h",Ty::Float),("s",Ty::Float),("v",Ty::Float)],vec![],None,vec![],Ty::Vec3,"Math",Arc::new(|_,_,a|{let(r,g,b)=rays_math::color::hsv(num(get(a,"h")?)?,num(get(a,"s")?)?,num(get(a,"v")?)?);Ok(Value::Vec3(fin("value/hsv",r)?,fin("value/hsv",g)?,fin("value/hsv",b)?))})));
-    let mut lerp=value_op("value/lerp",vec![("a",Ty::Float),("b",Ty::Float),("u",Ty::Float)],vec![],None,vec![],Ty::Float,"Math",Arc::new(|_,_,args|{let a=get(args,"a")?;let b=get(args,"b")?;let u=num(get(args,"u")?)?;if value::is_vec(a)||value::is_vec(b){let(ax,ay,az)=vec3(a)?;let(bx,by,bz)=vec3(b)?;let mix=|a:f64,b:f64|a*(1.-u)+b*u;Ok(Value::Vec3(fin("value/lerp",mix(ax,bx))?,fin("value/lerp",mix(ay,by))?,fin("value/lerp",mix(az,bz))?))}else{Ok(Value::Float(fin("value/lerp",num(a)?*(1.-u)+num(b)?*u)?))}}));
+    ops.push(value_op("rand/at",vec![("seed",Ty::Int),("index",Ty::Int)],vec![],None,vec![],Ty::Float,"Random",Arc::new(|_,_,a|Ok(Value::Float(packed_ops::rand_at(int_of(a.get_arg("seed")?)?,int_of(a.get_arg("index")?)?))))));
+    ops.push(value_op("dot",vec![("a",Ty::Vec3),("b",Ty::Vec3)],vec![],None,vec![],Ty::Float,"Vector",Arc::new(|_,_,a|{let x=vec3(a.get_arg("a")?)?;let y=vec3(a.get_arg("b")?)?;Ok(Value::Float(fin("dot",x.0*y.0+x.1*y.1+x.2*y.2)?))})));
+    ops.push(value_op("cross",vec![("a",Ty::Vec3),("b",Ty::Vec3)],vec![],None,vec![],Ty::Vec3,"Vector",Arc::new(|_,_,a|{let(x,y,z)=vec3(a.get_arg("a")?)?;let(u,v,w)=vec3(a.get_arg("b")?)?;Ok(Value::Vec3(fin("cross",rays_math::fma::fma(-z,v,y*w))?,fin("cross",rays_math::fma::fma(-x,w,z*u))?,fin("cross",rays_math::fma::fma(-y,u,x*v))?))})));
+    ops.push(value_op("normalize",vec![("vector",Ty::Vec3)],vec![],None,vec![],Ty::Vec3,"Vector",Arc::new(|_,_,a|{let(x,y,z)=vec3(a.get_arg("vector")?)?;let l=fin("normalize",(x*x+y*y+z*z).sqrt())?;if l==0.{Ok(Value::Vec3(0.,0.,0.))}else{Ok(Value::Vec3(fin("normalize",x/l)?,fin("normalize",y/l)?,fin("normalize",z/l)?))}})));
+    ops.push(value_op("length",vec![("vector",Ty::Vec3)],vec![],None,vec![],Ty::Float,"Vector",Arc::new(|_,_,a|{let(x,y,z)=match a.get_arg("vector")?{Value::Vec3(x,y,z)=>(*x,*y,*z),_=>return Err(fail("E_TYPE","length needs a vec3."))};Ok(Value::Float(fin("length",(x*x+y*y+z*z).sqrt())?))})));
+    ops.push(value_op("value/hsv",vec![("h",Ty::Float),("s",Ty::Float),("v",Ty::Float)],vec![],None,vec![],Ty::Vec3,"Math",Arc::new(|_,_,a|{let(r,g,b)=rays_math::color::hsv(num(a.get_arg("h")?)?,num(a.get_arg("s")?)?,num(a.get_arg("v")?)?);Ok(Value::Vec3(fin("value/hsv",r)?,fin("value/hsv",g)?,fin("value/hsv",b)?))})));
+    let mut lerp=value_op("value/lerp",vec![("a",Ty::Float),("b",Ty::Float),("u",Ty::Float)],vec![],None,vec![],Ty::Float,"Math",Arc::new(|_,_,args|{let a=args.get_arg("a")?;let b=args.get_arg("b")?;let u=num(args.get_arg("u")?)?;if value::is_vec(a)||value::is_vec(b){let(ax,ay,az)=vec3(a)?;let(bx,by,bz)=vec3(b)?;let mix=|a:f64,b:f64|a*(1.-u)+b*u;Ok(Value::Vec3(fin("value/lerp",mix(ax,bx))?,fin("value/lerp",mix(ay,by))?,fin("value/lerp",mix(az,bz))?))}else{Ok(Value::Float(fin("value/lerp",num(a)?*(1.-u)+num(b)?*u)?))}}));
     lerp.any_num=true;lerp.out=Arc::new(|ts|Ok(if ts.iter().take(2).any(|t|*t==Ty::Vec3){Ty::Vec3}else{Ty::Float}));ops.push(lerp);
-    ops.push(value_op("value/polar",vec![("radius",Ty::Float),("angle",Ty::Float)],vec![("height",Ty::Float)],None,vec![],Ty::Vec3,"Math",Arc::new(|_,_,a|{let r=num(get(a,"radius")?)?;let t=num(get(a,"angle")?)?;Ok(Value::Vec3(fin("value/polar",r*t.cos())?,opt(a,"height").map(num).transpose()?.unwrap_or(0.),fin("value/polar",r*t.sin())?))})));
+    ops.push(value_op("value/polar",vec![("radius",Ty::Float),("angle",Ty::Float)],vec![("height",Ty::Float)],None,vec![],Ty::Vec3,"Math",Arc::new(|_,_,a|{let r=num(a.get_arg("radius")?)?;let t=num(a.get_arg("angle")?)?;Ok(Value::Vec3(fin("value/polar",r*t.cos())?,a.opt_arg("height").map(num).transpose()?.unwrap_or(0.),fin("value/polar",r*t.sin())?))})));
     ops
 }
 fn list_element_out(index:usize)->Out{Arc::new(move |ts|match ts.get(index){Some(Ty::List(e))=>Ok(e.as_ref().clone()),_=>Ok(Ty::Any)})}
 fn list_out(index:usize)->Out{Arc::new(move |ts|match ts.get(index){Some(Ty::List(e))=>Ok(list(e.as_ref().clone())),_=>Ok(list(Ty::Any))})}
 fn text_ops()->Vec<Op>{
     let mut ops=Vec::new();
-    ops.push(value_op("text/blank?",vec![("text",Ty::Text)],vec![],None,vec![],Ty::Bool,"Text",Arc::new(|_,_,a|Ok(Value::Bool(text_bytes(get(a,"text")?)?.iter().all(u8::is_ascii_whitespace))))));
-    ops.push(value_op("text/trim",vec![("text",Ty::Text)],vec![],None,vec![],Ty::Text,"Text",Arc::new(|_,_,a|{let b=text_bytes(get(a,"text")?)?;let mut start=0;let mut end=b.len();while start<end&&b[start].is_ascii_whitespace(){start+=1}while end>start&&b[end-1].is_ascii_whitespace(){end-=1}Ok(Value::Text(b[start..end].to_vec()))})));
-    ops.push(value_op("text/lower",vec![("text",Ty::Text)],vec![],None,vec![],Ty::Text,"Text",Arc::new(|_,_,a|Ok(Value::Text(text_bytes(get(a,"text")?)?.iter().map(u8::to_ascii_lowercase).collect())))));
-    ops.push(value_op("text/repr",vec![("text",Ty::Text)],vec![],None,vec![],Ty::Text,"Text",Arc::new(|_,_,a|Ok(Value::Text(text_repr(text_bytes(get(a,"text")?)?))))));
-    ops.push(value_op("text/split",vec![("text",Ty::Text),("separator",Ty::Text)],vec![],None,vec![],arr(Ty::Text),"Text",Arc::new(|_,_,a|{let source=text_bytes(get(a,"text")?)?;let separator=text_bytes(get(a,"separator")?)?;if separator.is_empty(){return Err(fail("E_TEXT_SEPARATOR","text/split needs a nonempty separator."))}Ok(Value::Text_array(Arc::new(bytes_split(source,separator))))})));
-    ops.push(value_op("text/tokens",vec![("text",Ty::Text)],vec![],None,vec![],arr(Ty::Text),"Text",Arc::new(|_,_,a|{let b=text_bytes(get(a,"text")?)?;let mut out=Vec::new();let mut start=0;for i in 0..=b.len(){if i==b.len()||matches!(b[i],b' '|b','|b'\t'|b'\n'){if i>start{out.push(b[start..i].to_vec())}start=i+1}}Ok(Value::Text_array(Arc::new(out)))})));
+    ops.push(value_op("text/blank?",vec![("text",Ty::Text)],vec![],None,vec![],Ty::Bool,"Text",Arc::new(|_,_,a|Ok(Value::Bool(text_bytes(a.get_arg("text")?)?.iter().all(u8::is_ascii_whitespace))))));
+    ops.push(value_op("text/trim",vec![("text",Ty::Text)],vec![],None,vec![],Ty::Text,"Text",Arc::new(|_,_,a|{let b=text_bytes(a.get_arg("text")?)?;let mut start=0;let mut end=b.len();while start<end&&b[start].is_ascii_whitespace(){start+=1}while end>start&&b[end-1].is_ascii_whitespace(){end-=1}Ok(Value::Text(b[start..end].to_vec()))})));
+    ops.push(value_op("text/lower",vec![("text",Ty::Text)],vec![],None,vec![],Ty::Text,"Text",Arc::new(|_,_,a|Ok(Value::Text(text_bytes(a.get_arg("text")?)?.iter().map(u8::to_ascii_lowercase).collect())))));
+    ops.push(value_op("text/repr",vec![("text",Ty::Text)],vec![],None,vec![],Ty::Text,"Text",Arc::new(|_,_,a|Ok(Value::Text(text_repr(text_bytes(a.get_arg("text")?)?))))));
+    ops.push(value_op("text/split",vec![("text",Ty::Text),("separator",Ty::Text)],vec![],None,vec![],arr(Ty::Text),"Text",Arc::new(|_,_,a|{let source=text_bytes(a.get_arg("text")?)?;let separator=text_bytes(a.get_arg("separator")?)?;if separator.is_empty(){return Err(fail("E_TEXT_SEPARATOR","text/split needs a nonempty separator."))}Ok(Value::Text_array(Arc::new(bytes_split(source,separator))))})));
+    ops.push(value_op("text/tokens",vec![("text",Ty::Text)],vec![],None,vec![],arr(Ty::Text),"Text",Arc::new(|_,_,a|{let b=text_bytes(a.get_arg("text")?)?;let mut out=Vec::new();let mut start=0;for i in 0..=b.len(){if i==b.len()||matches!(b[i],b' '|b','|b'\t'|b'\n'){if i>start{out.push(b[start..i].to_vec())}start=i+1}}Ok(Value::Text_array(Arc::new(out)))})));
     for (name,float_result) in [("text/to_float",true),("text/to_int",false)]{
         let result=if float_result{Ty::Float}else{Ty::Int};
         ops.push(value_op(name,vec![("text",Ty::Text)],vec![],None,vec![],rec(vec![("value",result.clone()),("valid",Ty::Bool)]),"Text",Arc::new(move |_,_,a|{
-            let parsed=if float_result{parse_float_token(text_bytes(get(a,"text")?)?).map(Value::Float)}else{parse_int_token(text_bytes(get(a,"text")?)?).map(Value::Int)};
+            let parsed=if float_result{parse_float_token(text_bytes(a.get_arg("text")?)?).map(Value::Float)}else{parse_int_token(text_bytes(a.get_arg("text")?)?).map(Value::Int)};
             Ok(Value::Record(vec![("value".into(),parsed.clone().unwrap_or(if float_result{Value::Float(0.)}else{Value::Int(0)})),("valid".into(),Value::Bool(parsed.is_some()))]))
         })));
     }
-    ops.push(value_op("text/table_decode",vec![("text",Ty::Text)],vec![],None,vec![],list(list(Ty::Text)),"Text",Arc::new(|_,_,a|table_decode(text_bytes(get(a,"text")?)?))));
-    ops.push(value_op("text/table_encode",vec![("rows",list(list(Ty::Text)))],vec![],None,vec![],Ty::Text,"Text",Arc::new(|_,_,a|table_encode(get(a,"rows")?))));
+    ops.push(value_op("text/table_decode",vec![("text",Ty::Text)],vec![],None,vec![],list(list(Ty::Text)),"Text",Arc::new(|_,_,a|table_decode(text_bytes(a.get_arg("text")?)?))));
+    ops.push(value_op("text/table_encode",vec![("rows",list(list(Ty::Text)))],vec![],None,vec![],Ty::Text,"Text",Arc::new(|_,_,a|table_encode(a.get_arg("rows")?))));
     ops
 }
 fn list_ops()->Vec<Op>{
     let mut ops=Vec::new();
     let range_body:Body=Arc::new(|_,_,a|{
-        let (lo,hi)=if let Some(end)=opt(a,"end"){(int_of(get(a,"count")?)?,int_of(end)?)}else{(0,int_of(get(a,"count")?)?)};
+        let (lo,hi)=if let Some(end)=a.opt_arg("end"){(int_of(a.get_arg("count")?)?,int_of(end)?)}else{(0,int_of(a.get_arg("count")?)?)};
         let n=range_length(None,lo,hi)?;Ok(Value::List((0..n).map(|i|Value::Int(wrap63(lo.wrapping_add(i as i64)))).collect()))
     });
     ops.push(value_op("range",vec![("count",Ty::Int)],vec![("end",Ty::Int)],None,vec![],list(Ty::Int),"List",range_body));
     ops.push(value_op("linspace",vec![("from",Ty::Float),("to",Ty::Float),("count",Ty::Int)],vec![],None,vec![],list(Ty::Float),"List",Arc::new(|_,_,a|{
-        let from=num(get(a,"from")?)?;let to=num(get(a,"to")?)?;let count=int_of(get(a,"count")?)?;
+        let from=num(a.get_arg("from")?)?;let to=num(a.get_arg("to")?)?;let count=int_of(a.get_arg("count")?)?;
         if count>MAX_ITERATIONS as i64{return Err(fail("E_ITER_BOUND","linspace exceeds 4,096 values."))}
         let n=count.max(0) as usize;Ok(Value::List((0..n).map(|k|Value::Float(if n==1{from}else{from+(to-from)*k as f64/(n-1) as f64})).collect()))
     })));
-    ops.push(value_op("count",vec![("list",list(Ty::Any))],vec![],None,vec![],Ty::Int,"List",Arc::new(|_,_,a|Ok(Value::Int(value::list_arg(get(a,"list")?)?.len() as i64)))));
+    ops.push(value_op("count",vec![("list",list(Ty::Any))],vec![],None,vec![],Ty::Int,"List",Arc::new(|_,_,a|Ok(Value::Int(value::list_arg(a.get_arg("list")?)?.len() as i64)))));
     for (name,last) in [("first",false),("last",true)]{
-        ops.push(with_defaults(mk(name,context::value(),signature(vec![("list",list(Ty::Any))],vec![],None,vec![]),list_element_out(0),Arc::new(move |_,_,a|{let xs=value::list_arg(get(a,"list")?)?;if xs.is_empty(){return Err(fail("E_LIST_RANGE",if last{"last of an empty list."}else{"first of an empty list."}))}Ok(xs[if last{xs.len()-1}else{0}].clone())})),"List"));
+        ops.push(with_defaults(mk(name,context::value(),signature(vec![("list",list(Ty::Any))],vec![],None,vec![]),list_element_out(0),Arc::new(move |_,_,a|{let xs=value::list_arg(a.get_arg("list")?)?;if xs.is_empty(){return Err(fail("E_LIST_RANGE",if last{"last of an empty list."}else{"first of an empty list."}))}Ok(xs[if last{xs.len()-1}else{0}].clone())})),"List"));
     }
-    ops.push(with_defaults(mk("rest",context::value(),signature(vec![("list",list(Ty::Any))],vec![],None,vec![]),list_out(0),Arc::new(|_,_,a|{let xs=value::list_arg(get(a,"list")?)?;Ok(Value::List(if xs.is_empty(){xs.to_vec()}else{xs[1..].to_vec()}))})),"List"));
+    ops.push(with_defaults(mk("rest",context::value(),signature(vec![("list",list(Ty::Any))],vec![],None,vec![]),list_out(0),Arc::new(|_,_,a|{let xs=value::list_arg(a.get_arg("list")?)?;Ok(Value::List(if xs.is_empty(){xs.to_vec()}else{xs[1..].to_vec()}))})),"List"));
     ops.push(with_defaults(mk("nth",context::value(),signature(vec![("list",list(Ty::Any)),("index",Ty::Int)],vec![],None,vec![]),list_element_out(0),Arc::new(|_,_,a|{
-        let raw=get(a,"index")?;if let Value::Float(x)=raw{if x.fract()!=0.{return Err(failf("E_LIST_RANGE",format!("nth index {} is not a whole number.",value::general(*x))))}}
-        let i=int_of(raw)?;let xs=value::list_arg(get(a,"list")?)?;if i<0||i as u128>=xs.len() as u128{return Err(failf("E_LIST_RANGE",format!("nth index {i} is out of range for a list of length {}.",xs.len())))}Ok(xs[i as usize].clone())
+        let raw=a.get_arg("index")?;if let Value::Float(x)=raw{if x.fract()!=0.{return Err(failf("E_LIST_RANGE",format!("nth index {} is not a whole number.",value::general(*x))))}}
+        let i=int_of(raw)?;let xs=value::list_arg(a.get_arg("list")?)?;if i<0||i as u128>=xs.len() as u128{return Err(failf("E_LIST_RANGE",format!("nth index {i} is out of range for a list of length {}.",xs.len())))}Ok(xs[i as usize].clone())
     })),"List"));
-    ops.push(with_defaults(mk("reverse",context::value(),signature(vec![("list",list(Ty::Any))],vec![],None,vec![]),list_out(0),Arc::new(|_,_,a|{let xs=value::list_arg(get(a,"list")?)?;Ok(Value::List(xs.iter().rev().cloned().collect()))})),"List"));
+    ops.push(with_defaults(mk("reverse",context::value(),signature(vec![("list",list(Ty::Any))],vec![],None,vec![]),list_out(0),Arc::new(|_,_,a|{let xs=value::list_arg(a.get_arg("list")?)?;Ok(Value::List(xs.iter().rev().cloned().collect()))})),"List"));
     for (name,take) in [("take",true),("drop",false)]{
         ops.push(with_defaults(mk(name,context::value(),signature(vec![("n",Ty::Int),("list",list(Ty::Any))],vec![],None,vec![]),list_out(1),Arc::new(move |_,_,a|{
-            let n=int_of(get(a,"n")?)?.max(0) as u128;let xs=value::list_arg(get(a,"list")?)?;let n=n.min(xs.len() as u128) as usize;
+            let n=int_of(a.get_arg("n")?)?.max(0) as u128;let xs=value::list_arg(a.get_arg("list")?)?;let n=n.min(xs.len() as u128) as usize;
             Ok(Value::List(if take{xs[..n].to_vec()}else{xs[n..].to_vec()}))
         })),"List"));
     }
     ops
 }
 fn color_ops()->Vec<Op>{
-    let hsl=value_op("color/hsl",vec![("h",Ty::Float),("s",Ty::Float),("l",Ty::Float)],vec![],None,vec![],Ty::Vec3,"Color",Arc::new(|_,_,a|{let (r,g,b)=rays_math::color::hsl_channels(fin("h",num(get(a,"h")?)?)?,fin("s",num(get(a,"s")?)?)?,fin("l",num(get(a,"l")?)?)?);Ok(Value::Vec3(r,g,b))}));
-    let hsla=value_op("color/hsla",vec![("h",Ty::Float),("s",Ty::Float),("l",Ty::Float),("a",Ty::Float)],vec![],None,vec![],list(Ty::Float),"Color",Arc::new(|_,_,a|{let c=rays_math::color::hsl(Some(fin("a",num(get(a,"a")?)?)?),fin("h",num(get(a,"h")?)?)?,fin("s",num(get(a,"s")?)?)?,fin("l",num(get(a,"l")?)?)?);let(r,g,b,a)=rays_math::color::to_floats(c);Ok(Value::List(vec![Value::Float(r),Value::Float(g),Value::Float(b),Value::Float(a)]))}));
+    let hsl=value_op("color/hsl",vec![("h",Ty::Float),("s",Ty::Float),("l",Ty::Float)],vec![],None,vec![],Ty::Vec3,"Color",Arc::new(|_,_,a|{let (r,g,b)=rays_math::color::hsl_channels(fin("h",num(a.get_arg("h")?)?)?,fin("s",num(a.get_arg("s")?)?)?,fin("l",num(a.get_arg("l")?)?)?);Ok(Value::Vec3(r,g,b))}));
+    let hsla=value_op("color/hsla",vec![("h",Ty::Float),("s",Ty::Float),("l",Ty::Float),("a",Ty::Float)],vec![],None,vec![],list(Ty::Float),"Color",Arc::new(|_,_,a|{let c=rays_math::color::hsl(Some(fin("a",num(a.get_arg("a")?)?)?),fin("h",num(a.get_arg("h")?)?)?,fin("s",num(a.get_arg("s")?)?)?,fin("l",num(a.get_arg("l")?)?)?);let(r,g,b,a)=rays_math::color::to_floats(c);Ok(Value::List(vec![Value::Float(r),Value::Float(g),Value::Float(b),Value::Float(a)]))}));
     let gradient=value_op("color/gradient",vec![("stops",list(Ty::Color)),("x",Ty::Float)],vec![],None,vec![],Ty::Vec3,"Color",Arc::new(|_,_,a|{
-        let Value::List(xs)=get(a,"stops")? else{return Err(fail("E_DRAW_COLOR","A gradient needs at least one color stop."))};
+        let Value::List(xs)=a.get_arg("stops")? else{return Err(fail("E_DRAW_COLOR","A gradient needs at least one color stop."))};
         if xs.is_empty(){return Err(fail("E_DRAW_COLOR","A gradient needs at least one color stop."))}
         let colors=xs.iter().map(drawing_color).collect::<Result<Vec<_>,_>>()?;
         if colors.iter().any(|c|c.a!=255){return Err(fail("E_DRAW_COLOR","A packed RGB gradient requires opaque stops."))}
-        let c=rays_math::color::gradient(&colors,fin("gradient position",num(get(a,"x")?)?)?).map_err(|e|fail("E_DRAW_COLOR",&e))?;Ok(color_value(c))
+        let c=rays_math::color::gradient(&colors,fin("gradient position",num(a.get_arg("x")?)?)?).map_err(|e|fail("E_DRAW_COLOR",&e))?;Ok(color_value(c))
     }));
     vec![hsl,hsla,gradient]
 }
@@ -734,11 +743,11 @@ fn misc_value_ops()->Vec<Op>{
     let mut ops=Vec::new();
     ops.push(value_op("value/rand",vec![],vec![],Some(("key",Ty::Float)),vec![],Ty::Float,"Math",Arc::new(|_,_,a|Ok(Value::Float(value::hash(&a.iter().map(|(_,v)|num(v)).collect::<Result<Vec<_>,_>>()?))))));
     let mut error=value_op("error",vec![("code",Ty::Text),("message",Ty::Text)],vec![],None,vec![("cause",Ty::Text)],Ty::Any,"Value",Arc::new(|_,_,a|{
-        let code=diagnostic_text(get(a,"code")?)?;let message=diagnostic_text(get(a,"message")?)?;let cause=opt(a,"cause").map(diagnostic_text).transpose()?;
+        let code=diagnostic_text(a.get_arg("code")?)?;let message=diagnostic_text(a.get_arg("message")?)?;let cause=a.opt_arg("cause").map(diagnostic_text).transpose()?;
         Err(rays_diagnostic::error(code,message,None,None,cause,Vec::new(),Vec::new()))
     }));ops.push(error);
     let exact_out:Out=Arc::new(|ts|Ok(ts.first().cloned().unwrap_or(Ty::Any)));
-    ops.push(with_defaults(mk("exact",context::value(),signature(vec![("value",Ty::Any)],vec![],None,vec![]),exact_out,Arc::new(|_,node,a|{let v=get(a,"value")?;if value::ty_of(v)==ty::image(){node("exact",a)}else{Ok(v.clone())}})),"Convert"));
+    ops.push(with_defaults(mk("exact",context::value(),signature(vec![("value",Ty::Any)],vec![],None,vec![]),exact_out,Arc::new(|_,node,a|{let v=a.get_arg("value")?;if value::ty_of(v)==ty::image(){node("exact",a)}else{Ok(v.clone())}})),"Convert"));
     ops
 }
 fn panel_ops()->Vec<Op>{
@@ -767,13 +776,13 @@ fn panel_ops()->Vec<Op>{
     let axis_choices=vec!["horizontal".to_owned(),"vertical".to_owned()];
     let split_check:Check=Arc::new(move |a|{
         one_of(a,"axis","Split axis",&axis_choices)?;
-        for key in ["first_size","second_size"]{if let Some(v)=opt(a,key){if !matches!(v,Value::Residual(_))&&num(v)?<1.{return Err(range_error("A fixed split size is 1 point or more."))}}}
+        for key in ["first_size","second_size"]{if let Some(v)=a.opt_arg(key){if !matches!(v,Value::Residual(_))&&num(v)?<1.{return Err(range_error("A fixed split size is 1 point or more."))}}}
         if has(a,"first_size")&&has(a,"second_size"){return Err(range_error("A split fixes one side: :first_size or :second_size."))}Ok(())
     });
     let mut split=structure_op("ui/split",context::editor(),vec![("axis",Ty::Text),("first",panel.clone()),("second",panel.clone())],vec![],None,vec![("first_size",Ty::Int),("second_size",Ty::Int)],panel.clone(),false,"Editor");
     split.choices=vec![("axis".into(),vec!["horizontal".into(),"vertical".into()])];split.check=split_check;ops.push(split);
     let axis_choices=vec!["horizontal".to_owned(),"vertical".to_owned()];
-    let split_at:Check=Arc::new(move |a|{one_of(a,"axis","Split axis",&axis_choices)?;if let Some(v)=opt(a,"ratio"){if !matches!(v,Value::Residual(_)){let r=num(v)?;if r<0.1||r>0.9{return Err(range_error("Split ratio is 0.1–0.9."))}}}Ok(())});
+    let split_at:Check=Arc::new(move |a|{one_of(a,"axis","Split axis",&axis_choices)?;if let Some(v)=a.opt_arg("ratio"){if !matches!(v,Value::Residual(_)){let r=num(v)?;if r<0.1||r>0.9{return Err(range_error("Split ratio is 0.1–0.9."))}}}Ok(())});
     let mut split=structure_op("ui/split-at",context::editor(),vec![("axis",Ty::Text),("ratio",Ty::Float),("first",panel.clone()),("second",panel.clone())],vec![],None,vec![],panel.clone(),false,"Editor");
     split.choices=vec![("axis".into(),vec!["horizontal".into(),"vertical".into()])];split.check=split_at;ops.push(split);
     let tile_check:Check=Arc::new(|a|{if a.is_empty()||a.len()>16{Err(range_error("A tile holds 1–16 panels."))}else{Ok(())}});
@@ -781,7 +790,7 @@ fn panel_ops()->Vec<Op>{
     ops.push(structure_op("ui/floating",context::editor(),vec![("panel",panel.clone())],vec![],None,vec![],panel.clone(),false,"Editor"));
     let switch_check:Check=Arc::new(|a|{
         let n=a.iter().filter(|(k,_)|k!="active").count();if n<1||n>16{return Err(range_error("A switch holds 1–16 layouts."))}
-        if let Some(v)=opt(a,"active"){if !matches!(v,Value::Residual(_)){let active=num(v)?;if active<0.||active>=n as f64{return Err(range_error("The active layout is 0 to the layout count minus one."))}}}Ok(())
+        if let Some(v)=a.opt_arg("active"){if !matches!(v,Value::Residual(_)){let active=num(v)?;if active<0.||active>=n as f64{return Err(range_error("The active layout is 0 to the layout count minus one."))}}}Ok(())
     });
     let mut switch_op=structure_op("ui/switch",context::editor(),vec![],vec![],Some(("panel",panel)),vec![("active",Ty::Int)],ty::panel(),false,"Editor");switch_op.check=switch_check;ops.push(switch_op);
     ops
@@ -813,7 +822,7 @@ fn builtins()->Vec<Op>{
     ops.extend(panel_ops());
     ops.push(noise_op());
     ops.extend(color_ops());
-    ops.push(value_op("text/float",vec![("value",Ty::Float)],vec![],None,vec![],Ty::Text,"Text",Arc::new(|_,_,a|match get(a,"value")?{Value::Float(x)=>Ok(text(&param::float_text(*x))),_=>Err(fail("E_METADATA_TEXT","text/float takes a float."))})));
+    ops.push(value_op("text/float",vec![("value",Ty::Float)],vec![],None,vec![],Ty::Text,"Text",Arc::new(|_,_,a|match a.get_arg("value")?{Value::Float(x)=>Ok(text(&param::float_text(*x))),_=>Err(fail("E_METADATA_TEXT","text/float takes a float."))})));
     ops.append(&mut available);
     ops
 }
@@ -866,5 +875,17 @@ mod ocaml_table {
         }
         let golden=std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"),"/golden/ops.txt")).unwrap().replace("\r\n","\n");
         assert!(out==golden,"operator declarations differ from golden/ops.txt");
+    }
+}
+
+fn concat_arrays(x:&Value,y:&Value)->Result<Value,Diagnostic>{
+    match (x,y){
+        (Value::Int_array(a),Value::Int_array(b))=>Ok(Value::Int_array(Arc::new([a.as_slice(),b.as_slice()].concat()))),
+        (Value::Text_array(a),Value::Text_array(b))=>Ok(Value::Text_array(Arc::new([a.as_slice(),b.as_slice()].concat()))),
+        (Value::Float_array(a),Value::Float_array(b))=>Ok(Value::Float_array(Arc::new([a.as_slice(),b.as_slice()].concat()))),
+        (Value::Vec2_array(a),Value::Vec2_array(b))=>Ok(Value::Vec2_array(Arc::new([a.as_slice(),b.as_slice()].concat()))),
+        (Value::Vec3_array(a),Value::Vec3_array(b))=>Ok(Value::Vec3_array(Arc::new([a.as_slice(),b.as_slice()].concat()))),
+        (Value::Vec4_array(a),Value::Vec4_array(b))=>Ok(Value::Vec4_array(Arc::new([a.as_slice(),b.as_slice()].concat()))),
+        _=>Err(fail("E_ARRAY_TYPE","Concatenated arrays must have the same element type.")),
     }
 }

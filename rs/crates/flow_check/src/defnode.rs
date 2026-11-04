@@ -124,16 +124,19 @@ fn options(form: &Syntax, allowed: &[&str], values: &[Syntax]) -> Result<Vec<(St
     Ok(result)
 }
 
-fn opt<'a>(options: &'a [(String, Syntax)], key: &'static str) -> Option<&'a Syntax> {
-    options.iter().find(|(name, _)| name == key).map(|(_, value)| value)
+trait Options { fn opt(&self, key: &'static str) -> Option<&Syntax>; }
+impl Options for [(String, Syntax)] {
+    fn opt(&self, key: &'static str) -> Option<&Syntax> {
+    self.iter().find(|(name, _)| name == key).map(|(_, value)| value)
+    }
 }
 
 fn get_text(options: &[(String, Syntax)], key: &'static str, default: &str) -> Result<String, Diagnostic> {
-    opt(options, key).map(text).unwrap_or_else(|| Ok(default.into()))
+    options.opt(key).map(text).unwrap_or_else(|| Ok(default.into()))
 }
 
 fn get_bool(options: &[(String, Syntax)], key: &'static str, default: bool) -> Result<bool, Diagnostic> {
-    opt(options, key).map(boolean).unwrap_or(Ok(default))
+    options.opt(key).map(boolean).unwrap_or(Ok(default))
 }
 
 fn title(name: &str) -> String {
@@ -153,37 +156,37 @@ fn validation(options: &[(String, Syntax)]) -> Result<Vec<Validation>, Diagnosti
     let code = get_text(options, "code", "E_PARAM")?;
     let message = get_text(options, "message", "Node parameter validation failed.")?;
     for key in ["code", "message"] {
-        if let Some(form) = opt(options, key) {
+        if let Some(form) = options.opt(key) {
             if text(form)?.trim().is_empty() { return Err(bad(form, "Validation code and message must be nonempty.")); }
         }
     }
-    Ok(opt(options, "validate").map(|predicate| vec![Validation { predicate: predicate.clone(), code, message }]).unwrap_or_default())
+    Ok(options.opt("validate").map(|predicate| vec![Validation { predicate: predicate.clone(), code, message }]).unwrap_or_default())
 }
 
 fn facts(form: &Syntax) -> Result<catalog::KernelFacts, Diagnostic> {
     let Node::Map(entries) = &form.node else { return Err(bad(form, ":facts is a metadata map.")); };
     let options = options(form, &["elementwise", "reads", "writes", "topology", "preserves_topology", "exact", "cook-mode"], entries)?;
-    let elementwise = match opt(&options, "elementwise").map(word).transpose()?.as_deref() {
+    let elementwise = match options.opt("elementwise").map(word).transpose()?.as_deref() {
         None | Some("none") | Some("irregular") => KernelElements::Irregular,
         Some("points") => KernelElements::Points,
         Some("primitives") => KernelElements::Primitives,
-        _ => return Err(bad(opt(&options, "elementwise").unwrap_or(form), "Elementwise is points, primitives or irregular.")),
+        _ => return Err(bad(options.opt("elementwise").unwrap_or(form), "Elementwise is points, primitives or irregular.")),
     };
-    if let Some(mode) = opt(&options, "cook-mode") {
+    if let Some(mode) = options.opt("cook-mode") {
         match word(mode)?.as_str() {
             "generator" | "generic" | "modifier" | "filter" | "analysis" | "irregular" => (),
             _ => return Err(bad(mode, "Invalid cook mode.")),
         }
     }
-    let topology = opt(&options, "topology").map(|value| match word(value)?.as_str() {
+    let topology = options.opt("topology").map(|value| match word(value)?.as_str() {
         "preserved" | "unchanged" => Ok(true), "changed" => Ok(false),
         _ => Err(bad(value, "Topology is preserved or changed.")),
     }).transpose()?;
-    let preserves_topology = opt(&options, "preserves_topology").map(boolean).transpose()?.or(topology).unwrap_or(false);
+    let preserves_topology = options.opt("preserves_topology").map(boolean).transpose()?.or(topology).unwrap_or(false);
     Ok(catalog::KernelFacts {
         elementwise,
-        reads: opt(&options, "reads").map(strings).transpose()?.unwrap_or_default(),
-        writes: opt(&options, "writes").map(strings).transpose()?.unwrap_or_default(),
+        reads: options.opt("reads").map(strings).transpose()?.unwrap_or_default(),
+        writes: options.opt("writes").map(strings).transpose()?.unwrap_or_default(),
         preserves_topology,
         exact: get_bool(&options, "exact", true)?,
     })
@@ -196,14 +199,14 @@ const PARAMETER_KEYS: &[&str] = &[
 ];
 
 fn range_value(options: &[(String, Syntax)], first: &'static str, alias: &'static str) -> Result<Option<f64>, Diagnostic> {
-    match (opt(options, first), opt(options, alias)) {
+    match (options.opt(first), options.opt(alias)) {
         (Some(value), Some(_)) => Err(bad(value, &format!("Duplicate metadata :{first}."))),
         (Some(value), _) | (_, Some(value)) => number(value).map(Some),
         _ => Ok(None),
     }
 }
 fn range_integer(options: &[(String, Syntax)], first: &'static str, alias: &'static str) -> Result<Option<i64>, Diagnostic> {
-    match (opt(options, first), opt(options, alias)) {
+    match (options.opt(first), options.opt(alias)) {
         (Some(value), Some(_)) => Err(bad(value, &format!("Duplicate metadata :{first}."))),
         (Some(value), _) | (_, Some(value)) => integer(value).map(Some),
         _ => Ok(None),
@@ -222,15 +225,15 @@ fn parameter(
     fields: &mut Vec<FieldView>, normalizers: &mut Vec<(String, Syntax)>,
 ) -> Result<(), Diagnostic> {
     let label = get_text(options, "label", &title(pn))?;
-    let description = opt(options, "description").map(text).transpose()?;
-    let folder = opt(options, "folder").map(strings).transpose()?.unwrap_or_default();
+    let description = options.opt("description").map(text).transpose()?;
+    let folder = options.opt("folder").map(strings).transpose()?.unwrap_or_default();
     let primary = get_bool(options, "primary", false)?;
-    let unit = opt(options, "unit").map(text).transpose()?;
-    let impact = match opt(options, "impact").map(word).transpose()?.as_deref() {
+    let unit = options.opt("unit").map(text).transpose()?;
+    let impact = match options.opt("impact").map(word).transpose()?.as_deref() {
         None | Some("cook") => Impact::Cook, Some("view") => Impact::View, Some("export") => Impact::Export,
-        _ => return Err(bad(opt(options, "impact").unwrap_or(form), "Impact is cook, view or export.")),
+        _ => return Err(bad(options.opt("impact").unwrap_or(form), "Impact is cook, view or export.")),
     };
-    let vec3 = match opt(options, "vec3") {
+    let vec3 = match options.opt("vec3") {
         None => None,
         Some(form) => match &form.node {
             Node::Vec(pair) if pair.len() == 2 => {
@@ -241,9 +244,9 @@ fn parameter(
             _ => return Err(bad(form, ":vec3 is [\"group\" component].")),
         },
     };
-    let has_ranges = ["min", "max", "hard_min", "hard_max", "hard-min", "hard-max"].iter().any(|key| opt(options, key).is_some());
+    let has_ranges = ["min", "max", "hard_min", "hard_max", "hard-min", "hard-max"].iter().any(|key| options.opt(key).is_some());
     if !matches!(ty, Ty::Float | Ty::Int | Ty::Vec3) && has_ranges { return Err(bad(form, "Ranges require a numeric parameter.")); }
-    let choices = match opt(options, "choices") {
+    let choices = match options.opt("choices") {
         None => Vec::new(),
         Some(value) => match &value.node {
             Node::Vec(values) => {
@@ -255,17 +258,17 @@ fn parameter(
             _ => return Err(bad(value, "Choices are a vector of strings.")),
         },
     };
-    let kind_name = match opt(options, "kind") { Some(v) => word(v)?, None => if choices.is_empty() { ty::to_string(ty) } else { "choice".to_owned() } };
-    match (kind_name.as_str(), opt(options, "normalize")) {
+    let kind_name = match options.opt("kind") { Some(v) => word(v)?, None => if choices.is_empty() { ty::to_string(ty) } else { "choice".to_owned() } };
+    match (kind_name.as_str(), options.opt("normalize")) {
         ("encoded", Some(fn_form)) if ty == &Ty::Text => normalizers.push((pn.into(), fn_form.clone())),
         ("encoded", None) => return Err(bad(form, "An encoded parameter requires a pure :normalize text-to-text function.")),
         (_, Some(_)) => return Err(bad(form, "Only encoded text parameters have :normalize.")),
         _ => (),
     }
-    let soft_min_float = opt(options, "min").map(number).transpose()?.unwrap_or(0.0);
-    let soft_max_float = opt(options, "max").map(number).transpose()?.unwrap_or(1.0);
+    let soft_min_float = options.opt("min").map(number).transpose()?.unwrap_or(0.0);
+    let soft_max_float = options.opt("max").map(number).transpose()?.unwrap_or(1.0);
     let integer_soft = if *ty == Ty::Int {
-        Some((opt(options, "min").map(integer).transpose()?.unwrap_or(0), opt(options, "max").map(integer).transpose()?.unwrap_or(1)))
+        Some((options.opt("min").map(integer).transpose()?.unwrap_or(0), options.opt("max").map(integer).transpose()?.unwrap_or(1)))
     } else { None };
     if integer_soft.is_some_and(|(min, max)| min > max) || (integer_soft.is_none() && soft_min_float > soft_max_float) {
         return Err(bad(form, "Soft minimum exceeds maximum."));
@@ -367,9 +370,9 @@ pub fn parse(form: &Syntax) -> Result<Defnode, Diagnostic> {
         validations.extend(validation(&opts)?);
         let slot = default.is_none() || ty == ty::geometry() || ty == ty::image() || matches!(ty, Ty::Fn(_));
         if slot {
-            if opt(&opts, "normalize").is_some() { return Err(bad(parameter_form, "Only encoded text parameters have :normalize.")); }
+            if opts.opt("normalize").is_some() { return Err(bad(parameter_form, "Only encoded text parameters have :normalize.")); }
             if default.is_some() { return Err(bad(parameter_form, "Typed slots have no default; use :required false for an optional slot.")); }
-            if ["min", "max", "hard_min", "hard_max", "hard-min", "hard-max", "choices", "kind", "vec3"].iter().any(|key| opt(&opts, key).is_some()) { return Err(bad(parameter_form, "Range and kind metadata belongs to parameters with defaults.")); }
+            if ["min", "max", "hard_min", "hard_max", "hard-min", "hard-max", "choices", "kind", "vec3"].iter().any(|key| opts.opt(key).is_some()) { return Err(bad(parameter_form, "Range and kind metadata belongs to parameters with defaults.")); }
             let required = get_bool(&opts, "required", true)?;
             let rest = get_bool(&opts, "rest", false)?;
             slots.push(Slot { name: pn.clone(), required, rest, ty: if ty == ty::geometry() { None } else { Some(ty.clone()) } });
@@ -383,7 +386,7 @@ pub fn parse(form: &Syntax) -> Result<Defnode, Diagnostic> {
                 keywords.push(catalog::Parameter { name: pn.clone(), label: pn.clone(), ty: Some(port), fields: Vec::new(), folder: Vec::new(), primary: true, unit: None });
             }
         } else {
-            if ["required", "rest", "keyword"].iter().any(|key| opt(&opts, key).is_some()) { return Err(bad(parameter_form, "Only typed slots have :required, :rest and :keyword.")); }
+            if ["required", "rest", "keyword"].iter().any(|key| opts.opt(key).is_some()) { return Err(bad(parameter_form, "Only typed slots have :required, :rest and :keyword.")); }
             let default_form = default.as_ref().ok_or_else(|| bad(parameter_form, "Each unique input is (name : type default? :metadata value ...)."))?;
             parameter(parameter_form, pn, &ty, default_form, &opts, &mut fields, &mut normalizers)?;
         }
@@ -401,13 +404,13 @@ pub fn parse(form: &Syntax) -> Result<Defnode, Diagnostic> {
     let mut kind_parameters = parameters; kind_parameters.extend(keywords);
     let kind = catalog::Kind {
         qualified: name.clone(), context: context::sop(), slots: kind_slots, parameters: kind_parameters,
-        outputs: vec![("geo".into(), PortType::Geometry)], facts: opt(&hs, "facts").map(facts).transpose()?,
+        outputs: vec![("geo".into(), PortType::Geometry)], facts: hs.opt("facts").map(facts).transpose()?,
     };
     Ok(Defnode {
         kind, slots, keyword_inputs, fields, label: get_text(&hs, "label", &title(short))?, operation,
-        version: opt(&hs, "version").map(version).transpose()?.unwrap_or(1),
-        category: opt(&hs, "category").map(strings).transpose()?.unwrap_or_default(),
-        description: opt(&hs, "description").map(text).transpose()?, inputs, body, validations, normalizers, form: form.clone(),
+        version: hs.opt("version").map(version).transpose()?.unwrap_or(1),
+        category: hs.opt("category").map(strings).transpose()?.unwrap_or_default(),
+        description: hs.opt("description").map(text).transpose()?, inputs, body, validations, normalizers, form: form.clone(),
     })
 }
 #[cfg(test)]

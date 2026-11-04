@@ -457,7 +457,7 @@ fn array_capacities() {
 
 
 #[test]
-#[ignore = "flow_check array/max_length out_args accepts a computed :type (the OCaml op refuses it with E_ARRAY_TYPE)"]
+
 fn array_capacities_refuse_a_computed_type() {
     let source = parse("(workspace capacities (graph g :context host (let* [limit (array/max_length)] limit)))");
     let checked = check_lenient(&source);

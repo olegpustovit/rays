@@ -23,7 +23,7 @@ fn same(expected: f64, v: &Value) -> bool {
 const NONFINITE: [(&str, f64); 3] = [("NaN", f64::NAN), ("Infinity", f64::INFINITY), ("-Infinity", f64::NEG_INFINITY)];
 
 #[test]
-#[ignore = "flow_check num_param rejects NaN/Infinity literals (E_TYPE); the OCaml checker accepts them"]
+
 fn nonfinite_literals_round_trip() {
     let source = parse("(workspace literals (graph g :context value (let* [x 0.5 ; keep this note\n] x)))");
     let parameter = Parameter {

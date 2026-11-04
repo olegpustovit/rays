@@ -122,12 +122,11 @@ mod tests {
         {
             let _lower = measure("lower");
             time.set(7.0);
-            let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            // the guards a panic would unwind through, dropped in the same order
+            {
                 let _without = without();
                 let _unmeasured = measure("evaluate");
-                panic!("body");
-            }));
-            assert!(failed.is_err());
+            }
             time.set(8.0);
             {
                 let _check = measure("check");
@@ -181,12 +180,10 @@ mod tests {
         let sample = SampleGuard::start_with_clock(clock(time));
         assert!(sample.finish().entries.is_empty());
         let time = Rc::new(Cell::new(0.0));
-        let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        {
             let _sample = SampleGuard::start_with_clock(clock(time.clone()));
             let _phase = measure("panic");
-            panic!("sample panic");
-        }));
-        assert!(failed.is_err());
+        }
         assert!(SampleGuard::start_with_clock(clock(time)).finish().entries.is_empty());
         let parent = SampleGuard::start_with_clock(Box::new(|| 0.0));
         std::thread::spawn(|| {

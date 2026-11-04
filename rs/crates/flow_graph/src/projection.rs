@@ -947,9 +947,6 @@ fn rail_of(c: &Cx, kind: ZoneKind, e: &S, t: Option<&Info>, visible: &[String]) 
                                             p.push(leaf[..i].to_owned());
                                             Some(p)
                                         }
-                                        // ponytail: flow_check does not specialise the fn of an `iterate` (the OCaml does), so
-                                        // its type is read off the holder, which is the zone without its `~fn` segment
-                                        None if leaf.starts_with("~fn") => Some(scope.to_vec()),
                                         None => None,
                                     },
                                     None => None,
@@ -957,11 +954,6 @@ fn rail_of(c: &Cx, kind: ZoneKind, e: &S, t: Option<&Info>, visible: &[String]) 
                                 parent.and_then(|parent| {
                                     let info = c.term_index.get(&parent).map(|i| &c.terms[*i].1);
                                     match info {
-                                        Some(Info { node: Slim::Hof { kind: w::HofKind::Iterate, inputs }, .. })
-                                            if inputs.len() >= 3 && (inputs[0].0 == fnc.form_id || inputs[3..].iter().any(|u| u.0 == fnc.form_id)) =>
-                                        {
-                                            Some(inputs[1].1.clone())
-                                        }
                                         Some(Info { node: Slim::Hof { kind: w::HofKind::Reduce, inputs }, .. }) if inputs.len() >= 3 && inputs[0].0 == fnc.form_id => {
                                             if k == 0 { Some(inputs[1].1.clone()) } else { ty::elem(&inputs[2].1) }
                                         }
