@@ -822,7 +822,7 @@ pub mod Region {
     /// The type of an uniform value; a residual's own term type (expired residual: `Any`).
     fn uniform_ty(value: &Value) -> Ty {
         match value {
-            Value::Residual(id) => flow_eval::Residual::residual_view(*id).map(|v| v.term.ty).unwrap_or(Ty::Any),
+            Value::Residual(id) => flow_eval::Residual::residual_ty(*id).unwrap_or(Ty::Any),
             other => value::ty_of(other),
         }
     }

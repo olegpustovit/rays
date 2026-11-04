@@ -113,7 +113,7 @@ fn merging_sibling_regions_requires_the_same_immutable_sources() {
     };
     assert!(cloned != input);
     let cloned_term = E::Residual::residual_view(cloned).unwrap().term;
-    let second = R::rebuild(&first, R::Rebuild { sources: Some(vec![(cloned, Arc::new(cloned_term))]), ..Default::default() }).unwrap_or_else(|ds| panic!("{}", ts::show_ds(&ds)));
+    let second = R::rebuild(&first, R::Rebuild { sources: Some(vec![(cloned, cloned_term)]), ..Default::default() }).unwrap_or_else(|ds| panic!("{}", ts::show_ds(&ds)));
     let merged = core_fuse::compact_sources(core_fuse::merge(&[first.clone(), second]).expect("merge"));
     assert_eq!(merged.sources.len(), 1);
     let (different, _) = source_count("", "(int/add (int t) 1)");

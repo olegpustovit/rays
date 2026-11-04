@@ -61,3 +61,8 @@ fn perf_check_phases() {
         for e in t.entries.iter().take(12) { eprintln!("PERF   {} calls {} {:.3}", e.phase, e.calls, e.seconds); }
     }
 }
+#[test]
+#[ignore = "benchmark"]
+fn perf_lower_garden() {
+    eprintln!("PERF garden: {}", time("(workspace w (graph garden :context sop [(seed : int 1) (count : int 40)] (let* [bed (sop/tube :top_radius 1 :bottom_radius 1 :height 0.04 :columns 48) spots (sop/scatter bed :count count :seed seed) dot (sop/uv_sphere :radius 0.06 :segments 8 :rings 4) dots (sop/copy_to_points dot spots) result (sop/set_color (sop/merge bed dots) :color \"#3b7d4e\")] result)))"));
+}

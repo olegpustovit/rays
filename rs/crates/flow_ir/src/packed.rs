@@ -3847,7 +3847,7 @@ fn evaluate_once(run: &Run, dispatch: &Option<Dispatch>, residual: ResidualId, t
         _ => None,
     };
     if let Some((r, inner)) = nested {
-        return evaluate(run, dispatch, r, &Arc::new(inner));
+        return evaluate(run, dispatch, r, &inner);
     }
     if leaf_term(term) {
         return eval_term(run, residual, term);
@@ -3925,13 +3925,13 @@ fn force_values(run: &Run, value: &Value, residual: &dyn Fn(ResidualId) -> Resul
 fn uniform(run: &Run, dispatch: &Option<Dispatch>, value: &Value) -> Result<Value, Diagnostic> {
     force_values(run, value, &|residual| {
         let view = E::Residual::residual_view(residual)?;
-        evaluate(run, dispatch, residual, &Arc::new(view.term))
+        evaluate(run, dispatch, residual, &view.term)
     })
 }
 
 fn execute_request(run: &Run, dispatch: &Option<Dispatch>, residual: ResidualId) -> Option<Value> {
     let view = E::Residual::residual_view(residual).ok()?;
-    let term = Arc::new(view.term.clone());
+    let term = view.term.clone();
     let active = REQUESTS.with(|stack| stack.borrow().iter().any(|(t, other)| same_term(t, &term) && same_context(&view, other)));
     if active {
         if run.strict {

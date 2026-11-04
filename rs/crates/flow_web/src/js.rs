@@ -1324,7 +1324,7 @@ fn binding_plan(fast: bool, kernel: Option<String>, packed: &packed::T) -> Resul
             Err(form) => return Err(refuse(&format!("Region capture preparation: {form}"))),
         };
         let ty = match value {
-            Value::Residual(residual) => E::Residual::residual_view(*residual)?.term.ty,
+            Value::Residual(residual) => E::Residual::residual_view(*residual)?.term.ty.clone(),
             v => value::ty_of(v),
         };
         captures.push(format!("{{type:{},source:{}}}", ty_json(&ty), escape(&prepare(true, &program)?)));

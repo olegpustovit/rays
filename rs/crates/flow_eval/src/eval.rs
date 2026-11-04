@@ -207,7 +207,7 @@ struct NamedData { name: String, calls: i64 }
 #[derive(Clone)]
 enum Function { Closure(Arc<ClosureData>), Named(NamedData) }
 #[derive(Clone)]
-struct ResidualData { term: Term, env: BTreeMap<String, Value>, ctx: ExecCtx, previous: bool, live: Option<Frame> }
+struct ResidualData { term: Arc<Term>, env: BTreeMap<String, Value>, ctx: ExecCtx, previous: bool, live: Option<Frame> }
 #[derive(Clone)]
 struct GraphCell { instance: i64, graph: String, default: bool, inputs: Vec<(String,Value)>, result: Value }
 // Copy-on-write cell: cloning an Arena for a published snapshot is O(fields); a write unshares only while a snapshot is alive.
@@ -429,7 +429,7 @@ fn eval_at(a:&mut Arena,c:&ExecCtx,env:&Env,t:&Term)->Result<Value,Diagnostic>{l
     Err(d) if d.code == "$NEEDS_TIME" => {
         if a.time.is_some() { Err(error("E_EVAL", "A live value was needed while evaluating dynamically.")) }
         else {
-            let residual = ResidualData { term: t.clone(), env: capture_env(t, env), ctx: c.clone(), previous: false, live: None };
+            let residual = ResidualData { term: Arc::new(t.clone()), env: capture_env(t, env), ctx: c.clone(), previous: false, live: None };
             let value = Value::Residual(residual_id(a, residual));
             if matches!(&t.node, TermNode::State { .. }) { a.states.push(value.clone()); }
             if a.record && c.record { if let Some(path) = &t.path { note(a, &c, path.clone(), value.clone()); } }
@@ -627,6 +627,9 @@ fn inline_node(a: &mut Arena, c: &ExecCtx, _authored: i64, original: &W::NodeDef
     mk_node(a, c, authored, flow_syntax::ty::geometry(), "$card".into(), marker_args)
 }
 fn eval_raw(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Value, Diagnostic> {
+    eval_raw_body(a, c, env, t)
+}
+fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Value, Diagnostic> {
     a.step_count += 1;
     if a.step_count % PACKED_BLOCK == 0 {
         if a.interrupt.as_ref().is_some_and(|stop| stop()) { return Err(error("cancelled", "Evaluation interrupted.")); }
@@ -634,7 +637,7 @@ fn eval_raw(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Value, Di
     if a.step_count > a.budget { return Err(errorf("E_EVAL_BUDGET", format!("Evaluation budget exceeded ({} steps). Reduce iteration counts.", a.budget))); }
     if c.depth > MAX_DEPTH { return eval_error("E_DEPTH", "Call depth exceeds 64."); }
     if a.time.is_some() && kernel_eligible(t) && current_residual_handlers().is_some_and(|handler| handler.kernel.is_some()) {
-        let residual = residual_id(a, ResidualData { term: t.clone(), env: capture_env(t, env), ctx: c.clone(), previous: false, live: a.time.clone() });
+        let residual = residual_id(a, ResidualData { term: Arc::new(t.clone()), env: capture_env(t, env), ctx: c.clone(), previous: false, live: a.time.clone() });
         if let Some(value) = kernel_value(a, residual, &t.ty) { return Ok(value); }
     }
     let observe = match &t.node {
@@ -643,7 +646,7 @@ fn eval_raw(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Value, Di
         _ => false,
     };
     if a.time.is_none() && observe && current_residual_handlers().is_some() {
-        let id = residual_id(a, ResidualData { term: t.clone(), env: capture_env(t, env), ctx: c.clone(), previous: false, live: None });
+        let id = residual_id(a, ResidualData { term: Arc::new(t.clone()), env: capture_env(t, env), ctx: c.clone(), previous: false, live: None });
         a.observed.push(id);
         ACTIVE_OBSERVED_RESIDUALS.with(|observed| { if let Some(queue) = observed.borrow_mut().last_mut() { queue.push(id); } });
     }
@@ -760,7 +763,7 @@ fn eval_raw(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Value, Di
         TermNode::State { binder, init, step, zone } => {
             if c.geometry { return eval_error("E_STATE_ELEMENT", "Frame state belongs to the workspace value lane; bind it outside a loop over cooked geometry."); }
             let previous = if a.time.is_none() {
-                Value::Residual(residual_id(a, ResidualData { term: t.clone(), env: capture_env(t, env), ctx: c.clone(), previous: true, live: None }))
+                Value::Residual(residual_id(a, ResidualData { term: Arc::new(t.clone()), env: capture_env(t, env), ctx: c.clone(), previous: true, live: None }))
             } else { state_previous(a, c, env, zone, init)? };
             let mut local = env.clone();
             record_pattern(a, c, zone, binder, &previous)?;
@@ -937,7 +940,7 @@ fn eval_error_rows(a: &mut Arena, c: &ExecCtx, env: &Env, rows: &Term, policy: W
             Value::Residual(id) => {
                 let residual = get_res(a, id)?;
                 let term = match &residual.term.node {
-                    TermNode::Op { op, args, .. } if op == "exact" && args.len() == 1 => args[0].1.clone(),
+                    TermNode::Op { op, args, .. } if op == "exact" && args.len() == 1 => Arc::new(args[0].1.clone()),
                     _ => residual.term,
                 };
                 let bindings = Env { values: Arc::new(residual.env) };
@@ -1270,7 +1273,7 @@ impl Drop for MapProgress {
 }
 fn map_residual(a: &mut Arena, c: &ExecCtx, term: &Term, env: &Env) -> ResidualId {
     a.observed.iter().rev().find(|id| get_res(a, **id).is_ok_and(|residual| residual.term.form.id == term.form.id && residual.ctx.iter == c.iter && site(&residual.ctx) == site(c))).copied()
-        .unwrap_or_else(|| residual_id(a, ResidualData { term: term.clone(), env: capture_env(term, env), ctx: c.clone(), previous: false, live: None }))
+        .unwrap_or_else(|| residual_id(a, ResidualData { term: Arc::new(term.clone()), env: capture_env(term, env), ctx: c.clone(), previous: false, live: None }))
 }
 fn function_call_offset(a: &Arena, function: FnId) -> i64 {
     a.fn_calls.get(&function).copied().unwrap_or_else(|| match a.functions.get(&function) { Some(Function::Closure(closure)) => closure.calls, Some(Function::Named(named)) => named.calls, None => 0 })
@@ -1591,7 +1594,7 @@ fn eval_geometry_loop(a: &mut Arena, c: &ExecCtx, env: &Env, pattern: &W::Patter
     let lo = a.nodes.len() as i64;
     let (element, element_arg) = if points {
         let term = Term { path: None, ty: Ty::Vec3, node: TermNode::RefBinding(element_name.clone(), Vec::new()), form: body.form.clone() };
-        let residual = residual_id(a, ResidualData { term, env: BTreeMap::new(), ctx: context.clone(), previous: false, live: None });
+        let residual = residual_id(a, ResidualData { term: Arc::new(term), env: BTreeMap::new(), ctx: context.clone(), previous: false, live: None });
         (Value::Residual(residual), text(&element_name))
     } else {
         let value = mk_node(a, &sub(&context, "element".into()), 0, flow_syntax::ty::geometry(), "zone/element".into(), Vec::new())?;
@@ -1852,8 +1855,8 @@ fn dependent(value: &Value, frame: bool, reads: &mut BTreeSet<String>) -> bool {
     let arena = arena.lock().unwrap();
     read_value(&arena, value, frame, reads, &mut HashSet::new(), &mut HashSet::new())
 }
-pub fn frame_dependent(value: &Value) -> bool { dependent(value, true, &mut BTreeSet::new()) }
-pub fn state_dependent(value: &Value) -> bool { dependent(value, false, &mut BTreeSet::new()) }
+pub fn frame_dependent(value: &Value) -> bool { dependent_fast(value, true) }
+pub fn state_dependent(value: &Value) -> bool { dependent_fast(value, false) }
 pub fn frame_reads(value: &Value) -> Vec<String> {
     let mut reads = BTreeSet::new();
     let _ = dependent(value, true, &mut reads);
@@ -1865,8 +1868,11 @@ fn stable_digest(bytes: &[u8]) -> String {
     format!("{hash:016x}")
 }
 fn structure_bytes(out: &mut String, bytes: &[u8]) {
-    out.push_str(&format!("{}:", bytes.len()));
-    for byte in bytes { out.push_str(&format!("{:02x}", byte)); }
+    use std::fmt::Write;
+    let _ = write!(out, "{}:", bytes.len());
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    out.reserve(bytes.len() * 2);
+    for byte in bytes { out.push(HEX[(byte >> 4) as usize] as char); out.push(HEX[(byte & 15) as usize] as char); }
 }
 fn structure_path(out: &mut String, path: &[String]) {
     out.push('P');
@@ -2009,7 +2015,7 @@ fn map_function(site: Option<(i64, Path, Vec<i64>)>, path: Option<Path>, signatu
     context.data = true;
     context.record = false;
     let term = Term { path, ty: Ty::Array(Box::new(result)), node: TermNode::Hof(W::HofKind::Map, terms), form };
-    Ok(Value::Residual(residual_id(&mut arena, ResidualData { term, env, ctx: context, previous: false, live: None })))
+    Ok(Value::Residual(residual_id(&mut arena, ResidualData { term: Arc::new(term), env, ctx: context, previous: false, live: None })))
 }
 pub fn map_kernel(site: Option<(i64, Path, Vec<i64>)>, path: Option<Path>, signature: &FnSignature, function: FnId, values: &[Value]) -> Result<Value, Diagnostic> {
     Host::map_function(site, path, signature, function, values)
@@ -2140,7 +2146,7 @@ pub mod Residual {
     use super::*;
     #[derive(Clone, Debug)]
     pub struct View {
-        pub term: Term, pub bindings: Vec<(String, Value)>, pub site: Path, pub owner: Path,
+        pub term: Arc<Term>, pub bindings: Vec<(String, Value)>, pub site: Path, pub owner: Path,
         pub iter: Vec<i64>, pub instance: i64, pub prefix: Path, pub previous: bool,
         pub host: bool, pub geometry: bool, pub context: Context,
     }
@@ -2157,6 +2163,22 @@ pub mod Residual {
     }
     pub fn free_names(term: &Term) -> Vec<String> { super::free_names(term).into_iter().collect() }
     pub fn residual_id(id: ResidualId) -> i64 { id.0 }
+    /// Cheap single-field reads (no ResidualData / Term clone) for the lowering's hot predicates.
+    pub fn residual_context(id: ResidualId) -> Option<Context> {
+        let arena = arena_for_residual(&id)?;
+        let arena = arena.lock().unwrap();
+        arena.residuals.get(&id).map(|r| r.ctx.context.clone())
+    }
+    pub fn residual_ty(id: ResidualId) -> Option<Ty> {
+        let arena = arena_for_residual(&id)?;
+        let arena = arena.lock().unwrap();
+        arena.residuals.get(&id).map(|r| r.term.ty.clone())
+    }
+    pub fn residual_bindings(id: ResidualId) -> Option<Vec<(String, Value)>> {
+        let arena = arena_for_residual(&id)?;
+        let arena = arena.lock().unwrap();
+        arena.residuals.get(&id).map(|r| r.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+    }
     pub fn residual_view(id: ResidualId) -> Result<View, Diagnostic> {
         let arena = arena_for_residual(&id).ok_or_else(|| error("E_RESIDUAL_ID", "Residual belongs to an expired evaluation."))?;
         let arena = arena.lock().unwrap();
@@ -2306,7 +2328,7 @@ pub mod Residual {
         let mut arena = arena.lock().unwrap();
         let mut residual = get_res(&arena, id)?;
         for (name, value) in bindings { residual.env.insert(name.clone(), value.clone()); }
-        residual.term = term.clone();
+        residual.term = Arc::new(term.clone());
         let free = free_names(term);
         residual.env.retain(|name, _| free.contains(name));
         residual.live = None;
@@ -2344,10 +2366,10 @@ fn rewrite_value(
             if let Some(copy) = residuals.get(id) { return Value::Residual(*copy); }
             let Some(mut residual) = arena.residuals.get(id).cloned() else { return value.clone(); };
             let original_bindings = residual.env.iter().map(|(name, value)| (name.clone(), value.clone())).collect::<Vec<_>>();
-            let (term, overrides) = retarget(&residual.term, &original_bindings).unwrap_or_else(|| (residual.term.clone(), Vec::new()));
+            let (term, overrides) = retarget(&residual.term, &original_bindings).unwrap_or_else(|| ((*residual.term).clone(), Vec::new()));
             let copy = ResidualId(fresh());
             residuals.insert(*id, copy);
-            residual.term = term;
+            residual.term = Arc::new(term);
             let names = overrides.iter().map(|(name, _)| name.clone()).collect::<BTreeSet<_>>();
             let mut env = BTreeMap::new();
             for (name, value) in residual.env {
@@ -2601,4 +2623,64 @@ mod tests {
         };
         assert_eq!(static_eval(&workspace(term)).unwrap().results, vec![("g".into(), Value::List(Arc::new(vec![Value::Int(1), Value::Int(2)])))]);
     }
+}
+
+// Dependence without a collecting walk (frame_dependent / state_dependent): every residual remembers its answer, as the OCaml
+// residual does (dep_frame / dep_state); without it a let-bound array read by many bindings is walked once per reader and
+// `static_sop` asks every residual. Residual ids are process-unique, so the memo needs no arena key.
+static DEP_MEMO: LazyLock<Mutex<HashMap<(i64, bool), bool>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+fn dep_value(arena: &Arena, value: &Value, frame: bool, active: &mut HashSet<i64>) -> bool {
+    match value {
+        Value::Residual(id) => {
+            if let Some(known) = DEP_MEMO.lock().unwrap().get(&(id.0, frame)) { return *known; }
+            if !active.insert(id.0) { return false; }
+            let answer = match arena.residuals.get(id) { Some(r) => dep_term(arena, &r.term, &r.env, &r.ctx.context, frame, active), None => false };
+            active.remove(&id.0);
+            if arena.residuals.contains_key(id) { DEP_MEMO.lock().unwrap().insert((id.0, frame), answer); }
+            answer
+        }
+        Value::Fn(id) => match arena.functions.get(id) {
+            Some(Function::Closure(closure)) => {
+                if !active.insert(-1 - id.0) { return false; }
+                let answer = dep_term(arena, &closure.body, &closure.env, &closure.at.context, frame, active);
+                active.remove(&(-1 - id.0));
+                answer
+            }
+            Some(Function::Named(function)) => dep_named(arena, &function.name, frame, active),
+            None => false,
+        },
+        Value::List(values) => values.iter().any(|value| dep_value(arena, value, frame, active)),
+        Value::Record(fields) | Value::Struct(_, _, fields) | Value::Source(_, _, fields) => fields.iter().any(|(_, value)| dep_value(arena, value, frame, active)),
+        _ => false,
+    }
+}
+fn dep_named(arena: &Arena, name: &str, frame: bool, active: &mut HashSet<i64>) -> bool {
+    if let Some(graph) = arena.workspace.defs.iter().find(|graph| graph.name == name) {
+        return dep_term(arena, &graph.body, &BTreeMap::new(), &graph.context, frame, active);
+    }
+    frame && op::find_indexed(&arena.workspace.ops, name, &flow_syntax::context::value()).is_some_and(|operation| operation.live)
+}
+fn dep_term(arena: &Arena, term: &Term, env: &BTreeMap<String, Value>, context: &Context, frame: bool, active: &mut HashSet<i64>) -> bool {
+    let own = match &term.node {
+        TermNode::Time => frame,
+        TermNode::State { .. } => true,
+        TermNode::RefBinding(name, _) => env.get(name).is_some_and(|value| dep_value(arena, value, frame, active)),
+        TermNode::FnRef(name) => dep_named(arena, name, frame, active),
+        TermNode::CallFn { fn_name, .. } => match env.get(fn_name) {
+            Some(Value::Fn(function)) => dep_value(arena, &Value::Fn(*function), frame, active),
+            _ => dep_named(arena, fn_name, frame, active),
+        },
+        TermNode::Op { op: name, .. } => frame && op::find_indexed(&arena.workspace.ops, name, context).is_some_and(|operation| operation.live),
+        TermNode::GraphRef { graph, .. } => arena.workspace.graphs.iter().find(|definition| definition.name == *graph).is_some_and(|graph| {
+            dep_term(arena, &graph.body, &BTreeMap::new(), &graph.context, frame, active)
+                || graph.inputs.iter().any(|(_, _, default)| default.as_ref().is_some_and(|term| dep_term(arena, term, env, context, frame, active)))
+        }),
+        _ => false,
+    };
+    own || children(term).into_iter().any(|child| dep_term(arena, child, env, context, frame, active))
+}
+fn dependent_fast(value: &Value, frame: bool) -> bool {
+    let Some(arena) = arena_for_value(value) else { return false; };
+    let arena = arena.lock().unwrap();
+    dep_value(&arena, value, frame, &mut HashSet::new())
 }

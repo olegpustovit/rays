@@ -25,7 +25,7 @@ fn term_once(select: &dyn Fn(&Term) -> Option<Term>, transform: &dyn Fn(Term) ->
     let rebuilt = match &t.node {
         Node::CallFn { fn_name, args, body } if !helpers => Term {
             node: Node::CallFn { fn_name: fn_name.clone(), args: args.iter().map(&walk).collect(), body: body.clone() },
-            ..t.clone()
+            ..shell(t)
         },
         _ => w::map_children(&walk, t),
     };
@@ -62,7 +62,7 @@ fn remove(patterns: &[Pattern], bindings: &[(String, Value)]) -> Bindings {
 }
 
 struct Scan {
-    defs: Vec<Graph>,
+
     found: RefCell<Vec<String>>,
     fuel: Cell<i64>,
 }
@@ -78,15 +78,15 @@ fn literal(t: &Term) -> Option<Value> {
 }
 
 /// The values a helper's inputs take over known arguments (`None` entries for unknown ones).
-fn local_inputs(scan: &Scan, helper: &Graph, args: &[Term], bindings: &[(String, Value)]) -> Vec<Option<(String, Value)>> {
+fn local_inputs(scan: &Scan, defs: &[Graph], helper: &Graph, args: &[Term], bindings: &[(String, Value)]) -> Vec<Option<(String, Value)>> {
     helper
         .inputs
         .iter()
         .enumerate()
         .map(|(i, (name, _, default))| {
             let value = match args.get(i) {
-                Some(argument) => scan.known(bindings, argument),
-                None => default.as_ref().and_then(|d| scan.known(&[], d)),
+                Some(argument) => scan.known(defs, bindings, argument),
+                None => default.as_ref().and_then(|d| scan.known(defs, &[], d)),
             };
             value.map(|value| (name.clone(), value))
         })
@@ -94,7 +94,7 @@ fn local_inputs(scan: &Scan, helper: &Graph, args: &[Term], bindings: &[(String,
 }
 
 impl Scan {
-    fn known(&self, bindings: &[(String, Value)], t: &Term) -> Option<Value> {
+    fn known(&self, defs: &[Graph], bindings: &[(String, Value)], t: &Term) -> Option<Value> {
         if let Some(value) = literal(t) {
             return Some(value);
         }
@@ -103,18 +103,18 @@ impl Scan {
             Node::CallFn { fn_name, args, body } if self.fuel.get() > 0 => {
                 // a helper over known arguments (a text predicate, say) decides its own branches
                 self.fuel.set(self.fuel.get() - 1);
-                let helper = self.defs.iter().find(|d| &d.name == fn_name)?;
-                let local = local_inputs(self, helper, args, bindings);
+                let helper = defs.iter().find(|d| &d.name == fn_name)?;
+                let local = local_inputs(self, defs, helper, args, bindings);
                 if local.iter().any(Option::is_none) {
                     return None;
                 }
                 let local: Bindings = local.into_iter().flatten().collect();
-                self.known(&local, body.as_deref().unwrap_or(&helper.body))
+                self.known(defs, &local, body.as_deref().unwrap_or(&helper.body))
             }
             Node::Op { op: name, args, .. } if !is_context_op(name) => {
                 let mut values = Vec::with_capacity(args.len());
                 for (key, value) in args {
-                    values.push((key.clone(), self.known(bindings, value)?));
+                    values.push((key.clone(), self.known(defs, bindings, value)?));
                 }
                 let found = op::find(operators::all(), name, &context::value())?;
                 (found.check)(&values).ok()?;
@@ -126,10 +126,10 @@ impl Scan {
         }
     }
 
-    fn scan(&self, bindings: &[(String, Value)], body: &Term, graph: &Graph) {
+    fn scan(&self, defs: &[Graph], bindings: &[(String, Value)], body: &Term, graph: &Graph) {
         let select_full = |t: &Term| -> Term {
             match &t.node {
-                Node::If(test, yes, no) => match self.known(bindings, test) {
+                Node::If(test, yes, no) => match self.known(defs, bindings, test) {
                     Some(Value::Bool(true)) => (**yes).clone(),
                     Some(Value::Bool(false)) => (**no).clone(),
                     _ => t.clone(),
@@ -139,7 +139,7 @@ impl Scan {
                     let mut live: Vec<(Term, Term)> = Vec::new();
                     let mut taken: Option<Term> = None;
                     for (test, yes) in arms {
-                        match self.known(bindings, test) {
+                        match self.known(defs, bindings, test) {
                             Some(Value::Bool(false)) => {}
                             Some(Value::Bool(true)) => {
                                 taken = Some(yes.clone());
@@ -151,27 +151,27 @@ impl Scan {
                     match (live.is_empty(), taken) {
                         (true, Some(yes)) => yes,
                         (true, None) => (**default).clone(),
-                        (false, Some(yes)) => Term { node: Node::Cond(live, Box::new(yes)), ..t.clone() },
-                        (false, None) => Term { node: Node::Cond(live, default.clone()), ..t.clone() },
+                        (false, Some(yes)) => Term { node: Node::Cond(live, Box::new(yes)), ..shell(t) },
+                        (false, None) => Term { node: Node::Cond(live, default.clone()), ..shell(t) },
                     }
                 }
                 Node::CallFn { fn_name, args, body } => {
-                    match self.defs.iter().find(|d| &d.name == fn_name) {
+                    match defs.iter().find(|d| &d.name == fn_name) {
                         Some(helper) => {
-                            let local: Bindings = local_inputs(self, helper, args, bindings).into_iter().flatten().collect();
-                            self.scan(&local, body.as_deref().unwrap_or(&helper.body), graph);
+                            let local: Bindings = local_inputs(self, defs, helper, args, bindings).into_iter().flatten().collect();
+                            self.scan(defs, &local, body.as_deref().unwrap_or(&helper.body), graph);
                         }
                         None => {
                             if let Some(inlined) = body {
-                                self.scan(&[], inlined, graph);
+                                self.scan(defs, &[], inlined, graph);
                             }
                         }
                     }
-                    Term { node: Node::CallFn { fn_name: fn_name.clone(), args: args.clone(), body: None }, ..t.clone() }
+                    Term { node: Node::CallFn { fn_name: fn_name.clone(), args: args.clone(), body: None }, ..shell(t) }
                 }
                 Node::Fn { params, body, zone, capture } => {
                     let names: Vec<Pattern> = params.iter().map(|(p, _)| p.clone()).collect();
-                    self.scan(&remove(&names, bindings), body, graph);
+                    self.scan(defs, &remove(&names, bindings), body, graph);
                     Term {
                         node: Node::Fn {
                             params: params.clone(),
@@ -179,45 +179,45 @@ impl Scan {
                             zone: zone.clone(),
                             capture: capture.clone(),
                         },
-                        ..t.clone()
+                        ..shell(t)
                     }
                 }
                 Node::FnRef(name) => {
-                    if let Some(helper) = self.defs.iter().find(|d| &d.name == name) {
-                        self.scan(&[], &helper.body, graph);
+                    if let Some(helper) = defs.iter().find(|d| &d.name == name) {
+                        self.scan(defs, &[], &helper.body, graph);
                     }
                     t.clone()
                 }
                 Node::Let(locals, inner) => {
                     let mut bindings: Bindings = bindings.to_vec();
                     for (pattern, value) in locals {
-                        self.scan(&bindings, value, graph);
-                        let local = match (pattern, self.known(&bindings, value)) {
+                        self.scan(defs, &bindings, value, graph);
+                        let local = match (pattern, self.known(defs, &bindings, value)) {
                             (Pattern::Name(name), Some(value)) => vec![(name.clone(), value)],
                             _ => Vec::new(),
                         };
                         bindings = local.into_iter().chain(remove(std::slice::from_ref(pattern), &bindings)).collect();
                     }
-                    self.scan(&bindings, inner, graph);
-                    Term { node: Node::Nil, ..t.clone() }
+                    self.scan(defs, &bindings, inner, graph);
+                    Term { node: Node::Nil, ..shell(t) }
                 }
                 Node::State { binder, init, step, .. } => {
-                    self.scan(bindings, init, graph);
-                    self.scan(&remove(std::slice::from_ref(binder), bindings), step, graph);
-                    Term { node: Node::Nil, ..t.clone() }
+                    self.scan(defs, bindings, init, graph);
+                    self.scan(defs, &remove(std::slice::from_ref(binder), bindings), step, graph);
+                    Term { node: Node::Nil, ..shell(t) }
                 }
                 Node::Loop { accs, clauses, body, .. } => {
                     for (_, value) in accs {
-                        self.scan(bindings, value, graph);
+                        self.scan(defs, bindings, value, graph);
                     }
                     let acc_patterns: Vec<Pattern> = accs.iter().map(|(p, _)| p.clone()).collect();
                     let mut bindings = remove(&acc_patterns, bindings);
                     for (pattern, value) in clauses {
-                        self.scan(&bindings, value, graph);
+                        self.scan(defs, &bindings, value, graph);
                         bindings = remove(std::slice::from_ref(pattern), &bindings);
                     }
-                    self.scan(&bindings, body, graph);
-                    Term { node: Node::Nil, ..t.clone() }
+                    self.scan(defs, &bindings, body, graph);
+                    Term { node: Node::Nil, ..shell(t) }
                 }
                 _ => t.clone(),
             }
@@ -230,8 +230,9 @@ impl Scan {
             }
             t
         };
-        let select = |t: &Term| Some(select_full(t));
-        map(&select, true, &record, &Graph { body: body.clone(), inputs: Vec::new(), ..graph.clone() });
+        let select = |t: &Term| match &t.node { Node::If(..) | Node::Cond(..) | Node::CallFn { .. } | Node::Fn { .. } | Node::FnRef(_) | Node::Let(..) | Node::State { .. } | Node::Loop { .. } => Some(select_full(t)), _ => None };
+        let _ = graph;
+        term_once(&select, &record, true, body);
     }
 }
 
@@ -242,12 +243,12 @@ pub fn context_ops_reached(inputs: &[(String, Value)], defs: &[Graph], graph: &G
         .iter()
         .filter_map(|(name, _, default)| default.as_ref().and_then(literal).map(|v| (name.clone(), v)))
         .collect();
-    let scan = Scan { defs: defs.to_vec(), found: RefCell::new(Vec::new()), fuel: Cell::new(4096) };
+    let scan = Scan { found: RefCell::new(Vec::new()), fuel: Cell::new(4096) };
     let bindings: Bindings = inputs.iter().cloned().chain(defaults).collect();
-    scan.scan(&bindings, &graph.body, graph);
+    scan.scan(defs, &bindings, &graph.body, graph);
     for (_, _, default) in &graph.inputs {
         if let Some(default) = default {
-            scan.scan(&bindings, default, graph);
+            scan.scan(defs, &bindings, default, graph);
         }
     }
     // OCaml conses: the last name found comes first
@@ -669,4 +670,9 @@ fn md5_hex(input: &[u8]) -> String {
         }
     }
     output
+}
+
+/// A term's path, type and form with no node: the struct-update base for a rebuilt node (cloning `t` whole just to drop its node is a deep copy).
+fn shell(t: &Term) -> Term {
+    Term { path: t.path.clone(), ty: t.ty.clone(), node: Node::Nil, form: t.form.clone() }
 }

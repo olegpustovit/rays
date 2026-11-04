@@ -79,8 +79,8 @@ pub fn sources(value: &Value) -> Vec<i64> {
             Value::Deferred(t, id) if ty::is_geometry(t) => ids.push(*id),
             Value::Residual(r) => {
                 if seen.residuals.insert(r.0) {
-                    if let Ok(view) = E::Residual::residual_view(*r) {
-                        for (_, v) in &view.bindings {
+                    if let Some(bindings) = E::Residual::residual_bindings(*r) {
+                        for (_, v) in &bindings {
                             visit(v, seen, ids);
                         }
                     }
@@ -689,8 +689,8 @@ pub fn context_reads(value: &Value) -> D::T {
             }
             Value::Residual(r) => {
                 if seen.residuals.insert(r.0) {
-                    if let Ok(view) = E::Residual::residual_view(*r) {
-                        view.bindings.iter().for_each(|(_, v)| visit(v, seen, found));
+                    if let Some(bindings) = E::Residual::residual_bindings(*r) {
+                        bindings.iter().for_each(|(_, v)| visit(v, seen, found));
                     }
                 }
             }
@@ -1600,7 +1600,7 @@ fn owner_origin(by_source: &[(i64, i64)], id: i64, parts: &[&str]) -> Option<Ori
 }
 
 fn count_source(by_source: &[(i64, i64)], residual: ResidualIdAlias, term: &Term) -> Option<Origin> {
-    let bindings = E::Residual::residual_view(residual).ok()?.bindings;
+    let bindings = E::Residual::residual_bindings(residual)?;
     let topology_component: Option<(String, Vec<(String, Value)>)> = match &term.node {
         TNode::Get(inner, component) if matches!(&inner.node, TNode::Op { op, .. } if op == "sop/topology") => match &inner.node {
             TNode::Op { args, .. } => Some((component.clone(), captured_args(&bindings, args))),
@@ -1614,7 +1614,7 @@ fn count_source(by_source: &[(i64, i64)], residual: ResidualIdAlias, term: &Term
     // a fill of one value per point ([array/int (sop/count g :points) v]) or its index
     // ([array/range (sop/count g :points)]) counts g's points
     fn filled(by_source: &[(i64, i64)], residual: ResidualIdAlias, term: &Term) -> Option<Origin> {
-        let bindings = E::Residual::residual_view(residual).ok()?.bindings;
+        let bindings = E::Residual::residual_bindings(residual)?;
         match &term.node {
             TNode::Op { op, args, .. } if ["array/int", "array/float", "array/vec2", "array/vec3", "array/vec4", "array/range"].contains(&op.as_str()) => {
                 match args.iter().find(|(k, _)| k == "count").and_then(|(_, t)| captured(&bindings, t)) {
@@ -1906,7 +1906,7 @@ fn prepare_constant(kind: &str, values: &Value) -> Option<Constant> {
             TNode::Expanded { body, .. } => find(constructors, kind, seen, residual, body),
             TNode::Op { op, args, .. } if op == "exact" && args.len() == 1 && args[0].0 == "value" => find(constructors, kind, seen, residual, &args[0].1),
             TNode::RefBinding(..) | TNode::Get(..) => {
-                let bindings = E::Residual::residual_view(residual).ok()?.bindings;
+                let bindings = E::Residual::residual_bindings(residual)?;
                 match captured(&bindings, term) {
                     Some(Value::Residual(nested)) if !seen.contains(&nested.0) => {
                         seen.push(nested.0);

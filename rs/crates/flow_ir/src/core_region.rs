@@ -554,7 +554,7 @@ impl Lower {
 
     fn array_type(&self, value: &Value) -> Res<Ty> {
         match value {
-            Value::Residual(r) => Ok(Residual::residual_view(*r)?.term.ty),
+            Value::Residual(r) => Ok(Residual::residual_view(*r)?.term.ty.clone()),
             other => Ok(V::ty_of(other)),
         }
     }
@@ -709,7 +709,7 @@ impl Lower {
         let scalar = matches!(v, Value::Int(_) | Value::Text(_) | Value::Float(_) | Value::Bool(_) | Value::Vec2(..) | Value::Vec3(..) | Value::Vec4(..));
         if simple && (self.dynamic || flow_eval::is_live(v) || matches!(v, Value::Source(..))) {
             let ty = match v {
-                Value::Residual(r) => Residual::residual_view(*r)?.term.ty,
+                Value::Residual(r) => Residual::residual_view(*r)?.term.ty.clone(),
                 other => V::ty_of(other),
             };
             let width = if ty == Ty::Text {
@@ -779,7 +779,7 @@ impl Lower {
             }
             Value::Residual(r) => {
                 // a live record (a matrix chosen per frame) is a uniform per field
-                match Residual::residual_view(*r)?.term.ty {
+                match Residual::residual_view(*r)?.term.ty.clone() {
                     Ty::Record(fs) => {
                         let mut out = Vec::new();
                         for (key, _) in &fs {
@@ -2202,7 +2202,7 @@ pub fn rebind(t: &RegionT, residual: ResidualId) -> Option<RegionT> {
     let view = Residual::residual_view(residual).ok()?;
     if !t.dynamic
         || t.stages.len() != 1
-        || *t.term != view.term
+        || *t.term != *view.term
         || view.previous
         || flow_eval::state_dependent(&Value::Residual(residual))
     {

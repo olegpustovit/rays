@@ -478,7 +478,7 @@ fn scalar_uniforms(packed: &Packed) -> bool {
     let scalar = |ty: &Ty| matches!(ty, Ty::Int | Ty::Float | Ty::Bool | Ty::Vec2 | Ty::Vec3 | Ty::Vec4 | Ty::Text);
     packed.uniforms.iter().all(|u| match u {
         Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Vec2(..) | Value::Vec3(..) | Value::Vec4(..) | Value::Text(_) => true,
-        Value::Residual(r) => e::Residual::residual_view(*r).map(|view| scalar(&view.term.ty)).unwrap_or(false),
+        Value::Residual(r) => e::Residual::residual_ty(*r).is_some_and(|ty| scalar(&ty)),
         Value::Source(_, ty, _) | Value::Struct(_, ty, _) => scalar(ty),
         _ => false,
     })
@@ -850,7 +850,7 @@ impl Qualifier {
         };
         let key = acceptance_key(&view);
         let seen = |path: &Path| match &key {
-            Some(key) => self.accepted.lock().unwrap().get(key).map(|l| l.iter().any(|(p, t)| *t == view.term && p == path)).unwrap_or(false),
+            Some(key) => self.accepted.lock().unwrap().get(key).map(|l| l.iter().any(|(p, t)| *t == *view.term && p == path)).unwrap_or(false),
             None => false,
         };
         if let Some(path) = &producer {
@@ -881,7 +881,7 @@ impl Qualifier {
                     .collect();
                 if reasons.is_empty() {
                     if let Some(key) = &key {
-                        self.accepted.lock().unwrap().entry(key.clone()).or_default().insert(0, (path.clone(), view.term.clone()));
+                        self.accepted.lock().unwrap().entry(key.clone()).or_default().insert(0, (path.clone(), (*view.term).clone()));
                     }
                 }
                 let mut outcomes = self.outcomes.lock().unwrap();
@@ -1546,7 +1546,7 @@ pub mod Executor {
             let run = self.clone();
             Arc::new(move |residual, term| {
                 let view = e::Residual::residual_view(residual)?;
-                let residual = if view.term == *term { residual } else { e::Residual::with_bindings(residual, term, &view.bindings)? };
+                let residual = if *view.term == *term { residual } else { e::Residual::with_bindings(residual, term, &view.bindings)? };
                 run.walk(&Value::Residual(residual))
             })
         }
@@ -1602,7 +1602,7 @@ pub mod Executor {
                     Some(packed::force(&p, live, &self.force_options()))
                 }
                 _ => {
-                    let node = e::Residual::residual_view(r).map(|v| v.term.node).ok();
+                    let node = e::Residual::residual_view(r).map(|v| v.term.node.clone()).ok();
                     match (self.o.strict, node) {
                         (true, Some(Node::Hof(w::HofKind::Map | w::HofKind::Reduce, _) | Node::Loop { .. })) => {
                             Some(Err(v::fail("E_KERNEL_FORM", "Numeric node bodies must compile to packed kernels.")))
@@ -1724,7 +1724,7 @@ pub mod Executor {
                             Value::Record(fields) if o.resident.is_some() || !(e::frame_dependent(&program.value) || e::state_dependent(&program.value)) => {
                                 let root = fields.iter().find_map(|(_, x)| match x {
                                     Value::Residual(r)
-                                        if o.resident.is_some() || e::Residual::residual_view(*r).map(|v| v.context == context::sop()).unwrap_or(false) =>
+                                        if o.resident.is_some() || e::Residual::residual_context(*r).is_some_and(|c| c == context::sop()) =>
                                     {
                                         Some(*r)
                                     }

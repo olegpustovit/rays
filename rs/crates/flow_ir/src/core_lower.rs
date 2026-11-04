@@ -43,20 +43,20 @@ pub type RegionAllowed = Rc<dyn Fn(&C::RegionT) -> bool>;
 pub type LoweredHook = Rc<dyn Fn(ResidualId)>;
 
 fn static_sop(r: ResidualId) -> bool {
-    match E::Residual::residual_view(r) {
-        Ok(v) => v.context == context::sop() && !E::frame_dependent(&Value::Residual(r)) && !E::state_dependent(&Value::Residual(r)),
-        Err(_) => false,
+    match E::Residual::residual_context(r) {
+        Some(c) => c == context::sop() && !E::frame_dependent(&Value::Residual(r)) && !E::state_dependent(&Value::Residual(r)),
+        None => false,
     }
 }
 /// a SOP cook lowers what its kernels capture as producers, frame-driven or not
-fn sop_cook(r: ResidualId) -> bool { E::Residual::residual_view(r).map(|v| v.context == context::sop()).unwrap_or(false) }
+fn sop_cook(r: ResidualId) -> bool { E::Residual::residual_context(r).is_some_and(|c| c == context::sop()) }
 
 fn holds_arrays(ty: &Ty) -> bool {
     match ty { Ty::Array(_) => true, Ty::Record(fields) => fields.iter().any(|(_, t)| holds_arrays(t)), _ => false }
 }
 fn holds_array_residual(v: &Value) -> bool {
     match v {
-        Value::Residual(r) => E::Residual::residual_view(*r).map(|v| holds_arrays(&v.term.ty)).unwrap_or(false),
+        Value::Residual(r) => E::Residual::residual_ty(*r).is_some_and(|ty| holds_arrays(&ty)),
         Value::Fn(f) => E::Residual::function_bindings(*f).iter().any(|(_, v)| holds_array_residual(v)),
         Value::Record(fields) => fields.iter().any(|(_, v)| holds_array_residual(v)),
         _ => false,
@@ -606,7 +606,7 @@ impl Lowerer {
     fn type_of(&self, l: &Lowered) -> Ty {
         match l {
             Selected(items, _) => items.iter().fold(Ty::Any, |ty, v| ty::join(&ty, &self.type_of(v)).unwrap_or(ty)),
-            Known(Value::Residual(r)) => E::Residual::residual_view(*r).map(|v| v.term.ty).unwrap_or(Ty::Any),
+            Known(Value::Residual(r)) => E::Residual::residual_ty(*r).unwrap_or(Ty::Any),
             Known(Value::List(items)) => Ty::List(Box::new(items.iter().fold(Ty::Any, |ty, v| ty::join(&ty, &self.type_of(&Known(v.clone()))).unwrap_or(ty)))),
             Known(v) => V::ty_of(v),
             Computed(_, ty) => ty.clone(),

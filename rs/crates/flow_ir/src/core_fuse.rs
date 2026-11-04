@@ -287,7 +287,7 @@ fn same_source(a: &Source, b: &Source) -> bool {
             (ar == br && x == y)
                 || (match (Residual::residual_view(ar), Residual::residual_view(br)) {
                     (Ok(va), Ok(vb)) => {
-                        va.term == x && vb.term == y && same_ops(ar, br)
+                        *va.term == x && *vb.term == y && same_ops(ar, br)
                             && Residual::residual_authored_key(ar) == Residual::residual_authored_key(br)
                             && flow_eval::structure(&Value::Residual(ar)) == flow_eval::structure(&Value::Residual(br))
                     }
