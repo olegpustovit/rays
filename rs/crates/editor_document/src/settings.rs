@@ -14,9 +14,10 @@ pub fn make(schema: &Arc<Schema>, values: Vec<Value>) -> T {
     T { schema: schema.clone(), values: Arc::new(values) }
 }
 
+/// One shared value, as in OCaml: `same_values (none ()) (none ())` holds.
 pub fn none() -> T {
-    let schema = Arc::new(param::schema("none".to_owned(), Vec::new()).expect("valid schema"));
-    make(&schema, Vec::new())
+    static NONE: std::sync::OnceLock<T> = std::sync::OnceLock::new();
+    NONE.get_or_init(|| make(&Arc::new(param::schema("none".to_owned(), Vec::new()).expect("valid schema")), Vec::new())).clone()
 }
 
 pub fn fields(settings: &T) -> Vec<FieldView> {
@@ -52,4 +53,12 @@ pub fn same_values(a: &T, b: &T) -> bool {
 
 pub fn schema_of(settings: &T) -> &Arc<Schema> {
     &settings.schema
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn none_is_one_shared_value() {
+        assert!(super::same_values(&super::none(), &super::none()));
+    }
 }
