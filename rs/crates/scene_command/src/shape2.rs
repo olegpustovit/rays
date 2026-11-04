@@ -37,12 +37,13 @@ fn path_of_points(closed: bool, points: &[(f64, f64)]) -> path::Path {
     }
     path::of_commands(&commands)
 }
+// OCaml Stdlib `min` / `max`: `if a <= b then a else b` and `if a >= b then a else b`.
+// These differ from `f64::min`/`max` on NaN, so they are spelled out.
+fn ocaml_min(a: f64, b: f64) -> f64 { if a <= b { a } else { b } }
+fn ocaml_max(a: f64, b: f64) -> f64 { if a >= b { a } else { b } }
+
 pub fn line(from: (f64, f64), to: (f64, f64), width: f64, color: i32) -> Result<Geometry, String> {
-    stroke_path(
-        color,
-        &path_of_points(false, &[from, to]),
-        if width.is_nan() { width } else { width.max(1.0) },
-    )
+    stroke_path(color, &path_of_points(false, &[from, to]), ocaml_max(1.0, width))
 }
 pub fn polygon(points: &[(f64, f64)], fill: Option<i32>, stroke: Option<i32>) -> Result<Vec<Geometry>, String> {
     let fill = if fill.is_none() && stroke.is_none() { Some(0xffff_ffffu32 as i32) } else { fill };
@@ -56,8 +57,8 @@ pub fn path(fill: Option<i32>, stroke: Option<i32>, value: &path::Path) -> Resul
 }
 pub fn rounded_rect(width: f64, height: f64, radius: f64, fill: Option<i32>, stroke: Option<i32>) -> Result<Vec<Geometry>, String> {
     let fill = if fill.is_none() && stroke.is_none() { Some(0xffff_ffffu32 as i32) } else { fill };
-    let cap = width.abs().min(height.abs()) / 2.0;
-    let radius = if radius.is_nan() { cap } else { radius.max(0.0).min(cap) };
+    let cap = ocaml_min(width.abs(), height.abs()) / 2.0;
+    let radius = ocaml_max(0.0, ocaml_min(radius, cap));
     let k = 0.5522847498307936 * radius;
     let p = |x, y| Point { x, y };
     let commands = [

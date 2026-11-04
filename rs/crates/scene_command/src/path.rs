@@ -76,6 +76,75 @@ fn midpoint(a: Point, b: Point) -> Point {
     Point { x: (a.x + b.x) * 0.5, y: (a.y + b.y) * 0.5 }
 }
 
+/// OCaml Stdlib `max` (NaN-propagating as written in the source, unlike `f64::max`).
+fn ocaml_max(x: f64, y: f64) -> f64 {
+    if x >= y { x } else { y }
+}
+
+/// OCaml `Array.sort` (heap sort, not stable), reproduced step for step so that
+/// equal keys end up in the same order as in the OCaml tessellator.
+fn ocaml_sort<T: Copy, F: Fn(T, T) -> std::cmp::Ordering>(a: &mut [T], cmp: F) {
+    use std::cmp::Ordering::{Greater, Less};
+    // Ok(child) of the larger son, or Err(i) where OCaml raises `Bottom i`.
+    fn maxson<T: Copy, F: Fn(T, T) -> std::cmp::Ordering>(a: &[T], cmp: &F, l: usize, i: usize) -> Result<usize, usize> {
+        let i31 = i + i + i + 1;
+        if i31 + 2 < l {
+            let mut x = i31;
+            if cmp(a[i31], a[i31 + 1]) == Less { x = i31 + 1; }
+            if cmp(a[x], a[i31 + 2]) == Less { x = i31 + 2; }
+            Ok(x)
+        } else if i31 + 1 < l && cmp(a[i31], a[i31 + 1]) == Less {
+            Ok(i31 + 1)
+        } else if i31 < l {
+            Ok(i31)
+        } else {
+            Err(i)
+        }
+    }
+    let l = a.len();
+    let trickle = |a: &mut [T], mut i: usize, e: T| loop {
+        match maxson(a, &cmp, l, i) {
+            Err(b) => { a[b] = e; return; }
+            Ok(j) => {
+                if cmp(a[j], e) == Greater { a[i] = a[j]; i = j; } else { a[i] = e; return; }
+            }
+        }
+    };
+    let bubble = |a: &mut [T], l: usize, mut i: usize| -> usize {
+        loop {
+            match maxson(a, &cmp, l, i) {
+                Err(b) => return b,
+                Ok(j) => { a[i] = a[j]; i = j; }
+            }
+        }
+    };
+    let trickleup = |a: &mut [T], mut i: usize, e: T| loop {
+        let father = (i - 1) / 3;
+        if cmp(a[father], e) == Less {
+            a[i] = a[father];
+            if father > 0 { i = father; } else { a[0] = e; return; }
+        } else {
+            a[i] = e;
+            return;
+        }
+    };
+    for i in (0..(l + 1) / 3).rev() {
+        let e = a[i];
+        trickle(a, i, e);
+    }
+    for i in (2..l).rev() {
+        let e = a[i];
+        a[i] = a[0];
+        let b = bubble(a, i, 0);
+        trickleup(a, b, e);
+    }
+    if l > 1 {
+        let e = a[1];
+        a[1] = a[0];
+        a[0] = e;
+    }
+}
+
 fn distance_to_line_squared(p: Point, a: Point, b: Point) -> f64 {
     let dx = b.x - a.x;
     let dy = b.y - a.y;
@@ -126,7 +195,7 @@ fn cubic(
     tolerance_squared: f64,
 ) -> Result<(), Error> {
     if depth == 24
-        || distance_to_line_squared(c1, a, b).max(distance_to_line_squared(c2, a, b))
+        || ocaml_max(distance_to_line_squared(c1, a, b), distance_to_line_squared(c2, a, b))
             <= tolerance_squared
     {
         return add_point(output, b);
@@ -235,10 +304,12 @@ pub fn tessellate(tolerance: f64, fill_rule: FillRule, path: &Path) -> Result<Me
     if active || open_contour { return Err(Error::OpenContour); }
     let contours = flatten(tolerance, path)?;
     let mut ys: Vec<f64> = contours.iter().flatten().map(|p| p.y).collect();
-    ys.sort_by(|a, b| compare_float(*a, *b));
+    ocaml_sort(&mut ys, compare_float);
     ys.dedup_by(|a, b| *a == *b);
     let mut vertices = Vec::new();
     let mut triangles = Vec::new();
+    // OCaml prepends each quad's six indices onto a list that is reversed at the end,
+    // so every quad is emitted as one block in reverse order.
     let add_quad = |vertices: &mut Vec<Point>, triangles: &mut Vec<usize>, left: Crossing, right: Crossing, y0: f64, y1: f64| -> Result<(), Error> {
         if vertices.len().checked_add(4).filter(|n| *n <= MAX_POINTS).is_none() {
             return Err(Error::ComplexityLimit);
@@ -248,7 +319,7 @@ pub fn tessellate(tolerance: f64, fill_rule: FillRule, path: &Path) -> Result<Me
             Point { x: left.x0, y: y0 }, Point { x: right.x0, y: y0 },
             Point { x: right.x1, y: y1 }, Point { x: left.x1, y: y1 },
         ]);
-        triangles.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        triangles.extend_from_slice(&[base + 3, base + 2, base, base + 2, base + 1, base]);
         Ok(())
     };
     for band in 0..ys.len().saturating_sub(1) {
@@ -269,7 +340,9 @@ pub fn tessellate(tolerance: f64, fill_rule: FillRule, path: &Path) -> Result<Me
                 }
             }
         }
-        edges.sort_by(|a, b| compare_float((a.x0 + a.x1) * 0.5, (b.x0 + b.x1) * 0.5));
+        // OCaml collects crossings by prepending, so the array it sorts is in reverse order.
+        edges.reverse();
+        ocaml_sort(&mut edges, |a: Crossing, b: Crossing| compare_float((a.x0 + a.x1) * 0.5, (b.x0 + b.x1) * 0.5));
         let mut inside = false;
         let mut winding = 0;
         let mut left = None;
@@ -310,10 +383,12 @@ pub fn stroke(
         if length == 0.0 { None } else { Some((dx / length, dy / length)) }
     };
     let offset = |p: Point, nx: f64, ny: f64, scale: f64| Point { x: p.x + nx * scale, y: p.y + ny * scale };
+    // OCaml's `triangle (vertex a) (vertex b) (vertex c)` evaluates its arguments right to
+    // left, so the vertices are stored c, b, a and the triangle reads back in that order.
     let add_triangle = |vertices: &mut Vec<Point>, indices: &mut Vec<usize>, a: Point, b: Point, c: Point| -> Result<(), Error> {
         if vertices.len().checked_add(3).filter(|n| *n <= MAX_POINTS).is_none() { return Err(Error::ComplexityLimit); }
         let base = vertices.len();
-        vertices.extend_from_slice(&[a, b, c]);
+        vertices.extend_from_slice(&[c, b, a]);
         indices.extend_from_slice(&[base, base + 1, base + 2]);
         Ok(())
     };
@@ -343,13 +418,13 @@ pub fn stroke(
                 if vertices.len().checked_add(4).filter(|n| *n <= MAX_POINTS).is_none() { return Err(Error::ComplexityLimit); }
                 let base = vertices.len();
                 vertices.extend_from_slice(&[a0, a1, b1, b0]);
-                indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+                indices.extend_from_slice(&[base + 2, base + 1, base, base + 3, base + 2, base]);
             }
         }
         let add_join = |vertices: &mut Vec<Point>, indices: &mut Vec<usize>, a: Point, b: Point, c: Point| -> Result<(), Error> {
             let (Some((dx0, dy0)), Some((dx1, dy1))) = (unit(a, b), unit(b, c)) else { return Ok(()) };
             let cross = dx0 * dy1 - dy0 * dx1;
-            if cross.abs() <= 1e-15 { return Ok(()); }
+            if !(cross.abs() > 1e-15) { return Ok(()); }
             let side = if cross > 0.0 { 1.0 } else { -1.0 };
             let n0x = -dy0 * side;
             let n0y = dx0 * side;
