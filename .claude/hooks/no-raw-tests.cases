@@ -1,0 +1,10 @@
+deny|cargo test -p flow_ir
+allow|cargo t -p flow_ir
+allow|cd /x && git commit -q -m "no plain cargo test here"
+allow|git log --oneline
+deny|C:/r/target/ag/debug/deps/flow_ir-0123abcd4567.exe --exact x
+allow|cargo test -q -p rays-t
+allow|cargo test -p sop --no-run
+deny|$env:X=1; cargo test -q -p flow_sop 2>&1
+allow|gdb -p 12 -batch -ex bt
+allow|cargo check -p flow_ir
