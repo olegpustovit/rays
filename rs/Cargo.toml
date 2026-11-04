@@ -9,29 +9,11 @@ license = "MIT"
 rust-version = "1.99"
 
 [profile.dev]
-opt-level = 0
-debug = "line-tables-only"
+opt-level = 0   # measured: opt-level=1 on flow_*/rdk_* gave no test-time gain (flow_eval 83 tests 19.4 s CPU either way, rdk_ops 260 tests ~25 s either way) and cost 2.5-3.5x cold build; see port/build-speed.md
+debug = 0   # measured: cold build -20%, target dir -40%; panic locations still print (RUST_BACKTRACE lines need debug="line-tables-only")
 incremental = true
 codegen-units = 256
 overflow-checks = true
-
-# geometry kernels are too slow for tests at -O0
-[profile.dev.package.rdk_geom]
-opt-level = 1
-[profile.dev.package.rdk_ops]
-opt-level = 1
-[profile.dev.package.rdk_boolean]
-opt-level = 1
-[profile.dev.package.flow_ir]
-opt-level = 1
-[profile.dev.package.flow_sop]
-opt-level = 1
-[profile.dev.package.flow_check]
-opt-level = 1
-[profile.dev.package.flow_syntax]
-opt-level = 1
-[profile.dev.package.flow_eval]
-opt-level = 1
 
 [profile.release]
 codegen-units = 16

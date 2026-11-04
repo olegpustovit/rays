@@ -58,12 +58,13 @@ mod tests {
     use super::{fnv_int_mix, fnv_int_range};
 
     // Expected values are OCaml 5.3 `lib/rays_math/hash.ml` run as a toplevel script.
+    // OCaml max_int/min_int are 63-bit: 2^62-1 and -2^62 (not i64::MAX/MIN, which wrap to -1/0).
     #[test]
     fn fnv_int_mix_matches_ocaml_precedence_and_63_bit_wrap() {
         assert_eq!(fnv_int_mix(0, 1), 1_099_511_628_211);
         assert_eq!(fnv_int_mix(1, 0), 1_099_511_628_211);
-        assert_eq!(fnv_int_mix(i64::MAX, 5), 4_611_679_421_357_618_638);
-        assert_eq!(fnv_int_mix(i64::MIN, -3), 4_611_682_719_892_503_271);
+        assert_eq!(fnv_int_mix((1_i64 << 62) - 1, 5), 4_611_679_421_357_618_638);
+        assert_eq!(fnv_int_mix(-(1_i64 << 62), -3), 4_611_682_719_892_503_271);
         assert_eq!(fnv_int_mix(-1, 200), -221_001_837_270_411);
         assert_eq!(fnv_int_mix(0x2bf29ce484222325, 0x7fffffff), 800_922_855_557_449_326);
     }

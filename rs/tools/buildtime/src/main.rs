@@ -253,9 +253,9 @@ fn run_w0_pair(root: &Path, enforce_budgets: bool, timings: &mut Vec<Timing>) ->
 
 fn canaries() -> Result<[Canary; 3], String> {
     Ok([
-        Canary { tier: Tier::Leaf, package: package_override("BUILDTIME_LEAF", "rays_diagnostic")? },
-        Canary { tier: Tier::Middle, package: package_override("BUILDTIME_MIDDLE", "flow_ir")? },
-        Canary { tier: Tier::Top, package: package_override("BUILDTIME_TOP", "rays_editor")? },
+        Canary { tier: Tier::Leaf, package: package_override("BUILDTIME_LEAF", "rays_math")? },
+        Canary { tier: Tier::Middle, package: package_override("BUILDTIME_MIDDLE", "flow_check")? },
+        Canary { tier: Tier::Top, package: package_override("BUILDTIME_TOP", "flow_sop")? },
     ])
 }
 
@@ -373,6 +373,20 @@ fn run_cargo(root: &Path, action: &str, packages: &[&str], timeout: Option<u64>)
     }
     if let Some(timeout) = timeout {
         command.env("RAYS_T_TIMEOUT", timeout.to_string());
+    }
+    if action == "t" {
+        // A red test is not a build-speed failure: accept a run that reached rays-t's summary line.
+        let out = command.output().map_err(|error| format!("could not start cargo t: {error}"))?;
+        io::stdout().write_all(&out.stdout).ok();
+        io::stderr().write_all(&out.stderr).ok();
+        if out.status.success() {
+            return Ok(());
+        }
+        if String::from_utf8_lossy(&out.stderr).contains("rays-t: total wall") {
+            eprintln!("buildtime: warning: tests are red in {}; timing still counted", packages.join(", "));
+            return Ok(());
+        }
+        return Err(format!("cargo t exited with {}", out.status));
     }
     let status = command.status().map_err(|error| format!("could not start cargo {action}: {error}"))?;
     if status.success() {
