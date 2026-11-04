@@ -46,3 +46,10 @@
 - $card marker: Rust flow_eval emits a marker with an attached error where OCaml evaluator makes a catalog call; lower.rs rewrites it (failed_card_as_call) — fix flow_eval to match OCaml and drop the rewrite.
 - Unported flow_sop tests: most of test_lisp_node, test_lisp_fusion, test_graph, test_node_sources, test_workspace_cook/edit/zone, test_projection, test_lisp_projection, test_mesh_resident, test_gpu_bulk, test_node_facts, test_metadata_kernel, kernel half of test_trace, test_group_kernel, test_remap.
 - flow_sop depends directly on rdk/rdk_core (OCaml reaches rdk only via sop) — gate.
+## Remaining after flowrt (2026-11-04 ~14:40)
+- flow_check op.rs:467 array/slice limit isize::MAX vs OCaml Sys.max_floatarray_length (pass None to array_count) -> slice_start_max_int.
+- flow_syntax value.rs array_init doesn't reject limit+1 before allocating (abort vs E_ARRAY_RANGE).
+- flow_check array/max_length non-text :type E_TYPE vs E_ARRAY_TYPE; array/max of [-0. 0.] keeps -0.
+- flow_ir debug-build tests over 5 s (iterate/map parity, several) and flow_web test_js 11 tests over 5 s — buildspeed agent deciding opt-level; else shrink.
+- frame_kernel_prepared_programs_match_the_reference_a/_b fail with flowck's working-tree core_lower/core_region edits.
+- Per-callback arena copy-on-write cost not measured.
