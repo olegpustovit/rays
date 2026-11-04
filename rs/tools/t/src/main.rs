@@ -11,6 +11,7 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const WHOLE_RUN_DEFAULT: Duration = Duration::from_secs(60);
+const BUILD_TIMEOUT: Duration = Duration::from_secs(900);
 const TEST_TIMEOUT: Duration = Duration::from_secs(5);
 const SLOW_TEST_TIMEOUT: Duration = Duration::from_secs(60);
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
@@ -204,14 +205,8 @@ fn run() -> i32 {
         return status;
     };
 
-    let status = run_tests(&args, timeout, run_started, &mut report.timings);
-    let status = if status != 124
-        && remaining(run_started, timeout).is_some_and(|remaining| remaining.is_zero())
-    {
-        report_whole_timeout(run_started)
-    } else {
-        status
-    };
+    // run_tests enforces the whole-run limit itself, from the end of the build.
+    let status = run_tests(&args, timeout, &mut report.timings);
     if let Err(error) = report.finish() {
         eprintln!("rays-t: could not append test timings: {error}");
         return if status == 0 { 1 } else { status };
@@ -222,13 +217,15 @@ fn run() -> i32 {
 fn run_tests(
     args: &Args,
     timeout: Option<Duration>,
-    run_started: Instant,
     timings: &mut Vec<TestTiming>,
 ) -> i32 {
+    // The build has its own bounded budget; the whole-run limit (60 s) covers listing and tests only,
+    // so a cold compile of a large crate cannot eat the test budget. Slow builds are G2 (buildtime).
+    let build_started = Instant::now();
     let mut build = Command::new("cargo");
     build.arg("test").arg("--no-run").arg("--message-format=json");
     build.args(&args.cargo);
-    let build_output = match run_command(&mut build, run_started, timeout, None, true) {
+    let build_output = match run_command(&mut build, build_started, Some(BUILD_TIMEOUT), None, true) {
         Ok(RunResult::Finished(output)) => output,
         Ok(RunResult::TimedOut { elapsed, output, .. }) => {
             print_bytes(io::stderr(), &output.stderr);
@@ -253,6 +250,7 @@ fn run_tests(
             return 1;
         }
     };
+    let run_started = Instant::now();
 
     let mut ordinary = Vec::new();
     let mut serial = Vec::new();
