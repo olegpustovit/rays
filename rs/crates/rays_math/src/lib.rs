@@ -256,3 +256,9 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod test_color;
+
+#[cfg(test)]
+mod test_clock;
