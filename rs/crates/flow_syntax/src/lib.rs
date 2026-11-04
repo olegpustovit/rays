@@ -11,3 +11,6 @@ pub mod text_lexer;
 pub mod syntax;
 pub mod ty;
 pub mod value;
+
+#[cfg(test)]
+mod test_macro;
