@@ -2287,7 +2287,7 @@ fn indexed(value: &Value) -> bool {
     fn term(t: &Term) -> bool {
         match &t.node {
             W::Node::Op { op, .. } if op == "array/range" => true,
-            _ => W::children(t).iter().any(term),
+            _ => W::children_ref(t).into_iter().any(term),
         }
     }
     fn visit(v: &Value, seen: &mut BTreeSet<i64>) -> bool {

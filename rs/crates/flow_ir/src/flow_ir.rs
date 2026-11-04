@@ -3225,7 +3225,7 @@ mod tests {
     fn has_region(value: &Value) -> bool {
         fn packed_child_region(residual: ResidualId, term: &Term) -> bool {
             packed::compile(&packed::CompileOptions::default(), residual, term).is_some()
-                || w::children(term).iter().any(|t| packed_child_region(residual, t))
+                || w::children_ref(term).into_iter().any(|t| packed_child_region(residual, t))
         }
         fn has_fields(fs: &[(String, Value)]) -> bool { fs.iter().any(|(_, x)| has_region(x)) }
         match value {

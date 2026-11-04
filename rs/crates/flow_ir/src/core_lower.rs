@@ -323,7 +323,7 @@ pub struct Lowerer {
     has_draw: bool,
     initial: Option<Value>,
     root: Option<ResidualId>,
-    root_ops: Option<Vec<op::Op>>,
+    root_ops: Option<std::sync::Arc<Vec<op::Op>>>,
     lowered_hook: LoweredHook,
     constants: Vec<C::Literal>,
     locals: Vec<Ty>,
@@ -463,7 +463,7 @@ impl Lowerer {
     fn root(&self) -> R<ResidualId> {
         self.root.ok_or_else(|| Stop::Diag(V::fail("E_INTERNAL", "root residual not available")))
     }
-    fn ops(&mut self) -> R<Vec<op::Op>> {
+    fn ops(&mut self) -> R<std::sync::Arc<Vec<op::Op>>> {
         if self.root_ops.is_none() {
             let root = self.root()?;
             self.root_ops = Some(E::Residual::residual_ops(root));

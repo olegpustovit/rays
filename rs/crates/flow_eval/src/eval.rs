@@ -2833,8 +2833,9 @@ pub mod Residual {
         let context = state_location(&residual, instance, path, iter, host);
         super::state_write(&mut arena, &context, &Vec::new(), value)
     }
-    pub fn residual_ops(id: ResidualId) -> Vec<op::Op> {
-        arena_for_residual(&id).and_then(|arena| Some(peek(&arena, |arena| (*arena.workspace.ops).clone()))).unwrap_or_default()
+    // the workspace's operator table, shared (a lowering asks for it per operator: copying the catalog each time was most of a call)
+    pub fn residual_ops(id: ResidualId) -> Arc<Vec<op::Op>> {
+        arena_for_residual(&id).map(|arena| peek(&arena, |arena| arena.workspace.ops.clone())).unwrap_or_default()
     }
     pub fn residual_authored_key(id: ResidualId) -> Option<String> {
         arena_for_residual(&id).map(|arena| peek(&arena, |arena| authored_key(&arena.workspace)))

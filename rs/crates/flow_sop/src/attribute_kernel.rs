@@ -196,8 +196,8 @@ fn checked_reads(bindings: &[(String, Value)], term: &Term, st: &mut Reads) -> V
                 }
             }
             _ => {
-                for child in W::children(term) {
-                    scan(bindings, &child, st, safe, unsafe_);
+                for child in W::children_ref(term) {
+                    scan(bindings, child, st, safe, unsafe_);
                 }
             }
         }

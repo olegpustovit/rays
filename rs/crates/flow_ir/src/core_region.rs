@@ -168,12 +168,9 @@ fn paths(view: &Residual::View, sites: &mut Vec<(i64, Path, Vec<i64>)>, t: &Term
     if let Some(path) = &t.path {
         sites.push((view.instance, path.clone(), view.iter.clone()));
     }
-    let children: Vec<Term> = match &t.node {
-        Node::Bypass(call) => W::bypass_input(call).into_iter().collect(),
-        _ => W::children(t),
-    };
-    for child in &children {
-        paths(view, sites, child);
+    match &t.node {
+        Node::Bypass(call) => { if let Some(input) = W::bypass_input(call) { paths(view, sites, &input); } }
+        _ => for child in W::children_ref(t) { paths(view, sites, child); },
     }
 }
 
