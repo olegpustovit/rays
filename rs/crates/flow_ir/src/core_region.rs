@@ -488,7 +488,7 @@ type CaptureKey = (String, Vec<String>, Vec<(i64, bool)>, Vec<i64>);
 
 struct Lower {
     residual: ResidualId,
-    term: Term,
+    term: std::sync::Arc<Term>,
     dynamic: bool,
     bindings: Vec<(String, Value)>,
     sources: Vec<Term>,
@@ -2027,11 +2027,12 @@ fn lower_inner(fusion: bool, dynamic: bool, count_source: &CountSource, residual
     if sources.len() != params.len() {
         return Err(refuse("E_PACKED_FORM", &format!("Packed kernel has {} sources but {} parameters.", sources.len(), params.len())));
     }
+    let arc_term = std::sync::Arc::new(term.clone());
     let mut lower = Lower {
         residual,
-        term: term.clone(),
+        term: arc_term.clone(),
         dynamic,
-        bindings: bindings.clone(),
+        bindings: bindings,
         sources: sources.clone(),
         code: Vec::new(),
         uniforms: Vec::new(),
@@ -2168,7 +2169,6 @@ fn lower_inner(fusion: bool, dynamic: bool, count_source: &CountSource, residual
             })
             .collect()
     };
-    let arc_term = std::sync::Arc::new(term.clone());
     let region = R::make(Parts {
         residual,
         term: arc_term.clone(),

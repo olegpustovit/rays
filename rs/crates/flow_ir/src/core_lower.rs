@@ -1227,6 +1227,15 @@ impl Lowerer {
     fn term(&mut self, borrow: bool, s: &mut Scope, source: &C::Source, env: &Env, x: &Term) -> R<Lowered> {
         self.budget -= 1;
         if self.budget < 0 { return Err(refusal("budget")); }
+        // a literal needs no source and is no kernel candidate
+        match &x.node {
+            Node::Lit(param::Value::Int(n)) => return Ok(Known(Value::Int(*n))),
+            Node::Lit(param::Value::Float(f)) => return Ok(Known(Value::Float(*f))),
+            Node::Lit(param::Value::Bool(b)) => return Ok(Known(Value::Bool(*b))),
+            Node::Text(t) => return Ok(Known(Value::Text(t.clone()))),
+            Node::Nil => return Ok(Known(Value::No_geo)),
+            _ => {}
+        }
         let mut src = source.clone();
         src.site = x.path.clone().unwrap_or_else(|| source.site.clone());
         src.span = Some(x.form.span.clone());

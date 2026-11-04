@@ -603,23 +603,30 @@ type Form = flow_syntax::syntax::Syntax;
 
 fn form_same(a: &Form, b: &Form) -> bool { a.id == b.id && a.span == b.span }
 
+/// What `form_same` compares: a form's identity without the form.
+type FormKey = (i64, rays_diagnostic::Span);
+fn key_of_form(f: &Form) -> FormKey { (f.id, f.span.clone()) }
+fn key_same(k: &FormKey, f: &Form) -> bool { k.0 == f.id && k.1 == f.span }
+
 struct Tables {
     roots: HashMap<i64, Vec<(Form, Path)>>,
-    index: HashMap<i64, Vec<(Form, Path, Paths)>>,
-    callable_owners: HashMap<i64, Vec<(Form, Path)>>,
+    index: HashMap<i64, Vec<(FormKey, Path, Paths)>>,
+    callable_owners: HashMap<i64, Vec<(FormKey, Path)>>,
 }
 
 struct Walker {
     collect: bool,
     t: Tables,
-    called: HashMap<i64, Vec<(Term, Path)>>,
+    called: HashMap<i64, Vec<(Term, Path, usize)>>,
+    /// bodies (by address) already found equal to a stored one under an owner
+    called_seen: std::collections::HashSet<(usize, Path)>,
 }
 
 impl Walker {
     fn callable(&mut self, owner: &Path, body: &Term) {
         let entries = self.t.callable_owners.entry(body.form.id).or_default();
-        if !entries.iter().any(|(form, path)| form_same(form, &body.form) && path == owner) {
-            entries.insert(0, ((*body.form).clone(), owner.clone()));
+        if !entries.iter().any(|(form, path)| key_same(form, &body.form) && path == owner) {
+            entries.insert(0, (key_of_form(&body.form), owner.clone()));
         }
     }
 
@@ -634,16 +641,16 @@ impl Walker {
             _ => producers,
         };
         let entries = self.t.index.entry(term.form.id).or_default();
-        let same = |x: &(Form, Path, Paths)| form_same(&x.0, &term.form) && x.1 == *owner;
+        let same = |x: &(FormKey, Path, Paths)| key_same(&x.0, &term.form) && x.1 == *owner;
         let old = entries.iter().find(|x| same(x)).map(|x| x.2.clone()).unwrap_or_default();
         let merged: Paths = old.union(&producers).cloned().collect();
         entries.retain(|x| !same(x));
-        entries.insert(0, ((*term.form).clone(), owner.clone(), merged));
+        entries.insert(0, (key_of_form(&term.form), owner.clone(), merged));
     }
 
     fn walk(&mut self, owner: &Path, term: &Term) {
         use w::Node;
-        let owner = term.path.clone().unwrap_or_else(|| owner.clone());
+        let owner = term.path.as_ref().unwrap_or(owner);
         if !self.collect {
             match &term.node {
                 Node::Hof(w::HofKind::Map | w::HofKind::Reduce, _) | Node::Loop { .. } => self.add(&owner, term),
@@ -681,7 +688,7 @@ impl Walker {
                         .t
                         .callable_owners
                         .get(&body.form.id)
-                        .map(|v| v.iter().filter(|(form, _)| form_same(form, &body.form)).map(|(_, o)| o.clone()).collect())
+                        .map(|v| v.iter().filter(|(form, _)| key_same(form, &body.form)).map(|(_, o)| o.clone()).collect())
                         .unwrap_or_default();
                     owners.sort();
                     owners.dedup();
@@ -689,8 +696,14 @@ impl Walker {
                     // A body walked again with the same owner adds nothing, and a call nested in
                     // calls would walk it once per path through them.
                     let walked = self.called.entry(body.form.id).or_default();
-                    if !walked.iter().any(|(seen, path)| *seen == **body && *path == call_owner) {
-                        walked.insert(0, ((**body).clone(), call_owner.clone()));
+                    // the same node reached again is its own equal; only another node pays the deep comparison
+                    let address = &**body as *const Term as usize;
+                    let known = self.called_seen.contains(&(address, call_owner.clone()))
+                        || walked.iter().any(|(seen, path, at)| *path == call_owner && (*at == address || *seen == **body));
+                    if known {
+                        self.called_seen.insert((address, call_owner.clone()));
+                    } else {
+                        walked.insert(0, ((**body).clone(), call_owner.clone(), address));
                         self.walk(&call_owner, body);
                     }
                 }
@@ -773,7 +786,7 @@ fn pending(path: &Path) -> Vec<Diagnostic> {
 
 struct Qualifier {
     t: Tables,
-    ops: Vec<flow_check::op::Op>,
+    ops: Arc<Vec<flow_check::op::Op>>,
     gpu: Gpu::Config,
     accepted: Mutex<HashMap<String, Vec<(Path, Term)>>>,
     outcomes: Mutex<HashMap<Path, Vec<Diagnostic>>>,
@@ -789,7 +802,7 @@ impl Qualifier {
             .t
             .index
             .get(&view.term.form.id)
-            .and_then(|v| v.iter().find(|(form, owner, _)| form_same(form, &view.term.form) && *owner == view.owner))
+            .and_then(|v| v.iter().find(|(form, owner, _)| key_same(form, &view.term.form) && *owner == view.owner))
             .map(|(_, _, p)| p.clone())
             .unwrap_or_default();
         let producer: Option<Path> = if producers.len() == 1 { producers.iter().next().cloned() } else { None };
@@ -964,11 +977,13 @@ pub fn qualify_workspace(options: &QualifyOptions, workspace: &w::Workspace) -> 
         collect: true,
         t: Tables { roots, index: HashMap::new(), callable_owners: HashMap::new() },
         called: HashMap::new(),
+        called_seen: std::collections::HashSet::new(),
     };
     for graph in workspace.defs.iter() { walker.callable(&vec![format!("def:{}", graph.name)], &graph.body); }
     for collect in [true, false] {
         walker.collect = collect;
         walker.called.clear();
+        walker.called_seen.clear();
         for (i, graph) in workspace.graphs.iter().chain(workspace.defs.iter()).enumerate() {
             let owner: Path = if i >= workspace.graphs.len() { vec![format!("def:{}", graph.name)] } else { vec![graph.name.clone()] };
             for (_, _, term) in &graph.inputs {
@@ -979,7 +994,7 @@ pub fn qualify_workspace(options: &QualifyOptions, workspace: &w::Workspace) -> 
     }
     let q = Arc::new(Qualifier {
         t: walker.t,
-        ops: (*workspace.ops).clone(),
+        ops: workspace.ops.clone(),
         gpu: gpu.clone(),
         accepted: Mutex::new(HashMap::new()),
         outcomes: Mutex::new(HashMap::new()),

@@ -378,23 +378,25 @@ fn inline_policy(checked: &Workspace, d: &NodeDefinition) -> E::InlineParameterP
     let normalizers = Arc::new(ep::for_node(checked, d));
     let key = d.kind.qualified[4..].to_owned();
     let (body, context_inputs) = ck::label_context(&key, &d.body);
-    let mut definition = d.clone();
-    definition.body = body.clone();
-    let checked_c = checked.clone();
-    let d_c = d.clone();
+    // the policy keeps what its canonicalization reads, not copies of the checked workspace and the definition (each a deep copy per kind)
+    let definition = NodeDefinition {
+        kind: d.kind.clone(), slots: d.slots.clone(), keyword_inputs: d.keyword_inputs.clone(), fields: d.fields.clone(), label: d.label.clone(),
+        category: d.category.clone(), description: d.description.clone(), operation: d.operation.clone(), version: d.version, body: body.clone(),
+        validations: d.validations.clone(), normalizers: d.normalizers.clone(),
+    };
+    let defs = checked.defs.clone();
+    let (fields, qualified) = (d.fields.clone(), d.kind.qualified.clone());
+    let original_body = if context_inputs.is_empty() { None } else { Some(d.body.clone()) };
     let source_key = declaration_key(checked, d);
     let canonicalize: E::InlineParameterCanonicalizer = Arc::new(move |vals: &[(String, Value)]| {
-        let d = &d_c;
-        let checked = &checked_c;
-        let schema = ln::schema("parameters", &d.fields, &normalizers);
-        let parameters = port::parameters(false, &d.fields)?;
-        let vals = material_args(&d.kind.qualified, vals.to_vec());
+        let schema = ln::schema("parameters", &fields, &normalizers);
+        let parameters = port::parameters(false, &fields)?;
+        let vals = material_args(&qualified, vals.to_vec());
         let (live, vals): (Vec<_>, Vec<_>) = vals.into_iter().partition(|(_, v)| E::is_live(v));
         // a live vec3 group is its three components, each a program input of its field
         let mut grouped: Vec<(String, Value)> = Vec::new();
         for (name, value) in live {
-            let components: Vec<(i64, String)> = d
-                .fields
+            let components: Vec<(i64, String)> = fields
                 .iter()
                 .filter_map(|f| match &f.vec3 {
                     Some((group, axis)) if *group == name => Some((*axis, f.name.clone())),
@@ -434,7 +436,7 @@ fn inline_policy(checked: &Workspace, d: &NodeDefinition) -> E::InlineParameterP
         let mut clamped: Vec<String> = Vec::new();
         let mut next_live = Vec::new();
         for (name, value) in live.drain(..) {
-            let field = d.fields.iter().find(|f| f.name == name);
+            let field = fields.iter().find(|f| f.name == name);
             match (field.map(|f| &f.kind), &value) {
                 (Some(param::KindView::Integer(range)), Value::Residual(r))
                     if (range.hard_min.is_some() || range.hard_max.is_some()) && !normalizers.iter().any(|(n, _)| *n == name) =>
@@ -472,9 +474,9 @@ fn inline_policy(checked: &Workspace, d: &NodeDefinition) -> E::InlineParameterP
         }
         // a live argument is passed as it is, a program input: its field must have nothing to canonicalize
         let raw = |(name, _): &(String, Value)| -> bool {
-            match d.fields.iter().find(|f| f.name == *name) {
-                None if d.fields.iter().any(|f| live.iter().any(|(n, _)| *n == f.name) && f.vec3.is_some() && f.vec3.as_ref().map(|v| &v.0) == Some(name)) => true,
-                None => !d.fields.iter().any(|f| f.vec3.is_some() && f.vec3.as_ref().map(|v| &v.0) == Some(name)),
+            match fields.iter().find(|f| f.name == *name) {
+                None if fields.iter().any(|f| live.iter().any(|(n, _)| *n == f.name) && f.vec3.is_some() && f.vec3.as_ref().map(|v| &v.0) == Some(name)) => true,
+                None => !fields.iter().any(|f| f.vec3.is_some() && f.vec3.as_ref().map(|v| &v.0) == Some(name)),
                 Some(f) => {
                     !normalizers.iter().any(|(n, _)| n == name)
                         && match &f.kind {
@@ -492,9 +494,9 @@ fn inline_policy(checked: &Workspace, d: &NodeDefinition) -> E::InlineParameterP
         }
         let live_names: Vec<String> = live.iter().map(|(n, _)| n.clone()).collect();
         let (values, _) = schema.apply_all(schema.default(), &changes).map_err(|m| fail("E_LOWER", &m))?;
-        let arguments = ln::arguments(&d.fields, &values).map_err(|m| fail("E_LOWER", &m))?;
+        let arguments = ln::arguments(&fields, &values).map_err(|m| fail("E_LOWER", &m))?;
         // a context input the call does not reach is bound to a placeholder, so no kernel captures its source
-        let reached = if context_inputs.is_empty() { Vec::new() } else { ck::context_ops_reached(&arguments, &checked.defs, &d.body) };
+        let reached = if context_inputs.is_empty() { Vec::new() } else { ck::context_ops_reached(&arguments, &defs, original_body.as_ref().expect("context inputs keep the body")) };
         let mut out: Vec<(String, Value)> = arguments.into_iter().filter(|(n, _)| !live_names.contains(n)).collect();
         out.extend(live);
         out.extend(context_inputs.iter().filter(|(_, op)| !reached.contains(op)).map(|(n, _)| (n.clone(), Value::Int(0))));
@@ -4093,9 +4095,11 @@ fn kind_key(qualified: &str) -> String {
 /// `error` is an evaluation error of the call's own parameters, reported when it cooks.
 fn lisp_factory(shared: &Arc<CallEnvShared>, kernel_source: &Lazy, error: Option<Diagnostic>, functions: &[(String, Value)], provenance: Option<i64>, definition: &NodeDefinition) -> Factory {
     let checked = shared.checked.clone();
+    // one copy of the definition, shared by the lazy digest, the constructor and every body it builds
+    let definition_arc = Arc::new(definition.clone());
     let declaration_source: Lazy = {
-        let (checked, definition) = (checked.clone(), definition.clone());
-        lazy(Box::new(move || cached_digest(&checked, std::slice::from_ref(&definition), &|| ck::declaration_source(&checked, &definition))))
+        let (checked, definition) = (checked.clone(), definition_arc.clone());
+        lazy(Box::new(move || cached_digest(&checked, std::slice::from_ref(&*definition), &|| ck::declaration_source(&checked, &definition))))
     };
     let functions: Vec<(String, Value)> = definition
         .slots
@@ -4112,9 +4116,10 @@ fn lisp_factory(shared: &Arc<CallEnvShared>, kernel_source: &Lazy, error: Option
     let key = kind_key(&definition.kind.qualified);
     let errored: Arc<Mutex<Option<Vec<(String, Value)>>>> = Arc::new(Mutex::new(None));
     let category: Vec<String> = if definition.category.is_empty() { vec!["Custom".into()] } else { definition.category.clone() };
-    let (shared_c, definition_c, functions_c, kernel_source_c, key_c) = (shared.clone(), definition.clone(), functions.clone(), kernel_source.clone(), key.clone());
+    let (shared_c, definition_c, functions_c, kernel_source_c, key_c) = (shared.clone(), definition_arc.clone(), functions.clone(), kernel_source.clone(), key.clone());
     let construct = move |inputs: &[Option<node::T>]| -> Result<node::T, String> {
-        let definition = &definition_c;
+        let definition = &*definition_c;
+        let definition_arc = definition_c.clone();
         let mut next = 0usize;
         let connected: Vec<(usize, Option<usize>)> = inputs
             .iter()
@@ -4156,7 +4161,7 @@ fn lisp_factory(shared: &Arc<CallEnvShared>, kernel_source: &Lazy, error: Option
             if functions_c.is_empty() { declaration_source() } else { kernel_source_c() },
             provenance.map_or(String::new(), |p| format!(";provenance={p}"))
         );
-        let (shared, definition2, functions2, bindings2, error2, errored2) = (shared_c.clone(), definition.clone(), functions_c.clone(), bindings, error.clone(), errored.clone());
+        let (shared, definition2, functions2, bindings2, error2, errored2) = (shared_c.clone(), definition_arc, functions_c.clone(), bindings, error.clone(), errored.clone());
         let build_body: ln::BuildFn = Arc::new(move |label: &str, context: &sctx::T, inputs: &[node::T], parameters: &[(String, Value)]| {
             let failed = match (&error2, &*errored2.lock().unwrap()) {
                 (Some(_), None) => true,

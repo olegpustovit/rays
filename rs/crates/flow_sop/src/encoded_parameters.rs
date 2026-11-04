@@ -116,6 +116,11 @@ fn normalize_node(workspace: &Workspace, node: &NodeDefinition) -> Result<NodeDe
 fn normalize_defaults(workspace: &Workspace) -> Result<Workspace, Diagnostic> {
     let mut nodes = Vec::with_capacity(workspace.nodes.len());
     for node in workspace.nodes.iter() {
+        // a node with no normalizer keeps its fields and parameters as checked
+        if node.normalizers.is_empty() {
+            nodes.push(node.clone());
+            continue;
+        }
         nodes.push(normalize_node(workspace, node)?);
     }
     Ok(Workspace { nodes: nodes.into(), ..workspace.clone() })
