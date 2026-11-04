@@ -13,8 +13,5 @@ fn main() {
     let mut cases: Vec<(&str, fn())> = Vec::new();
     cases.extend_from_slice(shell_a::CASES);
     cases.extend_from_slice(shell_b::CASES);
-    if std::env::var("RAYS_SHELL_PARAM_BUG").is_ok() {
-        cases.extend_from_slice(shell_b::PARAM_BUG);
-    }
     common::window::run(&cases);
 }

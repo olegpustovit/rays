@@ -49,7 +49,6 @@ fn tree_keys_through_run_command() {
 }
 
 #[test]
-#[ignore = "param::number::scrub applies the soft range to the value scaled by 10^digits (held((v+delta)*unit).round()/unit, not held(round((v+delta)*unit)/unit)): ranged float scrub gives 0.02, OCaml 2.0"]
 fn scrub_and_show() {
     use param::number as N;
     let got = [

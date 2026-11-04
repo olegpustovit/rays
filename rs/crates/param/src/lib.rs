@@ -230,7 +230,9 @@ fn display_value(kind: &Kind, value: &Value) -> Result<Value, String> {
 }
 
 fn ocaml_float_max(left: f64, right: f64) -> f64 {
-    if left == 0.0 && right == 0.0 {
+    if left.is_nan() || right.is_nan() {
+        f64::NAN
+    } else if left == 0.0 && right == 0.0 {
         if left.is_sign_positive() || right.is_sign_positive() { 0.0 } else { -0.0 }
     } else if left > right {
         left
@@ -240,7 +242,9 @@ fn ocaml_float_max(left: f64, right: f64) -> f64 {
 }
 
 fn ocaml_float_min(left: f64, right: f64) -> f64 {
-    if left == 0.0 && right == 0.0 {
+    if left.is_nan() || right.is_nan() {
+        f64::NAN
+    } else if left == 0.0 && right == 0.0 {
         if left.is_sign_negative() || right.is_sign_negative() { -0.0 } else { 0.0 }
     } else if left < right {
         left
@@ -919,6 +923,8 @@ pub mod string_table {
 }
 
 pub mod number {
+    use super::{ocaml_float_max, ocaml_float_min};
+
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub enum Kind {
         Int,
@@ -934,15 +940,16 @@ pub mod number {
 
     pub fn fraction(range: (f64, f64), text: &str) -> Option<f64> {
         let (low, high) = range;
-        parse_float(text).filter(|_| high > low).map(|value| {
-            0.0f64.max(1.0f64.min((value - low) / (high - low)))
-        })
+        parse_float(text)
+            .filter(|_| high > low)
+            .map(|value| ocaml_float_max(0.0, ocaml_float_min(1.0, (value - low) / (high - low))))
     }
 
     pub fn show(value: f64) -> String {
         super::float_text_with_decimal(value, true)
     }
 
+    // the digits a text writes after its point
     fn decimals(text: &str) -> usize {
         match text.find('.') {
             Some(index) if !text.contains('e') && !text.contains('E') => (text.len() - index - 1).min(6),
@@ -954,8 +961,11 @@ pub mod number {
         let Some(value) = parse_float(origin) else {
             return origin.to_owned();
         };
-        let held = |moved: f64| match range {
-            Some((low, high)) if high > low => low.min(value).max(high.max(value).min(moved)),
+        // a drag stays inside the soft range; a value typed outside it is not pulled in
+        let held = |v: f64, moved: f64| match range {
+            Some((low, high)) if high > low => {
+                ocaml_float_max(ocaml_float_min(low, v), ocaml_float_min(ocaml_float_max(high, v), moved))
+            }
             _ => moved,
         };
         match kind {
@@ -964,7 +974,7 @@ pub mod number {
                 if n == 0.0 {
                     origin.to_owned()
                 } else {
-                    (held(value.round() + n) as i64).to_string()
+                    (held(value, value.round() + n) as i64).to_string()
                 }
             }
             Kind::Float => {
@@ -972,47 +982,69 @@ pub mod number {
                     Some((low, high)) if high > low => (high - low) / 200.0,
                     _ => 0.05,
                 } / if fine { 10.0 } else { 1.0 };
-                let digits = decimals(origin).max((-step.log10()).ceil() as usize).min(6);
-                let unit = 10.0f64.powi(digits as i32);
+                // the result is rounded to the step's digits, or the origin's when it wrote more
+                let digits = decimals(origin).max(((-step.log10()).ceil() as i64).clamp(0, 6) as usize);
+                let unit = 10.0f64.powf(digits as f64);
                 let delta = (dx * step * unit).round() / unit;
                 if delta == 0.0 {
                     origin.to_owned()
                 } else {
-                    super::float_text_with_decimal((held((value + delta) * unit).round()) / unit, true)
+                    super::float_text_with_decimal(held(value, ((value + delta) * unit).round() / unit), true)
                 }
             }
         }
     }
 
+    // OCaml int_of_string: an optional sign, then 0x/0o/0b/0u (unsigned) or decimal digits, with
+    // '_' allowed after the first digit. Decimal signed magnitudes stop at 2^62 (negative) and
+    // 2^62 - 1 (positive); other forms at 2^63 - 1, and the value wraps to 63 bits.
     fn parse_int(text: &str) -> Option<i64> {
-        let text = text
-            .trim_matches(|character| matches!(character, ' ' | '\t' | '\n' | '\r' | '\x0c'))
-            .replace('_', "");
-        if text.is_empty() {
+        let bytes = text.as_bytes();
+        let (negative, mut index) = match bytes.first() {
+            Some(b'-') => (true, 1),
+            Some(b'+') => (false, 1),
+            _ => (false, 0),
+        };
+        let (base, signed) = match (bytes.get(index), bytes.get(index + 1)) {
+            (Some(b'0'), Some(b'x' | b'X')) => (16, false),
+            (Some(b'0'), Some(b'o' | b'O')) => (8, false),
+            (Some(b'0'), Some(b'b' | b'B')) => (2, false),
+            (Some(b'0'), Some(b'u' | b'U')) => (10, false),
+            _ => (10, true),
+        };
+        if matches!(bytes.get(index), Some(b'0')) && !signed {
+            index += 2;
+        }
+        let digits = &bytes[index..];
+        if !digits.first().is_some_and(u8::is_ascii_alphanumeric) {
             return None;
         }
-        let (negative, unsigned) = match text.as_bytes()[0] {
-            b'-' => (true, &text[1..]),
-            b'+' => (false, &text[1..]),
-            _ => (false, text.as_str()),
+        let mut magnitude: u64 = 0;
+        for &byte in digits {
+            if byte == b'_' {
+                continue;
+            }
+            let digit = match byte {
+                b'0'..=b'9' => u64::from(byte - b'0'),
+                b'a'..=b'z' => u64::from(byte - b'a') + 10,
+                b'A'..=b'Z' => u64::from(byte - b'A') + 10,
+                _ => return None,
+            };
+            if digit >= base {
+                return None;
+            }
+            magnitude = magnitude.checked_mul(base)?.checked_add(digit)?;
+        }
+        let limit = match (signed, negative) {
+            (true, true) => 1 << 62,
+            (true, false) => (1 << 62) - 1,
+            (false, _) => (1 << 63) - 1,
         };
-        let (radix, digits) = if unsigned.starts_with("0x") || unsigned.starts_with("0X") {
-            (16, &unsigned[2..])
-        } else if unsigned.starts_with("0o") || unsigned.starts_with("0O") {
-            (8, &unsigned[2..])
-        } else if unsigned.starts_with("0b") || unsigned.starts_with("0B") {
-            (2, &unsigned[2..])
-        } else {
-            (10, unsigned)
-        };
-        let magnitude = u64::from_str_radix(digits, radix).ok()?;
-        let value = i64::try_from(magnitude).ok()?;
-        let value = if negative { -value } else { value };
-        const OCAML_INT_MIN: i64 = -(1_i64 << 62);
-        const OCAML_INT_MAX: i64 = (1_i64 << 62) - 1;
-        (OCAML_INT_MIN..=OCAML_INT_MAX)
-            .contains(&value)
-            .then_some(value)
+        if magnitude > limit {
+            return None;
+        }
+        let wrapped = if negative { magnitude.wrapping_neg() } else { magnitude };
+        Some(((wrapped << 1) as i64) >> 1)
     }
 
     fn parse_float(text: &str) -> Option<f64> {
@@ -1552,7 +1584,9 @@ mod tests {
         assert!(!number::valid(number::Kind::Int, "4611686018427387904"));
         assert!(!number::valid(number::Kind::Int, "-4611686018427387905"));
         assert!(number::valid(number::Kind::Int, "0x3fffffffffffffff"));
-        assert!(!number::valid(number::Kind::Int, "0x4000000000000000"));
+        // OCaml int_of_string wraps a hex literal up to 2^63 - 1 into 63 bits
+        assert!(number::valid(number::Kind::Int, "0x4000000000000000"));
+        assert!(!number::valid(number::Kind::Int, "0x8000000000000000"));
         assert!(number::valid(number::Kind::Int, "0xff"));
         assert!(number::valid(number::Kind::Float, "0x1.8p1"));
         assert!(number::valid(number::Kind::Float, "0x1p-1074"));
@@ -1562,6 +1596,62 @@ mod tests {
             number::scrub(number::Kind::Float, None, "1", 10.0, false),
             "1.5"
         );
+    }
+
+    // expected values: lib/param/param.ml run under `ocaml` (Number.scrub, show, fraction, valid)
+    #[test]
+    fn number_scrub_and_parse_match_ocaml() {
+        use number::Kind::{Float, Int};
+        let s = number::scrub;
+        assert_eq!(s(Float, None, "1", 10.0, false), "1.5");
+        assert_eq!(s(Float, None, "1", 0.04, false), "1");
+        assert_eq!(s(Float, None, "1234567.89", 2.0, false), "1234567.99");
+        assert_eq!(s(Float, None, "1.5", 0.5, false), "1.53");
+        assert_eq!(s(Float, None, "2", 0.3, true), "2.002");
+        assert_eq!(s(Float, None, "1", 1.0, true), "1.005");
+        assert_eq!(s(Float, None, "1e3", 10.0, false), "1000.5");
+        assert_eq!(s(Float, None, "nan", 10.0, false), "NaN");
+        assert_eq!(s(Float, None, "abc", 10.0, false), "abc");
+        assert_eq!(s(Float, Some((5.0, 5.0)), "1", 10.0, false), "1.5");
+        // the range holds the rounded value, not the value scaled by 10^digits
+        assert_eq!(s(Float, Some((0.0, 2.0)), "1", 500.0, false), "2.0");
+        assert_eq!(s(Float, Some((0.0, 2.0)), "1", 1000.0, true), "2.0");
+        assert_eq!(s(Float, Some((0.0, 2.0)), "1", 1_000_000.0, false), "2.0");
+        assert_eq!(s(Float, Some((0.0, 2.0)), "1", -500.0, false), "0.0");
+        assert_eq!(s(Float, Some((0.0, 2.0)), "1.9", 3.0, false), "1.93");
+        // a value typed outside the range is not pulled in by a drag
+        assert_eq!(s(Float, Some((0.0, 2.0)), "3", -3.0, false), "2.97");
+        assert_eq!(s(Float, Some((0.0, 2.0)), "3", 0.5, false), "3.0");
+        assert_eq!(s(Float, Some((0.0, 2.0)), "0.5", 0.7, false), "0.51");
+        assert_eq!(s(Float, Some((0.0, 2.0)), "0.1234567", 7.0, false), "0.193457");
+        assert_eq!(s(Int, None, "3", 12.0, false), "5");
+        assert_eq!(s(Int, None, "2.5", 60.0, false), "13");
+        assert_eq!(s(Int, None, "-2.5", 60.0, false), "7");
+        assert_eq!(s(Int, None, "3", -18.0, false), "0");
+        assert_eq!(s(Int, Some((0.0, 5.0)), "9", 6.0, false), "9");
+        assert_eq!(s(Int, Some((0.0, 5.0)), "2", 1000.0, false), "5");
+        assert_eq!(number::show(1e-7), "0.0000001");
+        assert_eq!(number::show(1.0), "1.0");
+        assert_eq!(number::show(123_456_789.123), "123456789.123");
+        assert_eq!(number::show(-0.0), "-0.0");
+        assert_eq!(number::show(f64::NAN), "NaN");
+        // fraction propagates NaN (OCaml Float.min) and clamps finite values
+        assert!(number::fraction((0.0, 10.0), "nan").is_some_and(f64::is_nan));
+        assert_eq!(number::fraction((0.0, 10.0), "-5"), Some(0.0));
+        assert_eq!(number::fraction((0.0, 10.0), "50"), Some(1.0));
+        assert_eq!(number::fraction((0.0, 10.0), "x"), None);
+        assert_eq!(number::fraction((10.0, 0.0), "5"), None);
+        // int_of_string and float_of_string acceptance
+        let int = |text| number::valid(Int, text);
+        assert!(int("1_000") && int("1__0") && int("1_") && int("0u5") && int("+5") && int("-0x10"));
+        assert!(int("0o777777777777777777777") && int("-0x4000000000000001") && int("00012"));
+        assert!(!int("0x_1") && !int(" 5") && !int("1 ") && !int("_1") && !int("0x") && !int(""));
+        assert!(!int("-") && !int("0u") && !int("0b1000000000000000000000000000000000000000000000000000000000000000"));
+        assert!(!int("-0x8000000000000000") && !int("0u18446744073709551615") && !int("1e3"));
+        let float = |text| number::valid(Float, text);
+        assert!(float("1_000.5") && float(" 1") && float("1.") && float(".5") && float("+.5"));
+        assert!(float("0x_1p0") && float("0x1p-1074") && float("1.5e+3"));
+        assert!(!float(" 5 ") && !float("1e") && !float("1e400") && !float("infinity") && !float("1d"));
     }
 
     #[test]

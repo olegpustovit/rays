@@ -282,6 +282,7 @@ pub const CASES: &[(&str, fn())] = &[
     ("window_shell_inspector_record", window_shell_inspector_record),
     ("window_shell_vector_cells", window_shell_vector_cells),
     ("window_shell_ranged_float_click", window_shell_ranged_float_click),
+    ("window_shell_ranged_float_drag", window_shell_ranged_float_drag),
     ("window_shell_tree_pointer_gestures", window_shell_tree_pointer_gestures),
     ("window_shell_tree_shift_select", window_shell_tree_shift_select),
     ("window_shell_tree_scroll_and_sticky", window_shell_tree_scroll_and_sticky),
@@ -291,10 +292,6 @@ pub fn window_shell_ranged_float_click() {
     ranged_float(false);
 }
 
-/// Needs `param::number::scrub` to clamp the unscaled value; held back until the param port does
-/// (run with `RAYS_SHELL_PARAM_BUG=1`).
 pub fn window_shell_ranged_float_drag() {
     ranged_float(true);
 }
-
-pub const PARAM_BUG: &[(&str, fn())] = &[("window_shell_ranged_float_drag", window_shell_ranged_float_drag)];
