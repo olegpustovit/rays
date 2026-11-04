@@ -1,321 +1,6 @@
-//! Port of lib/editor_core/editor_core.ml: History, Keymap, Guide_context, Command and Router.
+//! Port of lib/editor_core/editor_core.ml: Keymap, Guide_context, Command and Router (History is specialised in rays_editor::editor_history: it names the editor Document).
 //! Each OCaml submodule is a Rust module with the same name; its main type is `t` (or the OCaml
 //! type name where it has one).
-
-pub mod history {
-    use std::collections::VecDeque;
-    use std::sync::Arc;
-
-    /// How a record merges with the entry it follows.
-    #[derive(Clone, Debug, PartialEq)]
-    pub enum Merge {
-        Step,
-        Gesture(String),
-        Burst { key: String, at: f64, window: f64 },
-        Repair,
-    }
-
-    /// The present is a live value behind an [`Arc`]; an entry keeps only what [`keep`] takes
-    /// from it. Arc identity stands in for OCaml's physical equality (`==`).
-    ///
-    /// [`keep`]: t::keep
-    pub struct t<A, E> {
-        /// Oldest first; the newest entry is at the back.
-        past: VecDeque<(Arc<E>, String, i64)>,
-        present: Arc<A>,
-        label: String,
-        /// The next redo is last.
-        future: Vec<(Arc<E>, String, i64)>,
-        /// The last present to become an entry, kept live beside the entries.
-        recent: Option<(Arc<E>, Arc<A>)>,
-        capacity: i64,
-        byte_capacity: i64,
-        keep: Arc<dyn Fn(&A) -> E>,
-        size: Arc<dyn Fn(&E) -> i64>,
-        depth: i64,
-        byte_depth: i64,
-        merge: Option<Merge>,
-    }
-
-    // ponytail: every field is an Arc or a plain value, so a clone is cheap and undo/redo can
-    // return the old history unchanged on Error without OCaml's immutable sharing.
-    impl<A, E> Clone for t<A, E> {
-        fn clone(&self) -> Self {
-            t {
-                past: self.past.clone(),
-                present: self.present.clone(),
-                label: self.label.clone(),
-                future: self.future.clone(),
-                recent: self.recent.clone(),
-                capacity: self.capacity,
-                byte_capacity: self.byte_capacity,
-                keep: self.keep.clone(),
-                size: self.size.clone(),
-                depth: self.depth,
-                byte_depth: self.byte_depth,
-                merge: self.merge.clone(),
-            }
-        }
-    }
-
-    /// [capacity] defaults to 128, [byte_capacity] to unbounded, [bytes] to 0.
-    pub fn create<A, E>(
-        capacity: Option<i64>,
-        byte_capacity: Option<i64>,
-        bytes: Option<Arc<dyn Fn(&E) -> i64>>,
-        keep: Arc<dyn Fn(&A) -> E>,
-        present: Arc<A>,
-    ) -> Result<t<A, E>, String> {
-        let capacity = capacity.unwrap_or(128);
-        let byte_capacity = byte_capacity.unwrap_or(i64::MAX);
-        if capacity < 1 {
-            return Err("Editor_core.History.create: capacity must be positive".into());
-        }
-        if byte_capacity < 0 {
-            return Err("Editor_core.History.create: byte_capacity must be non-negative".into());
-        }
-        Ok(t {
-            past: VecDeque::new(),
-            present,
-            label: String::new(),
-            future: Vec::new(),
-            recent: None,
-            capacity,
-            byte_capacity,
-            keep,
-            size: bytes.unwrap_or_else(|| Arc::new(|_: &E| 0)),
-            depth: 0,
-            byte_depth: 0,
-            merge: None,
-        })
-    }
-
-    pub fn present<A, E>(h: &t<A, E>) -> &A {
-        &h.present
-    }
-
-    pub fn label<A, E>(h: &t<A, E>) -> &str {
-        &h.label
-    }
-
-    /// The label of the next redo, if any.
-    pub fn redo_label<A, E>(h: &t<A, E>) -> Option<&str> {
-        h.future.last().map(|(_, label, _)| label.as_str())
-    }
-
-    pub fn can_undo<A, E>(h: &t<A, E>) -> bool {
-        !h.past.is_empty()
-    }
-
-    pub fn can_redo<A, E>(h: &t<A, E>) -> bool {
-        !h.future.is_empty()
-    }
-
-    pub fn depth<A, E>(h: &t<A, E>) -> i64 {
-        h.depth
-    }
-
-    /// What the byte cap counts: the entries to undo and to redo.
-    pub fn byte_depth<A, E>(h: &t<A, E>) -> i64 {
-        h.byte_depth
-    }
-
-    /// The entries (newest undo first, then redo), and the one live value kept beside them.
-    pub fn retained<A, E>(h: &t<A, E>) -> (Vec<&E>, Option<&A>) {
-        let entries = h
-            .past
-            .iter()
-            .rev()
-            .map(|(entry, _, _)| entry.as_ref())
-            .chain(h.future.iter().rev().map(|(entry, _, _)| entry.as_ref()))
-            .collect();
-        (entries, h.recent.as_ref().map(|(_, live)| live.as_ref()))
-    }
-
-    fn entry_of<A, E>(h: &t<A, E>) -> (Arc<E>, String, i64) {
-        let entry = Arc::new((h.keep)(&h.present));
-        let n = (h.size)(&entry).max(0);
-        (entry, h.label.clone(), n)
-    }
-
-    /// Oldest first, down to [limit] entries and the byte cap. The newest entry stays whatever it
-    /// weighs: one edit of a document over the cap can still be undone.
-    fn trim_to<A, E>(limit: i64, mut h: t<A, E>) -> t<A, E> {
-        let excess = h.depth - limit;
-        if excess <= 0 && (h.byte_depth <= h.byte_capacity || h.depth <= 1) {
-            return h;
-        }
-        let mut dropped = 0;
-        let mut bytes = h.byte_depth;
-        let mut depth = h.depth;
-        loop {
-            let n = match h.past.front() {
-                Some((_, _, n)) => *n,
-                None => break,
-            };
-            if dropped < excess || (bytes > h.byte_capacity && depth > 1) {
-                h.past.pop_front();
-                dropped += 1;
-                bytes -= n;
-                depth -= 1;
-            } else {
-                break;
-            }
-        }
-        h.byte_depth = bytes;
-        h.depth = depth;
-        h
-    }
-
-    fn trim<A, E>(h: t<A, E>) -> t<A, E> {
-        let limit = h.capacity;
-        trim_to(limit, h)
-    }
-
-    fn commit<A, E>(value: Arc<A>, label: &str, mut h: t<A, E>) -> t<A, E> {
-        if Arc::ptr_eq(&value, &h.present) {
-            return h;
-        }
-        let (entry, old_label, n) = entry_of(&h);
-        let abandoned: i64 = h.future.iter().map(|(_, _, n)| *n).sum();
-        h.past.push_back((entry.clone(), old_label, n));
-        let old_present = std::mem::replace(&mut h.present, value);
-        h.label = label.to_string();
-        h.future.clear();
-        h.recent = Some((entry, old_present));
-        h.depth += 1;
-        h.byte_depth = h.byte_depth + n - abandoned;
-        h.merge = None;
-        trim(h)
-    }
-
-    /// The present replaced in place: a continued gesture, or a repair that is no edit of the
-    /// user's (camera bookkeeping), which leaves what redo would restore.
-    fn amend<A, E>(value: Arc<A>, mut h: t<A, E>) -> t<A, E> {
-        if Arc::ptr_eq(&value, &h.present) {
-            return h;
-        }
-        h.present = value;
-        h
-    }
-
-    /// `Step` adds an undo entry; matching `Gesture` keys merge until [`seal`]; matching `Burst`
-    /// keys merge while edits stay within the window; `Repair` changes the current entry without
-    /// adding a step. `label` names the entry (OCaml's default is "Edit").
-    pub fn record<A, E>(merge: Merge, label: &str, value: Arc<A>, h: t<A, E>) -> t<A, E> {
-        let continuation = match (&merge, &h.merge) {
-            (Merge::Repair, _) => true,
-            (Merge::Gesture(id), Some(Merge::Gesture(previous))) => id == previous,
-            (
-                Merge::Burst { key, at, window },
-                Some(Merge::Burst { key: previous_key, at: previous_at, .. }),
-            ) => key == previous_key && *at >= *previous_at && *at - *previous_at < *window,
-            _ => false,
-        };
-        let repair = matches!(merge, Merge::Repair);
-        let mut h = if continuation { amend(value, h) } else { commit(value, label, h) };
-        if !repair {
-            h.merge = Some(merge);
-        }
-        h
-    }
-
-    pub fn seal<A, E>(gesture_only: bool, mut h: t<A, E>) -> t<A, E> {
-        match &h.merge {
-            None => h,
-            Some(Merge::Gesture(_)) => {
-                h.merge = None;
-                h
-            }
-            Some(_) if !gesture_only => {
-                h.merge = None;
-                h
-            }
-            Some(_) => h,
-        }
-    }
-
-    fn revive<A, E, X>(
-        restore: &dyn Fn(&E) -> Result<A, X>,
-        h: &t<A, E>,
-        entry: &Arc<E>,
-    ) -> Result<Arc<A>, X> {
-        match &h.recent {
-            Some((kept, live)) if Arc::ptr_eq(kept, entry) => Ok(live.clone()),
-            _ => restore(entry).map(Arc::new),
-        }
-    }
-
-    /// `None` with nothing to undo. `Some(Err)`: nothing changed; `h` stays as it was.
-    pub fn undo<A, E, X>(
-        restore: &dyn Fn(&E) -> Result<A, X>,
-        h: &t<A, E>,
-    ) -> Option<Result<t<A, E>, X>> {
-        let (previous, _, _) = h.past.back()?;
-        let live = match revive(restore, h, previous) {
-            Ok(live) => live,
-            Err(error) => return Some(Err(error)),
-        };
-        let mut next = h.clone();
-        let (_, label, n) = next.past.pop_back().expect("checked non-empty above");
-        let (entry, current_label, m) = entry_of(&next);
-        let old_present = std::mem::replace(&mut next.present, live);
-        next.future.push((entry.clone(), current_label, m));
-        next.label = label;
-        next.recent = Some((entry, old_present));
-        next.depth -= 1;
-        next.byte_depth = next.byte_depth + m - n;
-        next.merge = None;
-        Some(Ok(next))
-    }
-
-    /// `None` with nothing to redo. `Some(Err)`: nothing changed; `h` stays as it was.
-    pub fn redo<A, E, X>(
-        restore: &dyn Fn(&E) -> Result<A, X>,
-        h: &t<A, E>,
-    ) -> Option<Result<t<A, E>, X>> {
-        let (next_entry, _, _) = h.future.last()?;
-        let live = match revive(restore, h, next_entry) {
-            Ok(live) => live,
-            Err(error) => return Some(Err(error)),
-        };
-        let mut next = h.clone();
-        let (_, label, n) = next.future.pop().expect("checked non-empty above");
-        let (entry, current_label, m) = entry_of(&next);
-        let old_present = std::mem::replace(&mut next.present, live);
-        next.past.push_back((entry.clone(), current_label, m));
-        next.label = label;
-        next.recent = Some((entry, old_present));
-        next.depth += 1;
-        next.byte_depth = next.byte_depth + m - n;
-        next.merge = None;
-        Some(Ok(trim(next)))
-    }
-
-    /// The oldest undo entries gone, down to [keep] (at least one).
-    pub fn shed<A, E>(keep: i64, h: t<A, E>) -> t<A, E> {
-        trim_to(keep.max(1), h)
-    }
-
-    /// No entries left, and none charged: the editor is closing.
-    pub fn release<A, E>(mut h: t<A, E>) -> t<A, E> {
-        h.past.clear();
-        h.future.clear();
-        h.recent = None;
-        h.depth = 0;
-        h.byte_depth = 0;
-        h.merge = None;
-        h
-    }
-
-    /// A new document: [`release`], with this present.
-    pub fn restart<A, E>(value: Arc<A>, h: t<A, E>) -> t<A, E> {
-        let mut h = release(h);
-        h.present = value;
-        h.label = String::new();
-        h
-    }
-}
 
 pub mod keymap {
     use input::{Key, Platform};
@@ -507,7 +192,7 @@ pub mod command {
     }
 
     /// Applicable commands in their original table order.
-    pub fn for_guide<'k>(commands: &'k [t], focus: &Panel, context: guide_context::t) -> Vec<&'k t> {
+    pub fn for_guide(commands: &[t], focus: &Panel, context: guide_context::t) -> Vec<t> {
         commands
             .iter()
             .filter(|command| {
@@ -515,6 +200,7 @@ pub mod command {
                     && (command.scope.is_none() || command.scope.as_ref() == Some(focus))
                     && command.guide.contains(&context)
             })
+            .cloned()
             .collect()
     }
 }
@@ -536,13 +222,9 @@ pub mod router {
         Pending(String),
     }
 
-    /// The commands a pane with this focus may run, in table order.
-    fn visible<'k>(commands: &[&'k Command], focus: &Panel) -> Vec<&'k Command> {
-        commands
-            .iter()
-            .copied()
-            .filter(|command| command.scope.is_none() || command.scope.as_ref() == Some(focus))
-            .collect()
+    /// Whether a pane with this focus may run the command.
+    fn visible(command: &Command, focus: &Panel) -> bool {
+        command.scope.is_none() || command.scope.as_ref() == Some(focus)
     }
 
     fn same_key(a: Key, b: Key) -> bool {
@@ -553,9 +235,9 @@ pub mod router {
     }
 
     /// The matching chord with the most modifiers; on a tie the earlier command wins.
-    fn chord<'k>(platform: Platform, commands: &[&'k Command], focus: &Panel, keys: &[Key], key: Key) -> Option<&'k Command> {
-        let mut best: Option<(usize, &'k Command)> = None;
-        for command in visible(commands, focus) {
+    fn chord(platform: Platform, commands: &[&Command], focus: &Panel, keys: &[Key], key: Key) -> Option<Command> {
+        let mut best: Option<(usize, &Command)> = None;
+        for command in commands.iter().copied().filter(|command| visible(command, focus)) {
             let Some(Trigger::Chord(bound, modifiers)) = &command.trigger else { continue };
             let modifiers: Vec<Key> = modifiers.iter().map(|m| resolve(platform, *m)).collect();
             let matches = same_key(*bound, key)
@@ -571,7 +253,7 @@ pub mod router {
                 }
             }
         }
-        best.map(|(_, command)| command)
+        best.map(|(_, command)| command.clone())
     }
 
     /// In fly mode, keep pointer/window events and pass / to the leader router after ending the
@@ -599,14 +281,14 @@ pub mod router {
 
     /// A text field owns the keyboard except the Command/Ctrl chords it has no use for (its own
     /// are select all, copy, cut, paste, undo and redo). Only commands of every pane run.
-    fn text_chords<'k>(
+    fn text_chords(
         platform: Platform,
-        keymap: &[&'k Command],
+        keymap: &[&Command],
         focus: &Panel,
         previous_keys: &[Key],
         mut frame: frame::t,
-    ) -> (Vec<&'k Command>, frame::t) {
-        let global: Vec<&'k Command> =
+    ) -> (Vec<Command>, frame::t) {
+        let global: Vec<&Command> =
             keymap.iter().copied().filter(|command| command.scope.is_none()).collect();
         let owned = |key: Key| match key {
             Key::KeyChar(c) => ['a', 'c', 'v', 'x', 'z', 'y'].contains(&c.to_ascii_lowercase()),
@@ -639,15 +321,15 @@ pub mod router {
     ///
     /// `previous_keys` supplies the previous frame's keys for changed modifiers and focus
     /// cancellation; pass `&[]` when none were held.
-    pub fn step<'k>(
+    pub fn step(
         previous_keys: &[Key],
         platform: Platform,
-        keymap: &[&'k Command],
+        keymap: &[&Command],
         focus: &Panel,
         text_focus: bool,
         mut frame: frame::t,
         state: State,
-    ) -> (State, Vec<&'k Command>, frame::t) {
+    ) -> (State, Vec<Command>, frame::t) {
         if text_focus {
             let (actions, frame) = text_chords(platform, keymap, focus, previous_keys, frame);
             return (State::Idle, actions, frame);
@@ -655,7 +337,7 @@ pub mod router {
         let mut modifiers = input::keys_before(previous_keys, &frame.input.keys, &frame.input.events);
         let mut traversing = false;
         let mut state = state;
-        let mut actions: Vec<&'k Command> = Vec::new();
+        let mut actions: Vec<Command> = Vec::new();
         let mut passed: Vec<Event> = Vec::new();
         for event in frame.input.events.iter() {
             modifiers = input::keys_after(&modifiers, event);
@@ -718,10 +400,10 @@ pub mod router {
                         *character
                     };
                     let typed = format!("{}{}", prefix, character.to_ascii_lowercase());
-                    let commands = visible(keymap, focus);
+                    let commands: Vec<&Command> = keymap.iter().copied().filter(|command| visible(command, focus)).collect();
                     let exact = Trigger::Leader(typed.clone());
                     if let Some(command) = commands.iter().find(|command| command.trigger.as_ref() == Some(&exact)) {
-                        actions.push(command);
+                        actions.push((*command).clone());
                         state = State::Idle;
                     } else if commands.iter().any(|command| {
                         matches!(&command.trigger, Some(Trigger::Leader(sequence)) if sequence.starts_with(&typed))

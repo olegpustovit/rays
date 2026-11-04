@@ -61,3 +61,16 @@ mod test_bars;
 mod test_editor_commands;
 #[cfg(test)]
 mod test_source_file;
+
+// history: D (editor_core History specialised to the editor Document)
+pub mod editor_history;
+
+// tests: C
+#[cfg(test)]
+mod test_editor_inspect;
+
+// tests: D
+#[cfg(test)]
+mod test_editor_history;
+#[cfg(test)]
+mod test_editor_model;

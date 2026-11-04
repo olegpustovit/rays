@@ -8,8 +8,8 @@
 #![allow(non_camel_case_types)]
 use editor_core::panels::Path;
 
-// TEMP-EDA: swap to `pub use crate::editor_model::graph_pane as Pane;` once editor_model exists
-pub type Pane = i64;
+
+pub use crate::editor_model::graph_pane as Pane;
 
 pub type Key = Vec<String>;
 

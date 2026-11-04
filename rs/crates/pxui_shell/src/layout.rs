@@ -133,7 +133,6 @@ fn join(x: Presence, y: Presence) -> Presence {
     }
 }
 
-pub type StateFn<'a> = &'a dyn Fn(&[usize]) -> State;
 
 fn child(path: &[usize], i: usize) -> Path {
     let mut p = path.to_vec();
@@ -141,7 +140,7 @@ fn child(path: &[usize], i: usize) -> Path {
     p
 }
 
-fn presence(state: StateFn, hidden: &[Panel], path: &[usize], tree: &t) -> Presence {
+fn presence(state: &dyn Fn(&[usize]) -> State, hidden: &[Panel], path: &[usize], tree: &t) -> Presence {
     match tree {
         t::Leaf(_) if state(path).window.is_some() => Presence::Gone,
         // it has no header to keep
@@ -177,13 +176,13 @@ fn is_float(tree: &t) -> bool {
 /// A run of splits by ratio along one axis is one row of columns whose weights are the products
 /// of the ratios, so `[0.45 | 0.55 * 0.6364 | ...]` divides the width once. A split with a fixed
 /// side is one column of the run and is placed on its own.
-fn columns<'a>(axis: Axis, weight: f64, path: Path, tree: &'a t, out: &mut Vec<(f64, Path, &'a t)>) {
+fn columns(axis: Axis, weight: f64, path: Path, tree: &t, out: &mut Vec<(f64, Path, t)>) {
     match tree {
         t::Split { axis: a, size: Size::Ratio(ratio), a: ta, b: tb } if *a == axis && !(is_float(ta) || is_float(tb)) => {
             columns(axis, weight * ratio, child(&path, 0), ta, out);
             columns(axis, weight * (1.0 - ratio), child(&path, 1), tb, out);
         }
-        _ => out.push((weight, path, tree)),
+        _ => out.push((weight, path, tree.clone())),
     }
 }
 
@@ -290,7 +289,7 @@ struct Acc {
     floats: Vec<(Bounds, Path, t)>,
 }
 
-fn leaf(acc: &mut Acc, state: StateFn, floating: bool, path: &[usize], panel: &Panel, outer: Bounds) {
+fn leaf(acc: &mut Acc, state: &dyn Fn(&[usize]) -> State, floating: bool, path: &[usize], panel: &Panel, outer: Bounds) {
     let collapsed = state(path).collapsed;
     // a collapsed window is a short tab, its title and the expand button, wherever its place
     // came from: a saved window or the default one of a ui/floating
@@ -337,7 +336,7 @@ fn rect_at(horizontal: bool, x: i64, y: i64, w: i64, h: i64, from: i64, extent: 
     if horizontal { (from, y, extent, h) } else { (x, from, w, extent) }
 }
 
-fn place(acc: &mut Acc, state: StateFn, hidden: &[Panel], floating: bool, rect: Bounds, path: &[usize], tree: &t) {
+fn place(acc: &mut Acc, state: &dyn Fn(&[usize]) -> State, hidden: &[Panel], floating: bool, rect: Bounds, path: &[usize], tree: &t) {
     let (x, y, w, h) = rect;
     match tree {
         t::Leaf(p) => {
@@ -405,7 +404,7 @@ fn place(acc: &mut Acc, state: StateFn, hidden: &[Panel], floating: bool, rect: 
         }
         t::Split { axis, .. } => {
             let axis = *axis;
-            let mut cols: Vec<(f64, Path, &t)> = Vec::new();
+            let mut cols: Vec<(f64, Path, t)> = Vec::new();
             columns(axis, 1.0, Vec::new(), tree, &mut cols);
             let info: Vec<(Presence, f64, i64, i64)> = cols
                 .iter()
@@ -541,8 +540,8 @@ fn no_state(_: &[usize]) -> State {
 /// A `Timeline` leaf in a stack is 24 points; a tree without one has a 25-point strip under it. The
 /// 25-point status strip spans the frame below both. Every point of the frame is covered exactly
 /// once, floats aside.
-pub fn geometry(state: Option<StateFn>, hidden: Option<&[Panel]>, tree: &t, frame: &frame::t) -> Geometry {
-    let state: StateFn = state.unwrap_or(&no_state);
+pub fn geometry(state: Option<&dyn Fn(&[usize]) -> State>, hidden: Option<&[Panel]>, tree: &t, frame: &frame::t) -> Geometry {
+    let state: &dyn Fn(&[usize]) -> State = state.unwrap_or(&no_state);
     let default_hidden = [Panel::Timeline];
     let hidden: &[Panel] = hidden.unwrap_or(&default_hidden);
     let all = panels::leaves(tree);

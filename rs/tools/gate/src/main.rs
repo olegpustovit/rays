@@ -184,7 +184,7 @@ fn shape_source(crate_name: &str, path: &str, source: &str) -> Vec<String> {
     let test_ranges = if test_file { vec![(0, tokens.len())] } else { test_regions(&tokens) };
     // ponytail: editor_core and pxui_shell keep OCaml's generic History/Command/Router (and their key-sheet views) until rays_editor (its one
     // caller) is ported; then specialise them to concrete types and drop it from this list (shrink only).
-    let adapter_crate = matches!(crate_name, "rays_collections" | "editor_core" | "pxui_shell");
+    let adapter_crate = matches!(crate_name, "rays_collections");
     let unsafe_allowed = crate_name.ends_with("_sys") || crate_name == "parallel";
     let mut issues = Vec::new();
 

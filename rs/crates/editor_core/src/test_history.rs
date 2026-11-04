@@ -1,182 +1,10 @@
-//! Port of lib/editor_core/test_history.ml: History, the Router and the platform-modifier labels.
+//! Port of lib/editor_core/test_history.ml: the Router and the platform-modifier labels (the History half lives in rays_editor/src/test_editor_history.rs).
 use crate::command;
-use crate::history::{self as hist, Merge};
 use crate::keymap::{label, Trigger};
 use crate::panels::Panel;
 use crate::router::{self, State};
 use input::{Event, Key, Platform};
 use rays::frame;
-use std::sync::Arc;
-
-type H = hist::t<i64, i64>;
-
-fn restore_ok(entry: &i64) -> Result<i64, String> {
-    Ok(*entry)
-}
-
-fn new_h(capacity: Option<i64>, present: i64) -> H {
-    let keep: Arc<dyn Fn(&i64) -> i64> = Arc::new(|a: &i64| *a);
-    hist::create(capacity, None, None, keep, Arc::new(present)).unwrap()
-}
-
-fn record(merge: Merge, label: &str, value: i64, h: H) -> H {
-    hist::record(merge, label, Arc::new(value), h)
-}
-
-fn step(value: i64, h: H) -> H {
-    record(Merge::Step, "Edit", value, h)
-}
-
-fn undo(h: &H) -> Option<H> {
-    hist::undo(&restore_ok, h).map(|r| r.unwrap())
-}
-
-fn redo(h: &H) -> Option<H> {
-    hist::redo(&restore_ok, h).map(|r| r.unwrap())
-}
-
-fn present(h: &H) -> i64 {
-    *hist::present(h)
-}
-
-fn depth(h: &H) -> i64 {
-    hist::depth(h)
-}
-
-#[test]
-fn history_merge_seal_undo_redo_capacity_labels() {
-    let h = new_h(Some(3), 0);
-    let h = step(1, h);
-    let h = step(2, h);
-    let h = record(Merge::Repair, "Edit", 3, h);
-    assert!(present(&h) == 3 && depth(&h) == 2);
-    let h = undo(&h).unwrap();
-    assert!(present(&h) == 1 && hist::can_redo(&h));
-    let h = redo(&h).unwrap();
-    assert!(present(&h) == 3 && !hist::can_redo(&h));
-    let h = step(4, h);
-    let h = step(5, h);
-    let h = step(6, h);
-    assert!(depth(&h) == 3);
-    // the OCaml test walks to the bottom but continues from the original h
-    let mut bottom = h.clone();
-    while let Some(next) = undo(&bottom) {
-        bottom = next;
-    }
-    assert!(present(&bottom) == 3 && !hist::can_undo(&bottom));
-    let h = record(Merge::Gesture("move/7".into()), "Edit", 7, h);
-    let h = record(Merge::Gesture("move/7".into()), "Edit", 8, h);
-    assert!(present(&h) == 8 && depth(&h) == 3);
-    let h = hist::seal(false, h);
-    let h = record(Merge::Gesture("move/7".into()), "Edit", 9, h);
-    assert!(present(&undo(&h).unwrap()) == 8);
-    let burst = |at: f64, value: i64, h: H| {
-        record(Merge::Burst { key: "view".into(), at, window: 0.25 }, "Edit", value, h)
-    };
-    let h = burst(1.2, 2, burst(1., 1, new_h(None, 0)));
-    assert!(depth(&h) == 1 && present(&undo(&h).unwrap()) == 0);
-    let h = burst(1.5, 3, h);
-    assert!(depth(&h) == 2 && present(&undo(&h).unwrap()) == 2);
-    let h = undo(&h).unwrap();
-    // a repair is no edit: it leaves what redo restores (E12)
-    let h = record(Merge::Repair, "Edit", 10, h);
-    assert!(present(&h) == 10 && hist::can_redo(&h) && present(&redo(&h).unwrap()) == 3);
-    // Labels name what undo reverts and what redo reapplies.
-    let h = record(Merge::Step, "Move", 2, record(Merge::Step, "Connect", 1, new_h(None, 0)));
-    assert!(hist::label(&h) == "Move");
-    let h = undo(&h).unwrap();
-    assert!(hist::label(&h) == "Connect" && hist::redo_label(&h) == Some("Move"));
-    // The cap counts exactly the entries to undo and to redo, at every step of any sequence.
-    let bytes_fn: Arc<dyn Fn(&i64) -> i64> = Arc::new(|n: &i64| 10 + *n);
-    let keep: Arc<dyn Fn(&i64) -> i64> = Arc::new(|a: &i64| *a);
-    let check = |h: &H| {
-        let (entries, _) = hist::retained(h);
-        assert!(entries.iter().map(|n| 10 + **n).sum::<i64>() == hist::byte_depth(h));
-        assert!(hist::byte_depth(h) >= 0);
-    };
-    let h = hist::create(None, Some(200), Some(bytes_fn.clone()), keep.clone(), Arc::new(0)).unwrap();
-    assert!(hist::byte_depth(&h) == 0);
-    let h = step(1, h);
-    check(&h);
-    assert!(hist::byte_depth(&h) == 10);
-    let h = step(2, h);
-    check(&h);
-    let h = record(Merge::Gesture("a".into()), "Edit", 3, h);
-    check(&h);
-    let at_three = hist::byte_depth(&h);
-    let h = record(Merge::Gesture("a".into()), "Edit", 4, h);
-    check(&h);
-    assert!(hist::byte_depth(&h) == at_three);
-    let h = undo(&h).unwrap();
-    check(&h);
-    assert!(present(&h) == 2);
-    let h = undo(&h).unwrap();
-    check(&h);
-    let h = redo(&h).unwrap();
-    check(&h);
-    // a commit abandons what redo held, releasing it once
-    let h = step(50, h);
-    check(&h);
-    assert!(!hist::can_redo(&h));
-    // the byte cap goes oldest first and keeps the newest
-    let mut h = h;
-    for n in [60, 70, 80, 90, 100, 110] {
-        h = step(n, h);
-        check(&h);
-    }
-    assert!(hist::byte_depth(&h) <= 200 && hist::can_undo(&h));
-    let huge = hist::create(None, Some(1), Some(bytes_fn.clone()), keep.clone(), Arc::new(1000)).unwrap();
-    let huge = step(1001, huge);
-    assert!(depth(&huge) == 1 && hist::byte_depth(&huge) == 10 + 1000);
-    let huge = hist::release(huge);
-    assert!(depth(&huge) == 0 && hist::byte_depth(&huge) == 0 && present(&huge) == 1001);
-    check(&h);
-    // the retreat's step: only the oldest go
-    let shed_from = depth(&h);
-    let h = step(7, h);
-    let h = step(8, h);
-    let h = step(9, h);
-    let shed_from = shed_from.max(depth(&h));
-    let h = hist::shed(2, h);
-    check(&h);
-    assert!(depth(&h) == 2 && shed_from > 2);
-    let h = hist::restart(Arc::new(5), h);
-    check(&h);
-    assert!(present(&h) == 5 && depth(&h) == 0 && !hist::can_undo(&h) && hist::byte_depth(&h) == 0);
-
-    // an entry is only what [keep] took; the last present stays live, older ones come from [restore]
-    use std::cell::RefCell;
-    let restored: RefCell<Vec<String>> = RefCell::new(Vec::new());
-    let restore = |entry: &String| -> Result<i64, String> {
-        restored.borrow_mut().insert(0, entry.clone());
-        if entry == "refuse" { Err("no".into()) } else { Ok(entry.len() as i64) }
-    };
-    let string_keep: Arc<dyn Fn(&i64) -> String> = Arc::new(|n: &i64| "x".repeat(*n as usize));
-    let h: hist::t<i64, String> = hist::create(None, None, None, string_keep, Arc::new(1)).unwrap();
-    let h = hist::record(Merge::Step, "Edit", Arc::new(2), h);
-    let h = hist::record(Merge::Step, "Edit", Arc::new(3), h);
-    let back = |h: &hist::t<i64, String>| hist::undo(&restore, h).unwrap().unwrap();
-    let forth = |h: &hist::t<i64, String>| hist::redo(&restore, h).unwrap().unwrap();
-    let h = back(&h);
-    assert!(*hist::present(&h) == 2 && restored.borrow().is_empty());
-    let h = forth(&h);
-    assert!(*hist::present(&h) == 3 && restored.borrow().is_empty());
-    let h = back(&back(&h));
-    assert!(*hist::present(&h) == 1 && *restored.borrow() == vec!["x".to_string()]);
-
-    let bad_keep: Arc<dyn Fn(&i64) -> String> = Arc::new(|_: &i64| "refuse".to_string());
-    let bad: hist::t<i64, String> = hist::create(None, None, None, bad_keep, Arc::new(1)).unwrap();
-    let bad = hist::record(Merge::Step, "Edit", Arc::new(2), bad);
-    let bad = hist::record(Merge::Step, "Edit", Arc::new(3), bad);
-    let bad = hist::undo(&|_: &String| Ok::<i64, String>(9), &bad).unwrap().unwrap();
-    assert!(*hist::present(&bad) == 2);
-    let bad = hist::record(Merge::Step, "Edit", Arc::new(4), bad);
-    match hist::undo(&restore, &bad) {
-        Some(Ok(_)) => {}
-        _ => panic!("expected the last present to revive without restore"),
-    }
-    println!("editor history: merge, seal, undo/redo, capacity, labels ok");
-}
 
 /// The scopes the tests use, as the panels they are.
 struct Scope;
@@ -281,7 +109,7 @@ fn route(
     (state, matched.iter().map(|c| unact(c.action)).collect(), frame.input.events)
 }
 
-fn actions_of(matched: &[&Cmd]) -> Vec<Act> {
+fn actions_of(matched: &[Cmd]) -> Vec<Act> {
     matched.iter().map(|c| unact(c.action)).collect()
 }
 
@@ -307,7 +135,7 @@ fn router_leader_chord_scope_text_focus_and_event_consumption() {
         with_keys(frame_with(vec![pressed(Key::KeyChar('c'))]), vec![Key::Meta]),
         State::Idle,
     );
-    assert!(matched == vec![&graph]);
+    assert!(matched == vec![graph.clone()]);
     let (_, matched, _) = router::step(
         &[],
         Platform::Apple,
@@ -317,7 +145,7 @@ fn router_leader_chord_scope_text_focus_and_event_consumption() {
         with_keys(frame_with(vec![pressed(Key::KeyChar('c'))]), vec![Key::Ctrl]),
         State::Idle,
     );
-    assert!(matched == vec![&ctrl]);
+    assert!(matched == vec![ctrl.clone()]);
     let (_, matched, _) = router::step(
         &[],
         Platform::Apple,
@@ -331,7 +159,7 @@ fn router_leader_chord_scope_text_focus_and_event_consumption() {
         ]),
         State::Idle,
     );
-    assert!(matched == vec![&qq]);
+    assert!(matched == vec![qq.clone()]);
     let (traversed, activated, remaining) = router::step(
         &[],
         Platform::Apple,
@@ -616,7 +444,7 @@ fn router_leader_chord_scope_text_focus_and_event_consumption() {
         )
     };
     let (_, matched, passed) = typing(vec![pressed(Key::KeyChar('s'))]);
-    assert!(matched == vec![&save] && passed.input.events.is_empty());
+    assert!(matched == vec![save.clone()] && passed.input.events.is_empty());
     let (_, matched, passed) = typing(vec![pressed(Key::KeyChar('d'))]);
     assert!(matched.is_empty() && passed.input.events == vec![pressed(Key::KeyChar('d'))]);
     // the leader is /: Space plays and pauses, Shift P resets, a bare / waits for the sequence
@@ -674,7 +502,7 @@ fn router_leader_chord_scope_text_focus_and_event_consumption() {
         ]),
         State::Idle,
     );
-    assert!(matched == vec![&keys]);
+    assert!(matched == vec![keys.clone()]);
     let (_, matched, _) = router::step(
         &[],
         Platform::Apple,
@@ -684,7 +512,7 @@ fn router_leader_chord_scope_text_focus_and_event_consumption() {
         frame_with(vec![pressed(Key::KeyChar('/')), pressed(Key::KeyChar('/'))]),
         State::Idle,
     );
-    assert!(matched == vec![&palette]);
+    assert!(matched == vec![palette.clone()]);
     let (_, matched, _) = router::step(
         &[],
         Platform::Apple,
@@ -694,7 +522,7 @@ fn router_leader_chord_scope_text_focus_and_event_consumption() {
         with_keys(frame_with(vec![pressed(Key::KeyChar('='))]), vec![Key::Meta, Key::Shift]),
         State::Idle,
     );
-    assert!(matched == vec![&plus]);
+    assert!(matched == vec![plus.clone()]);
     println!("editor router: leader/chord scope, text focus, event consumption ok");
 }
 

@@ -177,14 +177,14 @@ fn last_char(key: &str) -> String {
 
 /// The shared panel menu, opened at a right-click and retained on `boxed`.
 pub fn panel_menu(
-    state: Option<StateFn>,
+    state: Option<&dyn Fn(&[usize]) -> panels::State>,
     key_of: Option<&dyn Fn(&str) -> String>,
     ui: &mut Ui,
     l: &Leaf,
     boxed: &UiBox,
     at: Option<(f64, f64)>,
 ) -> Vec<Intent> {
-    let state: StateFn = state.unwrap_or(&|_: &[usize]| panels::default_state());
+    let state: &dyn Fn(&[usize]) -> panels::State = state.unwrap_or(&|_: &[usize]| panels::default_state());
     let key_of: &dyn Fn(&str) -> String = key_of.unwrap_or(&no_key);
     if let Some((x, y)) = at {
         ui.set_state(boxed, 1);
@@ -328,7 +328,7 @@ struct Header {
 /// window's in dock and close. Panel backgrounds, the drawn gutters, headers with their collapse
 /// button and right-click menu. Pure: the host applies the intents.
 pub fn update(
-    state: Option<StateFn>,
+    state: Option<&dyn Fn(&[usize]) -> panels::State>,
     hidden: Option<&[Panel]>,
     title: Option<&dyn Fn(&Leaf) -> String>,
     groups: Option<&dyn Fn(&Leaf) -> Vec<f64>>,
@@ -338,7 +338,7 @@ pub fn update(
     ui: &mut Ui,
     frame: &frame::t,
 ) -> Vec<Intent> {
-    let state: StateFn = state.unwrap_or(&|_: &[usize]| panels::default_state());
+    let state: &dyn Fn(&[usize]) -> panels::State = state.unwrap_or(&|_: &[usize]| panels::default_state());
     let default_hidden = [Panel::Timeline];
     let hidden: &[Panel] = hidden.unwrap_or(&default_hidden);
     let title: &dyn Fn(&Leaf) -> String = title.unwrap_or(&default_title);
@@ -740,7 +740,7 @@ pub fn tools_start(ui: &mut Ui, focused: bool, floating: bool, collapsed: bool, 
 }
 
 /// Dock targets built after pane bodies, with PXUI hover feedback during a panel drag.
-pub fn drop_targets(ui: &mut Ui, dragging: Option<(Path, bool)>, geometry: &Geometry, state: StateFn) -> Vec<Intent> {
+pub fn drop_targets(ui: &mut Ui, dragging: Option<(Path, bool)>, geometry: &Geometry, state: &dyn Fn(&[usize]) -> panels::State) -> Vec<Intent> {
     let mut out = Vec::new();
     let Some((source, released)) = dragging else {
         return out;
@@ -817,8 +817,8 @@ pub fn drop_targets(ui: &mut Ui, dragging: Option<(Path, bool)>, geometry: &Geom
 
 /// The draggable gutters, wider than they are drawn. Build them after the panes so they sit on
 /// top of the neighbours' hit rectangles.
-pub fn splitters(state: Option<StateFn>, hidden: Option<&[Panel]>, tree: &t, ui: &mut Ui, frame: &frame::t) -> Vec<Intent> {
-    let state: StateFn = state.unwrap_or(&|_: &[usize]| panels::default_state());
+pub fn splitters(state: Option<&dyn Fn(&[usize]) -> panels::State>, hidden: Option<&[Panel]>, tree: &t, ui: &mut Ui, frame: &frame::t) -> Vec<Intent> {
+    let state: &dyn Fn(&[usize]) -> panels::State = state.unwrap_or(&|_: &[usize]| panels::default_state());
     let mut intents: Vec<Intent> = Vec::new();
     let geo = geometry(Some(state), hidden, tree, frame);
     let theme = ui.theme();

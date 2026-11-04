@@ -1,4 +1,3 @@
-#![cfg(any())] // EDA-GATED: remove when editor_model/editor_list/editor_inspect exist (bundle D/C)
 //! The viewport panes' marks: what is painted over each view, in the kit's marks (viewport.html).
 #![allow(non_camel_case_types)]
 use editor_document::kind_graph;
