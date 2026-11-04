@@ -195,6 +195,16 @@ pub mod hint {
         sys::set_control_click_right_click(enabled).map_err(|failure| native_error(OPERATION, failure))
     }
 
+    /// Name of SDL's video-driver hint; setting it before `init` selects the driver (`"dummy"` is headless).
+    pub const VIDEO_DRIVER: &str = "SDL_VIDEO_DRIVER";
+
+    pub fn set(name: &str, value: &str) -> std::result::Result<(), Error> {
+        const OPERATION: &str = "SDL3.Hint.set";
+        before_main(OPERATION)?;
+        sys::clear_error();
+        sys::set_hint(name, value).map_err(|failure| native_error(OPERATION, failure))
+    }
+
     pub fn mouse_relative_system_scale(enabled: bool) -> std::result::Result<(), Error> {
         const OPERATION: &str = "SDL3.Hint.mouse_relative_system_scale";
         before_main(OPERATION)?;

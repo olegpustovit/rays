@@ -56,6 +56,7 @@ bool rays_sdl3_set_cursor(SDL_Cursor *cursor);
 void rays_sdl3_destroy_cursor(SDL_Cursor *cursor);
 bool rays_sdl3_set_control_click_right_click(bool enabled);
 bool rays_sdl3_set_mouse_relative_system_scale(bool enabled);
+bool rays_sdl3_set_hint(const char *name, const char *value);
 bool rays_sdl3_clipboard_set_text(const char *text);
 char *rays_sdl3_clipboard_get_text(void);
 bool rays_sdl3_start_text_input(SDL_Window *window);

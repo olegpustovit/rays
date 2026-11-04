@@ -13,14 +13,10 @@ pub(crate) fn is_main() -> bool {
     MAIN.with(std::cell::Cell::get)
 }
 
-/// Claims the main thread for a test that needs the dummy video driver, and fails if the gate did not select it.
+/// Claims the main thread for a window test and selects the dummy video driver (as the OCaml dune rule does).
 fn claim_dummy_main() {
     claim_main();
-    assert_eq!(
-        std::env::var("SDL_VIDEODRIVER").ok().as_deref(),
-        Some("dummy"),
-        "window tests need SDL_VIDEODRIVER=dummy",
-    );
+    crate::hint::set(crate::hint::VIDEO_DRIVER, "dummy").expect("select the dummy video driver");
 }
 
 #[test]

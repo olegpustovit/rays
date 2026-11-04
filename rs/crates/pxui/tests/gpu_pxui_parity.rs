@@ -6,5 +6,7 @@ mod common;
 mod gpu_parity;
 
 fn main() {
+    // Headless, as lib/pxui/dune sets SDL_VIDEODRIVER=dummy; the hint has to precede SDL initialisation.
+    sdl3::hint::set(sdl3::hint::VIDEO_DRIVER, "dummy").expect("video driver hint");
     common::window::run(gpu_parity::CASES);
 }

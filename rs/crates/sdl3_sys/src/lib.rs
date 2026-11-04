@@ -132,6 +132,17 @@ pub fn set_mouse_relative_system_scale(enabled: bool) -> std::result::Result<(),
     }
 }
 
+pub fn set_hint(name: &str, value: &str) -> std::result::Result<(), Error> {
+    let name = input(name, "hint name")?;
+    let value = input(value, "hint value")?;
+    // SAFETY: both CStrings live through SDL's copying call.
+    if unsafe { ffi::rays_sdl3_set_hint(name.as_ptr(), value.as_ptr()) } {
+        Ok(())
+    } else {
+        Err(sdl_error(ErrorKind::Sdl, "SDL rejected the hint"))
+    }
+}
+
 pub fn clipboard_set_text(text: &str) -> std::result::Result<(), Error> {
     let text = input(text, "clipboard text")?;
     // SAFETY: the CString lives through SDL's copying call.
@@ -751,6 +762,7 @@ mod ffi {
         pub fn rays_sdl3_quit_subsystem(bits: u32);
         pub fn rays_sdl3_set_control_click_right_click(enabled: bool) -> bool;
         pub fn rays_sdl3_set_mouse_relative_system_scale(enabled: bool) -> bool;
+        pub fn rays_sdl3_set_hint(name: *const c_char, value: *const c_char) -> bool;
         pub fn rays_sdl3_clipboard_set_text(text: *const c_char) -> bool;
         pub fn rays_sdl3_clipboard_get_text() -> *mut c_char;
         pub fn rays_sdl3_create_cursor(shape: c_int) -> *mut SDL_Cursor;

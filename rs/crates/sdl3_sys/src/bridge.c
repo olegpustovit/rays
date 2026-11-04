@@ -166,6 +166,7 @@ bool rays_sdl3_set_mouse_relative_system_scale(bool enabled)
 {
   return SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_SYSTEM_SCALE, enabled ? "1" : "0");
 }
+bool rays_sdl3_set_hint(const char *name, const char *value) { return SDL_SetHint(name, value); }
 bool rays_sdl3_clipboard_set_text(const char *text) { return SDL_SetClipboardText(text); }
 char *rays_sdl3_clipboard_get_text(void) { return SDL_GetClipboardText(); }
 bool rays_sdl3_start_text_input(SDL_Window *window) { return SDL_StartTextInput(window); }
