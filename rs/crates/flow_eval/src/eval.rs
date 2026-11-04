@@ -33,7 +33,6 @@ pub struct ResidualHandlers {
     pub observe: Option<Arc<dyn Fn(ResidualId) + Send + Sync>>,
     pub kernel: Option<Arc<dyn Fn(ResidualId) -> Option<Value> + Send + Sync>>,
     pub bulk: Option<Arc<dyn Fn(ResidualId) -> Option<Value> + Send + Sync>>,
-    pub bulk_needed: Option<Arc<dyn Fn(ResidualId) -> Option<Value> + Send + Sync>>,
     pub defer: Option<Arc<dyn Fn(ResidualId) -> bool + Send + Sync>>,
     pub bulk_approx: Option<Arc<dyn Fn(ResidualId) -> Option<Value> + Send + Sync>>,
     pub trusted: bool,
@@ -1519,7 +1518,8 @@ fn eval_error_rows(a: &mut Arena, c: &ExecCtx, env: &Env, rows: &Term, policy: W
                 };
                 let bindings = Env::of(Arc::new(residual.env));
                 let needed = residual_id(a, ResidualData { env: capture_env(&term, &bindings), term, ctx: residual.ctx, previous: false, live: None });
-                match current_residual_handlers().and_then(|handlers| handlers.bulk_needed).and_then(|bulk| call_lent(a, needed, &|id| bulk(id))) {
+                // OCaml answers Bulk_needed with the host's bulk callback: a check the card needs now (a deferred mask) is asked of it
+                match current_residual_handlers().and_then(|handlers| handlers.bulk).and_then(|bulk| call_lent(a, needed, &|id| bulk(id))) {
                     Some(Value::Int_array(values)) => Value::Int_array(values),
                     _ => return need_time(),
                 }

@@ -238,3 +238,23 @@ fn a_live_validation_inlines_the_card_as_a_guard() {
     let kinds: Vec<&str> = l.plan.nodes.iter().map(|n| n.kind.as_str()).collect();
     assert!(!kinds.contains(&"sop/transform"), "the driven transform stayed a catalog node: {kinds:?}");
 }
+
+/// gpu_sea's chain with the host deferring large static maps (`defer`, as the editor lowers): a grid's
+/// own check of a deferred map (its rows mask) is answered by the host's bulk callback (OCaml's
+/// `Bulk_needed` -> `bulk`), so the grid stays a card over cooked nodes. When it was not asked, the
+/// grid turned structural (a residual), the noise read an open input (`sop/has_attr` unfolded) and
+/// stayed the catalog node, re-lowered every frame with `sop/attr` sources its device kernels could
+/// not bind.
+#[test]
+fn a_deferred_grid_stays_a_card_and_the_driven_noise_inlines() {
+    let text = "(workspace x (graph g :context sop (-> (sop/grid :counts \"Point counts\" :connectivity \"Triangles\" :columns 70 :rows 70) \
+        (sop/attribute_noise :name \"wave\" :seed 7 :octaves 4 :range \"Zero centered\" :offset [(* t 0.3) 0.0 (* t 0.2)] \
+        :lacunarity (+ 2.0 (* 0.3 (sin (* t 0.5))))))))";
+    let l = lower::workspace(None, Vec::new(), lower::Options { defer: true, ..lower::Options::default() }, &parse(text))
+        .unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
+    let kinds: Vec<&str> = l.plan.nodes.iter().map(|n| n.kind.as_str()).collect();
+    assert!(!kinds.contains(&"sop/attribute_noise"), "the driven noise stayed the catalog node: {kinds:?}");
+    let grid_card = l.plan.nodes.iter().find(|n| n.kind == flow_eval::card_kind() && n.args.iter().any(|(k, v)| k == "kind" && *v == flow_eval::Value::Text(b"sop/grid".to_vec())));
+    let value = grid_card.and_then(|n| n.args.iter().find(|(k, _)| k == "value")).map(|(_, v)| v.clone());
+    assert!(matches!(value, Some(flow_eval::Value::Deferred(..))), "the grid's card is structural: {value:?}");
+}
