@@ -136,7 +136,6 @@ fn late_slice_diagnostic_matches_the_walker() {
 
 // Product defect: the static map of 4101 rows reports head_elements 4096 (OCaml: 0, the fast path ran every row).
 #[test]
-#[ignore = "product: static map profile head_elements 4096, OCaml 0"]
 fn static_map_profile() {
     let workspace = checked("(map (fn [(i : int)]\n         (array/sum (map (fn [(j : int)] (+ i j)) (array/range 3 :type int))))\n         (array/range 4101 :type int))");
     let profile = Profile::create(Arc::new(|| 0.));
@@ -150,7 +149,6 @@ fn static_map_profile() {
 // Product defect: a slice start of 2^62-1 (OCaml max_int) is refused by packed with "needs a
 // non-negative whole length" where the walker says "An array slice must be within its source."
 #[test]
-#[ignore = "product: packed slice start max_int gives a different E_ARRAY_RANGE message than the walker"]
 fn slice_start_max_int() {
     for count in [0, 1, 64] {
         parity(&m(&format!("(array/sum (array/slice data i {count}))"), vec![MAX_INT]));

@@ -244,7 +244,6 @@ fn failing_table() -> ResolveArc {
 // packed kernel (and OCaml's reference) report the table error first (E_DATA_SOURCE, cause "table first"); the Rust
 // reference reports the index error first (E_RANGE division by zero).
 #[test]
-#[ignore = "product: Host::force_reference evaluates the index argument before resolving the table (E_RANGE), OCaml table first (E_DATA_SOURCE)"]
 fn argument_errors_precede_table_resolution() {
     let failing = failing_table();
     let live = live_at(0.);
@@ -402,7 +401,6 @@ fn rollback_resolver(state: e::State, fold: Value, live: input::Frame, table: Va
 }
 
 #[test]
-#[ignore = "deadlock: irfix (intermittent hang: resolver forces a state fold during packed::force)"]
 fn state_rolls_back_on_gather_errors() {
     let live = live_at(0.25);
     let table = int_table();
@@ -596,7 +594,6 @@ fn prepared_table_does_not_cross_a_force() {
 /// A is prepared in block 0. A late bad A index in block 1 must not be reported ahead of an
 /// earlier row's later B resolution/error/cause.
 #[test]
-#[ignore = "deadlock: irfix (intermittent hang: resolver forces a state fold during packed::force)"]
 fn late_bounds_versus_earlier_table_cause() {
     let live = live_at(0.25);
     let thread = std::thread::current().id();
@@ -722,7 +719,6 @@ fn text_leaves_are_immutable_byte_copies() {
 }
 
 #[test]
-#[ignore = "product: flaky E_UNBOUND $kernel-input:0 in the Text lookup-helper map (fails ~half the runs)"]
 fn text_helper_lookup() {
     let live = live_at(0.25);
     let strs = strings();
@@ -1000,7 +996,6 @@ fn list_tables_exact_widths_and_range_guards() {
 // not bound") when it is called inside a multi-domain scope (4 or 8 domains); outside one it
 // succeeds. OCaml's test calls the reference inside Parallel.run.
 #[test]
-#[ignore = "product: Host::force_reference inside a multi-domain scope gives E_UNBOUND $kernel-input:0 for a Text map"]
 fn text_select_reference_inside_domains() {
     let live = live_at(0.25);
     let strs = strings();
@@ -1022,7 +1017,6 @@ fn text_select_reference_inside_domains() {
 
 // Same defect as `argument_errors_precede_table_resolution`, for the trust-boundary and text-source cases.
 #[test]
-#[ignore = "product: Host::force_reference evaluates the index argument before resolving the table (E_RANGE), OCaml table first"]
 fn index_error_versus_table_source_errors() {
     let live = live_at(0.25);
     let ordered = instantiate(None, &arr(Ty::Int), "(fn [(index : int)] (array/nth data (int/div index 0)))", vec![0]);
@@ -1043,7 +1037,6 @@ fn index_error_versus_table_source_errors() {
 // select map on one thread (the original single test body) fails the second with E_UNBOUND
 // "$kernel-input:0 is not bound"; each passes alone.
 #[test]
-#[ignore = "product: Text select map fails E_UNBOUND after the Text lookup helper map ran on the same thread"]
 fn text_helper_then_select_same_thread() {
     text_helper_lookup();
     text_select_and_error_causes();

@@ -2,10 +2,7 @@
 // map of more than 4,096 elements is made by its CPU kernel after the walker's first 4,096
 // elements, and the evaluation is the same value bit for bit, the same records and the same failure.
 //
-// Not ported (and why): the 200,000-element wall-clock bound and the Gc.allocated_bytes marginal
-// cost (OCaml heap measurement); the kernel claim is asserted from the profile tier instead. The
-// replay probes (Flow_graph.Probe.at) need a flow_graph dev-dependency that flow_ir's Cargo.toml
-// does not declare; the rest of that block is ported.
+// Not ported (and why): the 200,000-element wall-clock bound and the Gc.allocated_bytes marginal cost (OCaml heap measurement); the kernel claim is asserted from the profile tier instead.
 // Sizes: OCaml used 20000/9000 element maps; 5000/4500 still cross the 4,096 walked head.
 use crate::core_exec;
 use crate::core_ir::{Expr, StatementNode};
@@ -323,6 +320,14 @@ fn trusted_replay_verifies_bits() {
     for map in Profile::static_maps(&profile) {
         assert!(map.tier == Tier::Cpu_kernel && map.tail_elements == 0);
     }
+    let mut eager_probe = flow_graph::probe::make(&eager, Default::default());
+    let mut replay_probe = flow_graph::probe::make(&replay, Default::default());
+    let path = eager.records.iter().find(|(path, _)| path.last().is_some_and(|s| s == "y")).expect("y records").0.clone();
+    for k in [0, 4095, 4096, 4100, 4101, 8196, 8201] {
+        let a = eager_probe.at(&path, &[k]);
+        let b = replay_probe.at(&path, &[k]);
+        assert!(a == b && b.is_some(), "replay probe differs or is absent at call {k} ({})", path.join("/"));
+    }
     for domains in [1, 8] {
         with_domains(domains, &|| {
             let compiled = ok(flow_ir::static_(&flow_ir::StaticOptions { replay: true, verify: true, ..Default::default() }, &workspace));
@@ -382,7 +387,6 @@ fn strict_captured_iterate() {
 // (head_elements = 4096); OCaml runs the kernel first (head_elements = 0, head_seconds = 0). Covers the
 // head assertions of static_map_profile, trusted_replay and this clock check.
 #[test]
-#[ignore = "product: static map profile head_elements 4096, OCaml 0 (kernel first)"]
 fn kernel_first_profile_clock() {
     let ticks = Arc::new(AtomicU64::new(0));
     let profile = {
@@ -551,7 +555,6 @@ fn sop_deferral_preserves_late_diagnostics() {
 }
 
 #[test]
-#[ignore = "product: static map profile head_elements 4096, OCaml 0 (kernel first)"]
 fn kernel_first_head_is_zero() {
     let workspace = checked("(map (fn [i] (* i 0.5)) (array/range 4100))");
     let profile = Profile::create(clock_zero());

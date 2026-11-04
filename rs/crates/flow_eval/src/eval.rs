@@ -45,50 +45,42 @@ fn current_residual_handlers() -> Option<ResidualHandlers> {
     ACTIVE_RESIDUAL_HANDLERS.with(|handlers| handlers.borrow().last().cloned())
 }
 thread_local! { static ACTIVE_OBSERVED_RESIDUALS: RefCell<Vec<Vec<ResidualId>>> = const { RefCell::new(Vec::new()) }; }
-thread_local! { static ACTIVE_RESIDUAL_SNAPSHOTS: RefCell<Vec<HashMap<ResidualId, Arc<Mutex<Arena>>>>> = const { RefCell::new(Vec::new()) }; }
-fn active_residual_snapshot(id: &ResidualId) -> Option<Arc<Mutex<Arena>>> {
-    ACTIVE_RESIDUAL_SNAPSHOTS.with(|snapshots| snapshots.borrow().iter().rev().find_map(|snapshot| snapshot.get(id).cloned()))
+// OCaml has no lock, so a host callback may read the arena that is evaluating. Here no lookup ever blocks on a live arena: while an arena's
+// lock is held across a callback (kernel/defer/bulk handlers, the data-source resolver), a clone of it is published under its id and every
+// lookup, on any thread, returns that clone. Ids map to their arena through a global index, so a lookup locks nothing it does not return.
+static PUBLISHED: LazyLock<Mutex<HashMap<i64, Vec<Arc<Mutex<Arena>>>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+static HOME_RESIDUAL: LazyLock<Mutex<HashMap<i64, i64>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+static HOME_FN: LazyLock<Mutex<HashMap<i64, i64>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+fn find_home(index: &Mutex<HashMap<i64, i64>>, key: i64) -> Option<Arc<Mutex<Arena>>> {
+    let arena = *index.lock().unwrap().get(&key)?;
+    if let Some(snapshot) = PUBLISHED.lock().unwrap().get(&arena).and_then(|stack| stack.last().cloned()) { return Some(snapshot); }
+    ARENAS.lock().unwrap().get(&arena)?.upgrade()
 }
-struct ResidualSnapshotScope { id: ResidualId }
-impl Drop for ResidualSnapshotScope {
-    fn drop(&mut self) {
-        ACTIVE_RESIDUAL_SNAPSHOTS.with(|snapshots| { if let Some(snapshot) = snapshots.borrow_mut().last_mut() { snapshot.remove(&self.id); } });
+fn call_published<T>(a: &Arena, callback: &dyn Fn() -> T) -> T {
+    let mut copy = a.clone();
+    copy.owns_index = false;
+    let snapshot = Arc::new(Mutex::new(copy));
+    PUBLISHED.lock().unwrap().entry(a.id).or_default().push(snapshot.clone());
+    struct Unpublish(i64, Arc<Mutex<Arena>>);
+    impl Drop for Unpublish {
+        fn drop(&mut self) {
+            let mut published = PUBLISHED.lock().unwrap();
+            if let Some(stack) = published.get_mut(&self.0) {
+                if let Some(at) = stack.iter().rposition(|s| Arc::ptr_eq(s, &self.1)) { stack.remove(at); }
+                if stack.is_empty() { published.remove(&self.0); }
+            }
+        }
     }
-}
-// Arena ids whose Mutex this thread holds while a host callback runs. OCaml has no lock, so a callback may read the arena it is called from;
-// here the callback reads the snapshot instead and registry scans must not block on the held original.
-thread_local! { static SHADOWED_ARENAS: RefCell<Vec<i64>> = const { RefCell::new(Vec::new()) }; }
-fn snapshot_find(pred: &dyn Fn(&Arena) -> bool) -> Option<Arc<Mutex<Arena>>> {
-    ACTIVE_RESIDUAL_SNAPSHOTS.with(|snapshots| snapshots.borrow().iter().rev().find_map(|scope| scope.values().find(|arena| arena.try_lock().ok().is_some_and(|arena| pred(&arena))).cloned()))
-}
-fn registry_find(pred: &dyn Fn(&Arena) -> bool) -> Option<Arc<Mutex<Arena>>> {
-    let arenas = ARENAS.lock().ok()?;
-    arenas.iter().find_map(|(id, weak)| {
-        if SHADOWED_ARENAS.with(|shadowed| shadowed.borrow().contains(id)) { return None; }
-        let arena = weak.upgrade()?;
-        let found = arena.lock().ok().is_some_and(|arena| pred(&arena));
-        found.then_some(arena)
-    })
+    let _unpublish = Unpublish(a.id, snapshot);
+    callback()
 }
 fn call_with_snapshot(a: &Arena, id: ResidualId, callback: &dyn Fn(ResidualId) -> Option<Value>) -> Option<Value> {
-    let snapshot = Arc::new(Mutex::new(a.clone()));
-    SHADOWED_ARENAS.with(|shadowed| shadowed.borrow_mut().push(a.id));
-    struct Unshadow;
-    impl Drop for Unshadow { fn drop(&mut self) { SHADOWED_ARENAS.with(|shadowed| { shadowed.borrow_mut().pop(); }); } }
-    let _unshadow = Unshadow;
-    ACTIVE_RESIDUAL_SNAPSHOTS.with(|snapshots| {
-        if let Some(scope) = snapshots.borrow_mut().last_mut() { scope.insert(id, snapshot); }
-    });
-    let scope = ResidualSnapshotScope { id };
-    let value = callback(id);
-    drop(scope);
-    value
+    call_published(a, &|| callback(id))
 }
 struct ResidualHandlerScope;
 impl Drop for ResidualHandlerScope {
     fn drop(&mut self) {
         ACTIVE_RESIDUAL_HANDLERS.with(|handlers| { handlers.borrow_mut().pop(); });
-        ACTIVE_RESIDUAL_SNAPSHOTS.with(|snapshots| { snapshots.borrow_mut().pop(); });
         ACTIVE_OBSERVED_RESIDUALS.with(|observed| { observed.borrow_mut().pop(); });
     }
 }
@@ -196,7 +188,7 @@ static NEXT_FID: AtomicI64 = AtomicI64::new(1);
 static NEXT_RID: AtomicI64 = AtomicI64::new(1);
 static NEXT_BULK: AtomicI64 = AtomicI64::new(-1);
 static FREE_WALKS: AtomicI64 = AtomicI64::new(0);
-static FREE_NAMES_CACHE: LazyLock<Mutex<HashMap<String, BTreeSet<String>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+static FREE_NAMES_CACHE: LazyLock<Mutex<HashMap<String, Vec<(Term, BTreeSet<String>)>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 type Interrupt = Arc<dyn Fn() -> bool + Send + Sync>;
 static INTERRUPTS: LazyLock<Mutex<HashMap<std::thread::ThreadId, Interrupt>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 static ARENAS: LazyLock<Mutex<HashMap<i64, Weak<Mutex<Arena>>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -217,24 +209,41 @@ enum Function { Closure(ClosureData), Named(NamedData) }
 struct ResidualData { term: Term, env: BTreeMap<String, Value>, ctx: ExecCtx, previous: bool, live: Option<Frame> }
 #[derive(Clone)]
 struct GraphCell { instance: i64, graph: String, default: bool, inputs: Vec<(String,Value)>, result: Value }
+// Copy-on-write cell: cloning an Arena for a published snapshot is O(fields); a write unshares only while a snapshot is alive.
+struct Shared<T>(Arc<T>);
+impl<T> Shared<T> { fn new(value: T) -> Self { Shared(Arc::new(value)) } }
+impl<T> Clone for Shared<T> { fn clone(&self) -> Self { Shared(self.0.clone()) } }
+impl<T: Default> Default for Shared<T> { fn default() -> Self { Shared(Arc::new(T::default())) } }
+impl<T> std::ops::Deref for Shared<T> { type Target = T; fn deref(&self) -> &T { &self.0 } }
+impl<T: Clone> std::ops::DerefMut for Shared<T> { fn deref_mut(&mut self) -> &mut T { Arc::make_mut(&mut self.0) } }
 #[derive(Clone)]
 struct Arena {
-    id: i64, workspace: Workspace, functions: HashMap<FnId,Function>, residuals: HashMap<ResidualId,ResidualData>,
-    nodes: Vec<Node>, authored: Vec<i64>, cells: Vec<GraphCell>, cache: HashMap<String,usize>, states: Vec<Value>, records: BTreeMap<Path, Vec<(Vec<i64>,Value)>>,
+    id: i64, workspace: Shared<Workspace>, functions: Shared<HashMap<FnId,Function>>, residuals: Shared<HashMap<ResidualId,ResidualData>>,
+    nodes: Shared<Vec<Node>>, authored: Vec<i64>, cells: Shared<Vec<GraphCell>>, cache: Shared<HashMap<String,usize>>, states: Shared<Vec<Value>>, records: Shared<BTreeMap<Path, Vec<(Vec<i64>,Value)>>>,
     observed: Vec<ResidualId>,
     record: bool, time: Option<Frame>, resolve: Option<Arc<dyn Fn(&Value)->Result<Value,Diagnostic> + Send + Sync>>,
-    state: Option<State>, elems: BTreeMap<String,Value>, step_count: usize, budget: usize, fn_calls: HashMap<FnId,i64>, memo: HashMap<ResidualId,Value>, interrupt: Option<Interrupt>,
+    state: Option<State>, elems: BTreeMap<String,Value>, step_count: usize, budget: usize, fn_calls: Shared<HashMap<FnId,i64>>, memo: Shared<HashMap<ResidualId,Value>>, interrupt: Option<Interrupt>, owns_index: bool,
+}
+impl Drop for Arena {
+    fn drop(&mut self) {
+        if !self.owns_index { return; }
+        ARENAS.lock().unwrap().remove(&self.id);
+        let mut home = HOME_RESIDUAL.lock().unwrap();
+        for id in self.residuals.keys() { if home.get(&id.0) == Some(&self.id) { home.remove(&id.0); } }
+        let mut home = HOME_FN.lock().unwrap();
+        for id in self.functions.keys() { if home.get(&id.0) == Some(&self.id) { home.remove(&id.0); } }
+    }
 }
 impl Arena {
     fn new(workspace: &Workspace, record: bool, budget: usize) -> Arc<Mutex<Arena>> {
         let id = NEXT_ARENA.fetch_add(1, Ordering::Relaxed);
         let interrupt = INTERRUPTS.lock().unwrap().get(&std::thread::current().id()).cloned();
         let arena = Arc::new(Mutex::new(Arena {
-            id, workspace: workspace.clone(), functions: HashMap::new(), residuals: HashMap::new(),
-            nodes: Vec::new(), authored: Vec::new(), cells: Vec::new(), cache: HashMap::new(),
-            states: Vec::new(), records: BTreeMap::new(), observed: Vec::new(), record,
+            id, workspace: Shared::new(workspace.clone()), functions: Shared::default(), residuals: Shared::default(),
+            nodes: Shared::default(), authored: Vec::new(), cells: Shared::default(), cache: Shared::default(),
+            states: Shared::default(), records: Shared::default(), observed: Vec::new(), record,
             time: None, resolve: None, state: None, elems: BTreeMap::new(), step_count: 0,
-            budget, fn_calls: HashMap::new(), memo: HashMap::new(), interrupt,
+            budget, fn_calls: Shared::default(), memo: Shared::default(), interrupt, owns_index: true,
         }));
         ARENAS.lock().unwrap().insert(id, Arc::downgrade(&arena));
         RECENT_ARENAS.with(|recent| { let mut recent = recent.borrow_mut(); recent.push_back(arena.clone()); if recent.len() > 64 { recent.pop_front(); } });
@@ -253,11 +262,21 @@ impl Env {
 
 fn new_fid()->FnId{FnId(NEXT_FID.fetch_add(1,Ordering::Relaxed))}
 fn new_rid()->ResidualId{ResidualId(NEXT_RID.fetch_add(1,Ordering::Relaxed))}
-fn get_fn(a:&Arena,id:FnId)->Result<Function,Diagnostic>{a.functions.get(&id).cloned().ok_or_else(||error("E_FUNCTION_ID","Function belongs to an expired evaluation."))}
+// OCaml closures are values, so a function made by another evaluation still calls; here its id is looked up in the arena that made it.
+fn foreign_fn(own: i64, id: FnId) -> Option<Function> {
+    let arena = find_home(&HOME_FN, id.0)?;
+    for _ in 0..2000 {
+        if let Ok(other) = arena.try_lock() { return if other.id == own { None } else { other.functions.get(&id).cloned() }; }
+        std::thread::yield_now();
+    }
+    None
+}
+fn get_fn(a:&Arena,id:FnId)->Result<Function,Diagnostic>{a.functions.get(&id).cloned().or_else(|| foreign_fn(a.id, id)).ok_or_else(||error("E_FUNCTION_ID","Function belongs to an expired evaluation."))}
 fn get_res(a:&Arena,id:ResidualId)->Result<ResidualData,Diagnostic>{a.residuals.get(&id).cloned().ok_or_else(||error("E_RESIDUAL_ID","Residual belongs to an expired evaluation."))}
-fn closure_id(a:&mut Arena, f:Function)->FnId{let id=new_fid();a.functions.insert(id,f);id}
+fn closure_id(a:&mut Arena, f:Function)->FnId{let id=new_fid();HOME_FN.lock().unwrap().insert(id.0,a.id);a.functions.insert(id,f);id}
 fn residual_id(a: &mut Arena, residual: ResidualData) -> ResidualId {
     let id = new_rid();
+    HOME_RESIDUAL.lock().unwrap().insert(id.0, a.id);
     a.residuals.insert(id, residual);
     id
 }
@@ -339,8 +358,9 @@ fn record_pattern(a: &mut Arena, c: &ExecCtx, zone: &Path, pattern: &W::Pattern,
     Ok(())
 }
 fn free_names(term: &Term) -> BTreeSet<String> {
-    let key = format!("{}:{:?}:{:p}", term.form.id, term.path, term);
-    if let Some(names) = FREE_NAMES_CACHE.lock().unwrap().get(&key).cloned() { return names; }
+    // OCaml keys this table physically on a term it keeps alive; a Rust address of a dropped temporary is reused, so a hit is the same term structurally.
+    let key = format!("{}:{:?}", term.form.id, term.path);
+    if let Some(names) = FREE_NAMES_CACHE.lock().unwrap().get(&key).and_then(|entries| entries.iter().find(|(t, _)| t == term).map(|(_, names)| names.clone())) { return names; }
     FREE_WALKS.fetch_add(1, Ordering::Relaxed);
     fn walk(t: &Term, bound: &mut BTreeSet<String>, free: &mut BTreeSet<String>) {
         match &t.node {
@@ -385,14 +405,14 @@ fn free_names(term: &Term) -> BTreeSet<String> {
     walk(term, &mut BTreeSet::new(), &mut free);
     let mut cache = FREE_NAMES_CACHE.lock().unwrap();
     if cache.len() >= 16_384 { cache.clear(); }
-    cache.insert(key, free.clone());
+    cache.entry(key).or_default().push((term.clone(), free.clone()));
     free
 }
 fn capture_env(term: &Term, env: &Env) -> BTreeMap<String, Value> {
     free_names(term).into_iter().filter_map(|name| env.get(&name).map(|value| (name, value))).collect()
 }
 
-fn eval_at(a:&mut Arena,c:&ExecCtx,env:&Env,t:&Term)->Result<Value,Diagnostic>{let c=match &t.path{Some(p)=>{let mut c=c.clone();c.base=p.clone();c.route.clear();c},None=>c.clone()};let r=eval_raw(a,&c,env,t).map_err(|e|add_span(e,t));match r{
+fn eval_at(a:&mut Arena,c:&ExecCtx,env:&Env,t:&Term)->Result<Value,Diagnostic>{let c=match &t.path{Some(p)=>{let mut c=c.clone();c.base=p.clone();c.route.clear();c},None=>c.clone()};let r=eval_raw(a,&c,env,t).and_then(|v| if a.time.is_some() { concrete(a, v) } else { Ok(v) }).map_err(|e|add_span(e,t));match r{
     Ok(v)=>{if a.record&&c.record{if let Some(p)=&t.path{note(a,&c,p.clone(),v.clone());}}Ok(v)},
     Err(d) if d.code == "$NEEDS_TIME" => {
         if a.time.is_some() { Err(error("E_EVAL", "A live value was needed while evaluating dynamically.")) }
@@ -836,7 +856,7 @@ fn diagnostic_payload(diagnostic: &Diagnostic) -> Value {
 fn is_cancelled(diagnostic: &Diagnostic) -> bool { diagnostic.code == "cancelled" || diagnostic.code == "E_CANCELLED" }
 fn resolve_source(a: &Arena, source: &Value) -> Result<Value, Diagnostic> {
     let resolve = a.resolve.as_ref().ok_or_else(|| error("E_DATA_SOURCE", "This data source needs its host's cooked data."))?;
-    let value = resolve(source)?;
+    let value = call_published(a, &|| resolve(source))?;
     if matches!(value, Value::Source(..) | Value::Struct(_, Ty::Array(_), _)) { return eval_error("E_DATA_SOURCE", "The host returned an unresolved data source."); }
     if value::ty_of(source) != Ty::Any && value::ty_of(source) != value::ty_of(&value) { return eval_error("E_DATA_SOURCE", "The host returned a data source of the wrong type."); }
     value::validate(&value)?;
@@ -852,25 +872,33 @@ fn concrete_data(a: &mut Arena, value: Value) -> Result<Value, Diagnostic> {
 }
 fn eval_with_error(a: &mut Arena, c: &ExecCtx, env: &Env, protected: &Term, mapper: &Term) -> Result<Value, Diagnostic> {
     if a.time.is_none() { return need_time(); }
-    let protected = eval_at(a, &sub(c, "0".into()), env, protected)?;
-    let diagnostic = match concrete_data(a, protected) {
-        Ok(Value::Deferred(ty, id)) if flow_syntax::ty::is_cooked(&ty) => {
-            let source = Value::Source("$core/complete".into(), ty.clone(), vec![("value".into(), Value::Deferred(ty, id))]);
-            return resolve_source(a, &source);
+    // OCaml runs both inside Value.with_error: an error raised while evaluating the protected term or the mapper is mapped / inherits the envelope
+    let guarded = (|| -> Result<Value, Diagnostic> {
+        let protected = eval_at(a, &sub(c, "0".into()), env, protected)?;
+        match concrete_data(a, protected)? {
+            Value::Deferred(ty, id) if flow_syntax::ty::is_cooked(&ty) => {
+                let source = Value::Source("$core/complete".into(), ty.clone(), vec![("value".into(), Value::Deferred(ty, id))]);
+                resolve_source(a, &source)
+            }
+            value => Ok(value),
         }
+    })();
+    let diagnostic = match guarded {
         Ok(value) => return Ok(value),
         Err(diagnostic) if is_cancelled(&diagnostic) => return Err(diagnostic),
         Err(diagnostic) => diagnostic,
     };
     let payload = diagnostic_payload(&diagnostic);
-    let mapped = match eval_concrete(a, &sub(c, "1".into()), env, mapper)? {
-        Value::Fn(function) => {
-            let mapped = call_fn(a, c, function, &[payload], None)?;
-            concrete_data(a, mapped)?
+    let mapped = (|| -> Result<Value, Diagnostic> {
+        match eval_concrete(a, &sub(c, "1".into()), env, mapper)? {
+            Value::Fn(function) => {
+                let mapped = call_fn(a, c, function, &[payload], None)?;
+                concrete_data(a, mapped)
+            }
+            _ => eval_error("E_DIAGNOSTIC_MAP", "An error mapper is a function."),
         }
-        _ => return eval_error("E_DIAGNOSTIC_MAP", "An error mapper is a function."),
-    };
-    value::with_error(&|| Err(diagnostic.clone()), &|_| Ok(mapped.clone()))
+    })();
+    value::with_error(&|| Err(diagnostic.clone()), &|_| mapped.clone())
 }
 fn eval_error_rows(a: &mut Arena, c: &ExecCtx, env: &Env, rows: &Term, policy: W::DiagnosticPolicy, mapper: &Term) -> Result<Value, Diagnostic> {
     let policy_name = match policy { W::DiagnosticPolicy::First => "first", W::DiagnosticPolicy::RangeLast => "range-last" };
@@ -912,14 +940,16 @@ fn eval_error_rows(a: &mut Arena, c: &ExecCtx, env: &Env, rows: &Term, policy: W
         Value::Int_array(values) if index >= 0 && (index as u128) < values.len() as u128 && values[index as usize] == 1 => (),
         _ => return eval_error("E_DIAGNOSTIC_CONTEXT", "Host diagnosis returned a non-failing row."),
     }
-    let mapped = match eval_concrete(a, &sub(c, "1".into()), env, mapper)? {
-        Value::Fn(function) => {
-            let mapped = call_fn(a, c, function, &[Value::Int(index)], None)?;
-            concrete_data(a, mapped)?
+    let mapped = (|| -> Result<Value, Diagnostic> {
+        match eval_concrete(a, &sub(c, "1".into()), env, mapper)? {
+            Value::Fn(function) => {
+                let mapped = call_fn(a, c, function, &[Value::Int(index)], None)?;
+                concrete_data(a, mapped)
+            }
+            _ => eval_error("E_DIAGNOSTIC_MAP", "A row mapper is a function."),
         }
-        _ => return eval_error("E_DIAGNOSTIC_MAP", "A row mapper is a function."),
-    };
-    value::with_error(&|| Err(error("E_DIAGNOSTIC_ROW", "A diagnostic row failed.")), &|_| Ok(mapped.clone()))
+    })();
+    value::with_error(&|| Err(error("E_DIAGNOSTIC_ROW", "A diagnostic row failed.")), &|_| mapped.clone())
 }
 
 fn data_type(ty: &Ty) -> bool {
@@ -1217,7 +1247,6 @@ fn eval_map(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, function: FnId, 
     let mut lists = Vec::with_capacity(sources.len());
     for (index, source) in sources.iter().enumerate() { lists.push(eval_sequence(a, c, env, source, format!("l{}", index))?); }
     let count = if lists.is_empty() { 0 } else { lists.iter().map(|(_, count)| *count).min().unwrap_or(0) };
-    if !packed && count > MAX_ITERATIONS { return eval_error("E_ITER_BOUND", "A map exceeds 4,096 elements."); }
     let numeric = !matches!(&term.ty, Ty::Array(element) if **element == Ty::Text) && !sources.iter().any(|source| matches!(&source.ty, Ty::Array(element) if **element == Ty::Text));
     let static_map = a.time.is_none() && packed && numeric;
     let id = if static_map || (a.record && c.record && matches!(&term.ty, Ty::Array(_))) { Some(map_residual(a, c, term, env)) } else { None };
@@ -1233,7 +1262,7 @@ fn eval_map(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, function: FnId, 
             note(a, c, path, Value::Record(vec![("offset".into(), Value::Int(offset)), ("call".into(), Value::Residual(id))]));
         }
     }
-    let large = static_map && count > MAX_ITERATIONS && matches!(&term.ty, Ty::Array(_));
+    let mut large = static_map && count > MAX_ITERATIONS && matches!(&term.ty, Ty::Array(_));
     if large {
         let id = id.unwrap();
         let can_defer = matches!(a.functions.get(&function), Some(Function::Closure(_)));
@@ -1244,13 +1273,14 @@ fn eval_map(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, function: FnId, 
         }
         let trusted = current_residual_handlers().is_some_and(|handlers| handlers.trusted && (!a.record || !c.record || (handlers.replay && function_replayable(a, function))));
         if trusted {
-            if let Some(candidate) = current_residual_handlers().and_then(|handlers| handlers.kernel).and_then(|kernel| call_with_snapshot(a, id, &|id| kernel(id))) {
+            if let Some(candidate) = current_residual_handlers().and_then(|handlers| handlers.bulk).and_then(|bulk| call_with_snapshot(a, id, &|id| bulk(id))) {
                 if value::ty_of(&candidate) == term.ty && array_len(&candidate).ok() == Some(count) {
                     reserve_function_calls(a, function, count);
                     progress.completed = true;
                     return Ok(candidate);
                 }
             }
+            large = false; // OCaml walks the whole map after a refused whole-array offer, with no second offer
         }
     }
     let walked = if large { MAX_ITERATIONS } else { count };
@@ -1338,7 +1368,6 @@ fn eval_hof_work(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, kind: &W::H
             let mut accumulator = eval_at(a, &sub(c, "init".into()), env, &rest[0])?;
             let count_term = eval_at(a, &sub(c, "n".into()), env, &rest[1])?;
             let count = int_value(&concrete(a, count_term)?)?;
-            if !(0..=MAX_ITERATIONS as i64).contains(&count) { return eval_error("E_ITER_BOUND", "iterate exceeds 4,096 iterations."); }
             let stop = if let Some(term) = rest.get(2) {
                 match eval_concrete(a, &sub(c, "until".into()), env, term)? { Value::Fn(function) => Some(function), _ => return eval_error("E_TYPE", "Expected a function.") }
             } else { None };
@@ -1549,7 +1578,7 @@ fn result_from(owner: &Arc<Mutex<Arena>>, results: Vec<(String, Value)>, authore
     let arena = owner.lock().unwrap();
     let records = arena.records.iter().map(|(path, values)| (path.clone(), values.clone())).collect();
     let instances = arena.cells.iter().map(|cell| Instance { graph: cell.graph.clone(), default: cell.default, inputs: cell.inputs.clone(), result: cell.result.clone() }).collect();
-    Eval { plan: Plan { instances, nodes: arena.nodes.clone() }, authored, results, states: arena.states.clone(), records, owner: owner.clone() }
+    Eval { plan: Plan { instances, nodes: arena.nodes.to_vec() }, authored, results, states: arena.states.to_vec(), records, owner: owner.clone() }
 }
  
 pub fn static_eval(workspace: &Workspace) -> Result<Eval, Diagnostic> { static_with(workspace, false, None, None) }
@@ -1665,10 +1694,7 @@ fn resolve_source_with(resolve: &Arc<dyn Fn(&Value) -> Result<Value, Diagnostic>
     value::validate(&value)?;
     Ok(value)
 }
-fn arena_for_residual(id: &ResidualId) -> Option<Arc<Mutex<Arena>>> {
-    if let Some(arena) = active_residual_snapshot(id) { return Some(arena); }
-    snapshot_find(&|arena| arena.residuals.contains_key(id)).or_else(|| registry_find(&|arena| arena.residuals.contains_key(id)))
-}
+fn arena_for_residual(id: &ResidualId) -> Option<Arc<Mutex<Arena>>> { find_home(&HOME_RESIDUAL, id.0) }
 pub fn residual_eval(id: ResidualId, live: &Frame, state: Option<&State>) -> Result<Value, Diagnostic> {
     let arena = arena_for_residual(&id).ok_or_else(|| error("E_RESIDUAL_ID", "Residual belongs to an expired evaluation."))?;
     let mut arena = arena.lock().unwrap();
@@ -1678,7 +1704,10 @@ pub fn residual_eval(id: ResidualId, live: &Frame, state: Option<&State>) -> Res
     arena.step_count = 0;
     arena.fn_calls.clear();
     arena.memo.clear();
-    execute_residual(&mut arena, id)
+    let saved = arena.state.as_ref().map(fork_state);
+    let result = execute_residual(&mut arena, id);
+    if result.is_err() { if let (Some(state), Some(saved)) = (arena.state.as_ref(), saved.as_ref()) { restore_state(state, saved); } }
+    result
 }
 pub fn run(workspace: &Workspace, record: bool, inputs: Option<&[(String, Vec<(String, Value)>)]>, state: Option<&State>, live: Option<&Frame>, time: f64) -> Result<Eval, Diagnostic> {
     let mut result = static_with(workspace, record, inputs, None)?;
@@ -1891,9 +1920,7 @@ fn workspace_source_key(workspace: &Workspace) -> String {
     stable_digest(source.as_bytes())
 }
 pub fn element_key(zone:&Path)->String{format!("$elem:{}",zone.join("/"))}
-fn arena_for_function(id: FnId) -> Option<Arc<Mutex<Arena>>> {
-    snapshot_find(&|arena| arena.functions.contains_key(&id)).or_else(|| registry_find(&|arena| arena.functions.contains_key(&id)))
-}
+fn arena_for_function(id: FnId) -> Option<Arc<Mutex<Arena>>> { find_home(&HOME_FN, id.0) }
 fn map_function(site: Option<(i64, Path, Vec<i64>)>, path: Option<Path>, signature: &FnSignature, function: FnId, arrays: &[Value]) -> Result<Value, Diagnostic> {
     let arena = arena_for_function(function).ok_or_else(|| error("E_FUNCTION_ID", "Function belongs to an expired evaluation."))?;
     let mut arena = arena.lock().unwrap();
@@ -2047,13 +2074,13 @@ fn replace_eval_value(evaluated: &mut Eval, original: &Value, replacement: &Valu
     for (_, values) in &mut evaluated.records { for (_, value) in values { replace_array(value, original, replacement); } }
     for value in &mut evaluated.states { replace_array(value, original, replacement); }
     let mut arena = evaluated.owner.lock().unwrap();
-    for node in &mut arena.nodes { for (_, value) in &mut node.args { replace_array(value, original, replacement); } }
-    for cell in &mut arena.cells {
+    for node in arena.nodes.iter_mut() { for (_, value) in &mut node.args { replace_array(value, original, replacement); } }
+    for cell in arena.cells.iter_mut() {
         for (_, value) in &mut cell.inputs { replace_array(value, original, replacement); }
         replace_array(&mut cell.result, original, replacement);
     }
     for values in arena.records.values_mut() { for (_, value) in values { replace_array(value, original, replacement); } }
-    for value in &mut arena.states { replace_array(value, original, replacement); }
+    for value in arena.states.iter_mut() { replace_array(value, original, replacement); }
 }
 pub mod Residual {
     use super::*;
@@ -2066,7 +2093,6 @@ pub mod Residual {
     pub type ResidualView = View;
     pub fn handle(handlers: ResidualHandlers, run: &mut dyn FnMut() -> Result<Eval, Diagnostic>) -> Result<Eval, Diagnostic> {
         ACTIVE_RESIDUAL_HANDLERS.with(|active| active.borrow_mut().push(handlers.clone()));
-        ACTIVE_RESIDUAL_SNAPSHOTS.with(|snapshots| snapshots.borrow_mut().push(HashMap::new()));
         ACTIVE_OBSERVED_RESIDUALS.with(|observed| observed.borrow_mut().push(Vec::new()));
         let scope = ResidualHandlerScope;
         let result = run();
@@ -2213,7 +2239,10 @@ pub mod Residual {
         arena.fn_calls.clear();
         arena.memo.clear();
         let residual = get_res(&arena, id)?;
-        eval_concrete(&mut arena, &residual.ctx, &Env { values: residual.env }, term)
+        let saved = arena.state.as_ref().map(fork_state);
+        let result = eval_concrete(&mut arena, &residual.ctx, &Env { values: residual.env }, term);
+        if result.is_err() { if let (Some(state), Some(saved)) = (arena.state.as_ref(), saved.as_ref()) { restore_state(state, saved); } }
+        result
     }
     pub fn with_bindings(id: ResidualId, term: &Term, bindings: &[(String, Value)]) -> Result<ResidualId, Diagnostic> {
         let arena = arena_for_residual(&id).ok_or_else(|| error("E_RESIDUAL_ID", "Residual belongs to an expired evaluation."))?;
@@ -2270,6 +2299,7 @@ fn rewrite_value(
             }
             env.extend(overrides);
             residual.env = env;
+            HOME_RESIDUAL.lock().unwrap().insert(copy.0, arena.id);
             arena.residuals.insert(copy, residual);
             Value::Residual(copy)
         }
@@ -2278,6 +2308,7 @@ fn rewrite_value(
             let Some(Function::Closure(mut closure)) = arena.functions.get(id).cloned() else { return value.clone(); };
             let copy = FnId(fresh());
             functions.insert(*id, copy);
+            HOME_FN.lock().unwrap().insert(copy.0, arena.id);
             arena.functions.insert(copy, Function::Closure(closure.clone()));
             closure.env = closure.env.into_iter().map(|(name, value)| (name, rewrite_value(arena, &value, replace, fresh, retarget, residuals, functions))).collect();
             arena.functions.insert(copy, Function::Closure(closure));
@@ -2406,6 +2437,7 @@ pub mod Host {
         let at = move |index: usize| -> Result<Records, Diagnostic> {
             if index >= count { return Err(error("E_LIST_RANGE", "Probe index is outside this map.")); }
             let mut worker = arena.lock().unwrap().clone();
+            worker.owns_index = false;
             worker.record = true;
             worker.records.clear();
             worker.fn_calls.clear();
@@ -2417,7 +2449,7 @@ pub mod Host {
             let args = lists.iter().map(|value| sequence_item(value, index)).collect::<Result<Vec<_>, _>>()?;
             let value = call_fn(&mut worker, &context, function, &args, None)?;
             let _ = concrete(&mut worker, value)?;
-            let mut records = worker.records.into_iter().collect::<Records>();
+            let mut records = std::mem::take(&mut *worker.records).into_iter().collect::<Records>();
             records.sort_by(|left, right| left.0.cmp(&right.0));
             Ok(records)
         };
@@ -2435,14 +2467,14 @@ pub fn live_kernels_get() -> Arc<dyn Fn(&[Node]) -> bool + Send + Sync> { LIVE_K
 mod tests {
     use super::*;
 
-    fn form() -> flow_syntax::syntax::Syntax {
-        flow_syntax::syntax::make(flow_syntax::syntax::Node::Sym("test".into()))
+    fn form() -> std::sync::Arc<flow_syntax::syntax::Syntax> {
+        std::sync::Arc::new(flow_syntax::syntax::make(flow_syntax::syntax::Node::Sym("test".into())))
     }
     fn literal(value: param::Value, ty: Ty) -> Term {
         Term { path: None, ty, node: W::Node::Lit(value), form: form() }
     }
     fn workspace(body: Term) -> Workspace {
-        let graph_form = form();
+        let graph_form = (*form()).clone();
         Workspace {
             name: "test".into(),
             graphs: vec![Graph { name: "g".into(), context: flow_syntax::context::value(), inputs: Vec::new(), body, form: graph_form.clone() }],
@@ -2475,7 +2507,7 @@ mod tests {
             ),
             form: form(),
         };
-        body.form.id = 12;
+        std::sync::Arc::make_mut(&mut body.form).id = 12;
         assert_eq!(static_eval(&workspace(body)).unwrap().results, vec![("g".into(), Value::Int(42))]);
     }
     #[test]

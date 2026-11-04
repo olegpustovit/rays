@@ -468,22 +468,18 @@ fn rollback_case_on(ty: Ty, failed_component: usize, check_state: bool, domain_l
     }
 }
 #[test]
-#[ignore = "deadlock: irfix (intermittent hang: resolver forces a state fold during packed::force)"]
 fn rollback_float() {
     rollback_case(Ty::Float, 0, false);
 }
 #[test]
-#[ignore = "deadlock: irfix (intermittent hang, ~5/8 runs even on one domain: resolver forces a state fold during packed::force)"]
 fn rollback_vec3_x() {
     rollback_case(Ty::Vec3, 0, false);
 }
 #[test]
-#[ignore = "deadlock: irfix (intermittent hang, ~5/8 runs even on one domain: resolver forces a state fold during packed::force)"]
 fn rollback_vec3_y() {
     rollback_case(Ty::Vec3, 1, false);
 }
 #[test]
-#[ignore = "deadlock: irfix (intermittent hang, ~5/8 runs even on one domain: resolver forces a state fold during packed::force)"]
 fn rollback_vec3_z() {
     rollback_case(Ty::Vec3, 2, false);
 }
@@ -514,7 +510,6 @@ fn small_maps_share_chunks_across_domains() {
 // (and host::prepare) leave the state advanced (stamp changes: 8 vs 0); OCaml rolls both callers back.
 // The four `rollback_*` tests check results and bytes only; this is their state assertion.
 #[test]
-#[ignore = "product: packed::force/host::prepare do not roll back state after a reduction error"]
 fn rollback_restores_state() {
     rollback_case(Ty::Float, 0, true);
     rollback_case(Ty::Vec3, 0, true);

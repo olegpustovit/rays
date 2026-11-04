@@ -328,7 +328,6 @@ fn argument_errors_precede_the_table() {
 // the `(helper ...)` call: the helper FnId lives in another evaluation's arena (get_fn is per arena in flow_eval), where OCaml
 // function ids are global.
 #[test]
-#[ignore = "product: cross-evaluation function binding gives E_FUNCTION_ID (flow_eval get_fn is per arena)"]
 fn captured_helpers() {
     let helpers: Vec<(&str, Box<dyn Fn(f64) -> i64>)> = vec![
         ("(array/nth (array/concat data data) j)", Box::new(|_| 9)),
