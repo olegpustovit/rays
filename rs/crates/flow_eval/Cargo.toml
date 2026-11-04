@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+mem_sys = { path = "../mem_sys" }
 flow_syntax = { path = "../flow_syntax" }
 flow_check = { path = "../flow_check" }
 input = { path = "../input" }

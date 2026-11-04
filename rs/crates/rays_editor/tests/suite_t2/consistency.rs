@@ -20,6 +20,7 @@ use param::Value;
 use rays_editor::Editor;
 
 pub const CASES: &[(&str, fn())] = &[
+    ("consistency_frozen_driven", frozen_driven),
     ("consistency_settings_authority", settings_authority),
     ("consistency_settings_rebuild", settings_rebuild),
     ("consistency_settings_presets", settings_presets),
@@ -419,12 +420,9 @@ fn document_forms() {
     assert!(editor_document::layout_by_path::is_empty(&explicit.layout), "an explicit empty layout did not clear its fallback");
 }
 
-/// Skipped: lowering of a SOP with a live argument (`sop/box :size [(+ 1 t) 1 1]`) never returns
-/// in the Rust port (see parity_backlog.md, "editor suite t2").
-#[allow(dead_code)]
 fn frozen_driven() {
     let driven = workspace("(workspace driven\n    (graph g :context sop (sop/box :size [(+ 1 t) 1 1]))\n    (graph scene :context scene (scene/geometry (ref g))))");
     assert!(lowering::of_workspace(&Default::default(), &driven).is_ok(), "a live SOP reference was mistaken for a frozen scene field");
 }
 
-pub const SKIPPED: &[(&str, &str)] = &[("consistency_frozen_driven", "hang: lowering a live SOP argument (flow_eval/flow_sop), see parity_backlog")];
+pub const SKIPPED: &[(&str, &str)] = &[];

@@ -89,6 +89,7 @@ dependencies = [
  "flow_check",
  "flow_syntax",
  "input",
+ "mem_sys",
  "param",
  "rays_diagnostic",
 ]
@@ -216,6 +217,7 @@ dependencies = [
  "input",
  "lru",
  "mem",
+ "mem_sys",
  "parallel",
  "param",
  "rays_diagnostic",

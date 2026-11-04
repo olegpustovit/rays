@@ -359,7 +359,7 @@ fn lower_nodes(lowered: &l::T, change: &Change) -> Option<R<l::T>> {
             }
         })
         .collect();
-    let plan = flow_eval::Plan { nodes, ..lowered.plan.clone() };
+    let plan = flow_eval::Plan { id: flow_eval::fresh_plan_id(), nodes, ..lowered.plan.clone() };
     let mut evaluated = (*lowered.evaluated).clone();
     evaluated.plan = plan.clone();
     Some(Ok(l::T { graphs, plan, evaluated: Arc::new(evaluated), ..lowered.clone() }))
@@ -432,7 +432,7 @@ fn lower_value(lowered: &l::T, change: &Change) -> Option<R<l::T>> {
     if !hit {
         return None;
     }
-    let plan = flow_eval::Plan { instances, ..lowered.plan.clone() };
+    let plan = flow_eval::Plan { id: flow_eval::fresh_plan_id(), instances, ..lowered.plan.clone() };
     let mut evaluated = (*lowered.evaluated).clone();
     evaluated.plan = plan.clone();
     evaluated.results = results;

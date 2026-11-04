@@ -227,3 +227,13 @@ fn cooked_data_arguments_resolve_once_per_cook() {
     let (small, large) = (timed(20_000), timed(80_000));
     assert!(large <= 12.0 * small + 0.05, "step E2: 4x points took {large:.3}s vs {small:.3}s");
 }
+
+/// sop/transform's `:validate` reads the live `:shear_xy`: the call is the plain node (OCaml's
+/// `Needs_t` fallback to the catalog node), not as a residual of the whole call.
+#[test]
+fn a_live_validation_keeps_the_plain_node() {
+    let l = lower::workspace(None, Vec::new(), lower::Options::default(), &parse("(workspace x (graph g :context sop (sop/transform (sop/box) :shear_xy (* t 0.25))))"))
+        .unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
+    let kinds: Vec<&str> = l.plan.nodes.iter().map(|n| n.kind.as_str()).collect();
+    assert!(kinds.contains(&"sop/transform"), "a live validation residualized the call: {kinds:?}");
+}

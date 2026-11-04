@@ -17,7 +17,7 @@ use rays_diagnostic::Diagnostic;
 pub struct prepared {
     pub plan: e::Plan,
     /// the plan's identity (see `workspace_images::plan_id`), not its value
-    pub plan_id: (usize, usize),
+    pub plan_id: u64,
     pub effects: I::Program,
     pub args: Vec<Option<I::Program>>,
     pub edges: Vec<bool>,

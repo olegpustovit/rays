@@ -6,7 +6,7 @@ pub use flow_syntax::ty::{Ty, FnSignature};
 pub use flow_syntax::value::{FnId, ResidualId, Value};
 use input::Frame;
 use rays_diagnostic::{Diagnostic, Severity};
-use std::{cell::RefCell, collections::{BTreeMap, BTreeSet, HashMap, HashSet}, sync::{Arc, LazyLock, Mutex, RwLock, Weak, atomic::{AtomicI64, Ordering}}};
+use std::{cell::RefCell, collections::{BTreeMap, BTreeSet, HashMap, HashSet}, sync::{Arc, LazyLock, Mutex, RwLock, Weak, atomic::{AtomicI64, AtomicU64, Ordering}}};
 
 pub use flow_syntax::value::{FnId as FunctionId, ResidualId as LiveId};
 pub type Live = Frame;
@@ -73,6 +73,28 @@ fn call_published<T>(a: &Arena, callback: &dyn Fn() -> T) -> T {
     }
     let _unpublish = Unpublish(a.id, snapshot);
     callback()
+}
+/// `call_published` for a callback that also makes residuals (`with_bindings`): the ones it adds
+/// to the snapshot are copied back into `a`. The inline-parameter policy reads and rebinds the
+/// residual arguments while `inline_node` holds `a`'s lock; locking it again deadlocked.
+fn call_published_merge<T>(a: &mut Arena, callback: &dyn Fn() -> T) -> T {
+    let mut copy = a.clone();
+    copy.owns_index = false;
+    let snapshot = Arc::new(Mutex::new(copy));
+    PUBLISHED.lock().unwrap().entry(a.id).or_default().push(snapshot.clone());
+    let result = callback();
+    {
+        let mut published = PUBLISHED.lock().unwrap();
+        if let Some(stack) = published.get_mut(&a.id) {
+            if let Some(at) = stack.iter().rposition(|s| Arc::ptr_eq(s, &snapshot)) { stack.remove(at); }
+            if stack.is_empty() { published.remove(&a.id); }
+        }
+    }
+    // collect, then release the snapshot's share of the map before inserting (else `a` copies it whole)
+    let added: Vec<(ResidualId, ResidualData)> = snapshot.lock().unwrap().residuals.iter().filter(|(id, _)| !a.residuals.contains_key(id)).map(|(id, r)| (*id, r.clone())).collect();
+    drop(snapshot);
+    for (id, residual) in added { a.residuals.insert(id, residual); }
+    result
 }
 fn call_with_snapshot(a: &Arena, id: ResidualId, callback: &dyn Fn(ResidualId) -> Option<Value>) -> Option<Value> {
     call_published(a, &|| callback(id))
@@ -156,8 +178,11 @@ pub struct Node {
 }
 #[derive(Clone, Debug)]
 pub struct Instance { pub graph: String, pub default: bool, pub inputs: Vec<(String, Value)>, pub result: Value }
+/// `id` is the plan's identity (OCaml `==`): assigned by `fresh_plan_id` where a plan is built, kept by clones.
 #[derive(Clone, Debug)]
-pub struct Plan { pub instances: Vec<Instance>, pub nodes: Vec<Node> }
+pub struct Plan { pub id: u64, pub instances: Vec<Instance>, pub nodes: Vec<Node> }
+static NEXT_PLAN_ID: AtomicU64 = AtomicU64::new(1);
+pub fn fresh_plan_id() -> u64 { NEXT_PLAN_ID.fetch_add(1, Ordering::Relaxed) }
 pub type Record = (Path, Vec<(Vec<i64>, Value)>);
 pub type Records = Vec<Record>;
 #[derive(Clone)]
@@ -221,7 +246,7 @@ impl<T: Clone> std::ops::DerefMut for Shared<T> { fn deref_mut(&mut self) -> &mu
 struct Arena {
     id: i64, workspace: Shared<Workspace>, functions: Shared<HashMap<FnId,Function>>, residuals: Shared<HashMap<ResidualId,ResidualData>>,
     nodes: Shared<Vec<Node>>, authored: Vec<i64>, cells: Shared<Vec<GraphCell>>, cache: Shared<HashMap<String,usize>>, states: Shared<Vec<Value>>, records: Shared<BTreeMap<Path, Vec<(Vec<i64>,Value)>>>,
-    observed: Vec<ResidualId>,
+    observed: Vec<ResidualId>, res_log: Shared<Vec<ResidualId>>, fn_log: Shared<Vec<FnId>>, approx: u64, policies: Shared<HashMap<String, Option<Arc<InlineParameterPolicy>>>>,
     record: bool, time: Option<Frame>, resolve: Option<Arc<dyn Fn(&Value)->Result<Value,Diagnostic> + Send + Sync>>,
     state: Option<State>, elems: BTreeMap<String,Value>, step_count: usize, budget: usize, fn_calls: Shared<HashMap<FnId,i64>>, memo: Shared<HashMap<ResidualId,Value>>, interrupt: Option<Interrupt>, owns_index: bool,
 }
@@ -242,7 +267,7 @@ impl Arena {
         let arena = Arc::new(Mutex::new(Arena {
             id, workspace: Shared::new(workspace.clone()), functions: Shared::default(), residuals: Shared::default(),
             nodes: Shared::default(), authored: Vec::new(), cells: Shared::default(), cache: Shared::default(),
-            states: Shared::default(), records: Shared::default(), observed: Vec::new(), record,
+            states: Shared::default(), records: Shared::default(), observed: Vec::new(), res_log: Shared::default(), fn_log: Shared::default(), approx: 0, policies: Shared::default(), record,
             time: None, resolve: None, state: Some(State::default()), elems: BTreeMap::new(), step_count: 0,
             budget, fn_calls: Shared::default(), memo: Shared::default(), interrupt, owns_index: true,
         }));
@@ -288,12 +313,17 @@ fn foreign_fn(own: i64, id: FnId) -> Option<Function> {
 fn unshare(c: Arc<ClosureData>) -> ClosureData { Arc::try_unwrap(c).unwrap_or_else(|c| (*c).clone()) }
 fn get_fn(a:&Arena,id:FnId)->Result<Function,Diagnostic>{a.functions.get(&id).cloned().or_else(|| foreign_fn(a.id, id)).ok_or_else(||error("E_FUNCTION_ID","Function belongs to an expired evaluation."))}
 fn get_res(a:&Arena,id:ResidualId)->Result<ResidualData,Diagnostic>{a.residuals.get(&id).cloned().ok_or_else(||error("E_RESIDUAL_ID","Residual belongs to an expired evaluation."))}
-fn closure_id(a:&mut Arena, f:Function)->FnId{let id=new_fid();HOME_FN.lock().unwrap().insert(id.0,a.id);a.functions.insert(id,f);id}
+fn closure_id(a:&mut Arena, f:Function)->FnId{let id=new_fid();insert_fn(a,id,f);id}
+fn insert_fn(a:&mut Arena,id:FnId,f:Function){HOME_FN.lock().unwrap().insert(id.0,a.id);a.functions.insert(id,f);a.fn_log.push(id);}
 fn residual_id(a: &mut Arena, residual: ResidualData) -> ResidualId {
     let id = new_rid();
+    insert_residual(a, id, residual);
+    id
+}
+fn insert_residual(a: &mut Arena, id: ResidualId, residual: ResidualData) {
     HOME_RESIDUAL.lock().unwrap().insert(id.0, a.id);
     a.residuals.insert(id, residual);
-    id
+    a.res_log.push(id);
 }
 fn root_ctx(a:&Arena)->ExecCtx{ExecCtx{arena:a.id,inst:-1,prefix:Arc::new(Vec::new()),base:Arc::new(Vec::new()),route:Route(None),iter:Arc::new(Vec::new()),depth:0,record:true,data:false,geometry:false,host:false,context:flow_syntax::context::host(),card:None}}
 fn site(c:&ExecCtx)->Path{let mut p=(*c.prefix).clone();p.extend(c.base.iter().cloned());p.extend(c.route.to_vec());p}
@@ -519,13 +549,199 @@ fn function_value(value: &Value) -> bool {
         _ => false,
     }
 }
-fn inline_node(a: &mut Arena, c: &ExecCtx, _authored: i64, original: &W::NodeDefinition, args: &[(String, Value)], call: &Term) -> Result<Value, Diagnostic> {
+// ---- inline body memo (OCaml's inline_memo / replay_inline) ----
+// An inline body's evaluation, kept for a later evaluation of the same card (declaration, canonical parameters, input shapes):
+// its nodes in creation order and value, the residuals and functions it made, the kernels it offered, and the site and iteration it ran at.
+// A replay puts them at the next ids of the new evaluation. Only a body whose values reference nothing but what it made (or its cooked inputs) is kept.
+struct InlineRegion { nodes: usize, authored: usize, residuals: usize, functions: usize, observed: usize, states: usize, cells: usize, approx: u64 }
+struct InlineEntry {
+    nodes: Vec<Node>, authored: Vec<i64>, value: Value, observed: Vec<ResidualId>, lo: i64, inputs: Vec<i64>, site: Path, iter: Vec<i64>,
+    residuals: Vec<(ResidualId, ResidualData)>, functions: Vec<(FnId, Function, Option<i64>)>,
+}
+#[derive(Default)]
+struct InlineMemo { entries: HashMap<Vec<u8>, Arc<InlineEntry>>, sites: HashMap<(Path, Vec<i64>, i64), Vec<Vec<u8>>> }
+static INLINE_MEMO: LazyLock<Mutex<InlineMemo>> = LazyLock::new(|| Mutex::new(InlineMemo::default()));
+const INLINE_VARIANTS: usize = 8;
+const INLINE_ENTRIES: usize = 256;
+// bounded twice: 256 entries (a whole-table clear) and INLINE_VARIANTS per call site, the newest kept
+fn inline_store(form: i64, key: Vec<u8>, entry: InlineEntry) {
+    let site = (entry.site.clone(), entry.iter.clone(), form);
+    let mut memo = INLINE_MEMO.lock().unwrap();
+    if memo.entries.len() >= INLINE_ENTRIES { memo.entries.clear(); memo.sites.clear(); }
+    let mut keys = memo.sites.get(&site).cloned().unwrap_or_default();
+    if !keys.contains(&key) { keys.insert(0, key.clone()); }
+    for stale in keys.iter().skip(INLINE_VARIANTS) { memo.entries.remove(stale); }
+    keys.truncate(INLINE_VARIANTS);
+    memo.sites.insert(site, keys);
+    memo.entries.insert(key, Arc::new(entry));
+}
+// The cooked inputs of an inlined call, in argument order.
+fn inline_inputs(parameters: &[(String, Value)], args: &[(String, Value)]) -> Vec<i64> {
+    fn ids(value: &Value, out: &mut Vec<i64>) {
+        match value { Value::Deferred(_, id) => out.push(*id), Value::List(values) => for value in values.iter() { ids(value, out); }, _ => () }
+    }
+    let mut out = Vec::new();
+    for (name, value) in args { if !parameters.iter().any(|(p, _)| p == name) { ids(value, &mut out); } }
+    out
+}
+fn has_fn(value: &Value) -> bool {
+    match value {
+        Value::Fn(_) => true,
+        Value::List(values) => values.iter().any(has_fn),
+        Value::Record(fields) | Value::Struct(_, _, fields) | Value::Source(_, _, fields) => fields.iter().any(|(_, value)| has_fn(value)),
+        _ => false,
+    }
+}
+fn key_bytes(out: &mut Vec<u8>, bytes: &[u8]) { out.extend_from_slice(bytes.len().to_string().as_bytes()); out.push(b':'); out.extend_from_slice(bytes); }
+type FactsFn = dyn Fn(&dyn Fn(i64) -> Option<Node>, i64) -> String;
+fn input_shape(value: &Value, out: &mut Vec<u8>, facts: &FactsFn, plan_node: &dyn Fn(i64) -> Option<Node>) -> bool {
+    match value {
+        Value::Deferred(ty, id) => { out.push(b'D'); key_bytes(out, ty::to_string(ty).as_bytes()); key_bytes(out, facts(plan_node, *id).as_bytes()); true }
+        Value::No_geo => { out.push(b'N'); true }
+        Value::List(values) => { out.push(b'['); for value in values.iter() { if !input_shape(value, out, facts, plan_node) { return false; } out.push(b','); } out.push(b']'); true }
+        Value::Source(..) | Value::Struct(..) | Value::Record(..) | Value::Fn(..) | Value::Residual(..) => false,
+        value => { out.push(b'='); key_bytes(out, &value::key_of(&|_| 0, value)); true }
+    }
+}
+// What an inline body's evaluation is a function of: the declaration, the canonical parameters and the shape of the inputs (cooked handles by type and static facts, not identity).
+// None for a live or function parameter, a non-data input, or outside the static evaluation.
+const INLINE_MEMO_ON: bool = true;
+fn inline_key(a: &Arena, c: &ExecCtx, policy: &InlineParameterPolicy, parameters: &[(String, Value)], args: &[(String, Value)]) -> Option<Vec<u8>> {
+    if !INLINE_MEMO_ON || a.time.is_some() || c.data { return None; }
+    if parameters.iter().any(|(_, value)| has_fn(value) || is_live_value(value)) { return None; }
+    let mut key = Vec::new();
+    key_bytes(&mut key, policy.key.as_bytes());
+    key_bytes(&mut key, policy.definition.body.body.form.id.to_string().as_bytes());
+    key_bytes(&mut key, &value::key_of(&|_| 0, &Value::Record(parameters.to_vec())));
+    let facts = static_facts_get();
+    let plan_node = |id: i64| -> Option<Node> { a.nodes.get(usize::try_from(id).ok()?).filter(|node| node.id == id).cloned() };
+    for (name, value) in args {
+        if parameters.iter().any(|(p, _)| p == name) { continue; }
+        key.push(1);
+        key_bytes(&mut key, name.as_bytes());
+        if !input_shape(value, &mut key, &*facts, &plan_node) { return None; }
+    }
+    key.push(c.geometry as u8);
+    key_bytes(&mut key, c.context.as_str().as_bytes());
+    key.push(current_residual_handlers().is_some_and(|handlers| handlers.defer.is_some()) as u8);
+    Some(key)
+}
+fn value_ids(value: &Value, residuals: &mut Vec<ResidualId>, functions: &mut Vec<FnId>) {
+    match value {
+        Value::Residual(id) => residuals.push(*id),
+        Value::Fn(id) => functions.push(*id),
+        Value::List(values) => for value in values.iter() { value_ids(value, residuals, functions); },
+        Value::Record(fields) | Value::Struct(_, _, fields) | Value::Source(_, _, fields) => for (_, value) in fields { value_ids(value, residuals, functions); },
+        _ => (),
+    }
+}
+// None when the body's results point at anything it did not make: such a body is evaluated again each time.
+fn inline_entry(a: &Arena, c: &ExecCtx, region: &InlineRegion, value: &Value, inputs: Vec<i64>) -> Option<InlineEntry> {
+    let mut residuals = Vec::new();
+    for id in &a.res_log[region.residuals..] { residuals.push((*id, a.residuals.get(id)?.clone())); }
+    let mut functions = Vec::new();
+    for id in &a.fn_log[region.functions..] { functions.push((*id, a.functions.get(id)?.clone(), a.fn_calls.get(id).copied())); }
+    let made_r: HashSet<ResidualId> = residuals.iter().map(|(id, _)| *id).collect();
+    let made_f: HashSet<FnId> = functions.iter().map(|(id, _, _)| *id).collect();
+    let (mut rs, mut fs) = (Vec::new(), Vec::new());
+    value_ids(value, &mut rs, &mut fs);
+    let nodes: Vec<Node> = a.nodes[region.nodes..].to_vec();
+    for node in &nodes { for (_, v) in &node.args { value_ids(v, &mut rs, &mut fs); } }
+    for (_, residual) in &residuals { for v in residual.env.values() { value_ids(v, &mut rs, &mut fs); } }
+    for (_, function, _) in &functions { if let Function::Closure(closure) = function { for v in closure.env.values() { value_ids(v, &mut rs, &mut fs); } } }
+    let observed = a.observed[region.observed..].to_vec();
+    rs.extend(observed.iter().copied());
+    if !rs.iter().all(|id| made_r.contains(id)) || !fs.iter().all(|id| made_f.contains(id)) { return None; }
+    Some(InlineEntry {
+        nodes, authored: a.authored[region.authored..].to_vec(), value: value.clone(), observed, lo: region.nodes as i64, inputs,
+        site: site(c), iter: (*c.iter).clone(), residuals, functions,
+    })
+}
+struct Reloc { lo: i64, count: i64, new_lo: i64, inputs: Vec<(i64, i64)>, rmap: HashMap<ResidualId, ResidualId>, fmap: HashMap<FnId, FnId>, site: Path, iter: Vec<i64>, new_site: Path, new_iter: Vec<i64>, arena: i64, inst: i64 }
+impl Reloc {
+    fn id(&self, n: i64) -> i64 {
+        if n >= self.lo && n < self.lo + self.count { n - self.lo + self.new_lo } else { self.inputs.iter().find(|(old, _)| *old == n).map_or(n, |(_, new)| *new) }
+    }
+    fn path(&self, p: &Path) -> Path {
+        if p.len() >= self.site.len() && p[..self.site.len()] == self.site[..] { let mut out = self.new_site.clone(); out.extend_from_slice(&p[self.site.len()..]); out } else { p.clone() }
+    }
+    fn iter(&self, i: &[i64]) -> Vec<i64> {
+        if i.len() >= self.iter.len() && i[..self.iter.len()] == self.iter[..] { let mut out = self.new_iter.clone(); out.extend_from_slice(&i[self.iter.len()..]); out } else { i.to_vec() }
+    }
+    fn ctx(&self, x: &ExecCtx) -> ExecCtx {
+        let mut y = x.clone();
+        y.arena = self.arena; y.inst = self.inst;
+        y.prefix = Arc::new(self.path(&x.prefix));
+        y.iter = Arc::new(self.iter(&x.iter));
+        y
+    }
+    fn fields(&self, fields: &[(String, Value)]) -> Vec<(String, Value)> { fields.iter().map(|(name, value)| (name.clone(), self.value(value))).collect() }
+    fn value(&self, value: &Value) -> Value {
+        match value {
+            Value::Deferred(ty, n) => Value::Deferred(ty.clone(), self.id(*n)),
+            Value::List(values) => Value::List(Arc::new(values.iter().map(|value| self.value(value)).collect())),
+            Value::Record(fields) => Value::Record(self.fields(fields)),
+            Value::Struct(name, ty, fields) => Value::Struct(name.clone(), ty.clone(), self.fields(fields)),
+            Value::Source(name, ty, fields) => Value::Source(name.clone(), ty.clone(), self.fields(fields)),
+            Value::Residual(id) => Value::Residual(*self.rmap.get(id).unwrap_or(id)),
+            Value::Fn(id) => Value::Fn(*self.fmap.get(id).unwrap_or(id)),
+            value => value.clone(),
+        }
+    }
+    fn env(&self, env: &BTreeMap<String, Value>) -> BTreeMap<String, Value> { env.iter().map(|(name, value)| (name.clone(), self.value(value))).collect() }
+}
+// An inline body's kept evaluation, in this evaluation: its nodes at the next ids over these inputs, its residuals and functions at fresh ids,
+// its sites and iterations under this call's, its kernels offered again. The value equals what evaluating the body here gives.
+fn replay_inline(a: &mut Arena, c: &ExecCtx, e: &InlineEntry, inputs: &[i64]) -> Option<Value> {
+    if inputs.len() != e.inputs.len() { return None; }
+    let mut reloc = Reloc {
+        lo: e.lo, count: e.nodes.len() as i64, new_lo: a.nodes.len() as i64, inputs: e.inputs.iter().copied().zip(inputs.iter().copied()).collect(),
+        rmap: HashMap::new(), fmap: HashMap::new(), site: e.site.clone(), iter: e.iter.clone(), new_site: site(c), new_iter: (*c.iter).clone(), arena: c.arena, inst: c.inst,
+    };
+    for (id, _) in &e.residuals { reloc.rmap.insert(*id, new_rid()); }
+    for (id, _, _) in &e.functions { reloc.fmap.insert(*id, new_fid()); }
+    let nodes: Vec<Node> = e.nodes.iter().map(|n| Node {
+        id: reloc.id(n.id), inst: c.inst, site: reloc.path(&n.site), iter: reloc.iter(&n.iter), kind: n.kind.clone(), ty: n.ty.clone(), args: reloc.fields(&n.args), error: n.error.clone(),
+    }).collect();
+    let residuals: Vec<(ResidualId, ResidualData)> = e.residuals.iter().map(|(id, r)| (reloc.rmap[id], ResidualData {
+        term: r.term.clone(), env: reloc.env(&r.env), ctx: reloc.ctx(&r.ctx), previous: r.previous, live: r.live.clone(),
+    })).collect();
+    let functions: Vec<(FnId, Function, Option<i64>)> = e.functions.iter().map(|(id, f, calls)| {
+        let f = match f {
+            Function::Closure(closure) => {
+                let mut closure = (**closure).clone();
+                closure.env = Arc::new(reloc.env(&closure.env));
+                closure.zone = reloc.path(&closure.zone);
+                closure.at = reloc.ctx(&closure.at);
+                Function::Closure(Arc::new(closure))
+            }
+            Function::Named(named) => Function::Named(named.clone()),
+        };
+        (reloc.fmap[id], f, *calls)
+    }).collect();
+    let value = reloc.value(&e.value);
+    let observed: Vec<ResidualId> = e.observed.iter().map(|id| reloc.rmap[id]).collect();
+    for (node, form) in nodes.into_iter().zip(e.authored.iter()) { a.nodes.push(node); a.authored.push(*form); }
+    for (id, residual) in residuals { insert_residual(a, id, residual); }
+    for (id, function, calls) in functions { insert_fn(a, id, function); if let Some(calls) = calls { a.fn_calls.insert(id, calls); } }
+    for id in observed {
+        a.observed.push(id);
+        ACTIVE_OBSERVED_RESIDUALS.with(|queues| { if let Some(queue) = queues.borrow_mut().last_mut() { queue.push(id); } });
+    }
+    Some(value)
+}
+
+fn inline_policy_for(a: &mut Arena, kind: &str) -> Option<Arc<InlineParameterPolicy>> {
+    if let Some(found) = a.policies.get(kind) { return found.clone(); }
+    let found = a.workspace.nodes.iter().find(|definition| definition.kind.qualified == kind).map(|original| Arc::new(INLINE_PARAMETERS_HOOK.read().unwrap()(&a.workspace, original)));
+    a.policies.insert(kind.to_owned(), found.clone());
+    found
+}
+fn inline_node(a: &mut Arena, c: &ExecCtx, _authored: i64, policy: &InlineParameterPolicy, args: &[(String, Value)], call: &Term) -> Result<Value, Diagnostic> {
     if c.depth > MAX_DEPTH { return eval_error("E_DEPTH", "Call depth exceeds 64."); }
-    let policy = INLINE_PARAMETERS_HOOK.read().unwrap()( &a.workspace, original);
     let authored = call.form.id;
-    let definition = policy.definition;
-    let _inline_key = policy.key;
-    let Some(parameters) = (policy.canonicalize)(args)? else {
+    let definition = &policy.definition;
+    let Some(parameters) = call_published_merge(a, &|| (policy.canonicalize)(args))? else {
         return catalog_call(a, c, authored, definition.kind.qualified.clone(), definition.kind.context.clone(), args.to_vec());
     };
     let live = args.iter().any(|(_, value)| live_in(value, a));
@@ -536,6 +752,18 @@ fn inline_node(a: &mut Arena, c: &ExecCtx, _authored: i64, original: &W::NodeDef
     context.depth += 1;
     context.record = false;
     context.card = definition.kind.qualified.split_once('/').map(|(_, label)| Arc::<str>::from(label)).or_else(|| Some(Arc::<str>::from(definition.kind.qualified.as_str())));
+    let region = InlineRegion { nodes: a.nodes.len(), authored: a.authored.len(), residuals: a.res_log.len(), functions: a.fn_log.len(), observed: a.observed.len(), states: a.states.len(), cells: a.cells.len(), approx: a.approx };
+    let inputs = inline_inputs(&parameters, args);
+    let key = inline_key(a, c, policy, &parameters, args);
+    let replayed = key.as_ref().and_then(|key| {
+        let entry = INLINE_MEMO.lock().unwrap().entries.get(key).cloned()?;
+        replay_inline(a, c, &entry, &inputs)
+    });
+    let was_replayed = replayed.is_some();
+    let mut body_nodes = region.nodes;
+    let mut body_authored = region.authored;
+    let mut outer_steps = a.step_count;
+    let evaluated = if let Some(value) = replayed { Ok(value) } else {
     let mut env = Env::empty();
     for (name, ty, default) in &definition.body.inputs {
         let mut value = if definition.slots.iter().any(|slot| slot.rest && slot.name == *name) {
@@ -558,20 +786,32 @@ fn inline_node(a: &mut Arena, c: &ExecCtx, _authored: i64, original: &W::NodeDef
         value = coerce(ty, &value)?;
         env.bind(name.clone(), value);
     }
+    let validation_nodes = (a.nodes.len(), a.authored.len());
     for (predicate, code, message) in &definition.validations {
-        match eval_concrete(a, &sub(&context, "validate".into()), &env, predicate)? {
+        // a validation that reads a live argument (OCaml's `Needs_t` in the call) makes the plain catalog node, not a residual of the whole call
+        let checked = match eval_concrete(a, &sub(&context, "validate".into()), &env, predicate) {
+            Err(d) if d.code == "$NEEDS_TIME" => {
+                a.nodes.truncate(validation_nodes.0);
+                a.authored.truncate(validation_nodes.1);
+                return catalog_call(a, c, authored, definition.kind.qualified.clone(), definition.kind.context.clone(), args.to_vec());
+            }
+            other => other?,
+        };
+        match checked {
             Value::Bool(true) => (),
             Value::Bool(false) => return Err(error("E_LOWER", &format!("{}: {}", code, message))),
             _ => return Err(error("E_TYPE", "A node validation must return bool.")),
         }
     }
     
-    let body_nodes = a.nodes.len();
-    let body_authored = a.authored.len();
-    let outer_steps = a.step_count;
+    body_nodes = a.nodes.len();
+    body_authored = a.authored.len();
+    outer_steps = a.step_count;
     a.step_count = 0;
     let evaluated = eval_at(a, &context, &env, &definition.body.body);
     a.step_count = outer_steps;
+    evaluated
+    };
     let result = match evaluated {
         Ok(value) => value,
         Err(diagnostic) if !is_cancelled(&diagnostic) => {
@@ -597,13 +837,16 @@ fn inline_node(a: &mut Arena, c: &ExecCtx, _authored: i64, original: &W::NodeDef
         }
         Err(diagnostic) => return Err(diagnostic),
     };
-    let body_nodes_values = a.nodes[body_nodes..].to_vec();
+    let body_nodes_values = &a.nodes[body_nodes..];
     // the hook reads other values of this arena (frame_dependent, compile): it runs against a published snapshot, as every re-entrant callback does
-    let takes_nodes = body_nodes_values.is_empty() || call_published(a, &|| (LIVE_KERNELS_HOOK.read().unwrap().clone())(&body_nodes_values));
+    let takes_nodes = body_nodes_values.is_empty() || call_published(a, &|| (LIVE_KERNELS_HOOK.read().unwrap().clone())(body_nodes_values));
     if live && (matches!(&result, Value::Residual(_)) || !takes_nodes) {
         a.nodes.truncate(body_nodes);
         a.authored.truncate(body_authored);
         return catalog_call(a, c, authored, definition.kind.qualified.clone(), definition.kind.context.clone(), args.to_vec());
+    }
+    if !was_replayed && a.approx == region.approx && a.states.len() == region.states && a.cells.len() == region.cells {
+        if let Some((key, entry)) = key.and_then(|key| inline_entry(a, c, &region, &result, inputs).map(|entry| (key, entry))) { inline_store(definition.body.body.form.id, key, entry); }
     }
     let geometry = match &result {
         Value::Deferred(ty, _) if flow_syntax::ty::is_geometry(ty) => true,
@@ -626,10 +869,45 @@ fn inline_node(a: &mut Arena, c: &ExecCtx, _authored: i64, original: &W::NodeDef
     marker_args.extend(args.iter().filter(|(_, value)| function_value(value)).cloned());
     mk_node(a, c, authored, flow_syntax::ty::geometry(), "$card".into(), marker_args)
 }
-fn eval_raw(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Value, Diagnostic> {
-    eval_raw_body(a, c, env, t)
+// ---- temporary profiler (perf4) ----
+pub static PROFILE_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+struct ProfFrame { label: String, t0: std::time::Instant, a0: u64, child_ns: u64, child_allocs: u64 }
+#[derive(Default)] struct ProfTable { stack: Vec<ProfFrame>, table: HashMap<String,(u64,u64,u64)> }
+thread_local! { static PROF: RefCell<ProfTable> = RefCell::new(ProfTable::default()); }
+fn prof_label(t: &Term) -> String {
+    match &t.node {
+        TermNode::Op { op, .. } => format!("Op {op}"), TermNode::Call { kind, .. } => format!("Call {kind}"),
+        TermNode::Hof(k, _) => format!("Hof {k:?}"), TermNode::Loop { kind, .. } => format!("Loop {kind:?}"),
+        TermNode::Lit(_) => "Lit".into(), TermNode::Text(_) => "Text".into(), TermNode::Nil => "Nil".into(), TermNode::Time => "Time".into(),
+        TermNode::Vec(_) => "Vec".into(), TermNode::RefBinding(..) => "Ref".into(), TermNode::CallFn { .. } => "CallFn".into(), TermNode::FnRef(_) => "FnRef".into(),
+        TermNode::GraphRef { .. } => "GraphRef".into(), TermNode::Let(..) => "Let".into(), TermNode::State { .. } => "State".into(),
+        TermNode::If(..) => "If".into(), TermNode::Cond(..) => "Cond".into(), TermNode::Case(..) => "Case".into(), TermNode::Fn { .. } => "Fn".into(),
+        TermNode::ListLit(_) => "ListLit".into(), TermNode::Record(_) => "Record".into(), TermNode::Get(..) => "Get".into(), TermNode::Assoc(..) => "Assoc".into(),
+        TermNode::Str(_) => "Str".into(), TermNode::ListOp(..) => "ListOp".into(), TermNode::Bypass(_) => "Bypass".into(), TermNode::Expanded { .. } => "Expanded".into(),
+        _ => "Other".into(),
+    }
 }
+fn prof_enter(t: &Term) {
+    PROF.with(|p| p.borrow_mut().stack.push(ProfFrame { label: prof_label(t), t0: std::time::Instant::now(), a0: mem_sys::alloc_count(), child_ns: 0, child_allocs: 0 }));
+}
+fn prof_exit() {
+    PROF.with(|p| { let mut p = p.borrow_mut(); let f = p.stack.pop().unwrap();
+        let ns = f.t0.elapsed().as_nanos() as u64; let al = mem_sys::alloc_count() - f.a0;
+        let e = p.table.entry(f.label).or_default(); e.0 += 1; e.1 += ns - f.child_ns; e.2 += al - f.child_allocs;
+        if let Some(parent) = p.stack.last_mut() { parent.child_ns += ns; parent.child_allocs += al; } });
+}
+pub fn profile_report() -> String {
+    PROF.with(|p| { let p = p.borrow(); let mut rows: Vec<_> = p.table.iter().collect(); rows.sort_by_key(|(_, v)| std::cmp::Reverse(v.1));
+        rows.iter().take(25).map(|(k, v)| format!("  {:<28} calls {:>9} self {:>8.1} ms  allocs {:>9}", k, v.0, v.1 as f64 / 1e6, v.2)).collect::<Vec<_>>().join("\n") })
+}
+pub fn profile_reset() { PROF.with(|p| p.borrow_mut().table.clear()); }
+fn eval_raw(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Value, Diagnostic> {
+    if !PROFILE_ON.load(Ordering::Relaxed) { return eval_raw_body(a, c, env, t); }
+    prof_enter(t); let r = eval_raw_body(a, c, env, t); prof_exit(); r
+}
+pub static EVAL_STEPS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Value, Diagnostic> {
+    EVAL_STEPS.fetch_add(1, Ordering::Relaxed);
     a.step_count += 1;
     if a.step_count % PACKED_BLOCK == 0 {
         if a.interrupt.as_ref().is_some_and(|stop| stop()) { return Err(error("cancelled", "Evaluation interrupted.")); }
@@ -691,9 +969,8 @@ fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Valu
                 }
                 args = flattened;
             }
-            let workspace = a.workspace.clone();
-            match workspace.nodes.iter().find(|definition| definition.kind.qualified == *kind) {
-                Some(definition) => inline_node(a, c, t.form.id, definition, &args, t),
+            match inline_policy_for(a, kind) {
+                Some(policy) => inline_node(a, c, t.form.id, &policy, &args, t),
                 None => catalog_call(a, c, t.form.id, kind.clone(), ctx.clone(), args),
             }
         }
@@ -1340,6 +1617,7 @@ fn eval_map(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, function: FnId, 
         let approximate = current_residual_handlers().and_then(|handlers| handlers.bulk_approx).and_then(|bulk| call_with_snapshot(a, id, &|id| bulk(id)))
             .filter(|candidate| bulk_matches(&head_value, candidate, count, walked, true));
         if let Some(candidate) = approximate {
+            a.approx += 1;
             reserve_function_calls(a, function, count - walked);
             progress.completed = true;
             return Ok(candidate);
@@ -1620,7 +1898,7 @@ fn result_from(owner: &Arc<Mutex<Arena>>, results: Vec<(String, Value)>, authore
     let arena = owner.lock().unwrap();
     let records = arena.records.iter().map(|(path, values)| (path.clone(), values.clone())).collect();
     let instances = arena.cells.iter().map(|cell| Instance { graph: cell.graph.clone(), default: cell.default, inputs: cell.inputs.clone(), result: cell.result.clone() }).collect();
-    Eval { plan: Plan { instances, nodes: arena.nodes.to_vec() }, authored, results, states: arena.states.to_vec(), records, owner: owner.clone() }
+    Eval { plan: Plan { id: fresh_plan_id(), instances, nodes: arena.nodes.to_vec() }, authored, results, states: arena.states.to_vec(), records, owner: owner.clone() }
 }
  
 pub fn static_eval(workspace: &Workspace) -> Result<Eval, Diagnostic> { static_with(workspace, false, None, None) }

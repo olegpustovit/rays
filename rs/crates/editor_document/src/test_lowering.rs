@@ -330,3 +330,20 @@ fn fast_path_inline_scrubs_orrery() {
         ],
     );
 }
+
+#[test]
+fn live_sop_argument_lowers() {
+    let ws = ws_of_text("(workspace driven\n    (graph g :context sop (sop/box :size [(+ 1 t) 1 1]))\n    (graph scene :context scene (scene/geometry (ref g))))");
+    lower(None, &ws);
+}
+
+#[test]
+fn live_sop_arguments_lower_for_transform_grid_sin() {
+    for body in [
+        "(let* [b (sop/box)] (sop/transform b :shear_xy (sin t)))",
+        "(sop/grid :size (+ 1 t))",
+    ] {
+        let ws = ws_of_text(&format!("(workspace live\n    (graph g :context sop {body})\n    (graph scene :context scene (scene/geometry (ref g))))"));
+        if let Err(d) = lowering::of_workspace(&Options { factories: Some(factories()), ..Default::default() }, &ws) { panic!("{body}: {}", rays_diagnostic::to_string(&d)); }
+    }
+}

@@ -35,12 +35,11 @@ static NEXT: AtomicI64 = AtomicI64::new(1);
 const CAPTURE_LIMIT: i64 = 64 * 1024 * 1024;
 const ENTRY_CAPACITY: usize = 64;
 
-pub type PlanId = (usize, usize);
+pub type PlanId = u64;
 
-/// The identity of a plan: the addresses of its vectors (a moved plan keeps them, a clone does
-/// not).
+/// The identity of a plan (OCaml `==`): its `id`, assigned when the plan is built and kept by clones.
 pub fn plan_id(plan: &e::Plan) -> PlanId {
-    (plan.nodes.as_ptr() as usize, plan.instances.as_ptr() as usize)
+    plan.id
 }
 
 struct Captured {

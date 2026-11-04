@@ -2427,7 +2427,7 @@ fn fold_mesh_writes(plan: &Plan) -> Plan {
             }
         }
     }
-    Plan { nodes, ..plan.clone() }
+    Plan { id: E::fresh_plan_id(), nodes, ..plan.clone() }
 }
 
 fn fold_writes(device: bool, defer: bool, plan: &Plan) -> R<Plan> {
@@ -2820,7 +2820,7 @@ fn fold_writes(device: bool, defer: bool, plan: &Plan) -> R<Plan> {
             nodes[id].args = args;
         }
     }
-    Ok(Plan { nodes, ..plan.clone() })
+    Ok(Plan { id: E::fresh_plan_id(), nodes, ..plan.clone() })
 }
 
 fn same_function(a: FnId, b: FnId) -> bool {
@@ -5329,7 +5329,7 @@ fn make_lowerer(factories: Vec<Factory>, o: Options, checked_in: Workspace) -> R
         let plan = fold_writes(o.gpu.fast && o.gpu.backend.is_some(), o.defer, &evaluated.plan)?;
         if o.gpu.fast && o.gpu.backend.is_some() { fold_mesh_writes(&plan) } else { plan }
     };
-    let plan = Plan { nodes: plan.nodes.iter().map(|n| failed_card_as_call(n, &plan, &checked)).collect(), ..plan.clone() };
+    let plan = Plan { id: E::fresh_plan_id(), nodes: plan.nodes.iter().map(|n| failed_card_as_call(n, &plan, &checked)).collect(), ..plan.clone() };
     let image_sites: Vec<Option<W::Path>> = plan
         .nodes
         .iter()

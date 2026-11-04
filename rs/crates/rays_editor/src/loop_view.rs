@@ -59,7 +59,7 @@ pub struct canvas_picture {
     pub dynamic: bool,
     pub scene: Nodes,
     /// the plan this picture was made from, by identity (`workspace_images::plan_id`)
-    pub plan: (usize, usize),
+    pub plan: u64,
     pub prepared: Option<Rc<drawing::prepared>>,
     /// the node shown instead of the pane's own picture
     pub preview: Option<(Ty, i64)>,

@@ -3,6 +3,8 @@ use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::Mutex;
 
 static LIVE: AtomicU64 = AtomicU64::new(0);
+static ALLOCS: AtomicU64 = AtomicU64::new(0);
+static TOTAL: AtomicU64 = AtomicU64::new(0);
 static PEAK: AtomicU64 = AtomicU64::new(0);
 static PRESSURE: AtomicI64 = AtomicI64::new(0);
 static PRESSURE_LOCK: Mutex<bool> = Mutex::new(false);
@@ -14,6 +16,8 @@ static GLOBAL: CountingAllocator = CountingAllocator;
 
 fn add_live(size: usize) {
     let size = size as u64;
+    ALLOCS.fetch_add(1, Ordering::Relaxed);
+    TOTAL.fetch_add(size, Ordering::Relaxed);
     let now = LIVE.try_update(Ordering::Relaxed, Ordering::Relaxed, |live| {
         Some(live.saturating_add(size))
     }).unwrap().saturating_add(size);
@@ -68,6 +72,9 @@ unsafe impl GlobalAlloc for CountingAllocator {
         replacement
     }
 }
+
+pub fn alloc_count() -> u64 { ALLOCS.load(Ordering::Relaxed) }
+pub fn alloc_bytes_total() -> u64 { TOTAL.load(Ordering::Relaxed) }
 
 pub fn allocated_bytes() -> u64 {
     LIVE.load(Ordering::Relaxed)

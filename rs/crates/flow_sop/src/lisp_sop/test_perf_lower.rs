@@ -13,9 +13,16 @@ fn time(text: &str) -> String {
     let (checked, _) = catalog::check_workspace(ops::all(), false, None, &cat, &forms);
     let checked = checked.unwrap();
     let t2 = Instant::now();
-    lower::of_checked(Some(factories), lower::Options::default(), &checked).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
+    use std::sync::atomic::Ordering::Relaxed;
+    let prof = std::env::var("PROF").is_ok(); if prof { flow_eval::PROFILE_ON.store(true, Relaxed); }
+    let (s0, a0, b0) = (flow_eval::EVAL_STEPS.load(Relaxed), mem_sys::alloc_count(), mem_sys::alloc_bytes_total());
+    lower::of_checked(Some(factories.clone()), lower::Options::default(), &checked).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
     let t3 = Instant::now();
-    format!("catalog {:.3} check {:.3} lower {:.3}", (t1 - t0).as_secs_f64(), (t2 - t1).as_secs_f64(), (t3 - t2).as_secs_f64())
+    if prof { flow_eval::PROFILE_ON.store(false, Relaxed); eprintln!("{}", flow_eval::profile_report()); }
+    let (s1, a1, b1) = (flow_eval::EVAL_STEPS.load(Relaxed), mem_sys::alloc_count(), mem_sys::alloc_bytes_total());
+    lower::of_checked(Some(factories), lower::Options::default(), &checked).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
+    let t4 = Instant::now();
+    format!("catalog {:.3} check {:.3} lower {:.3} warm {:.3} | steps {} allocs {} bytes {} ({:.1} allocs/step)", (t1 - t0).as_secs_f64(), (t2 - t1).as_secs_f64(), (t3 - t2).as_secs_f64(), (t4 - t3).as_secs_f64(), s1 - s0, a1 - a0, b1 - b0, (a1 - a0) as f64 / (s1 - s0).max(1) as f64)
 }
 
 #[test]
