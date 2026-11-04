@@ -1,0 +1,11 @@
+[package]
+name = "rdk"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rdk_core = { path = "../rdk_core" }
+rdk_geom = { path = "../rdk_geom" }
+rdk_ops = { path = "../rdk_ops" }
+rdk_boolean = { path = "../rdk_boolean" }
