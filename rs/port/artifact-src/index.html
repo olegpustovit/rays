@@ -50,28 +50,26 @@ summary{cursor:pointer;font-weight:600}
 </nav>
 
 <h2 id="progress">0. Current progress</h2>
-<p class="mute">Updated 2026-11-04 (session 2). Lead: Opus reviewing; ports by parallel Sonnet/Haiku agents, each with a private target dir.</p>
+<p class="mute">Updated 2026-11-04 ~11:20 (session 2). Lead: Opus reviewing; ports by parallel Sonnet/Haiku agents, each with a private target dir; every green batch committed on <code>dev</code> (rs/ only).</p>
 <div class="grid">
-<div class="card stat"><b>W0–W4</b><span>active in parallel; no cutover</span></div>
-<div class="card stat"><b>~40</b><span>crates in rs/crates; whole workspace compiles except crates mid-edit</span></div>
-<div class="card stat"><b>17</b><span>parallel agents this session</span></div>
-<div class="card stat"><b>0</b><span>known failing suites</span></div>
+<div class="card stat"><b>~40%</b><span>of ~270k OCaml product lines ported and passing their own ported tests (~105k)</span></div>
+<div class="card stat"><b>~11%</b><span>in progress now: flow_check/flow_eval, rays, sop</span></div>
+<div class="card stat"><b>10–16 h</b><span>estimated remaining wall time: ~6–8 h port + ~4–8 h parity/cutover</span></div>
+<div class="card stat"><b>204</b><span>OCaml check/fmt e2e goldens captured (rs/fixtures/e2e)</span></div>
 </div>
-<p>The rewrite is not complete: no <code>rays</code> executable in Rust yet; OCaml remains the product and oracle. Every suite runs under <code>cargo t</code> (5 s per test, 60 s per run).</p>
+<p>Not complete: no Rust <code>rays</code> executable yet; OCaml remains product and oracle. Ported means each crate's OCaml tests are ported and green under <code>cargo t</code> (5 s per test, 60 s per run after build); OCaml-vs-Rust oracle diffs are mostly still ahead.</p>
 <div class="tw"><table>
 <tr><th>Layer</th><th>Status</th><th>Evidence</th></tr>
-<tr><td>Tooling (<code>cargo t</code>)</td><td><span class="tag c">Green</span></td><td>Runner lock is now an OS file lock (a killed run no longer leaves a stale lock that hung later runs); harness=false targets are discovered; <code>window_*</code>/<code>gpu_*</code> targets serialize. 12 runner tests pass.</td></tr>
-<tr><td>Build repair</td><td><span class="tag c">Green</span></td><td>metal_sys (macOS-gated; unverified on Mac), vulkan_sys (missing brace in C++), sdl3_sys, ogpu_core, flow_syntax (27 tests, incl. OCaml Lisp goldens and every sketch round-trip), rdk_core (56 tests).</td></tr>
-<tr><td>SDL3 + media</td><td><span class="tag c">Green</span></td><td>sdl3 (16 tests, now really executing — 6 had silently skipped), sdl3_image/ttf/mixer (+ _sys), duplicate C symbols renamed per crate.</td></tr>
-<tr><td>OGPU</td><td><span class="tag c">Green</span></td><td>ogpu + ogpu_mock (12 tests), ogpu_vulkan with motion/AABB/capsule path tracing (5 conformance tests on the GPU, validation layer fatal).</td></tr>
-<tr><td>Runtime</td><td><span class="tag c">Green</span></td><td>runtime_input, runtime, runtime_resources (12 tests incl. window tests on the main thread).</td></tr>
-<tr><td>rdk_geom</td><td><span class="tag c">Green</span></td><td>All 19 modules (spatial_index finishing), 48 tests in 7.5 s; exact predicates ported; no OCaml oracle diff yet.</td></tr>
-<tr><td>rdk_ops (36k)</td><td><span class="tag w">In progress</span></td><td>58 modules split across six agents.</td></tr>
-<tr><td>flow_check / flow_eval</td><td><span class="tag w">In progress</span></td><td>Completing eval (Rust was ~60% of OCaml) and porting the workspace tests.</td></tr>
-<tr><td>renderer</td><td><span class="tag w">In progress</span></td><td>Embeds OCaml-printed shaders captured as goldens in <code>rs/fixtures/shaders/renderer</code> until flow_shader is ported.</td></tr>
-<tr><td>flow_ir, flow_graph, flow_shader, flow_gpu, sop, flow_sop, rays, pxui*, editor, bin</td><td><span class="tag w">Pending</span></td><td>Blocked on flow_eval / rdk_ops.</td></tr>
+<tr><td>Tooling (<code>cargo t</code>)</td><td><span class="tag c">Green</span></td><td>OS file lock; harness=false targets; window_ targets serial, gpu_ targets parallel with one process per target; 60 s run limit starts after the build.</td></tr>
+<tr><td>Leaves, SDL3 + media, runtime</td><td><span class="tag c">Green</span></td><td>All W1 leaves, sdl3 (+image/ttf/mixer), runtime_input, runtime, runtime_resources.</td></tr>
+<tr><td>GPU: ogpu, Vulkan, Metal</td><td><span class="tag c">Green</span></td><td>ogpu+mock; ogpu_vulkan (validation fatal) and ogpu_metal (Mac) incl. boxes/capsules/motion path-tracing; metal 17 tests on the Mac. Native curves untested (Mac lacks family 9).</td></tr>
+<tr><td>renderer</td><td><span class="tag c">Green</span></td><td>36 tests in ~9 s; shaders embedded from OCaml-printed goldens until flow_shader is ported.</td></tr>
+<tr><td>rdk (64.5k)</td><td><span class="tag c">Green</span></td><td>rdk_core 56, rdk_geom 52, rdk_ops 248, rdk_boolean 69 tests; facade crate. Restoring parallel loops that went serial (in progress).</td></tr>
+<tr><td>flow_syntax</td><td><span class="tag c">Green</span></td><td>27 tests incl. OCaml Lisp printer goldens and every sketch round-trip.</td></tr>
+<tr><td>flow_check / flow_eval, rays, sop</td><td><span class="tag w">In progress</span></td><td>sop core + ppx-as-tables pattern done (26 tests, manifest-checked); node files fanning out.</td></tr>
+<tr><td>flow_ir, flow_graph, flow_shader, flow_gpu, flow_web, flow_sop, flow_native, pxui*, editor_*, rays_pathtracer, bin</td><td><span class="tag w">Pending</span></td><td>~135k lines; blocked on flow_eval and rays.</td></tr>
 </table></div>
-<p class="mute">Open review items: oracle fixtures (L1) not generated yet; Metal side unverified on the Mac; ogpu backend selection is thread-local (OCaml: process-wide).</p>
+<p class="mute">Open review items: L1 oracle fixtures not generated; Windows OCaml prints CRLF in some diagnostics (normalize when comparing); OCaml working-tree conformance.ml rt_extra needs <code>triangle_data</code> on Metal; ogpu backend selection is thread-local.</p>
 
 
 
