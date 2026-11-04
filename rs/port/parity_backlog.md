@@ -53,3 +53,8 @@
 - flow_ir debug-build tests over 5 s (iterate/map parity, several) and flow_web test_js 11 tests over 5 s — buildspeed agent deciding opt-level; else shrink.
 - frame_kernel_prepared_programs_match_the_reference_a/_b fail with flowck's working-tree core_lower/core_region edits.
 - Per-callback arena copy-on-write cost not measured.
+## From flow_gpu
+- Kept GPU outputs (materialise, Device::add reads) only work on the creating thread (Rc mapped views); OCaml reads from 4 domains. Fix: owner-thread prefetch at settle, or Arc-backed mapped views in OGPU. Matters for flow_sop.
+- materialise is infallible (panics on bad/freed uint32 holder) where OCaml raised.
+- gpu_run::carried skips iterate-count/iterate-until/iterate-int63 for the (now removed) E_ITER_BOUND cap — un-ignore.
+- Mac: harmless thread-local destructor panic message at process exit in flow_gpu tests.
