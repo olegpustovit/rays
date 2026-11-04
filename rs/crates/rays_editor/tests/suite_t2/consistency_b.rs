@@ -457,7 +457,7 @@ fn with_factory_editor(ws_text: &str, f: impl FnOnce(&mut Ed, &wd::T, &[sop::edi
     factories.extend(sop::nodes::factories());
     let ws = workspace_factories(&factories, ws_text);
     with_dir(|presets| {
-        let options = Editor::Create { platform: Some(input::Platform::Apple), ui_text_size: Some(11), presets: Some(presets.to_owned()), await_: Some(true), factories: Some(factories.clone()), ..Default::default() };
+        let options = Editor::Create { platform: Some(input::Platform::Apple), ui_text_size: Some(11), presets: Some(presets.to_owned()), await_: Some(true), domains: Some(1), factories: Some(factories.clone()), ..Default::default() };
         let mut e = Editor::create(options, &ws, None, Editor::prepare_fn(), Editor::draw_fn()).expect("editor");
         e = step(e, 1);
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(&mut e, &ws, &factories)));

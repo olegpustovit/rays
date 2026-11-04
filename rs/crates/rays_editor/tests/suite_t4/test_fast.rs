@@ -1,6 +1,6 @@
 //! test_fast_path.ml: a camera write in a workspace holding a [fn] closure takes the literal fast
 //! path (no lowering, no evaluation) and the document is the one a full lowering gives. The
-//! gpu_sea / ws_orrery scrub sweeps and the Gc.live_words bound are SKIPPED (see window_suite_t4).
+//! gpu_sea / ws_orrery scrub sweeps and the Gc.live_words bound are SKIPPED (see gpu_suite_t4).
 use super::t4::*;
 use editor_document::{document, kind_graph as kg, lowering, scene_sync as sync, workspace_doc};
 use flow_graph::flow_edit as E;

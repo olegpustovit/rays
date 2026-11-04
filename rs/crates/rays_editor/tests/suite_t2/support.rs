@@ -23,7 +23,8 @@ pub fn diag_text(ds: &[rays_diagnostic::Diagnostic]) -> String {
 }
 
 pub fn catalog() -> flow_check::catalog::Catalog {
-    rays_editor::workspace_catalog(None).expect("catalog")
+    thread_local! { static C: flow_check::catalog::Catalog = rays_editor::workspace_catalog(None).expect("catalog"); }
+    C.with(|c| c.clone())
 }
 
 pub fn parse(text: &str) -> Syntax {
@@ -134,7 +135,7 @@ pub fn create(ws: &workspace_doc::T, presets: Option<&str>, camera: Option<rays:
         ui_text_size: Some(if native { 13 } else { 11 }),
         presets: presets.map(str::to_owned),
         camera,
-        await_: Some(true),
+        await_: Some(true), domains: Some(1),
         ..Default::default()
     };
     Editor::create(options, ws, None, Editor::prepare_fn(), Editor::draw_fn()).expect("the editor opens")

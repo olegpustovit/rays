@@ -73,7 +73,7 @@ fn open(text: &str, counter: Option<Rc<Cell<i64>>>) -> Ed {
         }
         rays_editor::cook::prepare(s, o)
     });
-    let options = Editor::Create { platform: Some(input::Platform::Apple), ui_text_size: Some(11), await_: Some(true), max_entries: Some(4), max_payload_bytes: Some(16 * 1024 * 1024), ..Default::default() };
+    let options = Editor::Create { platform: Some(input::Platform::Apple), ui_text_size: Some(11), await_: Some(true), domains: Some(1), max_entries: Some(4), max_payload_bytes: Some(16 * 1024 * 1024), ..Default::default() };
     Editor::create(options, &ws, None, prepare, Editor::draw_fn()).expect("the editor opens")
 }
 
@@ -508,7 +508,7 @@ fn run_surface_errors() {
       (graph geo :context sop (let* [box (sop/box :size [1 1 1])] box))
       (graph scene :context scene (scene/root (scene/geometry (ref geo)))))"#,
     );
-    let options = Editor::Create { platform: Some(input::Platform::Apple), ui_text_size: Some(11), await_: Some(true), ..Default::default() };
+    let options = Editor::Create { platform: Some(input::Platform::Apple), ui_text_size: Some(11), await_: Some(true), domains: Some(1), ..Default::default() };
     let mut current = Editor::create(options, &ws, None, Editor::prepare_fn(), Editor::draw_fn()).expect("editor");
     let calls = Rc::new(Cell::new(0));
     let message = "surface conversion refused at draw time";

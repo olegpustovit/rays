@@ -21,7 +21,8 @@ fn read(p: &str) -> String {
     fs::read_to_string(p).unwrap()
 }
 fn catalog() -> flow_check::catalog::Catalog {
-    rays_editor::workspace_catalog(None).unwrap()
+    thread_local! { static C: flow_check::catalog::Catalog = rays_editor::workspace_catalog(None).unwrap(); }
+    C.with(|c| c.clone())
 }
 fn doc_of(text: &str, imports: Vec<(String, String)>) -> Result<Doc::T, Vec<rays_diagnostic::Diagnostic>> {
     Doc::of_text(&Doc::TextOptions { imports, ..Default::default() }, &catalog(), text)
@@ -129,7 +130,7 @@ pub fn find() {
 // ---- through the editor ----
 
 fn editor(presets: Option<&str>, imports: Vec<(String, String)>, source: Source::t, text: &str) -> Editor::t {
-    let o = Editor::Create { ui_text_size: Some(11), platform: Some(input::Platform::Apple), await_: Some(true), presets: presets.map(|p| p.to_string()), ..Default::default() };
+    let o = Editor::Create { ui_text_size: Some(11), platform: Some(input::Platform::Apple), await_: Some(true), domains: Some(1), presets: presets.map(|p| p.to_string()), ..Default::default() };
     Editor::create(o, &doc_of(text, imports).unwrap(), Some(source), Editor::prepare_fn(), Editor::draw_fn()).unwrap_or_else(|m| panic!("{m}"))
 }
 fn source_text(e: &Editor::t) -> String {

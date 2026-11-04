@@ -55,7 +55,7 @@ pub fn box_workspace() -> wd::T {
 
 /// The options every OCaml test passes: Apple platform, 11-point text, awaited cook.
 pub fn options() -> Editor::Create {
-    Editor::Create { platform: Some(Platform::Apple), ui_text_size: Some(11), await_: Some(true), ..Default::default() }
+    Editor::Create { platform: Some(Platform::Apple), ui_text_size: Some(11), await_: Some(true), domains: Some(1), ..Default::default() }
 }
 
 pub fn create(o: Editor::Create, ws: &wd::T) -> Editor::t {
@@ -277,7 +277,8 @@ pub fn replace(text: &str, from: &str, by: &str) -> String {
 }
 
 pub fn catalog() -> flow_check::catalog::Catalog {
-    rays_editor::workspace_catalog(None).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)))
+    thread_local! { static C: flow_check::catalog::Catalog = rays_editor::workspace_catalog(None).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d))); }
+    C.with(|c| c.clone())
 }
 
 /// `Editor_prepare.empty`.

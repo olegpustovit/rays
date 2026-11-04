@@ -54,26 +54,46 @@ runtime_resources = { path = "../runtime_resources" }
 name = "window_editor_smoke"
 harness = false
 
+
+
 [[test]]
-name = "window_suite_t1"
+name = "gpu_suite_t1_a"
+path = "tests/gpu_suite_t1.rs"
 harness = false
 
 [[test]]
-name = "window_suite_t2"
+name = "gpu_suite_t1_b"
+path = "tests/gpu_suite_t1.rs"
 harness = false
 
 [[test]]
-name = "window_suite_t3"
+name = "gpu_suite_t2_a"
+path = "tests/gpu_suite_t2.rs"
 harness = false
 
 [[test]]
-name = "window_suite_t4"
+name = "gpu_suite_t2_b"
+path = "tests/gpu_suite_t2.rs"
 harness = false
 
 [[test]]
-name = "window_suite_t5"
+name = "gpu_suite_t3_a"
+path = "tests/gpu_suite_t3.rs"
 harness = false
 
 [[test]]
-name = "window_suite_t6"
+name = "gpu_suite_t3_b"
+path = "tests/gpu_suite_t3.rs"
+harness = false
+
+[[test]]
+name = "gpu_suite_t4"
+harness = false
+
+[[test]]
+name = "gpu_suite_t5"
+harness = false
+
+[[test]]
+name = "gpu_suite_t6"
 harness = false

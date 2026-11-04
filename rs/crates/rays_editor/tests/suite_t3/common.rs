@@ -55,7 +55,7 @@ pub fn box_workspace() -> wd::T {
 
 /// The options every OCaml test passes: Apple platform, 11-point text, awaited cook.
 pub fn options() -> Editor::Create {
-    Editor::Create { platform: Some(Platform::Apple), ui_text_size: Some(11), await_: Some(true), ..Default::default() }
+    Editor::Create { platform: Some(Platform::Apple), ui_text_size: Some(11), await_: Some(true), domains: Some(1), ..Default::default() }
 }
 
 pub fn create(o: Editor::Create, ws: &wd::T) -> Editor::t {

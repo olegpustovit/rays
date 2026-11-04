@@ -24,7 +24,8 @@ pub fn factories() -> Vec<sop::edit_graph::Factory> {
     sop::nodes::factories()
 }
 pub fn catalog() -> Catalog {
-    kinds::catalog(flow_sop::manifest::VERSION, &factories()).expect("catalog")
+    thread_local! { static C: Catalog = kinds::catalog(flow_sop::manifest::VERSION, &factories()).expect("catalog"); }
+    C.with(|c| c.clone())
 }
 pub fn show(ds: &[rays_diagnostic::Diagnostic]) -> String {
     ds.iter().map(rays_diagnostic::to_string).collect::<Vec<_>>().join("; ")

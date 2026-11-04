@@ -2,7 +2,7 @@
 //! scrubs, paste, find, symbols and lines. The sections that drive the whole editor
 //! (`editor_text`, `editor_binding`, `editor_w9`, `editor_active_scrub`, `editor_command_click`,
 //! `editor_literal_scrub`, `editor_text_drop`, `editor_graph_drafts`, `editor_text_find`,
-//! `editor_fn_frames`) need `Rays_editor::Editor`: they live in tests/window_suite_t3.rs
+//! `editor_fn_frames`) need `Rays_editor::Editor`: they live in tests/gpu_suite_t3.rs
 //! (tests/suite_t3/textpane.rs; the unported ones are listed in port/parity_backlog.md).
 use crate::text_pane::{self as t, Find, Shown, Step, Tab};
 use editor_document::kinds;
