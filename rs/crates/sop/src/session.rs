@@ -571,6 +571,18 @@ fn facts_error(message: &str) -> Diagnostic {
     crate::support::diagnostic("E_NODE_FACTS", message)
 }
 
+/// `node_result`: a panic in a node's cook is that node's error (OCaml: any exception other than the
+/// two it names), not the end of the cook or its worker. The message and code are OCaml's.
+fn node_result<X>(f: impl FnOnce() -> Result<X, Diagnostic>) -> Result<X, Diagnostic> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+        Ok(result) => result,
+        Err(payload) => {
+            let cause = payload.downcast_ref::<String>().cloned().or_else(|| payload.downcast_ref::<&str>().map(|s| (*s).to_owned())).unwrap_or_else(|| "panic".to_owned());
+            Err(crate::support::diagnostic_with("uncaught_node_exception", "a procedural node raised an exception while cooking", Some(cause), Vec::new()))
+        }
+    }
+}
+
 fn delta(n: &node::T, inputs: &[payload::T], cooked: &node::Cooked) -> Result<Option<Delta>, Diagnostic> {
     use rdk::{attribute as A, geometry as G};
     if !selective(n, inputs) {
@@ -1477,7 +1489,7 @@ fn evaluate_uncached(memo: &mut Memo, session: &mut T, context: &context::T, n: 
     let volatile = (session.volatile)(node::id(n));
     let found = if cache_active { lookup(session, volatile, n, &key) } else { None };
     if let Some(entry) = found {
-        let refreshed = refresh(&geometries, &entry).map_err(|e| traced(n, e))?;
+        let refreshed = node_result(|| refresh(&geometries, &entry)).map_err(|e| traced(n, e))?;
         let output = match refreshed {
             Some(fresh) => {
                 let output = fresh.output.clone();
@@ -1503,7 +1515,7 @@ fn evaluate_uncached(memo: &mut Memo, session: &mut T, context: &context::T, n: 
     }
     session.cooks += 1;
     let started = (session.clock)();
-    let cooked: Result<(node::Cooked, Option<Delta>), Diagnostic> = (|| {
+    let cooked: Result<(node::Cooked, Option<Delta>), Diagnostic> = node_result(|| {
         // no CPU reader sees device work still in flight
         if !context::settle(context, false).is_empty() {
             return Err(settle_failed());
@@ -1529,7 +1541,7 @@ fn evaluate_uncached(memo: &mut Memo, session: &mut T, context: &context::T, n: 
         let cooked = cook_node(memo, session, context, n, &geometries)?;
         let delta = delta(n, &geometries, &cooked)?;
         Ok((cooked, delta))
-    })();
+    });
     let seconds = ((session.clock)() - started).max(0.0);
     let points = match &cooked {
         Ok((output, _)) => payload::element_count(&output.payload),

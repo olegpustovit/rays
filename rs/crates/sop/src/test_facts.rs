@@ -341,3 +341,26 @@ fn shared_plane_charge() {
     session::close(&mut e);
     assert_eq!(mem::bytes(&owner), before, "closing left a slot's charge on the ledger");
 }
+
+/// OCaml `Session.node_result`: an exception in a node's cook is that node's error, not the end of
+/// the cook; the session cooks again afterwards.
+#[test]
+fn a_panicking_node_is_a_diagnostic_on_that_node() {
+    let panicking = build::make_geometry(
+        build::Args { label: Some("boom".to_owned()), cook_mode: CookMode::Generator, dependencies: crate::context::dependencies::STATIC, ..build::args("panic_test") },
+        None,
+        Arc::new(|_, _, _| -> Result<node::GeometryCooked, rays_diagnostic::Diagnostic> { panic!("kernel exploded") }),
+    );
+    let mut evaluator = session(64);
+    let error = match session::cook(&mut evaluator, None, &context(1), &panicking) {
+        Ok(_) => panic!("a panicking cook produced an output"),
+        Err(error) => error,
+    };
+    assert_eq!(error.code, "uncaught_node_exception");
+    assert_eq!(error.message, "a procedural node raised an exception while cooking");
+    assert_eq!(error.cause.as_deref(), Some("kernel exploded"));
+    // the session survives: a good node cooks, and the same bad node fails the same way again
+    let good = snapshot(&fixture());
+    cook(&mut evaluator, 1, &good);
+    assert!(session::cook(&mut evaluator, None, &context(1), &panicking).is_err());
+}

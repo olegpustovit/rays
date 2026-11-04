@@ -504,6 +504,18 @@ fn same_bits(a: &Value, b: &Value) -> bool {
     }
 }
 
+/// `f`, with a panic turned into the refusal OCaml's `Invalid_argument | Not_found | Failure` arm makes:
+/// `E_PACKED_EXECUTION` carrying the panic text, so the map falls back to the walker.
+fn guarded_force(f: &mut dyn FnMut() -> Result<Value, Diagnostic>) -> Result<Value, Diagnostic> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+        Ok(result) => result,
+        Err(payload) => {
+            let text = payload.downcast_ref::<String>().cloned().or_else(|| payload.downcast_ref::<&str>().map(|s| (*s).to_owned())).unwrap_or_else(|| "panic".to_owned());
+            Err(v::fail("E_PACKED_EXECUTION", &text))
+        }
+    }
+}
+
 /// Only exact static kernels receive trust. Failure or a live capture lets the evaluator walk from
 /// zero; eager recording still checks its ordinary head. Qualification additionally compares every
 /// element with the reference (a difference is recorded in `failure`).
@@ -521,7 +533,9 @@ fn static_map(verify: bool, failure: &Arc<Mutex<Option<Diagnostic>>>, residual: 
             }
             Ok(p) => p,
         };
-        match packed::force(&packed, &input::at_time(0.0), &packed::ForceOptions::default()) {
+        // OCaml catches Invalid_argument, Not_found and Failure here only: a kernel that cannot run is
+        // a refusal (E_PACKED_EXECUTION) and the walker takes the map, not a dead cook
+        match guarded_force(&mut || packed::force(&packed, &input::at_time(0.0), &packed::ForceOptions::default())) {
             Ok(value) => {
                 if verify {
                     let reference = match e::Host::force_reference(&Value::Residual(residual), &input::at_time(0.0), None, None, None) {
@@ -2502,6 +2516,17 @@ mod tests {
     use flow_check::catalog::{self, Catalog};
     use flow_syntax::syntax;
     use std::sync::atomic::AtomicBool;
+
+    /// OCaml static_map: a kernel run that raises is a refusal with E_PACKED_EXECUTION, not a dead cook.
+    #[test]
+    fn a_panicking_static_kernel_is_a_refusal() {
+        let error = guarded_force(&mut || panic!("index out of bounds: the len is 3")).expect_err("a panic is an error");
+        assert_eq!(error.code, "E_PACKED_EXECUTION");
+        assert!(error.message.contains("index out of bounds"), "{}", error.message);
+        assert_eq!(guarded_force(&mut || Ok(Value::Int(7))).unwrap(), Value::Int(7));
+        let kept = guarded_force(&mut || Err(v::fail("E_X", "kept"))).expect_err("an Err passes through");
+        assert_eq!(kept.code, "E_X");
+    }
 
     fn empty() -> Catalog { Catalog { version: 1, kinds: vec![] } }
 

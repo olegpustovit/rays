@@ -8,8 +8,7 @@
 //!
 //! The OCaml `'a` of a worker is `Prepared = Box<dyn Any + Send>`: a caller downcasts what its own
 //! `prepare` produced. The OCaml code also converts an exception in a cook into
-//! `Uncaught_exception`; a panic here ends the worker instead (no `catch_unwind` outside the crash
-//! reporter), so `Error::UncaughtException` is never produced.
+//! `Uncaught_exception`; so does `execute` here (a panic in a cook is a typed error; the worker lives).
 use std::any::Any;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, Weak};
@@ -103,7 +102,19 @@ fn none_volatile() -> Arc<dyn Fn(i64) -> bool + Send + Sync> {
     Arc::new(|_| false)
 }
 
+/// OCaml `with exn -> Error (Uncaught_exception ...)`: whatever the cook, the footer reads or `prepare`
+/// raises is an error of this request; the worker lives on.
 fn execute(session: &mut session::T, request: Request) -> Result<Prepared, Error> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| execute_request(session, request))) {
+        Ok(result) => result,
+        Err(payload) => {
+            let cause = payload.downcast_ref::<String>().cloned().or_else(|| payload.downcast_ref::<&str>().map(|s| (*s).to_owned())).unwrap_or_else(|| "panic".to_owned());
+            Err(Error::UncaughtException(cause))
+        }
+    }
+}
+
+fn execute_request(session: &mut session::T, request: Request) -> Result<Prepared, Error> {
     let mut outputs = Vec::with_capacity(request.nodes.len());
     for n in &request.nodes {
         match session::cook(session, None, &request.context, n) {
