@@ -12,3 +12,6 @@ rays_diagnostic = { path = "../rays_diagnostic" }
 flow_syntax = { path = "../flow_syntax" }
 runtime_resources = { path = "../runtime_resources" }
 cfmt = { path = "../cfmt" }
+
+[dev-dependencies]
+ogpu_mock = { path = "../ogpu_mock" }

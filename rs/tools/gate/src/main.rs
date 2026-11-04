@@ -206,12 +206,9 @@ fn shape_source(crate_name: &str, path: &str, source: &str) -> Vec<String> {
         {
             issue(&mut issues, path, token.line, "macro_rules! is not allowed in product crates");
         }
-        // Cache and IdentityList constructors pin the shared TableState variant.
-        let lru_state_invariant = crate_name == "lru" && path == "crates/lru/src/lib.rs" && token.text == "unreachable";
         // unreachable! is OCaml's `assert false` (an impossible case, never control flow) and is allowed.
         if matches!(token.text.as_str(), "panic" | "todo" | "unimplemented")
             && tokens.get(index + 1).is_some_and(|next| next.text == "!")
-            && !lru_state_invariant
             && !test_ranges.iter().any(|(start, end)| *start <= index && index <= *end)
         {
             issue(&mut issues, path, token.line, "panic macros must not be used for control flow");
@@ -787,6 +784,15 @@ fn crate_name(package_name: &str, lib_name: Option<&str>) -> String {
     lib_name.unwrap_or(package_name).replace('-', "_")
 }
 
+/// Rust-only helper leaves that stand in for OCaml stdlib, printf and int semantics: any product crate may name them.
+const HELPER_LEAVES: [&str; 4] = ["cfmt", "ocaml_int", "rays_hash", "rays_collections"];
+/// OCaml leaves a crate may name directly when its allowed dependencies reach them (flow reaches
+/// rays_diagnostic and input; lru reaches mem).
+const OCAML_LEAVES: [&str; 3] = ["rays_diagnostic", "input", "mem"];
+
+/// Direct edges each crate may name, mirroring the OCaml dune library lists (and `only` in
+/// test/dependency_gate.ml). The Rust flow library is three crates; each takes the OCaml flow edges.
+/// Sys crates are the Rust port's FFI bridges, which OCaml keeps inside its library.
 fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
     HashMap::from([
         ("cfmt_sys", &[][..]),
@@ -804,59 +810,108 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("rays_math", &["rays_math_sys", "ocaml_int"][..]),
         ("scene_command", &[][..]),
         ("parallel", &[][..]),
-        ("rdk_core", &["mem", "parallel", "rays_math"][..]),
         ("rays_hash", &[][..]),
         ("rays_collections", &["mem", "lru", "parallel", "rays_hash"][..]),
-        ("runtime", &["sdl3", "ogpu"][..]),
-        ("runtime_input", &["sdl3", "input"][..]),
-        ("runtime_resources", &["sdl3_image", "sdl3_ttf", "sdl3_mixer"][..]),
-        ("renderer", &["ogpu", "scene_command", "runtime", "lru", "rays_math", "runtime_resources"][..]),
-        ("flow", &["param", "input", "rays_diagnostic", "rays_math"][..]),
-        ("flow_syntax", &["param", "rays_diagnostic", "rays_math", "ocaml_int", "cfmt"][..]),
-        ("flow_graph", &["flow", "param"][..]),
-        ("flow_ir", &["flow", "param", "rays_math", "scene_command", "lru", "parallel"][..]),
-        ("flow_shader", &["flow", "flow_ir", "ogpu_core"][..]),
-        ("flow_gpu", &[
-            "flow", "flow_ir", "flow_shader", "param", "rays_math", "ogpu_core", "ogpu", "renderer", "lru", "mem",
+        ("sdl3_sys", &["native_layer_token_sys"][..]),
+        ("sdl3_image_sys", &[][..]),
+        ("sdl3_ttf_sys", &[][..]),
+        ("sdl3_mixer_sys", &[][..]),
+        ("metal_sys", &[][..]),
+        ("vulkan_sys", &[][..]),
+        // OCaml metal: threads, native_layer_token.
+        ("metal", &["metal_sys", "native_layer_token"][..]),
+        // OCaml vulkan: threads, native_layer_token.
+        ("vulkan", &["vulkan_sys", "native_layer_token"][..]),
+        ("rdk_core", &["mem", "parallel", "rays_math"][..]),
+        ("rdk_geom", &["rdk_core", "rays_math", "parallel"][..]),
+        ("rdk_ops", &["rdk_core", "rdk_geom", "rays_math", "parallel"][..]),
+        ("rdk_boolean", &["rdk_core", "rdk_geom", "rdk_ops", "rays_math", "parallel"][..]),
+        ("rdk", &["rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean", "parallel"][..]),
+        ("rdk_rays", &["rdk_core", "rdk_geom", "rdk_ops", "rays", "rays_math", "param"][..]),
+        ("rays", &[
+            "input", "rays_math", "lru", "runtime_resources", "runtime_input", "runtime", "scene_command", "renderer",
             "parallel",
         ][..]),
-        ("flow_web", &["flow", "flow_ir", "param", "rays_math", "scene_command", "parallel"][..]),
+        ("runtime", &["sdl3", "ogpu"][..]),
+        ("runtime_input", &["sdl3", "input"][..]),
+        ("runtime_resources", &["sdl3", "sdl3_image", "sdl3_ttf", "sdl3_mixer", "ogpu"][..]),
+        ("renderer", &["ogpu", "scene_command", "runtime", "lru", "rays_math", "runtime_resources"][..]),
+        ("flow_syntax", &["param", "rays_diagnostic", "input", "rays_math"][..]),
+        ("flow_check", &["flow_syntax", "param", "rays_diagnostic", "input", "rays_math"][..]),
+        ("flow_eval", &["flow_syntax", "flow_check", "param", "rays_diagnostic", "input", "rays_math"][..]),
+        ("flow_graph", &["flow_syntax", "flow_check", "flow_eval", "param"][..]),
+        ("flow_ir", &[
+            "flow_syntax", "flow_check", "flow_eval", "param", "rays_math", "scene_command", "lru", "parallel",
+        ][..]),
+        ("flow_shader", &["flow_syntax", "flow_check", "flow_eval", "flow_ir", "ogpu_core"][..]),
+        ("flow_gpu", &[
+            "flow_syntax", "flow_check", "flow_eval", "flow_ir", "flow_shader", "param", "rays_math", "ogpu_core",
+            "ogpu", "renderer", "lru", "mem", "parallel",
+        ][..]),
+        ("flow_web", &[
+            "flow_syntax", "flow_check", "flow_eval", "flow_ir", "param", "rays_math", "scene_command", "parallel",
+        ][..]),
         ("sop", &["param", "input", "rays_diagnostic", "rays_math", "rdk", "lru", "mem", "parallel"][..]),
         ("flow_sop", &[
-            "flow", "flow_ir", "lru", "param", "sop", "rays_diagnostic", "rays_math", "parallel",
+            "flow_syntax", "flow_check", "flow_eval", "flow_ir", "lru", "param", "sop", "rays_diagnostic", "rays_math",
+            "parallel",
         ][..]),
         ("flow_native", &[
-            "editor_document", "rays", "rays_math", "input", "rdk", "flow", "flow_graph", "flow_ir", "flow_gpu",
-            "flow_sop", "scene_command", "renderer", "lru", "runtime_resources", "parallel", "sop",
+            "editor_document", "rays", "rays_math", "input", "rdk", "flow_syntax", "flow_check", "flow_eval",
+            "flow_graph", "flow_ir", "flow_gpu", "flow_sop", "scene_command", "renderer", "lru", "runtime_resources",
+            "parallel", "sop",
         ][..]),
         ("ogpu_core", &["native_layer_token"][..]),
         ("ogpu", &["ogpu_core"][..]),
         ("ogpu_mock", &["ogpu_core"][..]),
-        ("metal", &["native_layer_token"][..]),
+        // Rust merges OCaml's ogpu_metal_native into ogpu_metal.
+        ("ogpu_metal", &["ogpu_metal_native", "ogpu_core", "metal", "lru"][..]),
         ("ogpu_metal_native", &["ogpu_core", "metal", "lru"][..]),
-        ("ogpu_metal", &["ogpu_metal_native", "metal"][..]),
-        ("vulkan", &["native_layer_token"][..]),
         ("ogpu_vulkan", &["ogpu_core", "vulkan", "native_layer_token"][..]),
         ("ogpu_native", &["ogpu_metal", "ogpu_vulkan"][..]),
         ("scene_execution_fixtures", &["renderer", "ogpu"][..]),
         ("pxui", &["rays", "rays_math", "param", "mem"][..]),
         ("pxui_shell", &["rays", "rays_math", "editor_core", "pxui"][..]),
+        ("pxui_graph", &[
+            "rays", "rays_math", "flow_syntax", "flow_check", "flow_eval", "flow_graph", "pxui", "editor_core",
+        ][..]),
+        ("editor_core", &["param", "rays", "rays_math", "flow_syntax", "flow_check", "flow_eval", "runtime_resources"][..]),
         ("web_export", &[
-            "flow", "flow_ir", "flow_web", "flow_sop", "editor_document", "input", "param", "scene_command",
-            "sdl3_image",
+            "flow_syntax", "flow_check", "flow_eval", "flow_ir", "flow_web", "flow_sop", "editor_document", "input",
+            "param", "scene_command", "sdl3_image",
         ][..]),
         ("rays_pathtracer", &[
-            "rays", "ogpu", "renderer", "flow", "flow_ir", "flow_gpu", "input", "runtime_resources", "rays_math",
+            "rays", "ogpu", "renderer", "flow_syntax", "flow_check", "flow_eval", "flow_ir", "flow_gpu", "input",
+            "runtime_resources", "rays_math",
         ][..]),
-        ("lisp_sop", &["flow", "flow_sop", "sop", "rdk", "rays_math"][..]),
+        ("lisp_sop", &["flow_syntax", "flow_check", "flow_eval", "flow_sop", "sop", "rdk", "rays_math"][..]),
     ])
 }
+
 fn local_workspace_only() -> HashSet<&'static str> {
     HashSet::from([
-        "diagnostic", "sdl3", "sdl3_image", "sdl3_ttf", "sdl3_mixer", "rays", "rdk", "rdk_core", "rdk_geom",
-        "rdk_ops", "rdk_boolean", "rdk_rays", "editor_core", "editor_document", "pxui_graph", "rays_editor",
+        "diagnostic", "sdl3", "sdl3_image", "sdl3_ttf", "sdl3_mixer", "editor_document", "rays_editor",
         "workspace_parity", "ogpu_conformance", "rdk_test_support", "flow_ir_test_support", "golden_fixtures",
     ])
+}
+
+/// OCaml leaves that `start` reaches through its allowed dependencies (transitively, over the policy).
+fn ocaml_leaves_reached(start: &str, allowlist: &HashMap<&'static str, &'static [&'static str]>) -> HashSet<&'static str> {
+    let mut reached = HashSet::new();
+    let mut seen = HashSet::new();
+    let mut pending: Vec<&'static str> = allowlist.get(start).map(|allowed| allowed.to_vec()).unwrap_or_default();
+    while let Some(name) = pending.pop() {
+        if !seen.insert(name) {
+            continue;
+        }
+        if OCAML_LEAVES.contains(&name) {
+            reached.insert(name);
+        }
+        if let Some(next) = allowlist.get(name) {
+            pending.extend(next.iter().copied());
+        }
+    }
+    reached
 }
 
 fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
@@ -879,7 +934,7 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
         "diagnostic", "rays_diagnostic", "native_layer_token", "native_layer_token_sys", "mem", "mem_sys",
         "lru", "ocaml_int", "param", "input", "rays_math", "rays_math_sys", "rays_hash", "parallel", "scene_command", "rays_collections", "sdl3", "sdl3_image",
         "sdl3_ttf", "sdl3_mixer", "metal", "vulkan", "ogpu_core", "ogpu",
-        "rdk_core", "flow_syntax",
+        "rdk_core",
     ];
     for library in foundational {
         rules.entry(library.to_owned()).or_default().extend(upper_no_gpu.iter().map(|name| (*name).to_owned()));
@@ -947,7 +1002,14 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
         "metal", "ogpu_metal_native", "ogpu_metal", "rdk_boolean", "rdk", "sop", "flow", "editor_core",
         "editor_document", "pxui", "pxui_shell", "pxui_graph", "rays_pathtracer", "rays_editor",
     ]);
-    forbid("rdk_rays", &gpu);
+    // Flow is UI-free and GPU-free, but its three crates may reach the OCaml flow's leaves (param, input, diagnostic).
+    for library in ["flow_syntax", "flow_check", "flow_eval"] {
+        forbid(library, &[
+            "flow_ir", "flow_web", "flow_shader", "flow_gpu", "flow_graph", "flow_sop", "flow_native", "rays",
+            "editor_core", "pxui", "pxui_shell", "pxui_graph", "sop", "rdk", "rays_editor",
+        ]);
+        forbid(library, &gpu);
+    }
     forbid("scene_execution_fixtures", &[
         "metal", "ogpu_metal_native", "ogpu_metal", "param", "flow", "flow_ir", "flow_web", "flow_shader",
         "flow_gpu", "flow_graph", "flow_sop", "flow_native", "rays", "editor_core", "editor_document", "pxui",
@@ -1048,7 +1110,11 @@ fn ogpu_selection_errors(
             continue;
         }
         let uses_native = selected.iter().any(|dependency| dependency == "ogpu_native");
-        let explicit: Vec<&str> = selected.iter().map(String::as_str).filter(|name| implementations.contains(name)).collect();
+        // An implementation crate's own tests select it by being it.
+        let mut explicit: Vec<&str> = selected.iter().map(String::as_str).filter(|name| implementations.contains(name)).collect();
+        if implementations.contains(&package.crate_name.as_str()) {
+            explicit.push(package.crate_name.as_str());
+        }
         let path = package.manifest.strip_prefix(workspace).unwrap_or(&package.manifest).to_string_lossy().replace('\\', "/");
         if uses_native && explicit.is_empty() {
             continue;
@@ -1208,8 +1274,10 @@ fn deps(workspace: &Path) -> Result<Vec<String>, String> {
         let selection: Vec<String> = selection.into_iter().collect();
         selection_direct.insert(package.crate_name.clone(), selection);
         if let Some(allowed) = allowlist.get(package.crate_name.as_str()) {
+            let leaves = ocaml_leaves_reached(&package.crate_name, &allowlist);
             for dependency in &direct {
-                if !allowed.contains(&dependency.as_str()) {
+                let name = dependency.as_str();
+                if !allowed.contains(&name) && !HELPER_LEAVES.contains(&name) && !leaves.contains(name) {
                     errors.push(format!("{path}: `{}` may not directly depend on `{dependency}`", package.crate_name));
                 }
             }
@@ -1349,17 +1417,12 @@ mod tests {
     }
 
     #[test]
-    fn shape_gate_allows_only_lru_table_state_unreachable() {
-        let invariant_unreachable = shape_source(
-            "lru",
-            "crates/lru/src/lib.rs",
-            "unreachable!(\"cache state\");\nunreachable!(\"identity-list state\");\n",
-        );
-        assert!(invariant_unreachable.is_empty());
+    fn shape_gate_allows_unreachable_but_not_panic() {
+        // unreachable! is OCaml's `assert false`, allowed anywhere; panic!/todo! never are.
+        assert!(shape_source("other", "crates/other/src/lib.rs", "unreachable!(\"cache state\");\n").is_empty());
         for (crate_name, path, source) in [
             ("lru", "crates/lru/src/lib.rs", "panic!(\"not an invariant\");"),
-            ("lru", "crates/lru/src/other.rs", "unreachable!(\"cache state\");"),
-            ("other", "crates/lru/src/lib.rs", "unreachable!(\"cache state\");"),
+            ("other", "crates/other/src/lib.rs", "todo!();"),
         ] {
             assert!(shape_source(crate_name, path, source)
                 .iter()
