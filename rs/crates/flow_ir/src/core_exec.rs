@@ -913,7 +913,7 @@ pub fn resident_live(program: &Program, s: &Statement) -> Option<Vec<i64>> {
         Some((_, writes)) if resident_loop(program, s) => {
             let mut outside: Vec<i64> = Vec::new();
             for t in &program.body {
-                if !std::ptr::eq(t, s) { outside = mentions(outside, t); }
+                if t.id != s.id { outside = mentions(outside, t); }
             }
             Some(writes.into_iter().filter(|n| outside.contains(n)).collect())
         }
@@ -934,7 +934,7 @@ pub fn resident_tail(program: &Program, s: &Statement, mark: &dyn Fn(i64) -> boo
     };
     let device_array = |n: i64| matches!(&program.locals[ix(n)], Ty::Array(inner) if matches!(**inner, Ty::Float | Ty::Vec2 | Ty::Vec3 | Ty::Vec4));
     let after: &[Statement] = {
-        let at = program.body.iter().position(|t| std::ptr::eq(t, s));
+        let at = program.body.iter().position(|t| t.id == s.id);
         match at { Some(i) => &program.body[i + 1..], None => &[] }
     };
     let mut held: BTreeSet<i64> = BTreeSet::new();
@@ -1374,12 +1374,12 @@ fn unfold_shape(program: &Program, loop_: &Statement, body: &[Statement], index:
     match head.as_slice() {
         [head] if points_ok && pre.iter().all(pure) && program.regions[ix(region)].sources.len() == 1 => {
             // the head is dead past the loop: nothing outside it reads it
-            let mut inside: Vec<*const Statement> = Vec::new();
-            c::iter(&mut |s: &Statement| inside.push(s as *const Statement), body);
+            let mut inside: Vec<i64> = Vec::new();
+            c::iter(&mut |s: &Statement| inside.push(s.id), body);
             let mut read_outside = false;
             c::iter(
                 &mut |s: &Statement| {
-                    if !std::ptr::eq(s, loop_) && !inside.contains(&(s as *const Statement)) && c::reads(s).contains(head) {
+                    if s.id != loop_.id && !inside.contains(&s.id) && c::reads(s).contains(head) {
                         read_outside = true;
                     }
                 },

@@ -101,8 +101,6 @@ sketches!(
     flow_image,
     #[ignore = "upstream: flow_sop::lower::of_checked hangs on the workspace's sop graphs (static-map deadlock in parity_backlog)"]
     flow_particles_gpu,
-    #[ignore = "upstream: flow_ir resident_live/resident_tail compare statements with ptr::eq, but flow_web::js hands them a cloned program, so the resident tail is lost: rt.resident.finish instead of keep (fix: compare Statement.id)"]
     recursive_signals,
-    #[ignore = "upstream: same resident_tail ptr::eq loss as recursive_signals"]
     recursive_rectangles
 );
