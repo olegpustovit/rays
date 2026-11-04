@@ -1,0 +1,40 @@
+[package]
+name = "pxui_graph"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "pxui_graph"
+path = "src/lib.rs"
+
+[dependencies]
+rays = { path = "../rays" }
+rays_math = { path = "../rays_math" }
+param = { path = "../param" }
+cfmt = { path = "../cfmt" }
+ocaml_int = { path = "../ocaml_int" }
+input = { path = "../input" }
+pxui = { path = "../pxui" }
+editor_core = { path = "../editor_core" }
+flow_syntax = { path = "../flow_syntax" }
+flow_check = { path = "../flow_check" }
+flow_eval = { path = "../flow_eval" }
+flow_graph = { path = "../flow_graph" }
+
+[dev-dependencies]
+sdl3 = { path = "../sdl3" }
+sop = { path = "../sop" }
+# flow_sop = { path = "../flow_sop" }  # TEMP: flow_sop does not build yet
+rays_diagnostic = { path = "../rays_diagnostic" }
+scene_command = { path = "../scene_command" }
+mem = { path = "../mem" }
+ogpu = { path = "../ogpu" }
+ogpu_vulkan = { path = "../ogpu_vulkan" }
+renderer = { path = "../renderer" }
+
+# The kit text needs the SDL main thread (fonts): the pane's cases run on their own main
+# (the rays crate tests/common/window.rs) in one process, as pxui's window_* targets do.
+[[test]]
+name = "window_pxui_graph"
+harness = false
