@@ -248,7 +248,7 @@ fn sweep(name: &str, from: usize, to: usize, stride: usize) {
 #[test]
 fn core_regions_sweep_hsl_sectors() { sweep("hsl-sectors", 0, usize::MAX, 1) }
 #[test]
-fn core_regions_sweep_hsl_sampled() { sweep("hsl", 0, usize::MAX, 16) }
+fn core_regions_sweep_hsl_sampled() { sweep("hsl", 0, usize::MAX, 64) }
 #[test]
 fn core_regions_sweep_hsl_full_part_1() { if slow() { sweep("hsl", 0, 10000, 1) } }
 #[test]
@@ -484,10 +484,12 @@ fn loop_fusion_producer_consumer_scopes_guards_and_sibling_outputs_agree() {
 
 #[test]
 fn loop_fusion_at_scale_and_shortened_producers() {
-    let parallel = ts::carried_fixtures(32769).into_iter().find(|(n, _)| n == "iterate-fused-both").unwrap().1;
+    // 32769 rows and 1/8 domains in RAYS_SLOW=1; the default 4097 rows crosses the 4096 chunk and runs 1/4 domains.
+    let (rows, domain_counts) = if slow() { (32769, [1, 8]) } else { (4097, [1, 4]) };
+    let parallel = ts::carried_fixtures(rows).into_iter().find(|(n, _)| n == "iterate-fused-both").unwrap().1;
     let live = input::at_time(0.37);
     let expected = reference(&parallel, &live);
-    for domains in [1, 8] {
+    for domains in domain_counts {
         ts::with_domains(domains, &|| assert!(same_result(&packed::force(&parallel, &live, &strict()), &expected)));
     }
     let shortened = ts::compile(

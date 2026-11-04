@@ -334,23 +334,27 @@ fn node_matches_native_uint32() {
     compare_native(true, "uint32 fast", &uint32);
 }
 
-const WIDE_INTEGERS: [&str; 8] = [
-    "(map (fn [x] (int/add x (frame/index))) (array/int 32769 4611686018427387903))",
-    "(map (fn [x] (int/sub x (frame/index))) (array/int 32769 -4611686018427387904))",
-    "(map (fn [x] (int/xor x (int/add 9007199254740993 (frame/index)))) (array/range 32769 :type int))",
-    "(map (fn [x] (int/shr (int/add x (int/sub (frame/index) 9007199254740993)) 31)) (array/range 1025 :type int))",
-    "(map (fn [x] (floor (+ x t))) (array/range 1025))",
-    "(array/sum (map (fn [x] (int/add x (frame/index))) (array/int 1025 9007199254740993)))",
-    "(scan [a (frame/index)] [x (array/range 1025 :type int)] (int/add a x))",
-    "(fold [a (frame/index)] [x (array/range 1025 :type int)] (int/add a x))",
-];
+/// The three 32769-row sources are 4097 rows in the default loop (still past the 4096 chunk); RAYS_SLOW=1 runs 32769.
+fn wide_integers_sources() -> Vec<String> {
+    let big = if std::env::var("RAYS_SLOW").as_deref() == Ok("1") { 32769 } else { 4097 };
+    vec![
+        format!("(map (fn [x] (int/add x (frame/index))) (array/int {big} 4611686018427387903))"),
+        format!("(map (fn [x] (int/sub x (frame/index))) (array/int {big} -4611686018427387904))"),
+        format!("(map (fn [x] (int/xor x (int/add 9007199254740993 (frame/index)))) (array/range {big} :type int))"),
+        "(map (fn [x] (int/shr (int/add x (int/sub (frame/index) 9007199254740993)) 31)) (array/range 1025 :type int))".to_string(),
+        "(map (fn [x] (floor (+ x t))) (array/range 1025))".to_string(),
+        "(array/sum (map (fn [x] (int/add x (frame/index))) (array/int 1025 9007199254740993)))".to_string(),
+        "(scan [a (frame/index)] [x (array/range 1025 :type int)] (int/add a x))".to_string(),
+        "(fold [a (frame/index)] [x (array/range 1025 :type int)] (int/add a x))".to_string(),
+    ]
+}
 
 fn wide_integers(from: usize, to: usize) {
     if !node_available() {
         eprintln!("node is absent: SKIPPED");
         return;
     }
-    for source in WIDE_INTEGERS.iter().skip(from).take(to - from) {
+    for source in wide_integers_sources().iter().skip(from).take(to - from) {
         compare_integer(false, source);
     }
 }

@@ -115,28 +115,33 @@ fn bad_masks_and_types() {
 
 #[test]
 fn core_and_executor_match_the_reference() {
-    // Sizes: OCaml used 32769-row bodies; 2049 keeps two 1024-lane block crossings within the 5 s debug budget.
-    // No huge array is fabricated to exercise the allocation bound. The guard precedes count+1 and
-    // allocation; runtime proof uses real small/large tails.
-    for body in [
-        "(array/compact (map (fn [(i : int)] (if (int/eq (int/mod i 3) 0) 1 0)) (array/range 2049 :type int)))",
-        "(array/scan_sum (map (fn [(i : int)] (int/add i (frame/index))) (array/range 2049 :type int)))",
-        "(array/scan_sum (array/int 13 9007199254740993))",
-        "(array/scan_sum (array/int 0))",
-        "(array/compact (array/int 0))",
-        "(if (> t 0.) (array/int 1) (array/compact (array/int 1 2)))",
-        "(array/compact (array/int 13 (if (> t 0.) 1 2)))",
-        "(let* [collect (fn [(mask : (array int))] (array/compact mask))] (collect (array/int 2049 1)))",
-        "(let* [kept (array/compact (map (fn [(i : int)] (if (int/eq (int/mod i 3) 0) 1 0)) (array/range 2049 :type int))) table (array/range 2049)] (map (fn [(i : int)] (array/nth table i)) kept))",
-        "(map (fn [(i : int)] (int/add i (frame/index))) (array/scan_sum (array/int 2049 1)))",
-    ] {
+    // Sizes: OCaml used 32769-row bodies. The default loop uses 1025 rows (one 1024-lane block crossing),
+    // 1 and 4 domains and two times (both sides of `(> t 0.)`); RAYS_SLOW=1 runs 2049 rows, 1/4/8 domains
+    // and four times. No huge array is fabricated to exercise the allocation bound. The guard precedes
+    // count+1 and allocation; runtime proof uses real small/large tails.
+    let slow = std::env::var("RAYS_SLOW").as_deref() == Ok("1");
+    let n = if slow { 2049 } else { 1025 };
+    let (domain_counts, times): (&[i64], &[f64]) = if slow { (&[1, 4, 8], &[-1., 0., 0.25, 2.]) } else { (&[1, 4], &[-1., 2.]) };
+    let bodies = [
+        format!("(array/compact (map (fn [(i : int)] (if (int/eq (int/mod i 3) 0) 1 0)) (array/range {n} :type int)))"),
+        format!("(array/scan_sum (map (fn [(i : int)] (int/add i (frame/index))) (array/range {n} :type int)))"),
+        "(array/scan_sum (array/int 13 9007199254740993))".to_string(),
+        "(array/scan_sum (array/int 0))".to_string(),
+        "(array/compact (array/int 0))".to_string(),
+        "(if (> t 0.) (array/int 1) (array/compact (array/int 1 2)))".to_string(),
+        "(array/compact (array/int 13 (if (> t 0.) 1 2)))".to_string(),
+        format!("(let* [collect (fn [(mask : (array int))] (array/compact mask))] (collect (array/int {n} 1)))"),
+        format!("(let* [kept (array/compact (map (fn [(i : int)] (if (int/eq (int/mod i 3) 0) 1 0)) (array/range {n} :type int))) table (array/range {n})] (map (fn [(i : int)] (array/nth table i)) kept))"),
+        format!("(map (fn [(i : int)] (int/add i (frame/index))) (array/scan_sum (array/int {n} 1)))"),
+    ];
+    for body in &bodies {
         let value = live_value(body);
         let r = residual(&value);
         let core = lower_strict(r).unwrap_or_else(|f| panic!("{f}"));
         let executor = executor_compile(&value, true);
-        for domains in [1, 4, 8] {
+        for &domains in domain_counts {
             with_domains(domains, &|| {
-                for time in [-1., 0., 0.25, 2.] {
+                for &time in times {
                     let live = live_frame(time, 3);
                     let reference = force_reference(&value, &live);
                     same(&run(None, false, None, None, &core, &live), &reference);

@@ -36,6 +36,15 @@ fn records_at(source: &str, name: &str, graph: &str) -> Value {
     evaluation.records.iter().find(|(p, _)| *p == path).expect("record").1[0].1.clone()
 }
 
+/// Default: four times, one on each side of zero, the 4096 bound and past it. RAYS_SLOW=1 runs all eleven.
+fn times() -> &'static [f64] {
+    if std::env::var("RAYS_SLOW").as_deref() == Ok("1") {
+        &[-3., -2.5, -0., 0., 0.37, 1., 1.9, 3., 8., 4096., 4097.]
+    } else {
+        &[-3., 0.37, 1.9, 4097.]
+    }
+}
+
 fn check(name: &str, body: &str, failures: &mut Vec<String>) {
     let tested = if name.starts_with("captured-") { body.to_owned() } else { format!("(if (> t -1000.) {body} {body})") };
     let source = format!("(workspace w (graph g :context value (let* [tested {tested}] 0.)))");
@@ -57,7 +66,7 @@ fn check(name: &str, body: &str, failures: &mut Vec<String>) {
     assert!(C::pp(&core) == C::pp(&core_lower::lower(None, None, false, None, None, r).unwrap()));
     let value = Value::Residual(r);
     let program = ok(Executor::compile(&value, &Default::default()));
-    for time in [-3., -2.5, -0., 0., 0.37, 1., 1.9, 3., 8., 4096., 4097.] {
+    for &time in times() {
         let live = input::at_time(time);
         let expected = E::Host::force_reference(&value, &live, None, None, None);
         let mut verify = |label: &str, actual: Result<Value, Diagnostic>| match (&actual, &expected) {
@@ -181,7 +190,11 @@ fn captured(ty: &str, body: &str, value: Value) -> ResidualId {
 
 #[test]
 fn known_5001_geometry_map_filter_captures() {
-    let xs: Vec<Value> = (0..5001).map(|i| if i % 11 == 10 { Value::No_geo } else { Value::Deferred(ty::geometry(), if i % 2 == 0 { 17 } else { 23 }) }).collect();
+    // 5001 elements in RAYS_SLOW=1; the default 1025 still overflows a 100-arm unrolled selector.
+    // 5001 elements in RAYS_SLOW=1. The default 257 still overflows the 100-statement loop-body check; the
+    // reference clones the whole captured list per selector call, so the cost is quadratic in this size.
+    let n = if std::env::var("RAYS_SLOW").as_deref() == Ok("1") { 5001 } else { 257 };
+    let xs: Vec<Value> = (0..n).map(|i| if i % 11 == 10 { Value::No_geo } else { Value::Deferred(ty::geometry(), if i % 2 == 0 { 17 } else { 23 }) }).collect();
     let resolve: crate::core_exec::ResolveFn = Arc::new(|value: &Value| match value {
         Value::Source(name, ty, args) if name == "$core/cooked" && *ty == ty::geometry() => match args.as_slice() {
             [(_, Value::Int(id))] => Ok(Value::Deferred(ty.clone(), *id)),
@@ -237,8 +250,11 @@ fn ts_error(message: String) -> Diagnostic {
 // loop, so 5000 passes do not re-lower anything; the count is a live int, past the 4,096 bound
 #[test]
 fn iterate_over_a_packed_array_is_one_region_and_one_counted_loop() {
-    let source = "(workspace w (graph g :context value (let* [tested (iterate (int (+ 5000. (* t 0.))) (array/float 8 1.0)\n    (fn [p] (exact (map (fn [(i : int)] (* 0.999 (+ (array/nth p i) (* t 0.)))) (array/range 8 :type int)))))] 0.)))";
-    let Value::Residual(r) = records_at(source, "tested", "g") else { panic!("iterate: expected residual") };
+    // 8 lanes and 5000 passes in RAYS_SLOW=1; the default 2 lanes and 4097 passes (least count past the bound).
+    let slow = std::env::var("RAYS_SLOW").as_deref() == Ok("1");
+    let (passes, width) = if slow { (5000, 8) } else { (4097, 2) };
+    let source = format!("(workspace w (graph g :context value (let* [tested (iterate (int (+ {passes}. (* t 0.))) (array/float {width} 1.0)\n    (fn [p] (exact (map (fn [(i : int)] (* 0.999 (+ (array/nth p i) (* t 0.)))) (array/range {width} :type int)))))] 0.)))");
+    let Value::Residual(r) = records_at(&source, "tested", "g") else { panic!("iterate: expected residual") };
     let core = ts::lower_strict(r).unwrap_or_else(|n| panic!("iterate refused: {n}"));
     let mut counted = 0;
     C::iter(&mut |s: &C::Statement| { if matches!(s.node, C::StatementNode::Counted { .. }) { counted += 1; } }, &core.body);
@@ -247,7 +263,7 @@ fn iterate_over_a_packed_array_is_one_region_and_one_counted_loop() {
     let live = input::at_time(0.);
     let want = E::Host::force_reference(&Value::Residual(r), &live, None, None, None);
     match (ts::run_simple(&core, &live), want) {
-        (Ok(Value::Float_array(a)), Ok(Value::Float_array(b))) => assert!(a.len() == 8 && a.iter().zip(b.iter()).all(|(x, y)| x.to_bits() == y.to_bits())),
+        (Ok(Value::Float_array(a)), Ok(Value::Float_array(b))) => assert!(a.len() == width && a.iter().zip(b.iter()).all(|(x, y)| x.to_bits() == y.to_bits())),
         (a, b) => panic!("iterate packed: {} <> {}", show(&a), show(&b)),
     }
 }

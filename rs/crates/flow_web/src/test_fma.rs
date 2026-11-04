@@ -101,7 +101,9 @@ fn explicit_fma_regions_match_exact_binary64() {
         }
         f64::from_bits((raw as u64) & 0xffef_ffff_ffff_ffff)
     };
-    while cases.len() < 10010 {
+    // 10010 sampled cases in RAYS_SLOW=1; the default loop samples 2010.
+    let target = if std::env::var("RAYS_SLOW").as_deref() == Ok("1") { 10010 } else { 2010 };
+    while cases.len() < target {
         let (a, b, c) = (sample(), sample(), sample());
         if a.mul_add(b, c).is_finite() {
             cases.push((a, b, c));
@@ -158,7 +160,8 @@ fn checked_arithmetic_regions_match_exact_binary64() {
         (-f64::from_bits(1), 0.5, -0.0),
         (0.37, 0.83, 0.19),
     ];
-    let count = 32769usize;
+    // 32769 elements in RAYS_SLOW=1; the default 4097 still crosses the 4096-element chunk.
+    let count = if std::env::var("RAYS_SLOW").as_deref() == Ok("1") { 32769usize } else { 4097 };
     let data: Vec<f64> = (0..count * 3)
         .map(|i| {
             let (a, b, c) = cases[i / 3 % cases.len()];

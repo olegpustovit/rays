@@ -305,7 +305,9 @@ fn nested_maps_draw_the_walkers_points_at_one_four_and_eight_domains() {
     let animated = program.body.iter().find(|s| matches!(s.node, C::StatementNode::Iterate { .. })).expect("an iterate statement");
     assert!(core_exec::footprint(&program, animated).is_none());
     assert!(core_exec::resident_live(&program, animated).is_some());
-    for domains in [1, 4, 8] {
+    // 1, 4 and 8 domains in RAYS_SLOW=1; the default loop keeps 1 and 4.
+    let domain_counts: &[i64] = if std::env::var("RAYS_SLOW").as_deref() == Ok("1") { &[1, 4, 8] } else { &[1, 4] };
+    for &domains in domain_counts {
         ts::with_domains(domains, &|| {
             let buffers = Buffers::create();
             let marks = ok(core_exec::draw(&prepare(&program), &live, (200, 100), &buffers, &draw_options(root, None)));

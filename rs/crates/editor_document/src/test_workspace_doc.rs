@@ -19,6 +19,8 @@ const STILL: &str = "; a small study
       b)))
 ";
 
+const VALUE_STUDY: &str = "(workspace study (graph g :context value (let* [a 1.] a)))\n";
+
 fn catalog() -> Catalog {
     kinds::catalog(1, &sop::nodes::factories()).expect("catalog")
 }
@@ -92,10 +94,11 @@ fn part_text() {
         Err(ds) => assert!(ds.iter().any(|d| d.code == code), "{code}: {ds:?}"),
         Ok(_) => panic!("accepted: {code}"),
     };
-    bad(&format!("{STILL}(layout (nope))"), "E_LAYOUT");
-    bad(&format!("{STILL}(layout (node [\"g\"] :at [1]))"), "E_LAYOUT");
-    bad(&format!("{STILL}(settings :nope 1)"), "E_SETTINGS");
-    bad(&format!("{STILL}(settings :amount \"x\")"), "E_SETTINGS");
+    // layout and settings are read after the workspace is checked: a value-context base keeps each check cheap
+    bad(&format!("{VALUE_STUDY}(layout (nope))"), "E_LAYOUT");
+    bad(&format!("{VALUE_STUDY}(layout (node [\"g\"] :at [1]))"), "E_LAYOUT");
+    bad(&format!("{VALUE_STUDY}(settings :nope 1)"), "E_SETTINGS");
+    bad(&format!("{VALUE_STUDY}(settings :amount \"x\")"), "E_SETTINGS");
     bad("(workspace w (graph g :context sop (sop/uv_sphere :nope 1)))", "E_UNKNOWN_PARAM");
     bad("(nothing)", "E_WORKSPACE");
 }
@@ -117,9 +120,10 @@ fn part_edit() {
         "accepted an unknown keyword"
     );
     assert_eq!(doc::to_text(&d), doc::to_text(&of_text(&catalog, None, &text)), "the original document is untouched");
+    // the spare node is added to the document already checked above (the layout keys are not asserted)
     let added = doc::edit(
         &catalog,
-        &of_text(&catalog, None, &format!("{STILL}(layout (node [\"g\" \"a\"] :at [1 2]) (node [\"g\" \"b\"] :at [3 4]))")),
+        &d,
         &Op::AddNode { scope: p(&["g"]), name: "spare".to_owned(), expr: s::make(Node::Num("1".to_owned())) },
     )
     .expect("add");
