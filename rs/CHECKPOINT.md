@@ -56,7 +56,7 @@ on PATH. A hook blocks plain `cargo test`. Build notes: `port/build-speed.md`.
 - [ ] Full windowed native smoke on Windows again (last: 36/49 before today's fixes)
 
 ### Memory (target: at or below OCaml)
-- [ ] Merge `syntax-share` (shared `Arc` children, boxed trivia: Syntax 128 -> 64 B, size asserts) — branch rebased on dev, gates running at checkpoint time; merge when green
+- [x] `syntax-share` merged (3992f0af, 065f4239): shared `Arc` children (Syntax::clone O(1)), boxed trivia (Syntax 128 -> 64 B), size asserts on Syntax/Node/Term
 - [ ] Measure ws_tree live before/after (381 MB Rust vs 28 MB OCaml); then shrink `Term` (176 B), interned names (`u32`), `u32` positions
 - [ ] Arena layout for syntax/terms (packed node tables, `u32` ids)
 - [ ] Lowering copies still present: `lisp_factory`, `qualify_workspace` / `static_with`, `inline_policy` (`label_context`, schema per call)
