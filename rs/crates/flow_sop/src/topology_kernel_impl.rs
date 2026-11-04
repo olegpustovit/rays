@@ -1467,3 +1467,24 @@ mod static_residual {
         assert!(held <= 4, "residual keys never die, so they are capped: {held}");
     }
 }
+
+#[cfg(test)]
+mod resident_identity {
+    use super::*;
+
+    // The device display pins a buffer by the placeholder's own `Arc` (`Arc::ptr_eq`): a copy never
+    // finds it and the whole mesh falls back to the host (swarm: a 983 MB host allocation).
+    #[test]
+    fn resident_vec3_returns_the_placeholder_itself() {
+        let placeholder = Arc::new(vec![7.0, 0.0, 0.0, 8.0, 0.0, 0.0]);
+        let holder = Arc::new(ResidentPoints { value: Value::Vec3_array(placeholder.clone()), count: 2 });
+        register_points(&holder);
+        let dynamic: Arc<dyn Deferred::Holder> = holder.clone();
+        let materialise: Float3::Materialise = Arc::new(|| Ok(vec![vec![7.0, 8.0], vec![0.0, 0.0], vec![0.0, 0.0]]));
+        let positions = Float3::deferred(Some(dynamic), None, None, 2, materialise).unwrap();
+        let topology = topology::create_owned(2, vec![0, 1], vec![0, 2], vec![topology::PrimitiveKind::OpenPolyline]).unwrap();
+        let g = geometry::create(positions, topology, None, None, None).unwrap();
+        let found = crate::attribute_kernel::resident_vec3(&g, "P").expect("resident positions");
+        assert!(Arc::ptr_eq(&found, &placeholder));
+    }
+}
