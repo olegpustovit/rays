@@ -109,6 +109,8 @@ pub struct T {
     pub profile: Arc<Profile::T>,
     pub preview: PreviewFn,
     pub card_node: CardNodeFn,
+    /// The lowering behind `preview` and `card_node`; weak, so a test can see it freed once every `T` clone is gone.
+    pub lowering: Weak<Lowerer>,
 }
 
 fn fail(code: &str, message: &str) -> Diagnostic {
@@ -1608,7 +1610,7 @@ fn function_elements(value: &Value) -> Vec<FnId> {
 }
 
 fn blank_term(ty: Ty, node: W::Node) -> Term {
-    Term { path: None, ty, node, form: empty_form() }
+    Term { path: None, ty, node, form: std::sync::Arc::new(empty_form()) }
 }
 
 pub struct CallEnv {
@@ -2954,6 +2956,20 @@ pub struct Lowerer {
 }
 
 /// What `build_call` needs of the enclosing lowering, shared by every Lisp factory of it.
+/// A node's back-reference to its lowering: weak, because the lowering stores its nodes (a strong one is a cycle
+/// that leaks every lowering). The `T` that `finish` returns keeps the lowering alive through its `preview` and
+/// `card_node`; a node used after that `T` is gone is a bug and panics.
+#[derive(Clone)]
+struct Wk(Weak<Lowerer>);
+impl Wk {
+    fn new(l: &Arc<Lowerer>) -> Wk {
+        Wk(Arc::downgrade(l))
+    }
+    fn get(&self) -> Arc<Lowerer> {
+        self.0.upgrade().expect("a lowered node outlived its lowering")
+    }
+}
+
 pub struct CallEnvShared {
     checked: Arc<Workspace>,
     factories: Vec<Factory>,
@@ -3523,7 +3539,7 @@ impl HostRun {
                 let key = format!("lisp_host_capture_{}", factories.len());
                 // Editable zero-input factories must return zero-input nodes: compiling a borrowed
                 // source directly would disconnect it.
-                let (run, actual_c, id_c, key_c) = (self.clone(), actual.clone(), *id, key.clone());
+                let (run, actual_c, id_c, key_c) = (Arc::downgrade(self), actual.clone(), *id, key.clone());
                 let factory = edit::factory(
                     edit::factory_args(&key, &key, &["Lisp"]),
                     0,
@@ -3532,7 +3548,7 @@ impl HostRun {
                         Ok(build::make(
                             build::Args { parameters: id_c.to_string().into_bytes(), cook_mode: CookMode::Generator, ..build::args(&key) },
                             None,
-                            Arc::new(move |_, _, _| run.snapshot(&actual, id_c).map(|o| node::Cooked { payload: o.payload, instances: o.instances })),
+                            Arc::new(move |_, _, _| run.upgrade().ok_or_else(|| data_source("A cooked handle outlived its execution."))?.snapshot(&actual, id_c).map(|o| node::Cooked { payload: o.payload, instances: o.instances })),
                         ))
                     }),
                 );
@@ -3541,7 +3557,7 @@ impl HostRun {
                 let ctx = if *actual == ty::image() { fctx::image() } else { fctx::sop() };
                 Ok(Some(blank_term(ty.clone(), W::Node::Call { kind, ctx, args: Vec::new() })))
             }
-            Value::No_geo if is_geometry_ty(ty) => Ok(Some(Term { path: None, ty: ty.clone(), form: syntax::make(SNode::Sym("nil".into())), node: W::Node::Nil })),
+            Value::No_geo if is_geometry_ty(ty) => Ok(Some(Term { path: None, ty: ty.clone(), form: std::sync::Arc::new(syntax::make(SNode::Sym("nil".into()))), node: W::Node::Nil })),
             Value::List(values) => {
                 let element = match ty {
                     Ty::List(element) => (**element).clone(),
@@ -3625,11 +3641,11 @@ impl HostRun {
                 None => return Err(data_source("A cooked handle is missing from this execution.")),
             };
             self.handle_exists(&actual, *id)?;
-            let (run, id_c, actual_c) = (self.clone(), *id, actual);
+            let (run, id_c, actual_c) = (Arc::downgrade(self), *id, actual);
             inputs.push(build::make(
                 build::Args { parameters: id.to_string().into_bytes(), cook_mode: CookMode::Generator, ..build::args("lisp_host_capture") },
                 None,
-                Arc::new(move |_, _, _| run.snapshot(&actual_c, id_c).map(|o| node::Cooked { payload: o.payload, instances: o.instances })),
+                Arc::new(move |_, _, _| run.upgrade().ok_or_else(|| data_source("A cooked handle outlived its execution."))?.snapshot(&actual_c, id_c).map(|o| node::Cooked { payload: o.payload, instances: o.instances })),
             ));
         }
         let n = (lowerer.arrays)(name, args, &sources, &inputs)?;
@@ -3784,11 +3800,11 @@ impl HostRun {
             }
             inputs.push((n.clone(), vty, default));
         }
-        let call_args: Vec<(String, Term)> = inputs.iter().map(|(n, t, _)| (n.clone(), Term { path: None, ty: t.clone(), form: form.clone(), node: W::Node::RefBinding(n.clone(), Vec::new()) })).collect();
+        let call_args: Vec<(String, Term)> = inputs.iter().map(|(n, t, _)| (n.clone(), Term { path: None, ty: t.clone(), form: std::sync::Arc::new(form.clone()), node: W::Node::RefBinding(n.clone(), Vec::new()) })).collect();
         let body = Term {
             path: None,
             ty: ty.clone(),
-            form: form.clone(),
+            form: std::sync::Arc::new(form.clone()),
             node: if catalog { W::Node::Call { kind: name.to_owned(), ctx: call_context, args: call_args } } else { W::Node::Op { op: name.to_owned(), args: call_args, skip: Vec::new() } },
         };
         let graph = WGraph { name: "lisp_host_call".into(), context: fctx::sop(), inputs, body, form };
@@ -4374,13 +4390,14 @@ impl Lowerer {
             None => kind.clone(),
         };
         let sources = self.deps(node)?;
-        let this = self.clone();
+        let this = Wk::new(self);
         let node_c = node.clone();
         let args_c = args.to_vec();
         let (key_c, kind_c, sources_c) = (key.clone(), kind.clone(), sources.clone());
         let build_inner: Arc<dyn Fn(&[node::T]) -> R<node::T> + Send + Sync> = Arc::new(move |inputs: &[node::T]| {
             match get(&args_c, "value") {
                 Some(Value::Residual(residual)) => {
+                    let this = this.get();
                     let captures: Vec<(i64, Ty, node::T)> = sources_c.iter().zip(inputs.iter()).map(|(id, input)| (*id, this.plan.nodes[*id as usize].ty.clone(), input.clone())).collect();
                     let n = this.reuse(Some(&node_c), &None, &None, "structural", &Value::Residual(*residual), inputs, &|| this.structural_node(Some(&node_c), *residual, &captures))?;
                     Ok(node::relabel(&key_c, &n))
@@ -4400,9 +4417,10 @@ impl Lowerer {
         });
         // the card's fields, for the inspector, handles and display; an edit goes through its text
         let schema_fn = {
-            let (this, args_c, kind_c, build_inner) = (self.clone(), args.to_vec(), kind.clone(), build_inner.clone());
+            let (this, args_c, kind_c, build_inner) = (Wk::new(self), args.to_vec(), kind.clone(), build_inner.clone());
             move |n: node::T, inputs: &[node::T]| -> node::T {
                 let _ = inputs;
+                let this = this.get();
                 match (this.lisp_definition(&kind_c), get(&args_c, "parameters")) {
                     (Some(d), Some(Value::Record(parameters))) => {
                         let schema = Arc::new(ln::schema("parameters", &d.fields, &ep::for_node(&this.checked, &d)));
@@ -4504,11 +4522,11 @@ impl Lowerer {
             Kind::Arrays => {
                 let operation = node.kind.clone();
                 let sources = self.deps(node)?;
-                let (this, node_c, args_c, sources_c, op_c) = (self.clone(), node.clone(), args.to_vec(), sources.clone(), operation.clone());
+                let (this, node_c, args_c, sources_c, op_c) = (Wk::new(self), node.clone(), args.to_vec(), sources.clone(), operation.clone());
                 let factory = edit::factory(
                     edit::factory_args(geometry_arrays_key(&operation), geometry_arrays_label(&operation), &["Flow", "Topology"]),
                     sources.len(),
-                    Arc::new(move |inputs: &[node::T]| this.arrays_node(Some(&node_c), None, false, None, None, &op_c, &args_c, &sources_c, inputs).map_err(|d| d.message)),
+                    Arc::new(move |inputs: &[node::T]| this.get().arrays_node(Some(&node_c), None, false, None, None, &op_c, &args_c, &sources_c, inputs).map_err(|d| d.message)),
                 );
                 Ok(plain(factory, &sources))
             }
@@ -4519,11 +4537,11 @@ impl Lowerer {
             }
             Kind::Group => {
                 let sources = self.deps(node)?;
-                let (this, node_c, args_c, sources_c) = (self.clone(), node.clone(), args.to_vec(), sources.clone());
+                let (this, node_c, args_c, sources_c) = (Wk::new(self), node.clone(), args.to_vec(), sources.clone());
                 let factory = edit::factory(
                     edit::factory_args("flow.with_group", "Write group", &["Flow"]),
                     sources.len(),
-                    Arc::new(move |inputs: &[node::T]| this.grp_node(Some(&node_c), None, None, &args_c, &sources_c, inputs).map_err(|d| d.message)),
+                    Arc::new(move |inputs: &[node::T]| this.get().grp_node(Some(&node_c), None, None, &args_c, &sources_c, inputs).map_err(|d| d.message)),
                 );
                 Ok(plain(factory, &sources))
             }
@@ -4562,7 +4580,7 @@ impl Lowerer {
                 if matches!(get(&args, "geometry"), Some(Value::No_geo)) {
                     sources.insert(0, -1);
                 }
-                let (this, node_c, sources_c) = (self.clone(), node.clone(), sources.clone());
+                let (this, node_c, sources_c) = (Wk::new(self), node.clone(), sources.clone());
                 let o = AttrOpts {
                     selection: get(&args, "selection").cloned(),
                     default: get(&args, "default").cloned(),
@@ -4576,7 +4594,7 @@ impl Lowerer {
                 let factory = edit::factory(
                     edit::factory_args("flow.with_attr", "Write attribute", &["Flow"]),
                     sources.len(),
-                    Arc::new(move |inputs: &[node::T]| this.attr_node(Some(&node_c), o.clone(), &name, &values, &sources_c, inputs).map_err(|d| d.message)),
+                    Arc::new(move |inputs: &[node::T]| this.get().attr_node(Some(&node_c), o.clone(), &name, &values, &sources_c, inputs).map_err(|d| d.message)),
                 );
                 Ok(Prepared {
                     cid,
@@ -4679,11 +4697,11 @@ impl Lowerer {
                 }
                 let base_site = self.plan.nodes[z.root as usize].site.clone();
                 self.zones.lock().unwrap().push(Zone { cid, site: node.site.clone(), iter: node.iter.clone(), body_site: base_site, base: z.base, count: z.count.clone(), ekey: z.ekey.clone(), positions: z.positions.clone() });
-                let (this, z_c) = (self.clone(), z.clone());
+                let (this, z_c) = (Wk::new(self), z.clone());
                 let factory = edit::factory_slots(
                     edit::FactoryArgs { slots: Some(vec!["input".to_owned()]), ..edit::factory_args("zone", "Loop over geometry", &["Copy"]) },
                     vec![InputRequirement::Rest],
-                    Arc::new(move |nodes: &[Option<node::T>]| Ok(this.make_zone(None, Vec::new(), &z_c, nodes.iter().flatten().cloned().collect()))),
+                    Arc::new(move |nodes: &[Option<node::T>]| Ok(this.get().make_zone(None, Vec::new(), &z_c, nodes.iter().flatten().cloned().collect()))),
                 );
                 Ok(Prepared { cid, factory, arity: sources.len(), changes: Vec::new(), dynamic: Vec::new(), kernels: Vec::new(), zone: Some(z), slots: sources.iter().enumerate().map(|(i, s)| (i, *s)).collect() })
             }
@@ -4714,10 +4732,10 @@ impl Lowerer {
         args.stamp = stamp;
         args.key = z.key.clone();
         args.select = select;
-        let (this, z_c) = (self.clone(), z.clone());
+        let (this, z_c) = (Wk::new(self), z.clone());
         szone::node(
             args,
-            Arc::new(move |inputs: &[node::T], context: &sctx::T| this.instantiate(state.clone(), outer.clone(), sctx::input(context).clone(), &z_c, inputs)),
+            Arc::new(move |inputs: &[node::T], context: &sctx::T| this.get().instantiate(state.clone(), outer.clone(), sctx::input(context).clone(), &z_c, inputs)),
             inputs,
         )
     }
@@ -4937,12 +4955,12 @@ impl Lowerer {
         for p in &prepared {
             if let Some(z) = &p.zone {
                 if z.stateful && edit::find(graph, p.cid).is_some() {
-                    let (this, z) = (self.clone(), z.clone());
+                    let (this, z) = (Wk::new(self), z.clone());
                     frame_nodes.insert(
                         p.cid,
                         Arc::new(move |_network: &network::Network, state: &State, _live: &Frame, n: &node::T| {
                             let snapshot = E::fork_state(state);
-                            Ok(build::adopt_identity(n, &this.make_zone(Some(snapshot), Vec::new(), &z, build::input_array(n))))
+                            Ok(build::adopt_identity(n, &this.get().make_zone(Some(snapshot), Vec::new(), &z, build::input_array(n))))
                         }),
                     );
                 }
@@ -4953,10 +4971,10 @@ impl Lowerer {
                 if !E::state_dependent(&Value::Fn(k.fun)) || edit::find(graph, k.cid).is_none() {
                     continue;
                 }
-                let (this, k) = (self.clone(), k.clone());
+                let (this, k) = (Wk::new(self), k.clone());
                 frame_nodes.insert(
                     k.cid,
-                    Arc::new(move |_network: &network::Network, state: &State, _live: &Frame, n: &node::T| this.kernel_node(Some(E::fork_state(state)), None, &k, &node::inputs(n))),
+                    Arc::new(move |_network: &network::Network, state: &State, _live: &Frame, n: &node::T| this.get().kernel_node(Some(E::fork_state(state)), None, &k, &node::inputs(n))),
                 );
             }
         }
@@ -4964,10 +4982,11 @@ impl Lowerer {
             if !is_geometry_arrays(&n.kind) || edit::find(graph, self.compiled[n.id as usize]).is_none() || !E::state_dependent(&geometry_arrays_data(&n.args)) {
                 continue;
             }
-            let (this, n) = (self.clone(), n.clone());
+            let (this, n) = (Wk::new(self), n.clone());
             frame_nodes.insert(
                 self.compiled[n.id as usize],
                 Arc::new(move |_network: &network::Network, state: &State, _live: &Frame, node: &node::T| {
+                    let this = this.get();
                     let sources = this.deps(&n)?;
                     let made = this.arrays_node(None, None, false, Some(E::fork_state(state)), None, &n.kind, &n.args, &sources, &node::inputs(node))?;
                     Ok(build::adopt_identity(node, &made))
@@ -4978,10 +4997,11 @@ impl Lowerer {
             if n.kind != "sop/with_group" || edit::find(graph, self.compiled[n.id as usize]).is_none() || !E::state_dependent(&group_data(&n.args)) {
                 continue;
             }
-            let (this, n) = (self.clone(), n.clone());
+            let (this, n) = (Wk::new(self), n.clone());
             frame_nodes.insert(
                 self.compiled[n.id as usize],
                 Arc::new(move |_network: &network::Network, state: &State, _live: &Frame, node: &node::T| {
+                    let this = this.get();
                     let sources = this.deps(&n)?;
                     let made = this.grp_node(None, Some(E::fork_state(state)), None, &n.args, &sources, &node::inputs(node))?;
                     Ok(build::adopt_identity(node, &made))
@@ -5007,10 +5027,11 @@ impl Lowerer {
             if !eligible && !E::state_dependent(&attribute_data(&n.args)) {
                 continue;
             }
-            let (this, n, values, program) = (self.clone(), n.clone(), values.clone(), program);
+            let (this, n, values, program) = (Wk::new(self), n.clone(), values.clone(), program);
             frame_nodes.insert(
                 self.compiled[n.id as usize],
                 Arc::new(move |_network: &network::Network, state: &State, live: &Frame, node: &node::T| {
+                    let this = this.get();
                     let name = match get(&n.args, "attribute") {
                         Some(Value::Text(name)) => txt(name),
                         _ => unreachable!("an attribute write names its attribute"),
@@ -5038,10 +5059,11 @@ impl Lowerer {
             if !is_resource(n) || edit::find(graph, self.compiled[n.id as usize]).is_none() {
                 continue;
             }
-            let (this, n) = (self.clone(), n.clone());
+            let (this, n) = (Wk::new(self), n.clone());
             frame_nodes.insert(
                 self.compiled[n.id as usize],
                 Arc::new(move |network: &network::Network, state: &State, live: &Frame, node: &node::T| {
+                    let this = this.get();
                     let Some(images) = image_provider() else {
                         return Err(fail("E_IMAGE", "Image resources need an initial-domain resolver."));
                     };
@@ -5178,10 +5200,10 @@ impl Lowerer {
         let net = network::with_geometry(&geometry, net)?;
         let mut frames = net.frame_nodes.clone();
         if z.stateful {
-            let (this, z) = (self.clone(), z.clone());
+            let (this, z) = (Wk::new(self), z.clone());
             frames.insert(
                 root,
-                Arc::new(move |_network: &network::Network, state: &State, _live: &Frame, n: &node::T| Ok(build::adopt_identity(n, &this.make_zone(Some(E::fork_state(state)), Vec::new(), &z, build::input_array(n))))),
+                Arc::new(move |_network: &network::Network, state: &State, _live: &Frame, n: &node::T| Ok(build::adopt_identity(n, &this.get().make_zone(Some(E::fork_state(state)), Vec::new(), &z, build::input_array(n))))),
             );
         }
         Ok(Some((network::with_frame_nodes(frames, &net), root)))
@@ -5416,6 +5438,7 @@ fn finish(lowerer: &Arc<Lowerer>) -> R<T> {
         approx_reasons: l.checked.approx_reasons.clone(),
         profile: l.profile.clone(),
         preview: Arc::new(move |target, probes, net| preview.preview(target, probes, net).ok().flatten()),
+        lowering: Arc::downgrade(l),
     })
 }
 

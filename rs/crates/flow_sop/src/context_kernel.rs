@@ -405,7 +405,7 @@ fn walk_graph(ws: &Workspace, st: &RefCell<Walk>, g: &Graph) {
                 walk_macro(ws, st, macro_name);
                 // Parameterized macro heads disappear during recursive expansion. Hygiene counters
                 // restart per Macro.expand, not per Syntax.id.
-                st.borrow_mut().expanded.push(body.form.clone());
+                st.borrow_mut().expanded.push((*body.form).clone());
             }
             _ => {}
         }

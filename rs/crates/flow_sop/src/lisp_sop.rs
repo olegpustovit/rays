@@ -179,6 +179,34 @@ mod test_lisp_node;
 mod test_node_contracts;
 #[cfg(test)]
 mod test_lower_core;
+#[cfg(test)]
+mod test_lisp_fusion;
+#[cfg(test)]
+mod test_node_facts;
+#[cfg(test)]
+mod test_node_sources;
+#[cfg(test)]
+mod test_graph;
+#[cfg(test)]
+mod test_workspace_cook;
+#[cfg(test)]
+mod test_workspace_edit;
+#[cfg(test)]
+mod test_workspace_zone;
+#[cfg(test)]
+mod test_projection;
+#[cfg(test)]
+mod test_lisp_projection;
+#[cfg(test)]
+mod test_metadata_kernel;
+#[cfg(test)]
+mod test_group_kernel;
+#[cfg(test)]
+mod test_remap;
+#[cfg(test)]
+mod test_mesh_resident;
+#[cfg(test)]
+mod test_trace;
 
 #[cfg(test)]
 mod tests {

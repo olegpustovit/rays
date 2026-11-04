@@ -197,7 +197,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "flow_check: an untyped fn parameter passed to image/map is refused (E_TYPE got fn); OCaml accepts"]
     fn image_map_through_a_defn_fn_parameter() {
         let defn = "(workspace w (defn tex :context image [(f : fn)] (image/map f :width 8 :height 8)) (graph img :context image (tex (fn [uv] [uv.x uv.y 0 1]))))";
         let forms = flow_syntax::syntax::parse(defn).unwrap();

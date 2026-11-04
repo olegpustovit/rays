@@ -85,3 +85,15 @@ fn a_graph_without_geometry_is_refused() {
     let r = lower::workspace(None, Vec::new(), lower::Options::default(), &parse("(workspace w (graph g :context sop (sop/not_a_node)))"));
     assert!(r.is_err());
 }
+
+#[test]
+fn a_lowering_is_freed_with_its_last_handle() {
+    let l = lowered(&merge_text());
+    let weak = l.lowering.clone();
+    let kept = l.clone();
+    assert!(weak.upgrade().is_some(), "the lowering lives while its result does");
+    drop(l);
+    assert!(weak.upgrade().is_some(), "a clone keeps it");
+    drop(kept);
+    assert!(weak.upgrade().is_none(), "nodes hold the lowering weakly, so dropping the result frees it");
+}

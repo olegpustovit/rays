@@ -61,7 +61,7 @@ pub fn for_node(checked: &Workspace, definition: &NodeDefinition) -> Vec<(String
                 context: context::value(),
                 inputs: vec![("raw_value".into(), Ty::Text, None)],
                 body,
-                form: form.clone(),
+                form: (*form).clone(),
             };
             let graph_name = graph.name.clone();
             let mut one = checked.clone();

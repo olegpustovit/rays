@@ -91,3 +91,15 @@ pub fn geometry_bytes(g: &geo::T) -> Vec<u8> {
     }
     out.into_bytes()
 }
+
+/// The text of a specification/workspace/cases fixture: `bloom` and `variations` are fixtures of
+/// their own, the other ten are the sketches `sketches/ws_NAME.rays` (the OCaml dune rule copies them).
+pub fn case_text(name: &str) -> String {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let path = if name == "bloom" || name == "variations" {
+        root.join("specification/workspace/cases").join(format!("{name}.lisp"))
+    } else {
+        root.join("sketches").join(format!("ws_{name}.rays"))
+    };
+    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+}

@@ -20,3 +20,6 @@ cfmt = { path = "../cfmt" }
 rdk = { path = "../rdk" }
 input = { path = "../input" }
 rdk_core = { path = "../rdk_core" }
+
+[dev-dependencies]
+flow_graph = { path = "../flow_graph" }

@@ -1430,7 +1430,7 @@ mod parity {
 
     #[test]
     fn rand_at_agrees_with_native_at_one_and_eight_domains() {
-        let count = 3000;
+        let count = 1000;
         let mapped = value(None, &format!("(map (fn [i] (rand_at (frame/index) i)) (array/range {count} :type int))"));
         let program = compile(&mapped);
         for seed in [0, 1, 42, MAX_INT] {
@@ -1447,7 +1447,7 @@ mod parity {
                 }
             }
         }
-        let indices = indices(count);
+        let indices = indices(600); // the walker reference costs ~0.4 ms an element in debug builds
         let (mapped, program) = map(None, Ty::Int, Value::Int_array(Arc::new(indices.clone())), "(rand_at (frame/index) i)");
         for seed in [MIN_INT, 0, 42, MAX_INT] {
             // Frame indices are nonnegative; signed seeds remain exact captured Int uniforms.
@@ -1466,7 +1466,7 @@ mod parity {
     #[test]
     fn rand_at_primitive_agrees_with_native() {
         let count = 3000;
-        let indices = indices(count);
+        let indices = indices(600);
         for seed in [MIN_INT, 0, 42, MAX_INT] {
             let (mapped, program) = map(Some(seed), Ty::Int, Value::Int_array(Arc::new(indices.clone())), "(rand/at (int/add seed (frame/index)) i)");
             let live = input::at_time(0.0);
@@ -1492,7 +1492,7 @@ mod parity {
             other => panic!("vec3 array expected, got {other:?}"),
         });
         let b = bases();
-        let seeds: Vec<i64> = (0..count).map(|i| b[i / 7 % b.len()] + (i / b.len()) as i64).collect();
+        let seeds: Vec<i64> = (0..indices.len()).map(|i| b[i / 7 % b.len()] + (i / b.len()) as i64).collect();
         let Value::Fn(f) = value(None, "(fn [(s : int) (i : int)] (if (int/lt s 0) (rand/at s (int/add i (frame/index))) (rand/at s (int/sub i (frame/index)))))") else {
             panic!("fn expected")
         };

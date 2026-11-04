@@ -1,0 +1,1 @@
+//! lib/flow_sop/test_mesh_resident.ml is NOT ported: it drives a real device (Renderer.acquire_gpu, Flow_gpu.Host) through a wrapped residency and asserts live Ogpu handles; it belongs with the flow_gpu port, not a unit test.
