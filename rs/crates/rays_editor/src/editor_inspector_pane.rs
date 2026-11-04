@@ -41,7 +41,7 @@ pub type Inspector_input<'a> = (&'a t, &'a scope::t, &'a selection::t, bool);
 #[allow(clippy::too_many_arguments)]
 pub fn inspect_panel(
     image: &dyn Fn(i64) -> Option<rays::image::t>,
-    camera_panel: &dyn Fn() -> Panel_result,
+    camera_panel: &dyn Fn(&mut Ui) -> Panel_result,
     inspector_visible: bool,
     unchanged: &settings::T,
     resized: Resized,
@@ -158,7 +158,7 @@ pub fn inspect_panel(
                                 });
                             });
                         }
-                        panel = Some(camera_panel());
+                        panel = Some(camera_panel(ui));
                     });
                 });
                 (panel, vec![], changes, live, vec![], vec![])

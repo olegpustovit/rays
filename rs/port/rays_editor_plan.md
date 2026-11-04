@@ -110,3 +110,76 @@ tests/
   window_editor_shell.rs  test_workspace_shell native sections
 ```
 Add each target to Cargo.toml as `[[test]] name = "..." harness = false` when its first case lands (dev-deps ogpu, ogpu_vulkan, renderer already present). Budgets: 30 s warm per target, 5 s per case.
+
+## Editor API for tests (bundle F, `rays_editor::Editor` and friends)
+
+The public surface of `rays_editor.ml` is `src/rays_editor.rs`, re-exported at the crate root
+(`use rays_editor::{Editor, Reduce, Workspace, Measure, Source, Settings, Renderer, Timeline, Workspace_doc}`).
+A worked example is `tests/window_editor_smoke.rs` (4 cases, about 8 s for the target in a debug build).
+
+**Harness.** A target that creates an `Editor` is `window_editor_*` (`[[test]] harness = false`, cases on the
+main thread through `../../rays/tests/common/window.rs`), with `sdl3::hint::set(VIDEO_DRIVER, "dummy")` and
+`sdl3::init::init(Video, Events)` first in `main`, as pxui does. Call `common::gpu()` at the top of each
+*case*, never in `main`: the lease it takes aborts the process at exit when `--list` returns before
+`window::run` releases it (0xC0000005 with no output, which `cargo t` reports as exit 5). Cases that need no
+device (pure `Editor::Private`, `Reduce` on a cooked-free workspace) still need the dummy-driver SDL for the fonts.
+
+**Creating.**
+```rust
+let ws = Workspace::load(None /*ops*/, imports, None /*factories*/, text)?;          // Vec<Diagnostic> on error
+let ed = Editor::create(Editor::Create { await_: Some(true), ui_text_size: Some(11), domains: Some(1), ..Default::default() },
+                        &ws, None /*Source::t*/, Editor::prepare_fn(), Editor::draw_fn())?;   // Result<Editor::t, String>
+```
+`Editor::Create` is `loop_model::create_options` (OCaml's optional arguments: `inputs name presets factories
+gpu_owner settings lights camera background seed grain domains max_entries max_payload_bytes await_ carry_budget
+preferences ui_text_size platform ui_font opened`). `await_: Some(true)` makes `update` block on its cook, as the
+OCaml tests do. Tests that want an isolated state folder pass `presets: Some(dir)`.
+
+**Frames.** `Editor::t` is a plain `Clone` value passed and returned by value, as in OCaml:
+`ed = Editor::update(ed, &frame); let nodes = Editor::scene(&ed, &frame); ed = Editor::after_present(ed, &frame);`
+(`Editor::update_with(ed, &frame, &|ui| Rc::new(...))` for a sketch inspector, answering `(t, Option<Rc<dyn Any>>)`).
+Build the `rays::frame::t` like `Measure::frame_at` / the smoke test's `frame_at` (size, pointer, buttons, keys,
+events, `pixel_scale (1,1)`). The 120-frame cadence and `Sketch.Fixed dt` of the OCaml helpers are `input::Frame.dt`
+and `tick`/`frame` set by the test. `Editor::close(&ed)` at the end of each case.
+
+**What a test reaches.**
+- `ed.core` (`editor_model::t`), `ed.extra` (viewport state), `ed.camera`, `ed.host` (`Rc<RefCell<workspace_host::t>>`), plus the
+  accessors of the mli as functions: `Editor::{can_undo, can_redo, undo_label, redo_label, workspace, document, scene_document,
+  network, prepared, selected_node, displayed_node, timeline, panes, probe, set_probe, node_box, edit, edit_layout, edit_phases,
+  carrying, carry_line, level, objects, lights, world, camera, viewport_camera, view_camera, render_camera, render_settings, film,
+  slot_of, flying, look_through, renderer, set_renderer, settings, set_settings}`; `Editor::Private::*` (status_text, live_frame,
+  inspector_subject, new_graph, menu_forms, lisp_completions, image_plan, image_payload, image_stats, image_render_stats,
+  canvas_scenes, image_gpu_stats, image, with_images, host_stats, resolved_scene, gpu_qualification).
+- OCaml's `{ editor with Loop_model.core = ... }` is `Editor::with_core(ed, core)`; use it (not `ed.core = ...`) so the idle-frame
+  bookkeeping (`ed.rest`) is dropped: the loop's "nothing changed" shortcut is valid only while the core is what the last full frame
+  left. Same for `Editor::set_camera`.
+- `Reduce::{open_import, spreadsheet, select_path, view, step}`; `step` returns `Result<Editor::t, String>` (`reduce_idle` does).
+- Tests that need the private modules use `rays_editor::<module>` (`editor_commands`, `cook`, `viewport`, `editor_renderer`, ...);
+  the OCaml `Rays_editor.Renderer` is `Renderer` (= `editor_renderer`) with `Mode::{Path_traced, Raster, Wireframe}`.
+- `Editor::Private::canvas_scenes` and `scene` answer `Vec<rays::scene::node>`.
+
+**Divergences a ported test meets.**
+- `Workspace::load(ops, imports, factories, text)`, `Workspace::main(text, process, path)`, `Workspace::export(graph, fps, dir, frames, doc)`,
+  `Workspace::sop_graphs(factories, doc)`: OCaml optional arguments are leading `Option` parameters. `Workspace::process.profile` is `bool`.
+- `Measure::run(MeasureOptions, step, early, frames, &ws)`; its `outcome.final` is `outcome.fin` (keyword). `track_sites` (Gc.Memprof) has no
+  Rust counterpart and is absent; `sample.live` is the allocator's live bytes (no GC), `promoted` is 0.
+- The camera panel and the viewport handles are closures that receive the `Ui` the frame holds (`editor_frame::update`'s
+  `camera_panel: &dyn Fn(&mut Ui) -> Panel_result`; it took no argument before bundle F because OCaml closes over the handle).
+- `draw_timeline_pane` takes `(Panel::Timeline, box)` as OCaml does (bundle C's `Leaf` stand-in is gone).
+- Physical equality of OCaml values that have no Rust identity is by value: a hidden scene is reused by `Scene3::same` + camera, the
+  textures of a drawn object are never known to be the same ones (a textured piece is composed again each frame), a bake and a
+  drawing are `Rc` identity. Tests asserting "the same Scene.t" use `Scene3::same` / `Scene::Layer::same`.
+- `Mem.root` heap walks: the ledger owner `editor.document` is the size of the document text; `editor.history` and `editor.lowering`
+  are charged nothing, and `memory_boundary` sheds history beyond 16 entries after the first `Over` verdict (the OCaml `later` step).
+
+**Known gaps and findings (bundle F).**
+- Lowering `sketches/ws_layout.rays` never returns in the Rust port: `lowering::of_workspace` of a graph with
+  `sop/scatter ... :count count :seed seed` (graph inputs) plus `copy_to_points` spins forever in `editor_document`/`flow_sop`/`sop`
+  (before any editor code runs; repro: the `garden` graph alone, `diag` text in the smoke test history). The smoke test runs a
+  ws_layout look-alike without the scatter (`smoke_studio`); `smoke_ws_layout` is gated on `RAYS_SMOKE_WS_LAYOUT=1` until that is fixed.
+- `rays::texture::t` has no identity (`same`); add it to drop the conservative recomposition of textured pieces.
+- `flow_sop::lower::ImageMetadata` must be `Send + Sync`, `workspace_images::t` is not: the frame's dimensions callback reads a
+  thread-local holding the latest frame's images (`editor_loop::FRAME_IMAGES`); `Editor::Private::with_images` passes a callback that
+  answers none.
+- The canvas pictures are not wrapped in `refusal_typed` (a refused allocation is whatever `Mem::admit_*` returns inside the kernels).
+- Nothing exercises `Editor::run` / `Workspace::main` headless (they open a window): covered by the type check only. The bin crate is not part of this bundle.

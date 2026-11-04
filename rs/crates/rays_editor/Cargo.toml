@@ -37,6 +37,7 @@ rdk = { path = "../rdk" }
 rays_diagnostic = { path = "../rays_diagnostic" }
 param = { path = "../param" }
 mem = { path = "../mem" }
+flow_gpu = { path = "../flow_gpu" }
 
 [dev-dependencies]
 ogpu = { path = "../ogpu" }
@@ -46,3 +47,7 @@ renderer = { path = "../renderer" }
 # Window/GPU suites (see rs/port/rays_editor_plan.md) are added per bundle, each
 #   [[test]] name = "window_editor_<x>" / "gpu_editor_<x>"  harness = false
 # like crates/pxui (own main, rays/tests/common/window.rs runner).
+
+[[test]]
+name = "window_editor_smoke"
+harness = false

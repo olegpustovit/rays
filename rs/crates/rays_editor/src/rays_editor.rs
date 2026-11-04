@@ -1,0 +1,769 @@
+//! The public API of Rays Editor: `Editor`, `Reduce`, `Workspace`, `Measure`, `Source`, `Settings`,
+//! `Renderer`. Port of lib/rays_editor/rays_editor.ml (and its .mli). OCaml's modules are Rust
+//! modules with the same names; the crate root re-exports them (`rays_editor::Editor`).
+//!
+//! OCaml optional arguments: `Editor::create` takes a `Create` record (`loop_model::create_options`),
+//! `Editor::update_with` an `inspector` callback answering `Rc<dyn Any>`, and `Measure::run` a
+//! `MeasureOptions` record. `Editor::t` is a plain `Clone` value: a test keeps the one it is given
+//! and passes it by value to the functions that return the next.
+#![allow(non_camel_case_types, non_snake_case)]
+use editor_document::lowering;
+
+pub use editor_document::kinds::Window as window;
+pub use editor_document::workspace_doc as Workspace_doc;
+pub use crate::editor_renderer as Renderer;
+pub use crate::source_file as Source;
+pub use crate::timeline as Timeline;
+pub use editor_document::settings as Settings;
+
+use editor_document::kinds;
+use sop::edit_graph::Factory;
+
+/// The catalog a workspace text is checked against (`Workspace_doc::of_text`): the SOP factories
+/// (default `sop::nodes::factories`) plus the scene, world and settings kinds generated from the
+/// editor's schemas.
+pub fn workspace_catalog(factories: Option<&[Factory]>) -> Result<flow_check::catalog::Catalog, rays_diagnostic::Diagnostic> {
+    let factories: Vec<Factory> = factories.map(|f| f.to_vec()).unwrap_or_else(sop::nodes::factories);
+    kinds::catalog(flow_sop::manifest::VERSION, &factories)
+}
+
+pub fn workspace_window(doc: &editor_document::workspace_doc::T) -> Result<window, rays_diagnostic::Diagnostic> {
+    lowering::window(doc)
+}
+
+pub mod Editor {
+    use std::any::Any;
+    use std::rc::Rc;
+
+    use editor_document::document::T as Document;
+    use editor_document::kind_graph as kg;
+    use editor_document::objects;
+    use editor_document::workspace_doc;
+    use flow_graph::flow_edit as fe;
+    use flow_native::{workspace_gpu, workspace_images};
+    use rays::{easy_camera, frame};
+
+    use crate::cook;
+    use crate::editor_inspect;
+    use crate::editor_loop;
+    use crate::editor_model;
+    use crate::editor_panels;
+    use crate::editor_renderer as renderer_mod;
+    use crate::editor_status;
+    use crate::loop_model;
+    use crate::source_file;
+    use crate::viewport as V;
+
+    pub use crate::editor_model::picked;
+    pub use crate::loop_model::create_options as Create;
+    pub use crate::loop_model::Draw_fn;
+    pub use crate::loop_model::{
+        camera, can_redo, can_undo, carry_line, carrying, displayed_node, document, edit, edit_layout, edit_phases, level, network, node_box, panes, prepared, probe, redo_label, scene_document, selected_node, set_probe, set_settings, settings, timeline,
+        undo_label, workspace, world,
+    };
+    pub type prepared_t = cook::prepared;
+    pub type t = loop_model::t;
+    pub type Prepared = cook::prepared;
+
+    /// What the app prepares of a cooked object: its geometry and its surface.
+    pub fn prepare(settings: &editor_document::settings::T, output: &sop::session::Output) -> Result<cook::prepared, String> {
+        cook::prepare(settings, output)
+    }
+
+    /// The object's 3D scene, pieces exploded as its node says.
+    pub fn draw(node: &sop::node::T, prepared: &cook::prepared) -> Result<rays::scene3::t, rdk_rays::surface::ConversionError> {
+        cook::draw(node, prepared)
+    }
+
+    /// `prepare` and `draw` as the closures `create` and `run` take.
+    pub fn prepare_fn() -> cook::Prepare_fn {
+        Rc::new(|s, o| cook::prepare(s, o))
+    }
+    pub fn draw_fn() -> Draw_fn {
+        Rc::new(|n, p| cook::draw(n, p))
+    }
+
+    /// `[await_]` (default false) makes each `update` block on the cook it submits.
+    pub fn create(options: Create, workspace: &workspace_doc::T, source: Option<source_file::t>, prepare: cook::Prepare_fn, draw: Draw_fn) -> Result<t, String> {
+        loop_model::create(options, workspace, source, prepare, draw)
+    }
+
+    pub fn update(value: t, frame_: &frame::t) -> t {
+        editor_loop::update(value, frame_)
+    }
+
+    /// `update`, also building sketch-owned kit widgets below the camera and render sections shown
+    /// while no node is selected. The result is `None` on frames where that panel is not built.
+    pub fn update_with(value: t, frame_: &frame::t, inspector: &dyn Fn(&mut pxui::ui::Ui) -> Rc<dyn Any>) -> (t, Option<Rc<dyn Any>>) {
+        editor_loop::update_with(value, frame_, inspector)
+    }
+
+    /// Call from the sketch's `after_present` when driving the environment manually so PNG requests
+    /// save the completed frame.
+    pub fn after_present(value: t, frame_: &frame::t) -> t {
+        editor_loop::after_present(value, frame_)
+    }
+
+    pub fn scene(value: &t, frame_: &frame::t) -> Vec<rays::scene::node> {
+        editor_loop::scene_of(value, frame_)
+    }
+
+    pub fn close(value: &t) {
+        editor_loop::close(value)
+    }
+
+    pub fn crash_dump(value: &t, directory: &str) -> Result<(), String> {
+        editor_loop::crash_dump(value, directory)
+    }
+
+    pub fn viewport_camera(value: &t, key: &str) -> rays::camera::t {
+        loop_model::viewport_camera(value, key)
+    }
+
+    pub fn lights(value: &t) -> Vec<rays::light::t> {
+        loop_model::lights(value)
+    }
+
+    /// Visible, renderable geometry objects' latest cooks at their world transforms.
+    pub fn objects(value: &t) -> Vec<(rays_math::mat4::T, cook::Prepared_ref)> {
+        loop_model::objects_placed(value)
+    }
+
+    /// Replace the model's core outside a frame (a test's `{ editor with core }`).
+    pub fn with_core(value: t, core: editor_model::t) -> t {
+        loop_model::with_core(value, core)
+    }
+
+    pub mod Private {
+        use super::*;
+
+        /// Explicit native benchmark selection.
+        pub fn gpu_qualification(value: &t) {
+            workspace_gpu::qualification(&value.host.borrow().gpu)
+        }
+
+        pub fn resolved_scene(value: &t) -> kg::T {
+            loop_model::resolved_scene(value)
+        }
+
+        /// The status strip's text: a cook or edit error reads "Cook rejected: ..." in it.
+        pub fn status_text(value: &t) -> String {
+            editor_status::status_text(&value.core, false)
+        }
+
+        /// The frame facts the sketch read last frame: the pointer only while it is the picture's.
+        pub fn live_frame(value: &t) -> input::Frame {
+            value.core.live_frame.clone()
+        }
+
+        /// The node the inspector shows for the selection, when it is exactly one.
+        pub fn inspector_subject(value: &t) -> Option<Vec<String>> {
+            editor_panels::inspector_subject(&value.core)
+        }
+
+        /// The `Set_graph` a "New graph" of this context name (`sop`, `scene`, ...) writes.
+        pub fn new_graph(value: &t, context: &str) -> fe::Op {
+            editor_inspect::new_graph(&value.core, context).1
+        }
+
+        /// The language forms of the add menu with the Lisp each is added as.
+        pub fn menu_forms() -> Vec<(String, String)> {
+            crate::editor_add::FORMS.iter().map(|(_, form, text, _)| (form.to_string(), text.to_string())).collect()
+        }
+
+        /// Completions from the vocabulary currently used by the workspace text panes.
+        pub fn lisp_completions(value: &t, text: &str) -> Vec<pxui::ui::Completion> {
+            let core = &value.core;
+            crate::lisp_text::complete(&crate::editor_shell::completion_names(core), &core.doc.workspace.ws.import_sources, core.lisp_vocab.force(), text, text.len())
+        }
+
+        pub fn image_plan(value: &t) -> flow_eval::Plan {
+            value.core.doc.workspace.lowered.plan.clone()
+        }
+
+        /// Inspect the owned plan and request an independent immutable CPU image cook.
+        pub fn image_payload(value: &t, image: &flow_syntax::value::Value, state: Option<&flow_eval::State>, live: Option<&input::Frame>) -> Result<sop::image::T, rays_diagnostic::Diagnostic> {
+            let core = &value.core;
+            let host = value.host.borrow();
+            workspace_images::bind(&host.images, &core.doc.workspace.lowered);
+            let resolver = workspace_images::payload(&host.images);
+            let state = state.cloned().unwrap_or_else(|| core.cook.state.clone());
+            let live = live.cloned().unwrap_or_else(|| core.live_frame.clone());
+            resolver(None, None, &image_plan(value), &state, &live, image)
+        }
+
+        pub fn image_stats(value: &t) -> (i64, i64) {
+            let host = value.host.borrow();
+            let resources = host.resources.0.borrow();
+            (resources.images_created, resources.images_destroyed)
+        }
+
+        /// Canvases created/destroyed, successful captures and actual GPU pixel readbacks.
+        pub fn image_render_stats(value: &t) -> (i64, i64, i64, i64) {
+            workspace_images::render_stats(&value.host.borrow().images)
+        }
+
+        /// The picture each canvas pane drew last frame, in layout order.
+        pub fn canvas_scenes(value: &t) -> Vec<Vec<rays::scene::node>> {
+            value.canvases.iter().map(|(_, p)| p.scene.clone()).collect()
+        }
+
+        /// Cumulative Host totals, sinks created/closed and sink buffer/texture creations.
+        pub fn image_gpu_stats(value: &t) -> (flow_gpu::host::Stats, i64, i64, i64, i64) {
+            workspace_gpu::image_stats(&value.host.borrow().gpu)
+        }
+
+        pub fn image(value: &t, image: &flow_syntax::value::Value) -> Result<rays::image::t, rays_diagnostic::Diagnostic> {
+            let core = &value.core;
+            let host = value.host.borrow();
+            workspace_images::bind(&host.images, &core.doc.workspace.lowered);
+            let gpu = workspace_gpu::config(&host.gpu, editor_document::lowering::fast(&core.doc));
+            workspace_images::image(Some(&gpu), true, &host.images, &core.cook.state, &core.live_frame, &core.doc.workspace.lowered.plan, image)
+        }
+
+        /// Scoped production image ownership and initial-domain SOP snapshots for qualification:
+        /// `run` receives the image and texture resolvers.
+        pub fn with_images(
+            value: &t,
+            state: Option<&flow_eval::State>,
+            live: Option<&input::Frame>,
+            plan: Option<&flow_eval::Plan>,
+            run: &mut dyn FnMut(&dyn Fn(&flow_syntax::value::Value) -> Result<rays::image::t, rays_diagnostic::Diagnostic>, &dyn Fn(&flow_syntax::value::Value) -> Result<rays::texture::t, rays_diagnostic::Diagnostic>),
+        ) {
+            let core = &value.core;
+            let state = state.cloned().unwrap_or_else(|| core.cook.state.clone());
+            let live = live.cloned().unwrap_or_else(|| core.live_frame.clone());
+            let plan = plan.cloned().unwrap_or_else(|| core.doc.workspace.lowered.plan.clone());
+            let (images, gpu_t) = {
+                let host = value.host.borrow();
+                (host.images.clone(), host.gpu.clone())
+            };
+            workspace_images::bind(&images, &core.doc.workspace.lowered);
+            workspace_gpu::with_backend(&gpu_t, editor_document::lowering::fast(&core.doc), &mut |gpu| {
+                let peek_images = images.clone();
+                let metadata: flow_sop::lower::ImageMetadata = {
+                    // ponytail: the dimensions callback is Send + Sync; the images are not, so it answers none
+                    let _ = &peek_images;
+                    std::sync::Arc::new(|_, _| None)
+                };
+                flow_sop::lower::with_images(Some(gpu.clone()), Some(metadata), workspace_images::payload(&images), &mut || {
+                    let image = |v: &flow_syntax::value::Value| workspace_images::image(Some(gpu), true, &images, &state, &live, &plan, v);
+                    let texture = |v: &flow_syntax::value::Value| workspace_images::texture(Some(gpu), &images, &state, &live, &plan, v);
+                    run(&image, &texture);
+                });
+            });
+        }
+
+        /// Quit requested, effects fired, samples created and samples destroyed.
+        pub fn host_stats(value: &t) -> (bool, i64, i64, i64) {
+            let host = value.host.borrow();
+            let resources = host.resources.0.borrow();
+            (host.quit_requested, host.fired, resources.samples_created, resources.samples_destroyed)
+        }
+    }
+
+    /// The scene root's output resolution in pixels and the samples per pixel at which a sketch's
+    /// progressive renderer stops.
+    pub type render_settings = objects::root::Render;
+
+    /// The ACTIVE camera object's view and lens (the viewport camera when the document has none).
+    pub fn render_camera(value: &t) -> rays::camera::t {
+        value.extra.document_camera.clone()
+    }
+
+    /// What the view pane shows this frame, for a sketch's own renderer.
+    pub fn view_camera(value: &t) -> rays::camera::t {
+        loop_model::view_camera(value)
+    }
+
+    pub fn render_settings(value: &t) -> render_settings {
+        objects::root::render(&value.extra.root)
+    }
+
+    /// The rect inside the view pane (pane-relative) that the render fills.
+    pub fn film(value: &t, frame_: &frame::t) -> (i64, i64, i64, i64) {
+        loop_model::film(value, frame_)
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct slot {
+        pub film: (i64, i64),
+        pub step: i64,
+        pub samples: i64,
+        pub max_spp: i64,
+        pub viewports: i64,
+    }
+
+    /// The path tracer slot serving the viewport with this key, when it has one.
+    pub fn slot_of(value: &t, key: &str) -> Option<slot> {
+        renderer_mod::info(&value.extra.renderer, key).map(|i| slot { film: i.size, step: i.step, samples: i.samples, max_spp: i.cap, viewports: i.viewports })
+    }
+
+    pub fn flying(value: &t) -> bool {
+        value.extra.fly.is_some()
+    }
+
+    pub fn look_through(value: &t) -> bool {
+        V::look_through(&value.extra)
+    }
+
+    pub fn renderer(value: &t) -> renderer_mod::Mode {
+        value.extra.renderer.mode
+    }
+
+    pub fn set_renderer(value: t, mode: renderer_mod::Mode) -> t {
+        let mut value = value;
+        value.extra.renderer_request = Some(mode);
+        value.rest = None;
+        value
+    }
+
+    /// Replace the camera orbit from code (the OCaml `{ editor with camera }`).
+    pub fn set_camera(value: t, camera: easy_camera::t) -> t {
+        let mut value = value;
+        value.camera = camera;
+        value.rest = None;
+        value
+    }
+
+    /// OCaml's `Editor.run`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn run(
+        options: Create,
+        max_frames: Option<i64>,
+        crash_dir: Option<String>,
+        profile: Option<bool>,
+        config: rays::sketch::config,
+        workspace: workspace_doc::T,
+        source: Option<source_file::t>,
+        prepare: cook::Prepare_fn,
+        draw: Draw_fn,
+    ) -> Result<(), rays::sketch::error> {
+        editor_loop::run(options, max_frames, crash_dir, profile, config, workspace, source, prepare, draw)
+    }
+
+    #[allow(dead_code)]
+    fn _unused(_: &Document) {}
+}
+
+/// The frame reducer without a UI frame: an unstable hook for tests, like `Editor::Private`.
+pub mod Reduce {
+    use editor_core::panels::Panel;
+    use flow_graph::flow_edit as fe;
+    use rays::frame;
+
+    use super::Editor;
+    use crate::editor_commands::action;
+    use crate::editor_inspect;
+    use crate::editor_panes;
+    use crate::editor_reduce;
+    use crate::editor_scope;
+    use crate::editor_shell;
+
+    pub fn open_import(editor: Editor::t, file: &str) -> Editor::t {
+        let mut core = editor.core.clone();
+        core.open_import = Some(file.to_string());
+        Editor::with_core(editor, core)
+    }
+
+    pub fn spreadsheet(editor: &Editor::t, path: &[usize]) -> (i64, Option<rdk_rays::geometry_view::T>) {
+        let key = editor_shell::panel_key(&editor.core.doc, path);
+        let pane = editor_panes::shown_as(&editor.core, (&key, &path.to_vec(), &Panel::Spreadsheet));
+        (editor_panes::local_of(&editor.core, &key).sheet_owner, editor_inspect::spreadsheet_source(&pane).cloned())
+    }
+
+    /// Select the checked lexical path; unstable test/diagnostic hook.
+    pub fn select_path(editor: Editor::t, path: &[String]) -> Editor::t {
+        match path.first() {
+            Some(graph) => {
+                let mut core = editor_panes::go(editor.core.clone(), graph);
+                core.select_later = vec![path.to_vec()];
+                Editor::with_core(editor, core)
+            }
+            None => editor,
+        }
+    }
+
+    /// `v` on the checked lexical path, as the graph pane requests it; unstable test hook.
+    pub fn view(editor: Editor::t, path: &[String]) -> Editor::t {
+        let core = editor_scope::view_node(editor.core.clone(), path);
+        Editor::with_core(editor, core)
+    }
+
+    /// Reduces one frame in which no pane was built: the keys are `actions`, the list's selection
+    /// is `select` (scene object ids), and `preview` puts a payload in flight whose hot target shows
+    /// that edit on a scratch document, as a carry does.
+    pub fn step(editor: Editor::t, select: Option<&[i64]>, preview: Option<&fe::Op>, actions: &[action], frame_: &frame::t) -> Result<Editor::t, String> {
+        let core = editor_reduce::reduce_idle(select, preview, &editor.core, actions, frame_)?;
+        Ok(Editor::with_core(editor, core))
+    }
+}
+
+/// A `.rays` sketch as a program. Command-S rewrites the file when it is still the text the
+/// document came from (comments intact), else saves a preset; an edit of the file from any editor
+/// reloads the running document as one history entry, "Reload <file>", and a file that does not
+/// check leaves the last good document with the diagnostics in the status bar and the text pane.
+pub mod Workspace {
+    use std::rc::Rc;
+
+    use editor_document::document::T as Document;
+    use editor_document::lowering;
+    use editor_document::workspace_doc;
+    use flow_native::{drawing, workspace_gpu, workspace_host, workspace_images};
+    use rays::easy_camera;
+    use rays_diagnostic::Diagnostic;
+    use rays_math::vec3;
+    use sop::edit_graph::Factory;
+
+    use super::{workspace_catalog, workspace_window};
+    use crate::cook;
+    use crate::editor_loop;
+    use crate::loop_model;
+    use crate::source_file;
+
+    /// Where a workspace came from: `path` relative to the project root, `digest` the SHA-256 of
+    /// its text.
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct source {
+        pub path: String,
+        pub digest: String,
+    }
+
+    /// What the process environment says, parsed once by the executable; the libraries never read it.
+    #[derive(Clone, Debug, PartialEq, Default)]
+    pub struct process {
+        pub max_frames: Option<i64>,
+        pub crash_dir: Option<String>,
+        pub profile: bool,
+        pub preferences: Option<String>,
+        pub ui_font: Option<String>,
+    }
+
+    pub fn no_process() -> process {
+        process::default()
+    }
+
+    /// Parse and check a `.rays` text against `workspace_catalog`.
+    pub fn load(ops: Option<Vec<flow_check::op::Op>>, imports: Vec<(String, String)>, factories: Option<&[Factory]>, text: &str) -> Result<workspace_doc::T, Vec<Diagnostic>> {
+        match workspace_catalog(factories) {
+            Err(d) => Err(vec![d]),
+            Ok(catalog) => workspace_doc::of_text(&workspace_doc::TextOptions { ops, imports, ..Default::default() }, &catalog, text),
+        }
+    }
+
+    /// Every `sop` graph of the document, lowered and compiled, for headless cooking.
+    pub fn sop_graphs(factories: Option<Vec<Factory>>, doc: &workspace_doc::T) -> Result<Vec<(String, sop::node::T)>, String> {
+        let factories = factories.unwrap_or_else(sop::nodes::factories);
+        let lowered = flow_sop::lower::workspace(
+            Some(factories),
+            editor_document::kinds::descriptors(),
+            flow_sop::lower::Options { inputs: Some((*doc.inputs).clone()), ..Default::default() },
+            &doc.source,
+        )
+        .map_err(|d| rays_diagnostic::to_string(&d))?;
+        let mut out = Vec::new();
+        for g in &lowered.graphs {
+            if let Some(node_id) = g.root {
+                out.push((g.name.clone(), sop::edit_graph::compile_node(&g.network.geometry, node_id)?));
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn document_camera(document: &Document, base: &easy_camera::t) -> easy_camera::t {
+        let scene = &document.scene;
+        let first = editor_document::objects::ids("camera", scene).first().copied();
+        match first.and_then(|id| editor_document::kind_graph::find(scene, id)).and_then(|n| editor_document::objects::camera::of_node(&n)) {
+            Some((view, _)) => easy_camera::of_view(rays::camera::position(&view), rays::camera::target(&view), base),
+            None => base.clone(),
+        }
+    }
+
+    /// The camera of the scene's first camera node, or the default base camera.
+    pub fn declared_camera(factories: Option<Vec<Factory>>, doc: &workspace_doc::T, base: &easy_camera::t) -> easy_camera::t {
+        let options = lowering::Options { factories: Some(factories.unwrap_or_else(sop::nodes::factories)), ..Default::default() };
+        match lowering::of_workspace(&options, doc) {
+            Err(_) => base.clone(),
+            Ok(document) => document_camera(&document, base),
+        }
+    }
+
+    /// One static evaluation a start: the document the editor opens is built here, and the window
+    /// and the camera are read from it.
+    fn run(inputs: Option<Rc<workspace_doc::Inputs>>, factories: Option<Vec<Factory>>, source: Option<source>, process: process, doc: workspace_doc::T) -> Result<(), Diagnostic> {
+        let mut doc = doc;
+        if let Some(inputs) = &inputs {
+            doc.inputs = std::sync::Arc::new((**inputs).clone());
+        }
+        let gpu_owner = workspace_gpu::create(None);
+        let result = (|| {
+            let gpu = workspace_gpu::config(&gpu_owner, false);
+            let source = source
+                .and_then(|s| source_file::find(&s.path, &s.digest))
+                .map(|s| source_file::with_imports(&s, &workspace_doc::import_texts(&doc)));
+            let opened = match &factories {
+                Some(f) if f.is_empty() => None,
+                _ => lowering::of_workspace(&lowering::Options { factories: Some(factories.clone().unwrap_or_else(sop::nodes::factories)), gpu: Some(gpu.clone()), ..Default::default() }, &doc).ok(),
+            };
+            let window = match &opened {
+                Some(document) => lowering::document_window(document),
+                None => workspace_window(&doc),
+            }?;
+            let config = rays::sketch::config { width: window.width, height: window.height, title: window.title.clone(), fps: Some(window.fps), ..rays::sketch::default_config() };
+            let lights = vec![rays::light::directional(Some(rays_math::color::white()), None, vec3::create(-1., -1.4, -0.8)).map_err(|m| rays_diagnostic::error("E_RUNTIME".to_string(), m, None, None, None, Vec::new(), Vec::new()))?];
+            let base = easy_camera::create(Some(vec3::zero()), Some(3.6), Some(0.4), Some(0.6), None, None).expect("base camera");
+            let camera = match (&opened, &factories) {
+                (Some(document), _) => document_camera(document, &base),
+                (None, Some(f)) if f.is_empty() => declared_camera(Some(Vec::new()), &doc, &base),
+                (None, _) => base,
+            };
+            editor_loop::run(
+                loop_model::create_options {
+                    inputs: inputs.clone(),
+                    gpu_owner: Some(gpu_owner.clone()),
+                    lights,
+                    camera: Some(camera),
+                    factories: factories.clone(),
+                    seed: Some(window.seed),
+                    preferences: process.preferences.clone(),
+                    ui_font: process.ui_font.clone(),
+                    opened,
+                    ..Default::default()
+                },
+                process.max_frames,
+                process.crash_dir.clone(),
+                Some(process.profile),
+                config,
+                doc.clone(),
+                source,
+                Rc::new(|s, o| cook::prepare(s, o)),
+                Rc::new(|n, p| cook::draw(n, p)),
+            )
+            .map_err(|error| rays_diagnostic::error("E_RUNTIME".to_string(), rays::sketch::error_to_string(&error), None, None, None, Vec::new(), Vec::new()))
+        })();
+        workspace_gpu::close(&gpu_owner);
+        result
+    }
+
+    /// Export a draw graph (the first by default) through `Sketch::export_state`. Each invocation
+    /// starts a fresh fold and pins every frame fact.
+    pub fn export(graph: Option<&str>, fps: Option<i64>, directory: &str, frames: i64, doc: &workspace_doc::T) -> Result<(), Diagnostic> {
+        let fps = fps.unwrap_or(60);
+        let factories = sop::nodes::factories();
+        if !(fps > 0 && frames > 0) {
+            return Err(rays_diagnostic::error("E_EXPORT_RANGE".to_string(), "Export frame count and fps must be positive.".to_string(), None, None, None, Vec::new(), Vec::new()));
+        }
+        let window = workspace_window(doc)?;
+        let lowered = flow_sop::lower::of_checked(Some(factories), flow_sop::lower::Options { reference: true, inputs: Some((*doc.inputs).clone()), ..Default::default() }, &doc.checked)?;
+        let evaluated = lowered.evaluated.clone();
+        workspace_host::export_check(doc, &evaluated.plan)?;
+        let chosen = doc.checked.graphs.iter().find(|g| g.context == flow_syntax::context::draw() && graph.is_none_or(|n| g.name == n));
+        let Some(graph) = chosen else {
+            return Err(rays_diagnostic::error("E_DRAW_GRAPH".to_string(), "Export needs a draw graph.".to_string(), None, None, None, Vec::new(), Vec::new()));
+        };
+        let state = flow_eval::create_state();
+        let host = Rc::new(std::cell::RefCell::new(workspace_host::create(workspace_host::CreateOptions { seed: Some(window.seed), ..Default::default() })));
+        let images = host.borrow().images.clone();
+        workspace_images::bind(&images, &lowered);
+        let value = evaluated.results.iter().find(|(n, _)| *n == graph.name).map(|(_, v)| v.clone()).expect("graph result");
+        let prepared = drawing::prepare(&drawing::PrepareOptions { states: evaluated.states.clone(), ..Default::default() }, &evaluated.plan, &value)?;
+        let failure: Rc<std::cell::RefCell<Option<Diagnostic>>> = Rc::new(std::cell::RefCell::new(None));
+        let (view_host, view_images, view_failure, view_doc, view_plan, view_state) = (host.clone(), images.clone(), failure.clone(), doc.clone(), evaluated.plan.clone(), state.clone());
+        let (width, height) = (window.width, window.height);
+        let view = move |_model: &dyn std::any::Any, frame_: &rays::frame::t| -> Vec<rays::scene::node> {
+            let live = input::Frame { dt: 1. / fps as f64, frame: frame_.input.frame, tick: frame_.input.tick, size: (width, height), ..input::at_time(frame_.input.t) };
+            let images = view_images.clone();
+            let (state, plan) = (view_state.clone(), view_plan.clone());
+            let live_for_image = live.clone();
+            let resolver: drawing::image_resolver = Rc::new(move |v| workspace_images::image(None, false, &images, &state, &live_for_image, &plan, v));
+            let options = drawing::RenderOptions { state: Some(view_state.clone()), image: Some(resolver), ..Default::default() };
+            match drawing::render_prepared(&prepared, &live, live.size, &options) {
+                Ok(scene) => match workspace_host::export_update(&mut view_host.borrow_mut(), &view_state, &live, &view_doc, &view_plan) {
+                    Ok(()) => scene,
+                    Err(d) => {
+                        view_failure.borrow_mut().get_or_insert(d);
+                        Vec::new()
+                    }
+                },
+                Err(d) => {
+                    view_failure.borrow_mut().get_or_insert(d);
+                    Vec::new()
+                }
+            }
+        };
+        let config = rays::sketch::config { width, height, title: window.title.clone(), clock: rays::sketch::clock::Fixed(1. / fps as f64), ..rays::sketch::default_config() };
+        let after_host = host.clone();
+        let after_failure = failure.clone();
+        let stop_host = host.clone();
+        let program = rays::sketch::program {
+            init: Box::new(|_| Box::new(())),
+            update: Box::new(|_, _| Box::new(())),
+            view: Box::new(view),
+            after_present: Some(Box::new(move |_, _| {
+                if let Err(d) = workspace_host::save_pending(&mut after_host.borrow_mut(), &mut |p| rays::canvas::save_screen_png(p)) {
+                    after_failure.borrow_mut().get_or_insert(d);
+                }
+                None
+            })),
+            crash_dump: None,
+            idle: None,
+            on_stop: Some(Box::new(move |_| workspace_host::close(&mut stop_host.borrow_mut()))),
+        };
+        let exported = rays::sketch::export_state(Some(config), Some(fps), None, directory, frames, program);
+        if let Some(d) = failure.borrow_mut().take() {
+            return Err(d);
+        }
+        exported.map(|_| ()).map_err(|error| rays_diagnostic::error("E_EXPORT".to_string(), rays::sketch::error_to_string(&error), None, None, None, Vec::new(), Vec::new()))
+    }
+
+    /// `main path` opens the `.rays` file at `path` and its imports beside it in the editor; `text`
+    /// opens that text instead, saved to `path` (the empty editor). On a failure it returns
+    /// diagnostics without printing or exiting.
+    pub fn main(text: Option<String>, process: Option<process>, path: &str) -> Result<(), Vec<Diagnostic>> {
+        let text = match text {
+            Some(text) => text,
+            None => std::fs::read(path)
+                .map_err(|e| vec![rays_diagnostic::error("E_IO".to_string(), e.to_string(), None, None, None, Vec::new(), Vec::new())])
+                .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())?,
+        };
+        let imports = source_file::read_imports(path, &text)?;
+        let doc = load(None, imports, None, &text)?;
+        run(None, None, Some(source { path: path.to_string(), digest: lowering::sha256(&text) }), process.unwrap_or_default(), doc).map_err(|d| vec![d])
+    }
+}
+
+/// One workspace's real frames without a window: update, render into an offscreen canvas, and the
+/// frame boundary (`after_present`), on one domain. The one runner behind `rays mem`.
+pub mod Measure {
+    use super::Editor;
+    use flow_native::workspace_gpu;
+    use rays::frame;
+
+    #[derive(Clone, Debug)]
+    pub struct sample {
+        pub frame: i64,
+        /// Rust allocator-requested live bytes (OCaml: live words after a full collection).
+        pub live: i64,
+        /// The device's allocated bytes, through OGPU.
+        pub device: i64,
+        pub footprint: i64,
+        pub allocated: f64,
+        pub promoted: f64,
+        pub report: mem::Report,
+    }
+
+    #[derive(Clone, Debug)]
+    pub struct outcome {
+        pub early: sample,
+        pub fin: sample,
+        pub fallbacks: Vec<(String, String, i64)>,
+        pub readback_bytes: i64,
+        /// arrays read back; the rest is bounds a selection box asks for
+        pub payload_readback_bytes: i64,
+        /// the process's highest, read before the last report's walk
+        pub peak_footprint: i64,
+        pub memory_error: Option<String>,
+        pub cook_error: Option<String>,
+    }
+
+    /// OCaml's optional arguments of `run`.
+    pub struct MeasureOptions {
+        pub width: i64,
+        pub height: i64,
+        pub device: bool,
+    }
+
+    impl Default for MeasureOptions {
+        fn default() -> MeasureOptions {
+            MeasureOptions { width: 960, height: 640, device: false }
+        }
+    }
+
+    fn frame_at(width: i64, height: i64, tick: i64) -> frame::t {
+        frame::t {
+            input: input::Frame { dt: 1. / 60., frame: tick, tick, size: (width, height), pointer: (-100., -100.), ..input::at_time(tick as f64 / 60.) },
+            pixel_scale: (1., 1.),
+            fps: 60.,
+            mouse_delta: (0., 0.),
+        }
+    }
+
+    /// `step` runs before each frame's update, for scripted edits.
+    pub fn run(options: MeasureOptions, step: &dyn Fn(i64, Editor::t) -> Editor::t, early: i64, frames: i64, workspace: &editor_document::workspace_doc::T) -> Result<outcome, String> {
+        let MeasureOptions { width, height, device } = options;
+        let canvas = rays::canvas::create(width, height)?;
+        let result = (|| {
+            // its renderer and pipelines before the document opens, as a window makes them at
+            // startup: a canvas makes them at its first render, which would land them on the first
+            // cook's peak
+            rays::canvas::render(Some(1), &canvas, &[])?;
+            let gpu_owner = workspace_gpu::create(None);
+            if device {
+                workspace_gpu::qualification(&gpu_owner);
+            }
+            // its pixels: a walk of the canvas would reach the renderer's charged caches too
+            let canvas_owner = mem::plan("rays.canvas");
+            let canvas_bytes = width * height * 4;
+            mem::charge(&canvas_owner, canvas_bytes);
+            let result = (|| {
+                let editor = Editor::create(
+                    Editor::Create { gpu_owner: Some(gpu_owner.clone()), ui_text_size: Some(11), await_: Some(true), domains: Some(1), ..Default::default() },
+                    workspace,
+                    None,
+                    Editor::prepare_fn(),
+                    Editor::draw_fn(),
+                )?;
+                let mut editor = editor;
+                let allocated0 = mem::allocated_bytes() as f64;
+                let measure = |editor: &Editor::t, walk: bool, tick: i64| -> sample {
+                    let device = workspace_gpu::device_limits(&editor.host.borrow().gpu).map(|(b, _, _)| b).unwrap_or(0);
+                    // one walk, the last: a walk's hash set stays in the footprint of the next sample
+                    let report = mem::report_with(mem::ReportOptions { walk, device, budget: None });
+                    sample { frame: tick, live: report.live_bytes, device, footprint: report.footprint, allocated: mem::allocated_bytes() as f64 - allocated0, promoted: 0., report }
+                };
+                let mut first: Option<sample> = None;
+                let mut failure: Option<String> = None;
+                let mut tick = 0;
+                while failure.is_none() && tick < frames {
+                    tick += 1;
+                    let at = frame_at(width, height, tick);
+                    editor = step(tick, editor);
+                    editor = Editor::update(editor, &at);
+                    if let Err(message) = rays::canvas::render(Some(1), &canvas, &Editor::scene(&editor, &at)) {
+                        failure = Some(message);
+                    }
+                    editor = Editor::after_present(editor, &at);
+                    if tick == early {
+                        first = Some(measure(&editor, false, tick));
+                    }
+                }
+                let outcome = match failure {
+                    Some(message) => Err(message),
+                    None => {
+                        let peak_footprint = mem::peak_footprint().unwrap_or(0);
+                        let fin = measure(&editor, true, frames);
+                        let early = first.unwrap_or_else(|| fin.clone());
+                        let (stats, _, _, _, _) = workspace_gpu::image_stats(&editor.host.borrow().gpu);
+                        Ok(outcome {
+                            early,
+                            fin,
+                            fallbacks: flow_ir::fallback::seen(),
+                            readback_bytes: stats.readback_bytes,
+                            payload_readback_bytes: stats.payload_readback_bytes,
+                            peak_footprint,
+                            memory_error: editor.memory_error.clone(),
+                            cook_error: editor.core.cook.error.clone(),
+                        })
+                    }
+                };
+                Editor::close(&editor);
+                outcome
+            })();
+            mem::release(&canvas_owner, canvas_bytes);
+            workspace_gpu::close(&gpu_owner);
+            result
+        })();
+        let _ = rays::canvas::destroy(&canvas);
+        result
+    }
+}

@@ -902,7 +902,7 @@ pub fn draw_timeline_pane(
     timeline_: &timeline::t,
     max_frame: i64,
     slots: &[(layout::Bounds, UiBox, bool)],
-    timeline_root: &Option<(Leaf, UiBox)>,
+    timeline_root: &Option<(Panel, UiBox)>,
     strip_bounds: layout::Bounds,
 ) -> (Vec<timeline_intent>, Vec<pxui_shell::chrome::Intent>) {
     let mut intents = Vec::new();

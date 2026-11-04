@@ -255,7 +255,7 @@ fn whole_frame_update() {
     big_stack(|| {
         let value = model();
         let frame0 = frame_at(0.0, vec![], vec![]);
-        let camera = || -> Panel_result { Rc::new(()) };
+        let camera = |_: &mut pxui::ui::Ui| -> Panel_result { Rc::new(()) };
         let handles = |_: &mut pxui::ui::Ui, _: Option<&picked>, _: rays_math::mat4::T, _: pxui_shell::layout::Bounds| (Vec::new(), false, None);
         let view_state: Rc<dyn Fn(Option<&Panel_result>) -> syntax::Syntax> = Rc::new(|_| syntax::make(syntax::Node::Map(Vec::new())));
         // the panes hidden: only the keys and the reducer run

@@ -554,7 +554,7 @@ pub fn draw_inspectors(
     value: &t,
     workspace: &shell,
     image: &dyn Fn(i64) -> Option<rays::image::t>,
-    camera_panel: &dyn Fn() -> Panel_result,
+    camera_panel: &dyn Fn(&mut Ui) -> Panel_result,
     inspector_visible: bool,
     unchanged: &editor_document::settings::T,
     g: &layout::Geometry,
@@ -895,7 +895,7 @@ pub fn update_frame(
     carry_changed: bool,
     all_ui_visible: bool,
     text_focus: bool,
-    camera_panel: &dyn Fn() -> Panel_result,
+    camera_panel: &dyn Fn(&mut Ui) -> Panel_result,
     view_handles: &ViewHandles,
     render_status: Option<String>,
     error_status: Option<String>,
@@ -1276,10 +1276,7 @@ pub fn update_frame(
             } else {
                 timeline_leaves.iter().map(|(l, b)| (l.body, b.clone(), false)).collect()
             };
-            let timeline_root_leaf: Option<(Leaf, UiBox)> = timeline_root.as_ref().map(|(panel, b)| {
-                (Leaf { path: vec![HOST_BAR], panel: panel.clone(), frame: (0, 0, 0, 0), header: (0, 0, 0, 0), body: (0, 0, 0, 0), floating: false }, b.clone())
-            });
-            let (timeline_intents, strip_layout) = draw_timeline_pane(ui, &value.timeline, value.timeline_frames, &timeline_slots, &timeline_root_leaf, g.timeline_at);
+            let (timeline_intents, strip_layout) = draw_timeline_pane(ui, &value.timeline, value.timeline_frames, &timeline_slots, &timeline_root, g.timeline_at);
             let (selection, grab, handle_ops, handle_changes) = draw_handles(&value, &workspace, selection, &selected_obj, lowered_level, scope_active, &active, &view_root, view_handles, ui);
             changes.extend(handle_ops);
             let context = match &leader {
@@ -1441,7 +1438,7 @@ pub fn update(
     value: t,
     all_ui_visible: bool,
     text_focus: bool,
-    camera_panel: &dyn Fn() -> Panel_result,
+    camera_panel: &dyn Fn(&mut Ui) -> Panel_result,
     view_handles: &ViewHandles,
     render_status: Option<String>,
     error_status: Option<String>,

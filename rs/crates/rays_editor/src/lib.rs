@@ -78,3 +78,10 @@ mod test_editor_model;
 // tests: E
 #[cfg(test)]
 mod test_editor_reduce;
+
+// api: F (the public surface of rays_editor.rs, as `Rays_editor.Editor` etc.)
+pub use rays_editor::{window, workspace_catalog, workspace_window, Editor, Measure, Reduce, Renderer, Settings, Source, Timeline, Workspace, Workspace_doc};
+
+// tests: F
+#[cfg(test)]
+mod test_loop_pure;
