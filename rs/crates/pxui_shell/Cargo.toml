@@ -1,0 +1,31 @@
+[package]
+name = "pxui_shell"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "pxui_shell"
+path = "src/lib.rs"
+
+[dependencies]
+rays = { path = "../rays" }
+rays_math = { path = "../rays_math" }
+editor_core = { path = "../editor_core" }
+pxui = { path = "../pxui" }
+cfmt = { path = "../cfmt" }
+ocaml_int = { path = "../ocaml_int" }
+input = { path = "../input" }
+param = { path = "../param" }
+
+[dev-dependencies]
+ogpu = { path = "../ogpu" }
+ogpu_vulkan = { path = "../ogpu_vulkan" }
+renderer = { path = "../renderer" }
+sdl3 = { path = "../sdl3" }
+
+# The kit text needs the SDL main thread (fonts): the window_ target runs its cases on its own main
+# (the rays crate tests/common/window.rs) in one process.
+[[test]]
+name = "window_pxui_shell"
+harness = false
