@@ -2,9 +2,8 @@
 //! and through 2^32-1, the resident fold's uint32 scope, compaction block tails, topology
 //! validation on the device and GPU-origin streams.
 //!
-//! Deviation, noted in the crate report: the OCaml test materialises holders from 4 worker
-//! domains; OGPU views are `Rc` here, so a worker thread can only read planes the creating thread
-//! already read. These cases materialise on the creating thread.
+//! The OCaml test materialises holders from 4 worker domains; here the creating thread answers
+//! their reads in `run::service` (`holders`).
 mod common;
 use common::test_program as tp;
 use flow_gpu::{host, pipelines, run};
@@ -299,6 +298,15 @@ fn holders() {
     assert!(read.is_err(), "freed uint32 holder read");
     (second.release)(true);
     run::close(&r, false);
+    // first read from 4 worker threads, the owner answering: equal to the 1-thread read
+    let workers: Vec<_> = (0..4).map(|_| { let s = second.clone(); std::thread::spawn(move || (s.materialise)()) }).collect();
+    while !workers.iter().all(|w| w.is_finished()) {
+        run::service();
+        std::thread::yield_now();
+    }
+    for w in workers {
+        assert_eq!(w.join().unwrap(), expected);
+    }
     assert_eq!((second.materialise)(), expected);
     assert_eq!(run::Private::readback_bytes(&r), 2 * 1025 * 4);
     // an invalid word is never published

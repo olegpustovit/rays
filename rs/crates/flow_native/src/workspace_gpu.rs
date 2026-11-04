@@ -741,6 +741,7 @@ pub fn pump(t_: &t, follow_up: bool) {
         panic!("Workspace_gpu.pump: initial domain required");
     }
     reap_scopes();
+    run::service();
     let shared = &d.shared;
     // only the pump's first take may be a settle; everything after it is a follow-up
     let Some(first) = take(shared, false) else { return };

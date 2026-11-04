@@ -30,10 +30,7 @@ use suite_t1::*;
 
 /// (case, reason): not run, recorded in rs/port/parity_backlog.md "## editor suite t1".
 const SKIPPED: &[(&str, &str)] = &[
-    ("run_result_view", "flow_gpu: Run.materialise panics on the sop-async-cook thread (device output read off its owner thread), the await never returns; parity_backlog.md editor suite t1"),
-    ("run_geometry_view", "hangs in the cook like run_result_view (for-loop over sop/point_list); parity_backlog.md editor suite t1"),
     ("run_cameras", "product: a click on the geometry of a viewport over another scene instance selects nothing (last assertion); parity_backlog.md editor suite t1"),
-    ("run_idle_follow", "product: E_CONTEXT_TIME, the checker refuses a scene field reading t that the OCaml checker accepts; parity_backlog.md editor suite t1"),
     ("probe", "scratch"),
 ];
 
@@ -55,8 +52,8 @@ cases! {
     run_values => part2::run_values, true;
     run_duplicate_and_view => part2::run_duplicate_and_view, true;
     run_loop_view => part2::run_loop_view, true;
-    run_result_view => part2::run_result_view, false;
-    run_geometry_view => part2::run_geometry_view, false;
+    run_result_view => part2::run_result_view, true;
+    run_geometry_view => part2::run_geometry_view, true;
     run_movers => part2::run_movers, true;
     run_ops => part3::run_ops, true;
     run_restore => part3::run_restore, false;
@@ -71,7 +68,7 @@ cases! {
     run_compose => part4::run_compose, true;
     run_layouts => part4::run_layouts, true;
     run_root_section => part5::run_root_section, false;
-    run_idle_follow => part5::run_idle_follow, false;
+    run_idle_follow => part5::run_idle_follow, true;
     run_hide_and_order => part5::run_hide_and_order, false;
     run_copy_lisp => part5::run_copy_lisp, false;
     run_studio => part5::run_studio, true;

@@ -6,8 +6,8 @@
 //! `release`) goes through a thread-local registry keyed by the holder's id: the closures a holder
 //! hands out capture only an `Arc<Token>` (id, fate, release queue), so they are `Send + Sync`.
 //! A holder is released when its last `Token` drops (OCaml: `Gc.finalise`); a read from another
-//! thread succeeds only once the planes were read on the owner (a gap against OCaml, noted in the
-//! crate report). Parallel conversion of mapped views (`Parallel.for_`) is sequential here for the
+//! thread posts a request the owner answers in `service` (the workspace pump calls it), so any
+//! thread can be the first reader as in OCaml. Parallel conversion of mapped views (`Parallel.for_`) is sequential here for the
 //! same reason: the views are `Rc`.
 use crate::kernels;
 use crate::pipelines;
@@ -21,7 +21,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
-use std::sync::{Arc, LazyLock, Mutex, Weak};
+use std::sync::{Arc, Condvar, LazyLock, Mutex, Weak};
 use std::thread::ThreadId;
 
 pub const MAX_STRING: i64 = 144115188075855863;
@@ -105,6 +105,7 @@ struct Shared {
 pub struct Token {
     settled: Arc<AtomicBool>,
     id: i64,
+    owner: ThreadId,
     fate: Arc<Fate>,
     shared: Arc<Shared>,
 }
@@ -1536,13 +1537,61 @@ fn release_kept(shared: &Shared, fate: &Fate, id: i64, weak: Weak<Token>, held: 
     }
 }
 
+/// A read another thread asked the owner for (OGPU handles are `Rc`, so only the owner can touch the
+/// buffer). The owner answers in `service`; the asker sleeps on `done`.
+struct Request {
+    owner: ThreadId,
+    id: i64,
+    result: Mutex<Option<Result<Arc<Vec<Vec<f64>>>, String>>>,
+    done: Condvar,
+}
+
+static REQUESTS: Mutex<Vec<Arc<Request>>> = Mutex::new(Vec::new());
+
+fn answer(request: &Request, result: Result<Arc<Vec<Vec<f64>>>, String>) {
+    *request.result.lock().unwrap() = Some(result);
+    request.done.notify_all();
+}
+
+/// Owner thread: answers the reads other threads asked for (every `materialise` off the creating
+/// thread waits for this). Call it wherever the owner waits or pumps; `Workspace_gpu.pump` does.
+pub fn service() {
+    let mine: Vec<Arc<Request>> = {
+        let mut all = REQUESTS.lock().unwrap();
+        let (mine, rest): (Vec<_>, Vec<_>) = all.drain(..).partition(|r| r.owner == me());
+        *all = rest;
+        mine
+    };
+    for request in mine {
+        let result = match kept_of(request.id) {
+            Some(kept) => std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| materialise(&kept))).map_err(|e| {
+                e.downcast_ref::<String>().cloned().or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_else(|| "Run.materialise failed".to_owned())
+            }),
+            None => Err("Run.materialise: a device output was read after its owner closed".to_owned()),
+        };
+        answer(&request, result);
+    }
+}
+
 fn token_planes(token: &Token) -> Arc<Vec<Vec<f64>>> {
     if let Some(p) = token.fate.planes() {
         return p;
     }
-    match kept_of(token.id) {
-        Some(kept) if me() == kept.owner.0.domain => materialise(&kept),
-        _ => panic!("Run.materialise: a device output was read off its owner's thread before it was read there"),
+    if me() == token.owner {
+        return match kept_of(token.id) {
+            Some(kept) => materialise(&kept),
+            None => panic!("Run.materialise: a device output was read after its owner closed"),
+        };
+    }
+    let request = Arc::new(Request { owner: token.owner, id: token.id, result: Mutex::new(None), done: Condvar::new() });
+    REQUESTS.lock().unwrap().push(request.clone());
+    let mut slot = request.result.lock().unwrap();
+    while slot.is_none() {
+        slot = request.done.wait(slot).unwrap();
+    }
+    match slot.take().unwrap() {
+        Ok(planes) => planes,
+        Err(message) => panic!("{message}"),
     }
 }
 
@@ -1565,7 +1614,7 @@ fn hold(t: &T, uint32: bool, buffer: &Buffer, capacity: i64, count: i64, width: 
         bounds_memo: RefCell::new(None),
         owner: t.clone(),
     });
-    let token = Arc::new(Token { id, fate: fate.clone(), shared: d.pool.0.shared.clone(), settled: settled.clone() });
+    let token = Arc::new(Token { id, owner: d.domain, fate: fate.clone(), shared: d.pool.0.shared.clone(), settled: settled.clone() });
     let weak = Arc::downgrade(&token);
     d.state.borrow_mut().kept.insert(0, KeptRef { epoch, settled: settled.clone(), token: weak.clone(), id });
     d.pool.0.s.borrow_mut().held.insert(id, (buffer.clone(), capacity, fate.clone()));
@@ -1740,12 +1789,12 @@ fn integer_holder(domain: ThreadId, planes: Gpu::Planes, kept: Option<Rc<Kept>>)
     Uint32Holder {
         count: planes.count,
         materialise: Arc::new(move || {
-            let mut g = cache.lock().unwrap();
-            if let Some(values) = &*g {
+            // not under the lock: a foreign reader waits for the owner, who may be reading too
+            if let Some(values) = &*cache.lock().unwrap() {
                 return (**values).clone();
             }
             let values: Vec<i64> = (p1.materialise)()[0].iter().map(|v| *v as i64).collect();
-            *g = Some(Arc::new(values.clone()));
+            *cache.lock().unwrap() = Some(Arc::new(values.clone()));
             values
         }),
         settle: Arc::new(move || (p2.settle)()),
@@ -2544,4 +2593,14 @@ pub fn clear_thread_state() {
     BINDABLE.with(|b| b.borrow_mut().clear());
     let kept: Vec<Rc<Kept>> = KEPT.with(|k| k.borrow_mut().drain().map(|(_, v)| v).collect());
     drop(kept);
+    // reads nobody will answer fail rather than sleep forever
+    let mine: Vec<Arc<Request>> = {
+        let mut all = REQUESTS.lock().unwrap();
+        let (mine, rest): (Vec<_>, Vec<_>) = all.drain(..).partition(|r| r.owner == me());
+        *all = rest;
+        mine
+    };
+    for request in mine {
+        answer(&request, Err("Run.materialise: a device output was read after its owner closed".to_owned()));
+    }
 }
