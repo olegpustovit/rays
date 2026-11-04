@@ -16,7 +16,7 @@ use std::sync::Arc;
 fn same(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Float(a), Value::Float(b)) => a.to_bits() == b.to_bits(),
-        (Value::List(a), Value::List(b)) => a.len() == b.len() && a.iter().zip(b).all(|(a, b)| same(a, b)),
+        (Value::List(a), Value::List(b)) => a.len() == b.len() && a.iter().zip(b.iter()).all(|(a, b)| same(a, b)),
         (Value::Record(a), Value::Record(b)) => a.len() == b.len() && a.iter().zip(b).all(|((n, a), (m, b))| n == m && same(a, b)),
         (a, b) => a == b,
     }
@@ -126,7 +126,7 @@ fn core_list_stores_need_a_local_builder() {
     let live = input::at_time(0.);
     let mut good = init();
     good.push(store());
-    assert!(ts::run_simple(&program(good), &live) == Ok(Value::List(vec![Value::Int(7), Value::No_geo])));
+    assert!(ts::run_simple(&program(good), &live) == Ok(Value::List(Arc::new(vec![Value::Int(7), Value::No_geo]))));
     let mut published = init();
     published.push(statement(5, C::StatementNode::Assign(4, C::Expr::Local(1))));
     published.push(statement(6, C::StatementNode::Assign(5, C::Expr::Fields(vec![("xs".into(), 4)]))));
@@ -212,7 +212,7 @@ fn known_5001_geometry_map_filter_captures() {
         "(map (fn [(geo : geometry)] (nth (list geo) (int/mod (frame/index) 1))) parts)",
         "(filter (fn [(geo : geometry)] (if (< t 0.5) true (equal? geo (first parts)))) parts)",
     ] {
-        let r = captured("geometry", body, Value::List(xs.clone()));
+        let r = captured("geometry", body, Value::List(Arc::new(xs.clone())));
         let core = ts::lower_strict(r).unwrap_or_else(|why| panic!("Known geometry HOF refused: {why}"));
         // A homogeneous captured collection is constructed once before Counted.
         // Its loop must not contain a 5001-arm selector or rebuild its input.
@@ -238,7 +238,7 @@ fn known_5001_geometry_map_filter_captures() {
             assert!(same(&actual, &expected));
         }
     }
-    let ordinary = captured("int", "(filter (fn [(x : int)] (< t 0.5)) parts)", Value::List(vec![Value::Int(1); 5001]));
+    let ordinary = captured("int", "(filter (fn [(x : int)] (< t 0.5)) parts)", Value::List(Arc::new(vec![Value::Int(1); 5001])));
     assert!(ts::lower_strict(ordinary).is_err());
 }
 

@@ -1,5 +1,6 @@
 // Port of lib/flow/test_workspace_eval.ml (part 1: helpers, fixtures, value cases, functions,
 // lists, patterns, records). Each OCaml `t "name"` case is one #[test] here.
+use std::sync::Arc;
 use crate::*;
 use crate::test_workspace::{base_catalog, bad_text, good, parse, run_in, run_src, show_ds, errors};
 use flow_check::{op, workspace as W};
@@ -25,7 +26,7 @@ fn num(v: &Value) -> f64 { match v { Value::Int(n) => *n as f64, Value::Float(f)
 pub fn same(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Int(_) | Value::Float(_), Value::Int(_) | Value::Float(_)) => num(a) == num(b),
-        (Value::List(x), Value::List(y)) => x.len() == y.len() && x.iter().zip(y).all(|(u, v)| same(u, v)),
+        (Value::List(x), Value::List(y)) => x.len() == y.len() && x.iter().zip(y.iter()).all(|(u, v)| same(u, v)),
         (Value::Record(x), Value::Record(y)) => x.len() == y.len() && x.iter().zip(y).all(|((k, u), (l, v))| k == l && same(u, v)),
         _ => a == b,
     }
@@ -34,7 +35,7 @@ pub fn is(src: &str, want: Value) {
     let got = g_value(src);
     assert!(same(&got, &want), "{src}: got {}, want {}", String::from_utf8_lossy(&show(&got)), String::from_utf8_lossy(&show(&want)));
 }
-pub fn ints(l: &[i64]) -> Value { Value::List(l.iter().map(|n| Value::Int(*n)).collect()) }
+pub fn ints(l: &[i64]) -> Value { Value::List(Arc::new(l.iter().map(|n| Value::Int(*n)).collect())) }
 pub fn t(s: &str) -> Value { Value::Text(s.as_bytes().to_vec()) }
 
 /// A run-time error: the code, and text in the message.
@@ -215,8 +216,8 @@ fn function_values() {
     is("(workspace w (defn tot :context value [(xs : (list float)) (r : {:k float})] (* r.k (reduce + 0 xs))) (graph g :context value (tot (list 1 2) {:k 2 :extra 1})))", Value::Int(6));
     assert!(same(&bound(&value("(let* [z (map (fn [a b c] (+ a (+ b c))) (list 1 2 3) (list 10 20) (list 100 200 300))] 1)"), "z"), &ints(&[111, 222])));
     assert!(same(&bound(&value("(let* [z (filter (fn [x] (> x 1)) (list 1 2 3))] 1)"), "z"), &ints(&[2, 3])));
-    let l = |a: i64, b: i64| Value::List(vec![Value::Int(a), Value::Int(b)]);
-    assert!(same(&bound(&value("(let* [z (sort-by (fn [p] (first p)) (list (list 2 0) (list 1 1) (list 2 2) (list 1 3)))] 1)"), "z"), &Value::List(vec![l(1, 1), l(1, 3), l(2, 0), l(2, 2)])));
+    let l = |a: i64, b: i64| Value::List(Arc::new(vec![Value::Int(a), Value::Int(b)]));
+    assert!(same(&bound(&value("(let* [z (sort-by (fn [p] (first p)) (list (list 2 0) (list 1 1) (list 2 2) (list 1 3)))] 1)"), "z"), &Value::List(Arc::new(vec![l(1, 1), l(1, 3), l(2, 0), l(2, 2)]))));
     let src = sop("(let* [z (map (fn [x] (sop/box :size x)) (list))] (sop/merge z))");
     assert!(same(&bound(&src, "z"), &ints(&[])));
     assert_eq!(ty_at(&check(&src), &["g", "z"]), "list:geometry");
@@ -225,10 +226,10 @@ fn function_values() {
 #[test]
 fn lists_and_patterns() {
     let src = value("(let* [z (list 1 2.5)] 1)");
-    assert_eq!(bound(&src, "z"), Value::List(vec![Value::Float(1.), Value::Float(2.5)]));
+    assert_eq!(bound(&src, "z"), Value::List(Arc::new(vec![Value::Float(1.), Value::Float(2.5)])));
     assert_eq!(ty_at(&check(&src), &["g", "z"]), "list:float");
     let src = value("(let* [z (list)] 1)");
-    assert!(bound(&src, "z") == Value::List(vec![]) && ty_at(&check(&src), &["g", "z"]) == "list:any");
+    assert!(bound(&src, "z") == Value::List(Arc::new(vec![])) && ty_at(&check(&src), &["g", "z"]) == "list:any");
     assert_eq!(bound(&value("(let* [s (str (first (list 4 5)) (last (list 4 5)) (rest (list 1 2 3)) (nth (list 7 8) 1) (concat (list 1) (list) (list 2 3)) (reverse (list 1 2)) (take 2 (list 1 2 3)) (drop 2 (list 1 2 3)))] 1)"), "s"), t("45[2 3]8[1 2 3][2 1][1 2][3]"));
     err(&value("(nth (list 1 2) 5)"), "E_LIST_RANGE", "index 5 is out of range for a list of length 2");
     err(&value("(nth (list 1 2) -1)"), "E_LIST_RANGE", "");
@@ -493,8 +494,8 @@ fn l2_l4_l5_product_order_empty_results_ints() {
     // merge of nothing: one merge node with no inputs
     assert!(count_of(&r, "sop/merge") == 1 && r.nodes_of("sop/merge")[0].args.is_empty());
     assert_eq!(bound(&value("(let* [z (range 3)] 1)"), "z"), ints(&[0, 1, 2]));
-    assert_eq!(bound(&value("(let* [z (linspace 0 1 3)] 1)"), "z"), Value::List(vec![Value::Float(0.), Value::Float(0.5), Value::Float(1.)]));
-    assert_eq!(bound(&value("(let* [z (linspace 2 5 1)] 1)"), "z"), Value::List(vec![Value::Float(2.)]));
+    assert_eq!(bound(&value("(let* [z (linspace 0 1 3)] 1)"), "z"), Value::List(Arc::new(vec![Value::Float(0.), Value::Float(0.5), Value::Float(1.)])));
+    assert_eq!(bound(&value("(let* [z (linspace 2 5 1)] 1)"), "z"), Value::List(Arc::new(vec![Value::Float(2.)])));
     is(&value("(count (range 2 6))"), Value::Int(4));
 }
 
@@ -503,7 +504,7 @@ fn l6_l14_accumulators_and_ref_overrides() {
     assert_eq!(g_value(&value("(fold [a 1] [i (range 3)] (* a 2.5))")), Value::Float(15.625));
     assert_eq!(g_value(&value("(fold [a 0] [i (range 3)] (+ a 0.5))")), Value::Float(1.5));
     assert_eq!(g_value(&value("(fold [a 0] [i (range 3)] (+ a i))")), Value::Int(3));
-    assert_eq!(bound(&value("(let* [z (scan [a 0] [i (range 2)] (+ a 0.5))] 1)"), "z"), Value::List(vec![Value::Float(0.5), Value::Float(1.)]));
+    assert_eq!(bound(&value("(let* [z (scan [a 0] [i (range 2)] (+ a 0.5))] 1)"), "z"), Value::List(Arc::new(vec![Value::Float(0.5), Value::Float(1.)])));
     assert_eq!(bound(&value("(let* [z (sum [i (range 3)] [i 0 1])] 1)"), "z"), Value::Vec3(3., 0., 3.));
     assert_eq!(g_value(&value("(sum [i (range 3)] 0.5)")), Value::Float(1.5));
     assert_eq!(g_value(&value("(sum [i (range 3)] i)")), Value::Int(3));
@@ -583,14 +584,14 @@ fn w8_for_over_point_list_is_a_zone_node() {
 
 #[test]
 fn l16_skip_leaves_iterations_out() {
-    let nested = |l: &[&[i64]]| Value::List(l.iter().map(|x| ints(x)).collect());
+    let nested = |l: &[&[i64]]| Value::List(Arc::new(l.iter().map(|x| ints(x)).collect()));
     let zs = |src: &str, want: Value| assert!(same(&bound(&value(&format!("(let* [z {src}] 1)")), "z"), &want), "{src}");
     zs("(for [i (range 5)] :skip [1 3] i)", ints(&[0, 2, 4]));
     zs("(for [i (range 5)] :skip [[1] [3]] i)", ints(&[0, 2, 4]));
     is(&value("(count (for [i (range 5)] :skip [0 1 2 3 4] i))"), Value::Int(0));
     zs("(for [i (range 2) j (range 3)] :skip [4] (+ (* 10 i) j))", ints(&[0, 1, 2, 10, 12]));
     zs("(for [i (range 3)] (for [j (range 2)] :skip [[1 0] [2 1]] (+ (* 10 i) j)))", nested(&[&[0, 1], &[11], &[20]]));
-    zs("(for [i (range 2)] (for [j (range 2)] (for [k (range 2)] :skip [[1 0 1] [0 1 0]] (+ (* 100 i) (+ (* 10 j) k)))))", Value::List(vec![Value::List(vec![ints(&[0, 1]), ints(&[11])]), Value::List(vec![ints(&[100]), ints(&[110, 111])])]));
+    zs("(for [i (range 2)] (for [j (range 2)] (for [k (range 2)] :skip [[1 0 1] [0 1 0]] (+ (* 100 i) (+ (* 10 j) k)))))", Value::List(Arc::new(vec![Value::List(Arc::new(vec![ints(&[0, 1]), ints(&[11])])), Value::List(Arc::new(vec![ints(&[100]), ints(&[110, 111])]))])));
     let all = run_ws(&check(&sop("(sop/merge (for [i (range 4)] (sop/box :size (+ 1 i))))")), 0.);
     let some = run_ws(&check(&sop("(sop/merge (for [i (range 4)] :skip [2] (sop/box :size (+ 1 i))))")), 0.);
     let keys = |r: &Eval| r.nodes_of("sop/box").iter().map(|n| (n.site.clone(), n.iter.clone())).collect::<Vec<_>>();

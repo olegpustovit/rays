@@ -251,8 +251,21 @@ impl Arena {
         arena
     }
 }
+// the path of argument names below the term being run, shared between the contexts that extend it
 #[derive(Clone)]
-struct ExecCtx { arena: i64, inst: i64, prefix: Arc<Path>, base: Arc<Path>, route: Vec<String>, iter: Arc<Vec<i64>>, depth: usize, record: bool, data: bool, geometry: bool, host: bool, context: Context, card: Option<String> }
+struct Route(Option<Arc<RouteNode>>);
+struct RouteNode { seg: String, up: Route }
+impl Route {
+    fn to_vec(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut at = &self.0;
+        while let Some(node) = at { out.push(node.seg.clone()); at = &node.up.0; }
+        out.reverse();
+        out
+    }
+}
+#[derive(Clone)]
+struct ExecCtx { arena: i64, inst: i64, prefix: Arc<Path>, base: Arc<Path>, route: Route, iter: Arc<Vec<i64>>, depth: usize, record: bool, data: bool, geometry: bool, host: bool, context: Context, card: Option<Arc<str>> }
 #[derive(Clone)]
 struct Env { values: Arc<BTreeMap<String,Value>> }
 impl Env {
@@ -282,12 +295,12 @@ fn residual_id(a: &mut Arena, residual: ResidualData) -> ResidualId {
     a.residuals.insert(id, residual);
     id
 }
-fn root_ctx(a:&Arena)->ExecCtx{ExecCtx{arena:a.id,inst:-1,prefix:Arc::new(Vec::new()),base:Arc::new(Vec::new()),route:Vec::new(),iter:Arc::new(Vec::new()),depth:0,record:true,data:false,geometry:false,host:false,context:flow_syntax::context::host(),card:None}}
-fn site(c:&ExecCtx)->Path{let mut p=(*c.prefix).clone();p.extend(c.base.iter().cloned());p.extend(c.route.iter().cloned());p}
+fn root_ctx(a:&Arena)->ExecCtx{ExecCtx{arena:a.id,inst:-1,prefix:Arc::new(Vec::new()),base:Arc::new(Vec::new()),route:Route(None),iter:Arc::new(Vec::new()),depth:0,record:true,data:false,geometry:false,host:false,context:flow_syntax::context::host(),card:None}}
+fn site(c:&ExecCtx)->Path{let mut p=(*c.prefix).clone();p.extend(c.base.iter().cloned());p.extend(c.route.to_vec());p}
 fn eval_sub(a: &mut Arena, c: &ExecCtx, seg: String, env: &Env, t: &Term) -> Result<Value, Diagnostic> {
     if t.path.is_some() { eval_at(a, c, env, t) } else { eval_at(a, &sub(c, seg), env, t) }
 }
-fn sub(c:&ExecCtx,seg:String)->ExecCtx{let mut c=c.clone();c.route.push(seg);c}
+fn sub(c:&ExecCtx,seg:String)->ExecCtx{let mut c=c.clone();c.route=Route(Some(Arc::new(RouteNode{seg,up:c.route.clone()})));c}
 fn note(a:&mut Arena,c:&ExecCtx,path:Path,v:Value){if a.record&&c.record{let e=a.records.entry(path).or_default();if e.len()<MAX_ITERATIONS{e.push(((*c.iter).clone(),v));}}}
 fn named_args(a: &mut Arena, c: &ExecCtx, env: &Env, args: &[(String, Term)]) -> Result<Vec<(String, Value)>, Diagnostic> {
     let mut values = Vec::with_capacity(args.len());
@@ -317,11 +330,11 @@ fn field(v:Value,name:&str,form:&str)->Result<Value,Diagnostic>{match v{
     Value::Record(fs)=>fs.iter().find(|(n,_)|n==name).map(|(_,v)|v.clone()).ok_or_else(||errorf("E_FIELD",format!("{} has no field {}.",form,name))),
     _=>Err(errorf("E_FIELD",format!("{} has no output {}. A vec3 has .x .y .z; a record has its fields.",form,name)))}}
 fn elem_type(vs:&[Value])->Ty{value::elem_ty(vs)}
-fn join_list(vs:Vec<Value>)->Value{let ty=elem_type(&vs);Value::List(vs.iter().map(|v|coerce(&ty,v).unwrap_or_else(|_|v.clone())).collect())}
+fn join_list(vs:Vec<Value>)->Value{let ty=elem_type(&vs);Value::List(Arc::new(vs.iter().map(|v|coerce(&ty,v).unwrap_or_else(|_|v.clone())).collect()))}
 fn live_in(v:&Value,a:&Arena)->bool{match v{Value::Residual(_)|Value::Source(..)=>true,Value::Struct(_,Ty::Array(_),_)=>true,Value::List(v)=>v.iter().any(|x|live_in(x,a)),Value::Record(fs)|Value::Struct(_,_,fs)=>fs.iter().any(|(_,v)|live_in(v,a)),_=>false}}
 fn bind_pattern(a:&mut Arena,c:&ExecCtx,env:&mut Env,pat:&W::Pattern,v:Value,mk:Option<&dyn Fn(&str)->Path>)->Result<(),Diagnostic>{match pat{
     W::Pattern::Name(n)=>{if let Some(mk)=mk{note(a,c,mk(n),v.clone());}env.bind(n.clone(),v);Ok(())},
-    W::Pattern::Seq(ps)=>{let v=concrete(a,v)?;let xs=match v{Value::List(xs)=>xs,Value::Vec2(x,y)=>vec![Value::Float(x),Value::Float(y)],Value::Vec3(x,y,z)=>vec![Value::Float(x),Value::Float(y),Value::Float(z)],Value::Vec4(x,y,z,w)=>vec![Value::Float(x),Value::Float(y),Value::Float(z),Value::Float(w)],_=>return Err(errorf("E_PATTERN",format!("{} destructures a list or vec3.",pattern_name(pat))))};if xs.len()<ps.len(){return Err(errorf("E_PATTERN",format!("{} needs {} elements; the list has {}.",pattern_name(pat),ps.len(),xs.len())))}for (p,x) in ps.iter().zip(xs){bind_pattern(a,c,env,p,x,mk)?;}Ok(())},
+    W::Pattern::Seq(ps)=>{let v=concrete(a,v)?;let xs=match v{Value::List(xs)=>(*xs).clone(),Value::Vec2(x,y)=>vec![Value::Float(x),Value::Float(y)],Value::Vec3(x,y,z)=>vec![Value::Float(x),Value::Float(y),Value::Float(z)],Value::Vec4(x,y,z,w)=>vec![Value::Float(x),Value::Float(y),Value::Float(z),Value::Float(w)],_=>return Err(errorf("E_PATTERN",format!("{} destructures a list or vec3.",pattern_name(pat))))};if xs.len()<ps.len(){return Err(errorf("E_PATTERN",format!("{} needs {} elements; the list has {}.",pattern_name(pat),ps.len(),xs.len())))}for (p,x) in ps.iter().zip(xs){bind_pattern(a,c,env,p,x,mk)?;}Ok(())},
     W::Pattern::Keys(ks)=>{let v=concrete(a,v)?;for k in ks{let x=field(v.clone(),k,&pattern_name(pat))?;bind_pattern(a,c,env,&W::Pattern::Name(k.clone()),x,mk)?;}Ok(())}}}
 fn record_pattern(a: &mut Arena, c: &ExecCtx, zone: &Path, pattern: &W::Pattern, value: &Value) -> Result<(), Diagnostic> {
     if !a.record || !c.record { return Ok(()); }
@@ -338,7 +351,7 @@ fn record_pattern(a: &mut Arena, c: &ExecCtx, zone: &Path, pattern: &W::Pattern,
         }
         W::Pattern::Seq(patterns) => {
             let values = match value {
-                Value::List(values) => values.clone(),
+                Value::List(values) => (**values).clone(),
                 Value::Vec2(x, y) => vec![Value::Float(*x), Value::Float(*y)],
                 Value::Vec3(x, y, z) => vec![Value::Float(*x), Value::Float(*y), Value::Float(*z)],
                 Value::Vec4(x, y, z, w) => vec![Value::Float(*x), Value::Float(*y), Value::Float(*z), Value::Float(*w)],
@@ -411,7 +424,7 @@ fn capture_env(term: &Term, env: &Env) -> BTreeMap<String, Value> {
     free_names(term).into_iter().filter_map(|name| env.get(&name).map(|value| (name, value))).collect()
 }
 
-fn eval_at(a:&mut Arena,c:&ExecCtx,env:&Env,t:&Term)->Result<Value,Diagnostic>{let owned;let c=match &t.path{Some(p)=>{owned=ExecCtx{arena:c.arena,inst:c.inst,prefix:c.prefix.clone(),base:Arc::new(p.clone()),route:Vec::new(),iter:c.iter.clone(),depth:c.depth,record:c.record,data:c.data,geometry:c.geometry,host:c.host,context:c.context.clone(),card:c.card.clone()};&owned},None=>c};let r=eval_raw(a,&c,env,t).and_then(|v| if a.time.is_some() { concrete(a, v) } else { Ok(v) }).map_err(|e|add_span(e,t));match r{
+fn eval_at(a:&mut Arena,c:&ExecCtx,env:&Env,t:&Term)->Result<Value,Diagnostic>{let owned;let c=match &t.path{Some(p)=>{owned=ExecCtx{arena:c.arena,inst:c.inst,prefix:c.prefix.clone(),base:Arc::new(p.clone()),route:Route(None),iter:c.iter.clone(),depth:c.depth,record:c.record,data:c.data,geometry:c.geometry,host:c.host,context:c.context.clone(),card:c.card.clone()};&owned},None=>c};let r=eval_raw(a,&c,env,t).and_then(|v| if a.time.is_some() { concrete(a, v) } else { Ok(v) }).map_err(|e|add_span(e,t));match r{
     Ok(v)=>{if a.record&&c.record{if let Some(p)=&t.path{note(a,&c,p.clone(),v.clone());}}Ok(v)},
     Err(d) if d.code == "$NEEDS_TIME" => {
         if a.time.is_some() { Err(error("E_EVAL", "A live value was needed while evaluating dynamically.")) }
@@ -479,7 +492,7 @@ fn eval_concrete(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term) -> Result<V
 fn geometry_ids(value: &Value, out: &mut Vec<i64>) {
     match value {
         Value::Deferred(ty, id) if flow_syntax::ty::is_geometry(ty) => out.push(*id),
-        Value::List(values) => for value in values { geometry_ids(value, out); },
+        Value::List(values) => for value in values.iter() { geometry_ids(value, out); },
         Value::Record(fields) | Value::Struct(_, _, fields) | Value::Source(_, _, fields) => for (_, value) in fields { geometry_ids(value, out); },
         _ => (),
     }
@@ -505,10 +518,10 @@ fn inline_node(a: &mut Arena, c: &ExecCtx, _authored: i64, original: &W::NodeDef
     let mut context = c.clone();
     context.prefix = Arc::new(site(c));
     context.base = Arc::new(vec![format!("node:{}", definition.kind.qualified)]);
-    context.route.clear();
+    context.route = Route(None);
     context.depth += 1;
     context.record = false;
-    context.card = definition.kind.qualified.split_once('/').map(|(_, label)| label.to_owned()).or_else(|| Some(definition.kind.qualified.clone()));
+    context.card = definition.kind.qualified.split_once('/').map(|(_, label)| Arc::<str>::from(label)).or_else(|| Some(Arc::<str>::from(definition.kind.qualified.as_str())));
     let mut env = Env::empty();
     for (name, ty, default) in &definition.body.inputs {
         let mut value = if definition.slots.iter().any(|slot| slot.rest && slot.name == *name) {
@@ -520,7 +533,7 @@ fn inline_node(a: &mut Arena, c: &ExecCtx, _authored: i64, original: &W::NodeDef
                     value => flattened.push(value.clone()),
                 }
             }
-            Value::List(flattened)
+            Value::List(Arc::new(flattened))
         } else if let Some(value) = parameters.iter().find(|(arg_name, _)| arg_name == name).or_else(|| args.iter().find(|(arg_name, _)| arg_name == name)).map(|(_, value)| value.clone()) {
             value
         } else if let Some(default) = default {
@@ -553,7 +566,7 @@ fn inline_node(a: &mut Arena, c: &ExecCtx, _authored: i64, original: &W::NodeDef
             let slots = definition.slots.iter().map(|slot| {
                 let mut ids = Vec::new();
                 for (_, value) in args.iter().filter(|(name, _)| name == &slot.name) { geometry_ids(value, &mut ids); }
-                (slot.name.clone(), Value::List(ids.into_iter().map(Value::Int).collect()))
+                (slot.name.clone(), Value::List(Arc::new(ids.into_iter().map(Value::Int).collect())))
             }).collect::<Vec<_>>();
             let mut marker_args = vec![
                 ("value".into(), Value::No_geo),
@@ -588,7 +601,7 @@ fn inline_node(a: &mut Arena, c: &ExecCtx, _authored: i64, original: &W::NodeDef
     for slot in &definition.slots {
         let mut ids = Vec::new();
         for (_, value) in args.iter().filter(|(name, _)| name == &slot.name) { geometry_ids(value, &mut ids); }
-        slot_values.push((slot.name.clone(), Value::List(ids.into_iter().map(Value::Int).collect())));
+        slot_values.push((slot.name.clone(), Value::List(Arc::new(ids.into_iter().map(Value::Int).collect()))));
     }
     let mut marker_args = vec![
         ("value".into(), result),
@@ -654,7 +667,7 @@ fn eval_raw(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Value, Di
                 let mut flattened = Vec::new();
                 for (name, value) in args {
                     match concrete(a, value)? {
-                        Value::List(values) => flattened.extend(values.into_iter().filter(|v| !matches!(v, Value::No_geo)).map(|v| (name.clone(), v))),
+                        Value::List(values) => flattened.extend(values.iter().cloned().filter(|v| !matches!(v, Value::No_geo)).map(|v| (name.clone(), v))),
                         Value::No_geo => (),
                         value => flattened.push((name, value)),
                     }
@@ -830,7 +843,7 @@ fn eval_raw(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Value, Di
             for (i, term) in terms.iter().enumerate() {
                 let context = sub(c, i.to_string());
                 match eval_concrete(a, &context, env, term)? {
-                    Value::List(list) => values.extend(list),
+                    Value::List(list) => values.extend(list.iter().cloned()),
                     _ => return eval_error("E_TYPE", "Expected a list."),
                 }
             }
@@ -851,7 +864,7 @@ fn diagnostic_payload(diagnostic: &Diagnostic) -> Value {
     Value::Record(vec![
         ("code".into(), Value::Text(diagnostic.code.as_bytes().to_vec())),
         ("message".into(), Value::Text(diagnostic.message.as_bytes().to_vec())),
-        ("cause".into(), Value::List(diagnostic.cause.iter().map(|cause| Value::Text(cause.as_bytes().to_vec())).collect())),
+        ("cause".into(), Value::List(Arc::new(diagnostic.cause.iter().map(|cause| Value::Text(cause.as_bytes().to_vec())).collect()))),
     ])
 }
 fn is_cancelled(diagnostic: &Diagnostic) -> bool { diagnostic.code == "cancelled" || diagnostic.code == "E_CANCELLED" }
@@ -865,7 +878,7 @@ fn resolve_source(a: &Arena, source: &Value) -> Result<Value, Diagnostic> {
 }
 fn concrete_data(a: &mut Arena, value: Value) -> Result<Value, Diagnostic> {
     match value {
-        Value::List(values) => Ok(Value::List(values.into_iter().map(|value| concrete_data(a, value)).collect::<Result<Vec<_>, _>>()?)),
+        Value::List(values) => Ok(Value::List(Arc::new(values.iter().cloned().map(|value| concrete_data(a, value)).collect::<Result<Vec<_>, _>>()?))),
         Value::Record(fields) => Ok(Value::Record(fields.into_iter().map(|(name, value)| Ok((name, concrete_data(a, value)?))).collect::<Result<Vec<_>, Diagnostic>>()?)),
         Value::Struct(name, ty, fields) => Ok(Value::Struct(name, ty, fields.into_iter().map(|(name, value)| Ok((name, concrete_data(a, value)?))).collect::<Result<Vec<_>, Diagnostic>>()?)),
         value => concrete(a, value),
@@ -963,7 +976,7 @@ fn data_type(ty: &Ty) -> bool {
 }
 fn apply_op(a: &mut Arena, c: &ExecCtx, authored: i64, name: &str, values: &[(String, Value)]) -> Result<Value, Diagnostic> {
     let workspace = a.workspace.clone();
-    let op = op::find_ref(&workspace.ops, name, &c.context).ok_or_else(|| errorf("E_UNKNOWN", format!("Unknown operator {}.", name)))?;
+    let op = op::find_indexed(&workspace.ops, name, &c.context).ok_or_else(|| errorf("E_UNKNOWN", format!("Unknown operator {}.", name)))?;
     let mut values = values.to_vec();
     if let Some(label) = &c.card {
         if W::BODY_CONTEXT_OPS.contains(&name) && !values.iter().any(|(key, _)| key == CONTEXT_LABEL) { values.push((CONTEXT_LABEL.into(), text(label))); }
@@ -972,7 +985,7 @@ fn apply_op(a: &mut Arena, c: &ExecCtx, authored: i64, name: &str, values: &[(St
         let mut spliced = Vec::new();
         for (name, value) in values {
             match concrete(a, value)? {
-                Value::List(items) => spliced.extend(items.into_iter().map(|value| (name.clone(), value))),
+                Value::List(items) => spliced.extend(items.iter().cloned().map(|value| (name.clone(), value))),
                 value => spliced.push((name, value)),
             }
         }
@@ -1020,7 +1033,7 @@ fn apply_op(a: &mut Arena, c: &ExecCtx, authored: i64, name: &str, values: &[(St
     }
     Ok(result)
 }
-fn apply_def(a:&mut Arena,c:&ExecCtx,name:&str,vals:&[Value],body:Option<&Term>)->Result<Value,Diagnostic>{let workspace=a.workspace.clone();let graph=workspace.defs.iter().find(|g|g.name==name).ok_or_else(||errorf("E_UNKNOWN",format!("Unknown function {}.",name)))?;if c.depth>=MAX_DEPTH{return eval_error("E_DEPTH","Call depth exceeds 64.")}let mut cx=c.clone();cx.prefix=Arc::new(site(c));cx.base=Arc::new(vec![format!("def:{}",name)]);cx.route.clear();cx.depth+=1;let mut env=Env::empty();for(i,(n,ty,default))in graph.inputs.iter().enumerate(){let v=if let Some(v)=vals.get(i){coerce(ty,v)?}else if let Some(t)=default{eval_at(a,&sub(&cx,n.clone()),&env,t)?}else{return Err(errorf("E_ARGS",format!("{} needs :{}.",name,n)))};let mut p=(*cx.base).clone();p.push(format!(":{}",n));note(a,&cx,p,v.clone());env.bind(n.clone(),v)}eval_at(a,&cx,&env,body.unwrap_or(&graph.body))}
+fn apply_def(a:&mut Arena,c:&ExecCtx,name:&str,vals:&[Value],body:Option<&Term>)->Result<Value,Diagnostic>{let workspace=a.workspace.clone();let graph=workspace.defs.iter().find(|g|g.name==name).ok_or_else(||errorf("E_UNKNOWN",format!("Unknown function {}.",name)))?;if c.depth>=MAX_DEPTH{return eval_error("E_DEPTH","Call depth exceeds 64.")}let mut cx=c.clone();cx.prefix=Arc::new(site(c));cx.base=Arc::new(vec![format!("def:{}",name)]);cx.route = Route(None);cx.depth+=1;let mut env=Env::empty();for(i,(n,ty,default))in graph.inputs.iter().enumerate(){let v=if let Some(v)=vals.get(i){coerce(ty,v)?}else if let Some(t)=default{eval_at(a,&sub(&cx,n.clone()),&env,t)?}else{return Err(errorf("E_ARGS",format!("{} needs :{}.",name,n)))};let mut p=(*cx.base).clone();p.push(format!(":{}",n));note(a,&cx,p,v.clone());env.bind(n.clone(),v)}eval_at(a,&cx,&env,body.unwrap_or(&graph.body))}
 fn call_fn(a: &mut Arena, c: &ExecCtx, id: FnId, values: &[Value], body: Option<&Term>) -> Result<Value, Diagnostic> {
     match get_fn(a, id)? {
         Function::Closure(closure) => {
@@ -1033,7 +1046,7 @@ fn call_fn(a: &mut Arena, c: &ExecCtx, id: FnId, values: &[Value], body: Option<
             context.inst = closure.at.inst;
             context.prefix = closure.at.prefix.clone();
             context.base = Arc::new(closure.zone.clone());
-            context.route.clear();
+            context.route = Route(None);
             Arc::make_mut(&mut context.iter).push(index);
             context.depth += 1;
             let mut env = Env { values: closure.env.clone() };
@@ -1054,7 +1067,7 @@ fn call_fn(a: &mut Arena, c: &ExecCtx, id: FnId, values: &[Value], body: Option<
                 Arc::make_mut(&mut context.iter).push(index);
                 return apply_def(a, &context, &named.name, values, body);
             }
-            if let Some(operation) = op::find_ref(&a.workspace.ops, &named.name, &c.context) {
+            if let Some(operation) = op::find_indexed(&a.workspace.ops, &named.name, &c.context) {
                 let names = operation.signature.pos.iter().chain(&operation.signature.opt).map(|(name, _)| name.clone()).collect::<Vec<_>>();
                 let args = values.iter().enumerate().map(|(index, value)| {
                     let name = names.get(index).cloned().or_else(|| operation.signature.rest.as_ref().map(|(name, _)| name.clone())).unwrap_or_else(|| format!("${}", index));
@@ -1123,7 +1136,7 @@ fn graph_value(a: &mut Arena, c: &ExecCtx, name: &str, over: &[(String, Value)],
     a.cells[instance as usize].result = value.clone();
     Ok(value)
 }
-fn eval_graph_body(a:&mut Arena,c:&ExecCtx,g:&Graph,over:&[(String,Value)],record:bool,inst:i64)->Result<(Value,Vec<(String,Value)>),Diagnostic>{let mut cx=c.clone();cx.inst=inst;cx.prefix=Arc::new(Vec::new());cx.base=Arc::new(vec![g.name.clone()]);cx.route.clear();cx.iter=Arc::new(Vec::new());cx.depth+=1;cx.record=record;cx.context=g.context.clone();cx.host=g.context==flow_syntax::context::host();let mut env=Env::empty();let mut ins=Vec::new();for(n,ty,default)in &g.inputs{let v=if let Some((_,v))=over.iter().find(|(k,_)|k==n){coerce(ty,v)?}else if let Some(t)=default{coerce(ty,&eval_at(a,&sub(&cx,n.clone()),&env,t)?)?}else{return Err(errorf("E_INPUT_DEFAULT",format!("Graph input {} of {} needs a default.",n,g.name)))};let mut p=vec![g.name.clone(),format!(":{}",n)];note(a,&cx,p.clone(),v.clone());env.bind(n.clone(),v.clone());ins.push((n.clone(),v));}let v=eval_at(a,&cx,&env,&g.body)?;Ok((v,ins))}
+fn eval_graph_body(a:&mut Arena,c:&ExecCtx,g:&Graph,over:&[(String,Value)],record:bool,inst:i64)->Result<(Value,Vec<(String,Value)>),Diagnostic>{let mut cx=c.clone();cx.inst=inst;cx.prefix=Arc::new(Vec::new());cx.base=Arc::new(vec![g.name.clone()]);cx.route = Route(None);cx.iter=Arc::new(Vec::new());cx.depth+=1;cx.record=record;cx.context=g.context.clone();cx.host=g.context==flow_syntax::context::host();let mut env=Env::empty();let mut ins=Vec::new();for(n,ty,default)in &g.inputs{let v=if let Some((_,v))=over.iter().find(|(k,_)|k==n){coerce(ty,v)?}else if let Some(t)=default{coerce(ty,&eval_at(a,&sub(&cx,n.clone()),&env,t)?)?}else{return Err(errorf("E_INPUT_DEFAULT",format!("Graph input {} of {} needs a default.",n,g.name)))};let mut p=vec![g.name.clone(),format!(":{}",n)];note(a,&cx,p.clone(),v.clone());env.bind(n.clone(),v.clone());ins.push((n.clone(),v));}let v=eval_at(a,&cx,&env,&g.body)?;Ok((v,ins))}
 fn state_plane(a: &Arena, c: &ExecCtx) -> Result<(State, i64), Diagnostic> {
     let state = a.state.clone().ok_or_else(|| error("E_STATE", "State is not available."))?;
     let frame = a.time.as_ref().map_or(0, |frame| if c.host { frame.tick } else { frame.frame });
@@ -1168,7 +1181,7 @@ fn state_data(value: Value) -> Result<Value, Diagnostic> {
         Value::Deferred(..) | Value::No_geo => eval_error("E_STATE_TYPE", "State stores data, not deferred nodes or layouts."),
         Value::Struct(_, ty, _) if flow_syntax::ty::shape(&ty) => eval_error("E_STATE_TYPE", "State stores data, not deferred nodes or layouts."),
         Value::Fn(_) => eval_error("E_FN_ESCAPES", "A function value cannot be stored in state."),
-        Value::List(values) => Ok(Value::List(values.into_iter().map(state_data).collect::<Result<Vec<_>, _>>()?)),
+        Value::List(values) => Ok(Value::List(Arc::new(values.iter().cloned().map(state_data).collect::<Result<Vec<_>, _>>()?))),
         Value::Record(fields) => Ok(Value::Record(fields.into_iter().map(|(name, value)| Ok((name, state_data(value)?))).collect::<Result<Vec<_>, Diagnostic>>()?)),
         Value::Struct(name, ty, fields) => Ok(Value::Struct(name, ty, fields.into_iter().map(|(name, value)| Ok((name, state_data(value)?))).collect::<Result<Vec<_>, Diagnostic>>()?)),
         value => Ok(Device::thaw(&value)),
@@ -1426,7 +1439,7 @@ fn pack(ty: &Ty, values: Vec<Value>) -> Result<Value, Diagnostic> {
 }
 fn loop_values(source: Value) -> Result<Vec<Value>, Diagnostic> {
     match source {
-        Value::List(values) => Ok(values),
+        Value::List(values) => Ok((*values).clone()),
         Value::Int_array(_) | Value::Text_array(_) | Value::Float_array(_) | Value::Vec2_array(_) | Value::Vec3_array(_) | Value::Vec4_array(_) => {
             let count = array_len(&source)?;
             (0..count).map(|index| array_get(&source, index)).collect()
@@ -1441,7 +1454,7 @@ fn coerce_like(a: &mut Arena, w: &Value, v: &Value) -> Result<Value, Diagnostic>
     let v = concrete(a, v.clone())?;
     match (&w, &v) {
         (Value::List(wa), Value::List(_)) if wa.is_empty() => Ok(v),
-        (Value::List(wa), Value::List(vb)) => Ok(Value::List(vb.iter().map(|x| coerce_like(a, &wa[0], x)).collect::<Result<Vec<_>, _>>()?)),
+        (Value::List(wa), Value::List(vb)) => Ok(Value::List(Arc::new(vb.iter().map(|x| coerce_like(a, &wa[0], x)).collect::<Result<Vec<_>, _>>()?))),
         (Value::Record(wf), Value::Record(fs)) => Ok(Value::Record(fs.iter().map(|(n, x)| Ok((n.clone(), match wf.iter().find(|(k, _)| k == n) { Some((_, old)) => coerce_like(a, old, x)?, None => x.clone() }))).collect::<Result<Vec<_>, Diagnostic>>()?)),
         _ => coerce(&value::ty_of(&w), &v),
     }
@@ -1458,7 +1471,7 @@ fn eval_loop(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, kind: &W::LoopK
     for (_, init) in accs {
         let mut context = c.clone();
         context.base = Arc::new(zone.clone());
-        context.route.clear();
+        context.route = Route(None);
         accumulators.push(eval_sub(a, &context, "init".into(), env, init)?);
     }
     let first = {
@@ -1508,7 +1521,7 @@ fn eval_loop(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, kind: &W::LoopK
         let ordinal = *count;
         let mut cx = c.clone();
         cx.base = Arc::new(zone.clone());
-        cx.route.clear();
+        cx.route = Route(None);
         Arc::make_mut(&mut cx.iter).push(ordinal as i64);
         // OCaml matches the skip tuples against the iteration path: the outer iteration plus this flat ordinal.
         let skipped = skip.iter().any(|indices| indices.iter().copied().map(|index| index as i64).eq(cx.iter.iter().copied()));
@@ -1695,7 +1708,7 @@ fn force_general(value: &Value, live: &Frame, state: Option<&State>, elems: Opti
                 eval_error("E_DATA_SOURCE", "This data source needs its host's cooked data.")
             }
         }
-        Value::List(values) => Ok(Value::List(values.iter().map(|value| force_general(value, live, state, elems, resolve.clone())).collect::<Result<Vec<_>, _>>()?)),
+        Value::List(values) => Ok(Value::List(Arc::new(values.iter().map(|value| force_general(value, live, state, elems, resolve.clone())).collect::<Result<Vec<_>, _>>()?))),
         Value::Record(fields) => Ok(Value::Record(fields.iter().map(|(name, value)| Ok((name.clone(), force_general(value, live, state, elems, resolve.clone())?))).collect::<Result<Vec<_>, Diagnostic>>()?)),
         Value::Struct(name, ty, fields) => Ok(Value::Struct(name.clone(), ty.clone(), fields.iter().map(|(name, value)| Ok((name.clone(), force_general(value, live, state, elems, resolve.clone())?))).collect::<Result<Vec<_>, Diagnostic>>()?)),
         _ => Ok(value.clone()),
@@ -1790,7 +1803,7 @@ fn read_named(arena: &Arena, name: &str, frame: bool, reads: &mut BTreeSet<Strin
     if let Some(graph) = arena.workspace.defs.iter().find(|graph| graph.name == name) {
         return read_term(arena, &graph.body, &BTreeMap::new(), &graph.context, frame, reads, residuals, functions);
     }
-    if frame && op::find_ref(&arena.workspace.ops, name, &flow_syntax::context::value()).is_some_and(|operation| operation.live) {
+    if frame && op::find_indexed(&arena.workspace.ops, name, &flow_syntax::context::value()).is_some_and(|operation| operation.live) {
         reads.insert(name.to_owned());
         return true;
     }
@@ -1807,7 +1820,7 @@ fn read_term(arena: &Arena, term: &Term, env: &BTreeMap<String, Value>, context:
             if let Some(Value::Fn(function)) = env.get(fn_name) { found |= read_value(arena, &Value::Fn(*function), frame, reads, residuals, functions); }
             else { found |= read_named(arena, fn_name, frame, reads, residuals, functions); }
         }
-        TermNode::Op { op: name, .. } if frame && op::find_ref(&arena.workspace.ops, name, context).is_some_and(|operation| operation.live) => {
+        TermNode::Op { op: name, .. } if frame && op::find_indexed(&arena.workspace.ops, name, context).is_some_and(|operation| operation.live) => {
             reads.insert(name.clone());
             found = true;
         }
@@ -1853,7 +1866,7 @@ fn structure_context(out: &mut String, context: &ExecCtx) {
         context.card.as_deref().unwrap_or(""), context.context.as_str(), context.arena));
     structure_path(out, &context.prefix);
     structure_path(out, &context.base);
-    structure_path(out, &context.route);
+    structure_path(out, &context.route.to_vec());
 }
 fn structure_term(out: &mut String, term: &Term) {
     out.push('T');
@@ -1901,7 +1914,7 @@ fn structure_value(
         }
         Value::List(values) => {
             out.push('[');
-            for value in values { structure_value(out, value, arena, seen_residuals, seen_functions, next); }
+            for value in values.iter() { structure_value(out, value, arena, seen_residuals, seen_functions, next); }
             out.push(']');
         }
         Value::Record(fields) => {
@@ -1978,7 +1991,7 @@ fn map_function(site: Option<(i64, Path, Vec<i64>)>, path: Option<Path>, signatu
         env.insert(name, value.clone());
     }
     let mut context = closure.at.clone();
-    if let Some((instance, prefix, iter)) = site { context.inst = instance; context.prefix = Arc::new(prefix); context.base = Arc::new(Vec::new()); context.route.clear(); context.iter = Arc::new(iter); }
+    if let Some((instance, prefix, iter)) = site { context.inst = instance; context.prefix = Arc::new(prefix); context.base = Arc::new(Vec::new()); context.route = Route(None); context.iter = Arc::new(iter); }
     context.data = true;
     context.record = false;
     let term = Term { path, ty: Ty::Array(Box::new(result)), node: TermNode::Hof(W::HofKind::Map, terms), form };
@@ -2041,7 +2054,7 @@ pub mod Device {
     pub fn thaw(value: &Value) -> Value {
         match value {
             Value::Float_array(data) | Value::Vec2_array(data) | Value::Vec3_array(data) | Value::Vec4_array(data) => reader(data).map_or_else(|| value.clone(), |read| read()),
-            Value::List(values) => Value::List(values.iter().map(thaw).collect()),
+            Value::List(values) => Value::List(Arc::new(values.iter().map(thaw).collect())),
             Value::Record(fields) => Value::Record(fields.iter().map(|(name, value)| (name.clone(), thaw(value))).collect()),
             Value::Struct(name, ty, fields) => Value::Struct(name.clone(), ty.clone(), fields.iter().map(|(name, value)| (name.clone(), thaw(value))).collect()),
             _ => value.clone(),
@@ -2084,7 +2097,7 @@ fn bulk_matches(expected: &Value, candidate: &Value, count: usize, head: usize, 
 fn replace_array(value: &mut Value, original: &Value, replacement: &Value) {
     if same_array_storage(value, original) { *value = replacement.clone(); return; }
     match value {
-        Value::List(values) => for value in values { replace_array(value, original, replacement); },
+        Value::List(values) => for value in Arc::make_mut(values).iter_mut() { replace_array(value, original, replacement); },
         Value::Record(fields) | Value::Struct(_, _, fields) | Value::Source(_, _, fields) => {
             for (_, value) in fields { replace_array(value, original, replacement); }
         }
@@ -2345,7 +2358,7 @@ fn rewrite_value(
             arena.functions.insert(copy, Function::Closure(Arc::new(closure)));
             Value::Fn(copy)
         }
-        Value::List(values) => Value::List(values.iter().map(|value| rewrite_value(arena, value, replace, fresh, retarget, residuals, functions)).collect()),
+        Value::List(values) => Value::List(Arc::new(values.iter().map(|value| rewrite_value(arena, value, replace, fresh, retarget, residuals, functions)).collect())),
         Value::Record(fields) => Value::Record(fields.iter().map(|(name, value)| (name.clone(), rewrite_value(arena, value, replace, fresh, retarget, residuals, functions))).collect()),
         Value::Struct(name, ty, fields) => Value::Struct(name.clone(), ty.clone(), fields.iter().map(|(name, value)| (name.clone(), rewrite_value(arena, value, replace, fresh, retarget, residuals, functions))).collect()),
         Value::Source(name, ty, fields) => Value::Source(name.clone(), ty.clone(), fields.iter().map(|(name, value)| (name.clone(), rewrite_value(arena, value, replace, fresh, retarget, residuals, functions))).collect()),
@@ -2355,7 +2368,7 @@ fn rewrite_value(
 fn rewrite_plain(value: &Value, replace: &dyn Fn(&Value) -> Option<Value>) -> Value {
     if let Some(value) = replace(value) { return value; }
     match value {
-        Value::List(values) => Value::List(values.iter().map(|value| rewrite_plain(value, replace)).collect()),
+        Value::List(values) => Value::List(Arc::new(values.iter().map(|value| rewrite_plain(value, replace)).collect())),
         Value::Record(fields) => Value::Record(fields.iter().map(|(name, value)| (name.clone(), rewrite_plain(value, replace))).collect()),
         Value::Struct(name, ty, fields) => Value::Struct(name.clone(), ty.clone(), fields.iter().map(|(name, value)| (name.clone(), rewrite_plain(value, replace))).collect()),
         Value::Source(name, ty, fields) => Value::Source(name.clone(), ty.clone(), fields.iter().map(|(name, value)| (name.clone(), rewrite_plain(value, replace))).collect()),
@@ -2382,7 +2395,7 @@ fn remap_value(arena: &mut Arena, value: &Value, sources: &[(i64, i64)], residua
             }
             value.clone()
         }
-        Value::List(values) => Value::List(values.iter().map(|value| remap_value(arena, value, sources, residuals, functions)).collect()),
+        Value::List(values) => Value::List(Arc::new(values.iter().map(|value| remap_value(arena, value, sources, residuals, functions)).collect())),
         Value::Record(fields) => Value::Record(fields.iter().map(|(name, value)| (name.clone(), remap_value(arena, value, sources, residuals, functions))).collect()),
         Value::Struct(name, ty, fields) => Value::Struct(name.clone(), ty.clone(), fields.iter().map(|(name, value)| (name.clone(), remap_value(arena, value, sources, residuals, functions))).collect()),
         Value::Source(name, ty, fields) => Value::Source(name.clone(), ty.clone(), fields.iter().map(|(name, value)| (name.clone(), remap_value(arena, value, sources, residuals, functions))).collect()),
@@ -2572,6 +2585,6 @@ mod tests {
             },
             form: form(),
         };
-        assert_eq!(static_eval(&workspace(term)).unwrap().results, vec![("g".into(), Value::List(vec![Value::Int(1), Value::Int(2)]))]);
+        assert_eq!(static_eval(&workspace(term)).unwrap().results, vec![("g".into(), Value::List(Arc::new(vec![Value::Int(1), Value::Int(2)])))]);
     }
 }

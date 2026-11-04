@@ -870,7 +870,7 @@ impl Lowerer {
             }
             (Known(Value::List(items)), index) if C::literal_of_value(&Value::List(items.clone())).is_none() => {
                 if items.len() > 4096 { return Err(refusal("list_limit")); }
-                let indices = Known(Value::List((0..items.len() as i64).map(Value::Int).collect()));
+                let indices = Known(Value::List(Arc::new((0..items.len() as i64).map(Value::Int).collect())));
                 let index = self.sequence_get(s, source, &indices, index)?;
                 Ok(Selected(items.iter().map(|v| Known(v.clone())).collect(), Box::new(index)))
             }
@@ -1283,7 +1283,7 @@ impl Lowerer {
                         let ty = V::elem_ty(&values);
                         let mut out = Vec::new();
                         for v in &values { out.push(V::coerce_to(&ty, v)?); }
-                        Ok(Known(Value::List(out)))
+                        Ok(Known(Value::List(Arc::new(out))))
                     }
                     None => {
                         let mut ids = Vec::new();
@@ -1558,7 +1558,7 @@ impl Lowerer {
                                 let ty = V::elem_ty(&vals);
                                 let mut out = Vec::new();
                                 for v in &vals { out.push(V::coerce_to(&ty, v)?); }
-                                Ok(Known(Value::List(out)))
+                                Ok(Known(Value::List(Arc::new(out))))
                             } else if vals.is_empty() {
                                 Ok(Known(Value::Int(0)))
                             } else {
@@ -2098,7 +2098,7 @@ impl Lowerer {
             l.store(sc, source, &keys, index, &key)?;
             l.store(sc, source, &current, index, index)
         })?;
-        let widths = Known(Value::List((0..12).map(|i| Value::Int(1i64 << i)).collect()));
+        let widths = Known(Value::List(Arc::new((0..12).map(|i| Value::Int(1i64 << i)).collect())));
         self.iterate(s, source, &widths, &mut |l, sc, _, width| {
             let needed = l.calc(sc, source, &Ty::Int, PO::Binary::Lt, width, &count)?;
             l.branch(sc, source, &Ty::Int, &needed,
@@ -2225,7 +2225,7 @@ impl Lowerer {
                     }
                     let empty = match &source_ty {
                         Ty::Array(elem) => Known(V::array_init(elem, 0, &|_| unreachable!())?),
-                        Ty::List(_) => Known(Value::List(Vec::new())),
+                        Ty::List(_) => Known(Value::List(Arc::new(Vec::new()))),
                         _ => return Err(refusal("text_collect_source")),
                     };
                     let nonempty = self.primitive(s, zone_source, &Ty::Bool, C::Primitive::Integer_compare(PO::Comparison::Igt), vec![("a", count.clone()), ("b", int(0))])?;
@@ -2778,7 +2778,7 @@ impl Lowerer {
                 let colors = match &stops {
                     Known(Value::List(xs)) if !xs.is_empty() => {
                         let mut out = Vec::new();
-                        for x in xs { out.push(op::drawing_color(x).map_err(|_| refusal(name))?); }
+                        for x in xs.iter() { out.push(op::drawing_color(x).map_err(|_| refusal(name))?); }
                         out
                     }
                     _ => return Err(refusal(name)),

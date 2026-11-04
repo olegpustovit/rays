@@ -519,7 +519,7 @@ fn live_curve_points_stay_typed_and_match_the_authored_curve() {
     let actual_node = edit::find(&resolved.geometry, curve_id).unwrap();
     assert!(node::parameter_key(&actual_node).starts_with(b"flow.curve\0"), "live curve points were text-encoded into the parameter key");
     let mut inf = drives.clone();
-    inf.insert(points_port.clone(), Value::List(vec![Value::Vec3(f64::INFINITY, 0.0, 0.0)]));
+    inf.insert(points_port.clone(), Value::List(Arc::new(vec![Value::Vec3(f64::INFINITY, 0.0, 0.0)])));
     let nonfinite = resolve(&with(inf).unwrap()).unwrap();
     let static_node = edit::find(&expected_graph.network.geometry, expected_graph.root.unwrap()).unwrap();
     let (static_node, _) = node::apply_parameters(&static_node, &[(curve::PARAMETER.to_owned(), param::Value::Text(curve::encode(&[(f64::INFINITY, 0.0, 0.0)]).into_bytes()))]).unwrap();
@@ -529,7 +529,7 @@ fn live_curve_points_stay_typed_and_match_the_authored_curve() {
         _ => panic!("nonfinite curve points were not refused consistently"),
     }
     let mut malformed = drives.clone();
-    malformed.insert(points_port.clone(), Value::List(vec![Value::Int(1)]));
+    malformed.insert(points_port.clone(), Value::List(Arc::new(vec![Value::Int(1)])));
     match resolve(&with(malformed.clone()).unwrap()) {
         Err(d) => assert_eq!(d.code, "E_LIVE", "malformed curve list error code"),
         Ok(_) => panic!("malformed live curve points were accepted"),

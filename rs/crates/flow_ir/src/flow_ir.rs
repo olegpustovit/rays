@@ -1362,7 +1362,7 @@ pub mod Executor {
                     Ok(())
                 }
                 Value::List(xs) => {
-                    for x in xs { self.validate_value(x)?; }
+                    for x in xs.iter() { self.validate_value(x)?; }
                     Ok(())
                 }
                 Value::Record(fs) | Value::Struct(_, _, fs) | Value::Source(_, _, fs) => {
@@ -1651,7 +1651,7 @@ pub mod Executor {
                     let forced = reference(self, value, &state)?;
                     self.walk(&forced)
                 }
-                Value::List(values) => Ok(Value::List(values.iter().map(|x| self.walk(x)).collect::<Result<_, _>>()?)),
+                Value::List(values) => Ok(Value::List(Arc::new(values.iter().map(|x| self.walk(x)).collect::<Result<_, _>>()?))),
                 Value::Record(fields) => Ok(Value::Record(self.walk_fields(fields)?)),
                 Value::Struct(name, ty, fields) => Ok(Value::Struct(name.clone(), ty.clone(), self.walk_fields(fields)?)),
                 other => Ok(other.clone()),

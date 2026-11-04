@@ -402,7 +402,7 @@ fn lower_value(lowered: &l::T, change: &Change) -> Option<R<l::T>> {
         }
         let fields = |fs: &[(String, E)], hit: &mut bool| fs.iter().map(|(f, x)| (f.clone(), rw(x, targets, change, hit, set))).collect::<Vec<_>>();
         match v {
-            E::List(a) => E::List(a.iter().map(|x| rw(x, targets, change, hit, set)).collect()),
+            E::List(a) => E::List(Arc::new(a.iter().map(|x| rw(x, targets, change, hit, set)).collect())),
             E::Record(fs) => E::Record(fields(fs, hit)),
             E::Struct(k, ty, fs) => E::Struct(k.clone(), ty.clone(), fields(fs, hit)),
             E::Source(k, ty, fs) => E::Source(k.clone(), ty.clone(), fields(fs, hit)),

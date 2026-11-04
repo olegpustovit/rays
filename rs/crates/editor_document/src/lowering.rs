@@ -351,7 +351,7 @@ fn walk<'a>(want: Want, below: Below, iter: &[usize], env: &Env<'a>, place: Opti
                 let looped = is_loop(env, term);
                 let n = if looped { (extra + 1).max(0) as usize } else { 1 };
                 let value = if looped {
-                    E::List(vargs.iter().skip(at).take(n).map(|(_, v)| v.clone()).collect())
+                    E::List(Arc::new(vargs.iter().skip(at).take(n).map(|(_, v)| v.clone()).collect()))
                 } else {
                     match vargs.get(at) {
                         Some((_, v)) => v.clone(),

@@ -1308,7 +1308,7 @@ pub const FUSED_GUARDS: &str = "$guards";
 /// A card's deferred checks: a write folded through the card checks them as it cooks.
 fn guards_of(key: &str, args: &[(String, Value)]) -> Vec<Value> {
     match get(args, key) {
-        Some(Value::List(guards)) => guards.clone(),
+        Some(Value::List(guards)) => (**guards).clone(),
         _ => Vec::new(),
     }
 }
@@ -1824,7 +1824,7 @@ pub fn build_call(
                     };
                     let v = match value {
                         Value::Fn(f) => remap(0, *f),
-                        Value::List(_) => Value::List(function_elements(value).into_iter().enumerate().map(|(i, f)| remap(i, f)).collect()),
+                        Value::List(_) => Value::List(Arc::new(function_elements(value).into_iter().enumerate().map(|(i, f)| remap(i, f)).collect())),
                         _ => value.clone(),
                     };
                     (name.clone(), v)
@@ -2350,7 +2350,7 @@ fn fold_mesh_writes(plan: &Plan) -> Plan {
     let mut folded = vec![false; nodes.len()];
     for n in &nodes {
         if let Some(Value::List(ids)) = get(&n.args, FUSED_CHAIN) {
-            for id in ids {
+            for id in ids.iter() {
                 if let Value::Int(id) = id {
                     if *id >= 0 && *id < count {
                         folded[*id as usize] = true;
@@ -2504,7 +2504,7 @@ fn fold_writes(device: bool, defer: bool, plan: &Plan) -> R<Plan> {
     };
     let deletes = |n: &ENode| -> Vec<Value> {
         match get(&n.args, FUSED_DELETES) {
-            Some(Value::List(ds)) => ds.clone(),
+            Some(Value::List(ds)) => (**ds).clone(),
             _ => Vec::new(),
         }
     };
@@ -2765,7 +2765,7 @@ fn fold_writes(device: bool, defer: bool, plan: &Plan) -> R<Plan> {
         let earlier: Vec<Value> = last(&entries, &name).into_iter().map(|(n, k, v)| fused_entry(&n, &k, v)).collect();
         // the folded writes, whose cards key this one's kernels with its own
         let mut chain_ids: Vec<Value> = match get(&u.args, FUSED_CHAIN) {
-            Some(Value::List(ids)) => ids.clone(),
+            Some(Value::List(ids)) => (**ids).clone(),
             _ => Vec::new(),
         };
         chain_ids.push(Value::Int(u.id));
@@ -2793,15 +2793,15 @@ fn fold_writes(device: bool, defer: bool, plan: &Plan) -> R<Plan> {
                     }
                 })
                 .collect();
-            args.push((FUSED_CHAIN.into(), Value::List(chain_ids)));
+            args.push((FUSED_CHAIN.into(), Value::List(Arc::new(chain_ids))));
             if !earlier.is_empty() {
-                args.push((FUSED_WRITES.into(), Value::List(earlier)));
+                args.push((FUSED_WRITES.into(), Value::List(Arc::new(earlier))));
             }
             if !dels.is_empty() {
-                args.push((FUSED_DELETES.into(), Value::List(dels)));
+                args.push((FUSED_DELETES.into(), Value::List(Arc::new(dels))));
             }
             if !guards.is_empty() {
-                args.push((FUSED_GUARDS.into(), Value::List(guards)));
+                args.push((FUSED_GUARDS.into(), Value::List(Arc::new(guards))));
             }
             nodes[id].args = args;
         }
@@ -3564,7 +3564,7 @@ impl HostRun {
                     _ => return Err(data_source("A cooked list has the wrong type.")),
                 };
                 let mut terms = Vec::new();
-                for v in values {
+                for v in values.iter() {
                     terms.push(self.cooked_term(factories, &element, v)?);
                 }
                 if terms.iter().all(|t| t.is_some()) {
@@ -4078,7 +4078,7 @@ fn lisp_factory(shared: &Arc<CallEnvShared>, kernel_source: &Lazy, error: Option
             match values.len() {
                 0 => None,
                 1 if !slot.rest => Some((slot.name.clone(), values[0].clone())),
-                _ => Some((slot.name.clone(), Value::List(values))),
+                _ => Some((slot.name.clone(), Value::List(Arc::new(values)))),
             }
         })
         .collect();
@@ -4349,7 +4349,7 @@ impl Lowerer {
                     *arity = (*arity).max(*next_rest);
                 }
                 Value::List(values) => {
-                    for v in values {
+                    for v in values.iter() {
                         add_rest(name, v, next_rest, arity, slots, kernels, rest, add_function)?;
                     }
                 }
@@ -5233,7 +5233,7 @@ impl Lowerer {
                 .filter_map(|(name, ids)| match ids {
                     Value::List(ids) if ids.is_empty() => None,
                     Value::List(ids) if ids.len() == 1 && !rest.contains(name) => Some((name.clone(), slot_value(&ids[0]))),
-                    Value::List(ids) => Some((name.clone(), Value::List(ids.iter().map(slot_value).collect()))),
+                    Value::List(ids) => Some((name.clone(), Value::List(Arc::new(ids.iter().map(slot_value).collect())))),
                     _ => None,
                 })
                 .collect();
@@ -5664,7 +5664,7 @@ fn failed_card_as_call(n: &ENode, plan: &Plan, checked: &Workspace) -> ENode {
         .filter_map(|(name, ids)| match ids {
             Value::List(ids) if ids.is_empty() => None,
             Value::List(ids) if ids.len() == 1 && !rest.contains(name) => Some((name.clone(), slot_value(&ids[0]))),
-            Value::List(ids) => Some((name.clone(), Value::List(ids.iter().map(slot_value).collect()))),
+            Value::List(ids) => Some((name.clone(), Value::List(Arc::new(ids.iter().map(slot_value).collect())))),
             _ => None,
         })
         .collect();

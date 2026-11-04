@@ -40,7 +40,7 @@ fn same(a: &Value, b: &Value) -> bool {
             flow_syntax::value::ty_of(a) == flow_syntax::value::ty_of(b) && bits(a) == bits(b)
         }
         (Value::Record(x), Value::Record(y)) => x.len() == y.len() && x.iter().zip(y).all(|((n, v), (m, w))| n == m && same(v, w)),
-        (Value::List(x), Value::List(y)) => x.len() == y.len() && x.iter().zip(y).all(|(p, q)| same(p, q)),
+        (Value::List(x), Value::List(y)) => x.len() == y.len() && x.iter().zip(y.iter()).all(|(p, q)| same(p, q)),
         (Value::Residual(_), Value::Residual(_)) => true,
         _ => bits(a) == bits(b),
     }

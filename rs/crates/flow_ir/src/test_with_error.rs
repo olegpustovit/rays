@@ -191,7 +191,7 @@ fn diagnostic_envelopes_are_lossless() {
         Ok(Value::Record(vec![
             ("code".into(), Value::Text(b"E_NEW".to_vec())),
             ("message".into(), Value::Text(b"new".to_vec())),
-            ("cause".into(), Value::List(vec![Value::Text(b"a".to_vec()), Value::Text(b"b".to_vec())])),
+            ("cause".into(), Value::List(Arc::new(vec![Value::Text(b"a".to_vec()), Value::Text(b"b".to_vec())]))),
         ]))
     }) {
         Err(actual) => assert!(actual.code == "E_DIAGNOSTIC_MAP" && actual.trace == original.trace && actual.hints == original.hints && actual.cause == original.cause),

@@ -937,7 +937,7 @@ fn list_tables_exact_widths_and_range_guards() {
     let live = live_at(0.);
     for ty in [Ty::Int, Ty::Float, Ty::Vec2, Ty::Vec3, Ty::Vec4] {
         let a = array(&ty, 7);
-        let table = Value::List((0..7).map(|i| v::array_get(&a, i).unwrap()).collect());
+        let table = Value::List(Arc::new((0..7).map(|i| v::array_get(&a, i).unwrap()).collect()));
         let value = instantiate(Some(&table), &Ty::List(Box::new(ty.clone())), "(fn [(index : int)] (nth data (int/mod index 7)))", (0..2049).collect());
         let expected = ok(force_reference(&value, &live));
         let p = pk(&value);
@@ -945,7 +945,7 @@ fn list_tables_exact_widths_and_range_guards() {
             with_domains(domains, &|| assert_eq!(bits(&ok(force(&p, &live))), bits(&expected)));
         }
     }
-    let table = Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3)]);
+    let table = Value::List(Arc::new(vec![Value::Int(1), Value::Int(2), Value::Int(3)]));
     let list_int = Ty::List(Box::new(Ty::Int));
     for index in [-1, 3, MAX_INT] {
         let value = instantiate(Some(&table), &list_int, "(fn [(index : int)] (nth data index))", vec![index]);
@@ -965,7 +965,7 @@ fn list_tables_exact_widths_and_range_guards() {
         assert_eq!(actual.as_ref().err().expect("range error").code, "E_LIST_RANGE");
         same_error(&packed_force(&pk(&value), &live, false, None), &force_reference(&value, &live));
     }
-    for table in [Value::List(vec![]), Value::List(vec![Value::Int(1), Value::Text(b"mixed".to_vec())])] {
+    for table in [Value::List(Arc::new(vec![])), Value::List(Arc::new(vec![Value::Int(1), Value::Text(b"mixed".to_vec())]))] {
         let value = instantiate(Some(&table), &list_int, "(fn [(index : int)] (nth data index))", vec![0]);
         match compile_region(residual(&value), true, None) {
             Err(ds) if ds.len() == 1 => assert_eq!(ds[0].code, "E_PACKED_CAPTURE"),
@@ -978,7 +978,7 @@ fn list_tables_exact_widths_and_range_guards() {
     let p = packed::compile_template(&Default::default(), r, &term).expect("template");
     let changed = |items: Vec<Value>| -> v::ResidualId {
         match e::Host::rewrite(&value, &|x| match x {
-            Value::List(_) => Some(Value::List(items.clone())),
+            Value::List(_) => Some(Value::List(Arc::new(items.clone()))),
             _ => None,
         }) {
             Value::Residual(r) => r,

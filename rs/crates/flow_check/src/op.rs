@@ -125,6 +125,22 @@ pub fn find_ref<'a>(extra:&'a [Op],name:&str,context:&Context)->Option<&'a Op>{
     let lookup=|key:&str|extra.iter().find(|op|op.name==key).or_else(||builtin_index().get(key).map(|i|&all()[*i]));
     lookup(name).or_else(||lookup(&format!("value/{name}"))).or_else(||lookup(&format!("{}/{name}",context::name(*context))))
 }
+// `find_ref` over a shared op table, with a first-wins name index kept per thread (the table is held, so its address cannot be reused).
+pub fn find_indexed<'a>(extra:&'a Arc<Vec<Op>>,name:&str,context:&Context)->Option<&'a Op>{
+    thread_local!{ static INDEX:std::cell::RefCell<Vec<(Arc<Vec<Op>>,Arc<std::collections::HashMap<String,usize>>)>>=std::cell::RefCell::new(Vec::new()); }
+    let index=INDEX.with(|cache|{
+        let mut cache=cache.borrow_mut();
+        if let Some((_,index))=cache.iter().find(|(table,_)|Arc::ptr_eq(table,extra)){return index.clone();}
+        let mut map=std::collections::HashMap::new();
+        for (i,op) in extra.iter().enumerate(){map.entry(op.name.clone()).or_insert(i);}
+        let index=Arc::new(map);
+        if cache.len()>=8{cache.remove(0);}
+        cache.push((extra.clone(),index.clone()));
+        index
+    });
+    let lookup=|key:&str|index.get(key).map(|i|&extra[*i]).or_else(||builtin_index().get(key).map(|i|&all()[*i]));
+    lookup(name).or_else(||lookup(&format!("value/{name}"))).or_else(||lookup(&format!("{}/{name}",context::name(*context))))
+}
 pub fn find(extra:&[Op],name:&str,context:&Context)->Option<Op>{ find_ref(extra,name,context).cloned() }
 pub fn finder(extra:&[Op])->Box<dyn Fn(&str,&Context)->Option<Op>+Send+Sync>{
     let mut index=std::collections::HashMap::<String,Op>::new();
@@ -307,7 +323,7 @@ pub fn drawing_color(v:&Value)->Result<rays_math::color::T,Diagnostic>{
 }
 fn color_value(c:rays_math::color::T)->Value{
     let (r,g,b,a)=rays_math::color::to_floats(c);
-    if c.a==255{Value::Vec3(r,g,b)}else{Value::List(vec![Value::Float(r),Value::Float(g),Value::Float(b),Value::Float(a)])}
+    if c.a==255{Value::Vec3(r,g,b)}else{Value::List(Arc::new(vec![Value::Float(r),Value::Float(g),Value::Float(b),Value::Float(a)]))}
 }
 fn noise_op()->Op{
     let mut op=mk("noise3",context::value(),signature(vec![("position",Ty::Vec3)],vec![],None,vec![("seed",Ty::Int),("octaves",Ty::Int),("lacunarity",Ty::Float),("gain",Ty::Float)]),output_const(Ty::Float),Arc::new(|_,_,args|{
@@ -329,11 +345,11 @@ fn value_op(name:&str,pos:Vec<(&str,Ty)>,optv:Vec<(&str,Ty)>,rest:Option<(&str,T
 }
 fn frame_value(f:&Frame)->Value{
     let event_fields=vec![("kind",Ty::Text),("key",Ty::Text),("button",Ty::Text),("position",Ty::Vec3),("delta",Ty::Vec3),("text",Ty::Text),("start",Ty::Int),("length",Ty::Int),("paths",list(Ty::Text)),("error",Ty::Text),("id",Ty::Int),("width",Ty::Int),("height",Ty::Int),("phase",Ty::Text),("time",Ty::Float),("scale",Ty::Float)];
-    let events=f.events.iter().map(|e|event_value(e,&event_fields)).collect();
+    let events:Vec<Value>=f.events.iter().map(|e|event_value(e,&event_fields)).collect();
     Value::Record(vec![
         ("t".into(),Value::Float(f.t)),("dt".into(),Value::Float(f.dt)),("index".into(),Value::Int(f.frame)),("width".into(),Value::Int(f.size.0)),("height".into(),Value::Int(f.size.1)),
-        ("pointer".into(),Value::Vec3(f.pointer.0,f.pointer.1,0.)),("buttons".into(),Value::List(f.buttons.iter().map(|b|text(input::button_name(*b))).collect())),
-        ("keys".into(),Value::List(f.keys.iter().map(|k|text(&input::key_name(*k))).collect())),("events".into(),Value::List(events))])
+        ("pointer".into(),Value::Vec3(f.pointer.0,f.pointer.1,0.)),("buttons".into(),Value::List(Arc::new(f.buttons.iter().map(|b|text(input::button_name(*b))).collect()))),
+        ("keys".into(),Value::List(Arc::new(f.keys.iter().map(|k|text(&input::key_name(*k))).collect()))),("events".into(),Value::List(Arc::new(events)))])
 }
 fn event_value(event:&Event,fields:&[(&str,Ty)])->Value{
     let point=|p:(f64,f64)|Value::Vec3(p.0,p.1,0.);
@@ -351,7 +367,7 @@ fn event_value(event:&Event,fields:&[(&str,Ty)])->Value{
         Event::File_drag_moved(p)=>("file-drag-moved",vec![("position",point(*p))]),
         Event::File_drag_ended=>("file-drag-ended",vec![]),
         Event::Pinched(x)=>("pinched",vec![("scale",Value::Float(*x))]),
-        Event::File_dialog{id,result}=>("file-dialog",std::iter::once(("id",Value::Int(*id))).chain(match result {Ok(xs)=>vec![("paths",Value::List(xs.iter().map(|s|text(s)).collect()))],Err(s)=>vec![("error",text(s))]}).collect()),
+        Event::File_dialog{id,result}=>("file-dialog",std::iter::once(("id",Value::Int(*id))).chain(match result {Ok(xs)=>vec![("paths",Value::List(Arc::new(xs.iter().map(|s|text(s)).collect())))],Err(s)=>vec![("error",text(s))]}).collect()),
         Event::Dialog_opened(id)=>("dialog-opened",vec![("id",Value::Int(*id))]),
         Event::Resized((w,h))=>("resized",vec![("width",Value::Int(*w)),("height",Value::Int(*h))]),
         Event::Focus_lost=>("focus-lost",vec![]),Event::Focus_gained=>("focus-gained",vec![]),Event::Closed=>("closed",vec![]),
@@ -359,7 +375,7 @@ fn event_value(event:&Event,fields:&[(&str,Ty)])->Value{
         Event::Visibility_changed(_)=>("visibility-changed",vec![]),
         Event::Trackpad_scrolled{delta,phase,time}=>("trackpad-scrolled",vec![("delta",point(*delta)),("phase",text(input::scroll_phase_name(*phase))),("time",Value::Float(*time))]),
     };
-    Value::Record(fields.iter().map(|(name,ty)|((*name).into(),if *name=="kind"{text(kind)}else if let Some((_,v))=values.iter().find(|(n,_)|n==name){v.clone()}else{match ty{Ty::Int=>Value::Int(0),Ty::Float=>Value::Float(0.),Ty::Vec3=>Value::Vec3(0.,0.,0.),Ty::List(_)=>Value::List(vec![]),_=>text("")}})).collect())
+    Value::Record(fields.iter().map(|(name,ty)|((*name).into(),if *name=="kind"{text(kind)}else if let Some((_,v))=values.iter().find(|(n,_)|n==name){v.clone()}else{match ty{Ty::Int=>Value::Int(0),Ty::Float=>Value::Float(0.),Ty::Vec3=>Value::Vec3(0.,0.,0.),Ty::List(_)=>Value::List(Arc::new(vec![])),_=>text("")}})).collect())
 }
 fn frame_ops()->Vec<Op>{
     let frame_ty=rec(vec![("t",Ty::Float),("dt",Ty::Float),("index",Ty::Int),("width",Ty::Int),("height",Ty::Int),("pointer",Ty::Vec3),("buttons",list(Ty::Text)),("keys",list(Ty::Text)),("events",list(rec(vec![("kind",Ty::Text),("key",Ty::Text),("button",Ty::Text),("position",Ty::Vec3),("delta",Ty::Vec3),("text",Ty::Text),("start",Ty::Int),("length",Ty::Int),("paths",list(Ty::Text)),("error",Ty::Text),("id",Ty::Int),("width",Ty::Int),("height",Ty::Int),("phase",Ty::Text),("time",Ty::Float),("scale",Ty::Float)])))]);
@@ -392,14 +408,14 @@ fn parse_int_token(bytes:&[u8])->Option<i64>{
     ((-(1i64<<62))..=((1i64<<62)-1)).contains(&value).then_some(value)
 }
 fn table_decode(bytes:&[u8])->Result<Value,Diagnostic>{
-    if bytes.is_empty(){return Ok(Value::List(vec![]))}
+    if bytes.is_empty(){return Ok(Value::List(Arc::new(vec![])))}
     let(mut rows,mut row,mut cell,mut escaped)=(Vec::new(),Vec::new(),Vec::new(),false);
     for &b in bytes{
         if escaped{escaped=false;match b{b'\\'=>cell.push(b'\\'),b't'=>cell.push(b'\t'),b'n'=>cell.push(b'\n'),_=>return Err(fail("E_TABLE",&format!("unsupported table escape \\{}",b as char)))}}
-        else{match b{b'\\'=>escaped=true,b'\t'=>row.push(Value::Text(std::mem::take(&mut cell))),b'\n'=>{row.push(Value::Text(std::mem::take(&mut cell)));rows.push(Value::List(std::mem::take(&mut row)))},_=>cell.push(b)}}
+        else{match b{b'\\'=>escaped=true,b'\t'=>row.push(Value::Text(std::mem::take(&mut cell))),b'\n'=>{row.push(Value::Text(std::mem::take(&mut cell)));rows.push(Value::List(Arc::new(std::mem::take(&mut row))))},_=>cell.push(b)}}
     }
     if escaped{return Err(fail("E_TABLE","trailing table escape"))}
-    row.push(Value::Text(cell));rows.push(Value::List(row));Ok(Value::List(rows))
+    row.push(Value::Text(cell));rows.push(Value::List(Arc::new(row)));Ok(Value::List(Arc::new(rows)))
 }
 fn table_encode(rows:&Value)->Result<Value,Diagnostic>{
     let Value::List(rows)=rows else{return Err(fail("E_TYPE","Expected a table of text cells."))};
@@ -702,35 +718,35 @@ fn list_ops()->Vec<Op>{
     let mut ops=Vec::new();
     let range_body:Body=Arc::new(|_,_,a|{
         let (lo,hi)=if let Some(end)=a.opt_arg("end"){(int_of(a.get_arg("count")?)?,int_of(end)?)}else{(0,int_of(a.get_arg("count")?)?)};
-        let n=range_length(None,lo,hi)?;Ok(Value::List((0..n).map(|i|Value::Int(wrap63(lo.wrapping_add(i as i64)))).collect()))
+        let n=range_length(None,lo,hi)?;Ok(Value::List(Arc::new((0..n).map(|i|Value::Int(wrap63(lo.wrapping_add(i as i64)))).collect())))
     });
     ops.push(value_op("range",vec![("count",Ty::Int)],vec![("end",Ty::Int)],None,vec![],list(Ty::Int),"List",range_body));
     ops.push(value_op("linspace",vec![("from",Ty::Float),("to",Ty::Float),("count",Ty::Int)],vec![],None,vec![],list(Ty::Float),"List",Arc::new(|_,_,a|{
         let from=num(a.get_arg("from")?)?;let to=num(a.get_arg("to")?)?;let count=int_of(a.get_arg("count")?)?;
         if count>MAX_ITERATIONS as i64{return Err(fail("E_ITER_BOUND","linspace exceeds 4,096 values."))}
-        let n=count.max(0) as usize;Ok(Value::List((0..n).map(|k|Value::Float(if n==1{from}else{from+(to-from)*k as f64/(n-1) as f64})).collect()))
+        let n=count.max(0) as usize;Ok(Value::List(Arc::new((0..n).map(|k|Value::Float(if n==1{from}else{from+(to-from)*k as f64/(n-1) as f64})).collect())))
     })));
     ops.push(value_op("count",vec![("list",list(Ty::Any))],vec![],None,vec![],Ty::Int,"List",Arc::new(|_,_,a|Ok(Value::Int(value::list_arg(a.get_arg("list")?)?.len() as i64)))));
     for (name,last) in [("first",false),("last",true)]{
         ops.push(with_defaults(mk(name,context::value(),signature(vec![("list",list(Ty::Any))],vec![],None,vec![]),list_element_out(0),Arc::new(move |_,_,a|{let xs=value::list_arg(a.get_arg("list")?)?;if xs.is_empty(){return Err(fail("E_LIST_RANGE",if last{"last of an empty list."}else{"first of an empty list."}))}Ok(xs[if last{xs.len()-1}else{0}].clone())})),"List"));
     }
-    ops.push(with_defaults(mk("rest",context::value(),signature(vec![("list",list(Ty::Any))],vec![],None,vec![]),list_out(0),Arc::new(|_,_,a|{let xs=value::list_arg(a.get_arg("list")?)?;Ok(Value::List(if xs.is_empty(){xs.to_vec()}else{xs[1..].to_vec()}))})),"List"));
+    ops.push(with_defaults(mk("rest",context::value(),signature(vec![("list",list(Ty::Any))],vec![],None,vec![]),list_out(0),Arc::new(|_,_,a|{let xs=value::list_arg(a.get_arg("list")?)?;Ok(Value::List(Arc::new(if xs.is_empty(){xs.to_vec()}else{xs[1..].to_vec()})))})),"List"));
     ops.push(with_defaults(mk("nth",context::value(),signature(vec![("list",list(Ty::Any)),("index",Ty::Int)],vec![],None,vec![]),list_element_out(0),Arc::new(|_,_,a|{
         let raw=a.get_arg("index")?;if let Value::Float(x)=raw{if x.fract()!=0.{return Err(failf("E_LIST_RANGE",format!("nth index {} is not a whole number.",value::general(*x))))}}
         let i=int_of(raw)?;let xs=value::list_arg(a.get_arg("list")?)?;if i<0||i as u128>=xs.len() as u128{return Err(failf("E_LIST_RANGE",format!("nth index {i} is out of range for a list of length {}.",xs.len())))}Ok(xs[i as usize].clone())
     })),"List"));
-    ops.push(with_defaults(mk("reverse",context::value(),signature(vec![("list",list(Ty::Any))],vec![],None,vec![]),list_out(0),Arc::new(|_,_,a|{let xs=value::list_arg(a.get_arg("list")?)?;Ok(Value::List(xs.iter().rev().cloned().collect()))})),"List"));
+    ops.push(with_defaults(mk("reverse",context::value(),signature(vec![("list",list(Ty::Any))],vec![],None,vec![]),list_out(0),Arc::new(|_,_,a|{let xs=value::list_arg(a.get_arg("list")?)?;Ok(Value::List(Arc::new(xs.iter().rev().cloned().collect())))})),"List"));
     for (name,take) in [("take",true),("drop",false)]{
         ops.push(with_defaults(mk(name,context::value(),signature(vec![("n",Ty::Int),("list",list(Ty::Any))],vec![],None,vec![]),list_out(1),Arc::new(move |_,_,a|{
             let n=int_of(a.get_arg("n")?)?.max(0) as u128;let xs=value::list_arg(a.get_arg("list")?)?;let n=n.min(xs.len() as u128) as usize;
-            Ok(Value::List(if take{xs[..n].to_vec()}else{xs[n..].to_vec()}))
+            Ok(Value::List(Arc::new(if take{xs[..n].to_vec()}else{xs[n..].to_vec()})))
         })),"List"));
     }
     ops
 }
 fn color_ops()->Vec<Op>{
     let hsl=value_op("color/hsl",vec![("h",Ty::Float),("s",Ty::Float),("l",Ty::Float)],vec![],None,vec![],Ty::Vec3,"Color",Arc::new(|_,_,a|{let (r,g,b)=rays_math::color::hsl_channels(fin("h",num(a.get_arg("h")?)?)?,fin("s",num(a.get_arg("s")?)?)?,fin("l",num(a.get_arg("l")?)?)?);Ok(Value::Vec3(r,g,b))}));
-    let hsla=value_op("color/hsla",vec![("h",Ty::Float),("s",Ty::Float),("l",Ty::Float),("a",Ty::Float)],vec![],None,vec![],list(Ty::Float),"Color",Arc::new(|_,_,a|{let c=rays_math::color::hsl(Some(fin("a",num(a.get_arg("a")?)?)?),fin("h",num(a.get_arg("h")?)?)?,fin("s",num(a.get_arg("s")?)?)?,fin("l",num(a.get_arg("l")?)?)?);let(r,g,b,a)=rays_math::color::to_floats(c);Ok(Value::List(vec![Value::Float(r),Value::Float(g),Value::Float(b),Value::Float(a)]))}));
+    let hsla=value_op("color/hsla",vec![("h",Ty::Float),("s",Ty::Float),("l",Ty::Float),("a",Ty::Float)],vec![],None,vec![],list(Ty::Float),"Color",Arc::new(|_,_,a|{let c=rays_math::color::hsl(Some(fin("a",num(a.get_arg("a")?)?)?),fin("h",num(a.get_arg("h")?)?)?,fin("s",num(a.get_arg("s")?)?)?,fin("l",num(a.get_arg("l")?)?)?);let(r,g,b,a)=rays_math::color::to_floats(c);Ok(Value::List(Arc::new(vec![Value::Float(r),Value::Float(g),Value::Float(b),Value::Float(a)])))}));
     let gradient=value_op("color/gradient",vec![("stops",list(Ty::Color)),("x",Ty::Float)],vec![],None,vec![],Ty::Vec3,"Color",Arc::new(|_,_,a|{
         let Value::List(xs)=a.get_arg("stops")? else{return Err(fail("E_DRAW_COLOR","A gradient needs at least one color stop."))};
         if xs.is_empty(){return Err(fail("E_DRAW_COLOR","A gradient needs at least one color stop."))}

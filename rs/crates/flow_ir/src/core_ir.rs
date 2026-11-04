@@ -1283,7 +1283,7 @@ pub fn value_of_literal(literal: &Literal) -> Value {
             [x, y, z, w] => Value::Vec4(*x, *y, *z, *w),
             _ => panic!("Core.value_of_literal: width"),
         },
-        Literal::List(xs) => Value::List(xs.iter().map(value_of_literal).collect()),
+        Literal::List(xs) => Value::List(Arc::new(xs.iter().map(value_of_literal).collect())),
         Literal::Record(xs) => Value::Record(xs.iter().map(|(n, v)| (n.clone(), value_of_literal(v))).collect()),
         Literal::Int_array(data) => Value::Int_array(data.clone()),
         Literal::Text_array(data) => Value::Text_array(data.clone()),
@@ -1725,7 +1725,7 @@ mod tests {
 
     #[test]
     fn literal_round_trip() {
-        let v = Value::Record(vec![("a".into(), Value::Vec3(1.0, 2.0, 3.0)), ("b".into(), Value::List(vec![Value::Int(1)]))]);
+        let v = Value::Record(vec![("a".into(), Value::Vec3(1.0, 2.0, 3.0)), ("b".into(), Value::List(Arc::new(vec![Value::Int(1)])))]);
         assert_eq!(value_of_literal(&literal_of_value(&v).unwrap()), v);
         assert!(literal_of_value(&Value::Fn(value::FnId(0))).is_none());
     }

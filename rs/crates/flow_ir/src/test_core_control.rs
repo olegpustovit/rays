@@ -36,7 +36,7 @@ fn same(a: &Value, b: &Value) -> bool {
         (Value::Vec2(a, b), Value::Vec2(x, y)) => bits(*a, *x) && bits(*b, *y),
         (Value::Vec3(a, b, c), Value::Vec3(x, y, z)) => bits(*a, *x) && bits(*b, *y) && bits(*c, *z),
         (Value::Vec4(a, b, c, d), Value::Vec4(x, y, z, w)) => bits(*a, *x) && bits(*b, *y) && bits(*c, *z) && bits(*d, *w),
-        (Value::List(a), Value::List(b)) => a.len() == b.len() && a.iter().zip(b).all(|(a, b)| same(a, b)),
+        (Value::List(a), Value::List(b)) => a.len() == b.len() && a.iter().zip(b.iter()).all(|(a, b)| same(a, b)),
         (Value::Record(a), Value::Record(b)) => a.len() == b.len() && a.iter().zip(b).all(|((n, a), (m, b))| n == m && same(a, b)),
         (a, b) => a == b,
     }

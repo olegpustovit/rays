@@ -3899,10 +3899,10 @@ fn force_values(run: &Run, value: &Value, residual: &dyn Fn(ResidualId) -> Resul
         }
         Value::List(values) => {
             let mut out = Vec::with_capacity(values.len());
-            for v in values {
+            for v in values.iter() {
                 out.push(force_values(run, v, residual)?);
             }
-            Ok(Value::List(out))
+            Ok(Value::List(Arc::new(out)))
         }
         Value::Record(fields) => {
             let mut out = Vec::with_capacity(fields.len());
@@ -4174,7 +4174,7 @@ pub mod host {
                     }
                 }
                 Value::List(values) => {
-                    for v in values {
+                    for v in values.iter() {
                         value(v, types, visited)?;
                     }
                 }
@@ -4244,7 +4244,7 @@ pub mod host {
                 _ => None,
             }
         };
-        let Value::List(rewritten) = E::Host::rewrite(&Value::List(all), &replace) else {
+        let Value::List(rewritten) = E::Host::rewrite(&Value::List(Arc::new(all)), &replace) else {
             return Err(value::fail("E_CORE_ARGUMENT", "Compiled region rewrite changed shape."));
         };
         let residual_of = |v: &Value| -> Result<ResidualId, Diagnostic> {
@@ -4812,7 +4812,7 @@ pub mod host {
                 }
                 Value::List(items) => {
                     let mapped: Vec<Value> = items.iter().map(|v| binding_of_value(pv, resolve, made, v)).collect();
-                    if items.iter().zip(mapped.iter()).all(|(a, b)| same_value(a, b)) { value.clone() } else { Value::List(mapped) }
+                    if items.iter().zip(mapped.iter()).all(|(a, b)| same_value(a, b)) { value.clone() } else { Value::List(Arc::new(mapped)) }
                 }
                 _ => value.clone(),
             }

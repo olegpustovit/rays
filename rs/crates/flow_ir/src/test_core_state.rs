@@ -15,7 +15,7 @@ fn bits(x: f64, y: f64) -> bool { x.to_bits() == y.to_bits() }
 fn same_bits(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Float(x), Value::Float(y)) => bits(*x, *y),
-        (Value::List(xs), Value::List(ys)) => xs.len() == ys.len() && xs.iter().zip(ys).all(|(a, b)| same_bits(a, b)),
+        (Value::List(xs), Value::List(ys)) => xs.len() == ys.len() && xs.iter().zip(ys.iter()).all(|(a, b)| same_bits(a, b)),
         (Value::Record(fs), Value::Record(gs)) => fs.len() == gs.len() && fs.iter().zip(gs).all(|((n, a), (m, b))| n == m && same_bits(a, b)),
         (a, b) => a == b,
     }

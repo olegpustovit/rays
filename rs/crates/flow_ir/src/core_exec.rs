@@ -70,7 +70,7 @@ pub fn host_value(resident: &Resident, value: &Value) -> Result<Value, Diagnosti
     }
     Ok(match value {
         Value::Record(fs) => Value::Record(fields(resident, fs)?),
-        Value::List(xs) => Value::List(xs.iter().map(|x| host_value(resident, x)).collect::<Result<_, _>>()?),
+        Value::List(xs) => Value::List(Arc::new(xs.iter().map(|x| host_value(resident, x)).collect::<Result<_, _>>()?)),
         Value::Source(n, t, fs) => Value::Source(n.clone(), t.clone(), fields(resident, fs)?),
         Value::Struct(n, t, fs) => Value::Struct(n.clone(), t.clone(), fields(resident, fs)?),
         other => (resident.finish)(other)?,
@@ -84,7 +84,7 @@ fn kept_value(resident: &Resident, value: &Value) -> Result<Value, Diagnostic> {
     }
     Ok(match value {
         Value::Record(fs) => Value::Record(fields(resident, fs)?),
-        Value::List(xs) => Value::List(xs.iter().map(|x| kept_value(resident, x)).collect::<Result<_, _>>()?),
+        Value::List(xs) => Value::List(Arc::new(xs.iter().map(|x| kept_value(resident, x)).collect::<Result<_, _>>()?)),
         Value::Struct(n, t, fs) => Value::Struct(n.clone(), t.clone(), fields(resident, fs)?),
         other => match (resident.keep)(other)? {
             Some(kept) => kept,
@@ -622,7 +622,7 @@ fn primitive(track: bool, locals: &[Ty], operation: &Primitive, args: &[(String,
                             },
                         };
                         if count < 0 || count > limit { return Err(v::fail("E_ITER_BOUND", "Core list length exceeds its bound.")); }
-                        Ok(Value::List(vec![Value::No_geo; count as usize]))
+                        Ok(Value::List(Arc::new(vec![Value::No_geo; count as usize])))
                     }
                     Some(width) => {
                         let width = v::int_of(&st.values[ix(width)])?;
@@ -661,7 +661,7 @@ fn primitive(track: bool, locals: &[Ty], operation: &Primitive, args: &[(String,
                 if first < 0 || count < 0 || first > len || count > len - first {
                     return Err(v::fail("E_LIST_RANGE", "A list slice must be within its source."));
                 }
-                Ok(Value::List(xs[first as usize..(first + count) as usize].to_vec()))
+                Ok(Value::List(Arc::new(xs[first as usize..(first + count) as usize].to_vec())))
             })
         }
         Primitive::Sequence_concat => {
@@ -679,7 +679,7 @@ fn primitive(track: bool, locals: &[Ty], operation: &Primitive, args: &[(String,
                 let mut out: Vec<Value> = Vec::with_capacity(count as usize);
                 for part in parts { out.extend_from_slice(part); }
                 let ty = v::elem_ty(&out);
-                Ok(Value::List(out.iter().map(|x| v::coerce_to(&ty, x)).collect::<Result<_, _>>()?))
+                Ok(Value::List(Arc::new(out.iter().map(|x| v::coerce_to(&ty, x)).collect::<Result<_, _>>()?)))
             })
         }
         Primitive::Color_parse => Arc::new(move |st| {
@@ -1587,7 +1587,7 @@ impl Ctx {
                         .collect();
                     if xs.len() > 4096 && !all_geometry { return Err(v::fail("E_ITER_BOUND", "Core list exceeds 4,096 values.")); }
                     let ty = v::elem_ty(&xs);
-                    Ok(Value::List(xs.iter().map(|x| v::coerce_to(&ty, x)).collect::<Result<_, _>>()?))
+                    Ok(Value::List(Arc::new(xs.iter().map(|x| v::coerce_to(&ty, x)).collect::<Result<_, _>>()?)))
                 })
             }
             Expr::Field(n, name) => {
@@ -2335,10 +2335,12 @@ pub fn prepare(program: &Program, clobber: bool, remember_loops: bool, approx: &
         );
         let n = program.locals.len();
         let roots: Vec<usize> = (0..n).map(|x| find(&mut parent, x)).collect();
+        // members per root (ascending), so the pass is linear in the locals
+        let mut members: Vec<Vec<i64>> = vec![Vec::new(); n];
+        for (y, root) in roots.iter().enumerate() { members[*root].push(y as i64); }
         for x in 0..n {
-            for y in 0..n {
-                if x != y && roots[x] == roots[y] { aliases[x].push(y as i64); }
-            }
+            let group = &members[roots[x]];
+            if group.len() > 1 { aliases[x] = group.iter().copied().filter(|y| *y != x as i64).collect(); }
         }
     }
     let ctx = Ctx {
@@ -2599,7 +2601,7 @@ fn store_value(target: &mut Value, i: i64, x: &Value) -> Result<(), Diagnostic> 
         }
         Value::List(xs) => {
             if i < 0 || i as usize >= xs.len() { return Err(range_error()); }
-            xs[i as usize] = x.clone();
+            Arc::make_mut(xs)[i as usize] = x.clone();
             Ok(())
         }
         other => {

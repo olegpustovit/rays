@@ -1,4 +1,5 @@
 // Port of lib/flow/test_frame.ml.
+use std::sync::Arc;
 use crate::*;
 use crate::test_workspace::{errors, show_ds};
 use flow_check::{catalog::Catalog, workspace as W};
@@ -70,8 +71,8 @@ fn frame_reads_force_against_the_live_frame() {
     live.events = vec![Event::Key_pressed(Key::Unknown(4242)), Event::Pointer_cancelled(MouseButton::MouseX2), Event::Trackpad_scrolled { delta: (0., -12.), phase: ScrollPhase::Momentum, time: 3.5 }];
     let t = |s: &str| Value::Text(s.as_bytes().to_vec());
     assert_eq!(force(&snapshot, &live, None), Ok(Value::Record(vec![
-        f("keys", Value::List(vec![t("space"), t("unknown:4242")])),
-        f("buttons", Value::List(vec![t("left"), t("x2")])),
+        f("keys", Value::List(Arc::new(vec![t("space"), t("unknown:4242")]))),
+        f("buttons", Value::List(Arc::new(vec![t("left"), t("x2")]))),
         f("key", t("unknown:4242")),
         f("button", t("x2")),
         f("phase", t("momentum")),

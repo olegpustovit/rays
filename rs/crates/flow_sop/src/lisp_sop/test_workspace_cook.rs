@@ -344,7 +344,7 @@ fn same_value(a: &flow_eval::Value, b: &flow_eval::Value) -> bool {
     use flow_eval::Value::*;
     match (a, b) {
         (Fn(_), Fn(_)) => true,
-        (List(a), List(b)) => a.len() == b.len() && a.iter().zip(b).all(|(a, b)| same_value(a, b)),
+        (List(a), List(b)) => a.len() == b.len() && a.iter().zip(b.iter()).all(|(a, b)| same_value(a, b)),
         (Record(a), Record(b)) | (Struct(_, _, a), Struct(_, _, b)) => a.len() == b.len() && a.iter().zip(b).all(|((n, a), (m, b))| n == m && same_value(a, b)),
         // Marshal compares NaN bits, `==` does not: fall back to the printed form
         _ => a == b || format!("{a:?}") == format!("{b:?}"),

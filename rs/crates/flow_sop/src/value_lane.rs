@@ -140,7 +140,7 @@ fn prepare(network: &Network) -> Result<Plan, Diagnostic> {
     let states = if network.states.is_empty() {
         None
     } else {
-        Some(compile(network, &Value::List(network.states.clone()))?)
+        Some(compile(network, &Value::List(Arc::new(network.states.clone())))?)
     };
     if network.drives.is_empty() {
         return Ok(Plan {

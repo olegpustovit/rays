@@ -214,7 +214,7 @@ fn one_force_lowers_129_residuals_once() {
     let residuals: Vec<Value> = (0..129).map(|i| ok(e::Host::map_function(None, None, &FnSignature { params: vec![Ty::Float], result: Ty::Vec3 }, f, &[Value::Float_array(Arc::new(vec![i as f64]))]))).collect();
     let mut items = residuals.clone();
     items.push(residuals[0].clone());
-    let value = Value::List(items);
+    let value = Value::List(Arc::new(items));
     let program = ok(Executor::compile(&value, &Default::default()));
     let live = live_at(0.25);
     let (actual, attempts) = Executor::Private::force_with_lower_attempts(&program, &Default::default(), &live);

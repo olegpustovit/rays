@@ -153,7 +153,7 @@ fn exact_images_cannot_be_state() {
             c.fetch_add(1, O::SeqCst);
             let resource = value::truthy(&args.iter().find(|(n, _)| n == "resource").unwrap().1)?;
             let v = if resource { Value::Deferred(ty::image(), 0) } else { Value::Int(0) };
-            Ok(match wrap { 0 => v, 1 => Value::List(vec![v]), 2 => Value::Record(vec![("image".into(), v)]), _ => Value::Struct("opaque".into(), ty::Ty::Any, vec![("image".into(), v)]) })
+            Ok(match wrap { 0 => v, 1 => Value::List(Arc::new(vec![v])), 2 => Value::Record(vec![("image".into(), v)]), _ => Value::Struct("opaque".into(), ty::Ty::Any, vec![("image".into(), v)]) })
         });
         for (seed, step, expected_calls) in [("(test/opaque true)", "(test/opaque false)", 1), ("(test/opaque false)", "(test/opaque true)", 2)] {
             let src = format!("(workspace opaque (graph g :context value (state [s {seed}] {step})))");

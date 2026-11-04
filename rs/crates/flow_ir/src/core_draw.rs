@@ -285,7 +285,7 @@ fn fail(ctx: &mut dyn DrawContext, source: &C::Source, code: &str, message: &str
 
 fn drawing(ctx: &mut dyn DrawContext, plan: &E::Plan, value: &Value) -> Result<(), String> {
     match value {
-        Value::List(xs) => { for x in xs { drawing(ctx, plan, x)?; } Ok(()) }
+        Value::List(xs) => { for x in xs.iter() { drawing(ctx, plan, x)?; } Ok(()) }
         Value::Deferred(Ty::Named(name), id) if name == "drawing" && *id >= 0 && (*id as usize) < plan.nodes.len() => node(ctx, plan, &plan.nodes[*id as usize]),
         Value::Residual(_) => Err("draw_dynamic".into()),
         _ => { fail(ctx, &no_source(), "E_TYPE", "The canvas needs a Drawing value."); Ok(()) }

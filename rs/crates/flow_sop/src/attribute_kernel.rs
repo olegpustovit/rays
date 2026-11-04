@@ -783,7 +783,7 @@ impl Specializer<'_> {
             Value::List(vs) => {
                 let m: Vec<(Value, bool)> = vs.iter().map(|v| self.map(v)).collect();
                 let changed = m.iter().any(|(_, c)| *c);
-                (Value::List(m.into_iter().map(|(v, _)| v).collect()), changed)
+                (Value::List(Arc::new(m.into_iter().map(|(v, _)| v).collect())), changed)
             }
             Value::Record(fs) => {
                 let (fs, c) = self.fields(fs);
@@ -3211,7 +3211,7 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
         let value = Value::Record(vec![("a".into(), attr_source("sop/attr", "P", &[])), ("b".into(), Value::Deferred(ty::geometry(), 3))]);
         assert_eq!(sources(&value), vec![3, 7]);
         assert_eq!(reads(&value), vec!["*".to_owned()], "a bare geometry is opaque");
-        let named = Value::List(vec![attr_source("sop/attr", "P", &[]), attr_source("sop/attr_checked", "Cd", &[]), attr_source("sop/attr", "P", &[])]);
+        let named = Value::List(Arc::new(vec![attr_source("sop/attr", "P", &[]), attr_source("sop/attr_checked", "Cd", &[]), attr_source("sop/attr", "P", &[])]));
         assert_eq!(reads(&named), vec!["Cd".to_owned(), "P".to_owned()]);
         let topology = Value::Source("sop/count".into(), Ty::Int, vec![("geometry".into(), Value::Deferred(ty::geometry(), 7)), ("element".into(), Value::Text(b"points".to_vec()))]);
         assert!(reads(&topology).is_empty(), "topology-only readers read no attribute");

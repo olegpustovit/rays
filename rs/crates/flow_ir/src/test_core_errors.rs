@@ -43,7 +43,7 @@ fn reference(value: &Value, live: &Frame) -> Result<Value, Diagnostic> { E::Host
 
 fn live_frame(frame: i64) -> Frame { Frame { frame, ..input::at_time(frame as f64 * 0.25) } }
 
-fn state_values(state: &E::State) -> Value { Value::List(E::Host::state_values(state)) }
+fn state_values(state: &E::State) -> Value { Value::List(Arc::new(E::Host::state_values(state))) }
 
 fn compile_strict(value: &Value) -> crate::flow_ir::Executor::Program {
     ok(Executor::compile(value, &Executor::CompileOptions { strict: true, ..Default::default() }))
@@ -140,7 +140,7 @@ fn a_refused_extension_op_is_interpreted_once_and_shared() {
         _ => panic!("opaque result was not residual"),
     };
     assert_eq!(core_lower::lower(None, None, false, None, None, residual).err().as_deref(), Some("test/opaque"));
-    let shared = Value::List(vec![Value::Residual(residual), Value::List(vec![Value::Residual(residual)])]);
+    let shared = Value::List(Arc::new(vec![Value::Residual(residual), Value::List(Arc::new(vec![Value::Residual(residual)]))]));
     let program = ok(Executor::compile(&shared, &Default::default()));
     let live = input::at_time(0.25);
     let (actual, attempts, walks) = Executor::Private::force_with_walker_counts(&program, &Default::default(), &live);

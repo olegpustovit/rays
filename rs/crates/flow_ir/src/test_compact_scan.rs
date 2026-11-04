@@ -106,7 +106,7 @@ fn bad_masks_and_types() {
             Value::Text_array(Arc::new(vec![b"0".to_vec()])),
             Value::Int(1),
             Value::Bool(true),
-            Value::List(vec![Value::Int(1)]),
+            Value::List(Arc::new(vec![Value::Int(1)])),
         ] {
             reject("E_ARRAY_TYPE", call(name, bad));
         }

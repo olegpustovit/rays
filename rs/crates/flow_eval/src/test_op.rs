@@ -37,7 +37,7 @@ fn sample(name: &str, ty: &Ty) -> Value {
         Ty::Vec4 => Value::Vec4(1., 2., 3., 4.),
         Ty::Text => t(if name == "axis" { "horizontal" } else if name == "button" { "left" } else { "a" }),
         Ty::Color => t("#336699"),
-        Ty::List(e) => Value::List(vec![sample("", e), sample("", e)]),
+        Ty::List(e) => Value::List(Arc::new(vec![sample("", e), sample("", e)])),
         Ty::Array(e) if **e == Ty::Int && name == "offsets" => ia(&[0, 2]),
         Ty::Array(e) => value::array_init(e, 2, &|_| sample("", e)).unwrap(),
         Ty::Named(_) => nominal(ty).unwrap_or_else(|| Value::Deferred(ty.clone(), 0)),
@@ -230,7 +230,7 @@ fn high_integers_stay_exact_end_to_end() {
     let high = (1i64 << 53) + 1;
     let text = high.to_string();
     assert!(value::int_of(&Value::Int(high)).unwrap() == high && value::int_of(&Value::Int(MAX_INT)).unwrap() == MAX_INT);
-    assert_eq!(value_of(&format!("(range {} {})", high, high + 3)), Value::List(vec![Value::Int(high), Value::Int(high + 1), Value::Int(high + 2)]));
+    assert_eq!(value_of(&format!("(range {} {})", high, high + 3)), Value::List(Arc::new(vec![Value::Int(high), Value::Int(high + 1), Value::Int(high + 2)])));
     assert_eq!(value_of(&format!("(array/int 3 {text})")), ia(&[high, high, high]));
     assert_eq!(value_of("(array/range 3 :type int)"), ia(&[0, 1, 2]));
     assert_eq!(value_of("(array/range 3)"), fa(&[0., 1., 2.]));

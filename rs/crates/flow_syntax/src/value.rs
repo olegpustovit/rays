@@ -16,7 +16,7 @@ pub enum Value {
     Vec2(f64, f64),
     Vec3(f64, f64, f64),
     Vec4(f64, f64, f64, f64),
-    List(Vec<Value>),
+    List(Arc<Vec<Value>>),
     Int_array(Arc<Vec<i64>>),
     Text_array(Arc<Vec<Vec<u8>>>),
     Float_array(Arc<Vec<f64>>),
@@ -120,7 +120,13 @@ pub fn ty_of(value: &Value) -> Ty {
     }
 }
 pub fn elem_ty(values: &[Value]) -> Ty {
-    values.iter().fold(Ty::Any, |current, value| ty::join(&current, &ty_of(value)).unwrap_or(current))
+    let mut current = Ty::Any;
+    for value in values {
+        // a deferred/struct element already of the running type needs no clone and no join
+        if let Value::Deferred(ty, _) | Value::Struct(_, ty, _) | Value::Source(_, ty, _) = value { if *ty == current { continue; } }
+        current = ty::join(&current, &ty_of(value)).unwrap_or(current);
+    }
+    current
 }
 
 pub fn coerce_to(want: &Ty, value: &Value) -> Result<Value, Diagnostic> {
@@ -134,7 +140,7 @@ pub fn coerce_to(want: &Ty, value: &Value) -> Result<Value, Diagnostic> {
         (Ty::Vec3, Value::Int(_) | Value::Float(_)) => { let n = num(value)?; Ok(Value::Vec3(n, n, n)) },
         (Ty::Vec2, Value::Int(_) | Value::Float(_)) => { let n = num(value)?; Ok(Value::Vec2(n, n)) },
         (Ty::Vec4, Value::Int(_) | Value::Float(_)) => { let n = num(value)?; Ok(Value::Vec4(n, n, n, n)) },
-        (Ty::List(element), Value::List(values)) => Ok(Value::List(values.iter().map(|value| coerce_to(element, value)).collect::<Result<Vec<_>, _>>()?)),
+        (Ty::List(element), Value::List(values)) => Ok(Value::List(Arc::new(values.iter().map(|value| coerce_to(element, value)).collect::<Result<Vec<_>, _>>()?))),
         (Ty::Array(element), Value::Int_array(values)) if **element == Ty::Float => Ok(Value::Float_array(Arc::new(values.iter().map(|value| *value as f64).collect()))),
         (Ty::Record(wanted), Value::Record(fields)) => Ok(Value::Record(fields.iter().map(|(name, value)| {
             Ok((name.clone(), wanted.iter().find(|(field, _)| field == name).map_or_else(|| Ok(value.clone()), |(_, want)| coerce_to(want, value))?))
@@ -516,7 +522,7 @@ pub fn validate(value: &Value) -> Result<(), Diagnostic> {
             if values.len() <= 4096 { check_float_array(values)?; }
             else { FINITE_ARRAYS.validate_once(values, &|| check_float_array(values))?; }
         }
-        Value::List(values) => for value in values { validate(value)?; },
+        Value::List(values) => for value in values.iter() { validate(value)?; },
         Value::Record(fields) | Value::Struct(_, _, fields) | Value::Source(_, _, fields) => for (_, value) in fields { validate(value)?; },
         _ => (),
     }
@@ -535,7 +541,7 @@ fn error_payload(diagnostic: &Diagnostic) -> Value {
     Value::Record(vec![
         ("code".into(), Value::Text(diagnostic.code.as_bytes().to_vec())),
         ("message".into(), Value::Text(diagnostic.message.as_bytes().to_vec())),
-        ("cause".into(), Value::List(diagnostic.cause.iter().map(|cause| Value::Text(cause.as_bytes().to_vec())).collect())),
+        ("cause".into(), Value::List(Arc::new(diagnostic.cause.iter().map(|cause| Value::Text(cause.as_bytes().to_vec())).collect()))),
     ])
 }
 pub fn with_error(protected: &dyn Fn() -> Result<Value, Diagnostic>, map: &dyn Fn(Value) -> Result<Value, Diagnostic>) -> Result<Value, Diagnostic> {
@@ -655,7 +661,7 @@ mod tests {
         let frame = Value::Record(vec![("dt".into(), Value::Float(0.125)), ("index".into(), Value::Int(24))]);
         assert_eq!(ty_of(&frame), Ty::Record(vec![("dt".into(), Ty::Float), ("index".into(), Ty::Int)]));
         validate(&frame).unwrap();
-        let state = Value::List(vec![Value::Float(1.0), packed.clone()]);
+        let state = Value::List(Arc::new(vec![Value::Float(1.0), packed.clone()]));
         assert_eq!(ty_of(&state), Ty::List(Box::new(Ty::Float)));
         validate(&state).unwrap();
         assert_eq!(array_get(&packed, -1).unwrap_err().code, "E_ARRAY_RANGE");
@@ -755,7 +761,7 @@ mod tests {
         let mapped = with_error(&|| Err(original.clone()), &|_| Ok(Value::Record(vec![
             ("code".into(), Value::Text(b"E_MAPPED".to_vec())),
             ("message".into(), Value::Text(b"mapped".to_vec())),
-            ("cause".into(), Value::List(vec![])),
+            ("cause".into(), Value::List(Arc::new(vec![]))),
         ]))).unwrap_err();
         assert_eq!(mapped.code, "E_MAPPED");
         assert_eq!(mapped.message, "mapped");

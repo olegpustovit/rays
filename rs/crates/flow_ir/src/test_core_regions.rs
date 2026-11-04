@@ -91,7 +91,7 @@ fn same(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Float(x), Value::Float(y)) => bits(*x, *y),
         (Value::Vec3(a, b, c), Value::Vec3(x, y, z)) => bits(*a, *x) && bits(*b, *y) && bits(*c, *z),
-        (Value::List(a), Value::List(b)) => a.len() == b.len() && a.iter().zip(b).all(|(a, b)| same(a, b)),
+        (Value::List(a), Value::List(b)) => a.len() == b.len() && a.iter().zip(b.iter()).all(|(a, b)| same(a, b)),
         (Value::Float_array(a), Value::Float_array(b))
         | (Value::Vec2_array(a), Value::Vec2_array(b))
         | (Value::Vec3_array(a), Value::Vec3_array(b))
