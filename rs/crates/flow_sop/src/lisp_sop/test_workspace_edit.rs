@@ -755,7 +755,6 @@ fn part13_move_binding_wrap_in_map_filter_inline_defn() {
 }
 
 #[test]
-#[ignore = "flow_graph: Set_arg :skip on a body-less (for) answers 'This form has no such input.', not E_EDIT 'The edit failed'"]
 fn a_raising_rewrite_is_a_refusal() {
     // an exception inside a rewrite (here an index on a [for] with no body) is a refusal too
     let broken = parse(&g("(let* [a (for)] a)"));

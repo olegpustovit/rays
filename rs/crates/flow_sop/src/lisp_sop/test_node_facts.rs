@@ -73,7 +73,7 @@ fn fixture() -> geo::T {
 }
 
 #[test]
-#[ignore = "deadlock: irfix (exceeds 5 s: cooking every Lisp-bodied factory over a grid-sized fixture hits the flow_ir static-map hang)"]
+#[ignore = "slow lowering: perf agent"]
 fn declared_preserved_topology_holds_at_one_and_eight_domains() {
     let native = sop::nodes::factories();
     let lowered = lower::workspace(Some(native.clone()), Vec::new(), lower::Options::default(), &parse("(workspace facts (graph unused :context value 0.0))")).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));

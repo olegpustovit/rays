@@ -25,7 +25,7 @@ fn run_chain(body: &str) -> (Vec<u8>, usize, Vec<u8>) {
 }
 
 #[test]
-#[ignore = "blocked upstream: grid lowering needs the flow_check error_rows shape [rows mapper :policy p] and then hits the irfix flow_ir deadlock"]
+#[ignore = "slow lowering: perf agent (1-3 s alone, over 5 s under the runner's parallelism)"]
 fn chained_bodies_are_one_program_and_equal_the_factory_node() {
     for (name, body) in [
         ("set_orient > color_by_height", "(sop/color_by_height (sop/set_orient (sop/grid :counts \"Point counts\" :connectivity \"Points\" :columns 1025 :rows 2) :x 0.5))"),
@@ -70,7 +70,6 @@ fn out(text: &str) -> Outcome {
 }
 
 #[test]
-#[ignore = "deadlock: irfix (flow_ir static-map hang in qualify_workspace)"]
 fn step_b_body_errors_cook_refusals_lower() {
     let normalized = r#"(defnode sop/b_norm [(geo : geometry) (rules : text "point" :kind encoded :normalize (fn [(raw : text)] (case (text/lower (text/trim raw)) "points" "point" "point" "point" :else (error "E_RULES" (str "Unknown owner: " raw)))))] (sop/with_attr geo :tag (array/text (sop/count geo :points) rules) :type text))"#;
     let rest = r#"(defnode sop/b_rest :validate (> n 0) :code "E_N" :message "n must be positive" [(geos : geometry :rest true :required false) (n : int 1)] (if (> (count geos) 0) (last geos) (sop/line :kind "Points" :points n)))"#;
@@ -104,7 +103,7 @@ fn step_b_body_errors_cook_refusals_lower() {
 /// Step C: a body that reaches its cook context lowers as its own node, specialized per context;
 /// the same card with the context branch untaken inlines.
 #[test]
-#[ignore = "deadlock: irfix (flow_ir static-map hang in qualify_workspace)"]
+#[ignore = "slow lowering: perf agent (1-3 s alone, over 5 s under the runner's parallelism)"]
 fn step_c_context_reaching_bodies_and_live_arguments_inline() {
     for (call, inlines) in [
         ("(sop/noise_displace (sop/line :points 9) :context_seed true :amplitude 0.5)", true),
@@ -129,7 +128,7 @@ fn step_c_context_reaching_bodies_and_live_arguments_inline() {
 /// Frame-driven arguments inline: a live vec3 group is its components, and a check of a live value
 /// is made as the card cooks, with the diagnostic the written-out call refuses or fails with.
 #[test]
-#[ignore = "blocked upstream: grid lowering needs the flow_check error_rows shape [rows mapper :policy p] and then hits the irfix flow_ir deadlock"]
+#[ignore = "slow lowering: perf agent"]
 fn frame_driven_arguments_inline_and_fail_as_the_call() {
     let text = |call: &str| format!("(workspace f (graph g :context sop (sop/attribute_noise (sop/grid :rows 5 :columns 7) {call})))");
     for (live, written, inlines) in [
@@ -160,7 +159,7 @@ fn frame_driven_arguments_inline_and_fail_as_the_call() {
 
 /// A driven transform inlines: its identity and singular tests are the write's data.
 #[test]
-#[ignore = "blocked upstream: grid lowering needs the flow_check error_rows shape [rows mapper :policy p] and then hits the irfix flow_ir deadlock"]
+#[ignore = "slow lowering: perf agent"]
 fn a_driven_transform_inlines_as_the_call() {
     let text = |input: &str, call: &str| format!("(workspace x (graph g :context sop (sop/transform {input} {call})))");
     let grid = "(sop/grid :rows 5 :columns 7)".to_owned();
@@ -188,7 +187,7 @@ fn a_driven_transform_inlines_as_the_call() {
 
 /// Recomputed normals are sop/normals' face-area bytes, gathered per point (or vertex).
 #[test]
-#[ignore = "blocked upstream: grid lowering needs the flow_check error_rows shape [rows mapper :policy p] and then hits the irfix flow_ir deadlock"]
+#[ignore = "slow lowering: perf agent"]
 fn recomputed_normals_are_sop_normals_face_area_bytes() {
     for (input, owner) in [
         ("(sop/grid :rows 5 :columns 7)", "point"),
@@ -211,7 +210,7 @@ fn recomputed_normals_are_sop_normals_face_area_bytes() {
 /// Step E2: a cooked-data argument (a count of the cooked input) inlines; the body reads it as a
 /// value resolved once per cook, in time linear in the points.
 #[test]
-#[ignore = "deadlock: irfix (flow_ir static-map hang in qualify_workspace)"]
+#[ignore = "slow lowering: perf agent (1-3 s alone, over 5 s under the runner's parallelism)"]
 fn cooked_data_arguments_resolve_once_per_cook() {
     let text = |amplitude: &str, points: i64| format!("(workspace e (graph g :context sop (let* [g (sop/line :points {points})] (sop/noise_displace g :amplitude {amplitude}))))");
     for points in [9i64, 4096] {

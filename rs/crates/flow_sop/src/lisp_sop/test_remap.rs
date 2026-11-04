@@ -576,7 +576,7 @@ fn outputs_are_owned_untaken_branches_are_not_evaluated_and_live_maps_follow_tim
 }
 
 #[test]
-#[ignore = "hang: >25 s (debug) building the 32769-point defnode with exact maps; likely the irfix flow_ir static-map deadlock, not diagnosed"]
+#[ignore = "slow lowering: perf agent"]
 fn strict_public_defnode_computes_maps_through_typed_kernels() {
     // The strict public defnode path computes the maps through genuine typed integer kernels, then
     // transfers raw source payload without numeric reads.

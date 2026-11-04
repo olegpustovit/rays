@@ -131,7 +131,7 @@ fn image_noise_lowers_cooks_and_edits() {
 // register L16: a skipped iteration makes no node; the others keep compiled ids, plan keys and
 // provenance, so the cook keeps hitting its cache
 #[test]
-#[ignore = "deadlock: irfix (flow_ir static-map deadlock; hangs past 25 s)"]
+#[ignore = "slow lowering: perf agent (1-3 s alone, over 5 s under the runner's parallelism)"]
 fn skips() {
     let text = |skip: &str| format!("(workspace w (graph g :context sop (sop/merge (for [i (range 4)] {skip}(sop/transform (sop/box) :translate [i 0 0])))))");
     let lower_text = |previous: Option<&lower::T>, source: &str| {
@@ -429,7 +429,6 @@ fn check_fixture(name: &str, extra: bool) -> usize {
 }
 
 #[test]
-#[ignore = "deadlock: irfix (flow_ir static-map deadlock; hangs past 25 s)"]
 fn kit_fixture_lowers_and_cooks_the_same_at_1_and_3_domains() {
     check_fixture("kit", false);
 }

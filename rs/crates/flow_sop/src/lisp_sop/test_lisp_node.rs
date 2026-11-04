@@ -83,7 +83,6 @@ const SHIFT: &str = r#"(workspace test
   (graph g :context sop (sop/lisp_shift (sop/ext_src) :distance 2.0)))"#;
 
 #[test]
-#[ignore = "deadlock: irfix (flow_ir static-map hang in qualify_workspace)"]
 fn empty_geometry_survives_a_lisp_map() {
     let empty = line_points(&[]);
     let node = lisp_sop::workspace_node(&external("src", empty.clone()), SHIFT);
@@ -145,7 +144,6 @@ fn authored_body_errors_cook_lazily() {
 }
 
 #[test]
-#[ignore = "blocked upstream: library nodes fail to check with E_ARITY sop/group takes 1 positional inputs; got 3"]
 fn prepared_bodies_reuse_unchanged_graphs_and_recompile_live_drives() {
     for expression in ["t", "(state [previous 0.0] (+ previous (frame/dt)))"] {
         for reference in [false, true] {
@@ -373,7 +371,6 @@ fn parameter_validation_rejects_without_changing_the_node() {
 }
 
 #[test]
-#[ignore = "deadlock: irfix (flow_ir static-map hang in qualify_workspace)"]
 fn a_lisp_body_keeps_topology_attributes_and_ordered_groups() {
     use rdk::attribute::{Owner, Storage};
     let positions = rdk_ok(rdk::packed::Float3::of_owned(vec![-1.0, 0.0, 1.0], vec![-0.0, 0.0, 0.0], vec![2.0, 3.0, 4.0]));
@@ -409,7 +406,6 @@ fn a_lisp_body_keeps_topology_attributes_and_ordered_groups() {
 }
 
 #[test]
-#[ignore = "deadlock: irfix (flow_ir static-map hang in qualify_workspace)"]
 fn a_defnode_keeps_its_operation_inputs_schema_and_cache_identity() {
     let original = lisp_sop::node(&[], "(sop/line :points 3)");
     let n = lisp_sop::workspace_node(&[("src".to_owned(), original.clone())], SHIFT);
@@ -449,7 +445,6 @@ const CONTROLS: &str = r#"(workspace controls
   (graph g :context sop (sop/all_controls (sop/line :kind "Points" :points 1))))"#;
 
 #[test]
-#[ignore = "deadlock: irfix (exceeds 5 s: flow_ir static-map hang in qualify_workspace on the defnode body)"]
 fn every_control_kind_reaches_the_body_with_exactly_one_miss_per_edit() {
     with_session(&mut |s| {
         let n = lower_ref(false, CONTROLS);
@@ -533,7 +528,6 @@ fn optional_and_rest_slots_pass_through() {
 }
 
 #[test]
-#[ignore = "deadlock: irfix (exceeds 5 s: flow_ir static-map hang in qualify_workspace on the defnode body)"]
 fn nested_lisp_calls_keep_parameters_and_leak_no_cache_nodes() {
     let source = r#"(workspace nested
     (defnode sop/inner [(geo : geometry) (distance : float 0.5)]
@@ -554,7 +548,6 @@ fn nested_lisp_calls_keep_parameters_and_leak_no_cache_nodes() {
 }
 
 #[test]
-#[ignore = "blocked upstream: grid lowering needs the flow_check error_rows shape [rows mapper :policy p] and then hits the irfix flow_ir deadlock"]
 fn exact_lisp_geometry_bytes_are_equal_across_interpreter_domains_and_grain() {
     let source = r#"(workspace exact
     (defnode sop/shift [(geo : geometry) (distance : float 0.125)]
@@ -577,7 +570,7 @@ fn exact_lisp_geometry_bytes_are_equal_across_interpreter_domains_and_grain() {
 }
 
 #[test]
-#[ignore = "blocked upstream: flow_check E_INPUT_TYPE rejects a let*-bound (fn [p] ...) for a (fn [vec3] float) graph input (got fn)"]
+#[ignore = "slow lowering: perf agent (1-3 s alone, over 5 s under the runner's parallelism)"]
 fn typed_function_slots_keep_their_callable_and_captures() {
     for (keyword, call) in [("", "(sop/function_slot field)"), (":keyword true", "(sop/function_slot :field field)")] {
         with_session(&mut |s| {
@@ -590,7 +583,7 @@ fn typed_function_slots_keep_their_callable_and_captures() {
 }
 
 #[test]
-#[ignore = "blocked upstream: grid lowering needs the flow_check error_rows shape [rows mapper :policy p] and then hits the irfix flow_ir deadlock"]
+#[ignore = "disconnected_input: image-typed defnode slot lowers without its input; see parity_backlog.md"]
 fn typed_image_slots_keep_their_cooked_pixels() {
     for (keyword, call) in [
         ("", r#"(sop/image_slot (sop/grid :columns 2 :rows 2 :uv_attribute "uv") (image/noise :width 2 :height 2))"#),
@@ -606,7 +599,7 @@ fn typed_image_slots_keep_their_cooked_pixels() {
 }
 
 #[test]
-#[ignore = "blocked upstream: flow_check E_INPUT_TYPE rejects a let*-bound (fn [p] ...) for a (fn [vec3] float) graph input (got fn)"]
+#[ignore = "slow lowering: perf agent (1-3 s alone, over 5 s under the runner's parallelism)"]
 fn a_distinct_local_function_is_not_replaced_by_forwarding() {
     with_session(&mut |s| {
         let body = "(let* [local (fn [p] (- (length (+ p [0.25 0.0 0.0])) 0.45))]\n    (sop/merge\n      (sop/iso_surface :field field :resolution [4 4 4])\n      (sop/iso_surface :field local :resolution [4 4 4])))";
@@ -619,7 +612,7 @@ fn a_distinct_local_function_is_not_replaced_by_forwarding() {
 }
 
 #[test]
-#[ignore = "deadlock: irfix (exceeds 5 s: flow_ir static-map hang in qualify_workspace on the defnode body)"]
+#[ignore = "slow lowering: perf agent (1-3 s alone, over 5 s under the runner's parallelism)"]
 fn a_function_slot_keeps_its_outer_cooked_geometry_capture() {
     with_session(&mut |s| {
         let body = |call: &str| format!("(let* [base (sop/line :kind \"Points\" :points 1 :origin [0.7 0.0 0.0])\n         sample {{:radius (array/sum (sop/attr base :P))}}\n         field (fn [p] (- (length p) sample.radius.x))] {call})");
@@ -631,7 +624,7 @@ fn a_function_slot_keeps_its_outer_cooked_geometry_capture() {
 }
 
 #[test]
-#[ignore = "blocked upstream: grid lowering needs the flow_check error_rows shape [rows mapper :policy p] and then hits the irfix flow_ir deadlock"]
+#[ignore = "E_RESIDUAL_ID Residual belongs to an expired evaluation: a closure handed from a library arena to a graph of another arena (graph_input_fits now looks it up in its home arena, but the library arena is dropped before the cook); see parity_backlog.md"]
 fn a_map_function_slot_keeps_its_separate_outer_geometry_capture() {
     let body = |call: &str| format!("(let* [base (sop/line :kind \"Points\" :points 1 :origin [0.7 0.2 -0.1])\n      sample {{:offset (array/sum (sop/attr base :P))}}\n      field (fn [p] (+ p sample.offset))\n      geo (sop/grid :columns 2 :rows 2)] {call})");
     let mut native = Vec::new();
@@ -654,7 +647,7 @@ fn a_map_function_slot_keeps_its_separate_outer_geometry_capture() {
 }
 
 #[test]
-#[ignore = "blocked upstream: grid lowering needs the flow_check error_rows shape [rows mapper :policy p] and then hits the irfix flow_ir deadlock"]
+#[ignore = "cook refusal arrives as E_LOWER message-only: the node factory build (lower.rs grp/attr_node .map_err(|d| d.message) then edit_r) drops E_KERNEL_FORM code and span; see parity_backlog.md"]
 fn a_numeric_body_without_a_packed_kernel_is_refused_not_interpreted() {
     let source = r#"(workspace refused
     (defnode sop/unsupported_map [(geo : geometry)]
@@ -685,7 +678,7 @@ fn a_numeric_body_without_a_packed_kernel_is_refused_not_interpreted() {
 const GRID_PREFIX: &str = "(let* [base (sop/line :kind \"Points\" :points 1 :origin [0.7 0.2 -0.1])\n    sample {:offset (array/sum (sop/attr base :P))}\n    field (fn [p] (+ p sample.offset))\n    other (fn [p] (- p sample.offset))\n    geo (sop/grid :columns 2 :rows 2)]";
 
 #[test]
-#[ignore = "blocked upstream: grid lowering needs the flow_check error_rows shape [rows mapper :policy p] and then hits the irfix flow_ir deadlock"]
+#[ignore = "flow_check E_TYPE Functions cannot be compared (optional/rest callable slot); not root-caused, see parity_backlog.md"]
 fn optional_and_rest_callable_slots_keep_bytes_and_cache() {
     with_session(&mut |s| {
         let prefix = |call: &str| format!("{GRID_PREFIX} {call})");
@@ -714,7 +707,7 @@ fn optional_and_rest_callable_slots_keep_bytes_and_cache() {
 }
 
 #[test]
-#[ignore = "blocked upstream: grid lowering needs the flow_check error_rows shape [rows mapper :policy p] and then hits the irfix flow_ir deadlock"]
+#[ignore = "disconnected_input: image-typed defnode slot lowers without its input; see parity_backlog.md"]
 fn optional_and_rest_image_slots_keep_bytes() {
     with_session(&mut |s| {
         let prefix = |call: &str| format!("(let* [geo (sop/grid :columns 2 :rows 2 :uv_attribute \"uv\")\n    picture (image/noise :width 2 :height 2)] {call})");
@@ -741,7 +734,7 @@ fn lower_prev(previous: Option<&lower::T>, factories: Option<Vec<edit::Factory>>
 }
 
 #[test]
-#[ignore = "deadlock: irfix (exceeds 5 s: flow_ir static-map hang in qualify_workspace on the defnode body)"]
+#[ignore = "cache: a call-site parameter edit recooks an unchanged Lisp sibling (misses 4 hits 3); not root-caused, see parity_backlog.md"]
 fn call_site_and_helper_edits_invalidate_only_what_depends_on_them() {
     let source = |amount: &str, helper: &str| {
         format!(
@@ -813,7 +806,7 @@ fn cone_source(extra: &str, v: &[&str; 9]) -> String {
 }
 
 #[test]
-#[ignore = "deadlock: irfix (exceeds 5 s: flow_ir static-map hang in qualify_workspace on the defnode body)"]
+#[ignore = "slow lowering: perf agent"]
 fn declaration_cones_invalidate_exactly_the_edited_dependencies() {
     let initial = CONE_INITIAL;
     for domains in [1i64, 8] {
@@ -857,7 +850,6 @@ fn declaration_cones_invalidate_exactly_the_edited_dependencies() {
 }
 
 #[test]
-#[ignore = "deadlock: irfix (exceeds 5 s: flow_ir static-map hang in qualify_workspace on the defnode body)"]
 fn unrelated_structural_macro_and_helper_edits_keep_the_cache() {
     let extra = "(defmacro irrelevant_bump [x] `(let* [owned# ~x] (+ owned# 1.0)))\n    (defn extra_unrelated :context value [] (irrelevant_bump 2.0))";
     for domains in [1i64, 8] {
@@ -973,7 +965,6 @@ fn deferred_child_cooking_stays_inside_its_authored_error_boundary() {
 
 /// sop/context_frame: the cook frame as a float, a Frame cache dependency, rebuilt per frame.
 #[test]
-#[ignore = "deadlock: irfix (exceeds 5 s: flow_ir static-map hang in qualify_workspace on the defnode body)"]
 fn context_frame_is_a_float_frame_dependency_in_bodies_only() {
     use sop::context::dependencies::{mem, Fact};
     let source = |body: &str| format!("(workspace frame_body\n    (defnode sop/frame_probe [(geo : geometry)]\n      (sop/with_attr geo \"f\" (array/float (sop/count geo :points) {body}) :owner \"point\" :type float))\n    (graph g :context sop (sop/frame_probe (sop/line :points 3))))");
@@ -1002,7 +993,6 @@ fn context_frame_is_a_float_frame_dependency_in_bodies_only() {
 
 /// sop/context_time: the cook time in seconds, a Time cache dependency (not Frame), body only.
 #[test]
-#[ignore = "deadlock: irfix (exceeds 5 s: flow_ir static-map hang in qualify_workspace on the defnode body)"]
 fn context_time_is_a_float_time_dependency_in_bodies_only() {
     use sop::context::dependencies::{mem, Fact};
     let source = |body: &str| format!("(workspace time_body\n    (defnode sop/time_probe [(geo : geometry)]\n      (sop/with_attr geo \"t\" (array/float (sop/count geo :points) {body}) :owner \"point\" :type float))\n    (graph g :context sop (sop/time_probe (sop/line :points 3))))");

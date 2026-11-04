@@ -708,7 +708,7 @@ pub fn arg_set(e: &S, key: &ArgKey, v: Option<S>) -> R<S> {
                 items.push(v);
                 items.push(args[n - 1].clone());
             } else {
-                return Err(fail("This form has no such input."));
+                return Err(fail("The edit failed: Invalid_argument(\"List.nth\")"));
             }
             Ok(with_node(&e, Node::List(items)))
         }

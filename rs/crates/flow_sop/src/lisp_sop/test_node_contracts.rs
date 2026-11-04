@@ -46,7 +46,6 @@ fn capture_once(max_entries: i64, context: &sctx::T, n: &node::T) -> geo::T {
 }
 
 #[test]
-#[ignore = "deadlock: irfix (flow_ir static-map hang in qualify_workspace)"]
 fn noise_displace_sop_cache_context_seed_dependency_and_relabel_identity() {
     let input = lisp_sop::snapshot(&contract_geometry());
     let plain = noise_node(input, "");

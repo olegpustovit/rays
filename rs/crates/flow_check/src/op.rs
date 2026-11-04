@@ -121,10 +121,11 @@ pub fn result_type(op:&Op,args:&[(String,Ty,Option<param::Value>)])->Result<Ty,D
     let named=|key:&str| op.signature.pos.iter().chain(op.signature.opt.iter()).any(|(n,_)|n==key);
     let ts=args.iter().filter(|(n,_,_)|named(n)).map(|(_,t,_)|t.clone()).collect::<Vec<_>>(); (op.out)(&ts)
 }
-pub fn find(extra:&[Op],name:&str,context:&Context)->Option<Op>{
-    let lookup=|key:&str|extra.iter().find(|op|op.name==key).cloned().or_else(||builtin_index().get(key).map(|i|all()[*i].clone()));
+pub fn find_ref<'a>(extra:&'a [Op],name:&str,context:&Context)->Option<&'a Op>{
+    let lookup=|key:&str|extra.iter().find(|op|op.name==key).or_else(||builtin_index().get(key).map(|i|&all()[*i]));
     lookup(name).or_else(||lookup(&format!("value/{name}"))).or_else(||lookup(&format!("{}/{name}",context::name(*context))))
 }
+pub fn find(extra:&[Op],name:&str,context:&Context)->Option<Op>{ find_ref(extra,name,context).cloned() }
 pub fn finder(extra:&[Op])->Box<dyn Fn(&str,&Context)->Option<Op>+Send+Sync>{
     let mut index=std::collections::HashMap::<String,Op>::new();
     for op in extra{index.entry(op.name.clone()).or_insert_with(||op.clone());}

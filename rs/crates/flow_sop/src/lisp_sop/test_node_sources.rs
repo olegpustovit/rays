@@ -102,7 +102,6 @@ fn helper_seed_node(enabled: &str) -> sop::node::T {
 }
 
 #[test]
-#[ignore = "deadlock: irfix (exceeds 5 s: flow_ir static-map hang in qualify_workspace on the defnode body)"]
 fn a_helper_seed_read_is_a_cache_dependency_only_while_reachable() {
     let node = helper_seed_node("false");
     // the card cone: its marker over its inlined body
@@ -213,7 +212,6 @@ fn embedded_fixture_checks_edits_and_round_trips_the_manifest() {
 }
 
 #[test]
-#[ignore = "blocked upstream: flow_check message text differs from OCaml (E_TYPE 'expects vec4; got text.' vs 'expected vec4, got text.'; E_FIELD 'Value has no such output.' vs 'c has no output x.')"]
 fn library_diagnostics_keep_their_codes_spans_and_messages_and_checks_are_kept() {
     // Library diagnostics keep their codes, spans and messages, and a second check of the same
     // workspace reuses the kept library check instead of checking the library again.

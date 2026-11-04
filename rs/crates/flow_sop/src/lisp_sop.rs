@@ -194,6 +194,8 @@ mod test_workspace_edit;
 #[cfg(test)]
 mod test_workspace_zone;
 #[cfg(test)]
+mod test_perf_lower;
+#[cfg(test)]
 mod test_projection;
 #[cfg(test)]
 mod test_lisp_projection;

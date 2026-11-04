@@ -173,7 +173,6 @@ fn native_owner_masks_stable_order_and_round_trips() {
 }
 
 #[test]
-#[ignore = "deadlock: irfix (flow_ir static-map hang in qualify_workspace; the defnode round trip uses exact map)"]
 fn native_owner_masks_defnode_round_trip() {
     native_owner_masks(true);
 }
@@ -393,7 +392,6 @@ fn captured_geometry_and_group_changes_invalidate_caches() {
 }
 
 #[test]
-#[ignore = "deadlock: irfix (flow_ir static-map hang in qualify_workspace)"]
 fn live_strict_multi_block_masks_preserve_native_bytes() {
     let n = 5001usize;
     let geometry = ok(geo::create(ok(Float3::View::of_owned_exn(vec![0.0; n], vec![0.0; n], vec![0.0; n])), ok(topology::empty(n as i64)), None, None, None));
@@ -416,7 +414,6 @@ fn live_strict_multi_block_masks_preserve_native_bytes() {
 }
 
 #[test]
-#[ignore = "upstream: Value_lane::resolve at frame 1 (time_dependent, states=1, frame_nodes=1) still cooks the frame-0 mask; the frame fold counter does not advance (flow_eval state step or value_lane frame node rebuild); not root-caused"]
 fn group_frame_folds_recook_exact_masks() {
     let forms = parse(
         r#"(workspace folded_group (graph g :context sop
@@ -442,7 +439,8 @@ fn group_frame_folds_recook_exact_masks() {
             };
             let original = get(&mut s, &node::inputs(&node)[0]);
             let expected = native_write(None, Some(group::Owner::Point), "selected", &vec![(frame + 1) % 2; geo::point_count(&original) as usize], &original);
-            assert!(bytes(&get(&mut s, &node)) == bytes(&expected));
+            let got = get(&mut s, &node);
+            assert!(bytes(&got) == bytes(&expected), "frame {frame} domains {domains}");
         }
         session::close(&mut s);
     }
@@ -514,7 +512,7 @@ fn public_geometry_folds_and_collecting_forms_are_refused() {
 }
 
 #[test]
-#[ignore = "hang >20 s cooking a defnode with a cooked fold over 5001 group entries (not diagnosed; probably the flow_ir irfix deadlock)"]
+#[ignore = "slow lowering: perf agent"]
 fn cooked_folds_traverse_inventory() {
     let groups: Vec<group::T> = (0..5001).map(|i| ok(group::init(None, group::Owner::Point, &format!("entry_{i}"), 0, &|_| unreachable!()))).collect();
     let geometry = ok(geo::create(geo::positions(&fixtures()[0]).clone(), ok(topology::empty(0)), None, Some(groups), None));
@@ -733,7 +731,6 @@ fn group_query_promotion_names_and_refusals() {
 }
 
 #[test]
-#[ignore = "deadlock: irfix (flow_ir static-map hang in qualify_workspace; defnode with exact map)"]
 fn promotion_origin_defnodes_cook_the_promoted_mask() {
     let geometry = promotion_fixture(7);
     for (owner, native_owner) in OWNERS {

@@ -61,7 +61,7 @@ fn with_attr_writes(root: &node::T) -> usize {
 }
 
 #[test]
-#[ignore = "blocked upstream: grid lowering needs the flow_check error_rows shape [rows mapper :policy p] and then hits the irfix flow_ir deadlock (exceeds 5 s)"]
+#[ignore = "slow lowering: perf agent"]
 fn four_noise_displace_nodes_cook_as_at_most_one_kernel_run() {
     let profiles: Profiles = Arc::new(Mutex::new(Vec::new()));
     let mut reference = Vec::new();
@@ -97,7 +97,7 @@ fn four_noise_displace_nodes_cook_as_at_most_one_kernel_run() {
 /// E4: the chain over a cooked (native) input folds into one region, with the bytes of the unfolded
 /// (reference) lowering at one and four domains, and the intermediate cards keep their own.
 #[test]
-#[ignore = "blocked upstream: grid lowering needs the flow_check error_rows shape [rows mapper :policy p] and then hits the irfix flow_ir deadlock (exceeds 5 s)"]
+#[ignore = "slow lowering: perf agent"]
 fn chain_over_a_cooked_input_folds_into_one_region() {
     let base = format!("(sop/soft_transform {})", grid());
     let body = STAGES.iter().enumerate().map(|(i, s)| stage_text(i, *s)).collect::<Vec<_>>().join(" ");
@@ -131,7 +131,7 @@ fn chain_over_a_cooked_input_folds_into_one_region() {
 /// Writes of different attributes fuse: one record program writes Cd, then P (over a transform
 /// card), with the unfolded bytes.
 #[test]
-#[ignore = "blocked upstream: grid lowering needs the flow_check error_rows shape [rows mapper :policy p] and then hits the irfix flow_ir deadlock (exceeds 5 s)"]
+#[ignore = "slow lowering: perf agent"]
 fn writes_of_different_attributes_fuse() {
     let text = format!(
         "(workspace mixed (graph g :context sop (let* [g (sop/soft_transform {}) c (sop/color_by_height g) d (sop/noise_displace c :amplitude 0.3 :frequency 0.7) tr (sop/transform d :translate [0.5 0 0] :rotate [0 0.3 0])] tr)))",
@@ -156,7 +156,7 @@ fn writes_of_different_attributes_fuse() {
 /// A map that reads the chain inside its term (no let* binding) folds too: its read of the written
 /// Cd takes the values, its read of P the input.
 #[test]
-#[ignore = "blocked upstream: grid lowering needs the flow_check error_rows shape [rows mapper :policy p] and then hits the irfix flow_ir deadlock (exceeds 5 s)"]
+#[ignore = "slow lowering: perf agent (1-3 s alone, over 5 s under the runner's parallelism)"]
 fn a_map_reading_the_chain_in_its_term_folds() {
     let text = format!(
         "(workspace lazy (graph g :context sop (let* [g (sop/soft_transform {}) c (sop/color_by_height g)] (sop/with_attr c :P (exact (map (fn [(p : vec3) (k : vec4)] (+ p [k.x k.y 0.0])) (sop/attr c :P) (sop/attr c \"Cd\" :type vec4)))))))",

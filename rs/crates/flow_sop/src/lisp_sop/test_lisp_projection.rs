@@ -131,7 +131,6 @@ fn row_expr(cat: &Catalog, ws: &w::Workspace, key: &ArgKey) -> Option<String> {
 }
 
 #[test]
-#[ignore = "deadlock: irfix (flow_ir static-map deadlock; hangs past 25 s)"]
 fn lisp_card_matches_the_ocaml_schema_and_gestures_project_back() {
     let base = catalog_of(&lisp_sop::factories());
     let mut with_native = vec![native_factory()];

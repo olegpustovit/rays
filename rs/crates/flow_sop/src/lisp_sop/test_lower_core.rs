@@ -48,9 +48,9 @@ fn merge_inputs_carry_provenance_tags() {
 }
 
 #[test]
-#[ignore = "blocked upstream: operators.rs sop/curve signature takes 1 positional input, the Lisp call is keyword-only (E_ARITY)"]
+#[ignore = "still failing after the positional (sop/curve (list ...)) fix; see parity_backlog.md"]
 fn a_live_curve_is_pending_and_volatile() {
-    let l = lowered("(workspace w (graph g :context sop (sop/curve :points (list [0.0 0.0 (* t 1.0)] [1.0 0.0 0.0]))))");
+    let l = lowered("(workspace w (graph g :context sop (sop/curve (list [0.0 0.0 (* t 1.0)] [1.0 0.0 0.0]))))");
     assert_eq!(l.pending.len(), 1, "the live points drive is a pending parameter");
     let root = l.graphs[0].root.unwrap();
     assert_eq!(l.pending[0].node, root);

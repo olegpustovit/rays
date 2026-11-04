@@ -15,7 +15,6 @@ fn seconds(side: i64) -> f64 {
 }
 
 #[test]
-#[ignore = "blocked upstream: grid lowering needs the flow_check error_rows shape [rows mapper :policy p] and then hits the irfix flow_ir deadlock"]
 fn lowering_a_static_grid_does_not_walk_its_points() {
     // the head of each map (4,096 elements) is walked at every size; the rest must not be
     let small = seconds(70);
