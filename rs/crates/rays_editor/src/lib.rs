@@ -41,3 +41,9 @@ pub mod text_pane;
 pub mod timeline;
 pub mod viewport;
 pub mod world_map;
+
+// tests: B
+#[cfg(test)]
+mod test_navigator;
+#[cfg(test)]
+mod test_text_pane;
