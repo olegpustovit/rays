@@ -1,0 +1,30 @@
+[package]
+name = "rays_bin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "rays_bin"
+path = "src/lib.rs"
+test = false
+doctest = false
+
+[[bin]]
+name = "rays"
+path = "src/main.rs"
+test = false
+
+[dependencies]
+editor_document = { path = "../editor_document" }
+editor_core = { path = "../editor_core" }
+rays_editor = { path = "../rays_editor" }
+web_export = { path = "../web_export" }
+flow_syntax = { path = "../flow_syntax" }
+flow_check = { path = "../flow_check" }
+input = { path = "../input" }
+flow_eval = { path = "../flow_eval" }
+flow_sop = { path = "../flow_sop" }
+sop = { path = "../sop" }
+mem = { path = "../mem" }
+rays_diagnostic = { path = "../rays_diagnostic" }

@@ -83,3 +83,13 @@ Three re-entrant deadlocks so far (registry_find lock, live-kernels hook under l
 - flow_sop attribute_kernel::resident_vec3/resident_color return a copied Vec, so flow_gpu::run::pin can't find the placeholder: workspace_gpu::display never succeeds (host copy drawn instead). Return the placeholder's own Arc.
 - flow_native frame-alloc budget measures live-byte growth (mem_sys tracks live bytes), not cumulative allocation like OCaml.
 - RECHECK after lowerperf2: flow_gpu run.rs materialise panicked (settle diagnostic / read after free) in a run during the Value::List refactor.
+
+## rays_bin e2e (`rays check` / `rays fmt` goldens)
+
+- Performance, not output: non-deferred lowering (`Lowering::of_workspace ~defer:false` plus the mesh cook of `check_meshes`) of any graph that calls
+  `sop/scatter` (lib/flow_sop/nodes/scatter.rays, whose own header says "10-40 s to lower" natively) does not finish in a debug build (> 60 s; e.g.
+  specification/pxui-kit/kit.rays, specification/workspace/cases/cube_cage.rays, and about 20 sketches: gpu_sea, procedural_modeling, shattered_*, sop_gallery,
+  swarm*, voxel_wall, ws_*). `crates/rays_bin/tests/e2e.rs` compares those 28 files (UNLOWERED) on parse, check and fmt only; their lowering
+  diagnostics are unverified. Owner: flow_sop / flow_eval lowering speed (profile `scatter.rays` lowering in release first).
+- Test budget: with `RAYS_SLOW` unset the e2e groups compare parse, check and fmt of all 204 files (no lowering); full lowering is `RAYS_SLOW=1`
+  (about 60 s wall with 33 parallel processes on a 24-core host). On a loaded host the default groups also overrun 5 s.

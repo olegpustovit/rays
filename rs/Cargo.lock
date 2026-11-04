@@ -459,6 +459,24 @@ name = "rays-t"
 version = "0.1.0"
 
 [[package]]
+name = "rays_bin"
+version = "0.1.0"
+dependencies = [
+ "editor_core",
+ "editor_document",
+ "flow_check",
+ "flow_eval",
+ "flow_sop",
+ "flow_syntax",
+ "input",
+ "mem",
+ "rays_diagnostic",
+ "rays_editor",
+ "sop",
+ "web_export",
+]
+
+[[package]]
 name = "rays_collections"
 version = "0.1.0"
 dependencies = [
