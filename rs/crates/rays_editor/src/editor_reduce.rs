@@ -38,7 +38,7 @@ use crate::cook;
 use crate::echo;
 use crate::editor_actions::{in_world, intent_label, world_keys};
 use crate::editor_carry::carry_payload;
-use crate::editor_commands::{self, action};
+use crate::editor_commands::action;
 use crate::editor_history::{self as history, Merge};
 use crate::editor_inspect::{kind, lists, level_key, node_path, objects as level_objects, view_wants, View};
 use crate::editor_list::{apply_tree, enterable, geometry_objects, open_level, tree_edit, tree_state};
@@ -1459,7 +1459,12 @@ pub fn reduce_idle(select: Option<&[i64]>, preview: Option<&Op>, value: &t, acti
         Some(ids) => selection::select_nodes(ids),
         None => pane_selection(&value).clone(),
     };
-    let result = frame_result {
+    Ok(reduce(None, None, idle_input(&value, actions, frame_), &value, idle_result(&value, selection)).core)
+}
+
+/// The frame result of a frame in which no pane asked for anything.
+pub fn idle_result(value: &t, selection: selection::t) -> frame_result {
+    frame_result {
         workspace: value.workspace.clone(),
         focus: value.focus.clone(),
         focus_path: value.focus_path.clone(),
@@ -1497,8 +1502,12 @@ pub fn reduce_idle(select: Option<&[i64]>, preview: Option<&Op>, value: &t, acti
         bar_action: None,
         view_pick: None,
         drops: Vec::new(),
-    };
-    let input = Frame_input {
+    }
+}
+
+/// The reducer's input for a frame without panes.
+pub fn idle_input(value: &t, actions: &[action], frame_: &frame::t) -> Frame_input {
+    Frame_input {
         carry_changed: false,
         all_ui_visible: false,
         view_state: Rc::new(|_| s::make(SNode::Map(Vec::new()))),
@@ -1520,9 +1529,6 @@ pub fn reduce_idle(select: Option<&[i64]>, preview: Option<&Op>, value: &t, acti
         text_shown: None,
         row_sets: Vec::new(),
         rows: Vec::new(),
-    };
-    Ok(reduce(None, None, input, &value, result).core)
+    }
 }
 
-#[allow(dead_code)]
-fn _keep(_: &editor_commands::Command, _: &Option<ArgKey>, _: &Option<Panel>) {}

@@ -74,3 +74,7 @@ mod test_editor_inspect;
 mod test_editor_history;
 #[cfg(test)]
 mod test_editor_model;
+
+// tests: E
+#[cfg(test)]
+mod test_editor_reduce;
