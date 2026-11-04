@@ -10,6 +10,7 @@
 use crate::theme::{self, Theme};
 use input::{Event, Key, MouseButton, Platform, ScrollPhase};
 use ocaml_int::{lsr, wrap_int63};
+use rays_math::hash::{fnv_int_mix, fnv_int_range};
 use rays::{font, frame as rframe, image, scene, sketch};
 use rays_math::color::{self, T as Color};
 use scene_command::ui_batch::{self, Clip};
@@ -28,25 +29,9 @@ pub const MIN_INT: i64 = -4611686018427387904;
 
 const ROOT_KEY: i64 = 0x2c1b3c6d;
 
-/// The OCaml `hash lxor value * 0x100000001b3`: `lxor` and `*` share a precedence level and
-/// associate left, so this is `(hash lxor value) * prime`, the real FNV-1a step. (rays_math's
-/// `Hash.fnv_int_mix` multiplies first, which makes the hash order-insensitive: "51" and "15"
-/// collide and `unique_key` can cycle; PXUI keeps its own.)
-fn fnv_int_mix(hash: i64, value: i64) -> i64 {
-    wrap_int63(wrap_int63(hash ^ value).wrapping_mul(0x100000001b3))
-}
-
-fn fnv_int_range(seed: i64, text: &str, first: usize, last: usize) -> i64 {
-    let mut hash = wrap_int63(seed);
-    for &byte in &text.as_bytes()[first..last] {
-        hash = fnv_int_mix(hash, i64::from(byte));
-    }
-    hash
-}
-
 /// 63-bit FNV-1a; keys 0 and 1 are the open-addressing empty/tombstone marks.
 fn hash_range(seed: i64, text: &str, first: usize, last: usize) -> i64 {
-    let hash = fnv_int_range(seed ^ 0x2bf29ce484222325, text, first, last);
+    let hash = fnv_int_range(seed ^ 0x2bf29ce484222325, text, first as i64, last as i64);
     let hash = hash ^ lsr(hash, 29);
     if hash == 0 || hash == 1 { hash + 2 } else { hash }
 }
