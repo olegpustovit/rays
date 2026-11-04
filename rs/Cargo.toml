@@ -15,6 +15,10 @@ incremental = true
 codegen-units = 256
 overflow-checks = true
 
+# the global allocator's counters run on every allocation: unoptimised they were ~15% of debug lowering
+[profile.dev.package.mem_sys]
+opt-level = 3
+
 [profile.release]
 codegen-units = 16
 lto = "thin"
