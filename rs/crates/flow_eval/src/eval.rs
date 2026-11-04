@@ -1814,7 +1814,8 @@ fn eval_map_walk(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, function: F
     // it is walked: the handler's whole array is the walker's (trusted), the call counts are reserved as for a large map, and packed
     // walks restore their step count, so nothing observable differs; it only asks the host where OCaml would not (post_parity_backlog).
     if static_map && count >= BULK_MIN_ELEMENTS && count <= MAX_ITERATIONS && matches!(&term.ty, Ty::Array(_))
-        && current_residual_handlers().is_some_and(|handlers| handlers.trusted && (!a.record || !c.record || (handlers.replay && function_replayable(a, function))))
+        // never while recording: the walk records each element (a large map replays its records; a walked one is the record)
+        && !(a.record && c.record) && current_residual_handlers().is_some_and(|handlers| handlers.trusted)
     {
         let id = id.expect("a static map has its residual");
         if let Some(candidate) = current_residual_handlers().and_then(|handlers| handlers.bulk).and_then(|bulk| call_lent(a, id, &|id| bulk(id))) {
