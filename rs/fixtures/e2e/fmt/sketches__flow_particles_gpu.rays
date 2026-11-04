@@ -1,0 +1,41 @@
+; The display producer is eligible for the measured GPU tier. Without a native
+; cost model it uses the CPU kernel. The exact SOP variant reads back a selected
+; GPU producer on the initial domain before CPU geometry cooking.
+(workspace flow_particles_gpu
+
+  (graph picture :context draw
+    (let* [indices (array/range 1000000)
+           positions (map (fn [i]
+                            (let* [column (mod i 1000)
+                                   row (/ (- i column) 1000)
+                                   wave (noise3 [(* column 0.03) (* row 0.03) t])]
+                              [(* column 0.8) (+ (* row 0.6) (* wave 2)) 0]))
+                          indices)]
+      (draw/merge (draw/background "#11151c")
+                  (draw/circles positions :radius 0.3 :fill "#76baca"))))
+
+  (graph exact_surface :context sop
+    (let* [side 999
+           extent [800 600 0]
+           grid (sop/grid :columns side :rows side :width extent.x :height extent.y)
+           indices (array/range 1000000)
+           positions (exact (map (fn [i]
+                                   (let* [column (mod i 1000)
+                                          row (/ (- i column) 1000)
+                                          wave (noise3 [(* column 0.03) (* row 0.03) t])]
+                                     [(* column 0.8) (+ (* row 0.6) (* wave 2)) 0]))
+                                 indices))]
+      (sop/with_attr grid :P positions)))
+
+  (graph settings :context settings
+    (settings/config :title "One million circles: approximate display and exact SOP"
+                     :width 800
+                     :height 600))
+
+  (graph editor :context editor
+    (let* [canvas (ui/canvas (ref picture) :focus true)
+           network (ui/graph "picture")
+           inspector (ui/inspector :of network)
+           edit (ui/split "horizontal" network inspector :second_size 260)]
+      (ui/workspace (ui/switch canvas
+                               (ui/split "vertical" canvas edit :second_size 280))))))

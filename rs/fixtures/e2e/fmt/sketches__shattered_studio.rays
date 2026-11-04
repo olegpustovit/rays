@@ -1,0 +1,124 @@
+; Studio study: genuine noisy-sheet Boolean fracture, never divided boxes.
+; Random groups use the primitive piece attribute so each shard has one color.
+(workspace shattered_studio
+
+  (graph cobalt :context material
+    (material/standard :name "cobalt" :color "#2670f5" :roughness 0.3))
+
+  (graph midnight :context material
+    (material/standard :name "midnight" :color "#070c29" :roughness 0.24))
+
+  (graph porcelain :context material
+    (material/standard :name "porcelain" :color "#e8f0f2" :roughness 0.38))
+
+  (graph turquoise :context material
+    (material/standard :name "turquoise" :color "#04c7b8" :roughness 0.28))
+
+  (graph shards :context sop
+    (let* [source (sop/box :size [2.6 2.6 2.6] :consolidate_points true)
+           sheet (sop/normals (sop/mountain (sop/grid :counts "Divisions"
+                                                      :connectivity "Triangles"
+                                                      :columns 2
+                                                      :rows 2
+                                                      :width 4.8
+                                                      :height 4.8)
+                                            :seed 0
+                                            :height 0.35
+                                            :frequency [0.27 1 0.27]
+                                            :octaves 1))
+           points (sop/point_jitter (sop/attribute_noise_quaternion (sop/points :points 50)
+                                        :seed 7349
+                                        :frequency [0.173 0.173 0.173]
+                                        :octaves 2)
+                                    :seed 7350
+                                    :id_attribute "sourceindex"
+                                    :scale 0.45)
+           fracture (sop/boolean_fracture source
+                        (sop/copy_to_points sheet points)
+                        :resolve_cutter_self_intersections true
+                        :piece_attribute "piece")]
+      (-> fracture
+          (sop/material :material (ref cobalt))
+          (sop/group_random :owner "Primitives"
+                            :name "navy"
+                            :probability 0.32
+                            :seed 81
+                            :seed_attribute "piece")
+          (sop/material :group "navy" :material (ref midnight))
+          (sop/group_random :owner "Primitives"
+                            :name "porcelain"
+                            :probability 0.24
+                            :seed 82
+                            :seed_attribute "piece")
+          (sop/material :group "porcelain" :material (ref porcelain))
+          (sop/group_random :owner "Primitives"
+                            :name "turquoise"
+                            :probability 0.16
+                            :seed 83
+                            :seed_attribute "piece")
+          (sop/material :group "turquoise" :material (ref turquoise))
+          (sop/normals :cusp_angle 0.65)
+          (sop/exploded_view :amount 1.42047))))
+
+  (graph studio_floor :context sop
+    (sop/material (sop/grid :width 10 :height 10)
+                  :material "studio_floor"
+                  :color [0.57 0.61 0.61]
+                  :roughness 0.85))
+
+  (graph scene :context scene
+    (let* [sculpture (scene/geometry (ref shards) :name "Boolean shards")
+           ground (scene/geometry (ref studio_floor)
+                                  :name "Studio floor"
+                                  :translate [0 -1.9 0]
+                                  :visible false)
+           camera (scene/camera :eye [5.9410062875096425 6.442144585132843 6.648786603201838]
+                                :target [0.0 0.0 0.0]
+                                :fov 20.5019
+                                :aperture 0.327837
+                                :focus_distance 7.6332
+                                :follow_viewport true)
+           key (scene/light :name "Softbox key"
+                            :shape "Area"
+                            :translate [2 7 5]
+                            :color "#fff8ed"
+                            :intensity 110
+                            :width 5
+                            :height 5)
+           fill (scene/light :name "Cool fill"
+                             :shape "Area"
+                             :translate [-5 3 2]
+                             :color "#d9ecff"
+                             :intensity 45
+                             :width 4
+                             :height 4)
+           rim (scene/light :name "Rim"
+                            :shape "Area"
+                            :translate [2 4 -5]
+                            :color "#ffffff"
+                            :intensity 80
+                            :width 3
+                            :height 4)]
+      (scene/root (scene/merge sculpture ground camera key fill rim)
+                  :width 1600
+                  :height 1600
+                  :max_spp 512)))
+
+  (graph settings :context settings
+    (settings/config :title "Shattered studio · Boolean materials"
+                     :width 1440
+                     :height 900
+                     :seed 7349))
+
+  (graph editor :context editor
+    (let* [preview (ui/viewport (ref scene))
+           network_a (ui/graph)
+           network_b (ui/lisp)
+           network (ui/split-at "vertical" 0.5 network_a network_b)
+           inspector (ui/inspector)
+           split (ui/split-at "horizontal" 0.64 network inspector)
+           split_2 (ui/split-at "horizontal" 0.45 preview split)]
+      (ui/workspace split_2))))
+
+(layout (panel ["editor" "network_a"] :collapsed false)
+        (panel ["editor" "network_b"] :collapsed false :window [692 266 635 541]))

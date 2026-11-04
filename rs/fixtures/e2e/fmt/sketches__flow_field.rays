@@ -1,0 +1,27 @@
+; An iso-surface of a pulsing sphere field: sop/iso_surface over a function of position.
+(workspace flow_field
+
+  (graph surface :context sop
+    (let* [radius (+ 1 (* 0.15 (sin t)))
+           field (fn [p] (- (length p) radius))]
+      (sop/iso_surface :field field
+                       :resolution [64 64 64]
+                       :min [-2 -2 -2]
+                       :max [2 2 2]
+                       :iso 0)))
+
+  (graph scene :context scene
+    (let* [mesh (scene/geometry (ref surface) :name "Lisp field")
+           camera (scene/camera :eye [4 3 5] :target [0 0 0] :fov 50)
+           light (scene/light :translate [-3 5 4] :intensity 60)]
+      (scene/merge mesh camera light)))
+
+  (graph settings :context settings
+    (settings/config :title "Rays Flow field kernel" :width 1200 :height 760))
+
+  (graph editor :context editor
+    (let* [preview (ui/viewport (ref scene) :look_through true)
+           network (ui/graph "surface" :focus true)
+           inspector (ui/inspector :of network)
+           work (ui/split "vertical" preview network :second_size 336)]
+      (ui/workspace (ui/split "horizontal" work inspector :second_size 240)))))

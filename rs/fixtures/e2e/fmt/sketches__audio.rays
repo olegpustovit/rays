@@ -1,0 +1,54 @@
+; Sample nodes are pinned by the workspace and released when it closes.
+(workspace audio
+
+  (graph notes :context host
+    (let* [frame (frame/input)
+           active (fold [note -1]
+                        [event frame.events]
+                    (cond
+                      (>= note 0) note
+                      (and (equal? event.kind "key-pressed") (equal? event.key "1")) 0
+                      (and (equal? event.kind "key-pressed") (equal? event.key "2")) 1
+                      (and (equal? event.kind "key-pressed") (equal? event.key "3")) 2
+                      (and (equal? event.kind "key-pressed") (equal? event.key "4")) 3
+                      (and (equal? event.kind "key-pressed") (equal? event.key "5")) 4
+                      (and (equal? event.kind "key-pressed") (equal? event.key "6")) 5
+                      (and (equal? event.kind "key-pressed") (equal? event.key "7")) 6
+                      (and (equal? event.kind "key-pressed") (equal? event.key "8")) 7
+                      (and (and (equal? event.kind "pointer-pressed")
+                                (equal? event.button "left"))
+                           (and (and (>= event.position.x 40)
+                                     (< event.position.x 600))
+                                (and (>= event.position.y 150)
+                                     (< event.position.y 310))))
+                        (min 7 (int (/ (- event.position.x 40) 70)))
+                      :else note))
+           samples (list (audio/synth :frequency 261.63 :duration 0.25)
+                         (audio/synth :frequency 293.66 :duration 0.25)
+                         (audio/synth :frequency 329.63 :duration 0.25)
+                         (audio/synth :frequency 349.23 :duration 0.25)
+                         (audio/synth :frequency 392.0 :duration 0.25)
+                         (audio/synth :frequency 440.0 :duration 0.25)
+                         (audio/synth :frequency 493.88 :duration 0.25)
+                         (audio/synth :frequency 523.25 :duration 0.25))]
+      {:active active
+       :effects (for [i (range 8)] (host/play (nth samples i) (= active i)))}))
+
+  (graph picture :context draw
+    (let* [notes (ref notes)]
+      (draw/merge (draw/background "#111827")
+                  (draw/text [40 60 0] "Press 1–8 or click a key")
+                  (for [i (range 8)]
+                    (draw/rect [(+ 40 (* i 70)) 150 0]
+                               [64 160 0]
+                               :fill (if (= notes.active i) "#22d3ee" "#f8fafc")
+                               :stroke "#0f172a")))))
+
+  (graph actions :context host
+    (get (ref notes) :effects))
+
+  (graph editor :context editor
+    (ui/workspace (ui/canvas (ref picture) :focus true) :effects (ref actions)))
+
+  (graph window :context settings
+    (settings/config :title "Rays audio" :width 640 :height 360)))

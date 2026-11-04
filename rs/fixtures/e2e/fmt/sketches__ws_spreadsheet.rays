@@ -1,0 +1,19 @@
+; Click a geometry card to inspect its cooked attributes and groups.
+(workspace ws_spreadsheet
+
+  (graph geometry :context sop
+    (let* [grid (sop/grid :counts "Point counts" :rows 40 :columns 40)
+           color (sop/set_color grid :color "#3b7d4e")]
+      color))
+
+  (graph scene :context scene
+    (scene/merge (scene/geometry (ref geometry))))
+
+  (graph settings :context settings
+    (settings/config :title "Attribute spreadsheet" :width 1440 :height 900))
+
+  (graph editor :context editor
+    (let* [network (ui/graph "geometry" :focus true)
+           sheet (ui/spreadsheet :of network)
+           work (ui/split "horizontal" network sheet)]
+      (ui/workspace (ui/split "vertical" (ui/viewport (ref scene)) work)))))

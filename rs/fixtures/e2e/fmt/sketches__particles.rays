@@ -1,0 +1,32 @@
+; Packed arrays are data: 10,000 particles, three static drawing nodes.
+(workspace particles
+
+  (graph picture :context draw
+    (let* [count 10000
+           initial_velocity (map (fn [i]
+                                   (let* [angle (* i 0.1)
+                                          speed (+ 30 (mod i 70))]
+                                     [(* (cos angle) speed) (* (sin angle) speed) 0]))
+                                 (array/range count))
+           particles (state [previous {:position (array/vec3 count [400 300 0]) :velocity (exact initial_velocity)}]
+                            (let* [position (map (fn [p v] (+ p (* v (frame/dt))))
+                                                 previous.position
+                                                 previous.velocity)
+                                   bounced_velocity (map (fn [p v]
+                                                           [(if (or (< p.x 0) (>= p.x (frame/width))) (- 0 v.x) v.x) (if (or (< p.y 0) (>= p.y (frame/height))) (- 0 v.y) v.y) 0])
+                                                         position
+                                                         previous.velocity)]
+                              {:position position :velocity bounced_velocity}))]
+      (draw/merge (draw/background "#080a10")
+                  (draw/points particles.position :color "#00ffff"))))
+
+  (graph editor :context editor
+    (ui/workspace (ui/switch (ui/canvas (ref picture) :focus true)
+                             (ui/split "horizontal"
+                                       (ui/canvas (ref picture))
+                                       (ui/split "vertical"
+                                                 (ui/graph "picture")
+                                                 (ui/lisp :tab "graph"))))))
+
+  (graph settings :context settings
+    (settings/config :width 800 :height 600 :title "Rays Lisp particles")))

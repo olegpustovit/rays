@@ -1,0 +1,5 @@
+exit 0
+File "sketches/sop_gallery.rays", line 90, characters 26-34:
+Warning [W_SOFT_RANGE]: :columns 100 is outside the slider range 1–64. Allowed, but check it
+File "sketches/sop_gallery.rays", line 90, characters 39-44:
+Warning [W_SOFT_RANGE]: :rows 100 is outside the slider range 1–64. Allowed, but check it

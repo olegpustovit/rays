@@ -1,0 +1,314 @@
+; IsoGrid drift: an asymmetric voxel composition in the manner of wblut, seen almost isometrically.
+; The cube is cut into long, thin and squat rooms. Each holds a motif clipped by a finer motif repeating inside
+; it. Rooms and motifs stay anchored: a room changes by a wipe, a front one voxel thick sweeping across it, the
+; old motif on one side and the new on the other, so only the front moves and the rest holds still.
+; Colour is mostly paper and ink with sparse accents. Scrub `seed`, `tempo`, `palette` and `side`.
+; Run: dune exec rays -- sketches/isogrid_drift.rays
+(workspace isogrid_drift
+
+  ; A bounded integer hash: the same decisions on the CPU and on the device.
+  (defn random-at :context value [(seed : int) (index : int)]
+    (let* [mask 2147483647
+           mixed (int/and (int/xor seed index) mask)
+           first (-> mixed
+                     (int/mul 1103515245)
+                     (int/add 12345)
+                     (int/and mask))
+           second (-> first
+                      (int/xor (int/shr first 16))
+                      (int/mul 1597334677)
+                      (int/and mask))
+           final (int/xor second (int/shr second 15))]
+      (/ final 2147483648.0)))
+
+  (defn cell :context value [(index : int) (side : int)]
+    [(int/div index (* side side)) (mod (int/div index side) side) (mod index side)])
+
+  ; One cut of the room holding p. The wall's axis favours the room's longest side; a small room, or one that chance stops, stays whole. A room is its low and high
+  ; corners and a key naming its path through the cuts.
+  (defn cut :context value [(room : {:lo vec3 :hi vec3 :key int}) (p : vec3) (seed : int)]
+    (let* [key room.key
+           size (- room.hi room.lo)
+           longest (max size.x (max size.y size.z))
+           wx (* size.x (+ 0.35 (random-at (int/add seed 1) key)))
+           wy (* size.y (+ 0.35 (random-at (int/add seed 2) key)))
+           wz (* size.z (+ 0.35 (random-at (int/add seed 3) key)))
+           axis (if (and (>= wx wy) (>= wx wz)) 0 (if (>= wy wz) 1 2))
+           extent (if (= axis 0) size.x (if (= axis 1) size.y size.z))
+           low (if (= axis 0) room.lo.x (if (= axis 1) room.lo.y room.lo.z))
+           at (if (= axis 0) p.x (if (= axis 1) p.y p.z))
+           place (+ 0.2 (* 0.6 (random-at (int/add seed 4) key)))
+           wall (+ low (floor (* extent place)))
+           below (< at wall)
+           whole (or (< longest 6)
+                     (and (< longest 40) (< (random-at (int/add seed 7) key) 0.1)))]
+      (if whole
+          room
+          {:lo [(if (and (= axis 0) (not below)) wall room.lo.x) (if (and (= axis 1) (not below)) wall room.lo.y) (if (and (= axis 2) (not below)) wall room.lo.z)]
+           :hi [(if (and (= axis 0) below) wall room.hi.x) (if (and (= axis 1) below) wall room.hi.y) (if (and (= axis 2) below) wall room.hi.z)]
+           :key (int/add (int/mul key 2) (if below 0 1))})))
+
+  ; Whether a motif fills `local` of a block of `size`; `stroke` is its line weight, `pitch` its rhythm.
+  (defn motif :context value [(kind : int) (local : vec3) (size : vec3) (stroke : float) (pitch : float)]
+    (let* [last (- size [1 1 1])
+           rim [(min local.x (- last.x local.x)) (min local.y (- last.y local.y)) (min local.z (- last.z local.z))]
+           near (min rim.x (min rim.y rim.z))
+           on-x (if (< rim.x stroke) 1 0)
+           on-y (if (< rim.y stroke) 1 0)
+           on-z (if (< rim.z stroke) 1 0)
+           walls (+ (+ on-x on-y) on-z)
+           bar-x (if (< (mod local.x pitch) stroke) 1 0)
+           bar-y (if (< (mod local.y pitch) stroke) 1 0)
+           bar-z (if (< (mod local.z pitch) stroke) 1 0)
+           bars (+ (+ bar-x bar-y) bar-z)
+           mid-x (if (>= rim.x (/ size.x 3)) 1 0)
+           mid-y (if (>= rim.y (/ size.y 3)) 1 0)
+           mid-z (if (>= rim.z (/ size.z 3)) 1 0)
+           middles (+ (+ mid-x mid-y) mid-z)]
+      (cond
+        (= kind 0) true
+        ; slabs, fins across x, fins across z
+        (= kind 1) (or (= bar-y 1) (>= walls 3))
+        (= kind 2) (or (= bar-x 1) (= on-y 1))
+        (= kind 3) (or (= bar-z 1) (= on-y 1))
+        ; columns under a roof
+        (= kind 4) (or (and (= bar-x 1) (= bar-z 1)) (> local.y (- last.y stroke)))
+        ; a wire frame
+        (= kind 5) (>= walls 2)
+        ; stairs
+        (= kind 6) (<= local.y (+ stroke (* (floor (/ local.x pitch)) stroke)))
+        ; a lattice
+        (= kind 7) (>= bars 2)
+        ; a shell with bars for windows
+        (= kind 8) (and (>= walls 1) (or (= bar-y 1) (>= walls 2)))
+        ; a ziggurat
+        (= kind 9) (<= local.y (* pitch (floor (/ (min rim.x rim.z) stroke))))
+        ; nested shells
+        (= kind 10) (< (mod near pitch) stroke)
+        ; diagonal planes
+        (= kind 11) (< (mod (+ (+ local.x local.y) local.z) pitch) stroke)
+        ; a sponge
+        (= kind 12) (< middles 2)
+        ; a three-axis cross
+        (= kind 13) (>= middles 2)
+        ; a checker of blocks
+        :else (= (mod (+ (+ (floor (/ local.x pitch)) (floor (/ local.y pitch)))
+                         (floor (/ local.z pitch)))
+                      2)
+                 0))))
+
+  ; What a room holds at one turn: 0 or one more than its colour family. A motif clipped by a finer one.
+  (defn holds :context value [(seed : int) (turn : int) (key : int) (local : vec3) (size : vec3)]
+    (let* [dice (int/add seed (int/mul turn 7919))
+           kind (int (* 18 (random-at (int/add dice 9) key)))
+           smallest (min size.x (min size.y size.z))
+           stroke (max 1 (floor (/ smallest 7)))
+           pitch (* stroke (+ 2 (floor (* 3 (random-at (int/add dice 11) key)))))
+           fine (+ 4 (floor (* 8 (random-at (int/add dice 13) key))))
+           tile [(mod local.x fine) (mod local.y fine) (mod local.z fine)]
+           detail (int (* 15 (random-at (int/add dice 14) key)))
+           pick (random-at (int/add dice 12) key)
+           ; Mostly paper and ink; the accents are rare.
+           family (if (< pick 0.48) 0 (if (< pick 0.8) 1 (if (< pick 0.93) 2 3)))]
+      (if (and (< kind 15)
+               (and (motif kind local size stroke pitch)
+                    (or (< smallest 14)
+                        (motif detail tile [fine fine fine] 1 (+ 2 (mod fine 3))))))
+          (+ family 1)
+          0)))
+
+  ; 0 is empty; otherwise one more than the voxel's colour family.
+  (defn voxel :context value [(p : vec3) (side : float) (seed : int) (clock : float)]
+    (let* [start {:lo [0 0 0] :hi [side side side] :key 1}
+           r1 (cut start p seed)
+           r2 (cut r1 p seed)
+           r3 (cut r2 p seed)
+           r4 (cut r3 p seed)
+           r5 (cut r4 p seed)
+           r6 (cut r5 p seed)
+           r7 (cut r6 p seed)
+           r8 (cut r7 p seed)
+           r9 (cut r8 p seed)
+           r10 (cut r9 p seed)
+           room (cut r10 p seed)
+           key room.key
+           size (- room.hi room.lo)
+           local (- p room.lo)
+           ; A room's turn starts at its own moment, and its wipe takes the first part of the turn.
+           rate (+ 0.08 (* 0.14 (random-at (int/add seed 15) key)))
+           moment (+ (* clock rate) (random-at (int/add seed 8) key))
+           turn (int (floor moment))
+           through (- moment (floor moment))
+           way (random-at (int/add seed 10) key)
+           along (if (< way 0.34) local.x (if (< way 0.67) local.y local.z))
+           length (if (< way 0.34) size.x (if (< way 0.67) size.y size.z))
+           front (* (min 1.0 (* through 4)) (+ length 1))
+           ; A one-voxel seam on the low faces keeps neighbouring rooms apart.
+           seam (or (< local.x 1) (or (< local.y 1) (< local.z 1)))]
+      (if seam 0 (holds seed (if (< along front) turn (- turn 1)) key local size))))
+
+  (defn occupied :context value [(voxels : (array int)) (side : int) (p : vec3)]
+    (if (and (and (>= p.x 0) (< p.x side))
+             (and (and (>= p.y 0) (< p.y side)) (and (>= p.z 0) (< p.z side))))
+        (array/nth voxels
+                   (+ (+ (* (int p.x) (* side side)) (* (int p.y) side)) (int p.z)))
+        0))
+
+  (graph drift :context sop [(side : int 128) (seed : int 23) (tempo : float 0.5) (palette : int 0)]
+    (let* [clock (* t tempo)
+           voxels (map (fn [(index : int)]
+                         (voxel (cell index side) (float side) seed clock))
+                       (array/range (* (* side side) side) :type int))
+           directions (list [1 0 0] [-1 0 0] [0 1 0] [0 -1 0] [0 0 1] [0 0 -1])
+           corners (list [1 0 0]
+                         [1 1 0]
+                         [1 1 1]
+                         [1 0 1]
+                         [0 0 1]
+                         [0 1 1]
+                         [0 1 0]
+                         [0 0 0]
+                         [0 1 1]
+                         [1 1 1]
+                         [1 1 0]
+                         [0 1 0]
+                         [0 0 0]
+                         [1 0 0]
+                         [1 0 1]
+                         [0 0 1]
+                         [1 0 1]
+                         [1 1 1]
+                         [0 1 1]
+                         [0 0 1]
+                         [0 0 0]
+                         [0 1 0]
+                         [1 1 0]
+                         [1 0 0])
+           ; Only voxels touching air can have a face: a fraction of the volume to test six times.
+           shell (array/compact (map (fn [(index : int)]
+                                       (let* [p (cell index side)]
+                                         (if (and (> (array/nth voxels index) 0)
+                                                  (or
+                                                      (or
+                                                          (= (occupied voxels side (+ p [1 0 0])) 0)
+                                                          (= (occupied voxels side (- p [1 0 0])) 0))
+                                                      (or
+                                                          (or
+                                                              (= (occupied voxels side (+ p [0 1 0])) 0)
+                                                              (= (occupied voxels side (- p [0 1 0])) 0))
+                                                          (or
+                                                              (= (occupied voxels side (+ p [0 0 1])) 0)
+                                                              (= (occupied voxels side (- p [0 0 1])) 0)))))
+                                             1
+                                             0)))
+                                     (array/range (* (* side side) side) :type int)))
+           ; Four palettes of paper, ink and two accents, one colour per facing: side, top, front.
+           palettes (list
+                      ; warm paper, ink, vermilion, ultramarine
+                      [0.82 0.78 0.7]
+                      [0.97 0.94 0.87]
+                      [0.6 0.55 0.48]
+                      [0.07 0.07 0.09]
+                      [0.16 0.16 0.2]
+                      [0.03 0.03 0.04]
+                      [0.86 0.17 0.07]
+                      [1.0 0.4 0.15]
+                      [0.5 0.06 0.08]
+                      [0.05 0.2 0.66]
+                      [0.14 0.42 0.92]
+                      [0.02 0.09 0.36]
+                      ; bone, deep teal, coral, mustard
+                      [0.78 0.76 0.68]
+                      [0.94 0.92 0.85]
+                      [0.54 0.52 0.46]
+                      [0.03 0.26 0.28]
+                      [0.06 0.44 0.44]
+                      [0.01 0.13 0.16]
+                      [0.9 0.32 0.28]
+                      [1.0 0.54 0.44]
+                      [0.55 0.14 0.2]
+                      [0.84 0.59 0.09]
+                      [0.98 0.78 0.22]
+                      [0.5 0.31 0.04]
+                      ; grey and black, one signal, one ice
+                      [0.74 0.74 0.74]
+                      [0.95 0.95 0.95]
+                      [0.48 0.48 0.48]
+                      [0.04 0.04 0.04]
+                      [0.12 0.12 0.12]
+                      [0.01 0.01 0.01]
+                      [1.0 0.22 0.04]
+                      [1.0 0.46 0.12]
+                      [0.56 0.08 0.02]
+                      [0.58 0.84 0.92]
+                      [0.86 0.97 0.99]
+                      [0.28 0.5 0.62]
+                      ; night, slate, magenta, gold
+                      [0.1 0.11 0.2]
+                      [0.2 0.22 0.36]
+                      [0.05 0.05 0.11]
+                      [0.36 0.42 0.52]
+                      [0.56 0.63 0.72]
+                      [0.18 0.22 0.3]
+                      [0.84 0.06 0.44]
+                      [1.0 0.28 0.66]
+                      [0.44 0.02 0.28]
+                      [0.92 0.68 0.14]
+                      [1.0 0.86 0.36]
+                      [0.56 0.36 0.05])
+           faces (array/compact (map (fn [(face : int)]
+                                       (let* [p (cell (array/nth shell (int/div face 6))
+                                                      side)]
+                                         (if (= (occupied voxels
+                                                          side
+                                                          (+ p (nth directions (mod face 6))))
+                                                0)
+                                             1
+                                             0)))
+                                     (array/range (* (array/count shell) 6)
+                                                  :type int)))
+           face_count (array/count faces)
+           vertices (array/range (* face_count 4) :type int)
+           positions (map (fn [(vertex : int)]
+                            (let* [face (array/nth faces (int/div vertex 4))
+                                   p (cell (array/nth shell (int/div face 6)) side)
+                                   turn (nth corners
+                                             (+ (* (mod face 6) 4) (mod vertex 4)))]
+                              (* (- (+ p turn) [(/ side 2) (/ side 2) (/ side 2)])
+                                 (/ 6.0 side))))
+                          vertices)
+           normals (map (fn [(vertex : int)]
+                          (nth directions
+                               (mod (array/nth faces (int/div vertex 4)) 6)))
+                        vertices)
+           colors (map (fn [(vertex : int)]
+                         (let* [face (array/nth faces (int/div vertex 4))
+                                family (- (array/nth voxels
+                                                     (array/nth shell (int/div face 6)))
+                                          1)
+                                facing (int/div (mod face 6) 2)
+                                chosen (mod palette 4)]
+                           (nth palettes (+ (+ (* chosen 12) (* family 3)) facing))))
+                       vertices)
+           mesh (sop/mesh :points (exact positions)
+                          :vertex_points (exact vertices)
+                          :primitive_offsets (exact (map (fn [(face : int)] (* face 4))
+                                                         (array/range (+ face_count 1) :type int)))
+                          :kinds (exact (array/int face_count 0)))
+           shaded (sop/with_attr mesh "N" (exact normals) :owner "point" :type vec3)]
+      (sop/with_attr shaded "Cd" (exact colors) :owner "point" :type vec3)))
+
+  (graph scene :context scene
+    (let* [drift (scene/geometry (ref drift) :name "Drift")
+           ; Far away through a long lens: as near to isometric as a perspective camera gets.
+           camera (scene/camera :eye [62 62 62]
+                                :target [0 0 0]
+                                :fov 8
+                                :follow_viewport true)
+           light (scene/light :shape "Directional"
+                              :translate [4 10 6]
+                              :intensity 1.15)]
+      (scene/root (scene/merge drift camera light) :camera camera)))
+
+  (graph settings :context settings
+    (settings/config :title "IsoGrid drift" :width 1280 :height 900)))

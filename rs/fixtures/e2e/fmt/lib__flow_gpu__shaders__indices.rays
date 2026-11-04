@@ -1,0 +1,7 @@
+; Device-generated exact range: no size-dependent CPU staging or upload.
+(defn write-indices :context value [(id : int) (output : (array int)) (bound : (array int)) (size : int)]
+  (if (int/lt id (array/nth bound 0))
+      (gpu/store-int output
+                     id
+                     (if (int/eq (array/nth bound 1) 0) id (array/nth bound 2)))
+      0))

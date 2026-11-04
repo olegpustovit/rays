@@ -1,0 +1,63 @@
+; The studio layout: a garden of scattered shapes over a bed, the reference for the design kit.
+(workspace ws_layout
+
+  ; The studio layout: fixed columns and strips that keep their points at any window size.
+  (graph garden :context sop [(seed : int 1) (count : int 40)]
+    (let* [bed (sop/tube :top_radius 1 :bottom_radius 1 :height 0.04 :columns 48)
+           spots (sop/scatter bed :count count :seed seed)
+           dot (sop/uv_sphere :radius 0.06 :segments 8 :rings 4)
+           dots (sop/copy_to_points dot spots)
+           result (sop/set_color (sop/merge bed dots) :color "#3b7d4e")]
+      result))
+
+  (graph clay :context material
+    (material/standard :name "clay" :color "#b0680f" :roughness 0.6))
+
+  (graph scene :context scene
+    (let* [plants (scene/geometry (ref garden) :name "garden")
+           cam (scene/camera :eye [0.5 1.8 6] :target [0 0.3 0] :fov 50)
+           sun (scene/light :shape "Directional"
+                            :translate [8 11.2 6.4]
+                            :intensity 1)
+           all (scene/merge plants cam sun)]
+      (scene/root all :camera cam)))
+
+  (graph settings :context settings
+    (settings/config :title "Studio layout" :width 1440 :height 900))
+
+  ; Outline 216 | Viewport / Timeline / Graph 336 | Inspector / Lisp 300, the right column 320.
+  ; The second layout adds windows beside the docked panels of their kind: the material graph,
+  ; a free viewport, an inspector tied to the material graph (the docked one is tied to the docked
+  ; graph; the text panes follow the focus) and a second text pane on the whole document.
+  (graph editor :context editor
+    (let* [outline (ui/outline)
+           preview (ui/viewport (ref scene) :look_through true)
+           timeline (ui/timeline)
+           network (ui/graph "garden" :focus true)
+           inspector (ui/inspector :of network)
+           code (ui/lisp :tab "graph")
+           stage (ui/split "vertical" preview timeline)
+           middle (ui/split "vertical" stage network :second_size 336)
+           right (ui/split "vertical" inspector code :second_size 300)
+           work (ui/split "horizontal" middle right :second_size 320)
+           studio (ui/split "horizontal" outline work :first_size 216)
+           material (ui/graph "clay")
+           orbit (ui/viewport (ref scene))
+           details (ui/inspector :of material)
+           notes (ui/lisp :tab "document")
+           boards (ui/split "horizontal"
+                            (ui/split "horizontal"
+                                      (ui/split "horizontal"
+                                                (ui/split "horizontal"
+                                                          studio
+                                                          (ui/floating material))
+                                                (ui/floating orbit))
+                                      (ui/floating details))
+                            (ui/floating notes))
+           shell (ui/workspace (ui/switch studio boards :active 0))]
+      shell)))
+
+(layout (panel ["editor" "details"] :collapsed false :window [1090 60 320 420])
+        (panel ["editor" "material"] :collapsed false :window [560 90 520 360])
+        (panel ["editor" "notes"] :collapsed false :window [640 500 420 300])
+        (panel ["editor" "orbit"] :collapsed false :window [250 470 380 260]))

@@ -1,0 +1,82 @@
+(workspace swarm_floating
+
+  ; The floating swarm: heads pulled toward a wandering target through a noise field, with drag; each
+  ; frame every trail point takes the place of the one ahead of it, drifting in a slower field.
+  (graph floating :context sop [(tubes : int 1000) (points : int 401) (sides : int 5) (radius : float 0.005) (spread : float 0.01) (force : float 5.0) (randomness : float 0.6) (drag : float 2.0) (head_force : float 0.5) (head_frequency : float 0.5) (trail_velocity : float 0.015) (trail_frequency : float 0.6) (noise_spread : float 1.5) (noise_motion : float 0.15) (wander : float 0.6) (seed : float 0.0)]
+    (let* [dt (min (frame/dt) 0.0333)
+           count (* tubes points)
+           ; the original's target wanders by Brownian motion (two octaves of noise a coordinate)
+           target [(* wander (- (* 2.0 (noise3 [(* t 0.1) 0.0 0.0] :octaves 2)) 1.0)) (* wander (- (* 2.0 (noise3 [(* t 0.1) 17.3 0.0] :octaves 2)) 1.0)) (* wander (- (* 2.0 (noise3 [(* t 0.1) 41.9 0.0] :octaves 2)) 1.0))]
+           offset (+ seed (* t noise_motion))
+           per_tube (/ noise_spread tubes)
+           least (* force (- 1.0 randomness))
+           ; every point of a tube starts at its home about the target's rest place
+           swarm (state [previous {:points (exact (map (fn [(k : int)] (floating-home (mod k tubes) [0.0 0.0 0.0] spread seed)) (array/range count :type int))) :velocity (array/vec3 tubes)}]
+                        (let* [velocity (map (fn [(id : int) (p : vec3) (v : vec3)]
+                                               (let* [pull (+ least
+                                                              (* (- force least)
+                                                                 (tube-random id 4.0 seed)))
+                                                      toward (* (- (floating-home id target spread seed) p)
+                                                                pull)
+                                                      drift (* (floating-field id
+                                                                               (* (+ p [offset offset offset])
+                                                                                  head_frequency)
+                                                                               per_tube)
+                                                               head_force)]
+                                                 (+ (* v (exp (* (- 0.0 drag) dt)))
+                                                    (* (+ toward drift) dt))))
+                                             (array/range tubes :type int)
+                                             previous.points
+                                             previous.velocity)
+                               trail (map (fn [(k : int)]
+                                            (if (< k tubes)
+                                                (+ (array/nth previous.points k)
+                                                   (* (array/nth velocity k) dt))
+                                                (let* [id (mod k tubes)
+                                                       ahead (array/nth previous.points
+                                                                        (int/sub k tubes))]
+                                                  (+ ahead
+                                                     (* (floating-field id
+                                                                        (* (+ ahead [offset offset offset])
+                                                                           trail_frequency)
+                                                                        per_tube)
+                                                        (* trail_velocity dt))))))
+                                          (array/range count :type int))]
+                          {:points trail :velocity velocity}))]
+      ; the original's "Gradient Red"
+      (tube-sweep swarm.points
+                  tubes
+                  points
+                  sides
+                  radius
+                  {:a [0.813 0.255 0.051]
+                   :b [0.313 0.102 0.287]
+                   :c [1.0 1.08 0.36]
+                   :d [0.0 0.274 0.809]})))
+
+  (graph scene :context scene
+    (let* [swarm (scene/geometry (ref floating) :name "Swarm")
+           ; the original's camera: 4 units back, an 18 degree lens
+           camera (scene/camera :eye [0 0 4]
+                                :target [0 0 0]
+                                :fov 18
+                                :follow_viewport true)
+           ; its warm directional key from above and behind the left shoulder
+           key (scene/light :name "Key"
+                            :shape "Directional"
+                            :translate [-2.5 3 -1.5]
+                            :intensity 1.2)
+           sky (scene/world (ref world) :name "Grey")]
+      (scene/root (scene/merge swarm camera key sky)
+                  :camera camera
+                  :renderer "Path traced"
+                  :bounces 4)))
+
+  (graph settings :context settings
+    (settings/config :title "Swarm: floating" :width 1280 :height 800)))
+
+; Swarm, floating (keijiro/Swarm's FloatingSwarm): heads pulled toward a wandering target through a noise
+; field with drag, trails left behind them drifting in a slower field. Each frame's trail is kept in a
+; state. Shared definitions: sketches/swarm_lib.rays.
+; Run: dune exec rays -- sketches/swarm_floating.rays
+(import "swarm_lib.rays")

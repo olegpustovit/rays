@@ -1,0 +1,125 @@
+; Cube cage: a lattice of hollow cube frames, an octree of point clouds
+; copied (packed) onto one cell. The renderer, path tracer and settings
+; are OCaml (main.ml); this is the document: network, studio, camera.
+^:allow-warnings (workspace cube_cage
+
+                   ; The cage is a unit box minus three bars; a small octahedron sits inside.
+                   (graph cage :context sop
+                     (let* [hole 0.56
+                            cell (sop/box)
+                            bars (sop/merge (sop/box :size [1.4 hole hole])
+                                            (sop/box :size [hole 1.4 hole])
+                                            (sop/box :size [hole hole 1.4]))
+                            carved (sop/boolean cell
+                                                bars
+                                                :operation "Subtract B from A"
+                                                :resolve_right_self_intersections true
+                                                :detriangulation "All polygons")
+                            chamfer (sop/poly_bevel carved :distance 0.04)
+                            core (sop/transform (sop/platonic :kind "Octahedron"
+                                                              :normals "None")
+                                                :uniform_scale 0.3
+                                                :rotate [0.7 0.5 0])
+                            unit (sop/merge chamfer core)
+                            ; an n x n x n cube of points, `step` apart, centred on the origin
+                            lattice-sheet (sop/grid :orientation "XZ"
+                                                    :connectivity "Points"
+                                                    :center [0 -2.9 0]
+                                                    :columns 5
+                                                    :rows 5
+                                                    :width 5.8
+                                                    :height 5.8
+                                                    :size 5.8)
+                            lattice (sop/duplicate lattice-sheet
+                                                   :copies 5
+                                                   :m13 1.16)
+                            octant-sheet (sop/grid :orientation "XZ"
+                                                   :connectivity "Points"
+                                                   :center [0 -0.29 0]
+                                                   :columns 1
+                                                   :rows 1
+                                                   :width 0.58
+                                                   :height 0.58
+                                                   :size 0.58)
+                            octant (sop/duplicate octant-sheet :copies 1 :m13 0.58)
+                            ; each level splits a share of its points into eight sub-points
+                            coarse-split (sop/group_random lattice
+                                                           :seed 6
+                                                           :probability 0.36
+                                                           :name "split")
+                            coarse-keep (sop/attribute_randomize
+                                            (sop/blast coarse-split
+                                                       :owner "Points"
+                                                       :group "split")
+                                            :seed 7
+                                            :name "pscale"
+                                            :a [0.84 0 0]
+                                            :b [1 1 1])
+                            mid-points (sop/copy_to_points
+                                           (sop/transform octant :uniform_scale 0.5)
+                                           coarse-split
+                                           :target_group "split")
+                            mid-split (sop/group_random mid-points
+                                                        :seed 3
+                                                        :probability 0.4
+                                                        :name "split")
+                            mid-keep (sop/attribute_randomize
+                                         (sop/blast mid-split
+                                                    :owner "Points"
+                                                    :group "split")
+                                         :seed 4
+                                         :name "pscale"
+                                         :a [0.42 0 0]
+                                         :b [0.5 1 1])
+                            fine-points (sop/copy_to_points
+                                            (sop/transform octant :uniform_scale 0.25)
+                                            mid-split
+                                            :target_group "split")
+                            fine-split (sop/group_random fine-points
+                                                         :seed 4
+                                                         :probability 0
+                                                         :name "split")
+                            fine-keep (sop/attribute_randomize
+                                          (sop/blast fine-split
+                                                     :owner "Points"
+                                                     :group "split")
+                                          :seed 5
+                                          :name "pscale"
+                                          :a [0.2 0 0]
+                                          :b [0.25 1 1])
+                            levels (sop/merge coarse-keep mid-keep fine-keep)
+                            holes (sop/group_random levels
+                                                    :seed 3
+                                                    :probability 0.1
+                                                    :name "holes")
+                            kept (sop/blast holes :owner "Points" :group "holes")
+                            cells (sop/copy_to_points unit kept :pack true)]
+                       cells))
+
+                   (graph scene :context scene
+                     (let* [cage (scene/geometry (ref cage) :name "cage")
+                            camera (scene/camera :eye [16.960626 14.382766 20.136365]
+                                                 :target [0 0 0]
+                                                 :fov 28.6478898
+                                                 :aperture 0.5
+                                                 :follow_viewport true)
+                            key (scene/light :name "key"
+                                             :translate [-16 22 12]
+                                             :intensity 873.4423
+                                             :width 14
+                                             :height 14)
+                            fill (scene/light :name "fill"
+                                              :translate [20 2 -6]
+                                              :intensity 114.0823
+                                              :width 16
+                                              :height 16)
+                            sky (scene/world (ref world) :name "studio")]
+                       (scene/merge cage camera key fill sky)))
+
+                   ; A near-black studio.
+                   (graph world :context world
+                     (world/gradient :name "studio"
+                                     :zenith [0.003 0.003 0.004]
+                                     :horizon [0.003 0.003 0.004]
+                                     :nadir [0.003 0.003 0.004]
+                                     :sharpness 1)))

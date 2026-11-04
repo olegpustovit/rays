@@ -1,0 +1,25 @@
+exit 0
+File "sketches/voxel_wall.rays", line 16, characters 47-53:
+Warning [W_SOFT_RANGE]: :width 35 is outside the slider range 0.01–10. Allowed, but check it
+File "sketches/voxel_wall.rays", line 16, characters 57-64:
+Warning [W_SOFT_RANGE]: :height 59 is outside the slider range 0.01–10. Allowed, but check it
+File "sketches/voxel_wall.rays", line 16, characters 68-73:
+Warning [W_SOFT_RANGE]: :size 35 is outside the slider range 0.01–10. Allowed, but check it
+File "sketches/voxel_wall.rays", line 25, characters 40-50:
+Warning [W_SOFT_RANGE]: :translate -34 is outside the slider range -20–20. Allowed, but check it
+File "sketches/voxel_wall.rays", line 25, characters 40-50:
+Warning [W_SOFT_RANGE]: :translate 40 is outside the slider range -20–20. Allowed, but check it
+File "sketches/voxel_wall.rays", line 25, characters 40-50:
+Warning [W_SOFT_RANGE]: :translate 30 is outside the slider range -20–20. Allowed, but check it
+File "sketches/voxel_wall.rays", line 25, characters 84-90:
+Warning [W_SOFT_RANGE]: :width 24 is outside the slider range 0.01–20. Allowed, but check it
+File "sketches/voxel_wall.rays", line 25, characters 94-101:
+Warning [W_SOFT_RANGE]: :height 24 is outside the slider range 0.01–20. Allowed, but check it
+File "sketches/voxel_wall.rays", line 26, characters 42-52:
+Warning [W_SOFT_RANGE]: :translate 30 is outside the slider range -20–20. Allowed, but check it
+File "sketches/voxel_wall.rays", line 26, characters 42-52:
+Warning [W_SOFT_RANGE]: :translate 26 is outside the slider range -20–20. Allowed, but check it
+File "sketches/voxel_wall.rays", line 26, characters 85-91:
+Warning [W_SOFT_RANGE]: :width 30 is outside the slider range 0.01–20. Allowed, but check it
+File "sketches/voxel_wall.rays", line 26, characters 95-102:
+Warning [W_SOFT_RANGE]: :height 30 is outside the slider range 0.01–20. Allowed, but check it

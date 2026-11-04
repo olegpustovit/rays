@@ -1,0 +1,20 @@
+(workspace terrain
+
+  (graph terrain :context sop
+    (let* [grid (sop/grid :columns 32 :rows 32 :width 5 :height 5)
+           pulse (+ 0.65 (* t 0.1))
+           mountain (sop/mountain grid
+                                  :height pulse
+                                  :frequency [0.8 1 0.8]
+                                  :octaves 3
+                                  :recompute_normals true)]
+      mountain))
+
+  (graph scene :context scene
+    (let* [land (scene/geometry (ref terrain) :name "terrain")
+           camera (scene/camera :eye [4 4 6.5] :target [0 0 0] :fov 50)
+           light (scene/light :translate [-3 5 4] :intensity 60)]
+      (scene/merge land camera light)))
+
+  (graph settings :context settings
+    (settings/config :title "Rays Flow terrain" :width 1200 :height 760)))

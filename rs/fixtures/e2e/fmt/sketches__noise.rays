@@ -1,0 +1,32 @@
+; Seeded five-octave fBm has the same table and octave order as Noise.fbm3.
+(workspace noise
+
+  (graph picture :context draw
+    (let* [phase (state [previous 0.0] (+ previous (* (frame/dt) 0.15)))
+           columns (ceil (/ (frame/width) 10))
+           rows (ceil (/ (frame/height) 10))
+           indices (array/range (* columns rows))
+           positions (map (fn [i]
+                            [(* (mod i columns) 10) (* (floor (/ i columns)) 10) 0])
+                          indices)
+           samples (map (fn [i]
+                          (noise3 [(* (mod i columns) 0.045) (* (floor (/ i columns)) 0.045) phase]
+                                  :seed 2026
+                                  :octaves 5))
+                        indices)
+           colors (map (fn [sample]
+                         (color/gradient (list "#101426"
+                                               "#244a72"
+                                               "#3ca6a6"
+                                               "#f2d16b"
+                                               "#f26444")
+                                         sample))
+                       samples)]
+      (draw/merge (draw/background "#101426")
+                  (draw/rects positions [10 10 0] :fill colors))))
+
+  (graph editor :context editor
+    (ui/workspace (ui/canvas (ref picture) :focus true)))
+
+  (graph window :context settings
+    (settings/config :title "Rays seeded noise" :width 800 :height 450)))

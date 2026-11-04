@@ -1,0 +1,71 @@
+(workspace swarm
+
+  ; The swirling swarm: each frame a tube is a streamline traced from a random point in a ball.
+  (graph swirling
+         :context sop
+         [(tubes : int 4000)
+          (points : int 257)
+          (sides : int 5)
+          (radius : float 0.01)
+          (length : float 0.3)
+          (spread : float 0.96)
+          (frequency : float 0.7)
+          ; how fast the field moves, noise units a second (the original's 0.04 barely moves)
+          (drift : float 0.25)
+          (seed : float 123.0)]
+         (let* [step (/ length (- points 1))
+                offset [0.0 (* t drift) 0.0]
+                ; the heads start in a ball and step through the field; every step is appended (the
+                ; original's history buffer)
+                starts (map (fn [(id : int)]
+                              (* (ball-point (float id) seed) spread))
+                            (array/range tubes :type int))
+                trail (iterate (- points 1)
+                               {:head starts :points starts}
+                               (fn [(walk : {:head (array vec3) :points (array vec3)})]
+                                 (let* [head (map (fn [(p : vec3)]
+                                                    (+ p (* (swirl p frequency offset) step)))
+                                                  walk.head)]
+                                   {:head head
+                                    :points (array/concat walk.points head)})))]
+           ; the original's "Gradient Rainbow"
+           (tube-sweep trail.points
+                       tubes
+                       points
+                       sides
+                       radius
+                       {:a [0.57 0.49 0.54]
+                        :b [0.459 0.278 0.13]
+                        :c [1.0 0.85 1.18]
+                        :d [0.0 0.76 0.15]})))
+
+  (graph scene :context scene
+    (let* [swarm (scene/geometry (ref swirling) :name "Swarm")
+           ; the original's camera: 4 units back, an 18 degree lens
+           camera (scene/camera :eye [0 0 4]
+                                :target [0 0 0]
+                                :fov 18
+                                :follow_viewport true)
+           ; its warm directional key from above and behind the left shoulder
+           key (scene/light :name "Key"
+                            :shape "Directional"
+                            :translate [-2.5 3 -1.5]
+                            :intensity 1.2)
+           sky (scene/world (ref world) :name "Grey")]
+      (scene/root (scene/merge swarm camera key sky)
+                  :camera camera
+                  :renderer "Path traced"
+                  :bounces 4)))
+
+  (graph settings :context settings
+    (settings/config :title "Swarm" :width 1280 :height 800)))
+
+; Swarm, after keijiro/Swarm (Unity, 2017): thousands of thin tubes swirling through a divergence-free
+; noise field. Each frame a tube is a streamline traced from a random point in a ball, through two
+; simplex-noise gradients crossed (curl-like, so the lines never bunch), framed by the radius through it
+; and swept into a five-sided tube coloured by a cosine gradient. Every stage is a map over a packed
+; range, so the trails, the frames and the mesh are compiled kernels run on the GPU each frame, and the
+; scene is path traced from those buffers.
+; Floating and crawling: sketches/swarm_floating.rays, sketches/swarm_crawling.rays.
+; Run: dune exec rays -- sketches/swarm.rays
+(import "swarm_lib.rays")

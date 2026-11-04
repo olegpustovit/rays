@@ -1,0 +1,21 @@
+; A circle that orbits the window centre on a frame clock: the smallest draw graph.
+(workspace basic
+
+  (graph picture :context draw
+    (let* [phase (state [previous 0.0] (+ previous (frame/dt)))]
+      (draw/merge (draw/background "#14161c")
+                  (draw/circle [(/ (frame/width) 2) (/ (frame/height) 2) 0]
+                               (+ 42 (int (* 10 (sin (* phase 2)))))
+                               :fill "#5aaaf0")
+                  (draw/text [12 12 0]
+                             (str (frame/width)
+                                  " × "
+                                  (frame/height)
+                                  "  frame "
+                                  (frame/index))))))
+
+  (graph editor :context editor
+    (ui/workspace (ui/canvas (ref picture) :focus true)))
+
+  (graph window :context settings
+    (settings/config :title "Rays basic sketch" :width 640 :height 360)))

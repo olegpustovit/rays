@@ -1,0 +1,68 @@
+(workspace swarm_crawling
+
+  ; The crawling swarm: heads crawl over the surface, the noise field turned along it by its
+  ; distance (the original's boundary condition); each frame the trail moves up one place.
+  (graph crawling :context sop [(tubes : int 3000) (points : int 257) (sides : int 5) (radius : float 0.005) (speed : float 0.7) (spread : float 0.5) (frequency : float 4.0) (noise_spread : float 0.25) (noise_motion : float 0.1) (seed : float 100.0) (ring : float 0.35) (thickness : float 0.15)]
+    (let* [step (* speed (min (frame/dt) 0.0333))
+           count (* tubes points)
+           per_tube (/ noise_spread tubes)
+           ; of two random points in a ball, the closer to the surface
+           start (fn [(id : int)]
+                   (let* [a (* (ball-point (float id) seed) spread)
+                          b (* (ball-point (+ (float id) 0.5) seed) spread)
+                          da (surface a ring thickness)
+                          db (surface b ring thickness)]
+                     (if (< (abs da.distance) (abs db.distance)) a b)))
+           swarm (state [previous (exact (map (fn [(k : int)] (start (mod k tubes))) (array/range count :type int)))]
+                        (map (fn [(k : int)]
+                               (if (< k tubes)
+                                   (let* [p (array/nth previous k)
+                                          df (surface p ring thickness)
+                                          shift [0.0 (* t noise_motion) (* (float k) per_tube)]
+                                          a (snoise (+ (+ [98.4898 98.4898 98.4898]
+                                                          (* p frequency))
+                                                       shift))
+                                          b (snoise (+ (- [1.2278 1.2278 1.2278] (* p frequency))
+                                                       shift))
+                                          bound (+ (* a.gradient (- 0.0 df.distance))
+                                                   (* df.gradient a.value))]
+                                     (+ p (* (cross bound b.gradient) step)))
+                                   (array/nth previous (int/sub k tubes))))
+                             (array/range count :type int)))]
+      ; the original's "Gradient Rainbow"
+      (tube-sweep swarm
+                  tubes
+                  points
+                  sides
+                  radius
+                  {:a [0.57 0.49 0.54]
+                   :b [0.459 0.278 0.13]
+                   :c [1.0 0.85 1.18]
+                   :d [0.0 0.76 0.15]})))
+
+  (graph scene :context scene
+    (let* [swarm (scene/geometry (ref crawling) :name "Swarm")
+           ; the original's camera: 4 units back, an 18 degree lens
+           camera (scene/camera :eye [0 0 4]
+                                :target [0 0 0]
+                                :fov 18
+                                :follow_viewport true)
+           ; its warm directional key from above and behind the left shoulder
+           key (scene/light :name "Key"
+                            :shape "Directional"
+                            :translate [-2.5 3 -1.5]
+                            :intensity 1.2)
+           sky (scene/world (ref world) :name "Grey")]
+      (scene/root (scene/merge swarm camera key sky)
+                  :camera camera
+                  :renderer "Path traced"
+                  :bounces 4)))
+
+  (graph settings :context settings
+    (settings/config :title "Swarm: crawling" :width 1280 :height 800)))
+
+; Swarm, crawling (keijiro/Swarm's CrawlingSwarm): heads crawl over a surface, the noise field turned
+; along it by its distance, trails kept in a state. The original's baked skull is a torus here.
+; Shared definitions: sketches/swarm_lib.rays.
+; Run: dune exec rays -- sketches/swarm_crawling.rays
+(import "swarm_lib.rays")

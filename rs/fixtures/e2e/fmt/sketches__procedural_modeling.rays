@@ -1,0 +1,88 @@
+; Procedural modeling: three small SOP chains (a swept spiral, grouped and
+; extruded tiles, a prototype copied onto randomized points), one scene node each.
+; examples/sop_gallery shows the wider node catalog.
+(workspace procedural_modeling
+
+  (graph tube :context sop
+    (-> (sop/spiral :turns 1.5
+                    :height 2.2
+                    :start_radius 0.9
+                    :end_radius 0.9
+                    :divisions 24)
+        (sop/sweep_circle :radius 0.16 :sides 12)
+        (sop/set_color :color "#22d3ee")
+        (sop/transform :translate [-3 0 0])))
+
+  (graph tiles :context sop
+    (-> (sop/grid :columns 4 :rows 3 :width 2.8 :height 2.8)
+        (sop/mountain :seed 222 :height 0.16 :frequency [1.2 0.8 1.2] :octaves 4)
+        (sop/group_random :owner "Points"
+                          :name "growth_seeds"
+                          :probability 0.1
+                          :seed 221)
+        (sop/group_edge_depth :point_group "growth_seeds"
+            :name "growth_points"
+            :depth 1)
+        (sop/group_random :owner "Primitives"
+                          :name "raised_tiles"
+                          :probability 0.42
+                          :seed 223)
+        (sop/poly_extrude :group "raised_tiles"
+                          :distance 0.28
+                          :divisions 3
+                          :front_group "tile_fronts"
+                          :side_group "tile_sides")
+        (sop/facet :unique_points true :post_compute_normals true)
+        (sop/set_color :color "#fb7185")
+        (sop/transform :translate [1.5 0 0])))
+
+  (graph copies :context sop
+    (let* [prototype (sop/set_color (sop/facet (sop/box :size [0.28 0.62 0.2]
+                                                        :consolidate_points true)
+                                               :cusp_angle 0.6
+                                               :post_compute_normals true)
+                                    :color "#facc15")
+           targets (sop/attribute_randomize
+                       (sop/transform (sop/points :points 18) :uniform_scale 4.8)
+                       :name "pscale"
+                       :seed 301
+                       :a_w 0.45
+                       :b_w 1.5)]
+      (-> prototype
+          (sop/copy_to_points targets)
+          (sop/connectivity :name "copy_piece" :output "Text" :text_prefix "copy_")
+          (sop/groups_from_name :owner "Primitive" :attribute "copy_piece"))))
+
+  (graph scene :context scene
+    (let* [swept (scene/geometry (ref tube) :name "Swept tube")
+           raised (scene/geometry (ref tiles) :name "Extruded tiles")
+           copied (scene/geometry (ref copies) :name "Copies")
+           camera (scene/camera :eye [6.5 5.0 6.5]
+                                :target [0 0.5 0]
+                                :fov 40
+                                :follow_viewport true)
+           key (scene/light :name "Key"
+                            :shape "Area"
+                            :translate [3 7 5]
+                            :intensity 60
+                            :width 4
+                            :height 4)]
+      (scene/root (scene/merge swept raised copied camera key)
+                  :width 960
+                  :height 640
+                  :max_spp 128)))
+
+  (graph settings :context settings
+    (settings/config :title "Rays Procedural Modeling"
+                     :width 960
+                     :height 640
+                     :seed 2026))
+
+  (graph editor :context editor
+    (ui/workspace (ui/split-at "horizontal"
+                               0.6
+                               (ui/viewport (ref scene))
+                               (ui/split-at "vertical"
+                                            0.5
+                                            (ui/graph)
+                                            (ui/inspector))))))

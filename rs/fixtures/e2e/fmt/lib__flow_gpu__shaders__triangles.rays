@@ -1,0 +1,145 @@
+; The host's first-ear quad rule, with conservative refusal near floating decisions.
+; epsilon is twice the float32 error of a cross product of coordinates of magnitude m (8 m^2 2^-24).
+; ponytail: a face still smaller than that is refused; use adaptive predicates if that is ever measured.
+(defn at3 :context value [(p : (array float)) (k : int)]
+  (let* [at (int/mul k 3)]
+    [(array/nth p at) (array/nth p (int/add at 1)) (array/nth p (int/add at 2))]))
+
+(defn newell :context value [(a : vec3) (b : vec3)]
+  [(* (- a.y b.y) (+ a.z b.z)) (* (- a.z b.z) (+ a.x b.x)) (* (- a.x b.x) (+ a.y b.y))])
+
+(defn project :context value [(p : vec3) (axis : int)]
+  (if (int/eq axis 0) [p.y p.z] (if (int/eq axis 1) [p.x p.z] [p.x p.y])))
+
+(defn cross2 :context value [(a : vec2) (b : vec2) (c : vec2)]
+  (- (* (- b.x a.x) (- c.y a.y)) (* (- b.y a.y) (- c.x a.x))))
+
+(defn area-edge :context value [(a : vec2) (b : vec2)]
+  (- (* a.x b.y) (* b.x a.y)))
+
+(defn magnitude :context value [(p : vec3)]
+  (max (abs p.x) (max (abs p.y) (abs p.z))))
+
+; -1: uncertain, 0: not an ear, 1: the first-ear test is proved.
+(defn ear :context value [(a : vec2) (b : vec2) (c : vec2) (other : vec2) (orientation : float) (epsilon : float)]
+  (let* [turn (* (cross2 a b c) orientation)]
+    (if (< turn (* epsilon -1.0))
+        0
+        (if (> turn epsilon)
+            (let* [x (* (cross2 a b other) orientation)
+                   y (* (cross2 b c other) orientation)
+                   z (* (cross2 c a other) orientation)]
+              (if (or (< x (* epsilon -1.0))
+                      (or (< y (* epsilon -1.0)) (< z (* epsilon -1.0))))
+                  1
+                  (if (and (> x epsilon) (and (> y epsilon) (> z epsilon))) 0 -1)))
+            -1))))
+
+(defn put-triangle :context value [(out : (array int)) (at : int) (a : int) (b : int) (c : int)]
+  (int/add (gpu/store-int out at a)
+           (int/add (gpu/store-int out (int/add at 1) b)
+                    (gpu/store-int out (int/add at 2) c))))
+
+(defn quad :context value [(p : (array float)) (out : (array int)) (at : int) (ia : int) (ib : int) (ic : int) (id : int)]
+  (let* [a (at3 p ia)
+         b (at3 p ib)
+         c (at3 p ic)
+         d (at3 p id)
+         m (max (max (magnitude a) (magnitude b)) (max (magnitude c) (magnitude d)))
+         epsilon (+ (* (* m m) 0.000001) 1e-10)
+         normal (+ (+ (+ (newell a b) (newell b c)) (newell c d)) (newell d a))
+         ax (abs normal.x)
+         ay (abs normal.y)
+         az (abs normal.z)
+         axis (if (and (>= ax ay) (>= ax az)) 0 (if (>= ay az) 1 2))
+         margin (if (int/eq axis 0)
+                    (- ax (max ay az))
+                    (if (int/eq axis 1) (- ay (max ax az)) (- az (max ax ay))))
+         u (project a axis)
+         v (project b axis)
+         w (project c axis)
+         x (project d axis)
+         area (+ (+ (+ (area-edge u v) (area-edge v w)) (area-edge w x))
+                 (area-edge x u))
+         orientation (if (> area 0.0) 1.0 -1.0)]
+    (if (and (< m 1e12) (and (> margin epsilon) (> (abs area) epsilon)))
+        (let* [e0 (ear x u v w orientation epsilon)
+               e1 (if (int/eq e0 0) (ear u v w x orientation epsilon) -1)
+               e2 (if (int/eq e1 0) (ear v w x u orientation epsilon) -1)
+               e3 (if (int/eq e2 0) (ear w x u v orientation epsilon) -1)
+               selected (if (int/eq e0 1)
+                            0
+                            (if (int/eq e1 1)
+                                1
+                                (if (int/eq e2 1) 2 (if (int/eq e3 1) 3 -1))))]
+          (if (int/lt selected 0)
+              1
+              (int/sub (int/add (if (int/eq selected 0)
+                                    (put-triangle out at id ia ib)
+                                    (if (int/eq selected 1)
+                                        (put-triangle out at ia ib ic)
+                                        (if (int/eq selected 2)
+                                            (put-triangle out at ib ic id)
+                                            (put-triangle out at ic id ia))))
+                                (let* [next (int/add at 3)]
+                                  (if (int/eq selected 0)
+                                      (put-triangle out next ib ic id)
+                                      (if (int/eq selected 1)
+                                          (put-triangle out next ia ic id)
+                                          (if (int/eq selected 2)
+                                              (put-triangle out next ia ib id)
+                                              (put-triangle out next ia ib ic))))))
+                       6)))
+        1)))
+
+(defn primitive :context value [(i : int) (p : (array float)) (vertices : (array int)) (offsets : (array int)) (kinds : (array int)) (out : (array int)) (bound : (array int))]
+  (let* [points (array/nth bound 0)
+         nv (array/nth bound 1)
+         np (array/nth bound 2)
+         first (array/nth offsets i)
+         last (array/nth offsets (int/add i 1))
+         n (int/sub last first)
+         base (int/mul (int/sub first (int/mul i 2)) 3)
+         total (int/mul (int/sub nv (int/mul np 2)) 3)]
+    (if (and (and (if (int/eq i 0) (int/eq first 0) true)
+                  (if (int/eq (int/add i 1) np) (int/eq last nv) true))
+             (and (int/eq (array/nth kinds i) 0)
+                  (and (or (int/eq n 3) (int/eq n 4))
+                       (and (int/ge first (int/mul i 2))
+                            (and (int/le last nv)
+                                 (int/le (int/add base (int/mul (int/sub n 2) 3))
+                                         total))))))
+        (let* [a (array/nth vertices first)
+               b (array/nth vertices (int/add first 1))
+               c (array/nth vertices (int/add first 2))
+               d (if (int/eq n 4) (array/nth vertices (int/add first 3)) c)]
+          (if (and (int/lt a points)
+                   (and (int/lt b points) (and (int/lt c points) (int/lt d points))))
+              (if (int/eq n 3)
+                  (int/sub (put-triangle out base a b c) 3)
+                  (quad p out base a b c d))
+              1))
+        1)))
+
+; Two passes: one flag per group, then one group reduces flags to a four-byte status.
+(defn triangle-indices :context value [(id : int) (p : (array float)) (vertices : (array int)) (offsets : (array int)) (kinds : (array int)) (out : (array int)) (blocks : (array int)) (status : (array int)) (bound : (array int)) (size : int)]
+  (let* [np (array/nth bound 2)
+         pass (array/nth bound 3)
+         group (int/div id size)
+         lane (int/mod id size)
+         groups (int/div (int/add np (int/sub size 1)) size)
+         chunks (int/div (int/add groups (int/sub size 1)) size)
+         failed (if (int/eq pass 0)
+                    (if (int/lt id np)
+                        (primitive id p vertices offsets kinds out bound)
+                        0)
+                    (fold [acc 0]
+                          [chunk (range chunks)]
+                      (let* [i (int/add lane (int/mul chunk size))]
+                        (int/add acc (if (int/lt i groups) (array/nth blocks i) 0)))))
+         prefix (gpu/group-scan failed)]
+    (if (int/eq lane 0)
+        (if (int/eq pass 0)
+            (gpu/store-int blocks group prefix.total)
+            (gpu/store-int status 0 prefix.total))
+        0)))

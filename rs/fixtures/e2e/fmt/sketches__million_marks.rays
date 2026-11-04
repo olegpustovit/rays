@@ -1,0 +1,70 @@
+; One million marks as a scatter plot with axes. Drag with the left button or use
+; the arrow keys to pan, "=" and "-" to zoom. The view is one frame-folded record;
+; the marks are only wrapped in draw/translate and draw/scale, never recomputed
+; from the pointer.
+(workspace million_marks
+
+  (defmacro hash [index salt]
+    `(abs (mod (* (sin (+ (* ~index 12.9898) (* ~salt 78.233))) 43758.5453) 1.0)))
+
+  (graph view :context host
+    (state [previous {:x 0.0 :y 0.0 :zoom 1.0 :px 0.0 :py 0.0}]
+           (let* [dt (max 0 (frame/dt))
+                  drag (if (pointer/down) 1.0 0.0)
+                  step (* dt 400.0)
+                  zoom (* previous.zoom
+                          (exp (* dt
+                                  (- (if (key/down "=") 1.0 0.0)
+                                     (if (key/down "-") 1.0 0.0)))))]
+             {:x (+ (+ previous.x (* drag (- (pointer/x) previous.px)))
+                    (* step
+                       (- (if (key/down "left") 1.0 0.0)
+                          (if (key/down "right") 1.0 0.0))))
+              :y (+ (+ previous.y (* drag (- (pointer/y) previous.py)))
+                    (* step
+                       (- (if (key/down "up") 1.0 0.0)
+                          (if (key/down "down") 1.0 0.0))))
+              :zoom zoom
+              :px (pointer/x)
+              :py (pointer/y)})))
+
+  (graph picture :context draw
+    (let* [view (ref view)
+           ; Number of marks.
+           count 1000000
+           ; Half the plot size in points.
+           extent 300.0
+           indices (array/range count)
+           ; A cheap hash of the mark index and a salt, in [0, 1); value/rand has no web kernel.
+           positions (map (fn [i]
+                            (let* [x (- (+ (hash i 1.0) (hash i 2.0)) 1.0)
+                                   y (- (hash i 3.0) 0.5)]
+                              [(* x extent) (* (+ y (* 0.1 (sin (+ t (* x 6.0))))) extent) 0]))
+                          indices)
+           ticks (array/range 13)
+           tick_from (map (fn [k] [(* (- k 6.0) 50.0) -6.0 0]) ticks)
+           tick_to (map (fn [k] [(* (- k 6.0) 50.0) 6.0 0]) ticks)
+           axes (-> 1
+                    (array/vec3 [(- 0 extent) 0 0])
+                    (draw/lines (array/vec3 1 [extent 0 0])
+                                :color "#8a93a0"
+                                :width 1.0)
+                    (-> 1
+                        (array/vec3 [0 (- 0 extent) 0])
+                        (draw/lines (array/vec3 1 [0 extent 0])
+                                    :color "#8a93a0"
+                                    :width 1.0)
+                        (draw/merge (draw/lines tick_from
+                                                tick_to
+                                                :color "#8a93a0"
+                                                :width 1.0))))
+           marks (draw/circles positions :radius 0.6 :fill "#76baca")]
+      (draw/merge (draw/background "#11151c")
+                  (draw/translate [(int (+ (/ (frame/width) 2) view.x)) (int (+ (/ (frame/height) 2) view.y)) 0]
+                                  (draw/scale view.zoom (draw/merge marks axes))))))
+
+  (graph settings :context settings
+    (settings/config :title "One million marks" :width 900 :height 700))
+
+  (graph editor :context editor
+    (ui/workspace (ui/canvas (ref picture) :focus true))))

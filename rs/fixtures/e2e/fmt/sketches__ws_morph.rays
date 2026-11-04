@@ -1,0 +1,64 @@
+; Blend shapes: a flat sheet moves toward two deformed copies of itself.
+(workspace ws_morph
+
+  ; Blend Shapes: a flat sheet moves toward two deformed copies of itself.
+  ; The shapes share the sheet's points, so only positions change.
+  (graph sheet :context sop [(hills : float 0.7) (curl : float 0.3)]
+    (let* [flat (sop/grid :columns 28
+                          :rows 28
+                          :width 3
+                          :height 3
+                          :connectivity "Quads")
+           rough (sop/mountain flat :height 0.9 :frequency [1.4 1.4 1.4] :seed 5)
+           bent (sop/bend flat
+                          :direction [1 0 0]
+                          :up [0 1 0]
+                          :length 1.5
+                          :bend_angle 1.6
+                          :both_directions true)
+           morph (sop/blend_shapes flat rough bent :weight1 hills :weight2 curl)]
+      morph))
+
+  ; Attribute Composite: the mean of two colourings of one sheet, the second
+  ; layer at a third of the first's weight.
+  (graph tinted :context sop [(warmth : float 0.35)]
+    (let* [cool (sop/set_color (ref sheet) :color "#2f6fb5")
+           warm (sop/set_color (ref sheet) :color "#f2a03d")
+           mixed (sop/attribute_composite cool
+                     warm
+                     :point_attributes "Cd"
+                     :weight1 warmth)]
+      (sop/normals mixed)))
+
+  ; Skin: rings of different radii become one tube wall. Group Ordered keeps
+  ; four of the first ring's points in authored order.
+  (graph vase :context sop [(rings : int 6)]
+    (let* [stack (sop/merge (for [i (range rings)]
+                              (let* [u (/ i (- rings 1))
+                                     r (+ 0.35 (* 0.3 (sin (* u 5))))]
+                                (sop/transform (sop/circle :radius_x r
+                                                           :radius_y r
+                                                           :segments 32)
+                                               :translate [0 (* u 2) 0]))))
+           wall (sop/skin stack)
+           marked (sop/ordered_group wall :name "rim" :elements "0 8 16 24")]
+      (sop/set_color (sop/normals marked) :color "#c9b79c")))
+
+  (graph scene :context scene
+    (let* [ground (scene/geometry (ref tinted) :name "sheet")
+           pot (scene/geometry (ref vase) :name "vase" :translate [0 0.2 0])
+           camera (scene/camera :eye [3.2 3 4.6] :target [0 0.7 0] :fov 45)
+           light (scene/light :shape "Directional" :translate [5 8 4] :intensity 2)
+           composed (scene/merge ground pot camera light)]
+      composed))
+
+  (graph editor :context editor
+    (let* [outline (ui/outline)
+           network (ui/graph)
+           preview (ui/viewport (ref scene))
+           inspector (ui/inspector)
+           side (ui/split-at "vertical" 0.55 preview inspector)
+           main (ui/split-at "horizontal" 0.6 network side)
+           panels (ui/split-at "horizontal" 0.13 outline main)
+           shell (ui/workspace panels)]
+      shell)))

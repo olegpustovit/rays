@@ -1,0 +1,35 @@
+End-to-end goldens of the OCaml `rays` binary (bin/rays.ml), for byte-for-byte comparison with the Rust port.
+
+Source commit: 8ffbd4c1 (rs: ogpu_metal — Metal OGPU backend incl. all path-tracing acceleration kinds; 12 gpu tests pass on the Mac. metal: resolve/ICB/acceleration bindings; fix render-pass action setters resetting each other, command-buffer destroy keeping retained buffers, argument_encoder index abort. Conformance MSL goldens in rs/fixtures/shaders/ogpu_metal)
+
+Working tree: NOT clean. It has uncommitted changes in lib/ (the binary was built from them), so these goldens
+reflect the working tree, not the commit alone. `git status --short lib | head` at capture time:
+
+```
+ M lib/flow_gpu/goldens/spirv.sexp
+ M lib/flow_gpu/run.ml
+ M lib/flow_gpu/run.mli
+ M lib/flow_gpu/test_spirv.ml
+ M lib/flow_gpu/test_trace.ml
+ M lib/flow_shader/emit.ml
+ M lib/flow_shader/spirv.ml
+ M lib/flow_shader/spirv.mli
+ M lib/flow_shader/trace.rays
+ M lib/ogpu/conformance/conformance.ml
+```
+
+Binary: _build/default/bin/rays.exe, built with `dune build bin/rays.exe` (already up to date when captured).
+
+Commands (per file, repo root as cwd, path relative to repo root, each run under `timeout 20`):
+- `rays check FILE`  -> check/<FILE with / as __>.out: first line `exit N`, then raw stdout+stderr (2>&1).
+- `rays fmt FILE`    -> fmt/<FILE with / as __>.rays: raw stdout (fmt prints; it does not rewrite in place). stderr discarded.
+- index.tsv lists each file with its check and fmt exit codes.
+
+Regenerate: `~/.local/bin/rw 'bash rs/fixtures/e2e/capture.sh'` (after `dune build bin/rays.exe`).
+
+File count: 204 .rays files (every *.rays outside _build, rs/, node_modules, .git).
+Exit codes: check 0 for 74 files, 1 for 130 files; fmt the same split (exit 1 files produce empty fmt output).
+Exit 1 is a genuine diagnostic, not a crash: all 129 lib/flow_sop/nodes/*.rays files fail: 115 with E_WORKSPACE (not a (workspace ...) form), 14 with E_NAME/E_NO_GRAPH (fragments that define names or no graph),
+and lib/rays_pathtracer/pathtrace.rays uses operators the catalog does not know.
+No crashes and no timeouts (no exit codes above 1).
+Total capture time: 47 s wall.

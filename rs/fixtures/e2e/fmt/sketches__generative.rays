@@ -1,0 +1,32 @@
+; Packed position, radius and color arrays share one instanced circle draw.
+(workspace generative
+
+  (graph picture :context draw
+    (let* [time (state [previous 0.0] (+ previous (frame/dt)))
+           indices (array/range 501)
+           positions (map (fn [i]
+                            [(int (+ 250 (* 200 (sin (+ time (* (* i 4.0) 0.01)))))) i 0])
+                          indices)
+           radii (map (fn [i]
+                        (int (+ 50 (* 40 (sin (+ time (* (* i 4.0) 0.0037)))))))
+                      indices)
+           colors (map (fn [i]
+                         [(/ (int (+ 127 (* 127 (sin (* (* i 4.0) 0.01))))) 255) (/ (int (+ 127 (* 127 (sin (* (* i 4.0) 0.011))))) 255) (/ (int (+ 127 (* 127 (sin (* (* i 4.0) 0.012))))) 255)])
+                       indices)]
+      (draw/merge (draw/background "#000000")
+                  (draw/translate [(/ (frame/width) 2) (/ (frame/height) 2) 0]
+                                  (draw/rotate 1.5707963267948966
+                                               (draw/translate [(- 0 (/ (frame/width) 2)) (- 0 (/ (frame/height) 2)) 0]
+                                                               (draw/scale 2.0
+                                                                           (draw/circles positions
+                                                                                         :radius radii
+                                                                                         :fill colors))))))))
+
+  (graph actions :context host
+    (list (host/quit (or (key/down "escape") (key/down "q")))))
+
+  (graph editor :context editor
+    (ui/workspace (ui/canvas (ref picture) :focus true) :effects (ref actions)))
+
+  (graph window :context settings
+    (settings/config :title "Rays generative sketch" :width 500 :height 500)))

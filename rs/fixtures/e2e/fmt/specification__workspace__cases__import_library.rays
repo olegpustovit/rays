@@ -1,0 +1,7 @@
+(workspace shared_library
+
+  (defn double :context value [(x : float)]
+    (* x 2))
+
+  (graph shared :context value
+    (double 3)))

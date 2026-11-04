@@ -1,0 +1,19 @@
+; Vec2/Vec4 are scalar values. Existing drawing ports still take vec3/RGB data.
+(workspace flow_vectors
+
+  (graph picture :context draw
+    (let* [center [400 300]
+           offset [(* 120 (cos t)) (* 120 (sin t))]
+           position (+ center offset)
+           rgba [0.1 0.7 1.0 0.9]
+           at [position.x position.y 0]
+           color (list rgba.x rgba.y rgba.z rgba.w)]
+      (draw/merge (draw/background "#080a10") (draw/circle at 24 :fill color))))
+
+  (graph settings :context settings
+    (settings/config :width 800 :height 600 :title "Rays Flow vector widths"))
+
+  (graph editor :context editor
+    (ui/workspace (ui/split "horizontal"
+                            (ui/canvas (ref picture) :focus true)
+                            (ui/graph "picture")))))

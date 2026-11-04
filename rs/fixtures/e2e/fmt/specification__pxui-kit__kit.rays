@@ -1,0 +1,47 @@
+(workspace kit
+
+  ; The fixture of the kit's reference sheets (specification/pxui-kit): the graph the Graph,
+  ; Inspector and Workspace artboards draw, in layouts sized like them.  Render it with
+  ; tools/ui_shot.exe and compare with the sheets' PNGs.
+  (graph garden :context sop [(count : int 120)]
+    (let* [grid1 (sop/grid)
+           box1 (sop/box :size [0.3 0.4 0.3])
+           scatter1 (sop/scatter grid1 :count count :seed 1)
+           copy1 (sop/copy_to_points box1 scatter1)
+           out (sop/merge copy1)]
+      out))
+
+  (graph brass :context material
+    (material/standard :name "brass" :color "#b0680f" :roughness 0.3))
+
+  (graph scene :context scene
+    (let* [plants (scene/geometry (ref garden) :name "garden")
+           cam (scene/camera :name "camera"
+                             :eye [0.5 1.8 6]
+                             :target [0 0.3 0]
+                             :fov 38)
+           key (scene/light :name "key light"
+                            :shape "Area"
+                            :translate [4 6 3]
+                            :intensity 1)
+           all (scene/merge plants cam key)]
+      (scene/root all :camera cam)))
+
+  ; layout 0: the Workspace sheet (1440 x 900).  layout 1: the Graph sheet beside the Inspector
+  ; sheet (1200 + 1 + 380 wide, 760 + the status strip high).
+  (graph editor :context editor
+    (let* [outline (ui/outline)
+           preview (ui/viewport (ref scene) :look_through true)
+           timeline (ui/timeline)
+           network (ui/graph "garden" :focus true)
+           inspector (ui/inspector :of network)
+           code (ui/lisp :tab "graph")
+           stage (ui/split "vertical" preview timeline)
+           middle (ui/split "vertical" stage network :second_size 336)
+           right (ui/split "vertical" inspector code :second_size 300)
+           work (ui/split "horizontal" middle right :second_size 320)
+           studio (ui/split "horizontal" outline work :first_size 216)
+           wide (ui/graph "garden")
+           detail (ui/inspector :of wide)
+           sheets (ui/split "horizontal" wide detail :second_size 380)]
+      (ui/workspace (ui/switch studio sheets :active 0)))))

@@ -1,0 +1,71 @@
+; Dialog outcomes, drag positions and pinch factors arrive through frame/input.
+(workspace file_dialog
+
+  (graph model :context host
+    (state [previous {:lines (list) :dragging false :position [0 0 0] :zoom 1.0}]
+           (fold [model previous]
+                 [event (get (frame/input) :events)]
+             (let* [line (cond
+                           (equal? event.kind "dialog-opened") (str "dialog " event.id " opened")
+                           (equal? event.kind "file-dropped") (str "dropped " event.text)
+                           (and (equal? event.kind "file-dialog")
+                                (not (equal? event.error "")))
+                             (str "dialog " event.id " failed: " event.error)
+                           (and (equal? event.kind "file-dialog")
+                                (= (count event.paths) 0))
+                             (str "dialog " event.id " cancelled")
+                           :else "")
+                    lines (if (equal? line "")
+                              model.lines
+                              (take 8 (concat (list line) model.lines)))
+                    outcomes (if (and (equal? event.kind "file-dialog")
+                                      (equal? event.error ""))
+                                 (fold [outcomes lines]
+                                       [path event.paths]
+                                   (take 8
+                                         (concat (list (str "dialog " event.id ": " path))
+                                                 outcomes)))
+                                 lines)]
+               {:lines outcomes
+                :dragging (cond
+                            (equal? event.kind "file-drag-moved") true
+                            (equal? event.kind "file-drag-ended") false
+                            :else model.dragging)
+                :position (if (equal? event.kind "file-drag-moved")
+                              event.position
+                              model.position)
+                :zoom (if (equal? event.kind "pinched")
+                          (max 0.25 (min 4.0 (* model.zoom event.scale)))
+                          model.zoom)}))))
+
+  (graph picture :context draw
+    (let* [model (ref model)
+           side (int (* 80 model.zoom))]
+      (draw/merge (draw/background "#14161c")
+                  (draw/text [12 12 0]
+                             "O: open images   S: save   F: folder   drag a file in   pinch to scale")
+                  (draw/rect [(- (int/div (frame/width) 2) (int/div side 2)) 60 0]
+                             [side side 0]
+                             :fill "#5aaaf0")
+                  (draw/circle [(int model.position.x) (int model.position.y) 0]
+                               10
+                               :fill (if model.dragging "#f0b43c" "#00000000"))
+                  (let* [lines (reverse model.lines)]
+                    (for [i (range 8)]
+                      (draw/text [12 (+ 200 (* i 18)) 0]
+                                 (if (< i (count lines)) (nth lines i) "")))))))
+
+  (graph actions :context host
+    (list (host/dialog "open_files"
+                       (key/down "o")
+                       :filters (list {:label "Images"
+                                       :extensions (list "png" "jpg")}
+                                      {:label "All" :extensions (list)}))
+          (host/dialog "save_file" (key/down "s"))
+          (host/dialog "open_folder" (key/down "f"))))
+
+  (graph editor :context editor
+    (ui/workspace (ui/canvas (ref picture) :focus true) :effects (ref actions)))
+
+  (graph window :context settings
+    (settings/config :title "File dialogs" :width 720 :height 420)))

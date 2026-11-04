@@ -1,0 +1,3 @@
+exit 0
+File "specification/workspace/cases/cube_cage.rays", line 61, characters 40-50:
+Warning [W_SOFT_RANGE]: :translate 22 is outside the slider range -20–20. Allowed, but check it

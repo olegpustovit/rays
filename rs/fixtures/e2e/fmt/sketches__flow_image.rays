@@ -1,0 +1,43 @@
+; A generated noise image drawn as a picture: image and draw graphs in one workspace.
+(workspace flow_image
+
+  (graph image :context image
+    (image/noise :width 256 :height 256 :frequency 0.03 :seed 17))
+
+  (graph picture :context draw
+    (draw/merge (draw/background "#11151c")
+                (draw/image (ref image) :at [16 16 0] :scale 1.5)))
+
+  (graph surface :context sop
+    (let* [grid (sop/grid :columns 64
+                          :rows 64
+                          :width 4
+                          :height 4
+                          :uv_attribute "uv")
+           sampled (sop/attr_from_image grid
+                       (ref image)
+                       :attribute "image"
+                       :channel "luminance")]
+      sampled))
+
+  (graph scene :context scene
+    (let* [surface (scene/geometry (ref surface)
+                                   :texture (ref image)
+                                   :name "Shared noise image")
+           camera (scene/camera :eye [4 5 5] :target [0 0 0])
+           light (scene/light :translate [0 5 3] :intensity 50)]
+      (scene/root (scene/merge surface camera light) :camera camera)))
+
+  (graph settings :context settings
+    (settings/config :title "Image: canvas, texture and sampled attribute"
+                     :width 1200
+                     :height 760))
+
+  (graph editor :context editor
+    (let* [network (ui/graph "image" :focus true)
+           details (ui/inspector :of network)
+           canvas (ui/canvas (ref picture))
+           viewport (ui/viewport (ref scene) :look_through true)
+           pictures (ui/split "horizontal" canvas viewport)
+           work (ui/split "vertical" pictures network :second_size 240)]
+      (ui/workspace (ui/split "horizontal" work details :second_size 260)))))

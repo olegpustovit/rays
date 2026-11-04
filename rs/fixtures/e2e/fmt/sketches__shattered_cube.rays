@@ -1,0 +1,59 @@
+; Shattered cube: a Boolean fracture of a cube or a dodecahedron by a noisy
+; sheet copied onto random oriented points, then an exploded view. The
+; per-piece renderer is OCaml (main.ml); this is the document.
+(workspace shattered_cube
+
+  (graph shattered :context sop
+    (let* [cube (sop/box :size [2.6 2.6 2.6] :consolidate_points true)
+           dodecahedron (sop/platonic :kind "Dodecahedron"
+                                      :normals "Vertex"
+                                      :rotation [0.173 0.291 0.113]
+                                      :radius 2.25)
+           source-switch (sop/switch cube dodecahedron)
+           ; the cutter: a noisy 2 x 2 sheet ...
+           cutter-grid (sop/normals (sop/mountain (sop/grid :counts "Divisions"
+                                                            :connectivity "Triangles"
+                                                            :columns 2
+                                                            :rows 2
+                                                            :size 4.8
+                                                            :width 4.8
+                                                            :height 4.8)
+                                                  :seed 0
+                                                  :height 0.35
+                                                  :frequency [0.27 1 0.27]
+                                                  :octaves 1
+                                                  :lacunarity 2
+                                                  :roughness 0.5
+                                                  :recompute_normals true))
+           ; ... copied onto 50 jittered, randomly oriented points
+           cutter-points (sop/point_jitter (sop/attribute_noise_quaternion (sop/points :points 50)
+                                               :seed 7349
+                                               :frequency [0.173 0.173 0.173]
+                                               :octaves 2)
+                                           :seed 7350
+                                           :id_attribute "sourceindex"
+                                           :scale 0.45)
+           cutters (sop/copy_to_points cutter-grid cutter-points)
+           fracture (sop/boolean_fracture source-switch
+                        cutters
+                        :resolve_cutter_self_intersections true
+                        :piece_attribute "piece")
+           shaded (sop/normals fracture :cusp_angle 0.65)]
+      (sop/exploded_view shaded)))
+
+  (graph scene :context scene
+    (let* [shards (scene/geometry (ref shattered) :name "shattered")
+           camera (scene/camera :eye [4.094123 2.772771 4.667965]
+                                :target [0 0 0]
+                                :follow_viewport true)
+           key (scene/light :name "key"
+                            :shape "Directional"
+                            :translate [8 12 16]
+                            :color "#fff7ed"
+                            :intensity 1)
+           fill (scene/light :name "fill"
+                             :shape "Directional"
+                             :translate [-9.6 -3.2 6.4]
+                             :color "#7dd3fc"
+                             :intensity 0.55)]
+      (scene/merge shards camera key fill))))

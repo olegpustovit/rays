@@ -1,0 +1,33 @@
+; A grid terrain displaced by a per-point kernel over its positions and normals.
+(workspace flow_kernel
+
+  (graph terrain :context sop
+    (let* [grid (sop/grid :columns 64 :rows 64 :width 5 :height 5)
+           positions (sop/attr grid :P)
+           normals (sop/attr grid :N)
+           amp (+ 0.65 (* 0.1 (sin t)))
+           freq 0.8
+           displace (fn [p n]
+                      (let* [scaled (* p freq)
+                             sample (noise3 scaled)
+                             offset (* n (* amp sample))]
+                        (+ p offset)))
+           updated (map displace positions normals)
+           terrain (sop/with_attr grid :P (exact updated))]
+      (sop/normals terrain)))
+
+  (graph scene :context scene
+    (let* [land (scene/geometry (ref terrain) :name "Lisp kernel")
+           camera (scene/camera :eye [4 4 6.5] :target [0 0 0] :fov 50)
+           light (scene/light :translate [-3 5 4] :intensity 60)]
+      (scene/merge land camera light)))
+
+  (graph settings :context settings
+    (settings/config :title "Rays Flow attribute kernel" :width 1200 :height 760))
+
+  (graph editor :context editor
+    (let* [preview (ui/viewport (ref scene) :look_through true)
+           network (ui/graph "terrain" :focus true)
+           inspector (ui/inspector :of network)
+           work (ui/split "vertical" preview network :second_size 336)]
+      (ui/workspace (ui/split "horizontal" work inspector :second_size 240)))))

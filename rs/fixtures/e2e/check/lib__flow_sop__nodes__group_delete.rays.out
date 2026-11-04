@@ -1,0 +1,9 @@
+exit 1
+File "lib/flow_sop/nodes/group_delete.rays", line 2, characters 0-54:
+Error [E_NAME]: Invalid, reserved or duplicate name: group_delete_owner.
+File "lib/flow_sop/nodes/group_delete.rays", line 11, characters 0-67:
+Error [E_NAME]: Invalid, reserved or duplicate name: metadata_group_delete_normalize.
+File "lib/flow_sop/nodes/group_delete.rays", line 17, characters 0-74:
+Error [E_NAME]: Invalid, reserved or duplicate name: sop/group_delete.
+File "lib/flow_sop/nodes/group_delete.rays", line 1, characters 0-28:
+Error [E_NO_GRAPH]: A workspace needs at least one graph.

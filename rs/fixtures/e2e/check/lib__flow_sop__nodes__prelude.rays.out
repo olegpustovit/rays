@@ -1,0 +1,299 @@
+exit 1
+File "lib/flow_sop/nodes/prelude.rays", line 3, characters 2-67:
+Error [E_NAME]: Invalid, reserved or duplicate name: setter_constant.
+File "lib/flow_sop/nodes/prelude.rays", line 14, characters 2-52:
+Error [E_NAME]: Invalid, reserved or duplicate name: float_floor.
+File "lib/flow_sop/nodes/prelude.rays", line 18, characters 2-51:
+Error [E_NAME]: Invalid, reserved or duplicate name: float_ceil.
+File "lib/flow_sop/nodes/prelude.rays", line 24, characters 2-62:
+Error [E_NAME]: Invalid, reserved or duplicate name: vec3_dot.
+File "lib/flow_sop/nodes/prelude.rays", line 26, characters 2-64:
+Error [E_NAME]: Invalid, reserved or duplicate name: vec3_cross.
+File "lib/flow_sop/nodes/prelude.rays", line 32, characters 2-54:
+Error [E_NAME]: Invalid, reserved or duplicate name: vec3_normalize.
+File "lib/flow_sop/nodes/prelude.rays", line 37, characters 2-61:
+Error [E_NAME]: Invalid, reserved or duplicate name: vec3_normalize_scaled.
+File "lib/flow_sop/nodes/prelude.rays", line 45, characters 2-54:
+Error [E_NAME]: Invalid, reserved or duplicate name: quat_normalize.
+File "lib/flow_sop/nodes/prelude.rays", line 62, characters 2-62:
+Error [E_NAME]: Invalid, reserved or duplicate name: quat_mul.
+File "lib/flow_sop/nodes/prelude.rays", line 68, characters 2-39:
+Error [E_NAME]: Invalid, reserved or duplicate name: mat4_identity.
+File "lib/flow_sop/nodes/prelude.rays", line 71, characters 2-56:
+Error [E_NAME]: Invalid, reserved or duplicate name: mat4_translation.
+File "lib/flow_sop/nodes/prelude.rays", line 74, characters 2-52:
+Error [E_NAME]: Invalid, reserved or duplicate name: mat4_scaling.
+File "lib/flow_sop/nodes/prelude.rays", line 77, characters 2-56:
+Error [E_NAME]: Invalid, reserved or duplicate name: mat4_rotation_x.
+File "lib/flow_sop/nodes/prelude.rays", line 81, characters 2-56:
+Error [E_NAME]: Invalid, reserved or duplicate name: mat4_rotation_y.
+File "lib/flow_sop/nodes/prelude.rays", line 85, characters 2-56:
+Error [E_NAME]: Invalid, reserved or duplicate name: mat4_rotation_z.
+File "lib/flow_sop/nodes/prelude.rays", line 89, characters 2-73:
+Error [E_NAME]: Invalid, reserved or duplicate name: mat4_rotation.
+File "lib/flow_sop/nodes/prelude.rays", line 102, characters 2-88:
+Error [E_NAME]: Invalid, reserved or duplicate name: mat4_transpose.
+File "lib/flow_sop/nodes/prelude.rays", line 108, characters 2-98:
+Error [E_NAME]: Invalid, reserved or duplicate name: mat4_mul_row.
+File "lib/flow_sop/nodes/prelude.rays", line 117, characters 2-31:
+Error [E_NAME]: Invalid, reserved or duplicate name: mat4_mul.
+File "lib/flow_sop/nodes/prelude.rays", line 122, characters 2-62:
+Error [E_NAME]: Invalid, reserved or duplicate name: mat4_dot4.
+File "lib/flow_sop/nodes/prelude.rays", line 124, characters 2-37:
+Error [E_NAME]: Invalid, reserved or duplicate name: mat4_transform.
+File "lib/flow_sop/nodes/prelude.rays", line 128, characters 2-67:
+Error [E_NAME]: Invalid, reserved or duplicate name: mat4_point_row.
+File "lib/flow_sop/nodes/prelude.rays", line 130, characters 2-43:
+Error [E_NAME]: Invalid, reserved or duplicate name: mat4_transform_point.
+File "lib/flow_sop/nodes/prelude.rays", line 136, characters 2-71:
+Error [E_NAME]: Invalid, reserved or duplicate name: mat4_direction_row.
+File "lib/flow_sop/nodes/prelude.rays", line 138, characters 2-47:
+Error [E_NAME]: Invalid, reserved or duplicate name: mat4_transform_direction.
+File "lib/flow_sop/nodes/prelude.rays", line 143, characters 2-68:
+Error [E_NAME]: Invalid, reserved or duplicate name: vec4_component.
+File "lib/flow_sop/nodes/prelude.rays", line 147, characters 2-86:
+Error [E_NAME]: Invalid, reserved or duplicate name: mat4_inverse.
+File "lib/flow_sop/nodes/prelude.rays", line 174, characters 2-53:
+Error [E_NAME]: Invalid, reserved or duplicate name: rand_mix_index.
+File "lib/flow_sop/nodes/prelude.rays", line 180, characters 2-59:
+Error [E_NAME]: Invalid, reserved or duplicate name: rand_at.
+File "lib/flow_sop/nodes/prelude.rays", line 186, characters 2-80:
+Error [E_NAME]: Invalid, reserved or duplicate name: int_gather.
+File "lib/flow_sop/nodes/prelude.rays", line 189, characters 2-79:
+Error [E_NAME]: Invalid, reserved or duplicate name: prim_of_vertex.
+File "lib/flow_sop/nodes/prelude.rays", line 196, characters 2-87:
+Error [E_NAME]: Invalid, reserved or duplicate name: edge_ancestry.
+File "lib/flow_sop/nodes/prelude.rays", line 209, characters 2-86:
+Error [E_NAME]: Invalid, reserved or duplicate name: group_value_keep.
+File "lib/flow_sop/nodes/prelude.rays", line 212, characters 2-44:
+Error [E_NAME]: Invalid, reserved or duplicate name: group_value_preferred.
+File "lib/flow_sop/nodes/prelude.rays", line 215, characters 2-40:
+Error [E_NAME]: Invalid, reserved or duplicate name: group_value_apply.
+File "lib/flow_sop/nodes/prelude.rays", line 243, characters 2-81:
+Error [E_NAME]: Invalid, reserved or duplicate name: group_exists.
+File "lib/flow_sop/nodes/prelude.rays", line 246, characters 2-34:
+Error [E_NAME]: Invalid, reserved or duplicate name: group_publish.
+File "lib/flow_sop/nodes/prelude.rays", line 267, characters 2-87:
+Error [E_NAME]: Invalid, reserved or duplicate name: group_order_filter.
+File "lib/flow_sop/nodes/prelude.rays", line 270, characters 2-48:
+Error [E_NAME]: Invalid, reserved or duplicate name: group_merge_publish_ordered.
+File "lib/flow_sop/nodes/prelude.rays", line 308, characters 2-40:
+Error [E_NAME]: Invalid, reserved or duplicate name: group_merge_publish.
+File "lib/flow_sop/nodes/prelude.rays", line 313, characters 2-96:
+Error [E_NAME]: Invalid, reserved or duplicate name: edge_usage.
+File "lib/flow_sop/nodes/prelude.rays", line 320, characters 2-38:
+Error [E_NAME]: Invalid, reserved or duplicate name: transform_normals.
+File "lib/flow_sop/nodes/prelude.rays", line 332, characters 2-68:
+Error [E_NAME]: Invalid, reserved or duplicate name: transform_row_fused.
+File "lib/flow_sop/nodes/prelude.rays", line 334, characters 2-44:
+Error [E_NAME]: Invalid, reserved or duplicate name: transform_point_fused.
+File "lib/flow_sop/nodes/prelude.rays", line 341, characters 2-39:
+Error [E_NAME]: Invalid, reserved or duplicate name: transform_geometry.
+File "lib/flow_sop/nodes/prelude.rays", line 353, characters 2-56:
+Error [E_NAME]: Invalid, reserved or duplicate name: fused_dot.
+File "lib/flow_sop/nodes/prelude.rays", line 355, characters 2-51:
+Error [E_NAME]: Invalid, reserved or duplicate name: fused_normalize.
+File "lib/flow_sop/nodes/prelude.rays", line 360, characters 2-58:
+Error [E_NAME]: Invalid, reserved or duplicate name: fused_normalize_scaled.
+File "lib/flow_sop/nodes/prelude.rays", line 367, characters 2-80:
+Error [E_NAME]: Invalid, reserved or duplicate name: deform_mask.
+File "lib/flow_sop/nodes/prelude.rays", line 371, characters 2-89:
+Error [E_NAME]: Invalid, reserved or duplicate name: deform_group_missing.
+File "lib/flow_sop/nodes/prelude.rays", line 376, characters 2-79:
+Error [E_NAME]: Invalid, reserved or duplicate name: deform_error.
+File "lib/flow_sop/nodes/prelude.rays", line 382, characters 2-32:
+Error [E_NAME]: Invalid, reserved or duplicate name: blast_apply.
+File "lib/flow_sop/nodes/prelude.rays", line 450, characters 2-53:
+Error [E_NAME]: Invalid, reserved or duplicate name: gen_normalize.
+File "lib/flow_sop/nodes/prelude.rays", line 455, characters 2-55:
+Error [E_NAME]: Invalid, reserved or duplicate name: gen_custom_frame.
+File "lib/flow_sop/nodes/prelude.rays", line 465, characters 2-102:
+Error [E_NAME]: Invalid, reserved or duplicate name: gen_frame.
+File "lib/flow_sop/nodes/prelude.rays", line 490, characters 2-62:
+Error [E_NAME]: Invalid, reserved or duplicate name: deform_area_directions.
+File "lib/flow_sop/nodes/prelude.rays", line 518, characters 2-65:
+Error [E_NAME]: Invalid, reserved or duplicate name: deform_default_directions.
+File "lib/flow_sop/nodes/prelude.rays", line 533, characters 2-63:
+Error [E_NAME]: Invalid, reserved or duplicate name: ramp_part.
+File "lib/flow_sop/nodes/prelude.rays", line 536, characters 2-52:
+Error [E_NAME]: Invalid, reserved or duplicate name: ramp_positions.
+File "lib/flow_sop/nodes/prelude.rays", line 538, characters 2-49:
+Error [E_NAME]: Invalid, reserved or duplicate name: ramp_values.
+File "lib/flow_sop/nodes/prelude.rays", line 540, characters 2-45:
+Error [E_NAME]: Invalid, reserved or duplicate name: ramp_ok.
+File "lib/flow_sop/nodes/prelude.rays", line 556, characters 2-96:
+Error [E_NAME]: Invalid, reserved or duplicate name: ramp_apply.
+File "lib/flow_sop/nodes/prelude.rays", line 585, characters 0-32:
+Error [E_NAME]: Invalid, reserved or duplicate name: loft_scales.
+File "lib/flow_sop/nodes/prelude.rays", line 593, characters 0-31:
+Error [E_NAME]: Invalid, reserved or duplicate name: loft_nlens.
+File "lib/flow_sop/nodes/prelude.rays", line 605, characters 0-31:
+Error [E_NAME]: Invalid, reserved or duplicate name: loft_dists.
+File "lib/flow_sop/nodes/prelude.rays", line 612, characters 0-34:
+Error [E_NAME]: Invalid, reserved or duplicate name: loft_vertices.
+File "lib/flow_sop/nodes/prelude.rays", line 624, characters 0-29:
+Error [E_NAME]: Invalid, reserved or duplicate name: loft_ncs.
+File "lib/flow_sop/nodes/prelude.rays", line 662, characters 0-76:
+Error [E_NAME]: Invalid, reserved or duplicate name: loft_part.
+File "lib/flow_sop/nodes/prelude.rays", line 666, characters 0-29:
+Error [E_NAME]: Invalid, reserved or duplicate name: loft_align.
+File "lib/flow_sop/nodes/prelude.rays", line 754, characters 0-27:
+Error [E_NAME]: Invalid, reserved or duplicate name: loft_zip.
+File "lib/flow_sop/nodes/prelude.rays", line 887, characters 0-68:
+Error [E_NAME]: Invalid, reserved or duplicate name: loft_error.
+File "lib/flow_sop/nodes/prelude.rays", line 892, characters 0-58:
+Error [E_NAME]: Invalid, reserved or duplicate name: loft_owners.
+File "lib/flow_sop/nodes/prelude.rays", line 898, characters 0-27:
+Error [E_NAME]: Invalid, reserved or duplicate name: loft_run.
+File "lib/flow_sop/nodes/prelude.rays", line 986, characters 0-61:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_finite.
+File "lib/flow_sop/nodes/prelude.rays", line 987, characters 0-46:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_fail.
+File "lib/flow_sop/nodes/prelude.rays", line 992, characters 0-68:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_interp.
+File "lib/flow_sop/nodes/prelude.rays", line 997, characters 0-69:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_rlen.
+File "lib/flow_sop/nodes/prelude.rays", line 1004, characters 0-65:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_nok.
+File "lib/flow_sop/nodes/prelude.rays", line 1006, characters 0-71:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_normalize.
+File "lib/flow_sop/nodes/prelude.rays", line 1012, characters 0-48:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_init_frame.
+File "lib/flow_sop/nodes/prelude.rays", line 1020, characters 0-70:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_unit_leg.
+File "lib/flow_sop/nodes/prelude.rays", line 1022, characters 0-52:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_init_frame_leg.
+File "lib/flow_sop/nodes/prelude.rays", line 1029, characters 0-71:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_transport.
+File "lib/flow_sop/nodes/prelude.rays", line 1047, characters 0-57:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_cross_imp.
+File "lib/flow_sop/nodes/prelude.rays", line 1049, characters 0-55:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_dot_imp.
+File "lib/flow_sop/nodes/prelude.rays", line 1052, characters 0-99:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_param.
+File "lib/flow_sop/nodes/prelude.rays", line 1059, characters 0-54:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_wrap.
+File "lib/flow_sop/nodes/prelude.rays", line 1061, characters 0-100:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_addwrap.
+File "lib/flow_sop/nodes/prelude.rays", line 1064, characters 0-29:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_prims.
+File "lib/flow_sop/nodes/prelude.rays", line 1085, characters 0-29:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_edges.
+File "lib/flow_sop/nodes/prelude.rays", line 1109, characters 0-29:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_rings.
+File "lib/flow_sop/nodes/prelude.rays", line 1159, characters 0-31:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_centers.
+File "lib/flow_sop/nodes/prelude.rays", line 1166, characters 0-71:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_same.
+File "lib/flow_sop/nodes/prelude.rays", line 1171, characters 0-29:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_links.
+File "lib/flow_sop/nodes/prelude.rays", line 1225, characters 0-32:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_tangents.
+File "lib/flow_sop/nodes/prelude.rays", line 1253, characters 0-31:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_lengths.
+File "lib/flow_sop/nodes/prelude.rays", line 1275, characters 0-67:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_fin.
+File "lib/flow_sop/nodes/prelude.rays", line 1278, characters 0-33:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_trans_arr.
+File "lib/flow_sop/nodes/prelude.rays", line 1301, characters 0-27:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_seq.
+File "lib/flow_sop/nodes/prelude.rays", line 1321, characters 0-81:
+Error [E_NAME]: Invalid, reserved or duplicate name: int_gather_v.
+File "lib/flow_sop/nodes/prelude.rays", line 1325, characters 0-30:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_totals.
+File "lib/flow_sop/nodes/prelude.rays", line 1332, characters 0-28:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_roll.
+File "lib/flow_sop/nodes/prelude.rays", line 1365, characters 0-74:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_upframes.
+File "lib/flow_sop/nodes/prelude.rays", line 1370, characters 0-71:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_upbad.
+File "lib/flow_sop/nodes/prelude.rays", line 1376, characters 0-54:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_upleg.
+File "lib/flow_sop/nodes/prelude.rays", line 1385, characters 0-78:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_upframes_leg.
+File "lib/flow_sop/nodes/prelude.rays", line 1387, characters 0-75:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_upbad_leg.
+File "lib/flow_sop/nodes/prelude.rays", line 1391, characters 0-31:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_ringpts.
+File "lib/flow_sop/nodes/prelude.rays", line 1429, characters 0-65:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_gcd.
+File "lib/flow_sop/nodes/prelude.rays", line 1440, characters 0-67:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_faces.
+File "lib/flow_sop/nodes/prelude.rays", line 1467, characters 0-54:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_cnext.
+File "lib/flow_sop/nodes/prelude.rays", line 1469, characters 0-73:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_craw.
+File "lib/flow_sop/nodes/prelude.rays", line 1475, characters 0-26:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_tv.
+File "lib/flow_sop/nodes/prelude.rays", line 1497, characters 0-33:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_outlayout.
+File "lib/flow_sop/nodes/prelude.rays", line 1526, characters 0-31:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_corners.
+File "lib/flow_sop/nodes/prelude.rays", line 1592, characters 0-59:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_m_pf.
+File "lib/flow_sop/nodes/prelude.rays", line 1594, characters 0-59:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_m_pi.
+File "lib/flow_sop/nodes/prelude.rays", line 1596, characters 0-59:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_m_pv.
+File "lib/flow_sop/nodes/prelude.rays", line 1598, characters 0-59:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_m_vi.
+File "lib/flow_sop/nodes/prelude.rays", line 1600, characters 0-59:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_m_v2.
+File "lib/flow_sop/nodes/prelude.rays", line 1602, characters 0-59:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_m_v4.
+File "lib/flow_sop/nodes/prelude.rays", line 1604, characters 0-74:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_a_pf.
+File "lib/flow_sop/nodes/prelude.rays", line 1607, characters 0-72:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_a_pi.
+File "lib/flow_sop/nodes/prelude.rays", line 1610, characters 0-59:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_a_pv.
+File "lib/flow_sop/nodes/prelude.rays", line 1613, characters 0-59:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_a_vi.
+File "lib/flow_sop/nodes/prelude.rays", line 1616, characters 0-87:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_a_v2.
+File "lib/flow_sop/nodes/prelude.rays", line 1620, characters 0-87:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_a_v4.
+File "lib/flow_sop/nodes/prelude.rays", line 1627, characters 0-30:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_legacy.
+File "lib/flow_sop/nodes/prelude.rays", line 1641, characters 0-92:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_count_bad_f.
+File "lib/flow_sop/nodes/prelude.rays", line 1648, characters 0-99:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_count_bad_i.
+File "lib/flow_sop/nodes/prelude.rays", line 1652, characters 0-26:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_prep.
+File "lib/flow_sop/nodes/prelude.rays", line 1715, characters 0-31:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_edgebad.
+File "lib/flow_sop/nodes/prelude.rays", line 1733, characters 0-69:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_valence.
+File "lib/flow_sop/nodes/prelude.rays", line 1747, characters 0-29:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_edgeanc.
+File "lib/flow_sop/nodes/prelude.rays", line 1811, characters 0-25:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_run.
+File "lib/flow_sop/nodes/prelude.rays", line 1966, characters 0-131:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_allfinite.
+File "lib/flow_sop/nodes/prelude.rays", line 1969, characters 0-29:
+Error [E_NAME]: Invalid, reserved or duplicate name: pw_valid.
+File "lib/flow_sop/nodes/prelude.rays", line 1985, characters 0-55:
+Error [E_NAME]: Invalid, reserved or duplicate name: etp_length.
+File "lib/flow_sop/nodes/prelude.rays", line 1995, characters 0-32:
+Error [E_NAME]: Invalid, reserved or duplicate name: etp_forward.
+File "lib/flow_sop/nodes/prelude.rays", line 2026, characters 0-33:
+Error [E_NAME]: Invalid, reserved or duplicate name: etp_backward.
+File "lib/flow_sop/nodes/prelude.rays", line 2066, characters 0-34:
+Error [E_NAME]: Invalid, reserved or duplicate name: etp_normalize.
+File "lib/flow_sop/nodes/prelude.rays", line 2096, characters 2-52:
+Error [E_NAME]: Invalid, reserved or duplicate name: lap_manifold.
+File "lib/flow_sop/nodes/prelude.rays", line 2153, characters 2-56:
+Error [E_NAME]: Invalid, reserved or duplicate name: lap_rows.
+File "lib/flow_sop/nodes/prelude.rays", line 2160, characters 2-67:
+Error [E_NAME]: Invalid, reserved or duplicate name: lap_times.
+File "lib/flow_sop/nodes/prelude.rays", line 2161, characters 2-79:
+Error [E_NAME]: Invalid, reserved or duplicate name: lap_pick.
+File "lib/flow_sop/nodes/prelude.rays", line 2163, characters 2-77:
+Error [E_NAME]: Invalid, reserved or duplicate name: lap_pick_int.
+File "lib/flow_sop/nodes/prelude.rays", line 2165, characters 2-68:
+Error [E_NAME]: Invalid, reserved or duplicate name: lap_vec_diff.
+File "lib/flow_sop/nodes/prelude.rays", line 2166, characters 2-86:
+Error [E_NAME]: Invalid, reserved or duplicate name: lap_sumsq.
+File "lib/flow_sop/nodes/prelude.rays", line 2, characters 0-20:
+Error [E_NO_GRAPH]: A workspace needs at least one graph.

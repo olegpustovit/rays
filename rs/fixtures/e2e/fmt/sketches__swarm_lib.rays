@@ -1,0 +1,203 @@
+; Swarm's shared definitions (sketches/swarm*.rays): keijiro's simplex noise with its gradient, his
+; hashes, the tube sweep of step-major trails, the variants' fields, and the grey world.
+; Ashima's 3D simplex noise (webgl-noise, as keijiro's SimplexNoise3D.cginc) with its analytic
+; gradient: {:gradient vec3 :value float}, both scaled by 42.
+(defn mod289 :context value [(x : float)]
+  (- x (* (floor (/ x 289.0)) 289.0)))
+
+(defn permute :context value [(x : float)]
+  (mod289 (* (+ (* x 34.0) 1.0) x)))
+
+; One simplex corner: x is the offset from the corner, hash its permutation. Its gradient is a point
+; of a 7 x 7 grid folded onto an octahedron; the corner weighs (0.6 - |x|^2)^4.
+(defn simplex-corner :context value [(x : vec3) (hash : float)]
+  (let* [j (- hash (* 49.0 (floor (/ hash 49.0))))
+         column (floor (/ j 7.0))
+         row (floor (- j (* 7.0 column)))
+         gx (- (/ (+ (* column 2.0) 0.5) 7.0) 1.0)
+         gy (- (/ (+ (* row 2.0) 0.5) 7.0) 1.0)
+         h (- (- 1.0 (abs gx)) (abs gy))
+         flip (if (<= h 0.0) -1.0 0.0)
+         raw [(+ gx (* (+ (* (floor gx) 2.0) 1.0) flip)) (+ gy (* (+ (* (floor gy) 2.0) 1.0) flip)) h]
+         g (* raw (- 1.79284291400159 (* (dot raw raw) 0.85373472095314)))
+         m (max (- 0.6 (dot x x)) 0.0)
+         m2 (* m m)
+         m4 (* m2 m2)
+         along (dot x g)]
+    {:gradient (+ (* x (* -6.0 (* (* m2 m) along))) (* g m4)) :value (* m4 along)}))
+
+; The permutation of a corner: cell is the wrapped lattice cell, corner its 0/1 offset.
+(defn simplex-hash :context value [(cell : vec3) (corner : vec3)]
+  (permute (+ (+ (permute (+ (+ (permute (+ cell.z corner.z)) cell.y) corner.y))
+                 cell.x)
+              corner.x)))
+
+(defn snoise :context value [(v : vec3)]
+  (let* [skew (/ (+ (+ v.x v.y) v.z) 3.0)
+         i [(floor (+ v.x skew)) (floor (+ v.y skew)) (floor (+ v.z skew))]
+         unskew (/ (+ (+ i.x i.y) i.z) 6.0)
+         x0 (+ (- v i) [unskew unskew unskew])
+         gx (if (>= x0.x x0.y) 1.0 0.0)
+         gy (if (>= x0.y x0.z) 1.0 0.0)
+         gz (if (>= x0.z x0.x) 1.0 0.0)
+         i1 [(min gx (- 1.0 gz)) (min gy (- 1.0 gx)) (min gz (- 1.0 gy))]
+         i2 [(max gx (- 1.0 gz)) (max gy (- 1.0 gx)) (max gz (- 1.0 gy))]
+         third 0.3333333333333333
+         sixth 0.16666666666666666
+         x1 (+ (- x0 i1) [sixth sixth sixth])
+         x2 (+ (- x0 i2) [third third third])
+         x3 (- x0 [0.5 0.5 0.5])
+         cell [(mod289 i.x) (mod289 i.y) (mod289 i.z)]
+         c0 (simplex-corner x0 (simplex-hash cell [0.0 0.0 0.0]))
+         c1 (simplex-corner x1 (simplex-hash cell i1))
+         c2 (simplex-corner x2 (simplex-hash cell i2))
+         c3 (simplex-corner x3 (simplex-hash cell [1.0 1.0 1.0]))]
+    {:gradient (* (+ (+ c0.gradient c1.gradient) (+ c2.gradient c3.gradient)) 42.0)
+     :value (* (+ (+ c0.value c1.value) (+ c2.value c3.value)) 42.0)}))
+
+; The divergence-free step: two noise gradients crossed.
+(defn swirl :context value [(p : vec3) (frequency : float) (offset : vec3)]
+  (let* [a (snoise (+ (+ [98.4898 98.4898 98.4898] (* p frequency)) offset))
+         b (snoise (+ (- [1.2278 1.2278 1.2278] (* p frequency)) offset))]
+    (cross a.gradient b.gradient)))
+
+; keijiro's shader hash: frac(43758.5453 sin(dot((12.9898, 78.233), (u, v)) + seed)).
+(defn hash2 :context value [(u : float) (v : float) (seed : float)]
+  (let* [s (* 43758.5453 (sin (+ (+ (* u 12.9898) (* v 78.233)) seed)))]
+    (- s (floor s))))
+
+; A nearly uniform random point in the unit ball for tube id.
+(defn ball-point :context value [(id : float) (seed : float)]
+  (let* [u (* (hash2 (* id 0.01334) 0.3728 seed) 6.283185307179586)
+         z (- (* (hash2 0.8372 (* id 0.01197) seed) 2.0) 1.0)
+         l (hash2 4.438 (- (* id 0.01938) 4.378) seed)
+         r (sqrt (- 1.0 (* z z)))]
+    (* [(* (cos u) r) (* (sin u) r) z] (sqrt l))))
+
+; Trails swept into tubes, keijiro's tube template: `positions` holds `points` points of each of
+; `tubes` curves, step-major (point s of tube id at s * tubes + id). A ring of `sides` points of
+; `radius` turns about each point's tangent, its normal across the tangent and the radius through
+; it; `gradient` is a cosine gradient a + b cos(2 pi (c x + d)) along and across the tubes.
+(defmacro tube-sweep [positions tubes points sides radius gradient]
+  `(let* [positions# ~positions
+          last# (- ~points 1)
+          gradient# ~gradient
+          ; the tangent at a point: its neighbours' chord, one-sided at the ends
+          tangent# (fn [(k# : int)]
+                     (let* [along# (int/div k# ~tubes)]
+                       (normalize (- (array/nth positions#
+                                                (if (< along# last#) (int/add k# ~tubes) k#))
+                                     (array/nth positions#
+                                                (if (> along# 0) (int/sub k# ~tubes) k#))))))
+          ; a point's normal: across its tangent and the radius through it, as the original frames a
+          ; tube's first point (a tangent along the radius takes any perpendicular)
+          normals# (map (fn [(k# : int)]
+                          (let* [t# (tangent# k#)
+                                 out# (cross t#
+                                             (normalize (array/nth positions# k#)))
+                                 side# (if (> (dot out# out#) 0.000001)
+                                           out#
+                                           (cross t# [0.0 1.0 0.0]))]
+                            (normalize (cross side# t#))))
+                        (array/range (* ~tubes ~points) :type int))
+          rings# (* (* ~tubes ~points) ~sides)
+          ; a ring point's outward normal: the tube's normal turned by its angle about the tangent
+          around# (fn [(v# : int)]
+                    (let* [ring# (int/div v# ~sides)
+                           ; rings are tube-major for the mesh, points step-major
+                           k# (int/add (* (mod ring# ~points) ~tubes)
+                                       (int/div ring# ~points))
+                           phi# (* (/ (float (mod v# ~sides)) ~sides)
+                                   6.283185307179586)
+                           n# (array/nth normals# k#)]
+                      (+ (* n# (cos phi#)) (* (cross (tangent# k#) n#) (sin phi#)))))
+          ring_normals# (map around# (array/range rings# :type int))
+          ; a ring point is its curve's point pushed out along its normal
+          ring_points# (map (fn [(v# : int) (n# : vec3)]
+                              (let* [ring# (int/div v# ~sides)
+                                     k# (int/add (* (mod ring# ~points) ~tubes)
+                                                 (int/div ring# ~points))]
+                                (+ (array/nth positions# k#) (* n# ~radius))))
+                            (array/range rings# :type int)
+                            ring_normals#)
+          ; keijiro's cosine gradient, a + b cos(2 pi (c x + d)), over the tube and along it, to linear
+          colors# (map (fn [(v# : int)]
+                         (let* [ring# (int/div v# ~sides)
+                                x# (+ (/ (float (mod ring# ~points)) ~points)
+                                      (/ (float (int/div ring# ~points)) ~tubes))
+                                wave# [(cos (* 6.283185307179586 (+ (* gradient#.c.x x#) gradient#.d.x))) (cos (* 6.283185307179586 (+ (* gradient#.c.y x#) gradient#.d.y))) (cos (* 6.283185307179586 (+ (* gradient#.c.z x#) gradient#.d.z)))]
+                                c# (+ gradient#.a
+                                      [(* gradient#.b.x wave#.x) (* gradient#.b.y wave#.y) (* gradient#.b.z wave#.z)])]
+                           [(pow (min (max c#.x 0.0) 1.0) 2.2) (pow (min (max c#.y 0.0) 1.0) 2.2) (pow (min (max c#.z 0.0) 1.0) 2.2)]))
+                       (array/range rings# :type int))
+          ; each segment of a ring is a quad of two triangles, as the original's tube template
+          quads# (* (* ~tubes last#) ~sides)
+          triangles# (* quads# 2)
+          corners# (map (fn [(w# : int)]
+                          (let* [triangle# (int/div w# 3)
+                                 q# (int/div triangle# 2)
+                                 ; triangles (0 1 2) and (0 2 3) of the quad's corners
+                                 k# (mod w# 3)
+                                 corner# (if (= k# 0)
+                                             0
+                                             (int/add k# (mod triangle# 2)))
+                                 side# (mod q# ~sides)
+                                 segment# (int/div q# ~sides)
+                                 id# (int/div segment# last#)
+                                 base# (* (int/add (* id# ~points)
+                                                   (mod segment# last#))
+                                          ~sides)
+                                 next_side# (mod (int/add side# 1) ~sides)
+                                 offset_side# (if (or (= corner# 0) (= corner# 3))
+                                                  side#
+                                                  next_side#)
+                                 offset_ring# (if (< corner# 2) 0 ~sides)]
+                            (int/add (int/add base# offset_ring#) offset_side#)))
+                        (array/range (* triangles# 3) :type int))
+          mesh# (sop/mesh :points (exact ring_points#)
+                          :vertex_points (exact corners#)
+                          :primitive_offsets (exact (map (fn [(f# : int)] (* f# 3))
+                                                         (array/range (+ triangles# 1) :type int)))
+                          :kinds (array/int triangles# 0))
+          shaded# (sop/with_attr mesh#
+                                 "N"
+                                 (exact ring_normals#)
+                                 :owner "point"
+                                 :type vec3)]
+     (sop/with_attr shaded# "Cd" (exact colors#) :owner "point" :type vec3)))
+
+; keijiro's per-tube hash of the floating swarm: Random(id, u).
+(defn tube-random :context value [(id : int) (u : float) (seed : float)]
+  (hash2 (+ (* u 0.0018372) (* seed 0.0023849)) (* (float id) 0.0013345) 0.0))
+
+; Where a floating tube is drawn to: a point of a small ball about the target.
+(defn floating-home :context value [(id : int) (target : vec3) (spread : float) (seed : float)]
+  (let* [u (* (tube-random id 1.0 seed) 6.283185307179586)
+         z (- (* (tube-random id 2.0 seed) 2.0) 1.0)
+         r (sqrt (- 1.0 (* z z)))]
+    (+ target
+       (* [(* (cos u) r) (* (sin u) r) z]
+          (* (sqrt (tube-random id 3.0 seed)) spread)))))
+
+; The floating swarm's divergence-free field, offset per tube by `spread`.
+(defn floating-field :context value [(id : int) (p : vec3) (spread : float)]
+  (let* [q (+ p (* [0.9 1.0 1.1] (* spread (float id))))
+         a (snoise q)
+         b (snoise (+ q [15.3 13.1 17.4]))]
+    (cross a.gradient b.gradient)))
+
+; The crawling swarm's surface, in place of the original's baked skull: a torus and its distance's
+; gradient, {:gradient vec3 :distance float}.
+(defn surface :context value [(p : vec3) (ring : float) (thickness : float)]
+  (let* [flat (sqrt (+ (* p.x p.x) (* p.z p.z)))
+         out [(* p.x (/ (- flat ring) (max flat 0.000001))) p.y (* p.z (/ (- flat ring) (max flat 0.000001)))]
+         across (max (length out) 0.000001)]
+    {:gradient (/ out across) :distance (- across thickness)}))
+
+; the original's flat grey background
+(graph world :context world
+  (world/gradient :name "Grey"
+                  :zenith [0.33 0.33 0.33]
+                  :horizon [0.33 0.33 0.33]
+                  :nadir [0.33 0.33 0.33]
+                  :sharpness 1))
