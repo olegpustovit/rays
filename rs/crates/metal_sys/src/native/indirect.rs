@@ -89,3 +89,19 @@ unsafe extern "C" {
         base_vertex: i64, base_instance: u64, device_registry_id: u64, message: *mut *const std::ffi::c_char,
     ) -> i32;
 }
+
+// ogpu_metal: execute a range of an indirect command buffer on a render encoder.
+#[cfg(target_vendor = "apple")]
+unsafe extern "C" {
+    fn caml_rays_metal_render_encoder_execute_icb_range(encoder: *mut NativeHandle, icb: *mut NativeHandle, location: u64, length: u64, message: *mut *const std::ffi::c_char) -> i32;
+}
+pub fn execute_icb_range(encoder: &Handle, icb: &Handle, location: u64, length: u64) -> Result<(), Error> {
+    #[cfg(target_vendor = "apple")]
+    {
+        let mut message: *const std::ffi::c_char = std::ptr::null();
+        let status = unsafe { caml_rays_metal_render_encoder_execute_icb_range(encoder.as_native_ptr()?, icb.as_native_ptr()?, location, length, &mut message) };
+        if status == 0 { Ok(()) } else { Err(unsafe { Error::from_native(status, message) }) }
+    }
+    #[cfg(not(target_vendor = "apple"))]
+    { let _ = (encoder, icb, location, length); Err(Error::Unavailable) }
+}

@@ -58,3 +58,11 @@ pub fn set_depth_stencil_actions(pass:&Handle,dl:i32,ds:i32,cd:f64,sl:i32,ss:i32
  #[cfg(target_vendor="apple")] {let mut msg=std::ptr::null();let status=unsafe{raw_depth_stencil_actions(pass.as_native_ptr()?,dl,ds,cd,sl,ss,cs,&mut msg)};if status==0{Ok(())}else{Err(unsafe{Error::from_native(status,msg)})}}
  #[cfg(not(target_vendor="apple"))] {let _=(pass,dl,ds,cd,sl,ss,cs);Err(Error::Unavailable)}
 }
+
+// ogpu_metal: the resolve target of colour attachment 0.
+#[cfg(target_vendor="apple")]
+unsafe extern "C" { fn caml_rays_metal_render_pass_set_resolve(pass:*mut NativeHandle,texture:*mut NativeHandle,message:*mut *const c_char)->i32; }
+pub fn set_render_pass_resolve(pass:&Handle,texture:Option<&Handle>)->Result<(),Error>{
+ #[cfg(target_vendor="apple")] {let mut msg=std::ptr::null();let status=unsafe{caml_rays_metal_render_pass_set_resolve(pass.as_native_ptr()?,match texture{Some(v)=>v.as_native_ptr()?,None=>std::ptr::null_mut()},&mut msg)};if status==0{Ok(())}else{Err(unsafe{Error::from_native(status,msg)})}}
+ #[cfg(not(target_vendor="apple"))] {let _=(pass,texture);Err(Error::Unavailable)}
+}

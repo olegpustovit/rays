@@ -116,3 +116,15 @@ extern "C" int32_t caml_rays_metal_indirect_render_draw_indexed(
         return rays_metal_set_error(message, exception.reason.UTF8String);
     }
 }
+
+// ogpu_metal: executeCommandsInBuffer:withRange: on a render encoder.
+extern "C" int32_t caml_rays_metal_render_encoder_execute_icb_range(MetalHandle *encoder_handle, MetalHandle *icb_handle, uint64_t location, uint64_t length, const char **message) {
+  if (message) *message = nullptr;
+  @try { @autoreleasepool {
+    id<MTLRenderCommandEncoder> encoder = (__bridge id<MTLRenderCommandEncoder>)rays_metal_handle_object(encoder_handle, KIND_RENDER_ENCODER);
+    id<MTLIndirectCommandBuffer> icb = (__bridge id<MTLIndirectCommandBuffer>)rays_metal_handle_object(icb_handle, KIND_INDIRECT_COMMAND_BUFFER);
+    if (!encoder || !icb) return rays_metal_set_error(message, "invalid render encoder or indirect command buffer handle");
+    [encoder executeCommandsInBuffer:icb withRange:NSMakeRange(static_cast<NSUInteger>(location), static_cast<NSUInteger>(length))];
+    return 0;
+  }} @catch (NSException *exception) { return rays_metal_set_error(message, exception.reason.UTF8String); }
+}

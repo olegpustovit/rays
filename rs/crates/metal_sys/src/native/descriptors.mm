@@ -170,3 +170,19 @@ extern "C" int32_t caml_rays_metal_render_pass_color_load_action(MetalHandle *pa
 extern "C" int32_t caml_rays_metal_render_pass_depth_stencil_actions(MetalHandle *pass, int32_t depth_load, int32_t depth_store, double clear_depth, int32_t stencil_load, int32_t stencil_store, uint32_t clear_stencil, const char **message) {
   return rays_metal_render_pass_set_actions(pass, MTLLoadActionDontCare, MTLStoreActionDontCare, depth_load, depth_store, clear_depth, stencil_load, stencil_store, clear_stencil, message);
 }
+
+// ogpu_metal: the multisample resolve target of colour attachment 0 (nullptr clears it).
+extern "C" int32_t caml_rays_metal_render_pass_set_resolve(MetalHandle *pass_handle, MetalHandle *texture_handle, const char **message) {
+  if (message) *message = nullptr;
+  @try { @autoreleasepool {
+    MTLRenderPassDescriptor *pass = (__bridge MTLRenderPassDescriptor *)rays_metal_handle_object(pass_handle, KIND_RENDER_PASS_DESCRIPTOR);
+    if (!pass) return rays_metal_set_error(message, "invalid render-pass handle");
+    id<MTLTexture> texture = nil;
+    if (texture_handle) {
+      texture = (__bridge id<MTLTexture>)rays_metal_handle_object(texture_handle, KIND_TEXTURE);
+      if (!texture) return rays_metal_set_error(message, "invalid resolve texture handle");
+    }
+    pass.colorAttachments[0].resolveTexture = texture;
+    return 0;
+  }} @catch (NSException *exception) { return rays_metal_set_error(message, exception.reason.UTF8String); }
+}

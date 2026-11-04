@@ -86,12 +86,13 @@ impl DepthStencil {
     pub(crate) fn device(&self) -> &Device { &self.0.device }
 }
 
-struct RenderPassInner { raw: metal_sys::Handle, lifetime: Lifetime, device: Device, device_attached: AtomicBool, width: u64, height: u64, samples: u64, attachments: std::sync::Mutex<(Option<Texture>, Option<Texture>, Option<Texture>)> }
+struct RenderPassInner { raw: metal_sys::Handle, lifetime: Lifetime, device: Device, device_attached: AtomicBool, width: u64, height: u64, samples: u64, attachments: std::sync::Mutex<(Option<Texture>, Option<Texture>, Option<Texture>)>, resolve: std::sync::Mutex<Option<Texture>> }
 impl RenderPassInner {
     fn detach_device(&self) { if self.device_attached.swap(false, Ordering::AcqRel) { self.device.lifetime().detach(); } }
     fn release_attachments(&self) {
         let mut guard = self.attachments.lock().unwrap();
         let attachments = &mut *guard;
+        if let Some(texture) = self.resolve.lock().unwrap().take() { texture.lifetime().detach(); }
         for texture in [&mut attachments.0, &mut attachments.1, &mut attachments.2] {
             if let Some(texture) = texture.take() { texture.lifetime().detach(); }
         }
@@ -103,11 +104,11 @@ pub struct RenderPassDescriptor(Arc<RenderPassInner>);
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LoadAction { DontCare, Load, Clear }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum StoreAction { DontCare, Store }
+pub enum StoreAction { DontCare, Store, MultisampleResolve, StoreAndMultisampleResolve }
 impl RenderPassDescriptor {
     pub fn create(device: &Device, width: u64, height: u64, sample_count: u64) -> Result<Self, Error> {
         let op = "Metal.RenderPassDescriptor.create";
-        on_main(op, || { device.ensure_live(op)?; let raw = native(op, sys::create_render_pass())?; if let Err(failure) = native(op, sys::set_render_pass_sizes(&raw, width, height, sample_count)) { drop(raw); return Err(failure); } device.lifetime().attach(); Ok(Self(Arc::new(RenderPassInner { raw, lifetime: Lifetime::new(), device: device.clone(), device_attached: AtomicBool::new(true), width, height, samples: sample_count, attachments: std::sync::Mutex::new((None,None,None)) }))) })
+        on_main(op, || { device.ensure_live(op)?; let raw = native(op, sys::create_render_pass())?; if let Err(failure) = native(op, sys::set_render_pass_sizes(&raw, width, height, sample_count)) { drop(raw); return Err(failure); } device.lifetime().attach(); Ok(Self(Arc::new(RenderPassInner { raw, lifetime: Lifetime::new(), device: device.clone(), device_attached: AtomicBool::new(true), width, height, samples: sample_count, attachments: std::sync::Mutex::new((None,None,None)), resolve: std::sync::Mutex::new(None) }))) })
     }
     pub fn set_attachments(&self, color: &Texture, depth: Option<&Texture>, stencil: Option<&Texture>, clear: [f64; 4]) -> Result<(), Error> {
         let op = "Metal.RenderPassDescriptor.set_attachments";
@@ -144,4 +145,30 @@ impl RenderPassDescriptor {
     pub fn color_attachment(&self) -> Option<Texture> { self.0.attachments.lock().unwrap().0.clone() }
     pub fn depth_attachment(&self) -> Option<Texture> { self.0.attachments.lock().unwrap().1.clone() }
     pub fn stencil_attachment(&self) -> Option<Texture> { self.0.attachments.lock().unwrap().2.clone() }
+}
+
+// ogpu_metal: the multisample resolve target of colour attachment 0.
+impl RenderPassDescriptor {
+    pub fn set_resolve_texture(&self, texture: Option<&Texture>) -> Result<(), Error> {
+        let op = "Metal.RenderPassDescriptor.set_resolve_texture";
+        on_main(op, || {
+            self.ensure_live(op)?;
+            if let Some(t) = texture {
+                let d = t.descriptor();
+                if t.is_destroyed() { return Err(error(op, ErrorKind::Destroyed, "resolve texture is destroyed")); }
+                if self.0.samples <= 1 { return Err(error(op, ErrorKind::InvalidArgument, "resolve texture requires a multisample render pass")); }
+                if d.width as u64 != self.0.width || d.height as u64 != self.0.height || d.sample_count != 1 || !d.usage.contains(&crate::metal::TextureUsage::RenderTarget) {
+                    return Err(error(op, ErrorKind::InvalidArgument, "resolve texture dimensions, samples, or usage are incompatible"));
+                }
+                if !t.device().same(&self.0.device) { return Err(error(op, ErrorKind::DeviceMismatch, "resolve texture belongs to another device")); }
+            }
+            native(op, sys::set_render_pass_resolve(&self.0.raw, texture.map(Texture::raw)))?;
+            let mut old = self.0.resolve.lock().unwrap();
+            if let Some(t) = texture { t.lifetime().attach(); }
+            if let Some(t) = old.as_ref() { t.lifetime().detach(); }
+            *old = texture.cloned();
+            Ok(())
+        })
+    }
+    pub fn resolve_texture(&self) -> Option<Texture> { self.0.resolve.lock().unwrap().clone() }
 }

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::metal::{error, native, on_main, Buffer, CommandBuffer, Device, DeviceFamily, Error, ErrorKind, Lifetime, Texture, TextureKind, TextureRegion};
 use crate::metal_format::Format;
 use crate::metal_raw_types::{Metal4RenderColorAttachmentDescriptor, Metal4RenderDescriptor};
-use crate::{descriptors::{DepthStencil, RenderPassDescriptor, Sampler}, library::{Function, Library}};
+use crate::{descriptors::{DepthStencil, RenderPassDescriptor, Sampler}, library::Library};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PrimitiveTopology { Point, Line, Triangle }
@@ -163,16 +163,15 @@ impl Compiler {
             let names = library.function_names()?;
             if !names.iter().any(|name| name == vertex) { return Err(error(OP, ErrorKind::InvalidArgument, "vertex function is absent from the source library")); }
             if options.fragment.as_ref().is_some_and(|fragment| !names.iter().any(|name| name == fragment)) { return Err(error(OP, ErrorKind::InvalidArgument, "fragment function is absent from the source library")); }
-            Function::find(library, vertex)?;
-            if let Some(fragment) = &options.fragment { Function::find(library, fragment)?; }
             let mut color_attachments = match (&options.color_formats, &options.color_attachments) {
                 (Some(_), Some(_)) => return Err(error(OP, ErrorKind::InvalidArgument, "color_formats and color_attachments are mutually exclusive")),
                 (Some(formats), None) => formats.iter().copied().map(ColorAttachment::new).collect(),
                 (None, Some(attachments)) => attachments.clone(),
-                (None, None) if options.fragment.is_some() => vec![ColorAttachment::new(Format::Bgra8Unorm)],
-                (None, None) => Vec::new(),
+                (None, None) => vec![ColorAttachment::new(Format::Bgra8Unorm)],
             };
-            if color_attachments.len() > 8 || (options.fragment.is_some() != !color_attachments.is_empty()) {
+            // Rasterization is always on: it needs exactly one fragment function and one to eight colours.
+            if options.fragment.is_none() { return Err(error(OP, ErrorKind::InvalidArgument, "rasterization requires exactly one fragment function")); }
+            if color_attachments.is_empty() || color_attachments.len() > 8 {
                 return Err(error(OP, ErrorKind::InvalidArgument, "render color attachments must match rasterization and not exceed eight"));
             }
             if color_attachments.iter().any(|attachment| attachment.format.is_depth_or_stencil()) { return Err(error(OP, ErrorKind::InvalidArgument, "render color attachments require color pixel formats")); }
@@ -351,7 +350,7 @@ impl RenderEncoder {
             let raw = native(OP, metal_sys::registry::command_buffer_render_encoder_from_pass(command_buffer.raw(), pass.raw()))?;
             command_buffer.lifetime().attach();
             pass.lifetime().attach();
-            for texture in [color_target.clone(), depth_target, stencil_target].into_iter().flatten() {
+            for texture in [color_target.clone(), depth_target, stencil_target, pass.resolve_texture()].into_iter().flatten() {
                 command_buffer.retain_texture(&texture);
             }
             Ok(Self(Arc::new(RenderEncoderInner {
@@ -654,5 +653,23 @@ fn texture_slices(descriptor: &crate::metal::TextureDescriptor) -> Option<usize>
         TextureKind::TextureCube => Some(6),
         TextureKind::TextureCubeArray => descriptor.array_length.checked_mul(6),
         _ => Some(1),
+    }
+}
+
+// ogpu_metal: executing a range of an indirect command buffer.
+impl RenderEncoder {
+    pub fn execute_indirect_commands(&self, commands: &crate::indirect::IndirectCommandBuffer, location: usize, length: usize) -> Result<(), Error> {
+        const OP: &str = "Metal.RenderEncoder.execute_indirect_commands";
+        on_main(OP, || {
+            self.ensure_open(OP)?;
+            commands.lifetime().ensure_live(OP)?;
+            if !self.0.command_buffer.device().same(commands.device()) { return Err(error(OP, ErrorKind::DeviceMismatch, "resources belong to different Metal devices")); }
+            commands.check_range(OP, location, length)?;
+            let pipeline = self.0.pipeline.borrow().clone().ok_or_else(|| error(OP, ErrorKind::InvalidState, "no render pipeline is bound"))?;
+            if !pipeline.supports_indirect_command_buffers()? { return Err(error(OP, ErrorKind::Unsupported, "pipeline lacks indirect-command-buffer support")); }
+            native(OP, metal_sys::native::indirect::execute_icb_range(&self.0.raw, commands.raw(), location as u64, length as u64))?;
+            self.0.command_buffer.retain_indirect(commands);
+            Ok(())
+        })
     }
 }

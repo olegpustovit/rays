@@ -294,3 +294,7 @@ impl RenderCommand {
         })
     }
 }
+
+impl IndirectCommandBuffer {
+    pub(crate) fn check_range(&self, operation: &str, location: usize, length: usize) -> Result<(), Error> { self.validate_range(operation, location, length) }
+}

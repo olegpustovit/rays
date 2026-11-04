@@ -427,11 +427,19 @@ impl Texture {
                 i64::from(texture_swizzle_code(descriptor.swizzle.blue)),
                 i64::from(texture_swizzle_code(descriptor.swizzle.alpha)),
             ];
-            if actual != expected { return Err(error(operation, ErrorKind::NativeError, "Metal changed checked texture properties during creation")); }
+            if actual != expected {
+                const FIELDS: [&str; 18] = ["kind", "format", "width", "height", "depth", "mip_levels", "sample_count", "array_length", "usage", "storage", "cpu_cache", "hazard_tracking", "allow_gpu_optimized_contents", "compression", "swizzle_red", "swizzle_green", "swizzle_blue", "swizzle_alpha"];
+                let differing = (0..FIELDS.len()).filter(|&index| actual[index] != expected[index])
+                    .map(|index| format!("{} expected {} got {}", FIELDS[index], expected[index], actual[index])).collect::<Vec<_>>().join("; ");
+                return Err(error(operation, ErrorKind::NativeError, format!("Metal changed checked texture properties during creation: {differing}")));
+            }
             if native(operation, metal_sys::registry::texture_is_shareable(&raw))? {
                 return Err(error(operation, ErrorKind::NativeError, "Metal changed the checked texture sharing mode during creation"));
             }
             device.attach_child(operation)?;
+            // Metal reports a default hazard mode as tracked (both are checked as 2 above).
+            let mut descriptor = descriptor;
+            if descriptor.hazard_tracking == HazardTrackingMode::Default { descriptor.hazard_tracking = HazardTrackingMode::Tracked; }
             Ok(Self(Arc::new(TextureInner {
                 raw,
                 lifetime: Lifetime::new(),
@@ -903,6 +911,39 @@ impl ComputeEncoder {
                 self.0.lifetime.destroyed.store(true, Ordering::Release);
                 self.0.command_buffer.0.lifetime.dependents.fetch_sub(1, Ordering::AcqRel);
             }
+            Ok(())
+        })
+    }
+}
+
+// ogpu_metal: acceleration structures bound to a compute encoder.
+impl ComputeEncoder {
+    pub fn set_acceleration_structure(&self, index: usize, structure: Option<&crate::acceleration::AccelerationStructure>) -> Result<(), Error> {
+        let operation = "Metal.Compute_encoder.set_acceleration_structure";
+        on_main(operation, || {
+            self.0.lifetime.ensure_live(operation)?;
+            if index >= 31 { return Err(error(operation, ErrorKind::InvalidArgument, "buffer index is outside [0, 31)")); }
+            if let Some(a) = structure {
+                a.lifetime().ensure_live(operation)?;
+                if !self.0.command_buffer.device().same(a.device()) { return Err(error(operation, ErrorKind::DeviceMismatch, "resources belong to different Metal devices")); }
+            }
+            native(operation, metal_sys::registry::compute35_acceleration(&self.0.raw, structure.map(|a| a.raw()), index as u64))?;
+            if let Some(a) = structure { self.0.command_buffer.retain_acceleration(a); }
+            Ok(())
+        })
+    }
+    pub fn use_acceleration_structures(&self, structures: &[crate::acceleration::AccelerationStructure]) -> Result<(), Error> {
+        let operation = "Metal.Compute_encoder.use_acceleration_structures";
+        on_main(operation, || {
+            self.0.lifetime.ensure_live(operation)?;
+            if structures.is_empty() { return Err(error(operation, ErrorKind::InvalidArgument, "structures must not be empty")); }
+            for a in structures {
+                a.lifetime().ensure_live(operation)?;
+                if !self.0.command_buffer.device().same(a.device()) { return Err(error(operation, ErrorKind::DeviceMismatch, "resources belong to different Metal devices")); }
+            }
+            let raws: Vec<metal_sys::Handle> = structures.iter().map(|a| a.raw().clone()).collect();
+            native(operation, metal_sys::native::use_accelerations(&self.0.raw, &raws))?;
+            for a in structures { self.0.command_buffer.retain_acceleration(a); }
             Ok(())
         })
     }

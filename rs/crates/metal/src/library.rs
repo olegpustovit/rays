@@ -68,24 +68,31 @@ pub enum FunctionKind { Vertex, Fragment, Kernel, Visible, Intersection, Mesh, O
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum FunctionConstantValue {
-    Bool(bool), Int8(i8), Uint8(u8), Int16(i16), Uint16(u16), Int32(i32), Uint32(u32),
+    // The narrow integer kinds carry an i64 so an out-of-range value reaches the range check (as in lib/metal).
+    Bool(bool), Int8(i64), Uint8(i64), Int16(i64), Uint16(i64), Int32(i32), Uint32(i64),
     Int64(i64), Uint64Bits(i64), Float16(f64), Float32(f64),
 }
 impl FunctionConstantValue {
-    fn raw(self) -> (i32, i64, f64) {
-        match self {
+    fn raw(self) -> Result<(i32, i64, f64), &'static str> {
+        let within = |value: i64, low: i64, high: i64| (low..=high).contains(&value);
+        Ok(match self {
             Self::Bool(value) => (0, i64::from(value), 0.0),
-            Self::Int8(value) => (1, i64::from(value), 0.0),
-            Self::Uint8(value) => (2, i64::from(value), 0.0),
-            Self::Int16(value) => (3, i64::from(value), 0.0),
-            Self::Uint16(value) => (4, i64::from(value), 0.0),
+            Self::Int8(value) if within(value, -128, 127) => (1, value, 0.0),
+            Self::Uint8(value) if within(value, 0, 255) => (2, value, 0.0),
+            Self::Int16(value) if within(value, -32_768, 32_767) => (3, value, 0.0),
+            Self::Uint16(value) if within(value, 0, 65_535) => (4, value, 0.0),
             Self::Int32(value) => (5, i64::from(value), 0.0),
-            Self::Uint32(value) => (6, i64::from(value), 0.0),
+            Self::Uint32(value) if within(value, 0, 0xffff_ffff) => (6, value, 0.0),
             Self::Int64(value) => (7, value, 0.0),
             Self::Uint64Bits(value) => (8, value, 0.0),
             Self::Float16(value) => (9, 0, value),
             Self::Float32(value) => (10, 0, value),
-        }
+            Self::Int8(_) => return Err("int8 function constant is out of range"),
+            Self::Uint8(_) => return Err("uint8 function constant is out of range"),
+            Self::Int16(_) => return Err("int16 function constant is out of range"),
+            Self::Uint16(_) => return Err("uint16 function constant is out of range"),
+            Self::Uint32(_) => return Err("uint32 function constant is out of range"),
+        })
     }
 }
 
@@ -123,7 +130,7 @@ impl Function {
                 if raw_constants.iter().any(|(seen, _, _, _)| seen == constant_name) {
                     return Err(error(OP, ErrorKind::InvalidArgument, "function-constant list contains a duplicate name"));
                 }
-                let (tag, integral, floating) = value.raw();
+                let (tag, integral, floating) = value.raw().map_err(|message| error(OP, ErrorKind::InvalidArgument, message))?;
                 raw_constants.push((constant_name.clone(), tag, integral, floating));
             }
             native(OP, metal_sys::native::specialize_function(library.raw(), name, &raw_constants, None))
