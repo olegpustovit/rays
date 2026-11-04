@@ -1270,6 +1270,13 @@ impl Lowerer {
             fallback::note(&site, &format!("no kernel, interpreted: {}", d.message));
         }
         if numeric_candidate && self.strict { return Err(refusal("packed_kernel")); }
+        self.term_node(borrow, s, source, env, x)
+    }
+
+    // The node match, out of `term`: a residual chain recurses term -> term_kernel -> capture -> residual -> term,
+    // and in a debug build this match's locals (~78 KB) sat in every level of it (a 20-region chain overflowed 2 MB).
+    #[inline(never)]
+    fn term_node(&mut self, borrow: bool, s: &mut Scope, source: &C::Source, env: &Env, x: &Term) -> R<Lowered> {
         match &x.node {
             Node::Lit(param::Value::Int(n)) => Ok(Known(Value::Int(*n))),
             Node::Lit(param::Value::Float(f)) => Ok(Known(Value::Float(*f))),
