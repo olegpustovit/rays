@@ -1449,7 +1449,7 @@ impl Ui {
                         value.press_point = pointer;
                         value.press_keys = mods;
                         value.button = Some(*button);
-                        if let Some(slot) = self.table.find(target) {
+                        if let Some(slot) = self.table.find(target).filter(|s| *s < self.slots.len()) {
                             if *button == MouseButton::LeftButton {
                                 let (x, y) = pointer;
                                 let s = &self.slots[slot];
