@@ -466,7 +466,25 @@ fn named_args(a: &mut Arena, c: &ExecCtx, env: &Env, args: &[(String, Term)]) ->
     }
     Ok(values)
 }
+fn cooked_geometry(a: &mut Arena, value: &Value) -> bool {
+    match value {
+        Value::Residual(id) if id.1 == a.id => own_res(a, id).is_some_and(|residual| residual.term.ty == flow_syntax::ty::geometry()),
+        Value::Residual(id) => { let id = *id; lend(a, || slot_of(id.1).and_then(|home| peek(&home, |home| own_res(home, &id).map(|residual| residual.term.ty == flow_syntax::ty::geometry()))).unwrap_or(false)) }
+        Value::Record(fields) | Value::Struct(_, _, fields) => fields.iter().any(|(_, value)| cooked_geometry(a, value)),
+        _ => false,
+    }
+}
 fn mk_node(a:&mut Arena,c:&ExecCtx,authored:i64,ty:Ty,kind:String,args:Vec<(String,Value)>)->Result<Value,Diagnostic>{
+    if c.data{return eval_error("E_ARRAY_TYPE","Packed-array functions produce data, not graph nodes.")}
+    if a.time.is_some(){return Err(errorf("E_LIVE_GEOMETRY",format!("{} makes geometry; geometry cannot be created while evaluating a live value.",kind)))}
+    // A geometry computed from cooked data (a fold over sop/attr_names) is only a value at cook time; a node reading it is deferred with it,
+    // up to the graph root, whose structural node cooks the lot (OCaml's `cooked_geometry`).
+    if args.iter().any(|(_, value)| cooked_geometry(a, value)) { return need_time(); }
+    push_node(a, c, authored, ty, kind, args)
+}
+// A plan node, as the card marker makes it (OCaml builds the marker without `mk_node`'s cooked-geometry deferral: its value may be a
+// residual geometry the marker cooks behind).
+fn push_node(a: &mut Arena, c: &ExecCtx, authored: i64, ty: Ty, kind: String, args: Vec<(String, Value)>) -> Result<Value, Diagnostic> {
     if c.data{return eval_error("E_ARRAY_TYPE","Packed-array functions produce data, not graph nodes.")}
     if a.time.is_some(){return Err(errorf("E_LIVE_GEOMETRY",format!("{} makes geometry; geometry cannot be created while evaluating a live value.",kind)))}
     let i=a.nodes.len() as i64;let node=Node{id:i,inst:c.inst,site:site(c),iter:(*c.iter).clone(),kind,ty:ty.clone(),args,error:None};
@@ -988,7 +1006,7 @@ fn inline_node(a: &mut Arena, c: &ExecCtx, _authored: i64, policy: &InlineParame
                 ("slots".into(), Value::Record(slots)),
             ];
             marker_args.extend(args.iter().filter(|(_, value)| function_value(value)).cloned());
-            let Value::Deferred(_, id) = mk_node(a, c, authored, flow_syntax::ty::geometry(), "$card".into(), marker_args)? else {
+            let Value::Deferred(_, id) = push_node(a, c, authored, flow_syntax::ty::geometry(), "$card".into(), marker_args)? else {
                 return eval_error("E_TYPE", "A failed node definition must produce a geometry marker.");
             };
             if let Some(node) = a.nodes.iter_mut().find(|node| node.id == id) { node.error = Some(diagnostic); }
@@ -1027,7 +1045,7 @@ fn inline_node(a: &mut Arena, c: &ExecCtx, _authored: i64, policy: &InlineParame
         ("slots".into(), Value::Record(slot_values)),
     ];
     marker_args.extend(args.iter().filter(|(_, value)| function_value(value)).cloned());
-    mk_node(a, c, authored, flow_syntax::ty::geometry(), "$card".into(), marker_args)
+    push_node(a, c, authored, flow_syntax::ty::geometry(), "$card".into(), marker_args)
 }
 // ---- temporary profiler (perf4) ----
 pub static PROFILE_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);

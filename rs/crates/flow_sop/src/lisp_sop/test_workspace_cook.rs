@@ -522,3 +522,14 @@ fn bloom_node_counts_and_provenance() {
     }
     let _ = s::make;
 }
+
+/// Blend Shapes with a graph-parameter weight: the weights decide at run time which shapes apply, so the
+/// shape folds stay residual until lowered (OCaml lowers it; `sopcat_morph_sketch`).
+#[test]
+fn blend_shapes_param_weight_lowers() {
+    // the deferred shape folds lower through deep evaluator recursion: a debug build needs more than the 2 MB test-thread stack (passes at 4 MB)
+    std::thread::Builder::new().stack_size(16 << 20).spawn(|| {
+        let text = "(workspace w (graph g :context sop [(k : float 0.7)] (let* [a (sop/box) b (sop/box :center [2 0 0]) r (sop/blend_shapes a b :weight1 k)] r)))";
+        lower_forms(lower::Options::default(), &parse(text));
+    }).unwrap().join().unwrap();
+}
