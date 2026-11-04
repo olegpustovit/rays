@@ -3,6 +3,11 @@
 #include <locale.h>
 #include <stdlib.h>
 
+#if defined(__APPLE__)
+/* macOS/BSD declare strtod_l and newlocale users in <xlocale.h>. */
+#include <xlocale.h>
+#endif
+
 #ifdef _WIN32
 static _locale_t cfmt_c_locale;
 
