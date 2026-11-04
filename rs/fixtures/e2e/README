@@ -33,3 +33,8 @@ Exit 1 is a genuine diagnostic, not a crash: all 129 lib/flow_sop/nodes/*.rays f
 and lib/rays_pathtracer/pathtrace.rays uses operators the catalog does not know.
 No crashes and no timeouts (no exit codes above 1).
 Total capture time: 47 s wall.
+
+NOTE: captured from the Windows working tree, which had uncommitted edits to lib/flow_shader/trace.rays
+(and other lib/ files listed above). The fmt/check goldens for those files therefore match the working
+tree, not HEAD (the Mac, synced from HEAD, differs on lib__flow_shader__trace.rays). Re-run capture.sh
+after those edits are committed.
