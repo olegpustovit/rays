@@ -265,6 +265,24 @@ static SOURCE_HOOK: LazyLock<RwLock<Arc<dyn Fn(&dyn Fn(i64)->Option<Node>, &Valu
 static FACTS_HOOK: LazyLock<RwLock<Arc<dyn Fn(&dyn Fn(i64)->Option<Node>, i64)->String + Send + Sync>>> = LazyLock::new(|| RwLock::new(Arc::new(|_,_|String::new())));
 static LIVE_KERNELS_HOOK: LazyLock<RwLock<Arc<dyn Fn(&[Node])->bool + Send + Sync>>> = LazyLock::new(|| RwLock::new(Arc::new(|_|true)));
 
+// A table keyed by an address (a term's path inside the arena's workspace): one multiply, not SipHash over a string.
+#[derive(Default)]
+struct AddrHasher(u64);
+impl std::hash::Hasher for AddrHasher {
+    fn finish(&self) -> u64 { self.0 }
+    fn write(&mut self, bytes: &[u8]) { for byte in bytes { self.0 = (self.0.rotate_left(5) ^ u64::from(*byte)).wrapping_mul(0x517c_c1b7_2722_0a95); } }
+    fn write_usize(&mut self, n: usize) { self.0 = (n as u64).wrapping_mul(0x517c_c1b7_2722_0a95); }
+}
+type AddrMap<V> = HashMap<usize, V, std::hash::BuildHasherDefault<AddrHasher>>;
+// The shared base of a term's own path: one allocation per term and arena. The address is checked against the path it held,
+// so a temporary term freed and another made at the same address cannot borrow its base.
+fn base_of(a: &mut Arena, path: &Path) -> Arc<Path> {
+    let key = path as *const Path as usize;
+    if let Some(base) = a.bases.get(&key) { if **base == *path { return base.clone(); } }
+    let base = Arc::new(path.clone());
+    a.bases.insert(key, base.clone());
+    base
+}
 #[derive(Clone)]
 struct ClosureData { params: Vec<(W::Pattern, Option<Ty>)>, replayable: bool, body: Arc<Term>, env: Arc<BTreeMap<String, Value>>, zone: Path, calls: i64, at: ExecCtx }
 #[derive(Clone)]
@@ -288,7 +306,7 @@ struct Arena {
     nodes: Shared<Vec<Node>>, authored: Vec<i64>, cells: Shared<Vec<GraphCell>>, cache: Shared<HashMap<String,usize>>, states: Shared<Vec<Value>>, records: Shared<BTreeMap<Path, Vec<(Vec<i64>,Value)>>>,
     observed: Vec<ResidualId>, res_log: Shared<Vec<ResidualId>>, fn_log: Shared<Vec<FnId>>, approx: u64, policies: Shared<HashMap<String, Option<Arc<InlineParameterPolicy>>>>,
     record: bool, time: Option<Frame>, resolve: Option<Arc<dyn Fn(&Value)->Result<Value,Diagnostic> + Send + Sync>>,
-    state: Option<State>, elems: BTreeMap<String,Value>, step_count: usize, budget: usize, fn_calls: Shared<HashMap<FnId,i64>>, memo: Shared<HashMap<ResidualId,Value>>, interrupt: Option<Interrupt>, owns_index: bool, lent: u32,
+    state: Option<State>, elems: BTreeMap<String,Value>, step_count: usize, budget: usize, fn_calls: Shared<HashMap<FnId,i64>>, memo: Shared<HashMap<ResidualId,Value>>, interrupt: Option<Interrupt>, owns_index: bool, lent: u32, bases: Shared<AddrMap<Arc<Path>>>, ops_seen: Shared<AddrMap<(String, &'static str, OpRef)>>,
 }
 static EMPTY_WORKSPACE: LazyLock<Shared<Workspace>> = LazyLock::new(|| Shared::new(Workspace {
     name: String::new(), graphs: Vec::new().into(), defs: Vec::new().into(), nodes: Vec::new().into(), macros: Vec::new().into(), source: Vec::new().into(),
@@ -302,7 +320,7 @@ impl Arena {
             nodes: Shared::default(), authored: Vec::new(), cells: Shared::default(), cache: Shared::default(),
             states: Shared::default(), records: Shared::default(), observed: Vec::new(), res_log: Shared::default(), fn_log: Shared::default(), approx: 0, policies: Shared::default(), record,
             time: None, resolve: None, state: Some(State::default()), elems: BTreeMap::new(), step_count: 0,
-            budget, fn_calls: Shared::default(), memo: Shared::default(), interrupt, owns_index, lent: 0,
+            budget, fn_calls: Shared::default(), memo: Shared::default(), interrupt, owns_index, lent: 0, bases: Shared::default(), ops_seen: Shared::default(),
         }
     }
     /// What stands in for an arena while it is lent (never read: `owns_index` false marks it).
@@ -320,24 +338,46 @@ impl Arena {
 // the path of argument names below the term being run, shared between the contexts that extend it
 #[derive(Clone)]
 struct Route(Option<Arc<RouteNode>>);
-struct RouteNode { seg: String, up: Route }
+// a route segment, spelled only when a site is read: most segments name a fixed part or a numbered one
+#[derive(Clone)]
+enum Seg { Static(&'static str), Index(&'static str, usize), Owned(Arc<str>) }
+impl Seg {
+    fn text(&self) -> String { match self { Seg::Static(text) => (*text).to_owned(), Seg::Index(prefix, index) => format!("{prefix}{index}"), Seg::Owned(text) => text.to_string() } }
+}
+impl From<&'static str> for Seg { fn from(text: &'static str) -> Seg { Seg::Static(text) } }
+impl From<String> for Seg { fn from(text: String) -> Seg { Seg::Owned(Arc::from(text)) } }
+struct RouteNode { seg: Seg, up: Route }
 impl Route {
     fn to_vec(&self) -> Vec<String> {
         let mut out = Vec::new();
         let mut at = &self.0;
-        while let Some(node) = at { out.push(node.seg.clone()); at = &node.up.0; }
+        while let Some(node) = at { out.push(node.seg.text()); at = &node.up.0; }
         out.reverse();
         out
     }
 }
 #[derive(Clone)]
 struct ExecCtx { arena: i64, inst: i64, prefix: Arc<Path>, base: Arc<Path>, route: Route, iter: Arc<Vec<i64>>, depth: usize, record: bool, data: bool, geometry: bool, host: bool, context: Context, card: Option<Arc<str>> }
+// A scope: the captured bindings it starts from, and the names bound since, newest first (a bind is one node, not a map copy).
+struct EnvNode { name: String, value: Value, next: Option<Arc<EnvNode>> }
+impl Drop for EnvNode {
+    // unlink iteratively: a long chain must not recurse once per binding
+    fn drop(&mut self) {
+        let mut next = self.next.take();
+        while let Some(node) = next { next = Arc::try_unwrap(node).ok().and_then(|mut node| node.next.take()); }
+    }
+}
 #[derive(Clone)]
-struct Env { values: Arc<BTreeMap<String,Value>> }
+struct Env { values: Arc<BTreeMap<String,Value>>, top: Option<Arc<EnvNode>> }
 impl Env {
-    fn empty() -> Self { Self { values: Arc::new(BTreeMap::new()) } }
-    fn get(&self, name:&str)->Option<Value>{self.values.get(name).cloned()}
-    fn bind(&mut self,name:String,value:Value){Arc::make_mut(&mut self.values).insert(name,value);}
+    fn empty() -> Self { static EMPTY: LazyLock<Arc<BTreeMap<String, Value>>> = LazyLock::new(|| Arc::new(BTreeMap::new())); Self { values: EMPTY.clone(), top: None } }
+    fn of(values: Arc<BTreeMap<String, Value>>) -> Self { Self { values, top: None } }
+    fn get(&self, name: &str) -> Option<Value> {
+        let mut at = &self.top;
+        while let Some(node) = at { if node.name == name { return Some(node.value.clone()); } at = &node.next; }
+        self.values.get(name).cloned()
+    }
+    fn bind(&mut self, name: String, value: Value) { self.top = Some(Arc::new(EnvNode { name, value, next: self.top.take() })); }
 }
 
 fn new_fid(a: &Arena) -> FnId { FnId(NEXT_FID.fetch_add(1, Ordering::Relaxed), a.id) }
@@ -368,17 +408,21 @@ fn insert_residual(a: &mut Arena, id: ResidualId, residual: ResidualData) {
 }
 fn root_ctx(a:&Arena)->ExecCtx{ExecCtx{arena:a.id,inst:-1,prefix:Arc::new(Vec::new()),base:Arc::new(Vec::new()),route:Route(None),iter:Arc::new(Vec::new()),depth:0,record:true,data:false,geometry:false,host:false,context:flow_syntax::context::host(),card:None}}
 fn site(c:&ExecCtx)->Path{let mut p=(*c.prefix).clone();p.extend(c.base.iter().cloned());p.extend(c.route.to_vec());p}
-fn eval_sub(a: &mut Arena, c: &ExecCtx, seg: String, env: &Env, t: &Term) -> Result<Value, Diagnostic> {
+fn eval_sub(a: &mut Arena, c: &ExecCtx, seg: Seg, env: &Env, t: &Term) -> Result<Value, Diagnostic> {
     if t.path.is_some() { eval_at(a, c, env, t) } else { eval_at(a, &sub(c, seg), env, t) }
 }
-fn sub(c:&ExecCtx,seg:String)->ExecCtx{let mut c=c.clone();c.route=Route(Some(Arc::new(RouteNode{seg,up:c.route.clone()})));c}
+// `eval_sub` under a name: the segment is spelled only when the term has no path of its own
+fn eval_named(a: &mut Arena, c: &ExecCtx, name: &str, env: &Env, t: &Term) -> Result<Value, Diagnostic> {
+    if t.path.is_some() { eval_at(a, c, env, t) } else { eval_at(a, &sub(c, Seg::Owned(Arc::from(name))), env, t) }
+}
+fn sub(c:&ExecCtx,seg:Seg)->ExecCtx{let mut c=c.clone();c.route=Route(Some(Arc::new(RouteNode{seg,up:c.route.clone()})));c}
 fn note(a:&mut Arena,c:&ExecCtx,path:Path,v:Value){if a.record&&c.record{let e=a.records.entry(path).or_default();if e.len()<MAX_ITERATIONS{e.push(((*c.iter).clone(),v));}}}
 fn named_args(a: &mut Arena, c: &ExecCtx, env: &Env, args: &[(String, Term)]) -> Result<Vec<(String, Value)>, Diagnostic> {
     let mut values = Vec::with_capacity(args.len());
     for (index, (name, term)) in args.iter().enumerate() {
         let count = args[..index].iter().filter(|(other, _)| other == name).count();
-        let route = if count == 0 { name.clone() } else { format!("{}#{}", name, count) };
-        values.push((name.clone(), eval_sub(a, c, route, env, term)?));
+        let value = if count == 0 { eval_named(a, c, name, env, term)? } else { eval_sub(a, c, format!("{}#{}", name, count).into(), env, term)? };
+        values.push((name.clone(), value));
     }
     Ok(values)
 }
@@ -495,7 +539,7 @@ fn capture_env(term: &Term, env: &Env) -> BTreeMap<String, Value> {
     free_names(term).into_iter().filter_map(|name| env.get(&name).map(|value| (name, value))).collect()
 }
 
-fn eval_at(a:&mut Arena,c:&ExecCtx,env:&Env,t:&Term)->Result<Value,Diagnostic>{let owned;let c=match &t.path{Some(p)=>{owned=ExecCtx{arena:c.arena,inst:c.inst,prefix:c.prefix.clone(),base:Arc::new(p.clone()),route:Route(None),iter:c.iter.clone(),depth:c.depth,record:c.record,data:c.data,geometry:c.geometry,host:c.host,context:c.context.clone(),card:c.card.clone()};&owned},None=>c};let r=eval_raw(a,&c,env,t).and_then(|v| if a.time.is_some() { concrete(a, v) } else { Ok(v) }).map_err(|e|add_span(e,t));match r{
+fn eval_at(a:&mut Arena,c:&ExecCtx,env:&Env,t:&Term)->Result<Value,Diagnostic>{let owned;let c=match &t.path{Some(p)=>{owned=ExecCtx{arena:c.arena,inst:c.inst,prefix:c.prefix.clone(),base:base_of(a,p),route:Route(None),iter:c.iter.clone(),depth:c.depth,record:c.record,data:c.data,geometry:c.geometry,host:c.host,context:c.context.clone(),card:c.card.clone()};&owned},None=>c};let r=eval_raw(a,&c,env,t).and_then(|v| if a.time.is_some() { concrete(a, v) } else { Ok(v) }).map_err(|e|add_span(e,t));match r{
     Ok(v)=>{if a.record&&c.record{if let Some(p)=&t.path{note(a,&c,p.clone(),v.clone());}}Ok(v)},
     Err(d) if d.code == "$NEEDS_TIME" => {
         if a.time.is_some() { Err(error("E_EVAL", "A live value was needed while evaluating dynamically.")) }
@@ -535,7 +579,7 @@ fn force_res(a: &mut Arena, id: ResidualId) -> Result<Value, Diagnostic> {
 }
 fn execute_residual(a: &mut Arena, id: ResidualId) -> Result<Value, Diagnostic> {
     let residual = get_res(a, id)?;
-    let env = Env { values: Arc::new(residual.env) };
+    let env = Env::of(Arc::new(residual.env));
     if residual.previous {
         if let TermNode::State { init, zone, .. } = &residual.term.node {
             return state_previous(a, &residual.ctx, &env, zone, init);
@@ -825,7 +869,7 @@ fn inline_node(a: &mut Arena, c: &ExecCtx, _authored: i64, policy: &InlineParame
         } else if let Some(value) = parameters.iter().find(|(arg_name, _)| arg_name == name).or_else(|| args.iter().find(|(arg_name, _)| arg_name == name)).map(|(_, value)| value.clone()) {
             value
         } else if let Some(default) = default {
-            eval_sub(a, &context, name.clone(), &env, default)?
+            eval_named(a, &context, name, &env, default)?
         } else {
             Value::No_geo
         };
@@ -986,7 +1030,7 @@ fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Valu
         TermNode::Vec(terms) => {
             let mut values = Vec::with_capacity(terms.len());
             for (i, term) in terms.iter().enumerate() {
-                let context = sub(c, i.to_string());
+                let context = sub(c, Seg::Index("", i));
                 values.push(num(&eval_concrete(a, &context, env, term)?)?);
             }
             match values.as_slice() {
@@ -1023,16 +1067,16 @@ fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Valu
         }
         TermNode::Op { op: name, args, .. } if (name == "and" || name == "or") && args.len() == 2 => {
             let (first_name, first_term) = &args[0];
-            let first = eval_sub(a, c, first_name.clone(), env, first_term)?;
+            let first = eval_named(a, c, first_name, env, first_term)?;
             if let Value::Bool(value) = &first {
                 if *value == (name == "or") { return Ok(Value::Bool(*value)); }
             }
             let (second_name, second_term) = &args[1];
-            let second = eval_sub(a, c, second_name.clone(), env, second_term)?;
-            apply_op(a, c, t.form.id, name, &[(args[0].0.clone(), first), (second_name.clone(), second)])
+            let second = eval_named(a, c, second_name, env, second_term)?;
+            apply_op(a, c, t.form.id, name, vec![(args[0].0.clone(), first), (second_name.clone(), second)])
         }
         TermNode::Op { op: name, args, skip } if name == "live?" && args.len() == 1 => {
-            Ok(Value::Bool(is_live_value(&eval_sub(a, c, args[0].0.clone(), env, &args[0].1)?)))
+            Ok(Value::Bool(is_live_value(&eval_named(a, c, &args[0].0, env, &args[0].1)?)))
         }
         TermNode::Op { op: name, args, skip } => {
             let values = if name == "scene/merge" && !skip.is_empty() {
@@ -1048,16 +1092,16 @@ fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Valu
                     kept.push((arg_name.clone(), route, term));
                 }
                 let mut values = kept.iter().map(|(name, _, _)| (name.clone(), Value::No_geo)).collect::<Vec<_>>();
-                for index in 0..kept.len() { values[index].1 = eval_sub(a, c, kept[index].1.clone(), env, kept[index].2)?; }
+                for index in 0..kept.len() { values[index].1 = eval_named(a, c, &kept[index].1, env, kept[index].2)?; }
                 values
             } else {
                 named_args(a, c, env, args)?
             };
-            apply_op(a, c, t.form.id, name, &values)
+            apply_op(a, c, t.form.id, name, values)
         }
         TermNode::CallFn { fn_name, args, body } => {
             let mut values = vec![Value::No_geo; args.len()];
-            for index in 0..args.len() { values[index] = eval_sub(a, c, format!("a{}", index), env, &args[index])?; }
+            for index in 0..args.len() { values[index] = eval_sub(a, c, Seg::Index("a", index), env, &args[index])?; }
             match env.get(fn_name) {
                 Some(Value::Fn(id)) => call_fn(a, c, id, &values, body.as_deref()),
                 _ => apply_def(a, c, fn_name, &values, body.as_deref()),
@@ -1108,8 +1152,8 @@ fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Valu
         }
         TermNode::Cond(arms, default) => {
             for (i, (test, body)) in arms.iter().enumerate() {
-                let context = sub(c, format!("test{}", i));
-                if truth(&eval_concrete(a, &context, env, test)?)? { return eval_sub(a, c, format!("arm{}", i), env, body); }
+                let context = sub(c, Seg::Index("test", i));
+                if truth(&eval_concrete(a, &context, env, test)?)? { return eval_sub(a, c, Seg::Index("arm", i), env, body); }
             }
             eval_sub(a, c, "else".into(), env, default)
         }
@@ -1127,7 +1171,7 @@ fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Valu
                         _ => false,
                     }
                 };
-                if matches { return eval_sub(a, c, format!("arm{}", i), env, body); }
+                if matches { return eval_sub(a, c, Seg::Index("arm", i), env, body); }
             }
             eval_sub(a, c, "else".into(), env, default)
         }
@@ -1148,19 +1192,19 @@ fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Valu
         }
         TermNode::ListLit(terms) => {
             let mut values = Vec::with_capacity(terms.len());
-            for (i, term) in terms.iter().enumerate() { values.push(eval_sub(a, c, i.to_string(), env, term)?); }
+            for (i, term) in terms.iter().enumerate() { values.push(eval_sub(a, c, Seg::Index("", i), env, term)?); }
             Ok(join_list(values))
         }
         TermNode::Record(fields) => {
             let mut values = Vec::with_capacity(fields.len());
-            for (name, term) in fields { values.push((name.clone(), eval_sub(a, c, name.clone(), env, term)?)); }
+            for (name, term) in fields { values.push((name.clone(), eval_named(a, c, name, env, term)?)); }
             Ok(Value::Record(values))
         }
         TermNode::Get(record, name) => field(eval_concrete(a, c, env, record)?, name, "value"),
         TermNode::Assoc(record, updates) => {
             let Value::Record(mut fields) = eval_concrete(a, c, env, record)? else { return eval_error("E_TYPE", "assoc updates a record."); };
             for (name, term) in updates {
-                let value = eval_sub(a, c, name.clone(), env, term)?;
+                let value = eval_named(a, c, name, env, term)?;
                 if let Some((_, old)) = fields.iter().find(|(key, _)| key == name) {
                     let value = coerce_like(a, old, &value)?;
                     if let Some(slot) = fields.iter_mut().find(|(key, _)| key == name) { slot.1 = value; }
@@ -1171,7 +1215,7 @@ fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Valu
         TermNode::Str(terms) => {
             let mut bytes = Vec::new();
             for (i, term) in terms.iter().enumerate() {
-                let context = sub(c, i.to_string());
+                let context = sub(c, Seg::Index("", i));
                 let value = eval_concrete(a, &context, env, term)?;
                 // OCaml shows through `concrete`: captured fields of a record are forced first.
                 let value = concrete_data(a, value)?;
@@ -1182,7 +1226,7 @@ fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Valu
         TermNode::ListOp(_, terms) => {
             let mut values = Vec::new();
             for (i, term) in terms.iter().enumerate() {
-                let context = sub(c, i.to_string());
+                let context = sub(c, Seg::Index("", i));
                 match eval_concrete(a, &context, env, term)? {
                     Value::List(list) => values.extend(list.iter().cloned()),
                     _ => return eval_error("E_TYPE", "Expected a list."),
@@ -1267,7 +1311,7 @@ fn eval_error_rows(a: &mut Arena, c: &ExecCtx, env: &Env, rows: &Term, policy: W
                     TermNode::Op { op, args, .. } if op == "exact" && args.len() == 1 => Arc::new(args[0].1.clone()),
                     _ => residual.term,
                 };
-                let bindings = Env { values: Arc::new(residual.env) };
+                let bindings = Env::of(Arc::new(residual.env));
                 let needed = residual_id(a, ResidualData { env: capture_env(&term, &bindings), term, ctx: residual.ctx, previous: false, live: None });
                 match current_residual_handlers().and_then(|handlers| handlers.bulk_needed).and_then(|bulk| call_lent(a, needed, &|id| bulk(id))) {
                     Some(Value::Int_array(values)) => Value::Int_array(values),
@@ -1315,10 +1359,23 @@ fn data_type(ty: &Ty) -> bool {
         Ty::Any | Ty::Named(_) | Ty::Fn(_) => false,
     }
 }
-fn apply_op(a: &mut Arena, c: &ExecCtx, authored: i64, name: &str, values: &[(String, Value)]) -> Result<Value, Diagnostic> {
+// An operator found by name, remembered per arena by the address of the name (checked against the name and context it was found for).
+#[derive(Clone, Copy)]
+enum OpRef { Extra(usize), Builtin(usize) }
+fn find_op<'w>(a: &mut Arena, workspace: &'w Workspace, name: &str, context: &Context) -> Option<&'w op::Op> {
+    let key = name.as_ptr() as usize;
+    let resolve = |found: OpRef| -> &'w op::Op { match found { OpRef::Extra(i) => &workspace.ops[i], OpRef::Builtin(i) => &op::all()[i] } };
+    if let Some((seen, at, found)) = a.ops_seen.get(&key) { if seen == name && *at == context.as_str() { return Some(resolve(*found)); } }
+    let found = op::find_indexed(&workspace.ops, name, context)?;
+    let index_in = |table: &[op::Op]| { let start = table.as_ptr() as usize; let at = found as *const op::Op as usize; (at >= start && at < start + table.len() * std::mem::size_of::<op::Op>()).then(|| (at - start) / std::mem::size_of::<op::Op>()) };
+    let slot = index_in(&workspace.ops).map(OpRef::Extra).or_else(|| index_in(op::all()).map(OpRef::Builtin))?;
+    a.ops_seen.insert(key, (name.to_owned(), context.as_str(), slot));
+    Some(resolve(slot))
+}
+fn apply_op(a: &mut Arena, c: &ExecCtx, authored: i64, name: &str, values: Vec<(String, Value)>) -> Result<Value, Diagnostic> {
     let workspace = a.workspace.clone();
-    let op = op::find_indexed(&workspace.ops, name, &c.context).ok_or_else(|| errorf("E_UNKNOWN", format!("Unknown operator {}.", name)))?;
-    let mut values = values.to_vec();
+    let op = find_op(a, &workspace, name, &c.context).ok_or_else(|| errorf("E_UNKNOWN", format!("Unknown operator {}.", name)))?;
+    let mut values = values;
     if let Some(label) = &c.card {
         if W::BODY_CONTEXT_OPS.contains(&name) && !values.iter().any(|(key, _)| key == CONTEXT_LABEL) { values.push((CONTEXT_LABEL.into(), text(label))); }
     }
@@ -1345,25 +1402,31 @@ fn apply_op(a: &mut Arena, c: &ExecCtx, authored: i64, name: &str, values: &[(St
     }
     (op.check)(&values)?;
     if a.time.is_none() && op.live { return need_time(); }
-    let frame = a.time.clone().unwrap_or_else(|| input::at_time(0.0));
-    let mut typed = Vec::with_capacity(values.len());
-    for (name, value) in values.iter() {
-        let ty = value::ty_of(value);
-        let literal = match value {
-            Value::Int(n) => Some(param::Value::Int(*n)),
-            Value::Float(n) => Some(param::Value::Float(*n)),
-            Value::Bool(b) => Some(param::Value::Bool(*b)),
-            Value::Text(bytes) => Some(param::Value::Text(bytes.clone())),
-            _ => None,
-        };
-        typed.push((name.clone(), ty, literal));
-    }
+    static AT_ZERO: LazyLock<Frame> = LazyLock::new(|| input::at_time(0.0));
+    let live_frame = a.time.clone();
+    let frame = live_frame.as_ref().unwrap_or(&AT_ZERO);
+    // op::result_type, without spelling the argument list when the type reads only the declared arguments' types
+    let ty = if op.out_args.is_none() {
+        let named = |key: &str| op.signature.pos.iter().chain(op.signature.opt.iter()).any(|(n, _)| n == key);
+        (op.out)(&values.iter().filter(|(name, _)| named(name)).map(|(_, value)| value::ty_of(value)).collect::<Vec<_>>())?
+    } else {
+        let typed = values.iter().map(|(name, value)| {
+            let literal = match value {
+                Value::Int(n) => Some(param::Value::Int(*n)),
+                Value::Float(n) => Some(param::Value::Float(*n)),
+                Value::Bool(b) => Some(param::Value::Bool(*b)),
+                Value::Text(bytes) => Some(param::Value::Text(bytes.clone())),
+                _ => None,
+            };
+            (name.clone(), value::ty_of(value), literal)
+        }).collect::<Vec<_>>();
+        op::result_type(op, &typed)?
+    };
     let args = &values;
-    let ty = op::result_type(&op, &typed)?;
     let result = {
         let cell = RefCell::new(&mut *a);
         let node = |kind: &str, args: &[(String, Value)]| mk_node(&mut cell.borrow_mut(), c, authored, ty.clone(), kind.to_owned(), args.to_vec());
-        (op.body)(&frame, &node, args)?
+        (op.body)(frame, &node, args)?
     };
     if a.time.is_none() {
         if matches!(&result, Value::Source(..)) {
@@ -1375,7 +1438,7 @@ fn apply_op(a: &mut Arena, c: &ExecCtx, authored: i64, name: &str, values: &[(St
     }
     Ok(result)
 }
-fn apply_def(a:&mut Arena,c:&ExecCtx,name:&str,vals:&[Value],body:Option<&Term>)->Result<Value,Diagnostic>{let workspace=a.workspace.clone();let graph=workspace.defs.iter().find(|g|g.name==name).ok_or_else(||errorf("E_UNKNOWN",format!("Unknown function {}.",name)))?;if c.depth>=MAX_DEPTH{return eval_error("E_DEPTH","Call depth exceeds 64.")}let mut cx=c.clone();cx.prefix=Arc::new(site(c));cx.base=Arc::new(vec![format!("def:{}",name)]);cx.route = Route(None);cx.depth+=1;let mut env=Env::empty();for(i,(n,ty,default))in graph.inputs.iter().enumerate(){let v=if let Some(v)=vals.get(i){coerce(ty,v)?}else if let Some(t)=default{eval_at(a,&sub(&cx,n.clone()),&env,t)?}else{return Err(errorf("E_ARGS",format!("{} needs :{}.",name,n)))};let mut p=(*cx.base).clone();p.push(format!(":{}",n));note(a,&cx,p,v.clone());env.bind(n.clone(),v)}eval_at(a,&cx,&env,body.unwrap_or(&graph.body))}
+fn apply_def(a:&mut Arena,c:&ExecCtx,name:&str,vals:&[Value],body:Option<&Term>)->Result<Value,Diagnostic>{let workspace=a.workspace.clone();let graph=workspace.defs.iter().find(|g|g.name==name).ok_or_else(||errorf("E_UNKNOWN",format!("Unknown function {}.",name)))?;if c.depth>=MAX_DEPTH{return eval_error("E_DEPTH","Call depth exceeds 64.")}let mut cx=c.clone();cx.prefix=Arc::new(site(c));cx.base=Arc::new(vec![format!("def:{}",name)]);cx.route = Route(None);cx.depth+=1;let mut env=Env::empty();for(i,(n,ty,default))in graph.inputs.iter().enumerate(){let v=if let Some(v)=vals.get(i){coerce(ty,v)?}else if let Some(t)=default{eval_at(a,&sub(&cx,n.clone().into()),&env,t)?}else{return Err(errorf("E_ARGS",format!("{} needs :{}.",name,n)))};let mut p=(*cx.base).clone();p.push(format!(":{}",n));note(a,&cx,p,v.clone());env.bind(n.clone(),v)}eval_at(a,&cx,&env,body.unwrap_or(&graph.body))}
 fn call_fn(a: &mut Arena, c: &ExecCtx, id: FnId, values: &[Value], body: Option<&Term>) -> Result<Value, Diagnostic> {
     match get_fn(a, id)? {
         Function::Closure(closure) => {
@@ -1391,7 +1454,7 @@ fn call_fn(a: &mut Arena, c: &ExecCtx, id: FnId, values: &[Value], body: Option<
             context.route = Route(None);
             Arc::make_mut(&mut context.iter).push(index);
             context.depth += 1;
-            let mut env = Env { values: closure.env.clone() };
+            let mut env = Env::of(closure.env.clone());
             for ((pattern, ty), value) in closure.params.iter().zip(values) {
                 let value = if let Some(ty) = ty { coerce(ty, value)? } else { value.clone() };
                 record_pattern(a, &context, &closure.zone, pattern, &value)?;
@@ -1415,7 +1478,7 @@ fn call_fn(a: &mut Arena, c: &ExecCtx, id: FnId, values: &[Value], body: Option<
                     let name = names.get(index).cloned().or_else(|| operation.signature.rest.as_ref().map(|(name, _)| name.clone())).unwrap_or_else(|| format!("${}", index));
                     (name, value.clone())
                 }).collect::<Vec<_>>();
-                return apply_op(a, c, 0, &named.name, &args);
+                return apply_op(a, c, 0, &named.name, args);
             }
             let (kind, context, slots) = a.workspace.kind_fns.iter().find(|(name, _)| name == &named.name).map(|(_, kind)| kind.clone()).ok_or_else(|| errorf("E_UNKNOWN", format!("Unknown function {}.", named.name)))?;
             let mut args = Vec::with_capacity(values.len());
@@ -1477,7 +1540,7 @@ fn graph_value(a: &mut Arena, c: &ExecCtx, name: &str, over: &[(String, Value)],
     a.cells[instance as usize].result = value.clone();
     Ok(value)
 }
-fn eval_graph_body(a:&mut Arena,c:&ExecCtx,g:&Graph,over:&[(String,Value)],record:bool,inst:i64)->Result<(Value,Vec<(String,Value)>),Diagnostic>{let mut cx=c.clone();cx.inst=inst;cx.prefix=Arc::new(Vec::new());cx.base=Arc::new(vec![g.name.clone()]);cx.route = Route(None);cx.iter=Arc::new(Vec::new());cx.depth+=1;cx.record=record;cx.context=g.context.clone();cx.host=g.context==flow_syntax::context::host();let mut env=Env::empty();let mut ins=Vec::new();for(n,ty,default)in &g.inputs{let v=if let Some((_,v))=over.iter().find(|(k,_)|k==n){coerce(ty,v)?}else if let Some(t)=default{coerce(ty,&eval_at(a,&sub(&cx,n.clone()),&env,t)?)?}else{return Err(errorf("E_INPUT_DEFAULT",format!("Graph input {} of {} needs a default.",n,g.name)))};let mut p=vec![g.name.clone(),format!(":{}",n)];note(a,&cx,p.clone(),v.clone());env.bind(n.clone(),v.clone());ins.push((n.clone(),v));}let v=eval_at(a,&cx,&env,&g.body)?;Ok((v,ins))}
+fn eval_graph_body(a:&mut Arena,c:&ExecCtx,g:&Graph,over:&[(String,Value)],record:bool,inst:i64)->Result<(Value,Vec<(String,Value)>),Diagnostic>{let mut cx=c.clone();cx.inst=inst;cx.prefix=Arc::new(Vec::new());cx.base=Arc::new(vec![g.name.clone()]);cx.route = Route(None);cx.iter=Arc::new(Vec::new());cx.depth+=1;cx.record=record;cx.context=g.context.clone();cx.host=g.context==flow_syntax::context::host();let mut env=Env::empty();let mut ins=Vec::new();for(n,ty,default)in &g.inputs{let v=if let Some((_,v))=over.iter().find(|(k,_)|k==n){coerce(ty,v)?}else if let Some(t)=default{coerce(ty,&eval_at(a,&sub(&cx,n.clone().into()),&env,t)?)?}else{return Err(errorf("E_INPUT_DEFAULT",format!("Graph input {} of {} needs a default.",n,g.name)))};let mut p=vec![g.name.clone(),format!(":{}",n)];note(a,&cx,p.clone(),v.clone());env.bind(n.clone(),v.clone());ins.push((n.clone(),v));}let v=eval_at(a,&cx,&env,&g.body)?;Ok((v,ins))}
 fn state_plane(a: &Arena, c: &ExecCtx) -> Result<(State, i64), Diagnostic> {
     let state = a.state.clone().ok_or_else(|| error("E_STATE", "State is not available."))?;
     let frame = a.time.as_ref().map_or(0, |frame| if c.host { frame.tick } else { frame.frame });
@@ -1564,7 +1627,7 @@ fn state_write(a: &mut Arena, c: &ExecCtx, zone: &Path, value: Value) -> Result<
     Ok(value)
 }
 
-fn eval_sequence(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, route: String) -> Result<(Value, usize), Diagnostic> {
+fn eval_sequence(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, route: Seg) -> Result<(Value, usize), Diagnostic> {
     let value = eval_concrete(a, &sub(c, route), env, term)?;
     let count = match &value { Value::List(values) => values.len(), _ => array_len(&value)? };
     Ok((value, count))
@@ -1615,7 +1678,7 @@ fn eval_map(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, function: FnId, 
 }
 fn eval_map_walk(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, function: FnId, sources: &[Term], packed: bool, saved_steps: usize, iter: &mut usize, progress: &mut MapProgress) -> Result<Value, Diagnostic> {
     let mut lists = Vec::with_capacity(sources.len());
-    for (index, source) in sources.iter().enumerate() { lists.push(eval_sequence(a, c, env, source, format!("l{}", index))?); }
+    for (index, source) in sources.iter().enumerate() { lists.push(eval_sequence(a, c, env, source, Seg::Index("l", index))?); }
     let count = if lists.is_empty() { 0 } else { lists.iter().map(|(_, count)| *count).min().unwrap_or(0) };
     let numeric = !matches!(&term.ty, Ty::Array(element) if **element == Ty::Text) && !sources.iter().any(|source| matches!(&source.ty, Ty::Array(element) if **element == Ty::Text));
     let static_map = a.time.is_none() && packed && numeric;
@@ -1845,7 +1908,7 @@ fn eval_loop(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, kind: &W::LoopK
         if depth < clauses.len() {
             let (pattern, source_term) = &clauses[depth];
             // A later source is evaluated where the earlier names are bound, when its turn comes.
-            let fresh = if depth == 0 { None } else { Some(loop_values(eval_concrete(a, &sub(c, format!("in{}", depth)), env, source_term)?)?) };
+            let fresh = if depth == 0 { None } else { Some(loop_values(eval_concrete(a, &sub(c, Seg::Index("in", depth)), env, source_term)?)?) };
             let items: &[Value] = match &fresh { Some(v) => v, None => &lists[0] };
             for (index, item) in items.iter().enumerate() {
                 selected.push(item.clone());
@@ -2650,7 +2713,7 @@ pub mod Residual {
         arena.fn_calls.clear();
         arena.memo.clear();
         let saved = arena.state.as_ref().map(fork_state);
-        let result = eval_concrete(&mut arena, &residual.ctx, &Env { values: Arc::new(residual.env) }, term);
+        let result = eval_concrete(&mut arena, &residual.ctx, &Env::of(Arc::new(residual.env)), term);
         // a term evaluated at its own frame (a compile-time capture) must not move the frame a bound live walk is on
         if prior_time.is_some() { arena.time = prior_time; }
         if result.is_err() { if let (Some(state), Some(saved)) = (arena.state.as_ref(), saved.as_ref()) { restore_state(state, saved); } }
@@ -2834,10 +2897,10 @@ pub mod Host {
             let residual = get_res(&data, id)?;
             let TermNode::Hof(W::HofKind::Map, terms) = &residual.term.node else { return Err(error("E_TYPE", "A map probe needs a checked map.")); };
             let Some(function_term) = terms.first() else { return Err(error("E_TYPE", "A map probe needs a checked map.")); };
-            let Value::Fn(function) = eval_concrete(&mut data, &residual.ctx, &Env { values: Arc::new(residual.env.clone()) }, function_term)? else { return Err(error("E_TYPE", "Expected a function.")); };
-            let env = Env { values: Arc::new(residual.env) };
+            let Value::Fn(function) = eval_concrete(&mut data, &residual.ctx, &Env::of(Arc::new(residual.env.clone())), function_term)? else { return Err(error("E_TYPE", "Expected a function.")); };
+            let env = Env::of(Arc::new(residual.env));
             let mut lists = Vec::with_capacity(terms.len().saturating_sub(1));
-            for (index, term) in terms.iter().skip(1).enumerate() { lists.push(eval_sequence(&mut data, &residual.ctx, &env, term, format!("l{}", index))?.0); }
+            for (index, term) in terms.iter().skip(1).enumerate() { lists.push(eval_sequence(&mut data, &residual.ctx, &env, term, Seg::Index("l", index))?.0); }
             let count = if lists.is_empty() { 0 } else { lists.iter().map(v_len).min().unwrap_or(0) };
             Ok((residual.ctx, function, lists, count))
             })();
