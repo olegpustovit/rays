@@ -121,6 +121,10 @@ fn run(args: Vec<String>) {
 }
 
 fn main() {
+    #[cfg(windows)]
+    ogpu::impl_::select(ogpu_vulkan::impl_::implementation());
+    #[cfg(target_os = "macos")]
+    ogpu::impl_::select(ogpu_metal::impl_::implementation());
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = std::panic::catch_unwind(|| run(args));
     if let Err(e) = result {
