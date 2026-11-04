@@ -69,3 +69,22 @@ Totals: 49 sketches. Rust: 36 exit 0 (gpu_sea and isogrid_drift print E_MEMORY b
 3. CRASH, panic (ws_morph). Crash report `C:\msys64\tmp\rays-crash\Rays-20261104-172249-24508\report.txt` (also `%TEMP%\rays-crash\...`): `panic: the editor opens: "E_LOWER: Attribute write without geometry"`, raised from `flow_sop/src/lower.rs:3271` (`deps` for `sop/with_attr`/`with_group`: the `geometry` argument is neither `Deferred` nor `No_geo`; the node comes from `sop/blend_shapes` -> `set_color`). The code matches lower.ml:3426, so the evaluator hands lowering a different value kind for the geometry arg; same as the existing backlog item sopcat_morph_sketch.
 4. CRASH, memory (isogrid_city, swarm, swarm_crawling, swarm_floating, ws_wave on rerun: `memory allocation of N bytes failed`, exit 0xC0000409). Plus E_MEMORY budget errors on gpu_sea, isogrid_drift, ws_orrery (live bytes 4.5 to 13 GB where OCaml runs the same sketches in 2 s). Owners named in the message: `flow_gpu.slots`, `flow_gpu.free/held`, `renderer.mesh`, `renderer.gpu_item`, `sop.session.payload`, i.e. caches that are not bounded/released per frame (a leak or missing eviction). No backtrace: the abort path does not write a crash report. Not root-caused; backlog entry added. Part may be the box running other agents, but the E_MEMORY ledger figures are the process's own.
 5. Slow (not failures): sop_gallery 78 s vs 4.4 s, flow_field, flow_particles_gpu, flow_survey, voxel_wall, ws_bloom, ws_rosette, ws_sunflower 11 to 19 s vs 1 to 10 s.
+
+## window-free mem, 3 frames (2026-11-04)
+
+`rays mem sketches/X.rays --frames 3`, one sketch at a time, hard 60 s kill, machine shared with other agents (about 4 GB free RAM, WSL holds about 18 GB). Rust: `target/shared/release/rays.exe` (HEAD 5901cd8f plus working tree). OCaml: `_build/default/bin/rays.exe` (`dune build bin/rays.exe` reported up to date). "live" is the ledger's live total (Rust prints "live bytes", which includes an unattributed share that is process memory with no owner; OCaml prints "ocaml live", the GC heap), "footprint" is the process footprint. Every run exited 0 inside 60 s; no OCaml run printed an E_ line, including E_MEMORY.
+
+| sketch | Rust time / live / footprint / unattributed | OCaml time / live / footprint | E_ lines | Rust live / OCaml live |
+|---|---|---|---|---|
+| ws_tree | 2.6 s / 381 MB / 849 MB / 376 MB | 1.5 s / 28 MB / 407 MB | none | 13.6x |
+| ws_layout | 2.9 s / 470 MB / 972 MB / 467 MB | 3.0 s / 52 MB / 431 MB | none | 9.1x |
+| shattered_cube | 33.4 s / 3.52 GB / 4.12 GB / 3.36 GB | 54.7 s / 2.36 GB / 2.95 GB | none | 1.5x |
+| shattered_studio | 36.7 s / 3.77 GB / 4.59 GB / 3.44 GB | 59.6 s / 2.58 GB / 3.40 GB | none | 1.5x |
+| ws_wave | 5.6 s / 776 MB / 1.27 GB / 771 MB | 2.6 s / 54 MB / 442 MB | none | 14.5x |
+| swarm | 13.1 s / 7.42 GB / 11.00 GB / 7.08 GB | 6.5 s / 476 MB / 4.32 GB | Rust: `E_MEMORY: 11.00 GB in use over the 9.90 GB budget` (gpu.driver 1.96 GB, flow_gpu.held 671 MB, sop.volatile 338 MB, flow_gpu.resident 134 MB); exit code still 0 | 15.6x |
+| gpu_sea | 10.6 s / 2.56 GB / 4.33 GB / 2.28 GB | 4.6 s / 593 MB / 1.79 GB | none | 4.3x |
+| procedural_modeling | 11.8 s / 1.11 GB / 1.83 GB / 1.10 GB | 6.9 s / 54 MB / 439 MB | none | 20.7x |
+| ws_variations | 6.1 s / 703 MB / 1.29 GB / 696 MB | 7.0 s / 77 MB / 461 MB | none | 9.1x |
+| ws_morph | 4.9 s / 805 MB / 1.40 GB / 800 MB | 5.5 s / 59 MB / 433 MB | none | 13.7x |
+
+Reading: 3 frames never grow live memory in either (live N -> N), so the gap is resident baseline, not a leak. In Rust 88-99% of live is "unattributed" (memory no ledger owner claims), the lead for the next memory pass; swarm is the only sketch over the Rust budget (9.9 GB, tightened by the low free RAM) and is the one with a large attributed share (gpu.driver, flow_gpu.held). Rust is faster than OCaml only on shattered_cube/studio (33-37 s vs 55-60 s, OCaml near the 60 s kill); it is 1.5-2.5x slower on swarm, gpu_sea, procedural_modeling and ws_wave. Raw outputs: `C:\msys64\tmp\mt_<sketch>_{rs,ml}.out`.
