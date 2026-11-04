@@ -1,0 +1,12 @@
+[package]
+name = "param"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "param"
+path = "src/lib.rs"
+
+[dependencies]
+cfmt = { path = "../cfmt" }

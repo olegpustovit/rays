@@ -1,0 +1,9 @@
+[package]
+name = "rays_math"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rays_math_sys = { path = "../rays_math_sys" }
+ocaml_int = { path = "../ocaml_int" }

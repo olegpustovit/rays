@@ -1,0 +1,2 @@
+Generated from the OCaml tree at 12889c56 by lib/flow_shader print_shader (via dune build) from lib/renderer/shaders/*.rays.
+The Rust renderer embeds these until the Rust flow_shader port exists; that port must reproduce them byte for byte (golden test).

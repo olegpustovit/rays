@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rays Rust Rewrite</title>
+<style>
+/* Layout: a compact current-state panel before the existing technical plan.
+   Reuse the report's theme tokens and system/code type stacks. */
+:root{--bg:#f7f6f3;--fg:#1d1d1b;--mute:#6b6a66;--line:#d9d7d0;--card:#fff;--acc:#c2410c;--ok:#15803d;--warn:#b45309;--code:#efede8}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#151514;--fg:#e9e7e2;--mute:#9a988f;--line:#33322f;--card:#1d1d1b;--acc:#fb923c;--ok:#4ade80;--warn:#fbbf24;--code:#262523}}
+:root[data-theme="dark"]{--bg:#151514;--fg:#e9e7e2;--mute:#9a988f;--line:#33322f;--card:#1d1d1b;--acc:#fb923c;--ok:#4ade80;--warn:#fbbf24;--code:#262523}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:980px;margin:0 auto;padding:32px 16px 80px}
+h1{font-size:30px;margin:0 0 4px;letter-spacing:-.01em}
+h2{font-size:21px;margin:44px 0 10px;padding-top:12px;border-top:1px solid var(--line)}
+h3{font-size:16px;margin:24px 0 6px}
+p,li{max-width:76ch}
+.sub{color:var(--mute);margin:0 0 20px}
+code,pre{font:13px/1.45 ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+code{background:var(--code);padding:1px 4px;border-radius:3px}
+pre{background:var(--code);padding:12px 14px;border-radius:6px;overflow-x:auto}
+pre code{background:none;padding:0}
+table{border-collapse:collapse;width:100%;margin:10px 0;font-size:14px}
+.tw{overflow-x:auto}
+th,td{text-align:left;vertical-align:top;padding:6px 8px;border-bottom:1px solid var(--line)}
+th{color:var(--mute);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px 16px;margin:12px 0}
+.crit{border-left:4px solid var(--acc)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px}
+.stat b{display:block;font-size:22px}
+.stat span{color:var(--mute);font-size:13px}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 6px;border-radius:3px;border:1px solid currentColor}
+.s{color:var(--acc)} .c{color:var(--ok)} .w{color:var(--warn)}
+nav a{color:var(--fg);margin-right:12px;font-size:14px}
+nav{margin:12px 0 4px;line-height:2}
+details{margin:8px 0}
+summary{cursor:pointer;font-weight:600}
+.mute{color:var(--mute)}
+</style>
+</head>
+<body>
+<main>
+<h1>Rays Rust Rewrite</h1>
+<p class="sub">Plan to port the OCaml tree to Rust with no regressions, parallel cheap-agent work units, a 5-second test timeout and fast incremental debug builds. Drafted 2026-11-04 against <code>dev</code> @ <code>ab050536</code>.</p>
+
+<nav>
+<a href="#progress">Progress</a><a href="#verdict">Verdict</a><a href="#gates">Gates</a><a href="#build">Build speed</a><a href="#runner">Test runner</a><a href="#parity">Parity</a><a href="#pt">Path tracing</a><a href="#rules">Rules</a><a href="#cookbook">Cookbook</a><a href="#traps">Traps</a><a href="#units">Work units</a><a href="#waves">Waves</a><a href="#cutover">Cutover</a><a href="#risks">Risks</a><a href="#decisions">Decisions</a>
+</nav>
+
+<h2 id="progress">0. Current progress</h2>
+<div class="grid">
+<div class="card stat"><b>W0–W2</b><span>active; no cutover</span></div>
+<div class="card stat"><b>456</b><span>source modules in the generated queue</span></div>
+<div class="card stat"><b>108</b><span>pre-W2 workspace tests passed; revalidation pending</span></div>
+<div class="card stat"><b>1</b><span>native Vulkan/Metal qualification gate pending</span></div>
+</div>
+<p>The OCaml-to-Rust rewrite is not complete. The Rust workspace has no <code>rays</code> executable yet; OCaml remains the product and behavioral oracle. The std-only <code>rs/tools/t</code> runner executes each test in a child process with a 5-second default limit and a 60-second whole-run limit; <code>--profile slow</code> raises the per-test limit to 60 seconds. Before the current helper/W2 edits, the full workspace default run passed 108 tests in 1.727 seconds; the separate <code>cfmt</code> million-seed round-trip passed in 1.587 seconds. Revalidation of the current tree is pending.</p>
+<div class="tw"><table>
+<tr><th>Workstream</th><th>Status</th><th>Evidence</th></tr>
+<tr><td>W0 tooling</td><td><span class="tag w">In progress</span></td><td>The Rust shape/dependency gates, buildtime unit tests, and available leaf/W0-pair budgets passed on the pre-W2 snapshot. New <code>ocaml_int</code>, <code>rays_hash</code> and W2 packages/edges now require revalidation. G2 remains partial because <code>flow_ir</code> and <code>rays_editor</code> canary crates are still absent; oracle/fixture helpers remain.</td></tr>
+<tr><td>W1 leaves</td><td><span class="tag s">Review / in progress</span></td><td>Before the current helper edits, ten W1/helper packages passed 75 tests; Windows FMA normal and subnormal cases passed. <code>rays_math</code> and <code>rays_collections</code> now use new shared helper crates and need rerunning. Interface coverage, oracle fixtures and broad differential checks remain incomplete.</td></tr>
+<tr><td>W2</td><td><span class="tag w">In progress</span></td><td>The Flow split planner and 19-row queue mapping are in place. Source for <code>flow_syntax</code>, <code>rdk_core</code>, <code>ogpu_core</code>, SDL3 and Vulkan is written but unverified; FlowCheck is incomplete and FlowEval remains partial. RDK review fixes are applied (final review/tests pending); Flow timer and OGPU discard/frame fixes are applied. SDL3 review is clean after fixes; native tests are pending. Metal surface/descriptor/indirect/acceleration/reflection files are written; root integration and reflection fields/call sites remain, and W2 checks have not run.</td></tr>
+<tr><td>W3–W12</td><td><span class="tag w">Pending</span></td><td>Flow graph/IR, backends, geometry, runtime, rendering, editor, and executable layers remain to port.</td></tr>
+<tr><td>Vulkan path tracing</td><td><span class="tag s">Integration check</span></td><td>PT0 implementation is present. The focused <code>@lib/flow_gpu/runtest</code> passed, so the last SPIR-V/Metal binding-interface mismatch was not reproduced. Native Vulkan/Metal path-tracing conformance has not run.</td></tr>
+</table></div>
+<p class="mute">Queue source: <code>rs/port/queue.tsv</code>. It has 456 module rows. Ambiguous names from <code>ocamldep</code> conservatively depend on all reachable matches; preprocessed modules still use raw-source dependency output.</p>
+
+
+<h2 id="verdict">1. Shape of the rewrite</h2>
+<div class="grid">
+<div class="card stat"><b>~270k</b><span>OCaml product lines (409k with 140k test lines)</span></div>
+<div class="card stat"><b>60</b><span>dune libraries in 12 dependency layers</span></div>
+<div class="card stat"><b>32k</b><span>C / ObjC / C++ bridge lines, reused unchanged</span></div>
+<div class="card stat"><b>32k</b><span>Rays Lisp lines, unchanged (the contract)</span></div>
+</div>
+<ul>
+<li><b>Separate tree, no mixed binary.</b> A Cargo workspace at <code>rs/</code> in this repo. The OCaml tree stays the shipping product <em>and the oracle</em> until cutover. No OCaml↔Rust FFI: glue for 400k lines of boundaries would be throwaway work and a second source of bugs.</li>
+<li><b>Translate, don't redesign.</b> One OCaml module becomes one Rust file with the same name, the same public functions and the same behaviour. Redesigns (memory plan stages, new caches) wait until after cutover. The single exception is the path-tracing gap in §6, which is closed in OCaml <em>first</em> so the port stays a translation.</li>
+<li><b>Strong agents set shapes, cheap agents fill bodies.</b> A strong agent turns each library's <code>.mli</code> files into a compiling Rust skeleton (all types, all signatures, <code>todo!()</code> bodies, fixed <code>Cargo.toml</code>). Cheap agents then fill one module each, in parallel, touching one file and its tests. Nobody but the skeleton owner edits <code>lib.rs</code>, <code>Cargo.toml</code> or a public signature.</li>
+<li><b>The oracle decides.</b> A unit is done when its ported tests and its oracle fixtures pass byte for byte. End-to-end goldens (Lisp output, shaders, web export, pixels, path-traced images) gate each wave and the cutover.</li>
+<li><b>Feature freeze on OCaml during the port.</b> Bug fixes only; each fix lands with a fixture, so the Rust side inherits it.</li>
+</ul>
+
+<h2 id="gates">2. Gates</h2>
+<p>Each gate is a command that passes or fails. Nothing merges without the gates for its scope.</p>
+<div class="tw"><table>
+<tr><th>Gate</th><th>Command</th><th>Rule</th><th>When</th></tr>
+<tr><td>G1 Test timeout</td><td><code>cargo t -p &lt;crate&gt;</code></td><td>Every test killed at <b>5 s</b>, no exceptions in the default profile. Whole focused run killed at 60 s.</td><td>Every edit</td></tr>
+<tr><td>G2 Build speed</td><td><code>cargo run -p buildtime</code></td><td>Touch-and-rebuild budgets on three canary crates (§3). Over budget = defect fixed in the same change.</td><td>Every merge</td></tr>
+<tr><td>G3 Shape lint</td><td><code>cargo run -p gate -- shape</code></td><td>No generics in public items, no proc macros, no lifetimes on structs, dependency allowlist (§7).</td><td>Every merge</td></tr>
+<tr><td>G4 Dependency gate</td><td><code>cargo run -p gate -- deps</code></td><td>The "may never reach" rules from <code>AGENTS.md</code> and <code>test/dependency_gate.ml</code>, read from each crate's <code>Cargo.toml</code>.</td><td>Every merge</td></tr>
+<tr><td>G5 Unit parity</td><td><code>cargo t -p &lt;crate&gt; parity</code></td><td>Oracle fixtures for the unit pass exactly. Floats compare by bits.</td><td>Unit done</td></tr>
+<tr><td>G6 Coverage of the interface</td><td><code>cargo run -p gate -- cover &lt;crate&gt;</code></td><td>Every <code>val</code> in the OCaml <code>.mli</code> is named by a ported test or a fixture, or has a one-line waiver in <code>rs/port/waivers.txt</code>.</td><td>Crate done</td></tr>
+<tr><td>G7 End-to-end goldens</td><td><code>cargo t --profile e2e</code></td><td>§5 L3 list, byte or pixel identical.</td><td>Wave done</td></tr>
+<tr><td>G8 Path tracing, both backends</td><td><code>cargo t -p rays_pathtracer --profile gpu</code> on the Mac and the Windows box</td><td>§6 checks green on Metal and on Vulkan.</td><td>Wave 7 and cutover</td></tr>
+<tr><td>G9 Performance and memory</td><td><code>cargo run --release -p bench -- compare</code></td><td>Each bench no slower than the OCaml run on the same machine (p50 and p95); <code>memory-budgets.sexp</code> holds.</td><td>Wave done</td></tr>
+<tr><td>G10 Determinism</td><td>part of each crate's tests</td><td>Every parallel path: 1 vs N threads byte-identical, as today.</td><td>Unit done</td></tr>
+</table></div>
+
+<h2 id="build">3. Build speed</h2>
+<h3>Budgets</h3>
+<p class="mute">Targets measured in Wave 0 on the M1 Air and the Windows box. If Wave 0 cannot meet them, stop and revisit before porting further (see §12).</p>
+<div class="tw"><table>
+<tr><th>Measure</th><th>Budget</th></tr>
+<tr><td><code>cargo check -p &lt;leaf&gt;</code> after a one-line body edit</td><td>≤ 1 s</td></tr>
+<tr><td>One-line edit in a middle crate, rebuild + run its tests</td><td>≤ 5 s</td></tr>
+<tr><td>Focused crate run, build + all its tests</td><td>≤ 15 s</td></tr>
+<tr><td>One test</td><td>≤ 5 s, hard kill</td></tr>
+<tr><td>Clean debug build of the whole workspace</td><td>≤ 120 s</td></tr>
+<tr><td>Whole workspace tests, warm</td><td>≤ 60 s</td></tr>
+</table></div>
+
+<h3>Structure that keeps rebuilds small</h3>
+<ul>
+<li><b>Many small crates.</b> One crate per dune library, and no crate over about 8k lines. The large libraries are split along their own module DAG (<code>ocamldep</code> order; OCaml modules cannot be cyclic, so the split is always possible): <code>flow</code> (16k) → <code>flow_syntax</code>, <code>flow_check</code>, <code>flow_eval</code>; <code>flow_ir</code> (18k), <code>flow_sop</code> (15k), <code>sop</code> (11k), <code>rdk_boolean</code> (10k) and <code>rays_editor</code> (23k) the same way. The skeleton agent picks the cut.</li>
+<li><b>One test binary per crate.</b> Unit tests live in <code>#[cfg(test)] mod tests</code> inside the source file; oracle fixtures in a single <code>tests/parity.rs</code>. No other <code>tests/*.rs</code> files: each one is a separate link, and linking dominates incremental test time.</li>
+<li><b>No generics in public APIs, no proc macros</b> (§7). Monomorphisation and macro expansion are where Rust compile time goes; avoiding both keeps per-crate compile cost close to the line count.</li>
+<li><b>No external crates</b> except <code>cc</code> (build dependency for the C bridges). Hashing, sexp reading, PNG write, JSON for tooling: small std-only crates in the workspace.</li>
+<li><b>Thin public surfaces.</b> A body edit that keeps signatures rebuilds only that crate; dependents re-link only. Rust only rebuilds dependents' metadata when a public signature changes, and signatures are frozen by the skeleton.</li>
+</ul>
+
+<h3>Configuration</h3>
+<pre><code># rs/Cargo.toml
+[workspace]
+resolver = "2"
+members = ["crates/*", "tools/*"]
+
+[profile.dev]
+opt-level = 0
+debug = "line-tables-only"     # backtraces with lines, a fraction of full debug info
+incremental = true
+codegen-units = 256
+split-debuginfo = "unpacked"   # macOS: no dsymutil step
+overflow-checks = true         # OCaml wraps silently; Rust says where (see §9)
+
+# geometry and IR kernels are too slow for tests at -O0; these few crates build at -O1
+[profile.dev.package.rdk_boolean]
+opt-level = 1
+[profile.dev.package.rdk_geom]
+opt-level = 1
+
+[profile.release]
+codegen-units = 16
+lto = "thin"
+debug = "line-tables-only"</code></pre>
+<pre><code># rs/.cargo/config.toml
+[alias]
+t = "run -q -p t --"            # the wrapper, §4
+
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld.exe"         # macOS keeps Apple's ld, already fast</code></pre>
+<ul>
+<li><b>Toolchain:</b> pinned stable in <code>rust-toolchain.toml</code>. Wave 0 also measures the Cranelift backend for debug builds (nightly, <code>codegen-backend = "cranelift"</code>) on the canary crates; it is adopted only if it beats LLVM <code>-O0</code> on this tree on both machines. Decision D2.</li>
+<li><b>Inner loop is <code>cargo check</code></b> (no codegen), like <code>dune build @check</code> today.</li>
+<li><b><code>buildtime</code> tool</b>: appends a comment to a body in a leaf, a middle and a top crate, times <code>check</code>, <code>build</code> and <code>t</code>, compares against the budget table, prints the slowest crates from <code>cargo build --timings</code> output, and fails with the crate name and seconds over.</li>
+</ul>
+
+<h2 id="runner">4. Test runner: <code>cargo t</code></h2>
+<p><code>rs/tools/t</code> is a std-only runner, not <code>cargo-nextest</code>. It builds selected test executables with <code>cargo test --no-run</code>, discovers test names, and executes each case in a separate child process to enforce per-test timeouts and collect timings.</p>
+<pre><code># rs/.cargo/config.toml
+[alias]
+t = "run -q -p rays-t --"
+
+# rs/tools/t/src/main.rs
+const TEST_TIMEOUT: Duration = Duration::from_secs(5);
+const SLOW_TEST_TIMEOUT: Duration = Duration::from_secs(60);
+const WHOLE_RUN_DEFAULT: Duration = Duration::from_secs(60);
+
+# examples
+cargo t -p param
+cargo t -p cfmt --profile slow -- --ignored</code></pre>
+<p><b>What <code>cargo t</code> does:</b></p>
+<ol>
+<li>Runs <code>cargo test --no-run</code>, gets test names from each executable's <code>--list</code> output, then runs each name with <code>--exact</code> in its own child process.</li>
+<li>Kills a test after 5 s by default (60 s with <code>--profile slow</code>) and the whole run after 60 s by default (<code>RAYS_T_TIMEOUT</code>, <code>0</code> = none); exits 124 on timeout.</li>
+<li>Prints wall time and the five slowest tests; appends <code>date, crate, test, seconds</code> to <code>rs/target/t-times.tsv</code>.</li>
+<li>Queues before Cargo with a lock in <code>rs/target/</code>, runs ordinary tests in parallel, and serializes tests named <code>window_*</code> or <code>gpu_*</code>.</li>
+</ol>
+<p><b>Rules:</b> a default test that hits 5 s is a defect, never a raised limit. Ported OCaml tests that are slower today (rows in <code>specification/test-times.md</code>) are shrunk while porting or explicitly moved to the slow run with an <code>#[ignore = "slow"]</code> reason. Golden corpora are one test per file. The runner discovers tests from the compiled executable; it needs no generated test list or build script.</p>
+
+
+<h2 id="parity">5. Parity: how regressions are caught</h2>
+<p>Four layers, from cheapest to widest. A unit needs L0 and L1; a wave needs L3; cutover needs all of them.</p>
+
+<h3>L0 Ported tests</h3>
+<p>Every OCaml test file beside a module (450 files, 140k lines) is translated with the module, assertion for assertion. A cheap agent may not drop a test; if it cannot port one, it writes a waiver line with the reason and a strong agent reviews it.</p>
+
+<h3>L1 Oracle fixtures</h3>
+<ul>
+<li>A test-only OCaml library per wave, <code>rs/oracle/&lt;lib&gt;_capture.ml</code>, built by dune, calls the library's public functions on chosen inputs and prints <code>input → output</code> cases into <code>rs/fixtures/&lt;crate&gt;/&lt;module&gt;.sx</code>.</li>
+<li>Format: s-expressions, one case per form. Floats are written as their 64-bit pattern in hex (<code>#x3ff0000000000000</code>), so comparison is exact and print-format-free. Strings are byte-escaped.</li>
+<li>Inputs come from three places: values recorded at module boundaries while running every sketch in <code>sketches/</code> for a few <code>Fixed dt</code> frames (a capture hook in test builds only); the existing OCaml tests' inputs; and seeded random inputs for pure libraries (<code>rays_math</code>, <code>rdk_core</code> predicates, the Lisp reader and printer, <code>flow_ir</code> passes).</li>
+<li>Fixture files are written only by the oracle tool and are read-only to porting agents. A fixture change after the fact needs an entry in <code>rs/port/accepted-diffs.md</code> signed off by a strong agent and the owner.</li>
+</ul>
+
+<h3>L2 Differential fuzz <span class="mute">(slow profile)</span></h3>
+<p>For pure libraries, an OCaml <code>oracle</code> executable answers s-expression requests on stdin. A Rust test drives the OCaml oracle and the Rust port with the same seeded random cases and stops at the first difference, printing the input. Runs nightly and before each wave closes; never in the edit loop.</p>
+
+<h3>L3 End-to-end goldens</h3>
+<p>Generated once from the OCaml tree at the freeze commit, regenerated only with an accepted-diffs entry.</p>
+<div class="tw"><table>
+<tr><th>Golden</th><th>Source</th><th>Compare</th></tr>
+<tr><td><code>rays check</code> diagnostics</td><td>every <code>.rays</code> in the repo (sketches, <code>lib/**/*.rays</code>, test corpora)</td><td>bytes</td></tr>
+<tr><td><code>rays fmt</code> output</td><td>same corpus</td><td>bytes</td></tr>
+<tr><td>Evaluated values</td><td>each sketch, frames 0–N at <code>Fixed dt</code>, printed by <code>Flow.Lisp</code></td><td>bytes</td></tr>
+<tr><td>Scene command streams</td><td>each sketch, frames 0–N</td><td>bytes per frame</td></tr>
+<tr><td>Cooked geometry</td><td>every SOP node reachable from the sketches and <code>lib/flow_sop/nodes/*.rays</code>; counts, topology and attributes</td><td>bits</td></tr>
+<tr><td><code>flow_manifest.sexp</code></td><td>generated</td><td>bytes</td></tr>
+<tr><td>Printed shaders</td><td><code>print_shader</code>: MSL and SPIR-V for renderer, ogpu_metal, flow_gpu</td><td>bytes</td></tr>
+<tr><td>Web export</td><td><code>rays web</code> on the web corpus: JS, WGSL, <code>serve.json</code></td><td>bytes</td></tr>
+<tr><td>Draw snapshots</td><td><code>test/draw_snapshots</code>, <code>draw_snapshots_windows</code></td><td>as today</td></tr>
+<tr><td>UI pixels</td><td><code>ui_shot</code> of the editor on the layout sketches; <code>test_ui_parity</code> goldens</td><td>pixels</td></tr>
+<tr><td>Sketch frames</td><td><code>smoke-all</code> last frame of each of the 45 sketches</td><td>pixels (same machine, same shaders)</td></tr>
+<tr><td>Path-traced images</td><td>§6</td><td>statistical</td></tr>
+<tr><td>Memory ledger</td><td><code>rays mem</code> on the budget corpus</td><td>owners present; bytes within <code>memory-budgets.sexp</code> (Rust numbers differ by design)</td></tr>
+<tr><td>Errors and crash reports</td><td>bad inputs, panics</td><td>typed error names; report folder layout</td></tr>
+</table></div>
+
+<h3>L4 Performance</h3>
+<p>Existing benches ported in their wave (<code>bench_isogrid</code>, <code>bench_chain_frames</code>, <code>tools/bench_rdk</code>, <code>bench_sop_cook</code>, frame allocation). Gate: Rust release build no slower than OCaml on the same machine, p50 and p95, interleaved runs as in the current bench recipes. Memory gates read an exact counting allocator instead of GC words, which removes the flaky retained-heap class of failure that prompted this.</p>
+
+<h2 id="pt">6. Path tracing on Metal and Vulkan</h2>
+<div class="card crit">
+<p><b>Critical:</b> the <code>metal</code> and <code>vulkan</code> crates must both run every path-tracer feature. Today they don't: Vulkan traces triangles and instances with ray queries, but <code>lib/ogpu_vulkan/backend.ml:541–562</code> rejects motion triangles, motion instances, curves and procedural boxes with <code>E.Unsupported</code>, and its caps report <code>ray_tracing_motion = false</code>.</p>
+</div>
+<div class="tw"><table>
+<tr><th>Feature (<code>Ogpu_core.Acceleration</code>)</th><th>Metal now</th><th>Vulkan now</th><th>Vulkan target</th></tr>
+<tr><td>Triangle BLAS, instance TLAS, user ids</td><td class="c">yes</td><td class="c">yes</td><td>keep</td></tr>
+<tr><td>Refit</td><td class="c">yes</td><td class="c">yes</td><td>keep</td></tr>
+<tr><td>Procedural boxes (<code>Driver_boxes</code>)</td><td class="c">yes</td><td class="s">rejected</td><td><code>VK_GEOMETRY_TYPE_AABBS_KHR</code>; the kernel's candidate loop runs the box's intersection test on <code>RayQueryCandidateAABB</code></td></tr>
+<tr><td>Curves (<code>Driver_curves</code>)</td><td class="c">native where <code>Ray_tracing_curves</code>; capsules on the M1</td><td class="s">rejected</td><td>the M1 capsule path, over AABBs: one box per segment, capsule test in the candidate loop. Same code on both backends where native curves are absent</td></tr>
+<tr><td>Motion instances</td><td class="c">native</td><td class="s">rejected</td><td>an AABB instance swept over the shutter; on a candidate, interpolate the instance transform at the sample's time, transform the ray, and run a nested ray query on the prototype's one-instance TLAS. Exact for linear keyframes</td></tr>
+<tr><td>Motion triangles (deforming keyframes)</td><td class="c">native</td><td class="s">rejected</td><td>per-triangle AABBs swept over the keyframes; candidate test interpolates the three vertices at the sample's time and runs the same watertight triangle test as the static path</td></tr>
+<tr><td>Caps</td><td class="c">all four</td><td class="w">motion false</td><td><code>Ray_tracing</code>, <code>Ray_tracing_refit</code>, <code>Ray_tracing_motion</code> true; <code>Ray_tracing_curves</code> stays the native-curves flag, with the capsule path behind it</td></tr>
+</table></div>
+
+<h3>Order</h3>
+<ol>
+<li><b>PT0, before the port, in OCaml (strong agent, Windows box).</b> Close the four Vulkan gaps in <code>lib/vulkan/vulkan_bridge.c</code>, <code>ogpu_vulkan</code> and the SPIR-V printer. This gives the rewrite a Vulkan oracle for every feature, and keeps the Rust port a pure translation. Metal's converged images are the oracle for PT0 itself.</li>
+<li><b>PT1, conformance suite first.</b> Extend <code>ogpu_conformance</code> with deterministic ray-set tests per geometry kind: a fixed list of rays, expected hit/miss, <code>t</code>, primitive id, instance id and barycentrics. Both backends must agree with each other within 1e-5 relative on <code>t</code> and exactly on ids. One test per kind, each under 5 s.</li>
+<li><b>PT2, image parity.</b> For each scene in <code>test_pathtracer</code>, <code>test_scene</code>, <code>test_world</code> and <code>sketches/pathtracer.rays</code>: fixed seed, 256², 64 spp. Pass when the per-pixel difference of means lies within 3σ of the per-pixel variance both renders report, on 99.5% of pixels, and the image mean differs by under 0.5%. A converged Metal render (offline, 4096 spp, checked in as an EXR-free float dump) is the long-run reference in the <code>slow</code> profile.</li>
+<li><b>PT3, performance.</b> Budgets from <code>specification/pathtracer.md</code> on the M1 (e.g. 2001 instances + 20k triangles: <code>move</code> + <code>flush</code> about 2 ms) and from <code>specification/vulkan/rtx2080ti.json</code> on Windows. Rust must match or beat the OCaml numbers.</li>
+<li><b>PT4, the Rust crates.</b> In Wave 3–7, <code>ogpu_metal</code>, <code>ogpu_vulkan</code> and <code>rays_pathtracer</code> are ported by strong agents only. G8 runs the PT1–PT3 suites on both machines; Wave 7 does not close and cutover does not happen until G8 is green on both.</li>
+</ol>
+<p>The C/ObjC bridges (<code>metal_bridge.mm</code>, <code>vulkan_bridge.c</code>, <code>vma.cpp</code>, <code>volk</code>) are compiled by <code>cc</code> in each sys crate's build script and called through <code>extern "C"</code>. The Metal binding registry generator (<code>lib/metal/gen</code>) gets a Rust emitter beside its OCaml one, so the Rust declarations are generated, not handwritten, as today.</p>
+
+<h2 id="rules">7. Shape rules (G3, enforced by the <code>gate</code> tool)</h2>
+<p>These rules exist for compile speed and so that a cheap agent has one obvious way to write anything.</p>
+<div class="tw"><table>
+<tr><th>Banned</th><th>Use instead</th><th>Why</th></tr>
+<tr><td>Type parameters on public <code>fn</code>, <code>struct</code>, <code>enum</code>, <code>trait</code></td><td>Concrete types. Std containers of concrete types (<code>Vec&lt;Point&gt;</code>, <code>Option</code>, <code>Result&lt;T, Error&gt;</code>, <code>Arc</code>, <code>HashMap</code>) are fine</td><td>Monomorphisation is the biggest compile-time cost</td></tr>
+<tr><td><code>impl Trait</code> in argument or return position</td><td><code>&amp;dyn Trait</code>, <code>Box&lt;dyn Fn(..)&gt;</code>, or plain <code>fn</code> pointers</td><td>Same as above</td></tr>
+<tr><td>Generic private helpers, except inside <code>rays_collections</code></td><td>Write the two concrete versions</td><td>Same</td></tr>
+<tr><td>Proc macros of any kind (<code>serde</code>, <code>thiserror</code>, <code>clap</code>, custom derives)</td><td>Hand-written impls. <code>#[derive]</code> only of <code>Clone, Copy, Debug, PartialEq, Eq, Hash, Default</code></td><td>Macro expansion cost; hidden code</td></tr>
+<tr><td><code>derive(PartialOrd, Ord)</code></td><td>A hand-written <code>cmp</code> that matches OCaml's <code>compare</code> (§9)</td><td>Derived order differs from OCaml's</td></tr>
+<tr><td>Lifetime parameters on structs and enums</td><td>Owned data, <code>Arc</code>, or an index into an arena</td><td>Borrow puzzles are where cheap agents stall</td></tr>
+<tr><td><code>async</code>, <code>macro_rules!</code> beyond the shared test-list macro</td><td>Threads from <code>parallel</code>; plain functions</td><td>Simplicity</td></tr>
+<tr><td><code>unsafe</code> outside <code>*_sys</code> crates and <code>parallel</code></td><td>Safe code</td><td>Contain the risk</td></tr>
+<tr><td>Crates outside the allowlist (only <code>cc</code>)</td><td>A small std-only crate in the workspace</td><td>Build time and supply chain</td></tr>
+<tr><td>Panics for control flow (only LRU's impossible <code>TableState</code> variant checks use <code>unreachable!</code>), <code>catch_unwind</code></td><td><code>Result</code> / <code>Option</code>; <code>catch_unwind</code> only in the crash reporter and worker isolation</td><td>OCaml exceptions become values</td></tr>
+<tr><td>Iterating a <code>HashMap</code> into output</td><td><code>rays_collections::OrderedMap</code> (insertion order) or sort first</td><td>Output order must be stable</td></tr>
+</table></div>
+<p>The gate is a token scanner over <code>rs/crates/**/*.rs</code> with an allowlist file that only shrinks, the same design as <code>test/private_allowlist.ml</code>.</p>
+
+<h2 id="cookbook">8. Translation cookbook</h2>
+<p>The one translation for each OCaml construct. A cheap agent looks the construct up here and does not choose.</p>
+<div class="tw"><table>
+<tr><th>OCaml</th><th>Rust</th></tr>
+<tr><td><code>type t = { a : int; b : float }</code></td><td><code>pub struct T { pub a: i64, pub b: f64 }</code>, <code>#[derive(Clone, Debug, PartialEq)]</code></td></tr>
+<tr><td><code>{ r with a = 1 }</code></td><td><code>T { a: 1, ..r.clone() }</code></td></tr>
+<tr><td>Variant <code>A | B of int</code></td><td><code>pub enum T { A, B(i64) }</code>; inline records become struct variants</td></tr>
+<tr><td>Abstract type in <code>.mli</code></td><td>Struct with private fields; module functions become <code>impl</code> methods or free functions, named the same</td></tr>
+<tr><td><code>'a option</code>, <code>('a, e) result</code></td><td><code>Option</code>, <code>Result</code>; <code>let*</code> (result_bind ppx) → <code>?</code></td></tr>
+<tr><td><code>'a list</code></td><td><code>Vec&lt;T&gt;</code> for owned, <code>&amp;[T]</code> for parameters. Recursion on <code>x :: rest</code> becomes a loop over a slice</td></tr>
+<tr><td><code>array</code>, <code>Float.Array</code>, <code>Bigarray</code></td><td><code>Vec&lt;T&gt;</code> / <code>Box&lt;[f32]&gt;</code>; packed layouts kept field for field</td></tr>
+<tr><td>Polymorphic function <code>'a -&gt; 'a</code></td><td>One concrete function per type actually used (grep the call sites). Truly open cases: <code>&amp;dyn Trait</code></td></tr>
+<tr><td>Functor, first-class module</td><td>One concrete module per application; or a trait object chosen at startup</td></tr>
+<tr><td>Dune virtual library (<code>ogpu</code>, <code>ogpu_native</code>)</td><td><code>ogpu::Backend</code> trait object; <code>ogpu_native::open()</code> picks Metal or Vulkan by <code>cfg(target_os)</code></td></tr>
+<tr><td>Closure stored in a record (OGPU driver records)</td><td><code>Box&lt;dyn Fn(..) -&gt; ..&gt;</code> field, or a trait object when there are several</td></tr>
+<tr><td>Shared immutable value</td><td><code>Arc&lt;T&gt;</code></td></tr>
+<tr><td>Graph, IR, AST with sharing</td><td>Arena: <code>Vec&lt;Node&gt;</code> + <code>NodeId(u32)</code></td></tr>
+<tr><td><code>ref</code>, <code>mutable</code> field</td><td><code>let mut</code>, <code>&amp;mut</code>; <code>Cell</code> / <code>RefCell</code> only when the OCaml code mutates through sharing</td></tr>
+<tr><td><code>Hashtbl</code></td><td><code>HashMap</code> with <code>rays_hash::Fx</code> (in-tree, 20 lines)</td></tr>
+<tr><td><code>Map</code>, <code>Set</code></td><td><code>BTreeMap</code>, <code>BTreeSet</code> with an OCaml-order <code>Ord</code></td></tr>
+<tr><td><code>Lazy.t</code></td><td><code>OnceLock</code> / <code>OnceCell</code></td></tr>
+<tr><td>Exceptions</td><td>Typed error enums in <code>Result</code>; <code>Not_found</code> → <code>Option</code>; <code>Exit</code> → labelled <code>break</code></td></tr>
+<tr><td><code>Printf.sprintf</code></td><td><code>format!</code>, except float conversions: <code>cfmt::g</code>, <code>cfmt::f</code>, <code>cfmt::e</code> (§9)</td></tr>
+<tr><td><code>Format</code> boxes and break hints</td><td><code>ocaml_format</code> crate: the subset of OCaml's Format the tree uses, with the same margin algorithm</td></tr>
+<tr><td><code>Marshal.to_string</code> as a digest or cache key</td><td>A hand-written <code>fn digest(&amp;self, h: &amp;mut Digest)</code> per type</td></tr>
+<tr><td><code>Domain</code>, <code>Mutex</code>, <code>Atomic</code></td><td><code>parallel</code> crate on <code>std::thread</code>; <code>std::sync</code></td></tr>
+<tr><td><code>Gc.*</code>, <code>Weak</code>, <code>Ephemeron</code></td><td>Explicit ownership and the counting allocator in <code>mem</code>; a weak table becomes an owner with <code>remove</code>. Strong agent only</td></tr>
+<tr><td>Tail recursion</td><td><code>loop</code>. Non-tail recursion on Lisp input depth: explicit stack, or the big-stack thread (§9)</td></tr>
+<tr><td><code>ppx_rays</code> SOP metadata</td><td>Plain <code>const</code> tables, checked against <code>flow_manifest.sexp</code> by a test</td></tr>
+<tr><td><code>.mli</code> doc comment</td><td><code>///</code> on the same item</td></tr>
+</table></div>
+
+<h2 id="traps">9. Semantic traps</h2>
+<p>Where a literal translation compiles, looks right and produces different output. Each has a check in Wave 0's helper crates, and every cheap-agent brief links this section.</p>
+<div class="tw"><table>
+<tr><th>Trap</th><th>OCaml</th><th>Rust rule</th></tr>
+<tr><td>Integer width</td><td><code>int</code> is 63-bit and wraps silently</td><td><code>i64</code>; <code>overflow-checks</code> on in dev. Code that relies on wrap (hashes, RNG, bit tricks) uses <code>wrapping_*</code> and masks to 63 bits where the result is observable. <code>Int64</code>/<code>Int32</code> map exactly</td></tr>
+<tr><td><code>lsr</code>, <code>asr</code>, <code>land</code></td><td>on 63-bit ints</td><td><code>lsr</code> on a negative <code>int</code> differs from <code>u64 &gt;&gt;</code>: use <code>ocaml_int::lsr</code></td></tr>
+<tr><td>Structural <code>compare</code></td><td>Constant constructors sort before non-constant ones; fields in order; <code>nan</code> equals itself; <code>-0.0 = 0.0</code></td><td>Hand-written <code>cmp</code> from <code>ocaml_cmp</code> helpers. Never <code>derive(Ord)</code>, never <code>f64::total_cmp</code> where OCaml used <code>compare</code></td></tr>
+<tr><td>Float printing</td><td><code>%g</code>, <code>%.17g</code>, <code>string_of_float</code> (<code>1.</code> for one)</td><td><code>cfmt</code> crate replicates C printf; <code>Float.to_string</code> → <code>cfmt::ocaml_float</code>. Tested against the oracle on 10⁶ seeded values</td></tr>
+<tr><td>Float parsing</td><td><code>float_of_string</code> accepts <code>_</code>, hex, <code>nan</code>, <code>inf</code></td><td><code>cfmt::parse_ocaml_float</code></td></tr>
+<tr><td><code>int_of_float</code></td><td>undefined on NaN and out of range</td><td>Find every call reachable with such inputs; match the oracle's observed value, else make it an error</td></tr>
+<tr><td>Sort stability</td><td><code>List.sort</code> and <code>Array.stable_sort</code> stable; <code>Array.sort</code> not</td><td><code>sort_by</code> (stable) everywhere. Where the oracle shows <code>Array.sort</code>'s equal-key order reaching output, port its heap sort as <code>ocaml_sort::array_sort</code></td></tr>
+<tr><td>Hashtbl order and <code>Hashtbl.hash</code></td><td>deterministic order from the OCaml hash</td><td>Never iterate a hash map into output. Where <code>Hashtbl.hash</code> values reach output or seeds, <code>ocaml_hash</code> ports <code>caml_hash</code> exactly</td></tr>
+<tr><td>Strings</td><td>bytes, any encoding</td><td><code>String</code> for text that is UTF-8 by contract (Lisp source is); <code>Vec&lt;u8&gt;</code> otherwise. Byte indices stay byte indices</td></tr>
+<tr><td>Math functions</td><td>C libm</td><td><code>f64::sin</code> etc. may not call the same libm as OCaml (especially on Windows); Wave 0 compares them on 10⁶ seeded inputs per platform and vendors one implementation if they differ. No FMA contraction on either side; never use <code>mul_add</code> unless OCaml used <code>Float.fma</code></td></tr>
+<tr><td>Recursion depth</td><td>TCO, large stacks</td><td>Tail calls become loops. The app runs its Lisp work on threads with a 256 MB stack; the main thread's stack is raised by a linker flag on both platforms</td></tr>
+<tr><td>Evaluation order</td><td>Arguments evaluate right to left</td><td>Matters only with side effects in arguments (RNG draws, counters): bind them to <code>let</code>s in OCaml's order</td></tr>
+<tr><td>Physical equality <code>==</code></td><td>pointer identity, used for caches</td><td><code>Arc::ptr_eq</code>, or an explicit id</td></tr>
+<tr><td>Main-thread work</td><td>initial domain</td><td>SDL, Metal and window calls stay on the main thread; same <code>parallel</code> rules</td></tr>
+</table></div>
+
+<h2 id="units">10. Work units and the agent protocol</h2>
+<pre class="mermaid">
+flowchart LR
+  A[Strong: skeleton crate from .mli<br/>types, signatures, todo bodies] --> B[Oracle: capture fixtures<br/>for the wave]
+  B --> C[Queue: one unit per module]
+  C --> D1[Cheap agent: unit 1]
+  C --> D2[Cheap agent: unit 2]
+  C --> D3[Cheap agent: unit n]
+  D1 & D2 & D3 --> E{G1 G3 G5 G10 pass?}
+  E -- yes --> F[Merge queue]
+  E -- one retry failed --> G[Strong agent takes it]
+  F --> H[Crate done: G6 · Wave done: G7 G8 G9]
+</pre>
+
+<h3>The queue</h3>
+<p><code>rs/port/queue.tsv</code>, written by <code>cargo run -p port -- plan</code> from <code>ocamldep</code>: one row per OCaml module, columns <code>id, ocaml_file, rust_file, crate, depends_on, lines, tier, status, owner</code>. Modules over 600 lines are split into several units by function groups (the skeleton agent lists them). <code>port next</code> hands out a unit whose dependencies are all <code>done</code>; <code>port claim</code>, <code>port done</code> and <code>port fail</code> update the row in one commit on the agent's branch.</p>
+
+<h3>Tiers</h3>
+<div class="tw"><table>
+<tr><th>Strong agents</th><th>Cheap agents</th></tr>
+<tr><td>Wave 0 tools and helper crates; every skeleton and crate split; <code>parallel</code>, <code>mem</code>, the Lisp evaluator core, the Format printer; all <code>*_sys</code> crates, <code>ogpu_*</code> and <code>rays_pathtracer</code>; any unit touching <code>Gc</code>, <code>Weak</code>, <code>Obj</code>, <code>Marshal</code>, effects or <code>unsafe</code>; failed units; accepted diffs; waiver review</td><td>Module bodies; translating each module's tests; oracle capture functions for their module; nothing else</td></tr>
+</table></div>
+
+<h3>Brief for a cheap agent</h3>
+<pre><code>Port unit {id}: {ocaml_file} (lines {range}) to {rust_file}.
+
+Read:  {ocaml_file}, its .mli, its test file {ocaml_test}, and the Rust
+       skeleton {rust_file}. Read rs/port/COOKBOOK.md and TRAPS.md.
+Write: only {rust_file} (bodies and #[cfg(test)] mod tests), and
+       rs/oracle/{lib}_capture.ml cases for this module.
+Never: change a signature, lib.rs, Cargo.toml, a fixture file, or any
+       other file. Never add a crate, a generic, a macro, a lifetime on
+       a struct, unsafe, or a panic for control flow.
+Translate every function and every test one for one. Keep names.
+If a construct is not in the cookbook, stop and run `port fail {id}
+"<construct>"`. Do not invent a translation.
+
+Done when, with the times printed:
+  cargo check -p {crate}
+  cargo t -p {crate} {module}          # ported tests, each under 5 s
+  cargo t -p {crate} parity::{module}  # oracle fixtures, exact
+  cargo run -p gate -- shape {crate}
+Then `port done {id}` and report the four commands' wall times.
+After one failed retry on the same error, `port fail {id}` with the
+error text. Do not keep trying.</code></pre>
+
+<h3>Why parallel work does not collide</h3>
+<ul>
+<li>A unit owns exactly one Rust file. <code>lib.rs</code>, <code>Cargo.toml</code>, public signatures and fixtures belong to the skeleton owner and are frozen before units are handed out.</li>
+<li>Each agent works in its own git worktree on <code>port/&lt;id&gt;</code>; the merge queue rebases and reruns the unit's gates, one merge at a time.</li>
+<li>Every merge is one commit, so a bad unit is one revert. Wave ends are tagged.</li>
+<li>Every agent in the same worktree goes through <code>cargo t</code>, which queues before Cargo's lock, like <code>tools/check.exe</code> today.</li>
+</ul>
+
+<h2 id="waves">11. Waves</h2>
+<p>From the dune dependency graph (layer = longest path to a leaf). Sizes are product lines, tests excluded. All units of a wave run in parallel; a wave closes when G6, G7 (for what it reaches), G9 and, from Wave 7, G8 pass.</p>
+<div class="tw"><table>
+<tr><th>Wave</th><th>Crates (OCaml product lines)</th><th>Notes</th></tr>
+<tr><td>W0 Tools</td><td><code>t</code>, <code>gate</code>, <code>buildtime</code>, <code>port</code>, <code>fixture</code>, <code>cfmt</code>, <code>ocaml_format</code>, <code>ocaml_int</code>, <code>ocaml_cmp</code>, <code>ocaml_hash</code>, <code>ocaml_sort</code>, <code>rays_hash</code>, <code>rays_collections</code>; the OCaml oracle library and corpus capture; PT0 on the OCaml tree</td><td>Strong only. Measures §3 budgets on a 5k-line canary (<code>rays_math</code> + <code>param</code> ported early). Kill criterion lives here</td></tr>
+<tr><td>W1 Leaves</td><td>rays_diagnostic 116 · native_layer_token 10 · mem 915 · lru 517 · param 873 · input 389 · rays_math 900 · parallel 302 · scene_command 1.8k</td><td><code>mem</code>, <code>parallel</code> strong; rest cheap</td></tr>
+<tr><td>W2</td><td>flow 15.7k (split 3) · rdk_core 5.7k · ogpu_core 4.7k · sdl3 1.5k · metal 7.9k · vulkan</td><td>Sys crates wrap the existing bridges; Lisp reader/printer goldens start here</td></tr>
+<tr><td>W3</td><td>flow_graph 5.5k · flow_ir 17.9k (split) · ogpu · ogpu_metal_native 4.2k · ogpu_vulkan 1.1k · ogpu_mock 0.6k · rdk_geom · runtime_input 0.9k · sdl3_image/ttf/mixer 1.2k</td><td>OGPU backends strong; conformance starts on both machines</td></tr>
+<tr><td>W4</td><td>flow_shader 3.9k · flow_web 3.0k · ogpu_metal 4.2k · ogpu_conformance 2.3k · rdk_ops · runtime 0.9k · runtime_resources 1.2k</td><td>Shader and web goldens byte-identical; PT1 suite ported</td></tr>
+<tr><td>W5</td><td>rdk_boolean 9.9k (split) · renderer 6.9k</td><td>Boolean exactness fixtures; renderer pixel goldens</td></tr>
+<tr><td>W6</td><td>flow_gpu 5.2k · rays 8.0k · rdk</td><td>First native window in Rust; draw snapshots</td></tr>
+<tr><td>W7</td><td>sop 10.6k (split) · pxui 6.6k · rays_pathtracer 3.8k · rdk_rays 1.3k · editor_core 1.1k</td><td><b>G8 must be green on Metal and Vulkan to close</b>; UI parity goldens</td></tr>
+<tr><td>W8</td><td>flow_sop 14.7k (split) · pxui_graph 6.5k · pxui_shell 3.9k</td><td>Geometry goldens for every SOP node; manifest</td></tr>
+<tr><td>W9</td><td>editor_document 7.8k</td><td></td></tr>
+<tr><td>W10</td><td>flow_native 3.3k · web_export 0.8k</td><td>Scene command streams; full web export goldens</td></tr>
+<tr><td>W11</td><td>rays_editor 22.7k (split) · editor_prepare · <code>bin/rays</code> · tools (<code>ui_shot</code>, <code>mem_gate</code>, benches, <code>render_workspace</code>, <code>web_parity</code>)</td><td>All sketches open; all L3 goldens; benches</td></tr>
+<tr><td>W12 Cutover</td><td colspan="2">§12</td></tr>
+</table></div>
+<p class="mute">Test-only OCaml libraries (<code>lisp_sop</code>, <code>workspace_parity</code>, <code>rdk_test_support</code>, <code>flow_ir_test_support</code>, <code>golden_fixtures</code>, <code>scene_execution_fixtures</code>) port in the wave of their first consumer. <code>tools/codemod</code> and the ppx are OCaml-specific and are not ported.</p>
+
+<h2 id="cutover">12. Cutover</h2>
+<p>All of these on both machines, then a release build of <code>rays</code> replaces the OCaml binary:</p>
+<ol>
+<li>Every unit <code>done</code>; <code>rs/port/waivers.txt</code> reviewed, each waiver either resolved or accepted by the owner.</li>
+<li>G1–G10 green. Whole workspace tests under 60 s warm; no test over 5 s outside <code>slow</code>.</li>
+<li>L3 goldens identical, except entries in <code>accepted-diffs.md</code>, each with a reason and the owner's sign-off.</li>
+<li>Path tracing: PT1–PT3 green on Metal (M1) and Vulkan (RTX 2080 Ti).</li>
+<li>Benches no slower than OCaml at p50 and p95; memory budgets hold; the frame-allocation guard reads the counting allocator.</li>
+<li><code>smoke-all</code> opens every sketch; Command-S round-trips comments; file-edit reload works; crash report folders written.</li>
+<li>One week of the owner using the Rust build day to day with the OCaml build one command away.</li>
+</ol>
+<p>Then: delete the OCaml tree, the oracle, <code>rs/fixtures</code> that duplicate L3 goldens, and the ppx; move <code>rs/</code> to the root; rewrite <code>AGENTS.md</code> loops for Cargo.</p>
+
+<h2 id="risks">13. Risks</h2>
+<div class="tw"><table>
+<tr><th>Risk</th><th>Mitigation</th></tr>
+<tr><td>Build-time budgets missed on the real tree</td><td>Measured in W0 on a canary and re-measured each merge (G2). <b>Kill criterion:</b> if after W2 a one-line edit in a middle crate takes over 5 s to rebuild and test, stop and decide (D5) before W3</td></tr>
+<tr><td>Port takes longer than planned while OCaml is frozen</td><td>The OCaml product keeps shipping bug fixes; waves are tagged so the effort can stop at any wave with nothing lost on the OCaml side</td></tr>
+<tr><td>Cheap agents translate subtly wrong</td><td>Exact oracle fixtures per unit, L2 fuzz, read-only fixtures, closed cookbook, escalation after one retry</td></tr>
+<tr><td>Output differences from hashing, sort order or float printing</td><td>W0 helper crates reproduce OCaml's behaviour; any remaining diff needs an accepted-diffs entry</td></tr>
+<tr><td>Vulkan path-tracing features have no oracle today</td><td>PT0 closes them in OCaml first, with Metal's images as the reference</td></tr>
+<tr><td>Borrow-checker friction in the Lisp evaluator, IR and editor state</td><td>Arenas with ids and <code>Arc</code> by rule; no struct lifetimes; those cores are strong-agent units</td></tr>
+<tr><td>Rust is not automatically faster (Arc counts, bounds checks, <code>-O0</code> tests)</td><td>G9 compares against OCaml every wave; hot kernels already use packed arrays, which map one to one</td></tr>
+<tr><td>Generic-free rule causes duplication</td><td>Accepted: duplication compiles once and reads plainly. <code>rays_collections</code> is the only place generics live</td></tr>
+</table></div>
+
+<h2 id="decisions">14. Decisions for you</h2>
+<div class="tw"><table>
+<tr><th></th><th>Decision</th><th>Recommendation</th></tr>
+<tr><td>D1</td><td>Freeze OCaml features during the port?</td><td>Yes, bug fixes only, each with a fixture. Without a freeze the oracle moves under the port</td></tr>
+<tr><td>D2</td><td>Cranelift (nightly) for debug builds?</td><td>Decide on W0 numbers; default to stable LLVM <code>-O0</code></td></tr>
+<tr><td>D3</td><td>Close the Vulkan path-tracing gaps in OCaml first (PT0)?</td><td>Yes: the port then stays a translation and Vulkan gets a real oracle</td></tr>
+<tr><td>D4</td><td>Accept output differences that are order-only (hash iteration)?</td><td>No by default; case by case in <code>accepted-diffs.md</code></td></tr>
+<tr><td>D5</td><td>What to do if the kill criterion trips after W2</td><td>Fall back to the hybrid: keep OCaml, keep the Rust crates already ported as hot kernels behind a C ABI</td></tr>
+</table></div>
+</main>
+</body>
+</html>

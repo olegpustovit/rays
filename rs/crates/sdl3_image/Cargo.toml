@@ -1,0 +1,10 @@
+[package]
+name = "sdl3_image"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+sdl3 = { path = "../sdl3" }
+sdl3_image_sys = { path = "../sdl3_image_sys" }

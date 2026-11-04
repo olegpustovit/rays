@@ -35,3 +35,4 @@ _opam
 # Agentpack mirror of the tracked .claude/skills files
 /.agents/
 /.claude/worktrees/
+/rs/target/

@@ -1,0 +1,12 @@
+[package]
+name = "ogpu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "ogpu"
+path = "src/lib.rs"
+
+[dependencies]
+ogpu_core = { path = "../ogpu_core" }

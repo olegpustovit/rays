@@ -1,0 +1,290 @@
+use super::{Error, Handle};
+#[cfg(target_vendor = "apple")]
+use super::NativeHandle;
+#[cfg(target_vendor = "apple")]
+use std::ffi::{c_char, CStr, CString, c_void};
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct ColorAttachment {
+    pub pixel_format: i32,
+    pub blending_state: i32,
+    pub source_rgb_blend_factor: i32,
+    pub destination_rgb_blend_factor: i32,
+    pub rgb_blend_operation: i32,
+    pub source_alpha_blend_factor: i32,
+    pub destination_alpha_blend_factor: i32,
+    pub alpha_blend_operation: i32,
+    pub write_mask: i32,
+}
+#[cfg(target_vendor = "apple")]
+#[repr(C)]
+struct RawResource { handle: *mut NativeHandle, kind: i32 }
+
+pub fn render_encoder_use_resources(
+    encoder: &Handle,
+    resources: &[(i32, &Handle)],
+    usage: i32,
+    stages: i32,
+) -> Result<(), Error> {
+    if resources.is_empty() { return Err(Error::InvalidArgument("render resources must not be empty")); }
+    #[cfg(target_vendor = "apple")]
+    {
+        let resources = resources.iter().map(|(kind, handle)| {
+            Ok(RawResource { handle: handle.as_native_ptr()?, kind: *kind })
+        }).collect::<Result<Vec<_>, Error>>()?;
+        let mut message = std::ptr::null();
+        let status = unsafe {
+            caml_rays_metal_render_encoder_use_resources(
+                encoder.as_native_ptr()?, resources.as_ptr(), resources.len(), usage, stages, &mut message,
+            )
+        };
+        if status == 0 { Ok(()) } else { Err(unsafe { Error::from_native(status, message) }) }
+    }
+    #[cfg(not(target_vendor = "apple"))]
+    { let _ = (encoder, resources, usage, stages); Err(Error::Unavailable) }
+}
+
+#[cfg(target_vendor = "apple")]
+unsafe extern "C" {
+    fn caml_rays_metal_render_encoder_use_resources(
+        encoder: *mut NativeHandle, resources: *const RawResource, count: usize,
+        usage: i32, stages: i32, message: *mut *const c_char,
+    ) -> i32;
+}
+
+
+#[cfg(target_vendor = "apple")]
+#[repr(C)]
+struct RawBinding {
+    name: *mut c_char,
+    binding_type: i32,
+    access: i32,
+    index: u64,
+    used: u8,
+    argument: u8,
+    buffer_alignment: i64,
+    buffer_data_size: i64,
+    buffer_data_type: i32,
+    texture_type: i32,
+    texture_data_type: i32,
+    depth: u8,
+    array_length: i64,
+    threadgroup_alignment: i64,
+    threadgroup_data_size: i64,
+    object_alignment: i64,
+    object_data_size: i64,
+    reflected_type: *mut c_void,
+}
+
+#[derive(Clone, Debug)]
+pub struct Binding {
+    pub name: String,
+    pub binding_type: i32,
+    pub access: i32,
+    pub index: u64,
+    pub used: bool,
+    pub argument: bool,
+    pub buffer_alignment: i64,
+    pub buffer_data_size: i64,
+    pub buffer_data_type: i32,
+    pub texture_type: i32,
+    pub texture_data_type: i32,
+    pub depth: bool,
+    pub array_length: i64,
+    pub threadgroup_alignment: i64,
+    pub threadgroup_data_size: i64,
+    pub object_alignment: i64,
+    pub object_data_size: i64,
+    pub reflected_type: Option<super::reflection::ReflectedType>,
+}
+
+pub fn create_compiler(device: &Handle) -> Result<Handle, Error> {
+    #[cfg(target_vendor = "apple")]
+    {
+        let mut output = std::ptr::null_mut();
+        let mut message = std::ptr::null();
+        let status = unsafe { caml_rays_metal_compiler_create(device.as_native_ptr()?, &mut output, &mut message) };
+        if status != 0 { return Err(unsafe { Error::from_native(status, message) }); }
+        unsafe { Handle::from_native(output) }
+    }
+    #[cfg(not(target_vendor = "apple"))]
+    { let _ = device; Err(Error::Unavailable) }
+}
+
+pub fn create_compute_pipeline(
+    device: &Handle,
+    function: &Handle,
+    label: Option<&str>,
+    reflection: bool,
+) -> Result<(Handle, Vec<Binding>), Error> {
+    #[cfg(target_vendor = "apple")]
+    {
+        let label = label.map(CString::new).transpose().map_err(|_| Error::InvalidArgument("Metal labels must not contain NUL"))?;
+        let mut output = std::ptr::null_mut();
+        let mut bindings = std::ptr::null_mut();
+        let mut count = 0usize;
+        let mut message = std::ptr::null();
+        let status = unsafe {
+            caml_rays_metal_compute_pipeline_create_descriptor(
+                device.as_native_ptr()?, function.as_native_ptr()?,
+                label.as_ref().map_or(std::ptr::null(), |value| value.as_ptr()),
+                u8::from(reflection), &mut output, &mut bindings, &mut count, &mut message,
+            )
+        };
+        if status != 0 {
+            unsafe { caml_rays_metal_pipeline_reflection_free(bindings, count); }
+            return Err(unsafe { Error::from_native(status, message) });
+        }
+        let result = unsafe { (Handle::from_native(output), bindings_from_raw(bindings, count)) };
+        unsafe { caml_rays_metal_pipeline_reflection_free(bindings, count); }
+        Ok((result.0?, result.1?))
+    }
+    #[cfg(not(target_vendor = "apple"))]
+    { let _ = (device, function, label, reflection); Err(Error::Unavailable) }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn create_render_pipeline(
+    compiler: &Handle,
+    library: &Handle,
+    label: Option<&str>,
+    vertex: &str,
+    fragment: Option<&str>,
+    reflection: bool,
+    sample_count: u64,
+    color_attachments: &[ColorAttachment],
+    primitive_topology: i32,
+    support_indirect_command_buffers: bool,
+) -> Result<(Handle, (Vec<Binding>, Vec<Binding>)), Error> {
+    #[cfg(target_vendor = "apple")]
+    {
+        let label = label.map(CString::new).transpose().map_err(|_| Error::InvalidArgument("Metal labels must not contain NUL"))?;
+        let vertex = CString::new(vertex).map_err(|_| Error::InvalidArgument("Metal function names must not contain NUL"))?;
+        let fragment = fragment.map(CString::new).transpose().map_err(|_| Error::InvalidArgument("Metal function names must not contain NUL"))?;
+        let mut output = std::ptr::null_mut();
+        let mut message = std::ptr::null();
+        let status = unsafe {
+            caml_rays_metal_compiler_create_render_pipeline(
+                compiler.as_native_ptr()?, library.as_native_ptr()?,
+                label.as_ref().map_or(std::ptr::null(), |value| value.as_ptr()),
+                vertex.as_ptr(), fragment.as_ref().map_or(std::ptr::null(), |value| value.as_ptr()),
+                u8::from(reflection), sample_count, color_attachments.as_ptr(), color_attachments.len(),
+                primitive_topology, u8::from(support_indirect_command_buffers), &mut output, &mut message,
+            )
+        };
+        if status != 0 { return Err(unsafe { Error::from_native(status, message) }); }
+        let pipeline = unsafe { Handle::from_native(output)? };
+        let reflection = if reflection {
+            render_pipeline_reflection(&pipeline)?
+        } else {
+            (Vec::new(), Vec::new())
+        };
+        Ok((pipeline, reflection))
+    }
+    #[cfg(not(target_vendor = "apple"))]
+    { let _ = (compiler, library, label, vertex, fragment, reflection, sample_count, color_attachments, primitive_topology, support_indirect_command_buffers); Err(Error::Unavailable) }
+}
+
+pub fn render_pipeline_reflection(pipeline: &Handle) -> Result<(Vec<Binding>, Vec<Binding>), Error> {
+    #[cfg(target_vendor = "apple")]
+    {
+        let mut vertex = std::ptr::null_mut();
+        let mut vertex_count = 0usize;
+        let mut fragment = std::ptr::null_mut();
+        let mut fragment_count = 0usize;
+        let mut message = std::ptr::null();
+        let status = unsafe {
+            caml_rays_metal_render_pipeline_reflection(
+                pipeline.as_native_ptr()?, &mut vertex, &mut vertex_count, &mut fragment, &mut fragment_count, &mut message,
+            )
+        };
+        if status != 0 {
+            unsafe { caml_rays_metal_pipeline_reflection_free(vertex, vertex_count); }
+            unsafe { caml_rays_metal_pipeline_reflection_free(fragment, fragment_count); }
+            return Err(unsafe { Error::from_native(status, message) });
+        }
+        let result = unsafe {
+            let vertex = bindings_from_raw(vertex, vertex_count);
+            let fragment = bindings_from_raw(fragment, fragment_count);
+            vertex.and_then(|vertex| fragment.map(|fragment| (vertex, fragment)))
+        };
+        unsafe {
+            caml_rays_metal_pipeline_reflection_free(vertex, vertex_count);
+            caml_rays_metal_pipeline_reflection_free(fragment, fragment_count);
+        }
+        result
+    }
+    #[cfg(not(target_vendor = "apple"))]
+    { let _ = pipeline; Err(Error::Unavailable) }
+}
+
+#[cfg(target_vendor = "apple")]
+unsafe fn bindings_from_raw(pointer: *mut RawBinding, count: usize) -> Result<Vec<Binding>, Error> {
+    if count != 0 && pointer.is_null() { return Err(Error::InvalidHandle); }
+    if count == 0 { return Ok(Vec::new()); }
+    let raw = unsafe { std::slice::from_raw_parts(pointer, count) };
+    raw.iter().map(|binding| {
+        if binding.name.is_null() { return Err(Error::InvalidHandle); }
+        let name = unsafe { CStr::from_ptr(binding.name) }.to_string_lossy().into_owned();
+        let reflected_type = unsafe { super::reflection::snapshot(binding.reflected_type) }?;
+        Ok(Binding {
+            name, binding_type: binding.binding_type, access: binding.access, index: binding.index,
+            used: binding.used != 0, argument: binding.argument != 0,
+            buffer_alignment: binding.buffer_alignment, buffer_data_size: binding.buffer_data_size,
+            buffer_data_type: binding.buffer_data_type, texture_type: binding.texture_type,
+            texture_data_type: binding.texture_data_type, depth: binding.depth != 0,
+            array_length: binding.array_length, threadgroup_alignment: binding.threadgroup_alignment,
+            threadgroup_data_size: binding.threadgroup_data_size, object_alignment: binding.object_alignment,
+            object_data_size: binding.object_data_size, reflected_type,
+        })
+    }).collect()
+}
+
+pub fn copy_buffer_to_texture(
+    encoder: &Handle, source: &Handle, source_offset: u64, source_bytes_per_row: u64, source_bytes_per_image: u64,
+    destination: &Handle, destination_slice: u64, destination_level: u64,
+    origin: (u64, u64, u64), size: (u64, u64, u64),
+) -> Result<(), Error> {
+    #[cfg(target_vendor = "apple")]
+    {
+        let mut message = std::ptr::null();
+        let status = unsafe {
+            caml_rays_metal_blit_encoder_copy_buffer_to_texture(
+                encoder.as_native_ptr()?, source.as_native_ptr()?, source_offset, source_bytes_per_row,
+                source_bytes_per_image, destination.as_native_ptr()?, destination_slice, destination_level,
+                origin.0, origin.1, origin.2, size.0, size.1, size.2, &mut message,
+            )
+        };
+        if status == 0 { Ok(()) } else { Err(unsafe { Error::from_native(status, message) }) }
+    }
+    #[cfg(not(target_vendor = "apple"))]
+    { let _ = (encoder, source, source_offset, source_bytes_per_row, source_bytes_per_image, destination, destination_slice, destination_level, origin, size); Err(Error::Unavailable) }
+}
+
+#[cfg(target_vendor = "apple")]
+unsafe extern "C" {
+    fn caml_rays_metal_compute_pipeline_create_descriptor(
+        device: *mut NativeHandle, function: *mut NativeHandle, label: *const c_char,
+        reflection: u8, output: *mut *mut NativeHandle, bindings: *mut *mut RawBinding,
+        binding_count: *mut usize, message: *mut *const c_char,
+    ) -> i32;
+    fn caml_rays_metal_compiler_create(device: *mut NativeHandle, output: *mut *mut NativeHandle, message: *mut *const c_char) -> i32;
+    fn caml_rays_metal_compiler_create_render_pipeline(
+        compiler: *mut NativeHandle, library: *mut NativeHandle, label: *const c_char, vertex: *const c_char,
+        fragment: *const c_char, reflection: u8, sample_count: u64, color_attachments: *const ColorAttachment,
+        color_attachment_count: usize, primitive_topology: i32, support_indirect_command_buffers: u8,
+        output: *mut *mut NativeHandle, message: *mut *const c_char,
+    ) -> i32;
+    fn caml_rays_metal_render_pipeline_reflection(
+        pipeline: *mut NativeHandle, vertex: *mut *mut RawBinding, vertex_count: *mut usize,
+        fragment: *mut *mut RawBinding, fragment_count: *mut usize, message: *mut *const c_char,
+    ) -> i32;
+    fn caml_rays_metal_pipeline_reflection_free(bindings: *mut RawBinding, count: usize);
+    fn caml_rays_metal_blit_encoder_copy_buffer_to_texture(
+        encoder: *mut NativeHandle, source: *mut NativeHandle, source_offset: u64, source_bytes_per_row: u64,
+        source_bytes_per_image: u64, destination: *mut NativeHandle, destination_slice: u64,
+        destination_level: u64, x: u64, y: u64, z: u64, width: u64, height: u64, depth: u64,
+        message: *mut *const c_char,
+    ) -> i32;
+}

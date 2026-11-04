@@ -1,0 +1,24 @@
+[package]
+name = "runtime_resources"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+sdl3 = { path = "../sdl3" }
+sdl3_image = { path = "../sdl3_image" }
+sdl3_ttf = { path = "../sdl3_ttf" }
+sdl3_mixer = { path = "../sdl3_mixer" }
+ogpu = { path = "../ogpu" }
+
+[dev-dependencies]
+ogpu_mock = { path = "../ogpu_mock" }
+
+# These tests need the SDL main thread, which libtest never gives a test: their own main runs them.
+[[test]]
+name = "window_runtime_resources"
+harness = false
+
+[[test]]
+name = "window_gpu_image"
+harness = false

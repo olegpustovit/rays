@@ -1,0 +1,40 @@
+//! The virtual `Impl` of the OCaml library: one backend record, chosen once per thread at startup
+//! by the executable (`select`); unselected is a typed error, never a default.
+use ogpu_core::{
+    backend::Driver,
+    error::{self, Error, ErrorKind},
+};
+use std::{cell::RefCell, rc::Rc};
+
+pub struct Impl {
+    pub backend: String,
+    pub create_driver: Box<dyn Fn() -> Driver>,
+    /// Native handles still alive. Diagnostics only.
+    pub live_handles: Box<dyn Fn() -> i64>,
+}
+
+thread_local! {
+    static SELECTED: RefCell<Option<Rc<Impl>>> = const { RefCell::new(None) };
+}
+
+pub fn select(implementation: Impl) {
+    SELECTED.with(|cell| *cell.borrow_mut() = Some(Rc::new(implementation)));
+}
+
+fn selected(operation: &str) -> Result<Rc<Impl>, Error> {
+    SELECTED.with(|cell| cell.borrow().clone()).ok_or_else(|| {
+        error::make(operation, ErrorKind::NoAdapter, "no OGPU implementation selected")
+    })
+}
+
+pub fn backend() -> Result<String, Error> {
+    Ok(selected("Ogpu.Impl.backend")?.backend.clone())
+}
+
+pub fn create_driver() -> Result<Driver, Error> {
+    Ok((selected("Ogpu.Impl.create_driver")?.create_driver)())
+}
+
+pub fn live_handles() -> Result<i64, Error> {
+    Ok((selected("Ogpu.Impl.live_handles")?.live_handles)())
+}

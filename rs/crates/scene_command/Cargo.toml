@@ -1,0 +1,8 @@
+[package]
+name = "scene_command"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "scene_command"
+path = "src/lib.rs"

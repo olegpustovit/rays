@@ -1,0 +1,12 @@
+/// Use the target C `fma` so results match OCaml's one-rounding implementation.
+pub fn fma(a: f64, b: f64, c: f64) -> f64 { rays_math_sys::fma(a, b, c) }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn subnormal_result_rounds_to_nearest() {
+        // This exact FMA rounds up to ...681; the Windows software fallback returned ...680.
+        assert_eq!(super::fma(0.1, 1e-308, 1e-308).to_bits(), 0x0007_e8eb_ea82_e681);
+        assert_eq!(super::fma(-0.1, 1e-308, -1e-308).to_bits(), 0x8007_e8eb_ea82_e681);
+    }
+}

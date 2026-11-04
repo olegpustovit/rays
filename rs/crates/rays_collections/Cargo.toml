@@ -1,0 +1,11 @@
+[package]
+name = "rays_collections"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mem = { path = "../mem" }
+lru = { path = "../lru" }
+rays_hash = { path = "../rays_hash" }
+parallel = { path = "../parallel" }

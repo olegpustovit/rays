@@ -1,0 +1,12 @@
+[package]
+name = "flow_syntax"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+param = { path = "../param" }
+rays_diagnostic = { path = "../rays_diagnostic" }
+ocaml_int = { path = "../ocaml_int" }
+rays_math = { path = "../rays_math" }
+cfmt = { path = "../cfmt" }

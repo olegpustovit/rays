@@ -1,0 +1,13 @@
+[package]
+name = "ogpu_mock"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "ogpu_mock"
+path = "src/lib.rs"
+
+[dependencies]
+ogpu_core = { path = "../ogpu_core" }
+ogpu = { path = "../ogpu" }

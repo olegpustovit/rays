@@ -1,0 +1,13 @@
+[package]
+name = "sdl3"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+native_layer_token = { path = "../native_layer_token" }
+sdl3_sys = { path = "../sdl3_sys" }
+
+[dev-dependencies]
+sdl3_sys = { path = "../sdl3_sys", features = ["test-util"] }

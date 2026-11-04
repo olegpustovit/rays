@@ -1,0 +1,31 @@
+scope	status	owner	detail
+W0	in_progress	integration	Workspace/runner/planner exist; pre-W2 shape/deps gates, cfmt tests, and available leaf/W0-pair budgets passed. `ocaml_int`, `rays_hash`, and W2 packages/edges have since changed; revalidation pending. G2 remains partial until flow_ir/rays_editor canaries exist; oracle/fixture work remains
+W1	in_review	parallel agents	Pre-helper-change suites passed (10 packages/75 W1 tests; 108 full-workspace tests). `rays_math`/`rays_collections` were updated to shared helpers; rerun and oracle/interface coverage pending
+W2	in_progress	parallel agents	Flow split/queue mapped; flow_syntax/rdk_core/ogpu_core/SDL3/Vulkan source written but unverified; FlowCheck incomplete, FlowEval partial; RDK fixes applied, final review/tests pending; SDL3 review clean, native tests pending; Metal feature files exist, pipeline/reflection integration incomplete; no W2 checks
+W3	pending		flow_graph, flow_ir, ogpu, ogpu_metal_native, ogpu_vulkan, ogpu_mock, rdk_geom, runtime_input, SDL media bindings
+W4	pending		flow_shader, flow_web, ogpu_metal, ogpu_conformance, rdk_ops, runtime, runtime_resources
+W5	pending		rdk_boolean, renderer
+W6	pending		flow_gpu, rays, rdk
+W7	pending		sop, pxui, rays_pathtracer, rdk_rays, editor_core
+W8	pending		flow_sop, pxui_graph, pxui_shell
+W9	pending		editor_document
+W10	pending		flow_native, web_export
+W11	pending		rays_editor, editor_prepare, bin/rays, tools and sketches
+W12	pending		Golden parity, performance, memory, Metal/Vulkan path-tracer qualification, then OCaml cutover
+unit: rays_diagnostic	in_review	RaysDiagnostic	Two package tests pass; oracle fixtures and G6 interface coverage pending
+unit: input	in_review	InputFacts	Seven package tests pass; oracle fixtures and G6 interface coverage pending
+unit: param	in_review	ParamSchema	Seven package tests pass; schema/API oracle coverage remains incomplete
+unit: rays_math	in_review	RaysMath	Seven package tests pass; normal/subnormal FMA cases pass on Windows; broad differential coverage remains
+unit: native_layer_token	in_review	NativeLayerToken	Wrapper and sys suites pass (six tests); live-pointer unsafe stays in *_sys; oracle coverage pending
+unit: scene_command	in_review	SceneCommands	Package tests pass; oracle fixtures and G6 interface coverage pending
+unit: test runner	in_review	RaysTestRunner	Eleven runner tests pass, including bounded timeouts, lock behavior, and Windows child-tree termination
+unit: mem	in_review	MemLedger	Package tests pass; W1 interface coverage and oracle fixtures pending
+unit: lru	in_review	LruPort	Eight package tests pass; OCaml parity/coverage review remains
+unit: parallel	in_review	ParallelPool	Eleven package tests pass, including exact one/many-domain results; oracle coverage pending
+unit: rays_collections	in_review	RaysCollections	Nine package tests pass; adapter/API coverage review remains
+unit: RustGate	in_review	RustGate	Shape and dependency gates pass; focused gate tests pass
+unit: buildtime	in_progress	BuildtimeGate	Six tests pass; timestamped Cargo report parsing fixed; leaf and rays_math+param budgets pass, but flow_ir/rays_editor canaries are absent
+unit: Vulkan PT0	in_progress	VulkanPathTracingPT0	Focused @lib/flow_gpu/runtest passes; prior SPIR-V/Metal interface mismatch not reproduced; native Vulkan/Metal qualification pending
+unit: Vulkan PT1	in_progress	RayTraceConformancePT1	Conformance suite remains unverified
+unit: port queue	in_review	PortQueue	Three planner tests pass; 456-row queue exists, but module completion and W2 skeleton planning remain
+unit: cfmt	in_review	CfmtCompat	Three default tests and the ignored million-seed round-trip pass; OCaml oracle parity remains

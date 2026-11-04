@@ -1,0 +1,2 @@
+[alias]
+t = "run -q -p rays-t --"

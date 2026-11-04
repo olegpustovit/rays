@@ -1,0 +1,8 @@
+[package]
+name = "mem"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mem_sys = { path = "../mem_sys" }

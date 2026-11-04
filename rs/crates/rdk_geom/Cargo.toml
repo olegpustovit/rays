@@ -1,0 +1,10 @@
+[package]
+name = "rdk_geom"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rdk_core = { path = "../rdk_core" }
+rays_math = { path = "../rays_math" }
+parallel = { path = "../parallel" }
