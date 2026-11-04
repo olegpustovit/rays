@@ -2,7 +2,8 @@
 //! scrubs, paste, find, symbols and lines. The sections that drive the whole editor
 //! (`editor_text`, `editor_binding`, `editor_w9`, `editor_active_scrub`, `editor_command_click`,
 //! `editor_literal_scrub`, `editor_text_drop`, `editor_graph_drafts`, `editor_text_find`,
-//! `editor_fn_frames`) need `Rays_editor::Editor` (bundle F): see `editor_sections_wait_for_f`.
+//! `editor_fn_frames`) need `Rays_editor::Editor`: they live in tests/window_suite_t3.rs
+//! (tests/suite_t3/textpane.rs; the unported ones are listed in port/parity_backlog.md).
 use crate::text_pane::{self as t, Find, Shown, Step, Tab};
 use editor_document::kinds;
 use editor_document::workspace_doc::{self as doc, TextOptions};
@@ -338,14 +339,6 @@ fn shown_cache_and_commands() {
     assert_eq!(state.request, Some(t::Request { select: (2, 5), splice: vec![] }));
     assert_eq!(state.nonce, 1);
 }
-
-/// The sections of test_text_pane.ml that drive `Rays_editor::Editor` (frames, keys, mouse, the
-/// cook worker) cannot run before bundle F: editor_text, editor_binding, editor_w9,
-/// editor_active_scrub, editor_command_click, editor_literal_scrub, editor_text_drop,
-/// editor_graph_drafts, editor_text_find, editor_fn_frames.
-#[test]
-#[ignore = "needs the Editor (bundle F) and cook (bundle A)"]
-fn editor_sections_wait_for_f() {}
 
 /// The editor's Lisp as the text area's language: indentation, bracket pairs, completions,
 /// descriptions and parinfer (lisp_text.rs is bundle A's; this section lives in test_text_pane.ml).
