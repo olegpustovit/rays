@@ -249,7 +249,7 @@ fn walk(hooks: &Hooks, term: &Term) -> Result<Term, Diagnostic> {
             term.node.clone()
         }
     };
-    Ok(Term { node, ..term.clone() })
+    Ok(Term { path: term.path.clone(), ty: term.ty.clone(), node, form: term.form.clone() })
 }
 
 fn walk_graph(hooks: &Hooks, graph: &Graph) -> Result<Graph, Diagnostic> {
@@ -275,13 +275,63 @@ pub fn checked(workspace: Workspace) -> Result<Workspace, Diagnostic> {
     let hooks = Hooks {
         nodes: workspace.nodes.iter().map(|node| (node.kind.qualified.clone(), for_node(&workspace, node))).collect(),
     };
-    let graphs = workspace.graphs.iter().map(|g| walk_graph(&hooks, g)).collect::<Result<Vec<_>, _>>()?;
-    let defs = workspace.defs.iter().map(|g| walk_graph(&hooks, g)).collect::<Result<Vec<_>, _>>()?;
-    let mut nodes = Vec::with_capacity(workspace.nodes.len());
-    for node in workspace.nodes.iter() {
-        nodes.push(NodeDefinition { body: walk_graph(&hooks, &node.body)?, ..node.clone() });
+    // Only a graph that calls a node with a hook can change; a collection with none keeps its Arc.
+    let hooked: Vec<&str> = hooks.nodes.iter().filter(|(_, h)| !h.is_empty()).map(|(k, _)| k.as_str()).collect();
+    let rebuild = |all: &Arc<Vec<Graph>>| -> Result<Arc<Vec<Graph>>, Diagnostic> {
+        if !all.iter().any(|g| graph_calls(g, &hooked)) {
+            return Ok(all.clone());
+        }
+        let walked = all.iter().map(|g| if graph_calls(g, &hooked) { walk_graph(&hooks, g) } else { Ok(g.clone()) }).collect::<Result<Vec<_>, _>>()?;
+        Ok(Arc::new(walked))
+    };
+    let graphs = rebuild(&workspace.graphs)?;
+    let defs = rebuild(&workspace.defs)?;
+    let nodes = if workspace.nodes.iter().any(|n| graph_calls(&n.body, &hooked)) {
+        let mut nodes = Vec::with_capacity(workspace.nodes.len());
+        for node in workspace.nodes.iter() {
+            let mut n = node.clone();
+            if graph_calls(&node.body, &hooked) {
+                n.body = walk_graph(&hooks, &node.body)?;
+            }
+            nodes.push(n);
+        }
+        Arc::new(nodes)
+    } else {
+        workspace.nodes.clone()
+    };
+    Ok(Workspace { graphs, defs, nodes, ..workspace })
+}
+
+/// Whether any term of the graph calls one of these node kinds (the only terms `walk` changes).
+fn graph_calls(graph: &Graph, kinds: &[&str]) -> bool {
+    !kinds.is_empty() && (calls(&graph.body, kinds) || graph.inputs.iter().any(|(_, _, d)| d.as_ref().is_some_and(|t| calls(t, kinds))))
+}
+
+fn calls(term: &Term, kinds: &[&str]) -> bool {
+    let all = |ts: &[Term]| ts.iter().any(|t| calls(t, kinds));
+    let fields = |fs: &[(String, Term)]| fs.iter().any(|(_, t)| calls(t, kinds));
+    let patterns = |ps: &[(Pattern, Term)]| ps.iter().any(|(_, t)| calls(t, kinds));
+    match &term.node {
+        Node::Call { kind, args, .. } => kinds.contains(&kind.as_str()) || fields(args),
+        Node::Op { args, .. } => fields(args),
+        Node::GraphRef { inputs, .. } => fields(inputs),
+        Node::CallFn { args, body, .. } => all(args) || body.as_ref().is_some_and(|b| calls(b, kinds)),
+        Node::Vec(v) | Node::ListLit(v) | Node::Str(v) | Node::Hof(_, v) | Node::ListOp(_, v) => all(v),
+        Node::Record(fs) => fields(fs),
+        Node::Let(bindings, body) => patterns(bindings) || calls(body, kinds),
+        Node::Loop { accs, clauses, body, .. } => patterns(accs) || patterns(clauses) || calls(body, kinds),
+        Node::State { init, step, .. } => calls(init, kinds) || calls(step, kinds),
+        Node::WithError(a, b) => calls(a, kinds) || calls(b, kinds),
+        Node::ErrorRows { rows, mapper, .. } => calls(rows, kinds) || calls(mapper, kinds),
+        Node::If(c, y, n) => calls(c, kinds) || calls(y, kinds) || calls(n, kinds),
+        Node::Cond(arms, default) => arms.iter().any(|(a, b)| calls(a, kinds) || calls(b, kinds)) || calls(default, kinds),
+        Node::Case(value, arms, default) => calls(value, kinds) || arms.iter().any(|(_, t)| calls(t, kinds)) || calls(default, kinds),
+        Node::Fn { body, capture, .. } => calls(body, kinds) || capture.as_ref().is_some_and(|c| calls(c, kinds)),
+        Node::Get(v, _) | Node::Bypass(v) => calls(v, kinds),
+        Node::Expanded { body, .. } => calls(body, kinds),
+        Node::Assoc(v, updates) => calls(v, kinds) || fields(updates),
+        Node::Lit(_) | Node::Text(_) | Node::Nil | Node::Time | Node::RefBinding(..) | Node::FnRef(_) => false,
     }
-    Ok(Workspace { graphs: graphs.into(), defs: defs.into(), nodes: nodes.into(), ..workspace })
 }
 
 #[cfg(test)]

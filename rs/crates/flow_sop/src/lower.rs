@@ -3447,6 +3447,27 @@ struct StructEnv {
     factories: Vec<Factory>,
 }
 
+/// Lend the session to `f`: the lock is never held across the cook, which can re-enter (a nested
+/// geometry lookup). A re-entrant call finds the slot empty and uses a fresh session; whichever
+/// finishes second closes its own.
+fn lend_session<X>(slot: &Mutex<Option<sop::session::T>>, f: impl FnOnce(&mut sop::session::T) -> X) -> X {
+    let taken = slot.lock().unwrap().take();
+    let mut session = taken.unwrap_or_else(|| {
+        let mut s = sop::session::create(0, 0).expect("a session with no entries");
+        sop::session::set_parallel_override(&mut s, Some(false));
+        s
+    });
+    let out = f(&mut session);
+    let mut guard = slot.lock().unwrap();
+    if guard.is_none() {
+        *guard = Some(session);
+    } else {
+        drop(guard);
+        sop::session::close(&mut session);
+    }
+    out
+}
+
 struct HostRun {
     env: StructEnv,
     context: sctx::T,
@@ -3488,15 +3509,7 @@ impl HostRun {
             (Some(output), _) => validate(output),
             (None, None) => Err(data_source("A cooked handle has no result or prepared node.")),
             (None, Some(node)) => {
-                let value = {
-                    let mut session = self.session.lock().unwrap();
-                    let session = session.get_or_insert_with(|| {
-                        let mut s = sop::session::create(0, 0).expect("a session with no entries");
-                        sop::session::set_parallel_override(&mut s, Some(false));
-                        s
-                    });
-                    sop::session::cook(session, None, &self.context, &node)?
-                };
+                let value = lend_session(&self.session, |session| sop::session::cook(session, None, &self.context, &node))?;
                 let value = validate(value)?;
                 self.handles.lock().unwrap().get_mut(&id).unwrap().2 = Some(value.clone());
                 Ok(value)
@@ -5686,4 +5699,17 @@ fn failed_card_as_call(n: &ENode, plan: &Plan, checked: &Workspace) -> ENode {
     args.extend(parameters.iter().cloned());
     args.extend(n.args.iter().filter(|(name, _)| !["value", "kind", "parameters", "slots"].contains(&name.as_str())).cloned());
     ENode { kind, args, ..n.clone() }
+}
+
+#[cfg(test)]
+mod lend_session_tests {
+    use super::*;
+
+    #[test]
+    fn reentrant_lend_does_not_deadlock() {
+        let slot: Mutex<Option<sop::session::T>> = Mutex::new(None);
+        let depth = lend_session(&slot, |_| lend_session(&slot, |_| lend_session(&slot, |_| 3)));
+        assert_eq!(depth, 3);
+        assert!(slot.lock().unwrap().is_some());
+    }
 }

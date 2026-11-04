@@ -124,7 +124,7 @@ fn lend<T>(a: &mut Arena, f: impl FnOnce() -> T) -> T {
 // call counts are its own, it records nothing, and the evaluation it was reached from keeps its own. An entry reached from a callback of an
 // evaluation of the same arena (the arena is lent) runs that way and puts them back on exit; residuals and functions it makes stay, as OCaml's
 // values do.
-struct LiveSaved { time: Option<Frame>, state: Option<State>, resolve: Option<ResolveFn>, elems: BTreeMap<String, Value>, step_count: usize, fn_calls: Shared<HashMap<FnId, i64>>, memo: Shared<HashMap<ResidualId, Value>>, record: bool }
+struct LiveSaved { time: Option<Frame>, state: Option<State>, resolve: Option<ResolveFn>, elems: BTreeMap<String, Value>, step_count: usize, fn_calls: Shared<IdMap<FnId, i64>>, memo: Shared<IdMap<ResidualId, Value>>, record: bool }
 fn save_live(a: &mut Arena) -> Option<LiveSaved> {
     (a.lent > 0).then(|| LiveSaved {
         time: a.time.clone(), state: a.state.clone(), resolve: a.resolve.clone(), elems: a.elems.clone(), step_count: a.step_count,
@@ -138,7 +138,22 @@ fn restore_live(a: &mut Arena, saved: Option<LiveSaved>) {
     let Some(saved) = saved else { return; };
     (a.time, a.state, a.resolve, a.elems, a.step_count, a.fn_calls, a.memo, a.record) = (saved.time, saved.state, saved.resolve, saved.elems, saved.step_count, saved.fn_calls, saved.memo, saved.record);
 }
-fn call_lent(a: &mut Arena, id: ResidualId, callback: &dyn Fn(ResidualId) -> Option<Value>) -> Option<Value> { lend(a, || callback(id)) }
+// A residual handler's callback runs outside that handler, as an OCaml effect handler's does: an evaluation the callback starts (a kernel
+// compile evaluating a term of its residual) offers nothing to the handler that is running it, only to the handlers around it.
+fn outside_handler<T>(f: impl FnOnce() -> T) -> T {
+    let handler = ACTIVE_RESIDUAL_HANDLERS.with(|handlers| handlers.borrow_mut().pop());
+    let observed = ACTIVE_OBSERVED_RESIDUALS.with(|observed| observed.borrow_mut().pop());
+    struct Restore(Option<ResidualHandlers>, Option<Vec<ResidualId>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            if let Some(handler) = self.0.take() { ACTIVE_RESIDUAL_HANDLERS.with(|handlers| handlers.borrow_mut().push(handler)); }
+            if let Some(observed) = self.1.take() { ACTIVE_OBSERVED_RESIDUALS.with(|queues| queues.borrow_mut().push(observed)); }
+        }
+    }
+    let _restore = Restore(handler, observed);
+    f()
+}
+fn call_lent(a: &mut Arena, id: ResidualId, callback: &dyn Fn(ResidualId) -> Option<Value>) -> Option<Value> { lend(a, || outside_handler(|| callback(id))) }
 fn slot_of(home: i64) -> Option<Arc<Slot>> { ARENAS.lock().unwrap_or_else(|e| e.into_inner()).get(&home)?.upgrade() }
 struct ResidualHandlerScope;
 impl Drop for ResidualHandlerScope {
@@ -272,8 +287,11 @@ impl std::hash::Hasher for AddrHasher {
     fn finish(&self) -> u64 { self.0 }
     fn write(&mut self, bytes: &[u8]) { for byte in bytes { self.0 = (self.0.rotate_left(5) ^ u64::from(*byte)).wrapping_mul(0x517c_c1b7_2722_0a95); } }
     fn write_usize(&mut self, n: usize) { self.0 = (n as u64).wrapping_mul(0x517c_c1b7_2722_0a95); }
+    fn write_i64(&mut self, n: i64) { self.0 = (n as u64).wrapping_mul(0x517c_c1b7_2722_0a95); }
 }
 type AddrMap<V> = HashMap<usize, V, std::hash::BuildHasherDefault<AddrHasher>>;
+// residual, function and call-count tables: keyed by an id, hashed with one multiply
+type IdMap<K, V> = HashMap<K, V, std::hash::BuildHasherDefault<AddrHasher>>;
 // The shared base of a term's own path: one allocation per term and arena. The address is checked against the path it held,
 // so a temporary term freed and another made at the same address cannot borrow its base.
 // A name of a term (a binding, an argument) as one shared string per arena, found by the address of the term's text.
@@ -310,11 +328,11 @@ impl<T> std::ops::Deref for Shared<T> { type Target = T; fn deref(&self) -> &T {
 impl<T: Clone> std::ops::DerefMut for Shared<T> { fn deref_mut(&mut self) -> &mut T { Arc::make_mut(&mut self.0) } }
 #[derive(Clone)]
 struct Arena {
-    id: i64, workspace: Shared<Workspace>, functions: Shared<HashMap<FnId,Function>>, residuals: Shared<HashMap<ResidualId,ResidualData>>,
+    id: i64, workspace: Shared<Workspace>, functions: Shared<IdMap<FnId, Function>>, residuals: Shared<IdMap<ResidualId, ResidualData>>,
     nodes: Shared<Vec<Node>>, authored: Vec<i64>, cells: Shared<Vec<GraphCell>>, cache: Shared<HashMap<String,usize>>, states: Shared<Vec<Value>>, records: Shared<BTreeMap<Path, Vec<(Vec<i64>,Value)>>>,
     observed: Vec<ResidualId>, res_log: Shared<Vec<ResidualId>>, fn_log: Shared<Vec<FnId>>, approx: u64, policies: Shared<HashMap<String, Option<Arc<InlineParameterPolicy>>>>,
     record: bool, time: Option<Frame>, resolve: Option<Arc<dyn Fn(&Value)->Result<Value,Diagnostic> + Send + Sync>>,
-    state: Option<State>, elems: BTreeMap<String,Value>, step_count: usize, budget: usize, fn_calls: Shared<HashMap<FnId,i64>>, memo: Shared<HashMap<ResidualId,Value>>, interrupt: Option<Interrupt>, owns_index: bool, lent: u32, bases: Shared<AddrMap<Arc<Path>>>, ops_seen: Shared<AddrMap<(String, &'static str, OpRef)>>, names: Shared<AddrMap<Arc<str>>>, arg_pool: Shared<AddrMap<Vec<(String, Value)>>>, routes: Shared<AddrMap<(usize, Seg, Route)>>, plans: Shared<AddrMap<CodePlan>>, terms: Shared<AddrMap<(Stamp, Arc<Term>)>>, frees: Shared<AddrMap<(Stamp, Arc<Vec<String>>)>>,
+    state: Option<State>, elems: BTreeMap<String,Value>, step_count: usize, budget: usize, fn_calls: Shared<IdMap<FnId, i64>>, memo: Shared<IdMap<ResidualId, Value>>, interrupt: Option<Interrupt>, owns_index: bool, lent: u32, bases: Shared<AddrMap<Arc<Path>>>, ops_seen: Shared<AddrMap<(String, &'static str, OpRef)>>, names: Shared<AddrMap<Arc<str>>>, arg_pool: Shared<AddrMap<Vec<(String, Value)>>>, routes: Shared<AddrMap<(usize, Seg, Route)>>, plans: Shared<AddrMap<CodePlan>>, terms: Shared<AddrMap<(Stamp, Arc<Term>)>>, frees: Shared<AddrMap<(Stamp, Arc<Vec<String>>)>>,
 }
 static EMPTY_WORKSPACE: LazyLock<Shared<Workspace>> = LazyLock::new(|| Shared::new(Workspace {
     name: String::new(), graphs: Vec::new().into(), defs: Vec::new().into(), nodes: Vec::new().into(), macros: Vec::new().into(), source: Vec::new().into(),
@@ -1511,7 +1529,7 @@ fn call_fn(a: &mut Arena, c: &ExecCtx, id: FnId, values: &[Value], body: Option<
             let mut context = c.clone();
             context.inst = closure.at.inst;
             context.prefix = closure.at.prefix.clone();
-            context.base = Arc::new(closure.zone.clone());
+            context.base = base_of(a, &closure.zone);
             context.route = Route(None);
             Arc::make_mut(&mut context.iter).push(index);
             context.depth += 1;
@@ -1745,7 +1763,7 @@ fn eval_map_walk(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, function: F
     let static_map = a.time.is_none() && packed && numeric;
     let id = if static_map || (a.record && c.record && matches!(&term.ty, Ty::Array(_))) { Some(map_residual(a, c, term, env)) } else { None };
     if static_map {
-        if let Some(map) = current_residual_handlers().and_then(|handlers| handlers.map) { let at = site(c); progress.finish = Some(lend(a, || map(&at, term, count))); }
+        if let Some(map) = current_residual_handlers().and_then(|handlers| handlers.map) { let at = site(c); progress.finish = Some(lend(a, || outside_handler(|| map(&at, term, count)))); }
     }
     if let (Some(id), Some(Function::Closure(closure))) = (id, own_fn(a, &function).cloned()) {
         if a.record && c.record && matches!(&term.ty, Ty::Array(_)) {

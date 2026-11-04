@@ -94,6 +94,7 @@ fn cold_lower_seconds(text: &str) -> (f64, f64) {
     let guard = flow_syntax::phase_timer::SampleGuard::start_with_clock(Box::new(move || start.elapsed().as_secs_f64()));
     lower::of_checked(Some(factories), lower::Options::default(), &checked).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
     let phases = guard.finish();
+    if std::env::var("PHASES").is_ok() { eprintln!("PHASES {}", phases.entries.iter().map(|e| format!("{} {:.1}ms x{}", e.phase, e.seconds*1000.0, e.calls)).collect::<Vec<_>>().join(" | ")); }
     (start.elapsed().as_secs_f64(), flow_syntax::phase_timer::seconds(&phases, "evaluate"))
 }
 
@@ -102,7 +103,7 @@ fn cold_lower_seconds(text: &str) -> (f64, f64) {
 fn debug_lowering_beats_native_ocaml() {
     // deep Lisp recursion: the garden needs the main thread's stack in a debug build
     let report = std::thread::Builder::new().stack_size(256 << 20).spawn(|| {
-        OCAML_BASELINE_MS.iter().map(|(name, text, ocaml)| { let (total, evaluate) = cold_lower_seconds(text); (*name, total * 1000.0, *ocaml, evaluate * 1000.0) }).collect::<Vec<_>>()
+        OCAML_BASELINE_MS.iter().filter(|(n, _, _)| std::env::var("ONLY").map_or(true, |o| o == *n)).map(|(name, text, ocaml)| { let (total, evaluate) = cold_lower_seconds(text); (*name, total * 1000.0, *ocaml, evaluate * 1000.0) }).collect::<Vec<_>>()
     }).unwrap().join().unwrap();
     let build = if cfg!(debug_assertions) { "debug" } else { "release" };
     for (name, ms, ocaml, evaluate) in &report { eprintln!("GATE {build} {name}: {ms:.0} ms (evaluator {evaluate:.0} ms; OCaml native {ocaml:.0} ms, {:.1}x)", ms / ocaml); }

@@ -80,3 +80,28 @@ fn reentrant_callbacks_on_eight_threads_share_arenas_without_deadlock() {
     }
     assert_eq!(nested.load(Ordering::Relaxed), 8 * 50 * 2 * per_force, "every evaluation made the same offers and re-entered each");
 }
+
+// A kernel handler that evaluates the very term it was offered (a kernel compile lowering its residual) is not offered it again: the
+// callback runs outside its handler, as an OCaml effect handler's does. Before, this recursed until the stack overflowed (procedural_modeling).
+#[test]
+fn a_kernel_callback_evaluating_its_own_term_is_not_offered_it_again() {
+    let ws = check(SOURCE);
+    let evaluated = ok(static_eval(&ws));
+    let residual = evaluated.results[0].1.clone();
+    let offers = Arc::new(AtomicI64::new(0));
+    let counted = offers.clone();
+    let handlers = ResidualHandlers {
+        kernel: Some(Arc::new(move |id| {
+            counted.fetch_add(1, Ordering::Relaxed);
+            assert!(counted.load(Ordering::Relaxed) < 100, "the kernel handler was offered its own term again");
+            let view = Residual::residual_view(id).unwrap();
+            let _ = Residual::eval_term(id, &view.term, &input::at_time(2.0), None, None, None).unwrap();
+            None
+        })),
+        ..Default::default()
+    };
+    let mut out = None;
+    let _ = Residual::handle(handlers, &mut || { out = Some(force(&residual, &input::at_time(2.0), None)); Ok(evaluated.clone()) });
+    assert_eq!(out.unwrap().unwrap(), Value::Float(expected(2.0)));
+    assert!(offers.load(Ordering::Relaxed) > 0);
+}
