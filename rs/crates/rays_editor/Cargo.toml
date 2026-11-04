@@ -51,3 +51,19 @@ renderer = { path = "../renderer" }
 [[test]]
 name = "window_editor_smoke"
 harness = false
+
+[[test]]
+name = "window_suite_t1"
+harness = false
+
+[[test]]
+name = "window_suite_t2"
+harness = false
+
+[[test]]
+name = "window_suite_t3"
+harness = false
+
+[[test]]
+name = "window_suite_t4"
+harness = false
