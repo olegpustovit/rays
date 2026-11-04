@@ -758,6 +758,9 @@ let mesh_resident_attributes ~grain (scope : Flow_ir.Gpu.residency) fields geome
     List.iter (fun (_, release) -> release ~held:false) (Rdk.Geometry.releasers geometry);
   result
 
+let stateful_programs = ref []
+let stateful_lock = Mutex.create ()
+
 let rec geometry_arrays_node ?check ~gpu ~profile ~clock ~strict_body ~reference ~approx ~kernel_source
     ?host ?state ?elems ~operation ~args ~sources inputs =
   per_context (E.Record args) (fun specialize ->
@@ -770,9 +773,53 @@ let rec geometry_arrays_node ?check ~gpu ~profile ~clock ~strict_body ~reference
 and geometry_arrays_node_in ?(check = true) ~gpu ~profile ~clock ~strict_body ~reference ~approx
     ~kernel_source ?(host = false) ?state ?elems ~operation ~args ~sources inputs =
   let data = geometry_arrays_data args in
-  let program =
+  let prepare data =
     Attribute_kernel.prepare ~profile ~strict:strict_body ~approx ~sink:Flow_ir.Sop_input ~sources
       inputs data
+  in
+  (* a topology no frame or state changes is built once (Topology_kernel_impl.static_cached):
+     later cooks run [points_program], without it *)
+  let static_topology =
+    operation = "sop/mesh"
+    && List.for_all
+         (fun name ->
+           match List.assoc_opt name args with
+           | Some v -> not (E.frame_dependent v || E.state_dependent v)
+           | None -> false)
+         [ "vertex_points"; "primitive_offsets"; "kinds" ]
+  in
+  let programs () =
+    ( prepare data,
+      lazy
+        (match data with
+        | E.Record fields ->
+            prepare
+              (E.Record
+                 (List.filter
+                    (fun (name, _) ->
+                      not (List.mem name [ "vertex_points"; "primitive_offsets"; "kinds" ]))
+                    fields))
+        | _ -> prepare data) )
+  in
+  (* a stateful mesh is rebuilt each frame over the same arguments: its programs, and so its kernels'
+     device sites, slots and buffers, are the last frame's *)
+  let program, points_program =
+    if state = None then programs ()
+    else
+      let same (a, i) =
+        a == args && Array.length i = List.length inputs
+        && List.for_all2 ( == ) (Array.to_list i) inputs
+      in
+      match
+        Mutex.protect stateful_lock (fun () -> List.find_opt (fun (k, _) -> same k) !stateful_programs)
+      with
+      | Some (_, programs) -> programs
+      | None ->
+          let made = programs () in
+          Mutex.protect stateful_lock (fun () ->
+              (* ponytail: the 8 newest; key a weak table if more stateful meshes live at once *)
+              stateful_programs := List.take 8 (((args, Array.of_list inputs), made) :: !stateful_programs));
+          made
   in
   if strict_body && check then ignore (ok program);
   let parameters =
@@ -822,7 +869,11 @@ and geometry_arrays_node_in ?(check = true) ~gpu ~profile ~clock ~strict_body ~r
         let cooked device =
           if cancelled () then error ()
           else
-            Result.bind program (fun program ->
+            (* keyed by its vertices' value: the same while the node's arguments are, across a
+               stateful node's per-frame rebuilds too *)
+            let topology_key = Option.value (List.assoc_opt "vertex_points" args) ~default:data in
+            let cached = static_topology && device && Topology_kernel_impl.static_cached topology_key in
+            Result.bind (if cached then Lazy.force points_program else program) (fun program ->
                 let force ?resident () =
                   Flow_ir.Executor.force ?resident ?state ?elems ~reference ~strict:strict_body
                     ~resolve:(Attribute_kernel.resolve ~context ~geometry)
@@ -841,7 +892,8 @@ and geometry_arrays_node_in ?(check = true) ~gpu ~profile ~clock ~strict_body ~r
                               if cancelled () then error ()
                               else
                                 let result =
-                                  match Topology_kernel_impl.mesh_resident scope fields with
+                                  let static_key = if static_topology then Some topology_key else None in
+                                  match Topology_kernel_impl.mesh_resident ?static_key scope fields with
                                   | Some result -> result
                                   | None ->
                                       Topology_kernel.mesh
@@ -1940,7 +1992,10 @@ let fold_mesh_writes (plan : E.plan) =
               when List.for_all plain writes
                    && (E.frame_dependent (geometry_arrays_data mesh.args)
                       || not (List.exists (fun (_, _, values) -> E.frame_dependent values) writes))
-                   && not (List.exists (fun (_, _, values) -> E.state_dependent values) writes) ->
+                   (* a stateful write folds when its mesh is stateful too: one node cooks both over
+                      the state's fork *)
+                   && (E.state_dependent (geometry_arrays_data mesh.args)
+                      || not (List.exists (fun (_, _, values) -> E.state_dependent values) writes)) ->
                 nodes.(id) <-
                   {
                     w with
@@ -4507,10 +4562,10 @@ struct
                    values)
             in
             let eligible =
-              (* Stateless fast writes choose placement in their cook, where
-                 downstream consumers are known. CPU-owned frame folds keep
-                 their existing pre-cook state advancement. *)
-              ((not gpu.fast) || gpu.backend = None || E.state_dependent (attribute_data n.args))
+              (* Fast writes choose placement in their cook, where downstream consumers are
+                 known, stateful ones too: the lane has advanced the state, and the rebuilt node
+                 cooks over its fork. Without the device a write materializes before cooking. *)
+              ((not gpu.fast) || gpu.backend = None)
               && (not (deferred_cpu (attribute_data n.args)))
               && Attribute_kernel.sources values = []
               && Flow_ir.Executor.root_is_packed_or_readback program

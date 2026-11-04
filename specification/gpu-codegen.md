@@ -202,6 +202,30 @@ refused kernel (interpreted element by element), a region the device passes over
 refused display. The editor's status line shows the first; a measured choice of the CPU is not a fallback, nor is a
 region under 256 elements. It resets when a document lowers.
 
+A history appended pass by pass (`(iterate n {:head h :points p} ...)` returning
+`(array/concat walk.points head)`, `sketches/swarm.rays`'s trails) stays on the device: in a resident
+scope `array/concat` of a device array and a device or host array whose counts the host knows is
+`Host.concat`, a copy stage (`shaders/copy.rays`, raw words) into a buffer twice its length, and
+when the first operand is its buffer's newest view and there is room, only the second is copied, in
+place (the prefix never changes). A pass costs its new words, not the history. In a SOP cook,
+frame-driven or not, what a kernel captures as an array residual, including one a captured
+function or record holds, is lowered as a producer and passed as an argument (`Core_lower.sop_cook`);
+left a residual it would be evaluated again on the host when its region binds. A mesh of device
+points and static host topology keeps its points on the device (`Topology_kernel_impl.mesh_resident`
+builds the topology once, keyed by its arrays); a host stream of one repeated integer beside device
+streams (`array/int n 0` kinds) is filled on the device. A region whose inputs cannot be bound says
+why (`Fallback`), and so does a kernel a capture refuses.
+
+Such a loop whose body is one region over the carried head, the append and loop-invariant scalars
+(`Core_exec.unfold_shape`; the head dead after the loop) runs as one dispatch on Metal: `Emit.kernel
+~unfold:n` keeps the head in the lane and runs the region's body n times, storing pass k at
+`(k n + i)`, and the history is joined once (`Host`'s `invoke ~steps`). Its values are the per-pass
+route's, bit for bit; Vulkan, without an unfolded SPIR-V form yet, keeps the per-pass loop. A mesh
+whose vertices, offsets and kinds depend on no frame or state keeps the topology its first device cook
+validated (host data, by the mesh's data) and pairs it with each later cook's points
+(`Topology_kernel_impl.mesh_resident ?static_key`). swarm.rays at 4000 x 257: 214 ms a cook to 35 ms
+(editor, M1, 2026-11-04).
+
 A chain of point writes over a `sop/mesh` nothing else reads is folded into the mesh's
 record (`Lower.fold_mesh_writes`), so their maps share its producers. As separate writes each would
 evaluate a captured compacted list on the CPU (`Packed.Host.prepare`) and upload it every frame.

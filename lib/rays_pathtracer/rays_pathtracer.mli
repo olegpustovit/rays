@@ -106,7 +106,7 @@ val mesh :
     below 2^24 vertices) is traced where the device holds it: the tracer gathers its corners from
     the registered positions and normals on the device (never reading them back or making the host
     copy) into a refittable structure, and a later mesh of the same topology (the same corners
-    array, vertex count and materials) refits that structure in place ({!Ogpu.Backend.refit_accel})
+    by contents, vertex count and materials) refits that structure in place ({!Ogpu.Backend.refit_accel})
     instead of rebuilding it. Such a mesh cannot join {!mesh_instanced} or {!scene_mesh}. A device
     mesh with device-only indices instead prepares from its memoised host copy, materialising
     geometry. *)

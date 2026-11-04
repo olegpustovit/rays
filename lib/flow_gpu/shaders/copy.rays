@@ -1,0 +1,9 @@
+; A resident array/concat's copy (Flow_gpu.Run.copy): lane i copies word src[bound[1] + i] to
+; dst[bound[2] + i] for i below bound[0], as raw words, so floats keep their bits. One lane a word, over
+; as many groups as it takes; offsets and counts stay below 2^30 words.
+(defn word :context value [(words : (array int)) (k : int)] (int/and (array/nth words k) 1073741823))
+(defn copy-words :context value [(id : int) (src : (array int)) (dst : (array int)) (bound : (array int))
+                                 (size : int)]
+  (if (int/lt id (word bound 0))
+    (gpu/store-int dst (int/add (word bound 2) id) (array/nth src (int/add (word bound 1) id)))
+    0))

@@ -13,6 +13,23 @@ let static_sop residual =
   && not (E.frame_dependent (V.Residual residual))
   && not (E.state_dependent (V.Residual residual))
 
+(* a SOP cook lowers what its kernels capture as producers, frame-driven or not: a frame-driven array
+   left a residual would be evaluated again on the host when its region binds *)
+let sop_cook residual = (E.Residual.residual_view residual).context = Flow.Context.sop
+
+(* a value of this type holds packed arrays a kernel would read *)
+let rec holds_arrays = function
+  | Flow.Ty.Array _ -> true
+  | Flow.Ty.Record fields -> List.exists (fun (_, ty) -> holds_arrays ty) fields
+  | _ -> false
+
+(* an array residual, or one a captured function or record holds *)
+let rec holds_array_residual = function
+  | V.Residual r -> holds_arrays (E.Residual.residual_view r).term.ty
+  | V.Fn fn -> List.exists (fun (_, v) -> holds_array_residual v) (E.Residual.function_bindings fn)
+  | V.Record fields -> List.exists (fun (_, v) -> holds_array_residual v) fields
+  | _ -> false
+
 let failure (d : Diagnostic.t) =
   if d.span = None && d.position = None && d.cause = None && d.hints = [] && d.trace = [] then
     C.Fail (d.code, d.message)
@@ -934,15 +951,11 @@ struct
             (* Draws and SOP cooks lower captured arrays as explicit producers, so compacted
                counts and the regions consuming them share their Core locals. *)
             let captured_arrays =
-              (initial <> None || draw <> None || static_sop r)
+              (initial <> None || draw <> None || sop_cook r)
               && List.exists
                    (fun name ->
-                     match List.assoc_opt name view.bindings with
-                     | Some (V.Residual r) -> (
-                         match (E.Residual.residual_view r).term.ty with
-                         | Flow.Ty.Array _ -> true
-                         | _ -> false)
-                     | _ -> false)
+                     Option.fold ~none:false ~some:holds_array_residual
+                       (List.assoc_opt name view.bindings))
                    (E.Residual.free_names view.term)
             in
             let packed = if view.previous || captured_arrays then None else packed_region r view in
@@ -1012,8 +1025,11 @@ struct
     in
     let why = ref None in
     let packed =
-      let sop = Option.fold ~none:false ~some:static_sop !current in
-      if (not candidate) || not (strict || initial <> None || draw <> None || sop || state_parent || reads_state ())
+      let static = Option.fold ~none:false ~some:static_sop !current in
+      let sop = Option.fold ~none:false ~some:sop_cook !current in
+      if (not candidate)
+         || not
+              (strict || initial <> None || draw <> None || sop || state_parent || reads_state ())
       then None
       else
         Option.bind !current (fun parent ->
@@ -1022,15 +1038,21 @@ struct
             let rec capture = function
               (* Draws, SOP cooks and state-dependent captures use an explicit producer before
                  the region, which reads its immutable result as an argument. *)
-              | Known (V.Residual r) when initial <> None || draw <> None || sop || E.state_dependent (V.Residual r) ->
+              | Known (V.Residual r)
+                when initial <> None || draw <> None || static || E.state_dependent (V.Residual r)
+                     || (sop && holds_arrays (E.Residual.residual_view r).term.ty) ->
                   capture (residual statements cache r)
               (* a record local is passed field by field: Packed takes scalars, not a record argument *)
-              | Computed (id, Flow.Ty.Record fields) when draw <> None ->
+              (* a record local (a state of several arrays) is passed field by field: Packed takes
+                 arrays and scalars, not a record argument *)
+              | Computed (id, Flow.Ty.Record fields) when draw <> None || sop ->
                   capture
                     (Record_fields
                        (List.map
                           (fun (name, ty) -> (name, emit statements source ty (Field (id, name))))
                           fields))
+              (* a captured function's arrays follow the kernel's own rule *)
+              | Known (V.Fn fn) when sop -> V.Fn (E.bind_captures (fun v -> capture (Known v)) fn)
               | Known value -> value
               | Computed (id, ty) ->
                   let index =
@@ -1066,19 +1088,22 @@ struct
                     why := Some d;
                     None
                 | Ok region -> if region_allowed region then Some (r, region, !arguments) else None
-            with Unsupported _ -> None)
+            with Unsupported reason ->
+              why := Some [ Diagnostic.error ~code:"E_PACKED_CAPTURE" ("unsupported " ^ reason) ];
+              None)
     in
     match packed with
     | Some (r, packed, args) -> region ~args statements packed (E.Residual.residual_view r)
     | None -> (
-        if numeric_candidate && strict then refuse "packed_kernel";
-        (* the costliest fallback there is: an interpreted loop, element by element *)
+        (* the costliest fallback there is: an interpreted loop, element by element; reported before
+           a strict lowering refuses it, so the refusal names its reason too *)
         (match (!why, !current) with
         | Some ((d : Diagnostic.t) :: _), Some parent ->
             Fallback.note
               ~site:(String.concat "/" (E.Residual.residual_view parent).site)
               ("no kernel, interpreted: " ^ d.message)
         | _ -> ());
+        if numeric_candidate && strict then refuse "packed_kernel";
         match x.node with
         | W.Lit (Param.Int_value n) -> Known (V.Int n)
         | Lit (Param.Float_value f) -> Known (V.Float f)

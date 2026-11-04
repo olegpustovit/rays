@@ -304,9 +304,96 @@ let resident geometry =
       Some (vertices, offsets, kinds)
   | Some _ | None -> None
 
-let mesh_resident (scope : Flow_ir.Gpu.residency) args =
+(* a host topology beside points the device computes: built here, so the points stay where they are.
+   ponytail: built every cook; not cached by the arrays' identity, which Core's arenas reuse *)
+let host_topology ~point_count vertices offsets kinds =
+  if Array.exists (fun kind -> kind < 0 || kind > 2) kinds then
+    Error "Primitive kinds are 0 (polygon), 1 (open polyline) or 2 (closed polyline)."
+  else
+    Rdk.Topology.create_owned ~point_count ~vertex_points:(Array.copy vertices)
+      ~primitive_offsets:(Array.copy offsets)
+      ~primitive_kinds:
+        (Array.map (function 0 -> Rdk.Topology.Polygon | 1 -> Open_polyline | _ -> Closed_polyline) kinds)
+
+(* A topology that depends on nothing a frame changes, kept from its mesh's first device cook by the
+   mesh's data (the same value while its node lives), as host data: later cooks pair it with their new
+   points, so none of them rebuilds, validates or retains it again *)
+module Static_topologies = Ephemeron.K1.Make (struct
+  type t = E.value
+
+  let equal = ( == )
+  let hash = Hashtbl.hash
+end)
+
+let static_topologies = Static_topologies.create 8
+let static_lock = Mutex.create ()
+
+(* whether a static mesh's topology is kept already: its cook need not compute it again *)
+let static_cached key =
+  Mutex.protect static_lock (fun () -> Static_topologies.mem static_topologies key)
+
+let mesh_resident ?static_key (scope : Flow_ir.Gpu.residency) args =
+  let cached =
+    Option.bind static_key (fun key ->
+        Mutex.protect static_lock (fun () -> Static_topologies.find_opt static_topologies key))
+  in
+  match (cached, List.assoc_opt "points" args) with
+  | Some (n, topology), Some (E.Vec3_array _ as points) when scope.executor.count points = Some n -> (
+      match scope.retain_float points with
+      | None -> None
+      | Some (planes : Flow_ir.Gpu.planes) ->
+          let holder = Option.map (fun v -> Resident (v, n)) planes.resident in
+          let positions =
+            Rdk.Packed.Float3.deferred ?holder ~length:n ~release:planes.release
+              ~bounds:planes.bounds planes.materialise
+          in
+          let result = Result.map_error (Diagnostic.error ~code:"E_TOPOLOGY") (G.create ~positions ~topology ()) in
+          if Result.is_error result then planes.release ~held:false;
+          Some result)
+  | _ ->
+  let remember topology point_count =
+    Option.iter
+      (fun key ->
+        (* the host copy: read back once *)
+        let view = Rdk.Topology.View.view topology in
+        match
+          Rdk.Topology.create_owned ~point_count ~vertex_points:(Array.copy view.vertex_points)
+            ~primitive_offsets:(Array.copy view.primitive_offsets)
+            ~primitive_kinds:
+              (Array.init (Rdk.Topology.primitive_count topology) (Rdk.Topology.primitive_kind topology))
+        with
+        | Ok owned ->
+            Mutex.protect static_lock (fun () ->
+                Static_topologies.replace static_topologies key (point_count, owned))
+        | Error _ -> ())
+      static_key
+  in
   match List.assoc_opt "points" args, List.assoc_opt "vertex_points" args,
         List.assoc_opt "primitive_offsets" args, List.assoc_opt "kinds" args with
+  | Some (E.Vec3_array _ as points), Some (E.Int_array vertices), Some (E.Int_array offsets),
+    Some (E.Int_array kinds)
+    when Option.is_some (scope.executor.count points)
+         && List.for_all
+              (fun a -> Option.is_none (scope.executor.count (E.Int_array a)))
+              [ vertices; offsets; kinds ] -> (
+      (* device points, host topology: the points stay where they are *)
+      let point_count = Option.get (scope.executor.count points) in
+      match host_topology ~point_count vertices offsets kinds with
+      | Error message -> Some (Error (Diagnostic.error ~code:"E_TOPOLOGY" message))
+      | Ok topology -> (
+          match scope.retain_float points with
+          | None -> None
+          | Some (planes : Flow_ir.Gpu.planes) ->
+              let holder = Option.map (fun v -> Resident (v, point_count)) planes.resident in
+              let positions =
+                Rdk.Packed.Float3.deferred ?holder ~length:point_count ~release:planes.release
+                  ~bounds:planes.bounds planes.materialise
+              in
+              let result =
+                Result.map_error (Diagnostic.error ~code:"E_TOPOLOGY") (G.create ~positions ~topology ())
+              in
+              if Result.is_error result then planes.release ~held:false;
+              Some result))
   | Some (E.Vec3_array points), Some vertices, Some offsets, Some kinds
     when Array.length points = 0 ->
       (* Empty maps may return owned arrays while their one-word offset stays
@@ -329,6 +416,20 @@ let mesh_resident (scope : Flow_ir.Gpu.residency) args =
                ~max_polygon_size:4294967295)
       | _ -> None)
   | Some (E.Vec3_array _ as points), Some vertices, Some offsets, Some kinds ->
+      (* a host stream of one repeated integer (all polygons, say) beside device streams: the
+         device fills it rather than the whole mesh coming back *)
+      let on_device = Option.is_some (scope.executor.count points) in
+      let device = function
+        | E.Int_array a as v
+          when on_device
+               && Option.is_none (scope.executor.count v)
+               && Array.length a > 0
+               && Array.for_all (( = ) a.(0)) a ->
+            Option.value ~default:v
+              (scope.executor.fill (Flow.Ty.Array Flow.Ty.Int) ~length:(Array.length a) (E.Int a.(0)))
+        | v -> v
+      in
+      let vertices = device vertices and offsets = device offsets and kinds = device kinds in
       (match scope.executor.count points, scope.executor.count vertices,
              scope.executor.count offsets, scope.executor.count kinds with
       | Some point_count, Some vertex_count, Some _, Some primitive_count ->
@@ -361,6 +462,7 @@ let mesh_resident (scope : Flow_ir.Gpu.residency) args =
                           ~primitive_kinds:(Array.map (function
                               | 0 -> Rdk.Topology.Polygon | 1 -> Open_polyline | _ -> Closed_polyline)
                               (kinds.materialise ())) |> Result.get_ok) in
+                  remember topology point_count;
                   let holder = Option.map (fun v -> Resident (v, point_count)) points.resident in
                   let positions = Rdk.Packed.Float3.deferred ?holder ~length:point_count
                       ~release:points.release ~bounds:points.bounds points.materialise in

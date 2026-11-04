@@ -82,9 +82,10 @@ let cook ?gpu text frames ~each =
   Fun.protect
     ~finally:(fun () -> Sop.Session.close session)
     (fun () ->
-      List.iter
-        (fun time ->
-          let live = Input.at_time time in
+      List.iteri
+        (fun frame time ->
+          (* a frame as the editor gives it: a step and an index, so a state steps *)
+          let live = { (Input.at_time time) with dt = 1. /. 60.; frame; tick = frame } in
           let resolved = Flow_sop.Value_lane.resolve ?gpu ~live lane ~time graph.network |> ok in
           let node =
             Sop.Edit_graph.compile_node resolved.geometry ~node_id:(Option.get graph.root)
@@ -92,7 +93,7 @@ let cook ?gpu text frames ~each =
           in
           let output =
             Sop.Session.cook ~cpu_consumers:0 session
-              ~context:(Sop.Context.create ~time ~input:live () |> Result.get_ok)
+              ~context:(Sop.Context.create ~frame:(Int64.of_int frame) ~time ~input:live () |> Result.get_ok)
               node
             |> ok
           in
@@ -200,7 +201,9 @@ let traced_case gpu config =
     let stats, _, _, _, _ = Flow_native.Workspace_gpu.image_stats gpu in
     stats.payload_readback_bytes
   in
-  cook ~gpu:config text [ time ] ~each:(fun _ geometry ->
+  (* the device route is what this traces: a mesh this small may measure cheaper on the CPU *)
+  cook ~gpu:{ config with Flow_ir.Gpu.policy = Flow_ir.Gpu.Qualification } text [ time ]
+    ~each:(fun _ geometry ->
       let scene =
         Rdk_rays.Surface.scene3
           ~device:(Flow_native.Workspace_gpu.display gpu)
@@ -211,7 +214,11 @@ let traced_case gpu config =
         (fun (drawing : Rays.Scene.D3.Walk.drawing) _ -> mesh := Some drawing.mesh)
         scene;
       let mesh = Option.get !mesh in
-      if Rays.Mesh.View.device mesh = None then failwith "no device mesh to trace";
+      if Rays.Mesh.View.device mesh = None then
+        failwith
+          ("no device mesh to trace: "
+          ^ Option.value ~default:"positions not resident"
+              (Flow_native.Workspace_gpu.display_refusal gpu));
       let before = payload () in
       let device = picture mesh in
       if payload () <> before then
@@ -239,7 +246,7 @@ let reporting config =
       (String.concat "; " (List.map (fun (site, reason, _) -> site ^ ": " ^ reason) clean));
   let broken =
     Str.global_replace (Str.regexp_string "(mod vertex 4)")
-      "(mod vertex (+ 4 (* 0 (array/count vertices))))" (text 8)
+      "(mod vertex (+ 4 (* 0 (array/count vertices))))" (text 16)
   in
   cook ~gpu:config broken [ 0. ] ~each:(fun _ _ -> ());
   let named (site, reason, _) = String.ends_with ~suffix:"positions" site && reason <> "" in
@@ -316,6 +323,122 @@ let sea_route gpu config =
         ("gpu_sea left the device: "
         ^ String.concat "; " (List.map (fun (site, reason, _) -> site ^ ": " ^ reason) off))
 
+(* A frame's history appended pass by pass (array/concat of an iterate's accumulator), as
+   sketches/swarm.rays builds its trails, with values float32 holds exactly: the device's in-place
+   append writes every pass where the CPU's concat puts it, and the mesh stays resident beside its
+   static triangles. *)
+let history_text =
+  {|(workspace history
+  (graph g :context sop
+    (let* [heads 16384 passes 6
+           starts (map (fn [(id : int)] [(float id) 0.0 (floor (* t 60.0))]) (array/range heads :type int))
+           trail (iterate passes {:head starts :points starts}
+                   (fn [(walk : {:head (array vec3) :points (array vec3)})]
+                     (let* [head (map (fn [(p : vec3)] (+ p [0.0 1.0 0.5])) walk.head)]
+                       {:head head :points (array/concat walk.points head)})))
+           count (array/count trail.points)
+           triangles (int/div count 3)]
+      (sop/mesh :points (exact trail.points) :vertex_points (exact (array/range (* triangles 3) :type int))
+                :primitive_offsets (exact (map (fn [(f : int)] (* f 3)) (array/range (+ triangles 1) :type int)))
+                :kinds (exact (array/int triangles 0))))))|}
+
+let history_case config =
+  let cpu = Hashtbl.create 4 in
+  let frames = [ 0.; 1. /. 60.; 2. /. 60.; 3. /. 60.; 4. /. 60. ] in
+  cook history_text frames ~each:(fun time geometry -> Hashtbl.replace cpu time (Rdk.Geometry.positions geometry));
+  cook ~gpu:config history_text frames ~each:(fun time geometry ->
+      if time >= 3. /. 60. && not (Rdk.Packed.Float3.resident (Rdk.Geometry.positions geometry)) then
+        failwith (Printf.sprintf "history t %g: P left the device" time);
+      same_vec3 "history P" (Rdk.Geometry.positions geometry) (Hashtbl.find cpu time))
+
+(* A state trail stepped on the device (sketches/swarm_crawling.rays' form): each frame the heads
+   move and the trail moves up one place. The state stays on the device between frames (bound by the
+   next step and the mesh, read to the host by the CPU frames that sample placement). Its values are
+   exact in float32, so it equals the CPU's on every frame. *)
+let trail_text =
+  {|(workspace trail
+  (graph g :context sop
+    (let* [heads 16384 count (* heads 8)
+           trail (state [previous (exact (map (fn [(k : int)] [(float (int/mod k heads)) 0.0 0.0])
+                                              (array/range count :type int)))]
+                   (map (fn [(k : int)]
+                          (if (< k heads) (+ (array/nth previous k) [0.0 1.0 0.5])
+                              (array/nth previous (int/sub k heads))))
+                        (array/range count :type int)))
+           triangles (int/div count 3)]
+      (sop/mesh :points (exact (map (fn [(p : vec3)] (* p 2.0)) trail)) :vertex_points (exact (array/range (* triangles 3) :type int))
+                :primitive_offsets (exact (map (fn [(f : int)] (* f 3)) (array/range (+ triangles 1) :type int)))
+                :kinds (exact (array/int triangles 0))))))|}
+
+let trail_case config =
+  let cpu = Hashtbl.create 8 and frames = List.init 7 (fun k -> float k /. 60.) in
+  cook trail_text frames ~each:(fun time geometry -> Hashtbl.replace cpu time (Rdk.Geometry.positions geometry));
+  cook ~gpu:config trail_text frames ~each:(fun time geometry ->
+      (* frames 2 and 3 sample the CPU for placement *)
+      if time >= 4. /. 60. && not (Rdk.Packed.Float3.resident (Rdk.Geometry.positions geometry)) then
+        failwith (Printf.sprintf "trail t %g: P left the device" time);
+      same_vec3 (Printf.sprintf "trail P at t %g" time) (Rdk.Geometry.positions geometry) (Hashtbl.find cpu time))
+
+(* sketches/swarm.rays, small, lowered as the editor lowers it: its trails append a history on the
+   device, its frames call closures over that history, its static triangles sit beside device points.
+   Nothing falls off the device and the mesh stays resident and displayable. Its float32 noise and
+   sine hash make another swarm than the CPU's doubles, so it is not compared with the CPU's. *)
+let swarm_route gpu config =
+  let module F = Flow_ir.Fallback in
+  let text =
+    let read name = In_channel.with_open_bin ("../../../sketches/" ^ name) In_channel.input_all in
+    (* the sketch's import, spliced as the editor splices it: the library's forms in its workspace *)
+    let text =
+      Str.global_replace (Str.regexp_string "(import \"swarm_lib.rays\")") "" (read "swarm.rays")
+      |> Str.replace_first (Str.regexp_string "(workspace swarm") ("(workspace swarm\n" ^ read "swarm_lib.rays")
+    in
+    Str.global_replace (Str.regexp_string "(tubes : int 4000) (points : int 257)")
+      "(tubes : int 300) (points : int 32)" text
+  in
+  let lowered =
+    Flow_sop.Lower.workspace ~gpu:config ~defer:true ~extra:Editor_document.Kinds.descriptors
+      (Flow.Syntax.parse text |> ok)
+    |> ok
+  in
+  let graph = List.find (fun (g : Flow_sop.Lower.graph) -> g.name = "swirling") lowered.graphs in
+  let lane = Flow_sop.Value_lane.create () in
+  let session = Sop.Session.create ~max_entries:64 ~max_payload_bytes:(1 lsl 30) |> Result.get_ok in
+  F.reset ();
+  Fun.protect
+    ~finally:(fun () -> Sop.Session.close session)
+    (fun () ->
+      for frame = 0 to 5 do
+        let time = float frame /. 60. in
+        let live = Input.at_time time in
+        let resolved = Flow_sop.Value_lane.resolve ~gpu:config ~live lane ~time graph.network |> ok in
+        let node =
+          Sop.Edit_graph.compile_node resolved.geometry ~node_id:(Option.get graph.root)
+          |> Result.get_ok
+        in
+        let output =
+          Sop.Session.cook ~cpu_consumers:0 session
+            ~context:(Sop.Context.create ~time ~input:live () |> Result.get_ok)
+            node
+          |> ok
+        in
+        let geometry = Result.get_ok (Sop.Payload.geometry output.payload) in
+        (* frame 2 is the placement's CPU sample *)
+        if frame >= 3 then begin
+          if not (Rdk.Packed.Float3.resident (Rdk.Geometry.positions geometry)) then
+            failwith (Printf.sprintf "swarm frame %d: P left the device" frame);
+          if Flow_native.Workspace_gpu.display gpu geometry = None then
+            failwith
+              (Printf.sprintf "swarm frame %d: display refused: %s" frame
+                 (Option.value ~default:"" (Flow_native.Workspace_gpu.display_refusal gpu)))
+        end
+      done);
+  match F.seen () with
+  | [] -> ()
+  | off ->
+      failwith
+        ("swarm left the device: "
+        ^ String.concat "; " (List.map (fun (site, reason, _) -> site ^ ": " ^ reason) off))
+
 let () =
   let gpu = Flow_native.Workspace_gpu.create () in
   Fun.protect
@@ -329,5 +452,8 @@ let () =
           traced_case gpu config;
           reporting config;
           sea_route gpu config;
+          history_case config;
+          trail_case config;
+          swarm_route gpu config;
           resident_case gpu config ~side:128 ~frames:[ 0.; 0.01; 0.02; 0.03; 0.04 ] ~compare:false ~displayed:true));
   print_endline "Live mesh: P, N and Cd resident from the first cook; no uploads; equal to the CPU"

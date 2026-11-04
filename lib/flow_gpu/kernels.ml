@@ -167,3 +167,27 @@ let normals =
             })
         [ 0; 1; 2; 3; 4; 5 ];
   }
+
+(* A resident array/concat's copy: raw words from one buffer to another at offsets (shaders/copy.rays,
+   one thread a word over groups of 256). Buffers: the source, the destination, {count, from, to}. *)
+let copy =
+  {
+    compaction with
+    source = Copy_source.source;
+    spirv = spirv Spirv_kernels.copy_comp (List.init 3 Fun.id);
+    entry = "copy_words";
+    uniform_bytes = 12;
+    output_widths = [| 1 |];
+    input_widths = [| 1 |];
+    interface =
+      List.map
+        (fun binding ->
+          S.
+            {
+              group = 0;
+              binding;
+              kind = (if binding = 2 then Uniform_buffer else Storage_buffer);
+              visibility = [ Compute ];
+            })
+        [ 0; 1; 2 ];
+  }

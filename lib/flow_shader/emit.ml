@@ -342,7 +342,7 @@ let settled ~vulkan msl =
   }
 
 let rec kernel ?(spirv = true) ?fast ?instanced ?motion ?curves ?spheres ?uint32_scalars ?uint32_outputs
-    ?uint32_inputs ?uint32_tables program =
+    ?uint32_inputs ?uint32_tables ?unfold program =
   (* the thunk keeps the program alive until it is forced: a Metal host must not hold one *)
   let spirv =
     if not spirv then no_spirv
@@ -351,19 +351,19 @@ let rec kernel ?(spirv = true) ?fast ?instanced ?motion ?curves ?spheres ?uint32
       (Result.map
          (fun (k : Spirv.t) -> (k.bytes, k.entry, k.interface))
          (Spirv.kernel ?fast ?instanced ?motion ~curves:(curves <> None) ?spheres ?uint32_scalars
-            ?uint32_outputs ?uint32_inputs ?uint32_tables program))
+            ?uint32_outputs ?uint32_inputs ?uint32_tables ?unfold program))
   in
   Result.map
     (fun msl -> { msl with spirv })
     (generate ?fast ?instanced ?motion ?curves ?spheres ?uint32_scalars ?uint32_outputs
-       ?uint32_inputs ?uint32_tables program)
+       ?uint32_inputs ?uint32_tables ?unfold program)
 
 and stage_body ~raster program =
   Result.map (fun msl -> msl.source) (generate ~fast:true ~raster program)
 
 and generate ?(fast = false) ?(instanced = false) ?(motion = false) ?curves ?(spheres = true)
     ?(uint32_scalars = false) ?(uint32_outputs = []) ?(uint32_inputs = []) ?(uint32_tables = [])
-    ?raster program =
+    ?raster ?unfold program =
   try
     (match P.gpu_refusals ~fused:true ~fast program with
     | [] -> ()
@@ -414,6 +414,19 @@ and generate ?(fast = false) ?(instanced = false) ?(motion = false) ?curves ?(sp
       | Some k -> k
       | None -> fail "Gather without its table."
     in
+    (match unfold with
+    | Some steps ->
+                if
+          steps <= 0 || raster <> None || Array.length view.widths <> 1
+          || Array.length view.outputs <> 1
+          || Array.length view.outputs.(0) <> view.widths.(0)
+          || uint32_inputs <> [] || uint32_outputs <> []
+        then
+          raise
+            (Diagnostic.Error
+               (Diagnostic.error ~code:"E_GPU_UNFOLD"
+                  "An unfolded kernel reads one input and writes one output of its width."))
+    | None -> ());
     let input_uint32 = Array.make (Array.length view.widths) false in
     List.iter
       (fun i ->
@@ -653,6 +666,7 @@ and generate ?(fast = false) ?(instanced = false) ?(motion = false) ?curves ?(sp
                 | Raise _ -> if integer_register slot then "0L" else "0.0f"
                 | Input (input, _, component) when raster <> None ->
                     (Option.get raster).input input component
+                | Input (0, _, component) when unfold <> None -> Printf.sprintf "uf%d" component
                 | Input (input, width, component) ->
                     let value = Printf.sprintf "input%d[i*%d+%d]" input width component in
                     if input_uint32.(input) then "float(" ^ value ^ ")" else value
@@ -874,15 +888,28 @@ and generate ?(fast = false) ?(instanced = false) ?(motion = false) ?curves ?(sp
                 Printf.bprintf body "  sb|=((%s)<0L||ulong(%s)>0xffffffffUL)?64u:0u;\n" value value)
             view.outputs;
           Printf.bprintf body "  %s\n" flush_status;
-          Array.iteri
-            (fun k registers ->
+          (match unfold with
+          | None ->
+              Array.iteri
+                (fun k registers ->
+                  Array.iteri
+                    (fun component slot ->
+                      Printf.bprintf body "  %s[i*%d+%d]=%s;\n" (output_name k) (Array.length registers)
+                        component
+                        (if output_uint32.(k) then "uint(" ^ int_of slot ^ ")" else float_of slot))
+                    registers)
+                view.outputs
+          | Some _ ->
+              (* step k's value is the output's (k n + i)th, and the next step's input *)
+              let registers = view.outputs.(0) in
               Array.iteri
                 (fun component slot ->
-                  Printf.bprintf body "  %s[i*%d+%d]=%s;\n" (output_name k) (Array.length registers)
-                    component
-                    (if output_uint32.(k) then "uint(" ^ int_of slot ^ ")" else float_of slot))
-                registers)
-            view.outputs);
+                  Printf.bprintf body "  output[(k*uf_n+i)*%d+%d]=%s;\n" (Array.length registers)
+                    component (float_of slot))
+                registers;
+              Array.iteri
+                (fun component slot -> Printf.bprintf body "  uf%d=%s;\n" component (float_of slot))
+                registers));
       body
     in
     ignore (print ());
@@ -1012,7 +1039,21 @@ and generate ?(fast = false) ?(instanced = false) ?(motion = false) ?curves ?(sp
               \  if(i>=n) return;\n"
               (w + 2) w (w + 1)
       in
-      let body = guard ^ "  uint sb=0u;\n" ^ Buffer.contents body in
+      let body =
+        match unfold with
+        | None -> guard ^ "  uint sb=0u;\n" ^ Buffer.contents body
+        | Some steps ->
+            (* a region over one carried input, run [steps] times in its lane: each pass's value
+               stored at its own offset, then fed back (an iterate that appends each pass) *)
+            let width = view.widths.(0) in
+            guard
+            ^ Printf.sprintf "  uint uf_n=%s;\n" (if counts = None then "uniforms[0]" else "n")
+            ^ "  uint sb=0u;\n"
+            ^ String.concat ""
+                (List.init width (fun c -> Printf.sprintf "  float uf%d=input0[i*%d+%d];\n" c width c))
+            ^ Printf.sprintf "  for(uint k=0u;k<%du;k++){\n" steps
+            ^ Buffer.contents body ^ "  }\n"
+      in
       let digest = Digest.to_hex (Digest.string (prefix ^ signature ^ body)) in
       let entry = "kernel_" ^ digest in
       let source = prefix ^ "kernel void " ^ entry ^ "(\n  " ^ signature ^ ") {\n" ^ body ^ "}\n" in

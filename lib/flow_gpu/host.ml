@@ -96,6 +96,7 @@ and placeholder = {
   cell : (Ogpu.Backend.buffer * int) option;
   slot : slot;
   counted : bool;  (** its count is the device's: it sizes the slot *)
+  known : bool;  (** its count is its length, known on the host (an exact array/concat may take it) *)
   clamped : int;
       (** with its length, the slot's capacity, below its bound, the run's number of its region;
           else [max_int] *)
@@ -119,6 +120,7 @@ type site = {
       (** the uniform widths and code of the region: a site outlives its lowering, so it keeps no
           [Packed.t], which holds that lowering's whole program and source *)
   mutable inputs : Flow_ir.Packed.Host.inputs option;  (** the plan's inputs, refilled per call *)
+  mutable unfolds : (int * Run.t option) list;  (** its kernel run n passes in a lane, by n *)
 }
 
 type t = {
@@ -140,6 +142,8 @@ type t = {
   mutable closed : bool;
   mutable resident_buffers : int;  (** buffers a resident fold's slots made *)
   mutable resident_payload_bytes : int;
+  mutable adopted_uploads : int;
+  mutable adopted_uploaded_bytes : int;  (** host arrays a resident scope uploaded once *)
   mutable count_bytes : int;
   mutable validation_bytes : int;
   mutable validation_status : Ogpu.Backend.buffer option;
@@ -224,6 +228,8 @@ let create ~clock gpu =
     closed = false;
     resident_buffers = 0;
     resident_payload_bytes = 0;
+    adopted_uploads = 0;
+    adopted_uploaded_bytes = 0;
     count_bytes = 0;
     validation_bytes = 0;
     validation_status = None;
@@ -478,6 +484,8 @@ let resident_scope ?(uint32 = false) ~fast t =
   let touched = ref [] and invoked = ref 0 and exact = ref max_int and cut = ref max_int in
   let extra_slots = ref [] in
   let pending = ref None and settled = ref false and post = ref false in
+  (* the words written into a buffer an array/concat appends to *)
+  let appended = ref [] in
   (* a level's command buffer and its one compute encoder, which orders its dispatches *)
   let commands () =
     match !pending with
@@ -522,14 +530,18 @@ let resident_scope ?(uint32 = false) ~fast t =
     | [] -> None
     | p :: rest -> if p.key == key && not p.dead then Some p else lookup key rest
   in
+  (* set below: an array a device holds past its scope (Flow.Eval.Device), bound where it is *)
+  let durables = ref [] and durable_ref = ref (fun (_ : E.value) -> None) in
   let find = function
-    | E.Float_array a | Vec2_array a | Vec3_array a | Vec4_array a -> lookup (Obj.repr a) !table
+    | (E.Float_array a | Vec2_array a | Vec3_array a | Vec4_array a) as v -> (
+        match lookup (Obj.repr a) !table with Some p -> Some p | None -> !durable_ref v)
     | Int_array a -> lookup (Obj.repr a) !table
     | _ -> None
   in
   (* A placeholder is an identity and a type: one element of its width, never read. Its length is
      [p.length] ([capacity], {!Flow_ir.Core_exec.resident}), so it costs no host memory by its size. *)
-  let placeholder ?(counted = false) ?(clamped = max_int) ?origin slot ty buffer cell length =
+  let placeholder ?(counted = false) ?(known = false) ?(clamped = max_int) ?origin slot ty buffer cell
+      length =
     let v : E.value =
       match ty with
       | Flow.Ty.Array Flow.Ty.Int -> Int_array (Array.make 1 0)
@@ -556,6 +568,7 @@ let resident_scope ?(uint32 = false) ~fast t =
         cell;
         slot;
         counted;
+        known;
         clamped;
         mul = 1;
         div = 1;
@@ -606,11 +619,15 @@ let resident_scope ?(uint32 = false) ~fast t =
                   t.iota_uint32 <- Some (buffer, capacity);
                   Some buffer))
   in
-  let bound v = Option.map (fun p -> fst p.buffer) (find v) in
+  (* set below, once [alloc] exists *)
+  let adopted = ref [] and adopt_ref = ref (fun (_ : E.value) -> None) in
+  let adopt v = !adopt_ref v in
+  let held_or_adopted v = match find v with Some p -> Some p | None -> adopt v in
+  let bound v = Option.map (fun p -> fst p.buffer) (held_or_adopted v) in
   (* a placeholder's elements, a capacity; its one-element block is never read *)
   let capacity v = Option.map (fun p -> p.length) (find v) in
   let table_floats p = p.length * max 1 p.kind in
-  let bound_table_of v = Option.map (fun p -> (fst p.buffer, table_floats p)) (find v) in
+  let bound_table_of v = Option.map (fun p -> (fst p.buffer, table_floats p)) (held_or_adopted v) in
   let give_back slot (b, bytes) =
     Hashtbl.replace slot.free bytes
       (b :: Option.value ~default:[] (Hashtbl.find_opt slot.free bytes))
@@ -659,7 +676,79 @@ let resident_scope ?(uint32 = false) ~fast t =
                       usage = [ Storage; Copy_src; Copy_dst ];
                     })))))
   in
+  (* A large host array (a state the lane keeps, say) several regions read is uploaded once a scope
+     and bound by each, rather than once a runner; it stays the host's: [finish] returns it as it is *)
+  let adopt_slot =
+    lazy { capacity = 0; kept = false; free = Hashtbl.create 1; held = []; spent = []; spare = [] }
+  in
+  adopt_ref :=
+    (fun v ->
+    match v with
+    | (E.Float_array f | Vec2_array f | Vec3_array f | Vec4_array f)
+      when Array.length f >= 1 lsl 16 -> (
+        let slot = Lazy.force adopt_slot in
+        let bytes = Bytes.create (4 * Array.length f) in
+        Array.iteri (fun k x -> Bytes.set_int32_le bytes (4 * k) (Int32.bits_of_float x)) f;
+        match alloc slot (Bytes.length bytes) with
+        | Error _ -> None
+        | Ok b ->
+            if Result.is_error (Ogpu.Backend.write_buffer (fst b) ~offset:0L bytes) then begin
+              give_back slot b;
+              None
+            end
+            else begin
+              t.adopted_uploads <- t.adopted_uploads + 1;
+              t.adopted_uploaded_bytes <- t.adopted_uploaded_bytes + Bytes.length bytes;
+              let kind = match v with E.Float_array _ -> 1 | Vec2_array _ -> 2 | Vec3_array _ -> 3 | _ -> 4 in
+              let p =
+                { key = Obj.repr f; kind; uint32 = false; buffer = b; length = Array.length f / kind;
+                  cell = None; slot; counted = false; known = true; clamped = max_int; mul = 1;
+                  div = 1; owned = true; dead = false; origin = None }
+              in
+              table := p :: !table;
+              slot.held <- p :: slot.held;
+              adopted := p.key :: !adopted;
+              Some p
+            end)
+    | _ -> None);
+  durable_ref :=
+    (fun v ->
+      match v with
+      | (E.Float_array a | Vec2_array a | Vec3_array a | Vec4_array a) when Flow.Eval.Device.held_by_device v -> (
+          match Run.pin a with
+          | None -> None
+          | Some (buffer, count, _, unpin) ->
+              on_close := unpin :: !on_close;
+              let kind = match v with E.Float_array _ -> 1 | Vec2_array _ -> 2 | Vec3_array _ -> 3 | _ -> 4 in
+              let p =
+                { key = Obj.repr a; kind; uint32 = false; buffer = (buffer, buffer_bytes buffer); length = count;
+                  cell = None; slot = Lazy.force adopt_slot; counted = false; known = true; clamped = max_int;
+                  mul = 1; div = 1; owned = false; dead = false; origin = None }
+              in
+              table := p :: !table;
+              durables := p.key :: !durables;
+              Some p)
+      | _ -> None);
   (* a site, its runner None when the device refuses its form; decided once per site *)
+  (* a region's kernel; [unfold] n runs it n passes in each lane (Emit.kernel ~unfold) *)
+  let emit ?unfold (packed : Flow_ir.Packed.t) =
+    let ty = packed.term.ty in
+    (if not uint32 then Emit.kernel ~spirv:(Ogpu.Impl.backend = "vulkan") ~fast:true ?unfold packed
+                  else
+                    let inputs = ref [] and tables = ref [] in
+                    Array.iter
+                      (fun code ->
+                        match snd (Trace.flat [] code) with
+                        | Flow_ir.Packed.Int_input i -> inputs := i :: !inputs
+                        | Array_prepare (u, Flow.Ty.Array Flow.Ty.Int) -> tables := u :: !tables
+                        | _ -> ())
+                      packed.code;
+                    Emit.kernel ~spirv:(Ogpu.Impl.backend = "vulkan") ~fast:true ~uint32_scalars:true
+                      ~uint32_inputs:(List.sort_uniq Int.compare !inputs)
+                      ~uint32_tables:(List.sort_uniq Int.compare !tables)
+                      ~uint32_outputs:(if ty = Flow.Ty.Array Flow.Ty.Int then [ 0 ] else [])
+                      ?unfold packed)
+  in
   let site (packed : Flow_ir.Packed.t) =
     let code = packed.code in
     let key = (code, uint32) in
@@ -678,26 +767,13 @@ let resident_scope ?(uint32 = false) ~fast t =
             Result.to_option
               (Result.map
                  (fun msl -> Run.create t.gpu t.pipelines msl)
-                 (if not uint32 then Emit.kernel ~spirv:(Ogpu.Impl.backend = "vulkan") ~fast:true packed
-                  else
-                    let inputs = ref [] and tables = ref [] in
-                    Array.iter
-                      (fun code ->
-                        match snd (Trace.flat [] code) with
-                        | Flow_ir.Packed.Int_input i -> inputs := i :: !inputs
-                        | Array_prepare (u, Flow.Ty.Array Flow.Ty.Int) -> tables := u :: !tables
-                        | _ -> ())
-                      packed.code;
-                    Emit.kernel ~spirv:(Ogpu.Impl.backend = "vulkan") ~fast:true ~uint32_scalars:true
-                      ~uint32_inputs:(List.sort_uniq Int.compare !inputs)
-                      ~uint32_tables:(List.sort_uniq Int.compare !tables)
-                      ~uint32_outputs:(if ty = Flow.Ty.Array Flow.Ty.Int then [ 0 ] else [])
-                      packed))
+                 (emit packed))
         in
         (* the 32 most recent region sites are kept; a re-prepared drawing has new sites *)
         let site =
           {
             run;
+            unfolds = [];
             slots = Dynarray.create ();
             shown = None;
             plan = None;
@@ -782,7 +858,7 @@ let resident_scope ?(uint32 = false) ~fast t =
       | Value _ | Range _ -> false
     in
     if Array.exists opaque (P.source_shapes packed) || Array.exists opaque (P.uniform_shapes packed)
-    then Error ()
+    then Error "a source or uniform reads a device array in a form the host would evaluate"
     else
       let count = placeholder_count in
       let counts =
@@ -798,7 +874,7 @@ let resident_scope ?(uint32 = false) ~fast t =
       | (c, m, d) :: rest when List.for_all (fun (c', m', d') -> c' == c && m' = m && d' = d) rest
         ->
           Ok (Some (c, m, d))
-      | _ -> Error ()
+      | _ -> Error "two device counts bound it"
   in
   (* A region's inputs, through its site's plan (from the arguments, nothing bound or evaluated)
      or else bound and prepared: its device count, its count, whether it reads a placeholder, and
@@ -876,13 +952,13 @@ let resident_scope ?(uint32 = false) ~fast t =
           | v -> c.(0) <- Flow.Value.num v)
     done;
     Array.iter (fun (i, value) -> inputs.frame.(i) <- value live) plan.plan_frames;
-    if not !agree then Error ()
+    if not !agree then Error "two device counts bound it"
     else Ok (!device, (if !n = max_int then 0 else !n), !held, inputs, bound_source, bound_table)
   in
   let unbound_table v = if find v = None then v else E.Float_array [||] in
   let prepared packed ~live =
     match device_count packed with
-    | Error () -> Error ()
+    | Error reason -> Error reason
     | Ok count -> (
         let shapes = P.source_shapes packed in
         (* a range source is the device's index buffer: its length is known, it is not built *)
@@ -895,7 +971,7 @@ let resident_scope ?(uint32 = false) ~fast t =
         in
         let indices = P.index_sources packed in
         match P.prepare_values ~index:uint32 ~lengths ~capacity packed ~live with
-        | Error _ -> Error ()
+        | Error (d : Diagnostic.t) -> Error d.message
         | Ok values ->
             let resident_input = Array.exists (fun v -> find v <> None) in
             let input i =
@@ -933,7 +1009,7 @@ let resident_scope ?(uint32 = false) ~fast t =
     Flow_ir.Fallback.note ~site:(String.concat "/" path) reason;
     None
   in
-  let invoke packed args ~locals ~live =
+  let invoke ?(steps = 0) ?source packed args ~locals ~live =
     if (not (live_ok t)) || not fast then None
     else
       let site = site packed in
@@ -941,7 +1017,22 @@ let resident_scope ?(uint32 = false) ~fast t =
         site.plan <- Some (P.plan packed);
         site.shape <- Some ((P.view packed).uniform_widths, packed.code)
       end;
-      match site.run with
+      (* [steps] > 0: the kernel run that many passes in each lane, its output [steps] times as long *)
+      let run =
+        if steps = 0 then site.run
+        else
+          match List.assoc_opt steps site.unfolds with
+          | Some run -> run
+          | None ->
+              let run =
+                Result.to_option
+                  (Result.map (fun (msl : Emit.kernel) -> let msl = if Sys.getenv_opt "KPATCH" <> None then { msl with source = (let s = msl.source and b = Buffer.create 50000 in let n = String.length s in let i = ref 0 in while !i < n do (if !i + 4 <= n && String.sub s !i 4 = "long" then (Buffer.add_string b "int"; i := !i + 4) else if s.[!i] = 'L' && !i > 0 && s.[!i - 1] >= '0' && s.[!i - 1] <= '9' then incr i else (Buffer.add_char b s.[!i]; incr i)) done; Buffer.contents b) } else msl in (match Sys.getenv_opt "KDUMP" with Some f -> Out_channel.with_open_text f (fun oc -> output_string oc msl.source) | None -> ()); Run.create t.gpu t.pipelines msl) (emit ~unfold:steps packed))
+              in
+              site.unfolds <- (steps, run) :: site.unfolds;
+              run
+      in
+      match run with
+      | None when steps > 0 -> None
       | None ->
           off packed
             (match Flow_ir.Packed.gpu_refusals ~fused:true ~fast:true packed with
@@ -954,10 +1045,10 @@ let resident_scope ?(uint32 = false) ~fast t =
             | _ -> (
                 match P.bind_arguments ~validate:false packed args with
                 | Ok packed -> prepared packed ~live
-                | Error _ -> Error ())
+                | Error (d : Diagnostic.t) -> Error d.message)
           in
           match level with
-          | Error () -> off packed "its inputs could not be bound"
+          | Error reason -> off packed ("its inputs could not be bound: " ^ reason)
           | Ok (count, n, held, inputs, bound_source, bound_table) -> (
               let slot = slot site ~locals and order = !invoked in
               incr invoked;
@@ -990,6 +1081,19 @@ let resident_scope ?(uint32 = false) ~fast t =
                  any size, so the web's 4M reach (65,535 groups of 64) is not a limit here *)
               if n = 0 || not (held || n >= 256 || Dynarray.exists (fun s -> s.capacity > 0) site.slots)
               then None
+              else if steps > 0 && (count <> None || length <> n) then None
+              else if
+                steps > 0
+                &&
+                (* the kernel's one input is the carried head: bound from its buffer or its array *)
+                not
+                  (match (source, Option.map find source) with
+                  | Some _, Some (Some p) -> (
+                      match bound_source 0 with Some b -> b == fst p.buffer | None -> false)
+                  | Some (E.Float_array f | Vec2_array f | Vec3_array f | Vec4_array f), Some None ->
+                      inputs.arrays.(0) == f
+                  | _ -> false)
+              then None
               else if n > 1 lsl 26 then off packed "over 64M elements"
               else
                 match commands () with
@@ -1003,26 +1107,47 @@ let resident_scope ?(uint32 = false) ~fast t =
                       | Array Vec4 -> 4
                       | _ -> 1
                     in
-                    match (alloc slot (max 4 (length * width * 4)), alloc slot 24) with
+                    match (alloc slot (max 4 (length * width * 4 * max 1 steps)), alloc slot 24) with
                     | Error _, b | b, Error _ ->
                         Result.iter (give_back slot) b;
                         None
                     | Ok output, Ok cell -> (
                         let reset_status = not (List.exists (( == ) run) !status_runs) in
-                        match
-                          Run.dispatch ~uint32_cpu:uint32 ~commands ~encoder ~reset_status ?count
+                        let ktime = Sys.getenv_opt "KTIME" <> None in
+                        let t0 = Unix.gettimeofday () in
+                        let r = Run.dispatch ~uint32_cpu:uint32 ~commands ~encoder ~reset_status ?count
                             ~into:(fst output, fst cell)
-                            ~bound:bound_source ~bound_table run { inputs with count = n }
-                        with
+                            ~bound:bound_source ~bound_table run { inputs with count = n } in
+                        if ktime then begin ignore (flush ()); ignore (Ogpu.Backend.complete_through queue !epoch);
+                          Printf.eprintf "k code=%d n=%d steps=%d %.2f ms\n%!" (Array.length packed.code) n steps ((Unix.gettimeofday () -. t0) *. 1000.) end;
+                        match r with
                         | Error diagnostic ->
                             give_back slot output;
                             give_back slot cell;
                             Flow.Value.raise_diagnostic diagnostic
+                        | Ok _ when steps > 0 ->
+                            settled := false;
+                            if reset_status then status_runs := run :: !status_runs;
+                            slot.spent <- cell :: slot.spent;
+                            Some (placeholder ~known:true slot ty output None (length * steps))
                         | Ok _ ->
                             settled := false;
                             if reset_status then status_runs := run :: !status_runs;
                             Some
-                              (placeholder ~counted:(count <> None) ~clamped ?origin:count slot ty
+                              (placeholder ~counted:(count <> None)
+                                 ~known:
+                                   (length = n
+                                   && (match count with
+                                      | None -> true
+                                      | Some (cell, mul, div) ->
+                                          (* a count followed from an array whose count is known *)
+                                          mul = div
+                                          && List.exists
+                                               (fun q ->
+                                                 q.known && q.length = n
+                                                 && match q.cell with Some (c, _) -> c == cell | None -> false)
+                                               !table))
+                                 ~clamped ?origin:count slot ty
                                  output (Some cell) length)))))
   in
   let compact mask =
@@ -1068,6 +1193,98 @@ let resident_scope ?(uint32 = false) ~fast t =
     | Flow.Ty.Array Flow.Ty.Int, Some p when p.uint32 -> Some v
     | _ -> None
   in
+  (* array/concat of two arrays the device holds or the host gives, both of counts known on the host:
+     the result's words are the first's then the second's. When the first is the newest view of its
+     buffer and the buffer has room, the second is appended there and the result shares the buffer
+     (the first's prefix never changes); otherwise a buffer twice the length takes both. An appended
+     history grows in place, a pass's new words at a time. *)
+  let concat a b =
+    let width = function
+      | E.Float_array _ -> Some 1
+      | Vec2_array _ -> Some 2
+      | Vec3_array _ -> Some 3
+      | Vec4_array _ -> Some 4
+      | _ -> None
+    in
+    let side v =
+      match find v with
+      | Some p when p.known && not p.uint32 -> Some (`Device p)
+      | Some _ -> None
+      | None -> (
+          match v with
+          | E.Float_array f | Vec2_array f | Vec3_array f | Vec4_array f -> Some (`Host f)
+          | _ -> None)
+    in
+    let words = function `Device p -> p.length * max 1 p.kind | `Host f -> Array.length f in
+    match (width a, width b, side a, side b) with
+    | Some w, Some w', Some sa, Some sb when w = w' && (match (sa, sb) with `Host _, `Host _ -> false | _ -> true) -> (
+        let wa = words sa and wb = words sb in
+        let total = wa + wb in
+        let slot = match (sa, sb) with `Device p, _ | _, `Device p -> p.slot | _ -> assert false in
+        let upload f =
+          let bytes = Bytes.create (4 * max 1 (Array.length f)) in
+          Array.iteri (fun k v -> Bytes.set_int32_le bytes (4 * k) (Int32.bits_of_float v)) f;
+          match alloc slot (Bytes.length bytes) with
+          | Error _ -> None
+          | Ok b ->
+              if Result.is_ok (Ogpu.Backend.write_buffer (fst b) ~offset:0L bytes) then begin
+                slot.spent <- b :: slot.spent;
+                Some (fst b)
+              end
+              else (
+                give_back slot b;
+                None)
+        in
+        let source = function `Device p -> Some (fst p.buffer) | `Host f -> upload f in
+        let in_place =
+          match sa with
+          | `Device p when p.owned ->
+              let buffer = fst p.buffer in
+              (match List.assq_opt buffer !appended with Some used -> used = wa | None -> true)
+              && snd p.buffer >= total * 4
+          | _ -> false
+        in
+        match commands () with
+        | Error _ -> None
+        | Ok (_, encoder) -> (
+            let ty =
+              match w with
+              | 1 -> Flow.Ty.Array Float
+              | 2 -> Array Vec2
+              | 3 -> Array Vec3
+              | _ -> Array Vec4
+            in
+            let copy src ~into ~words dst =
+              match src with
+              | None -> false
+              | Some src ->
+                  Result.is_ok (Run.copy ~encoder t.pipelines ~src ~from:0 ~dst ~into ~words)
+            in
+            let finish buffer =
+              appended := (fst buffer, total) :: List.remove_assq (fst buffer) !appended;
+              settled := false;
+              Some (placeholder ~known:true slot ty buffer None (total / w))
+            in
+            match sa with
+            | `Device p when in_place ->
+                if copy (source sb) ~into:wa ~words:wb (fst p.buffer) then begin
+                  (* the result shares the buffer: the slot gives it back once *)
+                  p.owned <- false;
+                  finish p.buffer
+                end
+                else None
+            | _ -> (
+                match alloc slot (max 4 (2 * total * 4)) with
+                | Error _ -> None
+                | Ok out ->
+                    if copy (source sa) ~into:0 ~words:wa (fst out)
+                       && copy (source sb) ~into:wa ~words:wb (fst out)
+                    then finish out
+                    else (
+                      give_back slot out;
+                      None))))
+    | _ -> None
+  in
   let get = function Ok x -> x | Error d -> Flow.Value.raise_diagnostic d in
   let count p =
     match p.cell with
@@ -1095,20 +1312,24 @@ let resident_scope ?(uint32 = false) ~fast t =
       settled := true
     end
   in
+  let host_of_planes (holder : Flow_ir.Gpu.planes) =
+    let planes = holder.materialise () in
+    let data = Array.init (holder.count * holder.width)
+        (fun i -> planes.(i mod holder.width).(i / holder.width)) in
+    match holder.width with
+    | 1 -> E.Float_array data | 2 -> Vec2_array data | 3 -> Vec3_array data | _ -> Vec4_array data
+  in
   let finish v =
     match find v with
     | None -> v
+    | Some p when List.memq p.key !durables -> E.Device.thaw v
+    | Some p when List.memq p.key !adopted -> v
     | Some p -> (
         settle ();
         match List.find_opt (fun (key, _) -> key == p.key) !integers,
               List.find_opt (fun (key, _) -> key == p.key) !floats with
         | Some (_, (holder : Run.uint32_holder)), _ -> E.Int_array (holder.materialise ())
-        | _, Some (_, (holder : Flow_ir.Gpu.planes)) ->
-            let planes = holder.Flow_ir.Gpu.materialise () in
-            let data = Array.init (holder.count * holder.width)
-                (fun i -> planes.(i mod holder.width).(i / holder.width)) in
-            (match holder.width with
-            | 1 -> E.Float_array data | 2 -> Vec2_array data | 3 -> Vec3_array data | _ -> Vec4_array data)
+        | _, Some (_, holder) -> host_of_planes holder
         | None, None ->
         let length = count p in
         let width =
@@ -1190,6 +1411,7 @@ let resident_scope ?(uint32 = false) ~fast t =
         s.spent <- [];
         s.spare <- [])
       touched_slots;
+    durables := [];
     table := [];
     integers := [];
     floats := []
@@ -1282,7 +1504,7 @@ let resident_scope ?(uint32 = false) ~fast t =
         let site = site packed in
         Some
           (match (site.run, device_count packed) with
-          | None, _ | _, Error () -> None
+          | None, _ | _, Error _ -> None
           | Some _, Ok count -> (
               let shapes = P.source_shapes packed in
               let lengths i =
@@ -1450,7 +1672,7 @@ let resident_scope ?(uint32 = false) ~fast t =
         | Some (_, holder) -> Some holder
         | None ->
             match find value with
-            | Some p when not p.uint32 && p.kind > 0 ->
+            | Some p when not p.uint32 && p.kind > 0 && not (List.memq p.key !durables) ->
                 settle ();
                 let aliases = List.filter (fun a -> not a.dead && fst a.buffer == fst p.buffer) !table in
                 let holder = get (Run.adopt_float (owner ()) ~buffer:(fst p.buffer)
@@ -1464,12 +1686,39 @@ let resident_scope ?(uint32 = false) ~fast t =
                 Some holder
             | _ -> None)
   in
+  (* a state step's array stays on the device: its holder lives as long as the placeholder a state
+     stores (Flow.Eval.Device), read to the host only when host code asks *)
+  let keep v =
+    match find v with
+    | Some p when List.memq p.key !durables -> Some v
+    | Some p when List.memq p.key !adopted -> None
+    | Some p -> (
+        match retain_float v with
+        | Some ({ resident = Some placeholder; _ } as holder) ->
+            (* a host read copies: the state's buffer stays its, for the next step to bind *)
+            let buffer = fst p.buffer in
+            E.Device.add placeholder (fun () ->
+                (* any domain (a CPU frame reads it on a worker): the mapped view, as Run.materialise *)
+                let length = holder.count * holder.width in
+                get (Result.map_error Run.Private.diagnostic
+                       (Ogpu.Backend.invalidate_mapped buffer ~length:(length * 4)));
+                let view = Option.get (Ogpu.Backend.mapped_view buffer) in
+                let xs = Array.init length (fun i -> Bigarray.Array1.get view i) in
+                ignore (Sys.opaque_identity holder);
+                match holder.width with
+                | 1 -> E.Float_array xs | 2 -> Vec2_array xs | 3 -> Vec3_array xs | _ -> Vec4_array xs);
+            Some placeholder
+        | _ -> None)
+    | None -> None
+  in
   let settle () =
     settle ();
     post := true;
     t.showing <- Some show
   in
-  { executor = { invoke; compact; coerce; finish; count = count_value; capacity; close; settle; range; fill };
+  let unfold packed args ~steps ~source ~locals ~live = invoke ~steps ~source packed args ~locals ~live in
+  let invoke packed args ~locals ~live = invoke packed args ~locals ~live in
+  { executor = { invoke; unfold; compact; coerce; concat; finish; keep; count = count_value; capacity; close; settle; range; fill };
     retain_uint32; retain_float;
     uint32_stream = (fun value -> match find value with
         | Some p when p.uint32 -> settle (); Some (fst p.buffer, count p)
@@ -1703,6 +1952,8 @@ let stats t =
   {
     !totals with
     buffer_creations = !totals.buffer_creations + t.resident_buffers;
+    input_uploads = !totals.input_uploads + t.adopted_uploads;
+    input_uploaded_bytes = !totals.input_uploaded_bytes + t.adopted_uploaded_bytes;
     readback_bytes = !totals.readback_bytes + t.resident_payload_bytes;
     payload_readback_bytes = !totals.payload_readback_bytes + t.resident_payload_bytes;
     count_readback_bytes = !totals.count_readback_bytes + t.count_bytes;

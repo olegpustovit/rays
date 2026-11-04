@@ -1428,9 +1428,11 @@ module Executor = struct
                   | None -> (
                       let record_core =
                         match value with
+                        (* a record over state its lane advanced reads it as data (Core_exec
+                           keeps a program that writes state off the resident device) *)
                         | E.Record fields
-                          when (not (E.state_dependent value))
-                               && (resident <> None || not (E.frame_dependent value)) ->
+                          when resident <> None
+                               || not (E.frame_dependent value || E.state_dependent value) ->
                             Option.bind
                               (List.find_map
                                  (function
@@ -1442,6 +1444,7 @@ module Executor = struct
                                    | _ -> None)
                                  fields)
                               (fun root ->
+                                Option.map (fun prepared -> (root, prepared)) @@
                                 match Atomic.get program.root_core with
                                 | Some (cached_strict, prepared) when cached_strict = strict ->
                                     Some prepared
@@ -1461,8 +1464,15 @@ module Executor = struct
                       in
                       match record_core with
                       | None -> walk value
-                      | Some prepared -> (
-                          match execute_core prepared with
+                      | Some (root, prepared) -> (
+                          (* a stateful record's root, bound to this frame and state, carries what
+                             its reads see *)
+                          match
+                            if E.state_dependent value then
+                              Result.bind (E.Residual.bind_live ~state ?elems ?resolve root ~live)
+                                (fun () -> execute_core ~root prepared)
+                            else execute_core prepared
+                          with
                           | Ok result -> walk result
                           | Error d when strict || resident <> None -> Error d
                           | Error _ -> fallback ()))

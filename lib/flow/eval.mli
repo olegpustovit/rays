@@ -181,6 +181,7 @@ module Residual : sig
       dispatcher again. *)
 
   val state_read :
+    ?device:bool ->
     residual ->
     instance:int ->
     path:Workspace.path ->
@@ -190,9 +191,12 @@ module Residual : sig
     value
 
   val state_peek :
+    ?device:bool ->
     residual -> instance:int -> path:Workspace.path -> iter:int list -> host:bool -> value option
 
+  (** [device]: the caller binds arrays {!Device} holds, so they are not read to the host. *)
   val state_write :
+    ?device:bool ->
     residual -> instance:int -> path:Workspace.path -> iter:int list -> host:bool -> value -> value
 
   val residual_ops : residual -> Op.t list
@@ -298,6 +302,18 @@ val static :
     ([first]/[last]/[nth]), [E_PATTERN] (a destructuring pattern longer than a driven list),
     [E_NONFINITE], [E_RANGE] ([ui/tile], [ui/split], [settings/config] with computed arguments),
     [E_DEPTH], [E_LIVE_GEOMETRY]. *)
+
+(** Arrays a device holds past the scope that made them (a state step left there): a placeholder its
+    backend binds, with how to read it to the host. State reads hand host code the host value. *)
+module Device : sig
+  val add : value -> (unit -> value) -> unit
+  (** [add placeholder read]; the entry lives as long as the placeholder. *)
+
+  val thaw : value -> value
+  (** Held arrays (in lists, records and structs too) read to the host; anything else as it is. *)
+
+  val held_by_device : value -> bool
+end
 
 val create_state : unit -> state
 

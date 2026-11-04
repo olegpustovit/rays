@@ -107,7 +107,7 @@
    (= %{system} macosx)
    (= %{system} mingw64)))
  (alias test_live_mesh_native)
- (deps ../../../sketches/gpu_sea.rays)
+ (deps ../../../sketches/gpu_sea.rays ../../../sketches/swarm.rays ../../../sketches/swarm_lib.rays)
  (action (run %{exe:test_live_mesh_native.exe})))
 
 (alias (name runtest-native) (deps (alias test_live_mesh_native)))

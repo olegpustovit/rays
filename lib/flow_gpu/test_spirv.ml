@@ -167,6 +167,20 @@ let () =
    with
   | Error d -> assert (d.code = "E_GPU_FORM")
   | Ok _ -> assert false);
+  (* an unfolded kernel: its passes in a structured loop over function variables *)
+  (let program = List.assoc "fast_float" (fast_cases ()) in
+   let emitted = Flow_shader.Spirv.kernel ~fast:true ~unfold:4 program |> Test_program.ok in
+   assert (Bytes.get_int32_le emitted.bytes 0 = 0x07230203l);
+   assert (Ogpu.Shader.validate_bindings emitted.interface = Ok ());
+   if validator then begin
+     let file = Filename.temp_file "rays-spirv-" ".spv" in
+     Fun.protect
+       ~finally:(fun () -> Sys.remove file)
+       (fun () ->
+         Out_channel.with_open_bin file (fun out -> output_bytes out emitted.bytes);
+         if Sys.command ("spirv-val --target-env vulkan1.1 " ^ Filename.quote file) <> 0 then
+           failwith "spirv-val refused the unfolded kernel")
+   end);
   let expected = "goldens/spirv.sexp" in
   if writing then
     Out_channel.with_open_bin expected (fun out -> output_string out (Buffer.contents golden))

@@ -40,11 +40,11 @@ type tables = {
 }
 
 (* A device mesh's gathered corners ([positions] and [normals] of its gpu_mesh, device-written): the
-   topology they were made for ([corners] by identity, [materials] the material bytes), the corners'
+   topology they were made for ([corners] by contents, [materials] the material bytes), the corners'
    vertex indices as floats, the refittable structure's scratch, and the device mesh whose buffers the
    last gather read, kept until the gather's [receipt] completes. *)
 type device_gpu = {
-  corners : int array;
+  mutable corners : int array;
   vertex_count : int;
   material_key : bytes;
   vix : B.buffer;

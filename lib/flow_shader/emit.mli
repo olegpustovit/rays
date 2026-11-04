@@ -40,6 +40,7 @@ val kernel :
   ?uint32_outputs:int list ->
   ?uint32_inputs:int list ->
   ?uint32_tables:int list ->
+  ?unfold:int ->
   Flow_ir.Packed.t ->
   (kernel, Diagnostic.t) result
 (** [spirv] (default true) also keeps the means to print the SPIR-V form, which holds the program until

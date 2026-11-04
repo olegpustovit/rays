@@ -384,6 +384,31 @@ let bulk_ids = Atomic.make (-1)
 let state_epochs = Atomic.make 0
 let fresh_state_epoch () = Atomic.fetch_and_add state_epochs 1
 
+(* Arrays a device holds past the scope that made them (a state step left there): the placeholder
+   its backend binds, and how to read it to the host. An entry lives as long as its placeholder. *)
+module Device = struct
+  module B = Ephemeron.K1.Bucket
+  let held : (float array, unit -> value) B.t = B.make ()
+  let lock = Mutex.create ()
+  let add (placeholder : value) read =
+    match placeholder with
+    | Float_array a | Vec2_array a | Vec3_array a | Vec4_array a ->
+        Mutex.protect lock (fun () -> B.add held a read)
+    | _ -> invalid_arg "Eval.Device.add"
+  let find a = Mutex.protect lock (fun () -> B.find held a)
+  let rec thaw = function
+    | (Float_array a | Vec2_array a | Vec3_array a | Vec4_array a) as v when Array.length a <= 4 ->
+        (match find a with Some read -> read () | None -> v)
+    | List values -> List (Array.map thaw values)
+    | Record fields -> Record (List.map (fun (name, v) -> (name, thaw v)) fields)
+    | Struct (name, ty, fields) -> Struct (name, ty, List.map (fun (name, v) -> (name, thaw v)) fields)
+    | v -> v
+  let held_by_device = function
+    | Float_array a | Vec2_array a | Vec3_array a | Vec4_array a ->
+        Array.length a <= 4 && find a <> None
+    | _ -> false
+end
+
 module Residual_effect = struct
   type _ Effect.t +=
     | Observe_kernel : residual -> unit Effect.t
@@ -1629,7 +1654,7 @@ and ev_raw c env (x : W.term) : value =
           let state, _ = state_plane c in
           let key = state_key c zone in
           match State_map.find_opt key state.next with
-          | Some v -> v
+          | Some v -> Device.thaw v
           | None ->
               let v = state_data c (coerce_to x.ty (ev c env step)) in
               state.next <- State_map.add key v state.next;
@@ -1805,7 +1830,8 @@ and state_previous c env zone init =
   | Some v -> state_data c v
   | None -> state_data c (ev c env init)
 
-and state_data c value =
+and state_data ?(device = false) c value =
+  let state_data c v = state_data ~device c v in
   match concrete c value with
   | Deferred _ | No_geo -> fail "E_STATE_TYPE" "State stores data, not deferred nodes or layouts."
   | Struct (_, ty, _) when Ty.shape ty ->
@@ -1815,7 +1841,7 @@ and state_data c value =
   | Record fields -> Record (List.map (fun (name, value) -> (name, state_data c value)) fields)
   | Struct (name, ty, fields) ->
       Struct (name, ty, List.map (fun (name, value) -> (name, state_data c value)) fields)
-  | value -> value
+  | value -> if device then value else Device.thaw value
 
 and concrete_data c value =
   match concrete c value with
@@ -3584,21 +3610,22 @@ module Residual = struct
   let state_ctx r ~instance ~path ~iter ~host =
     { (live_ctx r) with inst = instance; prefix = path; iter; host }
 
-  let state_read r ~instance ~path ~iter ~host ~init =
+  let state_read ?device r ~instance ~path ~iter ~host ~init =
     let c = state_ctx r ~instance ~path ~iter ~host in
     let state, frame = state_plane c in
     begin_frame state (Lazy.force c.st.source) frame;
     match State_map.find_opt (state_key c []) state.before with
-    | Some v -> state_data c v
-    | None -> state_data c (init ())
+    | Some v -> state_data ?device c v
+    | None -> state_data ?device c (init ())
 
-  let state_peek r ~instance ~path ~iter ~host =
+  let state_peek ?(device = false) r ~instance ~path ~iter ~host =
     let c = state_ctx r ~instance ~path ~iter ~host in
-    State_map.find_opt (state_key c []) (fst (state_plane c)).next
+    Option.map (if device then Fun.id else Device.thaw)
+      (State_map.find_opt (state_key c []) (fst (state_plane c)).next)
 
-  let state_write r ~instance ~path ~iter ~host v =
+  let state_write ?device r ~instance ~path ~iter ~host v =
     let c = state_ctx r ~instance ~path ~iter ~host in
-    let v = state_data c v in
+    let v = state_data ?device c v in
     let state, _ = state_plane c in
     state.next <- State_map.add (state_key c []) v state.next;
     state.epoch <- fresh_state_epoch ();

@@ -184,7 +184,18 @@ let compute ~gpu ~state previous plan ~live =
   Result.bind
     (match plan.states with
     | None -> Ok Flow.Eval.No_geo
-    | Some states -> force ~gpu ~reference ~state ~live states)
+    | Some states -> (
+        (* a step runs on the device when fast precision has one; what the state stores is read
+           back as it is written (Core_exec's State_write), so nothing here outlives the scope *)
+        match
+          if gpu.Flow_ir.Gpu.fast && not reference then
+            Option.bind gpu.backend (fun backend -> backend.residency ~fast:true)
+          else None
+        with
+        | Some scope ->
+            Fun.protect ~finally:scope.executor.close (fun () ->
+                Flow_ir.Executor.force ~resident:scope.executor ~reference ~state states ~live)
+        | None -> force ~gpu ~reference ~state ~live states))
     (fun _ ->
       if
         Array.length plan.targets = 0

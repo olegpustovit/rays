@@ -434,7 +434,10 @@ let update_with value frame ~inspector =
   let lowered = value.core.doc.workspace.lowered in
   let image_errors = preview_images value frame in
   let update =
-    Flow_native.Workspace_gpu.with_backend value.host.gpu (fun gpu ->
+    (* the workspace's precision, as its lowering has it: a fast workspace's value lane (its state
+       steps) runs on the device too *)
+    Flow_native.Workspace_gpu.with_backend ~fast:(Editor_document.Lowering.fast value.core.doc)
+      value.host.gpu (fun gpu ->
         Flow_sop.Lower.with_images ~gpu
           ~metadata:
             ((* the probe records keep this past the frame: the images, never [value] *)

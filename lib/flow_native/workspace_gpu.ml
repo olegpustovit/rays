@@ -345,9 +345,14 @@ let proxy t =
                         invoke =
                           (fun packed values ~locals ~live ->
                             route t (fun () -> r.invoke packed values ~locals ~live));
+                        unfold =
+                          (fun p v ~steps ~source ~locals ~live ->
+                            route t (fun () -> r.unfold p v ~steps ~source ~locals ~live));
                         compact = (fun v -> route t (fun () -> r.compact v));
                         coerce = (fun ty v -> route t (fun () -> r.coerce ty v));
+                        concat = (fun a b -> route t (fun () -> r.concat a b));
                         finish = (fun v -> route t (fun () -> r.finish v));
+                        keep = (fun v -> route t (fun () -> r.keep v));
                         count = (fun v -> route t (fun () -> r.count v));
                         capacity = (fun v -> route t (fun () -> r.capacity v));
                         close = (fun () -> route t r.close);

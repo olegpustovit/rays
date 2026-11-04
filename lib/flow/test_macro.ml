@@ -55,6 +55,8 @@ let () =
   rejects "(defmacro m [x] `(+ ~x y))" "E_MACRO_CAPTURE" "would capture a name from the call site";
   rejects "(defmacro m [x] `(let* [tmp ~x] tmp))" "E_MACRO_CAPTURE" "write tmp# for a fresh name";
   assert (check "(defmacro m [x] `(let* [tmp# ~x] tmp#))" = []);
+  (* a binder's type is not a name *)
+  assert (check "(defmacro m [x] `(for [(p# : (array vec3)) ~x] p#))" = []);
   rejects "(defmacro m [x] `(+ ~x k.y))" "E_MACRO_CAPTURE" "k.y";
   rejects "(defmacro m [x] `(+ ~x 1#x#))" "E_MACRO_TEMPLATE" "not a valid fresh name"
 

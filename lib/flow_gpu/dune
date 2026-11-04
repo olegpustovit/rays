@@ -11,6 +11,7 @@
   dispatch_source
   bounds_source
   normals_source
+  copy_source
   kernels
   pipelines
   run
@@ -28,6 +29,7 @@
   dispatch_source
   bounds_source
   normals_source
+  copy_source
   kernels
   image_rgba8_source
   image_rgba8_spirv)
@@ -54,6 +56,7 @@
     %{dep:triangles.comp.spv}
     %{dep:bounds.comp.spv}
     %{dep:normals.comp.spv}
+    %{dep:copy.comp.spv}
     %{dep:dispatch.comp.spv}))))
 
 (rule
@@ -72,6 +75,8 @@
   bounds.comp.spv
   normals.metal
   normals.comp.spv
+  copy.metal
+  copy.comp.spv
   dispatch.metal
   dispatch.comp.spv)
  (deps
@@ -191,6 +196,19 @@
    (progn
     (echo "let source = {msl|")
     (cat normals.metal)
+    (echo "|msl}\n")))))
+
+; a resident array/concat's copy
+
+(rule
+ (target copy_source.ml)
+ (deps copy.metal)
+ (action
+  (with-stdout-to
+   %{target}
+   (progn
+    (echo "let source = {msl|")
+    (cat copy.metal)
     (echo "|msl}\n")))))
 
 ; the image sink's stages, printed from ../renderer/shaders/image.rays

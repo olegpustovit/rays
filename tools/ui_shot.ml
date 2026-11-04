@@ -195,5 +195,9 @@ let () =
         times.(Array.length times / 2)
         times.(0))
     (Sys.getenv_opt "UI_SHOT_BENCH");
+  (* work meant for the device that ran on the CPU, and why *)
+  List.iter
+    (fun (site, reason, count) -> Printf.printf "off_gpu %s: %s (%d)\n%!" site reason count)
+    (Flow_ir.Fallback.seen ());
   E.close !editor;
   ignore (Rays.Canvas.destroy canvas)

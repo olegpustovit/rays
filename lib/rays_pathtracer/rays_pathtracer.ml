@@ -681,7 +681,7 @@ let move_async t (moved : mesh) =
 
 (* A device mesh's update (Mesh_data.device): its corners gathered from the device's positions and
    normals into the tracer's per-corner buffers (one compute pass each), then its structure. The same
-   topology (the corners array, vertex count and materials of the installed device mesh) refits the
+   topology (the corners, vertex count and materials of the installed device mesh) refits the
    installed structure in place, ordered on the queue before every later frame: [None], nothing to
    install. Anything else builds a refittable structure over fresh buffers, installed when done.
    ponytail: the structure is not compacted (a refit needs the uncompacted one). *)
@@ -736,10 +736,14 @@ let device_async t (mesh : mesh) (d : Mesh_data.device) =
   in
   match t.gpu.device with
   | Some installed
-    when d.corners <> [||] && installed.corners == d.corners
+    when d.corners <> [||]
          && installed.vertex_count = d.vertex_count
          && t.gpu.shape.colored = d.colored
-         && Bytes.equal installed.material_key material_key ->
+         && Bytes.equal installed.material_key material_key
+         (* the same topology re-derived hands a fresh array: one host compare (about 90 ms at 23M
+            corners, once, as the newest is kept) instead of a rebuild (2 s at 7.68M triangles).
+            ponytail: a producer's topology stamp is the upgrade if a fresh array every frame shows up *)
+         && (installed.corners == d.corners || installed.corners = d.corners) ->
       (* the last gather read the previous mesh's buffers: done before that mesh is let go *)
       let* () = wait t.queue installed.receipt in
       let* commands = gpu (B.begin_commands t.queue) in
@@ -760,6 +764,7 @@ let device_async t (mesh : mesh) (d : Mesh_data.device) =
       (match encoded with
       | Ok receipt ->
           installed.source <- d.holder;
+          installed.corners <- d.corners;
           installed.receipt <- receipt;
           t.refits <- t.refits + 1;
           edited t

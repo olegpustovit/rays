@@ -25,6 +25,21 @@ let text =
     (Option.value (Sys.getenv_opt "XDRIVE") ~default:"")
   |> fun text -> Option.value (Sys.getenv_opt "TEXT") ~default:text
 
+(* TIMEOUT=seconds: past it, say what left the device so far and stop, rather than hang *)
+let () =
+  Option.iter
+    (fun seconds ->
+      Sys.set_signal Sys.sigalrm
+        (Sys.Signal_handle
+           (fun _ ->
+             List.iter
+               (fun (site, reason, count) -> Printf.printf "off_gpu %s: %s (%d)\n" site reason count)
+               (Flow_ir.Fallback.seen ());
+             Printf.printf "timeout after %s s\n%!" seconds;
+             exit 2));
+      ignore (Unix.alarm (int_of_string seconds)))
+    (Sys.getenv_opt "TIMEOUT")
+
 let () =
   let gpu = Flow_native.Workspace_gpu.create () in
   if Sys.getenv_opt "QUALIFICATION" <> None then Flow_native.Workspace_gpu.qualification gpu;
@@ -60,7 +75,8 @@ let () =
             }
           in
           let lowered =
-            Flow_sop.Lower.workspace
+            (* DEFER=1: lowered as the editor lowers it *)
+            Flow_sop.Lower.workspace ~defer:(Sys.getenv_opt "DEFER" <> None) ~extra:Editor_document.Kinds.descriptors
               ?gpu:(if Sys.getenv_opt "CPU" = None then Some config else None)
               (Flow.Syntax.parse text |> ok)
             |> ok
@@ -78,7 +94,8 @@ let () =
             let time = float frame /. 60. in
             let before = stats () and calls = !dispatches in
             let start = Unix.gettimeofday () in
-            let live = Input.at_time time in
+            (* a frame as the editor gives it: a step and an index, so state folds advance *)
+            let live = { (Input.at_time time) with dt = 1. /. 60.; frame; tick = frame } in
             let resolved =
               Flow_sop.Value_lane.resolve
                 ?gpu:(if Sys.getenv_opt "CPU" = None then Some config else None)
@@ -92,7 +109,7 @@ let () =
             in
             let output =
               Sop.Session.cook ~cpu_consumers:readers session
-                ~context:(Sop.Context.create ~time ~input:live () |> Result.get_ok)
+                ~context:(Sop.Context.create ~frame:(Int64.of_int frame) ~time ~input:live () |> Result.get_ok)
                 node
               |> ok
             in
@@ -122,6 +139,20 @@ let () =
             let start = Unix.gettimeofday () in
             if not noread then ignore (Rdk.Packed.Float3.get (Rdk.Geometry.positions geometry) 0);
             let read_seconds = Unix.gettimeofday () -. start in
+            (* P[0], so a frame that did not move shows *)
+            if not noread then begin
+              let ps = Rdk.Geometry.positions geometry in
+              let x, y, z = Rdk.Packed.Float3.get ps 0 in
+              (* PSUM=1: a checksum of every point (reads them all back) *)
+              let sum = ref 0. in
+              if Sys.getenv_opt "PSUM" <> None then
+              for k = 0 to Rdk.Packed.Float3.length ps - 1 do
+                let a, b, c = Rdk.Packed.Float3.get ps k in
+                sum := !sum +. a +. (2. *. b) +. (3. *. c)
+              done;
+              Printf.printf "  P[0] %.6f %.6f %.6f sum %.4f\n" x y z !sum
+
+            end;
             Printf.printf
               "frame %2d: %.4f s (resolve %.4f s), %d dispatches, %d buffers, %d uploads (%d \
                bytes), %d compiled, P %s, bounds %.4f s (%d bytes, %d outputs read), read P %.4f \
@@ -155,6 +186,14 @@ let () =
               (Flow_ir.Profile.placements lowered.profile)
           done;
           let late = List.filteri (fun i _ -> i < max 1 (List.length !times / 2)) !times in
+          (let s = Gc.quick_stat () in
+           Printf.printf "gc: heap %d MB, major cycles %d, minor %d\n%!" (s.heap_words / 131072)
+             s.major_collections s.minor_collections;
+           let s = Gc.stat () in
+           Printf.printf "gc: live %d MB\n%!" (s.live_words / 131072));
+          if Sys.getenv_opt "ROOTS" <> None then
+            List.iter (fun (name, v) -> Printf.printf "  reach %s %d MB\n%!" name (Obj.reachable_words v / 131072))
+              [ ("lowered", Obj.repr lowered); ("lane", Obj.repr lane); ("session", Obj.repr session) ];
           Printf.printf "median_cook_s=%.6f over last %d frames\n%!"
             (List.nth (List.sort Float.compare late) (List.length late / 2))
             (List.length late);

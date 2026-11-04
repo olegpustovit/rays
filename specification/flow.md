@@ -1543,8 +1543,13 @@ fast kernel, arithmetic on integer values (an integer register, its float conver
 constant, `+ - * mod min max` of two such) stays in 64-bit integers instead of rounding through
 f32, and a conversion of such a value back to an integer takes it directly. The web export follows
 the same paths with the same setting (`specification/web-export/plan.md`, "Native parity of the
-fast paths"). State, exports,
-cache keys and catalog parameters stay exact (kept for now, 2026-10-26). `:precision "exact"`
+fast paths"). Exports, cache keys and catalog parameters stay exact (kept for now, 2026-10-26). A state
+step runs on the device too in fast precision (2026-11-04): the value lane forces it in a resident
+scope, and an array it stores stays on the device between frames (`Core_exec`'s `keep`: a
+`Flow.Eval.Device` placeholder the next step and the mesh bind; a host read copies it and leaves the
+buffer, so the step never writes the buffer it reads); a stateful SOP chain cooks on the device over the state
+its lane advanced (its program's root bound to the frame), and a large host array several regions
+read is uploaded once a scope (`Host`'s adopted arrays). `:precision "exact"`
 keeps every value bit-identical on the CPU. The editor sets `Gpu.fast` from the setting
 (`Lowering.fast`). recursive_rectangles while its picture changes, median per draw at 600x560
 (M-series, 2026-10-26, interleaved A/B, 5 rounds): 242 ms before, 82 ms exact, 6.8-7.4 ms with

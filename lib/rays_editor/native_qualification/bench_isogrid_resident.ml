@@ -66,6 +66,9 @@ let () =
                   count = (fun v -> time 5 (fun () -> r.count v));
                   finish = (fun v -> time 6 (fun () -> r.finish v));
                   capacity = r.capacity;
+                  concat = r.concat;
+                  unfold = r.unfold;
+                  keep = r.keep;
                   settle = (fun () -> time 7 r.settle);
                   close = (fun () -> time 8 r.close);
                 };

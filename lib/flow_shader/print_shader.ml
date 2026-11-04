@@ -36,6 +36,8 @@ let compute = function
         ("bounds", "bounds", "chunk-bounds", false, 1024, 1024);
         (* a triangle mesh's display normals from its resident P (Host.normals) *)
         ("normals", "normals", "point-normal", true, 256, 256);
+        (* a resident array/concat's copy (Run.copy) *)
+        ("copy", "copy", "copy-words", true, 256, 256);
         (* a resident dispatch's threadgroup counts from a count cell (Run.dispatch_arguments) *)
         ("dispatch", "dispatch", "dispatch-arguments", false, 1, 1);
       ]

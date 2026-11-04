@@ -519,7 +519,7 @@ let stage_value e raster ~table_of ~low ~float_of ~integer ~wide stage r =
   | Some x -> x.intrinsic stage (stage_operands ~table_of ~low ~float_of ~integer stage r)
   | None -> trace_stage e stage (fun () -> Array.map float_of r) (fun () -> Array.map low r) ~wide
 
-let emit_program ?raster ?(input_uint32 = [||]) ?(gather_uint32 = [||]) ?(uint32_words = [])
+let emit_program ?raster ?carried ?(input_uint32 = [||]) ?(gather_uint32 = [||]) ?(uint32_words = [])
     ?(output_uint32 = [||]) e (layout : Flow_ir.Kernel_layout.t) inputs outputs gathers index =
   let words = e.words and float = e.float and boolean = e.boolean in
   let registers = Array.make (Array.length layout.view.code) 0 in
@@ -630,6 +630,9 @@ let emit_program ?raster ?(input_uint32 = [||]) ?(gather_uint32 = [||]) ?(uint32
         | Gather (p, at, w, c) -> r.gather (table_of p) (low at) w c
         | Int_gather (p, at) -> r.int_gather (table_of p) (low at)
         | _ -> assert false)
+    | Input (0, _, component) when carried <> None ->
+        (* an unfolded kernel's input: the carried pass value *)
+        result e float 61 [ (Option.get carried).(component) ]
     | Input (input, width, component) when input_uint32.(input) ->
         result e float 112 [ load_uint e inputs.(input) (offset e index width component) ]
     | Input (input, width, component) -> load e inputs.(input) (offset e index width component)
@@ -927,7 +930,11 @@ let emit_program ?raster ?(input_uint32 = [||]) ?(gather_uint32 = [||]) ?(uint32
           | None ->
               store e outputs.(output)
                 (offset e index (Array.length values) component)
-                (float_of register))
+                (float_of register);
+              (* an unfolded kernel feeds its pass's value to the next *)
+              Option.iter
+                (fun vars -> Words.instruction e.words.body 62 [ vars.(component); float_of register ])
+                carried)
         values)
     layout.view.outputs;
   !invalid
@@ -963,7 +970,7 @@ let resident_count e (layout : Flow_ir.Kernel_layout.t) index buffers =
 
 let kernel ?(fast = false) ?(instanced = false) ?(motion = false) ?(curves = false)
     ?(spheres = true) ?(uint32_scalars = false) ?(uint32_outputs = []) ?(uint32_inputs = [])
-    ?(uint32_tables = []) program =
+    ?(uint32_tables = []) ?unfold program =
   try
     (match P.gpu_refusals ~fused:true ~fast program with
     | [] -> ()
@@ -1161,6 +1168,15 @@ let kernel ?(fast = false) ?(instanced = false) ?(motion = false) ?(curves = fal
     Words.instruction words.body 54 [ void; main; 0; function_type ];
     label e (Words.id words);
     e.status_bits <- result e uint_function_pointer 59 [ 7; u e 0 ];
+    (* an unfolded kernel's carried value and pass, function variables (the entry block's first) *)
+    let carried =
+      Option.map
+        (fun _ ->
+          let float_function_pointer = Words.declare words 32 [ 7; float ] in
+          ( Array.init layout.view.widths.(0) (fun _ -> result e float_function_pointer 59 [ 7 ]),
+            result e uint_function_pointer 59 [ 7; u e 0 ] ))
+        unfold
+    in
     let gid = result e vector3 61 [ invocation ] in
     let index = result e uint 81 [ gid; 0 ] in
     let body = Words.id words and finish = Words.id words in
@@ -1169,8 +1185,43 @@ let kernel ?(fast = false) ?(instanced = false) ?(motion = false) ?(curves = fal
     Words.instruction words.body 247 [ finish; 0 ];
     Words.instruction words.body 250 [ within; body; finish ];
     label e body;
-    let invalid = emit_program ~input_uint32 ~gather_uint32 ~uint32_words ~output_uint32 e layout inputs outputs gathers
-        index
+    let invalid =
+      match (unfold, carried) with
+      | Some steps, Some (vars, pass) ->
+          (* the region run [steps] passes in this lane: pass k's value stored at (k n + i), then fed
+             back (Emit.kernel ~unfold) *)
+          let width = layout.view.widths.(0) in
+          Array.iteri
+            (fun c var ->
+              Words.instruction words.body 62 [ var; load e inputs.(0) (offset e index width c) ])
+            vars;
+          let header = Words.id words and test = Words.id words and step = Words.id words
+          and continuing = Words.id words and merge = Words.id words in
+          jump e header;
+          label e header;
+          Words.instruction words.body 246 [ merge; continuing; 0 ];
+          jump e test;
+          label e test;
+          let k = result e uint 61 [ pass ] in
+          Words.instruction words.body 250 [ compare e 176 k (u e steps); step; merge ];
+          label e step;
+          e.loop_depth <- e.loop_depth + 1;
+          let invalid =
+            emit_program ~carried:vars ~input_uint32 ~gather_uint32 ~uint32_words ~output_uint32 e
+              layout inputs outputs gathers
+              (result e uint 128 [ result e uint 132 [ k; count ]; index ])
+          in
+          record_status e invalid 1;
+          e.loop_depth <- e.loop_depth - 1;
+          jump e continuing;
+          label e continuing;
+          Words.instruction words.body 62 [ pass; result e uint 128 [ k; u e 1 ] ];
+          jump e header;
+          label e merge;
+          compare e 171 (u e 0) (u e 0)
+      | _ ->
+          emit_program ~input_uint32 ~gather_uint32 ~uint32_words ~output_uint32 e layout inputs
+            outputs gathers index
     in
     record_status e invalid 1;
     let bits = result e uint 61 [ e.status_bits ] in

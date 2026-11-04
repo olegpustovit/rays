@@ -98,9 +98,18 @@ let check ~known m =
                 (Printf.sprintf "Macro %s: nested quoting is not supported." name)
           | List (h :: xs) ->
               walk ~head:true h;
-              List.iter walk xs
+              items xs
           | List [] -> ()
-          | Vec xs | Map xs -> List.iter walk xs
+          | Vec xs | Map xs -> items xs
+        (* what follows a [:] in a binder ([(walk# : (array vec3))]) is a type, never a name *)
+        and items = function
+          | ({ node = Sym ":"; _ } as colon) :: _type :: rest ->
+              walk colon;
+              items rest
+          | x :: rest ->
+              walk x;
+              items rest
+          | [] -> ()
         in
         walk body);
     []

@@ -94,6 +94,9 @@ let device ?(decline = false) ?(overflow = false) ?(error = false) () =
       capacity = (fun _ -> None);
       range = (fun _ _ ~div:_ ~length:_ -> None);
       fill = (fun _ ~length:_ _ -> None);
+      concat = (fun _ _ -> None);
+      unfold = (fun _ _ ~steps:_ ~source:_ ~locals:_ ~live:_ -> None);
+      keep = (fun _ -> None);
     }
   in
   let rec materialise = function
@@ -162,9 +165,11 @@ let () =
   | Ok _ -> failwith "device status error was ignored");
   let _, _, prepared = compile "(state [a 0.] (+ a t))" in
   let resident, _, invokes, _, closes = device () in
+  (* a stateful value reads its state through its root residual: without one it fails, on the
+     device as on the CPU; with one it runs there and stores host data (swarm_route) *)
   (match C.execute ~strict:true ~resident prepared ~live with
-  | Error d -> assert (d.code = "E_CORE_RESIDENT" && !invokes = 0 && !closes = 1)
-  | Ok _ -> failwith "resident stateful value execution accepted");
+  | Error d -> if not (d.code = "E_CORE_STATE" && !invokes = 0 && !closes = 1) then failwith (Diagnostic.to_string d)
+  | Ok _ -> failwith "a stateful value ran without its state");
   print_endline
     "Resident value execution: counts, escaping records, CPU readers, errors and overflow match"
 

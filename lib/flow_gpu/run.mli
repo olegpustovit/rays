@@ -195,6 +195,18 @@ val compact :
 
 val compact_blocks : int -> int
 
+val copy :
+  encoder:Ogpu.Backend.compute_encoder ->
+  Pipelines.t ->
+  src:Ogpu.Backend.buffer ->
+  from:int ->
+  dst:Ogpu.Backend.buffer ->
+  into:int ->
+  words:int ->
+  (unit, Diagnostic.t) result
+(** A resident [array/concat]'s part: [words] raw words of [src] from word [from] into [dst] from
+    word [into], encoded on [encoder] (queue order makes it see what was encoded before it). *)
+
 val validate_topology :
   ?on_read:(int -> unit) ->
   Ogpu.Backend.queue ->

@@ -56,9 +56,21 @@ type resident = {
     locals:Flow.Eval.value array ->
     live:Input.t ->
     Flow.Eval.value option;
+  unfold :
+    Packed.t ->
+    Flow.Eval.value array ->
+    steps:int ->
+    source:Flow.Eval.value ->
+    locals:Flow.Eval.value array ->
+    live:Input.t ->
+    Flow.Eval.value option;
   compact : Flow.Eval.value -> Flow.Eval.value option;
   coerce : Flow.Ty.t -> Flow.Eval.value -> Flow.Eval.value option;
+  concat : Flow.Eval.value -> Flow.Eval.value -> Flow.Eval.value option;
   finish : Flow.Eval.value -> Flow.Eval.value;
+  keep : Flow.Eval.value -> Flow.Eval.value option;
+      (** a placeholder kept on the device past the scope, as a {!Flow.Eval.Device} array (a state
+          step stores it); [None]: read it with [finish] *)
   count : Flow.Eval.value -> int option;
   capacity : Flow.Eval.value -> int option;
   close : unit -> unit;

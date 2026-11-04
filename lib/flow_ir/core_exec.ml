@@ -12,10 +12,24 @@ type resident = {
   invoke : Packed.t -> E.value array -> locals:E.value array -> live:Input.t -> E.value option;
       (* run the region with these arguments on the device ([locals]: the draw's, an array none
          holds is free); None leaves it to the CPU *)
+  unfold :
+    Packed.t ->
+    E.value array ->
+    steps:int ->
+    source:E.value ->
+    locals:E.value array ->
+    live:Input.t ->
+    E.value option;
+      (* the region run [steps] passes in each lane over its one carried input, every pass's
+         output kept in turn: the history an iterate appending each pass makes, in one dispatch *)
   compact : E.value -> E.value option; (* array/compact of a placeholder mask, on the device *)
   coerce : Flow.Ty.t -> E.value -> E.value option; (* a placeholder retyped, on the device *)
+  concat : E.value -> E.value -> E.value option;
+      (* array/concat of a placeholder and a placeholder or host array, on the device *)
   finish : E.value -> E.value;
       (* the host array a placeholder stands for; any other value as it is *)
+  keep : E.value -> E.value option;
+      (* a placeholder kept on the device past the scope (Flow.Eval.Device); None: finish it *)
   count : E.value -> int option;
       (* a placeholder's settled element count, without reading its payload *)
   capacity : E.value -> int option;
@@ -38,6 +52,14 @@ let rec host_value resident = function
   | E.Struct (name, ty, fields) ->
       E.Struct (name, ty, List.map (fun (name, v) -> (name, host_value resident v)) fields)
   | value -> resident.finish value
+
+(* what a state stores from a resident run: device arrays stay there, the rest is read back *)
+let rec kept_value resident = function
+  | E.Record fields -> E.Record (List.map (fun (name, v) -> (name, kept_value resident v)) fields)
+  | E.List values -> E.List (Array.map (kept_value resident) values)
+  | E.Struct (name, ty, fields) ->
+      E.Struct (name, ty, List.map (fun (name, v) -> (name, kept_value resident v)) fields)
+  | value -> (match resident.keep value with Some v -> v | None -> resident.finish value)
 
 (* A program's array arena (memory plan S5). [arena_buffers] is the TFLite greedy-by-size planner over
    top-level statement intervals; an OCaml array cannot be a prefix of a larger one, so a buffer
@@ -1044,6 +1066,74 @@ let prepare_group (group : Core_draw.group) fallback =
             outputs
       | Ok _ | Error _ -> original st
 
+(* A counted loop that steps one region over a carried array and appends each pass to another:
+   [pre] its loop-invariant scalars, the region and its arguments, the carried history ([points]).
+   The carried head must be the region's one source and dead after the loop, the history unread by
+   the region; anything else declines, and the loop runs pass by pass. *)
+type unfold = { pre : C.statement list; region : int; args : int list; head : int; points : int }
+
+let unfold_shape (program : C.program) (loop : C.statement) body ~index ~item =
+  let invokes =
+    List.filter_map
+      (fun (s : C.statement) ->
+        match s.node with C.Invoke { region; args; result } -> Some (region, args, result) | _ -> None)
+      body
+  in
+  match invokes with
+  | [ (region, args, h) ] -> (
+      let copies = Hashtbl.create 8 in
+      List.iter
+        (fun (s : C.statement) ->
+          match s.node with C.Assign (x, Local y) -> Hashtbl.replace copies x y | _ -> ())
+        body;
+      (* the local a copy chain starts from *)
+      let rec origin x = match Hashtbl.find_opt copies x with Some y when y <> x -> origin y | _ -> x in
+      let concat =
+        List.find_map
+          (fun (s : C.statement) ->
+            match s.node with
+            | C.Assign (pc, Prim (Array_concat, [ (_, pin); (_, h') ])) when origin h' = h -> Some (pc, pin)
+            | _ -> None)
+          body
+      in
+      match concat with
+      | None -> None
+      | Some (pc, pin) -> (
+          let carried_to src =
+            Hashtbl.fold (fun x _ acc -> if origin x = src && x <> src then x :: acc else acc) copies []
+          in
+          let head = List.filter (fun x -> List.mem x args) (carried_to h) in
+          let points_ok = List.mem pin (carried_to pc) in
+          let moved = h :: pc :: (carried_to h @ carried_to pc) in
+          let pre =
+            List.filter
+              (fun (s : C.statement) ->
+                match s.node with
+                | C.Invoke _ -> false
+                | Assign (x, Local _) when List.mem x moved -> false
+                | Assign (x, _) when x = pc -> false
+                | _ -> true)
+              body
+          in
+          let pure (s : C.statement) =
+            (match s.node with C.Assign _ | Reset_call _ -> true | _ -> false)
+            && not (List.exists (fun n -> List.mem n (index :: item :: moved)) (C.reads s))
+          in
+          match head with
+          | [ head ] when points_ok && List.for_all pure pre && Array.length program.regions.(region).sources = 1 ->
+              (* the head is dead past the loop: nothing outside it reads it *)
+              let inside = ref [] in
+              C.iter (fun s -> inside := s :: !inside) body;
+              let read_outside = ref false in
+              C.iter
+                (fun s ->
+                  if s != loop && not (List.memq s !inside) && List.mem head (C.reads s) then
+                    read_outside := true)
+                program.body;
+              if !read_outside then None else Some { pre; region; args; head; points = pin }
+          | _ -> None))
+  | _ -> None
+
 let prepare ?(clobber = false) ?(remember_loops = false) ?(approx = Flow.Workspace.Paths.empty)
     ?(fast = false)
     (program : C.program) =
@@ -1265,6 +1355,8 @@ let prepare ?(clobber = false) ?(remember_loops = false) ?(approx = Flow.Workspa
       program.state_slots
   in
   let slot_key st n = slot_keys.(n) st in
+  (* a resident run binds the arrays a device holds: its state reads leave them there *)
+  let device st = st.resident <> None && st.resident_on in
   let state_root st =
     match st.root with
     | Some r -> r
@@ -1390,6 +1482,15 @@ let prepare ?(clobber = false) ?(remember_loops = false) ?(approx = Flow.Workspa
                 | None ->
                     st.values.(arg) <- r.finish st.values.(arg);
                     value st)
+            | _ -> value st)
+    | Assign (n, (Prim (Array_concat, [ (_, a); (_, b) ]) as e)) ->
+        (* in a resident fold the device joins its own arrays (appending a history in place) *)
+        let value = expression e in
+        fun st ->
+          st.values.(n) <-
+            (match st.resident with
+            | Some r when st.resident_on -> (
+                match r.concat st.values.(a) st.values.(b) with Some v -> v | None -> value st)
             | _ -> value st)
     | Assign (n, (Prim (Array_range, [ (_, count) ]) as e)) when List.mem_assoc n tail_ranges -> (
         (* a range of a kept array's count: the device's index buffer while the array stays there,
@@ -1539,8 +1640,9 @@ let prepare ?(clobber = false) ?(remember_loops = false) ?(approx = Flow.Workspa
             body st
           done
     | Counted { first; last; count; index; item; limit; stop; init; body } -> (
+        let shape = if stop = None then unfold_shape program s body ~index ~item else None in
         let init = plain_block init and setup, body = loop_body body in
-        fun st ->
+        let normal = fun st ->
           let first = V.int_of st.values.(first) and last = V.int_of st.values.(last) in
           let length = Int64.sub (Int64.of_int last) (Int64.of_int first) in
           if length > Int64.of_int limit then
@@ -1563,7 +1665,53 @@ let prepare ?(clobber = false) ?(remember_loops = false) ?(approx = Flow.Workspa
                 st.values.(item) <- V.Int (first + !i);
                 body st;
                 incr i
-              done)
+              done
+        in
+        match shape with
+        | None -> normal
+        | Some u ->
+            (* an iterate appending one region's pass to a history, on the device: its passes in
+               one dispatch (each lane runs them all), the history joined once *)
+            let pre = plain_block u.pre in
+            fun st -> (
+              let first' = V.int_of st.values.(first) and last' = V.int_of st.values.(last) in
+              let length = last' - first' in
+              match st.resident with
+              | Some r when st.resident_on && length > 1 && length <= limit -> (
+                  st.values.(count) <- V.Int length;
+                  st.values.(index) <- V.Int 0;
+                  st.values.(item) <- V.Int first';
+                  pre st;
+                  let argv = Array.of_list (List.map (fun n -> st.values.(n)) u.args) in
+                  (* the region's one source is the carried head itself, and no uniform the history *)
+                  let fits =
+                    match Packed.Host.bind_arguments ~validate:false program.regions.(u.region) argv with
+                    | Error _ -> false
+                    | Ok bound ->
+                        let is v = function
+                          | Packed.Host.Value x -> x == v
+                          | Range (x, _, _) -> x == v
+                          | Opaque (Some xs) -> List.memq v xs
+                          | Opaque None -> true
+                        in
+                        (* its source is checked where it is bound: the device knows its input *)
+                        Array.length (Packed.Host.source_shapes bound) = 1
+                        && not (Array.exists (is st.values.(u.points)) (Packed.Host.uniform_shapes bound))
+                        && not (Array.exists (is st.values.(u.head)) (Packed.Host.uniform_shapes bound))
+                  in
+                  let un =
+                    if fits then
+                      r.unfold program.regions.(u.region) argv ~steps:length ~source:st.values.(u.head)
+                        ~locals:st.values ~live:st.live
+                    else None
+                  in
+                  match
+                    Option.bind un
+                      (fun history -> r.concat st.values.(u.points) history)
+                  with
+                  | Some joined -> st.values.(u.points) <- joined
+                  | None -> normal st)
+              | _ -> normal st))
     | Store { sequence; index; value } -> (
         fun st ->
           if
@@ -1600,21 +1748,29 @@ let prepare ?(clobber = false) ?(remember_loops = false) ?(approx = Flow.Workspa
           let instance, path, iter, host = slot_key st slot in
           if Array.length st.builders > 0 then st.builders.(result) <- None;
           st.values.(result) <-
-            E.Residual.state_read (state_root st) ~instance ~path ~iter ~host ~init:(fun () ->
+            E.Residual.state_read ~device:(device st) (state_root st) ~instance ~path ~iter ~host
+              ~init:(fun () ->
                 init st;
-                st.values.(initial))
+                (* a seed the device computed stays there (Flow.Eval.Device) *)
+                match st.resident with
+                | Some r when st.resident_on -> kept_value r st.values.(initial)
+                | _ -> st.values.(initial))
     | State_peek { slot; found; value } ->
         fun st ->
           let instance, path, iter, host = slot_key st slot in
-          let pending = E.Residual.state_peek (state_root st) ~instance ~path ~iter ~host in
+          let pending = E.Residual.state_peek ~device:(device st) (state_root st) ~instance ~path ~iter ~host in
           st.values.(found) <- V.Bool (Option.is_some pending);
           st.values.(value) <- Option.value ~default:V.No_geo pending
     | State_write { slot; value } ->
         fun st ->
+          (* a step the device computed stays there, its host copy read only when one is asked for *)
+          (match st.resident with
+          | Some r when st.resident_on -> st.values.(value) <- kept_value r st.values.(value)
+          | _ -> ());
           let instance, path, iter, host = slot_key st slot in
           seal st value;
           st.values.(value) <-
-            E.Residual.state_write (state_root st) ~instance ~path ~iter ~host st.values.(value)
+            E.Residual.state_write ~device:(device st) (state_root st) ~instance ~path ~iter ~host st.values.(value)
     | Invoke { region; args; result } -> (
         let run =
           prepare_invoke program.regions.(region) ~args ~result ~on_device:device_ok.(region)
@@ -1752,13 +1908,8 @@ let execute ?root ?(strict = false) ?(rerun_on_error = true) ?on_walk ?force ?re
     | Invalid_argument _ | Not_found | Failure _ ->
         Error (Diagnostic.error ~code:"E_CORE" "Core execution failed.")
   in
-  let result =
-    if resident <> None && Array.length prepared.program.state_slots <> 0 then
-      Error
-        (Diagnostic.error ~code:"E_CORE_RESIDENT"
-           "Resident value execution requires a stateless program.")
-    else run ()
-  in
+  (* state runs on the device too: what it stores is read back (State_read's seed, State_write) *)
+  let result = run () in
   (match result with Error _ -> close () | Ok _ -> ());
   match root with
   | None -> result

@@ -1326,16 +1326,19 @@ let release_kept t fate ~id ~weak ~held =
 
 let hold t ~uint32 ~buffer ~capacity ~count ~width ~epoch ~settled =
   Mem.charge held_owner capacity;
+  let id = Atomic.fetch_and_add next_kept 1 in
   let kept =
-    { id = Atomic.fetch_and_add next_kept 1;
+    { id;
       kept_buffer = buffer; kept_count = count; kept_width = width;
       uint32;
       fate =
         { lock = Mutex.create (); planes = Atomic.make None; destroyed = false; retired = false;
           readers = Atomic.make 0 };
-      placeholder = Array.make width 0.; kept_epoch = epoch;
+      (* its contents are its id: a cache keying values by contents (Flow.Value.key_of) tells two
+         held arrays apart *)
+      placeholder = Array.make width (float id); kept_epoch = epoch;
       settled = Atomic.make settled; bounds_memo = None;
-      thaw = ignore; pressure = device_pressure capacity }
+      thaw = ignore; pressure = device_pressure (if Sys.getenv_opt "NOPRESS" <> None then 0 else capacity) }
   in
   let weak = Weak.create 1 in
   Weak.set weak 0 (Some kept);
@@ -1796,6 +1799,27 @@ let compact ?(uint32 = false) ?encoder commands pipelines ~mask ~count ~count_in
                  let groups = if pass = 1 then 1 else compact_blocks count / 8 in
                  B.dispatch_threads encoder ~threads:(1024 * groups, 1, 1) ~threadgroup:(1024, 1, 1)))
           [ 0; 1; 2 ]);
+    Ok ()
+  with Diagnostic.Error error -> Error error
+
+let copy ~encoder pipelines ~src ~from ~dst ~into ~words =
+  try
+    if words > 0 then begin
+      let compiled =
+        match Pipelines.get pipelines Kernels.copy with
+        | Ok compiled -> compiled
+        | Error error -> raise (Diagnostic.Error error)
+      in
+      let bound = Bytes.create 12 in
+      Bytes.set_int32_le bound 0 (Int32.of_int words);
+      Bytes.set_int32_le bound 4 (Int32.of_int from);
+      Bytes.set_int32_le bound 8 (Int32.of_int into);
+      get (B.set_pipeline encoder compiled.pipeline);
+      get (B.set_buffer encoder ~index:0 src);
+      get (B.set_buffer encoder ~index:1 dst);
+      get (B.set_bytes encoder ~index:2 bound);
+      get (B.dispatch_threads encoder ~threads:(words, 1, 1) ~threadgroup:(256, 1, 1))
+    end;
     Ok ()
   with Diagnostic.Error error -> Error error
 

@@ -25,8 +25,11 @@ let () =
             Some {
               executor = {
                 invoke = (fun _ _ ~locals:_ ~live:_ -> owner (); None);
+                unfold = (fun _ _ ~steps:_ ~source:_ ~locals:_ ~live:_ -> owner (); None);
+                keep = (fun _ -> owner (); None);
                 compact = (fun v -> owner (); Some v);
                 coerce = (fun _ v -> owner (); Some v);
+                concat = (fun a _ -> owner (); Some a);
                 finish = (fun v -> owner (); v);
                 count = (fun _ -> owner (); Some 1);
                 capacity = (fun _ -> owner (); Some 1);
