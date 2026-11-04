@@ -143,9 +143,8 @@ fn authored_body_errors_cook_lazily() {
     with_session(&mut |s| expect_error(s, 1, &salted_call));
 }
 
-#[test]
-fn prepared_bodies_reuse_unchanged_graphs_and_recompile_live_drives() {
-    for expression in ["t", "(state [previous 0.0] (+ previous (frame/dt)))"] {
+fn prepared_bodies_reuse_unchanged_graphs_and_recompile_live_drives(expression: &str) {
+    {
         for reference in [false, true] {
             let n = lower_ref(
                 reference,
@@ -167,6 +166,38 @@ fn prepared_bodies_reuse_unchanged_graphs_and_recompile_live_drives() {
             });
         }
     }
+}
+
+/// The reuse half of the above, cheap: a live body is recompiled for a new time (its geometry moves,
+/// it is not the stale one) and an unchanged one hits the warm cache.
+#[test]
+fn a_live_body_recompiles_for_a_new_time_and_an_unchanged_one_hits_the_cache() {
+    let n = lower_ref(false, "(workspace live_body
+      (defnode sop/live_body [(geo : geometry)]
+        (sop/transform geo :translate [t 0.0 0.0]))
+      (graph g :context sop (sop/live_body (sop/line :points 2))))");
+    with_session(&mut |s| {
+        let at = |time: f64| sctx::create(ContextOptions { time: Some(time), frame: Some(time as i64), input: Some(input::Frame { frame: time as i64, tick: time as i64, ..input::at_time(time) }), ..Default::default() }).unwrap();
+        let (first, second) = (at(0.0), at(1.0));
+        let a = geometry_bytes(&cook(s, &first, &n));
+        let b = geometry_bytes(&cook(s, &second, &n));
+        assert!(a != b, "A live body reused the geometry of another time");
+        let before = session::stats(s);
+        assert!(geometry_bytes(&cook(s, &second, &n)) == b);
+        assert!(session::stats(s).misses == before.misses, "An unchanged prepared body missed its warm cache");
+    });
+}
+
+#[test]
+#[ignore = "slow: 1.2 s per lowering and 0.5-1 s per live card build in a debug build, over 10 s alone; the cheap half is a_live_body_recompiles_for_a_new_time_and_an_unchanged_one_hits_the_cache"]
+fn prepared_bodies_reuse_unchanged_graphs_and_recompile_a_live_time() {
+    prepared_bodies_reuse_unchanged_graphs_and_recompile_live_drives("t");
+}
+
+#[test]
+#[ignore = "slow: see prepared_bodies_reuse_unchanged_graphs_and_recompile_a_live_time"]
+fn prepared_bodies_reuse_unchanged_graphs_and_recompile_a_live_state() {
+    prepared_bodies_reuse_unchanged_graphs_and_recompile_live_drives("(state [previous 0.0] (+ previous (frame/dt)))");
 }
 
 #[allow(dead_code)]

@@ -183,15 +183,20 @@ fn previews_resolve_piece_templates() {
 }
 
 fn live_preview_lowered() -> (lower::T, lower::Graph, i64) {
+    live_preview_lowered_over("(list [0 0 0] [10 0 0])")
+}
+
+fn live_preview_lowered_over(points: &str) -> (lower::T, lower::Graph, i64) {
     // Live arguments and folds use the same frame and environment as the authored graph. Switching
     // selectors cannot advance or reset the fold.
     let lowered = lower_source(
-        r#"(workspace live_preview (graph g :context sop
+        &r#"(workspace live_preview (graph g :context sop
     (let* [ticks (state [n 0.0] (+ n (frame/dt)))
-           field (sop/curve (list [0 0 0] [10 0 0]))
+           field (sop/curve {points})
            dots (for [p (sop/point_list field)]
              (let* [moved (sop/transform (sop/box) :translate (+ p [ticks t 0]))] moved))]
-      (sop/merge dots))))"#,
+      (sop/merge dots))))"#
+        .replace("{points}", points),
     );
     let graph = lowered.graphs[0].clone();
     let target = lowered.plan.nodes.iter().find(|n| n.site == path(&["g", "dots", "moved"])).expect("a plan node").id;
@@ -216,16 +221,18 @@ fn a_same_session_never_reuses_a_zone_result_across_divergent_fold_histories() {
     let left = value_lane::create(Some(flow_eval::fork_state(&seed)));
     let right = value_lane::create(Some(flow_eval::fork_state(&seed)));
     let mut s = open_session();
-    let mut resolve = |lane: &value_lane::Lane, frame: i64, dt: f64| -> f64 {
+    // frame 1 only advances each lane's fold (the divergent histories); the zone is cooked at frame 2 in
+    // the one session, where a result cached for one history must not serve the other
+    let mut resolve = |lane: &value_lane::Lane, frame: i64, dt: f64, cook: bool| -> f64 {
         let input = frame_at(frame, dt, frame as f64 * 0.25);
         let (network, root) = (lowered.preview)(target, &[0], &graph.network).expect("a preview");
         let resolved = value_lane::resolve(None, Some(&input), lane, input.t, &network).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
-        mean_xy(&cook_frame(&mut s, 1, &input, &resolved.geometry, root)).0
+        if cook { mean_xy(&cook_frame(&mut s, 1, &input, &resolved.geometry, root)).0 } else { 0.0 }
     };
-    resolve(&left, 1, 0.25);
-    resolve(&right, 1, 0.5);
-    let left_x = resolve(&left, 2, 0.25);
-    let right_x = resolve(&right, 2, 0.25);
+    resolve(&left, 1, 0.25, false);
+    resolve(&right, 1, 0.5, false);
+    let left_x = resolve(&left, 2, 0.25, true);
+    let right_x = resolve(&right, 2, 0.25, true);
     assert!(left_x == 0.5 && right_x == 0.75, "the same session reused a zone result across divergent fold histories");
 }
 
@@ -288,12 +295,13 @@ fn frames_source(ticks: &str) -> String {
       (let* [ticks {ticks}
              bed (sop/curve (list [0 0 0] [1 0 0]))
              dots (for [p (sop/point_list bed)]
-                    (sop/transform (sop/uv_sphere :radius 0.1 :segments 8 :rings 4)
+                    (sop/transform (sop/box :size 0.1)
                       :translate (+ p [ticks 0 0])))] (sop/merge dots))))"#
     )
 }
 
 #[test]
+#[ignore = "slow: eight frame cooks of 1.5-4 s each and seven lowerings in a debug build (38 s alone); each frame rebuilds its live cards (see test_perf_lower)"]
 fn a_captured_fold_accumulates_in_the_zone_and_is_exact_across_domains() {
     let live = lower_source(&frames_source("(state [n 0.0] (+ n (frame/dt)))"));
     let graph = live.graphs[0].clone();

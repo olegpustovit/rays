@@ -87,6 +87,17 @@ the checker bounds the parameter; the rdk and `Camera`/`Edit_graph` ones are rea
 integrations only. Not worth porting one by one; port them when the owning module is next touched, or
 as a single `debug_assert`-style sweep.
 
+**Lisp-reachability follow-up (2026-11-04):** none of these is reachable from a `.rays` file. Checked one
+by one: `Camera.orthographic` near/far are the constants 0.1 and 1000 (the check is dead);
+`Mesh_merge ... group schemas must match exactly` needs `~pad_groups:false` and its only caller never
+passes it (dead branch); `Concat source_base/tag_base` has its `E_CONCAT_TYPE` twin in
+`topology_kernel_impl.rs` (`integer(..)?`); the `Poly_bevel`, `soft_transform`, `blur_points`, `clean`,
+`join_curves`, `boolean_*`, `remesh` preconditions are re-stated at node level (`sop_topology.rs`,
+`shapes.rs`, `attributes.rs` `refuse(..)` and hard parameter ranges) before the rdk call; `key/down` and
+`pointer/down` argument errors are excluded by the checker's types. What remains (rdk `grain must be
+positive`, `Edit_graph.factory` blank names, `Display_list.reserve`, `Attribute.create_*: empty name`) is
+API-only: reachable from integrations and tests, not from Lisp. Gap 5 is closed as no action.
+
 ## Triage of the rest (compressed)
 
 False positives, by cause (no action):
