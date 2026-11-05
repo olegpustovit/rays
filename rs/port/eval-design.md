@@ -7,6 +7,17 @@ not timed) and fails while any case is at or above its OCaml time.
 
 ## Current memory work — 2026-11-05, Mac M1
 
+Qualification-refusal tables now also use immutable `Arc<Vec<...>>` storage through
+checked, evaluator and lowered snapshots. Qualification replaces the table rather
+than mutating a prior snapshot. The regression checks shared identity and copy-on-write
+preservation of the exact diagnostic values; existing goldens still compare refusal
+paths/messages. Latest debug tree sample: 64.0 MB live, 40.9 MB unattributed,
+7.2 MB device, 110.8 MB footprint, 3.9 MB allocated/frame, 13.9 KB payload
+readback/frame, exit 0 in 4.29 s. The preceding packed-only sample below was
+72.0 MB live and 4.7 MB allocated/frame, with the same device/readback numbers.
+SHA-256 `83d37499c54df685acf7a03f28206e55cd17da5f0ffe8610d898c9a95138aa29`;
+log `/tmp/rays-shared-reasons-memory.log`. No wall-time improvement is claimed.
+
 Packed candidate metadata is now immutable shared storage (`Arc<Vec<...>>`) on
 the checked workspace. Evaluator and qualification snapshots keep that allocation;
 explicit edits use copy-on-write. The nonempty-candidate regression checks sharing

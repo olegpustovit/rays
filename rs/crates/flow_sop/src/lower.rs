@@ -106,7 +106,7 @@ pub struct T {
     pub states: Vec<Value>,
     pub evaluated: Arc<E::Eval>,
     pub approx: W::Paths,
-    pub approx_reasons: Vec<(W::Path, Vec<Diagnostic>)>,
+    pub approx_reasons: Arc<Vec<(W::Path, Vec<Diagnostic>)>>,
     pub profile: Arc<Profile::T>,
     pub preview: PreviewFn,
     pub card_node: CardNodeFn,

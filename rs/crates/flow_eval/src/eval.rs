@@ -427,7 +427,7 @@ struct Arena {
 }
 static EMPTY_WORKSPACE: LazyLock<Shared<Workspace>> = LazyLock::new(|| Shared::new(Workspace {
     name: String::new(), graphs: Vec::new().into(), defs: Vec::new().into(), nodes: Vec::new().into(), macros: Vec::new().into(), source: Vec::new().into(),
-    live: BTreeSet::new(), invariant: BTreeSet::new(), approx: BTreeSet::new(), packed: Vec::new().into(), packed_roots: Vec::new(), approx_reasons: Vec::new(),
+    live: BTreeSet::new(), invariant: BTreeSet::new(), approx: BTreeSet::new(), packed: Vec::new().into(), packed_roots: Vec::new(), approx_reasons: Vec::new().into(),
     kind_fns: Vec::new(), ops: Vec::new().into(),
 }));
 impl Arena {
@@ -3554,7 +3554,7 @@ mod tests {
             graphs: vec![Graph { name: "g".into(), context: flow_syntax::context::value(), inputs: Vec::new(), body, form: graph_form.clone() }].into(),
             defs: Vec::new().into(), nodes: Vec::new().into(), macros: Vec::new().into(), source: vec![graph_form].into(),
             live: BTreeSet::new(), invariant: BTreeSet::new(), approx: BTreeSet::new(),
-            packed: Vec::new().into(), packed_roots: Vec::new(), approx_reasons: Vec::new(),
+            packed: Vec::new().into(), packed_roots: Vec::new(), approx_reasons: Vec::new().into(),
             kind_fns: Vec::new(), ops: Vec::new().into(),
         }
     }

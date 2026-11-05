@@ -36,7 +36,7 @@ pub enum PackedForm { Candidate(Paths), Refused(Vec<Diagnostic>) }
 pub struct Workspace {
     pub name:String, pub graphs:Arc<Vec<Graph>>, pub defs:Arc<Vec<Graph>>, pub nodes:Arc<Vec<Arc<NodeDefinition>>>, pub macros:Arc<Vec<Syntax>>, pub source:Arc<Vec<Syntax>>,
     pub live:Paths, pub invariant:Paths, pub approx:Paths, pub packed:Arc<Vec<(Path,PackedForm)>>, pub packed_roots:Vec<(Syntax,Path)>,
-    pub approx_reasons:Vec<(Path,Vec<Diagnostic>)>, pub kind_fns:Vec<(String,(String,Context,Vec<catalog::Slot>))>, pub ops:Arc<Vec<op::Op>>,
+    pub approx_reasons:Arc<Vec<(Path,Vec<Diagnostic>)>>, pub kind_fns:Vec<(String,(String,Context,Vec<catalog::Slot>))>, pub ops:Arc<Vec<op::Op>>,
 }
 
 /// Capacity-based lower bound for retained checked terms and syntax across shared workspaces.
@@ -3503,7 +3503,7 @@ pub fn check(
         return (None, diagnostics);
     }
     let packed = checker.packed.into_iter().collect::<Vec<_>>();
-    let approx_reasons = packed.iter().map(|(path, form)| {
+    let approx_reasons: Vec<_> = packed.iter().map(|(path, form)| {
         let reasons = match form {
             PackedForm::Refused(reasons) => reasons.clone(),
             PackedForm::Candidate(_) => vec![err("E_PACKED_PENDING", "Actual producer captures have not been qualified.".into(), None)],
@@ -3524,7 +3524,7 @@ pub fn check(
         approx: Paths::new(),
         packed: packed.into(),
         packed_roots,
-        approx_reasons,
+        approx_reasons: approx_reasons.into(),
         kind_fns: checker.kind_fns.into_iter().collect(),
         ops: checker.ops.into(),
     };
@@ -3563,9 +3563,14 @@ mod memory_tests {
         assert!(!workspace.packed.is_empty(), "the fixture has packed candidates");
         let mut edited = workspace.clone();
         assert!(Arc::ptr_eq(&workspace.packed, &edited.packed), "snapshot cloning does not copy candidate paths");
+        assert!(!workspace.approx_reasons.is_empty());
+        assert!(Arc::ptr_eq(&workspace.approx_reasons, &edited.approx_reasons), "snapshot cloning does not copy refusal diagnostics");
         let before = workspace.packed.as_ref().clone();
         Arc::make_mut(&mut edited.packed).clear();
         assert_eq!(workspace.packed.as_ref(), &before, "changing a snapshot leaves the original metadata intact");
+        let reasons = workspace.approx_reasons.as_ref().clone();
+        Arc::make_mut(&mut edited.approx_reasons).clear();
+        assert_eq!(workspace.approx_reasons.as_ref(), &reasons, "changing a snapshot leaves the original refusal diagnostics intact");
     }
 
     #[test]

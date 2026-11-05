@@ -1047,7 +1047,7 @@ pub fn qualify_workspace(options: &QualifyOptions, workspace: &w::Workspace) -> 
     approx_reasons.reverse();
     let mut qualified = workspace.clone();
     qualified.approx = approx;
-    qualified.approx_reasons = approx_reasons;
+    qualified.approx_reasons = approx_reasons.into();
     Ok((qualified, evaluated))
 }
 
