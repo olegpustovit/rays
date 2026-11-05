@@ -95,6 +95,13 @@ pub fn is_main_thread() -> bool {
     unsafe { ffi::rays_sdl3_is_main_thread() }
 }
 
+/// Sets the native binary's fatal-error policy without initializing or owning SDL.
+pub fn configure_fatal_errors() {
+    // SAFETY: the bridge only sets process error-reporting flags; the safe SDL layer
+    // requires the initial thread before exposing this process-wide startup operation.
+    unsafe { ffi::rays_sdl3_configure_fatal_errors() }
+}
+
 pub fn clear_error() {
     // SAFETY: clears SDL's thread-local error text.
     unsafe { ffi::rays_sdl3_clear_error() }
@@ -758,6 +765,7 @@ mod ffi {
         pub fn rays_sdl3_pref_path(org: *const c_char, app: *const c_char) -> *mut c_char;
         pub fn rays_sdl3_free(value: *mut c_void);
         pub fn rays_sdl3_is_main_thread() -> bool;
+        pub fn rays_sdl3_configure_fatal_errors();
         pub fn rays_sdl3_init_subsystem(bits: u32) -> bool;
         pub fn rays_sdl3_quit_subsystem(bits: u32);
         pub fn rays_sdl3_set_control_click_right_click(enabled: bool) -> bool;

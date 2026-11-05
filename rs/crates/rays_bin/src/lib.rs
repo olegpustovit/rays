@@ -107,7 +107,10 @@ pub fn check_file(path: &str, lower: bool) -> Result<(String, Option<doc::T>, St
 /// `rays fmt FILE`: (stdout, stderr, exit code).
 pub fn fmt(path: &str) -> (String, String, i32) {
     match check_file(path, true) {
-        Ok((_, Some(document), printed, _)) => (doc::to_text(&document), printed, 0),
+        Ok((_, Some(document), printed, _)) => match doc::to_text(&document) {
+            Ok(text) => (text, printed, 0),
+            Err(error) => (String::new(), format!("{printed}{}\n", rays_diagnostic::to_string(&error)), 1),
+        },
         Ok((_, None, printed, _)) => (String::new(), printed, 1),
         Err(m) => (String::new(), format!("{m}\n"), 1),
     }
@@ -159,7 +162,10 @@ pub fn web(path: &str, dir: &str) -> Result<(), Fail> {
 /// `check` and `fmt` of one file from a single check: (stderr, check code, fmt stdout).
 pub fn check_fmt(path: &str, lower: bool) -> (String, i32, String) {
     match check_file(path, lower) {
-        Ok((_, document, printed, passed)) => (printed, if passed { 0 } else { 1 }, document.map(|d| doc::to_text(&d)).unwrap_or_default()),
+        Ok((_, document, printed, passed)) => match document.map(|d| doc::to_text(&d)).transpose() {
+            Ok(text) => (printed, if passed { 0 } else { 1 }, text.unwrap_or_default()),
+            Err(error) => (format!("{printed}{}\n", rays_diagnostic::to_string(&error)), 1, String::new()),
+        },
         Err(m) => (format!("{m}\n"), 1, String::new()),
     }
 }

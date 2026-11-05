@@ -613,7 +613,7 @@ mod tests {
         let g = with_attr(&g, Owner::Point, "pid", Storage::Int((0..6).collect()));
         let g = with_attr(&g, Owner::Vertex, "vid", Storage::Int((10..18).collect()));
         let g = with_attr(&g, Owner::Primitive, "fid", Storage::Int(vec![20, 21]));
-        with_attr(&g, Owner::Primitive, "label", Storage::Text(vec!["a".to_owned(), "b".to_owned()]))
+        with_attr(&g, Owner::Primitive, "label", Storage::Text(vec![b"a".to_vec(), b"b".to_vec()]))
     }
 
     #[test]

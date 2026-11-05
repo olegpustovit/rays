@@ -7,6 +7,7 @@ pub mod op;
 pub mod port_type;
 pub mod ray_host;
 pub mod workspace;
+pub mod term_arena;
 
 #[cfg(test)]
 mod test_value_core;

@@ -51,7 +51,7 @@ fn planes(g: &geo::T) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
 }
 
 #[test]
-#[ignore = "slow lowering: debug build, 1.7-4 s alone (a single sop/uv_sphere lowers in 3.3 s, a box in 0.15 s; see test_perf_lower)"]
+
 fn iterate_smoothing_matches_direct_computation() {
     let base = cook_once(1, &lower_ref(false, &text("sop/smooth_loop", 0)));
     let (x0, y0, z0) = planes(&base);
@@ -96,7 +96,7 @@ fn weights(g: &geo::T) -> Vec<f64> {
 }
 
 #[test]
-#[ignore = "slow lowering: debug build, 1.7-4 s alone (a single sop/uv_sphere lowers in 3.3 s, a box in 0.15 s; see test_perf_lower)"]
+
 fn iterate_until_stops_after_the_satisfying_pass() {
     let lo_hi = neighbours(POINTS);
     let w0: Vec<f64> = (0..POINTS).map(|i| if i == 0 { 1.0 } else { 0.0 }).collect();

@@ -660,6 +660,16 @@ mod tests {
 
     use super::{Builder, Owner, View};
 
+    // The only behavioral assertion in lib/rdk/test_point_jitter.ml; its runner never jitters.
+    #[test]
+    fn point_jitter_source_selection_membership() {
+        let selected = super::init(Some(1), Owner::Point, "selected", 4, &|point| point < 3).unwrap();
+        assert!(super::mem(0, &selected));
+        assert!(super::mem(1, &selected));
+        assert!(super::mem(2, &selected));
+        assert!(!super::mem(3, &selected));
+    }
+
     #[test]
     fn ordered_union_preserves_order_and_membership() {
         let left = super::ordered(Owner::Point, "left", 5, &[3, 1]).unwrap();
@@ -704,6 +714,15 @@ mod tests {
         let union = super::union_many(None, Some(257), "combined", &groups).unwrap();
         assert_eq!(super::cardinality(&union), 73_336);
         assert!(!super::is_ordered(&union));
+        for domains in [1, 4] {
+            parallel::run_unit(Some(domains), &|| {
+                let actual = super::union_many(None, Some(257), "combined", &groups).unwrap();
+                assert_eq!(View::bits_view(&actual), View::bits_view(&union));
+                assert_eq!(super::cardinality(&actual), 73_336);
+                assert!(!super::is_ordered(&actual));
+                Ok(())
+            }).unwrap();
+        }
 
         let cancelled = cancel::create();
         cancel::cancel(&cancelled);

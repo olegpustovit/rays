@@ -74,10 +74,10 @@ fn part_text() {
     assert_eq!(d.layout.at[&p(&["g", "b"])], (300.5, 40.));
     assert_eq!(d.layout.frames[&p(&["g"])][0].title, "Legs");
     assert_eq!(settings::get(&schema(), &d.settings).unwrap(), vec![Value::Float(2.5), Value::Text(b"b".to_vec())]);
-    let out = doc::to_text(&d);
+    let out = doc::to_text(&d).unwrap();
     assert!(has(&out, "; a small study") && has(&out, "; moved right"), "comments survive to_text");
     let again = of_text(&catalog, Some(plain()), &out);
-    assert_eq!(doc::to_text(&again), out, "to_text is a fixed point");
+    assert_eq!(doc::to_text(&again).unwrap(), out, "to_text is a fixed point");
     assert_eq!(again.layout, d.layout, "layout round trip");
     // an open expression is keyed by the leaf of a call that is only a card while open
     let opened = of_text(
@@ -88,7 +88,7 @@ fn part_text() {
     assert_eq!(opened.layout.collapsed.get(&p(&["g", "a#1"])), Some(&false), "an open expression survives loading");
     // a default setting is not written
     let plain_doc = of_text(&catalog, Some(plain()), STILL);
-    let t = doc::to_text(&plain_doc);
+    let t = doc::to_text(&plain_doc).unwrap();
     assert!(!has(&t, "settings") && !has(&t, "layout"), "empty layout and defaults are omitted");
     let bad = |text: &str, code: &str| match doc::of_text(&opts(Some(plain())), &catalog, text) {
         Err(ds) => assert!(ds.iter().any(|d| d.code == code), "{code}: {ds:?}"),
@@ -111,7 +111,7 @@ fn part_edit() {
     let renamed = doc::edit(&catalog, &d, &Op::Rename { node: p(&["g", "a"]), to_: "ball".to_owned() }).expect("rename");
     assert!(renamed.layout.at.contains_key(&p(&["g", "ball"])) && !renamed.layout.at.contains_key(&p(&["g", "a"])), "rename rewrites layout keys in the same transaction");
     assert!(renamed.layout.at.contains_key(&p(&["g", "b"])), "other layout keys stay");
-    assert!(has(&doc::to_text(&renamed), "(sop/transform ball"), "rename rewrites the source");
+    assert!(has(&doc::to_text(&renamed).unwrap(), "(sop/transform ball"), "rename rewrites the source");
     assert_eq!(renamed.checked.name, "study");
     // atomic: a refused edit leaves the document as it was
     assert!(doc::edit(&catalog, &d, &Op::Rename { node: p(&["g", "a"]), to_: "b".to_owned() }).is_err(), "accepted a clashing rename");
@@ -119,7 +119,7 @@ fn part_edit() {
         doc::edit(&catalog, &d, &Op::SetArg { node: p(&["g", "a"]), key: ArgKey::Kw("nope".to_owned()), sub: vec![], value: s::make(Node::Num("1".to_owned())) }).is_err(),
         "accepted an unknown keyword"
     );
-    assert_eq!(doc::to_text(&d), doc::to_text(&of_text(&catalog, None, &text)), "the original document is untouched");
+    assert_eq!(doc::to_text(&d).unwrap(), doc::to_text(&of_text(&catalog, None, &text)).unwrap(), "the original document is untouched");
     // the spare node is added to the document already checked above (the layout keys are not asserted)
     let added = doc::edit(
         &catalog,
@@ -145,12 +145,12 @@ fn part_imports() {
         doc::imported_file(&d, &p(&["shared", "@result"])) == Some("lib.rays".to_owned()) && doc::imported_file(&d, &p(&["def:twice"])) == Some("lib.rays".to_owned()),
         "import provenance was lost"
     );
-    let printed = doc::to_text(&d);
+    let printed = doc::to_text(&d).unwrap();
     assert!(
         has(&printed, "(import \"lib.rays\")") && has(&printed, "library stays separate") && !has(&printed, "(defn twice") && !has(&printed, "(graph shared"),
         "save inlined imported definitions"
     );
-    assert_eq!(doc::to_text(&doc::of_text(&with(&imports), &catalog, &printed).unwrap()), printed, "imports did not round trip");
+    assert_eq!(doc::to_text(&doc::of_text(&with(&imports), &catalog, &printed).unwrap()).unwrap(), printed, "imports did not round trip");
     let edit = Op::SetArg { node: p(&["shared", "@result"]), key: ArgKey::Pos(0), sub: vec![], value: s::make(Node::Num("4".to_owned())) };
     assert!(matches!(doc::edit(&catalog, &d, &edit), Err(x) if x.code == "E_IMPORTED" && has(&x.message, "lib.rays")), "imported expression remained writable");
     assert!(matches!(doc::edit(&catalog, &d, &Op::RemoveGraph { name: "shared".to_owned() }), Err(x) if x.code == "E_IMPORTED"), "imported graph remained removable");
@@ -173,7 +173,7 @@ fn part_imports() {
     );
     let mut fragment = doc::of_text(&TextOptions::default(), &catalog, "(defn twice :context value [(x : float)] (* x 2))").unwrap();
     fragment.layout.at.insert(p(&["def:twice", "@result"]), (20., 40.));
-    let ft = doc::to_text(&fragment);
+    let ft = doc::to_text(&fragment).unwrap();
     assert!(!has(&ft, "(workspace") && !has(&ft, "(layout"), "editing a library fragment appended workspace metadata");
     let error = |imports: &[(String, String)], text: &str, code: &str| {
         assert!(matches!(doc::of_text(&with(imports), &catalog, text), Err(ds) if ds.iter().any(|d| d.code == code)), "missing {code}");
@@ -183,7 +183,7 @@ fn part_imports() {
     error(&imports, "(workspace local (graph shared :context value 1)) (import \"lib.rays\")", "E_NAME");
     error(&[], "(workspace local (graph g :context value 1)) (import \"/absolute.rays\")", "E_IMPORT");
     let local = doc::edit(&catalog, &d, &Op::SetGraph { name: "result".to_owned(), form: one("(graph result :context value (twice 9))") }).unwrap();
-    assert!(doc::import_texts(&local) == imports && !has(&doc::to_text(&local), "(graph shared"), "local edit changed imported source");
+    assert!(doc::import_texts(&local) == imports && !has(&doc::to_text(&local).unwrap(), "(graph shared"), "local edit changed imported source");
 }
 
 // ---- parts that lower a document (each lowering is ~200 ms in a debug build: RAYS_SLOW=1) ----
@@ -241,7 +241,7 @@ fn part_view() {
     let view = parse_one("{:eye [1.5 -2.0 3] :look_through true :name \"a \\\"b\\\"\"}");
     let path = crate::preset::save(&dir, "v", &d, &view).expect("save");
     let loaded = crate::preset::load(None, &path, Some(&factories()), &settings::none()).expect("load");
-    let print = |v: &s::Syntax| flow_syntax::lisp::print(&[v.clone()]).0;
+    let print = |v: &s::Syntax| flow_syntax::lisp::print(&[v.clone()]).unwrap().0;
     assert_eq!(print(&loaded.view), print(&view), "view round trip");
     std::fs::remove_dir_all(&directory).ok();
 }
@@ -299,7 +299,7 @@ fn part_contexts() {
     };
     assert!(shape(&build(None, &bloom)) == shape(&d), "the same source builds the same document twice");
     assert_eq!(crate::document::dump(&build(Some(&d), &bloom)), crate::document::dump(&d), "rebuilding over the previous document changes nothing");
-    assert_eq!(doc::to_text(&of_text(&catalog, None, &doc::to_text(&bloom))), doc::to_text(&bloom), "print and parse are a fixed point");
+    assert_eq!(doc::to_text(&of_text(&catalog, None, &doc::to_text(&bloom).unwrap())).unwrap(), doc::to_text(&bloom).unwrap(), "print and parse are a fixed point");
     let directory = std::env::temp_dir().join(format!("rays-contexts-{}", std::process::id()));
     std::fs::create_dir_all(&directory).unwrap();
     let dir = directory.to_string_lossy().into_owned();
@@ -319,7 +319,7 @@ fn part_contexts() {
     let accent2 = crate::document::scene_graph(&doc2).into_iter().filter(|i| i.kind == "geometry").nth(1).unwrap();
     assert_eq!(accent2.id, accent_id, "an edit keeps the object's id");
     assert!(objects::geometry(&accent2).unwrap().translate_x == 4., "the edit reaches the object");
-    assert!(has(&doc::to_text(&edited), ":translate [4 0 1]"), "the source carries the edit");
+    assert!(has(&doc::to_text(&edited).unwrap(), ":translate [4 0 1]"), "the source carries the edit");
     let settings_of = |body: &str| of_text(&catalog, None, &format!("(workspace w (graph c :context settings [(f : int 60)] {body}))"));
     assert!(lowering::window(&settings_of("(settings/config :fps f)")).is_ok(), "a settings graph with an input");
     assert_eq!(lowering::window(&settings_of("(settings/config :fps (* f 100))")).unwrap().fps, 240, "a computed fps above the hard bound is clamped when lowered");
@@ -361,7 +361,7 @@ fn part_literals() {
         for phase in ["print", "parse", "check", "project"] {
             assert_eq!(calls(&phases, phase), 0, "literal repeated {phase}");
         }
-        assert_eq!(doc::to_text(&next), doc::to_text(&doc::T { source: source.clone(), checked: Arc::new(checked.clone()), ..next.clone() }), "literal save differs from slow edit");
+        assert_eq!(doc::to_text(&next).unwrap(), doc::to_text(&doc::T { source: source.clone(), checked: Arc::new(checked.clone()), ..next.clone() }).unwrap(), "literal save differs from slow edit");
         let changes = doc::literal_changes(&old, &next).expect("literal changes");
         let (patched, phases) = sampled(|| {
             let mut current = Some(lowered.clone());
@@ -424,7 +424,7 @@ fn part_literals() {
         let (next, phases) = sampled(|| doc::edit(&catalog, &old, &operation).unwrap());
         assert!(calls(&phases, "check") == 0 && calls(&phases, "parse") == 0, "literal with notes or in a loop repeated the workspace check");
         let (source, checked) = full_edit(&catalog, &old, &operation).unwrap();
-        assert_eq!(doc::to_text(&next), doc::to_text(&doc::T { source, checked: Arc::new(checked.clone()), ..next.clone() }), "loop/comment literal text differs");
+        assert_eq!(doc::to_text(&next).unwrap(), doc::to_text(&doc::T { source, checked: Arc::new(checked.clone()), ..next.clone() }).unwrap(), "loop/comment literal text differs");
         let low = flow_sop::lower::of_checked(Some(factories()), Default::default(), &old.checked).unwrap();
         let change = doc::literal_changes(&old, &next).unwrap().remove(0);
         let (patched, phases) = sampled(|| literal_edit::lower(&low, &change));

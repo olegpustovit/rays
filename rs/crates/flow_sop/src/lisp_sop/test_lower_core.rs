@@ -94,5 +94,5 @@ fn a_lowering_is_freed_with_its_last_handle() {
     drop(l);
     assert!(weak.upgrade().is_some(), "a clone keeps it");
     drop(kept);
-    assert!(weak.upgrade().is_none(), "nodes hold the lowering weakly, so dropping the result frees it");
+    assert!(weak.upgrade().is_none(), "cook services do not own the lowering's factory cache");
 }

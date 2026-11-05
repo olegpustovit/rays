@@ -31,6 +31,7 @@ fn window_runtime_render() {
     let mesh_ = mesh {
         key: mesh_key::Host("runtime-next-fullscreen".into()),
         vertices: new_bytes(vertices),
+        shared_vertices: None,
         vertex_count: 3,
         indices: new_bytes(indices),
         index_count: 3,

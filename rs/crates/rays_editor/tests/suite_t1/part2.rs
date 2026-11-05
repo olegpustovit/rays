@@ -211,7 +211,7 @@ pub fn run_duplicate_and_view() {
         r.step(p, vec![key(Key::KeyChar('v'))]);
         check(r.source() == before && r.undo_label() == label, "v changed the workspace or history");
         let layout_text = editor_document::layout_by_path::to_syntax(&Editor::workspace(&r.e).layout);
-        check(!has(&flow_syntax::lisp::print(&[layout_text]).0, "(display"), "the viewed node is not saved in the layout");
+        check(!has(&flow_syntax::lisp::print(&[layout_text]).unwrap().0, "(display"), "the viewed node is not saved in the layout");
         r.step(p, vec![]);
         check(sop::node::label(&Editor::displayed_node(&r.e)) == "box" && centre_x(&r.e) == Some(0.), &format!("v marked the node but did not show it in the viewport: {node}"));
         let (x, y, w, _) = Editor::node_box(&r.e, &["g".into(), "b".into()]).expect("box b");

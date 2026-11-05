@@ -11,7 +11,7 @@ pub const MAX_ELEMENTS: i64 = 64 * 65535;
 
 fn error(packed: &packed::T, code: &str, message: String) -> Diagnostic {
     let mut d = flow_syntax::value::fail(code, &message);
-    d.span = Some(packed.term.form.span.clone());
+    d.span = Some(packed.term.form().span.clone());
     d
 }
 
@@ -20,7 +20,7 @@ pub fn region(packed: &packed::T, count: Option<i64>) -> Vec<Diagnostic> {
     match wgsl::kernel(false, packed) {
         Err(mut d) => {
             if d.span.is_none() {
-                d.span = Some(packed.term.form.span.clone());
+                d.span = Some(packed.term.form().span.clone());
             }
             vec![d]
         }

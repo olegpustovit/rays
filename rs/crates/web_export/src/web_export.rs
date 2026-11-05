@@ -32,17 +32,6 @@ fn err(code: &str, message: &str, span: Option<Span>) -> Diagnostic {
     rays_diagnostic::error(code.to_owned(), message.to_owned(), span, None, None, Vec::new(), Vec::new())
 }
 
-/// OCaml `Web_export.children`: a bypassed call also lists its pass-through input.
-fn children(term: &Term) -> Vec<Term> {
-    match &term.node {
-        Node::Bypass(call) => {
-            let mut out = vec![(**call).clone()];
-            out.extend(W::bypass_input(call));
-            out
-        }
-        _ => W::children(term),
-    }
-}
 
 fn foreign_context(c: Context) -> bool {
     c == context::sop() || c == context::scene()
@@ -52,21 +41,40 @@ fn foreign_context(c: Context) -> bool {
 fn foreign(d: &doc::T, draw: &Graph) -> Option<(Term, String, Context)> {
     let graphs: Vec<&Graph> = d.checked.graphs.iter().chain(d.checked.defs.iter()).collect();
     fn visit(t: &Term, graphs: &[&Graph], seen: &mut HashSet<String>) -> Option<(Term, String, Context)> {
-        let here = match &t.node {
-            Node::GraphRef { graph, .. } => match graphs.iter().find(|g| &g.name == graph) {
-                Some(g) if foreign_context(g.context) => Some((graph.clone(), g.context)),
-                Some(g) if !seen.contains(&g.name) => {
-                    seen.insert(g.name.clone());
-                    visit(&g.body, graphs, seen).map(|(_, n, c)| (n, c))
+        let here = match t.node {
+            Node::GraphRef(reference) => {
+                let graph = t.name(t.arena().graph_ref(reference).graph);
+                match graphs.iter().find(|g| g.name == graph) {
+                    Some(g) if foreign_context(g.context) => Some((graph.to_owned(), g.context)),
+                    Some(g) if !seen.contains(&g.name) => {
+                        seen.insert(g.name.clone());
+                        visit(&g.body, graphs, seen).map(|(_, n, c)| (n, c))
+                    }
+                    _ => None,
                 }
-                _ => None,
-            },
-            Node::Call { kind, ctx, .. } if foreign_context(*ctx) => Some((kind.clone(), *ctx)),
+            }
+            Node::Call(call) => {
+                let call = t.arena().call(call);
+                foreign_context(call.ctx).then(|| (t.name(call.kind).to_owned(), call.ctx))
+            }
             _ => None,
         };
         match here {
             Some((name, ctx)) => Some((t.clone(), name, ctx)),
-            None => children(t).iter().find_map(|c| visit(c, graphs, seen)),
+            None => {
+                for &id in t.children() {
+                    if let Some(found) = visit(&t.child(id), graphs, seen) {
+                        return Some(found);
+                    }
+                }
+                // The bypassed call is visited first, then its explicit pass-through input.
+                if let Node::Bypass(id) = t.node {
+                    if let Some(input) = W::bypass_input(&t.child(id)) {
+                        return visit(&input, graphs, seen);
+                    }
+                }
+                None
+            }
         }
     }
     visit(&draw.body, &graphs, &mut HashSet::new())
@@ -94,7 +102,7 @@ pub fn lower(d: &doc::T) -> R<Lowered> {
         return Err(err(
             "E_WEB_GRAPH",
             &format!("The web export draws 2D canvas graphs only; this reaches the {} {}.", context::name(ctx), name),
-            Some(t.form.span.clone()),
+            Some(t.form().span.clone()),
         ));
     }
     let options = flow_sop::lower::Options { inputs: Some((*d.inputs).clone()), ..Default::default() };
@@ -270,7 +278,7 @@ fn uniform_components(v: &Value) -> Vec<f64> {
 }
 
 fn span_of_region(r: &C::RegionT) -> Option<Span> {
-    Some(r.term.form.span.clone())
+    Some(r.term.form().span.clone())
 }
 
 fn fixed_inputs(r: &C::RegionT) -> R<Fixed> {

@@ -25,6 +25,8 @@ impl Clone for Table {
 }
 impl Table {
     pub fn instances(&self) -> &[u8] { &self.bytes }
+    /// Immutable published storage, retained without copying by native rendering.
+    pub fn instances_shared(&self) -> Arc<Vec<u8>> { self.bytes.clone() }
     pub fn count(&self) -> i64 { self.count }
     pub fn batches(&self) -> &[Batch] { &self.batches }
     pub fn marks(&self) -> Option<GpuToken> { self.marks }
@@ -291,6 +293,48 @@ impl Builder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // lib/scene_command/test_ui_batch.ml: packed coordinates, clipping, batches and reset.
+    #[test]
+    fn logical_coordinates_clipped_chords_and_immutable_reset() {
+        let mut builder = Builder::with_capacity(1);
+        builder.rect(1.25, -2.5, 3.75, 4.5, 0x12345678, 0, 0.0, 0.0, false).unwrap();
+        let clip = Clip { x: 0.0, y: 0.0, width: 10.0, height: 10.0 };
+        builder.set_clip(Some(clip));
+        builder.wire([(100.0, 100.0), (120.0, 100.0), (140.0, 100.0), (160.0, 100.0)], 1.0, 0x01020304).unwrap();
+        builder.wire([(1.0, 2.0), (3.0, 2.0), (5.0, 2.0), (7.0, 2.0)], 1.0, 0x01020304).unwrap();
+        for texture in [2, 3] {
+            builder.textured(texture, 0.0, 0.0, 2.0, 2.0, 3.0, 4.0, 5.0, 6.0, -1).unwrap();
+        }
+        let packed = builder.publish().unwrap();
+        assert_eq!(packed.count(), 7);
+        for (word, expected) in [1.25, -2.5, 5.0, 2.0].into_iter().enumerate() {
+            assert_eq!(packed.float(0, word as i64).unwrap(), expected);
+        }
+        assert_eq!(get_i32(packed.instances(), 32), Some(0x12345678));
+        for i in 0..4 {
+            for (word, expected) in [1.0, 2.0, 3.0, 2.0, 5.0, 2.0, 7.0, 2.0].into_iter().enumerate() {
+                assert_eq!(packed.float(i + 1, word as i64).unwrap(), expected);
+            }
+            assert_eq!(packed.float(i + 1, 14).unwrap(), i as f64 / 4.0);
+            assert_eq!(packed.float(i + 1, 15).unwrap(), (i + 1) as f64 / 4.0);
+        }
+        assert_eq!(packed.batches(), &[
+            Batch { first: 0, count: 1, texture: 0, clip: None },
+            Batch { first: 1, count: 5, texture: 2, clip: Some(clip) },
+            Batch { first: 6, count: 1, texture: 3, clip: Some(clip) },
+        ]);
+        assert_eq!(packed.textures(), vec![2, 3]);
+        let bytes = packed.instances().to_vec();
+        builder.reset();
+        builder.rect(50.0, 60.0, 1.0, 1.0, -1, 0, 0.0, 0.0, false).unwrap();
+        let reset = builder.publish().unwrap();
+        assert_eq!(reset.count(), 1);
+        assert_eq!(reset.batches().len(), 1);
+        assert_eq!(reset.batches()[0].clip, None);
+        assert_eq!(packed.instances(), bytes);
+        assert_eq!(packed.batches().len(), 3);
+    }
     fn published(builder: &mut Builder) -> Table {
         match builder.publish() {
             Ok(table) => table,

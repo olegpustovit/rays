@@ -80,7 +80,7 @@ fn document_boundary_validation_dump_preset_gpu() {
     };
     let gpu_doc = lowering::of_workspace(&Options { factories: Some(factories()), gpu: Some(gpu.clone()), ..Default::default() }, &workspace).expect("gpu lowering");
     assert!(carries_gpu(&gpu_doc), "workspace lowering discarded its explicit GPU config");
-    let reloaded = document_edit::text_edit(None, Some(&factories()), &gpu_doc, &workspace_doc::to_text(&workspace)).expect("reload");
+    let reloaded = document_edit::text_edit(None, Some(&factories()), &gpu_doc, &workspace_doc::to_text(&workspace).unwrap()).expect("reload");
     assert!(carries_gpu(&reloaded), "a real workspace text reload discarded its GPU config");
     assert!(document::validate(&doc).is_ok(), "a lowered workspace is a valid document");
     let scene = document::scene_graph(&doc);
@@ -101,7 +101,7 @@ fn document_boundary_validation_dump_preset_gpu() {
     let saved = preset::save(&dir, "round", &doc, &s::make(Node::Map(Vec::new().into()))).expect("save");
     let loaded = preset::load(Some(gpu), &saved, Some(&factories()), &doc.settings).expect("load");
     assert!(
-        workspace_doc::to_text(&loaded.doc.workspace.ws) == workspace_doc::to_text(&workspace) && loaded.doc.networks.len() == doc.networks.len(),
+        workspace_doc::to_text(&loaded.doc.workspace.ws).unwrap() == workspace_doc::to_text(&workspace).unwrap() && loaded.doc.networks.len() == doc.networks.len(),
         "a saved preset did not load back"
     );
     assert!(carries_gpu(&loaded.doc), "preset loading discarded its explicit GPU config");
@@ -223,7 +223,7 @@ fn view(d: &document::T) -> View {
 }
 
 fn source(doc: &document::T) -> String {
-    workspace_doc::to_text(&doc.workspace.ws)
+    workspace_doc::to_text(&doc.workspace.ws).unwrap()
 }
 
 fn same_as_full(what: &str, doc: &document::T) {

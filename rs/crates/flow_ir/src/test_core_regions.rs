@@ -174,11 +174,13 @@ fn check(times: &[f64], region: bool, name: &str, body: &str) {
         panic!("{name}: region expectation\n{text}");
     }
     let program = ok(Executor::compile(&value, &Default::default()));
+    // Preparation is invariant across the sweep, just as Executor::compile is.
+    let prepared = ts::prepare_clobber(&core);
     for time in times {
         let live = input::at_time(*time);
         let expected = E::Host::force_reference(&value, &live, None, None, None);
         // A failing region declines to the packed path, so only successes compare with the walker.
-        match (ts::run_simple(&core, &live), &expected) {
+        match (crate::core_exec::execute(&prepared, &live, &Default::default()), &expected) {
             (Ok(a), Ok(b)) => assert!(same(&a, b), "{name} at {time} (direct)"),
             (Err(_), Err(_)) if !region => (),
             (Err(_), _) if region => (),
@@ -233,8 +235,7 @@ fn core_regions_primitives_packed_filter_vec() { primitives_slice(13..14) }
 
 fn slow() -> bool { std::env::var("RAYS_SLOW").is_ok_and(|v| v == "1") }
 
-// The default loop samples every `stride`th parameter of a dense sweep (debug builds run a
-// parameter in about 1 ms); RAYS_SLOW=1 runs every parameter, as the OCaml test does.
+// Every dense parameter is checked by the default run; split only the expensive HSL sweep.
 fn sweep(name: &str, from: usize, to: usize, stride: usize) {
     for (n, body, times) in sweeps() {
         if n == name {
@@ -249,22 +250,30 @@ fn sweep(name: &str, from: usize, to: usize, stride: usize) {
 fn core_regions_sweep_hsl_sectors() { sweep("hsl-sectors", 0, usize::MAX, 1) }
 #[test]
 fn core_regions_sweep_hsl_sampled() { sweep("hsl", 0, usize::MAX, 64) }
-#[test]
-fn core_regions_sweep_hsl_full_part_1() { if slow() { sweep("hsl", 0, 10000, 1) } }
-#[test]
-fn core_regions_sweep_hsl_full_part_2() { if slow() { sweep("hsl", 10000, 20000, 1) } }
-#[test]
-fn core_regions_sweep_hsl_full_part_3() { if slow() { sweep("hsl", 20000, 30000, 1) } }
-#[test]
-fn core_regions_sweep_hsl_full_part_4() { if slow() { sweep("hsl", 30000, 40000, 1) } }
+macro_rules! hsl_parts {
+    ($($name:ident $part:expr),* $(,)?) => {$(
+        #[test]
+        fn $name() { sweep("hsl", $part * 2500, ($part + 1) * 2500, 1) }
+    )*};
+}
+hsl_parts!(
+    core_regions_sweep_hsl_full_part_1 0, core_regions_sweep_hsl_full_part_2 1,
+    core_regions_sweep_hsl_full_part_3 2, core_regions_sweep_hsl_full_part_4 3,
+    core_regions_sweep_hsl_full_part_5 4, core_regions_sweep_hsl_full_part_6 5,
+    core_regions_sweep_hsl_full_part_7 6, core_regions_sweep_hsl_full_part_8 7,
+    core_regions_sweep_hsl_full_part_9 8, core_regions_sweep_hsl_full_part_10 9,
+    core_regions_sweep_hsl_full_part_11 10, core_regions_sweep_hsl_full_part_12 11,
+    core_regions_sweep_hsl_full_part_13 12, core_regions_sweep_hsl_full_part_14 13,
+    core_regions_sweep_hsl_full_part_15 14, core_regions_sweep_hsl_full_part_16 15,
+);
 #[test]
 fn core_regions_sweep_gradient_sampled() { sweep("gradient", 0, usize::MAX, 16) }
 #[test]
-fn core_regions_sweep_gradient_full() { if slow() { sweep("gradient", 0, usize::MAX, 1) } }
+fn core_regions_sweep_gradient_full() { sweep("gradient", 0, usize::MAX, 1) }
 #[test]
 fn core_regions_sweep_gradient_two_sampled() { sweep("gradient-two", 0, usize::MAX, 16) }
 #[test]
-fn core_regions_sweep_gradient_two_full() { if slow() { sweep("gradient-two", 0, usize::MAX, 1) } }
+fn core_regions_sweep_gradient_two_full() { sweep("gradient-two", 0, usize::MAX, 1) }
 #[test]
 fn core_regions_sweep_gradient_one() { sweep("gradient-one", 0, usize::MAX, 1) }
 
@@ -508,4 +517,19 @@ fn carried_int_float_widening_retains_exact_initial_bits_through_structured_core
     ] {
         check(&[0.37], false, name, &format!("(map (fn [x] {body}) (array/range 1))"));
     }
+}
+
+#[test]
+fn deeply_nested_scalar_body_compiles_on_default_stack() {
+    let mut body = "(+ x t)".to_owned();
+    let mut expected = 0.25_f64;
+    for _ in 0..48 {
+        body = format!("(sin {body})");
+        expected = expected.sin();
+    }
+    let program = ts::compile(&format!("(map (fn [x] {body}) (array/range 1))"));
+    assert_eq!(
+        ok(packed::force(&program, &input::at_time(0.25), &strict())),
+        Value::Float_array(Arc::new(vec![expected])),
+    );
 }

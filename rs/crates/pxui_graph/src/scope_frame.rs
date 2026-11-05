@@ -21,6 +21,10 @@ use rays_math::color;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+fn number_syntax(text: String) -> s::Syntax {
+    s::make(s::Draft::Num(text))
+}
+
 // Keep these tiny transforms local in the frame and painter.
 pub fn sx(t: &Pane, gx: f64) -> f64 {
     t.x as f64 + t.pan_x + gx * t.zoom
@@ -443,34 +447,38 @@ pub fn row_fields_of(ui: &mut Ui, z: f64, pl: &Placed, n: &p::Node, r: &p::Row, 
         if let Some(ex) = &r.expr {
             match &ex.node {
                 SNode::Num(text) => {
-                    return match num_field(ui, (at, ay), vw, h, Some(size), kind_of(r), range_of(r), nonfinite, &format!("f{}", name), text) {
-                        Some(text2) => vec![set(Vec::new(), s::make(SNode::Num(text2)))],
+                    return match num_field(ui, (at, ay), vw, h, Some(size), kind_of(r), range_of(r), nonfinite, &format!("f{}", name), ex.name(*text)) {
+                        Some(text2) => vec![set(Vec::new(), number_syntax(text2))],
                         None => Vec::new(),
                     };
                 }
-                SNode::Vec(elems) if elems.len() >= 2 && elems.len() <= 4 && sp::all_numbers(elems) => {
+                SNode::Vec(elems) if (2..=4).contains(&ex.range(*elems).len()) && sp::all_numbers(ex, ex.range(*elems)) => {
+                    let elems = ex.range(*elems);
                     let k = elems.len();
                     // a vector is its fields 8 points apart, 112 wide, at the row's right
                     let at = (pl.w - sp::HEAD_PAD - sp::VEC_W) * z;
                     let gap = 8.0 * z;
                     let cw = ((sp::VEC_W * z) - ((k - 1) as f64 * gap)) / k as f64;
                     let mut out = Vec::new();
-                    for (c, el) in elems.iter().enumerate() {
-                        if let SNode::Num(text) = &el.node {
-                            if let Some(text2) = num_field(ui, (at + (c as f64 * (cw + gap)), ay), cw, h, Some(size), kind_of(r), None, nonfinite, &format!("f{}.{}", name, c), text) {
-                                out.push(set(vec![c as i64], s::make(SNode::Num(text2))));
+                    for (c, &el) in elems.iter().enumerate() {
+                        if let SNode::Num(text) = ex.arena().row(el).node {
+                            if let Some(text2) = num_field(ui, (at + (c as f64 * (cw + gap)), ay), cw, h, Some(size), kind_of(r), None, nonfinite, &format!("f{}.{}", name, c), ex.name(text)) {
+                                out.push(set(vec![c as i64], number_syntax(text2)));
                             }
                         }
                     }
                     return out;
                 }
-                SNode::Sym(b) if b == "true" || b == "false" => {
+                SNode::Sym(b) if matches!(ex.name(*b), "true" | "false") => {
                     let toggle = ui.box_(
                         &format!("b{}", name),
                         BoxOpts::default().flags(CLICKABLE | TAB_STOP).w(Size::Px(sp::SWITCH_W * z)).h(Size::Px(sp::SWITCH_H * z)).at(((pl.w - sp::HEAD_PAD - sp::SWITCH_W) * z, (ry + 5.0) * z)),
                     );
                     if ui.signal(&toggle).clicked {
-                        return vec![set(Vec::new(), s::make(SNode::Sym(if b == "true" { "false" } else { "true" }.to_owned())))];
+                        let mut builder = flow_syntax::arena::SyntaxBuilder::new();
+                        let name = builder.intern(if ex.name(*b) == "true" { "false" } else { "true" });
+                        let id = builder.push(0, SNode::Sym(name), Default::default(), None);
+                        return vec![set(Vec::new(), builder.freeze().handle(id))];
                     }
                     return Vec::new();
                 }
@@ -594,8 +602,8 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
                 if let SNode::Num(text) = &d.node {
                     // a value node: its number is a field in the header, at body size
                     let saved = ui.enter(&tile);
-                    if let Some(text2) = num_field(ui, (sp::value_x(pl.w) * z, 4.0 * z), sp::FIELD_W * z, sp::FIELD_H * z, Some(fs), None, None, false, "default", text) {
-                        fields.push(Change::Syntax_edit(e::Op::SetInputDefault { form: i.path[0].clone(), input: i.name.clone(), value: s::make(SNode::Num(text2)) }));
+                    if let Some(text2) = num_field(ui, (sp::value_x(pl.w) * z, 4.0 * z), sp::FIELD_W * z, sp::FIELD_H * z, Some(fs), None, None, false, "default", d.name(*text)) {
+                        fields.push(Change::Syntax_edit(e::Op::SetInputDefault { form: i.path[0].clone(), input: i.name.clone(), value: number_syntax(text2) }));
                     }
                     ui.leave(saved);
                 }
@@ -654,7 +662,7 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
                                             break name;
                                         }
                                     };
-                                    add_clicks.push(Change::Syntax_edit(e::Op::AddField { node: n.path.clone(), name, value: s::make(SNode::Num("0".to_owned())) }));
+                                    add_clicks.push(Change::Syntax_edit(e::Op::AddField { node: n.path.clone(), name, value: number_syntax("0".to_owned()) }));
                                 }
                                 ArgKey::Kw(kw) if kw.is_empty() => {
                                     c.opened = Some(Editing::Output(n.path.clone()));
@@ -671,7 +679,7 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
                                             Some(value) => add_clicks.push(Change::Syntax_edit(e::Op::SetArg { node: n.path.clone(), key: key.clone(), sub: Vec::new(), value })),
                                             None => add_clicks.push(Change::Notice("Wire a node onto this row".to_owned())),
                                         },
-                                        None => add_clicks.push(Change::Syntax_edit(e::Op::SetArg { node: n.path.clone(), key: key.clone(), sub: Vec::new(), value: s::make(SNode::Num("0".to_owned())) })),
+                                        None => add_clicks.push(Change::Syntax_edit(e::Op::SetArg { node: n.path.clone(), key: key.clone(), sub: Vec::new(), value: number_syntax("0".to_owned()) })),
                                     }
                                 }
                             },
@@ -730,7 +738,7 @@ pub fn build_tile(c: &mut Ctx, t: &Pane, ui: &mut Ui, z: f64, fs: i64, slot: usi
                     let saved = ui.enter(&tile);
                     let np = n.path.clone();
                     editors = edit_field(c, ui, (sp::LABEL_X * z, (rows_top(n, 0.0) + (k as f64 * p::ROW_HEIGHT) + 4.0) * z), (pl.w - sp::LABEL_X - sp::HEAD_PAD) * z, sp::FIELD_H * z, "output", "", &valid_name, &move |v| {
-                        Change::Syntax_edit(e::Op::AddField { node: np.clone(), name: v, value: s::make(SNode::Num("0".to_owned())) })
+                        Change::Syntax_edit(e::Op::AddField { node: np.clone(), name: v, value: number_syntax("0".to_owned()) })
                     });
                     ui.leave(saved);
                 }

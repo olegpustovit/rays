@@ -99,7 +99,7 @@ fn track_device_and_memory_conformance() {
     channels.destroy().unwrap();
     channels.destroy().unwrap();
 
-    for _ in 0..1_000 {
+    for _ in 0..10_000 {
         let transient = Music::create(&mixer).unwrap();
         transient.destroy().unwrap();
     }

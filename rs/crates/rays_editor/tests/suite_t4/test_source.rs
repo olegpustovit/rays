@@ -47,7 +47,7 @@ fn write(file: &str, text: &str) {
 }
 
 fn printed(doc: &Doc::T) -> String {
-    let t = Doc::to_text(doc);
+    let t = Doc::to_text(doc).unwrap();
     if t.ends_with('\n') { t } else { t + "\n" }
 }
 
@@ -134,7 +134,7 @@ fn editor(presets: Option<&str>, imports: Vec<(String, String)>, source: Source:
     Editor::create(o, &doc_of(text, imports).unwrap(), Some(source), Editor::prepare_fn(), Editor::draw_fn()).unwrap_or_else(|m| panic!("{m}"))
 }
 fn source_text(e: &Editor::t) -> String {
-    flow_syntax::lisp::print(&Editor::workspace(e).source).0
+    flow_syntax::lisp::print(&Editor::workspace(e).source).unwrap().0
 }
 fn dump_line(e: &Editor::t, key: &str) -> String {
     let dir = temp_dir("dump");
@@ -187,7 +187,7 @@ impl Run {
         self.d.ed = Some(Editor::edit(e, &op).unwrap_or_else(|m| panic!("{m}")));
     }
 }
-fn set_arg(path: &[&str], kw: &str, value: S::Node) -> fe::Op {
+fn set_arg(path: &[&str], kw: &str, value: S::Draft) -> fe::Op {
     fe::Op::SetArg { node: path.iter().map(|s| s.to_string()).collect(), key: fe::ArgKey::Kw(kw.into()), sub: vec![], value: S::make(value) }
 }
 fn meta(c: char) -> Event {
@@ -304,7 +304,7 @@ pub fn external_over_dirty() {
     let mut r = Run::new(editor(Some(&format!("{dir}/presets")), vec![], Source::at(&file, &sha(&text0)), &text0), (450., 300.));
     r.step(vec![]);
     r.step(vec![]);
-    r.edit(set_arg(&["g", "@result"], "segments", S::Node::Num("12".into())));
+    r.edit(set_arg(&["g", "@result"], "segments", S::Draft::Num("12".into())));
     let label = Editor::undo_label(r.e());
     write(&file, &text1);
     r.run_for(1.5);
@@ -334,7 +334,7 @@ pub fn autosave() {
     let real = real.strip_prefix("\\\\?\\").unwrap_or(&real).to_string();
     let state = editor_document::preset::path(&format!("{presets}/state"), &sha(&format!("file:{real}")));
     assert!(!std::path::Path::new(&state).exists(), "opening a sketch wrote over its recovery state");
-    r.edit(set_arg(&["g", "@result"], "radius", S::Node::Num("1.25".into())));
+    r.edit(set_arg(&["g", "@result"], "radius", S::Draft::Num("1.25".into())));
     let e = r.d.ed.take().unwrap();
     r.replace(Editor::set_renderer(e, rays_editor::Renderer::Mode::Wireframe));
     r.step(vec![Event::Pointer_moved((200., 300.)), Event::Scrolled((0., -2.))]);
@@ -380,7 +380,7 @@ pub fn autosave() {
     write(&state_dir, "blocked");
     r = Run::new(create(), (200., 300.));
     r.step(vec![]);
-    r.edit(set_arg(&["g", "@result"], "radius", S::Node::Num("2".into())));
+    r.edit(set_arg(&["g", "@result"], "radius", S::Draft::Num("2".into())));
     r.advance(35);
     assert!(has(&dump_line(r.e(), "autosave"), "Autosave failed") && has(&source_text(r.e()), ":radius 2"), "a failed periodic save lost the edit or hid its error");
     fs::remove_file(&state_dir).unwrap();
@@ -437,7 +437,7 @@ pub fn start_keywords() {
         [(name, _)] => name.clone(),
         _ => panic!("/ s did not save one preset"),
     };
-    r.edit(set_arg(&["editor", "net"], "view", S::Node::Str("list".into())));
+    r.edit(set_arg(&["editor", "net"], "view", S::Draft::Str("list".into())));
     r.step(vec![]);
     r.step(vec![]);
     assert!(line(&r, "projection") == "list", "an edit of :view was not followed");
@@ -512,7 +512,7 @@ pub fn library() {
     let e = editor(None, vec![("lib.rays".into(), library("2"))], Source::at(&file, &sha(text)), text);
     let mut e = Editor::update(rays_editor::Reduce::open_import(e, "lib.rays"), &frame(&Opts::default(), (450., 300.), vec![], 0));
     assert!(Editor::workspace(&e).fragment && Editor::workspace(&e).imports.is_empty(), "open library did not switch to editable definitions");
-    e = Editor::edit(e, &fe::Op::SetArg { node: vec!["def:twice".into(), "@result".into()], key: fe::ArgKey::Pos(1), sub: vec![], value: S::make(S::Node::Num("4".into())) }).unwrap();
+    e = Editor::edit(e, &fe::Op::SetArg { node: vec!["def:twice".into(), "@result".into()], key: fe::ArgKey::Pos(1), sub: vec![], value: S::make(S::Draft::Num("4".into())) }).unwrap();
     e = Editor::update(e, &frame(&Opts { keys: vec![Key::Meta], ..Default::default() }, (450., 300.), vec![meta('s')], 1));
     assert!(has(&read(&lib), "(* x 4)") && has(&read(&lib), "editable library") && !has(&read(&lib), "workspace"), "library save added a wrapper or lost edit/comment");
     assert!(read(&file) == text, "open library saved over importer");
@@ -520,7 +520,7 @@ pub fn library() {
     for count in 2..=70 {
         e = Editor::update(e, &frame(&Opts::default(), (450., 300.), vec![], count));
     }
-    assert!(has(&Doc::to_text(&Editor::workspace(&e)), "(* x 5)"), "bare definition library did not reload");
+    assert!(has(&Doc::to_text(&Editor::workspace(&e)).unwrap(), "(* x 5)"), "bare definition library did not reload");
     Editor::close(&e);
     let _ = fs::remove_dir_all(&dir);
 }
@@ -530,7 +530,7 @@ pub fn embedded_nodes() {
     let contains_node = |d: &Doc::T| d.checked.nodes.iter().any(|n| n.kind.qualified == "sop/noise_displace");
     let doc = doc_of(text, vec![]).unwrap();
     assert!(contains_node(&doc), "embedded definition absent at load");
-    let doc = Doc::edit(&catalog(), &doc, &set_arg(&["g", "shifted"], "amplitude", S::Node::Num("0.75".into()))).unwrap();
+    let doc = Doc::edit(&catalog(), &doc, &set_arg(&["g", "shifted"], "amplitude", S::Draft::Num("0.75".into()))).unwrap();
     assert!(doc.literal.is_some(), "embedded scalar scrub missed literal edit path");
     assert!(contains_node(&doc), "scalar scrub lost embedded definition");
     assert!(!has(&printed(&doc), "(defnode"), "scalar scrub copied library forms into saved source");
@@ -601,7 +601,7 @@ pub fn vocabulary_refresh() {
     write(&file, &text(Some("amount")));
     poll(&mut r);
     assert!(labels(&r, "sop/vocab_card geo :am").iter().any(|l| l == ":amount") && !labels(&r, "sop/vocab_card geo :dis").iter().any(|l| l == ":distance"), "schema edit kept old keyword vocabulary");
-    r.edit(set_arg(&["g", "@result"], "amount", S::Node::Num("0.75".into())));
+    r.edit(set_arg(&["g", "@result"], "amount", S::Draft::Num("0.75".into())));
     assert!(head(&r) && labels(&r, "sop/vocab_card geo :am").iter().any(|l| l == ":amount"), "scalar scrub lost declaration vocabulary");
     step(&mut r, rays_editor::editor_commands::action::Undo);
     write(&file, &text(None));

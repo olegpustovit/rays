@@ -1,0 +1,74 @@
+#version 460
+#extension GL_EXT_ray_query : require
+layout(local_size_x = 4) in;
+layout(set = 0, binding = 0) uniform accelerationStructureEXT scene;
+layout(set = 0, binding = 1) readonly buffer Rays { vec4 rays[]; };
+struct Hit { uint hit; uint primitive; uint instance; float t; vec2 barycentrics; };
+layout(set = 0, binding = 2) buffer Hits { Hit hits[]; };
+layout(set = 0, binding = 3) uniform MotionTime { float time; };
+layout(set = 0, binding = 4) readonly buffer Vertices0 { float vertices0[]; };
+layout(set = 0, binding = 5) readonly buffer Vertices1 { float vertices1[]; };
+
+bool intersect_triangle(vec3 origin, vec3 direction, vec3 a, vec3 b, vec3 c, out float t, out vec2 barycentrics) {
+  vec3 p0 = a - origin, p1 = b - origin, p2 = c - origin;
+  int kz = 0;
+  if (abs(direction.y) > abs(direction.x)) kz = 1;
+  if (abs(direction.z) > abs(direction[kz])) kz = 2;
+  if (direction[kz] == 0.0) return false;
+  int kx = (kz + 1) % 3, ky = (kx + 1) % 3;
+  if (direction[kz] < 0.0) { int swap_axis = kx; kx = ky; ky = swap_axis; }
+  float sx = direction[kx] / direction[kz];
+  float sy = direction[ky] / direction[kz];
+  float sz = 1.0 / direction[kz];
+  float ax = p0[kx] - sx * p0[kz], ay = p0[ky] - sy * p0[kz];
+  float bx = p1[kx] - sx * p1[kz], by = p1[ky] - sy * p1[kz];
+  float cx = p2[kx] - sx * p2[kz], cy = p2[ky] - sy * p2[kz];
+  float u = cx * by - cy * bx;
+  float v = ax * cy - ay * cx;
+  float w = bx * ay - by * ax;
+  if ((u < 0.0 || v < 0.0 || w < 0.0) && (u > 0.0 || v > 0.0 || w > 0.0)) return false;
+  float det = u + v + w;
+  if (det == 0.0) return false;
+  float az = sz * p0[kz], bz = sz * p1[kz], cz = sz * p2[kz];
+  float scaled_t = u * az + v * bz + w * cz;
+  t = scaled_t / det;
+  if (t < 0.001 || t > 100.0) return false;
+  barycentrics = vec2(v, w) / det;
+  return true;
+}
+
+vec3 keyframe_vertex(uint vertex, float amount) {
+  uint offset = vertex * 3;
+  return mix(vec3(vertices0[offset], vertices0[offset + 1], vertices0[offset + 2]),
+             vec3(vertices1[offset], vertices1[offset + 1], vertices1[offset + 2]), amount);
+}
+
+void main() {
+  uint i = gl_GlobalInvocationID.x;
+  vec3 origin = rays[i * 2].xyz, direction = rays[i * 2 + 1].xyz;
+  float amount = clamp(time, 0.0, 1.0);
+  float best_t = 100.0;
+  vec2 best_barycentrics = vec2(0.0);
+  rayQueryEXT q;
+  rayQueryInitializeEXT(q, scene, gl_RayFlagsNoneEXT, 0xFF, origin, 0.001, direction, 100.0);
+  while (rayQueryProceedEXT(q)) {
+    if (rayQueryGetIntersectionTypeEXT(q, false) == gl_RayQueryCandidateIntersectionAABBEXT) {
+      uint primitive = rayQueryGetIntersectionPrimitiveIndexEXT(q, false);
+      uint vertex = primitive * 3;
+      vec3 a = keyframe_vertex(vertex, amount);
+      vec3 b = keyframe_vertex(vertex + 1, amount);
+      vec3 c = keyframe_vertex(vertex + 2, amount);
+      float t;
+      vec2 barycentrics;
+      if (intersect_triangle(origin, direction, a, b, c, t, barycentrics) && t < best_t) {
+        best_t = t;
+        best_barycentrics = barycentrics;
+        rayQueryGenerateIntersectionEXT(q, t);
+      }
+    }
+  }
+  bool hit = rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionGeneratedEXT;
+  hits[i] = Hit(hit ? 1u : 0u, hit ? uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, true)) : 0u, 0u,
+                hit ? rayQueryGetIntersectionTEXT(q, true) : 0.0,
+                hit ? best_barycentrics : vec2(0.0));
+}

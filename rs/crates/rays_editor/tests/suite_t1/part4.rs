@@ -197,7 +197,7 @@ pub fn run_panel_states() {
     let (sx, sy, sw, sh) = splitter.bounds;
     let grip = ((sx + sw / 2) as f64, (sy + sh / 2) as f64);
     let moved = (grip.0 + 30., grip.1);
-    let ws_text = |r: &Run| workspace_doc::to_text(&Editor::workspace(&r.e));
+    let ws_text = |r: &Run| workspace_doc::to_text(&Editor::workspace(&r.e)).unwrap();
     let before_split = ws_text(&r);
     r.step(grip, vec![Event::Pointer_moved(grip)]);
     r.stepb(&[LB], grip, vec![Event::Pointer_pressed(LB, grip)]);
@@ -440,7 +440,7 @@ pub fn run_layouts() {
         Ok(ws) => ws,
         Err(d) => fail(&rays_diagnostic::to_string(&d)),
     };
-    let text = |ws: &workspace_doc::T| workspace_doc::print(ws).0;
+    let text = |ws: &workspace_doc::T| workspace_doc::print(ws).unwrap().0;
     let switched = edit(&ws, L::SetLayout { graph: "editor".into(), index: 2 });
     check(has(&text(&switched), ":active 2"), "Set_layout writes :active");
     let added = edit(&switched, L::LayoutNew { graph: "editor".into() });

@@ -1200,7 +1200,7 @@ fn retained_scene2_segment_bytes(draws: &[draw]) -> i64 {
         .iter()
         .map(|d| {
             let value = &d.draw;
-            (value.mesh.vertices.borrow().len() + value.mesh.indices.borrow().len()) as i64
+            (value.mesh.vertex_bytes_len() + value.mesh.indices.borrow().len()) as i64
                 + value.state.transform_uniforms.as_ref().map_or(0, |b| b.borrow().len() as i64)
                 + d.texture.as_ref().map_or(0, |tx| renderer_lowering::sampled_texture_bytes(tx))
                 + d.auxiliary.as_ref().map_or(0, |a| a.buffer.borrow().len() as i64 + renderer_lowering::sampled_texture_bytes(&a.texture))
@@ -1358,6 +1358,7 @@ fn lower_ui(submission_: &submission, density: i64, resource_: &dyn Fn(i64) -> O
                     mesh: scene_execution::mesh {
                         key: scene_execution::mesh_key::Host(format!("ui:{}", slot_key)),
                         vertices: s.ui_vertices.clone(),
+                        shared_vertices: None,
                         vertex_count: 4 * batch_.count,
                         indices: s.ui_indices.clone(),
                         index_count: 6 * batch_.count,

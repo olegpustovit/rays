@@ -1158,7 +1158,7 @@ fn defaulted_attribute(
             Storage::Int(mapping.iter().map(|&index| if index >= 0 { values[index as usize] } else { 0 }).collect())
         }
         Storage::Text(values) => Storage::Text(
-            mapping.iter().map(|&index| if index >= 0 { values[index as usize].clone() } else { String::new() }).collect(),
+            mapping.iter().map(|&index| if index >= 0 { values[index as usize].clone() } else { Vec::new() }).collect(),
         ),
         Storage::IntArray(values) => {
             Storage::IntArray(ragged_ops::remap_int(cancel_value, Some(grain), mapping, values).map_err(pass)?)
@@ -2149,7 +2149,7 @@ mod tests {
             attr(
                 "primitive_label",
                 attribute::Owner::Primitive,
-                attribute::Storage::Text(vec!["surface".to_owned(), "constraint".to_owned(), "guide".to_owned()]),
+                attribute::Storage::Text(vec![b"surface".to_vec(), b"constraint".to_vec(), b"guide".to_vec()]),
             ),
             attr("detail_id", attribute::Owner::Detail, attribute::Storage::Int(vec![73])),
         ];
@@ -2250,7 +2250,7 @@ mod tests {
         }
         match storage(attribute::Owner::Primitive, "primitive_label", &output) {
             attribute::Storage::Text(values) => check(
-                values[0] == "surface" && values[1] == "guide" && values[2..].iter().all(|s| s.is_empty()),
+                values[0] == b"surface" && values[1] == b"guide" && values[2..].iter().all(|s| s.is_empty()),
                 "Keep Primitives primitive payload/defaults",
             ),
             _ => panic!("Keep Primitives primitive storage changed"),
@@ -2368,7 +2368,7 @@ mod tests {
         let label = attr(
             "label",
             attribute::Owner::Point,
-            attribute::Storage::Text(["a", "b", "c", "d"].iter().map(|s| s.to_string()).collect()),
+            attribute::Storage::Text(["a", "b", "c", "d"].iter().map(|s| s.as_bytes().to_vec()).collect()),
         );
         let selected = pgroup(group::Owner::Point, "selected", 4, &|p| p == 2);
         let constraints = pgroup(group::Owner::Primitive, "constraints", 2, &|_| true);
@@ -2419,7 +2419,7 @@ mod tests {
             attribute::Storage::Text(values) => values,
             _ => panic!("text storage changed"),
         };
-        check(int_values(p, "id", &output)[4] == 12 && labels[4] == "c", "crossing discrete payload policy");
+        check(int_values(p, "id", &output)[4] == 12 && labels[4] == b"c", "crossing discrete payload policy");
         check(group::mem(4, &find_group(group::Owner::Point, "selected", &output)), "split point group ancestry");
         let crossings = find_group(group::Owner::Point, "crossings", &output);
         check(group::cardinality(&crossings) == 1 && group::mem(4, &crossings), "split output group");

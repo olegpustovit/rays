@@ -288,6 +288,31 @@ mod tests {
     fn params() -> Params {
         Params { cancel: None, grain: Some(1), primitives: None }
     }
+    #[test]
+    fn deferred_topology_triangulates_like_owned_once_in_each_domain_context() {
+        use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+        for domains in [1, 4] {
+            let source = grid(2, 2, 2.0, true);
+            let reads = Arc::new(AtomicUsize::new(0));
+            let counter = Arc::clone(&reads);
+            let owned = geometry::topology(&source).clone();
+            let deferred = topology::deferred(
+                None, None, None, topology::point_count(&owned), topology::vertex_count(&owned),
+                topology::primitive_count(&owned), Arc::new(move || {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    Ok(owned.clone())
+                }),
+            ).unwrap();
+            let deferred = geometry::create(
+                geometry::positions(&source).clone(), deferred, Some(geometry::attributes(&source)), None, None,
+            ).unwrap();
+            let actual = at_domains(domains, &|| run(&params(), &deferred).unwrap());
+            let expected = at_domains(domains, &|| run(&params(), &source).unwrap());
+            assert_eq!(geometry_signature(&actual), geometry_signature(&expected), "deferred triangulation");
+            assert_eq!(reads.load(Ordering::SeqCst), 1, "CPU consumer did not materialise topology once");
+        }
+    }
+
 
     #[test]
     fn collapsed_quad_and_deterministic_failure() {
@@ -311,6 +336,12 @@ mod tests {
             error::message(&failure),
             "Rdk_mesh.Triangulate.triangulate: primitive 0 has degenerate projected area"
         );
+        let messages = |domains| {
+            at_domains_strings(domains, &|| {
+                vec![error::message(&err(run(&params(), &degenerate))).to_owned()]
+            })
+        };
+        assert_eq!(messages(1), messages(4), "lowest failing primitive differs across domains");
     }
 
     #[test]

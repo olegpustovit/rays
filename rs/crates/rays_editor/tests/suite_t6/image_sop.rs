@@ -7,7 +7,7 @@ use editor_document::workspace_doc as wd;
 use flow_graph::flow_edit::ArgKey;
 use flow_graph::flow_edit::Op;
 use flow_graph::projection as P;
-use flow_syntax::syntax::{self as S, Node};
+use flow_syntax::syntax::{self as S, Draft};
 use flow_syntax::ty::Ty;
 use sop::edit_graph;
 use sop::{context, session};
@@ -47,7 +47,7 @@ pub fn image_sop() {
     args.input_types = Some(vec!["missing_type".to_owned()]);
     let bad = edit_graph::factory(args, 1, Arc::new(|inputs| Ok(inputs[0].clone())));
     assert!(flow_sop::catalog::of_factories(1, &[], None, &[bad]).is_err());
-    let manifest = if std::env::var("RAYS_SLOW").as_deref() == Ok("1") { flow_sop::manifest::generate(&kinds::descriptors(), None, &factories).unwrap().0 } else { crate::support::read_repo("lib/flow_sop/flow_manifest.sexp") }; // regenerating the whole library takes minutes at -O0: the checked-in manifest is the same text
+    let manifest = flow_sop::manifest::generate(&kinds::descriptors(), None, &factories).unwrap().0;
     let (parsed, _) = flow_check::catalog::catalog_of_manifest(&manifest).unwrap();
     let kind_of = |c: &flow_check::catalog::Catalog| c.kinds.iter().find(|k| k.qualified == "sop/attr_from_image").unwrap().clone();
     assert!(kind_of(&parsed).slots == kind_of(&catalog).slots);
@@ -64,10 +64,15 @@ pub fn image_sop() {
     assert!(diagnostics(&catalog, wrong).iter().any(|d| d.code == "E_TYPE"));
     assert!(diagnostics(&catalog, "(workspace missing (graph g :context sop (sop/attr_from_image (sop/grid))))").iter().any(|d| d.code == "E_MISSING_INPUT"));
     let result = vec!["g".to_owned(), "result".to_owned()];
+    let mut builder = S::SyntaxBuilder::new();
+    let items = [Draft::Sym("ref".into()), Draft::Sym("img".into())].into_iter()
+        .map(|draft| builder.push_draft(0, draft, Default::default(), None)).collect();
+    let id = builder.push_draft(0, Draft::List(items), Default::default(), None);
+    let reference = builder.freeze().handle(id);
     for gesture in [
         Op::Connect { node: result.clone(), key: ArgKey::Pos(1), src: "picture".into(), iter: false },
-        Op::SetArg { node: result.clone(), key: ArgKey::Kw("channel".into()), sub: Vec::new(), value: S::make(Node::Str(b"b".to_vec())) },
-        Op::Disconnect { node: result.clone(), key: ArgKey::Pos(1), fallback: Some(S::make(Node::List(vec![S::make(Node::Sym("ref".into())), S::make(Node::Sym("img".into()))].into()))) },
+        Op::SetArg { node: result.clone(), key: ArgKey::Kw("channel".into()), sub: Vec::new(), value: S::make(Draft::Str(b"b".to_vec())) },
+        Op::Disconnect { node: result.clone(), key: ArgKey::Pos(1), fallback: Some(reference) },
     ] {
         wd::edit(&catalog, &document, &gesture).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
     }

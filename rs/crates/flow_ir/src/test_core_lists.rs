@@ -183,8 +183,12 @@ fn captured(ty: &str, body: &str, value: Value) -> ResidualId {
     let evaluation = ok(E::r#static(&ws, true, None));
     let path = vec!["g".to_owned(), "clock".to_owned()];
     let Value::Residual(r) = evaluation.records.iter().find(|(p, _)| *p == path).expect("clock").1[0].1.clone() else { panic!("Capture context needs a live clock") };
-    let W::Node::Let(bindings, _) = &ws.graphs[0].body.node else { panic!("Missing checked capture term") };
-    let term = bindings.iter().find_map(|(p, t)| if *p == W::Pattern::Name("tested".into()) { Some(t.clone()) } else { None }).expect("Missing checked capture term");
+    let body = &ws.graphs[0].body;
+    let W::Node::Let(id) = body.node else { panic!("Missing checked capture term") };
+    let arena = body.arena();
+    let term = arena.bindings(arena.let_node(id).bindings).iter().find_map(|binding| {
+        matches!(arena.pattern(binding.pattern), flow_check::term_arena::PatternNode::Name(name) if body.name(name) == "tested").then(|| body.child(binding.term))
+    }).expect("Missing checked capture term");
     ok(E::Residual::with_bindings(r, &term, &[("parts".to_owned(), value)]))
 }
 

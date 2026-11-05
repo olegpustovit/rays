@@ -1,7 +1,7 @@
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Span {
-    pub start: i64,
-    pub finish: i64,
+    pub start: u32,
+    pub finish: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -12,9 +12,12 @@ pub enum Severity {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Position {
-    pub line: i64,
-    pub col: i64,
+    pub line: u32,
+    pub col: u32,
 }
+
+const _: () = assert!(std::mem::size_of::<Span>() == 8);
+const _: () = assert!(std::mem::size_of::<Position>() == 8);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Trace {
@@ -38,9 +41,18 @@ pub struct Diagnostic {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Error(pub Diagnostic);
 
-pub fn position_of_offset(source: &str, offset: i64) -> Position {
-    let end = offset.clamp(0, source.len() as i64) as usize;
-    let (mut line, mut col) = (1, 1);
+/// Leave one byte for the one-based position at end of input.
+pub const MAX_SOURCE_BYTES: usize = u32::MAX as usize - 1;
+
+pub fn check_source_len(bytes: usize) -> Result<(), Diagnostic> {
+    if bytes <= MAX_SOURCE_BYTES { Ok(()) } else {
+        Err(error("E_SOURCE_SIZE".into(), format!("Source exceeds {MAX_SOURCE_BYTES} bytes."), None, None, None, Vec::new(), Vec::new()))
+    }
+}
+
+pub fn position_of_offset(source: &str, offset: impl Into<i64>) -> Position {
+    let end = offset.into().clamp(0, source.len() as i64) as usize;
+    let (mut line, mut col) = (1_u32, 1_u32);
     for &byte in source.as_bytes().iter().take(end) {
         if byte == b'\n' {
             line += 1;
@@ -141,20 +153,20 @@ pub fn report(file: &str, source: &str, value: &Diagnostic) -> String {
     };
     let (line, a, b) = match (value.span.as_ref(), value.position) {
         (Some(span), _) => {
-            let (line, first) = line_of(span.start);
+            let (line, first) = line_of(i64::from(span.start));
             let eol = source.as_bytes()[first as usize..]
                 .iter()
                 .position(|&byte| byte == b'\n')
                 .map_or(source.len() as i64, |offset| (first as usize + offset) as i64);
             (
                 line,
-                span.start - first,
-                span.finish.max(span.start.saturating_add(1)).min(eol) - first,
+                i64::from(span.start) - first,
+                i64::from(span.finish).max(i64::from(span.start) + 1).min(eol) - first,
             )
         }
         (None, Some(position)) => {
-            let col = position.col.saturating_sub(1).max(0);
-            (position.line, col, col)
+            let col = i64::from(position.col.saturating_sub(1));
+            (i64::from(position.line), col, col)
         }
         (None, None) => (1, 0, 0),
     };
@@ -175,6 +187,15 @@ pub fn report(file: &str, source: &str, value: &Diagnostic) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn compact_positions_reject_oversized_sources_without_allocating_them() {
+        assert_eq!(std::mem::size_of::<Span>(), 8);
+        assert_eq!(std::mem::size_of::<Position>(), 8);
+        assert!(check_source_len(MAX_SOURCE_BYTES).is_ok());
+        assert_eq!(check_source_len(MAX_SOURCE_BYTES + 1).unwrap_err().code, "E_SOURCE_SIZE");
+        assert_eq!(check_source_len(usize::MAX).unwrap_err().code, "E_SOURCE_SIZE");
+    }
     use super::*;
 
     #[test]

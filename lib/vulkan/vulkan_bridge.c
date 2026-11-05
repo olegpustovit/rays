@@ -1830,7 +1830,8 @@ typedef struct rv_accel {
   VkDeviceSize instances_offset;
   uint32_t instance_count, structure_count;
   void **structures;
-  VkDeviceSize structure_size, build_scratch, update_scratch;
+  bool build_children; /* internal proxy TLAS owns homogeneous AABB BLASes in structures */
+  VkDeviceSize structure_size, build_scratch, update_scratch, child_scratch;
 } rv_accel;
 
 static VkDeviceAddress buffer_address(rv_device *d, VkBuffer buffer) {
@@ -1907,7 +1908,14 @@ static void measure(rv_accel *a) {
   vkGetAccelerationStructureBuildSizesKHR(a->d->device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &info,
       a->level == VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR ? &instances : a->primitives, &sizes);
   a->structure_size = sizes.accelerationStructureSize;
-  a->build_scratch = sizes.buildScratchSize + 128;
+  a->child_scratch = 0;
+  if (a->build_children) {
+    for (uint32_t i = 0; i < a->structure_count; i++) {
+      rv_accel *child = a->structures[i];
+      a->child_scratch += (child->build_scratch + 255) & ~(VkDeviceSize)255;
+    }
+  }
+  a->build_scratch = sizes.buildScratchSize + 128 + a->child_scratch;
   a->update_scratch = sizes.updateScratchSize + 128;
 }
 
@@ -1928,7 +1936,8 @@ CAMLprim value rv_accel_create_blas(value device, value geometries, value refit)
 }
 
 /* structures: the bottom-level handles a record's structure index names */
-CAMLprim value rv_accel_create_tlas(value device, value instances, value offset, value count, value structures) {
+CAMLprim value rv_accel_create_tlas(value device, value instances, value offset, value count, value structures_flags) {
+  value structures = Field(structures_flags, 0);
   rv_accel *a = calloc(1, sizeof *a);
   a->d = H(device);
   a->level = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
@@ -1938,6 +1947,7 @@ CAMLprim value rv_accel_create_tlas(value device, value instances, value offset,
   a->instance_count = Long_val(count);
   a->structure_count = Wosize_val(structures);
   a->structures = calloc(a->structure_count + 1, sizeof *a->structures);
+  a->build_children = Bool_val(Field(structures_flags, 1));
   for (uint32_t i = 0; i < a->structure_count; i++) a->structures[i] = H(Field(structures, i));
   measure(a);
   VkResult r = accel_storage(a);
@@ -1972,6 +1982,9 @@ static void destroy_accel_now(rv_device *d, void *payload) {
   rv_accel *a = payload;
   if (a->wrap) destroy_accel_now(d, a->wrap);
   vkDestroyAccelerationStructureKHR(d->device, a->handle, NULL);
+  if (a->build_children)
+    for (uint32_t i = 0; i < a->structure_count; i++)
+      destroy_accel_now(d, a->structures[i]);
   vmaDestroyBuffer(d->allocator, a->buffer, a->allocation);
   free(a->geometries);
   free(a->primitives);
@@ -1982,6 +1995,9 @@ static void destroy_accel_now(rv_device *d, void *payload) {
 CAMLprim value rv_accel_destroy(value accel) {
   rv_accel *a = H(accel);
   __atomic_sub_fetch(&a->d->held, (int64_t)a->structure_size, __ATOMIC_RELAXED);
+  if (a->build_children)
+    for (uint32_t i = 0; i < a->structure_count; i++)
+      __atomic_sub_fetch(&a->d->held, (int64_t)((rv_accel *)a->structures[i])->structure_size, __ATOMIC_RELAXED);
   defer(a->d, destroy_accel_now, a);
   return Val_unit;
 }
@@ -2042,10 +2058,10 @@ CAMLprim value rv_cmd_set_accel(value commands, value index, value accel) {
   return Val_long(VK_SUCCESS);
 }
 
-/* The logical records (68 bytes: column-major transform, user id at 48, mask at 52, structure index
-   at 56) become Vulkan's. Their bits are a host fact at build time: read back from the buffer (the
-   pending uploads run and are waited for); a device-written instance buffer has no caller.
-   ponytail: one wait a build; shadow the host's writes if an animated top level ever shows it. */
+/* Logical instance records are 68 bytes: column-major transform, user id at 48, mask at 52,
+   structure index at 56, and motion proxy's prototype SBT offset at 60. Their bits are a host fact at
+   build time: read back from the buffer (the pending uploads run and are waited for); a device-written
+   instance buffer has no caller. ponytail: one wait a build; shadow host writes if an animated top level shows it. */
 static VkResult native_instances(rv_cmd *c, rv_accel *a, VkDeviceAddress *address) {
   VkBuffer chunk;
   VkDeviceSize at;
@@ -2059,14 +2075,16 @@ static VkResult native_instances(rv_cmd *c, rv_accel *a, VkDeviceAddress *addres
   const char *from = host;
   for (uint32_t i = 0; i < a->instance_count; i++, from += 68) {
     const float *m = (const float *)from;
-    uint32_t user_id, mask, index;
+    uint32_t user_id, mask, index, prototype;
     memcpy(&user_id, from + 48, 4);
     memcpy(&mask, from + 52, 4);
     memcpy(&index, from + 56, 4);
+    memcpy(&prototype, from + 60, 4);
     if (index >= a->structure_count) { free(host); return VK_ERROR_VALIDATION_FAILED_EXT; }
     VkAccelerationStructureInstanceKHR out = {
         .transform = {.matrix = {{m[0], m[3], m[6], m[9]}, {m[1], m[4], m[7], m[10]}, {m[2], m[5], m[8], m[11]}}},
         .instanceCustomIndex = user_id & 0xffffff, .mask = mask & 0xff,
+        .instanceShaderBindingTableRecordOffset = a->build_children ? prototype & 0xffffff : 0,
         .accelerationStructureReference = accel_address(a->structures[index])};
     memcpy(room + i * sizeof out, &out, sizeof out);
   }
@@ -2076,6 +2094,16 @@ static VkResult native_instances(rv_cmd *c, rv_accel *a, VkDeviceAddress *addres
 }
 
 static VkResult record_build(rv_cmd *c, rv_accel *a, rv_buffer *scratch, VkDeviceSize offset, bool update) {
+  if (a->build_children) {
+    VkDeviceSize child_offset = offset;
+    for (uint32_t i = 0; i < a->structure_count; i++) {
+      rv_accel *child = a->structures[i];
+      VkResult r = record_build(c, child, scratch, child_offset, false);
+      if (r != VK_SUCCESS) return r;
+      child_offset += (child->build_scratch + 255) & ~(VkDeviceSize)255;
+    }
+    offset += a->child_scratch;
+  }
   VkAccelerationStructureBuildGeometryInfoKHR info;
   VkAccelerationStructureGeometryKHR instance_geometry;
   build_info(a, &info, &instance_geometry);

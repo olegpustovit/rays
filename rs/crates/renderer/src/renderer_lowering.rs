@@ -76,6 +76,7 @@ fn scene2_draw(key: String, vertices: Vec<u8>, vertex_count: i64, indices: Vec<u
             mesh: mesh {
                 key: mesh_key::Host(key),
                 vertices: new_bytes(vertices),
+                shared_vertices: None,
                 vertex_count,
                 indices: new_bytes(indices),
                 index_count,
@@ -391,7 +392,7 @@ fn quad(
         vertex_attributes: None,
         samples: 1,
         draw: scene_execution::geometry_draw {
-            mesh: mesh { key: mesh_key::Host(key), vertices, vertex_count: 4, indices, index_count: 6, primitive: Primitive::TriangleList },
+            mesh: mesh { key: mesh_key::Host(key), vertices, shared_vertices: None, vertex_count: 4, indices, index_count: 6, primitive: Primitive::TriangleList },
             state: default_state(framebuffer, clip),
         },
     });
@@ -503,17 +504,14 @@ pub fn lower_scene2(
                 };
                 if failure.is_none() && clip_live(&clips) && shapes.count() > 0 {
                     let count = shapes.count();
-                    let instances = shapes.instances();
+                    let instances = shapes.instances_shared();
                     let slot_key = -1 - number as i64;
                     let slot = find_ui_slot(state_, slot_key);
                     {
-                        // changed content takes the batch's bytes; unchanged keeps the slot's (so the
-                        // executor's mesh cache hits by physical identity)
+                        // Published UI bytes remain immutable; the draw retains their Arc directly.
                         let mut s = slot.borrow_mut();
-                        if s.ui_vertices.borrow()[..] != *instances {
-                            s.ui_vertices = new_bytes(instances.to_vec());
-                        }
-                        s.ui_source = s.ui_vertices.clone();
+                        if !s.ui_vertices.borrow().is_empty() { s.ui_vertices=empty_bytes(); }
+                        s.ui_source=s.ui_vertices.clone();
                         if s.ui_indices.borrow().len() as i64 != count * 24 {
                             s.ui_indices = ui_index_bytes(state_, count);
                         }
@@ -538,6 +536,7 @@ pub fn lower_scene2(
                                     None => mesh_key::Host(format!("shapes:{}", slot_key)),
                                 },
                                 vertices: if gpu_key.is_none() { s.ui_vertices.clone() } else { empty_bytes() },
+                                shared_vertices: if gpu_key.is_none() { Some(instances.clone()) } else { None },
                                 vertex_count: 4 * count,
                                 indices: s.ui_indices.clone(),
                                 index_count: 6 * count,

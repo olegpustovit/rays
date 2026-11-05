@@ -5,7 +5,7 @@
 //! return `Result<node::T, Diagnostic>` (the same diagnostic, as a value).
 use flow_eval::Value;
 use flow_syntax::lisp;
-use flow_syntax::syntax::{self, Node};
+use flow_syntax::arena::{Node, SyntaxBuilder};
 use flow_syntax::ty;
 use rays_diagnostic::Diagnostic;
 use rdk::attribute::{self, Owner};
@@ -23,8 +23,14 @@ use crate::port::error;
 
 /// `Flow.Lisp.flat` of a vec of strings: the cache text of a node's text parameters.
 fn key(cells: &[&str]) -> String {
-    let items = cells.iter().map(|cell| syntax::make(Node::Str(cell.as_bytes().to_vec()))).collect();
-    lisp::flat(&syntax::make(Node::Vec(items)))
+    let mut builder = SyntaxBuilder::new();
+    let items: Vec<_> = cells.iter().map(|cell| {
+        let bytes = builder.bytes(cell.as_bytes());
+        builder.push(0, Node::Str(bytes), rays_diagnostic::Span { start: 0, finish: 0 }, None)
+    }).collect();
+    let range = builder.range(&items);
+    let root = builder.push(0, Node::Vec(range), rays_diagnostic::Span { start: 0, finish: 0 }, None);
+    lisp::flat(&builder.freeze().handle(root))
 }
 
 fn pattern_error(message: String) -> Diagnostic {
@@ -493,7 +499,7 @@ impl Named for [(String, Value)] {
 fn owner_argument(args: &[(String, Value)]) -> Result<Option<Owner>, Diagnostic> {
     match args.named("owner") {
         None => Ok(Some(Owner::Point)),
-        Some(Value::Text(owner)) => attribute_owner(&String::from_utf8_lossy(owner)),
+        Some(Value::Text(owner)) => attribute_owner(std::str::from_utf8(owner).map_err(|_| error("E_ATTR_OWNER", "Attribute owner must be UTF-8 text."))?),
         _ => Err(error("E_ATTR_OWNER", "Attribute owner must be text.")),
     }
 }
@@ -518,7 +524,7 @@ pub fn resolve(geometry: &dyn Fn(i64) -> Option<geometry::T>, value: &Value) -> 
     let owner = owner_argument(args)?;
     if operation == "sop/attr_entries" {
         return match args.named("component") {
-            Some(Value::Text(component)) => entries(owner, &String::from_utf8_lossy(component), &found),
+            Some(Value::Text(component)) => entries(owner, std::str::from_utf8(component).map_err(|_| error("E_ATTR_ENTRIES", "Attribute entry component must be UTF-8 text."))?, &found),
             _ => Err(error("E_ATTR_ENTRIES", "Attribute entry component is name, type or owner.")),
         };
     }
@@ -527,8 +533,8 @@ pub fn resolve(geometry: &dyn Fn(i64) -> Option<geometry::T>, value: &Value) -> 
     };
     let argument = args.named(if operation == "sop/attr_type" { "attribute" } else { "pattern" });
     match (operation, argument) {
-        ("sop/attr_type", Some(Value::Text(name))) => type_of(owner, &String::from_utf8_lossy(name), &found),
-        ("sop/attr_names", Some(Value::Text(pattern))) => names(owner, &String::from_utf8_lossy(pattern), &found),
+        ("sop/attr_type", Some(Value::Text(name))) => type_of(owner, std::str::from_utf8(name).map_err(|_| error("E_ATTR_NAME", "Attribute name must be UTF-8 text."))?, &found),
+        ("sop/attr_names", Some(Value::Text(pattern))) => names(owner, std::str::from_utf8(pattern).map_err(|_| error("E_ATTR_NAME", "Attribute pattern must be UTF-8 text."))?, &found),
         _ => Err(error("E_ATTR_NAME", "Metadata names and patterns must be text.")),
     }
 }
@@ -563,7 +569,7 @@ mod tests {
     fn fixture() -> geometry::T {
         let points = line_geometry::points(&[(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (2.0, 0.0, 0.0)]).expect("points");
         let colour = attribute::create_owned("Cd", Owner::Point, attribute::Storage::Float(vec![0.25; 3])).expect("Cd");
-        let tag = attribute::create_owned("tag", Owner::Detail, attribute::Storage::Text(vec!["a".to_owned()])).expect("tag");
+        let tag = attribute::create_owned("tag", Owner::Detail, attribute::Storage::Text(vec![b"a".to_vec()])).expect("tag");
         let geometry = geometry::with_attribute(colour, &points).expect("with Cd");
         geometry::with_attribute(tag, &geometry).expect("with tag")
     }

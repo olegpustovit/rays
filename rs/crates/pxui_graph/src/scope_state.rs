@@ -629,7 +629,7 @@ pub fn switch_nodes(scope: &p::Scope) -> Vec<(Path, i64)> {
                 .iter()
                 .find(|r| r.key == ArgKey::Kw("active".to_owned()))
                 .and_then(|r| match r.expr.as_ref().map(|x| &x.node) {
-                    Some(SNode::Num(s)) => s.parse::<i64>().ok(),
+                    Some(SNode::Num(s)) => r.expr.as_ref().unwrap().name(*s).parse::<i64>().ok(),
                     _ => None,
                 })
                 .unwrap_or(0);

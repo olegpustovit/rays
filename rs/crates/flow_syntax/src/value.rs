@@ -460,7 +460,7 @@ pub fn array_get(value: &Value, index: i64) -> Result<Value, Diagnostic> {
     let index = index as usize;
     let value = match value {
         Value::Int_array(values) => Value::Int(values[index]),
-        Value::Text_array(values) => Value::Text(values[index].clone()),
+        Value::Text_array(values) => { let mut text = array_buffer(values[index].len())?; text.extend_from_slice(&values[index]); Value::Text(text) },
         Value::Float_array(values) => Value::Float(values[index]),
         Value::Vec2_array(values) => Value::Vec2(values[index * 2], values[index * 2 + 1]),
         Value::Vec3_array(values) => Value::Vec3(values[index * 3], values[index * 3 + 1], values[index * 3 + 2]),
@@ -493,16 +493,24 @@ fn allocation_count_ok(count: i64, width: usize) -> Result<usize, Diagnostic> {
     if count < 0 || (count as u128) > MAX_ARRAY_LENGTH / width as u128 { Err(fail("E_ARRAY_RANGE", "Array length is outside native storage bounds.")) }
     else { Ok(count as usize) }
 }
+/// Reserve a user-sized result before filling it; allocation failure is a Lisp diagnostic.
+/// This cannot recover from an OS killing the process after an overcommitted allocation.
+pub fn array_buffer<T>(count: usize) -> Result<Vec<T>, Diagnostic> {
+    let mut values = Vec::new();
+    values.try_reserve_exact(count).map_err(|_| fail("E_ARRAY_MEMORY", "Frame data exceeds available memory."))?;
+    Ok(values)
+}
 pub fn array_init(element: &Ty, count: i64, f: &dyn Fn(usize) -> Value) -> Result<Value, Diagnostic> {
     if *element == Ty::Text {
         let count = allocation_count_ok(count, 1)?;
-        let mut values = Vec::with_capacity(count);
+        let mut values = array_buffer(count)?;
         for index in 0..count { match f(index) { Value::Text(text) => values.push(text), _ => return Err(fail("E_ARRAY_TYPE", "Text arrays contain text values.")) } }
         return Ok(Value::Text_array(Arc::new(values)));
     }
     if *element == Ty::Int {
         let count = allocation_count_ok(count, 1)?;
-        let mut values = vec![0; count];
+        let mut values = array_buffer(count)?;
+        values.resize(count, 0);
         for (index, slot) in values.iter_mut().enumerate() { *slot = match coerce_to(&Ty::Int, &f(index))? { Value::Int(value) => value, _ => return Err(fail("E_ARRAY_TYPE", "Packed integer arrays contain integer values.")) }; }
         return Ok(Value::Int_array(Arc::new(values)));
     }
@@ -515,7 +523,9 @@ pub fn array_init(element: &Ty, count: i64, f: &dyn Fn(usize) -> Value) -> Resul
         _ => return Err(fail("E_ARRAY_TYPE", "Packed arrays contain float, vec2, vec3 or vec4 values.")),
     };
     let count = allocation_count_ok(count, width)?;
-    let mut values = vec![0.0; count * width];
+    let slots = count.checked_mul(width).ok_or_else(|| fail("E_ARRAY_MEMORY", "Frame data exceeds available memory."))?;
+    let mut values = array_buffer(slots)?;
+    values.resize(slots, 0.0);
     for index in 0..count { array_put(&mut values, width, index, &f(index))?; }
     let values = Arc::new(values);
     Ok(match width { 2 => Value::Vec2_array(values), 3 => Value::Vec3_array(values), 4 => Value::Vec4_array(values), _ => Value::Float_array(values) })
@@ -656,6 +666,9 @@ mod tests {
         assert_eq!(array_init(&Ty::Text, 2, &|index| Value::Text(vec![0xff, index as u8])).unwrap(), Value::Text_array(Arc::new(vec![vec![0xff, 0], vec![0xff, 1]])));
         assert_eq!(array_init(&Ty::Text, 1, &|_| Value::Int(0)).unwrap_err().code, "E_ARRAY_TYPE");
         for count in [-1, i64::MAX] { assert_eq!(array_init(&Ty::Int, count, &|_| unreachable!()).unwrap_err().code, "E_ARRAY_RANGE"); }
+        for element in [Ty::Int, Ty::Float, Ty::Vec2, Ty::Vec3, Ty::Vec4, Ty::Text] {
+            assert_eq!(array_init(&element, (1_i64 << 52) - 1, &|_| unreachable!("allocation must fail before initialization")).unwrap_err().code, "E_ARRAY_MEMORY");
+        }
         for (element, value, expected) in [
             (Ty::Vec2, Value::Vec2(1.0, -0.0), 3_i64),
             (Ty::Vec4, Value::Vec4(1.0, 2.0, 3.0, 4.0), 3_i64),

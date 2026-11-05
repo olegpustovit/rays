@@ -1055,7 +1055,7 @@ mod tests {
         let g = add(
             attribute::Owner::Point,
             "point_tag",
-            attribute::Storage::Text((0..8).map(|p| format!("p{p}")).collect()),
+            attribute::Storage::Text((0..8).map(|p| format!("p{p}").into_bytes()).collect()),
             &g,
         );
         let g = add(
@@ -1404,8 +1404,7 @@ mod tests {
 
     #[test]
     fn parallel_scale() {
-        // The OCaml fixture uses 20_000 boxes; 1_000 keeps every identity and the 257 grain split.
-        let n = 1_000usize;
+        let n = 20_000usize;
         let source = many_open_boxes(n);
         let triangles = |domains| {
             with_domains(domains, &|| {

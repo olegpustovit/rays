@@ -1,3 +1,6 @@
+#[cfg(windows)]
+pub mod windows_process;
+
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::Mutex;

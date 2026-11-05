@@ -327,7 +327,7 @@ fn number(s: &Summary) -> Option<f64> {
 
 fn arg(n: &p::Node, i: i64) -> Option<String> {
     n.rows.iter().find(|r| r.key == crate::edit_base::ArgKey::Pos(i)).and_then(|r| match &r.expr {
-        Some(Syntax { node: SNode::Sym(s), .. }) => Some(s.clone()),
+        Some(form) => crate::edit_base::sym_of(form).map(str::to_owned),
         _ => None,
     })
 }
@@ -660,10 +660,11 @@ impl Probe {
         records.iter().find_map(|(tuple, value)| match value {
             Value::Residual(residual) if tuple == probes => {
                 let view = e::Residual::residual_view(*residual).ok()?;
-                let term: Option<w::Term> = match (&view.term.node, key) {
-                    (w::Node::If(test, _, _), "test") => Some((**test).clone()),
-                    (w::Node::Case(test, _, _), "of") => Some((**test).clone()),
-                    (w::Node::Cond(arms, _), key) if key.starts_with("test") => key[4..].parse::<usize>().ok().and_then(|i| arms.get(i)).map(|x| x.0.clone()),
+                let arena = view.term.arena();
+                let term: Option<w::Term> = match (view.term.node, key) {
+                    (w::Node::If(id), "test") => Some(view.term.child(arena.if_node(id).test)),
+                    (w::Node::Case(id), "of") => Some(view.term.child(arena.case(id).value)),
+                    (w::Node::Cond(id), key) if key.starts_with("test") => key[4..].parse::<usize>().ok().and_then(|i| arena.arms(arena.cond(id).arms).get(i)).map(|arm| view.term.child(arm.test)),
                     _ => None,
                 };
                 term.and_then(|term| e::Residual::eval_term(*residual, &term, &live, self.state.as_ref(), None, self.resolve.clone()).ok()).map(Summary::Value)
@@ -712,12 +713,12 @@ impl Probe {
             "case" => {
                 let equal = |value: &Value, literal: &Syntax| -> bool {
                     match (value, &literal.node) {
-                        (Value::Text(a), SNode::Str(b)) => a == b,
-                        (Value::Bool(_) | Value::Int(_) | Value::Float(_), SNode::Sym(s)) if s == "true" => flow_syntax::value::truthy(value).unwrap_or(false),
-                        (Value::Bool(_) | Value::Int(_) | Value::Float(_), SNode::Sym(s)) if s == "false" => !flow_syntax::value::truthy(value).unwrap_or(true),
-                        (Value::Bool(a), SNode::Num(b)) => *a == (cfmt::parse_ocaml_float(b).unwrap_or(0.0) != 0.0),
-                        (Value::Int(a), SNode::Num(b)) => *a as f64 == cfmt::parse_ocaml_float(b).unwrap_or(f64::NAN),
-                        (Value::Float(a), SNode::Num(b)) => *a == cfmt::parse_ocaml_float(b).unwrap_or(f64::NAN),
+                        (Value::Text(a), SNode::Str(b)) => a.as_slice() == literal.bytes(*b),
+                        (Value::Bool(_) | Value::Int(_) | Value::Float(_), SNode::Sym(s)) if literal.name(*s) == "true" => flow_syntax::value::truthy(value).unwrap_or(false),
+                        (Value::Bool(_) | Value::Int(_) | Value::Float(_), SNode::Sym(s)) if literal.name(*s) == "false" => !flow_syntax::value::truthy(value).unwrap_or(true),
+                        (Value::Bool(a), SNode::Num(b)) => *a == (cfmt::parse_ocaml_float(literal.name(*b)).unwrap_or(0.0) != 0.0),
+                        (Value::Int(a), SNode::Num(b)) => *a as f64 == cfmt::parse_ocaml_float(literal.name(*b)).unwrap_or(f64::NAN),
+                        (Value::Float(a), SNode::Num(b)) => *a == cfmt::parse_ocaml_float(literal.name(*b)).unwrap_or(f64::NAN),
                         _ => false,
                     }
                 };

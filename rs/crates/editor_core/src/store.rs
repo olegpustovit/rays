@@ -59,8 +59,8 @@ fn map(pairs: Vec<(&str, Syntax)>) -> Syntax {
     make_node(Node::Map(items.into()))
 }
 
-fn print(form: &Syntax) -> String {
-    lisp::print(std::slice::from_ref(form)).0
+fn print(form: &Syntax) -> Result<String, String> {
+    lisp::print(std::slice::from_ref(form)).map(|(text, _)| text).map_err(|error| rays_diagnostic::to_string(&error))
 }
 
 /// OCaml's `float_of_string_opt` on a number form, finite only.
@@ -268,7 +268,7 @@ pub mod settings {
             items.push(encode(value));
         }
         let form = make_node(Node::List(items.into()));
-        write_text(filename, &print(&form))
+        write_text(filename, &print(&form)?)
     }
 
     pub fn load(sketch: &str, filename: &str) -> Result<t, String> {

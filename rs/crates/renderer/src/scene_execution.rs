@@ -16,7 +16,7 @@ use ogpu::types::{
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 /// OCaml `bytes`, compared by physical equality where the OCaml code does (`Rc::ptr_eq`).
 pub use runtime_resources::bytes;
@@ -202,10 +202,18 @@ pub fn mesh_key_string(key: &mesh_key) -> String {
 pub struct mesh {
     pub key: mesh_key,
     pub vertices: bytes,
+    /// Immutable published UI vertices; when present, `vertices` must be empty.
+    pub shared_vertices: Option<Arc<Vec<u8>>>,
     pub vertex_count: i64,
     pub indices: bytes,
     pub index_count: i64,
     pub primitive: Primitive,
+}
+
+impl mesh {
+    pub fn vertex_bytes_len(&self) -> usize {
+        self.shared_vertices.as_ref().map_or_else(|| blen(&self.vertices), |bytes| bytes.len())
+    }
 }
 
 /// Equality is structural, as OCaml's `=` on the record (bytes by content, floats by value).
@@ -684,7 +692,7 @@ fn resolve_gpu_vertices(value: &t, entry: &sampled_draw) -> Result<Option<gpu_ve
             };
             let family = entry.family;
             let indices_len = blen(&mesh.indices) as i64;
-            let vertices_len = blen(&mesh.vertices) as i64;
+            let vertices_len = mesh.vertex_bytes_len() as i64;
             if !same_device(&source.gpu_device, &value.device) {
                 return Err(failure_error("Renderer.submit", ErrorKind::CrossDevice, "GPU vertices belong to another device"));
             }
@@ -734,8 +742,8 @@ fn valid_vertex_attributes(entry: &sampled_draw) -> bool {
                 && mesh.vertex_count >= 0
                 && mesh.vertex_count <= MAX_STRING_LENGTH / 24
                 && match &mesh.key {
-                    mesh_key::Gpu_vertices(_) => blen(&mesh.vertices) == 0,
-                    mesh_key::Host(_) => blen(&mesh.vertices) as i64 == mesh.vertex_count * 24,
+                    mesh_key::Gpu_vertices(_) => mesh.vertex_bytes_len() == 0,
+                    mesh_key::Host(_) => mesh.vertex_bytes_len() as i64 == mesh.vertex_count * 24,
                 }
                 && (blen(attributes) as i64 == mesh.vertex_count * 12
                     || match &mesh.key {
@@ -775,6 +783,7 @@ pub fn prepare_scene3(clear: (f64, f64, f64, f64), clear_depth: f64, entries: &[
             && !mesh_key_string(&mesh.key).is_empty()
             && mesh.vertex_count >= 0
             && mesh.index_count >= 0
+            && (mesh.shared_vertices.is_none() || blen(&mesh.vertices)==0)
             && ((mesh.primitive == Primitive::PointList) == (entry.family == Scene3_points))
             && match mesh.primitive {
                 Primitive::LineList => mesh.index_count % 2 == 0,
@@ -1026,14 +1035,18 @@ fn digest_hex(data: &[u8]) -> String {
 fn source_for_trust(mesh: &mesh, bytes: i64) -> Option<mesh> {
     // Keep extra CPU retention within the already bounded GPU payload budget, even when an indexed
     // mesh contains a large unused vertex plane.
-    let (v, i) = (blen(&mesh.vertices) as i64, blen(&mesh.indices) as i64);
+    let (v, i) = (mesh.vertex_bytes_len() as i64, blen(&mesh.indices) as i64);
     if i <= bytes && v <= bytes - i { Some(mesh.clone()) } else { None }
 }
 
 fn same_bytes(mesh: &mesh, source: &Option<mesh>) -> bool {
     match source {
         Some(source) => {
-            Rc::ptr_eq(&source.vertices, &mesh.vertices)
+            (match (&source.shared_vertices, &mesh.shared_vertices) {
+                (Some(a), Some(b)) => Arc::ptr_eq(a,b),
+                (None, None) => Rc::ptr_eq(&source.vertices,&mesh.vertices),
+                _ => false,
+            })
                 && Rc::ptr_eq(&source.indices, &mesh.indices)
                 && source.vertex_count == mesh.vertex_count
                 && source.index_count == mesh.index_count
@@ -1042,8 +1055,14 @@ fn same_bytes(mesh: &mesh, source: &Option<mesh>) -> bool {
     }
 }
 
+fn vertex_hash(mesh: &mesh) -> String {
+    let owned=mesh.vertices.borrow();
+    let vertices=mesh.shared_vertices.as_ref().map_or(owned.as_slice(), |bytes| bytes.as_slice());
+    digest_hex(vertices)
+}
+
 fn content_hash(mesh: &mesh, uniform_bytes: &[u8]) -> String {
-    format!("{}:{}:{}", digest_hex(&mesh.vertices.borrow()), digest_hex(&mesh.indices.borrow()), digest_hex(uniform_bytes))
+    format!("{}:{}:{}", vertex_hash(mesh), digest_hex(&mesh.indices.borrow()), digest_hex(uniform_bytes))
 }
 
 fn f32_at(bytes_: &[u8], index: usize) -> f32 {
@@ -1151,7 +1170,8 @@ fn prepare_upload(
     key: &str,
     existing: Option<cached_ref>,
 ) -> Result<cached_ref, Error> {
-    let vertices = mesh.vertices.borrow();
+    let owned_vertices = mesh.vertices.borrow();
+    let vertices = mesh.shared_vertices.as_ref().map_or(owned_vertices.as_slice(), |bytes| bytes.as_slice());
     let indices = mesh.indices.borrow();
     let (vertex_count, index_count) = (mesh.vertex_count, mesh.index_count);
     let total = (vertices.len() + indices.len() + uniform_bytes.len()) as i64;
@@ -1782,7 +1802,7 @@ fn mesh_identity(mesh: &mesh) -> String {
         "{}:{}:{}:{}",
         mesh_key_string(&mesh.key),
         primitive_code(mesh.primitive),
-        digest_hex(&mesh.vertices.borrow()),
+        vertex_hash(mesh),
         digest_hex(&mesh.indices.borrow())
     )
 }
@@ -1799,7 +1819,7 @@ fn combine_meshes(meshes: &[&mesh]) -> Result<mesh, Error> {
     let (mut vertex_bytes, mut vertex_count, mut index_count) = (0i64, 0i64, 0i64);
     let mut identities: Vec<String> = Vec::new();
     for mesh in meshes {
-        let vlen = blen(&mesh.vertices) as i64;
+        let vlen = mesh.vertex_bytes_len() as i64;
         if mesh.vertex_count <= 0
             || vlen % mesh.vertex_count != 0
             || !valid_index_length(mesh)
@@ -1823,8 +1843,9 @@ fn combine_meshes(meshes: &[&mesh]) -> Result<mesh, Error> {
     let mut indices = vec![0u8; (index_count * 4) as usize];
     let (mut vertex_offset, mut vertex_base, mut index_offset) = (0usize, 0i64, 0usize);
     for mesh in meshes {
-        let source = mesh.vertices.borrow();
-        vertices[vertex_offset..vertex_offset + source.len()].copy_from_slice(&source);
+        let owned = mesh.vertices.borrow();
+        let source = mesh.shared_vertices.as_ref().map_or(owned.as_slice(), |bytes| bytes.as_slice());
+        vertices[vertex_offset..vertex_offset + source.len()].copy_from_slice(source);
         let source_indices = mesh.indices.borrow();
         for index in 0..mesh.index_count as usize {
             let value = u32_le(&source_indices, index * 4) as i32 as i64;
@@ -1838,6 +1859,7 @@ fn combine_meshes(meshes: &[&mesh]) -> Result<mesh, Error> {
     Ok(mesh {
         key: mesh_key::Host(format!("batch:{}", identity)),
         vertices: new_bytes(vertices),
+        shared_vertices: None,
         vertex_count,
         indices: new_bytes(indices),
         index_count,
@@ -1866,11 +1888,11 @@ fn attribute_bytes(entry: &sampled_draw) -> i64 {
 }
 
 fn draw_bytes(entry: &sampled_draw) -> i64 {
-    (blen(&entry.draw.mesh.vertices) + blen(&entry.draw.mesh.indices)) as i64 + attribute_bytes(entry)
+    (entry.draw.mesh.vertex_bytes_len() + blen(&entry.draw.mesh.indices)) as i64 + attribute_bytes(entry)
 }
 
 fn coalesce_draws(draws: &[draw]) -> Result<Vec<draw>, Error> {
-    let stride = |mesh: &mesh| if mesh.vertex_count == 0 { 0 } else { blen(&mesh.vertices) as i64 / mesh.vertex_count };
+    let stride = |mesh: &mesh| if mesh.vertex_count == 0 { 0 } else { mesh.vertex_bytes_len() as i64 / mesh.vertex_count };
     let compatible = |first: &sampled_draw, next: &sampled_draw| {
         matches!((&first.draw.mesh.key, &next.draw.mesh.key), (mesh_key::Host(_), mesh_key::Host(_)))
             && first.family == next.family
@@ -3271,7 +3293,8 @@ pub fn submit(
             && mesh.vertex_count > 0
             && mesh.index_count > 0
             && valid_index_length(mesh)
-            && (blen(&mesh.vertices) + blen(&mesh.indices) > 0 || matches!(mesh.key, mesh_key::Gpu_vertices(_)))
+            && (mesh.shared_vertices.is_none() || blen(&mesh.vertices)==0)
+            && (mesh.vertex_bytes_len() + blen(&mesh.indices) > 0 || matches!(mesh.key, mesh_key::Gpu_vertices(_)))
     };
     let supported = draws.iter().all(|entry| find_pipeline(value, entry.family, entry.blend, entry.samples).is_some());
     let valid = draws.iter().all(|entry| {
@@ -3693,3 +3716,7 @@ pub fn destroy(value: &mut t) -> Result<(), Error> {
         None => Ok(()),
     }
 }
+
+#[cfg(test)]
+#[path = "test_prepared_scene3.rs"]
+mod test_prepared_scene3;

@@ -333,17 +333,17 @@ fn initial_text(
     unmatched: Unmatched,
     target_attribute: &Option<attribute::T>,
     count: usize,
-) -> Result<Vec<String>, error::T> {
+) -> Result<Vec<Vec<u8>>, error::T> {
     if let Some(item) = existing_storage(unmatched, selection, target_attribute) {
         if let attribute::Storage::Text(values) = attribute::View::storage(&item)? {
             let mut output = values.clone();
             if unmatched == Unmatched::DefaultValue {
-                reset_selected(selection, &mut |element| output[element] = String::new());
+                reset_selected(selection, &mut |element| output[element] = Vec::new());
             }
             return Ok(output);
         }
     }
-    Ok(vec![String::new(); count])
+    Ok(vec![Vec::new(); count])
 }
 
 /// Output planes for a Float..Float4 storage `like`: copies of the existing target's planes
@@ -1107,7 +1107,7 @@ fn transfer_surface_inner(params: &SurfaceParams) -> Result<geometry::T, error::
             fail(&error::to_string(&failure))
         }
     })?;
-    let (query_positions, position_indices): (packed::Float3::T, Option<Arc<[i64]>>) = match target_owner {
+    let (query_positions, position_indices): (packed::Float3::T, Option<Arc<Vec<i64>>>) = match target_owner {
         attribute::Owner::Point => (geometry::positions(target).clone(), None),
         attribute::Owner::Vertex => {
             let topology_view = topology::View::view(geometry::topology(target))?;
@@ -1125,7 +1125,7 @@ fn transfer_surface_inner(params: &SurfaceParams) -> Result<geometry::T, error::
     surface_index::closest_many_into(
         cancel_token,
         target_elements,
-        position_indices.as_deref(),
+        position_indices.as_ref().map(|indices| indices.as_slice()),
         grain,
         &surface,
         &query_positions,
@@ -1792,7 +1792,7 @@ mod tests {
         point_group.source_elements = Some(source_second);
         assert_eq!(err_code(attribute_ops::transfer_primitives(&point_group)), "invalid_transfer");
 
-        let asset = attribute::create_owned("asset", Detail, attribute::Storage::Text(vec!["oak".to_owned()])).unwrap();
+        let asset = attribute::create_owned("asset", Detail, attribute::Storage::Text(vec![b"oak".to_vec()])).unwrap();
         let detail_source = geometry::with_attribute(asset.clone(), &primitive_source).unwrap();
         let detail_target = attribute_ops::transfer_detail(&DetailParams {
             names: None,
@@ -1803,7 +1803,7 @@ mod tests {
         .unwrap();
         let moved = find(Detail, "asset", &detail_target);
         assert_eq!(attribute::storage_id(&moved), attribute::storage_id(&asset));
-        assert_eq!(texts(Detail, "asset", &detail_target), vec!["oak".to_owned()]);
+        assert_eq!(texts(Detail, "asset", &detail_target), vec![b"oak".to_vec()]);
         let detail_p = attribute::create_owned("P", Detail, attribute::Storage::Int(vec![23])).unwrap();
         let detail_p_source = geometry::with_attribute(detail_p, &detail_source).unwrap();
         let excluded = attribute_ops::transfer_detail(&DetailParams {
@@ -1897,6 +1897,7 @@ mod tests {
         assert_eq!(signature(&restricted_one), signature(&restricted_many));
         assert_eq!(ints(Point, "sampled_piece", &restricted_one), vec![9, 6]);
         assert_eq!(floats(Point, "surface_distance", &restricted_one), vec![77.0, 77.0]);
+        assert_eq!(signature(&target), target_signature, "restricted surface transfer mutated its input");
 
         let quad_source = add_values(Vertex, "quad_corner", vec![10.0, 20.0, 30.0, 40.0], &add_values(Point, "quad_weight", vec![0.0, 1.0, 2.0, 3.0], &quad()));
         let quad_target = points(&[(0.2, 0.7, 1.0), (0.8, 0.7, 1.0)]);

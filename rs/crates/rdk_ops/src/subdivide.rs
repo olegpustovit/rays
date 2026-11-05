@@ -277,7 +277,7 @@ pub fn resolve_scheme(default: Scheme, found: Option<&attribute::T>) -> Result<S
         Storage::Int(_) | Storage::Text(_) if attribute::length(item) != 1 => {
             Err(failm("detail attribute osd_scheme must contain exactly one value"))
         }
-        Storage::Text(values) if values.len() == 1 => match values[0].as_str() {
+        Storage::Text(values) if values.len() == 1 => match std::str::from_utf8(&values[0]).map_err(|_| failm("detail attribute osd_scheme must contain UTF-8 text"))? {
             "catmull-clark" => Ok(Scheme::CatmullClark),
             "loop" => Ok(Scheme::Loop),
             "bilinear" => Ok(Scheme::Bilinear),
@@ -2414,10 +2414,10 @@ mod tests {
             attr(
                 Owner::Vertex,
                 "label",
-                Storage::Text(["a", "b", "c", "d"].iter().map(|s| (*s).to_owned()).collect()),
+                Storage::Text(["a", "b", "c", "d"].iter().map(|s| s.as_bytes().to_vec()).collect()),
             ),
             attr(Owner::Primitive, "material", Storage::Int(vec![7, 9])),
-            attr(Owner::Detail, "tag", Storage::Text(vec!["curves".to_owned()])),
+            attr(Owner::Detail, "tag", Storage::Text(vec![b"curves".to_vec()])),
         ];
         let point_group = group::ordered(group::Owner::Point, "picked_points", 3, &[1, 0]).unwrap();
         let vertex_group = group::ordered(group::Owner::Vertex, "picked_vertices", 4, &[1, 0]).unwrap();
@@ -2532,7 +2532,7 @@ mod tests {
         let bp = positions(&bilinear);
         assert!(bp.x[1] == 1.0 && bp.y[1] == 2.0, "bilinear polygon-curve refinement moved an old point");
         let overridden = ok(
-            &with_detail(&curve_network(), "osd_scheme", Storage::Text(vec!["bilinear".to_owned()])),
+            &with_detail(&curve_network(), "osd_scheme", Storage::Text(vec![b"bilinear".to_vec()])),
             &|p| p.scheme = Scheme::CatmullClark,
         );
         let overridden = geometry::without_attribute(Owner::Detail, "osd_scheme", &overridden);
@@ -2662,7 +2662,7 @@ mod tests {
             ),
             float_attr(Owner::Vertex, "u", vec![0.0, 2.0, 3.0, 4.0, 5.0, 6.0, 10.0, 14.0]),
             attr(Owner::Primitive, "source_kind", Storage::Int(vec![1, 0, 1])),
-            attr(Owner::Detail, "tag", Storage::Text(vec!["mixed".to_owned()])),
+            attr(Owner::Detail, "tag", Storage::Text(vec![b"mixed".to_vec()])),
         ];
         geometry::create(
             packed::Float3::View::of_owned_exn(
@@ -2717,7 +2717,7 @@ mod tests {
         let tag = geometry::find_attribute(Owner::Detail, "tag", &one).unwrap();
         assert!(matches!(
             attribute::View::storage(&tag).unwrap(),
-            Storage::Text(values) if values == &vec!["mixed".to_owned()]
+            Storage::Text(values) if values == &vec![b"mixed".to_vec()]
         ));
         let selection = primitive_group("local", 3, &[0, 1]);
         let local_one = run_mixed(1, Some(&selection), false, false);

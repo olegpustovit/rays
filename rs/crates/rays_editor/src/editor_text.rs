@@ -159,8 +159,8 @@ fn put(mut text: text_pane::State, graph: &str, slot: Option<Slot>) -> text_pane
     text
 }
 
-fn of_graph(graph: &str, ws: &WorkspaceDoc) -> String {
-    text_pane::make_shown(&ws.source, graph, None, Tab::Graph).text
+fn of_graph(graph: &str, ws: &WorkspaceDoc) -> Result<String, Diagnostic> {
+    text_pane::make_shown(&ws.source, graph, None, Tab::Graph).map(|shown| shown.text)
 }
 
 fn one_intent(value: t, intent: &Intent) -> t {
@@ -191,10 +191,12 @@ fn one_intent(value: t, intent: &Intent) -> t {
     };
     // a draft begun on an older document: merged with what changed since on the syntax tree
     // (`Text_pane::merge3`); only a value both changed keeps the draft as a conflict
-    let checked = |metadata: bool, shown: &dyn Fn(&WorkspaceDoc) -> String, draft: &str, old: Option<&WorkspaceDoc>, apply: &dyn Fn(&str) -> Applied| -> Applied {
+    let checked = |metadata: bool, shown: &dyn Fn(&WorkspaceDoc) -> Result<String, Diagnostic>, draft: &str, old: Option<&WorkspaceDoc>, apply: &dyn Fn(&str) -> Applied| -> Applied {
         match old {
             Some(previous) if !Arc::ptr_eq(&previous.checked, &workspace.checked) || (metadata && (previous.layout != workspace.layout || !settings::same_values(&previous.settings, &workspace.settings))) => {
-                match text_pane::merge3(&shown(previous), draft, &shown(workspace)) {
+                let previous = shown(previous).map_err(|error| vec![error])?;
+                let current = shown(workspace).map_err(|error| vec![error])?;
+                match text_pane::merge3(&previous, draft, &current) {
                     Some(merged) => apply(&merged),
                     None => Err(vec![conflict()]),
                 }
@@ -212,8 +214,10 @@ fn one_intent(value: t, intent: &Intent) -> t {
                 match text_pane::graph_op(&previous.source, &path[0], Some(path), draft) {
                     Err(d) => Err(vec![d]),
                     Ok(Op::SetGraph { name, form }) => {
-                        let mine = lisp::print(&[form]).0;
-                        match text_pane::merge3(&of_graph(&name, previous), &mine, &of_graph(&name, workspace)) {
+                        let mine = lisp::print(&[form]).map_err(|error| vec![error])?.0;
+                        let previous = of_graph(&name, previous).map_err(|error| vec![error])?;
+                        let current = of_graph(&name, workspace).map_err(|error| vec![error])?;
+                        match text_pane::merge3(&previous, &mine, &current) {
                             Some(merged) => graph_edit(&value, &name, &merged, merge),
                             None => Err(vec![conflict()]),
                         }
@@ -238,6 +242,13 @@ fn one_intent(value: t, intent: &Intent) -> t {
     let scrubbed = |done: bool| -> bool { !done && literal.is_some() };
 
     match intent {
+        Intent::PrintError(error) => {
+            let mut next = value;
+            let message = rays_diagnostic::to_string(error);
+            next.edit_error = Some(message.clone());
+            next.notice = Some((notice_kind::Refusal, message));
+            next
+        }
         Intent::Tab(tab) => {
             text.tab = *tab;
             with_text(text)

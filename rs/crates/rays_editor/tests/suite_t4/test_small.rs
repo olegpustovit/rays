@@ -91,11 +91,11 @@ pub fn threading() {
     for path in &paths {
         let text = std::fs::read(path).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap();
         let forms = syntax::parse(&text).unwrap_or_else(|d| panic!("{}: {}", path.display(), rays_diagnostic::to_string(&d)));
-        let printed = lisp::print(&forms).0;
+        let printed = lisp::print(&forms).unwrap().0;
         let again = syntax::parse(&printed).unwrap_or_else(|d| panic!("{} reprint: {}", path.display(), rays_diagnostic::to_string(&d)));
         let flat = |f: &[syntax::Syntax]| f.iter().map(lisp::flat).collect::<Vec<_>>();
         assert!(flat(&forms) == flat(&again), "{}: the print reads differently", path.display());
-        assert!(lisp::print(&again).0 == printed, "{}: the print is not stable", path.display());
+        assert!(lisp::print(&again).unwrap().0 == printed, "{}: the print is not stable", path.display());
         threaded += printed.matches("(->").count();
     }
     assert!(threaded > 0, "no checked-in file threads a chain (shattered_studio shows it)");

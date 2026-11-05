@@ -53,8 +53,8 @@ fn dense_int(values: &[i64]) -> (Vec<usize>, usize) {
     (dense, table.len())
 }
 
-fn dense_text(values: &[String]) -> (Vec<usize>, usize) {
-    let mut table: HashMap<String, usize> = HashMap::with_capacity((values.len() / 4).max(16));
+fn dense_text(values: &[Vec<u8>]) -> (Vec<usize>, usize) {
+    let mut table: HashMap<Vec<u8>, usize> = HashMap::with_capacity((values.len() / 4).max(16));
     let dense = values
         .iter()
         .map(|value| {
@@ -230,10 +230,10 @@ pub fn explosion(operation: &str, fields: &[FieldView]) -> Option<Explosion> {
         named(name).into_iter().find_map(|v| if let Value::Int(v) = v { Some(*v) } else { None }).unwrap_or(fallback)
     };
     let string = |name: &str, fallback: &str| {
-        named(name)
-            .into_iter()
-            .find_map(|v| if let Value::Text(v) = v { Some(String::from_utf8_lossy(v).into_owned()) } else { None })
-            .unwrap_or_else(|| fallback.to_owned())
+        match named(name).into_iter().find_map(|v| if let Value::Text(v) = v { Some(v) } else { None }) {
+            Some(bytes) => std::str::from_utf8(bytes).ok().map(str::to_owned),
+            None => Some(fallback.to_owned()),
+        }
     };
     if !fields.iter().any(|field| field.name == "amount") {
         return None;
@@ -242,7 +242,7 @@ pub fn explosion(operation: &str, fields: &[FieldView]) -> Option<Explosion> {
     Some(Explosion {
         amount: float("amount", d.amount),
         scale: vec3::create(float("scale_x", d.scale.x), float("scale_y", d.scale.y), float("scale_z", d.scale.z)),
-        piece_attribute: string("piece_attribute", &d.piece_attribute),
+        piece_attribute: string("piece_attribute", &d.piece_attribute)?,
         noise_amount: float("noise_amount", d.noise_amount),
         noise_frequency: float("noise_frequency", d.noise_frequency),
         noise_seed: int("noise_seed", d.noise_seed),

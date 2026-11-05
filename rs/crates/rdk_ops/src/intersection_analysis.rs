@@ -875,9 +875,16 @@ mod tests {
         slot.into_inner().unwrap().unwrap()
     }
 
-    #[test]
-    fn parallel_exact() {
-        let (points, triangles) = grid(80, 60, 20.0);
+    fn parallel_exact_fixture(source_fixture: bool) {
+        let (mut points, mut triangles) = if source_fixture { grid(79, 59, 20.0) } else { grid(80, 60, 20.0) };
+        if source_fixture {
+            for point in &mut points {
+                *point = (point.0, 0., point.1);
+            }
+            for triangle in triangles.chunks_exact_mut(3) {
+                triangle.swap(1, 2);
+            }
+        }
         let source = mesh(&points, &triangles);
         let angle = std::f64::consts::PI / 2.0;
         let rotated: Vec<P3> =
@@ -913,5 +920,11 @@ mod tests {
         let four = run_curves(4);
         assert!(count(&one) == (horizontal_count * vertical_count) as i64, "curve scale fixture cardinality");
         assert!(equal_output(&one, &four), "curve output differs across one and four domains");
+    }
+
+    #[test]
+    fn parallel_exact() {
+        parallel_exact_fixture(false);
+        parallel_exact_fixture(true);
     }
 }

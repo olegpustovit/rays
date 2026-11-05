@@ -305,8 +305,8 @@ pub fn fraction_of(r: &p::Row, text: &str) -> Option<f64> {
     }
 }
 
-pub fn all_numbers(elems: &[S]) -> bool {
-    elems.iter().all(|e| matches!(e.node, SNode::Num(_)))
+pub fn all_numbers(form: &S, elems: &[flow_syntax::arena::SyntaxId]) -> bool {
+    elems.iter().all(|&id| matches!(form.arena().row(id).node, SNode::Num(_)))
 }
 
 /// A number or a vector of numbers at a zoom where the live editors are built: they paint themselves.
@@ -315,8 +315,10 @@ pub fn live_numbers(z: f64, r: &p::Row) -> bool {
         && match (&r.chip, r.expr.as_ref().map(|x| &x.node)) {
             (p::Chip::Const, Some(SNode::Num(_))) => true,
             (p::Chip::Const, Some(SNode::Vec(elems))) => {
+                let form = r.expr.as_ref().unwrap();
+                let elems = form.range(*elems);
                 let k = elems.len();
-                (2..=4).contains(&k) && all_numbers(elems)
+                (2..=4).contains(&k) && all_numbers(form, elems)
             }
             _ => false,
         }
@@ -353,16 +355,16 @@ pub fn paint_switch(paint: &mut Paint, theme: &Theme, z: f64, x: f64, y: f64, on
 
 /// The cells of a vector: each element is a field, its number right-aligned, anything else the
 /// expression's text.
-pub fn paint_vector(paint: &mut Paint, z: f64, ls: i64, theme: &Theme, right: f64, y: f64, elems: &[S]) {
+pub fn paint_vector(paint: &mut Paint, z: f64, ls: i64, theme: &Theme, right: f64, y: f64, form: &S, elems: &[flow_syntax::arena::SyntaxId]) {
     let k = elems.len();
     let vw = VEC_W * z;
     let gap = 8.0 * z;
     let cw = (vw - (gap * (k as f64 - 1.0))) / k as f64;
-    for (c, el) in elems.iter().enumerate() {
-        let (text, left) = match &el.node {
-            SNode::Num(s) => (s.clone(), false),
-            SNode::Str(s) => (String::from_utf8_lossy(s).into_owned(), true),
-            _ => (lisp::flat(el), true),
+    for (c, &id) in elems.iter().enumerate() {
+        let (text, left) = match form.arena().row(id).node {
+            SNode::Num(s) => (form.name(s).to_owned(), false),
+            SNode::Str(s) => (String::from_utf8_lossy(form.bytes(s)).into_owned(), true),
+            _ => (lisp::flat(&form.child(id)), true),
         };
         paint_field(paint, z, ls, theme, right - vw + (c as f64 * (cw + gap)), y, cw, left, None, false, theme.foreground, &text);
     }
@@ -370,10 +372,10 @@ pub fn paint_vector(paint: &mut Paint, z: f64, ls: i64, theme: &Theme, right: f6
 
 /// A wired row's name: a nested node names its kind.
 pub fn wired_name(r: &p::Row, s: &str) -> String {
-    if let Some(S { node: SNode::List(items), .. }) = &r.expr {
-        if let Some(S { node: SNode::Sym(head), .. }) = items.first() {
+    if let Some(form) = &r.expr {
+        if let Some(head) = flow_syntax::syntax::head(form) {
             if e::nested(s) {
-                return head.clone();
+                return head.to_owned();
             }
         }
     }
@@ -442,19 +444,21 @@ pub fn paint_value(paint: &mut Paint, t: &Pane, z: f64, fs: i64, size: Option<i6
         p::Chip::Const => match r.expr.as_ref().map(|x| &x.node) {
             Some(SNode::Num(text)) => {
                 if !live {
+                    let text = r.expr.as_ref().unwrap().name(*text);
                     paint_field(paint, z, ls, &theme, fx, fy, FIELD_W * z, false, fraction_of(r, text), false, theme.foreground, text);
                 }
             }
             Some(SNode::Vec(elems)) => {
                 if !live {
-                    paint_vector(paint, z, ls, &theme, right, fy, elems);
+                    let form = r.expr.as_ref().unwrap();
+                    paint_vector(paint, z, ls, &theme, right, fy, form, form.range(*elems));
                 }
             }
-            Some(SNode::Sym(b)) if b == "true" || b == "false" => paint_switch(paint, &theme, z, right - (SWITCH_W * z), y + (5.0 * z), b == "true"),
+            Some(SNode::Sym(b)) if matches!(r.expr.as_ref().unwrap().name(*b), "true" | "false") => paint_switch(paint, &theme, z, right - (SWITCH_W * z), y + (5.0 * z), r.expr.as_ref().unwrap().name(*b) == "true"),
             Some(_) => {
                 let ex = r.expr.as_ref().unwrap();
                 let text = match &ex.node {
-                    SNode::Str(s) => String::from_utf8_lossy(s).into_owned(),
+                    SNode::Str(s) => String::from_utf8_lossy(ex.bytes(*s)).into_owned(),
                     _ => lisp::flat(ex),
                 };
                 paint_field(paint, z, ls, &theme, fx, fy, FIELD_W * z, r.control != p::Control::Choice, None, r.control == p::Control::Choice, theme.foreground, &text);
@@ -496,7 +500,7 @@ pub fn value_room(paint: &mut Paint, t: &Pane, z: f64, fs: i64, wd: f64, fold: b
         (p::Chip::NoValue, _) => r.default.as_deref().and_then(number_words).is_some(),
         _ => false,
     };
-    let is_bool_sym = matches!(r.expr.as_ref().map(|x| &x.node), Some(SNode::Sym(b)) if b == "true" || b == "false");
+    let is_bool_sym = matches!(r.expr.as_ref().map(|x| &x.node), Some(SNode::Sym(b)) if matches!(r.expr.as_ref().unwrap().name(*b), "true" | "false"));
     if r.kind == p::RowKind::Add {
         return wd - ((LABEL_X + HEAD_PAD) * z);
     }
@@ -505,13 +509,7 @@ pub fn value_room(paint: &mut Paint, t: &Pane, z: f64, fs: i64, wd: f64, fold: b
         p::Chip::Const if is_bool_sym => wd - ((LABEL_X + HEAD_PAD + SWITCH_W + 6.0) * z),
         p::Chip::NoValue if matches!(r.default.as_deref(), Some("true" | "false")) => wd - ((LABEL_X + HEAD_PAD + SWITCH_W + 6.0) * z),
         p::Chip::Name(s) => {
-            let s = match r.expr.as_ref().map(|x| &x.node) {
-                Some(SNode::List(items)) if e::nested(s) => match items.first().map(|i| &i.node) {
-                    Some(SNode::Sym(head)) => head.clone(),
-                    _ => s.clone(),
-                },
-                _ => s.clone(),
-            };
+            let s = wired_name(r, s);
             let live = live_value(t, &s);
             let aw = paint.text_width(Some(fs), "\u{2190}");
             let sw = paint.text_width(Some(fs), &s).min(wd * 0.4);
@@ -1266,10 +1264,10 @@ pub fn paint_input(paint: &mut Paint, t: &Pane, z: f64, fs: i64, i: &p::Input, s
     // a number is the live editor's (built in `update` at 13 points, like the sheet's header value);
     // anything else is painted here
     match &i.default {
-        Some(S { node: SNode::Num(_), .. }) if z >= 0.5 => {}
+        Some(form) if z >= 0.5 && matches!(form.node, SNode::Num(_)) => {}
         Some(d) => {
             let text = match &d.node {
-                SNode::Str(s) => String::from_utf8_lossy(s).into_owned(),
+                SNode::Str(s) => String::from_utf8_lossy(d.bytes(*s)).into_owned(),
                 _ => lisp::flat(d),
             };
             let numeric = matches!(d.node, SNode::Num(_));

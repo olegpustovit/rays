@@ -181,7 +181,10 @@ pub fn save_source(core: m::t, source: Option<source_file::t>, view: &flow_synta
             Err(message) => notice_(core, notice_kind::Refusal, format!("Not saved: {message}")),
         }
     };
-    let text = preset::text(&core.doc);
+    let text = match preset::text(&core.doc) {
+        Ok(text) => text,
+        Err(message) => return (notice_(core, notice_kind::Refusal, format!("Not saved: {message}")), source),
+    };
     match source {
         None => (preset_(core, "no source file"), None),
         Some(file) => match source_file::save(&file, &text) {

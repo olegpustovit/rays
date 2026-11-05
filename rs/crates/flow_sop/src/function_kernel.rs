@@ -82,6 +82,11 @@ pub fn node(
         parameters.extend_from_slice(e::state_stamp(state).as_bytes());
     }
     let (signature, sources_owned, state, elems_owned) = (signature.clone(), sources.to_vec(), state.cloned(), elems.map(|e| e.to_vec()));
+    let function_value = Value::Fn(function);
+    let state_values = state.as_ref().map(e::Host::state_values);
+    let roots = e::roots(std::iter::once(&function_value)
+        .chain(elems_owned.iter().flatten().map(|(_, value)| value))
+        .chain(state_values.iter().flatten()));
     let dependencies = attribute_kernel::input_reads(&Value::Fn(function));
     let held_inputs = inputs.clone();
     build::make(
@@ -101,6 +106,7 @@ pub fn node(
             let prepare: kernel::Prepare = {
                 let (signature, sources, inputs, state, elems, resolve) =
                     (signature.clone(), sources_owned.clone(), held_inputs.clone(), state.clone(), elems_owned.clone(), resolve);
+                let roots = roots.clone();
                 Arc::new(move |columns: &[Column]| -> Result<Runner, Diagnostic> {
                     let arrays: Vec<Value> = columns.iter().map(column_value).collect();
                     let values = e::Host::map_function(None, None, &signature, function, &arrays)?;
@@ -109,7 +115,9 @@ pub fn node(
                         return Err(value::fail("E_KERNEL_FORM", "This function cannot compile to a packed kernel."));
                     };
                     let (state, elems, resolve) = (state.clone(), elems.clone(), resolve.clone());
+                    let roots = roots.clone();
                     Ok(Box::new(move |ctx: &context::T| {
+                        let _roots = &roots;
                         if context::cancelled(ctx) {
                             return Err(value::fail("E_CANCELLED", "Bulk function cancelled."));
                         }

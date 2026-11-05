@@ -110,7 +110,7 @@ fn source_index(source: &Source, vertex_points: &[i64], vertex: usize) -> usize 
     }
 }
 
-fn vertex_points_of(topo: &topology::T) -> Result<Arc<[i64]>, String> {
+fn vertex_points_of(topo: &topology::T) -> Result<Arc<Vec<i64>>, String> {
     Ok(topology::View::view(topo).map_err(text)?.vertex_points)
 }
 

@@ -18,7 +18,8 @@ use crate::objects::{self, root};
 use crate::settings;
 use crate::shell_eval;
 use crate::workspace_doc;
-use flow_check::workspace::{self as w, Graph, LoopKind, Node as WNode, Pattern, Term};
+use flow_check::workspace::{self as w, Graph, LoopKind, Node as WNode, Term};
+use flow_check::term_arena::{Field, PatternNode, RangeId, TermArena, TermId};
 use flow_eval::Plan;
 use flow_graph::flow_edit::ArgKey;
 use flow_ir::flow_ir::{Gpu, StaticOptions};
@@ -112,7 +113,7 @@ fn check_context_time(workspace: &workspace_doc::T, plan: &Plan) -> R<()> {
                         field,
                         w::context_name(&graph.context)
                     ),
-                    Some(graph.body.form.span.clone()),
+                    Some(graph.body.form().span.clone()),
                     None,
                     None,
                     Vec::new(),
@@ -186,12 +187,12 @@ struct Call {
 const SLOT_ARGS: [&str; 5] = ["geometry", "layers", "below", "scene", "world"];
 
 /// Argument `i` of a call as an edit addresses it: positional for a slot, else its keyword.
-fn arg_key(args: &[(String, Term)], i: usize) -> ArgKey {
-    let name = &args[i].0;
-    if SLOT_ARGS.contains(&name.as_str()) {
-        ArgKey::Pos(args[..i].iter().filter(|(n, _)| SLOT_ARGS.contains(&n.as_str())).count() as i64)
+fn arg_key(arena: &TermArena, args: &[Field], i: usize) -> ArgKey {
+    let name = arena.name(args[i].name);
+    if SLOT_ARGS.contains(&name) {
+        ArgKey::Pos(args[..i].iter().filter(|field| SLOT_ARGS.contains(&arena.name(field.name))).count() as i64)
     } else {
-        ArgKey::Kw(name.clone())
+        ArgKey::Kw(name.to_owned())
     }
 }
 
@@ -226,24 +227,24 @@ fn copy(zone: &[String], loop_: &Home, index: i64, home: Home) -> Home {
     }
 }
 
-type Env<'a> = [(&'a str, &'a Term)];
+type Env<'a> = [(&'a str, TermId)];
 
 fn is_for(t: &Term) -> bool {
-    matches!(t.node, WNode::Loop { kind: LoopKind::For, .. })
+    matches!(t.node, WNode::Loop(id) if t.arena().loop_node(id).kind == LoopKind::For)
 }
 
 fn is_loop(env: &Env, t: &Term) -> bool {
-    match &t.node {
-        WNode::Loop { kind: LoopKind::For, .. } => true,
-        WNode::RefBinding(n, rest) if rest.is_empty() => env.iter().find(|(k, _)| k == n).map_or(false, |(_, b)| is_for(b)),
+    match t.node {
+        WNode::Loop(id) => t.arena().loop_node(id).kind == LoopKind::For,
+        WNode::RefBinding(id) if t.arena().name_ids(t.arena().ref_binding(id).fields).is_empty() => env.iter().find(|(k, _)| *k == t.name(t.arena().ref_binding(id).name)).is_some_and(|(_, id)| is_for(&t.child(*id))),
         _ => false,
     }
 }
 
 /// A merge's values line up with its arguments: one each, and at most one loop takes the rest.
-fn merge_fits(env: &Env, targs: &[&Term], values: usize) -> bool {
-    let loops = targs.iter().filter(|t| is_loop(env, t)).count() as i64;
-    let extra = values as i64 - targs.len() as i64;
+fn merge_fits(env: &Env, owner: &Term, args: &[Field], kept: &[usize], values: usize) -> bool {
+    let loops = kept.iter().filter(|i| is_loop(env, &owner.child(args[**i].term))).count() as i64;
+    let extra = values as i64 - kept.len() as i64;
     if loops == 0 {
         extra == 0
     } else {
@@ -254,14 +255,12 @@ fn merge_fits(env: &Env, targs: &[&Term], values: usize) -> bool {
 /// The running index of each copy of a loop at the iteration tuple `iter` (its enclosing loops'
 /// indices): the copies are the iterations not in `skip`, so a copy keeps its index when others
 /// are deleted.
-fn real_indices(skip: &[Vec<usize>], iter: &[usize], n: usize) -> Vec<usize> {
+fn real_indices(arena: &TermArena, skip: &[RangeId], iter: &[usize], n: usize) -> Vec<usize> {
     let mut k = 0usize;
     (0..n)
         .map(|_| {
             loop {
-                let mut t = iter.to_vec();
-                t.push(k);
-                if skip.contains(&t) {
+                if skipped(arena, skip, iter, k) {
                     k += 1;
                 } else {
                     break;
@@ -275,22 +274,19 @@ fn real_indices(skip: &[Vec<usize>], iter: &[usize], n: usize) -> Vec<usize> {
 }
 
 /// The arguments of a merge that stay, with their written positions.
-fn kept<'a>(iter: &[usize], skip: &[Vec<usize>], args: &'a [(String, Term)]) -> Vec<(usize, &'a (String, Term))> {
-    args.iter()
-        .enumerate()
-        .filter(|(i, _)| {
-            let mut t = iter.to_vec();
-            t.push(*i);
-            !skip.contains(&t)
-        })
-        .collect()
+fn kept(arena: &TermArena, iter: &[usize], skip: &[RangeId], args: &[Field]) -> Vec<usize> {
+    (0..args.len()).filter(|i| !skipped(arena, skip, iter, *i)).collect()
+}
+
+fn skipped(arena: &TermArena, skip: &[RangeId], iter: &[usize], index: usize) -> bool {
+    skip.iter().any(|range| arena.indices(*range).iter().copied().eq(iter.iter().copied().chain(std::iter::once(index))))
 }
 
 /// The graph a `scene/world`'s World argument references: written in place or by a binding.
 fn referenced(env: &Env, t: &Term) -> Option<String> {
-    match &t.node {
-        WNode::GraphRef { graph, .. } => Some(graph.clone()),
-        WNode::RefBinding(n, rest) if rest.is_empty() => env.iter().find(|(k, _)| k == n).and_then(|(_, b)| referenced(env, b)),
+    match t.node {
+        WNode::GraphRef(id) => Some(t.name(t.arena().graph_ref(id).graph).to_owned()),
+        WNode::RefBinding(id) if t.arena().name_ids(t.arena().ref_binding(id).fields).is_empty() => env.iter().find(|(k, _)| *k == t.name(t.arena().ref_binding(id).name)).and_then(|(_, id)| referenced(env, &t.child(*id))),
         _ => None,
     }
 }
@@ -298,85 +294,85 @@ fn referenced(env: &Env, t: &Term) -> Option<String> {
 /// Walk the terms of a graph beside its evaluated result: each wanted call, bottom layer first,
 /// with its binding, or the argument of another call that holds it. `below kind` names the slot a
 /// call stacks its predecessor in.
-fn walk<'a>(want: Want, below: Below, iter: &[usize], env: &Env<'a>, place: Option<(Home, ArgKey)>, t: &'a Term, v: &E) -> Vec<Call> {
-    let home = || match (&t.path, &place) {
-        (Some(p), _) => Home::BoundAt(p.clone()),
+fn walk(want: Want, below: Below, iter: &[usize], env: &Env, place: Option<(Home, ArgKey)>, t: &Term, v: &E) -> Vec<Call> {
+    let arena = t.arena();
+    let home = || match (t.path(), &place) {
+        (Some(path), _) => Home::BoundAt(path.iter().map(|name| t.name(*name).to_owned()).collect()),
         (None, Some((parent, key))) => Home::InlineIn(Box::new(parent.clone()), key.clone()),
         (None, None) => Home::Looped,
     };
-    match (&t.node, v) {
-        (WNode::Let(bindings, body), _) => {
-            let mut env2: Vec<(&str, &Term)> = bindings
-                .iter()
-                .filter_map(|(p, x)| match p {
-                    Pattern::Name(n) => Some((n.as_str(), x)),
-                    _ => None,
-                })
-                .collect();
+    match (t.node, v) {
+        (WNode::Let(id), _) => {
+            let node = arena.let_node(id);
+            let mut env2: Vec<(&str, TermId)> = arena.bindings(node.bindings).iter().filter_map(|binding| match arena.pattern(binding.pattern) {
+                PatternNode::Name(name) => Some((arena.name(name), binding.term)),
+                _ => None,
+            }).collect();
             env2.extend_from_slice(env);
-            walk(want, below, iter, &env2, place, body, v)
+            walk(want, below, iter, &env2, place, &t.child(node.body), v)
         }
-        (WNode::RefBinding(n, rest), _) if rest.is_empty() => match env.iter().find(|(k, _)| k == n) {
-            Some((_, bound)) => walk(want, below, iter, env, None, bound, v),
+        (WNode::RefBinding(id), _) if arena.name_ids(arena.ref_binding(id).fields).is_empty() => match env.iter().find(|(name, _)| *name == t.name(arena.ref_binding(id).name)) {
+            Some((_, bound)) => walk(want, below, iter, env, None, &t.child(*bound), v),
             None => loose(want, below, v),
         },
-        (WNode::Call { kind, args: targs, .. }, E::Struct(k, _, vargs)) if k == kind && want(kind) => {
+        (WNode::Call(id), E::Struct(k, _, vargs)) if k == t.name(arena.call(id).kind) && want(k) => {
+            let call = arena.call(id);
+            let kind = t.name(call.kind);
+            let targs = arena.fields(call.args);
             let here = home();
             let under = match below(kind) {
-                Some(slot) => match (targs.iter().position(|(n, _)| n == slot), vargs.iter().find(|(n, _)| n == slot)) {
-                    (Some(i), Some((_, under_value))) => walk(want, below, iter, env, Some((here.clone(), arg_key(targs, i))), &targs[i].1, under_value),
+                Some(slot) => match (targs.iter().position(|field| t.name(field.name) == slot), vargs.iter().find(|(name, _)| name == slot)) {
+                    (Some(i), Some((_, under_value))) => walk(want, below, iter, env, Some((here.clone(), arg_key(arena, targs, i))), &t.child(targs[i].term), under_value),
                     _ => Vec::new(),
                 },
                 None => Vec::new(),
             };
-            let via = if kind != "scene/world" { None } else { targs.iter().find(|(n, _)| n == "world").and_then(|(_, t)| referenced(env, t)) };
+            let via = if kind != "scene/world" { None } else {
+                targs.iter().find(|field| t.name(field.name) == "world").and_then(|field| referenced(env, &t.child(field.term)))
+            };
             let mut out = under;
-            out.push(Call { kind: kind.clone(), args: vargs.clone(), home: here, via });
+            out.push(Call { kind: kind.to_owned(), args: vargs.clone(), home: here, via });
             out
         }
-        (WNode::Op { op, args: all, skip }, E::Struct(k, _, vargs)) if op == "scene/merge" && k == "scene/merge" && {
-            let kp = kept(iter, skip, all);
-            let targs: Vec<&Term> = kp.iter().map(|(_, a)| &a.1).collect();
-            merge_fits(env, &targs, vargs.len())
-        } =>
-        {
-            let kp = kept(iter, skip, all);
+        (WNode::Op(id), E::Struct(k, _, vargs)) if t.name(arena.op(id).op) == "scene/merge" && k == "scene/merge" => {
+            let op = arena.op(id);
+            let all = arena.fields(op.args);
+            let kp = kept(arena, iter, arena.skip(op.skip), all);
+            if !merge_fits(env, t, all, &kp, vargs.len()) { return loose(want, below, v); }
             let here = home();
             // an argument gives one value, a loop the rest: its copies
             let extra = vargs.len() as i64 - kp.len() as i64;
             let mut at = 0usize;
             let mut found = Vec::new();
-            for (orig, a) in kp.iter() {
-                let term = &a.1;
-                let looped = is_loop(env, term);
+            for orig in kp {
+                let term = t.child(all[orig].term);
+                let looped = is_loop(env, &term);
                 let n = if looped { (extra + 1).max(0) as usize } else { 1 };
                 let value = if looped {
                     E::List(Arc::new(vargs.iter().skip(at).take(n).map(|(_, v)| v.clone()).collect()))
                 } else {
                     match vargs.get(at) {
                         Some((_, v)) => v.clone(),
-                        None => {
-                            at += n;
-                            continue;
-                        }
+                        None => { at += n; continue; }
                     }
                 };
                 at += n;
-                found.extend(walk(want, below, iter, env, Some((here.clone(), ArgKey::Pos(*orig as i64))), term, &value));
+                found.extend(walk(want, below, iter, env, Some((here.clone(), ArgKey::Pos(orig as i64))), &term, &value));
             }
             found
         }
-        (WNode::Loop { kind: LoopKind::For, body, zone, skip, .. }, E::List(xs)) => {
-            // the body is one template, walked beside each copy's value
+        (WNode::Loop(id), E::List(xs)) if arena.loop_node(id).kind == LoopKind::For => {
+            let node = arena.loop_node(id);
             let loop_ = home();
-            let real = real_indices(skip, iter, xs.len());
+            let real = real_indices(arena, arena.skip(node.skip), iter, xs.len());
+            let zone: Vec<String> = arena.path(node.zone).iter().map(|name| arena.name(*name).to_owned()).collect();
             let mut out = Vec::new();
             for (pos, x) in xs.iter().enumerate() {
                 let i = real[pos];
                 let mut it = iter.to_vec();
                 it.push(i);
-                for mut c in walk(want, below, &it, env, None, body, x) {
-                    c.home = copy(zone, &loop_, i as i64, c.home);
+                for mut c in walk(want, below, &it, env, None, &t.child(node.body), x) {
+                    c.home = copy(&zone, &loop_, i as i64, c.home);
                     out.push(c);
                 }
             }
@@ -638,7 +634,7 @@ fn check_scene(workspace: &workspace_doc::T, plan: &Plan) -> R<()> {
             continue;
         }
         let refuse = |code: &str, message: String| -> R<()> {
-            Err(rays_diagnostic::error(code.to_owned(), message, Some(g.body.form.span.clone()), None, None, Vec::new(), Vec::new()))
+            Err(rays_diagnostic::error(code.to_owned(), message, Some(g.body.form().span.clone()), None, None, Vec::new(), Vec::new()))
         };
         let value = &instance.result;
         if nested_root(false, value) {

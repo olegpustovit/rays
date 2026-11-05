@@ -198,8 +198,8 @@ struct Ctx {
     pz: Arc<[f64]>,
     raw_distance: Vec<f64>,
     classified_distance: Vec<f64>,
-    vertex_points: Arc<[i64]>,
-    primitive_offsets: Arc<[i64]>,
+    vertex_points: Arc<Vec<i64>>,
+    primitive_offsets: Arc<Vec<i64>>,
     primitive_kinds: Arc<[u8]>,
     edge_a: Arc<[i64]>,
     edge_b: Arc<[i64]>,
@@ -1848,7 +1848,7 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
                     attribute::Storage::Text(values) => attribute::Storage::Text(
                         primitive_source
                             .iter()
-                            .map(|&input| if input >= 0 { values[input as usize].clone() } else { String::new() })
+                            .map(|&input| if input >= 0 { values[input as usize].clone() } else { Vec::new() })
                             .collect(),
                     ),
                     attribute::Storage::Float2(values) => {
@@ -1922,7 +1922,7 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
                     attribute::Storage::Text(values) => attribute::Storage::Text(
                         nearest_mapping
                             .iter()
-                            .map(|&source| if source >= 0 { values[source as usize].clone() } else { String::new() })
+                            .map(|&source| if source >= 0 { values[source as usize].clone() } else { Vec::new() })
                             .collect(),
                     ),
                     attribute::Storage::Float2(values) => {
@@ -2704,7 +2704,7 @@ mod tests {
         expect_code(clip(&p, &source), "invalid_geometry");
         let text = with_attribute(
             "field",
-            attribute::Storage::Text(vec!["a".to_owned(), "b".to_owned(), "c".to_owned()]),
+            attribute::Storage::Text(vec![b"a".to_vec(), b"b".to_vec(), b"c".to_vec()]),
             &source,
         );
         let mut p = params();

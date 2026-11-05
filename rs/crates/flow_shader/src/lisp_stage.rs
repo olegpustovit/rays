@@ -19,36 +19,37 @@ pub fn fail<X>(message: &str) -> Result<X, Diagnostic> {
 
 /// The entry's parameters, read from its authored `defn`.
 pub fn parameters(forms: &[Syntax], entry: &str) -> Result<Vec<(String, Ty)>, Diagnostic> {
-    fn find(forms: &[Syntax], entry: &str) -> Option<Vec<Syntax>> {
-        for (at, form) in forms.iter().enumerate() {
-            let Node::List(items) = &form.node else { continue };
-            if let [first, second, rest @ ..] = items.as_slice() {
-                if let (Node::Sym(head), Node::Sym(name)) = (&first.node, &second.node) {
-                    if head == "defn" && name == entry {
-                        return rest.iter().find_map(|x| match &x.node {
-                            Node::Vec(params) => Some(params.to_vec()),
-                            _ => None,
-                        });
-                    }
+    fn find(form: &Syntax, entry: &str) -> Option<Syntax> {
+        let Node::List(items) = form.node else { return None };
+        if let [first, second, rest @ ..] = form.range(items) {
+            let first = form.child(*first);
+            let second = form.child(*second);
+            if let (Node::Sym(head), Node::Sym(name)) = (first.node, second.node) {
+                if first.name(head) == "defn" && second.name(name) == entry {
+                    return rest.iter().find_map(|id| {
+                        let child = form.child(*id);
+                        matches!(child.node, Node::Vec(_)).then_some(child)
+                    });
                 }
             }
-            if let Some(found) = find(items, entry) {
-                return Some(found);
-            }
-            let _ = at;
         }
-        None
+        form.range(items).iter().find_map(|id| find(&form.child(*id), entry))
     }
-    let Some(params) = find(forms, entry) else { return fail(&format!("no defn {entry}")) };
+    let Some(params) = forms.iter().find_map(|form| find(form, entry)) else { return fail(&format!("no defn {entry}")) };
     let mut out = Vec::new();
-    for p in &params {
-        if let Node::List(items) = &p.node {
-            if let [a, b, c] = items.as_slice() {
-                if let (Node::Sym(name), Node::Sym(colon)) = (&a.node, &b.node) {
-                    if colon == ":" {
-                        match ty::of_syntax(c) {
+    for id in params.children() {
+        let p = params.child(*id);
+        if let Node::List(items) = p.node {
+            if let [a, b, c] = p.range(items) {
+                let a = p.child(*a);
+                let b = p.child(*b);
+                let c = p.child(*c);
+                if let (Node::Sym(name), Node::Sym(colon)) = (a.node, b.node) {
+                    let name = a.name(name);
+                    if b.name(colon) == ":" {
+                        match ty::of_syntax(&c) {
                             Some(ty) => {
-                                out.push((name.clone(), ty));
+                                out.push((name.to_owned(), ty));
                                 continue;
                             }
                             None => return fail(&format!("{entry}: parameter {name} has no stage type")),
@@ -57,7 +58,7 @@ pub fn parameters(forms: &[Syntax], entry: &str) -> Result<Vec<(String, Ty)>, Di
                 }
             }
         }
-        return fail(&format!("{entry}: every stage parameter is typed: {}", lisp::print(std::slice::from_ref(p)).0));
+        return fail(&format!("{entry}: every stage parameter is typed: {}", lisp::text(std::slice::from_ref(&p))));
     }
     Ok(out)
 }
@@ -184,7 +185,7 @@ pub fn compile(shared: &[(String, i64)], declarations: &str, entry: &str) -> Res
         _ => return fail(&format!("{entry}: the stage is not a function")),
     };
     let result = match E::Residual::function_body(function) {
-        Some((_, body)) => body.ty,
+        Some((_, body)) => body.ty().clone(),
         None => Ty::Any,
     };
     let mut bound = Vec::new();

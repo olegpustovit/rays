@@ -80,6 +80,7 @@ fn window_scene3_lighting() {
     let mesh_ = mesh {
         key: mesh_key::Host("runtime-scene3-light".to_owned()),
         vertices: new_bytes(vertices),
+        shared_vertices: None,
         vertex_count: 3,
         indices: new_bytes(indices),
         index_count: 3,

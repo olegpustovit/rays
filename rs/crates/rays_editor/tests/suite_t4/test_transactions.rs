@@ -113,7 +113,7 @@ pub fn run() {
         let n = sop::edit_graph::find(&network, id).unwrap();
         node::parameter_fields(&n).into_iter().find(|f| f.name == "value").unwrap().current
     };
-    let text = |d: &Driver| workspace_doc::to_text(&Editor::workspace(d.e()));
+    let text = |d: &Driver| workspace_doc::to_text(&Editor::workspace(d.e())).unwrap();
     let header = |d: &Driver, path: &[&str]| -> (f64, f64) {
         let path: Vec<String> = path.iter().map(|s| s.to_string()).collect();
         let (x, y, w, _) = Editor::node_box(d.e(), &path).expect("the node has no box in the graph pane");
@@ -121,7 +121,7 @@ pub fn run() {
     };
     let undo = |d: &mut Driver| d.bk(&[], &[Key::Meta], (0., 0.), vec![chr('z')]);
     let set = |d: &mut Driver, path: &[&str], n: i64| {
-        let op = fe::Op::SetArg { node: path.iter().map(|s| s.to_string()).collect(), key: fe::ArgKey::Kw("value".into()), sub: vec![], value: S::make(S::Node::Num(n.to_string())) };
+        let op = fe::Op::SetArg { node: path.iter().map(|s| s.to_string()).collect(), key: fe::ArgKey::Kw("value".into()), sub: vec![], value: S::make(S::Draft::Num(n.to_string())) };
         let ed = d.ed.take().unwrap();
         d.ed = Some(Editor::edit(ed, &op).unwrap_or_else(|m| panic!("{m}")));
     };

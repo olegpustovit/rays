@@ -41,7 +41,7 @@ fn typed_composition() {
                 apply_checked(&catalog(), &source, &Op::SetArg { node: card.path.clone(), key, sub: vec![], value: form(&replacement) }).unwrap();
             let r = result(&checked, 0.0);
             assert!(value::ty_of(&r) == Ty::Array(Box::new(ty.clone())) && value::array_length(&r).unwrap() == expected_count);
-            let saved = lisp::print(&changed).0;
+            let saved = lisp::print(&changed).unwrap().0;
             let loaded = check(&parse(&saved));
             assert_eq!(format!("{:?}", result(&loaded, 0.0)), format!("{:?}", r));
             assert!(apply_checked(&catalog(), &source, &Op::SetArg { node: card.path.clone(), key: ArgKey::Pos(0), sub: vec![], value: form("3") }).is_err());

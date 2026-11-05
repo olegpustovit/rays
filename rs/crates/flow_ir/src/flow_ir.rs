@@ -613,17 +613,15 @@ pub struct QualifyOptions {
     pub gpu: Option<Gpu::Config>,
 }
 
-type Form = flow_syntax::syntax::Syntax;
+type Form = flow_syntax::arena::SyntaxRow;
 
-fn form_same(a: &Form, b: &Form) -> bool { a.id == b.id && a.span == b.span }
-
-/// What `form_same` compares: a form's identity without the form.
+/// What authored association compares: a form's identity without the form.
 type FormKey = (i64, rays_diagnostic::Span);
 fn key_of_form(f: &Form) -> FormKey { (f.id, f.span.clone()) }
 fn key_same(k: &FormKey, f: &Form) -> bool { k.0 == f.id && k.1 == f.span }
 
 struct Tables {
-    roots: HashMap<i64, Vec<(Form, Path)>>,
+    roots: HashMap<i64, Vec<(FormKey, Path)>>,
     index: HashMap<i64, Vec<(FormKey, Path, Paths)>>,
     callable_owners: HashMap<i64, Vec<(FormKey, Path)>>,
 }
@@ -631,135 +629,106 @@ struct Tables {
 struct Walker {
     collect: bool,
     t: Tables,
-    called: HashMap<i64, Vec<(Term, Path, usize)>>,
-    /// bodies (by address) already found equal to a stored one under an owner
-    called_seen: std::collections::HashSet<(usize, Path)>,
+    called: HashMap<i64, Vec<(Term, Path)>>,
+    /// Bodies already found equal to a stored one under an owner.
+    called_seen: HashMap<(u64, u32), Vec<Path>>,
 }
 
 impl Walker {
-    fn callable(&mut self, owner: &Path, body: &Term) {
-        let entries = self.t.callable_owners.entry(body.form.id).or_default();
-        if !entries.iter().any(|(form, path)| key_same(form, &body.form) && path == owner) {
-            entries.insert(0, (key_of_form(&body.form), owner.clone()));
+    fn callable(&mut self, owner: &Path, arena: &flow_check::term_arena::TermArena, id: flow_check::term_arena::TermId) {
+        let form = arena.syntax().row(arena.row(id).form);
+        let entries = self.t.callable_owners.entry(form.id).or_default();
+        if !entries.iter().any(|(key, path)| key_same(key, form) && path == owner) {
+            entries.insert(0, (key_of_form(form), owner.clone()));
         }
     }
 
-    fn add(&mut self, owner: &Path, term: &Term) {
+    fn add(&mut self, owner: &Path, arena: &flow_check::term_arena::TermArena, id: flow_check::term_arena::TermId) {
+        let term = arena.row(id);
+        let form = arena.syntax().row(term.form);
         let mut producers: Paths = Paths::new();
-        for (form, path) in self.t.roots.get(&term.form.id).map(|v| v.as_slice()).unwrap_or(&[]) {
-            if form_same(form, &term.form) { producers.insert(path.clone()); }
+        for (key, path) in self.t.roots.get(&form.id).map(|v| v.as_slice()).unwrap_or(&[]) {
+            if key_same(key, form) { producers.insert(path.clone()); }
         }
-        let producers: Paths = match &term.path {
-            Some(path) if producers.contains(path) => std::iter::once(path.clone()).collect(),
+        let producer_path = term.path.and_then(|path| producers.iter().find(|candidate| {
+            let names = arena.path(path);
+            names.len() == candidate.len() && names.iter().zip(candidate.iter()).all(|(&name, part)| arena.name(name) == part)
+        })).cloned();
+        let producers: Paths = match producer_path {
+            Some(path) => std::iter::once(path).collect(),
             _ if producers.contains(owner) => std::iter::once(owner.clone()).collect(),
             _ => producers,
         };
-        let entries = self.t.index.entry(term.form.id).or_default();
-        let same = |x: &(FormKey, Path, Paths)| key_same(&x.0, &term.form) && x.1 == *owner;
-        let old = entries.iter().find(|x| same(x)).map(|x| x.2.clone()).unwrap_or_default();
-        let merged: Paths = old.union(&producers).cloned().collect();
-        entries.retain(|x| !same(x));
-        entries.insert(0, (key_of_form(&term.form), owner.clone(), merged));
+        let entries = self.t.index.entry(form.id).or_default();
+        let same = |x: &(FormKey, Path, Paths)| key_same(&x.0, form) && x.1 == *owner;
+        let mut merged = entries.iter().position(same).map(|i| entries.remove(i).2).unwrap_or_default();
+        merged.extend(producers);
+        entries.insert(0, (key_of_form(form), owner.clone(), merged));
     }
 
-    fn walk(&mut self, owner: &Path, term: &Term) {
+    fn walk(&mut self, owner: &Path, arena: &Arc<flow_check::term_arena::TermArena>, id: flow_check::term_arena::TermId) {
         use w::Node;
-        let owner = term.path.as_ref().unwrap_or(owner);
+        let term = arena.row(id);
+        let path = term.path.map(|path| arena.path(path).iter().map(|&name| arena.name(name).to_owned()).collect());
+        let owner = path.as_ref().unwrap_or(owner);
         if !self.collect {
-            match &term.node {
-                Node::Hof(w::HofKind::Map | w::HofKind::Reduce, _) | Node::Loop { .. } => self.add(&owner, term),
-                Node::Op { op, .. } if op == "array/sum" || op == "image/map" => self.add(&owner, term),
+            match term.node {
+                Node::Hof(hof) if matches!(arena.hof(hof).kind, w::HofKind::Map | w::HofKind::Reduce) => self.add(owner, arena, id),
+                Node::Loop(_) => self.add(owner, arena, id),
+                Node::Op(op) if matches!(arena.name(arena.op(op).op), "array/sum" | "image/map") => self.add(owner, arena, id),
                 _ => {}
             }
         }
-        match &term.node {
-            Node::Vec(ts) | Node::ListLit(ts) | Node::Str(ts) | Node::ListOp(_, ts) | Node::Hof(_, ts) => {
-                for t in ts { self.walk(&owner, t); }
+        match term.node {
+            Node::Loop(loop_id) => {
+                let zone = arena.path(arena.loop_node(loop_id).zone).iter().map(|&name| arena.name(name).to_owned()).collect();
+                for &child in arena.children(id) { self.walk(&zone, arena, child); }
             }
-            Node::Call { args, .. } | Node::Op { args, .. } | Node::Record(args) => {
-                for (_, t) in args { self.walk(&owner, t); }
+            Node::Fn(fn_id) => {
+                let function = arena.function(fn_id);
+                let zone = arena.path(function.zone).iter().map(|&name| arena.name(name).to_owned()).collect();
+                if self.collect { self.callable(&zone, arena, function.body); }
+                if let Some(capture) = function.capture { self.walk(owner, arena, capture); }
+                self.walk(&zone, arena, function.body);
             }
-            Node::GraphRef { inputs, .. } => {
-                for (_, t) in inputs { self.walk(&owner, t); }
-            }
-            Node::Let(bindings, body) => {
-                for (_, t) in bindings { self.walk(&owner, t); }
-                self.walk(&owner, body);
-            }
-            Node::Loop { zone, accs, clauses, body, .. } => {
-                for (_, t) in accs.iter().chain(clauses.iter()) { self.walk(zone, t); }
-                self.walk(zone, body);
-            }
-            Node::Fn { zone, body, capture, .. } => {
-                if self.collect { self.callable(zone, body); }
-                if let Some(t) = capture { self.walk(&owner, t); }
-                self.walk(zone, body);
-            }
-            Node::CallFn { args, body, .. } => {
-                for t in args { self.walk(&owner, t); }
-                if let Some(body) = body {
-                    let mut owners: Vec<Path> = self
-                        .t
-                        .callable_owners
-                        .get(&body.form.id)
-                        .map(|v| v.iter().filter(|(form, _)| key_same(form, &body.form)).map(|(_, o)| o.clone()).collect())
-                        .unwrap_or_default();
-                    owners.sort();
-                    owners.dedup();
-                    let call_owner = if owners.len() == 1 { owners.remove(0) } else { owner.clone() };
-                    // A body walked again with the same owner adds nothing, and a call nested in
-                    // calls would walk it once per path through them.
-                    let walked = self.called.entry(body.form.id).or_default();
-                    // the same node reached again is its own equal; only another node pays the deep comparison
-                    let address = &**body as *const Term as usize;
-                    let known = self.called_seen.contains(&(address, call_owner.clone()))
-                        || walked.iter().any(|(seen, path, at)| *path == call_owner && (*at == address || *seen == **body));
+            Node::CallFn(fn_id) => {
+                let call = arena.call_fn(fn_id);
+                for &arg in arena.term_ids(call.args) { self.walk(owner, arena, arg); }
+                if let Some(body_id) = call.body {
+                    let form = arena.syntax().row(arena.row(body_id).form);
+                    let mut owners = self.t.callable_owners.get(&form.id).into_iter().flatten().filter(|(key, _)| key_same(key, form)).map(|(_, owner)| owner);
+                    let call_owner = match owners.next() {
+                        Some(first) if owners.all(|other| other == first) => first.clone(),
+                        _ => owner.clone(),
+                    };
+                    // Calls through the same body and owner add nothing; another row still pays
+                    // the authored-content comparison before sharing the walk.
+                    let body = arena.handle(body_id);
+                    let identity = body.identity();
+                    let walked = self.called.entry(form.id).or_default();
+                    let known = self.called_seen.get(&identity).is_some_and(|paths| paths.contains(&call_owner))
+                        || walked.iter().any(|(seen, path)| *path == call_owner && (seen.identity() == identity || *seen == body));
                     if known {
-                        self.called_seen.insert((address, call_owner.clone()));
+                        let paths = self.called_seen.entry(identity).or_default();
+                        if !paths.contains(&call_owner) { paths.push(call_owner.clone()); }
                     } else {
-                        walked.insert(0, ((**body).clone(), call_owner.clone(), address));
-                        self.walk(&call_owner, body);
+                        walked.insert(0, (body, call_owner.clone()));
+                        self.walk(&call_owner, arena, body_id);
                     }
                 }
             }
-            Node::State { init, step, zone, .. } => {
-                self.walk(&owner, init);
-                self.walk(zone, step);
+            Node::State(state_id) => {
+                let state = arena.state(state_id);
+                let zone = arena.path(state.zone).iter().map(|&name| arena.name(name).to_owned()).collect();
+                self.walk(owner, arena, state.init);
+                self.walk(&zone, arena, state.step);
             }
-            Node::WithError(a, b) => {
-                self.walk(&owner, a);
-                self.walk(&owner, b);
+            Node::Bypass(call) => {
+                if let Some(input) = w::bypass_input(&arena.handle(call)) { self.walk(owner, arena, input.row_id()); }
             }
-            Node::ErrorRows { rows, mapper, .. } => {
-                self.walk(&owner, rows);
-                self.walk(&owner, mapper);
+            _ => {
+                for &child in arena.children(id) { self.walk(owner, arena, child); }
             }
-            Node::If(c, a, b) => {
-                self.walk(&owner, c);
-                self.walk(&owner, a);
-                self.walk(&owner, b);
-            }
-            Node::Cond(arms, d) => {
-                for (a, b) in arms {
-                    self.walk(&owner, a);
-                    self.walk(&owner, b);
-                }
-                self.walk(&owner, d);
-            }
-            Node::Case(s, arms, d) => {
-                self.walk(&owner, s);
-                for (_, t) in arms { self.walk(&owner, t); }
-                self.walk(&owner, d);
-            }
-            Node::Assoc(r, updates) => {
-                self.walk(&owner, r);
-                for (_, t) in updates { self.walk(&owner, t); }
-            }
-            Node::Get(t, _) | Node::Expanded { body: t, .. } => self.walk(&owner, t),
-            Node::Bypass(_) => {
-                if let Some(input) = w::bypass_input(term) { self.walk(&owner, &input); }
-            }
-            Node::Lit(_) | Node::Text(_) | Node::Nil | Node::Time | Node::RefBinding(..) | Node::FnRef(_) => {}
         }
     }
 }
@@ -782,7 +751,7 @@ fn acceptance_key(view: &e::Residual::View) -> Option<String> {
     Some(format!(
         "{:?}",
         (
-            view.term.form.id,
+            view.term.arena().syntax().row(view.term.form).id,
             &view.site,
             &view.owner,
             iter,
@@ -802,7 +771,7 @@ struct Qualifier {
     t: Tables,
     ops: Arc<Vec<flow_check::op::Op>>,
     gpu: Gpu::Config,
-    accepted: Mutex<HashMap<String, Vec<(Path, Term)>>>,
+    accepted: Mutex<HashMap<String, Vec<(Path, Arc<Term>)>>>,
     outcomes: Mutex<HashMap<Path, Vec<Diagnostic>>>,
     observe: Option<Arc<dyn Fn(Option<Path>, ResidualId) + Send + Sync>>,
     packed_sites: Vec<(Path, bool)>,
@@ -812,18 +781,20 @@ struct Qualifier {
 impl Qualifier {
     fn observed(&self, residual: ResidualId) {
         let Ok(view) = e::Residual::residual_view(residual) else { return };
+        let arena = view.term.arena();
+        let form = arena.syntax().row(view.term.form);
         let producers: Paths = self
             .t
             .index
-            .get(&view.term.form.id)
-            .and_then(|v| v.iter().find(|(form, owner, _)| key_same(form, &view.term.form) && *owner == view.owner))
+            .get(&form.id)
+            .and_then(|v| v.iter().find(|(key, owner, _)| key_same(key, form) && *owner == view.owner))
             .map(|(_, _, p)| p.clone())
             .unwrap_or_default();
         let producer: Option<Path> = if producers.len() == 1 { producers.iter().next().cloned() } else { None };
         if producer.is_none() {
             let mut possible = producers.clone();
-            for (form, path) in self.t.roots.get(&view.term.form.id).map(|v| v.as_slice()).unwrap_or(&[]) {
-                if form_same(form, &view.term.form) { possible.insert(path.clone()); }
+            for (key, path) in self.t.roots.get(&form.id).map(|v| v.as_slice()).unwrap_or(&[]) {
+                if key_same(key, form) { possible.insert(path.clone()); }
             }
             let mut outcomes = self.outcomes.lock().unwrap();
             for path in possible {
@@ -833,8 +804,8 @@ impl Qualifier {
                 }
             }
         }
-        let adapted: Result<ResidualId, Vec<Diagnostic>> = match (&producer, &view.term.node) {
-            (Some(path), w::Node::Op { op: name, args, .. }) if name == "image/map" => {
+        let adapted: Result<ResidualId, Vec<Diagnostic>> = match (&producer, view.term.node) {
+            (Some(path), w::Node::Op(id)) if arena.name(arena.op(id).op) == "image/map" => {
                 let canonical = match (
                     flow_check::op::find(&self.ops, "image/map", &context::image()),
                     flow_check::op::find(&[], "image/map", &context::image()),
@@ -845,10 +816,10 @@ impl Qualifier {
                 if !canonical {
                     Err(vec![v::fail("E_GPU_FORM", "Image qualification needs the canonical image/map declaration.")])
                 } else {
-                    match args.iter().find(|(n, _)| n == "function") {
+                    match arena.fields(arena.op(id).args).iter().find(|field| arena.name(field.name) == "function") {
                         None => Err(vec![v::fail("E_KERNEL_FORM", "Image map needs a pixel function.")]),
-                        Some((_, term)) => {
-                            let mapped = e::Residual::eval_term(residual, term, &input::at_time(0.0), None, None, None).and_then(|x| match x {
+                        Some(field) => {
+                            let mapped = e::Residual::eval_term(residual, &arena.handle(field.term), &input::at_time(0.0), None, None, None).and_then(|x| match x {
                                 Value::Fn(function) => e::Host::map_function(
                                     Some((view.instance, view.site.clone(), view.iter.clone())),
                                     Some(path.clone()),
@@ -875,13 +846,14 @@ impl Qualifier {
         let settled = |path: &Path| {
             matches!(self.outcomes.lock().unwrap().get(path), Some(x) if x.first().map(|d| d.code != "E_PACKED_PENDING").unwrap_or(false))
         };
-        let key = acceptance_key(&view);
-        let seen = |path: &Path| match &key {
-            Some(key) => self.accepted.lock().unwrap().get(key).map(|l| l.iter().any(|(p, t)| *t == *view.term && p == path)).unwrap_or(false),
-            None => false,
-        };
         if let Some(path) = &producer {
-            if !(settled(path) || seen(path)) {
+            let settled = settled(path);
+            let key = if settled { None } else { acceptance_key(&view) };
+            let seen = match &key {
+                Some(key) => self.accepted.lock().unwrap().get(key).map(|l| l.iter().any(|(p, t)| p == path && (t.identity() == view.term.identity() || **t == *view.term))).unwrap_or(false),
+                None => false,
+            };
+            if !(settled || seen) {
                 let reasons = match &adapted {
                     Err(reasons) => reasons.clone(),
                     Ok(r) => match e::Residual::residual_view(*r) {
@@ -895,7 +867,7 @@ impl Qualifier {
                 let reasons: Vec<Diagnostic> = reasons
                     .into_iter()
                     .map(|d| Diagnostic {
-                        span: if d.span.is_some() { d.span.clone() } else { Some(view.term.form.span.clone()) },
+                        span: if d.span.is_some() { d.span.clone() } else { Some(form.span.clone()) },
                         message: format!(
                             "{} (producer {}, instance {}, tuple [{}])",
                             d.message,
@@ -908,7 +880,7 @@ impl Qualifier {
                     .collect();
                 if reasons.is_empty() {
                     if let Some(key) = &key {
-                        self.accepted.lock().unwrap().entry(key.clone()).or_default().insert(0, (path.clone(), (*view.term).clone()));
+                        self.accepted.lock().unwrap().entry(key.clone()).or_default().insert(0, (path.clone(), view.term.clone()));
                     }
                 }
                 let mut outcomes = self.outcomes.lock().unwrap();
@@ -982,18 +954,19 @@ impl Qualifier {
 /// rebuilds conclusions; no residual/program proofs are retained and live forcing never
 /// requalifies.
 pub fn qualify_workspace(options: &QualifyOptions, workspace: &w::Workspace) -> Result<(w::Workspace, e::Eval), Diagnostic> {
+    let _phase = flow_syntax::phase_timer::measure("qualify");
     let gpu = options.gpu.clone().unwrap_or_else(Gpu::default);
-    let mut roots: HashMap<i64, Vec<(Form, Path)>> = HashMap::new();
+    let mut roots: HashMap<i64, Vec<(FormKey, Path)>> = HashMap::new();
     for (form, path) in &workspace.packed_roots {
-        roots.entry(form.id).or_default().insert(0, (form.clone(), path.clone()));
+        roots.entry(form.id).or_default().insert(0, (key_of_form(form), path.clone()));
     }
     let mut walker = Walker {
         collect: true,
         t: Tables { roots, index: HashMap::new(), callable_owners: HashMap::new() },
         called: HashMap::new(),
-        called_seen: std::collections::HashSet::new(),
+        called_seen: HashMap::new(),
     };
-    for graph in workspace.defs.iter() { walker.callable(&vec![format!("def:{}", graph.name)], &graph.body); }
+    for graph in workspace.defs.iter() { walker.callable(&vec![format!("def:{}", graph.name)], graph.body.arena(), graph.body.row_id()); }
     for collect in [true, false] {
         walker.collect = collect;
         walker.called.clear();
@@ -1001,9 +974,9 @@ pub fn qualify_workspace(options: &QualifyOptions, workspace: &w::Workspace) -> 
         for (i, graph) in workspace.graphs.iter().chain(workspace.defs.iter()).enumerate() {
             let owner: Path = if i >= workspace.graphs.len() { vec![format!("def:{}", graph.name)] } else { vec![graph.name.clone()] };
             for (_, _, term) in &graph.inputs {
-                if let Some(term) = term { walker.walk(&owner, term); }
+                if let Some(term) = term { walker.walk(&owner, term.arena(), term.row_id()); }
             }
-            walker.walk(&owner, &graph.body);
+            walker.walk(&owner, graph.body.arena(), graph.body.row_id());
         }
     }
     let q = Arc::new(Qualifier {
@@ -1113,12 +1086,12 @@ pub mod Executor {
         /// A residual is immutable: its strict lowering, and the captures that lowering took in,
         /// are kept for its next strict compile (a write's check, its program and its device
         /// record compile one value three times).
-        static STRICTS: RefCell<HashMap<i64, (Result<c::Program, String>, Vec<i64>)>> = RefCell::new(HashMap::new());
+        static STRICTS: RefCell<HashMap<i64, Arc<(Result<c::Program, String>, Vec<i64>)>>> = RefCell::new(HashMap::new());
     }
 
     /// This thread's strict lowerings still kept: the ledger walks them.
     pub fn kept_programs() -> Vec<c::Program> {
-        STRICTS.with(|t| t.borrow().values().filter_map(|(p, _)| p.as_ref().ok().cloned()).collect())
+        STRICTS.with(|t| t.borrow().values().filter_map(|entry| entry.0.as_ref().ok().cloned()).collect())
     }
 
     fn direct_region(
@@ -1139,23 +1112,24 @@ pub mod Executor {
         ) -> Option<(Packed, bool)> {
             if seen.iter().any(|(r, t)| *r == residual && t == term) { return None; }
             seen.push((residual, term.clone()));
-            match &term.node {
-                Node::Expanded { body, .. } => find(trace, through_exact, readback, count_source, seen, residual, body),
-                Node::Bypass(_) => w::bypass_input(term).and_then(|input| find(trace, through_exact, readback, count_source, seen, residual, &input)),
-                Node::Op { op, args, .. } if readback && op == "exact" && args.len() == 1 && args[0].0 == "value" => {
-                    find(trace, through_exact, readback, count_source, seen, residual, &args[0].1).map(|(packed, _)| (packed, true))
+            let arena = term.arena();
+            match term.node {
+                Node::Expanded(id) => find(trace, through_exact, readback, count_source, seen, residual, &term.child(arena.expanded(id).body)),
+                Node::Bypass(call) => w::bypass_input(&term.child(call)).and_then(|input| find(trace, through_exact, readback, count_source, seen, residual, &input)),
+                Node::Op(id) if readback && term.name(arena.op(id).op) == "exact" && arena.fields(arena.op(id).args).len() == 1 && term.name(arena.fields(arena.op(id).args)[0].name) == "value" => {
+                    find(trace, through_exact, readback, count_source, seen, residual, &term.child(arena.fields(arena.op(id).args)[0].term)).map(|(packed, _)| (packed, true))
                 }
-                Node::Hof(w::HofKind::Map | w::HofKind::Reduce, _) | Node::Loop { .. } => {
+                Node::Hof(id) if matches!(arena.hof(id).kind, w::HofKind::Map | w::HofKind::Reduce) => {
                     compile_region(trace, through_exact, count_source, residual, term).map(|p| (p, false))
                 }
-                Node::Op { op, .. } if op == "array/sum" => compile_region(trace, through_exact, count_source, residual, term).map(|p| (p, false)),
-                // a bound map ([(exact displaced)], noise_displace) is the map it names
-                Node::RefBinding(name, fields) if fields.is_empty() => {
-                    let view = e::Residual::residual_view(residual).ok()?;
-                    match view.bindings.iter().find(|(n, _)| n == name) {
-                        Some((_, Value::Residual(nested))) => {
-                            let nested_view = e::Residual::residual_view(*nested).ok()?;
-                            find(trace, through_exact, readback, count_source, seen, *nested, &nested_view.term)
+                Node::Loop(_) => compile_region(trace, through_exact, count_source, residual, term).map(|p| (p, false)),
+                Node::Op(id) if term.name(arena.op(id).op) == "array/sum" => compile_region(trace, through_exact, count_source, residual, term).map(|p| (p, false)),
+                // A bound map is the map it names.
+                Node::RefBinding(id) if arena.name_ids(arena.ref_binding(id).fields).is_empty() => {
+                    match e::Residual::residual_binding(residual, term.name(arena.ref_binding(id).name)) {
+                        Some(Value::Residual(nested)) => {
+                            let term = e::Residual::residual_term(nested)?;
+                            find(trace, through_exact, readback, count_source, seen, nested, &term)
                         }
                         _ => None,
                     }
@@ -1165,8 +1139,8 @@ pub mod Executor {
         }
         match value {
             Value::Residual(residual) => {
-                let view = e::Residual::residual_view(*residual).ok()?;
-                find(trace, through_exact, readback, count_source, &mut Vec::new(), *residual, &view.term)
+                let term = e::Residual::residual_term(*residual)?;
+                find(trace, through_exact, readback, count_source, &mut Vec::new(), *residual, &term)
             }
             _ => None,
         }
@@ -1180,8 +1154,9 @@ pub mod Executor {
         )
     }
 
-    fn strict_lower(trace: &Option<core_lower::Trace>, residual: ResidualId) -> (Result<c::Program, String>, Vec<i64>) {
+    fn strict_lower(trace: &Option<core_lower::Trace>, residual: ResidualId) -> Arc<(Result<c::Program, String>, Vec<i64>)> {
         let lower = || {
+            let _phase = flow_syntax::phase_timer::measure("executor.strict_lower");
             let inline: std::rc::Rc<RefCell<Vec<i64>>> = std::rc::Rc::new(RefCell::new(Vec::new()));
             let hook = {
                 let inline = inline.clone();
@@ -1189,7 +1164,7 @@ pub mod Executor {
             };
             let core = core_lower::lower(None, trace.clone(), true, None, Some(hook), residual);
             let ids = inline.borrow().clone();
-            (core, ids)
+            Arc::new((core, ids))
         };
         if trace.is_some() { return lower(); }
         if let Some(kept) = STRICTS.with(|t| t.borrow().get(&residual.0).cloned()) { return kept; }
@@ -1225,67 +1200,61 @@ pub mod Executor {
         )
     }
 
-    struct Validate<'a> {
-        trace: &'a Option<core_lower::Trace>,
-        count_source: &'a CountSource,
+    struct Validate {
+        trace: Option<core_lower::Trace>,
+        count_source: CountSource,
         inline: HashMap<i64, ()>,
         validated: HashMap<i64, ()>,
     }
 
-    impl Validate<'_> {
+    impl Validate {
         fn unsupported_source(&self, residual: ResidualId, term: &Term) -> Option<rays_diagnostic::Span> {
-            let children = |terms: &[&Term]| terms.iter().find_map(|t| self.unsupported_source(residual, t));
-            match &term.node {
-                Node::Hof(w::HofKind::Map | w::HofKind::Reduce, _) | Node::Loop { .. } => self.region_source(residual, term),
-                Node::Op { op, .. } if op == "array/sum" => self.region_source(residual, term),
-                Node::RefBinding(name, fields) => {
-                    let view = e::Residual::residual_view(residual).ok()?;
-                    let mut captured: Option<Value> = view.bindings.iter().find(|(n, _)| n == name).map(|(_, x)| x.clone());
-                    for field in fields {
+            self.unsupported_row(residual, term.arena(), term.row_id())
+        }
+
+        fn unsupported_row(&self, residual: ResidualId, arena: &Arc<flow_check::term_arena::TermArena>, id: flow_check::term_arena::TermId) -> Option<rays_diagnostic::Span> {
+            let term = arena.row(id);
+            let child = |id| self.unsupported_row(residual, arena, id);
+            match term.node {
+                Node::Hof(hof) if matches!(arena.hof(hof).kind, w::HofKind::Map | w::HofKind::Reduce) => self.region_source(residual, &arena.handle(id)),
+                Node::Loop(_) => self.region_source(residual, &arena.handle(id)),
+                Node::Op(op) if arena.name(arena.op(op).op) == "array/sum" => self.region_source(residual, &arena.handle(id)),
+                Node::RefBinding(binding) => {
+                    let binding = arena.ref_binding(binding);
+                    let mut captured = e::Residual::residual_binding(residual, arena.name(binding.name));
+                    for &field in arena.name_ids(binding.fields) {
                         captured = captured.and_then(|x| match x {
-                            Value::Record(fs) | Value::Struct(_, _, fs) => fs.iter().find(|(n, _)| n == field).map(|(_, x)| x.clone()),
+                            Value::Record(fs) | Value::Struct(_, _, fs) => fs.iter().find(|(n, _)| n == arena.name(field)).map(|(_, x)| x.clone()),
                             _ => None,
                         });
                     }
                     match captured {
                         Some(Value::Residual(r)) => {
-                            let rv = e::Residual::residual_view(r).ok()?;
-                            self.unsupported_source(r, &rv.term)
+                            let term = e::Residual::residual_term(r)?;
+                            self.unsupported_source(r, &term)
                         }
                         _ => None,
                     }
                 }
-                Node::Op { args, .. } | Node::Record(args) => children(&args.iter().map(|(_, t)| t).collect::<Vec<_>>()),
-                Node::Get(t, _) | Node::Expanded { body: t, .. } => self.unsupported_source(residual, t),
-                Node::Bypass(_) => w::bypass_input(term).and_then(|t| self.unsupported_source(residual, &t)),
-                Node::Let(bindings, result) => {
-                    let mut all: Vec<&Term> = vec![result];
-                    all.extend(bindings.iter().map(|(_, t)| t));
-                    children(&all)
+                Node::Bypass(call) => w::bypass_input(&arena.handle(call)).and_then(|input| child(input.row_id())),
+                Node::Let(let_id) => {
+                    let value = arena.let_node(let_id);
+                    child(value.body).or_else(|| arena.bindings(value.bindings).iter().find_map(|binding| child(binding.term)))
                 }
-                Node::WithError(a, b) => children(&[a, b]),
-                Node::ErrorRows { rows, mapper, .. } => children(&[rows, mapper]),
-                Node::If(a, b, c) => children(&[a, b, c]),
-                Node::Cond(arms, default) => {
-                    let mut all: Vec<&Term> = vec![default];
-                    for (a, b) in arms { all.push(a); all.push(b); }
-                    children(&all)
+                Node::Cond(cond) => {
+                    let value = arena.cond(cond);
+                    child(value.default).or_else(|| arena.arms(value.arms).iter().find_map(|arm| child(arm.test).or_else(|| child(arm.body))))
                 }
-                Node::Case(value, arms, default) => {
-                    let mut all: Vec<&Term> = vec![value, default];
-                    all.extend(arms.iter().map(|(_, t)| t));
-                    children(&all)
+                Node::Case(case) => {
+                    let value = arena.case(case);
+                    child(value.value).or_else(|| child(value.default)).or_else(|| arena.case_arms(value.arms).iter().find_map(|arm| child(arm.body)))
                 }
-                Node::Vec(ts) | Node::ListLit(ts) | Node::Str(ts) | Node::ListOp(_, ts) | Node::Hof(_, ts) => children(&ts.iter().collect::<Vec<_>>()),
-                Node::Assoc(record, updates) => {
-                    let mut all: Vec<&Term> = vec![record];
-                    all.extend(updates.iter().map(|(_, t)| t));
-                    children(&all)
-                }
-                Node::CallFn { fn_name, args, body: Some(body) } => {
-                    if let Some(span) = children(&args.iter().collect::<Vec<_>>()) { return Some(span); }
-                    match e::Residual::residual_definition(residual, fn_name) {
-                        None => self.unsupported_source(residual, body),
+                Node::CallFn(call) => {
+                    let call = arena.call_fn(call);
+                    if let Some(span) = arena.term_ids(call.args).iter().find_map(|&id| child(id)) { return Some(span); }
+                    let body = call.body?;
+                    match e::Residual::residual_definition(residual, arena.name(call.name)) {
+                        None => child(body),
                         Some(definition) => {
                             let bindings: Vec<(String, Value)> = definition
                                 .inputs
@@ -1295,22 +1264,23 @@ pub mod Executor {
                                     (name.clone(), Value::Source("$core/argument".into(), ty.clone(), vec![("index".into(), Value::Int(index as i64))]))
                                 })
                                 .collect();
-                            let nested = e::Residual::with_bindings(residual, body, &bindings).ok()?;
-                            self.unsupported_source(nested, body)
+                            let nested = e::Residual::with_bindings(residual, &arena.handle(body), &bindings).ok()?;
+                            self.unsupported_row(nested, arena, body)
                         }
                     }
                 }
-                Node::CallFn { args, body: None, .. } => children(&args.iter().collect::<Vec<_>>()),
-                Node::GraphRef { inputs, .. } | Node::Call { args: inputs, .. } => children(&inputs.iter().map(|(_, t)| t).collect::<Vec<_>>()),
-                Node::Fn { params, body, capture, .. } => {
-                    let types: Vec<Option<Ty>> = match &term.ty {
-                        Ty::Fn(Some(signature)) => signature.params.iter().cloned().map(Some).collect(),
-                        _ => params.iter().map(|(_, t)| t.clone()).collect(),
+                Node::Fn(function) => {
+                    let function = arena.function(function);
+                    let params = arena.params(function.params);
+                    let signature = match arena.ty(term.ty) { Ty::Fn(Some(signature)) => Some(signature), _ => None };
+                    let param_ty = |index: usize| match signature {
+                        Some(signature) => signature.params.get(index),
+                        None => params[index].ty.map(|ty| arena.ty(ty)),
                     };
-                    let eligible = types.len() == params.len()
-                        && params.iter().zip(types.iter()).all(|((pattern, _), ty)| {
-                            matches!(pattern, w::Pattern::Name(_))
-                                && ty.as_ref().map(|ty| match ty {
+                    let eligible = signature.is_none_or(|signature| signature.params.len() == params.len())
+                        && params.iter().enumerate().all(|(index, param)| {
+                            matches!(arena.pattern(param.pattern), flow_check::term_arena::PatternNode::Name(_))
+                                && param_ty(index).map(|ty| match ty {
                                     Ty::Int | Ty::Float | Ty::Bool | Ty::Text | Ty::Vec2 | Ty::Vec3 | Ty::Vec4 => true,
                                     Ty::Array(inner) => matches!(**inner, Ty::Int | Ty::Float | Ty::Text | Ty::Vec2 | Ty::Vec3 | Ty::Vec4),
                                     _ => false,
@@ -1319,30 +1289,26 @@ pub mod Executor {
                     if eligible {
                         let bindings: Vec<(String, Value)> = params
                             .iter()
-                            .zip(types.iter())
                             .enumerate()
-                            .map(|(index, ((pattern, _), ty))| {
-                                let name = match pattern { w::Pattern::Name(n) => n.clone(), _ => unreachable!() };
-                                (name, Value::Source("$core/argument".into(), ty.clone().expect("typed"), vec![("index".into(), Value::Int(index as i64))]))
+                            .map(|(index, param)| {
+                                let name = match arena.pattern(param.pattern) { flow_check::term_arena::PatternNode::Name(name) => arena.name(name).to_owned(), _ => unreachable!() };
+                                (name, Value::Source("$core/argument".into(), param_ty(index).expect("typed").clone(), vec![("index".into(), Value::Int(index as i64))]))
                             })
                             .collect();
-                        let nested = e::Residual::with_bindings(residual, body, &bindings).ok()?;
-                        self.unsupported_source(nested, body)
+                        let nested = e::Residual::with_bindings(residual, &arena.handle(function.body), &bindings).ok()?;
+                        self.unsupported_row(nested, arena, function.body)
                     } else {
-                        let mut all: Vec<&Term> = vec![body];
-                        if let Some(c) = capture { all.push(c); }
-                        children(&all)
+                        child(function.body).or_else(|| function.capture.and_then(child))
                     }
                 }
-                Node::State { init, step, .. } => children(&[init, step]),
-                _ => None,
+                _ => arena.children(id).iter().find_map(|&id| child(id)),
             }
         }
 
         fn region_source(&self, residual: ResidualId, term: &Term) -> Option<rays_diagnostic::Span> {
             let options = packed::CompileOptions { trace: self.trace.clone(), through_exact: false, fusion: true, count_source: Some(self.count_source.clone()) };
             match packed::compile_result(&options, residual, term) {
-                Err(_) => Some(term.form.span.clone()),
+                Err(_) => Some(term.arena().syntax().row(term.form).span.clone()),
                 Ok(p) => self.unsupported_packed_source(&p),
             }
         }
@@ -1355,8 +1321,8 @@ pub mod Executor {
         fn unsupported_captured(&self, value: &Value) -> Option<rays_diagnostic::Span> {
             match value {
                 Value::Residual(r) => {
-                    let view = e::Residual::residual_view(*r).ok()?;
-                    self.unsupported_source(*r, &view.term)
+                    let term = e::Residual::residual_term(*r)?;
+                    self.unsupported_source(*r, &term)
                 }
                 Value::List(xs) => xs.iter().find_map(|x| self.unsupported_captured(x)),
                 Value::Record(fs) | Value::Struct(_, _, fs) | Value::Source(_, _, fs) => fs.iter().find_map(|(_, x)| self.unsupported_captured(x)),
@@ -1367,13 +1333,13 @@ pub mod Executor {
         fn validate_residual(&mut self, residual: ResidualId) -> Result<(), Diagnostic> {
             let view = e::Residual::residual_view(residual)?;
             // Per-element Vec3 placeholders are runtime uniforms, not nested kernels.
-            let element_capture = matches!(&view.term.node, Node::RefBinding(name, fields) if fields.is_empty() && view.term.ty == Ty::Vec3 && name.starts_with("$elem:"));
+            let element_capture = matches!(view.term.node, Node::RefBinding(id) if view.term.arena().name_ids(view.term.arena().ref_binding(id).fields).is_empty() && *view.term.ty() == Ty::Vec3 && view.term.name(view.term.arena().ref_binding(id).name).starts_with("$elem:"));
             if view.previous || element_capture || e::state_dependent(&Value::Residual(residual)) { return Ok(()); }
-            let (core, lowered) = strict_lower(self.trace, residual);
-            for id in lowered { self.inline.insert(id, ()); }
-            match core {
+            let lowered = strict_lower(&self.trace, residual);
+            for id in &lowered.1 { self.inline.insert(*id, ()); }
+            match &lowered.0 {
                 Ok(core) if core.regions.iter().all(|r| self.unsupported_packed_source(r).is_none()) => Ok(()),
-                _ => Err(kernel_form(&view.term.form.span)),
+                _ => Err(kernel_form(&view.term.arena().syntax().row(view.term.form).span)),
             }
         }
 
@@ -1407,9 +1373,10 @@ pub mod Executor {
     }
 
     pub fn compile(v: &Value, o: &CompileOptions) -> Result<Program, Diagnostic> {
+        let _phase = flow_syntax::phase_timer::measure("executor.compile");
         let count_source = o.count_source.clone().unwrap_or_else(CountSource::none);
         if o.strict {
-            let mut validate = Validate { trace: &o.trace, count_source: &count_source, inline: HashMap::new(), validated: HashMap::new() };
+            let mut validate = Validate { trace: o.trace.clone(), count_source: count_source.clone(), inline: HashMap::new(), validated: HashMap::new() };
             validate.validate_value(v)?;
         }
         let packed_region = direct_region(&o.trace, false, false, &count_source, v).map(|(p, _)| p);
@@ -1630,13 +1597,17 @@ pub mod Executor {
                     Some(packed::force(&p, live, &self.force_options()))
                 }
                 _ => {
-                    let node = e::Residual::residual_view(r).map(|v| v.term.node.clone()).ok();
-                    match (self.o.strict, node) {
-                        (true, Some(Node::Hof(w::HofKind::Map | w::HofKind::Reduce, _) | Node::Loop { .. })) => {
-                            Some(Err(v::fail("E_KERNEL_FORM", "Numeric node bodies must compile to packed kernels.")))
-                        }
-                        (true, Some(Node::Op { op, .. })) if op == "array/sum" => Some(Err(v::fail("E_KERNEL_FORM", "Numeric node bodies must compile to packed kernels."))),
-                        _ => None,
+                    let view = e::Residual::residual_view(r).ok();
+                    let needs_kernel = view.is_some_and(|view| match view.term.node {
+                        Node::Hof(id) => matches!(view.term.arena().hof(id).kind, w::HofKind::Map | w::HofKind::Reduce),
+                        Node::Loop(_) => true,
+                        Node::Op(id) => view.term.name(view.term.arena().op(id).op) == "array/sum",
+                        _ => false,
+                    });
+                    if self.o.strict && needs_kernel {
+                        Some(Err(v::fail("E_KERNEL_FORM", "Numeric node bodies must compile to packed kernels.")))
+                    } else {
+                        None
                     }
                 }
             }
@@ -2124,10 +2095,11 @@ pub mod Executor {
             let ranges = self.ranges.clone();
             let source: packed::host::SourceFn = Arc::new(move |residual: ResidualId, term: &Term| -> Result<Option<Value>, Diagnostic> {
                 fn find(ranges: &Mutex<HashMap<i64, Value>>, residual: ResidualId, term: &Term) -> Result<Option<Value>, Diagnostic> {
-                    match &term.node {
-                        Node::RefBinding(name, fields) if fields.is_empty() => {
+                    let arena = term.arena();
+                    match term.node {
+                        Node::RefBinding(id) if arena.name_ids(arena.ref_binding(id).fields).is_empty() => {
                             let view = e::Residual::residual_view(residual)?;
-                            match view.bindings.iter().find(|(n, _)| n == name) {
+                            match view.bindings.iter().find(|(n, _)| n == term.name(arena.ref_binding(id).name)) {
                                 Some((_, Value::Residual(r))) => {
                                     let rv = e::Residual::residual_view(*r)?;
                                     find(ranges, *r, &rv.term)
@@ -2135,15 +2107,17 @@ pub mod Executor {
                                 _ => Ok(None),
                             }
                         }
-                        Node::Op { op, args, .. } if op == "array/range" && args.len() == 1 && args[0].0 == "count" => {
-                            if let Node::Lit(param::Value::Int(count)) = &args[0].1.node {
-                                if term.ty == Ty::Array(Box::new(Ty::Float)) && *count >= 0 && *count <= 64 * 1024 * 1024 / 8 {
-                                    if let Some(found) = ranges.lock().unwrap().get(count) { return Ok(Some(found.clone())); }
-                                    let value = e::Residual::eval_term(residual, term, &input::at_time(0.0), None, None, None)?;
-                                    let mut table = ranges.lock().unwrap();
-                                    if table.len() >= 16 { table.clear(); }
-                                    table.insert(*count, value.clone());
-                                    return Ok(Some(value));
+                        Node::Op(id) if term.name(arena.op(id).op) == "array/range" && arena.fields(arena.op(id).args).len() == 1 && term.name(arena.fields(arena.op(id).args)[0].name) == "count" => {
+                            if let Node::Lit(literal) = arena.row(arena.fields(arena.op(id).args)[0].term).node {
+                                if let flow_check::term_arena::Literal::Int(count) = arena.literal(literal) {
+                                    if matches!(term.ty(), Ty::Array(inner) if **inner == Ty::Float) && count >= 0 && count <= 64 * 1024 * 1024 / 8 {
+                                        if let Some(found) = ranges.lock().unwrap().get(&count) { return Ok(Some(found.clone())); }
+                                        let value = e::Residual::eval_term(residual, term, &input::at_time(0.0), None, None, None)?;
+                                        let mut table = ranges.lock().unwrap();
+                                        if table.len() >= 16 { table.clear(); }
+                                        table.insert(count, value.clone());
+                                        return Ok(Some(value));
+                                    }
                                 }
                             }
                             Ok(None)
@@ -2215,7 +2189,7 @@ pub mod Executor {
             let output = (kernel.run)(&inputs)?;
             // the device carries integers as floats: an Int map comes back as the Int array it is
             let value = (kernel.readback)(&output)?;
-            Ok(Some(match (value, &packed_region.term.ty) {
+            Ok(Some(match (value, packed_region.term.ty()) {
                 (Value::Float_array(xs), Ty::Array(inner)) if **inner == Ty::Int => Value::Int_array(Arc::new(xs.iter().map(|x| *x as i64).collect())),
                 (value, _) => value,
             }))
@@ -2627,7 +2601,7 @@ mod tests {
             invoke: Box::new({
                 let (actual, keep, invokes) = (actual.clone(), keep.clone(), invokes.clone());
                 move |packed, args, _locals, live| {
-                    if !matches!(packed.term.ty, Ty::Array(_)) { return Ok(None); }
+                    if !matches!(packed.term.ty(), Ty::Array(_)) { return Ok(None); }
                     let n = invokes.fetch_add(1, Ordering::SeqCst) + 1;
                     if decline && n % 2 == 0 { return Ok(None); }
                     let args: Vec<Value> = args.iter().map(|a| actual(a)).collect();
@@ -2784,13 +2758,13 @@ mod tests {
         );
         let Value::Residual(root) = &record else { panic!("residual") };
         let view = ok(e::Residual::residual_view(*root));
-        fn fields(term: &Term) -> Option<Vec<(String, Term)>> {
-            match &term.node {
-                w::Node::Record(fs) => Some(fs.clone()),
-                _ => w::children(term).iter().find_map(fields),
+        fn fields(arena: &Arc<flow_check::term_arena::TermArena>, id: flow_check::term_arena::TermId) -> Option<Vec<(String, Term)>> {
+            match arena.row(id).node {
+                w::Node::Record(fs) => Some(arena.fields(fs).iter().map(|field| (arena.name(field.name).to_owned(), arena.handle(field.term))).collect()),
+                _ => arena.children(id).iter().find_map(|&id| fields(arena, id)),
             }
         }
-        let fs = fields(&view.term).expect("record fields");
+        let fs = fields(view.term.arena(), view.term.row_id()).expect("record fields");
         let value = Value::Record(
             fs.iter().map(|(name, term)| (name.clone(), Value::Residual(ok(e::Residual::with_bindings(*root, term, &view.bindings))))).collect(),
         );
@@ -3094,6 +3068,38 @@ mod tests {
     fn p(parts: &[&str]) -> Path { parts.iter().map(|s| s.to_string()).collect() }
 
     #[test]
+    fn qualifier_body_cache_uses_arena_row_identity() {
+        use flow_check::term_arena::{Draft, TermBuilder};
+        let form = syntax::parse("0").unwrap().remove(0);
+        let mut builder = TermBuilder::new();
+        let form = builder.import_form(&form);
+        let body = builder.push(None, &Ty::Float, form, Draft::Time);
+        let call = builder.push(None, &Ty::Float, form, Draft::CallFn { fn_name: "f".into(), args: Vec::new(), body: Some(body) });
+        let arena = builder.freeze();
+        let owner = p(&["g"]);
+        let mut walker = Walker {
+            collect: false,
+            t: Tables { roots: HashMap::new(), index: HashMap::new(), callable_owners: HashMap::new() },
+            called: HashMap::new(),
+            called_seen: HashMap::new(),
+        };
+        walker.walk(&owner, &arena, call);
+        walker.walk(&owner, &arena, call);
+        let first = arena.handle(body).identity();
+        assert_eq!(walker.called_seen[&first], vec![owner.clone()]);
+
+        let mut builder = TermBuilder::new();
+        let roots = builder.rewrite_roots(&[arena.handle(call)], &mut |_, _, draft| draft);
+        let rewritten = builder.freeze();
+        let w::Node::CallFn(id) = rewritten.row(roots[0]).node else { panic!("call") };
+        let second = rewritten.handle(rewritten.call_fn(id).body.unwrap()).identity();
+        assert_ne!(first, second);
+        walker.walk(&owner, &rewritten, roots[0]);
+        assert_eq!(walker.called_seen[&second], vec![owner]);
+        assert_eq!(walker.called.values().map(Vec::len).sum::<usize>(), 1);
+    }
+
+    #[test]
     fn image_qualification_authored_sites_and_shared_functions() {
         let observed: Arc<Mutex<Vec<(Option<Path>, Path)>>> = Arc::new(Mutex::new(Vec::new()));
         let qualify = |inputs: Option<Vec<(String, Vec<(String, Value)>)>>, gpu: Gpu::Config, workspace: &w::Workspace| {
@@ -3105,7 +3111,7 @@ mod tests {
                 gpu: Some(gpu),
                 observe: Some(Arc::new(move |producer: Option<Path>, residual: ResidualId| {
                     let view = e::Residual::residual_view(residual).unwrap();
-                    if producer.is_some() && view.term.ty == Ty::Array(Box::new(Ty::Vec4)) {
+                    if producer.is_some() && matches!(view.term.ty(), Ty::Array(inner) if **inner == Ty::Vec4) {
                         for fusion in [true, false] {
                             let o = packed::CompileOptions { fusion, ..packed::CompileOptions::default() };
                             if let Ok(compiled) = packed::compile_result(&o, residual, &view.term) {
@@ -3250,7 +3256,7 @@ mod tests {
     fn has_region(value: &Value) -> bool {
         fn packed_child_region(residual: ResidualId, term: &Term) -> bool {
             packed::compile(&packed::CompileOptions::default(), residual, term).is_some()
-                || w::children_ref(term).into_iter().any(|t| packed_child_region(residual, t))
+                || term.children().iter().any(|&id| packed_child_region(residual, &term.child(id)))
         }
         fn has_fields(fs: &[(String, Value)]) -> bool { fs.iter().any(|(_, x)| has_region(x)) }
         match value {

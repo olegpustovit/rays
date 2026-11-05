@@ -1079,7 +1079,7 @@ mod tests {
 
     #[test]
     fn transfer_is_exact_across_domains_and_cancels() {
-        let base = grid(30, 20);
+        let base = grid(100, 80);
         let source = with_edges(
             "edge_band",
             &|edge| edge % 23 < 2,
@@ -1090,7 +1090,7 @@ mod tests {
                 &with_ordered(
                     group::Owner::Point,
                     "ordered_seed",
-                    &[404, 5, 600, 2],
+                    &[404, 5, 8_000, 2],
                     &with_group_where(group::Owner::Point, "point_band", &|p| p % 101 < 7, &base),
                 ),
             ),

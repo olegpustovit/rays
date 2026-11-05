@@ -45,31 +45,33 @@ fn retreat_device(usage: i64, device: Arc<dyn Fn() -> i64 + Send + Sync>) -> Ver
 }
 
 #[test]
-#[ignore = "PARITY: OCaml walks real reachability and dedups blocks shared across roots; Rust root/walk_table take explicit byte sizes, so the 'beyond the roots before it' figure is the caller's number"]
 fn walked_owners_charge_their_reach() {
     let _guard = setup();
     let named = plan("walk.named");
     let counted = cache("walk.counted");
     let charged = cache("walk.charged");
-    root(&named, Arc::new(|| 800_000));
-    struct Table(usize);
-    impl AccountedSize for Table {
-        fn owned_bytes(&self) -> usize {
-            self.0
-        }
-    }
-    let counted_table: Arc<dyn AccountedSize + Send + Sync> = Arc::new(Table(80_000));
-    walk_table(&counted, counted_table, Arc::new(|| true));
-    let charged_table: Arc<dyn AccountedSize + Send + Sync> = Arc::new(Table(400_000));
-    walk_table(&charged, charged_table, Arc::new(|| false));
+    let shared = Arc::new(vec![0_i64; 100_000]);
+    let held = Arc::new(vec![0_i64; 50_000]);
+    let root_shared = shared.clone();
+    let root_held = held.clone();
+    root(&named, Arc::new(move |visitor| {
+        root_shared.visit_allocations(visitor);
+        root_held.visit_allocations(visitor);
+    }));
+    let own = Arc::new(vec![0_i64; 10_000]);
+    let counted_table = Arc::new((shared, own));
+    walk_table(&counted, counted_table.clone(), Arc::new(|| true));
+    walk_table(&charged, held.clone(), Arc::new(|| false));
     charge(&charged, 400_000);
     report();
     assert!((named.bytes() - 800_000).abs() < 100, "a named root is its reach beyond what a table charges");
     assert!((counted.bytes() - 80_000).abs() < 100, "a table is what it reaches beyond the roots before it");
-    assert_eq!(charged.bytes(), 400_000, "a table on the ledger is not walked");
-    root(&named, Arc::new(|| 0));
+    assert_eq!(charged.bytes(), 400_000, "a table on the ledger is not charged again by a walk");
+    root(&named, Arc::new(|_| {}));
     report();
     assert_eq!(named.bytes(), 0, "a dropped root leaves the ledger");
+    assert!((counted.bytes() - 880_000).abs() < 100, "what a root let go of falls to the next");
+    std::hint::black_box((&counted_table, &held));
 }
 
 #[test]

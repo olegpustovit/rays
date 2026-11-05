@@ -100,20 +100,19 @@ fn function_ports_instantiate_bodies_and_keep_captures() {
         (_, ds) => panic!("{source}\n{}", show_ds(&ds)),
     };
     let ws = accepted(&signature, &sop("(sop/test_field :field (fn [r] r.p.x))"));
-    match &ws.graphs[0].body.node {
-        W::Node::Call { args, .. } if args.len() == 1 && args[0].0 == "field" => {
-            let t = &args[0].1;
-            assert!(matches!(&t.ty, Ty::Fn(Some(certified)) if **certified == signature));
-            match &t.node {
-                W::Node::Fn { params, body, .. } if params.len() == 1 => {
-                    assert_eq!(params[0].1.as_ref(), Some(&signature.params[0]));
-                    assert_eq!(body.ty, Ty::Float);
-                }
-                other => panic!("{other:?}"),
-            }
-        }
-        other => panic!("function port did not retain its checked body: {other:?}"),
-    }
+    let root = &ws.graphs[0].body;
+    let W::Node::Call(id) = root.node else { panic!("function port did not retain its checked body"); };
+    let arena = root.arena();
+    let args = arena.fields(arena.call(id).args);
+    assert!(args.len() == 1 && root.name(args[0].name) == "field");
+    let t = root.child(args[0].term);
+    assert!(matches!(t.ty(), Ty::Fn(Some(certified)) if **certified == signature));
+    let W::Node::Fn(id) = t.node else { panic!("{:?}", t.debug_node()); };
+    let function = arena.function(id);
+    let params = arena.params(function.params);
+    assert_eq!(params.len(), 1);
+    assert_eq!(params[0].ty.map(|id| arena.ty(id)), Some(&signature.params[0]));
+    assert_eq!(t.child(function.body).ty(), &Ty::Float);
     for (source, code) in [
         ("(sop/test_field :field 1.0)", "E_TYPE"),
         ("(sop/test_field :field (fn [r s] r.p.x))", "E_ARITY"),
@@ -131,7 +130,7 @@ fn function_ports_instantiate_bodies_and_keep_captures() {
     assert_eq!(functions.len(), 2);
     for (i, f) in functions.iter().enumerate() {
         let (_, body) = Residual::function_body(*f).unwrap();
-        assert_eq!(body.ty, Ty::Float);
+        assert_eq!(body.ty(), &Ty::Float);
         if i == 0 {
             assert_eq!(Residual::function_bindings(*f).iter().find(|(k, _)| k == "offset").unwrap().1, Value::Float(7.));
         }
@@ -142,21 +141,23 @@ fn function_ports_instantiate_bodies_and_keep_captures() {
 fn canvas_accepts_an_image_through_the_drawing_operator() {
     let ws = good("(workspace w (graph picture :context image (image/noise :width 2 :height 2)) (graph editor :context editor (ui/workspace (ui/canvas (ref picture)))))");
     let editor = ws.graphs.iter().find(|g| g.name == "editor").unwrap();
-    match &editor.body.node {
-        W::Node::Op { op, args, .. } if op == "ui/workspace" && args.len() == 1 => match &args[0].1.node {
-            W::Node::Op { op, args, .. } if op == "ui/canvas" && args.len() == 1 && args[0].0 == "drawing" => {
-                let drawing = &args[0].1;
-                match &drawing.node {
-                    W::Node::Op { op, args, .. } if op == "draw/image" && args.len() == 1 && args[0].0 == "image" => {
-                        assert!(drawing.ty == ty::drawing() && args[0].1.ty == ty::image());
-                    }
-                    other => panic!("{other:?}"),
-                }
-            }
-            other => panic!("{other:?}"),
-        },
-        other => panic!("canvas image did not lower to draw/image: {other:?}"),
-    }
+    let root = &editor.body;
+    let arena = root.arena();
+    let W::Node::Op(id) = root.node else { panic!("canvas image did not lower to draw/image"); };
+    let op = arena.op(id);
+    let args = arena.fields(op.args);
+    assert!(root.name(op.op) == "ui/workspace" && args.len() == 1);
+    let canvas = root.child(args[0].term);
+    let W::Node::Op(id) = canvas.node else { panic!("{:?}", canvas.debug_node()); };
+    let op = arena.op(id);
+    let args = arena.fields(op.args);
+    assert!(root.name(op.op) == "ui/canvas" && args.len() == 1 && root.name(args[0].name) == "drawing");
+    let drawing = root.child(args[0].term);
+    let W::Node::Op(id) = drawing.node else { panic!("{:?}", drawing.debug_node()); };
+    let op = arena.op(id);
+    let args = arena.fields(op.args);
+    assert!(root.name(op.op) == "draw/image" && args.len() == 1 && root.name(args[0].name) == "image");
+    assert!(drawing.ty() == &ty::drawing() && root.child(args[0].term).ty() == &ty::image());
     let evaluated = static_ok(&ws);
     match results_of(&evaluated, "editor") {
         Value::Struct(n, _, f) if n == "ui/workspace" && f.len() == 1 && f[0].0 == "root" => match &f[0].1 {
@@ -208,19 +209,23 @@ fn structure_and_the_typed_ir() {
     assert!(ws.name == "w" && ws.graphs.len() == 1 && ws.defs.len() == 1 && ws.macros.len() == 1);
     let g = &ws.graphs[0];
     assert!(g.context == context::value() && g.inputs.len() == 1);
-    match &g.body.node {
-        W::Node::Let(bs, r) if bs.len() == 1 => {
-            assert!(matches!(&bs[0].0, W::Pattern::Name(n) if n == "a"));
-            assert!(matches!(&bs[0].1.node, W::Node::CallFn { fn_name, args, .. } if fn_name == "f" && args.len() == 1));
-            assert_eq!(bs[0].1.path, Some(p(&["g", "a"])));
-            assert_eq!(r.path, Some(p(&["g", "@result"])));
-            match &r.node {
-                W::Node::Op { op, args, .. } if op == "+" && args.len() == 2 => assert!(matches!(&args[1].1.node, W::Node::Expanded { macro_name, .. } if macro_name == "m")),
-                other => panic!("result is not (+ a expansion): {other:?}"),
-            }
-        }
-        other => panic!("unexpected IR of g: {other:?}"),
-    }
+    let root = &g.body;
+    let arena = root.arena();
+    let W::Node::Let(id) = root.node else { panic!("unexpected IR of g"); };
+    let node = arena.let_node(id);
+    let bs = arena.bindings(node.bindings);
+    assert_eq!(bs.len(), 1);
+    assert!(matches!(arena.pattern(bs[0].pattern), flow_check::term_arena::PatternNode::Name(n) if root.name(n) == "a"));
+    let bound = root.child(bs[0].term);
+    assert!(matches!(bound.node, W::Node::CallFn(id) if root.name(arena.call_fn(id).name) == "f" && arena.term_ids(arena.call_fn(id).args).len() == 1));
+    assert_eq!(bound.path().map(|names| names.iter().map(|n| root.name(*n).to_owned()).collect::<Vec<_>>()), Some(p(&["g", "a"])));
+    let r = root.child(node.body);
+    assert_eq!(r.path().map(|names| names.iter().map(|n| root.name(*n).to_owned()).collect::<Vec<_>>()), Some(p(&["g", "@result"])));
+    let W::Node::Op(id) = r.node else { panic!("result is not (+ a expansion)"); };
+    let op = arena.op(id);
+    let args = arena.fields(op.args);
+    assert!(root.name(op.op) == "+" && args.len() == 2);
+    assert!(matches!(root.child(args[1].term).node, W::Node::Expanded(id) if root.name(arena.expanded(id).name) == "m"));
     bad("", "E_NO_WORKSPACE");
     bad("(graph g :context sop nil)", "E_WORKSPACE");
     bad("(workspace w) (workspace v)", "E_ONE_WORKSPACE");
@@ -412,13 +417,13 @@ fn groups_colours_and_bypass() {
     quiet(&sop("(sop/uv_sphere :radius 0.1)"));
     quiet(&sop("(sop/uv_sphere :radius [0.1 0.2 0.3])"));
     let ws = good(&sop("(let* [a (sop/box) b ^:bypass (sop/transform a :translate [5 0 0])] b)"));
-    match &ws.graphs[0].body.node {
-        W::Node::Let(bs, _) if bs.len() == 2 => match &bs[1].1.node {
-            W::Node::Bypass(call) => assert!(matches!(&call.node, W::Node::Call { kind, .. } if kind == "sop/transform")),
-            other => panic!("bypass is not wrapped: {other:?}"),
-        },
-        other => panic!("bypass is not wrapped: {other:?}"),
-    }
+    let root = &ws.graphs[0].body;
+    let arena = root.arena();
+    let W::Node::Let(id) = root.node else { panic!("bypass is not wrapped"); };
+    let bs = arena.bindings(arena.let_node(id).bindings);
+    assert_eq!(bs.len(), 2);
+    let W::Node::Bypass(call) = root.child(bs[1].term).node else { panic!("bypass is not wrapped"); };
+    assert!(matches!(root.child(call).node, W::Node::Call(id) if root.name(arena.call(id).kind) == "sop/transform"));
     bad_text(&sop("^:mute (sop/box)"), "E_META", "only metadata is ^:bypass");
     bad_text(&sop("^:bypass (sop/box :size 2)"), "E_BYPASS", "no positional input");
     bad_text(&sop("^:bypass (let* [a 1] (sop/box))"), "E_BYPASS", "only operator and function calls");
@@ -427,9 +432,12 @@ fn groups_colours_and_bypass() {
 #[test]
 fn records_lists_str_and_hofs_type_flow() {
     let ws = good(&val("(let* [r {:a 1 :b {:c [1 2 3]}} s (assoc r :a 5 :d 2) n (+ r.a r.b.c.y) l (list 1 2.5) e (list) t2 (str \"a\" 1 [1 2 3])] (+ n s.d))"));
-    let ty_of = |name: &str| match &ws.graphs[0].body.node {
-        W::Node::Let(bs, _) => ty::to_string(&bs.iter().find(|(pat, _)| matches!(pat, W::Pattern::Name(n) if n == name)).unwrap_or_else(|| panic!("{name}")).1.ty),
-        _ => panic!("no let"),
+    let ty_of = |name: &str| {
+        let root = &ws.graphs[0].body;
+        let arena = root.arena();
+        let W::Node::Let(id) = root.node else { panic!("no let"); };
+        let binding = arena.bindings(arena.let_node(id).bindings).iter().find(|binding| matches!(arena.pattern(binding.pattern), flow_check::term_arena::PatternNode::Name(n) if root.name(n) == name)).unwrap_or_else(|| panic!("{name}"));
+        ty::to_string(root.child(binding.term).ty())
     };
     assert_eq!(ty_of("r"), "rec{a:int,b:rec{c:vec3}}");
     assert_eq!(ty_of("s"), "rec{a:int,b:rec{c:vec3},d:int}");
@@ -448,13 +456,15 @@ fn records_lists_str_and_hofs_type_flow() {
 fn macros_through_the_workspace() {
     let radial = "(defmacro radial [i n body] `(sop/merge (for [~i (range ~n)] (sop/transform ~body :rotate [0 (* (/ ~i ~n) 6.2832) 0]))))";
     let ws = good(&format!("(workspace w {radial} (graph g :context sop (let* [ring (radial k 12 (sop/box :size (+ 0.1 (* k 0.01))))] ring)))"));
-    match &ws.graphs[0].body.node {
-        W::Node::Let(bs, _) if bs.len() == 1 => match &bs[0].1.node {
-            W::Node::Expanded { macro_name, body } if macro_name == "radial" => assert!(matches!(body.node, W::Node::Op { .. } | W::Node::Call { .. })),
-            other => panic!("radial did not expand: {other:?}"),
-        },
-        other => panic!("radial did not expand: {other:?}"),
-    }
+    let root = &ws.graphs[0].body;
+    let arena = root.arena();
+    let W::Node::Let(id) = root.node else { panic!("radial did not expand"); };
+    let bs = arena.bindings(arena.let_node(id).bindings);
+    assert_eq!(bs.len(), 1);
+    let W::Node::Expanded(id) = root.child(bs[0].term).node else { panic!("radial did not expand"); };
+    let expanded = arena.expanded(id);
+    assert_eq!(root.name(expanded.name), "radial");
+    assert!(matches!(root.child(expanded.body).node, W::Node::Op(_) | W::Node::Call(_)));
     assert!(ws.live.is_empty() && ws.macros.len() == 1);
     bad_text("(workspace w (defmacro m [x] `(+ ~x y)) (graph g :context value (let* [y 1] (m 2))))", "E_MACRO_CAPTURE", "would capture");
     bad("(workspace w (defmacro m [x] `(+ ~x ~(+ 1 2))) (graph g :context value (m 2)))", "E_MACRO_UNQUOTE");
@@ -505,33 +515,31 @@ fn the_other_contexts() {
 fn ir_shapes_notes_and_reporting() {
     let ws = good("(workspace w\n  ; a helper\n  (defn f :context value [(x : float 2.0) (y : float 1.0)] (+ x y))\n  (graph g :context value [(n : int 3)]\n    (let* [; loop\n           s (sum [i (range n)] (f :y i))\n           l (map (fn [k] (* k 2)) (range 3))\n           c (cond (< s 1) 1 :else 2)\n           k (case n 1 \"a\" :else \"b\")]\n      (+ s (+ (count l) c)))))");
     assert_eq!(ws.defs[0].form.notes(), vec!["a helper".to_owned()]);
-    match &ws.graphs[0].body.node {
-        W::Node::Let(bs, _) if bs.len() == 4 => {
-            let (s, l, c, k) = (&bs[0].1, &bs[1].1, &bs[2].1, &bs[3].1);
-            match &s.node {
-                W::Node::Loop { kind: W::LoopKind::Sum, accs, clauses, zone, body, .. } => {
-                    assert!(accs.is_empty() && clauses.len() == 1 && matches!(&clauses[0].0, W::Pattern::Name(n) if n == "i"));
-                    assert_eq!(*zone, p(&["g", "s"]));
-                    assert!(matches!(&body.node, W::Node::CallFn { fn_name, args, .. } if fn_name == "f" && args.len() == 2));
-                }
-                other => panic!("sum is not a Loop: {other:?}"),
-            }
-            match &l.node {
-                W::Node::Hof(W::HofKind::Map, ts) if ts.len() == 2 => match &ts[0].node {
-                    W::Node::Fn { zone, params, .. } => {
-                        assert_eq!(*zone, p(&["g", "l#0"]));
-                        assert!(params.len() == 1 && matches!(&params[0].0, W::Pattern::Name(n) if n == "k") && params[0].1.is_none());
-                    }
-                    other => panic!("{other:?}"),
-                },
-                other => panic!("map is not a Hof: {other:?}"),
-            }
-            assert!(matches!(&c.node, W::Node::Cond(arms, _) if arms.len() == 1));
-            assert!(matches!(&k.node, W::Node::Case(_, arms, _) if arms.len() == 1));
-            assert!(l.ty == Ty::List(Box::new(Ty::Int)) && k.ty == Ty::Text && s.ty == Ty::Float);
-        }
-        other => panic!("unexpected IR: {other:?}"),
-    }
+    let root = &ws.graphs[0].body;
+    let arena = root.arena();
+    let W::Node::Let(id) = root.node else { panic!("unexpected IR"); };
+    let bs = arena.bindings(arena.let_node(id).bindings);
+    assert_eq!(bs.len(), 4);
+    let (s, l, c, k) = (root.child(bs[0].term), root.child(bs[1].term), root.child(bs[2].term), root.child(bs[3].term));
+    let W::Node::Loop(id) = s.node else { panic!("sum is not a Loop"); };
+    let node = arena.loop_node(id);
+    let clauses = arena.bindings(node.clauses);
+    assert!(node.kind == W::LoopKind::Sum && arena.bindings(node.accs).is_empty() && clauses.len() == 1);
+    assert!(matches!(arena.pattern(clauses[0].pattern), flow_check::term_arena::PatternNode::Name(n) if root.name(n) == "i"));
+    assert_eq!(arena.path(node.zone).iter().map(|n| root.name(*n).to_owned()).collect::<Vec<_>>(), p(&["g", "s"]));
+    assert!(matches!(root.child(node.body).node, W::Node::CallFn(id) if root.name(arena.call_fn(id).name) == "f" && arena.term_ids(arena.call_fn(id).args).len() == 2));
+    let W::Node::Hof(id) = l.node else { panic!("map is not a Hof"); };
+    let node = arena.hof(id);
+    let ts = arena.term_ids(node.args);
+    assert!(node.kind == W::HofKind::Map && ts.len() == 2);
+    let W::Node::Fn(id) = root.child(ts[0]).node else { panic!("map function missing"); };
+    let function = arena.function(id);
+    assert_eq!(arena.path(function.zone).iter().map(|n| root.name(*n).to_owned()).collect::<Vec<_>>(), p(&["g", "l#0"]));
+    let params = arena.params(function.params);
+    assert!(params.len() == 1 && matches!(arena.pattern(params[0].pattern), flow_check::term_arena::PatternNode::Name(n) if root.name(n) == "k") && params[0].ty.is_none());
+    assert!(matches!(c.node, W::Node::Cond(id) if arena.arms(arena.cond(id).arms).len() == 1));
+    assert!(matches!(k.node, W::Node::Case(id) if arena.case_arms(arena.case(id).arms).len() == 1));
+    assert!(l.ty() == &Ty::List(Box::new(Ty::Int)) && k.ty() == &Ty::Text && s.ty() == &Ty::Float);
     match run_src("(workspace w (defn f :context value [(x : float)] (+ x \"a\")) (graph g :context value (+ (f 1) (+ (f 2) (f 3)))))") {
         (None, ds) => assert_eq!(errors(&ds).len(), 1),
         (Some(_), _) => panic!("accepted"),
@@ -548,7 +556,7 @@ fn ir_shapes_notes_and_reporting() {
 
 // ---- the check.cjs suite, static half ----
 
-fn printed(forms: &[Syntax]) -> String { flow_syntax::lisp::print(forms).0 }
+fn printed(forms: &[Syntax]) -> String { flow_syntax::lisp::print(forms).unwrap().0 }
 fn one(source: &str) -> Syntax { let mut f = parse(source); assert_eq!(f.len(), 1, "expected one form"); f.remove(0) }
 fn workspace_children(source: &str) -> Vec<Syntax> {
     match one(source).node { SN::List(mut xs) if xs.len() >= 2 => xs.split_off(2), _ => panic!("not a workspace") }
@@ -726,9 +734,11 @@ fn check_cjs_reserved_names_skip_and_t() {
 fn audit_language_cases() {
     let ws = good(&sop("(sop/merge (sop/merge (for [i (range 2)] (sop/box))) (sop/merge (for [j (range 3)] (sop/box))))"));
     fn walk(t: &W::Term, zones: &mut Vec<Vec<String>>) {
-        match &t.node {
-            W::Node::Loop { zone, body, .. } => { zones.push(zone.clone()); walk(body, zones); }
-            W::Node::Call { args, .. } | W::Node::Op { args, .. } => for (_, a) in args { walk(a, zones); },
+        let arena = t.arena();
+        match t.node {
+            W::Node::Loop(id) => { let node = arena.loop_node(id); zones.push(arena.path(node.zone).iter().map(|n| t.name(*n).to_owned()).collect()); walk(&t.child(node.body), zones); }
+            W::Node::Call(id) => for arg in arena.fields(arena.call(id).args) { walk(&t.child(arg.term), zones); },
+            W::Node::Op(id) => for arg in arena.fields(arena.op(id).args) { walk(&t.child(arg.term), zones); },
             _ => (),
         }
     }
@@ -849,7 +859,7 @@ fn sketch_checks_match_the_ocaml_oracle() {
                     None => text.push_str("NONE\n"),
                     Some(w) => {
                         text.push_str(&format!("W {} graphs={} defs={} macros={} nodes={}\n", w.name, w.graphs.len(), w.defs.len(), w.macros.len(), w.nodes.len()));
-                        for g in w.graphs.iter() { text.push_str(&format!("G {} {} {}\n", g.name, context::name(g.context), ty::to_string(&g.body.ty))); }
+                        for g in w.graphs.iter() { text.push_str(&format!("G {} {} {}\n", g.name, context::name(g.context), ty::to_string(g.body.ty()))); }
                         for p in &w.live { text.push_str(&format!("L {}\n", path_s(p))); }
                         for p in &w.invariant { text.push_str(&format!("I {}\n", path_s(p))); }
                         for p in &w.approx { text.push_str(&format!("A {}\n", path_s(p))); }

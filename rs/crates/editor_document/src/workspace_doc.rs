@@ -18,6 +18,7 @@ use flow_sop::catalog as fsc;
 use flow_syntax::context::{self, Context};
 use flow_syntax::lisp;
 use flow_syntax::syntax::{self as s, Node, Syntax};
+use flow_syntax::arena::{Draft, SyntaxBuilder, SyntaxId};
 use flow_syntax::value::Value as E;
 use param::Value as PV;
 use rays_diagnostic::{Diagnostic, Span};
@@ -56,6 +57,27 @@ pub struct T {
     pub import_sources: Vec<(String, String)>,
     /// A library of bare graph, definition or macro forms, printed without a workspace wrapper.
     pub fragment: bool,
+}
+
+/// Allocation identities for retained source/checked-term storage, excluding other editor owners.
+/// The caller must keep this document alive for as long as the recorded identities are visited.
+pub fn memory_allocations(value: &T) -> (Vec<(usize, usize)>, Vec<(usize, usize)>) {
+    let mut memory = w::Memory::default();
+    memory.syntax.forms(&value.source);
+    memory.syntax.forms(&value.extra);
+    memory.workspace(&value.checked);
+    if let Some(literal) = &value.literal { memory.workspace(&literal.base); }
+    memory.syntax.allocation(value.imports.as_ptr(), value.imports.capacity() * std::mem::size_of::<(String, Vec<S>)>());
+    for (path, forms) in &value.imports {
+        memory.syntax.allocation(path.as_ptr(), path.capacity());
+        memory.syntax.forms(forms);
+    }
+    memory.syntax.allocation(value.import_sources.as_ptr(), value.import_sources.capacity() * std::mem::size_of::<(String, String)>());
+    for (path, text) in &value.import_sources {
+        memory.syntax.allocation(path.as_ptr(), path.capacity());
+        memory.syntax.allocation(text.as_ptr(), text.capacity());
+    }
+    memory.into_allocations()
 }
 
 pub fn name(t: &T) -> String {
@@ -126,9 +148,9 @@ pub fn import_paths(text: &str) -> Result<Vec<String>, Vec<Diagnostic>> {
     let mut paths = Vec::new();
     for f in &forms {
         if head(f) == Some("import") {
-            match &f.node {
-                Node::List(items) if items.len() == 2 => match &items[1].node {
-                    Node::Str(path) if is_relative(path) => paths.push(String::from_utf8_lossy(path).into_owned()),
+            match f.children() {
+                [_, path] => match f.arena().row(*path).node {
+                    Node::Str(bytes) if is_relative(f.bytes(bytes)) => paths.push(String::from_utf8_lossy(f.bytes(bytes)).into_owned()),
                     _ => return Err(vec![diag(Some(f.span.clone()), "E_IMPORT", "Import takes one relative file path.")]),
                 },
                 _ => return Err(vec![diag(Some(f.span.clone()), "E_IMPORT", "Import takes one relative file path.")]),
@@ -139,8 +161,8 @@ pub fn import_paths(text: &str) -> Result<Vec<String>, Vec<Diagnostic>> {
 }
 
 fn second_name(f: &S) -> Option<String> {
-    match s::children(f).get(1).map(|c| &c.node) {
-        Some(Node::Sym(name)) => Some(name.clone()),
+    match f.children().get(1).map(|id| f.arena().row(*id).node) {
+        Some(Node::Sym(name)) => Some(f.name(name).to_owned()),
         _ => None,
     }
 }
@@ -161,17 +183,25 @@ pub fn imported_file(t: &T, path: &[String]) -> Option<String> {
 
 fn authored_source(t: &T) -> Vec<S> {
     let names: Vec<String> = t.imports.iter().flat_map(|(_, forms)| forms.iter().filter_map(second_name)).collect();
-    t.source
-        .iter()
-        .map(|ws| match &ws.node {
-            Node::List(items) if items.len() >= 2 => {
-                let mut v = vec![items[0].clone(), items[1].clone()];
-                v.extend(items[2..].iter().filter(|f| second_name(f).map_or(true, |n| !names.contains(&n))).cloned());
-                S { node: Node::List(v.into()), ..ws.clone() }
+    if names.is_empty() { return t.source.clone(); }
+    let mut builder = SyntaxBuilder::new();
+    for form in t.source.iter() { builder.import(form); }
+    let roots = t.source.iter().map(|form| match form.node {
+        Node::List(range) if form.range(range).len() >= 2 => {
+            let items = form.range(range);
+            let mut children = Vec::with_capacity(items.len());
+            for (index, id) in items.iter().enumerate() {
+                let child = form.child(*id);
+                if index < 2 || second_name(&child).is_none_or(|name| !names.contains(&name)) {
+                    children.push(builder.imported(&child).expect("source imported once"));
+                }
             }
-            _ => ws.clone(),
-        })
-        .collect()
+            builder.with_node(form, Draft::List(children))
+        }
+        _ => builder.imported(form).expect("source imported once"),
+    }).collect::<Vec<_>>();
+    let arena = builder.freeze();
+    roots.into_iter().map(|id| arena.handle(id)).collect()
 }
 
 // ---- settings: (settings :name value ...), only non-default fields ----
@@ -181,42 +211,46 @@ fn settings_form(st: &settings::T) -> Option<S> {
     if fields.is_empty() {
         return None;
     }
-    let value = |v: &PV| match v {
-        PV::Bool(b) => s::make(Node::Sym(if *b { "true" } else { "false" }.to_owned())),
-        PV::Int(i) => s::make(Node::Num(i.to_string())),
-        PV::Float(x) => s::make(Node::Num(lisp::float(*x))),
-        PV::Text(t) => s::make(Node::Str(t.clone())),
-        PV::Choice(c) => s::make(Node::Str(c.as_bytes().to_vec())),
-    };
-    let mut items = vec![s::make(Node::Sym("settings".to_owned()))];
+    let mut builder = SyntaxBuilder::new();
+    let span = Span { start: 0, finish: 0 };
+    let mut items = vec![builder.push_draft(0, Draft::Sym("settings".to_owned()), span.clone(), None)];
     for f in &fields {
-        items.push(s::make(Node::Kw(f.name.clone())));
-        items.push(value(&f.current));
+        items.push(builder.push_draft(0, Draft::Kw(f.name.clone()), span.clone(), None));
+        let value = match &f.current {
+            PV::Bool(b) => Draft::Sym(if *b { "true" } else { "false" }.to_owned()),
+            PV::Int(i) => Draft::Num(i.to_string()),
+            PV::Float(x) => Draft::Num(lisp::float(*x)),
+            PV::Text(bytes) => Draft::Str(bytes.clone()),
+            PV::Choice(choice) => Draft::Str(choice.as_bytes().to_vec()),
+        };
+        items.push(builder.push_draft(0, value, span.clone(), None));
     }
-    Some(s::make(Node::List(items.into())))
+    let root = builder.push_draft(0, Draft::List(items), span, None);
+    Some(builder.freeze().handle(root))
 }
 
 fn read_settings(base: &settings::T, form: &S) -> Result<settings::T, String> {
     let known = settings::fields(base);
     let mut changes: Vec<(String, PV)> = Vec::new();
-    let children: Vec<S> = s::children(form).into_iter().skip(1).cloned().collect();
-    let mut rest = children.as_slice();
+    let mut rest = form.children().get(1..).unwrap_or(&[]);
     loop {
         match rest {
             [] => break,
-            [S { node: Node::Kw(k), .. }, v, tail @ ..] => {
-                let field = known.iter().find(|f| f.name == *k).ok_or_else(|| format!("unknown setting {k}"))?;
-                let wrong = || format!("setting {k} has the wrong type");
-                let value = match (&field.current, &v.node) {
-                    (PV::Bool(_), Node::Sym(t)) if t == "true" => PV::Bool(true),
-                    (PV::Bool(_), Node::Sym(t)) if t == "false" => PV::Bool(false),
-                    (PV::Int(_), Node::Num(n)) if literal_edit::int_of_string_opt(n).is_some() => PV::Int(literal_edit::int_of_string_opt(n).unwrap()),
-                    (PV::Float(_), Node::Num(n)) if cfmt::parse_ocaml_float(n).is_some() => PV::Float(cfmt::parse_ocaml_float(n).unwrap()),
-                    (PV::Text(_), Node::Str(t)) => PV::Text(t.clone()),
-                    (PV::Choice(_), Node::Str(t)) => PV::Choice(String::from_utf8_lossy(t).into_owned()),
+            [key, value, tail @ ..] if matches!(form.arena().row(*key).node, Node::Kw(_)) => {
+                let Node::Kw(key) = form.arena().row(*key).node else { unreachable!() };
+                let key = form.name(key);
+                let field = known.iter().find(|f| f.name == key).ok_or_else(|| format!("unknown setting {key}"))?;
+                let wrong = || format!("setting {key} has the wrong type");
+                let value = match (&field.current, form.arena().row(*value).node) {
+                    (PV::Bool(_), Node::Sym(text)) if form.name(text) == "true" => PV::Bool(true),
+                    (PV::Bool(_), Node::Sym(text)) if form.name(text) == "false" => PV::Bool(false),
+                    (PV::Int(_), Node::Num(text)) => PV::Int(literal_edit::int_of_string_opt(form.name(text)).ok_or_else(wrong)?),
+                    (PV::Float(_), Node::Num(text)) => PV::Float(cfmt::parse_ocaml_float(form.name(text)).ok_or_else(wrong)?),
+                    (PV::Text(_), Node::Str(bytes)) => PV::Text(form.bytes(bytes).to_vec()),
+                    (PV::Choice(_), Node::Str(bytes)) => PV::Choice(String::from_utf8_lossy(form.bytes(bytes)).into_owned()),
                     _ => return Err(wrong()),
                 };
-                changes.push((k.clone(), value));
+                changes.push((key.to_owned(), value));
                 rest = tail;
             }
             _ => return Err("expected :name value pairs".to_owned()),
@@ -354,13 +388,11 @@ fn load_import(path: &str, imports: &[(String, String)]) -> Result<Vec<S>, Vec<D
         // ponytail: imports are one level; recursive resolution needs cycle detection.
         return fail("transitive imports are not supported.");
     }
-    let children: Vec<S> = forms
-        .iter()
-        .flat_map(|f| match &f.node {
-            Node::List(items) if items.len() >= 2 && matches!(&items[0].node, Node::Sym(h) if h == "workspace") => items[2..].to_vec(),
-            _ => vec![f.clone()],
-        })
-        .collect();
+    let children = forms.iter().flat_map(|form| {
+        let unwrap = head(form) == Some("workspace") && form.children().len() >= 2;
+        form.children().iter().skip(if unwrap { 2 } else { form.children().len() }).map(|id| form.child(*id))
+            .chain((!unwrap).then(|| form.clone()))
+    }).collect::<Vec<_>>();
     if children.iter().all(|f| matches!(head(f), Some("graph" | "defn" | "defnode" | "defmacro"))) {
         Ok(children)
     } else {
@@ -374,33 +406,42 @@ fn load_import(path: &str, imports: &[(String, String)]) -> Result<Vec<S>, Vec<D
 pub fn check_text(options: &TextOptions, catalog: &Catalog, text: &str) -> Result<(T, Vec<Diagnostic>), Vec<Diagnostic>> {
     let forms = s::parse(text).map_err(|d| vec![d])?;
     let fragment = !forms.is_empty() && forms.iter().all(is_library_head);
-    let forms: Vec<S> = if fragment {
-        let mut items = vec![s::make(Node::Sym("workspace".to_owned())), s::make(Node::Sym("library".to_owned()))];
-        items.extend(forms);
-        vec![s::make(Node::List(items.into()))]
+    let mut builder = SyntaxBuilder::new();
+    let root = if fragment {
+        let span = Span { start: 0, finish: 0 };
+        let mut items = vec![
+            builder.push_draft(0, Draft::Sym("workspace".to_owned()), span.clone(), None),
+            builder.push_draft(0, Draft::Sym("library".to_owned()), span.clone(), None),
+        ];
+        items.extend(forms.iter().map(|form| builder.import(form)));
+        builder.push_draft(0, Draft::List(items), span, None)
     } else {
-        forms
+        let Some(workspace) = forms.iter().find(|form| head(form) == Some("workspace")) else {
+            return Err(vec![diag(None, "E_WORKSPACE", "Expected a (workspace ...) form.")]);
+        };
+        check_forms(&forms)?;
+        builder.import(workspace)
     };
-    let Some(ws) = forms.iter().find(|f| head(f) == Some("workspace")) else {
-        return Err(vec![diag(None, "E_WORKSPACE", "Expected a (workspace ...) form.")]);
-    };
-    check_forms(&forms)?;
     let mut loaded: Vec<(String, Vec<S>)> = Vec::new();
     for path in import_paths(text)? {
         let children = load_import(&path, &options.imports)?;
         loaded.push((path, children));
     }
-    let ws = match &ws.node {
-        Node::List(items) if items.len() >= 2 => {
-            let mut v = vec![items[0].clone(), items[1].clone()];
-            v.extend(loaded.iter().flat_map(|(_, c)| c.iter().cloned()));
-            v.extend(items[2..].iter().cloned());
-            S { node: Node::List(v.into()), ..ws.clone() }
+    let root = match builder.row(root).node {
+        Node::List(range) if builder.range_ids(range).len() >= 2 && !loaded.is_empty() => {
+            let mut items = builder.range_ids(range)[..2].to_vec();
+            items.extend(loaded.iter().flat_map(|(_, children)| children).map(|form| builder.import(form)));
+            items.extend_from_slice(&builder.range_ids(range)[2..]);
+            let node = Node::List(builder.range(&items));
+            let row = builder.row(root).clone();
+            let trivia = builder.trivia(root).cloned();
+            builder.push(row.id, node, row.span, trivia)
         }
-        _ => ws.clone(),
+        _ => root,
     };
     // Imported parses have independent ids; the composed workspace owns one id space.
-    let ws = s::renumber(0, &ws).0;
+    let (root, _) = builder.renumber(0, root);
+    let ws = builder.freeze().handle(root);
     let ops: Arc<Vec<FlowOp>> = options.ops.clone().unwrap_or_else(|| Arc::new(flow_sop::operators::all().to_vec()));
     let (checked, warnings) = fsc::check_workspace(&ops, fragment, None, catalog, std::slice::from_ref(&ws));
     let Some(mut checked) = checked else { return Err(warnings) };
@@ -426,7 +467,7 @@ pub fn check_text(options: &TextOptions, catalog: &Catalog, text: &str) -> Resul
             imports: loaded.clone(),
             fragment,
             import_sources: options.imports.iter().filter(|(path, _)| loaded.iter().any(|(p, _)| p == path)).cloned().collect(),
-            extra: forms.iter().filter(|f| head(f) != Some("workspace")).cloned().collect(),
+            extra: if fragment { Vec::new() } else { forms.iter().filter(|f| head(f) != Some("workspace")).cloned().collect() },
             checked: Arc::new(checked),
         },
         warnings,
@@ -442,17 +483,17 @@ pub fn import_texts(t: &T) -> Vec<(String, String)> {
 }
 
 fn max_id(form: &S) -> i64 {
-    s::children(form).iter().fold(form.id, |id, child| id.max(max_id(child)))
+    form.children().iter().fold(form.id, |id, child| id.max(max_id(&form.child(*child))))
 }
 
 /// The workspace, then the other root forms in the order they were written (`view` verbatim,
 /// `layout` and `settings` rewritten from the document), each under the comments written above the
 /// form it replaces. Comments of a form that is no longer written move to the next one, or to the
 /// end of the text.
-pub fn print(t: &T) -> (String, lisp::Spans) {
+pub fn print(t: &T) -> R<(String, lisp::Spans)> {
     let source = authored_source(t);
     let source: Vec<S> = if t.fragment {
-        source.iter().flat_map(|f| s::children(f).into_iter().skip(2).cloned().collect::<Vec<_>>()).collect()
+        source.iter().flat_map(|form| form.children().iter().skip(2).map(|id| form.child(*id))).collect()
     } else {
         source
     };
@@ -468,21 +509,23 @@ pub fn print(t: &T) -> (String, lisp::Spans) {
     names.extend(["layout", "settings"].iter().filter(|n| !written.contains(n)));
     let mut carried: Vec<String> = Vec::new();
     let mut remaining: Vec<S> = t.extra.clone();
-    let mut forms: Vec<S> = Vec::new();
+    let mut builder = SyntaxBuilder::new();
+    let mut forms: Vec<SyntaxId> = Vec::new();
     for name in names {
         let old = remaining.iter().position(|f| head(f) == Some(name)).map(|i| remaining.remove(i));
         let mut notes = carried.clone();
         notes.extend(old.as_ref().map(|f| f.notes().to_vec()).unwrap_or_default());
         let tail = old.as_ref().map(|f| f.tail().to_vec()).unwrap_or_default();
-        let chosen = if name == "view" || name == "import" {
-            old
-        } else {
-            fresh.iter().find(|(n, _)| *n == name).and_then(|(_, f)| f.clone()).map(|mut f| { *f.tail_mut() = tail.clone(); f })
-        };
+        let preserve = name == "view" || name == "import";
+        let chosen = if preserve { old } else { fresh.iter().find(|(n, _)| *n == name).and_then(|(_, form)| form.clone()) };
         match chosen {
-            Some(f) => {
+            Some(form) => {
                 carried.clear();
-                { let mut f = f; *f.notes_mut() = notes; forms.push(f); }
+                let mut trivia = form.trivia().cloned().unwrap_or_default();
+                trivia.notes = notes;
+                if !preserve { trivia.tail = tail; }
+                let id = builder.import(&form);
+                forms.push(builder.with_trivia(id, Some(trivia)));
             }
             None => {
                 carried = notes;
@@ -492,29 +535,27 @@ pub fn print(t: &T) -> (String, lisp::Spans) {
     }
     // Root metadata is rebuilt, or kept from an earlier parse. Give it a disjoint printed ID range
     // so text gestures cannot alias source tokens.
-    let forms: Vec<S> = if forms.is_empty() {
-        source
-    } else {
-        let mut next = 1 + source.iter().fold(0, |id, form| id.max(max_id(form)));
-        let mut out = source;
-        for form in &forms {
-            let (form, n) = s::renumber(next, form);
-            next = n;
-            out.push(form);
-        }
-        out
-    };
-    let mut forms = forms;
+    if forms.is_empty() && carried.is_empty() { return lisp::print(&source); }
+    let mut next = 1 + source.iter().fold(0, |id, form| id.max(max_id(form)));
+    let mut roots = source.iter().map(|form| builder.import(form)).collect::<Vec<_>>();
+    for form in forms {
+        let (form, n) = builder.renumber(next, form);
+        next = n;
+        roots.push(form);
+    }
     if !carried.is_empty() {
-        if let Some(last) = forms.last_mut() {
-            last.tail_mut().extend(carried);
+        if let Some(last) = roots.last_mut() {
+            let mut trivia = builder.trivia(*last).cloned().unwrap_or_default();
+            trivia.tail.extend(carried);
+            *last = builder.with_trivia(*last, Some(trivia));
         }
     }
-    lisp::print(&forms)
+    let arena = builder.freeze();
+    lisp::print(&roots.into_iter().map(|id| arena.handle(id)).collect::<Vec<_>>())
 }
 
-pub fn to_text(t: &T) -> String {
-    print(t).0
+pub fn to_text(t: &T) -> R<String> {
+    print(t).map(|(text, _)| text)
 }
 
 /// A checked rewrite as the next document: the layout keys follow `remap`, and are pruned unless
@@ -580,16 +621,17 @@ fn guarded(t: &T, paths: &[Vec<String>], run: &mut dyn FnMut() -> R<T>) -> R<T> 
     }
     let next = run()?;
     // Renaming a local graph can rewrite references in imported forms too.
-    let children = |source: &[S]| -> Vec<S> { source.iter().flat_map(|f| s::children(f).into_iter().skip(2).cloned().collect::<Vec<_>>()).collect() };
-    let old_children = children(&t.source);
-    let new_children = children(&next.source);
+    let find = |source: &[S], name: &Option<String>| -> Option<S> {
+        source.iter().find_map(|root| root.children().iter().skip(2).find_map(|id| {
+            let form = root.child(*id);
+            (second_name(&form) == *name).then_some(form)
+        }))
+    };
     let changed = t.imports.iter().find_map(|(file, forms)| {
         if forms.iter().any(|form| {
             let name = second_name(form);
-            let old = old_children.iter().find(|f| second_name(f) == name);
-            let fresh = new_children.iter().find(|f| second_name(f) == name);
-            match (old, fresh) {
-                (Some(a), Some(b)) => !s::equal(a, b),
+            match (find(&t.source, &name), find(&next.source, &name)) {
+                (Some(a), Some(b)) => !s::equal(&a, &b),
                 (None, None) => false,
                 _ => true,
             }

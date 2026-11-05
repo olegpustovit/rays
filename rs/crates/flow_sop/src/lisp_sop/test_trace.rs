@@ -1,7 +1,7 @@
 //! Port of the kernel half of lib/flow_sop/test_trace.ml (the host half lives in trace_scene.rs): a `.rays`
 //! kernel traces a lattice of rays at a quad; the packed kernel is bit-identical to the reference walker
 //! at 1 and 8 domains, its t and prim match a direct raycast, and one host query is made per ray.
-//! The flow_web refusal (E_WEB_SOURCE) is not ported: flow_sop does not depend on flow_web.
+//! The real JavaScript region exporter refuses the native trace source with E_WEB_SOURCE.
 use crate::{catalog, operators, trace_scene};
 use flow_check::catalog::Catalog;
 use flow_check::ray_host as host;
@@ -53,6 +53,7 @@ fn packed_trace_matches_the_walker_and_a_direct_raycast() {
     let (value, program) = compile(&format!(
         "(map (fn [(i : int)] (let* [x (- (* 0.15 (float (int/mod i 16))) 1.2) y (- (* 0.15 (float (int/div i 16))) 1.2)\n h (scene/trace {ID} [x y 5.] [0. 0. -1.] 0. 100. t)]\n [h.t (float h.prim) (+ h.u h.v) (if h.hit (+ 1. (* h.normal.z h.normal.z)) 0.)])) (array/range {COUNT} :type int))"
     ));
+    assert_eq!(flow_web::js::region(false,&program).unwrap_err().code,"E_WEB_SOURCE");
     let live = input::at_time(1.0);
     let reference = e::Host::force_reference(&value, &live, None, None, None).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
     for domains in [1, 8] {

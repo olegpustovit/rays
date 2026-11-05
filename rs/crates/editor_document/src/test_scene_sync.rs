@@ -124,7 +124,7 @@ fn layer_labels(doc: &Doc) -> Vec<String> {
 }
 
 fn source(doc: &Doc) -> String {
-    workspace_doc::to_text(&doc.workspace.ws)
+    workspace_doc::to_text(&doc.workspace.ws).unwrap()
 }
 
 /// The text of `doc`, opened again, says the same.
@@ -790,7 +790,7 @@ fn loop_copy_that_makes_two_objects() {
       (scene/merge a b c d :skip [1 3]))))"#,
     );
     check(lamps(&renum).len() == 2, "a merge :skip did not leave two lamps");
-    let edit_text = |doc: &Doc, op: &Op| workspace_doc::to_text(&edit_ws(doc, op).unwrap());
+    let edit_text = |doc: &Doc, op: &Op| workspace_doc::to_text(&edit_ws(doc, op).unwrap()).unwrap();
     let after = edit_text(&renum, &Op::DeleteNodes { nodes: vec![vec!["scene".to_owned(), "b".to_owned()]] });
     check(contains(&after, ":skip [2]"), &format!("deleting an argument did not renumber the skip: {after}"));
     let after = edit_text(&renum, &Op::DeleteNodes { nodes: vec![vec!["scene".to_owned(), "a".to_owned()]] });
@@ -1192,7 +1192,7 @@ fn compose_add_geometry_and_world() {
     let shared = apply_ops(&worlded, &[Op::SetGraph { name: "saved".to_owned(), form: saved }]).unwrap();
     let sky_text = |doc: &Doc| {
         let graph = doc.workspace.ws.checked.graphs.iter().find(|g| g.name == "sky").unwrap();
-        flow_syntax::lisp::print(&[graph.form.clone()]).0
+        flow_syntax::lisp::print(&[graph.form.clone()]).unwrap().0
     };
     let retained = delete_world(&shared);
     check(

@@ -1,10 +1,13 @@
-//! Ports of lib/flow_gpu/test_film.ml, test_resolve.ml and the GPU half of test_helpers.ml.
+//! Ports of lib/flow_gpu/test_film.ml, test_resolve.ml and test_helpers.ml.
 //! film: in-place read-modify-write accumulation through `bound`/`into` plus an RGBA8 resolve by
 //! the image sink, ties to even. resolve: `resolve_preview.rays` on the GPU matches the same
 //! arithmetic written out on the host. helpers: `pathtrace_helpers.rays` kernels on the GPU match
-//! the CPU within float32 tolerance. (The OCaml helper test also checks the CPU result against
-//! pathtrace.metal's arithmetic written out in OCaml; that CPU-only oracle is not ported.)
+//! the CPU within float32 tolerance; the CPU also matches independent host arithmetic.
 mod common;
+#[path = "common/pathtrace_reference.rs"]
+mod reference_math;
+#[path = "common/helpers_reference.rs"]
+mod helpers_reference;
 use common::test_program as tp;
 use flow_gpu::{image_sink, pipelines, run};
 use flow_ir::packed::{self, host as phost};
@@ -163,10 +166,6 @@ fn kernel3(body: &str) -> String {
 }
 
 fn helpers() {
-    if !common::gpu() {
-        return;
-    }
-    let lease = common::lease();
     let live = input::at_time(1.0);
     let sources = vec![
         kernel("[(float (int/and a.value 16777215)) (d-ggx r1 a2) (v-smith r2 r3 a2) (+ r4 (* 0. t))])"),
@@ -176,13 +175,17 @@ fn helpers() {
         kernel3("[bs.b.y bs.b.z (+ rh.t (* 0. t)) rh.cos]"),
         kernel3("[wuv.u wuv.v wd.x (+ wd.z (* 0. t))]"),
     ];
+    let programs: Vec<_> = sources.iter().map(|src| tp::compile_with(None, true, HELPERS, src)).collect();
+    let cpu: Vec<_> = programs.iter().map(|p| vec4(&tp::ok(packed::force(p, &live, &Default::default())))).collect();
+    helpers_reference::check(&cpu);
+    if !common::gpu() { return; }
+    let lease = common::lease();
     let pipes = pipelines::create(&|| 0.0, &renderer::renderer::gpu_device(&lease));
-    for (k, src) in sources.iter().enumerate() {
-        let program = tp::compile_with(None, true, HELPERS, src);
-        let expected = vec4(&tp::ok(packed::force(&program, &live, &Default::default())));
+    for (k, program) in programs.iter().enumerate() {
+        let expected = &cpu[k];
         let runner = run::create(None, &lease, &pipes, &tp::ok(emit::kernel(&emit::Options { fast: true, ..Default::default() }, &program)));
         let gpu = vec4(&tp::ok(run::readback(&tp::ok(run::dispatch(&runner, &run::Options::default(), None, None, &prepare(&program, 1.0))), None)));
-        let worst = gpu.iter().zip(&expected).fold(0.0f64, |m, (v, e)| m.max((v - e).abs() / e.abs().max(1.0)));
+        let worst = gpu.iter().zip(expected).fold(0.0f64, |m, (v, e)| m.max((v - e).abs() / e.abs().max(1.0)));
         println!("pathtrace_helpers.rays kernel {k}: {N} rows, GPU vs CPU max relative error {worst:.3e}");
         assert!(worst <= 1e-3, "kernel {k}: {worst}");
         run::close(&runner, false);

@@ -51,10 +51,10 @@ fn catalog() -> flow_check::catalog::Catalog {
     kinds::catalog(1, &sop::nodes::factories()).expect("catalog")
 }
 
-fn child<'a>(form: &'a S, path: &[i64]) -> &'a S {
-    let mut cur = form;
+fn child(form: &S, path: &[i64]) -> S {
+    let mut cur = form.clone();
     for i in path {
-        cur = s::children(cur)[*i as usize];
+        cur = cur.child(cur.children()[*i as usize]);
     }
     cur
 }
@@ -85,44 +85,44 @@ fn token_scrubs() {
         let whole = f::arg_text(&source, path, key).unwrap();
         let atom = child(&whole, sub);
         for tab in [Tab::Selection, Tab::Graph, Tab::Document] {
-            let shown = t::make_shown(&source, "g", Some(path), tab);
+            let shown = t::make_shown(&source, "g", Some(path), tab).unwrap();
             let span = shown.spans.iter().find(|(id, _)| *id == atom.id).map(|(_, sp)| sp.clone()).unwrap();
             let guard = SampleGuard::start_with_clock(Box::new(|| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64()));
-            let op = t::scrub_op(&shown, (span.start, span.finish), "1234").unwrap();
+            let op = t::scrub_op(&shown, (i64::from(span.start), i64::from(span.finish)), "1234").unwrap();
             let phases = guard.finish();
             assert!(phases.entries.is_empty(), "finding a numeric token ran the workspace pipeline");
             assert!(
-                matches!(&op, Op::SetArg { node, key: k, sub: sb, value } if node == path && k == key && sb == sub && value.node == Node::Num("1234".into())),
+                matches!(&op, Op::SetArg { node, key: k, sub: sb, value } if node == path && k == key && sb == sub && matches!(value.node, Node::Num(n) if value.name(n) == "1234")),
                 "a printed numeric token targeted the wrong card or argument: {op:?}"
             );
         }
     }
     let path = p(&["g", "ys#0", "shift"]);
-    let shown = t::make_shown(&source, "g", Some(&path), Tab::Graph);
+    let shown = t::make_shown(&source, "g", Some(&path), Tab::Graph).unwrap();
     let atom = f::arg_text(&source, &path, &ArgKey::Pos(1)).unwrap();
     let span = shown.spans.iter().find(|(id, _)| *id == atom.id).map(|(_, sp)| sp.clone()).unwrap();
-    assert_eq!(t::binding_at(&shown, span.start), Some(path.clone()), "the caret in an inline function's body did not select its card");
+    assert_eq!(t::binding_at(&shown, i64::from(span.start)), Some(path.clone()), "the caret in an inline function's body did not select its card");
     assert!(t::binding(&source, &path).is_some(), "an inline function body path did not find its source binding");
     let catalog = catalog();
     let d = doc::of_text(&TextOptions::default(), &catalog, "(workspace w (graph g :context sop (sop/box))) (view :zoom 999)").unwrap();
     let form = s::parse("(graph g :context sop (let* [a (sop/box :size [2 3 4]) b (sop/transform a)] b))").unwrap().remove(0);
     let d = doc::edit(&catalog, &d, &Op::SetGraph { name: "g".into(), form }).unwrap();
-    let (printed, spans) = doc::print(&d);
+    let (printed, spans) = doc::print(&d).unwrap();
     let mut ids: Vec<i64> = spans.iter().map(|(id, _)| *id).collect();
     let n = ids.len();
     ids.sort();
     ids.dedup();
     assert_eq!(ids.len(), n, "document metadata reused source IDs after a structural edit");
-    let base = t::make_shown(&d.source, "g", None, Tab::Document);
+    let base = t::make_shown(&d.source, "g", None, Tab::Document).unwrap();
     let shown = Shown { text: printed.clone(), spans: std::sync::Arc::new(spans.clone()), ..base };
-    let last: Span = spans.iter().find(|(_, sp)| t::sub(&printed, sp.start, sp.finish - sp.start) == "999").map(|(_, sp)| sp.clone()).unwrap();
-    assert!(t::scrub_op(&shown, (last.start, last.finish), "1000").is_none(), "metadata token aliased a source literal");
+    let last: Span = spans.iter().find(|(_, sp)| t::sub(&printed, i64::from(sp.start), i64::from(sp.finish - sp.start)) == "999").map(|(_, sp)| sp.clone()).unwrap();
+    assert!(t::scrub_op(&shown, (i64::from(last.start), i64::from(last.finish)), "1000").is_none(), "metadata token aliased a source literal");
 }
 
 #[test]
 fn selection_text() {
     let src = source("sunflower");
-    let sel = |path: &[&str]| t::make_shown(&src, "sunflower", Some(&p(path)), Tab::Selection);
+    let sel = |path: &[&str]| t::make_shown(&src, "sunflower", Some(&p(path)), Tab::Selection).unwrap();
     // a binding inside a loop: its top-level ancestor, no unrelated bindings
     let sh = sel(&["sunflower", "seeds_each", "r"]);
     assert!(contains(&sh.text, "(let* [seeds_each (for [i (range seeds)]"), "sunflower closure lost the ancestor");
@@ -132,7 +132,7 @@ fn selection_text() {
     assert_eq!(marked(&sh), "r (* spread (sqrt i))");
     assert_eq!(sh.key, p(&["sunflower", "seeds_each", "r"]), "the selection's key");
     let bound = match t::binding(&src, &p(&["sunflower", "seeds_each", "r"])) {
-        Some((_, v)) => pxui_shell::kit::ocaml_trim(&flow_syntax::lisp::print(&[v]).0).to_owned(),
+        Some((_, v)) => pxui_shell::kit::ocaml_trim(&flow_syntax::lisp::print(&[v]).unwrap().0).to_owned(),
         None => String::new(),
     };
     assert_eq!(bound, "(* spread (sqrt i))", "binding text");
@@ -143,7 +143,7 @@ fn selection_text() {
     assert_eq!(marked(&sh), "head (sop/merge seeds_each)", "head mark");
     // the marked text is where the printer put it: printing again finds it
     let bloom = source("bloom");
-    let sel = |path: &[&str]| t::make_shown(&bloom, "flower", Some(&p(path)), Tab::Selection);
+    let sel = |path: &[&str]| t::make_shown(&bloom, "flower", Some(&p(path)), Tab::Selection).unwrap();
     let sh = sel(&["flower", "ring", "leaf"]);
     assert_eq!(marked(&sh), "leaf (petal :length (+ 0.9 wobble) :width 0.22)");
     assert!(contains(&sh.text, "ring (for") && !contains(&sh.text, "bloom (sop/merge") && !contains(&sh.text, "heart"), "bloom closure of ring is the loop alone");
@@ -157,12 +157,12 @@ fn selection_text() {
     );
     assert!(marked(&sh).starts_with("result"), "bloom result mark");
     // no selection: the whole graph, nothing marked; Graph marks the selection
-    let sh = t::make_shown(&bloom, "flower", None, Tab::Selection);
+    let sh = t::make_shown(&bloom, "flower", None, Tab::Selection).unwrap();
     assert!(contains(&sh.text, "(graph flower") && sh.mark.is_none() && sh.key == p(&["flower"]), "unselected shows the graph");
-    let g = t::make_shown(&bloom, "flower", Some(&p(&["flower", "ring", "leaf"])), Tab::Graph);
+    let g = t::make_shown(&bloom, "flower", Some(&p(&["flower", "ring", "leaf"])), Tab::Graph).unwrap();
     assert!(contains(&g.text, "(graph flower") && contains(&g.text, "heart") && g.mark.is_some(), "graph tab");
     assert!(!contains(&g.text, "(defn petal"), "the graph tab shows the active graph only");
-    let d = t::make_shown(&bloom, "flower", None, Tab::Document);
+    let d = t::make_shown(&bloom, "flower", None, Tab::Document).unwrap();
     assert!(contains(&d.text, "(defn petal") && contains(&d.text, "(graph world"), "document tab is the whole workspace");
     // the caret in a binding is that binding's path; outside every binding it is none
     let offset = |part: &str| offset_in(&g.text, part);
@@ -171,12 +171,12 @@ fn selection_text() {
     // a call written in an input is a node: the caret in it selects it, and its path finds it
     assert_eq!(t::binding_at(&g, offset("(value/hsv") + 3), Some(p(&["flower", "ring", "tint#:color"])), "binding_at: a nested node");
     assert!(
-        matches!(t::binding(&bloom, &p(&["flower", "ring", "tint#:color"])), Some((None, S { node: Node::List(l), .. })) if matches!(&l[0].node, Node::Sym(h) if h == "value/hsv")),
+        matches!(t::binding(&bloom, &p(&["flower", "ring", "tint#:color"])), Some((None, form)) if s::head(&form) == Some("value/hsv")),
         "binding: a nested node is the call written in the input"
     );
     assert_eq!(t::binding_at(&d, 5), None, "binding_at: the Document tab has none");
     for tab in [Tab::Selection, Tab::Graph, Tab::Document] {
-        let shown = t::make_shown(&bloom, "flower", Some(&p(&["flower", "ring", "leaf"])), tab);
+        let shown = t::make_shown(&bloom, "flower", Some(&p(&["flower", "ring", "leaf"])), tab).unwrap();
         assert_eq!(
             t::binding_at(&shown, offset_in(&shown.text, "leaf (") + 6),
             Some(p(&["flower", "ring", "leaf"])),
@@ -200,7 +200,7 @@ fn selection_text() {
         Some(p(&["g", "inner", "motion"])),
         "a shadowed name did not resolve in its inner scope"
     );
-    let shown = t::make_shown(&lexical, "g", Some(&p(&["g", "inner"])), Tab::Graph);
+    let shown = t::make_shown(&lexical, "g", Some(&p(&["g", "inner"])), Tab::Graph).unwrap();
     assert_eq!(t::definition_at(&shown, offset_in(&shown.text, "(panel leaf)") + 2), Some(p(&["macro:panel"])), "a macro call head did not resolve its template");
     let rails = s::parse(
         r#"(workspace rails
@@ -213,7 +213,7 @@ fn selection_text() {
     .unwrap();
     assert_eq!(t::reference_target(&rails, &p(&["g", "outer"]), "x"), Some(p(&["g", ":x"])), "a graph input did not resolve its input card");
     for tab in [Tab::Graph, Tab::Document] {
-        assert_eq!(marked(&t::make_shown(&rails, "g", Some(&p(&["g", ":x"])), tab)), "(x : float 1.0)", "a referenced graph input was not revealed in Lisp");
+        assert_eq!(marked(&t::make_shown(&rails, "g", Some(&p(&["g", ":x"])), tab).unwrap()), "(x : float 1.0)", "a referenced graph input was not revealed in Lisp");
     }
     for owner in ["loop", "f"] {
         assert_eq!(t::reference_target(&rails, &p(&["g", owner, "leaf"]), "x"), Some(p(&["g", owner])), "a local rail binder jumped to a shadowed graph input");
@@ -266,11 +266,13 @@ fn paste() {
     let workspace = doc::of_text(&TextOptions::default(), &catalog, "(workspace w (graph g :context sop (let* [bed (sop/box)] bed)))").unwrap();
     let pasted = |text: &str| -> String {
         let ops = t::paste_ops(&workspace.source, "g", &p(&["g"]), text).unwrap_or_else(|m| panic!("{m}"));
+        let expressions: Vec<_> = ops.iter().map(|op| match op { Op::AddNode { expr, .. } => expr, _ => panic!("expected pasted binding") }).collect();
+        assert!(expressions.iter().all(|expr| std::sync::Arc::ptr_eq(expressions[0].arena(), expr.arena())), "paste froze a separate arena per binding");
         let mut after = workspace.clone();
         for op in &ops {
             after = doc::edit(&catalog, &after, op).unwrap_or_else(|d| panic!("paste of {text}: {}", diagnostic::to_string(&d)));
         }
-        doc::to_text(&after).replace('\n', " ").split(' ').filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ")
+        doc::to_text(&after).unwrap().replace('\n', " ").split(' ').filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ")
     };
     // two bare forms with one head are two bindings
     let two = pasted("(sop/box) (sop/box :size [2 2 2])");
@@ -295,6 +297,33 @@ fn merge_three() {
     // a head only they changed, with a keyword only I added, both stay
     assert!(t::merge3(base, mine, both).unwrap().contains(":size [2 2 2]"));
     assert!(t::merge3(base, "(workspace w (graph", theirs).is_none(), "a draft that does not read");
+}
+
+#[test]
+fn selection_patch_keeps_source_ids_and_comments() {
+    let source = s::parse("(workspace w (graph g :context value (let* [a ; value note\n (+ 1 2) b (+ a 3)] b)))").unwrap();
+    let root = t::root_form(&source, "g").unwrap();
+    let body = root.child(*root.children().last().unwrap());
+    let bindings = child(&body, &[1]);
+    let old = t::binding(&source, &p(&["g", "a"])).unwrap().1;
+    assert_eq!(old.notes(), &["value note".to_owned()]);
+    let op = t::graph_op(&source, "g", Some(&p(&["g", "b"])), "(let* [a (+ 4 5)] b)").unwrap();
+    let Op::SetGraph { form, .. } = op else { panic!("expected graph patch") };
+    let next_body = form.child(*form.children().last().unwrap());
+    let next_bindings = child(&next_body, &[1]);
+    assert_eq!((form.id, next_body.id, next_bindings.id), (root.id, body.id, bindings.id));
+    assert_eq!(child(&next_bindings, &[0]).id, child(&bindings, &[0]).id);
+    assert_eq!(child(&next_bindings, &[2]).id, child(&bindings, &[2]).id);
+    assert_eq!(child(&next_bindings, &[3]), child(&bindings, &[3]), "omitted binding changed");
+    assert_eq!(child(&next_bindings, &[1]).notes(), old.notes());
+    assert_eq!(flow_syntax::lisp::flat(&child(&next_bindings, &[1])), "(+ 4 5)");
+    assert!(!std::sync::Arc::ptr_eq(root.arena(), form.arena()), "candidate retained its source arena");
+    let mut pending = vec![form.row_id()];
+    while let Some(id) = pending.pop() {
+        let node = form.child(id);
+        assert!(std::sync::Arc::ptr_eq(form.arena(), node.arena()));
+        pending.extend_from_slice(node.children());
+    }
 }
 
 /// The diagnostics a later text still shows, the first error and the summary line.
@@ -326,11 +355,11 @@ fn shown_cache_and_commands() {
     let src = source("bloom");
     let state = t::initial();
     let selected = p(&["flower", "ring", "leaf"]);
-    let (state, a) = t::shown(None, &state, &src, "flower", Some(&selected));
+    let (state, a) = t::shown(None, &state, &src, "flower", Some(&selected)).unwrap();
     assert!(state.cache.is_some());
-    let (_, b) = t::shown(None, &state, &src, "flower", Some(&selected));
+    let (_, b) = t::shown(None, &state, &src, "flower", Some(&selected)).unwrap();
     assert!(std::sync::Arc::ptr_eq(&a.source, &b.source), "the same source and selection are not shown again");
-    let (_, c) = t::shown(None, &state, &src, "flower", None);
+    let (_, c) = t::shown(None, &state, &src, "flower", None).unwrap();
     assert!(c.mark.is_none() && a.mark.is_some());
     let state = t::command(&state, t::Command::FindNext);
     assert_eq!(state.pending, vec![t::Command::FindNext]);
@@ -479,7 +508,7 @@ fn lisp_text_numbers_and_parinfer() {
     // parinfer: closers follow indentation, the printed workspaces are already in that shape
     let pf = |text: &str| flow_syntax::parinfer::rewrite(text, 0).0;
     for name in ["bloom", "sunflower", "rosette"] {
-        let printed = flow_syntax::lisp::print(&source(name)).0;
+        let printed = flow_syntax::lisp::print(&source(name)).unwrap().0;
         assert_eq!(pf(&printed), printed, "{name}: parinfer changed the printed workspace");
     }
     assert_eq!(pf("(a\n  b"), "(a\n  b)", "an open form closes at its last line");

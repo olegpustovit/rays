@@ -27,6 +27,7 @@ const char *rays_sdl3_platform_name(void);
 char *rays_sdl3_pref_path(const char *org, const char *app);
 void rays_sdl3_free(void *value);
 bool rays_sdl3_is_main_thread(void);
+void rays_sdl3_configure_fatal_errors(void);
 bool rays_sdl3_init_subsystem(uint32_t bits);
 void rays_sdl3_quit_subsystem(uint32_t bits);
 

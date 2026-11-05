@@ -2,10 +2,6 @@
 //! test_editor_cook, test_probe, test_workspace_live, test_viewport_pick, test_sop_ui,
 //! test_packed_pieces, test_drawing, test_materials and the editor-driven sections of
 //! test_text_pane. Cases run on the main thread via the shared window runner.
-//!
-//! A case that lowers a real workspace with `sop/uv_sphere` (or runs many editor frames) takes tens of
-//! seconds in a debug build (perf3): those are `slow_case!`s, skipped with a printed reason unless
-//! `RAYS_SLOW=1`.
 #[path = "../../rays/tests/common/mod.rs"]
 mod common;
 #[path = "suite_t3/common.rs"]
@@ -47,41 +43,6 @@ macro_rules! gpu_case {
     };
 }
 
-/// A case skipped unless `RAYS_SLOW=1`, with the reason printed.
-macro_rules! slow_case {
-    ($name:ident, $path:path, $reason:expr) => {
-        fn $name() {
-            if std::env::var("RAYS_SLOW").map_or(true, |v| v != "1") {
-                println!("SKIPPED {}: {}", stringify!($name), $reason);
-                return;
-            }
-            if !common::gpu() {
-                return;
-            }
-            $path();
-        }
-    };
-}
-
-/// A case that fails on a product difference recorded in parity_backlog.md: skipped, with the reason, unless
-/// `T3_RUN_KNOWN=1`.
-#[allow(unused_macros)] // no case is a known failure at the moment
-macro_rules! known_fail {
-    ($name:ident, $path:path, $reason:expr) => {
-        fn $name() {
-            if std::env::var("T3_RUN_KNOWN").map_or(true, |v| v != "1") {
-                println!("SKIPPED {}: {}", stringify!($name), $reason);
-                return;
-            }
-            if !common::gpu() {
-                return;
-            }
-            $path();
-        }
-    };
-}
-
-const PERF3: &str = "slow lowering: perf3";
 
 gpu_case!(commands_canvas_preview, commands::canvas_preview);
 gpu_case!(commands_canvas_frame_size, commands::canvas_frame_size);
@@ -100,30 +61,30 @@ gpu_case!(cook_live_drive, cook_t::live_drive);
 gpu_case!(cook_barriers, cook_t::barriers);
 gpu_case!(cook_close_joins, cook_t::close_joins);
 
-slow_case!(probe_off_display, probe_t::off_display, PERF3);
+gpu_case!(probe_off_display, probe_t::off_display);
 gpu_case!(probe_budget, probe_t::budget);
 gpu_case!(probe_compiled_inputs, probe_t::compiled_inputs);
-slow_case!(probe_live, probe_t::live, PERF3);
-slow_case!(probe_branches_garland, probe_t::branches_garland, "slow lowering: perf3 (the garland evaluates for 20 s in a debug build)");
+gpu_case!(probe_live, probe_t::live);
+gpu_case!(probe_branches_garland, probe_t::branches_garland);
 
-slow_case!(live_value_lanes, live_t::value_lanes, PERF3);
-slow_case!(live_equals_static_sunflower, live_t::live_equals_static_sunflower, PERF3);
-slow_case!(live_equals_static_orrery, live_t::live_equals_static_orrery, PERF3);
-slow_case!(live_orrery_playback, live_t::orrery_playback, PERF3);
-slow_case!(live_orrery_fixed_step, live_t::orrery_fixed_step, PERF3);
-slow_case!(live_realtime_edit, live_t::realtime_edit, PERF3);
-slow_case!(live_editor_cook_path, live_t::editor_cook_path, PERF3);
+gpu_case!(live_value_lanes, live_t::value_lanes);
+gpu_case!(live_equals_static_sunflower, live_t::live_equals_static_sunflower);
+gpu_case!(live_equals_static_orrery, live_t::live_equals_static_orrery);
+gpu_case!(live_orrery_playback, live_t::orrery_playback);
+gpu_case!(live_orrery_fixed_step, live_t::orrery_fixed_step);
+gpu_case!(live_realtime_edit, live_t::realtime_edit);
+gpu_case!(live_editor_cook_path, live_t::editor_cook_path);
 
-slow_case!(pick_sunflower, pick_t::pick_sunflower, PERF3);
-slow_case!(pick_bloom, pick_t::pick_bloom, PERF3);
-slow_case!(pick_flat_boxes, pick_t::flat_boxes, "twelve editor frames and three clicks take 7 s in a debug build");
-slow_case!(pick_flat_loops, pick_t::flat_loops, "two more editors of the same kind: 7 s each in a debug build");
+gpu_case!(pick_sunflower, pick_t::pick_sunflower);
+gpu_case!(pick_bloom, pick_t::pick_bloom);
+gpu_case!(pick_flat_boxes, pick_t::flat_boxes);
+gpu_case!(pick_flat_loops, pick_t::flat_loops);
 
 gpu_case!(packed_exploded_view, packed_t::exploded_view);
-slow_case!(packed_boolean_fracture, packed_t::boolean_fracture, "Boolean fracture cook in a debug build");
+gpu_case!(packed_boolean_fracture, packed_t::boolean_fracture);
 gpu_case!(materials_face_materials, materials_t::face_materials_preserve_explosion);
-slow_case!(materials_refs, materials_t::material_refs, PERF3);
-slow_case!(materials_follow, materials_t::follow_tests, "24 s in a debug build: lowering and editor frames (perf3)");
+gpu_case!(materials_refs, materials_t::material_refs);
+gpu_case!(materials_follow, materials_t::follow_tests);
 gpu_case!(textpane_graph_drafts, textpane_t::graph_drafts);
 gpu_case!(textpane_fn_frames, textpane_t::fn_frames);
 

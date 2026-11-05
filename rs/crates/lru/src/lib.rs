@@ -407,9 +407,9 @@ struct SharedTable {
 }
 
 impl AccountedSize for SharedTable {
-    // Only caller-measured entry bytes are attributable; Mem cannot trace erased Rust payloads.
-    fn owned_bytes(&self) -> usize {
-        lock_state(&self.state).owned_bytes()
+    // Entry payloads are type-erased; their caller-measured total is one explicit table aggregate.
+    fn visit_allocations(&self, visitor: &mut mem::AllocationVisitor) {
+        visitor.exclusive(lock_state(&self.state).owned_bytes());
     }
 }
 
@@ -440,10 +440,11 @@ fn release_entries(release: &Release, entries: Vec<Entry>) {
 fn register_table(state: &Arc<SharedTable>, shed: Shed, rebuild: f64) {
     let weak: Weak<SharedTable> = Arc::downgrade(state);
     let charged_for_walk = Arc::clone(&state.charged);
+    let directly_charged = state.charges;
     mem::walk_table(
         &state.owner,
         state.clone(),
-        Arc::new(move || charged_for_walk.load(Ordering::Relaxed) == 0),
+        Arc::new(move || !directly_charged || charged_for_walk.load(Ordering::Relaxed) == 0),
     );
     if matches!(&shed, Shed::Never) {
         return;
@@ -1292,6 +1293,21 @@ mod tests {
         mem::report();
         assert_eq!(count_only.bytes(), 0);
         assert_eq!(count_owner.bytes(), 0);
+
+        let walked_owner = super::cache("test.lru.walked");
+        let walked = Cache::with_options(
+            walked_owner.clone(), 4, Arc::new(int_equal),
+            CacheOptions { charges: false, ..CacheOptions::default() },
+        );
+        let value = Arc::new(String::with_capacity(32));
+        let retained = value.capacity() as i64;
+        walked.add(int_key(1), value, retained);
+        assert_eq!(walked_owner.bytes(), 0);
+        mem::report();
+        assert_eq!(walked_owner.bytes(), retained);
+        walked.clear();
+        mem::report();
+        assert_eq!(walked_owner.bytes(), 0);
     }
 
     #[test]

@@ -1269,10 +1269,10 @@ mod tests {
                 attribute_of(
                     attribute::Owner::Vertex,
                     "corner_name",
-                    attribute::Storage::Text((0..vertices).map(|v| v.to_string()).collect()),
+                    attribute::Storage::Text((0..vertices).map(|v| v.to_string().into_bytes()).collect()),
                 ),
                 attribute_of(attribute::Owner::Primitive, "material", attribute::Storage::Int((0..primitives).collect())),
-                attribute_of(attribute::Owner::Detail, "tag", attribute::Storage::Text(vec!["bevel".to_owned()])),
+                attribute_of(attribute::Owner::Detail, "tag", attribute::Storage::Text(vec![b"bevel".to_vec()])),
             ]),
             Some(vec![point_order, corner_group, face_order]),
             Some(vec![all_edges(source, "source_edges")]),
@@ -1336,7 +1336,7 @@ mod tests {
         );
         let detail = geometry::find_attribute(attribute::Owner::Detail, "tag", &chamfer).unwrap();
         match attribute::View::storage(&detail).unwrap() {
-            attribute::Storage::Text(values) => assert_eq!(values, &vec!["bevel".to_owned()]),
+            attribute::Storage::Text(values) => assert_eq!(values, &vec![b"bevel".to_vec()]),
             _ => panic!("detail storage changed"),
         }
         let mut p = Params::new(0.3);

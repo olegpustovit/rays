@@ -1,0 +1,97 @@
+#version 460
+#extension GL_EXT_ray_query : require
+layout(local_size_x = 4) in;
+layout(set = 0, binding = 0) uniform accelerationStructureEXT scene;
+layout(set = 0, binding = 1) readonly buffer Rays { vec4 rays[]; };
+struct Hit { uint hit; uint primitive; uint instance; float t; vec2 barycentrics; };
+layout(set = 0, binding = 2) buffer Hits { Hit hits[]; };
+layout(set = 0, binding = 3) uniform MotionTime { float time; };
+layout(set = 0, binding = 4) readonly buffer MotionRecords { uint words[]; };
+layout(set = 0, binding = 5) readonly buffer TransformKeyframes { float values[]; };
+layout(set = 0, binding = 6) uniform accelerationStructureEXT prototypes;
+
+struct Affine { vec3 c0; vec3 c1; vec3 c2; vec3 translation; };
+
+Affine motion_transform(uint record, float query_time) {
+  uint base = record * 11;
+  uint start = words[base + 3];
+  uint count = words[base + 4];
+  float start_time = uintBitsToFloat(words[base + 7]);
+  float end_time = uintBitsToFloat(words[base + 8]);
+  float amount = clamp((query_time - start_time) / (end_time - start_time), 0.0, 1.0);
+  float frame = amount * float(count - 1);
+  uint lo = uint(floor(frame));
+  uint hi = min(lo + 1, count - 1);
+  float blend = frame - float(lo);
+  uint lo_offset = (start + lo) * 12;
+  uint hi_offset = (start + hi) * 12;
+  float m[12];
+  for (uint i = 0; i < 12; ++i) m[i] = mix(values[lo_offset + i], values[hi_offset + i], blend);
+  return Affine(vec3(m[0], m[1], m[2]), vec3(m[3], m[4], m[5]),
+                vec3(m[6], m[7], m[8]), vec3(m[9], m[10], m[11]));
+}
+
+vec3 inverse_vector(vec3 v, Affine transform) {
+  vec3 r0 = cross(transform.c1, transform.c2);
+  vec3 r1 = cross(transform.c2, transform.c0);
+  vec3 r2 = cross(transform.c0, transform.c1);
+  float determinant = dot(transform.c0, r0);
+  return vec3(dot(r0, v), dot(r1, v), dot(r2, v)) / determinant;
+}
+
+vec3 inverse_point(vec3 p, Affine transform) {
+  return inverse_vector(p - transform.translation, transform);
+}
+
+bool intersect_prototype(vec3 origin, vec3 direction, uint target, out float t, out uint primitive, out vec2 barycentrics) {
+  rayQueryEXT nested;
+  rayQueryInitializeEXT(nested, prototypes, gl_RayFlagsNoOpaqueEXT, 0xFF, origin, 0.001, direction, 100.0);
+  while (rayQueryProceedEXT(nested)) {
+    if (rayQueryGetIntersectionTypeEXT(nested, false) == gl_RayQueryCandidateIntersectionTriangleEXT &&
+        uint(rayQueryGetIntersectionInstanceCustomIndexEXT(nested, false)) == target)
+      rayQueryConfirmIntersectionEXT(nested);
+  }
+  bool hit = rayQueryGetIntersectionTypeEXT(nested, true) == gl_RayQueryCommittedIntersectionTriangleEXT;
+  if (!hit) return false;
+  t = rayQueryGetIntersectionTEXT(nested, true);
+  primitive = uint(rayQueryGetIntersectionPrimitiveIndexEXT(nested, true));
+  barycentrics = rayQueryGetIntersectionBarycentricsEXT(nested, true);
+  return true;
+}
+
+void main() {
+  uint i = gl_GlobalInvocationID.x;
+  vec3 origin = rays[i * 2].xyz, direction = rays[i * 2 + 1].xyz;
+  float best_t = 100.0;
+  uint best_primitive = 0u, best_instance = 0u;
+  vec2 best_barycentrics = vec2(0.0);
+  rayQueryEXT q;
+  rayQueryInitializeEXT(q, scene, gl_RayFlagsNoneEXT, 0xFF, origin, 0.001, direction, 100.0);
+  while (rayQueryProceedEXT(q)) {
+    if (rayQueryGetIntersectionTypeEXT(q, false) == gl_RayQueryCandidateIntersectionAABBEXT) {
+      uint record = uint(rayQueryGetIntersectionInstanceIdEXT(q, false));
+      uint prototype = uint(rayQueryGetIntersectionInstanceShaderBindingTableRecordOffsetEXT(q, false));
+      uint user_id = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(q, false));
+      uint base = record * 11;
+      if ((words[base] & 0xFFu) != 0u) {
+        Affine transform = motion_transform(record, time);
+        vec3 local_origin = inverse_point(origin, transform);
+        vec3 local_direction = inverse_vector(direction, transform);
+        float t;
+        uint primitive;
+        vec2 barycentrics;
+        if (intersect_prototype(local_origin, local_direction, prototype, t, primitive, barycentrics) && t < best_t) {
+          best_t = t;
+          best_primitive = primitive;
+          best_instance = user_id;
+          best_barycentrics = barycentrics;
+          rayQueryGenerateIntersectionEXT(q, t);
+        }
+      }
+    }
+  }
+  bool hit = rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionGeneratedEXT;
+  hits[i] = Hit(hit ? 1u : 0u, hit ? best_primitive : 0u, hit ? best_instance : 0u,
+                hit ? rayQueryGetIntersectionTEXT(q, true) : 0.0,
+                hit ? best_barycentrics : vec2(0.0));
+}

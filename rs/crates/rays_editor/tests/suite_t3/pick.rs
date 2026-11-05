@@ -1,7 +1,6 @@
 //! Port of lib/rays_editor/test/test_viewport_pick.ml (W6: viewport provenance, CPU ray picks,
-//! the highlight, and the editor's click-to-select). Fixtures are shrunk (seed 83 of 240 is seed 3
-//! of 6; bloom runs at the sketch's size).
-use crate::probe_t::shrunk as case_text;
+//! the highlight, and the editor's click-to-select), using the original sketches.
+use crate::probe_t::fixture as case_text;
 
 use crate::t3c::*;
 use flow_sop::lower;

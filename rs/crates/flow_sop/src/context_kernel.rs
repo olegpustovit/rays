@@ -2,7 +2,8 @@
 //! (`sop/context_seed` and friends), and the source digests that key prepared kernels.
 use crate::operators;
 use flow_check::op;
-use flow_check::workspace::{self as w, Graph, Node, NodeDefinition, Pattern, Term, Workspace};
+use flow_check::workspace::{self as w, Graph, Node, NodeDefinition, Term, Workspace};
+use flow_check::term_arena::{Draft, Literal, PatternId, PatternNode, TermBuilder, TermId};
 use flow_syntax::context;
 use flow_syntax::syntax::{self, Node as SNode, QuoteKind, Syntax};
 use flow_syntax::ty::Ty;
@@ -15,52 +16,18 @@ fn is_context_op(name: &str) -> bool {
     w::BODY_CONTEXT_OPS.contains(&name)
 }
 
-/// Rewrite every term bottom-up: `select` may replace a term first (its replacement is then
-/// walked), `transform` sees each rebuilt term. Checked terms are trees here, so no sharing memo
-/// is needed. `helpers` false leaves a helper call's inlined body alone.
-fn term_once(select: &dyn Fn(&Term) -> Option<Term>, transform: &dyn Fn(Term) -> Term, helpers: bool, t: &Term) -> Term {
-    let owned;
-    let t = match select(t) { Some(replaced) => { owned = replaced; &owned } None => t };
-    let walk = |child: &Term| term_once(select, transform, helpers, child);
-    let rebuilt = match &t.node {
-        Node::CallFn { fn_name, args, body } if !helpers => Term {
-            node: Node::CallFn { fn_name: fn_name.clone(), args: args.iter().map(&walk).collect(), body: body.clone() },
-            ..shell(t)
-        },
-        _ => w::map_children(&walk, t),
-    };
-    transform(rebuilt)
-}
-
-fn map(select: &dyn Fn(&Term) -> Option<Term>, helpers: bool, transform: &dyn Fn(Term) -> Term, graph: &Graph) -> Graph {
-    let body = term_once(select, transform, helpers, &graph.body);
-    let inputs = graph
-        .inputs
-        .iter()
-        .map(|(name, ty, default)| (name.clone(), ty.clone(), default.as_ref().map(|d| term_once(select, transform, helpers, d))))
-        .collect();
-    Graph { body, inputs, ..graph.clone() }
-}
-
-fn keep(_: &Term) -> Option<Term> {
-    None
-}
-
-fn pattern_names(pattern: &Pattern) -> Vec<String> {
-    match pattern {
-        Pattern::Name(name) => vec![name.clone()],
-        Pattern::Seq(patterns) => patterns.iter().flat_map(pattern_names).collect(),
-        Pattern::Keys(names) => names.clone(),
-    }
-}
-
 type Bindings = Vec<(String, Value)>;
 
-fn remove(patterns: &[Pattern], bindings: &[(String, Value)]) -> Bindings {
-    let bound: Vec<String> = patterns.iter().flat_map(pattern_names).collect();
-    bindings.iter().filter(|(name, _)| !bound.contains(name)).cloned().collect()
+fn remove_pattern(term: &Term, pattern: PatternId, bindings: &[(String, Value)]) -> Bindings {
+    fn binds(term: &Term, pattern: PatternId, name: &str) -> bool {
+        match term.arena().pattern(pattern) {
+            PatternNode::Name(id) => term.name(id) == name,
+            PatternNode::Keys(ids) => term.arena().name_ids(ids).iter().any(|&id| term.name(id) == name),
+            PatternNode::Seq(ids) => term.arena().pattern_ids(ids).iter().any(|&id| binds(term, id, name)),
+        }
+    }
+    bindings.iter().filter(|(name, _)| !binds(term, pattern, name)).cloned().collect()
 }
-
 struct Scan {
 
     found: RefCell<Vec<String>>,
@@ -68,29 +35,27 @@ struct Scan {
 }
 
 fn literal(t: &Term) -> Option<Value> {
-    match &t.node {
-        Node::Lit(param::Value::Bool(b)) => Some(Value::Bool(*b)),
-        Node::Lit(param::Value::Int(n)) => Some(Value::Int(*n)),
-        Node::Lit(param::Value::Float(f)) => Some(Value::Float(*f)),
-        Node::Text(text) => Some(Value::Text(text.clone())),
+    match t.node {
+        Node::Lit(id) => match t.arena().literal(id) {
+            Literal::Bool(b) => Some(Value::Bool(b)),
+            Literal::Int(n) => Some(Value::Int(n)),
+            Literal::Float(f) => Some(Value::Float(f)),
+            _ => None,
+        },
+        Node::Text(id) => Some(Value::Text(t.arena().bytes(id).to_vec())),
         _ => None,
     }
 }
 
 /// The values a helper's inputs take over known arguments (`None` entries for unknown ones).
-fn local_inputs(scan: &Scan, defs: &[Graph], helper: &Graph, args: &[Term], bindings: &[(String, Value)]) -> Vec<Option<(String, Value)>> {
-    helper
-        .inputs
-        .iter()
-        .enumerate()
-        .map(|(i, (name, _, default))| {
-            let value = match args.get(i) {
-                Some(argument) => scan.known(defs, bindings, argument),
-                None => default.as_ref().and_then(|d| scan.known(defs, &[], d)),
-            };
-            value.map(|value| (name.clone(), value))
-        })
-        .collect()
+fn local_inputs(scan: &Scan, defs: &[Graph], helper: &Graph, owner: &Term, args: &[TermId], bindings: &[(String, Value)]) -> Vec<Option<(String, Value)>> {
+    helper.inputs.iter().enumerate().map(|(i, (name, _, default))| {
+        let value = match args.get(i) {
+            Some(&argument) => scan.known(defs, bindings, &owner.child(argument)),
+            None => default.as_ref().and_then(|d| scan.known(defs, &[], d)),
+        };
+        value.map(|value| (name.clone(), value))
+    }).collect()
 }
 
 impl Scan {
@@ -98,23 +63,29 @@ impl Scan {
         if let Some(value) = literal(t) {
             return Some(value);
         }
-        match &t.node {
-            Node::RefBinding(name, fields) if fields.is_empty() => bindings.iter().find(|(n, _)| n == name).map(|(_, v)| v.clone()),
-            Node::CallFn { fn_name, args, body } if self.fuel.get() > 0 => {
-                // a helper over known arguments (a text predicate, say) decides its own branches
-                self.fuel.set(self.fuel.get() - 1);
-                let helper = defs.iter().find(|d| &d.name == fn_name)?;
-                let local = local_inputs(self, defs, helper, args, bindings);
-                if local.iter().any(Option::is_none) {
-                    return None;
-                }
-                let local: Bindings = local.into_iter().flatten().collect();
-                self.known(defs, &local, body.as_deref().unwrap_or(&helper.body))
+        match t.node {
+            Node::RefBinding(id) if t.arena().name_ids(t.arena().ref_binding(id).fields).is_empty() => {
+                let name = t.name(t.arena().ref_binding(id).name);
+                bindings.iter().find(|(n, _)| n == name).map(|(_, v)| v.clone())
             }
-            Node::Op { op: name, args, .. } if !is_context_op(name) => {
-                let mut values = Vec::with_capacity(args.len());
-                for (key, value) in args {
-                    values.push((key.clone(), self.known(defs, bindings, value)?));
+            Node::CallFn(id) if self.fuel.get() > 0 => {
+                self.fuel.set(self.fuel.get() - 1);
+                let call = t.arena().call_fn(id);
+                let helper = defs.iter().find(|d| d.name == t.name(call.name))?;
+                let local = local_inputs(self, defs, helper, t, t.arena().term_ids(call.args), bindings);
+                if local.iter().any(Option::is_none) { return None; }
+                let local: Bindings = local.into_iter().flatten().collect();
+                match call.body {
+                    Some(body) => self.known(defs, &local, &t.child(body)),
+                    None => self.known(defs, &local, &helper.body),
+                }
+            }
+            Node::Op(id) if !is_context_op(t.name(t.arena().op(id).op)) => {
+                let call = t.arena().op(id);
+                let name = t.name(call.op);
+                let mut values = Vec::with_capacity(t.arena().fields(call.args).len());
+                for field in t.arena().fields(call.args) {
+                    values.push((t.name(field.name).to_owned(), self.known(defs, bindings, &t.child(field.term))?));
                 }
                 let found = op::find(operators::all(), name, &context::value())?;
                 (found.check)(&values).ok()?;
@@ -127,112 +98,98 @@ impl Scan {
     }
 
     fn scan(&self, defs: &[Graph], bindings: &[(String, Value)], body: &Term, graph: &Graph) {
-        let select_full = |t: &Term| -> Term {
-            match &t.node {
-                Node::If(test, yes, no) => match self.known(defs, bindings, test) {
-                    Some(Value::Bool(true)) => (**yes).clone(),
-                    Some(Value::Bool(false)) => (**no).clone(),
-                    _ => t.clone(),
-                },
-                Node::Cond(arms, default) => {
-                    // An arm whose test is known false never runs; the first known-true arm is the result.
-                    let mut live: Vec<(Term, Term)> = Vec::new();
-                    let mut taken: Option<Term> = None;
-                    for (test, yes) in arms {
-                        match self.known(defs, bindings, test) {
-                            Some(Value::Bool(false)) => {}
-                            Some(Value::Bool(true)) => {
-                                taken = Some(yes.clone());
-                                break;
-                            }
-                            _ => live.push((test.clone(), yes.clone())),
-                        }
-                    }
-                    match (live.is_empty(), taken) {
-                        (true, Some(yes)) => yes,
-                        (true, None) => (**default).clone(),
-                        (false, Some(yes)) => Term { node: Node::Cond(live, Box::new(yes)), ..shell(t) },
-                        (false, None) => Term { node: Node::Cond(live, default.clone()), ..shell(t) },
-                    }
+        match body.node {
+            Node::If(id) => {
+                let branch = body.arena().if_node(id);
+                match self.known(defs, bindings, &body.child(branch.test)) {
+                    Some(Value::Bool(true)) => self.scan(defs, bindings, &body.child(branch.yes), graph),
+                    Some(Value::Bool(false)) => self.scan(defs, bindings, &body.child(branch.no), graph),
+                    _ => for &id in body.children() { self.scan(defs, bindings, &body.child(id), graph); },
                 }
-                Node::CallFn { fn_name, args, body } => {
-                    match defs.iter().find(|d| &d.name == fn_name) {
-                        Some(helper) => {
-                            let local: Bindings = local_inputs(self, defs, helper, args, bindings).into_iter().flatten().collect();
-                            self.scan(defs, &local, body.as_deref().unwrap_or(&helper.body), graph);
-                        }
-                        None => {
-                            if let Some(inlined) = body {
-                                self.scan(defs, &[], inlined, graph);
-                            }
-                        }
-                    }
-                    Term { node: Node::CallFn { fn_name: fn_name.clone(), args: args.clone(), body: None }, ..shell(t) }
-                }
-                Node::Fn { params, body, zone, capture } => {
-                    let names: Vec<Pattern> = params.iter().map(|(p, _)| p.clone()).collect();
-                    self.scan(defs, &remove(&names, bindings), body, graph);
-                    Term {
-                        node: Node::Fn {
-                            params: params.clone(),
-                            body: Box::new(Term { node: Node::Nil, ..(**body).clone() }),
-                            zone: zone.clone(),
-                            capture: capture.clone(),
-                        },
-                        ..shell(t)
-                    }
-                }
-                Node::FnRef(name) => {
-                    if let Some(helper) = defs.iter().find(|d| &d.name == name) {
-                        self.scan(defs, &[], &helper.body, graph);
-                    }
-                    t.clone()
-                }
-                Node::Let(locals, inner) => {
-                    let mut bindings: Bindings = bindings.to_vec();
-                    for (pattern, value) in locals {
-                        self.scan(defs, &bindings, value, graph);
-                        let local = match (pattern, self.known(defs, &bindings, value)) {
-                            (Pattern::Name(name), Some(value)) => vec![(name.clone(), value)],
-                            _ => Vec::new(),
-                        };
-                        bindings = local.into_iter().chain(remove(std::slice::from_ref(pattern), &bindings)).collect();
-                    }
-                    self.scan(defs, &bindings, inner, graph);
-                    Term { node: Node::Nil, ..shell(t) }
-                }
-                Node::State { binder, init, step, .. } => {
-                    self.scan(defs, bindings, init, graph);
-                    self.scan(defs, &remove(std::slice::from_ref(binder), bindings), step, graph);
-                    Term { node: Node::Nil, ..shell(t) }
-                }
-                Node::Loop { accs, clauses, body, .. } => {
-                    for (_, value) in accs {
-                        self.scan(defs, bindings, value, graph);
-                    }
-                    let acc_patterns: Vec<Pattern> = accs.iter().map(|(p, _)| p.clone()).collect();
-                    let mut bindings = remove(&acc_patterns, bindings);
-                    for (pattern, value) in clauses {
-                        self.scan(defs, &bindings, value, graph);
-                        bindings = remove(std::slice::from_ref(pattern), &bindings);
-                    }
-                    self.scan(defs, &bindings, body, graph);
-                    Term { node: Node::Nil, ..shell(t) }
-                }
-                _ => t.clone(),
+                return;
             }
-        };
-        let record = |t: Term| -> Term {
-            if let Node::Op { op: name, .. } = &t.node {
-                if is_context_op(name) && !self.found.borrow().contains(name) {
-                    self.found.borrow_mut().push(name.clone());
+            Node::Cond(id) => {
+                let cond = body.arena().cond(id);
+                for arm in body.arena().arms(cond.arms) {
+                    match self.known(defs, bindings, &body.child(arm.test)) {
+                        Some(Value::Bool(false)) => {}
+                        Some(Value::Bool(true)) => { self.scan(defs, bindings, &body.child(arm.body), graph); return; }
+                        _ => {
+                            self.scan(defs, bindings, &body.child(arm.test), graph);
+                            self.scan(defs, bindings, &body.child(arm.body), graph);
+                        }
+                    }
                 }
+                self.scan(defs, bindings, &body.child(cond.default), graph);
+                return;
             }
-            t
-        };
-        let select = |t: &Term| match &t.node { Node::If(..) | Node::Cond(..) | Node::CallFn { .. } | Node::Fn { .. } | Node::FnRef(_) | Node::Let(..) | Node::State { .. } | Node::Loop { .. } => Some(select_full(t)), _ => None };
-        let _ = graph;
-        term_once(&select, &record, true, body);
+            Node::CallFn(id) => {
+                let call = body.arena().call_fn(id);
+                if let Some(helper) = defs.iter().find(|d| d.name == body.name(call.name)) {
+                    let local: Bindings = local_inputs(self, defs, helper, body, body.arena().term_ids(call.args), bindings).into_iter().flatten().collect();
+                    match call.body {
+                        Some(id) => self.scan(defs, &local, &body.child(id), graph),
+                        None => self.scan(defs, &local, &helper.body, graph),
+                    }
+                } else if let Some(id) = call.body { self.scan(defs, &[], &body.child(id), graph); }
+                for &id in body.arena().term_ids(call.args) { self.scan(defs, bindings, &body.child(id), graph); }
+                return;
+            }
+            Node::Fn(id) => {
+                let function = body.arena().function(id);
+                let mut local = bindings.to_vec();
+                for parameter in body.arena().params(function.params) {
+                    local = remove_pattern(body, parameter.pattern, &local);
+                }
+                self.scan(defs, &local, &body.child(function.body), graph);
+                if let Some(id) = function.capture { self.scan(defs, bindings, &body.child(id), graph); }
+                return;
+            }
+            Node::FnRef(name) => {
+                if let Some(helper) = defs.iter().find(|d| d.name == body.name(name)) { self.scan(defs, &[], &helper.body, graph); }
+            }
+            Node::Let(id) => {
+                let let_node = body.arena().let_node(id);
+                let mut local = bindings.to_vec();
+                for binding in body.arena().bindings(let_node.bindings) {
+                    let value = body.child(binding.term);
+                    self.scan(defs, &local, &value, graph);
+                    let known = self.known(defs, &local, &value);
+                    local = remove_pattern(body, binding.pattern, &local);
+                    if let (PatternNode::Name(name), Some(value)) = (body.arena().pattern(binding.pattern), known) {
+                        local.insert(0, (body.name(name).to_owned(), value));
+                    }
+                }
+                self.scan(defs, &local, &body.child(let_node.body), graph);
+                return;
+            }
+            Node::State(id) => {
+                let state = body.arena().state(id);
+                self.scan(defs, bindings, &body.child(state.init), graph);
+                self.scan(defs, &remove_pattern(body, state.binder, bindings), &body.child(state.step), graph);
+                return;
+            }
+            Node::Loop(id) => {
+                let node = body.arena().loop_node(id);
+                let mut local = bindings.to_vec();
+                for binding in body.arena().bindings(node.accs) { self.scan(defs, bindings, &body.child(binding.term), graph); }
+                for binding in body.arena().bindings(node.accs) { local = remove_pattern(body, binding.pattern, &local); }
+                for binding in body.arena().bindings(node.clauses) {
+                    self.scan(defs, &local, &body.child(binding.term), graph);
+                    local = remove_pattern(body, binding.pattern, &local);
+                }
+                self.scan(defs, &local, &body.child(node.body), graph);
+                return;
+            }
+            _ => {}
+        }
+        for &id in body.children() { self.scan(defs, bindings, &body.child(id), graph); }
+        if let Node::Op(id) = body.node {
+            let name = body.name(body.arena().op(id).op);
+            if is_context_op(name) && !self.found.borrow().iter().any(|found| found == name) {
+                self.found.borrow_mut().push(name.to_owned());
+            }
+        }
     }
 }
 
@@ -270,38 +227,52 @@ pub fn specialize(provenance: Option<i64>, context: &sop::context::T, label: &st
     let provenance = provenance.unwrap_or(-1);
     let refused: RefCell<Option<String>> = RefCell::new(None);
     let seed = sop::context::seed(context);
-    let transform = |t: Term| -> Term {
-        let Node::Op { op: name, args, .. } = &t.node else { return t };
-        let lit = |node: param::Value| Term { node: Node::Lit(node), ..t.clone() };
-        match name.as_str() {
-            "sop/provenance_base" => lit(param::Value::Int(provenance)),
-            "sop/context_frame" => lit(param::Value::Float(sop::context::frame(context) as f64)),
-            "sop/context_time" => lit(param::Value::Float(sop::context::time(context))),
+    let mut builder = TermBuilder::new();
+    let mut transform = |builder: &mut TermBuilder, _: &Term, draft: Draft| -> Draft {
+        let Draft::Op { op: name, args, skip } = draft else { return draft };
+        let value = match name.as_str() {
+            "sop/provenance_base" => Some(param::Value::Int(provenance)),
+            "sop/context_frame" => Some(param::Value::Float(sop::context::frame(context) as f64)),
+            "sop/context_time" => Some(param::Value::Float(sop::context::time(context))),
             "sop/context_seed" => {
-                let namespace = |term: &Term| match &term.node {
-                    Node::Text(bytes) => Some(String::from_utf8_lossy(bytes).into_owned()),
+                let namespace = |id: TermId| match builder.node(id) {
+                    Node::Text(bytes) => Some(String::from_utf8_lossy(builder.raw_bytes(bytes)).into_owned()),
                     _ => None,
                 };
                 let salted = match args.as_slice() {
-                    [(a, ns)] if a == "namespace" => namespace(ns).map(|ns| (ns, 0)),
-                    [(a, ns), (b, salt)] if a == "namespace" && b == "salt" => match (namespace(ns), &salt.node) {
-                        (Some(ns), Node::Lit(param::Value::Int(salt))) => Some((ns, *salt)),
+                    [(a, ns)] if a == "namespace" => namespace(*ns).map(|ns| (ns, 0)),
+                    [(a, ns), (b, salt)] if a == "namespace" && b == "salt" => match (namespace(*ns), builder.node(*salt)) {
+                        (Some(ns), Node::Lit(id)) => match builder.literal(id) {
+                            Literal::Int(salt) => Some((ns, salt)),
+                            _ => None,
+                        },
                         _ => None,
                     },
                     _ => None,
                 };
                 match salted {
-                    Some((namespace, salt)) => lit(param::Value::Int(operators::seed_for(salt, seed, &namespace, label))),
+                    Some((namespace, salt)) => Some(param::Value::Int(operators::seed_for(salt, seed, &namespace, label))),
                     None => {
                         *refused.borrow_mut() = Some("E_SEED_NAMESPACE: Context seed requires a literal namespace.".to_owned());
-                        t.clone()
+                        None
                     }
                 }
             }
-            _ => t.clone(),
-        }
+            _ => None,
+        };
+        match value { Some(value) => Draft::Lit(value), None => Draft::Op { op: name, args, skip } }
     };
-    let mapped = map(&keep, true, &transform, graph);
+    let roots: Vec<_> = std::iter::once(graph.body.clone()).chain(graph.inputs.iter().filter_map(|(_, _, default)| default.clone())).collect();
+    let ids = builder.rewrite_roots(&roots, &mut transform);
+    let form = builder.import_form(&graph.form);
+    let arena = builder.freeze();
+    let mut defaults = ids[1..].iter();
+    let mapped = Graph {
+        body: arena.handle(ids[0]),
+        inputs: graph.inputs.iter().map(|(name, ty, default)| (name.clone(), ty.clone(), default.as_ref().map(|_| arena.handle(*defaults.next().unwrap())))).collect(),
+        form: arena.syntax().handle(form),
+        ..graph.clone()
+    };
     match refused.into_inner() {
         Some(message) => Err(message),
         None => Ok(mapped),
@@ -359,10 +330,10 @@ fn walk_named(ws: &Workspace, st: &RefCell<Walk>, name: &str) {
 }
 
 fn macro_name(form: &Syntax) -> Option<&str> {
-    match syntax::children(form).get(1).map(|c| &c.node) {
-        Some(SNode::Sym(selected)) => Some(selected.as_str()),
+    form.children().get(1).and_then(|&id| match form.arena().row(id).node {
+        SNode::Sym(selected) => Some(form.name(selected)),
         _ => None,
-    }
+    })
 }
 
 fn walk_macro(ws: &Workspace, st: &RefCell<Walk>, name: &str) {
@@ -382,40 +353,42 @@ fn walk_syntax(ws: &Workspace, st: &RefCell<Walk>, form: &Syntax) {
     if let Some(head) = syntax::head(form) {
         walk_macro(ws, st, head);
     }
-    for child in syntax::children(form) {
-        walk_syntax(ws, st, child);
+    for &child in form.children() {
+        walk_syntax(ws, st, &form.child(child));
     }
 }
 
 fn walk_graph(ws: &Workspace, st: &RefCell<Walk>, g: &Graph) {
-    let transform = |t: Term| -> Term {
-        match &t.node {
-            Node::Call { kind, .. } => walk_named(ws, st, kind),
-            Node::CallFn { fn_name, .. } => walk_named(ws, st, fn_name),
-            Node::FnRef(name) => {
+    fn visit(ws: &Workspace, st: &RefCell<Walk>, t: &Term) {
+        // a helper call's body is its definition's, walked once by name
+        if let Node::CallFn(id) = t.node {
+            for &child in t.arena().term_ids(t.arena().call_fn(id).args) { visit(ws, st, &t.child(child)); }
+        } else {
+            for &child in t.children() { visit(ws, st, &t.child(child)); }
+        }
+        match t.node {
+            Node::Call(id) => walk_named(ws, st, t.name(t.arena().call(id).kind)),
+            Node::CallFn(id) => walk_named(ws, st, t.name(t.arena().call_fn(id).name)),
+            Node::FnRef(id) => {
+                let name = t.name(id);
                 walk_named(ws, st, name);
-                if let Some((_, (qualified, _, _))) = ws.kind_fns.iter().find(|(n, _)| n == name) {
-                    walk_named(ws, st, qualified);
-                }
+                if let Some((_, (qualified, _, _))) = ws.kind_fns.iter().find(|(n, _)| n == name) { walk_named(ws, st, qualified); }
             }
-            Node::GraphRef { graph, .. } => {
-                if let Some(def) = ws.graphs.iter().find(|d| &d.name == graph) {
-                    walk_definition(ws, st, true, def);
-                }
-                walk_named(ws, st, graph);
+            Node::GraphRef(id) => {
+                let name = t.name(t.arena().graph_ref(id).graph);
+                if let Some(def) = ws.graphs.iter().find(|d| d.name == name) { walk_definition(ws, st, true, def); }
+                walk_named(ws, st, name);
             }
-            Node::Expanded { macro_name, body } => {
-                walk_macro(ws, st, macro_name);
-                // Parameterized macro heads disappear during recursive expansion. Hygiene counters
-                // restart per Macro.expand, not per Syntax.id.
-                st.borrow_mut().expanded.push((*body.form).clone());
+            Node::Expanded(id) => {
+                let expanded = t.arena().expanded(id);
+                walk_macro(ws, st, t.name(expanded.name));
+                st.borrow_mut().expanded.push(t.child(expanded.body).form());
             }
             _ => {}
         }
-        t
-    };
-    // a helper call's body is its definition's, walked once by name
-    map(&keep, false, &transform, g);
+    }
+    visit(ws, st, &g.body);
+    for default in g.inputs.iter().filter_map(|(_, _, default)| default.as_ref()) { visit(ws, st, default); }
 }
 
 fn walk_term(ws: &Workspace, st: &RefCell<Walk>, definition: &NodeDefinition, t: &Term) {
@@ -476,21 +449,21 @@ fn put_library_free(buffer: &mut Vec<u8>, x: &Syntax) {
         put_all(buffer, &x.meta());
     }
     match &x.node {
-        SNode::Sym(s) => put_atom(buffer, b's', s.as_bytes()),
-        SNode::Kw(s) => put_atom(buffer, b'k', s.as_bytes()),
-        SNode::Num(s) => put_atom(buffer, b'n', s.as_bytes()),
-        SNode::Str(s) => put_atom(buffer, b't', s),
+        SNode::Sym(s) => put_atom(buffer, b's', x.name(*s).as_bytes()),
+        SNode::Kw(s) => put_atom(buffer, b'k', x.name(*s).as_bytes()),
+        SNode::Num(s) => put_atom(buffer, b'n', x.name(*s).as_bytes()),
+        SNode::Str(s) => put_atom(buffer, b't', x.bytes(*s)),
         SNode::List(l) => {
             buffer.push(b'(');
-            l.iter().for_each(|f| put_form(buffer, f));
+            x.range(*l).iter().for_each(|&id| put_form(buffer, &x.child(id)));
         }
         SNode::Vec(l) => {
             buffer.push(b'<');
-            l.iter().for_each(|f| put_form(buffer, f));
+            x.range(*l).iter().for_each(|&id| put_form(buffer, &x.child(id)));
         }
         SNode::Map(l) => {
             buffer.push(b'{');
-            l.iter().for_each(|f| put_form(buffer, f));
+            x.range(*l).iter().for_each(|&id| put_form(buffer, &x.child(id)));
         }
         SNode::Quote(kind, inner) => {
             buffer.push(b'q');
@@ -500,7 +473,7 @@ fn put_library_free(buffer: &mut Vec<u8>, x: &Syntax) {
                 QuoteKind::Unquote => b'u',
                 QuoteKind::Splice => b's',
             });
-            put_form(buffer, inner);
+            put_form(buffer, &x.child(*inner));
         }
     }
     if !x.tail().is_empty() {
@@ -535,46 +508,41 @@ pub fn kernel_source(checked: &Workspace) -> String {
 
 /// Whether `specialize` can change the graph: it names a context or provenance operator.
 pub fn uses_context(graph: &Graph) -> bool {
-    let found = Cell::new(false);
-    let transform = |t: Term| -> Term {
-        if let Node::Op { op: name, .. } = &t.node {
-            if is_context_op(name) {
-                found.set(true);
-            }
-        }
-        t
-    };
-    map(&keep, true, &transform, graph);
-    found.get()
+    fn term(t: &Term) -> bool {
+        matches!(t.node, Node::Op(id) if is_context_op(t.name(t.arena().op(id).op)))
+            || t.children().iter().any(|&id| term(&t.child(id)))
+    }
+    term(&graph.body) || graph.inputs.iter().filter_map(|(_, _, t)| t.as_ref()).any(term)
 }
 
-fn visit_reachable(workspace: &Workspace, seen: &RefCell<HashSet<String>>, graph: &Graph) {
-    let found: RefCell<Vec<String>> = RefCell::new(Vec::new());
-    let transform = |t: Term| -> Term {
-        match &t.node {
-            Node::CallFn { fn_name, .. } => found.borrow_mut().push(fn_name.clone()),
-            Node::Call { kind, .. } => found.borrow_mut().push(kind.clone()),
-            Node::FnRef(name) => found.borrow_mut().push(name.clone()),
-            Node::GraphRef { graph, .. } if graph.starts_with("def:") => found.borrow_mut().push(graph[4..].to_owned()),
+fn visit_reachable(workspace: &Workspace, seen: &RefCell<HashSet<String>>, body: &Term, inputs: &[(String, Ty, Option<Term>)]) {
+    fn collect<'a>(arena: &'a flow_check::term_arena::TermArena, id: TermId, names: &mut Vec<&'a str>) {
+        for &child in arena.children(id) { collect(arena, child, names); }
+        match arena.row(id).node {
+            Node::CallFn(id) => names.push(arena.name(arena.call_fn(id).name)),
+            Node::Call(id) => names.push(arena.name(arena.call(id).kind)),
+            Node::FnRef(name) => names.push(arena.name(name)),
+            Node::GraphRef(id) => {
+                if let Some(name) = arena.name(arena.graph_ref(id).graph).strip_prefix("def:") { names.push(name); }
+            }
             _ => {}
         }
-        t
-    };
-    map(&keep, true, &transform, graph);
-    let mut names = found.into_inner();
-    names.reverse();
-    for name in names {
-        if !seen.borrow_mut().insert(name.clone()) {
+    }
+    let mut found = Vec::new();
+    collect(body.arena(), body.row_id(), &mut found);
+    for default in inputs.iter().filter_map(|(_, _, t)| t.as_ref()) { collect(default.arena(), default.row_id(), &mut found); }
+    for name in found.into_iter().rev() {
+        if !seen.borrow_mut().insert(name.to_owned()) {
             continue;
         }
         for d in workspace.defs.iter().filter(|d| d.name == name) {
-            visit_reachable(workspace, seen, d);
+            visit_reachable(workspace, seen, &d.body, &d.inputs);
         }
         for n in workspace.nodes.iter().filter(|n| n.kind.qualified == name) {
-            visit_reachable(workspace, seen, &n.body);
+            visit_reachable(workspace, seen, &n.body.body, &n.body.inputs);
             let terms = n.validations.iter().map(|(t, _, _)| t).chain(n.normalizers.iter().map(|(_, t)| t));
             for term in terms {
-                visit_reachable(workspace, seen, &Graph { body: term.clone(), inputs: Vec::new(), ..n.body.clone() });
+                visit_reachable(workspace, seen, term, &[]);
             }
         }
     }
@@ -582,13 +550,13 @@ fn visit_reachable(workspace: &Workspace, seen: &RefCell<HashSet<String>>, graph
 
 /// The checked helpers the graphs reach, directly or through the Lisp nodes they call, in
 /// declaration order.
-pub fn reachable_defs(workspace: &Workspace, roots: &[Graph]) -> Vec<Graph> {
+pub fn reachable_defs<'a, 'g>(workspace: &'a Workspace, roots: impl IntoIterator<Item = &'g Graph>) -> Vec<&'a Graph> {
     let seen: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
     for root in roots {
-        visit_reachable(workspace, &seen, root);
+        visit_reachable(workspace, &seen, &root.body, &root.inputs);
     }
     let seen = seen.into_inner();
-    workspace.defs.iter().filter(|d| seen.contains(&d.name)).cloned().collect()
+    workspace.defs.iter().filter(|d| seen.contains(&d.name)).collect()
 }
 
 /// An inlined body reads its cook context through inputs: each distinct context operator, with the
@@ -596,50 +564,60 @@ pub fn reachable_defs(workspace: &Workspace, roots: &[Graph]) -> Vec<Graph> {
 /// to a cook-time source, which residuals capture as a binding, never as a term, so a kernel
 /// specializes it per context by its captures alone. Returns the graph and each input's operator.
 pub fn label_context(label: &str, graph: &Graph) -> (Graph, Vec<(String, String)>) {
-    let inputs: RefCell<Vec<(String, (String, Term))>> = RefCell::new(Vec::new());
-    let key = |args: &[(String, Term)]| -> Vec<String> {
-        args.iter()
-            .map(|(name, a)| match &a.node {
-                Node::Text(s) => format!("{name}={}", String::from_utf8_lossy(s)),
-                Node::Lit(param::Value::Int(n)) => format!("{name}={n}"),
-                _ => format!("{name}=?"),
-            })
-            .collect()
-    };
-    // a helper's body has its own scope: its operators read the card's label from the evaluation
-    let transform = |t: Term| -> Term {
-        let Node::Op { op: name, args, skip } = &t.node else { return t };
-        if !is_context_op(name) {
-            return t;
+    fn eligible(t: &Term, into: &mut HashSet<(u64, u32)>) {
+        if !into.insert(t.identity()) { return; }
+        if let Node::CallFn(id) = t.node {
+            for &id in t.arena().term_ids(t.arena().call_fn(id).args) { eligible(&t.child(id), into); }
+        } else {
+            for &id in t.children() { eligible(&t.child(id), into); }
         }
+    }
+    let roots: Vec<_> = std::iter::once(graph.body.clone()).chain(graph.inputs.iter().filter_map(|(_, _, default)| default.clone())).collect();
+    let mut selected = HashSet::new();
+    for root in &roots { eligible(root, &mut selected); }
+    let mut inputs: Vec<(String, String, String, TermId)> = Vec::new();
+    let mut builder = TermBuilder::new();
+    let ids = builder.rewrite_roots(&roots, &mut |builder, source, draft| {
+        if !selected.contains(&source.identity()) { return draft; }
+        let Draft::Op { op: name, args, skip } = draft else { return draft };
+        if !is_context_op(&name) { return Draft::Op { op: name, args, skip }; }
         let mut parts = vec![name.clone()];
-        parts.extend(key(args));
-        let k = parts.join(";");
-        let existing = inputs.borrow().iter().find(|(key, _)| *key == k).map(|(_, (n, _))| n.clone());
-        let input = match existing {
-            Some(input) => input,
+        parts.extend(args.iter().map(|(name, id)| match builder.node(*id) {
+            Node::Text(bytes) => format!("{name}={}", String::from_utf8_lossy(builder.raw_bytes(bytes))),
+            Node::Lit(id) => match builder.literal(id) {
+                Literal::Int(n) => format!("{name}={n}"),
+                _ => format!("{name}=?"),
+            },
+            _ => format!("{name}=?"),
+        }));
+        let key = parts.join(";");
+        let input = match inputs.iter().find(|(k, ..)| k == &key) {
+            Some((_, input, ..)) => input.clone(),
             None => {
-                let input = format!("$context{}", inputs.borrow().len());
-                let text = Term { node: Node::Text(label.as_bytes().to_vec()), path: None, ty: Ty::Text, ..t.clone() };
-                let mut with_label = args.clone();
-                with_label.push((operators::context_label().to_owned(), text));
-                let call = Term { node: Node::Op { op: name.clone(), args: with_label, skip: skip.clone() }, ..t.clone() };
-                inputs.borrow_mut().push((k, (input.clone(), call)));
+                let input = format!("$context{}", inputs.len());
+                let form = builder.import_form(&source.form());
+                let text = builder.push(None, &Ty::Text, form, Draft::Text(label.as_bytes().to_vec()));
+                let mut args = args;
+                args.push((operators::context_label().to_owned(), text));
+                let path: Option<Vec<_>> = source.path().map(|ids| ids.iter().map(|&id| source.name(id).to_owned()).collect());
+                let call = builder.push(path.as_deref(), source.ty(), form, Draft::Op { op: name.clone(), args, skip });
+                inputs.push((key, input.clone(), name, call));
                 input
             }
         };
-        Term { node: Node::RefBinding(input, Vec::new()), ..t.clone() }
+        Draft::RefBinding(input, Vec::new())
+    });
+    let form = builder.import_form(&graph.form);
+    let arena = builder.freeze();
+    let mut defaults = ids[1..].iter();
+    let mut graph = Graph {
+        body: arena.handle(ids[0]),
+        inputs: graph.inputs.iter().map(|(name, ty, default)| (name.clone(), ty.clone(), default.as_ref().map(|_| arena.handle(*defaults.next().unwrap())))).collect(),
+        form: arena.syntax().handle(form),
+        ..graph.clone()
     };
-    let mut graph = map(&keep, false, &transform, graph);
-    let inputs = inputs.into_inner();
-    graph.inputs.extend(inputs.iter().map(|(_, (name, call))| (name.clone(), call.ty.clone(), Some(call.clone()))));
-    let ops = inputs
-        .iter()
-        .map(|(_, (name, call))| match &call.node {
-            Node::Op { op, .. } => (name.clone(), op.clone()),
-            _ => unreachable!("label_context stores only operator calls"),
-        })
-        .collect();
+    graph.inputs.extend(inputs.iter().map(|(_, name, _, call)| (name.clone(), arena.handle(*call).ty().clone(), Some(arena.handle(*call)))));
+    let ops = inputs.into_iter().map(|(_, name, op, _)| (name, op)).collect();
     (graph, ops)
 }
 
@@ -672,7 +650,3 @@ fn md5_hex(input: &[u8]) -> String {
     output
 }
 
-/// A term's path, type and form with no node: the struct-update base for a rebuilt node (cloning `t` whole just to drop its node is a deep copy).
-fn shell(t: &Term) -> Term {
-    Term { path: t.path.clone(), ty: t.ty.clone(), node: Node::Nil, form: t.form.clone() }
-}

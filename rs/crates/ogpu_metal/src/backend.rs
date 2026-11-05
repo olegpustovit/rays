@@ -116,6 +116,10 @@ fn create_mapped_buffer(dev: &Rc<Dev>, descriptor: &BufferDescriptor) -> Result<
     const OP: &str = "Ogpu_metal.Backend.create_mapped_buffer";
     let value = buffer::create(&dev.device, buffer::Memory::Shared, descriptor)?;
     let resource = register_buffer(dev, Ok(value.clone()))?;
+    let native_readback = value.metal().owned_readback().map_err(|error| of_metal_error(OP, &error))?;
+    let readback: ogpu_core::backend::OwnedReadback = std::sync::Arc::new(move |offset, length| {
+        native_readback(offset, length).map_err(|error| of_metal_error(OP, &error))
+    });
     let cell: Rc<RefCell<Option<Floats>>> = Rc::new(RefCell::new(None));
     let count = (descriptor.size / 4) as usize;
     let make_view = {
@@ -139,6 +143,7 @@ fn create_mapped_buffer(dev: &Rc<Dev>, descriptor: &BufferDescriptor) -> Result<
     let (invalidate_value, invalidate_device) = (value, dev.device.clone());
     let (view, invalidate_view) = (make_view.clone(), make_view);
     Ok(DriverMapped {
+        readback,
         mapped_resource: DriverResource {
             token,
             write,

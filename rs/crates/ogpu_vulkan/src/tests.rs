@@ -283,7 +283,14 @@ fn gpu_conformance_transfer_and_compute() {
     }
     be::invalidate_mapped(&device_only, 16).unwrap_or_else(|failure| die(failure));
     require(be::mapped_view(&device_only).unwrap().borrow()[2] == 3., "a device-only buffer's first view");
+    let owned = be::owned_readback(&device_only).unwrap_or_else(|failure| die(failure));
+    refused(owned(-1, 4).err(), ErrorKind::InvalidArgument, "negative owned readback accepted");
+    refused(owned(12, 8).err(), ErrorKind::InvalidArgument, "oversized owned readback accepted");
     be::destroy_buffer(&device_only).unwrap_or_else(|failure| die(failure));
+    // A settled allocation is retained independently of its owner-only wrapper; no owner pump.
+    let bytes = std::thread::spawn(move || owned(8, 4).unwrap()).join().unwrap();
+    require(bytes == three, "owned readback did not preserve the native allocation");
+    refused(be::owned_readback(&device_only).err(), ErrorKind::StaleHandle, "destroyed owned capture accepted");
     refused(be::flush_mapped(&mapped, 20).err(), ErrorKind::InvalidArgument, "a flush past the buffer was accepted");
     refused(be::flush_mapped(&source, 4).err(), ErrorKind::InvalidArgument, "an unmapped buffer was flushed");
     be::destroy_buffer(&mapped).unwrap_or_else(|failure| die(failure));
@@ -937,6 +944,26 @@ fn gpu_conformance_ray_tracing() {
     be::write_buffer(&prototype_vertices, 0, &vertex_bytes(1.5)).unwrap_or_else(|failure| die(failure));
     let prototype_blas = be::create_accel(&device, triangles(&prototype_vertices, 72, 6), false).unwrap_or_else(|failure| die(failure));
     rt.build_one(&prototype_blas, &big_scratch);
+    // Compact before making either TLAS, then release the original: motion proxy metadata must
+    // belong to the compacted prototype, not to its template.
+    let prototype_size = make_buffer(&device, "prototype-compacted-size", 8, &[BufferUsage::Storage, BufferUsage::CopySrc]);
+    let commands = be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
+    let encoder = be::accel_encoder(&commands).unwrap_or_else(|failure| die(failure));
+    be::write_compacted_size(&encoder, &prototype_blas, &prototype_size, None).unwrap_or_else(|failure| die(failure));
+    be::end_accel(&encoder).unwrap_or_else(|failure| die(failure));
+    poll_epoch(&queue, be::commit(&commands).unwrap_or_else(|failure| die(failure)));
+    let size_bytes = be::read_buffer(&prototype_size, 0, 8).unwrap_or_else(|failure| die(failure));
+    let size = i64::from_le_bytes(size_bytes[..8].try_into().unwrap());
+    let compacted_prototype =
+        be::create_accel(&device, AccelDescriptor::Sized { size, template: prototype_blas.clone() }, false).unwrap_or_else(|failure| die(failure));
+    let commands = be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
+    let encoder = be::accel_encoder(&commands).unwrap_or_else(|failure| die(failure));
+    be::compact_accel(&encoder, &prototype_blas, &compacted_prototype).unwrap_or_else(|failure| die(failure));
+    be::end_accel(&encoder).unwrap_or_else(|failure| die(failure));
+    poll_epoch(&queue, be::commit(&commands).unwrap_or_else(|failure| die(failure)));
+    be::destroy_accel(&prototype_blas).unwrap_or_else(|failure| die(failure));
+    be::destroy_buffer(&prototype_size).unwrap_or_else(|failure| die(failure));
+    let prototype_blas = compacted_prototype;
     let prototype_records = be::pack_instance_records(&device, &[instance(&IDENTITY, 1, 0, 0), instance(&IDENTITY, 1, 1, 1)]).unwrap_or_else(|failure| die(failure));
     let prototype_record_buffer =
         make_buffer(&device, "motion-prototypes", prototype_records.len() as i64, &[BufferUsage::Storage, BufferUsage::CopyDst]);

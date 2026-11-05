@@ -56,7 +56,6 @@ struct TestCase {
     executable: PathBuf,
     crate_name: String,
     name: String,
-    more: Vec<String>,
 }
 
 struct TestOutcome {
@@ -333,12 +332,11 @@ fn run_tests(
                 executable: executable.path.clone(),
                 crate_name: executable.crate_name.clone(),
                 name: test,
-                more: Vec::new(),
             };
             order += 1;
-            // A harness=false target named window_*/gpu_* (e.g. tests/window_fonts.rs) serializes all its cases.
+            // GPU and window cases each get their own process and deadline.
+            // Serialize native work so GPU contention cannot consume another case's budget.
             let target = case.executable.file_name().and_then(|name| name.to_str()).unwrap_or("");
-            // gpu_* targets are offscreen: one process each, run in parallel with the others.
             if target.starts_with("gpu_") {
                 gpu.push(case);
             } else if target.starts_with("window_") || is_serial_test(&case.name) {
@@ -348,14 +346,14 @@ fn run_tests(
             }
         }
     }
-    ordinary.extend(group_by_executable(gpu));
     let workers = thread::available_parallelism().map_or(1, |count| count.get());
     let mut failure_code = 0;
     let outcomes = run_test_batch(ordinary, workers, args, run_started, timeout);
     if record_outcomes(outcomes, timings, &mut failure_code) {
         return report_whole_timeout(run_started);
     }
-    for case in group_by_executable(serial) {
+    gpu.extend(serial);
+    for case in gpu {
         if remaining(run_started, timeout).is_some_and(|remaining| remaining.is_zero()) {
             return report_whole_timeout(run_started);
         }
@@ -371,17 +369,6 @@ fn run_tests(
     }
 }
 
-// One process per executable: a gpu_/window_ target shares its device across its cases.
-fn group_by_executable(cases: Vec<TestCase>) -> Vec<TestCase> {
-    let mut groups: Vec<TestCase> = Vec::new();
-    for case in cases {
-        match groups.last_mut() {
-            Some(g) if g.executable == case.executable => g.more.push(case.name),
-            _ => groups.push(case),
-        }
-    }
-    groups
-}
 
 fn is_serial_test(name: &str) -> bool {
     name.rsplit("::")
@@ -457,10 +444,8 @@ fn run_test_case(
     let test_started = Instant::now();
     let mut command = Command::new(&case.executable);
     command.args(&args.test_args).arg("--exact").arg(&case.name);
-    command.args(&case.more);
-    let cases = 1 + case.more.len() as u32;
     let (elapsed, failure_code, whole_timeout) =
-        match run_command(&mut command, run_started, timeout, Some(args.test_timeout * cases), false) {
+        match run_command(&mut command, run_started, timeout, Some(args.test_timeout), false) {
             Ok(RunResult::Finished(output)) => (
                 test_started.elapsed(),
                 if output.status.success() {
@@ -498,7 +483,7 @@ fn run_test_case(
         order: case.order,
         timing: TestTiming {
             crate_name: case.crate_name,
-            test: if case.more.is_empty() { case.name } else { format!("{} (+{} more)", case.name, case.more.len()) },
+            test: case.name,
             elapsed,
         },
         failure_code,
@@ -709,6 +694,9 @@ fn run_command(
         command.stdout(Stdio::piped()).stderr(Stdio::piped());
     }
     let child_started = Instant::now();
+    #[cfg(windows)]
+    let (mut child, job) = mem_sys::windows_process::Job::spawn(command)?;
+    #[cfg(not(windows))]
     let mut child = spawn(command)?;
     let stdout_reader = child.stdout.take().map(read_pipe);
     let stderr_reader = child.stderr.take().map(read_pipe);
@@ -717,7 +705,11 @@ fn run_command(
     loop {
         if remaining(run_started, whole_timeout).is_some_and(|remaining| remaining.is_zero()) {
             let elapsed = run_started.elapsed();
-            let status = terminate_tree(&mut child)?;
+            let status = terminate_tree(
+                &mut child,
+                #[cfg(windows)]
+                &job,
+            )?;
             let output = Completed {
                 status,
                 stdout: join_pipe(stdout_reader)?,
@@ -727,7 +719,11 @@ fn run_command(
         }
         if remaining(child_started, child_timeout).is_some_and(|remaining| remaining.is_zero()) {
             let elapsed = child_started.elapsed();
-            let status = terminate_tree(&mut child)?;
+            let status = terminate_tree(
+                &mut child,
+                #[cfg(windows)]
+                &job,
+            )?;
             let output = Completed {
                 status,
                 stdout: join_pipe(stdout_reader)?,
@@ -780,6 +776,7 @@ fn join_pipe(reader: Option<thread::JoinHandle<io::Result<Vec<u8>>>>) -> io::Res
     }
 }
 
+#[cfg(not(windows))]
 fn spawn(command: &mut Command) -> io::Result<Child> {
     #[cfg(unix)]
     {
@@ -789,37 +786,33 @@ fn spawn(command: &mut Command) -> io::Result<Child> {
     command.spawn()
 }
 
-fn terminate_tree(child: &mut Child) -> io::Result<ExitStatus> {
-    let tree_killed = {
-        #[cfg(windows)]
-        {
-            Command::new("taskkill")
-                .arg("/PID")
-                .arg(child.id().to_string())
-                .arg("/T")
-                .arg("/F")
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .is_ok_and(|status| status.success())
+fn terminate_tree(
+    child: &mut Child,
+    #[cfg(windows)] job: &mem_sys::windows_process::Job,
+) -> io::Result<ExitStatus> {
+    #[cfg(windows)]
+    job.terminate()?;
+    #[cfg(not(windows))]
+    {
+        let tree_killed = {
+            #[cfg(unix)]
+            {
+                Command::new("kill")
+                    .args(["-KILL", "--"])
+                    .arg(format!("-{}", child.id()))
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status()
+                    .is_ok_and(|status| status.success())
+            }
+            #[cfg(not(unix))]
+            {
+                false
+            }
+        };
+        if !tree_killed {
+            let _ = child.kill();
         }
-        #[cfg(unix)]
-        {
-            Command::new("kill")
-                .args(["-KILL", "--"])
-                .arg(format!("-{}", child.id()))
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .is_ok_and(|status| status.success())
-        }
-        #[cfg(not(any(unix, windows)))]
-        {
-            false
-        }
-    };
-    if !tree_killed {
-        let _ = child.kill();
     }
     child.wait()
 }
@@ -1199,23 +1192,81 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn windows_timeout_terminates_child_process_tree() {
-        let mut command = Command::new("cmd.exe");
-        command.args(["/C", "ping -t 127.0.0.1 > nul"]);
-        let result = run_command(
-            &mut command,
-            Instant::now(),
-            None,
-            Some(Duration::from_millis(500)),
-            true,
-        )
-        .unwrap();
-        assert!(matches!(
-            result,
-            RunResult::TimedOut {
-                whole_run: false,
-                ..
+        use std::io::BufRead;
+
+        fn read_pids(output: impl Read) -> String {
+            io::BufReader::new(output)
+                .lines()
+                .map(Result::unwrap)
+                .find_map(|line| line.strip_prefix("tree-pids:").map(str::to_owned))
+                .expect("fixture published all three process IDs")
+        }
+
+        let fixture = |depth: u32| {
+            let mut command = Command::new(env::current_exe().unwrap());
+            command
+                .args([
+                    "--exact",
+                    "tests::windows_timeout_terminates_child_process_tree",
+                    "--nocapture",
+                    "--test-threads=1",
+                ])
+                .env("RAYS_T_WINDOWS_TREE_DEPTH", depth.to_string());
+            command
+        };
+        if let Ok(depth) = env::var("RAYS_T_WINDOWS_TREE_DEPTH") {
+            let depth: u32 = depth.parse().unwrap();
+            let mut pids = process::id().to_string();
+            if depth < 2 {
+                let mut child = fixture(depth + 1).stdout(Stdio::piped()).spawn().unwrap();
+                pids.push(' ');
+                pids.push_str(&read_pids(child.stdout.take().unwrap()));
             }
-        ));
+            writeln!(io::stderr(), "descendant holds captured stderr").unwrap();
+            io::stderr().flush().unwrap();
+            writeln!(io::stdout(), "\ntree-pids:{pids}").unwrap();
+            io::stdout().flush().unwrap();
+            if depth == 0 && env::var("RAYS_T_WINDOWS_ROOT_EXITS").as_deref() == Ok("1") {
+                process::exit(0);
+            }
+            io::stdin().read_exact(&mut [0]).unwrap();
+            process::exit(1);
+        }
+
+        for root_exits in [false, true] {
+            let mut command = fixture(0);
+            command
+                .env("RAYS_T_WINDOWS_ROOT_EXITS", if root_exits { "1" } else { "0" })
+                .stdin(Stdio::piped());
+            let started = Instant::now();
+            let result = run_command(
+                &mut command,
+                started,
+                None,
+                Some(Duration::from_millis(500)),
+                true,
+            )
+            .unwrap();
+            assert!(started.elapsed() < Duration::from_secs(2), "timeout return was unbounded");
+            let RunResult::TimedOut { whole_run: false, output, .. } = result else {
+                panic!("fixture should time out with root_exits={root_exits}");
+            };
+            assert_eq!(output.status.success(), root_exits);
+            assert!(String::from_utf8_lossy(&output.stderr).contains("descendant holds captured stderr"));
+            let pids: Vec<u32> = read_pids(&output.stdout[..])
+                .split_whitespace()
+                .map(|pid| pid.parse().unwrap())
+                .collect();
+            assert_eq!(pids.len(), 3, "child and grandchild must both have started");
+            for pid in pids {
+                assert!(
+                    mem_sys::windows_process::wait_for_process_exit(pid, Duration::from_secs(1))
+                        .unwrap(),
+                    "fixture process {pid} survived tree termination"
+                );
+            }
+            assert!(started.elapsed() < Duration::from_secs(2), "tree termination was unbounded");
+        }
     }
 
     #[test]

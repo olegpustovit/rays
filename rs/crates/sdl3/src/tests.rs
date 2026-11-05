@@ -77,12 +77,31 @@ fn sdl_calls_are_refused_from_worker_threads() {
         .join()
         .expect("SDL worker check panicked");
     assert_eq!(result.unwrap_err().kind, ErrorKind::WrongDomain);
+    std::thread::spawn(|| {
+        assert_eq!(crate::init::init(&[crate::init::Subsystem::Events]).unwrap_err().kind, ErrorKind::WrongDomain);
+        assert_eq!(crate::clipboard::get_text().unwrap_err().kind, ErrorKind::WrongDomain);
+        assert_eq!(crate::hint::control_click_is_right_click(true).unwrap_err().kind, ErrorKind::WrongDomain);
+        assert_eq!(crate::event::poll_coalesced().unwrap_err().kind, ErrorKind::WrongDomain);
+        assert!(matches!(crate::Window::create("wrong domain", 8, 8, &[]),
+            Err(error) if error.kind == ErrorKind::WrongDomain));
+    }).join().unwrap();
 }
 
 #[test]
 fn dummy_video_window_lifecycle_and_typed_errors() {
     claim_dummy_main();
+    crate::check_version(true).unwrap();
+    let lock = include_str!("../../../../packaging/sdl3.lock");
+    let entry = lock.lines().map(str::trim).find(|line| line.starts_with("((sdl3 ")).unwrap();
+    let floor = entry.split("(floor ").nth(1).unwrap().split(')').next().unwrap();
+    let floor: Vec<i32> = floor.split('.').map(|part| part.parse().unwrap()).collect();
+    for version in [crate::compiled_version(), crate::linked_version()] {
+        assert_eq!(version.major, floor[0]);
+        assert!((version.major, version.minor, version.patch) >= (floor[0], floor[1], floor[2]));
+    }
+    assert!(crate::thread::is_sdl_main_thread());
     crate::init::init(&[crate::init::Subsystem::Video, crate::init::Subsystem::Events]).unwrap();
+    assert!(crate::thread::is_sdl_main_thread());
     let mut window = crate::Window::create(
         "SDL3 Rust ownership test", 96, 64, &[crate::WindowFlag::Hidden],
     ).unwrap();
@@ -90,15 +109,17 @@ fn dummy_video_window_lifecycle_and_typed_errors() {
     assert_eq!(window.title().unwrap(), "SDL3 Rust ownership test");
     assert_eq!(window.size_in_pixels().unwrap(), (96, 64));
     assert_eq!(window.pixel_density().unwrap(), 1.0);
+    let _ = window.position().unwrap();
+    window.center().unwrap();
     window.set_size(112, 72).unwrap();
     window.sync().unwrap();
     assert_eq!(window.size().unwrap(), (112, 72));
     assert_eq!(window.size_in_pixels().unwrap(), (112, 72));
     assert!(window.state().unwrap().hidden);
     let resizable = window.set_resizable(false);
-    assert!(resizable.is_ok() || matches!(resizable, Err(error) if error.kind == ErrorKind::SdlError));
+    assert!(resizable.is_ok() || matches!(resizable, Err(error) if error.kind == ErrorKind::SdlError && !error.message.is_empty()));
     let resizable = window.set_resizable(true);
-    assert!(resizable.is_ok() || matches!(resizable, Err(error) if error.kind == ErrorKind::SdlError));
+    assert!(resizable.is_ok() || matches!(resizable, Err(error) if error.kind == ErrorKind::SdlError && !error.message.is_empty()));
     window.start_text_input().unwrap();
     window.set_text_input_area(crate::Rect { x: 3, y: 4, width: 40, height: 16 }, 7).unwrap();
     window.stop_text_input().unwrap();
@@ -118,7 +139,7 @@ fn dummy_video_window_lifecycle_and_typed_errors() {
         crate::CursorShape::EwResize, crate::CursorShape::NsResize,
     ] {
         match crate::Cursor::create(shape) {
-            Err(error) => assert_eq!(error.kind, ErrorKind::Unsupported),
+            Err(error) => assert!(error.kind == ErrorKind::Unsupported && !error.message.is_empty()),
             Ok(mut cursor) => {
                 cursor.set().unwrap();
                 cursor.destroy().unwrap();
@@ -129,13 +150,19 @@ fn dummy_video_window_lifecycle_and_typed_errors() {
     }
     window.show().unwrap();
     window.sync().unwrap();
-    assert!(!window.state().unwrap().hidden);
+    let shown = window.state().unwrap();
+    assert!(!shown.hidden && !shown.minimized && !shown.occluded);
     window.hide().unwrap();
     window.sync().unwrap();
     assert!(window.state().unwrap().hidden);
     assert_eq!(window.set_size(0, 72).unwrap_err().kind, ErrorKind::InvalidArgument);
     assert_eq!(
         window.set_text_input_area(crate::Rect { x: 0, y: 0, width: 4, height: 4 }, -1)
+            .unwrap_err().kind,
+        ErrorKind::InvalidArgument,
+    );
+    assert_eq!(
+        window.set_text_input_area(crate::Rect { x: 0, y: 0, width: 0, height: 4 }, 0)
             .unwrap_err().kind,
         ErrorKind::InvalidArgument,
     );
@@ -161,10 +188,14 @@ fn dummy_video_window_lifecycle_and_typed_errors() {
         window.dialog_show(crate::DialogKind::OpenFiles, &filters, None).unwrap_err().kind,
         ErrorKind::InvalidArgument,
     );
-    assert!(matches!(crate::MetalView::create(&window), Err(error) if error.kind == ErrorKind::SdlError));
+    assert!(matches!(crate::MetalView::create(&window), Err(error) if error.kind == ErrorKind::SdlError && !error.message.is_empty()));
     window.destroy().unwrap();
     window.destroy().unwrap();
     assert_eq!(window.size().unwrap_err().kind, ErrorKind::Destroyed);
+    assert_eq!(
+        window.dialog_show(crate::DialogKind::OpenFile, &[], None).unwrap_err().kind,
+        ErrorKind::Destroyed,
+    );
     crate::init::quit_subsystems(&[crate::init::Subsystem::Video, crate::init::Subsystem::Events]).unwrap();
 }
 
@@ -235,10 +266,12 @@ fn typed_event_trace_and_async_dialog_outcomes_match_native_bridge() {
     };
     let first = sdl3_sys::test_util::dialog_reserve();
     assert_ne!(first, 0);
+    assert!(outcomes().is_empty(), "a dialog that is still open produced an event");
     assert!(sdl3_sys::test_util::dialog_finish(first, Some(&["/tmp/žaba.png", "/tmp/b c.png"])));
     assert_eq!(outcomes(), vec![(first, crate::DialogOutcome::Chosen(vec!["/tmp/žaba.png".into(), "/tmp/b c.png".into()]))]);
     assert!(outcomes().is_empty());
     let cancelled = sdl3_sys::test_util::dialog_reserve();
+    assert_ne!(cancelled, first, "a finished dialog's id was reused at once");
     assert!(sdl3_sys::test_util::dialog_finish(cancelled, Some(&[])));
     assert_eq!(outcomes(), vec![(cancelled, crate::DialogOutcome::Cancelled)]);
     let failed = sdl3_sys::test_util::dialog_reserve();
@@ -339,7 +372,11 @@ fn injected_video_startup_failure_child() {
     assert_eq!(failure.message, message);
     crate::init::quit_subsystems(&[crate::init::Subsystem::Events]).unwrap();
     assert_eq!(
-        crate::init::init(&[crate::init::Subsystem::Video]).unwrap_err().kind,
+        {
+            let error = crate::init::init(&[crate::init::Subsystem::Video]).unwrap_err();
+            assert!(!error.message.is_empty());
+            error.kind
+        },
         ErrorKind::SdlError,
     );
 }
@@ -366,6 +403,12 @@ fn cocoa_layer_ownership_and_trackpad_phases() {
     window.set_size(80, 60).unwrap();
     window.sync().unwrap();
     assert_eq!(window.size().unwrap(), (80, 60));
+    let (resized_width, resized_height) = window.size_in_pixels().unwrap();
+    assert!((resized_width as f32 / 80.0 - density).abs() < 0.01);
+    assert!((resized_height as f32 / 60.0 - density).abs() < 0.01);
+    window.set_resizable(false).unwrap();
+    window.set_resizable(true).unwrap();
+    window.center().unwrap();
     window.set_background(0.95, 0.95, 0.93).unwrap();
 
     let _ = crate::event::poll_coalesced().unwrap();

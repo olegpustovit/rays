@@ -31,3 +31,7 @@ mod oracle_cases;
 mod test_oracle;
 #[cfg(test)]
 mod test_fma;
+#[cfg(test)]
+mod test_region_arguments;
+#[cfg(test)]
+mod test_array_composition_web;

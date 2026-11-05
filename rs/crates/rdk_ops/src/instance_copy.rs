@@ -119,7 +119,7 @@ fn repeat_i64(cancel_value: Option<&cancel::T>, grain: i64, copies: i64, source:
     build_i64(cancel_value, grain, copies * length, &|index| source[(index % length) as usize])
 }
 
-fn repeat_text(copies: i64, source: &[String]) -> Vec<String> {
+fn repeat_text(copies: i64, source: &[Vec<u8>]) -> Vec<Vec<u8>> {
     let mut output = Vec::with_capacity(source.len() * copies.max(0) as usize);
     for _ in 0..copies {
         output.extend(source.iter().cloned());

@@ -515,32 +515,7 @@ fn primitive(track: bool, locals: &[Ty], operation: &Primitive, args: &[(String,
             let d = d.clone();
             Arc::new(move |_| Err(d.clone()))
         }
-        Primitive::Error => {
-            let code = arg(args, "code").expect("error code");
-            let message = arg(args, "message").expect("error message");
-            let cause = arg(args, "cause");
-            Arc::new(move |st| match (&st.values[ix(code)], &st.values[ix(message)]) {
-                (Value::Text(code), Value::Text(message)) => {
-                    let cause = match cause {
-                        None => None,
-                        Some(index) => match &st.values[ix(index)] {
-                            Value::Text(cause) => Some(String::from_utf8_lossy(cause).into_owned()),
-                            _ => return Err(v::fail("E_TYPE", "error cause must be text.")),
-                        },
-                    };
-                    Err(rays_diagnostic::error(
-                        String::from_utf8_lossy(code).into_owned(),
-                        String::from_utf8_lossy(message).into_owned(),
-                        None,
-                        None,
-                        cause,
-                        Vec::new(),
-                        Vec::new(),
-                    ))
-                }
-                _ => Err(v::fail("E_TYPE", "error needs text code and message.")),
-            })
-        }
+        Primitive::Error => generic(),
         Primitive::Rand_at => {
             let seed = arg(args, "seed").expect("seed");
             let index = arg(args, "index").expect("index");

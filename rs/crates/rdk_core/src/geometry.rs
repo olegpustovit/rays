@@ -647,6 +647,83 @@ pub fn generate_point_ranges(
 mod tests {
     use super::*;
 
+    // Top-level deferred-storage assertions in lib/rdk/test_attribute_lifecycle.ml.
+    #[test]
+    fn deferred_positions_and_attribute_metadata_stay_lazy_across_racing_readers() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let count = 4_i64;
+        let reads = Arc::new(AtomicUsize::new(0));
+        let noise_reads = reads.clone();
+        let noise = attribute::create_deferred(
+            None, None, "noise", attribute::Owner::Point, &attribute::Storage::Float(vec![]), count,
+            Arc::new(move || {
+                noise_reads.fetch_add(1, Ordering::SeqCst);
+                attribute::Storage::Float((0..count).map(|i| i as f64).collect())
+            }),
+        ).unwrap();
+        let position_reads = reads.clone();
+        let positions = packed::Float3::deferred(None, None, None, count, Arc::new(move || {
+            position_reads.fetch_add(1, Ordering::SeqCst);
+            Ok((0..3).map(|component| (0..count).map(|i| (component * 10 + i) as f64).collect()).collect())
+        })).unwrap();
+        let geometry = create(positions, topology::polygons_owned(count, vec![0, 1, 2, 3], vec![0, 4]).unwrap(), Some(vec![noise.clone()]), None, None).unwrap();
+        assert_eq!(attribute::length(&noise), count);
+        assert_eq!(attribute::kind_name(&noise), "float");
+        assert_eq!(attribute::payload_bytes(&noise), count * 8);
+        assert_eq!(packed::Float3::length(super::positions(&geometry)), count);
+        assert!(attribute::resident(&noise));
+        assert!(packed::Float3::resident(super::positions(&geometry)));
+        assert_eq!(reads.load(Ordering::SeqCst), 0);
+        let positions = super::positions(&geometry);
+        parallel::run_unit(Some(4), &|| parallel::for_(1, 0, 63, &|index| {
+            packed::Float3::get(positions, index % count).unwrap();
+            Ok(())
+        })).unwrap();
+        assert_eq!(packed::Float3::get(positions, 1).unwrap(), (1.0, 11.0, 21.0));
+        assert_eq!(packed::Float3::get(positions, 2).unwrap(), (2.0, 12.0, 22.0));
+        let raced = reads.load(Ordering::SeqCst);
+        assert!(raced >= 1);
+        packed::Float3::get(positions, 0).unwrap();
+        assert_eq!(reads.load(Ordering::SeqCst), raced);
+        for _ in 0..2 {
+            let attribute::Storage::Float(values) = attribute::storage(&noise).unwrap() else {
+                panic!("deferred noise returned non-float storage");
+            };
+            assert_eq!(values, vec![0.0, 1.0, 2.0, 3.0]);
+        }
+        assert_eq!(reads.load(Ordering::SeqCst), raced + 1);
+        assert!(!attribute::resident(&noise));
+    }
+
+    // lib/rdk/test_rdk_sources.ml: retain the original million-point/domain matrix.
+    #[test]
+    fn million_point_range_kernel_is_exact_in_each_domain_context() {
+        for domains in [1, 4] {
+            parallel::run_unit(Some(domains), &|| {
+                let value = generate_point_ranges(1_000_000, &mut |first, last, x, y, z| {
+                    for index in first..last {
+                        let index = index as usize;
+                        let value = index as f64;
+                        x[index] = value;
+                        y[index] = value * 0.5;
+                        z[index] = -value;
+                    }
+                }).unwrap();
+                let planes = packed::Float3::View::view(super::positions(&value)).unwrap();
+                assert_eq!(planes.x.len(), 1_000_000);
+                assert_eq!(planes.y.len(), 1_000_000);
+                assert_eq!(planes.z.len(), 1_000_000);
+                for index in 0..1_000_000 {
+                    let value = index as f64;
+                    assert_eq!(planes.x[index].to_bits(), value.to_bits());
+                    assert_eq!(planes.y[index].to_bits(), (value * 0.5).to_bits());
+                    assert_eq!(planes.z[index].to_bits(), (-value).to_bits());
+                }
+                Ok(())
+            }).unwrap();
+        }
+    }
+
     fn positions() -> packed::Float3::T {
         packed::Float3::View::of_owned_exn(
             vec![0.0, 1.0],

@@ -59,7 +59,7 @@ fn join_ranges_float(slots: Vec<Mutex<Option<Vec<f64>>>>, capacity: usize, opera
     Ok(output)
 }
 
-fn join_ranges_text(slots: Vec<Mutex<Option<Vec<String>>>>, capacity: usize, operation: &str) -> Result<Vec<String>, error::T> {
+fn join_ranges_text(slots: Vec<Mutex<Option<Vec<Vec<u8>>>>>, capacity: usize, operation: &str) -> Result<Vec<Vec<u8>>, error::T> {
     let mut output = Vec::with_capacity(capacity);
     for slot in slots {
         let range = slot.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -110,10 +110,10 @@ pub fn select_int(
 pub fn select_text(
     cancel_value: Option<&cancel::T>,
     grain: i64,
-    missing: Option<&str>,
+    missing: Option<&[u8]>,
     mapping: &[i64],
-    source: &[String],
-) -> Result<Vec<String>, error::T> {
+    source: &[Vec<u8>],
+) -> Result<Vec<Vec<u8>>, error::T> {
     let operation = "Topology_remap.select";
     if mapping.is_empty() {
         return Ok(Vec::new());
@@ -125,7 +125,7 @@ pub fn select_text(
     validate_mapping(operation, checked_count(source.len(), operation)?, mapping, missing.is_some())?;
     let count = checked_count(mapping.len(), operation)?;
     let ranges = range_count(count, grain);
-    let slots: Vec<Mutex<Option<Vec<String>>>> = (0..ranges).map(|_| Mutex::new(None)).collect();
+    let slots: Vec<Mutex<Option<Vec<Vec<u8>>>>> = (0..ranges).map(|_| Mutex::new(None)).collect();
     run_indexed_ranges(grain, count, &|range, first, last| {
         let mut values = Vec::with_capacity((last - first) as usize);
         for output in first..last {
@@ -195,7 +195,7 @@ fn attribute_result(
             cancel_value, grain, defaults.then_some(0), mapping, values,
         )?),
         attribute::Storage::Text(values) => attribute::Storage::Text(select_text(
-            cancel_value, grain, defaults.then_some(""), mapping, values,
+            cancel_value, grain, defaults.then_some(&[][..]), mapping, values,
         )?),
         attribute::Storage::IntArray(values) => attribute::Storage::IntArray(ragged_ops::remap_int(
             cancel_value, Some(grain), mapping, values,
@@ -821,7 +821,7 @@ mod tests {
         cancel::cancel(&token);
         let integer = select_int(Some(&token), 1, None, &[-1], &[1]).unwrap_err();
         assert_eq!(error::code(&integer), "cancelled");
-        let text = select_text(Some(&token), 1, None, &[-1], &["value".to_owned()]).unwrap_err();
+        let text = select_text(Some(&token), 1, None, &[-1], &[b"value".to_vec()]).unwrap_err();
         assert_eq!(error::code(&text), "cancelled");
     }
     #[test]

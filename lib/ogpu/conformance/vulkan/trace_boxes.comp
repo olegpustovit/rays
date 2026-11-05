@@ -3,7 +3,7 @@
 layout(local_size_x = 4) in;
 layout(set = 0, binding = 0) uniform accelerationStructureEXT scene;
 layout(set = 0, binding = 1) readonly buffer Rays { vec4 rays[]; };
-struct Hit { uint hit; uint primitive; uint instance; float t; };
+struct Hit { uint hit; uint primitive; uint instance; float t; vec2 barycentrics; };
 layout(set = 0, binding = 2) buffer Hits { Hit hits[]; };
 layout(set = 0, binding = 3) readonly buffer Spheres { vec4 spheres[]; };
 // The sphere is resolved in the traversal loop: a box candidate is generated as a hit at the sphere's t.
@@ -25,5 +25,5 @@ void main() {
   }
   bool hit = rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionGeneratedEXT;
   hits[i] = Hit(hit ? 1u : 0u, hit ? uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, true)) : 0u, 0u,
-                hit ? rayQueryGetIntersectionTEXT(q, true) : 0.0);
+                hit ? rayQueryGetIntersectionTEXT(q, true) : 0.0, vec2(0.0));
 }

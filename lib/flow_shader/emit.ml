@@ -204,7 +204,40 @@ let comparison operation a b =
 
 (* A ray query (Trace): its result is held in locals declared in the scope and stored once a scope,
    guard set and ray (registers [r]), where its first field is read; [a k] prints operand k. *)
-let trace_query ~hits ~instancing ~moving (current : Scope.t) guards slot stage r a =
+let curve_capsule_msl =
+  String.concat "\n"
+    [
+      "inline float rays_curve_nearer(float best,float value,bool valid,float tmin,float tmax) {";
+      "  return valid && value>=tmin && value<=tmax && value<best ? value : best;";
+      "}";
+      "inline bool rays_curve_intersect(float3 origin,float3 direction,float tmin,float tmax,float4 sa,float4 sb,thread float &distance,thread float &parameter) {";
+      "  float shift=dot((sa.xyz+sb.xyz)*0.5f-origin,direction);";
+      "  float3 o=origin+direction*shift,ba=sb.xyz-sa.xyz,oa=o-sa.xyz,ob=o-sb.xyz;";
+      "  tmin-=shift;tmax-=shift;";
+      "  float radius=sa.w,baba=dot(ba,ba),bard=dot(ba,direction),baoa=dot(ba,oa);";
+      "  float qa=baba-bard*bard,qb=baba*dot(direction,oa)-baoa*bard;";
+      "  float qc=baba*dot(oa,oa)-baoa*baoa-radius*radius*baba;";
+      "  float disc=qb*qb-qa*qc,root=sqrt(max(disc,0.0f)),safe_qa=qa!=0.0f?qa:1.0f;";
+      "  float t0=(-qb-root)/safe_qa,t1=(-qb+root)/safe_qa;";
+      "  float y0=baoa+t0*bard,y1=baoa+t1*bard;";
+      "  float best=INFINITY;";
+      "  best=rays_curve_nearer(best,t0,qa>0.0f && disc>=0.0f && y0>0.0f && y0<baba,tmin,tmax);";
+      "  best=rays_curve_nearer(best,t1,qa>0.0f && disc>=0.0f && y1>0.0f && y1<baba,tmin,tmax);";
+      "  float ha=dot(oa,direction),cap_a=ha*ha-(dot(oa,oa)-radius*radius),root_a=sqrt(max(cap_a,0.0f));";
+      "  float ta0=-ha-root_a,ta1=-ha+root_a;";
+      "  best=rays_curve_nearer(best,ta0,cap_a>=0.0f && baoa+ta0*bard<=0.0f,tmin,tmax);";
+      "  best=rays_curve_nearer(best,ta1,cap_a>=0.0f && baoa+ta1*bard<=0.0f,tmin,tmax);";
+      "  float hb=dot(ob,direction),cap_b=hb*hb-(dot(ob,ob)-radius*radius),root_b=sqrt(max(cap_b,0.0f));";
+      "  float tb0=-hb-root_b,tb1=-hb+root_b;";
+      "  best=rays_curve_nearer(best,tb0,cap_b>=0.0f && baoa+tb0*bard>=baba,tmin,tmax);";
+      "  best=rays_curve_nearer(best,tb1,cap_b>=0.0f && baoa+tb1*bard>=baba,tmin,tmax);";
+      "  if(!isfinite(best)) return false;";
+      "  distance=best+shift;parameter=clamp((baoa+best*bard)/max(baba,1e-8f),0.0f,1.0f);";
+      "  return true;";
+      "}";
+    ]
+
+let trace_query ~hits ~instancing ~moving ~native (current : Scope.t) guards slot stage r a =
   let curve =
     match stage with Flow_ir.Core.Region.Trace_curves _ | Trace_curves_any -> true | _ -> false
   and any = stage = Flow_ir.Core.Region.Trace_any || stage = Trace_curves_any in
@@ -217,50 +250,74 @@ let trace_query ~hits ~instancing ~moving (current : Scope.t) guards slot stage 
         let declare ty field zero =
           Printf.bprintf current.Scope.decls "  %s %s%s=%s;\n" ty name field zero
         in
-        let tags =
-          if not moving then []
-          else [ (if instancing then "instance_motion" else "primitive_motion") ]
-        in
-        let data =
-          String.concat ", "
-            ((if curve then [ "curve_data" ] else if any then [] else [ "triangle_data" ])
-            @ (if instancing && not curve then [ "instancing" ] else [])
-            @ if curve then [] else tags)
-        in
-        let target = if curve then "scene_curves" else "scene" ^ if moving then "," ^ a 8 else "" in
-        let call =
-          Printf.sprintf "q.intersect(ray(float3(%s,%s,%s),float3(%s,%s,%s),%s,%s),%s)" (a 0) (a 1)
-            (a 2) (a 3) (a 4) (a 5) (a 6) (a 7) target
-        in
-        let kind = if curve then "curve" else "triangle" in
-        let store =
-          if any then (
-            declare "bool" "" "false";
-            Printf.sprintf "%s=%s.type==intersection_type::%s;" name call kind)
+        if curve && not native then begin
+          if any then declare "bool" "" "false"
           else begin
             declare "bool" "_h" "false";
             declare "float" "_t" "0.0f";
             declare "uint" "_p" "0u";
-            if curve then declare "float" "_u" "0.0f" else declare "float2" "_uv" "0.0f";
-            if instancing && not curve then declare "uint" "_i" "0u";
+            declare "float" "_u" "0.0f"
+          end;
+          let committed =
+            "q.get_committed_intersection_type()==intersection_type::bounding_box"
+          in
+          let body =
             Printf.sprintf
-              "auto h=%s;%s_h=h.type==intersection_type::%s;%s_t=h.distance;%s_p=h.primitive_id;%s"
-              call name kind name name
-              (if curve then name ^ "_u=h.curve_parameter;"
+              "{ray r(float3(%s,%s,%s),float3(%s,%s,%s),%s,%s);intersection_params params;intersection_query<> q(r,scene_curves,params);float best=INFINITY;uint best_primitive=0u;float best_parameter=0.0f;while(q.next()){if(q.get_candidate_intersection_type()==intersection_type::bounding_box){uint k=q.get_candidate_primitive_id();float t,u;if(rays_curve_intersect(r.origin,r.direction,%s,%s,scene_strands[2u*k],scene_strands[2u*k+1u],t,u)){q.commit_bounding_box_intersection(t);if(t<best){best=t;best_primitive=k;best_parameter=u;}}}}%s}"
+              (a 0) (a 1) (a 2) (a 3) (a 4) (a 5) (a 6) (a 7) (a 6) (a 7)
+              (if any then Printf.sprintf "%s=%s;" name committed
                else
-                 name ^ "_uv=h.triangle_barycentric_coord;"
-                 ^ if instancing then name ^ "_i=h.instance_id;" else "")
-          end
-        in
-        Printf.bprintf current.Scope.code
-          "%s{intersector<%s> \
-           q;q.assume_geometry_type(geometry_type::%s);q.force_opacity(forced_opacity::opaque);%s%s%s}\n"
-          (indent current) data kind
-          (if curve then
-             "q.assume_curve_type(curve_type::round);q.assume_curve_basis(curve_basis::linear);q.assume_curve_control_point_count(2);"
-           else "")
-          (if any then "q.accept_any_intersection(true);" else "")
-          store;
+                 Printf.sprintf "%s_h=%s;%s_t=q.get_committed_distance();%s_p=q.get_committed_primitive_id();%s_u=best_parameter;"
+                   name committed name name name)
+          in
+          Printf.bprintf current.Scope.code "%s%s\n" (indent current) body
+        end
+        else begin
+          let tags =
+            if not moving then []
+            else [ (if instancing then "instance_motion" else "primitive_motion") ]
+          in
+          let data =
+            String.concat ", "
+              ((if curve then [ "curve_data" ] else if any then [] else [ "triangle_data" ])
+              @ (if instancing && not curve then [ "instancing" ] else [])
+              @ if curve then [] else tags)
+          in
+          let target = if curve then "scene_curves" else "scene" ^ if moving then "," ^ a 8 else "" in
+          let call =
+            Printf.sprintf "q.intersect(ray(float3(%s,%s,%s),float3(%s,%s,%s),%s,%s),%s)"
+              (a 0) (a 1) (a 2) (a 3) (a 4) (a 5) (a 6) (a 7) target
+          in
+          let kind = if curve then "curve" else "triangle" in
+          let store =
+            if any then (
+              declare "bool" "" "false";
+              Printf.sprintf "%s=%s.type==intersection_type::%s;" name call kind)
+            else begin
+              declare "bool" "_h" "false";
+              declare "float" "_t" "0.0f";
+              declare "uint" "_p" "0u";
+              if curve then declare "float" "_u" "0.0f" else declare "float2" "_uv" "0.0f";
+              if instancing && not curve then declare "uint" "_i" "0u";
+              Printf.sprintf
+                "auto h=%s;%s_h=h.type==intersection_type::%s;%s_t=h.distance;%s_p=h.primitive_id;%s"
+                call name kind name name
+                (if curve then name ^ "_u=h.curve_parameter;"
+                 else
+                   name ^ "_uv=h.triangle_barycentric_coord;"
+                   ^ if instancing then name ^ "_i=h.instance_id;" else "")
+            end
+          in
+          Printf.bprintf current.Scope.code
+            "%s{intersector<%s> \
+             q;q.assume_geometry_type(geometry_type::%s);q.force_opacity(forced_opacity::opaque);%s%s%s}\n"
+            (indent current) data kind
+            (if curve then
+               "q.assume_curve_type(curve_type::round);q.assume_curve_basis(curve_basis::linear);q.assume_curve_control_point_count(2);"
+             else "")
+            (if any then "q.accept_any_intersection(true);" else "")
+            store
+        end;
         Hashtbl.add hits key name;
         name
   in
@@ -574,7 +631,8 @@ and generate ?(fast = false) ?(instanced = false) ?(motion = false) ?curves ?(sp
     let hits = Hashtbl.create 4 in
     let instancing = scene_instances <> None and moving = layout.scene_motion in
     let query current guards slot stage r =
-      trace_query ~hits ~instancing ~moving current guards slot stage r (fun k -> float_of r.(k))
+      trace_query ~hits ~instancing ~moving ~native current guards slot stage r
+        (fun k -> float_of r.(k))
     in
     let scene_read stage r =
       scene_read ~instancing ~stride:(if moving then 32 else 16) stage (fun k -> low r.(k))
@@ -974,11 +1032,7 @@ and generate ?(fast = false) ?(instanced = false) ?(motion = false) ?curves ?(sp
               | Some s ->
                   (false, "device const float4* scene_strands", s, "scene_strands[")
                   ::
-                  (if native then
-                     [
-                       (true, "primitive_acceleration_structure scene_curves", s + 1, "scene_curves");
-                     ]
-                   else []))
+                  [ (true, "primitive_acceleration_structure scene_curves", s + 1, "scene_curves") ])
       in
       (* fast: the element count may come from a device cell (another kernel's, times mul over div,
      when use is set) and is written to this kernel's own count record {n, 6n, 1, 0, 0, 0}: a
@@ -1021,9 +1075,11 @@ and generate ?(fast = false) ?(instanced = false) ?(motion = false) ?curves ?(sp
       in
       let prefix =
         "#include <metal_stdlib>\nusing namespace metal;\n"
-        ^
-        if scene_binding = None then ""
-        else "#include <metal_raytracing>\nusing namespace metal::raytracing;\n"
+        ^ (if scene_binding = None then ""
+           else "#include <metal_raytracing>\nusing namespace metal::raytracing;\n")
+        ^ (if curves = Some `Loop && layout.scene_strands <> None then
+             curve_capsule_msl ^ "\n"
+           else "")
       in
       let signature = String.concat ",\n  " arguments in
       let guard =

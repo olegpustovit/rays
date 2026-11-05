@@ -2673,14 +2673,22 @@ mod tests {
         geometry::with_attribute(attribute::create_owned(name, owner, storage).unwrap(), value).unwrap()
     }
 
-    /// `columns` x `rows` points over a square of `size` in the xz plane; alternating diagonals.
+    /// `Plane_generators.grid`: point counts, xz plane, alternating triangles.
     fn grid(columns: i64, rows: i64, size: f64, uv: bool) -> geometry::T {
         let mut x = Vec::new();
         let mut z = Vec::new();
+        let mut u = Vec::new();
+        let mut v = Vec::new();
         for row in 0..rows {
+            let point_v = row as f64 / (rows - 1) as f64;
             for column in 0..columns {
-                x.push(-size / 2.0 + size * (column as f64) / ((columns - 1) as f64));
-                z.push(-size / 2.0 + size * (row as f64) / ((rows - 1) as f64));
+                let point_u = column as f64 / (columns - 1) as f64;
+                x.push((point_u - 0.5) * size);
+                z.push((point_v - 0.5) * size);
+                if uv {
+                    u.push(point_u);
+                    v.push(point_v);
+                }
             }
         }
         let mut vertex_points = Vec::new();
@@ -2691,20 +2699,15 @@ mod tests {
                 let (p01, p10) = (p00 + 1, p00 + columns);
                 let p11 = p10 + 1;
                 if (row + column) % 2 == 0 {
-                    vertex_points.extend([p00, p01, p11, p00, p11, p10]);
+                    vertex_points.extend([p00, p10, p11, p00, p11, p01]);
                 } else {
-                    vertex_points.extend([p00, p01, p10, p01, p11, p10]);
+                    vertex_points.extend([p00, p10, p01, p01, p10, p11]);
                 }
                 offsets.push(vertex_points.len() as i64 - 3);
                 offsets.push(vertex_points.len() as i64);
             }
         }
         let count = x.len();
-        let vertex_total = vertex_points.len();
-        let uv_values = (
-            vertex_points.iter().map(|&p| x[p as usize] / size + 0.5).collect::<Vec<f64>>(),
-            vertex_points.iter().map(|&p| z[p as usize] / size + 0.5).collect::<Vec<f64>>(),
-        );
         let base = geometry::create(
             packed::Float3::View::of_owned_exn(x, vec![0.0; count], z).unwrap(),
             topology::polygons_owned(count as i64, vertex_points, offsets).unwrap(),
@@ -2713,17 +2716,36 @@ mod tests {
             None,
         )
         .unwrap();
+        let base = add_attribute(
+            &base,
+            Owner::Point,
+            "N",
+            Storage::Float3(
+                packed::Float3::View::of_owned_exn(vec![0.0; count], vec![1.0; count], vec![0.0; count])
+                    .unwrap(),
+            ),
+        );
         if uv {
-            assert_eq!(uv_values.0.len(), vertex_total);
-            add_attribute(
-                &base,
-                Owner::Vertex,
-                "uv",
-                Storage::Float2(packed::Float2::of_owned(uv_values.0, uv_values.1).unwrap()),
-            )
+            add_attribute(&base, Owner::Point, "uv", Storage::Float2(packed::Float2::of_owned(u, v).unwrap()))
         } else {
             base
         }
+    }
+
+    #[test]
+    fn grid_fixture_matches_ocaml_generator() {
+        let source = grid(9, 7, 6.0, true);
+        let topology = topology::View::view(geometry::topology(&source)).unwrap();
+        assert_eq!(&topology.vertex_points[..12], &[0, 9, 10, 0, 10, 1, 1, 10, 2, 2, 10, 11]);
+        let positions = packed::Float3::View::view(geometry::positions(&source)).unwrap();
+        assert_eq!(positions.z[36].to_bits(), 0x3fef_ffff_ffff_fffe);
+        let uv = geometry::find_attribute(Owner::Point, "uv", &source).unwrap();
+        let Storage::Float2(uv) = attribute::View::storage(&uv).unwrap() else {
+            panic!("grid fixture UV storage drifted");
+        };
+        let uv = packed::Float2::View::view(uv);
+        assert_eq!(uv.y.len(), 63);
+        assert_eq!(uv.y[9].to_bits(), (1.0_f64 / 6.0).to_bits());
     }
 
     fn scalar(owner: Owner, name: &str, value: &geometry::T) -> Vec<f64> {
@@ -2858,7 +2880,7 @@ mod tests {
         .unwrap();
         let value = add_attribute(&base, Owner::Vertex, "uv", Storage::Float2(uv));
         let value = add_attribute(&value, Owner::Point, "target", Storage::Float(vec![0.4; 4]));
-        let value = add_attribute(&value, Owner::Detail, "tag", Storage::Text(vec!["fixture".to_owned()]));
+        let value = add_attribute(&value, Owner::Detail, "tag", Storage::Text(vec![b"fixture".to_vec()]));
         let hard_points = group::init(None, group::Owner::Point, "pin", 4, &|point| point == 0).unwrap();
         (value, hard_points)
     }
@@ -2930,6 +2952,81 @@ mod tests {
         check_triangles(&output);
     }
 
+    // OCaml 5.3 runtime/hash.c and runtime/ints.c: only the Int64/string cases used
+    // by test_remesh.ml's byte-level chained-kernel oracle.
+    fn fixture_hash(value: &geometry::T) -> i64 {
+        fn word(hash: u32, value: u32) -> u32 {
+            let value = value.wrapping_mul(0xcc9e2d51).rotate_left(15).wrapping_mul(0x1b873593);
+            (hash ^ value).rotate_left(13).wrapping_mul(5).wrapping_add(0xe6546b64)
+        }
+        fn finish(mut hash: u32) -> i64 {
+            hash ^= hash >> 16;
+            hash = hash.wrapping_mul(0x85ebca6b);
+            hash ^= hash >> 13;
+            hash = hash.wrapping_mul(0xc2b2ae35);
+            i64::from((hash ^ (hash >> 16)) & 0x3fffffff)
+        }
+        fn mix(hash: i64, value: i64) -> i64 {
+            rays_math::hash::mix_with(1_000_003, hash, value) & ((1_i64 << 62) - 1)
+        }
+        fn ints(values: &[i64]) -> i64 {
+            values.iter().fold(17, |hash, &value| mix(hash, value))
+        }
+        fn floats(values: &[f64]) -> i64 {
+            values.iter().fold(17, |hash, value| {
+                let bits = value.to_bits();
+                mix(hash, finish(word(0, (bits as u32) ^ ((bits >> 32) as u32))))
+            })
+        }
+        fn text(value: &[u8]) -> i64 {
+            let mut hash = 0;
+            for chunk in value.chunks(4) {
+                let mut bytes = [0; 4];
+                bytes[..chunk.len()].copy_from_slice(chunk);
+                hash = word(hash, u32::from_le_bytes(bytes));
+            }
+            finish(hash ^ value.len() as u32)
+        }
+        let positions = packed::Float3::View::view(geometry::positions(value)).unwrap();
+        let topology = topology::View::view(geometry::topology(value)).unwrap();
+        let mut hash = 17;
+        hash = mix(hash, mix(mix(floats(&positions.x), floats(&positions.y)), floats(&positions.z)));
+        hash = mix(hash, ints(&topology.vertex_points));
+        hash = mix(hash, ints(&topology.primitive_offsets));
+        for item in geometry::attributes(value) {
+            let component = match attribute::View::storage(&item).unwrap() {
+                Storage::Float(values) => floats(values),
+                Storage::Int(values) => ints(values),
+                Storage::Text(values) => values.iter().fold(17, |hash, value| mix(hash, text(value))),
+                Storage::Float2(values) => {
+                    let planes = packed::Float2::View::view(values);
+                    mix(floats(&planes.x), floats(&planes.y))
+                }
+                Storage::Float3(values) => {
+                    let planes = packed::Float3::View::view(values).unwrap();
+                    mix(mix(floats(&planes.x), floats(&planes.y)), floats(&planes.z))
+                }
+                _ => 1,
+            };
+            hash = mix(hash, component);
+        }
+        for item in geometry::groups(value) {
+            let mut members = 17;
+            for element in 0..group::length(&item) {
+                if group::mem(element, &item) {
+                    members = mix(members, element);
+                }
+            }
+            let order = group::ordered_elements(&item).map_or(0, |values| ints(&values));
+            hash = mix(hash, mix(members, order));
+        }
+        for item in geometry::edge_groups(value) {
+            let component = edge_pairs(value, &item).iter().fold(17, |hash, &(a, b)| mix(mix(hash, a), b));
+            hash = mix(hash, component);
+        }
+        hash
+    }
+
     fn payload_fixture() -> (geometry::T, group::T) {
         let source = grid(9, 7, 6.0, true);
         let point_count = geometry::point_count(&source);
@@ -2947,11 +3044,11 @@ mod tests {
             "material",
             Storage::Text(
                 (0..primitive_count)
-                    .map(|primitive| if primitive % 3 == 0 { "red" } else { "blue" }.to_owned())
+                    .map(|primitive| if primitive % 3 == 0 { b"red".to_vec() } else { b"blue".to_vec() })
                     .collect(),
             ),
         );
-        let source = add_attribute(&source, Owner::Detail, "tag", Storage::Text(vec!["payload".to_owned()]));
+        let source = add_attribute(&source, Owner::Detail, "tag", Storage::Text(vec![b"payload".to_vec()]));
         let ordered_members: Vec<i64> =
             (0..point_count / 2).map(|index| point_count - 1 - (index * 2)).collect();
         let ordered =
@@ -3005,9 +3102,10 @@ mod tests {
             geometry::find_edge_group("authored_edges", &output).is_some(),
             "Remesh dropped an authored edge group"
         );
-        assert!(
-            geometry::primitive_count(&output) != geometry::primitive_count(&source),
-            "Remesh left the payload fixture's topology unchanged"
+        assert_eq!(
+            fixture_hash(&output),
+            if cfg!(windows) { 3_181_404_250_202_190_309 } else { 212_434_250_856_407_980 },
+            "Remesh payload fixture drifted from the chained kernels"
         );
         let flips_only = ok(&source, 0.8, &|p| {
             p.grain = 7;
@@ -3021,6 +3119,11 @@ mod tests {
             geometry::point_count(&flips_only),
             geometry::point_count(&source),
             "Remesh input-points-only fixture changed point cardinality"
+        );
+        assert_eq!(
+            fixture_hash(&flips_only),
+            1_893_477_268_345_860_603,
+            "Remesh flip-only fixture drifted from the chained kernels"
         );
         assert!(
             geometry_equal(&output, &run_domains(4)),

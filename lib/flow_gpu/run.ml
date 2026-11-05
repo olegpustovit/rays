@@ -185,9 +185,11 @@ type extras = {
   strands : B.buffer option;
   strand_count : int;
   curves : B.accel option;
+  prototypes : B.accel option;
 }
 
-let no_extras = { vertices_end = None; strands = None; strand_count = 0; curves = None }
+let no_extras =
+  { vertices_end = None; strands = None; strand_count = 0; curves = None; prototypes = None }
 
 type output = {
   owner : t;
@@ -569,7 +571,7 @@ let dispatch ?(wait = true) ?(reset_status = true) ?(uint32_cpu = false) ?comman
         List.filter_map
           (Option.map (fun b -> `Buffer b))
           [ s.instances; extras.vertices_end; extras.strands ]
-        @ Option.fold ~none:[] ~some:(fun a -> [ `Accel a ]) extras.curves
+        @ List.filter_map (Option.map (fun a -> `Accel a)) [ extras.curves; extras.prototypes ]
   in
   let error message = Error (Diagnostic.error ~code:"E_KERNEL" message) in
   if t.closed || Domain.self () <> t.domain then
@@ -867,7 +869,9 @@ let dispatch ?(wait = true) ?(reset_status = true) ?(uint32_cpu = false) ?comman
                     scene_tail;
                   get
                     (B.compute_use_accels encoder
-                       ((accel :: Option.to_list extras.curves) @ resident)))
+                       ((accel
+                        :: (Option.to_list extras.curves @ Option.to_list extras.prototypes))
+                       @ resident)))
                 scene;
               get
                 (match groups with
@@ -2011,6 +2015,38 @@ let build_scene ?caps gpu d =
             (fun (first, count) -> accel (B.Blas { geometries = [ triangles_at first count ] }))
             prototypes
         in
+        let prototype_accel =
+          if motion && Ogpu.Impl.backend = "vulkan" then begin
+            let identity =
+              [| 1.; 0.; 0.; 0.; 0.; 1.; 0.; 0.; 0.; 0.; 1.; 0. |]
+            in
+            let instances =
+              Array.mapi
+                (fun structure_index _ ->
+                  {
+                    B.instance =
+                      { transform = identity; mask = 0xFFFF_FFFF; structure_index };
+                    user_id = structure_index;
+                  })
+                (Array.of_list prototypes)
+            in
+            let instance_buffer =
+              upload (get (B.pack_instance_records device instances))
+            in
+            Some
+              (accel
+                 (B.Tlas_of
+                    {
+                      instances = instance_buffer;
+                      offset = 0L;
+                      instance_count = Array.length instances;
+                      kind = B.User_id_instances;
+                      structures = blas;
+                      motion_transforms = None;
+                    }))
+          end
+          else None
+        in
         let records =
           Array.mapi
             (fun k i ->
@@ -2081,7 +2117,7 @@ let build_scene ?caps gpu d =
         {
           scene =
             { accel; vertices; spheres; sphere_count; instances = Some (upload (bytes_of table)) };
-          extras = no_extras;
+          extras = { no_extras with prototypes = prototype_accel };
           instanced = true;
           motion;
           curves = None;
@@ -2089,16 +2125,15 @@ let build_scene ?caps gpu d =
         }
       end
     in
-    (* strands: Metal round linear curves over the segment records themselves (stride 16, radius at .w) where
-       the device has Ray_tracing_curves, else the kernel's in-loop capsule test over the same buffer *)
+    (* Native curves use their curve structure; other devices use per-segment swept AABBs and
+       resolve capsule candidates against the same strand records. *)
     let segments = Bytes.length d.strand_data / 32 in
     if segments = 0 then Ok built
     else begin
       let strands = upload d.strand_data in
       let native = Ogpu.Caps.has caps Ray_tracing_curves in
       let curves =
-        if not native then None
-        else
+        if native then
           let indices = Bytes.create (4 * segments) in
           for k = 0 to segments - 1 do
             Bytes.set_int32_le indices (4 * k) (Int32.of_int (2 * k))
@@ -2127,6 +2162,40 @@ let build_scene ?caps gpu d =
                           };
                       ];
                   }))
+        else begin
+          let boxes = Bytes.create (segments * 24) in
+          let value at = Int32.float_of_bits (Bytes.get_int32_le d.strand_data at) in
+          for segment = 0 to segments - 1 do
+            let record = segment * 32 in
+            let radius = max (Float.abs (value (record + 12))) (Float.abs (value (record + 28))) in
+            for axis = 0 to 2 do
+              let a = value (record + axis * 4)
+              and b = value (record + 16 + axis * 4) in
+              let low = min a b -. radius and high = max a b +. radius in
+              let epsilon = 1e-5 *. max 1. (max (Float.abs low) (Float.abs high)) in
+              Bytes.set_int32_le boxes (segment * 24 + axis * 4)
+                (Int32.bits_of_float (low -. epsilon));
+              Bytes.set_int32_le boxes (segment * 24 + 12 + axis * 4)
+                (Int32.bits_of_float (high +. epsilon))
+            done
+          done;
+          let boxes = upload boxes in
+          Some
+            (accel
+               (B.Blas
+                  {
+                    geometries =
+                      [
+                        B.Bounding_boxes
+                          {
+                            boxes = [ { buffer = boxes; offset = 0L } ];
+                            stride = 24;
+                            count = segments;
+                            options = B.default_geometry_options;
+                          };
+                      ];
+                  }))
+        end
       in
       Ok
         {

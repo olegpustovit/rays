@@ -28,7 +28,7 @@ fn bare(i: &I) -> &I {
 }
 
 fn source_input(term: &Term, source: i64, width: i64, component: i64) -> I {
-    match &term.ty {
+    match term.ty() {
         Ty::Array(e) if **e == Ty::Int => I::Int_input(source),
         Ty::Array(e) if **e == Ty::Text => I::Text_input(source),
         _ => I::Input(source, width, component),
@@ -151,8 +151,10 @@ fn remap(instruction: &I, registers: &[i64], uniform: i64) -> I {
 }
 
 fn source_region(through_exact: bool, dynamic: bool, count_source: &CountSource, residual: ResidualId, term: &Term) -> Option<RegionT> {
-    match &term.node {
-        Node::RefBinding(name, fields) if fields.is_empty() => {
+    let arena = term.arena();
+    match term.node {
+        Node::RefBinding(id) if arena.name_ids(arena.ref_binding(id).fields).is_empty() => {
+            let name = term.name(arena.ref_binding(id).name);
             let view = Residual::residual_view(residual).ok()?;
             match view.bindings.iter().find(|(n, _)| n == name).map(|(_, v)| v) {
                 Some(Value::Residual(r)) => {
@@ -162,8 +164,8 @@ fn source_region(through_exact: bool, dynamic: bool, count_source: &CountSource,
                 _ => None,
             }
         }
-        Node::Op { op, args, .. } if op == "exact" && args.len() == 1 && through_exact => {
-            source_region(through_exact, dynamic, count_source, residual, &args[0].1)
+        Node::Op(id) if term.name(arena.op(id).op) == "exact" && arena.fields(arena.op(id).args).len() == 1 && through_exact => {
+            source_region(through_exact, dynamic, count_source, residual, &term.child(arena.fields(arena.op(id).args)[0].term))
         }
         _ => lower(true, dynamic, count_source, residual, term).ok().map(|region| fuse(through_exact, region)),
     }
@@ -257,8 +259,10 @@ enum Resolved {
 }
 
 fn resolved(residual: ResidualId, term: &Term) -> Resolved {
-    if let Node::RefBinding(name, fields) = &term.node {
-        if fields.is_empty() {
+    if let Node::RefBinding(id) = term.node {
+        let binding = term.arena().ref_binding(id);
+        if term.arena().name_ids(binding.fields).is_empty() {
+            let name = term.name(binding.name);
             if let Ok(view) = Residual::residual_view(residual) {
                 match view.bindings.iter().find(|(n, _)| n == name).map(|(_, v)| v.clone()) {
                     Some(Value::Residual(r)) => {
@@ -341,17 +345,24 @@ pub fn merge(regions: &[RegionT]) -> Option<RegionT> {
 /// twice) are one upload.
 fn fill(source: &Source, width: i64) -> Option<Vec<I>> {
     if let Resolved::Term(residual, term) = resolved(source.0, &source.1) {
-        if let Node::Op { op, args, .. } = &term.node {
-            let value: Option<Value> = match args.iter().find(|(n, _)| n == "value").map(|(_, t)| t) {
-                Some(Term { node: Node::Lit(param::Value::Int(n)), .. }) => Some(Value::Int(*n)),
-                Some(Term { node: Node::Lit(param::Value::Float(x)), .. }) => Some(Value::Float(*x)),
-                Some(t @ Term { node: Node::RefBinding(_, fields), .. }) if fields.is_empty() => match resolved(residual, t) {
-                    Resolved::Value(v) => Some(v),
-                    Resolved::Term(..) => None,
-                },
-                _ => None,
-            };
-            return match (op.as_str(), value, width) {
+        if let Node::Op(id) = term.node {
+            let arena = term.arena();
+            let op = arena.op(id);
+            let value: Option<Value> = arena.fields(op.args).iter().find(|field| term.name(field.name) == "value").and_then(|field| {
+                match arena.row(field.term).node {
+                    Node::Lit(id) => match arena.literal(id) {
+                        flow_check::term_arena::Literal::Int(n) => Some(Value::Int(n)),
+                        flow_check::term_arena::Literal::Float(x) => Some(Value::Float(x)),
+                        _ => None,
+                    },
+                    Node::RefBinding(id) if arena.name_ids(arena.ref_binding(id).fields).is_empty() => match resolved(residual, &term.child(field.term)) {
+                        Resolved::Value(v) => Some(v),
+                        Resolved::Term(..) => None,
+                    },
+                    _ => None,
+                }
+            });
+            return match (term.name(op.op), value, width) {
                 ("array/int", Some(Value::Int(n)), 1) => Some(vec![I::Int_const(n)]),
                 ("array/float", Some(Value::Float(x)), 1) => Some(vec![I::Const(x)]),
                 ("array/float", Some(Value::Int(n)), 1) => Some(vec![I::Const(n as f64)]),

@@ -1275,18 +1275,19 @@ the CPU at 0.5. Static kernels print byte-identical source.
 
 Strands (curves) are the fourth static fact, `~curves` (`` `Native `` or `` `Loop `` on `Emit.kernel`, a bool on
 `Spirv.kernel` and `Kernel_layout.plan`). A strand segment is pathtrace.metal's linear round curve with sphere
-caps: two float4s (end a, radius; end b, radius) in a buffer bound after every other scene buffer, with a
-`scene:strands` count uniform. A hit reports `prim` = the segment, `u` = the curve parameter, `v` = 0,
+caps: two float4s (end a, radius; end b, radius) in the `scene_strands` buffer bound after every other scene
+buffer, followed by its native curve or swept-AABB acceleration structure. A hit reports `prim` = the segment,
+`u` = the curve parameter, `v` = 0,
 `instance` = -2 and the reference's normal (the offset from the axis point at `u`, less its tangential part); the
 nearest of triangle, strand and sphere wins. `` `Native `` (where `Run.build_scene` finds `Ray_tracing_curves`,
 Apple GPU family 9 and later) intersects a second, curve-only primitive structure built over the segment records
 themselves (control-point stride 16, radius at `.w`) with `intersector<curve_data>` bound after the strands.
-`` `Loop `` (CPU, SPIR-V, and Metal without the cap) tests each segment as a capsule in-loop, like the spheres:
-the cylinder's roots within the segment and the end spheres' beyond it, solved from the ray's point nearest the
-segment's middle so float32 keeps them within 1e-5 of the CPU. The loop is linear in the segment count (an AABB
-structure with a candidate loop is the upgrade if strand counts grow). `Trace_scene.register ~strands` is the
-CPU host. `test_trace` checks the capsule loop against the CPU on Metal; on a device below family 9 it checks
-only that the native kernel compiles to a pipeline. `test_spirv` validates the loop's SPIR-V (`fast_trace_curves`).
+`` `Loop `` keeps the CPU capsule loop; GPUs without native curves build one swept AABB per segment and
+run the capsule test only for a `RayQueryCandidateAABB`. The test solves the cylinder's roots within the
+segment and the end spheres' beyond it, from the ray's point nearest the segment's middle so float32 stays
+within 1e-5 of the CPU. Building the candidate structure is linear in segment count; rays test only its
+intersections. `Trace_scene.register ~strands` is the CPU host. `test_trace` checks curve hits against the CPU;
+`test_spirv` validates the curve candidate-query module (`fast_trace_curves`).
 
 ## Resident value scopes
 
@@ -1373,10 +1374,13 @@ records. `lib/ogpu_native` selects the platform's implementation; an executable 
   recorded calls replayed; an argument slice is a (texture, sampler) pair bound at a slot and the next.
 - Lifetime: destruction waits for the next submit's completion. One `VkInstance` lives for the process,
   because destroying the last one unloads the driver under its own starting threads.
-- Ray tracing: ray queries; a primitive structure bound to a kernel is wrapped in a one-instance top level.
   Instance records hold logical fields the bridge makes native at build, when structure addresses are known.
-  `Ray_tracing_motion` and `Ray_tracing_curves` are false: a moving scene builds at the shutter midpoint and
-  curves are the kernel's capsule loop.
+  `Ray_tracing_motion` is true after Vulkan enables `VK_KHR_acceleration_structure` and
+  `VK_KHR_ray_query` with their required features (both are startup requirements). Motion triangles use a
+  swept AABB per triangle and a SPIR-V watertight test at ray time; motion instances use an AABB-only proxy TLAS
+  and a separate prototype TLAS for nested, transform-interpolated queries.
+  `Ray_tracing_curves` remains false because Vulkan has no native curve geometry; linear curves use per-segment swept AABBs with
+  capsule candidate tests.
 - Math and text: `specification/core.md`, "Goldens across operating systems".
 - Facts about the tested card: `specification/vulkan/rtx2080ti.json`.
 

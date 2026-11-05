@@ -618,7 +618,7 @@ struct SState {
     epoch: i64,
     status_runs: Vec<run::T>,
     integers: Vec<(usize, Uint32Holder)>,
-    floats: Vec<(usize, Arc<G::Planes>)>,
+    floats: Vec<(usize, Arc<SharedPlanes>)>,
     on_close: Vec<Box<dyn FnOnce()>>,
     touched: Vec<Rc<Site>>,
     invoked: i64,
@@ -977,7 +977,7 @@ impl Scope {
 
     /// a region's kernel; `unfold` n runs it n passes in each lane (`Emit.kernel ~unfold`)
     fn emit(&self, unfold: Option<i64>, packed: &Packed) -> Result<Kernel, Diagnostic> {
-        let ty = &packed.term.ty;
+        let ty = packed.term.ty();
         let base = emit::Options { spirv: is_vulkan(), fast: true, unfold, ..emit::Options::default() };
         if !self.uint32 {
             return emit::kernel(&base, packed);
@@ -1007,7 +1007,7 @@ impl Scope {
         if let Some(site) = self.t.0.sites.borrow().peek(&|(c, u), _| Arc::ptr_eq(c, &code) && *u == uint32) {
             return site.clone();
         }
-        let ty = &packed.term.ty;
+        let ty = packed.term.ty();
         let types = [Ty::Array(Box::new(Ty::Int)), Ty::Array(Box::new(Ty::Float)), Ty::Array(Box::new(Ty::Vec2)), Ty::Array(Box::new(Ty::Vec3)), Ty::Array(Box::new(Ty::Vec4))];
         let run_ = if !flow_ir::packed::gpu_refusals(true, true, packed).is_empty() || !types.contains(ty) {
             None
@@ -1387,7 +1387,7 @@ impl Scope {
             return Ok(self.off(packed, "over 64M elements"));
         }
         let Ok((commands, encoder)) = self.commands() else { return Ok(None) };
-        let ty = packed.term.ty.clone();
+        let ty = packed.term.ty().clone();
         let width = match &ty {
             Ty::Array(i) if **i == Ty::Vec2 => 2,
             Ty::Array(i) if **i == Ty::Vec3 => 3,
@@ -1671,7 +1671,7 @@ impl Scope {
         Ok(())
     }
 
-    fn host_of_planes(&self, holder: &G::Planes) -> Value {
+    fn host_of_planes(&self, holder: &SharedPlanes) -> Value {
         let planes = (holder.materialise)();
         let (count, width) = (holder.count as usize, holder.width as usize);
         let data: Vec<f64> = (0..count * width).map(|i| planes[i % width][i / width]).collect();
@@ -2141,10 +2141,14 @@ impl Scope {
                 self.s.borrow_mut().on_close.insert(0, Box::new(move || unpin()));
             }
         }
-        let holder = Arc::new(holder);
+        let holder = Arc::new(SharedPlanes {
+            count: holder.count, width: holder.width, resident: holder.resident,
+            materialise: Arc::from(holder.materialise), settle: Arc::from(holder.settle),
+            release: Arc::from(holder.release), bounds: Arc::from(holder.bounds),
+        });
         {
             let mut s = self.s.borrow_mut();
-            let mut fl: Vec<(usize, Arc<G::Planes>)> = aliases.iter().map(|a| (a.key, holder.clone())).collect();
+            let mut fl: Vec<(usize, Arc<SharedPlanes>)> = aliases.iter().map(|a| (a.key, holder.clone())).collect();
             fl.extend(std::mem::take(&mut s.floats));
             s.floats = fl;
         }
@@ -2201,18 +2205,44 @@ fn run_same(a: &run::T, b_: &run::T) -> bool {
     run::same(a, b_)
 }
 
-/// A second `Planes` over the same holder: reads, settles and releases go to it.
-fn share_planes(holder: &Arc<G::Planes>) -> G::Planes {
-    let (a, s, r, bd) = (holder.clone(), holder.clone(), holder.clone(), holder.clone());
+/// Share callback ownership independently: retaining only release must not retain a reader.
+struct SharedPlanes {
+    count: i64,
+    width: i64,
+    resident: Option<Value>,
+    materialise: Arc<dyn Fn() -> Vec<Vec<f64>> + Send + Sync>,
+    settle: Arc<dyn Fn() -> Result<(), Diagnostic> + Send + Sync>,
+    release: Arc<dyn Fn(bool) + Send + Sync>,
+    bounds: Arc<dyn Fn() -> Option<Vec<f64>> + Send + Sync>,
+}
+
+fn share_planes(holder: &Arc<SharedPlanes>) -> G::Planes {
+    let (a, s, r, bd) = (holder.materialise.clone(), holder.settle.clone(), holder.release.clone(), holder.bounds.clone());
     G::Planes {
         count: holder.count,
         width: holder.width,
-        materialise: Box::new(move || (a.materialise)()),
+        materialise: Box::new(move || a()),
         resident: holder.resident.clone(),
-        settle: Box::new(move || (s.settle)()),
-        release: Box::new(move |held| (r.release)(held)),
-        bounds: Box::new(move || (bd.bounds)()),
+        settle: Box::new(move || s()),
+        release: Box::new(move |held| r(held)),
+        bounds: Box::new(move || bd()),
     }
+}
+
+#[cfg(test)]
+#[test]
+fn shared_release_does_not_retain_a_reader() {
+    let reader = Arc::new(());
+    let weak = Arc::downgrade(&reader);
+    let holder = Arc::new(SharedPlanes {
+        count: 0, width: 1, resident: None,
+        materialise: Arc::new(move || { let _keep = &reader; Vec::new() }),
+        settle: Arc::new(|| Ok(())), release: Arc::new(|_| {}), bounds: Arc::new(|| None),
+    });
+    let G::Planes { release, .. } = share_planes(&holder);
+    drop(holder);
+    assert!(weak.upgrade().is_none());
+    release(false);
 }
 
 fn scope_by(id: i64) -> Option<Rc<Scope>> {

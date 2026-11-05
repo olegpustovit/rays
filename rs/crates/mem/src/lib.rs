@@ -78,7 +78,7 @@ struct State {
     accounts: HashMap<(Kind, Pool), HashMap<String, Owner>>,
     evictors: Vec<Arc<Evictor>>,
     evictor_mark: usize,
-    roots: HashMap<usize, (Owner, Arc<dyn Fn() -> usize + Send + Sync>)>,
+    roots: Vec<(Owner, Arc<dyn Fn(&mut AllocationVisitor) + Send + Sync>)>,
     tables: Vec<Table>,
     walked: HashMap<usize, (Owner, i64)>,
 }
@@ -186,95 +186,110 @@ pub fn release(owner: &Owner, n: i64) {
     }
 }
 
-/// Explicitly measured bytes owned by a value. Implement this for project types whose retained heap
-/// storage is known; Rust has no safe general-purpose equivalent of an OCaml heap graph walk.
+/// One report's allocation identities, shared by every root and table in visitation order.
+/// Callers name actual retained allocations; no pointers are dereferenced by this visitor.
+#[derive(Default)]
+pub struct AllocationVisitor {
+    seen: HashSet<usize>,
+    bytes: usize,
+}
+
+impl AllocationVisitor {
+    pub fn bytes(&self) -> usize { self.bytes }
+
+    /// Returns true only for a newly reached nonempty allocation. Traverse its children then.
+    pub fn allocation(&mut self, address: usize, bytes: usize) -> bool {
+        if bytes == 0 || !self.seen.insert(address) { return false; }
+        self.exclusive(bytes);
+        true
+    }
+
+    /// Adds independently measured bytes with no shared allocation identity (for opaque owners).
+    pub fn exclusive(&mut self, bytes: usize) { self.bytes = self.bytes.saturating_add(bytes); }
+}
+
+/// Visit known owned allocations and shared edges, excluding this value's inline storage.
+/// Opaque payloads must explicitly identify their aggregate or declare independent bytes.
 pub trait AccountedSize: Send + Sync {
-    fn owned_bytes(&self) -> usize;
+    fn visit_allocations(&self, visitor: &mut AllocationVisitor);
+
+    fn visit_slice(values: &[Self], visitor: &mut AllocationVisitor) where Self: Sized {
+        for value in values { value.visit_allocations(visitor); }
+    }
 }
 
-impl AccountedSize for bool {
-    fn owned_bytes(&self) -> usize { 0 }
+macro_rules! scalar_sizes {
+    ($($ty:ty),* $(,)?) => { $(
+        impl AccountedSize for $ty {
+            fn visit_allocations(&self, _: &mut AllocationVisitor) {}
+            fn visit_slice(_: &[Self], _: &mut AllocationVisitor) {}
+        }
+    )* };
 }
-
-impl AccountedSize for char {
-    fn owned_bytes(&self) -> usize { 0 }
-}
-
-impl AccountedSize for u8 {
-    fn owned_bytes(&self) -> usize { 0 }
-}
-
-impl AccountedSize for u16 {
-    fn owned_bytes(&self) -> usize { 0 }
-}
-
-impl AccountedSize for u32 {
-    fn owned_bytes(&self) -> usize { 0 }
-}
-
-impl AccountedSize for u64 {
-    fn owned_bytes(&self) -> usize { 0 }
-}
-
-impl AccountedSize for u128 {
-    fn owned_bytes(&self) -> usize { 0 }
-}
-
-impl AccountedSize for usize {
-    fn owned_bytes(&self) -> usize { 0 }
-}
-
-impl AccountedSize for i8 {
-    fn owned_bytes(&self) -> usize { 0 }
-}
-
-impl AccountedSize for i16 {
-    fn owned_bytes(&self) -> usize { 0 }
-}
-
-impl AccountedSize for i32 {
-    fn owned_bytes(&self) -> usize { 0 }
-}
-
-impl AccountedSize for i64 {
-    fn owned_bytes(&self) -> usize { 0 }
-}
-
-impl AccountedSize for i128 {
-    fn owned_bytes(&self) -> usize { 0 }
-}
-
-impl AccountedSize for isize {
-    fn owned_bytes(&self) -> usize { 0 }
-}
-
-impl AccountedSize for f32 {
-    fn owned_bytes(&self) -> usize { 0 }
-}
-
-impl AccountedSize for f64 {
-    fn owned_bytes(&self) -> usize { 0 }
-}
-
-impl AccountedSize for () {
-    fn owned_bytes(&self) -> usize { 0 }
-}
+scalar_sizes!(bool, char, u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize, f32, f64, ());
 
 impl AccountedSize for str {
-    fn owned_bytes(&self) -> usize { 0 }
+    fn visit_allocations(&self, _: &mut AllocationVisitor) {}
 }
 
 impl AccountedSize for String {
-    fn owned_bytes(&self) -> usize { self.capacity() }
+    fn visit_allocations(&self, visitor: &mut AllocationVisitor) {
+        visitor.allocation(self.as_ptr() as usize, self.capacity());
+    }
+}
+
+impl<T: AccountedSize> AccountedSize for [T] {
+    fn visit_allocations(&self, visitor: &mut AllocationVisitor) { T::visit_slice(self, visitor); }
+}
+
+impl<T: AccountedSize> AccountedSize for Vec<T> {
+    fn visit_allocations(&self, visitor: &mut AllocationVisitor) {
+        if visitor.allocation(self.as_ptr() as usize, self.capacity() * std::mem::size_of::<T>()) {
+            T::visit_slice(self, visitor);
+        }
+    }
+}
+
+impl<T: AccountedSize + ?Sized> AccountedSize for Arc<T> {
+    fn visit_allocations(&self, visitor: &mut AllocationVisitor) {
+        if visitor.allocation(Arc::as_ptr(self) as *const () as usize, std::mem::size_of_val(self.as_ref())) {
+            self.as_ref().visit_allocations(visitor);
+        }
+    }
+}
+
+impl<T: AccountedSize + ?Sized> AccountedSize for Box<T> {
+    fn visit_allocations(&self, visitor: &mut AllocationVisitor) {
+        if visitor.allocation(self.as_ref() as *const T as *const () as usize, std::mem::size_of_val(self.as_ref())) {
+            self.as_ref().visit_allocations(visitor);
+        }
+    }
+}
+
+impl<A: AccountedSize, B: AccountedSize> AccountedSize for (A, B) {
+    fn visit_allocations(&self, visitor: &mut AllocationVisitor) {
+        self.0.visit_allocations(visitor);
+        self.1.visit_allocations(visitor);
+    }
 }
 
 pub fn reachable_bytes(value: &dyn AccountedSize) -> usize {
-    value.owned_bytes()
+    let mut visitor = AllocationVisitor::default();
+    value.visit_allocations(&mut visitor);
+    visitor.bytes()
 }
 
-/// Replace an owner's explicit size callback. Shared allocations must be assigned to one owner.
-pub fn root(owner: &Owner, roots: Arc<dyn Fn() -> usize + Send + Sync + 'static>) {
-    let old = state().roots.insert(owner.id(), (owner.clone(), roots));
+/// Replace a root callback without changing its original place in ownership visitation order.
+pub fn root(owner: &Owner, roots: Arc<dyn Fn(&mut AllocationVisitor) + Send + Sync + 'static>) {
+    let old = {
+        let mut state = state();
+        if let Some((_, callback)) = state.roots.iter_mut().find(|(prior, _)| prior == owner) {
+            Some(std::mem::replace(callback, roots))
+        } else {
+            state.roots.push((owner.clone(), roots));
+            None
+        }
+    };
     drop(old);
 }
 
@@ -284,7 +299,7 @@ struct Table {
     uncharged: Arc<dyn Fn() -> bool + Send + Sync>,
 }
 
-/// Track an uncharged table weakly. Its explicit size is charged while `uncharged` is true.
+/// Track a table weakly. Directly charged tables reserve their allocations before named roots.
 pub fn walk_table(
     owner: &Owner,
     table: Arc<dyn AccountedSize + Send + Sync + 'static>,
@@ -308,7 +323,7 @@ fn walk_roots() {
     let (roots, tables) = {
         let state = state();
         (
-            state.roots.values().cloned().collect::<Vec<_>>(),
+            state.roots.clone(),
             state
                 .tables
                 .iter()
@@ -320,26 +335,32 @@ fn walk_roots() {
                 .collect::<Vec<_>>(),
         )
     };
+    // Keep the live tables alive throughout the walk, and sample each charging predicate once.
+    let tables: Vec<_> = tables.into_iter().filter_map(|table| {
+        table.value.upgrade().map(|value| (table.owner, value, (table.uncharged)()))
+    }).collect();
+    let mut visitor = AllocationVisitor::default();
+    for (_, value, uncharged) in &tables {
+        if !uncharged && visitor.seen.insert(Arc::as_ptr(value) as *const () as usize) {
+            value.as_ref().visit_allocations(&mut visitor);
+            visitor.bytes = 0;
+        }
+    }
     let mut current: HashMap<usize, (Owner, i64)> = HashMap::new();
-    for (owner, size) in roots {
-        let bytes = size().min(i64::MAX as usize) as i64;
-        let id = owner.id();
-        current
-            .entry(id)
+    for (owner, visit) in roots {
+        let before = visitor.bytes();
+        visit(&mut visitor);
+        let bytes = visitor.bytes().saturating_sub(before).min(i64::MAX as usize) as i64;
+        current.insert(owner.id(), (owner, bytes));
+    }
+    for (owner, value, uncharged) in tables {
+        if !uncharged || !visitor.seen.insert(Arc::as_ptr(&value) as *const () as usize) { continue; }
+        let before = visitor.bytes();
+        value.as_ref().visit_allocations(&mut visitor);
+        let bytes = visitor.bytes().saturating_sub(before).min(i64::MAX as usize) as i64;
+        current.entry(owner.id())
             .and_modify(|entry| entry.1 = entry.1.saturating_add(bytes))
             .or_insert((owner, bytes));
-    }
-    for table in &tables {
-        if !(table.uncharged)() {
-            continue;
-        }
-        if let Some(value) = table.value.upgrade() {
-            let bytes = value.owned_bytes().min(i64::MAX as usize) as i64;
-            current
-                .entry(table.owner.id())
-                .and_modify(|entry| entry.1 = entry.1.saturating_add(bytes))
-                .or_insert((table.owner.clone(), bytes));
-        }
     }
     let previous = {
         let mut state = state();
@@ -1195,36 +1216,65 @@ mod tests {
     #[test]
     fn explicit_roots_and_weak_tables() {
         let _guard = setup();
-        struct Bytes(usize);
-        impl AccountedSize for Bytes {
-            fn owned_bytes(&self) -> usize { self.0 }
-        }
         let named = plan("rooted");
-        root(&named, Arc::new(|| 200));
+        root(&named, Arc::new(|visitor| visitor.exclusive(200)));
         let table_owner = cache("table");
-        let table = Arc::new(Bytes(300));
+        let table = Arc::new(vec![0_u8; 300]);
         walk_table(&table_owner, table.clone(), Arc::new(|| true));
         report();
         assert_eq!(named.bytes(), 200);
-        assert_eq!(table_owner.bytes(), 300);
-        root(&named, Arc::new(|| 0));
+        assert_eq!(table_owner.bytes(), table.capacity() as i64);
+        root(&named, Arc::new(|_| {}));
         drop(table);
         report();
         assert_eq!(named.bytes(), 0);
         assert_eq!(table_owner.bytes(), 0);
 
         let charged = cache("charged-table");
-        charge(&charged, 400);
-        let charged_table = Arc::new(Bytes(999));
+        let charged_table = Arc::new(vec![0_u8; 400]);
+        let charged_bytes = charged_table.capacity() as i64;
+        charge(&charged, charged_bytes);
         walk_table(&charged, charged_table.clone(), Arc::new(|| false));
         report();
-        assert_eq!(charged.bytes(), 400);
+        assert_eq!(charged.bytes(), charged_bytes);
         drop(charged_table);
         report();
-        assert_eq!(charged.bytes(), 400);
+        assert_eq!(charged.bytes(), charged_bytes);
 
-        let measured = Bytes(500);
-        assert_eq!(reachable_bytes(&measured), 500);
+        let measured = vec![0_u8; 500];
+        assert_eq!(reachable_bytes(&measured), measured.capacity());
+    }
+
+    #[test]
+    fn shared_roots_keep_registration_order_when_replaced() {
+        let _guard = setup();
+        let first = document("first-root");
+        let second = document("second-root");
+        let shared = Arc::new(vec![1_u64; 8]);
+        let expected = reachable_bytes(&shared) as i64;
+        let a = shared.clone();
+        root(&first, Arc::new(move |visitor| a.visit_allocations(visitor)));
+        let b = shared.clone();
+        root(&second, Arc::new(move |visitor| b.visit_allocations(visitor)));
+        report();
+        assert_eq!((first.bytes(), second.bytes()), (expected, 0));
+        let replacement = shared.clone();
+        root(&first, Arc::new(move |visitor| replacement.visit_allocations(visitor)));
+        report();
+        assert_eq!((first.bytes(), second.bytes()), (expected, 0));
+        root(&first, Arc::new(|_| {}));
+        report();
+        assert_eq!((first.bytes(), second.bytes()), (0, expected));
+
+        root(&second, Arc::new(|_| {}));
+        let oldest = cache("oldest-table");
+        let newest = cache("newest-table");
+        walk_table(&oldest, shared.clone(), Arc::new(|| true));
+        walk_table(&newest, shared.clone(), Arc::new(|| true));
+        report();
+        assert_eq!(oldest.bytes(), (shared.capacity() * std::mem::size_of::<u64>()) as i64);
+        assert_eq!(newest.bytes(), 0);
+        std::hint::black_box(&shared);
     }
 
     #[test]
@@ -1235,15 +1285,11 @@ mod tests {
         let callback_calls = calls.clone();
         let lock_checks = Arc::new(AtomicUsize::new(0));
         let callback_lock_checks = lock_checks.clone();
-        root(&owner, Arc::new(move || {
+        root(&owner, Arc::new(move |visitor| {
             if WALK_LOCK.try_lock().is_err() {
                 callback_lock_checks.fetch_add(1, AtomicOrdering::Relaxed);
             }
-            if callback_calls.fetch_add(1, AtomicOrdering::Relaxed) == 0 {
-                0
-            } else {
-                100
-            }
+            if callback_calls.fetch_add(1, AtomicOrdering::Relaxed) != 0 { visitor.exclusive(100); }
         }));
         let start = Arc::new(Barrier::new(3));
         let workers = (0..2).map(|_| {

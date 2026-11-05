@@ -39,14 +39,10 @@ fn dump_line(e: &Ed, key: &str) -> String {
 }
 
 fn source(e: &Ed) -> String {
-    flow_syntax::lisp::print(&Editor::workspace(e).source).0
+    flow_syntax::lisp::print(&Editor::workspace(e).source).unwrap().0
 }
 
 fn run() {
-    if std::env::var("RAYS_SLOW").is_err() {
-        println!("skipped: ws_bloom lowering exceeds the budget in debug (slow lowering: perf3); RAYS_SLOW=1 runs it");
-        return;
-    }
     if !common::gpu() {
         return;
     }

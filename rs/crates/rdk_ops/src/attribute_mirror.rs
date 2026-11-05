@@ -44,7 +44,7 @@ pub struct Params {
     pub group_use: GroupUse,
     pub attributes: String,
     pub transform: Transform,
-    pub string_replace: Option<(String, String)>,
+    pub string_replace: Option<(Vec<u8>, Vec<u8>)>,
     pub output_mapping: Option<String>,
     pub source_group: Option<String>,
     pub destination_group: Option<String>,
@@ -429,11 +429,11 @@ fn copy_ints(cancel_token: Option<&cancel::T>, grain: i64, mapping: &Mapping, va
     })
 }
 
-fn copy_texts(cancel_token: Option<&cancel::T>, grain: i64, mapping: &Mapping, values: &[String]) -> Result<Vec<String>, error::T> {
+fn copy_texts(cancel_token: Option<&cancel::T>, grain: i64, mapping: &Mapping, values: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, error::T> {
     if values.is_empty() {
         return Ok(Vec::new());
     }
-    let blanks = vec![String::new(); mapping.source_of_output.len()];
+    let blanks = vec![Vec::new(); mapping.source_of_output.len()];
     map_texts(cancel_token, grain, &blanks, &|element, slot| {
         *slot = values[mapping.source_of_output[element as usize] as usize].clone();
         Ok(())
@@ -541,7 +541,7 @@ fn remap_attribute(
     cancel_token: Option<&cancel::T>,
     grain: i64,
     transform: Transform,
-    string_replace: &Option<(String, String)>,
+    string_replace: &Option<(Vec<u8>, Vec<u8>)>,
     mapping: &Mapping,
     item: &attribute::T,
 ) -> Result<attribute::T, error::T> {
@@ -567,7 +567,20 @@ fn remap_attribute(
             if let Some((search, replacement)) = string_replace {
                 for (element, text) in output.iter_mut().enumerate() {
                     if mapping.pair_destination[element] == 1 {
-                        *text = text.replace(search.as_str(), replacement);
+                        let mut remaining = text.as_slice();
+                        let mut next = remaining.windows(search.len()).position(|window| window == search.as_slice());
+                        if next.is_none() {
+                            continue;
+                        }
+                        let mut output = Vec::with_capacity(text.len());
+                        while let Some(at) = next {
+                            output.extend_from_slice(&remaining[..at]);
+                            output.extend_from_slice(replacement);
+                            remaining = &remaining[at + search.len()..];
+                            next = remaining.windows(search.len()).position(|window| window == search.as_slice());
+                        }
+                        output.extend_from_slice(remaining);
+                        *text = output;
                     }
                 }
             }
@@ -843,7 +856,7 @@ mod tests {
         let g = add_storage(
             Point,
             "label",
-            attribute::Storage::Text(["left_A", "left_B", "old", "old"].iter().map(|s| (*s).to_owned()).collect()),
+            attribute::Storage::Text(["left_A", "left_B", "old", "old"].iter().map(|s| s.as_bytes().to_vec()).collect()),
             &g,
         );
         let g = add_storage(
@@ -884,7 +897,7 @@ mod tests {
         let source = point_fixture();
         let mut p = params(Point, mapping("map", &destination_of(&source)));
         p.attributes = "value id label uv Cd rows".to_owned();
-        p.string_replace = Some(("left".to_owned(), "right".to_owned()));
+        p.string_replace = Some((b"left".to_vec(), b"right".to_vec()));
         p.transform = Transform::MirrorUv { origin_u: 0.0, origin_v: 0.0, direction_u: 0.0, direction_v: 1.0 };
         p.output_mapping = Some("mirror_pair".to_owned());
         p.source_group = Some("mirror_source".to_owned());
@@ -894,7 +907,7 @@ mod tests {
         assert_eq!(ints(Point, "id", &output), vec![10, 20, 20, 10]);
         assert_eq!(
             texts(Point, "label", &output),
-            vec!["left_A".to_owned(), "left_B".to_owned(), "right_B".to_owned(), "right_A".to_owned()]
+            vec![b"left_A".to_vec(), b"left_B".to_vec(), b"right_B".to_vec(), b"right_A".to_vec()]
         );
         let uv = match attribute::storage(&find(Point, "uv", &output)).unwrap() {
             attribute::Storage::Float2(values) => packed::Float2::View::view(&values),
@@ -1013,7 +1026,7 @@ mod tests {
         p.transform = Transform::MirrorVector;
         expect(p, &g, "invalid_attribute_mirror");
         let mut p = base();
-        p.string_replace = Some((String::new(), "x".to_owned()));
+        p.string_replace = Some((Vec::new(), b"x".to_vec()));
         expect(p, &g, "invalid_attribute_mirror");
         expect(params(Vertex, plane(1.0)), &g, "invalid_attribute_mirror");
         let zero_normal = Method::MirrorByPlane {
@@ -1049,8 +1062,8 @@ mod tests {
 
     #[test]
     fn parallel_scale_is_exact_across_domains() {
-        let count = 20_000_i64;
-        let half = 10_000_i64;
+        let count = 100_000_i64;
+        let half = 50_000_i64;
         let xs: Vec<f64> = (0..count)
             .map(|point| if point < half { -((half - point) as f64) } else { (point - half + 1) as f64 })
             .collect();
@@ -1088,5 +1101,17 @@ mod tests {
             topology::data_id(geometry::topology(&one)),
             topology::data_id(geometry::topology(&g))
         );
+    }
+
+    #[test]
+    fn text_replacement_preserves_arbitrary_bytes() {
+        let rows = vec![b"\xff\0\xff\0".to_vec(), b"\0\x80\xff\0z".to_vec(), Vec::new(), Vec::new()];
+        let source = add_storage(Point, "label", attribute::Storage::Text(rows.clone()), &point_fixture());
+        let mut p = params(Point, mapping("map", &destination_of(&source)));
+        p.attributes = "label".to_owned();
+        p.string_replace = Some((b"\xff\0".to_vec(), b"\x80\xff".to_vec()));
+        let output = run(&p, &source).unwrap();
+        assert_eq!(texts(Point, "label", &output), vec![rows[0].clone(), rows[1].clone(), b"\0\x80\x80\xffz".to_vec(), b"\x80\xff\x80\xff".to_vec()]);
+        assert_eq!(texts(Point, "label", &source), rows);
     }
 }

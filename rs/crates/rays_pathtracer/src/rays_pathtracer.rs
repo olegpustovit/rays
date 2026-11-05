@@ -757,7 +757,6 @@ fn move_async(t: &t, moved: &mesh) -> Result<mesh_build, String> {
                     stage: stage::Ready,
                     instance_count: instances.records.len() as i64,
                     instances_built: false,
-                    compact: true,
                     proto_scratch: None,
                 };
                 match submit_instances(&t.device, &t.queue, &mut build) {
@@ -990,7 +989,6 @@ fn device_build(t: &t, o: &mut device_owned, m: &mesh, d: &mesh_data::device, g:
         stage: stage::Compacting(receipt),
         instance_count: 0,
         instances_built: false,
-        compact: true,
         proto_scratch: None,
     })
 }

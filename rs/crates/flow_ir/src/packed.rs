@@ -70,6 +70,23 @@ impl From<Diagnostic> for KErr {
     }
 }
 type K<X> = Result<X, KErr>;
+fn interrupted(expired: &Option<Arc<dyn Fn() -> bool + Send + Sync>>, run: &mut dyn FnMut() -> K<()>) -> K<()> {
+    let mut result = Ok(());
+    let mut work = || {
+        if let Err(d) = E::interruptible(&mut || result = run()) {
+            result = Err(KErr::Diag(d));
+        }
+    };
+    match expired {
+        Some(expired) => {
+            if !E::with_interrupt(expired.clone(), &mut work) {
+                return Err(fail("cancelled", "Evaluation interrupted."));
+            }
+        }
+        None => work(),
+    }
+    result
+}
 
 fn fail(code: &str, message: &str) -> KErr {
     KErr::Diag(value::fail(code, message))
@@ -99,7 +116,7 @@ fn typed_instruction(i: &Instruction) -> bool {
 }
 
 fn is_array_of_int(term: &Term) -> bool {
-    term.ty == Ty::Array(Box::new(Ty::Int))
+    *term.ty() == Ty::Array(Box::new(Ty::Int))
 }
 
 pub fn integer_program(t: &T) -> bool {
@@ -399,6 +416,7 @@ fn compile_impl(
     residual: ResidualId,
     term: &Term,
 ) -> Result<T, Vec<Diagnostic>> {
+    let _phase = flow_syntax::phase_timer::measure("packed.compile");
     core_region::lower(fusion, dynamic, count_source, residual, term)
         .map(|region| if fusion { core_fuse::fuse(through_exact, region) } else { region })
 }
@@ -1381,6 +1399,7 @@ fn run_chunk(
     };
     let last_block = r.blocks.min((chunk + 1) * r.blocks_per_chunk);
     for block in chunk * r.blocks_per_chunk..last_block {
+        E::interruptible(&mut || {})?;
         let start = block * bs;
         let limit = r.count.min((block + 1) * bs);
         let (length, output_start) = if contiguous {
@@ -1812,7 +1831,7 @@ fn float_launch(
     let widths: Vec<usize> = t.outputs.iter().map(Vec::len).collect();
     let width = widths[0];
     for (_, term) in t.stages.iter() {
-        if let Ty::Array(ty) = &term.ty {
+        if let Ty::Array(ty) = term.ty() {
             let w = width_of(ty)?;
             if count > MAX_ARRAY / w {
                 return Err(fail("E_ARRAY_RANGE", "Kernel intermediate exceeds native storage bounds."));
@@ -1994,6 +2013,7 @@ fn float_launch(
     };
     let mut plane_outputs = plane_outputs;
     let errors: Vec<Mutex<Option<KErr>>> = (0..chunks).map(|_| Mutex::new(None)).collect();
+    let interrupt = E::current_interrupt();
     match &t.result {
         RegionResult::Collect => {
             // chunk c writes output elements [bound c, bound c + 1)
@@ -2022,10 +2042,7 @@ fn float_launch(
                     .iter()
                     .map(|row| row.iter().map(|p| p.as_ref().map(|v| v[c].lock().unwrap().take().unwrap())).collect())
                     .collect();
-                let mut result = Ok(());
-                E::interruptible(&mut || {
-                    result = run_chunk(&r, regs, c, bounds[c], &mut outs, &mut planes);
-                });
+                let result = interrupted(&interrupt, &mut || run_chunk(&r, regs, c, bounds[c], &mut outs, &mut planes));
                 if let Err(e) = result {
                     *errors[c].lock().unwrap() = Some(e);
                 }
@@ -2048,10 +2065,7 @@ fn float_launch(
                 errors: &[Mutex<Option<KErr>>],
             ) {
                 if last - first == 1 {
-                    let mut result = Ok(());
-                    E::interruptible(&mut || {
-                        result = run_chunk(r, regs, first, 0, outs, planes);
-                    });
+                    let result = interrupted(&E::current_interrupt(), &mut || run_chunk(r, regs, first, 0, outs, planes));
                     if let Err(e) = result {
                         let mut slot = errors[first].lock().unwrap();
                         if slot.is_none() {
@@ -2842,29 +2856,32 @@ fn texec(
 }
 
 fn integer_range(residual: ResidualId, term: &Term) -> Option<(ResidualId, Term)> {
-    match &term.node {
-        Node::RefBinding(name, rest) if rest.is_empty() => {
-            let view = E::Residual::residual_view(residual).ok()?;
-            match view.bindings.iter().find(|(n, _)| n == name) {
-                Some((_, Value::Residual(nested))) => {
-                    let inner = E::Residual::residual_view(*nested).ok()?;
-                    integer_range(*nested, &inner.term)
+    let arena = term.arena();
+    match term.node {
+        Node::RefBinding(id) if arena.name_ids(arena.ref_binding(id).fields).is_empty() => {
+            match E::Residual::residual_binding(residual, term.name(arena.ref_binding(id).name)) {
+                Some(Value::Residual(nested)) => {
+                    let term = E::Residual::residual_term(nested)?;
+                    integer_range(nested, &term)
                 }
                 _ => None,
             }
         }
-        Node::Op { op, args, skip } if op == "array/range" && skip.is_empty() && is_array_of_int(term) => {
-            let kind = args.iter().find(|(n, _)| n == "type");
-            let count = args.iter().find(|(n, _)| n == "count");
-            match (kind, count) {
-                (Some((_, k)), Some((_, c)))
-                    if matches!(&k.node, Node::Text(b) if b.as_slice() == b"int")
-                        || matches!(&k.node, Node::Lit(param::Value::Text(b)) if b.as_slice() == b"int") =>
-                {
-                    Some((residual, c.clone()))
-                }
-                _ => None,
-            }
+        Node::Op(id) => {
+            let op = arena.op(id);
+            if term.name(op.op) != "array/range" || !arena.skip(op.skip).is_empty() || !is_array_of_int(term) { return None; }
+            let args = arena.fields(op.args);
+            let kind = args.iter().find(|f| term.name(f.name) == "type")?;
+            let count = args.iter().find(|f| term.name(f.name) == "count")?;
+            let bytes = match arena.row(kind.term).node {
+                Node::Text(id) => arena.bytes(id),
+                Node::Lit(id) => match arena.literal(id) {
+                    flow_check::term_arena::Literal::Text(id) => arena.bytes(id),
+                    _ => return None,
+                },
+                _ => return None,
+            };
+            (bytes == b"int").then(|| (residual, term.child(count.term)))
         }
         _ => None,
     }
@@ -2965,6 +2982,7 @@ fn typed_chunk(
     let ncode = t.code.len();
     let last_block = sh.blocks.min((chunk + 1) * sh.blocks_per_chunk);
     for block in chunk * sh.blocks_per_chunk..last_block {
+        E::interruptible(&mut || {})?;
         let start = block * bs;
         let limit = sh.count.min((block + 1) * bs);
         let before = sh.skipped_before(start);
@@ -3186,7 +3204,7 @@ fn run_typed(
             inputs.push(Value::No_geo);
             continue;
         }
-        borrowed[i] = match (&run.column_source, &term.ty) {
+        borrowed[i] = match (&run.column_source, term.ty()) {
             (Some(source), Ty::Array(inner)) if matches!(**inner, Ty::Float | Ty::Vec2 | Ty::Vec3 | Ty::Vec4) => source(*r, term)?,
             _ => None,
         };
@@ -3509,6 +3527,7 @@ fn run_typed(
                 .map(|row| row.iter_mut().map(|p| p.as_mut().map(|d| split_parts(&mut **d, &bounds, 1))).collect())
                 .collect(),
         };
+        let interrupt = E::current_interrupt();
         let run_one = |c: usize, fo: Option<&Forcer<'_>>| -> K<()> {
             let mut fouts: Vec<Option<&mut [f64]>> = f_parts.iter().map(|p| p.as_ref().map(|v| v[c].lock().unwrap().take().unwrap())).collect();
             let mut iouts: Vec<Option<&mut [i64]>> = i_parts.iter().map(|p| p.as_ref().map(|v| v[c].lock().unwrap().take().unwrap())).collect();
@@ -3517,11 +3536,7 @@ fn run_typed(
                 .iter()
                 .map(|row| row.iter().map(|p| p.as_ref().map(|v| v[c].lock().unwrap().take().unwrap())).collect())
                 .collect();
-            let mut result = Ok(());
-            E::interruptible(&mut || {
-                result = typed_chunk(&sh, regs, c, fo, bounds[c], &mut fouts, &mut iouts, &mut touts, &mut planes);
-            });
-            result
+            interrupted(&interrupt, &mut || typed_chunk(&sh, regs, c, fo, bounds[c], &mut fouts, &mut iouts, &mut touts, &mut planes))
         };
         let table = |i: usize| -> K<bool> { Ok(matches!(value::ty_of(&sh.uvalue(i, Some(&measured_uniform))?), Ty::Array(_))) };
         let settled = || -> bool {
@@ -3567,6 +3582,7 @@ fn run_typed(
             }
         }
     }
+    E::interruptible(&mut || {})?;
     let result: Vec<Value> = if has_planes {
         Vec::new()
     } else if collecting {
@@ -3633,7 +3649,7 @@ thread_local! {
 }
 
 fn same_term(a: &Arc<Term>, b: &Arc<Term>) -> bool {
-    Arc::ptr_eq(a, b) || (a.form.span == b.form.span && **a == **b)
+    a.identity() == b.identity() || (a.form().span == b.form().span && **a == **b)
 }
 
 fn same_value(a: &Value, b: &Value) -> bool {
@@ -3746,13 +3762,10 @@ impl Drop for PopGuard {
 }
 
 fn scope_find(residual: ResidualId, term: &Arc<Term>) -> Option<Value> {
-    let entries: Vec<(ResidualId, Arc<Term>, Value)> = CURRENT.with(|cell| {
-        cell.borrow()
-            .as_ref()
-            .map(|s| s.entries.iter().filter(|(_, t, _)| same_term(t, term)).cloned().collect())
-            .unwrap_or_default()
-    });
-    entries.into_iter().find(|(r, _, _)| same_residual(*r, residual)).map(|(_, _, v)| v)
+    CURRENT.with(|cell| {
+        let current = cell.borrow();
+        current.as_ref()?.entries.iter().find(|(r, t, _)| same_term(t, term) && same_residual(*r, residual)).map(|(_, _, v)| v.clone())
+    })
 }
 
 fn scope_add(residual: ResidualId, term: &Arc<Term>, value: &Value) {
@@ -3777,10 +3790,10 @@ fn leaf_term(term: &Term) -> bool {
 }
 
 fn numeric_loop(term: &Term) -> bool {
-    match &term.node {
-        Node::Hof(kind, _) => matches!(kind, flow_check::workspace::HofKind::Map | flow_check::workspace::HofKind::Reduce),
-        Node::Loop { .. } => true,
-        Node::Op { op, .. } => op == "array/sum",
+    match term.node {
+        Node::Hof(id) => matches!(term.arena().hof(id).kind, flow_check::workspace::HofKind::Map | flow_check::workspace::HofKind::Reduce),
+        Node::Loop(_) => true,
+        Node::Op(id) => term.name(term.arena().op(id).op) == "array/sum",
         _ => false,
     }
 }
@@ -3834,7 +3847,8 @@ fn evaluate(run: &Run, dispatch: &Option<Dispatch>, residual: ResidualId, term: 
 
 fn evaluate_once(run: &Run, dispatch: &Option<Dispatch>, residual: ResidualId, term: &Arc<Term>) -> Result<Value, Diagnostic> {
     let nested = match &term.node {
-        Node::RefBinding(name, rest) if rest.is_empty() => {
+        Node::RefBinding(id) if term.arena().name_ids(term.arena().ref_binding(*id).fields).is_empty() => {
+            let name = term.name(term.arena().ref_binding(*id).name);
             let view = E::Residual::residual_view(residual)?;
             match view.bindings.iter().find(|(n, _)| n == name) {
                 Some((_, Value::Residual(r))) => {
@@ -3875,7 +3889,7 @@ fn evaluate_once(run: &Run, dispatch: &Option<Dispatch>, residual: ResidualId, t
         }
         Err(_) => match (run.strict, &term.node) {
             // a fold over a list (a matrix inverse's four pivots) is value work, not a body
-            (true, Node::Loop { clauses, .. }) if clauses.iter().all(|(_, c)| matches!(c.ty, Ty::List(_))) => eval_term(run, residual, term),
+            (true, Node::Loop(id)) if term.arena().bindings(term.arena().loop_node(*id).clauses).iter().all(|c| matches!(term.arena().ty(term.arena().row(c.term).ty), Ty::List(_))) => eval_term(run, residual, term),
             (true, _) if numeric_loop(term) => Err(kernel_form_error()),
             (false, _) if numeric_loop(term) => eval_term(run, residual, term),
             _ => uniform(run, dispatch, &Value::Residual(E::Residual::with_bindings(residual, term, &[])?)),
@@ -4032,8 +4046,9 @@ fn run_all(run: &Run, dispatch: Option<Dispatch>, plane_outputs: PlaneOutputs) -
         (Some(d), _) => Err(d),
         (None, r) => r,
     };
-    match result {
+    match &result {
         Ok(_) => result,
+        Err(d) if d.code == "cancelled" => result,
         Err(_) if run.strict || has_planes || t.outputs.len() > 1 => result,
         Err(_) => {
             let started = run.measure.as_ref().map(|m| (m.clock)());
@@ -4310,7 +4325,7 @@ pub mod host {
     }
 
     fn binding_of(r: ResidualId, name: &str) -> Option<Value> {
-        E::Residual::residual_view(r).ok()?.bindings.into_iter().find(|(n, _)| n == name).map(|(_, v)| v)
+        E::Residual::residual_binding(r, name)
     }
 
     // What a source or uniform reads: a value itself; `array/range` of an array's count times `mul`
@@ -4321,10 +4336,10 @@ pub mod host {
             let mut acc = acc?;
             match &term.node {
                 Node::Lit(_) | Node::Text(_) | Node::Nil | Node::Time | Node::FnRef(_) => Some(acc),
-                Node::RefBinding(n, _) => match binding_of(r, n) {
+                Node::RefBinding(id) => match binding_of(r, term.name(term.arena().ref_binding(*id).name)) {
                     Some(Value::Residual(inner)) => {
-                        let view = E::Residual::residual_view(inner).ok()?;
-                        refs(inner, &view.term, Some(acc))
+                        let term = E::Residual::residual_term(inner)?;
+                        refs(inner, &term, Some(acc))
                     }
                     Some(v) => {
                         acc.push(v);
@@ -4332,27 +4347,23 @@ pub mod host {
                     }
                     None => None,
                 },
-                Node::Op { args, .. } | Node::Call { args, .. } => {
+                Node::Op(_) | Node::Call(_) | Node::Vec(_) => {
                     let mut acc = Some(acc);
-                    for (_, a) in args {
-                        acc = refs(r, a, acc);
+                    for id in term.children() {
+                        acc = refs(r, &term.child(*id), acc);
                     }
                     acc
                 }
-                Node::Vec(ts) => {
-                    let mut acc = Some(acc);
-                    for a in ts {
-                        acc = refs(r, a, acc);
-                    }
-                    acc
+                Node::If(id) => {
+                    let node = term.arena().if_node(*id);
+                    refs(r, &term.child(node.test), refs(r, &term.child(node.yes), refs(r, &term.child(node.no), Some(acc))))
                 }
-                Node::If(a, b, c) => refs(r, a, refs(r, b, refs(r, c, Some(acc)))),
                 _ => None,
             }
         }
         let value_of = |r: ResidualId, term: &Term| -> Option<Value> {
             match &term.node {
-                Node::RefBinding(n, rest) if rest.is_empty() => match binding_of(r, n) {
+                Node::RefBinding(id) if term.arena().name_ids(term.arena().ref_binding(*id).fields).is_empty() => match binding_of(r, term.name(term.arena().ref_binding(*id).name)) {
                     Some(Value::Residual(_)) | None => None,
                     Some(v) => Some(v),
                 },
@@ -4361,28 +4372,32 @@ pub mod host {
         };
         let int = |term: &Term| -> Option<i64> {
             match &term.node {
-                Node::Lit(param::Value::Int(k)) if *k > 0 => Some(*k),
+                Node::Lit(id) => match term.arena().literal(*id) { flow_check::term_arena::Literal::Int(k) if k > 0 => Some(k), _ => None },
                 _ => None,
             }
         };
         let count = |term: &Term| -> Option<Value> {
             match &term.node {
-                Node::Op { op, args, .. } if op == "array/count" && args.len() == 1 => value_of(residual, &args[0].1),
+                Node::Op(id) if term.name(term.arena().op(*id).op) == "array/count" && term.arena().fields(term.arena().op(*id).args).len() == 1 => value_of(residual, &term.child(term.arena().fields(term.arena().op(*id).args)[0].term)),
                 _ => None,
             }
         };
         let scaled = |term: &Term| -> Option<(Value, i64, i64)> {
-            match &term.node {
-                Node::Op { op, .. } if op == "array/count" => count(term).map(|v| (v, 1, 1)),
-                Node::Op { op, args, .. } if (op == "*" || op == "int/mul") && args.len() == 2 => {
-                    let (a, b) = (&args[0].1, &args[1].1);
-                    match (count(a), int(b), count(b), int(a)) {
+            let Node::Op(id) = term.node else { return None };
+            let node = term.arena().op(id);
+            let op = term.name(node.op);
+            let args = term.arena().fields(node.args);
+            match op {
+                "array/count" => count(term).map(|v| (v, 1, 1)),
+                "*" | "int/mul" if args.len() == 2 => {
+                    let (a, b) = (term.child(args[0].term), term.child(args[1].term));
+                    match (count(&a), int(&b), count(&b), int(&a)) {
                         (Some(v), Some(k), _, _) => Some((v, k, 1)),
                         (_, _, Some(v), Some(k)) => Some((v, k, 1)),
                         _ => None,
                     }
                 }
-                Node::Op { op, args, .. } if op == "int/div" && args.len() == 2 => match (count(&args[0].1), int(&args[1].1)) {
+                "int/div" if args.len() == 2 => match (count(&term.child(args[0].term)), int(&term.child(args[1].term))) {
                     (Some(v), Some(k)) => Some((v, 1, k)),
                     _ => None,
                 },
@@ -4392,9 +4407,11 @@ pub mod host {
         if let Some(v) = value_of(residual, term) {
             return Shape::Value(v);
         }
-        if let Node::Op { op, args, .. } = &term.node {
-            if op == "array/range" && matches!(args.first(), Some((n, _)) if n == "count") && (term.ty == Ty::Array(Box::new(Ty::Int)) || term.ty == Ty::Array(Box::new(Ty::Float))) {
-                if let Some((v, mul, div)) = scaled(&args[0].1) {
+        if let Node::Op(id) = term.node {
+            let node = term.arena().op(id);
+            let args = term.arena().fields(node.args);
+            if term.name(node.op) == "array/range" && matches!(args.first(), Some(f) if term.name(f.name) == "count") && (*term.ty() == Ty::Array(Box::new(Ty::Int)) || *term.ty() == Ty::Array(Box::new(Ty::Float))) {
+                if let Some((v, mul, div)) = scaled(&term.child(args[0].term)) {
                     return Shape::Range(v, mul, div);
                 }
             }
@@ -4412,19 +4429,20 @@ pub mod host {
     // `array/range n` (through bindings): 0, 1, ... a device makes from the element index
     fn index_range(residual: ResidualId, term: &Term) -> Option<(ResidualId, Term)> {
         match &term.node {
-            Node::RefBinding(name, rest) if rest.is_empty() => match binding_of(residual, name) {
+            Node::RefBinding(id) if term.arena().name_ids(term.arena().ref_binding(*id).fields).is_empty() => match binding_of(residual, term.name(term.arena().ref_binding(*id).name)) {
                 Some(Value::Residual(r)) => {
-                    let view = E::Residual::residual_view(r).ok()?;
-                    index_range(r, &view.term)
+                    let term = E::Residual::residual_term(r)?;
+                    index_range(r, &term)
                 }
                 _ => None,
             },
-            Node::Op { op, args, .. }
-                if op == "array/range"
-                    && matches!(args.first(), Some((n, _)) if n == "count")
-                    && (term.ty == Ty::Array(Box::new(Ty::Float)) || term.ty == Ty::Array(Box::new(Ty::Int))) =>
-            {
-                Some((residual, args[0].1.clone()))
+            Node::Op(id) => {
+                let op = term.arena().op(*id);
+                let args = term.arena().fields(op.args);
+                if term.name(op.op) != "array/range"
+                    || !matches!(args.first(), Some(f) if term.name(f.name) == "count")
+                    || !matches!(term.ty(), Ty::Array(inner) if matches!(**inner, Ty::Float | Ty::Int)) { return None; }
+                Some((residual, term.child(args[0].term)))
             }
             _ => None,
         }
@@ -4439,9 +4457,9 @@ pub mod host {
         t.uniforms
             .iter()
             .map(|v| match v {
-                Value::Residual(r) => match E::Residual::residual_view(*r) {
-                    Ok(view) => shape(*r, &view.term),
-                    Err(_) => Shape::Opaque(None),
+                Value::Residual(r) => match E::Residual::residual_term(*r) {
+                    Some(term) => shape(*r, &term),
+                    None => Shape::Opaque(None),
                 },
                 v => Shape::Value(v.clone()),
             })
@@ -4475,7 +4493,7 @@ pub mod host {
             && p.result == RegionResult::Collect
             && p.skip.is_empty()
             && p.outputs.len() == 1
-            && p.sources[0].1.ty == p.term.ty
+            && p.sources[0].1.ty() == p.term.ty()
             && p.outputs[0].len() as i64 == p.widths[0]
             && p.outputs[0].iter().enumerate().all(|(c, r)| matches!(unguarded(&p.code[*r as usize]), Instruction::Input(0, w, c2) if *w == p.widths[0] && *c2 == c as i64))
     }
@@ -4548,7 +4566,7 @@ pub mod host {
         if E::state_dependent(&Value::Residual(residual)) {
             return None;
         }
-        let term = E::Residual::residual_view(residual).ok()?.term;
+        let term = E::Residual::residual_term(residual)?;
         let t = &pv.t;
         match compile_impl(false, t.fusion, t.dynamic, &t.count_source, residual, &term) {
             Ok(program) => pv_force(pv, resolve, &program).ok(),
@@ -4563,9 +4581,10 @@ pub mod host {
     }
 
     fn pv_evaluate_with(pv: &Pv, resolve: &Option<Resolve>, residual: ResidualId, term: &Term) -> Result<Value, KErrOrDiag> {
-        if let Node::RefBinding(name, rest) = &term.node {
-            if rest.is_empty() {
-                if let Some(Value::Residual(inner)) = binding_of(residual, name) {
+        if let Node::RefBinding(id) = term.node {
+            let binding = term.arena().ref_binding(id);
+            if term.arena().name_ids(binding.fields).is_empty() {
+                if let Some(Value::Residual(inner)) = binding_of(residual, term.name(binding.name)) {
                     let view = E::Residual::residual_view(inner)?;
                     return pv_evaluate_with(pv, resolve, inner, &view.term);
                 }
@@ -4702,7 +4721,7 @@ pub mod host {
                 (None, true) => match index_range(*residual, term) {
                     Some((r, n)) => match evaluate(r, &n)? {
                         value @ Value::Int(_) => {
-                            let limit = if term.ty == Ty::Array(Box::new(Ty::Int)) { MAX_ARRAY } else { MAX_ARRAY };
+                            let limit = MAX_ARRAY;
                             match op::array_count(Some(limit), "array/range", &value) {
                                 Ok(n) => Some(n),
                                 Err(_) => {
@@ -4721,13 +4740,13 @@ pub mod host {
         let mut arrays: Vec<Value> = Vec::with_capacity(t.sources.len());
         for (i, (residual, term)) in t.sources.iter().enumerate() {
             let value = if known[i].is_some() {
-                match &term.ty {
+                match term.ty() {
                     Ty::Array(inner) if **inner == Ty::Int => Value::Int_array(Arc::new(Vec::new())),
                     Ty::Array(inner) if **inner == Ty::Float => Value::Float_array(Arc::new(Vec::new())),
                     _ => return Err(KErr::Unsupported),
                 }
             } else if empty_product {
-                match &term.ty {
+                match term.ty() {
                     Ty::Array(inner) => match **inner {
                         Ty::Int => Value::Int_array(Arc::new(Vec::new())),
                         Ty::Text => Value::Text_array(Arc::new(Vec::new())),
@@ -4764,7 +4783,7 @@ pub mod host {
             }
         };
         for (index, value) in arrays.iter().enumerate() {
-            if value::ty_of(value) != t.sources[index].1.ty {
+            if value::ty_of(value) != *t.sources[index].1.ty() {
                 return Err(fail("E_ARRAY_TYPE", "Kernel input changed its packed element type."));
             }
         }
@@ -4887,7 +4906,7 @@ pub mod host {
         let mut plan_uniforms = Vec::new();
         for v in t.uniforms.iter() {
             let v = match v {
-                Value::Residual(r) => match shape(*r, &E::Residual::residual_view(*r).ok()?.term) {
+                Value::Residual(r) => match shape(*r, E::Residual::residual_term(*r)?.as_ref()) {
                     Shape::Value(v) => v,
                     _ => return None,
                 },
@@ -5037,6 +5056,100 @@ mod tests {
         assert_eq!(block_layout(100, 1024), (100, 1, 1, 1));
         assert_eq!(block_layout(64 * 1024, 1024), (1024, 64, 16, 4));
         assert_eq!(block_layout(0, 1024), (1, 0, 1, 0));
+    }
+
+    #[test]
+    fn completed_cpu_probe_is_kept_without_a_second_kernel_run() {
+        use std::sync::atomic::AtomicUsize;
+        let (_, program) = compile_body("(map (fn [x] (+ x t)) (array/float 5 1.0))", true);
+        let runs = Arc::new(AtomicUsize::new(0));
+        let expired = Arc::new(AtomicBool::new(false));
+        let measure = Measure {
+            clock: Arc::new(|| 0.0),
+            report: Arc::new({
+                let runs = runs.clone();
+                let expired = expired.clone();
+                move |_, _, reference| {
+                    assert!(!reference);
+                    runs.fetch_add(1, Ordering::Relaxed);
+                    // The CPU cook has completed as its deadline expires, before force returns.
+                    expired.store(true, Ordering::Relaxed);
+                }
+            }),
+        };
+        let stop = expired.clone();
+        let mut output = None;
+        let completed = E::with_interrupt(Arc::new(move || stop.load(Ordering::Relaxed)), &mut || {
+            output = Some(force(&program, &input::at_time(0.5), &ForceOptions { measure: Some(measure.clone()), ..Default::default() }));
+        });
+        assert!(completed, "A completed CPU result must not be abandoned just because its budget is now expired.");
+        assert_eq!(runs.load(Ordering::Relaxed), 1);
+        assert_eq!(output.unwrap().unwrap(), Value::Float_array(Arc::new(vec![1.5; 5])));
+    }
+
+    #[test]
+    fn cancelled_packed_chunks_never_restart_the_reference_cook() {
+        use std::sync::atomic::AtomicUsize;
+        for body in [
+            "(map (fn [x] (+ x t)) (array/range 16384))",
+            "(map (fn [x] (int/add x (frame/index))) (array/range 16384 :type int))",
+        ] {
+            let (_, program) = compile_body(body, true);
+            for domains in [1, 8] {
+                at_domains(domains, &|| {
+                    let checks = Arc::new(AtomicUsize::new(0));
+                    let stop = checks.clone();
+                    let fallbacks = Arc::new(AtomicUsize::new(0));
+                    let measure = Measure {
+                        clock: Arc::new(|| 0.0),
+                        report: Arc::new({
+                            let fallbacks = fallbacks.clone();
+                            move |_, _, reference| { if reference { fallbacks.fetch_add(1, Ordering::Relaxed); } }
+                        }),
+                    };
+                    let mut result = None;
+                    let finished = E::with_interrupt(Arc::new(move || stop.fetch_add(1, Ordering::Relaxed) >= 2), &mut || {
+                        result = Some(force(&program, &input::at_time(0.5), &ForceOptions { measure: Some(measure.clone()), ..Default::default() }));
+                    });
+                    assert!(!finished);
+                    assert_eq!(result.unwrap().unwrap_err().code, "cancelled");
+                    assert_eq!(fallbacks.load(Ordering::Relaxed), 0, "An interrupted packed cook must not cook the same data in the walker.");
+                });
+            }
+        }
+    }
+
+    #[test]
+    fn capture_results_are_shared_only_within_the_outer_run() {
+        use std::sync::atomic::AtomicUsize;
+        let (_, program) = compile_body("(map (fn [x] (+ x t)) (array/float 5 1.0))", true);
+        let runs = Arc::new(AtomicUsize::new(0));
+        let measure = Measure {
+            clock: Arc::new(|| 0.0),
+            report: Arc::new({
+                let runs = runs.clone();
+                move |_, _, _| { runs.fetch_add(1, Ordering::Relaxed); }
+            }),
+        };
+        let mut run = make_run(&program, &input::at_time(0.5), &ForceOptions { measure: Some(measure), strict: true, ..Default::default() }, None, None);
+        run.in_scope = scope_enter(&run);
+        let first = {
+            let _scope = ScopeGuard(run.in_scope);
+            let first = evaluate(&run, &None, program.residual, &program.term).unwrap();
+            let second = evaluate(&run, &None, program.residual, &program.term).unwrap();
+            match (&first, &second) {
+                (Value::Float_array(a), Value::Float_array(b)) => assert!(Arc::ptr_eq(a, b)),
+                _ => panic!("Expected shared packed array captures."),
+            }
+            assert_eq!(runs.load(Ordering::Relaxed), 1);
+            first
+        };
+        assert!(CURRENT.with(|scope| scope.borrow().is_none()));
+        run.in_scope = scope_enter(&run);
+        let _scope = ScopeGuard(run.in_scope);
+        let next = evaluate(&run, &None, program.residual, &program.term).unwrap();
+        assert_eq!(first, next);
+        assert_eq!(runs.load(Ordering::Relaxed), 2);
     }
 
     // A map of fourteen 1,024-lane blocks splits into five chunks, which the domains share: values,

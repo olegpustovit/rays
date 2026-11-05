@@ -1,5 +1,29 @@
 let get = function Ok value -> value | Error error -> failwith (Ogpu.Error.to_string error)
 let require condition message = if not condition then failwith message
+let relative_close a b =
+  Float.is_finite a && Float.is_finite b
+  && (a = b || Float.abs (a -. b) <= 1e-5 *. max (Float.abs a) (Float.abs b))
+
+let check_hits label hits expected =
+  require (Array.length hits = Array.length expected) (label ^ ": ray count differs");
+  Array.iteri
+    (fun i (hit, primitive, instance, t, u, v) ->
+      let actual_hit, actual_primitive, actual_instance, actual_t, actual_u, actual_v = hits.(i) in
+      require
+        (actual_hit = hit && actual_primitive = primitive && actual_instance = instance)
+        (Printf.sprintf "%s ray %d ids differ" label i);
+      require
+        (if hit = 1 then
+           relative_close actual_t t && relative_close actual_u u && relative_close actual_v v
+         else actual_t = 0. && actual_u = 0. && actual_v = 0.)
+        (Printf.sprintf "%s ray %d distance/barycentrics differ" label i))
+    expected
+
+let no_hit = (0, 0, 0, 0., 0., 0.)
+
+let triangle_hit primitive instance t = (1, primitive, instance, t, 0.25, 0.5)
+
+let generated_hit primitive instance t = (1, primitive, instance, t, 0., 0.)
 
 type shaders = {
   backend : string;
@@ -555,28 +579,32 @@ let run ?shaders driver =
     (get (Backend.read_texture first ~bytes_per_row:8) = compact)
     "abandoned commands executed";
   get (Backend.destroy_library library);
-  (* Ray tracing: BLAS build, ray-query primitive id and t, TLAS instance ids;
-     typed Unsupported otherwise. *)
+  (* Ray tracing: deterministic primitive ids, t and barycentrics; TLAS instance ids; typed
+     Unsupported otherwise. *)
   let ray_source =
     Bytes.of_string
       "#include <metal_stdlib>\n\
        #include <metal_raytracing>\n\
        using namespace metal;\n\
        using namespace raytracing;\n\
-       struct Hit { uint hit; uint primitive; uint instance; float t; };\n\
+       struct Hit { uint hit; uint primitive; uint instance; float t; float2 barycentrics; };\n\
        kernel void trace(primitive_acceleration_structure scene [[buffer(0)]], device const float4 \
        *rays [[buffer(1)]], device Hit *hits [[buffer(2)]], uint i [[thread_position_in_grid]]) { \
        ray r(rays[i*2].xyz, rays[i*2+1].xyz, 0.001f, 100.0f); intersector<triangle_data> isect; \
        isect.assume_geometry_type(geometry_type::triangle); auto h = isect.intersect(r, scene); \
-       hits[i].hit = h.type == intersection_type::triangle ? 1u : 0u; hits[i].primitive = \
-       h.primitive_id; hits[i].instance = 0u; hits[i].t = h.distance; }\n\
+       bool hit = h.type == intersection_type::triangle; hits[i].hit = hit ? 1u : 0u; \
+       hits[i].primitive = hit ? h.primitive_id : 0u; hits[i].instance = 0u; \
+       hits[i].t = hit ? h.distance : 0.0f; hits[i].barycentrics = \
+       hit ? h.triangle_barycentric_coord : float2(0.0f); }\n\
        kernel void trace_instances(instance_acceleration_structure scene [[buffer(0)]], device \
        const float4 *rays [[buffer(1)]], device Hit *hits [[buffer(2)]], uint i \
        [[thread_position_in_grid]]) { ray r(rays[i*2].xyz, rays[i*2+1].xyz, 0.001f, 100.0f); \
        intersector<triangle_data, instancing> isect; \
        isect.assume_geometry_type(geometry_type::triangle); auto h = isect.intersect(r, scene); \
-       hits[i].hit = h.type == intersection_type::triangle ? 1u : 0u; hits[i].primitive = \
-       h.primitive_id; hits[i].instance = h.instance_id; hits[i].t = h.distance; }\n"
+       bool hit = h.type == intersection_type::triangle; hits[i].hit = hit ? 1u : 0u; \
+       hits[i].primitive = hit ? h.primitive_id : 0u; hits[i].instance = hit ? h.instance_id : 0u; \
+       hits[i].t = hit ? h.distance : 0.0f; hits[i].barycentrics = \
+       hit ? h.triangle_barycentric_coord : float2(0.0f); }\n"
   in
   let ray_shader =
     get
@@ -667,7 +695,7 @@ let run ?shaders driver =
   let hits =
     get
       (Backend.create_buffer device
-         { label = Some "hits"; size = 64L; usage = [ Storage; Copy_src ] })
+         { label = Some "hits"; size = 96L; usage = [ Storage; Copy_src ] })
   in
   let blas_descriptor =
     Backend.Blas
@@ -808,34 +836,29 @@ let run ?shaders driver =
     let receipt = get (Backend.commit commands) in
     poll_epoch receipt 1000;
     let read_hits () =
-      let bytes = get (Backend.read_buffer hits ~offset:0L ~length:64) in
+      let bytes = get (Backend.read_buffer hits ~offset:0L ~length:96) in
       Array.init 4 (fun i ->
-          ( Int32.to_int (Bytes.get_int32_le bytes (i * 16)),
-            Int32.to_int (Bytes.get_int32_le bytes ((i * 16) + 4)),
-            Int32.to_int (Bytes.get_int32_le bytes ((i * 16) + 8)),
-            Int32.float_of_bits (Bytes.get_int32_le bytes ((i * 16) + 12)) ))
+          ( Int32.to_int (Bytes.get_int32_le bytes (i * 24)),
+            Int32.to_int (Bytes.get_int32_le bytes ((i * 24) + 4)),
+            Int32.to_int (Bytes.get_int32_le bytes ((i * 24) + 8)),
+            Int32.float_of_bits (Bytes.get_int32_le bytes ((i * 24) + 12)),
+            Int32.float_of_bits (Bytes.get_int32_le bytes ((i * 24) + 16)),
+            Int32.float_of_bits (Bytes.get_int32_le bytes ((i * 24) + 20)) ))
     in
-    let close a b = Float.abs (a -. b) < 1e-4 in
     let primitive_hits = read_hits () in
-    let hit0, prim0, _, t0 = primitive_hits.(0)
-    and hit1, prim1, _, t1 = primitive_hits.(1)
-    and hit2, _, _, _ = primitive_hits.(2)
-    and hit3, _, _, _ = primitive_hits.(3) in
-    require (hit0 = 1 && prim0 = 0 && close t0 2.) "primitive 0 hit differs";
-    require (hit1 = 1 && prim1 = 1 && close t1 2.) "primitive 1 hit differs";
-    require (hit2 = 0 && hit3 = 0) "misses reported hits";
+    check_hits "primitive triangle" primitive_hits
+      [| triangle_hit 0 0 2.; triangle_hit 1 0 2.; no_hit; no_hit |];
     let commands = get (Backend.begin_commands queue) in
     query commands trace_instances tlas;
     poll_epoch (get (Backend.commit commands)) 1000;
     let instance_hits = read_hits () in
-    let hit0, prim0, inst0, t0 = instance_hits.(0)
-    and hit1, prim1, inst1, t1 = instance_hits.(1)
-    and hit2, prim2, inst2, t2 = instance_hits.(2)
-    and hit3, prim3, inst3, t3 = instance_hits.(3) in
-    require (hit0 = 1 && prim0 = 0 && inst0 = 0 && close t0 2.) "instance 0 primitive 0 hit differs";
-    require (hit1 = 1 && prim1 = 1 && inst1 = 0 && close t1 2.) "instance 0 primitive 1 hit differs";
-    require (hit2 = 1 && prim2 = 0 && inst2 = 1 && close t2 2.) "instance 1 primitive 0 hit differs";
-    require (hit3 = 1 && prim3 = 1 && inst3 = 1 && close t3 2.) "instance 1 primitive 1 hit differs";
+    check_hits "triangle instances" instance_hits
+      [|
+        triangle_hit 0 0 2.;
+        triangle_hit 1 0 2.;
+        triangle_hit 0 1 2.;
+        triangle_hit 1 1 2.;
+      |];
     (* Refit: a refittable structure updated in place from new vertex data of the same shape (the
        triangles moved to z = 1, so the rays from z = 2 hit at t = 1). *)
     if Caps.has profile Caps.Ray_tracing_refit then begin
@@ -908,9 +931,8 @@ let run ?shaders driver =
       query commands trace refittable;
       poll_epoch (get (Backend.commit commands)) 1000;
       let refit_hits = read_hits () in
-      let hit0, prim0, _, t0 = refit_hits.(0) and hit1, prim1, _, t1 = refit_hits.(1) in
-      require (hit0 = 1 && prim0 = 0 && close t0 1.) "refit primitive 0 hit differs";
-      require (hit1 = 1 && prim1 = 1 && close t1 1.) "refit primitive 1 hit differs";
+      check_hits "refit triangles" refit_hits
+        [| triangle_hit 0 0 1.; triangle_hit 1 0 1.; no_hit; no_hit |];
       get (Backend.destroy_accel refittable);
       get (Backend.destroy_buffer refit_scratch);
       get (Backend.destroy_buffer moved)
@@ -920,8 +942,8 @@ let run ?shaders driver =
       | Error { Error.kind = Unsupported; _ } -> ()
       | _ -> failwith "a refittable structure was created without Ray_tracing_refit"
     end;
-    (* Bounding boxes resolved in the kernel's traversal loop, curves,
-       motion keyframes, user-id instances with masks, and compaction. *)
+    (* Procedural box/capsule candidates, native curves where supported, motion keyframes,
+       user-id instances with masks, and compaction. *)
     let extra_source =
       Bytes.of_string
         (String.concat "\n"
@@ -930,13 +952,28 @@ let run ?shaders driver =
              "#include <metal_raytracing>";
              "using namespace metal;";
              "using namespace raytracing;";
-             "struct Hit { uint hit; uint primitive; uint instance; float t; };";
+             "struct Hit { uint hit; uint primitive; uint instance; float t; float2 barycentrics; };";
              "struct Sphere { float4 center_radius; };";
              "inline bool sphere_hit(ray r, Sphere s, thread float &t) {";
              "  float3 oc = r.origin - s.center_radius.xyz; float b = dot(oc, r.direction); float \
               cc = dot(oc, oc) - s.center_radius.w * s.center_radius.w; float disc = b * b - cc;";
              "  if (disc < 0.0f) return false; t = -b - sqrt(disc); return t >= r.min_distance && \
               t <= r.max_distance; }";
+             "struct Capsule { float4 a_radius; float4 b_radius; };";
+             "inline bool capsule_hit(ray r, Capsule c, thread float &t) {";
+             "  float3 ba = c.b_radius.xyz - c.a_radius.xyz; float3 oa = r.origin - c.a_radius.xyz;";
+             "  float baba = dot(ba, ba), bard = dot(ba, r.direction), baoa = dot(ba, oa);";
+             "  float rd2 = dot(r.direction, r.direction), rdoa = dot(r.direction, oa);";
+             "  float aa = baba * rd2 - bard * bard;";
+             "  float bb = baba * rdoa - baoa * bard;";
+             "  float cc = baba * dot(oa, oa) - baoa * baoa - c.a_radius.w * c.a_radius.w * baba;";
+             "  float disc = bb * bb - aa * cc; if (disc < 0.0f || aa <= 1e-8f) return false;";
+             "  float candidate = (-bb - sqrt(disc)) / aa; float y = baoa + candidate * bard;";
+             "  if (y > 0.0f && y < baba) { t = candidate; return t >= r.min_distance && t <= r.max_distance; }";
+             "  float3 oc = y <= 0.0f ? oa : r.origin - c.b_radius.xyz;";
+             "  float b = dot(r.direction, oc), cap_disc = b * b - rd2 * (dot(oc, oc) - c.a_radius.w * c.a_radius.w);";
+             "  if (cap_disc < 0.0f) return false; t = (-b - sqrt(cap_disc)) / rd2;";
+             "  return t >= r.min_distance && t <= r.max_distance; }";
              "inline ray make_ray(const device float4 *rays, uint tid) { ray r; r.origin = \
               rays[tid * 2].xyz; r.direction = rays[tid * 2 + 1].xyz; r.min_distance = 0.0f; \
               r.max_distance = 100.0f; return r; }";
@@ -949,44 +986,55 @@ let run ?shaders driver =
               intersection_type::bounding_box && sphere_hit(r, \
               spheres[query.get_candidate_primitive_id()], t)) \
               query.commit_bounding_box_intersection(t); }";
-             "  hits[tid].hit = query.get_committed_intersection_type() == \
-              intersection_type::bounding_box ? 1u : 0u; hits[tid].primitive = \
-              query.get_committed_primitive_id(); hits[tid].instance = 0u; hits[tid].t = \
-              query.get_committed_distance(); }";
+             "  bool hit = query.get_committed_intersection_type() == intersection_type::bounding_box;";
+             "  hits[tid].hit = hit ? 1u : 0u; hits[tid].primitive = hit ? query.get_committed_primitive_id() : 0u;";
+             "  hits[tid].instance = 0u; hits[tid].t = hit ? query.get_committed_distance() : 0.0f;";
+             "  hits[tid].barycentrics = float2(0.0f); }";
+             "kernel void trace_capsules(primitive_acceleration_structure scene [[buffer(0)]], const \
+              device float4 *rays [[buffer(1)]], device Hit *hits [[buffer(2)]], const device \
+              Capsule *capsules [[buffer(3)]], uint tid [[thread_position_in_grid]]) {";
+             "  ray r = make_ray(rays, tid); intersection_params params; intersection_query<> query(r, scene, params);";
+             "  while (query.next()) { float t; uint p = query.get_candidate_primitive_id();";
+             "    if (query.get_candidate_intersection_type() == intersection_type::bounding_box && capsule_hit(r, capsules[p], t))";
+             "      query.commit_bounding_box_intersection(t); }";
+             "  bool hit = query.get_committed_intersection_type() == intersection_type::bounding_box;";
+             "  hits[tid].hit = hit ? 1u : 0u; hits[tid].primitive = hit ? query.get_committed_primitive_id() : 0u;";
+             "  hits[tid].instance = 0u; hits[tid].t = hit ? query.get_committed_distance() : 0.0f;";
+             "  hits[tid].barycentrics = float2(0.0f); }";
              "kernel void trace_curves(primitive_acceleration_structure scene [[buffer(0)]], const \
               device float4 *rays [[buffer(1)]], device Hit *hits [[buffer(2)]], uint tid \
               [[thread_position_in_grid]]) {";
              "  intersector<curve_data> query; auto hit = query.intersect(make_ray(rays, tid), \
               scene);";
-             "  hits[tid].hit = hit.type == intersection_type::curve ? 1u : 0u; \
-              hits[tid].primitive = hit.primitive_id; hits[tid].instance = 0u; hits[tid].t = \
-              hit.distance; }";
+             "  bool found = hit.type == intersection_type::curve; hits[tid].hit = found ? 1u : 0u;";
+             "  hits[tid].primitive = found ? hit.primitive_id : 0u; hits[tid].instance = 0u;";
+             "  hits[tid].t = found ? hit.distance : 0.0f; hits[tid].barycentrics = float2(0.0f); }";
              "kernel void trace_motion(acceleration_structure<primitive_motion> scene \
               [[buffer(0)]], const device float4 *rays [[buffer(1)]], device Hit *hits \
               [[buffer(2)]], constant float &time [[buffer(3)]], uint tid \
               [[thread_position_in_grid]]) {";
              "  intersector<primitive_motion> query; auto hit = query.intersect(make_ray(rays, \
               tid), scene, time);";
-             "  hits[tid].hit = hit.type == intersection_type::triangle ? 1u : 0u; \
-              hits[tid].primitive = hit.primitive_id; hits[tid].instance = 0u; hits[tid].t = \
-              hit.distance; }";
+             "  bool found = hit.type == intersection_type::triangle; hits[tid].hit = found ? 1u : 0u;";
+             "  hits[tid].primitive = found ? hit.primitive_id : 0u; hits[tid].instance = 0u;";
+             "  hits[tid].t = found ? hit.distance : 0.0f; hits[tid].barycentrics = found ? hit.triangle_barycentric_coord : float2(0.0f); }";
              "kernel void trace_masked(instance_acceleration_structure scene [[buffer(0)]], const \
               device float4 *rays [[buffer(1)]], device Hit *hits [[buffer(2)]], constant uint \
               &mask [[buffer(3)]], uint tid [[thread_position_in_grid]]) {";
              "  intersector<instancing> query; auto hit = query.intersect(make_ray(rays, tid), \
               scene, mask);";
-             "  hits[tid].hit = hit.type == intersection_type::triangle ? 1u : 0u; \
-              hits[tid].primitive = hit.primitive_id; hits[tid].instance = hit.user_instance_id; \
-              hits[tid].t = hit.distance; }";
+             "  bool found = hit.type == intersection_type::triangle; hits[tid].hit = found ? 1u : 0u;";
+             "  hits[tid].primitive = found ? hit.primitive_id : 0u; hits[tid].instance = found ? hit.user_instance_id : 0u;";
+             "  hits[tid].t = found ? hit.distance : 0.0f; hits[tid].barycentrics = found ? hit.triangle_barycentric_coord : float2(0.0f); }";
              "kernel void trace_motion_instances(acceleration_structure<instancing, \
               instance_motion> scene [[buffer(0)]], const device float4 *rays [[buffer(1)]], \
               device Hit *hits [[buffer(2)]], constant float &time [[buffer(3)]], uint tid \
               [[thread_position_in_grid]]) {";
              "  intersector<instancing, instance_motion> query; auto hit = \
               query.intersect(make_ray(rays, tid), scene, time);";
-             "  hits[tid].hit = hit.type == intersection_type::triangle ? 1u : 0u; \
-              hits[tid].primitive = hit.primitive_id; hits[tid].instance = hit.user_instance_id; \
-              hits[tid].t = hit.distance; }";
+             "  bool found = hit.type == intersection_type::triangle; hits[tid].hit = found ? 1u : 0u;";
+             "  hits[tid].primitive = found ? hit.primitive_id : 0u; hits[tid].instance = found ? hit.user_instance_id : 0u;";
+             "  hits[tid].t = found ? hit.distance : 0.0f; hits[tid].barycentrics = found ? hit.triangle_barycentric_coord : float2(0.0f); }";
            ])
     in
     let extra_shader =
@@ -999,7 +1047,7 @@ let run ?shaders driver =
              entry_points =
                List.map
                  (fun name -> { Shader.name; stage = Shader.Compute })
-                 ([ "trace_boxes"; "trace_masked" ]
+                 ([ "trace_boxes"; "trace_capsules"; "trace_masked" ]
                  @ (if Caps.has profile Caps.Ray_tracing_curves then [ "trace_curves" ] else [])
                  @
                  if Caps.has profile Caps.Ray_tracing_motion then
@@ -1015,6 +1063,12 @@ let run ?shaders driver =
     let boxes_pipeline =
       get
         (Backend.create_compute_pipeline_from extra ~entry:"trace_boxes"
+           ~interface:(ray_interface @ [ binding 3 Shader.Storage_buffer ])
+           ())
+    in
+    let capsules_pipeline =
+      get
+        (Backend.create_compute_pipeline_from extra ~entry:"trace_capsules"
            ~interface:(ray_interface @ [ binding 3 Shader.Storage_buffer ])
            ())
     in
@@ -1054,6 +1108,29 @@ let run ?shaders driver =
                   ];
               }))
     in
+    let capsule_boxes =
+      float_buffer "capsule-boxes" [| 7.5; -1.5; -0.5; 8.5; 1.5; 0.5 |]
+    in
+    let capsule_data =
+      float_buffer "capsules" [| 8.; -1.; 0.; 0.5; 8.; 1.; 0.; 0.5 |]
+    in
+    let capsule_blas =
+      get
+        (Backend.create_accel device
+           (Backend.Blas
+              {
+                geometries =
+                  [
+                    Backend.Bounding_boxes
+                      {
+                        boxes = [ { buffer = capsule_boxes; offset = 0L } ];
+                        stride = 24;
+                        count = 1;
+                        options = Backend.default_geometry_options;
+                      };
+                  ];
+              }))
+    in
     let big_scratch =
       get
         (Backend.create_buffer ~memory:Types.Device_local device
@@ -1067,7 +1144,8 @@ let run ?shaders driver =
       poll_epoch (get (Backend.commit commands)) 1000
     in
     build_one box_blas;
-    let query_with ?extra_bytes ?extra_buffer pipeline structure =
+    build_one capsule_blas;
+    let query_with ?extra_bytes ?extra_buffer ?extra_buffer4 ?extra_buffer5 ?extra_accel6 pipeline structure =
       let commands = get (Backend.begin_commands queue) in
       let compute = get (Backend.compute_encoder commands) in
       get (Backend.set_pipeline compute pipeline);
@@ -1076,19 +1154,20 @@ let run ?shaders driver =
       get (Backend.set_buffer compute ~index:2 hits);
       Option.iter (fun bytes -> get (Backend.set_bytes compute ~index:3 bytes)) extra_bytes;
       Option.iter (fun buffer -> get (Backend.set_buffer compute ~index:3 buffer)) extra_buffer;
+      Option.iter (fun buffer -> get (Backend.set_buffer compute ~index:4 buffer)) extra_buffer4;
+      Option.iter (fun buffer -> get (Backend.set_buffer compute ~index:5 buffer)) extra_buffer5;
+      Option.iter (fun accel -> get (Backend.set_accel compute ~index:6 accel)) extra_accel6;
       get (Backend.dispatch_threads compute ~threads:(4, 1, 1) ~threadgroup:(4, 1, 1));
       get (Backend.end_compute compute);
       poll_epoch (get (Backend.commit commands)) 1000;
       read_hits ()
     in
     let box_hits = query_with ~extra_buffer:spheres boxes_pipeline box_blas in
-    let hit0, prim0, _, t0 = box_hits.(0)
-    and hit1, prim1, _, t1 = box_hits.(1)
-    and hit2, _, _, _ = box_hits.(2)
-    and hit3, _, _, _ = box_hits.(3) in
-    require (hit0 = 1 && prim0 = 0 && close t0 1.5) "sphere 0 intersection differs";
-    require (hit1 = 1 && prim1 = 1 && close t1 1.5) "sphere 1 intersection differs";
-    require (hit2 = 0 && hit3 = 0) "bounding boxes reported false hits";
+    check_hits "procedural sphere candidates" box_hits
+      [| generated_hit 0 0 1.5; generated_hit 1 0 1.5; no_hit; no_hit |];
+    let capsule_hits = query_with ~extra_buffer:capsule_data capsules_pipeline capsule_blas in
+    check_hits "procedural capsule candidates" capsule_hits
+      [| no_hit; no_hit; generated_hit 0 0 1.5; no_hit |];
     (* Curves: one round linear segment along y at x=8 with radius 0.5, on
        devices that intersect curves; typed Unsupported elsewhere. *)
     let control = float_buffer "curve-points" [| 8.; -1.; 0.; 8.; 1.; 0. |] in
@@ -1136,16 +1215,8 @@ let run ?shaders driver =
         let curve_blas = get (Backend.create_accel device curve_descriptor) in
         build_one curve_blas;
         let curve_hits = query_with curve_pipeline curve_blas in
-        let hit0, _, _, _ = curve_hits.(0)
-        and hit2, prim2, _, t2 = curve_hits.(2)
-        and hit3, _, _, _ = curve_hits.(3) in
-        require (hit0 = 0 && hit3 = 0) "curve reported false hits";
-        require
-          (hit2 = 1 && prim2 = 0 && close t2 1.5)
-          (Printf.sprintf "curve intersection differs: %s"
-             (String.concat ";"
-                (Array.to_list
-                   (Array.map (fun (h, p, i, t) -> Printf.sprintf "%d/%d/%d/%g" h p i t) curve_hits))));
+        check_hits "native curve" curve_hits
+          [| no_hit; no_hit; generated_hit 0 0 1.5; no_hit |];
         Some curve_blas
       end
       else begin
@@ -1161,6 +1232,15 @@ let run ?shaders driver =
       let bytes = Bytes.create 4 in
       put_f32 bytes 0 t;
       bytes
+    in
+    let motion_bindings =
+      if backend = "vulkan" then
+        [ binding 4 Shader.Storage_buffer; binding 5 Shader.Storage_buffer ]
+      else []
+    in
+    let motion_instance_bindings =
+      motion_bindings
+      @ (if backend = "vulkan" then [ binding 6 Shader.Acceleration_structure ] else [])
     in
     let motion_destroys =
       if not (Caps.has profile Caps.Ray_tracing_motion) then begin
@@ -1256,16 +1336,19 @@ let run ?shaders driver =
     let motion_pipeline =
       get
         (Backend.create_compute_pipeline_from extra ~entry:"trace_motion"
-           ~interface:(ray_interface @ [ binding 3 Shader.Uniform_buffer ])
+           ~interface:(ray_interface @ [ binding 3 Shader.Uniform_buffer ] @ motion_bindings)
            ())
     in
     List.iter
-      (fun (time, expected) ->
-        let motion_hits = query_with ~extra_bytes:(time_bytes time) motion_pipeline motion_blas in
-        let hit0, prim0, _, t0 = motion_hits.(0) and hit1, _, _, t1 = motion_hits.(1) in
-        require
-          (hit0 = 1 && prim0 = 0 && close t0 expected && hit1 = 1 && close t1 expected)
-          (Printf.sprintf "motion intersection at time %g differs" time))
+      (fun (time, expected_t) ->
+        let motion_hits =
+          if backend = "vulkan" then
+            query_with ~extra_bytes:(time_bytes time) ~extra_buffer4:vertices0 ~extra_buffer5:vertices1
+              motion_pipeline motion_blas
+          else query_with ~extra_bytes:(time_bytes time) motion_pipeline motion_blas
+        in
+        check_hits (Printf.sprintf "motion triangles at time %g" time) motion_hits
+          [| triangle_hit 0 0 expected_t; triangle_hit 1 0 expected_t; no_hit; no_hit |])
       [ (0., 2.); (1., 0.5); (0.5, 1.25) ];
     [
       (fun () -> Backend.destroy_pipeline motion_pipeline);
@@ -1323,22 +1406,13 @@ let run ?shaders driver =
       bytes
     in
     let masked = query_with ~extra_bytes:(mask_bytes 1) masked_pipeline masked_tlas in
-    let hit0, _, inst0, t0 = masked.(0)
-    and hit1, _, inst1, _ = masked.(1)
-    and hit2, _, _, _ = masked.(2)
-    and hit3, _, _, _ = masked.(3) in
-    require
-      (hit0 = 1 && hit1 = 1 && inst0 = 7 && inst1 = 7 && close t0 2. && hit2 = 0 && hit3 = 0)
-      "mask 1 selected the wrong instance";
+    check_hits "mask 1 instances" masked
+      [| triangle_hit 0 7 2.; triangle_hit 1 7 2.; no_hit; no_hit |];
     let masked = query_with ~extra_bytes:(mask_bytes 2) masked_pipeline masked_tlas in
-    let hit0, _, _, _ = masked.(0)
-    and hit2, _, inst2, t2 = masked.(2)
-    and hit3, _, inst3, _ = masked.(3) in
-    require
-      (hit0 = 0 && hit2 = 1 && hit3 = 1 && inst2 = 9 && inst3 = 9 && close t2 2.)
-      "mask 2 selected the wrong instance";
-    (* Motion instances: one instance whose transform keyframes slide it from
-       the origin to x=8, so time decides which ray pair hits it. *)
+    check_hits "mask 2 instances" masked
+      [| no_hit; no_hit; triangle_hit 0 9 2.; triangle_hit 1 9 2. |];
+    (* The off-ray record 0 and tested record 1 distinguish InstanceId=1, user_id=5, and
+       prototype structure_index=0. Record 1 moves from x=0 to x=8. *)
     let motion_instance_destroys =
       if not (Caps.has profile Caps.Ray_tracing_motion) then begin
         (match
@@ -1358,7 +1432,8 @@ let run ?shaders driver =
         []
       end
       else begin
-    let keyframes = get (Backend.pack_transforms [| identity; shifted |]) in
+    let far = [| 1.; 0.; 0.; 20.; 0.; 1.; 0.; 0.; 0.; 0.; 1.; 0. |] in
+    let keyframes = get (Backend.pack_transforms [| far; far; identity; shifted |]) in
     let keyframe_buffer =
       get
         (Backend.create_buffer device
@@ -1369,14 +1444,84 @@ let run ?shaders driver =
            })
     in
     get (Backend.write_buffer keyframe_buffer ~offset:0L keyframes);
+    let prototype_vertices =
+      get
+        (Backend.create_buffer device
+           {
+             label = Some "motion-instance-prototype";
+             size = 72L;
+             usage = [ Storage; Copy_dst ];
+           })
+    in
+    get (Backend.write_buffer prototype_vertices ~offset:0L (vertex_bytes 1.5));
+    let prototype_blas =
+      get
+        (Backend.create_accel device
+           (Backend.Blas
+              {
+                geometries =
+                  [
+                    Backend.Triangles
+                      {
+                        vertices = prototype_vertices;
+                        offset = 0L;
+                        length = 72L;
+                        vertex_stride = 12;
+                        vertex_count = 6;
+                      };
+                  ];
+              }))
+    in
+    build_one prototype_blas;
+    let prototype_records =
+      get
+        (Backend.pack_instance_records device
+           [|
+             { instance = { transform = identity; mask = 1; structure_index = 0 }; user_id = 0 };
+             { instance = { transform = identity; mask = 1; structure_index = 1 }; user_id = 1 };
+           |])
+    in
+    let prototype_record_buffer =
+      get
+        (Backend.create_buffer device
+           {
+             label = Some "motion-prototypes";
+             size = Int64.of_int (Bytes.length prototype_records);
+             usage = [ Storage; Copy_dst ];
+           })
+    in
+    get (Backend.write_buffer prototype_record_buffer ~offset:0L prototype_records);
+    let prototype_tlas =
+      get
+        (Backend.create_accel device
+           (Backend.Tlas_of
+              {
+                instances = prototype_record_buffer;
+                offset = 0L;
+                instance_count = 2;
+                kind = User_id_instances;
+                structures = [ blas; prototype_blas ];
+                motion_transforms = None;
+              }))
+    in
+    build_one prototype_tlas;
     let motion_records =
       get
         (Backend.pack_motion_instances device
            [|
              {
-               record =
-                 { instance = { transform = identity; mask = 1; structure_index = 0 }; user_id = 5 };
+               record = { instance = { transform = far; mask = 1; structure_index = 0 }; user_id = 3 };
                transforms_start = 0;
+               transforms_count = 2;
+               start_time = 0.;
+               end_time = 1.;
+               start_border = Clamp;
+               end_border = Clamp;
+             };
+             {
+               record =
+                 { instance = { transform = identity; mask = 1; structure_index = 1 }; user_id = 5 };
+               transforms_start = 2;
                transforms_count = 2;
                start_time = 0.;
                end_time = 1.;
@@ -1385,7 +1530,7 @@ let run ?shaders driver =
              };
            |])
     in
-    require (Bytes.length motion_records = 44) "motion instance record stride differs";
+    require (Bytes.length motion_records = 2 * 44) "motion instance record stride differs";
     let motion_record_buffer =
       get
         (Backend.create_buffer device
@@ -1402,9 +1547,9 @@ let run ?shaders driver =
             {
               instances = motion_record_buffer;
               offset = 0L;
-              instance_count = 1;
+              instance_count = 2;
               kind = Motion_instances;
-              structures = [ blas ];
+                structures = [ blas; prototype_blas ];
               motion_transforms = None;
             })
      with
@@ -1417,34 +1562,40 @@ let run ?shaders driver =
               {
                 instances = motion_record_buffer;
                 offset = 0L;
-                instance_count = 1;
+                instance_count = 2;
                 kind = Motion_instances;
-                structures = [ blas ];
-                motion_transforms = Some (keyframe_buffer, 0L, 2);
+                structures = [ blas; prototype_blas ];
+                motion_transforms = Some (keyframe_buffer, 0L, 4);
               }))
     in
     build_one motion_tlas;
     let motion_instances_pipeline =
       get
         (Backend.create_compute_pipeline_from extra ~entry:"trace_motion_instances"
-           ~interface:(ray_interface @ [ binding 3 Shader.Uniform_buffer ])
+           ~interface:(ray_interface @ [ binding 3 Shader.Uniform_buffer ] @ motion_instance_bindings)
            ())
     in
-    let at_start = query_with ~extra_bytes:(time_bytes 0.) motion_instances_pipeline motion_tlas in
-    let hit0, _, inst0, t0 = at_start.(0) and hit2, _, _, _ = at_start.(2) in
-    require
-      (hit0 = 1 && inst0 = 5 && close t0 2. && hit2 = 0)
-      "motion instance at time 0 is not at the origin";
-    let at_end = query_with ~extra_bytes:(time_bytes 1.) motion_instances_pipeline motion_tlas in
-    let hit0, _, _, _ = at_end.(0) and hit2, _, inst2, t2 = at_end.(2) in
-    require
-      (hit0 = 0 && hit2 = 1 && inst2 = 5 && close t2 2.)
-      "motion instance at time 1 did not reach x=8";
+    let query_motion_instances time =
+      if backend = "vulkan" then
+        query_with ~extra_bytes:(time_bytes time) ~extra_buffer4:motion_record_buffer
+          ~extra_buffer5:keyframe_buffer ~extra_accel6:prototype_tlas motion_instances_pipeline motion_tlas
+      else query_with ~extra_bytes:(time_bytes time) motion_instances_pipeline motion_tlas
+    in
+    let at_start = query_motion_instances 0. in
+    check_hits "motion instance at time 0" at_start
+      [| triangle_hit 0 5 0.5; triangle_hit 1 5 0.5; no_hit; no_hit |];
+    let at_end = query_motion_instances 1. in
+    check_hits "motion instance at time 1" at_end
+      [| no_hit; no_hit; triangle_hit 0 5 0.5; triangle_hit 1 5 0.5 |];
     [
       (fun () -> Backend.destroy_pipeline motion_instances_pipeline);
       (fun () -> Backend.destroy_accel motion_tlas);
       (fun () -> Backend.destroy_buffer motion_record_buffer);
       (fun () -> Backend.destroy_buffer keyframe_buffer);
+      (fun () -> Backend.destroy_accel prototype_tlas);
+      (fun () -> Backend.destroy_accel prototype_blas);
+      (fun () -> Backend.destroy_buffer prototype_record_buffer);
+      (fun () -> Backend.destroy_buffer prototype_vertices);
     ]
       end
     in
@@ -1480,28 +1631,28 @@ let run ?shaders driver =
     get (Backend.end_accel encoder);
     poll_epoch (get (Backend.commit commands)) 1000;
     let structure_hits = query_with trace compacted in
-    let hit0, prim0, _, t0 = structure_hits.(0)
-    and hit1, prim1, _, t1 = structure_hits.(1)
-    and hit2, _, _, _ = structure_hits.(2) in
-    require
-      (hit0 = 1 && prim0 = 0 && close t0 2. && hit1 = 1 && prim1 = 1 && close t1 2. && hit2 = 0)
-      "compacted structure hits differ from the source";
+    check_hits "compacted triangles" structure_hits
+      [| triangle_hit 0 0 2.; triangle_hit 1 0 2.; no_hit; no_hit |];
     List.iter
       (fun destroy -> get (destroy ()))
       (motion_destroys @ motion_instance_destroys
       @ [
         (fun () -> Backend.destroy_pipeline boxes_pipeline);
+        (fun () -> Backend.destroy_pipeline capsules_pipeline);
         (fun () -> Option.fold ~none:(Ok ()) ~some:Backend.destroy_pipeline curve_pipeline);
         (fun () -> Backend.destroy_pipeline masked_pipeline);
         (fun () -> Backend.destroy_accel compacted);
         (fun () -> Backend.destroy_accel masked_tlas);
         (fun () -> Option.fold ~none:(Ok ()) ~some:Backend.destroy_accel curve_blas);
+        (fun () -> Backend.destroy_accel capsule_blas);
         (fun () -> Backend.destroy_accel box_blas);
         (fun () -> Backend.destroy_buffer size_buffer);
         (fun () -> Backend.destroy_buffer record_buffer);
         (fun () -> Backend.destroy_buffer indices);
         (fun () -> Backend.destroy_buffer radii);
         (fun () -> Backend.destroy_buffer control);
+        (fun () -> Backend.destroy_buffer capsule_data);
+        (fun () -> Backend.destroy_buffer capsule_boxes);
         (fun () -> Backend.destroy_buffer big_scratch);
         (fun () -> Backend.destroy_buffer boxes);
         (fun () -> Backend.destroy_buffer spheres);

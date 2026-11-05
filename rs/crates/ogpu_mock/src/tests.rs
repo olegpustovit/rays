@@ -109,3 +109,32 @@ fn mapped_view_is_a_host_copy_synchronised_by_flush_and_invalidate() {
     assert_eq!(again.borrow()[0], 1.5);
     assert_eq!(again.borrow()[1], 0.0);
 }
+
+#[test]
+fn owned_readback_is_lazy_cross_thread_and_retains_the_allocation() {
+    let (driver, _) = crate::backend_mock::create();
+    let device = backend::create_device(driver).unwrap();
+    let plain = backend::create_buffer(&device, buffer(8), None).unwrap();
+    assert!(matches!(backend::owned_readback(&plain), Err(error) if error.kind == ErrorKind::InvalidArgument));
+    backend::destroy_buffer(&plain).unwrap();
+
+    let mapped = backend::create_mapped_buffer(&device, buffer(8)).unwrap();
+    backend::write_buffer(&mapped, 0, &[1; 8]).unwrap();
+    let readback = backend::owned_readback(&mapped).unwrap();
+    backend::write_buffer(&mapped, 0, &[2, 3, 4, 5, 6, 7, 8, 9]).unwrap();
+    // No GPU work is pending; the owner does not write while the foreign reader runs.
+    let foreign = readback.clone();
+    assert_eq!(std::thread::spawn(move || foreign(2, 4).unwrap()).join().unwrap(), [4, 5, 6, 7]);
+    for (offset, length) in [(-1, 1), (9, 0), (7, 2), (i64::MAX, 1), (1, usize::MAX)] {
+        assert_eq!(readback(offset, length).unwrap_err().kind, ErrorKind::InvalidArgument);
+    }
+    assert!(readback(8, 0).unwrap().is_empty());
+
+    backend::destroy_buffer(&mapped).unwrap();
+    assert!(matches!(backend::owned_readback(&mapped), Err(error) if error.kind == ErrorKind::StaleHandle));
+    drop(mapped);
+    backend::destroy_device(&device).unwrap();
+    drop(device);
+    // Allocation-lifetime conformance only: normal callers stop using readers at semantic free.
+    assert_eq!(std::thread::spawn(move || readback(0, 8).unwrap()).join().unwrap(), [2, 3, 4, 5, 6, 7, 8, 9]);
+}

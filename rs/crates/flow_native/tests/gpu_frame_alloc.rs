@@ -1,17 +1,14 @@
 //! Port of lib/flow_native/test_frame_alloc.ml: recursive_signals at full depth (its fold into a
 //! draw, on the editor's own path: Drawing over the workspace GPU owner, fast precision) drawn many
-//! times. After warm-up a frame creates no GPU buffer and holds on to (almost) no memory. The
+//! times. After warm-up a frame creates no GPU buffer and allocates at most 1.1 MB. The
 //! sketch animates, so every frame does its work and its counts move; the pointer rests.
 //!
 //! The fold's arrays stay on the device through the draw: the picture must match the one drawn
 //! after reading them back (the host declines to draw over them, so they come back and the marks
 //! upload).
 //!
-//! Deviation from the OCaml measurement: OCaml bounds the bytes a frame *allocates*
-//! (`Gc.allocated_bytes`, 1.1 MB for ~130 dispatches' encoding). The Rust allocator counter
-//! (`mem_sys`) reports live bytes only, so this bounds the live growth per frame, which catches a
-//! leak or a retained per-frame array; a cumulative allocation counter in `mem_sys` would restore
-//! the exact budget. `RAYS_ALLOC_PROFILE` has no Rust counterpart (no allocation sampler).
+//! Uses the counting allocator's cumulative allocated bytes for the OCaml per-frame budget.
+//! `RAYS_ALLOC_PROFILE` has no Rust counterpart (no allocation sampler).
 mod common;
 use flow_eval as e;
 use flow_native::{drawing, workspace_gpu as wg};
@@ -19,9 +16,8 @@ use flow_sop::lower;
 use rays::canvas;
 use std::rc::Rc;
 
-/// Live bytes a measured frame may add (the OCaml per-frame allocation budget is 1,100,000 bytes
-/// of transient allocation; what a frame keeps is far smaller). Measured after warm-up.
-const BUDGET: i64 = 262_144;
+/// The source budget for the dispatch encoding and per-region bookkeeping.
+const BUDGET: u64 = 1_100_000;
 
 fn frame() {
     if !common::gpu() {
@@ -70,25 +66,26 @@ fn frame() {
     };
     // warm-up: kernels compile, placement settles, and every slot grows to the counts of these
     // times (a count past its capacity is a change of shape: it reruns and grows)
-    for k in 41..=42 {
+    for k in 1..=60 {
         draw(false, k);
     }
     // one after the other: the second draw replaces the outputs the first scene binds
-    let kept = pixels(&draw(false, 42));
-    let read = pixels(&draw(true, 42));
+    let kept = pixels(&draw(false, 50));
+    let read = pixels(&draw(true, 50));
+    assert_eq!(kept.len(), read.len(), "resident and readback pixel counts");
     let differ = kept.iter().zip(read.iter()).filter(|(a, b)| a != b).count();
     assert_eq!(differ, 0, "recursive_signals: the kept fold draws {differ} pixels differently");
     // the measured frames replay times the warm-up drew: the same shapes, all the work again
-    let frames = 2i64;
-    let (before, made) = (mem_sys::allocated_bytes() as i64, buffers());
+    let frames = 20i64;
+    let (before, made) = (mem_sys::alloc_bytes_total(), buffers());
     for k in 41..=40 + frames {
         draw(false, k);
     }
-    let per_frame = (mem_sys::allocated_bytes() as i64 - before) / frames;
+    let per_frame = (mem_sys::alloc_bytes_total() - before) / frames as u64;
     let made = buffers() - made;
-    println!("recursive_signals: {per_frame} live bytes and {made} GPU buffers a frame after warm-up (budget {BUDGET})");
+    println!("recursive_signals: {per_frame} allocated bytes and {made} GPU buffers a frame after warm-up (budget {BUDGET})");
     wg::close(&ws);
-    assert!(per_frame <= BUDGET && made == 0, "recursive_signals: {per_frame} live bytes (budget {BUDGET}) and {made} GPU buffers a frame");
+    assert!(per_frame <= BUDGET && made == 0, "recursive_signals: {per_frame} allocated bytes (budget {BUDGET}) and {made} GPU buffers a frame");
 }
 
 fn main() {

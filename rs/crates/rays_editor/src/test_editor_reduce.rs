@@ -126,7 +126,7 @@ fn reducer_idle_undo_and_gestures() {
         assert_eq!(history::depth(&out.core.history), 1);
         assert_eq!(history::label(&out.core.history), "Add node");
         assert!(out.core.doc.workspace.ws.source.len() == value.doc.workspace.ws.source.len());
-        assert!(editor_document::preset::text(&out.core.doc).contains("second"));
+        assert!(editor_document::preset::text(&out.core.doc).unwrap().contains("second"));
         assert!(out.effects.cook);
         assert!(out.core.edit_error.is_none());
         let wrote = out.core.notice.clone().expect("a note of what was written");
@@ -135,12 +135,12 @@ fn reducer_idle_undo_and_gestures() {
 
         // undo restores the text
         let back = reduce_idle(None, None, &out.core, &[action::Undo], &frame0).expect("undo");
-        assert!(!editor_document::preset::text(&back.doc).contains("second"));
+        assert!(!editor_document::preset::text(&back.doc).unwrap().contains("second"));
         assert_eq!(history::depth(&back.history), 0);
         assert_eq!(back.notice, Some((notice_kind::Info, "Undo Add node".to_string())));
         // and redo brings it back
         let forth = reduce_idle(None, None, &back, &[action::Redo], &frame0).expect("redo");
-        assert!(editor_document::preset::text(&forth.doc).contains("second"));
+        assert!(editor_document::preset::text(&forth.doc).unwrap().contains("second"));
 
         // a refused gesture leaves the document and says why
         let mut result = idle_result(&value, selection::empty());
@@ -187,7 +187,7 @@ fn reducer_gesture_keys_layout_and_prompts() {
         let dir = std::env::temp_dir().join(format!("rays-editor-test-presets-{}", std::process::id()));
         let mut value = value;
         value.presets = dir.to_string_lossy().to_string();
-        let view = |_: Option<&Panel_result>| syntax::make(syntax::Node::Map(Vec::new().into()));
+        let view = |_: Option<&Panel_result>| syntax::make(syntax::Draft::Map(Vec::new()));
         let mut result = idle_result(&value, selection::empty());
         result.prompt_intent = Some(prompt_intent::Save_preset_file("probe".to_string()));
         let (_, notice, loaded) = editor_reduce::prompt_step(&value, &view, &result);
@@ -257,7 +257,7 @@ fn whole_frame_update() {
         let frame0 = frame_at(0.0, vec![], vec![]);
         let camera = |_: &mut pxui::ui::Ui| -> Panel_result { Rc::new(()) };
         let handles = |_: &mut pxui::ui::Ui, _: Option<&picked>, _: rays_math::mat4::T, _: pxui_shell::layout::Bounds| (Vec::new(), false, None);
-        let view_state: Rc<dyn Fn(Option<&Panel_result>) -> syntax::Syntax> = Rc::new(|_| syntax::make(syntax::Node::Map(Vec::new().into())));
+        let view_state: Rc<dyn Fn(Option<&Panel_result>) -> syntax::Syntax> = Rc::new(|_| syntax::make(syntax::Draft::Map(Vec::new())));
         // the panes hidden: only the keys and the reducer run
         let out = editor_frame::update(value.clone(), false, false, &camera, &handles, None, None, view_state.clone(), &frame0, None, None, Vec::new(), None);
         assert!(Arc::ptr_eq(&out.core.doc, &value.doc));

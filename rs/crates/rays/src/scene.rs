@@ -1340,7 +1340,7 @@ pub mod Layer {
                     .entries
                     .iter()
                     .map(|e| {
-                        e.draw.mesh.vertices.borrow().len() as i64
+                        e.draw.mesh.vertex_bytes_len() as i64
                             + e.draw.mesh.indices.borrow().len() as i64
                             + e.draw.state.transform_uniforms.as_ref().map_or(0, |b| b.borrow().len() as i64)
                     })

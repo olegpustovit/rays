@@ -79,13 +79,13 @@ pub struct IdentityCache {
     id: u64,
     owner: Option<mem::Owner>,
     bytes: Option<fn(&IdentityValue) -> i64>,
-    table_bytes: usize,
     state: Mutex<CacheState>,
 }
 
 impl mem::AccountedSize for IdentityCache {
-    fn owned_bytes(&self) -> usize {
-        self.table_bytes
+    fn visit_allocations(&self, visitor: &mut mem::AllocationVisitor) {
+        let state = lock_state(&self.state);
+        visitor.allocation(state.slots.as_ptr() as usize, state.slots.capacity() * std::mem::size_of::<Option<Entry>>());
     }
 }
 
@@ -135,8 +135,6 @@ impl IdentityCache {
             id: NEXT_CACHE_ID.fetch_add(1, AtomicOrdering::Relaxed),
             owner,
             bytes,
-            table_bytes: std::mem::size_of::<IdentityCache>()
-                .saturating_add(capacity.saturating_mul(std::mem::size_of::<Option<Entry>>())),
             state: Mutex::new(CacheState {
                 slots: (0..capacity).map(|_| None).collect(),
                 next: 0,

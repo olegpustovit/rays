@@ -16,9 +16,10 @@ use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
     rc::Rc,
+    sync::{Arc, Mutex},
 };
 
-type Bytes = Rc<RefCell<Vec<u8>>>;
+type Bytes = Arc<Mutex<Vec<u8>>>;
 
 struct TextureStorage {
     descriptor: TextureDescriptor,
@@ -168,7 +169,7 @@ fn execute_transfer(c: &Shared, t: &BufferToTexture) -> Result<(), Error> {
         };
         let texel = types::texel_bytes(storage.descriptor.format);
         let ok = valid_region(storage, t.mip, &t.origin, &t.extent)
-            && buffer_region(texel, source.borrow().len(), t.offset, t.row, t.image, &t.extent);
+            && buffer_region(texel, source.lock().unwrap().len(), t.offset, t.row, t.image, &t.extent);
         if !ok {
             return Err(fail(op, ErrorKind::InvalidArgument, "texture upload range is invalid"));
         }
@@ -184,8 +185,8 @@ fn execute_transfer(c: &Shared, t: &BufferToTexture) -> Result<(), Error> {
             let to = (target_offset + z * width * height * texel + y * width * texel) as usize;
             let n = (t.extent.width * texel) as usize;
             // a texture's level 0 can also be the source: copy through a temporary
-            let row = source.borrow()[from..from + n].to_vec();
-            level.borrow_mut()[to..to + n].copy_from_slice(&row);
+            let row = source.lock().unwrap()[from..from + n].to_vec();
+            level.lock().unwrap()[to..to + n].copy_from_slice(&row);
         }
     }
     Ok(())
@@ -215,7 +216,7 @@ fn resource(c: &Shared, kind: &'static str, size: i64) -> Result<DriverResource,
         return Err(fail("Backend_mock.allocate", ErrorKind::Capacity, "allocation exceeds mock byte capacity"));
     };
     let id = token(c);
-    let bytes: Bytes = Rc::new(RefCell::new(initial));
+    let bytes: Bytes = Arc::new(Mutex::new(initial));
     {
         let mut state = c.borrow_mut();
         state.memory.insert(id, bytes.clone());
@@ -229,7 +230,7 @@ fn resource(c: &Shared, kind: &'static str, size: i64) -> Result<DriverResource,
     Ok(DriverResource {
         token: id,
         write: Box::new(move |offset, source| {
-            let mut data = b_write.borrow_mut();
+            let mut data = b_write.lock().unwrap();
             if !in_range(data.len(), offset, source.len() as i64) {
                 return Err(fail("Backend_mock.write", ErrorKind::InvalidArgument, "range"));
             }
@@ -237,14 +238,14 @@ fn resource(c: &Shared, kind: &'static str, size: i64) -> Result<DriverResource,
             Ok(())
         }),
         read: Box::new(move |offset, length| {
-            let data = b_read.borrow();
+            let data = b_read.lock().unwrap();
             if !in_range(data.len(), offset, length as i64) {
                 return Err(fail("Backend_mock.read", ErrorKind::InvalidArgument, "range"));
             }
             Ok(data[offset as usize..offset as usize + length].to_vec())
         }),
         read_into: Box::new(move |offset, destination, destination_offset, length| {
-            let data = b_into.borrow();
+            let data = b_into.lock().unwrap();
             if !in_range(data.len(), offset, length as i64)
                 || destination_offset > destination.len()
                 || length > destination.len() - destination_offset
@@ -289,9 +290,17 @@ fn create_mapped_buffer(c: &Shared, d: &BufferDescriptor) -> Result<DriverMapped
     };
     let invalidate_view = view.clone();
     let invalidate_device = device.clone();
+    let readback_device = device.clone();
     let flush_cell = cell.clone();
     Ok(DriverMapped {
         mapped_resource: raw,
+        readback: Arc::new(move |offset, length| {
+            let data = readback_device.lock().unwrap();
+            let offset = usize::try_from(offset).map_err(|_| fail("Backend_mock.readback", ErrorKind::InvalidArgument, "range"))?;
+            let end = offset.checked_add(length).filter(|end| *end <= data.len())
+                .ok_or_else(|| fail("Backend_mock.readback", ErrorKind::InvalidArgument, "range"))?;
+            Ok(data[offset..end].to_vec())
+        }),
         view: Box::new(view),
         release_view: Box::new(move || {
             released.set(true);
@@ -303,7 +312,7 @@ fn create_mapped_buffer(c: &Shared, d: &BufferDescriptor) -> Result<DriverMapped
             None => Err(fail("Backend_mock.flush", ErrorKind::InvalidArgument, "no host view was written")),
             Some(floats) => {
                 let floats = floats.borrow();
-                let mut device = device.borrow_mut();
+                let mut device = device.lock().unwrap();
                 for i in 0..n / 4 {
                     device[4 * i..4 * i + 4].copy_from_slice(&floats[i].to_bits().to_le_bytes());
                 }
@@ -312,7 +321,7 @@ fn create_mapped_buffer(c: &Shared, d: &BufferDescriptor) -> Result<DriverMapped
         }),
         invalidate: Box::new(move |n| {
             let floats = invalidate_view().expect("view");
-            let device = invalidate_device.borrow();
+            let device = invalidate_device.lock().unwrap();
             let mut floats = floats.borrow_mut();
             for i in 0..n / 4 {
                 floats[i] = f32::from_bits(u32::from_le_bytes(device[4 * i..4 * i + 4].try_into().unwrap()));
@@ -342,7 +351,7 @@ fn create_texture(c: &Shared, d: &TextureDescriptor) -> Result<DriverResource, E
             levels.push(c.borrow().memory.get(&raw.token).cloned().expect("texture was just registered"));
         } else {
             match texture_level_size(d, mip).and_then(zeroed) {
-                Some(bytes) => levels.push(Rc::new(RefCell::new(bytes))),
+                Some(bytes) => levels.push(Arc::new(Mutex::new(bytes))),
                 None => {
                     let _ = (raw.destroy)();
                     return Err(fail(operation, ErrorKind::Capacity, "texture exceeds mock byte capacity"));
@@ -606,7 +615,7 @@ fn create_device(c: &Shared, capabilities: caps::Caps) -> Result<DriverDevice, E
         device_handle,
         capabilities,
         allocated_size: Box::new(move || {
-            c_size.borrow().memory.values().map(|bytes| bytes.borrow().len() as i64).sum()
+            c_size.borrow().memory.values().map(|bytes| bytes.lock().unwrap().len() as i64).sum()
         }),
         recommended_working_set: Box::new(|| 8 * 1024 * 1024 * 1024),
         create_buffer: Box::new(move |_memory, d| resource(&c_buffer, "buffer", d.size)),

@@ -109,6 +109,7 @@ dependencies = [
  "input",
  "lru",
  "mem",
+ "mem_sys",
  "ogpu",
  "ogpu_core",
  "ogpu_metal",
@@ -116,11 +117,14 @@ dependencies = [
  "ogpu_vulkan",
  "parallel",
  "param",
+ "rays",
  "rays_diagnostic",
  "rays_math",
  "rdk",
  "rdk_core",
  "renderer",
+ "runtime_resources",
+ "scene_command",
  "sop",
 ]
 
@@ -214,6 +218,7 @@ dependencies = [
  "flow_graph",
  "flow_ir",
  "flow_syntax",
+ "flow_web",
  "input",
  "lru",
  "mem",
@@ -267,6 +272,7 @@ name = "lru"
 version = "0.1.0"
 dependencies = [
  "mem",
+ "mem_sys",
 ]
 
 [[package]]
@@ -400,7 +406,7 @@ dependencies = [
  "flow_sop",
  "flow_syntax",
  "input",
- "mem",
+ "mem_sys",
  "ocaml_int",
  "ogpu",
  "ogpu_vulkan",
@@ -459,6 +465,9 @@ dependencies = [
 [[package]]
 name = "rays-t"
 version = "0.1.0"
+dependencies = [
+ "mem_sys",
+]
 
 [[package]]
 name = "rays_bin"
@@ -477,6 +486,7 @@ dependencies = [
  "ogpu_vulkan",
  "rays_diagnostic",
  "rays_editor",
+ "runtime",
  "sop",
  "web_export",
 ]
@@ -513,6 +523,7 @@ dependencies = [
  "input",
  "lru",
  "mem",
+ "mem_sys",
  "ocaml_int",
  "ogpu",
  "ogpu_vulkan",
@@ -530,6 +541,7 @@ dependencies = [
  "renderer",
  "runtime_input",
  "runtime_resources",
+ "scene_command",
  "sdl3",
  "sop",
 ]
@@ -644,8 +656,10 @@ dependencies = [
  "cfmt",
  "lru",
  "mem",
+ "mem_sys",
  "ogpu",
  "ogpu_core",
+ "ogpu_metal",
  "ogpu_mock",
  "ogpu_vulkan",
  "rays_math",

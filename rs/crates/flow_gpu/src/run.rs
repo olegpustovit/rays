@@ -1,14 +1,12 @@
 //! Port of lib/flow_gpu/run.ml: one runner per prepared kernel (its buffers, uniforms, status and
 //! the outputs it keeps), the buffer pool runners share, and the resident fold's device stages.
 //!
-//! Rust shape notes. OGPU handles are `Rc`, so everything that touches a buffer lives on the
-//! creating thread. What OCaml lets any domain do with a kept output (`materialise`, `settle`,
-//! `release`) goes through a thread-local registry keyed by the holder's id: the closures a holder
-//! hands out capture only an `Arc<Token>` (id, fate, release queue), so they are `Send + Sync`.
-//! A holder is released when its last `Token` drops (OCaml: `Gc.finalise`); a read from another
-//! thread posts a request the owner answers in `service` (the workspace pump calls it), so any
-//! thread can be the first reader as in OCaml. Parallel conversion of mapped views (`Parallel.for_`) is sequential here for the
-//! same reason: the views are `Rc`.
+//! Mutable OGPU handles and command submission stay on their creating thread. A holder's
+//! `Arc<Token>` carries its fate and an owning read-only native allocation handle: after owner
+//! settlement, any thread can perform the first conversion without an owner pump. Unsettled
+//! foreign reads still ask `service` to perform owner-only completion and status validation.
+//! Dropping the last token queues release (OCaml: `Gc.finalise`); materialisation releases its
+//! native readback lease as soon as real owned planes have been published.
 use crate::kernels;
 use crate::pipelines;
 use flow_ir::flow_ir::Gpu;
@@ -82,9 +80,19 @@ pub struct Fate {
     retired: AtomicBool,
     /// conversions and pins in progress: its buffer is not reused under them
     readers: AtomicI64,
+    readback: Mutex<Option<b::OwnedReadback>>,
+    count: i64,
+    width: i64,
+    uint32: bool,
+    materialised: Arc<AtomicI64>,
+    materialised_bytes: Arc<AtomicI64>,
 }
 
 impl Fate {
+    fn destroy(&self) {
+        self.destroyed.store(true, Ordering::SeqCst);
+        self.readback.lock().unwrap().take();
+    }
     fn planes(&self) -> Option<Arc<Vec<Vec<f64>>>> {
         self.planes.lock().unwrap().clone()
     }
@@ -295,6 +303,8 @@ fn drain_pool(pool: &Pool) {
             if mem::clobber() {
                 if let Some(v) = b::mapped_view(&buffer) {
                     v.borrow_mut().iter_mut().for_each(|x| *x = f32::NAN);
+                    // Poison the actual allocation too: owned readers do not use this host copy.
+                    gpu(b::flush_mapped(&buffer, capacity)).expect("clobber recycled GPU buffer");
                 }
             }
             // the host is done with it: a discrete device drops its host copy
@@ -378,7 +388,7 @@ pub fn close_pool(pool: &Pool) {
     for w in s.orphans.drain(..) {
         if let Some(token) = w.upgrade() {
             let _g = token.fate.lock.lock().unwrap();
-            token.fate.destroyed.store(true, Ordering::SeqCst);
+            token.fate.destroy();
         }
     }
     pool.0.shared.released.lock().unwrap().clear();
@@ -388,7 +398,7 @@ pub fn close_pool(pool: &Pool) {
         // a pin outlives a collected holder: its `valid` must see this
         {
             let _g = fate.lock.lock().unwrap();
-            fate.destroyed.store(true, Ordering::SeqCst);
+            fate.destroy();
         }
         KEPT.with(|k| k.borrow_mut().remove(&id));
         mem::release(&HELD_OWNER, capacity);
@@ -449,8 +459,8 @@ struct Data {
     pool: Pool,
     /// made for this runner alone: closed with it
     own_pool: bool,
-    materialised: AtomicI64,
-    materialised_bytes: AtomicI64,
+    materialised: Arc<AtomicI64>,
+    materialised_bytes: Arc<AtomicI64>,
     state: RefCell<State>,
 }
 
@@ -601,8 +611,8 @@ pub fn create_owned(pool_: Option<&Pool>, device: &Device, queue: &Queue, pipeli
         domain: me(),
         pool: pool_,
         own_pool,
-        materialised: AtomicI64::new(0),
-        materialised_bytes: AtomicI64::new(0),
+        materialised: Arc::new(AtomicI64::new(0)),
+        materialised_bytes: Arc::new(AtomicI64::new(0)),
         state: RefCell::new(State {
             inputs: kernel.input_widths.iter().map(|_| slot()).collect(),
             outputs: kernel.output_widths.iter().map(|_| slot()).collect(),
@@ -1356,6 +1366,34 @@ fn thaw(kept: &Kept) {
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| materialise(kept)));
 }
 
+/// Only immutable native allocation access crosses threads. Fate serializes conversion against
+/// retirement/destruction, and settlement publishes completion before a foreign reader enters.
+fn materialise_owned(fate: &Fate, shared: &Shared, id: i64) -> Result<Arc<Vec<Vec<f64>>>, String> {
+    let _guard = fate.lock.lock().unwrap();
+    if let Some(planes) = fate.planes() {
+        return Ok(planes);
+    }
+    if fate.destroyed() {
+        return Err("Run.materialise: a device output was read after its free".to_owned());
+    }
+    let length = fate.count * fate.width;
+    let mut readback = fate.readback.lock().unwrap();
+    let bytes = (readback.as_ref().ok_or("Run.materialise: storage was released")?)(0, (length * 4) as usize)
+        .map_err(|error| ogpu::error::to_string(&error))?;
+    let mut planes = vec![vec![0.0; fate.count as usize]; fate.width as usize];
+    for (i, word) in bytes.chunks_exact(4).enumerate() {
+        let word = u32::from_le_bytes(word.try_into().unwrap());
+        planes[i % fate.width as usize][i / fate.width as usize] =
+            if fate.uint32 { word as f64 } else { f32::from_bits(word) as f64 };
+    }
+    let planes = Arc::new(planes);
+    *fate.planes.lock().unwrap() = Some(planes.clone());
+    readback.take();
+    fate.materialised_bytes.fetch_add(length * 4, Ordering::SeqCst);
+    fate.materialised.fetch_add(1, Ordering::SeqCst);
+    shared.released.lock().unwrap().push(id);
+    Ok(planes)
+}
 /// The planes, on the creating thread (from any thread once read). Once read, the holder no longer
 /// needs the buffer: it goes back to the pool at once, not at drop.
 fn materialise(kept: &Kept) -> Arc<Vec<Vec<f64>>> {
@@ -1370,71 +1408,7 @@ fn materialise(kept: &Kept) -> Arc<Vec<Vec<f64>>> {
             panic!("{}", rays_diagnostic::to_string(&diagnostic));
         }
     }
-    if kept.fate.destroyed() {
-        panic!("Run.materialise: a device output was read after its free");
-    }
-    let length = kept.count * kept.width;
-    let release = || d.pool.0.shared.released.lock().unwrap().push(kept.id);
-    if kept.uint32 {
-        let _g = kept.fate.lock.lock().unwrap();
-        if let Some(planes) = kept.fate.planes() {
-            return planes;
-        }
-        if kept.fate.destroyed() {
-            panic!("Run.materialise: uint32 output was freed");
-        }
-        if length > 0 {
-            b::invalidate_mapped(&kept.buffer, length * 4).expect("invalidate");
-        }
-        let floats = view(&kept.buffer);
-        let f = floats.borrow();
-        let planes: Vec<Vec<f64>> = (0..kept.width as usize)
-            .map(|component| (0..kept.count as usize).map(|i| f[i * kept.width as usize + component].to_bits() as f64).collect())
-            .collect();
-        d.materialised_bytes.fetch_add(length * 4, Ordering::SeqCst);
-        d.materialised.fetch_add(1, Ordering::SeqCst);
-        let planes = Arc::new(planes);
-        *kept.fate.planes.lock().unwrap() = Some(planes.clone());
-        release();
-        return planes;
-    }
-    // Nothing here can fail, so no reader ever sees an error: the buffer is mapped, the range is
-    // its own, it is destroyed only under this lock after `destroyed` is set (a view taken before
-    // stays valid), and the status check at `keep` covered the completion and every output's
-    // finiteness (the kernel flags a nonfinite output).
-    let floats = {
-        let _g = kept.fate.lock.lock().unwrap();
-        if length == 0 {
-            Some(Rc::new(RefCell::new(Vec::new())))
-        } else if kept.fate.destroyed() {
-            None
-        } else {
-            match b::invalidate_mapped(&kept.buffer, length * 4) {
-                Ok(()) => {
-                    d.materialised_bytes.fetch_add(length * 4, Ordering::SeqCst);
-                    b::mapped_view(&kept.buffer)
-                }
-                Err(e) => panic!("Run.materialise: {}", ogpu::error::to_string(&e)),
-            }
-        }
-    };
-    let Some(floats) = floats else {
-        // destroyed after its read: the planes that read made
-        return kept.fate.planes().expect("Run.materialise: a device output was read after its free");
-    };
-    kept.fate.readers.fetch_add(1, Ordering::SeqCst);
-    let planes = to_planes(&floats, kept.count, kept.width, true);
-    kept.fate.readers.fetch_sub(1, Ordering::SeqCst);
-    let planes = Arc::new(planes.expect("checked conversion cannot fail"));
-    {
-        let mut g = kept.fate.planes.lock().unwrap();
-        if g.is_none() {
-            *g = Some(planes);
-            d.materialised.fetch_add(1, Ordering::SeqCst);
-            release();
-        }
-    }
-    kept.fate.planes().unwrap()
+    materialise_owned(&kept.fate, &d.pool.0.shared, kept.id).unwrap_or_else(|message| panic!("{message}"))
 }
 
 /// A settled, unread vec3 output's bounds, reduced where it is (shaders/bounds.rays): one group of
@@ -1525,7 +1499,7 @@ fn release_kept(shared: &Shared, fate: &Fate, id: i64, weak: Weak<Token>, held: 
                 fate.retired.store(true, Ordering::SeqCst);
                 true
             } else {
-                fate.destroyed.store(true, Ordering::SeqCst);
+                fate.destroy();
                 shared.freed.fetch_add(1, Ordering::SeqCst);
                 shared.released.lock().unwrap().push(id);
                 false
@@ -1577,6 +1551,9 @@ fn token_planes(token: &Token) -> Arc<Vec<Vec<f64>>> {
     if let Some(p) = token.fate.planes() {
         return p;
     }
+    if token.settled.load(Ordering::SeqCst) {
+        return materialise_owned(&token.fate, &token.shared, token.id).unwrap_or_else(|message| panic!("{message}"));
+    }
     if me() == token.owner {
         return match kept_of(token.id) {
             Some(kept) => materialise(&kept),
@@ -1599,7 +1576,13 @@ fn hold(t: &T, uint32: bool, buffer: &Buffer, capacity: i64, count: i64, width: 
     let d = &*t.0;
     mem::charge(&HELD_OWNER, capacity);
     let id = NEXT_KEPT.fetch_add(1, Ordering::SeqCst);
-    let fate = Arc::new(Fate { lock: Mutex::new(()), planes: Mutex::new(None), destroyed: AtomicBool::new(false), retired: AtomicBool::new(false), readers: AtomicI64::new(0) });
+    let fate = Arc::new(Fate {
+        lock: Mutex::new(()), planes: Mutex::new(None),
+        destroyed: AtomicBool::new(false), retired: AtomicBool::new(false), readers: AtomicI64::new(0),
+        readback: Mutex::new(Some(b::owned_readback(buffer).expect("kept output owns mapped storage"))),
+        count, width, uint32,
+        materialised: d.materialised.clone(), materialised_bytes: d.materialised_bytes.clone(),
+    });
     let settled = Arc::new(AtomicBool::new(settled));
     let kept = Rc::new(Kept {
         id,
@@ -1628,10 +1611,10 @@ fn hold(t: &T, uint32: bool, buffer: &Buffer, capacity: i64, count: i64, width: 
         3 => Value::Vec3_array(kept.placeholder.clone()),
         _ => Value::Vec4_array(kept.placeholder.clone()),
     };
-    let (t1, t2, t3, t4) = (token.clone(), token.clone(), token.clone(), token.clone());
-    let owner = t.clone();
+    let (t1, t2, t4) = (token.clone(), token.clone(), token.clone());
+    // A release callback observes the fate, not the holder's liveness (as does a display pin).
+    let (release_shared, release_fate, release_token) = (token.shared.clone(), token.fate.clone(), Arc::downgrade(&token));
     let owner_domain = d.domain;
-    let _ = owner;
     let planes = Gpu::Planes {
         count,
         width,
@@ -1653,8 +1636,7 @@ fn hold(t: &T, uint32: bool, buffer: &Buffer, capacity: i64, count: i64, width: 
             }
         }),
         release: Box::new(move |held| {
-            let weak = Arc::downgrade(&t3);
-            release_kept(&t3.shared, &t3.fate, t3.id, weak, held)
+            release_kept(&release_shared, &release_fate, id, release_token.clone(), held)
         }),
         bounds: Box::new(move || kept_of(t4.id).and_then(|k| bounds_of(&k))),
     };
@@ -1784,21 +1766,20 @@ pub fn pin_integers(holder: &Gpu::Integers) -> Option<Pin> {
 fn integer_holder(domain: ThreadId, planes: Gpu::Planes, kept: Option<Rc<Kept>>) -> Uint32Holder {
     let cache: Arc<Mutex<Option<Arc<Vec<i64>>>>> = Arc::new(Mutex::new(None));
     let kept_id = kept.as_ref().map(|k| k.id);
-    let planes = Arc::new(planes);
-    let (p1, p2, p3) = (planes.clone(), planes.clone(), planes.clone());
+    let Gpu::Planes { count, materialise, settle, release, .. } = planes;
     Uint32Holder {
-        count: planes.count,
+        count,
         materialise: Arc::new(move || {
             // not under the lock: a foreign reader waits for the owner, who may be reading too
             if let Some(values) = &*cache.lock().unwrap() {
                 return (**values).clone();
             }
-            let values: Vec<i64> = (p1.materialise)()[0].iter().map(|v| *v as i64).collect();
+            let values: Vec<i64> = materialise()[0].iter().map(|v| *v as i64).collect();
             *cache.lock().unwrap() = Some(Arc::new(values.clone()));
             values
         }),
-        settle: Arc::new(move || (p2.settle)()),
-        release: Arc::new(move |held| (p3.release)(held)),
+        settle: Arc::from(settle),
+        release: Arc::from(release),
         pin: Arc::new(move || {
             if me() != domain {
                 return None;
@@ -1928,7 +1909,7 @@ pub fn close(t: &T, discard: bool) {
             }
             {
                 let _g = k.fate.lock.lock().unwrap();
-                k.fate.destroyed.store(true, Ordering::SeqCst);
+                k.fate.destroy();
             }
             mem::release(&HELD_OWNER, capacity);
             d.pool.0.s.borrow_mut().held.remove(&id);
@@ -2002,7 +1983,13 @@ pub mod Private {
         super::create_owned(pool, device, queue, pipelines, kernel)
     }
     pub fn pool_free_floats(pool: &Pool) -> Vec<b::Floats> {
-        pool.0.s.borrow().free.iter().map(|(buffer, _)| view(buffer)).collect()
+        pool.0.s.borrow().free.iter().map(|(buffer, capacity)| {
+            gpu(b::invalidate_mapped(buffer, *capacity)).expect("inspect free GPU buffer");
+            view(buffer)
+        }).collect()
+    }
+    pub fn pool_free_buffers(pool: &Pool) -> usize {
+        pool.0.s.borrow().free.len()
     }
     pub fn pool_drain(pool: &Pool) {
         drain_pool(pool)

@@ -60,13 +60,17 @@ fn p(parts: &[&str]) -> Vec<String> { parts.iter().map(|s| s.to_string()).collec
 fn walk(f: &mut dyn FnMut(&W::Term), x: &W::Term) {
     f(x);
     // The declared function body, not the call-site specializations retained for evaluation.
-    let children: Vec<W::Term> = match &x.node { W::Node::CallFn { args, .. } => args.clone(), W::Node::Fn { body, .. } => vec![(**body).clone()], _ => W::children(x) };
-    for c in &children { walk(f, c); }
+    let arena = x.arena();
+    match x.node {
+        W::Node::CallFn(id) => for child in arena.term_ids(arena.call_fn(id).args) { walk(f, &x.child(*child)); },
+        W::Node::Fn(id) => walk(f, &x.child(arena.function(id).body)),
+        _ => for child in x.children() { walk(f, &x.child(*child)); },
+    }
 }
 pub fn ty_at(ws: &W::Workspace, path: &[&str]) -> String {
     let want = Some(p(path));
     let mut found = None;
-    for g in ws.graphs.iter().chain(ws.defs.iter()) { walk(&mut |x| { if x.path == want { found = Some(ty::to_string(&x.ty)); } }, &g.body); }
+    for g in ws.graphs.iter().chain(ws.defs.iter()) { walk(&mut |x| { if x.path().map(|names| names.iter().map(|n| x.name(*n).to_owned()).collect::<Vec<_>>()) == want { found = Some(ty::to_string(x.ty())); } }, &g.body); }
     found.unwrap_or_else(|| panic!("no term at {}", path.join("/")))
 }
 
@@ -89,7 +93,7 @@ fn the_fixtures_run_deterministically_with_unique_plan_keys() {
         assert!(a.plan.nodes.len() == b.plan.nodes.len() && a.authored == b.authored && a.results.len() == b.results.len(), "{name}: two runs differ");
         assert_eq!(a.authored.len(), a.plan.nodes.len());
         let mut forms = HashSet::new();
-        fn remember(f: &Syntax, forms: &mut HashSet<i64>) { forms.insert(f.id as i64); for c in syntax::children(f) { remember(&c, forms); } }
+        fn remember(f: &Syntax, forms: &mut HashSet<i64>) { forms.insert(f.id); for c in f.children() { remember(&f.child(*c), forms); } }
         for f in ws.source.iter() { remember(f, &mut forms); }
         assert!(a.authored.iter().all(|id| *id == 0 || forms.contains(id)), "{name}");
         assert_eq!(a.authored, static_ws(&ws).authored, "{name}");
@@ -247,16 +251,20 @@ fn lists_and_patterns() {
     assert!(recs(&rs, &["g", "s", ":a"]).len() == 2 && recs(&rs, &["g", "s", ":b"]).len() == 2);
     assert_eq!(recs(&rs, &["g", "f", ":[a b]"]).len(), 2);
     let ws = check(&value("(let* [z (for [[a b] (list (list 1 2)) {:keys [c]} (list {:c 1})] a)] 1)"));
-    match &ws.graphs[0].body.node {
-        W::Node::Let(bs, _) if bs.len() == 1 => match &bs[0].1.node {
-            W::Node::Loop { clauses, .. } if clauses.len() == 2 => {
-                assert!(matches!(&clauses[0].0, W::Pattern::Seq(ps) if ps.len() == 2 && matches!(&ps[0], W::Pattern::Name(a) if a == "a") && matches!(&ps[1], W::Pattern::Name(b) if b == "b")));
-                assert!(matches!(&clauses[1].0, W::Pattern::Keys(ks) if ks == &vec!["c".to_owned()]));
-            }
-            other => panic!("unexpected clause patterns: {other:?}"),
-        },
-        other => panic!("unexpected clause patterns: {other:?}"),
-    }
+    let root = &ws.graphs[0].body;
+    let arena = root.arena();
+    use flow_check::term_arena::PatternNode;
+    let W::Node::Let(id) = root.node else { panic!("unexpected clause patterns"); };
+    let bs = arena.bindings(arena.let_node(id).bindings);
+    assert_eq!(bs.len(), 1);
+    let W::Node::Loop(id) = root.child(bs[0].term).node else { panic!("unexpected clause patterns"); };
+    let clauses = arena.bindings(arena.loop_node(id).clauses);
+    assert_eq!(clauses.len(), 2);
+    let PatternNode::Seq(range) = arena.pattern(clauses[0].pattern) else { panic!("unexpected clause patterns"); };
+    let ps = arena.pattern_ids(range);
+    assert!(ps.len() == 2 && matches!(arena.pattern(ps[0]), PatternNode::Name(a) if root.name(a) == "a") && matches!(arena.pattern(ps[1]), PatternNode::Name(b) if root.name(b) == "b"));
+    let PatternNode::Keys(range) = arena.pattern(clauses[1].pattern) else { panic!("unexpected clause patterns"); };
+    assert_eq!(arena.name_ids(range).iter().map(|name| root.name(*name)).collect::<Vec<_>>(), vec!["c"]);
 }
 
 #[test]
@@ -299,7 +307,7 @@ fn cond_case_str_macros_bypass() {
     // a bypassed value call passes its first input, coerced
     is(&value("(let* [a 2 b ^:bypass (+ a 3)] b)"), Value::Int(2));
     let noted = "; lead\n(workspace w\n  ; a helper\n  (defn f :context value [(x : float)] (* x 2))\n  (graph g :context value\n    (let* [; first\n           a 1\n           ; the pattern\n           [b c] (list 1 2)\n           q (f a)]\n      ; result note\n      (+ a (+ b (* c q)))))\n  ; tail\n  )";
-    let printed = flow_syntax::lisp::print(&parse(noted)).0;
+    let printed = flow_syntax::lisp::print(&parse(noted)).unwrap().0;
     is(&printed, Value::Int(6));
 }
 
@@ -307,8 +315,8 @@ fn cond_case_str_macros_bypass() {
 fn round_trip_of_every_new_construct() {
     let radial = "(defmacro radial [i n body] `(sop/merge (for [~i (range ~n)] (sop/transform ~body :rotate [0 (* (/ ~i ~n) 6.2832) 0]))))";
     let all = format!("(workspace kitchen\n  ; macros\n  {radial}\n  (defmacro all [& xs] `(sop/merge ~@xs))\n  (defmacro add1 [a] `(let* [t# ~a] (+ t# 1)))\n  (defmacro twice [x] `(+ ~x ~x))\n  (defn ring :context sop [(n : int 8) (make : fn) (opts : {{:scale float :tags (list text)}} {{:scale 1.0 :tags (list \"a\")}})]\n    (sop/transform (sop/merge (map make (range n))) :uniform_scale opts.scale))\n  (graph g :context sop [(seed : int 3)]\n    (let* [; a local function\n           petal (fn [(i : int) [w h]]\n                   (sop/transform (sop/box :size [w h 0.1]) :rotate [0 0 (* i 0.5)]))\n           sizes (map (fn [k] (list (+ 0.1 (* k 0.01)) 0.5)) (range 12))\n           petals (map petal (range 12) sizes)\n           {{:keys [a b]}} {{:a 1 :b (twice 2)}}\n           [x y z] [a b 3]\n           kind (cond (< a 1) \"small\"\n                      (< a 5) \"medium\"\n                      :else \"large\")\n           steps (case seed 1 4 2 8 :else 12)\n           order (sort-by (fn [p] (- 0 (nth p 0))) sizes)\n           kept (filter (fn [p] (> (first p) 0.12)) (concat (take 3 sizes) (drop 9 sizes) (reverse (rest sizes))))\n           total (reduce + 0 (map (fn [p] (last p)) kept))\n           name (str \"floor_\" (add1 steps) \"_\" kind)\n           state (fold [{{:keys [n acc]}} (values :n 0 :acc 1.0)]\n                       [i (range steps)]\n                   (assoc {{:n (+ n 1) :acc (* acc 0.9)}} :acc (get {{:acc (* acc 0.9)}} :acc)))\n           ring2 (radial k 6 (sop/box :size (+ 0.1 (* k 0.01))))\n           faded ^:bypass (sop/subdivide ring2 :iterations 2)\n           shapes (all (sop/merge petals) faded (ring :n 3 :make (fn [i] (sop/box :size 0.05))) (sop/group_bounds (sop/box) :name name))\n           ; unused but checked\n           spare (count (list))]\n      ; the result\n      (sop/transform shapes :uniform_scale (* state.acc (* x (+ y (+ z total)))))))\n  ; trailing\n  )");
-    let printed = flow_syntax::lisp::print(&parse(&all)).0;
-    assert_eq!(flow_syntax::lisp::print(&parse(&printed)).0, printed);
+    let printed = flow_syntax::lisp::print(&parse(&all)).unwrap().0;
+    assert_eq!(flow_syntax::lisp::print(&parse(&printed)).unwrap().0, printed);
     let ws = check(&printed);
     let r = run_rec(&ws, 0.);
     assert!(!r.plan.nodes.is_empty());
@@ -402,14 +410,18 @@ fn named_arguments_and_residual_capture() {
     assert_eq!(Residual::residual_view(residual).unwrap().bindings.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>(), vec!["outer"]);
     assert_eq!(residual_eval(residual, &input::at_time(2.), None), Ok(Value::Float_array(std::sync::Arc::new(vec![9., 10.]))));
     let ws = check(&value("(let* [outside 7.0 unused 8.0] (let* [local (+ outside t) f (fn [x] (+ x (+ local outside))) mapped (map f (list 1.0 2.0))] 0.0))"));
-    let W::Node::Let(_, term) = &ws.graphs[0].body.node else { panic!() };
-    assert_eq!(Residual::free_names(term), vec!["outside"]);
+    let root = &ws.graphs[0].body;
+    let W::Node::Let(id) = root.node else { panic!() };
+    let term = root.child(root.arena().let_node(id).body);
+    assert_eq!(Residual::free_names(&term), vec!["outside"]);
     let walks = Host::free_name_walks();
-    let _ = Residual::free_names(term);
+    let _ = Residual::free_names(&term);
     assert_eq!(Host::free_name_walks(), walks);
     let ws = check(&value("(let* [source (list 3.0 4.0) initial 2.0] (let* [[x y] source total (state [s initial] (+ s t))] (+ x (+ y total))))"));
-    let W::Node::Let(_, term) = &ws.graphs[0].body.node else { panic!() };
-    assert_eq!(Residual::free_names(term), vec!["initial", "source"]);
+    let root = &ws.graphs[0].body;
+    let W::Node::Let(id) = root.node else { panic!() };
+    let term = root.child(root.arena().let_node(id).body);
+    assert_eq!(Residual::free_names(&term), vec!["initial", "source"]);
 }
 
 #[test]
@@ -623,9 +635,13 @@ fn live_packed_accumulators_defer_the_complete_iteration() {
         let workspace = check(&value(body));
         let v = result(&static_ws(&workspace), "g");
         match &v {
-            Value::Residual(r) => match &Residual::residual_view(*r).unwrap().term.node {
-                W::Node::Loop { kind: W::LoopKind::Fold, .. } | W::Node::Hof(W::HofKind::Reduce, _) => (),
-                _ => panic!("accumulator was unrolled into per-element residuals"),
+            Value::Residual(r) => {
+                let view = Residual::residual_view(*r).unwrap();
+                match view.term.node {
+                    W::Node::Loop(id) if view.term.arena().loop_node(id).kind == W::LoopKind::Fold => (),
+                    W::Node::Hof(id) if view.term.arena().hof(id).kind == W::HofKind::Reduce => (),
+                    _ => panic!("accumulator was unrolled into per-element residuals"),
+                }
             },
             _ => panic!("live accumulator did not defer"),
         }
@@ -723,12 +739,13 @@ fn static_bulk_maps() {
         let handlers = ResidualHandlers {
             bulk: Some(Arc::new(move |id| {
                 let view = Residual::residual_view(id).unwrap();
-                let n = match &view.term.node {
-                    W::Node::Hof(W::HofKind::Map, terms) if terms.len() == 2 => match Residual::eval_term(id, &terms[1], &input::at_time(0.), None, None, None) {
-                        Ok(v) => flow_syntax::value::array_length(&v).unwrap(),
-                        Err(d) => panic!("{}", rays_diagnostic::to_string(&d)),
-                    },
-                    _ => panic!("a map is offered"),
+                let W::Node::Hof(hof) = view.term.node else { panic!("a map is offered"); };
+                let node = view.term.arena().hof(hof);
+                let terms = view.term.arena().term_ids(node.args);
+                assert!(node.kind == W::HofKind::Map && terms.len() == 2);
+                let n = match Residual::eval_term(id, &view.term.child(terms[1]), &input::at_time(0.), None, None, None) {
+                    Ok(v) => flow_syntax::value::array_length(&v).unwrap(),
+                    Err(d) => panic!("{}", rays_diagnostic::to_string(&d)),
                 };
                 off.lock().unwrap().push(n);
                 bulk(n)
@@ -782,6 +799,23 @@ fn static_bulk_maps() {
     assert_eq!(*asked.lock().unwrap(), 0);
 }
 fn arc_data(v: &Value) -> std::sync::Arc<Vec<f64>> { match v { Value::Float_array(d) | Value::Vec2_array(d) | Value::Vec3_array(d) | Value::Vec4_array(d) => d.clone(), _ => panic!("packed") } }
+
+#[test]
+fn iterate_widens_scalars_and_coerces_record_fields() {
+    assert_eq!(g_value(&value("(iterate 3 0 (fn [n] (+ n 0.25)))")), Value::Float(0.75));
+    assert_eq!(g_value(&value("(iterate 3 {:n 0} (fn [s] {:n (+ s.n 0.25)}))")), Value::Record(vec![("n".into(), Value::Int(0))]));
+    let ws = check("(workspace w (graph g :context host [(seed : {:n int :data (array float)} {:n 0 :data (array/float 1)})]
+        (iterate 2 seed (fn [s] {:n (int/add s.n 1) :data s.data}))))");
+    let data = Value::Source("test/iterate_data".into(), Ty::Array(Box::new(Ty::Float)), vec![]);
+    let inputs = vec![("g".into(), vec![("seed".into(), Value::Record(vec![("n".into(), Value::Int(0)), ("data".into(), data)]))])];
+    let evaluation = ok(static_with(&ws, false, Some(&inputs), None));
+    let residual = result(&evaluation, "g");
+    assert!(matches!(residual, Value::Residual(_)), "a record accumulator must defer when its updated data needs cooking");
+    let data = Value::Float_array(Arc::new(vec![2.0]));
+    let resolved = data.clone();
+    let forced = force_with(&residual, &input::at_time(0.0), None, None, Some(Arc::new(move |_| Ok(resolved.clone())))).unwrap();
+    assert_eq!(forced, Value::Record(vec![("n".into(), Value::Int(2)), ("data".into(), data)]));
+}
 
 // Regression for shared evaluator state: `iterate` over a packed map must give the same packed result on every run and every thread,
 // a residual must outlive other threads' evaluations (the arena ring is per thread), and free names must not be served from a freed

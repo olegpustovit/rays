@@ -435,9 +435,14 @@ mod tests {
 
     #[test]
     fn one_and_four_domains_agree_on_a_displaced_grid() {
-        let base = grid(40, 30, 4.0);
+        let base = grid(400, 250, 40.0);
         let count = geometry::point_count(&base);
-        let y: Vec<f64> = (0..count).map(|point| ((point * 37) % 101) as f64 / 101.0 * 0.8).collect();
+        let source_positions = positions(&base);
+        let y: Vec<f64> = (0..count as usize).map(|point| {
+            source_positions.y[point] + 0.8 * (0.41 * (
+                source_positions.x[point] * 12.9898 + source_positions.z[point] * 78.233
+            ) + 73.0).sin()
+        }).collect();
         let weight = attribute::create_owned(
             "weight",
             Owner::Point,
@@ -449,7 +454,7 @@ mod tests {
             let slot: Mutex<Option<geometry::T>> = Mutex::new(None);
             parallel::run_unit(Some(domains), &|| {
                 *slot.lock().unwrap() = Some(ok(&scale, &|p| {
-                    p.grain = Some(64);
+                    p.grain = Some(1024);
                     p.iterations = 8;
                     p.mode = attribute_blur::Mode::CustomSteps { odd: 0.43, even: -0.45 };
                     p.boundary = Boundary::SmoothUnshared;

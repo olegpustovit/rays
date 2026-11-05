@@ -2288,7 +2288,7 @@ mod tests {
         let mut value = geometry_value;
         value = add_attribute(p, "weight", attribute::Storage::Float(indices.iter().map(|&v| v as f64 + 0.25).collect()), &value);
         value = add_attribute(p, "id", attribute::Storage::Int(indices.clone()), &value);
-        value = add_attribute(p, "label", attribute::Storage::Text(indices.iter().map(|v| format!("p{v}")).collect()), &value);
+        value = add_attribute(p, "label", attribute::Storage::Text(indices.iter().map(|v| format!("p{v}").into_bytes()).collect()), &value);
         value = add_attribute(
             p,
             "uv",
@@ -2578,7 +2578,7 @@ mod tests {
                 vec![0., 0., 0., 0., 0., 0., 1., 0., 0.],
             )),
         ).unwrap();
-        let tag = attribute::create_owned("tag", attribute::Owner::Detail, attribute::Storage::Text(vec!["normals".to_owned()])).unwrap();
+        let tag = attribute::create_owned("tag", attribute::Owner::Detail, attribute::Storage::Text(vec![b"normals".to_vec()])).unwrap();
         let selected = group::ordered(group::Owner::Point, "selected", 6, &[1, 0, 4]).unwrap();
         let source = build(positions, topology_value, vec![point_normal, vertex_normal, tag], vec![selected]);
         let consolidate = |distance: f64| Params { consolidate_normals_distance: Some(distance), ..Params::default() };
@@ -2681,7 +2681,7 @@ mod tests {
         let point_id = attribute::create_owned("point_id", attribute::Owner::Point, attribute::Storage::Int((0..12).collect())).unwrap();
         let corner_id = attribute::create_owned("corner_id", attribute::Owner::Vertex, attribute::Storage::Int((0..12).collect())).unwrap();
         let face_id = attribute::create_owned("face_id", attribute::Owner::Primitive, attribute::Storage::Int(vec![10, 11, 12])).unwrap();
-        let detail = attribute::create_owned("tag", attribute::Owner::Detail, attribute::Storage::Text(vec!["inline".to_owned()])).unwrap();
+        let detail = attribute::create_owned("tag", attribute::Owner::Detail, attribute::Storage::Text(vec![b"inline".to_vec()])).unwrap();
         let points = group::ordered(group::Owner::Point, "point_order", 12, &[2, 1, 6]).unwrap();
         let corners = group::ordered(group::Owner::Vertex, "corner_order", 12, &[1, 2, 4, 10]).unwrap();
         let faces = group::ordered(group::Owner::Primitive, "face_order", 3, &[2, 0]).unwrap();
@@ -2731,7 +2731,7 @@ mod tests {
         check(
             int_attr(attribute::Owner::Primitive, "face_id", &output) == [10, 11, 12]
                 && match attribute::View::storage(&geometry::find_attribute(attribute::Owner::Detail, "tag", &output).unwrap()).unwrap() {
-                    attribute::Storage::Text(values) => values[..] == ["inline".to_owned()],
+                    attribute::Storage::Text(values) => values[..] == [b"inline".to_vec()],
                     _ => false,
                 },
             "Facet Remove Inline Points changed primitive/detail payload",

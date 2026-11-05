@@ -701,9 +701,16 @@ mod tests {
         slot.into_inner().unwrap().unwrap()
     }
 
-    #[test]
-    fn parallel_exact() {
-        let (points, triangles) = grid(80, 60, 20.0);
+    fn parallel_exact_fixture(source_fixture: bool) {
+        let (mut points, mut triangles) = if source_fixture { grid(79, 59, 20.0) } else { grid(80, 60, 20.0) };
+        if source_fixture {
+            for point in &mut points {
+                *point = (point.0, 0., point.1);
+            }
+            for triangle in triangles.chunks_exact_mut(3) {
+                triangle.swap(1, 2);
+            }
+        }
         let source = mesh(&points, &triangles);
         let rotated: Vec<(f64, f64, f64)> = points
             .iter()
@@ -732,7 +739,7 @@ mod tests {
         combined_triangles.extend(triangles.iter().map(|v| v + count));
         let combined = mesh(&combined_points, &combined_triangles);
         let self_params = Params {
-            grain: 31,
+            grain: if source_fixture { 16_384 } else { 31 },
             intersecting_group: None,
             self_intersecting_group: Some("self_intersections".to_owned()),
             self_intersections_attribute: Some("self_hits".to_owned()),
@@ -756,5 +763,11 @@ mod tests {
         let four = run_self(4);
         assert!(signature(&one) == signature(&four), "AxA one/four-domain output drift");
         assert!(!int_array("self_hits", &one).1.is_empty(), "AxA scale fixture found no intersections");
+    }
+
+    #[test]
+    fn parallel_exact() {
+        parallel_exact_fixture(false);
+        parallel_exact_fixture(true);
     }
 }

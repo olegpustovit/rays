@@ -9,7 +9,7 @@ use editor_document::settings;
 use editor_document::workspace_doc::{self as wd, T as WorkspaceDoc};
 use flow_graph::flow_edit::{self as fe, ArgKey, Op};
 use flow_syntax::lisp::{self, Spans};
-use flow_syntax::syntax::{self as s, Node, Syntax};
+use flow_syntax::syntax::{self as s, Draft, Node, Syntax, SyntaxBuilder, SyntaxId};
 use rays_diagnostic::{self as diagnostic, Diagnostic, Severity, Span};
 use crate::lisp_text::{self, Names, Vocab};
 use pxui::theme::{self, Theme};
@@ -39,7 +39,7 @@ pub struct Printed {
 }
 
 struct PrintCell {
-    value: OnceLock<(String, Spans)>,
+    value: OnceLock<Result<(String, Spans), Diagnostic>>,
     source: PrintSource,
 }
 
@@ -63,25 +63,26 @@ impl Printed {
         Printed { cell: Arc::new(PrintCell { value: OnceLock::new(), source: PrintSource::Doc(Box::new(workspace.clone())) }) }
     }
     /// Already printed (`lazy value`).
-    pub fn ready(text: String, spans: Spans) -> Printed {
+    pub fn ready(text: String, spans: Spans) -> Result<Printed, Diagnostic> {
+        diagnostic::check_source_len(text.len())?;
         let value = OnceLock::new();
-        let _ = value.set((text, spans));
-        Printed { cell: Arc::new(PrintCell { value, source: PrintSource::Ready }) }
+        let _ = value.set(Ok((text, spans)));
+        Ok(Printed { cell: Arc::new(PrintCell { value, source: PrintSource::Ready }) })
     }
-    fn force(&self) -> &(String, Spans) {
+    fn force(&self) -> Result<&(String, Spans), &Diagnostic> {
         self.cell.value.get_or_init(|| match &self.cell.source {
             PrintSource::Forms(forms) => lisp::print(forms),
             PrintSource::Doc(doc) => wd::print(doc),
-            PrintSource::Ready => (String::new(), Vec::new()),
-        })
+            PrintSource::Ready => unreachable!("ready printer already initialized"),
+        }).as_ref()
     }
     /// `Lazy.force shown.applied`
-    pub fn text(&self) -> &str {
-        &self.force().0
+    pub fn text(&self) -> Result<&str, Diagnostic> {
+        self.force().map(|(text, _)| text.as_str()).map_err(Clone::clone)
     }
     /// `Lazy.force shown.applied_spans`
-    pub fn spans(&self) -> &Spans {
-        &self.force().1
+    pub fn spans(&self) -> Result<&Spans, Diagnostic> {
+        self.force().map(|(_, spans)| spans).map_err(Clone::clone)
     }
 }
 
@@ -255,62 +256,63 @@ fn index_from(text: &str, from: i64, c: u8) -> Option<i64> {
 
 // ---- reading the source ----
 
-fn root_forms(source: &[S]) -> Option<&[S]> {
-    match source.first().map(|f| &f.node) {
-        Some(Node::List(items)) if items.len() >= 2 => Some(&items[2..]),
+fn root_forms(source: &[S]) -> Option<(&S, &[SyntaxId])> {
+    let root = source.first()?;
+    match root.node {
+        Node::List(items) if root.range(items).len() >= 2 => Some((root, &root.range(items)[2..])),
         _ => None,
     }
 }
 
 fn root_name(item: &S) -> Option<String> {
-    if let Node::List(l) = &item.node
-        && l.len() >= 2
-        && let (Node::Sym(h), Node::Sym(n)) = (&l[0].node, &l[1].node)
-        && matches!(h.as_str(), "graph" | "defn" | "defmacro")
-    {
-        return Some(if h == "defn" {
-            format!("def:{}", n)
-        } else if h == "defmacro" {
-            format!("macro:{}", n)
-        } else {
-            n.clone()
-        });
+    let Node::List(range) = item.node else { return None };
+    let l = item.range(range);
+    let (&head, &name) = (l.first()?, l.get(1)?);
+    let (Node::Sym(h), Node::Sym(n)) = (item.arena().row(head).node, item.arena().row(name).node) else { return None };
+    let (h, n) = (item.name(h), item.name(n));
+    match h {
+        "defn" => Some(format!("def:{}", n)),
+        "defmacro" => Some(format!("macro:{}", n)),
+        "graph" => Some(n.to_owned()),
+        _ => None,
+    }
+}
+
+pub fn root_form(source: &[S], name: &str) -> Option<S> {
+    let (owner, roots) = root_forms(source)?;
+    roots.iter().map(|&id| owner.child(id)).find(|item| root_name(item).as_deref() == Some(name))
+}
+
+fn last(f: &S) -> Option<S> {
+    f.children().last().map(|&id| f.child(id))
+}
+
+/// `let* [bindings] result` of an even binding vector; IDs borrow `e`'s owner.
+fn scope(e: &S) -> Option<(&[SyntaxId], SyntaxId)> {
+    if let Node::List(range) = e.node {
+        let l = e.range(range);
+        if l.len() == 3
+            && matches!(e.arena().row(l[0]).node, Node::Sym(h) if e.name(h) == "let*")
+            && let Node::Vec(bs) = e.arena().row(l[1]).node
+            && e.range(bs).len() % 2 == 0
+        {
+            return Some((e.range(bs), l[2]));
+        }
     }
     None
 }
 
-pub fn root_form<'a>(source: &'a [S], name: &str) -> Option<&'a S> {
-    root_forms(source)?.iter().find(|item| root_name(item).as_deref() == Some(name))
-}
-
-fn last(f: &S) -> Option<&S> {
-    s::children(f).last().copied()
-}
-
-/// `let* [bindings] result` of an even binding vector.
-fn scope(e: &S) -> Option<(Vec<(&S, &S)>, &S)> {
-    if let Node::List(l) = &e.node
-        && l.len() == 3
-        && matches!(&l[0].node, Node::Sym(h) if h == "let*")
-        && let Node::Vec(bs) = &l[1].node
-        && bs.len() % 2 == 0
-    {
-        return Some((s::pairs(bs), &l[2]));
-    }
-    None
-}
-
-/// the scope inside a binding's value: itself, or a loop's body (the flag: it stepped inside)
-fn enter(v: &S) -> (&S, bool) {
+/// The scope inside a binding's value: itself, or a loop's body (the flag: it stepped inside).
+fn enter(v: &S) -> (S, bool) {
     if scope(v).is_some() {
-        return (v, false);
+        return (v.clone(), false);
     }
     if matches!(s::head(v), Some("for" | "fold" | "scan" | "sum" | "state" | "fn"))
         && let Some(l) = last(v)
     {
         return (l, true);
     }
-    (v, false)
+    (v.clone(), false)
 }
 
 fn append(path: &[String], leaf: &str) -> Path {
@@ -326,8 +328,8 @@ fn find_binding(cur: &S, names: &[String]) -> Found {
     let (name, rest) = names.split_first()?;
     let (name, keys) = fe::leaf_keys(name).unwrap_or((name.clone(), Vec::new()));
     let found: Found = match scope(cur) {
-        Some((_, res)) if name == "@result" => Some((None, res.clone())),
-        Some((ps, _)) => ps.iter().find(|(p, _)| fe::pat_key(p) == name).map(|(p, v)| (Some((*p).clone()), (*v).clone())),
+        Some((_, res)) if name == "@result" => Some((None, cur.child(res))),
+        Some((ps, _)) => ps.chunks_exact(2).find(|p| fe::pat_key(&cur.child(p[0])) == name).map(|p| (Some(cur.child(p[0])), cur.child(p[1]))),
         None if name == "@result" => Some((None, cur.clone())),
         None => None,
     };
@@ -344,7 +346,7 @@ fn find_binding(cur: &S, names: &[String]) -> Found {
     };
     match found {
         Some((p, v)) if rest.is_empty() => Some((p, v)),
-        Some((_, v)) => find_binding(enter(&v).0, rest),
+        Some((_, v)) => find_binding(&enter(&v).0, rest),
         None => None,
     }
 }
@@ -353,8 +355,8 @@ fn find_binding(cur: &S, names: &[String]) -> Found {
 pub fn binding(source: &[S], path: &[String]) -> Found {
     let (graph, names) = path.split_first()?;
     let root = root_form(source, graph)?;
-    let body = last(root)?;
-    find_binding(body, names)
+    let body = last(&root)?;
+    find_binding(&body, names)
 }
 
 fn named(forms: &[S]) -> Option<Vec<(String, S)>> {
@@ -365,7 +367,7 @@ fn named(forms: &[S]) -> Option<Vec<(String, S)>> {
             [] => return Some(out),
             [a, v, tail @ ..] if matches!(a.node, Node::Sym(_)) => {
                 if let Node::Sym(n) = &a.node {
-                    out.push((n.clone(), v.clone()));
+                    out.push((a.name(*n).to_owned(), v.clone()));
                 }
                 rest = tail;
             }
@@ -396,6 +398,10 @@ pub fn paste_ops(source: &[S], graph: &str, scope: &[String], text: &str) -> Res
         Some(ps) => (ps, true),
         None => (forms.iter().map(|f| (head(f), f.clone())).collect::<Vec<_>>(), false),
     };
+    let mut ctor = SyntaxBuilder::new();
+    for form in &forms {
+        ctor.import(form);
+    }
     let mut chosen: Vec<String> = Vec::new();
     let mut fresh = |n: &str| -> String {
         let mut k = 0;
@@ -411,7 +417,7 @@ pub fn paste_ops(source: &[S], graph: &str, scope: &[String], text: &str) -> Res
         }
     };
     let mut earlier: Vec<(String, String)> = Vec::new();
-    let mut ops: Vec<Op> = Vec::new();
+    let mut ops = Vec::new();
     for (old, expr) in bindings {
         let name = fresh(&old);
         // what the earlier pasted bindings are called now, the latest of a name first
@@ -425,21 +431,25 @@ pub fn paste_ops(source: &[S], graph: &str, scope: &[String], text: &str) -> Res
         }
         let held: Vec<(String, String, String)> =
             renames.iter().enumerate().map(|(i, (o, n))| (o.clone(), format!("@paste{}", i), n.clone())).collect();
-        let mut expr = expr;
+        let mut expr = ctor.imported(&expr).unwrap();
         for (o, hold, _) in &held {
-            expr = fe::rename_ref(o, hold, &expr);
+            expr = flow_graph::edit_tree::rename_ref(o, hold, &expr, &mut ctor);
         }
         for (_, hold, n) in &held {
-            expr = fe::rename_ref(hold, n, &expr);
+            expr = flow_graph::edit_tree::rename_ref(hold, n, &expr, &mut ctor);
         }
         earlier.insert(0, (old, name.clone()));
-        ops.push(Op::AddNode { scope: scope.to_vec(), name, expr });
+        ops.push((name, expr));
     }
-    Ok(ops)
+    let arena = ctor.freeze();
+    Ok(ops.into_iter().map(|(name, expr)| Op::AddNode { scope: scope.to_vec(), name, expr: arena.handle(expr) }).collect())
 }
 
 fn max_id(f: &S) -> i64 {
-    s::children(f).iter().fold(f.id, |m, c| m.max(max_id(c)))
+    fn visit(arena: &s::SyntaxArena, id: SyntaxId) -> i64 {
+        arena.children(id).iter().fold(arena.row(id).id, |m, &child| m.max(visit(arena, child)))
+    }
+    visit(f.arena(), f.row_id())
 }
 
 fn span_of<'a>(spans: &'a Spans, f: &S) -> Option<&'a Span> {
@@ -451,23 +461,21 @@ fn mark(spans: &Spans, found: &Found) -> Option<(i64, i64)> {
     let (p, v) = found.as_ref()?;
     let b = span_of(spans, v)?;
     match p.as_ref().and_then(|p| span_of(spans, p)) {
-        Some(a) => Some((a.start, b.finish)),
-        None => Some((b.start, b.finish)),
+        Some(a) => Some((i64::from(a.start), i64::from(b.finish))),
+        None => Some(span_range(b)),
     }
 }
 
-fn graph_at(shown: &Shown, byte: i64) -> Option<(String, &S)> {
-    for root in root_forms(&shown.source)? {
-        if let Node::List(l) = &root.node
-            && l.len() >= 2
-            && let (Node::Sym(h), Node::Sym(name)) = (&l[0].node, &l[1].node)
-            && matches!(h.as_str(), "graph" | "defn" | "defmacro")
-            && let Some(span) = span_of(&shown.spans, root)
-            && span.start <= byte
-            && byte < span.finish
+fn graph_at(shown: &Shown, byte: i64) -> Option<(String, S)> {
+    let (owner, roots) = root_forms(&shown.source)?;
+    for &id in roots {
+        let root = owner.child(id);
+        if let Some(name) = root_name(&root)
+            && let Some(span) = span_of(&shown.spans, &root)
+            && i64::from(span.start) <= byte
+            && byte < i64::from(span.finish)
         {
-            let prefix = if h == "defn" { "def:" } else if h == "defmacro" { "macro:" } else { "" };
-            return Some((format!("{}{}", prefix, name), root));
+            return Some((name, root));
         }
     }
     None
@@ -479,14 +487,14 @@ fn is_list_or_map(f: &S) -> bool {
 
 fn holds(spans: &Spans, byte: i64, f: &S) -> bool {
     match span_of(spans, f) {
-        Some(sp) => sp.start <= byte && byte <= sp.finish,
+        Some(sp) => i64::from(sp.start) <= byte && byte <= i64::from(sp.finish),
         None => false,
     }
 }
 
 fn nested_at(spans: &Spans, byte: i64, prefix: &[String], leaf: &str, v: &S) -> Path {
     let (body, entered) = enter(v);
-    let inner = if entered || scope(v).is_some() { within_at(spans, byte, &append(prefix, leaf), body) } else { None };
+    let inner = if entered || scope(v).is_some() { within_at(spans, byte, &append(prefix, leaf), &body) } else { None };
     if let Some(path) = inner {
         return path;
     }
@@ -505,15 +513,17 @@ fn within_at(spans: &Spans, byte: i64, prefix: &[String], cur: &S) -> Option<Pat
             if is_list_or_map(cur) && holds(spans, byte, cur) { Some(nested_at(spans, byte, prefix, "@result", cur)) } else { None }
         }
         Some((bindings, res)) => {
-            for (p, v) in &bindings {
-                if let (Some(a), Some(b)) = (span_of(spans, p), span_of(spans, v))
-                    && a.start <= byte
-                    && byte <= b.finish
+            for pair in bindings.chunks_exact(2) {
+                let (p, v) = (cur.child(pair[0]), cur.child(pair[1]));
+                if let (Some(a), Some(b)) = (span_of(spans, &p), span_of(spans, &v))
+                    && i64::from(a.start) <= byte
+                    && byte <= i64::from(b.finish)
                 {
-                    return Some(nested_at(spans, byte, prefix, &fe::pat_key(p), v));
+                    return Some(nested_at(spans, byte, prefix, &fe::pat_key(&p), &v));
                 }
             }
-            if holds(spans, byte, res) && is_list_or_map(res) { Some(nested_at(spans, byte, prefix, "@result", res)) } else { None }
+            let res = cur.child(res);
+            if holds(spans, byte, &res) && is_list_or_map(&res) { Some(nested_at(spans, byte, prefix, "@result", &res)) } else { None }
         }
     }
 }
@@ -523,7 +533,7 @@ pub fn binding_at(shown: &Shown, byte: i64) -> Option<Path> {
     let (graph, body, spans): (String, S, Arc<Spans>) = match &shown.body {
         Some((body, spans)) => (shown.graph.clone(), (**body).clone(), spans.clone()),
         None => match graph_at(shown, byte) {
-            Some((graph, root)) => match last(root) {
+            Some((graph, root)) => match last(&root) {
                 Some(body) => (graph, body.clone(), shown.spans.clone()),
                 None => return None,
             },
@@ -548,17 +558,17 @@ pub fn binding_at(shown: &Shown, byte: i64) -> Option<Path> {
 }
 
 fn parameter(p: &S) -> Vec<String> {
-    match &p.node {
-        Node::List(l) if !l.is_empty() => fe::pat_names(&l[0]),
+    match p.node {
+        Node::List(range) if !p.range(range).is_empty() => fe::pat_names(&p.child(p.range(range)[0])),
         _ => fe::pat_names(p),
     }
 }
 
 fn rail_names(expr: &S) -> Vec<String> {
-    let children = s::children(expr);
+    let children = expr.children();
     match s::head(expr) {
-        Some("fn") => match children.get(1).map(|c| &c.node) {
-            Some(Node::Vec(ps)) => ps.iter().flat_map(parameter).collect(),
+        Some("fn") => match children.get(1).map(|&id| expr.arena().row(id).node) {
+            Some(Node::Vec(ps)) => expr.range(ps).iter().flat_map(|&id| parameter(&expr.child(id))).collect(),
             _ => Vec::new(),
         },
         Some("for" | "sum" | "fold" | "scan" | "state") => {
@@ -566,8 +576,8 @@ fn rail_names(expr: &S) -> Vec<String> {
             let take = args.len().saturating_sub(1);
             args[..take]
                 .iter()
-                .flat_map(|arg| match &arg.node {
-                    Node::Vec(ps) => s::pairs(ps).into_iter().flat_map(|(p, _)| fe::pat_names(p)).collect::<Vec<_>>(),
+                .flat_map(|&id| match expr.arena().row(id).node {
+                    Node::Vec(ps) => expr.range(ps).chunks_exact(2).flat_map(|p| fe::pat_names(&expr.child(p[0]))).collect::<Vec<_>>(),
                     _ => Vec::new(),
                 })
                 .collect()
@@ -579,12 +589,11 @@ fn rail_names(expr: &S) -> Vec<String> {
 fn input_of(source: &[S], name: &str, prefix: &[String]) -> Option<Path> {
     if let [graph] = prefix {
         let root = root_form(source, graph)?;
-        let children = s::children(root);
-        let params = children.iter().skip(2).find_map(|arg| match &arg.node {
-            Node::Vec(ps) => Some(ps),
+        let params = root.children().iter().skip(2).find_map(|&id| match root.arena().row(id).node {
+            Node::Vec(ps) => Some(root.range(ps)),
             _ => None,
         })?;
-        if params.iter().any(|p| parameter(p).iter().any(|n| n == name)) {
+        if params.iter().any(|&id| parameter(&root.child(id)).iter().any(|n| n == name)) {
             return Some(vec![graph.clone(), format!(":{}", name)]);
         }
     }
@@ -593,30 +602,22 @@ fn input_of(source: &[S], name: &str, prefix: &[String]) -> Option<Path> {
 
 fn local_ref(source: &[S], name: &str, prefix: &[String], leaf: &str) -> Option<Path> {
     let expr: Option<S> = match prefix {
-        [graph] => root_form(source, graph).and_then(last).cloned(),
+        [graph] => root_form(source, graph).and_then(|root| last(&root)),
         _ => binding(source, prefix).map(|(_, v)| v),
     };
     let found = expr.and_then(|expr| {
         let body = enter(&expr).0;
-        let bindings: Vec<(&S, &S)> = scope(body).map(|(ps, _)| ps).unwrap_or_default();
+        let bindings = scope(&body).map(|(ps, _)| ps).unwrap_or_default();
         let holder = fe::leaf_keys(leaf).map(|(h, _)| h).unwrap_or(leaf.to_owned());
-        let bindings: Vec<(&S, &S)> = if bindings.iter().any(|(p, _)| fe::pat_key(p) == holder) {
-            let mut before = Vec::new();
-            for (p, v) in &bindings {
-                if fe::pat_key(p) == holder {
-                    if s::head(v) == Some("fn") {
-                        before.push((*p, *v));
-                    }
-                    break;
-                }
-                before.push((*p, *v));
-            }
-            before
+        let bindings = if bindings.chunks_exact(2).any(|p| fe::pat_key(&body.child(p[0])) == holder) {
+            let at = bindings.chunks_exact(2).position(|p| fe::pat_key(&body.child(p[0])) == holder).unwrap();
+            let end = at * 2 + if s::head(&body.child(bindings[at * 2 + 1])) == Some("fn") { 2 } else { 0 };
+            &bindings[..end]
         } else {
             bindings
         };
-        if let Some((p, _)) = bindings.iter().rev().find(|(p, _)| fe::pat_names(p).iter().any(|n| n == name)) {
-            return Some(append(prefix, &fe::pat_key(p)));
+        if let Some(p) = bindings.chunks_exact(2).rev().find(|p| fe::pat_names(&body.child(p[0])).iter().any(|n| n == name)) {
+            return Some(append(prefix, &fe::pat_key(&body.child(p[0]))));
         }
         if fe::nested(name) && binding(source, &append(prefix, name)).is_some() {
             return Some(append(prefix, name));
@@ -656,21 +657,23 @@ pub fn reference_target(source: &[S], from: &[String], name: &str) -> Option<Pat
 
 /// The definition of the symbol at a printed byte, including call heads.
 pub fn definition_at(shown: &Shown, byte: i64) -> Option<Path> {
-    fn symbol(shown: &Shown, byte: i64, form: &S) -> Option<String> {
-        if let (Node::Sym(name), Some(span)) = (&form.node, span_of(&shown.spans, form))
-            && span.start <= byte
-            && byte < span.finish
+    fn symbol(spans: &Spans, byte: i64, arena: &s::SyntaxArena, id: SyntaxId) -> Option<String> {
+        let row = arena.row(id);
+        if let Node::Sym(name) = row.node
+            && let Some((_, span)) = spans.iter().find(|(id, _)| *id == row.id)
+            && i64::from(span.start) <= byte
+            && byte < i64::from(span.finish)
         {
-            return Some(name.clone());
+            return Some(arena.name(name).to_owned());
         }
-        s::children(form).into_iter().find_map(|c| symbol(shown, byte, c))
+        arena.children(id).iter().find_map(|&child| symbol(spans, byte, arena, child))
     }
-    let name = shown.source.iter().find_map(|f| symbol(shown, byte, f))?;
+    let name = shown.source.iter().find_map(|f| symbol(&shown.spans, byte, f.arena(), f.row_id()))?;
     let from = binding_at(shown, byte).unwrap_or_else(|| vec![shown.graph.clone()]);
     if let Some((Some(p), _)) = binding(&shown.source, &from)
         && let Some(span) = span_of(&shown.spans, &p)
-        && span.start <= byte
-        && byte < span.finish
+        && i64::from(span.start) <= byte
+        && byte < i64::from(span.finish)
     {
         return Some(from);
     }
@@ -678,24 +681,25 @@ pub fn definition_at(shown: &Shown, byte: i64) -> Option<Path> {
 }
 
 fn span_range(span: &Span) -> (i64, i64) {
-    (span.start, span.finish)
+    (i64::from(span.start), i64::from(span.finish))
 }
 
 pub fn path_mark(source: &[S], spans: &Spans, path: &[String]) -> Option<(i64, i64)> {
     match path {
-        [graph] => root_form(source, graph).and_then(|root| span_of(spans, root)).map(span_range),
+        [graph] => root_form(source, graph).and_then(|root| span_of(spans, &root)).map(span_range),
         [graph, input] if input.starts_with(':') => {
             let name = &input[1..];
             let root = root_form(source, graph)?;
-            for arg in s::children(root).into_iter().skip(2) {
-                if let Node::Vec(ps) = &arg.node {
-                    for p in ps {
-                        let pattern = match &p.node {
-                            Node::List(l) if !l.is_empty() => &l[0],
-                            _ => p,
+            for &id in root.children().iter().skip(2) {
+                if let Node::Vec(ps) = root.arena().row(id).node {
+                    for &id in root.range(ps) {
+                        let p = root.child(id);
+                        let pattern = match p.node {
+                            Node::List(l) if !p.range(l).is_empty() => p.child(p.range(l)[0]),
+                            _ => p.clone(),
                         };
-                        if fe::pat_names(pattern).iter().any(|n| n == name) {
-                            return span_of(spans, p).map(span_range);
+                        if fe::pat_names(&pattern).iter().any(|n| n == name) {
+                            return span_of(spans, &p).map(span_range);
                         }
                     }
                 }
@@ -709,11 +713,12 @@ pub fn path_mark(source: &[S], spans: &Spans, path: &[String]) -> Option<(i64, i
 /// The bindings of a scene graph that are `scene/camera` calls.
 pub fn cameras(source: &[S], graph: &str) -> Vec<String> {
     let Some(root) = root_form(source, graph) else { return Vec::new() };
-    let Some((bindings, _)) = last(root).and_then(scope) else { return Vec::new() };
+    let Some(body) = last(&root) else { return Vec::new() };
+    let Some((bindings, _)) = scope(&body) else { return Vec::new() };
     bindings
-        .iter()
-        .filter_map(|(p, v)| match (s::head(v), &p.node) {
-            (Some("scene/camera"), Node::Sym(n)) => Some(n.clone()),
+        .chunks_exact(2)
+        .filter_map(|p| match (s::head(&body.child(p[1])), body.arena().row(p[0]).node) {
+            (Some("scene/camera"), Node::Sym(n)) => Some(body.name(n).to_owned()),
             _ => None,
         })
         .collect()
@@ -726,39 +731,39 @@ fn plural(n: usize, what: &str) -> String {
 /// the top-level ancestor with what it reads, as a `let*` over the root bindings it needs; None
 /// when the graph body is not a scope
 fn closure(root: &S, top: &str) -> Option<S> {
-    let (bindings, _) = last(root).and_then(scope)?;
+    let body = last(root)?;
+    let (bindings, _) = scope(&body)?;
     let mut declares: Vec<(String, usize)> = Vec::new();
-    for (i, (p, _)) in bindings.iter().enumerate() {
-        for n in fe::pat_names(p) {
+    for (i, pair) in bindings.chunks_exact(2).enumerate() {
+        for n in fe::pat_names(&body.child(pair[0])) {
             declares.push((n, i));
         }
     }
-    fn need(bindings: &[(&S, &S)], declares: &[(String, usize)], acc: &mut Vec<usize>, name: &str) {
+    fn need(owner: &S, bindings: &[SyntaxId], declares: &[(String, usize)], acc: &mut Vec<usize>, name: &str) {
         if let Some((_, i)) = declares.iter().find(|(n, _)| n == name)
             && !acc.contains(i)
         {
             acc.push(*i);
-            for n in fe::free_names(bindings[*i].1) {
-                need(bindings, declares, acc, &n);
+            for n in fe::free_names(&owner.child(bindings[*i * 2 + 1])) {
+                need(owner, bindings, declares, acc, &n);
             }
         }
     }
     let mut needed = Vec::new();
-    need(&bindings, &declares, &mut needed, top);
-    let sub: Vec<(&S, &S)> = bindings.iter().enumerate().filter(|(i, _)| needed.contains(i)).map(|(_, b)| *b).collect();
-    if sub.is_empty() {
+    need(&body, bindings, &declares, &mut needed, top);
+    if needed.is_empty() {
         return None;
     }
-    let inputs: Vec<String> = match s::children(root).into_iter().find_map(|c| match &c.node {
-        Node::Vec(inputs) => Some(inputs),
+    let inputs: Vec<String> = match root.children().iter().find_map(|&id| match root.arena().row(id).node {
+        Node::Vec(inputs) => Some(root.range(inputs)),
         _ => None,
     }) {
         None => Vec::new(),
         Some(inputs) => inputs
             .iter()
-            .filter_map(|i| match &i.node {
-                Node::List(l) if !l.is_empty() => match &l[0].node {
-                    Node::Sym(n) if sub.iter().any(|(_, v)| fe::free_names(v).contains(n)) => Some(n.clone()),
+            .filter_map(|&id| match root.arena().row(id).node {
+                Node::List(l) if !root.range(l).is_empty() => match root.arena().row(root.range(l)[0]).node {
+                    Node::Sym(n) if needed.iter().any(|&i| fe::free_names(&body.child(bindings[i * 2 + 1])).iter().any(|name| name == root.name(n))) => Some(root.name(n).to_owned()),
                     _ => None,
                 },
                 _ => None,
@@ -766,27 +771,26 @@ fn closure(root: &S, top: &str) -> Option<S> {
             .collect(),
     };
     let base = max_id(root) + 1;
-    let form = |id: i64, node: Node| S { id, ..s::make(node) };
     let note = format!(
         "{} \u{b7} {}{}",
         top,
-        if sub.len() > 1 { format!("with {}", plural(sub.len() - 1, "upstream binding")) } else { "no upstream bindings".to_owned() },
+        if needed.len() > 1 { format!("with {}", plural(needed.len() - 1, "upstream binding")) } else { "no upstream bindings".to_owned() },
         if inputs.is_empty() { String::new() } else { format!(" and inputs {}", inputs.join(", ")) }
     );
-    let vec_items: Vec<S> = sub.iter().flat_map(|(p, v)| [(*p).clone(), (*v).clone()]).collect();
-    let mut out = form(
-        base,
-        Node::List(vec![
-            form(base + 1, Node::Sym("let*".to_owned())),
-            form(base + 2, Node::Vec(vec_items.into())),
-            form(base + 3, Node::Sym(top.to_owned())),
-        ].into()),
-    );
-    *out.notes_mut() = vec![
-        note,
-        "Selection patches named bindings; omitted bindings stay. Change the result in Graph or Document.".to_owned(),
-    ];
-    Some(out)
+    let mut ctor = SyntaxBuilder::new();
+    ctor.import(root);
+    let vec_items: Vec<SyntaxId> = bindings.chunks_exact(2).enumerate()
+        .filter(|(i, _)| needed.contains(i))
+        .flat_map(|(_, pair)| pair.iter().map(|&id| ctor.imported(&body.child(id)).unwrap()))
+        .collect();
+    let head = ctor.push_draft(base + 1, Draft::Sym("let*".to_owned()), Span::default(), None);
+    let bindings = ctor.push_draft(base + 2, Draft::Vec(vec_items), Span::default(), None);
+    let result = ctor.push_draft(base + 3, Draft::Sym(top.to_owned()), Span::default(), None);
+    let out = ctor.push_draft(base, Draft::List(vec![head, bindings, result]), Span::default(), Some(s::Trivia {
+        notes: vec![note, "Selection patches named bindings; omitted bindings stay. Change the result in Graph or Document.".to_owned()],
+        ..s::Trivia::default()
+    }));
+    Some(ctor.freeze().handle(out))
 }
 
 fn e_edit(message: String) -> Diagnostic {
@@ -794,7 +798,7 @@ fn e_edit(message: String) -> Diagnostic {
 }
 
 fn printed_of(f: &S) -> String {
-    lisp::print(std::slice::from_ref(f)).0
+    lisp::text(std::slice::from_ref(f))
 }
 
 /// Build the complete candidate graph before checking: dependent bindings may change type
@@ -806,21 +810,21 @@ fn selection_form(source: &[S], path: &[String], form: &S) -> Result<S, Diagnost
         _ => return Err(shape()),
     };
     let Some((patches, result)) = scope(form) else { return Err(shape()) };
-    let names: Vec<&String> = patches
-        .iter()
-        .filter_map(|(p, _)| match &p.node {
-            Node::Sym(n) => Some(n),
+    let names: Vec<&str> = patches
+        .chunks_exact(2)
+        .filter_map(|p| match form.arena().row(p[0]).node {
+            Node::Sym(n) => Some(form.name(n)),
             _ => None,
         })
         .collect();
-    let invalid = patches.iter().find(|(p, _)| match &p.node {
-        Node::Sym(n) => binding(source, &[graph.clone(), n.clone()]).is_none(),
+    let invalid = patches.chunks_exact(2).find(|p| match form.arena().row(p[0]).node {
+        Node::Sym(n) => binding(source, &[graph.clone(), form.name(n).to_owned()]).is_none(),
         _ => true,
     });
-    if let Some((p, _)) = invalid {
+    if let Some(p) = invalid {
         return Err(e_edit(format!(
             "{} is not a binding of {}; add or remove bindings in the Graph tab.",
-            pxui_shell::kit::ocaml_trim(&printed_of(p)),
+            pxui_shell::kit::ocaml_trim(&printed_of(&form.child(p[0]))),
             graph
         )));
     }
@@ -830,34 +834,43 @@ fn selection_form(source: &[S], path: &[String], form: &S) -> Result<S, Diagnost
     if names.len() != sorted.len() {
         return Err(e_edit("Duplicate binding names in Selection.".to_owned()));
     }
-    if printed_of(result) != printed_of(&s::make(Node::Sym(top.clone()))) {
+    if printed_of(&form.child(result)) != format!("{}\n", top) {
         return Err(e_edit("Selection's result must stay unchanged; edit the result in Graph or Document.".to_owned()));
     }
     let Some(root) = root_form(source, graph) else { return Err(e_edit("Selection graph no longer exists.".to_owned())) };
-    let Some(body) = last(root) else { return Err(e_edit("Selection graph no longer exists.".to_owned())) };
-    let Some((bindings, res)) = scope(body) else { return Err(e_edit("Expected the shown Selection closure.".to_owned())) };
-    // a closure that changes nothing is the graph as it is, not a refusal: a scrub applies on
-    // every frame of its drag, also the ones that did not move
-    let bindings: Vec<(S, S)> = bindings
-        .iter()
-        .map(|(p, old)| match patches.iter().find(|(q, _)| q.node == p.node) {
-            Some((_, v)) if printed_of(old) != printed_of(v) => {
-                let mut v = (*v).clone();
-                if v.notes().is_empty() {
-                    *v.notes_mut() = old.notes().to_vec();
+    let Some(body) = last(&root) else { return Err(e_edit("Selection graph no longer exists.".to_owned())) };
+    let Some((bindings, res)) = scope(&body) else { return Err(e_edit("Expected the shown Selection closure.".to_owned())) };
+    // A closure that changes nothing is the graph as it is, not a refusal: a scrub applies on
+    // every frame of its drag, also the ones that did not move.
+    let mut ctor = SyntaxBuilder::new();
+    let imported_root = ctor.import(&root);
+    ctor.import(form);
+    let mut rewritten = Vec::with_capacity(bindings.len());
+    for pair in bindings.chunks_exact(2) {
+        let (p, old) = (body.child(pair[0]), body.child(pair[1]));
+        let mut value = ctor.imported(&old).unwrap();
+        if let Some(patch) = patches.chunks_exact(2).find(|q| s::equal_node(&form.child(q[0]), &p)) {
+            let v = form.child(patch[1]);
+            if printed_of(&old) != printed_of(&v) {
+                value = ctor.imported(&v).unwrap();
+                if v.notes().is_empty() && !old.notes().is_empty() {
+                    let mut trivia = v.trivia().cloned().unwrap_or_default();
+                    trivia.notes = old.notes().to_vec();
+                    value = ctor.with_trivia(value, Some(trivia));
                 }
-                ((*p).clone(), v)
             }
-            _ => ((*p).clone(), (*old).clone()),
-        })
-        .collect();
-    let kids = s::children(body);
-    let vec_form = S { node: Node::Vec(bindings.into_iter().flat_map(|(p, v)| [p, v]).collect()), ..kids[1].clone() };
-    let new_body = S { node: Node::List(vec![kids[0].clone(), vec_form, res.clone()].into()), ..body.clone() };
-    let mut root_kids: Vec<S> = s::children(root).into_iter().cloned().collect();
-    root_kids.pop();
-    root_kids.push(new_body);
-    Ok(S { node: Node::List(root_kids.into()), ..root.clone() })
+        }
+        rewritten.extend([ctor.imported(&p).unwrap(), value]);
+    }
+    let kids = body.children();
+    let vec_form = ctor.with_node(&body.child(kids[1]), Draft::Vec(rewritten));
+    let head = ctor.imported(&body.child(kids[0])).unwrap();
+    let result = ctor.imported(&body.child(res)).unwrap();
+    let new_body = ctor.with_node(&body, Draft::List(vec![head, vec_form, result]));
+    let mut root_kids = ctor.children(imported_root).to_vec();
+    *root_kids.last_mut().unwrap() = new_body;
+    let out = ctor.with_node(&root, Draft::List(root_kids));
+    Ok(ctor.freeze().handle(out))
 }
 
 /// The `Set_graph` of the graph form a Graph tab holds, or (with `selection`, the shown binding's
@@ -866,7 +879,7 @@ pub fn graph_op(source: &[S], graph: &str, selection: Option<&[String]>, text: &
     let set = |form: S| Op::SetGraph { name: graph.to_owned(), form };
     let forms = s::parse(text)?;
     match forms.as_slice() {
-        [form] if matches!(&form.node, Node::List(l) if matches!(l.first().map(|f| &f.node), Some(Node::Sym(h)) if h == "graph" || h == "defn")) => {
+        [form] if matches!(form.node, Node::List(_)) && matches!(s::head(form), Some("graph" | "defn")) => {
             Ok(set(form.clone()))
         }
         [form] => match selection {
@@ -880,7 +893,7 @@ pub fn graph_op(source: &[S], graph: &str, selection: Option<&[String]>, text: &
     }
 }
 
-fn make_shown_with(workspace: Option<&WorkspaceDoc>, source: &[S], graph: &str, selected: Option<&Path>, tab: Tab) -> Shown {
+fn make_shown_with(workspace: Option<&WorkspaceDoc>, source: &[S], graph: &str, selected: Option<&Path>, tab: Tab) -> Result<Shown, Diagnostic> {
     let source_arc = Arc::new(source.to_vec());
     let printed = match workspace {
         None => Printed::of_forms(source_arc.clone()),
@@ -890,12 +903,12 @@ fn make_shown_with(workspace: Option<&WorkspaceDoc>, source: &[S], graph: &str, 
         Some(path) => path.clone(),
         None => vec![graph.to_owned()],
     };
-    match tab {
+    Ok(match tab {
         Tab::Document => {
-            let spans = printed.spans().clone();
+            let spans = printed.spans()?.clone();
             Shown {
                 graph: graph.to_owned(),
-                text: printed.text().to_owned(),
+                text: printed.text()?.to_owned(),
                 mark: selected.and_then(|p| path_mark(source, &spans, p)),
                 key,
                 applied: printed.clone(),
@@ -923,14 +936,14 @@ fn make_shown_with(workspace: Option<&WorkspaceDoc>, source: &[S], graph: &str, 
                     _ => &[],
                 };
                 let (form, is_root): (S, bool) = match (tab, names.first()) {
-                    (Tab::Selection, Some(top)) => match closure(root, top) {
+                    (Tab::Selection, Some(top)) => match closure(&root, top) {
                         Some(f) => (f, false),
                         None => (root.clone(), true),
                     },
                     _ => (root.clone(), true),
                 };
-                let (text, spans) = lisp::print(std::slice::from_ref(&form));
-                let body = if is_root { last(root).unwrap_or(root).clone() } else { form };
+                let (text, spans) = lisp::print(std::slice::from_ref(&form))?;
+                let body = if is_root { last(&root).unwrap_or(root) } else { form };
                 Shown {
                     graph: graph.to_owned(),
                     mark: selected.and_then(|p| path_mark(source, &spans, p)),
@@ -944,13 +957,13 @@ fn make_shown_with(workspace: Option<&WorkspaceDoc>, source: &[S], graph: &str, 
                 }
             }
         },
-    }
+    })
 }
 
 /// `make_shown source graph selected tab`: Selection prints the selected binding's top-level
 /// ancestor as a `let*` over the root bindings it reads (a note names the count and the graph
 /// inputs used) with the binding marked; Graph the whole graph form; Document the workspace form.
-pub fn make_shown(source: &[S], graph: &str, selected: Option<&Path>, tab: Tab) -> Shown {
+pub fn make_shown(source: &[S], graph: &str, selected: Option<&Path>, tab: Tab) -> Result<Shown, Diagnostic> {
     make_shown_with(None, source, graph, selected, tab)
 }
 
@@ -963,10 +976,10 @@ fn atoms(old: &S, next: &S) -> Option<Vec<S>> {
     }
     match (&old.node, &next.node) {
         (Node::Num(_), Node::Num(_)) | (Node::Str(_), Node::Str(_)) | (Node::Sym(_), Node::Sym(_)) => Some(vec![next.clone()]),
-        (Node::Vec(o), Node::Vec(n)) if o.len() == n.len() => {
+        (Node::Vec(o), Node::Vec(n)) if old.range(*o).len() == next.range(*n).len() => {
             let mut values: Vec<S> = Vec::new();
-            for (o, n) in o.iter().zip(n) {
-                let mut more = atoms(o, n)?;
+            for (&o, &n) in old.range(*o).iter().zip(next.range(*n)) {
+                let mut more = atoms(&old.child(o), &next.child(n))?;
                 more.reverse();
                 more.extend(values);
                 values = more;
@@ -987,15 +1000,15 @@ fn same_workspace(a: &WorkspaceDoc, b: &WorkspaceDoc) -> bool {
         && a.imports == b.imports
 }
 
-fn patched_shown(previous: &WorkspaceDoc, workspace: &WorkspaceDoc, shown: &Shown) -> Option<Shown> {
+fn patched_shown(previous: &WorkspaceDoc, workspace: &WorkspaceDoc, shown: &Shown) -> Result<Option<Shown>, Diagnostic> {
     if previous.layout != workspace.layout || !settings::same_values(&previous.settings, &workspace.settings) || previous.extra != workspace.extra {
-        return None;
+        return Ok(None);
     }
-    let changes: Vec<Change> = wd::literal_changes(previous, workspace)?;
+    let Some(changes) = wd::literal_changes(previous, workspace) else { return Ok(None) };
     let mut values: Vec<S> = Vec::new();
     for change in &changes {
-        let old = fe::arg_text(&previous.source, &change.path, &ArgKey::Kw(change.field.clone()))?;
-        let mut more = atoms(&old, &change.expr)?;
+        let Some(old) = fe::arg_text(&previous.source, &change.path, &ArgKey::Kw(change.field.clone())) else { return Ok(None) };
+        let Some(mut more) = atoms(&old, &change.expr) else { return Ok(None) };
         more.reverse();
         more.extend(values);
         values = more;
@@ -1005,11 +1018,11 @@ fn patched_shown(previous: &WorkspaceDoc, workspace: &WorkspaceDoc, shown: &Show
         let ids: std::collections::HashSet<i64> = spans.iter().map(|(id, _)| *id).collect();
         values.iter().filter(|f| ids.contains(&f.id)).cloned().collect()
     };
-    let (text, spans) = lisp::patch_atoms(&(shown.text.clone(), (*shown.spans).clone()), &present(&shown.spans))?;
-    let old_applied_spans = shown.applied_spans.spans().clone();
-    let (applied, applied_spans) =
-        lisp::patch_atoms(&(shown.applied.text().to_owned(), old_applied_spans.clone()), &present(&old_applied_spans))?;
-    let body = root_form(&workspace.source, &shown.graph).and_then(last).cloned();
+    let Some((text, spans)) = lisp::patch_atoms(&(shown.text.clone(), (*shown.spans).clone()), &present(&shown.spans)) else { return Ok(None) };
+    let old_applied_spans = shown.applied_spans.spans()?.clone();
+    let Some((applied, applied_spans)) =
+        lisp::patch_atoms(&(shown.applied.text()?.to_owned(), old_applied_spans.clone()), &present(&old_applied_spans)) else { return Ok(None) };
+    let body = root_form(&workspace.source, &shown.graph).and_then(|root| last(&root));
     let new_body = match (&shown.body, body) {
         (Some(_), Some(body)) => Some((Arc::new(body), Arc::new(spans.clone()))),
         _ => None,
@@ -1017,18 +1030,18 @@ fn patched_shown(previous: &WorkspaceDoc, workspace: &WorkspaceDoc, shown: &Show
     // Selection marks are form boundaries in the repaired span map.
     let boundary = |old: i64| -> Option<i64> {
         shown.spans.iter().find_map(|(id, span)| {
-            if span.start == old {
-                spans.iter().find(|(i, _)| i == id).map(|(_, s)| s.start)
-            } else if span.finish == old {
-                spans.iter().find(|(i, _)| i == id).map(|(_, s)| s.finish)
+            if i64::from(span.start) == old {
+                spans.iter().find(|(i, _)| i == id).map(|(_, s)| i64::from(s.start))
+            } else if i64::from(span.finish) == old {
+                spans.iter().find(|(i, _)| i == id).map(|(_, s)| i64::from(s.finish))
             } else {
                 None
             }
         })
     };
     let mark = shown.mark.map(|(a, b)| (boundary(a).unwrap_or(a), boundary(b).unwrap_or(b)));
-    let printed = Printed::ready(applied, applied_spans);
-    Some(Shown {
+    let printed = Printed::ready(applied, applied_spans)?;
+    Ok(Some(Shown {
         source: Arc::new(workspace.source.clone()),
         text,
         applied: printed.clone(),
@@ -1037,14 +1050,14 @@ fn patched_shown(previous: &WorkspaceDoc, workspace: &WorkspaceDoc, shown: &Show
         mark,
         spans: Arc::new(spans),
         ..shown.clone()
-    })
+    }))
 }
 
 /// `make_shown` for the state's tab, cached by source, optional workspace, graph, selection and
 /// tab. A workspace includes saved layout and settings in the Document tab.
 /// ponytail: the cache compares the source structurally (OCaml `==`), O(source) per frame; hold the
 /// source in an `Arc` end to end if that shows in a profile.
-pub fn shown(workspace: Option<&WorkspaceDoc>, state: &State, source: &[S], graph: &str, selected: Option<&Path>) -> (State, Shown) {
+pub fn shown(workspace: Option<&WorkspaceDoc>, state: &State, source: &[S], graph: &str, selected: Option<&Path>) -> Result<(State, Shown), Diagnostic> {
     let graph = match (&state.tab, &state.binding_draft) {
         (Tab::Selection, Some((path, _))) if !path.is_empty() => path[0].as_str(),
         _ => graph,
@@ -1062,7 +1075,7 @@ pub fn shown(workspace: Option<&WorkspaceDoc>, state: &State, source: &[S], grap
     if let Some(cache) = &state.cache {
         let (key, shown) = &**cache;
         if *key.source == *source && same(&key.workspace, workspace) && key.graph == graph && key.selected == selected && key.tab == state.tab {
-            return (state.clone(), shown.clone());
+            return Ok((state.clone(), shown.clone()));
         }
     }
     let patched = match (&state.cache, workspace) {
@@ -1070,7 +1083,7 @@ pub fn shown(workspace: Option<&WorkspaceDoc>, state: &State, source: &[S], grap
             let (key, shown) = &**cache;
             match &key.workspace {
                 Some(previous) if state.scrubbing && key.graph == graph && key.selected == selected && key.tab == state.tab => {
-                    patched_shown(previous, workspace, shown)
+                    patched_shown(previous, workspace, shown)?
                 }
                 _ => None,
             }
@@ -1079,7 +1092,7 @@ pub fn shown(workspace: Option<&WorkspaceDoc>, state: &State, source: &[S], grap
     };
     let shown = match patched {
         Some(shown) => shown,
-        None => make_shown_with(workspace, source, graph, selected.as_ref(), state.tab),
+        None => make_shown_with(workspace, source, graph, selected.as_ref(), state.tab)?,
     };
     let key = CacheKey {
         source: shown.source.clone(),
@@ -1090,7 +1103,7 @@ pub fn shown(workspace: Option<&WorkspaceDoc>, state: &State, source: &[S], grap
     };
     let mut next = state.clone();
     next.cache = Some(Box::new((key, shown.clone())));
-    (next, shown)
+    Ok((next, shown))
 }
 
 // The printer's token ID names the source form. Prefer the innermost card, then address its
@@ -1098,32 +1111,33 @@ pub fn shown(workspace: Option<&WorkspaceDoc>, state: &State, source: &[S], grap
 const LOOP_HEADS: [&str; 6] = ["for", "fold", "scan", "sum", "state", "fn"];
 
 fn scrub_sub(id: i64, path: &mut Vec<i64>, form: &S) -> Option<Vec<i64>> {
-    if form.id == id {
-        return match form.node {
-            Node::Num(_) => Some(path.clone()),
-            _ => None,
-        };
-    }
-    for (i, child) in s::children(form).into_iter().enumerate() {
-        path.push(i as i64);
-        let found = scrub_sub(id, path, child);
-        path.pop();
-        if found.is_some() {
-            return found;
+    fn visit(id: i64, path: &mut Vec<i64>, arena: &s::SyntaxArena, row: SyntaxId) -> Option<Vec<i64>> {
+        let form = arena.row(row);
+        if form.id == id {
+            return matches!(form.node, Node::Num(_)).then(|| path.clone());
         }
+        for (i, &child) in arena.children(row).iter().enumerate() {
+            path.push(i as i64);
+            let found = visit(id, path, arena, child);
+            path.pop();
+            if found.is_some() {
+                return found;
+            }
+        }
+        None
     }
-    None
+    visit(id, path, form.arena(), form.row_id())
 }
 
 fn scrub_within(id: i64, value: &S, path: &[String], form: &S) -> Option<Op> {
     match scope(form) {
         Some((bindings, result)) => {
-            for (pattern, expr) in &bindings {
-                if let found @ Some(_) = scrub_card(id, value, &append(path, &fe::pat_key(pattern)), expr) {
+            for pair in bindings.chunks_exact(2) {
+                if let found @ Some(_) = scrub_card(id, value, &append(path, &fe::pat_key(&form.child(pair[0]))), &form.child(pair[1])) {
                     return found;
                 }
             }
-            scrub_card(id, value, &append(path, "@result"), result)
+            scrub_card(id, value, &append(path, "@result"), &form.child(result))
         }
         None => scrub_card(id, value, &append(path, "@result"), form),
     }
@@ -1132,7 +1146,7 @@ fn scrub_within(id: i64, value: &S, path: &[String], form: &S) -> Option<Op> {
 fn scrub_card(id: i64, value: &S, path: &[String], form: &S) -> Option<Op> {
     if scope(form).is_some() || LOOP_HEADS.contains(&s::head(form).unwrap_or("")) {
         let (inner, _) = enter(form);
-        if let found @ Some(_) = scrub_within(id, value, path, inner) {
+        if let found @ Some(_) = scrub_within(id, value, path, &inner) {
             return found;
         }
     }
@@ -1144,30 +1158,30 @@ fn scrub_card(id: i64, value: &S, path: &[String], form: &S) -> Option<Op> {
             return found;
         }
     }
-    let args: Vec<(ArgKey, S)> = match &form.node {
-        Node::List(l) if !l.is_empty() => {
+    let args: Vec<(ArgKey, SyntaxId)> = match form.node {
+        Node::List(l) if !form.range(l).is_empty() => {
             let mut out = Vec::new();
             let mut position = 0;
-            let mut rest = &l[1..];
+            let mut rest = &form.range(l)[1..];
             while !rest.is_empty() {
-                if let (Node::Kw(name), Some(expr)) = (&rest[0].node, rest.get(1)) {
-                    out.push((ArgKey::Kw(name.clone()), expr.clone()));
+                if let (Node::Kw(name), Some(&expr)) = (form.arena().row(rest[0]).node, rest.get(1)) {
+                    out.push((ArgKey::Kw(form.name(name).to_owned()), expr));
                     rest = &rest[2..];
                 } else {
-                    out.push((ArgKey::Pos(position), rest[0].clone()));
+                    out.push((ArgKey::Pos(position), rest[0]));
                     position += 1;
                     rest = &rest[1..];
                 }
             }
             out
         }
-        Node::Map(fields) => s::pairs(fields)
-            .into_iter()
-            .map(|(key, expr)| (ArgKey::Field(if let Node::Kw(name) = &key.node { name.clone() } else { String::new() }), expr.clone()))
+        Node::Map(fields) => form.range(fields).chunks_exact(2)
+            .map(|p| (ArgKey::Field(if let Node::Kw(name) = form.arena().row(p[0]).node { form.name(name).to_owned() } else { String::new() }), p[1]))
             .collect(),
-        _ => vec![(ArgKey::Whole, form.clone())],
+        _ => vec![(ArgKey::Whole, form.row_id())],
     };
     for (key, expr) in args {
+        let expr = form.child(expr);
         if fe::node_call(&expr) {
             continue;
         }
@@ -1182,20 +1196,19 @@ fn scrub_card(id: i64, value: &S, path: &[String], form: &S) -> Option<Op> {
 /// source card's `Set_arg`. No parsing or textual search.
 pub fn scrub_op(shown: &Shown, range: (i64, i64), replacement: &str) -> Option<Op> {
     let (start, finish) = range;
-    let id = shown.spans.iter().find(|(id, span)| *id != 0 && span.start == start && span.finish == finish).map(|(id, _)| *id)?;
+    let id = shown.spans.iter().find(|(id, span)| *id != 0 && i64::from(span.start) == start && i64::from(span.finish) == finish).map(|(id, _)| *id)?;
     if !s::number(replacement) {
         return None;
     }
-    let value = s::make(Node::Num(replacement.to_owned()));
-    for root in root_forms(&shown.source)? {
-        if let Node::List(l) = &root.node
-            && l.len() >= 2
-            && let (Node::Sym(h), Node::Sym(name)) = (&l[0].node, &l[1].node)
-            && matches!(h.as_str(), "graph" | "defn")
+    let value = s::make(Draft::Num(replacement.to_owned()));
+    let (owner, roots) = root_forms(&shown.source)?;
+    for &root in roots {
+        let root = owner.child(root);
+        if matches!(s::head(&root), Some("graph" | "defn"))
+            && let Some(prefix) = root_name(&root)
         {
-            let prefix = if h == "defn" { format!("def:{}", name) } else { name.clone() };
-            if let Some(body) = last(root)
-                && let found @ Some(_) = scrub_within(id, &value, &[prefix], body)
+            if let Some(body) = last(&root)
+                && let found @ Some(_) = scrub_within(id, &value, &[prefix], &body)
             {
                 return found;
             }
@@ -1206,53 +1219,55 @@ pub fn scrub_op(shown: &Shown, range: (i64, i64), replacement: &str) -> Option<O
 
 // ---- a draft against a document that changed under it ----
 
-type Entries = Vec<(String, Vec<S>)>;
+type Forms<'a> = (&'a S, &'a [SyntaxId]);
 
-fn text_of(f: &S) -> String {
-    printed_of(f)
+struct Entries<'a> {
+    owner: &'a S,
+    rows: Vec<(String, &'a [SyntaxId])>,
 }
 
 fn same(a: &S, b: &S) -> bool {
-    text_of(a) == text_of(b)
+    printed_of(a) == printed_of(b)
 }
 
-fn sames(a: &[S], b: &[S]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| same(x, y))
+fn sames((a, ai): Forms<'_>, (b, bi): Forms<'_>) -> bool {
+    ai.len() == bi.len() && ai.iter().zip(bi).all(|(&x, &y)| same(&a.child(x), &b.child(y)))
 }
 
 fn entry_key(f: &S) -> String {
-    if let Node::List(l) = &f.node {
-        match (l.first().map(|f| &f.node), l.get(1).map(|f| &f.node)) {
-            (Some(Node::Sym(h)), Some(Node::Sym(n))) => return format!("{} {}", h, n),
-            (Some(Node::Sym(h)), _) => return h.clone(),
+    if let Node::List(l) = f.node {
+        let l = f.range(l);
+        match (l.first().map(|&id| f.arena().row(id).node), l.get(1).map(|&id| f.arena().row(id).node)) {
+            (Some(Node::Sym(h)), Some(Node::Sym(n))) => return format!("{} {}", f.name(h), f.name(n)),
+            (Some(Node::Sym(h)), _) => return f.name(h).to_owned(),
             _ => {}
         }
     }
-    text_of(f)
+    printed_of(f)
 }
 
-fn entries(forms: &[S]) -> Entries {
-    forms.iter().map(|f| (entry_key(f), vec![f.clone()])).collect()
+fn entries((owner, forms): Forms<'_>) -> Entries<'_> {
+    Entries { owner, rows: forms.iter().map(|id| (entry_key(&owner.child(*id)), std::slice::from_ref(id))).collect() }
 }
 
-fn pair_entries(forms: &[S]) -> Option<Entries> {
+fn pair_entries((owner, forms): Forms<'_>) -> Option<Entries<'_>> {
     if forms.len() % 2 != 0 {
         return None;
     }
-    Some(forms.chunks_exact(2).map(|p| (text_of(&p[0]), vec![p[0].clone(), p[1].clone()])).collect())
+    Some(Entries { owner, rows: forms.chunks_exact(2).map(|p| (printed_of(&owner.child(p[0])), p)).collect() })
 }
 
-fn merge_seq(bl: &[S], ml: &[S], tl: &[S]) -> Option<Vec<S>> {
+fn merge_seq(ctor: &mut SyntaxBuilder, (b, bl): Forms<'_>, (m, ml): Forms<'_>, (t, tl): Forms<'_>) -> Option<Vec<SyntaxId>> {
     if bl.len() == ml.len() && ml.len() == tl.len() {
-        (0..ml.len()).map(|i| merge_forms(&bl[i], &ml[i], &tl[i])).collect()
+        (0..ml.len()).map(|i| merge_forms(ctor, &b.child(bl[i]), &m.child(ml[i]), &t.child(tl[i]))).collect()
     } else {
         None
     }
 }
 
-fn merge_keyed(bl: &Entries, ml: &Entries, tl: &Entries) -> Option<Vec<S>> {
-    let unique = |l: &Entries| {
-        let mut keys: Vec<&String> = l.iter().map(|(k, _)| k).collect();
+fn merge_keyed(ctor: &mut SyntaxBuilder, bl: &Entries<'_>, ml: &Entries<'_>, tl: &Entries<'_>) -> Option<Vec<SyntaxId>> {
+    let unique = |l: &Entries<'_>| {
+        let mut keys: Vec<&String> = l.rows.iter().map(|(k, _)| k).collect();
         let n = keys.len();
         keys.sort();
         keys.dedup();
@@ -1261,116 +1276,102 @@ fn merge_keyed(bl: &Entries, ml: &Entries, tl: &Entries) -> Option<Vec<S>> {
     if !(unique(bl) && unique(ml) && unique(tl)) {
         return None;
     }
-    let find = |l: &Entries, k: &str| l.iter().find(|(x, _)| x == k).map(|(_, v)| v.clone());
-    let mut out: Vec<Vec<S>> = Vec::new();
-    for (k, m) in ml {
-        let part = match (find(bl, k), find(tl, k)) {
-            (Some(b), Some(t)) => merge_seq(&b, m, &t)?,
+    fn find<'a>(l: &Entries<'a>, k: &str) -> Option<Forms<'a>> {
+        l.rows.iter().find(|(x, _)| x == k).map(|(_, v)| (l.owner, *v))
+    }
+    fn copied(ctor: &SyntaxBuilder, (owner, rows): Forms<'_>) -> Vec<SyntaxId> {
+        rows.iter().map(|&id| ctor.imported(&owner.child(id)).unwrap()).collect()
+    }
+    let mut out = Vec::new();
+    for (k, m) in &ml.rows {
+        let m = (ml.owner, *m);
+        match (find(bl, k), find(tl, k)) {
+            (Some(b), Some(t)) => out.extend(merge_seq(ctor, b, m, t)?),
             (Some(b), None) => {
-                if sames(m, &b) {
-                    Vec::new()
-                } else {
+                if !sames(m, b) {
                     return None;
                 }
             }
             (None, Some(t)) => {
-                if sames(m, &t) {
-                    m.clone()
-                } else {
+                if !sames(m, t) {
                     return None;
                 }
+                out.extend(copied(ctor, m));
             }
-            (None, None) => m.clone(),
-        };
-        out.push(part);
+            (None, None) => out.extend(copied(ctor, m)),
+        }
     }
-    for (k, t) in tl {
-        let part = match (ml.iter().any(|(x, _)| x == k), find(bl, k)) {
-            (true, _) => Vec::new(),
-            (false, None) => t.clone(),
+    for (k, t) in &tl.rows {
+        match (ml.rows.iter().any(|(x, _)| x == k), find(bl, k)) {
+            (true, _) => {}
+            (false, None) => out.extend(copied(ctor, (tl.owner, *t))),
             (false, Some(b)) => {
-                if sames(t, &b) {
-                    Vec::new()
-                } else {
+                if !sames((tl.owner, *t), b) {
                     return None;
                 }
             }
-        };
-        out.push(part);
+        }
     }
-    Some(out.into_iter().flatten().collect())
+    Some(out)
 }
 
-// a call whose argument count differs: what stands before the first keyword pairs by position, the
-// keyword arguments by name
-fn merge_call(bl: &[S], ml: &[S], tl: &[S]) -> Option<Vec<S>> {
-    fn split(forms: &[S]) -> Option<(Vec<S>, Entries)> {
-        let at = forms.iter().position(|f| matches!(f.node, Node::Kw(_))).unwrap_or(forms.len());
+// A call whose argument count differs: what stands before the first keyword pairs by position,
+// the keyword arguments by name.
+fn merge_call(ctor: &mut SyntaxBuilder, b: Forms<'_>, m: Forms<'_>, t: Forms<'_>) -> Option<Vec<SyntaxId>> {
+    fn split((owner, forms): Forms<'_>) -> Option<(Forms<'_>, Entries<'_>)> {
+        let at = forms.iter().position(|&id| matches!(owner.arena().row(id).node, Node::Kw(_))).unwrap_or(forms.len());
         let (before, rest) = forms.split_at(at);
-        let mut keywords = true;
-        let mut i = 0;
-        while i < rest.len() {
-            if matches!(rest[i].node, Node::Kw(_)) && i + 1 < rest.len() {
-                i += 2;
-            } else {
-                keywords = false;
-                break;
-            }
+        if rest.len() % 2 != 0 || rest.chunks_exact(2).any(|p| !matches!(owner.arena().row(p[0]).node, Node::Kw(_))) {
+            return None;
         }
-        if rest.is_empty() {
-            return Some((before.to_vec(), Vec::new()));
-        }
-        let pairs = if keywords { pair_entries(rest) } else { None };
-        pairs.map(|p| (before.to_vec(), p))
+        Some(((owner, before), pair_entries((owner, rest))?))
     }
-    let (bp, bk) = split(bl)?;
-    let (mp, mk) = split(ml)?;
-    let (tp, tk) = split(tl)?;
-    let mut positional = merge_seq(&bp, &mp, &tp)?;
-    positional.extend(merge_keyed(&bk, &mk, &tk)?);
+    let (bp, bk) = split(b)?;
+    let (mp, mk) = split(m)?;
+    let (tp, tk) = split(t)?;
+    let mut positional = merge_seq(ctor, bp, mp, tp)?;
+    positional.extend(merge_keyed(ctor, &bk, &mk, &tk)?);
     Some(positional)
 }
 
-fn merge_forms(b: &S, m: &S, t: &S) -> Option<S> {
+fn merge_forms(ctor: &mut SyntaxBuilder, b: &S, m: &S, t: &S) -> Option<SyntaxId> {
     if same(m, b) {
-        return Some(t.clone());
+        return ctor.imported(t);
     }
     if same(t, b) || same(m, t) {
-        return Some(m.clone());
+        return ctor.imported(m);
     }
-    let node = |n: Node| S { node: n, ..m.clone() };
-    match (&b.node, &m.node, &t.node) {
-        (Node::List(bl), Node::List(ml), Node::List(tl))
+    let (bl, ml, tl) = (b.children(), m.children(), t.children());
+    let draft = match (b.node, m.node, t.node) {
+        (Node::List(_), Node::List(_), Node::List(_))
             if bl.len() >= 2
-                && matches!(&bl[0].node, Node::Sym(h) if h == "let*")
-                && matches!(bl[1].node, Node::Vec(_))
+                && matches!(b.arena().row(bl[0]).node, Node::Sym(h) if b.name(h) == "let*")
+                && matches!(b.arena().row(bl[1]).node, Node::Vec(_))
                 && ml.len() >= 2
-                && matches!(ml[1].node, Node::Vec(_))
+                && matches!(m.arena().row(ml[1]).node, Node::Vec(_))
                 && tl.len() >= 2
-                && matches!(tl[1].node, Node::Vec(_)) =>
+                && matches!(t.arena().row(tl[1]).node, Node::Vec(_)) =>
         {
-            let (Node::Vec(bv), Node::Vec(mv), Node::Vec(tv)) = (&bl[1].node, &ml[1].node, &tl[1].node) else { return None };
-            let (bv, mv, tv) = (pair_entries(bv)?, pair_entries(mv)?, pair_entries(tv)?);
-            let bindings = merge_keyed(&bv, &mv, &tv)?;
-            let rest = merge_seq(&bl[2..], &ml[2..], &tl[2..])?;
-            let mut kids = vec![ml[0].clone(), S { node: Node::Vec(bindings.into()), ..ml[1].clone() }];
+            let (bv, mv, tv) = (b.child(bl[1]), m.child(ml[1]), t.child(tl[1]));
+            let bindings = merge_keyed(ctor, &pair_entries((&bv, bv.children()))?, &pair_entries((&mv, mv.children()))?, &pair_entries((&tv, tv.children()))?)?;
+            let rest = merge_seq(ctor, (b, &bl[2..]), (m, &ml[2..]), (t, &tl[2..]))?;
+            let head = ctor.imported(&m.child(ml[0])).unwrap();
+            let bindings = ctor.with_node(&mv, Draft::Vec(bindings));
+            let mut kids = vec![head, bindings];
             kids.extend(rest);
-            Some(node(Node::List(kids.into())))
+            Draft::List(kids)
         }
-        (Node::List(bl), Node::List(ml), Node::List(tl)) if matches!(bl.first().map(|f| &f.node), Some(Node::Sym(h)) if h == "workspace") => {
-            Some(node(Node::List(merge_keyed(&entries(bl), &entries(ml), &entries(tl))?.into())))
+        (Node::List(_), Node::List(_), Node::List(_)) if s::head(b) == Some("workspace") => {
+            Draft::List(merge_keyed(ctor, &entries((b, bl)), &entries((m, ml)), &entries((t, tl)))?)
         }
-        (Node::List(bl), Node::List(ml), Node::List(tl)) => {
-            let kids = match merge_seq(bl, ml, tl) {
-                Some(k) => Some(k),
-                None => merge_call(bl, ml, tl),
-            };
-            Some(node(Node::List(kids?.into())))
+        (Node::List(_), Node::List(_), Node::List(_)) => {
+            Draft::List(merge_seq(ctor, (b, bl), (m, ml), (t, tl)).or_else(|| merge_call(ctor, (b, bl), (m, ml), (t, tl)))?)
         }
-        (Node::Vec(bl), Node::Vec(ml), Node::Vec(tl)) => Some(node(Node::Vec(merge_seq(bl, ml, tl)?.into()))),
-        (Node::Map(bl), Node::Map(ml), Node::Map(tl)) => Some(node(Node::Map(merge_seq(bl, ml, tl)?.into()))),
-        _ => None,
-    }
+        (Node::Vec(_), Node::Vec(_), Node::Vec(_)) => Draft::Vec(merge_seq(ctor, (b, bl), (m, ml), (t, tl))?),
+        (Node::Map(_), Node::Map(_), Node::Map(_)) => Draft::Map(merge_seq(ctor, (b, bl), (m, ml), (t, tl))?),
+        _ => return None,
+    };
+    Some(ctor.with_node(m, draft))
 }
 
 /// A draft (`mine`) begun from `base`, against the text the document has now (`theirs`): the
@@ -1380,8 +1381,16 @@ fn merge_forms(b: &S, m: &S, t: &S) -> Option<S> {
 /// place for it when the order of bindings bites (the merged text is still checked).
 pub fn merge3(base: &str, mine: &str, theirs: &str) -> Option<String> {
     let (b, m, t) = (s::parse(base).ok()?, s::parse(mine).ok()?, s::parse(theirs).ok()?);
-    let forms = merge_keyed(&entries(&b), &entries(&m), &entries(&t))?;
-    Some(lisp::print(&forms).0)
+    let Some(fallback) = b.first().or(m.first()).or(t.first()) else { return Some("\n".to_owned()) };
+    let mut ctor = SyntaxBuilder::new();
+    for form in b.iter().chain(&m).chain(&t) {
+        ctor.import(form);
+    }
+    let (bi, mi, ti): (Vec<_>, Vec<_>, Vec<_>) = (b.iter().map(S::row_id).collect(), m.iter().map(S::row_id).collect(), t.iter().map(S::row_id).collect());
+    let forms = merge_keyed(&mut ctor, &entries((b.first().unwrap_or(fallback), &bi)), &entries((m.first().unwrap_or(fallback), &mi)), &entries((t.first().unwrap_or(fallback), &ti)))?;
+    let arena = ctor.freeze();
+    let forms: Vec<S> = forms.into_iter().map(|id| arena.handle(id)).collect();
+    Some(lisp::text(&forms))
 }
 
 // ---- find, symbols, lines ----
@@ -1451,36 +1460,34 @@ pub fn find_replace(f: &Find, matches: &[(i64, i64)], all: bool) -> Option<(Requ
 /// names, in order; empty for text that does not read.
 /// ponytail: the text is parsed per request, not cached
 pub fn symbols(text: &str) -> Vec<(String, String, i64)> {
-    fn walk(acc: &mut Vec<(String, String, i64)>, f: &S) {
-        match &f.node {
-            Node::List(l)
-                if l.len() >= 2
-                    && matches!(&l[0].node, Node::Sym(k) if matches!(k.as_str(), "graph" | "defn" | "defmacro"))
-                    && matches!(l[1].node, Node::Sym(_)) =>
+    fn walk(acc: &mut Vec<(String, String, i64)>, arena: &s::SyntaxArena, id: SyntaxId) {
+        if let Node::List(l) = arena.row(id).node {
+            let l = arena.range(l);
+            if l.len() >= 2
+                && let (Node::Sym(kind), Node::Sym(name)) = (arena.row(l[0]).node, arena.row(l[1]).node)
+                && matches!(arena.name(kind), "graph" | "defn" | "defmacro")
             {
-                if let (Node::Sym(kind), Node::Sym(name)) = (&l[0].node, &l[1].node) {
-                    acc.push((name.clone(), kind.clone(), l[1].span.start));
-                }
-            }
-            Node::List(l) if l.len() == 3 && matches!(&l[0].node, Node::Sym(h) if h == "let*") && matches!(l[1].node, Node::Vec(_)) => {
-                if let Node::Vec(bs) = &l[1].node {
-                    for (p, _) in s::pairs(bs) {
-                        if let Node::Sym(name) = &p.node {
-                            acc.push((name.clone(), "let*".to_owned(), p.span.start));
-                        }
+                acc.push((arena.name(name).to_owned(), arena.name(kind).to_owned(), i64::from(arena.row(l[1]).span.start)));
+            } else if l.len() == 3
+                && matches!(arena.row(l[0]).node, Node::Sym(h) if arena.name(h) == "let*")
+                && let Node::Vec(bs) = arena.row(l[1]).node
+            {
+                for pair in arena.range(bs).chunks_exact(2) {
+                    let p = arena.row(pair[0]);
+                    if let Node::Sym(name) = p.node {
+                        acc.push((arena.name(name).to_owned(), "let*".to_owned(), i64::from(p.span.start)));
                     }
                 }
             }
-            _ => {}
         }
-        for c in s::children(f) {
-            walk(acc, c);
+        for &child in arena.children(id) {
+            walk(acc, arena, child);
         }
     }
     let Ok(forms) = s::parse(text) else { return Vec::new() };
     let mut acc = Vec::new();
     for f in &forms {
-        walk(&mut acc, f);
+        walk(&mut acc, f.arena(), f.row_id());
     }
     acc
 }
@@ -1549,9 +1556,9 @@ pub fn graph_slot<'a>(state: &'a State, graph: &str) -> Option<&'a Slot> {
 }
 
 /// What the tab shows and edits: its draft when it has one.
-pub fn current_text(state: &State, shown: &Shown) -> String {
-    match state.tab {
-        Tab::Document => state.draft.clone().unwrap_or_else(|| shown.applied.text().to_owned()),
+pub fn current_text(state: &State, shown: &Shown) -> Result<String, Diagnostic> {
+    Ok(match state.tab {
+        Tab::Document => match &state.draft { Some(draft) => draft.clone(), None => shown.applied.text()?.to_owned() },
         Tab::Graph => match graph_slot(state, &shown.graph) {
             Some(s) => s.gtext.clone(),
             None => shown.text.clone(),
@@ -1560,7 +1567,7 @@ pub fn current_text(state: &State, shown: &Shown) -> String {
             Some((k, t)) if *k == shown.key => t.clone(),
             _ => shown.text.clone(),
         },
-    }
+    })
 }
 
 /// The state after a command: `Select` is a request at once, the rest wait for `view`.
@@ -1581,8 +1588,8 @@ pub fn command(state: &State, c: Command) -> State {
 /// The 1-based line of a diagnostic in the text it was checked from: its position, else its span.
 pub fn line_of(text: &str, d: &Diagnostic) -> Option<i64> {
     match (&d.position, &d.span) {
-        (Some(p), _) => Some(p.line),
-        (None, Some(s)) => Some(diagnostic::position_of_offset(text, s.start).line),
+        (Some(p), _) => Some(i64::from(p.line)),
+        (None, Some(s)) => Some(i64::from(diagnostic::position_of_offset(text, s.start).line)),
         (None, None) => None,
     }
 }
@@ -1597,25 +1604,26 @@ fn line_stop(text: &str, line: i64) -> i64 {
 }
 
 fn symbol_spans(text: &str) -> Vec<(String, Span)> {
-    fn walk(acc: &mut Vec<(String, Span)>, f: &S) {
-        if let Node::Sym(name) = &f.node {
-            acc.push((name.clone(), f.span.clone()));
+    fn walk(acc: &mut Vec<(String, Span)>, arena: &s::SyntaxArena, id: SyntaxId) {
+        let row = arena.row(id);
+        if let Node::Sym(name) = row.node {
+            acc.push((arena.name(name).to_owned(), row.span.clone()));
         }
-        for c in s::children(f) {
-            walk(acc, c);
+        for &child in arena.children(id) {
+            walk(acc, arena, child);
         }
     }
     let Ok(forms) = s::parse(text) else { return Vec::new() };
     let mut acc = Vec::new();
     for f in &forms {
-        walk(&mut acc, f);
+        walk(&mut acc, f.arena(), f.row_id());
     }
     acc
 }
 
 /// The symbol the byte `at` touches; `None` for anything else or text that does not read.
 pub fn symbol_at(text: &str, byte: i64) -> Option<String> {
-    symbol_spans(text).into_iter().find(|(_, span)| span.start <= byte && byte <= span.finish).map(|(n, _)| n)
+    symbol_spans(text).into_iter().find(|(_, span)| i64::from(span.start) <= byte && byte <= i64::from(span.finish)).map(|(n, _)| n)
 }
 
 /// `references text name`: the byte and the line's text of every use of the symbol `name`, in order.
@@ -1624,9 +1632,9 @@ pub fn references(text: &str, name: &str) -> Vec<(i64, String)> {
         .into_iter()
         .filter(|(n, _)| n == name)
         .map(|(_, span)| {
-            let line = diagnostic::position_of_offset(text, span.start).line;
+            let line = i64::from(diagnostic::position_of_offset(text, span.start).line);
             let a = line_start(text, line);
-            (span.start, pxui_shell::kit::ocaml_trim(&sub(text, a, line_stop(text, line) - a)).to_owned())
+            (i64::from(span.start), pxui_shell::kit::ocaml_trim(&sub(text, a, line_stop(text, line) - a)).to_owned())
         })
         .collect()
 }
@@ -1640,7 +1648,7 @@ pub fn visible(c: &Checked, text: &str) -> Vec<Diagnostic> {
     c.found
         .iter()
         .filter(|d| match line_of(&c.at, d) {
-            Some(line) => shared >= line_stop(&c.at, line).max(d.span.as_ref().map(|s| s.finish).unwrap_or(0)),
+            Some(line) => shared >= line_stop(&c.at, line).max(d.span.as_ref().map(|s| i64::from(s.finish)).unwrap_or(0)),
             None => false,
         })
         .cloned()
@@ -1760,6 +1768,8 @@ pub fn summary(state: &State) -> String {
 /// What `view` asks the editor to apply after the frame.
 #[derive(Clone, Debug)]
 pub enum Intent {
+    /// Printing failed before any draft or source mutation.
+    PrintError(Diagnostic),
     Tab(Tab),
     DocDraft(String),
     /// Check & apply the whole workspace text
@@ -1815,11 +1825,11 @@ pub fn live_delay() -> f64 {
     LIVE_DELAY
 }
 
-fn dirty(state: &State, shown: &Shown) -> bool {
-    match &state.draft {
-        Some(d) => d != shown.applied.text(),
+fn dirty(state: &State, shown: &Shown) -> Result<bool, Diagnostic> {
+    Ok(match &state.draft {
+        Some(d) => d != shown.applied.text()?,
         None => false,
-    }
+    })
 }
 
 // ---- drawing ----
@@ -1920,8 +1930,12 @@ fn tab_labels(width: i64, dirty: bool) -> Vec<(Tab, String)> {
 
 /// The room the Selection / Graph / Document tabs of `view` take in the header of a panel `width` wide.
 pub fn tabs_width(ui: &mut Ui, width: i64, state: &State, shown: &Shown) -> f64 {
+    let dirty = match dirty(state, shown) {
+        Ok(dirty) => dirty,
+        Err(error) => return ui.text_width(None, &diagnostic::to_string(&error)),
+    };
     let mut w = -12.0;
-    for (_, label) in tab_labels(width, dirty(state, shown)) {
+    for (_, label) in tab_labels(width, dirty) {
         w = w + 12.0 + ui.text_width(None, &label);
     }
     w
@@ -2082,20 +2096,23 @@ fn caret_select(text: &str, state: &State, shown: &Shown) -> Rc<dyn Fn(i64) -> O
     Rc::new(move |byte| {
         let mapped = mapped.get_or_init(|| {
             let forms = s::parse(&text).ok()?;
-            fn spans(form: &S) -> Spans {
-                let mut out = vec![(form.id, form.span.clone())];
-                for c in s::children(form) {
-                    out.extend(spans(c));
+            fn spans(out: &mut Spans, arena: &s::SyntaxArena, id: SyntaxId) {
+                let row = arena.row(id);
+                out.push((row.id, row.span.clone()));
+                for &child in arena.children(id) {
+                    spans(out, arena, child);
                 }
-                out
             }
-            let all: Spans = forms.iter().flat_map(spans).collect();
+            let mut all = Vec::new();
+            for form in &forms {
+                spans(&mut all, form.arena(), form.row_id());
+            }
             let all_arc = Arc::new(all.clone());
             Some(match (tab, forms.as_slice()) {
                 (Tab::Document, _) => Shown { source: Arc::new(forms.clone()), spans: all_arc, body: None, ..shown.clone() },
-                (Tab::Graph, [form]) => Shown { spans: all_arc.clone(), body: last(form).map(|b| (Arc::new(b.clone()), all_arc)), ..shown.clone() },
+                (Tab::Graph, [form]) => Shown { spans: all_arc.clone(), body: last(form).map(|b| (Arc::new(b), all_arc)), ..shown.clone() },
                 (Tab::Selection, [form]) => {
-                    let body = if matches!(s::head(form), Some("graph" | "defn")) { last(form).unwrap_or(form).clone() } else { form.clone() };
+                    let body = if matches!(s::head(form), Some("graph" | "defn")) { last(form).unwrap_or_else(|| form.clone()) } else { form.clone() };
                     Shown { spans: all_arc.clone(), body: Some((Arc::new(body), all_arc)), ..shown.clone() }
                 }
                 _ => shown.clone(),
@@ -2199,7 +2216,7 @@ fn editor_area(
     o.errors = errors.iter().filter_map(|d| line_of(text, d)).collect();
     o.messages = errors
         .iter()
-        .filter_map(|d| line_of(text, d).map(|line| (line, d.span.as_ref().map(|s| (s.start, s.finish)), format!("{}  {}", d.code, first_line(&d.message)))))
+        .filter_map(|d| line_of(text, d).map(|line| (line, d.span.as_ref().map(span_range), format!("{}  {}", d.code, first_line(&d.message)))))
         .collect();
     o.spans = spans;
     o.reveal = reveal;
@@ -2514,15 +2531,15 @@ fn editor_area(
 }
 
 /// The text pane: draws inside `Ui::frame` and returns the intents `Editor_frame` applies after it.
-pub fn view(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f64>, vocab: &Vocab, names: &Names, time: f64, state: &State, shown: &Shown) -> Vec<Intent> {
+fn view_checked(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f64>, vocab: &Vocab, names: &Names, time: f64, state: &State, shown: &Shown) -> Result<Vec<Intent>, Diagnostic> {
     let (x, y, width, height) = bounds;
     let row = ui.row_height() as f64;
     let (x, y, width, height) = (x as f64, y as f64, width as f64, height as f64);
     let theme = ui.theme();
     let emit: Emit = Rc::new(RefCell::new(Vec::new()));
     // the printed document is made here, once a frame, never inside a token scrub
-    let _ = shown.applied.text();
-    let dirty = dirty(state, shown);
+    let _ = shown.applied.text()?;
+    let dirty = dirty(state, shown)?;
     // the workspace sheet's narrow Lisp panel (under 400 points): "Doc", the two buttons alone in
     // the bar and no status row
     let narrow = width < 400.0;
@@ -2548,8 +2565,8 @@ pub fn view(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f64>, 
                 .imports
                 .iter()
                 .flat_map(|(file, forms)| {
-                    forms.iter().filter_map(|form| match s::children(form).get(1).map(|c| &c.node) {
-                        Some(Node::Sym(name)) => Some((name.clone(), file.clone())),
+                    forms.iter().filter_map(|form| match form.children().get(1).map(|&id| form.arena().row(id).node) {
+                        Some(Node::Sym(name)) => Some((form.name(name).to_owned(), file.clone())),
                         _ => None,
                     })
                 })
@@ -2572,7 +2589,7 @@ pub fn view(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f64>, 
             }
         }
     };
-    let text = current_text(state, shown);
+    let text = current_text(state, shown)?;
     match state.tab {
         Tab::Document => {
             let errors = errors_of(state, &state.doc_errors, &text);
@@ -2660,5 +2677,46 @@ pub fn view(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f64>, 
         }
     }
     let out = emit.borrow().clone();
-    out
+    Ok(out)
+}
+
+/// A printing refusal is visible in the pane and reaches the editor without replacing its draft.
+pub fn view(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f64>, vocab: &Vocab, names: &Names, time: f64, state: &State, shown: &Shown) -> Vec<Intent> {
+    match view_checked(ui, bounds, tabs_right, vocab, names, time, state, shown) {
+        Ok(intents) => intents,
+        Err(error) => {
+            let (x, y, width, height) = bounds;
+            let boxed = ui.box_("text-print-error", BoxOpts::default().flags(CLIP)
+                .w(Size::Px(width as f64)).h(Size::Px(height as f64)).at((x as f64, y as f64)));
+            let message = diagnostic::to_string(&error);
+            ui.draw(&boxed, Box::new(move |paint, (x, y, _, _)| {
+                let top = paint.text_top(None, y, 24.0);
+                paint.text_c((x + 12.0, top), theme::invalid(), &message);
+            }));
+            vec![Intent::PrintError(error)]
+        }
+    }
+}
+
+#[cfg(test)]
+mod printing_errors {
+    use super::*;
+
+    #[test]
+    fn cached_source_size_failure_preserves_an_unapplied_draft() {
+        let error = diagnostic::check_source_len(diagnostic::MAX_SOURCE_BYTES + 1).unwrap_err();
+        let value = OnceLock::new();
+        let _ = value.set(Err(error.clone()));
+        let printed = Printed { cell: Arc::new(PrintCell { value, source: PrintSource::Ready }) };
+        assert_eq!(printed.text().unwrap_err(), error);
+        assert_eq!(printed.spans().unwrap_err(), error);
+        let source = s::parse("(workspace w (graph g :context host 1))").unwrap();
+        let mut shown = make_shown(&source, "g", None, Tab::Document).unwrap();
+        shown.applied = printed;
+        let state = State { tab: Tab::Document, draft: Some("unsaved source".to_owned()), ..initial() };
+        assert_eq!(current_text(&state, &shown).unwrap(), "unsaved source");
+        assert_eq!(state.draft.as_deref(), Some("unsaved source"));
+        assert_eq!(current_text(&State { draft: None, ..state.clone() }, &shown).unwrap_err(), error);
+        assert_eq!(state.draft.as_deref(), Some("unsaved source"));
+    }
 }

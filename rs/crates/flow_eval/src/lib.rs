@@ -14,3 +14,5 @@ mod test_array;
 mod test_workspace_eval;
 #[cfg(test)]
 mod test_reentrant;
+#[cfg(test)]
+mod test_safety;

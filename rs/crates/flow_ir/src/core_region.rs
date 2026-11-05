@@ -12,6 +12,7 @@ use crate::core_ir::Region::{
 use crate::core_ir::RegionT;
 use flow_check::op::{self, PackedKind};
 use flow_check::workspace::{self as W, HofKind, LoopKind, Node, Path, Pattern, Term};
+use flow_check::term_arena::{Draft, Field, Literal, PatternNode, TermBuilder, TermId};
 use flow_eval::Residual;
 use flow_syntax::context;
 use flow_syntax::packed_ops::{self, Binary, Comparison, Conversion, Integer, Unary};
@@ -20,6 +21,7 @@ use flow_syntax::ty::{self, Ty};
 use flow_syntax::value::{self as V, ResidualId, Value};
 use flow_syntax::{lisp, Diagnostic};
 use rays_diagnostic::Span;
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -54,7 +56,7 @@ fn diag(span: Option<Span>, code: &str, message: &str) -> Diagnostic {
     rays_diagnostic::error(code.to_owned(), message.to_owned(), span, None, None, Vec::new(), Vec::new())
 }
 fn refusal(at: &Term, code: &str, message: &str) -> Stop {
-    Stop::Refused(diag(Some(at.form.span.clone()), code, message))
+    Stop::Refused(diag(Some(at.form().span.clone()), code, message))
 }
 fn invalid(message: &str) -> Stop { Stop::Invalid(message.to_owned()) }
 /// `e.registers.(i)`.
@@ -165,12 +167,12 @@ fn integer_work(instruction: &I) -> bool {
 
 fn paths(view: &Residual::View, sites: &mut Vec<(i64, Path, Vec<i64>)>, t: &Term) {
     // `sites` is the OCaml list reversed: its head is the last element.
-    if let Some(path) = &t.path {
-        sites.push((view.instance, path.clone(), view.iter.clone()));
+    if let Some(path) = t.path() {
+        sites.push((view.instance, path.iter().map(|name| t.name(*name).to_owned()).collect(), view.iter.clone()));
     }
-    match &t.node {
-        Node::Bypass(call) => { if let Some(input) = W::bypass_input(call) { paths(view, sites, &input); } }
-        _ => for child in W::children_ref(t) { paths(view, sites, child); },
+    match t.node {
+        Node::Bypass(call) => { if let Some(input) = W::bypass_input(&t.child(call)) { paths(view, sites, &input); } }
+        _ => for child in t.children() { paths(view, sites, &t.child(*child)); },
     }
 }
 
@@ -202,26 +204,41 @@ fn canonical_operator(residual: ResidualId, name: &str) -> bool {
     }
 }
 
+fn residual_term(residual: ResidualId) -> Res<std::sync::Arc<Term>> {
+    Residual::residual_term(residual).ok_or_else(|| V::fail("E_RESIDUAL_ID", "Residual belongs to an expired evaluation.").into())
+}
+
 /// A field of a live record (a matrix chosen per frame): the field of the one residual; a live
 /// vector's component stays a component of its one uniform.
 fn field_residual(r: ResidualId, value: &Value, field: &str) -> Res<Value> {
-    let view = Residual::residual_view(r)?;
-    let ty = match &view.term.ty {
+    let source = residual_term(r)?;
+    let ty = match source.ty() {
         Ty::Record(fs) => match fs.iter().find(|(n, _)| n == field) {
             Some((_, ty)) => ty.clone(),
             None => return Err(Stop::Unsupported),
         },
         _ => return Err(Stop::Unsupported),
     };
-    let term = Term { path: None, ty, node: Node::RefBinding("$field".to_owned(), vec![field.to_owned()]), form: view.term.form.clone() };
+    let mut builder = flow_check::term_arena::TermBuilder::new();
+    let form = builder.import_form(&source.form());
+    let term = builder.push(None, &ty, form, flow_check::term_arena::Draft::RefBinding("$field".to_owned(), vec![field.to_owned()]));
+    let term = builder.freeze().handle(term);
     let bound = Residual::with_bindings(r, &term, &[("$field".to_owned(), value.clone())])?;
     Ok(Value::Residual(bound))
 }
 
 fn captured_value(bindings: &[(String, Value)], name: &str, fields: &[String]) -> Res<Value> {
-    let mut value = bindings.iter().find(|(n, _)| n == name).map(|(_, v)| v.clone()).ok_or(Stop::Unsupported)?;
-    for field in fields {
-        value = match (&value, field.as_str()) {
+    let value = bindings.iter().find(|(n, _)| n == name).map(|(_, v)| v.clone()).ok_or(Stop::Unsupported)?;
+    field_value(value, fields)
+}
+
+fn field_value(mut value: Value, fields: &[String]) -> Res<Value> {
+    for field in fields { value = field_step(value, field)?; }
+    Ok(value)
+}
+
+fn field_step(value: Value, field: &str) -> Res<Value> {
+    Ok(match (&value, field) {
             (Value::Residual(r), f) => field_residual(*r, &value, f)?,
             (Value::Record(fs), f) | (Value::Struct(_, _, fs), f) => fs.iter().find(|(n, _)| n == f).map(|(_, v)| v.clone()).ok_or(Stop::Unsupported)?,
             (Value::Fn(function), f) => Residual::function_bindings(*function).into_iter().find(|(n, _)| n == f).map(|(_, v)| v).ok_or(Stop::Unsupported)?,
@@ -229,9 +246,7 @@ fn captured_value(bindings: &[(String, Value)], name: &str, fields: &[String]) -
             (Value::Vec2(x, _), "x") | (Value::Vec2(_, x), "y") => Value::Float(*x),
             (Value::Vec4(x, _, _, _), "x") | (Value::Vec4(_, x, _, _), "y") | (Value::Vec4(_, _, x, _), "z") | (Value::Vec4(_, _, _, x), "w") => Value::Float(*x),
             _ => return Err(Stop::Unsupported),
-        };
-    }
-    Ok(value)
+    })
 }
 
 type Params = Vec<(Pattern, Option<Ty>)>;
@@ -258,29 +273,35 @@ fn helper_body(at: &Term, residual: ResidualId, bindings: &[(String, Value)], fu
 }
 
 fn literal_function(f: &Term) -> bool {
-    match &f.node {
-        Node::Fn { capture: Some(value), .. } => literal_function(value),
-        Node::Expanded { body, .. } => literal_function(body),
-        Node::Fn { capture: None, .. } => true,
+    match f.node {
+        Node::Fn(id) => f.arena().function(id).capture.map(|value| literal_function(&f.child(value))).unwrap_or(true),
+        Node::Expanded(id) => literal_function(&f.child(f.arena().expanded(id).body)),
         _ => false,
     }
 }
 
 /// The element count of a source known before running.
 pub fn count_of(residual: ResidualId, s: &Term) -> Option<i64> {
-    match &s.node {
-        Node::RefBinding(name, fields) => {
-            let view = Residual::residual_view(residual).ok()?;
-            match captured_value(&view.bindings, name, fields) {
-                Ok(v @ (Value::Int_array(_) | Value::Text_array(_) | Value::Float_array(_) | Value::Vec2_array(_) | Value::Vec3_array(_) | Value::Vec4_array(_))) => {
-                    V::array_length(&v).ok().map(|n| n as i64)
-                }
+    let arena = s.arena();
+    match s.node {
+        Node::RefBinding(id) => {
+            let binding = arena.ref_binding(id);
+            let mut value = Residual::residual_binding(residual, s.name(binding.name))?;
+            for name in arena.name_ids(binding.fields) {
+                value = field_step(value, s.name(*name)).ok()?;
+            }
+            match value {
+                v @ (Value::Int_array(_) | Value::Text_array(_) | Value::Float_array(_) | Value::Vec2_array(_) | Value::Vec3_array(_) | Value::Vec4_array(_)) => V::array_length(&v).ok().map(|n| n as i64),
                 _ => None,
             }
         }
-        Node::Op { op, args, .. } if matches!(op.as_str(), "array/int" | "array/text" | "array/float" | "array/vec3" | "array/vec4" | "array/range") => {
-            match args.iter().find(|(n, _)| n == "count") {
-                Some((_, Term { node: Node::Lit(param::Value::Int(n)), .. })) if *n >= 0 => Some(*n),
+        Node::Op(id) if matches!(s.name(arena.op(id).op), "array/int" | "array/text" | "array/float" | "array/vec3" | "array/vec4" | "array/range") => {
+            let count = arena.fields(arena.op(id).args).iter().find(|field| s.name(field.name) == "count")?;
+            match arena.row(count.term).node {
+                Node::Lit(id) => match arena.literal(id) {
+                    flow_check::term_arena::Literal::Int(n) if n >= 0 => Some(n),
+                    _ => None,
+                },
                 _ => None,
             }
         }
@@ -310,124 +331,99 @@ fn count_of_sources(iteration: Iteration, counts: &[Option<i64>]) -> Res<Option<
     }
 }
 
-fn pattern_names(p: &Pattern) -> Vec<String> {
-    match p {
-        Pattern::Name(name) => vec![name.clone()],
-        Pattern::Keys(names) => names.clone(),
-        Pattern::Seq(ps) => ps.iter().flat_map(pattern_names).collect(),
+fn pattern_binds(term: &Term, pattern: flow_check::term_arena::PatternId, name: &str) -> bool {
+    use flow_check::term_arena::PatternNode;
+    match term.arena().pattern(pattern) {
+        PatternNode::Name(id) => term.name(id) == name,
+        PatternNode::Keys(range) => term.arena().name_ids(range).iter().any(|id| term.name(*id) == name),
+        PatternNode::Seq(range) => term.arena().pattern_ids(range).iter().any(|id| pattern_binds(term, *id, name)),
     }
 }
 
 fn reads_names(names: &[String], term: &Term) -> bool {
-    let any = |ts: &[&Term]| ts.iter().any(|t| reads_names(names, t));
-    fn of_fields(fs: &[(String, Term)]) -> Vec<&Term> { fs.iter().map(|(_, t)| t).collect() }
-    match &term.node {
-        Node::RefBinding(name, _) => names.contains(name),
-        Node::Fn { params, body, .. } => {
-            let bound: Vec<String> = params.iter().flat_map(|(p, _)| pattern_names(p)).collect();
-            let remaining: Vec<String> = names.iter().filter(|n| !bound.contains(n)).cloned().collect();
-            reads_names(&remaining, body)
+    let arena = term.arena();
+    match term.node {
+        Node::RefBinding(id) => names.iter().any(|name| name == term.name(arena.ref_binding(id).name)),
+        Node::Fn(id) => {
+            let function = arena.function(id);
+            let remaining: Vec<String> = names.iter().filter(|name| !arena.params(function.params).iter().any(|param| pattern_binds(term, param.pattern, name))).cloned().collect();
+            reads_names(&remaining, &term.child(function.body))
         }
-        Node::Let(bindings, body) => {
-            let mut names: Vec<String> = names.to_vec();
-            for (p, t) in bindings {
-                if reads_names(&names, t) { return true; }
-                let bound = pattern_names(p);
-                names.retain(|n| !bound.contains(n));
+        Node::Let(id) => {
+            let binding = arena.let_node(id);
+            let mut names = names.to_vec();
+            for binding in arena.bindings(binding.bindings) {
+                if reads_names(&names, &term.child(binding.term)) { return true; }
+                names.retain(|name| !pattern_binds(term, binding.pattern, name));
             }
-            reads_names(&names, body)
+            reads_names(&names, &term.child(binding.body))
         }
-        Node::Op { args, .. } | Node::Call { args, .. } | Node::Record(args) => any(&of_fields(args)),
-        Node::CallFn { args, .. } => any(&args.iter().collect::<Vec<_>>()),
-        Node::GraphRef { inputs, .. } => any(&of_fields(inputs)),
-        Node::Vec(ts) | Node::ListLit(ts) | Node::Str(ts) | Node::ListOp(_, ts) | Node::Hof(_, ts) => any(&ts.iter().collect::<Vec<_>>()),
-        Node::Loop { accs, clauses, body, .. } => {
-            let mut all: Vec<&Term> = vec![body];
-            all.extend(accs.iter().chain(clauses.iter()).map(|(_, t)| t));
-            any(&all)
-        }
-        Node::State { init, step, .. } => any(&[init, step]),
-        Node::WithError(a, b) => any(&[a, b]),
-        Node::ErrorRows { rows, mapper, .. } => any(&[rows, mapper]),
-        Node::If(c, a, b) => any(&[c, a, b]),
-        Node::Cond(arms, d) => {
-            let mut all: Vec<&Term> = vec![d];
-            for (a, b) in arms { all.push(a); all.push(b); }
-            any(&all)
-        }
-        Node::Case(s, arms, d) => {
-            let mut all: Vec<&Term> = vec![s, d];
-            all.extend(arms.iter().map(|(_, t)| t));
-            any(&all)
-        }
-        Node::Get(body, _) | Node::Expanded { body, .. } => reads_names(names, body),
-        Node::Bypass(call) => W::bypass_input(call).map(|t| reads_names(names, &t)).unwrap_or(false),
-        Node::Assoc(r, args) => {
-            let mut all: Vec<&Term> = vec![r];
-            all.extend(args.iter().map(|(_, t)| t));
-            any(&all)
-        }
-        Node::Lit(_) | Node::Text(_) | Node::Nil | Node::Time | Node::FnRef(_) => false,
+        Node::CallFn(id) => arena.term_ids(arena.call_fn(id).args).iter().any(|id| reads_names(names, &term.child(*id))),
+        Node::Bypass(call) => W::bypass_input(&term.child(call)).map(|t| reads_names(names, &t)).unwrap_or(false),
+        _ => term.children().iter().any(|id| reads_names(names, &term.child(*id))),
     }
 }
 
-fn function_body(
+fn function_body<'b>(
     residual: ResidualId,
-    bindings: &[(String, Value)],
+    bindings: &'b [(String, Value)],
     result_ty: &Ty,
     reduction: Option<(&Term, &Term)>,
     f: &Term,
-) -> Res<(Params, Term, Vec<(String, Value)>)> {
-    let captured_body = |f: &Term| -> Res<(Params, Term, Vec<(String, Value)>)> {
+) -> Res<(Params, Term, Cow<'b, [(String, Value)]>)> {
+    let captured_body = |f: &Term| -> Res<(Params, Term, Cow<'b, [(String, Value)]>)> {
         match Residual::eval_term(residual, f, &input::at_time(0.0), None, None, None) {
             Ok(Value::Fn(function)) => match Residual::function_body(function) {
-                Some((params, body)) => Ok((params, body, Residual::function_bindings(function))),
+                Some((params, body)) => Ok((params, body, Cow::Owned(Residual::function_bindings(function)))),
                 None => Err(refusal(f, "E_PACKED_FUNCTION", "Captured function has no instantiated packed body.")),
             },
             Err(d) => Err(Stop::Refused(d)),
             Ok(_) => Err(refusal(f, "E_PACKED_FUNCTION", "Captured callable did not resolve to a function.")),
         }
     };
-    match &f.node {
-        Node::Fn { capture: Some(_), .. } => captured_body(f),
-        Node::Fn { params, body, .. } => Ok((params.clone(), (**body).clone(), bindings.to_vec())),
-        Node::RefBinding(name, fields) if fields.is_empty() => match bindings.iter().find(|(n, _)| n == name).map(|(_, v)| v) {
+    match f.node {
+        Node::Fn(id) if f.arena().function(id).capture.is_some() => captured_body(f),
+        Node::Fn(id) => {
+            let function = f.arena().function(id);
+            let params = f.arena().params(function.params).iter().map(|param| (f.arena().owned_pattern(param.pattern), param.ty.map(|id| f.arena().ty(id).clone()))).collect();
+            Ok((params, f.child(function.body), Cow::Borrowed(bindings)))
+        }
+        Node::RefBinding(id) if f.arena().name_ids(f.arena().ref_binding(id).fields).is_empty() => {
+            let name = f.name(f.arena().ref_binding(id).name);
+            match bindings.iter().find(|(n, _)| n == name).map(|(_, v)| v) {
             Some(Value::Fn(function)) => match Residual::function_body(*function) {
-                Some((params, body)) => Ok((params, body, Residual::function_bindings(*function))),
+                Some((params, body)) => Ok((params, body, Cow::Owned(Residual::function_bindings(*function)))),
                 None => Err(refusal(f, "E_PACKED_FUNCTION", &format!("Function {} has no instantiated packed body.", name))),
             },
             _ => Err(refusal(f, "E_PACKED_FUNCTION", &format!("Function binding {} is unavailable.", name))),
+            }
         },
-        Node::FnRef(name) if name == "+" && reduction.is_some() => {
+        Node::FnRef(name) if f.name(name) == "+" && reduction.is_some() => {
             let extra = Residual::residual_ops(residual);
             match op::find(&extra, "+", &context::value()) {
                 Some(declaration) if op::packed_kind(&declaration) == Some(PackedKind::Binary(Binary::Add)) => {
                     let (seed, source) = reduction.unwrap();
-                    let item_ty = match &source.ty {
+                    let item_ty = match source.ty() {
                         Ty::Array(ty) => (**ty).clone(),
                         _ => return Err(refusal(source, "E_PACKED_TYPE", "Packed reduce requires a numeric array.")),
                     };
-                    let arg = |name: &str, ty: Ty| Term { path: None, ty, node: Node::RefBinding(name.to_owned(), Vec::new()), form: f.form.clone() };
-                    let body = Term {
-                        path: f.path.clone(),
-                        ty: result_ty.clone(),
-                        node: Node::Op {
-                            op: declaration.name.clone(),
-                            args: vec![("a".to_owned(), arg("@accumulator", seed.ty.clone())), ("b".to_owned(), arg("@item", item_ty))],
-                            skip: Vec::new(),
-                        },
-                        form: f.form.clone(),
-                    };
-                    Ok((vec![(Pattern::Name("@accumulator".to_owned()), None), (Pattern::Name("@item".to_owned()), None)], body, bindings.to_vec()))
+                    let mut builder = TermBuilder::new();
+                    let form = builder.import_form(&f.form());
+                    let a = builder.push(None, seed.ty(), form, Draft::RefBinding("@accumulator".to_owned(), Vec::new()));
+                    let b = builder.push(None, &item_ty, form, Draft::RefBinding("@item".to_owned(), Vec::new()));
+                    let path: Option<Vec<_>> = f.path().map(|ids| ids.iter().map(|&id| f.name(id).to_owned()).collect());
+                    let body = builder.push(path.as_deref(), result_ty, form, Draft::Op { op: declaration.name.clone(), args: vec![("a".to_owned(), a), ("b".to_owned(), b)], skip: Vec::new() });
+                    let body = builder.freeze().handle(body);
+                    Ok((vec![(Pattern::Name("@accumulator".to_owned()), None), (Pattern::Name("@item".to_owned()), None)], body, Cow::Borrowed(bindings)))
                 }
                 _ => Err(refusal(f, "E_PACKED_FUNCTION", "Packed named reduce requires canonical addition.")),
             }
         }
         Node::FnRef(name) => {
-            let (params, body, _) = definition_body(f, residual, name)?;
-            Ok((params, body, bindings.to_vec()))
+            let (params, body, _) = definition_body(f, residual, f.name(name))?;
+            Ok((params, body, Cow::Borrowed(bindings)))
         }
-        Node::Op { op, .. } if op == "first" => captured_body(f),
+        Node::Op(id) if f.name(f.arena().op(id).op) == "first" => captured_body(f),
         _ => Err(refusal(f, "E_PACKED_FUNCTION", "Packed kernels require a function with an instantiated body.")),
     }
 }
@@ -488,7 +484,6 @@ struct Lower {
     term: std::sync::Arc<Term>,
     dynamic: bool,
     bindings: Vec<(String, Value)>,
-    sources: Vec<Term>,
     code: Vec<I>,
     uniforms: Vec<Value>,
     uniform_names: Vec<(String, Vec<String>)>,
@@ -551,7 +546,7 @@ impl Lower {
 
     fn array_type(&self, value: &Value) -> Res<Ty> {
         match value {
-            Value::Residual(r) => Ok(Residual::residual_view(*r)?.term.ty.clone()),
+            Value::Residual(r) => Ok(residual_term(*r)?.ty().clone()),
             other => Ok(V::ty_of(other)),
         }
     }
@@ -669,13 +664,12 @@ impl Lower {
         }
     }
 
-    fn input(&mut self, i: usize, width: i64) -> Res<Expression> {
-        let source_ty = self.sources[i].ty.clone();
+    fn input(&mut self, i: usize, width: i64, source_ty: &Ty) -> Res<Expression> {
         let mut registers = Vec::new();
         for j in 0..width {
-            registers.push(if source_ty == array_of(Ty::Int) {
+            registers.push(if matches!(source_ty, Ty::Array(ty) if **ty == Ty::Int) {
                 self.emit(I::Int_input(i as i64))?
-            } else if source_ty == array_of(Ty::Text) {
+            } else if matches!(source_ty, Ty::Array(ty) if **ty == Ty::Text) {
                 self.emit(I::Text_input(i as i64))?
             } else {
                 self.emit(I::Input(i as i64, width, j))?
@@ -706,7 +700,7 @@ impl Lower {
         let scalar = matches!(v, Value::Int(_) | Value::Text(_) | Value::Float(_) | Value::Bool(_) | Value::Vec2(..) | Value::Vec3(..) | Value::Vec4(..));
         if simple && (self.dynamic || flow_eval::is_live(v) || matches!(v, Value::Source(..))) {
             let ty = match v {
-                Value::Residual(r) => Residual::residual_view(*r)?.term.ty.clone(),
+                Value::Residual(r) => residual_term(*r)?.ty().clone(),
                 other => V::ty_of(other),
             };
             let width = if ty == Ty::Text {
@@ -738,13 +732,13 @@ impl Lower {
         }
     }
 
-    fn capture_path(&self, name: &str, fields: &[String]) -> (String, Vec<String>) {
+    fn capture_path(&self, owner: &Term, name: &str, fields: &[flow_syntax::arena::NameId]) -> (String, Vec<String>) {
         match &self.capture_scope {
-            None => (name.to_owned(), fields.to_vec()),
+            None => (name.to_owned(), fields.iter().map(|&id| owner.name(id).to_owned()).collect()),
             Some((root, path)) => {
                 let mut p = path.clone();
                 p.push(name.to_owned());
-                p.extend(fields.iter().cloned());
+                p.extend(fields.iter().map(|&id| owner.name(id).to_owned()));
                 (root.clone(), p)
             }
         }
@@ -776,7 +770,7 @@ impl Lower {
             }
             Value::Residual(r) => {
                 // a live record (a matrix chosen per frame) is a uniform per field
-                match Residual::residual_view(*r)?.term.ty.clone() {
+                match residual_term(*r)?.ty().clone() {
                     Ty::Record(fs) => {
                         let mut out = Vec::new();
                         for (key, _) in &fs {
@@ -795,8 +789,8 @@ impl Lower {
         Ok(e)
     }
 
-    fn captured(&mut self, at: &Term, name: &str, fields: &[String]) -> Res<Expression> {
-        let (name, fields) = self.capture_path(name, fields);
+    fn captured(&mut self, at: &Term, name: &str, fields: &[flow_syntax::arena::NameId]) -> Res<Expression> {
+        let (name, fields) = self.capture_path(at, name, fields);
         self.capture(at, &name, &fields)
     }
 
@@ -903,7 +897,7 @@ impl Lower {
 
     fn carried_initial(&mut self, seed: &Term, ty: &Ty, value: &Expression) -> Res<Vec<i64>> {
         // ponytail: mixed carries stay in Core until Region retains their initial and later numeric kinds.
-        if !same_carry_type(&seed.ty, ty) {
+        if !same_carry_type(seed.ty(), ty) {
             return Err(refusal(seed, "E_PACKED_TYPE", "Carried numeric widening requires the structured Core representation."));
         }
         Ok(self.leaves(seed, ty, value)?.into_iter().map(|(r, _)| r).collect())
@@ -965,12 +959,12 @@ impl Lower {
         })
     }
 
-    fn hsl(&mut self, env: &Env, args: &[(String, Term)]) -> Res<Expression> {
+    fn hsl(&mut self, env: &Env, owner: &Term, args: &[Field]) -> Res<Expression> {
         // Flow.Op.hsl_channels, step for step, with a select per hue sector. Emission order is
         // OCaml's right-to-left argument order.
         let arg = |me: &mut Lower, name: &str| -> Res<i64> {
-            let term = args.iter().find(|(n, _)| n == name).map(|(_, t)| t).ok_or_else(|| invalid("Not_found"))?;
-            let e = me.expression(env, term)?;
+            let term = owner.child(args.iter().find(|field| owner.name(field.name) == name).ok_or_else(|| invalid("Not_found"))?.term);
+            let e = me.expression(env, &term)?;
             let f = me.as_float(&e)?;
             reg(&f, 0)
         };
@@ -1051,7 +1045,7 @@ impl Lower {
     }
 
     #[allow(clippy::too_many_lines)]
-    fn operation(&mut self, env: &Env, t: &Term, op_name: &str, args: &[(String, Term)]) -> Res<Expression> {
+    fn operation(&mut self, env: &Env, t: &Term, op_name: &str, args: &[Field]) -> Res<Expression> {
         let extra = Residual::residual_ops(self.residual);
         let declaration = match op::find(&extra, op_name, &context::value()) {
             Some(o) => match op::packed_kind(&o) {
@@ -1064,14 +1058,14 @@ impl Lower {
         };
         let (declaration, kind) = declaration;
         let mut expressions = Vec::new();
-        for (_, a) in args {
-            expressions.push(self.expression(env, a)?);
+        for field in args {
+            expressions.push(self.expression(env, &t.child(field.term))?);
         }
         if expressions.iter().all(|e| e.constant.is_some()) && !declaration.live {
-            let folded_args: Vec<(String, Value)> = args.iter().zip(expressions.iter()).map(|((name, _), e)| (name.clone(), e.constant.clone().unwrap())).collect();
+            let folded_args: Vec<(String, Value)> = args.iter().zip(expressions.iter()).map(|(field, e)| (t.name(field.name).to_owned(), e.constant.clone().unwrap())).collect();
             let refused: RefCell<Option<Diagnostic>> = RefCell::new(None);
             let node = |name: &str, _: &op::Args| -> Result<Value, Diagnostic> {
-                let d = diag(Some(t.form.span.clone()), "E_PACKED_CONSTANT", &format!("Constant operator {} attempted to create node {}.", op_name, name));
+                let d = diag(Some(t.form().span.clone()), "E_PACKED_CONSTANT", &format!("Constant operator {} attempted to create node {}.", op_name, name));
                 *refused.borrow_mut() = Some(d.clone());
                 Err(d)
             };
@@ -1080,8 +1074,8 @@ impl Lower {
             let value = result?;
             return self.literal(t, &value);
         }
-        if declaration.live && args.is_empty() && matches!(t.ty, Ty::Float | Ty::Int | Ty::Bool) {
-            let register = self.emit(if t.ty == Ty::Int { I::Int_frame(declaration.name.clone()) } else { I::Frame(declaration.name.clone()) })?;
+        if declaration.live && args.is_empty() && matches!(t.ty(), Ty::Float | Ty::Int | Ty::Bool) {
+            let register = self.emit(if *t.ty() == Ty::Int { I::Int_frame(declaration.name.clone()) } else { I::Frame(declaration.name.clone()) })?;
             return Ok(one(register));
         }
         match kind {
@@ -1209,10 +1203,10 @@ impl Lower {
         let index = index.registers[0];
         let table_ty = self.array_registers.get(&prepared).cloned().ok_or_else(|| invalid("Not_found"))?;
         let element = ty::elem(&table_ty).ok_or_else(|| invalid("option is None"))?;
-        if t.ty != Ty::Any && t.ty != element {
-            return Err(refusal(t, "E_PACKED_TYPE", &format!("{} has checked type {}, but its table contains {}.", lisp::flat(&t.form), ty::to_string(&t.ty), ty::to_string(&element))));
+        if *t.ty() != Ty::Any && *t.ty() != element {
+            return Err(refusal(t, "E_PACKED_TYPE", &format!("{} has checked type {}, but its table contains {}.", lisp::flat(&t.form()), ty::to_string(t.ty()), ty::to_string(&element))));
         }
-        let element = if t.ty == Ty::Any { element } else { t.ty.clone() };
+        let element = if *t.ty() == Ty::Any { element } else { t.ty().clone() };
         let gather = |me: &mut Lower, instruction: I| -> Res<i64> {
             match valid { None => me.emit(instruction), Some(valid) => me.under(valid, true, instruction) }
         };
@@ -1231,21 +1225,23 @@ impl Lower {
         Ok(regs(registers))
     }
 
-    fn stage(&mut self, t: &Term, op_name: &str, args: &[(String, Term)], expressions: &[Expression]) -> Res<Expression> {
+    fn stage(&mut self, t: &Term, op_name: &str, args: &[Field], expressions: &[Expression]) -> Res<Expression> {
         let mut operands: Vec<i64> = Vec::new();
-        for ((name, a), e) in args.iter().zip(expressions.iter()) {
-            if name == "texture" { continue; }
-            match &a.ty {
+        for (arg, e) in args.iter().zip(expressions.iter()) {
+            if t.name(arg.name) == "texture" { continue; }
+            match t.arena().ty(t.arena().row(arg.term).ty) {
                 Ty::Array(_) => operands.extend(e.registers.iter().copied()),
                 Ty::Int => operands.extend(self.as_int(e)?.registers),
                 _ => operands.extend(self.as_float(e)?.registers),
             }
         }
         let texture = || -> Res<i64> {
-            match args.iter().find(|(n, _)| n == "texture") {
-                Some((_, Term { node: Node::Lit(param::Value::Int(n)), .. })) => Ok(*n),
-                _ => Err(refusal(t, "E_PACKED_TYPE", &format!("{} names its texture slot with an integer literal.", op_name))),
+            if let Some(arg) = args.iter().find(|arg| t.name(arg.name) == "texture") {
+                if let Node::Lit(id) = t.arena().row(arg.term).node {
+                    if let Literal::Int(n) = t.arena().literal(id) { return Ok(n); }
+                }
             }
+            Err(refusal(t, "E_PACKED_TYPE", &format!("{} names its texture slot with an integer literal.", op_name)))
         };
         let stage = |me: &mut Lower, s: Stage| -> Res<Expression> { Ok(one(me.emit(I::Stage(s, operands.clone()))?)) };
         match op_name {
@@ -1304,7 +1300,7 @@ impl Lower {
         }
     }
 
-    fn arithmetic(&mut self, t: &Term, op_name: &str, declaration: &op::Op, kind: &PackedKind, expressions: &[Expression], args: &[(String, Term)]) -> Res<Expression> {
+    fn arithmetic(&mut self, t: &Term, op_name: &str, declaration: &op::Op, kind: &PackedKind, expressions: &[Expression], args: &[Field]) -> Res<Expression> {
         let width = expressions.iter().fold(1, |n, e| n.max(e.registers.len()));
         let registers: Vec<i64> = match (kind, expressions) {
             (PackedKind::Integer(operation), [a, b]) => {
@@ -1335,22 +1331,23 @@ impl Lower {
                 // seed picks a table, so it is constant
                 let mut live: Vec<(String, i64)> = Vec::new();
                 let mut configuration: Vec<(String, Value)> = Vec::new();
-                for ((name, _), expression) in args.iter().skip(1).zip(rest.iter()) {
+                for (arg, expression) in args.iter().skip(1).zip(rest.iter()) {
+                    let name = t.name(arg.name);
                     let value = match &expression.constant {
                         Some(value) => value.clone(),
                         None if name == "octaves" => {
                             let r = reg(&self.as_int(expression)?, 0)?;
-                            live.push((name.clone(), r));
+                            live.push((name.to_owned(), r));
                             Value::Int(1)
                         }
                         None if name == "lacunarity" || name == "gain" => {
                             let r = reg(&self.as_float(expression)?, 0)?;
-                            live.push((name.clone(), r));
+                            live.push((name.to_owned(), r));
                             Value::Float(if name == "lacunarity" { 2.0 } else { 0.5 })
                         }
                         None => return Err(refusal(t, "E_PACKED_CONSTANT", &format!("Noise configuration {} must be constant.", name))),
                     };
-                    configuration.push((name.clone(), value));
+                    configuration.push((name.to_owned(), value));
                 }
                 let (seed, octaves, lacunarity, gain) = match op::noise_settings(&configuration) {
                     Ok(settings) => settings,
@@ -1426,11 +1423,11 @@ impl Lower {
                 let mut out = Vec::new();
                 for i in 0..width {
                     let register = self.emit(I::Binary(*operation, self.component(&a, i)?, self.component(&b, i)?))?;
-                    out.push(if t.ty == Ty::Int { self.emit(I::Convert(Conversion::IntegerResult(declaration.name.clone()), register))? } else { register });
+                    out.push(if *t.ty() == Ty::Int { self.emit(I::Convert(Conversion::IntegerResult(declaration.name.clone()), register))? } else { register });
                 }
                 out
             }
-            (PackedKind::Unary(Unary::Abs), [a]) if t.ty == Ty::Int => vec![self.emit(I::Int_abs(reg(a, 0)?))?],
+            (PackedKind::Unary(Unary::Abs), [a]) if *t.ty() == Ty::Int => vec![self.emit(I::Int_abs(reg(a, 0)?))?],
             (PackedKind::Unary(operation), [a]) if width == 1 => {
                 let a = self.as_float(a)?;
                 vec![self.emit(I::Unary(*operation, reg(&a, 0)?))?]
@@ -1455,10 +1452,10 @@ impl Lower {
             Err(Stop::Unsupported) => Err(self.term_unsupported(t)),
             Err(Stop::Error(d)) => {
                 if !self.guards.is_empty() || !self.control_scope.is_empty() {
-                    let register = self.emit(I::Raise(t.ty.clone(), d.code.clone(), d.message.clone(), d.cause.clone()))?;
+                    let register = self.emit(I::Raise(t.ty().clone(), d.code.clone(), d.message.clone(), d.cause.clone()))?;
                     Ok(one(register))
                 } else {
-                    let span = d.span.clone().or_else(|| Some(t.form.span.clone()));
+                    let span = d.span.clone().or_else(|| Some(t.form().span.clone()));
                     Err(Stop::Error(Diagnostic { span, ..d }))
                 }
             }
@@ -1467,25 +1464,34 @@ impl Lower {
     }
 
     fn term_unsupported(&self, t: &Term) -> Stop {
-        refusal(t, "E_PACKED_FORM", &format!("Packed term {} has unsupported type {}.", lisp::flat(&t.form), ty::to_string(&t.ty)))
+        refusal(t, "E_PACKED_FORM", &format!("Packed term {} has unsupported type {}.", lisp::flat(&t.form()), ty::to_string(t.ty())))
     }
 
     fn expression_node(&mut self, env: &Env, t: &Term) -> Res<Expression> {
-        match &t.node {
-            Node::Lit(param::Value::Int(n)) => self.literal(t, &Value::Int(*n)),
-            Node::Lit(param::Value::Float(f)) => self.literal(t, &Value::Float(*f)),
-            Node::Lit(param::Value::Bool(b)) => self.literal(t, &Value::Bool(*b)),
-            Node::Text(text) => self.literal(t, &Value::Text(text.clone())),
-            Node::RefBinding(name, fields) => match env_find(env, name) {
+        let arena = t.arena();
+        match t.node {
+            Node::Loop(_) | Node::Hof(_) | Node::Cond(_) | Node::Case(_) | Node::If(_) | Node::CallFn(_) | Node::Let(_) => self.expression_control(env, t),
+            Node::Lit(id) => match arena.literal(id) {
+                Literal::Int(n) => self.literal(t, &Value::Int(n)),
+                Literal::Float(f) => self.literal(t, &Value::Float(f)),
+                Literal::Bool(b) => self.literal(t, &Value::Bool(b)),
+                _ => Err(self.term_unsupported(t)),
+            },
+            Node::Text(id) => self.literal(t, &Value::Text(arena.bytes(id).to_vec())),
+            Node::RefBinding(id) => {
+                let binding = arena.ref_binding(id);
+                let name = t.name(binding.name);
+                let fields = arena.name_ids(binding.fields);
+                match env_find(env, name) {
                 Some(e) => {
                     let mut e = e.clone();
-                    for f in fields { e = field(t, &e, f)?; }
+                    for &f in fields { e = field(t, &e, t.name(f))?; }
                     Ok(e)
                 }
                 None => {
                     // A record may contain a deferred vector. Bind that vector as a uniform before
                     // projecting its component.
-                    let (cname, cfields) = self.capture_path(name, fields);
+                    let (cname, cfields) = self.capture_path(t, name, fields);
                     let direct = captured_value(&self.bindings, &cname, &cfields).is_ok();
                     if direct {
                         self.captured(t, name, fields)
@@ -1493,18 +1499,19 @@ impl Lower {
                         match fields.split_last() {
                             Some((component, prefix)) => {
                                 let base = self.captured(t, name, prefix)?;
-                                field(t, &base, component)
+                                field(t, &base, t.name(*component))
                             }
                             None => Err(refusal(t, "E_PACKED_CAPTURE", &format!("Captured binding {} is unavailable.", name))),
                         }
                     }
                 }
+                }
             },
             Node::Time => Ok(one(self.emit(I::Frame("t".to_owned()))?)),
-            Node::Vec(ts) if matches!(ts.len(), 2 | 3 | 4) => {
+            Node::Vec(ts) if matches!(arena.term_ids(ts).len(), 2 | 3 | 4) => {
                 let mut components = Vec::new();
-                for term in ts {
-                    let e = self.expression(env, term)?;
+                for &id in arena.term_ids(ts) {
+                    let e = self.expression(env, &t.child(id))?;
                     components.push(self.as_float(&e)?);
                 }
                 if !components.iter().all(|e| e.registers.len() == 1) {
@@ -1514,13 +1521,14 @@ impl Lower {
             }
             Node::Record(fs) => {
                 let mut out = Vec::new();
-                for (name, value) in fs { out.push((name.clone(), self.expression(env, value)?)); }
+                for field in arena.fields(fs) { out.push((t.name(field.name).to_owned(), self.expression(env, &t.child(field.term))?)); }
                 Ok(fields_of(out))
             }
-            Node::Assoc(value, updates) => {
-                let value = self.expression(env, value)?;
+            Node::Assoc(id) => {
+                let assoc = arena.assoc(id);
+                let value = self.expression(env, &t.child(assoc.value))?;
                 let mut ups = Vec::new();
-                for (name, term) in updates { ups.push((name.clone(), self.expression(env, term)?)); }
+                for field in arena.fields(assoc.fields) { ups.push((t.name(field.name).to_owned(), self.expression(env, &t.child(field.term))?)); }
                 let mut fields: Vec<(String, Expression)> = value
                     .fields
                     .iter()
@@ -1531,66 +1539,152 @@ impl Lower {
                 }
                 Ok(Expression { fields, ..value })
             }
-            Node::Get(value, f) => {
-                let e = self.expression(env, value)?;
-                field(t, &e, f)
+            Node::Get(id) => {
+                let get = arena.get(id);
+                let e = self.expression(env, &t.child(get.value))?;
+                field(t, &e, t.name(get.name))
             }
-            Node::Loop { kind: LoopKind::Fold, accs, clauses, body, skip, .. }
-                if accs.len() == 1 && clauses.len() == 1 && skip.is_empty()
-                    && matches!(&accs[0].0, Pattern::Name(_))
-                    && matches!(&clauses[0], (Pattern::Name(_), Term { node: Node::Op { op, skip, .. }, .. }) if op == "range" && skip.is_empty())
-                    && canonical_operator(self.residual, "range") =>
+            Node::Op(id) if t.name(arena.op(id).op) == "array/sum" && arena.fields(arena.op(id).args).len() == 1 && canonical_operator(self.residual, "array/sum") => {
+                self.small_sum(env, t, &t.child(arena.fields(arena.op(id).args)[0].term))
+            }
+            Node::Op(id)
+                if matches!(t.name(arena.op(id).op), "array/concat" | "array/slice" | "array/count")
+                    && match (t.name(arena.op(id).op), t.ty()) {
+                        ("array/count", Ty::Int) => true,
+                        ("array/concat" | "array/slice", Ty::Array(_)) => true,
+                        _ => false,
+                    }
+                    && !Residual::free_names(t).iter().any(|n| env_find(env, n).is_some())
+                    && self.constant_only(t.name(arena.op(id).op)) =>
             {
-                let (Pattern::Name(accumulator), seed) = &accs[0] else { return Err(invalid("unreachable")) };
-                let (Pattern::Name(index_name), source) = &clauses[0] else { return Err(invalid("unreachable")) };
-                let Node::Op { args, .. } = &source.node else { return Err(invalid("unreachable")) };
-                let seed_e = self.expression(env, seed)?;
-                let initial = self.carried_initial(seed, &t.ty, &seed_e)?;
+                // Preserve checked argument order and copying. Invariant composition and its count
+                // use the existing selected table/integer captures.
+                self.invariant_value(t)
+            }
+            Node::Op(id) if t.name(arena.op(id).op) == "error" && self.constant_only("error") => {
+                let args = arena.fields(arena.op(id).args);
+                let text = |me: &Lower, arg: &Term| -> Res<String> {
+                    let bytes = match arg.node {
+                        Node::Text(id) => arg.arena().bytes(id).to_vec(),
+                        Node::RefBinding(id) => {
+                            let binding = arg.arena().ref_binding(id);
+                            let resolve = || -> Res<Value> {
+                                let mut value = me.bindings.iter().find(|(name, _)| name == arg.name(binding.name)).map(|(_, value)| value.clone()).ok_or(Stop::Unsupported)?;
+                                for &field in arg.arena().name_ids(binding.fields) { value = field_step(value, arg.name(field))?; }
+                                Ok(value)
+                            };
+                            match resolve() {
+                                Ok(Value::Text(bytes)) => bytes,
+                                _ => return Err(refusal(arg, "E_PACKED_CONSTANT", "Packed error code and message must be constant text.")),
+                            }
+                        }
+                        _ => return Err(refusal(arg, "E_PACKED_CONSTANT", "Packed error code and message must be constant text.")),
+                    };
+                    Ok(String::from_utf8_lossy(&bytes).into_owned())
+                };
+                let find = |key: &str| args.iter().find(|field| t.name(field.name) == key).map(|field| t.child(field.term));
+                // `let code = ... and message = ...`: in order
+                let code = text(self, &find("code").ok_or_else(|| invalid("Not_found"))?)?;
+                let message = text(self, &find("message").ok_or_else(|| invalid("Not_found"))?)?;
+                let cause = match find("cause") { Some(c) => Some(text(self, &c)?), None => None };
+                Ok(one(self.emit(I::Raise(t.ty().clone(), code, message, cause))?))
+            }
+            Node::Op(id) if t.name(arena.op(id).op) == "color/hsl" && arena.fields(arena.op(id).args).iter().map(|field| t.name(field.name)).eq(["h", "s", "l"]) => {
+                self.hsl(env, t, arena.fields(arena.op(id).args))
+            }
+            Node::Op(id) => self.operation(env, t, t.name(arena.op(id).op), arena.fields(arena.op(id).args)),
+            Node::Expanded(id) => self.expression(env, &t.child(arena.expanded(id).body)),
+            Node::Bypass(call) => match W::bypass_input(&t.child(call)) {
+                Some(input) if input.ty() == t.ty() => self.expression(env, &input),
+                Some(input) if *t.ty() == Ty::Float && matches!(input.ty(), Ty::Int | Ty::Bool) => {
+                    let e = self.expression(env, &input)?;
+                    self.as_float(&e)
+                }
+                Some(input) if matches!(t.ty(), Ty::Vec2 | Ty::Vec3 | Ty::Vec4) && matches!(input.ty(), Ty::Int | Ty::Float) => {
+                    let e = self.expression(env, &input)?;
+                    let e = self.as_float(&e)?;
+                    Ok(regs(vec![reg(&e, 0)?; width_res(t.ty())? as usize]))
+                }
+                _ => Err(refusal(t, "E_PACKED_TYPE", "Bypass coercion requires reference evaluation.")),
+            },
+            _ => Err(refusal(t, "E_PACKED_FORM", &format!("Unsupported packed body form {}.", flow_syntax::syntax::head(&t.form()).map(str::to_owned).unwrap_or_else(|| ty::to_string(t.ty()))))),
+        }
+    }
+
+    // Branch rewrites must not reserve their temporary storage at every scalar recursion level.
+    #[inline(never)]
+    fn expression_control(&mut self, env: &Env, t: &Term) -> Res<Expression> {
+        let arena = t.arena();
+        match t.node {
+            Node::Loop(id) if {
+                let node = arena.loop_node(id);
+                let accs = arena.bindings(node.accs);
+                let clauses = arena.bindings(node.clauses);
+                node.kind == LoopKind::Fold && accs.len() == 1 && clauses.len() == 1 && arena.skip(node.skip).is_empty()
+                    && matches!(arena.pattern(accs[0].pattern), PatternNode::Name(_))
+                    && matches!(arena.pattern(clauses[0].pattern), PatternNode::Name(_))
+                    && matches!(arena.row(clauses[0].term).node, Node::Op(id) if t.name(arena.op(id).op) == "range" && arena.skip(arena.op(id).skip).is_empty())
+                    && canonical_operator(self.residual, "range")
+            } => {
+                let node = arena.loop_node(id);
+                let acc = arena.bindings(node.accs)[0];
+                let clause = arena.bindings(node.clauses)[0];
+                let PatternNode::Name(accumulator) = arena.pattern(acc.pattern) else { return Err(invalid("unreachable")) };
+                let PatternNode::Name(index_name) = arena.pattern(clause.pattern) else { return Err(invalid("unreachable")) };
+                let seed = t.child(acc.term);
+                let source = t.child(clause.term);
+                let body = t.child(node.body);
+                let Node::Op(id) = source.node else { return Err(invalid("unreachable")) };
+                let args = arena.fields(arena.op(id).args);
+                let seed_e = self.expression(env, &seed)?;
+                let initial = self.carried_initial(&seed, t.ty(), &seed_e)?;
                 let bound = |me: &mut Lower, term: &Term| -> Res<i64> {
                     let e = me.expression(env, term)?;
                     reg(&me.as_int(&e)?, 0)
                 };
-                let (first, last) = match args.as_slice() {
-                    [(_, last)] => {
+                let (first, last) = match args {
+                    [last] => {
                         let first = self.emit(I::Int_const(0))?;
-                        (first, bound(self, last)?)
+                        (first, bound(self, &t.child(last.term))?)
                     }
-                    [(_, first), (_, last)] => {
-                        let first = bound(self, first)?;
-                        (first, bound(self, last)?)
+                    [first, last] => {
+                        let first = bound(self, &t.child(first.term))?;
+                        (first, bound(self, &t.child(last.term))?)
                     }
-                    _ => return Err(refusal(source, "E_PACKED_FORM", "A counted loop requires one or two range bounds.")),
+                    _ => return Err(refusal(&source, "E_PACKED_FORM", "A counted loop requires one or two range bounds.")),
                 };
-                let control = Loop { first, last, finish: -1, initial, limit: Some(op::max_iterations() as i64), span: source.form.span.clone() };
-                let ty = t.ty.clone();
+                let control = Loop { first, last, finish: -1, initial, limit: Some(op::max_iterations() as i64), span: source.form().span.clone() };
+                let ty = t.ty().clone();
                 self.carried_loop(&ty, control, &mut |me, header, carried| {
                     let index = one(header);
                     let mut env2 = env.clone();
-                    env2.push((accumulator.clone(), carried.clone()));
-                    env2.push((index_name.clone(), index));
+                    env2.push((t.name(accumulator).to_owned(), carried.clone()));
+                    env2.push((t.name(index_name).to_owned(), index));
                     // `(index_name, index) :: (accumulator, carried) :: env`: index_name shadows
-                    let value = me.expression(&env2, body)?;
-                    let next = me.leaves(body, &ty, &value)?.into_iter().map(|(r, _)| r).collect();
+                    let value = me.expression(&env2, &body)?;
+                    let next = me.leaves(&body, &ty, &value)?.into_iter().map(|(r, _)| r).collect();
                     Ok((next, None))
                 })
             }
-            Node::Hof(HofKind::Iterate, parts) if parts.len() >= 3 => {
-                let (fn_term, seed, count, until) = (&parts[0], &parts[1], &parts[2], &parts[3..]);
-                let seed_e = self.expression(env, seed)?;
-                let initial = self.carried_initial(seed, &t.ty, &seed_e)?;
-                let count_e = self.expression(env, count)?;
+            Node::Hof(id) if arena.hof(id).kind == HofKind::Iterate && arena.term_ids(arena.hof(id).args).len() >= 3 => {
+                let parts = arena.term_ids(arena.hof(id).args);
+                let (fn_term, seed, count, until) = (t.child(parts[0]), t.child(parts[1]), t.child(parts[2]), &parts[3..]);
+                let seed_e = self.expression(env, &seed)?;
+                let initial = self.carried_initial(&seed, t.ty(), &seed_e)?;
+                let count_e = self.expression(env, &count)?;
                 let last = reg(&self.as_int(&count_e)?, 0)?;
                 let first = self.emit(I::Int_const(0))?;
-                let control = Loop { first, last, finish: -1, initial, limit: None, span: count.form.span.clone() };
-                let ty = t.ty.clone();
+                let control = Loop { first, last, finish: -1, initial, limit: None, span: count.form().span.clone() };
+                let ty = t.ty().clone();
                 self.carried_loop(&ty, control, &mut |me, _header, carried| {
-                    let inlined = me.inline(env, t, fn_term, &[carried.clone()])?;
+                    let inlined = me.inline(env, t, &fn_term, &[carried.clone()])?;
                     let value = me.coerce(t, &ty, &inlined)?;
                     let stop = match until.first() {
                         None => None,
-                        Some(predicate) => {
-                            let r = me.inline(env, t, predicate, &[carried.clone(), value.clone()])?;
-                            let r = me.coerce(predicate, &Ty::Bool, &r)?;
+                        Some(&predicate) => {
+                            let predicate = t.child(predicate);
+                            let r = me.inline(env, t, &predicate, &[carried.clone(), value.clone()])?;
+                            let r = me.coerce(&predicate, &Ty::Bool, &r)?;
                             Some(reg(&r, 0)?)
                         }
                     };
@@ -1598,62 +1692,64 @@ impl Lower {
                     Ok((next, stop))
                 })
             }
-            Node::Cond(arms, default) => {
-                let mut folded: Term = (**default).clone();
-                for (condition, yes) in arms.iter().rev() {
-                    folded = Term { node: Node::If(Box::new(condition.clone()), Box::new(yes.clone()), Box::new(folded)), ..t.clone() };
+            Node::Cond(id) => {
+                let cond = arena.cond(id);
+                let mut builder = TermBuilder::new();
+                builder.import(t);
+                let mut folded = builder.import(&t.child(cond.default));
+                for arm in arena.arms(cond.arms).iter().rev() {
+                    let condition = builder.import(&t.child(arm.test));
+                    let yes = builder.import(&t.child(arm.body));
+                    folded = builder.rebuild(t, Draft::If(condition, yes, folded));
                 }
+                let folded = builder.freeze().handle(folded);
                 self.expression(env, &folded)
             }
-            Node::Case(scrutinee, arms, default) => {
-                let boolean = |value: &Term| -> Term {
-                    let inner = Term { ty: Ty::Bool, node: Node::Op { op: "not".to_owned(), args: vec![("x".to_owned(), value.clone())], skip: Vec::new() }, ..value.clone() };
-                    Term { ty: Ty::Bool, node: Node::Op { op: "not".to_owned(), args: vec![("x".to_owned(), inner)], skip: Vec::new() }, ..value.clone() }
-                };
-                let mut folded: Term = (**default).clone();
-                for (literal, yes) in arms.iter().rev() {
-                    let (value, ty) = match &literal.node {
-                        SNode::Num(s) => (param::Value::Float(cfmt::parse_ocaml_float(s).ok_or_else(|| invalid("float_of_string"))?), Ty::Float),
-                        SNode::Sym(s) if s == "true" || s == "false" => (param::Value::Bool(s == "true"), Ty::Bool),
+            Node::Case(id) => {
+                fn boolean(builder: &mut TermBuilder, value: TermId) -> TermId {
+                    let row = *builder.row(value);
+                    let path: Option<Vec<_>> = row.path.map(|id| builder.path_names(id).iter().map(|&id| builder.name(id).to_owned()).collect());
+                    let inner = builder.push(path.as_deref(), &Ty::Bool, row.form, Draft::Op { op: "not".to_owned(), args: vec![("x".to_owned(), value)], skip: Vec::new() });
+                    builder.push(path.as_deref(), &Ty::Bool, row.form, Draft::Op { op: "not".to_owned(), args: vec![("x".to_owned(), inner)], skip: Vec::new() })
+                }
+                let case = arena.case(id);
+                let scrutinee = t.child(case.value);
+                let mut builder = TermBuilder::new();
+                builder.import(t);
+                let mut folded = builder.import(&t.child(case.default));
+                for arm in arena.case_arms(case.arms).iter().rev() {
+                    let literal = arena.syntax().handle(arm.form);
+                    let (value, ty) = match literal.node {
+                        SNode::Num(s) => (param::Value::Float(cfmt::parse_ocaml_float(literal.name(s)).ok_or_else(|| invalid("float_of_string"))?), Ty::Float),
+                        SNode::Sym(s) if matches!(literal.name(s), "true" | "false") => (param::Value::Bool(literal.name(s) == "true"), Ty::Bool),
                         _ => return Err(refusal(t, "E_PACKED_FORM", "Packed case arms require numeric or boolean literals.")),
                     };
-                    let right = Term { path: None, ty: ty.clone(), node: Node::Lit(value), form: std::sync::Arc::new(literal.clone()) };
-                    let (left, right) = if scrutinee.ty == Ty::Bool || ty == Ty::Bool { (boolean(scrutinee), boolean(&right)) } else { ((**scrutinee).clone(), right) };
-                    let condition = Term { ty: Ty::Bool, node: Node::Op { op: "=".to_owned(), args: vec![("a".to_owned(), left), ("b".to_owned(), right)], skip: Vec::new() }, ..t.clone() };
-                    folded = Term { node: Node::If(Box::new(condition), Box::new(yes.clone()), Box::new(folded)), ..t.clone() };
+                    let form = builder.import_form(&literal);
+                    let right = builder.push(None, &ty, form, Draft::Lit(value));
+                    let left = builder.import(&scrutinee);
+                    let (left, right) = if *scrutinee.ty() == Ty::Bool || ty == Ty::Bool { (boolean(&mut builder, left), boolean(&mut builder, right)) } else { (left, right) };
+                    let condition = builder.rebuild(t, Draft::Op { op: "=".to_owned(), args: vec![("a".to_owned(), left), ("b".to_owned(), right)], skip: Vec::new() });
+                    let condition = builder.with_type(condition, &Ty::Bool);
+                    let yes = builder.import(&t.child(arm.body));
+                    folded = builder.rebuild(t, Draft::If(condition, yes, folded));
                 }
+                let folded = builder.freeze().handle(folded);
                 self.expression(env, &folded)
             }
-            Node::Op { op: name, args, .. } if name == "array/sum" && args.len() == 1 && canonical_operator(self.residual, "array/sum") => {
-                self.small_sum(env, t, &args[0].1)
-            }
-            Node::Op { op: name, .. }
-                if matches!(name.as_str(), "array/concat" | "array/slice" | "array/count")
-                    && match (name.as_str(), &t.ty) {
-                        ("array/count", Ty::Int) => true,
-                        ("array/concat" | "array/slice", Ty::Array(_)) => true,
-                        _ => false,
-                    }
-                    && !Residual::free_names(t).iter().any(|n| env_find(env, n).is_some())
-                    && self.constant_only(name) =>
-            {
-                // Preserve checked argument order and copying. Invariant composition and its count
-                // use the existing selected table/integer captures.
-                self.invariant_value(t)
-            }
             Node::If(..)
-                if matches!(t.ty, Ty::Array(_)) && !Residual::free_names(t).iter().any(|n| env_find(env, n).is_some()) =>
+                if matches!(t.ty(), Ty::Array(_)) && !Residual::free_names(t).iter().any(|n| env_find(env, n).is_some()) =>
             {
                 // An invariant array choice is a lazy table preparation, not a numeric select.
                 self.invariant_value(t)
             }
-            Node::If(condition, yes, no) => {
-                let condition_e = self.expression(env, condition)?;
+            Node::If(id) => {
+                let branch = arena.if_node(id);
+                let condition_e = self.expression(env, &t.child(branch.test))?;
                 let condition = self.as_float(&condition_e)?;
                 match &condition.constant {
                     Some(v) => {
-                        let chosen = if V::truthy(v)? { yes } else { no };
-                        self.expression(env, chosen)
+                        let chosen = if V::truthy(v)? { branch.yes } else { branch.no };
+                        self.expression(env, &t.child(chosen))
                     }
                     None => {
                         let c = reg(&condition, 0);
@@ -1662,82 +1758,49 @@ impl Lower {
                             me.with_guard(cond_reg, selected, &mut |me| me.expression(env, body))
                         };
                         let _ = c;
-                        let yes_e = branch(self, true, yes)?;
-                        let no_e = branch(self, false, no)?;
+                        let yes_e = branch(self, true, &t.child(arena.if_node(id).yes))?;
+                        let no_e = branch(self, false, &t.child(arena.if_node(id).no))?;
                         if condition.registers.len() != 1 {
                             return Err(refusal(t, "E_PACKED_TYPE", "Packed conditions require a scalar value."));
                         }
-                        self.select(t, &t.ty.clone(), condition.registers[0], &yes_e, &no_e)
+                        self.select(t, &t.ty().clone(), condition.registers[0], &yes_e, &no_e)
                     }
                 }
             }
-            Node::CallFn { fn_name, args, body: specialized } => {
+            Node::CallFn(id) => {
+                let call = arena.call_fn(id);
+                let fn_name = t.name(call.name);
                 if self.call_depth >= 64 { return Err(refusal(t, "E_PACKED_LIMIT", "Packed helper call depth exceeds 64.")); }
                 let mut values = Vec::new();
-                for a in args { values.push(self.expression(env, a)?); }
-                let (cname, cpath) = self.capture_path(fn_name, &[]);
+                for &id in arena.term_ids(call.args) { values.push(self.expression(env, &t.child(id))?); }
+                let (cname, cpath) = self.capture_path(t, fn_name, &[]);
                 let (params, body, scope) = helper_body(t, self.residual, &self.bindings, fn_name, &cname, &cpath)?;
                 let env2 = self.bind_parameters(t, &params, &values, &Vec::new())?;
                 let previous = self.capture_scope.clone();
                 self.capture_scope = scope;
                 self.call_depth += 1;
-                let chosen: Term = match specialized { Some(b) => (**b).clone(), None => body };
+                let chosen = match call.body { Some(id) => t.child(id), None => body };
                 let result = self.expression(&env2, &chosen);
                 self.capture_scope = previous;
                 self.call_depth -= 1;
                 result
             }
-            Node::Op { op: name, args, .. } if name == "error" && self.constant_only("error") => {
-                let text = |me: &Lower, arg: &Term| -> Res<String> {
-                    let bytes = match &arg.node {
-                        Node::Text(text) => text.clone(),
-                        Node::RefBinding(n, fields) => match captured_value(&me.bindings, n, fields) {
-                            Ok(Value::Text(text)) => text,
-                            _ => return Err(refusal(arg, "E_PACKED_CONSTANT", "Packed error code and message must be constant text.")),
-                        },
-                        _ => return Err(refusal(arg, "E_PACKED_CONSTANT", "Packed error code and message must be constant text.")),
-                    };
-                    Ok(String::from_utf8_lossy(&bytes).into_owned())
-                };
-                let find = |key: &str| args.iter().find(|(n, _)| n == key).map(|(_, t)| t);
-                // `let code = ... and message = ...`: in order
-                let code = text(self, find("code").ok_or_else(|| invalid("Not_found"))?)?;
-                let message = text(self, find("message").ok_or_else(|| invalid("Not_found"))?)?;
-                let cause = match find("cause") { Some(c) => Some(text(self, c)?), None => None };
-                Ok(one(self.emit(I::Raise(t.ty.clone(), code, message, cause))?))
-            }
-            Node::Op { op: name, args, .. } if name == "color/hsl" && args.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>() == ["h", "s", "l"] => {
-                self.hsl(env, args)
-            }
-            Node::Op { op: name, args, .. } => self.operation(env, t, name, args),
-            Node::Let(bindings, result) => {
+            Node::Let(id) => {
+                let node = arena.let_node(id);
                 let mut env2 = env.clone();
-                for (p, term) in bindings {
-                    match p {
-                        Pattern::Name(n) => {
-                            let e = self.expression(&env2, term)?;
-                            env2.push((n.clone(), e));
+                for binding in arena.bindings(node.bindings) {
+                    let term = t.child(binding.term);
+                    match arena.pattern(binding.pattern) {
+                        PatternNode::Name(n) => {
+                            let e = self.expression(&env2, &term)?;
+                            env2.push((t.name(n).to_owned(), e));
                         }
-                        _ => return Err(refusal(term, "E_PACKED_FORM", "Packed let bindings require name patterns.")),
+                        _ => return Err(refusal(&term, "E_PACKED_FORM", "Packed let bindings require name patterns.")),
                     }
                 }
-                self.expression(&env2, result)
+                self.expression(&env2, &t.child(node.body))
             }
-            Node::Expanded { body, .. } => self.expression(env, body),
-            Node::Bypass(call) => match W::bypass_input(call) {
-                Some(input) if input.ty == t.ty => self.expression(env, &input),
-                Some(input) if t.ty == Ty::Float && matches!(input.ty, Ty::Int | Ty::Bool) => {
-                    let e = self.expression(env, &input)?;
-                    self.as_float(&e)
-                }
-                Some(input) if matches!(t.ty, Ty::Vec2 | Ty::Vec3 | Ty::Vec4) && matches!(input.ty, Ty::Int | Ty::Float) => {
-                    let e = self.expression(env, &input)?;
-                    let e = self.as_float(&e)?;
-                    Ok(regs(vec![reg(&e, 0)?; width_res(&t.ty)? as usize]))
-                }
-                _ => Err(refusal(t, "E_PACKED_TYPE", "Bypass coercion requires reference evaluation.")),
-            },
-            _ => Err(refusal(t, "E_PACKED_FORM", &format!("Unsupported packed body form {}.", flow_syntax::syntax::head(&t.form).map(str::to_owned).unwrap_or_else(|| ty::to_string(&t.ty))))),
+            _ => Err(refusal(t, "E_PACKED_FORM", &format!("Unsupported packed body form {}.", flow_syntax::syntax::head(&t.form()).map(str::to_owned).unwrap_or_else(|| ty::to_string(t.ty()))))),
         }
     }
 
@@ -1786,11 +1849,14 @@ impl Lower {
     }
 
     fn small_sum(&mut self, env: &Env, at: &Term, source: &Term) -> Res<Expression> {
-        fn unwrap(term: &Term) -> &Term {
-            match &term.node { Node::Expanded { body, .. } => unwrap(body), _ => term }
+        fn unwrap(term: &Term) -> Term {
+            let mut term = term.clone();
+            while let Node::Expanded(id) = term.node { term = term.child(term.arena().expanded(id).body); }
+            term
         }
-        let source = unwrap(source);
-        let ty = match &source.ty { Ty::Array(ty) => (**ty).clone(), _ => Ty::Any };
+        let source_handle = unwrap(source);
+        let source = &source_handle;
+        let ty = match source.ty() { Ty::Array(ty) => (**ty).clone(), _ => Ty::Any };
         if !matches!(ty, Ty::Int | Ty::Float | Ty::Vec2 | Ty::Vec3 | Ty::Vec4) {
             return Err(refusal(source, "E_PACKED_TYPE", "An inner sum requires a numeric array."));
         }
@@ -1807,20 +1873,22 @@ impl Lower {
             let z = self.emit(I::Const(0.0))?;
             regs(vec![z; width])
         };
-        let (seed, items): (Expression, Vec<Expression>) = match &source.node {
-            Node::Hof(HofKind::Map, parts) if parts.len() == 2 => {
-                let range = unwrap(&parts[1]);
-                match &range.node {
-                    Node::Op { op: name, args, .. } if name == "array/range" && canonical_operator(self.residual, "array/range") => {
-                        let count_term = args.iter().find(|(n, _)| n == "count").map(|(_, t)| t).ok_or_else(|| invalid("Not_found"))?;
-                        let n = count(self, count_term)?;
+        let (seed, items): (Expression, Vec<Expression>) = match source.node {
+            Node::Hof(id) if source.arena().hof(id).kind == HofKind::Map && source.arena().term_ids(source.arena().hof(id).args).len() == 2 => {
+                let parts = source.arena().term_ids(source.arena().hof(id).args);
+                let range_handle = unwrap(&source.child(parts[1]));
+                let range = &range_handle;
+                match range.node {
+                    Node::Op(id) if range.name(range.arena().op(id).op) == "array/range" && canonical_operator(self.residual, "array/range") => {
+                        let count_term = range.child(range.arena().fields(range.arena().op(id).args).iter().find(|field| range.name(field.name) == "count").ok_or_else(|| invalid("Not_found"))?.term);
+                        let n = count(self, &count_term)?;
                         // Materialise every mapped expression before adding any of them: a later
                         // map error precedes overflow in the sum.
                         let mut items = Vec::new();
                         for i in 0..n {
-                            let index = if range.ty == array_of(Ty::Int) { Value::Int(i) } else { Value::Float(i as f64) };
+                            let index = if *range.ty() == array_of(Ty::Int) { Value::Int(i) } else { Value::Float(i as f64) };
                             let lit = self.literal(&self.term.clone(), &index)?;
-                            let inlined = self.inline_expressions(env, at, &parts[0], &[lit])?;
+                            let inlined = self.inline_expressions(env, at, &source.child(parts[0]), &[lit])?;
                             items.push(self.coerce(at, &ty, &inlined)?);
                         }
                         (zero, items)
@@ -1828,22 +1896,27 @@ impl Lower {
                     _ => return Err(refusal(range, "E_PACKED_FORM", "An inner map sum requires a constant-count array/range.")),
                 }
             }
-            Node::Op { op: name, args, .. } if name == "array/slice" && canonical_operator(self.residual, "array/slice") => {
-                let find = |key: &str| args.iter().find(|(n, _)| n == key).map(|(_, t)| t).ok_or_else(|| invalid("Not_found"));
-                let table = self.expression(env, find("array")?)?;
+            Node::Op(id) if source.name(source.arena().op(id).op) == "array/slice" && canonical_operator(self.residual, "array/slice") => {
+                let args = source.arena().fields(source.arena().op(id).args);
+                let find = |key: &str| args.iter().find(|field| source.name(field.name) == key).map(|field| source.child(field.term)).ok_or_else(|| invalid("Not_found"));
+                let table = self.expression(env, &find("array")?)?;
                 if !self.is_table(&table) {
                     return Err(refusal(source, "E_PACKED_CAPTURE", "An inner slice sum requires a numeric table."));
                 }
                 let first_term = find("first")?;
-                let first = self.expression(env, first_term)?;
-                if first_term.ty != Ty::Int && !matches!(first.constant, Some(Value::Int(_))) {
-                    return Err(refusal(first_term, "E_PACKED_TYPE", "An inner slice sum requires an integer first index."));
+                let first = self.expression(env, &first_term)?;
+                if *first_term.ty() != Ty::Int && !matches!(first.constant, Some(Value::Int(_))) {
+                    return Err(refusal(&first_term, "E_PACKED_TYPE", "An inner slice sum requires an integer first index."));
                 }
                 let first = reg(&self.as_int(&first)?, 0)?;
-                let n = count(self, find("count")?)?;
+                let n = count(self, &find("count")?)?;
                 let prepared = reg(&table, 0)?;
-                let input = Term { ty: array_of(ty.clone()), node: Node::RefBinding("$inner-sum-table".to_owned(), Vec::new()), ..source.clone() };
-                let length_term = Term { ty: Ty::Int, node: Node::Op { op: "array/count".to_owned(), args: vec![("array".to_owned(), input)], skip: Vec::new() }, ..source.clone() };
+                let mut builder = TermBuilder::new();
+                let input = builder.rebuild(source, Draft::RefBinding("$inner-sum-table".to_owned(), Vec::new()));
+                let input = builder.with_type(input, &array_of(ty.clone()));
+                let length_term = builder.rebuild(source, Draft::Op { op: "array/count".to_owned(), args: vec![("array".to_owned(), input)], skip: Vec::new() });
+                let length_term = builder.with_type(length_term, &Ty::Int);
+                let length_term = builder.freeze().handle(length_term);
                 let table_value = self.array_values.get(&prepared).cloned().ok_or_else(|| invalid("Not_found"))?;
                 let bound = Residual::with_bindings(self.residual, &length_term, &[("$inner-sum-table".to_owned(), table_value)])?;
                 let uniform = self.uniform(source, (String::new(), Vec::new()), &Value::Residual(bound))?;
@@ -1909,14 +1982,17 @@ impl Lower {
 
     fn inline(&mut self, env: &Env, at: &Term, f: &Term, values: &[Expression]) -> Res<Expression> {
         if self.call_depth >= 64 { return Err(refusal(at, "E_PACKED_LIMIT", "Packed helper call depth exceeds 64.")); }
-        let result_ty = self.term.ty.clone();
+        let result_ty = self.term.ty().clone();
         let (params, body, _) = function_body(self.residual, &self.bindings, &result_ty, None, f)?;
         let base: Env = if literal_function(f) { env.clone() } else { Vec::new() };
         let env2 = self.bind_parameters(at, &params, values, &base)?;
         fn scope(me: &Lower, f: &Term) -> Scope {
-            match &f.node {
-                Node::RefBinding(name, fields) => Some(me.capture_path(name, fields)),
-                Node::Fn { capture: Some(value), .. } => scope(me, value),
+            match f.node {
+                Node::RefBinding(id) => {
+                    let binding = f.arena().ref_binding(id);
+                    Some(me.capture_path(f, f.name(binding.name), f.arena().name_ids(binding.fields)))
+                }
+                Node::Fn(id) if f.arena().function(id).capture.is_some() => scope(me, &f.child(f.arena().function(id).capture.unwrap())),
                 Node::FnRef(_) => None,
                 _ => me.capture_scope.clone(),
             }
@@ -1939,70 +2015,84 @@ pub fn lower(fusion: bool, dynamic: bool, count_source: &CountSource, residual: 
     match lower_inner(fusion, dynamic, count_source, residual, term) {
         Ok(region) => Ok(region),
         Err(Stop::Refused(d)) | Err(Stop::Error(d)) => {
-            let span = d.span.clone().or_else(|| Some(term.form.span.clone()));
+            let span = d.span.clone().or_else(|| Some(term.form().span.clone()));
             Err(vec![Diagnostic { span, ..d }])
         }
-        Err(Stop::Invalid(message)) => Err(vec![diag(Some(term.form.span.clone()), "E_PACKED_LAYOUT", &format!("Packed layout is unsupported: {}", message))]),
+        Err(Stop::Invalid(message)) => Err(vec![diag(Some(term.form().span.clone()), "E_PACKED_LAYOUT", &format!("Packed layout is unsupported: {}", message))]),
         Err(Stop::Unsupported) => Err(vec![diag(
-            Some(term.form.span.clone()),
+            Some(term.form().span.clone()),
             "E_PACKED_FORM",
-            &format!("Packed term {} has unsupported type {}.", lisp::flat(&term.form), ty::to_string(&term.ty)),
+            &format!("Packed term {} has unsupported type {}.", lisp::flat(&term.form()), ty::to_string(term.ty())),
         )]),
     }
 }
 
 fn lower_inner(fusion: bool, dynamic: bool, count_source: &CountSource, residual: ResidualId, term: &Term) -> Res<RegionT> {
-    let view = Residual::residual_view(residual)?;
+    let mut view = Residual::residual_view(residual)?;
     let refuse = |code: &str, message: &str| -> Stop { refusal(term, code, message) };
-    let result_ty = term.ty.clone();
-    // params, accumulator, body, sources, bindings, iteration, result, skip
-    let (params, accumulator, body, sources, bindings, iteration, result, skip): (Params, Option<(Pattern, Option<Ty>)>, Term, Vec<Term>, Vec<(String, Value)>, Iteration, RegionResult, Vec<Vec<usize>>) =
-        match &term.node {
-            Node::Hof(HofKind::Map, parts) if !parts.is_empty() => {
-                let (params, body, bindings) = function_body(residual, &view.bindings, &result_ty, None, &parts[0])?;
-                (params, None, body, parts[1..].to_vec(), bindings, Iteration::Zip, RegionResult::Collect, Vec::new())
+    let result_ty = term.ty().clone();
+    let arena = term.arena();
+    // params, accumulator, body, borrowed source IDs, bindings, iteration, result, skip
+    let (params, accumulator, body, sources, bindings, iteration, result, skip): (Params, Option<(Pattern, Option<Ty>)>, Term, &[TermId], Cow<'_, [(String, Value)]>, Iteration, RegionResult, Vec<Vec<usize>>) =
+        match term.node {
+            Node::Hof(id) if arena.hof(id).kind == HofKind::Map && !arena.term_ids(arena.hof(id).args).is_empty() => {
+                let parts = arena.term_ids(arena.hof(id).args);
+                let (params, body, bindings) = function_body(residual, &view.bindings, &result_ty, None, &term.child(parts[0]))?;
+                (params, None, body, &parts[1..], bindings, Iteration::Zip, RegionResult::Collect, Vec::new())
             }
-            Node::Hof(HofKind::Reduce, parts) if parts.len() == 3 => {
-                let (params, body, bindings) = function_body(residual, &view.bindings, &result_ty, Some((&parts[1], &parts[2])), &parts[0])?;
-                let mut params = params;
+            Node::Hof(id) if arena.hof(id).kind == HofKind::Reduce && arena.term_ids(arena.hof(id).args).len() == 3 => {
+                let parts = arena.term_ids(arena.hof(id).args);
+                let seed = term.child(parts[1]);
+                let source = term.child(parts[2]);
+                let (mut params, body, bindings) = function_body(residual, &view.bindings, &result_ty, Some((&seed, &source)), &term.child(parts[0]))?;
                 if params.is_empty() { return Err(refuse("E_PACKED_FORM", "Packed reduce requires an accumulator parameter.")); }
                 let acc = params.remove(0);
-                (params, Some(acc), body, vec![parts[2].clone()], bindings, Iteration::Zip, RegionResult::Accumulate(std::sync::Arc::new(parts[1].clone()), false), Vec::new())
+                (params, Some(acc), body, &parts[2..], bindings, Iteration::Zip, RegionResult::Accumulate(std::sync::Arc::new(seed), false), Vec::new())
             }
-            Node::Loop { kind, accs, clauses, body, skip, .. } => {
-                let (accumulator, result) = match (kind, accs.as_slice()) {
+            Node::Loop(id) => {
+                let node = arena.loop_node(id);
+                let accs = arena.bindings(node.accs);
+                let clauses = arena.bindings(node.clauses);
+                let (accumulator, result) = match (node.kind, accs) {
                     (LoopKind::For, []) => (None, RegionResult::Collect),
                     (LoopKind::Sum, []) => (None, RegionResult::Sum(false)),
-                    (LoopKind::Fold | LoopKind::Scan, [(p, seed)]) => (Some((p.clone(), None)), RegionResult::Accumulate(std::sync::Arc::new(seed.clone()), *kind == LoopKind::Scan)),
+                    (LoopKind::Fold | LoopKind::Scan, [binding]) => (Some((arena.owned_pattern(binding.pattern), None)), RegionResult::Accumulate(std::sync::Arc::new(term.child(binding.term)), node.kind == LoopKind::Scan)),
                     _ => return Err(refuse("E_PACKED_FORM", "Packed fold/scan requires exactly one accumulator.")),
                 };
                 (
-                    clauses.iter().map(|(p, _)| (p.clone(), None)).collect(),
+                    clauses.iter().map(|binding| (arena.owned_pattern(binding.pattern), None)).collect(),
                     accumulator,
-                    (**body).clone(),
-                    clauses.iter().map(|(_, t)| t.clone()).collect(),
-                    view.bindings.clone(),
+                    term.child(node.body),
+                    &term.children()[accs.len()..accs.len() + clauses.len()],
+                    Cow::Borrowed(view.bindings.as_slice()),
                     Iteration::Product,
                     result,
-                    skip.clone(),
+                    arena.skip(node.skip).iter().map(|&range| arena.indices(range).to_vec()).collect(),
                 )
             }
-            Node::Op { op, args, .. } if op == "array/sum" && args.len() == 1 => {
-                let source = &args[0].1;
-                let ty = match &source.ty {
+            Node::Op(id) if term.name(arena.op(id).op) == "array/sum" && arena.fields(arena.op(id).args).len() == 1 => {
+                let source = term.child(arena.fields(arena.op(id).args)[0].term);
+                let ty = match source.ty() {
                     Ty::Array(ty) => (**ty).clone(),
-                    _ => return Err(refusal(source, "E_PACKED_TYPE", &format!("array/sum source is {}, not an array.", ty::to_string(&source.ty)))),
+                    _ => return Err(refusal(&source, "E_PACKED_TYPE", &format!("array/sum source is {}, not an array.", ty::to_string(source.ty())))),
                 };
-                let body = Term { ty, node: Node::RefBinding("@item".to_owned(), Vec::new()), ..source.clone() };
-                (vec![(Pattern::Name("@item".to_owned()), None)], None, body, vec![source.clone()], view.bindings.clone(), Iteration::Zip, RegionResult::Sum(true), Vec::new())
+                let mut builder = TermBuilder::new();
+                let body = builder.rebuild(&source, Draft::RefBinding("@item".to_owned(), Vec::new()));
+                let body = builder.with_type(body, &ty);
+                let body = builder.freeze().handle(body);
+                (vec![(Pattern::Name("@item".to_owned()), None)], None, body, term.children(), Cow::Borrowed(view.bindings.as_slice()), Iteration::Zip, RegionResult::Sum(true), Vec::new())
             }
             _ => return Err(refuse("E_PACKED_FORM", "Packed kernels require map, reduce, a numeric loop or array/sum.")),
         };
-    let binding_fn: Option<String> = match &term.node {
-        Node::Hof(_, parts) => match parts.first() {
-            Some(Term { node: Node::RefBinding(name, fields), .. }) if fields.is_empty() => Some(name.clone()),
+    let bindings = match bindings {
+        Cow::Borrowed(_) => std::mem::take(&mut view.bindings),
+        Cow::Owned(bindings) => bindings,
+    };
+    let binding_fn: Option<String> = match term.node {
+        Node::Hof(id) => arena.term_ids(arena.hof(id).args).first().and_then(|&id| match arena.row(id).node {
+            Node::RefBinding(id) if arena.name_ids(arena.ref_binding(id).fields).is_empty() => Some(term.name(arena.ref_binding(id).name).to_owned()),
             _ => None,
-        },
+        }),
         _ => None,
     };
     let mut names: Vec<String> = Vec::new();
@@ -2010,27 +2100,27 @@ fn lower_inner(fusion: bool, dynamic: bool, count_source: &CountSource, residual
         if let Pattern::Name(name) = p { names.push(name.clone()); }
     }
     // ponytail: correlated clauses stay interpreted; lower their changing source counts before tiling them.
-    if iteration == Iteration::Product && sources.iter().any(|s| reads_names(&names, s)) {
+    if iteration == Iteration::Product && sources.iter().any(|&id| reads_names(&names, &term.child(id))) {
         return Err(refuse("E_PACKED_FORM", "Correlated product sources require reference evaluation."));
     }
     let mut widths: Vec<i64> = Vec::new();
-    for s in &sources {
-        let width = if s.ty == array_of(Ty::Text) { Some(1) } else { packed_ops::array_width(&s.ty).map(|w| w as i64) };
+    for &id in sources {
+        let s = term.child(id);
+        let width = if *s.ty() == array_of(Ty::Text) { Some(1) } else { packed_ops::array_width(s.ty()).map(|w| w as i64) };
         match width {
             Some(width) => widths.push(width),
-            None => return Err(refusal(s, "E_PACKED_TYPE", &format!("Packed source must be a float/vector array, got {}.", ty::to_string(&s.ty)))),
+            None => return Err(refusal(&s, "E_PACKED_TYPE", &format!("Packed source must be a float/vector array, got {}.", ty::to_string(s.ty())))),
         }
     }
     if sources.len() != params.len() {
         return Err(refuse("E_PACKED_FORM", &format!("Packed kernel has {} sources but {} parameters.", sources.len(), params.len())));
     }
-    let arc_term = std::sync::Arc::new(term.clone());
+    let arc_term = if term.identity() == view.term.identity() { view.term.clone() } else { std::sync::Arc::new(term.clone()) };
     let mut lower = Lower {
         residual,
         term: arc_term.clone(),
         dynamic,
         bindings: bindings,
-        sources: sources.clone(),
         code: Vec::new(),
         uniforms: Vec::new(),
         uniform_names: Vec::new(),
@@ -2052,9 +2142,10 @@ fn lower_inner(fusion: bool, dynamic: bool, count_source: &CountSource, residual
     for (i, (pattern, annotation)) in params.iter().enumerate() {
         match pattern {
             Pattern::Name(name) => {
-                let element = ty::elem(&sources[i].ty).ok_or_else(|| invalid("option is None"))?;
+                let source = term.child(sources[i]);
+                let element = ty::elem(source.ty()).ok_or_else(|| invalid("option is None"))?;
                 if annotation.is_none() || annotation.as_ref() == Some(&element) {
-                    env.push((name.clone(), lower.input(i, widths[i])?));
+                    env.push((name.clone(), lower.input(i, widths[i], source.ty())?));
                 } else {
                     return Err(refuse(
                         "E_PACKED_TYPE",
@@ -2074,11 +2165,11 @@ fn lower_inner(fusion: bool, dynamic: bool, count_source: &CountSource, residual
     // but is searched first: push it last.
     match (&accumulator, &result) {
         (Some((Pattern::Name(name), annotation)), RegionResult::Accumulate(seed, _)) => {
-            if !matches!(seed.ty, Ty::Float | Ty::Int | Ty::Vec2 | Ty::Vec3 | Ty::Vec4) {
-                return Err(refusal(seed, "E_PACKED_TYPE", &format!("Packed accumulator {} has unsupported seed type {}.", name, ty::to_string(&seed.ty))));
+            if !matches!(seed.ty(), Ty::Float | Ty::Int | Ty::Vec2 | Ty::Vec3 | Ty::Vec4) {
+                return Err(refusal(seed, "E_PACKED_TYPE", &format!("Packed accumulator {} has unsupported seed type {}.", name, ty::to_string(seed.ty()))));
             }
-            let width = width_res(&seed.ty)?;
-            if annotation.is_some() && annotation.as_ref() != Some(&seed.ty) && !(seed.ty == Ty::Int && annotation.as_ref() == Some(&Ty::Float)) {
+            let width = width_res(seed.ty())?;
+            if annotation.is_some() && annotation.as_ref() != Some(seed.ty()) && !(*seed.ty() == Ty::Int && annotation.as_ref() == Some(&Ty::Float)) {
                 return Err(refusal(
                     seed,
                     "E_PACKED_TYPE",
@@ -2086,11 +2177,11 @@ fn lower_inner(fusion: bool, dynamic: bool, count_source: &CountSource, residual
                         "Packed accumulator {} annotation {} does not match seed type {}.",
                         name,
                         annotation.as_ref().map(ty::to_string).unwrap_or_else(|| "none".to_owned()),
-                        ty::to_string(&seed.ty)
+                        ty::to_string(seed.ty())
                     ),
                 ));
             }
-            let integer = seed.ty == Ty::Int && body.ty == Ty::Int;
+            let integer = *seed.ty() == Ty::Int && *body.ty() == Ty::Int;
             let mut registers = Vec::new();
             for i in 0..width {
                 registers.push(lower.emit(if integer { I::Int_accumulator } else { I::Accumulator(i) })?);
@@ -2101,14 +2192,14 @@ fn lower_inner(fusion: bool, dynamic: bool, count_source: &CountSource, residual
         _ => return Err(refuse("E_PACKED_FORM", "Packed accumulator requires a name pattern.")),
     }
 
-    let result_elem = match &term.ty { Ty::Array(ty) => (**ty).clone(), ty => ty.clone() };
+    let result_elem = match term.ty() { Ty::Array(ty) => (**ty).clone(), ty => ty.clone() };
     let output_expression = lower.expression(&env, &body)?;
     let outputs = record_outputs(&mut lower, &output_expression, &result_elem)?;
     let output_e = if result_elem == Ty::Text {
         lower.as_text(&output_expression)?
-    } else if result_elem == Ty::Int && body.ty == Ty::Int {
+    } else if result_elem == Ty::Int && *body.ty() == Ty::Int {
         lower.as_int(&output_expression)?
-    } else if (body.ty == Ty::Float && term.ty == Ty::Int) || !outputs.is_empty() {
+    } else if (*body.ty() == Ty::Float && *term.ty() == Ty::Int) || !outputs.is_empty() {
         output_expression.clone()
     } else {
         lower.as_float(&output_expression)?
@@ -2118,36 +2209,44 @@ fn lower_inner(fusion: bool, dynamic: bool, count_source: &CountSource, residual
         return Err(refuse("E_PACKED_TYPE", &format!("Packed result must be float or vector, got {}.", ty::to_string(&result_elem))));
     }
     let width = if result_elem == Ty::Text { 1 } else if !outputs.is_empty() { 0 } else { width_res(&result_elem)? as usize };
-    if matches!(result, RegionResult::Sum(_) | RegionResult::Accumulate(..)) && !matches!(body.ty, Ty::Int | Ty::Float | Ty::Vec2 | Ty::Vec3 | Ty::Vec4) {
-        return Err(refusal(&body, "E_PACKED_TYPE", &format!("Packed reduction body has unsupported type {}.", ty::to_string(&body.ty))));
+    if matches!(result, RegionResult::Sum(_) | RegionResult::Accumulate(..)) && !matches!(body.ty(), Ty::Int | Ty::Float | Ty::Vec2 | Ty::Vec3 | Ty::Vec4) {
+        return Err(refusal(&body, "E_PACKED_TYPE", &format!("Packed reduction body has unsupported type {}.", ty::to_string(body.ty()))));
     }
     // array_init also broadcasts a scalar to the requested vector width.
     if output.len() == 1 && width > 1 { output = vec![output[0]; width]; }
     if output.len() != width {
         return Err(refuse("E_PACKED_TYPE", &format!("Packed result has {} components but its type requires {}.", output.len(), width)));
     }
-    let counts: Vec<Option<i64>> = sources.iter().map(|s| count_of(residual, s)).collect();
+    let counts: Vec<Option<i64>> = sources.iter().map(|&id| count_of(residual, &term.child(id))).collect();
     let count = match count_of_sources(iteration, &counts) {
         Ok(c) => c,
         Err(Stop::Unsupported) => return Err(refuse("E_PACKED_LIMIT", "Packed product source count exceeds the integer limit.")),
         Err(other) => return Err(other),
     };
-    let mut sites: Vec<(i64, Path, Vec<i64>)> = vec![(view.instance, term.path.clone().unwrap_or_else(|| view.site.clone()), view.iter.clone())];
+    let site = term.path().map(|ids| ids.iter().map(|&id| term.name(id).to_owned()).collect()).unwrap_or_else(|| view.site.clone());
+    let mut sites: Vec<(i64, Path, Vec<i64>)> = vec![(view.instance, site, view.iter.clone())];
     paths(&view, &mut sites, &body);
-    match &term.node {
-        Node::Hof(_, parts) => match parts.first() {
-            Some(Term { node: Node::Fn { zone, .. }, .. }) => sites.push((view.instance, zone.clone(), view.iter.clone())),
-            Some(Term { node: Node::RefBinding(name, fields), .. }) if fields.is_empty() => {
-                if let Some(Value::Fn(f)) = view.bindings.iter().find(|(n, _)| n == name).map(|(_, v)| v) {
-                    if let Some((_, Term { path: Some(p), .. })) = Residual::function_body(*f) {
-                        let keep = p.len().saturating_sub(1);
-                        sites.push((view.instance, p[..keep.min(p.len())].to_vec(), view.iter.clone()));
+    if let Node::Hof(id) = term.node {
+        if let Some(&id) = arena.term_ids(arena.hof(id).args).first() {
+            let function = term.child(id);
+            match function.node {
+                Node::Fn(id) => {
+                    let zone = arena.path(arena.function(id).zone).iter().map(|&id| term.name(id).to_owned()).collect();
+                    sites.push((view.instance, zone, view.iter.clone()));
+                }
+                Node::RefBinding(id) if arena.name_ids(arena.ref_binding(id).fields).is_empty() => {
+                    if let Some(Value::Fn(f)) = Residual::residual_binding(residual, term.name(arena.ref_binding(id).name)) {
+                        if let Some((_, body)) = Residual::function_body(f) {
+                            if let Some(p) = body.path() {
+                                let keep = p.len().saturating_sub(1);
+                                sites.push((view.instance, p[..keep.min(p.len())].iter().map(|&id| body.name(id).to_owned()).collect(), view.iter.clone()));
+                            }
+                        }
                     }
                 }
+                _ => {}
             }
-            _ => {}
-        },
-        _ => {}
+        }
     }
     sites.reverse();
     let skip = iteration_skips(&view.iter, &skip);
@@ -2169,7 +2268,7 @@ fn lower_inner(fusion: bool, dynamic: bool, count_source: &CountSource, residual
     let region = R::make(Parts {
         residual,
         term: arc_term.clone(),
-        sources: sources.iter().map(|t| (residual, std::sync::Arc::new(t.clone()))).collect(),
+        sources: sources.iter().map(|&id| (residual, std::sync::Arc::new(term.child(id)))).collect(),
         widths,
         uniforms: lower.uniforms,
         uniform_names: lower.uniform_names,
@@ -2206,11 +2305,11 @@ pub fn rebind(t: &RegionT, residual: ResidualId) -> Option<RegionT> {
         return None;
     }
     let attempt = || -> Res<Option<RegionT>> {
-        let captured: Option<Term> = match &t.term.node {
-            Node::Hof(_, parts) => match parts.first() {
-                Some(f @ Term { node: Node::Fn { capture: Some(_), .. }, .. }) => Some(f.clone()),
-                _ => None,
-            },
+        let captured: Option<Term> = match t.term.node {
+            Node::Hof(id) => t.term.arena().term_ids(t.term.arena().hof(id).args).first().and_then(|&id| {
+                let f = t.term.child(id);
+                matches!(f.node, Node::Fn(id) if f.arena().function(id).capture.is_some()).then_some(f)
+            }),
             _ => None,
         };
         let bindings_of = |residual: ResidualId| -> Res<Vec<(String, Value)>> {

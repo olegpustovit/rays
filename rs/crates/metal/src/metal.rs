@@ -232,6 +232,23 @@ impl Buffer {
             metal_sys::native::read_buffer(&self.0.raw, offset, length).map_err(|failure| sys_error(operation, failure))
         })()
     }
+    /// Captures the allocation, not its bytes. The caller must finish GPU writes before reading.
+    /// The resulting read-only view may outlive this wrapper and never enters the main-thread API.
+    pub fn owned_readback(&self) -> Result<std::sync::Arc<dyn Fn(i64, usize) -> Result<Vec<u8>, Error> + Send + Sync>, Error> {
+        let operation = "Metal.Buffer.owned_readback";
+        enter_main(operation)?;
+        self.0.lifetime.ensure_live(operation)?;
+        if self.0.storage != StorageMode::Shared {
+            return Err(error(operation, ErrorKind::Unsupported, "readback requires shared buffer storage"));
+        }
+        let readback = metal_sys::native::shared_buffer_readback(&self.0.raw).map_err(|failure| sys_error(operation, failure))?;
+        let allocation_length = self.0.length;
+        Ok(Arc::new(move |offset, length| {
+            let offset = u64::try_from(offset).map_err(|_| error(operation, ErrorKind::InvalidArgument, "negative read offset"))?;
+            validate_range(operation, allocation_length, offset, length)?;
+            readback.read(offset, length).map_err(|failure| sys_error(operation, failure))
+        }))
+    }
     pub fn destroy(&self) -> Result<(), Error> {
         (|| -> Result<_, Error> { enter_main("Metal.Buffer.destroy")?;
             self.0.lifetime.destroy_parent("Metal.Buffer.destroy")?;

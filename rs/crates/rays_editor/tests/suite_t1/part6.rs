@@ -4,7 +4,7 @@ use super::support::*;
 use editor_document::layout_edit::{Op as L, Size as LSize};
 use editor_document::workspace_doc;
 use flow_graph::flow_edit::{ArgKey, Op};
-use flow_syntax::syntax::{self as s, Node};
+use flow_syntax::syntax::{self as s, Draft as Node};
 use input::{Event, Key, MouseButton};
 use rays_editor::Editor;
 use std::cell::Cell;

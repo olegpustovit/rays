@@ -501,7 +501,10 @@ fn malformed_public_region_input_is_checked_when_selected() {
     let table = texts(&[b"raw\xff\0"]);
     let template = pk(&instantiate(Some(&table), &arr(Ty::Text), "(fn [(index : int)] (array/nth data 0))", vec![0]));
     let (rid, term) = template.sources[0].clone();
-    let term = w::Term { node: w::Node::RefBinding("bad_storage".into(), vec![]), ..(*term).clone() };
+    let mut builder = flow_check::term_arena::TermBuilder::new();
+    let form = builder.import_form(&term.form());
+    let row = builder.push(None, term.ty(), form, flow_check::term_arena::Draft::RefBinding("bad_storage".into(), vec![]));
+    let term = builder.freeze().handle(row);
     for count in [1usize, 2049] {
         let rid = ok(e::Residual::with_bindings(rid, &term, &[("bad_storage".to_string(), Value::Float_array(Arc::new(vec![0.; count])))]));
         for selected in [false, true] {

@@ -1,7 +1,5 @@
 //! Port of lib/rays_editor/test/test_workspace_live.ml (W2b: live drives, volatile cache slots,
-//! fixed-step determinism, realtime edits and the editor's cook path). The fixtures are the sketches
-//! shrunk as the OCaml test does (the checks are about caching and time, not size).
-use crate::probe_t::shrunk as case_text;
+//! fixed-step determinism, realtime edits and the editor's cook path).
 use crate::support::*;
 use crate::t3c::frame_at;
 use flow_sop::lower;
@@ -11,6 +9,16 @@ use sop::context::{self as sctx, Options as ContextOptions};
 use sop::edit_graph as edit;
 use sop::node;
 use sop::session;
+
+fn case_text(name: &str) -> String {
+    let text = read_case(name);
+    // These are the exact fixture overrides in test_workspace_live.ml.
+    match name {
+        "sunflower" => text.replacen("(seeds : int 240)", "(seeds : int 8)", 1),
+        "orrery" => text.replacen("(rings : int 3)", "(rings : int 2)", 1).replacen("(moons : int 8)", "(moons : int 2)", 1),
+        _ => text,
+    }
+}
 
 fn fail(message: &str) -> ! {
     panic!("test_workspace_live: {message}")

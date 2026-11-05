@@ -93,7 +93,7 @@ external surface_destroy : handle -> unit = "rv_surface_destroy"
 
 external accel_create_blas : handle -> int array array -> bool -> int = "rv_accel_create_blas"
 
-external accel_create_tlas : handle -> handle -> int -> int -> int array -> int
+external accel_create_tlas : handle -> handle -> int -> int -> (int array * bool) -> int
   = "rv_accel_create_tlas"
 
 external accel_create_sized : handle -> int -> handle -> int = "rv_accel_create_sized"

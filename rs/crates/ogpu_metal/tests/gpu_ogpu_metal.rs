@@ -1,6 +1,6 @@
 // The Metal part of lib/ogpu/conformance (test_metal.ml and conformance.ml), run against a real device.
 // The OCaml suite is one function over one device; here it is three stages (as for Vulkan), each with its
-// own device so each stays inside the per-test budget. Every test skips when no Metal device exists and
+// own device so each stays inside the per-test budget. Native qualification requires a Metal device and
 // ends with the process-wide Metal handle count where it began. The MSL is the OCaml suite's, dumped to
 // rs/fixtures/shaders/ogpu_metal/conformance/*.metal. Metal calls need the main thread: a harness = false
 // target (common::run) runs the tests on it.
@@ -167,20 +167,10 @@ fn render_target(texture: &Texture, load: Load, store: Store, clear: (f64, f64, 
     }
 }
 
-/// A device on a fresh driver, or None where there is no Metal device.
-fn open() -> Option<Device> {
-    let driver = backend::create();
-    match (driver.create_device)() {
-        Err(failure) if failure.kind == ErrorKind::NoAdapter => {
-            eprintln!("OGPU conformance (Metal): skipped (no device)");
-            return None;
-        }
-        Err(failure) => panic!("{}", error::to_string(&failure)),
-        // The probe owns a device; release it before the shared run.
-        Ok(raw) => (raw.destroy_device)().unwrap_or_else(|failure| die(failure)),
-    }
+/// Native qualification fails rather than reporting success without a Metal device.
+fn open() -> Device {
     BEFORE.with(|before| before.set(impl_::live_handles()));
-    Some(be::create_device(driver).unwrap_or_else(|failure| die(failure)))
+    be::create_device(backend::create()).unwrap_or_else(|failure| die(failure))
 }
 
 thread_local! {
@@ -229,7 +219,7 @@ fn gpu_implementation_tag_and_handles() {
 /// independent queues.
 
 fn gpu_conformance_transfer_and_compute() {
-    let Some(device) = open() else { return };
+    let device = open();
     transfer_and_compute(&device);
     finish(device);
 }
@@ -297,7 +287,14 @@ fn transfer_and_compute(device: &Device) {
     }
     be::invalidate_mapped(&device_only, 16).unwrap_or_else(|failure| die(failure));
     require(be::mapped_view(&device_only).unwrap().borrow()[2] == 3., "a device-only buffer's first view");
+    let owned = be::owned_readback(&device_only).unwrap_or_else(|failure| die(failure));
+    refused(owned(-1, 4).err(), ErrorKind::InvalidArgument, "negative owned readback accepted");
+    refused(owned(12, 8).err(), ErrorKind::InvalidArgument, "oversized owned readback accepted");
     be::destroy_buffer(&device_only).unwrap_or_else(|failure| die(failure));
+    // A settled allocation is retained independently of its owner-only wrapper; no owner pump.
+    let bytes = std::thread::spawn(move || owned(8, 4).unwrap()).join().unwrap();
+    require(bytes == three, "owned readback did not preserve the native allocation");
+    refused(be::owned_readback(&device_only).err(), ErrorKind::StaleHandle, "destroyed owned capture accepted");
     refused(be::flush_mapped(&mapped, 20).err(), ErrorKind::InvalidArgument, "a flush past the buffer was accepted");
     refused(be::flush_mapped(&source, 4).err(), ErrorKind::InvalidArgument, "an unmapped buffer was flushed");
     be::destroy_buffer(&mapped).unwrap_or_else(|failure| die(failure));
@@ -657,7 +654,7 @@ const FAR: [f64; 12] = [1., 0., 0., 20., 0., 1., 0., 0., 0., 0., 1., 0.];
 /// compaction; typed Unsupported for curves.
 
 fn gpu_conformance_ray_tracing() {
-    let Some(device) = open() else { return };
+    let device = open();
     ray_tracing(&device);
     finish(device);
 }
@@ -1088,7 +1085,7 @@ fn color_bytes(r: f64, g: f64, b: f64, a: f64) -> Vec<u8> {
 /// binding, depth load and clear, multisample resolve, and typed Unsupported memoryless attachments.
 
 fn gpu_conformance_render() {
-    let Some(device) = open() else { return };
+    let device = open();
     render(&device);
     finish(device);
 }

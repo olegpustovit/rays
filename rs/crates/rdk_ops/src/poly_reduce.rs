@@ -830,7 +830,7 @@ mod tests {
         let detail = attribute::create_owned(
             "tag",
             attribute::Owner::Detail,
-            attribute::Storage::Text(vec!["reduce-fixture".to_owned()]),
+            attribute::Storage::Text(vec![b"reduce-fixture".to_vec()]),
         )
         .unwrap();
         let ordered = group::ordered(group::Owner::Point, "ordered_points", points, &[3, 7, 11, 15, 19]).unwrap();
@@ -912,8 +912,7 @@ mod tests {
 
     #[test]
     fn parallel_exact() {
-        // The OCaml fixture is 80 x 60 points; 40 x 30 keeps the same multi-round shape.
-        let source = grid(40, 30);
+        let source = grid(80, 60);
         let build = || {
             let mut p = Params::new(Target::ReduceRatio(0.42));
             p.grain = Some(127);

@@ -189,13 +189,13 @@ fn a_live_body_recompiles_for_a_new_time_and_an_unchanged_one_hits_the_cache() {
 }
 
 #[test]
-#[ignore = "slow: 1.2 s per lowering and 0.5-1 s per live card build in a debug build, over 10 s alone; the cheap half is a_live_body_recompiles_for_a_new_time_and_an_unchanged_one_hits_the_cache"]
+
 fn prepared_bodies_reuse_unchanged_graphs_and_recompile_a_live_time() {
     prepared_bodies_reuse_unchanged_graphs_and_recompile_live_drives("t");
 }
 
 #[test]
-#[ignore = "slow: see prepared_bodies_reuse_unchanged_graphs_and_recompile_a_live_time"]
+
 fn prepared_bodies_reuse_unchanged_graphs_and_recompile_a_live_state() {
     prepared_bodies_reuse_unchanged_graphs_and_recompile_live_drives("(state [previous 0.0] (+ previous (frame/dt)))");
 }
@@ -409,7 +409,7 @@ fn a_lisp_body_keeps_topology_attributes_and_ordered_groups() {
     let attributes: Vec<rdk::attribute::T> = vec![
         (Owner::Point, "weight", Storage::Float(vec![0.25, 0.5, 0.75])),
         (Owner::Point, "id", Storage::Int(vec![2, 1, 0])),
-        (Owner::Point, "tag", Storage::Text(vec!["one".to_owned(), "two".to_owned(), "three".to_owned()])),
+        (Owner::Point, "tag", Storage::Text(vec![b"one".to_vec(), b"two".to_vec(), b"three".to_vec()])),
         (Owner::Point, "weights", Storage::FloatArray(rdk_ok(rdk::packed::FloatArray::create_owned(vec![0, 0, 2, 3], vec![0.25, 0.5, 0.75])))),
         (Owner::Vertex, "uv", Storage::Float3(positions.clone())),
         (Owner::Primitive, "material", Storage::Int(vec![7])),
@@ -601,7 +601,7 @@ fn exact_lisp_geometry_bytes_are_equal_across_interpreter_domains_and_grain() {
 }
 
 #[test]
-#[ignore = "slow lowering: debug build, 1.7-4 s alone (a single sop/uv_sphere lowers in 3.3 s, a box in 0.15 s; see test_perf_lower)"]
+
 fn typed_function_slots_keep_their_callable_and_captures() {
     for (keyword, call) in [("", "(sop/function_slot field)"), (":keyword true", "(sop/function_slot :field field)")] {
         with_session(&mut |s| {
@@ -614,7 +614,7 @@ fn typed_function_slots_keep_their_callable_and_captures() {
 }
 
 #[test]
-#[ignore = "slow lowering (2.8 s alone in debug; was failing, fixed): see test-times.md; RAYS_SLOW"]
+
 fn typed_image_slots_keep_their_cooked_pixels() {
     for (keyword, call) in [
         ("", r#"(sop/image_slot (sop/grid :columns 2 :rows 2 :uv_attribute "uv") (image/noise :width 2 :height 2))"#),
@@ -630,7 +630,7 @@ fn typed_image_slots_keep_their_cooked_pixels() {
 }
 
 #[test]
-#[ignore = "slow lowering: debug build, 1.7-4 s alone (a single sop/uv_sphere lowers in 3.3 s, a box in 0.15 s; see test_perf_lower)"]
+
 fn a_distinct_local_function_is_not_replaced_by_forwarding() {
     with_session(&mut |s| {
         let body = "(let* [local (fn [p] (- (length (+ p [0.25 0.0 0.0])) 0.45))]\n    (sop/merge\n      (sop/iso_surface :field field :resolution [4 4 4])\n      (sop/iso_surface :field local :resolution [4 4 4])))";
@@ -643,7 +643,7 @@ fn a_distinct_local_function_is_not_replaced_by_forwarding() {
 }
 
 #[test]
-#[ignore = "slow lowering: debug build, 1.7-4 s alone (a single sop/uv_sphere lowers in 3.3 s, a box in 0.15 s; see test_perf_lower)"]
+
 fn a_function_slot_keeps_its_outer_cooked_geometry_capture() {
     with_session(&mut |s| {
         let body = |call: &str| format!("(let* [base (sop/line :kind \"Points\" :points 1 :origin [0.7 0.0 0.0])\n         sample {{:radius (array/sum (sop/attr base :P))}}\n         field (fn [p] (- (length p) sample.radius.x))] {call})");
@@ -707,7 +707,7 @@ fn a_numeric_body_without_a_packed_kernel_is_refused_not_interpreted() {
 const GRID_PREFIX: &str = "(let* [base (sop/line :kind \"Points\" :points 1 :origin [0.7 0.2 -0.1])\n    sample {:offset (array/sum (sop/attr base :P))}\n    field (fn [p] (+ p sample.offset))\n    other (fn [p] (- p sample.offset))\n    geo (sop/grid :columns 2 :rows 2)]";
 
 #[test]
-#[ignore = "slow lowering (2.3 s alone in debug; was failing, fixed): see test-times.md; RAYS_SLOW"]
+
 fn optional_and_rest_callable_slots_keep_bytes_and_cache() {
     with_session(&mut |s| {
         let prefix = |call: &str| format!("{GRID_PREFIX} {call})");
@@ -736,7 +736,7 @@ fn optional_and_rest_callable_slots_keep_bytes_and_cache() {
 }
 
 #[test]
-#[ignore = "slow lowering (3.9 s alone in debug; was failing, fixed): see test-times.md; RAYS_SLOW"]
+
 fn optional_and_rest_image_slots_keep_bytes() {
     with_session(&mut |s| {
         let prefix = |call: &str| format!("(let* [geo (sop/grid :columns 2 :rows 2 :uv_attribute \"uv\")\n    picture (image/noise :width 2 :height 2)] {call})");
@@ -834,7 +834,7 @@ fn cone_source(extra: &str, v: &[&str; 9]) -> String {
 }
 
 #[test]
-#[ignore = "slow lowering: debug build, over 5 s alone (a single sop/uv_sphere lowers in 3.3 s, a box in 0.15 s; see test_perf_lower)"]
+
 fn declaration_cones_invalidate_exactly_the_edited_dependencies() {
     let initial = CONE_INITIAL;
     for domains in [1i64, 8] {
@@ -894,20 +894,30 @@ fn unrelated_structural_macro_and_helper_edits_keep_the_cache() {
 }
 
 fn disable_boundary(form: &flow_syntax::syntax::Syntax) -> flow_syntax::syntax::Syntax {
-    use flow_syntax::syntax::{make, Node};
-    let node = match &form.node {
-        Node::List(children) if matches!(children.first().map(|c| &c.node), Some(Node::Sym(s)) if s == "sop/error_boundary") => {
-            let mut all = children.clone();
-            all.push(make(Node::Kw("enabled".to_owned())));
-            all.push(make(Node::Sym("false".to_owned())));
-            Node::List(all)
-        }
-        Node::List(children) => Node::List(children.iter().map(disable_boundary).collect()),
-        Node::Vec(children) => Node::Vec(children.iter().map(disable_boundary).collect()),
-        Node::Map(children) => Node::Map(children.iter().map(disable_boundary).collect()),
-        other => other.clone(),
-    };
-    flow_syntax::syntax::Syntax { node, ..form.clone() }
+    use flow_syntax::{arena::{SyntaxBuilder, SyntaxId}, syntax::{Node, Syntax}};
+    fn rewrite(b: &mut SyntaxBuilder, form: &Syntax) -> SyntaxId {
+        let node = match form.node {
+            Node::List(range) | Node::Vec(range) | Node::Map(range) => {
+                let boundary = matches!(form.node, Node::List(_)) && flow_syntax::syntax::head(form) == Some("sop/error_boundary");
+                let mut children: Vec<_> = form.range(range).iter().map(|&id| {
+                    if boundary { b.import(&form.child(id)) } else { rewrite(b, &form.child(id)) }
+                }).collect();
+                if boundary {
+                    let enabled = b.intern("enabled");
+                    children.push(b.push(0, Node::Kw(enabled), rays_diagnostic::Span { start: 0, finish: 0 }, None));
+                    let disabled = b.intern("false");
+                    children.push(b.push(0, Node::Sym(disabled), rays_diagnostic::Span { start: 0, finish: 0 }, None));
+                }
+                let children = b.range(&children);
+                match form.node { Node::List(_) => Node::List(children), Node::Vec(_) => Node::Vec(children), _ => Node::Map(children) }
+            }
+            _ => return b.import(form),
+        };
+        b.push(form.id, node, form.span.clone(), form.arena().trivia(form.row_id()).cloned())
+    }
+    let mut b = SyntaxBuilder::new();
+    let id = rewrite(&mut b, form);
+    b.freeze().handle(id)
 }
 
 /// Deferred child cooking stays inside its authored error boundary.
@@ -980,7 +990,7 @@ fn deferred_child_cooking_stays_inside_its_authored_error_boundary() {
                 }
             }
             let forms = parse(text);
-            let disabled = flow_syntax::lisp::print(&forms.iter().map(disable_boundary).collect::<Vec<_>>()).0;
+            let disabled = flow_syntax::lisp::print(&forms.iter().map(disable_boundary).collect::<Vec<_>>()).unwrap().0;
             let before = calls.load(Ordering::SeqCst);
             let mut original = None;
             with_session(&mut |s| original = Some(bytes_of(s, &lower_ref(false, "(workspace original (graph g :context sop (sop/line :points 2)))"))));

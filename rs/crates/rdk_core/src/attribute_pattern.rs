@@ -526,9 +526,20 @@ mod tests {
 
 #[cfg(test)]
 mod sources_tests {
-    //! Port of the `patterns` section of lib/rdk/test_rdk_sources.ml. The OCaml minor-heap
-    //! (ocamlopt 5.3.0 arm64 clobbered class bit) regression has no Rust counterpart.
+    //! Port of lib/rdk/test_rdk_sources.ml's pattern assertions. Rust has no OCaml minor heap,
+    //! but repeated compilation retains the source regression's full iteration count.
     use super::*;
+
+    #[test]
+    fn repeated_class_compilation_preserves_each_member_bit() {
+        for iteration in 1..=200_000 {
+            let compiled = compile(r"[fa]* ^[a-b]x \[z]").unwrap();
+            assert!(matches(&compiled, "f"), "compile {iteration}: f");
+            assert!(matches(&compiled, "alpha"), "compile {iteration}: alpha");
+            assert!(matches(&compiled, "[z]"), "compile {iteration}: escaped literal");
+            assert!(!matches(&compiled, "g"), "compile {iteration}: excluded member");
+        }
+    }
 
     fn reference_glob(glob: &[u8], name: &[u8]) -> bool {
         let (gl, nl) = (glob.len(), name.len());

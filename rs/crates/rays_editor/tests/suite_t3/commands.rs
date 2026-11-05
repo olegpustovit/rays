@@ -205,7 +205,7 @@ pub fn new_graphs() {
             assert!(names(&e).iter().any(|x| x == n), "New graph did not make {n}");
         }
         assert!(names(&add(e.clone(), "sop")).iter().any(|x| x == "sop_2"), "a second New graph sop is not named afresh");
-        let source = flow_syntax::lisp::print(&Editor::workspace(&e).source).0;
+        let source = flow_syntax::lisp::print(&Editor::workspace(&e).source).unwrap().0;
         assert!(has(&source, "(ref sop)"), "the new scene does not read the SOP graph");
         for count in 1..=3 {
             e = Editor::update(e, &frame_at((450., 300.), vec![], count));

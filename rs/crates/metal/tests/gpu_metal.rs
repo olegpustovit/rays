@@ -38,6 +38,29 @@ fn without_handles(name: &str, operation: &mut dyn FnMut()) {
 }
 const SOURCE_K: &str = "#include <metal_stdlib>\nusing namespace metal; kernel void k(uint i [[thread_position_in_grid]]) {}";
 
+// The OCaml wrong-domain cases are prevented at the Rust ownership boundary:
+// neither moving a handle nor sharing a reference may enter a foreign thread.
+fn gpu_owner_only_handles() {
+    trait AmbiguousIfSend<A> { fn check() {} }
+    impl<T: ?Sized> AmbiguousIfSend<()> for T {}
+    struct IsSend;
+    impl<T: ?Sized + Send> AmbiguousIfSend<IsSend> for T {}
+    trait AmbiguousIfSync<A> { fn check() {} }
+    impl<T: ?Sized> AmbiguousIfSync<()> for T {}
+    struct IsSync;
+    impl<T: ?Sized + Sync> AmbiguousIfSync<IsSync> for T {}
+    macro_rules! owner_only {
+        ($($handle:ty),+ $(,)?) => {$(
+            let _ = <$handle as AmbiguousIfSend<_>>::check;
+            let _ = <$handle as AmbiguousIfSync<_>>::check;
+        )+};
+    }
+    owner_only!(Device, Buffer, MappedBuffer, Texture, Sampler, Library, Function, Compiler,
+        CommandQueue, CommandBuffer, ComputePipeline, ComputeEncoder, BlitEncoder,
+        RenderPassDescriptor, RenderPipeline, RenderEncoder, ShaderArgumentEncoder,
+        AccelerationStructure, AccelerationEncoder, metal_sys::Handle);
+}
+
 fn gpu_device_safe() {
     let device = Device::system_default().unwrap_or_else(|failure| die(failure));
     let before = stats();
@@ -204,6 +227,7 @@ fn gpu_compute_encoder() {
     let texture = Texture::create(&device, Texture::descriptor_2d(m::metal_format::Format::Rgba8Unorm, 1, 1, StorageMode::Shared, &[TextureUsage::ShaderRead], None)).unwrap_or_else(|failure| die(failure));
     let command = CommandBuffer::create(&queue).unwrap_or_else(|failure| die(failure));
     let encoder = ComputeEncoder::create(&command).unwrap_or_else(|failure| die(failure));
+    reject(ErrorKind::InvalidArgument, encoder.set_buffer(usize::MAX, 0, &buffer).err());
     reject(ErrorKind::InvalidArgument, encoder.set_buffer(0, 17, &buffer).err());
     reject(ErrorKind::InvalidArgument, encoder.set_bytes(1, &[]).err());
     reject(ErrorKind::InvalidState, encoder.dispatch_threads((4, 1, 1), (1, 1, 1)).err());
@@ -234,6 +258,56 @@ fn gpu_compute_encoder() {
     device.destroy().unwrap_or_else(|failure| die(failure));
 }
 
+fn gpu_render_encoder() {
+    let device = Device::system_default().unwrap_or_else(|failure| die(failure));
+    let pass = RenderPassDescriptor::create(&device, 4, 4, 1).unwrap_or_else(|failure| die(failure));
+    let color = Texture::create(&device, Texture::descriptor_2d(Format::Bgra8Unorm, 4, 4, StorageMode::Private, &[TextureUsage::RenderTarget], None)).unwrap_or_else(|failure| die(failure));
+    let depth = Texture::create(&device, Texture::descriptor_2d(Format::Depth32Float, 4, 4, StorageMode::Private, &[TextureUsage::RenderTarget], None)).unwrap_or_else(|failure| die(failure));
+    pass.set_attachments(&color, Some(&depth), None, [0.0; 4]).unwrap_or_else(|failure| die(failure));
+    let actions = |clear_depth, clear_stencil| pass.set_actions(LoadAction::Clear, StoreAction::Store, LoadAction::Load, StoreAction::Store, clear_depth, LoadAction::Clear, StoreAction::DontCare, clear_stencil);
+    actions(0.5, 0).unwrap_or_else(|failure| die(failure));
+    without_handles("invalid depth and stencil clears", &mut || {
+        reject(ErrorKind::InvalidArgument, actions(1.5, 0).err());
+        reject(ErrorKind::InvalidArgument, actions(0.0, 256).err());
+        reject(ErrorKind::InvalidArgument, actions(f64::NAN, 0).err());
+        reject(ErrorKind::InvalidArgument, actions(-0.1, 0).err());
+        reject(ErrorKind::InvalidArgument, pass.set_actions(LoadAction::Clear, StoreAction::Store, LoadAction::Load, StoreAction::MultisampleResolve, 0.5, LoadAction::Clear, StoreAction::Store, 0).err());
+        reject(ErrorKind::InvalidArgument, pass.set_actions(LoadAction::Clear, StoreAction::Store, LoadAction::Load, StoreAction::Store, 0.5, LoadAction::Clear, StoreAction::StoreAndMultisampleResolve, 0).err());
+    });
+    pass.destroy().unwrap_or_else(|failure| die(failure));
+    depth.destroy().unwrap_or_else(|failure| die(failure));
+    color.destroy().unwrap_or_else(|failure| die(failure));
+
+    let queue = CommandQueue::create(&device).unwrap_or_else(|failure| die(failure));
+    let target = Texture::create(&device, Texture::descriptor_2d(Format::Bgra8Unorm, 8, 8, StorageMode::Shared, &[TextureUsage::RenderTarget], None)).unwrap_or_else(|failure| die(failure));
+    let pass = RenderPassDescriptor::create(&device, 8, 8, 1).unwrap_or_else(|failure| die(failure));
+    pass.set_attachments(&target, None, None, [0.0; 4]).unwrap_or_else(|failure| die(failure));
+    let commands = CommandBuffer::create(&queue).unwrap_or_else(|failure| die(failure));
+    let encoder = RenderEncoder::create(&commands, &pass).unwrap_or_else(|failure| die(failure));
+    let sampled = Texture::create(&device, Texture::descriptor_2d(Format::Rgba8Unorm, 1, 1, StorageMode::Shared, &[TextureUsage::ShaderRead], None)).unwrap_or_else(|failure| die(failure));
+    let viewport = Viewport { x: 0.0, y: 0.0, width: 8.0, height: 8.0, znear: 0.0, zfar: 1.0 };
+    encoder.set_viewport(Viewport { x: -2.0, width: 11.0, ..viewport }).unwrap_or_else(|failure| die(failure));
+    for invalid in [
+        Viewport { width: 0.0, ..viewport },
+        Viewport { height: -1.0, ..viewport },
+        Viewport { x: f64::NAN, ..viewport },
+        Viewport { zfar: 1.5, ..viewport },
+        Viewport { znear: 0.75, zfar: 0.25, ..viewport },
+    ] {
+        reject(ErrorKind::InvalidArgument, encoder.set_viewport(invalid).err());
+    }
+    reject(ErrorKind::InvalidArgument, encoder.set_scissor(Scissor { x: 7, y: 0, width: 2, height: 8 }).err());
+    reject(ErrorKind::InvalidArgument, encoder.set_vertex_texture(31, &sampled).err());
+    reject(ErrorKind::InvalidState, encoder.draw_primitives(Primitive::Point, 0, 1, 1).err());
+    encoder.end_encoding().unwrap_or_else(|failure| die(failure));
+    complete(&commands);
+    pass.destroy().unwrap_or_else(|failure| die(failure));
+    sampled.destroy().unwrap_or_else(|failure| die(failure));
+    target.destroy().unwrap_or_else(|failure| die(failure));
+    queue.destroy().unwrap_or_else(|failure| die(failure));
+    device.destroy().unwrap_or_else(|failure| die(failure));
+}
+
 // Rejections that are decided before Metal is asked for anything: no handle is created or released.
 fn gpu_resource_bounds() {
     let device = Device::system_default().unwrap_or_else(|failure| die(failure));
@@ -248,11 +322,15 @@ fn gpu_resource_bounds() {
         }
         assert_eq!(before, stats(), "{name} crossed the native boundary");
     };
+    reject_without_native_work("negative buffer length bits", &|| Buffer::create(&device, u64::MAX, StorageMode::Shared, CpuCacheMode::DefaultCache, None).map(|_| ()));
     reject_without_native_work("oversized buffer length", &|| Buffer::create(&device, info.max_buffer_length + 1, StorageMode::Shared, CpuCacheMode::DefaultCache, None).map(|_| ()));
     let buffer = shared(&device, 32);
     let bytes = [1u8; 16];
+    reject_without_native_work("buffer negative destination bits", &|| buffer.write_bytes(u64::MAX, &bytes));
     reject_without_native_work("buffer destination overflow", &|| buffer.write_bytes(24, &bytes));
     reject_without_native_work("buffer destination integer overflow", &|| buffer.write_bytes(i64::MAX as u64, &bytes));
+    reject_without_native_work("buffer negative read bits", &|| buffer.read_bytes(u64::MAX, 1).map(|_| ()));
+    reject_without_native_work("buffer negative read length bits", &|| buffer.read_bytes(0, usize::MAX).map(|_| ()));
     reject_without_native_work("buffer oversized read", &|| buffer.read_bytes(31, 2).map(|_| ()));
     reject_without_native_work("buffer integer-overflow read", &|| buffer.read_bytes(i64::MAX as u64, usize::MAX >> 1).map(|_| ()));
     buffer.write_bytes(16, &bytes).unwrap_or_else(|failure| die(failure));
@@ -504,6 +582,7 @@ fn gpu_texture_transfer_descriptors() {
             TextureDescriptor { kind: TextureKind::Texture1d, height: 2, mip_levels: 1, ..texture_descriptor.clone() },
             TextureDescriptor { sample_count: 2, mip_levels: 1, ..texture_descriptor.clone() },
             TextureDescriptor { usage: vec![TextureUsage::ShaderRead, TextureUsage::ShaderRead], ..texture_descriptor.clone() },
+            TextureDescriptor { label: Some("invalid\0label".to_owned()), ..texture_descriptor.clone() },
             TextureDescriptor { kind: TextureKind::TextureBuffer, height: 1, mip_levels: 1, ..texture_descriptor.clone() },
             TextureDescriptor { kind: TextureKind::Texture2dArray, mip_levels: 1, ..texture_descriptor.clone() },
             TextureDescriptor { kind: TextureKind::TextureCube, height: 2, mip_levels: 1, ..texture_descriptor.clone() },
@@ -511,7 +590,7 @@ fn gpu_texture_transfer_descriptors() {
         ];
         for descriptor in invalid { reject(ErrorKind::InvalidArgument, Texture::create(&device, descriptor).err()); }
     });
-    // Metal refuses an invalid label string (0xFF bytes); a Rust String cannot hold one, so that case is not ported.
+    // Invalid UTF-8 labels cannot cross the safe API's String boundary.
     if device.supports_texture_sample_count(2).unwrap_or_else(|failure| die(failure)) {
         let multisample = Texture::create(&device, TextureDescriptor {
             kind: TextureKind::Texture2dMultisample, mip_levels: 1, sample_count: 2, storage: StorageMode::Private,
@@ -553,6 +632,8 @@ fn gpu_texture_blit() {
         blit.copy_buffer_to_texture(&staging, 0, bytes_per_row, bytes_per_image, destination, slice, level, region)
     };
     without_handles("refused blits", &mut || {
+        reject(ErrorKind::InvalidArgument, blit.copy_buffer_to_texture(&staging, u64::MAX, 4, 16, &texture, 0, 0, region).err());
+        reject(ErrorKind::InvalidArgument, blit.copy_buffer_to_texture(&staging, 1, 4, 16, &texture, 0, 0, region).err());
         reject(ErrorKind::InvalidArgument, copy(1, usize::MAX, &volume, 0, 0, TextureRegion { depth: 2, ..full_region(1, 1) }).err());
         reject(ErrorKind::InvalidArgument, copy(3, 16, &texture, 0, 0, region).err());
         reject(ErrorKind::InvalidArgument, copy(4, 15, &texture, 0, 0, region).err());
@@ -561,7 +642,6 @@ fn gpu_texture_blit() {
         reject(ErrorKind::InvalidArgument, copy(4, 16, &texture, 0, 0, TextureRegion { x: 1, ..region }).err());
         reject(ErrorKind::InvalidArgument, copy(4, 16, &texture, 0, 0, TextureRegion { width: 0, ..region }).err());
     });
-    // A source offset of -1 is not expressible: source_offset is unsigned in Rust, so that case is not ported.
     copy(4, 16, &texture, 0, 0, region).unwrap_or_else(|failure| die(failure));
     reject(ErrorKind::ParentHasDependents, staging.destroy().err());
     reject(ErrorKind::ParentHasDependents, texture.destroy().err());
@@ -577,6 +657,7 @@ fn gpu_texture_blit() {
     let commands = CommandBuffer::create(&queue).unwrap_or_else(|failure| die(failure));
     let encoder = ComputeEncoder::create(&commands).unwrap_or_else(|failure| die(failure));
     encoder.set_pipeline(&read_pipeline).unwrap_or_else(|failure| die(failure));
+    reject(ErrorKind::InvalidArgument, encoder.set_texture(usize::MAX, &texture).err());
     reject(ErrorKind::InvalidArgument, encoder.set_texture(31, &texture).err());
     encoder.set_texture(0, &texture).unwrap_or_else(|failure| die(failure));
     encoder.set_buffer(0, 0, &output).unwrap_or_else(|failure| die(failure));
@@ -1095,6 +1176,7 @@ fn gpu_argument_reflection_snapshot() {
 fn main() {
     if !cfg!(target_os = "macos") { return; } // Metal exists only on macOS
     common::run(&[
+        ("gpu_owner_only_handles", gpu_owner_only_handles),
         ("gpu_device_safe", gpu_device_safe),
         ("gpu_device_queue", gpu_device_queue),
         ("gpu_device_library", gpu_device_library),
@@ -1102,6 +1184,7 @@ fn main() {
         ("gpu_blit", gpu_blit),
         ("gpu_compute_pipeline", gpu_compute_pipeline),
         ("gpu_compute_encoder", gpu_compute_encoder),
+        ("gpu_render_encoder", gpu_render_encoder),
         ("gpu_resource_bounds", gpu_resource_bounds),
         ("gpu_sampler", gpu_sampler),
         ("gpu_texture_formats", gpu_texture_formats),

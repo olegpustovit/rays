@@ -541,9 +541,6 @@ pub fn dump(value: &T) -> String {
 
 // ---- naming a home for a message: structural, read from the workspace source ----
 
-fn last<V: Clone>(l: &[V]) -> Option<V> {
-    l.last().cloned()
-}
 
 /// The form a home is written as, when the source can be walked to it: a loop's body is its last
 /// child, and a copy's `rel` walks the body's `let*` bindings to the template.
@@ -555,33 +552,28 @@ pub fn syntax_of(source: &[S], home: &Home) -> Option<S> {
             fn walk(e: &S, steps: &[String]) -> Option<S> {
                 match steps.split_first() {
                     None => Some(e.clone()),
-                    Some((step, rest)) => match &e.node {
-                        Node::List(items) if items.len() >= 2 && matches!(&items[0].node, Node::Sym(h) if h == "let*") && matches!(items[1].node, Node::Vec(_)) => {
-                            let Node::Vec(bs) = &items[1].node else { return None };
+                    Some((step, rest)) => {
+                        let items = e.children();
+                        if s::head(e) == Some("let*") && items.len() >= 2 && matches!(e.arena().row(items[1]).node, Node::Vec(_)) {
+                            let Node::Vec(range) = e.arena().row(items[1]).node else { return None };
                             if step == "@result" {
-                                last(&items[2..]).and_then(|b| walk(&b, rest))
+                                items[2..].last().and_then(|id| walk(&e.child(*id), rest))
                             } else {
-                                let mut i = 0;
-                                let mut found = None;
-                                while i + 1 < bs.len() {
-                                    if matches!(&bs[i].node, Node::Sym(n) if n == step) {
-                                        found = Some(bs[i + 1].clone());
-                                        break;
-                                    }
-                                    i += 2;
-                                }
-                                found.and_then(|v| walk(&v, rest))
+                                e.range(range).chunks_exact(2)
+                                    .find(|pair| matches!(e.arena().row(pair[0]).node, Node::Sym(name) if e.name(name) == step))
+                                    .and_then(|pair| walk(&e.child(pair[1]), rest))
                             }
+                        } else if step == "@result" {
+                            walk(e, rest)
+                        } else {
+                            None
                         }
-                        _ => {
-                            if step == "@result" { walk(e, rest) } else { None }
-                        }
-                    },
+                    }
                 }
             }
             let e = syntax_of(source, loop_)?;
-            match &e.node {
-                Node::List(items) if !items.is_empty() => last(&items[1..]).and_then(|body| walk(&body, rel)),
+            match e.node {
+                Node::List(range) if !e.range(range).is_empty() => e.range(range)[1..].last().and_then(|id| walk(&e.child(*id), rel)),
                 _ => None,
             }
         }
@@ -609,26 +601,24 @@ fn truncate(n: usize, text: &str) -> String {
 
 /// The head of a form for a message: `for [j (range 2)]`, `scene/light`.
 fn head_text(e: &S) -> String {
-    if let Node::List(items) = &e.node {
-        if let Some(Node::Sym(h)) = items.first().map(|x| &x.node) {
-            if let Some(v @ S { node: Node::Vec(_), .. }) = items.get(1) {
-                return format!("{h} {}", lisp::flat(&S { node: v.node.clone(), span: v.span.clone(), id: v.id, ..e.clone() }));
-            }
-            return h.clone();
+    if let Some(head) = s::head(e) {
+        if let Some(id) = e.children().get(1).filter(|id| matches!(e.arena().row(**id).node, Node::Vec(_))) {
+            return format!("{head} {}", lisp::flat_with_meta(&e.child(*id), e.meta()));
         }
+        return head.to_owned();
     }
     lisp::flat(e)
 }
 
 /// The line of a form in the printed text of the workspace, when it is part of it.
-fn line_of(source: &[S], e: &S) -> Option<usize> {
-    let (text, spans) = lisp::print(source);
-    let span = spans.iter().find(|(id, _)| *id == e.id).map(|(_, sp)| sp.clone())?;
-    if span.start as usize <= text.len() {
+fn line_of(source: &[S], e: &S) -> Result<Option<usize>, Diagnostic> {
+    let (text, spans) = lisp::print(source)?;
+    let Some(span) = spans.iter().find(|(id, _)| *id == e.id).map(|(_, sp)| sp) else { return Ok(None) };
+    Ok(if span.start as usize <= text.len() {
         Some(1 + text.as_bytes()[..span.start as usize].iter().filter(|c| **c == b'\n').count())
     } else {
         None
-    }
+    })
 }
 
 /// What a loop or an expression is called in a message: its binding if it has one, else its head
@@ -644,8 +634,10 @@ pub fn describe(source: &[S], home: &Home) -> String {
             },
             Some(e) => {
                 let mut wh: Vec<String> = Vec::new();
-                if let Some(l) = line_of(source, &e) {
-                    wh.push(format!("line {l}"));
+                match line_of(source, &e) {
+                    Ok(Some(line)) => wh.push(format!("line {line}")),
+                    Ok(None) => (),
+                    Err(error) => wh.push(rays_diagnostic::to_string(&error)),
                 }
                 if let Some(n) = enclosing(home) {
                     wh.push(format!("in {}", sop::node::ocaml_quote(&n)));

@@ -53,7 +53,7 @@ fn run_sticky() {
     let ws = checked(text);
     let forms = flow_syntax::syntax::parse(text).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
     let (source, ws2) = e::apply_checked(&scope_catalog(), &forms, &e::Op::MoveBinding { node: path(&["g", "b"]), by: -1 }).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
-    check(flow_syntax::lisp::print(&source).0 != text, "Move_binding changed no text");
+    check(flow_syntax::lisp::print(&source).unwrap().0 != text, "Move_binding changed no text");
     let first = p::layout(&p::LayoutOptions::new(), &p::of_graph(&scope_catalog(), &ws, "g").unwrap());
     let key = |l: &p::Layout| {
         let mut v: Vec<(Vec<String>, i64, i64)> = l.placed.iter().map(|b| (b.path.clone(), b.x.to_bits() as i64, b.y.to_bits() as i64)).collect();

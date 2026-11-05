@@ -280,9 +280,9 @@ impl<T: HeapSize> HeapSize for Accounted<T> {
     }
 }
 
-impl<T: HeapSize + Send + Sync> mem::AccountedSize for Accounted<T> {
-    fn owned_bytes(&self) -> usize {
-        self.heap_size()
+impl<T: mem::AccountedSize> mem::AccountedSize for Accounted<T> {
+    fn visit_allocations(&self, visitor: &mut mem::AllocationVisitor) {
+        self.0.visit_allocations(visitor);
     }
 }
 

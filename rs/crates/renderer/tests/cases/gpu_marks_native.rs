@@ -259,6 +259,7 @@ fn marks_draw(
     let m = mesh {
         key: mesh_key::Gpu_vertices(key),
         vertices: scene_execution::empty_bytes(),
+        shared_vertices: None,
         vertex_count: 4 * n,
         indices: new_bytes(quad_indices(n)),
         index_count: 6 * n,

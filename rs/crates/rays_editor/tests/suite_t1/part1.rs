@@ -56,7 +56,7 @@ pub fn run_lowering() {
     check(keys6[..4] == keys[..] && keys6.len() == 6, "panel keys follow the iteration index");
     check(editor_document::document::scene_graph(&more).len() > 4, "more objects for more viewports");
     // the default shell of a workspace without an editor graph, and a named graph panel
-    let plain = build_ok(&of_text("(workspace plain (graph g :context sop (sop/box)))")) /* cases/tree.lisp is not in the repo */;
+    let plain = build_ok(&of_text(&case("tree")));
     check(plain.shell.is_none(), "no editor graph, no shell");
     let named = build_ok(&of_text(&with_editor("    (ui/workspace (ui/split \"vertical\" (ui/graph \"scene\") (ui/viewport (ref scene))))")));
     check(shell_of(&named).named == vec![(vec![0usize], "scene".to_string())], "ui/graph names its graph");
@@ -71,6 +71,32 @@ pub fn run_lowering() {
     expect_error("an empty tile", &with_editor("    (ui/workspace (ui/tile (for [i (range 0)] (ui/graph))))"), "tile");
     // a selected layout that names no editor graph is dropped, not an error (a removed graph)
     check(of_text(&format!("{}\n(layout (editor \"missing\"))", with_editor("    (ui/workspace (ui/graph))"))).layout.editor.is_none(), "a dangling editor layout was kept");
+}
+
+pub fn run_frame_key() {
+    if !gpu() {
+        return;
+    }
+    let mut e = editor(&case("rosette"));
+    for n in 1..=24 {
+        let events = match n {
+            4 => {
+                let p = (900., 300.);
+                vec![Event::Pointer_moved(p), Event::Pointer_pressed(MouseButton::LeftButton, p), Event::Pointer_released(MouseButton::LeftButton, p)]
+            }
+            6 => vec![key(Key::ArrowDown)],
+            8 => vec![key(Key::KeyChar('i'))],
+            16 => vec![key(Key::ArrowRight)],
+            18 => vec![key(Key::Shift), key(Key::KeyChar('g'))],
+            _ => Vec::new(),
+        };
+        let mut at = frame_full(&[], if n == 18 { &[Key::Shift] } else { &[] }, (0., 0.), (640., 360.), events, n);
+        at.input.size = (1400, 800);
+        e = Editor::update(e, &at);
+    }
+    check(Editor::undo_label(&e).as_deref() == Some("Frame"), "Shift-G makes one Frame history entry");
+    check(!Editor::workspace(&e).layout.frames.is_empty(), "the frame is in the layout");
+    Editor::close(&e);
 }
 
 pub fn run_editor() {

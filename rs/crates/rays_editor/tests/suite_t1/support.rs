@@ -31,21 +31,16 @@ pub fn show(ds: &[rays_diagnostic::Diagnostic]) -> String {
     ds.iter().map(rays_diagnostic::to_string).collect::<Vec<_>>().join("; ")
 }
 pub fn read_case(name: &str) -> String {
-    let path = format!("{}/../../../specification/workspace/cases/{name}.lisp", env!("CARGO_MANIFEST_DIR"));
-    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"))
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let path = if matches!(name, "bloom" | "variations") {
+        root.join("specification/workspace/cases").join(format!("{name}.lisp"))
+    } else {
+        root.join("sketches").join(format!("ws_{name}.rays"))
+    };
+    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
-/// A small garden: the shell tests look at panels and edits, not at 40 scattered spheres a cook.
 pub fn case(name: &str) -> String {
-    let text = read_case(name);
-    if name != "variations" { return text; }
-    let text = text.replacen("(count : int 40)", "(count : int 3)", 1);
-    // slow lowering: perf3 -- sop/copy_to_points never returns in the Rust port (rays_editor_plan.md) and every
-    // lowering costs ~1 s in debug; the shell tests do not look at the scattered dots, so the garden is the bed
-    // alone unless RAYS_SLOW=1.
-    if std::env::var("RAYS_SLOW").map(|v| v == "1").unwrap_or(false) { return text; }
-    let from = text.find("           spots (sop/scatter").expect("spots");
-    let to = text.find("           result (sop/set_color").expect("result");
-    format!("{}{}", &text[..from], &text[to..]).replacen("(sop/merge bed dots)", "bed", 1)
+    read_case(name)
 }
 pub fn sketch(name: &str) -> String {
     let path = format!("{}/../../../sketches/{name}.rays", env!("CARGO_MANIFEST_DIR"));
@@ -132,7 +127,7 @@ pub fn editor_with(text: &str, options: Editor::Create) -> Editor::t {
     }
 }
 pub fn source(e: &Editor::t) -> String {
-    workspace_doc::print(&Editor::workspace(e)).0
+    workspace_doc::print(&Editor::workspace(e)).unwrap().0
 }
 pub fn dump_line(e: &Editor::t, key: &str) -> String {
     let dir = std::env::temp_dir().join(format!("rays-shell-dump-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
@@ -206,11 +201,6 @@ pub fn fpt(a: i64, b: i64) -> (f64, f64) {
 pub fn gpu() -> bool {
     crate::common::gpu()
 }
-/// sketches/ws_layout.rays with the garden of case("variations"): the bed alone (slow lowering: perf3).
 pub fn studio_text() -> String {
-    let text = sketch("ws_layout");
-    if std::env::var("RAYS_SLOW").map(|v| v == "1").unwrap_or(false) { return text; }
-    let from = text.find("           spots (sop/scatter").expect("spots");
-    let to = text.find("           result (sop/set_color").expect("result");
-    format!("{}{}", &text[..from], &text[to..]).replacen("(sop/merge bed dots)", "bed", 1)
+    sketch("ws_layout")
 }

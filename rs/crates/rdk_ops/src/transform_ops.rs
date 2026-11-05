@@ -1193,10 +1193,10 @@ mod tests {
         let params = SoftTransformParams { cancel: Some(token), ..soft(SoftRadius, SoftCubic, 1.0, seed(), None) };
         assert_eq!(failure_code(soft_transform(&params, &up(1.0), &source)), "cancelled");
         // One and four domains agree exactly on a grid large enough to split into many ranges.
-        let dense = grid(60, 40, 20.0);
-        let width = 61;
+        let dense = grid(400, 240, 20.0);
+        let width = 401;
         let count = geometry::point_count(&dense);
-        let center = 20 * width + 30;
+        let center = 120 * width + 200;
         let group_seed = point_group("seed", count, &move |point| point == center);
         for metric in [SoftRadius, SoftEdge] {
             let run = |domains: i64| -> geometry::T {
@@ -1214,7 +1214,11 @@ mod tests {
                 output.into_inner().unwrap().unwrap()
             };
             let (one, four) = (run(1), run(4));
-            assert_eq!(ys(&one), ys(&four));
+            let one_positions = packed::Float3::View::view(geometry::positions(&one)).unwrap();
+            let four_positions = packed::Float3::View::view(geometry::positions(&four)).unwrap();
+            assert_eq!(one_positions.x, four_positions.x);
+            assert_eq!(one_positions.y, four_positions.y);
+            assert_eq!(one_positions.z, four_positions.z);
             assert_eq!(float_attribute("falloff", &one), float_attribute("falloff", &four));
         }
     }
@@ -1368,7 +1372,7 @@ mod tests {
     }
 
     /// Remaining checks of `test_errors_cancellation_and_parallel` in lib/rdk/test_distance_from_geometry.ml
-    /// (the curve as surface reference, and one/four-domain exactness on a smaller dense fixture).
+    /// (the curve as surface reference, and full grid/sphere one/four-domain exactness).
     #[test]
     fn distance_from_geometry_curve_reference_and_domain_exactness() {
         let source = points_geometry(&[(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)]);
@@ -1396,13 +1400,47 @@ mod tests {
             "curve surface reference"
         );
         let mut row = Vec::new();
-        for j in 0..40 {
-            for i in 0..60 {
-                row.push((i as f64 * 0.33 - 10.0, 1.5, j as f64 * 0.5 - 10.0));
+        for j in 0..=200 {
+            for i in 0..=320 {
+                row.push((-10.0 + 20.0 * i as f64 / 320.0, 1.5, -10.0 + 20.0 * j as f64 / 200.0));
             }
         }
         let dense = points_geometry(&row);
-        let surface = grid(24, 24, 20.0);
+        // The source's radius-5 UV sphere: 80 latitude bands, 120 segments,
+        // shared poles and the same triangle order as test_support/uv_sphere.ml.
+        let (rings, segments) = (80_i64, 120_i64);
+        let mut sphere_points = vec![(0.0, 5.0, 0.0)];
+        for ring in 1..rings {
+            let theta = std::f64::consts::PI * ring as f64 / rings as f64;
+            for segment in 0..segments {
+                let phi = std::f64::consts::PI * 2.0 * segment as f64 / segments as f64;
+                sphere_points.push((5.0 * theta.sin() * phi.cos(), 5.0 * theta.cos(), 5.0 * theta.sin() * phi.sin()));
+            }
+        }
+        sphere_points.push((0.0, -5.0, 0.0));
+        let point = |ring: i64, segment: i64| {
+            if ring == 0 { 0 } else if ring == rings { 1 + (rings - 1) * segments }
+            else { 1 + (ring - 1) * segments + segment % segments }
+        };
+        let mut triangles = Vec::new();
+        for segment in 0..segments {
+            triangles.extend([point(0, segment), point(1, segment + 1), point(1, segment)]);
+        }
+        for ring in 1..rings - 1 {
+            for segment in 0..segments {
+                let (a, b, c, d) = (point(ring, segment), point(ring, segment + 1),
+                    point(ring + 1, segment + 1), point(ring + 1, segment));
+                triangles.extend([a, c, d, a, b, c]);
+            }
+        }
+        for segment in 0..segments {
+            triangles.extend([point(rings, segment), point(rings - 1, segment), point(rings - 1, segment + 1)]);
+        }
+        let offsets = (0..=triangles.len() / 3).map(|index| index as i64 * 3).collect();
+        let sphere_topology = topology::polygons_owned(sphere_points.len() as i64, triangles, offsets).unwrap();
+        let surface = geometry::create(
+            geometry::positions(&points_geometry(&sphere_points)).clone(), sphere_topology, None, None, None,
+        ).unwrap();
         let count = geometry::point_count(&dense);
         let affected = point_group("affected", count, &|point| point % 3 != 0);
         for kind in [DistanceReferencePoints, DistanceReferencePrimitives] {

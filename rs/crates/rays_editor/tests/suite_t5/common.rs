@@ -73,7 +73,7 @@ pub fn same_ws(a: &wd::T, b: &wd::T) -> bool {
 }
 
 pub fn text_of(e: &Editor::t) -> String {
-    wd::to_text(&Editor::workspace(e))
+    wd::to_text(&Editor::workspace(e)).unwrap()
 }
 
 pub fn has(text: &str, piece: &str) -> bool {
@@ -226,7 +226,7 @@ impl Env {
         Editor::workspace(self.e())
     }
     pub fn src(&self) -> String {
-        flow_syntax::lisp::print(&self.ws().source).0
+        flow_syntax::lisp::print(&self.ws().source).unwrap().0
     }
     pub fn dump(&self) -> String {
         dump_text(self.e())

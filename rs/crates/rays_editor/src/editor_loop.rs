@@ -1,9 +1,9 @@
 //! The editor's frame coordinator and resource lifetime. Port of lib/rays_editor/editor_loop.ml.
 //!
 //! Conventions of this port (see loop_model.rs): `update_with`'s `inspector` answers `Rc<dyn Any>`
-//! (OCaml's `'a`); the camera panel and the viewport handles are built by closures that receive the
-//! `Ui` the frame holds. `Mem.root`'s heap walks have no counterpart: the ledger roots of the
-//! document are the size of its text.
+//! (OCaml's `'a`); frame closures receive its `Ui`. `Mem.root` attributes retained source and
+//! checked-term buffers when the immutable document changes; allocator/Arc metadata and other
+//! lowering owners remain outside that accounting.
 #![allow(non_camel_case_types, non_upper_case_globals)]
 use std::any::Any;
 use std::cell::RefCell;
@@ -54,6 +54,30 @@ use crate::viewport as V;
 use crate::world_map::*;
 
 type Nodes = Vec<scene_node>;
+
+thread_local! {
+    static MEMORY_DOCUMENT: RefCell<std::sync::Weak<editor_document::document::T>> = RefCell::new(std::sync::Weak::new());
+}
+
+fn document_memory(value: &Arc<editor_document::document::T>) {
+    MEMORY_DOCUMENT.with(|last| {
+        let mut last = last.borrow_mut();
+        if last.upgrade().is_some_and(|old| Arc::ptr_eq(&old, value)) { return; }
+        let (syntax, terms) = workspace_doc::memory_allocations(&value.workspace.ws);
+        // Each callback owns the immutable root whose allocations its cached identities describe.
+        let syntax_document = value.clone();
+        mem::root(&mem::document("editor.document.syntax"), Arc::new(move |visitor| {
+            std::hint::black_box(&syntax_document);
+            for &(address, bytes) in &syntax { visitor.allocation(address, bytes); }
+        }));
+        let term_document = value.clone();
+        mem::root(&mem::document("editor.document.terms"), Arc::new(move |visitor| {
+            std::hint::black_box(&term_document);
+            for &(address, bytes) in &terms { visitor.allocation(address, bytes); }
+        }));
+        *last = Arc::downgrade(value);
+    });
+}
 
 fn host_gpu(value: &t) -> workspace_gpu::t {
     value.host.borrow().gpu.clone()
@@ -805,11 +829,8 @@ pub fn memory_boundary(mut value: t) -> t {
         mem::charge(&mem::plan_in(mem::Pool::Device, "gpu.driver"), driver - mem::attributed_device());
         value.memory_known = true;
     }
-    // on the ledger when a report walks them: the document is its text. ponytail: OCaml walks the
-    // reachable heap of the document, the history and the lowering; here the document owner is its
-    // text's size and the other two are charged nothing.
-    let text_bytes = workspace_doc::to_text(&value.core.doc.workspace.ws).len();
-    mem::root(&mem::document("editor.document"), Arc::new(move || text_bytes));
+    // Immutable ownership roots only change on edits/reloads, never on an unchanged scene's frame.
+    document_memory(&value.core.doc);
     let options = |device: i64| mem::RetreatOptions { device: Some(Arc::new(move || device)), usage: None, later: Vec::new() };
     let mut verdict = mem::retreat_with(options(device_bytes));
     let mut core_changed = false;
@@ -923,9 +944,10 @@ pub fn crash_dump(value: &t, directory: &str) -> Result<(), String> {
 }
 
 pub fn close(value: &t) {
-    for name in ["editor.document", "editor.history", "editor.lowering"] {
-        mem::root(&mem::document(name), Arc::new(|| 0));
+    for name in ["editor.document.syntax", "editor.document.terms"] {
+        mem::root(&mem::document(name), Arc::new(|_| {}));
     }
+    MEMORY_DOCUMENT.with(|last| *last.borrow_mut() = std::sync::Weak::new());
     let value = autosave(value.clone(), true, value.state_checked);
     if let Some(error) = &value.state_error {
         eprintln!("{error}");

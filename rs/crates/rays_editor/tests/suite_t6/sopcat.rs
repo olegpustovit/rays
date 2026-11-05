@@ -324,27 +324,29 @@ fn manifest_checks(exhaustive: bool) {
         Ok(_) => panic!("Flow manifest reader accepted changed contents"),
     }
     check(manifest::generate(&[], None, &native) == Ok((manifest_text.clone(), digest.clone())), "Flow catalog manifest is not deterministic");
-    let children = |name: &str, form: &syntax::Syntax| -> Vec<syntax::Syntax> {
-        match &form.node {
-            Node::List(items) if matches!(items.first().map(|i| &i.node), Some(Node::Sym(h)) if h == name) => items[1..].to_vec(),
+    let forms = syntax::parse(&manifest_text).unwrap();
+    assert!(forms.len() == 1, "Flow manifest needs one top-level form");
+    let owner = &forms[0];
+    let children = |name: &str, id: syntax::SyntaxId| {
+        let items = owner.arena().children(id);
+        match owner.arena().row(id).node {
+            Node::List(_) if items.first().is_some_and(|&id| matches!(owner.arena().row(id).node, Node::Sym(h) if owner.name(h) == name)) => &items[1..],
             _ => panic!("Malformed Flow manifest {name}"),
         }
     };
-    let forms = syntax::parse(&manifest_text).unwrap();
-    assert!(forms.len() == 1, "Flow manifest needs one top-level form");
-    let body = children("flow_manifest", &forms[0]);
+    let body = children("flow_manifest", owner.row_id());
     assert!(body.len() == 3, "Malformed Flow manifest body");
-    match (children("version", &body[0]).as_slice(), children("digest", &body[1]).as_slice()) {
-        ([v], [h]) => match (&v.node, &h.node) {
-            (Node::Num(n), Node::Str(s)) => check(n.parse::<i64>().unwrap() == manifest::VERSION && s.as_slice() == digest.as_bytes(), "Flow manifest header changed"),
+    match (children("version", body[0]), children("digest", body[1])) {
+        ([v], [h]) => match (owner.arena().row(*v).node, owner.arena().row(*h).node) {
+            (Node::Num(n), Node::Str(s)) => check(owner.name(n).parse::<i64>().unwrap() == manifest::VERSION && owner.bytes(s) == digest.as_bytes(), "Flow manifest header changed"),
             _ => panic!("Malformed Flow manifest header"),
         },
         _ => panic!("Malformed Flow manifest header"),
     }
-    let names: Vec<Vec<u8>> = children("kinds", &body[2])
+    let names: Vec<Vec<u8>> = children("kinds", body[2])
         .iter()
-        .map(|kind| match children("kind", kind).first().map(|k| &k.node) {
-            Some(Node::Str(name)) => name.clone(),
+        .map(|&kind| match children("kind", kind).first().map(|&id| owner.arena().row(id).node) {
+            Some(Node::Str(name)) => owner.bytes(name).to_vec(),
             _ => panic!("Malformed Flow manifest kind"),
         })
         .collect();
@@ -406,10 +408,6 @@ fn perturbed(view: &FieldView) -> Option<Value> {
 
 /// Every cook-impact schema field of every registered SOP participates in the cache identity.
 fn perturbation() {
-    if std::env::var("RAYS_SLOW").as_deref() != Ok("1") {
-        println!("SKIPPED sopcat_perturbation: builds all 165 default nodes (a body lowering each); RAYS_SLOW=1");
-        return;
-    }
     let (mut changed, mut rejected) = (0, 0);
     for factory in registered_factories() {
         let key = edit::factory_key(&factory).to_owned();
@@ -441,10 +439,6 @@ fn manifest_default() {
 }
 
 fn manifest_exhaustive() {
-    if std::env::var("RAYS_SLOW").as_deref() != Ok("1") {
-        println!("SKIPPED sopcat_manifest_exhaustive: instantiates every default node (about 25 s in release); RAYS_SLOW=1");
-        return;
-    }
     manifest_checks(true);
 }
 
@@ -705,39 +699,16 @@ fn node_inputs() {
     );
 }
 
-/// Runs only under RAYS_SLOW=1: everything here lowers the whole SOP library (the registered factories) or the
-/// gallery, which is tens of seconds in a debug build (perf3).
-macro_rules! slow {
-    ($name:ident, $body:path, $reason:expr) => {
-        fn $name() {
-            if std::env::var("RAYS_SLOW").as_deref() != Ok("1") {
-                println!("SKIPPED {}: {}", stringify!($name), $reason);
-                return;
-            }
-            $body();
-        }
-    };
-}
-
-slow!(c_gallery, gallery_grid_warning, "slow lowering: perf3 (sop_gallery check_text + 100x100 grid, 15 s in debug)");
-slow!(c_motion, motion, "slow lowering: perf3 (registered factories lower the whole library, over 40 s in debug)");
-slow!(c_set_color, set_color, "slow lowering: perf3 (registered factories, over 40 s in debug)");
-slow!(c_membership, membership, "slow lowering: perf3 (registered factories, over 40 s in debug)");
-slow!(c_manifest, manifest_default, "slow lowering: perf3 (registered factories, over 40 s in debug)");
-slow!(c_graph_edits, run_body, "slow lowering: perf3 (registered factories, over 40 s in debug)");
-slow!(c_morph, morph_sketch, "ws_morph lowering; also fails E_LOWER 'Attribute write without geometry' (parity_backlog.md, editor suite t6)");
-slow!(c_inputs, node_inputs, "slow lowering: perf3 (registered factories, over 40 s in debug)");
-
 pub fn cases() -> Vec<(&'static str, fn())> {
     vec![
-        ("sopcat_gallery_grid_warning", c_gallery),
-        ("sopcat_motion", c_motion),
-        ("sopcat_set_color", c_set_color),
-        ("sopcat_membership", c_membership),
-        ("sopcat_manifest", c_manifest),
-        ("sopcat_graph_edits", c_graph_edits),
-        ("sopcat_morph_sketch", c_morph),
-        ("sopcat_node_inputs", c_inputs),
+        ("sopcat_gallery_grid_warning", gallery_grid_warning),
+        ("sopcat_motion", motion),
+        ("sopcat_set_color", set_color),
+        ("sopcat_membership", membership),
+        ("sopcat_manifest", manifest_default),
+        ("sopcat_graph_edits", run_body),
+        ("sopcat_morph_sketch", morph_sketch),
+        ("sopcat_node_inputs", node_inputs),
         ("sopcat_manifest_exhaustive", manifest_exhaustive),
         ("sopcat_perturbation", perturbation),
     ]

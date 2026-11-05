@@ -828,7 +828,7 @@ pub mod Region {
     }
 
     fn invalid(term: &Term, message: &str) -> Vec<Diagnostic> {
-        vec![rays_diagnostic::error("E_PACKED_LAYOUT".to_owned(), message.to_owned(), Some(term.form.span.clone()), None, None, Vec::new(), Vec::new())]
+        vec![rays_diagnostic::error("E_PACKED_LAYOUT".to_owned(), message.to_owned(), Some(term.form().span.clone()), None, None, Vec::new(), Vec::new())]
     }
 
     fn validate(r: T) -> Result<T, Vec<Diagnostic>> {
@@ -909,7 +909,7 @@ pub mod Region {
                 Instruction::Text_input(input) => {
                     if *input < 0 || *input >= r.sources.len() as i64 || *input >= r.widths.len() as i64
                         || r.widths[*input as usize] != 1
-                        || r.sources[*input as usize].1.ty != Ty::Array(Box::new(Ty::Text))
+                        || *r.sources[*input as usize].1.ty() != Ty::Array(Box::new(Ty::Text))
                     {
                         *operands_ok = false;
                     }
@@ -922,7 +922,7 @@ pub mod Region {
                     if *input < 0 || *input >= r.widths.len() as i64
                         || *width != r.widths[*input as usize]
                         || *component < 0 || *component >= *width
-                        || (*input < r.sources.len() as i64 && r.sources[*input as usize].1.ty == Ty::Array(Box::new(Ty::Text)))
+                        || (*input < r.sources.len() as i64 && *r.sources[*input as usize].1.ty() == Ty::Array(Box::new(Ty::Text)))
                     {
                         *operands_ok = false;
                     }
@@ -930,7 +930,7 @@ pub mod Region {
                 Instruction::Int_input(input) => {
                     if *input < 0 || *input >= r.sources.len() as i64 || *input >= r.widths.len() as i64
                         || r.widths[*input as usize] != 1
-                        || r.sources[*input as usize].1.ty != Ty::Array(Box::new(Ty::Int))
+                        || *r.sources[*input as usize].1.ty() != Ty::Array(Box::new(Ty::Int))
                     {
                         *operands_ok = false;
                     }
@@ -1047,12 +1047,12 @@ pub mod Region {
             let diagnostic = rays_diagnostic::error(
                 "E_CORE_ARGUMENT".to_owned(),
                 "A rebound region changed its validated capture layout.".to_owned(),
-                Some(t.term.form.span.clone()), None, None, Vec::new(), Vec::new(),
+                Some(t.term.form().span.clone()), None, None, Vec::new(), Vec::new(),
             );
             if uniforms.len() != t.uniforms.len()
                 || !t.uniforms.iter().zip(uniforms.iter()).all(|(b, a)| uniform_ty(b) == uniform_ty(a))
                 || sources.len() != t.sources.len()
-                || !t.sources.iter().zip(sources.iter()).all(|(b, a)| b.1.ty == a.1.ty)
+                || !t.sources.iter().zip(sources.iter()).all(|(b, a)| b.1.ty() == a.1.ty())
                 || stages.len() != t.stages.len()
             {
                 return Err(diagnostic);

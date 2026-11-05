@@ -153,8 +153,8 @@ fn mapped_i64(cancel_value: Option<&cancel::T>, grain: i64, destinations: &[i64]
     Ok(output.into_vec())
 }
 
-fn mapped_string(cancel_value: Option<&cancel::T>, grain: i64, destinations: &[i64], source: &[String], target: &[String]) -> Result<Vec<String>, error::T> {
-    let output: Vec<Mutex<String>> = source.iter().map(|value| Mutex::new(value.clone())).collect();
+fn mapped_string(cancel_value: Option<&cancel::T>, grain: i64, destinations: &[i64], source: &[Vec<u8>], target: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, error::T> {
+    let output: Vec<Mutex<Vec<u8>>> = source.iter().map(|value| Mutex::new(value.clone())).collect();
     support::parallel_for(cancel_value, grain, destinations.len() as i64, &|point| {
         let destination = destinations[point as usize];
         if destination >= 0 {
@@ -541,7 +541,7 @@ mod tests {
             let g = geom(&(0..n).map(|p| p as f64).collect::<Vec<_>>(), &z, &z, &[], &[0], None);
             let g = with_attr(&g, Owner::Point, "f", Storage::Float((0..n).map(|p| (p + salt) as f64 * 0.5).collect()));
             let g = with_attr(&g, Owner::Point, "i", Storage::Int((0..n).map(|p| p * 3 + salt).collect()));
-            let g = with_attr(&g, Owner::Point, "t", Storage::Text((0..n).map(|p| format!("s{}", p + salt)).collect()));
+            let g = with_attr(&g, Owner::Point, "t", Storage::Text((0..n).map(|p| format!("s{}", p + salt).into_bytes()).collect()));
             let offsets: Vec<i64> = std::iter::once(0).chain((1..=n).scan(0, |at, p| { *at += p % 4; Some(*at) })).collect();
             let values: Vec<f64> = (0..offsets[n as usize]).map(|v| v as f64 + salt as f64).collect();
             let rows = packed::FloatArray::View::create_validated_owned(offsets, values);

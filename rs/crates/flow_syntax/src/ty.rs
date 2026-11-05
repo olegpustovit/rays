@@ -1,4 +1,5 @@
 use crate::syntax::{self, Node, Syntax};
+use crate::arena::SyntaxBuilder;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Ty {
@@ -59,20 +60,16 @@ pub fn panel() -> Ty { Ty::Named("panel".into()) }
 pub fn editor() -> Ty { Ty::Named("editor".into()) }
 pub fn material() -> Ty { Ty::Named("material".into()) }
 
-fn form(node: Node) -> Syntax { syntax::make(node) }
-
 fn descriptors() -> Vec<Descriptor> {
+    let mut builder = SyntaxBuilder::new();
+    let nil = default_into(&geometry(), &mut builder).expect("geometry default");
+    let image = default_into(&image(), &mut builder).expect("image default");
+    let drawing = default_into(&drawing(), &mut builder).expect("drawing default");
+    let arena = builder.freeze();
     vec![
-        Descriptor { name: "geometry", shape: true, color: ColorKind::Geometry, default: Some(form(Node::Sym("nil".into()))) },
-        Descriptor {
-            name: "image", shape: true, color: ColorKind::Output,
-            default: Some(form(Node::List(vec![
-                form(Node::Sym("image/noise".into())),
-                form(Node::Kw("width".into())), form(Node::Num("1".into())),
-                form(Node::Kw("height".into())), form(Node::Num("1".into())),
-            ].into()))),
-        },
-        Descriptor { name: "drawing", shape: true, color: ColorKind::Output, default: Some(form(Node::List(vec![form(Node::Sym("draw/merge".into()))].into()))) },
+        Descriptor { name: "geometry", shape: true, color: ColorKind::Geometry, default: Some(arena.handle(nil)) },
+        Descriptor { name: "image", shape: true, color: ColorKind::Output, default: Some(arena.handle(image)) },
+        Descriptor { name: "drawing", shape: true, color: ColorKind::Output, default: Some(arena.handle(drawing)) },
         Descriptor { name: "scene", shape: true, color: ColorKind::Output, default: None },
         Descriptor { name: "world", shape: true, color: ColorKind::Output, default: None },
         Descriptor { name: "settings", shape: false, color: ColorKind::Output, default: None },
@@ -120,6 +117,28 @@ pub fn default(ty: &Ty) -> Option<Syntax> {
         Ty::Named(name) => descriptors().into_iter().find(|d| d.name == name).and_then(|d| d.default),
         _ => None,
     }
+}
+
+pub fn default_into(ty: &Ty, builder: &mut SyntaxBuilder) -> Option<crate::arena::SyntaxId> {
+    let Ty::Named(name) = ty else { return None; };
+    let span = rays_diagnostic::Span { start: 0, finish: 0 };
+    if name == "geometry" {
+        let name = builder.intern("nil");
+        return Some(builder.push(0, Node::Sym(name), span, None));
+    }
+    let head = match name.as_str() { "image" => "image/noise", "drawing" => "draw/merge", _ => return None };
+    let head = builder.intern(head);
+    let mut children = vec![builder.push(0, Node::Sym(head), span.clone(), None)];
+    if name == "image" {
+        for keyword in ["width", "height"] {
+            let keyword = builder.intern(keyword);
+            children.push(builder.push(0, Node::Kw(keyword), span.clone(), None));
+            let one = builder.intern("1");
+            children.push(builder.push(0, Node::Num(one), span.clone(), None));
+        }
+    }
+    let range = builder.range(&children);
+    Some(builder.push(0, Node::List(range), span, None))
 }
 
 pub fn to_string(ty: &Ty) -> String {
@@ -191,31 +210,37 @@ fn valid_field_name(name: &str) -> bool {
 }
 
 pub fn of_syntax(form: &Syntax) -> Option<Ty> {
-    match &form.node {
-        Node::Sym(name) => names().into_iter().find(|(candidate, _)| candidate == name).and_then(|(_, ty)| if matches!(ty, Ty::Any | Ty::Color) { None } else { Some(ty) }),
-        Node::Map(items) => {
+    match form.node {
+        Node::Sym(name) => names().into_iter().find(|(candidate, _)| candidate == form.name(name)).and_then(|(_, ty)| if matches!(ty, Ty::Any | Ty::Color) { None } else { Some(ty) }),
+        Node::Map(range) => {
+            let items = form.range(range);
             let mut fields = Vec::new();
             let mut at = 0;
             while at < items.len() {
-                let Node::Kw(name) = &items[at].node else { return None; };
+                let Node::Kw(name) = form.arena().row(items[at]).node else { return None; };
+                let name = form.name(name);
                 if !valid_field_name(name) || fields.iter().any(|(seen, _): &(String, Ty)| seen == name) { return None; }
-                let value = items.get(at + 1)?;
-                fields.push((name.clone(), of_syntax(value)?));
+                let value = form.child(*items.get(at + 1)?);
+                fields.push((name.to_owned(), of_syntax(&value)?));
                 at += 2;
             }
             Some(Ty::Record(fields))
         }
-        Node::List(items) if items.len() == 2 && matches!(&items[0].node, Node::Sym(name) if name == "list") => {
-            Some(Ty::List(Box::new(of_syntax(&items[1])?)))
-        }
-        Node::List(items) if items.len() == 2 && matches!(&items[0].node, Node::Sym(name) if name == "array") => {
-            let inner = of_syntax(&items[1])?;
-            matches!(inner, Ty::Int | Ty::Float | Ty::Vec2 | Ty::Vec3 | Ty::Vec4 | Ty::Text).then(|| Ty::Array(Box::new(inner)))
-        }
-        Node::List(items) if items.len() == 3 && matches!(&items[0].node, Node::Sym(name) if name == "fn") => {
-            let Node::Vec(params) = &items[1].node else { return None; };
-            let params = params.iter().map(of_syntax).collect::<Option<Vec<_>>>()?;
-            Some(Ty::Fn(Some(Box::new(FnSignature { params, result: of_syntax(&items[2])? }))))
+        Node::List(range) => {
+            let items = form.range(range);
+            match (syntax::head(form)?, items.len()) {
+                ("list", 2) => Some(Ty::List(Box::new(of_syntax(&form.child(items[1]))?))),
+                ("array", 2) => {
+                    let inner = of_syntax(&form.child(items[1]))?;
+                    matches!(inner, Ty::Int | Ty::Float | Ty::Vec2 | Ty::Vec3 | Ty::Vec4 | Ty::Text).then(|| Ty::Array(Box::new(inner)))
+                }
+                ("fn", 3) => {
+                    let Node::Vec(params) = form.arena().row(items[1]).node else { return None; };
+                    let params = form.range(params).iter().map(|id| of_syntax(&form.child(*id))).collect::<Option<Vec<_>>>()?;
+                    Some(Ty::Fn(Some(Box::new(FnSignature { params, result: of_syntax(&form.child(items[2]))? }))))
+                }
+                _ => None,
+            }
         }
         _ => None,
     }
@@ -311,6 +336,12 @@ mod tests {
             assert_eq!(annotated(invalid), None, "{invalid}");
         }
         assert_eq!(to_string(&record), "rec{shape:geometry,y:float}");
+        let nested = Ty::Record(vec![
+            ("a".into(), Ty::List(Box::new(Ty::Record(vec![("b".into(), Ty::Int), ("c".into(), Ty::List(Box::new(Ty::Float)))])))),
+            ("d".into(), Ty::Text),
+        ]);
+        assert_eq!(to_string(&nested), "rec{a:list:rec{b:int,c:list:float},d:text}");
+        assert_eq!(of_string(&to_string(&nested)), Some(nested));
         for ty in [geometry(), Ty::Float, Ty::Int, Ty::Bool, Ty::Vec2, Ty::Vec3, Ty::Vec4, Ty::Array(Box::new(Ty::Vec2)), Ty::Array(Box::new(Ty::Vec4)), Ty::Text, Ty::Color, Ty::Fn(None), Ty::Any, scene(), world(), settings(), panel(), editor(), Ty::List(Box::new(Ty::Int)), record, Ty::Record(vec![])] {
             assert_eq!(of_string(&to_string(&ty)), Some(ty));
         }
@@ -328,6 +359,7 @@ mod tests {
         assert!(has_fn(&typed));
         assert!(!fits(&typed, &Ty::Fn(Some(Box::new(FnSignature { params: vec![Ty::Vec3], result: Ty::Float })))));
         for invalid in ["fn(", "fn(float)", "fn(float)->", "fn(nope)->float", "fn(float,)->float"] { assert_eq!(of_string(invalid), None); }
+        assert!(has_fn(&Ty::Fn(None)) && !has_fn(&Ty::Any));
         assert!(fits(&Ty::Int, &Ty::Float) && fits(&Ty::Float, &Ty::Int) && fits(&Ty::Int, &Ty::Bool) && fits(&Ty::Bool, &Ty::Float));
         assert!(fits(&Ty::Int, &Ty::Vec3) && !fits(&Ty::Bool, &Ty::Vec3) && !fits(&Ty::Vec3, &Ty::Float));
         assert!(fits(&Ty::Text, &Ty::Color) && fits(&Ty::Vec3, &Ty::Color) && !fits(&Ty::Float, &Ty::Color));
@@ -355,6 +387,12 @@ mod tests {
         assert_eq!(join(&Ty::Text, &geometry()), None);
         assert_eq!(join(&Ty::Int, &Ty::Bool), None);
         assert_eq!(join(&Ty::List(Box::new(Ty::Int)), &Ty::List(Box::new(Ty::Float))), Some(Ty::List(Box::new(Ty::Float))));
+        assert_eq!(
+            join(&Ty::Record(vec![("a".into(), Ty::Int), ("b".into(), Ty::Text)]), &Ty::Record(vec![("b".into(), Ty::Text), ("a".into(), Ty::Float)])),
+            Some(Ty::Record(vec![("a".into(), Ty::Float), ("b".into(), Ty::Text)]))
+        );
+        assert_eq!(join(&Ty::Record(vec![("a".into(), Ty::Int)]), &Ty::Record(vec![("b".into(), Ty::Int)])), None);
+        assert_eq!(join(&Ty::Record(vec![("a".into(), Ty::Int)]), &Ty::Record(vec![("a".into(), Ty::Text)])), None);
         assert_eq!(unify(&Ty::Int, &Ty::Bool), Some(Ty::Int));
         assert_eq!(unify(&geometry(), &Ty::Text), None);
         assert_eq!(elem(&Ty::List(Box::new(Ty::Int))), Some(Ty::Int));
@@ -362,9 +400,7 @@ mod tests {
     }
     #[test]
     fn syntax_signatures_vectors_and_nominals() {
-        let sym = |name: &str| syntax::make(syntax::Node::Sym(name.into()));
-        let params = syntax::make(syntax::Node::Vec(vec![sym("vec3"), sym("text")].into()));
-        let form = syntax::make(syntax::Node::List(vec![sym("fn"), params, sym("float")].into()));
+        let form = syntax::parse("(fn [vec3 text] float)").unwrap().remove(0);
         assert_eq!(of_syntax(&form), Some(Ty::Fn(Some(Box::new(FnSignature { params: vec![Ty::Vec3, Ty::Text], result: Ty::Float })))));
         assert!(has_fn(&Ty::List(Box::new(Ty::Fn(None)))));
         assert!(has_fn(&Ty::Record(vec![("f".into(), Ty::Fn(None))])));
@@ -394,5 +430,11 @@ mod tests {
         assert!(!shape(&settings()));
         assert_eq!(color(&geometry()), ColorKind::Geometry);
         assert!(default(&image()).is_some());
+        let mut builder = SyntaxBuilder::new();
+        for ty in [geometry(), image(), drawing()] {
+            let id = default_into(&ty, &mut builder).unwrap();
+            assert_eq!(crate::lisp::flat_id(id, &builder), crate::lisp::flat(&default(&ty).unwrap()));
+        }
+        assert!(default_into(&Ty::Float, &mut builder).is_none());
     }
 }

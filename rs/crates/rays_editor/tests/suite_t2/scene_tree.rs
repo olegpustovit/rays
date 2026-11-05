@@ -43,7 +43,7 @@ fn tframe(mouse: (i64, i64), events: Vec<Event>, keys: &[Key], buttons: &[MouseB
 }
 
 fn source(e: &Ed) -> String {
-    wd::to_text(&Editor::workspace(e))
+    wd::to_text(&Editor::workspace(e)).unwrap()
 }
 
 type Labelled = Vec<(String, String, Option<String>, Vec<(String, Value)>)>;

@@ -149,8 +149,8 @@ pub enum Row {
 
 fn walk(f: &mut dyn FnMut(&S), form: &S) {
     f(form);
-    for c in s::children(form) {
-        walk(f, c);
+    for &c in form.children() {
+        walk(f, &form.child(c));
     }
 }
 
@@ -169,13 +169,12 @@ fn reads(form: &S) -> Vec<String> {
     let mut names: Vec<String> = Vec::new();
     walk(
         &mut |f| {
-            if let Node::List(l) = &f.node
-                && l.len() >= 2
-                && matches!(&l[0].node, Node::Sym(r) if r == "ref")
-                && let Node::Sym(n) = &l[1].node
-                && !names.contains(n)
+            if s::head(f) == Some("ref")
+                && let Some(&id) = f.children().get(1)
+                && let Node::Sym(n) = f.arena().row(id).node
+                && !names.iter().any(|name| name == f.name(n))
             {
-                names.push(n.clone());
+                names.push(f.name(n).to_owned());
             }
         },
         form,
@@ -270,12 +269,11 @@ fn calls(ws: &Workspace, defs: &[&Graph], macros: &[&S], name: &str) -> i64 {
 }
 
 fn macro_name(form: &S) -> Option<String> {
-    if let Node::List(l) = &form.node
-        && l.len() >= 2
-        && matches!(&l[0].node, Node::Sym(h) if h == "defmacro")
-        && let Node::Sym(n) = &l[1].node
+    if s::head(form) == Some("defmacro")
+        && let Some(&id) = form.children().get(1)
+        && let Node::Sym(n) = form.arena().row(id).node
     {
-        return Some(n.clone());
+        return Some(form.name(n).to_owned());
     }
     None
 }
@@ -299,7 +297,7 @@ fn zone_glyph(kind: p::ZoneKind) -> &'static str {
 
 fn number(form: &S) -> Option<f64> {
     match &form.node {
-        Node::Num(text) => cfmt::parse_ocaml_float(text),
+        Node::Num(text) => cfmt::parse_ocaml_float(form.name(*text)),
         _ => None,
     }
 }
@@ -429,7 +427,7 @@ pub fn rows(wide: bool, state: &State, pa: &Params) -> Vec<Row> {
         .source
         .iter()
         .flat_map(|form| match &form.node {
-            Node::List(l) if l.len() >= 2 && matches!(&l[0].node, Node::Sym(h) if h == "workspace") => l[2..].iter().map(|f| f.id).collect::<Vec<_>>(),
+            Node::List(l) if form.range(*l).len() >= 2 && s::head(form) == Some("workspace") => form.range(*l)[2..].iter().map(|&id| form.arena().row(id).id).collect::<Vec<_>>(),
             _ => vec![form.id],
         })
         .collect();

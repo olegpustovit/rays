@@ -6,7 +6,7 @@ use ogpu::render_pass::{Comparison, Cull, Load, Primitive};
 use ogpu::types::{BufferDescriptor, BufferUsage};
 use ::renderer::renderer::{self, family, t};
 use ::renderer::scene_execution::{self, geometry_draw, mesh, mesh_key, new_bytes, sampled_draw, state};
-use std::rc::Rc;
+use std::{cell::Cell, rc::Rc};
 
 fn config() -> renderer::configuration {
     renderer::configuration { logical_width: 4, logical_height: 4, drawable_width: 4, drawable_height: 4, ..renderer::default_configuration() }
@@ -62,6 +62,7 @@ fn fixture() -> fixture {
     let mesh = mesh {
         key: mesh_key::Host("scene3-shared-mesh".to_owned()),
         vertices: new_bytes(vertices.clone()),
+        shared_vertices: None,
         vertex_count: 3,
         indices: new_bytes(indices.clone()),
         index_count: 3,
@@ -181,6 +182,7 @@ struct resident {
     positions: Buffer,
     device_indices: Buffer,
     key: String,
+    alive: Rc<Cell<bool>>,
     unregister: Box<dyn Fn()>,
     f: fixture,
 }
@@ -207,8 +209,10 @@ fn resident() -> resident {
     }
     backend::write_buffer(&positions, 0, &position_bytes).unwrap();
     backend::write_buffer(&device_indices, 0, &f.indices).unwrap();
-    let (key, unregister) = renderer::register_gpu_positions(&gpu, &positions, None, Some((device_indices.clone(), 3)), None, 3, Rc::new(|| true)).unwrap();
-    resident { runtime, host, gpu, positions, device_indices, key, unregister, f }
+    let alive = Rc::new(Cell::new(true));
+    let valid = alive.clone();
+    let (key, unregister) = renderer::register_gpu_positions(&gpu, &positions, None, Some((device_indices.clone(), 3)), None, 3, Rc::new(move || valid.get())).unwrap();
+    resident { runtime, host, gpu, positions, device_indices, key, alive, unregister, f }
 }
 
 fn finish(r: resident, color_buffers: Vec<Buffer>) {
@@ -312,9 +316,288 @@ fn gpu_scene3_resident_colors4() {
     resident_colors(4);
 }
 
+fn gpu_scene3_borrowed_stream_guards() {
+    if !common::gpu() { return; }
+    // Match the source's owned-device lifetime, excluding the unrelated shared probe cache.
+    common::release_keepalive();
+    use ogpu::error::ErrorKind;
+    use ::renderer::renderer::Native;
+    let baseline=ogpu::impl_::live_handles().unwrap();
+    let r=resident();
+    let mut uniforms=uniform(true); set(&mut uniforms,79,1.);
+    let e=device_entry(&r,r.key.clone(),uniforms,"indexed-attributes",r.f.attributes.clone());
+    let submit=|entry: sampled_draw| {
+        let submission=Native::begin_submission(&r.runtime)?;
+        let batch=Native::adopt_draws(&submission,vec![Rc::new(entry)])?;
+        Native::step(None,Some("borrowed-indexed"),Some(1),&submission,&[batch])
+    };
+    submit(e.clone()).unwrap();
+    let expected=render(&r.host,vec![entry(&r.f,(0,0,4,4),uniform(true))]);
+    assert_eq!(renderer::read_pixels(&r.runtime,256).unwrap(),expected);
+    let uploaded=renderer::stats(&r.runtime).unwrap().uploaded_bytes;
+    assert!(Native::replay(None,"borrowed-indexed",1,&r.runtime).unwrap().is_some());
+    assert_eq!(renderer::stats(&r.runtime).unwrap().uploaded_bytes,uploaded);
+    // Match the source's validity transition while this prepared submission is still retained.
+    r.alive.set(false);
+    match Native::replay(None, "borrowed-indexed", 1, &r.runtime) {
+        Err(error) => assert_eq!(error.kind, ErrorKind::StaleHandle),
+        Ok(_) => panic!("invalid producer replay accepted"),
+    }
+    r.alive.set(true);
+    // A fresh non-retained submission must validate each malformed stream before uploading.
+    let check=|bad: sampled_draw| {
+        let before=renderer::stats(&r.runtime).unwrap().uploaded_bytes;
+        match renderer::draw(None,&r.runtime,&[Rc::new(bad)]) {
+            Err(error) => assert_eq!(error.kind,ErrorKind::InvalidArgument),
+            Ok(_) => panic!("malformed borrowed Scene3 accepted"),
+        }
+        assert_eq!(renderer::stats(&r.runtime).unwrap().uploaded_bytes,before);
+    };
+    let mut bad=e.clone(); bad.draw.mesh.index_count=6; check(bad);
+    let mut bad=e.clone(); bad.draw.mesh.indices=new_bytes(r.f.indices.clone()); check(bad);
+    let mut bad=e.clone(); bad.draw.mesh.vertex_count=2; check(bad);
+    let mut bad=e.clone(); bad.vertex_attributes=Some(("missing".into(),scene_execution::empty_bytes())); check(bad);
+    let mut bad=e.clone(); bad.family=family::Marks; bad.vertex_attributes=None; check(bad);
+    let device=renderer::gpu_device(&r.gpu);
+    let colors=backend::create_buffer(&device,BufferDescriptor { label:Some("guard-colors".into()),size:36,usage:vec![BufferUsage::Vertex,BufferUsage::Storage,BufferUsage::CopyDst] },None).unwrap();
+    backend::write_buffer(&colors,0,&[1f32.to_le_bytes();9].concat()).unwrap();
+    let (key,unregister)=renderer::register_gpu_positions(&r.gpu,&r.positions,None,Some((r.device_indices.clone(),3)),Some((colors.clone(),3)),3,Rc::new(|| true)).unwrap();
+    let mut uniforms=uniform(true); set(&mut uniforms,79,1.);
+    let colored=device_entry(&r,key.clone(),uniforms.clone(),"resident-colors",Vec::new());
+    check(colored);
+    set(&mut uniforms,81,3.);
+    let colored=device_entry(&r,key,uniforms,"resident-colors",Vec::new());
+    assert_eq!(render(&r.runtime,vec![colored]),expected);
+    unregister(); backend::destroy_buffer(&colors).unwrap();
+    (r.unregister)();
+    match renderer::draw(None,&r.runtime,&[Rc::new(e.clone())]) {
+        Err(error) => assert_eq!(error.kind,ErrorKind::StaleHandle),
+        Ok(_) => panic!("closed producer draw accepted"),
+    }
+    assert_eq!(backend::read_buffer(&r.positions,0,36).unwrap().len(),36,"closing registration destroyed producer storage");
+    let foreign=backend::create_device(ogpu::impl_::create_driver().unwrap()).unwrap();
+    let source=scene_execution::register_gpu_vertices(&Native::gpu_vertices_owner(&r.runtime),None,Some(12),None,Some((r.device_indices.clone(),3)),None,&r.key,&foreign,&r.positions,3,Box::new(|| true)).unwrap();
+    match renderer::draw(None,&r.runtime,&[Rc::new(e)]) {
+        Err(error) => assert_eq!(error.kind,ErrorKind::CrossDevice),
+        Ok(_) => panic!("foreign producer device accepted"),
+    }
+    scene_execution::unregister_gpu_vertices(&source);
+    backend::destroy_device(&foreign).unwrap();
+    finish(r,Vec::new());
+    assert_eq!(ogpu::impl_::live_handles().unwrap(),baseline);
+}
+
+#[derive(Default)]
+struct native_vertex_observation {
+    buffers: std::collections::HashMap<String, backend::Token>,
+    bindings: Vec<(i64, backend::Token, i64)>,
+    mesh_upload_bytes: usize,
+}
+
+// Observe the real native ABI: struct updates retain every unobserved operation, and each
+// intercepted operation delegates to the original driver before recording its successful result.
+fn observe_native_vertices(
+    base: backend::Driver,
+    seen: Rc<std::cell::RefCell<native_vertex_observation>>,
+) -> backend::Driver {
+    backend::Driver { create_device: Box::new(move || {
+        let raw = (base.create_device)()?;
+        let uploads = seen.clone();
+        let queues = seen.clone();
+        Ok(backend::DriverDevice {
+            create_buffer: Box::new(move |memory, descriptor| {
+                let buffer = (raw.create_buffer)(memory, descriptor)?;
+                if let Some(label) = &descriptor.label {
+                    uploads.borrow_mut().buffers.insert(label.clone(), buffer.token);
+                }
+                if descriptor.label.as_ref().is_some_and(|label| label.starts_with("scene-mesh-")) {
+                    let uploads = uploads.clone();
+                    Ok(backend::DriverResource {
+                        write: Box::new(move |offset, bytes| {
+                            (buffer.write)(offset, bytes)?;
+                            uploads.borrow_mut().mesh_upload_bytes += bytes.len();
+                            Ok(())
+                        }),
+                        ..buffer
+                    })
+                } else {
+                    Ok(buffer)
+                }
+            }),
+            create_queue: Box::new(move || {
+                let queue = (raw.create_queue)()?;
+                let commands_seen = queues.clone();
+                Ok(backend::DriverQueue {
+                    begin_commands: Box::new(move || {
+                        let commands = (queue.begin_commands)()?;
+                        let encoders_seen = commands_seen.clone();
+                        Ok(backend::DriverCommands {
+                            render_encoder: Box::new(move |target| {
+                                let encoder = (commands.render_encoder)(target)?;
+                                let bindings = encoders_seen.clone();
+                                let batches = encoders_seen.clone();
+                                Ok(backend::DriverRenderEncoder {
+                                    set_stage_buffer: Box::new(move |stage, slot, offset, token| {
+                                        (encoder.set_stage_buffer)(stage, slot, offset, token)?;
+                                        if stage == backend::ShaderStage::Vertex {
+                                            bindings.borrow_mut().bindings.push((slot, token, offset));
+                                        }
+                                        Ok(())
+                                    }),
+                                    draw_batch: Box::new(move |draws| {
+                                        (encoder.draw_batch)(draws)?;
+                                        for draw in draws {
+                                            for &(stage, slot, token, offset) in &draw.batch_buffers {
+                                                if stage == backend::ShaderStage::Vertex {
+                                                    batches.borrow_mut().bindings.push((slot, token, offset));
+                                                }
+                                            }
+                                        }
+                                        Ok(())
+                                    }),
+                                    ..encoder
+                                })
+                            }),
+                            ..commands
+                        })
+                    }),
+                    ..queue
+                })
+            }),
+            ..raw
+        })
+    }) }
+}
+
+// lib/scene_execution/test_gpu_vertices.ml:249-283,291-310,344-370.
+fn gpu_borrowed_vertex_encoder_observation() {
+    if !common::gpu() { return; }
+    use ::renderer::{renderer_pipeline, scene_execution as se};
+    use ogpu::surface::{Configuration, Format, PresentMode};
+    use ogpu::types::{AddressMode, MipFilter, SamplerDescriptor, SamplerFilter};
+    let baseline = ogpu::impl_::live_handles().unwrap();
+    let seen = Rc::new(std::cell::RefCell::new(native_vertex_observation::default()));
+    let driver = observe_native_vertices(ogpu::impl_::create_driver().unwrap(), seen.clone());
+    let cfg = Configuration { logical_width: 4, logical_height: 4, physical_width: 4, physical_height: 4, format: Format::Rgba8Unorm, present_mode: PresentMode::Immediate, max_acquired: 1, layer: None };
+    let owner = se::create_gpu_vertices_owner();
+    let mut runtime = renderer_pipeline::create_renderer(&ogpu::impl_::backend().unwrap(), None, Some(owner.clone()), true, driver, &cfg).unwrap();
+    let device = se::device(&runtime);
+    let upload = |label: &str, bytes: &[u8]| {
+        let buffer = backend::create_buffer(&device, BufferDescriptor {
+            label: Some(label.to_owned()), size: bytes.len() as i64,
+            usage: vec![BufferUsage::Vertex, BufferUsage::Storage, BufferUsage::CopyDst],
+        }, None).unwrap();
+        backend::write_buffer(&buffer, 0, bytes).unwrap();
+        buffer
+    };
+    let mut records = vec![0;128];
+    for (record, left, right) in [(0, 0., 2.), (1, 2., 4.)] {
+        for (field, value) in [(0,left), (1,0.), (2,right), (3,4.)] {
+            set(&mut records, record * 16 + field, value);
+        }
+        set_u32(&mut records, record * 16 + 8, u32::MAX);
+    }
+    let producer = upload("observed-ui-producer", &records);
+    let source = se::register_gpu_vertices(&owner, None, None, None, None, None, "observed-ui", &device, &producer, 8, Box::new(|| true)).unwrap();
+    let indices = new_bytes(common::words(&[0,1,2,0,2,3,4,5,6,4,6,7]));
+    let texture = Rc::new(se::sampled_texture {
+        key: "observed-white".into(),
+        levels: Rc::new(vec![se::texture_level { width: 1, height: 1, bytes: new_bytes(vec![255;4]) }]),
+        gpu: None,
+        sampler: SamplerDescriptor { label: None, min_filter: SamplerFilter::Nearest, mag_filter: SamplerFilter::Nearest, mip_filter: MipFilter::NoMip, address_u: AddressMode::ClampToEdge, address_v: AddressMode::ClampToEdge, lod_min: 0., lod_max: 0., max_anisotropy: 1 },
+    });
+    let draw = Rc::new(sampled_draw {
+        family: family::Ui, blend: Blend::Alpha, texture: Some(texture), auxiliary: None, vertex_attributes: None, samples: 1,
+        draw: geometry_draw {
+            mesh: mesh { key: mesh_key::Gpu_vertices("observed-ui".into()), vertices: se::empty_bytes(), shared_vertices: None, vertex_count: 8, indices, index_count: 12, primitive: Primitive::TriangleList },
+            state: state { viewport: (0,0,4,4), scissor: (0,0,4,4), cull: Cull::CullNone, depth_compare: Comparison::Always, depth_write: false, depth_load: Load::Load, depth_clear: 1., transform_uniforms: Some(new_bytes(common::floats(&[0.5,0.,-1.,0.,-0.5,1.]))) },
+        },
+    });
+    let prepared = || Some(("observed-borrowed-plan".into(),1));
+    assert!(se::submit(prepared(), &mut || {}, None, &mut runtime, &[draw.clone()]).unwrap());
+    let expected = vec![255;4*256];
+    // read_pixels uses 256-byte rows: compare every active pixel, not uninitialized padding.
+    let check_pixels = |runtime: &mut se::t| {
+        let pixels = se::read_pixels(runtime,256).unwrap();
+        for row in 0..4 { assert_eq!(&pixels[row*256..row*256+16], &expected[row*256..row*256+16]); }
+    };
+    check_pixels(&mut runtime);
+    let producer_token = seen.borrow().buffers["observed-ui-producer"];
+    let assert_slot = |slot, token| {
+        let seen = seen.borrow();
+        let bindings: Vec<_> = seen.bindings.iter().filter(|binding| binding.0 == slot).collect();
+        assert!(!bindings.is_empty(), "native vertex slot {slot} was never bound");
+        assert!(bindings.iter().all(|binding| binding.1 == token && binding.2 == 0), "native vertex slot {slot} lost its producer token/offset");
+    };
+    assert_slot(0, producer_token);
+    assert_eq!(seen.borrow().mesh_upload_bytes,48);
+    let uploaded = se::upload_bytes(&runtime);
+    assert!(uploaded > 0);
+    assert!(se::submit(prepared(), &mut || {}, None, &mut runtime, &[draw.clone()]).unwrap());
+    assert_eq!(se::replay_prepared_sampled_resources(None,"observed-borrowed-plan",1,&mut runtime).unwrap(),Some((true,1)));
+    assert_eq!(se::upload_bytes(&runtime),uploaded);
+    let next_source = se::register_gpu_vertices(&owner, None, None, None, None, None, "observed-ui-next", &device, &producer, 8, Box::new(|| true)).unwrap();
+    let mut next = (*draw).clone();
+    next.draw.mesh.key = mesh_key::Gpu_vertices("observed-ui-next".into());
+    assert!(Rc::ptr_eq(&next.draw.mesh.indices,&draw.draw.mesh.indices));
+    assert!(se::submit(Some(("observed-borrowed-plan".into(),2)), &mut || {}, None, &mut runtime, &[Rc::new(next)]).unwrap());
+    assert_eq!(se::upload_bytes(&runtime),uploaded);
+    assert_eq!(seen.borrow().mesh_upload_bytes,48,"registration names must share the host index upload");
+    assert_slot(0, producer_token);
+    check_pixels(&mut runtime);
+    for variant in 0..2 {
+        let mut bad = (*draw).clone();
+        if variant == 0 {
+            bad.draw.mesh.indices = new_bytes(vec![0;47]);
+        } else {
+            bad.draw.mesh.key = mesh_key::Host("cpu:index-overflow".into());
+            bad.draw.mesh.vertices = new_bytes(vec![0;128]);
+            bad.draw.mesh.index_count = 1i64 << (isize::BITS-3);
+            bad.draw.mesh.indices = se::empty_bytes();
+        }
+        let mut releases = 0;
+        let error = se::submit(None, &mut || releases += 1, None, &mut runtime, &[Rc::new(bad)]).unwrap_err();
+        assert_eq!(error.kind,ogpu::error::ErrorKind::InvalidArgument,"malformed variant {variant}");
+        assert_eq!(releases,1,"malformed variant {variant} release hook");
+        assert_eq!(se::upload_bytes(&runtime),uploaded);
+        assert_eq!(seen.borrow().mesh_upload_bytes,48);
+    }
+    // The Marks shader consumes six distinct producer streams at slots 0..5; slot 6 is affine.
+    let mut positions = vec![0;128];
+    positions[..24].copy_from_slice(&common::floats(&[0.,0.,0.,2.,0.,0.]));
+    let contents = [
+        positions, common::floats(&[2.,4.,2.,4.]), common::words(&[-1,-1]),
+        common::words(&[0]), common::floats(&[1.]), common::words(&[0,3,2,1,0,0,0,0]),
+    ];
+    let buffers: Vec<_> = contents.iter().enumerate().map(|(slot,bytes)| upload(&format!("observed-marks-{slot}"),bytes)).collect();
+    let marks_source = se::register_gpu_vertices(&owner, Some(buffers[1..].to_vec()), None, None, None, None, "observed-marks", &device, &buffers[0], 8, Box::new(|| true)).unwrap();
+    let mut marks = (*draw).clone();
+    marks.family = family::Marks;
+    marks.texture = None;
+    marks.draw.mesh.key = mesh_key::Gpu_vertices("observed-marks".into());
+    seen.borrow_mut().bindings.clear();
+    assert!(se::submit(None, &mut || {}, None, &mut runtime, &[Rc::new(marks)]).unwrap());
+    check_pixels(&mut runtime);
+    for slot in 0..6 {
+        let token = seen.borrow().buffers[&format!("observed-marks-{slot}")];
+        assert_slot(slot,token);
+    }
+    assert!(seen.borrow().bindings.iter().any(|binding| binding.0 == 6),"Marks affine slot 6 missing");
+    se::unregister_gpu_vertices(&marks_source);
+    se::unregister_gpu_vertices(&next_source);
+    se::unregister_gpu_vertices(&source);
+    for buffer in buffers.iter().chain(std::iter::once(&producer)) {
+        backend::destroy_buffer(buffer).unwrap();
+    }
+    se::destroy(&mut runtime).unwrap();
+    assert_eq!(ogpu::impl_::live_handles().unwrap(),baseline);
+}
+
 pub const CASES: &[(&str, fn())] = &[
         ("gpu_scene3_shared_mesh_and_instances", gpu_scene3_shared_mesh_and_instances),
         ("gpu_scene3_device_indices_and_white", gpu_scene3_device_indices_and_white),
         ("gpu_scene3_resident_colors3", gpu_scene3_resident_colors3),
         ("gpu_scene3_resident_colors4", gpu_scene3_resident_colors4),
+        ("gpu_scene3_borrowed_stream_guards", gpu_scene3_borrowed_stream_guards),
+        ("gpu_borrowed_vertex_encoder_observation", gpu_borrowed_vertex_encoder_observation),
     ];

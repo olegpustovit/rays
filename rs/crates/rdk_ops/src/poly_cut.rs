@@ -1573,7 +1573,7 @@ mod tests {
         attributes.push(mk(
             attribute::Owner::Point,
             "label",
-            attribute::Storage::Text(vec!["a".to_owned(), "b".to_owned(), "c".to_owned()]),
+            attribute::Storage::Text(vec![b"a".to_vec(), b"b".to_vec(), b"c".to_vec()]),
         ));
         attributes.push(mk(
             attribute::Owner::Point,
@@ -1585,7 +1585,7 @@ mod tests {
         attributes.push(mk(
             attribute::Owner::Vertex,
             "corner_label",
-            attribute::Storage::Text(vec!["va".to_owned(), "vb".to_owned(), "vc".to_owned()]),
+            attribute::Storage::Text(vec![b"va".to_vec(), b"vb".to_vec(), b"vc".to_vec()]),
         ));
         attributes.push(mk(
             attribute::Owner::Vertex,
@@ -1594,7 +1594,7 @@ mod tests {
                 packed::IntArray::create_owned(vec![0, 1, 3, 4], vec![10, 20, 21, 30]).unwrap(),
             ),
         ));
-        attributes.push(mk(attribute::Owner::Detail, "author", attribute::Storage::Text(vec!["polycut".to_owned()])));
+        attributes.push(mk(attribute::Owner::Detail, "author", attribute::Storage::Text(vec![b"polycut".to_vec()])));
         let groups = vec![
             group::ordered(group::Owner::Point, "marked_points", 3, &[1]).unwrap(),
             group::ordered(group::Owner::Vertex, "marked_vertices", 3, &[1]).unwrap(),
@@ -1616,7 +1616,7 @@ mod tests {
                 _ => panic!("{name} storage"),
             }
         };
-        let owned = |values: &[&str]| -> Vec<String> { values.iter().map(|v| (*v).to_owned()).collect() };
+        let owned = |values: &[&str]| -> Vec<Vec<u8>> { values.iter().map(|v| v.as_bytes().to_vec()).collect() };
         assert_eq!(text(attribute::Owner::Point, "label"), owned(&["a", "b", "c", "b", "b"]));
         assert_eq!(text(attribute::Owner::Vertex, "corner_label"), owned(&["va", "vb", "vb", "vb", "vc"]));
         let rows = geometry::find_attribute(attribute::Owner::Point, "rows", &output).unwrap();

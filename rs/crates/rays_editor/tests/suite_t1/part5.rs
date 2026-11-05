@@ -5,7 +5,7 @@ use editor_core::panels::{self, Panel};
 use editor_document::layout_edit::{Op as L, Size as LSize};
 use editor_document::workspace_doc;
 use flow_graph::flow_edit::{ArgKey, Op};
-use flow_syntax::syntax::{self as s, Node};
+use flow_syntax::syntax::{self as s, Draft as Node};
 use input::{Event, Key, MouseButton};
 use pxui_shell::layout;
 use rays_editor::Editor;
@@ -218,13 +218,13 @@ pub fn run_studio() {
         "the start state of the studio's panels",
     );
     // print and re-read
-    let again = shell_of(&build_ok(&of_text(&workspace_doc::to_text(&ws))));
+    let again = shell_of(&build_ok(&of_text(&workspace_doc::to_text(&ws).unwrap())));
     check(again.tree == shell.tree && again.named == shell.named && again.start == shell.start && again.switch == shell.switch, "the studio did not round-trip through its printed text");
     let apply = |ws: &workspace_doc::T, op: L| match workspace_doc::edit_layout(&catalog(), ws, &op) {
         Ok(ws) => ws,
         Err(d) => fail(&format!("{}: {}", editor_document::layout_edit::label(&op), rays_diagnostic::to_string(&d))),
     };
-    let text_of = |ws: &workspace_doc::T| workspace_doc::print(ws).0;
+    let text_of = |ws: &workspace_doc::T| workspace_doc::print(ws).unwrap().0;
     // a gutter drag writes what the split is sized by
     let sized = apply(&ws, L::SetLayoutSize { node: vec!["editor".into(), "studio".into()], size: LSize::First(260) });
     check(has(&text_of(&sized), "(ui/split \"horizontal\" outline work :first_size 260)"), "a fixed side is written in points");
@@ -255,7 +255,7 @@ pub fn run_studio() {
     }
     check(has(&text_of(&laid), "shell (ui/workspace"), "the workspace binding was not kept");
     check(!has(&text_of(&laid), "(-> "), "a layout was printed as a thread");
-    let _ = build_ok(&of_text(&workspace_doc::to_text(&laid)));
+    let _ = build_ok(&of_text(&workspace_doc::to_text(&laid).unwrap()));
     // diagnostics
     let bad = |name: &str, body: &str, needle: &str| expect_error(name, &with_editor(&format!("    {body}")), needle);
     bad("an unknown graph", "(ui/workspace (ui/graph \"nope\"))", "E_UNKNOWN_GRAPH");

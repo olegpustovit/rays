@@ -1,6 +1,4 @@
-// A published Ui_batch reaches the GPU without another copy on the way. The OCaml test also
-// asserted bytes allocated per instance (Gc.allocated_bytes); Rust has no such counter, so only
-// the pixel assertions are ported (see the report).
+//! lib/renderer/test_shapes_lowering.ml: published batch pixels and exact allocation ceilings.
 use crate::common;
 use ::renderer::renderer::{self, Native};
 use scene_command::render_ir::{self as ir, Blend, Command};
@@ -42,10 +40,16 @@ fn gpu_shapes_lowering() {
         stepped.unwrap();
         renderer::capture(&execution).unwrap()
     };
+    let before=mem_sys::alloc_bytes_total();
     let pixels = frame();
+    let first=mem_sys::alloc_bytes_total()-before;
+    let before=mem_sys::alloc_bytes_total();
     let again = frame();
+    let second=mem_sys::alloc_bytes_total()-before;
     let painted = pixels.iter().enumerate().filter(|(i, v)| i % 4 == 1 && **v != 0).count() as i64;
     assert!(painted == WIDTH * HEIGHT && pixels == again, "painted {} of {}", painted, WIDTH * HEIGHT);
+    assert!(first <= 32*COUNT as u64,"first frame allocated {first} bytes for {COUNT} instances (ceiling 32 B/instance)");
+    assert!(second <= COUNT as u64,"unchanged frame allocated {second} bytes for {COUNT} instances (ceiling 1 B/instance)");
     renderer::destroy(&execution).unwrap();
     println!("Shapes lowering: a {}-instance batch painted {} pixels, identical on the second frame", COUNT, painted);
 }

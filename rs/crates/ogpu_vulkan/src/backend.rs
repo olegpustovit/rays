@@ -344,8 +344,22 @@ fn create_mapped_buffer(dev: &Rc<Dev>, descriptor: &BufferDescriptor) -> Result<
     let release_cell = cell.clone();
     let flush_cell = cell;
     let (flush_dev, invalidate_dev) = (dev.clone(), dev.clone());
+    // This native clone retains the allocation without retaining any owner-thread OGPU state.
+    // Native staged reads serialize their transfer queue under the device qlock; no OGPU queue,
+    // encoder, SDL operation or mutable backend cache is accessed by the reader.
+    let readback_buffer = dev.find_buffer(OP, id)?.buffer.borrow().clone();
+    let readback: ogpu_core::backend::OwnedReadback = std::sync::Arc::new(move |offset, length| {
+        let offset = u64::try_from(offset).map_err(|_| fail(OP, ErrorKind::InvalidArgument, "negative read offset"))?;
+        if offset > readback_buffer.size() || length as u64 > readback_buffer.size() - offset {
+            return Err(fail(OP, ErrorKind::InvalidArgument, "range exceeds the buffer"));
+        }
+        let mut bytes = vec![0; length];
+        readback_buffer.read(offset, &mut bytes).map_err(|failure| of_vk(OP, failure))?;
+        Ok(bytes)
+    });
     let (view, invalidate_view) = (make_view.clone(), make_view);
     Ok(DriverMapped {
+        readback,
         mapped_resource: DriverResource {
             token,
             write,
@@ -1141,7 +1155,16 @@ fn accel_encoder(cmds: &Rc<Cmds>) -> Result<DriverAccelEncoder, Error> {
         compact: Box::new(move |src, dst| {
             let source = c2.dev.find_accel(OP, src)?;
             let destination = c2.dev.find_accel(OP, dst)?;
-            c2.run(OP, &mut |c| c.compact_acceleration(&source, &destination))
+            c2.run(OP, &mut |c| c.compact_acceleration(&source, &destination))?;
+            // Motion proxies need the prototype's vertices even after its original BLAS is released.
+            let records = c2.dev.accel_geometries.borrow().get(&src).cloned();
+            let mut geometries = c2.dev.accel_geometries.borrow_mut();
+            if let Some(records) = records {
+                geometries.insert(dst, records);
+            } else {
+                geometries.remove(&dst);
+            }
+            Ok(())
         }),
         write_compacted_size: Box::new(move |id, dst, offset| {
             let accel = c3.dev.find_accel(OP, id)?;

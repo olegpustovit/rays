@@ -8,7 +8,8 @@
 use crate::core_ir as C;
 use crate::{fallback, packed};
 use flow_check::op::{self, Reduction};
-use flow_check::workspace::{self as W, HofKind, LoopKind, Node, Pattern, Path, Term};
+use flow_check::workspace::{self as W, HofKind, LoopKind, Node, Path, Term};
+use flow_check::term_arena::{self as A, Draft, Literal, PatternId, PatternNode, PathId, RangeId, TermBuilder, TermId};
 use flow_eval as E;
 use flow_syntax::packed_ops as PO;
 use flow_syntax::syntax::Node as SNode;
@@ -82,38 +83,25 @@ fn closure_free(v: &Value) -> bool {
 
 fn geometry_collection(ty: &Ty) -> bool { *ty == Ty::List(Box::new(ty::geometry())) }
 
-fn term_refs(term: &Term) -> Vec<&Term> {
-    match &term.node {
-        Node::Vec(ts) | Node::Hof(_, ts) | Node::ListLit(ts) | Node::Str(ts) | Node::ListOp(_, ts) => ts.iter().collect(),
-        Node::Call { args, .. } | Node::Op { args, .. } | Node::Record(args) | Node::GraphRef { inputs: args, .. } => args.iter().map(|(_, t)| t).collect(),
-        Node::CallFn { args, body, .. } => args.iter().chain(body.iter().map(Box::as_ref)).collect(),
-        Node::Let(bindings, body) => bindings.iter().map(|(_, t)| t).chain(std::iter::once(body.as_ref())).collect(),
-        Node::Loop { accs, clauses, body, .. } => accs.iter().chain(clauses).map(|(_, t)| t).chain(std::iter::once(body.as_ref())).collect(),
-        Node::State { init, step, .. } => vec![init.as_ref(), step.as_ref()],
-        Node::WithError(a, b) => vec![a.as_ref(), b.as_ref()],
-        Node::ErrorRows { rows, mapper, .. } => vec![rows.as_ref(), mapper.as_ref()],
-        Node::If(a, b, c) => vec![a.as_ref(), b.as_ref(), c.as_ref()],
-        Node::Cond(arms, d) => arms.iter().flat_map(|(a, b)| [a, b]).chain(std::iter::once(d.as_ref())).collect(),
-        Node::Case(s, arms, d) => std::iter::once(s.as_ref()).chain(arms.iter().map(|(_, t)| t)).chain(std::iter::once(d.as_ref())).collect(),
-        Node::Fn { body, capture, .. } => std::iter::once(body.as_ref()).chain(capture.iter().map(Box::as_ref)).collect(),
-        Node::Get(v, _) | Node::Expanded { body: v, .. } => vec![v.as_ref()],
-        Node::Bypass(call) => W::bypass_input_ref(call).into_iter().collect(),
-        Node::Assoc(r, updates) => std::iter::once(r.as_ref()).chain(updates.iter().map(|(_, t)| t)).collect(),
-        _ => Vec::new(),
-    }
-}
-// OCaml compares the step's direct nodes physically: collect their addresses in the one view the lowering walks
-fn state_step_nodes(term: &Term) -> HashSet<usize> {
-    fn direct(term: &Term, out: &mut HashSet<usize>) {
-        out.insert(term as *const Term as usize);
-        match &term.node {
-            Node::If(..) | Node::Cond(..) | Node::Case(..) => (),
-            _ => for c in term_refs(term) { direct(c, out); },
+// Packed identity is stable across temporary handles and never aliases a recycled owner.
+fn state_step_nodes(term: &Term) -> HashSet<(u64, u32)> {
+    fn direct(term: &Term, out: &mut HashSet<(u64, u32)>) {
+        out.insert(term.identity());
+        match term.node {
+            Node::If(_) | Node::Cond(_) | Node::Case(_) => (),
+            Node::Bypass(call) => {
+                if let Some(input) = W::bypass_input(&term.child(call)) { direct(&input, out); }
+            }
+            _ => for id in term.children() { direct(&term.child(*id), out); },
         }
     }
     let mut out = HashSet::new();
-    if let Node::State { step, .. } = &term.node { direct(step, &mut out); }
+    if let Node::State(id) = term.node { direct(&term.child(term.arena().state(id).step), &mut out); }
     out
+}
+
+fn term_path(term: &Term, path: PathId) -> Path {
+    term.arena().path(path).iter().map(|id| term.name(*id).to_owned()).collect()
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -140,7 +128,7 @@ use Lowered::*;
 pub enum Callable { Closure(Arc<Closure>), Named { name: String, identity: i64 } }
 #[derive(Clone, Debug)]
 pub struct Closure {
-    params: Vec<(Pattern, Option<Ty>)>,
+    params: RangeId,
     body: Term,
     env: Env,
     instance: i64,
@@ -167,28 +155,43 @@ fn shipped(o: &op::Op) -> bool {
 }
 
 fn packed_candidate(x: &Term) -> (bool, bool) {
-    fn text_input(terms: &[&Term]) -> bool { terms.iter().any(|t| t.ty == Ty::Array(Box::new(Ty::Text))) }
+    fn text_array(ty: &Ty) -> bool { matches!(ty, Ty::Array(inner) if **inner == Ty::Text) }
     fn geometry_accumulator(ty: &Ty) -> bool {
         *ty == ty::geometry() || matches!(ty, Ty::Record(fields) if fields.iter().any(|(_, t)| geometry_accumulator(t)))
     }
-    let arr = |t: &Term| matches!(t.ty, Ty::Array(_));
-    fn rest(ts: &[Term]) -> Vec<&Term> { ts.iter().skip(1).collect() }
-    fn clause_terms(clauses: &[(Pattern, Term)]) -> Vec<&Term> { clauses.iter().map(|(_, t)| t).collect() }
-    let numeric = !geometry_collection(&x.ty)
-        && x.ty != Ty::Array(Box::new(Ty::Text))
-        && x.ty != Ty::Text
-        && match &x.node {
-            Node::Loop { kind: LoopKind::Fold, .. } if geometry_accumulator(&x.ty) => false,
-            Node::Hof(_, ts) if !ts.is_empty() && text_input(&rest(ts)) => false,
-            Node::Loop { clauses, .. } if text_input(&clause_terms(clauses)) => false,
-            Node::Hof(HofKind::Map | HofKind::Reduce, ts) if !ts.is_empty() => ts[1..].iter().any(arr),
-            Node::Loop { clauses, .. } => clauses.iter().any(|(_, t)| arr(t)),
-            Node::Op { op, .. } if op == "array/sum" => true,
+    let arena = x.arena();
+    let child_ty = |id: TermId| arena.ty(arena.row(id).ty);
+    let numeric = !geometry_collection(x.ty()) && !text_array(x.ty()) && *x.ty() != Ty::Text
+        && match x.node {
+            Node::Hof(id) => {
+                let hof = arena.hof(id);
+                let terms = arena.term_ids(hof.args);
+                !terms.is_empty() && !terms[1..].iter().any(|id| text_array(child_ty(*id)))
+                    && matches!(hof.kind, HofKind::Map | HofKind::Reduce)
+                    && terms[1..].iter().any(|id| matches!(child_ty(*id), Ty::Array(_)))
+            }
+            Node::Loop(id) => {
+                let node = arena.loop_node(id);
+                let clauses = arena.bindings(node.clauses);
+                !(node.kind == LoopKind::Fold && geometry_accumulator(x.ty()))
+                    && !clauses.iter().any(|binding| text_array(child_ty(binding.term)))
+                    && clauses.iter().any(|binding| matches!(child_ty(binding.term), Ty::Array(_)))
+            }
+            Node::Op(id) => x.name(arena.op(id).op) == "array/sum",
             _ => false,
         };
-    let text = match &x.node {
-        Node::Hof(HofKind::Map, ts) if !ts.is_empty() => x.ty == Ty::Array(Box::new(Ty::Text)) || text_input(&rest(ts)),
-        Node::Loop { kind: LoopKind::For, clauses, .. } => x.ty == Ty::Array(Box::new(Ty::Text)) || text_input(&clause_terms(clauses)),
+    let text = match x.node {
+        Node::Hof(id) => {
+            let hof = arena.hof(id);
+            let terms = arena.term_ids(hof.args);
+            hof.kind == HofKind::Map && !terms.is_empty()
+                && (text_array(x.ty()) || terms[1..].iter().any(|id| text_array(child_ty(*id))))
+        }
+        Node::Loop(id) => {
+            let node = arena.loop_node(id);
+            node.kind == LoopKind::For && (text_array(x.ty())
+                || arena.bindings(node.clauses).iter().any(|binding| text_array(child_ty(binding.term))))
+        }
         _ => false,
     };
     (numeric, text)
@@ -335,7 +338,7 @@ pub struct Lowerer {
     next_function: i64,
     mixed: HashSet<i64>,
     current: Option<ResidualId>,
-    step_nodes: HashSet<usize>,
+    step_nodes: HashSet<(u64, u32)>,
     regions: Vec<Arc<C::RegionT>>,
     slots: Vec<C::StateSlot>,
     next_slot: i64,
@@ -1093,7 +1096,7 @@ impl Lowerer {
         self.current = Some(r);
         self.plane = if view.host { C::Plane::Host } else { C::Plane::Frame };
         self.geometry = view.geometry;
-        let result = self.residual_body(s, r, &view, key);
+        let result = self.residual_body(s, r, view, key);
         self.active.remove(&id);
         self.plane = saved.0;
         self.geometry = saved.1;
@@ -1102,22 +1105,25 @@ impl Lowerer {
         result
     }
 
-    fn residual_body(&mut self, s: &mut Scope, r: ResidualId, view: &E::Residual::View, key: CacheKey) -> R<Lowered> {
-        let env: Env = view.bindings.iter().map(|(n, v)| (n.clone(), Known(v.clone()))).collect();
-        let source = self.source_of_view(view);
+    fn residual_body(&mut self, s: &mut Scope, r: ResidualId, mut view: E::Residual::View, key: CacheKey) -> R<Lowered> {
+        let _phase = flow_syntax::phase_timer::measure("core.residual_body");
+        let source = self.source_of_view(&view);
         // Draws and SOP cooks lower captured arrays as explicit producers, so compacted
         // counts and the regions consuming them share their Core locals.
         let captured_arrays = (self.initial.is_some() || self.has_draw || sop_cook(r))
             && E::Residual::free_names(&view.term).iter().any(|name| view.bindings.iter().find(|(n, _)| n == name).map(|(_, v)| holds_array_residual(v)).unwrap_or(false));
-        let packed = if view.previous || captured_arrays { None } else { self.packed_region(r, view) };
+        let packed = if view.previous || captured_arrays { None } else { self.packed_region(r, &view) };
         let value = if let Some(region) = packed {
-            self.region(s, Vec::new(), region, view)
-        } else if view.previous {
-            let mut src = source.clone();
-            src.span = Some(view.term.form.span.clone());
-            self.state_term(s, &src, &env, &view.term, true)?
+            self.region(s, Vec::new(), region, &view)
         } else {
-            self.term(false, s, &source, &env, &view.term)?
+            let env: Env = std::mem::take(&mut view.bindings).into_iter().map(|(n, v)| (n, Known(v))).collect();
+            if view.previous {
+                let mut src = source;
+                src.span = Some(view.term.form().span.clone());
+                self.state_term(s, &src, &env, &view.term, true)?
+            } else {
+                self.term(false, s, &source, &env, &view.term)?
+            }
         };
         s.cache.insert(key, value.clone());
         (self.lowered_hook.clone())(r);
@@ -1151,7 +1157,7 @@ impl Lowerer {
             // the region, which reads its immutable result as an argument.
             Known(Value::Residual(r))
                 if self.initial.is_some() || self.has_draw || static_ || E::state_dependent(&Value::Residual(*r))
-                    || (sop && holds_arrays(&self.view(*r)?.term.ty)) =>
+                    || (sop && holds_arrays(self.view(*r)?.term.ty())) =>
             {
                 let v = self.residual(s, *r)?;
                 self.capture(s, source, parent, static_, sop, arguments, &v)
@@ -1228,23 +1234,32 @@ impl Lowerer {
         self.budget -= 1;
         if self.budget < 0 { return Err(refusal("budget")); }
         // a literal needs no source and is no kernel candidate
-        match &x.node {
-            Node::Lit(param::Value::Int(n)) => return Ok(Known(Value::Int(*n))),
-            Node::Lit(param::Value::Float(f)) => return Ok(Known(Value::Float(*f))),
-            Node::Lit(param::Value::Bool(b)) => return Ok(Known(Value::Bool(*b))),
-            Node::Text(t) => return Ok(Known(Value::Text(t.clone()))),
+        match x.node {
+            Node::Lit(id) => match x.arena().literal(id) {
+                Literal::Int(n) => return Ok(Known(Value::Int(n))),
+                Literal::Float(f) => return Ok(Known(Value::Float(f))),
+                Literal::Bool(b) => return Ok(Known(Value::Bool(b))),
+                _ => (),
+            },
+            Node::Text(id) => return Ok(Known(Value::Text(x.arena().bytes(id).to_vec()))),
             Node::Nil => return Ok(Known(Value::No_geo)),
             _ => {}
         }
-        let mut src = source.clone();
-        src.site = x.path.clone().unwrap_or_else(|| source.site.clone());
-        src.span = Some(x.form.span.clone());
+        let src = C::Source {
+            site: x.path.map(|path| term_path(x, path)).unwrap_or_else(|| source.site.clone()),
+            owner: source.owner.clone(),
+            instance: source.instance,
+            prefix: source.prefix.clone(),
+            iter: source.iter.clone(),
+            span: Some(x.form().span.clone()),
+        };
         let source = &src;
         let (numeric_candidate, text_candidate) = packed_candidate(x);
         let candidate = numeric_candidate || text_candidate;
+        if !candidate { return self.term_node(borrow, s, source, env, x); }
         // A State step's maps are deferred past the static pass. Compile those nested kernels
         // under their state residual; other nested candidates keep the existing strict/draw gate.
-        let state_parent = self.current.is_some() && self.step_nodes.contains(&(x as *const Term as usize));
+        let state_parent = self.current.is_some() && self.step_nodes.contains(&x.identity());
         // a kernel reading a state value takes it as an argument, lowered once before the region
         let reads_state = candidate
             && E::Residual::free_names(x).iter().any(|name| matches!(env.get(name), Some(Known(Value::Residual(r))) if E::state_dependent(&Value::Residual(*r))));
@@ -1277,21 +1292,26 @@ impl Lowerer {
     // and in a debug build this match's locals (~78 KB) sat in every level of it (a 20-region chain overflowed 2 MB).
     #[inline(never)]
     fn term_node(&mut self, borrow: bool, s: &mut Scope, source: &C::Source, env: &Env, x: &Term) -> R<Lowered> {
-        match &x.node {
-            Node::Lit(param::Value::Int(n)) => Ok(Known(Value::Int(*n))),
-            Node::Lit(param::Value::Float(f)) => Ok(Known(Value::Float(*f))),
-            Node::Lit(param::Value::Bool(b)) => Ok(Known(Value::Bool(*b))),
-            Node::Text(t) => Ok(Known(Value::Text(t.clone()))),
+        let arena = x.arena();
+        match x.node {
+            Node::Lit(id) => match arena.literal(id) {
+                Literal::Int(n) => Ok(Known(Value::Int(n))),
+                Literal::Float(f) => Ok(Known(Value::Float(f))),
+                Literal::Bool(b) => Ok(Known(Value::Bool(b))),
+                _ => Err(refusal("literal")),
+            },
+            Node::Text(id) => Ok(Known(Value::Text(arena.bytes(id).to_vec()))),
             Node::Nil => Ok(Known(Value::No_geo)),
-            Node::Record(fields) => (|| -> R<Lowered> {
+            Node::Record(range) => (|| -> R<Lowered> {
                 let mut out = Vec::new();
-                for (name, t) in fields { out.push((name.clone(), self.term(borrow, s, source, env, t)?)); }
+                for field in arena.fields(range) { out.push((x.name(field.name).to_owned(), self.term(borrow, s, source, env, &x.child(field.term))?)); }
                 Ok(Record_fields(out))
             })(),
             Node::ListLit(items) => (|| -> R<Lowered> {
-                if items.len() > 4096 && !geometry_collection(&x.ty) { return Err(refusal("list_limit")); }
+                let items = arena.term_ids(items);
+                if items.len() > 4096 && !geometry_collection(x.ty()) { return Err(refusal("list_limit")); }
                 let mut lowered = Vec::new();
-                for t in items { lowered.push(self.term(false, s, source, env, t)?); }
+                for t in items { lowered.push(self.term(false, s, source, env, &x.child(*t))?); }
                 let pairs: Vec<(String, Lowered)> = lowered.iter().map(|v| (String::new(), v.clone())).collect();
                 match known_values(&pairs) {
                     Some(items) => {
@@ -1304,24 +1324,27 @@ impl Lowerer {
                     None => {
                         let mut ids = Vec::new();
                         for v in &lowered { ids.push(self.ensure(s, source, v)?); }
-                        Ok(self.emit(s, source, &x.ty, C::Expr::Items(ids)))
+                        Ok(self.emit(s, source, x.ty(), C::Expr::Items(ids)))
                     }
                 }
             })(),
-            Node::ListOp(_, items) => (|| -> R<Lowered> {
+            Node::ListOp(id) => (|| -> R<Lowered> {
+                let items = arena.term_ids(arena.list_op(id).args);
                 let mut args = Vec::new();
-                for item in items { args.push(("list", self.term(false, s, source, env, item)?)); }
-                self.primitive(s, source, &x.ty, C::Primitive::Sequence_concat, args)
+                for item in items { args.push(("list", self.term(false, s, source, env, &x.child(*item))?)); }
+                self.primitive(s, source, x.ty(), C::Primitive::Sequence_concat, args)
             })(),
-            Node::Get(value, name) => (|| -> R<Lowered> {
-                let v = self.term(borrow, s, source, env, value)?;
-                self.field(s, source, &x.ty, &v, name)
+            Node::Get(id) => (|| -> R<Lowered> {
+                let get = arena.get(id);
+                let v = self.term(borrow, s, source, env, &x.child(get.value))?;
+                self.field(s, source, x.ty(), &v, x.name(get.name))
             })(),
-            Node::Assoc(record, updates) => (|| -> R<Lowered> {
-                let mut record = self.term(false, s, source, env, record)?;
-                for (name, t) in updates {
-                    let value = self.term(false, s, source, env, t)?;
-                    let name = name.clone();
+            Node::Assoc(id) => (|| -> R<Lowered> {
+                let assoc = arena.assoc(id);
+                let mut record = self.term(false, s, source, env, &x.child(assoc.value))?;
+                for field in arena.fields(assoc.fields) {
+                    let value = self.term(false, s, source, env, &x.child(field.term))?;
+                    let name = x.name(field.name).to_owned();
                     record = self.map_fields(s, source, &record, &mut |l, sc, fields| {
                         match fields.iter().find(|(n, _)| *n == name) {
                             Some((_, old)) => {
@@ -1335,8 +1358,9 @@ impl Lowerer {
                 Ok(record)
             })(),
             Node::Str(ts) => (|| -> R<Lowered> {
+                let ts = arena.term_ids(ts);
                 let mut values = Vec::new();
-                for t in ts { values.push(self.term(false, s, source, env, t)?); }
+                for t in ts { values.push(self.term(false, s, source, env, &x.child(*t))?); }
                 let mut texts = Vec::new();
                 for value in &values {
                     texts.push(match value {
@@ -1355,10 +1379,11 @@ impl Lowerer {
                 }
             })(),
             Node::Time => Ok(self.frame(s, source, &Ty::Float, C::FrameField::Time)),
-            Node::State { .. } => self.state_term(s, source, env, x, false),
-            Node::Vec(ts) if ts.len() >= 2 && ts.len() <= 4 => (|| -> R<Lowered> {
+            Node::State(_) => self.state_term(s, source, env, x, false),
+            Node::Vec(ts) if (2..=4).contains(&arena.term_ids(ts).len()) => (|| -> R<Lowered> {
+                let ts = arena.term_ids(ts);
                 let mut args = Vec::new();
-                for t in ts { args.push(self.term(false, s, source, env, t)?); }
+                for t in ts { args.push(self.term(false, s, source, env, &x.child(*t))?); }
                 let pairs: Vec<(String, Lowered)> = args.iter().map(|v| (String::new(), v.clone())).collect();
                 match known_values(&pairs) {
                     Some(values) => {
@@ -1369,66 +1394,81 @@ impl Lowerer {
                     None => {
                         let mut ids = Vec::new();
                         for a in &args { ids.push(self.ensure(s, source, a)?); }
-                        Ok(self.emit(s, source, &x.ty, C::Expr::Vec(ids)))
+                        Ok(self.emit(s, source, x.ty(), C::Expr::Vec(ids)))
                     }
                 }
             })(),
-            Node::RefBinding(name, _) if name.starts_with("$elem:") => Err(refusal("element")),
-            Node::RefBinding(name, fields) => (|| -> R<Lowered> {
+            Node::RefBinding(id) if x.name(arena.ref_binding(id).name).starts_with("$elem:") => Err(refusal("element")),
+            Node::RefBinding(id) => (|| -> R<Lowered> {
+                let binding = arena.ref_binding(id);
+                let name = x.name(binding.name);
+                let fields = arena.name_ids(binding.fields);
                 let start = match env.get(name) {
                     Some(v) => self.resolve(s, v)?,
                     None => return Err(refusal("binding")),
                 };
                 let mut value = start;
-                for f in fields { value = self.field(s, source, &x.ty, &value, f)?; }
+                for f in fields { value = self.field(s, source, x.ty(), &value, x.name(*f))?; }
                 if borrow { self.descriptor(s, source, &value) } else { Ok(value) }
             })(),
             // a program runs over values at hand: nothing it reads is live
-            Node::Op { op, .. } if op == "live?" => Ok(boolean(false)),
-            Node::Op { op, args, .. } => self.op_term(borrow, s, source, env, x, op, args),
-            Node::Call { kind, ctx, args } => (|| -> R<Lowered> {
-                if !ty::is_cooked(&x.ty) { return Err(refusal("call")); }
+            Node::Op(id) if x.name(arena.op(id).op) == "live?" => Ok(boolean(false)),
+            Node::Op(id) => {
+                let op = arena.op(id);
+                self.op_term(borrow, s, source, env, x, x.name(op.op), arena.fields(op.args))
+            }
+            Node::Call(id) => (|| -> R<Lowered> {
+                let call = arena.call(id);
+                let kind = x.name(call.kind);
+                let args = arena.fields(call.args);
+                if !ty::is_cooked(x.ty()) { return Err(refusal("call")); }
                 let mut lowered = Vec::new();
-                for (name, t) in args {
-                    let v = self.term(storage_argument(&t.ty), s, source, env, t)?;
-                    lowered.push((name.clone(), self.ensure(s, source, &v)?));
+                for field in args {
+                    let t = x.child(field.term);
+                    let v = self.term(storage_argument(t.ty()), s, source, env, &t)?;
+                    lowered.push((x.name(field.name).to_owned(), self.ensure(s, source, &v)?));
                 }
                 let mut all = Vec::new();
                 all.push(("$name".to_owned(), self.ensure(s, source, &Known(text(kind)))?));
-                all.push(("$context".to_owned(), self.ensure(s, source, &Known(text(context::name(*ctx))))?));
+                all.push(("$context".to_owned(), self.ensure(s, source, &Known(text(context::name(call.ctx))))?));
                 all.extend(lowered);
-                Ok(self.emit(s, source, &x.ty, C::Expr::Host_source { name: "$core/catalog".into(), ty: x.ty.clone(), args: all }))
+                Ok(self.emit(s, source, x.ty(), C::Expr::Host_source { name: "$core/catalog".into(), ty: x.ty().clone(), args: all }))
             })(),
-            Node::Let(bindings, body) => (|| -> R<Lowered> {
+            Node::Let(id) => (|| -> R<Lowered> {
+                let node = arena.let_node(id);
                 let mut env = env.clone();
-                for (pattern, value) in bindings {
-                    let v = self.term(false, s, source, &env, value)?;
-                    env = self.bind(s, source, env, pattern, v)?;
+                for binding in arena.bindings(node.bindings) {
+                    let v = self.term(false, s, source, &env, &x.child(binding.term))?;
+                    env = self.bind(s, source, env, x, binding.pattern, v)?;
                 }
-                self.term(borrow, s, source, &env, body)
+                self.term(borrow, s, source, &env, &x.child(node.body))
             })(),
-            Node::ErrorRows { rows, policy, mapper } => (|| -> R<Lowered> {
-                let rows = self.term(false, s, source, env, rows)?;
+            Node::ErrorRows(id) => (|| -> R<Lowered> {
+                let node = arena.error_rows(id);
+                let rows = self.term(false, s, source, env, &x.child(node.rows))?;
                 let rows = self.ensure(s, source, &rows)?;
                 let mut handler = Scope::fresh();
                 let index = self.local(&Ty::Int);
-                let m = self.term(false, &mut handler, source, env, mapper)?;
+                let m = self.term(false, &mut handler, source, env, &x.child(node.mapper))?;
                 let mapper = self.as_callable(source, &m)?;
                 let payload = Ty::Record(vec![("code".into(), Ty::Text), ("message".into(), Ty::Text), ("cause".into(), Ty::List(Box::new(Ty::Text)))]);
                 let d = self.call(false, &mut handler, source, &payload, None, &mapper, &[Computed(index, Ty::Int)])?;
                 let diagnostic = self.ensure(&mut handler, source, &d)?;
-                let result = self.local(&x.ty);
-                self.push(s, source, C::StatementNode::Diagnose_rows { rows, policy: *policy, index, handler: handler.st, diagnostic, result });
-                Ok(Computed(result, x.ty.clone()))
+                let result = self.local(x.ty());
+                self.push(s, source, C::StatementNode::Diagnose_rows { rows, policy: node.policy, index, handler: handler.st, diagnostic, result });
+                Ok(Computed(result, x.ty().clone()))
             })(),
-            Node::WithError(protected, mapper) => (|| -> R<Lowered> {
+            Node::WithError(id) => (|| -> R<Lowered> {
+                let node = arena.pair(id);
+                let protected = &x.child(node.first);
+                let mapper = &x.child(node.second);
                 let mut body = Scope::fresh();
                 let mut handler = Scope::fresh();
                 let protected_value = self.term(false, &mut body, source, env, protected)?;
                 let value = self.ensure(&mut body, source, &protected_value)?;
-                let complete = ty::is_cooked(&protected.ty) && !matches!(protected_value, Known(Value::No_geo));
+                let complete = ty::is_cooked(protected.ty()) && !matches!(protected_value, Known(Value::No_geo));
                 let value = if complete {
-                    let l = self.emit(&mut body, source, &protected.ty, C::Expr::Host_source { name: "$core/complete".into(), ty: protected.ty.clone(), args: vec![("value".into(), value)] });
+                    let l = self.emit(&mut body, source, protected.ty(), C::Expr::Host_source { name: "$core/complete".into(), ty: protected.ty().clone(), args: vec![("value".into(), value)] });
                     self.ensure(&mut body, source, &l)?
                 } else { value };
                 let payload = Ty::Record(vec![("code".into(), Ty::Text), ("message".into(), Ty::Text), ("cause".into(), Ty::List(Box::new(Ty::Text)))]);
@@ -1437,30 +1477,42 @@ impl Lowerer {
                 let mapper = self.as_callable(source, &m)?;
                 let mapped = self.call(false, &mut handler, source, &payload, None, &mapper, &[Computed(failure, payload.clone())])?;
                 let mapped = self.ensure(&mut handler, source, &mapped)?;
-                let result = self.local(&x.ty);
+                let result = self.local(x.ty());
                 self.push(s, source, C::StatementNode::Protect { body: body.st, value, failure, handler: handler.st, mapped, result });
-                Ok(Computed(result, x.ty.clone()))
+                Ok(Computed(result, x.ty().clone()))
             })(),
-            Node::If(condition, yes, no) => (|| -> R<Lowered> {
+            Node::If(id) => (|| -> R<Lowered> {
+                let node = arena.if_node(id);
+                let condition = &x.child(node.test);
+                let yes = &x.child(node.yes);
+                let no = &x.child(node.no);
                 let c = self.term(false, s, source, env, condition)?;
-                self.branch(s, source, &x.ty, &c,
+                self.branch(s, source, x.ty(), &c,
                     &mut |l, sc| l.term(borrow, sc, source, env, yes),
                     &mut |l, sc| l.term(borrow, sc, source, env, no))
             })(),
-            Node::Cond(arms, default) => self.cond_arms(borrow, s, source, env, &x.ty, arms, default),
-            Node::Case(scrutinee, arms, default) => (|| -> R<Lowered> {
-                let scrutinee = self.term(false, s, source, env, scrutinee)?;
-                self.case_arms(borrow, s, source, env, &x.ty, &scrutinee, arms, default)
+            Node::Cond(id) => {
+                let node = arena.cond(id);
+                self.cond_arms(borrow, s, source, env, x, arena.arms(node.arms), node.default)
+            }
+            Node::Case(id) => (|| -> R<Lowered> {
+                let node = arena.case(id);
+                let scrutinee = self.term(false, s, source, env, &x.child(node.value))?;
+                self.case_arms(borrow, s, source, env, x, &scrutinee, arena.case_arms(node.arms), node.default)
             })(),
-            Node::CallFn { fn_name, args, body } => (|| -> R<Lowered> {
+            Node::CallFn(id) => (|| -> R<Lowered> {
+                let node = arena.call_fn(id);
+                let fn_name = x.name(node.name);
+                let args = arena.term_ids(node.args);
+                let body = node.body.map(|id| x.child(id));
                 let mut values = Vec::new();
-                for a in args { values.push(self.term(false, s, source, env, a)?); }
+                for a in args { values.push(self.term(false, s, source, env, &x.child(*a))?); }
                 let value = match env.get(fn_name) {
                     Some(f) => {
                         let c = self.as_callable(source, f)?;
-                        self.call(borrow, s, source, &x.ty, body.as_deref(), &c, &values)?
+                        self.call(borrow, s, source, x.ty(), body.as_ref(), &c, &values)?
                     }
-                    None => self.definition(borrow, s, source, fn_name, body.as_deref(), &values)?,
+                    None => self.definition(borrow, s, source, fn_name, body.as_ref(), &values)?,
                 };
                 if borrow { self.descriptor(s, source, &value) } else { Ok(value) }
             })(),
@@ -1468,16 +1520,17 @@ impl Lowerer {
                 let identity = self.new_identity();
                 let slot = self.call_slot(identity);
                 self.push(s, source, C::StatementNode::Reset_call(slot));
-                Ok(Callable(Callable::Named { name: name.clone(), identity }))
+                Ok(Callable(Callable::Named { name: x.name(name).to_owned(), identity }))
             })(),
-            Node::Fn { params, body, zone, capture } => (|| -> R<Lowered> {
-                let closure = match capture {
+            Node::Fn(id) => (|| -> R<Lowered> {
+                let node = arena.function(id);
+                let closure = match node.capture {
                     Some(original) => {
-                        let o = self.term(false, s, source, env, original)?;
+                        let o = self.term(false, s, source, env, &x.child(original))?;
                         match self.as_callable(source, &o)? {
-                            Callable::Closure(cl) => Closure { params: params.clone(), body: (**body).clone(), ..(*cl).clone() },
+                            Callable::Closure(cl) => Closure { params: node.params, body: x.child(node.body), ..(*cl).clone() },
                             Callable::Named { identity, .. } => Closure {
-                                params: params.clone(), body: (**body).clone(), zone: zone.clone(), env: Env::new(),
+                                params: node.params, body: x.child(node.body), zone: term_path(x, node.zone), env: Env::new(),
                                 instance: source.instance, prefix: source.prefix.clone(), identity,
                             },
                         }
@@ -1486,50 +1539,62 @@ impl Lowerer {
                         let identity = self.new_identity();
                         let slot = self.call_slot(identity);
                         self.push(s, source, C::StatementNode::Reset_call(slot));
-                        Closure { params: params.clone(), body: (**body).clone(), zone: zone.clone(), env: env.clone(), instance: source.instance, prefix: source.prefix.clone(), identity }
+                        Closure { params: node.params, body: x.child(node.body), zone: term_path(x, node.zone), env: env.clone(), instance: source.instance, prefix: source.prefix.clone(), identity }
                     }
                 };
                 Ok(Callable(Callable::Closure(Arc::new(closure))))
             })(),
-            Node::Expanded { body, .. } => self.term(borrow, s, source, env, body),
-            Node::Bypass(inner) => match W::bypass_input(inner) {
+            Node::Expanded(id) => self.term(borrow, s, source, env, &x.child(arena.expanded(id).body)),
+            Node::Bypass(id) => {
+                let inner = x.child(id);
+                match W::bypass_input(&inner) {
                 Some(input) => {
                     let v = self.term(borrow, s, source, env, &input)?;
-                    self.coerce(s, source, &inner.ty, &v)
+                    self.coerce(s, source, inner.ty(), &v)
                 }
                 None => Err(refusal("bypass")),
+                }
             },
             // A drawing or structured value's filter of a range: its predicate as an Int mask map (its free names read from the
             // lowering's scope, as the inline fn reads them), which packs like any map (all cores, or the
             // device in fast precision), then array/compact keeps the indices.  Any other filter, or a mask
             // that does not pack, keeps the element loop below.
-            Node::Hof(HofKind::Filter, ts) if (self.has_draw || self.initial.is_some()) && filter_range(ts, &x.ty).is_some() => (|| -> R<Lowered> {
-                let (fn_term, items, elem) = filter_range(ts, &x.ty).unwrap();
-                let Node::Fn { body, .. } = &fn_term.node else { unreachable!() };
-                let lit = |n: i64| Term { node: Node::Lit(param::Value::Int(n)), ty: Ty::Int, path: None, ..(**body).clone() };
-                let mask_body = Term { node: Node::If(body.clone(), Box::new(lit(1)), Box::new(lit(0))), ty: Ty::Int, path: None, ..(**body).clone() };
-                let Node::Fn { params, zone, .. } = &fn_term.node else { unreachable!() };
-                let mask_fn = Term {
-                    ty: Ty::Fn(Some(Box::new(ty::FnSignature { params: vec![elem.clone()], result: Ty::Int }))),
-                    node: Node::Fn { params: params.clone(), body: Box::new(mask_body), zone: zone.clone(), capture: None },
-                    ..fn_term.clone()
-                };
-                let map = Term { node: Node::Hof(HofKind::Map, vec![mask_fn, items.clone()]), ty: Ty::Array(Box::new(Ty::Int)), path: None, ..x.clone() };
+            Node::Hof(id) if arena.hof(id).kind == HofKind::Filter && (self.has_draw || self.initial.is_some())
+                && filter_range(x, arena.term_ids(arena.hof(id).args), x.ty()).is_some() => (|| -> R<Lowered> {
+                let (fn_id, items, elem) = filter_range(x, arena.term_ids(arena.hof(id).args), x.ty()).unwrap();
+                let mut builder = TermBuilder::new();
+                let root = builder.import(x);
+                let fn_term = builder.imported(&x.child(fn_id)).expect("filter source imported");
+                let items = builder.imported(&x.child(items)).expect("filter source imported");
+                let Node::Fn(function) = builder.row(fn_term).node else { unreachable!() };
+                let body = builder.function(function).body;
+                let form = builder.row(body).form;
+                let yes = builder.push(None, &Ty::Int, form, Draft::Lit(param::Value::Int(1)));
+                let no = builder.push(None, &Ty::Int, form, Draft::Lit(param::Value::Int(0)));
+                let mask_body = builder.push(None, &Ty::Int, form, Draft::If(body, yes, no));
+                let fn_ty = Ty::Fn(Some(Box::new(ty::FnSignature { params: vec![elem.clone()], result: Ty::Int })));
+                let mask_fn = builder.with_function_body(fn_term, mask_body, &fn_ty, None);
+                let form = builder.row(root).form;
+                let map = builder.push(None, &Ty::Array(Box::new(Ty::Int)), form, Draft::Hof(HofKind::Map, vec![mask_fn, items]));
+                let map = builder.freeze().handle(map);
                 let mask = self.term(false, s, source, env, &map)?;
                 let kept = self.primitive(s, source, &Ty::Array(Box::new(Ty::Int)), C::Primitive::Array_compact, vec![("mask", mask)])?;
-                if elem == Ty::Int { Ok(kept) } else { self.primitive(s, source, &x.ty, C::Primitive::Coerce(x.ty.clone()), vec![("value", kept)]) }
+                if elem == Ty::Int { Ok(kept) } else { self.primitive(s, source, x.ty(), C::Primitive::Coerce(x.ty().clone()), vec![("value", kept)]) }
             })(),
-            Node::Hof(kind, ts) if !ts.is_empty() => (|| -> R<Lowered> {
-                let f = self.term(false, s, source, env, &ts[0])?;
+            Node::Hof(id) if !arena.term_ids(arena.hof(id).args).is_empty() => (|| -> R<Lowered> {
+                let node = arena.hof(id);
+                let ts = arena.term_ids(node.args);
+                let f = self.term(false, s, source, env, &x.child(ts[0]))?;
                 let f = self.as_callable(source, &f)?;
-                self.hof(s, source, env, &x.ty, *kind, &f, &ts[1..])
+                self.hof(s, source, env, x, node.kind, &f, &ts[1..])
             })(),
-            Node::Hof(_, _) => Err(refusal("higher_order")),
-            Node::GraphRef { graph, inputs } if inputs.is_empty() => (|| -> R<Lowered> {
+            Node::Hof(_) => Err(refusal("higher_order")),
+            Node::GraphRef(id) if arena.fields(arena.graph_ref(id).inputs).is_empty() => (|| -> R<Lowered> {
+                let graph = x.name(arena.graph_ref(id).graph);
                 // The referenced graph's body in its own default instance, as the live walker re-runs it.
                 let root = self.root()?;
                 let g = E::Residual::residual_graph(root, graph).ok_or_else(|| refusal("ref"))?;
-                let zone = vec![graph.clone()];
+                let zone = vec![graph.to_owned()];
                 let mut src2 = source.clone();
                 src2.instance = E::Residual::graph_instance(root, graph).unwrap_or(source.instance);
                 src2.prefix = Vec::new();
@@ -1553,11 +1618,18 @@ impl Lowerer {
                 self.plane = saved;
                 Ok(value)
             })(),
-            Node::Loop { kind: kind @ (LoopKind::For | LoopKind::Sum), accs, clauses, skip, body, zone }
-                if accs.is_empty() && clauses.len() == 1 && skip.is_empty() && matches!(clauses[0].0, Pattern::Name(_)) =>
-            {
-                let Pattern::Name(name) = &clauses[0].0 else { unreachable!() };
-                let items = self.term(false, s, source, env, &clauses[0].1)?;
+            Node::Loop(id) if {
+                let node = arena.loop_node(id);
+                let clauses = arena.bindings(node.clauses);
+                matches!(node.kind, LoopKind::For | LoopKind::Sum) && arena.bindings(node.accs).is_empty()
+                    && clauses.len() == 1 && arena.skip(node.skip).is_empty()
+                    && matches!(arena.pattern(clauses[0].pattern), PatternNode::Name(_))
+            } => {
+                let node = arena.loop_node(id);
+                let clauses = arena.bindings(node.clauses);
+                let PatternNode::Name(name) = arena.pattern(clauses[0].pattern) else { unreachable!() };
+                let name = x.name(name);
+                let items = self.term(false, s, source, env, &x.child(clauses[0].term))?;
                 match &items {
                     Known(Value::List(items)) if items.len() <= 32 => {
                         let mut values = Vec::new();
@@ -1565,12 +1637,12 @@ impl Lowerer {
                             let mut src2 = source.clone();
                             src2.iter.push(C::Iteration::Static_index(index as i64));
                             let mut e2 = env.clone();
-                            e2.insert(name.clone(), Known(item.clone()));
-                            values.push(self.term(false, s, &src2, &e2, body)?);
+                            e2.insert(name.to_owned(), Known(item.clone()));
+                            values.push(self.term(false, s, &src2, &e2, &x.child(node.body))?);
                         }
                         if values.iter().all(|v| matches!(v, Known(_))) {
                             let vals: Vec<Value> = values.iter().map(|v| match v { Known(v) => v.clone(), _ => unreachable!() }).collect();
-                            if *kind == LoopKind::For {
+                            if node.kind == LoopKind::For {
                                 let ty = V::elem_ty(&vals);
                                 let mut out = Vec::new();
                                 for v in &vals { out.push(V::coerce_to(&ty, v)?); }
@@ -1582,53 +1654,51 @@ impl Lowerer {
                                 for v in &vals[1..] { acc = V::arith("sum", &|a, b| a + b, &acc, v)?; }
                                 Ok(Known(acc))
                             }
-                        } else if *kind == LoopKind::For {
+                        } else if node.kind == LoopKind::For {
                             let mut ids = Vec::new();
                             for v in &values { ids.push(self.ensure(s, source, v)?); }
-                            Ok(self.emit(s, source, &x.ty, C::Expr::Items(ids)))
+                            Ok(self.emit(s, source, x.ty(), C::Expr::Items(ids)))
                         } else if values.is_empty() {
                             Ok(Known(Value::Int(0)))
                         } else {
                             let mut acc = values[0].clone();
                             for v in &values[1..] {
-                                acc = self.primitive(s, source, &x.ty, num(PO::Binary::Add), vec![("a", acc), ("b", v.clone())])?;
+                                acc = self.primitive(s, source, x.ty(), num(PO::Binary::Add), vec![("a", acc), ("b", v.clone())])?;
                             }
                             Ok(acc)
                         }
                     }
-                    _ => self.loop_(s, source, env, &x.ty, *kind, &[], &[(Pattern::Name(name.clone()), None)], &[], body, zone, Some(items.clone())),
+                    _ => self.loop_(s, source, env, x, node, Some(items.clone())),
                 }
             }
-            Node::Loop { kind, accs, clauses, skip, body, zone } => (|| -> R<Lowered> {
-                let clauses: Vec<(Pattern, Option<&Term>)> = clauses.iter().map(|(p, t)| (p.clone(), Some(t))).collect();
-                self.loop_(s, source, env, &x.ty, *kind, accs, &clauses, skip, body, zone, None)
-            })(),
+            Node::Loop(id) => self.loop_(s, source, env, x, arena.loop_node(id), None),
             Node::Vec(_) => Err(refusal("vector")),
-            Node::Lit(_) => Err(refusal("literal")),
-            Node::GraphRef { .. } => Err(refusal("ref")),
+            Node::GraphRef(_) => Err(refusal("ref")),
         }
     }
 
-    fn cond_arms(&mut self, borrow: bool, s: &mut Scope, source: &C::Source, env: &Env, ty: &Ty, arms: &[(Term, Term)], default: &Term) -> R<Lowered> {
+    fn cond_arms(&mut self, borrow: bool, s: &mut Scope, source: &C::Source, env: &Env, owner: &Term, arms: &[A::Arm], default: TermId) -> R<Lowered> {
         match arms.split_first() {
-            None => self.term(borrow, s, source, env, default),
-            Some(((condition, value), rest)) => {
-                let c = self.term(false, s, source, env, condition)?;
-                self.branch(s, source, ty, &c,
-                    &mut |l, sc| l.term(borrow, sc, source, env, value),
-                    &mut |l, sc| l.cond_arms(borrow, sc, source, env, ty, rest, default))
+            None => self.term(borrow, s, source, env, &owner.child(default)),
+            Some((arm, rest)) => {
+                let c = self.term(false, s, source, env, &owner.child(arm.test))?;
+                self.branch(s, source, owner.ty(), &c,
+                    &mut |l, sc| l.term(borrow, sc, source, env, &owner.child(arm.body)),
+                    &mut |l, sc| l.cond_arms(borrow, sc, source, env, owner, rest, default))
             }
         }
     }
 
-    fn case_arms(&mut self, borrow: bool, s: &mut Scope, source: &C::Source, env: &Env, ty: &Ty, scrutinee: &Lowered, arms: &[(flow_syntax::syntax::Syntax, Term)], default: &Term) -> R<Lowered> {
+    fn case_arms(&mut self, borrow: bool, s: &mut Scope, source: &C::Source, env: &Env, owner: &Term, scrutinee: &Lowered, arms: &[A::CaseArm], default: TermId) -> R<Lowered> {
         match arms.split_first() {
-            None => self.term(borrow, s, source, env, default),
-            Some(((lit, value), rest)) => {
-                let lit: Value = match &lit.node {
-                    SNode::Str(t) => Value::Text(t.clone()),
-                    SNode::Sym(t) => Value::Bool(t == "true"),
+            None => self.term(borrow, s, source, env, &owner.child(default)),
+            Some((arm, rest)) => {
+                let syntax = owner.arena().syntax();
+                let lit: Value = match syntax.row(arm.form).node {
+                    SNode::Str(t) => Value::Text(syntax.bytes(t).to_vec()),
+                    SNode::Sym(t) => Value::Bool(syntax.name(t) == "true"),
                     SNode::Num(t) => {
+                        let t = syntax.name(t);
                         match if t.contains('.') { None } else { t.parse::<i64>().ok() } {
                             Some(n) => Value::Int(n),
                             None => Value::Float(cfmt::parse_ocaml_float(t).ok_or_else(|| Stop::Diag(V::fail("E_INTERNAL", "float_of_string")))?),
@@ -1656,22 +1726,23 @@ impl Lowerer {
                     }
                     _ => self.primitive(s, source, &Ty::Bool, C::Primitive::Equal, vec![("a", scrutinee.clone()), ("b", Known(lit.clone()))])?,
                 };
-                self.branch(s, source, ty, &condition,
-                    &mut |l, sc| l.term(borrow, sc, source, env, value),
-                    &mut |l, sc| l.case_arms(borrow, sc, source, env, ty, scrutinee, rest, default))
+                self.branch(s, source, owner.ty(), &condition,
+                    &mut |l, sc| l.term(borrow, sc, source, env, &owner.child(arm.body)),
+                    &mut |l, sc| l.case_arms(borrow, sc, source, env, owner, scrutinee, rest, default))
             }
         }
     }
 }
 
 /// A filter whose function is an `fn` and whose items are an int or float `array/range` of the filter's own type.
-fn filter_range<'a>(ts: &'a [Term], ty: &Ty) -> Option<(&'a Term, &'a Term, Ty)> {
+fn filter_range(owner: &Term, ts: &[TermId], ty: &Ty) -> Option<(TermId, TermId, Ty)> {
     if ts.len() != 2 { return None; }
-    let (f, items) = (&ts[0], &ts[1]);
-    if !matches!(f.node, Node::Fn { .. }) { return None; }
-    let Node::Op { op, .. } = &items.node else { return None };
-    if op != "array/range" { return None; }
-    let Ty::Array(elem) = &items.ty else { return None };
+    let arena = owner.arena();
+    let (f, items) = (ts[0], ts[1]);
+    if !matches!(arena.row(f).node, Node::Fn(_)) { return None; }
+    let Node::Op(id) = arena.row(items).node else { return None; };
+    if owner.name(arena.op(id).op) != "array/range" { return None; }
+    let Ty::Array(elem) = arena.ty(arena.row(items).ty) else { return None; };
     if !matches!(**elem, Ty::Int | Ty::Float) { return None; }
     if *ty != Ty::Array(elem.clone()) { return None; }
     Some((f, items, (**elem).clone()))
@@ -1681,50 +1752,58 @@ impl Lowerer {
     fn packed_region(&mut self, r: ResidualId, view: &E::Residual::View) -> Option<Arc<C::RegionT>> {
         // Packed-array forms run as one region through Packed.force, unchanged; list
         // loops stay structured core. A refusal by Packed leaves the structured path.
-        let is_array = |ty: &Ty| matches!(ty, Ty::Array(_));
-        let sources: Option<Vec<&Term>> = match &view.term.node {
-            Node::Hof(HofKind::Map | HofKind::Reduce, ts) if !ts.is_empty() => Some(ts[1..].iter().collect()),
-            Node::Loop { clauses, .. } => Some(clauses.iter().map(|(_, t)| t).collect()),
-            Node::Op { op, args, .. } if op == "array/sum" => Some(args.iter().map(|(_, t)| t).collect()),
+        let x = &view.term;
+        let arena = x.arena();
+        let is_array = |id: TermId| matches!(arena.ty(arena.row(id).ty), Ty::Array(_));
+        let sources = match x.node {
+            Node::Hof(id) => {
+                let node = arena.hof(id);
+                let terms = arena.term_ids(node.args);
+                if matches!(node.kind, HofKind::Map | HofKind::Reduce) && !terms.is_empty() {
+                    Some(terms[1..].iter().any(|id| is_array(*id)))
+                } else { None }
+            }
+            Node::Loop(id) => Some(arena.bindings(arena.loop_node(id).clauses).iter().any(|binding| is_array(binding.term))),
+            Node::Op(id) if x.name(arena.op(id).op) == "array/sum" =>
+                Some(arena.fields(arena.op(id).args).iter().any(|field| is_array(field.term))),
             _ => None,
         };
-        match sources {
-            // Core keeps state in its own statements: a region over a state-reading residual stays structured
-            Some(_) if E::state_dependent(&Value::Residual(r)) => None,
-            Some(sources) if is_array(&view.term.ty) || sources.iter().any(|t| is_array(&t.ty)) => {
-                packed::compile(&self.options, r, &view.term).filter(|region| (self.region_allowed)(region)).map(Arc::new)
-            }
-            _ => None,
-        }
+        // Core keeps state in its own statements: a region over a state-reading residual stays structured.
+        if sources.is_some_and(|source_array| source_array || matches!(x.ty(), Ty::Array(_)))
+            && !E::state_dependent(&Value::Residual(r))
+        {
+            packed::compile(&self.options, r, x).filter(|region| (self.region_allowed)(region)).map(Arc::new)
+        } else { None }
     }
 
     fn region(&mut self, s: &mut Scope, args: Vec<i64>, packed: Arc<C::RegionT>, view: &E::Residual::View) -> Lowered {
         let index = self.regions.len() as i64;
         self.regions.push(packed);
         let mut source = self.source_of_view(view);
-        source.span = Some(view.term.form.span.clone());
-        let result = self.local(&view.term.ty);
+        source.span = Some(view.term.form().span.clone());
+        let result = self.local(view.term.ty());
         self.push(s, &source, C::StatementNode::Invoke { region: index, args, result });
-        Computed(result, view.term.ty.clone())
+        Computed(result, view.term.ty().clone())
     }
 
     fn state_term(&mut self, s: &mut Scope, source: &C::Source, env: &Env, x: &Term, previous_only: bool) -> R<Lowered> {
-        let Node::State { binder, init, step, zone } = &x.node else { return Err(refusal("state")) };
+        let Node::State(id) = x.node else { return Err(refusal("state")) };
+        let node = x.arena().state(id);
         if self.geometry { return Err(refusal("state")); }
-        let ty = x.ty.clone();
+        let ty = x.ty().clone();
         let numeric = ty == Ty::Int || ty == Ty::Float;
         let slot = self.next_slot;
         self.next_slot += 1;
-        self.slots.push(C::StateSlot { source: source.clone(), prefix: source.prefix.clone(), zone: zone.clone(), plane: self.plane, ty: ty.clone() });
+        self.slots.push(C::StateSlot { source: source.clone(), prefix: source.prefix.clone(), zone: term_path(x, node.zone), plane: self.plane, ty: ty.clone() });
         let mut initial_body = s.fork();
-        let v = self.term(false, &mut initial_body, source, env, init)?;
+        let v = self.term(false, &mut initial_body, source, env, &x.child(node.init))?;
         let initial = self.ensure(&mut initial_body, source, &v)?;
         let previous = self.local(&ty);
         if numeric { self.mixed.insert(previous); }
         self.push(s, source, C::StatementNode::State_read { slot, result: previous, init: initial_body.st, initial });
         let previous = Computed(previous, ty.clone());
         if previous_only { return Ok(previous); }
-        let env = self.bind(s, source, env.clone(), binder, previous)?;
+        let env = self.bind(s, source, env.clone(), x, node.binder, previous)?;
         let found = self.local(&Ty::Bool);
         let pending = self.local(&ty);
         let result = self.local(&ty);
@@ -1734,7 +1813,7 @@ impl Lowerer {
         let yes_id = self.number();
         let yes = vec![statement(yes_id, source, C::StatementNode::Assign(result, C::Expr::Local(pending)))];
         let mut body = s.fork();
-        let v = self.term(false, &mut body, source, &env, step)?;
+        let v = self.term(false, &mut body, source, &env, &x.child(node.step))?;
         let v = self.coerce(&mut body, source, &ty, &v)?;
         let value = self.ensure(&mut body, source, &v)?;
         let wid = self.number();
@@ -1745,18 +1824,21 @@ impl Lowerer {
         Ok(Computed(result, ty))
     }
 
-    fn bind(&mut self, s: &mut Scope, source: &C::Source, mut env: Env, pattern: &Pattern, value: Lowered) -> R<Env> {
-        match pattern {
-            Pattern::Name(name) => { env.insert(name.clone(), value); Ok(env) }
-            Pattern::Keys(keys) => {
+    fn bind(&mut self, s: &mut Scope, source: &C::Source, mut env: Env, owner: &Term, pattern: PatternId, value: Lowered) -> R<Env> {
+        let arena = owner.arena();
+        match arena.pattern(pattern) {
+            PatternNode::Name(name) => { env.insert(owner.name(name).to_owned(), value); Ok(env) }
+            PatternNode::Keys(keys) => {
                 let value = self.resolve(s, &value)?;
-                for name in keys {
+                for name in arena.name_ids(keys) {
+                    let name = owner.name(*name);
                     let f = self.field(s, source, &Ty::Any, &value, name)?;
-                    env.insert(name.clone(), f);
+                    env.insert(name.to_owned(), f);
                 }
                 Ok(env)
             }
-            Pattern::Seq(patterns) => {
+            PatternNode::Seq(patterns) => {
+                let patterns = arena.pattern_ids(patterns);
                 let value = self.resolve(s, &value)?;
                 let parts: Vec<Lowered> = match &value {
                     Known(v) => match v {
@@ -1795,7 +1877,7 @@ impl Lowerer {
                     Callable(_) | Record_fields(_) | Record_choice(..) => return Err(refusal("pattern")),
                 };
                 if parts.len() < patterns.len() { return Err(refusal("pattern")); }
-                for (p, v) in patterns.iter().zip(parts.into_iter()) { env = self.bind(s, source, env, p, v)?; }
+                for (p, v) in patterns.iter().zip(parts.into_iter()) { env = self.bind(s, source, env, owner, *p, v)?; }
                 Ok(env)
             }
         }
@@ -1830,15 +1912,16 @@ impl Lowerer {
         source.iter.push(C::Iteration::Local_index(index));
         match f {
             Callable::Closure(cl) => {
-                if cl.params.len() != values.len() { return Err(refusal("call_fn")); }
+                let params = cl.body.arena().params(cl.params);
+                if params.len() != values.len() { return Err(refusal("call_fn")); }
                 source.instance = cl.instance;
                 source.prefix = cl.prefix.clone();
                 source.site = cl.zone.clone();
                 source.owner = cl.zone.clone();
                 let mut env = cl.env.clone();
-                for ((pattern, pty), value) in cl.params.iter().zip(values.iter()) {
-                    let value = match pty { None => value.clone(), Some(t) => self.coerce(s, &source, t, value)? };
-                    env = self.bind(s, &source, env, pattern, value)?;
+                for (parameter, value) in params.iter().zip(values.iter()) {
+                    let value = match parameter.ty { None => value.clone(), Some(t) => self.coerce(s, &source, cl.body.arena().ty(t), value)? };
+                    env = self.bind(s, &source, env, &cl.body, parameter.pattern, value)?;
                 }
                 let body = specialized.unwrap_or(&cl.body);
                 self.term(borrow, s, &source, &env, body)
@@ -1921,12 +2004,13 @@ impl Lowerer {
         }
     }
 
-    fn op_term(&mut self, borrow: bool, s: &mut Scope, source: &C::Source, env: &Env, x: &Term, name: &str, args: &[(String, Term)]) -> R<Lowered> {
+    fn op_term(&mut self, borrow: bool, s: &mut Scope, source: &C::Source, env: &Env, x: &Term, name: &str, args: &[A::Field]) -> R<Lowered> {
         let o = match self.find_op(name)? { Some(o) => o, None => return Err(refusal(name)) };
         let mut largs: Vec<(String, Lowered)> = Vec::new();
-        for (n, t) in args {
-            let v = if ty::is_cooked(&x.ty) && storage_argument(&t.ty) { self.term(true, s, source, env, t)? } else { self.term(false, s, source, env, t)? };
-            largs.push((n.clone(), v));
+        for field in args {
+            let t = &x.child(field.term);
+            let v = if ty::is_cooked(x.ty()) && storage_argument(t.ty()) { self.term(true, s, source, env, t)? } else { self.term(false, s, source, env, t)? };
+            largs.push((x.name(field.name).to_owned(), v));
         }
         fn data_source(v: &Value) -> bool {
             match v {
@@ -1944,11 +2028,11 @@ impl Lowerer {
             }).collect();
             (o.body)(&input::at_time(0.), &|_, _| Err(refusal_diag(name)), &proto).ok()
         };
-        if ty::is_cooked(&x.ty) {
+        if ty::is_cooked(x.ty()) {
             let mut lowered = Vec::new();
             lowered.push(("$name".to_owned(), self.ensure(s, source, &Known(text(name)))?));
             for (n, v) in &largs { lowered.push((n.clone(), self.ensure(s, source, v)?)); }
-            return Ok(self.emit(s, source, &x.ty, C::Expr::Host_source { name: "$core/operator".into(), ty: x.ty.clone(), args: lowered }));
+            return Ok(self.emit(s, source, x.ty(), C::Expr::Host_source { name: "$core/operator".into(), ty: x.ty().clone(), args: lowered }));
         }
         if let Some(value) = &prototype {
             if data_source(value) {
@@ -1957,15 +2041,20 @@ impl Lowerer {
             }
         }
         if o.ctx != context::value() || o.shape != op::Shape::Scalar || !shipped(&o) { return Err(refusal(name)); }
+        // Diagnostic stores UTF-8 strings: folding byte Text would replace it with a quoted repr.
+        // Keep the original operands so backends with byte-preserving Text can raise them directly.
+        if name == "error" && largs.iter().any(|(_, v)| matches!(v, Known(Value::Text(bytes)) if std::str::from_utf8(bytes).is_err())) {
+            return self.operation(s, source, x.ty(), name, &largs);
+        }
         match known_values(&largs) {
             Some(values) if !o.live => match (o.body)(&input::at_time(0.), &|_, _| Err(refusal_diag(name)), &values) {
                 Ok(v) => Ok(Known(v)),
                 Err(d) => {
                     if d.code == "$unsupported" { return Err(Stop::from(d)); }
-                    self.primitive(s, source, &x.ty, failure(&d), vec![])
+                    self.primitive(s, source, x.ty(), failure(&d), vec![])
                 }
             },
-            _ => self.operation(s, source, &x.ty, name, &largs),
+            _ => self.operation(s, source, x.ty(), name, &largs),
         }
     }
 
@@ -1973,12 +2062,13 @@ impl Lowerer {
         self.primitive(s, source, ty, num(op), vec![("a", a.clone()), ("b", b.clone())])
     }
 
-    fn hof(&mut self, s: &mut Scope, source: &C::Source, env: &Env, ty: &Ty, kind: HofKind, f: &Callable, rest: &[Term]) -> R<Lowered> {
+    fn hof(&mut self, s: &mut Scope, source: &C::Source, env: &Env, owner: &Term, kind: HofKind, f: &Callable, rest: &[TermId]) -> R<Lowered> {
+        let ty = owner.ty();
         match (kind, rest) {
             (HofKind::Reduce, [init, items]) => {
-                let init = self.term(false, s, source, env, init)?;
+                let init = self.term(false, s, source, env, &owner.child(*init))?;
                 let accumulator = self.hold(s, source, Some(ty), &init)?;
-                let items = self.term(false, s, source, env, items)?;
+                let items = self.term(false, s, source, env, &owner.child(*items))?;
                 self.iterate(s, source, &items, &mut |l, sc, _, item| {
                     let value = l.call(false, sc, source, ty, None, f, &[accumulator.clone(), item.clone()])?;
                     let value = l.widen_like(sc, source, &accumulator, &value)?;
@@ -1988,12 +2078,12 @@ impl Lowerer {
             }
             (HofKind::Iterate, [init, count, until @ ..]) => {
                 // Lower the body once; [:until] stops the counted scope after committing its next value.
-                let init = self.term(false, s, source, env, init)?;
+                let init = self.term(false, s, source, env, &owner.child(*init))?;
                 let accumulator = self.hold(s, source, Some(ty), &init)?;
-                let count = self.term(false, s, source, env, count)?;
+                let count = self.term(false, s, source, env, &owner.child(*count))?;
                 let mut stop = Vec::new();
                 for g in until {
-                    let g = self.term(false, s, source, env, g)?;
+                    let g = self.term(false, s, source, env, &owner.child(*g))?;
                     stop.push(self.as_callable(source, &g)?);
                 }
                 let finished = if stop.is_empty() { None } else { Some(self.hold(s, source, None, &boolean(false))?) };
@@ -2013,7 +2103,7 @@ impl Lowerer {
                 Ok(accumulator)
             }
             (HofKind::SortBy, [items]) => {
-                let items = self.term(false, s, source, env, items)?;
+                let items = self.term(false, s, source, env, &owner.child(*items))?;
                 self.sort_by(s, source, ty, f, &items)
             }
             (HofKind::Map | HofKind::Filter, items) => {
@@ -2030,7 +2120,7 @@ impl Lowerer {
                 };
                 let mut lowered_items = Vec::new();
                 for item in items {
-                    let value = self.term(false, s, source, env, item)?;
+                    let value = self.term(false, s, source, env, &owner.child(*item))?;
                     let homogeneous = match &value {
                         Known(Value::List(xs)) => {
                             geometry_collection(&self.type_of(&value))
@@ -2185,31 +2275,34 @@ impl Lowerer {
 struct LoopCtx {
     zone_source: C::Source,
     source: C::Source,
-    init: Option<(Pattern, Lowered)>,
+    init: Option<(PatternId, Lowered)>,
     attempted: Lowered,
     kept: Lowered,
     total: Option<Lowered>,
     output: Option<Lowered>,
     array_loop: bool,
-    skip: Vec<Vec<usize>>,
+    skip: RangeId,
     body: Term,
     ty: Ty,
-    clauses: Vec<(Pattern, Option<Term>)>,
+    clauses: RangeId,
     first: Option<Lowered>,
 }
 
 impl Lowerer {
-    fn loop_(&mut self, s: &mut Scope, source: &C::Source, env: &Env, ty: &Ty, kind: LoopKind, accs: &[(Pattern, Term)],
-             clauses: &[(Pattern, Option<&Term>)], skip: &[Vec<usize>], body: &Term, zone: &Path, first: Option<Lowered>) -> R<Lowered> {
+    fn loop_(&mut self, s: &mut Scope, source: &C::Source, env: &Env, owner: &Term, node: &A::Loop, first: Option<Lowered>) -> R<Lowered> {
+        let arena = owner.arena();
+        let ty = owner.ty();
+        let kind = node.kind;
+        let clauses = arena.bindings(node.clauses);
         let mut zone_source = source.clone();
-        zone_source.site = zone.clone();
-        zone_source.owner = zone.clone();
+        zone_source.site = term_path(owner, node.zone);
+        zone_source.owner = zone_source.site.clone();
         let zone_source = &zone_source;
-        let init = match accs {
-            [(pattern, value)] => {
+        let init = match arena.bindings(node.accs) {
+            [binding] => {
                 let acc_ty = if kind == LoopKind::Scan { ty::elem(ty).unwrap_or(Ty::Any) } else { ty.clone() };
-                let v = self.term(false, s, zone_source, env, value)?;
-                Some((pattern.clone(), self.hold(s, zone_source, Some(&acc_ty), &v)?))
+                let v = self.term(false, s, zone_source, env, &owner.child(binding.term))?;
+                Some((binding.pattern, self.hold(s, zone_source, Some(&acc_ty), &v)?))
             }
             [] => None,
             _ => return Err(refusal("accumulator")),
@@ -2218,26 +2311,29 @@ impl Lowerer {
         let kept = self.hold(s, zone_source, None, &int(0))?;
         let total = if kind == LoopKind::Sum { Some(self.hold(s, zone_source, None, &int(0))?) } else { None };
         let collecting = kind == LoopKind::For || kind == LoopKind::Scan;
-        let array_loop = clauses.iter().any(|(_, value)| match value {
-            Some(v) => matches!(v.ty, Ty::Array(_)),
-            None => first.as_ref().map(|f| matches!(self.type_of(f), Ty::Array(_))).unwrap_or(false),
+        let array_loop = clauses.iter().enumerate().any(|(index, binding)| {
+            if index == 0 && first.is_some() {
+                matches!(self.type_of(first.as_ref().unwrap()), Ty::Array(_))
+            } else {
+                matches!(arena.ty(arena.row(binding.term).ty), Ty::Array(_))
+            }
         });
         let text_sources: Option<(Vec<Lowered>, Lowered)> = if collecting && *ty == Ty::Array(Box::new(Ty::Text)) {
             // ponytail: preallocate invariant clause products; dependent collections need
             // a growing structured builder rather than re-evaluating sources to count.
             let mut count = int(1);
             let mut sources = Vec::new();
-            for (index, (_, value)) in clauses.iter().enumerate() {
-                let source_ty = match value { Some(v) => v.ty.clone(), None => self.type_of(first.as_ref().ok_or_else(|| refusal("loop"))?) };
+            for (index, binding) in clauses.iter().enumerate() {
+                let value = owner.child(binding.term);
+                let source_ty = if index == 0 && first.is_some() { self.type_of(first.as_ref().unwrap()) } else { value.ty().clone() };
                 let items = if index == 0 {
-                    match value {
-                        Some(v) => self.term(false, s, zone_source, env, v)?,
-                        None => first.clone().ok_or_else(|| refusal("loop"))?,
+                    match &first {
+                        Some(value) => value.clone(),
+                        None => self.term(false, s, zone_source, env, &value)?,
                     }
                 } else {
-                    match value {
-                        Some(v) if self.invariant(v)? && E::Residual::free_names(v).iter().all(|n| env.contains_key(n)) => {}
-                        _ => return Err(refusal("text_collect_dependent_clause")),
+                    if !self.invariant(&value)? || !E::Residual::free_names(&value).iter().all(|n| env.contains_key(n)) {
+                        return Err(refusal("text_collect_dependent_clause"));
                     }
                     let empty = match &source_ty {
                         Ty::Array(elem) => Known(V::array_init(elem, 0, &|_| unreachable!())?),
@@ -2245,9 +2341,8 @@ impl Lowerer {
                         _ => return Err(refusal("text_collect_source")),
                     };
                     let nonempty = self.primitive(s, zone_source, &Ty::Bool, C::Primitive::Integer_compare(PO::Comparison::Igt), vec![("a", count.clone()), ("b", int(0))])?;
-                    let value = value.unwrap();
                     self.branch(s, zone_source, &source_ty, &nonempty,
-                        &mut |l, sc| l.term(false, sc, zone_source, env, value),
+                        &mut |l, sc| l.term(false, sc, zone_source, env, &value),
                         &mut |_, _| Ok(empty.clone()))?
                 };
                 let size = self.sequence_count(s, zone_source, &items)?;
@@ -2282,11 +2377,11 @@ impl Lowerer {
         };
         let ctx = LoopCtx {
             zone_source: zone_source.clone(), source: source.clone(), init: init.clone(), attempted, kept: kept.clone(), total: total.clone(),
-            output: output.clone(), array_loop, skip: skip.to_vec(), body: body.clone(), ty: ty.clone(),
-            clauses: clauses.iter().map(|(p, t)| (p.clone(), t.cloned())).collect(), first,
+            output: output.clone(), array_loop, skip: node.skip, body: owner.child(node.body), ty: ty.clone(),
+            clauses: node.clauses, first,
         };
-        let sources = text_sources.as_ref().map(|(xs, _)| xs.clone()).unwrap_or_default();
-        self.clauses_lower(s, env, &sources, 0, &ctx)?;
+        let sources = text_sources.as_ref().map_or(&[][..], |(xs, _)| xs.as_slice());
+        self.clauses_lower(s, env, sources, 0, &ctx)?;
         match (output, total, init) {
             (Some(output), _, _) => {
                 if *ty == Ty::Array(Box::new(Ty::Text)) {
@@ -2304,40 +2399,45 @@ impl Lowerer {
 
     /// A clause source that depends on nothing the loop computes (a literal-ish expression of shipped operators).
     fn invariant(&mut self, value: &Term) -> R<bool> {
-        match &value.node {
-            Node::Lit(_) | Node::Text(_) | Node::Nil | Node::Time | Node::RefBinding(..) => Ok(true),
-            Node::Op { op, args, .. } => {
+        let arena = value.arena();
+        match value.node {
+            Node::Lit(_) | Node::Text(_) | Node::Nil | Node::Time | Node::RefBinding(_) => Ok(true),
+            Node::Op(id) => {
+                let node = arena.op(id);
+                let op = value.name(node.op);
                 if op == "value/rand" { return Ok(false); }
                 match self.find_op(op)? {
                     Some(o) if shipped(&o) => {}
                     _ => return Ok(false),
                 }
-                for (_, x) in args { if !self.invariant(x)? { return Ok(false); } }
+                for field in arena.fields(node.args) { if !self.invariant(&value.child(field.term))? { return Ok(false); } }
                 Ok(true)
             }
-            Node::Vec(xs) | Node::ListLit(xs) | Node::Str(xs) => { for x in xs { if !self.invariant(x)? { return Ok(false); } } Ok(true) }
-            Node::Record(xs) => { for (_, x) in xs { if !self.invariant(x)? { return Ok(false); } } Ok(true) }
-            Node::Get(x, _) | Node::Expanded { body: x, .. } => self.invariant(x),
-            Node::If(a, b, c) => { for x in [a, b, c] { if !self.invariant(x)? { return Ok(false); } } Ok(true) }
+            Node::Vec(_) | Node::ListLit(_) | Node::Str(_) | Node::Record(_) | Node::Get(_) | Node::Expanded(_) | Node::If(_) => {
+                for child in value.children() { if !self.invariant(&value.child(*child))? { return Ok(false); } }
+                Ok(true)
+            }
             _ => Ok(false),
         }
     }
 
     fn clauses_lower(&mut self, s: &mut Scope, env: &Env, sources: &[Lowered], index: usize, ctx: &LoopCtx) -> R<()> {
-        if index == ctx.clauses.len() {
+        let clauses = ctx.body.arena().bindings(ctx.clauses);
+        if index == clauses.len() {
             return self.loop_body(s, env, ctx);
         }
-        let (pattern, value) = &ctx.clauses[index];
+        let binding = &clauses[index];
         let items = match sources.first() {
             Some(items) => items.clone(),
-            None => match value {
-                Some(v) => self.term(false, s, &ctx.zone_source, env, v)?,
-                None => ctx.first.clone().ok_or_else(|| refusal("loop"))?,
+            None => if index == 0 && ctx.first.is_some() {
+                ctx.first.clone().unwrap()
+            } else {
+                self.term(false, s, &ctx.zone_source, env, &ctx.body.child(binding.term))?
             },
         };
         let rest: &[Lowered] = if sources.is_empty() { sources } else { &sources[1..] };
         self.iterate(s, &ctx.zone_source, &items, &mut |l, sc, _, item| {
-            let env = l.bind(sc, &ctx.source, env.clone(), pattern, item.clone())?;
+            let env = l.bind(sc, &ctx.source, env.clone(), &ctx.body, binding.pattern, item.clone())?;
             l.clauses_lower(sc, &env, rest, index + 1, ctx)
         })
     }
@@ -2356,7 +2456,8 @@ impl Lowerer {
                 &mut |_, _| Ok(int(0)))?;
         }
         let mut skipped = boolean(false);
-        for tuple in &ctx.skip {
+        for tuple in ctx.body.arena().skip(ctx.skip) {
+            let tuple = ctx.body.arena().indices(*tuple);
             if tuple.len() != iteration.iter.len() { continue; }
             let mut matches = boolean(true);
             for (index, expected) in iteration.iter.iter().zip(tuple.iter()) {
@@ -2371,7 +2472,7 @@ impl Lowerer {
             &mut |l, sc| {
                 let env = match &ctx.init {
                     None => env.clone(),
-                    Some((pattern, accumulator)) => l.bind(sc, iteration, env.clone(), pattern, accumulator.clone())?,
+                    Some((pattern, accumulator)) => l.bind(sc, iteration, env.clone(), &ctx.body, *pattern, accumulator.clone())?,
                 };
                 let value = l.term(false, sc, iteration, &env, &ctx.body)?;
                 let value = match &ctx.init {
@@ -2896,7 +2997,7 @@ fn lower_value(l: Lowerer) -> Result<C::Program, String> {
         let root = l.root()?;
         let view = l.view(root)?;
         let mut source = l.source_of_view(&view);
-        source.span = Some(view.term.form.span.clone());
+        source.span = Some(view.term.form().span.clone());
         let result = match l.initial.clone() {
             None => l.residual(&mut s, root)?,
             Some(v) => Known(v),
@@ -2912,12 +3013,10 @@ fn lower_value(l: Lowerer) -> Result<C::Program, String> {
 static COUNT_SCOPES: AtomicI64 = AtomicI64::new(0);
 
 fn argument_index(residual: ResidualId, term: &Term) -> Option<i64> {
-    match &term.node {
-        Node::RefBinding(name, fields) if fields.is_empty() => {
-            let view = E::Residual::residual_view(residual).ok()?;
-            view.bindings.iter().find(|(n, _)| n == name).and_then(|(_, v)| argument_value(v))
-        }
-        Node::Expanded { body, .. } => argument_index(residual, body),
+    match term.node {
+        Node::RefBinding(id) if term.arena().name_ids(term.arena().ref_binding(id).fields).is_empty() =>
+            E::Residual::residual_binding(residual, term.name(term.arena().ref_binding(id).name)).as_ref().and_then(argument_value),
+        Node::Expanded(id) => argument_index(residual, &term.child(term.arena().expanded(id).body)),
         _ => None,
     }
 }
@@ -2927,7 +3026,7 @@ fn argument_value(v: &Value) -> Option<i64> {
             [(k, Value::Int(index))] if k == "index" => Some(*index),
             _ => None,
         },
-        Value::Residual(r) => argument_index(*r, &E::Residual::residual_view(*r).ok()?.term),
+        Value::Residual(r) => argument_index(*r, E::Residual::residual_term(*r)?.as_ref()),
         _ => None,
     }
 }
@@ -3010,6 +3109,26 @@ mod tests {
     use flow_syntax::syntax;
 
     fn empty() -> Catalog { Catalog { version: 1, kinds: vec![] } }
+
+    #[test]
+    fn packed_state_step_identity_survives_fresh_handles() {
+        let mut builder = TermBuilder::new();
+        let source = syntax::parse("1").unwrap().remove(0);
+        let form = builder.import_form(&source);
+        let one = builder.push(None, &Ty::Int, form, Draft::Lit(param::Value::Int(1)));
+        let step = builder.push(None, &Ty::Int, form, Draft::Op {
+            op: "+".into(), args: vec![("a".into(), one), ("b".into(), one)], skip: vec![],
+        });
+        let state = builder.push(None, &Ty::Int, form, Draft::State {
+            binder: W::Pattern::Name("value".into()), init: one, step, zone: vec![],
+        });
+        let arena = builder.freeze();
+        let nodes = state_step_nodes(&arena.handle(state));
+        assert_eq!(nodes.len(), 2);
+        assert!(nodes.contains(&arena.handle(step).identity()));
+        assert!(nodes.contains(&arena.handle(one).identity()));
+        assert!(!nodes.contains(&arena.handle(state).identity()));
+    }
 
     /// `(workspace w (graph g :context value BODY))`, checked.
     pub fn checked(body: &str) -> W::Workspace {
@@ -3115,7 +3234,7 @@ mod tests {
         let handlers = E::ResidualHandlers {
             observe: Some(Arc::new(move |r| {
                 let view = E::Residual::residual_view(r).unwrap();
-                if matches!(view.term.node, Node::Loop { kind: LoopKind::Fold, .. }) {
+                if matches!(view.term.node, Node::Loop(id) if view.term.arena().loop_node(id).kind == LoopKind::Fold) {
                     flag.store(true, Ordering::SeqCst);
                     let program = lowered(r);
                     for time in [0., 0.37, 2.] {

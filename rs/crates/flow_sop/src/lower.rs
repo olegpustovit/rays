@@ -1,8 +1,8 @@
 //! Port of lib/flow_sop/lower.ml: lowering of a checked workspace to SOP networks.
 //!
-//! The OCaml `Lowerer` functor becomes the `Lowerer` struct (one per `lower_checked` call): its
-//! module-level `let`s are fields, its mutable tables are `Mutex`es, and the closures it hands to
-//! nodes capture an `Arc<Lowerer>`. OCaml exceptions (`Diagnostic.Error`) are `Result`s.
+//! The OCaml lowering context is shared by cook closures; its prepared-factory cache stays outside
+//! that context so returned nodes own their cook dependencies without owning themselves.
+//! OCaml exceptions (`Diagnostic.Error`) are `Result`s.
 use crate::{
     attribute_kernel as ak, attribute_metadata as am, catalog, context_kernel as ck, curve,
     encoded_parameters as ep, function_kernel as fk, group_kernel as gk, lisp_node as ln, network,
@@ -10,11 +10,12 @@ use crate::{
 };
 use flow_check::catalog::Slot;
 use flow_check::workspace::{self as W, Graph as WGraph, NodeDefinition, Term, Workspace};
+use flow_check::term_arena::{Draft, TermBuilder, TermId};
 use flow_eval::{self as E, Instance, Node as ENode, Plan, State, Value};
 use input::Frame;
 use flow_ir::flow_ir::{Cost, Executor, Gpu, Placement, PlacementReason, Profile, Sink};
 use flow_syntax::context as fctx;
-use flow_syntax::syntax::{self, Node as SNode, Syntax};
+use flow_syntax::syntax::{self, Syntax};
 use flow_syntax::ty::{self, FnSignature, Ty};
 use flow_syntax::value::{FnId, ResidualId};
 use rays_diagnostic::Diagnostic;
@@ -109,7 +110,7 @@ pub struct T {
     pub profile: Arc<Profile::T>,
     pub preview: PreviewFn,
     pub card_node: CardNodeFn,
-    /// The lowering behind `preview` and `card_node`; weak, so a test can see it freed once every `T` clone is gone.
+    /// The lowering behind `preview` and `card_node`; cook nodes retain only its cycle-free services.
     pub lowering: Weak<Lowerer>,
 }
 
@@ -369,28 +370,42 @@ pub fn declaration_key(checked: &Workspace, d: &NodeDefinition) -> String {
 
 
 fn empty_form() -> Syntax {
-    syntax::make(SNode::List(Vec::new().into()))
+    let mut builder = flow_syntax::arena::SyntaxBuilder::new();
+    let range = builder.range(&[]);
+    let root = builder.push(0, flow_syntax::arena::Node::List(range), rays_diagnostic::Span { start: 0, finish: 0 }, None);
+    builder.freeze().handle(root)
 }
 
 /// An inlined Lisp call's parameters take the node path: the call's changes over the schema
 /// defaults, then the node's arguments. The body's context operators carry the card's cook label.
 fn inline_policy(checked: &Workspace, d: &NodeDefinition) -> E::InlineParameterPolicy {
+    let _phase = flow_syntax::phase_timer::measure("lower.inline_policy");
     let normalizers = Arc::new(ep::for_node(checked, d));
     let key = d.kind.qualified[4..].to_owned();
     let (body, context_inputs) = ck::label_context(&key, &d.body);
     // the policy keeps what its canonicalization reads, not copies of the checked workspace and the definition (each a deep copy per kind)
     let definition = NodeDefinition {
         kind: d.kind.clone(), slots: d.slots.clone(), keyword_inputs: d.keyword_inputs.clone(), fields: d.fields.clone(), label: d.label.clone(),
-        category: d.category.clone(), description: d.description.clone(), operation: d.operation.clone(), version: d.version, body: body.clone(),
+        category: d.category.clone(), description: d.description.clone(), operation: d.operation.clone(), version: d.version, body,
         validations: d.validations.clone(), normalizers: d.normalizers.clone(),
     };
     let defs = checked.defs.clone();
     let (fields, qualified) = (d.fields.clone(), d.kind.qualified.clone());
     let original_body = if context_inputs.is_empty() { None } else { Some(d.body.clone()) };
     let source_key = declaration_key(checked, d);
+    // Encoded defaults run checked Lisp while a schema is built; preserve those calls' ids/order.
+    let schema = normalizers.is_empty().then(|| ln::schema("parameters", &fields, &normalizers));
+    let parameters = port::parameters(false, &fields);
     let canonicalize: E::InlineParameterCanonicalizer = Arc::new(move |vals: &[(String, Value)]| {
-        let schema = ln::schema("parameters", &fields, &normalizers);
-        let parameters = port::parameters(false, &fields)?;
+        let normalized_schema;
+        let schema = match &schema {
+            Some(schema) => schema,
+            None => {
+                normalized_schema = ln::schema("parameters", &fields, &normalizers);
+                &normalized_schema
+            }
+        };
+        let parameters = parameters.as_ref().map_err(Clone::clone)?;
         let vals = material_args(&qualified, vals.to_vec());
         let (live, vals): (Vec<_>, Vec<_>) = vals.into_iter().partition(|(_, v)| E::is_live(v));
         // a live vec3 group is its three components, each a program input of its field
@@ -408,12 +423,10 @@ fn inline_policy(checked: &Workspace, d: &NodeDefinition) -> E::InlineParameterP
                     Value::List(xs) if xs.len() == 3 => Some(xs[axis as usize].clone()),
                     Value::Residual(r) => {
                         let view = E::Residual::residual_view(*r).ok()?;
-                        let term = Term {
-                            path: None,
-                            ty: Ty::Float,
-                            node: W::Node::RefBinding("$vec3".into(), vec![["x", "y", "z"][axis as usize].to_owned()]),
-                            form: view.term.form.clone(),
-                        };
+                        let mut builder = TermBuilder::new();
+                        let form = builder.import_form(&view.term.form());
+                        let term = builder.push(None, &Ty::Float, form, Draft::RefBinding("$vec3".into(), vec![["x", "y", "z"][axis as usize].to_owned()]));
+                        let term = builder.freeze().handle(term);
                         E::Residual::with_bindings(*r, &term, &[("$vec3".to_owned(), value.clone())]).ok().map(Value::Residual)
                     }
                     _ => None,
@@ -441,24 +454,18 @@ fn inline_policy(checked: &Workspace, d: &NodeDefinition) -> E::InlineParameterP
                 (Some(param::KindView::Integer(range)), Value::Residual(r))
                     if (range.hard_min.is_some() || range.hard_max.is_some()) && !normalizers.iter().any(|(n, _)| *n == name) =>
                 {
-                    let form = E::Residual::residual_view(*r)?.term.form.clone();
-                    let term = |ty: Ty, node: W::Node| Term { path: None, ty, node, form: form.clone() };
-                    let lit = |n: i64| term(Ty::Int, W::Node::Lit(param::Value::Int(n)));
-                    let bound = |op: &str, limit: Option<i64>, inner: Term| -> Term {
-                        match limit {
-                            None => inner,
-                            Some(n) => {
-                                let test = term(
-                                    Ty::Bool,
-                                    W::Node::Op { op: op.to_owned(), args: vec![("a".into(), inner.clone()), ("b".into(), lit(n))], skip: Vec::new() },
-                                );
-                                term(Ty::Int, W::Node::If(Box::new(test), Box::new(lit(n)), Box::new(inner)))
-                            }
+                    let mut builder = TermBuilder::new();
+                    let form = builder.import_form(&E::Residual::residual_view(*r)?.term.form());
+                    let mut bounded = builder.push(None, &Ty::Int, form, Draft::RefBinding("$int".into(), Vec::new()));
+                    for (op, limit) in [("int/lt", range.hard_min), ("int/gt", range.hard_max)] {
+                        if let Some(n) = limit {
+                            let literal = builder.push(None, &Ty::Int, form, Draft::Lit(param::Value::Int(n)));
+                            let test = builder.push(None, &Ty::Bool, form, Draft::Op { op: op.to_owned(), args: vec![("a".into(), bounded), ("b".into(), literal)], skip: Vec::new() });
+                            bounded = builder.push(None, &Ty::Int, form, Draft::If(test, literal, bounded));
                         }
-                    };
-                    let v = term(Ty::Int, W::Node::RefBinding("$int".into(), Vec::new()));
+                    }
                     clamped.push(name.clone());
-                    let bounded = bound("int/gt", range.hard_max, bound("int/lt", range.hard_min, v));
+                    let bounded = builder.freeze().handle(bounded);
                     let r2 = E::Residual::with_bindings(*r, &bounded, &[("$int".to_owned(), value.clone())])?;
                     next_live.push((name, Value::Residual(r2)));
                 }
@@ -599,10 +606,15 @@ fn cook_wrapped(n: &node::T, node_id: i64, context: &sctx::T, payloads: &[payloa
 
 type Build = dyn Fn(&dyn Fn(&Value) -> Value) -> node::T + Send + Sync;
 
+fn own_roots(roots: E::Roots, node: node::T) -> node::T {
+    if roots.is_empty() { node } else { build::with_owner(Arc::new(roots), node) }
+}
+
 fn per_context(value: &Value, build_with: Arc<Build>) -> node::T {
+    let roots = E::roots(std::iter::once(value));
     let reads = ak::context_reads(value);
     if reads == deps_mod::STATIC {
-        return build_with(&|v: &Value| v.clone());
+        return own_roots(roots, build_with(&|v: &Value| v.clone()));
     }
     let make = {
         let build_with = build_with.clone();
@@ -645,7 +657,7 @@ fn per_context(value: &Value, build_with: Arc<Build>) -> node::T {
             cook_wrapped(&n, node_id, context, payloads)
         }),
     );
-    build::with_facts(facts, &build::with_input_use(node::input_use(&base), &wrapped))
+    own_roots(roots, build::with_facts(facts, &build::with_input_use(node::input_use(&base), &wrapped)))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1035,6 +1047,7 @@ pub fn geometry_arrays_node(env: &KernelEnv, opts: &NodeOpts, operation: &str, a
 }
 
 fn geometry_arrays_node_in(env: &KernelEnv, opts: &NodeOpts, operation: &str, args: &[(String, Value)], sources: &[i64], inputs: &[node::T]) -> R<node::T> {
+    let _phase = flow_syntax::phase_timer::measure("lower.geometry_programs");
     let check = opts.check.unwrap_or(true);
     let data = geometry_arrays_data(args);
     let prepare = {
@@ -1362,6 +1375,7 @@ fn guarded(guards: Vec<Value>, n: node::T) -> node::T {
         return n;
     }
     let dependencies = guards.iter().fold(node::dependencies(&n), |found, guard| dep_union(found, ak::input_reads(guard)));
+    let roots = E::roots(&guards);
     let inner = n.clone();
     let wrapped = build::make(
         build::Args {
@@ -1376,6 +1390,7 @@ fn guarded(guards: Vec<Value>, n: node::T) -> node::T {
         },
         None,
         Arc::new(move |node_id, context, payloads| {
+            let _roots = &roots;
             check_guards(&guards, context)?;
             cook_wrapped(&inner, node_id, context, payloads)
         }),
@@ -1622,9 +1637,6 @@ fn function_elements(value: &Value) -> Vec<FnId> {
     }
 }
 
-fn blank_term(ty: Ty, node: W::Node) -> Term {
-    Term { path: None, ty, node, form: std::sync::Arc::new(empty_form()) }
-}
 
 pub struct CallEnv {
     pub gpu: Gpu::Config,
@@ -1633,7 +1645,7 @@ pub struct CallEnv {
     pub checked: Arc<Workspace>,
     pub provenance: Option<i64>,
     pub factories: Vec<Factory>,
-    pub def_context_use: Arc<dyn Fn() -> Vec<(WGraph, bool)> + Send + Sync>,
+    pub def_context_use: Arc<dyn Fn() -> Arc<Vec<bool>> + Send + Sync>,
 }
 
 /// Builds the body of one Lisp-node call: validation, then one lowering of the body over the
@@ -1688,35 +1700,35 @@ pub fn build_call(
     };
     let capture_factories = make_capture_factories(&[]);
     let mut body = ck::specialize(env.provenance, context, label, &definition.body)?;
-    let call_node = |kind: String, ctx| W::Node::Call { kind, ctx, args: Vec::new() };
+    let mut builder = TermBuilder::new();
+    let blank = builder.import_form(&empty_form());
+    let body_id = builder.import(&body.body);
+    let graph_form = builder.import_form(&body.form);
+    let call_node = |kind: String, ctx| Draft::Call { kind, ctx, args: Vec::new() };
     // inputs bound to captured cooked inputs
-    body.inputs = body
-        .inputs
-        .iter()
-        .map(|(name, ty, default)| {
-            let default = match bindings.iter().find(|(n, _)| n == name) {
-                None => default.clone(),
-                Some((_, indices)) => {
-                    let element_ty = match ty {
-                        Ty::List(element) => (**element).clone(),
-                        _ => ty.clone(),
-                    };
-                    let capture = |index: usize| -> Term {
-                        let (key, _) = &capture_factories[index];
-                        blank_term(element_ty.clone(), call_node(format!("sop/{key}"), if element_ty == ty::image() { fctx::image() } else { fctx::sop() }))
-                    };
-                    let node = match (ty, indices.as_slice()) {
-                        (Ty::List(_), _) => W::Node::ListLit(indices.iter().map(|i| capture(*i)).collect()),
-                        (_, [index]) => capture(*index).node,
-                        (_, []) => W::Node::Nil,
-                        _ => return Err("A fixed Lisp slot has several inputs".to_owned()),
-                    };
-                    Some(blank_term(ty.clone(), node))
-                }
-            };
-            Ok((name.clone(), ty.clone(), default))
-        })
-        .collect::<Result<Vec<_>, String>>()?;
+    let mut input_ids = Vec::with_capacity(body.inputs.len());
+    for (name, ty, default) in &body.inputs {
+        let default = match bindings.iter().find(|(n, _)| n == name) {
+            None => default.as_ref().map(|term| builder.import(term)),
+            Some((_, indices)) => {
+                let element_ty = match ty { Ty::List(element) => (**element).clone(), _ => ty.clone() };
+                let capture = |builder: &mut TermBuilder, index: usize| {
+                    let (key, _) = &capture_factories[index];
+                    builder.push(None, &element_ty, blank, call_node(format!("sop/{key}"), if element_ty == ty::image() { fctx::image() } else { fctx::sop() }))
+                };
+                Some(match (ty, indices.as_slice()) {
+                    (Ty::List(_), _) => {
+                        let terms = indices.iter().map(|&i| capture(&mut builder, i)).collect();
+                        builder.push(None, ty, blank, Draft::ListLit(terms))
+                    }
+                    (_, [index]) => capture(&mut builder, *index),
+                    (_, []) => builder.push(None, ty, blank, Draft::Nil),
+                    _ => return Err("A fixed Lisp slot has several inputs".to_owned()),
+                })
+            }
+        };
+        input_ids.push((name.clone(), ty.clone(), default));
+    }
     // callable slots forwarded as kernels
     let mut forwarded: Vec<(String, FnId, usize)> = Vec::new();
     for (name, value) in functions {
@@ -1759,30 +1771,32 @@ pub fn build_call(
             geometry_captures.push((key, source, index, factory));
         }
     }
-    let geo_input = |name: String, key: String| (name, ty::geometry(), Some(blank_term(ty::geometry(), call_node(key, fctx::sop()))));
-    let mut new_inputs: Vec<(String, Ty, Option<Term>)> = forwarded.iter().map(|(name, _, index)| geo_input(name.clone(), format!("sop/{}", capture_factories[*index].0))).collect();
-    new_inputs.extend(geometry_captures.iter().map(|(name, ..)| geo_input(name.clone(), format!("sop/{name}"))));
-    new_inputs.extend(body.inputs.iter().cloned());
-    body.inputs = new_inputs;
+    let mut new_inputs = Vec::new();
+    for (name, key) in forwarded.iter().map(|(name, _, index)| (name.clone(), format!("sop/{}", capture_factories[*index].0)))
+        .chain(geometry_captures.iter().map(|(name, ..)| (name.clone(), format!("sop/{name}")))) {
+        let term = builder.push(None, &ty::geometry(), blank, call_node(key, fctx::sop()));
+        new_inputs.push((name, ty::geometry(), Some(term)));
+    }
+    new_inputs.extend(input_ids);
+    let arena = builder.freeze();
+    body.body = arena.handle(body_id);
+    body.form = arena.syntax().handle(graph_form);
+    body.inputs = new_inputs.into_iter().map(|(name, ty, default)| (name, ty, default.map(|id| arena.handle(id)))).collect();
     let validations: Vec<WGraph> = definition
         .validations
         .iter()
         .enumerate()
-        .map(|(index, (predicate, _, _))| WGraph { name: format!("lisp_validate_{index}"), context: fctx::value(), body: predicate.clone(), ..body.clone() })
+        .map(|(index, (predicate, _, _))| WGraph { name: format!("lisp_validate_{index}"), context: fctx::value(), body: predicate.clone(), inputs: body.inputs.clone(), form: body.form.clone() })
         .collect();
-    let normalizers: Vec<WGraph> = definition.normalizers.iter().map(|(_, term)| WGraph { body: term.clone(), ..body.clone() }).collect();
-    let mut roots: Vec<WGraph> = vec![body.clone()];
-    roots.extend(validations.iter().cloned());
-    roots.extend(normalizers);
-    let reached = ck::reachable_defs(checked, &roots);
-    let reached_has = |def: &WGraph| reached.iter().any(|r| r.name == def.name && r.body == def.body);
+    let normalizers: Vec<WGraph> = definition.normalizers.iter().map(|(_, term)| WGraph { name: body.name.clone(), context: body.context, body: term.clone(), inputs: body.inputs.clone(), form: body.form.clone() }).collect();
+    let reached = ck::reachable_defs(checked, std::iter::once(&body).chain(validations.iter()).chain(normalizers.iter()));
+    let reached_has = |def: &WGraph| reached.iter().any(|r| std::ptr::eq(*r, def));
     let mut graphs = vec![body.clone()];
     graphs.extend(validations.iter().cloned());
     let library = Workspace {
         graphs: graphs.into(),
-        defs: (env.def_context_use)()
-            .into_iter()
-            .filter_map(|(def, uses)| if !reached_has(&def) { None } else { Some(if uses { ck::specialize(None, context, label, &def).unwrap_or_else(|_| def.clone()) } else { def }) })
+        defs: checked.defs.iter().zip((env.def_context_use)().iter())
+            .filter_map(|(def, uses)| if !reached_has(def) { None } else { Some(if *uses { ck::specialize(None, context, label, def).unwrap_or_else(|_| def.clone()) } else { def.clone() }) })
             .collect::<Vec<_>>().into(),
         nodes: checked.nodes.iter().filter(|d| d.kind.qualified != definition.kind.qualified).cloned().collect::<Vec<_>>().into(),
         ..checked.clone()
@@ -1854,25 +1868,33 @@ pub fn build_call(
         let capture_factories = make_capture_factories(&aliases);
         // one program of one call: the graph's inputs feed a call of the kind, which inlines in the
         // calling program, its context read through the cook context as a card's is
-        let call_args: Vec<(String, Term)> = definition
-            .body
-            .inputs
-            .iter()
-            .filter_map(|(name, ty, _)| {
-                let read = |name: &str| blank_term(Ty::Float, W::Node::RefBinding(name.to_owned(), Vec::new()));
-                match definition.fields.iter().find_map(|f| if f.name == *name { f.vec3.clone() } else { None }) {
-                    None => Some((name.clone(), blank_term(ty.clone(), W::Node::RefBinding(name.clone(), Vec::new())))),
-                    Some((group, 0)) => {
-                        let component = |i: i64| definition.fields.iter().find_map(|f| if f.vec3 == Some((group.clone(), i)) { Some(read(&f.name)) } else { None }).expect("vec3 component");
-                        Some((group.clone(), blank_term(Ty::Vec3, W::Node::Vec(vec![component(0), component(1), component(2)]))))
-                    }
-                    Some(_) => None,
+        let mut builder = TermBuilder::new();
+        let blank = builder.import_form(&empty_form());
+        let graph_form = builder.import_form(&body.form);
+        let mut call_args = Vec::new();
+        for (name, ty, _) in &definition.body.inputs {
+            let value = match definition.fields.iter().find_map(|f| if f.name == *name { f.vec3.clone() } else { None }) {
+                None => Some((name.clone(), builder.push(None, ty, blank, Draft::RefBinding(name.clone(), Vec::new())))),
+                Some((group, 0)) => {
+                    let components = (0..3).map(|i| {
+                        let field = definition.fields.iter().find(|f| f.vec3 == Some((group.clone(), i))).expect("vec3 component");
+                        builder.push(None, &Ty::Float, blank, Draft::RefBinding(field.name.clone(), Vec::new()))
+                    }).collect();
+                    Some((group, builder.push(None, &Ty::Vec3, blank, Draft::Vec(components))))
                 }
-            })
-            .collect();
+                Some(_) => None,
+            };
+            if let Some(value) = value { call_args.push(value); }
+        }
+        let call_id = builder.push(None, &ty::geometry(), blank, Draft::Call { kind: definition.kind.qualified.clone(), ctx: fctx::sop(), args: call_args });
+        let inputs: Vec<_> = body.inputs.iter().map(|(name, ty, default)| (name.clone(), ty.clone(), default.as_ref().map(|term| builder.import(term)))).collect();
+        let arena = builder.freeze();
         let call = WGraph {
-            body: blank_term(ty::geometry(), W::Node::Call { kind: definition.kind.qualified.clone(), ctx: fctx::sop(), args: call_args }),
-            ..body.clone()
+            body: arena.handle(call_id),
+            name: body.name.clone(),
+            context: body.context,
+            inputs: inputs.into_iter().map(|(name, ty, default)| (name, ty, default.map(|id| arena.handle(id)))).collect(),
+            form: arena.syntax().handle(graph_form),
         };
         let mut call_factories: Vec<Factory> = capture_factories.iter().map(|(_, f)| f.clone()).collect();
         call_factories.extend(geometry_captures.iter().map(|(_, _, _, f)| f.clone()));
@@ -1972,10 +1994,7 @@ pub fn build_call(
         };
         let gpu = env.gpu.clone();
         let network = graph.network.clone();
-        // the body's nodes read residuals and functions of the library lowering's evaluation: keep it as long as they live
-        let keep = Arc::new(lowered);
         let body_fn: Arc<dyn Fn(&sctx::T) -> R<node::T> + Send + Sync> = Arc::new(move |context: &sctx::T| {
-            let _keep = &keep;
             if !driven {
                 return Ok(compiled.clone());
             }
@@ -2285,10 +2304,8 @@ fn fused_entries(args: &[(String, Value)]) -> R<Vec<(String, String, Value)>> {
 /// generated attribute (a grid's P)
 fn indexed(value: &Value) -> bool {
     fn term(t: &Term) -> bool {
-        match &t.node {
-            W::Node::Op { op, .. } if op == "array/range" => true,
-            _ => W::children_ref(t).into_iter().any(term),
-        }
+        matches!(t.node, W::Node::Op(id) if t.name(t.arena().op(id).op) == "array/range")
+            || t.children().iter().any(|&id| term(&t.child(id)))
     }
     fn visit(v: &Value, seen: &mut BTreeSet<i64>) -> bool {
         match v {
@@ -2667,70 +2684,74 @@ fn fold_writes(device: bool, defer: bool, plan: &Plan) -> R<Plan> {
             }
             let extra: RefCell<Vec<(String, Value)>> = RefCell::new(Vec::new());
             let exit = std::cell::Cell::new(false);
-            fn binds(p: &W::Pattern, chained: &[String]) -> bool {
-                match p {
-                    W::Pattern::Name(n) => chained.contains(n),
-                    W::Pattern::Seq(ps) => ps.iter().any(|p| binds(p, chained)),
-                    W::Pattern::Keys(ns) => ns.iter().any(|n| chained.contains(n)),
+            fn binds(t: &Term, p: flow_check::term_arena::PatternId, chained: &[String]) -> bool {
+                use flow_check::term_arena::PatternNode;
+                match t.arena().pattern(p) {
+                    PatternNode::Name(n) => chained.iter().any(|s| s == t.name(n)),
+                    PatternNode::Seq(ps) => t.arena().pattern_ids(ps).iter().any(|&p| binds(t, p, chained)),
+                    PatternNode::Keys(ns) => t.arena().name_ids(ns).iter().any(|&n| chained.iter().any(|s| s == t.name(n))),
                 }
             }
             let literal = |t: &Term| -> Option<String> {
-                match &t.node {
-                    W::Node::Text(s) => Some(txt(s)),
+                match t.node {
+                    W::Node::Text(id) => Some(txt(t.arena().bytes(id))),
                     _ => None,
                 }
             };
-            fn map(t: &Term, chained: &[String], extra: &RefCell<Vec<(String, Value)>>, exit: &std::cell::Cell<bool>, written: &dyn Fn(&str) -> Option<(String, String, Value)>, literal: &dyn Fn(&Term) -> Option<String>, fresh: &dyn Fn() -> i64) -> Term {
-                let rec = |t: &Term| map(t, chained, extra, exit, written, literal, fresh);
-                let reads_chain = |args: &Vec<(String, Term)>| matches!(args.iter().find(|(k, _)| k == "geometry"), Some((_, Term { node: W::Node::RefBinding(x, v), .. })) if v.is_empty() && chained.contains(x));
-                match &t.node {
-                    W::Node::RefBinding(x, _) if chained.contains(x) => {
-                        exit.set(true);
-                        t.clone()
+            fn scan(t: &Term, chained: &[String], extra: &RefCell<Vec<(String, Value)>>, exit: &std::cell::Cell<bool>, written: &dyn Fn(&str) -> Option<(String, String, Value)>, literal: &dyn Fn(&Term) -> Option<String>, fresh: &dyn Fn() -> i64, replacements: &mut HashMap<(u64, u32), String>) {
+                let reads_chain = |args| t.arena().fields(args).iter().find(|field| t.name(field.name) == "geometry").is_some_and(|field| {
+                    let child = t.child(field.term);
+                    match child.node {
+                        W::Node::RefBinding(id) => {
+                            let binding = child.arena().ref_binding(id);
+                            child.arena().name_ids(binding.fields).is_empty() && chained.iter().any(|s| s == child.name(binding.name))
+                        }
+                        _ => false,
                     }
-                    W::Node::Op { op, args, .. } if op == "sop/count" && reads_chain(args) => t.clone(),
-                    W::Node::Op { op, args, .. } if op == "sop/attr" && reads_chain(args) => {
-                        let attribute = args.iter().find(|(k, _)| k == "attribute").and_then(|(_, a)| literal(a));
+                });
+                match t.node {
+                    W::Node::RefBinding(id) if chained.iter().any(|s| s == t.name(t.arena().ref_binding(id).name)) => { exit.set(true); return; }
+                    W::Node::Op(id) if t.name(t.arena().op(id).op) == "sop/count" && reads_chain(t.arena().op(id).args) => return,
+                    W::Node::Op(id) if t.name(t.arena().op(id).op) == "sop/attr" && reads_chain(t.arena().op(id).args) => {
+                        let args = t.arena().fields(t.arena().op(id).args);
+                        let attribute = args.iter().find(|field| t.name(field.name) == "attribute").and_then(|field| literal(&t.child(field.term)));
                         match attribute.as_deref().map(written) {
-                            Some(None) | None if attribute.is_some() => t.clone(),
-                            Some(Some((_, kind, earlier)))
-                                if args.iter().all(|(k, v)| match k.as_str() {
-                                    "geometry" | "attribute" => true,
-                                    "owner" => literal(v).as_deref() == Some("point"),
-                                    "type" => literal(v).as_deref() == Some(kind.as_str()),
-                                    _ => false,
-                                }) =>
-                            {
+                            Some(None) | None if attribute.is_some() => {}
+                            Some(Some((_, kind, earlier))) if args.iter().all(|field| match t.name(field.name) {
+                                "geometry" | "attribute" => true,
+                                "owner" => literal(&t.child(field.term)).as_deref() == Some("point"),
+                                "type" => literal(&t.child(field.term)).as_deref() == Some(kind.as_str()),
+                                _ => false,
+                            }) => {
                                 let name = format!("$fold{}", extra.borrow().len());
                                 extra.borrow_mut().push((name.clone(), E::Host::rewrite_with(&earlier, &|_| None, fresh, &|_, _| None)));
-                                Term { node: W::Node::RefBinding(name, Vec::new()), ..t.clone() }
+                                replacements.insert(t.identity(), name);
                             }
-                            _ => {
-                                exit.set(true);
-                                t.clone()
-                            }
+                            _ => exit.set(true),
                         }
+                        return;
                     }
-                    W::Node::Let(steps, _) if steps.iter().any(|(p, _)| binds(p, chained)) => {
-                        exit.set(true);
-                        t.clone()
-                    }
-                    W::Node::Loop { accs, clauses, .. } if accs.iter().chain(clauses.iter()).any(|(p, _)| binds(p, chained)) => {
-                        exit.set(true);
-                        t.clone()
-                    }
-                    W::Node::Fn { params, .. } if params.iter().any(|(p, _)| binds(p, chained)) => {
-                        exit.set(true);
-                        t.clone()
-                    }
-                    W::Node::State { binder, .. } if binds(binder, chained) => {
-                        exit.set(true);
-                        t.clone()
-                    }
-                    _ => W::map_children(&rec, t),
+                    W::Node::Let(id) if t.arena().bindings(t.arena().let_node(id).bindings).iter().any(|binding| binds(t, binding.pattern, chained)) => { exit.set(true); return; }
+                    W::Node::Loop(id) if {
+                        let node = t.arena().loop_node(id);
+                        t.arena().bindings(node.accs).iter().chain(t.arena().bindings(node.clauses)).any(|binding| binds(t, binding.pattern, chained))
+                    } => { exit.set(true); return; }
+                    W::Node::Fn(id) if t.arena().params(t.arena().function(id).params).iter().any(|param| binds(t, param.pattern, chained)) => { exit.set(true); return; }
+                    W::Node::State(id) if binds(t, t.arena().state(id).binder, chained) => { exit.set(true); return; }
+                    _ => {}
                 }
+                for &child in t.children() { scan(&t.child(child), chained, extra, exit, written, literal, fresh, replacements); }
             }
-            let mapped = map(term, &chained, &extra, &exit, &|a| written(a), &literal, &fresh);
+            let mut replacements = HashMap::new();
+            scan(term, &chained, &extra, &exit, &|a| written(a), &literal, &fresh, &mut replacements);
+            let mut builder = TermBuilder::new();
+            let mapped = builder.rewrite(term, &mut |_, source, draft| {
+                match replacements.get(&source.identity()) {
+                    Some(name) => Draft::RefBinding(name.clone(), Vec::new()),
+                    None => draft,
+                }
+            });
+            let mapped = builder.freeze().handle(mapped);
             if exit.get() {
                 fits.store(false, Ordering::SeqCst);
                 return None;
@@ -2871,7 +2892,7 @@ fn cached_digest(checked: &Workspace, extra: &[NodeDefinition], compute: &dyn Fn
     key.push(1);
     key.extend(checked.defs.iter().map(|g| g as *const WGraph as usize));
     key.push(2);
-    key.extend(checked.nodes.iter().map(|g| g as *const NodeDefinition as usize));
+    key.extend(checked.nodes.iter().map(|g| Arc::as_ptr(g) as usize));
     key.push(3);
     key.extend(checked.graphs.iter().map(|g| g as *const WGraph as usize));
     key.push(4);
@@ -2961,10 +2982,22 @@ struct Ids {
 type HostHandle = (Ty, Option<node::T>, Option<sop::session::Output>);
 
 pub struct Lowerer {
+    services: Arc<CookServices>,
+    prepared: Mutex<HashMap<i64, Prepared>>,
+}
+
+impl std::ops::Deref for Lowerer {
+    type Target = CookServices;
+    fn deref(&self) -> &CookServices { &self.services }
+}
+
+/// Cook state never owns prepared factories or nodes made from this state.
+pub struct CookServices {
     o: Options,
     factories: Vec<Factory>,
     checked: Arc<Workspace>,
     evaluated: Arc<E::Eval>,
+    _roots: E::Roots,
     profile: Arc<Profile::T>,
     plan: Plan,
     templ: Vec<bool>,
@@ -2978,7 +3011,6 @@ pub struct Lowerer {
     provenance: Mutex<BTreeMap<i64, Origin>>,
     tags: AtomicI64,
     zones: Mutex<Vec<Zone>>,
-    prepared: Mutex<HashMap<i64, Prepared>>,
     concat_tags: Mutex<HashMap<(W::Path, Vec<i64>), i64>>,
     lisp_factories: Vec<Factory>,
     call_env: Arc<CallEnvShared>,
@@ -2987,30 +3019,25 @@ pub struct Lowerer {
     volatile: Mutex<Vec<bool>>,
 }
 
-/// What `build_call` needs of the enclosing lowering, shared by every Lisp factory of it.
-/// A node's back-reference to its lowering: weak, because the lowering stores its nodes (a strong one is a cycle
-/// that leaks every lowering). The `T` that `finish` returns keeps the lowering alive through its `preview` and
-/// `card_node`; a node used after that `T` is gone is a bug and panics.
-#[derive(Clone)]
-struct Wk(Weak<Lowerer>);
-impl Wk {
-    fn new(l: &Arc<Lowerer>) -> Wk {
-        Wk(Arc::downgrade(l))
-    }
-    fn get(&self) -> Arc<Lowerer> {
-        self.0.upgrade().expect("a lowered node outlived its lowering")
-    }
+/// A zone owns only its upstream template factories, never the enclosing factory cache.
+struct ZoneCook {
+    services: Arc<CookServices>,
+    prepared: HashMap<i64, Prepared>,
+}
+
+impl std::ops::Deref for ZoneCook {
+    type Target = CookServices;
+    fn deref(&self) -> &CookServices { &self.services }
 }
 
 pub struct CallEnvShared {
     checked: Arc<Workspace>,
     factories: Vec<Factory>,
     o: Options,
-    def_context_use: Mutex<Option<Vec<(WGraph, bool)>>>,
+    def_context_use: OnceLock<Arc<Vec<bool>>>,
 }
 
-
-impl Lowerer {
+impl CookServices {
     fn deferred_cpu(&self, data: &Value) -> bool {
         self.o.defer && E::is_live(data) && static_cpu_data(data)
     }
@@ -3296,7 +3323,7 @@ impl Lowerer {
             Ok(cooked_sources(get(&n.args, "value").expect("card value")))
         } else {
             let direct = geo_of(&n.args);
-            fn captures(this: &Lowerer, v: &Value) -> Vec<i64> {
+            fn captures(this: &CookServices, v: &Value) -> Vec<i64> {
                 match v {
                     Value::Fn(f) => match this.external_kernel(*f) {
                         Some(source) => vec![source],
@@ -3322,7 +3349,7 @@ impl Lowerer {
         let (lo, hi, root) = (Self::int_arg(n, "lo")?, Self::int_arg(n, "hi")?, Self::int_arg(n, "body")?);
         let mut seen: BTreeSet<i64> = BTreeSet::new();
         let mut caps: Vec<i64> = Vec::new();
-        fn visit(this: &Lowerer, j: i64, lo: i64, hi: i64, seen: &mut BTreeSet<i64>, caps: &mut Vec<i64>) -> R<()> {
+        fn visit(this: &CookServices, j: i64, lo: i64, hi: i64, seen: &mut BTreeSet<i64>, caps: &mut Vec<i64>) -> R<()> {
             if j >= lo && j < hi {
                 if seen.insert(j) {
                     for d in this.deps(&this.plan.nodes[j as usize])? {
@@ -3376,8 +3403,8 @@ impl Lowerer {
         Ok(parameters)
     }
 
-    fn lisp_definition(&self, kind: &str) -> Option<NodeDefinition> {
-        self.checked.nodes.iter().find(|d| d.kind.qualified == kind).cloned()
+    fn lisp_definition(&self, kind: &str) -> Option<&NodeDefinition> {
+        self.checked.nodes.iter().find(|d| d.kind.qualified == kind).map(Arc::as_ref)
     }
 
     /// The editor's provenance: a merge tags its input i with base + i.
@@ -3574,7 +3601,7 @@ impl HostRun {
         Value::Deferred(ty, id)
     }
 
-    fn cooked_term(self: &Arc<Self>, factories: &mut Vec<Factory>, ty: &Ty, value: &Value) -> R<Option<Term>> {
+    fn cooked_term(self: &Arc<Self>, builder: &mut TermBuilder, form: flow_syntax::arena::SyntaxId, factories: &mut Vec<Factory>, ty: &Ty, value: &Value) -> R<Option<TermId>> {
         match value {
             Value::Deferred(actual, id) if ty::is_cooked(actual) => {
                 if actual != ty {
@@ -3600,9 +3627,14 @@ impl HostRun {
                 factories.push(factory);
                 let kind = format!("sop/{key}");
                 let ctx = if *actual == ty::image() { fctx::image() } else { fctx::sop() };
-                Ok(Some(blank_term(ty.clone(), W::Node::Call { kind, ctx, args: Vec::new() })))
+                Ok(Some(builder.push(None, ty, form, Draft::Call { kind, ctx, args: Vec::new() })))
             }
-            Value::No_geo if is_geometry_ty(ty) => Ok(Some(Term { path: None, ty: ty.clone(), form: std::sync::Arc::new(syntax::make(SNode::Sym("nil".into()))), node: W::Node::Nil })),
+            Value::No_geo if is_geometry_ty(ty) => {
+                let syntax = builder.syntax_builder();
+                let name = syntax.intern("nil");
+                let nil = syntax.push(0, flow_syntax::arena::Node::Sym(name), rays_diagnostic::Span { start: 0, finish: 0 }, None);
+                Ok(Some(builder.push(None, ty, nil, Draft::Nil)))
+            }
             Value::List(values) => {
                 let element = match ty {
                     Ty::List(element) => (**element).clone(),
@@ -3610,10 +3642,10 @@ impl HostRun {
                 };
                 let mut terms = Vec::new();
                 for v in values.iter() {
-                    terms.push(self.cooked_term(factories, &element, v)?);
+                    terms.push(self.cooked_term(builder, form, factories, &element, v)?);
                 }
                 if terms.iter().all(|t| t.is_some()) {
-                    Ok(Some(blank_term(ty.clone(), W::Node::ListLit(terms.into_iter().map(Option::unwrap).collect()))))
+                    Ok(Some(builder.push(None, ty, form, Draft::ListLit(terms.into_iter().map(Option::unwrap).collect()))))
                 } else {
                     Ok(None)
                 }
@@ -3833,26 +3865,25 @@ impl HostRun {
             return self.host_geometry_arrays(lowerer, ty, name, &args);
         }
         let call_context = if ty == ty::image() { fctx::image() } else { fctx::sop() };
-        let form = empty_form();
+        let mut builder = TermBuilder::new();
+        let form = builder.import_form(&empty_form());
         let mut capture_factories: Vec<Factory> = Vec::new();
         let mut overrides: Vec<(String, Value)> = Vec::new();
-        let mut inputs: Vec<(String, Ty, Option<Term>)> = Vec::new();
+        let mut inputs = Vec::new();
         for (n, value) in &args {
             let vty = flow_syntax::value::ty_of(value);
-            let default = self.cooked_term(&mut capture_factories, &vty, value)?;
+            let default = self.cooked_term(&mut builder, form, &mut capture_factories, &vty, value)?;
             if default.is_none() {
                 overrides.insert(0, (n.clone(), value.clone()));
             }
             inputs.push((n.clone(), vty, default));
         }
-        let call_args: Vec<(String, Term)> = inputs.iter().map(|(n, t, _)| (n.clone(), Term { path: None, ty: t.clone(), form: std::sync::Arc::new(form.clone()), node: W::Node::RefBinding(n.clone(), Vec::new()) })).collect();
-        let body = Term {
-            path: None,
-            ty: ty.clone(),
-            form: std::sync::Arc::new(form.clone()),
-            node: if catalog { W::Node::Call { kind: name.to_owned(), ctx: call_context, args: call_args } } else { W::Node::Op { op: name.to_owned(), args: call_args, skip: Vec::new() } },
-        };
-        let graph = WGraph { name: "lisp_host_call".into(), context: fctx::sop(), inputs, body, form };
+        let call_args = inputs.iter().map(|(n, ty, _)| (n.clone(), builder.push(None, ty, form, Draft::RefBinding(n.clone(), Vec::new())))).collect();
+        let node = if catalog { Draft::Call { kind: name.to_owned(), ctx: call_context, args: call_args } } else { Draft::Op { op: name.to_owned(), args: call_args, skip: Vec::new() } };
+        let body = builder.push(None, &ty, form, node);
+        let arena = builder.freeze();
+        let inputs = inputs.into_iter().map(|(name, ty, default)| (name, ty, default.map(|id| arena.handle(id)))).collect();
+        let graph = WGraph { name: "lisp_host_call".into(), context: fctx::sop(), inputs, body: arena.handle(body), form: arena.syntax().handle(form) };
         // an operator call with no function argument needs none of the library: qualifying it would
         // walk every definition per call
         fn callable(v: &Value) -> bool {
@@ -4109,13 +4140,16 @@ fn kind_key(qualified: &str) -> String {
 
 /// The factory of a checked Lisp declaration. `functions` are the call's function arguments;
 /// `error` is an evaluation error of the call's own parameters, reported when it cooks.
-fn lisp_factory(shared: &Arc<CallEnvShared>, kernel_source: &Lazy, error: Option<Diagnostic>, functions: &[(String, Value)], provenance: Option<i64>, definition: &NodeDefinition) -> Factory {
+fn lisp_factory(shared: &Arc<CallEnvShared>, kernel_source: &Lazy, error: Option<Diagnostic>, functions: &[(String, Value)], provenance: Option<i64>, definition_index: usize) -> Factory {
+    let _phase = flow_syntax::phase_timer::measure("lower.lisp_factory");
     let checked = shared.checked.clone();
-    // one copy of the definition, shared by the lazy digest, the constructor and every body it builds
-    let definition_arc = Arc::new(definition.clone());
+    let definition = &checked.nodes[definition_index];
     let declaration_source: Lazy = {
-        let (checked, definition) = (checked.clone(), definition_arc.clone());
-        lazy(Box::new(move || cached_digest(&checked, std::slice::from_ref(&*definition), &|| ck::declaration_source(&checked, &definition))))
+        let checked = checked.clone();
+        lazy(Box::new(move || {
+            let definition = checked.nodes[definition_index].as_ref();
+            cached_digest(&checked, std::slice::from_ref(definition), &|| ck::declaration_source(&checked, definition))
+        }))
     };
     let functions: Vec<(String, Value)> = definition
         .slots
@@ -4129,13 +4163,13 @@ fn lisp_factory(shared: &Arc<CallEnvShared>, kernel_source: &Lazy, error: Option
             }
         })
         .collect();
+    let roots = E::roots(functions.iter().map(|(_, value)| value));
     let key = kind_key(&definition.kind.qualified);
     let errored: Arc<Mutex<Option<Vec<(String, Value)>>>> = Arc::new(Mutex::new(None));
     let category: Vec<String> = if definition.category.is_empty() { vec!["Custom".into()] } else { definition.category.clone() };
-    let (shared_c, definition_c, functions_c, kernel_source_c, key_c) = (shared.clone(), definition_arc.clone(), functions.clone(), kernel_source.clone(), key.clone());
+    let (shared_c, functions_c, kernel_source_c, key_c) = (shared.clone(), functions.clone(), kernel_source.clone(), key.clone());
     let construct = move |inputs: &[Option<node::T>]| -> Result<node::T, String> {
-        let definition = &*definition_c;
-        let definition_arc = definition_c.clone();
+        let definition = &shared_c.checked.nodes[definition_index];
         let mut next = 0usize;
         let connected: Vec<(usize, Option<usize>)> = inputs
             .iter()
@@ -4177,8 +4211,11 @@ fn lisp_factory(shared: &Arc<CallEnvShared>, kernel_source: &Lazy, error: Option
             if functions_c.is_empty() { declaration_source() } else { kernel_source_c() },
             provenance.map_or(String::new(), |p| format!(";provenance={p}"))
         );
-        let (shared, definition2, functions2, bindings2, error2, errored2) = (shared_c.clone(), definition_arc, functions_c.clone(), bindings, error.clone(), errored.clone());
+        let (shared, functions2, bindings2, error2, errored2) = (shared_c.clone(), functions_c.clone(), bindings, error.clone(), errored.clone());
+        let roots = roots.clone();
         let build_body: ln::BuildFn = Arc::new(move |label: &str, context: &sctx::T, inputs: &[node::T], parameters: &[(String, Value)]| {
+            let _roots = &roots;
+            let definition2 = &shared.checked.nodes[definition_index];
             let failed = match (&error2, &*errored2.lock().unwrap()) {
                 (Some(_), None) => true,
                 (Some(_), Some(original)) => original.as_slice() == parameters,
@@ -4188,7 +4225,7 @@ fn lisp_factory(shared: &Arc<CallEnvShared>, kernel_source: &Lazy, error: Option
                 *errored2.lock().unwrap() = Some(parameters.to_vec());
             }
             if let (Some(diagnostic), true) = (&error2, failed) {
-                return Ok(lisp_body_failed(&shared.checked, &definition2, inputs, parameters, diagnostic.clone()));
+                return Ok(lisp_body_failed(&shared.checked, definition2, inputs, parameters, diagnostic.clone()));
             }
             let o = shared.o.clone();
             let lower_call: Arc<dyn Fn(&Gpu::Config, Vec<(FnId, i64)>, Vec<Factory>, Vec<(String, Vec<(String, Value)>)>, Workspace) -> R<T> + Send + Sync> = {
@@ -4215,7 +4252,7 @@ fn lisp_factory(shared: &Arc<CallEnvShared>, kernel_source: &Lazy, error: Option
                 factories: shared.factories.clone(),
                 def_context_use: Arc::new(move || shared2.def_context_use()),
             };
-            build_call(&env, &definition2, &functions2, &bindings2, label, context, inputs, parameters)
+            build_call(&env, definition2, &functions2, &bindings2, label, context, inputs, parameters)
         });
         ln::node(
             &ln::NodeOptions {
@@ -4262,9 +4299,8 @@ fn lisp_factory(shared: &Arc<CallEnvShared>, kernel_source: &Lazy, error: Option
 
 impl CallEnvShared {
     /// A helper that names no context operator is its own specialization: shared across instances.
-    fn def_context_use(&self) -> Vec<(WGraph, bool)> {
-        let mut guard = self.def_context_use.lock().unwrap();
-        guard.get_or_insert_with(|| self.checked.defs.iter().map(|def| (def.clone(), ck::uses_context(def))).collect()).clone()
+    fn def_context_use(&self) -> Arc<Vec<bool>> {
+        self.def_context_use.get_or_init(|| Arc::new(self.checked.defs.iter().map(ck::uses_context).collect())).clone()
     }
 }
 
@@ -4299,7 +4335,7 @@ fn schema_defaults(schema: &param::Schema) -> Vec<(String, param::Value)> {
     schema.fields().iter().zip(schema.default().iter()).map(|(f, v)| (f.name().to_owned(), v.clone())).collect()
 }
 
-impl Lowerer {
+impl CookServices {
     fn find_factory(&self, key: &str) -> R<Factory> {
         self.factories
             .iter()
@@ -4309,9 +4345,6 @@ impl Lowerer {
             .ok_or_else(|| fail("E_LOWER", &format!("Linked catalog has no {key}")))
     }
 
-    fn lisp_factory_for(&self, error: Option<Diagnostic>, functions: &[(String, Value)], provenance: Option<i64>, definition: &NodeDefinition) -> Factory {
-        lisp_factory(&self.call_env, &self.kernel_source, error, functions, provenance, definition)
-    }
 
     fn curve_points(args: &[(String, Value)]) -> R<Vec<(f64, f64, f64)>> {
         match get(args, "points") {
@@ -4337,12 +4370,12 @@ impl Lowerer {
         let factory = if key == "image_noise" {
             sop::image_nodes::noise_factory()
         } else {
-            match self.lisp_definition(&kind) {
+            match self.checked.nodes.iter().position(|d| d.kind.qualified == kind) {
                 Some(_) if self.o.defer_body_errors && node.error.is_none() && self.checked.graphs.iter().any(|g| node.site == vec![g.name.clone(), "@result".to_owned()]) => {
                     // a node's own cook is one inlined call: that call staying a node would cook the same lowering again
                     return Err(fail("E_LOWER", &format!("{kind} does not inline in its own cook")));
                 }
-                Some(definition) => {
+                Some(definition_index) => {
                     // the editor's provenance: a Lisp sop/merge tags input i with base + i
                     let tag_base = if kind != "sop/merge" || !self.o.provenance_tags {
                         None
@@ -4351,7 +4384,7 @@ impl Lowerer {
                     } else {
                         Some(self.tag_sources(cid, &args))
                     };
-                    self.lisp_factory_for(node.error.clone(), &args, tag_base, &definition)
+                    lisp_factory(&self.call_env, &self.kernel_source, node.error.clone(), &args, tag_base, definition_index)
                 }
                 None => self.find_factory(&key)?,
             }
@@ -4438,14 +4471,13 @@ impl Lowerer {
             None => kind.clone(),
         };
         let sources = self.deps(node)?;
-        let this = Wk::new(self);
+        let this = self.clone();
         let node_c = node.clone();
         let args_c = args.to_vec();
         let (key_c, kind_c, sources_c) = (key.clone(), kind.clone(), sources.clone());
         let build_inner: Arc<dyn Fn(&[node::T]) -> R<node::T> + Send + Sync> = Arc::new(move |inputs: &[node::T]| {
             match get(&args_c, "value") {
                 Some(Value::Residual(residual)) => {
-                    let this = this.get();
                     let captures: Vec<(i64, Ty, node::T)> = sources_c.iter().zip(inputs.iter()).map(|(id, input)| (*id, this.plan.nodes[*id as usize].ty.clone(), input.clone())).collect();
                     let n = this.reuse(Some(&node_c), &None, &None, "structural", &Value::Residual(*residual), inputs, &|| this.structural_node(Some(&node_c), *residual, &captures))?;
                     Ok(node::relabel(&key_c, &n))
@@ -4465,10 +4497,9 @@ impl Lowerer {
         });
         // the card's fields, for the inspector, handles and display; an edit goes through its text
         let schema_fn = {
-            let (this, args_c, kind_c, build_inner) = (Wk::new(self), args.to_vec(), kind.clone(), build_inner.clone());
+            let (this, args_c, kind_c, build_inner) = (self.clone(), args.to_vec(), kind.clone(), build_inner.clone());
             move |n: node::T, inputs: &[node::T]| -> node::T {
                 let _ = inputs;
-                let this = this.get();
                 match (this.lisp_definition(&kind_c), get(&args_c, "parameters")) {
                     (Some(d), Some(Value::Record(parameters))) => {
                         let schema = Arc::new(ln::schema("parameters", &d.fields, &ep::for_node(&this.checked, &d)));
@@ -4523,6 +4554,9 @@ impl Lowerer {
         })
     }
 
+}
+
+impl Lowerer {
     fn prepare(self: &Arc<Self>, node: &ENode) -> R<Prepared> {
         if let Some(p) = self.prepared.lock().unwrap().get(&node.id) {
             return Ok(p.clone());
@@ -4566,15 +4600,15 @@ impl Lowerer {
     fn lower_native(self: &Arc<Self>, kind: Kind, node: &ENode, args: &[(String, Value)], cid: i64) -> R<Prepared> {
         let plain = |factory: Factory, sources: &[i64]| Prepared { cid, factory, arity: sources.len(), changes: Vec::new(), dynamic: Vec::new(), zone: None, kernels: Vec::new(), slots: sources.iter().enumerate().map(|(i, s)| (i, *s)).collect() };
         match kind {
-            Kind::Card => self.lower_card(node, args, cid),
+            Kind::Card => self.services.lower_card(node, args, cid),
             Kind::Arrays => {
                 let operation = node.kind.clone();
                 let sources = self.deps(node)?;
-                let (this, node_c, args_c, sources_c, op_c) = (Wk::new(self), node.clone(), args.to_vec(), sources.clone(), operation.clone());
+                let (this, node_c, args_c, sources_c, op_c) = (self.services.clone(), node.clone(), args.to_vec(), sources.clone(), operation.clone());
                 let factory = edit::factory(
                     edit::factory_args(geometry_arrays_key(&operation), geometry_arrays_label(&operation), &["Flow", "Topology"]),
                     sources.len(),
-                    Arc::new(move |inputs: &[node::T]| this.get().arrays_node(Some(&node_c), None, false, None, None, &op_c, &args_c, &sources_c, inputs).map_err(keep_diagnostic)),
+                    Arc::new(move |inputs: &[node::T]| this.arrays_node(Some(&node_c), None, false, None, None, &op_c, &args_c, &sources_c, inputs).map_err(keep_diagnostic)),
                 );
                 Ok(plain(factory, &sources))
             }
@@ -4585,11 +4619,11 @@ impl Lowerer {
             }
             Kind::Group => {
                 let sources = self.deps(node)?;
-                let (this, node_c, args_c, sources_c) = (Wk::new(self), node.clone(), args.to_vec(), sources.clone());
+                let (this, node_c, args_c, sources_c) = (self.services.clone(), node.clone(), args.to_vec(), sources.clone());
                 let factory = edit::factory(
                     edit::factory_args("flow.with_group", "Write group", &["Flow"]),
                     sources.len(),
-                    Arc::new(move |inputs: &[node::T]| this.get().grp_node(Some(&node_c), None, None, &args_c, &sources_c, inputs).map_err(keep_diagnostic)),
+                    Arc::new(move |inputs: &[node::T]| this.grp_node(Some(&node_c), None, None, &args_c, &sources_c, inputs).map_err(keep_diagnostic)),
                 );
                 Ok(plain(factory, &sources))
             }
@@ -4628,7 +4662,7 @@ impl Lowerer {
                 if matches!(get(&args, "geometry"), Some(Value::No_geo)) {
                     sources.insert(0, -1);
                 }
-                let (this, node_c, sources_c) = (Wk::new(self), node.clone(), sources.clone());
+                let (this, node_c, sources_c) = (self.services.clone(), node.clone(), sources.clone());
                 let o = AttrOpts {
                     selection: get(&args, "selection").cloned(),
                     default: get(&args, "default").cloned(),
@@ -4642,7 +4676,7 @@ impl Lowerer {
                 let factory = edit::factory(
                     edit::factory_args("flow.with_attr", "Write attribute", &["Flow"]),
                     sources.len(),
-                    Arc::new(move |inputs: &[node::T]| this.get().attr_node(Some(&node_c), o.clone(), &name, &values, &sources_c, inputs).map_err(keep_diagnostic)),
+                    Arc::new(move |inputs: &[node::T]| this.attr_node(Some(&node_c), o.clone(), &name, &values, &sources_c, inputs).map_err(keep_diagnostic)),
                 );
                 Ok(Prepared {
                     cid,
@@ -4666,6 +4700,7 @@ impl Lowerer {
                     Some(_) => return Err(fail("E_ATTR_OWNER", "An attribute owner must be text")),
                 };
                 let guard = get(args, "when").cloned();
+                let guard_roots = guard.as_ref().map(|value| E::roots(std::iter::once(value)));
                 let sources = if guard.is_none() { geo_of(args) } else { self.deps(node)? };
                 let arity = sources.len();
                 let sources_c = sources.clone();
@@ -4679,7 +4714,9 @@ impl Lowerer {
                         let extra = inputs[1..].to_vec();
                         let guarded = guard.as_ref().map(|guard| {
                             let (g, sources) = (guard.clone(), sources_c.clone());
+                            let roots = guard_roots.clone();
                             let decide: Arc<dyn Fn(&sctx::T, &[rdk::geometry::T]) -> R<bool> + Send + Sync> = Arc::new(move |context, geometries| {
+                                let _roots = &roots;
                                 let geoms = geometries.to_vec();
                                 let sources = sources.clone();
                                 let resolve: flow_ir::core_exec::ResolveFn = {
@@ -4703,7 +4740,7 @@ impl Lowerer {
             Kind::Curve => {
                 let mut dynamic: Vec<Dynamic> = Vec::new();
                 let encode = |points: &[(String, Value)]| -> R<Vec<(String, param::Value)>> {
-                    Ok(vec![(curve::PARAMETER.to_owned(), param::Value::Text(curve::encode(&Self::curve_points(points)?).into_bytes()))])
+                    Ok(vec![(curve::PARAMETER.to_owned(), param::Value::Text(curve::encode(&CookServices::curve_points(points)?).into_bytes()))])
                 };
                 let closed = match get(args, "closed") {
                     None => Vec::new(),
@@ -4719,7 +4756,7 @@ impl Lowerer {
                 changes.extend(filled);
                 match get(args, "points") {
                     Some(points) if E::is_live(points) => {
-                        dynamic.push((points.clone(), Arc::new(move |v: &Value| Ok(vec![(curve::PARAMETER.to_owned(), param::Value::Text(curve::encode(&Lowerer::curve_points(&[("points".to_owned(), v.clone())])?).into_bytes()))]))));
+                        dynamic.push((points.clone(), Arc::new(move |v: &Value| Ok(vec![(curve::PARAMETER.to_owned(), param::Value::Text(curve::encode(&CookServices::curve_points(&[("points".to_owned(), v.clone())])?).into_bytes()))]))));
                     }
                     _ => changes.extend(encode(args)?),
                 }
@@ -4745,21 +4782,45 @@ impl Lowerer {
                 }
                 let base_site = self.plan.nodes[z.root as usize].site.clone();
                 self.zones.lock().unwrap().push(Zone { cid, site: node.site.clone(), iter: node.iter.clone(), body_site: base_site, base: z.base, count: z.count.clone(), ekey: z.ekey.clone(), positions: z.positions.clone() });
-                let (this, z_c) = (Wk::new(self), z.clone());
+                let (this, z_c) = (self.zone_cook(&z), z.clone());
                 let factory = edit::factory_slots(
                     edit::FactoryArgs { slots: Some(vec!["input".to_owned()]), ..edit::factory_args("zone", "Loop over geometry", &["Copy"]) },
                     vec![InputRequirement::Rest],
-                    Arc::new(move |nodes: &[Option<node::T>]| Ok(this.get().make_zone(None, Vec::new(), &z_c, nodes.iter().flatten().cloned().collect()))),
+                    Arc::new(move |nodes: &[Option<node::T>]| Ok(this.make_zone(None, Vec::new(), &z_c, nodes.iter().flatten().cloned().collect()))),
                 );
                 Ok(Prepared { cid, factory, arity: sources.len(), changes: Vec::new(), dynamic: Vec::new(), kernels: Vec::new(), zone: Some(z), slots: sources.iter().enumerate().map(|(i, s)| (i, *s)).collect() })
             }
         }
     }
 
+    fn zone_cook(&self, z: &Zinfo) -> Arc<ZoneCook> {
+        Arc::new(ZoneCook {
+            services: self.services.clone(),
+            prepared: self.prepared.lock().unwrap().iter().filter(|(id, _)| **id >= z.lo && **id < z.hi).map(|(id, p)| (*id, p.clone())).collect(),
+        })
+    }
+
+
+}
+
+impl CookServices {
+    fn int_geo(&self, node: &ENode) -> R<i64> {
+        match geo_of(&node.args.iter().filter(|(k, _)| k == "geometry").cloned().collect::<Vec<_>>()).as_slice() {
+            [id] => Ok(*id),
+            _ => Err(fail("E_LOWER", "Zone without geometry")),
+        }
+    }
     /// A kernel node of a function-valued input.
     fn kernel_node(&self, state: Option<State>, elems: Option<Vec<(String, Value)>>, k: &KernelInput, inputs: &[node::T]) -> R<node::T> {
         let n = fk::node(state.as_ref(), self.o.reference, elems.as_deref(), k.identity, &k.signature, k.fun, &k.sources, inputs.to_vec());
         edit_r(build::restore_id(k.cid, &n))
+    }
+
+}
+
+impl ZoneCook {
+    fn prepare(&self, node: &ENode) -> R<Prepared> {
+        self.prepared.get(&node.id).cloned().ok_or_else(|| fail("E_LOWER", "Zone template was not prepared"))
     }
 
     /// The zone node of a lowered graph: it cooks `z.root` once per element.
@@ -4780,10 +4841,10 @@ impl Lowerer {
         args.stamp = stamp;
         args.key = z.key.clone();
         args.select = select;
-        let (this, z_c) = (Wk::new(self), z.clone());
+        let (this, z_c) = (self.clone(), z.clone());
         szone::node(
             args,
-            Arc::new(move |inputs: &[node::T], context: &sctx::T| this.get().instantiate(state.clone(), outer.clone(), sctx::input(context).clone(), &z_c, inputs)),
+            Arc::new(move |inputs: &[node::T], context: &sctx::T| this.instantiate(state.clone(), outer.clone(), sctx::input(context).clone(), &z_c, inputs)),
             inputs,
         )
     }
@@ -4804,7 +4865,7 @@ impl Lowerer {
         let root = inner.as_ref().map_or(target, |i| i.plan_id);
         let mut seen: BTreeSet<i64> = BTreeSet::new();
         let mut captures: Vec<i64> = Vec::new();
-        fn visit(this: &Arc<Lowerer>, z: &Zinfo, id: i64, root: i64, target: i64, probes: &[i64], seen: &mut BTreeSet<i64>, captures: &mut Vec<i64>) -> R<()> {
+        fn visit(this: &Arc<ZoneCook>, z: &Zinfo, id: i64, root: i64, target: i64, probes: &[i64], seen: &mut BTreeSet<i64>, captures: &mut Vec<i64>) -> R<()> {
             if id >= z.lo && id < z.hi {
                 if seen.insert(id) {
                     let node = &this.plan.nodes[id as usize];
@@ -4829,12 +4890,6 @@ impl Lowerer {
         Ok(Zinfo { root, preview: Some((target, probes.to_vec())), captures, order: seen.into_iter().collect(), ..z.clone() })
     }
 
-    fn int_geo(&self, node: &ENode) -> R<i64> {
-        match geo_of(&node.args.iter().filter(|(k, _)| k == "geometry").cloned().collect::<Vec<_>>()).as_slice() {
-            [id] => Ok(*id),
-            _ => Err(fail("E_LOWER", "Zone without geometry")),
-        }
-    }
 
     /// One element's copy of the template, over the zone's own inputs.
     fn instantiate(self: &Arc<Self>, state: Option<State>, outer: Vec<(String, Value)>, live: Frame, z: &Zinfo, inputs: &[node::T]) -> szone::ElementBody {
@@ -4953,7 +5008,7 @@ impl Lowerer {
     }
 }
 
-impl Lowerer {
+impl CookServices {
     fn sop_instance(&self, i: &Instance) -> bool {
         self.checked.graphs.iter().find(|g| g.name == i.graph).is_some_and(|g| ty::is_cooked(&fctx::result(g.context)))
     }
@@ -4996,6 +5051,9 @@ impl Lowerer {
         self.compiled.iter().enumerate().filter(|(i, id)| **id != 0 && !self.templ[*i]).map(|(i, id)| (i as i64, *id)).collect()
     }
 
+}
+
+impl Lowerer {
     fn live_network(self: &Arc<Self>, network: network::Network, graph: &edit::T) -> R<network::Network> {
         let mut network = network::with_approx(self.checked.approx.clone(), &network::with_reference(self.o.reference, &network::with_profile(self.profile.clone(), &network::with_states(self.evaluated.states.clone(), &network))));
         let prepared: Vec<Prepared> = self.prepared.lock().unwrap().values().cloned().collect();
@@ -5003,12 +5061,12 @@ impl Lowerer {
         for p in &prepared {
             if let Some(z) = &p.zone {
                 if z.stateful && edit::find(graph, p.cid).is_some() {
-                    let (this, z) = (Wk::new(self), z.clone());
+                    let (this, z) = (self.zone_cook(z), z.clone());
                     frame_nodes.insert(
                         p.cid,
                         Arc::new(move |_network: &network::Network, state: &State, _live: &Frame, n: &node::T| {
                             let snapshot = E::fork_state(state);
-                            Ok(build::adopt_identity(n, &this.get().make_zone(Some(snapshot), Vec::new(), &z, build::input_array(n))))
+                            Ok(build::adopt_identity(n, &this.make_zone(Some(snapshot), Vec::new(), &z, build::input_array(n))))
                         }),
                     );
                 }
@@ -5019,10 +5077,10 @@ impl Lowerer {
                 if !E::state_dependent(&Value::Fn(k.fun)) || edit::find(graph, k.cid).is_none() {
                     continue;
                 }
-                let (this, k) = (Wk::new(self), k.clone());
+                let (this, k) = (self.services.clone(), k.clone());
                 frame_nodes.insert(
                     k.cid,
-                    Arc::new(move |_network: &network::Network, state: &State, _live: &Frame, n: &node::T| this.get().kernel_node(Some(E::fork_state(state)), None, &k, &node::inputs(n))),
+                    Arc::new(move |_network: &network::Network, state: &State, _live: &Frame, n: &node::T| this.kernel_node(Some(E::fork_state(state)), None, &k, &node::inputs(n))),
                 );
             }
         }
@@ -5030,11 +5088,10 @@ impl Lowerer {
             if !is_geometry_arrays(&n.kind) || edit::find(graph, self.compiled[n.id as usize]).is_none() || !E::state_dependent(&geometry_arrays_data(&n.args)) {
                 continue;
             }
-            let (this, n) = (Wk::new(self), n.clone());
+            let (this, n) = (self.services.clone(), n.clone());
             frame_nodes.insert(
                 self.compiled[n.id as usize],
                 Arc::new(move |_network: &network::Network, state: &State, _live: &Frame, node: &node::T| {
-                    let this = this.get();
                     let sources = this.deps(&n)?;
                     let made = this.arrays_node(None, None, false, Some(E::fork_state(state)), None, &n.kind, &n.args, &sources, &node::inputs(node))?;
                     Ok(build::adopt_identity(node, &made))
@@ -5045,11 +5102,10 @@ impl Lowerer {
             if n.kind != "sop/with_group" || edit::find(graph, self.compiled[n.id as usize]).is_none() || !E::state_dependent(&group_data(&n.args)) {
                 continue;
             }
-            let (this, n) = (Wk::new(self), n.clone());
+            let (this, n) = (self.services.clone(), n.clone());
             frame_nodes.insert(
                 self.compiled[n.id as usize],
                 Arc::new(move |_network: &network::Network, state: &State, _live: &Frame, node: &node::T| {
-                    let this = this.get();
                     let sources = this.deps(&n)?;
                     let made = this.grp_node(None, Some(E::fork_state(state)), None, &n.args, &sources, &node::inputs(node))?;
                     Ok(build::adopt_identity(node, &made))
@@ -5075,11 +5131,10 @@ impl Lowerer {
             if !eligible && !E::state_dependent(&attribute_data(&n.args)) {
                 continue;
             }
-            let (this, n, values, program) = (Wk::new(self), n.clone(), values.clone(), program);
+            let (this, n, values, program) = (self.services.clone(), n.clone(), values.clone(), program);
             frame_nodes.insert(
                 self.compiled[n.id as usize],
                 Arc::new(move |_network: &network::Network, state: &State, live: &Frame, node: &node::T| {
-                    let this = this.get();
                     let name = match get(&n.args, "attribute") {
                         Some(Value::Text(name)) => txt(name),
                         _ => unreachable!("an attribute write names its attribute"),
@@ -5107,11 +5162,10 @@ impl Lowerer {
             if !is_resource(n) || edit::find(graph, self.compiled[n.id as usize]).is_none() {
                 continue;
             }
-            let (this, n) = (Wk::new(self), n.clone());
+            let (this, n) = (self.services.clone(), n.clone());
             frame_nodes.insert(
                 self.compiled[n.id as usize],
                 Arc::new(move |network: &network::Network, state: &State, live: &Frame, node: &node::T| {
-                    let this = this.get();
                     let Some(images) = image_provider() else {
                         return Err(fail("E_IMAGE", "Image resources need an initial-domain resolver."));
                     };
@@ -5191,7 +5245,7 @@ impl Lowerer {
         let (mut graph, root) = match &instance.result {
             Value::Deferred(t, id) if ty::is_cooked(t) => (graph, Some(self.compiled[*id as usize])),
             Value::No_geo => (graph, None),
-            Value::Residual(r) if E::Residual::residual_view(*r)?.term.ty == ty::geometry() => {
+            Value::Residual(r) if *E::Residual::residual_view(*r)?.term.ty() == ty::geometry() => {
                 let ids = cooked_sources(&instance.result);
                 let captures: R<Vec<(i64, Ty, node::T)>> = ids
                     .iter()
@@ -5225,8 +5279,8 @@ impl Lowerer {
         for node in &self.plan.nodes {
             if is_zone(&node.kind)
                 && !self.templ[node.id as usize]
-                && target >= Self::int_arg(node, "lo")?
-                && target < Self::int_arg(node, "hi")?
+                && target >= CookServices::int_arg(node, "lo")?
+                && target < CookServices::int_arg(node, "hi")?
                 && edit::find(&net.geometry, self.compiled[node.id as usize]).is_some()
             {
                 outer = Some(node.clone());
@@ -5235,23 +5289,24 @@ impl Lowerer {
         }
         let Some(node) = outer else { return Ok(None) };
         let original = self.prepare(&node)?.zone.expect("a zone node has a zone");
-        let z = self.focus(&original, target, probes)?;
+        let cook = self.zone_cook(&original);
+        let z = cook.focus(&original, target, probes)?;
         let mut sources = vec![self.int_geo(&node)?];
         sources.extend(z.captures.iter().cloned());
         let inputs: R<Vec<node::T>> = sources
             .iter()
             .map(|id| edit::find(&net.geometry, self.compiled[*id as usize]).ok_or_else(|| fail("E_LOWER", "Preview capture is not in the owning network")))
             .collect();
-        let viewed = self.make_zone(None, Vec::new(), &z, inputs?);
+        let viewed = cook.make_zone(None, Vec::new(), &z, inputs?);
         let root = node::id(&viewed);
         let geometry = edit_r(edit::add_node(None, None, &viewed, &net.geometry))?;
         let net = network::with_geometry(&geometry, net)?;
         let mut frames = net.frame_nodes.clone();
         if z.stateful {
-            let (this, z) = (Wk::new(self), z.clone());
+            let (this, z) = (cook, z.clone());
             frames.insert(
                 root,
-                Arc::new(move |_network: &network::Network, state: &State, _live: &Frame, n: &node::T| Ok(build::adopt_identity(n, &this.get().make_zone(Some(E::fork_state(state)), Vec::new(), &z, build::input_array(n))))),
+                Arc::new(move |_network: &network::Network, state: &State, _live: &Frame, n: &node::T| Ok(build::adopt_identity(n, &this.make_zone(Some(E::fork_state(state)), Vec::new(), &z, build::input_array(n))))),
             );
         }
         Ok(Some((network::with_frame_nodes(frames, &net), root)))
@@ -5363,18 +5418,18 @@ fn make_lowerer(factories: Vec<Factory>, o: Options, checked_in: Workspace) -> R
         let plan = fold_writes(o.gpu.fast && o.gpu.backend.is_some(), o.defer, &evaluated.plan)?;
         if o.gpu.fast && o.gpu.backend.is_some() { fold_mesh_writes(&plan) } else { plan }
     };
-    let plan = Plan { id: E::fresh_plan_id(), nodes: plan.nodes.iter().map(|n| failed_card_as_call(n, &plan, &checked)).collect(), ..plan.clone() };
-    let image_sites: Vec<Option<W::Path>> = plan
-        .nodes
-        .iter()
-        .map(|node| if node.kind == "image/map" { image_origins.lock().unwrap().get(&(node.inst, node.site.clone(), node.iter.clone())).cloned().flatten() } else { None })
-        .collect();
-    let shared = Arc::new(CallEnvShared { checked: checked.clone(), factories: factories.clone(), o: o.clone(), def_context_use: Mutex::new(None) });
-    let lisp_factories: Vec<Factory> = checked.nodes.iter().map(|d| lisp_factory(&shared, &kernel_source, None, &[], None, d)).collect();
+    let nodes = plan.nodes.iter().map(|n| failed_card_as_call(n, &plan, &checked)).collect();
+    let plan = Plan { id: E::fresh_plan_id(), nodes, ..plan };
+    let shared = Arc::new(CallEnvShared { checked: checked.clone(), factories: factories.clone(), o: o.clone(), def_context_use: OnceLock::new() });
+    let lisp_factories: Vec<Factory> = (0..checked.nodes.len()).map(|index| lisp_factory(&shared, &kernel_source, None, &[], None, index)).collect();
     let templ = template_flags(&plan.nodes);
     let sites = o.sites.clone();
     let site_table: HashMap<W::Path, i64> = sites.iter().enumerate().map(|(i, p)| (p.clone(), i as i64)).collect();
-    let mut lowerer = Lowerer {
+    let roots = E::roots(plan.nodes.iter().flat_map(|node| node.args.iter().map(|(_, value)| value))
+        .chain(plan.instances.iter().flat_map(|instance| instance.inputs.iter().map(|(_, value)| value).chain(std::iter::once(&instance.result))))
+        .chain(&evaluated.states));
+    let mut services = CookServices {
+        _roots: roots,
         o: o.clone(),
         factories,
         checked,
@@ -5392,7 +5447,6 @@ fn make_lowerer(factories: Vec<Factory>, o: Options, checked_in: Workspace) -> R
         provenance: Mutex::new(BTreeMap::new()),
         tags: AtomicI64::new(o.tag_base),
         zones: Mutex::new(Vec::new()),
-        prepared: Mutex::new(HashMap::new()),
         concat_tags: Mutex::new(HashMap::new()),
         lisp_factories,
         call_env: shared,
@@ -5401,19 +5455,19 @@ fn make_lowerer(factories: Vec<Factory>, o: Options, checked_in: Workspace) -> R
         volatile: Mutex::new(Vec::new()),
     };
     // every plan node gets its id up front, in plan order, so ids do not depend on which network asks first
-    for node in lowerer.plan.nodes.clone() {
-        if lowerer.sop_instance(&lowerer.plan.instances[node.inst as usize]) && ty::is_cooked(&node.ty) {
-            let id = lowerer.compiled_id(&node);
-            lowerer.compiled[node.id as usize] = id;
+    for node in &services.plan.nodes {
+        if services.sop_instance(&services.plan.instances[node.inst as usize]) && ty::is_cooked(&node.ty) {
+            let id = services.compiled_id(node);
+            services.compiled[node.id as usize] = id;
         }
     }
-    lowerer.compute_volatile()?;
-    let lowerer = Arc::new(lowerer);
-    let _ = image_sites;
+    services.compute_volatile()?;
+    let lowerer = Arc::new(Lowerer { services: Arc::new(services), prepared: Mutex::new(HashMap::new()) });
     Ok(lowerer)
 }
 
 fn finish(lowerer: &Arc<Lowerer>) -> R<T> {
+    let _phase = flow_syntax::phase_timer::measure("lower.finish");
     let l = lowerer;
     let mut graphs: Vec<Graph> = Vec::new();
     for (index, instance) in l.plan.instances.iter().enumerate() {
@@ -5423,9 +5477,9 @@ fn finish(lowerer: &Arc<Lowerer>) -> R<T> {
     }
     {
         let volatile = l.volatile.lock().unwrap().clone();
-        let prepared: Vec<Prepared> = l.prepared.lock().unwrap().values().cloned().collect();
+        let prepared = l.prepared.lock().unwrap();
         let mut nodes = l.volatile_nodes.lock().unwrap();
-        for p in &prepared {
+        for p in prepared.values() {
             for k in &p.kernels {
                 if E::frame_dependent(&Value::Fn(k.fun)) || E::state_dependent(&Value::Fn(k.fun)) || k.sources.iter().any(|id| volatile[*id as usize]) {
                     nodes.insert(k.cid, ());
@@ -5666,7 +5720,9 @@ pub fn field_calls(state: Option<&State>, live: &Frame, resolve: flow_ir::core_e
         }
         offset = start + count;
         let (f, live, state, resolve) = (*f, live.clone(), state.clone(), resolve.clone());
+        let roots = E::roots(std::iter::once(&Value::Fn(f)));
         let at: Arc<dyn Fn(i64) -> R<Vec<(W::Path, Vec<(Vec<i64>, Value)>)>> + Send + Sync> = Arc::new(move |k: i64| {
+            let _roots = &roots;
             if k < 0 || k >= count {
                 return Err(fail("E_LIST_RANGE", "Probe index is outside the field grid."));
             }
@@ -5732,5 +5788,57 @@ mod lend_session_tests {
         let depth = lend_session(&slot, |_| lend_session(&slot, |_| lend_session(&slot, |_| 3)));
         assert_eq!(depth, 3);
         assert!(slot.lock().unwrap().is_some());
+    }
+
+    #[test]
+    fn escaped_zone_nodes_own_only_their_cook_context() {
+        let source = "(workspace w (graph g :context sop
+            (sop/merge (for [p (sop/point_list (sop/line :points 3))]
+                (sop/mesh :points (array/vec3 1 p)
+                    :vertex_points (array/int 0) :primitive_offsets (array/int 1) :kinds (array/int 0))))))";
+        let lowered = workspace(None, Vec::new(), Options::default(), &syntax::parse(source).unwrap()).unwrap();
+        let lowering = lowered.lowering.clone();
+        let services = Arc::downgrade(&lowering.upgrade().unwrap().services);
+        let checked = lowering.upgrade().unwrap().checked.clone();
+        let graph = &lowered.graphs[0];
+        let root = edit::compile_node(&graph.network.geometry, graph.root.unwrap()).unwrap();
+        let zone = node::inspect(&root).into_iter().find_map(|info| {
+            let n = node::find(&root, info.id).unwrap();
+            build::has_expand(&n).then_some(n)
+        }).expect("a geometry zone");
+        drop(lowered);
+        assert!(lowering.upgrade().is_none(), "the factory cache is not owned by returned nodes");
+        assert!(services.upgrade().is_some());
+        let context = sctx::create(sctx::Options::default()).unwrap();
+        let mut session = sop::session::create(32, 1_000_000).unwrap();
+        let cooked = sop::session::cook(&mut session, None, &context, &root).unwrap();
+        assert_eq!(rdk::geometry::point_count(&payload::geometry(&cooked.payload).unwrap()), 3);
+        let inputs = node::inputs(&zone);
+        let rebuilt = build::rebuild_with_inputs(&zone, &inputs);
+        drop((root, zone));
+        let expand = build::expand(&rebuilt).unwrap();
+        drop(rebuilt);
+        let payloads: Vec<_> = inputs.iter().map(|n| sop::session::cook(&mut session, None, &context, n).unwrap().payload).collect();
+        let children = expand(&context, &inputs, &payloads).unwrap();
+        assert_eq!(children.len(), 3);
+        let source = payload::geometry(&payloads[0]).unwrap();
+        drop((expand, inputs));
+        sop::session::close(&mut session);
+        drop(session);
+        // Expanded mesh children retain their residual homes, not the whole zone's factory state.
+        assert!(services.upgrade().is_none());
+        for _ in 0..65 { drop(E::static_eval(&checked).unwrap()); }
+        let mut session = sop::session::create(32, 1_000_000).unwrap();
+        for (index, child) in children.iter().enumerate() {
+            let output = sop::session::cook(&mut session, None, &context, child).unwrap();
+            let geometry = payload::geometry(&output.payload).unwrap();
+            assert_eq!(rdk::geometry::point_count(&geometry), 1);
+            assert_eq!(rdk::packed::Float3::get(rdk::geometry::positions(&geometry), 0).unwrap(),
+                rdk::packed::Float3::get(rdk::geometry::positions(&source), index as i64).unwrap());
+        }
+        drop(children);
+        sop::session::close(&mut session);
+        drop(session);
+        assert!(services.upgrade().is_none(), "no node/cache back-cycle keeps the cook context alive");
     }
 }

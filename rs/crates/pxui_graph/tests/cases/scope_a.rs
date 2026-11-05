@@ -309,12 +309,11 @@ fn scope_idle_frame() {
     for _ in 0..3 {
         step(&mut ui, &mut cur);
     }
-    // ponytail: the counting allocator reports live bytes, not Gc.allocated_bytes (cumulative): growth over the frames
-    let before = mem::allocated_bytes();
+    let before = mem_sys::alloc_bytes_total();
     for _ in 0..10 {
         step(&mut ui, &mut cur);
     }
-    let per_frame = (mem::allocated_bytes() - before).max(0) as f64 / 10.0;
+    let per_frame = (mem_sys::alloc_bytes_total() - before) as f64 / 10.0;
     let view = cur.unwrap();
     check(scope::stats(&view).nodes >= 2001, "the big graph is not laid out");
     check(per_frame < 500_000.0, &format!("an idle frame with nothing in view allocates {:.0} bytes", per_frame));

@@ -26,7 +26,7 @@ fn rdk_ok<A>(r: Result<A, rdk::error::T>) -> A {
     r.unwrap_or_else(|e| panic!("{}", rdk::error::to_string(&e)))
 }
 
-/// A `columns` x `rows` quad grid in the XY plane (Plane_generators.grid, divisions).
+/// Plane_generators.grid's default triangles in the XZ plane, retaining the OCaml fixture bounds.
 fn plane_grid(columns: i64, rows: i64, size: f64) -> geo::T {
     let stride = columns + 1;
     let (mut x, mut y) = (Vec::new(), Vec::new());
@@ -41,11 +41,11 @@ fn plane_grid(columns: i64, rows: i64, size: f64) -> geo::T {
     for j in 0..rows {
         for i in 0..columns {
             let a = j * stride + i;
-            vp.extend_from_slice(&[a, a + 1, a + 1 + stride, a + stride]);
-            offsets.push(vp.len() as i64);
+            vp.extend_from_slice(&[a, a + stride, a + stride + 1, a, a + stride + 1, a + 1]);
+            offsets.extend([vp.len() as i64 - 3, vp.len() as i64]);
         }
     }
-    let positions = rdk_ok(rdk::packed::Float3::of_owned(x, y, z));
+    let positions = rdk_ok(rdk::packed::Float3::of_owned(x, z, y));
     let topology = rdk_ok(rdk::topology::polygons_owned(stride * (rows + 1), vp, offsets));
     rdk_ok(geo::create(positions, topology, None, None, None))
 }
@@ -73,7 +73,7 @@ fn fixture() -> geo::T {
 }
 
 #[test]
-#[ignore = "slow lowering: debug build, over 5 s alone (a single sop/uv_sphere lowers in 3.3 s, a box in 0.15 s; see test_perf_lower)"]
+
 fn declared_preserved_topology_holds_at_one_and_eight_domains() {
     let native = sop::nodes::factories();
     let lowered = lower::workspace(Some(native.clone()), Vec::new(), lower::Options::default(), &parse("(workspace facts (graph unused :context value 0.0))")).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));

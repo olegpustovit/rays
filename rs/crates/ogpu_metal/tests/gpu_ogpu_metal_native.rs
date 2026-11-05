@@ -1,7 +1,7 @@
 // Port of lib/ogpu_metal/test_device_error.ml, test_ogpu_metal_{foundation,texture,pipeline,acceleration,
 // capabilities,sampler_pixels}.ml and test_pipeline_argument_buffer.ml: the native modules and the driver
-// record on the real Metal device. Metal handles are freed when their last owner drops (not at destroy),
-// so each live-handle delta is taken after the owners are dropped and the release queue drained.
+// record on the real Metal device. Direct native module handles follow their last Rust owner; core
+// wrappers release driver payloads at logical destroy, even when dead wrappers remain in scope.
 mod common;
 use ogpu_core::{
     backend::{self as be, DriverAccelDescriptor, DriverGeometry, Token},
@@ -91,10 +91,7 @@ fn gpu_foundation() {
     let mut unsupported = caps::minimum_m1();
     unsupported.limits.max_buffer_size = 0;
     expect(ErrorKind::InvalidArgument, caps::validate(&unsupported).err());
-    let Ok(device) = Device::system_default() else {
-        println!("ogpu_metal foundation: skipped (no Metal device)");
-        return;
-    };
+    let device = Device::system_default().unwrap_or_else(|failure| die(failure));
     let other = Device::system_default().unwrap_or_else(|failure| die(failure));
     let before = live();
     expect(ErrorKind::InvalidArgument, buffer::create(&device, buffer::Memory::Shared, &buffer_descriptor(0, &[BufferUsage::CopySrc])).err());
@@ -128,10 +125,7 @@ fn gpu_foundation() {
 }
 
 fn gpu_texture() {
-    let Ok(device) = Device::system_default() else {
-        println!("ogpu_metal texture: skipped (no device)");
-        return;
-    };
+    let device = Device::system_default().unwrap_or_else(|failure| die(failure));
     let other = Device::system_default().unwrap_or_else(|failure| die(failure));
     let before = live();
     let descriptor = TextureDescriptor {
@@ -164,10 +158,7 @@ fn gpu_texture() {
 }
 
 fn gpu_capabilities() {
-    let Ok(device) = Device::system_default() else {
-        println!("ogpu_metal capabilities: skipped (no device)");
-        return;
-    };
+    let device = Device::system_default().unwrap_or_else(|failure| die(failure));
     let info = device.metal().info().expect("info");
     let reported = device.capabilities();
     assert!(
@@ -188,11 +179,94 @@ const COMPUTE_SOURCE: &str = "#include <metal_stdlib>\nusing namespace metal;\nk
 
 const RENDER_SOURCE: &str = "#include <metal_stdlib>\nusing namespace metal;\nstruct V { float4 position [[position]]; };\nvertex V mapped_vertex(uint i [[vertex_id]]) { constexpr float2 p[3]={{-1.,-1.},{3.,-1.},{-1.,3.}}; V v; v.position=float4(p[i],0.,1.); return v; }\nfragment float4 mapped_fragment() { return float4(0.125,0.5,0.875,1.); }\n";
 
+fn gpu_destroy_releases_retained_driver_payloads() {
+    let before = live();
+    let device = be::create_device(backend::create()).unwrap_or_else(|failure| die(failure));
+    let device_only = live();
+    let queue = be::create_queue(&device).unwrap_or_else(|failure| die(failure));
+    let plain = be::create_buffer(&device, buffer_descriptor(8, &[BufferUsage::CopyDst]), None).unwrap_or_else(|failure| die(failure));
+    let mapped = be::create_mapped_buffer(&device, buffer_descriptor(8, &[BufferUsage::Storage, BufferUsage::CopyDst])).unwrap_or_else(|failure| die(failure));
+    let mapped_clone = mapped.clone();
+    let id = be::buffer_id(&mapped);
+    be::write_buffer(&mapped, 0, &[0; 8]).unwrap_or_else(|failure| die(failure));
+    assert!(be::mapped_view(&mapped).is_some());
+    let readback = be::owned_readback(&mapped).unwrap_or_else(|failure| die(failure));
+    let texture = be::create_texture(&device, TextureDescriptor {
+        label: None, width: 1, height: 1, depth: 1, mip_levels: 1, sample_count: 1,
+        format: TextureFormat::Rgba8Unorm, usage: vec![TextureUsage::TextureBinding],
+    }).unwrap_or_else(|failure| die(failure));
+    let sampler = be::create_sampler(&device, SamplerDescriptor {
+        label: None, min_filter: SamplerFilter::Nearest, mag_filter: SamplerFilter::Nearest,
+        mip_filter: MipFilter::NoMip, address_u: AddressMode::ClampToEdge, address_v: AddressMode::ClampToEdge,
+        lod_min: 0.0, lod_max: 0.0, max_anisotropy: 1,
+    }).unwrap_or_else(|failure| die(failure));
+    let binding = Binding { group: 0, binding: 0, kind: BindingKind::StorageBuffer, visibility: vec![Stage::Compute] };
+    let shader = make_shader("destroy-ownership", COMPUTE_SOURCE, &[("mapped_compute", Stage::Compute)], vec![binding.clone()]);
+    let library = be::create_library(&device, &shader).unwrap_or_else(|failure| die(failure));
+    let pipeline = be::create_compute_pipeline_from(&library, "mapped_compute", None, &[binding]).unwrap_or_else(|failure| die(failure));
+    expect(ErrorKind::InvalidState, be::destroy_library(&library).err());
+    expect(ErrorKind::InvalidState, be::destroy_device(&device).err());
+
+    let abandoned = be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
+    let blit = be::blit_encoder(&abandoned).unwrap_or_else(|failure| die(failure));
+    be::abandon(&abandoned).unwrap_or_else(|failure| die(failure));
+    be::abandon(&abandoned).unwrap_or_else(|failure| die(failure));
+    expect(ErrorKind::InvalidState, be::end_blit(&blit).err());
+
+    let commands = be::begin_commands(&queue).unwrap_or_else(|failure| die(failure));
+    let encoder = be::compute_encoder(&commands).unwrap_or_else(|failure| die(failure));
+    be::set_pipeline(&encoder, &pipeline).unwrap_or_else(|failure| die(failure));
+    be::set_buffer(&encoder, 0, &mapped).unwrap_or_else(|failure| die(failure));
+    be::dispatch_threads(&encoder, (2, 1, 1), (1, 1, 1)).unwrap_or_else(|failure| die(failure));
+    be::end_compute(&encoder).unwrap_or_else(|failure| die(failure));
+    // Submission cleanup, not these now-dead core wrappers, owns resources until completion.
+    be::destroy_buffer(&mapped).unwrap_or_else(|failure| die(failure));
+    be::destroy_buffer(&mapped_clone).unwrap_or_else(|failure| die(failure));
+    be::destroy_pipeline(&pipeline).unwrap_or_else(|failure| die(failure));
+    expect(ErrorKind::InvalidState, be::destroy_library(&library).err());
+    let receipt = be::commit(&commands).unwrap_or_else(|failure| die(failure));
+    expect(ErrorKind::InvalidState, be::destroy_queue(&queue).err());
+    be::complete_through(&queue, receipt.epoch).unwrap_or_else(|failure| die(failure));
+    assert_eq!(readback(0, 8).unwrap_or_else(|failure| die(failure)), [3, 0, 0, 0, 3, 0, 0, 0]);
+    drop(readback);
+    be::destroy_library(&library).unwrap_or_else(|failure| die(failure));
+    be::destroy_sampler(&sampler).unwrap_or_else(|failure| die(failure));
+    be::destroy_texture(&texture).unwrap_or_else(|failure| die(failure));
+    be::destroy_buffer(&plain).unwrap_or_else(|failure| die(failure));
+    be::destroy_queue(&queue).unwrap_or_else(|failure| die(failure));
+    be::destroy_queue(&queue).unwrap_or_else(|failure| die(failure));
+    assert_eq!(be::completed_epoch(&queue), receipt.epoch);
+    assert_eq!(be::buffer_id(&mapped_clone), id);
+    assert!(be::max_total_threads(&pipeline) > 0);
+    expect(ErrorKind::StaleHandle, be::read_buffer(&mapped_clone, 0, 8).err());
+    expect(ErrorKind::InvalidState, be::commit(&commands).err());
+    assert_eq!(live(), device_only, "dead wrappers retained native driver payloads");
+    be::destroy_device(&device).unwrap_or_else(|failure| die(failure));
+    be::destroy_device(&device).unwrap_or_else(|failure| die(failure));
+    assert_eq!(live(), before, "dead device or child wrapper retained the native device");
+}
+
+fn gpu_destroy_preserves_only_escaped_owned_readback() {
+    let before = live();
+    let device = be::create_device(backend::create()).unwrap_or_else(|failure| die(failure));
+    let mapped = be::create_mapped_buffer(&device, buffer_descriptor(8, &[BufferUsage::CopyDst])).unwrap_or_else(|failure| die(failure));
+    let clone = mapped.clone();
+    be::write_buffer(&mapped, 0, &[2, 3, 4, 5, 6, 7, 8, 9]).unwrap_or_else(|failure| die(failure));
+    let readback = be::owned_readback(&mapped).unwrap_or_else(|failure| die(failure));
+    be::destroy_buffer(&mapped).unwrap_or_else(|failure| die(failure));
+    be::destroy_device(&device).unwrap_or_else(|failure| die(failure));
+    assert_eq!(live(), before + 1, "escaped reader must retain only the buffer allocation");
+    expect(ErrorKind::StaleHandle, be::owned_readback(&clone).err());
+    assert!(be::mapped_view(&clone).is_none());
+    let foreign = readback.clone();
+    assert_eq!(std::thread::spawn(move || foreign(2, 4).unwrap()).join().unwrap(), [4, 5, 6, 7]);
+    drop(readback);
+    assert_eq!(be::buffer_size(&clone), 8);
+    assert_eq!(live(), before, "dead mapped wrappers retained their base reader callbacks");
+}
+
 fn gpu_pipeline() {
-    let Ok(device) = Device::system_default() else {
-        println!("ogpu_metal pipeline: skipped (no device)");
-        return;
-    };
+    let device = Device::system_default().unwrap_or_else(|failure| die(failure));
     let other = Device::system_default().unwrap_or_else(|failure| die(failure));
     let before = live();
     let compute_binding = Binding { group: 0, binding: 0, kind: BindingKind::StorageBuffer, visibility: vec![Stage::Compute] };
@@ -233,10 +307,7 @@ fn gpu_pipeline() {
 const ARGUMENT_SOURCE: &str = "#include <metal_stdlib>\nusing namespace metal;\nstruct V { float4 position [[position]]; float2 uv; };\nvertex V scene_vertex(uint i [[vertex_id]]) { constexpr float2 p[3]={{-1.,-1.},{3.,-1.},{-1.,3.}}; V v; v.position=float4(p[i],0.,1.); v.uv=(p[i]+1.)*.5; return v; }\nstruct Args { texture2d<float, access::sample> image [[id(0)]]; sampler sampling [[id(1)]]; };\nfragment float4 scene_fragment_argument(V v [[stage_in]], constant Args &args [[buffer(1)]]) { return args.image.sample(args.sampling, v.uv); }\n";
 
 fn gpu_pipeline_argument_buffer() {
-    let Ok(device) = Device::system_default() else {
-        println!("pipeline argument buffer: skipped (no device)");
-        return;
-    };
+    let device = Device::system_default().unwrap_or_else(|failure| die(failure));
     let before = live();
     let vertex = make_shader("argument", ARGUMENT_SOURCE, &[("scene_vertex", Stage::Vertex)], vec![]);
     let fragment = make_shader(
@@ -276,10 +347,7 @@ fn gpu_pipeline_argument_buffer() {
 }
 
 fn gpu_acceleration() {
-    let Ok(device) = Device::system_default() else {
-        println!("ogpu_metal acceleration: skipped (no device)");
-        return;
-    };
+    let device = Device::system_default().unwrap_or_else(|failure| die(failure));
     let other = Device::system_default().unwrap_or_else(|failure| die(failure));
     let before = live();
     let vertices = buffer::create(&device, buffer::Memory::Shared, &BufferDescriptor { label: Some("triangle".to_owned()), size: 36, usage: vec![BufferUsage::Storage, BufferUsage::Vertex] }).unwrap_or_else(|failure| die(failure));
@@ -377,17 +445,7 @@ fragment float4 sample_mip(texture2d<float> t [[texture(0)]], sampler s [[sample
 fn gpu_sampler_pixels() {
     let driver = backend::create();
     let before = impl_::live_handles();
-    let device = match (driver.create_device)() {
-        Err(failure) if failure.kind == ErrorKind::NoAdapter => {
-            println!("ogpu_metal sampler pixels: skipped (no device)");
-            return;
-        }
-        Err(failure) => panic!("{}", error::to_string(&failure)),
-        Ok(raw) => {
-            (raw.destroy_device)().unwrap_or_else(|failure| die(failure));
-            be::create_device(driver).unwrap_or_else(|failure| die(failure))
-        }
-    };
+    let device = be::create_device(driver).unwrap_or_else(|failure| die(failure));
     {
         let sampler_binding = |binding: i64, kind: BindingKind| Binding { group: 0, binding, kind, visibility: vec![Stage::Fragment] };
         let vertex = make_shader("sampler-pixels", SAMPLER_SOURCE, &[("sample_vertex", Stage::Vertex)], vec![]);
@@ -480,6 +538,7 @@ fn gpu_sampler_pixels() {
             be::end_render(&encoder).unwrap_or_else(|failure| die(failure));
             wait(be::commit(&commands).unwrap_or_else(|failure| die(failure)));
             let actual = be::read_texture(&target, 4).unwrap_or_else(|failure| die(failure));
+            assert_eq!(actual.len(), expected.len(), "{entry}: sampler pixel byte count");
             assert!(
                 expected.iter().zip(actual.iter()).all(|(a, b)| (*a as i32 - *b as i32).abs() <= 1),
                 "{entry} sampled {actual:?}, expected {expected:?}"
@@ -513,5 +572,7 @@ fn main() {
         ("gpu_pipeline_argument_buffer", gpu_pipeline_argument_buffer),
         ("gpu_acceleration", gpu_acceleration),
         ("gpu_sampler_pixels", gpu_sampler_pixels),
+        ("gpu_destroy_releases_retained_driver_payloads", gpu_destroy_releases_retained_driver_payloads),
+        ("gpu_destroy_preserves_only_escaped_owned_readback", gpu_destroy_preserves_only_escaped_owned_readback),
     ]);
 }

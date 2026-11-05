@@ -3,7 +3,7 @@ use crate::port_type::PortType;
 use flow_syntax::context;
 use flow_syntax::macros;
 use flow_syntax::symbol;
-use flow_syntax::syntax::{Node, Syntax};
+use flow_syntax::syntax::{Node, Syntax, SyntaxId};
 use flow_syntax::ty::{self, Ty};
 use param::{self, FieldView, Impact, KindView, Value};
 use rays_diagnostic::{self, Diagnostic};
@@ -41,43 +41,43 @@ fn metadata_string(bytes: &[u8]) -> String {
     if let Ok(text) = std::str::from_utf8(bytes) {
         return text.to_owned();
     }
-    let quoted = flow_syntax::lisp::flat(&flow_syntax::syntax::make(Node::Str(bytes.to_vec())));
+    let quoted = flow_syntax::lisp::quote_string(bytes);
     quoted.strip_prefix('"').and_then(|text| text.strip_suffix('"')).unwrap_or(&quoted).to_owned()
 }
 
 fn text(form: &Syntax) -> Result<String, Diagnostic> {
     match &form.node {
-        Node::Str(bytes) => Ok(metadata_string(bytes)),
+        Node::Str(bytes) => Ok(metadata_string(form.bytes(*bytes))),
         _ => Err(bad(form, "Metadata text must be a string.")),
     }
 }
 
 fn byte_text(form: &Syntax) -> Result<Vec<u8>, Diagnostic> {
     match &form.node {
-        Node::Str(bytes) => Ok(bytes.clone()),
+        Node::Str(bytes) => Ok(form.bytes(*bytes).to_vec()),
         _ => Err(bad(form, "Expected a string value.")),
     }
 }
 
 fn word(form: &Syntax) -> Result<String, Diagnostic> {
     match &form.node {
-        Node::Sym(value) | Node::Kw(value) => Ok(value.clone()),
-        Node::Str(bytes) => Ok(metadata_string(bytes)),
+        Node::Sym(value) | Node::Kw(value) => Ok(form.name(*value).to_owned()),
+        Node::Str(bytes) => Ok(metadata_string(form.bytes(*bytes))),
         _ => Err(bad(form, "Expected a metadata name.")),
     }
 }
 
 fn boolean(form: &Syntax) -> Result<bool, Diagnostic> {
     match &form.node {
-        Node::Sym(value) if value == "true" => Ok(true),
-        Node::Sym(value) if value == "false" => Ok(false),
+        Node::Sym(value) if form.name(*value) == "true" => Ok(true),
+        Node::Sym(value) if form.name(*value) == "false" => Ok(false),
         _ => Err(bad(form, "Expected true or false.")),
     }
 }
 
 fn number(form: &Syntax) -> Result<f64, Diagnostic> {
     match &form.node {
-        Node::Num(value) => match flow_syntax::syntax::number_value(value) {
+        Node::Num(value) => match flow_syntax::syntax::number_value(form.name(*value)) {
             Some(number) if number.is_finite() => Ok(number),
             _ => Err(bad(form, "Expected a finite number.")),
         },
@@ -95,7 +95,7 @@ fn integer(form: &Syntax) -> Result<i64, Diagnostic> {
 
 fn version(form: &Syntax) -> Result<i64, Diagnostic> {
     match &form.node {
-        Node::Num(value) => match value.parse::<i64>() {
+        Node::Num(value) => match form.name(*value).parse::<i64>() {
             Ok(number) if (0..=4_611_686_018_427_387_903).contains(&number) => Ok(number),
             _ => Err(bad(form, "Node version must be a nonnegative integer literal.")),
         },
@@ -106,20 +106,22 @@ fn version(form: &Syntax) -> Result<i64, Diagnostic> {
 fn strings(form: &Syntax) -> Result<Vec<String>, Diagnostic> {
     match &form.node {
         Node::Str(_) => Ok(vec![text(form)?]),
-        Node::Vec(values) => values.iter().map(text).collect(),
+        Node::Vec(values) => form.range(*values).iter().map(|id| text(&form.child(*id))).collect(),
         _ => Err(bad(form, "Expected a string or a vector of strings.")),
     }
 }
 
-fn options(form: &Syntax, allowed: &[&str], values: &[Syntax]) -> Result<Vec<(String, Syntax)>, Diagnostic> {
+fn options(form: &Syntax, allowed: &[&str], values: &[SyntaxId]) -> Result<Vec<(String, Syntax)>, Diagnostic> {
     let mut result = Vec::new();
     let mut at = 0;
     while at < values.len() {
         if at + 1 >= values.len() { return Err(bad(form, "Metadata consists of :key value pairs.")); }
-        let Node::Kw(key) = &values[at].node else { return Err(bad(form, "Metadata consists of :key value pairs.")); };
-        if !allowed.contains(&key.as_str()) { return Err(bad(&values[at], &format!("Unknown metadata :{key}."))); }
-        if result.iter().any(|(seen, _): &(String, Syntax)| seen == key) { return Err(bad(&values[at], &format!("Duplicate metadata :{key}."))); }
-        result.push((key.clone(), values[at + 1].clone())); at += 2;
+        let key_form = form.child(values[at]);
+        let Node::Kw(key) = key_form.node else { return Err(bad(form, "Metadata consists of :key value pairs.")); };
+        let key = key_form.name(key);
+        if !allowed.contains(&key) { return Err(bad(&key_form, &format!("Unknown metadata :{key}."))); }
+        if result.iter().any(|(seen, _): &(String, Syntax)| seen == key) { return Err(bad(&key_form, &format!("Duplicate metadata :{key}."))); }
+        result.push((key.to_owned(), form.child(values[at + 1]))); at += 2;
     }
     Ok(result)
 }
@@ -165,7 +167,7 @@ fn validation(options: &[(String, Syntax)]) -> Result<Vec<Validation>, Diagnosti
 
 fn facts(form: &Syntax) -> Result<catalog::KernelFacts, Diagnostic> {
     let Node::Map(entries) = &form.node else { return Err(bad(form, ":facts is a metadata map.")); };
-    let options = options(form, &["elementwise", "reads", "writes", "topology", "preserves_topology", "exact", "cook-mode"], entries)?;
+    let options = options(form, &["elementwise", "reads", "writes", "topology", "preserves_topology", "exact", "cook-mode"], form.range(*entries))?;
     let elementwise = match options.opt("elementwise").map(word).transpose()?.as_deref() {
         None | Some("none") | Some("irregular") => KernelElements::Irregular,
         Some("points") => KernelElements::Points,
@@ -236,8 +238,9 @@ fn parameter(
     let vec3 = match options.opt("vec3") {
         None => None,
         Some(form) => match &form.node {
-            Node::Vec(pair) if pair.len() == 2 => {
-                let group = text(&pair[0])?; let index = integer(&pair[1])?;
+            Node::Vec(pair) if form.range(*pair).len() == 2 => {
+                let pair = form.range(*pair);
+                let group = text(&form.child(pair[0]))?; let index = integer(&form.child(pair[1]))?;
                 if !(0..=2).contains(&index) { return Err(bad(form, "A vec3 component is 0, 1 or 2.")); }
                 Some((group, index))
             }
@@ -250,7 +253,7 @@ fn parameter(
         None => Vec::new(),
         Some(value) => match &value.node {
             Node::Vec(values) => {
-                let labels: Vec<String> = values.iter().map(text).collect::<Result<_, _>>()?;
+                let labels: Vec<String> = value.range(*values).iter().map(|id| text(&value.child(*id))).collect::<Result<_, _>>()?;
                 let mut unique = labels.clone(); unique.sort(); unique.dedup();
                 if labels.is_empty() || labels.len() != unique.len() { return Err(bad(value, "Choices must be nonempty and unique.")); }
                 labels
@@ -311,10 +314,10 @@ fn parameter(
     if !choices.is_empty() && kind_name != "choice" { return Err(bad(form, ":choices requires kind choice.")); }
     if *ty == Ty::Vec3 {
         match &default_form.node {
-            Node::Vec(values) if values.len() == 3 => {
-                for (index, value_form) in values.iter().enumerate() {
+            Node::Vec(values) if default_form.range(*values).len() == 3 => {
+                for (index, value_id) in default_form.range(*values).iter().enumerate() {
                     let suffix = ["x", "y", "z"][index];
-                    let value = number(value_form)?; bounded(value)?;
+                    let value = number(&default_form.child(*value_id))?; bounded(value)?;
                     fields.push(field_value(format!("{pn}_{suffix}"), format!("{label} {}", suffix.to_ascii_uppercase()), description.clone(), folder.clone(), impact, primary, unit.clone(), Some((pn.into(), index as i64)), kind.clone(), Value::Float(value)));
                 }
             }
@@ -332,24 +335,29 @@ pub fn valid_name(name: &str) -> bool {
 }
 
 pub fn parse(form: &Syntax) -> Result<Defnode, Diagnostic> {
-    let (name, rest) = match &form.node {
-        Node::List(items) if items.len() >= 2 && matches!(&items[0].node, Node::Sym(head) if head == "defnode") && matches!(&items[1].node, Node::Sym(name) if valid_name(name)) => {
-            let Node::Sym(name) = &items[1].node else { return Err(bad(form, "A node is (defnode sop/name :label \"Name\" :category [\"Folder\"] [parameters] body).")); };
-            (name.clone(), &items[2..])
+    let (name, rest) = match form.node {
+        Node::List(range) => {
+            let items = form.range(range);
+            if items.len() < 2 || !matches!(form.child(items[0]).node, Node::Sym(head) if form.name(head) == "defnode") {
+                return Err(bad(form, "A node is (defnode sop/name :label \"Name\" :category [\"Folder\"] [parameters] body)."));
+            }
+            let Node::Sym(name) = form.child(items[1]).node else { return Err(bad(form, "A node is (defnode sop/name :label \"Name\" :category [\"Folder\"] [parameters] body).")); };
+            if !valid_name(form.name(name)) { return Err(bad(form, "A node is (defnode sop/name :label \"Name\" :category [\"Folder\"] [parameters] body).")); }
+            (form.name(name).to_owned(), &items[2..])
         }
         _ => return Err(bad(form, "A node is (defnode sop/name :label \"Name\" :category [\"Folder\"] [parameters] body).")),
     };
-    let mut header_values = Vec::new();
     let mut at = 0;
     while at < rest.len() {
-        if matches!(&rest[at].node, Node::Kw(_)) && at + 1 < rest.len() {
-            header_values.push(rest[at].clone()); header_values.push(rest[at + 1].clone()); at += 2;
+        if matches!(form.child(rest[at]).node, Node::Kw(_)) && at + 1 < rest.len() {
+            at += 2;
         } else { break; }
     }
     if rest.len() != at + 2 { return Err(bad(form, "A defnode needs metadata, a parameter vector and exactly one body.")); }
-    let Node::Vec(parameters_form) = &rest[at].node else { return Err(bad(form, "A defnode needs metadata, a parameter vector and exactly one body.")); };
-    let body = rest[at + 1].clone();
-    let hs = options(form, &["label", "operation", "version", "category", "description", "facts", "validate", "code", "message"], &header_values)?;
+    let parameters = form.child(rest[at]);
+    let Node::Vec(parameters_form) = parameters.node else { return Err(bad(form, "A defnode needs metadata, a parameter vector and exactly one body.")); };
+    let body = form.child(rest[at + 1]);
+    let hs = options(form, &["label", "operation", "version", "category", "description", "facts", "validate", "code", "message"], &rest[..at])?;
     let short = name.rsplit('/').next().unwrap_or(&name);
     let operation = get_text(&hs, "operation", short)?;
     if !symbol::valid_name(&operation) { return Err(bad(form, ":operation is a nonempty stable operation name.")); }
@@ -357,15 +365,17 @@ pub fn parse(form: &Syntax) -> Result<Defnode, Diagnostic> {
     let mut fields = Vec::new(); let mut slots = Vec::new(); let mut keywords = Vec::new(); let mut normalizers = Vec::new();
     let mut validations = validation(&hs)?;
     let mut inputs = Vec::new();
-    for parameter_form in parameters_form {
-        let values = match &parameter_form.node { Node::List(values) => values, _ => return Err(bad(parameter_form, "Each unique input is (name : type default? :metadata value ...).")) };
-        if values.len() < 3 || !matches!(&values[1].node, Node::Sym(colon) if colon == ":") { return Err(bad(parameter_form, "Each unique input is (name : type default? :metadata value ...).")); }
-        let Node::Sym(pn) = &values[0].node else { return Err(bad(parameter_form, "Each unique input is (name : type default? :metadata value ...).")); };
+    for parameter_id in parameters.range(parameters_form) {
+        let parameter_form = &form.child(*parameter_id);
+        let values = match parameter_form.node { Node::List(values) => parameter_form.range(values), _ => return Err(bad(parameter_form, "Each unique input is (name : type default? :metadata value ...).")) };
+        if values.len() < 3 || !matches!(form.child(values[1]).node, Node::Sym(colon) if form.name(colon) == ":") { return Err(bad(parameter_form, "Each unique input is (name : type default? :metadata value ...).")); }
+        let Node::Sym(pn) = form.child(values[0]).node else { return Err(bad(parameter_form, "Each unique input is (name : type default? :metadata value ...).")); };
+        let pn = form.name(pn);
         if !macros::valid_name(pn) || symbol::reserved(pn) || used.iter().any(|seen| seen == pn) { return Err(bad(parameter_form, "Each unique input is (name : type default? :metadata value ...).")); }
-        let ty = ty::of_syntax(&values[2]).ok_or_else(|| bad(parameter_form, "Unknown parameter type."))?;
-        used.push(pn.clone());
+        let ty = ty::of_syntax(&form.child(values[2])).ok_or_else(|| bad(parameter_form, "Unknown parameter type."))?;
+        used.push(pn.to_owned());
         let mut tail = &values[3..];
-        let default = if tail.first().is_some_and(|value| matches!(&value.node, Node::Kw(_))) || tail.is_empty() { None } else { let result = Some(tail[0].clone()); tail = &tail[1..]; result };
+        let default = if tail.first().is_some_and(|id| matches!(form.child(*id).node, Node::Kw(_))) || tail.is_empty() { None } else { let result = Some(form.child(tail[0])); tail = &tail[1..]; result };
         let opts = options(parameter_form, PARAMETER_KEYS, tail)?;
         validations.extend(validation(&opts)?);
         let slot = default.is_none() || ty == ty::geometry() || ty == ty::image() || matches!(ty, Ty::Fn(_));
@@ -375,7 +385,7 @@ pub fn parse(form: &Syntax) -> Result<Defnode, Diagnostic> {
             if ["min", "max", "hard_min", "hard_max", "hard-min", "hard-max", "choices", "kind", "vec3"].iter().any(|key| opts.opt(key).is_some()) { return Err(bad(parameter_form, "Range and kind metadata belongs to parameters with defaults.")); }
             let required = get_bool(&opts, "required", true)?;
             let rest = get_bool(&opts, "rest", false)?;
-            slots.push(Slot { name: pn.clone(), required, rest, ty: if ty == ty::geometry() { None } else { Some(ty.clone()) } });
+            slots.push(Slot { name: pn.to_owned(), required, rest, ty: if ty == ty::geometry() { None } else { Some(ty.clone()) } });
             if get_bool(&opts, "keyword", false)? {
                 let port = match &ty {
                     Ty::Fn(Some(signature)) => PortType::Fn((**signature).clone()),
@@ -383,14 +393,14 @@ pub fn parse(form: &Syntax) -> Result<Defnode, Diagnostic> {
                     _ => return Err(bad(parameter_form, "Keyword slots must have image or typed fn types.")),
                 };
                 if !required || rest { return Err(bad(parameter_form, "Keyword slots must be required and cannot repeat.")); }
-                keywords.push(catalog::Parameter { name: pn.clone(), label: pn.clone(), ty: Some(port), fields: Vec::new(), folder: Vec::new(), primary: true, unit: None });
+                keywords.push(catalog::Parameter { name: pn.to_owned(), label: pn.to_owned(), ty: Some(port), fields: Vec::new(), folder: Vec::new(), primary: true, unit: None });
             }
         } else {
             if ["required", "rest", "keyword"].iter().any(|key| opts.opt(key).is_some()) { return Err(bad(parameter_form, "Only typed slots have :required, :rest and :keyword.")); }
             let default_form = default.as_ref().ok_or_else(|| bad(parameter_form, "Each unique input is (name : type default? :metadata value ...)."))?;
             parameter(parameter_form, pn, &ty, default_form, &opts, &mut fields, &mut normalizers)?;
         }
-        inputs.push((pn.clone(), if slot && get_bool(&opts, "rest", false)? { Ty::List(Box::new(ty)) } else { ty }, default));
+        inputs.push((pn.to_owned(), if slot && get_bool(&opts, "rest", false)? { Ty::List(Box::new(ty)) } else { ty }, default));
     }
     for (index, slot) in slots.iter().enumerate() {
         if slot.rest && index + 1 != slots.len() { return Err(bad(form, "A rest slot must be the final slot.")); }
@@ -516,7 +526,8 @@ mod test_defnode {
         assert!(distance.label == "Distance" && distance.description.as_deref() == Some("Displacement") && distance.folder == vec!["Shape"] && distance.primary && distance.unit.as_deref() == Some("m") && distance.impact == param::Impact::Cook);
         assert!(d.kind.facts.as_ref().unwrap().preserves_topology);
         assert!(d.kind.slots[0].ty.is_none() && !d.kind.slots[0].required);
-        assert!(matches!(&w.graphs[0].body.node, W::Node::Call { kind, .. } if kind == "sop/test_node"));
+        let body = &w.graphs[0].body;
+        assert!(matches!(body.node, W::Node::Call(id) if body.name(body.arena().call(id).kind) == "sop/test_node"));
         good(&c, &source("(defnode sop/test_node [(geo : geometry :rest true)] (sop/merge geo))", "(sop/test_node nil nil)"));
         let grouped = good(&c, &source("(defnode sop/test_node [(geo : geometry)\n    (scale_x : float 1 :vec3 [\"scale\" 0]) (scale_y : float 2 :vec3 [\"scale\" 1])\n    (scale_z : float 3 :vec3 [\"scale\" 2])] geo)", "(sop/test_node nil :scale [4 5 6])"));
         assert_eq!(grouped.nodes[0].kind.parameters.iter().map(|p| p.name.clone()).collect::<Vec<_>>(), vec!["scale"]);
@@ -527,9 +538,13 @@ mod test_defnode {
         assert_eq!(k.keyword_inputs, vec!["image", "field"]);
         assert!(k.kind.parameters.iter().all(|p| p.fields.is_empty() && p.primary));
         let typed_map = good(&c, &source("(defnode sop/typed_map [(geo : geometry) (field : (fn [vec3] vec3))]\n    (let* [mapped (map field (array/vec3 1))] geo))", "nil"));
-        match &typed_map.nodes[0].body.body.node {
-            W::Node::Let(bindings, _) if bindings.len() == 1 => assert_eq!(bindings[0].1.ty, Ty::Array(Box::new(Ty::Vec3))),
-            other => panic!("{other:?}"),
+        let body = &typed_map.nodes[0].body.body;
+        match body.node {
+            W::Node::Let(id) if body.arena().bindings(body.arena().let_node(id).bindings).len() == 1 => {
+                let binding = &body.arena().bindings(body.arena().let_node(id).bindings)[0];
+                assert_eq!(body.child(binding.term).ty(), &Ty::Array(Box::new(Ty::Vec3)));
+            }
+            _ => panic!("{:?}", body.debug_node()),
         }
         for call in ["(let* [field (fn [p] (+ p [1 0 0]))] (sop/rest_fields nil field field))", "(sop/rest_fields nil (list (fn [p] (+ p [1 0 0])) (fn [p] (* p 2))))"] {
             good(&c, &source("(defnode sop/rest_fields [(geo : geometry) (fields : (fn [vec3] vec3) :rest true)] geo)", call));

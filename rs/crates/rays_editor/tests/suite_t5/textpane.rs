@@ -30,11 +30,11 @@ fn small_rosette() -> String {
 }
 
 fn num(s: &str) -> syn::Syntax {
-    syn::make(Node::Num(s.into()))
+    syn::make(syn::Draft::Num(s.into()))
 }
 
 fn printed(source: &[syn::Syntax]) -> String {
-    flow_syntax::lisp::print(source).0
+    flow_syntax::lisp::print(source).unwrap().0
 }
 
 pub fn editor_text() {
@@ -115,7 +115,7 @@ pub fn editor_text() {
     let tab_graph = tab_at(gw < 400, gx + gw - 159, gy, 1);
     env.click(tab_graph);
     check(has(&env.dump(), "graph tab, draft no"), &format!("Graph tab\n{}", env.dump()));
-    let graph_text = T::make_shown(&original.source, "sunflower", None, T::Tab::Graph).text;
+    let graph_text = T::make_shown(&original.source, "sunflower", None, T::Tab::Graph).unwrap().text;
     check(has(&graph_text, "(graph sunflower"), "the Graph tab does not show the graph");
     env.click(area);
     env.step_k(&[Key::Meta], vec![ch('a')]);
@@ -144,7 +144,7 @@ pub fn editor_text() {
     check(has(&env.dump(), "graph tab, draft yes, error"), &format!("a refused graph left the pane\n{}", env.dump()));
     check(same_ws(&env.ws(), &applied_graph), "a refused Graph apply changed the document");
     env.click(discard);
-    let current_graph = T::make_shown(&env.ws().source, "sunflower", None, T::Tab::Graph).text;
+    let current_graph = T::make_shown(&env.ws().source, "sunflower", None, T::Tab::Graph).unwrap().text;
     type_text(&mut env, &replace(&current_graph, "(seeds : int 6)", "(seeds : int 3)"));
     env.step(vec![key(Key::Escape)]);
     env.step_k(&[Key::Meta], vec![ch('z')]);
@@ -155,7 +155,7 @@ pub fn editor_text() {
     check(has(&env.dump(), "draft yes") && has(&env.dump(), "E_DRAFT_CONFLICT"), &format!("an old Graph draft was not retained as a conflict: {}", env.dump()));
     env.click(discard);
     env.click(tab_document);
-    let t = replace(&wd::to_text(&env.ws()), "(seeds : int 8)", "(seeds : int 2)");
+    let t = replace(&wd::to_text(&env.ws()).unwrap(), "(seeds : int 8)", "(seeds : int 2)");
     type_text(&mut env, &t);
     env.d.map(|e| Editor::edit(e, &fe::Op::SetInputDefault { form: "sunflower".into(), input: "seeds".into(), value: num("4") }).expect("edit"));
     let host_edited = env.ws();
@@ -164,23 +164,23 @@ pub fn editor_text() {
     check(same_ws(&env.ws(), &host_edited) && env.undo() == host_label, "an old Document draft overwrote a host edit");
     check(has(&env.dump(), "draft yes") && has(&env.dump(), "E_DRAFT_CONFLICT"), &format!("an old Document draft was not kept as a conflict: {}", env.dump()));
     env.click(discard);
-    let t = replace(&wd::to_text(&env.ws()), "(spread : float 0.062)", "(spread : float 0.07)");
+    let t = replace(&wd::to_text(&env.ws()).unwrap(), "(spread : float 0.062)", "(spread : float 0.07)");
     type_text(&mut env, &t);
     env.d.map(|e| Editor::edit(e, &fe::Op::SetInputDefault { form: "sunflower".into(), input: "seeds".into(), value: num("9") }).expect("edit"));
     env.click(apply);
-    let merged = wd::to_text(&env.ws());
+    let merged = wd::to_text(&env.ws()).unwrap();
     check(has(&merged, "(seeds : int 9)") && has(&merged, "(spread : float 0.07)") && has(&env.dump(), "draft no"), &format!("a draft and a host edit of different values did not merge: {}{merged}", env.dump()));
     type_text(&mut env, &replace(&merged, ":segments 6", ":segments 8"));
     env.d.map(|e| {
         Editor::edit(e, &fe::Op::SetArg { node: vec!["sunflower".into(), "seeds_each".into(), "@result".into()], key: ArgKey::Kw("uniform_scale".into()), sub: vec![], value: num("0.5") }).unwrap_or_else(|m| panic!("{m}"))
     });
     env.click(apply);
-    let merged = wd::to_text(&env.ws());
+    let merged = wd::to_text(&env.ws()).unwrap();
     check(has(&merged, ":segments 8") && has(&merged, ":uniform_scale 0.5") && has(&env.dump(), "draft no"), &format!("an added keyword argument and a draft did not merge: {}{merged}", env.dump()));
     type_text(&mut env, &replace(&merged, ":segments 8", ":segments 9"));
     env.step_k(&[Key::Meta], vec![ch('s')]);
     env.step(vec![]);
-    check(has(&wd::to_text(&env.ws()), ":segments 9") && has(&env.dump(), "draft no"), &format!("Command-S with a draft in the text pane did not apply it: {}", env.dump()));
+    check(has(&wd::to_text(&env.ws()).unwrap(), ":segments 9") && has(&env.dump(), "draft no"), &format!("Command-S with a draft in the text pane did not apply it: {}", env.dump()));
     check(editor_document::preset::list(&presets).len() == 1, "Command-S with the caret in the text pane saved nothing");
     env.close();
     let _ = std::fs::remove_dir_all(&presets);
@@ -241,7 +241,7 @@ pub fn editor_binding() {
     let after = env.ws();
     check(!same_ws(&after, &before) && has(&env.dump(), "draft no"), &format!("coherent cross-binding type change was refused: {}", env.dump()));
     check(printed_binding(&after, &["sunflower", "seeds_each"]) != printed_binding(&before, &["sunflower", "seeds_each"]), "producer was not patched");
-    let reloaded = load(&wd::to_text(&after));
+    let reloaded = load(&wd::to_text(&after).unwrap());
     check(printed_binding(&reloaded, &["sunflower", "head"]) == printed_binding(&after, &["sunflower", "head"]), "Selection patch did not survive serialized reload");
     env.click(((gx + 30) as f64, (gy + gh - 70) as f64));
     env.step(vec![key(Key::Escape)]);
@@ -447,7 +447,7 @@ pub fn editor_literal_scrub() {
         env.step(vec![]);
         let g_a = vec!["g".to_string(), "a".to_string()];
         let pts = ArgKey::Kw("points".into());
-        let shown = T::make_shown(&env.ws().source, "g", Some(&g_a), tab);
+        let shown = T::make_shown(&env.ws().source, "g", Some(&g_a), tab).unwrap();
         let value = fe::arg_text(&shown.source, &g_a, &pts).expect("points");
         let span = shown.spans.iter().find(|(id, _)| *id == value.id).expect("span").1.clone();
         let position = rays_diagnostic::position_of_offset(&shown.text, span.start);
@@ -478,24 +478,25 @@ pub fn editor_literal_scrub() {
         let s = drag(&mut env, 220.);
         scrubbed(&s, "wider");
         let valid = env.ws();
-        check(fe::arg_text(&valid.source, &g_a, &pts).expect("points").node == Node::Num("45".into()), "a growing token lost its repaired span");
+        let points = fe::arg_text(&valid.source, &g_a, &pts).expect("points");
+        check(matches!(points.node, Node::Num(n) if points.name(n) == "45"), "a growing token lost its repaired span");
         let set = |v: &str| fe::Op::SetArg { node: g_a.clone(), key: pts.clone(), sub: vec![], value: num(v) };
         let (source, checked) = fe::apply_checked(&catalog, &before.source, &set("45")).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
         let mut alt = valid.clone();
         alt.source = source;
         alt.checked = std::sync::Arc::new(checked);
-        check(wd::to_text(&valid) == wd::to_text(&alt), "fast text token scrub differs from the full syntax edit");
+        check(wd::to_text(&valid).unwrap() == wd::to_text(&alt).unwrap(), "fast text token scrub differs from the full syntax edit");
         drag(&mut env, 520.);
         check(same_ws(&env.ws(), &valid), "an invalid text token scrub changed the document");
         drag(&mut env, 20.);
         let ws = env.ws();
         let points = fe::arg_text(&ws.source, &g_a, &pts).expect("points");
-        check(points.node == Node::Num("5".into()), &format!("text token scrub in tab {tab_index} did not apply its latest number: {} (at {nx:.1},{ny:.1}; text {:?})", flow_syntax::lisp::flat(&points), shown.text));
+        check(matches!(points.node, Node::Num(n) if points.name(n) == "5"), &format!("text token scrub in tab {tab_index} did not apply its latest number: {} (at {nx:.1},{ny:.1}; text {:?})", flow_syntax::lisp::flat(&points), shown.text));
         let (source, checked) = fe::apply_checked(&catalog, &before.source, &set("5")).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
         let mut alt = ws.clone();
         alt.source = source;
         alt.checked = std::sync::Arc::new(checked);
-        check(wd::to_text(&ws) == wd::to_text(&alt), "text token scrub differs from the full syntax edit");
+        check(wd::to_text(&ws).unwrap() == wd::to_text(&alt).unwrap(), "text token scrub differs from the full syntax edit");
         env.at((nx + 20., ny), vec![Event::Pointer_released(LB, (nx + 20., ny))]);
         env.step(vec![]);
         check(env.undo().as_deref() == Some("Edit text"), "text token scrub lost its history label");
@@ -544,7 +545,7 @@ pub fn editor_text_drop() {
     let original = env.ws();
     let history = env.undo();
     let point = |env: &Env, tab: T::Tab, needle: &str, after: usize| -> (f64, f64) {
-        let text = T::make_shown(&env.ws().source, "b", None, tab).text;
+        let text = T::make_shown(&env.ws().source, "b", None, tab).unwrap().text;
         let lines: Vec<&str> = text.split('\n').collect();
         let l = lines.iter().position(|l| has(l, needle)).expect("line");
         let col = lines[l].find(needle).expect("col");
@@ -643,7 +644,7 @@ pub fn editor_command_click() {
     env.at(graph_tab, vec![Event::Pointer_moved(graph_tab)]);
     env.at(graph_tab, vec![Event::Pointer_pressed(LB, graph_tab), Event::Pointer_released(LB, graph_tab)]);
     env.step(vec![]);
-    let graph = T::make_shown(&env.ws().source, "g", None, T::Tab::Graph);
+    let graph = T::make_shown(&env.ws().source, "g", None, T::Tab::Graph).unwrap();
     let lines: Vec<&str> = graph.text.split('\n').collect();
     let line = lines.iter().position(|l| has(l, "(ref h)")).expect("line");
     let col = find_col(lines[line], "(ref h)", 5);
@@ -688,7 +689,7 @@ pub fn editor_text_find() {
     env.at(tab, vec![Event::Pointer_moved(tab)]);
     env.at(tab, vec![Event::Pointer_pressed(LB, tab), Event::Pointer_released(LB, tab)]);
     env.step(vec![]);
-    let document = |env: &Env| -> String { T::make_shown(&env.ws().source, "g", None, T::Tab::Document).applied.text().to_string() };
+    let document = |env: &Env| -> String { T::make_shown(&env.ws().source, "g", None, T::Tab::Document).unwrap().applied.text().unwrap().to_string() };
     env.click_s(((gx + 200) as f64, (gy + 8) as f64));
     command(&mut env, 'f');
     check(has(&env.line("text"), "find \"\""), &format!("Command-F did not open the bar: {}", env.line("text")));

@@ -112,15 +112,14 @@ fn empty_form() -> Syntax {
 }
 
 fn definition_name(form: &Syntax) -> Option<String> {
-    match &form.node {
-        Node::List(items) => match (items.first().map(|f| &f.node), items.get(1).map(|f| &f.node)) {
-            (Some(Node::Sym(head)), Some(Node::Sym(name)))
-                if head == "defnode" || head == "defn" || head == "defmacro" =>
-            {
-                Some(name.clone())
-            }
-            _ => None,
-        },
+    let items = form.children();
+    if !matches!(form.node, Node::List(_)) || items.len() < 2 {
+        return None;
+    }
+    let head = form.child(items[0]);
+    let name = form.child(items[1]);
+    match (head.node, name.node) {
+        (Node::Sym(h), Node::Sym(n)) if matches!(head.name(h), "defnode" | "defn" | "defmacro") => Some(name.name(n).to_owned()),
         _ => None,
     }
 }
@@ -128,15 +127,15 @@ fn definition_name(form: &Syntax) -> Option<String> {
 /// Names a form mentions, as a set.
 fn mentions(into: &mut HashSet<String>, form: &Syntax) {
     if let Node::Sym(name) = &form.node {
-        into.insert(name.clone());
+        into.insert(form.name(*name).to_owned());
     }
-    for child in syntax::children(form) {
-        mentions(into, child);
+    for &child in form.children() {
+        mentions(into, &form.child(child));
     }
 }
 
 fn size(form: &Syntax) -> i64 {
-    1 + syntax::children(form).into_iter().map(size).sum::<i64>()
+    1 + form.children().iter().map(|&id| size(&form.child(id))).sum::<i64>()
 }
 
 
@@ -287,12 +286,10 @@ fn load_library() -> Result<Library, Diagnostic> {
             d
         })?;
         for form in parsed {
-            let children = match &form.node {
-                Node::List(items) => match (items.first().map(|f| &f.node), items.get(1)) {
-                    (Some(Node::Sym(head)), Some(_)) if head == "workspace" => Some(items[2..].to_vec()),
-                    _ => None,
-                },
-                _ => None,
+            let children = if syntax::head(&form) == Some("workspace") && form.children().len() >= 2 {
+                Some(form.children()[2..].iter().map(|&id| form.child(id)).collect::<Vec<_>>())
+            } else {
+                None
             };
             match children {
                 Some(children) => forms.extend(children),

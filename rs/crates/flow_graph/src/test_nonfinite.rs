@@ -46,10 +46,10 @@ fn nonfinite_literals_round_trip() {
         assert!(card.ty == Ty::Float && p::value_card(&card));
         let row = card.rows[0].clone();
         assert!(row.key == ArgKey::Whole && row.chip == p::Chip::Const);
-        let (printed, spans) = lisp::print(&source);
+        let (printed, spans) = lisp::print(&source).unwrap();
         assert!(printed.contains(';'));
         let reparsed = parse(&printed);
-        assert!(lisp::print(&reparsed).0 == printed && same(expected, &result(&check(&reparsed), 0.0)));
+        assert!(lisp::print(&reparsed).unwrap().0 == printed && same(expected, &result(&check(&reparsed), 0.0)));
         let literal = row.expr.clone().unwrap();
         let mut seven = literal.clone();
         seven.node = Node::Num("7.5".into());

@@ -242,8 +242,8 @@ fn dynamic(body: &str) -> Value {
 }
 fn count_source() -> crate::core_ir::Region::CountSource {
     crate::core_ir::Region::CountSource::new(Arc::new(|_, term| match &term.node {
-        flow_check::workspace::Node::RefBinding(name, fields) if fields.is_empty() && name == "keys" => Some((vec!["fixture".to_string(), "keys".to_string()], vec![])),
-        flow_check::workspace::Node::RefBinding(name, fields) if fields.is_empty() && name == "queries" => Some((vec!["fixture".to_string(), "queries".to_string()], vec![])),
+        flow_check::workspace::Node::RefBinding(id) if term.arena().name_ids(term.arena().ref_binding(*id).fields).is_empty() && term.name(term.arena().ref_binding(*id).name) == "keys" => Some((vec!["fixture".to_string(), "keys".to_string()], vec![])),
+        flow_check::workspace::Node::RefBinding(id) if term.arena().name_ids(term.arena().ref_binding(*id).fields).is_empty() && term.name(term.arena().ref_binding(*id).name) == "queries" => Some((vec!["fixture".to_string(), "queries".to_string()], vec![])),
         _ => None,
     }))
 }

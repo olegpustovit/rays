@@ -55,7 +55,7 @@ fn sketch_text(name: &str) -> String {
 fn load(name: &str) -> Doc::T {
     let source = sketch_text(name);
     let ws = Workspace::load(None, vec![], None, &source).unwrap_or_else(|ds| panic!("{name}: {ds:?}"));
-    assert!(Doc::to_text(&ws) == source, "{name}: load does not print back to its source");
+    assert!(Doc::to_text(&ws).unwrap() == source, "{name}: load does not print back to its source");
     ws
 }
 
@@ -75,7 +75,7 @@ fn save_roundtrip(name: &str) {
     ed = Editor::update(ed, &frame_of(false, name, 2));
     // (the OCaml inode check is POSIX-only: an atomic replace keeps the text and comments)
     assert!(std::fs::read_to_string(&file).unwrap() == source, "{name}: Command-S changed the source file");
-    assert!(Doc::to_text(&Editor::workspace(&ed)) == source, "{name}: the document changed on save");
+    assert!(Doc::to_text(&Editor::workspace(&ed)).unwrap() == source, "{name}: the document changed on save");
     Editor::close(&ed);
     let _ = std::fs::remove_dir_all(&dir);
 }

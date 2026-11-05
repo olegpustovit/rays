@@ -809,7 +809,7 @@ mod tests {
             ),
             &g,
         );
-        add_storage(Detail, "left_text", attribute::Storage::Text(vec!["payload".to_owned()]), &g)
+        add_storage(Detail, "left_text", attribute::Storage::Text(vec![b"payload".to_vec()]), &g)
     }
 
     #[test]
@@ -961,7 +961,7 @@ mod tests {
     #[test]
     fn dense_rename_delete_and_swap_are_exact_across_domains() {
         let base = points(&[(0.0, 0.0, 0.0)]);
-        let attributes: Vec<attribute::T> = (0..2_000_i64)
+        let attributes: Vec<attribute::T> = (0..10_000_i64)
             .map(|index| {
                 let prefix = if index & 1 == 0 { "temporary" } else { "keep" };
                 attribute::create_owned(
@@ -993,7 +993,7 @@ mod tests {
         };
         let (one, many) = (run(1), run(4));
         assert_eq!(names(&one), names(&many));
-        assert_eq!(geometry::attributes(&one).len(), 1_000);
+        assert_eq!(geometry::attributes(&one).len(), 5_000);
         for value in geometry::attributes(&one) {
             let original = find(Detail, &format!("temporary_{}", &attribute::name(&value)[6..11]), &dense);
             assert_eq!(attribute::storage_id(&value), attribute::storage_id(&original));
@@ -1010,7 +1010,7 @@ mod tests {
         };
         let (swap_one, swap_many) = (run_swap(1), run_swap(4));
         assert_eq!(names(&swap_one), names(&swap_many));
-        assert_eq!(geometry::attributes(&swap_one).len(), 3_000);
+        assert_eq!(geometry::attributes(&swap_one).len(), 15_000);
         for value in geometry::attributes(&swap_one) {
             if attribute::name(&value).starts_with("copy_") {
                 let source = find(Detail, &format!("temporary_{}", &attribute::name(&value)[5..10]), &dense);

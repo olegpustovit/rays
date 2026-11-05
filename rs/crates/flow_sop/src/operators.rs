@@ -83,7 +83,7 @@ fn type_argument(args: &Named) -> Result<String, Diagnostic> {
     match find_named(args, "type") {
         None => Ok("vec3".to_owned()),
         Some((_, _, Some(param::Value::Text(kind)))) => {
-            let kind = String::from_utf8_lossy(kind).into_owned();
+            let kind = std::str::from_utf8(kind).map_err(|_| value::fail("E_ATTR_TYPE", "Attribute type must be UTF-8 text."))?.to_owned();
             attribute_kernel::value_type(&kind)?;
             Ok(kind)
         }
@@ -114,13 +114,18 @@ fn planar_values(kind: &str, ty: &Ty) -> bool {
 
 fn validate_args(args: &Args) -> Result<(), Diagnostic> {
     match arg(args, "attribute") {
-        Some(Value::Text(name)) if !blank(&String::from_utf8_lossy(name)) => {}
+        Some(Value::Text(name)) => {
+            let name = std::str::from_utf8(name).map_err(|_| value::fail("E_ATTR_NAME", "Attribute name must be UTF-8 text."))?;
+            if blank(name) {
+                return fail("E_ATTR_NAME", "An attribute needs a nonblank name.");
+            }
+        }
         _ => return fail("E_ATTR_NAME", "An attribute needs a nonblank name."),
     }
     if let Some(owner) = arg(args, "owner") {
         match owner {
             Value::Text(owner) => {
-                attribute_kernel::owner(&String::from_utf8_lossy(owner))?;
+                attribute_kernel::owner(std::str::from_utf8(owner).map_err(|_| value::fail("E_ATTR_OWNER", "Attribute owner must be UTF-8 text."))?)?;
             }
             _ => return fail("E_ATTR_OWNER", "Attribute owner must be text."),
         }
@@ -128,7 +133,7 @@ fn validate_args(args: &Args) -> Result<(), Diagnostic> {
     if let Some(kind) = arg(args, "type") {
         match kind {
             Value::Text(kind) => {
-                attribute_kernel::value_type(&String::from_utf8_lossy(kind))?;
+                attribute_kernel::value_type(std::str::from_utf8(kind).map_err(|_| value::fail("E_ATTR_TYPE", "Attribute type must be UTF-8 text."))?)?;
             }
             _ => return fail("E_ATTR_TYPE", "Attribute type must be text."),
         }
@@ -1340,16 +1345,14 @@ mod parity {
     static SOURCES: LazyLock<Vec<Syntax>> = LazyLock::new(|| {
         let text = include_str!("../../../../lib/flow_sop/nodes/prelude.rays");
         let forms = syntax::parse(text).unwrap();
-        syntax::children(&forms[0])
-            .into_iter()
+        forms[0].children().iter().map(|&id| forms[0].child(id))
             .filter(|form| {
                 syntax::head(form) == Some("defn")
                     && !matches!(
-                        syntax::children(form).as_slice(),
-                        [_, _, Syntax { node: SNode::Kw(k), .. }, Syntax { node: SNode::Sym(s), .. }, ..] if k == "context" && s == "sop"
+                        form.children(),
+                        [_, _, k, s, ..] if matches!(form.arena().row(*k).node, SNode::Kw(name) if form.name(name) == "context") && matches!(form.arena().row(*s).node, SNode::Sym(name) if form.name(name) == "sop")
                     )
             })
-            .cloned()
             .collect()
     });
 
@@ -1428,61 +1431,55 @@ mod parity {
         (0..count).map(|i| b[i % b.len()] + (i / b.len()) as i64).collect()
     }
 
-    #[test]
-    fn rand_at_agrees_with_native_at_one_and_eight_domains() {
-        let count = 1000;
-        let mapped = value(None, &format!("(map (fn [i] (rand_at (frame/index) i)) (array/range {count} :type int))"));
-        let program = compile(&mapped);
-        for seed in [0, 1, 42, MAX_INT] {
-            let live = at_frame(seed);
-            let expected: Vec<f64> = (0..count as i64).map(|index| native(seed, index)).collect();
-            same(&expected, &reference(&mapped, &live).unwrap());
-            domains(&|| same(&expected, &force(&program, &live).unwrap()));
-        }
-        for seed in [MIN_INT, MIN_INT + 1, 0, 1, 42, MAX_INT] {
-            for index in bases() {
-                match value(None, &format!("(rand_at {seed} {index})")) {
-                    Value::Float(actual) => assert_eq!(actual.to_bits(), native(seed, index).to_bits(), "seed {seed} index {index}"),
-                    other => panic!("float expected, got {other:?}"),
-                }
-            }
-        }
-        let indices = indices(600); // the walker reference costs ~0.4 ms an element in debug builds
-        let (mapped, program) = map(None, Ty::Int, Value::Int_array(Arc::new(indices.clone())), "(rand_at (frame/index) i)");
-        for seed in [MIN_INT, 0, 42, MAX_INT] {
-            // Frame indices are nonnegative; signed seeds remain exact captured Int uniforms.
-            let (mapped, program, live) = if seed < 0 {
-                let (m, p) = map(Some(seed), Ty::Int, Value::Int_array(Arc::new(indices.clone())), "(rand_at seed i)");
-                (m, p, input::at_time(0.0))
-            } else {
-                (mapped.clone(), program.clone(), at_frame(seed))
-            };
-            let expected: Vec<f64> = indices.iter().map(|index| native(seed, *index)).collect();
-            same(&expected, &reference(&mapped, &live).unwrap());
-            domains(&|| same(&expected, &force(&program, &live).unwrap()));
-        }
+    fn random_proof(mapped:&Value,program:&packed::T,live:&input::Frame,expected:&[f64]){
+        same(expected,&reference(mapped,live).unwrap());
+        domains(&||same(expected,&force(program,live).unwrap()));
+        js_exact(program,live,expected);
     }
-
-    #[test]
-    fn rand_at_primitive_agrees_with_native() {
-        let count = 3000;
-        let indices = indices(600);
-        for seed in [MIN_INT, 0, 42, MAX_INT] {
-            let (mapped, program) = map(Some(seed), Ty::Int, Value::Int_array(Arc::new(indices.clone())), "(rand/at (int/add seed (frame/index)) i)");
-            let live = input::at_time(0.0);
-            let expected: Vec<f64> = indices.iter().map(|index| native(seed, *index)).collect();
-            same(&expected, &reference(&mapped, &live).unwrap());
-            domains(&|| same(&expected, &force(&program, &live).unwrap()));
-            for index in bases() {
-                match value(None, &format!("(rand/at {seed} {index})")) {
-                    Value::Float(actual) => assert_eq!(actual.to_bits(), native(seed, index).to_bits()),
-                    other => panic!("float expected, got {other:?}"),
-                }
+    fn rand_range(seed:i64){
+        let count=100000;
+        let mapped=value(None,&format!("(map (fn [i] (rand_at (frame/index) i)) (array/range {count} :type int))"));
+        let program=compile(&mapped);let live=at_frame(seed);
+        let expected=(0..count).map(|i|native(seed,i)).collect::<Vec<_>>();
+        random_proof(&mapped,&program,&live,&expected);
+    }
+    fn rand_indices(seed:i64,primitive:bool){
+        let indices=indices(100000);let input=Value::Int_array(Arc::new(indices.clone()));
+        let(mapped,program,live)=if primitive{
+            let(m,p)=map(Some(seed),Ty::Int,input,"(rand/at (int/add seed (frame/index)) i)");(m,p,input::at_time(0.))
+        }else if seed<0{
+            let(m,p)=map(Some(seed),Ty::Int,input,"(rand_at seed i)");(m,p,input::at_time(0.))
+        }else{
+            let(m,p)=map(None,Ty::Int,input,"(rand_at (frame/index) i)");(m,p,at_frame(seed))
+        };
+        let expected=indices.iter().map(|i|native(seed,*i)).collect::<Vec<_>>();
+        random_proof(&mapped,&program,&live,&expected);
+    }
+    macro_rules! random_seed {
+        ($module:ident,$seed:expr)=>{
+            mod $module {use super::*;
+                #[test]fn helper_indices(){rand_indices($seed,false)}
+                #[test]fn primitive_indices(){rand_indices($seed,true)}
             }
-        }
+        };
+    }
+    random_seed!(random_minimum,MIN_INT);random_seed!(random_zero,0);random_seed!(random_42,42);random_seed!(random_maximum,MAX_INT);
+    #[test]fn random_range_zero(){rand_range(0)}
+    #[test]fn random_range_one(){rand_range(1)}
+    #[test]fn random_range_42(){rand_range(42)}
+    #[test]fn random_range_maximum(){rand_range(MAX_INT)}
+    #[test]fn random_scalar_signed_boundaries(){
+        for seed in [MIN_INT,MIN_INT+1,0,1,42,MAX_INT]{for index in bases(){for op in ["rand_at","rand/at"]{
+            let Value::Float(actual)=value(None,&format!("({op} {seed} {index})"))else{panic!("float expected")};
+            assert_eq!(actual.to_bits(),native(seed,index).to_bits(),"{op} seed{seed}/index{index}");
+        }}}
+    }
+    #[test]
+    fn random_three_outputs_match_native(){
+        let count=100000;
         let mapped = value(
             None,
-            "(map (fn [(i : int)] [(rand/at (int/add 42 (frame/index)) i) (rand/at (int/add 43 (frame/index)) i) (rand/at (int/add 44 (frame/index)) i)]) (array/range 3000 :type int))",
+            "(map (fn [(i : int)] [(rand/at (int/add 42 (frame/index)) i) (rand/at (int/add 43 (frame/index)) i) (rand/at (int/add 44 (frame/index)) i)]) (array/range 100000 :type int))",
         );
         let program = compile(&mapped);
         let live = input::at_time(0.0);
@@ -1491,6 +1488,11 @@ mod parity {
             Value::Vec3_array(actual) => same(&expected, &Value::Float_array(actual)),
             other => panic!("vec3 array expected, got {other:?}"),
         });
+    }
+    #[test]
+    fn random_exact_seed_and_index_columns(){
+        let indices=indices(100000);
+        let live=input::at_time(0.0);
         let b = bases();
         let seeds: Vec<i64> = (0..indices.len()).map(|i| b[i / 7 % b.len()] + (i / b.len()) as i64).collect();
         let Value::Fn(f) = value(None, "(fn [(s : int) (i : int)] (if (int/lt s 0) (rand/at s (int/add i (frame/index))) (rand/at s (int/sub i (frame/index)))))") else {
@@ -1500,8 +1502,7 @@ mod parity {
         let mapped = e::Host::map_function(None, None, &signature, f, &[Value::Int_array(Arc::new(seeds.clone())), Value::Int_array(Arc::new(indices.clone()))]).unwrap();
         let program = compile(&mapped);
         let expected: Vec<f64> = seeds.iter().zip(&indices).map(|(s, i)| native(*s, *i)).collect();
-        same(&expected, &reference(&mapped, &live).unwrap());
-        domains(&|| same(&expected, &force(&program, &live).unwrap()));
+        random_proof(&mapped,&program,&live,&expected);
     }
 
     fn points(count: usize) -> Vec<(f64, f64, f64)> {
@@ -1513,10 +1514,8 @@ mod parity {
         Value::Vec3_array(Arc::new(points.iter().flat_map(|(x, y, z)| [*x, *y, *z]).collect()))
     }
 
-    #[test]
-    fn noise3_strict_packed_matches_the_reference() {
-        let all = points(2000);
-        let special = &all[..6];
+    fn noise3_strict_packed_matches_the_reference(seed:i64,octaves:i64,lacunarity:f64,gain:f64,special_only:bool) {
+        let all = points(if special_only {6}else{100000});
         let check = |pts: &[(f64, f64, f64)], seed: i64, octaves: i64, lacunarity: f64, gain: f64| {
             let (mapped, program) = map(
                 None,
@@ -1540,20 +1539,40 @@ mod parity {
                 assert!((native - expected[i]).abs() / ulp <= 4.0, "noise3 seed{seed}/octaves{octaves}/index{i}: native {native:.17} vs Lisp {:.17}", expected[i]);
             }
         };
-        for octaves in [1, 4, 32] {
-            check(&all, 42, octaves, 2.0, 0.5);
-        }
-        for seed in [0, 1, 42] {
-            for octaves in [1, 4, 32] {
-                check(special, seed, octaves, 2.0, 0.5);
-            }
-        }
-        for (lacunarity, gain) in [(1.7, 0.62), (3.0, 0.0), (0.5, 1.0), (2.0, 1.0), (2.31, 0.25)] {
-            for octaves in [2, 5, 32] {
-                check(&all, 7, octaves, lacunarity, gain);
-            }
-        }
+        check(&all,seed,octaves,lacunarity,gain);
     }
+    macro_rules! noise_case {
+        ($name:ident,$seed:expr,$octaves:expr,$lacunarity:expr,$gain:expr,$special:expr)=>{
+            #[test]fn $name(){noise3_strict_packed_matches_the_reference($seed,$octaves,$lacunarity,$gain,$special)}
+        };
+    }
+    noise_case!(noise_default_octave1,42,1,2.,0.5,false);
+    noise_case!(noise_default_octave4,42,4,2.,0.5,false);
+    noise_case!(noise_default_octave32,42,32,2.,0.5,false);
+    noise_case!(noise_special_seed0_octave1,0,1,2.,0.5,true);
+    noise_case!(noise_special_seed0_octave4,0,4,2.,0.5,true);
+    noise_case!(noise_special_seed0_octave32,0,32,2.,0.5,true);
+    noise_case!(noise_special_seed1_octave1,1,1,2.,0.5,true);
+    noise_case!(noise_special_seed1_octave4,1,4,2.,0.5,true);
+    noise_case!(noise_special_seed1_octave32,1,32,2.,0.5,true);
+    noise_case!(noise_special_seed42_octave1,42,1,2.,0.5,true);
+    noise_case!(noise_special_seed42_octave4,42,4,2.,0.5,true);
+    noise_case!(noise_special_seed42_octave32,42,32,2.,0.5,true);
+    noise_case!(noise_lacunarity17_octave2,7,2,1.7,0.62,false);
+    noise_case!(noise_lacunarity17_octave5,7,5,1.7,0.62,false);
+    noise_case!(noise_lacunarity17_octave32,7,32,1.7,0.62,false);
+    noise_case!(noise_zero_gain_octave2,7,2,3.,0.,false);
+    noise_case!(noise_zero_gain_octave5,7,5,3.,0.,false);
+    noise_case!(noise_zero_gain_octave32,7,32,3.,0.,false);
+    noise_case!(noise_lacunarity05_octave2,7,2,0.5,1.,false);
+    noise_case!(noise_lacunarity05_octave5,7,5,0.5,1.,false);
+    noise_case!(noise_lacunarity05_octave32,7,32,0.5,1.,false);
+    noise_case!(noise_unit_gain_octave2,7,2,2.,1.,false);
+    noise_case!(noise_unit_gain_octave5,7,5,2.,1.,false);
+    noise_case!(noise_unit_gain_octave32,7,32,2.,1.,false);
+    noise_case!(noise_lacunarity231_octave2,7,2,2.31,0.25,false);
+    noise_case!(noise_lacunarity231_octave5,7,5,2.31,0.25,false);
+    noise_case!(noise_lacunarity231_octave32,7,32,2.31,0.25,false);
 
     /// `Float.frexp`: mantissa in [0.5, 1) and exponent, for finite nonzero values.
     fn frexp(x: f64) -> (f64, i32) {
@@ -1583,7 +1602,7 @@ mod parity {
         }
         // a live lacunarity and gain are the region's registers: one program whose bytes at each
         // time, and whose refusal, are the walker's
-        let all = points(2000);
+        let all = points(100000);
         let input = vec3_input(&all);
         let (mapped, program) = map(None, Ty::Vec3, input.clone(), "(noise3 i :seed 7 :octaves 5 :lacunarity (+ 1.7 t) :gain (- 0.62 t))");
         for time in [0.0, 0.25] {
@@ -1632,44 +1651,50 @@ mod parity {
         }
     }
 
-    #[test]
-    #[ignore = "slow in debug (parity sweep over every packed math op); unchanged by this pass"]
-    fn packed_math_matches_reference_bytes_and_invalid_domains_refuse() {
-        let count = 4097;
-        let scalar = Value::Float_array(Arc::new((0..count).map(|i| if i == 0 { -0.0 } else { (i as f64 * 0.31).sin() * 0.8 }).collect()));
-        let vectors = Value::Vec3_array(Arc::new(
-            (0..count * 3).map(|i| if i < 3 { -0.0 } else { (i as f64 * 0.73).sin() * 2f64.powi((i % 40) as i32 - 20) }).collect(),
-        ));
-        let mut cases: Vec<(Ty, Ty, Value, &str)> = [
-            "(tan (+ x t))",
-            "(atan2 x t)",
-            "(asin (* (+ x t) 0.25))",
-            "(acos (* (+ x t) 0.25))",
-            "(exp (+ x t))",
-            "(log (+ (+ x t) 4.0))",
-            "(sign (+ x t))",
-            "(hypot x t)",
-        ]
-        .into_iter()
-        .map(|body| (Ty::Float, Ty::Float, scalar.clone(), body))
-        .collect();
-        cases.extend([
-            (Ty::Vec3, Ty::Float, vectors.clone(), "(dot x [t 0.3 -0.2])"),
-            (Ty::Vec3, Ty::Vec3, vectors.clone(), "(cross x [t 0.3 -0.2])"),
-            (Ty::Vec3, Ty::Vec3, vectors.clone(), "(normalize (+ x [t 0.0 0.0]))"),
-            (Ty::Vec3, Ty::Vec3, vectors, "(normalize (+ x [(float (frame/index)) t 0.0]))"),
-        ]);
-        let only_normalize = std::env::var("RAYS_NORMALIZE_PARITY").is_ok();
-        for (input_ty, output_ty, input, body) in cases {
-            // ponytail: packed normalize differs from the reference at time -0 (flow_ir); run with RAYS_NORMALIZE_PARITY=1
-            if body.starts_with("(normalize") != only_normalize { continue; }
-            let (mapped, program) = math_compile(input_ty, output_ty, input, body);
-            for time in [-0.0, 0.0, 0.37, 1.0] {
-                let live = input::at_time(time);
-                let expected = bytes(&reference(&mapped, &live).unwrap());
-                domains(&|| assert_eq!(bytes(&force(&program, &live).unwrap_or_else(|d| panic!("{body}: {}: {}", d.code, d.message))), expected, "{body} differs at {time}"));
+    fn packed_math_case(body: &str, input_ty: Ty, output_ty: Ty, time: f64) {
+        let count = 32769;
+        let input = if input_ty == Ty::Float {
+            Value::Float_array(Arc::new((0..count).map(|i| if i == 0 { -0.0 } else { (i as f64 * 0.31).sin() * 0.8 }).collect()))
+        } else {
+            Value::Vec3_array(Arc::new((0..count * 3).map(|i| if i < 3 { -0.0 } else { (i as f64 * 0.73).sin() * 2f64.powi((i % 40) as i32 - 20) }).collect()))
+        };
+        let (mapped, program) = math_compile(input_ty, output_ty, input, body);
+        let live = input::at_time(time);
+        let expected = bytes(&reference(&mapped, &live).unwrap());
+        domains(&|| {
+            let actual = bytes(&force(&program, &live).unwrap_or_else(|d| panic!("{body}: {}: {}", d.code, d.message)));
+            assert_eq!(actual.len(), expected.len());
+            for (lane, (actual, expected)) in actual.iter().zip(&expected).enumerate() {
+                assert_eq!(actual, expected, "{body} at time bits {:016x}, lane {lane}: actual {:016x}, reference {:016x}", time.to_bits(), actual, expected);
             }
-        }
+        });
+    }
+    macro_rules! math_cases {
+        ($module:ident, $body:literal, $input:expr, $output:expr) => {
+            mod $module {
+                use super::*;
+                #[test] fn negative_zero() { packed_math_case($body, $input, $output, -0.0); }
+                #[test] fn zero() { packed_math_case($body, $input, $output, 0.0); }
+                #[test] fn fractional() { packed_math_case($body, $input, $output, 0.37); }
+                #[test] fn one() { packed_math_case($body, $input, $output, 1.0); }
+            }
+        };
+    }
+    math_cases!(packed_tan, "(tan (+ x t))", Ty::Float, Ty::Float);
+    math_cases!(packed_atan2, "(atan2 x t)", Ty::Float, Ty::Float);
+    math_cases!(packed_asin, "(asin (* (+ x t) 0.25))", Ty::Float, Ty::Float);
+    math_cases!(packed_acos, "(acos (* (+ x t) 0.25))", Ty::Float, Ty::Float);
+    math_cases!(packed_exp, "(exp (+ x t))", Ty::Float, Ty::Float);
+    math_cases!(packed_log, "(log (+ (+ x t) 4.0))", Ty::Float, Ty::Float);
+    math_cases!(packed_sign, "(sign (+ x t))", Ty::Float, Ty::Float);
+    math_cases!(packed_hypot, "(hypot x t)", Ty::Float, Ty::Float);
+    math_cases!(packed_dot, "(dot x [t 0.3 -0.2])", Ty::Vec3, Ty::Float);
+    math_cases!(packed_cross, "(cross x [t 0.3 -0.2])", Ty::Vec3, Ty::Vec3);
+    math_cases!(packed_normalize, "(normalize (+ x [t 0.0 0.0]))", Ty::Vec3, Ty::Vec3);
+    math_cases!(packed_normalize_frame, "(normalize (+ x [(float (frame/index)) t 0.0]))", Ty::Vec3, Ty::Vec3);
+
+    #[test]
+    fn packed_hypot_extremes_and_invalid_domains_refuse() {
         let (mapped, program) = math_compile(Ty::Float, Ty::Float, Value::Float_array(Arc::new(vec![1e308, 1e-300, f64::from_bits(1), -0.0])), "(hypot x (+ x t))");
         let live = input::at_time(0.0);
         let expected = bytes(&reference(&mapped, &live).unwrap());
@@ -1695,7 +1720,7 @@ mod parity {
             (limit, limit, -limit, limit),
         ];
         let input = Value::Vec4_array(Arc::new(
-            (0..4097 * 4)
+            (0..32769 * 4)
                 .map(|index| {
                     let (x, y, z, w) = cases[index / 4 % cases.len()];
                     [x, y, z, w][index % 4]
@@ -1706,5 +1731,64 @@ mod parity {
         let live = input::at_time(0.0);
         let expected = bytes(&reference(&mapped, &live).unwrap());
         domains(&|| assert_eq!(bytes(&force(&program, &live).unwrap()), expected));
+    }
+    fn fma_proof(input_ty:Ty,output_ty:Ty,input:Value,body:&str,expected:Vec<f64>){
+        use flow_ir::flow_ir::Executor;
+        let(value,program)=math_compile(input_ty,output_ty,input,body);
+        let compiled=Executor::compile(&value,&Executor::CompileOptions{strict:true,..Default::default()}).unwrap();
+        let live=input::at_time(0.0);
+        let check=|actual:Value|{
+            let actual=bytes(&actual);assert_eq!(actual.len(),expected.len());
+            for(i,(a,e))in actual.iter().zip(&expected).enumerate(){assert_eq!(*a,e.to_bits(),"{body} lane{i}");}
+        };
+        check(reference(&value,&live).unwrap());
+        for domains in [1,4,8]{parallel::run_unit(Some(domains),&||{
+            check(force(&program,&live).unwrap());
+            check(Executor::force(&compiled,&Executor::ForceOptions{strict:true,..Default::default()},&live).unwrap());Ok(())
+        }).unwrap();}
+        assert!(!packed::gpu_refusals(false,false,&program).is_empty(),"binary64 FMA must refuse fast GPU export");
+        js_exact(&program,&live,&expected);
+    }
+    fn js_exact(program:&packed::T,live:&input::Frame,expected:&[f64]){
+        let inputs=packed::host::prepare_values(program,&Default::default(),live).unwrap();
+        let js_value=|v:&Value|match v{
+            Value::Int(n)=>format!("{n}n"),Value::Float(x)=>flow_syntax::lisp::float(*x),
+            Value::Vec2(x,y)=>format!("[{},{}]",flow_syntax::lisp::float(*x),flow_syntax::lisp::float(*y)),
+            Value::Vec3(x,y,z)=>format!("[{},{},{}]",flow_syntax::lisp::float(*x),flow_syntax::lisp::float(*y),flow_syntax::lisp::float(*z)),
+            Value::Vec4(x,y,z,w)=>format!("[{},{},{},{}]",flow_syntax::lisp::float(*x),flow_syntax::lisp::float(*y),flow_syntax::lisp::float(*z),flow_syntax::lisp::float(*w)),
+            _=>panic!("numeric uniform expected")
+        };
+        let arrays=inputs.arrays.iter().map(|a|match a{
+            Value::Float_array(xs)|Value::Vec3_array(xs)|Value::Vec4_array(xs)=>format!("Float64Array.from([{}])",xs.iter().map(|x|flow_syntax::lisp::float(*x)).collect::<Vec<_>>().join(",")),
+            Value::Int_array(xs)=>format!("BigInt64Array.from([{}])",xs.iter().map(|x|format!("{x}n")).collect::<Vec<_>>().join(",")),
+            _=>panic!("numeric input array expected")
+        }).collect::<Vec<_>>().join(",");
+        let mut uniforms=inputs.uniforms.iter().map(|v|{let s=js_value(v);if matches!(v,Value::Vec2(..)|Value::Vec3(..)|Value::Vec4(..)){s}else{format!("[{s}]")}}).collect::<Vec<_>>();
+        uniforms.push(format!("[{}]",inputs.frame.iter().map(js_value).collect::<Vec<_>>().join(",")));
+        let script=format!("const b=new DataView(new ArrayBuffer(8));const bits=x=>{{b.setFloat64(0,x,true);return b.getBigUint64(0,true)}};\n{}\nconst out=new Float64Array({}),ins=[{}],uni=[{}];if(region(ins,uni,[out],0,{})!==0||region(ins,uni,[out],{},{})!==0)throw Error('region refused');const expected=[{}];for(let i=0;i<out.length;i++)if(bits(out[i])!==expected[i])throw Error('region bits '+i);",
+            flow_web::js::region(false,program).unwrap(),expected.len(),arrays,uniforms.join(","),inputs.count/2,inputs.count/2,inputs.count,expected.iter().map(|x|format!("0x{:x}n",x.to_bits())).collect::<Vec<_>>().join(","));
+        use std::io::Write;
+        let mut child=std::process::Command::new("node").stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn().expect("Node is required for actual JavaScript parity");
+        child.stdin.take().unwrap().write_all(script.as_bytes()).unwrap();
+        let out=child.wait_with_output().unwrap();assert!(out.status.success(),"{}",String::from_utf8_lossy(&out.stderr));
+    }
+    fn cross_fma(body:&str){
+        let cases:[[f64;3];4]=[[0.,0.,0.],[-0.,0.,-0.],[0.3,-0.7,1.2],[1e-150,-2e-150,3e-150]];
+        let input=(0..5001*3).map(|i|cases[i/3%4][i%3]).collect::<Vec<_>>();
+        let expected=(0..5001*3).map(|i|{let[x,y,z]=cases[i/3%4];[(-z).mul_add(y,y*z),(-x).mul_add(z,z*x),(-y).mul_add(x,x*y)][i%3]}).collect();
+        fma_proof(Ty::Vec3,Ty::Vec3,Value::Vec3_array(Arc::new(input)),body,expected);
+    }
+    #[test]fn cross_intrinsic_native_fma_all_tiers_js(){cross_fma("(cross x x)")}
+    #[test]fn cross_helper_native_fma_all_tiers_js(){cross_fma("(vec3_cross x x)")}
+    #[test]fn matrix_native_fma_all_tiers_js(){
+        let rows:[[f64;4];3]=[[-0.,0.,-0.,0.],[0.3,-0.7,1.2,-0.5],[1e-150,-2e-150,3e-150,-4e-150]];
+        let right=[[2.,3.,-1.,4.],[5.,-2.,6.,-3.],[1.,4.,3.,2.],[0.2,-0.1,0.4,2.]];
+        let input=(0..5001*4).map(|i|rows[i/4%3][i%4]).collect::<Vec<_>>();
+        let expected=(0..5001*4).map(|i|{let mut out=0.;for k in 0..4{out=rows[i/4%3][k].mul_add(right[k][i%4],out);}out}).collect();
+        fma_proof(Ty::Vec4,Ty::Vec4,Value::Vec4_array(Arc::new(input)),"(get (mat4_mul {:r0 x :r1 [0.0 0.0 0.0 0.0] :r2 [0.0 0.0 0.0 0.0] :r3 [0.0 0.0 0.0 0.0]} {:r0 [2.0 3.0 -1.0 4.0] :r1 [5.0 -2.0 6.0 -3.0] :r2 [1.0 4.0 3.0 2.0] :r3 [0.2 -0.1 0.4 2.0]}) :r0)",expected);
+    }
+    #[test]fn cross_overflow_refuses_both_execution_tiers(){
+        let(value,program)=math_compile(Ty::Vec3,Ty::Vec3,Value::Vec3_array(Arc::new(vec![0.,f64::MAX,0.])),"(cross x [0.0 0.0 2.0])");
+        let live=input::at_time(0.0);for result in [reference(&value,&live),force(&program,&live)]{assert_eq!(result.unwrap_err().code,"E_NONFINITE");}
     }
 }

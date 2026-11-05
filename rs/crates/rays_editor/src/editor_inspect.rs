@@ -37,24 +37,13 @@ pub type Path = Vec<String>;
 pub use editor_document::document::Level;
 
 fn sym(name: &str) -> S {
-    s::make(SNode::Sym(name.to_owned()))
-}
-fn kw(name: &str) -> S {
-    s::make(SNode::Kw(name.to_owned()))
+    s::make(s::Draft::Sym(name.to_owned()))
 }
 fn num(text: &str) -> S {
-    s::make(SNode::Num(text.to_owned()))
+    s::make(s::Draft::Num(text.to_owned()))
 }
 fn string(text: &str) -> S {
-    s::make(SNode::Str(text.as_bytes().to_vec()))
-}
-fn list(items: Vec<S>) -> S {
-    s::make(SNode::List(items.into()))
-}
-fn call(head: &str, args: Vec<S>) -> S {
-    let mut items = vec![sym(head)];
-    items.extend(args);
-    list(items)
+    s::make(s::Draft::Str(text.as_bytes().to_vec()))
 }
 fn text_value(t: &str) -> Value {
     Value::Text(t.as_bytes().to_vec())
@@ -251,22 +240,18 @@ pub fn new_material(value: &Model) -> (String, fe::Op) {
         }
         i += 1;
     };
-    // (graph name :context material (material/standard :name "name" :color "#cccccc" :roughness 0.4))
-    let form = list(vec![
-        sym("graph"),
-        sym(&name),
-        kw("context"),
-        sym("material"),
-        list(vec![
-            sym("material/standard"),
-            kw("name"),
-            string(&name),
-            kw("color"),
-            string("#cccccc"),
-            kw("roughness"),
-            num("0.4"),
-        ]),
-    ]);
+    use s::Draft;
+    let mut builder = s::SyntaxBuilder::new();
+    let body: Vec<_> = [
+        Draft::Sym("material/standard".into()), Draft::Kw("name".into()), Draft::Str(name.as_bytes().to_vec()),
+        Draft::Kw("color".into()), Draft::Str(b"#cccccc".to_vec()), Draft::Kw("roughness".into()), Draft::Num("0.4".into()),
+    ].into_iter().map(|draft| builder.push_draft(0, draft, Default::default(), None)).collect();
+    let body = builder.push_draft(0, Draft::List(body), Default::default(), None);
+    let mut items: Vec<_> = [Draft::Sym("graph".into()), Draft::Sym(name.clone()), Draft::Kw("context".into()), Draft::Sym("material".into())]
+        .into_iter().map(|draft| builder.push_draft(0, draft, Default::default(), None)).collect();
+    items.push(body);
+    let id = builder.push_draft(0, Draft::List(items), Default::default(), None);
+    let form = builder.freeze().handle(id);
     (name.clone(), fe::Op::SetGraph { name, form })
 }
 
@@ -282,43 +267,69 @@ pub fn new_graph(value: &Model, context: &str) -> (String, fe::Op) {
         }
         i += 1;
     };
-    let vec3 = |items: [&str; 3]| s::make(SNode::Vec(items.iter().map(|x| num(x)).collect()));
+    use s::Draft;
+    let mut builder = s::SyntaxBuilder::new();
     let body = match context {
-        "sop" => call("sop/box", vec![]),
-        "draw" => call("draw/background", vec![string("#111318")]),
-        "image" => call(
-            "image/noise",
-            vec![kw("width"), num("256"), kw("height"), num("256"), kw("frequency"), num("0.03"), kw("seed"), num("1")],
-        ),
-        "value" => num("1"),
-        "material" => call(
-            "material/standard",
-            vec![kw("name"), string(&name), kw("color"), string("#cccccc"), kw("roughness"), num("0.4")],
-        ),
+        "value" => builder.push_draft(0, Draft::Num("1".into()), Default::default(), None),
+        "sop" | "draw" | "image" | "material" => {
+            let atoms = match context {
+                "sop" => vec![Draft::Sym("sop/box".into())],
+                "draw" => vec![Draft::Sym("draw/background".into()), Draft::Str(b"#111318".to_vec())],
+                "image" => vec![Draft::Sym("image/noise".into()), Draft::Kw("width".into()), Draft::Num("256".into()), Draft::Kw("height".into()), Draft::Num("256".into()), Draft::Kw("frequency".into()), Draft::Num("0.03".into()), Draft::Kw("seed".into()), Draft::Num("1".into())],
+                _ => vec![Draft::Sym("material/standard".into()), Draft::Kw("name".into()), Draft::Str(name.as_bytes().to_vec()), Draft::Kw("color".into()), Draft::Str(b"#cccccc".to_vec()), Draft::Kw("roughness".into()), Draft::Num("0.4".into())],
+            };
+            let items = atoms.into_iter().map(|draft| builder.push_draft(0, draft, Default::default(), None)).collect();
+            builder.push_draft(0, Draft::List(items), Default::default(), None)
+        },
         _ => {
             let ws = &value.doc.workspace.ws;
-            let geometry = ws.checked.graphs.iter().find_map(|g| if g.context == context::sop() { Some(g.name.clone()) } else { None });
-            let mut bindings: Vec<(String, S)> = Vec::new();
-            if let Some(g) = geometry {
-                bindings.push(("geometry".into(), call("scene/geometry", vec![list(vec![sym("ref"), sym(&g)])])));
+            let mut bindings = Vec::new();
+            let mut names = Vec::new();
+            if let Some(g) = ws.checked.graphs.iter().find(|g| g.context == context::sop()) {
+                let reference = [Draft::Sym("ref".into()), Draft::Sym(g.name.clone())].into_iter().map(|draft| builder.push_draft(0, draft, Default::default(), None)).collect();
+                let reference = builder.push_draft(0, Draft::List(reference), Default::default(), None);
+                let head = builder.push_draft(0, Draft::Sym("scene/geometry".into()), Default::default(), None);
+                let geometry = builder.push_draft(0, Draft::List(vec![head, reference]), Default::default(), None);
+                let name = builder.push_draft(0, Draft::Sym("geometry".into()), Default::default(), None);
+                bindings.extend([name, geometry]);
+                names.push(name);
             }
-            bindings.push(("camera".into(), call("scene/camera", vec![kw("eye"), vec3(["4", "5", "5"]), kw("target"), vec3(["0", "0", "0"])])));
-            bindings.push(("light".into(), call("scene/light", vec![kw("translate"), vec3(["0", "5", "3"]), kw("intensity"), num("50")])));
-            list(vec![
-                sym("let*"),
-                s::make(SNode::Vec(bindings.iter().flat_map(|(n, e)| vec![sym(n), e.clone()]).collect())),
-                call(
-                    "scene/root",
-                    vec![
-                        call("scene/merge", bindings.iter().map(|(n, _)| sym(n)).collect()),
-                        kw("camera"),
-                        sym("camera"),
-                    ],
-                ),
-            ])
-        }
+            for (name, head, vectors, intensity) in [
+                ("camera", "scene/camera", &[("eye", ["4", "5", "5"]), ("target", ["0", "0", "0"])][..], None),
+                ("light", "scene/light", &[("translate", ["0", "5", "3"])][..], Some("50")),
+            ] {
+                let mut args = vec![builder.push_draft(0, Draft::Sym(head.into()), Default::default(), None)];
+                for &(key, values) in vectors {
+                    args.push(builder.push_draft(0, Draft::Kw(key.into()), Default::default(), None));
+                    let values = values.into_iter().map(|text| builder.push_draft(0, Draft::Num(text.into()), Default::default(), None)).collect();
+                    args.push(builder.push_draft(0, Draft::Vec(values), Default::default(), None));
+                }
+                if let Some(text) = intensity {
+                    args.push(builder.push_draft(0, Draft::Kw("intensity".into()), Default::default(), None));
+                    args.push(builder.push_draft(0, Draft::Num(text.into()), Default::default(), None));
+                }
+                let expr = builder.push_draft(0, Draft::List(args), Default::default(), None);
+                let name = builder.push_draft(0, Draft::Sym(name.into()), Default::default(), None);
+                bindings.extend([name, expr]);
+                names.push(name);
+            }
+            let merge = builder.push_draft(0, Draft::Sym("scene/merge".into()), Default::default(), None);
+            let mut merge_args = vec![merge];
+            merge_args.extend(names);
+            let merge = builder.push_draft(0, Draft::List(merge_args), Default::default(), None);
+            let mut root: Vec<_> = [Draft::Sym("scene/root".into()), Draft::Kw("camera".into()), Draft::Sym("camera".into())].into_iter().map(|draft| builder.push_draft(0, draft, Default::default(), None)).collect();
+            root.insert(1, merge);
+            let root = builder.push_draft(0, Draft::List(root), Default::default(), None);
+            let head = builder.push_draft(0, Draft::Sym("let*".into()), Default::default(), None);
+            let bindings = builder.push_draft(0, Draft::Vec(bindings), Default::default(), None);
+            builder.push_draft(0, Draft::List(vec![head, bindings, root]), Default::default(), None)
+        },
     };
-    let form = list(vec![sym("graph"), sym(&name), kw("context"), sym(context), body]);
+    let mut items: Vec<_> = [Draft::Sym("graph".into()), Draft::Sym(name.clone()), Draft::Kw("context".into()), Draft::Sym(context.into())]
+        .into_iter().map(|draft| builder.push_draft(0, draft, Default::default(), None)).collect();
+    items.push(body);
+    let id = builder.push_draft(0, Draft::List(items), Default::default(), None);
+    let form = builder.freeze().handle(id);
     (name.clone(), fe::Op::SetGraph { name, form })
 }
 
@@ -374,7 +385,7 @@ pub fn kind_fields(value: &Model, graph: &str, head: &str, authored: &dyn Fn(&st
     let declaration = ws.checked.nodes.iter().find(|n| n.kind.qualified == head);
     let number = |e: &S| -> Option<f64> {
         match &e.node {
-            SNode::Num(t) => float_of(t),
+            SNode::Num(t) => float_of(e.name(*t)),
             _ => None,
         }
     };
@@ -382,7 +393,7 @@ pub fn kind_fields(value: &Model, graph: &str, head: &str, authored: &dyn Fn(&st
         // a built-in of the workspace, not a catalog kind: its four keywords
         let field = |name: &str, default: Value, view: KindView| -> FieldView {
             let current = match (authored(name), &default) {
-                (Some(S { node: SNode::Str(t), .. }), Value::Text(_)) => Value::Text(t),
+                (Some(e), Value::Text(_)) if matches!(e.node, SNode::Str(_)) => match e.node { SNode::Str(t) => Value::Text(e.bytes(t).to_vec()), _ => unreachable!() },
                 (Some(e), Value::Float(_)) => match number(&e) {
                     Some(f) => Value::Float(f),
                     None => default.clone(),
@@ -410,7 +421,7 @@ pub fn kind_fields(value: &Model, graph: &str, head: &str, authored: &dyn Fn(&st
         let three = pm.fields.len() == 3 && pm.ty == Some(flow_check::port_type::PortType::Vec3);
         for (i, (name, view, default)) in pm.fields.iter().enumerate() {
             let current = match (&written, default) {
-                (Some(S { node: SNode::Vec(v), .. }), Value::Float(_)) if three && v.len() == 3 => match number(&v[i]) {
+                (Some(e), Value::Float(_)) if three && matches!(e.node, SNode::Vec(v) if e.range(v).len() == 3) => match number(&e.child(e.children()[i])) {
                     Some(f) => Value::Float(f),
                     None => default.clone(),
                 },
@@ -418,13 +429,22 @@ pub fn kind_fields(value: &Model, graph: &str, head: &str, authored: &dyn Fn(&st
                     Some(f) => Value::Float(f),
                     None => default.clone(),
                 },
-                (Some(S { node: SNode::Num(t), .. }), Value::Int(_)) => match int_of(t) {
-                    Some(n) => Value::Int(n),
-                    None => default.clone(),
+                (Some(e), Value::Int(_)) if matches!(e.node, SNode::Num(_)) => match e.node {
+                    SNode::Num(t) => int_of(e.name(t)).map(Value::Int).unwrap_or_else(|| default.clone()),
+                    _ => unreachable!(),
                 },
-                (Some(S { node: SNode::Str(t), .. }), Value::Choice(_)) => Value::Choice(text_of(t)),
-                (Some(S { node: SNode::Str(t), .. }), Value::Text(_)) => Value::Text(t.clone()),
-                (Some(S { node: SNode::Sym(b), .. }), Value::Bool(_)) if b == "true" || b == "false" => Value::Bool(b == "true"),
+                (Some(e), Value::Choice(_)) if matches!(e.node, SNode::Str(_)) => match e.node {
+                    SNode::Str(t) => Value::Choice(text_of(e.bytes(t))),
+                    _ => unreachable!(),
+                },
+                (Some(e), Value::Text(_)) if matches!(e.node, SNode::Str(_)) => match e.node {
+                    SNode::Str(t) => Value::Text(e.bytes(t).to_vec()),
+                    _ => unreachable!(),
+                },
+                (Some(e), Value::Bool(_)) if matches!(e.node, SNode::Sym(b) if matches!(e.name(b), "true" | "false")) => match e.node {
+                    SNode::Sym(b) => Value::Bool(e.name(b) == "true"),
+                    _ => unreachable!(),
+                },
                 _ => default.clone(),
             };
             let field = FieldView {
@@ -471,13 +491,7 @@ pub fn compiled_at(value: &Model, chains: &HashMap<Path, Vec<Path>>, records: &R
 pub const ARG_PREFIX: &str = "@arg:";
 
 pub fn operator_call(e: &S) -> bool {
-    match &e.node {
-        SNode::List(items) => match items.as_slice() {
-            [S { node: SNode::Sym(h), .. }, _, ..] => !h.contains('/'),
-            _ => false,
-        },
-        _ => false,
-    }
+    e.children().len() >= 2 && s::head(e).is_some_and(|head| !head.contains('/'))
 }
 
 /// An entry of the inspector: the row's base name, the projection row, its sub-path and its sheet row.
@@ -492,36 +506,26 @@ fn int_range(i: i64) -> IntRange {
     IntRange { soft_min: 0.min(2 * i), soft_max: 10.max(2 * i), hard_min: None, hard_max: None }
 }
 
-fn all_numbers(l: &[S]) -> bool {
-    l.iter().all(|x| matches!(&x.node, SNode::Num(t) if float_of(t).is_some()))
+fn all_numbers(form: &S, l: &[s::SyntaxId]) -> bool {
+    l.iter().all(|&id| matches!(form.arena().row(id).node, SNode::Num(t) if float_of(form.name(t)).is_some()))
 }
 
 #[allow(clippy::too_many_arguments)]
 fn walk_sub(row: &p::Row, shown: bool, chain: &[String], depth: i64, sub: &[i64], e: &S, count: &mut i64, out: &mut Vec<Entry>) {
-    let items = match &e.node {
-        SNode::List(items) => items,
-        _ => return,
-    };
-    let h = match items.first() {
-        Some(S { node: SNode::Sym(h), .. }) if depth < 4 => h.clone(),
-        _ => return,
-    };
-    let children: Vec<&S> = s::children(e);
-    for (i, c) in children.iter().enumerate() {
+    if depth >= 4 { return; }
+    let Some(h) = s::head(e).map(str::to_owned) else { return; };
+    for (i, &id) in e.children().iter().enumerate() {
+        let c = e.child(id);
         if i == 0 {
             continue;
         }
         let mut sub2 = sub.to_vec();
         sub2.push(i as i64);
-        if let SNode::List(inner) = &c.node {
-            if let [S { node: SNode::Sym(h2), .. }, _, ..] = inner.as_slice() {
-                if !h2.contains('/') {
-                    let mut chain2 = chain.to_vec();
-                    chain2.push(h.clone());
-                    walk_sub(row, shown, &chain2, depth + 1, &sub2, c, count, out);
-                    continue;
-                }
-            }
+        if operator_call(&c) {
+            let mut chain2 = chain.to_vec();
+            chain2.push(h.clone());
+            walk_sub(row, shown, &chain2, depth + 1, &sub2, &c, count, out);
+            continue;
         }
         if *count >= 12 {
             continue;
@@ -553,22 +557,23 @@ fn walk_sub(row: &p::Row, shown: bool, chain: &[String], depth: i64, sub: &[i64]
             ));
         };
         match &c.node {
-            SNode::Num(t) => match (int_of(t), float_of(t)) {
+            SNode::Num(t) => match (int_of(c.name(*t)), float_of(c.name(*t))) {
                 (Some(i), _) => make(vec![field(None, "", KindView::Integer(int_range(i)), Value::Int(i))], None, out),
                 (_, Some(f)) => make(vec![field(None, "", KindView::Floating(num_range(f)), Value::Float(f))], None, out),
                 _ => {}
             },
-            SNode::Str(t) => make(vec![field(None, "", KindView::Text, Value::Text(t.clone()))], None, out),
-            SNode::Sym(b) if b == "true" || b == "false" => {
-                make(vec![field(None, "", KindView::Toggle, Value::Bool(b == "true"))], None, out)
+            SNode::Str(t) => make(vec![field(None, "", KindView::Text, Value::Text(c.bytes(*t).to_vec()))], None, out),
+            SNode::Sym(b) if matches!(c.name(*b), "true" | "false") => {
+                make(vec![field(None, "", KindView::Toggle, Value::Bool(c.name(*b) == "true"))], None, out)
             }
-            SNode::Vec(l) if l.len() >= 2 && l.len() <= 4 && all_numbers(l) => {
+            SNode::Vec(l) if (2..=4).contains(&c.range(*l).len()) && all_numbers(&c, c.range(*l)) => {
+                let l = c.range(*l);
                 let fields = l
                     .iter()
                     .enumerate()
-                    .map(|(i, x)| {
-                        let f = match &x.node {
-                            SNode::Num(t) => float_of(t).unwrap_or(0.0),
+                    .map(|(i, &id)| {
+                        let f = match c.arena().row(id).node {
+                            SNode::Num(t) => float_of(c.name(t)).unwrap_or(0.0),
                             _ => 0.0,
                         };
                         field(Some((base.clone(), i as i64)), [".x", ".y", ".z", ".w"][i], KindView::Floating(num_range(f)), Value::Float(f))
@@ -576,8 +581,8 @@ fn walk_sub(row: &p::Row, shown: bool, chain: &[String], depth: i64, sub: &[i64]
                     .collect();
                 make(fields, None, out)
             }
-            SNode::Sym(sy) => make(vec![field(None, "", KindView::Text, text_value(""))], Some(sy.clone()), out),
-            _ => make(vec![field(None, "", KindView::Text, text_value(""))], Some(format!("={}", lisp::flat(c))), out),
+            SNode::Sym(sy) => make(vec![field(None, "", KindView::Text, text_value(""))], Some(c.name(*sy).to_owned()), out),
+            _ => make(vec![field(None, "", KindView::Text, text_value(""))], Some(format!("={}", lisp::flat(&c))), out),
         }
     }
 }
@@ -635,7 +640,7 @@ pub fn arg_request(source: &[S], n: &p::Node, arg_row: &dyn Fn(&str) -> Option<(
         insp::FlowChange::Follow(path) => arg_row(path).and_then(|(r, sub)| {
             let mut expr = r.expr.clone();
             for i in &sub {
-                expr = expr.and_then(|e| s::children(&e).get(*i as usize).map(|c| (*c).clone()));
+                expr = expr.and_then(|e| e.children().get(*i as usize).map(|&id| e.child(id)));
             }
             let chip = if sub.is_empty() { r.chip.clone() } else { p::Chip::Const };
             follow_row(source, n, &p::Row { expr, chip, ..r })
@@ -654,7 +659,7 @@ pub fn arg_request(source: &[S], n: &p::Node, arg_row: &dyn Fn(&str) -> Option<(
                 Value::Float(f) => Some(num(&lisp::float(*f))),
                 Value::Int(i) => Some(num(&i.to_string())),
                 Value::Bool(b) => Some(sym(if *b { "true" } else { "false" })),
-                Value::Text(t) => Some(s::make(SNode::Str(t.clone()))),
+                Value::Text(t) => Some(s::make(s::Draft::Str(t.clone()))),
                 Value::Choice(t) => Some(string(t)),
             };
             syntax.map(|value| {
@@ -791,20 +796,24 @@ fn syntax_of_value(v: &Value) -> S {
         Value::Float(f) => num(&lisp::float(*f)),
         Value::Int(i) => num(&i.to_string()),
         Value::Bool(b) => sym(if *b { "true" } else { "false" }),
-        Value::Text(t) => s::make(SNode::Str(t.clone())),
+        Value::Text(t) => s::make(s::Draft::Str(t.clone())),
         Value::Choice(t) => string(t),
     }
 }
 
 fn ref_form(name: &str) -> S {
-    list(vec![sym("ref"), sym(name)])
+    let mut builder = s::SyntaxBuilder::new();
+    let items = [s::Draft::Sym("ref".into()), s::Draft::Sym(name.into())].into_iter()
+        .map(|draft| builder.push_draft(0, draft, Default::default(), None)).collect();
+    let id = builder.push_draft(0, s::Draft::List(items), Default::default(), None);
+    builder.freeze().handle(id)
 }
 
 fn is_literal(e: &S) -> bool {
     match &e.node {
         SNode::Num(_) | SNode::Str(_) => true,
-        SNode::Sym(b) => b == "true" || b == "false",
-        SNode::Vec(l) => l.iter().all(|x| matches!(x.node, SNode::Num(_))),
+        SNode::Sym(b) => matches!(e.name(*b), "true" | "false"),
+        SNode::Vec(l) => e.range(*l).iter().all(|&id| matches!(e.arena().row(id).node, SNode::Num(_))),
         _ => false,
     }
 }
@@ -916,24 +925,21 @@ pub fn field_edits(
                         let syntax = if parameter.fields.len() != 3 {
                             syntax
                         } else {
-                            s::make(SNode::Vec(
-                                parameter
-                                    .fields
-                                    .iter()
-                                    .enumerate()
-                                    .map(|(i, f)| {
-                                        if i == index {
-                                            syntax.clone()
-                                        } else {
-                                            match &f.current {
-                                                Value::Float(x) => num(&lisp::float(*x)),
-                                                Value::Int(x) => num(&lisp::float(*x as f64)),
-                                                _ => num("0.0"),
-                                            }
-                                        }
-                                    })
-                                    .collect(),
-                            ))
+                            let mut builder = s::SyntaxBuilder::new();
+                            let items = parameter.fields.iter().enumerate().map(|(i, f)| {
+                                if i == index {
+                                    builder.import(&syntax)
+                                } else {
+                                    let text = match &f.current {
+                                        Value::Float(x) => lisp::float(*x),
+                                        Value::Int(x) => lisp::float(*x as f64),
+                                        _ => "0.0".to_owned(),
+                                    };
+                                    builder.push_draft(0, s::Draft::Num(text), Default::default(), None)
+                                }
+                            }).collect();
+                            let id = builder.push_draft(0, s::Draft::Vec(items), Default::default(), None);
+                            builder.freeze().handle(id)
                         };
                         out.push(change::Syntax_edit(fe::Op::SetArg { node: n.path.clone(), key: ArgKey::Kw(parameter.path.clone()), sub: vec![], value: syntax }));
                         break;
@@ -1016,28 +1022,28 @@ pub fn operator_rows(n: &p::Node, pin_of: &dyn Fn(&p::Row) -> Option<bool>, size
             row(
                 vec![field(None, "", KindView::Text, text_value(""))],
                 Some(match &e.node {
-                    SNode::Sym(sy) => sy.clone(),
+                    SNode::Sym(sy) => e.name(*sy).to_owned(),
                     _ => format!("={}", lisp::flat(e)),
                 }),
             )
         };
         let made = match &e.node {
-            SNode::Num(t) => match (&r.ty, float_of(t)) {
-                (Some(Ty::Int), _) if int_of(t).is_some() => {
-                    let i = int_of(t).unwrap();
+            SNode::Num(t) => match (&r.ty, float_of(e.name(*t))) {
+                (Some(Ty::Int), _) if int_of(e.name(*t)).is_some() => {
+                    let i = int_of(e.name(*t)).unwrap();
                     row(vec![field(None, "", KindView::Integer(int_range(i)), Value::Int(i))], None)
                 }
                 (_, Some(f)) => row(vec![field(None, "", KindView::Floating(float_range(f)), Value::Float(f))], None),
                 _ => wired(),
             },
-            SNode::Str(t) => row(vec![field(None, "", KindView::Text, Value::Text(t.clone()))], None),
-            SNode::Sym(b) if b == "true" || b == "false" => row(vec![field(None, "", KindView::Toggle, Value::Bool(b == "true"))], None),
-            SNode::Vec(l) if l.len() == 3 && all_numbers(l) => row(
-                l.iter()
+            SNode::Str(t) => row(vec![field(None, "", KindView::Text, Value::Text(e.bytes(*t).to_vec()))], None),
+            SNode::Sym(b) if matches!(e.name(*b), "true" | "false") => row(vec![field(None, "", KindView::Toggle, Value::Bool(e.name(*b) == "true"))], None),
+            SNode::Vec(l) if e.range(*l).len() == 3 && all_numbers(e, e.range(*l)) => row(
+                e.range(*l).iter()
                     .enumerate()
-                    .map(|(i, x)| {
-                        let f = match &x.node {
-                            SNode::Num(t) => float_of(t).unwrap_or(0.0),
+                    .map(|(i, &id)| {
+                        let f = match e.arena().row(id).node {
+                            SNode::Num(t) => float_of(e.name(t)).unwrap_or(0.0),
                             _ => 0.0,
                         };
                         field(Some((name.clone(), i as i64)), [".x", ".y", ".z"][i], KindView::Floating(float_range(f)), Value::Float(f))
@@ -1100,9 +1106,11 @@ pub fn layout_and_size_rows(value: &Model, n: &p::Node) -> (Layout_names, Option
 }
 
 fn ref_target(e: &Option<S>) -> Option<String> {
-    match e {
-        Some(S { node: SNode::List(items), .. }) => match items.as_slice() {
-            [S { node: SNode::Sym(r), .. }, S { node: SNode::Sym(name), .. }] if r == "ref" => Some(name.clone()),
+    let form = e.as_ref()?;
+    if s::head(form) != Some("ref") { return None; }
+    match form.children() {
+        [_, id] => match form.arena().row(*id).node {
+            SNode::Sym(name) => Some(form.name(name).to_owned()),
             _ => None,
         },
         _ => None,
@@ -1216,7 +1224,7 @@ pub fn input_inspector(ui: &mut Ui, graph: &str, width: f64, scope: &p::Scope, p
     ui.inspector_body(&mut |ui| {
         let (row, cx, cy, cw) = ui.inspector_row(Some(width), None, "ws-input-default", "default");
         ui.within(&row, &mut |ui| match &input.default {
-            Some(S { node: SNode::Num(_), .. }) => {
+            Some(form) if matches!(form.node, SNode::Num(_)) => {
                 // a number: the pane's own field, so it drags here as it does on the card
                 // the input's type decides the step: a float written [1] scrubs by fractions
                 let kind = match input.ty {
@@ -1246,13 +1254,7 @@ pub fn input_inspector(ui: &mut Ui, graph: &str, width: f64, scope: &p::Scope, p
 /// An expression chip clicked on a card: the row is the subject.
 pub fn expression_inspector(ui: &mut Ui, width: f64, value: &Model, holder: &p::Node, r: &p::Row) -> (Vec<change>, Vec<ScopeChange>) {
     let e = r.expr.clone().expect("expression row");
-    let op = match &e.node {
-        SNode::List(items) => match items.first() {
-            Some(S { node: SNode::Sym(op), .. }) => op.clone(),
-            _ => String::new(),
-        },
-        _ => String::new(),
-    };
+    let op = s::head(&e).unwrap_or_default().to_owned();
     ui.inspector_header("ws-header", Some(&op), None, None, None, &[], None, false, &format!("{} \u{b7} {}", p::title(holder), r.label), &lisp::flat(&e));
     let entries = sub_entries(true, r);
     let mut requests: Vec<change> = Vec::new();
@@ -1404,7 +1406,7 @@ pub fn workspace_inspector(value: &Model, ui: &mut Ui, width: f64, path: &[Strin
     let last_name = n.path.last().cloned().unwrap_or_default();
     let active_camera = n.head == "scene/camera"
         && match &root_node {
-            Some(root) => root.rows.iter().any(|r| r.key == ArgKey::Kw("camera".to_owned()) && matches!(&r.expr, Some(S { node: SNode::Sym(name), .. }) if *name == last_name)),
+            Some(root) => root.rows.iter().any(|r| r.key == ArgKey::Kw("camera".to_owned()) && r.expr.as_ref().is_some_and(|form| matches!(form.node, SNode::Sym(name) if form.name(name) == last_name))),
             None => false,
         };
     // a scene or material node says its state: the active camera is `active`, the rest how it cooks
@@ -1559,7 +1561,7 @@ pub fn workspace_inspector(value: &Model, ui: &mut Ui, width: f64, path: &[Strin
             // number, replaces it; the cross removes it. A plain name is a link, read as "<- name";
             // anything else is an expression
             let drive = match authored(pm) {
-                Some(S { node: SNode::Sym(name), .. }) if wired => Some(name),
+                Some(e) if wired && matches!(e.node, SNode::Sym(_)) => match e.node { SNode::Sym(name) => Some(e.name(name).to_owned()), _ => unreachable!() },
                 Some(e) if wired => Some(format!("={}", lisp::flat(&e))),
                 _ => None,
             };

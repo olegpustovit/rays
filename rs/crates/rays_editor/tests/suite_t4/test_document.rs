@@ -34,7 +34,7 @@ pub fn run() {
     lap("lowered");
     let gpu_doc = lowering::of_workspace(&lowering::Options { gpu: Some(gpu.clone()), ..Default::default() }, &workspace).unwrap_or_else(|d| panic!("{d:?}"));
     assert!(carries_gpu(&gpu_doc), "workspace lowering discarded its explicit GPU config");
-    let reloaded = document_edit::text_edit(None, None, &gpu_doc, &workspace_doc::to_text(&workspace)).unwrap();
+    let reloaded = document_edit::text_edit(None, None, &gpu_doc, &workspace_doc::to_text(&workspace).unwrap()).unwrap();
     assert!(carries_gpu(&reloaded), "a real workspace text reload discarded its GPU config");
     assert!(document::validate(&doc).is_ok(), "a lowered workspace is a valid document");
     let scene = document::scene_graph(&doc);
@@ -52,10 +52,10 @@ pub fn run() {
     assert!(document::validate(&bad_camera).is_err(), "an active camera that is not a camera object was accepted");
     assert!(document::dump(&doc) == document::dump(&doc) && document::dump(&doc).contains("object "), "the document dump is not deterministic or lost an object");
     // the preset text is the workspace text: it loads back to the same document
-    let view = flow_syntax::syntax::make(flow_syntax::syntax::Node::Map(vec![].into()));
+    let view = flow_syntax::syntax::make(flow_syntax::syntax::Draft::Map(vec![]));
     let saved = preset::save(&directory, "round", &doc, &view).unwrap();
     let loaded = preset::load(Some(gpu.clone()), &saved, None, &doc.settings).unwrap();
-    assert!(workspace_doc::to_text(&loaded.doc.workspace.ws) == workspace_doc::to_text(&workspace) && loaded.doc.networks.len() == doc.networks.len(), "a saved preset did not load back");
+    assert!(workspace_doc::to_text(&loaded.doc.workspace.ws).unwrap() == workspace_doc::to_text(&workspace).unwrap() && loaded.doc.networks.len() == doc.networks.len(), "a saved preset did not load back");
     assert!(carries_gpu(&loaded.doc), "preset loading discarded its explicit GPU config");
     std::fs::remove_file(&saved).unwrap();
 

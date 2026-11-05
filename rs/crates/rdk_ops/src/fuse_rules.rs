@@ -193,7 +193,7 @@ pub fn expand_i64(clusters: &Clusters, compact: bool, values: Vec<i64>) -> Vec<i
     }
 }
 
-pub fn expand_string(clusters: &Clusters, compact: bool, values: Vec<String>) -> Vec<String> {
+pub fn expand_string(clusters: &Clusters, compact: bool, values: Vec<Vec<u8>>) -> Vec<Vec<u8>> {
     if compact {
         values
     } else {
@@ -215,7 +215,7 @@ pub fn select_i64(source: &[i64], mapping: &[i64]) -> Vec<i64> {
     mapping.iter().map(|&index| source[index as usize]).collect()
 }
 
-pub fn select_string(source: &[String], mapping: &[i64]) -> Vec<String> {
+pub fn select_string(source: &[Vec<u8>], mapping: &[i64]) -> Vec<Vec<u8>> {
     mapping.iter().map(|&index| source[index as usize].clone()).collect()
 }
 
@@ -249,8 +249,8 @@ fn compare_int_entry(values: &[i64], points: &[i64], left: usize, right: usize) 
     if compared != 0 { compared } else { int_compare(points[left], points[right]) }
 }
 
-fn compare_text_entry(values: &[String], points: &[i64], left: usize, right: usize) -> i64 {
-    let compared = match values[left].as_bytes().cmp(values[right].as_bytes()) {
+fn compare_text_entry(values: &[Vec<u8>], points: &[i64], left: usize, right: usize) -> i64 {
+    let compared = match values[left].cmp(&values[right]) {
         std::cmp::Ordering::Less => -1,
         std::cmp::Ordering::Equal => 0,
         std::cmp::Ordering::Greater => 1,
@@ -333,12 +333,12 @@ fn sort_range_i64(values: &mut [i64], points: &mut [i64], first: usize, last: us
     }
 }
 
-fn sort_range_string(values: &mut [String], points: &mut [i64], first: usize, last: usize) {
+fn sort_range_string(values: &mut [Vec<u8>], points: &mut [i64], first: usize, last: usize) {
     let count = last - first;
     if count < 2 {
         return;
     }
-    let sift = |values: &mut [String], points: &mut [i64], root: usize, count: usize| {
+    let sift = |values: &mut [Vec<u8>], points: &mut [i64], root: usize, count: usize| {
         let mut root = root;
         loop {
             let child = root * 2 + 1;
@@ -450,14 +450,14 @@ fn sorted_text(
     cancel_value: Option<&cancel::T>,
     grain: i64,
     clusters: &Clusters,
-    source: &[String],
+    source: &[Vec<u8>],
     method: AttributeMethod,
-) -> Result<Vec<String>, error::T> {
-    let output: Vec<Mutex<String>> = (0..clusters.count).map(|_| Mutex::new(String::new())).collect();
+) -> Result<Vec<Vec<u8>>, error::T> {
+    let output: Vec<Mutex<Vec<u8>>> = (0..clusters.count).map(|_| Mutex::new(Vec::new())).collect();
     run(cancel_value, grain, clusters.count, &|cluster| {
         let first = clusters.offsets[cluster as usize] as usize;
         let last = clusters.offsets[cluster as usize + 1] as usize;
-        let mut values: Vec<String> = clusters.members[first..last].iter().map(|&point| source[point as usize].clone()).collect();
+        let mut values: Vec<Vec<u8>> = clusters.members[first..last].iter().map(|&point| source[point as usize].clone()).collect();
         let mut points = clusters.members[first..last].to_vec();
         let (first, last) = (0usize, last - first);
         sort_range_string(&mut values, &mut points, first, last);
@@ -793,10 +793,10 @@ fn concatenate_text(
     cancel_value: Option<&cancel::T>,
     grain: i64,
     clusters: &Clusters,
-    source: &[String],
+    source: &[Vec<u8>],
     ordered_members: &[i64],
-) -> Result<Vec<String>, error::T> {
-    let output: Vec<Mutex<String>> = (0..clusters.count).map(|_| Mutex::new(String::new())).collect();
+) -> Result<Vec<Vec<u8>>, error::T> {
+    let output: Vec<Mutex<Vec<u8>>> = (0..clusters.count).map(|_| Mutex::new(Vec::new())).collect();
     run(cancel_value, grain, clusters.count, &|cluster| {
         let first = clusters.offsets[cluster as usize] as usize;
         let last = clusters.offsets[cluster as usize + 1] as usize;
@@ -810,10 +810,9 @@ fn concatenate_text(
         }
         let mut bytes = Vec::with_capacity(length as usize);
         for slot in first..last {
-            bytes.extend_from_slice(source[ordered_members[slot] as usize].as_bytes());
+            bytes.extend_from_slice(&source[ordered_members[slot] as usize]);
         }
-        // Concatenating whole UTF-8 strings stays UTF-8; arbitrary OCaml bytes are not expected here.
-        *output[cluster as usize].lock().unwrap() = String::from_utf8_lossy(&bytes).into_owned();
+        *output[cluster as usize].lock().unwrap() = bytes;
         Ok(())
     })?;
     Ok(output.into_iter().map(|slot| slot.into_inner().unwrap()).collect())
@@ -824,11 +823,11 @@ fn reduce_text(
     grain: i64,
     name: &str,
     clusters: &Clusters,
-    source: &[String],
+    source: &[Vec<u8>],
     method: AttributeMethod,
     weights: Option<&[f64]>,
     ordered_members: &[i64],
-) -> Result<Vec<String>, error::T> {
+) -> Result<Vec<Vec<u8>>, error::T> {
     if let Some(mapping) = source_mapping(clusters, method, weights) {
         return Ok(select_string(source, &mapping));
     }
@@ -842,9 +841,9 @@ fn reduce_text(
                 for slot in first + 1..last {
                     let candidate = &source[clusters.members[slot] as usize];
                     let replace = if method == AttributeMethod::Minimum {
-                        candidate.as_bytes() < value.as_bytes()
+                        candidate < value
                     } else {
-                        candidate.as_bytes() > value.as_bytes()
+                        candidate > value
                     };
                     if replace {
                         value = candidate;
@@ -1374,7 +1373,7 @@ mod tests {
         let g = geom(&[0., 1., 2., 3.], &[0.; 4], &[0.; 4], &[], &[0], None);
         let g = with_attr(&g, Owner::Point, "f", Storage::Float(vec![1., 5., 10., 2.]));
         let g = with_attr(&g, Owner::Point, "i", Storage::Int(vec![3, 3, 7, 9]));
-        let text = ["b", "a", "z", "c"].iter().map(|s| (*s).to_owned()).collect();
+        let text = ["b", "a", "z", "c"].iter().map(|s| s.as_bytes().to_vec()).collect();
         let g = with_attr(&g, Owner::Point, "t", Storage::Text(text));
         let g = with_attr(&g, Owner::Point, "w", Storage::Float(vec![1., 1., 1., 4.]));
         geometry::with_group(group::init(None, group::Owner::Point, "g1", 4, &|p| p == 0 || p == 2).unwrap(), &g).unwrap()
@@ -1465,10 +1464,10 @@ mod tests {
             Storage::Text(values) => values.clone(),
             _ => panic!("not text"),
         };
-        assert_eq!(texts(Minimum), vec!["a".to_owned(), "z".to_owned()]);
-        assert_eq!(texts(Maximum), vec!["c".to_owned(), "z".to_owned()]);
-        assert_eq!(texts(Concatenate), vec!["bac".to_owned(), "z".to_owned()]);
-        assert_eq!(texts(ConcatenateWeightOrder), vec!["bac".to_owned(), "z".to_owned()]);
+        assert_eq!(texts(Minimum), vec![b"a".to_vec(), b"z".to_vec()]);
+        assert_eq!(texts(Maximum), vec![b"c".to_vec(), b"z".to_vec()]);
+        assert_eq!(texts(Concatenate), vec![b"bac".to_vec(), b"z".to_vec()]);
+        assert_eq!(texts(ConcatenateWeightOrder), vec![b"bac".to_vec(), b"z".to_vec()]);
         let failure = reduce("t", Sum, true).err().unwrap();
         assert_eq!(
             error::message(&failure),
@@ -1602,7 +1601,7 @@ mod tests {
         let g = geom(&(0..n).map(|p| p as f64).collect::<Vec<_>>(), &z, &z, &[], &[0], None);
         let g = with_attr(&g, Owner::Point, "f", Storage::Float((0..n).map(|p| ((p * 7919) % 101) as f64 * 0.37).collect()));
         let g = with_attr(&g, Owner::Point, "i", Storage::Int((0..n).map(|p| (p * 31) % 17).collect()));
-        let g = with_attr(&g, Owner::Point, "t", Storage::Text((0..n).map(|p| format!("t{}", (p * 13) % 29)).collect()));
+        let g = with_attr(&g, Owner::Point, "t", Storage::Text((0..n).map(|p| format!("t{}", (p * 13) % 29).into_bytes()).collect()));
         let g = with_attr(&g, Owner::Point, "w", Storage::Float((0..n).map(|p| 1.0 + (p % 5) as f64).collect()));
         for method in [Average, Median, Mode, Sum, SumSquares, RootMeanSquare, WeightedAverage, ConcatenateWeightOrder] {
             let patterns: &[&str] = if matches!(method, Mode | Median | ConcatenateWeightOrder) { &["f", "i", "t"] } else { &["f", "i"] };

@@ -38,6 +38,7 @@ pub fn run(runtime: &renderer::t) {
     let quad = mesh {
         key: mesh_key::Host("scene2-retained-argument".into()),
         vertices: floats(&[1., 0., 0., 0., 1., 0., 0., 0., 1., 1., 1., 1., -1., -1., 2., 2., 0., 0., 1., 1.]),
+        shared_vertices: None,
         vertex_count: 4,
         indices: words(&[0, 1, 2, 0, 2, 3]),
         index_count: 6,

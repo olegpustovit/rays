@@ -1,7 +1,7 @@
 // Ports of test_runtime_resources.ml, test_png_rows.ml, test_resources_font.ml and
 // test_resources_audio.ml. They run on the process main thread (see common/mod.rs).
 // Not ported: the `Gc.allocated_bytes` / `Gc.quick_stat` ceilings, which measure OCaml's heap;
-// the storage hand-over they guard is checked by identity (`Rc::ptr_eq`) and by pixels instead.
+// the storage hand-over they guard is checked by snapshot lifetime and pixels instead.
 mod common;
 use ogpu::error::ErrorKind;
 use runtime_resources::*;
@@ -176,7 +176,7 @@ fn image_and_canvas() {
     let bank_canvas = Canvas::create(4, 4).unwrap();
     fill(&bank_canvas, 0x2468acffu32 as i32);
     let bank_image = Canvas::capture(&bank_canvas).unwrap();
-    for round in 1..=2000 {
+    for round in 1..=100_000 {
         Canvas::set_pixel(&bank_canvas, round & 3, 0, 0x2468acffu32 as i32).unwrap();
         Image::destroy(&Canvas::capture(&bank_canvas).unwrap()).unwrap();
     }
@@ -213,7 +213,7 @@ fn image_and_canvas() {
     );
     Image::destroy(&image).unwrap();
     assert_eq!(match Image::pixels(&image) { Ok(_) => panic!("expected an error"), Err(e) => e.kind }, ErrorKind::Destroyed, "a destroyed image was read");
-    for _ in 0..2000 {
+    for _ in 0..100_000 {
         let x = Image::create(1, 1, &[0; 4]).unwrap();
         Image::destroy(&x).unwrap();
     }
@@ -281,7 +281,7 @@ fn png_rows() {
         }
     }
     let mut previous: Option<Vec<u8>> = None;
-    for _ in 0..4 {
+    for _ in 0..16 {
         Canvas::save_png(&canvas, path.to_str().unwrap()).unwrap();
         let png = std::fs::read(&path).unwrap();
         let raw = png_scanlines(&png);

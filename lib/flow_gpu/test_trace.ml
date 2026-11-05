@@ -4,7 +4,7 @@
    exactly; t, uv and normal within 1e-5. Procedural spheres ride along. Motion (WN10): vertex keyframes
    (flat, `primitive_motion`) and instance keyframes (`instance_motion`) match the CPU host at several times,
    and without Ray_tracing_motion the static kernel over the shutter-midpoint scene matches it at time 0.5.
-   Strands: Metal curve primitives and, without Ray_tracing_curves, the in-loop capsule test match it too. *)
+   Strands: Metal curve primitives and non-native swept-AABB capsule candidates match it too. *)
 open Rdk
 open Rdk_test_support
 module B = Ogpu.Backend
@@ -250,10 +250,11 @@ let instanced lease =
       [| 0.4; 0.; 0.; -1.0; 0.; 0.4; 0.; -0.8; 0.; 0.; 0.4; -0.5 |];
     |]
   in
-  (* the shutter's end: the first instance tilts and slides, the second squashes, the third stays *)
+  (* the shutter's end: the first instance tilts and slides, the second squashes, the third stays;
+     x=0.42 keeps the sample grid off the prototype's exact outer edge. *)
   let ends =
     [|
-      [| 1.; 0.; 0.; 0.4; 0.; 0.8; -0.6; 0.; 0.; 0.6; 0.8; 0.3 |];
+      [| 1.; 0.; 0.; 0.42; 0.; 0.8; -0.6; 0.; 0.; 0.6; 0.8; 0.3 |];
       Array.mapi (fun k v -> if k = 4 || k = 5 || k = 6 then v *. 0.5 else v) transforms.(1);
       transforms.(2);
     |]

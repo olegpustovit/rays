@@ -132,7 +132,18 @@ impl RenderPassDescriptor {
         })()
     }
     pub fn set_actions(&self, color_load: LoadAction, color_store: StoreAction, depth_load: LoadAction, depth_store: StoreAction, clear_depth: f64, stencil_load: LoadAction, stencil_store: StoreAction, clear_stencil: u32) -> Result<(), Error> {
-        let op="Metal.RenderPassDescriptor.set_actions"; (|| -> Result<_, Error> { enter_main(op)?; self.ensure_live(op)?; sys::set_color_load(&self.0.raw, color_load as i32).map_err(|failure| sys_error(op, failure))?; sys::set_color_store(&self.0.raw, color_store as i32).map_err(|failure| sys_error(op, failure))?; sys::set_depth_stencil_actions(&self.0.raw, depth_load as i32, depth_store as i32, clear_depth, stencil_load as i32, stencil_store as i32, clear_stencil).map_err(|failure| sys_error(op, failure)) })()
+        let op = "Metal.RenderPassDescriptor.set_actions";
+        enter_main(op)?;
+        self.ensure_live(op)?;
+        if !clear_depth.is_finite() || !(0.0..=1.0).contains(&clear_depth) || clear_stencil > 255
+            || !matches!(depth_store, StoreAction::DontCare | StoreAction::Store)
+            || !matches!(stencil_store, StoreAction::DontCare | StoreAction::Store)
+        {
+            return Err(error(op, ErrorKind::InvalidArgument, "invalid depth or stencil actions"));
+        }
+        sys::set_color_load(&self.0.raw, color_load as i32).map_err(|failure| sys_error(op, failure))?;
+        sys::set_color_store(&self.0.raw, color_store as i32).map_err(|failure| sys_error(op, failure))?;
+        sys::set_depth_stencil_actions(&self.0.raw, depth_load as i32, depth_store as i32, clear_depth, stencil_load as i32, stencil_store as i32, clear_stencil).map_err(|failure| sys_error(op, failure))
     }
     pub fn destroy(&self) -> Result<(), Error> { (|| -> Result<_, Error> { enter_main("Metal.RenderPassDescriptor.destroy")?; self.0.lifetime.destroy_parent("Metal.RenderPassDescriptor.destroy")?; self.0.release_attachments(); self.0.detach_device(); Ok(()) })() }
     pub fn width(&self) -> u64 { self.0.width }

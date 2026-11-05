@@ -67,7 +67,7 @@ fn set_arg(node: &[&str], key: &str, value: S::Syntax) -> Gesture {
 pub fn open_domain() {
     let geometry = T::geometry();
     let context = C::sop();
-    assert!(T::of_string("geometry") == Some(geometry.clone()) && T::of_syntax(&S::make(Node::Sym("geometry".into()))) == Some(geometry.clone()), "built-in nominal type is absent from annotations");
+    assert!(T::of_string("geometry") == Some(geometry.clone()) && T::of_syntax(&S::make(S::Draft::Sym("geometry".into()))) == Some(geometry.clone()), "built-in nominal type is absent from annotations");
     let nested = Ty::Record(vec![("x".into(), Ty::List(Box::new(geometry.clone())))]);
     assert!(T::of_string(&T::to_string(&nested)) == Some(nested.clone()), "nested nominal type did not round trip");
     assert!(T::fits(&geometry, &geometry) && !T::fits(&geometry, &Ty::Float) && T::join(&geometry, &Ty::Float).is_none(), "nominal type identity is not distinct");
@@ -98,7 +98,7 @@ pub fn open_domain() {
         assert!(of_text(&kernel_ops, &catalog, &format!("(workspace w (graph g :context sop (sop/toy_kernel :field {body})))")).is_err(), "external function port accepted an invalid function");
     }
     let changed_field = wd::edit(&catalog, &field_doc, &set_arg(&["g", "surface"], "field", S::parse("(fn [p] (* p.x 2.0))").unwrap().remove(0))).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
-    assert!(contains(&wd::to_text(&changed_field), "(* p.x 2.0)"), "external function-port edit was not retained");
+    assert!(contains(&wd::to_text(&changed_field).unwrap(), "(* p.x 2.0)"), "external function-port edit was not retained");
     let text = "(workspace w\n(defn make :context sop [(n : float)] (sop/toy_emit n :gain 2.0))\n(graph g :context sop (let* [first (sop/toy_emit 1.0 :gain 3.0) second (make 4.0)] second)))";
     let workspace = doc(of_text(&ops, &catalog, text));
     let evaluated = static_eval(&workspace.checked, true);
@@ -107,9 +107,9 @@ pub fn open_domain() {
     assert!(op::find(&ops, "toy_emit", &context).is_some_and(|o| o.name == ops[0].name), "bare context operator did not resolve");
     let scope = P::of_graph(&catalog, &workspace.checked, "g").unwrap();
     assert!(scope.nodes.iter().any(|n| n.path == ["g", "first"] && n.ty == geometry), "custom node did not project");
-    let edited = wd::edit(&catalog, &workspace, &set_arg(&["g", "first"], "gain", S::make(Node::Num("7.0".into())))).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
-    assert!(edited.checked.ops.len() == ops.len() && edited.checked.ops[0].name == "sop/toy_emit" && contains(&wd::to_text(&edited), ":gain 7.0"), "checked edit discarded custom operators");
-    let reloaded = doc(of_text(&ops, &catalog, &wd::to_text(&edited)));
+    let edited = wd::edit(&catalog, &workspace, &set_arg(&["g", "first"], "gain", S::make(S::Draft::Num("7.0".into())))).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
+    assert!(edited.checked.ops.len() == ops.len() && edited.checked.ops[0].name == "sop/toy_emit" && contains(&wd::to_text(&edited).unwrap(), ":gain 7.0"), "checked edit discarded custom operators");
+    let reloaded = doc(of_text(&ops, &catalog, &wd::to_text(&edited).unwrap()));
     let plan = |w: &wd::T| format!("{:?}", static_eval(&w.checked, false).plan.nodes.iter().map(|n| (n.id, n.kind.clone(), n.site.clone(), n.args.clone())).collect::<Vec<_>>());
     assert!(plan(&edited) == plan(&reloaded), "custom operator edit did not survive reload");
     let mut changed = toy.clone();
@@ -154,9 +154,9 @@ pub fn open_domain() {
     host = step(host, vec![Event::Key_pressed(Key::Enter)]);
     let after = Editor::workspace(&host);
     let count = authored(&static_eval(&after.checked, false).plan);
-    assert!(contains(&wd::to_text(&after), "sop/toy_box") && count == 3, "host menu did not insert custom operator ({count} nodes): {}", wd::to_text(&after));
+    assert!(contains(&wd::to_text(&after).unwrap(), "sop/toy_box") && count == 3, "host menu did not insert custom operator ({count} nodes): {}", wd::to_text(&after).unwrap());
     let path = presets.join("saved.rays");
-    std::fs::write(&path, wd::to_text(&Editor::workspace(&host))).unwrap();
+    std::fs::write(&path, wd::to_text(&Editor::workspace(&host)).unwrap()).unwrap();
     let loaded = editor_document::preset::load_with_ops(None, host_ops, path.to_str().unwrap(), None, &editor_document::settings::none()).unwrap_or_else(|m| panic!("{m}"));
     assert!(authored(&loaded.doc.workspace.lowered.evaluated.plan) == 3, "preset reload discarded custom operators");
     Editor::close(&host);

@@ -2,8 +2,7 @@
 //! rewrite of the workspace text: apply the op, compare the printed text. A refused edit changes
 //! nothing.
 //!
-//! The OCaml catalog is `Editor_document.Kinds.catalog`; flow_sop cannot depend on editor_document,
-//! so `catalog()` is the factory catalog alone and the tests that write a `scene/`, `world/` or
+//! Uses the editor's complete kinds catalog, including scene/world/layout gestures.
 use super::support::*;
 use crate::{lisp_sop, manifest};
 use flow_check::catalog::Catalog;
@@ -17,7 +16,7 @@ fn catalog() -> Catalog {
 }
 
 fn canon(forms: &[Syntax]) -> String {
-    lisp::print(forms).0
+    lisp::print(forms).unwrap().0
 }
 
 fn norm(text: &str) -> String {
@@ -61,15 +60,19 @@ fn base() -> String {
 }
 
 fn num(t: &str) -> Syntax {
-    s::make(Node::Num(t.to_owned()))
+    let mut b = flow_syntax::arena::SyntaxBuilder::new();
+    let name = b.intern(t);
+    let id = b.push(0, Node::Num(name), rays_diagnostic::Span { start: 0, finish: 0 }, None);
+    b.freeze().handle(id)
 }
 
-fn sym(t: &str) -> Syntax {
-    s::make(Node::Sym(t.to_owned()))
-}
-
-fn call(items: Vec<Syntax>) -> Syntax {
-    s::make(Node::List(items.into()))
+fn call(name: &str) -> Syntax {
+    let mut b = flow_syntax::arena::SyntaxBuilder::new();
+    let name = b.intern(name);
+    let head = b.push(0, Node::Sym(name), rays_diagnostic::Span { start: 0, finish: 0 }, None);
+    let children = b.range(&[head]);
+    let id = b.push(0, Node::List(children), rays_diagnostic::Span { start: 0, finish: 0 }, None);
+    b.freeze().handle(id)
 }
 
 fn node(l: &[&str]) -> Vec<String> {
@@ -415,7 +418,22 @@ fn part7_functions_and_macros() {
         ]
         .concat(),
     );
-    let lits = e::literals(&call(vec![sym("sop/transform"), sym("a"), s::make(Node::Kw("translate".into())), s::make(Node::Vec(vec![num("1"), num("2"), num("3")].into()))]));
+    let mut b = flow_syntax::arena::SyntaxBuilder::new();
+    let span = rays_diagnostic::Span { start: 0, finish: 0 };
+    let mut children = Vec::new();
+    for (text, keyword) in [("sop/transform", false), ("a", false), ("translate", true)] {
+        let name = b.intern(text);
+        children.push(b.push(0, if keyword { Node::Kw(name) } else { Node::Sym(name) }, span.clone(), None));
+    }
+    let numbers: Vec<_> = ["1", "2", "3"].iter().map(|text| {
+        let name = b.intern(text);
+        b.push(0, Node::Num(name), span.clone(), None)
+    }).collect();
+    let numbers = b.range(&numbers);
+    children.push(b.push(0, Node::Vec(numbers), span.clone(), None));
+    let children = b.range(&children);
+    let root = b.push(0, Node::List(children), span, None);
+    let lits = e::literals(&b.freeze().handle(root));
     assert_eq!(lits.iter().map(|(p, _)| p.clone()).collect::<Vec<_>>(), vec![vec![3, 0], vec![3, 1], vec![3, 2]], "literals of an expression");
     refused("", "macro name taken", &base(), Op::MakeMacro { nodes: vec![node(&["b"])], name: "range".into(), holes: vec![] });
     // several bindings: their own names become fresh names in the template
@@ -543,7 +561,7 @@ fn part10_add_and_delete() {
     same(
         "add node",
         &base(),
-        Op::AddNode { scope: path(&["g"]), name: "extra".into(), expr: call(vec![sym("sop/uv_sphere")]) },
+        Op::AddNode { scope: path(&["g"]), name: "extra".into(), expr: call("sop/uv_sphere") },
         &g("(let* [a (sop/uv_sphere :radius 0.5) b (sop/transform a :translate [1 2 3]) c (sop/subdivide b :iterations 1) extra (sop/uv_sphere)] c)"),
     );
     same(
@@ -629,26 +647,41 @@ fn part10b_scene_and_world_graphs() {
     // a keyword before the positional argument is still an argument of the call
     let mixed = "(workspace w\n  (graph world :context world\n    (world/sun :name \"w\" (world/sky :name \"s\"))))";
     assert!(
-        has(&apply(mixed, set_arg(path(&["world", "@result"]), ArgKey::Pos(0), vec![], call(vec![sym("world/sky")]))), "(world/sky)"),
+        has(&apply(mixed, set_arg(path(&["world", "@result"]), ArgKey::Pos(0), vec![], call("world/sky"))), "(world/sky)"),
         "a positional argument after a keyword pair is found"
     );
     // a scene object joins the merge, a World layer goes on top of the stack, deleting takes them out
     let scene = "(workspace w\n  (graph g :context sop (sop/box))\n  (graph scene :context scene\n    (let* [a (scene/geometry (ref g)) all (scene/merge a)] all)))";
-    let added = apply(scene, Op::AddNode { scope: path(&["scene"]), name: "lamp".into(), expr: call(vec![sym("scene/light")]) });
+    let added = apply(scene, Op::AddNode { scope: path(&["scene"]), name: "lamp".into(), expr: call("scene/light") });
     assert!(has(&added, "(scene/merge a lamp)") && has(&added, "lamp (scene/light)"), "a new object did not join the merge\n{added}");
     let removed = apply(&added, Op::DeleteNodes { nodes: vec![path(&["scene", "lamp"])] });
     assert!(has(&removed, "(scene/merge a)") && !has(&removed, "lamp"), "a deleted object stayed in the merge");
     let single = "(workspace w\n  (graph g :context sop (sop/box))\n  (graph scene :context scene (scene/geometry (ref g))))";
     assert!(
-        has(&apply(single, Op::AddNode { scope: path(&["scene"]), name: "lamp".into(), expr: call(vec![sym("scene/light")]) }), "(scene/merge (scene/geometry (ref g)) lamp)"),
+        has(&apply(single, Op::AddNode { scope: path(&["scene"]), name: "lamp".into(), expr: call("scene/light") }), "(scene/merge (scene/geometry (ref g)) lamp)"),
         "a scene that is one object becomes a merge"
     );
     let world = "(workspace w\n  (graph world :context world\n    (let* [sky (world/sky)] sky)))";
-    let layered = apply(world, Op::AddNode { scope: path(&["world"]), name: "sun".into(), expr: call(vec![sym("world/sun")]) });
+    let layered = apply(world, Op::AddNode { scope: path(&["world"]), name: "sun".into(), expr: call("world/sun") });
     assert!(has(&layered, "sun (world/sun sky)") && has(&layered, "sun)))"), "a new layer is not on top\n{layered}");
     let closed = apply(&layered, Op::DeleteNodes { nodes: vec![path(&["world", "sun"])] });
     assert!(has(&closed, "sky)))") && !has(&closed, "world/sun"), "the stack did not close over a deleted layer\n{closed}");
-    let graph = |name: &str| call(vec![sym("graph"), sym(name), s::make(Node::Kw("context".into())), sym("sop"), call(vec![sym("sop/box")])]);
+    let graph = |name: &str| {
+        let mut b = flow_syntax::arena::SyntaxBuilder::new();
+        let span = rays_diagnostic::Span { start: 0, finish: 0 };
+        let mut children = Vec::new();
+        for (text, keyword) in [("graph", false), (name, false), ("context", true), ("sop", false)] {
+            let name = b.intern(text);
+            children.push(b.push(0, if keyword { Node::Kw(name) } else { Node::Sym(name) }, span.clone(), None));
+        }
+        let name = b.intern("sop/box");
+        let head = b.push(0, Node::Sym(name), span.clone(), None);
+        let body = b.range(&[head]);
+        children.push(b.push(0, Node::List(body), span.clone(), None));
+        let children = b.range(&children);
+        let root = b.push(0, Node::List(children), span, None);
+        b.freeze().handle(root)
+    };
     assert!(
         has(&apply(scene, Op::SetGraph { name: "g".into(), form: graph("g") }), "(graph g :context sop")
             && has(&apply("(workspace w (graph g :context sop (sop/box)))", Op::SetGraph { name: "extra".into(), form: graph("extra") }), "(graph extra"),
@@ -663,8 +696,19 @@ fn part11_atomic_refusals_and_labels() {
     let before = norm(&base());
     assert!(e::apply(&catalog(), &parse(&base()), &rename(node(&["b"]), "a")).is_err(), "expected a refusal");
     assert_eq!(canon(&parse(&base())), before, "source unchanged after a refusal");
-    // not ported here: the [:active] outside the switch's layouts refusal (Layout_edit.apply_checked over
-    // ui/switch layouts) lives in editor_document. The raising-rewrite check is `a_raising_rewrite_is_a_refusal`.
+    use editor_document::layout_edit as layout;
+    for active in ["5","-1"] {
+        let text=format!("(workspace w (graph editor :context editor (let* [a (ui/graph) b (ui/lisp)] (ui/workspace (ui/switch a b :active {active})))))");
+        let forms=parse(&text);
+        for op in [
+            layout::Op::LayoutRemove{graph:"editor".into()},
+            layout::Op::LayoutNew{graph:"editor".into()},
+            layout::Op::LayoutWindow{graph:"editor".into(),panel:parse("(ui/inspector)").remove(0)}
+        ] {
+            let diagnostic=layout::apply_checked(&[],false,None,&catalog(),&forms,&op).err().expect("invalid active layout accepted");
+            assert!(diagnostic.message.contains("not one of the switch's layouts"),"{}",diagnostic.message);
+        }
+    }
     for (op, label) in [
         (Op::Wrap { nodes: vec![], loop_: Loop::For }, "Repeat"),
         (Op::Wrap { nodes: vec![], loop_: Loop::Fold }, "Iterate"),
@@ -685,20 +729,17 @@ fn part12_the_fixtures_notes_survive_edits_round_trip() {
     for name in names {
         let text = case_text(name);
         let forms = parse(&text);
-        let graph = match &forms[..] {
-            [Syntax { node: Node::List(items), .. }] => items
-                .iter()
-                .skip(2)
-                .find_map(|i| match &i.node {
-                    Node::List(l) => match &l[..] {
-                        [Syntax { node: Node::Sym(h), .. }, Syntax { node: Node::Sym(n), .. }, ..] if h == "graph" => Some(n.clone()),
-                        _ => None,
-                    },
-                    _ => None,
-                })
-                .expect("a graph"),
-            _ => panic!("{name}: shape"),
-        };
+        let [workspace] = &forms[..] else { panic!("{name}: shape") };
+        assert!(matches!(workspace.node, Node::List(_)), "{name}: shape");
+        let graph = workspace.children().iter().skip(2).find_map(|&id| {
+            let form = workspace.child(id);
+            if s::head(&form) != Some("graph") { return None; }
+            let name = *form.children().get(1)?;
+            match form.arena().row(name).node {
+                Node::Sym(name) => Some(form.name(name).to_owned()),
+                _ => None,
+            }
+        }).expect("a graph");
         // a note on the graph and back leaves the text unchanged
         let noted = e::apply(&catalog(), &forms, &Op::SetNote { node: vec![graph.clone()], text: "edited".into() }).unwrap_or_else(|d| panic!("{name}: {}", rays_diagnostic::to_string(&d)));
         assert!(canon(&noted) != canon(&forms), "{name}: note prints");

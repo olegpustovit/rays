@@ -202,7 +202,7 @@ fn scope_zone_footer_paths() {
 // ---------------------------------------------------------------- gestures 1
 
 fn num(n: &str) -> s::Syntax {
-    s::make(Node::Num(n.to_owned()))
+    s::make(s::Draft::Num(n.to_owned()))
 }
 
 fn set_args(changes: &[Change]) -> Vec<e::Op> {
@@ -210,7 +210,7 @@ fn set_args(changes: &[Change]) -> Vec<e::Op> {
 }
 
 fn written(ops: &[e::Op]) -> Vec<String> {
-    ops.iter().filter_map(|op| if let e::Op::SetArg { value, .. } = op { if let Node::Num(n) = &value.node { Some(n.clone()) } else { None } } else { None }).collect()
+    ops.iter().filter_map(|op| if let e::Op::SetArg { value, .. } = op { if let Node::Num(n) = value.node { Some(value.name(n).to_owned()) } else { None } } else { None }).collect()
 }
 
 fn scrub(ui: &mut Ui, (view, from): (Pane, (i64, i64)), by: i64) -> Vec<e::Op> {
@@ -254,7 +254,7 @@ fn scope_gestures_1() {
     let view = g::settled(&mut ui, view);
     let (_, changes) = g::type_text(&mut ui, view, "9");
     check(
-        changes.iter().any(|c| matches!(c, Change::Syntax_edit(e::Op::SetInputDefault { form, input, value }) if form == "flower" && input == "petals" && matches!(&value.node, Node::Num(n) if n == "9"))),
+        changes.iter().any(|c| matches!(c, Change::Syntax_edit(e::Op::SetInputDefault { form, input, value }) if form == "flower" && input == "petals" && matches!(value.node, Node::Num(n) if value.name(n) == "9"))),
         "typing an input default did not become Set_input_default",
     );
     // scrub: a drag on a number field is Set_arg

@@ -553,7 +553,7 @@ pub fn dock_panels(factories: &[Factory], doc: &Document, source: &layout::Path,
             s::Node::Sym(name) => {
                 let mut c = target_node.clone();
                 c.pop();
-                c.push(name.clone());
+                c.push(e.name(*name).to_owned());
                 c
             }
             _ => target_node.clone(),
@@ -604,14 +604,24 @@ pub fn apply_change(state: (kg::T, Option<String>, param::Effects), c: &change) 
 /// text a let* vector or the Lisp pane takes.
 pub fn copy_bindings(value: &t, paths: &[Vec<String>]) -> change {
     let ws = &value.doc.workspace.ws;
-    let lines: Vec<String> = paths
-        .iter()
-        .filter_map(|path| text_pane::binding(&ws.source, path).map(|(_, v)| format!("{} {}", path.last().cloned().unwrap_or_default(), lisp::print(&[v]).0.trim())))
-        .collect();
+    let mut lines = Vec::new();
+    for path in paths {
+        if let Some((_, form)) = text_pane::binding(&ws.source, path) {
+            let (text, _) = match lisp::print(&[form]) {
+                Ok(printed) => printed,
+                Err(error) => return change::Declined(rays_diagnostic::to_string(&error)),
+            };
+            lines.push(format!("{} {}", path.last().map_or("", String::as_str), text.trim()));
+        }
+    }
     if lines.is_empty() {
         return change::Declined("Nothing to copy".to_string());
     }
-    match rays::clipboard::set_text(&lines.join("\n")) {
+    let text = lines.join("\n");
+    if let Err(error) = rays_diagnostic::check_source_len(text.len()) {
+        return change::Declined(rays_diagnostic::to_string(&error));
+    }
+    match rays::clipboard::set_text(&text) {
         Ok(()) => change::Notice(format!("Copied {} binding{}", lines.len(), if lines.len() == 1 { "" } else { "s" })),
         Err(message) => change::Declined(format!("Clipboard: {message}")),
     }
@@ -619,7 +629,7 @@ pub fn copy_bindings(value: &t, paths: &[Vec<String>]) -> change {
 
 /// The palette's "Copy workspace as Lisp": the text Command-S writes, on the clipboard.
 pub fn copy_workspace(value: &t) -> (notice_kind, String) {
-    match rays::clipboard::set_text(&preset::text(&value.doc)) {
+    match preset::text(&value.doc).and_then(|text| rays::clipboard::set_text(&text)) {
         Ok(()) => (notice_kind::Info, "Copied the workspace as Lisp".to_string()),
         Err(message) => (notice_kind::Refusal, format!("Clipboard: {message}")),
     }

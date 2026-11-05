@@ -1,8 +1,7 @@
 //! Port of lib/flow_sop/test_remap.ml: `sop/remap` against the native Topology_remap helpers, across
 //! the reference and CPU tiers, domains and grains.
 //!
-//! Deviation: the OCaml text attribute is "猫\255" (a lone 0xff byte, invalid UTF-8); a Rust `String`
-//! cannot hold it, so the fixture uses "猫ÿ".
+//! Text fixtures retain the original invalid 0xff byte and embedded NUL without Unicode substitution.
 use super::support::*;
 use super::test_group_kernel::{flow_ok, ok};
 use crate::{catalog, lisp_sop, lower, operators};
@@ -24,18 +23,8 @@ use std::sync::Arc;
 
 type Args = Vec<(String, Value)>;
 
-/// default: grains 1 and 4096, 1 and 8 domains; RAYS_SLOW=1 adds grain 97 and 4 domains
-fn slow() -> bool {
-    std::env::var("RAYS_SLOW").as_deref() == Ok("1")
-}
-
-fn grains() -> Vec<i64> {
-    if slow() { vec![1, 97, 4096] } else { vec![1, 4096] }
-}
-
-fn domains_list() -> Vec<i64> {
-    if slow() { vec![1, 4, 8] } else { vec![1, 8] }
-}
+fn grains() -> Vec<i64> { vec![1, 97, 4096] }
+fn domains_list() -> Vec<i64> { vec![1, 4, 8] }
 
 const WORDS: [u64; 7] = [0, 0x8000000000000000, 1, 0x7ff0000000000000, 0xfff0000000000000, 0x7ff8000000000011, 0x7ff8000000000022];
 
@@ -80,7 +69,7 @@ fn source_with(canonical: bool, count: i64) -> geo::T {
             ),
             ("float", Storage::Float(floats(0))),
             ("int", Storage::Int((0..n as i64).map(|i| (1 << 55) + i).collect())),
-            ("text", Storage::Text((0..n).map(|i| if i % 2 == 0 { "猫\u{ff}".to_owned() } else { "😀\0".to_owned() }).collect())),
+            ("text", Storage::Text((0..n).map(|i| if i % 2 == 0 { [0xe7,0x8c,0xab,0xff].to_vec() } else { [0xf0,0x9f,0x98,0x80,0].to_vec() }).collect())),
             ("vec2", Storage::Float2(ok(Float2::of_owned(floats(1), floats(2))))),
             ("vec3", Storage::Float3(ok(Float3::View::of_owned_exn(floats(3), floats(4), floats(5))))),
             ("vec4", Storage::Float4(ok(Float4::of_owned(floats(2), floats(3), floats(4), floats(5))))),
@@ -346,7 +335,7 @@ fn minus_one_rows_are_defaults_and_in_no_group() {
                         }
                         (Storage::Text(x), Storage::Text(y)) => {
                             for (i, e) in x.iter().enumerate() {
-                                assert!(*e == if map[i] >= 0 { y[i].clone() } else { String::new() }, "created text row is not empty");
+                                assert!(*e == if map[i] >= 0 { y[i].clone() } else { Vec::new() }, "created text row is not empty");
                             }
                         }
                         (Storage::Float2(x), Storage::Float2(y)) => {
@@ -506,27 +495,18 @@ fn remap_has_a_graph_card_and_checked_gestures() {
     assert!(apply_checked_with(&[], false, Some(&checker), &cat, &forms, &set("points", "(array/text 0)")).is_err(), "remap graph type-changing malformed map edit accepted");
 }
 
-#[test]
-fn packed_cutoff_with_all_native_storage_kept_opaque() {
-    // Crossing the packed cutoff with all native storage kept opaque.
-    // ~2.4 s alone, over the 5 s kill under load: the full size runs with RAYS_SLOW=1
-    if std::env::var("RAYS_SLOW").as_deref() != Ok("1") {
-        return;
-    }
+fn packed_cutoff_with_all_native_storage_kept_opaque(reference:bool,domains:i64) {
+    // Original 32769-row boundary, independently registered per tier/domain.
     let n = 32769usize;
     let src = source(n as i64);
     let dst = ok(geo::with_positions(ok(Float3::View::of_owned_exn(vec![1.0; n], vec![2.0; n], vec![3.0; n])), &src));
     let p: Vec<i64> = (0..n as i64).map(|i| (i + 1) % n as i64).collect();
     let (v, prim, offsets, ancestors) = ([0i64, 1, 2], [0i64], [0i64, 1, 2, 3], [0i64, 1, 2]);
     let expected = oracle(&src, &dst, &p, &v, &prim, &offsets, &ancestors, true);
-    for reference in [false, true] {
         let node = compile_with(reference, true, "", &src, &dst, &args(&p, &v, &prim, &offsets, &ancestors, "mapped"));
-        for &domains in &domains_list() {
             for &grain in &grains() {
                 assert!(geometry_bytes(&geometry(run_with(domains, grain, None, &node))) == geometry_bytes(&expected), "32769-row all-storage remap differs across CPU/reference/domains/grains");
             }
-        }
-    }
 }
 
 #[test]
@@ -575,9 +555,7 @@ fn outputs_are_owned_untaken_branches_are_not_evaluated_and_live_maps_follow_tim
     session::close(&mut s);
 }
 
-#[test]
-#[ignore = "slow lowering: debug build, over 5 s alone (a single sop/uv_sphere lowers in 3.3 s, a box in 0.15 s; see test_perf_lower)"]
-fn strict_public_defnode_computes_maps_through_typed_kernels() {
+fn strict_public_defnode_computes_maps_through_typed_kernels(reference:bool,domains:i64) {
     // The strict public defnode path computes the maps through genuine typed integer kernels, then
     // transfers raw source payload without numeric reads.
     let src = source(3);
@@ -599,17 +577,25 @@ fn strict_public_defnode_computes_maps_through_typed_kernels() {
     let prim = vec![0i64; 10923];
     let offsets: Vec<i64> = (0..32770).collect();
     let expected = oracle(&src, &dst, &p, &p, &prim, &offsets, &p, true);
-    for reference in [false, true] {
         let lowered = flow_ok(lower::workspace(Some(factories(&src, &dst)), Vec::new(), lower::Options { reference, ..lower::Options::default() }, &parse(text)));
         let graph = lowered.graphs[0].clone();
         let node = edit::compile_node(&graph.network.geometry, graph.root.unwrap()).unwrap();
-        for &domains in &domains_list() {
             for &grain in &grains() {
                 assert!(geometry_bytes(&geometry(run_with(domains, grain, None, &node))) == geometry_bytes(&expected), "strict generated maps/raw payload differ from native oracle");
             }
-        }
-    }
 }
+
+macro_rules! remap_matrix_case {
+    ($module:ident,$reference:expr,$domains:expr)=>{
+        mod $module {
+            use super::*;
+            #[test]fn packed_cutoff(){packed_cutoff_with_all_native_storage_kept_opaque($reference,$domains);}
+            #[test]fn strict_public_defnode(){strict_public_defnode_computes_maps_through_typed_kernels($reference,$domains);}
+        }
+    };
+}
+remap_matrix_case!(cpu_one,false,1);remap_matrix_case!(cpu_four,false,4);remap_matrix_case!(cpu_eight,false,8);
+remap_matrix_case!(reference_one,true,1);remap_matrix_case!(reference_four,true,4);remap_matrix_case!(reference_eight,true,8);
 
 #[test]
 fn a_failed_child_remains_the_first_failure() {

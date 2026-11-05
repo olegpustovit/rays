@@ -119,6 +119,7 @@ struct Data {
     cook: CookFn,
     expand: Option<ExpandFn>,
     parameterization: Option<Parameterization>,
+    owner: Option<Arc<dyn std::any::Any + Send + Sync>>,
 }
 
 /// A node. Cloning shares the node; `ptr_eq` tells shared from rebuilt.
@@ -245,6 +246,7 @@ pub fn apply_parameters(value: &T, changes: &[(String, Value)]) -> Result<(T, Ef
         let rebuilt = (p.rebuild)(&value.0.label, &value.0.inputs, &values)?;
         let mut data = (*rebuilt.0).clone();
         data.id = value.0.id;
+        data.owner = data.owner.or_else(|| value.0.owner.clone());
         Ok((T(Arc::new(data)), effects))
     } else {
         let mut data = (*value.0).clone();
@@ -384,6 +386,7 @@ pub mod build {
             cook,
             expand,
             parameterization: None,
+            owner: None,
         }))
     }
 
@@ -407,6 +410,17 @@ pub mod build {
                 Ok(Cooked { payload: payload::T::Geometry(cooked.geometry), instances: cooked.instances })
             }),
         )
+    }
+
+    /// Keep a cook dependency alive with this node, including parameter/input rebuilds.
+    /// The dependency must not own this node or a cache containing it.
+    pub fn with_owner(owner: Arc<dyn std::any::Any + Send + Sync>, mut value: T) -> T {
+        let data = Arc::make_mut(&mut value.0);
+        data.owner = Some(match data.owner.take() {
+            None => owner,
+            Some(previous) => Arc::new((previous, owner)),
+        });
+        value
     }
 
     /// Intrinsic operator identity before schema display text is attached.
@@ -480,6 +494,7 @@ pub mod build {
                 Ok(rebuilt) => {
                     let mut data = (*rebuilt.0).clone();
                     data.id = value.0.id;
+                    data.owner = data.owner.or_else(|| value.0.owner.clone());
                     T(Arc::new(data))
                 }
                 Err(message) => unreachable!("{message}"),

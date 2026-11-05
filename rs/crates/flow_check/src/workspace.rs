@@ -1,23 +1,13 @@
 use crate::{catalog, defnode, op, port_type};
+use crate::term_arena::{self as packed, Draft, Node as PackedNode, TermBuilder};
 use flow_syntax::{context, lisp, macros, syntax::{self, Node as SNode, Syntax}, ty::{self, FnSignature, Ty}, value::Value};
 use param::{self, FieldView, KindView};
 use rays_diagnostic::{self as diagnostic, Diagnostic, Severity, Span};
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::rc::Rc;
 
-trait SyntaxArguments {
-    fn node_as_args(&self) -> &[Syntax];
-}
-
-impl SyntaxArguments for Syntax {
-    fn node_as_args(&self) -> &[Syntax] {
-        match &self.node {
-            SNode::List(forms) if !forms.is_empty() => &forms[1..],
-            _ => &[],
-        }
-    }
-}
 
 pub type Path = Vec<String>;
 pub type Paths = BTreeSet<Path>;
@@ -27,99 +17,14 @@ pub type Context = context::Context;
 pub enum Pattern { Name(String), Seq(Vec<Pattern>), Keys(Vec<String>) }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DiagnosticPolicy { First, RangeLast }
-#[derive(Clone, Debug, PartialEq)]
-pub struct Term { pub path: Option<Path>, pub ty: Ty, pub node: Node, pub form: std::sync::Arc<Syntax> }
-#[derive(Clone, Debug, PartialEq)]
-pub enum Node {
-    Lit(param::Value), Text(Vec<u8>), Nil, Time, Vec(Vec<Term>), RefBinding(String, Vec<String>),
-    Call { kind: String, ctx: Context, args: Vec<(String, Term)> },
-    Op { op: String, args: Vec<(String, Term)>, skip: Vec<Vec<usize>> },
-    CallFn { fn_name: String, args: Vec<Term>, body: Option<Box<Term>> }, FnRef(String),
-    GraphRef { graph: String, inputs: Vec<(String, Term)> }, Let(Vec<(Pattern, Term)>, Box<Term>),
-    State { binder: Pattern, init: Box<Term>, step: Box<Term>, zone: Path },
-    Loop { kind: LoopKind, accs: Vec<(Pattern, Term)>, clauses: Vec<(Pattern, Term)>, skip: Vec<Vec<usize>>, body: Box<Term>, zone: Path },
-    WithError(Box<Term>, Box<Term>), ErrorRows { rows: Box<Term>, policy: DiagnosticPolicy, mapper: Box<Term> },
-    If(Box<Term>, Box<Term>, Box<Term>), Cond(Vec<(Term, Term)>, Box<Term>),
-    Case(Box<Term>, Vec<(Syntax, Term)>, Box<Term>),
-    Fn { params: Vec<(Pattern, Option<Ty>)>, body: Box<Term>, zone: Path, capture: Option<Box<Term>> },
-    Hof(HofKind, Vec<Term>), ListLit(Vec<Term>), Record(Vec<(String, Term)>), Get(Box<Term>, String),
-    Assoc(Box<Term>, Vec<(String, Term)>), Str(Vec<Term>), ListOp(String, Vec<Term>), Bypass(Box<Term>),
-    Expanded { macro_name: String, body: Box<Term> },
-}
+pub use crate::term_arena::{Node, Term, TermId};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LoopKind { For, Fold, Scan, Sum }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HofKind { Map, Filter, Reduce, SortBy, Iterate }
 
-fn fields(xs: &[(String, Term)], out: &mut Vec<Term>) { out.extend(xs.iter().map(|(_, t)| t.clone())); }
-/// Borrowed children, in the order of `children`.
-pub fn children_ref(term: &Term) -> Vec<&Term> {
-    let mut out: Vec<&Term> = Vec::new();
-    match &term.node {
-        Node::Lit(_) | Node::Text(_) | Node::Nil | Node::Time | Node::RefBinding(_, _) | Node::FnRef(_) => (),
-        Node::Vec(ts) | Node::Hof(_, ts) | Node::ListLit(ts) | Node::Str(ts) | Node::ListOp(_, ts) => out.extend(ts.iter()),
-        Node::Call { args, .. } | Node::Op { args, .. } | Node::GraphRef { inputs: args, .. } | Node::Record(args) => out.extend(args.iter().map(|(_, t)| t)),
-        Node::CallFn { args, body, .. } => { out.extend(args.iter()); if let Some(t) = body { out.push(t); } },
-        Node::Let(bs, b) => { for (_, t) in bs { out.push(t); } out.push(b); },
-        Node::State { init, step, .. } => { out.push(init); out.push(step); },
-        Node::Loop { accs, clauses, body, .. } => { for (_, t) in accs.iter().chain(clauses) { out.push(t); } out.push(body); },
-        Node::WithError(a, b) => { out.push(a); out.push(b); },
-        Node::ErrorRows { rows, mapper, .. } => { out.push(rows); out.push(mapper); },
-        Node::If(a, b, c) => { out.push(a); out.push(b); out.push(c); },
-        Node::Cond(arms, d) => { for (a, b) in arms { out.push(a); out.push(b); } out.push(d); },
-        Node::Case(v, arms, d) => { out.push(v); out.extend(arms.iter().map(|(_, t)| t)); out.push(d); },
-        Node::Fn { body, capture, .. } => { out.push(body); if let Some(t) = capture { out.push(t); } },
-        Node::Get(t, _) | Node::Bypass(t) | Node::Expanded { body: t, .. } => out.push(t),
-        Node::Assoc(t, fs) => { out.push(t); out.extend(fs.iter().map(|(_, t)| t)); },
-    }
-    out
-}
-pub fn children(term: &Term) -> Vec<Term> {
-    let mut out = Vec::new();
-    match &term.node {
-        Node::Lit(_) | Node::Text(_) | Node::Nil | Node::Time | Node::RefBinding(_, _) | Node::FnRef(_) => (),
-        Node::Vec(ts) | Node::Hof(_, ts) | Node::ListLit(ts) | Node::Str(ts) | Node::ListOp(_, ts) => out.extend(ts.iter().cloned()),
-        Node::Call { args, .. } | Node::Op { args, .. } | Node::GraphRef { inputs: args, .. } | Node::Record(args) => fields(args, &mut out),
-        Node::CallFn { args, body, .. } => { out.extend(args.iter().cloned()); if let Some(t) = body { out.push((**t).clone()); } },
-        Node::Let(bs, b) => { for (_, t) in bs { out.push(t.clone()); } out.push((**b).clone()); },
-        Node::State { init, step, .. } => { out.push((**init).clone()); out.push((**step).clone()); },
-        Node::Loop { accs, clauses, body, .. } => { for (_, t) in accs.iter().chain(clauses) { out.push(t.clone()); } out.push((**body).clone()); },
-        Node::WithError(a,b) => { out.push((**a).clone()); out.push((**b).clone()); },
-        Node::ErrorRows { rows, mapper, .. } => { out.push((**rows).clone()); out.push((**mapper).clone()); },
-        Node::If(a,b,c) => { out.push((**a).clone()); out.push((**b).clone()); out.push((**c).clone()); },
-        Node::Cond(arms,d) => { for (a,b) in arms { out.push(a.clone()); out.push(b.clone()); } out.push((**d).clone()); },
-        Node::Case(v,arms,d) => { out.push((**v).clone()); out.extend(arms.iter().map(|(_,t)| t.clone())); out.push((**d).clone()); },
-        Node::Fn { body, capture, .. } => { out.push((**body).clone()); if let Some(t) = capture { out.push((**t).clone()); } },
-        Node::Get(t,_) | Node::Bypass(t) | Node::Expanded { body:t, .. } => out.push((**t).clone()),
-        Node::Assoc(t,fs) => { out.push((**t).clone()); fields(fs,&mut out); },
-    }
-    out
-}
-pub fn map_children(f: &dyn Fn(&Term) -> Term, term: &Term) -> Term {
-    fn mapped(fs: &[(String, Term)], f: &dyn Fn(&Term)->Term) -> Vec<(String,Term)> { fs.iter().map(|(n,t)|(n.clone(),f(t))).collect() }
-    let node = match &term.node {
-        Node::Lit(_) | Node::Text(_) | Node::Nil | Node::Time | Node::RefBinding(_,_) | Node::FnRef(_) => term.node.clone(),
-        Node::Vec(ts) => Node::Vec(ts.iter().map(f).collect()), Node::Hof(k,ts) => Node::Hof(*k,ts.iter().map(f).collect()),
-        Node::ListLit(ts) => Node::ListLit(ts.iter().map(f).collect()), Node::Str(ts) => Node::Str(ts.iter().map(f).collect()),
-        Node::ListOp(n,ts) => Node::ListOp(n.clone(),ts.iter().map(f).collect()), Node::Call { kind,ctx,args } => Node::Call{kind:kind.clone(),ctx:ctx.clone(),args:mapped(args,f)},
-        Node::Op{op,args,skip} => Node::Op{op:op.clone(),args:mapped(args,f),skip:skip.clone()},
-        Node::CallFn{fn_name,args,body} => Node::CallFn{fn_name:fn_name.clone(),args:args.iter().map(f).collect(),body:body.as_ref().map(|t|Box::new(f(t)))},
-        Node::GraphRef{graph,inputs} => Node::GraphRef{graph:graph.clone(),inputs:mapped(inputs,f)},
-        Node::Let(bs,b) => Node::Let(bs.iter().map(|(p,t)|(p.clone(),f(t))).collect(),Box::new(f(b))),
-        Node::State{binder,init,step,zone} => Node::State{binder:binder.clone(),init:Box::new(f(init)),step:Box::new(f(step)),zone:zone.clone()},
-        Node::Loop{kind,accs,clauses,skip,body,zone} => Node::Loop{kind:*kind,accs:accs.iter().map(|(p,t)|(p.clone(),f(t))).collect(),clauses:clauses.iter().map(|(p,t)|(p.clone(),f(t))).collect(),skip:skip.clone(),body:Box::new(f(body)),zone:zone.clone()},
-        Node::WithError(a,b)=>Node::WithError(Box::new(f(a)),Box::new(f(b))),
-        Node::ErrorRows{rows,policy,mapper}=>Node::ErrorRows{rows:Box::new(f(rows)),policy:*policy,mapper:Box::new(f(mapper))},
-        Node::If(a,b,c)=>Node::If(Box::new(f(a)),Box::new(f(b)),Box::new(f(c))),
-        Node::Cond(arms,d)=>Node::Cond(arms.iter().map(|(a,b)|(f(a),f(b))).collect(),Box::new(f(d))),
-        Node::Case(v,arms,d)=>Node::Case(Box::new(f(v)),arms.iter().map(|(s,t)|(s.clone(),f(t))).collect(),Box::new(f(d))),
-        Node::Fn{params,body,zone,capture}=>Node::Fn{params:params.clone(),body:Box::new(f(body)),zone:zone.clone(),capture:capture.as_ref().map(|t|Box::new(f(t)))},
-        Node::Record(fs)=>Node::Record(mapped(fs,f)),Node::Get(t,n)=>Node::Get(Box::new(f(t)),n.clone()),
-        Node::Assoc(t,fs)=>Node::Assoc(Box::new(f(t)),mapped(fs,f)),Node::Bypass(t)=>Node::Bypass(Box::new(f(t))),
-        Node::Expanded{macro_name,body}=>Node::Expanded{macro_name:macro_name.clone(),body:Box::new(f(body))},
-    };
-    Term{path:term.path.clone(),ty:term.ty.clone(),node,form:term.form.clone()}
-}
+/// Borrowed child row IDs, in authored traversal order.
+pub fn children(term: &Term) -> &[TermId] { term.children() }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Graph { pub name:String, pub context:Context, pub inputs:Vec<(String,Ty,Option<Term>)>, pub body:Term, pub form:Syntax }
@@ -129,10 +34,111 @@ pub struct NodeDefinition { pub kind:catalog::Kind, pub slots:Vec<catalog::Slot>
 pub enum PackedForm { Candidate(Paths), Refused(Vec<Diagnostic>) }
 #[derive(Clone)]
 pub struct Workspace {
-    pub name:String, pub graphs:Arc<Vec<Graph>>, pub defs:Arc<Vec<Graph>>, pub nodes:Arc<Vec<NodeDefinition>>, pub macros:Arc<Vec<Syntax>>, pub source:Arc<Vec<Syntax>>,
+    pub name:String, pub graphs:Arc<Vec<Graph>>, pub defs:Arc<Vec<Graph>>, pub nodes:Arc<Vec<Arc<NodeDefinition>>>, pub macros:Arc<Vec<Syntax>>, pub source:Arc<Vec<Syntax>>,
     pub live:Paths, pub invariant:Paths, pub approx:Paths, pub packed:Vec<(Path,PackedForm)>, pub packed_roots:Vec<(Syntax,Path)>,
     pub approx_reasons:Vec<(Path,Vec<Diagnostic>)>, pub kind_fns:Vec<(String,(String,Context,Vec<catalog::Slot>))>, pub ops:Arc<Vec<op::Op>>,
 }
+
+/// Capacity-based lower bound for retained checked terms and syntax across shared workspaces.
+/// Catalog/operator closures, tree-map nodes and allocator/control-block overhead stay unattributed.
+#[derive(Default)]
+pub struct Memory {
+    pub syntax: syntax::Memory,
+    checked: syntax::Memory,
+}
+
+impl Memory {
+    pub fn checked_bytes(&self) -> usize { self.checked.bytes() }
+    pub fn into_allocations(self) -> (Vec<(usize, usize)>, Vec<(usize, usize)>) {
+        (self.syntax.into_allocations(), self.checked.into_allocations())
+    }
+
+    fn shared<T>(&mut self, value: &Arc<T>) -> bool {
+        self.checked.allocation(Arc::as_ptr(value), std::mem::size_of::<T>())
+    }
+
+    fn buffer<T>(&mut self, values: &Vec<T>) -> bool {
+        self.checked.allocation(values.as_ptr(), values.capacity() * std::mem::size_of::<T>())
+    }
+
+    fn name(&mut self, name: &String) { self.checked.allocation(name.as_ptr(), name.capacity()); }
+
+    fn names(&mut self, names: &Vec<String>) {
+        if self.buffer(names) { for name in names { self.name(name); } }
+    }
+
+
+    fn ty(&mut self, ty: &Ty) {
+        match ty {
+            Ty::Named(name) => self.name(name),
+            Ty::List(element) | Ty::Array(element) => {
+                if self.checked.allocation(element.as_ref() as *const Ty, std::mem::size_of::<Ty>()) { self.ty(element); }
+            }
+            Ty::Record(fields) => {
+                if self.buffer(fields) { for (name, ty) in fields { self.name(name); self.ty(ty); } }
+            }
+            Ty::Fn(Some(signature)) => {
+                if self.checked.allocation(signature.as_ref() as *const FnSignature, std::mem::size_of::<FnSignature>()) {
+                    if self.buffer(&signature.params) { for ty in &signature.params { self.ty(ty); } }
+                    self.ty(&signature.result);
+                }
+            }
+            _ => (),
+        }
+    }
+
+
+    pub fn workspace(&mut self, workspace: &Arc<Workspace>) {
+        if !self.shared(workspace) { return; }
+        self.name(&workspace.name);
+        for graphs in [&workspace.graphs, &workspace.defs] {
+            if self.shared(graphs) {
+                self.buffer(graphs);
+                for graph in graphs.iter() { self.graph(graph); }
+            }
+        }
+        if self.shared(&workspace.nodes) {
+            self.buffer(&workspace.nodes);
+            for node in workspace.nodes.iter() {
+                if !self.shared(node) { continue; }
+                self.names(&node.keyword_inputs);
+                self.buffer(&node.slots);
+                self.buffer(&node.fields);
+                self.name(&node.label);
+                self.names(&node.category);
+                if let Some(description) = &node.description { self.name(description); }
+                self.name(&node.operation);
+                self.graph(&node.body);
+                self.buffer(&node.validations);
+                self.buffer(&node.normalizers);
+                for (term, code, message) in &node.validations {
+                    self.term(term); self.name(code); self.name(message);
+                }
+                for (name, term) in &node.normalizers { self.name(name); self.term(term); }
+            }
+        }
+        self.syntax.shared_forms(&workspace.source);
+        self.syntax.shared_forms(&workspace.macros);
+        self.buffer(&workspace.packed_roots);
+        for (form, path) in &workspace.packed_roots { self.syntax.add(form); self.names(path); }
+    }
+
+    fn graph(&mut self, graph: &Graph) {
+        self.name(&graph.name);
+        self.buffer(&graph.inputs);
+        for (name, ty, default) in &graph.inputs {
+            self.name(name); self.ty(ty);
+            if let Some(default) = default { self.term(default); }
+        }
+        self.syntax.add(&graph.form);
+        self.term(&graph.body);
+    }
+
+    fn term(&mut self, term: &Term) {
+        term.arena().attribute(&mut self.checked, &mut self.syntax);
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OpSignature { pub pos:Vec<(String,Ty)>,pub opt:Vec<(String,Ty)>,pub rest:Option<(String,Ty)>,pub kw:Vec<(String,Ty)> }
 pub type op_signature = OpSignature;
@@ -149,31 +155,75 @@ pub fn op_signature(ops:&[op::Op],ctx:&Context,name:&str)->Option<OpSignature>{o
 pub fn op_choices(ops:&[op::Op],name:&str,argument:&str)->Vec<String>{op::find(ops,name,&context::value()).and_then(|o|o.choices.iter().find(|(n,_)|n==argument).map(|(_,v)|v.clone())).unwrap_or_default()}
 pub fn name_taken(name:&str)->bool { SPECIAL.contains(&name) || flow_syntax::symbol::reserved(name) || ty::names().iter().any(|(n,_)|n==name) || op::find(&[],name,&context::value()).is_some() }
 
-pub fn skip_tuples(form:&Syntax)->Option<Vec<Vec<usize>>>{
-    fn number(x:&Syntax)->Option<usize>{ if let SNode::Num(s)=&x.node { let n=s.parse::<i64>().ok()?; if n>=0 {usize::try_from(n).ok()}else{None} }else{None} }
-    fn tuple(x:&Syntax)->Option<Vec<usize>>{match &x.node{SNode::Vec(xs) if !xs.is_empty()=>xs.iter().map(number).collect(),_=>number(x).map(|n|vec![n])}}
-    match &form.node { SNode::Vec(xs)=>xs.iter().map(tuple).collect(),_=>None }
-}
-
-pub fn kind_calls(term:&Term)->Vec<String>{let mut out=BTreeSet::new();let mut stack=vec![term];while let Some(t)=stack.pop(){if let Node::Call{kind,..}=&t.node{out.insert(kind.clone());}stack.extend(children_ref(t));}out.into_iter().collect()}
-pub fn bypass_input_ref(term:&Term)->Option<&Term>{
-    let entries:Vec<&Term>=match &term.node{Node::Call{args,..}|Node::Op{args,..}=>args.iter().map(|(_,t)|t).collect(),Node::CallFn{args,..}=>args.iter().collect(),_=>Vec::new()};
-    match &term.form.node{
-        SNode::List(xs) if !xs.is_empty()=>{
-            let mut rest=&xs[1..];
-            let first=loop{match rest{[Syntax{node:SNode::Kw(_),..},_,tail@..]=>rest=tail,[input,..]=>break input,[]=>return None}};
-            entries.into_iter().find(|t|t.form.id==first.id&&t.form.span==first.span)
+pub fn skip_tuples(form: &Syntax) -> Option<Vec<Vec<usize>>> {
+    fn number(form: &Syntax, id: syntax::SyntaxId) -> Option<usize> {
+        let SNode::Num(name) = form.arena().row(id).node else { return None; };
+        let value = form.name(name).parse::<i64>().ok()?;
+        if value < 0 { None } else { usize::try_from(value).ok() }
+    }
+    fn tuple(form: &Syntax, id: syntax::SyntaxId) -> Option<Vec<usize>> {
+        match form.arena().row(id).node {
+            SNode::Vec(range) if !form.range(range).is_empty() => form.range(range).iter().map(|&id| number(form, id)).collect(),
+            _ => number(form, id).map(|value| vec![value]),
         }
-        _=>entries.into_iter().next(),
+    }
+    match form.node {
+        SNode::Vec(range) => form.range(range).iter().map(|&id| tuple(form, id)).collect(),
+        _ => None,
     }
 }
-pub fn bypass_input(term:&Term)->Option<Term>{ bypass_input_ref(term).cloned() }
+
+pub fn kind_calls(term: &Term) -> Vec<String> {
+    let arena = term.arena();
+    let mut out = BTreeSet::new();
+    let mut stack = vec![term.row_id()];
+    while let Some(id) = stack.pop() {
+        if let Node::Call(call) = arena.row(id).node { out.insert(arena.name(arena.call(call).kind).to_owned()); }
+        stack.extend_from_slice(arena.children(id));
+    }
+    out.into_iter().collect()
+}
+
+pub fn bypass_input(term: &Term) -> Option<Term> {
+    let arena = term.arena();
+    let entries = match term.node {
+        Node::Call(_) | Node::Op(_) => term.children(),
+        Node::CallFn(id) => arena.term_ids(arena.call_fn(id).args),
+        _ => return None,
+    };
+    let syntax = arena.syntax();
+    let form = syntax.row(term.form);
+    let selected = match form.node {
+        SNode::List(range) if !syntax.range(range).is_empty() => {
+            let mut rest = &syntax.range(range)[1..];
+            let first = loop {
+                let (&id, tail) = rest.split_first()?;
+                if matches!(syntax.row(id).node, SNode::Kw(_)) && !tail.is_empty() { rest = &tail[1..]; }
+                else { break syntax.row(id); }
+            };
+            entries.iter().copied().find(|&id| {
+                let candidate = syntax.row(arena.row(id).form);
+                candidate.id == first.id && candidate.span == first.span
+            })
+        }
+        _ => entries.first().copied(),
+    };
+    selected.map(|id| term.child(id))
+}
 
 pub fn slot_ty(slot:Option<&catalog::Slot>,kind:&catalog::Kind)->Ty { if let Some(t)=slot.and_then(|s|s.ty.as_ref()){return t.clone()} match kind.qualified.as_str(){"scene/world"=>ty::world(),"scene/root"=>ty::scene(),_ if kind.context==context::scene()=>ty::geometry(),_=>context::result(kind.context)} }
 pub fn group_reader(p:&catalog::Parameter)->bool { p.name=="group" }
 pub fn group_writer(k:&catalog::Kind,p:&catalog::Parameter)->bool { p.name=="name"&&k.qualified.starts_with("sop/group_") }
 
 fn err(code:&str,message:String,span:Option<Span>)->Diagnostic { diagnostic::error(code.to_owned(),message,span,None,None,Vec::new(),Vec::new()) }
+fn add_to(diags: &mut Vec<Diagnostic>, severity: Severity, form: &Syntax, code: &str, message: String) {
+    let span = if form.span.start == 0 && form.span.finish == 0 { None } else { Some(form.span.clone()) };
+    let diagnostic = match severity {
+        Severity::ErrorSeverity => err(code, message, span),
+        Severity::Warning => diagnostic::warning(span, code.to_owned(), message),
+    };
+    diags.push(diagnostic);
+}
 fn ty_port(t:&Ty)->Option<port_type::PortType>{match t{Ty::Float=>Some(port_type::PortType::Float),Ty::Int=>Some(port_type::PortType::Int),Ty::Bool=>Some(port_type::PortType::Bool),Ty::Vec3=>Some(port_type::PortType::Vec3),Ty::Named(n) if n=="geometry"=>Some(port_type::PortType::Geometry),Ty::Named(n) if n=="image"=>Some(port_type::PortType::Image),Ty::Fn(Some(s))=>Some(port_type::PortType::Fn((**s).clone())),_=>None}}
 fn port_ty(t:&port_type::PortType)->Ty {match t{port_type::PortType::Float=>Ty::Float,port_type::PortType::Int=>Ty::Int,port_type::PortType::Bool=>Ty::Bool,port_type::PortType::Vec3=>Ty::Vec3,port_type::PortType::Geometry=>ty::geometry(),port_type::PortType::Image=>ty::image(),port_type::PortType::Fn(s)=>Ty::Fn(Some(Box::new(s.clone())))}}
 
@@ -216,14 +266,6 @@ fn cooked(ty: &Ty) -> bool {
     ty::is_cooked(ty)
 }
 
-fn make_term(form: &Syntax, ty: Ty, node: Node) -> Term {
-    Term { path: None, ty, node, form: std::sync::Arc::new(form.clone()) }
-}
-
-fn set_path(mut term: Term, path: Path) -> Term {
-    term.path = Some(path);
-    term
-}
 
 fn path_text(path: &[String]) -> String {
     path.join("/")
@@ -293,72 +335,110 @@ fn packed_source(ty: &Ty) -> bool {
         || packed_array(ty)
 }
 
-fn packed_body(ops: &[op::Op], term: &Term) -> bool {
-    let packed = |name: &str| op::find(ops, name, &context::value()).and_then(|operator| op::packed_kind(&operator));
-    let body = |term: &Term| packed_body(ops, term);
-    match &term.node {
-        Node::Lit(param::Value::Int(_) | param::Value::Float(_) | param::Value::Bool(_)) | Node::Time => true,
-        Node::Text(_) => true,
-        Node::RefBinding(_, _) => term.ty == Ty::Text || flow_syntax::packed_ops::scalar_width(&term.ty).is_some(),
-        Node::Vec(items) => matches!(items.len(), 2 | 3 | 4) && items.iter().all(body),
-        Node::Get(value, field) => {
-            let scalar_field = match &value.ty {
-                Ty::Vec2 => ["x", "y"].contains(&field.as_str()),
-                Ty::Vec3 => ["x", "y", "z"].contains(&field.as_str()),
-                Ty::Vec4 => ["x", "y", "z", "w"].contains(&field.as_str()),
-                Ty::Record(fields) => fields.iter().any(|(name, _)| name == field),
-                _ => false,
-            };
-            scalar_field && body(value)
+fn bypass_input_id(terms: &TermBuilder, term: TermId) -> Option<TermId> {
+    let syntax = terms.syntax();
+    let form = syntax.row(terms.row(term).form);
+    let mut first = None;
+    let mut match_form = false;
+    if let SNode::List(range) = form.node {
+        let forms = syntax.range_ids(range);
+        if !forms.is_empty() {
+            match_form = true;
+            let mut rest = &forms[1..];
+            while let Some((&id, tail)) = rest.split_first() {
+                if matches!(syntax.row(id).node, SNode::Kw(_)) && !tail.is_empty() { rest = &tail[1..]; }
+                else { first = Some(syntax.row(id)); break; }
+            }
+            first?;
         }
-        Node::Record(fields) => fields.iter().all(|(_, value)| body(value)),
-        Node::CallFn { args, body: Some(specialized), .. } => args.iter().all(body) && body(specialized),
-        Node::Op { op: name, args, .. } => {
-            let Some(capability) = packed(name) else { return false };
+    }
+    let selected = |id: TermId| {
+        if !match_form { return true; }
+        let candidate = syntax.row(terms.row(id).form);
+        let first = first.unwrap();
+        candidate.id == first.id && candidate.span == first.span
+    };
+    match terms.node(term) {
+        PackedNode::Call(id) => terms.field_ids(terms.call(id).args).iter().map(|field| field.term).find(|&id| selected(id)),
+        PackedNode::Op(id) => terms.field_ids(terms.op(id).args).iter().map(|field| field.term).find(|&id| selected(id)),
+        PackedNode::CallFn(id) => terms.term_ids(terms.call_fn(id).args).iter().copied().find(|&id| selected(id)),
+        _ => None,
+    }
+}
+
+fn packed_body(ops: &[op::Op], terms: &TermBuilder, term: TermId) -> bool {
+    let packed = |name: &str| op::find(ops, name, &context::value()).and_then(|operator| op::packed_kind(&operator));
+    let body = |term: TermId| packed_body(ops, terms, term);
+    match terms.node(term) {
+        PackedNode::Lit(id) => matches!(terms.literal(id), packed::Literal::Int(_) | packed::Literal::Float(_) | packed::Literal::Bool(_)),
+        PackedNode::Time | PackedNode::Text(_) => true,
+        PackedNode::RefBinding(_) => *terms.ty(term) == Ty::Text || flow_syntax::packed_ops::scalar_width(terms.ty(term)).is_some(),
+        PackedNode::Vec(range) => {
+            let items = terms.term_ids(range);
+            matches!(items.len(), 2 | 3 | 4) && items.iter().all(|&id| body(id))
+        }
+        PackedNode::Get(id) => {
+            let value = terms.get(id);
+            let field = terms.name(value.name);
+            let scalar_field = match terms.ty(value.value) {
+                Ty::Vec2 => ["x", "y"].contains(&field), Ty::Vec3 => ["x", "y", "z"].contains(&field),
+                Ty::Vec4 => ["x", "y", "z", "w"].contains(&field),
+                Ty::Record(fields) => fields.iter().any(|(name, _)| name == field), _ => false,
+            };
+            scalar_field && body(value.value)
+        }
+        PackedNode::Record(range) => terms.field_ids(range).iter().all(|field| body(field.term)),
+        PackedNode::CallFn(id) => {
+            let call = terms.call_fn(id);
+            call.body.is_some_and(|specialized| terms.term_ids(call.args).iter().all(|&id| body(id)) && body(specialized))
+        }
+        PackedNode::Op(id) => {
+            let operator = terms.op(id);
+            let args = terms.field_ids(operator.args);
+            let Some(capability) = packed(terms.name(operator.op)) else { return false; };
             match capability {
-                op::PackedKind::Frame => args.is_empty() && matches!(&term.ty, Ty::Float | Ty::Int | Ty::Bool),
-                op::PackedKind::Noise3 => args.iter().all(|(key, value)| match (key.as_str(), &value.node) {
-                    ("position", _) => body(value),
-                    ("seed", Node::Lit(param::Value::Int(_))) => true,
-                    ("octaves", Node::Lit(param::Value::Int(value))) => flow_syntax::packed_ops::supported_noise_octaves(*value),
-                    ("lacunarity" | "gain", Node::Lit(param::Value::Float(_))) => true,
-                    _ => false,
+                op::PackedKind::Frame => args.is_empty() && matches!(terms.ty(term), Ty::Float | Ty::Int | Ty::Bool),
+                op::PackedKind::Noise3 => args.iter().all(|field| {
+                    let literal = match terms.node(field.term) { PackedNode::Lit(id) => Some(terms.literal(id)), _ => None };
+                    match (terms.name(field.name), literal) {
+                        ("position", _) => body(field.term), ("seed", Some(packed::Literal::Int(_))) => true,
+                        ("octaves", Some(packed::Literal::Int(value))) => flow_syntax::packed_ops::supported_noise_octaves(value),
+                        ("lacunarity" | "gain", Some(packed::Literal::Float(_))) => true, _ => false,
+                    }
                 }),
-                op::PackedKind::Length | op::PackedKind::Normalize => {
-                    matches!(args.as_slice(), [(_, value)] if value.ty == Ty::Vec3 && body(value))
-                }
-                op::PackedKind::Dot | op::PackedKind::Cross => {
-                    args.len() == 2 && args.iter().all(|(_, value)| value.ty == Ty::Vec3 && body(value))
-                }
-                op::PackedKind::Exact => matches!(args.as_slice(), [(_, value)] if body(value)),
-                op::PackedKind::Fma | op::PackedKind::CheckedFma => args.len() == 3 && args.iter().all(|(_, value)| body(value)),
-                op::PackedKind::Trace => args.len() == 6 && args.iter().all(|(_, value)| body(value)),
-                op::PackedKind::Stage => args.iter().all(|(_, value)| body(value)),
-                op::PackedKind::CheckedMul => args.len() == 2 && args.iter().all(|(_, value)| body(value)),
-                op::PackedKind::Gather => matches!(args.as_slice(), [(_, array), (_, index)] if (array.ty == Ty::Array(Box::new(Ty::Text)) || packed_array(&array.ty)) && body(index)),
-                op::PackedKind::Binary(_) | op::PackedKind::Integer(_) | op::PackedKind::IntegerCompare(_) | op::PackedKind::RandAt => {
-                    args.len() == 2 && args.iter().all(|(_, value)| body(value))
-                }
-                op::PackedKind::Unary(_) | op::PackedKind::Convert(_) => args.len() == 1 && args.iter().all(|(_, value)| body(value)),
+                op::PackedKind::Length | op::PackedKind::Normalize => matches!(args, [value] if *terms.ty(value.term) == Ty::Vec3 && body(value.term)),
+                op::PackedKind::Dot | op::PackedKind::Cross => args.len() == 2 && args.iter().all(|value| *terms.ty(value.term) == Ty::Vec3 && body(value.term)),
+                op::PackedKind::Exact => matches!(args, [value] if body(value.term)),
+                op::PackedKind::Fma | op::PackedKind::CheckedFma => args.len() == 3 && args.iter().all(|value| body(value.term)),
+                op::PackedKind::Trace => args.len() == 6 && args.iter().all(|value| body(value.term)),
+                op::PackedKind::Stage => args.iter().all(|value| body(value.term)),
+                op::PackedKind::CheckedMul => args.len() == 2 && args.iter().all(|value| body(value.term)),
+                op::PackedKind::Gather => matches!(args, [array,index] if (matches!(terms.ty(array.term), Ty::Array(element) if **element == Ty::Text) || packed_array(terms.ty(array.term))) && body(index.term)),
+                op::PackedKind::Binary(_) | op::PackedKind::Integer(_) | op::PackedKind::IntegerCompare(_) | op::PackedKind::RandAt => args.len() == 2 && args.iter().all(|value| body(value.term)),
+                op::PackedKind::Unary(_) | op::PackedKind::Convert(_) => args.len() == 1 && args.iter().all(|value| body(value.term)),
                 op::PackedKind::ConstantOnly => false,
             }
         }
-        Node::Let(bindings, result) => bindings.iter().all(|(pattern, value)| matches!(pattern, Pattern::Name(_)) && body(value)) && body(result),
-        Node::If(test, yes, no) => body(test) && body(yes) && body(no),
-        Node::Cond(arms, default) => body(default) && arms.iter().all(|(test, value)| body(test) && body(value)),
-        Node::Case(scrutinee, arms, default) => {
-            body(scrutinee) && body(default) && arms.iter().all(|(literal, value)| {
-                let literal = matches!(&literal.node, SNode::Num(_) | SNode::Str(_))
-                    || matches!(&literal.node, SNode::Sym(name) if name == "true" || name == "false");
-                literal && body(value)
+        PackedNode::Let(id) => {
+            let node = terms.let_node(id);
+            terms.binding_ids(node.bindings).iter().all(|binding| matches!(terms.pattern_node(binding.pattern), packed::PatternNode::Name(_)) && body(binding.term)) && body(node.body)
+        }
+        PackedNode::If(id) => { let node = terms.if_node(id); body(node.test) && body(node.yes) && body(node.no) }
+        PackedNode::Cond(id) => { let node = terms.cond(id); body(node.default) && terms.arm_ids(node.arms).iter().all(|arm| body(arm.test) && body(arm.body)) }
+        PackedNode::Case(id) => {
+            let node = terms.case(id);
+            body(node.value) && body(node.default) && terms.case_arm_ids(node.arms).iter().all(|arm| {
+                let literal = match terms.syntax().row(arm.form).node {
+                    SNode::Num(_) | SNode::Str(_) => true,
+                    SNode::Sym(name) => matches!(terms.syntax().name(name), "true" | "false"), _ => false,
+                };
+                literal && body(arm.body)
             })
         }
-        Node::Expanded { body: expanded, .. } => body(expanded),
-        Node::Bypass(call) => bypass_input(call).is_some_and(|input| {
-            (input.ty == term.ty
-                || (term.ty == Ty::Float && matches!(&input.ty, Ty::Int | Ty::Bool))
-                || (matches!(&term.ty, Ty::Vec2 | Ty::Vec3 | Ty::Vec4) && matches!(&input.ty, Ty::Int | Ty::Float)))
-                && body(&input)
+        PackedNode::Expanded(id) => body(terms.expanded(id).body),
+        PackedNode::Bypass(call) => bypass_input_id(terms, call).is_some_and(|input| {
+            (terms.ty(input) == terms.ty(term) || (*terms.ty(term) == Ty::Float && matches!(terms.ty(input), Ty::Int | Ty::Bool))
+                || (matches!(terms.ty(term), Ty::Vec2 | Ty::Vec3 | Ty::Vec4) && matches!(terms.ty(input), Ty::Int | Ty::Float))) && body(input)
         }),
         _ => false,
     }
@@ -424,10 +504,10 @@ struct Sig{name:String,ctx:Context,params:Vec<(String,Ty,Option<Syntax>)>,body:S
 #[derive(Clone)]
 struct Cx{env:Rc<BTreeMap<String,Info>>,ctx:Context,path:Path,scope:String,in_def:bool,stack:Vec<String>,depth:usize,zone:Option<usize>,zbody:bool}
 #[derive(Clone)]
-struct Arg{key:Option<String>,form:Syntax,term:Term,info:Info}
+struct Arg{key:Option<String>,form:Syntax,term:TermId,info:Info}
 
-#[derive(Clone)]
 struct Checker {
+    terms: TermBuilder,
     catalog: catalog::Catalog,
     ops: Vec<op::Op>,
     library: bool,
@@ -442,7 +522,7 @@ struct Checker {
     macros: BTreeMap<String, Syntax>,
     macro_forms: Vec<Syntax>,
     node_defs: BTreeMap<String, defnode::Defnode>,
-    nodes: Vec<NodeDefinition>,
+    nodes: Vec<Arc<NodeDefinition>>,
     graph_terms: BTreeMap<String, Graph>,
     ginfo: BTreeMap<String, Info>,
     def_terms: BTreeMap<String, Graph>,
@@ -461,9 +541,25 @@ struct Checker {
     graph_stack: Vec<String>,
 }
 
+impl Clone for Checker {
+    fn clone(&self) -> Self {
+        Self { terms: TermBuilder::new(), catalog: self.catalog.clone(), ops: self.ops.clone(),
+            library: self.library, call_sites: self.call_sites, diags: self.diags.clone(), live: self.live.clone(),
+            invariant: self.invariant.clone(), packed: self.packed.clone(), roots: self.roots.clone(),
+            defs: self.defs.clone(), graphs: self.graphs.clone(), macros: self.macros.clone(), macro_forms: self.macro_forms.clone(),
+            node_defs: self.node_defs.clone(), nodes: self.nodes.clone(), graph_terms: self.graph_terms.clone(),
+            ginfo: self.ginfo.clone(), def_terms: self.def_terms.clone(), kind_fns: self.kind_fns.clone(),
+            inline: self.inline.clone(), input_paths: self.input_paths.clone(), checked_defs: self.checked_defs.clone(),
+            graph_order: self.graph_order.clone(), def_order: self.def_order.clone(), node_order: self.node_order.clone(),
+            declared_names: self.declared_names.clone(), steps: self.steps, count: self.count, children: self.children,
+            zone_id: self.zone_id, graph_stack: self.graph_stack.clone() }
+    }
+}
+
 impl Checker {
     fn new(catalog: catalog::Catalog, ops: &[op::Op], library: bool, call_sites: bool) -> Self {
         Self {
+            terms: TermBuilder::new(),
             catalog,
             ops: ops.to_vec(),
             library,
@@ -497,7 +593,13 @@ impl Checker {
             graph_stack: Vec::new(),
         }
     }
- fn add(&mut self,sev:Severity,form:&Syntax,code:&str,msg:String){let span=if form.span.start==0&&form.span.finish==0{None}else{Some(form.span.clone())};let d=match sev{Severity::ErrorSeverity=>err(code,msg,span),Severity::Warning=>diagnostic::warning(span,code.to_owned(),msg)};self.diags.push(d)}
+ fn make_term(&mut self, form: &Syntax, ty: Ty, node: Draft) -> TermId {
+     let form = self.terms.import_form(form);
+     self.terms.push(None, &ty, form, node)
+ }
+ fn set_path(&mut self, term: TermId, path: Path) -> TermId { self.terms.with_path(term, Some(&path)) }
+ fn term_form(&self, term: TermId) -> &Syntax { self.terms.source_form(term).expect("checked term source form") }
+ fn add(&mut self,sev:Severity,form:&Syntax,code:&str,msg:String){add_to(&mut self.diags,sev,form,code,msg)}
  fn error(&mut self,f:&Syntax,c:&str,m:&str){self.add(Severity::ErrorSeverity,f,c,m.to_owned())}
  fn warn(&mut self,f:&Syntax,c:&str,m:&str){self.add(Severity::Warning,f,c,m.to_owned())}
  fn warn_owned(&mut self,f:&Syntax,c:&str,m:String){self.add(Severity::Warning,f,c,m)}
@@ -544,9 +646,9 @@ impl Checker {
      self.packed.entry(path).and_modify(|old| *old = Self::merge_packed(old.clone(), producer.clone())).or_insert(producer);
  }
 
- fn fail_term(&mut self, form: &Syntax, code: &str, message: &str) -> (Term, Info) {
+ fn fail_term(&mut self, form: &Syntax, code: &str, message: &str) -> (TermId, Info) {
      self.error(form, code, message);
-     (make_term(form, Ty::Any, Node::Nil), Info::leaf(Ty::Any))
+     (self.make_term(form, Ty::Any, Draft::Nil), Info::leaf(Ty::Any))
  }
 
  fn exact_sink(&mut self, cx: &Cx, form: &Syntax, sink: &str, value: &Info) {
@@ -560,7 +662,7 @@ impl Checker {
      }
  }
 
- fn infer(&mut self, cx: &Cx, form: &Syntax) -> (Term, Info) {
+ fn infer(&mut self, cx: &Cx, form: &Syntax) -> (TermId, Info) {
      self.steps += 1;
      if self.steps > 400_000 * (self.count + self.children).max(1) {
          return self.fail_term(form, "E_BUDGET", "The workspace is too large to check: call-site typing exceeded its budget. Reduce nested function calls.");
@@ -580,68 +682,69 @@ impl Checker {
      result
  }
 
- fn infer_plain(&mut self, cx: &Cx, form: &Syntax) -> (Term, Info) {
-     match &form.node {
-         SNode::Num(raw) => match num_param(raw) {
-             Some(param::Value::Int(value)) => (make_term(form, Ty::Int, Node::Lit(param::Value::Int(value))), Info::leaf(Ty::Int)),
-             Some(param::Value::Float(value)) => (make_term(form, Ty::Float, Node::Lit(param::Value::Float(value))), Info::leaf(Ty::Float)),
-             _ => self.fail_term(form, "E_TYPE", "Nonfinite number."),
-         },
-         SNode::Str(bytes) => (make_term(form, Ty::Text, Node::Text(bytes.clone())), Info::leaf(Ty::Text)),
-         SNode::Kw(key) => self.fail_term(form, "E_KEYWORD", &format!("Keyword :{key} has no call to belong to.")),
-         SNode::Sym(name) => self.symbol(cx, form, name),
-         SNode::Vec(items) => self.vector(cx, form, items),
-         SNode::Map(items) => self.record(cx, form, items, "A record"),
-         SNode::Quote(_, _) => self.fail_term(form, "E_QUOTE", "Quotes belong in a defmacro template (`…)."),
-         SNode::List(items) if items.is_empty() => self.fail_term(form, "E_EXPR", "Expected an expression."),
-         SNode::List(items) => match &items[0].node {
-             SNode::Sym(head) => self.call(cx, form, head, &items[1..]),
-             _ => self.fail_term(form, "E_CALL", "A call head is a name."),
-         },
-     }
- }
+ fn infer_plain(&mut self, cx: &Cx, form: &Syntax) -> (TermId, Info) {
+    match form.node {
+        SNode::Num(raw) => match num_param(form.name(raw)) {
+            Some(param::Value::Int(value)) => (self.make_term(form, Ty::Int, Draft::Lit(param::Value::Int(value))), Info::leaf(Ty::Int)),
+            Some(param::Value::Float(value)) => (self.make_term(form, Ty::Float, Draft::Lit(param::Value::Float(value))), Info::leaf(Ty::Float)),
+            _ => self.fail_term(form, "E_TYPE", "Nonfinite number."),
+        },
+        SNode::Str(bytes) => (self.make_term(form, Ty::Text, Draft::Text(form.bytes(bytes).to_vec())), Info::leaf(Ty::Text)),
+        SNode::Kw(key) => self.fail_term(form, "E_KEYWORD", &format!("Keyword :{} has no call to belong to.", form.name(key))),
+        SNode::Sym(name) => self.symbol(cx, form, form.name(name)),
+        SNode::Vec(items) => self.vector(cx, form, form.range(items)),
+        SNode::Map(items) => self.record(cx, form, form.range(items), "A record"),
+        SNode::Quote(_, _) => self.fail_term(form, "E_QUOTE", "Quotes belong in a defmacro template (`…)."),
+        SNode::List(items) if form.range(items).is_empty() => self.fail_term(form, "E_EXPR", "Expected an expression."),
+        SNode::List(items) => {
+            let items = form.range(items);
+            match form.arena().row(items[0]).node {
+                SNode::Sym(head) => self.call(cx, form, form.name(head), &items[1..]),
+                _ => self.fail_term(form, "E_CALL", "A call head is a name."),
+            }
+        }
+    }
+}
 
- fn bypass(&mut self, cx: &Cx, form: &Syntax) -> (Term, Info) {
+ fn bypass(&mut self, cx: &Cx, form: &Syntax) -> (TermId, Info) {
      let SNode::List(items) = &form.node else {
          return self.fail_term(form, "E_BYPASS", &format!("can't bypass {}: only operator and function calls pass an input through.", lisp::flat(form)));
      };
-     let Some(SNode::Sym(head)) = items.first().map(|item| &item.node) else {
+     let items = form.range(*items);
+    let Some(SNode::Sym(head)) = items.first().map(|item| form.arena().row(*item).node) else {
          return self.fail_term(form, "E_BYPASS", &format!("can't bypass {}: only operator and function calls pass an input through.", lisp::flat(form)));
      };
-     if head == "if" && items.len() == 4 {
-         let mut plain = form.clone();
-         plain.meta_mut().clear();
-         let (_, checked) = self.infer_plain(cx, &plain);
-         let (mut branch, mut value) = self.branch(cx, "then", &items[2]);
-         branch.ty = checked.ty.clone();
-         branch.form = std::sync::Arc::new(form.clone());
+     let head = form.name(head);
+    if head == "if" && items.len() == 4 {
+         let (_, checked) = self.infer_plain(cx, form);
+         let (mut branch, mut value) = self.branch(cx, "then", &form.child(items[2]));
+         branch = self.terms.with_type(branch, &checked.ty);
+         branch = self.terms.with_form(branch, form);
          value.ty = checked.ty;
          return (branch, value);
      }
-     if SPECIAL.contains(&head.as_str()) || self.macros.contains_key(head) {
+     if SPECIAL.contains(&head) || self.macros.contains_key(head) {
          return self.fail_term(form, "E_BYPASS", &format!("can't bypass {head}: only operator and function calls pass an input through."));
      }
      let args = &items[1..];
-     let first_positional = { let mut i = 0; loop { match args.get(i) { None => break false, Some(Syntax { node: SNode::Kw(_), .. }) if i + 1 < args.len() => i += 2, Some(_) => break true } } };
+     let first_positional = { let mut i = 0; loop { match args.get(i) { None => break false, Some(id) if matches!(form.arena().row(*id).node, SNode::Kw(_)) && i + 1 < args.len() => i += 2, Some(_) => break true } } };
     if !first_positional {
          return self.fail_term(form, "E_BYPASS", &format!("can't bypass {head}: it has no positional input to pass through."));
      }
-     let mut plain = form.clone();
-     plain.meta_mut().clear();
-     let (call, value) = self.infer_plain(cx, &plain);
-     let Some(input) = bypass_input(&call) else {
+     let (call, value) = self.infer_plain(cx, form);
+     let Some(input) = bypass_input_id(&self.terms, call) else {
          return self.fail_term(form, "E_BYPASS", &format!("can't bypass {head}: only operator and function calls pass an input through."));
      };
-     if !ty::fits(&input.ty, &value.ty) || ty::has_fn(&input.ty) {
-         self.error(form, "E_BYPASS", &format!("can't bypass {head}: its input is {} but it returns {}.", show(&input.ty), show(&value.ty)));
+     if !ty::fits(self.terms.ty(input), &value.ty) || ty::has_fn(self.terms.ty(input)) {
+         self.error(form, "E_BYPASS", &format!("can't bypass {head}: its input is {} but it returns {}.", show(self.terms.ty(input)), show(&value.ty)));
      }
-     (make_term(form, value.ty.clone(), Node::Bypass(Box::new(call))), value)
+     (self.make_term(form, value.ty.clone(), Draft::Bypass(call)), value)
  }
- fn symbol(&mut self,cx:&Cx,f:&Syntax,s:&str)->(Term,Info){match s{"t"=>{let mut v=Info::leaf(Ty::Float);v.live=true;(make_term(f,Ty::Float,Node::Time),v)},"pi"=>(make_term(f,Ty::Float,Node::Lit(param::Value::Float(std::f64::consts::PI))),Info::leaf(Ty::Float)),"true"|"false"=>(make_term(f,Ty::Bool,Node::Lit(param::Value::Bool(s=="true"))),Info::leaf(Ty::Bool)),"nil"=>(make_term(f,ty::geometry(),Node::Nil),Info::leaf(ty::geometry())),_=>{
+ fn symbol(&mut self,cx:&Cx,f:&Syntax,s:&str)->(TermId,Info){match s{"t"=>{let mut v=Info::leaf(Ty::Float);v.live=true;(self.make_term(f,Ty::Float,Draft::Time),v)},"pi"=>(self.make_term(f,Ty::Float,Draft::Lit(param::Value::Float(std::f64::consts::PI))),Info::leaf(Ty::Float)),"true"|"false"=>(self.make_term(f,Ty::Bool,Draft::Lit(param::Value::Bool(s=="true"))),Info::leaf(Ty::Bool)),"nil"=>(self.make_term(f,ty::geometry(),Draft::Nil),Info::leaf(ty::geometry())),_=>{
      let mut parts=s.split('.');let name=parts.next().unwrap_or(s);let fs=parts.map(str::to_owned).collect::<Vec<_>>();
-     if let Some(mut v)=cx.env.get(name).cloned(){let mut t=make_term(f,v.ty.clone(),Node::RefBinding(name.into(),fs.clone()));for field in &fs{v=self.field(f,&v,field,name);}t.ty=v.ty.clone();(t,v)}else if !fs.is_empty()&&["t","pi","true","false","nil"].contains(&name){self.fail_term(f,"E_FIELD",&format!("{name} is a constant; it has no .{}.",fs.join(".")))}else{self.error(f,"E_UNBOUND",&format!("{name} is not bound in {}.{}",cx.scope,if cx.env.is_empty(){String::new()}else{format!(" Bound here: {}.",cx.env.keys().cloned().collect::<Vec<_>>().join(", "))}));self.fail_term_no_diag(f)}
+     if let Some(mut v)=cx.env.get(name).cloned(){let mut t=self.make_term(f,v.ty.clone(),Draft::RefBinding(name.into(),fs.clone()));for field in &fs{v=self.field(f,&v,field,name);}t=self.terms.with_type(t,&v.ty);(t,v)}else if !fs.is_empty()&&["t","pi","true","false","nil"].contains(&name){self.fail_term(f,"E_FIELD",&format!("{name} is a constant; it has no .{}.",fs.join(".")))}else{self.error(f,"E_UNBOUND",&format!("{name} is not bound in {}.{}",cx.scope,if cx.env.is_empty(){String::new()}else{format!(" Bound here: {}.",cx.env.keys().cloned().collect::<Vec<_>>().join(", "))}));self.fail_term_no_diag(f)}
    }}}
- fn fail_term_no_diag(&self,f:&Syntax)->(Term,Info){(make_term(f,Ty::Any,Node::Nil),Info::leaf(Ty::Any))}
+ fn fail_term_no_diag(&mut self,f:&Syntax)->(TermId,Info){(self.make_term(f,Ty::Any,Draft::Nil),Info::leaf(Ty::Any))}
  fn field(&mut self, form: &Syntax, value: &Info, name: &str, base: &str) -> Info {
      let ty = match &value.ty {
          Ty::Any => Ty::Any,
@@ -669,8 +772,8 @@ impl Checker {
      result.callable = None;
      result
  }
- fn vector(&mut self,cx:&Cx,f:&Syntax,xs:&[Syntax])->(Term,Info){let ty=match xs.len(){2=>Ty::Vec2,3=>Ty::Vec3,4=>Ty::Vec4,_=>{return self.fail_term(f,"E_VECTOR",&format!("A vector has 2, 3 or 4 components; this one has {}.",xs.len()))}};let mut ts=Vec::new();let mut vs=Vec::new();for x in xs{let(t,v)=self.infer(cx,x);if !matches!(v.ty,Ty::Int|Ty::Float|Ty::Any){self.error(x,"E_TYPE",&format!("Vector components are numbers; got {}.",show(&v.ty)));}ts.push(t);vs.push(v);}let v=Info::derive(ty.clone(),&vs);(make_term(f,ty,Node::Vec(ts)),v)}
- fn record(&mut self, cx: &Cx, form: &Syntax, items: &[Syntax], what: &str) -> (Term, Info) {
+ fn vector(&mut self,cx:&Cx,f:&Syntax,xs:&[SyntaxId])->(TermId,Info){let ty=match xs.len(){2=>Ty::Vec2,3=>Ty::Vec3,4=>Ty::Vec4,_=>{return self.fail_term(f,"E_VECTOR",&format!("A vector has 2, 3 or 4 components; this one has {}.",xs.len()))}};let mut ts=Vec::new();let mut vs=Vec::new();for id in xs{let x=&f.child(*id);let(t,v)=self.infer(cx,x);if !matches!(v.ty,Ty::Int|Ty::Float|Ty::Any){self.error(x,"E_TYPE",&format!("Vector components are numbers; got {}.",show(&v.ty)));}ts.push(t);vs.push(v);}let v=Info::derive(ty.clone(),&vs);(self.make_term(f,ty,Draft::Vec(ts)),v)}
+ fn record(&mut self, cx: &Cx, form: &Syntax, items: &[SyntaxId], what: &str) -> (TermId, Info) {
      if items.len() % 2 != 0 {
          return self.fail_term(form, "E_RECORD", &format!("{what} is :key value pairs; a key has no value."));
      }
@@ -681,20 +784,21 @@ impl Checker {
      let mut seen = BTreeSet::new();
      let mut valid = true;
      for pair in items.chunks_exact(2) {
-         let key = &pair[0];
-         let SNode::Kw(name) = &key.node else {
+         let key = &form.child(pair[0]);
+         let SNode::Kw(name) = key.node else {
              self.error(key, "E_RECORD", &format!("{what} keys are keywords like :size; got {}.", lisp::flat(key)));
              valid = false;
              continue;
          };
-         if !seen.insert(name.clone()) {
+         let name = key.name(name).to_owned();
+        if !seen.insert(name.clone()) {
              self.error(key, "E_RECORD", &format!("{what} gives :{name} twice."));
              valid = false;
              continue;
          }
-         let (term, value) = self.infer(cx, &pair[1]);
-         self.no_fn(&pair[1], &value.ty, &format!("Record field :{name}"));
-         fields.push((name.clone(), term.ty.clone()));
+         let (term, value) = self.infer(cx, &form.child(pair[1]));
+         self.no_fn(&form.child(pair[1]), &value.ty, &format!("Record field :{name}"));
+         fields.push((name.clone(), self.terms.ty(term).clone()));
          terms.push((name.clone(), term));
          if value.live_len {
              list_fields.push(vec![name.clone()]);
@@ -707,7 +811,7 @@ impl Checker {
          values.push(value);
      }
      if !valid {
-         return (make_term(form, Ty::Any, Node::Nil), Info::leaf(Ty::Any));
+         return (self.make_term(form, Ty::Any, Draft::Nil), Info::leaf(Ty::Any));
      }
      list_fields.sort();
      list_fields.dedup();
@@ -715,10 +819,10 @@ impl Checker {
      let mut value = Info::derive(ty.clone(), &values);
      value.list_fields = list_fields;
      value.live_len = value.list_fields.iter().any(Vec::is_empty);
-     (make_term(form, ty, Node::Record(terms)), value)
+     (self.make_term(form, ty, Draft::Record(terms)), value)
  }
  fn no_fn(&mut self,f:&Syntax,t:&Ty,what:&str){if ty::has_fn(t){self.error(f,"E_FN_ESCAPES",&format!("{what} is a function; a function value cannot be stored or returned (E_FN_ESCAPES). Call it where it is bound."))}}
- fn input(&mut self, cx: &Cx, form: &Syntax, key: &str) -> (Term, Info) {
+ fn input(&mut self, cx: &Cx, form: &Syntax, key: &str) -> (TermId, Info) {
      let head = syntax::head(form).unwrap_or("");
      if !head.contains('/') && !self.macros.contains_key(head) && !opaque_head(head) {
          return self.infer(cx, form);
@@ -751,8 +855,8 @@ impl Checker {
      inner.path = path.clone();
      let (term, value) = self.infer(&inner, form);
      self.mark(path.clone(), &value);
-     let term = if term.ty == ty::drawing() || term.ty == ty::image() {
-         set_path(term, path)
+     let term = if *self.terms.ty(term) == ty::drawing() || *self.terms.ty(term) == ty::image() {
+         self.set_path(term, path)
      } else {
          term
      };
@@ -766,12 +870,14 @@ impl Checker {
      }
      match &pattern.node {
          SNode::Sym(name) => {
+             let name = pattern.name(*name).to_owned();
              let mut path = cx.path.clone();
              path.push(format!("{marker_text}{name}"));
              self.mark(path, &value);
              env.insert(name.clone(), value);
          }
          SNode::Vec(patterns) => {
+             let patterns = pattern.range(*patterns);
              let width = match &value.ty {
                  Ty::Vec2 => Some(2),
                  Ty::Vec3 => Some(3),
@@ -793,19 +899,23 @@ impl Checker {
              part.live_len = false;
              part.len = None;
              part.callable = None;
-             for pattern in patterns {
-                 self.bind(cx, pattern, part.clone(), marker_text, env);
+             for id in patterns {
+                 self.bind(cx, &pattern.child(*id), part.clone(), marker_text, env);
              }
          }
-         SNode::Map(items) if items.len() == 2 && matches!(&items[0].node, SNode::Kw(key) if key == "keys") => {
-             if !matches!(&value.ty, Ty::Record(_) | Ty::Any) {
-                 self.error(pattern, "E_PATTERN", &format!("{} destructures a record; got {}.", Self::pattern_key(pattern), show(&value.ty)));
-             }
-             if let SNode::Vec(keys) = &items[1].node {
-                 for key in keys {
-                     if let SNode::Sym(name) = &key.node {
-                         let field = self.field(key, &value, name, "pattern");
-                         self.bind(cx, key, field, marker_text, env);
+         SNode::Map(items) => {
+             let items = pattern.range(*items);
+             if items.len() == 2 && matches!(pattern.arena().row(items[0]).node, SNode::Kw(key) if pattern.name(key) == "keys") {
+                 if !matches!(&value.ty, Ty::Record(_) | Ty::Any) {
+                     self.error(pattern, "E_PATTERN", &format!("{} destructures a record; got {}.", Self::pattern_key(pattern), show(&value.ty)));
+                 }
+                 if let SNode::Vec(keys) = pattern.arena().row(items[1]).node {
+                     for id in pattern.range(keys) {
+                         let key = pattern.child(*id);
+                         if let SNode::Sym(name) = key.node {
+                             let field = self.field(&key, &value, key.name(name), "pattern");
+                             self.bind(cx, &key, field, marker_text, env);
+                         }
                      }
                  }
              }
@@ -847,19 +957,26 @@ impl Checker {
          format!("Invalid binding name {}. Bind a name, [a b] or {{:keys [a b]}}.", Self::pattern_key(p))
      };
      match &pattern.node {
-         SNode::Sym(name) => self.check_name(cx, pattern, name, seen, what, zone),
-         SNode::Vec(items) if !items.is_empty() => {
+         SNode::Sym(name) => self.check_name(cx, pattern, pattern.name(*name), seen, what, zone),
+         SNode::Vec(items) if !pattern.range(*items).is_empty() => {
+             let items = pattern.range(*items);
              let mut ok = true;
-             for item in items { ok &= self.check_pattern(cx, item, seen, _env, what); }
+             for item in items { ok &= self.check_pattern(cx, &pattern.child(*item), seen, _env, what); }
              ok
          }
-         SNode::Map(items) if items.len() == 2 && matches!(&items[0].node, SNode::Kw(k) if k == "keys") && matches!(&items[1].node, SNode::Vec(ks) if !ks.is_empty()) => {
-             let SNode::Vec(keys) = &items[1].node else { unreachable!() };
+         SNode::Map(range) if {
+             let items = pattern.range(*range);
+             items.len() == 2 && matches!(pattern.arena().row(items[0]).node, SNode::Kw(k) if pattern.name(k) == "keys")
+                 && matches!(pattern.arena().row(items[1]).node, SNode::Vec(ks) if !pattern.range(ks).is_empty())
+         } => {
+             let items = pattern.range(*range);
+             let SNode::Vec(keys) = pattern.arena().row(items[1]).node else { unreachable!() };
              let mut ok = true;
-             for key in keys {
-                 match &key.node {
-                     SNode::Sym(name) => ok &= self.check_name(cx, key, name, seen, what, zone),
-                     _ => { ok = false; let m = shape(key); self.error(key, "E_PATTERN", &m); }
+             for id in pattern.range(keys) {
+                 let key = pattern.child(*id);
+                 match key.node {
+                     SNode::Sym(name) => ok &= self.check_name(cx, &key, key.name(name), seen, what, zone),
+                     _ => { ok = false; let m = shape(&key); self.error(&key, "E_PATTERN", &m); }
                  }
              }
              ok
@@ -867,12 +984,33 @@ impl Checker {
          _ => { let m = shape(pattern); self.error(pattern, "E_PATTERN", &m); false }
      }
  }
- fn pattern(p:&Syntax)->Pattern{match &p.node{SNode::Sym(n)=>Pattern::Name(n.clone()),SNode::Vec(xs)=>Pattern::Seq(xs.iter().map(Self::pattern).collect()),SNode::Map(xs) if xs.len()==2=>if let SNode::Vec(ks)=&xs[1].node{Pattern::Keys(ks.iter().filter_map(|x|if let SNode::Sym(n)=&x.node{Some(n.clone())}else{None}).collect())}else{Pattern::Name("_".into())},_=>Pattern::Name("_".into())}}
- fn path_term(&mut self,cx:&Cx,f:&Syntax,term:Term,v:Info)->(Term,Info){let mut t=term;t.path=Some(cx.path.clone());self.mark(cx.path.clone(),&v);(t,v)}
- fn binding(&mut self, cx: &Cx, x: &Syntax, id: Path) -> (Term, Info) {
+ fn pattern(p: &Syntax) -> Pattern {
+     match p.node {
+         SNode::Sym(n) => Pattern::Name(p.name(n).to_owned()),
+         SNode::Vec(xs) => Pattern::Seq(p.range(xs).iter().map(|id| Self::pattern(&p.child(*id))).collect()),
+         SNode::Map(xs) if p.range(xs).len() == 2 => {
+             if let SNode::Vec(ks) = p.arena().row(p.range(xs)[1]).node {
+                 Pattern::Keys(p.range(ks).iter().filter_map(|id| match p.arena().row(*id).node {
+                     SNode::Sym(n) => Some(p.name(n).to_owned()), _ => None,
+                 }).collect())
+             } else { Pattern::Name("_".into()) }
+         }
+         _ => Pattern::Name("_".into()),
+     }
+ }
+
+ fn path_term(&mut self,cx:&Cx,f:&Syntax,term:TermId,v:Info)->(TermId,Info){let t=self.set_path(term,cx.path.clone());self.mark(cx.path.clone(),&v);(t,v)}
+ fn binding(&mut self, cx: &Cx, x: &Syntax, id: Path) -> (TermId, Info) {
      let mut inner = cx.clone();
      inner.path = id.clone();
-     let head = match &x.node { SNode::List(items) if x.meta().is_empty() => match items.first().map(|h| &h.node) { Some(SNode::Sym(h)) => Some((h.as_str(), &items[1..])), _ => None }, _ => None };
+     let head = match x.node {
+         SNode::List(range) if x.meta().is_empty() => {
+             let items = x.range(range);
+             match items.first().map(|id| x.arena().row(*id).node) {
+                 Some(SNode::Sym(h)) => Some((x.name(h), &items[1..])), _ => None,
+             }
+         }, _ => None,
+     };
      let (mut term, mut value) = match head {
          Some((h @ ("for" | "fold" | "scan" | "sum"), args)) => self.zone(&inner, x, h, args, Some(id.clone())),
          Some(("let*", args)) => self.let_scope(&inner, x, args, id.clone()),
@@ -882,18 +1020,19 @@ impl Checker {
      };
      if value.approx && value.approx_sources.is_empty() { value.approx_sources.insert(id.clone()); }
      self.mark(id.clone(), &value);
-     term.path = Some(id);
+     term = self.set_path(term, id);
      (term, value)
  }
- fn result_in(&mut self, cx: &Cx, form: &Syntax, base: &Path) -> (Term, Info) {
+ fn result_in(&mut self, cx: &Cx, form: &Syntax, base: &Path) -> (TermId, Info) {
      let path = marker(base, "@result");
      let (term, value) = self.binding(cx, form, path);
      self.no_fn(form, &value.ty, &format!("The result of {}", cx.scope));
      (term, value)
  }
- fn body(&mut self, cx: &Cx, form: &Syntax) -> (Term, Info) {
+ fn body(&mut self, cx: &Cx, form: &Syntax) -> (TermId, Info) {
      if let SNode::List(items) = &form.node {
-         if items.first().is_some_and(|head| matches!(&head.node, SNode::Sym(name) if name == "let*"))
+         let items = form.range(*items);
+         if items.first().is_some_and(|id| matches!(form.arena().row(*id).node, SNode::Sym(name) if form.name(name) == "let*"))
              && form.meta().is_empty()
          {
              return self.let_scope(cx, form, &items[1..], cx.path.clone());
@@ -905,7 +1044,7 @@ impl Checker {
      (term, value)
  }
 
- fn branch_test(&mut self, cx: &Cx, key: &str, form: &Syntax) -> (Term, Info) {
+ fn branch_test(&mut self, cx: &Cx, key: &str, form: &Syntax) -> (TermId, Info) {
      let mut path = cx.path.clone();
      if let Some(last) = path.pop() {
          path.push(format!("{last}#{key}"));
@@ -915,7 +1054,7 @@ impl Checker {
      self.binding(cx, form, path)
  }
 
- fn branch(&mut self, cx: &Cx, key: &str, form: &Syntax) -> (Term, Info) {
+ fn branch(&mut self, cx: &Cx, key: &str, form: &Syntax) -> (TermId, Info) {
      let mut path = cx.path.clone();
      if let Some(last) = path.pop() {
          path.push(format!("{last}#{key}"));
@@ -926,41 +1065,77 @@ impl Checker {
      inner.path = path.clone();
      let (mut term, value) = self.body(&inner, form);
      if syntax::head(form) != Some("let*") {
-         term = make_term(form, value.ty.clone(), Node::Let(Vec::new(), Box::new(term)));
+         term = self.make_term(form, value.ty.clone(), Draft::Let(Vec::new(), term));
      }
-     term.path = Some(path.clone());
+     term = self.set_path(term, path.clone());
      self.mark(path, &value);
      (term, value)
  }
- fn call(&mut self,cx:&Cx,f:&Syntax,name:&str,args:&[Syntax])->(Term,Info){match name{
+ fn call(&mut self,cx:&Cx,f:&Syntax,name:&str,args:&[SyntaxId])->(TermId,Info){match name{
    "let*"=>{let base=self.inline_path(cx,"~let");self.let_scope(cx,f,args,base)},"state"=>self.state(cx,f,args,None),"for"|"fold"|"scan"|"sum"=>self.zone(cx,f,name,args,None),"fn"=>self.make_fn(cx,f,args,"fn",None),
    "if"=>self.if_form(cx,f,args),"cond"=>self.cond_form(cx,f,name,args),"case"=>self.cond_form(cx,f,name,args),"values"=>self.record(cx,f,args,"values"),"list"=>self.list(cx,f,args),"concat"=>self.concat(cx,f,args),"str"=>self.str_form(cx,f,args),"get"=>self.get(cx,f,args),"assoc"=>self.assoc(cx,f,args),"map"|"filter"|"reduce"|"sort-by"=>self.hof(cx,f,name,args),"iterate"=>self.iterate(cx,f,args),"ref"=>self.ref_form(cx,f,args),"with_error"=>self.with_error(cx,f,args),"error_rows"=>self.error_rows(cx,f,args),
    "quote"|"quasiquote"|"unquote"|"unquote-splicing"=>self.fail_term(f,"E_QUOTE",&format!("{name} belongs in a defmacro template (`…).")),"workspace"|"graph"|"defn"|"defnode"|"defmacro"=>self.fail_term(f,"E_FORM",&format!("{name} is a top-level form of a workspace.")),
    _=>self.call_named(cx,f,name,args)
  }}
- fn let_scope(&mut self,cx:&Cx,f:&Syntax,args:&[Syntax],base:Path)->(Term,Info){if args.len()!=2{return self.fail_term(f,"E_LET","let* needs [name expression …] and one result.")}let SNode::Vec(bs)=&args[0].node else{return self.fail_term(f,"E_LET","let* needs [name expression …] and one result.")};if bs.len()%2!=0{return self.fail_term(f,"E_LET","let* needs [name expression …] and one result.")}let mut env=(*cx.env).clone();let mut out=Vec::new();let mut seen=BTreeSet::new();for pair in bs.chunks_exact(2){let p=&pair[0];if !self.check_pattern(cx,p,&mut seen,&env,"let*" ){continue}let mut path=base.clone();path.push(Self::pattern_key(p));let mut inner=cx.clone();inner.env=Rc::new(env.clone());inner.path=path.clone();inner.zbody=false;let(t,v)=if pair[1].meta().is_empty()&&matches!((&p.node,&pair[1].node),(SNode::Sym(_),SNode::List(xs)) if xs.first().is_some_and(|h|matches!(&h.node,SNode::Sym(s) if s=="fn"))){self.make_fn(&inner,&pair[1],&pair[1].node_as_args(),Self::pattern_key(p).as_str(),Some(path.clone()))}else{self.binding(&inner,&pair[1],path.clone())};let mut t=t;t.path=Some(path.clone());self.mark(path.clone(),&v);if cx.zbody&&!cx.zone.is_some_and(|z|v.vary.contains(&z)){self.invariant.insert(path.clone());}{let mut bcx=cx.clone();bcx.path=base.clone();self.bind(&bcx,p,v.clone(),"",&mut env);}out.push((Self::pattern(p),t));}let mut inner=cx.clone();inner.env=Rc::new(env);inner.zbody=false;let(t,v)=self.result_in(&inner,&args[1],&base);(make_term(f,v.ty.clone(),Node::Let(out,Box::new(t))),v)}
- fn pattern_key(p:&Syntax)->String{if let SNode::Sym(s)=&p.node{s.clone()}else{lisp::flat(p)}}
- fn list(&mut self,cx:&Cx,f:&Syntax,args:&[Syntax])->(Term,Info){let mut ts=Vec::new();let mut vs=Vec::new();let mut elem=Ty::Any;for a in args{let(t,v)=self.infer(cx,a);self.no_fn(a,&v.ty,"A list element");elem=ty::join(&elem,&v.ty).unwrap_or_else(||{self.error(a,"E_TYPE",&format!("List elements share one type; got {} and {}.",show(&elem),show(&v.ty)));elem.clone()});ts.push(t);vs.push(v)}let mut v=Info::derive(Ty::List(Box::new(elem.clone())),&vs);v.len=Some(args.len());(make_term(f,Ty::List(Box::new(elem)),Node::ListLit(ts)),v)}
- fn concat(&mut self,cx:&Cx,f:&Syntax,args:&[Syntax])->(Term,Info){let mut ts=Vec::new();let mut vs=Vec::new();let mut el=Ty::Any;let mut len=Some(0usize);for a in args{let(t,v)=self.infer(cx,a);if let Some(e)=ty::elem(&v.ty){el=ty::join(&el,&e).unwrap_or_else(||{self.error(a,"E_TYPE","concat joins lists of one type.");el.clone()});}else{self.error(a,"E_TYPE",&format!("concat joins lists; got {}.",show(&v.ty)));}len=match(len,v.len){(Some(x),Some(y))=>x.checked_add(y),_=>None};ts.push(t);vs.push(v)}let ty=Ty::List(Box::new(el));let mut v=Info::derive(ty.clone(),&vs);v.len=len;(make_term(f,ty,Node::ListOp("concat".into(),ts)),v)}
- fn str_form(&mut self,cx:&Cx,f:&Syntax,args:&[Syntax])->(Term,Info){let mut ts=Vec::new();let mut vs=Vec::new();for a in args{let(t,v)=self.infer(cx,a);ts.push(t);vs.push(v)}(make_term(f,Ty::Text,Node::Str(ts)),Info::derive(Ty::Text,&vs))}
- fn get(&mut self,cx:&Cx,f:&Syntax,args:&[Syntax])->(Term,Info){if args.len()!=2{return self.fail_term(f,"E_ARGS","get is (get record :field).")};let(t,v)=self.infer(cx,&args[0]);let SNode::Kw(field)=&args[1].node else{return self.fail_term(f,"E_ARGS","get is (get record :field).")};if !matches!(v.ty,Ty::Record(_)|Ty::Any){self.error(&args[0],"E_TYPE",&format!("get reads a record field; got {}.",show(&v.ty)));}let out=self.field(f,&v,field,&Self::pattern_key(&args[0]));(make_term(f,out.ty.clone(),Node::Get(Box::new(t),field.clone())),out)}
- fn assoc(&mut self, cx: &Cx, f: &Syntax, args: &[Syntax]) -> (Term, Info) {
+ fn let_scope(&mut self,cx:&Cx,f:&Syntax,args:&[SyntaxId],base:Path)->(TermId,Info){
+     if args.len()!=2{return self.fail_term(f,"E_LET","let* needs [name expression …] and one result.")}
+     let bindings=f.child(args[0]);
+     let SNode::Vec(bs)=bindings.node else{return self.fail_term(f,"E_LET","let* needs [name expression …] and one result.")};
+     let bs=bindings.range(bs);
+     if bs.len()%2!=0{return self.fail_term(f,"E_LET","let* needs [name expression …] and one result.")}
+     let mut env=(*cx.env).clone();let mut out=Vec::new();let mut seen=BTreeSet::new();
+     for pair in bs.chunks_exact(2){
+         let p=&f.child(pair[0]);let expr=&f.child(pair[1]);
+         if !self.check_pattern(cx,p,&mut seen,&env,"let*"){continue}
+         let mut path=base.clone();path.push(Self::pattern_key(p));
+         let mut inner=cx.clone();inner.env=Rc::new(env.clone());inner.path=path.clone();inner.zbody=false;
+         let(t,v)=if expr.meta().is_empty()&&matches!(p.node,SNode::Sym(_))&&syntax::head(expr)==Some("fn"){
+             let args=expr.children();
+             self.make_fn(&inner,expr,&args[1..],Self::pattern_key(p).as_str(),Some(path.clone()))
+         }else{self.binding(&inner,expr,path.clone())};
+         let t=self.set_path(t,path.clone());self.mark(path.clone(),&v);
+         if cx.zbody&&!cx.zone.is_some_and(|z|v.vary.contains(&z)){self.invariant.insert(path.clone());}
+         {let mut bcx=cx.clone();bcx.path=base.clone();self.bind(&bcx,p,v.clone(),"",&mut env);}
+         out.push((Self::pattern(p),t));
+     }
+     let mut inner=cx.clone();inner.env=Rc::new(env);inner.zbody=false;
+     let(t,v)=self.result_in(&inner,&f.child(args[1]),&base);
+     (self.make_term(f,v.ty.clone(),Draft::Let(out,t)),v)
+ }
+
+ fn pattern_key(p:&Syntax)->String{if let SNode::Sym(s)=p.node{p.name(s).to_owned()}else{lisp::flat(p)}}
+
+ fn list(&mut self,cx:&Cx,f:&Syntax,args:&[SyntaxId])->(TermId,Info){let mut ts=Vec::new();let mut vs=Vec::new();let mut elem=Ty::Any;for id in args{let a=&f.child(*id);let(t,v)=self.infer(cx,a);self.no_fn(a,&v.ty,"A list element");elem=ty::join(&elem,&v.ty).unwrap_or_else(||{self.error(a,"E_TYPE",&format!("List elements share one type; got {} and {}.",show(&elem),show(&v.ty)));elem.clone()});ts.push(t);vs.push(v)}let mut v=Info::derive(Ty::List(Box::new(elem.clone())),&vs);v.len=Some(args.len());(self.make_term(f,Ty::List(Box::new(elem)),Draft::ListLit(ts)),v)}
+ fn concat(&mut self,cx:&Cx,f:&Syntax,args:&[SyntaxId])->(TermId,Info){let mut ts=Vec::new();let mut vs=Vec::new();let mut el=Ty::Any;let mut len=Some(0usize);for id in args{let a=&f.child(*id);let(t,v)=self.infer(cx,a);if let Some(e)=ty::elem(&v.ty){el=ty::join(&el,&e).unwrap_or_else(||{self.error(a,"E_TYPE","concat joins lists of one type.");el.clone()});}else{self.error(a,"E_TYPE",&format!("concat joins lists; got {}.",show(&v.ty)));}len=match(len,v.len){(Some(x),Some(y))=>x.checked_add(y),_=>None};ts.push(t);vs.push(v)}let ty=Ty::List(Box::new(el));let mut v=Info::derive(ty.clone(),&vs);v.len=len;(self.make_term(f,ty,Draft::ListOp("concat".into(),ts)),v)}
+ fn str_form(&mut self,cx:&Cx,f:&Syntax,args:&[SyntaxId])->(TermId,Info){let mut ts=Vec::new();let mut vs=Vec::new();for id in args{let a=&f.child(*id);let(t,v)=self.infer(cx,a);ts.push(t);vs.push(v)}(self.make_term(f,Ty::Text,Draft::Str(ts)),Info::derive(Ty::Text,&vs))}
+ fn get(&mut self,cx:&Cx,f:&Syntax,args:&[SyntaxId])->(TermId,Info){
+     if args.len()!=2{return self.fail_term(f,"E_ARGS","get is (get record :field).")};
+     let record=f.child(args[0]);let key=f.child(args[1]);let(t,v)=self.infer(cx,&record);
+     let SNode::Kw(field)=key.node else{return self.fail_term(f,"E_ARGS","get is (get record :field).")};
+     let field=key.name(field);
+     if !matches!(v.ty,Ty::Record(_)|Ty::Any){self.error(&record,"E_TYPE",&format!("get reads a record field; got {}.",show(&v.ty)));}
+     let out=self.field(f,&v,field,&Self::pattern_key(&record));
+     (self.make_term(f,out.ty.clone(),Draft::Get(t,field.to_owned())),out)
+ }
+
+ fn assoc(&mut self, cx: &Cx, f: &Syntax, args: &[SyntaxId]) -> (TermId, Info) {
      if args.len() < 3 || args.len() % 2 == 0 { return self.fail_term(f, "E_ARGS", "assoc is (assoc record :field value …)."); }
-     let (rt, rv) = self.infer(cx, &args[0]);
+     let (rt, rv) = self.infer(cx, &f.child(args[0]));
      match rv.ty.clone() {
          Ty::Any => {
              let mut poison = Info::leaf(Ty::Any);
              poison.live = rv.live;
-             (make_term(f, Ty::Any, Node::Assoc(Box::new(rt), Vec::new())), poison)
+             (self.make_term(f, Ty::Any, Draft::Assoc(rt, Vec::new())), poison)
          }
          Ty::Record(mut fs) => {
              let mut lengths = rv.list_fields.clone();
              let mut vs = vec![rv];
-             let mut updates: Vec<(String, Term)> = Vec::new();
+             let mut updates: Vec<(String, TermId)> = Vec::new();
              for pair in args[1..].chunks_exact(2) {
-                 let (k, value) = (&pair[0], &pair[1]);
+                 let (k, value) = (&f.child(pair[0]), &f.child(pair[1]));
                  match &k.node {
                      SNode::Kw(n) => {
+                         let n = k.name(*n);
                          let (t, v) = self.infer(cx, value);
                          self.no_fn(value, &v.ty, &format!("Record field :{n}"));
                          match fs.iter().find(|(name, _)| name == n) {
@@ -970,12 +1145,12 @@ impl Checker {
                                      self.error(value, "E_TYPE", &m);
                                  }
                              }
-                             None => fs.push((n.clone(), v.ty.clone())),
+                             None => fs.push((n.to_owned(), v.ty.clone())),
                          }
-                         lengths.retain(|p| p.first() != Some(n));
+                         lengths.retain(|p| p.first().map(String::as_str) != Some(n));
                          let fields = if v.live_len { let mut x = vec![Vec::new()]; x.extend(v.list_fields.iter().cloned()); x } else { v.list_fields.clone() };
-                         lengths.extend(fields.into_iter().map(|p| { let mut q = vec![n.clone()]; q.extend(p); q }));
-                         updates.push((n.clone(), t));
+                         lengths.extend(fields.into_iter().map(|p| { let mut q = vec![n.to_owned()]; q.extend(p); q }));
+                         updates.push((n.to_owned(), t));
                          vs.push(v);
                      }
                      _ => self.error(k, "E_ARGS", &format!("assoc keys are keywords; got {}.", Self::pattern_key(k))),
@@ -984,26 +1159,26 @@ impl Checker {
              let ty = Ty::Record(fs);
              let mut info = Info::derive(ty.clone(), &vs);
              info.list_fields = lengths;
-             (make_term(f, ty, Node::Assoc(Box::new(rt), updates)), info)
+             (self.make_term(f, ty, Draft::Assoc(rt, updates)), info)
          }
          t => self.fail_term(f, "E_TYPE", &format!("assoc updates a record; got {}.", show(&t))),
      }
  }
- fn if_form(&mut self, cx: &Cx, form: &Syntax, args: &[Syntax]) -> (Term, Info) {
+ fn if_form(&mut self, cx: &Cx, form: &Syntax, args: &[SyntaxId]) -> (TermId, Info) {
      if args.len() != 3 {
          return self.fail_term(form, "E_NO_ELSE", "if takes a condition, a then and an else.");
      }
-     let (condition, condition_value) = self.branch_test(cx, "test", &args[0]);
+     let (condition, condition_value) = self.branch_test(cx, "test", &form.child(args[0]));
      if !ty::fits(&condition_value.ty, &Ty::Bool) {
-         self.error(&args[0], "E_TYPE", &format!("if needs a bool condition, got {}.", show(&condition_value.ty)));
+         self.error(&form.child(args[0]), "E_TYPE", &format!("if needs a bool condition, got {}.", show(&condition_value.ty)));
      }
-     let (then_term, then_value) = self.branch(cx, "then", &args[1]);
-     let (else_term, else_value) = self.branch(cx, "else", &args[2]);
+     let (then_term, then_value) = self.branch(cx, "then", &form.child(args[1]));
+     let (else_term, else_value) = self.branch(cx, "else", &form.child(args[2]));
      if !ty::fits(&then_value.ty, &else_value.ty) && !ty::fits(&else_value.ty, &then_value.ty) {
          self.error(form, "E_TYPE", &format!("Both branches of if must have one type: {} and {}.", show(&then_value.ty), show(&else_value.ty)));
      }
-     self.no_fn(&args[1], &then_value.ty, "An if branch");
-     self.no_fn(&args[2], &else_value.ty, "An if branch");
+     self.no_fn(&form.child(args[1]), &then_value.ty, "An if branch");
+     self.no_fn(&form.child(args[2]), &else_value.ty, "An if branch");
      let ty = ty::join(&then_value.ty, &else_value.ty).unwrap_or_else(|| then_value.ty.clone());
      if condition_value.live && shape_ty(&ty) {
          self.error(form, "E_TIME_BRANCH", "A branch picks between shapes by t. The network keeps its shape while playing; pick a value instead.");
@@ -1019,10 +1194,10 @@ impl Checker {
      value.approx = condition_value.approx || then_value.approx || else_value.approx;
      value.live_len = then_value.live_len || else_value.live_len || lf.iter().any(Vec::is_empty);
      value.list_fields = lf;
-     (make_term(form, ty, Node::If(Box::new(condition), Box::new(then_term), Box::new(else_term))), value)
+     (self.make_term(form, ty, Draft::If(condition, then_term, else_term)), value)
  }
 
- fn cond_form(&mut self, cx: &Cx, form: &Syntax, name: &str, args: &[Syntax]) -> (Term, Info) {
+ fn cond_form(&mut self, cx: &Cx, form: &Syntax, name: &str, args: &[SyntaxId]) -> (TermId, Info) {
      let is_case = name == "case";
      let (scrutinee, arms_form) = if is_case {
          let Some((scrutinee, rest)) = args.split_first() else {
@@ -1040,10 +1215,10 @@ impl Checker {
          });
      }
      let pairs = arms_form.chunks_exact(2).collect::<Vec<_>>();
-     if !matches!(&pairs[pairs.len() - 1][0].node, SNode::Kw(key) if key == "else") {
+     if !matches!(form.arena().row(pairs[pairs.len() - 1][0]).node, SNode::Kw(key) if form.name(key) == "else") {
          return self.fail_term(form, "E_NO_ELSE", &format!("{name} needs a final :else arm, so it always has a value."));
      }
-     let scrutinee = scrutinee.map(|form| self.branch_test(cx, "of", form));
+     let scrutinee = scrutinee.map(|id| self.branch_test(cx, "of", &form.child(*id)));
      let mut test_live = scrutinee.as_ref().is_some_and(|(_, value)| value.live);
      let mut values = scrutinee.iter().map(|(_, value)| value.clone()).collect::<Vec<_>>();
      let mut conditional_arms = Vec::new();
@@ -1051,9 +1226,9 @@ impl Checker {
      let mut default = None;
      let mut result_ty: Option<Ty> = None;
      for (index, pair) in pairs.iter().enumerate() {
-         let test = &pair[0];
-         let result_form = &pair[1];
-         let is_else = matches!(&test.node, SNode::Kw(key) if key == "else");
+         let test = &form.child(pair[0]);
+         let result_form = &form.child(pair[1]);
+         let is_else = matches!(test.node, SNode::Kw(key) if test.name(key) == "else");
          if is_else && index + 1 != pairs.len() {
              self.error(test, "E_COND", &format!(":else is the last arm of {name}."));
          }
@@ -1061,7 +1236,7 @@ impl Checker {
              None
          } else if let Some((_, scrutinee_value)) = &scrutinee {
              let literal = matches!(&test.node, SNode::Num(_) | SNode::Str(_))
-                 || matches!(&test.node, SNode::Sym(name) if name == "true" || name == "false");
+                 || matches!(test.node, SNode::Sym(name) if test.name(name) == "true" || test.name(name) == "false");
              if literal {
                  let (term, value) = self.infer(cx, test);
                  if !ty::fits(&value.ty, &scrutinee_value.ty) && !ty::fits(&scrutinee_value.ty, &value.ty) {
@@ -1099,14 +1274,14 @@ impl Checker {
              default = Some(result);
          } else if let Some(test_term) = test_term {
              if is_case {
-                 case_arms.push((test.clone(), result));
+                 case_arms.push((self.terms.import_form(test), result));
              } else {
                  conditional_arms.push((test_term, result));
              }
          }
      }
      let ty = result_ty.unwrap_or(Ty::Any);
-     let default = default.unwrap_or_else(|| make_term(form, Ty::Any, Node::Nil));
+     let default = default.unwrap_or_else(|| self.make_term(form, Ty::Any, Draft::Nil));
      if test_live && shape_ty(&ty) {
          self.error(form, "E_TIME_BRANCH", &format!("A branch in {} picks between shapes by t. The network keeps its shape while playing; pick a value instead.", path_text(&cx.path)));
      }
@@ -1121,37 +1296,39 @@ impl Checker {
      value.live_len = values.iter().any(|value| value.live_len) || lf.iter().any(Vec::is_empty);
      value.list_fields = lf;
      let node = if let Some((scrutinee, _)) = scrutinee {
-         Node::Case(Box::new(scrutinee), case_arms, Box::new(default))
+         Draft::Case(scrutinee, case_arms, default)
      } else {
-         Node::Cond(conditional_arms, Box::new(default))
+         Draft::Cond(conditional_arms, default)
      };
-     (make_term(form, ty, node), value)
+     (self.make_term(form, ty, node), value)
  }
- fn state(&mut self, cx: &Cx, form: &Syntax, args: &[Syntax], at: Option<Path>) -> (Term, Info) {
+ fn state(&mut self, cx: &Cx, form: &Syntax, args: &[SyntaxId], at: Option<Path>) -> (TermId, Info) {
      if args.len() != 2 {
          return self.fail_term(form, "E_STATE", "state is (state [s init] step).");
      }
-     let SNode::Vec(binding) = &args[0].node else {
+     let binding_form = form.child(args[0]);
+     let SNode::Vec(binding) = binding_form.node else {
          return self.fail_term(form, "E_STATE", "state is (state [s init] step).");
      };
+     let binding = binding_form.range(binding);
      if binding.len() != 2 {
          return self.fail_term(form, "E_STATE", "state is (state [s init] step).");
      }
-     let pattern = &binding[0];
+     let pattern = &form.child(binding[0]);
      let mut seen = BTreeSet::new();
      if !matches!(&pattern.node, SNode::Sym(_))
          || !self.check_pattern(cx, pattern, &mut seen, &cx.env, "state")
      {
          return self.fail_term(form, "E_PATTERN", "state binds one name.");
      }
-     let (init, mut init_value) = self.infer(cx, &binding[1]);
-     self.exact_sink(cx, &binding[1], "state init", &init_value);
-     self.no_fn(&binding[1], &init_value.ty, "A state seed");
+     let (init, mut init_value) = self.infer(cx, &form.child(binding[1]));
+     self.exact_sink(cx, &form.child(binding[1]), "state init", &init_value);
+     self.no_fn(&form.child(binding[1]), &init_value.ty, "A state seed");
      if init_value.live {
-         self.error(&binding[1], "E_STATE_INIT", "A state seed is static; read the frame in the step.");
+         self.error(&form.child(binding[1]), "E_STATE_INIT", "A state seed is static; read the frame in the step.");
      }
      if shape_ty(&init_value.ty) {
-         self.error(&binding[1], "E_STATE_TYPE", "State stores data, not deferred nodes or layouts.");
+         self.error(&form.child(binding[1]), "E_STATE_TYPE", "State stores data, not deferred nodes or layouts.");
      }
      let zone = match at { Some(p) => p, None => self.inline_path(cx, "~state") };
      let seed_list_fields = list_fields(&init_value.ty);
@@ -1164,7 +1341,7 @@ impl Checker {
      let mut inner = cx.clone();
      inner.env = Rc::new(env);
      inner.path = zone.clone();
-     let (step, step_value) = self.body(&inner, &args[1]);
+     let (step, step_value) = self.body(&inner, &form.child(args[1]));
      self.no_fn(form, &step_value.ty, "A state step");
      if !ty::fits(&step_value.ty, &init_value.ty) || shape_ty(&step_value.ty) {
          self.error(form, "E_STATE_TYPE", "A state step returns the seed's data type.");
@@ -1181,31 +1358,38 @@ impl Checker {
      value.list_fields.dedup();
      value.live_len |= value.list_fields.iter().any(Vec::is_empty);
      (
-         make_term(form, ty, Node::State {
+         self.make_term(form, ty, Draft::State {
              binder: Self::pattern(pattern),
-             init: Box::new(init),
-             step: Box::new(step),
+             init: init,
+             step: step,
              zone,
          }),
          value,
      )
  }
- fn zone(&mut self, cx: &Cx, form: &Syntax, name: &str, args: &[Syntax], at: Option<Path>) -> (Term, Info) {
+ fn zone(&mut self, cx: &Cx, form: &Syntax, name: &str, args: &[SyntaxId], at: Option<Path>) -> (TermId, Info) {
      let kind = match name { "for" => LoopKind::For, "fold" => LoopKind::Fold, "scan" => LoopKind::Scan, _ => LoopKind::Sum };
      let is_acc = matches!(kind, LoopKind::Fold | LoopKind::Scan);
-     let even = |xs: &Vec<Syntax>| xs.len() % 2 == 0;
-     let shape: Option<(Vec<Syntax>, Vec<Syntax>, &Syntax, Vec<Vec<usize>>)> = match args {
-         [Syntax { node: SNode::Vec(a), .. }, Syntax { node: SNode::Vec(i), .. }, b] if is_acc && even(a) && even(i) => Some((a.to_vec(), i.to_vec(), b, Vec::new())),
-         [Syntax { node: SNode::Vec(i), .. }, b] if !is_acc && even(i) => Some((Vec::new(), i.to_vec(), b, Vec::new())),
-         [Syntax { node: SNode::Vec(i), .. }, Syntax { node: SNode::Kw(k), .. }, sk, b] if k == "skip" && name == "for" && even(i) => {
-             let skip = match skip_tuples(sk) {
-                 Some(t) => t,
-                 None => {
-                     self.error(sk, "E_SKIP", ":skip is a list of iteration tuples of non-negative integers, for example :skip [[0 1] [2 0]].");
-                     Vec::new()
-                 }
-             };
-             Some((Vec::new(), i.to_vec(), b, skip))
+     let vector = |id: SyntaxId| match form.arena().row(id).node {
+         SNode::Vec(range) => Some(form.range(range)), _ => None,
+     };
+     let shape: Option<(&[SyntaxId], &[SyntaxId], SyntaxId, Vec<Vec<usize>>)> = match args {
+         [a, i, b] if is_acc => match (vector(*a), vector(*i)) {
+             (Some(a), Some(i)) if a.len() % 2 == 0 && i.len() % 2 == 0 => Some((a, i, *b, Vec::new())), _ => None,
+         },
+         [i, b] if !is_acc => vector(*i).filter(|i| i.len() % 2 == 0).map(|i| (&[][..], i, *b, Vec::new())),
+         [i, k, sk, b] if name == "for" && matches!(form.arena().row(*k).node, SNode::Kw(k) if form.name(k) == "skip") => {
+             vector(*i).filter(|i| i.len() % 2 == 0).map(|i| {
+                 let sk = form.child(*sk);
+                 let skip = match skip_tuples(&sk) {
+                     Some(t) => t,
+                     None => {
+                         self.error(&sk, "E_SKIP", ":skip is a list of iteration tuples of non-negative integers, for example :skip [[0 1] [2 0]].");
+                         Vec::new()
+                     }
+                 };
+                 (&[][..], i, *b, skip)
+             })
          }
          _ => None,
      };
@@ -1213,10 +1397,11 @@ impl Checker {
          let msg = if is_acc { format!("{name} is ({name} [acc init] [i collection] body).") } else { format!("{name} is ({name} [i collection …] body).") };
          return self.fail_term(form, "E_ZONE", &msg);
      };
+     let body_form = form.child(body_form);
      let mut seen = BTreeSet::new();
      let mut ok = true;
      for pair in accs.chunks_exact(2).chain(iters.chunks_exact(2)) {
-         ok = self.check_pattern(cx, &pair[0], &mut seen, &cx.env, name) && ok;
+         ok = self.check_pattern(cx, &form.child(pair[0]), &mut seen, &cx.env, name) && ok;
      }
      if ok && iters.is_empty() {
          self.error(form, "E_ZONE", &format!("{name} needs at least one [name collection] clause."));
@@ -1231,10 +1416,10 @@ impl Checker {
      let id = match at { Some(p) => p, None => self.inline_path(cx, &format!("~{name}")) };
      self.zone_id += 1;
      let zid = self.zone_id;
-     let init: Option<(Syntax, Term, Info)> = if is_acc {
-         let (t, v) = self.infer(cx, &accs[1]);
-         self.no_fn(&accs[1], &v.ty, &format!("The {name} accumulator"));
-         Some((accs[0].clone(), t, v))
+     let init: Option<(Syntax, TermId, Info)> = if is_acc {
+         let (t, v) = self.infer(cx, &form.child(accs[1]));
+         self.no_fn(&form.child(accs[1]), &v.ty, &format!("The {name} accumulator"));
+         Some((form.child(accs[0]), t, v))
      } else { None };
      let last = id.last().cloned().unwrap_or_else(|| name.to_owned());
      let mut zcx = cx.clone();
@@ -1254,7 +1439,7 @@ impl Checker {
          let mut lens = Vec::new();
          let mut outer = Vec::new();
          for pair in iters.chunks_exact(2) {
-             let (p, e) = (&pair[0], &pair[1]);
+             let (p, e) = (&form.child(pair[0]), &form.child(pair[1]));
              let mut ecx = cx.clone();
              ecx.env = Rc::new(env.clone());
              let (ct, cv) = self.infer(&ecx, e);
@@ -1288,24 +1473,24 @@ impl Checker {
          inner.scope = format!("{} › {}", cx.scope, last);
          inner.zone = Some(zid);
          inner.zbody = true;
-         let (bt, bv) = self.body(&inner, body_form);
+         let (bt, bv) = self.body(&inner, &body_form);
          if init.is_some() && bv.live && !acc_live0 && !run_live { run_live = true; continue; }
          break (clauses, lens, outer, bt, bv);
      };
      // ponytail: literal counts only; a driven count is bounded when Eval runs the zone.
-     if !clauses.iter().any(|(_, t)| matches!(t.ty, Ty::Array(_))) && lens.iter().all(|l| l.is_some_and(|n| n <= MAX_ITERATIONS)) {
+     if !clauses.iter().any(|(_, t)| matches!(self.terms.ty(*t), Ty::Array(_))) && lens.iter().all(|l| l.is_some_and(|n| n <= MAX_ITERATIONS)) {
          let total = lens.iter().fold(1usize, |a, l| (MAX_ITERATIONS + 1).min(a * l.unwrap_or(0)));
          if total > MAX_ITERATIONS { self.error(form, "E_ITER_BOUND", &format!("{last} runs more than 4,096 iterations.")); }
      }
      let acc_ty = init.as_ref().map(|(_, _, iv)| iv.ty.clone());
      if let Some(at) = &acc_ty {
-         if !ty::fits(&bt.ty, at) {
-             self.error(form, "E_ACC_TYPE", &format!("{name} body must return the accumulator type {}; it returns {}.", show(at), show(&bt.ty)));
+         if !ty::fits(self.terms.ty(bt), at) {
+             self.error(form, "E_ACC_TYPE", &format!("{name} body must return the accumulator type {}; it returns {}.", show(at), show(self.terms.ty(bt))));
          }
      }
-     let acc_ty = acc_ty.map(|at| ty::join(&at, &bt.ty).unwrap_or(at));
-     let packed = clauses.iter().any(|(_, t)| matches!(t.ty, Ty::Array(_)));
-     let result_ty = match (kind, &acc_ty) { (LoopKind::Fold, Some(t)) => t.clone(), _ => bt.ty.clone() };
+     let acc_ty = acc_ty.map(|at| ty::join(&at, self.terms.ty(bt)).unwrap_or(at));
+     let packed = clauses.iter().any(|(_, t)| matches!(self.terms.ty(*t), Ty::Array(_)));
+     let result_ty = match (kind, &acc_ty) { (LoopKind::Fold, Some(t)) => t.clone(), _ => self.terms.ty(bt).clone() };
      let cooked_fold = kind == LoopKind::Fold && cx.ctx == context::sop() && geometry_accumulator(&result_ty) && cx.stack.iter().any(|n| self.node_defs.contains_key(n));
      if packed && shape_ty(&result_ty) && !cooked_fold {
          self.error(form, "E_ARRAY_TYPE", "Packed-array loops produce data; their length cannot create graph nodes.");
@@ -1315,13 +1500,14 @@ impl Checker {
          Ty::Float | Ty::Bool | Ty::Any => Ty::Float,
          _ => { this.error(form, "E_ARRAY_TYPE", "Arrays hold ints, floats, vectors or text values."); Ty::Float }
      };
-     if kind == LoopKind::Sum && !matches!(bt.ty, Ty::Int | Ty::Float | Ty::Vec2 | Ty::Vec3 | Ty::Vec4 | Ty::Any) {
-         self.error(form, "E_TYPE", &format!("sum adds numbers or matching-width vectors; the body returns {}.", show(&bt.ty)));
+     if kind == LoopKind::Sum && !matches!(self.terms.ty(bt), Ty::Int | Ty::Float | Ty::Vec2 | Ty::Vec3 | Ty::Vec4 | Ty::Any) {
+         self.error(form, "E_TYPE", &format!("sum adds numbers or matching-width vectors; the body returns {}.", show(self.terms.ty(bt))));
      }
+     let body_ty = self.terms.ty(bt).clone();
      let ty = match (kind, &acc_ty) {
          (LoopKind::Scan, Some(at)) => if packed { Ty::Array(Box::new(array_elem(self, at))) } else { Ty::List(Box::new(at.clone())) },
-         (LoopKind::For | LoopKind::Scan, _) => if packed { Ty::Array(Box::new(array_elem(self, &bt.ty))) } else { Ty::List(Box::new(bt.ty.clone())) },
-         (LoopKind::Sum, _) => match bt.ty { Ty::Int | Ty::Vec2 | Ty::Vec3 | Ty::Vec4 => bt.ty.clone(), _ => Ty::Float },
+         (LoopKind::For | LoopKind::Scan, _) => if packed { Ty::Array(Box::new(array_elem(self, &body_ty))) } else { Ty::List(Box::new(self.terms.ty(bt).clone())) },
+         (LoopKind::Sum, _) => match self.terms.ty(bt) { Ty::Int | Ty::Vec2 | Ty::Vec3 | Ty::Vec4 => self.terms.ty(bt).clone(), _ => Ty::Float },
          (LoopKind::Fold, Some(at)) => at.clone(),
          (LoopKind::Fold, None) => Ty::Any,
      };
@@ -1332,8 +1518,8 @@ impl Checker {
      let mut value = Info::derive(ty.clone(), &all);
      value.approx = kind == LoopKind::For && skip.is_empty() && packed_array(&ty) && clauses.len() == 1
          && clauses.iter().all(|(p, _)| matches!(p, Pattern::Name(_)))
-         && clauses.iter().all(|(_, t)| packed_array(&t.ty))
-         && packed_body(&self.ops, &bt);
+         && clauses.iter().all(|(_, t)| packed_array(self.terms.ty(*t)))
+         && packed_body(&self.ops, &self.terms, bt);
      value.vary = bv.vary.iter().filter(|v| **v != zid).copied().collect();
      for i in &ins { value.vary.extend(i.vary.iter().copied()); }
      let mut reasons: Vec<Diagnostic> = Vec::new();
@@ -1342,74 +1528,108 @@ impl Checker {
      } else {
          for (pattern, source) in &clauses {
              match pattern {
-                 Pattern::Name(_) => match &source.ty {
+                 Pattern::Name(_) => match self.terms.ty(*source) {
                      Ty::Any => (),
                      Ty::Array(e) if **e == Ty::Any => (),
                      t if packed_array(t) => (),
-                     t => reasons.push(err("E_PACKED_TYPE", format!("Packed source requires Array Float/Vec2/Vec3/Vec4, got {}.", show(t)), Some(source.form.span.clone()))),
+                     t => reasons.push(err("E_PACKED_TYPE", format!("Packed source requires Array Float/Vec2/Vec3/Vec4, got {}.", show(t)), Some(self.term_form(*source).span.clone()))),
                  },
                  _ => reasons.push(err("E_PACKED_FORM", "Packed parameters require name patterns.".into(), Some(form.span.clone()))),
              }
          }
      }
      if reasons.is_empty() { self.add_root(form, id.clone(), None); } else { for r in reasons { self.add_root(form, id.clone(), Some(r)); } }
-     self.link_body(&bt, &id);
+     self.link_body(bt, &id);
      value.packed = [id.clone()].into_iter().collect();
-     let accs_ir = init.as_ref().map(|(p, t, _)| vec![(Self::pattern(p), t.clone())]).unwrap_or_default();
-     (make_term(form, ty, Node::Loop { kind, accs: accs_ir, clauses, skip, body: Box::new(bt), zone: id }), value)
+     let accs_ir = init.as_ref().map(|(p, t, _)| vec![(Self::pattern(p), *t)]).unwrap_or_default();
+     (self.make_term(form, ty, Draft::Loop { kind, accs: accs_ir, clauses, skip, body: bt, zone: id }), value)
  }
- fn link_body(&mut self, term: &Term, producer: &Path) {
-     match &term.node {
-         Node::Hof(_, _) | Node::Loop { .. } | Node::Fn { .. } => return,
-         Node::Op { op: name, .. }
-             if op::find(&self.ops, name, &context::value())
+ fn link_body(&mut self, term: TermId, producer: &Path) {
+     let node = self.terms.node(term);
+     match node {
+         PackedNode::Hof(_) | PackedNode::Loop(_) | PackedNode::Fn(_) => return,
+         PackedNode::Op(id)
+             if op::find(&self.ops, self.terms.name(self.terms.op(id).op), &context::value())
                  .and_then(|operator| op::packed_kind(&operator))
                  == Some(op::PackedKind::Exact) => return,
          _ => (),
      }
-     if let Some(path) = &term.path {
+     if let Some(path) = self.terms.row(term).path {
+         let path = self.terms.path_names(path).iter().map(|&name| self.terms.name(name).to_owned()).collect();
          let next = PackedForm::Candidate([producer.clone()].into_iter().collect());
-         self.packed.entry(path.clone()).and_modify(|old| *old = Self::merge_packed(old.clone(), next.clone())).or_insert(next);
+         self.packed.entry(path).and_modify(|old| *old = Self::merge_packed(old.clone(), next.clone())).or_insert(next);
      }
-     let visit: Vec<&Term> = match &term.node {
-         Node::Vec(ts) => ts.iter().collect(),
-         Node::Get(t, _) | Node::Bypass(t) | Node::Expanded { body: t, .. } => vec![t.as_ref()],
-         Node::Op { args, .. } => args.iter().map(|(_, t)| t).collect(),
-         Node::Let(bindings, result) => bindings.iter().map(|(_, t)| t).chain(std::iter::once(result.as_ref())).collect(),
-         Node::WithError(a, b) => vec![a.as_ref(), b.as_ref()],
-         Node::ErrorRows { rows, mapper, .. } => vec![rows.as_ref(), mapper.as_ref()],
-         Node::If(c, a, b) => vec![c.as_ref(), a.as_ref(), b.as_ref()],
-         Node::Cond(arms, d) => arms.iter().flat_map(|(a, b)| [a, b]).chain(std::iter::once(d.as_ref())).collect(),
-         Node::Case(s, arms, d) => std::iter::once(s.as_ref()).chain(arms.iter().map(|(_, t)| t)).chain(std::iter::once(d.as_ref())).collect(),
-         Node::CallFn { args, body, .. } => args.iter().chain(body.iter().map(|b| b.as_ref())).collect(),
-         _ => Vec::new(),
-     };
-     for child in visit {
-         self.link_body(child, producer);
+     if matches!(node, PackedNode::Vec(_) | PackedNode::Get(_) | PackedNode::Bypass(_) | PackedNode::Expanded(_)
+         | PackedNode::Op(_) | PackedNode::Let(_) | PackedNode::WithError(_) | PackedNode::ErrorRows(_)
+         | PackedNode::If(_) | PackedNode::Cond(_) | PackedNode::Case(_) | PackedNode::CallFn(_)) {
+         for index in 0..self.terms.children(term).len() {
+             let child = self.terms.children(term)[index];
+             self.link_body(child, producer);
+         }
      }
  }
- fn make_fn(&mut self,cx:&Cx,f:&Syntax,args:&[Syntax],name:&str,at:Option<Path>)->(Term,Info){if args.len()!=2{return self.fail_term(f,"E_FN","fn is (fn [params] body).")}let SNode::Vec(ps)=&args[0].node else{return self.fail_term(f,"E_FN","fn is (fn [params] body).")};let path=match at{Some(p)=>p,None=>self.inline_path(cx,"~fn")};let mut bcx=cx.clone();bcx.path=path.clone();let mut params=Vec::new();let mut env=(*cx.env).clone();let mut seen=BTreeSet::new();for p in ps{let(mut pat,mut annot)=(p.clone(),None);if let SNode::List(parts)=&p.node{if parts.len()==3&&matches!(&parts[1].node,SNode::Sym(s) if s==":"){pat=parts[0].clone();annot=ty::of_syntax(&parts[2]);if annot.is_none(){self.error(p,"E_PARAM","Invalid fn parameter annotation.")}}}if !self.check_pattern(cx,&pat,&mut seen,&env,"fn"){continue}params.push((pat.clone(),annot.clone()));self.bind(&bcx,&pat,Info::leaf(annot.unwrap_or(Ty::Any)),":",&mut env)}let mut inner=cx.clone();inner.env=Rc::new(env.clone());inner.path=path.clone();inner.scope=format!("{} › {name}",cx.scope);let(bt,bv)=self.body(&inner,&args[1]);let callable=Rc::new(Callable::Local(Rc::new(Closure{params:params.iter().map(|(p,t)|(p.clone(),t.clone())).collect(),body:args[1].clone(),env:cx.env.clone(),ctx:cx.ctx.clone(),path:path.clone(),name:name.into()})));let ir_params=params.iter().map(|(p,t)|(Self::pattern(p),t.clone())).collect();let mut v=Info::leaf(Ty::Fn(None));v.live=bv.live;v.state_dep=bv.state_dep;v.callable=Some(callable);(make_term(f,Ty::Fn(None),Node::Fn{params:ir_params,body:Box::new(bt),zone:path,capture:None}),v)}
- fn fn_value(&mut self, cx: &Cx, form: &Syntax, what: &str) -> (Term, Info) {
-     if let SNode::Sym(name) = &form.node {
-         if !cx.env.contains_key(name) && !name.contains('.') && !SPECIAL.contains(&name.as_str()) {
+ fn make_fn(&mut self, cx: &Cx, f: &Syntax, args: &[SyntaxId], name: &str, at: Option<Path>) -> (TermId, Info) {
+     if args.len() != 2 { return self.fail_term(f, "E_FN", "fn is (fn [params] body)."); }
+     let SNode::Vec(ps) = f.arena().row(args[0]).node else { return self.fail_term(f, "E_FN", "fn is (fn [params] body)."); };
+     let path = at.unwrap_or_else(|| self.inline_path(cx, "~fn"));
+     let mut bcx = cx.clone();
+     bcx.path = path.clone();
+     let mut params = Vec::new();
+     let mut env = (*cx.env).clone();
+     let mut seen = BTreeSet::new();
+     for &id in f.range(ps) {
+         let p = f.child(id);
+         let (mut pat, mut annot) = (p.clone(), None);
+         if let SNode::List(parts) = p.node {
+             let parts = p.range(parts);
+             if parts.len() == 3 && matches!(p.arena().row(parts[1]).node, SNode::Sym(s) if p.name(s) == ":") {
+                 pat = p.child(parts[0]);
+                 annot = ty::of_syntax(&p.child(parts[2]));
+                 if annot.is_none() { self.error(&p, "E_PARAM", "Invalid fn parameter annotation."); }
+             }
+         }
+         if !self.check_pattern(cx, &pat, &mut seen, &env, "fn") { continue; }
+         params.push((pat.clone(), annot.clone()));
+         self.bind(&bcx, &pat, Info::leaf(annot.unwrap_or(Ty::Any)), ":", &mut env);
+     }
+     let mut inner = cx.clone();
+     inner.env = Rc::new(env);
+     inner.path = path.clone();
+     inner.scope = format!("{} › {name}", cx.scope);
+     let body = f.child(args[1]);
+     let (bt, bv) = self.body(&inner, &body);
+     let callable = Rc::new(Callable::Local(Rc::new(Closure {
+         params: params.clone(), body, env: cx.env.clone(), ctx: cx.ctx.clone(), path: path.clone(), name: name.into(),
+     })));
+     let ir_params = params.iter().map(|(p, t)| (Self::pattern(p), t.clone())).collect();
+     let mut value = Info::leaf(Ty::Fn(None));
+     value.live = bv.live;
+     value.state_dep = bv.state_dep;
+     value.callable = Some(callable);
+     (self.make_term(f, Ty::Fn(None), Draft::Fn { params: ir_params, body: bt, zone: path, capture: None }), value)
+ }
+ fn fn_value(&mut self, cx: &Cx, form: &Syntax, what: &str) -> (TermId, Info) {
+     if let SNode::Sym(name) = form.node {
+         let name = form.name(name);
+         if !cx.env.contains_key(name) && !name.contains('.') && !SPECIAL.contains(&name) {
              if self.defs.contains_key(name) {
                  if self.call_sites {
                      self.check_def_body(name, true);
                  }
                  let mut value = Info::leaf(Ty::Fn(None));
-                 value.callable = Some(Rc::new(Callable::Def(name.clone())));
-                 return (make_term(form, Ty::Fn(None), Node::FnRef(name.clone())), value);
+                 value.callable = Some(Rc::new(Callable::Def(name.to_owned())));
+                 return (self.make_term(form, Ty::Fn(None), Draft::FnRef(name.to_owned())), value);
              }
              if let Some(operator) = op::find(&self.ops, name, &cx.ctx) {
                  let mut value = Info::leaf(Ty::Fn(None));
-                 value.callable = Some(Rc::new(Callable::Op(name.clone())));
-                 return (make_term(form, Ty::Fn(None), Node::FnRef(operator.name.clone())), value);
+                 value.callable = Some(Rc::new(Callable::Op(name.to_owned())));
+                 return (self.make_term(form, Ty::Fn(None), Draft::FnRef(operator.name.clone())), value);
              }
              if let Ok(kind) = catalog::resolve_kind(&self.catalog, &cx.ctx, name) {
-                 self.kind_fns.insert(name.clone(), (kind.qualified.clone(), kind.context.clone(), kind.slots.clone()));
+                 self.kind_fns.insert(name.to_owned(), (kind.qualified.clone(), kind.context.clone(), kind.slots.clone()));
                  let mut value = Info::leaf(Ty::Fn(None));
                  value.callable = Some(Rc::new(Callable::Kind(kind)));
-                 return (make_term(form, Ty::Fn(None), Node::FnRef(name.clone())), value);
+                 return (self.make_term(form, Ty::Fn(None), Draft::FnRef(name.to_owned())), value);
              }
              if self.macros.contains_key(name) {
                  self.error(form, "E_MACRO_AS_VALUE", &format!("{name} is a macro; a macro is not a function value. Wrap it: (fn [a] ({name} a))."));
@@ -1423,7 +1643,7 @@ impl Checker {
      }
      (term, value)
  }
- fn call_closure(&mut self,cx:&Cx,f:&Syntax,c:&Closure,args:&[Arg])->(Term,Info){
+ fn call_closure(&mut self,cx:&Cx,f:&Syntax,c:&Closure,args:&[Arg])->(TermId,Info){
      if args.len()!=c.params.len(){return self.fail_term(f,"E_ARITY",&format!("{} takes {} argument{}; got {}.",c.name,c.params.len(),if c.params.len()==1{""}else{"s"},args.len()))}
      if cx.depth>64{return self.fail_term(f,"E_DEPTH","Call depth exceeds 64.")}
      let mut env=(*c.env).clone();
@@ -1447,7 +1667,7 @@ impl Checker {
      inner.zbody=false;
      self.body(&inner,&c.body)
  }
- fn apply_callable(&mut self,cx:&Cx,f:&Syntax,value:&Info,args:&[Arg])->(Term,Info){
+ fn apply_callable(&mut self,cx:&Cx,f:&Syntax,value:&Info,args:&[Arg])->(TermId,Info){
      match value.callable.as_deref(){
          Some(Callable::Local(closure))=>self.call_closure(cx,f,closure,args),
          Some(Callable::Def(name))=>self.apply_def(cx,f,name,args),
@@ -1462,24 +1682,25 @@ impl Checker {
                  }
                  _=>Ty::Any,
              };
-             (make_term(f,result.clone(),Node::Nil),Info::derive(result,std::slice::from_ref(value)))
+             (self.make_term(f,result.clone(),Draft::Nil),Info::derive(result,std::slice::from_ref(value)))
          }
      }
  }
- fn fn_argument(&mut self, cx: &Cx, form: &Syntax) -> (Term, Info) {
-     if let SNode::List(items) = &form.node {
-         if items.first().is_some_and(|head| matches!(&head.node, SNode::Sym(name) if name == "list")) {
+ fn fn_argument(&mut self, cx: &Cx, form: &Syntax) -> (TermId, Info) {
+     if let SNode::List(items) = form.node {
+         let items = form.range(items);
+         if items.first().is_some_and(|&head| matches!(form.arena().row(head).node, SNode::Sym(name) if form.name(name) == "list")) {
              let mut terms = Vec::new();
              let mut values = Vec::new();
-             for item in items.iter().skip(1) {
-                 let (term, value) = self.fn_value(cx, item, "function input");
+             for &item in items.iter().skip(1) {
+                 let (term, value) = self.fn_value(cx, &form.child(item), "function input");
                  terms.push(term);
                  values.push(value);
              }
              let ty = Ty::List(Box::new(Ty::Fn(None)));
              let mut value = Info::derive(ty.clone(), &values);
              value.len = Some(terms.len());
-             return (make_term(form, ty, Node::ListLit(terms)), value);
+             return (self.make_term(form, ty, Draft::ListLit(terms)), value);
          }
      }
      self.fn_value(cx, form, "function input")
@@ -1488,61 +1709,80 @@ impl Checker {
  fn args_of(
      &mut self,
      cx: &Cx,
-     forms: &[Syntax],
+     source: &Syntax,
+     forms: &[SyntaxId],
+     normalize: Option<&str>,
      fn_slot: &dyn Fn(Option<usize>, Option<&str>) -> bool,
  ) -> Vec<Arg> {
+     let normalized = normalize.and_then(|head| {
+         let mut builder = syntax::SyntaxBuilder::new();
+         let mut rows = BTreeMap::new();
+         for (index, (id, text)) in syntax::attribute_args_view(head, source.arena(), forms).enumerate() {
+             if let Some(text) = text {
+                 let form = source.child(id);
+                 let bytes = builder.bytes(text);
+                 let row = builder.push(form.id, SNode::Str(bytes), form.span.clone(), form.trivia().cloned());
+                 rows.insert(index, row);
+             }
+         }
+         (!rows.is_empty()).then(|| (builder.freeze(), rows))
+     });
+     let get = |index: usize| normalized.as_ref()
+         .and_then(|(arena, rows)| rows.get(&index).map(|&id| arena.handle(id)))
+         .unwrap_or_else(|| source.child(forms[index]));
      let mut result = Vec::new();
      let mut at = 0;
      let mut positional = 0;
      while at < forms.len() {
-         if let SNode::Kw(key) = &forms[at].node {
+         let form = get(at);
+         if let SNode::Kw(key) = form.node {
+             let key = form.name(key);
              if at + 1 == forms.len() {
-                 self.error(&forms[at], "E_MISSING_VALUE", &format!(":{key} has no value"));
+                 self.error(&form, "E_MISSING_VALUE", &format!(":{key} has no value"));
                  break;
              }
-             let form = &forms[at + 1];
-             let (term, info) = if fn_slot(None, Some(key)) && syntax::head(form) != Some("fn") {
-                 self.fn_argument(cx, form)
+             let value_form = get(at + 1);
+             let (term, info) = if fn_slot(None, Some(key)) && syntax::head(&value_form) != Some("fn") {
+                 self.fn_argument(cx, &value_form)
              } else {
-                 self.input(cx, form, &format!(":{key}"))
+                 self.input(cx, &value_form, &format!(":{key}"))
              };
-             result.push(Arg { key: Some(key.clone()), form: forms[at].clone(), term, info });
+             result.push(Arg { key: Some(key.to_owned()), form, term, info });
              at += 2;
          } else {
-             let form = &forms[at];
-             let (term, info) = if fn_slot(Some(positional), None) && syntax::head(form) != Some("fn") {
-                 self.fn_argument(cx, form)
+             let (term, info) = if fn_slot(Some(positional), None) && syntax::head(&form) != Some("fn") {
+                 self.fn_argument(cx, &form)
              } else {
-                 self.input(cx, form, &positional.to_string())
+                 self.input(cx, &form, &positional.to_string())
              };
-             result.push(Arg { key: None, form: form.clone(), term, info });
+             result.push(Arg { key: None, form, term, info });
              positional += 1;
              at += 1;
          }
      }
      result
  }
- fn call_named(&mut self, cx: &Cx, form: &Syntax, name: &str, forms: &[Syntax]) -> (Term, Info) {
+ fn call_named(&mut self, cx: &Cx, form: &Syntax, name: &str, forms: &[SyntaxId]) -> (TermId, Info) {
      let local = cx.env.get(name).cloned();
      if let Some(local) = local.as_ref().filter(|local| ty::fits(&local.ty, &Ty::Fn(None))) {
-         if forms.iter().any(|f| matches!(f.node, SNode::Kw(_))) {
+         if forms.iter().any(|&id| matches!(form.arena().row(id).node, SNode::Kw(_))) {
              return self.fail_term(form, "E_ARGS", &format!("{name} is a local function; it takes positional arguments only."));
          }
-         let args = self.args_of(cx, forms, &|_, _| false);
+         let args = self.args_of(cx, form, forms, None, &|_, _| false);
          let (result, rv) = self.apply_callable(cx, form, local, &args);
-         let body = match (local.callable.as_deref(), &result.node) {
-             (Some(Callable::Local(_)), _) => Some(Box::new(result.clone())),
-             (Some(Callable::Def(_)), Node::CallFn { body, .. }) => body.clone(),
+         let body = match (local.callable.as_deref(), self.terms.node(result)) {
+             (Some(Callable::Local(_)), _) => Some(result),
+             (Some(Callable::Def(_)), PackedNode::CallFn(id)) => self.terms.call_fn(id).body,
              _ => None,
          };
-         return (make_term(form, rv.ty.clone(), Node::CallFn { fn_name: name.to_owned(), args: args.iter().map(|a| a.term.clone()).collect(), body }), rv);
+         return (self.make_term(form, rv.ty.clone(), Draft::CallFn { fn_name: name.to_owned(), args: args.iter().map(|a| a.term).collect(), body }), rv);
      }
      if self.macros.contains_key(name) {
          let definitions = self.macro_forms.clone();
          return match macros::expand(&definitions, form) {
              Ok(expanded) => {
                  let (term, value) = self.infer(cx, &expanded);
-                 (make_term(form, term.ty.clone(), Node::Expanded { macro_name: name.into(), body: Box::new(term) }), value)
+                 (self.make_term(form, self.terms.ty(term).clone(), Draft::Expanded { macro_name: name.into(), body: term }), value)
              }
              Err(problem) => {
                  self.diags.push(problem);
@@ -1559,7 +1799,7 @@ impl Checker {
              };
              parameter.is_some_and(|(_, ty, _)| matches!(ty, Ty::Fn(_)))
          };
-         let args = self.args_of(cx, forms, &fn_slot);
+         let args = self.args_of(cx, form, forms, None, &fn_slot);
          return self.apply_sig(cx, form, &definition, &args);
      }
      if let Some(operator) = op::find(&self.ops, name, &cx.ctx) {
@@ -1568,19 +1808,19 @@ impl Checker {
              let mut args_form = Vec::new();
              let mut at = 0;
              while at < forms.len() {
-                 if matches!(&forms[at].node, SNode::Kw(key) if key == "skip") && at + 1 < forms.len() {
-                     if let Some(tuples) = skip_tuples(&forms[at + 1]) {
+                 if matches!(form.arena().row(forms[at]).node, SNode::Kw(key) if form.name(key) == "skip") && at + 1 < forms.len() {
+                     if let Some(tuples) = skip_tuples(&form.child(forms[at + 1])) {
                          skip.extend(tuples);
                      } else {
-                         self.error(&forms[at + 1], "E_SKIP", ":skip is a list of iteration tuples of non-negative integers, for example :skip [[0 1] [2 0]].");
+                         self.error(&form.child(forms[at + 1]), "E_SKIP", ":skip is a list of iteration tuples of non-negative integers, for example :skip [[0 1] [2 0]].");
                      }
                      at += 2;
                  } else {
-                     args_form.push(forms[at].clone());
+                     args_form.push(forms[at]);
                      at += 1;
                  }
              }
-             let args = self.args_of(cx, &args_form, &|_, _| false);
+             let args = self.args_of(cx, form, &args_form, None, &|_, _| false);
              return self.apply_op(cx, form, &operator, &args, skip);
          }
          let slots = operator.signature.pos.iter().chain(&operator.signature.opt).cloned().collect::<Vec<_>>();
@@ -1593,8 +1833,7 @@ impl Checker {
              };
              ty.is_some_and(|ty| matches!(ty, Ty::Fn(_)))
          };
-         let forms = syntax::attribute_args(name, forms);
-         let args = self.args_of(cx, &forms, &fn_slot);
+         let args = self.args_of(cx, form, forms, Some(name), &fn_slot);
          return self.apply_op(cx, form, &operator, &args, Vec::new());
      }
      match catalog::resolve_kind(&self.catalog, &cx.ctx, name) {
@@ -1610,7 +1849,7 @@ impl Checker {
                          parameter.name == key && matches!(parameter.ty, Some(port_type::PortType::Fn(_)))
                      }))
              };
-             let args = self.args_of(cx, forms, &fn_slot);
+             let args = self.args_of(cx, form, forms, None, &fn_slot);
              self.apply_kind(cx, form, &kind, &args)
          }
          Err((code, message)) => {
@@ -1623,9 +1862,62 @@ impl Checker {
          }
      }
  }
- fn apply_def(&mut self,cx:&Cx,f:&Syntax,name:&str,args:&[Arg])->(Term,Info){let Some(d)=self.defs.get(name).cloned()else{return self.fail_term(f,"E_UNKNOWN_KIND","Unknown definition.")};self.apply_sig(cx,f,&d,args)}
- fn apply_sig(&mut self,cx:&Cx,f:&Syntax,d:&Sig,args:&[Arg])->(Term,Info){if d.ctx!=cx.ctx&&d.ctx!=context::value(){return self.fail_term(f,"E_WRONG_CONTEXT",&format!("{} belongs to {}; it cannot run in {}.",d.name,context_name(&d.ctx),context_name(&cx.ctx)))}if cx.stack.contains(&d.name){let mut stack=cx.stack.clone();stack.push(d.name.clone());return self.fail_term(f,"E_RECURSION",&format!("Recursive call: {}. Use fold for repetition.",stack.join(" → ")))}let pos=args.iter().filter(|a|a.key.is_none()).collect::<Vec<_>>();if pos.len()>d.params.len(){self.error(f,"E_ARITY",&format!("{} takes {} inputs; got {} positional.",d.name,d.params.len(),pos.len()))}let mut env=BTreeMap::new();let mut terms=Vec::new();for(i,(n,want,default))in d.params.iter().enumerate(){let named=args.iter().find(|a|a.key.as_deref()==Some(n));let bypos=pos.get(i).copied();if bypos.is_some()&&named.is_some(){self.error(&named.unwrap().form,"E_DUPLICATE_PARAM",&format!("{} input {n} is given twice.",d.name))}let(t,v)=if let Some(a)=bypos.or(named){self.need(a,&format!("{} :{n}",d.name),want);let mut v=a.info.clone();v.ty=ty::coerce(&v.ty,want);(a.term.clone(),v)}else if let Some(default)=default{let dcx=Cx{env:Rc::new(BTreeMap::new()),ctx:d.ctx.clone(),path:vec![format!("def:{}",d.name),format!(":{n}")],scope:format!("ƒ {}",d.name),in_def:true,stack:vec![d.name.clone()],depth:0,zone:None,zbody:false};let(t,v)=self.infer(&dcx,default);if !ty::fits(&v.ty,want){self.error(default,"E_TYPE","Definition default differs from its declared input type.")}(t,v)}else{self.error(f,"E_ARGS",&format!("{} needs :{n} ({}).",d.name,show(want)));(make_term(f,want.clone(),Node::Nil),Info::leaf(want.clone()))};env.insert(n.clone(),v);terms.push(t)}for a in args{if let Some(k)=&a.key{if !d.params.iter().any(|(n,_,_)|n==k){self.error(&a.form,"E_UNKNOWN_PARAM",&format!("{} has no input :{k}.",d.name))}}}let mut inner=Cx{env:Rc::new(env),ctx:d.ctx.clone(),path:vec![format!("def:{}",d.name)],scope:format!("ƒ {}",d.name),in_def:true,stack:cx.stack.clone(),depth:cx.depth+1,zone:None,zbody:false};inner.stack.push(d.name.clone());let(body,v)=self.body(&inner,&d.body);(make_term(f,v.ty.clone(),Node::CallFn{fn_name:d.name.clone(),args:terms,body:Some(Box::new(body))}),v)}
- fn apply_op(&mut self, cx: &Cx, form: &Syntax, operator: &op::Op, arguments: &[Arg], skip: Vec<Vec<usize>>) -> (Term, Info) {
+ fn apply_def(&mut self,cx:&Cx,f:&Syntax,name:&str,args:&[Arg])->(TermId,Info){let Some(d)=self.defs.get(name).cloned()else{return self.fail_term(f,"E_UNKNOWN_KIND","Unknown definition.")};self.apply_sig(cx,f,&d,args)}
+ fn apply_sig(&mut self, cx: &Cx, f: &Syntax, d: &Sig, args: &[Arg]) -> (TermId, Info) {
+     if d.ctx != cx.ctx && d.ctx != context::value() {
+         return self.fail_term(f, "E_WRONG_CONTEXT", &format!("{} belongs to {}; it cannot run in {}.", d.name, context_name(&d.ctx), context_name(&cx.ctx)));
+     }
+     if cx.stack.contains(&d.name) {
+         let mut stack = cx.stack.clone();
+         stack.push(d.name.clone());
+         return self.fail_term(f, "E_RECURSION", &format!("Recursive call: {}. Use fold for repetition.", stack.join(" → ")));
+     }
+     let pos = args.iter().filter(|a| a.key.is_none()).collect::<Vec<_>>();
+     if pos.len() > d.params.len() {
+         self.error(f, "E_ARITY", &format!("{} takes {} inputs; got {} positional.", d.name, d.params.len(), pos.len()));
+     }
+     let mut env = BTreeMap::new();
+     let mut terms = Vec::new();
+     for (i, (n, want, default)) in d.params.iter().enumerate() {
+         let named = args.iter().find(|a| a.key.as_deref() == Some(n));
+         let bypos = pos.get(i).copied();
+         if bypos.is_some() && named.is_some() {
+             self.error(&named.unwrap().form, "E_DUPLICATE_PARAM", &format!("{} input {n} is given twice.", d.name));
+         }
+         let (term, value) = if let Some(a) = bypos.or(named) {
+             self.need(a, &format!("{} :{n}", d.name), want);
+             let mut value = a.info.clone();
+             value.ty = ty::coerce(&value.ty, want);
+             (a.term, value)
+         } else if let Some(default) = default {
+             let dcx = Cx {
+                 env: Rc::new(BTreeMap::new()), ctx: d.ctx.clone(), path: vec![format!("def:{}", d.name), format!(":{n}")],
+                 scope: format!("ƒ {}", d.name), in_def: true, stack: vec![d.name.clone()], depth: 0, zone: None, zbody: false,
+             };
+             let (term, value) = self.infer(&dcx, default);
+             if !ty::fits(&value.ty, want) { self.error(default, "E_TYPE", "Definition default differs from its declared input type."); }
+             (term, value)
+         } else {
+             self.error(f, "E_ARGS", &format!("{} needs :{n} ({}).", d.name, show(want)));
+             (self.make_term(f, want.clone(), Draft::Nil), Info::leaf(want.clone()))
+         };
+         env.insert(n.clone(), value);
+         terms.push(term);
+     }
+     for a in args {
+         if let Some(key) = &a.key {
+             if !d.params.iter().any(|(name, _, _)| name == key) { self.error(&a.form, "E_UNKNOWN_PARAM", &format!("{} has no input :{key}.", d.name)); }
+         }
+     }
+     let mut inner = Cx {
+         env: Rc::new(env), ctx: d.ctx.clone(), path: vec![format!("def:{}", d.name)], scope: format!("ƒ {}", d.name),
+         in_def: true, stack: cx.stack.clone(), depth: cx.depth + 1, zone: None, zbody: false,
+     };
+     inner.stack.push(d.name.clone());
+     let (body, value) = self.body(&inner, &d.body);
+     (self.make_term(f, value.ty.clone(), Draft::CallFn { fn_name: d.name.clone(), args: terms, body: Some(body) }), value)
+ }
+ fn apply_op(&mut self, cx: &Cx, form: &Syntax, operator: &op::Op, arguments: &[Arg], skip: Vec<Vec<usize>>) -> (TermId, Info) {
      if BODY_CONTEXT_OPS.contains(&operator.name.as_str()) && !cx.in_def {
          self.error(form, "E_NODE_CONTEXT", "Context seed, frame and provenance base are available inside a defnode body.");
      }
@@ -1663,19 +1955,21 @@ impl Checker {
                  .or_else(|| operator.signature.rest.as_ref().map(|(_, ty)| ty.clone()))
          };
          args.push(match want {
-             Some(Ty::Fn(Some(signature))) => self.instantiate_fn(cx, argument, &signature, true),
-             _ => argument.clone(),
+             Some(Ty::Fn(Some(signature))) => Cow::Owned(self.instantiate_fn(cx, argument, &signature, true)),
+             _ => Cow::Borrowed(argument),
          });
      }
      if operator.name == "ui/canvas" {
          for argument in &mut args {
              if argument.key.is_none() && argument.info.ty == ty::image() {
-                 argument.term = make_term(
-                     &argument.term.form,
+                 let argument = argument.to_mut();
+                 let source_form = self.term_form(argument.term).clone();
+                 argument.term = self.make_term(
+                     &source_form,
                      ty::drawing(),
-                     Node::Op {
+                     Draft::Op {
                          op: "draw/image".into(),
-                         args: vec![("image".into(), argument.term.clone())],
+                         args: vec![("image".into(), argument.term)],
                          skip: Vec::new(),
                      },
                  );
@@ -1704,7 +1998,7 @@ impl Checker {
              if !compatible_number {
                  self.need(argument, &format!("{} {}", operator.name, name), want);
              }
-             named.push((name.clone(), argument.term.clone()));
+             named.push((name.clone(), argument.term));
          } else if let Some((name, want)) = &operator.signature.rest {
              let element = ty::elem(&argument.info.ty).filter(|element| ty::fits(element, want));
              if let Some(_element) = element {
@@ -1714,7 +2008,7 @@ impl Checker {
              } else {
                  self.need(argument, &format!("{} {}", operator.name, name), want);
              }
-             named.push((name.clone(), argument.term.clone()));
+             named.push((name.clone(), argument.term));
          }
      }
      let mut seen = BTreeSet::new();
@@ -1730,7 +2024,7 @@ impl Checker {
              }
              Some((_, want)) => {
                 self.need(argument, &format!("{} :{key}", operator.name), want);
-                 named.push((key.to_owned(), argument.term.clone()));
+                 named.push((key.to_owned(), argument.term));
              }
          }
      }
@@ -1746,7 +2040,7 @@ impl Checker {
              self.error(form, "E_TYPE", &format!("{} needs matching vector widths; got {widths}.", operator.name));
          }
      }
-     let typed = named.iter().map(|(name, term)| (name.clone(), term.ty.clone(), literal_param(term))).collect::<Vec<_>>();
+     let typed = named.iter().map(|(name, term)| (name.clone(), self.terms.ty(*term).clone(), literal_param(&self.terms, *term))).collect::<Vec<_>>();
      let result = match op::result_type(operator, &typed) {
          Ok(ty) => ty,
          Err(mut problem) => {
@@ -1766,7 +2060,7 @@ impl Checker {
          "rest" | "reverse" => positional.first().is_some_and(|value| value.info.live_len),
          _ => false,
      };
-     let literal_int = |index: usize| positional.get(index).and_then(|argument| match literal_param(&argument.term) {
+     let literal_int = |index: usize| positional.get(index).and_then(|argument| match literal_param(&self.terms, argument.term) {
          Some(param::Value::Int(value)) => Some(value),
          _ => None,
      });
@@ -1797,37 +2091,52 @@ impl Checker {
      } else if operator.name == "image/map" {
          self.add_root(form, cx.path.clone(), None);
          for argument in &args {
-             if let Node::Fn { body, zone, .. } = &argument.term.node {
-                 self.link_body(body, &cx.path);
-                 self.packed.entry(zone.clone()).and_modify(|old| *old = Self::merge_packed(old.clone(), PackedForm::Candidate([cx.path.clone()].into_iter().collect()))).or_insert_with(|| PackedForm::Candidate([cx.path.clone()].into_iter().collect()));
+             if let PackedNode::Fn(id) = self.terms.node(argument.term) {
+                 let function = *self.terms.function(id);
+                 let zone = self.terms.path_names(function.zone).iter().map(|&name| self.terms.name(name).to_owned()).collect();
+                 self.link_body(function.body, &cx.path);
+                 self.packed.entry(zone).and_modify(|old| *old = Self::merge_packed(old.clone(), PackedForm::Candidate([cx.path.clone()].into_iter().collect()))).or_insert_with(|| PackedForm::Candidate([cx.path.clone()].into_iter().collect()));
              }
          }
          info.packed.insert(cx.path.clone());
      }
-     (make_term(form, result, Node::Op { op: operator.name.clone(), args: named, skip }), info)
+     (self.make_term(form, result, Draft::Op { op: operator.name.clone(), args: named, skip }), info)
  }
 
- fn literal_checks(&mut self, form: &Syntax, operator: &op::Op, args: &[Arg]) {
+ fn literal_checks(&mut self, form: &Syntax, operator: &op::Op, args: &[Cow<'_, Arg>]) {
      let positional = args.iter().filter(|argument| argument.key.is_none()).collect::<Vec<_>>();
-     let integer = |argument: &Arg| match literal_param(&argument.term) {
-         Some(param::Value::Int(value)) => Some(value),
+     let terms = &self.terms;
+     let mut error = |form: &Syntax, code: &str, message: &str| add_to(&mut self.diags, Severity::ErrorSeverity, form, code, message.to_owned());
+     let literal = |argument: &Arg| {
+         let mut term = argument.term;
+         loop {
+             match terms.node(term) {
+                 PackedNode::Lit(id) => break Some(terms.literal(id)),
+                 PackedNode::Expanded(id) => term = terms.expanded(id).body,
+                 _ => break None,
+             }
+         }
+     };
+     let integer = |argument: &Arg| match literal(argument) {
+         Some(packed::Literal::Int(value)) => Some(value),
          _ => None,
      };
-     let number = |argument: &Arg| match literal_param(&argument.term) {
-         Some(param::Value::Int(value)) => Some(value as f64),
-         Some(param::Value::Float(value)) => Some(value),
-         _ => None,
+     let number = |argument: &Arg| match literal(argument) {
+         Some(packed::Literal::Int(value)) => Some(value as f64), Some(packed::Literal::Float(value)) => Some(value), _ => None,
      };
-     let text = |argument: &Arg| match &argument.term.node {
-         Node::Text(bytes) => std::str::from_utf8(bytes).ok().map(str::to_owned),
-         Node::Lit(param::Value::Text(bytes)) => std::str::from_utf8(bytes).ok().map(str::to_owned),
-         Node::Lit(param::Value::Choice(value)) => Some(value.clone()),
+     let text = |argument: &Arg| match terms.node(argument.term) {
+         PackedNode::Text(bytes) => std::str::from_utf8(terms.raw_bytes(bytes)).ok(),
+         PackedNode::Lit(id) => match terms.literal(id) {
+             packed::Literal::Text(bytes) => std::str::from_utf8(terms.raw_bytes(bytes)).ok(),
+             packed::Literal::Choice(name) => Some(terms.name(name)),
+             _ => None,
+         },
          _ => None,
      };
      match operator.name.as_str() {
          "sop/context_seed" => match positional.as_slice() {
              [argument] if text(argument).is_some_and(|value| !value.trim().is_empty()) => (),
-             [argument] => self.error(&argument.form, "E_SEED_NAMESPACE", "Context seed requires a literal nonblank namespace."),
+             [argument] => error(&argument.form, "E_SEED_NAMESPACE", "Context seed requires a literal nonblank namespace."),
              _ => (),
          },
          "image/map" => {
@@ -1835,66 +2144,66 @@ impl Checker {
                  match &argument.info.ty {
                      Ty::Fn(Some(signature)) if signature.params == [Ty::Vec2] && signature.result == Ty::Vec4 => (),
                      Ty::Fn(None) | Ty::Any => (),
-                     _ => self.error(&argument.form, "E_TYPE", "image/map needs a vec2-to-vec4 pixel function."),
+                     _ => error(&argument.form, "E_TYPE", "image/map needs a vec2-to-vec4 pixel function."),
                  }
              }
              for argument in args {
                  if matches!(argument.key.as_deref(), Some("width" | "height"))
                      && integer(argument).is_some_and(|value| value <= 0)
                  {
-                     self.error(&argument.form, "E_RANGE", "Image dimensions must be positive.");
+                     error(&argument.form, "E_RANGE", "Image dimensions must be positive.");
                  }
              }
          }
          "length" => {
              for argument in &positional {
                  if argument.info.ty != Ty::Vec3 && argument.info.ty != Ty::Any {
-                     self.error(&argument.form, "E_TYPE", "length needs a vec3.");
+                     error(&argument.form, "E_TYPE", "length needs a vec3.");
                  }
              }
          }
          "material/standard" => for argument in args {
-             match (argument.key.as_deref(), &argument.term.node) {
-                 (Some("color" | "emission"), Node::Text(bytes)) if !hex_colour(bytes) => self.error(&argument.form, "E_TYPE", "A material colour is #rrggbb or a vec3."),
-                 (Some("roughness"), _) if number(argument).is_some_and(|value| !(0.0..=1.0).contains(&value)) => self.error(&argument.form, "E_RANGE", "Material roughness must be in [0,1]."),
+             match (argument.key.as_deref(), terms.node(argument.term)) {
+                 (Some("color" | "emission"), PackedNode::Text(bytes)) if !hex_colour(terms.raw_bytes(bytes)) => error(&argument.form, "E_TYPE", "A material colour is #rrggbb or a vec3."),
+                 (Some("roughness"), _) if number(argument).is_some_and(|value| !(0.0..=1.0).contains(&value)) => error(&argument.form, "E_RANGE", "Material roughness must be in [0,1]."),
                  _ => (),
              }
          },
          "range" => match positional.iter().map(|argument| integer(argument)).collect::<Vec<_>>().as_slice() {
-             [Some(count)] if *count > MAX_ITERATIONS as i64 => self.error(form, "E_ITER_BOUND", &format!("range 0‥{count} exceeds 4,096 iterations.")),
-             [Some(start), Some(finish)] if *finish as i128 - *start as i128 > MAX_ITERATIONS as i128 => self.error(form, "E_ITER_BOUND", &format!("range {start}‥{finish} exceeds 4,096 iterations.")),
+             [Some(count)] if *count > MAX_ITERATIONS as i64 => error(form, "E_ITER_BOUND", &format!("range 0‥{count} exceeds 4,096 iterations.")),
+             [Some(start), Some(finish)] if *finish as i128 - *start as i128 > MAX_ITERATIONS as i128 => error(form, "E_ITER_BOUND", &format!("range {start}‥{finish} exceeds 4,096 iterations.")),
              _ => (),
          },
          "linspace" if positional.len() == 3 && integer(positional[2]).is_some_and(|count| count > MAX_ITERATIONS as i64) => {
-             self.error(form, "E_ITER_BOUND", "linspace exceeds 4,096 values.");
+             error(form, "E_ITER_BOUND", "linspace exceeds 4,096 values.");
          }
          "ui/split" | "ui/split-at" => {
              if let Some(axis) = positional.first().and_then(|argument| text(argument)) {
                  let choices = operator.choices.iter().find(|(name, _)| name == "axis").map(|(_, values)| values);
-                 if choices.is_some_and(|choices| !choices.contains(&axis)) {
-                     self.error(form, "E_RANGE", "Split axis is horizontal or vertical.");
+                 if choices.is_some_and(|choices| !choices.iter().any(|choice| choice == axis)) {
+                     error(form, "E_RANGE", "Split axis is horizontal or vertical.");
                  }
              }
              if operator.name == "ui/split-at" && positional.len() > 1 && number(positional[1]).is_some_and(|value| !(0.1..=0.9).contains(&value)) {
-                 self.error(form, "E_RANGE", "Split ratio is 0.1–0.9.");
+                 error(form, "E_RANGE", "Split ratio is 0.1–0.9.");
              }
              let mut fixed = Vec::new();
              for argument in args.iter().filter(|argument| matches!(argument.key.as_deref(), Some("first_size" | "second_size"))) {
                  if number(argument).is_some_and(|value| value < 1.0) {
-                     self.error(&argument.form, "E_RANGE", "A fixed split size is 1 point or more.");
+                     error(&argument.form, "E_RANGE", "A fixed split size is 1 point or more.");
                  }
                  fixed.push(argument);
              }
              if fixed.len() > 1 {
-                 self.error(form, "E_RANGE", "A split fixes one side: :first_size or :second_size.");
+                 error(form, "E_RANGE", "A split fixes one side: :first_size or :second_size.");
              }
          }
          "ui/graph" => if let Some(argument) = positional.first() {
              if let Some(name) = text(argument) {
-                 let valid = self.graphs.contains_key(&name)
+                 let valid = self.graphs.contains_key(name)
                      || name.strip_prefix("def:").is_some_and(|name| self.defs.contains_key(name));
                  if !valid {
-                     self.error(&argument.form, "E_UNKNOWN_GRAPH", &format!("Unknown graph: {name}."));
+                     error(&argument.form, "E_UNKNOWN_GRAPH", &format!("Unknown graph: {name}."));
                  }
              }
          },
@@ -1902,12 +2211,16 @@ impl Checker {
      }
  }
  fn instantiate_fn(&mut self, cx: &Cx, argument: &Arg, signature: &FnSignature, coerce_params: bool) -> Arg {
-     if let Node::ListLit(entries) = &argument.term.node {
-         let mut terms = Vec::with_capacity(entries.len());
-         let mut values = Vec::with_capacity(entries.len());
-         for entry in entries {
-             let (term, value) = self.fn_value(cx, &entry.form, "function port");
-             let nested = Arg { key: None, form: (*entry.form).clone(), term, info: value };
+    if let PackedNode::ListLit(entries) = self.terms.node(argument.term) {
+        let source_form = self.term_form(argument.term).clone();
+        let len = self.terms.term_ids(entries).len();
+        let mut terms = Vec::with_capacity(len);
+        let mut values = Vec::with_capacity(len);
+        for index in 0..len {
+            let entry = self.terms.term_ids(entries)[index];
+            let form = self.term_form(entry).clone();
+            let (term, value) = self.fn_value(cx, &form, "function port");
+            let nested = Arg { key: None, form, term, info: value };
              let nested = self.instantiate_fn(cx, &nested, signature, coerce_params);
              terms.push(nested.term);
              values.push(nested.info);
@@ -1918,7 +2231,7 @@ impl Checker {
          return Arg {
              key: argument.key.clone(),
              form: argument.form.clone(),
-             term: make_term(&argument.term.form, ty, Node::ListLit(terms)),
+            term: self.make_term(&source_form, ty, Draft::ListLit(terms)),
              info: value,
          };
      }
@@ -1929,7 +2242,7 @@ impl Checker {
          Callable::Local(closure) => Some((**closure).clone()),
          Callable::Def(name) => self.defs.get(name).map(|definition| Closure {
              params: definition.params.iter().map(|(name, ty, _)| {
-                 (syntax::make(SNode::Sym(name.clone())), Some(ty.clone()))
+                (syntax::make(syntax::Draft::Sym(name.clone())), Some(ty.clone()))
              }).collect(),
              body: definition.body.clone(),
              env: Rc::new(BTreeMap::new()),
@@ -1942,12 +2255,12 @@ impl Checker {
      let mut inputs = Vec::with_capacity(signature.params.len());
      for (index, ty) in signature.params.iter().enumerate() {
          let name = format!("__flow_port_{index}");
-         let form = syntax::make(SNode::Sym(name.clone()));
+        let form = syntax::make(syntax::Draft::Sym(name.clone()));
          let value = Info::leaf(ty.clone());
          inputs.push(Arg {
              key: None,
              form: argument.form.clone(),
-             term: make_term(&form, ty.clone(), Node::RefBinding(name, Vec::new())),
+            term: self.make_term(&form, ty.clone(), Draft::RefBinding(name, Vec::new())),
              info: value,
          });
      }
@@ -1980,15 +2293,16 @@ impl Checker {
      info.live |= value.live;
      info.state_dep |= value.state_dep;
      info.approx_sources.extend(value.approx_sources);
+    let source_form = self.term_form(argument.term).clone();
      Arg {
          key: argument.key.clone(),
          form: argument.form.clone(),
-         term: make_term(&argument.term.form, ty, Node::Fn {
-             params,
-             body: Box::new(body),
-             zone,
-             capture: Some(Box::new(argument.term.clone())),
-         }),
+        term: self.make_term(&source_form, ty, Draft::Fn {
+            params,
+            body,
+            zone,
+            capture: Some(argument.term),
+        }),
          info,
      }
  }
@@ -2003,9 +2317,9 @@ impl Checker {
          self.error(&arg.form, "E_TYPE", &format!("Input {} takes {}", slot.name, show(&want)));
      }
  }
- fn apply_kind(&mut self, cx: &Cx, form: &Syntax, kind: &catalog::Kind, args: &[Arg]) -> (Term, Info) {
+fn apply_kind(&mut self, cx: &Cx, form: &Syntax, kind: &catalog::Kind, args: &[Arg]) -> (TermId, Info) {
      let mut position = 0;
-     let mut prepared: Vec<Arg> = Vec::with_capacity(args.len());
+     let mut prepared: Vec<Cow<'_, Arg>> = Vec::with_capacity(args.len());
      for arg in args {
          let slot = if let Some(name) = &arg.key {
              kind.slots.iter().find(|slot| &slot.name == name).cloned()
@@ -2047,8 +2361,8 @@ impl Checker {
                  })
              });
          prepared.push(match signature {
-             Some(signature) => self.instantiate_fn(cx, arg, &signature, true),
-             None => arg.clone(),
+             Some(signature) => Cow::Owned(self.instantiate_fn(cx, arg, &signature, true)),
+             None => Cow::Borrowed(arg),
          });
      }
 
@@ -2062,7 +2376,7 @@ impl Checker {
      let short = catalog::short(&kind.qualified);
      let nslots = kind.slots.len();
      let plural = |n: usize| if n == 1 { "" } else { "s" };
-     let mut named: Vec<(String, Term)> = Vec::new();
+    let mut named: Vec<(String, TermId)> = Vec::new();
      let mut seen = BTreeSet::new();
      let mut npos = 0usize;
      let mut writes: Vec<String> = Vec::new();
@@ -2105,10 +2419,11 @@ impl Checker {
                              if kind.qualified == "sop/material" && name == "material" && arg.info.ty == ty::material() {
                              } else if matches!((&parameter.ty, &arg.info.ty, &arg.info.callable), (Some(port_type::PortType::Fn(_)), Ty::Fn(None), None)) {
                              } else {
-                                 validate_parameter(Some(arg.info.ty.clone()), &mut |severity, code, message| self.add(severity, &arg.form, code, message.to_owned()), parameter, &arg.term);
-                             }
-                             if let Node::Text(bytes) = &arg.term.node {
-                                 let group = String::from_utf8_lossy(&bytes[..]).into_owned();
+                                let diags = &mut self.diags;
+                                validate_parameter_id(Some(arg.info.ty.clone()), &mut |severity, code, message| add_to(diags, severity, &arg.form, code, message.to_owned()), parameter, &self.terms, arg.term);
+                            }
+                            if let PackedNode::Text(bytes) = self.terms.node(arg.term) {
+                                let group = String::from_utf8_lossy(self.terms.raw_bytes(bytes)).into_owned();
                                  if group_reader(parameter) && !group.is_empty() && !groups_in.contains(&group) {
                                      self.warn_owned(&arg.form, "W_UNKNOWN_GROUP", format!("Group \"{group}\" is not made by any node upstream of {short}."));
                                  } else if group_writer(kind, parameter) {
@@ -2130,7 +2445,7 @@ impl Checker {
      for slot in &kind.slots {
          if slot.required && !slot.rest && !seen.contains(&slot.name) {
              if slot_ty(Some(slot), kind) == ty::geometry() {
-                 named.push((slot.name.clone(), make_term(form, ty::geometry(), Node::Nil)));
+                named.push((slot.name.clone(), self.make_term(form, ty::geometry(), Draft::Nil)));
              } else {
                  self.error(form, "E_MISSING_INPUT", &format!("{} needs its {} input", catalog::short(&kind.qualified), slot.name));
              }
@@ -2159,16 +2474,16 @@ impl Checker {
     value.groups = groups_in.iter().cloned().chain(writes.iter().cloned()).collect();
      value.packed.clear();
      value.approx_sources.clear();
-     (make_term(form, out, Node::Call { kind: kind.qualified.clone(), ctx: kind.context.clone(), args: named }), value)
+    (self.make_term(form, out, Draft::Call { kind: kind.qualified.clone(), ctx: kind.context.clone(), args: named }), value)
  }
  fn link_path(&mut self, path: Path, producer: &Path) {
      let next = PackedForm::Candidate([producer.clone()].into_iter().collect());
      self.packed.entry(path).and_modify(|old| *old = Self::merge_packed(old.clone(), next.clone())).or_insert(next);
  }
- fn value_arg(&self, x: &Syntax, v: &Info) -> Arg {
-     Arg { key: None, form: x.clone(), term: make_term(x, v.ty.clone(), Node::RefBinding("_".into(), Vec::new())), info: v.clone() }
- }
- fn hof(&mut self, cx: &Cx, x: &Syntax, name: &str, forms: &[Syntax]) -> (Term, Info) {
+fn value_arg(&mut self, x: &Syntax, v: &Info) -> Arg {
+    Arg { key: None, form: x.clone(), term: self.make_term(x, v.ty.clone(), Draft::RefBinding("_".into(), Vec::new())), info: v.clone() }
+}
+fn hof(&mut self, cx: &Cx, x: &Syntax, name: &str, forms: &[packed::SyntaxId]) -> (TermId, Info) {
      let (lo, hi) = match name { "map" => (2, 4), "filter" | "sort-by" => (2, 2), _ => (3, 3) };
      let n = forms.len();
      if n < lo || n > hi {
@@ -2179,17 +2494,18 @@ impl Checker {
              _ => "sort-by is (sort-by key list).",
          });
      }
-     let f_form = &forms[0];
-     let (ft, fv) = if syntax::head(f_form) == Some("fn") { self.input(cx, f_form, "0") } else { self.fn_value(cx, f_form, name) };
-     let reduce = name == "reduce";
-     let init = if reduce { Some(self.input(cx, &forms[1], "1")) } else { None };
+    let f_form = x.child(forms[0]);
+    let (ft, fv) = if syntax::head(&f_form) == Some("fn") { self.input(cx, &f_form, "0") } else { self.fn_value(cx, &f_form, name) };
+    let reduce = name == "reduce";
+    let init = if reduce { Some(self.input(cx, &x.child(forms[1]), "1")) } else { None };
      if let Some((_, iv)) = &init { self.no_fn(x, &iv.ty, "The reduce accumulator"); }
      let first = if reduce { 2 } else { 1 };
-     let mut lists: Vec<(Syntax, Term, Info)> = Vec::new();
-     for (i, a) in forms[first..].iter().enumerate() {
-         let (t, v) = self.input(cx, a, &(i + first).to_string());
+    let mut lists: Vec<(Syntax, TermId, Info)> = Vec::new();
+    for (i, id) in forms[first..].iter().enumerate() {
+        let a = x.child(*id);
+        let (t, v) = self.input(cx, &a, &(i + first).to_string());
          if ty::elem(&v.ty).is_none() && v.ty != Ty::Any {
-             self.error(a, "E_TYPE", &format!("{name} iterates a list; got {}.", show(&v.ty)));
+            self.error(&a, "E_TYPE", &format!("{name} iterates a list; got {}.", show(&v.ty)));
          }
          lists.push((a.clone(), t, v));
      }
@@ -2260,11 +2576,11 @@ impl Checker {
      vals.extend(list_vs.iter().cloned());
      if let Some((_, iv)) = &init { vals.push(iv.clone()); }
      let mut v = Info::derive(out.clone(), &vals);
-     let specialized = match &result.node { Node::CallFn { body: Some(body), .. } => (**body).clone(), _ => result.clone() };
-     let eligible = packed_body(&self.ops, &specialized);
+    let specialized = match self.terms.node(result) { PackedNode::CallFn(id) => self.terms.call_fn(id).body.unwrap_or(result), _ => result };
+    let eligible = packed_body(&self.ops, &self.terms, specialized);
      let params: Option<Vec<(Syntax, Option<Ty>)>> = match fv.callable.as_deref() {
          Some(Callable::Local(c)) => Some(c.params.clone()),
-         Some(Callable::Def(def)) => self.defs.get(def).map(|d| d.params.iter().map(|(pn, pty, _)| (syntax::make(SNode::Sym(pn.clone())), Some(pty.clone()))).collect()),
+        Some(Callable::Def(def)) => self.defs.get(def).map(|d| d.params.iter().map(|(pn, pty, _)| (syntax::make(syntax::Draft::Sym(pn.clone())), Some(pty.clone()))).collect()),
          _ => None,
      };
      let inputs_fit = params.as_ref().is_none_or(|params| {
@@ -2275,11 +2591,11 @@ impl Checker {
          reasons.push(err("E_GPU_FORM", "GPU kernels require collecting maps.".into(), Some(x.span.clone())));
      } else {
          for (_, t, _) in &lists {
-             match &t.ty {
+            match self.terms.ty(*t) {
                  Ty::Any => (),
                  Ty::Array(e) if **e == Ty::Any => (),
                  ty if packed_array(ty) => (),
-                 ty => reasons.push(err("E_PACKED_TYPE", format!("Packed source requires Array Float/Vec2/Vec3/Vec4, got {}.", show(ty)), Some(t.form.span.clone()))),
+                ty => reasons.push(err("E_PACKED_TYPE", format!("Packed source requires Array Float/Vec2/Vec3/Vec4, got {}.", show(ty)), Some(self.term_form(*t).span.clone()))),
              }
          }
          if let Some(params) = &params {
@@ -2300,7 +2616,7 @@ impl Checker {
          }
      }
      if reasons.is_empty() { self.add_root(x, cx.path.clone(), None); } else { for r in reasons { self.add_root(x, cx.path.clone(), Some(r)); } }
-     self.link_body(&specialized, &cx.path);
+    self.link_body(specialized, &cx.path);
      match fv.callable.as_deref() {
          Some(Callable::Local(c)) => { let cid = c.path.clone(); self.link_path(cid, &cx.path); }
          Some(Callable::Def(def)) => self.link_path(vec![format!("def:{def}")], &cx.path),
@@ -2310,23 +2626,23 @@ impl Checker {
      v.live = v.live || live_len;
      v.packed = [cx.path.clone()].into_iter().collect();
      v.approx = kind == HofKind::Map && packed_array(&out) && inputs_fit && lists.iter().all(|(_, _, l)| packed_array(&l.ty)) && eligible;
-     (make_term(x, out, Node::Hof(kind, terms)), v)
+    (self.make_term(x, out, Draft::Hof(kind, terms)), v)
  }
- fn iterate(&mut self, cx: &Cx, f: &Syntax, forms: &[Syntax]) -> (Term, Info) {
-     let until_form = match forms {
-         [_, _, _] => None,
-         [_, _, _, k, g] if matches!(&k.node, SNode::Kw(k) if k == "until") => Some(g),
+fn iterate(&mut self, cx: &Cx, f: &Syntax, forms: &[packed::SyntaxId]) -> (TermId, Info) {
+    let until_form = match forms {
+        [_, _, _] => None,
+        [_, _, _, k, g] if matches!(f.arena().row(*k).node, SNode::Kw(k) if f.name(k) == "until") => Some(f.child(*g)),
          _ => return self.fail_term(f, "E_ARITY", "iterate is (iterate n init (fn [x] body)) with an optional :until (fn [prev next] bool)."),
      };
-     let (n_form, init_form, f_form) = (&forms[0], &forms[1], &forms[2]);
-     let (nt, nv) = self.input(cx, n_form, "0");
+    let (n_form, init_form, f_form) = (f.child(forms[0]), f.child(forms[1]), f.child(forms[2]));
+    let (nt, nv) = self.input(cx, &n_form, "0");
      if !ty::fits(&nv.ty, &Ty::Int) && nv.ty != Ty::Any {
-         self.error(n_form, "E_TYPE", &format!("iterate's count is an int; got {}.", show(&nv.ty)));
+        self.error(&n_form, "E_TYPE", &format!("iterate's count is an int; got {}.", show(&nv.ty)));
      }
-     let (it, iv) = self.input(cx, init_form, "1");
+    let (it, iv) = self.input(cx, &init_form, "1");
      self.no_fn(f, &iv.ty, "The iterate value");
      let fn_term = |s: &mut Self, key: &str, form: &Syntax| if syntax::head(form) == Some("fn") { s.input(cx, form, key) } else { s.fn_value(cx, form, "iterate") };
-     let (ft, fv) = fn_term(self, "2", f_form);
+    let (ft, fv) = fn_term(self, "2", &f_form);
      let plain = |v: &Info| { let mut v = v.clone(); v.live_len = false; v.len = None; v.callable = None; v };
      let arg_iv = self.value_arg(f, &plain(&iv));
      let (result, rv) = self.apply_callable(cx, f, &fv, std::slice::from_ref(&arg_iv));
@@ -2341,22 +2657,22 @@ impl Checker {
          _ => self.instantiate_fn(cx, &Arg { key: None, form: f_form.clone(), term: ft, info: fv.clone() }, &FnSignature { params: vec![iv.ty.clone()], result: rv.ty.clone() }, false).term,
      };
      let until = until_form.map(|g| {
-         let (gt, gv) = fn_term(self, ":until", g);
+        let (gt, gv) = fn_term(self, ":until", &g);
          let arg_rv = self.value_arg(f, &plain(&rv));
          let (_, uv) = self.apply_callable(cx, f, &gv, &[arg_iv.clone(), arg_rv]);
-         if !ty::fits(&uv.ty, &Ty::Bool) { self.error(g, "E_TYPE", &format!("iterate's :until returns bool; it returns {}.", show(&uv.ty))); }
+        if !ty::fits(&uv.ty, &Ty::Bool) { self.error(&g, "E_TYPE", &format!("iterate's :until returns bool; it returns {}.", show(&uv.ty))); }
          let gt = match gv.callable.as_deref() {
              Some(Callable::Op(_) | Callable::Kind(_)) => gt,
              _ => self.instantiate_fn(cx, &Arg { key: None, form: g.clone(), term: gt, info: gv.clone() }, &FnSignature { params: vec![iv.ty.clone(), rv.ty.clone()], result: Ty::Bool }, false).term,
          };
          (gt, gv, uv)
      });
-     let specialized = match &result.node { Node::CallFn { body: Some(body), .. } => (**body).clone(), _ => result.clone() };
+    let specialized = match self.terms.node(result) { PackedNode::CallFn(id) => self.terms.call_fn(id).body.unwrap_or(result), _ => result };
      let mut vals = vec![fv.clone(), rv.clone(), iv.clone(), nv.clone()];
      if let Some((_, gv, uv)) = &until { vals.push(gv.clone()); vals.push(uv.clone()); }
      let mut v = Info::derive(ty.clone(), &vals);
      self.add_root(f, cx.path.clone(), Some(err("E_GPU_FORM", "GPU kernels require collecting maps.".into(), Some(f.span.clone()))));
-     self.link_body(&specialized, &cx.path);
+    self.link_body(specialized, &cx.path);
      match fv.callable.as_deref() {
          Some(Callable::Local(c)) => { let cid = c.path.clone(); self.link_path(cid, &cx.path); }
          Some(Callable::Def(def)) => self.link_path(vec![format!("def:{def}")], &cx.path),
@@ -2366,85 +2682,100 @@ impl Checker {
      if let Some((gt, _, _)) = &until { terms.push(gt.clone()); }
      v.live_len = false;
      v.packed = [cx.path.clone()].into_iter().collect();
-     (make_term(f, ty, Node::Hof(HofKind::Iterate, terms)), v)
+    (self.make_term(f, ty, Draft::Hof(HofKind::Iterate, terms)), v)
  }
  fn need(&mut self, a: &Arg, what: &str, want: &Ty) -> bool {
      if ty::fits(&a.info.ty, want) || (a.info.ty == Ty::Fn(None) && a.info.callable.is_none() && matches!(want, Ty::Fn(_))) { return true; }
      self.error(&a.form, "E_TYPE", &format!("{what}: expected {}, got {}.", show(want), show(&a.info.ty)));
      false
  }
- fn ref_form(&mut self, cx: &Cx, x: &Syntax, forms: &[Syntax]) -> (Term, Info) {
-     let Some(Syntax { node: SNode::Sym(g), .. }) = forms.first() else { return self.fail_term(x, "E_ARGS", "ref takes a graph name, then :input value pairs.") };
-     let Some(sg) = self.graphs.get(g).cloned() else { return self.fail_term(&forms[0], "E_UNKNOWN_GRAPH", &format!("Unknown graph reference: {g}.")) };
+fn ref_form(&mut self, cx: &Cx, x: &Syntax, forms: &[packed::SyntaxId]) -> (TermId, Info) {
+    let Some(first) = forms.first() else { return self.fail_term(x, "E_ARGS", "ref takes a graph name, then :input value pairs.") };
+    let first = x.child(*first);
+    let SNode::Sym(g) = first.node else { return self.fail_term(x, "E_ARGS", "ref takes a graph name, then :input value pairs.") };
+    let g = first.name(g);
+    let Some(sg) = self.graphs.get(g).cloned() else { return self.fail_term(&first, "E_UNKNOWN_GRAPH", &format!("Unknown graph reference: {g}.")) };
      if cx.in_def { return self.fail_term(x, "E_REF_IN_DEF", "Reusable functions cannot capture project graphs; add an explicit parameter."); }
      let gv = self.graph_info(x, g);
-     let mut overrides: Vec<(String, Term)> = Vec::new();
+    let mut overrides: Vec<(String, TermId)> = Vec::new();
      let mut vs = vec![gv.clone()];
      let mut rest = &forms[1..];
      loop {
          match rest {
-             [Syntax { node: SNode::Kw(k), .. }, value, more @ ..] => {
-                 let kf = &rest[0];
-                 match sg.params.iter().find(|(n, _, _)| n == k) {
+            [key, value, more @ ..] if matches!(x.arena().row(*key).node, SNode::Kw(_)) => {
+                let kf = x.child(*key);
+                let SNode::Kw(k) = kf.node else { unreachable!() };
+                let k = kf.name(k);
+                let value = x.child(*value);
+                match sg.params.iter().find(|(n, _, _)| n == k) {
                      None => {
                          let inputs = if sg.params.is_empty() { "none".to_owned() } else { sg.params.iter().map(|(n, _, _)| n.clone()).collect::<Vec<_>>().join(", ") };
-                         self.error(kf, "E_UNKNOWN_PARAM", &format!("Graph {g} has no input :{k}. Inputs: {inputs}."));
+                        self.error(&kf, "E_UNKNOWN_PARAM", &format!("Graph {g} has no input :{k}. Inputs: {inputs}."));
                      }
                      Some((_, want, _)) => {
-                         let (t, v) = self.infer(cx, value);
-                         self.exact_sink(cx, value, &format!("ref {g} :{k}"), &v);
-                         self.no_fn(value, &v.ty, &format!("Input :{k} of {g}"));
-                         let arg = self.value_arg(value, &v);
+                        let (t, v) = self.infer(cx, &value);
+                        self.exact_sink(cx, &value, &format!("ref {g} :{k}"), &v);
+                        self.no_fn(&value, &v.ty, &format!("Input :{k} of {g}"));
+                        let arg = self.value_arg(&value, &v);
                          self.need(&arg, &format!(":{k} of {g}"), want);
-                         overrides.push((k.clone(), t));
+                        overrides.push((k.to_owned(), t));
                          vs.push(v);
                      }
                  }
                  rest = more;
              }
              [] => break,
-             [y, ..] => { self.error(y, "E_ARGS", "ref takes a graph name, then :input value pairs."); break; }
+            [y, ..] => { self.error(&x.child(*y), "E_ARGS", "ref takes a graph name, then :input value pairs."); break; }
          }
      }
      let out = context::result(sg.ctx);
      let mut info = Info::derive(out.clone(), &vs);
      info.groups.clear();
      info.approx = gv.approx;
-     (make_term(x, out, Node::GraphRef { graph: g.clone(), inputs: overrides }), info)
- }
- fn with_error(&mut self,cx:&Cx,f:&Syntax,forms:&[Syntax])->(Term,Info){
-     if forms.len()!=2{return self.fail_term(f,"E_ARITY","with_error takes a protected value and a pure error mapper.")}
-     let(protected,protected_info)=self.input(cx,&forms[0],"0");
-     let(mapper_term,mapper_info)=self.fn_value(cx,&forms[1],"with_error");
+    (self.make_term(x, out, Draft::GraphRef { graph: g.to_owned(), inputs: overrides }), info)
+}
+fn with_error(&mut self,cx:&Cx,f:&Syntax,forms:&[packed::SyntaxId])->(TermId,Info){
+    if forms.len()!=2{return self.fail_term(f,"E_ARITY","with_error takes a protected value and a pure error mapper.")}
+    let protected_form = f.child(forms[0]);
+    let mapper_form = f.child(forms[1]);
+    let(protected,protected_info)=self.input(cx,&protected_form,"0");
+    let(mapper_term,mapper_info)=self.fn_value(cx,&mapper_form,"with_error");
      let payload=Ty::Record(vec![("code".into(),Ty::Text),("message".into(),Ty::Text),("cause".into(),Ty::List(Box::new(Ty::Text)))]);
-     let argument=self.instantiate_fn(cx,&Arg{key:None,form:forms[1].clone(),term:mapper_term,info:mapper_info},&FnSignature{params:vec![payload.clone()],result:payload.clone()},false);
+    let argument=self.instantiate_fn(cx,&Arg{key:None,form:mapper_form.clone(),term:mapper_term,info:mapper_info},&FnSignature{params:vec![payload.clone()],result:payload.clone()},false);
      let(mapper,mapper_info)=(argument.term,argument.info);
-     match &mapper_info.ty{Ty::Fn(Some(s)) if s.params==[payload.clone()]&&ty::fits(&s.result,&payload)=>(),_=>self.error(&mapper.form,"E_DIAGNOSTIC_MAP","An error mapper takes and returns a diagnostic record.")}
-     self.no_fn(&forms[0],&protected_info.ty,"A protected value");
+    match &mapper_info.ty{Ty::Fn(Some(s)) if s.params==[payload.clone()]&&ty::fits(&s.result,&payload)=>(),_=>self.error(&mapper_form,"E_DIAGNOSTIC_MAP","An error mapper takes and returns a diagnostic record.")}
+    self.no_fn(&protected_form,&protected_info.ty,"A protected value");
      fn cooked_container(t:&Ty)->bool{cooked(t)||match t{Ty::List(e)=>cooked_container(e),Ty::Record(fs)=>fs.iter().any(|(_,t)|cooked_container(t)),_=>false}}
-     if cooked_container(&protected_info.ty)&&protected_info.ty!=ty::geometry()&&protected_info.ty!=ty::image(){self.error(&protected.form,"E_ERROR_SCOPE","An error boundary completes a direct cooked result, not a cooked container.")}
-     self.pure_boundary(cx,false,"E_ERROR_SCOPE","An error boundary has no state, graph, drawing or UI effects.",&protected);
-     if mapper_info.live||mapper_info.state_dep{self.error(&mapper.form,"E_DIAGNOSTIC_MAP","An error mapper is pure and independent of frame/state.")}
-     self.pure_boundary(cx,true,"E_DIAGNOSTIC_MAP","An error mapper is pure: no frame, state, context or cooked values.",&mapper);
-     let result=Info::derive(protected_info.ty.clone(),&[protected_info,mapper_info]);
-     (make_term(f,result.ty.clone(),Node::WithError(Box::new(protected),Box::new(mapper))),result)
- }
- fn error_rows(&mut self,cx:&Cx,f:&Syntax,forms:&[Syntax])->(Term,Info){
-     let is_policy=|k:&Syntax|matches!(&k.node,SNode::Kw(k) if k=="policy");
-     let parse=|this:&mut Self,rows:&Syntax,mapper:&Syntax,policy:&Syntax|->Option<(Syntax,Syntax,DiagnosticPolicy)>{match &policy.node{SNode::Str(s) if s==b"first"=>Some((rows.clone(),mapper.clone(),DiagnosticPolicy::First)),SNode::Str(s) if s==b"range-last"=>Some((rows.clone(),mapper.clone(),DiagnosticPolicy::RangeLast)),_=>{this.error(policy,"E_DIAGNOSTIC_POLICY","Diagnostic policy is literal first or range-last.");None}}};
-     let parsed=if forms.len()==2{Some((forms[0].clone(),forms[1].clone(),DiagnosticPolicy::First))}else if forms.len()==4&&is_policy(&forms[1]){parse(self,&forms[0],&forms[3],&forms[2])}else if forms.len()==4&&is_policy(&forms[2]){parse(self,&forms[0],&forms[1],&forms[3])}else{None};
+    if cooked_container(&protected_info.ty)&&protected_info.ty!=ty::geometry()&&protected_info.ty!=ty::image(){self.error(&protected_form,"E_ERROR_SCOPE","An error boundary completes a direct cooked result, not a cooked container.")}
+    self.pure_boundary(cx,false,"E_ERROR_SCOPE","An error boundary has no state, graph, drawing or UI effects.",protected);
+    if mapper_info.live||mapper_info.state_dep{self.error(&mapper_form,"E_DIAGNOSTIC_MAP","An error mapper is pure and independent of frame/state.")}
+    self.pure_boundary(cx,true,"E_DIAGNOSTIC_MAP","An error mapper is pure: no frame, state, context or cooked values.",mapper);
+    let result=Info::derive(protected_info.ty.clone(),&[protected_info,mapper_info]);
+    (self.make_term(f,result.ty.clone(),Draft::WithError(protected,mapper)),result)
+}
+fn error_rows(&mut self,cx:&Cx,f:&Syntax,forms:&[packed::SyntaxId])->(TermId,Info){
+    let is_policy=|id:packed::SyntaxId|matches!(f.arena().row(id).node,SNode::Kw(k) if f.name(k)=="policy");
+    let parse=|this:&mut Self,rows:packed::SyntaxId,mapper:packed::SyntaxId,policy:packed::SyntaxId|->Option<(Syntax,Syntax,DiagnosticPolicy)>{
+        let policy=f.child(policy);
+        match policy.node{
+            SNode::Str(s) if policy.bytes(s)==b"first"=>Some((f.child(rows),f.child(mapper),DiagnosticPolicy::First)),
+            SNode::Str(s) if policy.bytes(s)==b"range-last"=>Some((f.child(rows),f.child(mapper),DiagnosticPolicy::RangeLast)),
+            _=>{this.error(&policy,"E_DIAGNOSTIC_POLICY","Diagnostic policy is literal first or range-last.");None}
+        }
+    };
+    let parsed=if forms.len()==2{Some((f.child(forms[0]),f.child(forms[1]),DiagnosticPolicy::First))}else if forms.len()==4&&is_policy(forms[1]){parse(self,forms[0],forms[3],forms[2])}else if forms.len()==4&&is_policy(forms[2]){parse(self,forms[0],forms[1],forms[3])}else{None};
      let Some((rows_form,mapper_form,policy))=parsed else{return self.fail_term(f,"E_ARGS","error_rows takes rows, a pure diagnostic mapper, and optional :policy text.")};
      let(rows,rv)=self.input(cx,&rows_form,"0");
-     if rv.ty!=Ty::Array(Box::new(Ty::Int)){self.error(&rows.form,"E_DIAGNOSTIC_ROWS","Diagnostic rows require an integer 0/1 array.")}
+    if rv.ty!=Ty::Array(Box::new(Ty::Int)){self.error(&rows_form,"E_DIAGNOSTIC_ROWS","Diagnostic rows require an integer 0/1 array.")}
      let(mapper_term,mapper_info)=self.fn_value(cx,&mapper_form,"error_rows");
      let payload=Ty::Record(vec![("code".into(),Ty::Text),("message".into(),Ty::Text),("cause".into(),Ty::List(Box::new(Ty::Text)))]);
      let argument=self.instantiate_fn(cx,&Arg{key:None,form:mapper_form.clone(),term:mapper_term,info:mapper_info},&FnSignature{params:vec![Ty::Int],result:payload.clone()},false);
      let(mapper,mv)=(argument.term,argument.info);
-     match &mv.ty{Ty::Fn(Some(s)) if s.params==[Ty::Int]&&ty::fits(&s.result,&payload)=>(),_=>self.error(&mapper.form,"E_DIAGNOSTIC_MAP","A row mapper takes an int and returns a diagnostic record.")}
-     if mv.live||mv.state_dep{self.error(&mapper.form,"E_DIAGNOSTIC_MAP","A row mapper is pure and independent of frame/state.")}
-     self.pure_boundary(cx,true,"E_DIAGNOSTIC_MAP","A row mapper is pure: no frame, state, context or cooked values.",&mapper);
+    match &mv.ty{Ty::Fn(Some(s)) if s.params==[Ty::Int]&&ty::fits(&s.result,&payload)=>(),_=>self.error(&mapper_form,"E_DIAGNOSTIC_MAP","A row mapper takes an int and returns a diagnostic record.")}
+    if mv.live||mv.state_dep{self.error(&mapper_form,"E_DIAGNOSTIC_MAP","A row mapper is pure and independent of frame/state.")}
+    self.pure_boundary(cx,true,"E_DIAGNOSTIC_MAP","A row mapper is pure: no frame, state, context or cooked values.",mapper);
      let out=ty::geometry();
-     (make_term(f,out.clone(),Node::ErrorRows{rows:Box::new(rows),policy,mapper:Box::new(mapper)}),Info::derive(out,&[rv,mv]))
+    (self.make_term(f,out.clone(),Draft::ErrorRows{rows,policy,mapper}),Info::derive(out,&[rv,mv]))
  }
  fn graph_info(&mut self, x: &Syntax, name: &str) -> Info {
      if let Some(v) = self.ginfo.get(name) { return v.clone(); }
@@ -2455,6 +2786,8 @@ impl Checker {
          self.error(x, "E_GRAPH_CYCLE", &format!("Graph cycle: {}.", cycle.join(" → ")));
          return Info::leaf(context::result(sg.ctx));
      }
+     let outer_terms = std::mem::take(&mut self.terms);
+     let graph_form = self.terms.import_form(&sg.form);
      self.graph_stack.push(name.to_owned());
      let cx0 = Cx { env: Rc::new(BTreeMap::new()), ctx: sg.ctx, path: vec![name.to_owned()], scope: name.to_owned(), in_def: false, stack: Vec::new(), depth: 0, zone: None, zbody: false };
      let mut env: BTreeMap<String, Info> = BTreeMap::new();
@@ -2489,7 +2822,16 @@ impl Checker {
          self.error(&sg.body, "E_TYPE", &format!("{name} must return {}, but its result is {}.", show(&want), show(&bv.ty)));
      }
      self.graph_stack.pop();
-     self.graph_terms.insert(name.to_owned(), Graph { name: name.to_owned(), context: sg.ctx, inputs, body: bt, form: sg.form.clone() });
+     let mut roots = inputs.iter().filter_map(|(_, _, default)| *default).collect::<Vec<_>>();
+     roots.push(bt);
+     let (arena, roots, forms) = std::mem::replace(&mut self.terms, outer_terms).finish(&roots, &[graph_form]);
+     let mut roots = roots.into_iter();
+     let inputs = inputs.into_iter().map(|(name, ty, default)| {
+         (name, ty, default.map(|_| arena.handle(roots.next().unwrap())))
+     }).collect();
+     let body = arena.handle(roots.next().unwrap());
+     let form = arena.syntax().handle(forms[0]);
+     self.graph_terms.insert(name.to_owned(), Graph { name: name.to_owned(), context: sg.ctx, inputs, body, form });
      let mut v = Info::leaf(want);
      v.live = bv.live;
      v.approx = bv.approx;
@@ -2529,30 +2871,31 @@ impl Checker {
     }
 
     fn parse_signature(&mut self, form: &Syntax, head: &str, name: &str) -> Option<Sig> {
-        let SNode::List(items) = &form.node else {
+        let SNode::List(items) = form.node else {
             self.error(form, "E_SHAPE", "Expected a graph or defn declaration.");
             return None;
         };
-        if items.len() < 5 || !matches!(&items[2].node, SNode::Kw(key) if key == "context") {
+        let items = form.range(items);
+        if items.len() < 5 || !matches!(form.arena().row(items[2]).node, SNode::Kw(key) if form.name(key) == "context") {
             self.error(form, "E_SHAPE", &format!("Invalid shape for {head}: expected ({head} {name} :context ctx [params] body)."));
             return None;
         }
-        let SNode::Sym(context_name) = &items[3].node else {
+        let SNode::Sym(context_name) = form.arena().row(items[3]).node else {
             self.error(form, "E_CONTEXT_UNKNOWN", "Unknown context.");
             return None;
         };
-        let ctx = match context::of_string(context_name) {
+        let ctx = match context::of_string(form.name(context_name)) {
             Ok(ctx) => ctx,
             Err(problem) => { self.diags.push(problem); return None; }
         };
-        let (parameters, body): (&[Syntax], &Syntax) = if head == "graph" && items.len() == 5 {
-            (&[], &items[4])
-        } else if let SNode::Vec(parameters) = &items[4].node {
+        let (parameters, body): (&[packed::SyntaxId], packed::SyntaxId) = if head == "graph" && items.len() == 5 {
+            (&[], items[4])
+        } else if let SNode::Vec(parameters) = form.arena().row(items[4]).node {
             if items.len() != 6 {
                 self.error(form, "E_SHAPE", &format!("Invalid shape for {head}: expected ({head} {name} :context ctx [params] body)."));
                 return None;
             }
-            (parameters, &items[5])
+            (form.range(parameters), items[5])
         } else {
             self.error(form, "E_SHAPE", &format!("Invalid shape for {head}: expected ({head} {name} :context ctx [params] body)."));
             return None;
@@ -2563,42 +2906,45 @@ impl Checker {
         }
         let mut params = Vec::new();
         let mut seen = BTreeSet::new();
-        for parameter in parameters {
-            let SNode::List(parts) = &parameter.node else {
-                self.error(parameter, "E_PARAM", &format!("Invalid parameter in {name}. Each is (name : type default?)."));
+        for id in parameters {
+            let parameter = form.child(*id);
+            let SNode::List(parts) = parameter.node else {
+                self.error(&parameter, "E_PARAM", &format!("Invalid parameter in {name}. Each is (name : type default?)."));
                 continue;
             };
+            let parts = parameter.range(parts);
             if !(3..=4).contains(&parts.len())
-                || !matches!(&parts[0].node, SNode::Sym(_))
-                || !matches!(&parts[1].node, SNode::Sym(colon) if colon == ":")
+                || !matches!(parameter.arena().row(parts[0]).node, SNode::Sym(_))
+                || !matches!(parameter.arena().row(parts[1]).node, SNode::Sym(colon) if parameter.name(colon) == ":")
             {
-                self.error(parameter, "E_PARAM", &format!("Invalid parameter in {name}. Each is (name : type default?)."));
+                self.error(&parameter, "E_PARAM", &format!("Invalid parameter in {name}. Each is (name : type default?)."));
                 continue;
             }
-            let SNode::Sym(param_name) = &parts[0].node else { continue };
-            let Some(param_ty) = ty::of_syntax(&parts[2]) else {
-                self.error(parameter, "E_PARAM", &format!("Invalid parameter in {name}. Each is (name : type default?)."));
+            let SNode::Sym(param_name) = parameter.arena().row(parts[0]).node else { continue };
+            let param_name = parameter.name(param_name);
+            let Some(param_ty) = ty::of_syntax(&parameter.child(parts[2])) else {
+                self.error(&parameter, "E_PARAM", &format!("Invalid parameter in {name}. Each is (name : type default?)."));
                 continue;
             };
-            let default = parts.get(3).cloned();
-            if !macros::valid_name(param_name) || self.reserved(param_name) || !seen.insert(param_name.clone()) {
-                self.error(parameter, "E_PARAM", &format!("Invalid or repeated parameter in {name}."));
+            let default = parts.get(3).map(|id| parameter.child(*id));
+            if !macros::valid_name(param_name) || self.reserved(param_name) || !seen.insert(param_name.to_owned()) {
+                self.error(&parameter, "E_PARAM", &format!("Invalid or repeated parameter in {name}."));
                 continue;
             }
             if ty::has_fn(&param_ty) && (param_ty != Ty::Fn(None) || head == "graph") {
-                self.error(parameter, "E_FN_ESCAPES", &format!("{name} input {param_name}: a function value cannot be stored or returned (E_FN_ESCAPES)."));
+                self.error(&parameter, "E_FN_ESCAPES", &format!("{name} input {param_name}: a function value cannot be stored or returned (E_FN_ESCAPES)."));
                 continue;
             }
             if param_ty == Ty::Fn(None) && default.is_some() {
-                self.error(parameter, "E_PARAM", &format!("{name} input {param_name}: a fn input has no default; callers pass a function."));
+                self.error(&parameter, "E_PARAM", &format!("{name} input {param_name}: a fn input has no default; callers pass a function."));
                 continue;
             }
             if head == "graph" && default.is_none() {
-                self.error(parameter, "E_INPUT_DEFAULT", &format!("Graph input {param_name} of {name} needs a default, so the graph runs on its own."));
+                self.error(&parameter, "E_INPUT_DEFAULT", &format!("Graph input {param_name} of {name} needs a default, so the graph runs on its own."));
             }
-            params.push((param_name.clone(), param_ty, default));
+            params.push((param_name.to_owned(), param_ty, default));
         }
-        Some(Sig { name: name.to_owned(), ctx, params, body: body.clone(), form: form.clone() })
+        Some(Sig { name: name.to_owned(), ctx, params, body: form.child(body), form: form.clone() })
     }
 
     fn check_def_body(&mut self, name: &str, own: bool) {
@@ -2606,6 +2952,8 @@ impl Checker {
             return;
         }
         let Some(definition) = self.defs.get(name).cloned() else { return };
+        let outer_terms = std::mem::take(&mut self.terms);
+        let graph_form = self.terms.import_form(&definition.form);
         let mut env = BTreeMap::new();
         let mut inputs = Vec::new();
         for (input, want, default) in &definition.params {
@@ -2646,69 +2994,85 @@ impl Checker {
         let body = if own {
             self.body(&cx, &definition.body).0
         } else {
-            make_term(&definition.body, Ty::Any, Node::Nil)
+            self.make_term(&definition.body, Ty::Any, Draft::Nil)
         };
+        let mut roots = inputs.iter().filter_map(|(_, _, default)| *default).collect::<Vec<_>>();
+        roots.push(body);
+        let (arena, roots, forms) = std::mem::replace(&mut self.terms, outer_terms).finish(&roots, &[graph_form]);
+        let mut roots = roots.into_iter();
+        let inputs = inputs.into_iter().map(|(name, ty, default)| {
+            (name, ty, default.map(|_| arena.handle(roots.next().unwrap())))
+        }).collect();
+        let body = arena.handle(roots.next().unwrap());
         self.def_terms.insert(name.to_owned(), Graph {
             name: name.to_owned(),
             context: definition.ctx,
             inputs,
             body,
-            form: definition.form,
+            form: arena.syntax().handle(forms[0]),
         });
     }
 
-    fn contains_body_context_op(term: &Term) -> bool {
-        let mut todo = vec![term];
+    fn contains_body_context_op(&self, root: TermId) -> bool {
+        let mut todo = vec![root];
         while let Some(term) = todo.pop() {
-            if matches!(&term.node, Node::Op { op, .. } if BODY_CONTEXT_OPS.contains(&op.as_str())) {
-                return true;
+            if let PackedNode::Op(id) = self.terms.node(term) {
+                if BODY_CONTEXT_OPS.contains(&self.terms.name(self.terms.op(id).op)) {
+                    return true;
+                }
             }
-            todo.extend(children_ref(term));
+            todo.extend_from_slice(self.terms.children(term));
         }
         false
     }
 
-    fn pure_boundary(&mut self, cx: &Cx, mapper: bool, code: &str, message: &str, root: &Term) {
+    fn pure_boundary(&mut self, cx: &Cx, mapper: bool, code: &str, message: &str, root: TermId) {
         let mut visited = BTreeSet::new();
-        let mut todo = vec![root.clone()];
+        let mut todo = vec![root];
         while let Some(term) = todo.pop() {
-            if mapper && cooked(&term.ty) {
-                self.error(&term.form, code, message);
+            if mapper && cooked(self.terms.ty(term)) {
+                add_to(&mut self.diags, Severity::ErrorSeverity, self.terms.source_form(term).expect("checked term source form"), code, message.to_owned());
             }
-            match &term.node {
-                Node::State { .. } | Node::GraphRef { .. } => self.error(&term.form, code, message),
-                Node::Time if mapper => self.error(&term.form, code, message),
-                Node::Call { ctx: call_context, .. } if mapper || (*call_context != context::sop() && *call_context != context::image()) => {
-                    self.error(&term.form, code, message);
+            let invalid = match self.terms.node(term) {
+                PackedNode::State(_) | PackedNode::GraphRef(_) => true,
+                PackedNode::Time if mapper => true,
+                PackedNode::Call(id) => {
+                    let call_context = self.terms.call(id).ctx;
+                    mapper || (call_context != context::sop() && call_context != context::image())
                 }
-                Node::Op { op: name, .. } => {
+                PackedNode::Op(id) => {
+                    let name = self.terms.name(self.terms.op(id).op);
                     let operator = op::find(&self.ops, name, &cx.ctx);
-                    let allowed = operator.as_ref().is_some_and(|operator| {
+                    !operator.as_ref().is_some_and(|operator| {
                         if mapper {
                             operator.ctx == context::value() && !operator.live && !BODY_CONTEXT_OPS.contains(&operator.name.as_str())
                         } else {
                             operator.ctx == context::value() || operator.ctx == context::sop() || operator.ctx == context::image()
                         }
-                    });
-                    if !allowed {
-                        self.error(&term.form, code, message);
-                    }
+                    })
                 }
-                Node::RefBinding(name, _) if mapper => {
-                    if cx.env.get(name).is_some_and(|value| value.live || value.state_dep || cooked(&value.ty)) {
-                        self.error(&term.form, code, message);
-                    }
+                PackedNode::RefBinding(id) if mapper => {
+                    let name = self.terms.name(self.terms.ref_binding(id).name);
+                    cx.env.get(name).is_some_and(|value| value.live || value.state_dep || cooked(&value.ty))
                 }
-                Node::FnRef(name) => self.pure_helper(cx, mapper, code, message, &term, name, &mut visited, &mut todo),
-                Node::CallFn { fn_name, body: None, .. } => self.pure_helper(cx, mapper, code, message, &term, fn_name, &mut visited, &mut todo),
-                Node::ErrorRows { .. } if mapper => self.error(&term.form, code, message),
-                _ => (),
+                PackedNode::FnRef(name) => {
+                    self.pure_helper(cx, mapper, code, message, term, name, &mut visited, &mut todo);
+                    false
+                }
+                PackedNode::CallFn(id) if self.terms.call_fn(id).body.is_none() => {
+                    let name = self.terms.call_fn(id).name;
+                    self.pure_helper(cx, mapper, code, message, term, name, &mut visited, &mut todo);
+                    false
+                }
+                PackedNode::ErrorRows(_) if mapper => true,
+                _ => false,
+            };
+            if invalid {
+                add_to(&mut self.diags, Severity::ErrorSeverity, self.terms.source_form(term).expect("checked term source form"), code, message.to_owned());
             }
-            let nested = children(&term);
-            todo.extend(nested);
+            todo.extend_from_slice(self.terms.children(term));
         }
     }
-
 
     fn pure_helper(
         &mut self,
@@ -2716,16 +3080,17 @@ impl Checker {
         mapper: bool,
         code: &str,
         message: &str,
-        form: &Term,
-        name: &str,
+        form: TermId,
+        name: packed::NameId,
         visited: &mut BTreeSet<String>,
-        todo: &mut Vec<Term>,
+        todo: &mut Vec<TermId>,
     ) {
+        let name = self.terms.name(name);
         if !visited.insert(name.to_owned()) {
             return;
         }
         if let Some(definition) = self.def_terms.get(name) {
-            todo.push(definition.body.clone());
+            todo.push(self.terms.import(&definition.body));
             return;
         }
         let operator = op::find(&self.ops, name, &cx.ctx);
@@ -2736,8 +3101,9 @@ impl Checker {
         }) {
             return;
         }
-        self.error(&form.form, code, message);
+        add_to(&mut self.diags, Severity::ErrorSeverity, self.terms.source_form(form).expect("checked term source form"), code, message.to_owned());
     }
+
     fn check_node_cycles(&mut self) {
         let definitions = self.nodes.iter().enumerate().map(|(index, node)| (node.kind.qualified.clone(), index)).collect::<BTreeMap<_, _>>();
         fn visit(
@@ -2774,36 +3140,40 @@ impl Checker {
         }
     }
 
-    fn phase(&mut self, forms: &[Syntax]) -> (Vec<String>, Vec<String>) {
+    fn phase(&mut self, forms: impl IntoIterator<Item = Syntax>) -> (Vec<String>, Vec<String>) {
         let mut declarations = Vec::new();
         let mut seen = BTreeSet::new();
         let mut graph_names = Vec::new();
         let mut def_names = Vec::new();
         let mut node_names = Vec::new();
         for form in forms {
+            let form = &form;
             self.metadata(form, &[]);
             let SNode::List(items) = &form.node else {
                 self.error(form, "E_FORM", "Workspace children are graph, defn, defnode and defmacro forms.");
                 continue;
             };
-            let Some((SNode::Sym(head), SNode::Sym(name))) = items.get(0).zip(items.get(1)).map(|(head, name)| (&head.node, &name.node)) else {
+            let items = form.range(*items);
+            let Some((SNode::Sym(head), SNode::Sym(name))) = items.first().zip(items.get(1)).map(|(head, name)| (form.arena().row(*head).node, form.arena().row(*name).node)) else {
                 self.error(form, "E_FORM", "Workspace children are graph, defn, defnode and defmacro forms.");
                 continue;
             };
-            if !["graph", "defn", "defnode", "defmacro"].contains(&head.as_str()) {
+            let head = form.name(head);
+            let name = form.name(name);
+            if !["graph", "defn", "defnode", "defmacro"].contains(&head) {
                 self.error(form, "E_FORM", "Workspace children are graph, defn, defnode and defmacro forms.");
                 continue;
             }
             let valid = if head == "defnode" { defnode::valid_name(name) } else { macros::valid_name(name) };
-            let duplicate_kind = head == "defnode" && self.catalog.kinds.iter().any(|kind| kind.qualified == *name);
-            let operator_name = op::of_context(&self.ops, &context::value()).iter().any(|operator| operator.name == *name);
+            let duplicate_kind = head == "defnode" && self.catalog.kinds.iter().any(|kind| kind.qualified == name);
+            let operator_name = op::all().iter().chain(&self.ops).any(|operator| operator.ctx == context::value() && operator.name == name);
             let already_declared = self.declared_names.contains(name);
-            if !valid || self.reserved(name) || !seen.insert(name.clone()) || already_declared || duplicate_kind || operator_name {
+            if !valid || self.reserved(name) || !seen.insert(name.to_owned()) || already_declared || duplicate_kind || operator_name {
                 self.error(form, "E_NAME", &format!("Invalid, reserved or duplicate name: {name}."));
                 continue;
             }
-            self.declared_names.insert(name.clone());
-            declarations.push((head.clone(), name.clone(), form.clone()));
+            self.declared_names.insert(name.to_owned());
+            declarations.push((head.to_owned(), name.to_owned(), form.clone()));
         }
 
         for (head, name, form) in &declarations {
@@ -2856,6 +3226,8 @@ impl Checker {
 
         for name in node_names {
             let Some(definition) = self.node_defs.get(&name).cloned() else { continue };
+            let outer_terms = std::mem::take(&mut self.terms);
+            let graph_form = self.terms.import_form(&definition.form);
             let env = definition.inputs.iter().map(|(input, ty, _)| (input.clone(), Info::leaf(ty.clone()))).collect::<BTreeMap<_, _>>().into();
             let base = Cx {
                 env,
@@ -2889,7 +3261,7 @@ impl Checker {
             let mut validations = Vec::new();
             for validation in &definition.validations {
                 let (term, value) = self.infer(&base, &validation.predicate);
-                if Self::contains_body_context_op(&term) {
+                if self.contains_body_context_op(term) {
                     self.error(&validation.predicate, "E_NODE_CONTEXT", "A validation checks parameters; context seed is available inside the body.");
                 }
                 if value.ty != Ty::Bool {
@@ -2909,10 +3281,26 @@ impl Checker {
                 if normalized.info.ty != Ty::Fn(Some(Box::new(signature))) {
                     self.error(form, "E_TYPE", "An encoded normalizer takes one text and returns text.");
                 }
-                self.pure_boundary(&cx, true, "E_PARAM_NORMALIZE", "An encoded normalizer is pure: no frame, state, context or cooked values.", &normalized.term);
+                self.pure_boundary(&cx, true, "E_PARAM_NORMALIZE", "An encoded normalizer is pure: no frame, state, context or cooked values.", normalized.term);
                 normalizers.push((input.clone(), normalized.term));
             }
-            self.nodes.push(NodeDefinition {
+            let mut roots = inputs.iter().filter_map(|(_, _, default)| *default).collect::<Vec<_>>();
+            roots.push(body);
+            roots.extend(validations.iter().map(|(term, _, _)| *term));
+            roots.extend(normalizers.iter().map(|(_, term)| *term));
+            let (arena, roots, forms) = std::mem::replace(&mut self.terms, outer_terms).finish(&roots, &[graph_form]);
+            let mut roots = roots.into_iter();
+            let inputs = inputs.into_iter().map(|(name, ty, default)| {
+                (name, ty, default.map(|_| arena.handle(roots.next().unwrap())))
+            }).collect();
+            let body = arena.handle(roots.next().unwrap());
+            let validations = validations.into_iter().map(|(_, code, message)| {
+                (arena.handle(roots.next().unwrap()), code, message)
+            }).collect();
+            let normalizers = normalizers.into_iter().map(|(input, _)| {
+                (input, arena.handle(roots.next().unwrap()))
+            }).collect();
+            self.nodes.push(Arc::new(NodeDefinition {
                 kind: definition.kind,
                 slots: definition.slots,
                 keyword_inputs: definition.keyword_inputs,
@@ -2922,10 +3310,10 @@ impl Checker {
                 description: definition.description,
                 operation: definition.operation,
                 version: definition.version,
-                body: Graph { name: name.clone(), context: context::sop(), inputs, body, form: definition.form },
+                body: Graph { name: name.clone(), context: context::sop(), inputs, body, form: arena.syntax().handle(forms[0]) },
                 validations,
                 normalizers,
-            });
+            }));
         }
         self.check_node_cycles();
         for name in &graph_names {
@@ -2938,67 +3326,89 @@ impl Checker {
     }
 }
 
-fn catalog_term(term: &Term) -> catalog::Term {
-    let ty = ty_port(&term.ty);
-    let node = match &term.node {
-        Node::Lit(value) => catalog::TermNode::Literal(value.clone()),
-        Node::Text(bytes) => catalog::TermNode::Literal(param::Value::Text(bytes.clone())),
-        Node::Nil => catalog::TermNode::Nil,
-        Node::Vec(terms) => catalog::TermNode::Vector(terms.iter().map(|component| { let mut c = catalog_term(component); if c.ty.is_none() { c.ty = Some(port_type::PortType::Float); } c }).collect()),
+fn literal_param(terms: &TermBuilder, mut term: TermId) -> Option<param::Value> {
+    loop {
+        return match terms.node(term) {
+            PackedNode::Lit(id) => Some(match terms.literal(id) {
+                packed::Literal::Bool(value) => param::Value::Bool(value), packed::Literal::Int(value) => param::Value::Int(value),
+                packed::Literal::Float(value) => param::Value::Float(value), packed::Literal::Text(id) => param::Value::Text(terms.raw_bytes(id).to_vec()),
+                packed::Literal::Choice(name) => param::Value::Choice(terms.name(name).to_owned()),
+            }),
+            PackedNode::Text(id) => Some(param::Value::Text(terms.raw_bytes(id).to_vec())),
+            PackedNode::Expanded(id) => { term = terms.expanded(id).body; continue; }
+            _ => None,
+        };
+    }
+}
+fn catalog_term(terms: &TermBuilder, term: TermId) -> catalog::Term {
+    let ty = ty_port(terms.ty(term));
+    let node = match terms.node(term) {
+        PackedNode::Lit(_) | PackedNode::Text(_) => catalog::TermNode::Literal(literal_param(terms, term).unwrap()),
+        PackedNode::Nil => catalog::TermNode::Nil,
+        PackedNode::Vec(range) => catalog::TermNode::Vector(terms.term_ids(range).iter().map(|&component| {
+            let mut component = catalog_term(terms, component);
+            if component.ty.is_none() { component.ty = Some(port_type::PortType::Float); }
+            component
+        }).collect()),
         _ => catalog::TermNode::Reference("_".into(), "_".into()),
     };
     catalog::Term { node, ty }
 }
-fn literal_param(term: &Term) -> Option<param::Value> {
-    match &term.node {
-        Node::Lit(value) => Some(value.clone()),
-        Node::Text(bytes) => Some(param::Value::Text(bytes.clone())),
-        Node::Expanded { body, .. } => literal_param(body),
-        _ => None,
-    }
+fn catalog_term_of(term: &packed::Term) -> catalog::Term {
+    let arena = term.arena();
+    let ty = ty_port(term.ty());
+    let node = match term.node {
+        PackedNode::Lit(id) => catalog::TermNode::Literal(match arena.literal(id) {
+            packed::Literal::Bool(value) => param::Value::Bool(value), packed::Literal::Int(value) => param::Value::Int(value),
+            packed::Literal::Float(value) => param::Value::Float(value), packed::Literal::Text(id) => param::Value::Text(arena.bytes(id).to_vec()),
+            packed::Literal::Choice(name) => param::Value::Choice(term.name(name).to_owned()),
+        }),
+        PackedNode::Text(id) => catalog::TermNode::Literal(param::Value::Text(arena.bytes(id).to_vec())),
+        PackedNode::Nil => catalog::TermNode::Nil,
+        PackedNode::Vec(range) => catalog::TermNode::Vector(arena.term_ids(range).iter().map(|&id| {
+            let mut component = catalog_term_of(&term.child(id));
+            if component.ty.is_none() { component.ty = Some(port_type::PortType::Float); }
+            component
+        }).collect()),
+        _ => catalog::TermNode::Reference("_".into(), "_".into()),
+    };
+    catalog::Term { node, ty }
 }
-
-pub fn validate_parameter(
-    ty_override: Option<Ty>,
-    report: &mut dyn FnMut(Severity, &str, &str),
-    parameter: &catalog::Parameter,
-    term: &Term,
-) {
+fn validate_parameter_id(ty_override: Option<Ty>, report: &mut dyn FnMut(Severity, &str, &str),
+    parameter: &catalog::Parameter, terms: &TermBuilder, term: TermId) {
+    let text = match terms.node(term) { PackedNode::Text(id) => Some(terms.raw_bytes(id)), _ => None };
+    validate_parameter_value(ty_override.as_ref().unwrap_or_else(|| terms.ty(term)), report, parameter, text, &|| catalog_term(terms, term));
+}
+pub fn validate_parameter(ty_override: Option<Ty>, report: &mut dyn FnMut(Severity, &str, &str),
+    parameter: &catalog::Parameter, term: &packed::Term) {
+    let text = match term.node { PackedNode::Text(id) => Some(term.arena().bytes(id)), _ => None };
+    validate_parameter_value(ty_override.as_ref().unwrap_or_else(|| term.ty()), report, parameter, text, &|| catalog_term_of(term));
+}
+fn validate_parameter_value(have: &Ty, report: &mut dyn FnMut(Severity, &str, &str),
+    parameter: &catalog::Parameter, text: Option<&[u8]>, data: &dyn Fn() -> catalog::Term) {
     let want = parameter_ty(parameter);
-    let have = ty_override.unwrap_or_else(|| term.ty.clone());
-    if have == Ty::Any {
+    if *have == Ty::Any { return; }
+    if !ty::fits(have, &want) {
+        report(Severity::ErrorSeverity, "E_TYPE", &format!(":{} takes {}, but this is {}", parameter.name, show(&want), show(have)));
         return;
     }
-    if !ty::fits(&have, &want) {
-        report(
-            Severity::ErrorSeverity,
-            "E_TYPE",
-            &format!(":{} takes {}, but this is {}", parameter.name, show(&want), show(&have)),
-        );
-        return;
-    }
-    match (&want, &term.node) {
-        (Ty::Color, Node::Text(bytes)) => {
+    match (&want, text) {
+        (Ty::Color, Some(bytes)) => {
             if !hex_colour(bytes) {
-                let text = lisp::flat(&syntax::make(SNode::Str(bytes.clone())));
-                report(
-                    Severity::ErrorSeverity,
-                    "E_TYPE",
-                    &format!(":{} is a colour: write \"#rrggbb\" or a vec3, not {text}", parameter.name),
-                );
+                report(Severity::ErrorSeverity, "E_TYPE", &format!(":{} is a colour: write \"#rrggbb\" or a vec3, not {}", parameter.name, lisp::quote_string(bytes)));
             }
         }
-        (Ty::Color, _) => {
-            if have == Ty::Vec3 {
+        (Ty::Color, None) => {
+            if *have == Ty::Vec3 {
                 let mut typed = parameter.clone();
                 typed.ty = Some(port_type::PortType::Vec3);
-                catalog::validate_parameter(report, &typed, &catalog_term(term));
+                catalog::validate_parameter(report, &typed, &data());
             }
         }
-        (Ty::Vec3, _) if have != Ty::Vec3 => (),
-        (Ty::Text, Node::Text(_)) => catalog::validate_parameter(report, parameter, &catalog_term(term)),
-        (Ty::Text, _) => (),
-        _ => catalog::validate_parameter(report, parameter, &catalog_term(term)),
+        (Ty::Vec3, _) if *have != Ty::Vec3 => (),
+        (Ty::Text, Some(_)) => catalog::validate_parameter(report, parameter, &data()),
+        (Ty::Text, None) => (),
+        _ => catalog::validate_parameter(report, parameter, &data()),
     }
 }
 
@@ -3103,5 +3513,73 @@ pub fn check(
     };
     (Some(workspace), diagnostics)
 }
-// Measured with the shared-children Syntax; a grown Term multiplies across every checked node.
-const _: () = assert!(std::mem::size_of::<Term>() <= 176);
+#[cfg(test)]
+mod memory_tests {
+    use super::*;
+
+    #[test]
+    fn retained_memory_counts_capacities_and_shared_workspace_roots_once() {
+        let forms = syntax::parse("(workspace w (graph g :context host (let* [x {:field [1 2]}] (get x :field))))").unwrap();
+        let catalog = catalog::Catalog { version: 0, kinds: Vec::new() };
+        let (workspace, diagnostics) = check(&[], false, false, None, &catalog, &forms);
+        let workspace = Arc::new(workspace.unwrap_or_else(|| panic!("{diagnostics:?}")));
+        let mut memory = Memory::default();
+        memory.workspace(&workspace);
+        let before = (memory.syntax.bytes(), memory.checked_bytes());
+        assert!(before.0 > std::mem::size_of::<Syntax>());
+        assert!(before.1 > std::mem::size_of::<Workspace>() + std::mem::size_of::<Graph>());
+        memory.workspace(&workspace);
+        assert_eq!((memory.syntax.bytes(), memory.checked_bytes()), before);
+        let cloned = Arc::new((*workspace).clone());
+        memory.workspace(&cloned);
+        assert_eq!(memory.syntax.bytes(), before.0, "workspace clones share syntax allocations");
+        assert!(memory.checked_bytes() > before.1, "the separate workspace value is retained too");
+
+        let mut text = Vec::with_capacity(128);
+        text.push(b'x');
+        let allocation = (text.as_ptr() as usize, text.capacity());
+        let mut builder = TermBuilder::new();
+        let form = builder.import_form(&syntax::make(syntax::Draft::Sym("x".into())));
+        let root = builder.push(None, &Ty::Text, form, Draft::Text(text));
+        let arena = builder.freeze();
+        let mut memory = Memory::default();
+        memory.term(&arena.handle(root));
+        let before = (memory.syntax.bytes(), memory.checked_bytes());
+        memory.term(&arena.handle(root));
+        assert_eq!((memory.syntax.bytes(), memory.checked_bytes()), before, "separate handles share one arena allocation");
+        let (_, checked) = memory.into_allocations();
+        assert!(checked.contains(&allocation), "unused retained capacity is not live length");
+    }
+
+    #[test]
+    fn packed_skip_tuples_keep_integer_and_nonempty_tuple_rules() {
+        for (source, expected) in [
+            ("[]", Some(vec![])),
+            ("[0 [1 2] 3]", Some(vec![vec![0], vec![1, 2], vec![3]])),
+            ("[[]]", None), ("[-1]", None), ("[1.0]", None),
+            ("[9223372036854775808]", None), ("[name]", None),
+        ] {
+            let form = syntax::parse(source).unwrap().remove(0);
+            assert_eq!(skip_tuples(&form), expected, "{source}");
+        }
+    }
+
+    #[test]
+    fn packed_bypass_selects_authored_positional_argument_not_body() {
+        let source = syntax::parse("(f :option 9 2)").unwrap().remove(0);
+        let forms = source.children();
+        let mut builder = TermBuilder::new();
+        let option_form = builder.import_form(&source.child(forms[2]));
+        let option = builder.push(None, &Ty::Int, option_form, Draft::Lit(param::Value::Int(9)));
+        let input_form = builder.import_form(&source.child(forms[3]));
+        let input = builder.push(None, &Ty::Int, input_form, Draft::Lit(param::Value::Int(2)));
+        let form = builder.import_form(&source);
+        let call = builder.push(None, &Ty::Int, form, Draft::Op {
+            op: "f".into(), args: vec![("option".into(), option), ("value".into(), input)], skip: Vec::new(),
+        });
+        let body_only = builder.push(None, &Ty::Int, form, Draft::CallFn { fn_name: "f".into(), args: Vec::new(), body: Some(input) });
+        let arena = builder.freeze();
+        assert_eq!(bypass_input(&arena.handle(call)).unwrap().row_id(), input);
+        assert!(bypass_input(&arena.handle(body_only)).is_none());
+    }
+}

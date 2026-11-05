@@ -1,0 +1,73 @@
+#version 460
+#extension GL_EXT_ray_query : require
+layout(local_size_x = 4) in;
+layout(set = 0, binding = 0) uniform accelerationStructureEXT scene;
+layout(set = 0, binding = 1) readonly buffer Rays { vec4 rays[]; };
+struct Hit { uint hit; uint primitive; uint instance; float t; vec2 barycentrics; };
+layout(set = 0, binding = 2) buffer Hits { Hit hits[]; };
+layout(set = 0, binding = 3) readonly buffer Capsules { vec4 endpoints[]; };
+
+bool capsule_hit(vec3 origin, vec3 direction, vec4 a_radius, vec4 b_radius, out float distance) {
+  vec3 ba = b_radius.xyz - a_radius.xyz;
+  vec3 oa = origin - a_radius.xyz;
+  float rd2 = dot(direction, direction);
+  float baba = dot(ba, ba);
+  float bard = dot(ba, direction);
+  float baoa = dot(ba, oa);
+  float rdoa = dot(direction, oa);
+  float radius = a_radius.w;
+  float best = 100.0;
+  bool found = false;
+
+  float aa = baba * rd2 - bard * bard;
+  float bb = baba * rdoa - baoa * bard;
+  float cc = baba * dot(oa, oa) - baoa * baoa - radius * radius * baba;
+  float h = bb * bb - aa * cc;
+  if (aa > 1e-8 && h >= 0.0) {
+    float root = sqrt(h);
+    float t0 = (-bb - root) / aa;
+    float y0 = baoa + t0 * bard;
+    if (y0 >= 0.0 && y0 <= baba && t0 >= 0.0 && t0 <= best) { best = t0; found = true; }
+    float t1 = (-bb + root) / aa;
+    float y1 = baoa + t1 * bard;
+    if (y1 >= 0.0 && y1 <= baba && t1 >= 0.0 && t1 <= best) { best = t1; found = true; }
+  }
+
+  for (int cap = 0; cap < 2; ++cap) {
+    vec3 center = cap == 0 ? a_radius.xyz : b_radius.xyz;
+    vec3 oc = origin - center;
+    float b = dot(direction, oc);
+    float c = dot(oc, oc) - radius * radius;
+    float disc = b * b - rd2 * c;
+    if (disc >= 0.0) {
+      float root = sqrt(disc);
+      for (int side = 0; side < 2; ++side) {
+        float t = (-b + (side == 0 ? -root : root)) / rd2;
+        float y = baoa + t * bard;
+        bool on_cap = cap == 0 ? y <= 0.0 : y >= baba;
+        if (on_cap && t >= 0.0 && t <= best) { best = t; found = true; }
+      }
+    }
+  }
+
+  distance = best;
+  return found;
+}
+
+void main() {
+  uint i = gl_GlobalInvocationID.x;
+  vec3 origin = rays[i * 2].xyz, direction = rays[i * 2 + 1].xyz;
+  rayQueryEXT q;
+  rayQueryInitializeEXT(q, scene, gl_RayFlagsNoneEXT, 0xFF, origin, 0.0, direction, 100.0);
+  while (rayQueryProceedEXT(q)) {
+    if (rayQueryGetIntersectionTypeEXT(q, false) == gl_RayQueryCandidateIntersectionAABBEXT) {
+      uint primitive = rayQueryGetIntersectionPrimitiveIndexEXT(q, false);
+      float t;
+      if (capsule_hit(origin, direction, endpoints[primitive * 2], endpoints[primitive * 2 + 1], t))
+        rayQueryGenerateIntersectionEXT(q, t);
+    }
+  }
+  bool hit = rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionGeneratedEXT;
+  hits[i] = Hit(hit ? 1u : 0u, hit ? uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, true)) : 0u, 0u,
+                hit ? rayQueryGetIntersectionTEXT(q, true) : 0.0, vec2(0.0));
+}

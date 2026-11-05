@@ -90,8 +90,8 @@ fn kept(
 pub fn topology_component(geometry: &Geometry, component: &str) -> Result<Value, Diagnostic> {
     let view = topo_view(geometry::topology(geometry))?;
     match component {
-        "vertex_points" => Ok(ints(view.vertex_points.to_vec())),
-        "primitive_offsets" => Ok(ints(view.primitive_offsets.to_vec())),
+        "vertex_points" => Ok(Value::Int_array(view.vertex_points)),
+        "primitive_offsets" => Ok(Value::Int_array(view.primitive_offsets)),
         "kinds" => Ok(ints(view.primitive_kinds.iter().map(|k| *k as i64).collect())),
         _ => fail("E_DATA_SOURCE", "Topology source requires vertex_points, primitive_offsets or kinds."),
     }
@@ -707,7 +707,6 @@ pub fn mesh_resident(static_key: Option<&Value>, scope: &Residency, args: &Args)
             Arc::new(move || {
                 let kinds: Vec<topology::PrimitiveKind> = (holder.kinds.materialise)().iter().map(|k| kind_of(*k)).collect();
                 topology::create_owned(point_count, (holder.vertices.materialise)(), (holder.offsets.materialise)(), kinds)
-                    .unwrap_or_else(|e| unreachable!("resident topology was validated: {}", error::to_string(&e)))
             })
         };
         let topology = topology::deferred(None, Some(holder.clone() as Arc<dyn Deferred::Holder>), Some(release), point_count, vertex_count, primitive_count, materialise)

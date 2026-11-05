@@ -156,11 +156,19 @@ fn dynamic_call_identity_and_statement_traversal() {
     assert_eq!(C::reads(inner[0]), vec![1, 2, 6]);
     let workspace = checked("(workspace traversal (graph g :context value (+ (* t 2.) 1.)))");
     let term = &workspace.graphs[0].body;
-    let mapped = W::map_children(&|child: &W::Term| W::Term { ty: Ty::Bool, ..child.clone() }, term);
-    assert!(mapped.ty == term.ty);
-    assert_eq!(W::children(&mapped).iter().map(|c| c.ty.clone()).collect::<Vec<_>>(), vec![Ty::Bool, Ty::Bool]);
-    let grandchildren = W::children(&W::children(term)[0]);
-    assert!(grandchildren.len() == 2 && grandchildren[0].ty == Ty::Float, "Workspace.map_children changed a grandchild");
+    let mut builder = flow_check::term_arena::TermBuilder::new();
+    let mapped = builder.rewrite_roots_with(std::slice::from_ref(term), &mut |builder, source, draft| {
+        let id = builder.rebuild(source, draft);
+        if source.identity().0 == term.identity().0 && term.children().contains(&source.row_id()) {
+            builder.with_type(id, &Ty::Bool)
+        } else { id }
+    })[0];
+    let mapped = builder.freeze().handle(mapped);
+    assert!(mapped.ty() == term.ty());
+    assert_eq!(mapped.children().iter().map(|id| mapped.child(*id).ty().clone()).collect::<Vec<_>>(), vec![Ty::Bool, Ty::Bool]);
+    let child = term.child(term.children()[0]);
+    let grandchildren = child.children();
+    assert!(grandchildren.len() == 2 && *child.child(grandchildren[0]).ty() == Ty::Float, "Workspace.map_children changed a grandchild");
 }
 
 #[test]

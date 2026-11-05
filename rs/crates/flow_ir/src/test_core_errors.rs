@@ -84,6 +84,35 @@ fn core_failures_answer_with_the_walkers_diagnostic() {
     }
 }
 
+#[test]
+fn byte_error_operands_keep_native_diagnostic_representation() {
+    for (code, message, cause) in [
+        (b"E_BYTES".as_slice(), b"selected".as_slice(), b"raw\xff\0cause".as_slice()),
+        (b"E_\xff".as_slice(), b"selected".as_slice(), b"cause".as_slice()),
+        (b"E_BYTES".as_slice(), b"raw\xffmessage".as_slice(), b"cause".as_slice()),
+    ] {
+        let body = format!("(if (> t 0.) (error {} {} :cause {}) 0.)", ts::text_literal(code), ts::text_literal(message), ts::text_literal(cause));
+        let value = recorded(&body);
+        let Value::Residual(r) = &value else { panic!("expected live error") };
+        let program = core_lower::lower(None, None, true, None, None, *r).expect("byte error lowers");
+        let prepared = core_exec::prepare(&program, false, false, &Default::default(), false);
+        for time in [-0.25, 0.25] {
+            let live = input::at_time(time);
+            let expected = reference(&value, &live);
+            let actual = core_exec::execute(&prepared, &live, &Options { strict: true, rerun_on_error: false, ..Default::default() });
+            match (actual, expected) {
+                (Ok(a), Ok(b)) => assert_eq!(a, b),
+                (Err(a), Err(b)) => {
+                    assert_eq!(a.code, b.code);
+                    assert_eq!(a.message, b.message);
+                    assert_eq!(a.cause, b.cause);
+                }
+                (a, b) => panic!("native byte error mismatch: {a:?} / {b:?}"),
+            }
+        }
+    }
+}
+
 fn state_value() -> Value {
     let evaluation = ok(E::static_eval(&workspace(
         r##"(state [s 0.] (if (> t 0.6) (error "E_RULES" (str "exact failure " t) :cause "state rollback") (+ s 1.)))"##,

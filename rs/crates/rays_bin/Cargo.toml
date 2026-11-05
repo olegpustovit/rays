@@ -27,6 +27,7 @@ flow_eval = { path = "../flow_eval" }
 flow_sop = { path = "../flow_sop" }
 sop = { path = "../sop" }
 mem = { path = "../mem" }
+runtime = { path = "../runtime" }
 rays_diagnostic = { path = "../rays_diagnostic" }
 ogpu = { path = "../ogpu" }
 

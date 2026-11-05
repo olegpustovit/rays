@@ -86,7 +86,7 @@ fn report_line(ed: &Editor::t, name: &str) -> String {
 }
 
 fn text_of(ed: &Editor::t) -> String {
-    workspace_doc::to_text(&Editor::workspace(ed))
+    workspace_doc::to_text(&Editor::workspace(ed)).unwrap()
 }
 fn has(text: &str, piece: &str) -> bool {
     text.contains(piece)

@@ -1,201 +1,493 @@
 # OCaml test inventory vs Rust port
 
-Scope: all 432 `lib/**/test_*.ml` files (365 at depth `lib/<x>/`, 67 nested). Generated from a name and comment scan of `rs/` (`target/` excluded).
+Reconciled 2026-11-05 against every current `lib/**/test_*.ml` filename. The old
+PORTED/STUB/PARTIAL/MISSING subtotals are retired: they totaled 429 while the source census
+contained 432 files, and their PORTED/STUB rows were not recorded individually. No files are
+invented or promoted by arithmetic; every source path below occurs exactly once.
 
-**Summary: PORTED 233, STUB 55, PARTIAL 45, MISSING 96, rdk verified 2026-11-04 (432 files).**
+## Evidence census, not a completion claim
 
-Method:
-- PORTED: a Rust file with the same basename (or a `tests/` file without the `test_` prefix), or a Rust comment or `##` backlog header naming the file, or a same-named module containing `#[cfg(test)]`. The last kind is a name-only match: 48 PORTED rows, unverified.
-- PARTIAL: named as ported, but a Rust header or `port/parity_backlog.md` says parts are not ported, skipped or unported.
-- MISSING: none of the above.
-- Library: top-level directory under `lib/`.
-- Cases: top-level `let test*` functions. Files without that style are counted by assertion-style call lines (`assert`, `check`, `expect*`), so the figures are a size proxy, not an exact case count. Files with zero detected checks show 0.
+| Evidence class | Files | Meaning |
+|---|---:|---|
+| ASSERTIONS_PRESENT | 324 | Assertion-bearing Rust counterpart identified; full source parity and executable qualification are separate requirements. |
+| MAC | 26 | Platform-qualified source; Metal/OGPU cases are qualified in CHECKPOINT.md, SDL Cocoa coverage remains separately tracked. |
+| STUB | 57 | Source runner has no operation-under-test assertion: 51 print-only runners and six setup-only edge runners. |
+| HARNESS | 19 | Source dispatch only; its registered children carry the behavior checks. |
+| SUPPORT | 6 | Source comparison/fixture support; callers must establish reachability. |
+| TOTAL | 432 | Exact current source census; no duplicates or unclassified filenames. |
 
-## Libraries with the most missing cases
+The table is an evidence ledger, **not** a claim that every candidate test is a complete or
+passing port. A filename, source comment or lexical assertion count is insufficient proof.
+The historical-label column preserves the old explicit MISSING/PARTIAL rows only; it is not
+a current completion classification. The inherited 48 weak PORTED row identities were never
+recorded, so all assertion candidates must be reviewed rather than guessing which 48 they were.
 
-| Library | Missing cases | Missing files |
-|---|---:|---:|
-| rays_editor | 280 | 13 |
-| flow_gpu | 181 | 5 |
-| flow_sop | 117 | 9 |
-| scene_execution | 78 | 6 |
-| mem | 46 | 1 |
-| param | 46 | 1 |
-| metal | 44 | 16 |
-| flow | 43 | 2 |
-| renderer | 37 | 8 |
-| lru | 32 | 1 |
-| ogpu_metal | 23 | 6 |
-| flow_web | 21 | 2 |
-| rays_math | 18 | 2 |
-| scene_command | 17 | 3 |
+Source runner correction: point_jitter asserts Group membership and is not a stub. The source
+stub list includes curvature, group_ops, point_replicate and scatter; overlapping old prose lists
+must not be used as category totals.
 
-Total MISSING cases: 1043 (rdk row removed, see "rdk verification").
+## Qualification and surviving parity work
 
-## MISSING (96 files, sorted by library, then cases)
+- Current commands, times and checked acceptance live in [CHECKPOINT.md](../CHECKPOINT.md).
+  Only its executable evidence closes a behavior; the rows below do not silently waive failures.
+- param's float shortestness/round trips, metadata, choices, normalization and text codecs were
+  assertion-audited; OCaml physical-default identity is represented by immutable owned-value preservation.
+- LRU functional/accounting/lifecycle and allocation-free-hit assertions are enabled. Preallocated
+  lookup keys plus the counting allocator prove zero Rust heap bytes across 1,000 steady-state hits,
+  with exact returned values checked. `cargo t -p lru` passes all 18 tests; the PARITY ignore is removed.
+- mem's shared-reachability gap is now implemented through allocation identities, preserving root/FIFO
+  order and the original 880,000-byte transfer. All 56 enabled mem/LRU/collections tests passed;
+  this does not close unrelated allocation ceilings in runtime/UI suites.
+- Web region-argument/composition ports execute actual emitted JS with serial/one/eight workers.
+  Their 78 enabled additions and the complete 119-test crate run passed. Root text errors are kept
+  as byte operands through lowering instead of folding into quoted native diagnostic strings.
+- Five GPU source suites, helper coverage and resident-run assertions passed Windows qualification;
+  native Metal safe wrappers, OGPU tests and conformance passed on Mac. Native owner transfers that
+  Rust excludes with !Send/!Sync are type-enforced, not exercised by invalid unsafe test objects.
+- SOP arrays, mesh residents, math helpers, fixture codec, remap and the full parallel matrix are
+  now assertion-bearing ports; their current tests still require the recorded focused/native gates.
+- Geometry Text values now use raw byte vectors; the original remap bytes (including invalid UTF-8)
+  are restored rather than replaced by a different Unicode string. Native identifiers are decoded
+  only at checked identifier boundaries. Core/glue all-byte tests and remesh oracle components passed.
+- Restored editor native qualification and renderer source cases remain subject to runtime/budget
+  gates. Test bodies must not return success because a required device is unavailable. Genuine source
+  capability refusals and compile-time ownership restrictions remain valid typed boundaries.
+- Rust has explicit ownership/counting rather than an OCaml collector; all still-relevant allocation,
+  aliasing, retention and transition assertions need real Rust evidence, not live-growth substitutes.
 
-| Library | File | Cases | Basis |
-|---|---|---:|---|
-| diagnostic | `lib/diagnostic/test_diagnostic.ml` | 6 | checks |
-| flow | `lib/flow/test_macro.ml` | 26 | checks |
-| flow | `lib/flow/test_value_core.ml` | 17 | checks |
-| flow_gpu | `lib/flow_gpu/test_image_sink_native.ml` | 76 | checks |
-| flow_gpu | `lib/flow_gpu/test_run_lifetime.ml` | 60 | checks |
-| flow_gpu | `lib/flow_gpu/test_image_sink.ml` | 42 | checks |
-| flow_gpu | `lib/flow_gpu/test_sampling.ml` | 3 | checks |
-| flow_gpu | `lib/flow_gpu/test_raster.ml` | 0 | checks |
-| flow_sop | `lib/flow_sop/test_geometry_arrays.ml` | 51 | checks |
-| flow_sop | `lib/flow_sop/test_math_helpers.ml` | 33 | checks |
-| flow_sop | `lib/flow_sop/test_gpu_bulk.ml` | 13 | checks |
-| flow_sop | `lib/flow_sop/test_mesh_planes.ml` | 11 | checks |
-| flow_sop | `lib/flow_sop/test_concat.ml` | 5 | checks |
-| flow_sop | `lib/flow_sop/goldens/test_fixture_codec.ml` | 3 | checks |
-| flow_sop | `lib/flow_sop/test_planes.ml` | 1 | checks |
-| flow_sop | `lib/flow_sop/test_units.ml` | 0 | checks |
-| flow_sop | `lib/flow_sop/test_units_geometry.ml` | 0 | checks |
-| flow_web | `lib/flow_web/test_region_arguments.ml` | 15 | checks |
-| flow_web | `lib/flow_web/test_array_composition_web.ml` | 6 | checks |
-| input | `lib/input/test_gate.ml` | 0 | checks |
-| lru | `lib/lru/test_lru.ml` | 32 | checks |
-| mem | `lib/mem/test_mem.ml` | 46 | checks |
-| metal | `lib/metal/test_metal_compute_encoder_safe.ml` | 10 | checks |
-| metal | `lib/metal/test_metal_render_encoder_safe.ml` | 9 | checks |
-| metal | `lib/metal/test_metal_support.ml` | 7 | checks |
-| metal | `lib/metal/test_metal_function_constants_safe.ml` | 5 | checks |
-| metal | `lib/metal/test_metal_argument_reflection_snapshot.ml` | 4 | checks |
-| metal | `lib/metal/test_metal_command_buffer_safe.ml` | 3 | checks |
-| metal | `lib/metal/test_metal_resource_bounds.ml` | 3 | checks |
-| metal | `lib/metal/test_metal_blit_safe.ml` | 1 | checks |
-| metal | `lib/metal/test_metal_device_library_safe.ml` | 1 | checks |
-| metal | `lib/metal/test_metal_device_safe.ml` | 1 | checks |
-| metal | `lib/metal/test_metal_build_config.ml` | 0 | checks |
-| metal | `lib/metal/test_metal_compute_pipeline_safe.ml` | 0 | checks |
-| metal | `lib/metal/test_metal_device_queue_safe.ml` | 0 | checks |
-| metal | `lib/metal/test_metal_render_icb_argument.ml` | 0 | checks |
-| metal | `lib/metal/test_metal_render_pipeline_safe.ml` | 0 | checks |
-| metal | `lib/metal/test_metal_sampler_safe.ml` | 0 | checks |
-| native_layer_token | `lib/native_layer_token/test_native_layer_token.ml` | 11 | checks |
-| ogpu | `lib/ogpu/conformance/test_mock.ml` | 0 | checks |
-| ogpu_metal | `lib/ogpu_metal/test_ogpu_metal_acceleration.ml` | 7 | checks |
-| ogpu_metal | `lib/ogpu_metal/test_ogpu_metal_foundation.ml` | 7 | checks |
-| ogpu_metal | `lib/ogpu_metal/test_ogpu_metal_texture.ml` | 4 | checks |
-| ogpu_metal | `lib/ogpu_metal/test_ogpu_metal_pipeline.ml` | 3 | checks |
-| ogpu_metal | `lib/ogpu_metal/test_ogpu_metal_sampler_pixels.ml` | 2 | checks |
-| ogpu_metal | `lib/ogpu_metal/test_ogpu_metal_capabilities.ml` | 0 | checks |
-| parallel | `lib/parallel/test_parallel.ml` | 7 | checks |
-| param | `lib/param/test_param.ml` | 46 | checks |
-| pxui | `lib/pxui/test_ui_parity.ml` | 8 | checks |
-| rays | `lib/rays/test_world_raster.ml` | 6 | checks |
-| rays | `lib/rays/test_automatic_text_cache.ml` | 2 | checks |
-| rays | `lib/rays/test_canvas_native.ml` | 2 | checks |
-| rays | `lib/rays/test_scene_display_list.ml` | 1 | checks |
-| rays | `lib/rays/test_retained_view_native.ml` | 0 | checks |
-| rays_editor | `lib/rays_editor/native_qualification/test_workspace_gpu_native.ml` | 98 | checks |
-| rays_editor | `lib/rays_editor/native_qualification/test_placement_native.ml` | 96 | checks |
-| rays_editor | `lib/rays_editor/native_qualification/test_isogrid_viewport.ml` | 55 | checks |
-| rays_editor | `lib/rays_editor/marks_scene_test/test_marks_scene.ml` | 18 | checks |
-| rays_editor | `lib/rays_editor/native_qualification/test_workspace_gpu_marks.ml` | 8 | checks |
-| rays_editor | `lib/rays_editor/native_qualification/test_chain_gpu_native.ml` | 2 | checks |
-| rays_editor | `lib/rays_editor/native_qualification/test_grid_gpu_native.ml` | 1 | checks |
-| rays_editor | `lib/rays_editor/native_qualification/test_holder_frames_native.ml` | 1 | checks |
-| rays_editor | `lib/rays_editor/test/test_rays.ml` | 1 | checks |
-| rays_editor | `lib/rays_editor/native_qualification/test_chain_frames_native.ml` | 0 | checks |
-| rays_editor | `lib/rays_editor/native_qualification/test_live_mesh_native.ml` | 0 | checks |
-| rays_editor | `lib/rays_editor/native_qualification/test_scrub_gpu_native.ml` | 0 | checks |
-| rays_editor | `lib/rays_editor/test/test_text.ml` | 0 | checks |
-| rays_math | `lib/rays_math/test_color.ml` | 16 | checks |
-| rays_math | `lib/rays_math/test_clock.ml` | 2 | checks |
-| renderer | `lib/renderer/test_batch_merge.ml` | 9 | checks |
-| renderer | `lib/renderer/test_dense_scene2.ml` | 9 | checks |
-| renderer | `lib/renderer/test_scene3_instances.ml` | 9 | checks |
-| renderer | `lib/renderer/test_scene3_lighting.ml` | 6 | checks |
-| renderer | `lib/renderer/test_ui_pipeline.ml` | 2 | checks |
-| renderer | `lib/renderer/test_marks_native.ml` | 1 | checks |
-| renderer | `lib/renderer/test_shapes_lowering.ml` | 1 | checks |
-| renderer | `lib/renderer/test_runtime_render.ml` | 0 | checks |
-| scene_command | `lib/scene_command/test_ui_primitives.ml` | 12 | checks |
-| scene_command | `lib/scene_command/test_marks.ml` | 5 | checks |
-| scene_command | `lib/scene_command/test_display_list.ml` | 0 | checks |
-| scene_execution | `lib/scene_execution/test_gpu_vertices.ml` | 45 | checks |
-| scene_execution | `lib/scene_execution/test_prepared_scene3.ml` | 20 | checks |
-| scene_execution | `lib/scene_execution/test_offscreen_metal.ml` | 8 | checks |
-| scene_execution | `lib/scene_execution/test_retained_eviction.ml` | 2 | checks |
-| scene_execution | `lib/scene_execution/test_scene_execution_metal.ml` | 2 | checks |
-| scene_execution | `lib/scene_execution/test_automatic_scratch.ml` | 1 | checks |
-| sdl3 | `lib/sdl3/test_sdl3.ml` | 9 | checks |
-| sdl3 | `lib/sdl3/test_sdl3_events.ml` | 4 | checks |
-| sdl3 | `lib/sdl3/test_sdl3_metal.ml` | 2 | checks |
-| sdl3 | `lib/sdl3/test_sdl3_failure.ml` | 0 | checks |
-| sdl3 | `lib/sdl3/test_sdl3_stress.ml` | 0 | checks |
-| sdl3_image | `lib/sdl3_image/test_sdl3_image.ml` | 2 | checks |
-| sdl3_mixer | `lib/sdl3_mixer/test_sdl3_mixer.ml` | 0 | checks |
-| sdl3_mixer | `lib/sdl3_mixer/test_sdl3_mixer_device_failure.ml` | 0 | checks |
-| sdl3_ttf | `lib/sdl3_ttf/test_sdl3_ttf.ml` | 0 | checks |
-| sdl3_ttf | `lib/sdl3_ttf/test_sdl3_ttf_discovery_failure.ml` | 0 | checks |
+## Complete per-file evidence ledger
 
-## PARTIAL (45 files)
-
-| Library | File | Note |
-|---|---|---|
-| flow_gpu | `lib/flow_gpu/test_helpers.ml` | header: only the GPU half of test_helpers.ml ported |
-| flow_sop | `lib/flow_sop/test_adjacency.ml` | header: only the parts that need no sop/group_edges (or packed-vs-reference) ported |
-| flow_sop | `lib/flow_sop/test_graph.ml` | parity_backlog Unported list: most cases of this file not ported (test_trace: kernel half; test_js_frame: node half) |
-| flow_sop | `lib/flow_sop/test_group_kernel.ml` | parity_backlog Unported list: most cases of this file not ported (test_trace: kernel half; test_js_frame: node half) |
-| flow_sop | `lib/flow_sop/test_keyword_ports.ml` | header: catalog side only |
-| flow_sop | `lib/flow_sop/test_lisp_fusion.ml` | parity_backlog Unported list: most cases of this file not ported (test_trace: kernel half; test_js_frame: node half) |
-| flow_sop | `lib/flow_sop/test_lisp_node.ml` | parity_backlog Unported list: most cases of this file not ported (test_trace: kernel half; test_js_frame: node half) |
-| flow_sop | `lib/flow_sop/test_lisp_projection.ml` | parity_backlog Unported list: most cases of this file not ported (test_trace: kernel half; test_js_frame: node half) |
-| flow_sop | `lib/flow_sop/test_math_kernel.ml` | header: only the parts that need no sop/group_edges (or packed-vs-reference) ported |
-| flow_sop | `lib/flow_sop/test_merge_source.ml` | header: reduced port (Mesh_merge_front oracle dropped) |
-| flow_sop | `lib/flow_sop/test_mesh_resident.ml` | parity_backlog Unported list: most cases of this file not ported (test_trace: kernel half; test_js_frame: node half) |
-| flow_sop | `lib/flow_sop/test_metadata_kernel.ml` | parity_backlog Unported list: most cases of this file not ported (test_trace: kernel half; test_js_frame: node half) |
-| flow_sop | `lib/flow_sop/test_node_facts.ml` | parity_backlog Unported list: most cases of this file not ported (test_trace: kernel half; test_js_frame: node half) |
-| flow_sop | `lib/flow_sop/test_node_sources.ml` | parity_backlog Unported list: most cases of this file not ported (test_trace: kernel half; test_js_frame: node half) |
-| flow_sop | `lib/flow_sop/test_projection.ml` | parity_backlog Unported list: most cases of this file not ported (test_trace: kernel half; test_js_frame: node half) |
-| flow_sop | `lib/flow_sop/test_rand_at.ml` | header: only the parts that need no sop/group_edges (or packed-vs-reference) ported |
-| flow_sop | `lib/flow_sop/test_remap.ml` | parity_backlog Unported list: most cases of this file not ported (test_trace: kernel half; test_js_frame: node half) |
-| flow_sop | `lib/flow_sop/test_trace.ml` | parity_backlog Unported list: most cases of this file not ported (test_trace: kernel half; test_js_frame: node half) |
-| flow_sop | `lib/flow_sop/test_workspace_cook.ml` | parity_backlog Unported list: most cases of this file not ported (test_trace: kernel half; test_js_frame: node half) |
-| flow_sop | `lib/flow_sop/test_workspace_edit.ml` | parity_backlog Unported list: most cases of this file not ported (test_trace: kernel half; test_js_frame: node half) |
-| flow_sop | `lib/flow_sop/test_workspace_zone.ml` | parity_backlog Unported list: most cases of this file not ported (test_trace: kernel half; test_js_frame: node half) |
-| flow_web | `lib/flow_web/test_array_max_length.ml` | parity_backlog Unported list: most cases of this file not ported (test_trace: kernel half; test_js_frame: node half) |
-| flow_web | `lib/flow_web/test_compact_scan.ml` | parity_backlog Unported list: most cases of this file not ported (test_trace: kernel half; test_js_frame: node half) |
-| flow_web | `lib/flow_web/test_gather.ml` | parity_backlog Unported list: most cases of this file not ported (test_trace: kernel half; test_js_frame: node half) |
-| flow_web | `lib/flow_web/test_grade_index.ml` | parity_backlog Unported list: most cases of this file not ported (test_trace: kernel half; test_js_frame: node half) |
-| flow_web | `lib/flow_web/test_js_frame.ml` | parity_backlog Unported list: most cases of this file not ported (test_trace: kernel half; test_js_frame: node half) |
-| flow_web | `lib/flow_web/test_scatter.ml` | parity_backlog Unported list: most cases of this file not ported (test_trace: kernel half; test_js_frame: node half) |
-| rays_editor | `lib/rays_editor/test/test_drawing.ml` | backlog: only the pure mode ported |
-| rays_editor | `lib/rays_editor/test/test_editor_consistency.ml` | backlog: run_native/render_mode_click not ported; consistency_frozen_driven skipped (HANG) |
-| rays_editor | `lib/rays_editor/test/test_editor_document.ml` | header: lowering parts only |
-| rays_editor | `lib/rays_editor/test/test_editor_input.ml` | header: support module for the suite, not a standalone test target |
-| rays_editor | `lib/rays_editor/test/test_fast_path.ml` | header: part of the file ported; the rest drives lowering that is still ignored |
-| rays_editor | `lib/rays_editor/test/test_host_effects.ml` | header: errors only ported (start/reload path) |
-| rays_editor | `lib/rays_editor/test/test_isogrid_deferred.ml` | backlog: NOT PORTED (stub in suite_t6/isogrid.rs) |
-| rays_editor | `lib/rays_editor/test/test_materials.ml` | backlog: carry_tests and viewport_carry_tests not ported |
-| rays_editor | `lib/rays_editor/test/test_scene_sync.ml` | backlog: qualification_roots and the through-the-editor block unported |
-| rays_editor | `lib/rays_editor/test/test_sop_ui.ml` | backlog: dynamic_schema and the sop_params PPX checks not ported |
-| rays_editor | `lib/rays_editor/test/test_text_pane.ml` | backlog: only editor_graph_drafts and editor_fn_frames ported |
-| rays_editor | `lib/rays_editor/test/test_threading.ml` | header: errors only ported (start/reload path) |
-| rays_editor | `lib/rays_editor/test/test_workspace_doc.ml` | backlog: part_editor, part_live, part_preset and others unported |
-| rays_editor | `lib/rays_editor/test/test_workspace_ir.ml` | backlog: static part only |
-| rays_editor | `lib/rays_editor/test/test_workspace_shell.ml` | backlog: run_native and window sections not ported; several cases SKIPPED |
-| rays_editor | `lib/rays_editor/test/test_workspace_start.ml` | header: errors only ported (start/reload path) |
-| sop | `lib/sop/test_parallel_exact.ml` | header: session-level core only |
-| sop | `lib/sop/test_sop.ml` | header: only the parts that need no sop/group_edges (or packed-vs-reference) ported |
-
-## Caveats
-
-- Name matching is textual. A module with a different name (e.g. an rdk `group_ops.rs` holding a port) is invisible to the scan and shows as MISSING. Verify the largest MISSING rows before planning work.
-- The rdk and rays_editor counts dominate. rdk tests are mostly `let run ()` scripts with `check` helpers, so their cases are a proxy.
-- 48 PORTED rows are the name-only `#[cfg(test)]` match. Re-verify those first.
-
-## rdk verification (2026-11-04)
-
-All 64 rdk rows were MISSING by name. Checked against `lib/rdk/dune`'s `test_main` and the Rust `rdk_*` crates:
-
-- 47 files are stubs: `let run () = print_endline "... passed"`, no assertion on product code (attribute_composite, attribute_copy, attribute_fade, blast_by_attribute, blend_shapes, circle, circle_from_edges, crease, distance_along_geometry, distance_from_target, duplicate, edge_divide, edge_equalize, edge_flip, ends, extract_centroid, extract_point_curve, group_{backface,boundary,bounds,edge_angle,edge_depth,find_path,non_planar,normal,promote_boundary,random,range_connectivity,unshared}, groups_from_name, laplacian, match_size, motion, normals, platonic, point_generate, point_split, poly_bridge, poly_loft, polyframe, polywire, resample, reverse, revolve, rewire_vertices, separate_pieces, skin, spiral, sweep, tube). Their cases counted in this table were helper-function checks that never run.
-- 7 more are stubs with unused helpers (`_`-prefixed values, a cancel token, no assertion): edge_cusp, edge_relax, edge_straighten, point_jitter (one `Group.init` self-check), plus edge_divide/equalize/flip above. 12 OCaml modules they would exercise (scatter, spiral, polywire, sweep, crease, duplicate, edge_ops, extract_point_curve, laplacian, motion, revolve, sweep_modeling) have no Rust file; accepted Lisp nodes replace them.
-- `test_support/test_geometry_comparison.ml` tests the OCaml-only `close_geometry` ulp comparator; Rust compares with `geometry_signature`. No port.
-- 9 files assert for real. Already ported under other names: clip (`plane_clip.rs`, 11 of 11 sections), connectivity (`rdk_core/analysis.rs`), fuse (`fuse_grid.rs` and `fuse_*.rs`), group_catalog (`group_ops.rs`), instances (`instance_copy.rs`), soft_transform and transform (`transform_ops.rs`). Gaps found and ported now: connectivity validation and sentinels; fuse one/four-domain target and rule exactness; rdk_sources pattern/rewrite suite (`attribute_pattern.rs`); rdk_misc tuple blur (`attribute_blur.rs`).
-- The 3 PARTIAL rdk rows are complete: test_rdk (topology validation and deferred topology in `rdk_core/topology.rs`, group/extrude remap in `rdk_rays/tests.rs`), test_rdk_attributes (surface-index extras in `rdk_geom/surface_index.rs`; the transfer half was already in `attribute_transfer.rs`), test_distance_from_geometry (curve reference and domain exactness in `transform_ops.rs`).
-- Not ported on purpose: the million-point range kernel (`Geometry.generate_point_ranges`, sequential in Rust, covered by `point_range_generator_keeps_fixed_plane_lengths`); the OCaml minor-heap class-bit regression; the "released topology still materialised" thunk (a Rust materialiser returns a value, it cannot raise); one/four/eight-domain loops over topology validation (sequential in Rust).
+| Exact OCaml source | Historical explicit label | Current evidence | Rust assertions / source evidence |
+|---|---|---|---|
+| `lib/diagnostic/test_diagnostic.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/rays_diagnostic/src/lib.rs` (12 assertion/check sites; diagnostic_behavior, offsets_and_reports_use_clamped_byte_positions) |
+| `lib/editor_core/test_history.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/editor_core/src/test_history.rs` (53 assertion/check sites; router_leader_chord_scope_text_focus_and_event_consumption, router_platform_modifier_and_labels); `rs/crates/rays_editor/src/test_editor_history.rs` (45 assertion/check sites; history_merge_seal_undo_redo_capacity_labels, history_entries_are_snapshots_the_last_present_stays_live, no_op_edit_is_detected_by_value); `rs/crates/rays_editor/tests/suite_t4/test_history.rs` (10 assertion/check sites; ) |
+| `lib/editor_core/test_panels.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/editor_core/src/test_panels.rs` (18 assertion/check sites; split_size_clamp_and_validate, layout_labels) |
+| `lib/editor_core/test_store.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/editor_core/src/test_store.rs` (14 assertion/check sites; symlink_save_keeps_link, settings_round_trip_and_viewport, user_folder_follows_platform) |
+| `lib/flow/test_array.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_eval/src/test_array.rs` (59 assertion/check sites; packed_arrays_through_the_evaluator, live_packed_maps_defer, text_arrays_through_the_evaluator …) |
+| `lib/flow/test_catalog.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_check/src/catalog.rs` (40 assertion/check sites; verifies_md5_and_manifest_digest, resolves_and_expands_components, groups_vec3_and_checks_parameter_ranges …) |
+| `lib/flow/test_defnode.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_check/src/defnode.rs` (37 assertion/check sites; parses_slots_parameters_and_version, parses_vec3_fields_and_rejects_bad_metadata, preserves_text_default_bytes …) |
+| `lib/flow/test_frame.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_eval/src/test_frame.rs` (23 assertion/check sites; frame_reads_force_against_the_live_frame, frame_dependent_counts_are_rejected, a_map_is_live_when_its_function_reads_the_frame) |
+| `lib/flow/test_lisp.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_syntax/src/lisp.rs` and `syntax.rs` — corrected manual mapping: byte strings, printer fixtures, threading, spans and comments; not the unrelated path-tracer Lisp suite. |
+| `lib/flow/test_macro.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/flow_syntax/src/test_macro.rs` (30 assertion/check sites; hygiene_a_caller_names_arrive_only_through_holes, unquoting, fresh_names_are_deterministic_distinct_and_stepped …) |
+| `lib/flow/test_op.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_eval/src/test_op.rs` (119 assertion/check sites; every_operator_shape_and_arithmetic, raster_stage_intrinsics_refuse_cpu_values, contexts_checks_and_custom_kinds …) |
+| `lib/flow/test_phase_timer.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_syntax/src/phase_timer.rs` (28 assertion/check sites; panics_restore_suspended_samples_and_clear_aborted_samples, injected_clock_tracks_nested_time_and_guard_restoration) |
+| `lib/flow/test_state.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_eval/src/test_state.rs` (40 assertion/check sites; forked_states_diverge, graph_state_clocks_and_snapshots_agree, state_folds_seek_reset_and_roll_back …) |
+| `lib/flow/test_syntax.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_syntax/src/syntax.rs` (72 assertion/check sites; parses_atoms_containers_quotes_and_comments, metadata_ids_and_identity, diagnostics_depth_and_threading …) |
+| `lib/flow/test_ty.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_syntax/src/ty.rs` (71 assertion/check sites; annotation_and_spelling_round_trips, function_types_and_compatibility, syntax_signatures_vectors_and_nominals) |
+| `lib/flow/test_value_core.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/flow_check/src/test_value_core.rs` (16 assertion/check sites; value_keys_contexts_and_symbols, coercions_follow_the_port_rules, hard_bounds_clamp_a_coerced_integer) |
+| `lib/flow/test_workspace.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_eval/src/test_workspace.rs` (115 assertion/check sites; vectors_widen_and_check, function_ports_instantiate_bodies_and_keep_captures, canvas_accepts_an_image_through_the_drawing_operator …) |
+| `lib/flow/test_workspace_eval.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_eval/src/test_workspace_eval.rs` (230 assertion/check sites; check, the_fixtures_run_deterministically_with_unique_plan_keys, nested_data_and_lazy_selection …) |
+| `lib/flow_gpu/test_emit.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_shader/tests/test_emit.rs` (47 assertion/check sites; exact_uint32_buffers_and_outputs, integer_status_bits_are_published, carried_fixtures_share_the_layout …) |
+| `lib/flow_gpu/test_film.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_gpu/tests/gpu_pathtrace.rs` (9 assertion/check sites; ) |
+| `lib/flow_gpu/test_helpers.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/flow_gpu/tests/gpu_pathtrace.rs` (9 assertion/check sites; ) |
+| `lib/flow_gpu/test_image_sink.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/flow_gpu/src/image_sink.rs` (1 assertion/check sites; ) |
+| `lib/flow_gpu/test_image_sink_native.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/flow_gpu/tests/gpu_image_sink_native.rs` — source assertion port registered; executable qualification tracked separately in CHECKPOINT.md. |
+| `lib/flow_gpu/test_pipelines.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_gpu/tests/pipelines_mock.rs` (10 assertion/check sites; pipeline_ownership_on_mock) |
+| `lib/flow_gpu/test_raster.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/flow_shader/src/raster.rs` (5 assertion/check sites; ) |
+| `lib/flow_gpu/test_resolve.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_gpu/tests/gpu_pathtrace.rs` (9 assertion/check sites; ) |
+| `lib/flow_gpu/test_run.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_gpu/tests/gpu_run.rs` (47 assertion/check sites; ) |
+| `lib/flow_gpu/test_run_lifetime.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/flow_gpu/tests/gpu_run_lifetime.rs` — source assertion port registered; executable qualification tracked separately in CHECKPOINT.md. |
+| `lib/flow_gpu/test_sampling.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/flow_gpu/tests/gpu_sampling.rs` — source assertion port registered; executable qualification tracked separately in CHECKPOINT.md. |
+| `lib/flow_gpu/test_spirv.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_shader/tests/test_spirv.rs` (22 assertion/check sites; exact_kernels_match_the_digest_goldens, fast_kernels_match_the_digest_goldens, moving_scenes_and_unfolded_kernels_print) |
+| `lib/flow_gpu/test_trace.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_gpu/tests/gpu_trace.rs` (15 assertion/check sites; ); `rs/crates/flow_sop/src/lisp_sop/test_trace.rs` (5 assertion/check sites; packed_trace_matches_the_walker_and_a_direct_raycast, one_host_query_per_ray_not_one_per_field); `rs/crates/flow_sop/src/trace_scene.rs` (34 assertion/check sites; registered_quad_matches_a_direct_raycast, a_moving_geometry_needs_matching_points, spheres_and_strands_report_their_hits …) |
+| `lib/flow_gpu/test_triangles.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_gpu/tests/gpu_triangles.rs` (24 assertion/check sites; ) |
+| `lib/flow_gpu/test_uint32.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_gpu/tests/gpu_uint32.rs` (117 assertion/check sites; ) |
+| `lib/flow_graph/test_array_composition_graph.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_graph/src/test_array_composition_graph.rs` (13 assertion/check sites; typed_composition) |
+| `lib/flow_graph/test_domain.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_graph/src/test_domain.rs` (92 assertion/check sites; num, lookup_keeps_big_integers, lookup_in_a_map …) |
+| `lib/flow_graph/test_graph_edits.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_graph/src/test_graph_edits.rs` (53 assertion/check sites; same_graph_keys_on_the_shared_ops, unnamed_math_nodes_fold_into_their_reader, a_deleted_node_dissolves_into_its_readers …) |
+| `lib/flow_graph/test_iterate_graph.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_graph/src/test_iterate_graph.rs` (21 assertion/check sites; iterate_graph, debug_iterate) |
+| `lib/flow_graph/test_nonfinite.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_graph/src/test_nonfinite.rs` (31 assertion/check sites; nonfinite_literals_round_trip, nonfinite_primitives) |
+| `lib/flow_graph/test_string_bytes.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_graph/src/test_string_bytes.rs` (6 assertion/check sites; string_bytes) |
+| `lib/flow_ir/test_arena.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_ir/src/test_arena.rs` (10 assertion/check sites; arena_buffer_plan, chain_of_regions, long_body_few_slots) |
+| `lib/flow_ir/test_array_composition.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_ir/src/test_array_composition.rs` (17 assertion/check sites; concat_and_slice_copy_exactly, range_and_type_errors, has_array_prepare …) |
+| `lib/flow_ir/test_array_max_length.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_ir/src/test_array_max_length.rs` (21 assertion/check sites; op_direct_and_literal_selectors, exact_int_kernels_keep_gpu_refusal, statically_folded_float_conversion_has_no_int_bank …) |
+| `lib/flow_ir/test_compact_scan.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_ir/src/test_compact_scan.rs` (18 assertion/check sites; compact_kept_indices_and_immutable_source, scan_sum_offsets_and_wrap, bad_masks_and_types …) |
+| `lib/flow_ir/test_core.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_ir/src/region_snapshot.rs` (8 assertion/check sites; core_prints_a_region, registers_match_the_ocaml_oracle) |
+| `lib/flow_ir/test_core_control.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_ir/src/test_core_control.rs` (19 assertion/check sites; core_control_print_is_stable, dynamic_call_identity_and_statement_traversal, bypass_returns_the_unevaluated_time) |
+| `lib/flow_ir/test_core_draw.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_ir/src/core_draw.rs` (4 assertion/check sites; draw_lowering_matches_the_ocaml_snapshot) |
+| `lib/flow_ir/test_core_errors.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_ir/src/test_core_errors.rs` (35 assertion/check sites; core_failures_answer_with_the_walkers_diagnostic, byte_error_operands_keep_native_diagnostic_representation, a_failure_after_a_state_write_restores_the_plane …) |
+| `lib/flow_ir/test_core_lists.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_ir/src/test_core_lists.rs` (21 assertion/check sites; core_lists_parity_part_0, core_lists_parity_part_1, core_lists_parity_part_2 …) |
+| `lib/flow_ir/test_core_lower.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_ir/src/core_lower.rs` (50 assertion/check sites; lowering_matches_the_ocaml_snapshot, budget_refuses_and_a_larger_budget_admits, a_residual_has_no_literal …) |
+| `lib/flow_ir/test_core_marks.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_ir/src/test_core_marks.rs` (33 assertion/check sites; core_marks_snapshot_is_byte_identical, device_buffers_for_attributes_only_read_by_mark_sets, a_device_colour_of_the_wrong_length_is_refused …) |
+| `lib/flow_ir/test_core_operators.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_ir/src/test_core_operators.rs` (12 assertion/check sites; every_scalar_value_operator_has_a_case, scalar_value_operators_lower_and_match_the_walker_bit_for_bit_part_1, scalar_value_operators_lower_and_match_the_walker_bit_for_bit_part_2 …) |
+| `lib/flow_ir/test_core_parity.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_ir/src/flow_ir.rs` (93 assertion/check sites; a_panicking_static_kernel_is_a_refusal, cost_choose_picks_by_measured_total_time, resident_value_execution_counts_escaping_records_and_cpu_readers …) |
+| `lib/flow_ir/test_core_records.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_ir/src/test_core_records.rs` (8 assertion/check sites; concrete_values_skip_resolver_and_state, core_record_and_text_print_is_stable, core_and_executor_match_the_reference_walker_on_every_case …) |
+| `lib/flow_ir/test_core_regions.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_ir/src/test_core_regions.rs` (43 assertion/check sites; index_only_preparation_counts_without_building_the_range, a_nested_count_is_a_uniform, merging_sibling_regions_requires_the_same_immutable_sources …) |
+| `lib/flow_ir/test_core_resident.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_ir/src/flow_ir.rs` (93 assertion/check sites; a_panicking_static_kernel_is_a_refusal, cost_choose_picks_by_measured_total_time, resident_value_execution_counts_escaping_records_and_cpu_readers …) |
+| `lib/flow_ir/test_core_state.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_ir/src/test_core_state.rs` (11 assertion/check sites; core_state_slots_pending_writes_keys_errors_and_rollback_match_the_walker_part_1, core_state_slots_pending_writes_keys_errors_and_rollback_match_the_walker_part_2, core_state_slots_pending_writes_keys_errors_and_rollback_match_the_walker_part_3 …) |
+| `lib/flow_ir/test_error_rows.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_ir/src/test_error_rows.rs` (24 assertion/check sites; clean_flags_never_ask_the_host_or_run_the_mapper, boundary_and_tail_selection_with_complete_immutable_flags, malformed_context_cancellation_and_laziness …) |
+| `lib/flow_ir/test_frame_kernel.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_ir/src/flow_ir.rs` (93 assertion/check sites; a_panicking_static_kernel_is_a_refusal, cost_choose_picks_by_measured_total_time, resident_value_execution_counts_escaping_records_and_cpu_readers …) |
+| `lib/flow_ir/test_gather.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_ir/src/test_gather.rs` (94 assertion/check sites; int_table, helper_function_and_index_errors, host_tables_resolve_once_on_the_initial_domain …) |
+| `lib/flow_ir/test_grade_index.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_ir/src/test_grade_index.rs` (18 assertion/check sites; grade_direct_orders, index_of_first_match, bad_inputs …) |
+| `lib/flow_ir/test_inner_sum.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_ir/src/test_inner_sum.rs` (7 assertion/check sites; counts_k_0_1_64, empty_tables_and_helper_tables, exact_vector_bits …) |
+| `lib/flow_ir/test_ir.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_ir/src/flow_ir.rs` (93 assertion/check sites; a_panicking_static_kernel_is_a_refusal, cost_choose_picks_by_measured_total_time, resident_value_execution_counts_escaping_records_and_cpu_readers …) |
+| `lib/flow_ir/test_noise.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_ir/src/packed.rs` (25 assertion/check sites; block_layout_cuts_small_maps_into_four_chunks, small_maps_share_chunks_exactly, typed_blocks_agree_with_the_reference …) |
+| `lib/flow_ir/test_packed.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_ir/src/packed.rs` (25 assertion/check sites; block_layout_cuts_small_maps_into_four_chunks, small_maps_share_chunks_exactly, typed_blocks_agree_with_the_reference …) |
+| `lib/flow_ir/test_reductions.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_ir/src/test_reductions.rs` (27 assertion/check sites; reduce_array_direct, reduce_array_rows_parallel_matches_sequential, reductions_core_reference_and_cpu_agree …) |
+| `lib/flow_ir/test_region_snapshot.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_ir/src/test_region_snapshot.rs` (6 assertion/check sites; workspace_particles_snapshot, workspace_flow_shader_snapshot, workspace_flow_particles_gpu_snapshot …) |
+| `lib/flow_ir/test_scatter.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_ir/src/test_scatter.rs` (13 assertion/check sites; exact_int_wrap_and_ownership, ordered_float_sums_match_the_reference_loop, malformed_inputs …) |
+| `lib/flow_ir/test_static_map.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_ir/src/test_static_map.rs` (79 assertion/check sites; failures_are_the_walkers, kernel_makes_the_elements_past_the_head, static_map_profile_head_tail_and_refusal …) |
+| `lib/flow_ir/test_support/test_program.ml` | not recorded per file | SUPPORT | Source support/helper module; comparison/helper definitions require caller audit. |
+| `lib/flow_ir/test_uniforms.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_ir/src/packed.rs` (25 assertion/check sites; block_layout_cuts_small_maps_into_four_chunks, small_maps_share_chunks_exactly, typed_blocks_agree_with_the_reference …); `rs/crates/flow_ir/src/test_uniforms.rs` (32 assertion/check sites; tiny_maps_in_recorded_call_records, one_force_lowers_129_residuals_once, strict_uniform_reductions …) |
+| `lib/flow_ir/test_with_error.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_ir/src/test_with_error.rs` (26 assertion/check sites; with_error_nil_is_no_geo, with_error_passes_a_value_without_running_the_mapper, with_error_in_an_untaken_branch_is_not_evaluated …) |
+| `lib/flow_native/test_frame_alloc.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_native/tests/gpu_frame_alloc.rs` (6 assertion/check sites; ) |
+| `lib/flow_native/test_workspace_gpu_service.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_native/src/test_workspace_gpu_service.rs` (29 assertion/check sites; a_worker_reaches_the_resident_scope_only_through_the_owner_pump, a_worker_cook_selects_cpu_when_slower_and_reads_back_when_cheaper, nested_scopes_keep_their_own_backend …) |
+| `lib/flow_sop/goldens/test_fixture_codec.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/lisp_sop/test_fixture_codec.rs` — source assertion port registered; executable qualification tracked separately in CHECKPOINT.md. |
+| `lib/flow_sop/lisp_sop/test_workspace_node.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/lisp_sop.rs` (9 assertion/check sites; workspace_node_helpers, external_marker_is_restored_and_a_line_cooks, invalid_workspaces_fail_with_a_diagnostic) |
+| `lib/flow_sop/test_adjacency.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/topology_kernel_impl.rs` (44 assertion/check sites; mesh_and_counts, topology_and_triangles, components_count …) |
+| `lib/flow_sop/test_attribute_kernel.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/attribute_kernel.rs` (99 assertion/check sites; selected_writes_all_numeric_owners, csr_writer_finite_scan, xyz_attribute_writes_by_domain …) |
+| `lib/flow_sop/test_catalog_load.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/catalog.rs` (45 assertion/check sites; embedded_files_are_the_whole_node_directory_sorted, the_library_parses_and_its_ids_are_fixed_by_position, small_workspace_checks_against_the_library_catalog …) |
+| `lib/flow_sop/test_concat.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/lisp_sop/test_concat.rs` (3 assertion/check sites; rk, concat_one, concat_two …) |
+| `lib/flow_sop/test_encoded_parameters.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/encoded_parameters.rs` (24 assertion/check sites; defaults_are_canonical_and_the_authored_source_is_kept, literal_arguments_are_canonicalized_and_bad_ones_refused, hooks_must_be_typed_pure_text_functions …) |
+| `lib/flow_sop/test_geometry_arrays.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/lisp_sop/test_geometry_arrays.rs` — source assertion port registered; executable qualification tracked separately in CHECKPOINT.md. |
+| `lib/flow_sop/test_gpu_bulk.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/lisp_sop/test_gpu_bulk.rs` — source assertion port registered; executable qualification tracked separately in CHECKPOINT.md. |
+| `lib/flow_sop/test_graph.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/lisp_sop/test_graph.rs` (2 assertion/check sites; shortest_paths, color, chains …) |
+| `lib/flow_sop/test_grid_bulk.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/lisp_sop/test_grid_bulk.rs` (1 assertion/check sites; lowering_a_static_grid_does_not_walk_its_points) |
+| `lib/flow_sop/test_group_kernel.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/lisp_sop/test_group_kernel.rs` (60 assertion/check sites; native_owner_masks_stable_order_and_round_trips, native_owner_masks_defnode_round_trip, wildcard_names_and_refusals …) |
+| `lib/flow_sop/test_image_kernel.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/image_kernel.rs` (23 assertion/check sites; typed_function_is_checked, image_map_through_a_defn_fn_parameter, uv_orientation_and_domain_bytes …) |
+| `lib/flow_sop/test_iterate.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/lisp_sop/test_iterate.rs` (8 assertion/check sites; iterate_smoothing_matches_direct_computation, iterate_until_stops_after_the_satisfying_pass) |
+| `lib/flow_sop/test_keyword_ports.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/catalog.rs` (45 assertion/check sites; embedded_files_are_the_whole_node_directory_sorted, the_library_parses_and_its_ids_are_fixed_by_position, small_workspace_checks_against_the_library_catalog …) |
+| `lib/flow_sop/test_lisp_fusion.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/lisp_sop/test_lisp_fusion.rs` (15 assertion/check sites; four_noise_displace_nodes_cook_as_at_most_one_kernel_run, chain_over_a_cooked_input_folds_into_one_region, writes_of_different_attributes_fuse …) |
+| `lib/flow_sop/test_lisp_inline.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/lisp_sop/test_lisp_inline.rs` (14 assertion/check sites; chained_bodies_are_one_program_and_equal_the_factory_node, step_b_body_errors_cook_refusals_lower, step_c_context_reaching_bodies_and_live_arguments_inline …) |
+| `lib/flow_sop/test_lisp_node.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/lisp_sop/test_lisp_node.rs` (95 assertion/check sites; lazy_cooked_selection_keeps_a_chained_write, empty_geometry_survives_a_lisp_map, authored_body_errors_cook_lazily …) |
+| `lib/flow_sop/test_lisp_projection.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/lisp_sop/test_lisp_projection.rs` (18 assertion/check sites; lisp_card_matches_the_ocaml_schema_and_gestures_project_back, a_nested_lisp_node_is_a_card_with_typed_rows) |
+| `lib/flow_sop/test_main.ml` | not recorded per file | HARNESS | Source runner dispatches other test modules, not an independent assertion suite. |
+| `lib/flow_sop/test_math_helpers.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/lisp_sop/test_math_helpers.rs` — source assertion port registered; executable qualification tracked separately in CHECKPOINT.md. |
+| `lib/flow_sop/test_math_kernel.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/operators.rs` (37 assertion/check sites; declares_the_ocaml_operator_list_in_order, inherits_the_chain_the_ocaml_records_do, lowering_table …) |
+| `lib/flow_sop/test_merge_source.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/lisp_sop/test_node_contracts.rs` (15 assertion/check sites; noise_displace_sop_cache_context_seed_dependency_and_relabel_identity, lisp_source_merge_domains_inputs_and_cancellation) |
+| `lib/flow_sop/test_mesh_planes.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/lisp_sop/test_mesh_planes.rs` — source assertion port registered; executable qualification tracked separately in CHECKPOINT.md. |
+| `lib/flow_sop/test_mesh_resident.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/flow_gpu/tests/gpu_sop_mesh.rs` — source assertion port registered; executable qualification tracked separately in CHECKPOINT.md. |
+| `lib/flow_sop/test_metadata_kernel.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/lisp_sop/test_metadata_kernel.rs` (36 assertion/check sites; rename_conflicts_canonical_p_and_type_queries, all_owners_and_storages_rename_without_copying, copy_move_swap_preserve_owner_payloads_and_canonical_p …) |
+| `lib/flow_sop/test_node_facts.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/lisp_sop/test_node_facts.rs` (8 assertion/check sites; declared_preserved_topology_holds_at_one_and_eight_domains) |
+| `lib/flow_sop/test_node_sources.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/lisp_sop/test_node_sources.rs` (40 assertion/check sites; an_explicit_library_is_pruned_to_what_the_workspace_reaches, the_embedded_source_list_and_a_fresh_copy_agree, a_helper_seed_read_is_a_cache_dependency_only_while_reachable …) |
+| `lib/flow_sop/test_noise_displace_contract.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/lisp_sop/test_node_contracts.rs` (15 assertion/check sites; noise_displace_sop_cache_context_seed_dependency_and_relabel_identity, lisp_source_merge_domains_inputs_and_cancellation) |
+| `lib/flow_sop/test_planes.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/lisp_sop/test_planes.rs` (5 assertion/check sites; planes_round_trip_point, planes_round_trip_vertex, planes_round_trip_primitive …) |
+| `lib/flow_sop/test_projection.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/lisp_sop/test_projection.rs` (81 assertion/check sites; noise3_rows_edit_and_survive_reload, snapshots, snapshots_of_the_scene_fixtures …) |
+| `lib/flow_sop/test_rand_at.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/operators.rs` (37 assertion/check sites; declares_the_ocaml_operator_list_in_order, inherits_the_chain_the_ocaml_records_do, lowering_table …) |
+| `lib/flow_sop/test_remap.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/lisp_sop/test_remap.rs` (49 assertion/check sites; all_owner_storage_raw_bytes_order_and_edge_copies, minus_one_rows_are_defaults_and_in_no_group, permutation_edge_or_identity_and_copy_major_order …) |
+| `lib/flow_sop/test_settle.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/lisp_sop/test_settle.rs` (10 assertion/check sites; in_flight_device_writes_settle_at_a_cooks_end) |
+| `lib/flow_sop/test_topology_kernel.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/topology_kernel_impl.rs` (44 assertion/check sites; mesh_and_counts, topology_and_triangles, components_count …) |
+| `lib/flow_sop/test_trace.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/flow_gpu/tests/gpu_trace.rs` (15 assertion/check sites; ); `rs/crates/flow_sop/src/lisp_sop/test_trace.rs` (5 assertion/check sites; packed_trace_matches_the_walker_and_a_direct_raycast, one_host_query_per_ray_not_one_per_field); `rs/crates/flow_sop/src/trace_scene.rs` (34 assertion/check sites; registered_quad_matches_a_direct_raycast, a_moving_geometry_needs_matching_points, spheres_and_strands_report_their_hits …) |
+| `lib/flow_sop/test_units.ml` | MISSING | HARNESS | Source consists only of `module _ = Test_*` suite inclusions; not an assertion-bearing test file. |
+| `lib/flow_sop/test_units_geometry.ml` | MISSING | HARNESS | Source consists only of `module _ = Test_*` suite inclusions; not an assertion-bearing test file. |
+| `lib/flow_sop/test_workspace_cook.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/lisp_sop/test_workspace_cook.rs` (54 assertion/check sites; image_noise_lowers_cooks_and_edits, skips, optional_rest …) |
+| `lib/flow_sop/test_workspace_edit.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/lisp_sop/test_workspace_edit.rs` (48 assertion/check sites; part1_scrub, part2_connect_disconnect_input_defaults, part2_set_arg_beside_a_self_named_graph_ref …) |
+| `lib/flow_sop/test_workspace_zone.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/lisp_sop/test_workspace_zone.rs` (57 assertion/check sites; previews_resolve_a_template_at_the_selected_tuple, previews_resolve_nested_templates, previews_resolve_piece_templates …) |
+| `lib/flow_web/test_array_composition_web.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_web/src/test_array_composition_web.rs` (8 assertion/check sites; concat, slice, hoisted …) |
+| `lib/flow_web/test_array_max_length.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/flow_ir/src/test_array_max_length.rs` (21 assertion/check sites; op_direct_and_literal_selectors, exact_int_kernels_keep_gpu_refusal, statically_folded_float_conversion_has_no_int_bank …) |
+| `lib/flow_web/test_compact_scan.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/flow_ir/src/test_compact_scan.rs` (18 assertion/check sites; compact_kept_indices_and_immutable_source, scan_sum_offsets_and_wrap, bad_masks_and_types …) |
+| `lib/flow_web/test_fma.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_web/src/test_fma.rs` (14 assertion/check sites; explicit_fma_regions_match_exact_binary64, checked_arithmetic_regions_match_exact_binary64) |
+| `lib/flow_web/test_gather.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/flow_ir/src/test_gather.rs` (94 assertion/check sites; int_table, helper_function_and_index_errors, host_tables_resolve_once_on_the_initial_domain …) |
+| `lib/flow_web/test_grade_index.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/flow_ir/src/test_grade_index.rs` (18 assertion/check sites; grade_direct_orders, index_of_first_match, bad_inputs …) |
+| `lib/flow_web/test_js.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_web/src/test_js.rs` (19 assertion/check sites; region_goldens, explicit_error_cause_is_raised_only_when_selected, node_matches_native_programs_a …) |
+| `lib/flow_web/test_js_frame.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/flow_web/src/test_js_frame.rs` (22 assertion/check sites; goldens_control_and_lists, goldens_primitives_regions_expressions, goldens_state …) |
+| `lib/flow_web/test_js_gpu.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_web/src/test_js_gpu.rs` (11 assertion/check sites; gpu_attribute_regions_print_gpu_array_and_cpu_programs_are_unchanged) |
+| `lib/flow_web/test_region_arguments.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_web/src/test_region_arguments.rs` (20 assertion/check sites; byte_text_case, lazy_capture_statement_survives_workers, malformed_count_and_integer_storage …) |
+| `lib/flow_web/test_scatter.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/flow_ir/src/test_scatter.rs` (13 assertion/check sites; exact_int_wrap_and_ownership, ordered_float_sums_match_the_reference_loop, malformed_inputs …) |
+| `lib/flow_web/test_target.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_web/src/test_target.rs` (7 assertion/check sites; webgpu_regions_refuse_with_spans) |
+| `lib/flow_web/test_text_bytes.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_web/src/test_text_bytes.rs` (2 assertion/check sites; text_codec_round_trips_every_byte_value) |
+| `lib/flow_web/test_wgsl.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_web/src/test_wgsl.rs` (27 assertion/check sites; guarded_exp_checks_finiteness_right_after_its_assignment, operators_fractal_noise_and_hypot, fast_kernels_print_for_every_fast_case …) |
+| `lib/input/test_gate.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/input/src/lib.rs` (72 assertion/check sites; gate_behavior, time_only_frame_has_empty_input_facts, key_snapshots_reconstruct_ordered_frame_transitions …) |
+| `lib/lru/test_lru.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/lru/src/test_lru.rs` (65 assertion/check sites; order_hits_copy_replace_take_remove_and_drop_oldest, byte_capacity_pinned_entries_and_clear_release, identity_list_recency_release_copy_and_clear …) |
+| `lib/mem/test_mem.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/mem/src/test_mem.rs` (53 assertion/check sites; walked_owners_charge_their_reach, charge_release_peak_and_report_fields, touched_block_raises_the_footprint …) |
+| `lib/metal/test_main.ml` | not recorded per file | HARNESS | Source runner dispatches other test modules, not an independent assertion suite. |
+| `lib/metal/test_metal_argument_reflection_snapshot.ml` | MISSING | MAC | Mac backend/source; separate hardware qualification. No assertion-bearing Rust match found. |
+| `lib/metal/test_metal_blit_safe.ml` | MISSING | MAC | Mac backend/source; separate hardware qualification. No assertion-bearing Rust match found. |
+| `lib/metal/test_metal_build_config.ml` | MISSING | MAC | Mac backend/source; separate hardware qualification. No assertion-bearing Rust match found. |
+| `lib/metal/test_metal_command_buffer_safe.ml` | MISSING | MAC | Mac backend/source; separate hardware qualification. No assertion-bearing Rust match found. |
+| `lib/metal/test_metal_compute_encoder_safe.ml` | MISSING | MAC | Mac backend/source; separate hardware qualification. No assertion-bearing Rust match found. |
+| `lib/metal/test_metal_compute_pipeline_safe.ml` | MISSING | MAC | Mac backend/source; separate hardware qualification. No assertion-bearing Rust match found. |
+| `lib/metal/test_metal_device_library_safe.ml` | MISSING | MAC | Mac backend/source; separate hardware qualification. No assertion-bearing Rust match found. |
+| `lib/metal/test_metal_device_queue_safe.ml` | MISSING | MAC | Mac backend/source; separate hardware qualification. No assertion-bearing Rust match found. |
+| `lib/metal/test_metal_device_safe.ml` | MISSING | MAC | Mac backend/source; separate hardware qualification. No assertion-bearing Rust match found. |
+| `lib/metal/test_metal_function_constants_safe.ml` | MISSING | MAC | Mac backend/source; separate hardware qualification. No assertion-bearing Rust match found. |
+| `lib/metal/test_metal_render_encoder_safe.ml` | MISSING | MAC | Mac backend/source; separate hardware qualification. No assertion-bearing Rust match found. |
+| `lib/metal/test_metal_render_icb_argument.ml` | MISSING | MAC | Mac backend/source; separate hardware qualification. No assertion-bearing Rust match found. |
+| `lib/metal/test_metal_render_pipeline_safe.ml` | MISSING | MAC | Mac backend/source; separate hardware qualification. No assertion-bearing Rust match found. |
+| `lib/metal/test_metal_resource_bounds.ml` | MISSING | MAC | Mac backend/source; separate hardware qualification. No assertion-bearing Rust match found. |
+| `lib/metal/test_metal_sampler_safe.ml` | MISSING | MAC | Mac backend/source; separate hardware qualification. No assertion-bearing Rust match found. |
+| `lib/metal/test_metal_support.ml` | MISSING | MAC | Mac backend/source; separate hardware qualification. No assertion-bearing Rust match found. |
+| `lib/metal/test_metal_texture_safe.ml` | not recorded per file | MAC | Mac backend/source; separate hardware qualification. `rs/crates/metal/tests/gpu_metal.rs` (73 assertions; ) |
+| `lib/native_layer_token/test_native_layer_token.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/native_layer_token_sys/src/lib.rs` (34 assertion/check sites; identity_borrow_invalidation_and_ownership, rejects_unpaired_callbacks_and_null_handles_are_dead, final_drop_releases_without_invalidation …) |
+| `lib/ogpu/conformance/test_metal.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/ogpu_metal/tests/gpu_ogpu_metal.rs` (43 assertion/check sites; ) |
+| `lib/ogpu/conformance/test_mock.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/ogpu_mock/src/tests.rs` (21 assertion/check sites; mock_implementation_tag_and_live_handles, mock_refuses_what_it_cannot_run, queue_epochs_and_blit_replay …) |
+| `lib/ogpu/conformance/test_vulkan.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/ogpu_vulkan/src/tests.rs` (49 assertion/check sites; gpu_implementation_tag_and_handles, gpu_conformance_transfer_and_compute, gpu_conformance_ray_tracing …) |
+| `lib/ogpu/test_main.ml` | not recorded per file | HARNESS | Source runner dispatches other test modules, not an independent assertion suite. |
+| `lib/ogpu/test_ogpu_acceleration.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/ogpu/src/test_ogpu_acceleration.rs` (20 assertion/check sites; acceleration_lifecycle_validation) |
+| `lib/ogpu/test_ogpu_binding.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/ogpu/src/test_ogpu_binding.rs` (7 assertion/check sites; immutable_binding_tables) |
+| `lib/ogpu/test_ogpu_foundation.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/ogpu/src/test_ogpu_foundation.rs` (6 assertion/check sites; unselected_implementation_is_a_typed_error, handle_and_descriptor_foundation) |
+| `lib/ogpu/test_ogpu_pipeline.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/ogpu/src/test_ogpu_pipeline.rs:34-77`: deterministic_pipeline_descriptions; successful render plus five reject(...) assertions (helper panics unless InvalidArgument). |
+| `lib/ogpu/test_ogpu_shader.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/ogpu/src/test_ogpu_shader.rs` (2 assertion/check sites; immutable_deterministic_shader_artifact) |
+| `lib/ogpu/test_ogpu_surface.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/ogpu/src/test_ogpu_surface.rs` (7 assertion/check sites; surface_lifecycle_contract) |
+| `lib/ogpu/test_ogpu_validation.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/ogpu/src/test_ogpu_validation.rs` (4 assertion/check sites; centralized_validation) |
+| `lib/ogpu_metal/test_device_error.ml` | not recorded per file | MAC | Mac backend/source; separate hardware qualification. `rs/crates/ogpu_metal/tests/gpu_ogpu_metal_native.rs` (20 assertions; ) |
+| `lib/ogpu_metal/test_main.ml` | not recorded per file | HARNESS | Source runner dispatches other test modules, not an independent assertion suite. |
+| `lib/ogpu_metal/test_ogpu_metal_acceleration.ml` | MISSING | MAC | Mac backend/source; separate hardware qualification. No assertion-bearing Rust match found. |
+| `lib/ogpu_metal/test_ogpu_metal_capabilities.ml` | MISSING | MAC | Mac backend/source; separate hardware qualification. No assertion-bearing Rust match found. |
+| `lib/ogpu_metal/test_ogpu_metal_foundation.ml` | MISSING | MAC | Mac backend/source; separate hardware qualification. No assertion-bearing Rust match found. |
+| `lib/ogpu_metal/test_ogpu_metal_pipeline.ml` | MISSING | MAC | Mac backend/source; separate hardware qualification. No assertion-bearing Rust match found. |
+| `lib/ogpu_metal/test_ogpu_metal_sampler_pixels.ml` | MISSING | MAC | Mac backend/source; separate hardware qualification. No assertion-bearing Rust match found. |
+| `lib/ogpu_metal/test_ogpu_metal_texture.ml` | MISSING | MAC | Mac backend/source; separate hardware qualification. No assertion-bearing Rust match found. |
+| `lib/ogpu_metal/test_pipeline_argument_buffer.ml` | not recorded per file | MAC | Mac backend/source; separate hardware qualification. `rs/crates/ogpu_metal/tests/gpu_ogpu_metal_native.rs` (20 assertions; ) |
+| `lib/parallel/test_parallel.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/parallel/src/lib.rs` (22 assertion/check sites; one_and_many_domains_produce_identical_ordered_results, nested_jobs_match_sequential_execution, lowest_failure_reducer_handles_reverse_arrival_order …) |
+| `lib/param/test_param.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/param/src/test_param.rs` (60 assertion/check sites; float_text_round_trips_and_is_shortest, float_text_is_shortest, flow_row_metadata_preserves_values_and_cook_identity …) |
+| `lib/pxui/test_input.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/pxui/tests/cases/small.rs` (37 assertion/check sites; ); `rs/crates/rays_editor/tests/suite_t4/test_input.rs` (34 assertion/check sites; ) |
+| `lib/pxui/test_keyboard.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/pxui/tests/cases/small.rs` (37 assertion/check sites; ) |
+| `lib/pxui/test_main.ml` | not recorded per file | HARNESS | Source runner dispatches other test modules, not an independent assertion suite. |
+| `lib/pxui/test_table.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/pxui/tests/cases/small.rs` (37 assertion/check sites; ) |
+| `lib/pxui/test_ui.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/pxui/tests/cases/support.rs` (1 assertion/check sites; ); `rs/crates/pxui/tests/cases/ui_b.rs` (16 assertion/check sites; ); `rs/crates/pxui/tests/cases/ui_c.rs` (60 assertion/check sites; ) |
+| `lib/pxui/test_ui_parity.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/pxui/tests/cases/gpu_parity.rs` (16 assertion/check sites; ) |
+| `lib/pxui_graph/test_main.ml` | not recorded per file | HARNESS | Source runner dispatches other test modules, not an independent assertion suite. |
+| `lib/pxui_graph/test_pxui_graph.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/pxui_graph/tests/cases/scope_a.rs` (70 assertion/check sites; ); `rs/crates/pxui_graph/tests/cases/scope_b.rs` (90 assertion/check sites; ); `rs/crates/pxui_graph/tests/cases/scope_e.rs` (16 assertion/check sites; ); `rs/crates/pxui_graph/tests/cases/support.rs` (4 assertion/check sites; ) |
+| `lib/pxui_shell/test_shell.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/pxui_shell/src/test_layout.rs` (39 assertion/check sites; default_columns_are_45_35_20, default_layout_goldens, every_tree_covers_the_area_once …); `rs/crates/pxui_shell/src/test_logic.rs` (21 assertion/check sites; tree_keys_through_run_command, scrub_and_show, key_sheet_lists_every_command_once_under_its_section …); `rs/crates/pxui_shell/tests/cases/shell_a.rs` (37 assertion/check sites; ); `rs/crates/pxui_shell/tests/cases/shell_b.rs` (18 assertion/check sites; ) |
+| `lib/rays/test_automatic_text_cache.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/rays/tests/cases/window_resources.rs` (105 assertion/check sites; ) |
+| `lib/rays/test_canvas_native.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/rays/tests/cases/gpu_rays.rs` (84 assertion/check sites; ) |
+| `lib/rays/test_easy_camera.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rays/src/test_easy_camera.rs` (21 assertion/check sites; easy_camera_buttons_modifiers_bounds_reset_cancellation_fly) |
+| `lib/rays/test_light.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rays/src/test_light.rs` (17 assertion/check sites; light_attenuation_and_uniform_abi) |
+| `lib/rays/test_main.ml` | not recorded per file | HARNESS | Source runner dispatches other test modules, not an independent assertion suite. |
+| `lib/rays/test_meshes.ml` | not recorded per file | SUPPORT | Source and Rust module construct fixtures; no independent test assertions. Rust: `rs/crates/rays/src/test_meshes.rs`. |
+| `lib/rays/test_rays_api.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rays/src/test_rays_api.rs` (51 assertion/check sites; sketch_startup_result, math_vec_color_mat4, random_and_noise_are_deterministic …) |
+| `lib/rays/test_retained_view_native.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/rays/tests/cases/window_sketch.rs` (16 assertion/check sites; ) |
+| `lib/rays/test_scene3_float32.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rays/src/test_scene3_float32.rs` (27 assertion/check sites; scene3_float32_split_mirror_reuse_recolour_finite_narrowing) |
+| `lib/rays/test_scene3_native_lowering.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rays/src/test_scene3_native_lowering.rs` (74 assertion/check sites; scene3_lowering_geometry_uniforms_texture_mips_world_depth_stable_pack, device_host_copy_made_once, resident_streams) |
+| `lib/rays/test_scene_display_list.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/rays/tests/cases/window_resources.rs` (105 assertion/check sites; ) |
+| `lib/rays/test_scene_primitives.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rays/src/test_scene_primitives.rs` (17 assertion/check sites; shapes_layout_finite_bounds_owned_commands, failing_tessellation_is_an_error_with_ocaml_message) |
+| `lib/rays/test_scene_rounded_cache.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rays/src/test_scene_rounded_cache.rs` (42 assertion/check sites; rounded_and_path_caches_are_deterministic_and_bounded) |
+| `lib/rays/test_world.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rays/src/test_world.rs` (32 assertion/check sites; domains, seeds, sh9 …); `rs/crates/rays_pathtracer/tests/gpu_world.rs` (18 assertion/check sites; ) |
+| `lib/rays/test_world_raster.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/rays/tests/cases/gpu_rays.rs` (84 assertion/check sites; ) |
+| `lib/rays_editor/marks_scene_test/test_marks_scene.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/flow_native/src/marks_scene.rs` (1 assertion/check sites; ) |
+| `lib/rays_editor/native_qualification/test_chain_frames_native.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/native_qualification/chains_frames.rs` — source assertion port registered; executable qualification tracked separately in CHECKPOINT.md. |
+| `lib/rays_editor/native_qualification/test_chain_gpu_native.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/native_qualification/chains.rs` — source assertion port registered; executable qualification tracked separately in CHECKPOINT.md. |
+| `lib/rays_editor/native_qualification/test_grid_gpu_native.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/native_qualification/chains.rs` — source assertion port registered; executable qualification tracked separately in CHECKPOINT.md. |
+| `lib/rays_editor/native_qualification/test_holder_frames_native.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/native_qualification/live_mesh.rs` — source assertion port registered; executable qualification tracked separately in CHECKPOINT.md. |
+| `lib/rays_editor/native_qualification/test_isogrid_viewport.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/native_qualification/isogrid.rs` — source assertion port registered; executable qualification tracked separately in CHECKPOINT.md. |
+| `lib/rays_editor/native_qualification/test_live_mesh_native.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/native_qualification/live_mesh.rs` — source assertion port registered; executable qualification tracked separately in CHECKPOINT.md. |
+| `lib/rays_editor/native_qualification/test_placement_native.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/native_qualification/placement.rs` — source assertion port registered; executable qualification tracked separately in CHECKPOINT.md. |
+| `lib/rays_editor/native_qualification/test_scrub_gpu_native.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/native_qualification/chains_scrub.rs` — source assertion port registered; executable qualification tracked separately in CHECKPOINT.md. |
+| `lib/rays_editor/native_qualification/test_workspace_gpu_marks.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/native_qualification/workspace.rs` — source assertion port registered; executable qualification tracked separately in CHECKPOINT.md. |
+| `lib/rays_editor/native_qualification/test_workspace_gpu_native.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/native_qualification/workspace.rs` — source assertion port registered; executable qualification tracked separately in CHECKPOINT.md. |
+| `lib/rays_editor/test/test_2d_ports.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/suite_t4/test_ports.rs` (6 assertion/check sites; ) |
+| `lib/rays_editor/test/test_bloom_studio.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rays_editor/src/test_navigator.rs` (29 assertion/check sites; rows_list_the_document, folded_by_default_and_narrow_sheet, search_lists_matches_only …); `rs/crates/rays_editor/tests/suite_t2/bloom_studio.rs` (29 assertion/check sites; ) |
+| `lib/rays_editor/test/test_custom_sop.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/suite_t6/small.rs` (13 assertion/check sites; ) |
+| `lib/rays_editor/test/test_drawing.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/flow_native/src/test_drawing.rs` (15 assertion/check sites; a_draw_graph_becomes_a_scene, transforms_and_clips_nest, per_instance_colours_go_through_drawing_color …); `rs/crates/rays_editor/tests/suite_t3/drawing.rs` (21 assertion/check sites; ) |
+| `lib/rays_editor/test/test_editor_commands.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rays_editor/src/test_editor_commands.rs` (30 assertion/check sites; every_command_names_its_action_and_scope, scope_maps_panels_to_the_pane_that_owns_their_keys, sheet_sections_follow_ids_and_scopes …); `rs/crates/rays_editor/tests/suite_t3/commands.rs` (56 assertion/check sites; ) |
+| `lib/rays_editor/test/test_editor_consistency.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/suite_t2/consistency.rs` (51 assertion/check sites; ); `rs/crates/rays_editor/tests/suite_t2/consistency_b.rs` (60 assertion/check sites; ) |
+| `lib/rays_editor/test/test_editor_cook.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/suite_t3/cook.rs` (32 assertion/check sites; ) |
+| `lib/rays_editor/test/test_editor_document.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/editor_document/src/test_lowering.rs` (61 assertion/check sites; sha256_known_vectors, document_boundary_validation_dump_preset_gpu, lowering_reads_objects_root_camera_and_homes …); `rs/crates/rays_editor/tests/suite_t4/test_document.rs` (14 assertion/check sites; ) |
+| `lib/rays_editor/test/test_editor_input.ml` | PARTIAL | SUPPORT | Source support/helper module; comparison/helper definitions require caller audit. |
+| `lib/rays_editor/test/test_editor_transactions.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/suite_t4/test_transactions.rs` (10 assertion/check sites; ) |
+| `lib/rays_editor/test/test_fast_path.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/editor_document/src/test_lowering.rs` (61 assertion/check sites; sha256_known_vectors, document_boundary_validation_dump_preset_gpu, lowering_reads_objects_root_camera_and_homes …); `rs/crates/rays_editor/tests/suite_t4/test_fast.rs` (4 assertion/check sites; ) |
+| `lib/rays_editor/test/test_flow_shader.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/suite_t6/flow_shader.rs` (11 assertion/check sites; ) |
+| `lib/rays_editor/test/test_gallery_shapes.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/suite_t6/gallery.rs` (5 assertion/check sites; ) |
+| `lib/rays_editor/test/test_history_memory.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/suite_t4/test_history.rs` (10 assertion/check sites; ) |
+| `lib/rays_editor/test/test_host_effects.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/suite_t4/test_small.rs` (11 assertion/check sites; ) |
+| `lib/rays_editor/test/test_image_sop.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/suite_t6/image_sop.rs` (17 assertion/check sites; ) |
+| `lib/rays_editor/test/test_isogrid_deferred.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/suite_t6/isogrid.rs` (3 assertion/check sites; ) |
+| `lib/rays_editor/test/test_main.ml` | not recorded per file | HARNESS | Source runner dispatches other test modules, not an independent assertion suite. |
+| `lib/rays_editor/test/test_materials.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/gpu_suite_t5.rs` (2 assertion/check sites; ); `rs/crates/rays_editor/tests/suite_t3/materials.rs` (39 assertion/check sites; ); `rs/crates/rays_editor/tests/suite_t5/carry.rs` (3 assertion/check sites; ) |
+| `lib/rays_editor/test/test_open_domain.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/suite_t6/open_domain.rs` (28 assertion/check sites; ) |
+| `lib/rays_editor/test/test_packed_pieces.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rays_editor/src/test_schedule.rs` (11 assertion/check sites; cook_scheduler_fires_on_change_clock_and_held_drags, an_input_slice_nobody_reads_never_recooks); `rs/crates/rays_editor/src/test_timeline.rs` (7 assertion/check sites; timeline_advances_pauses_stops_resets_and_seeks); `rs/crates/rays_editor/tests/suite_t3/packed.rs` (2 assertion/check sites; ); `rs/crates/rdk_rays/src/tests.rs` (48 assertion/check sites; surface_failure, quad_and_extrude_bridge, mesh_round_trip_and_trace_mesh …) |
+| `lib/rays_editor/test/test_probe.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/suite_t3/probe.rs` (70 assertion/check sites; ) |
+| `lib/rays_editor/test/test_rays.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/native_qualification/smoke.rs` — source assertion port registered; executable qualification tracked separately in CHECKPOINT.md. |
+| `lib/rays_editor/test/test_rays_editor.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/suite_t4/test_rays_editor.rs` (72 assertion/check sites; ) |
+| `lib/rays_editor/test/test_scene_sync.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/editor_document/src/test_scene_sync.rs` (166 assertion/check sites; value_syntax_prints_numbers_flags_and_vectors, a_camera_still_takes_no_render_size, camera_write_back_keeps_precision_and_identity …); `rs/crates/rays_editor/tests/gpu_suite_t5.rs` (2 assertion/check sites; ); `rs/crates/rays_editor/tests/suite_t5/scene_sync.rs` (3 assertion/check sites; ) |
+| `lib/rays_editor/test/test_scene_tree.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/suite_t2/scene_tree.rs` (77 assertion/check sites; ) |
+| `lib/rays_editor/test/test_shattered_studio.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/suite_t6/shattered.rs` (12 assertion/check sites; ) |
+| `lib/rays_editor/test/test_sop_catalog.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/suite_t6/sopcat.rs` (72 assertion/check sites; ) |
+| `lib/rays_editor/test/test_sop_ui.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/suite_t3/sop_ui.rs` (26 assertion/check sites; ) |
+| `lib/rays_editor/test/test_support.ml` | not recorded per file | SUPPORT | Source support/helper module; comparison/helper definitions require caller audit. |
+| `lib/rays_editor/test/test_terminal_boolean_normals.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/suite_t6/small.rs` (13 assertion/check sites; ) |
+| `lib/rays_editor/test/test_text.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/suite_t3/support.rs` (11 assertion/check sites; ) |
+| `lib/rays_editor/test/test_text_pane.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/rays_editor/src/test_text_pane.rs` (155 assertion/check sites; token_scrubs, selection_text, find_pure …); `rs/crates/rays_editor/tests/gpu_suite_t5.rs` (2 assertion/check sites; ); `rs/crates/rays_editor/tests/suite_t3/textpane.rs` (5 assertion/check sites; ); `rs/crates/rays_editor/tests/suite_t5/textpane.rs` (127 assertion/check sites; ) |
+| `lib/rays_editor/test/test_threading.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/suite_t4/test_small.rs` (11 assertion/check sites; ) |
+| `lib/rays_editor/test/test_viewport_pick.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/suite_t3/pick.rs` (36 assertion/check sites; ) |
+| `lib/rays_editor/test/test_workspace_doc.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/editor_document/src/test_workspace_doc.rs` (95 assertion/check sites; part_text, part_edit, part_imports …); `rs/crates/rays_editor/tests/suite_t2/workspace_doc.rs` (48 assertion/check sites; ) |
+| `lib/rays_editor/test/test_workspace_images.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_native/src/test_workspace_images.rs` (3 assertion/check sites; a_host_owns_and_closes_its_services); `rs/crates/rays_editor/tests/suite_t6/images.rs` (167 assertion/check sites; ) |
+| `lib/rays_editor/test/test_workspace_images_native.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/suite_t6/images.rs` (167 assertion/check sites; ) |
+| `lib/rays_editor/test/test_workspace_ir.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/suite_t6/workspace_ir.rs` (3 assertion/check sites; ) |
+| `lib/rays_editor/test/test_workspace_live.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/suite_t3/live.rs` (39 assertion/check sites; ) |
+| `lib/rays_editor/test/test_workspace_shell.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/gpu_suite_t1.rs` (2 assertion/check sites; ); `rs/crates/rays_editor/tests/suite_t1/part1.rs` (51 assertion/check sites; ); `rs/crates/rays_editor/tests/suite_t1/part2.rs` (61 assertion/check sites; ); `rs/crates/rays_editor/tests/suite_t1/part3.rs` (55 assertion/check sites; ); `rs/crates/rays_editor/tests/suite_t1/part4.rs` (73 assertion/check sites; ); `rs/crates/rays_editor/tests/suite_t1/part5.rs` (54 assertion/check sites; ); `rs/crates/rays_editor/tests/suite_t1/part6.rs` (34 assertion/check sites; ); `rs/crates/rays_editor/tests/suite_t1/part7.rs` (56 assertion/check sites; ); `rs/crates/rays_editor/tests/suite_t1/part8.rs` (32 assertion/check sites; ); `rs/crates/rays_editor/tests/suite_t1/part9.rs` (21 assertion/check sites; ); `rs/crates/rays_editor/tests/suite_t1/support.rs` (11 assertion/check sites; ) |
+| `lib/rays_editor/test/test_workspace_source.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/suite_t4/test_source.rs` (103 assertion/check sites; ) |
+| `lib/rays_editor/test/test_workspace_start.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/rays_editor/tests/suite_t4/test_small.rs` (11 assertion/check sites; ) |
+| `lib/rays_math/test_clock.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/rays_math/src/test_clock.rs` (3 assertion/check sites; clock_is_monotonic_with_resolution_finer_than_100_microseconds) |
+| `lib/rays_math/test_color.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/rays_math/src/test_color.rs` (16 assertion/check sites; color_hex_unit_floats_hsl_hsv_aces_and_linear, hash_mixes_float_sequences_and_strings, float_at_int_matches_float_at_over_the_seed_and_index_edges) |
+| `lib/rays_math/test_fma.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/flow_web/src/test_fma.rs` (14 assertion/check sites; explicit_fma_regions_match_exact_binary64, checked_arithmetic_regions_match_exact_binary64) |
+| `lib/rays_pathtracer/test_gpu_film.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rays_pathtracer/tests/gpu_film.rs` (20 assertion/check sites; ) |
+| `lib/rays_pathtracer/test_lisp.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rays_pathtracer/tests/gpu_lisp.rs` (9 assertion/check sites; ) |
+| `lib/rays_pathtracer/test_main.ml` | not recorded per file | HARNESS | Source runner dispatches other test modules, not an independent assertion suite. |
+| `lib/rays_pathtracer/test_parity.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rays_pathtracer/tests/gpu_parity.rs` (7 assertion/check sites; ) |
+| `lib/rays_pathtracer/test_pathtracer.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rays_pathtracer/tests/gpu_pathtracer.rs` (44 assertion/check sites; ) |
+| `lib/rays_pathtracer/test_scene.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rays_pathtracer/tests/gpu_scene.rs` (25 assertion/check sites; ) |
+| `lib/rays_pathtracer/test_world.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rays/src/test_world.rs` (32 assertion/check sites; domains, seeds, sh9 …); `rs/crates/rays_pathtracer/tests/gpu_world.rs` (18 assertion/check sites; ) |
+| `lib/rdk/test_attribute_composite.ml` | not recorded per file | STUB | `lib/rdk/test_attribute_composite.ml:112`: print-only runner |
+| `lib/rdk/test_attribute_copy.ml` | not recorded per file | STUB | `lib/rdk/test_attribute_copy.ml:75`: print-only runner |
+| `lib/rdk/test_attribute_fade.ml` | not recorded per file | STUB | `lib/rdk/test_attribute_fade.ml:85`: print-only runner |
+| `lib/rdk/test_attribute_interpolate.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_ops/src/attribute_interpolate.rs` (78 assertion/check sites; triangle_mixed_storage_and_position, quad_ngon_and_curve_parameter_spaces, destination_owners_group_blend_and_misses …) |
+| `lib/rdk/test_attribute_lifecycle.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_rays/src/tests.rs` (48 assertion/check sites; surface_failure, quad_and_extrude_bridge, mesh_round_trip_and_trace_mesh …) |
+| `lib/rdk/test_attribute_mirror.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_ops/src/attribute_mirror.rs` (40 assertion/check sites; explicit_mapping_covers_every_storage, plane_points_and_transforms, vertex_primitive_and_plane_primitive_correspondence …) |
+| `lib/rdk/test_attribute_transfer.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_ops/src/attribute_transfer.rs` (65 assertion/check sites; source_kernels_and_fallbacks, blend_falloff_bands, multi_owner_exactness …) |
+| `lib/rdk/test_blast_by_attribute.ml` | not recorded per file | STUB | `lib/rdk/test_blast_by_attribute.ml:55`: print-only runner |
+| `lib/rdk/test_blend_shapes.ml` | not recorded per file | STUB | `lib/rdk/test_blend_shapes.ml:47`: print-only runner |
+| `lib/rdk/test_boolean.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_boolean/src/boolean.rs` (23 assertion/check sites; solid_products, surface_cut_and_payload, normal_payload_orientation …) |
+| `lib/rdk/test_boolean_cells.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_boolean/src/boolean_cells.rs` (14 assertion/check sites; disjoint_solids, nested_solids, domain_exactness …) |
+| `lib/rdk/test_boolean_complex.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_boolean/src/boolean_complex.rs` (16 assertion/check sites; disjoint_closed_surfaces, identical_facet_ownership, partial_coplanar_overlap …) |
+| `lib/rdk/test_boolean_constraints.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_boolean/src/boolean_constraints.rs` (8 assertion/check sites; right_operand_constraints, same_operand_coplanar_pair, invalid_grain …) |
+| `lib/rdk/test_boolean_coplanar.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_boolean/src/boolean_coplanar.rs` (15 assertion/check sites; six_edge_overlap, containment_and_reversed_identity, lower_dimensional_contacts …) |
+| `lib/rdk/test_boolean_detect.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_ops/src/boolean_detect.rs` (22 assertion/check sites; cross_and_coplanar, tolerance_and_translation, self_intersections …) |
+| `lib/rdk/test_boolean_extract.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_boolean/src/boolean_extract.rs` (9 assertion/check sites; materialization_validation, closed_topology_and_expressions) |
+| `lib/rdk/test_boolean_face_arrangement.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_boolean/src/boolean_face_arrangement.rs` (25 assertion/check sites; proper_crossing, single_segment, multiway_crossing …) |
+| `lib/rdk/test_boolean_face_cdt.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_boolean/src/boolean_face_cdt.rs` (7 assertion/check sites; cancellation, crossing_constraints_recovered, coplanar_constraints_recovered_with_workspace …) |
+| `lib/rdk/test_boolean_payload.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_boolean/src/boolean_payload.rs` (11 assertion/check sites; surface_cut_payload, invalid_parameters_and_geometry_mismatch) |
+| `lib/rdk/test_boolean_radial.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_boolean/src/boolean_radial.rs` (8 assertion/check sites; exact_radial_dot, transverse_cyclic_order, cancellation) |
+| `lib/rdk/test_boolean_refinement.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_boolean/src/boolean_refinement.rs` (6 assertion/check sites; validation, grain_does_not_change_faces, coplanar_pairs_refine_both_sides) |
+| `lib/rdk/test_boolean_seam.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_boolean/src/boolean_seam.rs` (19 assertion/check sites; coincident_products, self_kinds, same_operand_coincidence …) |
+| `lib/rdk/test_boolean_solid.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_boolean/src/boolean_solid.rs` — source assertion port registered; executable qualification tracked separately in CHECKPOINT.md. |
+| `lib/rdk/test_boolean_weiler.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_boolean/src/boolean_weiler.rs` (2 assertion/check sites; cancellation) |
+| `lib/rdk/test_circle.ml` | not recorded per file | STUB | `lib/rdk/test_circle.ml:33`: print-only runner |
+| `lib/rdk/test_circle_from_edges.ml` | not recorded per file | STUB | `lib/rdk/test_circle_from_edges.ml:104`: print-only runner |
+| `lib/rdk/test_clean.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_ops/src/clean.rs` (25 assertion/check sites; degenerate_tolerance_and_extreme_coordinates, overlap_policies_keep_ancestry, triangle_overlaps_use_the_sorted_key_path …) |
+| `lib/rdk/test_clip.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_ops/src/plane_clip.rs` (56 assertion/check sites; custom_clip_attribute, distance_is_translation, selection_isolation …) |
+| `lib/rdk/test_connectivity.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_core/src/analysis.rs` (13 assertion/check sites; connectivity_is_deterministic_and_respects_include_masks, seam_edges_split_shared_edge_primitive_components, modes_sentinels_point_seams_and_validation …) |
+| `lib/rdk/test_convex_hull.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_ops/src/convex_hull.rs` (21 assertion/check sites; affine_dimensions, solid_payload_and_selection, exact_and_errors …) |
+| `lib/rdk/test_copy_to_points.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_ops/src/instance_copy.rs` (15 assertion/check sites; instance_materialization_cardinality, matches_merged_transformed_copies, single_instance_and_errors …) |
+| `lib/rdk/test_crease.ml` | not recorded per file | STUB | `lib/rdk/test_crease.ml:95`: print-only runner |
+| `lib/rdk/test_curvature.ml` | not recorded per file | STUB | `lib/rdk/test_curvature.ml:62`: print-only runner |
+| `lib/rdk/test_delaunay2.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_geom/src/delaunay2.rs` (7 assertion/check sites; failures_and_cancellation, unit_square_has_two_triangles) |
+| `lib/rdk/test_dissolve.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_ops/src/dissolve.rs` (25 assertion/check sites; interior_dissolve_keeps_payload, boundary_dissolve_deletes_or_makes_curves, bridge_policies …) |
+| `lib/rdk/test_distance_along_geometry.ml` | not recorded per file | STUB | `lib/rdk/test_distance_along_geometry.ml:40`: print-only runner |
+| `lib/rdk/test_distance_from_geometry.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_geom/src/spatial_index.rs` (16 assertion/check sites; rejects_bad_grain_and_non_finite_positions, distance_only_search_matches_provenance_and_misses_are_infinite, parallel_build_and_queries_match_sequential_and_brute_force …); `rs/crates/rdk_ops/src/transform_ops.rs` (45 assertion/check sites; composition_orders_pivot_inverse_and_errors, soft_transform_radius_edge_and_falloffs, soft_transform_attribute_weights_normals_and_sharing …) |
+| `lib/rdk/test_distance_from_target.ml` | not recorded per file | STUB | `lib/rdk/test_distance_from_target.ml:29`: print-only runner |
+| `lib/rdk/test_duplicate.ml` | not recorded per file | STUB | `lib/rdk/test_duplicate.ml:25`: print-only runner |
+| `lib/rdk/test_edge_collapse.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_ops/src/edge_collapse.rs` (26 assertion/check sites; collapses_one_edge_with_ancestry, connectivity_attribute_blocks_merges, options_and_identities …) |
+| `lib/rdk/test_edge_cusp.ml` | not recorded per file | STUB | `lib/rdk/test_edge_cusp.ml:161`: setup/cancel only; no tested operation or result assertion |
+| `lib/rdk/test_edge_divide.ml` | not recorded per file | STUB | `lib/rdk/test_edge_divide.ml:107`: setup/cancel only; no tested operation or result assertion |
+| `lib/rdk/test_edge_equalize.ml` | not recorded per file | STUB | `lib/rdk/test_edge_equalize.ml:96`: setup/cancel only; no tested operation or result assertion |
+| `lib/rdk/test_edge_flip.ml` | not recorded per file | STUB | `lib/rdk/test_edge_flip.ml:153`: setup/cancel only; no tested operation or result assertion |
+| `lib/rdk/test_edge_relax.ml` | not recorded per file | STUB | `lib/rdk/test_edge_relax.ml:43`: setup/cancel only; no tested operation or result assertion |
+| `lib/rdk/test_edge_straighten.ml` | not recorded per file | STUB | `lib/rdk/test_edge_straighten.ml:129`: setup/cancel only; no tested operation or result assertion |
+| `lib/rdk/test_edge_transport.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_ops/src/edge_transport.rs` (3 assertion/check sites; variants_compare_by_constructor) |
+| `lib/rdk/test_ends.ml` | not recorded per file | STUB | `lib/rdk/test_ends.ml:69`: print-only runner |
+| `lib/rdk/test_extract_centroid.ml` | not recorded per file | STUB | `lib/rdk/test_extract_centroid.ml:60`: print-only runner |
+| `lib/rdk/test_extract_point_curve.ml` | not recorded per file | STUB | `lib/rdk/test_extract_point_curve.ml:126`: print-only runner |
+| `lib/rdk/test_facet.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_ops/src/facet.rs` (100 assertion/check sites; unique_points, primitive_group_unique_points, typed_selections …) |
+| `lib/rdk/test_fuse.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_ops/src/fuse_grid.rs` (75 assertion/check sites; restricted_fuse_and_cluster_contract, target_policies, specified_targets_and_validation …) |
+| `lib/rdk/test_group_backface.ml` | not recorded per file | STUB | `lib/rdk/test_group_backface.ml:60`: print-only runner |
+| `lib/rdk/test_group_boundary.ml` | not recorded per file | STUB | `lib/rdk/test_group_boundary.ml:67`: print-only runner |
+| `lib/rdk/test_group_bounds.ml` | not recorded per file | STUB | `lib/rdk/test_group_bounds.ml:95`: print-only runner |
+| `lib/rdk/test_group_catalog.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_ops/src/group_ops.rs` (40 assertion/check sites; group_names_are_validated_and_forced, rename_and_delete_follow_conflict_policies, transfer_point_proximity_conflicts_and_policies …) |
+| `lib/rdk/test_group_edge_angle.ml` | not recorded per file | STUB | `lib/rdk/test_group_edge_angle.ml:37`: print-only runner |
+| `lib/rdk/test_group_edge_depth.ml` | not recorded per file | STUB | `lib/rdk/test_group_edge_depth.ml:43`: print-only runner |
+| `lib/rdk/test_group_find_path.ml` | not recorded per file | STUB | `lib/rdk/test_group_find_path.ml:57`: print-only runner |
+| `lib/rdk/test_group_non_planar.ml` | not recorded per file | STUB | `lib/rdk/test_group_non_planar.ml:82`: print-only runner |
+| `lib/rdk/test_group_normal.ml` | not recorded per file | STUB | `lib/rdk/test_group_normal.ml:59`: print-only runner |
+| `lib/rdk/test_group_ops.ml` | not recorded per file | STUB | `lib/rdk/test_group_ops.ml:152`: print-only runner |
+| `lib/rdk/test_group_promote_boundary.ml` | not recorded per file | STUB | `lib/rdk/test_group_promote_boundary.ml:74`: print-only runner |
+| `lib/rdk/test_group_random.ml` | not recorded per file | STUB | `lib/rdk/test_group_random.ml:41`: print-only runner |
+| `lib/rdk/test_group_range_connectivity.ml` | not recorded per file | STUB | `lib/rdk/test_group_range_connectivity.ml:88`: print-only runner |
+| `lib/rdk/test_group_unshared.ml` | not recorded per file | STUB | `lib/rdk/test_group_unshared.ml:65`: print-only runner |
+| `lib/rdk/test_groups_from_name.ml` | not recorded per file | STUB | `lib/rdk/test_groups_from_name.ml:64`: print-only runner |
+| `lib/rdk/test_implicit_point.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_geom/src/implicit_point.rs` (25 assertion/check sites; source_validation, lpi_tpi_midpoint_equal_explicit, errors_and_predicates) |
+| `lib/rdk/test_instances.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_ops/src/instance_copy.rs` (15 assertion/check sites; instance_materialization_cardinality, matches_merged_transformed_copies, single_instance_and_errors …) |
+| `lib/rdk/test_intersection_analysis.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_ops/src/intersection_analysis.rs` (26 assertion/check sites; crossing_and_provenance, coplanar_and_self, curve_intersections …) |
+| `lib/rdk/test_laplacian.ml` | not recorded per file | STUB | `lib/rdk/test_laplacian.ml:59`: print-only runner |
+| `lib/rdk/test_main.ml` | not recorded per file | HARNESS | Source runner dispatches other test modules, not an independent assertion suite. |
+| `lib/rdk/test_match_size.ml` | not recorded per file | STUB | `lib/rdk/test_match_size.ml:47`: print-only runner |
+| `lib/rdk/test_motion.ml` | not recorded per file | STUB | `lib/rdk/test_motion.ml:32`: print-only runner |
+| `lib/rdk/test_normals.ml` | not recorded per file | STUB | `lib/rdk/test_normals.ml:52`: print-only runner |
+| `lib/rdk/test_planar_cdt.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_geom/src/planar_cdt.rs` (7 assertion/check sites; crossing_rejected, single_diagonal_constraint_is_recovered) |
+| `lib/rdk/test_planar_constraints.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_geom/src/planar_constraints.rs` (45 assertion/check sites; square_crossing, crossing_policy, t_junction_and_overlap …) |
+| `lib/rdk/test_platonic.ml` | not recorded per file | STUB | `lib/rdk/test_platonic.ml:54`: print-only runner |
+| `lib/rdk/test_point_generate.ml` | not recorded per file | STUB | `lib/rdk/test_point_generate.ml:97`: print-only runner |
+| `lib/rdk/test_point_jitter.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_core/src/group.rs` (15 assertion/check sites; ordered_union_preserves_order_and_membership, names_use_ocaml_ascii_whitespace, builder_and_owned_order_keep_packed_membership …) |
+| `lib/rdk/test_point_replicate.ml` | not recorded per file | STUB | `lib/rdk/test_point_replicate.ml:51`: print-only runner |
+| `lib/rdk/test_point_split.ml` | not recorded per file | STUB | `lib/rdk/test_point_split.ml:152`: print-only runner |
+| `lib/rdk/test_poly_bevel.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_ops/src/poly_bevel.rs` (18 assertion/check sites; all_edges_and_profiles, partial_network_and_clamping, connected_network_flat_filter_and_normals …) |
+| `lib/rdk/test_poly_bridge.ml` | not recorded per file | STUB | `lib/rdk/test_poly_bridge.ml:159`: print-only runner |
+| `lib/rdk/test_poly_cut.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_ops/src/poly_cut.rs` (44 assertion/check sites; change_subdivision_and_scale_normalised_crossing, edge_cut_boundary_semantics, discrete_ragged_payload_and_ordered_groups …) |
+| `lib/rdk/test_poly_extrude.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_ops/src/poly_extrude.rs` (13 assertion/check sites; mixed_curve_and_manifold_checks, cancelled_run_reports_cancelled, connected_extrude_scale_cardinality …) |
+| `lib/rdk/test_poly_fill.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_ops/src/poly_fill.rs` (39 assertion/check sites; modes_and_payload, unique_reverse_and_normals, selection_and_failures …) |
+| `lib/rdk/test_poly_loft.ml` | not recorded per file | STUB | `lib/rdk/test_poly_loft.ml:135`: print-only runner |
+| `lib/rdk/test_poly_reduce.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_ops/src/poly_reduce.rs` (22 assertion/check sites; reduces_and_preserves_boundary, original_positions_and_constraints, payload_group_and_edge_ancestry …) |
+| `lib/rdk/test_polyframe.ml` | not recorded per file | STUB | `lib/rdk/test_polyframe.ml:44`: print-only runner |
+| `lib/rdk/test_polywire.ml` | not recorded per file | STUB | `lib/rdk/test_polywire.ml:151`: print-only runner |
+| `lib/rdk/test_predicates.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_geom/src/predicates.rs` (32 assertion/check sites; ordinary_and_cancelled_cases, segment_and_triangle_cases, orient2d_rejects_nan …) |
+| `lib/rdk/test_ray.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_ops/src/ray.rs` (50 assertion/check sites; basic_projection, direction_policies, multi_samples …) |
+| `lib/rdk/test_rdk.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_core/src/topology.rs` (76 assertion/check sites; validates_and_preserves_packed_topology, builder_freezes_polylines, deferred_shape_answers_without_forcing_and_materialises_once …); `rs/crates/rdk_rays/src/tests.rs` (48 assertion/check sites; surface_failure, quad_and_extrude_bridge, mesh_round_trip_and_trace_mesh …) |
+| `lib/rdk/test_rdk_attributes.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_geom/src/spatial_index.rs` (16 assertion/check sites; rejects_bad_grain_and_non_finite_positions, distance_only_search_matches_provenance_and_misses_are_infinite, parallel_build_and_queries_match_sequential_and_brute_force …); `rs/crates/rdk_geom/src/surface_index.rs` (34 assertion/check sites; construction_triangulates_and_raycasts_with_stable_ties, closest_queries_fill_stable_slots_and_parallel_equals_sequential, candidate_pairs_exclude_same_primitive_and_tolerance_widens …) |
+| `lib/rdk/test_rdk_misc.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_ops/src/attribute_blur.rs` (24 assertion/check sites; laplacian_blur_of_positions_and_attributes, selection_limits_which_points_move, invalid_parameters_and_cancellation …) |
+| `lib/rdk/test_rdk_sources.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_core/src/attribute_pattern.rs` (27 assertion/check sites; implicit_selection_and_glob_terms, byte_classes_and_rewrite_capture_shapes, rewrite_set_uses_last_matching_positive_rule …) |
+| `lib/rdk/test_remesh.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_ops/src/remesh.rs` (21 assertion/check sites; adaptive_hard_and_uv_seams, input_points_only, local_edits_keep_payload_and_agree_across_domains …) |
+| `lib/rdk/test_resample.ml` | not recorded per file | STUB | `lib/rdk/test_resample.ml:38`: print-only runner |
+| `lib/rdk/test_reverse.ml` | not recorded per file | STUB | `lib/rdk/test_reverse.ml:25`: print-only runner |
+| `lib/rdk/test_revolve.ml` | not recorded per file | STUB | `lib/rdk/test_revolve.ml:18`: print-only runner |
+| `lib/rdk/test_rewire_vertices.ml` | not recorded per file | STUB | `lib/rdk/test_rewire_vertices.ml:89`: print-only runner |
+| `lib/rdk/test_scatter.ml` | not recorded per file | STUB | `lib/rdk/test_scatter.ml:101`: print-only runner |
+| `lib/rdk/test_separate_pieces.ml` | not recorded per file | STUB | `lib/rdk/test_separate_pieces.ml:65`: print-only runner |
+| `lib/rdk/test_skin.ml` | not recorded per file | STUB | `lib/rdk/test_skin.ml:66`: print-only runner |
+| `lib/rdk/test_smooth.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_ops/src/smooth.rs` (11 assertion/check sites; smoothing_curves_constraints_boundaries_normals_and_errors, one_and_four_domains_agree_on_a_displaced_grid) |
+| `lib/rdk/test_soft_transform.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_ops/src/transform_ops.rs` (45 assertion/check sites; composition_orders_pivot_inverse_and_errors, soft_transform_radius_edge_and_falloffs, soft_transform_attribute_weights_normals_and_sharing …) |
+| `lib/rdk/test_spiral.ml` | not recorded per file | STUB | `lib/rdk/test_spiral.ml:44`: print-only runner |
+| `lib/rdk/test_subdivide.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_ops/src/subdivide.rs` (110 assertion/check sites; checked_loop_quad_error, selected_loop_validation_scope, disconnected_selected_fans …) |
+| `lib/rdk/test_support/test_geometry_comparison.ml` | not recorded per file | SUPPORT | Source support/helper module; comparison/helper definitions require caller audit. |
+| `lib/rdk/test_surface_index.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_geom/src/surface_index.rs` (34 assertion/check sites; construction_triangulates_and_raycasts_with_stable_ties, closest_queries_fill_stable_slots_and_parallel_equals_sequential, candidate_pairs_exclude_same_primitive_and_tolerance_widens …) |
+| `lib/rdk/test_sweep.ml` | not recorded per file | STUB | `lib/rdk/test_sweep.ml:76`: print-only runner |
+| `lib/rdk/test_transform.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_ops/src/transform_ops.rs` (45 assertion/check sites; composition_orders_pivot_inverse_and_errors, soft_transform_radius_edge_and_falloffs, soft_transform_attribute_weights_normals_and_sharing …) |
+| `lib/rdk/test_triangulate.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_ops/src/triangulate.rs` (17 assertion/check sites; collapsed_quad_and_deterministic_failure, quads_become_triangles_with_ancestry, selection_keeps_other_primitives …) |
+| `lib/rdk/test_triangulate2d.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/rdk_ops/src/triangulate2d.rs` (108 assertion/check sites; xy_payload_and_group, best_fit_and_explicit_plane, projected_output_positions …) |
+| `lib/rdk/test_tube.ml` | not recorded per file | STUB | `lib/rdk/test_tube.ml:55`: print-only runner |
+| `lib/renderer/test_batch_merge.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/renderer/tests/cases/gpu_batch_merge.rs` (10 assertion/check sites; ) |
+| `lib/renderer/test_dense_scene2.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/renderer/tests/cases/gpu_dense_scene2.rs` (9 assertion/check sites; ) |
+| `lib/renderer/test_gpu_draw.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/renderer/tests/cases/gpu_draw.rs` (12 assertion/check sites; ) |
+| `lib/renderer/test_main.ml` | not recorded per file | HARNESS | Source runner dispatches other test modules, not an independent assertion suite. |
+| `lib/renderer/test_marks_native.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/renderer/tests/cases/gpu_marks_native.rs` (4 assertion/check sites; ) |
+| `lib/renderer/test_mock_backend.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/renderer/src/test_mock_backend.rs` (1 assertion/check sites; mock_renderer_returns_typed_unsupported, mock_caps_live_allocations) |
+| `lib/renderer/test_offscreen.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/renderer/tests/cases/gpu_offscreen.rs` (59 assertion/check sites; ) |
+| `lib/renderer/test_renderer_scaling.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/renderer/src/test_renderer_scaling.rs` (14 assertion/check sites; renderer_scaling); `rs/crates/runtime/src/test_runtime_visibility.rs` (15 assertion/check sites; offscreen_target_is_not_a_window, change_flag_queries_once_per_announcement, map_logical_rect_scales_edges) |
+| `lib/renderer/test_runtime_render.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/renderer/tests/cases/window_runtime_render.rs` (2 assertion/check sites; ) |
+| `lib/renderer/test_scene2_argument.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/renderer/tests/cases/gpu_scene2_argument.rs` (1 assertion/check sites; ); `rs/crates/renderer/tests/cases/scene2_argument_body/mod.rs` (18 assertion/check sites; ); `rs/crates/renderer/tests/cases/window_scene2_argument.rs` (1 assertion/check sites; ) |
+| `lib/renderer/test_scene2_coordinates.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/renderer/tests/cases/gpu_scene2_coordinates.rs` (8 assertion/check sites; ) |
+| `lib/renderer/test_scene3_instances.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/renderer/tests/cases/gpu_scene3_instances.rs` (5 assertion/check sites; ) |
+| `lib/renderer/test_scene3_lighting.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/renderer/tests/cases/window_scene3_lighting.rs` (7 assertion/check sites; ) |
+| `lib/renderer/test_shapes_lowering.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/renderer/tests/cases/gpu_shapes_lowering.rs` (4 assertion/check sites; ) |
+| `lib/renderer/test_ui_pipeline.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/renderer/tests/cases/gpu_ui_pipeline.rs` (2 assertion/check sites; ) |
+| `lib/runtime/resources/test_gpu_image.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/runtime_resources/tests/window_gpu_image.rs` (32 assertion/check sites; ) |
+| `lib/runtime/resources/test_main.ml` | not recorded per file | HARNESS | Source runner dispatches other test modules, not an independent assertion suite. |
+| `lib/runtime/resources/test_png_rows.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/runtime_resources/tests/window_runtime_resources.rs` (58 assertion/check sites; ) |
+| `lib/runtime/resources/test_resources_audio.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/runtime_resources/tests/window_runtime_resources.rs` (58 assertion/check sites; ) |
+| `lib/runtime/resources/test_resources_font.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/runtime_resources/tests/window_runtime_resources.rs` (58 assertion/check sites; ) |
+| `lib/runtime/resources/test_runtime_resources.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/runtime_resources/tests/window_runtime_resources.rs` (58 assertion/check sites; ) |
+| `lib/runtime/test_main.ml` | not recorded per file | HARNESS | Source runner dispatches other test modules, not an independent assertion suite. |
+| `lib/runtime/test_runtime_input.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/runtime_input/src/test_runtime_input.rs` (32 assertion/check sites; runtime_input_translates_sdl_events_into_facts) |
+| `lib/runtime/test_runtime_visibility.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/runtime/src/test_runtime_visibility.rs` (15 assertion/check sites; offscreen_target_is_not_a_window, change_flag_queries_once_per_announcement, map_logical_rect_scales_edges) |
+| `lib/scene_command/test_display_list.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/scene_command/src/test_display_list.rs` (11 assertion/check sites; render_ir_encoding_keeps_version_little_endian_words_and_signed_zero, fresh_ids_are_unique_and_consecutive_across_threads, publication_growth_reset_and_validation) |
+| `lib/scene_command/test_marks.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/scene_command/src/test_marks.rs` (5 assertion/check sites; valid_tables_of_every_entry_kind_pass, refusals_name_each_invalid_entry, serialize_is_exact_and_deterministic) |
+| `lib/scene_command/test_ui_batch.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/scene_command/src/ui_batch.rs` (35 assertion/check sites; logical_coordinates_clipped_chords_and_immutable_reset, shape_validation_is_cached_but_a_copy_is_checked_again, publish_shares_full_storage_and_copies_partial_storage …) |
+| `lib/scene_command/test_ui_primitives.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/scene_command/src/test_ui_primitives.rs` (15 assertion/check sites; shape2_polygon_preserves_subpixel_vertices, published_batch_validation_is_remembered_and_builder_refuses_bad_input, tampered_packed_copies_are_refused …) |
+| `lib/scene_execution/test_automatic_scratch.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/renderer/src/scene_execution.rs` (23 assertion/check sites; ) |
+| `lib/scene_execution/test_gpu_vertices.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/renderer/src/scene_execution.rs` (23 assertion/check sites; ) |
+| `lib/scene_execution/test_main.ml` | not recorded per file | HARNESS | Source runner dispatches other test modules, not an independent assertion suite. |
+| `lib/scene_execution/test_offscreen_metal.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/renderer/src/scene_execution.rs` (23 assertion/check sites; ) |
+| `lib/scene_execution/test_prepared_scene3.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/renderer/src/scene_execution.rs` (23 assertion/check sites; ) |
+| `lib/scene_execution/test_retained_eviction.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/renderer/src/scene_execution.rs` (23 assertion/check sites; ); `rs/crates/renderer/tests/cases/gpu_offscreen.rs` (59 assertion/check sites; ) |
+| `lib/scene_execution/test_scene_execution_metal.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/renderer/src/scene_execution.rs` (23 assertion/check sites; ) |
+| `lib/sdl3/test_main.ml` | not recorded per file | HARNESS | Source runner dispatches other test modules, not an independent assertion suite. |
+| `lib/sdl3/test_sdl3.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/sdl3/src/tests.rs` (88 assertion/check sites; version_compatibility_rejects_older_and_prerelease_versions, invalid_arguments_are_rejected_before_native_thread_checks, sdl_calls_are_refused_from_worker_threads …) |
+| `lib/sdl3/test_sdl3_events.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/sdl3/src/tests.rs` (88 assertion/check sites; version_compatibility_rejects_older_and_prerelease_versions, invalid_arguments_are_rejected_before_native_thread_checks, sdl_calls_are_refused_from_worker_threads …) |
+| `lib/sdl3/test_sdl3_failure.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/sdl3/src/tests.rs` (88 assertion/check sites; version_compatibility_rejects_older_and_prerelease_versions, invalid_arguments_are_rejected_before_native_thread_checks, sdl_calls_are_refused_from_worker_threads …) |
+| `lib/sdl3/test_sdl3_metal.ml` | MISSING | MAC | Mac backend/source; separate hardware qualification. `rs/crates/sdl3/src/tests.rs` (86 assertions; version_compatibility_rejects_older_and_prerelease_versions, invalid_arguments_are_rejected_before_native_thread_checks, sdl_calls_are_refused_from_worker_threads …) |
+| `lib/sdl3/test_sdl3_stress.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/sdl3/src/tests.rs` (88 assertion/check sites; version_compatibility_rejects_older_and_prerelease_versions, invalid_arguments_are_rejected_before_native_thread_checks, sdl_calls_are_refused_from_worker_threads …) |
+| `lib/sdl3_image/test_sdl3_image.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/sdl3_image/src/tests.rs` (11 assertion/check sites; cpu_decode_conformance) |
+| `lib/sdl3_mixer/test_main.ml` | not recorded per file | HARNESS | Source runner dispatches other test modules, not an independent assertion suite. |
+| `lib/sdl3_mixer/test_sdl3_mixer.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/sdl3_mixer/src/tests.rs` (20 assertion/check sites; track_device_and_memory_conformance, typed_device_failure_with_missing_audio_driver, typed_device_failure) |
+| `lib/sdl3_mixer/test_sdl3_mixer_device_failure.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/sdl3_mixer/src/tests.rs` (20 assertion/check sites; track_device_and_memory_conformance, typed_device_failure_with_missing_audio_driver, typed_device_failure) |
+| `lib/sdl3_ttf/test_main.ml` | not recorded per file | HARNESS | Source runner dispatches other test modules, not an independent assertion suite. |
+| `lib/sdl3_ttf/test_sdl3_ttf.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/sdl3_ttf/src/tests.rs` (25 assertion/check sites; cpu_font_conformance, invalid_font_override_is_a_typed_discovery_failure) |
+| `lib/sdl3_ttf/test_sdl3_ttf_discovery_failure.ml` | MISSING | ASSERTIONS_PRESENT | `rs/crates/sdl3_ttf/src/tests.rs` (25 assertion/check sites; cpu_font_conformance, invalid_font_override_is_a_typed_discovery_failure) |
+| `lib/sop/test_diagnostics.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/sop/src/test_diagnostics.rs` (5 assertion/check sites; missing_groups_have_the_missing_group_code, rdk_failures_become_traced_diagnostics) |
+| `lib/sop/test_edit_graph.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/sop/src/test_edit_graph.rs` (33 assertion/check sites; editable_graph, declared_factories_follow_their_metadata, factory_refuses_no_slot_names …) |
+| `lib/sop/test_facts.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/sop/src/test_facts.rs` (34 assertion/check sites; dependencies, write_footprint, refusals_cached …) |
+| `lib/sop/test_parallel_branches.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/sop/src/test_parallel_branches.rs` (37 assertion/check sites; independent_branches_fork_and_shared_prefix_cooks_once, stale_hit_after_eviction_is_recooked_sequentially, warm_cache_hits_are_not_forked_and_reused_ids_are_exact …) |
+| `lib/sop/test_parallel_exact.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/flow_sop/src/lisp_sop/test_parallel_exact.rs` — all 84 current registered source sections map to 97 enabled Rust cases; execution qualification still required. |
+| `lib/sop/test_payload.ml` | not recorded per file | ASSERTIONS_PRESENT | `rs/crates/sop/src/test_payload.rs` (25 assertion/check sites; image_is_immutable_and_converts_exactly, session_accounting_and_geometry_refusal, packed_image_passes_through_unmaterialized) |
+| `lib/sop/test_sop.ml` | PARTIAL | ASSERTIONS_PRESENT | `rs/crates/sop/src/sop_topology.rs` (25 assertion/check sites; edge_collapse_contract, poly_fill_contract, mesh_nodes_cook_on_the_grid_and_match_across_domains …) |
+| `lib/test_support/test_support.ml` | not recorded per file | SUPPORT | Source support/helper module; comparison/helper definitions require caller audit. |

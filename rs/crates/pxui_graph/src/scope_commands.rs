@@ -87,8 +87,6 @@ pub fn wired(r: &p::Row) -> bool {
 /// The value the wire carried, as the literal a disconnected row keeps.
 /// ponytail: read at no probe, so a source inside a loop keeps the default
 fn last_value(t: &Pane, n: &p::Node, r: &p::Row) -> Option<S> {
-    let num = |f: f64| s::make(Node::Num(lisp::float(f)));
-    let vec = |l: &[f64]| s::make(Node::Vec(l.iter().map(|f| num(*f)).collect()));
     let records = t.records.as_ref()?;
     let srcs = p::sources(r);
     if srcs.len() != 1 {
@@ -97,16 +95,23 @@ fn last_value(t: &Pane, n: &p::Node, r: &p::Row) -> Option<S> {
     let mut path = drop_last(&n.path);
     path.push(srcs[0].clone());
     let at = records.borrow_mut().at(&path, &[]);
-    match at {
-        Some(Summary::Value(Value::Int(i))) => Some(s::make(Node::Num(i.to_string()))),
-        Some(Summary::Value(Value::Float(f))) if f.is_finite() => Some(num(f)),
-        Some(Summary::Value(Value::Bool(b))) => Some(s::make(Node::Sym(b.to_string()))),
-        Some(Summary::Value(Value::Text(b))) => Some(s::make(Node::Str(b))),
-        Some(Summary::Value(Value::Vec2(a, b))) => Some(vec(&[a, b])),
-        Some(Summary::Value(Value::Vec3(a, b, c))) => Some(vec(&[a, b, c])),
-        Some(Summary::Value(Value::Vec4(a, b, c, d))) => Some(vec(&[a, b, c, d])),
-        _ => None,
-    }
+    use flow_syntax::arena::{Draft, SyntaxBuilder};
+    let mut builder = SyntaxBuilder::new();
+    let mut vector = |values: &[f64]| {
+        Draft::Vec(values.iter().map(|f| builder.push_draft(0, Draft::Num(lisp::float(*f)), Default::default(), None)).collect())
+    };
+    let draft = match at {
+        Some(Summary::Value(Value::Int(i))) => Draft::Num(i.to_string()),
+        Some(Summary::Value(Value::Float(f))) if f.is_finite() => Draft::Num(lisp::float(f)),
+        Some(Summary::Value(Value::Bool(b))) => Draft::Sym(b.to_string()),
+        Some(Summary::Value(Value::Text(b))) => Draft::Str(b),
+        Some(Summary::Value(Value::Vec2(a, b))) => vector(&[a, b]),
+        Some(Summary::Value(Value::Vec3(a, b, c))) => vector(&[a, b, c]),
+        Some(Summary::Value(Value::Vec4(a, b, c, d))) => vector(&[a, b, c, d]),
+        _ => return None,
+    };
+    let id = builder.push_draft(0, draft, Default::default(), None);
+    Some(builder.freeze().handle(id))
 }
 
 /// Taking a wire off a row: the nested node written there stays, as a binding of its own.
@@ -146,7 +151,10 @@ pub fn unwire_at(t: &Pane, inputs: &[(Path, ArgKey)]) -> Vec<Op> {
             None => {
                 // the end of a wire from a vector's cell: its holder is no node
                 if let ArgKey::Cell(_) = key {
-                    out.push(Op::Disconnect { node: path.clone(), key: key.clone(), fallback: Some(s::make(Node::Num("0.0".to_owned()))) });
+                    let mut builder = flow_syntax::arena::SyntaxBuilder::new();
+                    let name = builder.intern("0.0");
+                    let id = builder.push(0, Node::Num(name), Default::default(), None);
+                    out.push(Op::Disconnect { node: path.clone(), key: key.clone(), fallback: Some(builder.freeze().handle(id)) });
                 }
             }
         }
@@ -204,7 +212,7 @@ fn hide_row(n: &p::Node) -> Option<bool> {
         return None;
     }
     n.rows.iter().find_map(|r| match (&r.key, r.kind, &r.ty) {
-        (ArgKey::Kw(k), p::RowKind::Arg, Some(Ty::Bool)) if k == "visible" => Some(matches!(r.expr.as_ref().map(|x| &x.node), Some(Node::Sym(v)) if v == "false")),
+        (ArgKey::Kw(k), p::RowKind::Arg, Some(Ty::Bool)) if k == "visible" => Some(matches!(r.expr.as_ref().map(|x| &x.node), Some(Node::Sym(v)) if r.expr.as_ref().unwrap().name(*v) == "false")),
         _ => None,
     })
 }
@@ -288,12 +296,17 @@ pub fn action_changes(t: &Pane, command: Command) -> Vec<Change> {
             // a node that cannot pass an input through but has a boolean :visible (a scene object) takes
             // itself out of the render without leaving the graph
             match hide_row(n) {
-                Some(hidden) => edit(Op::SetArg {
-                    node: n.path.clone(),
-                    key: ArgKey::Kw("visible".to_owned()),
-                    sub: Vec::new(),
-                    value: s::make(Node::Sym((if hidden { "true" } else { "false" }).to_owned())),
-                }),
+                Some(hidden) => {
+                    let mut builder = flow_syntax::arena::SyntaxBuilder::new();
+                    let name = builder.intern(if hidden { "true" } else { "false" });
+                    let id = builder.push(0, Node::Sym(name), Default::default(), None);
+                    edit(Op::SetArg {
+                        node: n.path.clone(),
+                        key: ArgKey::Kw("visible".to_owned()),
+                        sub: Vec::new(),
+                        value: builder.freeze().handle(id),
+                    })
+                },
                 None => edit(Op::ToggleBypass { node: n.path.clone() }),
             }
         }),

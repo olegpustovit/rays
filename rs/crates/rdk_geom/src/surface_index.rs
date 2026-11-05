@@ -1928,6 +1928,29 @@ mod tests {
         let topo = topology::View::create_validated_owned(7, vec![0, 1, 2, 3, 4, 5, 6], vec![0, 4, 7], vec![0, 0]);
         geometry::create(positions, topo, None, None, None).unwrap()
     }
+    #[test]
+    fn distance_only_surface_matches_provenance_and_bounded_misses() {
+        let positions = packed::Float3::View::of_owned_exn(
+            vec![-5.0, 5.0, 5.0, -5.0], vec![0.0; 4], vec![-5.0, -5.0, 5.0, 5.0],
+        ).unwrap();
+        let topology = topology::polygons_owned(4, vec![0, 1, 2, 3], vec![0, 4]).unwrap();
+        let geometry = geometry::create(positions, topology, None, None, None).unwrap();
+        let index = create(None, Some(1), None, None, None, &geometry).unwrap();
+        let queries = packed::Float3::View::of_owned_exn(
+            vec![0.0, 1.0, 4.0], vec![0.0, 2.0, 0.0], vec![0.0; 3],
+        ).unwrap();
+        let (mut primitives, mut triangles) = ([-1; 3], [-1; 3]);
+        let (mut a, mut b, mut c) = ([0.0; 3], [0.0; 3], [0.0; 3]);
+        let (mut generic, mut specialized) = ([f64::INFINITY; 3], [f64::INFINITY; 3]);
+        closest_many_into(None, None, None, 1, &index, &queries, f64::INFINITY,
+            &mut primitives, &mut triangles, &mut a, &mut b, &mut c, &mut generic).unwrap();
+        closest_distances_many_into(None, None, 1, &index, &queries, f64::INFINITY, &mut specialized).unwrap();
+        assert_eq!(generic, specialized, "distance-only surface index matches provenance query");
+        let mut bounded = [0.0; 3];
+        closest_distances_many_into(None, None, 1, &index, &queries, 0.01, &mut bounded).unwrap();
+        assert_eq!(bounded[1], f64::INFINITY, "distance-only surface index bounded miss sentinel");
+    }
+
 
     #[test]
     fn construction_triangulates_and_raycasts_with_stable_ties() {

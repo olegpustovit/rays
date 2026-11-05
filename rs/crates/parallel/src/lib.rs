@@ -655,7 +655,7 @@ mod tests {
 
     #[test]
     fn one_and_many_domains_produce_identical_ordered_results() {
-        for length in [0_usize, 1, 2, 7, 64, 1000, 12_345] {
+        for length in [0_usize, 1, 2, 7, 64, 1000, 12_345, 100_003] {
             let expected = (0..length)
                 .map(|index| (index ^ 0x5a5a).wrapping_mul(7919))
                 .collect::<Vec<_>>();
@@ -664,8 +664,15 @@ mod tests {
             assert_eq!(collect(&one), expected);
 
             let many = (0..length).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>();
-            fill(&many, None, 0x5a5a).unwrap();
-            assert_eq!(collect(&many), expected);
+            for _ in 0..3 {
+                fill(&many, None, 0x5a5a).unwrap();
+                assert_eq!(collect(&many), expected);
+            }
+            for_(1, 0, length as i64 - 1, &|index| {
+                many[index as usize].store((index as usize ^ 0x5a5a).wrapping_mul(7919), Ordering::Relaxed);
+                Ok(())
+            }).unwrap();
+            assert_eq!(collect(&many), expected, "outside a domain run");
         }
     }
 
@@ -722,6 +729,36 @@ mod tests {
             })
         });
         assert_eq!(result, Err("35".to_owned()));
+    }
+
+    #[test]
+    fn periodic_failures_choose_500_in_every_domain_context() {
+        for domains in [1, 4, 4, 4, 4, 4] {
+            let result = run_unit(Some(domains), &|| for_(1, 0, 9_999, &|index| {
+                if index % 997 == 500 { Err(index.to_string()) } else { Ok(()) }
+            }));
+            assert_eq!(result, Err("500".to_owned()));
+        }
+    }
+
+    #[test]
+    fn varying_nested_ranges_match_the_source_matrix() {
+        let expected = (0..40).map(|i| (0..100+i).map(|j| ((i+j) as usize).wrapping_mul(7919)).sum::<usize>()).collect::<Vec<_>>();
+        for domains in [1, 4] {
+            let sums = (0..40).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>();
+            run_unit(Some(domains), &|| for_(1, 0, 39, &|i| {
+                let inner = (0..100+i).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>();
+                run_chunks(2, 0, 99+i, &|first,last| {
+                    for j in first..=last {
+                        inner[j as usize].store(((i+j) as usize).wrapping_mul(7919), Ordering::Relaxed);
+                    }
+                    Ok(())
+                })?;
+                sums[i as usize].store(collect(&inner).into_iter().sum(), Ordering::Relaxed);
+                Ok(())
+            })).unwrap();
+            assert_eq!(collect(&sums), expected);
+        }
     }
 
     #[test]
@@ -797,23 +834,23 @@ mod tests {
 
     #[test]
     fn simultaneous_owners_share_the_worker_set() {
-        let expected_a = (0usize..4096)
+        let expected_a = (0usize..200_000)
             .map(|index| (index ^ 17).wrapping_mul(7919))
             .collect::<Vec<_>>();
-        let expected_b = (0usize..4096)
+        let expected_b = (0usize..200_000)
             .map(|index| (index ^ 29).wrapping_mul(7919))
             .collect::<Vec<_>>();
         thread::scope(|scope| {
             let owner_a = scope.spawn(|| {
-                let values = (0..4096).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>();
-                for _ in 0..3 {
+                let values = (0..200_000).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>();
+                for _ in 0..20 {
                     fill(&values, None, 17).unwrap();
                     assert_eq!(collect(&values), expected_a);
                 }
             });
             let owner_b = scope.spawn(|| {
-                let values = (0..4096).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>();
-                for _ in 0..3 {
+                let values = (0..200_000).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>();
+                for _ in 0..20 {
                     fill(&values, None, 29).unwrap();
                     assert_eq!(collect(&values), expected_b);
                 }

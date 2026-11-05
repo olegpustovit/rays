@@ -60,10 +60,13 @@ type R<T> = Result<T, String>;
 type Factories<'a> = Option<&'a [Factory]>;
 
 fn name_of(expr: &Syntax) -> Option<String> {
-    match &expr.node {
-        Node::List(items) if items.len() == 2 => match (&items[0].node, &items[1].node) {
-            (Node::Sym(head), Node::Sym(name)) if head == "ref" => Some(name.clone()),
-            _ => None,
+    match expr.node {
+        Node::List(items) if expr.range(items).len() == 2 => {
+            let items = expr.range(items);
+            match (expr.arena().row(items[0]).node, expr.arena().row(items[1]).node) {
+                (Node::Sym(head), Node::Sym(name)) if expr.name(head) == "ref" => Some(expr.name(name).to_owned()),
+                _ => None,
+            }
         },
         _ => None,
     }
@@ -77,7 +80,7 @@ pub fn parse(payload: &Payload) -> R<(Syntax, String)> {
             if payload.kind == "camera" {
                 match &expr.node {
                     Node::Sym(name) => {
-                        let name = name.clone();
+                        let name = expr.name(*name).to_owned();
                         Ok((expr, name))
                     }
                     _ => Err("A carried camera is the name of its object".to_string()),
@@ -135,8 +138,16 @@ fn reads_material(n: &p::Node, graph: &str) -> bool {
             .any(|r| r.key == ArgKey::Kw("material".into()) && r.expr.as_ref().and_then(name_of).as_deref() == Some(graph))
 }
 
-fn list(items: Vec<Syntax>) -> Syntax {
-    s::make(Node::List(items.into()))
+fn with_argument(head: &str, input: &str, key: &str, expr: &Syntax) -> Syntax {
+    use flow_syntax::arena::{Draft, SyntaxBuilder};
+    let mut builder = SyntaxBuilder::new();
+    let mut items = Vec::with_capacity(4);
+    for draft in [Draft::Sym(head.to_owned()), Draft::Sym(input.to_owned()), Draft::Kw(key.to_owned())] {
+        items.push(builder.push_draft(0, draft, Default::default(), None));
+    }
+    items.push(builder.import(expr));
+    let id = builder.push_draft(0, Draft::List(items), Default::default(), None);
+    builder.freeze().handle(id)
 }
 
 /// A material put on a SOP graph as a whole: its result node when that is a material node, else a
@@ -160,12 +171,7 @@ fn material_on_graph(catalog: &Catalog, doc: &Document, graph: &str, expr: &Synt
                         Op::AddNode {
                             scope: vec![graph.to_string()],
                             name: fresh.clone(),
-                            expr: list(vec![
-                                s::make(Node::Sym("sop/material".into())),
-                                s::make(Node::Sym(name.clone())),
-                                s::make(Node::Kw("material".into())),
-                                expr.clone(),
-                            ]),
+                            expr: with_argument("sop/material", &name, "material", expr),
                         },
                         Op::Connect { node: vec![graph.to_string(), "@result".to_string()], key: ArgKey::Whole, src: fresh, iter: false },
                     ],
@@ -268,12 +274,7 @@ fn on_viewport(
                         Op::AddNode {
                             scope: vec![scene.clone()],
                             name: fresh.clone(),
-                            expr: list(vec![
-                                s::make(Node::Sym("scene/root".into())),
-                                s::make(Node::Sym(result.clone())),
-                                s::make(Node::Kw("camera".into())),
-                                expr.clone(),
-                            ]),
+                            expr: with_argument("scene/root", &result, "camera", expr),
                         },
                         Op::Connect { node: vec![scene.clone(), "@result".to_string()], key: ArgKey::Whole, src: fresh, iter: false },
                     ];

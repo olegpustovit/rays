@@ -332,7 +332,7 @@ fn interpolate_fixed(
     if pair.kind == 7 {
         let text_of = text_of_storage;
         let (left, right) = (text_of(left), text_of(right));
-        let mut output = vec![String::new(); corner_count];
+        let mut output = vec![Vec::new(); corner_count];
         for corner in 0..corner_count {
             corner_poll(cancel_value, corner)?;
             let primitive = corner / 3;
@@ -525,7 +525,7 @@ fn consolidate_to_points(
             Ok(Storage::Int(output))
         }
         Storage::Text(source) => {
-            let output: Vec<String> = (0..point_count).map(|point| source[rep(point)].clone()).collect();
+            let output: Vec<Vec<u8>> = (0..point_count).map(|point| source[rep(point)].clone()).collect();
             for (corner, &point) in vertex_points.iter().enumerate() {
                 if output[point as usize] != source[corner] {
                     return Err(conflict_fail(name, point as usize));
@@ -1006,7 +1006,7 @@ fn copy_attribute(
     if pair.kind == 7 {
         let text_of = text_of_storage;
         let (left, right) = (text_of(left), text_of(right));
-        let mut output = vec![String::new(); primitive_count];
+        let mut output = vec![Vec::new(); primitive_count];
         for primitive in 0..primitive_count {
             corner_poll(cancel_value, primitive)?;
             let (is_left, index) = selected_primitive(ancestry, primitive);
@@ -1193,7 +1193,7 @@ fn int_of_storage(storage: Option<&Storage>) -> Option<&Vec<i64>> {
     }
 }
 
-fn text_of_storage(storage: Option<&Storage>) -> Option<&Vec<String>> {
+fn text_of_storage(storage: Option<&Storage>) -> Option<&Vec<Vec<u8>>> {
     match storage {
         Some(Storage::Text(values)) => Some(values),
         _ => None,

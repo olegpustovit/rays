@@ -868,18 +868,22 @@ pub fn image(t_: &t, key: &str, width: i64, height: i64, publish: &mut dyn FnMut
     if d.images.borrow().length() >= 64 {
         return Err(error("A workspace owns at most 64 GPU image sinks."));
     }
-    let sink = image_sink::create(&gpu)?;
-    d.image_stats.borrow_mut().created += 1;
-    match convert(&sink) {
-        Ok(()) => {
-            d.images.borrow_mut().add(key.to_owned(), sink);
-            Ok(())
-        }
-        Err(e) => {
-            close_image(&d.image_stats, sink);
-            Err(e)
+    struct PendingImage<'a> {
+        stats: &'a RefCell<ImageStats>,
+        sink: Option<image_sink::T>,
+    }
+    impl Drop for PendingImage<'_> {
+        fn drop(&mut self) {
+            if let Some(sink) = self.sink.take() {
+                close_image(self.stats, sink);
+            }
         }
     }
+    let mut pending = PendingImage { stats: &d.image_stats, sink: Some(image_sink::create(&gpu)?) };
+    d.image_stats.borrow_mut().created += 1;
+    convert(pending.sink.as_ref().unwrap())?;
+    d.images.borrow_mut().add(key.to_owned(), pending.sink.take().unwrap());
+    Ok(())
 }
 
 /// One `Marks`-family source per GPU mark set of a frame, numbered in drawing order (at most 64),

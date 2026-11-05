@@ -28,6 +28,7 @@ use flow_sop::port;
 use flow_syntax::context;
 use flow_syntax::lisp;
 use flow_syntax::syntax::{self as s, Node, Syntax};
+use flow_syntax::arena::{self, Draft, SyntaxBuilder, SyntaxId};
 use param::{Effects, FieldView, Value};
 use sop::edit_graph::Factory;
 
@@ -72,48 +73,50 @@ fn stop<T>(message: impl Into<String>) -> R<T> {
     Err(message.into())
 }
 
-fn mk(node: Node) -> S {
-    s::make(node)
+fn mk(node: Draft) -> S {
+    let mut builder = SyntaxBuilder::new();
+    let root = push(node, &mut builder);
+    builder.freeze().handle(root)
 }
-fn sym(name: &str) -> S {
-    mk(Node::Sym(name.to_owned()))
+fn push(node: Draft, builder: &mut SyntaxBuilder) -> SyntaxId {
+    builder.push_draft(0, node, rays_diagnostic::Span { start: 0, finish: 0 }, None)
 }
-fn kw(name: &str) -> S {
-    mk(Node::Kw(name.to_owned()))
-}
-fn string(text: &str) -> S {
-    mk(Node::Str(text.as_bytes().to_vec()))
-}
-fn list(items: Vec<S>) -> S {
-    mk(Node::List(items.into()))
-}
+fn sym(name: &str) -> S { mk(Draft::Sym(name.to_owned())) }
+fn string(text: &str) -> S { mk(Draft::Str(text.as_bytes().to_vec())) }
+fn sym_id(name: &str, builder: &mut SyntaxBuilder) -> SyntaxId { push(Draft::Sym(name.to_owned()), builder) }
+fn kw_id(name: &str, builder: &mut SyntaxBuilder) -> SyntaxId { push(Draft::Kw(name.to_owned()), builder) }
+fn string_id(text: &str, builder: &mut SyntaxBuilder) -> SyntaxId { push(Draft::Str(text.as_bytes().to_vec()), builder) }
+fn list(items: Vec<SyntaxId>, builder: &mut SyntaxBuilder) -> SyntaxId { push(Draft::List(items), builder) }
 fn diag(d: &rays_diagnostic::Diagnostic) -> String {
     rays_diagnostic::to_string(d)
 }
 
 // ---- values as text ----
 
-fn number(x: f64) -> S {
-    mk(Node::Num(lisp::float(x)))
+fn scalar_draft(value: &Value) -> Draft {
+    match value {
+        Value::Float(x) => Draft::Num(lisp::float(*x)),
+        Value::Int(i) => Draft::Num(i.to_string()),
+        Value::Bool(b) => Draft::Sym(if *b { "true" } else { "false" }.to_owned()),
+        Value::Text(bytes) => Draft::Str(bytes.clone()),
+        Value::Choice(text) => Draft::Str(text.as_bytes().to_vec()),
+    }
 }
+fn scalar(value: &Value) -> S { mk(scalar_draft(value)) }
 
-fn scalar(v: &Value) -> S {
-    match v {
-        Value::Float(x) => number(*x),
-        Value::Int(i) => mk(Node::Num(i.to_string())),
-        Value::Bool(b) => sym(if *b { "true" } else { "false" }),
-        Value::Text(t) => mk(Node::Str(t.clone())),
-        Value::Choice(t) => string(t),
+fn value_row(fields: &[FieldView], builder: &mut SyntaxBuilder) -> SyntaxId {
+    match fields {
+        [field] => push(scalar_draft(&field.current), builder),
+        fields => push(Draft::Vec(fields.iter().map(|field| push(scalar_draft(&field.current), builder)).collect()), builder),
     }
 }
 
 /// The text of a parameter's current value: a number, flag or text, or a vector of numbers for the
 /// three fields of a vec3.
 pub fn value_syntax(fields: &[FieldView]) -> Syntax {
-    match fields {
-        [field] => scalar(&field.current),
-        fields => mk(Node::Vec(fields.iter().map(|field| scalar(&field.current)).collect())),
-    }
+    let mut builder = SyntaxBuilder::new();
+    let root = value_row(fields, &mut builder);
+    builder.freeze().handle(root)
 }
 
 fn current(fields: &[FieldView], name: &str) -> Option<Value> {
@@ -144,10 +147,9 @@ fn current_syntax(node: &g::Node, key: &str) -> Option<S> {
     ports(node).into_iter().find_map(|p| if p.path == key { Some(value_syntax(&p.fields)) } else { None })
 }
 
-fn non_default(node: &g::Node) -> Vec<(String, S)> {
-    ports(node)
-        .into_iter()
-        .filter_map(|p| if p.fields.iter().any(|f| f.current != f.default) { Some((p.path.clone(), value_syntax(&p.fields))) } else { None })
+fn non_default(node: &g::Node, builder: &mut SyntaxBuilder) -> Vec<(String, SyntaxId)> {
+    ports(node).into_iter()
+        .filter_map(|port| if port.fields.iter().any(|field| field.current != field.default) { Some((port.path.clone(), value_row(&port.fields, builder))) } else { None })
         .collect()
 }
 
@@ -204,9 +206,10 @@ fn bind(st: &mut State, home: &Home) -> R<Path> {
             let node = bind(st, parent)?;
             apply(st, Op::Unfold { node: node.clone(), key: key.clone(), sub: Vec::new() })?;
             match f::arg_text(&st.workspace.source, &node, key) {
-                Some(S { node: Node::Sym(name), .. }) if !node.is_empty() => {
+                Some(form) if matches!(form.node, Node::Sym(_)) && !node.is_empty() => {
                     let mut path = node[..node.len() - 1].to_vec();
-                    path.push(name);
+                    let Node::Sym(name) = form.node else { unreachable!() };
+                    path.push(form.name(name).to_owned());
                     st.unfolded.push((template, path.clone()));
                     Ok(path)
                 }
@@ -224,8 +227,8 @@ fn bind(st: &mut State, home: &Home) -> R<Path> {
 fn literal(e: &S) -> bool {
     match &e.node {
         Node::Num(_) | Node::Str(_) => true,
-        Node::Sym(n) => n == "true" || n == "false",
-        Node::Vec(l) => l.iter().all(|c| matches!(c.node, Node::Num(_))),
+        Node::Sym(n) => e.name(*n) == "true" || e.name(*n) == "false",
+        Node::Vec(range) => e.range(*range).iter().all(|id| matches!(e.arena().row(*id).node, Node::Num(_))),
         _ => false,
     }
 }
@@ -244,22 +247,21 @@ fn set(st: &mut State, home: &Home, edits: &[(String, Option<S>)], before: Optio
             continue;
         };
         let computed = |e: &S| -> R<()> { stop(format!("{key} is computed by the loop: type =(expression) in its row (now {}).", lisp::flat(e))) };
-        let was = before.and_then(|b| b(key)).map(|b| b.node);
-        match (&written, &value.node, &was) {
+        let was = before.and_then(|before| before(key));
+        match (&written, value.node, &was) {
             (None, _, _) => write(st, Vec::new(), value)?,
-            (Some(e), _, _) if literal(e) => write(st, Vec::new(), value)?,
-            (Some(S { node: Node::Vec(template), .. }), Node::Vec(now), Some(Node::Vec(was))) if template.len() == now.len() && now.len() == was.len() => {
-                for (i, c) in now.iter().enumerate() {
-                    if c.node != was[i].node {
-                        if literal(&template[i]) {
-                            write(st, vec![i as i64], c)?;
-                        } else {
-                            computed(&template[i])?;
-                        }
+            (Some(form), _, _) if literal(form) => write(st, Vec::new(), value)?,
+            (Some(template), Node::Vec(now), Some(was)) if matches!(template.node, Node::Vec(_)) && matches!(was.node, Node::Vec(_)) && template.children().len() == value.range(now).len() && value.range(now).len() == was.children().len() => {
+                for (i, id) in value.range(now).iter().enumerate() {
+                    let current = value.child(*id);
+                    if !arena::equal_node(&current, &was.child(was.children()[i])) {
+                        let authored = template.child(template.children()[i]);
+                        if literal(&authored) { write(st, vec![i as i64], &current)?; }
+                        else { computed(&authored)?; }
                     }
                 }
             }
-            (Some(e), _, _) => computed(e)?,
+            (Some(form), _, _) => computed(form)?,
         }
     }
     Ok(())
@@ -301,48 +303,34 @@ fn holder(source: &[S], home: &Home) -> Option<(Home, i64)> {
         Home::InlineIn(parent, ArgKey::Pos(p)) => Some(((**parent).clone(), *p)),
         Home::Copy { loop_, rel, index } if rel.len() == 1 => {
             let name = &rel[0];
-            let positional = |args: &[S]| -> Vec<S> {
-                let mut out = Vec::new();
-                let mut i = 0;
-                while i < args.len() {
-                    if matches!(args[i].node, Node::Kw(_)) && i + 1 < args.len() {
-                        i += 2;
-                    } else {
-                        out.push(args[i].clone());
-                        i += 1;
+            let in_merge = |form: &S| -> Option<i64> {
+                if s::head(form) != Some("scene/merge") { return None; }
+                let args = &form.children()[1..];
+                let (mut index, mut positional) = (0, 0);
+                while index < args.len() {
+                    if index + 1 < args.len() && matches!(form.arena().row(args[index]).node, Node::Kw(_)) { index += 2; }
+                    else {
+                        if matches!(form.arena().row(args[index]).node, Node::Sym(symbol) if form.name(symbol) == name) { return Some(positional); }
+                        index += 1;
+                        positional += 1;
                     }
                 }
-                out
-            };
-            let in_merge = |e: &S| -> Option<i64> {
-                match &e.node {
-                    Node::List(items) if matches!(items.first().map(|x| &x.node), Some(Node::Sym(h)) if h == "scene/merge") => {
-                        positional(&items[1..]).iter().position(|a| matches!(&a.node, Node::Sym(n) if n == name)).map(|i| i as i64)
-                    }
-                    _ => None,
-                }
+                None
             };
             let e = document::syntax_of(source, loop_)?;
-            let Node::List(items) = &e.node else { return None };
-            let body = items.get(1..)?.last()?;
-            let (bindings, result): (Vec<(String, S)>, S) = match &body.node {
-                Node::List(l) if l.len() == 3 && matches!(&l[0].node, Node::Sym(h) if h == "let*") && matches!(l[1].node, Node::Vec(_)) => {
-                    let Node::Vec(bs) = &l[1].node else { return None };
-                    let mut pairs = Vec::new();
-                    let mut i = 0;
-                    while i + 1 < bs.len() {
-                        if let Node::Sym(n) = &bs[i].node {
-                            pairs.push((n.clone(), bs[i + 1].clone()));
-                        }
-                        i += 2;
-                    }
-                    (pairs, l[2].clone())
-                }
-                _ => (Vec::new(), body.clone()),
+            let Node::List(range) = e.node else { return None };
+            let body = e.child(*e.range(range).get(1..)?.last()?);
+            let children = body.children();
+            let (bindings, result) = if s::head(&body) == Some("let*") && children.len() == 3 && matches!(body.arena().row(children[1]).node, Node::Vec(_)) {
+                (body.arena().children(children[1]), children[2])
+            } else {
+                (&[][..], body.row_id())
             };
-            let mut homes = bindings;
-            homes.push(("@result".to_owned(), result));
-            homes.iter().find_map(|(n, v)| in_merge(v).map(|p| (Home::Copy { loop_: loop_.clone(), rel: vec![n.clone()], index: *index }, p)))
+            let found = bindings.chunks_exact(2).find_map(|pair| {
+                let Node::Sym(name) = body.arena().row(pair[0]).node else { return None };
+                in_merge(&body.child(pair[1])).map(|position| (body.name(name), position))
+            }).or_else(|| in_merge(&body.child(result)).map(|position| ("@result", position)));
+            found.map(|(name, position)| (Home::Copy { loop_: loop_.clone(), rel: vec![name.to_owned()], index: *index }, position))
         }
         _ => None,
     }
@@ -439,17 +427,18 @@ fn unique(graph: &[g::Node], id: i64) -> R<()> {
 
 /// The graphs a deleted object leaves behind, when no other `(ref g)` reads them.
 fn refs(name: &str, e: &S) -> usize {
-    if let Node::List(items) = &e.node {
+    if let Node::List(range) = e.node {
+        let items = e.range(range);
         if items.len() >= 2 {
-            match (&items[0].node, &items[1].node) {
-                (Node::Sym(h), Node::Sym(n)) if h == "ref" && n == name => return 1,
+            match (e.arena().row(items[0]).node, e.arena().row(items[1]).node) {
+                (Node::Sym(head), Node::Sym(graph)) if e.name(head) == "ref" && e.name(graph) == name => return 1,
                 // a panel shows it
-                (Node::Sym(h), Node::Str(n)) if h == "ui/graph" && n.as_slice() == name.as_bytes() => return 1,
+                (Node::Sym(head), Node::Str(graph)) if e.name(head) == "ui/graph" && e.bytes(graph) == name.as_bytes() => return 1,
                 _ => {}
             }
         }
     }
-    s::children(e).into_iter().map(|c| refs(name, c)).sum()
+    e.children().iter().map(|id| refs(name, &e.child(*id))).sum()
 }
 
 /// The graph that makes a scene object: the `(ref g)` its call holds, for a geometry's SOP graph
@@ -457,17 +446,15 @@ fn refs(name: &str, e: &S) -> usize {
 fn source_graph_of(doc: &document::T, id: i64) -> Option<String> {
     let home = doc.homes.objects.iter().find(|(i, _)| *i == id).map(|(_, h)| h)?;
     let e = document::syntax_of(&doc.workspace.ws.source, home)?;
-    let Node::List(items) = &e.node else { return None };
-    match items.first().map(|x| &x.node) {
-        Some(Node::Sym(h)) if h == "scene/geometry" || h == "scene/world" => items[1..].iter().find_map(|a| match &a.node {
-            Node::List(l) if l.len() == 2 && matches!(&l[0].node, Node::Sym(r) if r == "ref") => match &l[1].node {
-                Node::Sym(gname) => Some(gname.clone()),
-                _ => None,
-            },
+    if !matches!(s::head(&e), Some("scene/geometry" | "scene/world")) { return None; }
+    e.children()[1..].iter().find_map(|id| {
+        let Node::List(range) = e.arena().row(*id).node else { return None };
+        let [head, name] = e.range(range) else { return None };
+        match (e.arena().row(*head).node, e.arena().row(*name).node) {
+            (Node::Sym(head), Node::Sym(name)) if e.name(head) == "ref" => Some(e.name(name).to_owned()),
             _ => None,
-        }),
-        _ => None,
-    }
+        }
+    })
 }
 
 /// An object a viewport over another scene instance draws is derived: its text is that reference.
@@ -604,11 +591,12 @@ fn owned(workspace: &workspace_doc::T) -> Vec<String> {
     let c = &workspace.checked;
     let mut out: Vec<String> = c.graphs.iter().chain(c.defs.iter()).map(|gr| gr.name.clone()).collect();
     for m in c.macros.iter() {
-        if let Node::List(items) = &m.node {
+        if let Node::List(range) = m.node {
+            let items = m.range(range);
             if items.len() >= 2 {
-                if let Node::Sym(n) = &items[1].node {
-                    if items.len() == 4 || matches!(items[0].node, Node::Sym(_)) {
-                        out.push(n.clone());
+                if let Node::Sym(name) = m.arena().row(items[1]).node {
+                    if items.len() == 4 || matches!(m.arena().row(items[0]).node, Node::Sym(_)) {
+                        out.push(m.name(name).to_owned());
                     }
                 }
             }
@@ -619,64 +607,53 @@ fn owned(workspace: &workspace_doc::T) -> Vec<String> {
 
 /// `(kind slots... :name "label" :field value ...)` for a derived node; only what differs from the
 /// kind's defaults is written.
-fn call_of(kind: &str, label: &str, default_label: &str, slots: Vec<S>, extra: Vec<S>, node: &g::Node) -> S {
-    let mut items = vec![sym(kind)];
+fn call_of(kind: &str, label: &str, default_label: &str, slots: Vec<SyntaxId>, extra: Vec<SyntaxId>, node: &g::Node, builder: &mut SyntaxBuilder) -> SyntaxId {
+    let mut items = vec![sym_id(kind, builder)];
     items.extend(slots);
     if label != default_label {
-        items.push(kw("name"));
-        items.push(string(label));
+        items.push(kw_id("name", builder));
+        items.push(string_id(label, builder));
     }
     items.extend(extra);
-    for (key, value) in non_default(node) {
-        items.push(kw(&key));
+    for (key, value) in non_default(node, builder) {
+        items.push(kw_id(&key, builder));
         items.push(value);
     }
-    list(items)
+    list(items, builder)
 }
 
-fn graph_form(name: &str, context: &str, body: S) -> S {
-    list(vec![sym("graph"), sym(name), kw("context"), sym(context), body])
+fn graph_form(name: &str, context: &str, body: SyntaxId, builder: &mut SyntaxBuilder) -> SyntaxId {
+    list(vec![sym_id("graph", builder), sym_id(name, builder), kw_id("context", builder), sym_id(context, builder), body], builder)
 }
 
-fn let_star(bindings: &[(String, S)], result: S) -> S {
-    let mut vs = Vec::new();
-    for (n, e) in bindings {
-        vs.push(sym(n));
-        vs.push(e.clone());
+fn let_star(bindings: &[(String, SyntaxId)], result: SyntaxId, builder: &mut SyntaxBuilder) -> SyntaxId {
+    let mut items = Vec::new();
+    for (name, expression) in bindings {
+        items.push(sym_id(name, builder));
+        items.push(*expression);
     }
-    list(vec![sym("let*"), mk(Node::Vec(vs.into())), result])
+    list(vec![sym_id("let*", builder), push(Draft::Vec(items), builder), result], builder)
 }
 
 fn default_label(node: &g::Node) -> String {
     node.kind.to_ascii_lowercase()
 }
 
-fn object_binding(doc: &document::T, used: &mut Vec<String>, id: i64, info: &g::Node) -> R<(String, S)> {
+fn object_binding(doc: &document::T, used: &mut Vec<String>, id: i64, info: &g::Node, builder: &mut SyntaxBuilder) -> R<(String, SyntaxId)> {
     let graph = document::scene_graph(doc);
     let parent = objects::parent(&graph, id);
-    let slots: Vec<S> = if info.kind == "geometry" {
-        match document::object_graph(doc, id) {
-            Some(gname) => vec![list(vec![sym("ref"), sym(&gname)])],
-            None => return stop(format!("{} has no graph of its own to place.", info.label)),
-        }
-    } else {
-        Vec::new()
-    };
-    let parent: Vec<S> = match parent.and_then(|p| label(&graph, p)) {
-        Some(p) => vec![kw("parent"), string(&p)],
+    let mut default = default_label(info);
+    let slots = if info.kind == "geometry" {
+        let Some(name) = document::object_graph(doc, id) else { return stop(format!("{} has no graph of its own to place.", info.label)); };
+        default = name.clone();
+        vec![list(vec![sym_id("ref", builder), sym_id(&name, builder)], builder)]
+    } else { Vec::new() };
+    let mut extra = match parent.and_then(|id| label(&graph, id)) {
+        Some(parent) => vec![kw_id("parent", builder), string_id(&parent, builder)],
         None => Vec::new(),
     };
-    let active: Vec<S> = if doc.active_camera == Some(id) && info.kind == "camera" { vec![kw("active"), sym("true")] } else { Vec::new() };
-    let dl = match (info.kind.as_str(), slots.as_slice()) {
-        ("geometry", [S { node: Node::List(l), .. }]) if l.len() == 2 && matches!(l[1].node, Node::Sym(_)) => match &l[1].node {
-            Node::Sym(gname) => gname.clone(),
-            _ => unreachable!(),
-        },
-        _ => default_label(info),
-    };
-    let mut extra = parent;
-    extra.extend(active);
-    Ok((f::fresh_among(used, &info.label), call_of(&format!("scene/{}", info.kind), &info.label, &dl, slots, extra, info)))
+    if doc.active_camera == Some(id) && info.kind == "camera" { extra.extend([kw_id("active", builder), sym_id("true", builder)]); }
+    Ok((f::fresh_among(used, &info.label), call_of(&format!("scene/{}", info.kind), &info.label, &default, slots, extra, info, builder)))
 }
 
 /// The text of every object no binding holds, into the scene graph (made when there is none, even
@@ -690,26 +667,31 @@ fn adopt_objects(st: &mut State, doc: &document::T) -> R<()> {
     let graph = document::scene_graph(doc);
     let unhomed: Vec<g::Node> = graph.iter().filter(|i| i.kind != "world" && !homed(doc, i.id)).cloned().collect();
     if unhomed.is_empty() && lowering::graph_of(&st.workspace, context::scene()).is_none() {
-        apply(st, Op::SetGraph { name: "scene".to_owned(), form: graph_form("scene", "scene", list(vec![sym("scene/merge")])) })?;
+        let mut builder = SyntaxBuilder::new();
+        let root = graph_form("scene", "scene", list(vec![sym_id("scene/merge", &mut builder)], &mut builder), &mut builder);
+        apply(st, Op::SetGraph { name: "scene".to_owned(), form: builder.freeze().handle(root) })?;
     }
     if !unhomed.is_empty() {
         let mut used = owned(&st.workspace);
+        let mut builder = SyntaxBuilder::new();
         let mut bindings = Vec::new();
         for i in &unhomed {
-            bindings.push(object_binding(doc, &mut used, i.id, i)?);
+            bindings.push(object_binding(doc, &mut used, i.id, i, &mut builder)?);
         }
         match lowering::graph_of(&st.workspace, context::scene()) {
             None => {
-                let mut items = vec![sym("scene/merge")];
-                items.extend(bindings.iter().map(|(n, _)| sym(n)));
-                let body = let_star(&bindings, list(items));
-                apply(st, Op::SetGraph { name: "scene".to_owned(), form: graph_form("scene", "scene", body) })?;
+                let mut items = vec![sym_id("scene/merge", &mut builder)];
+                items.extend(bindings.iter().map(|(name, _)| sym_id(name, &mut builder)));
+                let body = let_star(&bindings, list(items, &mut builder), &mut builder);
+                let root = graph_form("scene", "scene", body, &mut builder);
+                apply(st, Op::SetGraph { name: "scene".to_owned(), form: builder.freeze().handle(root) })?;
             }
             Some(gr) => {
                 // into a graph the text has: each name is free of what the graph binds by then
+                let arena = builder.freeze();
                 for ((_, expr), i) in bindings.into_iter().zip(unhomed.iter()) {
                     let name = f::fresh_name(&st.workspace.source, &gr.name, &i.label);
-                    apply(st, Op::AddNode { scope: vec![gr.name.clone()], expr, name })?;
+                    apply(st, Op::AddNode { scope: vec![gr.name.clone()], expr: arena.handle(expr), name })?;
                 }
             }
         }
@@ -717,9 +699,6 @@ fn adopt_objects(st: &mut State, doc: &document::T) -> R<()> {
     Ok(())
 }
 
-fn none_world() -> S {
-    list(vec![sym("world/none")])
-}
 
 /// The layers of a World as a world graph named `name`: bound bottom first, the top layer the
 /// result; `(world/none)` without layers.
@@ -735,21 +714,23 @@ fn write_stack(st: &mut State, layers_graph: &[g::Node], bottom_first: &[i64], n
         bindings.push((*id, n, info));
     }
     let world_kinds = kinds::world_kinds();
-    let mut layers: Vec<(String, S)> = Vec::new();
+    let mut builder = SyntaxBuilder::new();
+    let mut layers: Vec<(String, SyntaxId)> = Vec::new();
     for (i, (_, n, info)) in bindings.iter().enumerate() {
-        let below: Vec<S> = if i == 0 { Vec::new() } else { vec![sym(&bindings[i - 1].1)] };
+        let below = if i == 0 { Vec::new() } else { vec![sym_id(&bindings[i - 1].1, &mut builder)] };
         let qualified = format!("world/{}", info.kind);
         let dl = match world_kinds.iter().find(|(k, _)| *k == qualified) {
             Some((_, k)) => k.label.clone(),
             None => return stop(format!("Unknown World layer kind {}.", info.kind)),
         };
-        layers.push((n.clone(), call_of(&qualified, &info.label, &dl, below, Vec::new(), info)));
+        layers.push((n.clone(), call_of(&qualified, &info.label, &dl, below, Vec::new(), info, &mut builder)));
     }
     let body = match layers.last() {
-        None => none_world(),
-        Some((top, _)) => let_star(&layers, sym(top)),
+        None => list(vec![sym_id("world/none", &mut builder)], &mut builder),
+        Some((top, _)) => let_star(&layers, sym_id(top, &mut builder), &mut builder),
     };
-    apply(st, Op::SetGraph { name: name.to_owned(), form: graph_form(name, "world", body) })
+    let root = graph_form(name, "world", body, &mut builder);
+    apply(st, Op::SetGraph { name: name.to_owned(), form: builder.freeze().handle(root) })
 }
 
 /// The layers of the World `wid` the text has, with `removed` gone and the others stacked as
@@ -842,14 +823,18 @@ fn adopt_root(st: &mut State, doc: &document::T, root: &root::Parameters) -> R<(
         Some(gr) => gr.name,
         None => return stop("option is None"),
     };
-    let changed = root_edits(&root::default(), root);
-    let mut items = vec![sym("scene/root")];
-    for (key, value) in changed {
-        items.push(kw(&key));
-        items.push(value.expect("root edit has a value"));
+    let mut builder = SyntaxBuilder::new();
+    let defaults = root::fields(&root::default());
+    let mut items = vec![sym_id("scene/root", &mut builder)];
+    for field in root::fields(root) {
+        if current(&defaults, &field.name).as_ref() != Some(&field.current) {
+            items.push(kw_id(&field.name, &mut builder));
+            items.push(push(scalar_draft(&field.current), &mut builder));
+        }
     }
+    let expression = list(items, &mut builder);
     let name = f::fresh_name(&st.workspace.source, &scene, "root");
-    apply(st, Op::AddNode { scope: vec![scene], name, expr: list(items) })
+    apply(st, Op::AddNode { scope: vec![scene], name, expr: builder.freeze().handle(expression) })
 }
 
 fn root_write(st: &mut State, before: &document::T, now: &root::Parameters) -> R<()> {
@@ -1253,15 +1238,17 @@ fn scene_name(workspace: &workspace_doc::T) -> String {
 pub fn add_geometry(doc: &document::T, existing: Option<&str>) -> Vec<Op> {
     let workspace = &doc.workspace.ws;
     let mut used = owned(workspace);
-    let (mut ops, graph): (Vec<Op>, String) = match existing {
-        Some(gr) => (Vec::new(), gr.to_owned()),
+    let mut builder = SyntaxBuilder::new();
+    let (new_graph, graph) = match existing {
+        Some(graph) => (None, graph.to_owned()),
         None => {
-            let gr = f::fresh_among(&mut used, "shape");
-            (vec![Op::SetGraph { name: gr.clone(), form: graph_form(&gr, "sop", list(vec![sym("sop/box")])) }], gr)
+            let graph = f::fresh_among(&mut used, "shape");
+            let form = graph_form(&graph, "sop", list(vec![sym_id("sop/box", &mut builder)], &mut builder), &mut builder);
+            (Some(form), graph)
         }
     };
     let labels: Vec<String> = document::scene_graph(doc).iter().map(|i| i.label.clone()).collect();
-    let name: Vec<S> = if !labels.contains(&graph) {
+    let name = if !labels.contains(&graph) {
         Vec::new()
     } else {
         let mut n = 2;
@@ -1273,12 +1260,16 @@ pub fn add_geometry(doc: &document::T, existing: Option<&str>) -> Vec<Op> {
                 break l;
             }
         };
-        vec![kw("name"), string(&free)]
+        vec![kw_id("name", &mut builder), string_id(&free, &mut builder)]
     };
-    let mut items = vec![sym("scene/geometry"), list(vec![sym("ref"), sym(&graph)])];
+    let mut items = vec![sym_id("scene/geometry", &mut builder), list(vec![sym_id("ref", &mut builder), sym_id(&graph, &mut builder)], &mut builder)];
     items.extend(name);
+    let expression = list(items, &mut builder);
+    let arena = builder.freeze();
+    let mut ops = Vec::new();
+    if let Some(form) = new_graph { ops.push(Op::SetGraph { name: graph, form: arena.handle(form) }); }
     let scene = scene_name(workspace);
-    ops.push(Op::AddNode { scope: vec![scene.clone()], name: f::fresh_name(&workspace.source, &scene, "object"), expr: list(items) });
+    ops.push(Op::AddNode { scope: vec![scene.clone()], name: f::fresh_name(&workspace.source, &scene, "object"), expr: arena.handle(expression) });
     ops
 }
 
@@ -1291,10 +1282,14 @@ pub fn add_world(doc: &document::T) -> R<Vec<Op>> {
     let workspace = &doc.workspace.ws;
     let mut used = owned(workspace);
     let gr = f::fresh_among(&mut used, "sky");
-    let body = list(vec![sym("world/sun"), list(vec![sym("world/sky")])]);
+    let mut builder = SyntaxBuilder::new();
+    let body = list(vec![sym_id("world/sun", &mut builder), list(vec![sym_id("world/sky", &mut builder)], &mut builder)], &mut builder);
+    let graph = graph_form(&gr, "world", body, &mut builder);
+    let expression = list(vec![sym_id("scene/world", &mut builder), list(vec![sym_id("ref", &mut builder), sym_id(&gr, &mut builder)], &mut builder)], &mut builder);
+    let arena = builder.freeze();
     let scene = scene_name(workspace);
     Ok(vec![
-        Op::SetGraph { name: gr.clone(), form: graph_form(&gr, "world", body) },
-        Op::AddNode { scope: vec![scene.clone()], name: f::fresh_name(&workspace.source, &scene, "world"), expr: list(vec![sym("scene/world"), list(vec![sym("ref"), sym(&gr)])]) },
+        Op::SetGraph { name: gr.clone(), form: arena.handle(graph) },
+        Op::AddNode { scope: vec![scene.clone()], name: f::fresh_name(&workspace.source, &scene, "world"), expr: arena.handle(expression) },
     ])
 }

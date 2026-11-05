@@ -106,9 +106,6 @@ pub struct mesh_build {
     pub instance_count: i64,
     /// `encode_instances` made a structure of its own (OCaml compares `build.gpu.structure` physically)
     pub instances_built: bool,
-    /// false: the primitive structure stays uncompacted (Vulkan motion instances: a compacted structure
-    /// keeps no geometry record for the motion proxies)
-    pub compact: bool,
     /// the prototype structure's build scratch, until the build finishes
     pub proto_scratch: Option<Buffer>,
 }
@@ -472,7 +469,7 @@ fn upload_inner(o: &mut owned_resources, reuse: Option<&gpu_mesh>, material_data
     let native_curves = shape.curves && capabilities.ray_tracing_curves;
     let extra_key = || [extras.sphere_bytes.as_slice(), extras.strand_points.as_slice(), mesh.mesh_colors.as_slice()].concat();
     let reused: Option<(&gpu_mesh, Accel)> = match (reuse, &mesh.instances) {
-        (Some(gpu), Some(_)) if mesh.scene.is_none() && !(shape.motion && flow_gpu::pipelines::is_vulkan()) => match (&gpu.prototype_key, &gpu.primitive) {
+        (Some(gpu), Some(_)) if mesh.scene.is_none() => match (&gpu.prototype_key, &gpu.primitive) {
             (Some((positions, normals, ids, materials, key)), Some(primitive))
                 if *positions == mesh.mesh_positions && *normals == mesh.mesh_normals && *ids == mesh.mesh_ids && materials.as_slice() == material_data && *key == extra_key() =>
             {
@@ -654,7 +651,6 @@ fn upload_inner(o: &mut owned_resources, reuse: Option<&gpu_mesh>, material_data
         stage: stage::Building(receipt),
         instance_count,
         instances_built: false,
-        compact: !(shape.motion && flow_gpu::pipelines::is_vulkan()),
         proto_scratch: None,
     };
     if !scene_blas.is_empty() {
@@ -706,7 +702,6 @@ fn upload_inner(o: &mut owned_resources, reuse: Option<&gpu_mesh>, material_data
             stage: stage::Ready,
             instance_count,
             instances_built: false,
-            compact: true,
             proto_scratch: None,
         };
         submit_instances(device, queue, &mut build)?;
@@ -778,24 +773,6 @@ pub fn advance_build(device: &Device, queue: &Queue, build: &mut mesh_build) -> 
                 None => return Err("path tracer build lost its compacted size".to_string()),
             };
             let size = i64::from_le_bytes(size_bytes[0..8].try_into().unwrap());
-            if !build.compact {
-                // the primitive structure stays as built (no compacted copy to give the proxies a geometry record)
-                if build.instance_count > 0 {
-                    build.gpu.primitive = Some(uncompacted.clone());
-                }
-                let command = b::begin_commands(queue).map_err(gpu_err)?;
-                let encoded = encode_instances(device, build, &command).and_then(|()| b::commit(&command).map_err(gpu_err));
-                return match encoded {
-                    Ok(receipt) => {
-                        build.stage = stage::Compacting(receipt);
-                        Ok(())
-                    }
-                    Err(e) => {
-                        let _ = b::abandon(&command);
-                        Err(e)
-                    }
-                };
-            }
             let compacted = b::create_accel(device, AccelDescriptor::Sized { size, template: uncompacted.clone() }, false).map_err(gpu_err)?;
             build.uncompacted = Some(uncompacted.clone());
             build.gpu.structure = compacted.clone();

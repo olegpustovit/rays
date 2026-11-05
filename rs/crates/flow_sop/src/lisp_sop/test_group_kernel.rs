@@ -130,12 +130,16 @@ pub(super) fn evaluated(g: &geo::T, body: &str) -> (Value, flow_ir::core_exec::R
 fn exact(g: &geo::T, body: &str, expected: &Value) {
     let (value, resolve) = evaluated(g, body);
     let program = flow_ok(Executor::compile(&value, &Executor::CompileOptions { strict: true, ..Default::default() }));
+    exact_prepared(&value, &program, resolve, body, expected);
+}
+
+fn exact_prepared(value: &Value, program: &Executor::Program, resolve: flow_ir::core_exec::ResolveFn, body: &str, expected: &Value) {
     for domains in [1i64, 8] {
         parallel::run_unit(Some(domains), &|| {
             let live = input::at_time(0.25);
-            assert!(&flow_ok(flow_eval::Host::force_reference(&value, &live, None, None, Some(resolve.clone()))) == expected, "{body}: reference");
+            assert!(&flow_ok(flow_eval::Host::force_reference(value, &live, None, None, Some(resolve.clone()))) == expected, "{body}: reference");
             let options = Executor::ForceOptions { strict: true, resolve: Some(resolve.clone()), ..Default::default() };
-            assert!(&flow_ok(Executor::force(&program, &options, &live)) == expected, "{body}: strict");
+            assert!(&flow_ok(Executor::force(program, &options, &live)) == expected, "{body}: strict");
             Ok(())
         })
         .unwrap();
@@ -246,7 +250,7 @@ fn wildcard_names_and_refusals() {
         }
         for pattern in ["", "*", "wall*", "wall?", "wall_[a-b]", "wall_[!0-9]", "* ^wall*", "^wall* wall_b", "literal\\*", "\u{17e}*"] {
             let compiled = ok(rdk::attribute_pattern::compile(pattern));
-            let printed = flow_syntax::lisp::print(&[syntax::make(Node::Str(pattern.as_bytes().to_vec()))]).0;
+            let printed = flow_syntax::lisp::quote_string(pattern.as_bytes());
             let expected: Vec<Vec<u8>> = names.iter().filter(|n| rdk::attribute_pattern::matches(&compiled, n)).map(|n| n.as_bytes().to_vec()).collect();
             exact(&g, &format!("(sop/group_names geo {printed} :owner {owner})"), &Value::Text_array(Arc::new(expected)));
         }
@@ -318,7 +322,10 @@ fn group_cards_expose_typed_masks_names_and_order() {
         assert!(node.rows.iter().any(|row| row.label == "owner"));
     }
     for binding in ["mask", "names", "order", "result"] {
-        let op = Op::SetArg { node: path(binding), key: ArgKey::Kw("owner".to_owned()), sub: vec![], value: syntax::make(Node::Sym("edge".to_owned())) };
+        let mut b = flow_syntax::arena::SyntaxBuilder::new();
+        let name = b.intern("edge");
+        let id = b.push(0, Node::Sym(name), rays_diagnostic::Span { start: 0, finish: 0 }, None);
+        let op = Op::SetArg { node: path(binding), key: ArgKey::Kw("owner".to_owned()), sub: vec![], value: b.freeze().handle(id) };
         let (_, checked) = flow_ok(apply_checked_with(&[], false, Some(&checker), &cat, &forms, &op));
         let pane = proj::of_graph(&cat, &checked, "g").unwrap();
         let node = proj::find(&pane, &path(binding)).unwrap();
@@ -330,7 +337,10 @@ fn group_cards_expose_typed_masks_names_and_order() {
     (let* [geo (sop/line) mask (sop/group geo :name "selected" :owner point)
       result (sop/with_group geo (array/int 0 0) :name "copy" :owner point)] result)))"#,
     );
-    let op = Op::SetArg { node: path("result"), key: ArgKey::Pos(1), sub: vec![], value: syntax::make(Node::Sym("mask".to_owned())) };
+    let mut b = flow_syntax::arena::SyntaxBuilder::new();
+    let name = b.intern("mask");
+    let id = b.push(0, Node::Sym(name), rays_diagnostic::Span { start: 0, finish: 0 }, None);
+    let op = Op::SetArg { node: path("result"), key: ArgKey::Pos(1), sub: vec![], value: b.freeze().handle(id) };
     flow_ok(apply_checked_with(&[], false, Some(&checker), &cat, &forms, &op));
     for text in [
         "(workspace bad (graph g :context sop (sop/with_group nil (array/int 0 0) :name \"x\" :order 2)))",
@@ -478,7 +488,10 @@ fn glob_literal_rewrite_and_group_entries() {
         ("entries", ArgKey::Pos(1), "wall*"),
         ("entries", ArgKey::Kw("owner".to_owned()), "edge"),
     ] {
-        let replacement = syntax::make(Node::Str(value.as_bytes().to_vec()));
+        let mut b = flow_syntax::arena::SyntaxBuilder::new();
+        let bytes = b.bytes(value.as_bytes());
+        let id = b.push(0, Node::Str(bytes), rays_diagnostic::Span { start: 0, finish: 0 }, None);
+        let replacement = b.freeze().handle(id);
         let op = Op::SetArg { node: path(binding), key: key.clone(), sub: vec![], value: replacement.clone() };
         let (_, changed) = flow_ok(apply_checked_with(&[], false, Some(&checker), &cat, &forms, &op));
         let card = proj::find(&proj::of_graph(&cat, &changed, "g").unwrap(), &path(binding)).unwrap();
@@ -512,7 +525,7 @@ fn public_geometry_folds_and_collecting_forms_are_refused() {
 }
 
 #[test]
-#[ignore = "slow lowering: debug build, over 5 s alone (a single sop/uv_sphere lowers in 3.3 s, a box in 0.15 s; see test_perf_lower)"]
+
 fn cooked_folds_traverse_inventory() {
     let groups: Vec<group::T> = (0..5001).map(|i| ok(group::init(None, group::Owner::Point, &format!("entry_{i}"), 0, &|_| unreachable!()))).collect();
     let geometry = ok(geo::create(geo::positions(&fixtures()[0]).clone(), ok(topology::empty(0)), None, Some(groups), None));
@@ -647,48 +660,87 @@ fn promotion_fixture(n: i64) -> geo::T {
     ok(geo::create(ok(Float3::View::of_owned_exn((0..nn).map(|i| i as f64).collect(), vec![0.0; nn], vec![0.0; nn])), t, None, None, None))
 }
 
-#[test]
-fn group_query_promotion_matches_native_any_incidence_masks() {
-    let slow = std::env::var("RAYS_SLOW").as_deref() == Ok("1");
-    // 32769 points (the packed cutoff) costs ~30 s in a debug build: RAYS_SLOW=1 only
-    for n in [0i64, 1, 7, 8, 9, 32769].into_iter().filter(|n| *n < 1000 || slow) {
-        let geometry = promotion_fixture(n);
-        for (owner, native_owner) in OWNERS {
-            let length = count(&geometry, native_owner);
-            let selectors: [&dyn Fn(i64) -> bool; 4] = [&|_| false, &|_| true, &|i| i % 2 == 0, &|i| i == length - 1];
-            for selected in selectors {
-                let mask: Vec<i64> = (0..length).map(|i| i64::from(selected(i))).collect();
-                for ordered in [false, true] {
-                    let order: Option<Vec<i64>> = (ordered && native_owner.is_some()).then(|| mask.iter().enumerate().filter(|(_, v)| **v == 1).map(|(i, _)| i as i64).rev().collect());
-                    let geometry = native_write(order.as_deref(), native_owner, "promoted", &mask, &geometry);
-                    let before = bytes(&geometry);
-                    let original = query(&geometry, owner, "promoted", None);
-                    let expected = native_promoted(&geometry, owner, "promoted", 97);
-                    for domains in [1i64, 4, 8] {
-                        parallel::run_unit(Some(domains), &|| {
-                            for grain in [1i64, 97, 4096] {
-                                assert!(native_promoted(&geometry, owner, "promoted", grain) == expected);
-                            }
-                            assert!(flow_ok(promoted_query(&geometry, owner, "promoted")) == expected);
-                            if let Value::Int_array(values) = flow_ok(promoted_query(&geometry, owner, "promoted")) {
-                                if n > 0 {
-                                    let mut copy = (*values).clone();
-                                    copy[0] = 1 - copy[0];
-                                }
-                            }
-                            assert!(flow_ok(promoted_query(&geometry, owner, "promoted")) == expected);
-                            assert!(query(&geometry, owner, "promoted", None) == original);
-                            Ok(())
-                        })
-                        .unwrap();
+fn promotion_matches(n: i64, owner: &str, native_owner: Option<group::Owner>, selectors: std::ops::Range<usize>) {
+    let geometry = promotion_fixture(n);
+    let body = format!("(exact (map (fn [(value : int)] value) (sop/group geo :name \"promoted\" :owner {owner} :as_owner point)))");
+    // Only the resolver's immutable geometry changes between masks: check and compile once.
+    let (value, _) = evaluated(&geometry, &body);
+    let program = flow_ok(Executor::compile(&value, &Executor::CompileOptions { strict: true, ..Default::default() }));
+    let length = count(&geometry, native_owner);
+    let selected: [&dyn Fn(i64) -> bool; 4] = [&|_| false, &|_| true, &|i| i % 2 == 0, &|i| i == length - 1];
+    for selector in selectors {
+        let mask: Vec<i64> = (0..length).map(|i| i64::from(selected[selector](i))).collect();
+        for ordered in [false, true] {
+            let order: Option<Vec<i64>> = (ordered && native_owner.is_some()).then(|| mask.iter().enumerate().filter(|(_, v)| **v == 1).map(|(i, _)| i as i64).rev().collect());
+            let geometry = native_write(order.as_deref(), native_owner, "promoted", &mask, &geometry);
+            let before = bytes(&geometry);
+            let original = query(&geometry, owner, "promoted", None);
+            let expected = native_promoted(&geometry, owner, "promoted", 97);
+            for domains in [1i64, 4, 8] {
+                parallel::run_unit(Some(domains), &|| {
+                    for grain in [1i64, 97, 4096] {
+                        assert!(native_promoted(&geometry, owner, "promoted", grain) == expected);
                     }
-                    exact(&geometry, &format!("(exact (map (fn [(value : int)] value) (sop/group geo :name \"promoted\" :owner {owner} :as_owner point)))"), &expected);
-                    assert!(bytes(&geometry) == before);
-                }
+                    assert!(flow_ok(promoted_query(&geometry, owner, "promoted")) == expected);
+                    if let Value::Int_array(values) = flow_ok(promoted_query(&geometry, owner, "promoted")) {
+                        if n > 0 {
+                            let mut copy = (*values).clone();
+                            copy[0] = 1 - copy[0];
+                        }
+                    }
+                    assert!(flow_ok(promoted_query(&geometry, owner, "promoted")) == expected);
+                    assert!(query(&geometry, owner, "promoted", None) == original);
+                    Ok(())
+                })
+                .unwrap();
             }
+            let lookup = lookup_of(Some(geometry.clone()));
+            exact_prepared(&value, &program, Arc::new(move |value| attribute_kernel::resolve(None, &lookup, value)), &body, &expected);
+            assert!(bytes(&geometry) == before);
         }
     }
 }
+
+macro_rules! promotion_owners {
+    ($($test:ident $owner:literal $native:expr),* $(,)?) => {$(
+        #[test]
+        fn $test() {
+            for n in [0i64, 1, 7, 8, 9] { promotion_matches(n, $owner, $native, 0..4); }
+        }
+    )*};
+}
+promotion_owners!(
+    group_query_promotion_point "point" Some(group::Owner::Point),
+    group_query_promotion_vertex "vertex" Some(group::Owner::Vertex),
+    group_query_promotion_primitive "primitive" Some(group::Owner::Primitive),
+    group_query_promotion_edge "edge" None,
+);
+
+// The full packed-cutoff fixture remains in the default run, split by owner and mask.
+macro_rules! promotion_cutoff {
+    ($($test:ident $owner:literal $native:expr, $selector:expr);* $(;)?) => {$(
+        #[test]
+        fn $test() { promotion_matches(32769, $owner, $native, $selector..$selector + 1); }
+    )*};
+}
+promotion_cutoff!(
+    group_query_promotion_cutoff_point_none "point" Some(group::Owner::Point), 0;
+    group_query_promotion_cutoff_point_all "point" Some(group::Owner::Point), 1;
+    group_query_promotion_cutoff_point_even "point" Some(group::Owner::Point), 2;
+    group_query_promotion_cutoff_point_last "point" Some(group::Owner::Point), 3;
+    group_query_promotion_cutoff_vertex_none "vertex" Some(group::Owner::Vertex), 0;
+    group_query_promotion_cutoff_vertex_all "vertex" Some(group::Owner::Vertex), 1;
+    group_query_promotion_cutoff_vertex_even "vertex" Some(group::Owner::Vertex), 2;
+    group_query_promotion_cutoff_vertex_last "vertex" Some(group::Owner::Vertex), 3;
+    group_query_promotion_cutoff_primitive_none "primitive" Some(group::Owner::Primitive), 0;
+    group_query_promotion_cutoff_primitive_all "primitive" Some(group::Owner::Primitive), 1;
+    group_query_promotion_cutoff_primitive_even "primitive" Some(group::Owner::Primitive), 2;
+    group_query_promotion_cutoff_primitive_last "primitive" Some(group::Owner::Primitive), 3;
+    group_query_promotion_cutoff_edge_none "edge" None, 0;
+    group_query_promotion_cutoff_edge_all "edge" None, 1;
+    group_query_promotion_cutoff_edge_even "edge" None, 2;
+    group_query_promotion_cutoff_edge_last "edge" None, 3;
+);
 
 #[test]
 fn group_query_promotion_names_and_refusals() {
@@ -779,7 +831,10 @@ fn promotion_optional_target_graph_gestures() {
         card.rows.iter().find(|row| row.key == ArgKey::Kw("as_owner".to_owned())).unwrap().expr.as_ref().map(flow_syntax::lisp::flat)
     };
     assert!(row_expr(&initial).is_none());
-    let set = Op::SetArg { node: path("mask"), key: ArgKey::Kw("as_owner".to_owned()), sub: vec![], value: syntax::make(Node::Str(b"point".to_vec())) };
+    let mut b = flow_syntax::arena::SyntaxBuilder::new();
+    let bytes = b.bytes(b"point");
+    let id = b.push(0, Node::Str(bytes), rays_diagnostic::Span { start: 0, finish: 0 }, None);
+    let set = Op::SetArg { node: path("mask"), key: ArgKey::Kw("as_owner".to_owned()), sub: vec![], value: b.freeze().handle(id) };
     let (changed_forms, changed) = flow_ok(apply_checked_with(&[], false, Some(&checker), &cat, &forms, &set));
     assert!(row_expr(&changed).as_deref() == Some("\"point\""));
     let disconnect = Op::Disconnect { node: path("mask"), key: ArgKey::Kw("as_owner".to_owned()), fallback: None };

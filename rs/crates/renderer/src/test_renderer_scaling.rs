@@ -18,6 +18,7 @@ fn renderer_scaling() {
     let the_mesh = mesh {
         key: mesh_key::Host("scale".to_owned()),
         vertices: empty_bytes(),
+        shared_vertices: None,
         vertex_count: 1,
         indices: empty_bytes(),
         index_count: 1,

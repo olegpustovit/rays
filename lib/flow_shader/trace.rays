@@ -2,8 +2,8 @@
 ; read field is its hit) at each scene/trace of a traced kernel, specialised by the scene's static facts:
 ; instanced (an instance structure and its table, 16 words an instance or 32 with both keyframes),
 ; motion (the query's time: instance transforms, or vertex keyframes in a flat scene), strands (0 none,
-; 1 the in-loop capsule test, 2 native round linear curves) and spheres (whether it has any). The ray queries and the scene tables are the
-; gpu/ intrinsics the printers emit. Vector arithmetic is written in the GPU's rounding of the MSL
+; 1 a capsule test in swept-AABB candidates, 2 native round linear curves), and spheres (whether it has any).
+; The ray queries and the scene tables are the gpu/ intrinsics the printers emit. Vector arithmetic is written
 ; intrinsics: dot is a fused chain from x, normalize scales by rsqrt and cross is one fma a component.
 (defn tdot :context value [(a : vec3) (b : vec3)] (fma a.z b.z (fma a.y b.y (* a.x b.x))))
 (defn tunit :context value [(v : vec3)] (* v (rsqrt (tdot v v))))
@@ -52,42 +52,12 @@
          off (- (+ o (* dn at)) (tmix a b u))
          axial (- off (* tangent (/ (tdot off tangent) (max (tdot tangent tangent) 1e-8))))]
     {:t at :prim (float k) :u u :v 0. :n (tunit axial) :hit true :inst -2.}))
-(defn nearer :context value [(best : float) (x : float) (ok : bool) (tmin : float) (tmax : float)]
-  (if (and ok (and (>= x tmin) (and (<= x tmax) (< x best)))) x best))
-; A segment as a capsule: the cylinder's two roots within it and each end sphere's two roots beyond it,
-; the nearest in [tmin, tmax] (Infinity for none) and its clamped curve parameter. The roots are taken
-; from the ray's point nearest the segment's middle, shift along it: float32 keeps them precise.
-(defn strand-t :context value [(o0 : vec3) (dn : vec3) (tmin0 : float) (tmax0 : float) (sa : vec4) (sb : vec4)]
-  (let* [shift (tdot (- (* (+ (txyz sa) (txyz sb)) 0.5) o0) dn)
-         o (+ o0 (* dn shift)) tmin (- tmin0 shift) tmax (- tmax0 shift)
-         ba (- (txyz sb) (txyz sa)) oa (- o (txyz sa)) ob (- o (txyz sb))
-         r sa.w baba (tdot ba ba) bard (tdot ba dn) baoa (tdot ba oa)
-         qa (- baba (* bard bard)) qb (- (* baba (tdot dn oa)) (* baoa bard))
-         qc (- (- (* baba (tdot oa oa)) (* baoa baoa)) (* (* r r) baba))
-         disc (- (* qb qb) (* qa qc)) root (sqrt disc) side (and (> qa 0.) (>= disc 0.))
-         t0 (/ (- (* -1. qb) root) qa) t1 (/ (+ (* -1. qb) root) qa)
-         y0 (+ baoa (* t0 bard)) y1 (+ baoa (* t1 bard))
-         side-best (nearer (nearer Infinity t0 (and side (and (> y0 0.) (< y0 baba))) tmin tmax)
-                      t1 (and side (and (> y1 0.) (< y1 baba))) tmin tmax)
-         ha (tdot oa dn) capa (- (* ha ha) (- (tdot oa oa) (* r r))) roota (sqrt capa)
-         ta0 (- (* -1. ha) roota) ta1 (+ (* -1. ha) roota)
-         a-best (nearer (nearer side-best ta0 (and (>= capa 0.) (<= (+ baoa (* ta0 bard)) 0.)) tmin tmax)
-                      ta1 (and (>= capa 0.) (<= (+ baoa (* ta1 bard)) 0.)) tmin tmax)
-         hb (tdot ob dn) capb (- (* hb hb) (- (tdot ob ob) (* r r))) rootb (sqrt capb)
-         tb0 (- (* -1. hb) rootb) tb1 (+ (* -1. hb) rootb)
-         best (nearer (nearer a-best tb0 (and (>= capb 0.) (>= (+ baoa (* tb0 bard)) baba)) tmin tmax)
-                      tb1 (and (>= capb 0.) (>= (+ baoa (* tb1 bard)) baba)) tmin tmax)]
-    {:t (+ best shift) :u (min (max (/ (+ baoa (* best bard)) baba) 0.) 1.)}))
+; A strand query uses its native curve or swept-AABB candidate structure; the backend resolves its capsules.
 (defn strands :context value [(h : {:t float :prim float :u float :v float :n vec3 :hit bool :inst float})
                               (o : vec3) (dn : vec3) (tmin : float) (tmax : float) (kind : int)]
-  (if (int/eq kind 2)
+  (if (int/eq kind 0) h
     (let* [c (gpu/trace-curves o dn tmin (if h.hit h.t tmax))]
-      (if c.hit (strand-hit o dn c.t c.prim c.u) h))
-    (if (int/eq kind 1)
-      (fold [near h] [k (range (gpu/scene-strands))]
-        (let* [st (strand-t o dn tmin (if near.hit near.t tmax) (gpu/scene-strand k 0) (gpu/scene-strand k 1))]
-          (if (<= st.t tmax) (strand-hit o dn st.t k st.u) near)))
-      h)))
+      (if c.hit (strand-hit o dn c.t c.prim c.u) h))))
 
 ; Sphere k (centre, radius) met in [tmin, tmax], the nearer root first.
 (defn sphere-t :context value [(o : vec3) (dn : vec3) (tmin : float) (k : int)]
@@ -113,14 +83,7 @@
   (let* [dn (tunit d)]
     (if (gpu/trace-any o dn tmin tmax time)
       true
-      (if (if (int/eq kind 2) (gpu/trace-curves-any o dn tmin tmax)
-            (if (int/eq kind 1)
-              (let* [found (iterate (gpu/scene-strands) {:k 0 :seen false}
-                             (fn [w] (let* [st (strand-t o dn tmin tmax (gpu/scene-strand w.k 0) (gpu/scene-strand w.k 1))]
-                                       {:k (int/add w.k 1) :seen (<= st.t tmax)}))
-                             :until (fn [prev next] next.seen))]
-                found.seen)
-              false))
+      (if (if (int/eq kind 0) false (gpu/trace-curves-any o dn tmin tmax))
         true
         (if spheres
           (let* [found (iterate (gpu/scene-spheres) {:k 0 :seen false}

@@ -67,16 +67,17 @@ fn checked_rgba(rgba: Rgba, width: i32, height: i32) -> Rgba {
 
 fn check_fixture(value: &Fixture) {
     let path = fixture(value.file);
-    let decoded = match load_file(&path) {
+    let mut decoded = match load_file(&path) {
         Ok(rgba) => rgba,
         Err(error) => panic!("{} decode: {error}", value.file),
     };
     checked_rgba(decoded.clone(), value.width, value.height);
     // each decode owns its buffer: scribbling on one never shows in the next
-    let mut scribbled = decoded.clone();
-    scribbled.pixels.fill(0xAA);
+    let first = decoded.pixels.clone();
+    decoded.pixels.fill(0xAA);
     let again = get_image(load_file(&path));
-    assert_eq!(again.pixels, decoded.pixels, "{} decoded differently the second time", value.file);
+    assert_ne!(again.pixels.as_ptr(), decoded.pixels.as_ptr(), "{} shared a buffer between two decodes", value.file);
+    assert_eq!(again.pixels, first, "{} decoded differently the second time", value.file);
 }
 
 fn pixel(pixels: &[u8], width: usize, x: usize, y: usize) -> &[u8] {
@@ -161,7 +162,7 @@ fn cpu_decode_conformance() {
     }
     check_reload();
 
-    for _ in 0..1_000 {
+    for _ in 0..10_000 {
         get_image(load_file(&fixture("sample.png")));
     }
 }

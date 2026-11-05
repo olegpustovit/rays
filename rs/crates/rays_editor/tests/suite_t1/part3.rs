@@ -6,7 +6,7 @@ use editor_document::layout_edit::{Axis, Op as L, Side, Size as LSize};
 use editor_document::panel_kinds;
 use editor_document::workspace_doc;
 use flow_graph::flow_edit::{ArgKey, Op};
-use flow_syntax::syntax::{self as s, Node};
+use flow_syntax::syntax::{self as s, Draft as Node};
 use input::{Event, Key, MouseButton};
 use pxui_shell::layout;
 use rays_editor::Editor;
@@ -75,8 +75,8 @@ pub fn run_ops() {
     check(panels::to_string(&tree(&t)) == "(h outline (h (v list lisp) (tile view)))", &format!("retype: {}", panels::to_string(&tree(&t))));
     let sheet = ok("Retype panel", L::SetPanelKind { node: p(&["editor", "network"]), panel: panel("spreadsheet") });
     check(panels::to_string(&tree(&sheet)) == "(h outline (h (v spreadsheet lisp) (tile view)))", "retype spreadsheet");
-    let saved = workspace_doc::to_text(&Editor::workspace(&sheet));
-    check(workspace_doc::to_text(&of_text(&saved)) == saved, "retyped spreadsheet did not round trip");
+    let saved = workspace_doc::to_text(&Editor::workspace(&sheet)).unwrap();
+    check(workspace_doc::to_text(&of_text(&saved)).unwrap() == saved, "retyped spreadsheet did not round trip");
     let v = ok("Retype panel", L::SetPanelKind { node: p(&["editor", "outline"]), panel: panel("viewport") });
     check(has(&source(&v), "outline (ui/viewport (ref scene))"), "a viewport is over the first scene graph");
     let docked = ok("Dock panel", L::DockPanel { node: p(&["editor", "network"]), target: p(&["editor", "outline"]), side: Side::Right });
@@ -149,7 +149,10 @@ pub fn run_restore() {
     }
     check(r.source() == before && panes_graph(&r.e) > 0, "a refused edit keeps the layout");
     // a valid one that leaves only an outline: nothing to edit the layout with
-    let bricked = Editor::edit(r.e.clone(), &Op::SetArg { node: p(&["editor", "shell"]), key: ArgKey::Pos(0), sub: vec![], value: s::make(Node::List(vec![s::make(Node::Sym("ui/outline".into()))].into())) }).expect("bricked");
+    let mut builder = s::SyntaxBuilder::new();
+    let head = builder.push_draft(0, Node::Sym("ui/outline".into()), Default::default(), None);
+    let id = builder.push_draft(0, Node::List(vec![head]), Default::default(), None);
+    let bricked = Editor::edit(r.e.clone(), &Op::SetArg { node: p(&["editor", "shell"]), key: ArgKey::Pos(0), sub: vec![], value: builder.freeze().handle(id) }).expect("bricked");
     r.e = bricked.clone();
     r.step(m, vec![]);
     check(panes_graph(&r.e) == 0, "the bricked shell has no graph panel");

@@ -148,7 +148,7 @@ pub fn editable_folds() {
     let source = edited(&workspace.source, &fe::Op::AddNode { scope: vec!["picture".into()], name: "elapsed".into(), expr });
     let source = edited(
         &source,
-        &fe::Op::SetArg { node: vec!["picture".into(), "elapsed".into()], key: flow_graph::edit_tree::ArgKey::Bv(1, 1), sub: Vec::new(), value: flow_syntax::syntax::make(flow_syntax::syntax::Node::Num("2.0".into())) },
+        &fe::Op::SetArg { node: vec!["picture".into(), "elapsed".into()], key: flow_graph::edit_tree::ArgKey::Bv(1, 1), sub: Vec::new(), value: flow_syntax::syntax::make(flow_syntax::syntax::Draft::Num("2.0".into())) },
     );
     let w = match flow_sop::catalog::check_workspace(&[], false, None, &catalog, &source) {
         (Some(w), _) => w,

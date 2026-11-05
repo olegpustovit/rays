@@ -123,7 +123,10 @@ fn cell(a: &attribute::T, row: i64, component: usize) -> String {
     match storage {
         Storage::Float(values) => number(values[at]),
         Storage::Int(values) => values[at].to_string(),
-        Storage::Text(values) => values[at].clone(),
+        Storage::Text(values) => match std::str::from_utf8(&values[at]) {
+            Ok(text) => text.to_owned(),
+            Err(_) => rdk_ops::attribute_ops::ocaml_quote(&values[at]),
+        },
         Storage::IntArray(values) => packed::IntArray::get(values, row).map(|v| ints(&v)).unwrap_or_default(),
         Storage::FloatArray(values) => packed::FloatArray::get(values, row).map(|v| floats(&v)).unwrap_or_default(),
         Storage::Float2(values) => {
@@ -239,15 +242,20 @@ pub fn cast(attribute_name: &str, surface: Option<&Surface>, value: &T, origin: 
     }
 }
 
-/// The nearest hit as (distance, `shop_materialpath` of that primitive).
+/// The nearest hit as (distance, `shop_materialpath` of that primitive); invalid UTF-8 identifiers refuse picking.
 pub fn cast_material(surface: Option<&Surface>, value: &T, origin: vec3::T, direction: vec3::T) -> Option<(f64, Option<String>)> {
     let surface = surface?;
     match surface_index::raycast(surface, origin, direction) {
         Ok(Some(hit)) => {
-            let path = geometry::find_attribute(Owner::Primitive, "shop_materialpath", value).and_then(|a| match attribute::storage(&a) {
-                Ok(Storage::Text(paths)) if !paths[hit.primitive as usize].is_empty() => Some(paths[hit.primitive as usize].clone()),
-                _ => None,
-            });
+            let path = match geometry::find_attribute(Owner::Primitive, "shop_materialpath", value) {
+                Some(a) => match attribute::View::storage(&a) {
+                    Ok(Storage::Text(paths)) if !paths[hit.primitive as usize].is_empty() => {
+                        Some(std::str::from_utf8(&paths[hit.primitive as usize]).ok()?.to_owned())
+                    }
+                    _ => None,
+                },
+                None => None,
+            };
             Some((hit.distance, path))
         }
         _ => None,

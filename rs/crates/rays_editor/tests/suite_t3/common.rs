@@ -73,7 +73,7 @@ pub fn same_ws(a: &wd::T, b: &wd::T) -> bool {
 }
 
 pub fn text_of(e: &Editor::t) -> String {
-    wd::to_text(&Editor::workspace(e))
+    wd::to_text(&Editor::workspace(e)).unwrap()
 }
 
 pub fn has(text: &str, piece: &str) -> bool {

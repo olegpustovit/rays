@@ -266,13 +266,15 @@ fn inconsistent_gather_type_is_refused() {
     ok(e::Residual::handle(handlers, &mut || e::Host::static_with_requests(None, false, None, &checked_ws)));
     let residual_id = seen.lock().unwrap().expect("a bulk request");
     let view = e::Residual::residual_view(residual_id).unwrap();
-    fn corrupt(term: &w::Term) -> w::Term {
-        match &term.node {
-            w::Node::Op { op, .. } if op == "array/nth" => w::Term { ty: Ty::Float, ..term.clone() },
-            _ => w::map_children(&corrupt, term),
+    let mut builder = flow_check::term_arena::TermBuilder::new();
+    let term = builder.rewrite_roots_with(std::slice::from_ref(view.term.as_ref()), &mut |builder, source, draft| {
+        let id = builder.rebuild(source, draft);
+        match source.node {
+            w::Node::Op(op) if source.name(source.arena().op(op).op) == "array/nth" => builder.with_type(id, &Ty::Float),
+            _ => id,
         }
-    }
-    let term = corrupt(&view.term);
+    })[0];
+    let term = builder.freeze().handle(term);
     let rid = ok(e::Residual::with_bindings(residual_id, &term, &view.bindings));
     match compile_region_term(rid, &term) {
         Err(ds) if ds.len() == 1 => {

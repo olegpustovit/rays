@@ -15,28 +15,17 @@ fn fail(message: &str) -> ! {
     panic!("test_probe: {message}")
 }
 
-/// The seeds of the sunflower fixture: 240 in the sketch; the debug evaluator takes seconds at that size,
-/// so the checks run at 30 (every count below is derived from it).
-pub const SEEDS: i64 = 6;
-/// tree depth 5, tiles 8 x 8 and orrery 3 rings of 8 moons in the sketches; smaller here for the same reason.
-pub const DEPTH: i64 = 3;
-pub const CELLS: i64 = 4;
-pub const BEADS: i64 = 6;
+pub const SEEDS: i64 = 240;
+pub const DEPTH: i64 = 5;
+pub const CELLS: i64 = 8;
+pub const BEADS: i64 = 14;
 
-pub fn shrunk(name: &str) -> String {
-    let text = read_case(name);
-    match name {
-        "sunflower" => text.replacen("(seeds : int 240)", &format!("(seeds : int {SEEDS})"), 1),
-        "tree" => text.replacen("(depth : int 5)", &format!("(depth : int {DEPTH})"), 1),
-        "tiles" => text.replacen("(cells : int 8)", &format!("(cells : int {CELLS})"), 1),
-        "orrery" => text.replacen("(rings : int 3)", "(rings : int 2)", 1).replacen("(moons : int 8)", "(moons : int 2)", 1),
-        "garland" => text.replacen("(count : int 14)", &format!("(count : int {BEADS})"), 1),
-        _ => text,
-    }
+pub fn fixture(name: &str) -> String {
+    read_case(name)
 }
 
 pub fn load(name: &str) -> Workspace {
-    checked(&shrunk(name))
+    checked(&fixture(name))
 }
 
 pub fn workspace_of(text: &str) -> Workspace {
@@ -171,14 +160,14 @@ pub fn live() {
     check(!at(1., &base, &[]).live, "a cached node carries no tag");
     let bob = node_of(&w, "orrery", &["moons_each", "bob"]);
     match (at(1., &bob, &[3]).spark, at(2., &bob, &[3]).spark) {
-        (Some((a, _)), Some((b, _))) => check(a.len() == 4 && a != b, "a live sparkline moves with t"),
+        (Some((a, _)), Some((b, _))) => check(a.len() == 24 && a != b, "a live sparkline moves with t"),
         _ => fail("bob has no sparkline"),
     }
     let mut r1 = probe::make(&ev, Options { time: Some(1.), ..Default::default() });
     check(r1.readouts(&spin, &[]) == vec![("value".to_string(), "0.8".to_string()), ("cook".to_string(), "live, recooks every frame".to_string())], "live inspector rows");
     // the viewport header
     let lower = |name: &str| {
-        let forms = flow_syntax::syntax::parse(&shrunk(name)).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
+        let forms = flow_syntax::syntax::parse(&fixture(name)).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
         flow_sop::lower::workspace(None, editor_document::kinds::descriptors(), flow_sop::lower::Options::default(), &forms).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)))
     };
     let lowered = lower("orrery");
@@ -240,11 +229,7 @@ pub fn geometry_zone() {
     let dynamic: Rc<dyn Fn(&[String]) -> Option<i64>> = Rc::new(move |p| if p == z2.as_slice() { Some(100) } else { None });
     let eval = eval_recorded(&w);
     let before_cook = probe::make(&eval, Options::default()).counts(&scope, &|_| 0);
-    // KNOWN DIVERGENCE (parity_backlog.md, suite t3): the Rust recorded evaluation has no count for a loop over
-    // geometry before a cook (OCaml: the one template record); the assertion is reported, not fatal.
-    if before_cook != vec![(zone.clone(), 1)] {
-        println!("KNOWN DIVERGENCE probe_geometry_zone: template count before a cook is {before_cook:?}, OCaml [(zone, 1)]");
-    }
+    check(before_cook == vec![(zone.clone(), 1)], "template count before a cook");
     let mut r = probe::make(&eval, Options { dynamic: Some(dynamic.clone()), ..Default::default() });
     check(r.counts(&scope, &|_| 0) == vec![(zone.clone(), 100)], "the cook's element count");
     let m = node_of(&w, "g", &["d", "m"]);
@@ -330,7 +315,7 @@ pub fn skips() {
         match rg.plan_node(None, &result, &[k]) {
             Some(id) => {
                 let n = &plan.nodes[id as usize];
-                check((n.kind == "sop/box" || n.kind == "$card") && n.iter == vec![k] && n.site == result, &format!("a plan node is at its own tuple: {} {:?} {:?}", n.kind, n.iter, n.site));
+                check(n.kind == flow_eval::card_kind() && n.args.iter().any(|(name, value)| name == "kind" && value == &Value::Text(b"sop/box".to_vec())) && n.iter == vec![k] && n.site == result, &format!("a card names its call at its own tuple: {} {:?} {:?}", n.kind, n.iter, n.site));
             }
             None => fail("an iteration that ran has no plan node"),
         }

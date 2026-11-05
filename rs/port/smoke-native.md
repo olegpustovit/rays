@@ -88,3 +88,42 @@ Totals: 49 sketches. Rust: 36 exit 0 (gpu_sea and isogrid_drift print E_MEMORY b
 | ws_morph | 4.9 s / 805 MB / 1.40 GB / 800 MB | 5.5 s / 59 MB / 433 MB | none | 13.7x |
 
 Reading: 3 frames never grow live memory in either (live N -> N), so the gap is resident baseline, not a leak. In Rust 88-99% of live is "unattributed" (memory no ledger owner claims), the lead for the next memory pass; swarm is the only sketch over the Rust budget (9.9 GB, tightened by the low free RAM) and is the one with a large attributed share (gpu.driver, flow_gpu.held). Rust is faster than OCaml only on shattered_cube/studio (33-37 s vs 55-60 s, OCaml near the 60 s kill); it is 1.5-2.5x slower on swarm, gpu_sea, procedural_modeling and ws_wave. Raw outputs: `C:\msys64\tmp\mt_<sketch>_{rs,ml}.out`.
+
+## Paired pre-arena baseline — 2026-11-05
+
+Window-free, three measured frames, one process at a time, 30-second deadline; all samples exit 0
+without memory-budget errors. These identify the **pre-arena binaries**, not the subsequently
+edited working tree or a final memory/parity claim:
+
+- Rust `rs/target/ag-gpumem/release/rays.exe`, SHA-256
+  `84bb9ade8a969196247e8c92dafefb3ebe068821986ca9af76905c32e1be1eb3`.
+- OCaml `_build/default/bin/rays.exe`, SHA-256
+  `1c9e130e49e02be294c299608572e4053afa0cf78e8eee0ba5229f8afe640210`.
+- Remaining paired raw stdout/stderr:
+  `rs/target/memory-baseline-20261105-prearena/<sketch>-<rust|ocaml>.out/.err`.
+  Earlier successful Rust gpu_sea/swarm/ws_tree measurements from this pass were reused, not rerun.
+- Same 24-core Windows/Vulkan machine while implementation workers were active. Times are single
+  observations, not interleaved medians or p50/p95 speed claims. Units/rounding are the binaries' output.
+
+| Sketch | Rust seconds | Rust live | Rust footprint | Rust unattributed | OCaml seconds | OCaml live | OCaml footprint |
+|---|---:|---|---|---|---:|---|---|
+| gpu_sea | 2.28 | 1.08 GB | 2.02 GB | 835.3 MB | 4.630 | 616.3 MB | 1.81 GB |
+| swarm | 3.81 | 783.8 MB | 4.51 GB | 442.1 MB | 5.832 | 466.0 MB | 4.31 GB |
+| procedural_modeling | 9.230 | 764.9 MB | 1.42 GB | 760.6 MB | 6.252 | 53.6 MB | 443.6 MB |
+| ws_wave | 4.969 | 680.2 MB | 1.16 GB | 676.4 MB | 2.121 | 53.6 MB | 446.6 MB |
+| ws_morph | 2.891 | 538.2 MB | 1.09 GB | 533.6 MB | 6.317 | 58.7 MB | 433.2 MB |
+| ws_tree | 2.23 | 236.1 MB | 684.5 MB | 231.2 MB | 1.693 | 28.1 MB | 407.1 MB |
+| ws_variations | 4.108 | 542.1 MB | 1.10 GB | 535.1 MB | 6.559 | 77.2 MB | 462.2 MB |
+
+gpu_sea readback agrees at 73.7 KB with zero payload and no fallback lines. Swarm readback agrees at
+204.9 MB (204.8 MB payload); its GPU driver/held allocations are still substantial. Procedural,
+wave and morph readbacks agree. Rust tree reads 43.0 KB versus 29.5 KB; variations reads 6.0 KB
+versus 3.0 KB. Those readback differences and all above-OCaml live-memory gaps remain open;
+large Rust unattributed shares motivate the owner/packed-arena work.
+
+The full 30-frame real-window Windows pass used the original 120-second per-sketch deadline.
+All 49 sketches launched: 48 exit 0; ws_orrery times out before creating its window. GDB identifies
+recursive definition/body cloning during lowering, not a renderer/event-loop hang. The sharing fix
+is implemented but requires a rebuilt-snapshot rerun. Complete per-sketch stdout/stderr:
+`rs/target/native-smoke-verified-20261105/<sketch>.out/.err`.
+

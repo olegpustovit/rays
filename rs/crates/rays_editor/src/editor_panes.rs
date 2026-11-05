@@ -393,10 +393,13 @@ pub fn go(value: t, graph: &str) -> t {
 }
 
 fn reference(ws_graphs: &[flow_check::workspace::Graph], e: &S) -> Option<String> {
-    if let SNode::List(items) = &e.node {
-        if let [S { node: SNode::Sym(r), .. }, S { node: SNode::Sym(name), .. }] = items.as_slice() {
-            if r == "ref" && ws_graphs.iter().any(|g| g.name == *name) {
-                return Some(name.clone());
+    if let SNode::List(items) = e.node {
+        if let [head, name] = e.range(items) {
+            if let (SNode::Sym(r), SNode::Sym(name)) = (e.arena().row(*head).node, e.arena().row(*name).node) {
+                let name = e.name(name);
+                if e.name(r) == "ref" && ws_graphs.iter().any(|g| g.name == name) {
+                    return Some(name.to_owned());
+                }
             }
         }
     }
@@ -419,10 +422,13 @@ pub fn follow_target(value: &t, path: Option<&[String]>) -> Option<String> {
                 return Some(found);
             }
             match fe::arg_text(&ws.source, path, &ArgKey::Whole) {
-                Some(S { node: SNode::List(items), .. }) => match items.as_slice() {
-                    [S { node: SNode::Sym(h), .. }, ..] if ws.checked.defs.iter().any(|d| d.name == *h) => Some(format!("def:{h}")),
-                    [_, args @ ..] => args.iter().find_map(|a| reference(graphs, a)),
-                    _ => None,
+                Some(form) if matches!(form.node, SNode::List(_)) => {
+                    if let Some(head) = flow_syntax::syntax::head(&form) {
+                        if ws.checked.defs.iter().any(|d| d.name == head) {
+                            return Some(format!("def:{head}"));
+                        }
+                    }
+                    form.children().get(1..).and_then(|args| args.iter().find_map(|&id| reference(graphs, &form.child(id))))
                 },
                 _ => None,
             }
@@ -447,9 +453,14 @@ pub fn viewport_target(value: &t) -> Option<String> {
         Panel::View(key) if selection::selected(pane_selection(value)).is_none() => {
             let named = value.doc.shell.as_ref().and_then(|shell| {
                 shell.preview_sources.iter().find(|(k, _)| k == key).and_then(|(_, src)| match &src.scene_ref {
-                    Some(S { node: SNode::List(items), .. }) => match items.as_slice() {
-                        [S { node: SNode::Sym(r), .. }, S { node: SNode::Sym(name), .. }] if r == "ref" => Some(name.clone()),
-                        _ => None,
+                    Some(form) if flow_syntax::syntax::head(form) == Some("ref") => {
+                        match form.children() {
+                            [_, name] => match form.arena().row(*name).node {
+                                SNode::Sym(name) => Some(form.name(name).to_owned()),
+                                _ => None,
+                            },
+                            _ => None,
+                        }
                     },
                     _ => None,
                 })

@@ -21,7 +21,7 @@ const MAX_INT: i64 = (1 << 62) - 1;
 const MIN_INT: i64 = -(1 << 62);
 
 fn quoted(value: &str) -> String {
-    flow_syntax::lisp::flat(&syntax::make(Node::Str(value.as_bytes().to_vec())))
+    flow_syntax::lisp::quote_string(value.as_bytes())
 }
 
 fn cook(input: &geo::T, expression: &str) -> Result<geo::T, String> {
@@ -193,7 +193,7 @@ fn all_owners_and_storages_rename_without_copying() {
             ("vec2", Storage::Float2(ok(Float2::of_owned(plane(-0.0), plane(2.0))))),
             ("vec3", Storage::Float3(ok(Float3::View::of_owned_exn(plane(1.0), plane(2.0), plane(3.0))))),
             ("vec4", Storage::Float4(ok(Float4::of_owned(plane(1.0), plane(2.0), plane(3.0), plane(4.0))))),
-            ("text", Storage::Text(vec!["preserved \u{2713}\n".to_owned(); count])),
+            ("text", Storage::Text(vec!["preserved \u{2713}\n".as_bytes().to_vec(); count])),
             ("float_array", Storage::FloatArray(ok(FloatArray::create_owned(offsets.clone(), vec![0.25; count * 16])))),
             ("int_array", Storage::IntArray(ok(IntArray::create_owned(offsets, vec![MIN_INT; count * 16])))),
         ]
@@ -293,7 +293,10 @@ fn metadata_graph_projection_and_enum_gestures_remain_checked() {
         assert!(node.rows.iter().any(|row| row.label == "owner"), "Metadata owner row missing");
     }
     for (binding, key, value) in [("renamed", "conflict", "overwrite"), ("swapped", "method", "move"), ("grouped", "owner", "point")] {
-        let op = Op::SetArg { node: path(binding), key: ArgKey::Kw(key.to_owned()), sub: vec![], value: syntax::make(Node::Sym(value.to_owned())) };
+        let mut b = flow_syntax::arena::SyntaxBuilder::new();
+        let name = b.intern(value);
+        let id = b.push(0, Node::Sym(name), rays_diagnostic::Span { start: 0, finish: 0 }, None);
+        let op = Op::SetArg { node: path(binding), key: ArgKey::Kw(key.to_owned()), sub: vec![], value: b.freeze().handle(id) };
         let (_, checked) = apply_checked_with(&[], false, Some(&checker), &cat, &forms, &op).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
         let pane = proj::of_graph(&cat, &checked, "g").unwrap();
         let node = proj::find(&pane, &path(binding)).unwrap();

@@ -168,6 +168,15 @@ pub mod init {
         })
     }
 
+    /// Call once at native binary startup, before creating threads or SDL resources.
+    /// Unrecoverable native faults still terminate the process; they are not diagnostics.
+    pub fn configure_native_process() -> std::result::Result<(), Error> {
+        const OPERATION: &str = "SDL3.Init.configure_native_process";
+        before_main(OPERATION)?;
+        sys::configure_fatal_errors();
+        Ok(())
+    }
+
     pub fn init(subsystems: &[Subsystem]) -> std::result::Result<(), Error> {
         const OPERATION: &str = "SDL3.Init.init";
         before_main(OPERATION)?;

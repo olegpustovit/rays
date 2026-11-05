@@ -170,7 +170,7 @@ mod graph_edits {
     use flow_graph::flow_edit::{apply_checked, ArgKey, Op};
     use flow_graph::projection;
     use flow_syntax::lisp;
-    use flow_syntax::syntax::{make, Node};
+    use flow_syntax::syntax::{make, Draft as Node};
 
     #[test]
     fn a_positional_error_rows_argument_edits_through_the_graph() {
@@ -181,7 +181,7 @@ mod graph_edits {
         let card = projection::find(&scope, &["g".into(), "tested".into(), "checked#0".into()]).expect("card");
         assert_eq!(card.head, "array/int");
         let (forms, workspace) = ok(apply_checked(&catalog(), &forms, &Op::SetArg { node: card.path.clone(), key: ArgKey::Pos(1), sub: vec![], value: make(Node::Num("1".into())) }));
-        let printed = lisp::print(&forms).0;
+        let printed = lisp::print(&forms).unwrap().0;
         checked(&printed);
         let result = ok(E::static_with(&workspace, true, Some(&[("g".to_owned(), vec![("flags".to_owned(), Value::Int_array(Arc::new(vec![])))])]), None));
         let path = vec!["g".to_owned(), "tested".to_owned()];
@@ -208,7 +208,7 @@ mod graph_edits {
                 &format!("(error_rows (array/int 2 1) {MAPPER} :policy \"range-last\")"),
             ),
         );
-        checked(&lisp::print(&forms).0);
+        checked(&lisp::print(&forms).unwrap().0);
         assert!(apply_checked(&catalog(), &forms, &Op::SetArg { node: card.path, key: ArgKey::Kw("policy".into()), sub: vec![], value: make(Node::Str(b"unknown".to_vec())) }).is_err());
     }
 }

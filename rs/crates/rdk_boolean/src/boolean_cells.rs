@@ -986,8 +986,8 @@ mod tests {
 
     #[test]
     fn component_index_scale() {
-        let left = tetra_batch(16, 0.);
-        let right = tetra_batch(16, 3.);
+        let left = tetra_batch(64, 0.);
+        let right = tetra_batch(64, 3.);
         assert!(
             signature_at(1, &left, &right) == signature_at(4, &left, &right),
             "component index scale result differs between domain counts"

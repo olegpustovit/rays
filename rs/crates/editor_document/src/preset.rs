@@ -55,20 +55,21 @@ pub fn path(directory: &str, name: &str) -> String {
 
 fn finite(f: &S) -> bool {
     match &f.node {
-        Node::Num(n) => cfmt::parse_ocaml_float(n).map_or(false, |x| x.is_finite()),
-        Node::Vec(l) | Node::Map(l) | Node::List(l) => l.iter().all(finite),
+        Node::Num(n) => cfmt::parse_ocaml_float(f.name(*n)).is_some_and(|x| x.is_finite()),
+        Node::Vec(range) | Node::Map(range) | Node::List(range) => f.range(*range).iter().all(|id| finite(&f.child(*id))),
         _ => true,
     }
 }
 
 /// The canonical workspace text of `doc` (its settings beside it).
-pub fn text(doc: &document::T) -> String {
+pub fn text(doc: &document::T) -> Result<String, String> {
     let workspace = &doc.workspace.ws;
-    if lowering::has_settings(workspace) {
+    let text = if lowering::has_settings(workspace) {
         workspace_doc::to_text(workspace)
     } else {
         workspace_doc::to_text(&workspace_doc::T { settings: doc.settings.clone(), ..workspace.clone() })
-    }
+    };
+    text.map_err(|error| rays_diagnostic::to_string(&error))
 }
 
 /// Write atomically; returns the path. `Err` when the view has nonfinite numbers or the file
@@ -80,10 +81,16 @@ pub fn save(directory: &str, name: &str, doc: &document::T, view: &S) -> Result<
     if !finite(view) {
         return Err("viewport contains nonfinite values".to_owned());
     }
-    let body = text(doc);
-    let view_text = lisp::print(&[s::make(Node::List(vec![s::make(Node::Sym("view".to_owned())), view.clone()].into()))]).0;
+    let body = text(doc)?;
+    let mut builder = flow_syntax::arena::SyntaxBuilder::new();
+    let head = builder.push_draft(0, flow_syntax::arena::Draft::Sym("view".to_owned()), rays_diagnostic::Span { start: 0, finish: 0 }, None);
+    let view = builder.import(view);
+    let root = builder.push_draft(0, flow_syntax::arena::Draft::List(vec![head, view]), rays_diagnostic::Span { start: 0, finish: 0 }, None);
+    let view_text = lisp::print(&[builder.freeze().handle(root)]).map_err(|error| rays_diagnostic::to_string(&error))?.0;
+    let text = format!("{body}\n{view_text}");
+    rays_diagnostic::check_source_len(text.len()).map_err(|error| rays_diagnostic::to_string(&error))?;
     let target = path(directory, name);
-    editor_core::store::write_text(&target, &format!("{body}\n{view_text}"))?;
+    editor_core::store::write_text(&target, &text)?;
     Ok(target)
 }
 
@@ -119,10 +126,14 @@ pub fn load_with_ops(gpu: Option<flow_ir::flow_ir::Gpu::Config>, ops: Vec<FlowOp
     // the view is the preset's own form, not the document's
     workspace.extra = Vec::new();
     let forms = s::parse(&text).map_err(|d| rays_diagnostic::to_string(&d))?;
-    let view = match forms.iter().find(|f| matches!(&f.node, Node::List(items) if matches!(items.first().map(|h| &h.node), Some(Node::Sym(h)) if h == "view"))) {
-        Some(S { node: Node::List(items), .. }) if items.len() == 2 => items[1].clone(),
+    let view = match forms.iter().find(|form| s::head(form) == Some("view")) {
+        Some(form) if form.children().len() == 2 => form.child(form.children()[1]),
         Some(_) => return Err("view: expected one value".to_owned()),
-        None => s::make(Node::Map(Vec::new().into())),
+        None => {
+            let mut builder = flow_syntax::arena::SyntaxBuilder::new();
+            let root = builder.push_draft(0, flow_syntax::arena::Draft::Map(Vec::new()), rays_diagnostic::Span { start: 0, finish: 0 }, None);
+            builder.freeze().handle(root)
+        }
     };
     let doc = lowering::of_workspace(&lowering::Options { factories: Some(factories_v), gpu, ..Default::default() }, &workspace).map_err(|d| rays_diagnostic::to_string(&d))?;
     document::validate(&doc)?;

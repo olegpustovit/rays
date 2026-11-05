@@ -3,7 +3,7 @@ use crate::support::*;
 use flow_graph::edit_tree::ArgKey;
 use flow_graph::flow_edit::Op;
 use flow_graph::projection as p;
-use flow_syntax::syntax::{self as s, Node as SNode};
+use flow_syntax::syntax as s;
 use input::{Event, Key, MouseButton};
 use pxui_graph::scope_pane as scope;
 use pxui_graph::scope_state::{Change, Command, ScopeOpts};
@@ -121,7 +121,7 @@ fn scope_gestures_3() {
     check(changes.is_empty() && scope::editing(&naming), "the + output row did not open a name field");
     let (_, changes) = scope_step(&mut ui, naming, &g::frame((0, 0), Vec::new(), vec![Event::Text_input("depth".into()), Event::Key_pressed(Key::Enter)]));
     check(
-        changes.contains(&syn(Op::AddField { node: values.clone(), name: "depth".into(), value: s::make(SNode::Num("0".into())) })),
+        changes.contains(&syn(Op::AddField { node: values.clone(), name: "depth".into(), value: s::make(s::Draft::Num("0".into())) })),
         "a named output did not become Add_field",
     );
     let cw = checked("(workspace c (graph g :context value (let* [xs (list 1 2) ys (concat xs xs)] (count ys))))");

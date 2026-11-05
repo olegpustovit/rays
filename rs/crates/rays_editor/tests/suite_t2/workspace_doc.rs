@@ -9,7 +9,7 @@ use editor_document::workspace_doc as doc;
 use flow_graph::flow_edit::label;
 use flow_graph::flow_edit::{ArgKey, Loop, Op};
 use flow_graph::projection;
-use flow_syntax::syntax::{self as syn, Node};
+use flow_syntax::syntax::{self as syn, Draft as Node};
 use input::{Event, Key};
 use rays_editor::Editor;
 
@@ -79,10 +79,6 @@ fn objects(e: &Ed) -> Vec<(String, String)> {
 }
 
 fn part_editor() {
-    if std::env::var("RAYS_SLOW").is_err() {
-        println!("skipped: slow lowering/cook in debug (perf3); RAYS_SLOW=1 runs it");
-        return;
-    }
     if !common::gpu() {
         return;
     }
@@ -103,7 +99,7 @@ fn part_editor() {
     e = Editor::edit(e, &scrub("0.6")).unwrap_or_else(|m| panic!("{m}"));
     e = Editor::edit(e, &scrub("0.7")).unwrap();
     assert_eq!(Editor::undo_label(&e).as_deref(), Some("Edit value"), "scrub label");
-    assert!(doc::to_text(&Editor::workspace(&e)).contains(":radius 0.7"), "scrub rewrote the source");
+    assert!(doc::to_text(&Editor::workspace(&e)).unwrap().contains(":radius 0.7"), "scrub rewrote the source");
     e = Editor::edit(e, &Op::Rename { node: s(&["g", "b"]), to_: "moved".into() }).unwrap();
     assert_eq!(Editor::undo_label(&e).as_deref(), Some("Rename"), "rename label");
     e = Editor::edit(e, &Op::Wrap { nodes: vec![s(&["g", "a"])], loop_: Loop::For }).unwrap();
@@ -117,7 +113,7 @@ fn part_editor() {
     assert!(Editor::undo_label(&e).as_deref() == Some("Edit value") && Editor::redo_label(&e).as_deref() == Some("Rename"), "undo Rename");
     e = undo(e, count + 2);
     assert!(Editor::undo_label(&e).is_none() && Editor::redo_label(&e).as_deref() == Some("Edit value"), "one undo reverts the merged scrub");
-    assert_eq!(doc::to_text(&Editor::workspace(&e)), doc::to_text(&workspace(STILL)), "undo restored the source");
+    assert_eq!(doc::to_text(&Editor::workspace(&e)).unwrap(), doc::to_text(&workspace(STILL)).unwrap(), "undo restored the source");
     e = Editor::update(e, &fr(&[Key::Meta, Key::Shift], vec![ch('z')], count + 3));
     assert_eq!(Editor::undo_label(&e).as_deref(), Some("Edit value"), "redo");
     Editor::close(&e);
@@ -136,7 +132,7 @@ fn part_conditional_history() {
         (+ b c))))",
         None,
     );
-    let before = doc::to_text(&Editor::workspace(&e));
+    let before = doc::to_text(&Editor::workspace(&e)).unwrap();
     let ops = vec![
         Op::Wrap { nodes: vec![s(&["g", "a"])], loop_: Loop::If },
         Op::SetArg { node: s(&["g", "c"]), key: ArgKey::Pos(0), sub: vec![], value: syn::make(Node::Sym("false".into())) },
@@ -152,7 +148,7 @@ fn part_conditional_history() {
         assert_eq!(Editor::undo_label(&changed).as_deref(), Some(label(op)), "conditional gesture history label");
         let undone = undo(changed, i as i64 + 1);
         assert!(
-            doc::to_text(&Editor::workspace(&undone)) == before && Editor::undo_label(&undone).is_none() && Editor::redo_label(&undone).as_deref() == Some(label(op)),
+            doc::to_text(&Editor::workspace(&undone)).unwrap() == before && Editor::undo_label(&undone).is_none() && Editor::redo_label(&undone).as_deref() == Some(label(op)),
             "conditional gesture was not one undo step: {}",
             label(op)
         );
@@ -162,10 +158,6 @@ fn part_conditional_history() {
 }
 
 fn part_live() {
-    if std::env::var("RAYS_SLOW").is_err() {
-        println!("skipped: slow lowering/cook in debug (perf3); RAYS_SLOW=1 runs it");
-        return;
-    }
     if !common::gpu() {
         return;
     }
@@ -208,20 +200,24 @@ fn part_preset() {
         assert!(text.contains("(workspace study") && text.contains("; kept") && text.contains("(view"), "the preset is s-expressions with its comments");
         assert!(!text.contains("{\"") && !text.contains("\"version\""), "no JSON");
         let loaded = preset::load(None, &path, None, &settings::none()).unwrap();
-        assert_eq!(doc::to_text(&loaded.doc.workspace.ws), doc::to_text(&Editor::workspace(&e)), "save then load round trip");
+        assert_eq!(doc::to_text(&loaded.doc.workspace.ws).unwrap(), doc::to_text(&Editor::workspace(&e)).unwrap(), "save then load round trip");
         assert_eq!(preset::list(directory).into_iter().map(|(n, _)| n).collect::<Vec<_>>(), vec![name.clone()], "listed");
         // load through / b: one undo entry
         e = Editor::edit(e, &Op::Rename { node: s(&["g", "a"]), to_: "ball".into() }).unwrap();
         e = Editor::update(e, &fr(&[], vec![ch('/'), ch('b')], count + 3));
         e = Editor::update(e, &fr(&[], vec![Event::Text_input(name.clone()), Event::Key_pressed(Key::Enter)], count + 4));
         e = Editor::update(e, &fr(&[], vec![], count + 5));
-        assert!(doc::to_text(&Editor::workspace(&e)).contains("(sop/transform a "), "/ b restored the saved source");
+        assert!(doc::to_text(&Editor::workspace(&e)).unwrap().contains("(sop/transform a "), "/ b restored the saved source");
         assert_eq!(Editor::undo_label(&e).as_deref(), Some("Load preset"), "load is one undo entry");
         // errors never touch the document
         let corrupt = preset::path(directory, "corrupt");
         std::fs::write(&corrupt, "(workspace").unwrap();
         assert!(preset::load(None, &corrupt, None, &settings::none()).is_err(), "corrupt text is an error");
-        let nonfinite = syn::make(Node::Map(vec![syn::make(Node::Kw("zoom".into())), syn::make(Node::Num("inf".into()))].into()));
+        let mut builder = syn::SyntaxBuilder::new();
+        let fields = [Node::Kw("zoom".into()), Node::Num("inf".into())].into_iter()
+            .map(|draft| builder.push_draft(0, draft, Default::default(), None)).collect();
+        let id = builder.push_draft(0, Node::Map(fields), Default::default(), None);
+        let nonfinite = builder.freeze().handle(id);
         assert!(preset::save(directory, "x", &loaded.doc, &nonfinite).is_err(), "a nonfinite view is refused");
         assert!(preset::save(directory, "", &loaded.doc, &syn::make(Node::Map(vec![].into()))).is_err(), "an empty name is refused");
         Editor::close(&e);
@@ -236,44 +232,36 @@ fn part_pane_layout() {
     ws.layout.collapsed.insert(s(&["g", "b"]), true);
     ws.layout.level.insert(s(&["g", "gone"]), projection::Level::Full);
     ws.layout.pinned.insert(s(&["nograph", "a"]), true);
-    let again = workspace(&doc::to_text(&ws));
+    let again = workspace(&doc::to_text(&ws).unwrap());
     assert!(again.layout.at[&s(&["g", "a"])] == (40., 60.) && again.layout.collapsed.contains_key(&s(&["g", "b"])), "moved items and collapsed zones round-trip through the s-expression");
     assert!(again.layout.level.is_empty() && again.layout.pinned.is_empty(), "stale layout keys were kept");
     let two = workspace("(workspace w (graph a :context sop (sop/box)) (graph b :context sop (let* [x (sop/box)] x)))\n(layout (node [\"b\" \"x\"] :at [10 20]))");
     assert!(two.layout.at.contains_key(&s(&["b", "x"])), "a live key was dropped");
     let removed = doc::edit(&catalog(), &two, &Op::RemoveGraph { name: "b".into() }).unwrap();
     assert!(editor_document::layout_by_path::is_empty(&removed.layout), "the layout of a removed graph was kept");
-    assert!(doc::of_text(&Default::default(), &catalog(), &doc::to_text(&removed)).is_ok(), "the text after removing a graph does not load");
+    assert!(doc::of_text(&Default::default(), &catalog(), &doc::to_text(&removed).unwrap()).is_ok(), "the text after removing a graph does not load");
     let noted = workspace(
         "(workspace w (graph a :context sop (let* [x (sop/box)] x)))\n; about the view\n(view {:eye [1 2 3]})\n; where things are\n(layout (node [\"a\" \"x\"] :at [10 20]))\n; the end\n",
     );
-    let out = doc::to_text(&noted);
+    let out = doc::to_text(&noted).unwrap();
     assert!(out.contains("; about the view") && out.contains("(view {:eye [1 2 3]})") && out.contains("; where things are") && out.contains("; the end"), "root forms and their comments: {out}");
-    assert_eq!(doc::to_text(&workspace(&out)), out, "to_text with root comments is a fixed point");
+    assert_eq!(doc::to_text(&workspace(&out)).unwrap(), out, "to_text with root comments is a fixed point");
     match doc::of_text(&Default::default(), &catalog(), "(workspace w (graph a :context sop (sop/box)))\n(layout (nonsense))") {
         Err(ds) if ds.len() == 1 && ds[0].code == "E_LAYOUT" && ds[0].span.as_ref().map(|s| s.start > 0).unwrap_or(false) => {}
         other => panic!("E_LAYOUT has no span: {:?}", other.err().map(|d| diag_text(&d))),
     }
 }
 
-fn small_bloom() -> String {
+fn bloom_fixture() -> String {
     let path = format!("{}/../../../specification/workspace/cases/bloom.lisp", env!("CARGO_MANIFEST_DIR"));
-    let mut text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
-    for (from, by) in [("(petals : int 12)", "(petals : int 3)"), (":petals 7", ":petals 2")] {
-        text = text.replace(from, by);
-    }
-    text
+    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"))
 }
 
 fn part_editor_contexts() {
-    if std::env::var("RAYS_SLOW").is_err() {
-        println!("skipped: slow lowering/cook in debug (perf3); RAYS_SLOW=1 runs it");
-        return;
-    }
     if !common::gpu() {
         return;
     }
-    let mut e = editor(&small_bloom(), None);
+    let mut e = editor(&bloom_fixture(), None);
     let mut count = 0;
     for _ in 0..3 {
         count += 1;
@@ -289,7 +277,10 @@ fn part_editor_contexts() {
     assert!(objs.contains(&("accent".into(), "geometry".into())) && objs.contains(&("Bloom study".into(), "world".into())), "the editor opens the workspace's objects and World");
     assert!(objs.iter().filter(|(_, op)| op == "camera").count() == 1 && objs.iter().filter(|(_, op)| op == "light").count() == 1, "a scene that declares a camera and a light gets no seeded ones");
     assert!(dump(&e).contains("pane graph: scene\n"), "the pane shows the scene graph at the scene level until an outline row or a named panel picks another");
-    let vec3 = syn::make(Node::Vec(["1", "1", "1"].iter().map(|n| syn::make(Node::Num((*n).into()))).collect()));
+    let mut builder = syn::SyntaxBuilder::new();
+    let fields = ["1", "1", "1"].into_iter().map(|n| builder.push_draft(0, Node::Num(n.into()), Default::default(), None)).collect();
+    let id = builder.push_draft(0, Node::Vec(fields), Default::default(), None);
+    let vec3 = builder.freeze().handle(id);
     let e2 = Editor::edit(e.clone(), &Op::SetArg { node: s(&["scene", "accent"]), key: ArgKey::Kw("scale".into()), sub: vec![], value: vec3 }).unwrap();
     assert_eq!(Editor::undo_label(&e2).as_deref(), Some("Edit value"), "one history entry");
     assert!(

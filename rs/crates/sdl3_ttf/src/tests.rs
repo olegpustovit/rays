@@ -65,6 +65,7 @@ fn cpu_font_conformance() {
     // every render owns its buffer
     let again = some(font.render_blended((12, 34, 56, 200), "Rays ž"), "second raster of the same text failed");
     assert_eq!(again.pixels, rgba.pixels, "two renders of one text differ");
+    assert_ne!(again.pixels.as_ptr(), rgba.pixels.as_ptr(), "two renders of one text share a buffer");
 
     // Setters used by the runtime and glyph metrics.
     font.set_hinting(Hinting::Mono).unwrap();
@@ -110,7 +111,7 @@ fn cpu_font_conformance() {
     font.destroy().unwrap();
     font.destroy().unwrap();
     assert_eq!(font.metrics().err().map(|failure| failure.kind()), Some(ErrorKind::Destroyed), "stale font access");
-    for _ in 0..1_000 {
+    for _ in 0..10_000 {
         let transient = Font::open_file(&font_path, 8.0).unwrap();
         transient.destroy().unwrap();
     }

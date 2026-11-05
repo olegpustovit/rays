@@ -23,14 +23,11 @@ use crate::editor_panes::graph_name;
 
 type S = Syntax;
 
-fn mk(node: SNode) -> S {
-    s::make(node)
-}
 fn sym(name: &str) -> S {
-    mk(SNode::Sym(name.to_owned()))
+    s::make(s::Draft::Sym(name.to_owned()))
 }
 fn num(n: &str) -> S {
-    mk(SNode::Num(n.to_owned()))
+    s::make(s::Draft::Num(n.to_owned()))
 }
 fn parse_one(text: &str) -> S {
     s::parse(text).expect("a form of the add menu parses").remove(0)
@@ -49,8 +46,8 @@ pub fn binding_name(path: &[String]) -> Option<String> {
 /// Does `e` read the name.
 pub fn reads(name: &str, e: &S) -> bool {
     match &e.node {
-        SNode::Sym(n) => n == name,
-        _ => s::children(e).into_iter().any(|c| reads(name, c)),
+        SNode::Sym(n) => e.name(*n) == name,
+        _ => e.children().iter().any(|&id| reads(name, &e.child(id))),
     }
 }
 
@@ -140,9 +137,20 @@ pub fn value_expression(ops: &[op::Op], wire: Option<(String, Ty)>, context: &Co
     match o {
         "number" => (num("1.0"), "value".to_owned()),
         "t" => (sym("t"), "time".to_owned()),
-        "vec3" => (mk(SNode::Vec(vec![num("0.0"), num("0.0"), num("0.0")].into())), "vector".to_owned()),
-        "text" => (mk(SNode::Str(b"text".to_vec())), "text".to_owned()),
-        "str" => (mk(SNode::List(vec![sym("str"), mk(SNode::Str(b"text".to_vec()))].into())), "text".to_owned()),
+        "vec3" => {
+            let mut builder = s::SyntaxBuilder::new();
+            let items = (0..3).map(|_| builder.push_draft(0, s::Draft::Num("0.0".into()), Default::default(), None)).collect();
+            let id = builder.push_draft(0, s::Draft::Vec(items), Default::default(), None);
+            (builder.freeze().handle(id), "vector".to_owned())
+        },
+        "text" => (s::make(s::Draft::Str(b"text".to_vec())), "text".to_owned()),
+        "str" => {
+            let mut builder = s::SyntaxBuilder::new();
+            let items = [s::Draft::Sym("str".into()), s::Draft::Str(b"text".to_vec())].into_iter()
+                .map(|draft| builder.push_draft(0, draft, Default::default(), None)).collect();
+            let id = builder.push_draft(0, s::Draft::List(items), Default::default(), None);
+            (builder.freeze().handle(id), "text".to_owned())
+        },
         "array/index_of" => (parse_one("(array/index_of (array/int 0) (array/int 0))"), "matched".to_owned()),
         "array/scatter_add" => (parse_one("(array/scatter_add (array/int 0) (array/float 0) 0)"), "added".to_owned()),
         "sop/with_attr" => (
@@ -174,28 +182,32 @@ pub fn value_expression(ops: &[op::Op], wire: Option<(String, Ty)>, context: &Co
         }
         o => {
             let signature = w::op_signature(ops, context, o);
+            let mut builder = s::SyntaxBuilder::new();
             // the selected node feeds the first input of its type
             let mut wired = false;
-            let mut args = Vec::new();
+            let mut args = vec![builder.push_draft(0, s::Draft::Sym(o.into()), Default::default(), None)];
             if let Some(sig) = &signature {
                 for (label, ty) in &sig.pos {
                     let arg = match (&wire, fe::default_for(ty, label, None)) {
                         (Some((name, wty)), _) if !wired && ty::fits(wty, ty) => {
                             wired = true;
-                            sym(name)
+                            builder.push_draft(0, s::Draft::Sym(name.clone()), Default::default(), None)
                         }
-                        (_, Some(d)) => d,
+                        (_, Some(d)) => builder.import(&d),
                         (_, None) => match ty {
-                            Ty::List(_) => mk(SNode::List(vec![sym("range"), num("4")].into())),
-                            _ => num("0.5"),
+                            Ty::List(_) => {
+                                let items = [s::Draft::Sym("range".into()), s::Draft::Num("4".into())].into_iter()
+                                    .map(|draft| builder.push_draft(0, draft, Default::default(), None)).collect();
+                                builder.push_draft(0, s::Draft::List(items), Default::default(), None)
+                            },
+                            _ => builder.push_draft(0, s::Draft::Num("0.5".into()), Default::default(), None),
                         },
                     };
                     args.push(arg);
                 }
             }
-            let mut items = vec![sym(o)];
-            items.extend(args);
-            (mk(SNode::List(items.into())), fe::value_base(o))
+            let id = builder.push_draft(0, s::Draft::List(args), Default::default(), None);
+            (builder.freeze().handle(id), fe::value_base(o))
         }
     }
 }
@@ -239,7 +251,10 @@ pub fn scope_add(value: &t, key: &str) -> Vec<change> {
         return if selected.len() >= 2 {
             vec![change::Syntax_edit(fe::Op::GroupMerge { nodes: selected, name })]
         } else {
-            vec![change::Syntax_edit(fe::Op::AddNode { scope: vec![graph], name, expr: mk(SNode::List(vec![sym("scene/merge")].into())) })]
+            let mut builder = s::SyntaxBuilder::new();
+            let head = builder.push_draft(0, s::Draft::Sym("scene/merge".into()), Default::default(), None);
+            let id = builder.push_draft(0, s::Draft::List(vec![head]), Default::default(), None);
+            vec![change::Syntax_edit(fe::Op::AddNode { scope: vec![graph], name, expr: builder.freeze().handle(id) })]
         };
     }
     let is_value = key.starts_with('=');
@@ -302,21 +317,26 @@ pub fn scope_add(value: &t, key: &str) -> Vec<change> {
         };
         value_expression(&ws.checked.ops, wire, &context, key)
     } else {
-        let head = sym(&format!("{}/{}", w::context_name(&context), if material_of { "material" } else { key }));
-        let geometry: Vec<S> = match (&context, key, ws.checked.graphs.iter().find(|g| g.context == context::sop())) {
-            (c, "geometry", Some(g)) if *c == context::scene() => vec![mk(SNode::List(vec![sym("ref"), sym(&g.name)].into()))],
+        let mut builder = s::SyntaxBuilder::new();
+        let head = builder.push_draft(0, s::Draft::Sym(format!("{}/{}", w::context_name(&context), if material_of { "material" } else { key })), Default::default(), None);
+        let geometry = match (&context, key, ws.checked.graphs.iter().find(|g| g.context == context::sop())) {
+            (c, "geometry", Some(g)) if *c == context::scene() => {
+                let items = [s::Draft::Sym("ref".into()), s::Draft::Sym(g.name.clone())].into_iter()
+                    .map(|draft| builder.push_draft(0, draft, Default::default(), None)).collect();
+                vec![builder.push_draft(0, s::Draft::List(items), Default::default(), None)]
+            },
             _ => Vec::new(),
         };
         let mut positional = geometry.clone();
         match &input {
-            Some(n) => positional.push(sym(n)),
+            Some(n) => positional.push(builder.push_draft(0, s::Draft::Sym(n.clone()), Default::default(), None)),
             None => {
                 if arity > 0 && geometry.is_empty() {
-                    positional.push(sym("nil"));
+                    positional.push(builder.push_draft(0, s::Draft::Sym("nil".into()), Default::default(), None));
                 }
             }
         }
-        let mut defaults: Vec<S> = Vec::new();
+        let mut defaults = Vec::new();
         if let Some(d) = &kind_d {
             let mut next_position = 0usize;
             let types: Vec<String> = if d.slot_types.is_empty() { d.slots.iter().map(|_| "geometry".to_owned()).collect() } else { d.slot_types.clone() };
@@ -333,8 +353,8 @@ pub fn scope_add(value: &t, key: &str) -> Vec<change> {
                 }
                 let fresh = |n: &str| fe::fresh_name(&ws.source, &graph, n);
                 if let Some(form) = ty::of_string(ty).and_then(|t_| fe::default_for(&t_, name, Some(&fresh))) {
-                    defaults.push(mk(SNode::Kw(name.clone())));
-                    defaults.push(form);
+                    defaults.push(builder.push_draft(0, s::Draft::Kw(name.clone()), Default::default(), None));
+                    defaults.push(builder.import(&form));
                 }
             }
         }
@@ -342,10 +362,13 @@ pub fn scope_add(value: &t, key: &str) -> Vec<change> {
         items.extend(positional);
         items.extend(defaults);
         if material_of {
-            items.push(mk(SNode::Kw("material".to_owned())));
-            items.push(mk(SNode::List(vec![sym("ref"), sym(&key[12..])].into())));
+            items.push(builder.push_draft(0, s::Draft::Kw("material".into()), Default::default(), None));
+            let reference = [s::Draft::Sym("ref".into()), s::Draft::Sym(key[12..].into())].into_iter()
+                .map(|draft| builder.push_draft(0, draft, Default::default(), None)).collect();
+            items.push(builder.push_draft(0, s::Draft::List(reference), Default::default(), None));
         }
-        (mk(SNode::List(items.into())), if material_of { "material".to_owned() } else { key.to_owned() })
+        let id = builder.push_draft(0, s::Draft::List(items), Default::default(), None);
+        (builder.freeze().handle(id), if material_of { "material".to_owned() } else { key.to_owned() })
     };
     let mut name = fe::fresh_name(&ws.source, &graph, &base);
     if let Some((_, h)) = &hoisted {

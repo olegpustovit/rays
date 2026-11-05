@@ -193,13 +193,13 @@ fn preview_orbits() {
         upd(e, |e| Editor::edit_layout(e, &editor_document::layout_edit::Op::DockPanel { node: s(&["editor", "comparison"]), target: s(&["editor", "main"]), side: editor_document::layout_edit::Side::Right }).unwrap());
         update(e, &[], (0., 0.), (0., 0.), vec![]);
         preserved(e);
-        let shown = rays_editor::text_pane::make_shown(&Editor::workspace(e).source, "editor", None, rays_editor::text_pane::Tab::Graph);
+        let shown = rays_editor::text_pane::make_shown(&Editor::workspace(e).source, "editor", None, rays_editor::text_pane::Tab::Graph).unwrap();
         do_edit(e, &Op::SetGraph { name: "editor".into(), form: parse(&shown.text) });
         preserved(e);
         focus(e, &update, main);
         upd(e, |e| Editor::edit_layout(e, &editor_document::layout_edit::Op::ClosePanel { node: s(&["editor", "comparison"]) }).unwrap());
         update(e, &[], (0., 0.), (0., 0.), vec![]);
-        let original = rays_editor::text_pane::make_shown(&ws.source, "editor", None, rays_editor::text_pane::Tab::Graph);
+        let original = rays_editor::text_pane::make_shown(&ws.source, "editor", None, rays_editor::text_pane::Tab::Graph).unwrap();
         do_edit(e, &Op::SetGraph { name: "editor".into(), form: parse(&original.text) });
         focus(e, &update, comparison);
         assert!(same(position(e, comparison), initial) && !same(position(e, comparison), orbited), "closing a preview left an orphan orbit that reappeared on re-add");
@@ -383,7 +383,7 @@ fn lisp_apply() {
         click(e, &run, tab_at(x + w - 32, y, 2));
         click(e, &run, ((x + 180) as f64, (y + 80) as f64));
         run(e, (450., 300.), &[Key::Meta], vec![Event::Key_pressed(Key::KeyChar('a'))]);
-        run(e, (450., 300.), &[], vec![Event::Text_input(replace(&wd::to_text(&ws), "(sop/box)", "(sop/box :size [2 2 2])"))]);
+        run(e, (450., 300.), &[], vec![Event::Text_input(replace(&wd::to_text(&ws).unwrap(), "(sop/box)", "(sop/box :size [2 2 2])"))]);
         let before = format!("{:?}", Editor::prepared(e).map(|g| {
             let v = rdk::packed::Float3::View::view(rdk::geometry::positions(&g)).unwrap();
             (v.x.clone(), v.y.clone(), v.z.clone())

@@ -1020,7 +1020,7 @@ mod tests {
         let detail = attribute::create_owned(
             "tag",
             attribute::Owner::Detail,
-            attribute::Storage::Text(vec!["cube".to_owned()]),
+            attribute::Storage::Text(vec![b"cube".to_vec()]),
         ).unwrap();
         let corners = group::ordered(group::Owner::Point, "corners", points as i64, &[7, 0, 3, 4]).unwrap();
         geometry::create(

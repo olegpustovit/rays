@@ -123,7 +123,10 @@ fn apply(cat: &Catalog, forms: &[syntax::Syntax], op: Op) -> Result<(Vec<syntax:
 }
 
 fn num(text: &str) -> syntax::Syntax {
-    syntax::make(syntax::Node::Num(text.to_owned()))
+    let mut b = flow_syntax::arena::SyntaxBuilder::new();
+    let name = b.intern(text);
+    let id = b.push(0, syntax::Node::Num(name), rays_diagnostic::Span { start: 0, finish: 0 }, None);
+    b.freeze().handle(id)
 }
 
 fn row_expr(cat: &Catalog, ws: &w::Workspace, key: &ArgKey) -> Option<String> {

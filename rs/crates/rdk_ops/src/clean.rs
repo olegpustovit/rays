@@ -817,7 +817,7 @@ mod tests {
         let g = with_attr(&g, Owner::Vertex, "keep_vertex", Storage::Int(vec![0, 1, 2]));
         let g = with_attr(&g, Owner::Vertex, "temp_vertex", Storage::Float(vec![1., 2., 3.]));
         let g = with_attr(&g, Owner::Primitive, "temp_primitive", Storage::Int(vec![4]));
-        let g = with_attr(&g, Owner::Detail, "temp_detail", Storage::Text(vec!["drop".to_owned()]));
+        let g = with_attr(&g, Owner::Detail, "temp_detail", Storage::Text(vec![b"drop".to_vec()]));
         let g = geometry::with_group(group::init(None, group::Owner::Point, "drop_points", 3, &|p| p == 0).unwrap(), &g).unwrap();
         let g = geometry::with_group(group::init(None, group::Owner::Vertex, "empty_vertices", 3, &|_| false).unwrap(), &g).unwrap();
         let g = geometry::with_group(group::init(None, group::Owner::Primitive, "keep_faces", 1, &|_| true).unwrap(), &g).unwrap();

@@ -1,5 +1,20 @@
 #include "bridge.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#include <stdlib.h>
+#endif
+
+void rays_sdl3_configure_fatal_errors(void)
+{
+#ifdef _WIN32
+  /* Rust leaves stack overflow to Windows. Keep fatal reporting noninteractive;
+     _set_error_mode also covers the legacy CRT used by Windows GNU builds. */
+  SetErrorMode(GetErrorMode() | SEM_NOGPFAULTERRORBOX);
+  _set_error_mode(_OUT_TO_STDERR);
+#endif
+}
+
 #if defined(RAYS_SDL3_MACOS)
 #include <CoreFoundation/CoreFoundation.h>
 #include <pthread.h>

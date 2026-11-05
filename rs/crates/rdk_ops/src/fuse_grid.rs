@@ -24,7 +24,7 @@ enum FuseAttributeView {
     Float4(Arc<[f64]>, Arc<[f64]>, Arc<[f64]>, Arc<[f64]>),
     IntArray(Arc<[i64]>, Arc<[i64]>),
     FloatArray(Arc<[i64]>, Arc<[f64]>),
-    Text(Vec<String>),
+    Text(Vec<Vec<u8>>),
 }
 
 fn make(operation: &str, code: &str, message: String) -> error::T {
@@ -1100,11 +1100,11 @@ mod tests {
         let _ = topology::point_count;
     }
 
-    /// `check_target_parallel_exact` of lib/rdk/test_fuse.ml at a smaller size: target Fuse and
+    /// `check_target_parallel_exact` of lib/rdk/test_fuse.ml: target Fuse and
     /// attribute/group rules give byte-identical geometry at one and four domains.
     #[test]
     fn target_fuse_and_rules_are_exact_across_domains() {
-        let target = grid(59, 39, 4.2, false);
+        let target = grid(420, 320, 30.0, false);
         let (tx, ty, tz) = positions(&target);
         let (vp, offsets, _) = topo(&target);
         let source = geom(
@@ -1119,7 +1119,7 @@ mod tests {
             at_domains(domains, &|| {
                 fuse(
                     &Params {
-                        grain: 64,
+                        grain: 1024,
                         target: Some(target.clone()),
                         using: point_snap::Using::ClosestTargetPoint,
                         tolerance: 0.05,
@@ -1139,8 +1139,10 @@ mod tests {
         assert!(snapped.iter().all(|&d| d >= 0), "every shifted point snaps to its own target");
 
         // Two stacked copies linked by a closest-target snap that modifies the target.
-        let half = geometry::point_count(&target);
-        let (x, y, z) = positions(&target);
+        let linked_base = grid(220, 160, 20.0, false);
+        let half = geometry::point_count(&linked_base);
+        let (x, y, z) = positions(&linked_base);
+        let (vp, offsets, _) = topo(&linked_base);
         let (x2, y2): (Vec<f64>, Vec<f64>) = (x.iter().map(|v| v + 0.013).collect(), y.iter().map(|v| v - 0.017).collect());
         let both = |a: &Vec<f64>, b: &Vec<f64>| a.iter().chain(b.iter()).copied().collect::<Vec<f64>>();
         let mut all_vp = vp.clone();
@@ -1157,7 +1159,7 @@ mod tests {
             &linked,
             Owner::Point,
             "rule_text",
-            Storage::Text((0..total).map(|p| if p < half { "q" } else { "t" }.to_owned()).collect()),
+            Storage::Text((0..total).map(|p| if p < half { b"q" } else { b"t" }.to_vec()).collect()),
         );
         let linked = geometry::with_group(point_group("rule_group", total, &|p| p & 1 == 0), &linked).unwrap();
         let rules_run = |domains: i64| {

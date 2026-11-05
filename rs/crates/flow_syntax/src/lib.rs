@@ -1,5 +1,7 @@
 pub use rays_diagnostic::Diagnostic;
 
+pub mod arena;
+pub mod arena_parse;
 pub mod context;
 pub mod lisp;
 pub mod macros;

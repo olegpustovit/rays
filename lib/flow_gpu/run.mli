@@ -38,10 +38,12 @@ type extras = {
   strands : Ogpu.Backend.buffer option;
   strand_count : int;
   curves : Ogpu.Backend.accel option;
+  prototypes : Ogpu.Backend.accel option;
 }
 (** Bindings of a moving or stranded scene, after the instance table: a flat moving scene's
     shutter-end triangle vertices, then the strand segments (two float4 each: end a, radius; end b,
-    radius) and, for native curves, their curve structure. *)
+    radius) and, for native curves, their curve structure. Vulkan motion instances also bind their
+    prototype TLAS after these resources. *)
 
 val no_extras : extras
 

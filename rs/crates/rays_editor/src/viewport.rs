@@ -543,10 +543,12 @@ pub fn section(camera_: &camera, extra_: &extra) -> Syntax {
     let form = store::viewport::encode(camera_, look_through(extra_)).expect("viewport form");
     match &form.node {
         SNode::Map(fields) => {
-            let mut fields = fields.clone();
-            fields.push(Syntax { node: SNode::Kw("renderer".to_string()), ..form.clone() });
-            fields.push(Syntax { node: SNode::Str(renderer::label(extra_.renderer_request.unwrap_or(extra_.renderer.mode)).as_bytes().to_vec()), ..form.clone() });
-            Syntax { node: SNode::Map(fields), ..form }
+            let mut builder = flow_syntax::arena::SyntaxBuilder::new();
+            let mut fields: Vec<_> = form.range(*fields).iter().map(|&id| builder.import(&form.child(id))).collect();
+            fields.push(builder.with_node(&form, flow_syntax::arena::Draft::Kw("renderer".to_string())));
+            fields.push(builder.with_node(&form, flow_syntax::arena::Draft::Str(renderer::label(extra_.renderer_request.unwrap_or(extra_.renderer.mode)).as_bytes().to_vec())));
+            let id = builder.with_node(&form, flow_syntax::arena::Draft::Map(fields));
+            builder.freeze().handle(id)
         }
         _ => form,
     }
@@ -554,15 +556,17 @@ pub fn section(camera_: &camera, extra_: &extra) -> Syntax {
 
 pub fn restore(camera_: &camera, extra_: &extra, json: &Syntax) -> (camera, extra) {
     let (camera_, look) = store::viewport::decode(camera_.clone(), json);
-    fn find(items: &[Syntax]) -> Option<renderer::Mode> {
+    fn find(form: &Syntax, items: &[flow_syntax::arena::SyntaxId]) -> Option<renderer::Mode> {
         match items {
-            [Syntax { node: SNode::Kw(k), .. }, Syntax { node: SNode::Str(label), .. }, ..] if k == "renderer" => renderer::of_label(&String::from_utf8_lossy(label)),
-            [_, _, rest @ ..] => find(rest),
+            [key, value, rest @ ..] => match (form.arena().row(*key).node, form.arena().row(*value).node) {
+                (SNode::Kw(k), SNode::Str(label)) if form.name(k) == "renderer" => renderer::of_label(&String::from_utf8_lossy(form.bytes(label))),
+                _ => find(form, rest),
+            },
             _ => None,
         }
     }
     let mode = match &json.node {
-        SNode::Map(fields) => find(fields),
+        SNode::Map(fields) => find(json, json.range(*fields)),
         _ => None,
     };
     (camera_, extra { renderer_request: mode, ..set_look(extra_, look) })

@@ -22,7 +22,7 @@ fn lower(previous: Option<document::T>, ws: &workspace_doc::T) -> document::T {
     lowering::of_workspace(&lowering::Options { previous, ..Default::default() }, ws).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)))
 }
 fn source(d: &document::T) -> String {
-    workspace_doc::to_text(&d.workspace.ws)
+    workspace_doc::to_text(&d.workspace.ws).unwrap()
 }
 /// lowering and evaluation calls made by [f]
 fn work<R>(f: impl FnOnce() -> R) -> (R, i64) {

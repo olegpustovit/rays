@@ -3,7 +3,7 @@
 use super::support::*;
 use editor_document::workspace_doc;
 use flow_graph::flow_edit::{ArgKey, Op};
-use flow_syntax::syntax::{self as s, Node};
+use flow_syntax::syntax::{self as s, Draft as Node};
 use input::{Event, Key, MouseButton};
 use pxui_shell::layout;
 use rays_editor::{Editor, Reduce};
@@ -301,7 +301,7 @@ pub fn run_spreadsheet() {
       sa (ui/spreadsheet :of a) sb (ui/spreadsheet :of b)]
       (ui/workspace (ui/split "vertical" (ui/split "horizontal" a b) (ui/split "horizontal" sa sb))))))"#;
     let doc = of_text(text);
-    check(workspace_doc::to_text(&of_text(&workspace_doc::to_text(&doc))) == workspace_doc::to_text(&doc), "spreadsheet layout did not round trip");
+    check(workspace_doc::to_text(&of_text(&workspace_doc::to_text(&doc).unwrap())).unwrap() == workspace_doc::to_text(&doc).unwrap(), "spreadsheet layout did not round trip");
     let shell = shell_of(&build_ok(&doc));
     check(shell.follows == vec![(vec![1usize, 1], vec![0usize, 1]), (vec![1, 0], vec![0, 0])], "spreadsheet :of did not follow its graph panel");
     let mut r = Run::new(editor(text));
@@ -331,7 +331,7 @@ pub fn run_spreadsheet() {
     check(rdk::geometry::point_count(&geometry) == 8 && Reduce::spreadsheet(&r.e, &[1, 0]).0 == 3, "spreadsheet recook kept stale geometry or reset owner");
     let columns = sheet::columns(0, &geometry);
     check(columns.len() >= 4 && (0..4).map(|i| columns[i].0.clone()).collect::<Vec<_>>() == ["index", "P.x", "P.y", "P.z"], "canonical position tuple columns");
-    let attr = rdk::attribute::create_owned("label", rdk::attribute::Owner::Point, rdk::attribute::Storage::Text(vec!["sample".to_string(); 8])).expect("attribute");
+    let attr = rdk::attribute::create_owned("label", rdk::attribute::Owner::Point, rdk::attribute::Storage::Text(vec![b"sample".to_vec(); 8])).expect("attribute");
     let geometry = rdk::geometry::with_attribute(attr, &geometry).expect("with_attribute");
     let group = rdk::group::init(None, rdk::group::Owner::Point, "odd", 8, &|i| i % 2 == 1).expect("group");
     let geometry = rdk::geometry::with_group(group, &geometry).expect("with_group");

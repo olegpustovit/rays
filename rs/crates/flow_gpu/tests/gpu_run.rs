@@ -2,8 +2,7 @@
 //! the recorded native noise tolerance, uniform/frame/input reuse, fast precision (carried loops,
 //! int32 arithmetic, gathers), selected and untaken integer errors, empty dispatches, fused
 //! outputs, refusals, and a drawing's region read back through `Executor::region_readback`.
-//! Not ported: `resident_fold`, `resident_value` and the rest of the file's resident-fold scenarios
-//! (they need `Core_draw` lowering driven through a Core_exec draw; see `gpu_resident.rs`).
+//! Resident-fold, resident-value and counted compaction scenarios live in `gpu_resident.rs`.
 mod common;
 use common::test_program as tp;
 use flow_gpu::{host, pipelines, run};
@@ -125,10 +124,6 @@ fn fixtures() {
 fn carried() {
     let Some((lease, pipes)) = start() else { return };
     for (name, program) in tp::carried_fixtures(512) {
-        if let Some(reason) = carried_blocker(&name) {
-            println!("ignored {name}: {reason}");
-            continue;
-        }
         let r = runner(&lease, &pipes, &program, true);
         let expected = array(&tp::ok(packed::host::reference(&program, &live(1.0), None, None, None)));
         let cpu = array(&force(&program, 1.0, true));
@@ -142,13 +137,6 @@ fn carried() {
     pipelines::close(&pipes);
 }
 
-/// carried fixtures that sit on a known flow_eval/flow_ir blocker (rs/port/parity_backlog.md item 1: iterate counts outside 0..=4096 raise E_ITER_BOUND)
-fn carried_blocker(name: &str) -> Option<&'static str> {
-    match name {
-        "iterate-count" | "iterate-until" | "iterate-int63" => Some("flow_eval E_ITER_BOUND (parity_backlog item 1)"),
-        _ => None,
-    }
-}
 
 const STATUS: [(&str, &str, bool, &str); 8] = [
     ("shift-selected", "(map (fn [(x : int)] (if (> (+ (float x) t) 0.) (float (int/shr x (int/add 63 (int/mod (frame/index) 1)))) (float x))) (array/range 8 :type int))", true, "Integer shift count must be within [0, 62]."),

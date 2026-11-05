@@ -1053,7 +1053,7 @@ mod tests {
 
     #[test]
     fn verification_scale() {
-        let count = 1024_usize;
+        let count = 4096_usize;
         let points: Vec<P> =
             (0..count * 2).map(|point| ((point / 2) as f64 * 4., (point & 1) as f64, 0.)).collect();
         let primitives: Vec<Vec<i64>> =

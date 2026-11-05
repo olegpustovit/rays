@@ -23,11 +23,11 @@ pub fn history() {
     type Dump = (String, Vec<(i64, String, String)>, Vec<(i64, String)>);
     let dump = |d: &Driver| -> Dump {
         let plan = Editor::Private::image_plan(d.e());
-        (Doc::to_text(&Editor::workspace(d.e())), Editor::document(d.e()).iter().map(|n| (n.id, n.label.clone(), n.kind.clone())).collect(), plan.nodes.iter().map(|n| (n.id, n.kind.clone())).collect())
+        (Doc::to_text(&Editor::workspace(d.e())).unwrap(), Editor::document(d.e()).iter().map(|n| (n.id, n.label.clone(), n.kind.clone())).collect(), plan.nodes.iter().map(|n| (n.id, n.kind.clone())).collect())
     };
     let undo = |d: &mut Driver| d.bk(&[], &[Key::Meta], off, vec![Event::Key_pressed(Key::KeyChar('z'))]);
     let edit = |d: &mut Driver, n: i64| {
-        let op = F::Op::AddNode { scope: vec!["picture".into()], name: format!("added_{n}"), expr: S::make(S::Node::Num(format!("{:?}", n as f64))) };
+        let op = F::Op::AddNode { scope: vec!["picture".into()], name: format!("added_{n}"), expr: S::make(S::Draft::Num(format!("{:?}", n as f64))) };
         let e = d.ed.take().unwrap();
         d.ed = Some(Editor::edit(e, &op).unwrap_or_else(|m| panic!("{m}")));
         d.step_at(off, vec![]);

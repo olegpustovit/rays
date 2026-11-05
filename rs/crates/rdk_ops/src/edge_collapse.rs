@@ -32,7 +32,7 @@ enum Connectivity {
     Always,
     Float(Vec<f64>),
     Int(Vec<i64>),
-    Text(Vec<String>),
+    Text(Vec<Vec<u8>>),
     Float2(Arc<[f64]>, Arc<[f64]>),
     Float3(Arc<[f64]>, Arc<[f64]>, Arc<[f64]>),
     Float4(Arc<[f64]>, Arc<[f64]>, Arc<[f64]>, Arc<[f64]>),
@@ -346,14 +346,14 @@ mod tests {
             &g,
             Owner::Point,
             "label",
-            Storage::Text(["a", "b", "c", "d"].iter().map(|s| (*s).to_owned()).collect()),
+            Storage::Text(["a", "b", "c", "d"].iter().map(|s| s.as_bytes().to_vec()).collect()),
         );
         let rows = packed::IntArray::create_owned(vec![0, 1, 2, 3, 4], vec![10, 11, 12, 13]).unwrap();
         let g = with_attr(&g, Owner::Point, "rows", Storage::IntArray(rows));
         let g = with_attr(&g, Owner::Point, "__rdk_edge_collapse_target", Storage::Int(vec![9, 8, 7, 6]));
         let g = with_attr(&g, Owner::Point, "N", float3_attr(vec![1.; 4], vec![0.; 4], vec![0.; 4]));
         let g = with_attr(&g, Owner::Vertex, "corner", Storage::Float(vec![10., 20., 30., 40.]));
-        let g = with_attr(&g, Owner::Primitive, "material", Storage::Text(vec!["panel".to_owned()]));
+        let g = with_attr(&g, Owner::Primitive, "material", Storage::Text(vec![b"panel".to_vec()]));
         let g = with_attr(&g, Owner::Detail, "meta", Storage::Int(vec![42]));
         let ordered = group::ordered(group::Owner::Point, "ordered", 4, &[1, 0, 2]).unwrap();
         let corners = group::init(None, group::Owner::Vertex, "corners", 4, &|v| v < 3).unwrap();
@@ -494,12 +494,14 @@ mod tests {
 
     #[test]
     fn disjoint_edges_on_a_grid() {
-        let large = grid(40, 30, 20.0, true);
+        let large = grid(180, 140, 20.0, true);
         let disjoint = edge_group_where(&large, "disjoint", &|_, a, b| {
             let (low, high) = (a.min(b), a.max(b));
             high == low + 1 && low % 4 == 0
         });
-        let out = run(&Params { grain: Some(127), edges: Some(disjoint), ..params() }, &large).unwrap();
+        let out = exact_at_one_and_four(&|| {
+            run(&Params { grain: Some(127), edges: Some(disjoint.clone()), ..params() }, &large).unwrap()
+        });
         assert!(geometry::point_count(&out) < geometry::point_count(&large) && geometry::point_count(&out) > 0);
     }
 }

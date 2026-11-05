@@ -1,15 +1,13 @@
 //! Port of lib/flow_sop/test_workspace_cook.ml (W2): every workspace fixture lowers and cooks, byte
 //! for byte the same at 1 and 3 domains; node counts; provenance.
 //!
-//! The OCaml catalog and `Lower.workspace ~extra` carry `Editor_document.Kinds`; flow_sop cannot
-//! depend on editor_document, so the fixtures that write scene/world/settings/ui kinds (`bloom`,
-//! `#[ignore = "slow ..."]` tests here (lowering costs 0.5-1 s per sphere-like node).
+//! Uses the editor's full kinds catalog for scene/world/settings/UI fixtures as well as SOP graphs.
 use super::support::*;
 use crate::{catalog as fcat, lisp_sop, lower, operators};
 use flow_check::catalog::Catalog;
 use flow_graph::flow_edit::{self as e, ArgKey, Op};
 use flow_graph::projection as p;
-use flow_syntax::syntax::{self as s, Syntax};
+use flow_syntax::syntax::Syntax;
 use flow_syntax::{lisp, phase_timer};
 use rdk::geometry as geo;
 use sop::context::{self as sctx, Options as ContextOptions};
@@ -135,7 +133,7 @@ fn image_noise_lowers_cooks_and_edits() {
 // register L16: a skipped iteration makes no node; the others keep compiled ids, plan keys and
 // provenance, so the cook keeps hitting its cache
 #[test]
-#[ignore = "slow lowering: debug build, 1.7-4 s alone (a single sop/uv_sphere lowers in 3.3 s, a box in 0.15 s; see test_perf_lower)"]
+
 fn skips() {
     let text = |skip: &str| format!("(workspace w (graph g :context sop (sop/merge (for [i (range 4)] {skip}(sop/transform (sop/box) :translate [i 0 0])))))");
     let lower_text = |previous: Option<&lower::T>, source: &str| {
@@ -195,7 +193,7 @@ fn source3(result: &str) -> String {
 }
 
 #[test]
-#[ignore = "slow (RAYS_SLOW=1 in OCaml): lowers a merge of several boxes per case"]
+
 fn optional_rest() {
     let mut all = vec![rest_fixture()];
     all.extend(factories());
@@ -239,11 +237,11 @@ fn optional_rest() {
     assert!(node.rows.iter().any(|r| r.kind == p::RowKind::Add && r.key == ArgKey::Pos(2)), "optional rest projects an add row after the fixed prefix");
     let before = lower_all(None, &text);
     let edited = e::apply(&cat, &forms, &Op::Connect { node: sv(&["g", "r"]), key: ArgKey::Pos(2), src: "b".into(), iter: false }).unwrap();
-    let after = lower_all(Some(&before), &lisp::print(&edited).0);
+    let after = lower_all(Some(&before), &lisp::print(&edited).unwrap().0);
     assert!(before.graphs[0].root == after.graphs[0].root, "connecting optional rest preserves compiled identity");
     assert!(geometry_bytes(&cook_graph(1, &after.graphs[0]).unwrap()) == geometry_bytes(&cook_node(&merge(&[a.clone(), b.clone()]))), "Flow_edit pads disconnected fixed slots before the rest connection");
     let edited = e::apply(&cat, &edited, &Op::Disconnect { node: sv(&["g", "r"]), key: ArgKey::Pos(2), fallback: None }).unwrap();
-    let disconnected = lower_all(Some(&after), &lisp::print(&edited).0);
+    let disconnected = lower_all(Some(&after), &lisp::print(&edited).unwrap().0);
     assert!(geometry_bytes(&cook_graph(1, &disconnected.graphs[0]).unwrap()) == geometry_bytes(&cook_node(&merge(&[a.clone()]))), "Flow_edit disconnect restores zero extras");
     let workspace = checked_in(&cat, &parse(&source3("(sop/rest_fixture a :extras (list b a))")), "named rest");
     let node = node_of(&cat, &workspace, "r");
@@ -256,7 +254,7 @@ fn expected_bytes(with_: &[(&str, &node::T)], text: &str) -> Vec<u8> {
 }
 
 #[test]
-#[ignore = "slow (RAYS_SLOW=1 in OCaml): lowers and cooks several boxes per case"]
+
 fn attribute_composite() {
     let (a, b) = boxes();
     let expected = expected_bytes(
@@ -287,7 +285,7 @@ fn switch_source(result: &str) -> String {
 }
 
 #[test]
-#[ignore = "slow: 4-6 s (over the 5 s per-test budget; lowers five box graphs)"]
+
 fn switch() {
     let cat = catalog_of(&factories());
     let cooked = |result: &str| -> Vec<Vec<u8>> {
@@ -309,7 +307,7 @@ fn switch() {
 }
 
 #[test]
-#[ignore = "slow (RAYS_SLOW=1 in OCaml): lowers and cooks several boxes per case"]
+
 fn blend_shapes() {
     let (a, b) = boxes();
     let c = lisp_sop::node(&[], "(sop/box :center [4.0 0.0 0.0])");
@@ -438,7 +436,7 @@ fn kit_fixture_lowers_and_cooks_the_same_at_1_and_3_domains() {
 }
 
 #[test]
-#[ignore = "slow (RAYS_SLOW=1 in OCaml): lowers the fixtures tree, tunnel and wave"]
+
 fn the_other_sop_fixtures_lower_and_cook() {
     let mut cooked = 0;
     for name in ["tree", "tunnel", "wave"] {
@@ -448,7 +446,7 @@ fn the_other_sop_fixtures_lower_and_cook() {
 }
 
 #[test]
-#[ignore = "slow lowering: over 5 s alone in debug (sphere lowers in 3.3 s; see test_perf_lower)"]
+
 fn variations_fixture_lowers_and_cooks() {
     check_fixture("variations", true);
 }
@@ -462,7 +460,7 @@ fn lowering_accepts_only_a_checked_workspace() {
 }
 
 #[test]
-#[ignore = "slow (RAYS_SLOW=1 in OCaml): six uv_spheres lower in seconds"]
+
 fn a_merge_loop_tags_its_primitives_with_the_input_index() {
     let small = lower_forms(lower::Options::default(), &parse("(workspace w (graph g :context sop (sop/merge (for [i (range 6)] (sop/uv_sphere :center [i 0 0])))))"));
     let graph = &small.graphs[0];
@@ -481,7 +479,7 @@ fn a_merge_loop_tags_its_primitives_with_the_input_index() {
 }
 
 #[test]
-#[ignore = "slow (RAYS_SLOW=1 in OCaml): the wave fixture lowers in seconds"]
+
 fn wave_pending_parameters_and_stable_compiled_ids() {
     // Wave: the curve is a native node; t-dependent points are pending and the static cook uses t = 0
     let wave = lower_case("wave");
@@ -494,7 +492,7 @@ fn wave_pending_parameters_and_stable_compiled_ids() {
 }
 
 #[test]
-#[ignore = "slow lowering: 2 uv_sphere petals per bloom case, over 5 s alone in debug (sphere lowers in 3.3 s; see test_perf_lower)"]
+
 fn bloom_node_counts_and_provenance() {
     // Bloom (3 petals, the ref override 2): flower is 3 petals of (uv_sphere, transform, set_color,
     // transform), a merge, the heart (uv_sphere, set_color) and the result merge; the ref override
@@ -520,7 +518,6 @@ fn bloom_node_counts_and_provenance() {
         }
         graphs => panic!("bloom has {} sop networks", graphs.len()),
     }
-    let _ = s::make;
 }
 
 /// Blend Shapes with a graph-parameter weight: the weights decide at run time which shapes apply, so the

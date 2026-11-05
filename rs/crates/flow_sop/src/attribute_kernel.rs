@@ -40,7 +40,7 @@ fn assoc<'a>(fields: &'a [(String, Value)], key: &str) -> Option<&'a Value> {
 }
 fn text_of(value: &Value) -> Option<String> {
     match value {
-        Value::Text(bytes) => Some(String::from_utf8_lossy(bytes).into_owned()),
+        Value::Text(bytes) => std::str::from_utf8(bytes).ok().map(str::to_owned),
         _ => None,
     }
 }
@@ -120,33 +120,36 @@ fn field_of(value: Option<Value>, field: &str) -> Option<Value> {
 
 /// The captured value a term names (`captured` / `lookup` of the OCaml).
 fn lookup(bindings: &[(String, Value)], term: &Term) -> Option<Value> {
-    match &term.node {
-        TNode::Text(name) => Some(Value::Text(name.clone())),
-        TNode::RefBinding(name, fields) => {
-            let mut value = assoc(bindings, name).cloned();
-            for field in fields {
-                value = field_of(value, field);
+    match term.node {
+        TNode::Text(id) => Some(Value::Text(term.arena().bytes(id).to_vec())),
+        TNode::RefBinding(id) => {
+            let binding = term.arena().ref_binding(id);
+            let mut value = assoc(bindings, term.name(binding.name)).cloned();
+            for &field in term.arena().name_ids(binding.fields) {
+                value = field_of(value, term.name(field));
             }
             value
         }
-        TNode::Get(inner, field) => field_of(lookup(bindings, inner), field),
-        TNode::Expanded { body, .. } | TNode::Bypass(body) => lookup(bindings, body),
+        TNode::Get(id) => {
+            let get = term.arena().get(id);
+            field_of(lookup(bindings, &term.child(get.value)), term.name(get.name))
+        }
+        TNode::Expanded(id) => lookup(bindings, &term.child(term.arena().expanded(id).body)),
+        TNode::Bypass(body) => lookup(bindings, &term.child(body)),
         _ => None,
     }
 }
 
 /// `captured`: like `lookup` but a literal `Text` term is not a capture.
 pub fn captured(bindings: &[(String, Value)], term: &Term) -> Option<Value> {
-    match &term.node {
-        TNode::RefBinding(name, fields) => {
-            let mut value = assoc(bindings, name).cloned();
-            for field in fields {
-                value = field_of(value, field);
-            }
-            value
+    match term.node {
+        TNode::RefBinding(_) => lookup(bindings, term),
+        TNode::Get(id) => {
+            let get = term.arena().get(id);
+            field_of(captured(bindings, &term.child(get.value)), term.name(get.name))
         }
-        TNode::Get(inner, field) => field_of(captured(bindings, inner), field),
-        TNode::Bypass(body) | TNode::Expanded { body, .. } => captured(bindings, body),
+        TNode::Bypass(body) => captured(bindings, &term.child(body)),
+        TNode::Expanded(id) => captured(bindings, &term.child(term.arena().expanded(id).body)),
         _ => None,
     }
 }
@@ -157,48 +160,42 @@ struct Reads {
     opaque: bool,
 }
 
-fn arg_geometry(bindings: &[(String, Value)], args: &[(String, Term)]) -> Option<i64> {
-    args.iter().find(|(k, _)| k == "geometry").and_then(|(_, t)| lookup(bindings, t)).as_ref().and_then(geometry_id)
+fn arg_geometry(bindings: &[(String, Value)], term: &Term, args: flow_check::term_arena::RangeId) -> Option<i64> {
+    term.arena().fields(args).iter().find(|field| term.name(field.name) == "geometry")
+        .and_then(|field| lookup(bindings, &term.child(field.term))).as_ref().and_then(geometry_id)
 }
 
 fn checked_reads(bindings: &[(String, Value)], term: &Term, st: &mut Reads) -> Vec<i64> {
     fn scan(bindings: &[(String, Value)], term: &Term, st: &mut Reads, safe: &mut Vec<i64>, unsafe_: &mut Vec<i64>) {
-        match &term.node {
-            TNode::Op { op, args, .. } if ATTR_OPS.contains(&op.as_str()) => {
-                let name = args.iter().find(|(k, _)| k == "attribute").and_then(|(_, t)| lookup(bindings, t));
-                match (name.as_ref().and_then(text_of), arg_geometry(bindings, args)) {
-                    (Some(name), Some(id)) => {
-                        st.names.push(name);
-                        safe.push(id);
+        match term.node {
+            TNode::Op(id) => {
+                let op = term.arena().op(id);
+                let name = term.name(op.op);
+                if ATTR_OPS.contains(&name) {
+                    let attribute = term.arena().fields(op.args).iter().find(|field| term.name(field.name) == "attribute")
+                        .and_then(|field| lookup(bindings, &term.child(field.term)));
+                    match (attribute.as_ref().and_then(text_of), arg_geometry(bindings, term, op.args)) {
+                        (Some(name), Some(id)) => { st.names.push(name); safe.push(id); }
+                        _ => st.opaque = true,
                     }
-                    _ => st.opaque = true,
+                } else if TOPOLOGY_OPS.contains(&name) || matches!(name, "sop/attr_names" | "sop/attr_entries") {
+                    if matches!(name, "sop/attr_names" | "sop/attr_entries") { st.names.push("*".to_owned()); }
+                    match arg_geometry(bindings, term, op.args) {
+                        Some(id) => safe.push(id),
+                        None => st.opaque = true,
+                    }
+                } else {
+                    for &child in term.children() { scan(bindings, &term.child(child), st, safe, unsafe_); }
                 }
             }
-            TNode::Op { op, args, .. } if TOPOLOGY_OPS.contains(&op.as_str()) => match arg_geometry(bindings, args) {
-                Some(id) => safe.push(id),
-                None => st.opaque = true,
-            },
-            TNode::Op { op, args, .. } if op == "sop/attr_names" || op == "sop/attr_entries" => {
-                st.names.push("*".to_owned());
-                match arg_geometry(bindings, args) {
-                    Some(id) => safe.push(id),
-                    None => st.opaque = true,
-                }
-            }
-            TNode::RefBinding(..) if ty::is_geometry(&term.ty) => {
-                if let Some(Value::Deferred(_, id)) = lookup(bindings, term) {
-                    unsafe_.push(id);
-                }
+            TNode::RefBinding(_) if ty::is_geometry(term.ty()) => {
+                if let Some(Value::Deferred(_, id)) = lookup(bindings, term) { unsafe_.push(id); }
             }
             TNode::Bypass(call) => {
-                if let Some(input) = W::bypass_input(call) {
-                    scan(bindings, &input, st, safe, unsafe_);
-                }
+                if let Some(input) = W::bypass_input(&term.child(call)) { scan(bindings, &input, st, safe, unsafe_); }
             }
             _ => {
-                for child in W::children_ref(term) {
-                    scan(bindings, child, st, safe, unsafe_);
-                }
+                for &child in term.children() { scan(bindings, &term.child(child), st, safe, unsafe_); }
             }
         }
     }
@@ -340,7 +337,7 @@ fn options(args: &[(String, Value)]) -> Result<(Owner, String), Diagnostic> {
     let text = |key: &str, default: &str, code: &str| -> Result<String, Diagnostic> {
         match assoc(args, key) {
             None => Ok(default.to_owned()),
-            Some(Value::Text(t)) => Ok(String::from_utf8_lossy(t).into_owned()),
+            Some(Value::Text(t)) => std::str::from_utf8(t).map(str::to_owned).map_err(|_| fail(code, &format!("Attribute {key} must be UTF-8 text."))),
             _ => err(code, &format!("Attribute {key} must be text.")),
         }
     };
@@ -539,7 +536,7 @@ fn read(component: Option<&str>, owner: Owner, kind: &str, name: &str, g: &geome
     let Some(planes) = columns(storage)? else {
         return match (storage, component) {
             (Storage::Int(data), None) => Ok(Value::Int_array(Arc::new(data.clone()))),
-            (Storage::Text(data), None) => Ok(Value::Text_array(Arc::new(data.iter().map(|s| s.as_bytes().to_vec()).collect()))),
+            (Storage::Text(data), None) => Ok(Value::Text_array(Arc::new(data.clone()))),
             (Storage::FloatArray(data), Some("offsets")) => Ok(Value::Int_array(Arc::new(FloatArray::View::view(data).offsets.to_vec()))),
             (Storage::FloatArray(data), Some("values")) => Ok(float_array(FloatArray::View::view(data).values.to_vec())),
             (Storage::IntArray(data), Some("offsets")) => Ok(Value::Int_array(Arc::new(IntArray::View::view(data).offsets.to_vec()))),
@@ -655,12 +652,12 @@ fn context_value(context: &context::T, value: &Value) -> Option<Value> {
     let Value::Source(name, _, args) = value else { return None };
     match name.as_str() {
         "sop/context_seed" => {
-            let text = |key: &str| assoc(args, key).and_then(text_of).unwrap_or_default();
+            let text = |key: &str| match assoc(args, key) { None => Some(String::new()), Some(value) => text_of(value) };
             let salt = match assoc(args, "salt") {
                 Some(Value::Int(n)) => *n,
                 _ => 0,
             };
-            Some(Value::Int(seed_for(salt, context::seed(context), &text("namespace"), &text(context_label()))))
+            Some(Value::Int(seed_for(salt, context::seed(context), &text("namespace")?, &text(context_label())?)))
         }
         "sop/context_frame" => Some(Value::Float(context::frame(context) as f64)),
         "sop/context_time" => Some(Value::Float(context::time(context))),
@@ -865,7 +862,7 @@ pub fn resolve(context: Option<&context::T>, geometry: &GeometryLookup, value: &
                     (Some(id), Some(attribute)) => match geometry(id) {
                         Some(g) => {
                             let (owner, kind) = options(args)?;
-                            let component = assoc(args, "component").and_then(text_of);
+                            let component = assoc(args, "component").map(|value| text_of(value).ok_or_else(|| fail("E_ATTR_TYPE", "Attribute component must be UTF-8 text."))).transpose()?;
                             read(component.as_deref(), owner, &kind, &attribute, &g)
                         }
                         None => not_cooked(),
@@ -1239,7 +1236,7 @@ pub fn write_storage(owned_fields: &[&str], grain: i64, owner: Owner, kind: &str
             if data.len() != count {
                 return err("E_ATTR_COUNT", "Text attribute count differs from owner count.");
             }
-            semantic_owned(owner, name, Storage::Text(data.iter().map(|t| String::from_utf8_lossy(t).into_owned()).collect()), g)
+            semantic_owned(owner, name, Storage::Text(data.as_ref().clone()), g)
         }
         ("vec2" | "vec3" | "vec4", Value::Record(fields)) => {
             let names: &[&str] = match kind {
@@ -1370,7 +1367,7 @@ pub fn with_planes(grain: i64, g: &geometry::T, fields: &[(String, Value)]) -> R
     let Some(name) = assoc(fields, "attribute").and_then(text_of) else {
         return err("E_ATTR_NAME", "sop/with_planes needs attribute as text.");
     };
-    let owner = owner(&assoc(fields, "owner").and_then(text_of).unwrap_or_else(|| "point".to_owned()))?;
+    let owner = options(fields)?.0;
     match assoc(fields, "planes") {
         Some(Value::Record(planes)) => match assoc(planes, "width") {
             Some(Value::Int(w)) if (1..=4).contains(w) => {
@@ -1507,7 +1504,7 @@ pub fn write_constant_source(
         (Some(selection), Some(default)) => write_selected(grain, owner, kind, name, values, selection, default, g).map(Some),
         (None, None) => match &value {
             Value::Int(n) => semantic_owned(owner, name, Storage::Int(vec![*n; count]), g).map(Some),
-            Value::Text(t) => semantic_owned(owner, name, Storage::Text(vec![String::from_utf8_lossy(t).into_owned(); count]), g).map(Some),
+            Value::Text(t) => semantic_owned(owner, name, Storage::Text(vec![t.clone(); count]), g).map(Some),
             Value::Float(x) => install(owner, kind, name, vec![vec![*x; count]], g).map(Some),
             Value::Vec3(x, y, z) => install(owner, kind, name, [*x, *y, *z].iter().map(|v| vec![*v; count]).collect(), g).map(Some),
             Value::Vec4(x, y, z, q) => install(owner, kind, name, [*x, *y, *z, *q].iter().map(|v| vec![*v; count]).collect(), g).map(Some),
@@ -1576,8 +1573,8 @@ fn origin_of(by_source: &[(i64, i64)], id: i64) -> Option<i64> {
     by_source.iter().find(|(k, _)| *k == id).map(|(_, o)| *o)
 }
 
-fn captured_args(bindings: &[(String, Value)], args: &[(String, Term)]) -> Vec<(String, Value)> {
-    args.iter().filter_map(|(n, t)| captured(bindings, t).map(|v| (n.clone(), v))).collect()
+fn captured_args(bindings: &[(String, Value)], term: &Term, args: flow_check::term_arena::RangeId) -> Vec<(String, Value)> {
+    term.arena().fields(args).iter().filter_map(|field| captured(bindings, &term.child(field.term)).map(|v| (term.name(field.name).to_owned(), v))).collect()
 }
 
 fn promoted<X: Clone>(args: &[(String, X)], target_of: &dyn Fn(&X) -> X) -> Vec<(String, X)> {
@@ -1601,11 +1598,16 @@ fn owner_origin(by_source: &[(i64, i64)], id: i64, parts: &[&str]) -> Option<Ori
 
 fn count_source(by_source: &[(i64, i64)], residual: ResidualIdAlias, term: &Term) -> Option<Origin> {
     let bindings = E::Residual::residual_bindings(residual)?;
-    let topology_component: Option<(String, Vec<(String, Value)>)> = match &term.node {
-        TNode::Get(inner, component) if matches!(&inner.node, TNode::Op { op, .. } if op == "sop/topology") => match &inner.node {
-            TNode::Op { args, .. } => Some((component.clone(), captured_args(&bindings, args))),
-            _ => None,
-        },
+    let topology_component: Option<(String, Vec<(String, Value)>)> = match term.node {
+        TNode::Get(id) if {
+            let inner = term.child(term.arena().get(id).value);
+            matches!(inner.node, TNode::Op(op) if inner.name(inner.arena().op(op).op) == "sop/topology")
+        } => {
+            let get = term.arena().get(id);
+            let inner = term.child(get.value);
+            let TNode::Op(op) = inner.node else { unreachable!() };
+            Some((term.name(get.name).to_owned(), captured_args(&bindings, &inner, inner.arena().op(op).args)))
+        }
         _ => match captured(&bindings, term) {
             Some(Value::Source(n, _, args)) if n == "sop/topology" => assoc(&args, "component").and_then(text_of).map(|c| (c, args.clone())),
             _ => None,
@@ -1615,9 +1617,9 @@ fn count_source(by_source: &[(i64, i64)], residual: ResidualIdAlias, term: &Term
     // ([array/range (sop/count g :points)]) counts g's points
     fn filled(by_source: &[(i64, i64)], residual: ResidualIdAlias, term: &Term) -> Option<Origin> {
         let bindings = E::Residual::residual_bindings(residual)?;
-        match &term.node {
-            TNode::Op { op, args, .. } if ["array/int", "array/float", "array/vec2", "array/vec3", "array/vec4", "array/range"].contains(&op.as_str()) => {
-                match args.iter().find(|(k, _)| k == "count").and_then(|(_, t)| captured(&bindings, t)) {
+        match term.node {
+            TNode::Op(id) if ["array/int", "array/float", "array/vec2", "array/vec3", "array/vec4", "array/range"].contains(&term.name(term.arena().op(id).op)) => {
+                match term.arena().fields(term.arena().op(id).args).iter().find(|field| term.name(field.name) == "count").and_then(|field| captured(&bindings, &term.child(field.term))) {
                     Some(Value::Source(n, _, counted) | Value::Struct(n, _, counted)) if n == "sop/count" => {
                         match (assoc(&counted, "geometry").and_then(geometry_id), assoc(&counted, "element").and_then(text_of)) {
                             (Some(id), Some(element)) if element == "points" => owner_origin(by_source, id, &["@sop-owner", "point"]),
@@ -1627,13 +1629,15 @@ fn count_source(by_source: &[(i64, i64)], residual: ResidualIdAlias, term: &Term
                     _ => None,
                 }
             }
-            TNode::Expanded { body, .. } => filled(by_source, residual, body),
-            TNode::Op { op, args, .. } if op == "exact" && args.len() == 1 => count_source(by_source, residual, &args[0].1),
-            TNode::Hof(HofKind::Map, terms) if terms.len() >= 2 => {
+            TNode::Expanded(id) => filled(by_source, residual, &term.child(term.arena().expanded(id).body)),
+            TNode::Op(id) if term.name(term.arena().op(id).op) == "exact" && term.arena().fields(term.arena().op(id).args).len() == 1 => {
+                count_source(by_source, residual, &term.child(term.arena().fields(term.arena().op(id).args)[0].term))
+            }
+            TNode::Hof(id) if term.arena().hof(id).kind == HofKind::Map && term.arena().term_ids(term.arena().hof(id).args).len() >= 2 => {
                 // a map zips its arrays: when they share an origin it has it
-                let arrays = &terms[1..];
-                match count_source(by_source, residual, &arrays[0]) {
-                    Some(origin) if arrays.iter().all(|a| count_source(by_source, residual, a).as_ref() == Some(&origin)) => Some(origin),
+                let arrays = &term.arena().term_ids(term.arena().hof(id).args)[1..];
+                match count_source(by_source, residual, &term.child(arrays[0])) {
+                    Some(origin) if arrays.iter().all(|&a| count_source(by_source, residual, &term.child(a)).as_ref() == Some(&origin)) => Some(origin),
                     _ => None,
                 }
             }
@@ -1661,24 +1665,26 @@ fn count_source(by_source: &[(i64, i64)], residual: ResidualIdAlias, term: &Term
         };
     }
     let owner_edge = |v: Option<&Option<Value>>| matches!(v, Some(Some(Value::Text(t))) if t == b"edge");
-    let (edge, args): (bool, Option<Vec<(String, Value)>>) = match &term.node {
-        TNode::Get(inner, c) if (c == "a" || c == "b") && matches!(&inner.node, TNode::Op { op, .. } if op == "sop/edges") => match &inner.node {
-            TNode::Op { args, .. } => (true, Some(captured_args(&bindings, args))),
-            _ => (false, None),
-        },
-        TNode::Op { op, args, .. } if op == "sop/attr" || op == "sop/group" => {
-            let resolved: Vec<(String, Option<Value>)> = args
-                .iter()
-                .map(|(n, t)| {
-                    (
-                        n.clone(),
-                        match &t.node {
-                            TNode::Text(text) => Some(Value::Text(text.clone())),
-                            _ => captured(&bindings, t),
-                        },
-                    )
+    let (edge, args): (bool, Option<Vec<(String, Value)>>) = match term.node {
+        TNode::Get(id) if {
+            let get = term.arena().get(id);
+            let inner = term.child(get.value);
+            matches!(term.name(get.name), "a" | "b") && matches!(inner.node, TNode::Op(op) if inner.name(inner.arena().op(op).op) == "sop/edges")
+        } => {
+            let inner = term.child(term.arena().get(id).value);
+            let TNode::Op(op) = inner.node else { unreachable!() };
+            (true, Some(captured_args(&bindings, &inner, inner.arena().op(op).args)))
+        }
+        TNode::Op(id) if matches!(term.name(term.arena().op(id).op), "sop/attr" | "sop/group") => {
+            let call = term.arena().op(id);
+            let op = term.name(call.op);
+            let resolved: Vec<(String, Option<Value>)> = term.arena().fields(call.args).iter().map(|field| {
+                let t = term.child(field.term);
+                (term.name(field.name).to_owned(), match t.node {
+                    TNode::Text(id) => Some(Value::Text(t.arena().bytes(id).to_vec())),
+                    _ => captured(&bindings, &t),
                 })
-                .collect();
+            }).collect();
             let resolved = if op == "sop/group" { promoted(&resolved, &|x: &Option<Value>| x.clone()) } else { resolved };
             let edge = op == "sop/group" && owner_edge(resolved.iter().find(|(k, _)| k == "owner").map(|(_, v)| v));
             let missing = resolved.iter().any(|(n, v)| ["owner", "type", "as_owner"].contains(&n.as_str()) && v.is_none());
@@ -1787,28 +1793,32 @@ fn borrowed_value(geometry: &GeometryLookup, value: &Value) -> Result<Option<Vec
 fn borrowed_source(geometry: &GeometryLookup, residual: ResidualIdAlias, term: &Term) -> Result<Option<Vec<Column>>, Diagnostic> {
     let Ok(view) = E::Residual::residual_view(residual) else { return Ok(None) };
     let bindings = view.bindings;
-    match &term.node {
-        TNode::Op { op, args, .. } if op == "sop/attr" => {
+    match term.node {
+        TNode::Op(id) if term.name(term.arena().op(id).op) == "sop/attr" => {
+            let args = term.arena().fields(term.arena().op(id).args);
             let argument = |name: &str| -> Option<Value> {
-                args.iter().find(|(k, _)| k == name).and_then(|(_, t)| match &t.node {
-                    TNode::Text(text) => Some(Value::Text(text.clone())),
-                    _ => captured(&bindings, t),
+                args.iter().find(|field| term.name(field.name) == name).and_then(|field| {
+                    let t = term.child(field.term);
+                    match t.node {
+                        TNode::Text(id) => Some(Value::Text(t.arena().bytes(id).to_vec())),
+                        _ => captured(&bindings, &t),
+                    }
                 })
             };
-            if ["owner", "type"].iter().any(|key| args.iter().any(|(k, _)| k == key) && argument(key).is_none()) {
+            if ["owner", "type"].iter().any(|key| args.iter().any(|field| term.name(field.name) == *key) && argument(key).is_none()) {
                 return Ok(None);
             }
             match (argument("geometry"), argument("attribute")) {
                 (Some(g), Some(a)) => {
                     let mut fields = vec![("geometry".to_owned(), g), ("attribute".to_owned(), a)];
                     fields.extend(["owner", "type"].iter().filter_map(|k| argument(k).map(|v| ((*k).to_owned(), v))));
-                    borrowed_value(geometry, &Value::Struct("sop/attr".into(), term.ty.clone(), fields))
+                    borrowed_value(geometry, &Value::Struct("sop/attr".into(), term.ty().clone(), fields))
                 }
                 _ => Ok(None),
             }
         }
-        TNode::Expanded { body, .. } => borrowed_source(geometry, residual, body),
-        TNode::Bypass(body) => match W::bypass_input(body) {
+        TNode::Expanded(id) => borrowed_source(geometry, residual, &term.child(term.arena().expanded(id).body)),
+        TNode::Bypass(body) => match W::bypass_input(&term.child(body)) {
             Some(input) => borrowed_source(geometry, residual, &input),
             None => Ok(None),
         },
@@ -1901,10 +1911,14 @@ struct Constant {
 
 fn prepare_constant(kind: &str, values: &Value) -> Option<Constant> {
     let constructors = [("array/int", "int"), ("array/text", "text"), ("array/float", "float"), ("array/vec3", "vec3"), ("array/vec4", "vec4")];
-    fn find(constructors: &[(&str, &str)], kind: &str, seen: &mut Vec<i64>, residual: ResidualIdAlias, term: &Term) -> Option<(ResidualIdAlias, String, Vec<(String, Term)>)> {
-        match &term.node {
-            TNode::Expanded { body, .. } => find(constructors, kind, seen, residual, body),
-            TNode::Op { op, args, .. } if op == "exact" && args.len() == 1 && args[0].0 == "value" => find(constructors, kind, seen, residual, &args[0].1),
+    fn find(constructors: &[(&str, &str)], kind: &str, seen: &mut Vec<i64>, residual: ResidualIdAlias, term: &Term) -> Option<(ResidualIdAlias, Term)> {
+        match term.node {
+            TNode::Expanded(id) => find(constructors, kind, seen, residual, &term.child(term.arena().expanded(id).body)),
+            TNode::Op(id) if {
+                let op = term.arena().op(id);
+                let args = term.arena().fields(op.args);
+                term.name(op.op) == "exact" && args.len() == 1 && term.name(args[0].name) == "value"
+            } => find(constructors, kind, seen, residual, &term.child(term.arena().fields(term.arena().op(id).args)[0].term)),
             TNode::RefBinding(..) | TNode::Get(..) => {
                 let bindings = E::Residual::residual_bindings(residual)?;
                 match captured(&bindings, term) {
@@ -1916,19 +1930,23 @@ fn prepare_constant(kind: &str, values: &Value) -> Option<Constant> {
                     _ => None,
                 }
             }
-            TNode::Op { op, args, .. } if constructors.iter().any(|(o, k)| o == op && *k == kind) => Some((residual, op.clone(), args.clone())),
+            TNode::Op(id) if constructors.iter().any(|(o, k)| *o == term.name(term.arena().op(id).op) && *k == kind) => Some((residual, term.clone())),
             _ => None,
         }
     }
     let Value::Residual(residual) = values else { return None };
     let view = E::Residual::residual_view(*residual).ok()?;
-    let (residual, operation, args) = find(&constructors, kind, &mut vec![residual.0], *residual, &view.term)?;
+    let (residual, term) = find(&constructors, kind, &mut vec![residual.0], *residual, &view.term)?;
+    let TNode::Op(id) = term.node else { unreachable!() };
+    let call = term.arena().op(id);
+    let operation = term.name(call.op);
+    let args = term.arena().fields(call.args);
     let compile = |term: &Term| -> Result<Executor::Program, Diagnostic> {
         let id = E::Residual::with_bindings(residual, term, &[])?;
         Executor::compile(&Value::Residual(id), &Executor::CompileOptions { strict: true, ..Default::default() })
     };
-    let count = compile(&args.iter().find(|(k, _)| k == "count")?.1);
-    let value = args.iter().find(|(k, _)| k == "value").map(|(_, t)| compile(t));
+    let count = compile(&term.child(args.iter().find(|field| term.name(field.name) == "count")?.term));
+    let value = args.iter().find(|field| term.name(field.name) == "value").map(|field| compile(&term.child(field.term)));
     match (count, value) {
         (Ok(count), None) => Some(Constant { op: op::find(&[], &operation, &fctx::value())?, count, value: None }),
         (Ok(count), Some(Ok(value))) => Some(Constant { op: op::find(&[], &operation, &fctx::value())?, count, value: Some(value) }),
@@ -2593,7 +2611,7 @@ mod tests {
             match attribute::storage(&item).unwrap() {
                 Storage::Float(v) => out.extend(v.iter().map(|x| x.to_bits())),
                 Storage::Int(v) => out.extend(v.iter().map(|x| *x as u64)),
-                Storage::Text(v) => v.iter().for_each(|s| out.extend(s.bytes().map(u64::from))),
+                Storage::Text(v) => v.iter().for_each(|s| out.extend(s.iter().copied().map(u64::from))),
                 Storage::Float2(v) => {
                     let w = Float2::View::view(&v);
                     [&w.x, &w.y].iter().for_each(|p| out.extend(p.iter().map(|x| x.to_bits())))
@@ -2943,7 +2961,7 @@ mod tests {
                 base = geometry::create(geometry::positions(&base).clone(), t, None, None, None).unwrap();
             }
             let raw = attribute::create_owned("untouched", Owner::Detail, Storage::Float(vec![f64::from_bits(0x7ff8000000001234)])).unwrap();
-            let text = attribute::create_owned("bytes", Owner::Detail, Storage::Text(vec!["é".to_owned()])).unwrap();
+            let text = attribute::create_owned("bytes", Owner::Detail, Storage::Text(vec!["é".as_bytes().to_vec()])).unwrap();
             let matrix = FloatArray::create_owned(vec![0, 16], (0..16).map(|i| if i == 0 { -0.0 } else { i as f64 }).collect()).unwrap();
             let mut original = base;
             for a in [raw, text, attribute::create_owned("matrix", Owner::Detail, Storage::FloatArray(matrix)).unwrap()] {

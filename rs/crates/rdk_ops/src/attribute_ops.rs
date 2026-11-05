@@ -25,9 +25,9 @@ pub fn is_blank(text: &str) -> bool {
 }
 
 /// OCaml `Printf "%S"`: a double-quoted string with `String.escaped` escapes.
-pub fn ocaml_quote(text: &str) -> String {
+pub fn ocaml_quote(text: impl AsRef<[u8]>) -> String {
     let mut out = String::from("\"");
-    for &byte in text.as_bytes() {
+    for &byte in text.as_ref() {
         match byte {
             b'"' => out.push_str("\\\""),
             b'\\' => out.push_str("\\\\"),
@@ -46,7 +46,7 @@ pub fn ocaml_quote(text: &str) -> String {
 enum Chunk {
     Planes(Vec<Vec<f64>>),
     Ints(Vec<i64>),
-    Texts(Vec<String>),
+    Texts(Vec<Vec<u8>>),
 }
 
 type Slots = Vec<Mutex<Option<Chunk>>>;
@@ -139,9 +139,9 @@ pub fn map_ints(
 pub fn map_texts(
     cancel_token: Option<&cancel::T>,
     grain: i64,
-    init: &[String],
-    work: &(dyn Fn(i64, &mut String) -> Result<(), error::T> + Sync),
-) -> Result<Vec<String>, error::T> {
+    init: &[Vec<u8>],
+    work: &(dyn Fn(i64, &mut Vec<u8>) -> Result<(), error::T> + Sync),
+) -> Result<Vec<Vec<u8>>, error::T> {
     let count = init.len() as i64;
     let slots: Slots = new_slots(count, grain);
     support::run_indexed_ranges(grain, count, &|range, first, last| {
@@ -595,7 +595,7 @@ pub(crate) mod fixtures {
         }
     }
 
-    pub fn texts(owner: attribute::Owner, name: &str, geometry_value: &geometry::T) -> Vec<String> {
+    pub fn texts(owner: attribute::Owner, name: &str, geometry_value: &geometry::T) -> Vec<Vec<u8>> {
         match attribute::storage(&find(owner, name, geometry_value)).unwrap() {
             attribute::Storage::Text(values) => values,
             _ => panic!("wrong text storage for {name}"),
@@ -658,7 +658,7 @@ pub(crate) mod fixtures {
 
 #[cfg(test)]
 pub(crate) mod fixtures2 {
-    use rdk_core::{attribute, geometry, group, packed};
+    use rdk_core::{attribute, geometry, packed};
 
     pub fn add_values(owner: attribute::Owner, name: &str, values: Vec<f64>, g: &geometry::T) -> geometry::T {
         super::fixtures::add_storage(owner, name, attribute::Storage::Float(values), g)
@@ -697,48 +697,8 @@ pub(crate) mod fixtures2 {
         expected.len() == actual.len() && expected.iter().zip(actual).all(|(a, b)| near(*a, *b))
     }
 
-    /// An exact description of a geometry (OCaml `geometry_bytes`): positions, attributes, groups.
+    /// The shared byte-exact geometry oracle, including topology and ordered/edge groups.
     pub fn signature(g: &geometry::T) -> String {
-        let mut text = String::new();
-        let view = packed::Float3::View::view(geometry::positions(g)).unwrap();
-        for plane in [&view.x, &view.y, &view.z] {
-            for value in plane.iter() {
-                text.push_str(&format!("{:x},", value.to_bits()));
-            }
-            text.push('|');
-        }
-        for item in geometry::attributes(g) {
-            text.push_str(&format!("[{:?} {} {} ", attribute::owner(&item), attribute::name(&item), attribute::kind_name(&item)));
-            match attribute::storage(&item).unwrap() {
-                attribute::Storage::Float(v) => v.iter().for_each(|x| text.push_str(&format!("{:x},", x.to_bits()))),
-                attribute::Storage::Int(v) => v.iter().for_each(|x| text.push_str(&format!("{x},"))),
-                attribute::Storage::Text(v) => v.iter().for_each(|x| text.push_str(&format!("{x:?},"))),
-                attribute::Storage::Float2(v) => {
-                    let w = packed::Float2::View::view(&v);
-                    [&w.x, &w.y].iter().for_each(|p| p.iter().for_each(|x| text.push_str(&format!("{:x},", x.to_bits()))))
-                }
-                attribute::Storage::Float3(v) => {
-                    let w = packed::Float3::View::view(&v).unwrap();
-                    [&w.x, &w.y, &w.z].iter().for_each(|p| p.iter().for_each(|x| text.push_str(&format!("{:x},", x.to_bits()))))
-                }
-                attribute::Storage::Float4(v) => {
-                    let w = packed::Float4::View::view(&v);
-                    [&w.x, &w.y, &w.z, &w.w].iter().for_each(|p| p.iter().for_each(|x| text.push_str(&format!("{:x},", x.to_bits()))))
-                }
-                attribute::Storage::IntArray(v) => {
-                    let w = packed::IntArray::View::view(&v);
-                    text.push_str(&format!("{:?}{:?}", w.offsets, w.values));
-                }
-                attribute::Storage::FloatArray(v) => {
-                    let w = packed::FloatArray::View::view(&v);
-                    text.push_str(&format!("{:?}{:?}", w.offsets, w.values.iter().map(|x| x.to_bits()).collect::<Vec<u64>>()));
-                }
-            }
-            text.push(']');
-        }
-        for item in geometry::groups(g) {
-            text.push_str(&format!("<{:?} {} {:?}>", group::owner(&item), group::name(&item), group::View::bits_view(&item)));
-        }
-        text
+        crate::compact_points::fixtures::geometry_signature(g)
     }
 }

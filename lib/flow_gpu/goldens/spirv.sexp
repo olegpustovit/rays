@@ -17,7 +17,7 @@
 (fast_convert 4132 a9cb7f2244338a55fc31f938ab82c769)
 (fast_trace 18140 87ba12fdea1e6fb5830c6f2a5a85b217)
 (fast_trace_instanced 25520 994d180e7bfeb64d9bb22735f72cc943)
-(fast_trace_curves 35900 1c54f4051fb03de30e8bb63fb47b26c6)
+(fast_trace_curves 39124 d23999c003d7fbb17162b7eb2da937d9)
 (fast_gather 3648 be5de20a784414c9fd8957a2c0988bae)
 (fast_list_gather 5732 7602a03d49fe7f260de897152151d0a4)
 (fast_list_float_index 5104 c66dceeaa84304b9af7f1b783d5ee211)

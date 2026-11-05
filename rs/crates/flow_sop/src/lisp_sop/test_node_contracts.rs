@@ -1,4 +1,4 @@
-//! Ports of lib/flow_sop/test_noise_displace_contract.ml and (reduced) test_merge_source.ml.
+//! Ports of lib/flow_sop/test_noise_displace_contract.ml and test_merge_source.ml.
 use super::support::*;
 use crate::{catalog, lisp_sop, lower, manifest, operators};
 use rdk::geometry as geo;
@@ -77,30 +77,44 @@ fn noise_displace_sop_cache_context_seed_dependency_and_relabel_identity() {
     session::close(&mut s);
 }
 
-/// Reduced test_merge_source: the OCaml test compares against the `Mesh_merge_front` oracle, which
-/// has no Rust twin; this keeps the lowering-level checks (one and eight domains agree, the source
-/// attribute is written from `source_base`, inputs are not mutated, a cancelled cook is refused).
+/// The original two-merge implementation remains the independent oracle for fused provenance.
 #[test]
 fn lisp_source_merge_domains_inputs_and_cancellation() {
-    let geometry = line_points(&[(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (2.0, 0.0, 0.0)]);
-    let originals = geometry_bytes(&geometry);
-    let with_: Vec<(String, node::T)> = (0..2).map(|i| (format!("i{i}"), lisp_sop::snapshot(&geometry))).collect();
-    let merged = lisp_sop::node(&with_, "(sop/merge (sop/ext_i0) (sop/ext_i1) :source_attribute \"src\" :source_base 10)");
-    let cook_with = |domains: i64, cancel: Option<Arc<rdk::cancel::T>>| {
-        let context = sctx::create(ContextOptions { domains: Some(domains), grain: Some(97), cancel, ..Default::default() }).unwrap();
-        let mut s = session::create(32, 268_435_456).unwrap();
-        let r = try_cook(&mut s, &context, &merged);
-        session::close(&mut s);
-        r
-    };
-    let one = cook_with(1, None).unwrap_or_else(|d| panic!("{}", rays_diagnostic::error_to_string(&d)));
-    let eight = cook_with(8, None).unwrap();
-    assert!(geometry_bytes(&one) == geometry_bytes(&eight), "Lisp source merge changed geometry across domains");
-    assert_eq!(geo::point_count(&one), 2 * geo::point_count(&geometry));
-    assert!(geometry_bytes(&geometry) == originals, "source merge mutated its inputs");
-    let cancel = Arc::new(rdk::cancel::create());
-    rdk::cancel::cancel(&cancel);
-    assert!(cook_with(1, Some(cancel)).is_err(), "cancelled source merge succeeded");
+    use rdk::{attribute::{self,Owner,Storage},mesh_merge};
+    let geometry=cook_once(1,&lisp_sop::node(&[],"(sop/box :size [1.0 2.0 3.0] :x_divisions 2 :y_divisions 2 :z_divisions 2 :face_groups \"face\")"));
+    let count=geo::primitive_count(&geometry)as usize;let tag=lower::source_attribute();
+    let add=|name:&str,storage:Storage|geo::with_attribute(attribute::create_owned(name,Owner::Primitive,storage).unwrap(),&geometry).unwrap();
+    let named=add("src",Storage::Int(vec![73;count]));let tagged=add(tag,Storage::Int(vec![42;count]));let float_named=add("src",Storage::Float(vec![0.25;count]));
+    let cases=vec![
+        ("src",vec![geometry.clone()]),("src",vec![geometry.clone(),geometry.clone()]),
+        ("src",vec![tagged.clone(),tagged.clone()]),("src",vec![tagged.clone(),geometry.clone()]),
+        ("src",vec![geometry.clone(),tagged]),("src",vec![named.clone(),named.clone()]),
+        ("src",vec![named.clone(),float_named.clone()]),("src",vec![float_named.clone(),float_named]),
+        ("src",vec![named,geometry.clone()]),(tag,vec![geometry.clone(),geometry.clone()]),
+        ("src",vec![rdk::line_geometry::points(&[]).unwrap()]),
+    ];
+    for(attribute,geometries)in cases{
+        let originals=geometries.iter().map(geometry_bytes).collect::<Vec<_>>();
+        let run=|name:&str,base|mesh_merge::run(&mesh_merge::RunParams{cancel:None,grain:None,source_attribute:Some(name.into()),source_base:Some(base)},&geometries);
+        let expected=run(tag,0).and_then(|tagged|run(attribute,10).and_then(|named|{
+            match geo::find_attribute(Owner::Primitive,attribute,&named){
+                Some(values)if geo::find_attribute(Owner::Primitive,attribute,&tagged).is_none()=>geo::with_attribute(values,&tagged),
+                _=>Ok(tagged)
+            }
+        }));
+        let with_=geometries.iter().enumerate().map(|(i,g)|(format!("i{i}"),lisp_sop::snapshot(g))).collect::<Vec<_>>();
+        let merged=lisp_sop::node(&with_,&format!("(sop/merge {} :source_attribute {attribute:?} :source_base 10)",(0..geometries.len()).map(|i|format!("(sop/ext_i{i})")).collect::<Vec<_>>().join(" ")));
+        for domains in [1,8]{let mut s=new_session(32,268_435_456);let actual=try_cook(&mut s,&context(domains,97),&merged);
+            match(&expected,actual){(Ok(expected),Ok(actual))=>assert_eq!(geometry_bytes(expected),geometry_bytes(&actual),"source merge changed geometry/tags/order"),(Err(_),Err(d))=>assert_eq!(d.code,"schema_mismatch"),_=>panic!("source merge changed success/refusal")}
+            session::close(&mut s);
+        }
+        assert_eq!(geometries.iter().map(geometry_bytes).collect::<Vec<_>>(),originals);
+    }
+    let cancel=Arc::new(rdk::cancel::create());rdk::cancel::cancel(&cancel);
+    let c=sctx::create(ContextOptions{domains:Some(1),cancel:Some(cancel),..Default::default()}).unwrap();
+    let with_=vec![("i0".into(),lisp_sop::snapshot(&geometry)),("i1".into(),lisp_sop::snapshot(&geometry))];
+    let merged=lisp_sop::node(&with_,"(sop/merge (sop/ext_i0) (sop/ext_i1) :source_attribute \"src\" :source_base 10)");
+    let mut s=new_session(32,268_435_456);assert!(try_cook(&mut s,&c,&merged).is_err());session::close(&mut s);
 }
 
 /// Physical identity of a cooked geometry (OCaml `==`): the same payload object.

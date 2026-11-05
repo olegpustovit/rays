@@ -109,8 +109,11 @@ fn fresh_names_are_deterministic_distinct_and_stepped() {
         "(sop/merge (for [k (range 2)] (sop/transform (add1 1) :rotate [0 (* (/ k 2) 6.2832) 0])))"
     );
     let s2 = macros::expand_once_with_state(&ms, &s1, &mut state).unwrap();
-    // OCaml `==`: a finished form is returned as it is; Rust has no physical identity, so compare values.
-    assert_eq!(macros::expand_once_with_state(&ms, &s2, &mut state).unwrap(), s2);
+    let unchanged = macros::expand_once_with_state(&ms, &s2, &mut state).unwrap();
+    assert_eq!(unchanged, s2);
+    assert!(matches!(s2.node, syntax::Node::List(_)), "expanded radial is a list");
+    assert_eq!(s2.identity(), unchanged.identity());
+    assert!(std::ptr::eq(s2.children(), unchanged.children()));
     assert_eq!(lisp::flat(&s2), expand(&format!("{RADIAL}{ADD1}"), "(radial k 2 (add1 1))"));
 
     // The new forms take the span of the call.

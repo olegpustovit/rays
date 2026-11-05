@@ -46,7 +46,7 @@ fn iterate_graph() {
     assert_eq!(first(&result(&reseeded, 0.0)), 1.0);
     let (stopped, until_ws) = edit(set(ArgKey::Kw("until".into()), "(fn [a b] true)"));
     assert_eq!(first(&result(&until_ws, 0.0)), 0.5);
-    let saved = lisp::print(&stopped).0;
+    let saved = lisp::print(&stopped).unwrap().0;
     let loaded = check(&parse(&saved));
     assert_eq!(first(&result(&loaded, 0.0)), 0.5);
     let with_until = p::of_graph(&catalog(), &until_ws, "g").unwrap();

@@ -19,7 +19,8 @@ pub enum Storage {
     Float2(packed::Float2::T),
     Float3(packed::Float3::T),
     Float4(packed::Float4::T),
-    Text(Vec<String>),
+    /// Opaque byte strings; attribute names and schema identifiers remain UTF-8.
+    Text(Vec<Vec<u8>>),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -567,5 +568,18 @@ mod tests {
         let planes = super::float_planes(&value).unwrap().unwrap();
         assert_eq!(planes[0], &[1.0, 2.0]);
         assert!(matches!(super::of_float_planes(&value, &planes).unwrap(), Storage::Float(result) if result == vec![1.0, 2.0]));
+    }
+
+    #[test]
+    fn text_storage_and_remap_preserve_every_byte() {
+        let bytes: Vec<u8> = (0..=255).collect();
+        let reversed: Vec<u8> = bytes.iter().rev().copied().collect();
+        let source = super::create_owned("bytes", Owner::Point, Storage::Text(vec![bytes.clone(), reversed.clone()])).unwrap();
+        assert!(matches!(super::View::storage(&source).unwrap(), Storage::Text(values) if values == &vec![bytes.clone(), reversed.clone()]));
+        for grain in [1, 97] {
+            let remapped = crate::topology_remap::attribute(None, grain, Some(true), &[1, -1, 0, 1], &source).unwrap();
+            assert!(matches!(super::storage(&remapped).unwrap(), Storage::Text(values) if values == vec![reversed.clone(), Vec::new(), bytes.clone(), reversed.clone()]));
+        }
+        assert!(matches!(super::storage(&source).unwrap(), Storage::Text(values) if values == vec![bytes, reversed]));
     }
 }

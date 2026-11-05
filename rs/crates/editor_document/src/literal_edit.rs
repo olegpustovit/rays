@@ -7,6 +7,8 @@
 use crate::layout_by_path::Path;
 use flow_check::catalog::{self as fc, Catalog};
 use flow_check::workspace::{self as w, Graph, Node as TNode, Term, Workspace};
+use flow_check::term_arena::{Draft as TermDraft, TermBuilder, TermId};
+use flow_syntax::arena::{SyntaxBuilder, SyntaxId};
 use flow_graph::flow_edit::{arg_text, ArgKey, Op};
 use flow_sop::lower as l;
 use flow_sop::network as net;
@@ -65,49 +67,41 @@ fn float_of_string_opt(text: &str) -> Option<f64> {
     cfmt::parse_ocaml_float(text)
 }
 
-type Lit = (Ty, E, TNode);
+type Lit = (Ty, E);
 
 fn literal(form: &S) -> Option<Lit> {
     if !form.meta().is_empty() {
         return None;
     }
     match &form.node {
-        Node::Num(text) if s::number(text) => match (int_of_string_opt(text), float_of_string_opt(text)) {
-            (Some(n), _) => Some((Ty::Int, E::Int(n), TNode::Lit(param::Value::Int(n)))),
-            (None, Some(n)) if n.is_finite() => Some((Ty::Float, E::Float(n), TNode::Lit(param::Value::Float(n)))),
+        Node::Num(text) if s::number(form.name(*text)) => match (int_of_string_opt(form.name(*text)), float_of_string_opt(form.name(*text))) {
+            (Some(n), _) => Some((Ty::Int, E::Int(n))),
+            (None, Some(n)) if n.is_finite() => Some((Ty::Float, E::Float(n))),
             _ => None,
         },
-        Node::Str(text) => Some((Ty::Text, E::Text(text.clone()), TNode::Text(text.clone()))),
-        Node::Sym(text) if text == "true" || text == "false" => {
-            let value = text == "true";
-            Some((Ty::Bool, E::Bool(value), TNode::Lit(param::Value::Bool(value))))
+        Node::Str(text) => Some((Ty::Text, E::Text(form.bytes(*text).to_vec()))),
+        Node::Sym(text) if form.name(*text) == "true" || form.name(*text) == "false" => {
+            Some((Ty::Bool, E::Bool(form.name(*text) == "true")))
         }
-        Node::Vec(items) if items.len() == 3 => {
-            let number = |form: &S| match literal(form) {
-                Some((_, E::Int(n), _)) => Some(n as f64),
-                Some((_, E::Float(n), _)) => Some(n),
+        Node::Vec(range) if form.range(*range).len() == 3 => {
+            let items = form.range(*range);
+            let number = |id| match literal(&form.child(id)) {
+                Some((_, E::Int(n))) => Some(n as f64),
+                Some((_, E::Float(n))) => Some(n),
                 _ => None,
             };
-            let (x, y, z) = (number(&items[0])?, number(&items[1])?, number(&items[2])?);
-            let term = |form: &S| {
-                let (ty, _, node) = literal(form).expect("checked above");
-                Term { path: None, ty, node, form: std::sync::Arc::new(form.clone()) }
-            };
-            Some((Ty::Vec3, E::Vec3(x, y, z), TNode::Vec(items.iter().map(term).collect())))
+            let (x, y, z) = (number(items[0])?, number(items[1])?, number(items[2])?);
+            Some((Ty::Vec3, E::Vec3(x, y, z)))
         }
         _ => None,
     }
 }
 
-/// `f` over every term, bottom up.
-fn map_term(f: &dyn Fn(&Term) -> Term, term: &Term) -> Term {
-    f(&w::map_children(&|t| map_term(f, t), term))
-}
 
 fn child(form: &S, sub: &[i64]) -> Option<S> {
     let mut form = form.clone();
     for &index in sub {
-        let next = s::children(&form).get(usize::try_from(index).ok()?).map(|c| (*c).clone())?;
+        let next = form.child(*form.children().get(usize::try_from(index).ok()?)?);
         form = next;
     }
     Some(form)
@@ -116,26 +110,29 @@ fn child(form: &S, sub: &[i64]) -> Option<S> {
 type Found = (String, w::Context, i64, Term, bool);
 
 fn find_argument(in_fn: bool, field: &str, id: i64, term: &Term) -> Option<Found> {
-    if let TNode::Call { kind, ctx, args } = &term.node {
-        if let Some((_, arg)) = args.iter().find(|(n, _)| n == field) {
-            if arg.form.id == id {
-                return Some((kind.clone(), *ctx, term.form.id, arg.clone(), in_fn));
+    let arena = term.arena();
+    if let TNode::Call(call) = term.node {
+        let call = arena.call(call);
+        if let Some(field) = arena.fields(call.args).iter().find(|arg| term.name(arg.name) == field) {
+            let arg = term.child(field.term);
+            if arg.form().id == id {
+                return Some((term.name(call.kind).to_owned(), call.ctx, term.form().id, arg, in_fn));
             }
         }
     }
-    let in_fn = in_fn || matches!(term.node, TNode::Fn { .. });
-    w::children(term).iter().find_map(|c| find_argument(in_fn, field, id, c))
+    let in_fn = in_fn || matches!(term.node, TNode::Fn(_));
+    term.children().iter().find_map(|child| find_argument(in_fn, field, id, &term.child(*child)))
 }
 
 /// Names a `fn` body reads: a closure may hold the value bound to one of them.
 fn fn_names(graphs: &[&Graph]) -> HashSet<String> {
     fn go(names: &mut HashSet<String>, inside: bool, term: &Term) {
-        if let (TNode::RefBinding(name, _), true) = (&term.node, inside) {
-            names.insert(name.clone());
+        if let (TNode::RefBinding(id), true) = (term.node, inside) {
+            names.insert(term.name(term.arena().ref_binding(id).name).to_owned());
         }
-        let inside = inside || matches!(term.node, TNode::Fn { .. });
-        for c in w::children(term) {
-            go(names, inside, &c);
+        let inside = inside || matches!(term.node, TNode::Fn(_));
+        for id in term.children() {
+            go(names, inside, &term.child(*id));
         }
     }
     let mut names = HashSet::new();
@@ -146,64 +143,75 @@ fn fn_names(graphs: &[&Graph]) -> HashSet<String> {
 }
 
 fn plain(form: &S) -> bool {
-    form.notes().is_empty() && form.tail().is_empty() && s::children(form).iter().all(|c| plain(c))
+    form.notes().is_empty() && form.tail().is_empty() && form.children().iter().all(|id| plain(&form.child(*id)))
 }
 
-fn patch_source(source: &[S], before: &S, after: &S) -> (Vec<S>, HashMap<i64, S>) {
-    let delta = lisp::flat(after).len() as i64 - (before.span.finish - before.span.start);
-    let mut forms: HashMap<i64, S> = HashMap::new();
-    let shift = |span: &Span| {
-        if span.start >= before.span.finish {
-            Span { start: span.start + delta, finish: span.finish + delta }
+fn patch_source(source: &[S], before: &S, after: &S) -> R<(Vec<S>, HashMap<i64, S>)> {
+    let delta = lisp::flat(after).len() as i64 - (i64::from(before.span.finish) - i64::from(before.span.start));
+    fn offset(position: i64) -> R<u32> {
+        let bytes = usize::try_from(position).map_err(|_| rays_diagnostic::error("E_SOURCE_SIZE".into(), "Source offset is negative.".into(), None, None, None, Vec::new(), Vec::new()))?;
+        rays_diagnostic::check_source_len(bytes)?;
+        Ok(u32::try_from(bytes).expect("checked source length"))
+    }
+    let mut forms: HashMap<i64, SyntaxId> = HashMap::new();
+    let shift = |span: &Span| -> R<Span> {
+        Ok(if span.start >= before.span.finish {
+            Span { start: offset(i64::from(span.start) + delta)?, finish: offset(i64::from(span.finish) + delta)? }
         } else if span.finish >= before.span.finish {
-            Span { start: span.start, finish: span.finish + delta }
+            Span { start: span.start, finish: offset(i64::from(span.finish) + delta)? }
         } else {
             span.clone()
-        }
+        })
     };
-    fn replacement(forms: &mut HashMap<i64, S>, keep_notes: bool, start: i64, old: &S, value: &S) -> S {
-        let finish = start + lisp::flat(value).len() as i64;
-        let node = match (&old.node, &value.node) {
+    fn replacement(builder: &mut SyntaxBuilder, forms: &mut HashMap<i64, SyntaxId>, keep_notes: bool, start: u32, old: &S, value: &S) -> R<SyntaxId> {
+        let finish = offset(i64::from(start) + lisp::flat(value).len() as i64)?;
+        let node = match (old.node, value.node) {
             (Node::Vec(olds), Node::Vec(values)) => {
-                let mut at = start + 1;
+                let mut at = offset(i64::from(start) + 1)?;
                 let mut out = Vec::new();
-                for (o, v) in olds.iter().zip(values) {
-                    let form = replacement(forms, false, at, o, v);
-                    at = form.span.finish + 1;
-                    out.push(form);
+                for (old_id, value_id) in old.range(olds).iter().zip(value.range(values)) {
+                    let id = replacement(builder, forms, false, at, &old.child(*old_id), &value.child(*value_id))?;
+                    at = offset(i64::from(builder.row(id).span.finish) + 1)?;
+                    out.push(id);
                 }
-                Node::Vec(out.into())
+                Node::Vec(builder.range(&out))
             }
-            (_, node) => node.clone(),
+            _ => builder.row(builder.imported(value).expect("replacement imported once")).node,
         };
-        let value = S {
-            id: old.id,
-            node,
-            trivia: S::trivia_of(if value.notes().is_empty() && keep_notes { old.notes().to_vec() } else { value.notes().to_vec() }, value.meta().to_vec(), value.tail().to_vec()),
-            span: Span { start, finish },
-            ..value.clone()
+        let trivia = s::Trivia {
+            notes: if value.notes().is_empty() && keep_notes { old.notes().to_vec() } else { value.notes().to_vec() },
+            meta: value.meta().to_vec(),
+            tail: value.tail().to_vec(),
         };
-        forms.insert(value.id, value.clone());
-        value
+        let id = builder.push(old.id, node, Span { start, finish }, Some(trivia));
+        forms.insert(old.id, id);
+        Ok(id)
     }
-    fn go(forms: &mut HashMap<i64, S>, shift: &dyn Fn(&Span) -> Span, before: &S, after: &S, form: &S) -> S {
+    fn go(builder: &mut SyntaxBuilder, forms: &mut HashMap<i64, SyntaxId>, shift: &dyn Fn(&Span) -> R<Span>, before: &S, after: &S, form: &S) -> R<SyntaxId> {
         let out = if form.id == before.id {
-            replacement(forms, true, before.span.start, form, after)
+            replacement(builder, forms, true, before.span.start, form, after)?
         } else {
-            let node = match &form.node {
-                Node::List(items) => Node::List(items.iter().map(|i| go(forms, shift, before, after, i)).collect()),
-                Node::Vec(items) => Node::Vec(items.iter().map(|i| go(forms, shift, before, after, i)).collect()),
-                Node::Map(items) => Node::Map(items.iter().map(|i| go(forms, shift, before, after, i)).collect()),
-                Node::Quote(kind, item) => Node::Quote(*kind, std::sync::Arc::new(go(forms, shift, before, after, item))),
-                node => node.clone(),
+            let imported = builder.imported(form).expect("source imported once");
+            let node = match form.node {
+                Node::List(range) | Node::Vec(range) | Node::Map(range) => {
+                    let children = form.range(range).iter().map(|id| go(builder, forms, shift, before, after, &form.child(*id))).collect::<R<Vec<_>>>()?;
+                    let range = builder.range(&children);
+                    match form.node { Node::List(_) => Node::List(range), Node::Vec(_) => Node::Vec(range), _ => Node::Map(range) }
+                }
+                Node::Quote(kind, id) => Node::Quote(kind, go(builder, forms, shift, before, after, &form.child(id))?),
+                _ => builder.row(imported).node,
             };
-            S { node, span: shift(&form.span), ..form.clone() }
+            builder.push(form.id, node, shift(&form.span)?, form.trivia().cloned())
         };
-        forms.insert(out.id, out.clone());
-        out
+        forms.insert(form.id, out);
+        Ok(out)
     }
-    let out = source.iter().map(|f| go(&mut forms, &shift, before, after, f)).collect();
-    (out, forms)
+    let mut builder = SyntaxBuilder::new();
+    for root in source { builder.import(root); }
+    builder.import(after);
+    let roots = source.iter().map(|form| go(&mut builder, &mut forms, &shift, before, after, form)).collect::<R<Vec<_>>>()?;
+    let arena = builder.freeze();
+    Ok((roots.into_iter().map(|id| arena.handle(id)).collect(), forms.into_iter().map(|(authored, id)| (authored, arena.handle(id))).collect()))
 }
 
 /// `None` when the op is not a single literal change.
@@ -214,13 +222,13 @@ pub fn patch(catalog: &Catalog, workspace: &Workspace, op: &Op) -> Option<R<(Wor
     if before.id == 0 || literal(&expr).is_none() || (!sub.is_empty() && !before.notes().is_empty()) || !plain(value) {
         return None;
     }
-    let (ty, _, _) = literal(&before)?;
-    let (next_ty, _, _) = literal(value)?;
+    let (ty, _) = literal(&before)?;
+    let (next_ty, _) = literal(value)?;
     let numeric = |t: &Ty| matches!(t, Ty::Int | Ty::Float);
     if !(ty == next_ty || (!sub.is_empty() && numeric(&ty) && numeric(&next_ty))) {
         return None;
     }
-    let (kind, ctx, authored, argument, in_fn) = workspace
+    let (kind, ctx, authored, _, in_fn) = workspace
         .graphs
         .iter()
         .chain(workspace.defs.iter())
@@ -231,7 +239,7 @@ pub fn patch(catalog: &Catalog, workspace: &Workspace, op: &Op) -> Option<R<(Wor
         return None;
     }
     let parameter = descriptor.parameters.iter().find(|p| p.name == *field)?;
-    let (source, forms) = patch_source(&workspace.source, &before, value);
+    let (source, forms) = match patch_source(&workspace.source, &before, value) { Ok(patched) => patched, Err(error) => return Some(Err(error)) };
     let remap_form = |form: &S| -> (S, bool) {
         if form.span.finish > form.span.start {
             match forms.get(&form.id) {
@@ -242,23 +250,51 @@ pub fn patch(catalog: &Catalog, workspace: &Workspace, op: &Op) -> Option<R<(Wor
             (form.clone(), false)
         }
     };
-    let update = |term: &Term| -> Term {
-        let (form, changed) = remap_form(&term.form);
-        if term.form.id == before.id {
-            let (ty, _, node) = literal(&form).expect("patched literal");
-            Term { ty, node, form: std::sync::Arc::new(form), ..term.clone() }
-        } else if !changed {
-            term.clone()
-        } else {
-            Term { form: std::sync::Arc::new(form), ..term.clone() }
+    let graph = |g: &Graph| {
+        let mut builder = TermBuilder::new();
+        let graph_form = forms.get(&g.form.id).unwrap_or(&g.form);
+        let graph_form = builder.import_form(graph_form);
+        let mut roots = vec![g.body.clone()];
+        roots.extend(g.inputs.iter().filter_map(|(_, _, default)| default.clone()));
+        let roots = builder.rewrite_roots_with(&roots, &mut |builder, term, draft| {
+            let source_form = term.form();
+            let (form, changed) = remap_form(&source_form);
+            let (draft, ty) = if source_form.id == before.id {
+                let (ty, value) = literal(&form).expect("patched literal");
+                let draft = match value {
+                    E::Int(n) => TermDraft::Lit(param::Value::Int(n)),
+                    E::Float(n) => TermDraft::Lit(param::Value::Float(n)),
+                    E::Bool(n) => TermDraft::Lit(param::Value::Bool(n)),
+                    E::Text(bytes) => TermDraft::Text(bytes),
+                    E::Vec3(..) => draft,
+                    _ => unreachable!("literal value"),
+                };
+                (draft, Some(ty))
+            } else {
+                (draft, None)
+            };
+            let mut id = builder.rebuild(term, draft);
+            if let Some(ty) = ty { id = builder.with_type(id, &ty); }
+            if changed { id = builder.with_form(id, &form); }
+            id
+        });
+        let (arena, roots, graph_forms) = builder.finish(&roots, &[graph_form]);
+        let mut defaults = roots[1..].iter();
+        Graph {
+            body: arena.handle(roots[0]),
+            inputs: g.inputs.iter().map(|(name, ty, default)| (name.clone(), ty.clone(), default.as_ref().map(|_| arena.handle(*defaults.next().expect("default root"))))).collect(),
+            form: arena.syntax().handle(graph_forms[0]),
+            ..g.clone()
         }
     };
-    let argument = map_term(&update, &argument);
+    let graphs: Vec<_> = workspace.graphs.iter().map(&graph).collect();
+    let defs: Vec<_> = workspace.defs.iter().map(&graph).collect();
+    let (_, _, _, argument, _) = graphs.iter().chain(&defs).find_map(|graph| find_argument(false, field, expr.id, &graph.body))?;
     let mut error: Option<Diagnostic> = None;
     {
         let mut report = |severity: Severity, code: &str, message: &str| {
             if severity == Severity::ErrorSeverity && error.is_none() {
-                error = Some(rays_diagnostic::error(code.to_owned(), message.to_owned(), Some(argument.form.span.clone()), None, None, Vec::new(), Vec::new()));
+                error = Some(rays_diagnostic::error(code.to_owned(), message.to_owned(), Some(argument.form().span.clone()), None, None, Vec::new(), Vec::new()));
             }
         };
         w::validate_parameter(None, &mut report, &fc_param(parameter), &argument);
@@ -266,18 +302,12 @@ pub fn patch(catalog: &Catalog, workspace: &Workspace, op: &Op) -> Option<R<(Wor
     if let Some(error) = error {
         return Some(Err(error));
     }
-    let graph = |g: &Graph| Graph {
-        body: map_term(&update, &g.body),
-        inputs: g.inputs.iter().map(|(name, ty, value)| (name.clone(), ty.clone(), value.as_ref().map(|v| map_term(&update, v)))).collect(),
-        form: forms.get(&g.form.id).cloned().unwrap_or_else(|| g.form.clone()),
-        ..g.clone()
-    };
     let old_value = literal(&expr).map(|l| l.1)?;
-    let new_value = literal(&argument.form).map(|l| l.1)?;
+    let new_value = literal(&argument.form()).map(|l| l.1)?;
     let workspace = Workspace {
         source: source.into(),
-        graphs: workspace.graphs.iter().map(graph).collect::<Vec<_>>().into(),
-        defs: workspace.defs.iter().map(graph).collect::<Vec<_>>().into(),
+        graphs: graphs.into(),
+        defs: defs.into(),
         packed_roots: workspace.packed_roots.iter().map(|(form, path)| (remap_form(form).0, path.clone())).collect(),
         macros: workspace.macros.iter().map(|f| forms.get(&f.id).cloned().unwrap_or_else(|| f.clone())).collect::<Vec<_>>().into(),
         ..workspace.clone()
@@ -292,7 +322,7 @@ pub fn patch(catalog: &Catalog, workspace: &Workspace, op: &Op) -> Option<R<(Wor
         captured: path.iter().any(|p| names.contains(p)),
         before: old_value,
         after: new_value,
-        expr: (*argument.form).clone(),
+        expr: argument.form(),
     };
     Some(Ok((workspace, change)))
 }
@@ -442,4 +472,19 @@ fn lower_value(lowered: &l::T, change: &Change) -> Option<R<l::T>> {
 
 pub fn lower(lowered: &l::T, change: &Change) -> Option<R<l::T>> {
     lower_nodes(lowered, change).or_else(|| lower_value(lowered, change))
+}
+
+#[cfg(test)]
+mod compact_span_tests {
+    use super::*;
+
+    #[test]
+    fn literal_growth_rejects_offsets_beyond_the_compact_source_limit() {
+        let mut source = s::parse("[1 2]").unwrap();
+        source[0].span.finish = rays_diagnostic::MAX_SOURCE_BYTES as u32;
+        let Node::Vec(items) = &source[0].node else { panic!("expected vector") };
+        let before = items[0].clone();
+        let after = S { node: Node::Num("1234".into()), ..before.clone() };
+        assert_eq!(patch_source(&source, &before, &after).unwrap_err().code, "E_SOURCE_SIZE");
+    }
 }

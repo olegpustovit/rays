@@ -404,6 +404,44 @@ pub mod native {
         pub fn buffer(&self) -> &Handle { &self.handle }
     }
 
+    /// An allocation-retaining CPU-only lease. Capture on main, then read only after GPU
+    /// completion while the owner excludes further writes. No generic Handle crosses this API.
+    pub struct SharedBufferReadback {
+        _handle: Handle,
+        pointer: NonNull<u8>,
+        length: usize,
+    }
+    // The only operations available on this lease copy immutable shared memory or drop its
+    // retained handle. Handle's last drop merely queues release through PENDING_RELEASES.
+    // Neither operation invokes Metal or accesses owner-only handle state on the reader.
+    unsafe impl Send for SharedBufferReadback {}
+    unsafe impl Sync for SharedBufferReadback {}
+    impl SharedBufferReadback {
+        pub fn read(&self, offset: u64, length: usize) -> Result<Vec<u8>, Error> {
+            let offset = usize::try_from(offset).map_err(|_| Error::InvalidArgument("readback offset exceeds address space"))?;
+            if offset > self.length || length > self.length - offset {
+                return Err(Error::InvalidArgument("readback range exceeds buffer"));
+            }
+            Ok(unsafe { slice::from_raw_parts(self.pointer.as_ptr().add(offset), length) }.to_vec())
+        }
+    }
+    pub fn shared_buffer_readback(buffer: &Handle) -> Result<SharedBufferReadback, Error> {
+        #[cfg(target_vendor = "apple")]
+        {
+            if !is_main_thread() { return Err(Error::WrongThread); }
+            let mut pointer = std::ptr::null_mut();
+            let mut length = 0;
+            let mut message = std::ptr::null();
+            let status = unsafe { raw_buffer_readback(buffer.as_native_ptr()?, &mut pointer, &mut length, &mut message) };
+            if status != 0 { return Err(unsafe { Error::from_native(status, message) }); }
+            let pointer = NonNull::new(pointer).ok_or(Error::InvalidHandle)?;
+            let length = usize::try_from(length).map_err(|_| Error::InvalidArgument("readback allocation exceeds address space"))?;
+            Ok(SharedBufferReadback { _handle: buffer.clone(), pointer, length })
+        }
+        #[cfg(not(target_vendor = "apple"))]
+        { let _ = buffer; Err(Error::Unavailable) }
+    }
+
     #[cfg(target_vendor = "apple")]
     unsafe extern "C" {
         #[link_name = "caml_rays_metal_default_device"]
@@ -414,6 +452,8 @@ pub mod native {
         fn raw_buffer_write(buffer: *mut NativeHandle, destination_offset: u64, bytes: *const u8, source_offset: usize, length: usize, message: *mut *const c_char) -> i32;
         #[link_name = "caml_rays_metal_buffer_read"]
         fn raw_buffer_read(buffer: *mut NativeHandle, offset: u64, length: usize, destination: *mut u8, message: *mut *const c_char) -> i32;
+        #[link_name = "caml_rays_metal_buffer_readback"]
+        fn raw_buffer_readback(buffer: *mut NativeHandle, pointer: *mut *mut u8, length: *mut u64, message: *mut *const c_char) -> i32;
         #[link_name = "caml_rays_metal_buffer_create_mapped"]
         fn rays_metal_buffer_create_mapped(device: *mut NativeHandle, length: u64, options: i64, output: *mut *mut NativeHandle, mapping: *mut *mut f32, message: *mut *const c_char) -> i32;
         #[link_name = "caml_rays_metal_texture_create"]

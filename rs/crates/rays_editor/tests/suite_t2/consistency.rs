@@ -127,7 +127,7 @@ fn settings_graph_writeback() {
             .unwrap(),
         );
         upd(e, |e| Editor::set_settings(e, &settings::make(&schema, vec![Value::Int(90)])));
-        let loaded = build(&workspace(&wd::to_text(&Editor::workspace(e))));
+        let loaded = build(&workspace(&wd::to_text(&Editor::workspace(e)).unwrap()));
         assert!(settings::fields(&loaded.settings).iter().any(|f| f.name == "fps" && f.current == Value::Int(90)), "set_settings changed a graph-owned value without writing the settings graph");
     });
 }
@@ -141,7 +141,7 @@ fn startup_settings() {
             let before = Editor::workspace(e);
             upd(e, |e| edit(e, &Op::SetArg { node: s(&["config", "@result"]), key: ArgKey::Kw((*name).to_owned()), sub: vec![], value: parse(literal) }));
             let after = Editor::workspace(e);
-            let reloaded = workspace(&wd::to_text(&after));
+            let reloaded = workspace(&wd::to_text(&after).unwrap());
             let w = |x: &wd::T| lowering::window(x).map(|w| format!("{w:?}")).map_err(|d| rays_diagnostic::to_string(&d));
             assert_eq!(w(&reloaded), w(&after), "startup setting did not survive reload: {name}");
             assert_ne!(w(&after), w(&before), "startup setting did not update saved configuration: {name}");
@@ -205,7 +205,7 @@ fn frozen_row(i: usize) {
         };
         assert!(diagnostic.code == "E_CONTEXT_TIME" && diagnostic.message.contains(field), "frozen-time refusal did not identify the field: {}", rays_diagnostic::to_string(&diagnostic));
         assert!(lowering::window(&ws).is_err(), "startup window checking ignored a frozen context");
-        let reloaded = workspace(&wd::to_text(&ws));
+        let reloaded = workspace(&wd::to_text(&ws).unwrap());
         assert!(lowering::of_workspace(&Default::default(), &reloaded).is_err(), "serialized reload bypassed frozen-time refusal");
     }
 }
@@ -227,7 +227,7 @@ fn frozen_editor() {
             }
         }
         upd(e, |e| edit(e, &set_arg(&["scene", "object"], "translate", "[2 0 0]")));
-        assert!(lowering::of_workspace(&Default::default(), &workspace(&wd::to_text(&Editor::workspace(e)))).is_ok(), "literal replacement did not survive reload");
+        assert!(lowering::of_workspace(&Default::default(), &workspace(&wd::to_text(&Editor::workspace(e)).unwrap())).is_ok(), "literal replacement did not survive reload");
         upd(e, |e| Editor::update(e, &undo_frame((450., 300.), 2)));
         assert!(same_ws(&Editor::workspace(e), &before), "literal replacement did not undo in one entry");
     });
@@ -321,7 +321,7 @@ fn preview_identity() {
     let mut dk = view_keys(&docked);
     dk.sort();
     assert_eq!(dk, sorted, "docking changed named viewport identity: {}", view_keys(&docked).join(","));
-    let reloaded = build(&workspace(&wd::to_text(&docked.workspace.ws)));
+    let reloaded = build(&workspace(&wd::to_text(&docked.workspace.ws).unwrap()));
     assert_eq!(view_keys(&reloaded), view_keys(&docked), "reload changed named viewport identity");
     let renamed = edit_doc(&docked, &Op::Rename { node: s(&["editor", "comparison"]), to_: "alternate".into() });
     assert!(view_keys(&renamed).contains(&"v:\"editor\"/\"alternate\"".to_owned()) && !view_keys(&renamed).contains(&comparison.to_owned()), "renaming retained the old authored viewport key");
@@ -375,7 +375,7 @@ fn live_lights() {
     let zero = resolve(&doc, 0.);
     let two = resolve(&doc, 2.);
     assert!(intensities(&zero) == vec![1., 2.] && intensities(&two) == vec![3., 4.], "light residuals did not resolve independently at two times");
-    let reloaded = build(&workspace(&wd::to_text(&ws)));
+    let reloaded = build(&workspace(&wd::to_text(&ws).unwrap()));
     assert!(intensities(&resolve(&reloaded, 2.)) == intensities(&two), "live light source did not survive serialization");
     with_editor(&ws, None, |e| {
         let source = Editor::workspace(e);

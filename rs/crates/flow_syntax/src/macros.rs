@@ -1,5 +1,6 @@
 use crate::lisp;
 use crate::syntax::{Node, QuoteKind, Syntax};
+use crate::arena::{NameId, RangeId, SyntaxBuilder, SyntaxId};
 use rays_diagnostic::{self as diagnostic, Diagnostic, Span};
 use std::collections::HashMap;
 
@@ -32,17 +33,16 @@ fn fresh_name(name: &str) -> bool {
     base(name).ends_with('#')
 }
 
-fn parts(form: &Syntax) -> Option<(&str, &[Syntax], &Syntax)> {
-    let Node::List(forms) = &form.node else { return None; };
-    if forms.len() != 4 || !matches!(&forms[0].node, Node::Sym(head) if head == "defmacro") {
-        return None;
-    }
-    let Node::Sym(name) = &forms[1].node else { return None; };
-    let Node::Vec(parameters) = &forms[2].node else { return None; };
-    Some((name, parameters, &forms[3]))
+fn parts(form: &Syntax) -> Option<(&str, &[SyntaxId], SyntaxId)> {
+    let Node::List(range) = form.node else { return None; };
+    let forms = form.range(range);
+    if forms.len() != 4 || crate::syntax::head(form) != Some("defmacro") { return None; }
+    let Node::Sym(name) = form.arena().row(forms[1]).node else { return None; };
+    let Node::Vec(parameters) = form.arena().row(forms[2]).node else { return None; };
+    Some((form.name(name), form.range(parameters), forms[3]))
 }
 
-fn shape(form: &Syntax) -> Result<(&str, &[Syntax], &Syntax), Diagnostic> {
+fn shape(form: &Syntax) -> Result<(&str, &[SyntaxId], SyntaxId), Diagnostic> {
     parts(form).ok_or_else(|| fail(form, "E_MACRO_SHAPE", "A macro is (defmacro name [params] template)."))
 }
 
@@ -52,26 +52,28 @@ fn params_inner(form: &Syntax) -> Result<(Vec<String>, Option<String>), Diagnost
     let mut required = Vec::new();
     let mut i = 0;
     while i < parameters.len() {
-        match &parameters[i].node {
-            Node::Sym(value) if value == "&" => {
+        let parameter = form.child(parameters[i]);
+        match &parameter.node {
+            Node::Sym(value) if parameter.name(*value) == "&" => {
                 if i + 2 == parameters.len() {
-                    if let Node::Sym(rest) = &parameters[i + 1].node {
-                        if valid_name(rest) && !required.contains(rest) {
-                            return Ok((required, Some(rest.clone())));
+                    if let Node::Sym(rest) = form.arena().row(parameters[i + 1]).node {
+                        let rest = form.name(rest);
+                        if valid_name(rest) && !required.iter().any(|name| name == rest) {
+                            return Ok((required, Some(rest.to_owned())));
                         }
                     }
                 }
                 return Err(fail(form, "E_MACRO_PARAM", &bad_rest));
             }
-            Node::Sym(parameter) if valid_name(parameter) && !required.contains(parameter) => {
-                required.push(parameter.clone());
+            Node::Sym(name) if valid_name(parameter.name(*name)) && !required.iter().any(|value| value == parameter.name(*name)) => {
+                required.push(parameter.name(*name).to_owned());
                 i += 1;
             }
             _ => {
                 return Err(fail(
                     form,
                     "E_MACRO_PARAM",
-                    &format!("Macro {name}: invalid or repeated parameter {}.", lisp::flat(&parameters[i])),
+                    &format!("Macro {name}: invalid or repeated parameter {}.", lisp::flat(&parameter)),
                 ));
             }
         }
@@ -83,9 +85,10 @@ pub fn params(form: &Syntax) -> Result<(Vec<String>, Option<String>), Diagnostic
     params_inner(form)
 }
 
-fn quasi(form: &Syntax) -> Option<&Syntax> {
-    match parts(form) {
-        Some((_, _, Syntax { node: Node::Quote(QuoteKind::Quasi, body), .. })) => Some(body),
+fn quasi(form: &Syntax) -> Option<Syntax> {
+    let (_, _, body) = parts(form)?;
+    match form.arena().row(body).node {
+        Node::Quote(QuoteKind::Quasi, child) => Some(form.child(child)),
         _ => None,
     }
 }
@@ -110,7 +113,7 @@ fn check_inner(form: &Syntax, known: &dyn Fn(bool, &str) -> bool) -> Result<(), 
         fail(form, "E_MACRO_UNQUOTE", &format!("Macro {name}: macros unquote only their parameters; {} is not one.", lisp::flat(form)))
     }
     fn walk_items(
-        forms: &[Syntax],
+        owner: &Syntax, forms: &[SyntaxId],
         name: &str,
         parameters: &[String],
         rest: Option<&str>,
@@ -118,11 +121,12 @@ fn check_inner(form: &Syntax, known: &dyn Fn(bool, &str) -> bool) -> Result<(), 
     ) -> Result<(), Diagnostic> {
         let mut i = 0;
         while i < forms.len() {
-            if matches!(&forms[i].node, Node::Sym(symbol) if symbol == ":") && i + 1 < forms.len() {
-                walk(&forms[i], false, name, parameters, rest, known)?;
+            let child = owner.child(forms[i]);
+            if matches!(&child.node, Node::Sym(symbol) if child.name(*symbol) == ":") && i + 1 < forms.len() {
+                walk(&child, false, name, parameters, rest, known)?;
                 i += 2;
             } else {
-                walk(&forms[i], false, name, parameters, rest, known)?;
+                walk(&child, false, name, parameters, rest, known)?;
                 i += 1;
             }
         }
@@ -138,6 +142,7 @@ fn check_inner(form: &Syntax, known: &dyn Fn(bool, &str) -> bool) -> Result<(), 
     ) -> Result<(), Diagnostic> {
         match &form.node {
             Node::Sym(symbol) => {
+                let symbol = form.name(*symbol);
                 let base = base(symbol);
                 if fresh_name(base) {
                     let stem = &base[..base.len() - 1];
@@ -155,16 +160,19 @@ fn check_inner(form: &Syntax, known: &dyn Fn(bool, &str) -> bool) -> Result<(), 
             }
             Node::Kw(_) | Node::Num(_) | Node::Str(_) => Ok(()),
             Node::Quote(QuoteKind::Unquote, child) => {
-                if let Node::Sym(parameter) = &child.node {
-                    if !parameters.contains(parameter) { return Err(bad_unquote(form, name)); }
-                    if rest == Some(parameter.as_str()) {
+                let child = form.child(*child);
+                if let Node::Sym(parameter) = child.node {
+                    let parameter = child.name(parameter);
+                    if !parameters.iter().any(|name| name == parameter) { return Err(bad_unquote(form, name)); }
+                    if rest == Some(parameter) {
                         return Err(fail(form, "E_MACRO_UNQUOTE", &format!("Macro {name}: splice the rest parameter with ~@{parameter}.")));
                     }
                     Ok(())
                 } else { Err(bad_unquote(form, name)) }
             }
             Node::Quote(QuoteKind::Splice, child) => {
-                if matches!(&child.node, Node::Sym(parameter) if rest == Some(parameter.as_str())) {
+                let child = form.child(*child);
+                if matches!(&child.node, Node::Sym(parameter) if rest == Some(child.name(*parameter))) {
                     Ok(())
                 } else {
                     let suffix = rest.map_or(String::new(), |parameter| format!(" (~@{parameter})"));
@@ -172,16 +180,17 @@ fn check_inner(form: &Syntax, known: &dyn Fn(bool, &str) -> bool) -> Result<(), 
                 }
             }
             Node::Quote(_, _) => Err(fail(form, "E_MACRO_TEMPLATE", &format!("Macro {name}: nested quoting is not supported."))),
-            Node::List(forms) => {
+            Node::List(range) => {
+                let forms = form.range(*range);
                 if let Some((first, rest_forms)) = forms.split_first() {
-                    walk(first, true, name, parameters, rest, known)?;
-                    walk_items(rest_forms, name, parameters, rest, known)
+                    walk(&form.child(*first), true, name, parameters, rest, known)?;
+                    walk_items(form, rest_forms, name, parameters, rest, known)
                 } else { Ok(()) }
             }
-            Node::Vec(forms) | Node::Map(forms) => walk_items(forms, name, parameters, rest, known),
+            Node::Vec(range) | Node::Map(range) => walk_items(form, form.range(*range), name, parameters, rest, known),
         }
     }
-    walk(body, false, name, &parameters, rest.as_deref(), known)
+    walk(&body, false, name, &parameters, rest.as_deref(), known)
 }
 
 #[derive(Clone, Debug, Default)]
@@ -194,16 +203,13 @@ pub fn state() -> State {
     State::default()
 }
 
-fn count(form: &Syntax) -> usize {
-    let mut size = 1;
-    match &form.node {
-        Node::List(forms) | Node::Vec(forms) | Node::Map(forms) => {
-            for child in forms { size += count(child); }
-        }
-        Node::Quote(_, child) => size += count(child),
-        Node::Sym(_) | Node::Kw(_) | Node::Num(_) | Node::Str(_) => (),
+fn count(builder: &SyntaxBuilder, form: SyntaxId) -> usize {
+    1 + match builder.row(form).node {
+        Node::List(range) | Node::Vec(range) | Node::Map(range) =>
+            builder.range_ids(range).iter().map(|child| count(builder, *child)).sum(),
+        Node::Quote(_, child) => count(builder, child),
+        _ => 0,
     }
-    size
 }
 
 fn fresh_symbol(state: &mut State, fresh: &mut HashMap<String, String>, symbol: &str) -> String {
@@ -219,180 +225,194 @@ fn fresh_symbol(state: &mut State, fresh: &mut HashMap<String, String>, symbol: 
     };
     format!("{replacement}{}", &symbol[stem.len()..])
 }
-fn with_node(form: &Syntax, node: Node, span: Span) -> Syntax {
-    Syntax {
-        id: form.id,
-        node,
-        span,
-        trivia: form.trivia.clone(),
+fn fail_at(builder: &SyntaxBuilder, form: SyntaxId, code: &str, message: &str) -> Diagnostic {
+    diagnostic::error(code.to_owned(), message.to_owned(), Some(builder.row(form).span.clone()), None, None, Vec::new(), Vec::new())
+}
+
+fn with_node(builder: &mut SyntaxBuilder, form: SyntaxId, node: Node, span: Span) -> SyntaxId {
+    let id = builder.row(form).id;
+    let trivia = builder.trivia(form).cloned();
+    builder.push(id, node, span, trivia)
+}
+
+fn parts_id(form: SyntaxId, builder: &SyntaxBuilder) -> Option<(NameId, RangeId, SyntaxId)> {
+    let Node::List(range) = builder.row(form).node else { return None; };
+    let forms = builder.range_ids(range);
+    if forms.len() != 4 || head(builder, form) != Some("defmacro") { return None; }
+    let Node::Sym(name) = builder.row(forms[1]).node else { return None; };
+    let Node::Vec(params) = builder.row(forms[2]).node else { return None; };
+    Some((name, params, forms[3]))
+}
+
+fn params_id(form: SyntaxId, name: &str, range: RangeId, builder: &SyntaxBuilder) -> Result<(Vec<String>, Option<String>), Diagnostic> {
+    let parameters = builder.range_ids(range);
+    let mut required = Vec::new();
+    let mut i = 0;
+    while i < parameters.len() {
+        match builder.row(parameters[i]).node {
+            Node::Sym(value) if builder.name(value) == "&" => {
+                if i + 2 == parameters.len() {
+                    if let Node::Sym(rest) = builder.row(parameters[i + 1]).node {
+                        let rest = builder.name(rest);
+                        if valid_name(rest) && !required.iter().any(|name| name == rest) { return Ok((required, Some(rest.to_owned()))); }
+                    }
+                }
+                return Err(fail_at(builder, form, "E_MACRO_PARAM", &format!("Macro {name}: & is followed by exactly one rest parameter, at the end.")));
+            }
+            Node::Sym(parameter) if valid_name(builder.name(parameter)) && !required.iter().any(|name| name == builder.name(parameter)) => {
+                required.push(builder.name(parameter).to_owned());
+                i += 1;
+            }
+            _ => return Err(fail_at(builder, form, "E_MACRO_PARAM", &format!("Macro {name}: invalid or repeated parameter {}.", lisp::flat_id(parameters[i], builder)))),
+        }
     }
+    Ok((required, None))
 }
 
 fn expand_sequence(
-    state: &mut State,
-    fresh: &mut HashMap<String, String>,
-    forms: &[Syntax],
-    call: &Syntax,
-    name: &str,
-    environment: &HashMap<String, Syntax>,
-    rest: Option<&str>,
-    more: &[Syntax],
-) -> Result<Vec<Syntax>, Diagnostic> {
-    let mut result = Vec::with_capacity(forms.len());
-    for form in forms {
-        if let Node::Quote(QuoteKind::Splice, child) = &form.node {
-            if let Node::Sym(parameter) = &child.node {
-                if rest == Some(parameter.as_str()) {
+    builder: &mut SyntaxBuilder, state: &mut State, fresh: &mut HashMap<String, String>,
+    forms: RangeId, call: SyntaxId, name: &str,
+    environment: &HashMap<String, SyntaxId>, rest: Option<&str>, more: &[SyntaxId],
+) -> Result<Vec<SyntaxId>, Diagnostic> {
+    let len = builder.range_ids(forms).len();
+    let mut result = Vec::with_capacity(len);
+    for index in 0..len {
+        let form = builder.range_ids(forms)[index];
+        if let Node::Quote(QuoteKind::Splice, child) = builder.row(form).node {
+            if let Node::Sym(parameter) = builder.row(child).node {
+                if rest == Some(builder.name(parameter)) {
                     result.extend_from_slice(more);
                     continue;
                 }
             }
-            return Err(fail(form, "E_MACRO_UNQUOTE", &format!("Macro {name}: ~@ splices the rest parameter only.")));
+            return Err(fail_at(builder, form, "E_MACRO_UNQUOTE", &format!("Macro {name}: ~@ splices the rest parameter only.")));
         }
-        result.push(expand_template(state, fresh, form, call, name, environment, rest, more)?);
+        result.push(expand_template(builder, state, fresh, form, call, name, environment, rest, more)?);
     }
     Ok(result)
 }
 
 fn expand_template(
-    state: &mut State,
-    fresh: &mut HashMap<String, String>,
-    form: &Syntax,
-    call: &Syntax,
-    name: &str,
-    environment: &HashMap<String, Syntax>,
-    rest: Option<&str>,
-    more: &[Syntax],
-) -> Result<Syntax, Diagnostic> {
-    let node = match &form.node {
-        Node::Sym(symbol) => Node::Sym(fresh_symbol(state, fresh, symbol)),
-        Node::Kw(keyword) => Node::Kw(keyword.clone()),
-        Node::Num(number) => Node::Num(number.clone()),
-        Node::Str(text) => Node::Str(text.clone()),
-        Node::Quote(QuoteKind::Unquote, child) => {
-            if let Node::Sym(parameter) = &child.node {
-                if let Some(argument) = environment.get(parameter) { return Ok(argument.clone()); }
-            }
-            return Err(fail(form, "E_MACRO_UNQUOTE", &format!("Macro {name}: macros unquote only their parameters; {} is not one.", lisp::flat(form))));
+    builder: &mut SyntaxBuilder, state: &mut State, fresh: &mut HashMap<String, String>,
+    form: SyntaxId, call: SyntaxId, name: &str, environment: &HashMap<String, SyntaxId>,
+    rest: Option<&str>, more: &[SyntaxId],
+) -> Result<SyntaxId, Diagnostic> {
+    let original = builder.row(form).node;
+    let node = match original {
+        Node::Sym(symbol) => {
+            let name = fresh_symbol(state, fresh, builder.name(symbol));
+            Node::Sym(builder.intern(&name))
         }
-        Node::Quote(QuoteKind::Splice, _) => return Err(fail(form, "E_MACRO_UNQUOTE", &format!("Macro {name}: ~@ splices into a list."))),
-        Node::Quote(_, _) => return Err(fail(form, "E_MACRO_TEMPLATE", &format!("Macro {name}: nested quoting is not supported."))),
-        Node::List(forms) => Node::List(expand_sequence(state, fresh, forms, call, name, environment, rest, more)?.into()),
-        Node::Vec(forms) => Node::Vec(expand_sequence(state, fresh, forms, call, name, environment, rest, more)?.into()),
-        Node::Map(forms) => Node::Map(expand_sequence(state, fresh, forms, call, name, environment, rest, more)?.into()),
+        Node::Kw(_) | Node::Num(_) | Node::Str(_) => original,
+        Node::Quote(QuoteKind::Unquote, child) => {
+            if let Node::Sym(parameter) = builder.row(child).node {
+                if let Some(argument) = environment.get(builder.name(parameter)) { return Ok(*argument); }
+            }
+            return Err(fail_at(builder, form, "E_MACRO_UNQUOTE", &format!("Macro {name}: macros unquote only their parameters; {} is not one.", lisp::flat_id(form, builder))));
+        }
+        Node::Quote(QuoteKind::Splice, _) => return Err(fail_at(builder, form, "E_MACRO_UNQUOTE", &format!("Macro {name}: ~@ splices into a list."))),
+        Node::Quote(_, _) => return Err(fail_at(builder, form, "E_MACRO_TEMPLATE", &format!("Macro {name}: nested quoting is not supported."))),
+        Node::List(range) | Node::Vec(range) | Node::Map(range) => {
+            let children = expand_sequence(builder, state, fresh, range, call, name, environment, rest, more)?;
+            let range = builder.range(&children);
+            match original { Node::List(_) => Node::List(range), Node::Vec(_) => Node::Vec(range), _ => Node::Map(range) }
+        }
     };
-    Ok(with_node(form, node, call.span.clone()))
+    let span = builder.row(call).span.clone();
+    Ok(with_node(builder, form, node, span))
 }
 
-fn step(state: &mut State, definition: &Syntax, call: &Syntax) -> Result<Syntax, Diagnostic> {
-    let (name, _, _) = shape(definition)?;
-    let (required, rest) = params_inner(definition)?;
-    let arguments = match &call.node { Node::List(forms) => &forms[1..], _ => &[] };
+fn step(builder: &mut SyntaxBuilder, state: &mut State, definition: SyntaxId, call: SyntaxId) -> Result<SyntaxId, Diagnostic> {
+    let (name, parameters, template) = parts_id(definition, builder)
+        .ok_or_else(|| fail_at(builder, definition, "E_MACRO_SHAPE", "A macro is (defmacro name [params] template)."))?;
+    let name = builder.name(name).to_owned();
+    let (required, rest) = params_id(definition, &name, parameters, builder)?;
+    let arguments = match builder.row(call).node { Node::List(range) => &builder.range_ids(range)[1..], _ => &[] };
     let required_count = required.len();
     let argument_count = arguments.len();
     if if rest.is_some() { argument_count < required_count } else { argument_count != required_count } {
-        return Err(fail(
-            call,
-            "E_MACRO_ARITY",
+        return Err(fail_at(
+            builder, call, "E_MACRO_ARITY",
             &format!("{name} expects {}{} argument{}; got {argument_count}.", if rest.is_some() { "at least " } else { "" }, required_count, if required_count == 1 { "" } else { "s" }),
         ));
     }
-    let mut environment = HashMap::with_capacity(required_count);
-    for (parameter, argument) in required.iter().zip(arguments.iter()) {
-        environment.insert(parameter.clone(), argument.clone());
-    }
-    let more = &arguments[required_count..];
-    let Some(body) = quasi(definition) else {
-        return Err(fail(definition, "E_MACRO_TEMPLATE", &format!("Macro {name}: the template is quoted: write `(…) with ~parameters.")));
+    let environment = required.into_iter().zip(arguments.iter().copied()).collect();
+    let more = arguments[required_count..].to_vec();
+    let Node::Quote(QuoteKind::Quasi, body) = builder.row(template).node else {
+        return Err(fail_at(builder, definition, "E_MACRO_TEMPLATE", &format!("Macro {name}: the template is quoted: write `(…) with ~parameters.")));
     };
-    expand_template(state, &mut HashMap::new(), body, call, name, &environment, rest.as_deref(), more)
+    expand_template(builder, state, &mut HashMap::new(), body, call, &name, &environment, rest.as_deref(), &more)
 }
 
-
-fn inert(form: &Syntax) -> bool {
-    matches!(&form.node, Node::List(forms) if forms.first().is_some_and(|head| matches!(&head.node, Node::Sym(name) if name == "defmacro")))
-        || matches!(&form.node, Node::Quote(_, _))
+fn head(builder: &SyntaxBuilder, form: SyntaxId) -> Option<&str> {
+    let Node::List(range) = builder.row(form).node else { return None; };
+    let first = *builder.range_ids(range).first()?;
+    let Node::Sym(name) = builder.row(first).node else { return None; };
+    Some(builder.name(name))
 }
 
-fn call_of(macros: &[Syntax], form: &Syntax) -> Option<usize> {
-    let head = crate::syntax::head(form)?;
-    macros.iter().position(|definition| parts(definition).is_some_and(|(name, _, _)| name == head))
+fn inert(builder: &SyntaxBuilder, form: SyntaxId) -> bool {
+    head(builder, form) == Some("defmacro") || matches!(builder.row(form).node, Node::Quote(_, _))
 }
 
-fn expand_children(state: &mut State, macros: &[Syntax], depth: usize, form: &Syntax) -> Result<Syntax, Diagnostic> {
-    let node = match &form.node {
-        Node::List(forms) => {
-            let mut expanded = Vec::with_capacity(forms.len());
-            for child in forms { expanded.push(expand_at(state, macros, depth, child)?); }
-            Node::List(expanded.into())
-        }
-        Node::Vec(forms) => {
-            let mut expanded = Vec::with_capacity(forms.len());
-            for child in forms { expanded.push(expand_at(state, macros, depth, child)?); }
-            Node::Vec(expanded.into())
-        }
-        Node::Map(forms) => {
-            let mut expanded = Vec::with_capacity(forms.len());
-            for child in forms { expanded.push(expand_at(state, macros, depth, child)?); }
-            Node::Map(expanded.into())
-        }
-        Node::Sym(_) | Node::Kw(_) | Node::Num(_) | Node::Str(_) | Node::Quote(_, _) => return Ok(form.clone()),
-    };
-    Ok(with_node(form, node, form.span.clone()))
+fn call_of(builder: &SyntaxBuilder, macros: &[SyntaxId], form: SyntaxId) -> Option<usize> {
+    let head = head(builder, form)?;
+    macros.iter().position(|definition| parts_id(*definition, builder).is_some_and(|(name, _, _)| builder.name(name) == head))
 }
 
-fn expand_at(state: &mut State, macros: &[Syntax], depth: usize, form: &Syntax) -> Result<Syntax, Diagnostic> {
-    if inert(form) { return Ok(form.clone()); }
-    if let Some(index) = call_of(macros, form) {
-        let definition = &macros[index];
-        let head = crate::syntax::head(form).unwrap_or("");
-        if depth >= MAX_DEPTH {
-            return Err(fail(form, "E_MACRO_DEPTH", &format!("Macro expansion exceeds {MAX_DEPTH} nested expansions (at {head}).")));
+fn expand_at(
+    builder: &mut SyntaxBuilder, state: &mut State, macros: &[SyntaxId], depth: usize,
+    once: bool, finished: &mut bool, form: SyntaxId,
+) -> Result<SyntaxId, Diagnostic> {
+    if (once && *finished) || inert(builder, form) { return Ok(form); }
+    if let Some(index) = call_of(builder, macros, form) {
+        if !once && depth >= MAX_DEPTH {
+            return Err(fail_at(builder, form, "E_MACRO_DEPTH", &format!("Macro expansion exceeds {MAX_DEPTH} nested expansions (at {}).", head(builder, form).unwrap_or(""))));
         }
-        let expanded = step(state, definition, form)?;
-        state.size += count(&expanded);
+        let expanded = step(builder, state, macros[index], form)?;
+        *finished = true;
+        if once { return Ok(expanded); }
+        state.size += count(builder, expanded);
         if state.size > MAX_FORMS {
-            return Err(fail(form, "E_MACRO_SIZE", &format!("Macro expansion of {head} exceeds 5,000 forms.")));
+            return Err(fail_at(builder, form, "E_MACRO_SIZE", &format!("Macro expansion of {} exceeds 5,000 forms.", head(builder, form).unwrap_or(""))));
         }
-        return expand_at(state, macros, depth + 1, &expanded);
+        return expand_at(builder, state, macros, depth + 1, once, finished, expanded);
     }
-    expand_children(state, macros, depth, form)
+    let node = builder.row(form).node;
+    let range = match node {
+        Node::List(range) | Node::Vec(range) | Node::Map(range) => range,
+        _ => return Ok(form),
+    };
+    let len = builder.range_ids(range).len();
+    let mut children = None;
+    for index in 0..len {
+        let child = builder.range_ids(range)[index];
+        let expanded = expand_at(builder, state, macros, depth, once, finished, child)?;
+        if expanded != child && children.is_none() {
+            let mut rewritten = Vec::with_capacity(len);
+            rewritten.extend_from_slice(&builder.range_ids(range)[..index]);
+            children = Some(rewritten);
+        }
+        if let Some(children) = &mut children { children.push(expanded); }
+    }
+    let Some(children) = children else { return Ok(form); };
+    let range = builder.range(&children);
+    let node = match node { Node::List(_) => Node::List(range), Node::Vec(_) => Node::Vec(range), _ => Node::Map(range) };
+    let span = builder.row(form).span.clone();
+    Ok(with_node(builder, form, node, span))
+}
+
+fn run(macros: &[Syntax], form: &Syntax, state: &mut State, once: bool) -> Result<Syntax, Diagnostic> {
+    if macros.is_empty() { return Ok(form.clone()); }
+    let mut builder = SyntaxBuilder::new();
+    let root = builder.import(form);
+    let macros: Vec<_> = macros.iter().map(|definition| builder.import(definition)).collect();
+    let result = expand_at(&mut builder, state, &macros, 0, once, &mut false, root)?;
+    if result == root { Ok(form.clone()) } else { Ok(builder.freeze().handle(result)) }
 }
 
 pub fn expand(macros: &[Syntax], form: &Syntax) -> Result<Syntax, Diagnostic> {
-    expand_at(&mut state(), macros, 0, form)
-}
-
-fn expand_once_at(
-    state: &mut State,
-    macros: &[Syntax],
-    finished: &mut bool,
-    form: &Syntax,
-) -> Result<Syntax, Diagnostic> {
-    if *finished || inert(form) { return Ok(form.clone()); }
-    if let Some(index) = call_of(macros, form) {
-        *finished = true;
-        return step(state, &macros[index], form);
-    }
-    let node = match &form.node {
-        Node::List(forms) => {
-            let mut expanded = Vec::with_capacity(forms.len());
-            for child in forms { expanded.push(expand_once_at(state, macros, finished, child)?); }
-            Node::List(expanded.into())
-        }
-        Node::Vec(forms) => {
-            let mut expanded = Vec::with_capacity(forms.len());
-            for child in forms { expanded.push(expand_once_at(state, macros, finished, child)?); }
-            Node::Vec(expanded.into())
-        }
-        Node::Map(forms) => {
-            let mut expanded = Vec::with_capacity(forms.len());
-            for child in forms { expanded.push(expand_once_at(state, macros, finished, child)?); }
-            Node::Map(expanded.into())
-        }
-        Node::Sym(_) | Node::Kw(_) | Node::Num(_) | Node::Str(_) | Node::Quote(_, _) => return Ok(form.clone()),
-    };
-    Ok(with_node(form, node, form.span.clone()))
+    run(macros, form, &mut state(), false)
 }
 
 pub fn expand_once(macros: &[Syntax], form: &Syntax) -> Result<Syntax, Diagnostic> {
@@ -400,9 +420,12 @@ pub fn expand_once(macros: &[Syntax], form: &Syntax) -> Result<Syntax, Diagnosti
 }
 
 pub fn expand_once_with_state(macros: &[Syntax], form: &Syntax, state: &mut State) -> Result<Syntax, Diagnostic> {
-    let mut finished = false;
-    let result = expand_once_at(state, macros, &mut finished, form)?;
-    if finished { Ok(result) } else { Ok(form.clone()) }
+    run(macros, form, state, true)
+}
+
+pub fn expand_into(macros: &[SyntaxId], form: SyntaxId, builder: &mut SyntaxBuilder) -> Result<SyntaxId, Diagnostic> {
+    if macros.is_empty() { return Ok(form); }
+    expand_at(builder, &mut state(), macros, 0, false, &mut false, form)
 }
 
 #[cfg(test)]
@@ -511,6 +534,29 @@ mod tests {
         refuses("(defmacro m [a b c] `(+ ~a ~b ~c))", "(m 1 2)", "E_MACRO_ARITY", "expects 3 arguments; got 2");
         refuses("(defmacro radial [i n body] `(sop/merge ~body))", "(radial k 2)", "E_MACRO_ARITY", "expects 3 arguments; got 2");
         refuses("(defmacro m [x & rest] `(+ ~x ~@rest))", "(m)", "E_MACRO_ARITY", "at least 1 argument; got 0");
+    }
+
+    #[test]
+    fn packed_expansion_preserves_authored_ids_and_shared_arguments() {
+        let definition = one("(defmacro twice [x] `(+ ~x ~x))");
+        let call = one("(twice [1 2])");
+        let argument = call.child(call.children()[1]);
+        let template = super::quasi(&definition).unwrap();
+        let result = expand_once_with_state(std::slice::from_ref(&definition), &call, &mut state()).unwrap();
+        assert_eq!(result.id, template.id);
+        assert_eq!(result.span, call.span);
+        let children = result.children();
+        assert_eq!(children[1], children[2]);
+        assert_eq!(result.child(children[1]).id, argument.id);
+        assert_eq!(result.child(children[1]).span, argument.span);
+        let unchanged = super::expand(&[], &result).unwrap();
+        assert_eq!(unchanged.identity(), result.identity());
+        let mut builder = super::SyntaxBuilder::new();
+        let definition = builder.import(&definition);
+        let call = builder.import(&call);
+        let expanded = super::expand_into(&[definition], call, &mut builder).unwrap();
+        assert_eq!(lisp::flat_id(expanded, &builder), lisp::flat(&result));
+        assert_eq!(builder.row(expanded).id, template.id);
     }
 
     #[test]

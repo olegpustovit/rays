@@ -477,8 +477,7 @@ pub fn composition_core(value: &Value) -> (ResidualId, c::Program) {
     }
 }
 pub fn text_literal(bytes: &[u8]) -> String {
-    let (text, _) = flow_syntax::lisp::print(&[syntax::make(syntax::Node::Str(bytes.to_vec()))]);
-    text
+    flow_syntax::lisp::quote_string(bytes)
 }
 pub fn all_bytes() -> Vec<u8> {
     (0..=255u8).collect()
@@ -645,7 +644,7 @@ pub fn dynamic_value(inputs: &[(String, Vec<(String, Value)>)], declarations: &s
 /// A count source naming a `data` binding's origin `["fixture","data"]`.
 pub fn data_count_source() -> c::Region::CountSource {
     c::Region::CountSource::new(Arc::new(|_, term| match &term.node {
-        w::Node::RefBinding(name, fields) if name == "data" && fields.is_empty() => Some((vec!["fixture".to_string(), "data".to_string()], vec![])),
+        w::Node::RefBinding(id) if term.name(term.arena().ref_binding(*id).name) == "data" && term.arena().name_ids(term.arena().ref_binding(*id).fields).is_empty() => Some((vec!["fixture".to_string(), "data".to_string()], vec![])),
         _ => None,
     }))
 }

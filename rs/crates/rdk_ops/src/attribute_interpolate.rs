@@ -103,7 +103,7 @@ fn is_blank(text: &str) -> bool {
 enum Data {
     F(Vec<Arc<[f64]>>),
     I(Vec<i64>),
-    T(Vec<String>),
+    T(Vec<Vec<u8>>),
     IntArray(packed::IntArray::View::View),
     FloatArray(packed::FloatArray::View::View),
 }
@@ -112,7 +112,7 @@ enum Data {
 struct Out {
     f: Vec<Vec<f64>>,
     i: Vec<i64>,
-    t: Vec<String>,
+    t: Vec<Vec<u8>>,
     choices: Vec<i64>,
 }
 
@@ -141,7 +141,7 @@ struct GroupJob {
 struct Cell {
     f: [f64; 4],
     i: i64,
-    t: String,
+    t: Vec<u8>,
     choice: i64,
 }
 
@@ -381,7 +381,7 @@ fn create_job(
         (Data::I(_), Some(Data::I(old))) => out.i = old.clone(),
         (Data::I(_), _) => out.i = vec![0; count],
         (Data::T(_), Some(Data::T(old))) => out.t = old.clone(),
-        (Data::T(_), _) => out.t = vec![String::new(); count],
+        (Data::T(_), _) => out.t = vec![Vec::new(); count],
         (Data::IntArray(_) | Data::FloatArray(_), _) => out.choices = vec![-1; count],
     }
     Ok(Job {
@@ -582,7 +582,7 @@ fn blend_job(job: &Job, destination: usize, cell: &mut Cell, blend: f64) {
             if blend < 0.5 {
                 cell.t = match existing {
                     Some(Data::T(old)) => old[destination].clone(),
-                    _ => String::new(),
+                    _ => Vec::new(),
                 };
             }
         }
@@ -602,7 +602,7 @@ fn default_job(job: &Job, cell: &mut Cell) {
             }
         }
         Data::I(_) => cell.i = 0,
-        Data::T(_) => cell.t = String::new(),
+        Data::T(_) => cell.t = Vec::new(),
         Data::IntArray(_) | Data::FloatArray(_) => cell.choice = -2,
     }
 }
@@ -1790,7 +1790,7 @@ mod tests {
         let g = polygons(&[(0.0, 0.0, 0.0), (2.0, 0.0, 0.0), (0.0, 2.0, 0.0)], &[vec![0, 1, 2]]);
         let g = add_values(Point, "weight", vec![0.0, 10.0, 20.0], &g);
         let g = add_ints(Point, "id", vec![10, 20, 30], &g);
-        let g = add_storage(Point, "label", attribute::Storage::Text(vec!["a".into(), "b".into(), "c".into()]), &g);
+        let g = add_storage(Point, "label", attribute::Storage::Text(vec![b"a".to_vec(), b"b".to_vec(), b"c".to_vec()]), &g);
         let g = add_storage(
             Point,
             "uv",
@@ -1842,7 +1842,7 @@ mod tests {
         assert_eq!(py, vec![0.0, 0.5, 0.0, 0.0]);
         assert_eq!(floats(Point, "weight", &result), vec![0.0, 7.5, 10.0, 0.0]);
         assert_eq!(ints(Point, "id", &result), vec![10, 10, 20, 0]);
-        assert_eq!(texts(Point, "label", &result), vec!["a".to_owned(), "a".to_owned(), "b".to_owned(), String::new()]);
+        assert_eq!(texts(Point, "label", &result), vec![b"a".to_vec(), b"a".to_vec(), b"b".to_vec(), Vec::new()]);
         let uv = match attribute::storage(&find(Point, "uv", &result)).unwrap() {
             attribute::Storage::Float2(values) => packed::Float2::View::view(&values),
             _ => panic!("uv"),
@@ -2265,7 +2265,7 @@ mod tests {
         let incompatible = add_storage(
             Point,
             "weight",
-            attribute::Storage::Text(vec!["bad".to_owned()]),
+            attribute::Storage::Text(vec![b"bad".to_vec()]),
             &add_drivers(Point, vec![0], &[(0.0, 0.0, 0.0)], &blank_points(1)),
         );
         assert_eq!(err_code(attribute_ops::interpolate(&base(&source, &incompatible, Point, weight_spec()))), "invalid_interpolate");
@@ -2314,11 +2314,11 @@ mod tests {
 
     #[test]
     fn parallel_exactness_at_scale() {
-        let count = 20_003_i64;
+        let count = 200_003_i64;
         let source = polygons(&[(0.0, 0.0, 0.0), (0.0, 1.0, 0.0), (1.0, 1.0, 0.0), (1.0, 0.0, 0.0)], &[vec![0, 1, 2, 3]]);
         let source = add_storage(Point, "weight", attribute::Storage::Float(vec![0.0, 1.0, 2.0, 3.0]), &source);
         let source = add_ints(Point, "id", vec![3, 5, 7, 11], &source);
-        let source = add_storage(Point, "label", attribute::Storage::Text(vec!["a".into(), "b".into(), "c".into(), "d".into()]), &source);
+        let source = add_storage(Point, "label", attribute::Storage::Text(vec![b"a".to_vec(), b"b".to_vec(), b"c".to_vec(), b"d".to_vec()]), &source);
         let source = add_storage(
             Point,
             "tuple4",

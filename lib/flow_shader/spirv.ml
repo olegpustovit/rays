@@ -82,6 +82,24 @@ module Words = struct
         result
 end
 
+type scene = {
+  accel : int;
+  accel_type : int;
+  vertices : int;
+  spheres : int;
+  instances : int option;
+  vertices_end : int option;
+  motion : bool;
+  query : int;
+  nested_query : int option;
+  curve_accel : int option;
+  curve_query : int option;
+  prototype_accel : int option;
+  motion_best : (int * int * int * int * int) option;
+  vec3 : int;
+  vec2 : int;
+}
+
 type emitter = {
   words : Words.t;
   boolean : int;
@@ -99,8 +117,7 @@ type emitter = {
   uint_function_pointer : int;
   mutable status_bits : int; (* the thread's Function-storage status word *)
   table : int option;
-  scene : (int * int * int * int * int option * int * int * int) option;
-      (* acceleration structure variable and type, vertices, spheres, ray query, vec3, vec2 *)
+  scene : scene option;
   mutable block : int;
   mutable trace_cache : (int list * int * int array) list;
   strands : int option; (* the strand segments' storage variable *)
@@ -363,60 +380,467 @@ let int_compare_opcode = function
 (* A ray query (Flow_shader.Trace's gpu/trace-* intrinsics) over origin, direction, tmin and tmax: the
    committed triangle's t, primitive (uint), barycentrics, hit (bool) and instance (uint), or for an
    any-hit query (terminate on first hit) only hit; once a ray in a block. *)
+let ray_query_init e (scene : scene) query ~accel ~flags ~origin ~tmin ~direction ~tmax =
+  let v3 a b c = result e scene.vec3 80 [ a; b; c ] in
+  Words.instruction e.words.body 4473
+    [
+      query;
+      result e scene.accel_type 61 [ accel ];
+      u e flags;
+      u e 255;
+      v3 origin.(0) origin.(1) origin.(2);
+      tmin;
+      v3 direction.(0) direction.(1) direction.(2);
+      tmax;
+    ]
+
+let ray_query_loop e query candidate =
+  let header = Words.id e.words and body = Words.id e.words
+  and continuing = Words.id e.words and merge = Words.id e.words in
+  jump e header;
+  label e header;
+  let proceed = result e e.boolean 4477 [ query ] in
+  Words.instruction e.words.body 246 [ merge; continuing; 0 ];
+  Words.instruction e.words.body 250 [ proceed; body; merge ];
+  label e body;
+  candidate ();
+  jump e continuing;
+  label e continuing;
+  jump e header;
+  label e merge
+
+let triangle_test e (scene : scene) ray primitive time =
+  let add a b = result e e.uint 128 [ a; b ]
+  and times a k = result e e.uint 132 [ a; u e k ] in
+  let time = ext e 43 [ time; f e 0.; f e 1. ] in
+  let vertices = Option.get scene.vertices_end in
+  let corner corner =
+    Array.init 3 (fun axis ->
+        let at =
+          times (add (times primitive 3) (u e corner)) 3
+          |> fun base -> add base (u e axis)
+        in
+        let a = load e scene.vertices at and b = load e vertices at in
+        floating e 129 [ a; floating e 133 [ floating e 131 [ b; a ]; time ] ])
+  in
+  let a = corner 0 and b = corner 1 and c = corner 2 in
+  let direction = Array.init 3 (fun k -> ray.(3 + k))
+  and origin = Array.init 3 (fun k -> ray.(k)) in
+  let abs value = ext e 4 [ value ] in
+  let dx, dy, dz = (direction.(0), direction.(1), direction.(2)) in
+  let ax, ay, az = (abs dx, abs dy, abs dz) in
+  let x_major = result e e.boolean 167 [ compare e 186 ax ay; compare e 186 ax az ] in
+  let y_major = compare e 186 ay az in
+  let kz = select e e.uint x_major (u e 0) (select e e.uint y_major (u e 1) (u e 2)) in
+  let kx = result e e.uint 137 [ result e e.uint 128 [ kz; u e 1 ]; u e 3 ] in
+  let ky = result e e.uint 137 [ result e e.uint 128 [ kx; u e 1 ]; u e 3 ] in
+  let direction_vector = result e scene.vec3 80 (Array.to_list direction) in
+  let kz_value = result e e.float 77 [ direction_vector; kz ] in
+  let swap = compare e 184 kz_value (f e 0.) in
+  let kx, ky = (select e e.uint swap ky kx, select e e.uint swap kx ky) in
+  let component vector axis = result e e.float 77 [ result e scene.vec3 80 (Array.to_list vector); axis ] in
+  let safe_direction =
+    select e e.float (compare e 180 kz_value (f e 0.)) (f e 1.) kz_value
+  in
+  let sx = floating e 136 [ component direction kx; safe_direction ]
+  and sy = floating e 136 [ component direction ky; safe_direction ]
+  and sz = floating e 136 [ f e 1.; safe_direction ] in
+  let projected point =
+    let translated = Array.init 3 (fun k -> floating e 131 [ point.(k); origin.(k) ]) in
+    let z = component translated kz in
+    let x = floating e 131 [ component translated kx; floating e 133 [ sx; z ] ]
+    and y = floating e 131 [ component translated ky; floating e 133 [ sy; z ] ] in
+    (x, y, floating e 133 [ sz; z ])
+  in
+  let ax, ay, az = projected a and bx, by, bz = projected b and cx, cy, cz = projected c in
+  let edge x0 y0 x1 y1 =
+    floating e 131 [ floating e 133 [ x0; y1 ]; floating e 133 [ y0; x1 ] ]
+  in
+  let e0 = edge bx by cx cy and e1 = edge cx cy ax ay and e2 = edge ax ay bx by in
+  let has_negative =
+    result e e.boolean 166
+      [
+        result e e.boolean 166 [ compare e 184 e0 (f e 0.); compare e 184 e1 (f e 0.) ];
+        compare e 184 e2 (f e 0.);
+      ]
+  and has_positive =
+    result e e.boolean 166
+      [
+        result e e.boolean 166 [ compare e 186 e0 (f e 0.); compare e 186 e1 (f e 0.) ];
+        compare e 186 e2 (f e 0.);
+      ]
+  in
+  let determinant = floating e 129 [ floating e 129 [ e0; e1 ]; e2 ] in
+  let valid_edges = result e e.boolean 168 [ result e e.boolean 167 [ has_negative; has_positive ] ] in
+  let safe_determinant =
+    select e e.float (compare e 180 determinant (f e 0.)) (f e 1.) determinant
+  in
+  let scaled_t =
+    floating e 129
+      [
+        floating e 129 [ floating e 133 [ e0; az ]; floating e 133 [ e1; bz ] ];
+        floating e 133 [ e2; cz ];
+      ]
+  in
+  let distance = floating e 136 [ scaled_t; safe_determinant ] in
+  let u_value = floating e 136 [ e1; safe_determinant ]
+  and v_value = floating e 136 [ e2; safe_determinant ] in
+  let hit =
+    result e e.boolean 167
+      [
+        result e e.boolean 167
+          [ valid_edges; result e e.boolean 168 [ compare e 180 determinant (f e 0.) ] ];
+        result e e.boolean 167 [ compare e 190 distance ray.(6); compare e 188 distance ray.(7) ];
+      ]
+  in
+  (hit, distance, u_value, v_value)
+
+let moving_triangles_query e (scene : scene) ray any =
+  let query = scene.query in
+  ray_query_init e scene query ~accel:scene.accel ~flags:0 ~origin:(Array.sub ray 0 3) ~tmin:ray.(6)
+    ~direction:(Array.sub ray 3 3) ~tmax:ray.(7);
+  ray_query_loop e query (fun () ->
+      let kind = result e e.uint 4479 [ query; u e 0 ] in
+      ignore
+        (conditional e e.uint (compare e 170 kind (u e 1))
+           (fun () ->
+             let primitive = result e e.uint 6023 [ query; u e 0 ] in
+             let hit, distance, _, _ = triangle_test e scene ray primitive ray.(8) in
+             conditional e e.uint hit
+               (fun () ->
+                 Words.instruction e.words.body 4475 [ query; distance ];
+                 u e 1)
+               (fun () -> u e 0))
+           (fun () -> u e 0)));
+  let committed = result e e.uint 4479 [ query; u e 1 ] in
+  let hit = compare e 170 committed (u e 2) in
+  if any then [| hit |]
+  else
+    let raw_primitive = result e e.uint 6023 [ query; u e 1 ] in
+    let primitive = select e e.uint hit raw_primitive (u e 0) in
+    let _test, _, bary_u, bary_v = triangle_test e scene ray primitive ray.(8) in
+    [|
+      result e e.float 6018 [ query; u e 1 ];
+      primitive;
+      bary_u;
+      bary_v;
+      hit;
+      u e 0;
+    |]
+
+let motion_instance_ray e (scene : scene) ray instance =
+  let table = Option.get scene.instances in
+  let base = result e e.uint 132 [ instance; u e 32 ] in
+  let word index = result e e.uint 128 [ base; u e index ] in
+  let time = ext e 43 [ ray.(8); f e 0.; f e 1. ] in
+  let matrix =
+    Array.init 12 (fun k ->
+        let start = load e table (word (k + 1))
+        and ending = load e table (word (k + 13)) in
+        floating e 129 [ start; floating e 133 [ floating e 131 [ ending; start ]; time ] ])
+  in
+  let add a b = floating e 129 [ a; b ]
+  and sub a b = floating e 131 [ a; b ]
+  and mul a b = floating e 133 [ a; b ] in
+  let a, b, c, tx = (matrix.(0), matrix.(1), matrix.(2), matrix.(3)) in
+  let d, e_, f_, ty = (matrix.(4), matrix.(5), matrix.(6), matrix.(7)) in
+  let g, h, i, tz = (matrix.(8), matrix.(9), matrix.(10), matrix.(11)) in
+  let cofactors =
+    [|
+      sub (mul e_ i) (mul f_ h);
+      sub (mul c h) (mul b i);
+      sub (mul b f_) (mul c e_);
+      sub (mul f_ g) (mul d i);
+      sub (mul a i) (mul c g);
+      sub (mul c d) (mul a f_);
+      sub (mul d h) (mul e_ g);
+      sub (mul b g) (mul a h);
+      sub (mul a e_) (mul b d);
+    |]
+  in
+  let determinant = add (add (mul a cofactors.(0)) (mul b cofactors.(3))) (mul c cofactors.(6)) in
+  let valid = result e e.boolean 168 [ compare e 180 determinant (f e 0.) ] in
+  let safe_determinant =
+    select e e.float (compare e 180 determinant (f e 0.)) (f e 1.) determinant
+  in
+  let invert vector translation =
+    let x = sub vector.(0) translation.(0)
+    and y = sub vector.(1) translation.(1)
+    and z = sub vector.(2) translation.(2) in
+    [|
+      floating e 136
+        [ add (add (mul cofactors.(0) x) (mul cofactors.(1) y)) (mul cofactors.(2) z);
+          safe_determinant ];
+      floating e 136
+        [ add (add (mul cofactors.(3) x) (mul cofactors.(4) y)) (mul cofactors.(5) z);
+          safe_determinant ];
+      floating e 136
+        [ add (add (mul cofactors.(6) x) (mul cofactors.(7) y)) (mul cofactors.(8) z);
+          safe_determinant ];
+    |]
+  in
+  ( valid,
+    invert (Array.sub ray 0 3) [| tx; ty; tz |],
+    invert (Array.sub ray 3 3) [| f e 0.; f e 0.; f e 0. |] )
+
+let nested_instance_trace e (scene : scene) query origin direction ray prototype =
+  ray_query_init e scene query ~accel:(Option.get scene.prototype_accel) ~flags:2 ~origin
+    ~tmin:ray.(6) ~direction ~tmax:ray.(7);
+  ray_query_loop e query (fun () ->
+      let kind = result e e.uint 4479 [ query; u e 0 ] in
+      let custom = result e e.uint 6019 [ query; u e 0 ] in
+      let triangle = compare e 170 kind (u e 0)
+      and target = compare e 170 custom prototype in
+      let accept = result e e.boolean 167 [ triangle; target ] in
+      ignore
+        (conditional e e.uint accept
+           (fun () ->
+             Words.instruction e.words.body 4476 [ query ];
+             u e 1)
+           (fun () -> u e 0)));
+  let hit = compare e 170 (result e e.uint 4479 [ query; u e 1 ]) (u e 1) in
+  let primitive =
+    select e e.uint hit (result e e.uint 6023 [ query; u e 1 ]) (u e 0)
+  in
+  let distance = select e e.float hit (result e e.float 6018 [ query; u e 1 ]) (f e 0.) in
+  let barycentrics = result e scene.vec2 6024 [ query; u e 1 ] in
+  ( hit,
+    distance,
+    primitive,
+    result e e.float 81 [ barycentrics; 0 ],
+    result e e.float 81 [ barycentrics; 1 ] )
+
+let moving_instances_query e (scene : scene) ray any =
+  let query = scene.query and nested = Option.get scene.nested_query in
+  let best_t, best_primitive, best_instance, best_bary_u, best_bary_v =
+    Option.get scene.motion_best
+  in
+  Words.instruction e.words.body 62 [ best_t; f e Float.infinity ];
+  Words.instruction e.words.body 62 [ best_primitive; u e 0 ];
+  Words.instruction e.words.body 62 [ best_instance; u e 0 ];
+  Words.instruction e.words.body 62 [ best_bary_u; f e 0. ];
+  Words.instruction e.words.body 62 [ best_bary_v; f e 0. ];
+  ray_query_init e scene query ~accel:scene.accel ~flags:2 ~origin:(Array.sub ray 0 3)
+    ~tmin:ray.(6) ~direction:(Array.sub ray 3 3) ~tmax:ray.(7);
+  ray_query_loop e query (fun () ->
+      let kind = result e e.uint 4479 [ query; u e 0 ] in
+      let candidate = compare e 170 kind (u e 1) in
+      ignore
+        (conditional e e.uint candidate
+           (fun () ->
+             let instance = result e e.uint 6020 [ query; u e 0 ]
+             and prototype = result e e.uint 6021 [ query; u e 0 ] in
+             let valid, origin, direction = motion_instance_ray e scene ray instance in
+             conditional e e.uint valid
+               (fun () ->
+                 let hit, distance, primitive, bary_u, bary_v =
+                   nested_instance_trace e scene nested origin direction ray prototype
+                 in
+                 let closer =
+                   compare e 184 distance (result e e.float 61 [ best_t ])
+                 in
+                 let accept = result e e.boolean 167 [ hit; closer ] in
+                 conditional e e.uint accept
+                   (fun () ->
+                     Words.instruction e.words.body 4475 [ query; distance ];
+                     Words.instruction e.words.body 62 [ best_t; distance ];
+                     Words.instruction e.words.body 62 [ best_primitive; primitive ];
+                     Words.instruction e.words.body 62 [ best_instance; instance ];
+                     Words.instruction e.words.body 62 [ best_bary_u; bary_u ];
+                     Words.instruction e.words.body 62 [ best_bary_v; bary_v ];
+                     u e 1)
+                   (fun () -> u e 0))
+               (fun () -> u e 0))
+           (fun () -> u e 0)));
+  let committed = result e e.uint 4479 [ query; u e 1 ] in
+  let hit = compare e 170 committed (u e 2) in
+  if any then [| hit |]
+  else
+    let output value ty zero =
+      select e ty hit (result e ty 61 [ value ]) zero
+    in
+    [|
+      output best_t e.float (f e 0.);
+      output best_primitive e.uint (u e 0);
+      output best_bary_u e.float (f e 0.);
+      output best_bary_v e.float (f e 0.);
+      hit;
+      output best_instance e.uint (u e 0);
+    |]
+let capsule_intersection e ray primitive =
+  let add a b = floating e 129 [ a; b ]
+  and sub a b = floating e 131 [ a; b ]
+  and mul a b = floating e 133 [ a; b ]
+  and div a b = floating e 136 [ a; b ]
+  and logical_and a b = result e e.boolean 167 [ a; b ] in
+  let base = result e e.uint 132 [ primitive; u e 8 ] in
+  let strand component = load e (Option.get e.strands) (result e e.uint 128 [ base; u e component ]) in
+  let a = Array.init 3 (fun k -> strand k)
+  and b = Array.init 3 (fun k -> strand (k + 4)) in
+  let radius = strand 3 in
+  let origin = Array.init 3 (fun k -> ray.(k))
+  and direction = Array.init 3 (fun k -> ray.(k + 3)) in
+  let dot a b =
+    ext e 50
+      [
+        a.(2);
+        b.(2);
+        ext e 50 [ a.(1); b.(1); mul a.(0) b.(0) ];
+      ]
+  in
+  let sqrt value = ext e 31 [ ext e 4 [ value ] ] in
+  let center = Array.init 3 (fun k -> mul (add a.(k) b.(k)) (f e 0.5)) in
+  let shift = dot (Array.init 3 (fun k -> sub center.(k) origin.(k))) direction in
+  let origin = Array.init 3 (fun k -> add origin.(k) (mul direction.(k) shift)) in
+  let tmin = sub ray.(6) shift and tmax = sub ray.(7) shift in
+  let ba = Array.init 3 (fun k -> sub b.(k) a.(k))
+  and oa = Array.init 3 (fun k -> sub origin.(k) a.(k))
+  and ob = Array.init 3 (fun k -> sub origin.(k) b.(k)) in
+  let baba = dot ba ba and bard = dot ba direction and baoa = dot ba oa in
+  let qa = sub baba (mul bard bard) in
+  let qb = sub (mul baba (dot direction oa)) (mul baoa bard) in
+  let qc =
+    sub
+      (sub (mul baba (dot oa oa)) (mul baoa baoa))
+      (mul (mul radius radius) baba)
+  in
+  let discriminant = sub (mul qb qb) (mul qa qc) in
+  let root = sqrt discriminant in
+  let safe_qa = select e e.float (compare e 186 qa (f e 0.)) qa (f e 1.) in
+  let t0 = div (sub (floating e 127 [ qb ]) root) safe_qa
+  and t1 = div (add (floating e 127 [ qb ]) root) safe_qa in
+  let y0 = add baoa (mul t0 bard) and y1 = add baoa (mul t1 bard) in
+  let within t = logical_and (compare e 190 t tmin) (compare e 188 t tmax) in
+  let nearer best t valid =
+    let valid = logical_and valid (within t) in
+    let valid = logical_and valid (compare e 184 t best) in
+    select e e.float valid t best
+  in
+  let side = logical_and (compare e 186 qa (f e 0.)) (compare e 190 discriminant (f e 0.)) in
+  let side0 =
+    logical_and side (logical_and (compare e 186 y0 (f e 0.)) (compare e 184 y0 baba))
+  and side1 =
+    logical_and side (logical_and (compare e 186 y1 (f e 0.)) (compare e 184 y1 baba))
+  in
+  let side_best = nearer (nearer (f e infinity) t0 side0) t1 side1 in
+  let ha = dot oa direction in
+  let cap_a = sub (mul ha ha) (sub (dot oa oa) (mul radius radius)) in
+  let root_a = sqrt cap_a in
+  let ta0 = sub (floating e 127 [ ha ]) root_a and ta1 = add (floating e 127 [ ha ]) root_a in
+  let cap_a_ok = compare e 190 cap_a (f e 0.) in
+  let a0 = logical_and cap_a_ok (compare e 188 (add baoa (mul ta0 bard)) (f e 0.))
+  and a1 = logical_and cap_a_ok (compare e 188 (add baoa (mul ta1 bard)) (f e 0.)) in
+  let a_best = nearer (nearer side_best ta0 a0) ta1 a1 in
+  let hb = dot ob direction in
+  let cap_b = sub (mul hb hb) (sub (dot ob ob) (mul radius radius)) in
+  let root_b = sqrt cap_b in
+  let tb0 = sub (floating e 127 [ hb ]) root_b and tb1 = add (floating e 127 [ hb ]) root_b in
+  let cap_b_ok = compare e 190 cap_b (f e 0.) in
+  let b0 = logical_and cap_b_ok (compare e 190 (add baoa (mul tb0 bard)) baba)
+  and b1 = logical_and cap_b_ok (compare e 190 (add baoa (mul tb1 bard)) baba) in
+  let best = nearer (nearer a_best tb0 b0) tb1 b1 in
+  let hit = compare e 184 best (f e infinity) in
+  let safe_best = select e e.float hit best (f e 0.) in
+  let safe_baba = select e e.float (compare e 186 baba (f e 0.)) baba (f e 1.) in
+  let parameter =
+    ext e 43 [ div (add baoa (mul safe_best bard)) safe_baba; f e 0.; f e 1. ]
+  in
+  (hit, select e e.float hit (add best shift) (f e 0.), parameter)
+
+let curves_query e ray any =
+  let key = (if any then -4 else -3) :: Array.to_list ray and block = e.block in
+  match List.find_opt (fun (k, b, _) -> k = key && b = block) e.trace_cache with
+  | Some (_, _, values) -> values
+  | None ->
+      let scene = Option.get e.scene in
+      let query = Option.get scene.curve_query in
+      ray_query_init e scene query ~accel:(Option.get scene.curve_accel) ~flags:0
+        ~origin:(Array.sub ray 0 3) ~tmin:ray.(6) ~direction:(Array.sub ray 3 3) ~tmax:ray.(7);
+      ray_query_loop e query (fun () ->
+          let kind = result e e.uint 4479 [ query; u e 0 ] in
+          ignore
+            (conditional e e.uint (compare e 170 kind (u e 1))
+               (fun () ->
+                 let primitive = result e e.uint 6023 [ query; u e 0 ] in
+                 let hit, distance, _ = capsule_intersection e ray primitive in
+                 conditional e e.uint hit
+                   (fun () ->
+                     Words.instruction e.words.body 4475 [ query; distance ];
+                     u e 1)
+                   (fun () -> u e 0))
+               (fun () -> u e 0)));
+      let committed = result e e.uint 4479 [ query; u e 1 ] in
+      let hit = compare e 170 committed (u e 2) in
+      let raw_primitive = result e e.uint 6023 [ query; u e 1 ] in
+      let primitive = select e e.uint hit raw_primitive (u e 0) in
+      let _test, _, parameter = capsule_intersection e ray primitive in
+      let values =
+        if any then [| hit |]
+        else
+          [|
+            select e e.float hit (result e e.float 6018 [ query; u e 1 ]) (f e 0.);
+            primitive;
+            parameter;
+            hit;
+          |]
+      in
+      e.trace_cache <- (key, e.block, values) :: e.trace_cache;
+      values
+
 let query e r any =
   let key = (if any then -1 else -2) :: Array.to_list r and block = e.block in
   match List.find_opt (fun (k, b, _) -> k = key && b = block) e.trace_cache with
   | Some (_, _, values) -> values
   | None ->
-      let accel, accel_type, _, _, _, query, vec3, vec2 = Option.get e.scene in
-      let v3 a b c = result e vec3 80 [ a; b; c ] and one = u e 1 in
-      Words.instruction e.words.body 4473
-        [
-          query;
-          result e accel_type 61 [ accel ];
-          u e (if any then 5 else 1);
-          u e 255;
-          v3 r.(0) r.(1) r.(2);
-          r.(6);
-          v3 r.(3) r.(4) r.(5);
-          r.(7);
-        ];
-      ignore (result e e.boolean 4477 [ query ]);
-      let hit = compare e 170 (result e e.uint 4479 [ query; one ]) one in
+      let scene = Option.get e.scene in
       let values =
-        if any then [| hit |]
-        else
-          let barycentrics = result e vec2 6024 [ query; one ] in
-          [|
-            result e e.float 6018 [ query; one ];
-            result e e.uint 6023 [ query; one ];
-            result e e.float 81 [ barycentrics; 0 ];
-            result e e.float 81 [ barycentrics; 1 ];
-            hit;
-            result e e.uint 6020 [ query; one ];
-          |]
+        if scene.motion then
+          if scene.instances = None then moving_triangles_query e scene r any
+          else moving_instances_query e scene r any
+        else begin
+          let query = scene.query in
+          ray_query_init e scene query ~accel:scene.accel ~flags:(if any then 5 else 1)
+            ~origin:(Array.sub r 0 3) ~tmin:r.(6) ~direction:(Array.sub r 3 3) ~tmax:r.(7);
+          ignore (result e e.boolean 4477 [ query ]);
+          let hit = compare e 170 (result e e.uint 4479 [ query; u e 1 ]) (u e 1) in
+          if any then [| hit |]
+          else
+            let barycentrics = result e scene.vec2 6024 [ query; u e 1 ] in
+            [|
+              result e e.float 6018 [ query; u e 1 ];
+              result e e.uint 6023 [ query; u e 1 ];
+              result e e.float 81 [ barycentrics; 0 ];
+              result e e.float 81 [ barycentrics; 1 ];
+              hit;
+              result e e.uint 6020 [ query; u e 1 ];
+            |]
+        end
       in
-      e.trace_cache <- (key, block, values) :: e.trace_cache;
+      e.trace_cache <- (key, e.block, values) :: e.trace_cache;
       values
 
 (* A scene table read at uint indices (Emit's scene_read): a triangle corner through the instance's
    vertex base, an instance-table word, a sphere or a strand end component. *)
 let scene_read e stage index =
-  let _, _, vertices, spheres, instances, _, _, _ = Option.get e.scene in
+  let scene = Option.get e.scene in
   let add a b = result e e.uint 128 [ a; b ] and times a k = result e e.uint 132 [ a; u e k ] in
+  let instance_stride = if scene.motion then 32 else 16 in
   match stage with
-  | Flow_ir.Core.Region.Scene_vertex (false, c) ->
+  | Flow_ir.Core.Region.Scene_vertex (ending, c) ->
       let base =
-        match instances with
+        match scene.instances with
         | None -> index.(1)
-        | Some table -> add (result e e.uint 109 [ load e table (times index.(0) 16) ]) index.(1)
+        | Some table ->
+            add (result e e.uint 109 [ load e table (times index.(0) instance_stride) ]) index.(1)
       in
+      let vertices = if ending then Option.get scene.vertices_end else scene.vertices in
       load e vertices (add (times (add (times base 3) index.(2)) 3) (u e c))
-  | Scene_instance -> load e (Option.get instances) (add (times index.(0) 16) index.(1))
-  | Scene_sphere c -> load e spheres (add (times index.(0) 4) (u e c))
+  | Scene_instance ->
+      load e (Option.get scene.instances) (add (times index.(0) instance_stride) index.(1))
+  | Scene_sphere c -> load e scene.spheres (add (times index.(0) 4) (u e c))
   | Scene_strand c ->
       load e (Option.get e.strands) (add (times (add (times index.(0) 2) index.(1)) 4) (u e c))
-  | _ -> fail "scene/trace motion and native curves have no SPIR-V ray-query form."
+  | _ -> fail "scene/trace native curves have no SPIR-V ray-query form."
 
 (* A gpu/trace-* field (an integer one as a long when [wide]) or a scene table read, over the operands as
    floats and as uint words; the uniform word of a scene count. *)
@@ -429,6 +853,13 @@ let trace_stage e stage floats words ~wide =
         result e (Option.get e.long) 124 [ result e (Option.get e.ulong) 113 [ value ] ]
       else value
   | Trace_any -> numeric_truth e (query e (floats ()) true).(0)
+  | Trace_curves k ->
+      let value = (curves_query e (floats ()) false).(k) in
+      if k = 3 then numeric_truth e value
+      else if wide && k = 1 then
+        result e (Option.get e.long) 124 [ result e (Option.get e.ulong) 113 [ value ] ]
+      else value
+  | Trace_curves_any -> numeric_truth e (curves_query e (floats ()) true).(0)
   | stage -> scene_read e stage (words ())
 
 let scene_count e (layout : Flow_ir.Kernel_layout.t) name ~wide =
@@ -1028,11 +1459,6 @@ let kernel ?(fast = false) ?(instanced = false) ?(motion = false) ?(curves = fal
                 (Array.to_list layout.view.code)))
       end
     in
-    (* SPV_NV_ray_tracing_motion_blur moves only trace-rays pipelines, not ray queries *)
-    if layout.scene_motion then
-      fail
-        "scene/trace motion has no SPIR-V ray-query form; build the scene at the shutter midpoint \
-         (Flow_gpu.Run.build_scene without Ray_tracing_motion).";
     let words = Words.create () in
     let void = Words.declare words 19 []
     and boolean = Words.declare words 20 []
@@ -1120,18 +1546,75 @@ let kernel ?(fast = false) ?(instanced = false) ?(motion = false) ?(curves = fal
           let spheres = bind storage 12 (binding + 2) Shader.Storage_buffer in
           let instances =
             Option.map
-              (fun _ -> bind storage 12 (binding + 3) Shader.Storage_buffer)
+              (fun slot -> bind storage 12 slot Shader.Storage_buffer)
               layout.scene_instances
+          and vertices_end =
+            Option.map
+              (fun slot -> bind storage 12 slot Shader.Storage_buffer)
+              layout.scene_vertices_end
           in
-          let query = variable (Words.declare words 32 [ 6; Words.declare words 4472 [] ]) 6 in
-          ( accel,
-            accel_type,
-            vertices,
-            spheres,
-            instances,
-            query,
-            Words.declare words 23 [ float; 3 ],
-            Words.declare words 23 [ float; 2 ] ))
+          let query_type = Words.declare words 4472 [] in
+          let query = variable (Words.declare words 32 [ 6; query_type ]) 6 in
+          let nested_query =
+            if layout.scene_motion && instances <> None then
+              Some (variable (Words.declare words 32 [ 6; query_type ]) 6)
+            else None
+          and curve_accel =
+            Option.map
+              (fun strand_binding ->
+                bind (Words.declare words 32 [ 0; accel_type ]) 0 (strand_binding + 1)
+                  Shader.Acceleration_structure)
+              layout.scene_strands
+          in
+          let motion_best =
+            if layout.scene_motion && instances <> None then
+              Some
+                ( variable (Words.declare words 32 [ 6; float ]) 6,
+                  variable (Words.declare words 32 [ 6; uint ]) 6,
+                  variable (Words.declare words 32 [ 6; uint ]) 6,
+                  variable (Words.declare words 32 [ 6; float ]) 6,
+                  variable (Words.declare words 32 [ 6; float ]) 6 )
+            else None
+          in
+          let curve_query =
+            Option.map
+              (fun _ -> variable (Words.declare words 32 [ 6; query_type ]) 6)
+              curve_accel
+          in
+          let prototype_binding =
+            match (layout.scene_motion, layout.scene_instances) with
+            | true, Some instances ->
+                Some
+                  (match layout.scene_strands with
+                  | None -> instances + 1
+                  | Some strands -> strands + 2)
+            | _ -> None
+          in
+          let prototype_accel =
+            Option.map
+              (fun slot ->
+                bind (Words.declare words 32 [ 0; accel_type ]) 0 slot
+                  Shader.Acceleration_structure)
+              prototype_binding
+          in
+          {
+            accel;
+            accel_type;
+            vertices;
+            spheres;
+            instances;
+            vertices_end;
+            motion = layout.scene_motion;
+            query;
+            nested_query;
+            curve_accel;
+            curve_query;
+            prototype_accel;
+            motion_best;
+            vec3 = Words.declare words 23 [ float; 3 ];
+            vec2 = Words.declare words 23 [ float; 2 ];
+          }
+        )
         layout.scene_binding
     in
     let strands =
@@ -1268,7 +1751,11 @@ let kernel ?(fast = false) ?(instanced = false) ?(motion = false) ?(curves = fal
       {
         bytes = Buffer.to_bytes module_bytes;
         entry;
-        interface = List.rev !interface;
+        interface =
+          List.rev !interface
+          |> List.sort (fun (left : Shader.binding) right ->
+              let group = Int.compare left.group right.group in
+              if group = 0 then Int.compare left.binding right.binding else group);
         layout = { layout with uniform_layout = Trace.frames back layout.uniform_layout };
         uniform_bytes = Flow_ir.Kernel_layout.uniform_words layout * 16;
       }

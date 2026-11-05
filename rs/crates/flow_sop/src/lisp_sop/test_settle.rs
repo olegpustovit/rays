@@ -76,7 +76,7 @@ fn positions(g: &geo::T) -> Vec<(f64, f64, f64)> {
 }
 
 #[test]
-#[ignore = "needs the device write placement of attribute_kernel (settle/release/bounds) and flow_gpu"]
+
 fn in_flight_device_writes_settle_at_a_cooks_end() {
     let c = Arc::new(Counters { settles: AtomicI64::new(0), releases: AtomicI64::new(0), bounded: AtomicI64::new(0), fail: AtomicBool::new(false) });
     let gpu = Gpu::Config { backend: Some(backend(&c)), fast: true, policy: Gpu::Policy::Qualification, readback_per_float: None };

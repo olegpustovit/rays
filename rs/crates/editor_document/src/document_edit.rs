@@ -140,7 +140,7 @@ pub fn panel_node(factories: Option<&[Factory]>, loop_message: Option<&str>, doc
                 Some(f) => match f.node {
                     Node::Sym(name) => {
                         let mut path = node[..node.len() - 1].to_vec();
-                        path.push(name);
+                        path.push(f.name(name).to_owned());
                         Ok((doc, path))
                     }
                     _ => Err("The panel could not be named.".to_owned()),

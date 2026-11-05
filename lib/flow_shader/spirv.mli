@@ -20,8 +20,8 @@ val kernel :
   ?unfold:int ->
   Flow_ir.Packed.t ->
   (t, Diagnostic.t) result
-(** A moving scene ([motion]) is refused ([E_GPU_FORM]): SPIR-V ray queries have no motion form.
-    [curves] strands are the in-loop capsule test of {!Emit.kernel}'s [`Loop]. *)
+(** Moving triangles and instances use swept AABB candidates; linear curves use per-segment swept AABBs
+    and capsule tests in the ray-query candidate loop. *)
 
 type output = Position | Point_size | Varying of int * bool | Colour | Discard
 
@@ -33,13 +33,7 @@ type stage = {
   workgroup : int option;
   grid : bool;
 }
-(** A raster stage's interface: [inputs.(k)] is element [k]'s (location, width, flat); [outputs.(k)]
-    is output [k]'s role ([Varying (location, flat)]); [buffers] are (array uniform, binding, uint
-    words). [workgroup] [Some n] makes it a compute stage of one workgroup of [n] threads
-    (GLCompute, LocalSize n): its element is LocalInvocationIndex, its outputs are discarded and it
-    may store into its buffers. [grid] makes its element GlobalInvocationId.x instead, a stage
-    dispatched over any number of workgroups. *)
 
 val stage : stage -> Flow_ir.Packed.t -> (bytes, Diagnostic.t) result
-(** A Vulkan vertex or fragment module (entry [main]) of a raster stage program (Flow_shader.Raster).
-*)
+(** A Vulkan vertex or fragment module (entry [main]) from the shared raster-stage program. Workgroup
+    stages are GLCompute modules; [grid] selects dispatch-wide rather than workgroup-local indexing. *)

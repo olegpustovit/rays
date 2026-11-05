@@ -60,8 +60,8 @@ fn restore(with_: &[(String, node::T)], root: &node::T) -> node::T {
     go(with_, &mut HashMap::new(), root)
 }
 
-/// A graph's result: a card's factory node (`T.card_node`) when it is a Lisp call, otherwise its
-/// compiled node.
+/// A graph's independently owned result: a card's factory node (`T.card_node`) when it is a Lisp
+/// call, otherwise its compiled node. Its inputs and rebuild/expand callbacks may outlive `lowered`.
 pub fn root(lowered: &lower::T, graph: &lower::Graph) -> Result<node::T, String> {
     let root = graph.root.expect("a graph with a result");
     let card = lowered.compiled.iter().any(|(id, cid)| *cid == root && lowered.plan.nodes[*id as usize].kind == flow_eval::card_kind());
@@ -210,9 +210,21 @@ mod test_group_kernel;
 #[cfg(test)]
 mod test_remap;
 #[cfg(test)]
-mod test_mesh_resident;
-#[cfg(test)]
 mod test_trace;
+#[cfg(test)]
+mod test_geometry_arrays;
+#[cfg(test)]
+mod test_mesh_planes;
+#[cfg(test)]
+mod test_math_helpers;
+#[cfg(test)]
+mod test_gpu_bulk;
+#[cfg(test)]
+mod fixture_codec;
+#[cfg(test)]
+mod test_fixture_codec;
+#[cfg(test)]
+mod test_keyword_ports;
 
 #[cfg(test)]
 mod tests {
@@ -228,7 +240,7 @@ mod tests {
 
     // lib/flow_sop/lisp_sop/test_workspace_node.ml
     #[test]
-    #[ignore = "blocked upstream: grid lowering needs the flow_check error_rows shape [rows mapper :policy p] and then hits the irfix flow_ir deadlock"]
+    
     fn workspace_node_helpers() {
         let workspace = "(workspace shared\n    (defn size :context value [] 3)\n    (graph g :context sop (sop/grid :columns (size) :rows 2)))";
         assert_eq!(rdk::geometry::point_count(&cook(&workspace_node(&[], workspace))), 12, "workspace definitions were not available while lowering");
@@ -255,3 +267,6 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod test_parallel_exact;

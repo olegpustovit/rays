@@ -110,6 +110,19 @@ let () =
   let writing = Array.to_list Sys.argv = [ Sys.argv.(0); "--write-goldens" ] in
   let validator = Sys.command ("spirv-val --version > " ^ Filename.null ^ " 2>&1") = 0 in
   let golden = Buffer.create 512 in
+
+  let validate name scene bytes =
+    if validator then begin
+      let file = Filename.temp_file "rays-spirv-" ".spv" in
+      Fun.protect
+        ~finally:(fun () -> Sys.remove file)
+        (fun () ->
+          Out_channel.with_open_bin file (fun out -> output_bytes out bytes);
+          let target = if scene then "vulkan1.2" else "vulkan1.1" in
+          if Sys.command ("spirv-val --target-env " ^ target ^ " " ^ Filename.quote file) <> 0 then
+            failwith ("spirv-val refused " ^ name))
+    end
+  in
   List.iter
     (fun (name, fast, program) ->
       let instanced = String.ends_with ~suffix:"instanced" name
@@ -138,49 +151,42 @@ let () =
           program
         |> Test_program.ok
       in
-      assert (emitted.interface = metal.interface);
+      if emitted.interface <> metal.interface then
+        failwith ("SPIR-V/Metal binding interface differs for " ^ name);
       assert (emitted.layout.uniform_layout = metal.uniform_layout);
       assert (emitted.layout.table_seeds = metal.table_seeds);
       assert (Array.of_list (List.map snd emitted.layout.gathers) = metal.gathers);
       assert (emitted.layout.counts = metal.counts);
-      if validator then begin
-        let file = Filename.temp_file "rays-spirv-" ".spv" in
-        Fun.protect
-          ~finally:(fun () -> Sys.remove file)
-          (fun () ->
-            Out_channel.with_open_bin file (fun out -> output_bytes out emitted.bytes);
-            let code =
-              Sys.command
-                ((if emitted.layout.scene_binding = None then "spirv-val --target-env vulkan1.1 "
-                  else "spirv-val --target-env vulkan1.2 ")
-                ^ Filename.quote file)
-            in
-            if code <> 0 then failwith ("spirv-val refused " ^ name))
-      end;
+      validate name (emitted.layout.scene_binding <> None) emitted.bytes;
       Printf.bprintf golden "(%s %d %s)\n" name (Bytes.length emitted.bytes)
         (Digest.to_hex (Digest.bytes emitted.bytes)))
     (List.map (fun (name, program) -> (name, false, program)) (cases ())
     @ List.map (fun (name, program) -> (name, true, program)) (fast_cases ()));
-  (* a moving scene has no SPIR-V ray-query form: a typed refusal, never a static kernel *)
-  (match
+  (* moving scenes compile to candidate-AABB ray queries instead of a static fallback *)
+  (let moving =
      Flow_shader.Spirv.kernel ~fast:true ~motion:true (List.assoc "fast_trace" (fast_cases ()))
-   with
-  | Error d -> assert (d.code = "E_GPU_FORM")
-  | Ok _ -> assert false);
+     |> Test_program.ok
+   in
+   assert (Bytes.get_int32_le moving.bytes 0 = 0x07230203l);
+   assert moving.layout.scene_motion;
+   assert (Ogpu.Shader.validate_bindings moving.interface = Ok ()));
+
+  (let moving_instances =
+     Flow_shader.Spirv.kernel ~fast:true ~instanced:true ~motion:true
+       (List.assoc "fast_trace_instanced" (fast_cases()))
+     |> Test_program.ok
+   in
+   assert moving_instances.layout.scene_motion;
+   assert (Ogpu.Shader.validate_bindings moving_instances.interface = Ok ());
+   validate "motion instances"
+     (moving_instances.layout.scene_binding <> None) moving_instances.bytes);
   (* an unfolded kernel: its passes in a structured loop over function variables *)
   (let program = List.assoc "fast_float" (fast_cases ()) in
    let emitted = Flow_shader.Spirv.kernel ~fast:true ~unfold:4 program |> Test_program.ok in
    assert (Bytes.get_int32_le emitted.bytes 0 = 0x07230203l);
    assert (Ogpu.Shader.validate_bindings emitted.interface = Ok ());
-   if validator then begin
-     let file = Filename.temp_file "rays-spirv-" ".spv" in
-     Fun.protect
-       ~finally:(fun () -> Sys.remove file)
-       (fun () ->
-         Out_channel.with_open_bin file (fun out -> output_bytes out emitted.bytes);
-         if Sys.command ("spirv-val --target-env vulkan1.1 " ^ Filename.quote file) <> 0 then
-           failwith "spirv-val refused the unfolded kernel")
-   end);
+   validate "unfolded" false emitted.bytes
+  );
   let expected = "goldens/spirv.sexp" in
   if writing then
     Out_channel.with_open_bin expected (fun out -> output_string out (Buffer.contents golden))

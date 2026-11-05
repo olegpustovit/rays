@@ -211,12 +211,12 @@ mod graph_edits {
     use flow_graph::flow_edit::{apply_checked, ArgKey, Op};
     use flow_graph::projection;
     use flow_syntax::lisp;
-    use flow_syntax::syntax::{make, Node};
+    use flow_syntax::syntax::{make, Draft as Node};
 
     #[test]
     fn a_with_error_child_edits_through_the_graph() {
         let forms = ok(syntax::parse(&source("(let* [guarded (with_error (array/float 2 3.0) (fn [failure] failure))] guarded)")));
-        let checked = check(&lisp::print(&forms).0);
+        let checked = check(&lisp::print(&forms).unwrap().0);
         let scope = projection::of_graph(&catalog(), &checked, "g").unwrap();
         let card = projection::find(&scope, &["g".into(), "tested".into(), "guarded#0".into()]).expect("card");
         assert_eq!(card.head, "array/float");
@@ -224,7 +224,7 @@ mod graph_edits {
         let evaluation = ok(E::run(&checked, true, None, None, None, 0.));
         let path = vec!["g".to_owned(), "tested".to_owned()];
         assert!(evaluation.records.iter().find(|(p, _)| *p == path).unwrap().1[0].1 == Value::Float_array(Arc::new(vec![4., 4.])));
-        let forms_again = ok(syntax::parse(&lisp::print(&forms).0));
+        let forms_again = ok(syntax::parse(&lisp::print(&forms).unwrap().0));
         let (_, ds) = W::check(&[], false, false, None, &catalog(), &forms_again);
         assert!(!has_error(&ds));
         assert!(apply_checked(&catalog(), &forms, &Op::SetArg { node: card.path, key: ArgKey::Pos(0), sub: vec![], value: make(Node::Str(b"invalid".to_vec())) }).is_err());

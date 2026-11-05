@@ -50,24 +50,24 @@ summary{cursor:pointer;font-weight:600}
 </nav>
 
 <h2 id="progress">0. Current progress</h2>
-<p class="mute">Updated 2026-11-04 16:20 (session 2). Lead: Opus reviewing; ports by parallel Sonnet/Haiku agents; 70 commits on <code>dev</code> this session (rs/ only).</p>
+<p class="mute">Updated 2026-11-05. Completion is in progress; <code>rs/CHECKPOINT.md</code> is the live evidence ledger. Existing OCaml sources and oracle goldens remain intact.</p>
 <div class="grid">
-<div class="card stat"><b>~95%</b><span>of ~270k OCaml product lines ported; only rays_editor bundle F (~3.9k) and the rays binary + tools remain</span></div>
-<div class="card stat"><b>~4–7 h</b><span>estimated remaining: finish port (~1 h), editor test suite + parity/cutover goldens (~3–6 h)</span></div>
-<div class="card stat"><b>5 s / 60 s</b><span>per-test / per-run kill; a hook denies untimed test runs for every agent</span></div>
-<div class="card stat"><b>budgets</b><span>check after edit 0.19 s (leaf); flow_sop edit→test 9.8 s; clean workspace build 61 s</span></div>
+<div class="card stat"><b>Product ports present</b><span>all libraries and the rays CLI have Rust implementations; remaining parity, memory, speed and qualification criteria are still open</span></div>
+<div class="card stat"><b>Evidence, not estimates</b><span>checklist items close only after focused tests or actual native runs; no completion percentage or time-to-finish claim</span></div>
+<div class="card stat"><b>5 s / 60 s</b><span>default per-test / per-run limits; exhaustive native qualification is reported separately</span></div>
+<div class="card stat"><b>Both native backends</b><span>Windows Vulkan and Mac Metal conformance exercised; current source snapshots and remaining platform tests are tracked explicitly</span></div>
 </div>
-<p>Not complete: no Rust <code>rays</code> executable yet (waits on bundle F). OCaml remains product and oracle.</p>
+<p><b>Not complete.</b> Syntax/term arenas, memory targets, transform/garden debug speed, complete assertion parity and final shipping gates remain open. The Rust binary implements check, fmt, mem, web and the native editor; OCaml remains the oracle.</p>
 <div class="tw"><table>
 <tr><th>Area</th><th>Status</th><th>Evidence</th></tr>
-<tr><td>Byte/pixel parity proven</td><td><span class="tag c">Green</span></td><td>flow_check/flow_eval diagnostics+evaluation on all 49 sketches; every shader (renderer, Metal, flow_gpu; 55 SPIR-V digests); flow_web 101 goldens; web_export 15/17 sketches; pxui 4 pixel goldens; tessellator (600-case fuzz); path tracer 0/576 channels vs CPU walker.</td></tr>
-<tr><td>Geometry (rdk, sop)</td><td><span class="tag c">Green</span></td><td>rdk_core/geom/ops/boolean, sop (37 native nodes manifest-checked), parallel loops byte-identical 1 vs N domains.</td></tr>
-<tr><td>GPU, runtime, renderer, path tracing</td><td><span class="tag c">Green</span></td><td>Vulkan (validation fatal) and Metal (Mac) incl. boxes/capsules/motion; renderer 36 tests in 9 s.</td></tr>
-<tr><td>Flow stack</td><td><span class="tag w">Green with backlog</span></td><td>flow_syntax/check/eval/ir/graph/shader/web/gpu/sop, editor_document, flow_native, web_export. Fixed: 3 re-entrant deadlocks, address-reuse cache, state scoping, lowering 36 s → 2 s. Open: arena-locking redesign; ~20 flow_sop lowering parity failures (agent running).</td></tr>
-<tr><td>UI + editor</td><td><span class="tag w">In progress</span></td><td>pxui, pxui_shell, pxui_graph, editor_core done; rays_editor bundles A–E done (51 tests), F running.</td></tr>
-<tr><td>Binary, tools, cutover</td><td><span class="tag w">Pending</span></td><td>rays CLI (check/fmt/mem/web/editor) vs 204 OCaml check/fmt goldens; editor test suite (26.7k lines); benches vs OCaml.</td></tr>
+<tr><td>Evaluator safety and checked values</td><td><span class="tag w">Scoped verification</span></td><td>149 flow_eval/flow_syntax/flow_check tests passed. Default-stack subprocess covers deep terms/values, callback reentry, large array refusal and 64 call levels. Recursive owner drops and arbitrary allocator/OS failure are not claimed contained.</td></tr>
+<tr><td>Vulkan motion and Metal readback</td><td><span class="tag c">Focused gates pass</span></td><td>Compacted motion prototypes retain geometry after original BLAS destruction; native Vulkan conformance and nine path-tracer scenarios pass. Metal backend conformance, including retained cross-thread readback, passes on the Mac mini.</td></tr>
+<tr><td>GPU holders and missing tests</td><td><span class="tag c">Windows qualification passes</span></td><td>Five missing GPU suites, helper coverage and resident-run matrix ported. flow_gpu + mock + Vulkan validation passes; real native clobbering and reader-lifetime bugs fixed. Further Mac test-port qualification remains open.</td></tr>
+<tr><td>Editor and native surfaces</td><td><span class="tag w">Partial qualification</span></td><td>All 13 T6 workspace-IR comparisons pass with exact path/tuple/value assertions. Mac real-window basic and sop_gallery smoke passes at 30 frames. Full Windows smoke and remaining editor/native source cases are being qualified.</td></tr>
+<tr><td>Web and test budgets</td><td><span class="tag c">Focused gates pass</span></td><td>78 new region-argument/composition tests execute emitted JS with serial/1/8 workers; 119 web tests pass. Manifest, promotion and complete 40,000-time HSL coverage split into default cases below five seconds without dropping the original matrices.</td></tr>
+<tr><td>Memory and debug speed</td><td><span class="tag w">Targets not met</span></td><td>gpu_sea slots are flat at 104.9 MB through 1/3/8 frames with zero payload readback and no fallback lines. ws_tree live is 236.1 MB versus historical OCaml 28 MB. Last debug gate: box 32 ms, transform 95 ms, sphere 188 ms, garden 585 ms; transform/garden still fail.</td></tr>
 </table></div>
-<p class="mute">Backlog with every known divergence: <code>rs/port/parity_backlog.md</code>. Build/test policy: <code>rs/port/build-speed.md</code>.</p>
+<p class="mute">Current evidence and outstanding scope: <code>rs/CHECKPOINT.md</code>, <code>rs/port/test_inventory.md</code> and <code>rs/port/parity_backlog.md</code>. The sections below preserve the original 2026-11-04 plan; their proposed milestones and historical backend gaps are not current-state claims.</p>
 
 
 

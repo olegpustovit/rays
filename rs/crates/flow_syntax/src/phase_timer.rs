@@ -98,6 +98,39 @@ mod tests {
     use super::*;
     use std::{cell::Cell, rc::Rc};
     fn clock(time: Rc<Cell<f64>>) -> Box<dyn FnMut() -> f64> { Box::new(move || time.get()) }
+    // lib/flow/test_phase_timer.ml exercises actual unwinding, not only guard drop order.
+    #[test]
+    fn panics_restore_suspended_samples_and_clear_aborted_samples() {
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+        let time = Rc::new(Cell::new(0.0));
+        let sample = SampleGuard::start_with_clock(clock(time.clone()));
+        {
+            let _lower = measure("lower");
+            time.set(1.0);
+            assert!(catch_unwind(AssertUnwindSafe(|| {
+                let _without = without();
+                let _evaluate = measure("evaluate");
+                time.set(2.0);
+                panic!("body");
+            })).is_err());
+            {
+                let _check = measure("check");
+                time.set(3.0);
+            }
+        }
+        let timer = sample.finish();
+        assert_eq!(calls(&timer, "lower"), 1);
+        assert_eq!(seconds(&timer, "lower"), 2.0);
+        assert_eq!(calls(&timer, "evaluate"), 0);
+        assert_eq!(calls(&timer, "check"), 1);
+        assert!(catch_unwind(AssertUnwindSafe(|| {
+            let _sample = SampleGuard::start_with_clock(clock(time.clone()));
+            let _phase = measure("aborted");
+            panic!("outside");
+        })).is_err());
+        drop(measure("outside"));
+        assert!(SampleGuard::start_with_clock(clock(time)).finish().entries.is_empty());
+    }
     #[test]
     fn injected_clock_tracks_nested_time_and_guard_restoration() {
         let time = Rc::new(Cell::new(0.0));

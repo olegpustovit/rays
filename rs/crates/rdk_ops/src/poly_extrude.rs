@@ -962,8 +962,7 @@ mod tests {
 
     #[test]
     fn connected_extrude_scale_cardinality() {
-        // The OCaml fixture is a 320 x 240 grid; a 40 x 30 grid keeps the same identities.
-        let (columns, rows) = (40usize, 30usize);
+        let (columns, rows) = (320usize, 240usize);
         let dense = grid(columns, rows);
         let build = || {
             let mut p = Params::new(0.75);

@@ -239,7 +239,16 @@ fn shape_source(crate_name: &str, path: &str, source: &str) -> Vec<String> {
         if let Some(name_index) = item_name {
             let generic_index = if token.text == "impl" { index + 1 } else { name_index + 1 };
             if tokens.get(generic_index).is_some_and(|next| next.text == "<") {
-                if !adapter_crate {
+                // Borrow lifetimes do not monomorphize functions or impls; only type parameters do.
+                let borrow_lifetimes_only = matches!(token.text.as_str(), "fn" | "impl")
+                    && generic_end(&tokens, generic_index).is_some_and(|end| {
+                        let parameters = &tokens[generic_index + 1..end];
+                        !parameters.is_empty() && parameters.iter().enumerate().all(|(at, parameter)| {
+                            matches!(parameter.text.as_str(), "'" | ":" | "+" | ",")
+                                || (at > 0 && parameters[at - 1].text == "'" && is_identifier(&parameter.text))
+                        })
+                    });
+                if !adapter_crate && !borrow_lifetimes_only {
                     issue(&mut issues, path, token.line, "generic items are restricted to rays_collections");
                 }
                 if matches!(token.text.as_str(), "struct" | "enum") {
@@ -1415,6 +1424,21 @@ mod tests {
             dependency_path("base", "upper", &graph),
             Some(vec!["base".to_owned(), "middle".to_owned(), "upper".to_owned()])
         );
+    }
+
+    #[test]
+    fn shape_gate_distinguishes_borrow_lifetimes_from_type_parameters() {
+        for source in [
+            "fn borrow<'a>(value: &'a str) -> &'a str { value }",
+            "fn borrow<'a, 'b: 'a>(a: &'a str, b: &'b str) -> &'a str { a }",
+            "impl<'a> IntoIterator for &'a Rows {}",
+        ] {
+            assert!(shape_source("other", "other/src/lib.rs", source).is_empty(), "{source}");
+        }
+        let typed = shape_source("other", "other/src/lib.rs", "fn generic<'a, T>(value: &'a T) {}");
+        assert!(typed.iter().any(|issue| issue.contains("generic items")));
+        let borrowed = shape_source("other", "other/src/lib.rs", "struct View<'a>(&'a str);");
+        assert!(borrowed.iter().any(|issue| issue.contains("lifetime parameters")));
     }
 
     #[test]

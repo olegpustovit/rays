@@ -23,7 +23,7 @@ fn string_bytes() {
     .unwrap();
     let expected = Value::Text_array(Arc::new(vec![bytes.clone()]));
     assert_eq!(result(&workspace, 0.0), expected);
-    let saved = lisp::print(&edited).0;
+    let saved = lisp::print(&edited).unwrap().0;
     let restored = check(&parse(&saved));
     assert_eq!(result(&restored, 0.0), expected);
     assert_eq!(p::find(&p::of_graph(&catalog(), &restored, "g").unwrap(), &card.path).unwrap().ty, Ty::Array(Box::new(Ty::Text)));

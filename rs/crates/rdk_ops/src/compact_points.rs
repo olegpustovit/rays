@@ -305,9 +305,14 @@ pub mod fixtures {
         let attributes: Vec<String> = geometry::attributes(g).iter().map(|a| format!("{:?}{}", attribute::owner(a), attribute_signature(a))).collect();
         let groups: Vec<String> = geometry::groups(g)
             .iter()
-            .map(|g| format!("{}:{:?}", group::name(g), (0..group::length(g)).filter(|&e| group::mem(e, g)).collect::<Vec<_>>()))
+            .map(|g| format!("{:?}:{}:{}:{:?}:{:?}", group::owner(g), group::name(g), group::length(g),
+                group::ordered_elements(g), (0..group::length(g)).filter(|&e| group::mem(e, g)).collect::<Vec<_>>()))
             .collect();
-        format!("{:?}{:?}{:?}{:?}{attributes:?}{groups:?}", bits(&x), bits(&y), bits(&z), topo(g))
+        let edges: Vec<String> = geometry::edge_groups(g).iter().map(|group| {
+            format!("{}:{}:{:?}", edge_group::name(group), edge_group::length(group),
+                (0..edge_group::length(group)).filter(|&edge| edge_group::mem(edge, group)).collect::<Vec<_>>())
+        }).collect();
+        format!("{}:{:?}{:?}{:?}{:?}{attributes:?}{groups:?}{edges:?}", geometry::point_count(g), bits(&x), bits(&y), bits(&z), topo(g))
     }
 
     /// Exact text of a stored attribute (floats as bit patterns) for equality checks.
@@ -324,9 +329,24 @@ pub mod fixtures {
                 let v = packed::IntArray::View::view(a);
                 format!("{:?}{:?}", v.offsets, v.values)
             }
-            _ => "other".to_owned(),
+            attribute::Storage::Float2(values) => {
+                let v = packed::Float2::View::view(values);
+                format!("{:?}{:?}", v.x.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
+                    v.y.iter().map(|x| x.to_bits()).collect::<Vec<_>>())
+            }
+            attribute::Storage::Float3(values) => {
+                let v = packed::Float3::View::view(values).unwrap();
+                format!("{:?}{:?}{:?}", v.x.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
+                    v.y.iter().map(|x| x.to_bits()).collect::<Vec<_>>(), v.z.iter().map(|x| x.to_bits()).collect::<Vec<_>>())
+            }
+            attribute::Storage::Float4(values) => {
+                let v = packed::Float4::View::view(values);
+                format!("{:?}{:?}{:?}{:?}", v.x.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
+                    v.y.iter().map(|x| x.to_bits()).collect::<Vec<_>>(), v.z.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
+                    v.w.iter().map(|x| x.to_bits()).collect::<Vec<_>>())
+            }
         };
-        format!("{}:{storage}", attribute::name(item))
+        format!("{}:{}:{storage}", attribute::kind_name(item), attribute::name(item))
     }
 
     pub fn geometry_equal(left: &geometry::T, right: &geometry::T) -> bool {
@@ -373,6 +393,29 @@ mod tests {
     use super::fixtures::*;
     use super::*;
     use rdk_core::attribute::{Owner, Storage};
+
+    #[test]
+    fn parity_signature_includes_tuple_bits_group_order_and_edges() {
+        let source = grid(1, 1, 2.0, true);
+        for dimension in [2, 3, 4] {
+            let tuple = |first| match dimension {
+                2 => Storage::Float2(packed::Float2::of_owned(vec![first; 4], vec![0.0; 4]).unwrap()),
+                3 => Storage::Float3(packed::Float3::of_owned(vec![first; 4], vec![0.0; 4], vec![0.0; 4]).unwrap()),
+                _ => Storage::Float4(packed::Float4::of_owned(vec![first; 4], vec![0.0; 4], vec![0.0; 4], vec![0.0; 4]).unwrap()),
+            };
+            let left = with_attr(&source, Owner::Point, "tuple", tuple(0.0));
+            let right = with_attr(&source, Owner::Point, "tuple", tuple(-0.0));
+            assert_ne!(geometry_signature(&left), geometry_signature(&right));
+        }
+        let ordered = |members: &[i64]| geometry::with_group(
+            group::ordered(group::Owner::Point, "ordered", 4, members).unwrap(), &source,
+        ).unwrap();
+        assert_ne!(geometry_signature(&ordered(&[0, 1])), geometry_signature(&ordered(&[1, 0])));
+        let with_edge = geometry::with_edge_group(
+            edge_group_pairs(geometry::topology(&source), "edge", &[(0, 1)]), &source,
+        ).unwrap();
+        assert_ne!(geometry_signature(&source), geometry_signature(&with_edge));
+    }
 
     #[test]
     fn compacts_unused_points_and_remaps_payload() {

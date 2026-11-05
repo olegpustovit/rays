@@ -851,19 +851,21 @@ mod tests {
 
     #[test]
     fn large_grid_collapses_to_a_rectangle() {
-        let source = add_payload(&grid(30, 20, 20.0, true));
+        let source = add_payload(&grid(300, 220, 20.0, true));
         let edges = manifold_edges(&source);
-        let out = run(
-            &Params {
-                grain: Some(257),
-                edges: Some(edges),
-                remove_inline_points: true,
-                collinearity_tolerance: 1e-10,
-                ..params()
-            },
-            &source,
-        )
-        .unwrap();
+        let out = exact_at_one_and_four(&|| {
+            run(
+                &Params {
+                    grain: Some(257),
+                    edges: Some(edges.clone()),
+                    remove_inline_points: true,
+                    collinearity_tolerance: 1e-10,
+                    ..params()
+                },
+                &source,
+            )
+            .unwrap()
+        });
         assert_eq!(
             (geometry::point_count(&out), geometry::vertex_count(&out), geometry::primitive_count(&out)),
             (4, 4, 1)

@@ -15,8 +15,11 @@ fn handlers(nested: Arc<AtomicI64>) -> ResidualHandlers {
     ResidualHandlers {
         kernel: Some(Arc::new(move |id| {
             let view = Residual::residual_view(id).unwrap();
-            if let W::Node::Hof(W::HofKind::Map, terms) = &view.term.node {
-                let xs = Residual::eval_term(id, &terms[1], &input::at_time(9.0), None, None, None).unwrap();
+            if let W::Node::Hof(hof) = view.term.node {
+                let node = view.term.arena().hof(hof);
+                assert_eq!(node.kind, W::HofKind::Map);
+                let terms = view.term.arena().term_ids(node.args);
+                let xs = Residual::eval_term(id, &view.term.child(terms[1]), &input::at_time(9.0), None, None, None).unwrap();
                 assert_eq!(flow_syntax::value::array_length(&xs).unwrap(), 8);
             }
             let fresh = fresh.clone();

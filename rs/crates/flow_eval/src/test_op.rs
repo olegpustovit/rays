@@ -284,7 +284,7 @@ fn typed_and_source_operators() {
         ("(test/typed :type \"vec3\")", Value::Vec3_array(Arc::new(vec![1., 2., 3.])), Ty::Array(Box::new(Ty::Vec3))),
     ] {
         let workspace = checked(std::slice::from_ref(&operator), body);
-        assert_eq!(workspace.graphs[0].body.ty, ty);
+        assert_eq!(workspace.graphs[0].body.ty(), &ty);
         assert_eq!(result_of(&r#static(&workspace, false, None).unwrap(), "g"), expected);
     }
     let (workspace, diagnostics) = W::check(std::slice::from_ref(&operator), false, false, None, &empty(), &parse(&host_forms("(let* [kind \"vec3\"] (test/typed :type kind))")));

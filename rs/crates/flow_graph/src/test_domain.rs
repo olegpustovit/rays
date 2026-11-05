@@ -36,7 +36,7 @@ fn int_array(v: &[i64]) -> Value {
 #[test]
 fn lookup_keeps_big_integers() {
     let source = parse("(workspace lookup (graph g :context value (let* [table (array/int 3 9007199254740993) picked (array/nth table 1)] picked)))");
-    let workspace = check_lenient(&source);
+    let workspace = check(&source);
     let card = card(&workspace, &["g", "picked"]);
     assert!(card.head == "array/nth" && card.ty == Ty::Int);
     let (_, edited) = apply_checked(&catalog(), &source, &set_arg(&card.path, ArgKey::Pos(1), num("2"))).unwrap();
@@ -46,7 +46,7 @@ fn lookup_keeps_big_integers() {
 #[test]
 fn lookup_in_a_map() {
     let source = parse("(workspace lookup (graph g :context host (let* [table (array/range 3 :type int) picked (map (fn [i] (array/nth table i)) (array/range 3 :type int))] picked)))");
-    let workspace = check_lenient(&source);
+    let workspace = check(&source);
     let card = lookup(&pane(&workspace)).unwrap();
     let (_, edited) = apply_checked(&catalog(), &source, &set_arg(&card.path, ArgKey::Pos(1), num("2"))).unwrap();
     assert_eq!(result(&edited, 0.0), int_array(&[2, 2, 2]));
@@ -55,7 +55,7 @@ fn lookup_in_a_map() {
 #[test]
 fn lookup_of_text() {
     let source = parse("(workspace lookup (graph g :context host (let* [table (array/text 3 \"é日本😀\") picked (map (fn [(i : int)] (array/nth table i)) (array/range 3 :type int))] picked)))");
-    let workspace = check_lenient(&source);
+    let workspace = check(&source);
     let card = lookup(&pane(&workspace)).unwrap();
     assert_eq!(card.ty, Ty::Text);
     let (_, edited) = apply_checked(&catalog(), &source, &set_arg(&card.path, ArgKey::Pos(1), num("2"))).unwrap();
@@ -78,7 +78,7 @@ fn checked_arithmetic_records() {
 #[test]
 fn footer_of_an_int_array() {
     let source = parse("(workspace integers (graph g :context host (let* [v (array/int 1)] v)))");
-    let workspace = check_lenient(&source);
+    let workspace = check(&source);
     let card = card(&workspace, &["g", "v"]);
     let mut probe = probe::make(&recorded(&workspace), Options::default());
     assert_eq!(probe.footer(&card, &[]).value, "1 × int");
@@ -87,7 +87,7 @@ fn footer_of_an_int_array() {
 #[test]
 fn footer_of_a_long_text_array() {
     let source = parse("(workspace texts (graph g :context host (let* [v (array/text 5001 \"猫\")] v)))");
-    let workspace = check_lenient(&source);
+    let workspace = check(&source);
     let card = card(&workspace, &["g", "v"]);
     assert_eq!(card.ty, array_of(Ty::Text));
     let default = default_for(&array_of(Ty::Text), "texts", None).unwrap();
@@ -123,7 +123,7 @@ fn vector_literals_edit_a_component() {
 fn live_branches_and_wrapping() {
     let text = "(workspace live (graph g :context value (let* [x (if (< t 1) 1 2) y (cond (< t 0) 1 (< t 1) 2 :else 3) z (case (< t 1) 0 4 true 5 :else 6)] (+ x (+ y z)))))";
     let source = parse(text);
-    let workspace = check_lenient(&source);
+    let workspace = check(&source);
     let scope = p::of_graph(&catalog(), &workspace, "g").unwrap();
     let evaluated = recorded(&workspace);
     for (time, expected) in [(0.0, [0i64, 1, 1]), (2.0, [1, 2, 0])] {
@@ -153,7 +153,7 @@ fn live_branches_and_wrapping() {
 #[test]
 fn tuples_and_lazy_geometry_records() {
     let source = parse("(workspace tuples (graph g :context value (sum [i (range 2)] (if (< i 1) 1 2))))");
-    let workspace = check_lenient(&source);
+    let workspace = check(&source);
     let scope = p::of_graph(&catalog(), &workspace, "g").unwrap();
     let node = p::find(&scope, &path(&["g", "@result", "@result"])).unwrap();
     let mut probe = probe::make(&recorded(&workspace), Options::default());
@@ -203,7 +203,7 @@ fn tuples_and_lazy_geometry_records() {
 #[test]
 fn conditional_arms_are_inputs() {
     let source = parse("(workspace branches (graph g :context value (let* [x (if true (+ 1 2) (* 3 4)) y (cond false 1 true 2 :else 3) z (case 1 0 4 1 5 :else 6)] (+ x (+ y z)))))");
-    let workspace = check_lenient(&source);
+    let workspace = check(&source);
     let scope = p::of_graph_with(&|_| false, &catalog(), &workspace, "g").unwrap();
     for path in [path(&["g", "x#then"]), path(&["g", "x#else"])] {
         // an arm is an input of its conditional: a call written there is a card, not a zone
@@ -277,7 +277,7 @@ fn exact_freezes_an_image() {
     let (source, edited) = apply_checked(&catalog(), &source, &set_arg(&card.path, ArgKey::Pos(0), replacement)).unwrap();
     let nested = p::find(&pane(&edited), &path(&["g", "snapshot#0"])).unwrap();
     assert_eq!(nested.head, "image/noise");
-    let text = lisp::print(&source).0;
+    let text = lisp::print(&source).unwrap().0;
     let roundtrip = check(&parse(&text));
     let result = unrecorded(&roundtrip);
     let node = result.plan.nodes.iter().find(|n| n.kind == "exact").unwrap();
@@ -323,7 +323,7 @@ fn maps_probe_one_call() {
     let mut probe = probe::make(&recorded(&edited), Options::default());
     assert_eq!(probe.footer(&shift, &[9999]).value, "4.5");
     let source = parse("(workspace nested (graph g :context value (array/count (map (fn [(x : float)] (+ x 2.0)) (array/float 3 1.0)))))");
-    let workspace = check_lenient(&source);
+    let workspace = check(&source);
     let scope = pane(&workspace);
     let fnc = p::find(&scope, &path(&["g", "@result#0#0"])).unwrap();
     let mut body_path = fnc.path.clone();
@@ -341,7 +341,7 @@ fn is_error(source: &[s::Syntax], op: Op) -> bool {
 #[test]
 fn scatter_add_is_typed() {
     let source = parse("(workspace scatter (graph g :context host (let* [added (array/scatter_add (array/int 3 0) (array/vec3 3 [1 2 3]) 2)] added)))");
-    let workspace = check_lenient(&source);
+    let workspace = check(&source);
     let card = card(&workspace, &["g", "added"]);
     assert!(card.head == "array/scatter_add" && card.ty == array_of(Ty::Vec3));
     let o = op::find(&[], &card.head, &context::value()).unwrap();
@@ -351,7 +351,7 @@ fn scatter_add_is_typed() {
     );
     let (edited_source, edited) = apply_checked(&catalog(), &source, &set_arg(&card.path, ArgKey::Pos(2), num("3"))).unwrap();
     assert_eq!(result(&edited, 0.0), Value::Vec3_array(Arc::new(vec![3., 6., 9., 0., 0., 0., 0., 0., 0.])));
-    let saved = lisp::print(&edited_source).0;
+    let saved = lisp::print(&edited_source).unwrap().0;
     let restored = parse(&saved);
     assert!(matches!(flow_check::workspace::check(&[], false, false, None, &catalog(), &restored), (Some(_), ds) if ds.is_empty()));
     for (index, replacement) in [(0, "(array/float 3)"), (1, "(array/text 3)"), (2, "\"bad\""), (2, "2.5")] {
@@ -371,7 +371,7 @@ fn integer_arrays() {
     ];
     for (name, argument, expected, edited_argument, edited_expected) in cases {
         let source = parse(&format!("(workspace integer_arrays (graph g :context host (let* [tested ({} {})] tested)))", name, argument));
-        let workspace = check_lenient(&source);
+        let workspace = check(&source);
         let card = card(&workspace, &["g", "tested"]);
         assert!(card.head == name && card.ty == array_of(Ty::Int));
         let signature = op::find(&[], name, &context::value()).unwrap().signature;
@@ -379,7 +379,7 @@ fn integer_arrays() {
         assert_eq!(result(&workspace, 0.0), int_array(&expected));
         let (changed, checked) = apply_checked(&catalog(), &source, &set_arg(&card.path, ArgKey::Pos(0), parse(edited_argument).remove(0))).unwrap();
         assert_eq!(result(&checked, 0.0), int_array(&edited_expected));
-        let saved = lisp::print(&changed).0;
+        let saved = lisp::print(&changed).unwrap().0;
         assert!(checks_clean(&parse(&saved)));
         for value in ["(array/float 3)", "(array/text 3)", "3"] {
             assert!(is_error(&source, set_arg(&card.path, ArgKey::Pos(0), parse(value).remove(0))), "{} {}", name, value);
@@ -392,7 +392,7 @@ fn ordering_arrays() {
     let cases = [("array/grade", "(array/int 3 2)", vec![0i64, 1, 2]), ("array/index_of", "(array/int 3 1) (array/int 4 1)", vec![0, 0, 0, 0])];
     for (name, args, expected) in cases {
         let source = parse(&format!("(workspace ordering (graph g :context host (let* [tested ({} {})] tested)))", name, args));
-        let workspace = check_lenient(&source);
+        let workspace = check(&source);
         let card = card(&workspace, &["g", "tested"]);
         assert!(card.head == name && card.ty == array_of(Ty::Int));
         assert!(card.rows[0].ty == Some(array_of(Ty::Any)) && card.rows[0].socket);
@@ -411,7 +411,7 @@ fn ordering_arrays() {
             if name == "array/grade" { (ArgKey::Kw("descending".into()), "true", vec![0i64, 1, 2]) } else { (ArgKey::Pos(1), "(array/int 5 2)", vec![-1i64, -1, -1, -1, -1]) };
         let (changed, checked) = apply_checked(&catalog(), &source, &set_arg(&card.path, key, parse(value).remove(0))).unwrap();
         assert_eq!(result(&checked, 0.0), int_array(&expected));
-        let saved = lisp::print(&changed).0;
+        let saved = lisp::print(&changed).unwrap().0;
         assert!(checks_clean(&parse(&saved)));
         let (_, checked) = apply_checked(&catalog(), &source, &set_arg(&card.path, ArgKey::Pos(0), parse("(array/int 0)").remove(0))).unwrap();
         assert_eq!(result(&checked, 0.0), if name == "array/grade" { int_array(&[]) } else { int_array(&[-1, -1, -1, -1]) });
@@ -429,7 +429,7 @@ fn ordering_arrays() {
 #[test]
 fn array_capacities() {
     let source = parse("(workspace capacities (graph g :context host (let* [limit (array/max_length)] limit)))");
-    let checked = check_lenient(&source);
+    let checked = check(&source);
     let card = card(&checked, &["g", "limit"]);
     assert!(card.ty == Ty::Int && card.head == "array/max_length");
     let selector = card.rows.iter().find(|row| row.key == ArgKey::Kw("type".into())).unwrap();
@@ -445,8 +445,8 @@ fn array_capacities() {
         let (changed, checked) =
             apply_checked(&catalog(), &source, &set_arg(&card.path, ArgKey::Kw("type".into()), s::make(Node::Sym(kind.into())))).unwrap();
         assert_eq!(result(&checked, 0.0), Value::Int(expected));
-        let printed = lisp::print(&changed).0;
-        let saved = check_lenient(&parse(&printed));
+        let printed = lisp::print(&changed).unwrap().0;
+        let saved = check(&parse(&printed));
         assert_eq!(result(&saved, 0.0), Value::Int(expected));
     }
     for text in ["\"unknown\"", "1"] {
@@ -460,7 +460,7 @@ fn array_capacities() {
 
 fn array_capacities_refuse_a_computed_type() {
     let source = parse("(workspace capacities (graph g :context host (let* [limit (array/max_length)] limit)))");
-    let checked = check_lenient(&source);
+    let checked = check(&source);
     let card = card(&checked, &["g", "limit"]);
     assert!(is_error(&source, set_arg(&card.path, ArgKey::Kw("type".into()), parse("(if (> t 0.) \"int\" \"float\")").remove(0))));
 }

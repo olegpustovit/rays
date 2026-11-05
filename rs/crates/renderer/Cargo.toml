@@ -22,7 +22,13 @@ sdl3 = { path = "../sdl3" }
 
 [dev-dependencies]
 ogpu_mock = { path = "../ogpu_mock" }
+mem_sys = { path = "../mem_sys" }
+
+[target.'cfg(windows)'.dev-dependencies]
 ogpu_vulkan = { path = "../ogpu_vulkan" }
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+ogpu_metal = { path = "../ogpu_metal" }
 
 # Resource operations (and so Renderer.destroy) need the SDL main thread, which libtest never gives a
 # test: these targets' own main runs their cases (tests/common/window.rs) in one process on one device

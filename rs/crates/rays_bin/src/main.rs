@@ -121,6 +121,9 @@ fn run(args: Vec<String>) {
 }
 
 fn main() {
+    if let Err(error) = runtime::configure_native_process() {
+        die(&format!("rays: {error}"));
+    }
     #[cfg(windows)]
     ogpu::impl_::select(ogpu_vulkan::impl_::implementation());
     #[cfg(target_os = "macos")]

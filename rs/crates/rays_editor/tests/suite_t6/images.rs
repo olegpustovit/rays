@@ -789,14 +789,14 @@ pub fn cases() -> Vec<(&'static str, fn())> {
         ("images_scene_textures_preserved", scene_textures_preserved),
         ("images_oracle_noise_owner", image_oracle_noise_owner),
         ("images_capacity", capacity),
-        ("images_native_canvas_playback", slow_canvas_playback),
-        ("images_native_geometry_captures", slow_geometry_captures),
+        ("images_native_canvas_playback", canvas_playback),
+        ("images_native_geometry_captures", native_geometry_captures),
         ("images_native_nested_map", native_nested_map),
         ("images_native_rendered_snapshots", native_rendered_snapshots),
         ("images_native_legacy_stamps", legacy_stamps),
-        ("images_native_resident_dimensions", slow_resident_dimensions),
+        ("images_native_resident_dimensions", resident_dimensions),
         ("images_native_failed_publication", failed_publication),
-        ("images_native_nested_exact", slow_nested_exact),
+        ("images_native_nested_exact", nested_exact),
         ("images_native_workspace_gpu_images", native_workspace_gpu_images),
         ("images_native_retained_canvas", native_retained_canvas),
     ]
@@ -814,25 +814,6 @@ fn export_or_skip(dir: &std::path::Path, doc: &editor_document::workspace_doc::T
     }
 }
 
-fn slow_on(name: &str, reason: &str) -> bool {
-    if std::env::var("RAYS_SLOW").as_deref() == Ok("1") {
-        return true;
-    }
-    println!("SKIPPED {name}: {reason}; passes under RAYS_SLOW=1");
-    false
-}
-
-fn slow_canvas_playback() {
-    if slow_on("images_native_canvas_playback", "5.9 s in a debug build (two 900x640 editor frames with canvas renders)") {
-        canvas_playback();
-    }
-}
-
-fn slow_geometry_captures() {
-    if slow_on("images_native_geometry_captures", "10 s in a debug build (three owners, GPU image kernels over three timestamps)") {
-        native_geometry_captures();
-    }
-}
 
 // ---- the two reload-driven resident cases ----
 
@@ -870,7 +851,7 @@ fn is_destroyed(r: Result<Option<(i64, i64, i64, ogpu::backend::Texture)>, ogpu:
 /// Workspace GPU images: exact-first independent CPU snapshots, live display, mesh/image parity, replan/resize,
 /// authority transitions and ownership.
 fn native_workspace_gpu_images() {
-    if !common::gpu() || !slow_on("images_native_workspace_gpu_images", "many reloads and canvas renders, tens of seconds in a debug build") {
+    if !common::gpu() {
         return;
     }
     let before = handles();
@@ -985,7 +966,7 @@ fn options_d1() -> Editor::Create {
 /// Resident Canvas live route: mixed mesh/image roundtrip parity, stable identity, isolation, replan/resize,
 /// failure/recovery, snapshots and teardown.
 fn native_retained_canvas() {
-    if !common::gpu() || !slow_on("images_native_retained_canvas", "many reloads and canvas renders, tens of seconds in a debug build") {
+    if !common::gpu() {
         return;
     }
     let baseline = handles();
@@ -1075,14 +1056,3 @@ fn native_retained_canvas() {
     assert_eq!(handles(), baseline);
 }
 
-fn slow_resident_dimensions() {
-    if slow_on("images_native_resident_dimensions", "12 s in a debug build (eight Canvas renders and resizes)") {
-        resident_dimensions();
-    }
-}
-
-fn slow_nested_exact() {
-    if slow_on("images_native_nested_exact", "6 s in a debug build (three 320x240 owners and CPU renders)") {
-        nested_exact();
-    }
-}

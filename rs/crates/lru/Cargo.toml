@@ -6,3 +6,6 @@ license.workspace = true
 
 [dependencies]
 mem = { path = "../mem" }
+
+[dev-dependencies]
+mem_sys = { path = "../mem_sys" }

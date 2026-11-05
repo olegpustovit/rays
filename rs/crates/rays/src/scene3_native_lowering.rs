@@ -603,6 +603,7 @@ fn make_background_mesh() -> se::mesh {
     se::mesh {
         key: se::mesh_key::Host("world:background".to_string()),
         vertices: new_bytes(vertices),
+        shared_vertices: None,
         vertex_count: 3,
         indices: new_bytes(indices),
         index_count: 3,
@@ -786,7 +787,7 @@ fn prepared_bytes(p: &se::prepared_scene3) -> i64 {
         .iter()
         .map(|entry| {
             let m = &entry.draw.mesh;
-            m.vertices.borrow().len() as i64
+            m.vertex_bytes_len() as i64
                 + m.indices.borrow().len() as i64
                 + entry.vertex_attributes.as_ref().map_or(0, |(_, b)| b.borrow().len() as i64)
                 + entry.draw.state.transform_uniforms.as_ref().map_or(0, |b| b.borrow().len() as i64)
@@ -1278,6 +1279,7 @@ pub fn prepare(resources: &resources, cam: &camera::t, viewport: viewport_t, sce
                     let mesh_ = se::mesh {
                         key: if packed.gpu.is_none() { se::mesh_key::Host(packed.key.clone()) } else { se::mesh_key::Gpu_vertices(packed.key.clone()) },
                         vertices: packed.vertices.clone(),
+                        shared_vertices: None,
                         vertex_count: packed.vertex_count,
                         indices: packed.indices.clone(),
                         index_count: packed.index_count,

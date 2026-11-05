@@ -66,7 +66,7 @@ pub fn path(parts: &[&str]) -> Vec<String> {
 }
 
 pub fn text_of(forms: &[Syntax]) -> String {
-    flow_syntax::lisp::print(forms).0
+    flow_syntax::lisp::print(forms).unwrap().0
 }
 
 pub fn has(hay: &str, sub: &str) -> bool {

@@ -1,6 +1,6 @@
 // Port of test_gpu_image.ml over ogpu_mock: storage-free publication, checked source lifetime and
 // resize, CPU transitions, leases, domain and borrowed ownership. The `Gc.allocated_bytes`
-// ceilings are not ported (they measure the OCaml heap); `cpu_storage_bytes = 0` states the same.
+// ceilings are not ported (they measure the OCaml heap); zero CPU storage is checked separately.
 mod common;
 use ogpu::backend::{self as b, Driver, DriverResource, Texture};
 use ogpu::error::{self, ErrorKind};

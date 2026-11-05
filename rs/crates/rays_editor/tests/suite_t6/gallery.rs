@@ -10,29 +10,35 @@ use sop::{context, node, session};
 
 use crate::support::read_repo;
 
-fn sym(s: &str) -> Syntax {
-    S::make(Node::Sym(s.into()))
-}
 
 fn graph(forms: &[Syntax], name: &str) -> Syntax {
-    let roots = S::children(&forms[0]);
-    let form = roots
-        .into_iter()
-        .find(|form| match &form.node {
-            Node::List(xs) => xs.len() >= 2 && matches!((&xs[0].node, &xs[1].node), (Node::Sym(g), Node::Sym(n)) if g == "graph" && n == name),
-            _ => false,
-        })
-        .unwrap_or_else(|| panic!("graph {name}"));
-    S::children(form).last().map(|s| (*s).clone()).unwrap()
+    let root = &forms[0];
+    let &id = root.children().iter().find(|&&id| {
+        let row = root.arena().row(id);
+        if let Node::List(xs) = row.node {
+            let xs = root.range(xs);
+            xs.len() >= 2 && matches!((root.arena().row(xs[0]).node, root.arena().row(xs[1]).node), (Node::Sym(g), Node::Sym(n)) if root.name(g) == "graph" && root.name(n) == name)
+        } else { false }
+    }).unwrap_or_else(|| panic!("graph {name}"));
+    let form = root.child(id);
+    form.child(*form.children().last().unwrap())
 }
 
 fn replace(head: &str, replacement: &Syntax, form: &Syntax) -> Syntax {
-    match &form.node {
-        Node::List(xs) if matches!(xs.first().map(|x| &x.node), Some(Node::Sym(n)) if n == head) => replacement.clone(),
-        Node::List(xs) => Syntax { node: Node::List(xs.iter().map(|x| replace(head, replacement, x)).collect()), ..form.clone() },
-        Node::Vec(xs) => Syntax { node: Node::Vec(xs.iter().map(|x| replace(head, replacement, x)).collect()), ..form.clone() },
-        _ => form.clone(),
+    fn go(builder: &mut S::SyntaxBuilder, head: &str, replacement: &Syntax, form: &Syntax) -> S::SyntaxId {
+        if S::head(form) == Some(head) { return builder.import(replacement); }
+        match form.node {
+            Node::List(xs) | Node::Vec(xs) => {
+                let items = form.range(xs).iter().map(|&id| go(builder, head, replacement, &form.child(id))).collect();
+                let draft = if matches!(form.node, Node::List(_)) { S::Draft::List(items) } else { S::Draft::Vec(items) };
+                builder.with_node(form, draft)
+            },
+            _ => builder.import(form),
+        }
     }
+    let mut builder = S::SyntaxBuilder::new();
+    let id = go(&mut builder, head, replacement, form);
+    builder.freeze().handle(id)
 }
 
 fn polygon(points: &[(f64, f64, f64)]) -> rdk::geometry::T {
@@ -71,8 +77,17 @@ fn fixtures() -> Vec<Fixture> {
             flow_sop::lisp_sop::node(&[("source".to_owned(), flow_sop::lisp_sop::snapshot(input))], &flow_syntax::lisp::flat(&replace(head, &external, &body))),
         )
     };
-    let mesh_body = match &graph(&forms, "geom_meshes").node {
-        Node::List(xs) if xs.len() == 3 => S::make(Node::List(vec![xs[0].clone(), xs[1].clone(), sym("extruded")].into())),
+    let mesh_form = graph(&forms, "geom_meshes");
+    let mesh_body = match mesh_form.node {
+        Node::List(xs) if mesh_form.range(xs).len() == 3 => {
+            let mut builder = S::SyntaxBuilder::new();
+            let xs = mesh_form.range(xs);
+            let first = builder.import(&mesh_form.child(xs[0]));
+            let second = builder.import(&mesh_form.child(xs[1]));
+            let result = builder.push_draft(0, S::Draft::Sym("extruded".into()), Default::default(), None);
+            let id = builder.push_draft(0, S::Draft::List(vec![first, second, result]), Default::default(), None);
+            builder.freeze().handle(id)
+        },
         _ => panic!("geom_meshes shape"),
     };
     let reference_star = flow_sop::lisp_sop::node(&[("source".to_owned(), flow_sop::lisp_sop::snapshot(&star))], "(sop/poly_extrude (sop/ext_source) :distance 0.65)");

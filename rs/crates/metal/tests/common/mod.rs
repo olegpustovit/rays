@@ -20,6 +20,8 @@ pub fn run(tests: &[(&str, fn())]) {
             continue;
         }
         test();
+        // Every source safe suite leaves no native handles after its owners drop.
+        super::settle(0);
         println!("test {name} ... ok");
     }
 }

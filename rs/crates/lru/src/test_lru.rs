@@ -257,19 +257,24 @@ fn identity_list_recency_release_copy_and_clear() {
 }
 
 #[test]
-#[ignore = "PARITY: Gc.minor_words has no Rust equivalent; the hit path is checked for hits only, allocation is not measured"]
-fn steady_state_hits_are_found() {
+fn steady_state_hits_do_not_allocate() {
     let _guard = setup();
     let cache = cache_with(mem::cache("test.lru.alloc"), 64, CacheOptions::default());
-    for i in 0..64 {
-        cache.add(int_key(i), Arc::new(i), 0);
+    let keys: Vec<_> = (0..64).map(int_key).collect();
+    for (index, key) in keys.iter().enumerate() {
+        cache.add(key.clone(), Arc::new(index as i32), 0);
     }
     for round in 0..1000 {
-        assert!(cache.find_opt(&int_key(round & 63)).is_some());
+        assert!(cache.find_opt(&keys[round & 63]).is_some());
     }
+    let before = mem_sys::alloc_bytes_total();
     for round in 0..1000 {
-        assert!(cache.find_opt(&int_key((round * 7) & 63)).is_some());
+        let index = (round * 7) & 63;
+        let value = cache.find_opt(&keys[index]).unwrap();
+        assert_eq!(value.downcast_ref::<i32>(), Some(&(index as i32)));
     }
+    let allocated = mem_sys::alloc_bytes_total() - before;
+    assert_eq!(allocated, 0, "test.lru.alloc steady-state hits allocated Rust heap bytes");
 }
 
 #[test]

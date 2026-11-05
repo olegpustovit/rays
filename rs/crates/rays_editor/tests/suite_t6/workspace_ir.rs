@@ -35,17 +35,20 @@ fn key(v: &Value) -> Vec<u8> {
     flow_syntax::value::key_of(&|r| E::Residual::residual_id(r), &functions(v))
 }
 
-type Sig = (Vec<String>, Vec<String>, Vec<(String, Vec<u8>)>, Vec<Vec<u8>>, usize);
+type Sig = (Vec<String>, Vec<String>, Vec<(String, Vec<u8>)>, Vec<Vec<u8>>, Vec<(Vec<String>, Vec<(Vec<i64>, Vec<u8>)>)>);
 
 fn signature(e: &E::Eval) -> Sig {
     let nodes = e.plan.nodes.iter().map(|n| format!("{}|{}|{:?}|{:?}|{:?}|{}|{:?}", n.id, n.kind, n.ty, n.site, n.iter, n.inst, n.args.iter().map(|(k, v)| (k.clone(), String::from_utf8_lossy(&key(v)).into_owned())).collect::<Vec<_>>())).collect();
     let instances = e.plan.instances.iter().map(|i| format!("{}|{}|{:?}|{:?}", i.graph, i.default, i.inputs.iter().map(|(k, v)| (k.clone(), key(v))).collect::<Vec<_>>(), key(&i.result))).collect();
     let results = e.results.iter().map(|(n, v)| (n.clone(), key(v))).collect();
     let states = e.states.iter().map(key).collect();
-    (nodes, instances, results, states, e.records.len())
+    let records = e.records.iter().map(|(path, values)| (path.clone(), values.iter().map(|(iter, value)| (iter.clone(), key(value))).collect())).collect();
+    (nodes, instances, results, states, records)
 }
 
 pub fn check(root_relative: &str) {
+    // OCaml installs these module hooks before any static evaluation, not at the first lowering.
+    flow_sop::lower::install_hooks();
     let path = repo_root().join(root_relative);
     let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{root_relative}: {e}"));
     let imports = rays_editor::Source::read_imports(path.to_str().unwrap(), &text).unwrap_or_else(|ds| panic!("{root_relative}: {}", diag_text(&ds)));
@@ -76,6 +79,11 @@ pub fn check(root_relative: &str) {
             values.extend(n.args.iter().map(|(_, v)| v.clone()));
         }
     }
+    for instance in &evaluated.plan.instances {
+        values.push(instance.result.clone());
+        values.extend(instance.inputs.iter().map(|(_, value)| value.clone()));
+    }
+    values.extend(evaluated.records.iter().filter(|(path, _)| !path.iter().any(|s| s.starts_with("node:"))).flat_map(|(_, records)| records.iter().map(|(_, value)| value.clone())));
     for v in &values {
         flow_ir::flow_ir::Executor::compile(v, &Default::default()).unwrap_or_else(|d| panic!("{root_relative}: {}", rays_diagnostic::to_string(&d)));
     }

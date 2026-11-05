@@ -33,7 +33,7 @@ fn a_kind_without_a_folder_is_named_for_its_leaf() {
 #[test]
 fn a_typed_expression_is_one_form() {
     let ok = expression_text("=(* 2 t)").unwrap();
-    assert!(matches!(&ok.node, SNode::List(items) if items.len() == 3));
+    assert!(matches!(ok.node, SNode::List(items) if ok.range(items).len() == 3));
     assert_eq!(expression_text("=1 2").unwrap_err(), "Write one expression after the =");
     assert!(expression_text("=(").unwrap_err().starts_with("Expression: "));
 }

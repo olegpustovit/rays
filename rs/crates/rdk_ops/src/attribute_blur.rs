@@ -361,6 +361,12 @@ mod tests {
     #[test]
     fn tuple_attributes_blur_plane_by_plane() {
         let g = add_values(Point, "value", vec![0.0, 10.0, 0.0], &path(3));
+        let uniform = attribute_ops::blur_points(&params("value", 1, Mode::Laplacian(1.0)), &g).unwrap();
+        assert_eq!(floats(Point, "value", &uniform), vec![10.0, 0.0, 10.0]);
+        let custom = attribute_ops::blur_points(
+            &params("value", 2, Mode::CustomSteps { odd: 1.0, even: 0.0 }), &g,
+        ).unwrap();
+        assert_eq!(floats(Point, "value", &custom), vec![10.0, 0.0, 10.0]);
         let uv = attribute::Storage::Float2(packed::Float2::of_owned(vec![0.0, 10.0, 0.0], vec![2.0, 4.0, 2.0]).unwrap());
         let color = attribute::Storage::Float4(
             packed::Float4::of_owned(

@@ -11,7 +11,7 @@ use editor_document::settings;
 use flow_graph::flow_edit::{self as fe, ArgKey};
 use flow_graph::projection as p;
 use flow_sop::port;
-use flow_syntax::syntax::{Node as SNode, Syntax};
+use flow_syntax::syntax::Node as SNode;
 use param::{FieldView, Value};
 use pxui::ui::{Drop, Ui, UiBox};
 use pxui_graph::scope_state as scope;
@@ -330,8 +330,9 @@ fn object_inspector(value: &t, ui: &mut Ui, document: &kind_graph::T, node_id: i
                                 Level::Inside(_) => value.doc.homes.layers.iter().find(|(i, _)| *i == node_id).map(|(_, h)| h.clone()),
                             };
                             if let Some(doc_mod::Home::BoundAt(from)) = home {
-                                if let Some(Syntax { node: SNode::Sym(name), .. }) = fe::arg_text(&ws.source, &from, &ArgKey::Kw(path.clone())) {
-                                    if let Some(target) = text_pane::reference_target(&ws.source, &from, &name) {
+                                if let Some(form) = fe::arg_text(&ws.source, &from, &ArgKey::Kw(path.clone()))
+                                    && let SNode::Sym(name) = form.node {
+                                    if let Some(target) = text_pane::reference_target(&ws.source, &from, form.name(name)) {
                                         body.push(change::Follow_source(target));
                                     }
                                 }

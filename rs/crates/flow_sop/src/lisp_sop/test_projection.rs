@@ -1,15 +1,14 @@
 //! Port of lib/flow_sop/test_projection.ml (W4 part A): the graph pane's projection of every
 //! fixture (nodes, zones, rows, chips), liveness and invariance flags, and the layout.
 //!
-//! The OCaml catalog is `Editor_document.Kinds.catalog`; flow_sop cannot depend on editor_document,
-//! so `catalog()` is the factory catalog alone. The ten fixtures that are sop-only sketches run;
+//! Uses the editor's complete kinds catalog, retaining the study's graph and layout projections.
 use super::support::*;
 use crate::{catalog as fcat, lisp_sop, port};
 use flow_check::catalog::Catalog;
 use flow_check::workspace as w;
 use flow_graph::flow_edit::{self as e, ArgKey, Op};
 use flow_graph::projection as p;
-use flow_syntax::syntax::{self as s, Node, Syntax};
+use flow_syntax::syntax::{Node, Syntax};
 use flow_syntax::{lisp, ty::Ty};
 use param::Value;
 
@@ -80,7 +79,10 @@ fn apply(text: &str, op: Op) -> w::Workspace {
 }
 
 fn num(t: &str) -> Syntax {
-    s::make(Node::Num(t.to_owned()))
+    let mut b = flow_syntax::arena::SyntaxBuilder::new();
+    let name = b.intern(t);
+    let id = b.push(0, Node::Num(name), rays_diagnostic::Span { start: 0, finish: 0 }, None);
+    b.freeze().handle(id)
 }
 
 fn text(t: &str) -> Syntax {
@@ -106,7 +108,7 @@ fn noise3_rows_edit_and_survive_reload() {
     assert!(matches!(r, flow_eval::Value::Float(x) if (0.0..=1.0).contains(&x)), "noise3 row edit did not evaluate");
     crate::lower::workspace(None, Vec::new(), crate::lower::Options::default(), &forms).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
     // Workspace_doc.to_text / of_text: print and check again
-    let reloaded = workspace_of(&lisp::print(&edited_forms).0);
+    let reloaded = workspace_of(&lisp::print(&edited_forms).unwrap().0);
     let again = flow_eval::run(&reloaded, false, None, None, None, 7.0).unwrap();
     assert!(again.results == value.results, "noise3 was lost on document reload");
 }

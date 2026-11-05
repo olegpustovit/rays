@@ -8,6 +8,7 @@ use flow_check::port_type::PortType;
 use flow_check::workspace as w;
 use flow_syntax::context::Context;
 use flow_syntax::syntax::{self as s, Node as SNode, Syntax};
+use flow_syntax::arena::{self, SyntaxBuilder, SyntaxId};
 use flow_syntax::ty::{self, Ty};
 use flow_syntax::{lisp, macros, value as fvalue};
 use param::{KindView, Value as PValue};
@@ -186,7 +187,7 @@ pub enum ScopeResult {
 }
 
 fn print_flat(f: &S) -> String {
-    let t = lisp::print(std::slice::from_ref(f)).0;
+    let t = lisp::text(std::slice::from_ref(f));
     match t.strip_suffix('\n') {
         Some(x) => x.to_owned(),
         None => t,
@@ -221,7 +222,7 @@ fn macro_lens(c: &Cx, call: &S) -> Lens {
         Some(name) => c
             .macros_list
             .iter()
-            .find(|m| matches!(s::children(m).get(1).map(|x| &x.node), Some(SNode::Sym(n)) if n == name))
+            .find(|m| m.children().get(1).is_some_and(|id| matches!(m.arena().row(*id).node, SNode::Sym(n) if m.name(n) == name)))
             .map(print_flat)
             .unwrap_or_default(),
         None => String::new(),
@@ -272,7 +273,7 @@ struct Cx {
 }
 
 pub fn last(e: &S) -> S {
-    s::children(e).last().map(|c| (*c).clone()).unwrap_or_else(|| e.clone())
+    e.children().last().map(|id| e.child(*id)).unwrap_or_else(|| e.clone())
 }
 fn root_of(name: &str) -> &str {
     eb::root_of(name)
@@ -282,11 +283,11 @@ fn is_zone_head(h: &str) -> bool {
 }
 
 /// The terms below a term that the projection walks (a call of a local fn: its arguments; a fn: its body).
-pub fn subterms(term: &w::Term) -> Vec<w::Term> {
-    match &term.node {
-        w::Node::CallFn { args, .. } => args.clone(),
-        w::Node::Fn { body, .. } => vec![(**body).clone()],
-        _ => w::children(term),
+pub fn subterms(term: &w::Term) -> &[flow_check::term_arena::TermId] {
+    match term.node {
+        w::Node::CallFn(id) => term.arena().term_ids(term.arena().call_fn(id).args),
+        w::Node::Fn(id) => std::slice::from_ref(&term.arena().function(id).body),
+        _ => term.children(),
     }
 }
 
@@ -295,24 +296,45 @@ fn is_point_list(f: &S) -> bool {
 }
 
 fn info_of(t: &w::Term) -> Info {
-    let node = match &t.node {
-        w::Node::Hof(kind, inputs) => Slim::Hof { kind: *kind, inputs: inputs.iter().map(|x| (x.form.id, x.ty.clone())).collect() },
-        w::Node::CallFn { fn_name, .. } => Slim::CallFn { fn_name: fn_name.clone() },
-        w::Node::Loop { accs, clauses, .. } => Slim::Loop { clause_tys: clauses.iter().map(|(_, ct)| ct.ty.clone()).collect(), acc0: accs.first().map(|(_, a)| a.ty.clone()) },
-        w::Node::State { init, .. } => Slim::State { init_ty: init.ty.clone() },
-        w::Node::Fn { params, zone, .. } => Slim::Fn {
-            params: params.iter().map(|(p, ty)| (match p { w::Pattern::Name(n) => n.clone(), _ => String::new() }, ty.clone())).collect(),
-            zone: zone.clone(),
-        },
+    let arena = t.arena();
+    let node = match t.node {
+        w::Node::Hof(id) => {
+            let hof = arena.hof(id);
+            Slim::Hof { kind: hof.kind, inputs: arena.term_ids(hof.args).iter().map(|id| {
+                let row = arena.row(*id);
+                (arena.syntax().row(row.form).id, arena.ty(row.ty).clone())
+            }).collect() }
+        }
+        w::Node::CallFn(id) => Slim::CallFn { fn_name: arena.name(arena.call_fn(id).name).to_owned() },
+        w::Node::Loop(id) => {
+            let node = arena.loop_node(id);
+            Slim::Loop {
+                clause_tys: arena.bindings(node.clauses).iter().map(|binding| arena.ty(arena.row(binding.term).ty).clone()).collect(),
+                acc0: arena.bindings(node.accs).first().map(|binding| arena.ty(arena.row(binding.term).ty).clone()),
+            }
+        }
+        w::Node::State(id) => Slim::State { init_ty: arena.ty(arena.row(arena.state(id).init).ty).clone() },
+        w::Node::Fn(id) => {
+            let function = arena.function(id);
+            Slim::Fn {
+                params: arena.params(function.params).iter().map(|p| (
+                    match arena.pattern(p.pattern) { flow_check::term_arena::PatternNode::Name(n) => arena.name(n).to_owned(), _ => String::new() },
+                    p.ty.map(|ty| arena.ty(ty).clone()),
+                )).collect(),
+                zone: arena.path(function.zone).iter().map(|name| arena.name(*name).to_owned()).collect(),
+            }
+        }
         _ => Slim::Other,
     };
-    Info { ty: t.ty.clone(), form_id: t.form.id, point_form: if is_point_list(&t.form) { Some((*t.form).clone()) } else { None }, node }
+    let form = t.form();
+    Info { ty: t.ty().clone(), form_id: form.id, point_form: if is_point_list(&form) { Some(form) } else { None }, node }
 }
 
 fn collect(c: &mut Cx, t: &w::Term) {
     let info = info_of(t);
-    if let Some(p) = &t.path {
-        match c.term_index.get(p) {
+    if let Some(path) = t.path() {
+        let p: Path = path.iter().map(|name| t.name(*name).to_owned()).collect();
+        match c.term_index.get(&p) {
             Some(i) => c.terms[*i].1 = info.clone(),
             None => {
                 c.term_index.insert(p.clone(), c.terms.len());
@@ -320,9 +342,9 @@ fn collect(c: &mut Cx, t: &w::Term) {
             }
         }
     }
-    c.forms.insert(t.form.id, info);
+    c.forms.insert(t.form().id, info);
     for sub in subterms(t) {
-        collect(c, &sub);
+        collect(c, &t.child(*sub));
     }
 }
 
@@ -352,7 +374,12 @@ pub fn same_graph(a: &w::Workspace, b: &w::Workspace, name: &str) -> bool {
     }
     fn same(a: &w::Term, b: &w::Term) -> bool {
         let (sa, sb) = (subterms(a), subterms(b));
-        a.path == b.path && a.ty == b.ty && sa.len() == sb.len() && sa.iter().zip(sb.iter()).all(|(p, q)| same(p, q))
+        let same_path = match (a.path(), b.path()) {
+            (Some(p), Some(q)) => p.len() == q.len() && p.iter().zip(q).all(|(p, q)| a.name(*p) == b.name(*q)),
+            (None, None) => true,
+            _ => false,
+        };
+        same_path && a.ty() == b.ty() && sa.len() == sb.len() && sa.iter().zip(sb.iter()).all(|(p, q)| same(&a.child(*p), &b.child(*q)))
     }
     let root = if name.starts_with("def:") {
         name.to_owned()
@@ -386,8 +413,8 @@ fn chip(c: &Cx, e: &Option<S>) -> Chip {
     };
     let inline = |glyph: &str| Chip::Inline { glyph: glyph.to_owned(), text: lisp::flat(e) };
     match &e.node {
-        SNode::Sym(n) if matches!(n.as_str(), "t" | "pi" | "true" | "false" | "nil") => Chip::Const,
-        SNode::Sym(n) => Chip::Name(n.clone()),
+        SNode::Sym(n) if matches!(e.name(*n), "t" | "pi" | "true" | "false" | "nil") => Chip::Const,
+        SNode::Sym(n) => Chip::Name(e.name(*n).to_owned()),
         SNode::Num(_) | SNode::Str(_) | SNode::Vec(_) | SNode::Kw(_) | SNode::Quote(..) => Chip::Const,
         SNode::Map(_) => inline("{}"),
         SNode::List(_) => match s::head(e) {
@@ -467,24 +494,58 @@ fn default_text(p: &catalog::Parameter) -> Option<String> {
 // a macro parameter the template uses as a loop or scope name
 fn binder(p: &str, e: &S) -> bool {
     let unquoted = |x: &S| match &x.node {
-        SNode::Quote(s::QuoteKind::Unquote, inner) => matches!(&inner.node, SNode::Sym(n) if n == p),
+        SNode::Quote(s::QuoteKind::Unquote, inner) => matches!(x.arena().row(*inner).node, SNode::Sym(n) if x.name(n) == p),
         _ => false,
     };
-    let here = match &e.node {
-        SNode::List(l) if !l.is_empty() => match &l[0].node {
-            SNode::Sym(h) if is_zone_head(h) || h == "let*" => l[1..].iter().any(|v| match &v.node {
-                SNode::Vec(items) => eb::pairs(items).iter().any(|(b, _)| unquoted(b)),
-                _ => false,
-            }),
-            _ => false,
-        },
+    let here = match e.node {
+        SNode::List(range) => {
+            let items = e.range(range);
+            items.first().is_some_and(|head| matches!(e.arena().row(*head).node, SNode::Sym(h) if is_zone_head(e.name(h)) || e.name(h) == "let*"))
+                && items[1..].iter().any(|id| match e.arena().row(*id).node {
+                    SNode::Vec(range) => e.range(range).chunks_exact(2).any(|pair| unquoted(&e.child(pair[0]))),
+                    _ => false,
+                })
+        }
         _ => false,
     };
-    here || s::children(e).into_iter().any(|c| binder(p, c))
+    here || e.children().iter().any(|id| binder(p, &e.child(*id)))
 }
 
-fn macro_rows(c: &Cx, m: &S, pos: &[S]) -> Vec<Row> {
-    let npos = pos.len() as i64;
+fn positional_args<'a>(owner: &'a S, head: &str, args: &'a [SyntaxId]) -> impl Iterator<Item = (SyntaxId, Option<&'a [u8]>)> + 'a {
+    let mut skip = false;
+    arena::attribute_args_view(head, owner.arena(), args).enumerate().filter_map(move |(index, item)| {
+        if skip { skip = false; return None; }
+        if item.1.is_none() && index + 1 < args.len() && matches!(owner.arena().row(item.0).node, SNode::Kw(_)) {
+            skip = true;
+            None
+        } else {
+            Some(item)
+        }
+    })
+}
+
+fn keyword_args<'a>(owner: &'a S, head: &str, args: &'a [SyntaxId]) -> impl Iterator<Item = (&'a str, (SyntaxId, Option<&'a [u8]>))> + 'a {
+    let mut key = None;
+    arena::attribute_args_view(head, owner.arena(), args).enumerate().filter_map(move |(index, item)| {
+        if let Some(key) = key.take() { return Some((key, item)); }
+        if item.1.is_none() && index + 1 < args.len() {
+            if let SNode::Kw(name) = owner.arena().row(item.0).node { key = Some(owner.name(name)); }
+        }
+        None
+    })
+}
+
+fn capture_arg(owner: &S, (id, normalized): (SyntaxId, Option<&[u8]>)) -> S {
+    let Some(bytes) = normalized else { return owner.child(id) };
+    let mut builder = SyntaxBuilder::new();
+    let source = owner.arena().row(id);
+    let bytes = builder.bytes(bytes);
+    let id = builder.push(source.id, SNode::Str(bytes), source.span.clone(), owner.arena().trivia(id).cloned());
+    builder.freeze().handle(id)
+}
+
+fn macro_rows(c: &Cx, m: &S, owner: &S, head: &str, args: &[SyntaxId]) -> Vec<Row> {
+    let npos = positional_args(owner, head, args).count() as i64;
     let Ok((req, rest)) = macros::params(m) else {
         return Vec::new();
     };
@@ -492,13 +553,13 @@ fn macro_rows(c: &Cx, m: &S, pos: &[S]) -> Vec<Row> {
     let mut rows: Vec<Row> = req
         .iter()
         .enumerate()
-        .map(|(i, p)| row(c, p, ArgKey::Pos(i as i64), pos.get(i).cloned()).with_kind(if binder(p, &template) { RowKind::Binder } else { RowKind::Hole }))
+        .map(|(i, p)| row(c, p, ArgKey::Pos(i as i64), positional_args(owner, head, args).nth(i).map(|arg| capture_arg(owner, arg))).with_kind(if binder(p, &template) { RowKind::Binder } else { RowKind::Hole }))
         .collect();
     if let Some(r) = rest {
         let n = req.len();
-        for (j, a) in pos.iter().enumerate().skip(n).map(|(i, a)| (i - n, a)) {
+        for (j, a) in positional_args(owner, head, args).enumerate().skip(n).map(|(i, a)| (i - n, a)) {
             let label = if j == 0 { r.clone() } else { format!("{} {}", r, j + 1) };
-            rows.push(row(c, &label, ArgKey::Pos((n + j) as i64), Some(a.clone())).with_kind(RowKind::Rest));
+            rows.push(row(c, &label, ArgKey::Pos((n + j) as i64), Some(capture_arg(owner, a))).with_kind(RowKind::Rest));
         }
         rows.push(add(c, &format!("+ {}", r), ArgKey::Pos(npos), true, None));
     }
@@ -521,9 +582,9 @@ fn kind_section(k: &catalog::Kind) -> String {
     }
 }
 
-fn kind_rows(c: &Cx, k: &catalog::Kind, pos: &[S], kws: &[(String, S)]) -> Vec<Row> {
-    let npos = pos.len() as i64;
-    let kw = |name: &str| kws.iter().find(|(n, _)| n == name).map(|(_, v)| v.clone());
+fn kind_rows(c: &Cx, k: &catalog::Kind, owner: &S, head: &str, args: &[SyntaxId]) -> Vec<Row> {
+    let npos = positional_args(owner, head, args).count() as i64;
+    let kw = |name: &str| keyword_args(owner, head, args).find(|(key, _)| *key == name).map(|(_, arg)| capture_arg(owner, arg));
     let mut rows = Vec::new();
     for (i, sl) in k.slots.iter().enumerate() {
         let i = i as i64;
@@ -531,21 +592,21 @@ fn kind_rows(c: &Cx, k: &catalog::Kind, pos: &[S], kws: &[(String, S)]) -> Vec<R
         let default = if slot_ty == ty::geometry() {
             None
         } else {
-            ty::default(&slot_ty).map(|form| trim_ws(&lisp::print(&[form]).0).to_owned())
+            ty::default(&slot_ty).map(|form| trim_ws(&lisp::text(&[form])).to_owned())
         };
         // the first geometry slot is the header's in-port, not a row of the body
         let head_of = i == 0 && slot_ty == ty::geometry();
         if sl.rest {
-            for (j, a) in pos.iter().enumerate().skip(i as usize).map(|(x, a)| (x - i as usize, a)) {
+            for (j, a) in positional_args(owner, head, args).enumerate().skip(i as usize).map(|(x, a)| (x - i as usize, a)) {
                 let label = if j == 0 { sl.name.clone() } else { format!("{} {}", sl.name, j + 1) };
-                rows.push(row(c, &label, ArgKey::Pos(i + j as i64), Some(a.clone())).with_ty(Some(slot_ty.clone())).with_kind(RowKind::Rest).with_head(head_of && j == 0));
+                rows.push(row(c, &label, ArgKey::Pos(i + j as i64), Some(capture_arg(owner, a))).with_ty(Some(slot_ty.clone())).with_kind(RowKind::Rest).with_head(head_of && j == 0));
             }
             if let Some(value) = kw(&sl.name) {
                 rows.push(row(c, &sl.name, ArgKey::Kw(sl.name.clone()), Some(value)).with_ty(Some(slot_ty.clone())).with_kind(RowKind::Rest));
             }
             rows.push(add(c, &format!("+ {}", sl.name), ArgKey::Pos(npos.max(i)), true, Some(slot_ty.clone())));
         } else {
-            match (pos.get(i as usize).cloned(), kw(&sl.name)) {
+            match (positional_args(owner, head, args).nth(i as usize).map(|arg| capture_arg(owner, arg)), kw(&sl.name)) {
                 (Some(a), _) => rows.push(row(c, &sl.name, ArgKey::Pos(i), Some(a)).with_ty(Some(slot_ty.clone())).with_default(default).with_head(head_of)),
                 (None, Some(a)) => rows.push(row(c, &sl.name, ArgKey::Kw(sl.name.clone()), Some(a)).with_ty(Some(slot_ty.clone())).with_default(default).with_head(head_of)),
                 (None, None) => {
@@ -586,27 +647,26 @@ fn kind_rows(c: &Cx, k: &catalog::Kind, pos: &[S], kws: &[(String, S)]) -> Vec<R
     rows
 }
 
-fn input_rows(c: &Cx, inputs: &[(String, Ty, Option<S>)], pos: &[S], kws: &[(String, S)]) -> Vec<Row> {
+fn input_rows(c: &Cx, inputs: &[(String, Ty, Option<S>)], owner: &S, head: &str, args: &[SyntaxId], positional: bool) -> Vec<Row> {
     inputs
         .iter()
         .enumerate()
         .map(|(i, (n, t, d))| {
             let default = d.as_ref().map(lisp::flat);
-            match pos.get(i) {
-                Some(a) => row(c, n, ArgKey::Pos(i as i64), Some(a.clone())).with_ty(Some(t.clone())),
-                None => row(c, n, ArgKey::Kw(n.clone()), kws.iter().find(|(k, _)| k == n).map(|(_, v)| v.clone())).with_ty(Some(t.clone())).with_default(default),
+            match if positional { positional_args(owner, head, args).nth(i) } else { None } {
+                Some(arg) => row(c, n, ArgKey::Pos(i as i64), Some(capture_arg(owner, arg))).with_ty(Some(t.clone())),
+                None => row(c, n, ArgKey::Kw(n.clone()), keyword_args(owner, head, args).find(|(key, _)| *key == n).map(|(_, arg)| capture_arg(owner, arg))).with_ty(Some(t.clone())).with_default(default),
             }
         })
         .collect()
 }
 
-fn call_rows(c: &Cx, e: &S, h: &str, args: &[S]) -> Vec<Row> {
-    let args = s::attribute_args(h, args);
-    let pos = eb::positional(&args);
-    let kws = eb::keywords(&args);
-    let npos = pos.len() as i64;
-    let at = |i: i64| if i < 0 { None } else { pos.get(i as usize).cloned() };
-    let kw_find = |name: &str| kws.iter().find(|(n, _)| n == name).map(|(_, v)| v.clone());
+fn call_rows(c: &Cx, e: &S, h: &str, args: &[SyntaxId]) -> Vec<Row> {
+    let pos = || positional_args(e, h, args);
+    let kws = || keyword_args(e, h, args);
+    let npos = pos().count() as i64;
+    let at = |i: i64| if i < 0 { None } else { pos().nth(i as usize).map(|arg| capture_arg(e, arg)) };
+    let kw_find = |name: &str| kws().find(|(key, _)| *key == name).map(|(_, arg)| capture_arg(e, arg));
     let posrow = |ty: Option<Ty>, socket: bool, label: &str, i: i64| row(c, label, ArgKey::Pos(i), at(i)).with_ty(ty).with_socket(socket);
     let kwrow = |ty: Option<Ty>, label: &str| {
         let choices = w::op_choices(&c.ops, h, label);
@@ -617,7 +677,7 @@ fn call_rows(c: &Cx, e: &S, h: &str, args: &[S]) -> Vec<Row> {
             .with_socket(!literal)
     };
     let items = |label: &dyn Fn(i64) -> String, prefix: &str, ty: Option<Ty>| -> Vec<Row> {
-        let mut rows: Vec<Row> = pos.iter().enumerate().map(|(i, a)| row(c, &label(i as i64), ArgKey::Pos(i as i64), Some(a.clone())).with_ty(ty.clone()).with_kind(RowKind::Rest)).collect();
+        let mut rows: Vec<Row> = pos().enumerate().map(|(i, arg)| row(c, &label(i as i64), ArgKey::Pos(i as i64), Some(capture_arg(e, arg))).with_ty(ty.clone()).with_kind(RowKind::Rest)).collect();
         rows.push(add(c, prefix, ArgKey::Pos(npos), true, ty));
         rows
     };
@@ -700,31 +760,31 @@ fn call_rows(c: &Cx, e: &S, h: &str, args: &[S]) -> Vec<Row> {
         "get" => vec![posrow(None, true, "record", 0), posrow(None, false, "field", 1)],
         "assoc" => {
             let mut rows = vec![posrow(None, true, "record", 0)];
-            rows.extend(kws.iter().map(|(k, _)| kwrow(None, k)));
+            rows.extend(kws().map(|(key, _)| kwrow(None, key)));
             rows
         }
         "values" => {
-            let mut rows: Vec<Row> = kws.iter().map(|(k, _)| kwrow(None, k)).collect();
+            let mut rows: Vec<Row> = kws().map(|(key, _)| kwrow(None, key)).collect();
             rows.push(add(c, "+ output", ArgKey::Kw(String::new()), false, None));
             rows
         }
         "ref" => {
             let g = match at(0) {
-                Some(S { node: SNode::Sym(n), .. }) => c.graphs.iter().find(|g| g.name == n),
+                Some(form) => eb::sym_of(&form).and_then(|n| c.graphs.iter().find(|g| g.name == n)),
                 _ => None,
             };
             let mut rows = vec![row(c, "graph", ArgKey::Pos(0), at(0)).with_socket(false)];
             if let Some(g) = g {
-                rows.extend(input_rows(c, &g.inputs, &[], &kws));
+                rows.extend(input_rows(c, &g.inputs, e, h, args, false));
             }
             rows
         }
         _ => {
             if let Some(d) = c.defs.iter().find(|d| d.name == h) {
-                return input_rows(c, &d.inputs, &pos, &kws);
+                return input_rows(c, &d.inputs, e, h, args, true);
             }
             if let Some((_, m)) = c.macros.iter().find(|(n, _)| n == h) {
-                return macro_rows(c, m, &pos);
+                return macro_rows(c, m, e, h, args);
             }
             if let Some(o) = w::op_signature(&c.ops, &c.ctx, h) {
                 let np = o.pos.len();
@@ -735,9 +795,9 @@ fn call_rows(c: &Cx, e: &S, h: &str, args: &[S]) -> Vec<Row> {
                     }
                 }
                 if let Some((rn, t)) = &o.rest {
-                    for (j, a) in pos.iter().enumerate().skip(np).map(|(i, a)| (i - np, a)) {
+                    for (j, arg) in pos().enumerate().skip(np).map(|(i, arg)| (i - np, arg)) {
                         let label = if j == 0 { rn.clone() } else { format!("{} {}", rn, j + 1) };
-                        rows.push(row(c, &label, ArgKey::Pos((np + j) as i64), Some(a.clone())).with_ty(Some(t.clone())).with_kind(RowKind::Rest));
+                        rows.push(row(c, &label, ArgKey::Pos((np + j) as i64), Some(capture_arg(e, arg))).with_ty(Some(t.clone())).with_kind(RowKind::Rest));
                     }
                     rows.push(add(c, &format!("+ {}", rn), ArgKey::Pos(npos.max(np as i64)), true, Some(t.clone())));
                 }
@@ -747,7 +807,7 @@ fn call_rows(c: &Cx, e: &S, h: &str, args: &[S]) -> Vec<Row> {
                 return rows;
             }
             match catalog::resolve_kind(&c.catalog, &c.ctx, h) {
-                Ok(k) => kind_rows(c, &k, &pos, &kws),
+                Ok(k) => kind_rows(c, &k, e, h, args),
                 Err(_) => {
                     // a call of a local fn reads the fn: a wire, so a used fn never looks unused
                     let mut callee = Vec::new();
@@ -763,14 +823,14 @@ fn call_rows(c: &Cx, e: &S, h: &str, args: &[S]) -> Vec<Row> {
                                 }
                             }
                         }
-                        callee.push(row(c, "fn", ArgKey::Pos(-1), Some((*f).clone())).with_ty(Some(Ty::Fn(None))).with_socket(false));
+                        callee.push(row(c, "fn", ArgKey::Pos(-1), Some(e.child(*f))).with_ty(Some(Ty::Fn(None))).with_socket(false));
                     }
-                    for (i, a) in pos.iter().enumerate() {
+                    for (i, arg) in pos().enumerate() {
                         let label = match names.get(i) {
                             Some(n) if !n.is_empty() => n.clone(),
                             _ => format!("arg{}", i + 1),
                         };
-                        callee.push(row(c, &label, ArgKey::Pos(i as i64), Some(a.clone())));
+                        callee.push(row(c, &label, ArgKey::Pos(i as i64), Some(capture_arg(e, arg))));
                     }
                     callee
                 }
@@ -781,23 +841,25 @@ fn call_rows(c: &Cx, e: &S, h: &str, args: &[S]) -> Vec<Row> {
 
 fn rows_of(c: &Cx, e: &S) -> Vec<Row> {
     match (&e.node, s::head(e)) {
-        (SNode::Map(l), _) => {
-            let mut rows: Vec<Row> = eb::pairs(l)
-                .into_iter()
-                .filter_map(|(k, v)| match &k.node {
-                    SNode::Kw(k) => Some(row(c, k, ArgKey::Field(k.clone()), Some(v))),
+        (SNode::Map(range), _) => {
+            let mut rows: Vec<Row> = e.range(*range).chunks_exact(2).filter_map(|pair| {
+                match e.arena().row(pair[0]).node {
+                    SNode::Kw(key) => {
+                        let key = e.name(key);
+                        Some(row(c, key, ArgKey::Field(key.to_owned()), Some(e.child(pair[1]))))
+                    }
                     _ => None,
-                })
-                .collect();
+                }
+            }).collect();
             rows.push(add(c, "+ field", ArgKey::Field(String::new()), false, None));
             rows
         }
-        (SNode::List(l), Some(h)) => call_rows(c, e, h, &l[1..]),
+        (SNode::List(range), Some(h)) => call_rows(c, e, h, &e.range(*range)[1..]),
         (SNode::Vec(_), _) => {
             let ty = c.forms.get(&e.id).map(|i| i.ty.clone());
             vec![row(c, "value", ArgKey::Whole, Some(e.clone())).with_ty(ty)]
         }
-        (SNode::Sym(n), _) if !matches!(n.as_str(), "t" | "pi" | "true" | "false" | "nil") => vec![row(c, "from", ArgKey::Whole, Some(e.clone()))],
+        (SNode::Sym(n), _) if !matches!(e.name(*n), "t" | "pi" | "true" | "false" | "nil") => vec![row(c, "from", ArgKey::Whole, Some(e.clone()))],
         _ => vec![row(c, "value", ArgKey::Whole, Some(e.clone()))],
     }
 }
@@ -815,15 +877,17 @@ fn head_label(e: &S) -> String {
 
 // ---- nodes, zones and scopes ----
 
-fn scope_form(e: &S) -> Option<(Vec<(S, S)>, S)> {
+fn scope_form(e: &S) -> Option<(&[flow_syntax::arena::SyntaxId], S)> {
     if !e.meta().is_empty() {
         return None;
     }
-    if let SNode::List(l) = &e.node {
-        if l.len() == 3 && eb::sym_of(&l[0]) == Some("let*") {
-            if let SNode::Vec(bs) = &l[1].node {
-                if bs.len() % 2 == 0 {
-                    return Some((eb::pairs(bs), l[2].clone()));
+    if let SNode::List(range) = e.node {
+        let items = e.range(range);
+        if items.len() == 3 && s::head(e) == Some("let*") {
+            if let SNode::Vec(range) = e.arena().row(items[1]).node {
+                let bindings = e.range(range);
+                if bindings.len() % 2 == 0 {
+                    return Some((bindings, e.child(items[2])));
                 }
             }
         }
@@ -885,11 +949,11 @@ fn rail_of(c: &Cx, kind: ZoneKind, e: &S, t: Option<&Info>, visible: &[String]) 
         }
     };
     let vars = |first: usize, bound: &mut Vec<String>| -> Vec<RailRow> {
-        match kids.get(first).map(|k| &k.node) {
-            Some(SNode::Vec(l)) => eb::pairs(l)
-                .into_iter()
+        match kids.get(first).map(|id| e.arena().row(*id).node) {
+            Some(SNode::Vec(range)) => e.range(range).chunks_exact(2)
                 .enumerate()
-                .map(|(k, (p, x))| {
+                .map(|(k, pair)| {
+                    let (p, x) = (e.child(pair[0]), e.child(pair[1]));
                     bound.extend(eb::pat_names(&p));
                     RailRow {
                         name: eb::pat_key(&p),
@@ -908,15 +972,16 @@ fn rail_of(c: &Cx, kind: ZoneKind, e: &S, t: Option<&Info>, visible: &[String]) 
         ZoneKind::For | ZoneKind::Sum => vars(1, &mut bound),
         ZoneKind::Fold | ZoneKind::Scan | ZoneKind::State => {
             let mut acc = Vec::new();
-            if let Some(SNode::Vec(l)) = kids.get(1).map(|k| &k.node) {
-                if let [p, init] = l.as_slice() {
-                    bound.extend(eb::pat_names(p));
+            if let Some(SNode::Vec(range)) = kids.get(1).map(|id| e.arena().row(*id).node) {
+                if let [p, init] = e.range(range) {
+                    let p = e.child(*p);
+                    bound.extend(eb::pat_names(&p));
                     let ty = match t {
                         Some(Info { node: Slim::Loop { acc0, .. }, .. }) => acc0.clone(),
                         Some(Info { node: Slim::State { init_ty }, .. }) => Some(init_ty.clone()),
                         _ => None,
                     };
-                    acc.push(RailRow { name: eb::pat_key(p), names: eb::pat_names(p), role: Role::Acc, ty, expr: Some(init.clone()), key: Some(ArgKey::Bv(1, 1)) });
+                    acc.push(RailRow { name: eb::pat_key(&p), names: eb::pat_names(&p), role: Role::Acc, ty, expr: Some(e.child(*init)), key: Some(ArgKey::Bv(1, 1)) });
                 }
             }
             if kind != ZoneKind::State {
@@ -924,14 +989,15 @@ fn rail_of(c: &Cx, kind: ZoneKind, e: &S, t: Option<&Info>, visible: &[String]) 
             }
             acc
         }
-        ZoneKind::Fn => match kids.get(1).map(|k| &k.node) {
-            Some(SNode::Vec(ps)) => ps
+        ZoneKind::Fn => match kids.get(1).map(|id| e.arena().row(*id).node) {
+            Some(SNode::Vec(range)) => e.range(range)
                 .iter()
                 .enumerate()
-                .map(|(k, p)| {
-                    let pat = match &p.node {
-                        SNode::List(l) if l.len() == 3 && eb::sym_of(&l[1]) == Some(":") => l[0].clone(),
-                        _ => p.clone(),
+                .map(|(k, id)| {
+                    let p = e.child(*id);
+                    let pat = match p.node {
+                        SNode::List(range) if p.range(range).len() == 3 && eb::sym_of(&p.child(p.range(range)[1])) == Some(":") => p.child(p.range(range)[0]),
+                        _ => p,
                     };
                     bound.extend(eb::pat_names(&pat));
                     let ty = match t {
@@ -1001,16 +1067,17 @@ fn is_vec(e: &S) -> bool {
 fn scope_of(c: &Cx, folded: &dyn Fn(&[String]) -> bool, card_result: bool, visible: &[String], inputs: Vec<Input>, path: &Path, body: &S) -> Scope {
     let (binds, res) = match scope_form(body) {
         Some((bs, res)) => (bs, res),
-        None => (Vec::new(), body.clone()),
+        None => (&[][..], body.clone()),
     };
-    let mut vis: Vec<String> = binds.iter().flat_map(|(p, _)| eb::pat_names(p)).collect();
+    let mut vis: Vec<String> = binds.chunks_exact(2).flat_map(|pair| eb::pat_names(&body.child(pair[0]))).collect();
     vis.extend(visible.iter().cloned());
     let mut nodes: Vec<Node> = Vec::new();
-    for (pat, e) in &binds {
-        nodes.extend(node_of(c, folded, &vis, false, None, path, Some(pat), e));
+    for pair in binds.chunks_exact(2) {
+        let (pat, expression) = (body.child(pair[0]), body.child(pair[1]));
+        nodes.extend(node_of(c, folded, &vis, false, None, path, Some(&pat), &expression));
     }
     let (result, extra) = match &res.node {
-        SNode::Sym(sy) if vis.iter().any(|v| v == root_of(sy)) => (ScopeResult::Link(sy.clone()), Vec::new()),
+        SNode::Sym(sy) if vis.iter().any(|v| v == root_of(res.name(*sy))) => (ScopeResult::Link(res.name(*sy).to_owned()), Vec::new()),
         SNode::List(_) | SNode::Map(_) | SNode::Vec(_) if card_result || !is_vec(&res) => {
             let ns = node_of(c, folded, &vis, false, None, path, None, &res);
             let mut p = path.clone();
@@ -1049,10 +1116,10 @@ fn node_of(c: &Cx, folded: &dyn Fn(&[String]) -> bool, visible: &[String], expr:
             // the collection is the call itself, or a name bound to it
             let call: Option<S> = match (r.role, &r.expr) {
                 (Role::Var, Some(x)) if is_point_list(x) && matches!(x.node, SNode::List(_)) => Some(x.clone()),
-                (Role::Var, Some(S { node: SNode::Sym(n), .. })) => {
+                (Role::Var, Some(form)) if matches!(form.node, SNode::Sym(_)) => {
                     let mut found = None;
                     for (path, t) in &c.terms {
-                        if !path.is_empty() && path[path.len() - 1] == *n {
+                        if !path.is_empty() && eb::sym_of(form) == Some(path[path.len() - 1].as_str()) {
                             found = t.point_form.clone();
                             break;
                         }
@@ -1066,9 +1133,9 @@ fn node_of(c: &Cx, folded: &dyn Fn(&[String]) -> bool, visible: &[String], expr:
                 let mut order = "by index".to_owned();
                 let mut i = 0;
                 while i + 1 < kids.len() {
-                    if let (SNode::Kw(k), SNode::Str(v)) = (&kids[i].node, &kids[i + 1].node) {
-                        if k == "key" {
-                            order = format!("by {}", String::from_utf8_lossy(v));
+                    if let (SNode::Kw(k), SNode::Str(v)) = (e.arena().row(kids[i]).node, e.arena().row(kids[i + 1]).node) {
+                        if e.name(k) == "key" {
+                            order = format!("by {}", String::from_utf8_lossy(e.bytes(v)));
                             break;
                         }
                     }
@@ -1112,12 +1179,13 @@ fn node_of(c: &Cx, folded: &dyn Fn(&[String]) -> bool, visible: &[String], expr:
                     if keyed && plain && macro_.is_none() {
                         let base = eb::nested_leaf(&name, &r.key).unwrap_or_default();
                         // no glyph opens a cell, so a call in one is always a card
-                        let lifted: Vec<(i64, String, S)> = cs
+                        let lifted: Vec<(i64, String, S)> = a.range(*cs)
                             .iter()
                             .enumerate()
-                            .filter_map(|(i, a)| {
+                            .filter_map(|(i, id)| {
+                                let child = a.child(*id);
                                 let leaf = eb::nested_leaf(&base, &ArgKey::Cell(i as i64)).unwrap_or_default();
-                                if eb::node_call(a) || eb::value_call(a) { Some((i as i64, leaf, a.clone())) } else { None }
+                                if eb::node_call(&child) || eb::value_call(&child) { Some((i as i64, leaf, child)) } else { None }
                             })
                             .collect();
                         if lifted.is_empty() {
@@ -1201,14 +1269,14 @@ pub fn title(n: &Node) -> String {
 pub fn sources(r: &Row) -> Vec<String> {
     match (&r.chip, &r.expr) {
         (Chip::Name(leaf), _) if eb::nested(leaf) => vec![leaf.clone()],
-        (_, Some(S { node: SNode::Sym(n), .. })) if matches!(n.as_str(), "t" | "pi" | "true" | "false" | "nil") => Vec::new(),
-        (_, Some(S { node: SNode::Vec(l), .. })) if !r.cells.is_empty() => {
+        (_, Some(e)) if matches!(e.node, SNode::Sym(n) if matches!(e.name(n), "t" | "pi" | "true" | "false" | "nil")) => Vec::new(),
+        (_, Some(e)) if matches!(e.node, SNode::Vec(_)) && !r.cells.is_empty() => {
             // a call written in a cell is a card of its own, wired from its leaf
             let mut out = Vec::new();
-            for (i, c) in l.iter().enumerate() {
+            for (i, id) in e.children().iter().enumerate() {
                 match r.cells.iter().find(|(k, _)| *k == i as i64) {
                     Some((_, leaf)) => out.push(leaf.clone()),
-                    None => out.extend(eb::free_names(c)),
+                    None => out.extend(eb::free_names(&e.child(*id))),
                 }
             }
             out
@@ -1222,7 +1290,10 @@ pub fn sources(r: &Row) -> Vec<String> {
 pub fn cell_wire(n: &Node, r: &Row, i: i64) -> (Path, ArgKey, Option<S>) {
     let mut p = n.path[..n.path.len().saturating_sub(1)].to_vec();
     p.push(eb::nested_leaf(&n.name, &r.key).unwrap_or_default());
-    (p, ArgKey::Cell(i), Some(s::make(SNode::Num("0.0".into()))))
+    let mut builder = flow_syntax::arena::SyntaxBuilder::new();
+    let number = builder.intern("0.0");
+    let id = builder.push(0, SNode::Num(number), rays_diagnostic::Span { start: 0, finish: 0 }, None);
+    (p, ArgKey::Cell(i), Some(builder.freeze().handle(id)))
 }
 
 /// Patch existing same-type literal rows.
@@ -1287,7 +1358,7 @@ pub fn find_graph<'a>(workspace: &'a w::Workspace, name: &str) -> Option<&'a w::
 }
 
 fn graph_info(g: &w::Graph) -> GraphInfo {
-    GraphInfo { name: g.name.clone(), inputs: g.inputs.iter().map(|(n, t, d)| (n.clone(), t.clone(), d.as_ref().map(|x| (*x.form).clone()))).collect() }
+    GraphInfo { name: g.name.clone(), inputs: g.inputs.iter().map(|(n, t, d)| (n.clone(), t.clone(), d.as_ref().map(|x| x.form()))).collect() }
 }
 
 /// The root scope of a graph or, for `"def:name"` or a `defn` name, of a definition. An operator call
@@ -1302,10 +1373,10 @@ pub fn of_graph_with(folded: &dyn Fn(&[String]) -> bool, catalog: &Catalog, work
     let macros_list = (*workspace.macros).clone();
     let macros: Vec<(String, S)> = macros_list
         .iter()
-        .filter_map(|m| match s::children(m).get(1).map(|x| &x.node) {
-            Some(SNode::Sym(n)) => Some((n.clone(), m.clone())),
+        .filter_map(|m| m.children().get(1).and_then(|id| match m.arena().row(*id).node {
+            SNode::Sym(n) => Some((m.name(n).to_owned(), m.clone())),
             _ => None,
-        })
+        }))
         .collect();
     let mut c = Cx {
         catalog,
@@ -1328,7 +1399,7 @@ pub fn of_graph_with(folded: &dyn Fn(&[String]) -> bool, catalog: &Catalog, work
         .map(|(n, ty, d)| {
             let mut path = root.clone();
             path.push(format!(":{}", n));
-            Input { path, name: n.clone(), ty: ty.clone(), default: d.as_ref().map(|t| (*t.form).clone()) }
+            Input { path, name: n.clone(), ty: ty.clone(), default: d.as_ref().map(|t| t.form()) }
         })
         .collect();
     let visible: Vec<String> = inputs.iter().map(|i| i.name.clone()).collect();

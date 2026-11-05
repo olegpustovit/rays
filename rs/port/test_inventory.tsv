@@ -1,0 +1,433 @@
+ocaml_file	declared_status	audit_status	rust_candidates
+lib/diagnostic/test_diagnostic.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/editor_core/test_history.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/editor_core/src/test_history.rs;rs/crates/rays_editor/src/test_editor_history.rs;rs/crates/rays_editor/tests/suite_t4/test_history.rs
+lib/editor_core/test_panels.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/editor_core/src/panels.rs;rs/crates/editor_core/src/test_panels.rs
+lib/editor_core/test_store.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/editor_core/src/store.rs;rs/crates/editor_core/src/test_store.rs
+lib/flow/test_array.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_eval/src/test_array.rs
+lib/flow/test_catalog.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_check/src/catalog.rs;rs/crates/flow_sop/src/catalog.rs
+lib/flow/test_defnode.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_check/src/defnode.rs
+lib/flow/test_frame.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_eval/src/test_frame.rs;rs/crates/rays/src/frame.rs
+lib/flow/test_lisp.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_syntax/src/lisp.rs;rs/crates/rays_pathtracer/tests/gpu_lisp.rs
+lib/flow/test_macro.ml	MISSING	NEEDS_ASSERTION_REVIEW	rs/crates/flow_syntax/src/test_macro.rs
+lib/flow/test_op.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_check/src/op.rs;rs/crates/flow_eval/src/test_op.rs
+lib/flow/test_phase_timer.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_syntax/src/phase_timer.rs
+lib/flow/test_state.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_eval/src/test_state.rs
+lib/flow/test_syntax.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_syntax/src/syntax.rs
+lib/flow/test_ty.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_syntax/src/ty.rs
+lib/flow/test_value_core.ml	MISSING	NEEDS_ASSERTION_REVIEW	rs/crates/flow_check/src/test_value_core.rs
+lib/flow/test_workspace.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_check/src/workspace.rs;rs/crates/flow_eval/src/test_workspace.rs;rs/crates/rays_editor/tests/native_qualification/workspace.rs
+lib/flow/test_workspace_eval.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_eval/src/test_workspace_eval.rs
+lib/flow_gpu/test_emit.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_shader/src/emit.rs;rs/crates/flow_shader/tests/test_emit.rs
+lib/flow_gpu/test_film.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_gpu/tests/gpu_pathtrace.rs
+lib/flow_gpu/test_helpers.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/flow_gpu/tests/common/pathtrace_reference.rs;rs/crates/flow_gpu/tests/gpu_pathtrace.rs
+lib/flow_gpu/test_image_sink.ml	MISSING	NEEDS_ASSERTION_REVIEW	rs/crates/flow_gpu/src/image_sink.rs;rs/crates/flow_gpu/tests/gpu_image_sink.rs
+lib/flow_gpu/test_image_sink_native.ml	MISSING	NEEDS_ASSERTION_REVIEW	rs/crates/flow_gpu/tests/gpu_image_sink_native.rs
+lib/flow_gpu/test_pipelines.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_gpu/src/pipelines.rs;rs/crates/flow_gpu/tests/pipelines_mock.rs
+lib/flow_gpu/test_raster.ml	MISSING	NEEDS_ASSERTION_REVIEW	rs/crates/flow_gpu/tests/gpu_raster.rs;rs/crates/flow_shader/src/raster.rs
+lib/flow_gpu/test_resolve.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_gpu/tests/gpu_pathtrace.rs
+lib/flow_gpu/test_run.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_gpu/src/run.rs;rs/crates/flow_gpu/tests/gpu_resident.rs;rs/crates/flow_gpu/tests/gpu_run.rs
+lib/flow_gpu/test_run_lifetime.ml	MISSING	NEEDS_ASSERTION_REVIEW	rs/crates/flow_gpu/tests/gpu_run_lifetime.rs
+lib/flow_gpu/test_sampling.ml	MISSING	NEEDS_ASSERTION_REVIEW	rs/crates/flow_gpu/tests/common/pathtrace_reference.rs;rs/crates/flow_gpu/tests/gpu_sampling.rs
+lib/flow_gpu/test_spirv.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_shader/src/spirv.rs;rs/crates/flow_shader/tests/test_spirv.rs
+lib/flow_gpu/test_trace.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_gpu/tests/gpu_trace.rs;rs/crates/flow_shader/src/trace.rs;rs/crates/flow_sop/src/lisp_sop/test_trace.rs;rs/crates/flow_sop/src/trace_scene.rs
+lib/flow_gpu/test_triangles.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_gpu/tests/gpu_triangles.rs
+lib/flow_gpu/test_uint32.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_gpu/tests/gpu_uint32.rs
+lib/flow_graph/test_array_composition_graph.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_graph/src/test_array_composition_graph.rs
+lib/flow_graph/test_domain.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_graph/src/test_domain.rs
+lib/flow_graph/test_graph_edits.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_graph/src/test_graph_edits.rs
+lib/flow_graph/test_iterate_graph.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_graph/src/test_iterate_graph.rs
+lib/flow_graph/test_nonfinite.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_graph/src/test_nonfinite.rs
+lib/flow_graph/test_string_bytes.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_graph/src/test_string_bytes.rs
+lib/flow_ir/test_arena.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/test_arena.rs
+lib/flow_ir/test_array_composition.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/test_array_composition.rs
+lib/flow_ir/test_array_max_length.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/test_array_max_length.rs
+lib/flow_ir/test_compact_scan.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/test_compact_scan.rs
+lib/flow_ir/test_core.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/region_snapshot.rs
+lib/flow_ir/test_core_control.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/test_core_control.rs
+lib/flow_ir/test_core_draw.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/core_draw.rs
+lib/flow_ir/test_core_errors.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/test_core_errors.rs
+lib/flow_ir/test_core_lists.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/test_core_lists.rs
+lib/flow_ir/test_core_lower.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/core_lower.rs
+lib/flow_ir/test_core_marks.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/core_marks.rs;rs/crates/flow_ir/src/test_core_marks.rs
+lib/flow_ir/test_core_operators.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/test_core_operators.rs
+lib/flow_ir/test_core_parity.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/flow_ir.rs
+lib/flow_ir/test_core_records.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/test_core_records.rs
+lib/flow_ir/test_core_regions.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/test_core_regions.rs
+lib/flow_ir/test_core_resident.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/flow_ir.rs
+lib/flow_ir/test_core_state.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/test_core_state.rs
+lib/flow_ir/test_error_rows.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/test_error_rows.rs
+lib/flow_ir/test_frame_kernel.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/flow_ir.rs
+lib/flow_ir/test_gather.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/test_gather.rs
+lib/flow_ir/test_grade_index.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/test_grade_index.rs
+lib/flow_ir/test_inner_sum.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/test_inner_sum.rs
+lib/flow_ir/test_ir.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/flow_ir.rs
+lib/flow_ir/test_noise.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/packed.rs;rs/crates/flow_shader/src/noise.rs;rs/crates/rays_math/src/noise.rs
+lib/flow_ir/test_packed.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/packed.rs;rs/crates/rays_editor/tests/suite_t3/packed.rs;rs/crates/rdk_core/src/packed.rs
+lib/flow_ir/test_reductions.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/test_reductions.rs
+lib/flow_ir/test_region_snapshot.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/region_snapshot.rs;rs/crates/flow_ir/src/test_region_snapshot.rs
+lib/flow_ir/test_scatter.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/test_scatter.rs
+lib/flow_ir/test_static_map.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/test_static_map.rs
+lib/flow_ir/test_support/test_program.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_gpu/tests/common/test_program.rs;rs/crates/flow_ir/src/test_support.rs;rs/crates/flow_shader/tests/support/mod.rs;rs/crates/flow_web/src/test_program.rs
+lib/flow_ir/test_uniforms.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/packed.rs;rs/crates/flow_ir/src/test_uniforms.rs
+lib/flow_ir/test_with_error.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/test_with_error.rs
+lib/flow_native/test_frame_alloc.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_native/tests/gpu_frame_alloc.rs
+lib/flow_native/test_workspace_gpu_service.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_native/src/test_workspace_gpu_service.rs
+lib/flow_sop/goldens/test_fixture_codec.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/flow_sop/lisp_sop/test_workspace_node.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_sop/src/lisp_sop.rs
+lib/flow_sop/test_adjacency.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/flow_sop/src/topology_kernel_impl.rs
+lib/flow_sop/test_attribute_kernel.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_sop/src/attribute_kernel.rs
+lib/flow_sop/test_catalog_load.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_sop/src/catalog.rs
+lib/flow_sop/test_concat.ml	MISSING	NEEDS_ASSERTION_REVIEW	rs/crates/flow_sop/src/lisp_sop/test_concat.rs
+lib/flow_sop/test_encoded_parameters.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_sop/src/encoded_parameters.rs
+lib/flow_sop/test_geometry_arrays.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/flow_sop/test_gpu_bulk.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/flow_sop/test_graph.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/flow_sop/src/lisp_sop/test_graph.rs
+lib/flow_sop/test_grid_bulk.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_sop/src/lisp_sop/test_grid_bulk.rs
+lib/flow_sop/test_group_kernel.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/flow_sop/src/group_kernel.rs;rs/crates/flow_sop/src/lisp_sop/test_group_kernel.rs
+lib/flow_sop/test_image_kernel.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_sop/src/image_kernel.rs
+lib/flow_sop/test_iterate.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_sop/src/lisp_sop/test_iterate.rs
+lib/flow_sop/test_keyword_ports.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/flow_sop/src/catalog.rs
+lib/flow_sop/test_lisp_fusion.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/flow_sop/src/lisp_sop/test_lisp_fusion.rs
+lib/flow_sop/test_lisp_inline.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_sop/src/lisp_sop/test_lisp_inline.rs
+lib/flow_sop/test_lisp_node.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/flow_sop/src/lisp_node.rs;rs/crates/flow_sop/src/lisp_sop/test_lisp_node.rs
+lib/flow_sop/test_lisp_projection.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/flow_sop/src/lisp_sop/test_lisp_projection.rs
+lib/flow_sop/test_main.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_bin/src/main.rs
+lib/flow_sop/test_math_helpers.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/flow_sop/test_math_kernel.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/flow_sop/src/operators.rs
+lib/flow_sop/test_merge_source.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/flow_sop/src/lisp_sop/test_node_contracts.rs
+lib/flow_sop/test_mesh_planes.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/flow_sop/test_mesh_resident.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/flow_sop/src/lisp_sop/test_mesh_resident.rs
+lib/flow_sop/test_metadata_kernel.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/flow_sop/src/lisp_sop/test_metadata_kernel.rs
+lib/flow_sop/test_node_facts.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/flow_sop/src/lisp_sop/test_node_facts.rs
+lib/flow_sop/test_node_sources.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/flow_sop/src/lisp_sop/test_node_sources.rs
+lib/flow_sop/test_noise_displace_contract.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_sop/src/lisp_sop/test_node_contracts.rs
+lib/flow_sop/test_planes.ml	MISSING	NEEDS_ASSERTION_REVIEW	rs/crates/flow_sop/src/lisp_sop/test_planes.rs
+lib/flow_sop/test_projection.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/flow_graph/src/projection.rs;rs/crates/flow_sop/src/lisp_sop/test_projection.rs
+lib/flow_sop/test_rand_at.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/flow_sop/src/operators.rs
+lib/flow_sop/test_remap.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/flow_sop/src/lisp_sop/test_remap.rs
+lib/flow_sop/test_settle.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_sop/src/lisp_sop/test_settle.rs
+lib/flow_sop/test_topology_kernel.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_sop/src/topology_kernel.rs;rs/crates/flow_sop/src/topology_kernel_impl.rs
+lib/flow_sop/test_trace.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/flow_gpu/tests/gpu_trace.rs;rs/crates/flow_shader/src/trace.rs;rs/crates/flow_sop/src/lisp_sop/test_trace.rs;rs/crates/flow_sop/src/trace_scene.rs
+lib/flow_sop/test_units.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/flow_sop/test_units_geometry.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/flow_sop/test_workspace_cook.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/flow_sop/src/lisp_sop/test_workspace_cook.rs
+lib/flow_sop/test_workspace_edit.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/flow_sop/src/lisp_sop/test_workspace_edit.rs
+lib/flow_sop/test_workspace_zone.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/flow_sop/src/lisp_sop/test_workspace_zone.rs
+lib/flow_web/test_array_composition_web.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_web/src/test_array_composition_web.rs
+lib/flow_web/test_array_max_length.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/test_array_max_length.rs
+lib/flow_web/test_compact_scan.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/test_compact_scan.rs
+lib/flow_web/test_fma.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_web/src/test_fma.rs;rs/crates/rays_math/src/fma.rs
+lib/flow_web/test_gather.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/test_gather.rs
+lib/flow_web/test_grade_index.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/test_grade_index.rs
+lib/flow_web/test_js.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_web/src/js.rs;rs/crates/flow_web/src/test_js.rs
+lib/flow_web/test_js_frame.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/flow_web/src/test_js_frame.rs
+lib/flow_web/test_js_gpu.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_web/src/test_js_gpu.rs
+lib/flow_web/test_region_arguments.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_web/src/test_region_arguments.rs
+lib/flow_web/test_scatter.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/test_scatter.rs
+lib/flow_web/test_target.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_web/src/target.rs;rs/crates/flow_web/src/test_target.rs
+lib/flow_web/test_text_bytes.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_web/src/test_text_bytes.rs
+lib/flow_web/test_wgsl.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_web/src/oracle_cases.rs;rs/crates/flow_web/src/test_wgsl.rs;rs/crates/flow_web/src/wgsl.rs
+lib/input/test_gate.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/lru/test_lru.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/lru/src/test_lru.rs
+lib/mem/test_mem.ml	MISSING	NEEDS_ASSERTION_REVIEW	rs/crates/mem/src/test_mem.rs
+lib/metal/test_main.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_bin/src/main.rs
+lib/metal/test_metal_argument_reflection_snapshot.ml	MISSING	NEEDS_ASSERTION_REVIEW	rs/crates/metal/src/metal_argument_reflection_snapshot.rs
+lib/metal/test_metal_blit_safe.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/metal/test_metal_build_config.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/metal/test_metal_command_buffer_safe.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/metal/test_metal_compute_encoder_safe.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/metal/test_metal_compute_pipeline_safe.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/metal/test_metal_device_library_safe.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/metal/test_metal_device_queue_safe.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/metal/test_metal_device_safe.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/metal/test_metal_function_constants_safe.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/metal/test_metal_render_encoder_safe.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/metal/test_metal_render_icb_argument.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/metal/test_metal_render_pipeline_safe.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/metal/test_metal_resource_bounds.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/metal/test_metal_sampler_safe.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/metal/test_metal_support.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/metal/test_metal_texture_safe.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/metal/tests/gpu_metal.rs
+lib/native_layer_token/test_native_layer_token.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/ogpu/conformance/test_metal.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/metal/src/metal.rs;rs/crates/ogpu_metal/tests/gpu_ogpu_metal.rs
+lib/ogpu/conformance/test_mock.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/ogpu/conformance/test_vulkan.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/ogpu_vulkan/src/tests.rs;rs/crates/vulkan/src/vulkan.rs
+lib/ogpu/test_main.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_bin/src/main.rs
+lib/ogpu/test_ogpu_acceleration.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/ogpu/src/test_ogpu_acceleration.rs
+lib/ogpu/test_ogpu_binding.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/ogpu/src/test_ogpu_binding.rs
+lib/ogpu/test_ogpu_foundation.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/ogpu/src/test_ogpu_foundation.rs
+lib/ogpu/test_ogpu_pipeline.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/ogpu/src/test_ogpu_pipeline.rs
+lib/ogpu/test_ogpu_shader.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/ogpu/src/test_ogpu_shader.rs
+lib/ogpu/test_ogpu_surface.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/ogpu/src/test_ogpu_surface.rs
+lib/ogpu/test_ogpu_validation.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/ogpu/src/test_ogpu_validation.rs
+lib/ogpu_metal/test_device_error.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/ogpu_metal/tests/gpu_ogpu_metal_native.rs
+lib/ogpu_metal/test_main.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_bin/src/main.rs
+lib/ogpu_metal/test_ogpu_metal_acceleration.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/ogpu_metal/test_ogpu_metal_capabilities.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/ogpu_metal/test_ogpu_metal_foundation.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/ogpu_metal/test_ogpu_metal_pipeline.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/ogpu_metal/test_ogpu_metal_sampler_pixels.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/ogpu_metal/test_ogpu_metal_texture.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/ogpu_metal/test_pipeline_argument_buffer.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/ogpu_metal/tests/gpu_ogpu_metal_native.rs
+lib/parallel/test_parallel.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/param/test_param.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/param/src/test_param.rs
+lib/pxui/test_input.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/pxui/tests/cases/small.rs;rs/crates/rays_editor/tests/suite_t4/test_input.rs
+lib/pxui/test_keyboard.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/pxui/tests/cases/small.rs
+lib/pxui/test_main.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_bin/src/main.rs
+lib/pxui/test_table.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/pxui/tests/cases/small.rs;rs/crates/rays/src/table.rs
+lib/pxui/test_ui.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/pxui/src/ui.rs;rs/crates/pxui/tests/cases/support.rs;rs/crates/pxui/tests/cases/ui_a.rs;rs/crates/pxui/tests/cases/ui_b.rs;rs/crates/pxui/tests/cases/ui_c.rs
+lib/pxui/test_ui_parity.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/pxui_graph/test_main.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_bin/src/main.rs
+lib/pxui_graph/test_pxui_graph.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/pxui_graph/tests/cases/scope_a.rs;rs/crates/pxui_graph/tests/cases/scope_b.rs;rs/crates/pxui_graph/tests/cases/scope_e.rs;rs/crates/pxui_graph/tests/cases/support.rs
+lib/pxui_shell/test_shell.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/pxui_shell/src/test_layout.rs;rs/crates/pxui_shell/src/test_logic.rs;rs/crates/pxui_shell/tests/cases/shell_a.rs;rs/crates/pxui_shell/tests/cases/shell_b.rs
+lib/rays/test_automatic_text_cache.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/rays/test_canvas_native.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/rays/test_easy_camera.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays/src/easy_camera.rs;rs/crates/rays/src/test_easy_camera.rs
+lib/rays/test_light.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays/src/light.rs;rs/crates/rays/src/test_light.rs
+lib/rays/test_main.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_bin/src/main.rs
+lib/rays/test_meshes.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays/src/test_meshes.rs;rs/crates/rays_pathtracer/tests/common/meshes.rs
+lib/rays/test_rays_api.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays/src/test_rays_api.rs
+lib/rays/test_retained_view_native.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/rays/test_scene3_float32.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays/src/test_scene3_float32.rs
+lib/rays/test_scene3_native_lowering.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays/src/scene3_native_lowering.rs;rs/crates/rays/src/test_scene3_native_lowering.rs
+lib/rays/test_scene_display_list.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/rays/test_scene_primitives.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays/src/test_scene_primitives.rs
+lib/rays/test_scene_rounded_cache.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays/src/test_scene_rounded_cache.rs
+lib/rays/test_world.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays/src/test_world.rs;rs/crates/rays/src/world.rs;rs/crates/rays_pathtracer/tests/gpu_world.rs
+lib/rays/test_world_raster.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/rays_editor/marks_scene_test/test_marks_scene.ml	MISSING	NEEDS_ASSERTION_REVIEW	rs/crates/flow_native/src/marks_scene.rs;rs/crates/rays_editor/tests/native_qualification/marks_scene.rs
+lib/rays_editor/native_qualification/test_chain_frames_native.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/rays_editor/native_qualification/test_chain_gpu_native.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/rays_editor/native_qualification/test_grid_gpu_native.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/rays_editor/native_qualification/test_holder_frames_native.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/rays_editor/native_qualification/test_isogrid_viewport.ml	MISSING	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/tests/native_qualification/isogrid.rs
+lib/rays_editor/native_qualification/test_live_mesh_native.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/rays_editor/native_qualification/test_placement_native.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/rays_editor/native_qualification/test_scrub_gpu_native.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/rays_editor/native_qualification/test_workspace_gpu_marks.ml	MISSING	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/tests/native_qualification/workspace.rs
+lib/rays_editor/native_qualification/test_workspace_gpu_native.ml	MISSING	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/tests/native_qualification/workspace.rs
+lib/rays_editor/test/test_2d_ports.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/tests/suite_t4/test_ports.rs
+lib/rays_editor/test/test_bloom_studio.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/src/test_navigator.rs;rs/crates/rays_editor/tests/suite_t2/bloom_studio.rs
+lib/rays_editor/test/test_custom_sop.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/tests/suite_t6/small.rs
+lib/rays_editor/test/test_drawing.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/flow_native/src/drawing.rs;rs/crates/flow_native/src/test_drawing.rs;rs/crates/rays_editor/tests/suite_t3/drawing.rs
+lib/rays_editor/test/test_editor_commands.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/src/editor_commands.rs;rs/crates/rays_editor/src/test_editor_commands.rs;rs/crates/rays_editor/tests/suite_t3/commands.rs
+lib/rays_editor/test/test_editor_consistency.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/tests/suite_t2/consistency.rs;rs/crates/rays_editor/tests/suite_t2/consistency_b.rs
+lib/rays_editor/test/test_editor_cook.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/tests/suite_t3/cook.rs
+lib/rays_editor/test/test_editor_document.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/editor_document/src/test_lowering.rs;rs/crates/rays_editor/tests/suite_t4/test_document.rs
+lib/rays_editor/test/test_editor_input.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/tests/suite_t1/support.rs;rs/crates/rays_editor/tests/suite_t2/support.rs;rs/crates/rays_editor/tests/suite_t3/common.rs;rs/crates/rays_editor/tests/suite_t4/mod.rs;rs/crates/rays_editor/tests/suite_t4/test_input.rs;rs/crates/rays_editor/tests/suite_t5/common.rs
+lib/rays_editor/test/test_editor_transactions.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/tests/suite_t4/test_transactions.rs
+lib/rays_editor/test/test_fast_path.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/editor_document/src/test_lowering.rs;rs/crates/rays_editor/tests/suite_t4/test_fast.rs
+lib/rays_editor/test/test_flow_shader.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/tests/suite_t6/flow_shader.rs
+lib/rays_editor/test/test_gallery_shapes.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/tests/suite_t6/gallery.rs
+lib/rays_editor/test/test_history_memory.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/tests/suite_t4/test_history.rs
+lib/rays_editor/test/test_host_effects.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/tests/suite_t4/test_small.rs
+lib/rays_editor/test/test_image_sop.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/tests/suite_t6/image_sop.rs
+lib/rays_editor/test/test_isogrid_deferred.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/tests/suite_t6/isogrid.rs
+lib/rays_editor/test/test_main.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_bin/src/main.rs
+lib/rays_editor/test/test_materials.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/tests/gpu_suite_t5.rs;rs/crates/rays_editor/tests/suite_t3/materials.rs;rs/crates/rays_editor/tests/suite_t5/carry.rs
+lib/rays_editor/test/test_open_domain.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/tests/suite_t6/open_domain.rs
+lib/rays_editor/test/test_packed_pieces.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/src/test_schedule.rs;rs/crates/rays_editor/src/test_timeline.rs;rs/crates/rays_editor/tests/suite_t3/packed.rs;rs/crates/rdk_rays/src/packed_pieces.rs;rs/crates/rdk_rays/src/tests.rs
+lib/rays_editor/test/test_probe.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_graph/src/probe.rs;rs/crates/rays_editor/tests/suite_t3/probe.rs
+lib/rays_editor/test/test_rays.ml	MISSING	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/tests/native_qualification/smoke.rs
+lib/rays_editor/test/test_rays_editor.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/src/rays_editor.rs;rs/crates/rays_editor/tests/suite_t4/test_rays_editor.rs
+lib/rays_editor/test/test_scene_sync.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/editor_document/src/scene_sync.rs;rs/crates/editor_document/src/test_scene_sync.rs;rs/crates/rays_editor/tests/gpu_suite_t5.rs;rs/crates/rays_editor/tests/suite_t5/scene_sync.rs
+lib/rays_editor/test/test_scene_tree.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/tests/suite_t2/scene_tree.rs
+lib/rays_editor/test/test_shattered_studio.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/tests/suite_t6/shattered.rs
+lib/rays_editor/test/test_sop_catalog.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/tests/suite_t6/sopcat.rs
+lib/rays_editor/test/test_sop_ui.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/tests/suite_t3/sop_ui.rs
+lib/rays_editor/test/test_support.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_graph/src/test_support.rs;rs/crates/flow_ir/src/test_support.rs;rs/crates/flow_sop/src/lisp_sop/support.rs;rs/crates/pxui/tests/cases/support.rs;rs/crates/pxui_graph/tests/cases/support.rs;rs/crates/rays_editor/tests/suite_t1/support.rs;rs/crates/rays_editor/tests/suite_t2/support.rs;rs/crates/rays_editor/tests/suite_t3/support.rs;rs/crates/rays_editor/tests/suite_t6/support.rs;rs/crates/rdk_core/src/support.rs;rs/crates/sop/src/support.rs;rs/crates/sop/src/test_support.rs
+lib/rays_editor/test/test_terminal_boolean_normals.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/tests/suite_t6/small.rs
+lib/rays_editor/test/test_text.ml	MISSING	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/tests/native_qualification/smoke.rs;rs/crates/rays_editor/tests/suite_t3/support.rs
+lib/rays_editor/test/test_text_pane.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/src/test_text_pane.rs;rs/crates/rays_editor/src/text_pane.rs;rs/crates/rays_editor/tests/gpu_suite_t5.rs;rs/crates/rays_editor/tests/suite_t3/textpane.rs;rs/crates/rays_editor/tests/suite_t5/textpane.rs
+lib/rays_editor/test/test_threading.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/tests/suite_t4/test_small.rs
+lib/rays_editor/test/test_viewport_pick.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/tests/suite_t3/pick.rs
+lib/rays_editor/test/test_workspace_doc.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/editor_document/src/test_workspace_doc.rs;rs/crates/editor_document/src/workspace_doc.rs;rs/crates/rays_editor/tests/suite_t2/workspace_doc.rs
+lib/rays_editor/test/test_workspace_images.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_native/src/test_workspace_images.rs;rs/crates/flow_native/src/workspace_images.rs;rs/crates/rays_editor/tests/suite_t6/images.rs
+lib/rays_editor/test/test_workspace_images_native.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/tests/suite_t6/images.rs
+lib/rays_editor/test/test_workspace_ir.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/tests/suite_t6/workspace_ir.rs
+lib/rays_editor/test/test_workspace_live.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/tests/suite_t3/live.rs
+lib/rays_editor/test/test_workspace_shell.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/tests/gpu_suite_t1.rs;rs/crates/rays_editor/tests/suite_t1/part1.rs;rs/crates/rays_editor/tests/suite_t1/part2.rs;rs/crates/rays_editor/tests/suite_t1/part3.rs;rs/crates/rays_editor/tests/suite_t1/part4.rs;rs/crates/rays_editor/tests/suite_t1/part5.rs;rs/crates/rays_editor/tests/suite_t1/part6.rs;rs/crates/rays_editor/tests/suite_t1/part7.rs;rs/crates/rays_editor/tests/suite_t1/part8.rs;rs/crates/rays_editor/tests/suite_t1/part9.rs;rs/crates/rays_editor/tests/suite_t1/support.rs
+lib/rays_editor/test/test_workspace_source.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/tests/suite_t4/test_source.rs
+lib/rays_editor/test/test_workspace_start.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/rays_editor/tests/suite_t4/test_small.rs
+lib/rays_math/test_clock.ml	MISSING	NEEDS_ASSERTION_REVIEW	rs/crates/rays_math/src/clock.rs;rs/crates/rays_math/src/test_clock.rs
+lib/rays_math/test_color.ml	MISSING	NEEDS_ASSERTION_REVIEW	rs/crates/rays_math/src/color.rs;rs/crates/rays_math/src/test_color.rs
+lib/rays_math/test_fma.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_web/src/test_fma.rs;rs/crates/rays_math/src/fma.rs
+lib/rays_pathtracer/test_gpu_film.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_pathtracer/tests/gpu_film.rs
+lib/rays_pathtracer/test_lisp.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_syntax/src/lisp.rs;rs/crates/rays_pathtracer/tests/gpu_lisp.rs
+lib/rays_pathtracer/test_main.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_bin/src/main.rs
+lib/rays_pathtracer/test_parity.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_pathtracer/tests/gpu_parity.rs
+lib/rays_pathtracer/test_pathtracer.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_pathtracer/tests/gpu_pathtracer.rs
+lib/rays_pathtracer/test_scene.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays/src/scene.rs;rs/crates/rays_pathtracer/tests/gpu_scene.rs
+lib/rays_pathtracer/test_world.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays/src/test_world.rs;rs/crates/rays/src/world.rs;rs/crates/rays_pathtracer/tests/gpu_world.rs
+lib/rdk/test_attribute_composite.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_attribute_copy.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_ops/src/attribute_copy.rs
+lib/rdk/test_attribute_fade.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_attribute_interpolate.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_ops/src/attribute_interpolate.rs
+lib/rdk/test_attribute_lifecycle.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_core/src/geometry.rs;rs/crates/rdk_ops/src/attribute_lifecycle.rs;rs/crates/rdk_rays/src/tests.rs
+lib/rdk/test_attribute_mirror.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_ops/src/attribute_mirror.rs
+lib/rdk/test_attribute_transfer.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_ops/src/attribute_transfer.rs
+lib/rdk/test_blast_by_attribute.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_blend_shapes.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_boolean.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_boolean/src/boolean.rs
+lib/rdk/test_boolean_cells.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_boolean/src/boolean_cells.rs
+lib/rdk/test_boolean_complex.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_boolean/src/boolean_complex.rs
+lib/rdk/test_boolean_constraints.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_boolean/src/boolean_constraints.rs
+lib/rdk/test_boolean_coplanar.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_boolean/src/boolean_coplanar.rs
+lib/rdk/test_boolean_detect.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_ops/src/boolean_detect.rs
+lib/rdk/test_boolean_extract.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_boolean/src/boolean_extract.rs
+lib/rdk/test_boolean_face_arrangement.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_boolean/src/boolean_face_arrangement.rs
+lib/rdk/test_boolean_face_cdt.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_boolean/src/boolean_face_cdt.rs
+lib/rdk/test_boolean_payload.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_boolean/src/boolean_payload.rs
+lib/rdk/test_boolean_radial.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_boolean/src/boolean_radial.rs
+lib/rdk/test_boolean_refinement.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_boolean/src/boolean_refinement.rs
+lib/rdk/test_boolean_seam.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_boolean/src/boolean_seam.rs
+lib/rdk/test_boolean_solid.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_boolean/src/boolean_solid.rs
+lib/rdk/test_boolean_weiler.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_boolean/src/boolean_weiler.rs
+lib/rdk/test_circle.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_circle_from_edges.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_clean.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_ops/src/clean.rs
+lib/rdk/test_clip.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_connectivity.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_core/src/analysis.rs
+lib/rdk/test_convex_hull.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_ops/src/convex_hull.rs
+lib/rdk/test_copy_to_points.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_ops/src/instance_copy.rs
+lib/rdk/test_crease.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_curvature.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_ops/src/curvature.rs
+lib/rdk/test_delaunay2.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_geom/src/delaunay2.rs
+lib/rdk/test_dissolve.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_ops/src/dissolve.rs
+lib/rdk/test_distance_along_geometry.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_distance_from_geometry.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_geom/src/spatial_index.rs;rs/crates/rdk_ops/src/transform_ops.rs
+lib/rdk/test_distance_from_target.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_duplicate.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_edge_collapse.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_ops/src/edge_collapse.rs
+lib/rdk/test_edge_cusp.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_edge_divide.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_edge_equalize.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_edge_flip.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_edge_relax.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_edge_straighten.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_edge_transport.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_ops/src/edge_transport.rs
+lib/rdk/test_ends.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_extract_centroid.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_extract_point_curve.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_facet.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_ops/src/facet.rs
+lib/rdk/test_fuse.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_ops/src/fuse_grid.rs
+lib/rdk/test_group_backface.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_group_boundary.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_group_bounds.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_group_catalog.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_group_edge_angle.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_group_edge_depth.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_group_find_path.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_group_non_planar.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_group_normal.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_group_ops.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_ops/src/group_ops.rs
+lib/rdk/test_group_promote_boundary.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_group_random.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_group_range_connectivity.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_group_unshared.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_groups_from_name.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_implicit_point.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_geom/src/implicit_point.rs
+lib/rdk/test_instances.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_intersection_analysis.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_ops/src/intersection_analysis.rs
+lib/rdk/test_laplacian.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_main.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_bin/src/main.rs
+lib/rdk/test_match_size.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_motion.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_normals.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_planar_cdt.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_geom/src/planar_cdt.rs
+lib/rdk/test_planar_constraints.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_geom/src/planar_constraints.rs
+lib/rdk/test_platonic.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_point_generate.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_point_jitter.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_core/src/group.rs
+lib/rdk/test_point_replicate.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_ops/src/point_replicate.rs
+lib/rdk/test_point_split.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_poly_bevel.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_ops/src/poly_bevel.rs
+lib/rdk/test_poly_bridge.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_poly_cut.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_ops/src/poly_cut.rs
+lib/rdk/test_poly_extrude.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_ops/src/poly_extrude.rs
+lib/rdk/test_poly_fill.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_ops/src/poly_fill.rs
+lib/rdk/test_poly_loft.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_poly_reduce.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_ops/src/poly_reduce.rs
+lib/rdk/test_polyframe.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_polywire.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_predicates.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_geom/src/predicates.rs
+lib/rdk/test_ray.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_ops/src/ray.rs
+lib/rdk/test_rdk.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_core/src/topology.rs;rs/crates/rdk_rays/src/tests.rs
+lib/rdk/test_rdk_attributes.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_geom/src/spatial_index.rs;rs/crates/rdk_geom/src/surface_index.rs
+lib/rdk/test_rdk_misc.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_ops/src/attribute_blur.rs
+lib/rdk/test_rdk_sources.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_core/src/attribute_pattern.rs;rs/crates/rdk_core/src/geometry.rs
+lib/rdk/test_remesh.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_ops/src/remesh.rs
+lib/rdk/test_resample.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_reverse.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_revolve.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_rewire_vertices.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_scatter.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_ir/src/test_scatter.rs
+lib/rdk/test_separate_pieces.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_skin.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_smooth.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_ops/src/smooth.rs
+lib/rdk/test_soft_transform.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_spiral.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_subdivide.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_ops/src/subdivide.rs
+lib/rdk/test_support/test_geometry_comparison.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_surface_index.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_geom/src/surface_index.rs
+lib/rdk/test_sweep.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_transform.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/rdk/test_triangulate.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_ops/src/triangulate.rs
+lib/rdk/test_triangulate2d.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rdk_ops/src/triangulate2d.rs
+lib/rdk/test_tube.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	
+lib/renderer/test_batch_merge.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/renderer/test_dense_scene2.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/renderer/test_gpu_draw.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/renderer/tests/cases/gpu_draw.rs
+lib/renderer/test_main.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_bin/src/main.rs
+lib/renderer/test_marks_native.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/renderer/test_mock_backend.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/renderer/src/test_mock_backend.rs
+lib/renderer/test_offscreen.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/renderer/tests/cases/gpu_offscreen.rs
+lib/renderer/test_renderer_scaling.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/renderer/src/test_renderer_scaling.rs;rs/crates/runtime/src/test_runtime_visibility.rs
+lib/renderer/test_runtime_render.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/renderer/test_scene2_argument.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/renderer/tests/cases/gpu_scene2_argument.rs;rs/crates/renderer/tests/cases/scene2_argument_body/mod.rs;rs/crates/renderer/tests/cases/window_scene2_argument.rs
+lib/renderer/test_scene2_coordinates.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/renderer/tests/cases/gpu_scene2_coordinates.rs
+lib/renderer/test_scene3_instances.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/renderer/test_scene3_lighting.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/renderer/test_shapes_lowering.ml	MISSING	NEEDS_ASSERTION_REVIEW	rs/crates/renderer/tests/cases/gpu_shapes_lowering.rs
+lib/renderer/test_ui_pipeline.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/runtime/resources/test_gpu_image.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/runtime_resources/tests/window_gpu_image.rs
+lib/runtime/resources/test_main.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_bin/src/main.rs
+lib/runtime/resources/test_png_rows.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/runtime_resources/tests/window_runtime_resources.rs
+lib/runtime/resources/test_resources_audio.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/runtime_resources/tests/window_runtime_resources.rs
+lib/runtime/resources/test_resources_font.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/runtime_resources/tests/window_runtime_resources.rs
+lib/runtime/resources/test_runtime_resources.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/runtime_resources/src/runtime_resources.rs;rs/crates/runtime_resources/tests/window_runtime_resources.rs
+lib/runtime/test_main.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_bin/src/main.rs
+lib/runtime/test_runtime_input.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/runtime_input/src/runtime_input.rs;rs/crates/runtime_input/src/test_runtime_input.rs
+lib/runtime/test_runtime_visibility.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/runtime/src/test_runtime_visibility.rs
+lib/scene_command/test_display_list.ml	MISSING	NEEDS_ASSERTION_REVIEW	rs/crates/scene_command/src/display_list.rs;rs/crates/scene_command/src/test_display_list.rs
+lib/scene_command/test_marks.ml	MISSING	NEEDS_ASSERTION_REVIEW	rs/crates/scene_command/src/marks.rs;rs/crates/scene_command/src/test_marks.rs
+lib/scene_command/test_ui_batch.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/scene_command/src/ui_batch.rs
+lib/scene_command/test_ui_primitives.ml	MISSING	NEEDS_ASSERTION_REVIEW	rs/crates/scene_command/src/test_ui_primitives.rs
+lib/scene_execution/test_automatic_scratch.ml	MISSING	NEEDS_ASSERTION_REVIEW	rs/crates/renderer/tests/cases/gpu_offscreen.rs
+lib/scene_execution/test_gpu_vertices.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/scene_execution/test_main.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_bin/src/main.rs
+lib/scene_execution/test_offscreen_metal.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/scene_execution/test_prepared_scene3.ml	MISSING	NEEDS_ASSERTION_REVIEW	rs/crates/renderer/src/test_prepared_scene3.rs
+lib/scene_execution/test_retained_eviction.ml	MISSING	NEEDS_ASSERTION_REVIEW	rs/crates/renderer/tests/cases/gpu_offscreen.rs
+lib/scene_execution/test_scene_execution_metal.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/sdl3/test_main.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_bin/src/main.rs
+lib/sdl3/test_sdl3.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/sdl3/test_sdl3_events.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/sdl3/test_sdl3_failure.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/sdl3/test_sdl3_metal.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/sdl3/test_sdl3_stress.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/sdl3_image/test_sdl3_image.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/sdl3_mixer/test_main.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_bin/src/main.rs
+lib/sdl3_mixer/test_sdl3_mixer.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/sdl3_mixer/test_sdl3_mixer_device_failure.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/sdl3_ttf/test_main.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/rays_bin/src/main.rs
+lib/sdl3_ttf/test_sdl3_ttf.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/sdl3_ttf/test_sdl3_ttf_discovery_failure.ml	MISSING	NEEDS_ASSERTION_REVIEW	
+lib/sop/test_diagnostics.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/sop/src/test_diagnostics.rs
+lib/sop/test_edit_graph.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/sop/src/edit_graph.rs;rs/crates/sop/src/test_edit_graph.rs
+lib/sop/test_facts.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/sop/src/test_facts.rs
+lib/sop/test_parallel_branches.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/sop/src/test_parallel_branches.rs
+lib/sop/test_parallel_exact.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/flow_sop/src/lisp_sop/test_parallel_exact.rs;rs/crates/sop/src/test_parallel_branches.rs
+lib/sop/test_payload.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/sop/src/payload.rs;rs/crates/sop/src/test_payload.rs
+lib/sop/test_sop.ml	PARTIAL	NEEDS_ASSERTION_REVIEW	rs/crates/sop/src/sop_topology.rs
+lib/test_support/test_support.ml	UNVERIFIED	NEEDS_ASSERTION_REVIEW	rs/crates/flow_graph/src/test_support.rs;rs/crates/flow_ir/src/test_support.rs;rs/crates/flow_sop/src/lisp_sop/support.rs;rs/crates/pxui/tests/cases/support.rs;rs/crates/pxui_graph/tests/cases/support.rs;rs/crates/rays_editor/tests/suite_t1/support.rs;rs/crates/rays_editor/tests/suite_t2/support.rs;rs/crates/rays_editor/tests/suite_t3/support.rs;rs/crates/rays_editor/tests/suite_t6/support.rs;rs/crates/rdk_core/src/support.rs;rs/crates/sop/src/support.rs;rs/crates/sop/src/test_support.rs

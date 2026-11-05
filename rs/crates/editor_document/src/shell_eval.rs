@@ -6,7 +6,8 @@
 use crate::document::{self, Home, Origin, PreviewSource, Start, Switch};
 use crate::workspace_doc;
 use editor_core::panels::{self, Panel};
-use flow_check::workspace::{self as w, Graph, Pattern, Term};
+use flow_check::workspace::{self as w, Graph, Term};
+use flow_check::term_arena::{PatternNode, TermId};
 use flow_eval::Plan;
 use flow_graph::flow_edit::{arg_of, arg_text, ArgKey};
 use flow_syntax::context;
@@ -202,7 +203,7 @@ fn panel_tree(root: &E) -> R<Tree> {
 }
 
 fn is_loop_term(t: &Term) -> bool {
-    matches!(t.node, w::Node::Loop { .. })
+    matches!(t.node, w::Node::Loop(_))
 }
 
 struct Found {
@@ -217,88 +218,95 @@ impl Found {
     }
     fn inline(&mut self, home: &Home, path: &[usize], key: &ArgKey, t: &Term) {
         match t.node {
-            w::Node::RefBinding(_, ref p) if p.is_empty() => {}
-            w::Node::Loop { .. } => {}
+            w::Node::RefBinding(id) if t.arena().name_ids(t.arena().ref_binding(id).fields).is_empty() => {}
+            w::Node::Loop(_) => {}
             _ => self.add(path, Origin::Inline(home.clone(), key.clone())),
         }
     }
 }
 
-fn walk(f: &mut Found, env: &[(String, Term)], place: Option<(Home, ArgKey)>, path: &[usize], t: &Term, v: &E) {
-    let here = || match (&t.path, &place) {
-        (Some(p), _) => Home::BoundAt(p.clone()),
+fn walk(f: &mut Found, env: &[(&str, TermId)], place: Option<(Home, ArgKey)>, path: &[usize], t: &Term, v: &E) {
+    let arena = t.arena();
+    let here = || match (t.path(), &place) {
+        (Some(path), _) => Home::BoundAt(path.iter().map(|name| t.name(*name).to_owned()).collect()),
         (None, Some((parent, key))) => Home::InlineIn(Box::new(parent.clone()), key.clone()),
         (None, None) => Home::Looped,
     };
     let pos = |i: usize| ArgKey::Pos(i as i64);
-    match (&t.node, v) {
-        (w::Node::RefBinding(n, rest), _) if rest.is_empty() => {
-            f.add(path, Origin::Bound(n.clone()));
-            if let Some((_, t2)) = env.iter().find(|(k, _)| k == n) {
-                walk(f, env, None, path, t2, v);
+    match (t.node, v) {
+        (w::Node::RefBinding(id), _) if arena.name_ids(arena.ref_binding(id).fields).is_empty() => {
+            let name = t.name(arena.ref_binding(id).name);
+            f.add(path, Origin::Bound(name.to_owned()));
+            if let Some((_, id)) = env.iter().find(|(key, _)| *key == name) {
+                walk(f, env, None, path, &t.child(*id), v);
             }
         }
-        (w::Node::Op { op, args, .. }, _) if matches!(op.as_str(), "ui/inspector" | "ui/spreadsheet" | "ui/list" | "ui/lisp") => {
-            if let Some((_, a)) = args.iter().find(|(n, _)| n == "of") {
-                f.ofs.push((path.to_vec(), a.clone()));
+        (w::Node::Op(id), _) if matches!(t.name(arena.op(id).op), "ui/inspector" | "ui/spreadsheet" | "ui/list" | "ui/lisp") => {
+            if let Some(field) = arena.fields(arena.op(id).args).iter().find(|field| t.name(field.name) == "of") {
+                f.ofs.push((path.to_vec(), t.child(field.term)));
             }
         }
-        (w::Node::Op { op, args, .. }, E::Struct(_, _, vargs)) if op == "ui/workspace" && !args.is_empty() && !vargs.is_empty() => {
-            let r = &args[0].1;
-            let rv = &vargs[0].1;
-            let h = here();
-            f.inline(&h, path, &pos(0), r);
-            walk(f, env, Some((h, pos(0))), path, r, rv);
-        }
-        (w::Node::Op { op, args, .. }, E::Struct(_, _, vargs)) if op == "ui/split" || op == "ui/split-at" => {
-            let h = here();
-            for (i, key) in ["first", "second"].iter().enumerate() {
-                if let (Some((_, a)), Some((_, va))) = (args.iter().find(|(n, _)| n == key), vargs.iter().find(|(n, _)| n == key)) {
-                    let k = pos(args.iter().position(|(n, _)| n == key).expect("found above"));
-                    let p = child(path, i);
-                    f.inline(&h, &p, &k, a);
-                    walk(f, env, Some((h.clone(), k)), &p, a, va);
+        (w::Node::Op(id), E::Struct(_, _, vargs)) => {
+            let op = arena.op(id);
+            let args = arena.fields(op.args);
+            match t.name(op.op) {
+                "ui/workspace" if !args.is_empty() && !vargs.is_empty() => {
+                    let r = t.child(args[0].term);
+                    let h = here();
+                    f.inline(&h, path, &pos(0), &r);
+                    walk(f, env, Some((h, pos(0))), path, &r, &vargs[0].1);
                 }
-            }
-        }
-        // transparent: the active layout is found at the switch's own path
-        (w::Node::Op { op, args, .. }, E::Struct(_, _, vargs)) if op == "ui/switch" => {
-            let h = here();
-            let layouts = |l: &[(String, Term)]| l.iter().filter(|(n, _)| n != "active").cloned().collect::<Vec<_>>();
-            let vlayouts: Vec<&(String, E)> = vargs.iter().filter(|(n, _)| n != "active").collect();
-            let active = match vargs.iter().find(|(n, _)| n == "active") {
-                Some((_, E::Int(n))) => *n,
-                _ => 0,
-            };
-            let idx = usize::try_from(active).ok();
-            if let (Some(i), ls) = (idx, layouts(args)) {
-                if let (Some((_, a)), Some((_, va))) = (ls.get(i), vlayouts.get(i).map(|x| *x)) {
-                    f.inline(&h, path, &pos(i), a);
-                    walk(f, env, Some((h, pos(i))), path, a, va);
-                }
-            }
-        }
-        (w::Node::Op { op, args, .. }, E::Struct(_, _, vargs)) if op == "ui/floating" && !args.is_empty() && !vargs.is_empty() => {
-            let h = here();
-            let p = child(path, 0);
-            f.inline(&h, &p, &pos(0), &args[0].1);
-            walk(f, env, Some((h, pos(0))), &p, &args[0].1, &vargs[0].1);
-        }
-        (w::Node::Op { op, args, .. }, E::Struct(_, _, vargs)) if op == "ui/tile" => {
-            let h = here();
-            if let Some(li) = args.iter().position(|(_, a)| is_loop_term(a)) {
-                let key = pos(li);
-                for i in 0..vargs.len() {
-                    f.add(&child(path, i), Origin::Loop(h.clone(), key.clone()));
-                }
-            } else {
-                for (i, (_, a)) in args.iter().enumerate() {
-                    let p = child(path, i);
-                    f.inline(&h, &p, &pos(i), a);
-                    if let Some((_, va)) = vargs.get(i) {
-                        walk(f, env, Some((h.clone(), pos(i))), &p, a, va);
+                "ui/split" | "ui/split-at" => {
+                    let h = here();
+                    for (i, key) in ["first", "second"].iter().enumerate() {
+                        if let (Some(index), Some((_, va))) = (args.iter().position(|field| t.name(field.name) == *key), vargs.iter().find(|(name, _)| name.as_str() == *key)) {
+                            let a = t.child(args[index].term);
+                            let k = pos(index);
+                            let p = child(path, i);
+                            f.inline(&h, &p, &k, &a);
+                            walk(f, env, Some((h.clone(), k)), &p, &a, va);
+                        }
                     }
                 }
+                // transparent: the active layout is found at the switch's own path
+                "ui/switch" => {
+                    let h = here();
+                    let active = match vargs.iter().find(|(name, _)| name == "active") {
+                        Some((_, E::Int(n))) => *n,
+                        _ => 0,
+                    };
+                    if let Ok(i) = usize::try_from(active) {
+                        if let (Some(field), Some((_, va))) = (args.iter().filter(|field| t.name(field.name) != "active").nth(i), vargs.iter().filter(|(name, _)| name != "active").nth(i)) {
+                            let a = t.child(field.term);
+                            f.inline(&h, path, &pos(i), &a);
+                            walk(f, env, Some((h, pos(i))), path, &a, va);
+                        }
+                    }
+                }
+                "ui/floating" if !args.is_empty() && !vargs.is_empty() => {
+                    let h = here();
+                    let p = child(path, 0);
+                    let a = t.child(args[0].term);
+                    f.inline(&h, &p, &pos(0), &a);
+                    walk(f, env, Some((h, pos(0))), &p, &a, &vargs[0].1);
+                }
+                "ui/tile" => {
+                    let h = here();
+                    if let Some(li) = args.iter().position(|field| is_loop_term(&t.child(field.term))) {
+                        let key = pos(li);
+                        for i in 0..vargs.len() { f.add(&child(path, i), Origin::Loop(h.clone(), key.clone())); }
+                    } else {
+                        for (i, field) in args.iter().enumerate() {
+                            let p = child(path, i);
+                            let a = t.child(field.term);
+                            f.inline(&h, &p, &pos(i), &a);
+                            if let Some((_, va)) = vargs.get(i) {
+                                walk(f, env, Some((h.clone(), pos(i))), &p, &a, va);
+                            }
+                        }
+                    }
+                }
+                _ => {}
             }
         }
         _ => {}
@@ -307,17 +315,18 @@ fn walk(f: &mut Found, env: &[(String, Term)], place: Option<(Home, ArgKey)>, pa
 
 /// Which panels are named: the terms of the graph beside its value.
 fn origins(graph: &Graph, value: &E) -> (Vec<(panels::Path, Origin)>, Vec<(panels::Path, Term)>) {
-    let (bindings, result): (Vec<(Pattern, Term)>, Term) = match &graph.body.node {
-        w::Node::Let(bs, r) => (bs.clone(), (**r).clone()),
-        _ => (Vec::new(), graph.body.clone()),
+    let arena = graph.body.arena();
+    let (bindings, result) = match graph.body.node {
+        w::Node::Let(id) => {
+            let node = arena.let_node(id);
+            (arena.bindings(node.bindings), graph.body.child(node.body))
+        }
+        _ => (&[][..], graph.body.clone()),
     };
-    let env: Vec<(String, Term)> = bindings
-        .into_iter()
-        .filter_map(|(p, t)| match p {
-            Pattern::Name(n) => Some((n, t)),
-            _ => None,
-        })
-        .collect();
+    let env: Vec<(&str, TermId)> = bindings.iter().filter_map(|binding| match arena.pattern(binding.pattern) {
+        PatternNode::Name(name) => Some((arena.name(name), binding.term)),
+        _ => None,
+    }).collect();
     let mut f = Found { found: Vec::new(), ofs: Vec::new() };
     walk(&mut f, &env, None, &[], &result, value);
     (f.found, f.ofs)

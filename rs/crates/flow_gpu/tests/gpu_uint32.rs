@@ -2,8 +2,7 @@
 //! and through 2^32-1, the resident fold's uint32 scope, compaction block tails, topology
 //! validation on the device and GPU-origin streams.
 //!
-//! The OCaml test materialises holders from 4 worker domains; here the creating thread answers
-//! their reads in `run::service` (`holders`).
+//! Settled holders materialise from four worker domains without their owner pumping requests.
 mod common;
 use common::test_program as tp;
 use flow_gpu::{host, pipelines, run};
@@ -298,12 +297,8 @@ fn holders() {
     assert!(read.is_err(), "freed uint32 holder read");
     (second.release)(true);
     run::close(&r, false);
-    // first read from 4 worker threads, the owner answering: equal to the 1-thread read
+    // First read from four worker threads while the owner blocks in join.
     let workers: Vec<_> = (0..4).map(|_| { let s = second.clone(); std::thread::spawn(move || (s.materialise)()) }).collect();
-    while !workers.iter().all(|w| w.is_finished()) {
-        run::service();
-        std::thread::yield_now();
-    }
     for w in workers {
         assert_eq!(w.join().unwrap(), expected);
     }

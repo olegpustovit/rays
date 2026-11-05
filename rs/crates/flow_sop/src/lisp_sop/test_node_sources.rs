@@ -48,6 +48,22 @@ fn an_explicit_library_is_pruned_to_what_the_workspace_reaches() {
 }
 
 #[test]
+fn filtered_node_registries_share_checked_declarations() {
+    let source = parse("(workspace shared_nodes
+        (defnode sop/registry_first [(geo : geometry)] geo)
+        (defnode sop/registry_kept [(geo : geometry)] geo))");
+    let workspace = checked(flow_check::workspace::check(&[], true, false, None, &Catalog { version: 1, kinds: vec![] }, &source));
+    let filtered = Workspace {
+        nodes: workspace.nodes.iter().filter(|node| node.kind.qualified != "sop/registry_first").cloned().collect::<Vec<_>>().into(),
+        ..workspace.clone()
+    };
+    assert_eq!(filtered.nodes.len(), 1);
+    assert_eq!(filtered.nodes[0].kind.qualified, "sop/registry_kept");
+    assert!(std::sync::Arc::ptr_eq(&workspace.nodes[1], &filtered.nodes[0]), "Filtering a cook's registry must not recursively copy another checked body.");
+    assert_eq!(*workspace.source, *filtered.source);
+}
+
+#[test]
 fn the_embedded_source_list_and_a_fresh_copy_agree() {
     // The embedded immutable source list uses the prepared index; a fresh list spine with the same
     // forms takes the uncached path. Both must select the same definitions and preserve identical
@@ -143,14 +159,44 @@ fn a_seed_read_inside_a_fn_is_scoped_to_the_fn() {
     assert!(context_kernel::depends(None, &[("enabled".to_owned(), Value::Bool(false))], &workspace.defs, &definition.body));
 }
 
+#[test]
+fn context_scans_borrow_helpers_and_keep_labeled_defaults() {
+    let source = parse(
+        r#"(workspace borrowed_context
+    (defn unused :context value [] 9.0)
+    (defn seeded :context value [] (sop/context_seed "borrowed_fixture"))
+    (defn forwarded :context value [] (seeded))
+    (graph g :context value [(initial : float (forwarded))] (+ initial (forwarded))))"#,
+    );
+    let workspace = checked(flow_check::workspace::check(operators::all(), false, false, None, &Catalog { version: 1, kinds: vec![] }, &source));
+    let reached = context_kernel::reachable_defs(&workspace, workspace.graphs.iter());
+    assert_eq!(reached.iter().map(|g| g.name.as_str()).collect::<Vec<_>>(), vec!["seeded", "forwarded"]);
+    assert!(std::ptr::eq(reached[0], &workspace.defs[1]));
+    assert!(std::ptr::eq(reached[1], &workspace.defs[2]));
+    assert!(!context_kernel::uses_context(&workspace.defs[0]));
+    assert!(context_kernel::uses_context(&workspace.graphs[0]));
+    let (labeled, inputs) = context_kernel::label_context("borrowed_card", reached[0]);
+    assert_eq!(inputs, vec![("$context0".to_owned(), "sop/context_seed".to_owned())]);
+    let flow_check::workspace::Node::RefBinding(id) = labeled.body.node else { panic!("A labeled context is a binding reference.") };
+    let binding = labeled.body.arena().ref_binding(id);
+    assert!(labeled.body.name(binding.name) == "$context0" && labeled.body.arena().name_ids(binding.fields).is_empty());
+    let default = labeled.inputs.last().unwrap().2.as_ref().unwrap();
+    let flow_check::workspace::Node::Op(id) = default.node else { panic!("A context input keeps its operator default.") };
+    assert!(default.arena().fields(default.arena().op(id).args).iter().any(|field| {
+        default.name(field.name) == operators::context_label()
+            && matches!(default.arena().row(field.term).node, flow_check::workspace::Node::Text(label) if default.arena().bytes(label) == b"borrowed_card")
+    }));
+    assert!(matches!(workspace.defs[1].body.node, flow_check::workspace::Node::Op(_)));
+}
+
 fn has(name: &str, text: &str, form: &Syntax) -> bool {
     (syntax::head(form) == Some(name)
-        && syntax::children(form).iter().any(|child| match &child.node {
-            Node::Str(value) => value.as_slice() == text.as_bytes(),
-            Node::Sym(value) => value == text,
+        && form.children().iter().any(|&id| match form.arena().row(id).node {
+            Node::Str(value) => form.bytes(value) == text.as_bytes(),
+            Node::Sym(value) => form.name(value) == text,
             _ => false,
         }))
-        || syntax::children(form).iter().any(|c| has(name, text, c))
+        || form.children().iter().any(|&id| has(name, text, &form.child(id)))
 }
 
 fn sorted(kinds: &[Kind]) -> Vec<Kind> {
@@ -183,16 +229,16 @@ fn embedded_fixture_checks_edits_and_round_trips_the_manifest() {
     assert!(*workspace.source == authored);
     assert_eq!(workspace.nodes.len(), 1);
     let graph = &workspace.graphs[0];
-    let source_graph = *syntax::children(&authored[0]).last().unwrap();
+    let source_graph = authored[0].child(*authored[0].children().last().unwrap());
     assert_eq!(graph.form.id, source_graph.id);
-    assert!(workspace.nodes[0].body.form.id > source_graph.id);
+    assert!(workspace.nodes[0].body.form().id > source_graph.id);
     let checker_forms = forms.clone();
     let checker = move |c: &Catalog, s: &[Syntax]| catalog::check_workspace(&[], false, Some(&checker_forms), c, s);
     let (edited, checked_edit) = ok(flow_graph::flow_edit::apply_checked_with(&[], false, Some(&checker), &cat, &authored, &EditOp::SetNote { node: vec!["g".to_owned(), "@result".to_owned()], text: "kept note".to_owned() }));
     assert!(*checked_edit.source == edited);
     assert_eq!(checked_edit.nodes.len(), 1);
-    let saved = flow_syntax::lisp::print(&edited).0;
-    assert!(syntax::children(&edited[0]).iter().all(|form| syntax::head(form) != Some("defnode")));
+    let saved = flow_syntax::lisp::print(&edited).unwrap().0;
+    assert!(edited[0].children().iter().all(|&id| syntax::head(&edited[0].child(id)) != Some("defnode")));
     assert_eq!(checked(catalog::check_workspace(&[], false, Some(&forms), &cat, &parse(&saved))).nodes.len(), 1);
     let mut nodes = vec![node.clone()];
     nodes.extend(line_nodes());

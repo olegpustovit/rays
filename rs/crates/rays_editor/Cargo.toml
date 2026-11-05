@@ -45,6 +45,8 @@ ogpu_vulkan = { path = "../ogpu_vulkan" }
 renderer = { path = "../renderer" }
 flow_sop = { path = "../flow_sop", features = ["test-support"] }
 runtime_resources = { path = "../runtime_resources" }
+mem_sys = { path = "../mem_sys" }
+scene_command = { path = "../scene_command" }
 
 # Window/GPU suites (see rs/port/rays_editor_plan.md) are added per bundle, each
 #   [[test]] name = "window_editor_<x>" / "gpu_editor_<x>"  harness = false
@@ -96,4 +98,8 @@ harness = false
 
 [[test]]
 name = "gpu_suite_t6"
+harness = false
+
+[[test]]
+name = "gpu_native_qualification"
 harness = false

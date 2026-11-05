@@ -26,6 +26,30 @@ different profile. In that agent's target dir: `cargo clean -p flow_syntax -p fl
 Canaries: leaf `rays_math`, middle `flow_check`, top `flow_sop` (override with `BUILDTIME_LEAF/MIDDLE/TOP`).
 A red test no longer fails the tool (it warns; timing is still counted); a build failure or a hang still does.
 
+### Native deadlines and qualification (2026-11-05)
+
+`cargo t` now launches one process per listed case, including native `gpu_*`/`window_*` cases.
+CPU cases still use the worker pool; GPU/window cases serialize to avoid hardware contention.
+The former native batching multiplied the deadline by the number of cases and hid individual
+overruns. Default cases are killed at five seconds; explicit `RAYS_SLOW=1` qualification uses
+the slow deadline. Printed runner wall includes build/queue time; per-case timing does not.
+
+Windows spawns each command suspended, assigns its Job before resuming, and retains that Job
+until exit and pipe completion. An exited root no longer leaves descendants holding capture
+pipes indefinitely. The runner's 12 self-tests, including this ownership regression, pass.
+
+The source's complete 300-texture, 20-prepared-frame plus four-automatic-frame eviction stress
+is preserved as explicit qualification:
+`RAYS_SLOW=1 cargo t -p renderer --test gpu_offscreen_etc qualification_retained_eviction_textured300`.
+It passes in 6.433 s. The default boundary case still crosses the 256-entry cache capacity with
+all 300 textures, checks two prepared frames and all four automatic frames, and passes in 1.514 s.
+No source stress assertion is discarded or counted as passing without executing it.
+
+Shape scanning distinguishes non-monomorphizing borrow lifetimes on functions/impls from type
+parameters. Type parameters outside `rays_collections`, lifetime-bearing structs/enums and the
+other existing shape rules remain enforced; the complete shape gate is not yet green.
+
+
 ## Why tests are slow under load, not at -O0
 - `rays-t` runs one process per test with `available_parallelism()` = 24 workers. With ~12 agents compiling
   and testing, every CPU-bound test stretches 2-3x: `flow_web` `integer_registers_past_2_pow_53_a` is 1.7-1.9 s

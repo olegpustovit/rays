@@ -28,7 +28,7 @@ sop = { path = "../sop" }
 flow_sop = { path = "../flow_sop" }
 rays_diagnostic = { path = "../rays_diagnostic" }
 scene_command = { path = "../scene_command" }
-mem = { path = "../mem" }
+mem_sys = { path = "../mem_sys" }
 ogpu = { path = "../ogpu" }
 ogpu_vulkan = { path = "../ogpu_vulkan" }
 renderer = { path = "../renderer" }

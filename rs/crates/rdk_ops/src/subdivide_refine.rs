@@ -2325,7 +2325,7 @@ fn discrete_map_ints(mapping: &[i64], source: &[i64]) -> Result<Vec<i64>, error:
     Ok(mapping.iter().map(|&at| gi(source, at)).collect())
 }
 
-fn discrete_map_text(mapping: &[i64], source: &[String]) -> Result<Vec<String>, error::T> {
+fn discrete_map_text(mapping: &[i64], source: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, error::T> {
     if source.is_empty() {
         return Err(invalid_arg("index out of bounds".to_owned()));
     }
@@ -2958,7 +2958,7 @@ pub fn concatenate_part_attribute(
             Storage::Int(output)
         }
         Storage::Text(_) => {
-            let mut output = vec![String::new(); total as usize];
+            let mut output = vec![Vec::new(); total as usize];
             let mut offset = 0_i64;
             for (count, found) in counts.iter().zip(attributes.iter()) {
                 cancel::check_opt(cancel_token)?;
@@ -3291,7 +3291,7 @@ pub fn concatenate_welded_point_attribute(
             let mut output = Vec::with_capacity(rows.len());
             for row in rows {
                 output.push(match row {
-                    None => String::new(),
+                    None => Vec::new(),
                     Some((local, part)) => {
                         let found = attributes[part].as_ref().ok_or_else(wrong_storage)?;
                         match attribute::View::storage(found)? {
@@ -3758,8 +3758,8 @@ pub fn select_ints(
 pub fn select_texts(
     cancel_token: Option<&cancel::T>,
     mapping: &[i64],
-    source: &[String],
-) -> Result<Vec<String>, error::T> {
+    source: &[Vec<u8>],
+) -> Result<Vec<Vec<u8>>, error::T> {
     let mut output = Vec::with_capacity(mapping.len());
     for (point, &at) in mapping.iter().enumerate() {
         cancel::poll(cancel_token, point as i64, 4095)?;

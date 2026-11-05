@@ -77,7 +77,15 @@ pub fn geometry_bytes(g: &geo::T) -> Vec<u8> {
                     out.push_str(&format!("{:?}", rdk::packed::Float4::get(&v, i).map(|(a, b, c, d)| (a.to_bits(), b.to_bits(), c.to_bits(), d.to_bits()))));
                 }
             }
-            Ok(_) => out.push_str("array"),
+            Ok(rdk::attribute::Storage::IntArray(v)) => {
+                let v = rdk::packed::IntArray::View::view(&v);
+                out.push_str(&format!("{:?}:{:?}", v.offsets, v.values));
+            }
+            Ok(rdk::attribute::Storage::FloatArray(v)) => {
+                let v = rdk::packed::FloatArray::View::view(&v);
+                out.push_str(&format!("{:?}:", v.offsets));
+                for x in v.values.iter() { out.push_str(&format!("{:016x}", x.to_bits())); }
+            }
             Err(e) => out.push_str(&format!("{e:?}")),
         }
         out.push(';');
@@ -86,6 +94,14 @@ pub fn geometry_bytes(g: &geo::T) -> Vec<u8> {
         out.push_str(&format!("G{:?}:{}:", rdk::group::owner(&group), rdk::group::name(&group)));
         for i in 0..rdk::group::length(&group) {
             out.push(if rdk::group::mem(i, &group) { '1' } else { '0' });
+        }
+        out.push_str(&format!("{:?}", rdk::group::ordered_elements(&group)));
+        out.push(';');
+    }
+    for group in geo::edge_groups(g) {
+        out.push_str(&format!("E{}:", rdk::edge_group::name(&group)));
+        for i in 0..rdk::edge_group::length(&group) {
+            out.push(if rdk::edge_group::mem(i, &group) { '1' } else { '0' });
         }
         out.push(';');
     }
@@ -133,7 +149,3 @@ pub fn fixture_grid(columns: i64, rows: i64, size: f64) -> geo::T {
     fixture_ok(geo::create(positions, topology, None, None, None).map_err(|e| rdk::error::to_string(&e)))
 }
 
-/// `RAYS_SLOW=1`: the exhaustive halves of a test (every grain, the reference tier).
-pub fn slow_matrix() -> bool {
-    std::env::var("RAYS_SLOW").as_deref() == Ok("1")
-}

@@ -37,6 +37,8 @@ pub struct Network {
     pub reference: bool,
     pub approx: Paths,
     identity: u64,
+    _state_roots: flow_eval::Roots,
+    _drive_roots: flow_eval::Roots,
 }
 
 fn fresh() -> u64 {
@@ -62,6 +64,8 @@ pub fn of_geometry(geometry: &edit_graph::T) -> Network {
         reference: false,
         approx: BTreeSet::new(),
         identity: fresh(),
+        _state_roots: flow_eval::Roots::default(),
+        _drive_roots: flow_eval::Roots::default(),
     }
 }
 
@@ -78,7 +82,8 @@ pub fn with_reference(reference: bool, network: &Network) -> Network {
 }
 
 pub fn with_states(states: Vec<Value>, network: &Network) -> Network {
-    Network { states, identity: fresh(), ..network.clone() }
+    let state_roots = flow_eval::roots(&states);
+    Network { states, _state_roots: state_roots, identity: fresh(), ..network.clone() }
 }
 
 pub fn with_frame_nodes(frame_nodes: BTreeMap<i64, FrameNode>, network: &Network) -> Network {
@@ -129,7 +134,8 @@ pub fn validate(network: &Network) -> Result<(), Diagnostic> {
 }
 
 pub fn with_drives(drives: BTreeMap<Port, Value>, network: &Network) -> Result<Network, Diagnostic> {
-    let next = Network { drives, identity: fresh(), ..network.clone() };
+    let drive_roots = flow_eval::roots(drives.values());
+    let next = Network { drives, _drive_roots: drive_roots, identity: fresh(), ..network.clone() };
     validate(&next)?;
     Ok(next)
 }

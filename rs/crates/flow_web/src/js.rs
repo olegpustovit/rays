@@ -1309,7 +1309,7 @@ fn binding_plan(fast: bool, kernel: Option<String>, packed: &packed::T) -> Resul
             instance: view.instance,
             prefix: view.prefix.clone(),
             iter: view.iter.iter().map(|i| Iteration::Static_index(*i)).collect(),
-            span: Some(view.term.form.span.clone()),
+            span: Some(view.term.form().span.clone()),
         };
         let mut result: i64 = -1;
         let lowered = core_lower::lower_draw(None, Some(r.residual), &mut |ctx: &mut dyn core_lower::DrawContext| {
@@ -1324,7 +1324,7 @@ fn binding_plan(fast: bool, kernel: Option<String>, packed: &packed::T) -> Resul
             Err(form) => return Err(refuse(&format!("Region capture preparation: {form}"))),
         };
         let ty = match value {
-            Value::Residual(residual) => E::Residual::residual_view(*residual)?.term.ty.clone(),
+            Value::Residual(residual) => E::Residual::residual_view(*residual)?.term.ty().clone(),
             v => value::ty_of(v),
         };
         captures.push(format!("{{type:{},source:{}}}", ty_json(&ty), escape(&prepare(true, &program)?)));

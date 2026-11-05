@@ -2,6 +2,7 @@
 //! defaults and native schemas.
 use flow_check::catalog::{self as flow_catalog, Parameter};
 use flow_check::workspace::{Graph, Node, NodeDefinition, Pattern, Term, Workspace};
+use flow_check::term_arena::{Draft, TermBuilder};
 use flow_eval::{Host, Residual, ResidualHandlers, Value};
 use flow_syntax::context;
 use flow_syntax::phase_timer;
@@ -43,25 +44,21 @@ pub fn for_node(checked: &Workspace, definition: &NodeDefinition) -> Vec<(String
         .normalizers
         .iter()
         .map(|(name, normalizer)| {
-            let form = normalizer.form.clone();
-            let term = |ty: Ty, node: Node| Term { path: None, ty, node, form: form.clone() };
-            let argument = term(Ty::Text, Node::RefBinding("raw_value".into(), Vec::new()));
-            let body = term(
-                Ty::Text,
-                Node::Let(
-                    vec![(Pattern::Name("normalizer".into()), normalizer.clone())],
-                    Box::new(term(
-                        Ty::Text,
-                        Node::CallFn { fn_name: "normalizer".into(), args: vec![argument], body: None },
-                    )),
-                ),
-            );
+            let mut builder = TermBuilder::new();
+            let form_id = builder.import_form(&normalizer.form());
+            let normalizer_id = builder.import(normalizer);
+            let argument = builder.push(None, &Ty::Text, form_id, Draft::RefBinding("raw_value".into(), Vec::new()));
+            let call = builder.push(None, &Ty::Text, form_id, Draft::CallFn { fn_name: "normalizer".into(), args: vec![argument], body: None });
+            let body = builder.push(None, &Ty::Text, form_id, Draft::Let(vec![(Pattern::Name("normalizer".into()), normalizer_id)], call));
+            let arena = builder.freeze();
+            let body = arena.handle(body);
+            let form = arena.syntax().handle(form_id);
             let graph = Graph {
                 name: format!("lisp_normalize_{name}"),
                 context: context::value(),
                 inputs: vec![("raw_value".into(), Ty::Text, None)],
                 body,
-                form: (*form).clone(),
+                form: form.clone(),
             };
             let graph_name = graph.name.clone();
             let mut one = checked.clone();
@@ -121,7 +118,7 @@ fn normalize_defaults(workspace: &Workspace) -> Result<Workspace, Diagnostic> {
             nodes.push(node.clone());
             continue;
         }
-        nodes.push(normalize_node(workspace, node)?);
+        nodes.push(Arc::new(normalize_node(workspace, node)?));
     }
     Ok(Workspace { nodes: nodes.into(), ..workspace.clone() })
 }
@@ -130,144 +127,50 @@ struct Hooks {
     nodes: Vec<(String, Vec<(String, Normalizer)>)>,
 }
 
-fn walk_terms(hooks: &Hooks, terms: &[Term]) -> Result<Vec<Term>, Diagnostic> {
-    terms.iter().map(|t| walk(hooks, t)).collect()
-}
-
-fn walk_fields(hooks: &Hooks, fields: &[(String, Term)]) -> Result<Vec<(String, Term)>, Diagnostic> {
-    fields.iter().map(|(name, t)| Ok((name.clone(), walk(hooks, t)?))).collect()
-}
-
-fn walk_patterns(hooks: &Hooks, bindings: &[(Pattern, Term)]) -> Result<Vec<(Pattern, Term)>, Diagnostic> {
-    bindings.iter().map(|(p, t)| Ok((p.clone(), walk(hooks, t)?))).collect()
-}
-
-fn walk_box(hooks: &Hooks, term: &Term) -> Result<Box<Term>, Diagnostic> {
-    Ok(Box::new(walk(hooks, term)?))
-}
-
-fn walk_optional(hooks: &Hooks, term: &Option<Box<Term>>) -> Result<Option<Box<Term>>, Diagnostic> {
-    match term {
-        None => Ok(None),
-        Some(term) => Ok(Some(walk_box(hooks, term)?)),
-    }
-}
-
-fn walk(hooks: &Hooks, term: &Term) -> Result<Term, Diagnostic> {
-    let node = match &term.node {
-        Node::Call { kind, ctx, args } => {
-            let args = walk_fields(hooks, args)?;
-            let table = hooks.nodes.iter().find(|(name, _)| name == kind).map(|(_, h)| h.as_slice()).unwrap_or(&[]);
-            let mut canonical = Vec::with_capacity(args.len());
-            for (name, arg) in args {
-                let hook = table.iter().find(|(hook, _)| *hook == name);
-                match (hook, &arg.node) {
-                    (Some((_, normalize)), Node::Text(raw)) => {
-                        let text = normalize(raw).map_err(|mut d| {
-                            d.span = Some(arg.form.span.clone());
-                            d
-                        })?;
-                        canonical.push((name, Term { node: Node::Text(text), ..arg }));
-                    }
-                    _ => canonical.push((name, arg)),
-                }
-            }
-            Node::Call { kind: kind.clone(), ctx: *ctx, args: canonical }
-        }
-        Node::Op { op, args, skip } => Node::Op { op: op.clone(), args: walk_fields(hooks, args)?, skip: skip.clone() },
-        Node::GraphRef { graph, inputs } => {
-            Node::GraphRef { graph: graph.clone(), inputs: walk_fields(hooks, inputs)? }
-        }
-        Node::CallFn { fn_name, args, body } => {
-            let args = walk_terms(hooks, args)?;
-            Node::CallFn { fn_name: fn_name.clone(), args, body: walk_optional(hooks, body)? }
-        }
-        Node::Vec(values) => Node::Vec(walk_terms(hooks, values)?),
-        Node::ListLit(values) => Node::ListLit(walk_terms(hooks, values)?),
-        Node::Str(values) => Node::Str(walk_terms(hooks, values)?),
-        Node::Hof(kind, values) => Node::Hof(*kind, walk_terms(hooks, values)?),
-        Node::ListOp(kind, values) => Node::ListOp(kind.clone(), walk_terms(hooks, values)?),
-        Node::Record(values) => Node::Record(walk_fields(hooks, values)?),
-        Node::Let(bindings, body) => {
-            let bindings = walk_patterns(hooks, bindings)?;
-            Node::Let(bindings, walk_box(hooks, body)?)
-        }
-        Node::Loop { kind, accs, clauses, skip, body, zone } => {
-            let accs = walk_patterns(hooks, accs)?;
-            let clauses = walk_patterns(hooks, clauses)?;
-            Node::Loop {
-                kind: *kind,
-                accs,
-                clauses,
-                skip: skip.clone(),
-                body: walk_box(hooks, body)?,
-                zone: zone.clone(),
-            }
-        }
-        Node::State { binder, init, step, zone } => {
-            let init = walk_box(hooks, init)?;
-            Node::State { binder: binder.clone(), init, step: walk_box(hooks, step)?, zone: zone.clone() }
-        }
-        Node::WithError(a, b) => {
-            let a = walk_box(hooks, a)?;
-            Node::WithError(a, walk_box(hooks, b)?)
-        }
-        Node::ErrorRows { rows, policy, mapper } => {
-            let rows = walk_box(hooks, rows)?;
-            Node::ErrorRows { rows, policy: *policy, mapper: walk_box(hooks, mapper)? }
-        }
-        Node::If(condition, yes, no) => {
-            let condition = walk_box(hooks, condition)?;
-            let yes = walk_box(hooks, yes)?;
-            Node::If(condition, yes, walk_box(hooks, no)?)
-        }
-        Node::Cond(arms, default) => {
-            let mut walked = Vec::with_capacity(arms.len());
-            for (a, b) in arms {
-                let a = walk(hooks, a)?;
-                walked.push((a, walk(hooks, b)?));
-            }
-            Node::Cond(walked, walk_box(hooks, default)?)
-        }
-        Node::Case(value, arms, default) => {
-            let value = walk_box(hooks, value)?;
-            let mut walked = Vec::with_capacity(arms.len());
-            for (pattern, arm) in arms {
-                walked.push((pattern.clone(), walk(hooks, arm)?));
-            }
-            Node::Case(value, walked, walk_box(hooks, default)?)
-        }
-        Node::Fn { params, body, zone, capture } => {
-            let capture = walk_optional(hooks, capture)?;
-            Node::Fn { params: params.clone(), body: walk_box(hooks, body)?, zone: zone.clone(), capture }
-        }
-        Node::Get(value, field) => Node::Get(walk_box(hooks, value)?, field.clone()),
-        Node::Bypass(value) => Node::Bypass(walk_box(hooks, value)?),
-        Node::Expanded { macro_name, body } => {
-            Node::Expanded { macro_name: macro_name.clone(), body: walk_box(hooks, body)? }
-        }
-        Node::Assoc(value, updates) => {
-            let value = walk_box(hooks, value)?;
-            Node::Assoc(value, walk_fields(hooks, updates)?)
-        }
-        Node::Lit(_) | Node::Text(_) | Node::Nil | Node::Time | Node::RefBinding(..) | Node::FnRef(_) => {
-            term.node.clone()
-        }
-    };
-    Ok(Term { path: term.path.clone(), ty: term.ty.clone(), node, form: term.form.clone() })
-}
-
 fn walk_graph(hooks: &Hooks, graph: &Graph) -> Result<Graph, Diagnostic> {
-    let body = walk(hooks, &graph.body)?;
-    let mut inputs = Vec::with_capacity(graph.inputs.len());
-    for (name, ty, default) in &graph.inputs {
-        let default = match default {
-            None => None,
-            Some(term) => Some(walk(hooks, term)?),
-        };
-        inputs.push((name.clone(), ty.clone(), default));
-    }
-    Ok(Graph { body, inputs, ..graph.clone() })
+    let mut builder = TermBuilder::new();
+    let roots: Vec<_> = std::iter::once(graph.body.clone()).chain(graph.inputs.iter().filter_map(|(_, _, default)| default.clone())).collect();
+    let mut error = None;
+    let ids = builder.rewrite_roots(&roots, &mut |builder, _, draft| {
+        if error.is_some() { return draft; }
+        let Draft::Call { kind, ctx, args } = draft else { return draft };
+        let table = hooks.nodes.iter().find(|(name, _)| name == &kind).map(|(_, h)| h.as_slice()).unwrap_or(&[]);
+        let mut canonical = Vec::with_capacity(args.len());
+        for (name, arg) in args {
+            let hook = table.iter().find(|(hook, _)| *hook == name);
+            let arg = match (hook, builder.node(arg)) {
+                (Some((_, normalize)), Node::Text(raw)) => {
+                    match normalize(builder.raw_bytes(raw)) {
+                        Ok(text) => {
+                            let row = *builder.row(arg);
+                            let ty = builder.type_by_id(row.ty).clone();
+                            let path: Option<Vec<_>> = row.path.map(|id| builder.path_names(id).iter().map(|&id| builder.name(id).to_owned()).collect());
+                            builder.push(path.as_deref(), &ty, row.form, Draft::Text(text))
+                        }
+                        Err(mut d) => {
+                            let form = builder.row(arg).form;
+                            d.span = Some(builder.syntax_builder().row(form).span.clone());
+                            error = Some(d);
+                            arg
+                        }
+                    }
+                }
+                _ => arg,
+            };
+            canonical.push((name, arg));
+        }
+        Draft::Call { kind, ctx, args: canonical }
+    });
+    if let Some(error) = error { return Err(error); }
+    let form = builder.import_form(&graph.form);
+    let arena = builder.freeze();
+    let mut defaults = ids[1..].iter();
+    Ok(Graph {
+        body: arena.handle(ids[0]),
+        inputs: graph.inputs.iter().map(|(name, ty, default)| (name.clone(), ty.clone(), default.as_ref().map(|_| arena.handle(*defaults.next().unwrap())))).collect(),
+        form: arena.syntax().handle(form),
+        ..graph.clone()
+    })
 }
 
 /// Node-owned schemas and cook identity for checked Lisp geometry bodies: the workspace with
@@ -294,11 +197,15 @@ pub fn checked(workspace: Workspace) -> Result<Workspace, Diagnostic> {
     let nodes = if workspace.nodes.iter().any(|n| graph_calls(&n.body, &hooked)) {
         let mut nodes = Vec::with_capacity(workspace.nodes.len());
         for node in workspace.nodes.iter() {
-            let mut n = node.clone();
-            if graph_calls(&node.body, &hooked) {
-                n.body = walk_graph(&hooks, &node.body)?;
-            }
-            nodes.push(n);
+            nodes.push(if graph_calls(&node.body, &hooked) {
+                Arc::new(NodeDefinition {
+                    kind: node.kind.clone(), slots: node.slots.clone(), keyword_inputs: node.keyword_inputs.clone(), fields: node.fields.clone(),
+                    label: node.label.clone(), category: node.category.clone(), description: node.description.clone(), operation: node.operation.clone(), version: node.version,
+                    body: walk_graph(&hooks, &node.body)?, validations: node.validations.clone(), normalizers: node.normalizers.clone(),
+                })
+            } else {
+                node.clone()
+            });
         }
         Arc::new(nodes)
     } else {
@@ -313,30 +220,8 @@ fn graph_calls(graph: &Graph, kinds: &[&str]) -> bool {
 }
 
 fn calls(term: &Term, kinds: &[&str]) -> bool {
-    let all = |ts: &[Term]| ts.iter().any(|t| calls(t, kinds));
-    let fields = |fs: &[(String, Term)]| fs.iter().any(|(_, t)| calls(t, kinds));
-    let patterns = |ps: &[(Pattern, Term)]| ps.iter().any(|(_, t)| calls(t, kinds));
-    match &term.node {
-        Node::Call { kind, args, .. } => kinds.contains(&kind.as_str()) || fields(args),
-        Node::Op { args, .. } => fields(args),
-        Node::GraphRef { inputs, .. } => fields(inputs),
-        Node::CallFn { args, body, .. } => all(args) || body.as_ref().is_some_and(|b| calls(b, kinds)),
-        Node::Vec(v) | Node::ListLit(v) | Node::Str(v) | Node::Hof(_, v) | Node::ListOp(_, v) => all(v),
-        Node::Record(fs) => fields(fs),
-        Node::Let(bindings, body) => patterns(bindings) || calls(body, kinds),
-        Node::Loop { accs, clauses, body, .. } => patterns(accs) || patterns(clauses) || calls(body, kinds),
-        Node::State { init, step, .. } => calls(init, kinds) || calls(step, kinds),
-        Node::WithError(a, b) => calls(a, kinds) || calls(b, kinds),
-        Node::ErrorRows { rows, mapper, .. } => calls(rows, kinds) || calls(mapper, kinds),
-        Node::If(c, y, n) => calls(c, kinds) || calls(y, kinds) || calls(n, kinds),
-        Node::Cond(arms, default) => arms.iter().any(|(a, b)| calls(a, kinds) || calls(b, kinds)) || calls(default, kinds),
-        Node::Case(value, arms, default) => calls(value, kinds) || arms.iter().any(|(_, t)| calls(t, kinds)) || calls(default, kinds),
-        Node::Fn { body, capture, .. } => calls(body, kinds) || capture.as_ref().is_some_and(|c| calls(c, kinds)),
-        Node::Get(v, _) | Node::Bypass(v) => calls(v, kinds),
-        Node::Expanded { body, .. } => calls(body, kinds),
-        Node::Assoc(v, updates) => calls(v, kinds) || fields(updates),
-        Node::Lit(_) | Node::Text(_) | Node::Nil | Node::Time | Node::RefBinding(..) | Node::FnRef(_) => false,
-    }
+    matches!(term.node, Node::Call(id) if kinds.contains(&term.name(term.arena().call(id).kind)))
+        || term.children().iter().any(|&id| calls(&term.child(id), kinds))
 }
 
 #[cfg(test)]
@@ -407,16 +292,22 @@ mod tests {
         let literal = checked.graphs.iter().find_map(|graph| {
             let mut stack = vec![graph.body.clone()];
             while let Some(term) = stack.pop() {
-                if let Node::Call { kind, args, .. } = &term.node {
-                    if kind == "sop/test_encoded" {
-                        return args.iter().find(|(name, _)| name == "rules").map(|(_, arg)| arg.node.clone());
+                if let Node::Call(id) = term.node {
+                    let call = term.arena().call(id);
+                    if term.name(call.kind) == "sop/test_encoded" {
+                        return term.arena().fields(call.args).iter().find(|field| term.name(field.name) == "rules").and_then(|field| {
+                            match term.child(field.term).node {
+                                Node::Text(id) => Some(term.arena().bytes(id).to_vec()),
+                                _ => None,
+                            }
+                        });
                     }
                 }
-                stack.extend(workspace::children(&term));
+                stack.extend(term.children().iter().map(|&id| term.child(id)));
             }
             None
         });
-        assert_eq!(literal, Some(Node::Text(b"detail".to_vec())));
+        assert_eq!(literal, Some(b"detail".to_vec()));
         refused(&catalog, "E_RULES", &source(NORMALIZER, "bad", "test_encoded", ""));
         refused(&catalog, "E_RULES", &source(NORMALIZER, "point", "test_encoded", ":rules \"bad\""));
         refused(&catalog, "E_PARAM_NORMALIZE", &source("(fn [(raw : text)] (str raw \"x\"))", "point", "test_encoded", ""));
