@@ -35,7 +35,7 @@ pub enum PackedForm { Candidate(Paths), Refused(Vec<Diagnostic>) }
 #[derive(Clone)]
 pub struct Workspace {
     pub name:String, pub graphs:Arc<Vec<Graph>>, pub defs:Arc<Vec<Graph>>, pub nodes:Arc<Vec<Arc<NodeDefinition>>>, pub macros:Arc<Vec<Syntax>>, pub source:Arc<Vec<Syntax>>,
-    pub live:Paths, pub invariant:Paths, pub approx:Paths, pub packed:Vec<(Path,PackedForm)>, pub packed_roots:Vec<(Syntax,Path)>,
+    pub live:Paths, pub invariant:Paths, pub approx:Paths, pub packed:Arc<Vec<(Path,PackedForm)>>, pub packed_roots:Vec<(Syntax,Path)>,
     pub approx_reasons:Vec<(Path,Vec<Diagnostic>)>, pub kind_fns:Vec<(String,(String,Context,Vec<catalog::Slot>))>, pub ops:Arc<Vec<op::Op>>,
 }
 
@@ -3522,7 +3522,7 @@ pub fn check(
         live: checker.live,
         invariant: checker.invariant,
         approx: Paths::new(),
-        packed,
+        packed: packed.into(),
         packed_roots,
         approx_reasons,
         kind_fns: checker.kind_fns.into_iter().collect(),
@@ -3552,6 +3552,20 @@ mod memory_tests {
             assert!(workspace.is_none(), "{source}");
             assert!(diagnostics.iter().any(|d| d.code == "E_WORKSPACE"), "{source}: {diagnostics:?}");
         }
+    }
+
+    #[test]
+    fn workspace_clones_share_packed_metadata_and_edits_keep_the_original() {
+        let forms = syntax::parse("(workspace w (graph g :context host (array/count (map (fn [(x : float)] (+ x 1.0)) (array/float 8 2.0)))))").unwrap();
+        let catalog = catalog::Catalog { version: 0, kinds: Vec::new() };
+        let (workspace, diagnostics) = check(&[], false, false, None, &catalog, &forms);
+        let workspace = workspace.unwrap_or_else(|| panic!("{diagnostics:?}"));
+        assert!(!workspace.packed.is_empty(), "the fixture has packed candidates");
+        let mut edited = workspace.clone();
+        assert!(Arc::ptr_eq(&workspace.packed, &edited.packed), "snapshot cloning does not copy candidate paths");
+        let before = workspace.packed.as_ref().clone();
+        Arc::make_mut(&mut edited.packed).clear();
+        assert_eq!(workspace.packed.as_ref(), &before, "changing a snapshot leaves the original metadata intact");
     }
 
     #[test]

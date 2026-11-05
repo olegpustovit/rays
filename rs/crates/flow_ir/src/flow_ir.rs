@@ -1025,7 +1025,7 @@ pub fn qualify_workspace(options: &QualifyOptions, workspace: &w::Workspace) -> 
     if let Some(d) = failure.lock().unwrap().take() { return Err(d); }
     let evaluated = evaluated?;
     let mut packed_by_path: HashMap<&Path, &w::PackedForm> = HashMap::new();
-    for (path, form) in &workspace.packed {
+    for (path, form) in workspace.packed.iter() {
         packed_by_path.entry(path).or_insert(form);
     }
     let outcomes = q.outcomes.lock().unwrap();
@@ -1037,7 +1037,7 @@ pub fn qualify_workspace(options: &QualifyOptions, workspace: &w::Workspace) -> 
     };
     let mut approx = Paths::new();
     let mut approx_reasons: Vec<(Path, Vec<Diagnostic>)> = Vec::new();
-    for (path, form) in &workspace.packed {
+    for (path, form) in workspace.packed.iter() {
         let refused: Vec<Diagnostic> = match form {
             w::PackedForm::Refused(reasons) => reasons.clone(),
             w::PackedForm::Candidate(producers) => producers.iter().flat_map(|p| reasons(p)).collect(),

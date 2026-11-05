@@ -7,6 +7,30 @@ not timed) and fails while any case is at or above its OCaml time.
 
 ## Current memory work — 2026-11-05, Mac M1
 
+Packed candidate metadata is now immutable shared storage (`Arc<Vec<...>>`) on
+the checked workspace. Evaluator and qualification snapshots keep that allocation;
+explicit edits use copy-on-write. The nonempty-candidate regression checks sharing
+and preservation of the original, while existing evaluator/IR goldens check values,
+paths and refusal diagnostics. No inference or cache invalidation rule changed.
+
+Paired unoptimized debug `ws_tree --frames 3` samples, both exit 0 under 30 s:
+
+| | Before | Shared packed metadata |
+|---|---:|---:|
+| Live | 78.0 MB | 72.0 MB |
+| Unattributed | 54.9 MB | 48.9 MB |
+| Device | 7.2 MB | 7.2 MB |
+| Footprint | 127.9 MB | 115.9 MB |
+| Payload readback/frame | 28.4 KB | 13.9 KB |
+| Wall | 4.13 s | 3.82 s |
+
+Before SHA-256 `9e06afbd327b4057b311959994dd44b2046f3bf8d0fba572366f99bfc31976f3`;
+after `e481d3bff69f19495d0fac46364e901464bcb169b1a3f2161e46897523af334d`.
+Logs `/tmp/rays-packed-metadata-{before,after}.log`. Frame allocation stays
+4.7 MB; both reports overclaim device storage by 10.8 KB, a separate ledger issue.
+Readback varies between samples: this is a retained-memory comparison, not a
+speedup or route-parity claim. Native OCaml's 28.4 MB live target remains unmet.
+
 Fresh unoptimized debug baseline after `7e547730`: `target/debug/rays mem
 ../sketches/ws_tree.rays --frames 3` exits 0 in 5.02 s under a 30-second deadline.
 Live 77.9 MB, device 11.7 MB, footprint 121.5 MB, unattributed 58.4 MB; frame

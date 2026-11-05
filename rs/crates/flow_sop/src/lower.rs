@@ -3897,7 +3897,7 @@ impl HostRun {
         let library = if catalog || overrides.iter().any(|(_, v)| callable(v)) {
             (**checked).clone()
         } else {
-            Workspace { defs: Vec::new().into(), nodes: Vec::new().into(), packed: Vec::new(), packed_roots: Vec::new(), ..(**checked).clone() }
+            Workspace { defs: Vec::new().into(), nodes: Vec::new().into(), packed: Vec::new().into(), packed_roots: Vec::new(), ..(**checked).clone() }
         };
         let mut factories = capture_factories;
         factories.extend(self.env.factories.iter().cloned());

@@ -874,8 +874,8 @@ fn sketch_checks_match_the_ocaml_oracle() {
                         for p in &w.invariant { text.push_str(&format!("I {}\n", path_s(p))); }
                         for p in &w.approx { text.push_str(&format!("A {}\n", path_s(p))); }
                         let mut packed = w.packed.clone();
-                        packed.sort_by(|a, b| a.0.cmp(&b.0));
-                        for (p, f) in &packed {
+                        std::sync::Arc::make_mut(&mut packed).sort_by(|a, b| a.0.cmp(&b.0));
+                        for (p, f) in packed.iter() {
                             match f {
                                 W::PackedForm::Candidate(ps) => text.push_str(&format!("P {} candidate {}\n", path_s(p), ps.iter().map(path_s).collect::<Vec<_>>().join(","))),
                                 W::PackedForm::Refused(rs) => text.push_str(&format!("P {} refused {}\n", path_s(p), rs.len())),
