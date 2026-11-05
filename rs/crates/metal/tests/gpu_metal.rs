@@ -1173,9 +1173,29 @@ fn gpu_argument_reflection_snapshot() {
     no_delta("texture-reference success");
 }
 
+fn gpu_handle_release_pool() {
+    const CHILD: &str = "RAYS_HANDLE_POOL_CHILD";
+    if std::env::var_os(CHILD).is_some() {
+        for _ in 0..32 {
+            drop(metal_sys::native::descriptors::create_render_pass().expect("render pass"));
+            metal_sys::drain_releases().expect("release handles");
+        }
+        gpu_compute_pipeline();
+        return;
+    }
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "gpu_handle_release_pool"])
+        .env(CHILD, "1").env("OBJC_DEBUG_MISSING_POOLS", "YES")
+        .output().expect("autorelease child");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "autorelease child failed: {stderr}");
+    assert!(!stderr.contains("MISSING POOLS"), "native handle release autoreleases outside a pool: {stderr}");
+}
+
 fn main() {
     if !cfg!(target_os = "macos") { return; } // Metal exists only on macOS
     common::run(&[
+        ("gpu_handle_release_pool", gpu_handle_release_pool),
         ("gpu_owner_only_handles", gpu_owner_only_handles),
         ("gpu_device_safe", gpu_device_safe),
         ("gpu_device_queue", gpu_device_queue),

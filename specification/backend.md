@@ -319,6 +319,10 @@ existing case sharding while sharing backend selection and lease cleanup.
 Native lifetime tests release the helper's keepalive before their baseline: the
 last canvas must own device teardown, including cached pipelines, for an exact
 before/after native handle count. Other tests may retain the shared device.
+Rust's native Metal handle destruction and reflection-binding cleanup open their
+own autorelease pools: ARC's `CFBridgingRelease` can autorelease even when its
+result is discarded. A subprocess regression checks both paths with
+`OBJC_DEBUG_MISSING_POOLS=YES`; Rust handle counts alone cannot detect these leaks.
 The Rust dependency gate checks backend selection separately for Apple and
 Windows: mutually exclusive target dependencies do not count as two selections.
 An unconditional second backend or a missing platform backend remains an error.

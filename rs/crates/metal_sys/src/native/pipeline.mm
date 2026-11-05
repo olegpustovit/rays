@@ -45,13 +45,15 @@ struct RaysMetalPipelineBinding {
   void *reflected_type;
 };
 static void free_pipeline_bindings(RaysMetalPipelineBinding *bindings, size_t count) {
-  if (bindings == nullptr) return;
-  for (size_t index = 0; index < count; ++index) {
-    delete[] bindings[index].name;
-    if (bindings[index].reflected_type != nullptr)
-      (void)CFBridgingRelease(bindings[index].reflected_type);
+  @autoreleasepool {
+    if (bindings == nullptr) return;
+    for (size_t index = 0; index < count; ++index) {
+      delete[] bindings[index].name;
+      if (bindings[index].reflected_type != nullptr)
+        (void)CFBridgingRelease(bindings[index].reflected_type);
+    }
+    delete[] bindings;
   }
-  delete[] bindings;
 }
 
 static uint64_t texture_slice_count(id<MTLTexture> texture) {
