@@ -7,6 +7,17 @@ not timed) and fails while any case is at or above its OCaml time.
 
 ## Current memory work — 2026-11-05, Mac M1
 
+The dependency memo now bounds answers and observed function IDs at 4,096 each.
+Semantic replacement of an observed function invalidates across arena homes;
+identical dependency inputs and unobserved construction preserve warm answers.
+Capacity clears also advance a generation so older queries cannot restore answers
+after their function watches were forgotten. No arena ownership is retained.
+Current debug tree remains 59.3 MB live / 39.4 MB unattributed, 7.2 MB device,
+3.9 MB allocated/frame and 13.9 KB payload readback/frame, exit 0 in 3.94 s.
+SHA-256 `053aa1f2d403bde767b05195a24efe69f5d3985201f40ca4dc6dd491030ecef3`;
+log `/tmp/rays-dependency-memo-watched-memory.log`. This is lifecycle/correctness
+work, not a claimed live-memory reduction; the OCaml target remains unmet.
+
 Packed producer sets inside `PackedForm::Candidate` are shared through `Arc<Paths>`.
 Cloning the prelude's map or a checked metadata entry retains the existing set;
 merging uses copy-on-write only when the incoming set adds paths. Exact set/merge

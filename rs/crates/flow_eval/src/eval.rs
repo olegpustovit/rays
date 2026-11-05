@@ -524,6 +524,22 @@ fn own_fn<'a>(a: &'a Arena, id: &FnId) -> Option<&'a Function> { if id.1 == a.id
 fn get_res(a: &Arena, id: ResidualId) -> Result<ResidualData, Diagnostic> { own_res(a, &id).cloned().ok_or_else(|| error("E_RESIDUAL_ID", "Residual belongs to an expired evaluation.")) }
 fn closure_id(a:&mut Arena, f:Function)->FnId{let id=new_fid(a);insert_fn(a,id,f);id}
 fn insert_fn(a:&mut Arena,id:FnId,f:Function){a.functions.insert(id,f);a.fn_log.push(id);}
+fn replace_fn(a: &mut Arena, id: FnId, function: Function) {
+    let unchanged = match (a.functions.get(&id), &function) {
+        (Some(Function::Closure(old)), Function::Closure(new)) => old.body.identity() == new.body.identity()
+            && Arc::ptr_eq(&old.env, &new.env) && old.at.context == new.at.context,
+        _ => false,
+    };
+    a.functions.insert(id, function);
+    // Residuals in other homes can capture this same function ID. A function never
+    // read by a dependency query cannot affect a retained answer.
+    if !unchanged {
+        let mut memo = DEP_MEMO.lock().unwrap();
+        if memo.watched.contains(&(id.1, id.0)) {
+            memo.invalidate();
+        }
+    }
+}
 fn residual_id(a: &mut Arena, residual: ResidualData) -> ResidualId {
     let id = new_rid(a);
     insert_residual(a, id, residual);
@@ -1601,7 +1617,7 @@ fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Valu
             if let Some(original) = node.capture {
                 let Value::Fn(id) = eval_at(a, c, env, &t.child(original))? else { return eval_error("E_TYPE", "A function port requires a function."); };
                 match get_fn(a, id)? {
-                    Function::Closure(closure) => { let mut closure = unshare(closure); { closure.params = params; closure.body = shared_term(a, body); a.functions.insert(id, Function::Closure(Arc::new(closure))); Ok(Value::Fn(id)) } }
+                    Function::Closure(closure) => { let mut closure = unshare(closure); { closure.params = params; closure.body = shared_term(a, body); replace_fn(a, id, Function::Closure(Arc::new(closure))); Ok(Value::Fn(id)) } }
                     Function::Named(named) => { let body = shared_term(a, body); Ok(Value::Fn(closure_id(a, Function::Closure(Arc::new(ClosureData { params, replayable: false, body, env: Arc::new(BTreeMap::new()), zone, calls: named.calls, at: c.clone() }))))) },
                 }
             } else {
@@ -3379,7 +3395,7 @@ fn rewrite_value(
             functions.insert(key, copy);
             peek(&home, |arena| { arena.functions.insert(copy, Function::Closure(Arc::new(closure.clone()))); });
             closure.env = Arc::new(Arc::unwrap_or_clone(closure.env).into_iter().map(|(name, value)| (name, rewrite_value(&value, replace, fresh, retarget, residuals, functions))).collect());
-            peek(&home, |arena| { arena.functions.insert(copy, Function::Closure(Arc::new(closure))); });
+            peek(&home, |arena| replace_fn(arena, copy, Function::Closure(Arc::new(closure))));
             Value::Fn(copy)
         }
         Value::List(values) => Value::List(Arc::new(values.iter().map(|value| rewrite_value(value, replace, fresh, retarget, residuals, functions)).collect())),
@@ -3431,7 +3447,7 @@ pub mod Host {
         if let Some(Function::Closure(closure)) = peek(&arena, |arena| arena.functions.get(&function).cloned()) {
             let mut closure = unshare(closure);
             closure.env = Arc::new(Arc::unwrap_or_clone(closure.env).into_iter().map(|(name, value)| (name, replace(&value))).collect());
-            peek(&arena, |arena| { arena.functions.insert(function, Function::Closure(Arc::new(closure))); });
+            peek(&arena, |arena| replace_fn(arena, function, Function::Closure(Arc::new(closure))));
         }
         function
     }
@@ -3680,7 +3696,30 @@ mod tests {
 // Dependence without a collecting walk (frame_dependent / state_dependent): every residual remembers its answer, as the OCaml
 // residual does (dep_frame / dep_state); without it a let-bound array read by many bindings is walked once per reader and
 // `static_sop` asks every residual. It is keyed by id and home: deterministic ids repeat across plans.
-static DEP_MEMO: LazyLock<Mutex<HashMap<(i64, i64, bool), bool>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+#[derive(Default)]
+struct DependencyMemo {
+    generation: u64,
+    values: HashMap<(i64, i64, bool), bool>,
+    watched: HashSet<(i64, i64)>,
+}
+impl DependencyMemo {
+    fn invalidate(&mut self) { self.generation = self.generation.wrapping_add(1); self.values.clear(); self.watched.clear(); }
+    fn watch(&mut self, function: FnId) {
+        let key = (function.1, function.0);
+        if self.watched.contains(&key) { return; }
+        // Forget watches only with the answers they protect. The generation also rejects
+        // an in-flight query that read a function before its watch was forgotten.
+        if self.watched.len() >= 4096 { self.invalidate(); }
+        self.watched.insert(key);
+    }
+    fn remember(&mut self, generation: u64, key: (i64, i64, bool), answer: bool) {
+        if generation != self.generation { return; }
+        // ponytail: clear at 4096 answers; use LRU if eviction profiles hot.
+        if self.values.len() >= 4096 { self.invalidate(); return; }
+        self.values.insert(key, answer);
+    }
+}
+static DEP_MEMO: LazyLock<Mutex<DependencyMemo>> = LazyLock::new(|| Mutex::new(DependencyMemo::default()));
 fn dep_value(arena: &mut Arena, value: &Value, frame: bool, active: &mut HashSet<(i64, i64, bool)>, named: &mut HashMap<(i64, (u64, u32), &'static str), bool>) -> bool {
     let home = match value { Value::Residual(id) => id.1, Value::Fn(id) => id.1, _ => arena.id };
     if home != arena.id {
@@ -3690,22 +3729,27 @@ fn dep_value(arena: &mut Arena, value: &Value, frame: bool, active: &mut HashSet
     }
     match value {
         Value::Residual(id) => {
-            if let Some(known) = DEP_MEMO.lock().unwrap().get(&(id.0, id.1, frame)) { return *known; }
+            let key = (id.0, id.1, frame);
+            let (known, generation) = { let memo = DEP_MEMO.lock().unwrap(); (memo.values.get(&key).copied(), memo.generation) };
+            if let Some(known) = known { return known; }
             if !active.insert((id.1, id.0, false)) { return false; }
             let answer = match own_res(arena, id).cloned() { Some(r) => dep_term(arena, &r.term, &r.env, &r.ctx.context, frame, active, named), None => false };
             active.remove(&(id.1, id.0, false));
-            if own_res(arena, id).is_some() { DEP_MEMO.lock().unwrap().insert((id.0, id.1, frame), answer); }
+            if own_res(arena, id).is_some() { DEP_MEMO.lock().unwrap().remember(generation, key, answer); }
             answer
         }
-        Value::Fn(id) => match own_fn(arena, id).cloned() {
-            Some(Function::Closure(closure)) => {
-                if !active.insert((id.1, id.0, true)) { return false; }
-                let answer = dep_term(arena, &closure.body, &closure.env, &closure.at.context, frame, active, named);
-                active.remove(&(id.1, id.0, true));
-                answer
+        Value::Fn(id) => {
+            DEP_MEMO.lock().unwrap().watch(*id);
+            match own_fn(arena, id).cloned() {
+                Some(Function::Closure(closure)) => {
+                    if !active.insert((id.1, id.0, true)) { return false; }
+                    let answer = dep_term(arena, &closure.body, &closure.env, &closure.at.context, frame, active, named);
+                    active.remove(&(id.1, id.0, true));
+                    answer
+                }
+                Some(Function::Named(function)) => dep_named(arena, &function.name, frame, active, named),
+                None => false,
             }
-            Some(Function::Named(function)) => dep_named(arena, &function.name, frame, active, named),
-            None => false,
         },
         Value::List(values) => values.iter().any(|value| dep_value(arena, value, frame, active, named)),
         Value::Record(fields) | Value::Struct(_, _, fields) | Value::Source(_, _, fields) => fields.iter().any(|(_, value)| dep_value(arena, value, frame, active, named)),
@@ -4179,7 +4223,7 @@ impl Run {
                 Undo::Calls(id, Some(count)) => { a.fn_calls.insert(id, count); }
                 Undo::Calls(id, None) => { a.fn_calls.remove(&id); }
                 Undo::Closure(id) => { a.functions.remove(&id); if a.fn_log.last() == Some(&id) { a.fn_log.pop(); } }
-                Undo::Replace(id, function) => { a.functions.insert(id, function); }
+                Undo::Replace(id, function) => { replace_fn(a, id, function); }
             }
         }
     }
@@ -4291,7 +4335,7 @@ impl Run {
                         ported.params = made.params.clone();
                         ported.body = made.body.clone();
                         self.undo.push(Undo::Replace(id, Function::Closure(closure)));
-                        a.functions.insert(id, Function::Closure(Arc::new(ported)));
+                        replace_fn(a, id, Function::Closure(Arc::new(ported)));
                         Value::Fn(id)
                     }
                     Some(Function::Named(named)) => {
@@ -4439,6 +4483,56 @@ fn run_compiled(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Option<Resul
 #[cfg(test)]
 mod ownership_tests {
     use super::*;
+
+    #[test]
+    fn residual_dependency_memo_tracks_capture_edits() {
+        let mut memo = DependencyMemo::default();
+        for id in 0..8192 { memo.remember(memo.generation, (id, 0, false), true); }
+        assert!(memo.values.len() <= 4096, "the memo has a fixed retained-entry ceiling");
+        let prior = memo.generation;
+        memo.invalidate();
+        memo.remember(prior, (0, 0, false), true);
+        assert!(memo.values.is_empty(), "an in-flight old query cannot restore invalidated answers");
+        memo.remember(memo.generation, (0, 0, false), false);
+        assert_eq!(memo.values.get(&(0, 0, false)), Some(&false));
+        let prior = memo.generation;
+        for id in 0..8192 { memo.watch(FnId(id, 0)); }
+        assert!(memo.watched.len() <= 4096, "watched functions have a fixed retained-entry ceiling too");
+        memo.remember(prior, (0, 0, false), true);
+        assert!(memo.values.is_empty(), "forgetting watches also rejects old in-flight answers");
+        let checked = crate::test_workspace_eval::check("(workspace w (graph g :context host [(x : float 0)]
+          (let* [f (fn [(i : float)] (+ x (+ i t)))] (map f (array/float 4)))))");
+        let evaluation = r#static(&checked, true, None).unwrap();
+        let value = &evaluation.results[0].1;
+        assert!(matches!(value, Value::Residual(_)));
+        let Value::Fn(function) = evaluation.records.iter().find(|(path, _)| path == &["g", "f"]).unwrap().1[0].1 else { panic!("recorded mapper"); };
+        let Value::Residual(original) = value else { unreachable!() };
+        let mut captured = peek(&slot_of(original.1).unwrap(), |arena| own_res(arena, original).unwrap().clone());
+        let foreign = Arena::new(&checked, false, 1000);
+        let foreign = {
+            let mut arena = checkout(&foreign);
+            captured.ctx.arena = arena.id;
+            Value::Residual(residual_id(&mut arena, captured))
+        };
+        let values = [value, &foreign];
+        for value in values { assert!(!state_dependent(value)); }
+        let generation = DEP_MEMO.lock().unwrap().generation;
+        peek(&slot_of(function.1).unwrap(), |arena| {
+            let same = own_fn(arena, &function).unwrap().clone();
+            replace_fn(arena, function, same.clone());
+            let unused = closure_id(arena, same.clone());
+            let Function::Closure(closure) = same else { unreachable!() };
+            let mut changed = unshare(closure);
+            changed.env = Arc::new(BTreeMap::new());
+            replace_fn(arena, unused, Function::Closure(Arc::new(changed)));
+        });
+        assert_eq!(DEP_MEMO.lock().unwrap().generation, generation, "unchanged or unread dependency inputs keep warm answers");
+        let state = static_eval(&crate::test_workspace_eval::check("(workspace stateful (graph g :context host (state [n 0] (+ n 1))))")).unwrap().results[0].1.clone();
+        Host::map_function_bindings(function, &|_| state.clone());
+        for value in values { assert!(state_dependent(value), "cached residuals in either home must see edited function captures"); }
+        Host::map_function_bindings(function, &|_| Value::Float(0.));
+        for value in values { assert!(!state_dependent(value), "removing state must invalidate cached positive answers too"); }
+    }
 
     #[test]
     fn shared_named_dependencies_preserve_reads_across_capture_edits() {
