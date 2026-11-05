@@ -1069,7 +1069,7 @@ pub mod Executor {
 
     pub struct ProgramData {
         pub value: Value,
-        candidates: Mutex<HashMap<(i64, bool), Candidate>>,
+        candidates: Mutex<HashMap<((i64, i64), bool), Candidate>>,
         root_core: Mutex<Option<(bool, Arc<core_exec::Prepared>)>>,
         packed_region: Option<Packed>,
         packed_root: Option<(Packed, bool)>,
@@ -1088,7 +1088,7 @@ pub mod Executor {
         /// A residual is immutable: its strict lowering, and the captures that lowering took in,
         /// are kept for its next strict compile (a write's check, its program and its device
         /// record compile one value three times).
-        static STRICTS: RefCell<HashMap<i64, Arc<(Result<c::Program, String>, Vec<i64>)>>> = RefCell::new(HashMap::new());
+        static STRICTS: RefCell<HashMap<(i64, i64), Arc<(Result<c::Program, String>, Vec<(i64, i64)>)>>> = RefCell::new(HashMap::new());
     }
 
     /// This thread's strict lowerings still kept: the ledger walks them.
@@ -1156,26 +1156,27 @@ pub mod Executor {
         )
     }
 
-    fn strict_lower(trace: &Option<core_lower::Trace>, residual: ResidualId) -> Arc<(Result<c::Program, String>, Vec<i64>)> {
+    fn strict_lower(trace: &Option<core_lower::Trace>, residual: ResidualId) -> Arc<(Result<c::Program, String>, Vec<(i64, i64)>)> {
         let lower = || {
             let _phase = flow_syntax::phase_timer::measure("executor.strict_lower");
-            let inline: std::rc::Rc<RefCell<Vec<i64>>> = std::rc::Rc::new(RefCell::new(Vec::new()));
+            let inline = std::rc::Rc::new(RefCell::new(Vec::new()));
             let hook = {
                 let inline = inline.clone();
-                std::rc::Rc::new(move |r: ResidualId| inline.borrow_mut().insert(0, r.0)) as core_lower::LoweredHook
+                std::rc::Rc::new(move |r: ResidualId| inline.borrow_mut().insert(0, (r.1, r.0))) as core_lower::LoweredHook
             };
             let core = core_lower::lower(None, trace.clone(), true, None, Some(hook), residual);
             let ids = inline.borrow().clone();
             Arc::new((core, ids))
         };
         if trace.is_some() { return lower(); }
-        if let Some(kept) = STRICTS.with(|t| t.borrow().get(&residual.0).cloned()) { return kept; }
+        let key = (residual.1, residual.0);
+        if let Some(kept) = STRICTS.with(|t| t.borrow().get(&key).cloned()) { return kept; }
         let kept = lower();
         // ponytail: a whole clear at 4096 residuals, as Eval's free-name memo
         STRICTS.with(|t| {
             let mut t = t.borrow_mut();
             if t.len() >= 4096 { t.clear(); }
-            t.insert(residual.0, kept.clone());
+            t.insert(key, kept.clone());
         });
         kept
     }
@@ -1205,8 +1206,8 @@ pub mod Executor {
     struct Validate {
         trace: Option<core_lower::Trace>,
         count_source: CountSource,
-        inline: HashMap<i64, ()>,
-        validated: HashMap<i64, ()>,
+        inline: HashMap<(i64, i64), ()>,
+        validated: HashMap<(i64, i64), ()>,
     }
 
     impl Validate {
@@ -1349,10 +1350,10 @@ pub mod Executor {
         // strict lowering took into its program (a capture it reads) was lowered there
         fn validate_value(&mut self, value: &Value) -> Result<(), Diagnostic> {
             match value {
-                Value::Residual(r) if self.validated.contains_key(&r.0) => Ok(()),
+                Value::Residual(r) if self.validated.contains_key(&(r.1, r.0)) => Ok(()),
                 Value::Residual(r) => {
-                    self.validated.insert(r.0, ());
-                    if !self.inline.contains_key(&r.0) { self.validate_residual(*r)?; }
+                    self.validated.insert((r.1, r.0), ());
+                    if !self.inline.contains_key(&(r.1, r.0)) { self.validate_residual(*r)?; }
                     let view = e::Residual::residual_view(*r)?;
                     for (_, x) in &view.bindings { self.validate_value(x)?; }
                     Ok(())
@@ -1484,8 +1485,8 @@ pub mod Executor {
         live: Frame,
         counters: Counters,
         measure: Option<packed::Measure>,
-        forced: Mutex<HashMap<i64, Value>>,
-        operation: Mutex<HashMap<(i64, bool), Candidate>>,
+        forced: Mutex<HashMap<(i64, i64), Value>>,
+        operation: Mutex<HashMap<((i64, i64), bool), Candidate>>,
         fell_back: std::sync::atomic::AtomicBool,
         packed_ran: Arc<std::sync::atomic::AtomicBool>,
     }
@@ -1497,7 +1498,7 @@ pub mod Executor {
 
     impl Run {
         fn candidate(&self, r: ResidualId) -> Candidate {
-            let key = (r.0, self.o.strict);
+            let key = ((r.1, r.0), self.o.strict);
             if let Some(found) = self.operation.lock().unwrap().get(&key) { return found.clone(); }
             let result = {
                 let mut candidates = self.p.candidates.lock().unwrap();
@@ -1533,7 +1534,7 @@ pub mod Executor {
                 }
             };
             if let (Candidate::Core(prepared), Value::Residual(root)) = (&result, &self.p.value) {
-                if *root == r && prepared.direct() { *self.p.root_core.lock().unwrap() = Some((self.o.strict, prepared.clone())); }
+                if (root.1, root.0) == (r.1, r.0) && prepared.direct() { *self.p.root_core.lock().unwrap() = Some((self.o.strict, prepared.clone())); }
             }
             self.operation.lock().unwrap().insert(key, result.clone());
             result
@@ -1620,7 +1621,8 @@ pub mod Executor {
             let strict_or_resident = self.o.strict || self.o.resident.is_some();
             match value {
                 Value::Residual(r) => {
-                    if let Some(found) = self.forced.lock().unwrap().get(&r.0) { return Ok(found.clone()); }
+                    let key = (r.1, r.0);
+                    if let Some(found) = self.forced.lock().unwrap().get(&key) { return Ok(found.clone()); }
                     e::Residual::bind_live(*r, &self.live, Some(&state))?;
                     let restore = e::Residual::checkpoint(*r)?;
                     let result = match self.execute(*r, &self.live) {
@@ -1645,7 +1647,7 @@ pub mod Executor {
                             }
                         }
                     }?;
-                    self.forced.lock().unwrap().insert(r.0, result.clone());
+                    self.forced.lock().unwrap().insert(key, result.clone());
                     self.walk(&result)
                 }
                 Value::Source(..) | Value::Struct(_, Ty::Array(_), _) => {

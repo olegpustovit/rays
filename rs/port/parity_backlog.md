@@ -1,4 +1,12 @@
 # Parity backlog (collected from agent reports; fix in one pass when flow_ir/flow_sop land)
+
+## Verified identity follow-up — 2026-11-05
+
+- FIXED: physical residual/function memo keys include home as well as numeric ID across strict validation, Core lowering, executor results/candidates, packed uniforms/arguments and Host rewriting. Public ID equality is unchanged. Default evaluator/IR/SOP/native and actual Metal resident gates pass; exact counts/times are in `../CHECKPOINT.md`.
+- OPEN: evaluator `read_value`/`dep_value` traverse only `own_res`/`own_fn` in the initially chosen arena, dropping foreign-home dependencies. A record of independently evaluated `t` and `(state [n 0] (+ n 1))` reports `frame_reads == ["time"]` instead of `["state", "time"]`; cold `state_dependent` is false, becoming true after querying the state alone. Reproduces with distinct numeric IDs too: changing visited keys alone cannot fix ownership traversal. Next repair must traverse foreign homes without nested arena-lock deadlocks. Diagnostic source `/tmp/rays-foreign-dependency-repro.rs`, log `/tmp/rays-foreign-dependency-diagnostic.log`; temporary diagnostic test was removed, not ignored or counted as passing.
+
+## Historical reports (verify before treating as current)
+
 - flow_ir: OCaml evaluates `if` branches right-to-left, so text constants are numbered in the other order (flow_web oracle case `js_region carried record`, both precisions).
 - flow_ir core_lower refuses the `error_rows` mapper with "refused binding" where OCaml lowers it (flow_web ignored test range_last_diagnosis_is_refused_with_its_span).
 - flow_check: `error_rows` rejects `rows mapper :policy text`; OCaml accepts (workspace.ml:1456).

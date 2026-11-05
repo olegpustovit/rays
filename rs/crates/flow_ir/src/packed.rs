@@ -4167,8 +4167,8 @@ pub mod host {
     /// Declared types of the structured Core arguments captured by this region.
     pub fn argument_types(t: &T) -> Result<Vec<Ty>, Diagnostic> {
         let mut types: HashMap<i64, Ty> = HashMap::new();
-        let mut visited: HashSet<i64> = HashSet::new();
-        fn value(v: &Value, types: &mut HashMap<i64, Ty>, visited: &mut HashSet<i64>) -> Result<(), Diagnostic> {
+        let mut visited: HashSet<(i64, i64)> = HashSet::new();
+        fn value(v: &Value, types: &mut HashMap<i64, Ty>, visited: &mut HashSet<(i64, i64)>) -> Result<(), Diagnostic> {
             if let Some((ty, index)) = argument_index(v)? {
                 if index < 0 {
                     return Err(value::fail("E_CORE_ARGUMENT", "Invalid compiled argument index."));
@@ -4202,8 +4202,8 @@ pub mod host {
             }
             Ok(())
         }
-        fn residual(r: ResidualId, types: &mut HashMap<i64, Ty>, visited: &mut HashSet<i64>) -> Result<(), Diagnostic> {
-            let id = E::Residual::residual_id(r);
+        fn residual(r: ResidualId, types: &mut HashMap<i64, Ty>, visited: &mut HashSet<(i64, i64)>) -> Result<(), Diagnostic> {
+            let id = (r.1, r.0);
             if visited.insert(id) {
                 for (_, v) in E::Residual::residual_view(r)?.bindings {
                     value(&v, types, visited)?;
@@ -4809,9 +4809,9 @@ pub mod host {
         // live bindings are their values, made once per call; a binding that fails made eagerly stays
         // as it was, made only where the term reads it. So do the residuals inside a record or list
         // binding: a live matrix's rows, which every read of the matrix made again.
-        let made: RefCell<HashMap<i64, Value>> = RefCell::new(HashMap::new());
-        fn uniform_of(pv: &Pv, resolve: &Option<Resolve>, made: &RefCell<HashMap<i64, Value>>, residual: ResidualId) -> K<Value> {
-            let id = E::Residual::residual_id(residual);
+        let made: RefCell<HashMap<(i64, i64), Value>> = RefCell::new(HashMap::new());
+        fn uniform_of(pv: &Pv, resolve: &Option<Resolve>, made: &RefCell<HashMap<(i64, i64), Value>>, residual: ResidualId) -> K<Value> {
+            let id = (residual.1, residual.0);
             if let Some(v) = made.borrow().get(&id) {
                 return Ok(v.clone());
             }
@@ -4822,7 +4822,7 @@ pub mod host {
             made.borrow_mut().insert(id, value.clone());
             Ok(value)
         }
-        fn binding_of_value(pv: &Pv, resolve: &Option<Resolve>, made: &RefCell<HashMap<i64, Value>>, value: &Value) -> Value {
+        fn binding_of_value(pv: &Pv, resolve: &Option<Resolve>, made: &RefCell<HashMap<(i64, i64), Value>>, value: &Value) -> Value {
             match value {
                 Value::Residual(r) if !E::state_dependent(value) => uniform_of(pv, resolve, made, *r).unwrap_or_else(|_| value.clone()),
                 Value::Record(fields) => {

@@ -49,6 +49,89 @@ fn compile_strict(value: &Value) -> crate::flow_ir::Executor::Program {
     ok(Executor::compile(value, &Executor::CompileOptions { strict: true, ..Default::default() }))
 }
 
+#[test]
+fn strict_validation_distinguishes_equal_residual_numbers_in_different_homes() {
+    let rewrite = |value: Value| {
+        let next = std::cell::Cell::new(-8_440_001i64);
+        E::Host::rewrite_with(&value, &|_| None, &|| {
+            let id = next.get();
+            next.set(id - 1);
+            id
+        }, &|_, _| None)
+    };
+    let good = rewrite(recorded("(map (fn [x] (+ x t)) (array/range 16))"));
+    let bad = recorded(r#"(map (fn [x] (if (> t 0.) (error "E_DYNAMIC" (str x)) x)) (array/range 16))"#);
+    let options = Executor::CompileOptions { strict: true, ..Default::default() };
+    assert!(matches!(Executor::compile(&bad, &options), Err(d) if d.code == "E_KERNEL_FORM"), "the uncached fixture must refuse");
+    let bad = rewrite(bad);
+    let (Value::Residual(a), Value::Residual(b)) = (&good, &bad) else { panic!("live maps must be residuals"); };
+    assert_eq!(a.0, b.0);
+    assert_ne!(a.1, b.1);
+    assert!(Executor::compile(&good, &options).is_ok());
+    for value in [&bad, &Value::Record(vec![("good".into(), good.clone()), ("bad".into(), bad.clone())])] {
+        match Executor::compile(value, &options) {
+            Err(d) => assert_eq!(d.code, "E_KERNEL_FORM"),
+            Ok(_) => panic!("a different home's cached or visited residual hid the dynamic error"),
+        }
+    }
+    assert!(Executor::compile(&good, &options).is_ok(), "a refusal in another home must not poison valid compilation");
+    let other = rewrite(recorded("(map (fn [x] (* x t)) (array/range 16))"));
+    let root = *a;
+    let both = Value::Record(vec![("sum".into(), good), ("product".into(), other)]);
+    let program = ok(Executor::compile(&both, &options));
+    let core = core_lower::lower(Some(both.clone()), None, true, None, None, root).expect("mixed-home core");
+    let prepared = core_exec::prepare(&core, false, false, &W::Paths::new(), false);
+    for time in [0.5, 2.0] {
+        let live = input::at_time(time);
+        let actual = Executor::force(&program, &Executor::ForceOptions { strict: true, ..Default::default() }, &live);
+        let expected = reference(&both, &live);
+        assert!(same_result(&actual, &expected), "core lowering differs at t={time}: actual {actual:?}, expected {expected:?}");
+        let direct = core_exec::execute(&prepared, &live, &Options { strict: true, rerun_on_error: false, ..Default::default() });
+        assert!(same_result(&direct, &expected), "direct core differs at t={time}: actual {direct:?}, expected {expected:?}");
+    }
+    let forms = ok(syntax::parse("(workspace w (graph g :context host [(a : float 0) (b : float 0)] (map (fn [x] (+ x (+ a b))) (array/range 16))))"));
+    let (workspace, diagnostics) = W::check(&[], false, false, None, &ts::catalog(), &forms);
+    assert!(diagnostics.is_empty(), "{}", ts::show_ds(&diagnostics));
+    let inputs = vec![("g".into(), vec![("a".into(), rewrite(recorded("(+ t 1)"))), ("b".into(), rewrite(recorded("(* t 2)")))])];
+    let workspace = workspace.unwrap();
+    let evaluation = ok(E::static_with(&workspace, false, Some(&inputs), None));
+    let value = &evaluation.results[0].1;
+    let program = ok(Executor::compile(value, &options));
+    let packed = Executor::packed_region(&program).expect("direct packed map with mixed-home uniforms");
+    assert_eq!(packed.uniforms.len(), 2, "both foreign scalar captures must reach host preparation");
+    for time in [0.5, 2.0] {
+        let live = input::at_time(time);
+        let actual = crate::packed::force(&packed, &live, &Default::default());
+        let expected = reference(value, &live);
+        assert!(same_result(&actual, &expected), "packed uniforms differ at t={time}: actual {actual:?}, expected {expected:?}");
+        let host = ok(crate::packed::host::prepare_values(&packed, &Default::default(), &live));
+        for (uniform, actual) in packed.uniforms.iter().zip(host.uniforms.iter()) {
+            let expected = ok(reference(uniform, &live));
+            assert_eq!(*actual, expected, "host uniform differs at t={time}");
+        }
+    }
+    let forms = ok(syntax::parse("(workspace w (graph g :context value [(x : float 0)] (+ x t)))"));
+    let (scalar, diagnostics) = W::check(&[], false, false, None, &ts::catalog(), &forms);
+    assert!(diagnostics.is_empty(), "{}", ts::show_ds(&diagnostics));
+    let scalar = scalar.unwrap();
+    let argument = |index| {
+        let marker = Value::Source("$core/argument".into(), flow_syntax::ty::Ty::Float, vec![("index".into(), Value::Int(index))]);
+        let inputs = vec![("g".into(), vec![("x".into(), marker)])];
+        rewrite(ok(E::static_with(&scalar, false, Some(&inputs), None)).results[0].1.clone())
+    };
+    let inputs = vec![("g".into(), vec![("a".into(), argument(0)), ("b".into(), argument(1))])];
+    let evaluation = ok(E::static_with(&workspace, false, Some(&inputs), None));
+    let program = ok(Executor::compile(&evaluation.results[0].1, &Default::default()));
+    let packed = Executor::packed_region(&program).expect("packed map with mixed-home argument captures");
+    assert_eq!(ok(crate::packed::host::argument_types(&packed)), vec![flow_syntax::ty::Ty::Float; 2], "both homes' argument declarations must be visited");
+    let bound = ok(crate::packed::host::bind_arguments(&packed, &[Value::Float(2.0), Value::Float(5.0)], None));
+    for time in [0.5, 2.0] {
+        let actual = ok(crate::packed::force(&bound, &input::at_time(time), &Default::default()));
+        let expected = Value::Float_array(Arc::new((0..16).map(|x| x as f64 + 7.0 + 2.0 * time).collect()));
+        assert_eq!(actual, expected, "binding both homes' arguments changed their values");
+    }
+}
+
 // The core itself fails on these, and the executor must answer with the walker's own
 // diagnostic (message and span) rather than a core one.
 fn failing() -> Vec<(&'static str, &'static str, Vec<f64>)> {

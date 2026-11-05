@@ -105,7 +105,7 @@ fn term_path(term: &Term, path: PathId) -> Path {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-enum CacheKey { Residual(i64), Cooked(String, i64), CookedList(Vec<i64>), Frame(u8) }
+enum CacheKey { Residual((i64, i64)), Cooked(String, i64), CookedList(Vec<i64>), Frame(u8) }
 fn frame_key(f: C::FrameField) -> u8 {
     use C::FrameField::*;
     match f { Time => 0, Dt => 1, Index => 2, Tick => 3, Width => 4, Height => 5, Pointer_x => 6, Pointer_y => 7, Input => 8 }
@@ -332,7 +332,7 @@ pub struct Lowerer {
     locals: Vec<Ty>,
     next_statement: i64,
     budget: i64,
-    active: HashSet<i64>,
+    active: HashSet<(i64, i64)>,
     calls: HashMap<i64, i64>,
     next_call: i64,
     next_function: i64,
@@ -1084,7 +1084,7 @@ impl Lowerer {
 
 impl Lowerer {
     fn residual(&mut self, s: &mut Scope, r: ResidualId) -> R<Lowered> {
-        let id = E::Residual::residual_id(r);
+        let id = (r.1, r.0);
         let key = CacheKey::Residual(id);
         if let Some(v) = s.cache.get(&key) { return Ok(v.clone()); }
         let view = self.view(r)?;

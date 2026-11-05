@@ -3330,19 +3330,20 @@ fn arena_for_value(value: &Value) -> Option<Arc<Slot>> {
 // a callback may rewrite again (a folded write copying an earlier one): each copy gets its own fresh id, as in OCaml.
 fn rewrite_value(
     value: &Value, replace: &dyn Fn(&Value) -> Option<Value>, fresh: &dyn Fn() -> i64,
-    retarget: &RetargetResidual, residuals: &mut HashMap<ResidualId, ResidualId>, functions: &mut HashMap<FnId, FnId>,
+    retarget: &RetargetResidual, residuals: &mut HashMap<(i64, i64), ResidualId>, functions: &mut HashMap<(i64, i64), FnId>,
 ) -> Value {
     if let Some(value) = replace(value) { return value; }
     match value {
         Value::Residual(id) => {
-            if let Some(copy) = residuals.get(id) { return Value::Residual(*copy); }
+            let key = (id.1, id.0);
+            if let Some(copy) = residuals.get(&key) { return Value::Residual(*copy); }
             let Some(home) = slot_of(id.1) else { return value.clone(); };
             let Some(mut residual) = peek(&home, |arena| arena.residuals.get(id).cloned()) else { return value.clone(); };
             let original_bindings = residual.env.iter().map(|(name, value)| (name.clone(), value.clone())).collect::<Vec<_>>();
             // an unretargeted copy shares its term (one term, not one per copy along a write chain)
             let (term, overrides) = retarget(&residual.term, &original_bindings).map(|(term, overrides)| (Arc::new(term), overrides)).unwrap_or_else(|| (residual.term.clone(), Vec::new()));
             let copy = ResidualId(fresh(), id.1);
-            residuals.insert(*id, copy);
+            residuals.insert(key, copy);
             residual.term = term;
             let names = overrides.iter().map(|(name, _)| name.clone()).collect::<BTreeSet<_>>();
             let mut env = BTreeMap::new();
@@ -3356,12 +3357,13 @@ fn rewrite_value(
             Value::Residual(copy)
         }
         Value::Fn(id) => {
-            if let Some(copy) = functions.get(id) { return Value::Fn(*copy); }
+            let key = (id.1, id.0);
+            if let Some(copy) = functions.get(&key) { return Value::Fn(*copy); }
             let Some(home) = slot_of(id.1) else { return value.clone(); };
             let Some(Function::Closure(closure)) = peek(&home, |arena| arena.functions.get(id).cloned()) else { return value.clone(); };
             let mut closure = unshare(closure);
             let copy = FnId(fresh(), id.1);
-            functions.insert(*id, copy);
+            functions.insert(key, copy);
             peek(&home, |arena| { arena.functions.insert(copy, Function::Closure(Arc::new(closure.clone()))); });
             closure.env = Arc::new(Arc::unwrap_or_clone(closure.env).into_iter().map(|(name, value)| (name, rewrite_value(&value, replace, fresh, retarget, residuals, functions))).collect());
             peek(&home, |arena| { arena.functions.insert(copy, Function::Closure(Arc::new(closure))); });
@@ -4408,6 +4410,27 @@ fn run_compiled(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Option<Resul
 #[cfg(test)]
 mod ownership_tests {
     use super::*;
+
+    #[test]
+    fn rewriting_foreign_functions_preserves_both_homes_and_shared_captures() {
+        let function = |add| {
+            let checked = crate::test_workspace_eval::check(&format!("(workspace w (graph g :context value (let* [f (fn [(x : float)] (+ x {add}))] 0)))"));
+            let evaluation = r#static(&checked, true, None).unwrap();
+            let value = &evaluation.records.iter().find(|(path, _)| path == &["g", "f"]).unwrap().1[0].1;
+            Host::rewrite_with(value, &|_| None, &|| -8_440_099, &|_, _| None)
+        };
+        let (left, right) = (function(1), function(2));
+        let (Value::Fn(a), Value::Fn(b)) = (&left, &right) else { panic!("recorded functions"); };
+        let (a, b) = (*a, *b);
+        assert_eq!(a.0, b.0);
+        assert_ne!(a.1, b.1);
+        let rewritten = Host::rewrite(&Value::List(Arc::new(vec![left.clone(), right.clone(), left])), &|_| None);
+        let Value::List(values) = rewritten else { panic!("function list"); };
+        let ids: Vec<_> = values.iter().map(|value| match value { Value::Fn(id) => (id.1, id.0), _ => panic!("function") }).collect();
+        assert_ne!(ids[0], ids[1], "foreign closures must not share one rewritten body");
+        assert_eq!(ids[0], ids[2], "repeated captures of the same closure stay shared");
+        assert_eq!((ids[0].0, ids[1].0), (a.1, b.1));
+    }
 
     #[test]
     fn state_source_digest_is_lazy_exact_and_shared_by_replays() {
