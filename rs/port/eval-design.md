@@ -7,6 +7,30 @@ not timed) and fails while any case is at or above its OCaml time.
 
 ## Current memory work — 2026-11-05, Mac M1
 
+Fresh unoptimized debug baseline after `7e547730`: `target/debug/rays mem
+../sketches/ws_tree.rays --frames 3` exits 0 in 5.02 s under a 30-second deadline.
+Live 77.9 MB, device 11.7 MB, footprint 121.5 MB, unattributed 58.4 MB; frame
+allocation 4.7 MB and payload readback 13.9 KB/frame. Binary SHA-256
+`967a6f3a08e7744057f7347b37e24c75ad2622f8352625ad1737de3fa7fd112c`;
+raw log `/tmp/rays-memory-debug-tree-baseline.log`. This debug sample is separate
+from the versioned release comparisons below. At this baseline, retained-memory visitors
+covered checked/source arenas while evaluator arenas/caches had no corresponding
+visitor; the following accounting change starts covering those owners.
+
+The first partial evaluator visitor now reports `flow.eval.arenas`: source/checked
+storage, plan-node fields, values, closure/residual environments, names/paths and
+selected caches, deduplicated by allocation identity and capacity. It snapshots the
+weak live-arena registry, never waits for an arena, and retains no arena after a
+report. Busy arenas are omitted. Map-node storage, type/diagnostic payloads, callback
+captures and compiled-code caches remain excluded; this is a lower bound.
+The corresponding debug tree sample reports 2.8 MB for this owner, 78.0 MB live,
+56.0 MB unattributed, 11.7 MB device, 123.7 MB footprint, 4.7 MB/frame allocated
+and 28.4 KB/frame payload readback; exit 0 in 3.84 s. SHA-256
+`7691abec11a79b3ddf71bc3efd4134374ad1986938676a3522e2ebdddc50ca01`,
+log `/tmp/rays-eval-memory-tree-after.log`. Payload readback differs between these
+three-frame samples; neither the timing nor live-byte difference is an isolated
+performance claim. The new owner reclassifies retained memory rather than saving it.
+
 The unoptimized native `recursive_signals` frame-allocation gate now passes at
 771,271 bytes/frame (previously 13,895,611), below its unchanged 1,100,000-byte
 ceiling. Built-in shader metadata is immutable and retained by nine `OnceLock`s;

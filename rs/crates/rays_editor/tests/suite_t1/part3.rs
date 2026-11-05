@@ -272,9 +272,12 @@ pub fn run_cameras() {
     r.step(graph_pane, vec![Event::Pointer_released(LB, graph_pane)]);
     r.step(graph_pane, vec![key(Key::KeyChar('/')), ch('l'), ch('g')]);
     r.step(graph_pane, vec![]);
-    check(has(&r.dump("projection"), "graph"), &format!("the pane is not showing a graph: {}", r.dump("projection")));
+    let projection = r.dump("projection");
+    check(has(&projection, "graph"), &format!("the pane is not showing a graph: {projection}"));
     click(&mut r, "v1.1.2");
-    check(r.dump("pane graph") == "garden" && r.dump("scope selected") != "-", &format!("a click in another instance's viewport selected nothing (pane {}, selected {})", r.dump("pane graph"), r.dump("scope selected")));
+    let pane = r.dump("pane graph");
+    let selected = r.dump("scope selected");
+    check(pane == "garden" && selected != "-", &format!("a click in another instance's viewport selected nothing (pane {pane}, selected {selected})"));
     r.close();
 }
 

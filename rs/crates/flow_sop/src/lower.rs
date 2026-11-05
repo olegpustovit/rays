@@ -5554,6 +5554,10 @@ pub fn lower_checked(factories: Vec<Factory>, o: Options, checked: Workspace) ->
 /// Lower an already checked document, without rebuilding a catalog or checking its source again.
 /// `provenance_tags` (default true) numbers a Lisp `sop/merge`'s inputs for the editor (`tags`).
 pub fn of_checked(factories: Option<Vec<Factory>>, o: Options, checked: &Workspace) -> R<T> {
+    static MEMORY: std::sync::Once = std::sync::Once::new();
+    MEMORY.call_once(|| mem::root(&mem::plan("flow.eval.arenas"), Arc::new(|visitor| {
+        for (address, bytes) in E::memory_allocations() { visitor.allocation(address, bytes); }
+    })));
     let checked = ep::checked(checked.clone())?;
     lower_checked(factories.unwrap_or_else(sop::nodes::factories), o, checked)
 }

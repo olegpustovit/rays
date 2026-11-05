@@ -55,6 +55,9 @@ thread_local! { static ACTIVE_OBSERVED_RESIDUALS: RefCell<Vec<Vec<ResidualId>>> 
 // reached without a lend is a panic that names the arena, never a hang. Trusted calls made while holding (operator bodies and checks, the
 // interrupt probe) never reach an arena.
 struct Slot { id: i64, cell: Mutex<Option<Arena>>, returned: Condvar }
+#[path = "memory.rs"]
+mod memory;
+pub use memory::memory_allocations;
 impl Drop for Slot { fn drop(&mut self) { ARENAS.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.id); } }
 thread_local! {
     static HELD: RefCell<Option<Arc<Slot>>> = const { RefCell::new(None) };
