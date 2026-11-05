@@ -312,7 +312,9 @@ fn expire(canvas: &canvas::t, current: &i::t, scenes: &[Vec<scene::node>]) {
 }
 fn resident_consumers() {
     if !common::gpu() { return; }
+    common::release_keepalive();
     let before = ogpu::impl_::live_handles().unwrap();
+    assert!(common::gpu());
     let gpu = common::lease();
     let cache = pipelines::create(&|| 0.0, &rr::gpu_device(&gpu));
     let sink = tp::ok(s::create(&gpu));
@@ -385,6 +387,7 @@ fn resident_consumers() {
     i::release_snapshot(&mut lease);
     s::close(&sink);
     pipelines::close(&cache);
+    common::release_keepalive();
     assert_eq!(ogpu::impl_::live_handles().unwrap(), before);
 }
 fn main() {

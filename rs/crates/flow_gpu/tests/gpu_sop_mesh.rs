@@ -39,13 +39,23 @@ fn run_case(test:&str,empty_offset:bool){
     }
     let cancel=Arc::new(rdk::cancel::create());let closes=Arc::new(AtomicUsize::new(0));let backend=h::backend(&host);let residency=backend.residency;let cancel_wrap=cancel.clone();let closes_wrap=closes.clone();let cancel_case=case=="cancel";
     let backend=Gpu::Backend{residency:Box::new(move|fast|residency(fast).map(|scope|{
-        let dispatched=Arc::new(AtomicBool::new(false));let base=Arc::try_unwrap(scope.executor).unwrap_or_else(|_|panic!("fresh executor shared"));let invoke=base.invoke;let settle=base.settle;let count=base.count;let close=base.close;
+        // Retained-stream callbacks share this executor; observe it by delegation.
+        let dispatched=Arc::new(AtomicBool::new(false));let base=scope.executor;let invoke=base.clone();let settle=base.clone();let count=base.clone();let close=base.clone();
         let inv=dispatched.clone();let set=dispatched.clone();let cnt=dispatched.clone();let cancel_set=cancel_wrap.clone();let cancel_count=cancel_wrap.clone();let closes=closes_wrap.clone();
         let executor=core_exec::Resident{
-            invoke:Box::new(move|p,args,locals,live|{let result=invoke(p,args,locals,live)?;if result.is_some(){inv.store(true,Ordering::SeqCst);}Ok(result)}),
-            settle:Box::new(move||{settle()?;if cancel_case&&set.load(Ordering::SeqCst){rdk::cancel::cancel(&cancel_set);}Ok(())}),
-            count:Box::new(move|v|{let n=count(v)?;if cancel_case&&cnt.load(Ordering::SeqCst)&&n.is_some(){rdk::cancel::cancel(&cancel_count);}Ok(n)}),
-            close:Box::new(move||{if dispatched.load(Ordering::SeqCst){closes.fetch_add(1,Ordering::SeqCst);}close()}),..base};
+            invoke:Box::new(move|p,args,locals,live|{let result=(invoke.invoke)(p,args,locals,live)?;if result.is_some(){inv.store(true,Ordering::SeqCst);}Ok(result)}),
+            settle:Box::new(move||{(settle.settle)()?;if cancel_case&&set.load(Ordering::SeqCst){rdk::cancel::cancel(&cancel_set);}Ok(())}),
+            count:Box::new(move|v|{let n=(count.count)(v)?;if cancel_case&&cnt.load(Ordering::SeqCst)&&n.is_some(){rdk::cancel::cancel(&cancel_count);}Ok(n)}),
+            close:Box::new(move||{if dispatched.load(Ordering::SeqCst){closes.fetch_add(1,Ordering::SeqCst);}(close.close)()}),
+            fill:Box::new({let b=base.clone();move|ty,n,v|(b.fill)(ty,n,v)}),
+            unfold:Box::new({let b=base.clone();move|p,args,n,v,locals,live|(b.unfold)(p,args,n,v,locals,live)}),
+            compact:Box::new({let b=base.clone();move|v|(b.compact)(v)}),
+            coerce:Box::new({let b=base.clone();move|ty,v|(b.coerce)(ty,v)}),
+            concat:Box::new({let b=base.clone();move|a,c|(b.concat)(a,c)}),
+            finish:Box::new({let b=base.clone();move|v|(b.finish)(v)}),
+            keep:Box::new({let b=base.clone();move|v|(b.keep)(v)}),
+            capacity:Box::new({let b=base.clone();move|v|(b.capacity)(v)}),
+            range:Box::new(move|ty,v,div,n|(base.range)(ty,v,div,n))};
         Gpu::Residency{executor:Arc::new(executor),..scope}
     })),..backend};
     let config=Gpu::Config{backend:Some(Arc::new(backend)),fast:true,policy:Gpu::Policy::Qualification,readback_per_float:None};
