@@ -7,6 +7,18 @@ not timed) and fails while any case is at or above its OCaml time.
 
 ## Current memory work — 2026-11-05, Mac M1
 
+Frozen checked/syntax arenas now shrink their three largest growable tables
+(rows, ranges and term/edge IDs) once when sealed. Builders still grow geometrically;
+row IDs, forms and ownership remain unchanged. Current debug `ws_tree --frames 3`
+falls from 64.0 to 60.7 MB live, with footprint 110.5 to 105.5 MB. Both samples
+exit 0, with 40.9 MB unattributed, 7.2 MB device, 3.9 MB allocated/frame and
+13.9 KB payload readback/frame. Wall times 2.74/3.74 s are not a speedup claim.
+Before source is `65f5351e`; after binary SHA-256
+`179f4f2b79e19f4dc2d34f1dad79127547e8dc977233ee2bb832e7897581a11d`.
+Logs `/tmp/rays-frozen-capacity-{before,after}.log`; fresh allocation evidence
+`/tmp/rays-memory-current-profile-tree.log` identified retained prelude arenas.
+This saves 3.3 MB of retained capacity; the 28.4 MB OCaml target remains open.
+
 Qualification-refusal tables now also use immutable `Arc<Vec<...>>` storage through
 checked, evaluator and lowered snapshots. Qualification replaces the table rather
 than mutating a prior snapshot. The regression checks shared identity and copy-on-write

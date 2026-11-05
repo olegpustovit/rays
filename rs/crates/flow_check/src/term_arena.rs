@@ -652,7 +652,10 @@ impl TermBuilder {
         (builder.freeze(), roots, forms)
     }
 
-    pub fn freeze(self) -> Arc<TermArena> {
+    pub fn freeze(mut self) -> Arc<TermArena> {
+        self.tables.rows.shrink_to_fit();
+        self.tables.ranges.shrink_to_fit();
+        self.tables.terms.shrink_to_fit();
         Arc::new(TermArena { owner: arena::fresh_owner_id(), tables: self.tables, names: self.names.freeze(), syntax: self.syntax.freeze() })
     }
 }

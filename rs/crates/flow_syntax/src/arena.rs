@@ -352,7 +352,10 @@ impl SyntaxBuilder {
         }
         self.imports[&syntax.identity()]
     }
-    pub fn freeze(self) -> Arc<SyntaxArena> {
+    pub fn freeze(mut self) -> Arc<SyntaxArena> {
+        self.rows.shrink_to_fit();
+        self.edges.shrink_to_fit();
+        self.ranges.shrink_to_fit();
         Arc::new(SyntaxArena { owner: fresh_owner_id(), rows: self.rows, edges: self.edges,
             ranges: self.ranges, names: self.names.freeze(), bytes: self.bytes, trivia: self.trivia })
     }
