@@ -1,4 +1,4 @@
-// A real window: Vulkan frames 1/2/60/600 and a resize, zero handle delta. A missing window or
+// A real window: native frames 1/2/60/600 and a resize, zero handle delta. A missing window or
 // device is a skip, as in the OCaml test.
 use crate::common;
 use ::renderer::renderer::{self, family, Native};
@@ -10,11 +10,12 @@ fn window_runtime_render() {
         return;
     }
     let before = ogpu::impl_::live_handles().unwrap();
-    let cfg = renderer::configuration { logical_width: 4, logical_height: 4, drawable_width: 4, drawable_height: 4, ..renderer::default_configuration() };
+    // Exercise all 600 frames without waiting for the display's refresh clock.
+    let cfg = renderer::configuration { logical_width: 4, logical_height: 4, drawable_width: 4, drawable_height: 4, vsync: false, ..renderer::default_configuration() };
     let value = match renderer::create(&cfg) {
         Ok(value) => value,
         Err(e) => {
-            println!("renderer: skipped (no window/Vulkan device: {})", ogpu::error::to_string(&e));
+            println!("renderer: skipped (no window/native device: {})", ogpu::error::to_string(&e));
             return;
         }
     };
@@ -49,9 +50,17 @@ fn window_runtime_render() {
     };
     let prepared = |state: state| renderer::prepared_draw(family::Scene2, None, None, None, None, None, geometry_draw { mesh: mesh_.clone(), state });
     let draw = prepared(state_.clone());
+    // Service the host event loop between presents, as Sketch::run does.
+    let mut input = runtime_input::create(4096, 4, 4).unwrap();
+    let mut pump = || {
+        runtime_input::begin_frame(&mut input);
+        runtime_input::runtime_input_sdl3::pump(&mut input).unwrap();
+        runtime_input::drain(&mut input);
+    };
     for frame in 1..=600 {
+        pump();
         let draws = if frame == 2 { vec![draw.clone(), draw.clone()] } else { vec![draw.clone()] };
-        renderer::draw(None, &value, &draws).unwrap();
+        assert!(renderer::draw(None, &value, &draws).unwrap(), "runtime frame {frame} was not presented");
         if [1, 2, 60, 600].contains(&frame) {
             let facts = renderer::presentation_facts_of(&value).unwrap();
             let bytes = renderer::read_pixels(&value, facts.drawable_width * 4).unwrap();
@@ -62,11 +71,12 @@ fn window_runtime_render() {
     Native::runtime_of_mut(&value, &mut |rt| resized = Some(runtime::resize(rt, 8, 8)));
     resized.unwrap().unwrap();
     let resized_state = state { viewport: (0, 0, 8, 8), scissor: (0, 0, 8, 8), ..state_ };
-    renderer::draw(None, &value, &[prepared(resized_state)]).unwrap();
+    pump();
+    assert!(renderer::draw(None, &value, &[prepared(resized_state)]).unwrap(), "resized runtime frame was not presented");
     renderer::destroy(&value).unwrap();
-    assert_eq!(ogpu::impl_::live_handles().unwrap(), before, "renderer Vulkan live-handle delta");
+    assert_eq!(ogpu::impl_::live_handles().unwrap(), before, "renderer native live-handle delta");
     let _ = scene_execution::empty_bytes;
-    println!("renderer: Vulkan frames 1/2/60/600 and resize, zero delta");
+    println!("renderer: {} frames 1/2/60/600 and resize, zero delta", ogpu::impl_::backend().unwrap());
 }
 
 pub const CASES: &[(&str, fn())] = &[("window_runtime_render", window_runtime_render)];

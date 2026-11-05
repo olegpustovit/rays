@@ -1911,10 +1911,6 @@ pub mod Native {
         side_lru::length(&mut value.0.snapshots.borrow_mut())
     }
 
-    pub fn window_handle(value: &t, f: &mut dyn FnMut(Option<&sdl3::window::Window>)) {
-        f(runtime::window_handle(&value.0.runtime.borrow()))
-    }
-
     pub fn lower_scene2(submission_: &submission, density: i64, resource_: &dyn Fn(i64) -> Option<retained_resource>, ir_: &Rc<RenderIr>) -> Result<batch, Error> {
         lower_scene2_submission(submission_, density, resource_, ir_)
     }

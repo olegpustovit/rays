@@ -18,9 +18,9 @@ lru = { path = "../lru" }
 rays_math = { path = "../rays_math" }
 mem = { path = "../mem" }
 cfmt = { path = "../cfmt" }
-sdl3 = { path = "../sdl3" }
 
 [dev-dependencies]
+runtime_input = { path = "../runtime_input" }
 ogpu_mock = { path = "../ogpu_mock" }
 mem_sys = { path = "../mem_sys" }
 

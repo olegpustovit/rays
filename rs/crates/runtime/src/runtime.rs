@@ -586,9 +586,3 @@ pub fn surface_configuration(value: &mut t) -> Result<surface::Configuration, Er
         layer,
     })
 }
-
-/// The SDL window of a window target, for qualification tests that change its size behind the
-/// runtime's back.
-pub fn window_handle(value: &t) -> Option<&Window> {
-    value.window.as_ref().map(|w| &w.handle)
-}

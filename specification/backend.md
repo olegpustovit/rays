@@ -25,6 +25,16 @@ record without depending upward on `ogpu`; their conformance tests use `ogpu` on
 through dev-dependencies. This preserves the core/backend/public-API dependency
 direction without changing selection behavior or adding a default implementation.
 
+The Rust renderer does not expose a raw SDL window accessor. Window ownership and
+resizing stay in `runtime`; renderer callers use its typed native-runtime bridge
+and presentation facts. The unused renderer/runtime window-handle escape hatch
+is removed, along with the renderer's direct SDL dependency.
+Native renderer frame-sweep tests pump and drain the existing `runtime_input`
+event source before each draw, as the application host does. Their throughput
+fixtures explicitly request immediate presentation and keep every original
+frame, pixel, cache and lifetime assertion; product presentation defaults stay
+unchanged. The shared offscreen body uses a no-op pre-draw hook.
+
 Scene3's existing borrowed-position registration can also borrow a UInt32
 index buffer with a settled count. Those draws carry no host index bytes;
 ordinary and sun-shadow indexed draws bind the same producer-owned buffer.

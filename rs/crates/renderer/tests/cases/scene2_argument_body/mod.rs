@@ -31,7 +31,11 @@ fn describe(s: &renderer::stats) -> String {
     format!("misses {} hits {}", s.retained_plan_misses, s.retained_plan_hits)
 }
 
-pub fn run(runtime: &renderer::t) {
+pub fn run(runtime: &renderer::t, mut before_draw: impl FnMut()) {
+    let mut render = |draws: &[renderer::draw]| {
+        before_draw();
+        renderer::draw(None, runtime, draws)
+    };
     let live_handles = || ogpu::impl_::live_handles().unwrap();
     // a quad's constants (marks.rays): the identity affine, a white ink, the clip square and the
     // whole texture
@@ -93,7 +97,7 @@ pub fn run(runtime: &renderer::t) {
     let draw = textured(Blend::Replace, texture.clone());
     let mut first_uploaded = None;
     for frame in 1..=20 {
-        assert!(renderer::draw(None, runtime, &[draw.clone()]).unwrap(), "scene2 retained argument frame was not presented");
+        assert!(render(&[draw.clone()]).unwrap(), "scene2 retained argument frame was not presented");
         assert_eq!(first_pixel(runtime), SAMPLE, "scene2 retained argument exact pixel mismatch");
         if frame == 1 {
             first_uploaded = Some(renderer::stats(runtime).unwrap().uploaded_bytes);
@@ -114,7 +118,7 @@ pub fn run(runtime: &renderer::t) {
         // new generation recycles the same-shape texture.
         let changing = one_pixel(&format!("image:managed-churn:1:{frame}"), rgba);
         let changing_draw = textured(Blend::Replace, changing);
-        assert!(renderer::draw(None, runtime, &[changing_draw]).unwrap(), "managed-image churn frame was not presented");
+        assert!(render(&[changing_draw]).unwrap(), "managed-image churn frame was not presented");
         let pixels = first_pixel(runtime);
         assert!(pixels == rgba, "managed-image churn exact pixel mismatch at frame {frame}: got {pixels:?} expected {rgba:?}");
         // Sample after the automatic plan is admitted (frame 2): the live handle count must then
@@ -138,7 +142,7 @@ pub fn run(runtime: &renderer::t) {
     let plain_draw = prepared_draw(pipeline_family::Scene2, Some(Blend::Replace), None, None, None, None, geometry_draw { mesh: plain_mesh.clone(), state: st.clone() });
     let textured_draw = textured(Blend::Alpha, texture.clone());
     for _ in 1..=100 {
-        assert!(renderer::draw(None, runtime, &[plain_draw.clone(), textured_draw.clone()]).unwrap(), "mixed canonical Scene2 frame was not presented");
+        assert!(render(&[plain_draw.clone(), textured_draw.clone()]).unwrap(), "mixed canonical Scene2 frame was not presented");
     }
     assert_eq!(first_pixel(runtime), SAMPLE, "mixed canonical Scene2 exact pixel mismatch");
     let mixed = renderer::stats(runtime).unwrap();
@@ -147,7 +151,7 @@ pub fn run(runtime: &renderer::t) {
         let identity = frame % 80;
         let m = mesh { key: mesh_key::Host(format!("scene2-plan-churn-{identity:02}")), ..triangle.clone() };
         let d = prepared_draw(pipeline_family::Scene2, None, None, None, None, None, geometry_draw { mesh: m, state: st.clone() });
-        assert!(renderer::draw(None, runtime, &[d]).unwrap(), "80-identity retained-plan frame was not presented");
+        assert!(render(&[d]).unwrap(), "80-identity retained-plan frame was not presented");
     }
     let cycled = renderer::stats(runtime).unwrap();
     // Every frame differs from its predecessor, so no automatic plan is admitted: 160 misses and no
@@ -169,13 +173,13 @@ pub fn run(runtime: &renderer::t) {
         prepared_draw(pipeline_family::Scene2, Some(Blend::Replace), None, None, None, None, geometry_draw { mesh: plain_mesh.clone(), state: s })
     };
     for frame in 0..20 {
-        renderer::draw(None, runtime, &[animated(if frame & 1 == 0 { 0. } else { 2. })]).unwrap();
+        assert!(render(&[animated(if frame & 1 == 0 { 0. } else { 2. })]).unwrap(), "animated affine warm-up frame was not presented");
     }
     for frame in 0..100 {
-        assert!(renderer::draw(None, runtime, &[animated(if frame & 1 == 0 { 0. } else { 2. })]).unwrap(), "animated affine frame was not presented");
+        assert!(render(&[animated(if frame & 1 == 0 { 0. } else { 2. })]).unwrap(), "animated affine frame was not presented");
     }
-    renderer::draw(None, runtime, &[animated(2.)]).unwrap();
+    assert!(render(&[animated(2.)]).unwrap(), "translated affine frame was not presented");
     assert_eq!(first_pixel(runtime), [0, 0, 0, 0], "animated affine translated pixel mismatch");
-    renderer::draw(None, runtime, &[animated(0.)]).unwrap();
+    assert!(render(&[animated(0.)]).unwrap(), "restored affine frame was not presented");
     assert_eq!(first_pixel(runtime), SAMPLE, "animated affine restored pixel mismatch");
 }

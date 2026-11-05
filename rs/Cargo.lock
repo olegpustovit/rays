@@ -666,9 +666,9 @@ dependencies = [
  "ogpu_vulkan",
  "rays_math",
  "runtime",
+ "runtime_input",
  "runtime_resources",
  "scene_command",
- "sdl3",
 ]
 
 [[package]]
