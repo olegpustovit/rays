@@ -851,7 +851,7 @@ fn guardable(a: &mut Arena, v: &Value) -> bool {
             _ => true,
         }
     }
-    dep_value(a, v, true, &mut HashSet::new()) && !dep_value(a, v, false, &mut HashSet::new()) && free(a, v, &mut HashSet::new())
+    dep_value(a, v, true, &mut HashSet::new(), &mut HashMap::new()) && !dep_value(a, v, false, &mut HashSet::new(), &mut HashMap::new()) && free(a, v, &mut HashSet::new())
 }
 // a live test of an inlined body's if/cond that can be a deferred check
 fn guarding(a: &mut Arena, v: &Value) -> bool { a.guards.is_some() && matches!(v, Value::Residual(_)) && guardable(a, v) }
@@ -2097,7 +2097,7 @@ fn eval_hof(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, kind: &W::HofKin
             }
         } else { None };
         // A function that reads the frame is live whichever elements read it: walking until one does could spend the static budget on a branch that leaves it unread.
-        if a.time.is_none() && read_value(a, &Value::Fn(function), true, &mut BTreeSet::new(), &mut HashSet::new(), &mut HashSet::new()) { return need_time(); }
+        if a.time.is_none() && read_value(a, &Value::Fn(function), true, &mut BTreeSet::new(), &mut HashSet::new(), &mut HashSet::new(), &mut HashSet::new()) { return need_time(); }
         eval_hof_work(a, c, env, term, kind, function, rest, packed, saved_steps, calls)
     })();
     if packed { a.step_count = saved_steps; }
@@ -2707,36 +2707,38 @@ pub fn is_live_value(value: &Value) -> bool {
         _ => false,
     }
 }
-fn read_value(arena: &mut Arena, value: &Value, frame: bool, reads: &mut BTreeSet<String>, residuals: &mut HashSet<(i64, i64)>, functions: &mut HashSet<(i64, i64)>) -> bool {
+fn read_value(arena: &mut Arena, value: &Value, frame: bool, reads: &mut BTreeSet<String>, residuals: &mut HashSet<(i64, i64)>, functions: &mut HashSet<(i64, i64)>, named: &mut HashSet<(i64, (u64, u32), &'static str)>) -> bool {
     let home = match value { Value::Residual(id) => id.1, Value::Fn(id) => id.1, _ => arena.id };
     if home != arena.id {
         // Captures may return to this home; never hold two arena locks while walking them.
         return lend(arena, || slot_of(home).is_some_and(|slot| {
-            read_value(&mut checkout(&slot), value, frame, reads, residuals, functions)
+            read_value(&mut checkout(&slot), value, frame, reads, residuals, functions, named)
         }));
     }
     match value {
         Value::Residual(id) => {
             if !residuals.insert((id.1, id.0)) { return false; }
-            if let Some(residual) = own_res(arena, id).cloned() { read_term(arena, &residual.term, &residual.env, &residual.ctx.context, frame, reads, residuals, functions) } else { false }
+            if let Some(residual) = own_res(arena, id).cloned() { read_term(arena, &residual.term, &residual.env, &residual.ctx.context, frame, reads, residuals, functions, named) } else { false }
         }
         Value::Fn(id) => {
             if !functions.insert((id.1, id.0)) { return false; }
             match own_fn(arena, id).cloned() {
-                Some(Function::Closure(closure)) => read_term(arena, &closure.body, &closure.env, &closure.at.context, frame, reads, residuals, functions),
-                Some(Function::Named(function)) => read_named(arena, &function.name, frame, reads, residuals, functions),
+                Some(Function::Closure(closure)) => read_term(arena, &closure.body, &closure.env, &closure.at.context, frame, reads, residuals, functions, named),
+                Some(Function::Named(function)) => read_named(arena, &function.name, frame, reads, residuals, functions, named),
                 None => false,
             }
         }
-        Value::List(values) => values.iter().fold(false, |found, value| read_value(arena, value, frame, reads, residuals, functions) || found),
-        Value::Record(fields) | Value::Struct(_, _, fields) | Value::Source(_, _, fields) => fields.iter().fold(false, |found, (_, value)| read_value(arena, value, frame, reads, residuals, functions) || found),
+        Value::List(values) => values.iter().fold(false, |found, value| read_value(arena, value, frame, reads, residuals, functions, named) || found),
+        Value::Record(fields) | Value::Struct(_, _, fields) | Value::Source(_, _, fields) => fields.iter().fold(false, |found, (_, value)| read_value(arena, value, frame, reads, residuals, functions, named) || found),
         _ => false,
     }
 }
-fn read_named(arena: &mut Arena, name: &str, frame: bool, reads: &mut BTreeSet<String>, residuals: &mut HashSet<(i64, i64)>, functions: &mut HashSet<(i64, i64)>) -> bool {
+fn read_named(arena: &mut Arena, name: &str, frame: bool, reads: &mut BTreeSet<String>, residuals: &mut HashSet<(i64, i64)>, functions: &mut HashSet<(i64, i64)>, named: &mut HashSet<(i64, (u64, u32), &'static str)>) -> bool {
     let workspace = arena.workspace.clone();
     if let Some(graph) = workspace.defs.iter().find(|graph| graph.name == name) {
-        return read_term(arena, &graph.body, &BTreeMap::new(), &graph.context, frame, reads, residuals, functions);
+        // Reads accumulate in one set, so a shared named body contributes only once.
+        if !named.insert((arena.id, graph.body.identity(), graph.context.as_str())) { return false; }
+        return read_term(arena, &graph.body, &BTreeMap::new(), &graph.context, frame, reads, residuals, functions, named);
     }
     if frame && op::find_indexed(&arena.workspace.ops, name, &flow_syntax::context::value()).is_some_and(|operation| operation.live) {
         reads.insert(name.to_owned());
@@ -2744,18 +2746,18 @@ fn read_named(arena: &mut Arena, name: &str, frame: bool, reads: &mut BTreeSet<S
     }
     false
 }
-fn read_term(arena: &mut Arena, term: &Term, env: &BTreeMap<String, Value>, context: &Context, frame: bool, reads: &mut BTreeSet<String>, residuals: &mut HashSet<(i64, i64)>, functions: &mut HashSet<(i64, i64)>) -> bool {
+fn read_term(arena: &mut Arena, term: &Term, env: &BTreeMap<String, Value>, context: &Context, frame: bool, reads: &mut BTreeSet<String>, residuals: &mut HashSet<(i64, i64)>, functions: &mut HashSet<(i64, i64)>, named: &mut HashSet<(i64, (u64, u32), &'static str)>) -> bool {
     let mut found = false;
     let packed = term.arena();
     match term.node {
         TermNode::Time if frame => { reads.insert("time".into()); found = true; }
         TermNode::State(_) => { reads.insert("state".into()); found = true; }
-        TermNode::RefBinding(id) => if let Some(value) = env.get(term.name(packed.ref_binding(id).name)) { found |= read_value(arena, value, frame, reads, residuals, functions); },
-        TermNode::FnRef(name) => found |= read_named(arena, term.name(name), frame, reads, residuals, functions),
+        TermNode::RefBinding(id) => if let Some(value) = env.get(term.name(packed.ref_binding(id).name)) { found |= read_value(arena, value, frame, reads, residuals, functions, named); },
+        TermNode::FnRef(name) => found |= read_named(arena, term.name(name), frame, reads, residuals, functions, named),
         TermNode::CallFn(id) => {
             let name = term.name(packed.call_fn(id).name);
-            if let Some(Value::Fn(function)) = env.get(name) { found |= read_value(arena, &Value::Fn(*function), frame, reads, residuals, functions); }
-            else { found |= read_named(arena, name, frame, reads, residuals, functions); }
+            if let Some(Value::Fn(function)) = env.get(name) { found |= read_value(arena, &Value::Fn(*function), frame, reads, residuals, functions, named); }
+            else { found |= read_named(arena, name, frame, reads, residuals, functions, named); }
         }
         TermNode::Op(id) if frame => {
             let name = term.name(packed.op(id).op);
@@ -2764,19 +2766,19 @@ fn read_term(arena: &mut Arena, term: &Term, env: &BTreeMap<String, Value>, cont
         TermNode::GraphRef(id) => {
             let workspace = arena.workspace.clone();
             if let Some(graph) = workspace.graphs.iter().find(|definition| definition.name == term.name(packed.graph_ref(id).graph)) {
-                found |= read_term(arena, &graph.body, &BTreeMap::new(), &graph.context, frame, reads, residuals, functions);
-                for (_, _, default) in &graph.inputs { if let Some(term) = default { found |= read_term(arena, term, env, context, frame, reads, residuals, functions); } }
+                found |= read_term(arena, &graph.body, &BTreeMap::new(), &graph.context, frame, reads, residuals, functions, named);
+                for (_, _, default) in &graph.inputs { if let Some(term) = default { found |= read_term(arena, term, env, context, frame, reads, residuals, functions, named); } }
             }
         },
         _ => (),
     }
-    for child in children(term) { found |= read_term(arena, &child, env, context, frame, reads, residuals, functions); }
+    for child in children(term) { found |= read_term(arena, &child, env, context, frame, reads, residuals, functions, named); }
     found
 }
 fn dependent(value: &Value, frame: bool, reads: &mut BTreeSet<String>) -> bool {
     let Some(arena) = arena_for_value(value) else { return false; };
     let mut arena = checkout(&arena);
-    read_value(&mut arena, value, frame, reads, &mut HashSet::new(), &mut HashSet::new())
+    read_value(&mut arena, value, frame, reads, &mut HashSet::new(), &mut HashSet::new(), &mut HashSet::new())
 }
 pub fn frame_dependent(value: &Value) -> bool { dependent_fast(value, true) }
 pub fn state_dependent(value: &Value) -> bool { dependent_fast(value, false) }
@@ -3679,18 +3681,18 @@ mod tests {
 // residual does (dep_frame / dep_state); without it a let-bound array read by many bindings is walked once per reader and
 // `static_sop` asks every residual. It is keyed by id and home: deterministic ids repeat across plans.
 static DEP_MEMO: LazyLock<Mutex<HashMap<(i64, i64, bool), bool>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
-fn dep_value(arena: &mut Arena, value: &Value, frame: bool, active: &mut HashSet<(i64, i64, bool)>) -> bool {
+fn dep_value(arena: &mut Arena, value: &Value, frame: bool, active: &mut HashSet<(i64, i64, bool)>, named: &mut HashMap<(i64, (u64, u32), &'static str), bool>) -> bool {
     let home = match value { Value::Residual(id) => id.1, Value::Fn(id) => id.1, _ => arena.id };
     if home != arena.id {
         return lend(arena, || slot_of(home).is_some_and(|slot| {
-            dep_value(&mut checkout(&slot), value, frame, active)
+            dep_value(&mut checkout(&slot), value, frame, active, named)
         }));
     }
     match value {
         Value::Residual(id) => {
             if let Some(known) = DEP_MEMO.lock().unwrap().get(&(id.0, id.1, frame)) { return *known; }
             if !active.insert((id.1, id.0, false)) { return false; }
-            let answer = match own_res(arena, id).cloned() { Some(r) => dep_term(arena, &r.term, &r.env, &r.ctx.context, frame, active), None => false };
+            let answer = match own_res(arena, id).cloned() { Some(r) => dep_term(arena, &r.term, &r.env, &r.ctx.context, frame, active, named), None => false };
             active.remove(&(id.1, id.0, false));
             if own_res(arena, id).is_some() { DEP_MEMO.lock().unwrap().insert((id.0, id.1, frame), answer); }
             answer
@@ -3698,52 +3700,58 @@ fn dep_value(arena: &mut Arena, value: &Value, frame: bool, active: &mut HashSet
         Value::Fn(id) => match own_fn(arena, id).cloned() {
             Some(Function::Closure(closure)) => {
                 if !active.insert((id.1, id.0, true)) { return false; }
-                let answer = dep_term(arena, &closure.body, &closure.env, &closure.at.context, frame, active);
+                let answer = dep_term(arena, &closure.body, &closure.env, &closure.at.context, frame, active, named);
                 active.remove(&(id.1, id.0, true));
                 answer
             }
-            Some(Function::Named(function)) => dep_named(arena, &function.name, frame, active),
+            Some(Function::Named(function)) => dep_named(arena, &function.name, frame, active, named),
             None => false,
         },
-        Value::List(values) => values.iter().any(|value| dep_value(arena, value, frame, active)),
-        Value::Record(fields) | Value::Struct(_, _, fields) | Value::Source(_, _, fields) => fields.iter().any(|(_, value)| dep_value(arena, value, frame, active)),
+        Value::List(values) => values.iter().any(|value| dep_value(arena, value, frame, active, named)),
+        Value::Record(fields) | Value::Struct(_, _, fields) | Value::Source(_, _, fields) => fields.iter().any(|(_, value)| dep_value(arena, value, frame, active, named)),
         _ => false,
     }
 }
-fn dep_named(arena: &mut Arena, name: &str, frame: bool, active: &mut HashSet<(i64, i64, bool)>) -> bool {
+fn dep_named(arena: &mut Arena, name: &str, frame: bool, active: &mut HashSet<(i64, i64, bool)>, named: &mut HashMap<(i64, (u64, u32), &'static str), bool>) -> bool {
     let workspace = arena.workspace.clone();
     if let Some(graph) = workspace.defs.iter().find(|graph| graph.name == name) {
-        return dep_term(arena, &graph.body, &BTreeMap::new(), &graph.context, frame, active);
+        // Named bodies have an empty capture environment. Reuse their completed answer only
+        // within this query: callers can remap function captures between queries.
+        let key = (arena.id, graph.body.identity(), graph.context.as_str());
+        if let Some(answer) = named.get(&key) { return *answer; }
+        let answer = dep_term(arena, &graph.body, &BTreeMap::new(), &graph.context, frame, active, named);
+        named.insert(key, answer);
+        return answer;
     }
     frame && op::find_indexed(&arena.workspace.ops, name, &flow_syntax::context::value()).is_some_and(|operation| operation.live)
 }
-fn dep_term(arena: &mut Arena, term: &Term, env: &BTreeMap<String, Value>, context: &Context, frame: bool, active: &mut HashSet<(i64, i64, bool)>) -> bool {
+fn dep_term(arena: &mut Arena, term: &Term, env: &BTreeMap<String, Value>, context: &Context, frame: bool, active: &mut HashSet<(i64, i64, bool)>, named: &mut HashMap<(i64, (u64, u32), &'static str), bool>) -> bool {
     let packed = term.arena();
     let own = match term.node {
         TermNode::Time => frame,
         TermNode::State(_) => true,
-        TermNode::RefBinding(id) => env.get(term.name(packed.ref_binding(id).name)).is_some_and(|value| dep_value(arena, value, frame, active)),
-        TermNode::FnRef(name) => dep_named(arena, term.name(name), frame, active),
+        TermNode::RefBinding(id) => env.get(term.name(packed.ref_binding(id).name)).is_some_and(|value| dep_value(arena, value, frame, active, named)),
+        TermNode::FnRef(name) => dep_named(arena, term.name(name), frame, active, named),
         TermNode::CallFn(id) => {
             let name = term.name(packed.call_fn(id).name);
-            match env.get(name) { Some(Value::Fn(function)) => dep_value(arena, &Value::Fn(*function), frame, active), _ => dep_named(arena, name, frame, active) }
+            match env.get(name) { Some(Value::Fn(function)) => dep_value(arena, &Value::Fn(*function), frame, active, named), _ => dep_named(arena, name, frame, active, named) }
         }
         TermNode::Op(id) => frame && op::find_indexed(&arena.workspace.ops, term.name(packed.op(id).op), context).is_some_and(|operation| operation.live),
         TermNode::GraphRef(id) => {
             let workspace = arena.workspace.clone();
             workspace.graphs.iter().find(|definition| definition.name == term.name(packed.graph_ref(id).graph)).is_some_and(|graph| {
-                dep_term(arena, &graph.body, &BTreeMap::new(), &graph.context, frame, active)
-                    || graph.inputs.iter().any(|(_, _, default)| default.as_ref().is_some_and(|term| dep_term(arena, term, env, context, frame, active)))
+                dep_term(arena, &graph.body, &BTreeMap::new(), &graph.context, frame, active, named)
+                    || graph.inputs.iter().any(|(_, _, default)| default.as_ref().is_some_and(|term| dep_term(arena, term, env, context, frame, active, named)))
             })
         },
         _ => false,
     };
-    own || children(term).any(|child| dep_term(arena, &child, env, context, frame, active))
+    own || children(term).any(|child| dep_term(arena, &child, env, context, frame, active, named))
 }
 fn dependent_fast(value: &Value, frame: bool) -> bool {
     let Some(arena) = arena_for_value(value) else { return false; };
     let mut arena = checkout(&arena);
-    dep_value(&mut arena, value, frame, &mut HashSet::new())
+    dep_value(&mut arena, value, frame, &mut HashSet::new(), &mut HashMap::new())
 }
 
 // ---- compiled pure expressions ----
@@ -4431,6 +4439,64 @@ fn run_compiled(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Option<Resul
 #[cfg(test)]
 mod ownership_tests {
     use super::*;
+
+    #[test]
+    fn shared_named_dependencies_preserve_reads_across_capture_edits() {
+        use flow_syntax::context;
+        let checked = crate::test_workspace_eval::check("(workspace w
+          (defn leaf :context host [] t)
+          (defn left :context host [] (leaf))
+          (defn right :context host [] (leaf))
+          (defn diamond :context host [] (+ (left) (right)))
+          (graph g :context host [(x : float 0)] (let* [f (fn [] (+ x (diamond)))] (f))))");
+        let evaluation = r#static(&checked, true, None).unwrap();
+        let function = &evaluation.records.iter().find(|(path, _)| path == &["g", "f"]).unwrap().1[0].1;
+        let Value::Fn(id) = function else { panic!("capturing function"); };
+        assert_eq!(frame_reads(function), vec!["time"]);
+        assert!(frame_dependent(function));
+        assert!(!state_dependent(function));
+
+        let state = crate::test_workspace_eval::check("(workspace stateful (graph g :context host (state [n 0] (+ n 1))))");
+        let state = static_eval(&state).unwrap().results[0].1.clone();
+        Host::map_function_bindings(*id, &|_| state.clone());
+        assert_eq!(frame_reads(function), vec!["state", "time"]);
+        assert!(state_dependent(function));
+        Host::map_function_bindings(*id, &|_| Value::Float(0.));
+        assert_eq!(frame_reads(function), vec!["time"]);
+        assert!(!state_dependent(function));
+
+        // A packed body can be shared by definitions with different operator contexts.
+        let mut scoped = crate::test_workspace_eval::check("(workspace w
+          (defn quiet :context value [] (pointer/x))
+          (defn live :context value [] (pointer/x))
+          (graph g :context host 0))");
+        let defs = Arc::make_mut(&mut scoped.defs);
+        defs[0].context = context::sop();
+        defs[1].context = context::draw();
+        let mut terms = TermBuilder::new();
+        let form = terms.import_form(&defs[0].form);
+        let body = terms.push(None, &Ty::Float, form, Draft::Op { op: "probe".into(), args: Vec::new(), skip: Vec::new() });
+        defs[0].body = terms.freeze().handle(body);
+        defs[1].body = defs[0].body.clone();
+        let mut quiet = op::find(&[], "pointer/x", &context::value()).unwrap();
+        quiet.name = "sop/probe".into();
+        quiet.ctx = context::sop();
+        quiet.live = false;
+        let mut live = quiet.clone();
+        live.name = "draw/probe".into();
+        live.ctx = context::draw();
+        live.live = true;
+        scoped.ops = Arc::new(vec![quiet, live]);
+        let slot = Arena::new(&scoped, false, 1000);
+        let mut arena = checkout(&slot);
+        let (mut active, mut named) = (HashSet::new(), HashMap::new());
+        assert!(!dep_named(&mut arena, "quiet", true, &mut active, &mut named));
+        assert!(dep_named(&mut arena, "live", true, &mut active, &mut named));
+        let (mut reads, mut residuals, mut functions, mut named) = (BTreeSet::new(), HashSet::new(), HashSet::new(), HashSet::new());
+        assert!(!read_named(&mut arena, "quiet", true, &mut reads, &mut residuals, &mut functions, &mut named));
+        assert!(read_named(&mut arena, "live", true, &mut reads, &mut residuals, &mut functions, &mut named));
+        assert_eq!(reads.into_iter().collect::<Vec<_>>(), vec!["probe"]);
+    }
 
     #[test]
     fn foreign_dependencies_are_independent_of_query_order_and_numeric_ids() {
