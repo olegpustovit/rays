@@ -1,4 +1,4 @@
-# Rust port checkpoint — 2026-11-04
+# Rust port checkpoint — 2026-11-05
 
 The OCaml Rays codebase (~270k lines, `lib/`) is ported to the Cargo workspace `rs/` (edition 2024,
 toolchain 1.99.1, std + `cc` only). Plan and rules: `port/artifact-src/index.html` (published as
@@ -6,6 +6,11 @@ microapps artifact `15ksz3bazstq`). This is a live completion ledger; checked it
 evidence. The current completion pass is recorded below; untouched historical measurements are not fresh verification. This is a work-in-progress checkpoint, not a green shipping release.
 
 ## Where it stands
+
+Wrap-up: implementation changes through `9109258c` are committed and pushed on
+`origin/dev`. The worktree was clean before this documentation update; no source
+experiment or validation process remains pending. The proposed GPU-core import
+cleanup was inspected but not started. The overall port remains unfinished.
 
 | Area | State |
 |---|---|
@@ -17,6 +22,15 @@ evidence. The current completion pass is recorded below; untouched historical me
 | Debug speed vs native OCaml | latest Mac debug gate: box 20 ms, transform 110 ms, sphere 186 ms, garden 915 ms against stored Windows thresholds 36/45/205/260 ms; transform/garden still fail, garden varies, same-machine OCaml speed comparison remains open |
 | Memory | latest Mac debug `ws_tree` is 59.3 MB live, 39.4 MB unattributed after sharing packed/refusal metadata and producer sets and shrinking frozen arena capacity; prior release was 77.9 MB (original release baseline 101.3 MB). OCaml's 28.4 MB and broader sketch targets remain unmet; exact debug versions/logs in `port/eval-design.md`, release comparisons in `port/smoke-native.md` |
 | Tests | exact 432-file evidence ledger: 324 assertion-bearing candidates, 57 source stubs, 19 harnesses, six support modules, 26 Mac-qualified source paths; assertion parity/qualification is tracked separately (`port/test_inventory.md`) |
+| Dependency gate | 25 remaining violations, down from 35 across the recent boundary cleanups; gate policy/allowlists unchanged. Real mock tests and remaining mixed-target cases are still present. |
+| Latest native checks | renderer/runtime/input: 58 pass; Rays/Flow-native: 55 pass; stricter existing Metal film fixture: pass. Exact frames, pixels, allocation/residency and lifetime checks are recorded below; these focused results are not blanket shipping qualification. |
+
+Next priorities: resolve the remaining dependency violations; reduce tree live
+memory from 59.3 MB to the 28.4 MB OCaml target and attribute the remaining
+39.4 MB; meet the debug lowering/gallery budgets; finish native/editor and Windows
+qualification plus assertion-level test parity. Camera last passed at
+4.799/4.979 s, with only 21 ms margin in the latter run. Raw diagnostic code/message
+byte preservation and catch-all allocation/stack recovery also remain open.
 
 ## How to run
 
@@ -116,10 +130,10 @@ on PATH. A hook blocks plain `cargo test`. Build notes: `port/build-speed.md`.
 
 ### Memory (target: at or below OCaml)
 - [x] `syntax-share` merged (3992f0af, 065f4239): shared `Arc` children (Syntax::clone O(1)), boxed trivia (Syntax 128 -> 64 B), size asserts on Syntax/Node/Term
-- [ ] Measure ws_tree live before/after (381 MB Rust vs 28 MB OCaml); then shrink `Term` (176 B), interned names (`u32`), `u32` positions
+- [ ] Reach the OCaml tree live-memory target: latest debug 59.3 MB versus 28.4 MB. Historical pre-arena Rust measurement was 381 MB; packed term/name/position layout is implemented, but the memory target remains unmet.
 - [x] Arena layout for syntax/terms: packed rows and child tables with `u32` IDs, 16-byte handles, eight-byte node tags; static size checks enforce 32-byte syntax rows and 24-byte term rows. Syntax/checker gates (75 tests) cover all term payload imports, shared ownership/accounting, exact source metadata and 100,000-node iterative drops; current release also runs `ws_tree` and real-window basic/gallery. This layout milestone does not close the live-memory or remaining raw-byte qualification targets.
 - [ ] Lowering copies still present: `lisp_factory`, `qualify_workspace` / `static_with`, `inline_policy` (`label_context`, schema per call)
-- [ ] Untracked heap in the memory ledger (88-99% "unattributed"): charge the big owners
+- [ ] Attribute the remaining untracked heap: latest debug tree has 39.4 MB unattributed (59% of explicit), improved from historical 88-99% reports; opaque owners and caches remain.
 - [x] Recorded paired three-frame Rust/OCaml baselines for gpu_sea, swarm, procedural_modeling, ws_wave, ws_morph, ws_tree and ws_variations; all exit 0 within 30 s without memory errors. `port/smoke-native.md` identifies exact pre-arena binary SHA-256 hashes, raw logs and reused successful samples. Unmet live-memory targets and tree/variations readback differences remain explicit, not waived.
 
 ### Debug speed (target: every gate case below native OCaml)
@@ -144,7 +158,7 @@ on PATH. A hook blocks plain `cargo test`. Build notes: `port/build-speed.md`.
 - [x] Reconciled inventory by exact current source filenames, not arithmetic: all 432 paths occur once in the evidence ledger, with zero duplicate or unclassified filenames. Retired inconsistent inherited PORTED/STUB subtotals and corrected known renamed/misidentified counterparts. Full assertion-level parity remains the separate task above.
 
 ### Process
-- [ ] Commit `rs/` on `dev` per green checkpoint; never stage the OCaml working tree's uncommitted files
+- [ ] Commit `rs/` on `dev` per green checkpoint; never stage the OCaml working tree's uncommitted files. All authorized current work is committed/pushed through `9109258c`; the whole-green checkpoint bar remains unmet.
 - [ ] Agents: shared brief rules — `cargo t` only, 5 s tests, window-free sketch repros (`rays mem --frames 3`, 30 s kill), size asserts on hot structs, never revert files wholesale, edit with Edit/Write (PowerShell Set-Content corrupts UTF-8)
 - Runner verification: each native case now has an individual process/deadline; GPU/window cases are serialized rather than hidden in summed batch limits. Windows Job ownership survives root exit and kills captured-pipe descendants before joining readers. `cargo t -p rays-t`: 12 passed, 4.584 s runner wall; the orphan-process timeout regression passes.
 - [x] Updated and published artifact progress page: https://artifacts.microapps.space/a/15ksz3bazstq, version 14. Previewed the actual HTML surface; current verified gates and remaining work are explicit, original plan retained as historical reference. Refresh again before final shipping.
