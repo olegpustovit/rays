@@ -31,7 +31,7 @@ pub struct Graph { pub name:String, pub context:Context, pub inputs:Vec<(String,
 #[derive(Clone, Debug, PartialEq)]
 pub struct NodeDefinition { pub kind:catalog::Kind, pub slots:Vec<catalog::Slot>, pub keyword_inputs:Vec<String>, pub fields:Vec<FieldView>, pub label:String, pub category:Vec<String>, pub description:Option<String>, pub operation:String, pub version:i64, pub body:Graph, pub validations:Vec<(Term,String,String)>, pub normalizers:Vec<(String,Term)> }
 #[derive(Clone, Debug, PartialEq)]
-pub enum PackedForm { Candidate(Paths), Refused(Vec<Diagnostic>) }
+pub enum PackedForm { Candidate(Arc<Paths>), Refused(Vec<Diagnostic>) }
 #[derive(Clone)]
 pub struct Workspace {
     pub name:String, pub graphs:Arc<Vec<Graph>>, pub defs:Arc<Vec<Graph>>, pub nodes:Arc<Vec<Arc<NodeDefinition>>>, pub macros:Arc<Vec<Syntax>>, pub source:Arc<Vec<Syntax>>,
@@ -622,7 +622,7 @@ impl Checker {
  fn merge_packed(old: PackedForm, next: PackedForm) -> PackedForm {
      match (old, next) {
          (PackedForm::Candidate(mut left), PackedForm::Candidate(right)) => {
-             left.extend(right);
+             if !right.is_subset(&left) { Arc::make_mut(&mut left).extend(right.iter().cloned()); }
              PackedForm::Candidate(left)
          }
          (PackedForm::Refused(mut left), PackedForm::Refused(right)) => {
@@ -643,7 +643,7 @@ impl Checker {
          self.live.insert(path.clone());
      }
      if !value.packed.is_empty() {
-         let next = PackedForm::Candidate(value.packed.clone());
+         let next = PackedForm::Candidate(Arc::new(value.packed.clone()));
          self.packed.entry(path).and_modify(|old| *old = Self::merge_packed(old.clone(), next.clone())).or_insert(next);
      }
  }
@@ -654,10 +654,10 @@ impl Checker {
      }
      let next = match refusal {
          Some(reason) => PackedForm::Refused(vec![reason]),
-         None => PackedForm::Candidate([path.clone()].into_iter().collect()),
+         None => PackedForm::Candidate(Arc::new([path.clone()].into_iter().collect())),
      };
      self.packed.entry(path.clone()).and_modify(|old| *old = Self::merge_packed(old.clone(), next.clone())).or_insert(next);
-     let producer = PackedForm::Candidate([path.clone()].into_iter().collect());
+     let producer = PackedForm::Candidate(Arc::new([path.clone()].into_iter().collect()));
      self.packed.entry(path).and_modify(|old| *old = Self::merge_packed(old.clone(), producer.clone())).or_insert(producer);
  }
 
@@ -1571,7 +1571,7 @@ impl Checker {
      }
      if let Some(path) = self.terms.row(term).path {
          let path = self.terms.path_names(path).iter().map(|&name| self.terms.name(name).to_owned()).collect();
-         let next = PackedForm::Candidate([producer.clone()].into_iter().collect());
+         let next = PackedForm::Candidate(Arc::new([producer.clone()].into_iter().collect()));
          self.packed.entry(path).and_modify(|old| *old = Self::merge_packed(old.clone(), next.clone())).or_insert(next);
      }
      if matches!(node, PackedNode::Vec(_) | PackedNode::Get(_) | PackedNode::Bypass(_) | PackedNode::Expanded(_)
@@ -2110,7 +2110,7 @@ impl Checker {
                  let function = *self.terms.function(id);
                  let zone = self.terms.path_names(function.zone).iter().map(|&name| self.terms.name(name).to_owned()).collect();
                  self.link_body(function.body, &cx.path);
-                 self.packed.entry(zone).and_modify(|old| *old = Self::merge_packed(old.clone(), PackedForm::Candidate([cx.path.clone()].into_iter().collect()))).or_insert_with(|| PackedForm::Candidate([cx.path.clone()].into_iter().collect()));
+                 self.packed.entry(zone).and_modify(|old| *old = Self::merge_packed(old.clone(), PackedForm::Candidate(Arc::new([cx.path.clone()].into_iter().collect())))).or_insert_with(|| PackedForm::Candidate(Arc::new([cx.path.clone()].into_iter().collect())));
              }
          }
          info.packed.insert(cx.path.clone());
@@ -2492,7 +2492,7 @@ fn apply_kind(&mut self, cx: &Cx, form: &Syntax, kind: &catalog::Kind, args: &[A
     (self.make_term(form, out, Draft::Call { kind: kind.qualified.clone(), ctx: kind.context.clone(), args: named }), value)
  }
  fn link_path(&mut self, path: Path, producer: &Path) {
-     let next = PackedForm::Candidate([producer.clone()].into_iter().collect());
+     let next = PackedForm::Candidate(Arc::new([producer.clone()].into_iter().collect()));
      self.packed.entry(path).and_modify(|old| *old = Self::merge_packed(old.clone(), next.clone())).or_insert(next);
  }
 fn value_arg(&mut self, x: &Syntax, v: &Info) -> Arg {
@@ -3566,6 +3566,22 @@ mod memory_tests {
         assert!(!workspace.approx_reasons.is_empty());
         assert!(Arc::ptr_eq(&workspace.approx_reasons, &edited.approx_reasons), "snapshot cloning does not copy refusal diagnostics");
         let before = workspace.packed.as_ref().clone();
+        for ((_, original), (_, copy)) in workspace.packed.iter().zip(&before) {
+            if let (PackedForm::Candidate(original), PackedForm::Candidate(copy)) = (original, copy) {
+                assert!(Arc::ptr_eq(original, copy), "cloning prelude entries shares producer paths");
+            }
+        }
+        let producers = before.iter().find_map(|(_, form)| match form { PackedForm::Candidate(paths) => Some(paths), _ => None }).unwrap();
+        let mut candidate = PackedForm::Candidate(producers.clone());
+        candidate = Checker::merge_packed(candidate, PackedForm::Candidate(producers.clone()));
+        let PackedForm::Candidate(shared) = &candidate else { unreachable!() };
+        assert!(Arc::ptr_eq(producers, shared));
+        let original = producers.as_ref().clone();
+        candidate = Checker::merge_packed(candidate, PackedForm::Candidate(Arc::new([vec!["extra".into()]].into_iter().collect())));
+        let PackedForm::Candidate(merged) = candidate else { unreachable!() };
+        assert!(merged.contains(&vec!["extra".into()]));
+        assert!(original.is_subset(&merged));
+        assert_eq!(producers.as_ref(), &original, "merging leaves cached producer sets intact");
         Arc::make_mut(&mut edited.packed).clear();
         assert_eq!(workspace.packed.as_ref(), &before, "changing a snapshot leaves the original metadata intact");
         let reasons = workspace.approx_reasons.as_ref().clone();

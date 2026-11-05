@@ -7,6 +7,19 @@ not timed) and fails while any case is at or above its OCaml time.
 
 ## Current memory work — 2026-11-05, Mac M1
 
+Packed producer sets inside `PackedForm::Candidate` are shared through `Arc<Paths>`.
+Cloning the prelude's map or a checked metadata entry retains the existing set;
+merging uses copy-on-write only when the incoming set adds paths. Exact set/merge
+semantics and prior snapshots are covered by the existing metadata regression.
+Debug three-frame tree measurement falls from 60.7 to 59.3 MB live and 40.9 to
+39.4 MB unattributed; device 7.2 MB, allocation 3.9 MB/frame and payload readback
+13.9 KB/frame stay unchanged. Footprint is 100.1 MB, wall 4.01 s, exit 0.
+Before binary is the frozen-capacity sample below; after SHA-256
+`a053a7f5ac14869924d0bfb49f856231ae06451a0fcd0e6178687ba3c5f7e500`.
+Log `/tmp/rays-producer-sharing-memory.log`; full allocation snapshot
+`/tmp/rays-memory-full-profile-tree.log` identified deep producer-set clones under
+`Checker::clone`. This is retained-memory evidence, not a wall-time speed claim.
+
 Frozen checked/syntax arenas now shrink their three largest growable tables
 (rows, ranges and term/edge IDs) once when sealed. Builders still grow geometrically;
 row IDs, forms and ownership remain unchanged. Current debug `ws_tree --frames 3`
