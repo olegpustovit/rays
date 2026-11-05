@@ -39,7 +39,7 @@ pub fn diagnostic(code: &str, message: &str) -> Diagnostic {
 
 /// `Diagnostic.error ~code ~cause ~hints message`.
 pub fn diagnostic_with(code: &str, message: &str, cause: Option<String>, hints: Vec<String>) -> Diagnostic {
-    rays_diagnostic::error(code.to_owned(), message.to_owned(), None, None, cause, hints, Vec::new())
+    rays_diagnostic::error(code.to_owned(), message.to_owned(), None, None, cause.map(String::into_bytes), hints, Vec::new())
 }
 
 pub fn cooked(geometry: geometry::T) -> Result<GeometryCooked, Diagnostic> {

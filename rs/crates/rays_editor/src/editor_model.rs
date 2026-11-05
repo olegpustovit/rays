@@ -30,7 +30,6 @@ use flow_graph::probe::{self, Probe};
 use flow_graph::projection as fprojection;
 use flow_native::probe_run;
 use flow_native::workspace_gpu;
-use flow_sop::lower;
 use flow_sop::network as net;
 use flow_syntax::phase_timer::PhaseTimer;
 use flow_syntax::syntax::Syntax;
@@ -365,7 +364,7 @@ pub struct frame_result {
 pub struct lit_cache {
     pub site: w::Path,
     pub at: PathMap<i64>,
-    pub lowered: lower::T,
+    pub evaluated: Arc<flow_eval::Eval>,
     pub scope: fprojection::Scope,
     pub tags: pick::Set,
 }
@@ -499,7 +498,7 @@ pub struct t {
     pub canvas_preview: Option<preview>,
     /// its plan node and type, resolved by `sync_views`
     pub canvas_viewed: Option<(Ty, i64)>,
-    pub view_key: Option<(lower::T, PathMap<i64>, BTreeMap<i64, preview>, Option<preview>)>,
+    pub view_key: Option<(Arc<flow_eval::Eval>, PathMap<i64>, BTreeMap<i64, preview>, Option<preview>)>,
     /// the highlight of the selected node at the probes, see `lit_tags`
     pub lit: Option<lit_cache>,
     pub edit_phases: PhaseTimer,

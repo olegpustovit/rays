@@ -33,7 +33,8 @@ pub struct Diagnostic {
     pub position: Option<Position>,
     pub message: String,
     pub span: Option<Span>,
-    pub cause: Option<String>,
+    /// Original Text bytes; decode only at a display boundary.
+    pub cause: Option<Vec<u8>>,
     pub hints: Vec<String>,
     pub trace: Vec<Trace>,
 }
@@ -69,7 +70,7 @@ pub fn error(
     message: String,
     span: Option<Span>,
     position: Option<Position>,
-    cause: Option<String>,
+    cause: Option<Vec<u8>>,
     hints: Vec<String>,
     trace: Vec<Trace>,
 ) -> Diagnostic {
@@ -130,7 +131,7 @@ pub fn error_to_string(value: &Diagnostic) -> String {
     output.push_str(&value.message);
     if let Some(cause) = &value.cause {
         output.push_str("\n  cause: ");
-        output.push_str(cause);
+        output.push_str(&String::from_utf8_lossy(cause));
     }
     for hint in &value.hints {
         output.push_str("\n  hint: ");

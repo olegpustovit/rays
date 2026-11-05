@@ -1195,7 +1195,9 @@ impl Lowerer {
             Callable(Callable::Closure(cl)) => {
                 let mut bindings = Vec::new();
                 for (name, v) in &cl.env { bindings.push((name.clone(), self.capture(s, source, parent, static_, sop, arguments, v)?)); }
-                let f = E::Residual::compiled_function(parent, cl.instance, cl.prefix.clone(), cl.zone.clone(), cl.params.clone(), cl.body.clone(), bindings)?;
+                let arena = cl.body.arena();
+                let params = arena.params(cl.params).iter().map(|p| (arena.owned_pattern(p.pattern), p.ty.map(|id| arena.ty(id).clone()))).collect();
+                let f = E::Residual::compiled_function(parent, cl.instance, cl.prefix.clone(), cl.zone.clone(), params, cl.body.clone(), bindings)?;
                 Ok(Value::Fn(f))
             }
             _ => Err(refusal("packed_capture")),
@@ -1891,6 +1893,14 @@ impl Lowerer {
                 match (E::Residual::function_body(*f), E::Residual::function_origin(*f)) {
                     (Some((params, body)), Some((instance, prefix, zone))) => {
                         let env: Env = E::Residual::function_bindings(*f).into_iter().map(|(n, v)| (n, Known(v))).collect();
+                        let mut builder = TermBuilder::new();
+                        let form = builder.import_form(&body.form());
+                        let body_id = builder.import(&body);
+                        let function = builder.push(None, &Ty::Fn(None), form, Draft::Fn { params, body: body_id, zone: zone.clone(), capture: None });
+                        let arena = builder.freeze();
+                        let Node::Fn(node) = arena.handle(function).node else { unreachable!() };
+                        let params = arena.function(node).params;
+                        let body = arena.handle(body_id);
                         Ok(Callable::Closure(Arc::new(Closure { params, body, env, instance, prefix, zone, identity })))
                     }
                     _ => match E::Residual::function_name(*f) {

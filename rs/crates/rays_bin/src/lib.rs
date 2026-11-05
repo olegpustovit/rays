@@ -49,7 +49,7 @@ fn check_meshes(lowered: &flow_sop::lower::T) -> Result<(), Diagnostic> {
     }
     for (index, instance) in lowered.plan.instances.iter().enumerate() {
         if let flow_eval::Value::Residual(id) = &instance.result {
-            let geometry = flow_eval::Residual::residual_view(*id).map(|v| v.term.ty == flow_syntax::ty::geometry()).unwrap_or(false);
+            let geometry = flow_eval::Residual::residual_view(*id).map(|v| *v.term.ty() == flow_syntax::ty::geometry()).unwrap_or(false);
             if geometry && !(flow_eval::frame_dependent(&instance.result) || flow_eval::state_dependent(&instance.result)) {
                 check_root(lowered, index, lower_error("Missing static geometry graph".to_string()))?;
             }

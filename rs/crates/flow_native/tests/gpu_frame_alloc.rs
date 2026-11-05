@@ -14,6 +14,7 @@ use flow_eval as e;
 use flow_native::{drawing, workspace_gpu as wg};
 use flow_sop::lower;
 use rays::canvas;
+use std::cell::Cell;
 use std::rc::Rc;
 
 /// The source budget for the dispatch encoding and per-region bookkeeping.
@@ -43,15 +44,20 @@ fn frame() {
         // the pointer at the bottom: density 1, 32 levels
         let live = input::Frame { dt: 1. / 60., frame: k, tick: k, size, pointer: (420., 1000.), ..input::at_time(k as f64 / 60.) };
         let mut scene = None;
+        let shown = Rc::new(Cell::new(0));
         wg::with_backend(&ws, true, &mut |gpu| {
-            let resident = wg::resident(gpu, &ws).map(|(r, show)| {
-                let show: drawing::show = if read_back { Rc::new(|_, _| Some(None)) } else { show };
-                (r, show)
-            });
-            let options = drawing::RenderOptions { state: Some(state.clone()), gpu: Some(wg::marks(&ws)), resident, ..Default::default() };
+            let (resident, show) = wg::resident(gpu, &ws).expect("resident GPU scope");
+            let shown = shown.clone();
+            let show: drawing::show = if read_back { Rc::new(|_, _| Some(None)) } else { Rc::new(move |packed, live| {
+                let result = show(packed, live);
+                if matches!(&result, Some(Some(_))) { shown.set(shown.get() + 1); }
+                result
+            }) };
+            let options = drawing::RenderOptions { state: Some(state.clone()), gpu: Some(wg::marks(&ws)), resident: Some((resident, show)), ..Default::default() };
             scene = Some(drawing::render_prepared(&prepared, &live, size, &options).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d))));
         });
         wg::frame(&ws, None);
+        assert!(read_back || shown.get() > 0, "recursive_signals frame {k}: no mark attributes drawn over resident fold arrays");
         scene.expect("scene")
     };
     let pixels = |scene: &rays::scene::t| {

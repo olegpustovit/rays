@@ -1,5 +1,6 @@
 //! Offscreen-GPU cases of lib/rays (canvas depth, World raster, Scene3 float32 and lowering
-//! uploads). One process, one shared device (tests/common keeps a lease).
+//! uploads). Tests normally share a device; lifetime assertions release the helper's lease first
+//! so destroying the last canvas also releases the device's cached native resources.
 //! Not ported: the canvas wrong-execution-context checks (OCaml Domain/Thread based) and the
 //! allocation (`Gc`) ceilings.
 use crate::common;
@@ -55,6 +56,7 @@ fn gpu_rays_camera_depth() {
     if !common::gpu() {
         return;
     }
+    common::release_keepalive();
     let baseline = live_handles();
     let canvas_ = canvas::create(32, 32).expect("canvas");
     let plane = mesh::plane(1., 1.).expect("plane");
@@ -81,7 +83,7 @@ fn gpu_rays_camera_depth() {
         require(snapshot(&canvas_) == first, "camera instance retained replay pixels");
     }
     let _ = canvas::destroy(&canvas_);
-    require(live_handles() == baseline, "camera native live-handle delta");
+    assert_eq!(live_handles(), baseline, "camera native live-handle delta");
 }
 
 fn gpu_rays_canvas_resize_density() {
@@ -151,6 +153,7 @@ fn gpu_rays_world_furnace() {
     if !common::gpu() {
         return;
     }
+    common::release_keepalive();
     let baseline = live_handles();
     let radiance = 0.5;
     let baked = world::bake(Some(1), None, 64, 32, &uniform(radiance)).expect("bake");
@@ -201,7 +204,7 @@ fn gpu_rays_world_furnace() {
         &[scene::line((4, 4), (4, 4), Some(color::white()), Some(1)).expect("line"), scene::circle((8, 8), 0, Some(color::white()), None).expect("circle")],
     );
     let _ = canvas::destroy(&canvas_);
-    require(live_handles() == baseline, "World raster native handle delta");
+    assert_eq!(live_handles(), baseline, "World raster native handle delta");
 }
 
 /// A World sun straight down (+Z here) through the GPU sun map: the plane under a floating box is
@@ -211,6 +214,7 @@ fn gpu_rays_world_sun_shadow() {
     if !common::gpu() {
         return;
     }
+    common::release_keepalive();
     let baseline = live_handles();
     let baked = world::bake(Some(1), None, 64, 32, &uniform(0.2)).expect("bake");
     let sun = world::sun { direction: vec3::unit_z(), radiance: world::rgb(2000., 2000., 2000.), angular_radius: 0.02 };
@@ -255,7 +259,7 @@ fn gpu_rays_world_sun_shadow() {
     let (a, b) = (luminance(under), luminance(beside));
     require((a - b).abs() <= 3, &format!("sunless World shows a patch: {a} vs {b}"));
     let _ = canvas::destroy(&canvas_);
-    require(live_handles() == baseline, "World sun shadow native handle delta");
+    assert_eq!(live_handles(), baseline, "World sun shadow native handle delta");
 }
 
 fn box_mesh() -> mesh::t {

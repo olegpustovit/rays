@@ -37,10 +37,11 @@ fn nonfinite_literals_round_trip() {
     };
     for (text, expected) in NONFINITE {
         assert!(s::number(text) && lisp::float(expected) == text);
-        assert!(matches!(&parse(text)[0].node, Node::Num(n) if n == text));
+        let literal = &parse(text)[0];
+        assert!(matches!(literal.node, Node::Num(n) if literal.name(n) == text));
         assert!(s::number_value(text).is_some_and(|f| f.is_nan() == expected.is_nan() && (f.is_nan() || f == expected)));
         let (source, w) =
-            apply_checked(&catalog(), &source, &Op::SetArg { node: path(&["g", "x"]), key: ArgKey::Whole, sub: vec![], value: s::make(Node::Num(text.into())) }).unwrap();
+            apply_checked(&catalog(), &source, &Op::SetArg { node: path(&["g", "x"]), key: ArgKey::Whole, sub: vec![], value: s::make(s::Draft::Num(text.into())) }).unwrap();
         assert!(same(expected, &result(&w, 0.0)));
         let card = p::find(&p::of_graph(&catalog(), &w, "g").unwrap(), &path(&["g", "x"])).unwrap();
         assert!(card.ty == Ty::Float && p::value_card(&card));
@@ -51,13 +52,14 @@ fn nonfinite_literals_round_trip() {
         let reparsed = parse(&printed);
         assert!(lisp::print(&reparsed).unwrap().0 == printed && same(expected, &result(&check(&reparsed), 0.0)));
         let literal = row.expr.clone().unwrap();
-        let mut seven = literal.clone();
-        seven.node = Node::Num("7.5".into());
+        let mut builder = s::SyntaxBuilder::new();
+        let seven = builder.with_node(&literal, s::Draft::Num("7.5".into()));
+        let seven = builder.freeze().handle(seven);
         let (patched, spans) = lisp::patch_atoms(&(printed.clone(), spans), &[seven]).unwrap();
         assert_eq!(result(&check(&parse(&patched)), 0.0), Value::Float(7.5));
         let (restored, _) = lisp::patch_atoms(&(patched, spans), &[literal]).unwrap();
         assert!(same(expected, &result(&check(&parse(&restored)), 0.0)));
-        let (_, finite) = apply_checked(&catalog(), &source, &Op::SetArg { node: card.path.clone(), key: ArgKey::Whole, sub: vec![], value: s::make(Node::Num("7.5".into())) }).unwrap();
+        let (_, finite) = apply_checked(&catalog(), &source, &Op::SetArg { node: card.path.clone(), key: ArgKey::Whole, sub: vec![], value: s::make(s::Draft::Num("7.5".into())) }).unwrap();
         assert_eq!(result(&finite, 0.0), Value::Float(7.5));
         let mut codes: Vec<(Severity, String)> = Vec::new();
         catalog::validate_parameter(
@@ -100,7 +102,8 @@ fn nonfinite_primitives() {
     };
     for (text, expected) in NONFINITE {
         assert!(s::number(text) && lisp::float(expected) == text);
-        assert!(matches!(&parse(text)[0].node, Node::Num(n) if n == text));
+        let literal = &parse(text)[0];
+        assert!(matches!(literal.node, Node::Num(n) if literal.name(n) == text));
         assert!(s::number_value(text).is_some_and(|f| f.is_nan() == expected.is_nan() && (f.is_nan() || f == expected)));
         let mut codes: Vec<(Severity, String)> = Vec::new();
         catalog::validate_parameter(

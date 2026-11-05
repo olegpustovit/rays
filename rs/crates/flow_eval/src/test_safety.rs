@@ -108,3 +108,16 @@ fn interrupts_only_abandon_work_when_a_stop_was_observed() {
         }).join().unwrap();
     }), "a worker's observed stop reaches its caller's latch");
 }
+
+#[test]
+fn retained_evaluation_uses_the_callers_interrupt() {
+    let workspace = check("(workspace w (graph g :context host (array/count (map (fn [(x : float)] (+ x (frame/dt))) (array/float 32 1.0)))))");
+    let evaluated = ok(static_eval(&workspace));
+    let value = &evaluated.results[0].1;
+    let live = input::Frame { dt: 0.125, ..input::at_time(0.0) };
+    assert!(!with_interrupt(Arc::new(|| true), &mut || {
+        assert_eq!(force(value, &live, None).unwrap_err().code, "cancelled");
+    }));
+    let result = force(value, &live, None).unwrap();
+    assert_eq!(result, Value::Int(32));
+}

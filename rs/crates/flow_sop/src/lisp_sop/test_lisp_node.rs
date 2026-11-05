@@ -97,7 +97,7 @@ fn authored_body_errors_cook_lazily() {
     let expect_error = |s: &mut session::T, domains: i64, n: &node::T| {
         let context = sctx::create(ContextOptions { domains: Some(domains), ..Default::default() }).unwrap();
         match session::cook(s, None, &context, n) {
-            Err(d) => assert!(d.code == "E_BODY" && d.message == "body failure" && d.cause.as_deref() == Some("authored cause"), "authored body error changed during cooking: {}", rays_diagnostic::error_to_string(&d)),
+            Err(d) => assert!(d.code == "E_BODY" && d.message == "body failure" && d.cause.as_deref() == Some(b"authored cause"), "authored body error changed during cooking: {}", rays_diagnostic::error_to_string(&d)),
             Ok(_) => panic!("authored body error succeeded"),
         }
     };
@@ -325,7 +325,7 @@ fn a_selected_cooked_error_keeps_its_diagnostic() {
         for domains in [1i64, 8] {
             let context = sctx::create(ContextOptions { domains: Some(domains), ..Default::default() }).unwrap();
             match session::cook(s, None, &context, &n) {
-                Err(d) => assert!(d.code == "E_SELECTED" && d.message == "selected failure" && d.cause.as_deref() == Some("point count 1"), "compiled cooked selection diagnostic differs: {}", rays_diagnostic::error_to_string(&d)),
+                Err(d) => assert!(d.code == "E_SELECTED" && d.message == "selected failure" && d.cause.as_deref() == Some(b"point count 1"), "compiled cooked selection diagnostic differs: {}", rays_diagnostic::error_to_string(&d)),
                 Ok(_) => panic!("selected cooked error succeeded"),
             }
         }
@@ -929,8 +929,7 @@ fn deferred_child_cooking_stays_inside_its_authored_error_boundary() {
         Trace { node_id: 88, label: "retained child".to_owned(), operation: "native.retained".to_owned() },
         Trace { node_id: 89, label: "retained input".to_owned(), operation: "native.input".to_owned() },
     ];
-    // OCaml's cause starts with the raw byte \255, which a Rust String cannot hold: U+00FF stands in.
-    let mut child_error = rays_diagnostic::error("E_CHILD".to_owned(), "child cook failed".to_owned(), None, None, Some("\u{ff} raw 日本😀".to_owned()), vec!["retained hint".to_owned()], Vec::new());
+    let mut child_error = rays_diagnostic::error("E_CHILD".to_owned(), "child cook failed".to_owned(), None, None, Some([b"\xff raw ".as_slice(), "日本😀".as_bytes()].concat()), vec!["retained hint".to_owned()], Vec::new());
     child_error.trace = retained.clone();
     let counter = calls.clone();
     let failure = child_error.clone();

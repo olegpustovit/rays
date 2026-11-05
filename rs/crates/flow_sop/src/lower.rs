@@ -355,7 +355,7 @@ fn digest(text: &str) -> String {
 
 pub fn declaration_key(checked: &Workspace, d: &NodeDefinition) -> String {
     let compute = || digest(&ck::declaration_source(checked, d));
-    let id = d.body.body.form.id;
+    let id = d.body.body.form().id;
     if id < catalog::library_base() {
         return compute();
     }
@@ -1888,6 +1888,7 @@ pub fn build_call(
         }
         let call_id = builder.push(None, &ty::geometry(), blank, Draft::Call { kind: definition.kind.qualified.clone(), ctx: fctx::sop(), args: call_args });
         let inputs: Vec<_> = body.inputs.iter().map(|(name, ty, default)| (name.clone(), ty.clone(), default.as_ref().map(|term| builder.import(term)))).collect();
+        let input_count = inputs.len();
         let arena = builder.freeze();
         let call = WGraph {
             body: arena.handle(call_id),
@@ -1938,7 +1939,6 @@ pub fn build_call(
             Some(f) => f.preserves_topology,
             None => !conservative && owned.iter().all(|n| n.facts.topology == Topology::Preserved),
         };
-        let input_count = inputs.len();
         let resolve = |names: &[String]| -> Vec<String> {
             flow_check::catalog::resolve_component_names(
                 &|name| match get(parameters, name) {

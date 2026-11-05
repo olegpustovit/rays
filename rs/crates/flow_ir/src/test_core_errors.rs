@@ -220,7 +220,7 @@ fn authored_errors_keep_exact_dynamic_messages() {
         check(Executor::force(&compiled, &Executor::ForceOptions { strict: true, ..Default::default() }, &live));
     }
     match E::static_eval(&workspace(r##"(error "E_LITERAL" "literal failure" :cause "literal cause")"##)) {
-        Err(d) => assert!(d.code == "E_LITERAL" && d.cause.as_deref() == Some("literal cause") && d.span.is_some()),
+        Err(d) => assert!(d.code == "E_LITERAL" && d.cause.as_deref() == Some(b"literal cause") && d.span.is_some()),
         Ok(_) => panic!("literal error was accepted"),
     }
     for count in [0, 5001] {

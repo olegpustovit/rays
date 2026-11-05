@@ -177,7 +177,6 @@ dependencies = [
  "mem",
  "mem_sys",
  "ogpu",
- "ogpu_core",
  "ogpu_metal",
  "ogpu_mock",
  "ogpu_vulkan",
@@ -338,7 +337,6 @@ name = "ogpu_metal"
 version = "0.1.0"
 dependencies = [
  "metal",
- "native_layer_token",
  "ogpu",
  "ogpu_core",
 ]
@@ -385,6 +383,7 @@ dependencies = [
  "mem",
  "ocaml_int",
  "ogpu",
+ "ogpu_metal",
  "ogpu_vulkan",
  "param",
  "rays",
@@ -400,6 +399,7 @@ version = "0.1.0"
 dependencies = [
  "cfmt",
  "editor_core",
+ "editor_document",
  "flow_check",
  "flow_eval",
  "flow_graph",
@@ -409,6 +409,7 @@ dependencies = [
  "mem_sys",
  "ocaml_int",
  "ogpu",
+ "ogpu_metal",
  "ogpu_vulkan",
  "param",
  "pxui",
@@ -430,6 +431,7 @@ dependencies = [
  "input",
  "ocaml_int",
  "ogpu",
+ "ogpu_metal",
  "ogpu_vulkan",
  "param",
  "pxui",
@@ -449,7 +451,7 @@ dependencies = [
  "mem",
  "ocaml_int",
  "ogpu",
- "ogpu_core",
+ "ogpu_metal",
  "ogpu_mock",
  "ogpu_vulkan",
  "parallel",
@@ -459,7 +461,6 @@ dependencies = [
  "runtime_input",
  "runtime_resources",
  "scene_command",
- "sdl3",
 ]
 
 [[package]]
@@ -526,6 +527,7 @@ dependencies = [
  "mem_sys",
  "ocaml_int",
  "ogpu",
+ "ogpu_metal",
  "ogpu_vulkan",
  "parallel",
  "param",

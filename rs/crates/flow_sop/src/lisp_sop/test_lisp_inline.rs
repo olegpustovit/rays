@@ -158,15 +158,14 @@ fn frame_driven_arguments_inline_and_fail_as_the_call() {
 }
 
 /// A driven transform inlines: its identity and singular tests are the write's data.
-#[test]
-
-fn a_driven_transform_inlines_as_the_call() {
+fn driven_transform_case(case: usize) {
     let text = |input: &str, call: &str| format!("(workspace x (graph g :context sop (sop/transform {input} {call})))");
-    let grid = "(sop/grid :rows 5 :columns 7)".to_owned();
+    let grid = "(sop/grid :rows 4 :columns 4)".to_owned();
     let vertex = format!("(sop/normals {grid} :owner \"Vertex\")");
-    let range = format!("(sop/group_range {grid} :start 3 :end_ 12)");
-    let empty = format!("(sop/group_range {grid} :range_mode \"Start and length\" :length 0)");
-    for (input, live, written, inlines) in [
+    // Four divisions give 25 points. Keep Group Range's 3..12 selection without its library closure.
+    let range = format!("(sop/with_group {grid} (array/concat (array/int 3 0) (array/concat (array/int 10 1) (array/int 12 0))) :name \"range\")");
+    let empty = format!("(sop/with_group {grid} (array/int 25 0) :name \"range\")");
+    let (input, live, written, inlines) = [
         (&grid, ":shear_xy (* t 2.0) :translate [0.0 t 0.0]", ":shear_xy 0.25 :translate [0.0 0.125 0.0]", true),
         (&grid, ":translate [(- t 0.125) 0.0 0.0]", "", true),
         (&grid, ":scale [(- t 0.125) 1.0 1.0]", ":scale [0.0 1.0 1.0]", true),
@@ -176,36 +175,47 @@ fn a_driven_transform_inlines_as_the_call() {
         (&range, ":group \"range\" :scale [1.0 (- t 0.125) 1.0]", ":group \"range\" :scale [1.0 0.0 1.0]", false),
         (&empty, ":group \"range\" :scale [1.0 (- t 0.125) 1.0]", ":group \"range\" :scale [1.0 0.0 1.0]", false),
         (&grid, ":recompute_normals true :shear_xy (* t 2.0)", ":recompute_normals true :shear_xy 0.25", true),
-    ] {
-        let mut inline = false;
-        let a = outcome(0, &mut inline, &text(input, live));
-        assert_eq!(inline, inlines, "driven transform: {live} inlined wrongly");
-        let b = out(&text(input, written));
-        assert!(a.is_ok() && a == b, "driven transform: {input} {live} differs from {written}");
-    }
+    ][case];
+    let mut inline = false;
+    let a = outcome(0, &mut inline, &text(input, live));
+    assert_eq!(inline, inlines, "driven transform: {live} inlined wrongly");
+    let b = out(&text(input, written));
+    assert!(a.is_ok() && a == b, "driven transform: {input} {live} differs from {written}");
 }
+
+#[test] fn driven_transform_shear_translate() { driven_transform_case(0); }
+#[test] fn driven_transform_translate_zero() { driven_transform_case(1); }
+#[test] fn driven_transform_scale_zero() { driven_transform_case(2); }
+#[test] fn driven_transform_vertex_shear() { driven_transform_case(3); }
+#[test] fn driven_transform_vertex_scale_zero() { driven_transform_case(4); }
+#[test] fn driven_transform_group_shear() { driven_transform_case(5); }
+#[test] fn driven_transform_group_scale_zero() { driven_transform_case(6); }
+#[test] fn driven_transform_empty_group() { driven_transform_case(7); }
+#[test] fn driven_transform_recompute_normals() { driven_transform_case(8); }
 
 /// Recomputed normals are sop/normals' face-area bytes, gathered per point (or vertex).
-#[test]
-
-fn recomputed_normals_are_sop_normals_face_area_bytes() {
-    for (input, owner) in [
-        ("(sop/grid :rows 5 :columns 7)", "point"),
-        ("(sop/grid :rows 5 :columns 7 :connectivity \"Triangles\")", "point"),
-        ("(sop/normals (sop/uv_sphere) :owner \"Point\")", "point"),
-        ("(sop/normals (sop/grid :rows 5 :columns 7) :owner \"Vertex\")", "vertex"),
-    ] {
-        let moved = format!("(sop/transform {input} :shear_xy 0.25 :rotate [0.3 0.0 0.0])");
-        let recomputed = format!("(sop/transform {input} :shear_xy 0.25 :rotate [0.3 0.0 0.0] :recompute_normals true)");
-        let cap = format!("{}{}", owner[..1].to_uppercase(), &owner[1..]);
-        let scattered = format!(
-            "(sop/with_attr {moved} \"N\" (sop/attr (sop/normals {moved} :owner {cap:?} :weighting \"Face area\") \"N\" :owner {owner:?} :type vec3) :owner {owner:?} :type vec3)"
-        );
-        let text = |body: &str| format!("(workspace x (graph g :context sop {body}))");
-        let (a, b) = (out(&text(&recomputed)), out(&text(&scattered)));
-        assert!(a.is_ok() && a == b, "recomputed normals differ from sop/normals: {input}");
-    }
+fn recomputed_normals_case(case: usize) {
+    let (input, owner) = [
+        ("(sop/grid :rows 4 :columns 4)", "point"),
+        ("(sop/grid :rows 4 :columns 4 :connectivity \"Triangles\")", "point"),
+        ("(sop/normals (sop/uv_sphere :segments 8 :rings 4) :owner \"Point\")", "point"),
+        ("(sop/normals (sop/grid :rows 4 :columns 4) :owner \"Vertex\")", "vertex"),
+    ][case];
+    let moved = format!("(sop/transform {input} :shear_xy 0.25 :rotate [0.3 0.0 0.0])");
+    let recomputed = format!("(sop/transform {input} :shear_xy 0.25 :rotate [0.3 0.0 0.0] :recompute_normals true)");
+    let cap = format!("{}{}", owner[..1].to_uppercase(), &owner[1..]);
+    let scattered = format!(
+        "(sop/with_attr {moved} \"N\" (sop/attr (sop/normals {moved} :owner {cap:?} :weighting \"Face area\") \"N\" :owner {owner:?} :type vec3) :owner {owner:?} :type vec3)"
+    );
+    let text = |body: &str| format!("(workspace x (graph g :context sop {body}))");
+    let (a, b) = (out(&text(&recomputed)), out(&text(&scattered)));
+    assert!(a.is_ok() && a == b, "recomputed normals differ from sop/normals: {input}");
 }
+
+#[test] fn recomputed_normals_grid_quads() { recomputed_normals_case(0); }
+#[test] fn recomputed_normals_grid_triangles() { recomputed_normals_case(1); }
+#[test] fn recomputed_normals_sphere() { recomputed_normals_case(2); }
+#[test] fn recomputed_normals_vertex() { recomputed_normals_case(3); }
 
 /// Step E2: a cooked-data argument (a count of the cooked input) inlines; the body reads it as a
 /// value resolved once per cook, in time linear in the points.

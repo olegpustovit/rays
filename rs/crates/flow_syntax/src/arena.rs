@@ -414,19 +414,29 @@ pub fn equal_node(a: &Syntax, b: &Syntax) -> bool {
 }
 fn compare(a: &Syntax, b: &Syntax, location: bool) -> bool {
     if a.identity() == b.identity() { return true; }
-    let mut pending = vec![(a.row, b.row)];
+    compare_roots(&a.arena, &b.arena, &[(a.row, b.row)], location)
+}
+
+/// Exact comparison of several source roots, sharing one visited-row set.
+pub fn equal_roots(a: &SyntaxArena, b: &SyntaxArena, roots: &[(SyntaxId, SyntaxId)]) -> bool {
+    compare_roots(a, b, roots, true)
+}
+
+fn compare_roots(a: &SyntaxArena, b: &SyntaxArena, roots: &[(SyntaxId, SyntaxId)], location: bool) -> bool {
+    let mut pending = roots.to_vec();
     let mut seen = HashSet::new();
     while let Some((a_id, b_id)) = pending.pop() {
+        if a.owner == b.owner && a_id == b_id { continue; }
         if !seen.insert((a_id, b_id)) { continue; }
-        let (x, y) = (a.arena.row(a_id), b.arena.row(b_id));
+        let (x, y) = (a.row(a_id), b.row(b_id));
         if location && (x.id != y.id || x.span != y.span) { return false; }
-        if a.arena.notes(a_id) != b.arena.notes(b_id) || a.arena.meta(a_id) != b.arena.meta(b_id)
-            || a.arena.tail(a_id) != b.arena.tail(b_id) { return false; }
+        if a.notes(a_id) != b.notes(b_id) || a.meta(a_id) != b.meta(b_id)
+            || a.tail(a_id) != b.tail(b_id) { return false; }
         match (x.node, y.node) {
-            (Node::Sym(x), Node::Sym(y)) | (Node::Kw(x), Node::Kw(y)) | (Node::Num(x), Node::Num(y)) => if a.arena.name(x) != b.arena.name(y) { return false; },
-            (Node::Str(x), Node::Str(y)) => if a.arena.bytes(x) != b.arena.bytes(y) { return false; },
+            (Node::Sym(x), Node::Sym(y)) | (Node::Kw(x), Node::Kw(y)) | (Node::Num(x), Node::Num(y)) => if a.name(x) != b.name(y) { return false; },
+            (Node::Str(x), Node::Str(y)) => if a.bytes(x) != b.bytes(y) { return false; },
             (Node::List(x), Node::List(y)) | (Node::Vec(x), Node::Vec(y)) | (Node::Map(x), Node::Map(y)) => {
-                let (x, y) = (a.arena.range(x), b.arena.range(y));
+                let (x, y) = (a.range(x), b.range(y));
                 if x.len() != y.len() { return false; }
                 pending.extend(x.iter().copied().zip(y.iter().copied()));
             }

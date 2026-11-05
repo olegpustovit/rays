@@ -16,6 +16,20 @@ fn at(time: f64, frame: i64, tick: i64) -> input::Frame { let mut f = input::at_
 fn get(e: &Eval, n: &str) -> Value { e.results.iter().find(|(k, _)| k == n).unwrap().1.clone() }
 
 #[test]
+fn state_source_identity_survives_rechecking_and_resets_on_change() {
+    for context in ["value", "host"] {
+        let source = |step| format!("(workspace w (graph g :context {context} (state [n 0] (+ n {step}))))");
+        let state = create_state();
+        for (frame, step, expected) in [(0, 1, 1), (1, 1, 2), (2, 2, 2)] {
+            // Every check and static evaluation owns a fresh arena, even for equal source.
+            let workspace = checked_src(&source(step));
+            let evaluation = static_eval(&workspace).unwrap();
+            assert_eq!(force(&get(&evaluation, "g"), &at(0., frame, frame), Some(&state)).unwrap(), Value::Int(expected));
+        }
+    }
+}
+
+#[test]
 fn forked_states_diverge() {
     let workspace = checked("(state [n 0.0] (+ n t))");
     let run0 = |state: &State, frame: i64, time: f64| run(&workspace, false, None, Some(state), Some(&at(time, frame, 0)), time);

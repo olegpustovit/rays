@@ -67,7 +67,7 @@ pub const CASES_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../speci
 
 pub fn scope_catalog() -> Catalog {
     thread_local! {
-        static CATALOG: Catalog = flow_sop::catalog::of_factories(1, &[], None, &sop::nodes::factories()).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
+        static CATALOG: Catalog = editor_document::kinds::catalog(1, &sop::nodes::factories()).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
     }
     CATALOG.with(|c| c.clone())
 }
@@ -75,14 +75,20 @@ pub fn scope_catalog() -> Catalog {
 /// `Workspace_doc.of_text scope_catalog text |> Result.get_ok` then `.checked`.
 pub fn checked(text: &str) -> Workspace {
     let forms = flow_syntax::syntax::parse(text).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
-    match flow_sop::catalog::check_workspace(&[], false, None, &scope_catalog(), &forms) {
+    match flow_check::workspace::check(flow_sop::operators::all(), false, false, None, &scope_catalog(), &forms) {
         (Some(w), _) => w,
         (None, ds) => panic!("{}", ds.iter().map(rays_diagnostic::to_string).collect::<Vec<_>>().join("; ")),
     }
 }
 
 pub fn load_workspace(name: &str) -> Workspace {
-    let text = std::fs::read_to_string(format!("{}/{}.lisp", CASES_DIR, name)).unwrap_or_else(|e| panic!("{name}: {e}"));
+    // Dune copies these sketches into the OCaml fixture directory; read the same sources directly.
+    let path = if matches!(name, "bloom" | "variations") {
+        format!("{CASES_DIR}/{name}.lisp")
+    } else {
+        format!("{}/../../../sketches/ws_{name}.rays", env!("CARGO_MANIFEST_DIR"))
+    };
+    let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{name}: {e}"));
     checked(&text)
 }
 

@@ -376,10 +376,13 @@ pub fn editor(workspace: &workspace_doc::T, plan: &Plan) -> R<Option<Editor>> {
             let mut follows: Vec<(panels::Path, panels::Path)> = Vec::new();
             for (path, term) in &ofs {
                 match &term.node {
-                    w::Node::RefBinding(n, rest) if rest.is_empty() => match all.iter().find(|(p, panel)| *panel == Panel::Graph && bound(p).as_deref() == Some(n.as_str())) {
+                    w::Node::RefBinding(id) if term.arena().name_ids(term.arena().ref_binding(*id).fields).is_empty() => {
+                        let n = term.name(term.arena().ref_binding(*id).name);
+                        match all.iter().find(|(p, panel)| *panel == Panel::Graph && bound(p).as_deref() == Some(n)) {
                         Some((target, _)) => follows.insert(0, (path.clone(), target.clone())),
                         None => return Err(diag("E_PANEL_OF", &format!(":of {n} is not a graph panel of the layout shown."))),
-                    },
+                        }
+                    }
                     _ => return Err(diag("E_PANEL_OF", ":of takes the binding of a graph panel.")),
                 }
             }

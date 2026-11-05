@@ -98,7 +98,7 @@ fn document_boundary_validation_dump_preset_gpu() {
     let directory = std::env::temp_dir().join(format!("rays-document-contract-{}", std::process::id()));
     std::fs::create_dir_all(&directory).expect("temp dir");
     let dir = directory.to_string_lossy().into_owned();
-    let saved = preset::save(&dir, "round", &doc, &s::make(Node::Map(Vec::new().into()))).expect("save");
+    let saved = preset::save(&dir, "round", &doc, &s::make(s::Draft::Map(Vec::new().into()))).expect("save");
     let loaded = preset::load(Some(gpu), &saved, Some(&factories()), &doc.settings).expect("load");
     assert!(
         workspace_doc::to_text(&loaded.doc.workspace.ws).unwrap() == workspace_doc::to_text(&workspace).unwrap() && loaded.doc.networks.len() == doc.networks.len(),
@@ -287,7 +287,6 @@ fn names(v: &[&str]) -> Vec<String> {
 }
 
 #[test]
-#[ignore = "upstream: flow_eval static evaluation of sop/uv_sphere (gpu_sea, orrery) takes 20-40 s per lowering in a debug build, not a deadlock (parity_backlog: flow_eval static_with cost)"]
 fn fast_path_literal_scrub_with_closure() {
     let doc = lower(None, &ws_of_text(SEA));
     same_as_full("initial", &doc);

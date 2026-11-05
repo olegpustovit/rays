@@ -215,7 +215,7 @@ pub fn run_cameras() {
     for _ in 0..8 {
         r.step((450., 300.), vec![]);
     }
-    let geometry = |r: &Run| layout::geometry(None, Some(&[Panel::Timeline]), &shell_of(&build_ok(&Editor::workspace(&r.e))).tree, &idle_frame(0));
+    let geometry = |r: &Run| layout::geometry(None, Some(&[Panel::Timeline]), &shell_of(&r.e.core.doc).tree, &idle_frame(0));
     let center = |r: &Run, key: &str| {
         let leaf = layout::find(&geometry(r), &Panel::View(key.into())).expect("leaf");
         let (x, y, w, h) = leaf.body;

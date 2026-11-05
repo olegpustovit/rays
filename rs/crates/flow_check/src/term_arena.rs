@@ -819,19 +819,22 @@ impl std::fmt::Debug for DebugPart {
 
 impl PartialEq for Term {
     fn eq(&self, other: &Self) -> bool {
+        if self.identity() == other.identity() { return true; }
         let (a, b) = (&self.arena, &other.arena);
         let mut pending = vec![(self.row, other.row)];
         let mut seen = std::collections::HashSet::new();
+        let mut forms = Vec::new();
         while let Some((x, y)) = pending.pop() {
             if !seen.insert((x, y)) { continue; }
             let (x, y) = (a.row(x), b.row(y));
             if a.ty(x.ty) != b.ty(y.ty) || !paths_equal(a, x.path, b, y.path)
-                || a.syntax.handle(x.form) != b.syntax.handle(y.form) || !metadata_equal(a, x.node, b, y.node) { return false; }
+                || !metadata_equal(a, x.node, b, y.node) { return false; }
+            forms.push((x.form, y.form));
             let (x, y) = (a.term_ids(x.children), b.term_ids(y.children));
             if x.len() != y.len() { return false; }
             pending.extend(x.iter().copied().zip(y.iter().copied()));
         }
-        true
+        arena::equal_roots(&a.syntax, &b.syntax, &forms)
     }
 }
 
@@ -1005,6 +1008,33 @@ mod tests {
         assert!(source_weak.upgrade().is_none());
         assert!(syntax_weak.upgrade().is_none());
         assert!(!target.rows().is_empty());
+    }
+
+    #[test]
+    fn term_equality_checks_source_payload_locations_and_trivia_at_every_root() {
+        fn term(source: &Syntax) -> Term {
+            let mut builder = TermBuilder::new();
+            let root_form = builder.import_form(&arena::make(arena::Draft::Sym("root".into())));
+            let child_form = builder.import_form(source);
+            let child = builder.push(None, &Ty::Int, child_form, Draft::Lit(param::Value::Int(1)));
+            let root = builder.push(None, &Ty::Any, root_form, Draft::Vec(vec![child, child]));
+            builder.freeze().handle(root)
+        }
+        let source = arena::make(arena::Draft::Sym("leaf".into()));
+        let expected = term(&source);
+        assert_eq!(expected, term(&source));
+        let mut builder = SyntaxBuilder::new();
+        let imported = builder.import(&source);
+        let different = builder.with_node(&source, arena::Draft::Sym("other".into()));
+        let location = builder.with_location(imported, 99, source.span.clone());
+        let span = builder.with_location(imported, source.id, Span { start: 1, finish: 2 });
+        let notes = builder.with_trivia(imported, Some(flow_syntax::syntax::Trivia { notes: vec!["note".into()], ..Default::default() }));
+        let metadata = builder.with_trivia(imported, Some(flow_syntax::syntax::Trivia { meta: vec!["tag".into()], ..Default::default() }));
+        let tail = builder.with_trivia(imported, Some(flow_syntax::syntax::Trivia { tail: vec!["tail".into()], ..Default::default() }));
+        let syntax = builder.freeze();
+        for changed in [different, location, span, notes, metadata, tail] {
+            assert_ne!(expected, term(&syntax.handle(changed)));
+        }
     }
 
     #[test]

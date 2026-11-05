@@ -289,7 +289,7 @@ pub mod Region {
         Convert(Conversion, i64),
         Int_select(i64, i64, i64),
         Guarded(Vec<(i64, bool)>, Box<Instruction>),
-        Raise(Ty, String, String, Option<String>),
+        Raise(Ty, String, String, Option<Vec<u8>>),
         Loop_begin(Loop),
         Loop_carry(i64, i64, Ty),
         Loop_end(i64, Vec<i64>, Option<i64>),
@@ -1394,7 +1394,7 @@ pub fn pp(p: &Program) -> String {
                     Primitive::Fail(code, message) => o.push_str(&format!("<{} {}>", quoted(code.as_bytes()), quoted(message.as_bytes()))),
                     Primitive::Fail_diagnostic(d) => o.push_str(&format!(
                         "<{} {} cause={}>", quoted(d.code.as_bytes()), quoted(d.message.as_bytes()),
-                        quoted(d.cause.clone().unwrap_or_default().as_bytes()))),
+                        quoted(d.cause.as_deref().unwrap_or_default()))),
                     _ => {}
                 }
                 o.push('(');
@@ -1573,7 +1573,7 @@ pub fn pp(p: &Program) -> String {
             }
             I::Raise(ty, code, message, cause) => {
                 o.push_str(&format!("error<{} {} {}", ty::to_string(ty), quoted(code.as_bytes()), quoted(message.as_bytes())));
-                if let Some(cause) = cause { o.push_str(&format!(" cause={}", quoted(cause.as_bytes()))); }
+                if let Some(cause) = cause { o.push_str(&format!(" cause={}", quoted(cause))); }
                 o.push('>');
             }
             I::Loop_begin(l) => o.push_str(&format!("loop r{}..r{} end={}", l.first, l.last, l.finish)),

@@ -101,6 +101,8 @@ fn of_defnode(node: &Defnode) -> Descriptor {
 /// The library as a process holds it: each form with its fixed id base, the names it mentions, and
 /// a defnode's declaration without its Lisp.
 struct Entry {
+    file: usize,
+    form: usize,
     name: String,
     base: i64,
     references: Vec<String>,
@@ -273,68 +275,86 @@ const NODE_FILES: [(&str, &str); 129] = [
 
 struct Library {
     entries: Vec<Entry>,
-    forms: Vec<Syntax>,
+    forms: OnceLock<Vec<Syntax>>,
     nodes: OnceLock<Result<Vec<Defnode>, Diagnostic>>,
 }
 
-fn load_library() -> Result<Library, Diagnostic> {
-    // sorted: the library's order fixes its forms' ids
+fn parse_file(index: usize) -> Result<Vec<Syntax>, Diagnostic> {
+    let (file, text) = NODE_FILES[index];
     let mut forms: Vec<Syntax> = Vec::new();
-    for (file, text) in NODE_FILES.iter() {
-        let parsed = syntax::parse(text).map_err(|mut d| {
-            d.message = format!("{file}: {}", d.message);
-            d
-        })?;
-        for form in parsed {
-            let children = if syntax::head(&form) == Some("workspace") && form.children().len() >= 2 {
-                Some(form.children()[2..].iter().map(|&id| form.child(id)).collect::<Vec<_>>())
-            } else {
-                None
-            };
-            match children {
-                Some(children) => forms.extend(children),
-                None => forms.push(form),
-            }
+    let parsed = syntax::parse(text).map_err(|mut d| {
+        d.message = format!("{file}: {}", d.message);
+        d
+    })?;
+    for form in parsed {
+        let children = if syntax::head(&form) == Some("workspace") && form.children().len() >= 2 {
+            Some(form.children()[2..].iter().map(|&id| form.child(id)).collect::<Vec<_>>())
+        } else {
+            None
+        };
+        match children {
+            Some(children) => forms.extend(children),
+            None => forms.push(form),
         }
     }
+    Ok(forms)
+}
+
+fn load_library() -> Result<Library, Diagnostic> {
+    // Validate every source and retain its header/index, not every unused implementation body.
     let empty = empty_form();
-    let mut entries = Vec::with_capacity(forms.len());
+    let mut entries = Vec::new();
     let mut next = LIBRARY_BASE;
-    for form in &forms {
-        let Some(name) = definition_name(form) else {
-            return Err(catalog_error("node sources contain only defnode, defn and defmacro forms".into()));
-        };
-        let header = if syntax::head(form) != Some("defnode") {
-            None
-        } else {
-            let mut node = defnode::parse(form)?;
-            node.inputs = Vec::new();
-            node.body = empty.clone();
-            node.validations = Vec::new();
-            node.normalizers = Vec::new();
-            node.form = empty.clone();
-            Some(node)
-        };
-        let mut names = HashSet::new();
-        mentions(&mut names, form);
-        let mut references: Vec<String> = names.into_iter().collect();
-        references.sort();
-        let base = next;
-        next += size(form);
-        entries.push(Entry { name, base, references, header });
+    for file in 0..NODE_FILES.len() {
+        for (form_index, form) in parse_file(file)?.iter().enumerate() {
+            let Some(name) = definition_name(form) else {
+                return Err(catalog_error("node sources contain only defnode, defn and defmacro forms".into()));
+            };
+            let header = if syntax::head(form) != Some("defnode") {
+                None
+            } else {
+                let mut node = defnode::parse(form)?;
+                node.inputs = Vec::new();
+                node.body = empty.clone();
+                node.validations = Vec::new();
+                node.normalizers = Vec::new();
+                node.form = empty.clone();
+                Some(node)
+            };
+            let mut names = HashSet::new();
+            mentions(&mut names, form);
+            let mut references: Vec<String> = names.into_iter().collect();
+            references.sort();
+            let base = next;
+            next += size(form);
+            entries.push(Entry { file, form: form_index, name, base, references, header });
+        }
     }
-    Ok(Library { entries, forms, nodes: OnceLock::new() })
+    Ok(Library { entries, forms: OnceLock::new(), nodes: OnceLock::new() })
 }
 
 fn library() -> Result<&'static Library, Diagnostic> {
     static LIBRARY: OnceLock<Result<Library, Diagnostic>> = OnceLock::new();
-    LIBRARY.get_or_init(load_library).as_ref().map_err(|d| d.clone())
+    static OWNER: OnceLock<mem::Owner> = OnceLock::new();
+    let library = LIBRARY.get_or_init(load_library).as_ref().map_err(|d| d.clone())?;
+    OWNER.get_or_init(|| {
+        let owner = mem::cache("flow.library.syntax");
+        mem::root(&owner, std::sync::Arc::new(move |visitor| {
+            let mut memory = syntax::Memory::default();
+            if let Some(forms) = library.forms.get() { memory.forms(forms); }
+            for (address, bytes) in memory.into_allocations() { visitor.allocation(address, bytes); }
+        }));
+        owner
+    });
+    Ok(library)
 }
 
 /// The whole library, for what reads all of it (the manifest, tests). A workspace check does not.
 /// Embedded node-library definitions, sorted by source filename.
 pub fn sources() -> Result<&'static [Syntax], Diagnostic> {
-    Ok(&library()?.forms)
+    Ok(library()?.forms.get_or_init(|| (0..NODE_FILES.len())
+        .flat_map(|file| parse_file(file).expect("embedded sources were validated when indexing the library"))
+        .collect()))
 }
 
 /// `Catalog.definitions_of_sources`: the defnode forms among `forms`, parsed.
@@ -353,7 +373,7 @@ pub fn node_definitions() -> Result<&'static [Defnode], Diagnostic> {
     let library = library()?;
     library
         .nodes
-        .get_or_init(|| definitions_of_sources(&library.forms))
+        .get_or_init(|| definitions_of_sources(sources()?))
         .as_ref()
         .map(|nodes| nodes.as_slice())
         .map_err(|d| d.clone())
@@ -489,10 +509,8 @@ pub fn library_base() -> i64 {
 }
 
 fn is_embedded(supplied: &[Syntax]) -> bool {
-    match sources() {
-        Ok(embedded) => std::ptr::eq(supplied.as_ptr(), embedded.as_ptr()) && supplied.len() == embedded.len(),
-        Err(_) => false,
-    }
+    library().ok().and_then(|library| library.forms.get()).is_some_and(|embedded|
+        std::ptr::eq(supplied.as_ptr(), embedded.as_ptr()) && supplied.len() == embedded.len())
 }
 
 type PreludeKey = (Vec<String>, bool, Catalog, Vec<i64>);
@@ -517,6 +535,20 @@ fn prelude_cached(
     positions: &[i64],
     make: &dyn Fn() -> (Catalog, Prelude),
 ) -> Rc<(Catalog, Prelude)> {
+    static OWNER: OnceLock<mem::Owner> = OnceLock::new();
+    OWNER.get_or_init(|| {
+        let owner = mem::cache("flow.library.preludes");
+        mem::root(&owner, std::sync::Arc::new(|visitor| {
+            // Workspace checking and memory reports run on the initial domain.
+            let mut memory = workspace::Memory::default();
+            PRELUDES.with(|cache| {
+                for (_, prelude) in cache.borrow().iter() { memory.prelude(&prelude.1); }
+            });
+            let (syntax, checked) = memory.into_allocations();
+            for (address, bytes) in syntax.into_iter().chain(checked) { visitor.allocation(address, bytes); }
+        }));
+        owner
+    });
     let key: PreludeKey = (op_names(ops), library, catalog.clone(), positions.to_vec());
     let hit = PRELUDES.with(|cache| {
         let mut cache = cache.borrow_mut();
@@ -591,8 +623,13 @@ fn check_embedded(ops: &[Op], library_flag: bool, catalog: &Catalog, forms: &[Sy
                 e.header.is_some() && e.name == kind.qualified
             })
         });
-        let sources: Vec<Syntax> =
-            reached.iter().map(|i| syntax::renumber(library.entries[*i].base, &library.forms[*i]).0).collect();
+        let mut files = HashMap::new();
+        let sources: Vec<Syntax> = reached.iter().map(|i| {
+            let entry = &library.entries[*i];
+            let forms = files.entry(entry.file).or_insert_with(|| parse_file(entry.file)
+                .expect("embedded sources were validated when indexing the library"));
+            syntax::renumber(entry.base, &forms[entry.form]).0
+        }).collect();
         let prelude = workspace::prelude(ops, library_flag, false, &catalog, &sources);
         (catalog, prelude)
     };
@@ -867,6 +904,49 @@ mod tests {
     }
 
     #[test]
+    fn retained_prelude_arenas_are_charged_once() {
+        let catalog = Catalog { version: 0, kinds: Vec::new() };
+        let forms = syntax::parse("(defn identity :context value [(x : int)] x)").unwrap();
+        let cached = prelude_cached(&[], false, &catalog, &[1], &|| {
+            (catalog.clone(), workspace::prelude(&[], false, false, &catalog, &forms))
+        });
+        let mut memory = workspace::Memory::default();
+        memory.prelude(&cached.1);
+        let expected = memory.checked_bytes() + memory.syntax.bytes();
+        assert!(expected > 0);
+        memory.prelude(&cached.1);
+        assert_eq!(memory.checked_bytes() + memory.syntax.bytes(), expected);
+        for _ in 0..2 {
+            let report = mem::report();
+            let owner = report.owners.iter().find(|owner| owner.name == "flow.library.preludes").unwrap();
+            assert_eq!(owner.bytes, expected as i64);
+        }
+    }
+
+    #[test]
+    fn retained_library_syntax_is_charged_once_across_roots() {
+        let library = library().expect("library loads");
+        sources().expect("materialize the full library explicitly");
+        let forms = library.forms.get().unwrap();
+        let mut memory = syntax::Memory::default();
+        memory.forms(forms);
+        let expected = memory.bytes() as i64;
+        assert!(expected > 0);
+        let alias = mem::cache("test.library.alias");
+        mem::root(&alias, Arc::new(move |visitor| {
+            let mut memory = syntax::Memory::default();
+            memory.forms(forms);
+            for (address, bytes) in memory.into_allocations() { visitor.allocation(address, bytes); }
+        }));
+        for _ in 0..2 {
+            let report = mem::report();
+            let owner = report.owners.iter().find(|owner| owner.name == "flow.library.syntax").expect("library owner");
+            assert_eq!(owner.bytes, expected);
+            assert_eq!(mem::bytes(&alias), 0, "another root cannot charge the same source arenas twice");
+        }
+    }
+
+    #[test]
     fn embedded_files_are_the_whole_node_directory_sorted() {
         let mut on_disk: Vec<String> = std::fs::read_dir(nodes_dir())
             .expect("nodes directory")
@@ -889,7 +969,19 @@ mod tests {
         assert_eq!(nodes, NODE_FILES.iter().map(|(_, text)| text.matches("(defnode ").count()).sum::<usize>());
         let again = node_definitions().expect("definitions parse");
         assert_eq!(again.len(), nodes);
-        assert!(std::ptr::eq(sources().expect("sources").as_ptr(), library.forms.as_ptr()));
+        assert!(std::ptr::eq(sources().expect("sources").as_ptr(), library.forms.get().unwrap().as_ptr()));
+    }
+
+    #[test]
+    fn normal_checks_do_not_retain_the_complete_library_syntax() {
+        let catalog = of_factories(1, &[], None, &sop::nodes::factories()).expect("catalog");
+        let library = library().expect("library");
+        assert!(library.forms.get().is_none());
+        let forms = syntax::parse("(workspace w (graph g :context sop (sop/box)))").expect("parses");
+        let (checked, diagnostics) = check_workspace(crate::operators::all(), false, None, &catalog, &forms);
+        assert!(checked.is_some(), "{diagnostics:?}");
+        assert!(!checked.unwrap().nodes.is_empty(), "the reached implementation is present");
+        assert!(library.forms.get().is_none(), "unused implementations remain unmaterialized");
     }
 
     /// test_catalog_load.ml: a catalog without native kinds still lists every library node, and a

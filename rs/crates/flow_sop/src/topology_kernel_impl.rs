@@ -1036,7 +1036,7 @@ pub fn concat(cancel: Option<Arc<cancel::T>>, grain: i64, sources: &[Geometry], 
     };
     rdk::mesh_merge::run_tagged(&params, sources).map_err(|e| {
         let mut d = diag(error::code(&e), &format!("{} could not produce valid geometry", error::operation(&e)));
-        d.cause = Some(error::to_string(&e));
+        d.cause = Some(error::to_string(&e).into_bytes());
         d.hints = error::hints(&e).to_vec();
         d
     })

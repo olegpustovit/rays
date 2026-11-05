@@ -191,7 +191,7 @@ fn lazy(planes:bool){
         assert_eq!(geometry_bytes(&cook_once(1,&n)),geometry_bytes(&original));
         let n=authored(reference,&original,&wrapped(bad));let mut s=new_session(64,64_000_000);let d=try_cook(&mut s,&context(1,97),&n).err().expect("selected error succeeded");
         let expected=if planes {("E_X","selected x","x cause")}else{("E_POINTS","selected points","point cause")};
-        assert_eq!((d.code.as_str(),d.message.as_str(),d.cause.as_deref()),(expected.0,expected.1,Some(expected.2)));session::close(&mut s);
+        assert_eq!((d.code.as_str(),d.message.as_str(),d.cause.as_deref()),(expected.0,expected.1,Some(expected.2.as_bytes())));session::close(&mut s);
     }
 }
 #[test]fn arrays_lazy_branches_preserve_selected_causes(){lazy(false)}
@@ -241,7 +241,7 @@ fn rollback(planes:bool){
     let op=if planes{"sop/mesh_planes"}else{"sop/mesh"};
     let source=format!("(workspace rollback (graph g :context sop (let* [step (state [previous 0.0] (+ previous (frame/dt)))] ({op} :points {points} :vertex_points (array/int 0) :primitive_offsets (array/int 1) :kinds (array/int 0)))))");
     for reference in [false,true]{let(l,_)=lower_text(lower::Options{reference,..Default::default()},&source);let g=&l.graphs[0];let state=flow_eval::create_state();let lane=value_lane::create(Some(state.clone()));let live=input::Frame{dt:0.5,frame:1,tick:1,..input::at_time(1.)};let resolved=value_lane::resolve(None,Some(&live),&lane,1.,&g.network).unwrap();let n=edit::compile_node(&resolved.geometry,g.root.unwrap()).unwrap();let stamp=flow_eval::state_stamp(&state);
-        for domains in [1,8]{let c=ctx::create(ctx::Options{domains:Some(domains),time:Some(1.),input:Some(live.clone()),..Default::default()}).unwrap();let mut s=new_session(64,64_000_000);let d=try_cook(&mut s,&c,&n).err().expect("selected state error succeeded");assert_eq!((d.code.as_str(),d.cause.as_deref()),(code,Some(cause)));assert_eq!(flow_eval::state_stamp(&state),stamp);session::close(&mut s);}
+        for domains in [1,8]{let c=ctx::create(ctx::Options{domains:Some(domains),time:Some(1.),input:Some(live.clone()),..Default::default()}).unwrap();let mut s=new_session(64,64_000_000);let d=try_cook(&mut s,&c,&n).err().expect("selected state error succeeded");assert_eq!((d.code.as_str(),d.cause.as_deref()),(code,Some(cause.as_bytes())));assert_eq!(flow_eval::state_stamp(&state),stamp);session::close(&mut s);}
     }
 }
 #[test]fn arrays_failed_state_rolls_back(){rollback(false)}

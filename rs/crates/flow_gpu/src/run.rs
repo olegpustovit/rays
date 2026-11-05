@@ -725,7 +725,7 @@ fn ensure(d: &Data, slot: &mut Slot, creations: &mut i64, mapped: bool, length: 
 /// into `groups`: its grid is sized on the device, nothing is read back. The caller sets its
 /// pipeline next.
 pub fn dispatch_arguments(encoder: &ComputeEncoder, pipelines: &pipelines::T, cell: &Buffer, mul: i64, div: i64, capacity: i64, group: i64, groups: &Buffer) -> Result<(), Diagnostic> {
-    let compiled = pipelines::get(pipelines, &kernels::dispatch_arguments())?;
+    let compiled = pipelines::get(pipelines, kernels::dispatch_arguments())?;
     let mut bound = [0u8; 16];
     put_i32(&mut bound, 0, capacity as i32);
     put_i32(&mut bound, 4, mul as i32);
@@ -1426,7 +1426,7 @@ fn bounds_of(kept: &Kept) -> Option<Vec<f64>> {
     let n = kept.count;
     let lanes = n.min(1024);
     let compute = || -> Result<Option<Vec<f64>>, Diagnostic> {
-        let compiled = pipelines::get(&d.pipelines, &kernels::bounds())?;
+        let compiled = pipelines::get(&d.pipelines, kernels::bounds())?;
         let out = {
             let mut st = d.state.borrow_mut();
             match &st.bounds_out {
@@ -2042,7 +2042,7 @@ pub fn fill_indices(value: Option<i64>, queue: &Queue, pipelines: &pipelines::T,
     if count == 0 {
         return Ok(());
     }
-    let compiled = pipelines::get(pipelines, &kernels::indices())?;
+    let compiled = pipelines::get(pipelines, kernels::indices())?;
     one_pass(queue, &|commands| {
         let encoder = gpu(b::compute_encoder(commands))?;
         let r = (|| -> Result<(), Diagnostic> {
@@ -2088,7 +2088,7 @@ pub fn validate_topology(
     for (i, n) in [point_count, vertices.1, offsets.1, kinds.1, max_polygon_size].iter().enumerate() {
         pack_uint32(&mut bound, i * 4, *n as f64)?;
     }
-    let compiled = pipelines::get(pipelines, &kernels::topology())?;
+    let compiled = pipelines::get(pipelines, kernels::topology())?;
     one_pass(queue, &|commands| {
         let encoder = gpu(b::compute_encoder(commands))?;
         let r = (|| -> Result<(), Diagnostic> {
@@ -2150,7 +2150,7 @@ pub fn triangle_indices(
             return refuse("Resident display stream count exceeds buffer capacity.");
         }
     }
-    let compiled = pipelines::get(pipelines, &kernels::triangles())?;
+    let compiled = pipelines::get(pipelines, kernels::triangles())?;
     let mut bound = [0u8; 16];
     for (i, n) in [points, nv, np].iter().enumerate() {
         put_i32(&mut bound, i * 4, *n as i32);
@@ -2206,7 +2206,7 @@ pub fn compact(
     blocks: &Buffer,
     groups: &Buffer,
 ) -> Result<(), Diagnostic> {
-    let compiled = pipelines::get(pipelines, &if uint32 { kernels::compaction_uint32() } else { kernels::compaction() })?;
+    let compiled = pipelines::get(pipelines, if uint32 { kernels::compaction_uint32() } else { kernels::compaction() })?;
     let encoder_ = match encoder {
         Some(e) => e.clone(),
         None => gpu(b::compute_encoder(commands))?,
@@ -2246,7 +2246,7 @@ pub fn compact(
 /// word `into`, encoded on `encoder` (queue order makes it see what was encoded before it).
 pub fn copy(encoder: &ComputeEncoder, pipelines: &pipelines::T, src: &Buffer, from: i64, dst: &Buffer, into: i64, words: i64) -> Result<(), Diagnostic> {
     if words > 0 {
-        let compiled = pipelines::get(pipelines, &kernels::copy())?;
+        let compiled = pipelines::get(pipelines, kernels::copy())?;
         let mut bound = [0u8; 12];
         put_i32(&mut bound, 0, words as i32);
         put_i32(&mut bound, 4, from as i32);

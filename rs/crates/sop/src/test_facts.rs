@@ -358,7 +358,7 @@ fn a_panicking_node_is_a_diagnostic_on_that_node() {
     };
     assert_eq!(error.code, "uncaught_node_exception");
     assert_eq!(error.message, "a procedural node raised an exception while cooking");
-    assert_eq!(error.cause.as_deref(), Some("kernel exploded"));
+    assert_eq!(error.cause.as_deref(), Some(b"kernel exploded".as_slice()));
     // the session survives: a good node cooks, and the same bad node fails the same way again
     let good = snapshot(&fixture());
     cook(&mut evaluator, 1, &good);

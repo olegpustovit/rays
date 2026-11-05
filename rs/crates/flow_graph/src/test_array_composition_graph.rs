@@ -2,7 +2,7 @@
 use crate::flow_edit::{apply_checked, default_for, ArgKey, Op};
 use crate::projection as p;
 use crate::test_support::*;
-use flow_syntax::syntax::{self as s, Node};
+use flow_syntax::syntax as s;
 use flow_syntax::ty::Ty;
 use flow_syntax::{lisp, value};
 
@@ -50,7 +50,11 @@ fn typed_composition() {
             }
         }
         let default = default_for(&Ty::Array(Box::new(ty.clone())), "source", None).unwrap();
-        let expression = s::make(Node::List(vec![s::make(Node::Sym("array/concat".into())), default.clone(), default].into()));
+        let mut builder = s::SyntaxBuilder::new();
+        let head = builder.push_draft(0, s::Draft::Sym("array/concat".into()), Default::default(), None);
+        let default = builder.import(&default);
+        let expression = builder.push_draft(0, s::Draft::List(vec![head, default, default]), Default::default(), None);
+        let expression = builder.freeze().handle(expression);
         let source = parse("(workspace menu (graph g :context host (array/int 0)))");
         let (_, added) = apply_checked(&catalog(), &source, &Op::AddNode { scope: path(&["g"]), name: "joined".into(), expr: expression }).unwrap();
         assert_eq!(card(&added, &["g", "joined"]).ty, Ty::Array(Box::new(ty.clone())));

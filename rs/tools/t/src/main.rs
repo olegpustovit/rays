@@ -346,7 +346,9 @@ fn run_tests(
             }
         }
     }
-    let workers = thread::available_parallelism().map_or(1, |count| count.get());
+    // ponytail: cap outer concurrency at four; cases also run worker pools/Node workers.
+    // Revisit per-suite scheduling if larger hosts need more throughput.
+    let workers = thread::available_parallelism().map_or(1, |count| count.get()).min(4);
     let mut failure_code = 0;
     let outcomes = run_test_batch(ordinary, workers, args, run_started, timeout);
     if record_outcomes(outcomes, timings, &mut failure_code) {
@@ -451,6 +453,7 @@ fn run_test_case(
                 if output.status.success() {
                     0
                 } else {
+                    eprintln!("rays-t: test {}::{} failed ({})", case.crate_name, case.name, output.status);
                     status_code(output.status)
                 },
                 false,
@@ -1146,7 +1149,7 @@ mod tests {
         let mut command = Command::new("sh");
         command
             .arg("-c")
-            .arg("cat >/dev/null & wait")
+            .arg("exec 3<&0; cat <&3 >/dev/null & wait")
             .stdin(Stdio::piped());
         let result = run_command(
             &mut command,
@@ -1171,7 +1174,7 @@ mod tests {
         let mut command = Command::new("sh");
         command
             .arg("-c")
-            .arg("cat >/dev/null & exit 0")
+            .arg("exec 3<&0; cat <&3 >/dev/null & exit 0")
             .stdin(Stdio::piped());
         let result = run_command(
             &mut command,

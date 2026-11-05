@@ -291,7 +291,7 @@ pub fn run_result_view() {
     let m = (450., 300.);
     let centre = |r: &Run, expected: f64| {
         let actual = centre_x(&r.e);
-        check(actual == Some(expected), &format!("VIEW kept stale geometry: expected {expected:.1}, got {actual:?}"));
+        check(actual == Some(expected), &format!("VIEW kept stale geometry: expected {expected:.1}, got {actual:?}; cook error: {:?}", r.e.core.cook.error));
     };
     let select = |r: &mut Run, name: &str| {
         let (x, y, w, _) = Editor::node_box(&r.e, &["g".into(), name.into()]).expect("box");

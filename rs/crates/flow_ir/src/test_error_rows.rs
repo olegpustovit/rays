@@ -76,7 +76,7 @@ fn resolve(grain: i64, calls: &Arc<AtomicI64>) -> ResolveFn {
 
 fn failure(index: i64, result: Result<Value, Diagnostic>) {
     match result {
-        Err(d) => assert!(d.code == "E_ROW" && d.message == format!("bad {index}") && d.cause == Some(format!("raw 日本😀 {index}"))),
+        Err(d) => assert!(d.code == "E_ROW" && d.message == format!("bad {index}") && d.cause == Some(format!("raw 日本😀 {index}").into_bytes())),
         Ok(v) => panic!("expected a row failure, got {v:?}"),
     }
 }
@@ -126,11 +126,11 @@ fn malformed_context_cancellation_and_laziness() {
     assert!(evaluate(None, one(), &format!("(if (< t 0.) (let* [unused (error_rows flags {MAPPER})] 0) 0)")) == Ok(Value::Int(0)));
     let cancel: ResolveFn = Arc::new(|_| Err(rays_diagnostic::error("cancelled".into(), "cancel".into(), None, None, Some("raw cancel".into()), Vec::new(), Vec::new())));
     match evaluate(Some(cancel), one(), &range_last(MAPPER)) {
-        Err(d) => assert!(d.code == "cancelled" && d.message == "cancel" && d.cause.as_deref() == Some("raw cancel")),
+        Err(d) => assert!(d.code == "cancelled" && d.message == "cancel" && d.cause.as_deref() == Some(b"raw cancel")),
         _ => panic!("expected a cancellation"),
     }
     match evaluate(None, one(), r##"(error_rows flags (fn [index] (error "cancelled" "mapper cancel" :cause "original cancel")))"##) {
-        Err(d) => assert!(d.code == "cancelled" && d.message == "mapper cancel" && d.cause.as_deref() == Some("original cancel")),
+        Err(d) => assert!(d.code == "cancelled" && d.message == "mapper cancel" && d.cause.as_deref() == Some(b"original cancel")),
         _ => panic!("expected the mapper cancellation"),
     }
     match V::error_row_index(&Value::Float_array(Arc::new(vec![1.])), None, None) {

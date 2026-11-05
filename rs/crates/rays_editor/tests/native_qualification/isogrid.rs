@@ -49,7 +49,7 @@ pub(super) fn placed(session: &mut sop::session::T, node: &sop::node::T) -> g::T
 }
 pub(super) fn picture(owner: &gpu::t, geometry: &g::T) -> scene3::t {
     let surface = rdk_rays::surface::of_geometry(None, geometry).unwrap();
-    let display = |g: &g::T| gpu::display(owner, g);
+    let display = |g: &g::T| gpu::display(owner, g).map(|(key, count, indices, color, keep)| (key, count, indices, color, std::rc::Rc::from(keep)));
     rdk_rays::surface::scene3(None, Some(&display), &surface).unwrap()
 }
 pub(super) fn frame(camera: &rays::camera::t, picture: scene3::t) -> scene::t {
@@ -68,7 +68,7 @@ fn run(owner: &gpu::t, config: &Gpu::Config, workspace: &editor_document::worksp
     assert_eq!(before.payload_readback_bytes, publication.payload_readback_bytes);
     let surface = rdk_rays::surface::of_geometry(None, &geometry).unwrap();
     assert_eq!(gpu::image_stats(owner).0.payload_readback_bytes, before.payload_readback_bytes);
-    let display = |g: &g::T| gpu::display(owner, g);
+    let display = |g: &g::T| gpu::display(owner, g).map(|(key, count, indices, color, keep)| (key, count, indices, color, std::rc::Rc::from(keep)));
     let picture = rdk_rays::surface::scene3(None, Some(&display), &surface).unwrap();
     assert_eq!(gpu::display_refusal(owner), None);
     let mesh = scene3::Walk::drawings(&picture)[0].mesh.clone();

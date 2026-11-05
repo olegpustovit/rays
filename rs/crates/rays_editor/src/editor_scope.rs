@@ -23,7 +23,7 @@ use flow_syntax::value::Value;
 use pxui_graph::scope_state as scope;
 use sop::context as sop_context;
 
-use crate::editor_inspect::{node_owner_of, same_lowered, viewed_path};
+use crate::editor_inspect::{node_owner_of, viewed_path};
 use crate::editor_model::*;
 use crate::editor_panes::*;
 use crate::editor_shell::*;
@@ -49,17 +49,18 @@ fn probes_for(value: &t, chain: &[Path]) -> Vec<i64> {
 /// Resolve the previews (viewport requests and the canvas's picture) of the model against its
 /// lowering, once per change of the lowering, the probes or the previews.
 pub fn sync_views(value: t) -> t {
-    let lowered = value.doc.workspace.lowered.clone();
+    let lowered = &value.doc.workspace.lowered;
     if let Some((previous, probes, previews, canvas)) = &value.view_key {
-        if same_lowered(previous, &lowered) && *probes == value.probes && *previews == value.previews && *canvas == value.canvas_preview {
+        if Arc::ptr_eq(previous, &lowered.evaluated) && *probes == value.probes && *previews == value.previews && *canvas == value.canvas_preview {
             return value;
         }
     }
     if value.previews.is_empty() && value.canvas_preview.is_none() {
+        let evaluated = lowered.evaluated.clone();
         let mut v = value;
         v.viewed = BTreeMap::new();
         v.canvas_viewed = None;
-        v.view_key = Some((lowered, v.probes.clone(), v.previews.clone(), v.canvas_preview.clone()));
+        v.view_key = Some((evaluated, v.probes.clone(), v.previews.clone(), v.canvas_preview.clone()));
         return v;
     }
     let dynamic_lowered = lowered.clone();
@@ -91,8 +92,9 @@ pub fn sync_views(value: t) -> t {
             }
         }
     };
+    let evaluated = lowered.evaluated.clone();
     let mut v = value;
-    v.view_key = Some((lowered, v.probes.clone(), previews.clone(), canvas_preview.clone()));
+    v.view_key = Some((evaluated, v.probes.clone(), previews.clone(), canvas_preview.clone()));
     v.previews = previews;
     v.viewed = viewed;
     v.canvas_preview = canvas_preview;
@@ -150,7 +152,8 @@ pub fn sync_scope(value: t) -> t {
     };
     let Some(name) = graph_name(&value) else { return value };
     let Some(catalog) = value.flow_catalog.force().clone() else { return value };
-    let workspace = value.doc.workspace.clone();
+    let document = value.doc.clone();
+    let workspace = &document.workspace;
     let (ws, lowered) = (&workspace.ws, &workspace.lowered);
     let previous = pane_laid(&value).cloned();
     let arguments: Option<Vec<editor_document::literal_edit::Change>> = previous.as_ref().and_then(|k| {

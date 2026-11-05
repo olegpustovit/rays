@@ -20,14 +20,17 @@ renderer = { path = "../renderer" }
 parallel = { path = "../parallel" }
 mem = { path = "../mem" }
 ogpu = { path = "../ogpu" }
-ogpu_core = { path = "../ogpu_core" }
-sdl3 = { path = "../sdl3" }
 cfmt = { path = "../cfmt" }
 ocaml_int = { path = "../ocaml_int" }
 
 [dev-dependencies]
 ogpu_mock = { path = "../ogpu_mock" }
+
+[target.'cfg(windows)'.dev-dependencies]
 ogpu_vulkan = { path = "../ogpu_vulkan" }
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+ogpu_metal = { path = "../ogpu_metal" }
 
 # Resource operations need the SDL main thread, which libtest never gives a test: these targets'
 # own main runs their cases (tests/common/window.rs) in one process on one device each; gpu_*

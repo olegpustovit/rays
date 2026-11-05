@@ -612,7 +612,7 @@ pub fn paint_rail(paint: &mut Paint, t: &Pane, z: f64, fs: i64, x: f64, y: f64, 
         if let Some(ex) = &r.expr {
             let sym = matches!(ex.node, SNode::Sym(_));
             let shown = match &ex.node {
-                SNode::Sym(s) => s.clone(),
+                SNode::Sym(s) => ex.name(*s).to_owned(),
                 _ => lisp::flat(ex),
             };
             let exx = nx + (79.0 * z);
@@ -1309,7 +1309,7 @@ pub fn paint_return(paint: &mut Paint, t: &Pane, z: f64, fs: i64, s: &p::Scope, 
             text_in(paint, fs, theme.foreground, right - tw, ry, rh, &text);
         }
     }
-    let nil = matches!(&s.result, p::ScopeResult::Literal(ex) if matches!(&ex.node, SNode::Sym(n) if n == "nil"));
+    let nil = matches!(&s.result, p::ScopeResult::Literal(ex) if matches!(&ex.node, SNode::Sym(n) if ex.name(*n) == "nil"));
     paint_socket(paint, &theme, None, !nil, z, (x, ry + (12.0 * z)));
     if selected {
         paint.brackets(x, y, wd, h, 3.0, 8.0, 2.0, theme.accent);

@@ -13,7 +13,6 @@ path = "src/lib.rs"
 ogpu_core = { path = "../ogpu_core" }
 ogpu = { path = "../ogpu" }
 metal = { path = "../metal" }
-native_layer_token = { path = "../native_layer_token" }
 
 # Metal handles are main-thread only and the tests count process-wide handles: their own main runs them.
 [[test]]

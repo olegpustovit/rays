@@ -2008,7 +2008,7 @@ impl Scope {
         if let Some(r) = &*t.0.ownership.borrow() {
             return r.clone();
         }
-        let r = run::create(Some(&t.0.shared), &t.0.gpu, &t.0.pipelines, &kernels::indices());
+        let r = run::create(Some(&t.0.shared), &t.0.gpu, &t.0.pipelines, kernels::indices());
         t.0.created.set(t.0.created.get() + 1);
         *t.0.ownership.borrow_mut() = Some(r.clone());
         r
@@ -2571,7 +2571,7 @@ pub fn normals(t: &T, positions: &Buffer, count: i64, corners: &Arc<Vec<i64>>) -
     let ts = tables_?;
     let out = display_buffer(t, bytes).ok()?;
     let run_ = || -> Option<()> {
-        let compiled = pipelines::get(&t.0.pipelines, &kernels::normals()).ok()?;
+        let compiled = pipelines::get(&t.0.pipelines, kernels::normals()).ok()?;
         let commands = b::begin_commands(&queue).ok()?;
         let encoded = (|| -> Option<()> {
             let encoder = b::compute_encoder(&commands).ok()?;

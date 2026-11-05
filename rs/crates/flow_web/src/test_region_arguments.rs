@@ -94,8 +94,7 @@ fn expectation(source: &mut String, expected: Result<Value, Diagnostic>) {
             source.push_str(if matches!(v, Value::Text_array(_)) { "assert.deepEqual(got.data,expected);\n" } else { "assert.deepEqual(bytes(got.data),bytes(expected));\n" });
         }
         Err(d) => {
-            // Rust diagnostics quote invalid UTF-8; the original OCaml contract preserves these bytes.
-            let cause = if d.code == "E_TABLE" { crate::text_literal::quote(b"raw\xff\0cause") } else { d.cause.as_deref().map(json_string).unwrap_or_else(|| "undefined".into()) };
+            let cause = d.cause.as_deref().map(crate::text_literal::quote).unwrap_or_else(|| "undefined".into());
             source.push_str(&format!("await assert.rejects(()=>frame(input,rt.slots,rt),e=>{{assert.equal(e.code,{});assert.equal(e.message,{});assert.equal(e.cause,{cause});return true}});\n", json_string(&d.code), json_string(&d.message)));
         }
     }

@@ -108,7 +108,7 @@ pub fn instruction(x: &I) -> String {
             ty::to_string(t),
             quoted(code.as_bytes()),
             quoted(message.as_bytes()),
-            cause.as_ref().map(|c| format!(" cause={}", quoted(c.as_bytes()))).unwrap_or_default()
+            cause.as_ref().map(|c| format!(" cause={}", quoted(c))).unwrap_or_default()
         ),
         I::Loop_begin(l) => format!("Loop_begin {} {} end={}", l.first, l.last, l.finish),
         I::Loop_carry(l, c, t) => format!("Loop_carry {} {} {}", l, c, ty::to_string(t)),

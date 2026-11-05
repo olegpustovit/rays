@@ -25,7 +25,6 @@ flow_sop = { path = "../flow_sop" }
 scene_command = { path = "../scene_command" }
 renderer = { path = "../renderer" }
 ogpu = { path = "../ogpu" }
-ogpu_core = { path = "../ogpu_core" }
 runtime_resources = { path = "../runtime_resources" }
 parallel = { path = "../parallel" }
 sop = { path = "../sop" }

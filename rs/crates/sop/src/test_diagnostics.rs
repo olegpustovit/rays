@@ -27,6 +27,6 @@ fn missing_groups_have_the_missing_group_code() {
 #[test]
 fn rdk_failures_become_traced_diagnostics() {
     let d = support::rdk_error(Vec::new(), "blast", "boom");
-    assert_eq!((d.code.as_str(), d.cause.as_deref()), ("blast_failed", Some("boom")));
+    assert_eq!((d.code.as_str(), d.cause.as_deref()), ("blast_failed", Some(b"boom".as_slice())));
     assert_eq!(d.message, "blast could not produce valid geometry");
 }

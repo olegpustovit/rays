@@ -1,5 +1,70 @@
 # Native smoke: Rust `rays` vs OCaml `rays` (real windows, Windows/Vulkan)
 
+## Unused library retention removed — Mac M1, 2026-11-05
+
+Sequential window-free `ws_tree --frames 3` observations, each exiting 0 inside a 30-second deadline.
+Same source checkout, release profile and machine as the packed-arena baseline below; single samples
+on a shared machine, not timing medians. Compiled paths now share interned storage, and normal
+workspace checking retains only the library declaration index and reached implementation forms.
+The explicit full-source/manifest APIs remain available and account retained syntax exactly once.
+
+| Rust stage | SHA-256 | Wall | Live | Footprint | Unattributed |
+|---|---|---:|---:|---:|---:|
+| Shared compiled paths | `6934a2a190ab43d7401bd85bee72b11f5c678a3a47c435c8218567f37d6fa238` | 1.92 s | 101.0 MB | 153.6 MB | 80.8 MB |
+| Library storage accounted | `3a28de5abee278223631f59cca9fe1522d7e84b6fecd31ef9ba7e83996f84928` | 1.97 s | 100.9 MB | 152.5 MB | 61.7 MB |
+| Unused library AST not retained | `6e971616a7fd10997a1bde08b28abff8a2703bf56bd602d00fe79a4622b15442` | 1.53 s | 82.4 MB | 132.0 MB | 62.1 MB |
+
+Accounting alone exposed 18.9 MB as `flow.library.syntax`; it did not free it. Avoiding that retained
+AST storage reduced actual live memory by roughly 19 MB from the 101.3 MB baseline. Rust still
+exceeds the paired OCaml live memory (28.4 MB) by 2.9 times. All three runs retain the same checked
+term/syntax ledger (10.8/4.0 MB); the remaining unattributed heap is still unresolved.
+
+Raw logs: `rs/target/memory-mac-20261105/library-retention/`. The temporary arena trace found only
+one evaluator arena (97 functions, 1,180 residuals and 2,060 plan entries), disproving the initial
+64-arena-ring hypothesis for this sketch; instrumentation was removed. The native malloc call tree
+locates about 21 MB under library parsing and about 23 MB under prelude-cache construction; these
+allocation stacks overlap other owners and must not be summed as disjoint ledger accounts.
+The profiling run used 1,000 frames and stack logging, so it is not a comparable timing/footprint
+sample. Payload readback varies across these short async runs (33.8, 4.8 and 15.0 KB); this is not
+proof of readback parity or of its resolution.
+
+The final lazy-library release above also passes real-window 30-frame smokes for basic (1.76 s)
+and sop_gallery (10.69 s), both exit 0 with no stderr diagnostics, under 30-second deadlines.
+Their logs are in `library-retention/` beside the memory samples. The separate debug CLI gallery
+golden still exceeds its 5-second default test budget; the diagnostic golden pass is not a waiver.
+
+## Current packed-arena measurement — Mac M1, 2026-11-05
+
+Both binaries rebuilt from the current working tree, window-free, sequential three-frame `ws_tree`
+runs with a 30-second deadline. Rust release build: 2 m 20 s. These are single observations on a
+shared machine, not a controlled comparison with the historical Windows pre-arena numbers below.
+
+| Binary | SHA-256 | Wall | Live | Device | Footprint | Unattributed | Payload readback |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Rust `rs/target/release/rays` | `1db2f0a4e61a05c15d16580e06ef8db7dd013a155f98fecf4f0cbefefba94cb2` | 2.32 s | 101.3 MB | 7.3 MB | 155.1 MB | 81.1 MB | 41.8 KB |
+| OCaml `_build/default/bin/rays.exe` | `e871cb3d2d7bec7af83a7c9a30821bdf42868f05d92fdff4ed98c2bda0717de2` | 3.71 s | 28.4 MB | 7.4 MB | 97.4 MB | 1.3 MB | 33.8 KB |
+
+Both exit 0 without memory-budget errors; live memory stays flat across the measured frames.
+Rust still uses 3.6 times the OCaml live memory. Its ledger charges checked terms 10.8 MB and
+syntax 4.0 MB, but leaves 74% of explicit memory unattributed. The readback difference remains
+unresolved. Both report the same three device-fallback sites (transform, mesh and polywire).
+Raw logs: `rs/target/memory-mac-20261105/ws_tree-{rust,ocaml}.log`.
+
+The same Rust binary also opens real Cocoa/Metal windows for `basic` and `sop_gallery` with
+`RAYS_MAX_FRAMES=30`: both exit 0, respectively 7.50 s and 11.09 s, under 30-second deadlines.
+No native stderr diagnostics were emitted. Logs: `basic-window.log` and `sop_gallery-window.log`
+in the same directory. This refreshes the two-sketch Mac smoke only; no pixel parity or broad
+Windows/native qualification is inferred.
+
+```sh
+cargo build --release -p rays_bin  # from rs/
+dune build bin/rays.exe           # from repository root
+rs/target/release/rays mem sketches/ws_tree.rays --frames 3
+_build/default/bin/rays.exe mem sketches/ws_tree.rays --frames 3
+```
+
+## Historical Windows smoke
+
 First real-window run of the Rust editor. Command per sketch: `RAYS_MAX_FRAMES=60 rays FILE.rays`, one window at a time, hard 120 s kill.
 Rust: `cargo build --release -p rays_bin` (target `rs/target/ag-smoke`), 4 m 38 s cold (3 m 55 s incremental after the rays_bin edit). OCaml: `_build/default/bin/rays.exe`.
 Times are wall seconds on a machine shared with other agents' builds and tests, so treat them as rough.
@@ -126,4 +191,82 @@ All 49 sketches launched: 48 exit 0; ws_orrery times out before creating its win
 recursive definition/body cloning during lowering, not a renderer/event-loop hang. The sharing fix
 is implemented but requires a rebuilt-snapshot rerun. Complete per-sketch stdout/stderr:
 `rs/target/native-smoke-verified-20261105/<sketch>.out/.err`.
+
+## Prelude ownership follow-up — 2026-11-05
+
+Release SHA-256: `ab59c774f5d0bac06df2153e7fdb990136d3685817bc86a24c1b64fcb9388c19`.
+`rays mem sketches/ws_tree.rays --frames 3` exits 0 in 2.02 s under the 30-second deadline:
+82.5 MB live, 7.3 MB device, 133.7 MB footprint, 62.0 MB unattributed.
+The new `flow.library.preludes` owner reports 14.8 MB, largely formerly charged to document
+syntax/terms through the same shared arenas. No memory saving is claimed. It accounts for the
+cache independently of an open document; catalog regression covers that lifecycle and repeat reports.
+
+Raw log: `rs/target/memory-mac-20261105/library-retention/prelude-accounting.log`.
+Allocation investigation: `lazy-malloc-call-tree.log` in the same directory, captured from a
+500-frame run of the preceding `6e971616…` release with `MallocStackLogging=1`. That instrumented
+run is diagnostic, not a three-frame parity measurement: 83.0 MB live, 208.7 MB footprint.
+Its stacks put 35.5 MB under initial lowering and 22.6 MB under prelude caching (inclusive
+allocation stacks, not additive ledger owners). The shared prelude arenas do not explain the
+remaining 62 MB unattributed heap; evaluator/lowering ownership remains open.
+
+## Shared inline-replay captures — 2026-11-05
+
+Release SHA-256: `6278069cc24abe3cba0047a2460fac24208ee4430e78dc071236f01d479cf359`.
+The same three-frame `ws_tree` command exits 0 in 1.95 s with 80.5 MB live, 7.2 MB device,
+129.8 MB footprint and 60.0 MB unattributed. The immediately preceding release above measured
+82.5 MB live: unchanged replay environments/lists save 2.0 MB. This remains above OCaml's
+28.4 MB baseline. Readback varies with asynchronous completion and is not a parity claim.
+Raw log: `rs/target/memory-mac-20261105/library-retention/shared-replay.log`.
+
+Real-window checks with `RAYS_MAX_FRAMES=30` and individual 30-second deadlines both exit 0:
+basic 2.21 s and sop_gallery 13.19 s, with no stderr diagnostics (only `/usr/bin/time` output).
+Logs: `shared-replay-basic.log` and `shared-replay-gallery.log` in the same directory.
+
+## Native test helper and vector edits — 2026-11-05
+
+The Rays/editor/PXUI helper had skipped GPU assertions on macOS. It now reuses the
+renderer helper's Metal backend and lease cleanup; supported-platform creation failures
+fail the test. Windows keeps fatal-validation Vulkan. Case sharding stays unchanged.
+These are offscreen native tests, distinct from real-window smoke above.
+
+Verified through `cargo t` with default deadlines:
+
+- `rays --test gpu_rays_all gpu_rays_primitives`: 1.381 s test, 2.852 s runner, exit 0.
+- `pxui --test gpu_pxui_parity gpu_parity_overlays`: exact golden pixels, 0.346 s test,
+  0.592 s runner, exit 0.
+- `rays_editor --test gpu_suite_t1_b run_result_view`: complete original script, 4.399 s
+  test, 9.797 s including build, exit 0. The first real run exposed stale checked children
+  after a whole-vector edit; the shared literal patch now rebuilds those children.
+- `editor_document`: all 23 enabled tests pass, 5.140 s warm; the new direct regression
+  compares checked terms and recorded evaluation against full checking (0.305 s).
+
+Logs: `/tmp/rays-metal-shared-primitives.log`, `/tmp/rays-metal-shared-pxui-pixels.log`,
+`/tmp/rays-result-view-vector-default.log`, `/tmp/rays-vector-literal-document-gate.log`.
+The final workspace test compile exits 0 in 3.23 s. These checks do not qualify all newly
+enabled native cases or replace Windows smoke.
+
+## Shared document lowering — 2026-11-05
+
+Release SHA-256: `19569fd1563124e52a1d35f35a23457d5f99e8798b895794a2b00f43b69fdad4`
+(release build 2m 03s). `ws_tree --frames 3` exits 0 in 1.66 s:
+77.9 MB live, 7.3 MB device, 127.6 MB footprint and 57.4 MB unattributed.
+The previous measured `6278069…` release was 80.5 MB live. This version also includes
+intervening diagnostic-byte and literal-edit fixes; these are versioned observations,
+not an isolated allocation experiment. OCaml's 28.4 MB target remains unmet.
+
+The immutable document now shares its lowering through `Arc`; caches retain only their
+existing evaluation identity and frame/scope readers borrow the shared payload. Restore
+uses copy-on-write for saved compiled IDs/sites. Document tests (23) and editor unit tests
+(58) pass, and workspace test compilation passes in 4.64 s.
+
+Real windows, `RAYS_MAX_FRAMES=30`, separate 30-second deadlines: basic exits 0 in 4.88 s,
+sop_gallery exits 0 in 4.74 s. Neither prints diagnostics beyond `/usr/bin/time` output.
+Raw logs under `rs/target/memory-mac-20261105/library-retention/`:
+`shared-lowering.log`, `shared-lowering-basic.log`, `shared-lowering-gallery.log`.
+
+Debug UI evidence is separate: original `run_cameras` correctness passes in 6.354 s with
+the diagnostic slow timeout profile, down from 25.618 s. Full original geometry, four
+scene instances and every gesture/assertion remain. Default still times out at 5.024 s;
+it is not a green default gate. Creation remains the next profiled bottleneck. The
+unchanged default `run_result_view` passes in 3.063 s after sharing (previously 4.399 s).
 

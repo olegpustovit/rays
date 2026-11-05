@@ -955,6 +955,7 @@ impl Qualifier {
 /// requalifies.
 pub fn qualify_workspace(options: &QualifyOptions, workspace: &w::Workspace) -> Result<(w::Workspace, e::Eval), Diagnostic> {
     let _phase = flow_syntax::phase_timer::measure("qualify");
+    let index_phase = flow_syntax::phase_timer::measure("qualify.index");
     let gpu = options.gpu.clone().unwrap_or_else(Gpu::default);
     let mut roots: HashMap<i64, Vec<(FormKey, Path)>> = HashMap::new();
     for (form, path) in &workspace.packed_roots {
@@ -979,6 +980,7 @@ pub fn qualify_workspace(options: &QualifyOptions, workspace: &w::Workspace) -> 
             walker.walk(&owner, graph.body.arena(), graph.body.row_id());
         }
     }
+    drop(index_phase);
     let q = Arc::new(Qualifier {
         t: walker.t,
         ops: workspace.ops.clone(),

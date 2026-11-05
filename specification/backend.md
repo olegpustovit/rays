@@ -310,6 +310,18 @@ and the native executable are enabled only on macOS. `metal` owns the safe
 Metal resource and command API. Rays owns pure scene
 values and records rendering through the narrow GPU boundary; it never exposes
 native handles in its public API.
+
+Rust native Rays/editor/PXUI tests reuse the renderer test helper: Metal on macOS,
+Vulkan with fatal validation on Windows. Their backend dev-dependencies are platform
+specific. A supported platform's device-creation failure fails the test; it must not
+return success through a GPU-unavailable early return. The editor runner keeps its
+existing case sharding while sharing backend selection and lease cleanup.
+Native lifetime tests release the helper's keepalive before their baseline: the
+last canvas must own device teardown, including cached pipelines, for an exact
+before/after native handle count. Other tests may retain the shared device.
+The Rust dependency gate checks backend selection separately for Apple and
+Windows: mutually exclusive target dependencies do not count as two selections.
+An unconditional second backend or a missing platform backend remains an error.
 All raw Metal binding declarations come from `lib/metal/gen/registry.ml`;
 typed SDK calls are generated, while custom marshalling/ownership primitives
 are explicitly registered as `Native` entries. This does not change the OGPU

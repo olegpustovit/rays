@@ -149,7 +149,7 @@ fn build_node(label: &str, inputs: &[node::T], curve: &Curve) -> Result<node::T,
         Arc::new(move |_node_id, _context, _inputs| match polyline(shared.closed, shared.filled, &shared.points) {
             Ok(geometry) => Ok(GeometryCooked { geometry, instances: None }),
             Err(failure) => Err(Diagnostic {
-                cause: Some(rdk_error::to_string(&failure)),
+                cause: Some(rdk_error::to_string(&failure).into_bytes()),
                 hints: rdk_error::hints(&failure).to_vec(),
                 ..crate::port::error(rdk_error::code(&failure), &format!("{} could not produce valid geometry", rdk_error::operation(&failure)))
             }),

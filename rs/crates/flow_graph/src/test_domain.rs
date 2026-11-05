@@ -18,7 +18,7 @@ use std::sync::Arc;
 const MAX_ARRAY_LENGTH: i64 = (1i64 << 54) - 1;
 
 fn num(n: &str) -> s::Syntax {
-    s::make(Node::Num(n.into()))
+    s::make(s::Draft::Num(n.into()))
 }
 fn set_arg(node: &[String], key: ArgKey, v: s::Syntax) -> Op {
     Op::SetArg { node: node.to_vec(), key, sub: vec![], value: v }
@@ -105,7 +105,7 @@ fn vector_literals_edit_a_component() {
         assert!(card.ty == ty && card.rows[0].ty == Some(ty.clone()));
         let default = default_for(&ty, "v", None).unwrap();
         match &default.node {
-            Node::Vec(cs) => assert_eq!(cs.len(), width),
+            Node::Vec(cs) => assert_eq!(default.range(*cs).len(), width),
             _ => panic!("default is not a vector"),
         }
         let (_, edited) = apply_checked(
@@ -443,7 +443,7 @@ fn array_capacities() {
         ("vec4", MAX_ARRAY_LENGTH / 4),
     ] {
         let (changed, checked) =
-            apply_checked(&catalog(), &source, &set_arg(&card.path, ArgKey::Kw("type".into()), s::make(Node::Sym(kind.into())))).unwrap();
+            apply_checked(&catalog(), &source, &set_arg(&card.path, ArgKey::Kw("type".into()), s::make(s::Draft::Sym(kind.into())))).unwrap();
         assert_eq!(result(&checked, 0.0), Value::Int(expected));
         let printed = lisp::print(&changed).unwrap().0;
         let saved = check(&parse(&printed));

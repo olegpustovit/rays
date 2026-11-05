@@ -53,7 +53,7 @@ pub fn prepare(
     if width > MAX_STORAGE / 4 / height {
         return error("Image dimensions exceed native storage bounds.");
     }
-    let vec4_body = e::Residual::function_body(function).is_some_and(|(_, body)| body.ty == Ty::Vec4);
+    let vec4_body = e::Residual::function_body(function).is_some_and(|(_, body)| *body.ty() == Ty::Vec4);
     if !vec4_body {
         return error("Image map needs an instantiated vec4 pixel body.");
     }

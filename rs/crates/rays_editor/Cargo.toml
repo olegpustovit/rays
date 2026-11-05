@@ -41,7 +41,6 @@ flow_gpu = { path = "../flow_gpu" }
 
 [dev-dependencies]
 ogpu = { path = "../ogpu" }
-ogpu_vulkan = { path = "../ogpu_vulkan" }
 renderer = { path = "../renderer" }
 flow_sop = { path = "../flow_sop", features = ["test-support"] }
 runtime_resources = { path = "../runtime_resources" }
@@ -51,6 +50,12 @@ scene_command = { path = "../scene_command" }
 # Window/GPU suites (see rs/port/rays_editor_plan.md) are added per bundle, each
 #   [[test]] name = "window_editor_<x>" / "gpu_editor_<x>"  harness = false
 # like crates/pxui (own main, rays/tests/common/window.rs runner).
+
+[target.'cfg(windows)'.dev-dependencies]
+ogpu_vulkan = { path = "../ogpu_vulkan" }
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+ogpu_metal = { path = "../ogpu_metal" }
 
 [[test]]
 name = "window_editor_smoke"

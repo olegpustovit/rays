@@ -803,7 +803,7 @@ fn arc_data(v: &Value) -> std::sync::Arc<Vec<f64>> { match v { Value::Float_arra
 #[test]
 fn iterate_widens_scalars_and_coerces_record_fields() {
     assert_eq!(g_value(&value("(iterate 3 0 (fn [n] (+ n 0.25)))")), Value::Float(0.75));
-    assert_eq!(g_value(&value("(iterate 3 {:n 0} (fn [s] {:n (+ s.n 0.25)}))")), Value::Record(vec![("n".into(), Value::Int(0))]));
+    assert_eq!(g_value("(workspace w (graph g :context host (iterate 3 {:n 0} (fn [s] {:n (+ s.n 0.25)}))))"), Value::Record(vec![("n".into(), Value::Int(0))]));
     let ws = check("(workspace w (graph g :context host [(seed : {:n int :data (array float)} {:n 0 :data (array/float 1)})]
         (iterate 2 seed (fn [s] {:n (int/add s.n 1) :data s.data}))))");
     let data = Value::Source("test/iterate_data".into(), Ty::Array(Box::new(Ty::Float)), vec![]);

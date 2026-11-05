@@ -1112,31 +1112,41 @@ fn ogpu_selection_errors(
     for package in packages.iter().filter(|package| {
         package.crate_name != "ogpu_native" && (package.has_binary || package.has_tests)
     }) {
-        let selected = direct.get(&package.crate_name).map(Vec::as_slice).unwrap_or_default();
-        let reaches_ogpu = selected.iter().any(|dependency| {
-            dependency == "ogpu" || dependency_path(dependency, "ogpu", graph).is_some()
-        });
-        if !reaches_ogpu {
-            continue;
+        let all_selected = direct.get(&package.crate_name).map(Vec::as_slice).unwrap_or_default();
+        for platform in ["apple", "windows"] {
+            let selected: Vec<String> = all_selected.iter().filter(|name| {
+                let declarations: Vec<_> = package.deps.iter().filter(|dep| {
+                    dep.package.as_deref().unwrap_or(&dep.alias) == name.as_str()
+                }).collect();
+                declarations.is_empty() || declarations.iter().any(|dep| {
+                    dep.target.as_deref().and_then(target_platform).is_none_or(|target| target == platform)
+                })
+            }).cloned().collect();
+            let reaches_ogpu = selected.iter().any(|dependency| {
+                dependency == "ogpu" || dependency_path(dependency, "ogpu", graph).is_some()
+            });
+            if !reaches_ogpu {
+                continue;
+            }
+            let uses_native = selected.iter().any(|dependency| dependency == "ogpu_native");
+            // An implementation crate's own tests select it by being it.
+            let mut explicit: Vec<&str> = selected.iter().map(String::as_str).filter(|name| implementations.contains(name)).collect();
+            if implementations.contains(&package.crate_name.as_str()) {
+                explicit.push(package.crate_name.as_str());
+            }
+            let path = package.manifest.strip_prefix(workspace).unwrap_or(&package.manifest).to_string_lossy().replace('\\', "/");
+            if uses_native && explicit.is_empty() {
+                continue;
+            }
+            if !uses_native && explicit.len() == 1 {
+                continue;
+            }
+            errors.push(format!(
+                "{path}: executable/test crate `{}` reaches `ogpu` on {platform}; select `ogpu_native` or exactly one explicit implementation (selected: {})",
+                package.crate_name,
+                if selected.is_empty() { "none".to_owned() } else { selected.join(", ") }
+            ));
         }
-        let uses_native = selected.iter().any(|dependency| dependency == "ogpu_native");
-        // An implementation crate's own tests select it by being it.
-        let mut explicit: Vec<&str> = selected.iter().map(String::as_str).filter(|name| implementations.contains(name)).collect();
-        if implementations.contains(&package.crate_name.as_str()) {
-            explicit.push(package.crate_name.as_str());
-        }
-        let path = package.manifest.strip_prefix(workspace).unwrap_or(&package.manifest).to_string_lossy().replace('\\', "/");
-        if uses_native && explicit.is_empty() {
-            continue;
-        }
-        if !uses_native && explicit.len() == 1 {
-            continue;
-        }
-        errors.push(format!(
-            "{path}: executable/test crate `{}` reaches `ogpu`; select `ogpu_native` or exactly one explicit implementation (selected: {})",
-            package.crate_name,
-            if selected.is_empty() { "none".to_owned() } else { selected.join(", ") }
-        ));
     }
     errors
 }
@@ -1576,5 +1586,28 @@ mod tests {
         assert!(!ogpu_selection_errors(&[app.clone()], &graph, &missing, Path::new("rs")).is_empty());
         let selected = HashMap::from([("rays".to_owned(), vec!["ogpu".to_owned(), "ogpu_native".to_owned()])]);
         assert!(ogpu_selection_errors(&[app], &graph, &selected, Path::new("rs")).is_empty());
+    }
+
+    #[test]
+    fn ogpu_selection_checks_each_platform_without_merging_backend_edges() {
+        let mut app = Package {
+            manifest: PathBuf::from("rs/bin/app/Cargo.toml"),
+            package_name: "app".into(), crate_name: "app".into(), product: true,
+            deps: vec![
+                DepSpec { alias: "ogpu_metal".into(), target: Some("cfg(target_os = \"macos\")".into()), ..Default::default() },
+                DepSpec { alias: "ogpu_vulkan".into(), target: Some("cfg(windows)".into()), ..Default::default() },
+            ],
+            has_binary: true, has_tests: false,
+        };
+        let graph = HashMap::new();
+        let selected = HashMap::from([("app".into(), vec!["ogpu".into(), "ogpu_metal".into(), "ogpu_vulkan".into()])]);
+        assert!(ogpu_selection_errors(&[app.clone()], &graph, &selected, Path::new("rs")).is_empty());
+        app.deps[1].target = None;
+        let errors = ogpu_selection_errors(&[app.clone()], &graph, &selected, Path::new("rs"));
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].contains("on apple"), "{errors:?}");
+        app.deps[1].target = Some("cfg(target_os = \"macos\")".into());
+        let errors = ogpu_selection_errors(&[app], &graph, &selected, Path::new("rs"));
+        assert_eq!(errors.len(), 2, "duplicate Apple backend and missing Windows backend: {errors:?}");
     }
 }

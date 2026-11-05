@@ -116,7 +116,7 @@ fn part_edit() {
     // atomic: a refused edit leaves the document as it was
     assert!(doc::edit(&catalog, &d, &Op::Rename { node: p(&["g", "a"]), to_: "b".to_owned() }).is_err(), "accepted a clashing rename");
     assert!(
-        doc::edit(&catalog, &d, &Op::SetArg { node: p(&["g", "a"]), key: ArgKey::Kw("nope".to_owned()), sub: vec![], value: s::make(Node::Num("1".to_owned())) }).is_err(),
+        doc::edit(&catalog, &d, &Op::SetArg { node: p(&["g", "a"]), key: ArgKey::Kw("nope".to_owned()), sub: vec![], value: s::make(s::Draft::Num("1".to_owned())) }).is_err(),
         "accepted an unknown keyword"
     );
     assert_eq!(doc::to_text(&d).unwrap(), doc::to_text(&of_text(&catalog, None, &text)).unwrap(), "the original document is untouched");
@@ -124,7 +124,7 @@ fn part_edit() {
     let added = doc::edit(
         &catalog,
         &d,
-        &Op::AddNode { scope: p(&["g"]), name: "spare".to_owned(), expr: s::make(Node::Num("1".to_owned())) },
+        &Op::AddNode { scope: p(&["g"]), name: "spare".to_owned(), expr: s::make(s::Draft::Num("1".to_owned())) },
     )
     .expect("add");
     let d = doc::edit(&catalog, &added, &Op::DeleteNodes { nodes: vec![p(&["g", "spare"])] }).expect("delete");
@@ -151,7 +151,7 @@ fn part_imports() {
         "save inlined imported definitions"
     );
     assert_eq!(doc::to_text(&doc::of_text(&with(&imports), &catalog, &printed).unwrap()).unwrap(), printed, "imports did not round trip");
-    let edit = Op::SetArg { node: p(&["shared", "@result"]), key: ArgKey::Pos(0), sub: vec![], value: s::make(Node::Num("4".to_owned())) };
+    let edit = Op::SetArg { node: p(&["shared", "@result"]), key: ArgKey::Pos(0), sub: vec![], value: s::make(s::Draft::Num("4".to_owned())) };
     assert!(matches!(doc::edit(&catalog, &d, &edit), Err(x) if x.code == "E_IMPORTED" && has(&x.message, "lib.rays")), "imported expression remained writable");
     assert!(matches!(doc::edit(&catalog, &d, &Op::RemoveGraph { name: "shared".to_owned() }), Err(x) if x.code == "E_IMPORTED"), "imported graph remained removable");
     let one = |t: &str| s::parse(t).unwrap().remove(0);
@@ -159,8 +159,8 @@ fn part_imports() {
         Op::RenameGraph { name: "shared".to_owned(), to_: "renamed".to_owned() },
         Op::SetNote { node: p(&["shared"]), text: "changed".to_owned() },
         Op::Wrap { nodes: vec![p(&["shared", "@result"])], loop_: Loop::If },
-        Op::AddNode { scope: p(&["shared"]), name: "extra".to_owned(), expr: s::make(Node::Num("1".to_owned())) },
-        Op::SetInputDefault { form: "def:twice".to_owned(), input: "x".to_owned(), value: s::make(Node::Num("1".to_owned())) },
+        Op::AddNode { scope: p(&["shared"]), name: "extra".to_owned(), expr: s::make(s::Draft::Num("1".to_owned())) },
+        Op::SetInputDefault { form: "def:twice".to_owned(), input: "x".to_owned(), value: s::make(s::Draft::Num("1".to_owned())) },
         Op::SetGraph { name: "shared".to_owned(), form: one("(graph shared :context value 1)") },
     ];
     for op in &ops {
@@ -232,7 +232,6 @@ fn parse_one(text: &str) -> s::Syntax {
 }
 
 #[test]
-#[ignore = "upstream: lowering STILL (sop/uv_sphere) takes ~35 s in a debug build (parity_backlog: flow_eval static_with cost)"]
 fn part_view() {
     let directory = std::env::temp_dir().join(format!("rays-workspace-view-{}", std::process::id()));
     std::fs::create_dir_all(&directory).unwrap();
@@ -303,7 +302,7 @@ fn part_contexts() {
     let directory = std::env::temp_dir().join(format!("rays-contexts-{}", std::process::id()));
     std::fs::create_dir_all(&directory).unwrap();
     let dir = directory.to_string_lossy().into_owned();
-    let path = crate::preset::save(&dir, "bloom", &d, &s::make(Node::Map(Vec::new().into()))).unwrap();
+    let path = crate::preset::save(&dir, "bloom", &d, &s::make(s::Draft::Map(Vec::new().into()))).unwrap();
     assert!(!has(&std::fs::read_to_string(&path).unwrap(), "(settings :"), "settings owned by a graph are not written a second time");
     let loaded = crate::preset::load(None, &path, Some(&factories()), &settings::none()).unwrap();
     assert!(shape(&loaded.doc) == shape(&d), "the preset round trips scene, World and settings");
@@ -312,7 +311,7 @@ fn part_contexts() {
     let edited = doc::edit(
         &catalog,
         &bloom,
-        &Op::SetArg { node: p(&["scene", "accent"]), key: ArgKey::Kw("translate".to_owned()), sub: vec![], value: s::make(Node::Vec(["4", "0", "1"].iter().map(|n| s::make(Node::Num((*n).to_owned()))).collect())) },
+        &Op::SetArg { node: p(&["scene", "accent"]), key: ArgKey::Kw("translate".to_owned()), sub: vec![], value: s::parse("[4 0 1]").unwrap().remove(0) },
     )
     .unwrap();
     let doc2 = build(Some(&d), &edited);

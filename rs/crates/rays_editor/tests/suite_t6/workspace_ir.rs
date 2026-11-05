@@ -15,13 +15,13 @@ fn functions(v: &Value) -> Value {
     match v {
         Value::Fn(f) => Value::Record(vec![
             ("body".into(), Value::Text(match E::Residual::function_body(*f) {
-                Some((params, body)) => format!("{params:?}{}", lisp::flat(&body.form)).into_bytes(),
+                Some((params, body)) => format!("{params:?}{}", lisp::flat(&body.form())).into_bytes(),
                 None => b"named".to_vec(),
             })),
             ("captures".into(), functions(&Value::Record(E::Residual::function_bindings(*f)))),
         ]),
         Value::Residual(r) => match E::Residual::residual_view(*r) {
-            Ok(view) => Value::Record(vec![("residual".into(), Value::Text(lisp::flat(&view.term.form).into_bytes())), ("bindings".into(), functions(&Value::Record(view.bindings.clone())))]),
+            Ok(view) => Value::Record(vec![("residual".into(), Value::Text(lisp::flat(&view.term.form()).into_bytes())), ("bindings".into(), functions(&Value::Record(view.bindings.clone())))]),
             Err(_) => v.clone(),
         },
         Value::List(xs) => Value::List(std::sync::Arc::new(xs.iter().map(functions).collect())),

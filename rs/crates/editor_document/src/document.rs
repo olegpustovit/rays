@@ -187,7 +187,7 @@ impl LazyCatalog {
 #[derive(Clone)]
 pub struct Workspace {
     pub ws: workspace_doc::T,
-    pub lowered: l::T,
+    pub lowered: Arc<l::T>,
     pub fast: LazyBool,
     pub catalog: LazyCatalog,
 }

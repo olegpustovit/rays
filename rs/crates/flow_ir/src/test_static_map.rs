@@ -481,7 +481,7 @@ fn sop_deferral() {
         origin_core
             .regions
             .iter()
-            .find(|r| r.term.path == Some(vec!["sculpture".to_string(), name.to_string()]))
+            .find(|r| r.term.path().is_some_and(|ids| ids.iter().map(|&id| r.term.name(id)).eq(["sculpture", name])))
             .unwrap_or_else(|| panic!("no region {name}"))
             .origin
             .clone()

@@ -73,23 +73,26 @@ fn filled(slot: &Slot) -> std::sync::MutexGuard<'_, Option<Arena>> {
     cell
 }
 /// An arena checked out of its slot for an evaluation that may call back (it lends around each callback).
-struct Out { slot: Arc<Slot>, arena: Option<Arena> }
+struct Out { slot: Arc<Slot>, arena: Option<Arena>, previous_interrupt: Option<Interrupt> }
 impl std::ops::Deref for Out { type Target = Arena; fn deref(&self) -> &Arena { self.arena.as_ref().expect("checked out") } }
 impl std::ops::DerefMut for Out { fn deref_mut(&mut self) -> &mut Arena { self.arena.as_mut().expect("checked out") } }
 impl Drop for Out {
     fn drop(&mut self) {
         HELD.with(|held| { held.borrow_mut().take(); });
         // a hollow left by a callback that unwound is dropped: the live arena is already back in the slot
-        let Some(arena) = self.arena.take().filter(|arena| arena.owns_index) else { return; };
+        let Some(mut arena) = self.arena.take().filter(|arena| arena.owns_index) else { return; };
+        arena.interrupt = self.previous_interrupt.take();
         *self.slot.cell.lock().unwrap_or_else(|e| e.into_inner()) = Some(arena);
         self.slot.returned.notify_all();
     }
 }
 fn checkout(slot: &Arc<Slot>) -> Out {
     not_holding(slot.id);
-    let arena = filled(slot).take();
+    let mut arena = filled(slot).take();
+    // A retained evaluation belongs to its current caller's cancellation scope.
+    let previous_interrupt = arena.as_mut().and_then(|arena| std::mem::replace(&mut arena.interrupt, current_interrupt()));
     HELD.with(|held| *held.borrow_mut() = Some(slot.clone()));
-    Out { slot: slot.clone(), arena }
+    Out { slot: slot.clone(), arena, previous_interrupt }
 }
 /// A short callback-free read or update of an arena in place, waiting while another thread has it out.
 fn peek<T>(slot: &Slot, f: impl FnOnce(&mut Arena) -> T) -> T {
@@ -408,6 +411,8 @@ impl<T: Clone> std::ops::DerefMut for Shared<T> { fn deref_mut(&mut self) -> &mu
 #[derive(Clone)]
 struct Arena {
     id: i64, workspace: Shared<Workspace>, functions: Shared<IdMap<FnId, Function>>, residuals: Shared<IdMap<ResidualId, ResidualData>>,
+    // Replays share the immutable workspace and its lazily computed state-reset identity.
+    source_key: Arc<std::sync::OnceLock<String>>,
     nodes: Shared<Vec<Node>>, authored: Vec<i64>, cells: Shared<Vec<GraphCell>>, cache: Shared<HashMap<String,usize>>, states: Shared<Vec<Value>>, records: Shared<BTreeMap<Path, Vec<(Vec<i64>,Value)>>>,
     observed: Vec<ResidualId>, res_log: Shared<Vec<ResidualId>>, fn_log: Shared<Vec<FnId>>, approx: u64, policies: Shared<HashMap<String, Option<Arc<InlineParameterPolicy>>>>,
     record: bool, time: Option<Frame>, resolve: Option<Arc<dyn Fn(&Value)->Result<Value,Diagnostic> + Send + Sync>>,
@@ -426,6 +431,7 @@ impl Arena {
     fn fresh(id: i64, workspace: Shared<Workspace>, record: bool, budget: usize, interrupt: Option<Interrupt>, owns_index: bool) -> Arena {
         Arena {
             id, workspace, functions: Shared::default(), residuals: Shared::default(),
+            source_key: Arc::new(std::sync::OnceLock::new()),
             nodes: Shared::default(), authored: Vec::new(), cells: Shared::default(), cache: Shared::default(),
             states: Shared::default(), records: Shared::default(), observed: Vec::new(), res_log: Shared::default(), fn_log: Shared::default(), approx: 0, policies: Shared::default(), record,
             time: None, resolve: None, state: Some(State::default()), elems: BTreeMap::new(), step_count: 0,
@@ -1076,9 +1082,20 @@ impl Reloc {
         y
     }
     fn fields(&self, fields: &[(String, Value)]) -> Vec<(String, Value)> { fields.iter().map(|(name, value)| (name.clone(), self.value(value))).collect() }
+    fn changes(&self, value: &Value) -> bool {
+        match value {
+            Value::Deferred(_, id) => self.id(*id) != *id,
+            Value::Residual(id) => self.rmap.get(id).is_some_and(|new| new != id),
+            Value::Fn(id) => self.fmap.get(id).is_some_and(|new| new != id),
+            Value::List(values) => values.iter().any(|value| self.changes(value)),
+            Value::Record(fields) | Value::Struct(_, _, fields) | Value::Source(_, _, fields) => fields.iter().any(|(_, value)| self.changes(value)),
+            _ => false,
+        }
+    }
     fn value(&self, value: &Value) -> Value {
         match value {
             Value::Deferred(ty, n) => Value::Deferred(ty.clone(), self.id(*n)),
+            Value::List(values) if !values.iter().any(|value| self.changes(value)) => Value::List(values.clone()),
             Value::List(values) => Value::List(Arc::new(values.iter().map(|value| self.value(value)).collect())),
             Value::Record(fields) => Value::Record(self.fields(fields)),
             Value::Struct(name, ty, fields) => Value::Struct(name.clone(), ty.clone(), self.fields(fields)),
@@ -1088,7 +1105,10 @@ impl Reloc {
             value => value.clone(),
         }
     }
-    fn env(&self, env: &BTreeMap<String, Value>) -> BTreeMap<String, Value> { env.iter().map(|(name, value)| (name.clone(), self.value(value))).collect() }
+    fn env(&self, env: &Arc<BTreeMap<String, Value>>) -> Arc<BTreeMap<String, Value>> {
+        if !env.values().any(|value| self.changes(value)) { return env.clone(); }
+        Arc::new(env.iter().map(|(name, value)| (name.clone(), self.value(value))).collect())
+    }
 }
 // An inline body's kept evaluation, in this evaluation: its nodes at the next ids over these inputs, its residuals and functions at fresh ids,
 // its sites and iterations under this call's, its kernels offered again. The value equals what evaluating the body here gives.
@@ -1104,13 +1124,13 @@ fn replay_inline(a: &mut Arena, c: &ExecCtx, e: &InlineEntry, inputs: &[i64]) ->
         id: reloc.id(n.id), inst: c.inst, site: reloc.path(&n.site), iter: reloc.iter(&n.iter), kind: n.kind.clone(), ty: n.ty.clone(), args: reloc.fields(&n.args), error: n.error.clone(),
     }).collect();
     let residuals: Vec<(ResidualId, ResidualData)> = e.residuals.iter().map(|(id, r)| (reloc.rmap[id], ResidualData {
-        term: r.term.clone(), env: Arc::new(reloc.env(&r.env)), ctx: reloc.ctx(&r.ctx), previous: r.previous, live: r.live.clone(),
+        term: r.term.clone(), env: reloc.env(&r.env), ctx: reloc.ctx(&r.ctx), previous: r.previous, live: r.live.clone(),
     })).collect();
     let functions: Vec<(FnId, Function, Option<i64>)> = e.functions.iter().map(|(id, f, calls)| {
         let f = match f {
             Function::Closure(closure) => {
                 let mut closure = (**closure).clone();
-                closure.env = Arc::new(reloc.env(&closure.env));
+                closure.env = reloc.env(&closure.env);
                 closure.zone = reloc.path(&closure.zone);
                 closure.at = reloc.ctx(&closure.at);
                 Function::Closure(Arc::new(closure))
@@ -1655,7 +1675,7 @@ fn diagnostic_payload(diagnostic: &Diagnostic) -> Value {
     Value::Record(vec![
         ("code".into(), Value::Text(diagnostic.code.as_bytes().to_vec())),
         ("message".into(), Value::Text(diagnostic.message.as_bytes().to_vec())),
-        ("cause".into(), Value::List(Arc::new(diagnostic.cause.iter().map(|cause| Value::Text(cause.as_bytes().to_vec())).collect()))),
+        ("cause".into(), Value::List(Arc::new(diagnostic.cause.iter().map(|cause| Value::Text(cause.clone())).collect()))),
     ])
 }
 fn is_cancelled(diagnostic: &Diagnostic) -> bool { diagnostic.code == "cancelled" || diagnostic.code == "E_CANCELLED" }
@@ -2006,7 +2026,7 @@ fn state_data(value: Value) -> Result<Value, Diagnostic> {
 }
 fn state_previous(a: &mut Arena, c: &ExecCtx, env: &Env, zone: &Path, init: &Term) -> Result<Value, Diagnostic> {
     let (state, frame) = state_plane(a, c)?;
-    let source = workspace_source_key(&a.workspace);
+    let source = workspace_source_key(a);
     let key = state_key(c, zone);
     let previous = {
         let mut state_data = state.inner.lock().unwrap();
@@ -2024,7 +2044,7 @@ fn state_previous(a: &mut Arena, c: &ExecCtx, env: &Env, zone: &Path, init: &Ter
 fn state_write(a: &mut Arena, c: &ExecCtx, zone: &Path, value: Value) -> Result<Value, Diagnostic> {
     let value = state_data(concrete(a, value)?)?;
     let (state, frame) = state_plane(a, c)?;
-    let source = workspace_source_key(&a.workspace);
+    let source = workspace_source_key(a);
     let key = state_key(c, zone);
     let mut data = state.inner.lock().unwrap();
     if c.host {
@@ -2875,9 +2895,11 @@ pub fn authored_key(workspace: &Workspace) -> String {
         .collect::<Vec<_>>().join("\0");
     stable_digest(forms.as_bytes())
 }
-fn workspace_source_key(workspace: &Workspace) -> String {
-    let source = flow_syntax::lisp::text(&workspace.source);
-    stable_digest(source.as_bytes())
+fn workspace_source_key(arena: &Arena) -> &str {
+    arena.source_key.get_or_init(|| {
+        let source = flow_syntax::lisp::text(&arena.workspace.source);
+        stable_digest(source.as_bytes())
+    })
 }
 pub fn element_key(zone:&Path)->String{format!("$elem:{}",zone.join("/"))}
 fn arena_for_function(id: FnId) -> Option<Arc<Slot>> { slot_of(id.1) }
@@ -3190,7 +3212,7 @@ pub mod Residual {
         let residual = get_res(&arena, id)?;
         let context = state_location(&residual, instance, path, iter, host);
         let (state, frame) = state_plane(&arena, &context)?;
-        let source = workspace_source_key(&arena.workspace);
+        let source = workspace_source_key(arena);
         let key = state_key(&context, &[]);
         let previous = {
             let mut state = state.inner.lock().unwrap();
@@ -3462,6 +3484,7 @@ pub mod Host {
         let at = move |index: usize| -> Result<Records, Diagnostic> {
             if index >= count { return Err(error("E_LIST_RANGE", "Probe index is outside this map.")); }
             let mut worker = peek(&arena, |arena| arena.clone());
+            worker.interrupt = current_interrupt();
             worker.owns_index = false;
             worker.record = true;
             worker.records.clear();
@@ -3491,6 +3514,32 @@ pub fn live_kernels_get() -> Arc<dyn Fn(&[Node]) -> bool + Send + Sync> { LIVE_K
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inline_relocation_shares_unchanged_environments_and_rewrites_nested_ids() {
+        let reloc = Reloc {
+            lo: 10, count: 2, new_lo: 20, inputs: vec![(3, 30)],
+            rmap: HashMap::from([(ResidualId(1, 1), ResidualId(2, 1))]),
+            fmap: HashMap::from([(FnId(7, 1), FnId(8, 1))]),
+            site: Vec::new(), iter: Vec::new(), new_site: Vec::new(), new_iter: Vec::new(), arena: 1, inst: 1,
+        };
+        let values = Arc::new(vec![Value::Float(f64::NAN), Value::Residual(ResidualId(99, 1))]);
+        let env = Arc::new(BTreeMap::from([("pure".into(), Value::List(values.clone()))]));
+        assert!(Arc::ptr_eq(&env, &reloc.env(&env)));
+        let Value::List(shared) = reloc.value(&Value::List(values.clone())) else { panic!("list") };
+        assert!(Arc::ptr_eq(&values, &shared));
+        let nested = |node, input, residual, function| Value::List(Arc::new(vec![
+            Value::Record(vec![("node".into(), Value::Deferred(Ty::Int, node))]),
+            Value::Struct("s".into(), Ty::Any, vec![("input".into(), Value::Deferred(Ty::Int, input))]),
+            Value::Source("host".into(), Ty::Any, vec![("residual".into(), Value::Residual(residual)), ("fn".into(), Value::Fn(function))]),
+            Value::Deferred(Ty::Int, 5),
+        ]));
+        let env = Arc::new(BTreeMap::from([("nested".into(), nested(10, 3, ResidualId(1, 1), FnId(7, 1)))]));
+        let rewritten = reloc.env(&env);
+        assert!(!Arc::ptr_eq(&env, &rewritten));
+        assert_eq!(rewritten["nested"], nested(20, 30, ResidualId(2, 1), FnId(8, 1)));
+        assert_eq!(env["nested"], nested(10, 3, ResidualId(1, 1), FnId(7, 1)), "the captured environment stays immutable");
+    }
 
     fn form() -> flow_syntax::syntax::Syntax {
         flow_syntax::syntax::make(flow_syntax::syntax::Draft::Sym("test".into()))
@@ -3680,7 +3729,7 @@ fn dependent_fast(value: &Value, frame: bool) -> bool {
 // residual value, an error, an interrupt, the budget, a node or data source made by an operator, a call it cannot run) abandons the
 // compiled run: the call counts and closures it changed are put back, and the walker evaluates the term instead, from the same state.
 #[derive(Clone)]
-struct Code { path: Option<Path>, kind: Kind }
+struct Code { path: Option<Arc<Path>>, kind: Kind }
 #[derive(Clone)]
 enum Kind {
     Lit(Value),
@@ -3707,7 +3756,7 @@ struct DefCall { name: String, body: Arc<Term>, inputs: Vec<(String, Ty)>, steps
 #[derive(Clone)]
 struct MakeFn { params: (Term, RangeId), body: Arc<Term>, zone: Path, captures: Vec<(String, Option<usize>)>, steps: Vec<Step> }
 #[derive(Clone)]
-enum Step { Base(Path), Seg(Seg) }
+enum Step { Base(Arc<Path>), Seg(Seg) }
 // One compiled term (or closure body): its code, the context its operators were resolved in, its slots, and how its runs went.
 #[derive(Clone)]
 struct Compiled { code: Code, context: &'static str, slots: usize, stamp: Stamp, params: Option<((u64, u32), RangeId)>, inputs: Vec<String>, runs: u32, abandons: u32 }
@@ -3756,10 +3805,10 @@ impl Compiler {
     // A child entered as the walker enters it: `eval_at` (no segment) or `eval_sub` under a segment.
     fn term(&mut self, a: &mut Arena, t: &Term, seg: Option<Seg>) -> Option<Code> {
         let path = term_base(a, t);
-        let pushed = match (&path, seg) { (Some(path), _) => { self.steps.push(Step::Base((**path).clone())); true } (None, Some(seg)) => { self.steps.push(Step::Seg(seg)); true } (None, None) => false };
+        let pushed = match (&path, seg) { (Some(path), _) => { self.steps.push(Step::Base(path.clone())); true } (None, Some(seg)) => { self.steps.push(Step::Seg(seg)); true } (None, None) => false };
         let kind = self.kind(a, t);
         if pushed { self.steps.pop(); }
-        Some(Code { path: path.map(|path| (*path).clone()), kind: kind? })
+        Some(Code { path, kind: kind? })
     }
     fn kind(&mut self, a: &mut Arena, t: &Term) -> Option<Kind> {
         self.nodes += 1;
@@ -3910,9 +3959,9 @@ impl Run {
     }
     // A value made by compiled code is plain by construction (operators, literals, slots of such values); one read from the enclosing
     // scope is checked.
-    fn done(&mut self, path: &Option<Path>, value: Value, outside: bool) -> Result<Value, Abandon> {
+    fn done(&mut self, path: &Option<Arc<Path>>, value: Value, outside: bool) -> Result<Value, Abandon> {
         if outside && is_live_value(&value) { return Err(Abandon); }
-        if self.record { if let Some(path) = path { self.notes.push((path.clone(), value.clone())); } }
+        if self.record { if let Some(path) = path { self.notes.push(((**path).clone(), value.clone())); } }
         Ok(value)
     }
     // `name.f.g` read through references: only the field itself is copied (an error gives way, so no message is spelled).
@@ -3934,7 +3983,7 @@ impl Run {
             Root::Ctx(context) => context.clone(),
             Root::Def { name, caller, steps } => {
                 let mut context = self.root_ctx(a, *caller);
-                for step in steps.iter() { match step { Step::Base(path) => { context.base = base_of(a, path); context.route = Route(None); } Step::Seg(seg) => context = sub(&context, seg.clone()) } }
+                for step in steps.iter() { match step { Step::Base(path) => { context.base = path.clone(); context.route = Route(None); } Step::Seg(seg) => context = sub(&context, seg.clone()) } }
                 let mut cx = context.clone();
                 cx.prefix = Arc::new(site(&context)); cx.base = Arc::new(vec![format!("def:{}", name)]); cx.route = Route(None); cx.depth += 1;
                 cx
@@ -4081,7 +4130,7 @@ impl Run {
         let top = self.frames.len() - 1;
         let mut context = self.root_ctx(a, top);
         for step in &made.steps {
-            match step { Step::Base(path) => { context.base = base_of(a, path); context.route = Route(None); } Step::Seg(seg) => context = sub(&context, seg.clone()) }
+            match step { Step::Base(path) => { context.base = path.clone(); context.route = Route(None); } Step::Seg(seg) => context = sub(&context, seg.clone()) }
         }
         let frame = &self.frames[top];
         let env: BTreeMap<String, Value> = made.captures.iter().filter_map(|(name, slot)| match slot { Some(slot) => Some((name.clone(), frame.slots[*slot].clone())), None => frame.env.get(name).map(|value| (name.clone(), value)) }).collect();
@@ -4214,7 +4263,7 @@ impl Run {
                     Some(Function::Named(named)) => {
                         let top = self.frames.len() - 1;
                         let mut context = self.root_ctx(a, top);
-                        for step in &made.steps { match step { Step::Base(path) => { context.base = base_of(a, path); context.route = Route(None); } Step::Seg(seg) => context = sub(&context, seg.clone()) } }
+                        for step in &made.steps { match step { Step::Base(path) => { context.base = path.clone(); context.route = Route(None); } Step::Seg(seg) => context = sub(&context, seg.clone()) } }
                         let id = closure_id(a, Function::Closure(Arc::new(ClosureData { params: made.params.clone(), replayable: false, body: made.body.clone(), env: Arc::new(BTreeMap::new()), zone: made.zone.clone(), calls: named.calls, at: context })));
                         self.undo.push(Undo::Closure(id));
                         Value::Fn(id)
@@ -4356,6 +4405,17 @@ fn run_compiled(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Option<Resul
 #[cfg(test)]
 mod ownership_tests {
     use super::*;
+
+    #[test]
+    fn state_source_digest_is_lazy_exact_and_shared_by_replays() {
+        let checked = crate::test_workspace_eval::check("(workspace w (graph g :context value (state [n 0] (+ n 1))))");
+        let arena = Arena::fresh(0, Shared::new(checked.clone()), false, 0, None, false);
+        let replay = arena.clone();
+        assert!(arena.source_key.get().is_none());
+        assert_eq!(workspace_source_key(&replay), stable_digest(flow_syntax::lisp::text(&checked.source).as_bytes()));
+        assert!(Arc::ptr_eq(&arena.source_key, &replay.source_key));
+        assert_eq!(arena.source_key.get().unwrap(), workspace_source_key(&replay));
+    }
 
     #[test]
     fn escaping_roots_retain_foreign_homes_without_cycles() {

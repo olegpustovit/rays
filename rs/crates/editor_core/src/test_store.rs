@@ -64,6 +64,8 @@ fn settings_round_trip_and_viewport() {
     let values = vec![
         ("animate".to_string(), settings::Value::Bool(true)),
         ("density".to_string(), settings::Value::Float(0.625)),
+        ("count".to_string(), settings::Value::Int(42)),
+        ("mode".to_string(), settings::Value::Choice("orbit".into())),
         ("label".to_string(), settings::Value::Text("hello\nworld".into())),
         ("range".to_string(), settings::Value::Pair(0.2, 0.8)),
     ];

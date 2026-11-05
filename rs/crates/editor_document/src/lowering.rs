@@ -886,7 +886,7 @@ pub fn of_workspace(options: &Options, workspace: &workspace_doc::T) -> R<docume
         let old = &doc.workspace.ws;
         let lowered = &doc.workspace.lowered;
         let changes = if same_gpu(&gpu, &lowered.gpu) && lowered.defer == defer { workspace_doc::literal_changes(old, workspace) } else { None }?;
-        let mut result: Option<R<lower_mod::T>> = Some(Ok(lowered.clone()));
+        let mut result: Option<R<lower_mod::T>> = Some(Ok((**lowered).clone()));
         for change in &changes {
             result = match result {
                 None => None,
@@ -1158,7 +1158,7 @@ pub fn of_workspace(options: &Options, workspace: &workspace_doc::T) -> R<docume
         scene_textures,
         workspace: document::Workspace {
             ws: workspace,
-            lowered,
+            lowered: Arc::new(lowered),
             catalog: document::LazyCatalog::new(Arc::new(move || kinds::catalog(flow_sop::manifest::VERSION, &factories_for_catalog))),
             fast,
         },
@@ -1173,8 +1173,9 @@ pub fn restore(factories: Option<&[Factory]>, current: &document::T, saved: &doc
     previous.layers = saved.saved_layers.clone();
     previous.active_camera = saved.saved_camera;
     previous.homes = saved.saved_homes.clone();
-    previous.workspace.lowered.compiled_ids = saved.saved_ids.clone();
-    previous.workspace.lowered.sites = saved.saved_sites.clone();
+    let lowered = Arc::make_mut(&mut previous.workspace.lowered);
+    lowered.compiled_ids = saved.saved_ids.clone();
+    lowered.sites = saved.saved_sites.clone();
     let options = Options { factories: factories.map(|f| f.to_vec()), previous: Some(previous), ..Default::default() };
     let mut doc = of_workspace(&options, &saved.saved_ws)?;
     doc.scene = saved.saved_scene.clone();

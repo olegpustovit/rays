@@ -565,7 +565,7 @@ fn error_payload(diagnostic: &Diagnostic) -> Value {
     Value::Record(vec![
         ("code".into(), Value::Text(diagnostic.code.as_bytes().to_vec())),
         ("message".into(), Value::Text(diagnostic.message.as_bytes().to_vec())),
-        ("cause".into(), Value::List(Arc::new(diagnostic.cause.iter().map(|cause| Value::Text(cause.as_bytes().to_vec())).collect()))),
+        ("cause".into(), Value::List(Arc::new(diagnostic.cause.iter().map(|cause| Value::Text(cause.clone())).collect()))),
     ])
 }
 pub fn with_error(protected: &dyn Fn() -> Result<Value, Diagnostic>, map: &dyn Fn(Value) -> Result<Value, Diagnostic>) -> Result<Value, Diagnostic> {
@@ -591,7 +591,7 @@ pub fn with_error(protected: &dyn Fn() -> Result<Value, Diagnostic>, map: &dyn F
     let Some(Value::List(causes)) = fields.iter().find(|(name, _)| name == "cause").map(|(_, value)| value) else { return Err(malformed()); };
     let cause = match causes.as_slice() {
         [] => None,
-        [Value::Text(cause)] => match String::from_utf8(cause.clone()) { Ok(cause) => Some(cause), Err(_) => return Err(malformed()) },
+        [Value::Text(cause)] => Some(cause.clone()),
         _ => return Err(malformed()),
     };
     let mut result = original;

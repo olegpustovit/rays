@@ -266,7 +266,17 @@ pub fn patch(catalog: &Catalog, workspace: &Workspace, op: &Op) -> Option<R<(Wor
                     E::Float(n) => TermDraft::Lit(param::Value::Float(n)),
                     E::Bool(n) => TermDraft::Lit(param::Value::Bool(n)),
                     E::Text(bytes) => TermDraft::Text(bytes),
-                    E::Vec3(..) => draft,
+                    E::Vec3(..) => TermDraft::Vec(form.children().iter().map(|id| {
+                        let component = form.child(*id);
+                        let (ty, value) = literal(&component).expect("numeric vector component");
+                        let value = match value {
+                            E::Int(n) => param::Value::Int(n),
+                            E::Float(n) => param::Value::Float(n),
+                            _ => unreachable!("numeric vector component"),
+                        };
+                        let form = builder.import_form(&component);
+                        builder.push(None, &ty, form, TermDraft::Lit(value))
+                    }).collect()),
                     _ => unreachable!("literal value"),
                 };
                 (draft, Some(ty))
@@ -479,12 +489,46 @@ mod compact_span_tests {
     use super::*;
 
     #[test]
+    fn whole_vector_edit_replaces_checked_components() {
+        let catalog = crate::kinds::catalog(1, &sop::nodes::factories()).unwrap();
+        let doc = crate::workspace_doc::of_text(
+            &Default::default(), &catalog,
+            "(workspace w (graph scene :context scene (scene/camera :eye [0 0 6])))",
+        ).unwrap();
+        let op = Op::SetArg {
+            node: vec!["scene".into(), "@result".into()], key: ArgKey::Kw("eye".into()),
+            sub: vec![], value: s::parse("[9 2.5 -3]").unwrap().remove(0),
+        };
+        let (checked, change) = patch(&catalog, &doc.checked, &op).unwrap().unwrap();
+        let (_, _, _, argument, _) = find_argument(false, "eye", change.expr.id, &checked.graphs[0].body).unwrap();
+        let values: Vec<_> = argument.children().iter().map(|id| {
+            let term = argument.child(*id);
+            let TNode::Lit(literal) = term.node else { panic!("numeric component") };
+            term.arena().literal(literal).clone()
+        }).collect();
+        use flow_check::term_arena::Literal;
+        assert_eq!(values, vec![Literal::Int(9), Literal::Float(2.5), Literal::Int(-3)]);
+        let (full, diagnostics) = flow_sop::catalog::check_workspace(&doc.checked.ops, false, None, &catalog, &checked.source);
+        let full = full.unwrap_or_else(|| panic!("{diagnostics:?}"));
+        assert_eq!(checked.graphs[0].body, full.graphs[0].body);
+        let patched = flow_eval::static_with(&checked, true, None, None).unwrap();
+        let reference = flow_eval::static_with(&full, true, None, None).unwrap();
+        assert_eq!(patched.results, reference.results);
+        assert_eq!(patched.records, reference.records);
+    }
+
+    #[test]
     fn literal_growth_rejects_offsets_beyond_the_compact_source_limit() {
-        let mut source = s::parse("[1 2]").unwrap();
-        source[0].span.finish = rays_diagnostic::MAX_SOURCE_BYTES as u32;
+        let parsed = s::parse("[1 2]").unwrap().remove(0);
+        let mut builder = s::SyntaxBuilder::new();
+        let root = builder.import(&parsed);
+        let root = builder.with_location(root, parsed.id, rays_diagnostic::Span { start: parsed.span.start, finish: rays_diagnostic::MAX_SOURCE_BYTES as u32 });
+        let source = vec![builder.freeze().handle(root)];
         let Node::Vec(items) = &source[0].node else { panic!("expected vector") };
-        let before = items[0].clone();
-        let after = S { node: Node::Num("1234".into()), ..before.clone() };
+        let before = source[0].child(source[0].range(*items)[0]);
+        let mut builder = s::SyntaxBuilder::new();
+        let after = builder.with_node(&before, s::Draft::Num("1234".into()));
+        let after = builder.freeze().handle(after);
         assert_eq!(patch_source(&source, &before, &after).unwrap_err().code, "E_SOURCE_SIZE");
     }
 }

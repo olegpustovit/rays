@@ -175,6 +175,12 @@ fn context_scans_borrow_helpers_and_keep_labeled_defaults() {
     assert!(std::ptr::eq(reached[1], &workspace.defs[2]));
     assert!(!context_kernel::uses_context(&workspace.defs[0]));
     assert!(context_kernel::uses_context(&workspace.graphs[0]));
+    for graph in [&workspace.defs[0], reached[1], &workspace.graphs[0]] {
+        let (unchanged, inputs) = context_kernel::label_context("borrowed_card", graph);
+        assert!(inputs.is_empty(), "helper bodies keep their own context scope");
+        assert_eq!(unchanged.body.identity(), graph.body.identity(), "unchanged terms retain their arena");
+        assert_eq!(unchanged.inputs, graph.inputs);
+    }
     let (labeled, inputs) = context_kernel::label_context("borrowed_card", reached[0]);
     assert_eq!(inputs, vec![("$context0".to_owned(), "sop/context_seed".to_owned())]);
     let flow_check::workspace::Node::RefBinding(id) = labeled.body.node else { panic!("A labeled context is a binding reference.") };
@@ -231,7 +237,7 @@ fn embedded_fixture_checks_edits_and_round_trips_the_manifest() {
     let graph = &workspace.graphs[0];
     let source_graph = authored[0].child(*authored[0].children().last().unwrap());
     assert_eq!(graph.form.id, source_graph.id);
-    assert!(workspace.nodes[0].body.form().id > source_graph.id);
+    assert!(workspace.nodes[0].body.form.id > source_graph.id);
     let checker_forms = forms.clone();
     let checker = move |c: &Catalog, s: &[Syntax]| catalog::check_workspace(&[], false, Some(&checker_forms), c, s);
     let (edited, checked_edit) = ok(flow_graph::flow_edit::apply_checked_with(&[], false, Some(&checker), &cat, &authored, &EditOp::SetNote { node: vec!["g".to_owned(), "@result".to_owned()], text: "kept note".to_owned() }));

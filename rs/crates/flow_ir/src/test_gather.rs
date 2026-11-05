@@ -137,7 +137,7 @@ fn lit(bytes: &[u8]) -> String {
 }
 fn data_source_error(code: &str, message: &str, cause: Option<&str>) -> Diagnostic {
     let mut d = v::fail(code, message);
-    d.cause = cause.map(|c| c.to_string());
+    d.cause = cause.map(|c| c.as_bytes().to_vec());
     d
 }
 
@@ -810,7 +810,7 @@ fn text_identity_uniform_and_failures() {
         let three = three.clone();
         move |_| {
             let mut d = v::fail("E_DATA_SOURCE", "Text source failed");
-            d.cause = Some(String::from_utf8_lossy(&three).into_owned());
+            d.cause = Some(three.clone());
             Err(d)
         }
     });
@@ -1045,16 +1045,18 @@ fn text_helper_then_select_same_thread() {
     text_select_and_error_causes();
 }
 
-// Product defect: a raw non-UTF-8 `:cause` ("raw\255\000cause") reaches the diagnostic differently on the
-// two paths (Diagnostic.cause is a Rust String): the packed kernel keeps a lossy decode, the reference
-// keeps the printed source form with quotes. OCaml compares equal byte strings.
 #[test]
-#[ignore = "product: raw-byte :cause differs between packed kernel and reference (Diagnostic.cause is a String)"]
 fn text_error_cause_raw_bytes() {
     let live = live_at(0.25);
     let table = Value::Text_array(Arc::new(strings()));
     let error = instantiate(Some(&table), &arr(Ty::Text), &format!("(fn [(index : int)] (if (int/lt index 0) (error \"E_TEXT\" \"selected\" :cause {}) (array/nth data index)))", lit(b"raw\xff\0cause")), vec![-1, 0]);
     for domains in [1, 4, 8] {
-        with_domains(domains, &|| same_error(&force(&pk(&error), &live), &force_reference(&error, &live)));
+        with_domains(domains, &|| {
+            for fusion in [false, true] {
+                let actual = force(&packed_of(fusion, &error), &live);
+                assert_eq!(actual.as_ref().unwrap_err().cause.as_deref(), Some(b"raw\xff\0cause".as_slice()));
+                same_error(&actual, &force_reference(&error, &live));
+            }
+        });
     }
 }

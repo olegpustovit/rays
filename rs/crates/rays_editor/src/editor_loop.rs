@@ -428,7 +428,8 @@ pub fn update_with(value: t, frame_: &frame::t, inspector: &dyn Fn(&mut Ui) -> R
         // a handle is where the picture shows its point: in the view's film, not its pane
         V::handles(ui, selected, &handles_scene, &space, &handles_view, &handles_extra, V::film(&handles_extra, &handles_key, bounds))
     };
-    let lowered = value.core.doc.workspace.lowered.clone();
+    let document = value.core.doc.clone();
+    let lowered = &document.workspace.lowered;
     let image_errors = preview_images(&value, &frame);
     let images = host_images(&value);
     FRAME_IMAGES.with(|f| *f.borrow_mut() = Some(images.clone()));
@@ -628,8 +629,8 @@ pub fn update_with(value: t, frame_: &frame::t, inspector: &dyn Fn(&mut Ui) -> R
     value.source = source;
     let mut value = refresh_hidden(value, &raw_frame);
     {
-        let workspace = value.core.doc.workspace.ws.clone();
-        let lowered = value.core.doc.workspace.lowered.clone();
+        let workspace = &value.core.doc.workspace.ws;
+        let lowered = &value.core.doc.workspace.lowered;
         let result = workspace_host::update(&mut value.host.borrow_mut(), &value.core.cook.state, &live_input, &workspace, &lowered.plan);
         if let Err(diagnostic) = result {
             value.context_error = Some(rays_diagnostic::to_string(&diagnostic));

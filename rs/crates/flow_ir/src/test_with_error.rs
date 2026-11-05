@@ -60,7 +60,7 @@ fn compare(body: &str) -> Result<Value, Diagnostic> {
 
 fn error(code: &str, message: &str, cause: Option<&str>, result: Result<Value, Diagnostic>) {
     match result {
-        Err(d) => assert!(d.code == code && d.message == message && d.cause.as_deref() == cause, "{d:?}"),
+        Err(d) => assert!(d.code == code && d.message == message && d.cause.as_deref() == cause.map(str::as_bytes), "{d:?}"),
         Ok(v) => panic!("expected an error, got {v:?}"),
     }
 }
@@ -87,6 +87,17 @@ fn with_error_maps_code_and_message_and_keeps_the_cause() {
 #[test]
 fn with_error_mapper_failures_replace_the_error() {
     error("E_MAPPER", "mapper", None, compare("(with_error (error \"E_CHILD\" \"child\") (fn [failure] (error \"E_MAPPER\" \"mapper\")))"));
+}
+
+#[test]
+fn with_error_preserves_and_maps_raw_cause_bytes() {
+    for mapper in ["failure", "(assoc failure :cause (list \"mapped\\255\\000cause\"))"] {
+        let result = compare(&format!("(with_error (error \"E_BYTES\" \"child\" :cause \"raw\\255\\000cause\") (fn [failure] {mapper}))"));
+        let diagnostic = result.unwrap_err();
+        let expected: &[u8] = if mapper == "failure" { b"raw\xff\0cause" } else { b"mapped\xff\0cause" };
+        assert_eq!(diagnostic.code, "E_BYTES");
+        assert_eq!(diagnostic.cause.as_deref(), Some(expected));
+    }
 }
 
 #[test]

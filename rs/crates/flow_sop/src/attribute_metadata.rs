@@ -94,7 +94,7 @@ fn structured_error(failure: &rdk_error::T) -> Diagnostic {
         format!("{} could not produce valid geometry", rdk_error::operation(failure)),
         None,
         None,
-        Some(rdk_error::to_string(failure)),
+        Some(rdk_error::to_string(failure).into_bytes()),
         rdk_error::hints(failure).to_vec(),
         Vec::new(),
     )
@@ -398,7 +398,7 @@ pub fn rename_edge(from: &str, into: &str, input: &node::T) -> node::T {
                     "rename_edge_group could not produce valid geometry".into(),
                     None,
                     None,
-                    Some(rdk_error::message(&failure).to_owned()),
+                    Some(rdk_error::message(&failure).as_bytes().to_vec()),
                     Vec::new(),
                     Vec::new(),
                 )

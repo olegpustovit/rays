@@ -5,6 +5,85 @@ Gate: `RAYS_SLOW=1 cargo t -p flow_sop debug_lowering_beats -- --ignored --nocap
 (`crates/flow_sop/src/lisp_sop/test_perf_lower.rs`). It times a cold `lower::of_checked` (the catalog and the check are
 not timed) and fails while any case is at or above its OCaml time.
 
+## Current memory work — 2026-11-05, Mac M1
+
+The unoptimized native `recursive_signals` frame-allocation gate now passes at
+771,271 bytes/frame (previously 13,895,611), below its unchanged 1,100,000-byte
+ceiling. Built-in shader metadata is immutable and retained by nine `OnceLock`s;
+the workspace state-reset digest is computed lazily once per evaluator arena and
+shared by replay clones. Digest bytes and equal/changed-source reset behavior stay
+covered by regressions. The original full-depth fixture and exact pixel comparison
+remain; every resident frame asserts successful device-backed mark output and the
+measured frames create no new GPU buffers. This does not close live-memory targets.
+
+Compiled `Code` paths and closure route bases reuse the evaluator's interned `Arc<Path>`;
+owned paths are materialized when recording results. This changes no Lisp names or record paths.
+The full evaluator gate passes 92 tests, including the OCaml sketch-output oracle.
+
+The embedded library now validates/indexes all source files once, retaining declaration headers,
+references and fixed authored-ID bases. A workspace check parses only reached files on a prelude
+cache miss; the existing eight-subset prelude cache remains bounded. The complete `sources()` and
+`node_definitions()` APIs materialize the full immutable library on explicit request (manifest
+generation/tests), accounted by `flow.library.syntax`. File order, authored IDs, spans and diagnostics
+are unchanged; catalog/source parity tests cover the normal and full-library paths.
+
+Native allocation profiling identified roughly 21 MB under full-library parsing. The ledger measured
+18.9 MB of retained source arenas before lazy materialization; final same-machine memory figures
+and binary hashes are recorded in `smoke-native.md` rather than inferred from the profile.
+
+The initial-domain prelude cache now reports its retained syntax and checked arenas through
+`flow.library.preludes`, using the same allocation identities as document roots. Shared arenas
+are charged once across cache entries and documents. Catalog/operator closures and map nodes
+remain excluded; this is a lower bound, not an estimate of the whole cache. The regression checks
+both repeated traversal and repeated ledger reports. Accounting does not reduce live memory.
+
+Inline replay now keeps immutable captured maps/lists shared when none of their contained
+node, residual or function IDs changes. It still recursively relocates affected values, including
+IDs nested in records, structs and host sources. Tests verify both pointer sharing and exact
+relocation without mutating the original capture. The paired three-frame `ws_tree` release
+measurement falls from 82.5 MB to 80.5 MB live; remaining memory work stays open.
+
+Editor cache keys now retain only the evaluation identity they already compare, rather than
+cloning an entire lowering. The immutable document owns its lowering through `Arc`; restoring
+saved compiled IDs/sites uses copy-on-write, and actual literal edits still produce a changed
+lowering. Frame/scope code borrows this shared lowering until a callback needs an owned handle.
+This removes deep copies of plans, diagnostics and maps during immutable model updates without
+changing cache invalidation policy. The camera test also reads its installed shell for viewport
+bounds instead of repeatedly rebuilding/lowering the workspace as an observation side effect.
+Its original four instances and all gestures/assertions remain; the default five-second budget
+is still open despite the measured reduction from about 25.6 to 6.1 seconds diagnostically.
+
+## Next checker phase: reuse inference work without losing effects
+
+Cold gallery profiling on the Mac M1 (`cargo t --profile slow -p rays_bin --test e2e
+sketches_sop_gallery`) records 9,243 definition applications, 6,228 generic function checks
+and 6,234 specializations. In the instrumented 7.771 s run, exclusive times are 2.771 s,
+1.121 s and 0.890 s respectively; the authored workspace check is only 0.060 s, parsing
+0.254 s and printing 0.025 s. Raw evidence: `/tmp/rays-gallery-specialization-phases.log`
+and `/tmp/rays-gallery-fresh.sample`. Temporary instrumentation was removed.
+
+The generic and specialized results are not interchangeable. Generic checking preserves
+captured dependencies; HOF application passes actual element/accumulator information, while
+`instantiate_fn` deliberately checks typed leaf inputs. Reusing the first term directly
+changes metadata even when the final evaluated number matches. A whole-result memo keyed
+only by source/type is therefore insufficient.
+
+The next implementation must separate reusable body analysis from context-dependent replay:
+
+- Preserve all `Info` outputs: type, callable/captures, liveness, length, varying zones,
+  groups, packed producers, approximation sources, state dependence and list fields.
+- Preserve ordered diagnostics and checker effects: live/invariant/packed paths, roots,
+  inline-path allocation, input paths, zone IDs, function/kind references and safety budgets.
+- Rebind term IDs to the active builder; preserve authored IDs, spans and trivia. Closures
+  must retain their original lexical environments. Unhandled effects use ordinary inference.
+- Prove parity of complete checked workspaces and diagnostics, including unused functions,
+  nested captures/HOFs, live and state inputs, packed refusals, and depth/step exhaustion.
+  Evaluation goldens alone cannot prove equivalence of checker metadata.
+
+Measure the same cold process and original gallery/camera fixtures after that work; the
+default deadline stays five seconds. Rejected hash/context/import experiments in the
+checkpoint are not a substitute for this phase. No inference-result cache is implemented yet.
+
 ## Where we are (2026-11-04, after the arena redesign 2bb65a8f, loaded 24-core Windows host)
 
 | case | OCaml native | Rust debug | ratio | evaluator share (phase "evaluate") | Rust release |

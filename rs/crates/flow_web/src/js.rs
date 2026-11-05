@@ -260,7 +260,7 @@ impl Printer {
                 escape(code),
                 escape(message),
                 match cause {
-                    Some(cause) => format!(", {}", escape(cause)),
+                    Some(cause) => format!(", {}", crate::text_literal::quote(cause)),
                     None => String::new(),
                 }
             ),
@@ -844,7 +844,7 @@ fn call(primitive: &Primitive, args: &[(String, i64)]) -> Result<String, Diagnos
         Primitive::Color_byte(C::ByteMode::Unclamped) => vec!["\"unclamped\"".to_owned()],
         Primitive::Fail(code, message) => vec![escape(code), escape(message)],
         Primitive::Fail_diagnostic(d) => {
-            let mut s = vec![escape(&d.code), escape(&d.message), d.cause.as_ref().map(|c| escape(c)).unwrap_or_else(|| "undefined".to_owned())];
+            let mut s = vec![escape(&d.code), escape(&d.message), d.cause.as_ref().map(|c| crate::text_literal::quote(c)).unwrap_or_else(|| "undefined".to_owned())];
             if !(d.hints.is_empty() && d.trace.is_empty()) {
                 s.push(format!("[{}]", d.hints.iter().map(|h| escape(h)).collect::<Vec<_>>().join(",")));
                 s.push(format!(
@@ -1298,7 +1298,7 @@ fn binding_plan(fast: bool, kernel: Option<String>, packed: &packed::T) -> Resul
             Ok(p) => p,
             Err(form) => return Err(refuse(&format!("Region input preparation: {form}"))),
         };
-        sources.push(format!("{{type:{},source:{}}}", ty_json(&term.ty), escape(&prepare(false, &program)?)));
+        sources.push(format!("{{type:{},source:{}}}", ty_json(term.ty()), escape(&prepare(false, &program)?)));
     }
     let mut captures: Vec<String> = Vec::new();
     for value in r.uniforms.iter() {

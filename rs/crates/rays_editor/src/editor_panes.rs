@@ -30,7 +30,7 @@ use rays::frame;
 use crate::bars;
 use crate::cook;
 use crate::editor_commands::action;
-use crate::editor_inspect::{compiled_at, compiled_node, kind, probes_of, same_lowered, scene, spreadsheet_source};
+use crate::editor_inspect::{compiled_at, compiled_node, kind, probes_of, scene, spreadsheet_source};
 use crate::editor_model::*;
 use crate::editor_shell::*;
 use crate::lisp_text;
@@ -509,13 +509,13 @@ pub fn lit_tags(value: &t) -> (pick::Set, Option<lit_cache>) {
     match (pane_laid(value), selected.as_slice()) {
         (Some(laid), [site]) if scope_name(value).is_some() => {
             if let Some(c) = &value.lit {
-                if c.site == *site && c.at == value.probes && same_lowered(&c.lowered, lowered) && c.scope == *laid.scope {
+                if c.site == *site && c.at == value.probes && std::sync::Arc::ptr_eq(&c.evaluated, &lowered.evaluated) && c.scope == *laid.scope {
                     return (c.tags.clone(), value.lit.clone());
                 }
             }
             let iter = probes_of(value, &probe::chains(&laid.scope), site);
             let tags: pick::Set = lower::tags(lowered, site, &iter).into_iter().collect();
-            (tags.clone(), Some(lit_cache { site: site.clone(), at: value.probes.clone(), lowered: lowered.clone(), scope: (*laid.scope).clone(), tags }))
+            (tags.clone(), Some(lit_cache { site: site.clone(), at: value.probes.clone(), evaluated: lowered.evaluated.clone(), scope: (*laid.scope).clone(), tags }))
         }
         _ => (pick::Set::new(), None),
     }

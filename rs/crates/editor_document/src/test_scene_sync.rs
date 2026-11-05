@@ -200,18 +200,21 @@ fn text_first(what: &str, doc: &Doc, level: Level, edit: &Edit, after: &Doc) {
     }
 }
 
-fn mk(node: Node) -> Syntax {
+fn mk(node: s::Draft) -> Syntax {
     s::make(node)
 }
 
 fn sym(name: &str) -> Syntax {
-    mk(Node::Sym(name.to_owned()))
+    mk(s::Draft::Sym(name.to_owned()))
 }
 
 fn call(head: &str, args: Vec<Syntax>) -> Syntax {
     let mut items = vec![sym(head)];
     items.extend(args);
-    mk(Node::List(items.into()))
+    let mut builder = s::SyntaxBuilder::new();
+    let children = items.iter().map(|form| builder.import(form)).collect();
+    let root = builder.push_draft(0, s::Draft::List(children), rays_diagnostic::Span { start: 0, finish: 0 }, None);
+    builder.freeze().handle(root)
 }
 
 fn edit_ws(doc: &Doc, op: &Op) -> Result<workspace_doc::T, String> {
@@ -549,7 +552,7 @@ fn adding_by_key() {
     let doc = open_text(TEXT);
     let added = edit(
         &doc,
-        &Op::AddNode { scope: vec!["scene".to_owned()], name: "lamp".to_owned(), expr: call("scene/light", vec![mk(Node::Kw("name".to_owned())), mk(Node::Str(b"lamp".to_vec()))]) },
+        &Op::AddNode { scope: vec!["scene".to_owned()], name: "lamp".to_owned(), expr: call("scene/light", vec![mk(s::Draft::Kw("name".to_owned())), mk(s::Draft::Str(b"lamp".to_vec()))]) },
     );
     check(
         contains(&source(&added), "scene/merge body arm cam side (scene/light :name \"fill\") lamp") || contains(&source(&added), "lamp)"),
@@ -1316,7 +1319,7 @@ fn compose_world_member_layer_edits_are_surgical() {
     let pair = open_text("(workspace pair (graph g :context sop (sop/box)) (graph h :context sop (sop/box)))");
     let relowered = apply_ops(
         &pair,
-        &[Op::SetArg { node: path(&["h", "@result"]), key: ArgKey::Kw("uniform_scale".to_owned()), sub: vec![], value: mk(Node::Num("2.0".to_owned())) }],
+        &[Op::SetArg { node: path(&["h", "@result"]), key: ArgKey::Kw("uniform_scale".to_owned()), sub: vec![], value: mk(s::Draft::Num("2.0".to_owned())) }],
     )
     .unwrap();
     let moved = ok(reconcile(None, &relowered, &set(&relowered, "g", &[float("translate_x", 1.)])));

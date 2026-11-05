@@ -791,7 +791,7 @@ fn misc_value_ops()->Vec<Op>{
     let mut ops=Vec::new();
     ops.push(value_op("value/rand",vec![],vec![],Some(("key",Ty::Float)),vec![],Ty::Float,"Math",Arc::new(|_,_,a|Ok(Value::Float(value::hash(&a.iter().map(|(_,v)|num(v)).collect::<Result<Vec<_>,_>>()?))))));
     let mut error=value_op("error",vec![("code",Ty::Text),("message",Ty::Text)],vec![],None,vec![("cause",Ty::Text)],Ty::Any,"Value",Arc::new(|_,_,a|{
-        let code=diagnostic_text(a.get_arg("code")?)?;let message=diagnostic_text(a.get_arg("message")?)?;let cause=a.opt_arg("cause").map(diagnostic_text).transpose()?;
+        let code=diagnostic_text(a.get_arg("code")?)?;let message=diagnostic_text(a.get_arg("message")?)?;let cause=a.opt_arg("cause").map(|value| text_bytes(value).map(<[u8]>::to_vec)).transpose()?;
         Err(rays_diagnostic::error(code,message,None,None,cause,Vec::new(),Vec::new()))
     }));ops.push(error);
     let exact_out:Out=Arc::new(|ts|Ok(ts.first().cloned().unwrap_or(Ty::Any)));

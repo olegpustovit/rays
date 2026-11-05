@@ -559,9 +559,10 @@ fn ir_shapes_notes_and_reporting() {
 fn printed(forms: &[Syntax]) -> String { flow_syntax::lisp::print(forms).unwrap().0 }
 fn one(source: &str) -> Syntax { let mut f = parse(source); assert_eq!(f.len(), 1, "expected one form"); f.remove(0) }
 fn workspace_children(source: &str) -> Vec<Syntax> {
-    match one(source).node { SN::List(mut xs) if xs.len() >= 2 => xs.split_off(2), _ => panic!("not a workspace") }
+    let form = one(source);
+    match form.node { SN::List(xs) if form.range(xs).len() >= 2 => form.range(xs)[2..].iter().map(|&id| form.child(id)).collect(), _ => panic!("not a workspace") }
 }
-fn head_is(name: &str, x: &Syntax) -> bool { matches!(&x.node, SN::List(xs) if matches!(xs.first(), Some(Syntax { node: SN::Sym(h), .. }) if h == name)) }
+fn head_is(name: &str, x: &Syntax) -> bool { syntax::head(x) == Some(name) }
 fn macros_of(source: &str) -> Vec<Syntax> { workspace_children(source).into_iter().filter(|x| head_is("defmacro", x)).collect() }
 
 #[test]
@@ -625,8 +626,9 @@ fn check_cjs_lists_records_branches() {
     let s = "list:rec{pos:vec3,kids:list:rec{n:int}}";
     assert_eq!(ty::to_string(&tyf(s)), s);
     assert_eq!(ty::of_string("rec{a:list:rec{x:float},b:int}"), Some(Ty::Record(vec![("a".into(), Ty::List(Box::new(Ty::Record(vec![("x".into(), Ty::Float)])))), ("b".into(), Ty::Int)])));
-    match one("{:a 1 :b [1 2 3]}").node {
-        SN::Map(xs) if xs.len() == 4 && matches!(&xs[3].node, SN::Vec(v) if v.len() == 3) => (),
+    let form = one("{:a 1 :b [1 2 3]}");
+    match form.node {
+        SN::Map(xs) if form.range(xs).len() == 4 && matches!(form.arena().row(form.range(xs)[3]).node, SN::Vec(v) if form.range(v).len() == 3) => (),
         other => panic!("not a map: {other:?}"),
     }
     assert_eq!(printed(&parse("{:a 1 :b [1 2 3]}")).trim(), "{:a 1 :b [1 2 3]}");
@@ -670,29 +672,37 @@ fn check_cjs_notes_and_metadata() {
     let defn = workspace_children(noted).into_iter().find(|x| head_is("defn", x)).unwrap();
     assert_eq!(defn.notes(), vec!["a helper".to_owned()]);
     let graph = workspace_children(noted).into_iter().find(|x| head_is("graph", x)).unwrap();
-    match &graph.node {
-        SN::List(xs) if xs.len() == 5 => match &xs[4].node {
-            SN::List(l) if l.len() == 3 => match &l[1].node {
-                SN::Vec(v) if v.len() >= 3 => {
-                    assert!(v[0].notes() == vec!["first".to_owned()] && v[2].notes() == vec!["the pattern".to_owned()] && l[2].notes() == vec!["result note".to_owned()]);
-                }
-                other => panic!("{other:?}"),
-            },
-            other => panic!("{other:?}"),
-        },
-        other => panic!("graph shape: {other:?}"),
-    }
+    assert!(matches!(graph.node, SN::List(_)) && graph.children().len() == 5);
+    let body = graph.child(graph.children()[4]);
+    assert!(matches!(body.node, SN::List(_)) && body.children().len() == 3);
+    let bindings = body.child(body.children()[1]);
+    assert!(matches!(bindings.node, SN::Vec(_)) && bindings.children().len() >= 3);
+    assert_eq!(bindings.child(bindings.children()[0]).notes(), ["first"]);
+    assert_eq!(bindings.child(bindings.children()[2]).notes(), ["the pattern"]);
+    assert_eq!(body.child(body.children()[2]).notes(), ["result note"]);
     let text = printed(&parse(noted));
     assert!(text.contains("  ; a helper\n  (defn f") && text.contains("; the pattern\n           [b c]"));
     assert_eq!(printed(&parse(&text)), text);
     // setNote edits and removes notes
     fn set_notes(key: &str, notes: &[String], y: &Syntax) -> Syntax {
-        let map = |l: &Vec<Syntax>| l.iter().map(|c| set_notes(key, notes, c)).collect::<Vec<_>>();
-        let node = match &y.node { SN::List(l) => SN::List(map(l).into()), SN::Vec(l) => SN::Vec(map(l).into()), SN::Map(l) => SN::Map(map(l).into()), n => n.clone() };
-        let mut out = y.clone();
-        out.node = node;
-        if matches!(&y.node, SN::Sym(k) if k == key) { *out.notes_mut() = notes.to_vec(); }
-        out
+        fn rewrite(key: &str, notes: &[String], y: &Syntax, builder: &mut syntax::SyntaxBuilder) -> syntax::SyntaxId {
+            let out = match y.node {
+                SN::List(_) | SN::Vec(_) | SN::Map(_) => {
+                    let children = y.children().iter().map(|&id| rewrite(key, notes, &y.child(id), builder)).collect();
+                    let node = match y.node { SN::List(_) => syntax::Draft::List(children), SN::Vec(_) => syntax::Draft::Vec(children), _ => syntax::Draft::Map(children) };
+                    builder.with_node(y, node)
+                }
+                _ => builder.import(y),
+            };
+            if matches!(y.node, SN::Sym(k) if y.name(k) == key) {
+                let mut trivia = y.trivia().cloned().unwrap_or_default();
+                trivia.notes = notes.to_vec();
+                builder.with_trivia(out, Some(trivia))
+            } else { out }
+        }
+        let mut builder = syntax::SyntaxBuilder::new();
+        let root = rewrite(key, notes, y, &mut builder);
+        builder.freeze().handle(root)
     }
     let x = one(&val("(let* [a 1 b 2] b)"));
     let edited = printed(&[set_notes("b", &["two".into(), "lines".into()], &x)]);

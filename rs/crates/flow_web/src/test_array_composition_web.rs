@@ -98,12 +98,7 @@ rt.invoke=async function(k,args,plan){{assert.ok(plan,'Composition producer has 
                     if text { "textBytes(expected)" } else { "bytes(expected)" }, json_string(&format!("{name}/{count}/{time} runtime bytes"))));
             }
             Err(d) => {
-                // OCaml preserves raw Text bytes; native Diagnostic strings quote invalid UTF-8.
-                let cause = if name == "table_cause" && d.code == "E_COMPOSE" {
-                    text_literal::quote(b"raw\xff\0cause")
-                } else {
-                    d.cause.as_ref().map(|s| json_string(s)).unwrap_or_else(|| "undefined".into())
-                };
+                let cause = d.cause.as_deref().map(text_literal::quote).unwrap_or_else(|| "undefined".into());
                 script.push_str(&format!("await assert.rejects(()=>frame(input,rt.slots,rt),e=>{{assert.equal(e.code,{});assert.equal(e.message,{});assert.equal(e.cause,{});return true}});\n",
                     json_string(&d.code), json_string(&d.message), cause));
             }

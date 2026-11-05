@@ -1,5 +1,5 @@
 use crate::{catalog, defnode, op, port_type};
-use crate::term_arena::{self as packed, Draft, Node as PackedNode, TermBuilder};
+use crate::term_arena::{self as packed, Draft, Node as PackedNode, SyntaxId, TermBuilder};
 use flow_syntax::{context, lisp, macros, syntax::{self, Node as SNode, Syntax}, ty::{self, FnSignature, Ty}, value::Value};
 use param::{self, FieldView, KindView};
 use rays_diagnostic::{self as diagnostic, Diagnostic, Severity, Span};
@@ -51,6 +51,21 @@ impl Memory {
     pub fn checked_bytes(&self) -> usize { self.checked.bytes() }
     pub fn into_allocations(self) -> (Vec<(usize, usize)>, Vec<(usize, usize)>) {
         (self.syntax.into_allocations(), self.checked.into_allocations())
+    }
+
+    /// Retained syntax and checked arenas; catalog closures and map nodes remain excluded.
+    pub fn prelude(&mut self, prelude: &Prelude) {
+        let checker = &prelude.checker;
+        for definition in checker.defs.values().chain(checker.graphs.values()) {
+            self.syntax.add(&definition.form);
+        }
+        self.syntax.forms(&checker.macro_forms);
+        for graph in checker.def_terms.values().chain(checker.graph_terms.values()) { self.graph(graph); }
+        for node in &checker.nodes {
+            self.graph(&node.body);
+            for (term, _, _) in &node.validations { self.term(term); }
+            for (_, term) in &node.normalizers { self.term(term); }
+        }
     }
 
     fn shared<T>(&mut self, value: &Arc<T>) -> bool {
@@ -3421,7 +3436,7 @@ pub fn prelude(
 ) -> Prelude {
     let mut checker = Checker::new(catalog.clone(), ops, library, call_sites);
     checker.children = forms.len();
-    checker.phase(forms);
+    checker.phase(forms.iter().cloned());
     checker.count += forms.len();
     Prelude { checker }
 }
@@ -3455,22 +3470,24 @@ pub fn check(
     let SNode::List(items) = &workspace_form.node else {
         return (None, vec![err("E_WORKSPACE", "Expected (workspace name …).".into(), Some(workspace_form.span.clone()))]);
     };
+    let items = workspace_form.range(*items);
     checker.children = items.len().saturating_sub(2);
-    if items.first().and_then(|form| match &form.node { SNode::Sym(name) => Some(name.as_str()), _ => None }) != Some("workspace") {
+    if items.first().and_then(|id| match workspace_form.arena().row(*id).node { SNode::Sym(name) => Some(workspace_form.name(name)), _ => None }) != Some("workspace") {
         checker.error(workspace_form, "E_WORKSPACE", "Expected (workspace name …).");
         return (None, checker.diags);
     }
-    let Some(SNode::Sym(name)) = items.get(1).map(|form| &form.node) else {
+    let Some(SNode::Sym(name)) = items.get(1).map(|id| workspace_form.arena().row(*id).node) else {
         checker.error(workspace_form, "E_WORKSPACE", "Expected (workspace name …).");
         return (None, checker.diags);
     };
+    let name = workspace_form.name(name);
     if !macros::valid_name(name) {
         checker.error(workspace_form, "E_WORKSPACE", "Expected (workspace name …).");
         return (None, checker.diags);
     }
     checker.metadata(workspace_form, &["allow-warnings"]);
     let children = &items[2..];
-    let (graph_names, def_names) = checker.phase(children);
+    let (graph_names, def_names) = checker.phase(children.iter().map(|id| workspace_form.child(*id)));
     if !library && graph_names.is_empty() {
         checker.error(workspace_form, "E_NO_GRAPH", "A workspace needs at least one graph.");
     }
@@ -3496,7 +3513,7 @@ pub fn check(
     let mut packed_roots = checker.roots;
     packed_roots.sort_by(|(a, p),(b, q)| p.cmp(q).then(a.id.cmp(&b.id)));
     let workspace = Workspace {
-        name: name.clone(),
+        name: name.to_owned(),
         graphs: graph_names.iter().filter_map(|name| checker.graph_terms.remove(name)).collect::<Vec<_>>().into(),
         defs: def_names.iter().filter_map(|name| checker.def_terms.remove(name)).collect::<Vec<_>>().into(),
         nodes: checker.nodes.into(),
@@ -3516,6 +3533,26 @@ pub fn check(
 #[cfg(test)]
 mod memory_tests {
     use super::*;
+
+    #[test]
+    fn workspace_and_prelude_resolve_ids_in_their_own_syntax_arenas() {
+        let catalog = catalog::Catalog { version: 0, kinds: Vec::new() };
+        let forms = syntax::parse("(defn identity :context value [(x : int)] x)").unwrap();
+        let prelude = prelude(&[], false, false, &catalog, &forms);
+        drop(forms);
+        let forms = syntax::parse("(workspace example (graph result :context value (identity 7)))").unwrap();
+        let (workspace, diagnostics) = check(&[], false, false, Some(&prelude), &catalog, &forms);
+        let workspace = workspace.unwrap_or_else(|| panic!("{diagnostics:?}"));
+        assert_eq!(workspace.name, "example");
+        assert_eq!(workspace.graphs[0].name, "result");
+        assert_eq!(workspace.defs[0].name, "identity");
+        for source in ["()", "(workspace)", "(workspace 7)", "(workspace :bad)", "(other w)"] {
+            let forms = syntax::parse(source).unwrap();
+            let (workspace, diagnostics) = check(&[], false, false, None, &catalog, &forms);
+            assert!(workspace.is_none(), "{source}");
+            assert!(diagnostics.iter().any(|d| d.code == "E_WORKSPACE"), "{source}: {diagnostics:?}");
+        }
+    }
 
     #[test]
     fn retained_memory_counts_capacities_and_shared_workspace_roots_once() {

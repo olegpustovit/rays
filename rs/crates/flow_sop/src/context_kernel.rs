@@ -564,17 +564,21 @@ pub fn reachable_defs<'a, 'g>(workspace: &'a Workspace, roots: impl IntoIterator
 /// to a cook-time source, which residuals capture as a binding, never as a term, so a kernel
 /// specializes it per context by its captures alone. Returns the graph and each input's operator.
 pub fn label_context(label: &str, graph: &Graph) -> (Graph, Vec<(String, String)>) {
-    fn eligible(t: &Term, into: &mut HashSet<(u64, u32)>) {
-        if !into.insert(t.identity()) { return; }
+    fn eligible(t: &Term, into: &mut HashSet<(u64, u32)>) -> bool {
+        if !into.insert(t.identity()) { return false; }
+        let mut context = matches!(t.node, Node::Op(id) if is_context_op(t.name(t.arena().op(id).op)));
         if let Node::CallFn(id) = t.node {
-            for &id in t.arena().term_ids(t.arena().call_fn(id).args) { eligible(&t.child(id), into); }
+            for &id in t.arena().term_ids(t.arena().call_fn(id).args) { context |= eligible(&t.child(id), into); }
         } else {
-            for &id in t.children() { eligible(&t.child(id), into); }
+            for &id in t.children() { context |= eligible(&t.child(id), into); }
         }
+        context
     }
     let roots: Vec<_> = std::iter::once(graph.body.clone()).chain(graph.inputs.iter().filter_map(|(_, _, default)| default.clone())).collect();
     let mut selected = HashSet::new();
-    for root in &roots { eligible(root, &mut selected); }
+    let mut context = false;
+    for root in &roots { context |= eligible(root, &mut selected); }
+    if !context { return (graph.clone(), Vec::new()); }
     let mut inputs: Vec<(String, String, String, TermId)> = Vec::new();
     let mut builder = TermBuilder::new();
     let ids = builder.rewrite_roots(&roots, &mut |builder, source, draft| {

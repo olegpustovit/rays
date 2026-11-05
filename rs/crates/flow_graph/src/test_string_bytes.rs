@@ -4,7 +4,7 @@ use crate::projection as p;
 use crate::test_support::*;
 use flow_eval::Value;
 use flow_syntax::lisp;
-use flow_syntax::syntax::{self as s, Node};
+use flow_syntax::syntax as s;
 use flow_syntax::ty::Ty;
 use std::sync::Arc;
 
@@ -18,7 +18,7 @@ fn string_bytes() {
     let (edited, workspace) = apply_checked(
         &catalog(),
         &source,
-        &Op::SetArg { node: card.path.clone(), key: ArgKey::Pos(1), sub: vec![], value: s::make(Node::Str(bytes.clone())) },
+        &Op::SetArg { node: card.path.clone(), key: ArgKey::Pos(1), sub: vec![], value: s::make(s::Draft::Str(bytes.clone())) },
     )
     .unwrap();
     let expected = Value::Text_array(Arc::new(vec![bytes.clone()]));

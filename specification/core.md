@@ -1417,6 +1417,9 @@ only a reached typed failure. The pure mapper takes and returns a record with
 always rethrows; it does not recover a value, retry a child, or catch cancellation
 or unrelated host exceptions. Hints, ordered native trace and source location
 survive mapping. A failing mapper is not caught recursively by itself.
+The optional cause retains arbitrary Text bytes, including invalid UTF-8 and NUL,
+through evaluation, mapping, packed kernels and export. Human-readable diagnostic
+display is a presentation boundary and must not replace the retained cause.
 
 The checked term stays residual during static evaluation. Structured Core's
 `Protect` executes the protected block and completes a direct cooked result

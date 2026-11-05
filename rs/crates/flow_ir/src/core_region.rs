@@ -1061,6 +1061,12 @@ impl Lower {
         for field in args {
             expressions.push(self.expression(env, &t.child(field.term))?);
         }
+        self.operation_value(t, op_name, args, &declaration, kind, &expressions)
+    }
+
+    // Folding and dispatch temporaries must not remain on the stack while lowering child terms.
+    #[inline(never)]
+    fn operation_value(&mut self, t: &Term, op_name: &str, args: &[Field], declaration: &op::Op, kind: PackedKind, expressions: &[Expression]) -> Res<Expression> {
         if expressions.iter().all(|e| e.constant.is_some()) && !declaration.live {
             let folded_args: Vec<(String, Value)> = args.iter().zip(expressions.iter()).map(|(field, e)| (t.name(field.name).to_owned(), e.constant.clone().unwrap())).collect();
             let refused: RefCell<Option<Diagnostic>> = RefCell::new(None);
@@ -1079,7 +1085,7 @@ impl Lower {
             return Ok(one(register));
         }
         match kind {
-            PackedKind::Gather => self.gather(t, op_name, &expressions),
+            PackedKind::Gather => self.gather(t, op_name, expressions),
             PackedKind::Trace => {
                 let mut registers = Vec::new();
                 for (i, e) in expressions.iter().enumerate() {
@@ -1097,12 +1103,12 @@ impl Lower {
                 // record fields and array elements evaluate right to left in OCaml
                 Ok(self.trace_record(&registers, f0, prim, u, v)?)
             }
-            PackedKind::Stage => self.stage(t, op_name, args, &expressions),
+            PackedKind::Stage => self.stage(t, op_name, args, expressions),
             PackedKind::CheckedMul | PackedKind::CheckedFma => {
                 // ponytail: one destination per instruction computes both projections
                 // separately; co-compute pairs only if duplicate arithmetic measures hot.
                 let mut arguments = Vec::new();
-                for e in &expressions { arguments.push(self.as_float(e)?); }
+                for e in expressions { arguments.push(self.as_float(e)?); }
                 let instruction = |me: &mut Lower, projection: Projection| -> Res<Expression> {
                     let ins = match (&kind, arguments.as_slice()) {
                         (PackedKind::CheckedMul, [a, b]) => I::Checked_mul(projection, reg(a, 0)?, reg(b, 0)?),
@@ -1116,7 +1122,7 @@ impl Lower {
                 let value = instruction(self, Projection::Value)?;
                 Ok(fields_of(vec![("value".to_owned(), value), ("valid".to_owned(), valid)]))
             }
-            _ => self.arithmetic(t, op_name, &declaration, &kind, &expressions, args),
+            _ => self.arithmetic(t, op_name, declaration, &kind, expressions, args),
         }
     }
 
@@ -1563,7 +1569,7 @@ impl Lower {
             }
             Node::Op(id) if t.name(arena.op(id).op) == "error" && self.constant_only("error") => {
                 let args = arena.fields(arena.op(id).args);
-                let text = |me: &Lower, arg: &Term| -> Res<String> {
+                let text = |me: &Lower, arg: &Term| -> Res<Vec<u8>> {
                     let bytes = match arg.node {
                         Node::Text(id) => arg.arena().bytes(id).to_vec(),
                         Node::RefBinding(id) => {
@@ -1580,12 +1586,12 @@ impl Lower {
                         }
                         _ => return Err(refusal(arg, "E_PACKED_CONSTANT", "Packed error code and message must be constant text.")),
                     };
-                    Ok(String::from_utf8_lossy(&bytes).into_owned())
+                    Ok(bytes)
                 };
                 let find = |key: &str| args.iter().find(|field| t.name(field.name) == key).map(|field| t.child(field.term));
                 // `let code = ... and message = ...`: in order
-                let code = text(self, &find("code").ok_or_else(|| invalid("Not_found"))?)?;
-                let message = text(self, &find("message").ok_or_else(|| invalid("Not_found"))?)?;
+                let code = String::from_utf8_lossy(&text(self, &find("code").ok_or_else(|| invalid("Not_found"))?)?).into_owned();
+                let message = String::from_utf8_lossy(&text(self, &find("message").ok_or_else(|| invalid("Not_found"))?)?).into_owned();
                 let cause = match find("cause") { Some(c) => Some(text(self, &c)?), None => None };
                 Ok(one(self.emit(I::Raise(t.ty().clone(), code, message, cause))?))
             }

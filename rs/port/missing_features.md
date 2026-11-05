@@ -51,11 +51,17 @@ exception containment in four places.
 - Module: `lib/flow/eval.ml` `protect` (line 3099) -> `eval.rs`.
 - OCaml: `Stack_overflow -> Error "Evaluation is nested too deeply." (E_DEPTH)`; `Out_of_memory ->
   E_ARRAY_MEMORY "Frame data exceeds available memory."`.
-- Behaviour: the explicit depth counter (`MAX_DEPTH`, 64 nested calls) exists in Rust, but unbounded
-  native recursion (deeply nested data or terms, a long `let*` chain) aborts the process in Rust
-  (it is the reason the perf gate needs a 256 MB thread stack in debug). OCaml answers with a
-  diagnostic. Allocation failure has no Rust twin either (Rust aborts on OOM).
-- Affects: robustness on hostile or very large workspaces; `RAYS_SLOW` debug runs.
+- Partially implemented: evaluation checks authored term/value depth iteratively before recursive
+  analysis, and callback re-entry shares a scoped nesting budget. Array constructors, range,
+  scatter and loop output growth use fallible reservations returning `E_ARRAY_MEMORY`.
+- Verified on 2026-11-05: `cargo t -p flow_eval test_safety` passes both tests in 5.090 s including
+  build (slowest 0.069 s). Its normal-stack child refuses 4,096-deep terms on both evaluation
+  routes, nested values and recursive host callbacks; impossible array allocations return the
+  diagnostic, and subsequent evaluation succeeds. It also preserves 63 legal named calls.
+- Remaining: arbitrary infallible allocations and host/native stack exhaustion can still abort;
+  fallible reservations at selected array boundaries do not provide OCaml's catch-all `protect`.
+  Keep this gap open until the remaining evaluator allocation/recursion paths are audited and
+  qualified. Native crash termination is a separate guarantee, not diagnostic recovery.
 
 ### 4. Static-kernel failures refuse instead of failing hard. MEDIUM.
 
