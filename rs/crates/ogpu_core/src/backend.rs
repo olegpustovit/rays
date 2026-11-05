@@ -279,6 +279,14 @@ pub struct DriverDevice {
 
 pub struct Driver { pub create_device: Box<dyn Fn() -> Result<DriverDevice, Error>> }
 
+/// A backend factory record; selection belongs to the public OGPU layer.
+pub struct Implementation {
+    pub backend: String,
+    pub create_driver: Box<dyn Fn() -> Driver>,
+    /// Native handles still alive. Diagnostics only.
+    pub live_handles: Box<dyn Fn() -> i64>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Status { Pending, Completed }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

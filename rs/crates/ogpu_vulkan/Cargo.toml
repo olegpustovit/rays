@@ -10,6 +10,8 @@ path = "src/lib.rs"
 
 [dependencies]
 ogpu_core = { path = "../ogpu_core" }
-ogpu = { path = "../ogpu" }
 vulkan = { path = "../vulkan" }
 native_layer_token = { path = "../native_layer_token" }
+
+[dev-dependencies]
+ogpu = { path = "../ogpu" }

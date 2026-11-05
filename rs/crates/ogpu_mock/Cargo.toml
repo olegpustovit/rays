@@ -10,4 +10,6 @@ path = "src/lib.rs"
 
 [dependencies]
 ogpu_core = { path = "../ogpu_core" }
+
+[dev-dependencies]
 ogpu = { path = "../ogpu" }

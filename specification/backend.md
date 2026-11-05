@@ -18,6 +18,13 @@ device's registry identifier remains `Device_lost`, with source operation
 
 ## Ownership and dependency direction
 
+The Rust backend factory record lives in `ogpu_core::backend::Implementation`.
+`ogpu::impl_::Impl` re-exports that same type; startup selection and its thread-local
+state remain in `ogpu`. Metal, Vulkan and mock production crates construct the core
+record without depending upward on `ogpu`; their conformance tests use `ogpu` only
+through dev-dependencies. This preserves the core/backend/public-API dependency
+direction without changing selection behavior or adding a default implementation.
+
 Scene3's existing borrowed-position registration can also borrow a UInt32
 index buffer with a settled count. Those draws carry no host index bytes;
 ordinary and sun-shadow indexed draws bind the same producer-owned buffer.

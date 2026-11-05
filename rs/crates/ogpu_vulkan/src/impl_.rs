@@ -1,7 +1,6 @@
 //! The Vulkan implementation of `ogpu::impl_`.
 use crate::backend;
-use ogpu::impl_::Impl;
-use ogpu_core::backend::Driver;
+use ogpu_core::backend::{Driver, Implementation as Impl};
 
 pub const BACKEND: &str = "vulkan";
 

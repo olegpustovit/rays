@@ -6,12 +6,7 @@ use ogpu_core::{
 };
 use std::{cell::RefCell, rc::Rc};
 
-pub struct Impl {
-    pub backend: String,
-    pub create_driver: Box<dyn Fn() -> Driver>,
-    /// Native handles still alive. Diagnostics only.
-    pub live_handles: Box<dyn Fn() -> i64>,
-}
+pub use ogpu_core::backend::Implementation as Impl;
 
 thread_local! {
     static SELECTED: RefCell<Option<Rc<Impl>>> = const { RefCell::new(None) };

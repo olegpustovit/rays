@@ -11,7 +11,6 @@ path = "src/lib.rs"
 # ponytail: no `lru` dependency; metal handles are not Send, so the 64 depth-stencil states are a small local LRU.
 [dependencies]
 ogpu_core = { path = "../ogpu_core" }
-ogpu = { path = "../ogpu" }
 metal = { path = "../metal" }
 
 # Metal handles are main-thread only and the tests count process-wide handles: their own main runs them.
@@ -24,3 +23,6 @@ harness = false
 name = "gpu_ogpu_metal_native"
 path = "tests/gpu_ogpu_metal_native.rs"
 harness = false
+
+[dev-dependencies]
+ogpu = { path = "../ogpu" }
