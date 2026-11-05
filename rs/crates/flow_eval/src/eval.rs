@@ -828,7 +828,7 @@ fn need_time() -> Result<Value, Diagnostic> { Err(error("$NEEDS_TIME", "")) }
 // ---- deferred checks (OCaml guardable / guarding / add_guard / arm_error) ----
 // A deferred check's test reads frame facts only: no cooked data, fold state or zone element, so the card forces it with its cook's input alone.
 // A residual or closure of another evaluation is not one (its environment is not at hand): the call stays the plain catalog node.
-fn guardable(a: &Arena, v: &Value) -> bool {
+fn guardable(a: &mut Arena, v: &Value) -> bool {
     fn reads_elem(t: &Term) -> bool {
         matches!(t.node, TermNode::RefBinding(id) if t.name(t.arena().ref_binding(id).name).starts_with("$elem:")) || children(t).any(|child| reads_elem(&child))
     }
@@ -854,7 +854,7 @@ fn guardable(a: &Arena, v: &Value) -> bool {
     dep_value(a, v, true, &mut HashSet::new()) && !dep_value(a, v, false, &mut HashSet::new()) && free(a, v, &mut HashSet::new())
 }
 // a live test of an inlined body's if/cond that can be a deferred check
-fn guarding(a: &Arena, v: &Value) -> bool { a.guards.is_some() && matches!(v, Value::Residual(_)) && guardable(a, v) }
+fn guarding(a: &mut Arena, v: &Value) -> bool { a.guards.is_some() && matches!(v, Value::Residual(_)) && guardable(a, v) }
 fn add_guard(a: &mut Arena, test: Value, fails: bool, d: Diagnostic) { if let Some(guards) = a.guards.as_mut() { guards.push((test, fails, d)); } }
 // the diagnostic an arm fails with whatever the frame, or None: the nodes it made are dropped
 fn arm_error(a: &mut Arena, c: &ExecCtx, env: &Env, arm: &Term) -> Result<Option<Diagnostic>, Diagnostic> {
@@ -2707,15 +2707,22 @@ pub fn is_live_value(value: &Value) -> bool {
         _ => false,
     }
 }
-fn read_value(arena: &Arena, value: &Value, frame: bool, reads: &mut BTreeSet<String>, residuals: &mut HashSet<ResidualId>, functions: &mut HashSet<FnId>) -> bool {
+fn read_value(arena: &mut Arena, value: &Value, frame: bool, reads: &mut BTreeSet<String>, residuals: &mut HashSet<(i64, i64)>, functions: &mut HashSet<(i64, i64)>) -> bool {
+    let home = match value { Value::Residual(id) => id.1, Value::Fn(id) => id.1, _ => arena.id };
+    if home != arena.id {
+        // Captures may return to this home; never hold two arena locks while walking them.
+        return lend(arena, || slot_of(home).is_some_and(|slot| {
+            read_value(&mut checkout(&slot), value, frame, reads, residuals, functions)
+        }));
+    }
     match value {
         Value::Residual(id) => {
-            if !residuals.insert(*id) { return false; }
-            if let Some(residual) = own_res(arena, id) { read_term(arena, &residual.term, &residual.env, &residual.ctx.context, frame, reads, residuals, functions) } else { false }
+            if !residuals.insert((id.1, id.0)) { return false; }
+            if let Some(residual) = own_res(arena, id).cloned() { read_term(arena, &residual.term, &residual.env, &residual.ctx.context, frame, reads, residuals, functions) } else { false }
         }
         Value::Fn(id) => {
-            if !functions.insert(*id) { return false; }
-            match own_fn(arena, id) {
+            if !functions.insert((id.1, id.0)) { return false; }
+            match own_fn(arena, id).cloned() {
                 Some(Function::Closure(closure)) => read_term(arena, &closure.body, &closure.env, &closure.at.context, frame, reads, residuals, functions),
                 Some(Function::Named(function)) => read_named(arena, &function.name, frame, reads, residuals, functions),
                 None => false,
@@ -2726,8 +2733,9 @@ fn read_value(arena: &Arena, value: &Value, frame: bool, reads: &mut BTreeSet<St
         _ => false,
     }
 }
-fn read_named(arena: &Arena, name: &str, frame: bool, reads: &mut BTreeSet<String>, residuals: &mut HashSet<ResidualId>, functions: &mut HashSet<FnId>) -> bool {
-    if let Some(graph) = arena.workspace.defs.iter().find(|graph| graph.name == name) {
+fn read_named(arena: &mut Arena, name: &str, frame: bool, reads: &mut BTreeSet<String>, residuals: &mut HashSet<(i64, i64)>, functions: &mut HashSet<(i64, i64)>) -> bool {
+    let workspace = arena.workspace.clone();
+    if let Some(graph) = workspace.defs.iter().find(|graph| graph.name == name) {
         return read_term(arena, &graph.body, &BTreeMap::new(), &graph.context, frame, reads, residuals, functions);
     }
     if frame && op::find_indexed(&arena.workspace.ops, name, &flow_syntax::context::value()).is_some_and(|operation| operation.live) {
@@ -2736,7 +2744,7 @@ fn read_named(arena: &Arena, name: &str, frame: bool, reads: &mut BTreeSet<Strin
     }
     false
 }
-fn read_term(arena: &Arena, term: &Term, env: &BTreeMap<String, Value>, context: &Context, frame: bool, reads: &mut BTreeSet<String>, residuals: &mut HashSet<ResidualId>, functions: &mut HashSet<FnId>) -> bool {
+fn read_term(arena: &mut Arena, term: &Term, env: &BTreeMap<String, Value>, context: &Context, frame: bool, reads: &mut BTreeSet<String>, residuals: &mut HashSet<(i64, i64)>, functions: &mut HashSet<(i64, i64)>) -> bool {
     let mut found = false;
     let packed = term.arena();
     match term.node {
@@ -2753,9 +2761,12 @@ fn read_term(arena: &Arena, term: &Term, env: &BTreeMap<String, Value>, context:
             let name = term.name(packed.op(id).op);
             if op::find_indexed(&arena.workspace.ops, name, context).is_some_and(|operation| operation.live) { reads.insert(name.to_owned()); found = true; }
         }
-        TermNode::GraphRef(id) => if let Some(graph) = arena.workspace.graphs.iter().find(|definition| definition.name == term.name(packed.graph_ref(id).graph)) {
-            found |= read_term(arena, &graph.body, &BTreeMap::new(), &graph.context, frame, reads, residuals, functions);
-            for (_, _, default) in &graph.inputs { if let Some(term) = default { found |= read_term(arena, term, env, context, frame, reads, residuals, functions); } }
+        TermNode::GraphRef(id) => {
+            let workspace = arena.workspace.clone();
+            if let Some(graph) = workspace.graphs.iter().find(|definition| definition.name == term.name(packed.graph_ref(id).graph)) {
+                found |= read_term(arena, &graph.body, &BTreeMap::new(), &graph.context, frame, reads, residuals, functions);
+                for (_, _, default) in &graph.inputs { if let Some(term) = default { found |= read_term(arena, term, env, context, frame, reads, residuals, functions); } }
+            }
         },
         _ => (),
     }
@@ -2764,8 +2775,8 @@ fn read_term(arena: &Arena, term: &Term, env: &BTreeMap<String, Value>, context:
 }
 fn dependent(value: &Value, frame: bool, reads: &mut BTreeSet<String>) -> bool {
     let Some(arena) = arena_for_value(value) else { return false; };
-    let mut cell = held(&arena); let arena = cell.as_mut().expect("filled");
-    read_value(&arena, value, frame, reads, &mut HashSet::new(), &mut HashSet::new())
+    let mut arena = checkout(&arena);
+    read_value(&mut arena, value, frame, reads, &mut HashSet::new(), &mut HashSet::new())
 }
 pub fn frame_dependent(value: &Value) -> bool { dependent_fast(value, true) }
 pub fn state_dependent(value: &Value) -> bool { dependent_fast(value, false) }
@@ -3668,21 +3679,27 @@ mod tests {
 // residual does (dep_frame / dep_state); without it a let-bound array read by many bindings is walked once per reader and
 // `static_sop` asks every residual. It is keyed by id and home: deterministic ids repeat across plans.
 static DEP_MEMO: LazyLock<Mutex<HashMap<(i64, i64, bool), bool>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
-fn dep_value(arena: &Arena, value: &Value, frame: bool, active: &mut HashSet<i64>) -> bool {
+fn dep_value(arena: &mut Arena, value: &Value, frame: bool, active: &mut HashSet<(i64, i64, bool)>) -> bool {
+    let home = match value { Value::Residual(id) => id.1, Value::Fn(id) => id.1, _ => arena.id };
+    if home != arena.id {
+        return lend(arena, || slot_of(home).is_some_and(|slot| {
+            dep_value(&mut checkout(&slot), value, frame, active)
+        }));
+    }
     match value {
         Value::Residual(id) => {
             if let Some(known) = DEP_MEMO.lock().unwrap().get(&(id.0, id.1, frame)) { return *known; }
-            if !active.insert(id.0) { return false; }
-            let answer = match own_res(arena, id) { Some(r) => dep_term(arena, &r.term, &r.env, &r.ctx.context, frame, active), None => false };
-            active.remove(&id.0);
+            if !active.insert((id.1, id.0, false)) { return false; }
+            let answer = match own_res(arena, id).cloned() { Some(r) => dep_term(arena, &r.term, &r.env, &r.ctx.context, frame, active), None => false };
+            active.remove(&(id.1, id.0, false));
             if own_res(arena, id).is_some() { DEP_MEMO.lock().unwrap().insert((id.0, id.1, frame), answer); }
             answer
         }
-        Value::Fn(id) => match own_fn(arena, id) {
+        Value::Fn(id) => match own_fn(arena, id).cloned() {
             Some(Function::Closure(closure)) => {
-                if !active.insert(-1 - id.0) { return false; }
+                if !active.insert((id.1, id.0, true)) { return false; }
                 let answer = dep_term(arena, &closure.body, &closure.env, &closure.at.context, frame, active);
-                active.remove(&(-1 - id.0));
+                active.remove(&(id.1, id.0, true));
                 answer
             }
             Some(Function::Named(function)) => dep_named(arena, &function.name, frame, active),
@@ -3693,13 +3710,14 @@ fn dep_value(arena: &Arena, value: &Value, frame: bool, active: &mut HashSet<i64
         _ => false,
     }
 }
-fn dep_named(arena: &Arena, name: &str, frame: bool, active: &mut HashSet<i64>) -> bool {
-    if let Some(graph) = arena.workspace.defs.iter().find(|graph| graph.name == name) {
+fn dep_named(arena: &mut Arena, name: &str, frame: bool, active: &mut HashSet<(i64, i64, bool)>) -> bool {
+    let workspace = arena.workspace.clone();
+    if let Some(graph) = workspace.defs.iter().find(|graph| graph.name == name) {
         return dep_term(arena, &graph.body, &BTreeMap::new(), &graph.context, frame, active);
     }
     frame && op::find_indexed(&arena.workspace.ops, name, &flow_syntax::context::value()).is_some_and(|operation| operation.live)
 }
-fn dep_term(arena: &Arena, term: &Term, env: &BTreeMap<String, Value>, context: &Context, frame: bool, active: &mut HashSet<i64>) -> bool {
+fn dep_term(arena: &mut Arena, term: &Term, env: &BTreeMap<String, Value>, context: &Context, frame: bool, active: &mut HashSet<(i64, i64, bool)>) -> bool {
     let packed = term.arena();
     let own = match term.node {
         TermNode::Time => frame,
@@ -3711,18 +3729,21 @@ fn dep_term(arena: &Arena, term: &Term, env: &BTreeMap<String, Value>, context: 
             match env.get(name) { Some(Value::Fn(function)) => dep_value(arena, &Value::Fn(*function), frame, active), _ => dep_named(arena, name, frame, active) }
         }
         TermNode::Op(id) => frame && op::find_indexed(&arena.workspace.ops, term.name(packed.op(id).op), context).is_some_and(|operation| operation.live),
-        TermNode::GraphRef(id) => arena.workspace.graphs.iter().find(|definition| definition.name == term.name(packed.graph_ref(id).graph)).is_some_and(|graph| {
-            dep_term(arena, &graph.body, &BTreeMap::new(), &graph.context, frame, active)
-                || graph.inputs.iter().any(|(_, _, default)| default.as_ref().is_some_and(|term| dep_term(arena, term, env, context, frame, active)))
-        }),
+        TermNode::GraphRef(id) => {
+            let workspace = arena.workspace.clone();
+            workspace.graphs.iter().find(|definition| definition.name == term.name(packed.graph_ref(id).graph)).is_some_and(|graph| {
+                dep_term(arena, &graph.body, &BTreeMap::new(), &graph.context, frame, active)
+                    || graph.inputs.iter().any(|(_, _, default)| default.as_ref().is_some_and(|term| dep_term(arena, term, env, context, frame, active)))
+            })
+        },
         _ => false,
     };
     own || children(term).any(|child| dep_term(arena, &child, env, context, frame, active))
 }
 fn dependent_fast(value: &Value, frame: bool) -> bool {
     let Some(arena) = arena_for_value(value) else { return false; };
-    let mut cell = held(&arena); let arena = cell.as_mut().expect("filled");
-    dep_value(&arena, value, frame, &mut HashSet::new())
+    let mut arena = checkout(&arena);
+    dep_value(&mut arena, value, frame, &mut HashSet::new())
 }
 
 // ---- compiled pure expressions ----
@@ -4410,6 +4431,48 @@ fn run_compiled(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Option<Resul
 #[cfg(test)]
 mod ownership_tests {
     use super::*;
+
+    #[test]
+    fn foreign_dependencies_are_independent_of_query_order_and_numeric_ids() {
+        for same in [false, true] {
+            let value = |body| {
+                let checked = crate::test_workspace_eval::check(&format!("(workspace w (graph g :context host {body}))"));
+                let value = static_eval(&checked).unwrap().results[0].1.clone();
+                let next = Cell::new(-8_440_299);
+                if same { Host::rewrite_with(&value, &|_| None, &|| { let id = next.get(); next.set(id - 1); id }, &|_, _| None) } else { value }
+            };
+            let (clock, state) = (value("t"), value("(state [n 0] (+ n 1))"));
+            let both = Value::Record(vec![("clock".into(), clock.clone()), ("state".into(), state.clone())]);
+            assert!(state_dependent(&both), "cold mixed-home state, same IDs={same}");
+            assert!(frame_dependent(&both));
+            assert_eq!(frame_reads(&both), vec!["state", "time"]);
+            assert!(!state_dependent(&clock));
+            assert!(state_dependent(&state));
+            assert!(state_dependent(&both));
+            assert_eq!(frame_reads(&both), vec!["state", "time"]);
+
+            let caller = crate::test_workspace_eval::check("(workspace w (graph g :context host [(x : float 0.0)] (let* [f (fn [] (+ x t))] (f))))");
+            let evaluation = r#static(&caller, true, Some(&[("g".into(), vec![("x".into(), state.clone())])])).unwrap();
+            let function = evaluation.records.iter().find(|(path, _)| path == &["g", "f"]).unwrap().1[0].1.clone();
+            let captured = &evaluation.results[0].1;
+            for value in [&function, captured] {
+                assert!(state_dependent(value), "foreign state captured by a closure/residual");
+                assert_eq!(frame_reads(value), vec!["state", "time"]);
+            }
+            // Opposite traversal orders must release the current home before entering another.
+            let barrier = std::sync::Barrier::new(2);
+            std::thread::scope(|scope| {
+                for values in [vec![captured.clone(), clock.clone()], vec![clock.clone(), captured.clone()]] {
+                    let barrier = &barrier;
+                    scope.spawn(move || {
+                        barrier.wait();
+                        let value = Value::List(Arc::new(values));
+                        for _ in 0..16 { assert_eq!(frame_reads(&value), vec!["state", "time"]); }
+                    });
+                }
+            });
+        }
+    }
 
     #[test]
     fn rewriting_foreign_functions_preserves_both_homes_and_shared_captures() {
