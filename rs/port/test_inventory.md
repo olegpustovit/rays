@@ -28,6 +28,7 @@ must not be used as category totals.
 
 ## Qualification and surviving parity work
 
+- The existing Rust GPU-film fixture passes on actual Metal with exact standalone/shared/Canvas pixels, the unconditional 116-byte/pixel film-release floor and zero handle delta. Removed the stale Metal release bypass and expected +2 handle allowance. This qualifies those assertions at the existing 320x180 fixture, not full source parity with OCaml's 960x540 release-size check; the evidence-class census is unchanged. Log `/tmp/rays-unused-mock-film-fixed.log` (1.098 s process, 3.130 s runner).
 - Current commands, times and checked acceptance live in [CHECKPOINT.md](../CHECKPOINT.md).
   Only its executable evidence closes a behavior; the rows below do not silently waive failures.
 - param's float shortestness/round trips, metadata, choices, normalization and text codecs were

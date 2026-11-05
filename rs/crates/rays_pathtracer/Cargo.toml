@@ -26,9 +26,6 @@ rays_diagnostic = { path = "../rays_diagnostic" }
 cfmt = { path = "../cfmt" }
 param = { path = "../param" }
 
-[dev-dependencies]
-ogpu_mock = { path = "../ogpu_mock" }
-
 [target.'cfg(windows)'.dev-dependencies]
 ogpu_vulkan = { path = "../ogpu_vulkan" }
 

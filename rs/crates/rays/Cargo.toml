@@ -23,9 +23,6 @@ ogpu = { path = "../ogpu" }
 cfmt = { path = "../cfmt" }
 ocaml_int = { path = "../ocaml_int" }
 
-[dev-dependencies]
-ogpu_mock = { path = "../ogpu_mock" }
-
 [target.'cfg(windows)'.dev-dependencies]
 ogpu_vulkan = { path = "../ogpu_vulkan" }
 

@@ -94,7 +94,7 @@ fn film() {
     get(p::release_film(&mut tracer));
     let after = p::Private::device_bytes(&tracer);
     println!("GPU film at rest: device {before} -> {after} bytes at 320x180");
-    assert!(before - after >= 116 * 320 * 180 || ogpu::impl_::backend().map(|b| b == "metal").unwrap_or(false));
+    assert!(before - after >= 116 * 320 * 180);
     p::destroy(&mut tracer);
     drop(tracer);
     renderer::renderer::destroy(&coordinator).unwrap_or_else(|e| panic!("{}", ogpu::error::to_string(&e)));
@@ -103,9 +103,7 @@ fn film() {
     drop(image);
     drop(canvas);
     drop(copied);
-    // GAP (Metal): two handles of the window's layer outlive its renderer; every tracer handle is back
-    let window_residue = if ogpu::impl_::backend().map(|b| b == "metal").unwrap_or(false) { 2 } else { 0 };
-    assert_eq!(pt::live_handles(), baseline + window_residue);
+    assert_eq!(pt::live_handles(), baseline);
     println!("GPU film: exact standalone/shared/Canvas bytes, direct texture, readback, zero live delta");
 }
 
