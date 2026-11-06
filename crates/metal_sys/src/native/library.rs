@@ -85,3 +85,47 @@ unsafe extern "C" {
     ) -> i32;
     fn caml_rays_metal_free_bytes(bytes: *mut std::ffi::c_char);
 }
+
+/// A background compile of a library and its entry's compute pipeline (`library_warm`), which
+/// only fills Metal's cache; released on drop, while or after it compiles.
+pub struct Warm(*mut std::ffi::c_void);
+
+impl Warm {
+    /// None while compiling, then whether it compiled.
+    pub fn state(&self) -> Option<bool> {
+        #[cfg(target_vendor = "apple")]
+        { match unsafe { caml_rays_metal_warm_state(self.0) } { 0 => None, state => Some(state == 1) } }
+        #[cfg(not(target_vendor = "apple"))]
+        { Some(false) }
+    }
+}
+
+impl Drop for Warm {
+    fn drop(&mut self) {
+        #[cfg(target_vendor = "apple")]
+        unsafe { caml_rays_metal_warm_release(self.0) }
+    }
+}
+
+pub fn library_warm(device: &Handle, source: &str, entry: &str) -> Result<Warm, Error> {
+    #[cfg(target_vendor = "apple")]
+    {
+        use std::ffi::{c_char, CString};
+        let source = CString::new(source).map_err(|_| Error::InvalidArgument("Metal source may not contain NUL"))?;
+        let entry = CString::new(entry).map_err(|_| Error::InvalidArgument("Metal entry may not contain NUL"))?;
+        let mut output = std::ptr::null_mut();
+        let mut message: *const c_char = std::ptr::null();
+        let status = unsafe { caml_rays_metal_library_warm(device.as_native_ptr()?, source.as_ptr(), entry.as_ptr(), &mut output, &mut message) };
+        if status != 0 { return Err(unsafe { Error::from_native(status, message) }); }
+        Ok(Warm(output))
+    }
+    #[cfg(not(target_vendor = "apple"))]
+    { let _ = (device, source, entry); Err(Error::Unavailable) }
+}
+
+#[cfg(target_vendor = "apple")]
+unsafe extern "C" {
+    fn caml_rays_metal_library_warm(device: *mut NativeHandle, source: *const std::ffi::c_char, entry: *const std::ffi::c_char, output: *mut *mut std::ffi::c_void, message: *mut *const std::ffi::c_char) -> i32;
+    fn caml_rays_metal_warm_state(warm: *mut std::ffi::c_void) -> i32;
+    fn caml_rays_metal_warm_release(warm: *mut std::ffi::c_void);
+}

@@ -1663,6 +1663,7 @@ fn create_device(device_live: &Rc<Cell<bool>>, validation: (bool, bool)) -> Resu
             Err(fail("Ogpu_vulkan.create_memoryless_texture", ErrorKind::Unsupported, "this device has no tile memory"))
         }),
         create_library: Box::new(move |shader| create_library(&d_library, shader)),
+        warm_library: Box::new(|_| None),
         create_accel: Box::new(move |descriptor| create_accel(&d_accel, descriptor)),
         // Vulkan stores a 24-bit user id and 8-bit mask together; motion records are the portable
         // 44-byte keyframe layout consumed when swept instance AABBs are built.

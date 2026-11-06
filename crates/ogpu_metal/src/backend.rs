@@ -265,6 +265,13 @@ fn create_library(dev: &Rc<Dev>, shader: &Shader) -> Result<DriverLibrary, Error
     })
 }
 
+fn warm_library(dev: &Rc<Dev>, shader: &Shader) -> Option<ogpu_core::backend::Warm> {
+    let source = std::str::from_utf8(ogpu_core::shader::bytes(shader)).ok()?;
+    let entry = &ogpu_core::shader::entry_points(shader).first()?.name;
+    let warm = metal::Library::warm(dev.device.metal(), source, entry).ok()?;
+    Some(Box::new(move || warm.state()))
+}
+
 fn create_accel(dev: &Rc<Dev>, descriptor: &DriverAccelDescriptor) -> Result<DriverAccel, Error> {
     const OP: &str = "Ogpu_metal.Backend.create_accel";
     let resolve_buffer = |token: Token| -> Result<Buffer, Error> {
@@ -788,6 +795,7 @@ fn create_device(device_live: &Rc<Cell<bool>>) -> Result<DriverDevice, Error> {
     let d_sampler = dev.clone();
     let d_render = dev.clone();
     let d_icb = dev.clone();
+    let d_warm = dev.clone();
     let d_argument = dev.clone();
     let d_queue = dev.clone();
     let d_surface = dev.clone();
@@ -810,6 +818,7 @@ fn create_device(device_live: &Rc<Cell<bool>>) -> Result<DriverDevice, Error> {
             )
         }),
         create_library: Box::new(move |shader| create_library(&d_library, shader)),
+        warm_library: Box::new(move |shader| warm_library(&d_warm, shader)),
         create_accel: Box::new(move |descriptor| create_accel(&d_accel, descriptor)),
         instance_layout: Box::new(instance_layout),
         create_sampler: Box::new(move |descriptor| create_sampler(&d_sampler, descriptor)),

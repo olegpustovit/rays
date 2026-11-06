@@ -2,6 +2,8 @@
 #include "metal_kinds.h"
 #include <Metal/Metal.h>
 #include <cstring>
+#include <atomic>
+#include <memory>
 #include <new>
 
 extern "C" void caml_rays_metal_free_bytes(char *bytes);
@@ -110,4 +112,56 @@ extern "C" int32_t caml_rays_metal_argument_encoder_single(
     } @catch (NSException *exception) {
         return rays_metal_set_error(message, exception.reason.UTF8String);
     }
+}
+
+// Compiles a library and its entry's compute pipeline on Metal's own queues, with the options
+// the synchronous path uses, so that path's later compile of the same source hits Metal's
+// cache. Nothing compiled is kept; `state` reads 0 while compiling, 1 once ready, 2 on failure.
+struct RaysMetalWarm { std::atomic<int32_t> state{0}; };
+
+extern "C" int32_t caml_rays_metal_library_warm(
+    MetalHandle *device_handle, const char *source_bytes, const char *entry_bytes,
+    void **output, const char **message) {
+  if (message) *message = nullptr;
+  if (output == nullptr || source_bytes == nullptr || entry_bytes == nullptr)
+    return rays_metal_set_error(message, "invalid library-warm arguments");
+  @try {
+    @autoreleasepool {
+      id<MTLDevice> device = (__bridge id<MTLDevice>)rays_metal_handle_object(device_handle, KIND_DEVICE);
+      NSString *source = [NSString stringWithUTF8String:source_bytes];
+      NSString *entry = [NSString stringWithUTF8String:entry_bytes];
+      if (device == nil || source == nil || entry == nil)
+        return rays_metal_set_error(message, "invalid library-warm device, source or entry");
+      auto warm = std::make_shared<RaysMetalWarm>();
+      MTLCompileOptions *options = [[MTLCompileOptions alloc] init];
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+      options.fastMathEnabled = NO;
+#pragma clang diagnostic pop
+      [device newLibraryWithSource:source options:options completionHandler:^(id<MTLLibrary> library, NSError *) {
+        id<MTLFunction> function = library ? [library newFunctionWithName:entry] : nil;
+        if (function == nil) { warm->state.store(2); return; }
+        MTLComputePipelineDescriptor *descriptor = [[MTLComputePipelineDescriptor alloc] init];
+        descriptor.computeFunction = function;
+        descriptor.label = entry;
+        [device newComputePipelineStateWithDescriptor:descriptor
+                                              options:MTLPipelineOptionBindingInfo | MTLPipelineOptionBufferTypeInfo
+                                    completionHandler:^(id<MTLComputePipelineState> pipeline, MTLComputePipelineReflection *, NSError *) {
+          warm->state.store(pipeline ? 1 : 2);
+        }];
+      }];
+      *output = new std::shared_ptr<RaysMetalWarm>(warm);
+      return 0;
+    }
+  } @catch (NSException *exception) {
+    return rays_metal_set_error(message, exception.reason.UTF8String);
+  }
+}
+
+extern "C" int32_t caml_rays_metal_warm_state(void *warm) {
+  return (*static_cast<std::shared_ptr<RaysMetalWarm> *>(warm))->state.load();
+}
+
+extern "C" void caml_rays_metal_warm_release(void *warm) {
+  delete static_cast<std::shared_ptr<RaysMetalWarm> *>(warm);
 }

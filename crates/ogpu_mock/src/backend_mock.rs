@@ -630,6 +630,7 @@ fn create_device(c: &Shared, capabilities: caps::Caps) -> Result<DriverDevice, E
             ))
         }),
         create_library: Box::new(move |_| create_library(&c_library)),
+        warm_library: Box::new(|_| None),
         create_accel: Box::new(|_| {
             Err(fail("Backend_mock.create_accel", ErrorKind::Unsupported, "mock backend has no ray tracing"))
         }),

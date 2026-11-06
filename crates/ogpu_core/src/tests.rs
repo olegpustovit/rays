@@ -198,6 +198,7 @@ fn discard_test_device(fail_first: bool) -> (crate::backend::Device, std::rc::Rc
                 create_depth_texture: Box::new(|_| Err(discard_test_error())),
                 create_memoryless_texture: Box::new(|_, _| Err(discard_test_error())),
                 create_library: Box::new(|_| Err(discard_test_error())),
+                warm_library: Box::new(|_| None),
                 create_accel: Box::new(|_| Err(discard_test_error())),
                 instance_layout: Box::new(|_| vec![64; 12]),
                 create_sampler: Box::new(|_| Err(discard_test_error())),

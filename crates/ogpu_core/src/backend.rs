@@ -266,6 +266,9 @@ pub struct DriverDevice {
     pub create_depth_texture: Box<dyn Fn(&TextureDescriptor) -> Result<DriverResource, Error>>,
     pub create_memoryless_texture: Box<dyn Fn(bool, &TextureDescriptor) -> Result<DriverResource, Error>>,
     pub create_library: Box<dyn Fn(&Shader) -> Result<DriverLibrary, Error>>,
+    /// Compiles a library and its first entry's compute pipeline in the driver's background so a
+    /// later `create_library` of the same shader is a cache hit; None where the driver cannot.
+    pub warm_library: Box<dyn Fn(&Shader) -> Option<Warm>>,
     pub create_accel: Box<dyn Fn(&DriverAccelDescriptor) -> Result<DriverAccel, Error>>,
     pub instance_layout: Box<dyn Fn(InstanceKind) -> Vec<i64>>,
     pub create_sampler: Box<dyn Fn(&SamplerDescriptor) -> Result<DriverSampler, Error>>,
@@ -780,6 +783,14 @@ pub fn create_library(device: &Device, shader: &Shader) -> Result<Library, Error
     let raw = (device.0.raw().create_library)(shader)?;
     device.0.children.set(device.0.children.get() + 1);
     Ok(Library(Rc::new(LibraryInner { raw: RefCell::new(Some(raw)), device: device.clone(), dead: Cell::new(false), pipelines: Cell::new(0) })))
+}
+/// A background compile's state: None while compiling, then whether it compiled.
+pub type Warm = Box<dyn Fn() -> Option<bool>>;
+
+/// Starts `shader`'s compile in the driver's background (see `DriverDevice::warm_library`).
+pub fn warm_library(device: &Device, shader: &Shader) -> Option<Warm> {
+    live("Backend.warm_library", device).ok()?;
+    (device.0.raw().warm_library)(shader)
 }
 pub fn create_compute_pipeline_from(
     library: &Library,

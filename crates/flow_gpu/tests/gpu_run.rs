@@ -308,6 +308,32 @@ fn selected_outputs() {
     pipelines::close(&pipes);
 }
 
+/// a captured value that holds still is folded into a background-compiled kernel; the result is
+/// the generic kernel's, and a changed value is right at once, through the generic kernel
+fn specialized_captures() {
+    let Some((lease, pipes)) = start() else { return };
+    let program = tp::compile("(let* [side 3] (map (fn [(i : int)] (+ (* t 0.0) (float (int/div (int/mul i 7) side)))) (array/range 4096 :type int)))");
+    let r = runner(&lease, &pipes, &program, true);
+    let values = prepare(&program, true, 1.0);
+    assert!(!values.uniforms.is_empty(), "the capture is a uniform");
+    let expected = array(&force(&program, 1.0, false));
+    assert_eq!(array(&tp::ok(run::readback(&tp::ok(dispatch(&r, &values)), None))), expected);
+    let start = std::time::Instant::now();
+    let generic = pipelines::Private::count(&pipes);
+    while pipelines::Private::count(&pipes) == generic && start.elapsed().as_secs_f64() < 3.0 {
+        assert_eq!(array(&tp::ok(run::readback(&tp::ok(dispatch(&r, &values)), None))), expected);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(pipelines::Private::count(&pipes) > generic, "a specialized kernel compiled");
+    assert_eq!(array(&tp::ok(run::readback(&tp::ok(dispatch(&r, &values)), None))), expected);
+    let mut changed = values.clone();
+    changed.uniforms[0] = vec![5.0];
+    let five = array(&tp::ok(run::readback(&tp::ok(dispatch(&r, &changed)), None)));
+    assert!(five.iter().enumerate().all(|(i, x)| *x == ((i * 7) / 5) as f64));
+    run::close(&r, false);
+    pipelines::close(&pipes);
+}
+
 fn main() {
-    common::window::run(&[("fixtures", fixtures), ("carried", carried), ("statuses", statuses), ("empty_and_outputs", empty_and_outputs), ("refusals", refusals), ("gather_and_region", gather_and_region), ("selected_outputs", selected_outputs)]);
+    common::window::run(&[("specialized_captures", specialized_captures), ("fixtures", fixtures), ("carried", carried), ("statuses", statuses), ("empty_and_outputs", empty_and_outputs), ("refusals", refusals), ("gather_and_region", gather_and_region), ("selected_outputs", selected_outputs)]);
 }

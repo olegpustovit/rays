@@ -918,6 +918,11 @@ pub fn dispatch(t: &T, o: &Options, explicit_input: Bound, explicit_table: Bound
             }
         }
     }
+    let captures: Vec<usize> = d.layout.iter().flat_map(|e| match *e {
+        Entry::Uniform_at(_, offset, width) => (0..width).map(|c| offset + 4 * c).collect(),
+        _ => vec![],
+    }).collect();
+    let compiled = pipelines::specialized(&d.pipelines, kernel, &captures, &st.uniforms).unwrap_or(compiled);
     // a buffer this runner's last dispatch still reads is not rewritten under it
     if o.commands.is_none() && st.last_epoch > b::completed_epoch(&d.queue) {
         gpu(b::complete_through(&d.queue, st.last_epoch))?;

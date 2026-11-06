@@ -40,6 +40,17 @@ impl Library {
         })()
     }
 
+    /// Compiles `source` and `entry`'s compute pipeline in Metal's background, so a later
+    /// `compile_source` of the same source is a cache hit; poll the result, drop it any time.
+    pub fn warm(device: &Device, source: &str, entry: &str) -> Result<metal_sys::native::library::Warm, Error> {
+        const OP: &str = "Metal.Library.warm";
+        enter_main(OP)?;
+        device.lifetime().ensure_live(OP)?;
+        validate_text(OP, source)?;
+        validate_text(OP, entry)?;
+        metal_sys::native::library::library_warm(device.raw(), source, entry).map_err(|failure| sys_error(OP, failure))
+    }
+
     pub fn function_names(&self) -> Result<Vec<String>, Error> {
         const OP: &str = "Metal.Library.function_names";
         (|| -> Result<_, Error> { enter_main(OP)?;
