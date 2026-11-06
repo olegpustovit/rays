@@ -228,6 +228,15 @@ fn integer_status(unsigned: bool, indentation: &str, operation: Integer, b: &str
     }
 }
 
+/// A fast compute kernel's float `mod`, equal bit for bit to `binary`'s two-`fmod` form: integral operands
+/// under 2^23 (so the quotient's floor and `a - b*q` are exact) skip the precise `fmod`, a slow library
+/// call; the zero result keeps the sign of `b`, as `fmod(fmod(a,b)+b,b)` does.
+const RAYS_MOD_MSL: &str = "static inline float rays_mod(float a,float b){if(b==0.0f) return 0.0f;if(a==trunc(a)&&b==trunc(b)&&fabs(a)<8388608.0f&&fabs(b)<8388608.0f) return copysign(a-b*floor(a/b),b);return fmod(fmod(a,b)+b,b);}\n";
+
+/// A float as a fast compute kernel's Int: truncated and saturated to the 32-bit range (NaN to its
+/// minimum); MSL leaves a conversion past it undefined, and the compiler drops what reads one.
+const RAYS_INT_MSL: &str = "static inline int rays_int(float x){return int(fmin(fmax(x,-2147483648.0f),2147483520.0f));}\n";
+
 /// The status bits gather in the thread's `sb` and reach the shared word with the kernel's one atomic.
 const FLUSH_STATUS: &str = "if(sb!=0u||i==0) atomic_fetch_or_explicit(status,sb,memory_order_relaxed);";
 
@@ -273,6 +282,32 @@ fn declarations(decls: &str) -> String {
 
 fn opening(condition: i64, selected: bool) -> String {
     format!("if(r{condition}{}0.0f) {{", if selected { "!=" } else { "==" })
+}
+
+/// A fast compute kernel's Int: 32-bit two's complement that wraps; shifts are logical over 32 bits and a
+/// count over 31 gives 0 (the narrow register's rule). Division and remainder truncate.
+fn integer32(operation: Integer, a: &str, b: &str) -> String {
+    let wrap = |operator: &str| format!("as_type<int>(uint({a}){operator}uint({b}))");
+    let shift = |operator: &str| format!("(({b}&63)>31?0:as_type<int>(uint({a}){operator}uint({b}&63)))");
+    match operation {
+        Integer::Iadd => wrap("+"),
+        Integer::Isub => wrap("-"),
+        Integer::Imul => wrap("*"),
+        // -1 apart: the minimum Int over -1 wraps, as the 63-bit form's does
+        Integer::Idiv => format!("({b}==0?0:{b}==-1?as_type<int>(0u-uint({a})):{a}/{b})"),
+        Integer::Imod => format!("({b}==0||{b}==-1?0:{a}%{b})"),
+        Integer::Iand => format!("({a}&{b})"),
+        Integer::Ior => format!("({a}|{b})"),
+        Integer::Ixor => format!("({a}^{b})"),
+        Integer::Ishl => shift("<<"),
+        Integer::Ishr => shift(">>"),
+    }
+}
+
+/// An Int constant as a 32-bit literal: its low word.
+fn int_literal(n: i64) -> String {
+    let w = n as i32;
+    if w < 0 { format!("as_type<int>({}u)", w as u32) } else { w.to_string() }
 }
 
 fn integer(operation: Integer, a: &str, b: &str) -> String {
@@ -413,6 +448,8 @@ type Guards = Vec<(i64, bool)>;
 struct Gen {
     layout: Arc<kernel_layout::T>,
     fast: bool,
+    /// Int registers are 32-bit (`integer32`): a fast compute kernel, never a raster stage.
+    int32: bool,
     raster: Option<Raster>,
     unfold: Option<i64>,
     instancing: bool,
@@ -467,6 +504,21 @@ impl Gen {
         &self.layout.view.code[u(slot)]
     }
 
+    /// An Int expression widened to 64 bits where registers are 32-bit.
+    fn wide(&self, x: String) -> String {
+        if self.int32 { format!("long({x})") } else { x }
+    }
+
+    /// An expression as an Int register: a float through `rays_int` in 32-bit registers.
+    fn int_cast(&self, x: String, float: bool) -> String {
+        if self.int32 && float { format!("rays_int({x})") } else { format!("{}({x})", self.lt()) }
+    }
+
+    /// The wide Int register type.
+    fn lt(&self) -> &'static str {
+        if self.int32 { "int" } else { "long" }
+    }
+
     fn integer_register(&self, slot: i64) -> bool {
         Region::integer_register(self.code(slot))
     }
@@ -514,7 +566,9 @@ impl Gen {
         if self.integer_register(r) && !self.narrow(r) {
             self.reg(r)
         } else {
-            format!("long({})", self.reg(r))
+            let float = !self.integer_register(r);
+            let x = self.reg(r);
+            self.int_cast(x, float)
         }
     }
 
@@ -527,8 +581,8 @@ impl Gen {
         }
     }
 
-    /// An integer-valued register as a 64-bit expression: an integer register, its conversion to
-    /// float, an integral constant, or +, -, *, mod, min, max of two such.
+    /// An integer-valued register as an Int-register expression (32-bit in a fast compute kernel): an
+    /// integer register, its conversion to float, an integral constant, or +, -, *, mod, min, max of two such.
     fn whole(&mut self, r: i64) -> Option<String> {
         if self.integer_register(r) {
             return Some(self.int_of(r));
@@ -536,7 +590,9 @@ impl Gen {
         let instruction = self.layout.view.code[u(r)].clone();
         match unguarded(&instruction) {
             Instruction::Convert(Conversion::ToFloat, x) if self.integer_register(*x) => Some(self.int_of(*x)),
-            Instruction::Const(c) if c.is_finite() && c.fract() == 0.0 && c.abs() < 9007199254740992.0 => Some(format!("{:.0}L", c)),
+            Instruction::Const(c) if c.is_finite() && c.fract() == 0.0 && c.abs() < if self.int32 { 2147483648.0 } else { 9007199254740992.0 } => {
+                Some(if self.int32 { int_literal(*c as i64) } else { format!("{:.0}L", c) })
+            }
             Instruction::Binary(op @ (Binary::Add | Binary::Sub | Binary::Mul | Binary::Mod | Binary::Min | Binary::Max), a, b) if self.fast => {
                 let wb = self.whole(*b);
                 let wa = self.whole(*a);
@@ -544,9 +600,19 @@ impl Gen {
                     (Some(a), Some(b)) => Some(format!(
                         "({})",
                         match op {
+                            Binary::Add | Binary::Sub | Binary::Mul if self.int32 => integer32(
+                                match op {
+                                    Binary::Add => Integer::Iadd,
+                                    Binary::Sub => Integer::Isub,
+                                    _ => Integer::Imul,
+                                },
+                                &a,
+                                &b,
+                            ),
                             Binary::Add => format!("{a}+{b}"),
                             Binary::Sub => format!("{a}-{b}"),
                             Binary::Mul => format!("{a}*{b}"),
+                            Binary::Mod if self.int32 => format!("{b}==0?0:({a}%{b})+((({a}%{b})!=0&&(({a}%{b})<0)!=({b}<0))?{b}:0)"),
                             Binary::Mod => format!("{b}==0?0:({a}%{b}+{b})%{b}"),
                             Binary::Min => format!("min({a},{b})"),
                             _ => format!("max({a},{b})"),
@@ -613,7 +679,7 @@ impl Gen {
             }
         };
         if integer {
-            format!("long({value})")
+            self.int_cast(value, !self.gather_uint32[u(k)])
         } else if self.gather_uint32[u(k)] {
             format!("float({value})")
         } else {
@@ -881,7 +947,7 @@ impl Gen {
         match instruction {
             Instruction::Const(value) => format!("as_type<float>(0x{:x}u)", (*value as f32).to_bits()),
             Instruction::Raise(..) if raster => self.fail("Explicit errors need a compute status record."),
-            Instruction::Raise(..) => (if self.integer_register(slot) { "0L" } else { "0.0f" }).to_owned(),
+            Instruction::Raise(..) => (if self.integer_register(slot) { if self.int32 { "0" } else { "0L" } } else { "0.0f" }).to_owned(),
             Instruction::Input(input, _, component) if raster => (self.raster.as_ref().unwrap().input)(*input, *component),
             Instruction::Input(0, _, component) if self.unfold.is_some() => format!("uf{component}"),
             Instruction::Input(input, width, component) => {
@@ -917,7 +983,7 @@ impl Gen {
             Instruction::Binary(op, a, b) => {
                 let fb = self.float_of(*b);
                 let fa = self.float_of(*a);
-                let r = binary(*op, &fa, &fb);
+                let r = if self.int32 && *op == Binary::Mod { Ok(format!("rays_mod({fa},{fb})")) } else { binary(*op, &fa, &fb) };
                 self.ok(r)
             }
             Instruction::Unary(op, a) => {
@@ -939,17 +1005,24 @@ impl Gen {
             Instruction::Gather(prepared, index, width, component) => self.element(false, *prepared, *index, *width, *component),
             Instruction::Int_gather(prepared, index) => self.element(true, *prepared, *index, 1, 0),
             Instruction::Array_prepare(..) => panic!("array_prepare is not printed"),
+            Instruction::Int_const(n) if self.int32 => int_literal(*n),
             Instruction::Int_const(n) => format!("long({n}L)"),
             Instruction::Int_input(input) if raster => (self.raster.as_ref().unwrap().int_input)(*input),
-            Instruction::Int_input(input) => format!("long(input{input}[i])"),
-            Instruction::Int_uniform(index) => format!("long({})", self.uniform_word(self.layout.uniforms[u(*index)])),
+            Instruction::Int_input(input) => self.int_cast(format!("input{input}[i]"), !self.input_uint32[u(*input)]),
+            Instruction::Int_uniform(index) => {
+                let offset = self.layout.uniforms[u(*index)];
+                self.int_cast(self.uniform_word(offset), !self.uint32_uniforms.contains(&(offset * 4)))
+            }
             Instruction::Int_frame(name) if raster => format!("long({})", (self.raster.as_ref().unwrap().builtin)(name)),
-            Instruction::Int_frame(name) if kernel_layout::scene_fact(name) => format!("long({})", self.scene_count(name)),
-            Instruction::Int_frame(_) => format!("long({})", self.uniform_word(self.layout.frames[u(slot)])),
+            Instruction::Int_frame(name) if kernel_layout::scene_fact(name) => format!("{}({})", self.lt(), self.scene_count(name)),
+            Instruction::Int_frame(_) => {
+                let offset = self.layout.frames[u(slot)];
+                self.int_cast(self.uniform_word(offset), !self.uint32_uniforms.contains(&(offset * 4)))
+            }
             Instruction::Int_binary(op, a, b) => {
                 let ib = self.int_of(*b);
                 let ia = self.int_of(*a);
-                integer(*op, &ia, &ib)
+                if self.int32 { integer32(*op, &ia, &ib) } else { integer(*op, &ia, &ib) }
             }
             Instruction::Int_compare(op, a, b) => {
                 let ib = self.int_of(*b);
@@ -958,7 +1031,7 @@ impl Gen {
             }
             Instruction::Int_abs(a) => {
                 let ia = self.int_of(*a);
-                wrap_integer(&format!("abs({ia})"))
+                if self.int32 { format!("abs({ia})") } else { wrap_integer(&format!("abs({ia})")) }
             }
             Instruction::Int_select(_, yes, no) if yes == no => self.int_of(*yes),
             Instruction::Int_select(condition, yes, no) => {
@@ -984,9 +1057,18 @@ impl Gen {
             }
             Instruction::Convert(Conversion::ToFloat, a) => self.float_of(*a),
             Instruction::Convert(Conversion::Truncate | Conversion::CoerceInt | Conversion::IntegerResult(_), a) => self.int_of(*a),
-            Instruction::Convert(Conversion::Floor, a) => format!("long(floor({}))", self.float_of(*a)),
-            Instruction::Convert(Conversion::Ceil, a) => format!("long(ceil({}))", self.float_of(*a)),
-            Instruction::Convert(Conversion::Round, a) => format!("long(round({}))", self.float_of(*a)),
+            Instruction::Convert(Conversion::Floor, a) => {
+                let x = format!("floor({})", self.float_of(*a));
+                self.int_cast(x, true)
+            }
+            Instruction::Convert(Conversion::Ceil, a) => {
+                let x = format!("ceil({})", self.float_of(*a));
+                self.int_cast(x, true)
+            }
+            Instruction::Convert(Conversion::Round, a) => {
+                let x = format!("round({})", self.float_of(*a));
+                self.int_cast(x, true)
+            }
             Instruction::Text_const(_) | Instruction::Text_input(_) | Instruction::Text_uniform(_) | Instruction::Text_gather(..) | Instruction::Text_select(..) => {
                 self.fail("Text kernels stay on the CPU.")
             }
@@ -1000,14 +1082,14 @@ impl Gen {
             Instruction::Stage(stage @ (Stage::Trace_triangles(_) | Stage::Trace_any | Stage::Trace_curves(_) | Stage::Trace_curves_any), r) if !raster => {
                 let value = self.trace_query(guards, slot, stage, r);
                 if self.integer_register(slot) {
-                    format!("long({value})")
+                    format!("{}({value})", self.lt())
                 } else {
                     value
                 }
             }
             Instruction::Stage(Stage::Noise_table(seed), r) => {
                 let l = self.low(r[0]);
-                format!("long(table[{}+{l}])", self.table(*seed))
+                format!("{}(table[{}+{l}])", self.lt(), self.table(*seed))
             }
             Instruction::Stage(stage, r) if !raster => self.scene_read(stage, r),
             Instruction::Stage(stage @ (Stage::Group_scan(_) | Stage::Store), r) => format!("long({})", self.group_intrinsic(guards, stage, r)),
@@ -1082,7 +1164,13 @@ impl Gen {
         let layout = self.layout.clone();
         let view = &layout.view;
         for (k, registers) in view.outputs.iter().enumerate() {
-            if self.output_uint32(k) {
+            // a 32-bit Int is out of uint32 range only when negative; a narrow register never is
+            if self.output_uint32(k) && self.int32 {
+                if !self.narrow(registers[0]) {
+                    let value = self.int_of(registers[0]);
+                    body.push_str(&format!("  sb|=({value}<0)?64u:0u;\n"));
+                }
+            } else if self.output_uint32(k) {
                 let value = self.int_of(registers[0]);
                 body.push_str(&format!("  sb|=(({value})<0L||ulong({value})>0xffffffffUL)?64u:0u;\n"));
             }
@@ -1133,7 +1221,7 @@ impl Visit for Gen {
         let (ty, zero) = if self.narrow(s) {
             ("uint", "0u")
         } else if self.integer_register(s) {
-            ("long", "0")
+            (self.lt(), "0")
         } else {
             ("float", "0.0f")
         };
@@ -1197,7 +1285,7 @@ impl Visit for Gen {
             if g.narrow(slot) {
                 "uint"
             } else if g.integer_register(slot) {
-                "long"
+                g.lt()
             } else {
                 "float"
             }
@@ -1218,10 +1306,10 @@ impl Visit for Gen {
         self.blocks = Scope::stack(&self.scopes[oi]);
         let indentation = Scope::indent(&self.scopes[oi]);
         if let Some(limit) = control.limit {
-            let il = self.int_of(control.last);
-            let if_ = self.int_of(control.first);
-            let il2 = self.int_of(control.last);
-            let if2 = self.int_of(control.first);
+            let il = self.loop_bound(control.last);
+            let if_ = self.loop_bound(control.first);
+            let il2 = { let x = self.loop_bound(control.last); self.wide(x) };
+            let if2 = { let x = self.loop_bound(control.first); self.wide(x) };
             self.scopes[oi].code.push_str(&format!(
                 "{indentation}bool over{header}={il}>{if_} && ulong({il2}-{if2})>{limit}uL;\n{indentation}sb|=over{header}?1u:0u;\n"
             ));
@@ -1232,7 +1320,7 @@ impl Visit for Gen {
             self.scopes[oi].code.push_str(&format!("{indentation}r{slot}={value};\n"));
         }
         fn bound(g: &mut Gen, h: i64, r: i64) -> String {
-            if g.narrow(h) { g.low(r) } else { g.int_of(r) }
+            if g.narrow(h) { g.low(r) } else { g.loop_bound(r) }
         }
         let last = if control.limit.is_none() {
             bound(self, h, control.last)
@@ -1275,6 +1363,15 @@ impl Visit for Gen {
 }
 
 impl Gen {
+    /// A loop bound: in 32-bit registers an Int constant past them saturates, so `(iterate
+    /// 4611686018427387903 ... :until ...)` still runs until it stops.
+    fn loop_bound(&mut self, r: i64) -> String {
+        match unguarded(self.code(r)) {
+            Instruction::Int_const(n) if self.int32 && *n != *n as i32 as i64 => int_literal((*n).clamp(i32::MIN as i64, i32::MAX as i64)),
+            _ => self.int_of(r),
+        }
+    }
+
     fn carried(&mut self, slot: i64, source: i64) -> String {
         if self.narrow(slot) {
             self.low(source)
@@ -1370,6 +1467,7 @@ fn generate(o: &Options, raster: Option<Raster>, program: &packed::T) -> Result<
     let is_raster = raster.is_some();
     let mut g = Gen {
         fast,
+        int32: fast && raster.is_none(),
         raster,
         unfold: o.unfold,
         instancing: layout.scene_instances.is_some(),
@@ -1467,9 +1565,11 @@ fn generate(o: &Options, raster: Option<Raster>, program: &packed::T) -> Result<
     }
     arguments.push("uint i [[thread_position_in_grid]]".to_owned());
     let prefix = format!(
-        "#include <metal_stdlib>\nusing namespace metal;\n{}{}",
+        "#include <metal_stdlib>\nusing namespace metal;\n{}{}{}{}",
         if layout.scene_binding.is_none() { "" } else { "#include <metal_raytracing>\nusing namespace metal::raytracing;\n" },
-        if o.curves == Some(Curves::Loop) && layout.scene_strands.is_some() { format!("{CURVE_CAPSULE_MSL}\n") } else { String::new() }
+        if o.curves == Some(Curves::Loop) && layout.scene_strands.is_some() { format!("{CURVE_CAPSULE_MSL}\n") } else { String::new() },
+        if body.contains("rays_mod(") { RAYS_MOD_MSL } else { "" },
+        if body.contains("rays_int(") { RAYS_INT_MSL } else { "" }
     );
     let signature = arguments.join(",\n  ");
     let guard = match layout.counts {

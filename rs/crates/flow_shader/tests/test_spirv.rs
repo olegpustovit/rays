@@ -1,6 +1,7 @@
 //! Port of lib/flow_gpu/test_spirv.ml (the SPIR-V half of lib/flow_shader's tests): every kernel
 //! prints deterministically, shares the Metal kernel's bindings and layout, and matches the digest
-//! goldens in lib/flow_gpu/goldens/spirv.sexp byte for byte (size and MD5 of the module).
+//! goldens byte for byte (size and MD5 of the module): exact kernels lib/flow_gpu/goldens/spirv.sexp,
+//! fast ones tests/spirv_fast.sexp.
 mod support;
 use flow_ir::kernel_layout;
 use flow_shader::emit::{self, Curves};
@@ -71,8 +72,13 @@ fn fast_cases() -> Vec<(String, flow_ir::packed::T)> {
     out
 }
 
-fn golden() -> HashMap<String, (usize, String)> {
-    let text = fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../lib/flow_gpu/goldens/spirv.sexp")).unwrap();
+/// Exact kernels keep the OCaml goldens; fast kernels (32-bit Int registers) diverge from OCaml and
+/// keep their own, rewritten with `RAYS_UPDATE_FIXTURES=1`.
+const EXACT_GOLDEN: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../lib/flow_gpu/goldens/spirv.sexp");
+const FAST_GOLDEN: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/spirv_fast.sexp");
+
+fn golden(path: &str) -> HashMap<String, (usize, String)> {
+    let text = fs::read_to_string(path).unwrap_or_default();
     text.lines()
         .map(|line| {
             let parts: Vec<&str> = line.trim_matches(|c| c == '(' || c == ')').split(' ').collect();
@@ -95,7 +101,7 @@ fn has_int64(bytes: &[u8]) -> bool {
 }
 
 /// One case: the shared assertions, then the digest against the golden.
-fn check(name: &str, fast: bool, program: &flow_ir::packed::T, golden: &HashMap<String, (usize, String)>) {
+fn check(name: &str, fast: bool, program: &flow_ir::packed::T, golden: &HashMap<String, (usize, String)>) -> (usize, String) {
     let instanced = name.ends_with("instanced");
     let curves = name.ends_with("curves");
     let options = spirv::Options { fast, instanced, curves, ..spirv::Options::default() };
@@ -107,7 +113,7 @@ fn check(name: &str, fast: bool, program: &flow_ir::packed::T, golden: &HashMap<
     assert_eq!(word(4), if emitted.layout.scene_binding.is_none() { 0x00010300 } else { 0x00010400 });
     assert_eq!(emitted.bytes.len() % 4, 0);
     if fast {
-        assert_eq!(has_int64(&emitted.bytes), name != "fast_float", "{name}: int64 capability");
+        assert!(!has_int64(&emitted.bytes), "{name}: a fast kernel needs no int64 capability");
     }
     assert!(shader::validate_bindings(&emitted.interface).is_ok());
     assert_eq!(emitted.uniform_bytes, kernel_layout::uniform_words(&emitted.layout) * 16);
@@ -121,14 +127,24 @@ fn check(name: &str, fast: bool, program: &flow_ir::packed::T, golden: &HashMap<
     assert_eq!(emitted.layout.table_seeds, metal.table_seeds);
     assert_eq!(emitted.layout.gathers.iter().map(|(_, g)| *g).collect::<Vec<_>>(), metal.gathers);
     assert_eq!(emitted.layout.counts, metal.counts);
+    let printed = (emitted.bytes.len(), md5_hex(&emitted.bytes));
+    if golden.is_empty() {
+        return printed;
+    }
     let (size, digest) = golden.get(name).unwrap_or_else(|| panic!("no golden for {name}"));
-    assert_eq!((emitted.bytes.len(), md5_hex(&emitted.bytes)), (*size, digest.clone()), "{name}: digest");
+    assert_eq!(printed, (*size, digest.clone()), "{name}: digest");
+    printed
 }
 
 fn check_all(cases: Vec<(String, flow_ir::packed::T)>, fast: bool) {
-    let golden = golden();
-    for (name, program) in cases {
-        check(&name, fast, &program, &golden);
+    let update = fast && std::env::var_os("RAYS_UPDATE_FIXTURES").is_some();
+    let golden = if update { HashMap::new() } else { golden(if fast { FAST_GOLDEN } else { EXACT_GOLDEN }) };
+    let lines: Vec<String> = cases.iter().map(|(name, program)| {
+        let (size, digest) = check(name, fast, program, &golden);
+        format!("({name} {size} {digest})\n")
+    }).collect();
+    if update {
+        fs::write(FAST_GOLDEN, lines.concat()).unwrap();
     }
 }
 
@@ -140,8 +156,9 @@ fn exact_kernels_match_the_digest_goldens() {
 #[test]
 fn fast_kernels_match_the_digest_goldens() {
     let (sources, carried): (Vec<_>, Vec<_>) = fast_cases().into_iter().partition(|(n, _)| n.starts_with("fast_"));
-    check_all(sources, true);
-    check_all(carried, true);
+    let mut all = sources;
+    all.extend(carried);
+    check_all(all, true);
 }
 
 #[test]

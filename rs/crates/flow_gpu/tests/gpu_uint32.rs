@@ -259,8 +259,8 @@ fn kinds_of_values() {
 
 fn holders() {
     let Some((lease, pipes)) = setup() else { return };
-    let packed = program("(int/add (if (int/eq (int/mod i 2) 0) 4294967295 16777217) (int/mod (frame/index) 1))");
-    let expected: Vec<i64> = (0..1025).map(|i| if i % 2 == 0 { 4294967295 } else { 16777217 }).collect();
+    let packed = program("(int/add (if (int/eq (int/mod i 2) 0) 2147483647 16777217) (int/mod (frame/index) 1))");
+    let expected: Vec<i64> = (0..1025).map(|i| if i % 2 == 0 { 2147483647 } else { 16777217 }).collect();
     let r = run::create(None, &lease, &pipes, &u32_kernel(&packed));
     let dispatch = || {
         let o = tp::ok(run::dispatch(&r, &run::Options { wait: Some(false), ..Default::default() }, None, None, &prepare(&packed, 0.0)));
@@ -416,7 +416,7 @@ fn topology() {
 fn outputs() {
     let Some((lease, pipes)) = setup() else { return };
     let lv = live(0.0);
-    for expression in ["(+ (+ i 16777217) (int t))", "(+ 4294967295 (int/mod (int t) 1))", "(int/mod (+ i (int t)) 2)"] {
+    for expression in ["(+ (+ i 16777217) (int t))", "(+ 2147483647 (int/mod (int t) 1))", "(int/mod (+ i (int t)) 2)"] {
         let packed = program(expression);
         let msl = u32_kernel(&packed);
         assert_eq!(msl.output_uint32, vec![true]);
@@ -443,9 +443,9 @@ fn outputs() {
             let host_result = tp::ok(run::dispatch(&consumer, &run::Options { uint32_cpu: true, ..Default::default() }, None, None, &values));
             assert_eq!(format!("{:?}", tp::ok(run::readback(&host_result, None))), format!("{:?}", force_strict(packed, 0.0)));
             if msl.input_uint32.iter().any(|x| *x) {
-                let exact = phost::Inputs { arrays: vec![Arc::new(vec![16777217.0, 4294967295.0])], count: 2, ..values.clone() };
+                let exact = phost::Inputs { arrays: vec![Arc::new(vec![16777217.0, 2147483647.0])], count: 2, ..values.clone() };
                 let output = tp::ok(run::dispatch(&consumer, &run::Options { uint32_cpu: true, ..Default::default() }, None, None, &exact));
-                assert_eq!(ints(&tp::ok(run::readback(&output, None))), vec![16777217, 4294967295]);
+                assert_eq!(ints(&tp::ok(run::readback(&output, None))), vec![16777217, 2147483647]);
                 for invalid in [-1.0, 4294967296.0, 1.5, f64::NAN] {
                     let bad = phost::Inputs { arrays: vec![Arc::new(vec![invalid])], count: 1, ..values.clone() };
                     match run::dispatch(&consumer, &run::Options { uint32_cpu: true, ..Default::default() }, None, None, &bad) {
@@ -513,11 +513,12 @@ fn scalars_and_ranges() {
         assert_eq!(format!("{:?}", tp::ok(run::readback(&output, Some(index as i64)))), format!("{e:?}"));
     }
     run::close(&r, false);
-    for expression in ["(+ -1 (int/mod (int t) 1))", "(+ 4294967296 (int/mod (int t) 1))"] {
+    // a fast kernel's Int is 32 bits: past 2^31 - 1 it wraps negative, refused as a uint32 word
+    for expression in ["(+ -1 (int/mod (int t) 1))", "(int/add 2147483647 (int/add 1 (int/mod (int t) 1)))"] {
         let packed = program(expression);
         let r = run::create(None, &lease, &pipes, &u32_kernel(&packed));
         match run::dispatch(&r, &run::Options::default(), None, None, &prepare(&packed, 0.0)) {
-            Err(d) => assert_eq!(d.code, "E_GPU_UINT32_RANGE"),
+            Err(d) => assert_eq!(d.code, "E_GPU_UINT32_RANGE", "{expression}: {}", d.message),
             Ok(_) => panic!("out-of-range uint32 output was published"),
         }
         run::close(&r, false);

@@ -120,10 +120,20 @@ fn fixtures() {
     pipelines::close(&pipes);
 }
 
-/// fast precision: int32 arithmetic and a gather from a live vec3 table match the CPU kernel
+/// fast precision: carried loops match the CPU kernel; 63-bit Int checks hold on the CPU and their
+/// 32-bit form on the device, whose fast Int registers are 32 bits
 fn carried() {
     let Some((lease, pipes)) = start() else { return };
+    let int32 = tp::compile(&format!("(map (fn [x] (iterate 1 [t 0. 0. 0.] (fn [unused] {}))) (array/range 512))", tp::INT32_CHECKS));
+    let r = runner(&lease, &pipes, &int32, true);
+    let actual = array(&tp::ok(run::readback(&tp::ok(dispatch(&r, &prepare(&int32, true, 1.0))), None)));
+    assert!(actual.len() == 2048 && actual.iter().all(|v| *v == 1.0), "32-bit Int checks on the device");
+    run::close(&r, false);
     for (name, program) in tp::carried_fixtures(512) {
+        if name == "iterate-int63" {
+            assert!(array(&force(&program, 1.0, true)).iter().all(|v| *v == 1.0), "63-bit Int checks on the CPU");
+            continue;
+        }
         let r = runner(&lease, &pipes, &program, true);
         let expected = array(&tp::ok(packed::host::reference(&program, &live(1.0), None, None, None)));
         let cpu = array(&force(&program, 1.0, true));

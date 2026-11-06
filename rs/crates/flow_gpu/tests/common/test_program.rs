@@ -123,6 +123,9 @@ pub fn vector_fixtures(trace: Option<Trace>, count: i64) -> Vec<(String, packed:
 
 pub const INT63_CHECKS: &str = "(let* [n (int/add (int x) (frame/index))\n  d (int/add (int/mod n 4) 1) even (int/mul d 2)\n  low (int/shl 1 (int/add 62 (int/mod n 1)))]\n  [(if (int/lt (int/add 4611686018427387903 d) 0) 1. 0.)\n   (if (int/eq (int/mul 4611686018427387903 even) (int/sub 0 even)) 1. 0.)\n   (if (int/eq (int/shr (int/sub 0 d) 62) 1) 1. 0.)\n   (if (and (int/lt (abs low) 0) (int/eq (int/div low -1) low)) 1. 0.)])";
 
+/// INT63_CHECKS at a fast kernel's width: its Int registers are 32 bits and wrap.
+pub const INT32_CHECKS: &str = "(let* [n (int/add (int x) (frame/index))\n  d (int/add (int/mod n 4) 1) even (int/mul d 2)\n  low (int/shl 1 (int/add 31 (int/mod n 1)))]\n  [(if (int/lt (int/add 2147483647 d) 0) 1. 0.)\n   (if (int/eq (int/mul 2147483647 even) (int/sub 0 even)) 1. 0.)\n   (if (int/eq (int/shr (int/sub 0 d) 31) 1) 1. 0.)\n   (if (and (int/lt (abs low) 0) (int/eq (int/div low -1) low)) 1. 0.)])";
+
 pub fn carried_fixtures(count: i64) -> Vec<(String, packed::T)> {
     let mapped: Vec<(&str, String)> = vec![
         ("loop-bounds", "(fold [a t] [i (range -2 (int/mod (int x) 5))] (+ a (* i 0.5)))".into()),

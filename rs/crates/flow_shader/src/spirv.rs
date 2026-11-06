@@ -129,6 +129,8 @@ pub struct Emitter {
     float: i64,
     long: Option<i64>,
     ulong: Option<i64>,
+    /// A fast compute kernel: `long`/`ulong` are the 32-bit `sint`/`uint` (Emit's `integer32`).
+    int32: bool,
     glsl: i64,
     uniform: i64,
     uniform_pointer: i64,
@@ -179,6 +181,9 @@ impl Emitter {
     }
     fn l(&mut self, value: i64) -> i64 {
         let ty = self.long();
+        if self.int32 {
+            return self.words.constant(ty, value as i32);
+        }
         self.words.wide_constant(ty, value)
     }
     fn from_long(&mut self, value: i64) -> i64 {
@@ -502,6 +507,17 @@ fn storage_type(words: &mut Words, scalar: i64) -> (i64, i64) {
 fn integer_binary(e: &mut Emitter, operation: Integer, a: i64, b: i64) -> i64 {
     let long = e.long();
     match operation {
+        Integer::Ishl | Integer::Ishr if e.int32 => {
+            // logical over 32 bits; a count over 31 gives 0
+            let c63 = e.l(63);
+            let k = e.result(long, 199, &[b, c63]);
+            let c31 = e.l(31);
+            let kk = e.result(long, 199, &[k, c31]);
+            let shifted = e.result(long, if operation == Integer::Ishl { 196 } else { 194 }, &[a, kk]);
+            let z = e.l(0);
+            let c = e.compare(173, k, c31);
+            e.select_l(c, z, shifted)
+        }
         Integer::Iadd => e.result(long, 128, &[a, b]),
         Integer::Isub => e.result(long, 130, &[a, b]),
         Integer::Imul => e.result(long, 132, &[a, b]),
@@ -565,6 +581,9 @@ fn integer_binary(e: &mut Emitter, operation: Integer, a: i64, b: i64) -> i64 {
 }
 
 fn wrap_integer(e: &mut Emitter, value: i64) -> i64 {
+    if e.int32 {
+        return value;
+    }
     let long = e.long();
     let one = e.l(1);
     let shifted = e.result(long, 196, &[value, one]);
@@ -1761,6 +1780,9 @@ impl EP {
     fn widen_word(&mut self, word: i64) -> i64 {
         let ulong = self.e.ulong();
         let long = self.e.long();
+        if self.e.int32 {
+            return self.e.result(long, 124, &[word]);
+        }
         let w = self.e.result(ulong, 113, &[word]);
         self.e.result(long, 124, &[w])
     }
@@ -1799,6 +1821,13 @@ impl EP {
         let float = self.e.float;
         let s = self.e.select(float, valid, value, zero);
         let long = self.e.long();
+        if self.e.int32 {
+            // Emit's `rays_int`: saturated to the 32-bit range
+            let lo = self.e.f(-2147483648.0);
+            let hi = self.e.f(2147483520.0);
+            let clamped = self.e.ext(43, &[s, lo, hi]);
+            return self.e.result(long, 110, &[clamped]);
+        }
         self.e.result(long, 110, &[s])
     }
     fn mark_invalid(&mut self, condition: i64) {
@@ -1833,7 +1862,7 @@ impl EP {
         } else {
             let i = self.int_of(slot);
             let uint = self.e.uint;
-            self.e.result(uint, 113, &[i])
+            self.e.result(uint, if self.e.int32 { 124 } else { 113 }, &[i])
         }
     }
     fn guard_condition(&mut self, guards: &[(i64, bool)]) -> Option<i64> {
@@ -1871,18 +1900,13 @@ impl EP {
             let sint = self.e.sint;
             let long = self.e.long();
             let s = self.e.result(sint, 124, &[r]);
-            self.e.result(long, 114, &[s])
+            if self.e.int32 { s } else { self.e.result(long, 114, &[s]) }
         } else {
             self.int_of(at)
         };
         let k = self.gather_k(prepared);
-        let long = self.e.long();
-        let ulong = self.e.ulong();
-        let uint = self.e.uint;
-        let _ = uint;
         let word = self.e.uniform(self.layout.gather_lengths[k]);
-        let size = self.e.result(ulong, 113, &[word]);
-        let size = self.e.result(long, 124, &[size]);
+        let size = self.widen_word(word);
         let one = self.e.l(1);
         let last = integer_binary(&mut self.e, Integer::Isub, size, one);
         let zero = self.e.l(0);
@@ -1893,7 +1917,7 @@ impl EP {
         let c = self.e.compare(173, at, last);
         let at = self.e.select_l(c, last, at);
         let uint = self.e.uint;
-        let at = self.e.result(uint, 113, &[at]);
+        let at = self.e.result(uint, if self.e.int32 { 124 } else { 113 }, &[at]);
         let offset = self.e.offset(at, width, component);
         self.e.load_uint(self.gathers[k], offset)
     }
@@ -2140,7 +2164,7 @@ impl EP {
             Instruction::Stage(stage, r) if !raster => self.stage_value(stage, r, integer),
             Instruction::Int_frame(name) if kernel_layout::scene_fact(name) => self.scene_count(name, true),
             Instruction::Const(value) => {
-                if self.e.long.is_some() && value.is_finite() && value.fract() == 0.0 && value.abs() < 9007199254740992.0 {
+                if self.e.long.is_some() && value.is_finite() && value.fract() == 0.0 && value.abs() < if self.e.int32 { 2147483648.0 } else { 9007199254740992.0 } {
                     self.whole[slot as usize] = Some(self.e.l(*value as i64));
                 }
                 self.e.f(*value)
@@ -2410,6 +2434,14 @@ impl EP {
         }
     }
 
+    /// A loop bound, as Emit's: in 32-bit registers an Int constant past them saturates.
+    fn loop_bound(&mut self, slot: i64) -> i64 {
+        match unguarded(&self.layout.view.code[slot as usize]) {
+            Instruction::Int_const(n) if self.e.int32 && *n != *n as i32 as i64 => self.e.l((*n).clamp(i32::MIN as i64, i32::MAX as i64)),
+            _ => self.int_of(slot),
+        }
+    }
+
     fn carried_value(&mut self, slot: i64, source: i64) -> i64 {
         if self.narrow(slot) {
             self.low(source)
@@ -2452,8 +2484,8 @@ impl EP {
             self.e.jump(preheader);
             self.e.label(preheader);
         }
-        let first = self.int_of(control.first);
-        let last = self.int_of(control.last);
+        let first = self.loop_bound(control.first);
+        let last = self.loop_bound(control.last);
         let initial: Vec<i64> = control.initial.iter().enumerate().map(|(c, source)| self.carried_value(h + 1 + c as i64, *source)).collect();
         let long = self.e.long();
         let index_type = if self.narrow(h) { uint } else { long };
@@ -2472,7 +2504,7 @@ impl EP {
                 let unsigned_last = self.e.result(ulong, 124, &[last]);
                 let unsigned_first = self.e.result(ulong, 124, &[first]);
                 let distance = self.e.result(ulong, 130, &[unsigned_last, unsigned_first]);
-                let bound = self.e.words.wide_constant(ulong, limit);
+                let bound = if self.e.int32 { self.e.u(limit.min(u32::MAX as i64)) } else { self.e.words.wide_constant(ulong, limit) };
                 let over = self.e.result(boolean, 172, &[distance, bound]);
                 let too_long = self.e.result(boolean, 167, &[positive, over]);
                 self.e.record_status(too_long, 1);
@@ -2595,14 +2627,22 @@ impl EP {
                 } else if self.output_uint32[output] {
                     let value = self.int_of(register);
                     let boolean = self.e.boolean;
-                    let top = self.e.l(0xffff_ffff);
-                    let c172 = self.e.compare(172, value, top);
-                    let zero = self.e.l(0);
-                    let c177 = self.e.compare(177, value, zero);
-                    let c = self.e.result(boolean, 166, &[c177, c172]);
+                    // a 32-bit Int is out of uint32 range only when negative; a narrow register never is
+                    let c = if self.e.int32 && self.narrow(register) {
+                        self.e.bool_false()
+                    } else if self.e.int32 {
+                        let zero = self.e.l(0);
+                        self.e.compare(177, value, zero)
+                    } else {
+                        let top = self.e.l(0xffff_ffff);
+                        let c172 = self.e.compare(172, value, top);
+                        let zero = self.e.l(0);
+                        let c177 = self.e.compare(177, value, zero);
+                        self.e.result(boolean, 166, &[c177, c172])
+                    };
                     self.e.record_status(c, 64);
                     let uint = self.e.uint;
-                    let narrowed = self.e.result(uint, 113, &[value]);
+                    let narrowed = self.e.result(uint, if self.e.int32 { 124 } else { 113 }, &[value]);
                     let offset = self.e.offset(self.index, values.len() as i64, component as i64);
                     self.e.store_uint(self.outputs[output], offset, narrowed);
                 } else {
@@ -2856,7 +2896,9 @@ pub fn kernel(options: &Options, program: &packed::T) -> Result<T, Diagnostic> {
     let uint = m.words.declare(21, &[32, 0]);
     let sint = m.words.declare(21, &[32, 1]);
     let float = m.words.declare(22, &[32]);
-    let (long, ulong) = if needs_integer(&layout) {
+    let (long, ulong) = if options.fast && needs_integer(&layout) {
+        (Some(sint), Some(uint))
+    } else if needs_integer(&layout) {
         // a tuple evaluates right to left: the unsigned type first
         let ulong = m.words.declare(21, &[64, 0]);
         let long = m.words.declare(21, &[64, 1]);
@@ -2990,6 +3032,7 @@ pub fn kernel(options: &Options, program: &packed::T) -> Result<T, Diagnostic> {
         float,
         long,
         ulong,
+        int32: options.fast,
         glsl,
         uniform: uniform_buffer,
         uniform_pointer,
@@ -3110,7 +3153,7 @@ pub fn kernel(options: &Options, program: &packed::T) -> Result<T, Diagnostic> {
         add_word(&mut module_bytes, w);
     }
     instruction(&mut module_bytes, 17, &[1]);
-    if long.is_some() {
+    if long.is_some() && !e.int32 {
         instruction(&mut module_bytes, 17, &[11]);
     }
     if scene.is_some() {

@@ -1497,11 +1497,17 @@ covered approximable packed producer at a display sink after measured costs
 justify it; `(exact x)` explicitly materializes a selected GPU producer.
 
 **Workspace precision.** `(settings/config :precision "fast")`, the default, lets what only reaches
-the screen run on the GPU in float32 and 64-bit integer registers: a drawing's mark attributes need
-no qualified path, the device takes gathers from bound tables and integer arithmetic (wrapping,
-truncating division, logical right shift; integers travel between kernels as floats, exact to
-2^24), and a region of 4,096 elements or more that a drawing computes with runs on the device and
-is read back (`Executor.region_readback`, kernels kept by form, at most 16). A drawing's `filter` of
+the screen run on the GPU in float32 and 32-bit integer registers: a drawing's mark attributes need
+no qualified path, the device takes gathers from bound tables and integer arithmetic (32-bit
+two's-complement wrapping, truncating division, a shift logical over 32 bits whose count past 31
+gives 0; a float converts to Int truncated and saturated to the 32-bit range; `+`, `-`, `*`, `mod`,
+`min`, `max` of integral floats (Int conversions and integral constants under 2^31) run in those Int
+registers, exact within 32 bits and wrapping past them; a uint32 word from 2^31 reads as a negative
+Int, which a uint32 output refuses; a constant loop bound past 32 bits saturates, so `(iterate
+4611686018427387903 ... :until ...)` still runs; integers travel between kernels as floats, exact to
+2^24). Raster stages, the web export and exact precision keep 63-bit integers. A compute kernel's
+float `mod` of integral operands under 2^23 skips the precise `fmod` with the same bits. A region of
+4,096 elements or more that a drawing computes with runs on the device and is read back (`Executor.region_readback`, kernels kept by form, at most 16). A drawing's `filter` of
 an `array/range` lowers to an Int mask region and `array/compact`, so a fold's filter packs too.
 Inside a top-level loop whose body holds only regions, scalars, ifs, compaction, retyping and
 counts, the **resident fold** (`Host.resident`, `Core_exec.draw ?resident`) keeps the arrays on
