@@ -247,6 +247,8 @@ pub struct extra {
     pub follow_request: Option<bool>,
     /// the view the viewport last wrote to the camera node
     pub written: Option<rcam::t>,
+    /// a held drag moved the following camera: its node is written on release
+    pub follow_pending: bool,
     pub show: show,
     pub tool: tool,
     pub renderer: renderer::State,
@@ -301,6 +303,18 @@ pub fn view_parameters(easy: &easy_camera::t) -> Vec<(String, Value)> {
     let camera = easy_camera::camera(easy).expect("easy camera");
     let (eye, target) = (rcam::position(&camera), rcam::target(&camera));
     ocamera::to_values(eye, target, easy_camera::fov_y(easy))
+}
+
+/// The node's camera once `easy`'s view is written to it: eye, target and field of view from the
+/// viewport, the rest from the node (`ocamera::of_node` over `view_parameters`).
+fn following_view(node: &rcam::t, easy: &easy_camera::t) -> Option<rcam::t> {
+    let view = easy_camera::camera(easy).ok()?;
+    let (near, far) = match rcam::projection(node) {
+        rcam::projection::Perspective { near, far, .. } | rcam::projection::Orthographic { near, far, .. } => (near, far),
+    };
+    let fov = easy_camera::fov_y(easy) * 180. / std::f64::consts::PI;
+    let camera = rcam::perspective(Some(fov * std::f64::consts::PI / 180.), Some(near), Some(far), rcam::position(&view), rcam::target(&view)).ok()?;
+    rcam::with_lens(rcam::lens(node), &rcam::with_up(rcam::up(node), &camera).ok()?).ok()
 }
 
 pub fn same_view(a: &rcam::t, b: &rcam::t) -> bool {
@@ -465,6 +479,7 @@ pub fn init(core: Model, camera_: &easy_camera::t) -> (Model, extra) {
         following: active_node(&core).map(|n| follows(&n)),
         follow_request: None,
         written: None,
+        follow_pending: false,
         show: show { cameras: true, axes: true, handles: true },
         tool: tool::Move,
         renderer: renderer::State { mode, custom, ..renderer::empty() },
@@ -641,7 +656,7 @@ pub fn frame_bounds(min: vec3::T, max: vec3::T, camera_: &camera) -> camera {
 /// Follow-viewport motion writes the camera node as view state (no undo entry); node edits and
 /// undo pull the viewport back to the document. On a frame that stepped the history (`stepped`)
 /// nothing is written: the document just restored is the one to show.
-pub fn on_view(core: Model, previous: &camera, key: &str, camera_: camera, extra_: extra, stepped: bool) -> (Model, camera, extra) {
+pub fn on_view(core: Model, previous: &camera, key: &str, camera_: camera, extra_: extra, stepped: bool, held: bool) -> (Model, camera, extra) {
     // a change in the Render section: an authored root takes it; without one only the renderer is
     // the viewport's own choice, and any other setting writes the root
     let (core, mut extra_) = match extra_.root_request.clone() {
@@ -684,13 +699,22 @@ pub fn on_view(core: Model, previous: &camera, key: &str, camera_: camera, extra
         _ => core,
     };
     let mut written = extra_.written.clone();
+    let mut pending = extra_.follow_pending && !stepped;
+    let mut deferred = None;
     let active = active_node(&core);
     let decoded = active.as_ref().and_then(ocamera::of_node);
     let (core, camera_) = match (&active, &decoded) {
         (Some(node), Some((node_view, true))) => {
             let moved = !stepped && !same_view(&easy_camera::camera(previous).expect("camera"), &easy_camera::camera(&camera_).expect("camera"));
-            if moved || !same_view(node_view, &easy_camera::camera(&camera_).expect("camera")) {
-                if moved {
+            if moved || pending || !same_view(node_view, &easy_camera::camera(&camera_).expect("camera")) {
+                if (moved || pending) && held {
+                    // a held drag writes the node once, on release: a document per frame was most
+                    // of an orbit frame. Meanwhile renders look through what the write will say.
+                    pending = true;
+                    deferred = following_view(node_view, &camera_);
+                    (core, camera_)
+                } else if moved || pending {
+                    pending = false;
                     match kg::set_fields(&editor_inspect::scene(&core), node.id, &view_parameters(&camera_)) {
                         Ok((scene, _)) => {
                             written = Some(easy_camera::camera(&camera_).expect("camera"));
@@ -724,7 +748,7 @@ pub fn on_view(core: Model, previous: &camera, key: &str, camera_: camera, extra
         _ => current.as_ref().and_then(ocamera::of_node),
     };
     extra_ = extra {
-        document_camera: decoded.as_ref().map(|(c, _)| c.clone()).unwrap_or_else(|| easy_camera::camera(&camera_).expect("camera")),
+        document_camera: deferred.or_else(|| decoded.as_ref().map(|(c, _)| c.clone())).unwrap_or_else(|| easy_camera::camera(&camera_).expect("camera")),
         view_roots: core.doc.view_roots.clone(),
         ..extra_
     };
@@ -746,6 +770,7 @@ pub fn on_view(core: Model, previous: &camera, key: &str, camera_: camera, extra
         following: current.as_ref().map(|_| decoded.as_ref().map(|(_, f)| *f).unwrap_or(false)),
         follow_request: None,
         written,
+        follow_pending: pending,
         ..extra_
     };
     (core, camera_, extra_)

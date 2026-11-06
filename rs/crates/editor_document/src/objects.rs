@@ -166,10 +166,7 @@ pub mod camera {
         if node.kind != "camera" {
             return None;
         }
-        let values: Vec<(String, Value)> = g::fields(node).into_iter().map(|f| (f.name, f.current)).collect();
-        let schema = parameters_schema();
-        let (record, _) = schema.apply_all(schema.default(), &values).ok()?;
-        let p = from_values(record);
+        let p = from_values(super::read(&parameters_schema(), node)?);
         let at = vec3::create(p.eye_x, p.eye_y, p.eye_z);
         let target = vec3::create(p.target_x, p.target_y, p.target_z);
         let up = vec3::create(p.up_x, p.up_y, p.up_z);
@@ -410,6 +407,10 @@ pub mod light {
 
 /// The node's values read through `schema` (OCaml `read`); `None` when a value is refused.
 pub fn read(schema: &Schema, node: &g::Node) -> Option<Vec<Value>> {
+    // values made over this very schema are already its record
+    if let Some(values) = crate::settings::record_of(&node.values, schema) {
+        return Some(values.to_vec());
+    }
     let changes: Vec<(String, Value)> = g::fields(node).into_iter().map(|f| (f.name, f.current)).collect();
     schema.apply_all(schema.default(), &changes).ok().map(|(values, _)| values)
 }

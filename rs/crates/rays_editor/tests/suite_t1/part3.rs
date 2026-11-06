@@ -199,6 +199,22 @@ pub fn run_camera_zoom() {
         step(&mut e, vec![], 2 * count + 1);
         check(rays_math::vec3::nearly_equal(eye, rays::camera::position(&rays::easy_camera::camera(&Editor::camera(&e)).expect("camera")), 1e-6), "an idle frame snapped the viewport to rounded camera coordinates");
     }
+    // an orbit held on the button writes the camera node once, on release; meanwhile renders look
+    // through the viewport, never the node's last write
+    let eye_of = |e: &Editor::t| rays::camera::position(&rays::easy_camera::camera(&Editor::camera(e)).expect("camera"));
+    let (before, start) = (source(&e), eye_of(&e));
+    let at = (200., 200.);
+    e = Editor::update(e.clone(), &frame_full(&[LB], &[Key::Alt], (0., 0.), at, vec![Event::Key_pressed(Key::Alt), Event::Pointer_pressed(LB, at)], 40));
+    for i in 1..=4 {
+        let p = (200. + 8. * i as f64, 200.);
+        e = Editor::update(e.clone(), &frame_full(&[LB], &[Key::Alt], (8., 0.), p, vec![Event::Pointer_moved(p)], 40 + i));
+        check(rays_math::vec3::nearly_equal(eye_of(&e), rays::camera::position(&Editor::render_camera(&e)), 1e-6), "a held orbit left the render camera behind the viewport");
+    }
+    check(!rays_math::vec3::nearly_equal(start, eye_of(&e), 1e-6), "the Alt-drag did not orbit");
+    check(source(&e) == before, "a held orbit wrote the document on every frame");
+    let p = (232., 200.);
+    e = Editor::update(e.clone(), &frame_full(&[], &[], (0., 0.), p, vec![Event::Pointer_released(LB, p), Event::Key_released(Key::Alt)], 45));
+    check(source(&e) != before && rays_math::vec3::nearly_equal(eye_of(&e), rays::camera::position(&Editor::render_camera(&e)), 1e-6), "releasing the orbit did not write the camera node");
     Editor::close(&e);
 }
 

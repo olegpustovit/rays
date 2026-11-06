@@ -89,52 +89,43 @@ pub fn name(panel: &Panel) -> &'static str {
     }
 }
 
-fn concat_pairs(
-    (a, af): (Vec<(Path, Panel)>, Vec<(Path, Panel)>),
-    (b, bf): (Vec<(Path, Panel)>, Vec<(Path, Panel)>),
-) -> (Vec<(Path, Panel)>, Vec<(Path, Panel)>) {
-    let mut docked = a;
-    docked.extend(b);
-    let mut floats = af;
-    floats.extend(bf);
-    (docked, floats)
-}
-
 type Walked = (Vec<(Path, Panel)>, Vec<(Path, Panel)>);
 
-fn walk(path: &[usize], tree: &t) -> Walked {
-    // ponytail: a plain recursive walk; floats are collected after the rest
+// one path buffer and one pair of lists for the whole walk; floats are collected after the rest,
+// a float's own leaves before the floats inside it
+fn walk(path: &mut Path, tree: &t, acc: &mut Walked) {
     match tree {
-        t::Leaf(p) => (vec![(path.to_vec(), p.clone())], Vec::new()),
-        t::Split { a, b, .. } => both(path, &[a.as_ref(), b.as_ref()]),
+        t::Leaf(p) => acc.0.push((path.clone(), p.clone())),
+        t::Split { a, b, .. } => {
+            for (i, child) in [a.as_ref(), b.as_ref()].into_iter().enumerate() {
+                path.push(i);
+                walk(path, child, acc);
+                path.pop();
+            }
+        }
         t::Tile(cells) => {
-            let refs: Vec<&t> = cells.iter().collect();
-            both(path, &refs)
+            for (i, child) in cells.iter().enumerate() {
+                path.push(i);
+                walk(path, child, acc);
+                path.pop();
+            }
         }
         t::Float(inner) => {
-            let mut child = path.to_vec();
-            child.push(0);
-            let (r, f) = walk(&child, inner);
-            let mut floats = r;
-            floats.extend(f);
-            (Vec::new(), floats)
+            let mut own: Walked = (Vec::new(), Vec::new());
+            path.push(0);
+            walk(path, inner, &mut own);
+            path.pop();
+            acc.1.extend(own.0);
+            acc.1.extend(own.1);
         }
     }
-}
-
-fn both(path: &[usize], children: &[&t]) -> Walked {
-    let mut acc: Walked = (Vec::new(), Vec::new());
-    for (i, child) in children.iter().enumerate() {
-        let mut child_path = path.to_vec();
-        child_path.push(i);
-        acc = concat_pairs(acc, walk(&child_path, child));
-    }
-    acc
 }
 
 /// Every leaf in tree order, floats last.
 pub fn leaves(tree: &t) -> Vec<(Path, Panel)> {
-    let (mut docked, floats) = walk(&[], tree);
+    let mut acc: Walked = (Vec::new(), Vec::new());
+    walk(&mut Vec::new(), tree, &mut acc);
+    let (mut docked, floats) = acc;
     docked.extend(floats);
     docked
 }

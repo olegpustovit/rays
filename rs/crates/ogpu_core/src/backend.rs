@@ -1709,13 +1709,20 @@ pub fn draw_batch(encoder: &RenderEncoder, draws: &[BatchDraw]) -> Result<(), Er
     open_render(OP, encoder)?;
     if draws.is_empty() { return Err(make_error(OP, ErrorKind::InvalidArgument, "draw batch is empty")); }
     let device = render_device(encoder);
-    let mut lowered = Vec::with_capacity(draws.len());
-    for draw in draws {
+    // lowered into storage kept between batches, inner buffer lists included: a batch per pass
+    // per frame allocated a list per draw; an error leaves the scratch to be made again
+    thread_local! { static LOWERED: std::cell::RefCell<Vec<DriverBatchDraw>> = const { std::cell::RefCell::new(Vec::new()) }; }
+    let mut lowered = LOWERED.with(|l| std::mem::take(&mut *l.borrow_mut()));
+    for (n, draw) in draws.iter().enumerate() {
         if draw.pipeline.0.dead.get() { return Err(make_error(OP, ErrorKind::StaleHandle, "pipeline is destroyed")); }
         if !Rc::ptr_eq(&draw.pipeline.0.device.0, &device.0) {
             return Err(make_error(OP, ErrorKind::CrossDevice, "pipeline belongs to another device"));
         }
-        let mut buffers = Vec::with_capacity(draw.buffers.len());
+        if n == lowered.len() {
+            lowered.push(DriverBatchDraw { batch_pipeline: draw.pipeline.0.token, batch_buffers: Vec::new(), batch_primitive: draw.primitive, batch_index: None, batch_vertex_start: 0, batch_vertex_count: 0, batch_instances: 0 });
+        }
+        let mut buffers = std::mem::take(&mut lowered[n].batch_buffers);
+        buffers.clear();
         for (stage, index, buffer, offset) in &draw.buffers {
             check_slot(OP, *index)?;
             resource_check(OP, &device, &buffer.resource)?;
@@ -1731,7 +1738,7 @@ pub fn draw_batch(encoder: &RenderEncoder, draws: &[BatchDraw]) -> Result<(), Er
             valid_draw(OP, draw.primitive, draw.vertex_start, draw.vertex_count, draw.instances)?;
             None
         };
-        lowered.push(DriverBatchDraw {
+        lowered[n] = DriverBatchDraw {
             batch_pipeline: draw.pipeline.0.token,
             batch_buffers: buffers,
             batch_primitive: draw.primitive,
@@ -1739,9 +1746,11 @@ pub fn draw_batch(encoder: &RenderEncoder, draws: &[BatchDraw]) -> Result<(), Er
             batch_vertex_start: draw.vertex_start,
             batch_vertex_count: draw.vertex_count,
             batch_instances: draw.instances,
-        });
+        };
     }
-    (encoder.0.raw().draw_batch)(&lowered)?;
+    let result = (encoder.0.raw().draw_batch)(&lowered[..draws.len()]);
+    LOWERED.with(|l| *l.borrow_mut() = lowered);
+    result?;
     encoder.0.pipeline_set.set(true);
     Ok(())
 }

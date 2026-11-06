@@ -537,7 +537,7 @@ pub fn update_with(value: t, frame_: &frame::t, inspector: &dyn Fn(&mut Ui) -> R
         None => (camera, render_status),
     };
     let stepped = update_.actions.iter().any(|a| matches!(a, action::Undo | action::Redo));
-    let (mut core, camera, extra) = V::on_view(core, &previous_camera, &focus_key_of(&focused.viewing), camera, extra, stepped);
+    let (mut core, camera, extra) = V::on_view(core, &previous_camera, &focus_key_of(&focused.viewing), camera, extra, stepped, !raw_frame.input.buttons.is_empty());
     let ends_pointer = |e: &Event| matches!(e, Event::Pointer_released(MouseButton::LeftButton, _) | Event::Pointer_cancelled(MouseButton::LeftButton) | Event::Focus_lost);
     if !frame::mouse_down(MouseButton::LeftButton, &raw_frame) || frame::has_event(&ends_pointer, &raw_frame) || frame::has_event(&ends_pointer, &update_.input) {
         core.history = history::seal(true, core.history.clone());
@@ -648,7 +648,10 @@ pub fn update_with(value: t, frame_: &frame::t, inspector: &dyn Fn(&mut Ui) -> R
         (true, Some((_, pending))) => Some(((value.core.clock)(), pending)),
         (false, _) => Some(((value.core.clock)(), first_draws)),
     };
-    (autosave(value, false, frame.input.t), inspected)
+    // a held button defers the write to its release: the synced write is tens of ms (F_FULLFSYNC)
+    // and stuttered every orbit and slider drag at 2 Hz
+    let value = if frame.input.buttons.is_empty() { autosave(value, false, frame.input.t) } else { value };
+    (value, inspected)
 }
 
 pub fn compose_scene(value: &t, frame_: &frame::t) -> Nodes {
@@ -847,7 +850,7 @@ pub fn memory_boundary(mut value: t) -> t {
         }
         mem::Verdict::Within => {
             if cook::out_of_memory(&value.core.cook) && mem::retry_worthwhile() {
-                value.core.cook = cook::force(&value.core.cook);
+                value.core.cook = std::rc::Rc::new(cook::force(&value.core.cook));
                 core_changed = true;
             }
             // a refused cook stays refused, though the process is back under: the last good frame shows

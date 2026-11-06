@@ -224,10 +224,10 @@ fn frame_helpers() {
         assert_eq!(editor_frame::fps_sample(&value, &later), (Some(60), 1.5));
         // a hidden pane set leaves the list and frame-camera keys out
         let all = editor_commands::keymap().to_vec();
-        let live = editor_frame::live_keymap(false, all.clone());
+        let live = editor_frame::live_keymap(false, std::rc::Rc::new(all.clone()));
         assert!(live.len() < all.len());
         assert!(live.iter().all(|c| !matches!(action_of(c), action::List_command(_) | action::Frame_camera)));
-        assert_eq!(editor_frame::live_keymap(true, all.clone()).len(), all.len());
+        assert_eq!(editor_frame::live_keymap(true, std::rc::Rc::new(all.clone())).len(), all.len());
         // no carry: no marks
         assert_eq!(editor_frame::carry_marks(&value), (Vec::new(), None));
         // the hud shows the leader's pending prefix

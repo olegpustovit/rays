@@ -108,12 +108,14 @@ pub struct Builder {
     open_texture: i64,
     clip: Option<Clip>,
     render_ir_valid: bool,
+    /// Storage of published tables (a frame publishes one per layer): reused once dropped.
+    spares: Vec<Arc<Vec<u8>>>,
 }
 impl Builder {
     pub fn create() -> Builder { Self::with_capacity(256) }
     pub fn with_capacity(capacity: i64) -> Builder {
         let capacity = capacity.max(1) as usize;
-        Builder { bytes: Arc::new(vec![0; capacity.saturating_mul(INSTANCE_BYTES)]), length: 0, batches: Vec::new(), open_first: 0, open_texture: 0, clip: None, render_ir_valid: true }
+        Builder { bytes: Arc::new(vec![0; capacity.saturating_mul(INSTANCE_BYTES)]), length: 0, batches: Vec::new(), open_first: 0, open_texture: 0, clip: None, render_ir_valid: true, spares: Vec::new() }
     }
     pub fn reset(&mut self) {
         self.length = 0;
@@ -122,7 +124,18 @@ impl Builder {
         self.open_texture = 0;
         self.clip = None;
         self.render_ir_valid = true;
-        if Arc::strong_count(&self.bytes) != 1 { self.bytes = Arc::new(vec![0; self.bytes.len()]); }
+        // a published table still holds the storage (publishing shares it, not a copy): write a
+        // spare its table dropped, or a new one, and keep this one as a spare
+        if Arc::strong_count(&self.bytes) != 1 {
+            let free = match self.spares.iter().position(|s| Arc::strong_count(s) == 1) {
+                Some(i) => self.spares.swap_remove(i),
+                None => Arc::new(Vec::with_capacity(self.bytes.capacity())),
+            };
+            self.spares.push(std::mem::replace(&mut self.bytes, free));
+            if self.spares.len() > 64 { self.spares.retain(|s| Arc::strong_count(s) != 1); }
+        }
+        let bytes = Arc::get_mut(&mut self.bytes).expect("unique storage");
+        bytes.resize(bytes.capacity(), 0);
     }
     fn close(&mut self) {
         if self.length > self.open_first {
@@ -140,6 +153,11 @@ impl Builder {
     }
     fn reserve(&mut self) -> Result<usize, String> {
         let needed = self.length.checked_add(1).and_then(|n| n.checked_mul(INSTANCE_BYTES)).ok_or_else(|| String::from("Ui_batch capacity overflow"))?;
+        if needed > self.bytes.len() {
+            if let Some(bytes) = Arc::get_mut(&mut self.bytes).filter(|b| b.capacity() >= needed) {
+                bytes.resize(bytes.capacity(), 0);
+            }
+        }
         let current = self.bytes.len();
         if needed > current {
             let grown = needed.max(current.saturating_mul(2));
@@ -232,6 +250,7 @@ impl Builder {
     pub fn publish(&mut self) -> Result<Table, String> {
         self.close();
         let len = self.length * INSTANCE_BYTES;
+        if let Some(bytes) = Arc::get_mut(&mut self.bytes) { bytes.truncate(len); }
         let bytes = if len == self.bytes.len() { self.bytes.clone() } else {
             let Some(source) = self.bytes.get(..len) else { return Err("Ui_batch: invalid instance storage".into()); };
             Arc::new(source.to_vec())
@@ -366,7 +385,7 @@ mod tests {
     }
 
     #[test]
-    fn publish_shares_full_storage_and_copies_partial_storage() {
+    fn publish_shares_storage() {
         let mut full = Builder::with_capacity(1);
         assert!(full.shape_rect(0.0, 0.0, 1.0, 1.0, -1, 0).is_ok());
         let full_snapshot = published(&mut full);
@@ -376,8 +395,18 @@ mod tests {
         assert_eq!(full_snapshot.count(), 1);
         let mut partial = Builder::with_capacity(2);
         assert!(partial.shape_rect(0.0, 0.0, 1.0, 1.0, -1, 0).is_ok());
-        let published = published(&mut partial);
-        assert!(!Arc::ptr_eq(&partial.bytes, &published.bytes));
+        let first = published(&mut partial);
+        assert!(Arc::ptr_eq(&partial.bytes, &first.bytes) && first.instances().len() == INSTANCE_BYTES);
+        // the next frame writes a spare; the one after reuses this storage once its table is gone
+        partial.reset();
+        assert!(!Arc::ptr_eq(&partial.bytes, &first.bytes));
+        let storage = Arc::as_ptr(&first.bytes);
+        drop(first);
+        assert!(partial.shape_rect(0.0, 0.0, 1.0, 1.0, -1, 0).is_ok());
+        let second = published(&mut partial);
+        partial.reset();
+        assert!(Arc::as_ptr(&partial.bytes) == storage, "the storage two frames back is reused");
+        drop(second);
     }
 
     #[test]

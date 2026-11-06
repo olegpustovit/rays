@@ -20,6 +20,11 @@ pub fn none() -> T {
     NONE.get_or_init(|| make(&Arc::new(param::schema("none".to_owned(), Vec::new()).expect("valid schema")), Vec::new())).clone()
 }
 
+/// The values, when they are a record of `schema` itself.
+pub fn record_of<'a>(settings: &'a T, schema: &Schema) -> Option<&'a [Value]> {
+    std::ptr::eq(&*settings.schema, schema).then(|| settings.values.as_slice())
+}
+
 pub fn fields(settings: &T) -> Vec<FieldView> {
     settings.schema.view(&settings.values).expect("settings are valid by construction")
 }

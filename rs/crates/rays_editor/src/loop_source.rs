@@ -198,8 +198,8 @@ pub fn save_source(core: m::t, source: Option<source_file::t>, view: &flow_synta
     }
 }
 
-/// One recovery file per sketch. Polling at 2 Hz coalesces live drags and keeps printing and
-/// filesystem work out of idle frames; close flushes.
+/// One recovery file per sketch. Polling at 2 Hz keeps printing and filesystem work out of idle
+/// frames; a live drag is saved after its release (the caller skips held frames); close flushes.
 pub fn autosave(value: t, force: bool, now: f64) -> t {
     if !force && now >= value.state_checked && now - value.state_checked < 0.5 {
         return value;

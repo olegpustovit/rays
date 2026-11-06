@@ -892,11 +892,11 @@ pub fn hud_of(value: &t, leader: &router::State, frame_: &frame::t, commands: &[
 }
 
 /// A hidden pane set leaves the list and frame-camera keys out of the keymap.
-pub fn live_keymap(all_ui_visible: bool, keymap: Vec<Command>) -> Vec<Command> {
+pub fn live_keymap(all_ui_visible: bool, keymap: std::rc::Rc<Vec<Command>>) -> std::rc::Rc<Vec<Command>> {
     if all_ui_visible {
         keymap
     } else {
-        keymap.into_iter().filter(|c| !matches!(action_of(c), action::List_command(_) | action::Frame_camera)).collect()
+        std::rc::Rc::new(keymap.iter().filter(|c| !matches!(action_of(c), action::List_command(_) | action::Frame_camera)).cloned().collect())
     }
 }
 
@@ -948,11 +948,12 @@ pub fn update_frame(
         || (all_ui_visible && graph_family(&value) && scope_name(&value).is_some() && scope::editing(pane_view(&value)))
         || tree::editing(&value.tree);
     let text_focus = text_focus || modal;
-    let keymap = {
-        let mut focused = value.clone();
-        focused.focus = focus.clone();
-        live_keymap(all_ui_visible, routed(&focused))
-    };
+    // routed as the new focus has it, without a copy of the model
+    let mut value = value;
+    let held_focus = std::mem::replace(&mut value.focus, focus.clone());
+    let keymap = live_keymap(all_ui_visible, routed(&value));
+    value.focus = held_focus;
+    let value = value;
     let held_keys = frame_.input.keys.clone();
     let platform = ui_platform(&value);
     let keymap_refs: Vec<&Command> = keymap.iter().collect();

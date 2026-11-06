@@ -113,7 +113,7 @@ pub fn set_settings(value: t, new_settings: &settings::T) -> t {
             let doc = adopt(&value.history, doc);
             let history = commit(&doc, Some("Settings"), None, value.history.clone());
             let mut next = value;
-            next.cook = cook::force(&next.cook);
+            next.cook = std::rc::Rc::new(cook::force(&next.cook));
             next.doc = doc;
             next.history = history;
             next
@@ -448,7 +448,7 @@ pub fn carry_over_surface(view: Option<&str>, value: t, origin: vec3::T, directi
     }
     let view = view_of(view, &value);
     let mut settled = value.clone();
-    settled.cook.pieces = c.settled.clone();
+    std::rc::Rc::make_mut(&mut settled.cook).pieces = c.settled.clone();
     let placed = placed_pieces(false, Some(&view), &settled);
     let nearest = nearest_by(&placed, origin, direction, &|p, o, d| cook::pick_material(p, o, d).map(|(t, m)| (t, Hit::Material(m))));
     let place = match nearest {

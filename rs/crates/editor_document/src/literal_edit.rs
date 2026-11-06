@@ -7,7 +7,7 @@
 use crate::layout_by_path::Path;
 use flow_check::catalog::{self as fc, Catalog};
 use flow_check::workspace::{self as w, Graph, Node as TNode, Term, Workspace};
-use flow_check::term_arena::{Draft as TermDraft, TermBuilder, TermId};
+use flow_check::term_arena::{Draft as TermDraft, TermArena, TermBuilder, TermId};
 use flow_syntax::arena::{SyntaxBuilder, SyntaxId};
 use flow_graph::flow_edit::{arg_text, ArgKey, Op};
 use flow_sop::lower as l;
@@ -18,7 +18,7 @@ use flow_syntax::syntax::{self as s, Node, Syntax};
 use flow_syntax::ty::Ty;
 use flow_syntax::value::Value as E;
 use rays_diagnostic::{Diagnostic, Severity, Span};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 type S = Syntax;
@@ -125,21 +125,21 @@ fn find_argument(in_fn: bool, field: &str, id: i64, term: &Term) -> Option<Found
 }
 
 /// Names a `fn` body reads: a closure may hold the value bound to one of them.
-fn fn_names(graphs: &[&Graph]) -> HashSet<String> {
-    fn go(names: &mut HashSet<String>, inside: bool, term: &Term) {
-        if let (TNode::RefBinding(id), true) = (term.node, inside) {
-            names.insert(term.name(term.arena().ref_binding(id).name).to_owned());
+/// Whether a function body refers to a binding named on `path`: a walk of arena rows that stops
+/// at the first hit and allocates nothing (it runs on every follow-viewport orbit frame).
+fn captures(graphs: &[&Graph], path: &[String]) -> bool {
+    fn go(arena: &TermArena, path: &[String], inside: bool, row: TermId) -> bool {
+        let node = arena.row(row).node;
+        if let (TNode::RefBinding(id), true) = (node, inside) {
+            let name = arena.name(arena.ref_binding(id).name);
+            if path.iter().any(|p| p == name) {
+                return true;
+            }
         }
-        let inside = inside || matches!(term.node, TNode::Fn(_));
-        for id in term.children() {
-            go(names, inside, &term.child(*id));
-        }
+        let inside = inside || matches!(node, TNode::Fn(_));
+        arena.children(row).iter().any(|child| go(arena, path, inside, *child))
     }
-    let mut names = HashSet::new();
-    for g in graphs {
-        go(&mut names, false, &g.body);
-    }
-    names
+    graphs.iter().any(|g| go(g.body.arena(), path, false, g.body.row_id()))
 }
 
 fn plain(form: &S) -> bool {
@@ -297,8 +297,19 @@ pub fn patch(catalog: &Catalog, workspace: &Workspace, op: &Op) -> Option<R<(Wor
             ..g.clone()
         }
     };
-    let graphs: Vec<_> = workspace.graphs.iter().map(&graph).collect();
-    let defs: Vec<_> = workspace.defs.iter().map(&graph).collect();
+    // A graph none of whose forms `remap_form` would replace (library bodies from other files, or
+    // forms ending before the patched literal) rebuilds to itself: reuse it. A follow-viewport orbit
+    // patches the camera every frame, and rebuilding every graph made that frame cost the workspace.
+    // ponytail: graphs after the literal still rebuild when its text length changes; shift spans in place if that shows.
+    let before_edit = |arena: &flow_syntax::arena::SyntaxArena| {
+        arena.rows().iter().all(|row| row.id != before.id && (row.span.finish <= before.span.start || row.span.finish <= row.span.start || !forms.contains_key(&row.id)))
+    };
+    let untouched = |g: &Graph| {
+        before_edit(g.form.arena()) && before_edit(g.body.arena().syntax()) && g.inputs.iter().all(|(_, _, default)| default.as_ref().is_none_or(|d| before_edit(d.arena().syntax())))
+    };
+    let reuse = |g: &Graph| if untouched(g) { g.clone() } else { graph(g) };
+    let graphs: Vec<_> = workspace.graphs.iter().map(&reuse).collect();
+    let defs: Vec<_> = workspace.defs.iter().map(&reuse).collect();
     let (_, _, _, argument, _) = graphs.iter().chain(&defs).find_map(|graph| find_argument(false, field, expr.id, &graph.body))?;
     let mut error: Option<Diagnostic> = None;
     {
@@ -322,14 +333,13 @@ pub fn patch(catalog: &Catalog, workspace: &Workspace, op: &Op) -> Option<R<(Wor
         macros: workspace.macros.iter().map(|f| forms.get(&f.id).cloned().unwrap_or_else(|| f.clone())).collect::<Vec<_>>().into(),
         ..workspace.clone()
     };
-    let names = fn_names(&workspace.graphs.iter().chain(workspace.defs.iter()).collect::<Vec<_>>());
     let change = Change {
         path: path.clone(),
         field: field.clone(),
         kind,
         authored,
         in_fn,
-        captured: path.iter().any(|p| names.contains(p)),
+        captured: captures(&workspace.graphs.iter().chain(workspace.defs.iter()).collect::<Vec<_>>(), path),
         before: old_value,
         after: new_value,
         expr: argument.form(),
@@ -515,6 +525,31 @@ mod compact_span_tests {
         let reference = flow_eval::static_with(&full, true, None, None).unwrap();
         assert_eq!(patched.results, reference.results);
         assert_eq!(patched.records, reference.records);
+    }
+
+    #[test]
+    fn orbit_patch_reuses_graphs_before_the_literal() {
+        let catalog = crate::kinds::catalog(1, &sop::nodes::factories()).unwrap();
+        let doc = crate::workspace_doc::of_text(
+            &Default::default(), &catalog,
+            "(workspace w (defn twice :context value [(x : float)] (* x 2.0)) (graph early :context sop (sop/box :size [1 1 1])) (graph scene :context scene (scene/camera :eye [0 0 6])))",
+        ).unwrap();
+        let eye = |text: &str| Op::SetArg {
+            node: vec!["scene".into(), "@result".into()], key: ArgKey::Kw("eye".into()),
+            sub: vec![], value: s::parse(text).unwrap().remove(0),
+        };
+        let (once, _) = patch(&catalog, &doc.checked, &eye("[9 2.5 -3]")).unwrap().unwrap();
+        let (twice, change) = patch(&catalog, &once, &eye("[10.125 2 -3.5]")).unwrap().unwrap();
+        assert!(!change.captured);
+        let same = |a: &Graph, b: &Graph| Arc::ptr_eq(a.body.arena(), b.body.arena());
+        assert!(same(&once.graphs[0], &twice.graphs[0]), "a graph before the literal was rebuilt");
+        assert!(once.defs.iter().zip(twice.defs.iter()).all(|(a, b)| same(a, b)), "a defn or library body was rebuilt");
+        assert!(!same(&once.graphs[1], &twice.graphs[1]));
+        let (full, diagnostics) = flow_sop::catalog::check_workspace(&doc.checked.ops, false, None, &catalog, &twice.source);
+        let full = full.unwrap_or_else(|| panic!("{diagnostics:?}"));
+        for (patched, checked) in twice.graphs.iter().zip(full.graphs.iter()).chain(twice.defs.iter().zip(full.defs.iter())) {
+            assert_eq!(patched.body, checked.body, "{}", patched.name);
+        }
     }
 
     #[test]

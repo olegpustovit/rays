@@ -110,10 +110,12 @@ pub fn acquire_many(value: &mut t, keys: &[(kind, i64, bool)]) -> Result<Vec<Tex
             },
         }
     }
-    // OCaml prepends the new entries, newest first
-    made.reverse();
-    made.append(&mut value.entries);
-    value.entries = made;
+    // OCaml prepends the new entries, newest first; a pass that made none leaves the list as it is
+    if !made.is_empty() {
+        made.reverse();
+        made.append(&mut value.entries);
+        value.entries = made;
+    }
     Ok(textures)
 }
 

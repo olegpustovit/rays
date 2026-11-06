@@ -86,7 +86,7 @@ impl Rig {
     pub fn step(&mut self, o: &StepOptions, objects: &[Obj]) -> cook::update_result {
         let mut frame = still_frame();
         frame.input.buttons = o.buttons.clone();
-        let u = cook::update(None, None, false, &o.probes, &pick::Set::default(), None, &self.cook, &o.settings, objects, None, Effects::default(), &o.changes, &o.timeline, &frame, None);
+        let u = cook::update(None, None, false, &o.probes, &pick::Set::default(), None, &self.cook, &o.settings, &objects.iter().map(|(i, n, d)| (*i, n, *d)).collect::<Vec<_>>(), None, Effects::default(), &o.changes, &o.timeline, &frame, None);
         self.cook = u.cook.clone();
         u
     }
@@ -264,7 +264,7 @@ pub fn reuse() {
             None,
             &rig.cook,
             &b,
-            objects,
+            &objects.iter().map(|(i, n, d)| (*i, n, *d)).collect::<Vec<_>>(),
             None,
             Effects { cook: recook, ..Effects::default() },
             &[],

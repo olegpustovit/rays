@@ -2790,10 +2790,11 @@ fn assoc(table: &[(i64, i64)], slot: i64) -> i64 {
     table.iter().find(|(from, _)| *from == slot).map_or(slot, |(_, to)| *to)
 }
 
-type plan_entry_result = (plan_draw, automatic_signature);
+type plan_entry_result = (plan_draw, Option<automatic_signature>);
 
 /// One draw's plan: the bindings its pipeline's Lisp declaration order expects.
-fn plan_entry(value: &mut t, index: usize) -> Result<plan_entry_result, Error> {
+/// `keep`: the plan is retained, and replays when each slot matches its signature.
+fn plan_entry(value: &mut t, index: usize, keep: bool) -> Result<plan_entry_result, Error> {
     let slot = &value.prepared_scratch.scratch_slots[index];
     let family = slot.slot_family;
     let blend = slot.slot_blend;
@@ -2806,7 +2807,7 @@ fn plan_entry(value: &mut t, index: usize) -> Result<plan_entry_result, Error> {
     let slot_gpu_vertices = slot.slot_gpu_vertices.clone();
     let slot_vertex_attributes = slot.slot_vertex_attributes.clone();
     let transform_uniforms = slot.slot_state.as_ref().expect("slot state").transform_uniforms.clone();
-    let signature = automatic_signature(slot);
+    let signature = keep.then(|| automatic_signature(slot));
     let sun_requested = sun_key_of(slot).is_some();
     let item = item_ref.borrow();
     if let Some(source) = &slot_gpu_vertices {
@@ -3048,7 +3049,7 @@ fn batch_resources_of(value: &t, draws: &[plan_draw]) -> Vec<ResourceUse> {
     resources
 }
 
-fn plan_batches(value: &mut t) -> Result<Vec<(Rc<batch_plan>, Vec<automatic_signature>)>, Error> {
+fn plan_batches(value: &mut t, keep: bool) -> Result<Vec<(Rc<batch_plan>, Vec<automatic_signature>)>, Error> {
     let length = value.prepared_scratch.scratch_length;
     let mut planned: Vec<(Rc<batch_plan>, Vec<automatic_signature>)> = Vec::new();
     let mut first = true;
@@ -3071,11 +3072,13 @@ fn plan_batches(value: &mut t) -> Result<Vec<(Rc<batch_plan>, Vec<automatic_sign
                 break;
             }
         }
-        let mut entries: Vec<plan_entry_result> = Vec::new();
+        let mut draws: Vec<plan_draw> = Vec::with_capacity(next - index);
+        let mut signatures: Vec<automatic_signature> = Vec::with_capacity(if keep { next - index } else { 0 });
         for slot_index in index..next {
-            entries.push(plan_entry(value, slot_index)?);
+            let (draw, signature) = plan_entry(value, slot_index, keep)?;
+            draws.push(draw);
+            signatures.extend(signature);
         }
-        let (draws, signatures): (Vec<plan_draw>, Vec<automatic_signature>) = entries.into_iter().unzip();
         let batch = batch_plan {
             batch_family: family,
             batch_samples: samples,
@@ -3158,34 +3161,7 @@ fn finish_prepared_frame(
         return encode_frame(value, &frame, clear, &plan.replay_batches).map(|()| true);
     }
     value.icb_stats.icb_misses += 1;
-    let planned = match plan_batches(value) {
-        Ok(planned) => planned,
-        Err(e) => {
-            discard(&frame);
-            return Err(e);
-        }
-    };
-    let mut plan_batches_: Vec<Rc<batch_plan>> = Vec::new();
-    let mut payloads: Vec<automatic_signature> = Vec::new();
-    for (batch, signatures) in planned {
-        plan_batches_.push(batch);
-        payloads.extend(signatures);
-    }
-    let gpu_vertices: Vec<gpu_vertices> = value.prepared_scratch.scratch_slots[..value.prepared_scratch.scratch_length]
-        .iter()
-        .rev()
-        .filter_map(|slot| slot.slot_gpu_vertices.clone())
-        .collect();
-    clear_prepared_scratch(&mut value.prepared_scratch);
-    encode_frame(value, &frame, clear, &plan_batches_)?;
-    value.previous_uniforms = uniform_slices;
-    let payload_count = payloads.len() as i64;
-    let plan = Rc::new(replay_plan {
-        replay_clear: clear,
-        replay_payloads: payloads,
-        replay_batches: plan_batches_.clone(),
-        replay_gpu_vertices: gpu_vertices,
-    });
+    let payload_count = value.prepared_scratch.scratch_length as i64;
     let admit = match &value.automatic_candidate {
         Some(candidate) => {
             candidate.candidate_clear == clear
@@ -3194,9 +3170,36 @@ fn finish_prepared_frame(
         }
         None => false,
     };
+    // a plan nothing keeps (a frame unlike the last, without a prepared key) is encoded only
     let retained = prepared_key.is_some() || admit;
-    if retained {
-        for batch in &plan_batches_ {
+    let planned = match plan_batches(value, retained) {
+        Ok(planned) => planned,
+        Err(e) => {
+            discard(&frame);
+            return Err(e);
+        }
+    };
+    let mut plan_batches_: Vec<Rc<batch_plan>> = Vec::with_capacity(planned.len());
+    let mut payloads: Vec<automatic_signature> = Vec::with_capacity(if retained { payload_count as usize } else { 0 });
+    for (batch, signatures) in planned {
+        plan_batches_.push(batch);
+        if retained {
+            payloads.extend(signatures);
+        }
+    }
+    let gpu_vertices: Vec<gpu_vertices> = if retained {
+        value.prepared_scratch.scratch_slots[..value.prepared_scratch.scratch_length].iter().rev().filter_map(|slot| slot.slot_gpu_vertices.clone()).collect()
+    } else {
+        Vec::new()
+    };
+    clear_prepared_scratch(&mut value.prepared_scratch);
+    encode_frame(value, &frame, clear, &plan_batches_)?;
+    value.previous_uniforms = uniform_slices;
+    let plan = retained.then(|| {
+        Rc::new(replay_plan { replay_clear: clear, replay_payloads: payloads, replay_batches: plan_batches_, replay_gpu_vertices: gpu_vertices })
+    });
+    if let Some(plan) = &plan {
+        for batch in &plan.replay_batches {
             if let Err(e) = build_icb(value, batch) {
                 value.icb_stats.icb_failures += 1;
                 value.icb_stats.icb_last_failure = Some(error::to_string(&e));
@@ -3208,13 +3211,13 @@ fn finish_prepared_frame(
             submission_identity: identity.clone(),
             submission_version: *version,
             submission_draw_count: draw_count,
-            submission_plan: plan.clone(),
+            submission_plan: plan.clone().expect("a prepared key retains its plan"),
         });
     }
     let old = value.automatic_submission.take();
     drop_plan(value, old);
     if admit {
-        value.automatic_submission = Some(plan);
+        value.automatic_submission = plan;
         value.automatic_candidate = None;
     } else {
         value.automatic_submission = None;

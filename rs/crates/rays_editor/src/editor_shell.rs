@@ -106,12 +106,12 @@ pub fn panel_state(value: &t, path: &[usize]) -> panels::State {
     let state = if value.workspace.restored {
         panels::default_state()
     } else {
-        match saved(&panel_key(&value.doc, path)) {
+        let key = panel_key(&value.doc, path);
+        match saved(&key) {
             Some(state) => state,
             None => {
                 // a leaf of a binding used twice starts from the binding's entry (flow.md 11.11)
                 let origin = value.doc.shell.as_ref().and_then(|s| s.origins.iter().find(|(p, _)| p == path).map(|(_, o)| o));
-                let key = panel_key(&value.doc, path);
                 let by_name = match (origin, key.as_slice()) {
                     (Some(Origin::Bound(name)), [graph, second, ..]) if second == "@panel" => saved(&vec![graph.clone(), name.clone()]),
                     _ => None,

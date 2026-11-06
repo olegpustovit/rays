@@ -245,7 +245,7 @@ pub fn create(opts: create_opts, workspace: &workspace_doc::T, prepare: cook::Pr
         workspace: shell,
         timeline: timeline::create(),
         live_frame: input::at_time(0.0),
-        cook,
+        cook: std::rc::Rc::new(cook),
         edit_error: None,
         status_fps: None,
         status_fps_at: f64::NEG_INFINITY,

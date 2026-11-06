@@ -171,15 +171,20 @@ impl LazyBool {
 #[derive(Clone)]
 pub struct LazyCatalog {
     cell: Arc<OnceLock<Result<Catalog, Diagnostic>>>,
-    init: Arc<dyn Fn() -> Result<Catalog, Diagnostic> + Send + Sync>,
+    factories: Vec<edit_graph::Factory>,
 }
 
 impl LazyCatalog {
-    pub fn new(init: Arc<dyn Fn() -> Result<Catalog, Diagnostic> + Send + Sync>) -> LazyCatalog {
-        LazyCatalog { cell: Arc::new(OnceLock::new()), init }
+    /// `previous`'s catalog when it is of the same factories: a lowering per orbit frame must not
+    /// rebuild every kind.
+    pub fn new(previous: Option<&LazyCatalog>, factories: Vec<edit_graph::Factory>) -> LazyCatalog {
+        match previous {
+            Some(p) if p.factories.len() == factories.len() && p.factories.iter().zip(&factories).all(|(a, b)| edit_graph::same_factory(a, b)) => p.clone(),
+            _ => LazyCatalog { cell: Arc::new(OnceLock::new()), factories },
+        }
     }
     pub fn force(&self) -> &Result<Catalog, Diagnostic> {
-        self.cell.get_or_init(|| (self.init)())
+        self.cell.get_or_init(|| crate::kinds::catalog(flow_sop::manifest::VERSION, &self.factories))
     }
 }
 
@@ -197,7 +202,8 @@ pub struct T {
     /// Objects: the input is the parent.
     pub scene: kg::T,
     /// By geometry object id: its SOP network.
-    pub networks: IntMap<Network>,
+    /// Shared: a document is cloned several times a frame and a network's maps are deep.
+    pub networks: Arc<IntMap<Network>>,
     /// By World id: its layers, each on the one below.
     pub layers: IntMap<kg::T>,
     /// A camera object.
@@ -361,7 +367,7 @@ pub fn validate(value: &T) -> Result<(), String> {
             Some(_) => Ok(()),
         }
     };
-    for (id, network) in &value.networks {
+    for (id, network) in value.networks.iter() {
         owner(*id, "geometry")?;
         if network.context != context::sop() {
             return Err(format!("network #{id} has the wrong context"));
@@ -390,6 +396,7 @@ pub fn prune(value: &T) -> T {
     let networks: IntMap<Network> = value.networks.iter().filter(|(id, _)| alive(**id)).map(|(k, v)| (*k, v.clone())).collect();
     let layers: IntMap<kg::T> = value.layers.iter().filter(|(id, _)| alive(**id)).map(|(k, v)| (*k, v.clone())).collect();
     let active_camera = value.active_camera.filter(|id| alive(*id));
+    let networks = Arc::new(networks);
     if networks.len() == value.networks.len() && layers.len() == value.layers.len() && active_camera == value.active_camera {
         value.clone()
     } else {
@@ -514,7 +521,7 @@ pub fn dump(value: &T) -> String {
         }
     }
     kinds_line(&mut line, "scene", "scene", &value.scene);
-    for (id, n) in &value.networks {
+    for (id, n) in value.networks.iter() {
         net_line(&mut line, &format!("object {id}"), n);
     }
     for (id, l) in &value.layers {

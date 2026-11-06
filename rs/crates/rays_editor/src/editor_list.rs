@@ -48,7 +48,7 @@ pub fn open_level(mut value: t, level: Level) -> t {
 }
 
 /// The geometry objects to cook: visible ones, each with its network.
-pub fn geometry_objects(value: &t) -> Vec<(i64, net::Network, i64)> {
+pub fn geometry_objects(value: &t) -> Vec<(i64, &net::Network, i64)> {
     // a workspace without a scene graph shows each graph the lowering made a network of; an image
     // graph is one (the canvas previews its nodes) but its payload is not geometry, so the geometry
     // cook never takes it (Flow_native.Workspace_images cooks images)
@@ -60,10 +60,10 @@ pub fn geometry_objects(value: &t) -> Vec<(i64, net::Network, i64)> {
         if let (Some(node), Some(network)) = (kg::find(&scene_graph, id), value.doc.networks.get(&id)) {
             if objects::visible(&node) && !image_graph(&node) {
                 match value.viewed.get(&id) {
-                    Some((graph, displayed)) => found.push((id, graph.clone(), *displayed)),
+                    Some((graph, displayed)) => found.push((id, graph, *displayed)),
                     None => {
                         if let Some(displayed) = network.displayed {
-                            found.push((id, network.graph.clone(), displayed));
+                            found.push((id, &network.graph, displayed));
                         }
                     }
                 }

@@ -12,7 +12,7 @@
 //! once with the lowering.
 use crate::document::{self, Home, ViewRoot, ViewWorld};
 use crate::kind_graph as kg;
-use crate::kinds::{self, ports, scene_kinds, window_default, window_of_values, window_schema, world_kinds, Window};
+use crate::kinds::{ports, scene_kinds, window_default, window_of_values, window_schema, world_kinds, Window};
 use crate::literal_edit;
 use crate::objects::{self, root};
 use crate::settings;
@@ -1084,6 +1084,10 @@ pub fn of_workspace(options: &Options, workspace: &workspace_doc::T) -> R<docume
             }
         }
     }
+    let networks = match previous {
+        Some(doc) if doc.networks.len() == networks.len() && networks.iter().all(|(id, n)| doc.networks.get(id).is_some_and(|old| same_network(old, n))) => doc.networks.clone(),
+        _ => Arc::new(networks),
+    };
     let settings_calls = calls(&|k| k == "settings/config", &no_below, workspace, &lowered.plan, context::settings())?;
     let settings = match settings_calls.first() {
         Some(Call { kind, args, .. }) => settings_of(&E::Struct(kind.clone(), ty::settings(), args.clone()))?,
@@ -1142,7 +1146,6 @@ pub fn of_workspace(options: &Options, workspace: &workspace_doc::T) -> R<docume
         Ok(w) => w.fast,
         Err(_) => true,
     }));
-    let factories_for_catalog = factories.clone();
     Ok(document::T {
         scene,
         networks,
@@ -1159,7 +1162,7 @@ pub fn of_workspace(options: &Options, workspace: &workspace_doc::T) -> R<docume
         workspace: document::Workspace {
             ws: workspace,
             lowered: Arc::new(lowered),
-            catalog: document::LazyCatalog::new(Arc::new(move || kinds::catalog(flow_sop::manifest::VERSION, &factories_for_catalog))),
+            catalog: document::LazyCatalog::new(previous.map(|d| &d.workspace.catalog), factories),
             fast,
         },
     })

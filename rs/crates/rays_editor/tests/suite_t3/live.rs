@@ -263,7 +263,7 @@ pub fn editor_cook_path() {
         timeline = next;
         let mut f = frame_at((0., 0.), vec![], 0);
         f.input.dt = 0.;
-        let update = cook::update(None, None, false, &[], &rays_editor::pick::Set::default(), None, &cook, &crate::cook_t::none_settings(), &objects, None, param::Effects::default(), &changes, &timeline, &f, None);
+        let update = cook::update(None, None, false, &[], &rays_editor::pick::Set::default(), None, &cook, &crate::cook_t::none_settings(), &objects.iter().map(|(i, n, d)| (*i, n, *d)).collect::<Vec<_>>(), None, param::Effects::default(), &changes, &timeline, &f, None);
         cook = update.cook.clone();
         check(update.edit_error.is_none(), "editor cook: edit error");
         check(cook::status(&cook) == sop::async_cook::Status::Idle && update.prepared_changed, "await: the cook of frame n is published in frame n");

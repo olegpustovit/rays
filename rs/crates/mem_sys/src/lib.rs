@@ -18,6 +18,7 @@ pub struct CountingAllocator;
 static GLOBAL: CountingAllocator = CountingAllocator;
 
 fn add_live(size: usize) {
+    trace(size);
     let size = size as u64;
     ALLOCS.fetch_add(1, Ordering::Relaxed);
     TOTAL.fetch_add(size, Ordering::Relaxed);
@@ -149,4 +150,21 @@ pub fn instructions() -> Option<i64> {
 
 pub fn physical_ram() -> i64 {
     unsafe { mem_sys_physical_ram() }
+}
+
+// TEMP alloc sampler
+pub static TRACE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static ACC: AtomicU64 = AtomicU64::new(0);
+pub static SAMPLES: Mutex<Vec<String>> = Mutex::new(Vec::new());
+thread_local! { static IN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+fn trace(size: usize) {
+    if !TRACE.load(Ordering::Relaxed) || IN.with(|c| c.get()) { return; }
+    let step = 8192u64;
+    let before = ACC.fetch_add(size as u64, Ordering::Relaxed);
+    let n = (before + size as u64) / step - before / step;
+    if n == 0 { return; }
+    IN.with(|c| c.set(true));
+    let bt = format!("{}\t{}", n, std::backtrace::Backtrace::force_capture());
+    SAMPLES.lock().unwrap().push(bt);
+    IN.with(|c| c.set(false));
 }

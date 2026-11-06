@@ -1385,9 +1385,10 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::Gpu::Config>, pump: Option<&dyn Fn(
         _ if all_ui_visible && actions.contains(&action::Add_node) && !graph_shown && has_panel(&value2, &Panel::Graph) => vec![action::Add_node],
         _ => Vec::new(),
     };
-    let mut core = value2.clone();
+    let notice_at = value2.notice_at;
+    let mut core = value2;
     core.timeline = timeline;
-    core.cook = cooked.cook.clone();
+    core.cook = std::rc::Rc::new(cooked.cook);
     core.lit = lit_cache;
     core.edit_error = cooked.edit_error.clone();
     core.status_fps = status_fps;
@@ -1407,7 +1408,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::Gpu::Config>, pump: Option<&dyn Fn(
     core.carry = carry_value;
     core.framing = if cooked.framed.is_some() { None } else { framing };
     core.notice = new_notice;
-    core.notice_at = if notice_changed { frame_.input.t } else { value2.notice_at };
+    core.notice_at = if notice_changed { frame_.input.t } else { notice_at };
     let scene_changed = carry_changed || !kg::same(&doc.scene, &value.doc.scene) || prepared_changed;
     let mut out_actions = actions.clone();
     if entered_camera.is_some() && entered_camera == doc.active_camera {

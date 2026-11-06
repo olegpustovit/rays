@@ -87,11 +87,11 @@ fn document_boundary_validation_dump_preset_gpu() {
     let geometry = crate::objects::ids("geometry", &scene);
     assert!(!scene.is_empty() && document::object_network(&doc, geometry[0]).is_some(), "the lowering has no geometry object with a network");
     // an object must own its network, and a network its object
-    assert!(document::validate(&document::T { networks: document::IntMap::new(), ..doc.clone() }).is_err(), "an object without its network was accepted");
+    assert!(document::validate(&document::T { networks: Default::default(), ..doc.clone() }).is_err(), "an object without its network was accepted");
     let network = doc.networks.values().next().expect("a network").clone();
-    let mut extra = doc.networks.clone();
+    let mut extra = (*doc.networks).clone();
     extra.insert(9_999, network);
-    assert!(document::validate(&document::T { networks: extra, ..doc.clone() }).is_err(), "a network without its object was accepted");
+    assert!(document::validate(&document::T { networks: std::sync::Arc::new(extra), ..doc.clone() }).is_err(), "a network without its object was accepted");
     assert!(document::validate(&document::T { active_camera: Some(9_999), ..doc.clone() }).is_err(), "an active camera that is not a camera object was accepted");
     assert!(document::dump(&doc) == document::dump(&doc) && document::dump(&doc).contains("object "), "the document dump is not deterministic or lost an object");
     // the preset text is the workspace text: it loads back to the same document

@@ -41,11 +41,11 @@ pub fn run() {
     assert!(!scene.is_empty() && document::object_network(&doc, objects::ids("geometry", &scene)[0]).is_some(), "the lowering has no geometry object with a network");
     // an object must own its network, and a network its object
     let mut no_networks = doc.clone();
-    no_networks.networks.clear();
+    std::sync::Arc::make_mut(&mut no_networks.networks).clear();
     assert!(document::validate(&no_networks).is_err(), "an object without its network was accepted");
     let network = doc.networks.values().next().unwrap().clone();
     let mut orphan = doc.clone();
-    orphan.networks.insert(9_999, network);
+    std::sync::Arc::make_mut(&mut orphan.networks).insert(9_999, network);
     assert!(document::validate(&orphan).is_err(), "a network without its object was accepted");
     let mut bad_camera = doc.clone();
     bad_camera.active_camera = Some(9_999);

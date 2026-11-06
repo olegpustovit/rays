@@ -2,6 +2,8 @@
 //! routed keymap. Port of lib/rays_editor/editor_actions.ml.
 #![allow(non_camel_case_types)]
 use editor_core::keymap::Trigger;
+use std::cell::RefCell;
+use std::rc::Rc;
 use editor_core::panels::{self, Panel};
 use editor_document::document::{self, Level, T as Document};
 use editor_document::kind_graph as kg;
@@ -203,24 +205,54 @@ pub fn layout_labels(value: &t, keymap: Vec<editor_commands::Command>) -> Vec<ed
         .collect()
 }
 
-/// Commands that only mean something on this level and projection.
-pub fn routed(value: &t) -> Vec<editor_commands::Command> {
-    let graph_shown = graph_family(value);
-    let (listing, texting) = (listing(value), texting(value));
+/// What `routed` keeps commands by: the keymap is a constant table, so equal facts route the same.
+#[derive(PartialEq)]
+struct Routing {
+    graph_shown: bool,
+    listing: bool,
+    texting: bool,
+    scope: bool,
+    view: bool,
+    graph: bool,
+    world: bool,
+    layouts: Vec<(String, bool)>,
+}
+
+/// Commands that only mean something on this level and projection; the last frame's list while
+/// its facts hold.
+pub fn routed(value: &t) -> Rc<Vec<editor_commands::Command>> {
     let leaves = panels::leaves(&shell_tree(value, &value.workspace));
+    let (listing, texting) = (listing(value), texting(value));
+    let r = Routing {
+        graph_shown: graph_family(value),
+        listing,
+        texting,
+        scope: scope_name(value).is_some(),
+        view: leaves.iter().any(|(_, p)| matches!(p, Panel::View(_))),
+        graph: leaves.iter().any(|(_, p)| *p == Panel::Graph),
+        world: in_world(value),
+        layouts: layouts(value),
+    };
+    thread_local! { static LAST: RefCell<Option<(Routing, Rc<Vec<editor_commands::Command>>)>> = const { RefCell::new(None) }; }
+    if let Some(hit) = LAST.with(|l| l.borrow().as_ref().filter(|(k, _)| *k == r).map(|(_, v)| v.clone())) {
+        return hit;
+    }
+    let (f, a) = (Some(Trigger::Leader("f".to_string())), Some(Trigger::Leader("a".to_string())));
     let keep = |command: &&editor_commands::Command| -> bool {
         match action_of(command) {
-            action::List_command(_) => listing && graph_shown,
-            action::Scope_command(_) => scope_name(value).is_some() && graph_shown && !texting,
-            action::Frame_tile => !texting && graph_shown && (listing || command.trigger == Some(Trigger::Leader("f".to_string()))),
-            action::Frame_camera => leaves.iter().any(|(_, p)| matches!(p, Panel::View(_))),
+            action::List_command(_) => r.listing && r.graph_shown,
+            action::Scope_command(_) => r.scope && r.graph_shown && !r.texting,
+            action::Frame_tile => !r.texting && r.graph_shown && (r.listing || command.trigger == f),
+            action::Frame_camera => r.view,
             // Tab is the canvas's key for it; in the list Tab indents the row
-            action::Add_node => !texting && (!listing || command.trigger == Some(Trigger::Leader("a".to_string()))) && leaves.iter().any(|(_, p)| *p == Panel::Graph),
-            action::World_emit | action::World_reseed | action::World_time(_) | action::World_play | action::World_preset(_) => in_world(value),
+            action::Add_node => !r.texting && (!r.listing || command.trigger == a) && r.graph,
+            action::World_emit | action::World_reseed | action::World_time(_) | action::World_play | action::World_preset(_) => r.world,
             _ => true,
         }
     };
     let kept: Vec<editor_commands::Command> = editor_commands::keymap().iter().filter(keep).cloned().collect();
-    layout_labels(value, kept)
+    let routed = Rc::new(layout_labels(value, kept));
+    LAST.with(|l| *l.borrow_mut() = Some((r, routed.clone())));
+    routed
 }
 

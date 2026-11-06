@@ -515,7 +515,8 @@ pub struct t {
     pub workspace: shell,
     pub timeline: timeline::t,
     pub live_frame: Input,
-    pub cook: cook::t,
+    /// shared: the model is cloned several times a frame
+    pub cook: std::rc::Rc<cook::t>,
     pub edit_error: Option<String>,
     pub status_fps: Option<i64>,
     pub status_fps_at: f64,

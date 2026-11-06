@@ -21,7 +21,6 @@ use crate::lowering::{self, Options};
 use crate::objects::{self, root};
 use crate::settings;
 use crate::workspace_doc;
-use flow_check::catalog::Catalog;
 use flow_check::workspace as w;
 use flow_graph::flow_edit::{self as f, ArgKey, Op};
 use flow_sop::port;
@@ -156,7 +155,8 @@ fn non_default(node: &g::Node, builder: &mut SyntaxBuilder) -> Vec<(String, Synt
 // ---- applying ops to the text ----
 
 struct State {
-    catalog: Catalog,
+    /// shared, not copied: an orbit frame edits through it
+    catalog: document::LazyCatalog,
     workspace: workspace_doc::T,
     /// Homes already made bindings.
     unfolded: Vec<(Home, Path)>,
@@ -169,15 +169,14 @@ struct State {
 }
 
 fn state(doc: &document::T) -> R<State> {
-    let catalog = match doc.workspace.catalog.force() {
-        Ok(c) => c.clone(),
-        Err(d) => return Err(diag(d)),
-    };
-    Ok(State { catalog, workspace: doc.workspace.ws.clone(), unfolded: Vec::new(), adopted: false, changed: false, source_changed: false })
+    if let Err(d) = doc.workspace.catalog.force() {
+        return Err(diag(d));
+    }
+    Ok(State { catalog: doc.workspace.catalog.clone(), workspace: doc.workspace.ws.clone(), unfolded: Vec::new(), adopted: false, changed: false, source_changed: false })
 }
 
 fn apply(st: &mut State, op: Op) -> R<()> {
-    match workspace_doc::edit(&st.catalog, &st.workspace, &op) {
+    match workspace_doc::edit(st.catalog.force().as_ref().expect("checked by state"), &st.workspace, &op) {
         Ok(workspace) => {
             st.workspace = workspace;
             st.changed = true;

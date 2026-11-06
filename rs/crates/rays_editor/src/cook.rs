@@ -485,7 +485,7 @@ pub fn update(
     pump: Option<&dyn Fn()>,
     value: &t,
     settings: &settings::T,
-    objects: &[(i64, Network, i64)],
+    objects: &[(i64, &Network, i64)],
     edit_error: Option<String>,
     effects: Effects,
     timeline_changes: &[timeline::Change],

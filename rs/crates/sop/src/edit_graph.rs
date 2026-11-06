@@ -687,6 +687,11 @@ pub fn factory_slots(args: FactoryArgs, inputs: Vec<InputRequirement>, build: Bu
     make_factory("factory_slots", args, inputs, build)
 }
 
+/// The same registered factory, not merely an equal one.
+pub fn same_factory(a: &Factory, b: &Factory) -> bool {
+    Arc::ptr_eq(&a.0, &b.0)
+}
+
 pub fn factory_key(value: &Factory) -> &str {
     &value.0.key
 }

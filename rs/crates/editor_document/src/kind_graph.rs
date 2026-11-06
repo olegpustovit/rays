@@ -174,18 +174,18 @@ pub fn schema_of(specs: Vec<decl::Spec>) -> Arc<Schema> {
 }
 
 /// A record read by field name (the typed `parameters` records of the OCaml, positional here).
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Rec {
-    pub names: Vec<String>,
+    schema: Arc<Schema>,
     pub values: Vec<Value>,
 }
 
 impl Rec {
-    pub fn of(schema: &Schema, values: Vec<Value>) -> Rec {
-        Rec { names: schema.fields().iter().map(|f| f.name().to_owned()).collect(), values }
+    pub fn of(schema: &Arc<Schema>, values: Vec<Value>) -> Rec {
+        Rec { schema: schema.clone(), values }
     }
     fn at(&self, name: &str) -> &Value {
-        let i = self.names.iter().position(|n| n == name).unwrap_or_else(|| panic!("no field {name}"));
+        let i = self.schema.fields().iter().position(|f| f.name() == name).unwrap_or_else(|| panic!("no field {name}"));
         &self.values[i]
     }
     pub fn f(&self, name: &str) -> f64 {
