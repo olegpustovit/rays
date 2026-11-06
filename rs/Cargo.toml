@@ -9,7 +9,7 @@ license = "MIT"
 rust-version = "1.99"
 
 [profile.dev]
-opt-level = 0   # measured: opt-level=1 on flow_*/rdk_* gave no test-time gain (flow_eval 83 tests 19.4 s CPU either way, rdk_ops 260 tests ~25 s either way) and cost 2.5-3.5x cold build; see port/build-speed.md
+opt-level = 1   # debug runs must be fast too (2026-11-06, M1): `rays check sketches/*.rays` 123.8 s at 0 -> 19.1 s at 1 (OCaml native 14.0 s); an edit to flow_ir rebuilds rays in 4.5 -> 5.2 s, cold 1 m 55 s at -j4
 debug = 0   # measured: cold build -20%, target dir -40%; panic locations still print (RUST_BACKTRACE lines need debug="line-tables-only")
 incremental = true
 codegen-units = 256
