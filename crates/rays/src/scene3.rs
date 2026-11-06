@@ -224,6 +224,22 @@ pub mod Walk {
         t { nodes: scene.nodes.iter().map(|n| visit(texture, n)).collect(), ..scene.clone() }
     }
 
+    /// `scene` with every mesh drawn under `cull` (a geometry object's face culling)
+    pub fn with_cull(cull_: cull, scene: &t) -> t {
+        fn visit(c: cull, n: &node) -> node {
+            let many = |children: &Rc<Vec<node>>| Rc::new(children.iter().map(|x| visit(c, x)).collect::<Vec<node>>());
+            match n {
+                node::Mesh(m, mat, tex, mode, _, shading_) => node::Mesh(m.clone(), mat.clone(), tex.clone(), *mode, c, *shading_),
+                node::Instances(m, mat, tex, mode, _, shading_, transforms) => node::Instances(m.clone(), mat.clone(), tex.clone(), *mode, c, *shading_, transforms.clone()),
+                node::Group(children) => node::Group(many(children)),
+                node::Transform(matrix, children) => node::Transform(matrix.clone(), many(children)),
+                node::Depth_state(state, children) => node::Depth_state(*state, many(children)),
+                node::Blend_state(state, children) => node::Blend_state(*state, many(children)),
+            }
+        }
+        t { nodes: scene.nodes.iter().map(|n| visit(cull_, n)).collect(), ..scene.clone() }
+    }
+
     #[derive(Clone)]
     pub struct drawing {
         pub mesh: mesh::t,

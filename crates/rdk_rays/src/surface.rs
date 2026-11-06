@@ -338,9 +338,11 @@ pub fn scene3_result(
             }
         }
     };
+    // back faces are culled: a closed surface draws about half its triangles. An open one (a
+    // plane, a grid) is empty from behind; its winding decides which side shows.
     let draw = |material: material::t, m: mesh::t| match &surface.transforms {
-        None => d3::mesh(Some(material), None, None, Some(cull::Cull_none), None, m),
-        Some(transforms) => d3::instances_array(Some(material), None, Some(cull::Cull_none), None, m, transforms),
+        None => d3::mesh(Some(material), None, None, Some(cull::Cull_back), None, m),
+        Some(transforms) => d3::instances_array(Some(material), None, Some(cull::Cull_back), None, m, transforms),
     };
     let drawings = if surface.batches.is_empty() {
         vec![draw(material::default(), m)]

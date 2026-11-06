@@ -684,7 +684,17 @@ pub fn compose(value: &t, core: &m::t, update_: &update, baked: &Option<Rc<world
         V::compose(
             &editor_host::scene_for_view(Some(scene.clone()), Some(view), core),
             world_.as_deref(),
-            pieces.into_iter().map(|(matrix, piece)| (matrix, ghost(piece.id), drawn.get(&piece.id).expect("drawn piece").rendered.clone())).collect(),
+            pieces
+                .into_iter()
+                .map(|(matrix, piece)| {
+                    let rendered = &drawn.get(&piece.id).expect("drawn piece").rendered;
+                    let culled = match kg::find(&scene, piece.id) {
+                        Some(node) => Walk::with_cull(objects::cull(&node), rendered),
+                        None => rendered.clone(),
+                    };
+                    (matrix, ghost(piece.id), culled)
+                })
+                .collect(),
         )
     };
     // a viewport over another scene instance: its own objects, its own World. Viewports over the

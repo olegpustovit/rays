@@ -51,10 +51,15 @@ pub mod geometry {
                 s("scale_z", "Scale Z"),
                 tog("visible", "Visible", "", true),
                 tog("render", "Renderable", "", true),
+                chc("cull", "Cull faces", &CULL_LABELS, "Back"),
             ])
         })
         .clone()
     }
+
+    /// Which faces the raster view skips: back faces by default, so a closed surface draws about
+    /// half its triangles; "None" for open or single-sided geometry seen from both sides.
+    pub const CULL_LABELS: [&str; 3] = ["Back", "None", "Front"];
 
     pub fn from_values(values: Vec<Value>) -> Parameters {
         let r = Rec::of(&parameters_schema(), values);
@@ -490,6 +495,15 @@ pub fn visible(node: &g::Node) -> bool {
         (Some(p), _) => p.visible,
         (None, Some(p)) => p.visible,
         (None, None) => true,
+    }
+}
+
+/// A geometry object's face culling (back faces when it says nothing).
+pub fn cull(node: &g::Node) -> rays::scene3::cull {
+    match g::field(node, "cull") {
+        Some(Value::Choice(c)) if c == "None" => rays::scene3::cull::Cull_none,
+        Some(Value::Choice(c)) if c == "Front" => rays::scene3::cull::Cull_front,
+        _ => rays::scene3::cull::Cull_back,
     }
 }
 

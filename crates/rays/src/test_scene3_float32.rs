@@ -101,3 +101,20 @@ fn scene3_float32_split_mirror_reuse_recolour_finite_narrowing() {
         }
     });
 }
+
+/// a geometry object's culling reaches every mesh under it, transforms and groups included
+#[test]
+fn with_cull_sets_every_mesh() {
+    let plane = mesh::plane(1., 1.).expect("plane");
+    let inner = d3::mesh(None, None, None, None, None, plane.clone());
+    let scene3 = d3::create(None, None, None, None, vec![d3::group(vec![inner, d3::mesh(None, None, None, Some(d3::cull::Cull_back), None, plane)])]).expect("scene3");
+    let culls = |s: &d3::t| {
+        let mut found = Vec::new();
+        d3::Walk::iter_batches(&mut |drawing, _| found.push(drawing.cull), s);
+        found
+    };
+    assert!(culls(&scene3).iter().all(|c| *c == d3::cull::Cull_back));
+    let open = d3::Walk::with_cull(d3::cull::Cull_none, &scene3);
+    assert_eq!(culls(&open).len(), 2);
+    assert!(culls(&open).iter().all(|c| *c == d3::cull::Cull_none));
+}

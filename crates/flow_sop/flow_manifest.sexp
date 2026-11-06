@@ -3543,7 +3543,8 @@
         (field "scale_y" "Scale Y" (folder "Transform") (float (soft 0 5) (hard nil nil)) (float 1) (primary false) (vec3 "scale" 1))
         (field "scale_z" "Scale Z" (folder "Transform") (float (soft 0 5) (hard nil nil)) (float 1) (primary false) (vec3 "scale" 2))
         (field "visible" "Visible" (folder) (bool) (bool true) (primary false) (vec3))
-        (field "render" "Renderable" (folder) (bool) (bool true) (primary false) (vec3)))
+        (field "render" "Renderable" (folder) (bool) (bool true) (primary false) (vec3))
+        (field "cull" "Cull faces" (folder) (choice "Back" "None" "Front") (choice "Back") (primary false) (vec3)))
       (outputs))
     (kind "scene/light"
       (key "light")
