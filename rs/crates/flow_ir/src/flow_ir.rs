@@ -108,6 +108,10 @@ pub mod Gpu {
         pub retain_float: Box<dyn Fn(&super::Value) -> Option<Planes>>,
         /// point_count, vertices, offsets, kinds, max_polygon_size
         pub validate_topology: Box<dyn Fn(i64, &super::Value, &super::Value, &super::Value, i64) -> Option<Result<(), Diagnostic>>>,
+        /// Commits the scope's encoded work and says, without waiting, whether the device has
+        /// finished it. A cook worker asks this before a call that reads counts, so the owner thread
+        /// (which draws frames) never blocks on the device for it.
+        pub ready: Box<dyn Fn() -> bool>,
     }
 
     pub struct Backend {

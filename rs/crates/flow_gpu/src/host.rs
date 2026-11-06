@@ -586,6 +586,7 @@ pub struct Residency {
     pub retain_uint32: Box<dyn Fn(&Value) -> Option<Uint32Holder>>,
     pub retain_float: Box<dyn Fn(&Value) -> Option<G::Planes>>,
     pub uint32_stream: Box<dyn Fn(&Value) -> Option<(Buffer, i64)>>,
+    pub ready: Box<dyn Fn() -> bool>,
 }
 
 /// An outgrown index buffer goes when nothing can read it. A scope may still encode with one it
@@ -1644,6 +1645,15 @@ impl Scope {
         }
     }
 
+    /// commits what is encoded and polls it: an error is left for the call that follows to report
+    fn ready(&self) -> bool {
+        if self.flush().is_err() {
+            return true;
+        }
+        let epoch = self.s.borrow().epoch;
+        epoch <= b::completed_epoch(&self.queue) || b::poll_through(&self.queue, epoch).unwrap_or(true)
+    }
+
     fn count_of(&self, p: &Placeholder) -> Result<i64, Diagnostic> {
         match &p.cell {
             None => Ok(p.length),
@@ -2351,7 +2361,7 @@ pub fn resident_scope(uint32: bool, fast: bool, t: &T) -> Residency {
         }),
         range: Box::new(move |ty, v, div, length| with!(g13, Ok(None), |s| s.range(ty, v, div, length))),
     };
-    let (ga, gb, gc) = (g.clone(), g.clone(), g.clone());
+    let (ga, gb, gc, gd) = (g.clone(), g.clone(), g.clone(), g.clone());
     Residency {
         executor: Arc::new(executor),
         retain_uint32: Box::new(move |v| scope_of(&ga).and_then(|s| s.retain_uint32(v))),
@@ -2363,6 +2373,7 @@ pub fn resident_scope(uint32: bool, fast: bool, t: &T) -> Residency {
             let c = s.count_of(&p).ok()?;
             Some((p.buffer.0.clone(), c))
         }),
+        ready: Box::new(move || scope_of(&gd).is_none_or(|s| s.ready())),
     }
     .keep_alive(g)
 }
@@ -2679,7 +2690,7 @@ pub fn backend(t: &T) -> G::Backend {
                 return None;
             }
             let scope = Rc::new(resident_scope(true, fast, &t));
-            let (s1, s2, s3) = (scope.clone(), scope.clone(), scope.clone());
+            let (s1, s2, s3, s4) = (scope.clone(), scope.clone(), scope.clone(), scope.clone());
             let t2 = t.clone();
             Some(G::Residency {
                 executor: scope.executor.clone(),
@@ -2691,6 +2702,7 @@ pub fn backend(t: &T) -> G::Backend {
                         _ => None,
                     }
                 }),
+                ready: Box::new(move || (s4.ready)()),
             })
         }),
         ..standard

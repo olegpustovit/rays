@@ -184,6 +184,7 @@ let mut os: Vec<Arc<dyn Fn() + Send + Sync>> = (0..16).map(|_| owner.clone()).co
                     o16();
                     Some(Ok(()))
                 }),
+                ready: Box::new(|| true),
             })
         }),
     };

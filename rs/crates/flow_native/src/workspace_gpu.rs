@@ -511,6 +511,22 @@ fn reap_scopes() {
     }
 }
 
+/// On a cook worker, before a call that reads the scope's counts: waits off the owner until the
+/// device has finished the scope's work, asking the owner only to commit and poll. The owner keeps
+/// drawing frames meanwhile instead of blocking in the read. On the owner it does nothing.
+fn ready_first(shared: &Arc<Shared>, id: i64) {
+    if is_owner(shared) {
+        return;
+    }
+    loop {
+        let ready = route(shared, false, Box::new(move || Box::new(scope_of(id).map_or(true, |r| (r.ready)())) as Box<dyn Any + Send>));
+        match ready.map(|b| *b.downcast::<bool>().expect("route type")) {
+            Ok(false) => std::thread::sleep(Duration::from_micros(200)),
+            _ => return,
+        }
+    }
+}
+
 /// Held by every closure of a proxy residency: the owner's scope goes when the last is dropped.
 struct ScopeGuard(i64);
 impl Drop for ScopeGuard {
@@ -582,14 +598,17 @@ fn proxy_residency(shared: &Arc<Shared>, real: &Arc<G::Backend>, fast: bool) -> 
         }),
         finish: Box::new(move |value: &Value| {
             let (value, g) = (value.clone(), g7.clone());
+            ready_first(&s7, g.0);
             route_value(&s7, Box::new(move || scope_of(g.0).and_then(|r| (r.executor.finish)(&value))))
         }),
         keep: Box::new(move |value: &Value| {
             let (value, g) = (value.clone(), g8.clone());
+            ready_first(&s8, g.0);
             route_value_opt(&s8, false, Box::new(move || scope_of(g.0).and_then(|r| (r.executor.keep)(&value))))
         }),
         count: Box::new(move |value: &Value| {
             let (value, g) = (value.clone(), g9.clone());
+            ready_first(&s9, g.0);
             route_count(&s9, Box::new(move || scope_of(g.0).and_then(|r| (r.executor.count)(&value))))
         }),
         capacity: Box::new(move |value: &Value| {
@@ -598,6 +617,7 @@ fn proxy_residency(shared: &Arc<Shared>, real: &Arc<G::Backend>, fast: bool) -> 
         }),
         close: Box::new(move || {
             let g = g11.clone();
+            ready_first(&s11, g.0);
             let _ = route_unit(&s11, false, Box::new(move || {
                 if let Ok(r) = scope_of(g.0) {
                     (r.executor.close)()
@@ -606,6 +626,7 @@ fn proxy_residency(shared: &Arc<Shared>, real: &Arc<G::Backend>, fast: bool) -> 
         }),
         settle: Box::new(move || {
             let g = g12.clone();
+            ready_first(&s12, g.0);
             route_unit_result(&s12, false, Box::new(move || scope_of(g.0).and_then(|r| (r.executor.settle)())))
         }),
         range: Box::new(move |ty: &Ty, value: &Value, div: i64, length: i64| {
@@ -617,18 +638,21 @@ fn proxy_residency(shared: &Arc<Shared>, real: &Arc<G::Backend>, fast: bool) -> 
         executor: Arc::new(executor),
         retain_uint32: Box::new(move |value: &Value| {
             let (value, g) = (value.clone(), g14.clone());
+            ready_first(&s14, g.0);
             route(&s14, false, Box::new(move || Box::new(scope_of(g.0).ok().and_then(|r| (r.retain_uint32)(&value))) as Box<dyn Any + Send>))
                 .ok()
                 .and_then(|b| *b.downcast::<Option<G::Integers>>().expect("route type"))
         }),
         retain_float: Box::new(move |value: &Value| {
             let (value, g) = (value.clone(), g15.clone());
+            ready_first(&s15, g.0);
             route(&s15, false, Box::new(move || Box::new(scope_of(g.0).ok().and_then(|r| (r.retain_float)(&value))) as Box<dyn Any + Send>))
                 .ok()
                 .and_then(|b| *b.downcast::<Option<G::Planes>>().expect("route type"))
         }),
         validate_topology: Box::new(move |point_count: i64, vertices: &Value, offsets: &Value, kinds: &Value, max_polygon_size: i64| {
             let (vertices, offsets, kinds, g) = (vertices.clone(), offsets.clone(), kinds.clone(), g16.clone());
+            ready_first(&s16, g.0);
             match route(
                 &s16,
                 false,
@@ -643,6 +667,14 @@ fn proxy_residency(shared: &Arc<Shared>, real: &Arc<G::Backend>, fast: bool) -> 
                 Err(d) => Some(Err(d)),
             }
         }),
+        ready: {
+            let (s, g) = (s.clone(), guard.clone());
+            Box::new(move || {
+                let g = g.clone();
+                route(&s, false, Box::new(move || Box::new(scope_of(g.0).map_or(true, |r| (r.ready)())) as Box<dyn Any + Send>))
+                    .map_or(true, |b| *b.downcast::<bool>().expect("route type"))
+            })
+        },
     })
 }
 
