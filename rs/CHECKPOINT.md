@@ -60,6 +60,28 @@ on PATH. A hook blocks plain `cargo test`. Build notes: `port/build-speed.md`.
 - `port/eval-design.md` — evaluator speed phases
 - `port/smoke-native.md` — native and window-free sketch runs vs OCaml
 
+## Performance pass — 2026-11-06 (isogrid_city, M1)
+
+`sketches/isogrid_city.rays` (128³ voxels, ~2.9M triangles recooked on the GPU every frame): drawn
+18.7 -> 23.7 fps interactive; device memory 2.54 -> 1.55 GB; host live memory flat (no leak). Debug
+`rays check sketches/*.rays` 123.8 -> 19.1 s (OCaml native 14.0 s). Commits on `dev`:
+- size-class device buffers (<=12.5% slack, was power of two), display index buffers pooled by
+  class, the taken index buffer replaced from the pool, fills encoded without a wait;
+- cook workers wait for the device off the owner thread (`Residency.ready`), so the frame loop
+  no longer blocks in `read_count` (was 72% of main-thread samples);
+- dev profile `opt-level = 1`;
+- fast kernels: 32-bit Int registers, float `mod` fast path, saturating float->int (voxel kernel
+  8.14 -> 2.63 ms standalone, bit-identical); `and`/`or` short-circuit a costly right operand
+  (2.55 -> 2.13 ms);
+- grid-wide `bounds` (2.8 -> 1.3 ms) and `topology` kernels. Bug fixed: topology validation checked
+  nothing on meshes over 1,048,576 rows (fold cap), it now does.
+
+Known divergences / open: fast GPU Ints are 32-bit (uint32 outputs carry [0, 2^31)); the web export
+still uses 63-bit pairs, so native and web differ there. The frame is GPU-bound (~84% busy): mesh draw
+~10.5 ms, `triangle_indices` ~2.7 ms plus a main-thread status wait, `bounds` still waited for on the
+owner. Release `rays check` startup is ~2x OCaml's per file (0.12 vs 0.06 s). `E_MEMORY` status
+errors reported by the user were not investigated.
+
 ## Active completion pass — 2026-11-05
 
 - Removed unused `ogpu_mock` dev-dependencies from `flow_native`, `rays` and `rays_pathtracer`, plus their lockfile edges. Source audit found no consumers in those packages; real mock tests in `flow_gpu` and `renderer` remain. The dependency gate drops 31 -> 25 violations without policy changes; actual mixed-target and other boundary issues stay open. Workspace/tests typecheck passes (1.66 s); all 55 Rays/Flow-native cases pass with dummy audio and real Metal rendering (20.260 s including build, slowest 2.105 s), retaining 771,431 bytes/frame and zero new GPU buffers. Path-tracer film validation exposed stale Metal exceptions: it expected two extra handles despite returning exactly to baseline, and bypassed the 116-byte/pixel release floor. Removed both exceptions to restore the source contracts; the stricter existing 320x180 Rust fixture passes (1.098 s test process, 3.130 s runner), with exact standalone/shared/Canvas pixels, device ledger 10,502,144 -> 3,670,016 bytes and zero handle delta. This does not qualify the larger OCaml fixture or the full tracer suite. Logs `/tmp/rays-unused-mock-{workspace,deps,native,film,film-fixed}.log`.
