@@ -376,6 +376,14 @@ pub fn gpu_refusals(fused: bool, fast: bool, t: &T) -> Vec<Diagnostic> {
                         bad_constant = true;
                     }
                 }
+                // a captured constant is a uniform; its current value takes the constant's check
+                Instruction::Uniform(u, c) => {
+                    if let Ok(values) = components(&t.uniforms[*u as usize]) {
+                        if values.get(*c as usize).is_some_and(|x| !packed_ops::finite_float32(*x)) {
+                            bad_constant = true;
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -446,7 +454,11 @@ fn traced(
 /// valid unfused program and is not a refusal.
 pub fn compile_result(options: &CompileOptions, residual: ResidualId, term: &Term) -> Result<T, Vec<Diagnostic>> {
     let source = options.count_source.clone().unwrap_or_else(none_source);
-    traced(&options.trace, compile_impl(options.through_exact, options.fusion, false, &source, residual, term))
+    // Captures lower as uniforms so a changed parameter reuses the compiled shader (a 36 KB MSL
+    // kernel costs 150-450 ms to compile); a body that needs a capture as a constant falls back.
+    let compiled = compile_impl(options.through_exact, options.fusion, true, &source, residual, term)
+        .or_else(|_| compile_impl(options.through_exact, options.fusion, false, &source, residual, term));
+    traced(&options.trace, compiled)
 }
 
 /// Unsupported bodies remain on the reference interpreter.

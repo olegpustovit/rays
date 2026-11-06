@@ -362,6 +362,22 @@ fn compile_value(body: &str) -> (Value, packed::T) {
     (value, p)
 }
 
+/// A scalar capture is a uniform: another parameter value keeps the same register code, so the
+/// GPU reuses its compiled shader (isogrid_city's `seed` cost a 150-450 ms MSL compile per value).
+#[test]
+fn changed_captures_keep_the_register_code() {
+    let compile = |seed: i64, scale: f64| {
+        let value = evaluate(&workspace(&format!("seed {seed} scale {scale:?}"), &[], "(map (fn [(i : int)] (* scale (+ t (float (int/xor i seed))))) (array/range 64 :type int))"));
+        let r = residual(&value);
+        let p = packed::compile(&Default::default(), r, &e::Residual::residual_view(r).unwrap().term).expect("packed region");
+        assert!(same(&packed_force(&p, &live_at(0.), true, None), &force_reference(&value, &live_at(0.))));
+        p
+    };
+    let (a, b) = (compile(17, 0.5), compile(18, 2.0));
+    assert_eq!(format!("{:?}", a.code), format!("{:?}", b.code));
+    assert_ne!(format!("{:?}", a.uniforms), format!("{:?}", b.uniforms));
+}
+
 #[test]
 fn product_loops_are_not_ordered_adds() {
     for body in [
