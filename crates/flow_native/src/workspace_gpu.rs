@@ -571,6 +571,7 @@ fn proxy_residency(shared: &Arc<Shared>, real: &Arc<G::Backend>, fast: bool) -> 
     let (s14, g14) = value_opt(&s, &guard);
     let (s15, g15) = value_opt(&s, &guard);
     let (s16, g16) = value_opt(&s, &guard);
+    let (s17, g17) = value_opt(&s, &guard);
     let executor = c::Resident {
         fill: Box::new(move |ty: &Ty, length: i64, value: &Value| {
             let (ty, value, g) = (ty.clone(), value.clone(), g1.clone());
@@ -579,6 +580,10 @@ fn proxy_residency(shared: &Arc<Shared>, real: &Arc<G::Backend>, fast: bool) -> 
         invoke: Box::new(move |packed: &Packed, values: &[Value], locals: &[Value], live: &Frame| {
             let (packed, values, locals, live, g) = (packed.clone(), values.to_vec(), locals.to_vec(), live.clone(), g2.clone());
             route_value_opt(&s2, false, Box::new(move || scope_of(g.0).and_then(|r| (r.executor.invoke)(&packed, &values, &locals, &live))))
+        }),
+        invoke_all: Box::new(move |packed: &Packed, tys: &[Ty], values: &[Value], locals: &[Value], live: &Frame| {
+            let (packed, tys, values, locals, live, g) = (packed.clone(), tys.to_vec(), values.to_vec(), locals.to_vec(), live.clone(), g17.clone());
+            route_value_opt(&s17, false, Box::new(move || scope_of(g.0).and_then(|r| (r.executor.invoke_all)(&packed, &tys, &values, &locals, &live))))
         }),
         unfold: Box::new(move |packed: &Packed, values: &[Value], steps: i64, source: &Value, locals: &[Value], live: &Frame| {
             let (packed, values, source, locals, live, g) = (packed.clone(), values.to_vec(), source.clone(), locals.to_vec(), live.clone(), g3.clone());

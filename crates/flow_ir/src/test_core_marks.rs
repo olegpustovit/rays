@@ -488,3 +488,16 @@ fn fused_device_dispatches_share_their_inputs_and_follow_the_frame_count() {
     assert_eq!(unique, vec![1025, 1026]);
     assert!(counts[0] == 1026 && counts[counts.len() - 1] == 1025);
 }
+
+/// sibling maps over one range with an array op between them group where the first runs (a
+/// resident fold's positions, normals and colors), and a merged region keeps its gathers' tables
+#[test]
+fn sibling_regions_group_at_the_first() {
+    let body = "(let* [w (map (fn [i] (* i t)) (array/range 8)) a (map (fn [i] (+ (array/nth w i) t)) (array/range 4)) k (array/int (array/count w) 1) b (map (fn [i] (* (array/nth w (+ i 1)) t)) (array/range 4)) p (map (fn [i] [(+ (array/nth a i) (array/nth b i)) (array/nth k i) 0]) (array/range 4))] (draw/circles p))";
+    let (program, _) = lowered(body);
+    let found = groups(&program, &Paths::new(), &|_| true);
+    let sibling = found.iter().find(|g| g.at_first).expect("a sibling group");
+    assert_eq!(sibling.members.len(), 2);
+    assert_eq!(sibling.region.outputs.len(), 2);
+    assert!(sibling.region.code.iter().any(|i| matches!(i, C::Region::Instruction::Gather(..))));
+}

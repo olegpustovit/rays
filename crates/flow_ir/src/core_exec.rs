@@ -47,6 +47,9 @@ pub struct Resident {
     pub fill: Box<dyn Fn(&Ty, i64, &Value) -> Result<Option<Value>, Diagnostic> + Send + Sync>,
     /// run the region with these arguments on the device (`locals`: the draw's); None leaves it to the CPU
     pub invoke: Box<dyn Fn(&Packed, &[Value], &[Value], &Frame) -> Result<Option<Value>, Diagnostic> + Send + Sync>,
+    /// a region with several outputs (fused siblings) run once: a list of a value for each of the
+    /// types; None runs them one by one
+    pub invoke_all: Box<dyn Fn(&Packed, &[Ty], &[Value], &[Value], &Frame) -> Result<Option<Value>, Diagnostic> + Send + Sync>,
     /// the region run `steps` passes in each lane over its one carried input, every pass kept
     pub unfold: Box<dyn Fn(&Packed, &[Value], i64, &Value, &[Value], &Frame) -> Result<Option<Value>, Diagnostic> + Send + Sync>,
     pub compact: Box<dyn Fn(&Value) -> Result<Option<Value>, Diagnostic> + Send + Sync>,
@@ -268,6 +271,8 @@ struct State {
     values: Vec<Value>,
     /// allocated by the first builder, so a call that builds nothing pays nothing
     builders: Vec<Option<Arc<AtomicBool>>>,
+    /// by region: a fused sibling's result, made by its group's first member in this pass
+    fused_done: Vec<bool>,
     calls: Vec<i64>,
     live: Frame,
     root: Option<ResidualId>,
@@ -1242,9 +1247,37 @@ fn prepare_invoke(packed_region: Packed, args: Vec<i64>, result: i64, on_device:
     })
 }
 
-fn grouped(st: &State) -> bool { st.device.is_some() && st.marks.is_some() && !st.resident_on }
+fn grouped(st: &State) -> bool { (st.device.is_some() && st.marks.is_some() && !st.resident_on) || (st.resident_on && st.resident.is_some()) }
 
-fn prepare_group(group: Arc<core_draw::Group>, fallback: Vec<(Option<c::Span>, Run)>) -> Run {
+/// A resident fold's sibling group, run where its first member is: one dispatch for all of them
+/// (each later member then finds its result made), else the first member alone, the others
+/// each where it stands.
+fn prepare_first(group: Arc<core_draw::Group>, tys: Vec<Ty>, first: Run) -> Run {
+    Arc::new(move |st: &mut State| {
+        if let (true, Some(r)) = (st.resident_on, st.resident.clone()) {
+            let args: Vec<Value> = group.args.iter().map(|a| st.values[ix(*a)].clone()).collect();
+            if let Some(Value::List(made)) = (r.invoke_all)(&group.region, &tys, &args, &st.values, &st.live)? {
+                if made.len() == group.results.len() {
+                    let regions = group.members.iter().map(|m| ix(*m) + 1).max().unwrap_or(0);
+                    if st.fused_done.len() < regions { st.fused_done.resize(regions, false); }
+                    for ((member, result), value) in group.members.iter().zip(&group.results).zip(made.iter()) {
+                        if !st.builders.is_empty() { st.builders[ix(*result)] = None; }
+                        st.values[ix(*result)] = value.clone();
+                        st.fused_done[ix(*member)] = *member != group.members[0];
+                    }
+                    return Ok(());
+                }
+            }
+        }
+        for member in &group.members {
+            if let Some(done) = st.fused_done.get_mut(ix(*member)) { *done = false; }
+        }
+        first(st)
+    })
+}
+
+/// `tys`: the members' result types
+fn prepare_group(group: Arc<core_draw::Group>, tys: Vec<Ty>, fallback: Vec<(Option<c::Span>, Run)>) -> Run {
     let results: Vec<i64> = group.results.clone();
     Arc::new(move |st: &mut State| {
         if !grouped(st) {
@@ -1258,6 +1291,20 @@ fn prepare_group(group: Arc<core_draw::Group>, fallback: Vec<(Option<c::Span>, R
             }
             Ok(())
         };
+        // a resident fold runs the siblings as one dispatch, each result its own placeholder
+        if let (true, Some(r)) = (st.resident_on, st.resident.clone()) {
+            let args: Vec<Value> = group.args.iter().map(|a| st.values[ix(*a)].clone()).collect();
+            return match (r.invoke_all)(&group.region, &tys, &args, &st.values, &st.live)? {
+                Some(Value::List(made)) if made.len() == results.len() => {
+                    for (result, value) in results.iter().zip(made.iter()) {
+                        if !st.builders.is_empty() { st.builders[ix(*result)] = None; }
+                        st.values[ix(*result)] = value.clone();
+                    }
+                    Ok(())
+                }
+                _ => original(st),
+            };
+        }
         let device = st.device.clone().expect("device");
         let offered = bind_arguments(st, &group.region, &group.args).and_then(|bound| device(&bound));
         match offered {
@@ -2190,6 +2237,14 @@ impl Ctx {
                 self.individual.lock().unwrap()[ix(*region)] = Some((s.source.span.clone(), run.clone()));
                 match &self.fused[ix(*region)] {
                     None => run,
+                    Some(group) if group.at_first && group.members[0] == *region => {
+                        let tys = group.members.iter().map(|r| program.regions[ix(*r)].term.ty().clone()).collect();
+                        prepare_first(group.clone(), tys, run)
+                    }
+                    Some(_) if self.fused[ix(*region)].as_ref().is_some_and(|g| g.at_first) => {
+                        let region = ix(*region);
+                        Arc::new(move |st| if st.fused_done.get(region).copied().unwrap_or(false) { st.fused_done[region] = false; Ok(()) } else { run(st) })
+                    }
                     Some(group) if *group.members.last().expect("members") != *region => {
                         Arc::new(move |st| if !grouped(st) { run(st) } else { Ok(()) })
                     }
@@ -2200,7 +2255,8 @@ impl Ctx {
                             .iter()
                             .map(|r| individual[ix(*r)].clone().expect("member prepared"))
                             .collect();
-                        prepare_group(group.clone(), members)
+                        let tys = group.members.iter().map(|r| program.regions[ix(*r)].term.ty().clone()).collect();
+                        prepare_group(group.clone(), tys, members)
                     }
                 }
             }
@@ -2414,6 +2470,7 @@ fn new_state(prepared: &Prepared, values: Vec<Value>, arena: Option<Arena>, live
         arena,
         values,
         builders: Vec::new(),
+        fused_done: Vec::new(),
         calls: call_counters(&prepared.program),
         live: live.clone(),
         root: o.root,

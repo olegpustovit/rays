@@ -76,6 +76,7 @@ fn fold_case(gpu: &renderer::renderer::gpu, n: i64, levels: i64, keep: &str, slo
     let ran = Arc::new(AtomicUsize::new(0));
     let calls = ran.clone();
     let resident = Arc::new(c::Resident {
+        invoke_all: Box::new(|_, _, _, _, _| Ok(None)),
         invoke: Box::new(move |p, args, locals, live| {
             let value = invoke(p, args, locals, live)?;
             if let Some(v) = &value {
@@ -190,6 +191,7 @@ fn resident_value() {
             let calls = invoked.clone();
             let read_calls = reads.clone();
             let resident = Arc::new(c::Resident {
+                invoke_all: Box::new(|_, _, _, _, _| Ok(None)),
                 invoke: Box::new(move |p, args, locals, live| {
                     let value = invoke(p, args, locals, live)?;
                     if value.is_some() { calls.fetch_add(1, Ordering::Relaxed); }

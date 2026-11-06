@@ -2606,6 +2606,7 @@ mod tests {
             }
         };
         let resident = core_exec::Resident {
+            invoke_all: Box::new(|_, _, _, _, _| Ok(None)),
             invoke: Box::new({
                 let (actual, keep, invokes) = (actual.clone(), keep.clone(), invokes.clone());
                 move |packed, args, _locals, live| {
@@ -2794,6 +2795,7 @@ mod tests {
             }),
             fill: Box::new({ let i = inner.clone(); move |a, b, c| (i.fill)(a, b, c) }),
             invoke: Box::new({ let i = inner.clone(); move |a, b, c, d| (i.invoke)(a, b, c, d) }),
+            invoke_all: Box::new({ let i = inner.clone(); move |a, b, c, d, e| (i.invoke_all)(a, b, c, d, e) }),
             unfold: Box::new({ let i = inner.clone(); move |a, b, c, d, e, f| (i.unfold)(a, b, c, d, e, f) }),
             compact: Box::new({ let i = inner.clone(); move |a| (i.compact)(a) }),
             coerce: Box::new({ let i = inner.clone(); move |a, b| (i.coerce)(a, b) }),

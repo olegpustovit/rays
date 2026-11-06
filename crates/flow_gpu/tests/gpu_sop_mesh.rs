@@ -43,6 +43,7 @@ fn run_case(test:&str,empty_offset:bool){
         let dispatched=Arc::new(AtomicBool::new(false));let base=scope.executor;let invoke=base.clone();let settle=base.clone();let count=base.clone();let close=base.clone();
         let inv=dispatched.clone();let set=dispatched.clone();let cnt=dispatched.clone();let cancel_set=cancel_wrap.clone();let cancel_count=cancel_wrap.clone();let closes=closes_wrap.clone();
         let executor=core_exec::Resident{
+            invoke_all:Box::new(|_,_,_,_,_|Ok(None)),
             invoke:Box::new(move|p,args,locals,live|{let result=(invoke.invoke)(p,args,locals,live)?;if result.is_some(){inv.store(true,Ordering::SeqCst);}Ok(result)}),
             settle:Box::new(move||{(settle.settle)()?;if cancel_case&&set.load(Ordering::SeqCst){rdk::cancel::cancel(&cancel_set);}Ok(())}),
             count:Box::new(move|v|{let n=(count.count)(v)?;if cancel_case&&cnt.load(Ordering::SeqCst)&&n.is_some(){rdk::cancel::cancel(&cancel_count);}Ok(n)}),

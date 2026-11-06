@@ -126,6 +126,7 @@ let mut os: Vec<Arc<dyn Fn() + Send + Sync>> = (0..16).map(|_| owner.clone()).co
                         o1();
                         Ok(Some(Value::Int_array(Arc::new(vec![0]))))
                     }),
+                    invoke_all: Box::new(|_, _, _, _, _| Ok(None)),
                     invoke: Box::new(move |_, _, _, _| {
                         o2();
                         Ok(None)

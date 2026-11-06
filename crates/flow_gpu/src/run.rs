@@ -763,6 +763,8 @@ pub struct Options {
     pub count: Option<(Buffer, i64, i64)>,
     /// writes a one-output fast kernel's output and count into the caller's buffers
     pub into: Option<(Buffer, Buffer)>,
+    /// with `into`, the buffers of the outputs past the first
+    pub into_more: Vec<Buffer>,
     pub scene: Option<Scene>,
     pub extras: Option<Extras>,
     /// the bottom-level structures an instanced scene references, declared read so they stay resident
@@ -957,7 +959,7 @@ pub fn dispatch(t: &T, o: &Options, explicit_input: Bound, explicit_table: Bound
         }
     }
     let outputs: Vec<Buffer> = match &o.into {
-        Some((output, _)) if st.outputs.len() == 1 => vec![output.clone()],
+        Some((output, _)) if st.outputs.len() == 1 + o.into_more.len() => std::iter::once(output.clone()).chain(o.into_more.iter().cloned()).collect(),
         _ => {
             let mut v = Vec::new();
             for k in 0..st.outputs.len() {

@@ -1303,7 +1303,13 @@ impl Scope {
     }
 
     fn invoke(&self, steps: i64, source: Option<&Value>, packed: &Packed, args: &[Value], locals: &[Value], live_: &Frame) -> Result<Option<Value>, Diagnostic> {
-        if !self.live_ok() {
+        Ok(self.invoke_all(steps, source, packed, &[packed.term.ty().clone()], args, locals, live_)?.and_then(|vs| vs.into_iter().next()))
+    }
+
+    /// `invoke` of a region with an output for each of `tys` (siblings fused into one dispatch):
+    /// a placeholder each, every one with its own copy of the count
+    fn invoke_all(&self, steps: i64, source: Option<&Value>, packed: &Packed, tys: &[Ty], args: &[Value], locals: &[Value], live_: &Frame) -> Result<Option<Vec<Value>>, Diagnostic> {
+        if !self.live_ok() || tys.len() != packed.outputs.len() || (steps > 0 && tys.len() != 1) {
             return Ok(None);
         }
         let site = self.site(packed);
@@ -1333,8 +1339,12 @@ impl Scope {
                 Some(d) => d.message.clone(),
                 None => "its output type or kernel is refused".to_owned(),
             };
-            return Ok(self.off(packed, &reason));
+            return Ok(self.off(packed, &reason).map(|v| vec![v]));
         };
+        let types = [Ty::Array(Box::new(Ty::Int)), Ty::Array(Box::new(Ty::Float)), Ty::Array(Box::new(Ty::Vec2)), Ty::Array(Box::new(Ty::Vec3)), Ty::Array(Box::new(Ty::Vec4))];
+        if !tys.iter().all(|ty| types.contains(ty)) {
+            return Ok(None);
+        }
         let plan = site.plan.borrow().clone();
         let level = match plan {
             Some(Some(plan)) => self.planned(&site, &plan, args, live_),
@@ -1344,7 +1354,7 @@ impl Scope {
             },
         };
         let level = match level {
-            Err(reason) => return Ok(self.off(packed, &format!("its inputs could not be bound: {reason}"))),
+            Err(reason) => return Ok(self.off(packed, &format!("its inputs could not be bound: {reason}")).map(|v| vec![v])),
             Ok(level) => level,
         };
         let Level { count, n, held: held_, inputs, bound_arrays, bound_tables } = level;
@@ -1396,40 +1406,50 @@ impl Scope {
             }
         }
         if n > 1 << 26 {
-            return Ok(self.off(packed, "over 64M elements"));
+            return Ok(self.off(packed, "over 64M elements").map(|v| vec![v]));
         }
         let Ok((commands, encoder)) = self.commands() else { return Ok(None) };
-        let ty = packed.term.ty().clone();
-        let width = match &ty {
+        let width = |ty: &Ty| match ty {
             Ty::Array(i) if **i == Ty::Vec2 => 2,
             Ty::Array(i) if **i == Ty::Vec3 => 3,
             Ty::Array(i) if **i == Ty::Vec4 => 4,
             _ => 1,
         };
-        let out_bytes = 4.max(length * width * 4 * 1.max(steps));
-        let (output, cell) = match (self.alloc(&slot, out_bytes), self.alloc(&slot, 24)) {
-            (Ok(o), Ok(c)) => (o, c),
-            (a, b_) => {
-                if let Ok(x) = a {
-                    self.give_back(&slot, x);
+        // an output and a count cell for each type, all or none
+        let mut made: Vec<((Buffer, i64), (Buffer, i64))> = vec![];
+        for ty in tys {
+            match (self.alloc(&slot, 4.max(length * width(ty) * 4 * 1.max(steps))), self.alloc(&slot, 24)) {
+                (Ok(o), Ok(c)) => made.push((o, c)),
+                (a, b_) => {
+                    for x in [a, b_].into_iter().flatten().chain(made.into_iter().flat_map(|(o, c)| [o, c])) {
+                        self.give_back(&slot, x);
+                    }
+                    return Ok(None);
                 }
-                if let Ok(x) = b_ {
-                    self.give_back(&slot, x);
-                }
-                return Ok(None);
             }
-        };
+        }
+        let (output, cell) = made[0].clone();
+        let more: Vec<Buffer> = made[1..].iter().map(|(o, _)| o.0.clone()).collect();
         let reset_status = !self.s.borrow().status_runs.iter().any(|r| run_same(r, &run_));
         let mut inputs = inputs;
         inputs.count = n;
         let bound = |i: i64| bound_arrays.get(i as usize).cloned().flatten();
         let bound_table = |u: i64| bound_tables.get(u as usize).cloned().flatten();
-        let opts = Options { uint32_cpu: self.uint32, commands: Some(commands), encoder: Some(encoder), reset_status: Some(reset_status), count: count.clone(), into: Some((output.0.clone(), cell.0.clone())), ..Options::default() };
+        let opts = Options { uint32_cpu: self.uint32, commands: Some(commands), encoder: Some(encoder.clone()), reset_status: Some(reset_status), count: count.clone(), into: Some((output.0.clone(), cell.0.clone())), into_more: more, ..Options::default() };
         let r = run::dispatch(&run_, &opts, Some(&bound), Some(&bound_table), &inputs);
+        // the outputs past the first take a copy of its count cell, encoded after the dispatch
+        let r = r.and_then(|o| {
+            for (_, c) in &made[1..] {
+                run::copy(&encoder, &self.t.0.pipelines, &cell.0, 0, &c.0, 0, 6)?;
+            }
+            Ok(o)
+        });
         match r {
             Err(d) => {
-                self.give_back(&slot, output);
-                self.give_back(&slot, cell);
+                for (o, c) in made {
+                    self.give_back(&slot, o);
+                    self.give_back(&slot, c);
+                }
                 Err(d)
             }
             Ok(_) if steps > 0 => {
@@ -1441,7 +1461,7 @@ impl Scope {
                     }
                 }
                 slot.spent.borrow_mut().insert(0, cell);
-                Ok(Some(self.placeholder(false, true, i64::MAX, None, &slot, &ty, output, None, length * steps)))
+                Ok(Some(vec![self.placeholder(false, true, i64::MAX, None, &slot, &tys[0], output, None, length * steps)]))
             }
             Ok(_) => {
                 {
@@ -1460,7 +1480,7 @@ impl Scope {
                                 && self.s.borrow().table.iter().any(|q| q.known && q.length == n && matches!(&q.cell, Some((c, _)) if same_buffer(c, cell_)))
                         }
                     };
-                Ok(Some(self.placeholder(count.is_some(), known, clamped, count.clone(), &slot, &ty, output, Some(cell), length)))
+                Ok(Some(made.into_iter().zip(tys).map(|((output, cell), ty)| self.placeholder(count.is_some(), known, clamped, count.clone(), &slot, ty, output, Some(cell), length)).collect()))
             }
         }
     }
@@ -2326,6 +2346,10 @@ pub fn resident_scope(uint32: bool, fast: bool, t: &T) -> Residency {
         invoke: Box::new({
             let g = g2.clone();
             move |packed, args, locals, live_| with!(g, Ok(None), |s| s.invoke(0, None, packed, args, locals, live_))
+        }),
+        invoke_all: Box::new({
+            let g = g2.clone();
+            move |packed, tys, args, locals, live_| with!(g, Ok(None), |s| Ok(s.invoke_all(0, None, packed, tys, args, locals, live_)?.map(|vs| Value::List(Arc::new(vs)))))
         }),
         unfold: Box::new({
             let g = g3.clone();

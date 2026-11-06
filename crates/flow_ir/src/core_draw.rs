@@ -88,6 +88,8 @@ pub struct Group {
     pub results: Vec<i64>,
     pub args: Vec<i64>,
     pub region: C::RegionT,
+    /// runs where its first member is (a resident fold's siblings), else where its last is
+    pub at_first: bool,
 }
 
 fn visit(statement: &C::Statement, f: &mut dyn FnMut(&C::Statement)) {
@@ -150,12 +152,16 @@ enum Item { Invoke(i64), Setup { local: i64 }, Other }
 
 struct Info { block: usize, index: usize, args: Vec<i64>, result: i64 }
 
-fn scan_block(statements: &[C::Statement], blocks: &mut Vec<Vec<Item>>, info: &mut [Option<Info>], occurrences: &mut [i64], writes: &mut [i64]) {
+/// `writer`: the block and index of the statement that last wrote each local
+fn scan_block(statements: &[C::Statement], blocks: &mut Vec<Vec<Item>>, info: &mut [Option<Info>], occurrences: &mut [i64], writes: &mut [i64], writer: &mut [Option<(usize, usize)>]) {
     let id = blocks.len();
     blocks.push(Vec::new());
     let mut items = Vec::new();
     for (index, s) in statements.iter().enumerate() {
-        for local in C::writes(s) { writes[local as usize] += 1; }
+        for local in C::writes(s) {
+            writes[local as usize] += 1;
+            writer[local as usize] = Some((id, index));
+        }
         if let C::StatementNode::Invoke { region, args, result } = &s.node {
             occurrences[*region as usize] += 1;
             info[*region as usize] = Some(Info { block: id, index, args: args.clone(), result: *result });
@@ -166,12 +172,12 @@ fn scan_block(statements: &[C::Statement], blocks: &mut Vec<Vec<Item>>, info: &m
             _ => Item::Other,
         });
         match &s.node {
-            C::StatementNode::If { yes, no, .. } => { scan_block(yes, blocks, info, occurrences, writes); scan_block(no, blocks, info, occurrences, writes); }
-            C::StatementNode::Protect { body, handler, .. } => { scan_block(body, blocks, info, occurrences, writes); scan_block(handler, blocks, info, occurrences, writes); }
-            C::StatementNode::Counted { init, body, .. } => { scan_block(init, blocks, info, occurrences, writes); scan_block(body, blocks, info, occurrences, writes); }
-            C::StatementNode::Iterate { body, .. } => scan_block(body, blocks, info, occurrences, writes),
-            C::StatementNode::State_read { init, .. } => scan_block(init, blocks, info, occurrences, writes),
-            C::StatementNode::Diagnose_rows { handler, .. } => scan_block(handler, blocks, info, occurrences, writes),
+            C::StatementNode::If { yes, no, .. } => { scan_block(yes, blocks, info, occurrences, writes, writer); scan_block(no, blocks, info, occurrences, writes, writer); }
+            C::StatementNode::Protect { body, handler, .. } => { scan_block(body, blocks, info, occurrences, writes, writer); scan_block(handler, blocks, info, occurrences, writes, writer); }
+            C::StatementNode::Counted { init, body, .. } => { scan_block(init, blocks, info, occurrences, writes, writer); scan_block(body, blocks, info, occurrences, writes, writer); }
+            C::StatementNode::Iterate { body, .. } => scan_block(body, blocks, info, occurrences, writes, writer),
+            C::StatementNode::State_read { init, .. } => scan_block(init, blocks, info, occurrences, writes, writer),
+            C::StatementNode::Diagnose_rows { handler, .. } => scan_block(handler, blocks, info, occurrences, writes, writer),
             _ => {}
         }
     }
@@ -185,12 +191,13 @@ fn scan_block(statements: &[C::Statement], blocks: &mut Vec<Vec<Item>>, info: &m
 /// earlier invocations to the last therefore preserves branches, side effects and errors.
 pub fn device_groups(approx: &Paths, fast: bool, program: &C::Program, width: &dyn Fn(i64) -> Option<i64>, legal: &dyn Fn(&C::RegionT) -> bool) -> (Vec<bool>, Vec<Group>) {
     let (eligible, batches) = device_regions(program, width);
-    if batches.is_empty() { return (eligible, Vec::new()); }
+    if batches.is_empty() && program.regions.len() < 2 { return (eligible, Vec::new()); }
     let mut info: Vec<Option<Info>> = (0..program.regions.len()).map(|_| None).collect();
     let mut occurrences = vec![0i64; program.regions.len()];
     let mut writes = vec![0i64; program.locals.len()];
     let mut blocks: Vec<Vec<Item>> = Vec::new();
-    scan_block(&program.body, &mut blocks, &mut info, &mut occurrences, &mut writes);
+    let mut writer: Vec<Option<(usize, usize)>> = vec![None; program.locals.len()];
+    scan_block(&program.body, &mut blocks, &mut info, &mut occurrences, &mut writes, &mut writer);
     let static_ = static_invokes(program);
     let rate = |k: i64| info[k as usize].as_ref().map(|i| static_[i.result as usize]).unwrap_or(false);
     let precision = |k: i64| {
@@ -201,9 +208,12 @@ pub fn device_groups(approx: &Paths, fast: bool, program: &C::Program, width: &d
     };
     let single = |k: i64| {
         let i = info[k as usize].as_ref().expect("invoked region");
-        Group { members: vec![k], results: vec![i.result], args: i.args.clone(), region: (*program.regions[k as usize]).clone() }
+        Group { members: vec![k], results: vec![i.result], args: i.args.clone(), region: (*program.regions[k as usize]).clone(), at_first: false }
     };
-    let merge = |members: &[i64]| -> Option<Group> {
+    // `hoisted`: the group runs where its first member is, so every member's arguments are written
+    // once before it in its block (or are inputs), whatever stands between the members; else
+    // where its last is, past nothing but setup
+    let merge = |members: &[i64], hoisted: bool| -> Option<Group> {
         let first = info[members[0] as usize].as_ref().unwrap().block;
         if !members.iter().all(|k| occurrences[*k as usize] == 1 && info[*k as usize].as_ref().map(|i| i.block == first).unwrap_or(false)) {
             return None;
@@ -218,7 +228,10 @@ pub fn device_groups(approx: &Paths, fast: bool, program: &C::Program, width: &d
         let at = |k: i64| info[k as usize].as_ref().unwrap().index;
         let (first_index, last_index) = (at(members[0]), at(*members.last().unwrap()));
         let mut safe = true;
-        for index in first_index..=last_index {
+        if hoisted {
+            safe = args.iter().all(|local| writes[*local as usize] <= 1 && writer[*local as usize].is_none_or(|(block, index)| block == first && index < first_index));
+        }
+        for index in (first_index..=last_index).filter(|_| !hoisted) {
             match blocks[first][index] {
                 Item::Invoke(region) if members.contains(&region) => {}
                 Item::Setup { local } if !args.contains(&local) || writes[local as usize] == 1 => {}
@@ -239,9 +252,10 @@ pub fn device_groups(approx: &Paths, fast: bool, program: &C::Program, width: &d
             }
         }
         let region = core_fuse::merge(&normalized)?;
-        if !legal(&region) { return None; }
+        // a resident fold runs in fast precision and declines what its device refuses
+        if !(if hoisted { packed::gpu_refusals(true, true, &region).is_empty() } else { legal(&region) }) { return None; }
         let results = members.iter().map(|k| info[*k as usize].as_ref().unwrap().result).collect();
-        Some(Group { members, args, region, results })
+        Some(Group { members, args, region, results, at_first: hoisted })
     };
     let mut taken = vec![false; program.regions.len()];
     let mut groups = Vec::new();
@@ -253,11 +267,46 @@ pub fn device_groups(approx: &Paths, fast: bool, program: &C::Program, width: &d
             match selected.as_slice() {
                 [] => {}
                 [k] => groups.push(single(*k)),
-                _ => match merge(&selected) {
+                _ => match merge(&selected, false) {
                     Some(group) => groups.push(group),
                     None => for k in &selected { groups.push(single(*k)); },
                 },
             }
+        }
+    }
+    // Sibling regions of one count in a block run as one dispatch with an output each (a
+    // resident fold's `positions`, `normals`, `colors` over one range), where the first runs.
+    // ponytail: a merge attempt per open group a region meets, quadratic in a block's regions;
+    // index the groups by count if blocks ever hold hundreds
+    for block in &blocks {
+        let mut open: Vec<(Vec<i64>, Option<Group>)> = Vec::new();
+        for item in block {
+            let Item::Invoke(k) = *item else { continue };
+            if taken[k as usize] || occurrences[k as usize] != 1 {
+                continue;
+            }
+            let joined = open.iter_mut().any(|(run, last)| {
+                if rate(run[0]) != rate(k) || precision(run[0]) != precision(k) {
+                    return false;
+                }
+                let mut members = run.clone();
+                members.push(k);
+                match merge(&members, true) {
+                    Some(group) => {
+                        run.push(k);
+                        *last = Some(group);
+                        true
+                    }
+                    None => false,
+                }
+            });
+            if !joined {
+                open.push((vec![k], None));
+            }
+        }
+        for group in open.into_iter().filter_map(|(_, last)| last) {
+            for k in &group.members { taken[*k as usize] = true; }
+            groups.push(group);
         }
     }
     (eligible, groups)

@@ -146,6 +146,10 @@ fn remap(instruction: &I, registers: &[i64], uniform: i64) -> I {
         I::Loop_end(owner, next, stop) => I::Loop_end(at(*owner), next.iter().map(|r| at(*r)).collect(), stop.map(at)),
         I::Loop_result(owner, component, ty) => I::Loop_result(at(*owner), *component, ty.clone()),
         I::Guarded(guards, body) => I::Guarded(guards.iter().map(|(c, yes)| (at(*c), *yes)).collect(), Box::new(remap(body, registers, uniform))),
+        // the prepared array is a register too: `map_registers` leaves it as it is
+        I::Gather(a, i, w, c) => I::Gather(at(*a), at(*i), *w, *c),
+        I::Int_gather(a, i) => I::Int_gather(at(*a), at(*i)),
+        I::Text_gather(a, i) => I::Text_gather(at(*a), at(*i)),
         other => R::map_registers(&at, other),
     }
 }
