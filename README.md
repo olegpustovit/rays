@@ -1,55 +1,31 @@
 # Rays
 
-A creative-coding system for Apple-Silicon Macs. A `.rays` Lisp workspace describes drawings, geometry, scenes and editor layout. The native editor renders through Metal and uses SDL3 for its window, input and media services.
-
-This is an active-development project. Native rendering requires an Apple-Silicon Mac with Metal; there is no native CPU, OpenGL or SDL2 fallback. A separate 2D web-export target is described in the [project guide](AGENTS.md), rather than a substitute native renderer.
-
-## Platform and build
-
-The package requires OCaml 5.3 or newer and Dune 3.21 or newer. You also need opam, the macOS developer SDK/frameworks and SDL3, SDL3_image, SDL3_ttf and SDL3_mixer development packages.
-
-On the supported Mac host:
+A Rust creative-coding framework and native editor for `.rays` Lisp workspaces.
+Apple Silicon uses Metal; Windows uses Vulkan. Web export is a separate 2D target.
 
 ```sh
-brew install opam sdl3 sdl3_image sdl3_ttf sdl3_mixer pkg-config
-git clone https://github.com/olegpustovit/rays.git
-cd rays
-opam init
-opam switch create . 5.3.0 --no-install
-opam pin add --no-action --yes --recursive ./packaging
-eval "$(opam env --switch=. --set-switch)"
-opam install . --deps-only --with-test --with-doc
-dune build @all
+cargo run -p rays_bin -- sketches/basic.rays
+cargo run -p rays_bin -- check sketches/basic.rays
+cargo run -p rays_bin -- mem sketches/ws_tree.rays --frames 3
+cargo run -p rays_bin -- web sketches/basic.rays -o _out/basic
 ```
 
-## Run a workspace
+Use the toolchain pinned in `rust-toolchain.toml`. On macOS:
+`brew install pkgconf sdl3 sdl3_image sdl3_ttf sdl3_mixer`.
+Windows setup: [packaging](packaging/README.md).
 
-The small [basic workspace](sketches/basic.rays) defines a draw graph, an editor graph and window settings. In the native environment:
+Debug builds are the daily workflow. Run `cargo check -p <crate>` while editing, then
+`cargo t -p <crate> [filter]` for time-bounded tests. See [development](docs/development.md).
 
-```sh
-dune exec rays -- sketches/basic.rays
-```
+- `crates/`: Rust libraries, native bindings, application, Lisp nodes and runtime assets.
+- `sketches/`: runnable workspaces and their assets.
+- `tools/`: deadline-enforced tests, architecture gates and build-time measurement.
+- `fixtures/`: shared shader, CLI and web goldens.
+- `specification/`: language, rendering and editor contracts.
+- `docs/history/`: historical port measurements and outstanding qualification evidence.
 
-A finite run uses the existing frame limit:
+OCaml lives only in Git history at [ocaml-reference](https://github.com/OlegHQ/rays/tree/ocaml-reference)
+(commit `e92f94f0`). Rust is the sole implementation here. Existing unfinished performance and
+qualification work is recorded in [the historical checkpoint](docs/history/CHECKPOINT.md).
 
-```sh
-RAYS_MAX_FRAMES=30 dune exec rays -- sketches/basic.rays
-```
-
-The application is built around Rays Lisp. `Sketch`, `Frame` and `Scene` are internal OCaml layers, rather than the first-time user's sketch API. The [language reference](specification/flow.md) explains workspace graphs and references.
-
-## Verification
-
-```sh
-dune build tools/check.exe
-_build/default/tools/check.exe --ship
-dune build @doc
-```
-
-[AGENTS.md](AGENTS.md) records development commands and dependency boundaries.
-The [architecture cleanup tracker](specification/cleanup/status.md) records
-implementation and verification against the approved plan.
-
-## License
-
-[MIT](LICENSE). SDL libraries, fonts and Apple platform components retain their own terms; see [license and provenance notes](specification/licenses.md).
+[MIT license](LICENSE).

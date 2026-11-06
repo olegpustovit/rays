@@ -1,0 +1,21 @@
+// Rays web export: frame program. frame(input, state, rt); see crates/flow_web/src/js.rs.
+let K;
+export function frame(input, state, rt) {
+  K ??= [0];
+  let l0, l1, l2, l3;
+  let at = 0;
+  try {
+    at = 0; l0 = input.t;
+    at = 1; l1 = K[0];
+    at = 2; l2 = rt.gt(l0, l1);
+    at = 3; if (rt.truthy(l2)) {
+      at = 4; l3 = l0;
+    } else {
+      at = 5; l3 = l0;
+    }
+  } catch (e) {
+    if (e !== null && typeof e === "object" && e.statement === undefined) e.statement = at;
+    throw e;
+  }
+  return l3;
+}

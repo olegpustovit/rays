@@ -1,3 +1,0 @@
-# Goldens are byte-exact: never convert line endings.
-crates/*/golden/** -text
-crates/*/goldens/** -text

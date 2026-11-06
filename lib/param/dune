@@ -1,9 +1,0 @@
-(library
- (name param)
- (modules param)
- (public_name rays.param))
-
-(test
- (name test_param)
- (modules test_param)
- (libraries param))

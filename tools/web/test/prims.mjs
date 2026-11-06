@@ -1,7 +1,7 @@
 // node prims.mjs FIXTURE_DIR PRIMS_JS_PATH
 //
 // Runs the native fixtures written by tools/prims_fixtures.exe through the browser primitives
-// (lib/web_export/runtime/prims.js). Each case is export(...static, ...args); its result must equal the
+// (crates/web_export/runtime/prims.js). Each case is export(...static, ...args); its result must equal the
 // native result: exact for Int, Text, Bool, structure and error code/message; floats within 1e-12
 // relative (NaN matches NaN, infinities must match exactly). Prints one "ok" line, or every
 // mismatch and exits 1. No dependencies.

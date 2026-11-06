@@ -1,4 +1,0 @@
-(executable
- (name generate)
- (modules generate registry)
- (libraries ogpu_core compiler-libs.common))

@@ -1,0 +1,5 @@
+exit 1
+File "crates/flow_sop/nodes/set_vector.rays", line 2, characters 0-73:
+Error [E_NAME]: Invalid, reserved or duplicate name: sop/set_vector.
+File "crates/flow_sop/nodes/set_vector.rays", line 1, characters 0-26:
+Error [E_NO_GRAPH]: A workspace needs at least one graph.

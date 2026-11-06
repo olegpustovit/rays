@@ -1,1 +1,0 @@
-val quote : string -> string

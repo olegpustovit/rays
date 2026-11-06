@@ -1,0 +1,3 @@
+exit 1
+File "crates/flow_sop/nodes/edge_relax.rays", line 1, characters 0-0:
+Error [E_WORKSPACE]: Expected a (workspace ...) form.

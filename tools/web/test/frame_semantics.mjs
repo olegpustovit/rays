@@ -7,8 +7,8 @@
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { PArray, TextArray } from '../../../lib/web_export/runtime/prims.js';
-import { eventRecord } from '../../../lib/web_export/runtime/runtime.js';
+import { PArray, TextArray } from '../../../crates/web_export/runtime/prims.js';
+import { eventRecord } from '../../../crates/web_export/runtime/runtime.js';
 import { makeRt } from './rt_shim.mjs';
 
 const hex = s => Array.from(new TextEncoder().encode(s), b => b.toString(16).padStart(2, '0')).join('');

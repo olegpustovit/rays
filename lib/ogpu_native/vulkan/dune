@@ -1,7 +1,0 @@
-(library
- (name ogpu_native)
- (enabled_if
-  (= %{system} mingw64))
- (modules)
- (libraries
-  (re_export ogpu_vulkan)))

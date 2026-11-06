@@ -1,6 +1,6 @@
 // node present_check.mjs RUNTIME_DIR [EXPORT_DIR NATIVE_PNG_DIR ...]
 //
-// Real-Chrome check of the presenter (plan P6.4, P6.5): lib/web_export/runtime/present.js + the printed marks.wgsl.
+// Real-Chrome check of the presenter (plan P6.4, P6.5): crates/web_export/runtime/present.js + the printed marks.wgsl.
 //  1. Hand-built mark tables (rect, circle, line, with and without stroke; constants and per-instance
 //     buffers; geometry; point set; transform; clip; blend; text; image; device pixel ratio 2) are drawn and
 //     the canvas pixels are read back. Interior probes avoid edges; fractional point probes pin native

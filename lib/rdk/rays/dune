@@ -1,4 +1,0 @@
-(library
- (name rdk_rays)
- (public_name rays.rdk.rays)
- (libraries rdk_core rdk_geom rdk_ops rays rays_math param))

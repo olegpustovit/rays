@@ -1,38 +1,14 @@
-# Dune build output
-/_build/
-/.rays-check.lock
-/_build-packaging-check-*/
-/_install/
-/dist/
-
-# opam switch (local)
-.opam-switch/
-
-# Dune temporary files
-*.install
-*.merlin
-*.cmt
-*.cmti
-*.cmi
-*.cmo
-*.cmx
-*.o
-*.a
-*.annot
-
-# Editor/OS stuff
+/target/
+/_out/
+/rays-render.png
+*.stackdump
+.DS_Store
 *.swp
 *.swo
 *.bak
 *~
-.DS_Store
-_opam
-
-# Runtime outputs of sketches (render button, settings saves)
-/_out/
-/rays-render.png
-
-# Agentpack mirror of the tracked .claude/skills files
 /.agents/
 /.claude/worktrees/
-/rs/target/
+/_build/
+/_opam/
+/.rays-check.lock

@@ -1,3 +1,0 @@
-# macOS 26 CoreUI parses a system-owned PDF rendition while SDL resizes a
-# native window.  Keep ASan enabled everywhere else, including Rays stubs.
-interceptor_via_fun:pdf_lexer_scan

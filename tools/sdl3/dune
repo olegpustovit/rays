@@ -1,8 +1,0 @@
-(executable
- (name bump)
- (modules bump)
- (libraries sdl3_lock unix))
-
-(executable
- (name generate_image_fixtures)
- (modules generate_image_fixtures))

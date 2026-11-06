@@ -1,5 +1,0 @@
-(library
- (name flow_ir_test_support)
- (wrapped false)
- (modules test_program core_fixtures array_composition_cases)
- (libraries flow_ir flow))

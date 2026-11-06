@@ -1,7 +1,7 @@
 // node gpu_fast_check.mjs DIR GPU_JS
 //
 // Fast-precision WGSL kernels (lib/flow_web/wgsl.ml `kernel_fast`) compiled and run in real Chrome through
-// lib/web_export/runtime/gpu.js, against native: DIR holds `test_wgsl.exe --write-fast-table DIR`'s kernels.json
+// crates/web_export/runtime/gpu.js, against native: DIR holds `test_wgsl.exe --write-fast-table DIR`'s kernels.json
 // and expected.json (each case's native fast inputs and native exact outputs). The kernels' integer
 // registers are 64-bit pairs; their inputs and outputs travel as f32, so an integer output is compared
 // exactly below 2^24 and to f32 rounding above, a float output to 1e-5 relative (noise 1e-4 absolute).

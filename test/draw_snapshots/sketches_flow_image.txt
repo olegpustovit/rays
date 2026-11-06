@@ -1,3 +1,0 @@
-frame 0 error E_IMAGE
-frame 1 error E_IMAGE
-frame 30 error E_IMAGE

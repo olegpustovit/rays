@@ -1,0 +1,42 @@
+; A resident packed float3 array's bounds (Flow_gpu.Run.bounds), grid-wide. Each lane takes the min and
+; max of the elements lane, lane + lanes, lane + 2 lanes, ... below the array's count (bound[0]), lanes
+; being the grid's width (bound[1]), neighbouring lanes reading neighbouring elements, and stores them at
+; lane x 6 (min x y z, max x y z); a lane at or past the count stores nothing, and the host finishes over
+; the stored lanes. min and max of float32 values are exact, so the result is the host's scan.
+(defn chunk-bounds :context value [(id : int) (p : (array float)) (out : (array float)) (bound : (array int)) (size : int)]
+  (let* [lane id
+         lanes (array/nth bound 1)
+         n (int/and (array/nth bound 0) 1073741823)
+         chunk (int/div (int/add n (int/sub lanes 1)) lanes)]
+    (if (int/lt lane n)
+        (let* [x (array/nth p (int/mul lane 3))
+               y (array/nth p (int/add (int/mul lane 3) 1))
+               z (array/nth p (int/add (int/mul lane 3) 2))
+               walk (iterate chunk
+                             {:i lane :ax x :ay y :az z :bx x :by y :bz z}
+                             (fn [w]
+                               (let* [k (int/mul w.i 3)
+                                      px (array/nth p k)
+                                      py (array/nth p (int/add k 1))
+                                      pz (array/nth p (int/add k 2))]
+                                 {:i (int/add w.i lanes)
+                                  :ax (min w.ax px)
+                                  :ay (min w.ay py)
+                                  :az (min w.az pz)
+                                  :bx (max w.bx px)
+                                  :by (max w.by py)
+                                  :bz (max w.bz pz)}))
+                             :until (fn [prev next] (int/ge next.i n)))
+               at (int/mul lane 6)]
+          (-> out
+              (gpu/store at walk.ax)
+              (int/add (gpu/store out (int/add at 1) walk.ay))
+              (-> out
+                  (gpu/store (int/add at 2) walk.az)
+                  (int/add (gpu/store out (int/add at 3) walk.bx))
+                  (int/add))
+              (-> out
+                  (gpu/store (int/add at 4) walk.by)
+                  (int/add (gpu/store out (int/add at 5) walk.bz))
+                  (int/add))))
+        0)))

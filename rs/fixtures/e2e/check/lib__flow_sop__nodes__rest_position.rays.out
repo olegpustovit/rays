@@ -1,3 +1,0 @@
-exit 1
-File "lib/flow_sop/nodes/rest_position.rays", line 1, characters 0-0:
-Error [E_WORKSPACE]: Expected a (workspace ...) form.

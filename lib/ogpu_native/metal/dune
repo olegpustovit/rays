@@ -1,9 +1,0 @@
-; The OGPU implementation of this platform: an executable that runs on the GPU names ogpu_native,
-; and exactly one of these two stanzas exists.
-(library
- (name ogpu_native)
- (enabled_if
-  (= %{system} macosx))
- (modules)
- (libraries
-  (re_export ogpu_metal)))

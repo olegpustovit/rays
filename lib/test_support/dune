@@ -1,4 +1,0 @@
-(library
- (name test_support)
- (wrapped false)
- (libraries rays_diagnostic))

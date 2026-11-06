@@ -1,0 +1,35 @@
+[workspace]
+resolver = "2"
+members = ["crates/*", "tools/t", "tools/gate", "tools/buildtime"]
+default-members = ["crates/rays_bin"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.99"
+
+[profile.dev]
+opt-level = 1   # debug runs must be fast too (2026-11-06, M1): `rays check sketches/*.rays` 123.8 s at 0 -> 19.1 s at 1 (OCaml native 14.0 s); an edit to flow_ir rebuilds rays in 4.5 -> 5.2 s, cold 1 m 55 s at -j4
+debug = 0   # measured: cold build -20%, target dir -40%; panic locations still print (RUST_BACKTRACE lines need debug="line-tables-only")
+incremental = true
+codegen-units = 256
+overflow-checks = true
+
+# the global allocator's counters run on every allocation: unoptimised they were ~15% of debug lowering
+[profile.dev.package.mem_sys]
+opt-level = 3
+
+[profile.release]
+codegen-units = 16
+lto = "thin"
+debug = "line-tables-only"
+
+[profile.e2e]
+inherits = "dev"
+
+[profile.gpu]
+inherits = "dev"
+
+[profile.slow]
+inherits = "dev"

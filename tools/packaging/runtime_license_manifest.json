@@ -1,9 +1,0 @@
-{"schema":1,"surfaces":[
- {"name":"runtime","license":"MIT","provenance":"Rays OCaml source","bundled":false},
- {"name":"SDL3","license":"Zlib","provenance":"system library via conf-sdl3","bundled":false},
- {"name":"SDL3_image","license":"Zlib","provenance":"system library via conf-sdl3-image","bundled":false},
- {"name":"SDL3_ttf","license":"Zlib","provenance":"system library via conf-sdl3-ttf","bundled":false},
- {"name":"SDL3_mixer","license":"Zlib","provenance":"system library via conf-sdl3-mixer","bundled":false},
- {"name":"Metal","license":"Apple platform terms","provenance":"system SDK/framework","bundled":false},
- {"name":"OGPU","license":"MIT","provenance":"Rays OCaml source","bundled":false},
- {"name":"low_core","license":"MIT","provenance":"Rays OCaml source","bundled":false}]}

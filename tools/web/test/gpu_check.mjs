@@ -1,7 +1,7 @@
 // node gpu_check.mjs KERNELS_JSON GPU_JS GOLDEN_DIR
 //
-// Compiles the four WGSL goldens in real Chrome through lib/web_export/runtime/gpu.js, runs each on a small
-// deterministic input and compares the read-back outputs with the CPU region goldens (lib/flow_web/goldens/*.js)
+// Compiles the four WGSL goldens in real Chrome through crates/web_export/runtime/gpu.js, runs each on a small
+// deterministic input and compares the read-back outputs with the CPU region goldens (crates/flow_web/goldens/*.js)
 // on the same f32-rounded input, plus an `ops` kernel (not a golden) for the operators they never reach. KERNELS_JSON is `test_wgsl.exe --write-kernel-table`'s output.
 // Exit: 0 pass (or skipped: no Chrome, printed), 1 mismatch or WGSL error, 2 usage, 3 WebGPU unavailable.
 //

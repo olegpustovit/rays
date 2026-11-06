@@ -1,4 +1,0 @@
-(test
- (name test_marks_scene)
- (modules test_marks_scene)
- (libraries rays flow_native flow_ir scene_command ogpu_mock))

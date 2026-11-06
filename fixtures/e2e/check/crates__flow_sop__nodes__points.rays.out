@@ -1,0 +1,7 @@
+exit 1
+File "crates/flow_sop/nodes/points.rays", line 3, characters 2-45:
+Error [E_NAME]: Invalid, reserved or duplicate name: points_origin_validate.
+File "crates/flow_sop/nodes/points.rays", line 14, characters 2-56:
+Error [E_NAME]: Invalid, reserved or duplicate name: sop/points.
+File "crates/flow_sop/nodes/points.rays", line 2, characters 0-22:
+Error [E_NO_GRAPH]: A workspace needs at least one graph.

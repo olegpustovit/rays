@@ -1,9 +1,0 @@
-(library
- (enabled_if
-  (= %{system} mingw64))
- (name ogpu_vulkan)
- (public_name rays.ogpu_vulkan)
- (implements ogpu)
- (modules Impl Backend)
- (private_modules Backend)
- (libraries ogpu_core vulkan native_layer_token))

@@ -1,7 +1,0 @@
-(library
- (name ogpu_mock)
- (public_name rays.ogpu_mock)
- (implements ogpu)
- (modules Impl Backend_mock)
- (private_modules Backend_mock)
- (libraries ogpu_core))

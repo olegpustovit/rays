@@ -1,9 +1,0 @@
-exit 1
-File "lib/flow_sop/nodes/delete_attributes.rays", line 2, characters 0-64:
-Error [E_NAME]: Invalid, reserved or duplicate name: metadata_delete_validate.
-File "lib/flow_sop/nodes/delete_attributes.rays", line 7, characters 0-78:
-Error [E_NAME]: Invalid, reserved or duplicate name: metadata_delete_pattern.
-File "lib/flow_sop/nodes/delete_attributes.rays", line 13, characters 0-57:
-Error [E_NAME]: Invalid, reserved or duplicate name: sop/delete_attributes.
-File "lib/flow_sop/nodes/delete_attributes.rays", line 1, characters 0-33:
-Error [E_NO_GRAPH]: A workspace needs at least one graph.

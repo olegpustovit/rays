@@ -1,326 +1,51 @@
-# Rays repository guide
+# Rays development guide
 
-## Purpose
+Rays is a Rust creative-coding framework and native `.rays` Lisp workspace editor.
+The Cargo workspace is the repository root. `crates/` owns libraries, native bindings,
+the `rays_bin` application, Lisp nodes and runtime assets. `sketches/` owns runnable
+workspaces. `fixtures/` owns shared goldens; `specification/` owns design contracts.
+Historical port evidence lives in `docs/history/` and records known unfinished work.
 
-Rays is an OCaml creative-coding framework for interactive native desktop
-programs. It ships natively on Apple-Silicon Metal and on Windows Vulkan, through OGPU, whose API is
-backend-agnostic by design. Keep the public API small and functional where
-practical. Never add a CPU raster, browser/web, SDL2/Tsdl, or OpenGL fallback;
-Metal or Vulkan unavailability is a typed startup error. Web export (see Direction) is a
-separate compiler target, not a fallback: the native program never selects it.
+## Fast iteration
 
-Nested `AGENTS.md` files hold subsystem rules: `lib/metal`, `lib/vulkan`, `lib/ogpu`
-(also for `lib/ogpu_core`),
-`lib/runtime`, `lib/rdk`, `lib/rays_editor`, `lib/editor_document`, `lib/pxui_graph`, `lib/flow_sop`.
-Read the one for the directory you change. Design notes live in `specification/`;
-the shared frame/region compiler contract is [specification/core.md](specification/core.md).
-Update them when behavior or architecture changes materially.
+- Read the actual flow and callers first. Reuse existing code, stdlib/native features and installed
+  dependencies. Write the smallest correct change, delete obsolete code, avoid new abstractions.
+- Fast compilation AND fast debug execution are requirements. Measure both before changing profiles,
+  dependencies, crate boundaries or hot paths. Rust should beat archived native OCaml in both modes.
+- Keep incremental compilation and the warm shared `target/` cache. No routine clean, private target
+  directories or RUSTFLAGS/profile overrides. Dependencies are std + cc; justify additions with evidence.
+- Inner loop: `cargo check -p <crate>`. Focused regression: `cargo t -p <crate> [filter]`.
+  Never run raw `cargo test` or test binaries: cargo t kills cases at 5 seconds and test runs at
+  60 seconds, serializes GPU/window cases, reports slowest tests and records `target/t-times.tsv`.
+- Stage tests over time: focused case after an edit; touched crates and affected consumers at a stable
+  boundary; affected native/GPU checks before commit. Broad/slow qualification belongs at the end,
+  explicitly enabled with `RAYS_SLOW=1`. Do not repeatedly run the workspace suite in the edit loop.
+- A focused warm run should finish under 30 seconds. Shrink fixtures/share setup before moving genuinely
+  exhaustive work to qualification. Never raise deadlines to hide regressions or weaken assertions.
+- Leave one small runnable regression for nontrivial logic. Report commands, wall times and slowest cases.
+  Run `git diff --check` and commit completed stages after their checks. Known failures stay visible.
 
-The SOP network editor is Rays Flow: a left-to-right
-typed canvas with value ports, drives, graph/list/text views and a
-checked Lisp text form. `specification/flow.md` is the normative design.
-Work on `pxui_graph`, the graph pane, parameter drives
-or sketch Lisp follows it. Everything the Lisp can say is drawn in the graph and edited
-there directly: a call of a node kind is a card whether it is bound in a `let*`, written inside
-another call or a step of a `->` (a nested node, path leaf `holder#input`), and its inputs are rows
-the pane edits in place. New syntax or sugar ships with its graph projection, its `Flow_edit`
-gestures and a test, never as text-only. `specification/flow/prototype/` is an HTML behavioral reference to open
-in a browser, never product code and never a web fallback.
+## Contracts
 
-## Direction
+- Lisp is the first-class public surface. OCaml is retired: `ocaml-reference` tags `e92f94f0`, the last
+  complete implementation. Compare in a separate worktree, never restore an OCaml build dependency.
+  See `docs/development.md` for workflows and performance comparison instructions.
+- Preserve Lisp semantics, determinism and exact sequential/parallel equality. Rust owns its goldens;
+  OCaml byte parity is not required. Refresh goldens alongside intentional changes.
+- Native backends are Metal on Apple Silicon and Vulkan on Windows. No CPU raster, SDL2, OpenGL or
+  browser fallback. Missing GPU support is a typed startup error. Web export is a separate 2D target;
+  editor chrome stays native.
+- Keep foundational crates independent of runtime/UI. Flow syntax/check/eval/IR/shader/web remain UI-free.
+  Run `cargo run -p gate -- deps` for boundary edits. Existing violations are in the historical checkpoint.
+- SDL/GPU/window/resource operations stay on the initial thread. Use the process-wide parallel worker
+  pool for coarse pure work; no per-frame threads. Own resources and bounded caches explicitly.
+- Scene/input/UI use logical points; drawable-pixel conversion belongs at the backend boundary.
+- PXUI is the only UI engine. Preserve theme tokens, Pragmasevka, 24-point rows/bars, 20-point controls.
+  UI returns intents; do not mutate the document during frame construction.
+- Rays Flow follows `specification/flow.md`. New Lisp syntax ships with graph projection, direct editing
+  gestures and a regression, never text-only syntax.
+- Required C/C++/Objective-C++ ABI code lives under its owning sys crate. Metal bindings are checked in
+  under `crates/metal_sys/src/`; no OCaml generator runs at build time.
 
-Lisp is the first-class surface of Rays: a sketch is a `.rays` workspace. `Sketch`, `Frame` and
-`Scene` are the internal layer the editor is built on; there are no typed SOP constructors and no
-OCaml sketch programs. The OCaml API is second-class, used by tests and integrations. When the two could
-differ, Lisp decides: its names, defaults, ranges and errors are the contract, and the OCaml function is derived to match (`specification/sop.md`,
-"one declaration", for SOPs). A new capability ships in Lisp first; do not add an OCaml-only
-parameter or behaviour.
-
-The accepted architecture cleanup is tracked in
-[`specification/cleanup/status.md`](specification/cleanup/status.md), with the
-full approved requirements beside it. Accepted Lisp nodes replace their OCaml
-twins and parity code are deleted; Lisp-output goldens are the regression net; no oracle
-library is retained. The internal OCaml API has no frozen manifest.
-
-One binary, `rays` (`bin/rays.ml`), interprets `.rays` files; nothing generates OCaml from Lisp.
-`dune exec rays` opens an empty editor (Command-S writes `./untitled.rays`), `dune exec rays -- FILE.rays`
-opens a workspace natively, `rays check FILE...` / `rays fmt FILE` check and format, and `rays mem FILE [--frames N]` prints the memory ledger of its real frames, window-free (`specification/memory-budgets.sexp` holds the budgets `@tools/mem` checks with the same runner).
-
-Web export: `dune exec rays -- web FILE.rays -o DIR` writes static files, nothing more: preview them with
-`npx serve DIR`, which reads the worker pool's cross-origin isolation headers from the emitted `serve.json`.
-Its scope is the 2D canvas only (`:context draw` graphs
-and the values that feed them). PXUI and the editor are never exported; they are editor chrome and
-stay native. `scene` and `sop` graphs are a later phase. Lisp SOP bodies live in
-`lib/flow_sop/nodes/*.rays`; their OCaml twins and parity-only kernels are deleted.
-Exact predicates, spatial indexes,
-solvers, wiring and native carriers stay OCaml. Generated `image/map`
-images run as WebGPU kernels; `image/noise` preserves native double arithmetic, `image/render` uses
-offscreen WebGPU textures, and static `image/load` files are bundled using the native decoder. The web follows
-the native optimization paths, not a parallel set: regions bound per call (arguments, frame inputs), loop
-memory, the workspace's `:precision` (fast: exact 64-bit integer register pairs in JS and WGSL), the resident
-fold on WebGPU (count records, compaction, one readback) and display regions drawn indirect; a change to one
-target's path lands in the other with a parity check (`@tools/qualification-web`). The design summary and the
-task plan are `specification/web-export/plan.md`.
-
-## Rust port
-
-`rs/` is the Cargo port (`rs/CHECKPOINT.md`). Byte-for-byte parity with the OCaml build is no longer
-a goal: the Rust build must be fast and lean, in release and in debug, and beat native OCaml on both.
-Change Rust goldens, shaders or pixels when a faster path needs it, and refresh them in the same change;
-correctness (Lisp semantics, determinism, parallel == sequential) still holds.
-
-## Libraries
-
-| Library | Owns |
-|---|---|
-| `diagnostic`, `native_layer_token`, `mem`, `lru`, `param`, `input`, `rays_math` | Leaves with no dependencies: shared diagnostics, the opaque presentation-layer handle, the memory ledger, a bounded LRU (required [`Mem.owner`](lib/mem/mem.mli) / [`Lru.cache`](lib/lru/lru.mli)), typed parameter schemas, immutable logical frame facts, and pure math |
-| `parallel` | One process-wide worker pool and deterministic coarse-grained work helpers |
-| `sdl3`, `sdl3_image/ttf/mixer` | SDL3 bindings (foundational) |
-| `metal` | Metal bindings: safe layer over a handwritten bridge (foundational) |
-| `vulkan` | Vulkan bridge: operations shaped like OGPU's driver records over volk and VMA, Windows only (foundational) |
-| `ogpu_core`, `ogpu` | Portable GPU core and virtual public API |
-| `ogpu_metal_native`, `ogpu_metal`, `ogpu_vulkan`, `ogpu_mock` | Native Metal detail and the three OGPU implementations |
-| `ogpu_native` | The platform's OGPU implementation: what an executable that runs on the GPU names; one stanza per platform |
-| `runtime`, `runtime_input`, `runtime_resources` | SDL3/window lifecycle and frame facts, typed event translation, SDL image/ttf/mixer services, atomic file writes |
-| `renderer` | GPU execution, pipelines, Scene lowering caches, render stats and leases over one window or offscreen `Runtime`; contains `Scene_execution` |
-| `scene_command` | Pure renderer-neutral commands |
-| `rays` | `Sketch`, `Frame`, pure `Scene`, shared `Input`, resources, renderer behavior |
-| `rays_pathtracer` | Hardware ray-traced path tracer |
-| `rdk` | The single packed geometry/topology compute core, built from `rdk_core` → `rdk_geom` → `rdk_ops` → `rdk_boolean`; `rdk_rays` is its glue to `rays` meshes |
-| `sop` | Immutable SOP graphs over `rdk` operations |
-| `flow` | UI-free workspace language over `diagnostic`, `param`, `input` and pure `rays_math`: reader, printer, macros, checker, evaluator, frame folds, packed arrays and typed deferred nodes |
-| `flow_ir` | Typed dataflow IR over `flow` evaluations with sharing, hoisting, pruning, fusion and precision passes, block-at-a-time CPU kernels, and bounded caches; uses `parallel`, `lru` and the `scene_command` marks contract as pure data; `flow` never depends on it |
-| `flow_shader` | The shader printers (`Emit` MSL, `Spirv`, `Raster` stages) over `flow`, `flow_ir` and `ogpu_core`, and `print_shader.exe`, which prints `renderer`, `ogpu_metal` and `flow_gpu` shaders from their `.rays` at build time (none are checked in); never reaches GPU runners, geometry or UI |
-| `flow_gpu` | Runs `flow_shader`'s kernels: a pipeline cache of 64 and owned native runners; depends on `flow`, `flow_ir`, `flow_shader`, `ogpu`, `renderer`, `rays_math`, `lru` and `parallel`; never reaches geometry or UI |
-| `flow_web` | WGSL and JavaScript printers from `flow_ir` core programs for the web export; depends on `flow`, `flow_ir`, `param`, `rays_math`, `scene_command` and `parallel`; never reaches `rays`, geometry, GPU or UI libraries |
-| `web_export` | Static 2D workspace export and embedded web runtime assets; consumes the checked document and shared compiler, bundles loaded images through SDL3_image, and never reaches UI libraries |
-| `flow_graph` | Domain-neutral graph projection, checked text gestures, exposure and probes over `flow` and `param` |
-| `flow_sop` | Typed SOP/value overlay, drives, exposure and environment-owned value lane over `flow`, `flow_ir`, `sop`, `rays_math` and `parallel` |
-| `flow_native` | Native Flow drawing, marks, workspace execution and live-frame glue; uses the UI-free document model and renderer, never PXUI or the editor |
-| `editor_core` | Editor state and routing: labelled `History`, `Command`, `Keymap`, `Router`, the shell's panel tree (`Panels`), and s-expression user preferences (`Store`, printed by `Flow.Lisp`) |
-| `editor_document` | Package-private scene/network/settings model, document edits (`Document_edit`), workspace document (`Workspace_doc`, `Layout_by_path`), validation, object/layer schemas and s-expression presets; no presentation dependencies |
-| `pxui` | The one immediate-mode UI engine (`Pxui.Ui`), over `rays` and `rays_math` |
-| `pxui_shell` | Editor chrome over PXUI: layout, headers, keys, status, timeline, prompts, frame, `Inspector`; uses `rays_math` values directly |
-| `pxui_graph` | SOP-network presentation; emits typed requests, never edits |
-| `lisp_sop`, `workspace_parity`, `ogpu_conformance`, `rdk_test_support`, `flow_ir_test_support`, `golden_fixtures`, `scene_execution_fixtures` | Test-only helper libraries beside their owners (`lib/flow_sop/lisp_sop`, `lib/rays_editor/test`, `lib/ogpu/conformance`); product libraries never reach them |
-| `rays_editor` | Rays Editor: the Houdini-like SOP shell (`Editor`), composed from the document, native Flow and UI libraries, plus editor views and `Timeline` |
-
-A sketch is one file, `sketches/<name>.rays`: no `dune`, no `main.ml`, no folder. Its header comment
-says what it shows; a library two sketches import sits beside them (`ws_shared_lib.rays`). A folder,
-`sketches/<name>/<name>.rays`, only for a sketch with assets of its own. Add one by adding the file:
-`@runtest` checks every sketch, `@smoke-all` opens each under `RAYS_MAX_FRAMES`. Command-S in
-its window rewrites the file (comments kept) and an edit of the file reloads the window. Prefer
-`Rays_editor.Editor` for SOP sketches, SOP graphs for geometry, and
-deterministic seeds.
-
-## Dependency rules
-
-Tests live beside their library (editor tests in `lib/rays_editor/test`); `test/` keeps the gate and the draw-graph snapshots. The gate also rejects a cross-library `X.Private.` reference missing from `test/private_allowlist.ml`, a list that only shrinks, and a backend module named outside its backend.
-`test/dependency_gate.ml` reads Dune files in `lib`, `ppx`, `tools`, `test`
-and `bin` when present, builds the transitive graph, and enforces "may never
-reach" rules plus a token scan. Executables and tests that reach virtual
-OGPU select exactly one implementation explicitly; the library has no default.
-There are no
-reachability exceptions; tooling and backend conformance have explicit
-source-token allowances.
-Library sources are never duplicated with Dune `copy_files`. The existing
-shared Flow IR fixtures are packaged in a test-only library that product
-libraries cannot reach.
-
-- Foundational libraries (`sdl3*`, `metal`, `ogpu_core`, `ogpu`, `native_layer_token`,
-  `scene_command`) never reach `runtime`, `rays`, or anything above.
-  `ogpu_core` depends only on `native_layer_token` (the opaque presentation
-  layer handle); virtual `ogpu` depends only on `ogpu_core`. `ogpu_mock`
-  stays portable; native Metal detail depends only on `ogpu_core`, `metal`
-  and `lru`.
-- `Vulkan.` and `Ogpu_vulkan.` stay within the Vulkan backend, as `Metal.` does within Metal's. `ogpu_vulkan`
-  depends only on `ogpu_core`, `vulkan` and `native_layer_token`.
-- `Metal.`/`Ogpu_metal_native.` stay within the Metal backend; the runtime,
-  path tracer, and their tests use the virtual `ogpu` only, and the gate lists
-  no Metal exception.
-- `rays` never depends on `pxui`, geometry, sketch libraries, or examples.
-- `pxui_shell` depends only on `rays`, `rays_math`, `editor_core`, and `pxui`; it never imports
-  SOP, graph, geometry, or sketch libraries.
-- `pxui` depends only on `rays`, `rays_math`, `param` (the number field's model) and `mem` (text undo's charge).
-- `rdk` never reaches `sop`; `sop` never reaches UI
-  libraries; `pxui` never reaches `sop`; `param` depends on nothing;
-  `pxui_graph` never reaches `sop` or `rdk`;
-  `flow_graph` depends only on `flow` and `param`; `flow_ir` depends only on `flow`, `param`,
-  `rays_math`, `scene_command`, `lru` and `parallel` and never reaches `rays`, `pxui*`, `sop`, `rdk` or `rays_editor`;
-  `flow_shader` depends only on `flow`, `flow_ir` and `ogpu_core` (a build rule running its
-  `print_shader.exe` adds no library edge); `flow_gpu` depends only on `flow`, `flow_ir`, `flow_shader`, `param`, `rays_math`,
-  `ogpu_core`, `ogpu`, `renderer`, `lru`, `mem` and `parallel` and never reaches
-  `sop`, `rdk`, `flow_sop` or any UI library; `flow_web` depends only on `flow`, `flow_ir`,
-  `param`, `rays_math`, `scene_command` and `parallel` and never reaches `rays`, `sop`, `rdk`, `flow_sop`,
-  `flow_gpu`, any UI library or the GPU libraries;
-  nothing below imports `rays_editor`.
-- A boundary change updates the gate, adds focused tests at each affected
-  boundary, and updates `specification/backend.md`. Do not expose raw SDL,
-  Metal, or runtime values in `Scene` or public sketch code.
-
-## Loops
-
-```sh
-dune build @check                 # inner loop: typecheck only
-dune build @lib/<name>/runtest    # focused tests
-dune build @all && dune runtest && dune build @smoke && git diff --check  # pre-commit
-dune build @doc
-```
-
-`@smoke` opens two sketches (`basic`, `sop_gallery`) for 30 frames; use `@smoke-all` for every
-sketch. Both open windows sequentially. For a window-free broad
-test run, set `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy` on `dune runtest`.
-
-A fatal exception in a running sketch writes a report folder under the
-platform temporary directory's `rays-crash` (exception, backtrace, recent input, and the editor's
-document as text, plus a loadable `.rays` for a workspace); read it first when asked to investigate a crash.
-
-## Test time is a budget
-
-Slow tests cost every agent every edit. Treat test time like a performance bug: measure it, record it,
-and fix it in the same change that made it worse.
-
-- Never run the whole `@runtest` to check an edit. Run the focused alias (`@lib/<x>/runtest`,
-  `@test/<name>`) through `tools/check.exe`, which kills a run at 180 s (`RAYS_CHECK_TIMEOUT`, `0` = none).
-  A run that hits the timeout is a defect to fix, not a limit to raise.
-- Time every focused run you do and note the wall time in your report. After a change, read the
-  per-action times with `dune trace cat | jq` (or the `test_workspace_shell` section lines) and find the
-  slowest ones before you finish.
-- Budgets: a focused alias finishes in under 30 s warm; one test section under 10 s. The
-  `test_workspace_shell` runner leaves its listed slow sections (`slow` in the file) to `RAYS_SLOW=1`; run them
-  only for the final check, in the background.
-- A test over budget gets reworked in this order: shrink the fixture (fewer frames, a smaller graph, no
-  footer probes); share one setup between its checks; replace a UI-driven path with a direct call to the
-  function under test; split the slow exhaustive part into `qualification-scale` or `RAYS_SLOW=1`
-  (`enabled_if (= %{env:RAYS_SLOW=0} 1)`). Delete a test that no longer guards a behavior anyone relies on,
-  and one that repeats another's check. Never leave a slow test in the default loop "for later".
-- Record it. When you find or fix a slow test, add one row to `specification/test-times.md` (date, test,
-  before, after, what changed); when you add a test that takes over 5 s, add the row with the reason. Check
-  the file before you add a slow one: a similar test may already exist to extend.
-- Tests that open a window stay in `@runtest-native` (see Loops) and hold `(locks %{workspace_root}/smoke_window)`:
-  a bare lock name is per directory, and a window opening anywhere stalls another's `nextDrawable`. An unbounded
-  wait, a sleep or a real clock in a test is a bug.
-
-## Find breakage when it happens
-
-A late failure costs hours of tracing; a cheap gate on the edit costs seconds.
-
-- Commit each stage of a multi-step plan, and each fix, once its gates pass. A large uncommitted tree cannot
-  be bisected.
-- On every change, run the alias of each library you touched and the focused native aliases it reaches. Before
-  each commit, also run whole `@runtest-native`. Only `--ship`, `@smoke-all` and `@qualification-scale` wait
-  for the end. A subagent brief never forbids a cheap gate.
-- A change to a policy or default (placement, caching, a threshold) breaks tests elsewhere that assumed it. Grep
-  for them and fix them in the same change. A test of a contract states the policy it needs, rather than relying on
-  the default.
-- A bench asserts on every sample that it is measuring the route it claims. Its own reads must not change that
-  route.
-- A failing gate names what differs: the field, and for heap growth the owner that grew. Never just "grew".
-- Before a run over 2 minutes, check whether a log on disk already answers it. Confirm a fix with one long run,
-  not many. A bench stops once it has its answer.
-- After one failed retry on the same root cause, stop retrying: hand it to a stronger model with what is proved
-  and what is not.
-- These gates stay usable only while they are cheap. New tests reuse an existing fixture at the smallest size that
-  fails; the budgets above apply to native aliases too.
-
-Default `runtest` is green on a clean checkout. Display-dependent tests live in
-`@runtest-native`; long, SDK-, driver-, or machine-specific checks in
-`@qualification`. Large algorithm fixtures (studio fracture and high-density
-one/four-domain exactness) and exhaustive catalog/control sweeps are optional
-under `@qualification-scale` (also included in `@qualification`). Normal
-shipping does not run them.
-When agents share a worktree, build `tools/check.exe` once, then invoke
-`_build/default/tools/check.exe` directly: it queues validation requests before
-Dune takes its build lock. It defaults to `@runtest`; pass focused aliases such
-as `@lib/rdk/runtest`, or `--ship` for `@all`, `@runtest`, `@smoke` and
-`git diff --check`. Use the same launcher for every agent in that worktree.
-Keep Dune's cache: do not use `--force` or clean between ordinary validations.
-Agents run the focused alias for their change; reserve `--ship` for the final
-shipping check. GPU rendering integration and presentation timeouts live in
-`@runtest-native`; pure prepared-command validation stays in `@runtest`.
-Warnings are errors. Automated application loops arrange
-their own termination. Build, generation, and validation glue is OCaml under
-Dune, never Python; external-tool comparisons belong in `../rays-support`.
-The generated `lib/flow_sop/flow_manifest.sexp` is also checked by
-`dune build @lib/flow_sop/runtest`; when SOP metadata changes, review and
-accept its diff with `dune promote`.
-
-SDL3 versions live only in `packaging/sdl3.lock` (a floor per library and the
-release last tested); `dune exec tools/sdl3/bump.exe` records a new one. Native
-structs the stubs read are pinned in `lib/sdl3/abi.sexp`; the build fails and
-names a field an SDL release moved (`generate.exe accept` re-probes). See
-`specification/sdl3.md`.
-
-Windows setup, tests and the validation layer: `packaging/README.md`. Tests there run with
-`RAYS_VULKAN_VALIDATION=fatal`; the shell is MSYS2's bash, never Git Bash.
-
-Bootstrap: `opam switch create . 5.3.0 --no-install`, then `opam pin add
---no-action --yes --recursive ./packaging`, `direnv allow` (or
-`eval "$(opam env --switch=. --set-switch)"`), and `opam install . --deps-only
---with-test --with-doc`. `packaging/` only probes native SDL3 dependencies.
-
-## Public API
-
-- A sketch is a `.rays` workspace. OCaml code on the internal layer (`Sketch`, `Frame`, `Scene`)
-  threads an immutable model through `Sketch.run_state`; no global user-state refs.
-- A `view` returns `Scene.t`. Scene constructors are pure data;
-  `Scene.render` is the effect boundary.
-- `Frame.t` carries canonical logical facts in `Frame.input`, with backing-pixel
-  scale, FPS, and per-frame pointer delta alongside it.
-  `Frame.mouse_delta` sums one frame's pointer motion and resets each frame.
-- Conventions: `at:(x, y)` positions, radians, radius for circles, `Color.t`
-  colors, short constructor names, sensible defaults with explicit config.
-- Resources (textures, fonts, canvases, audio) are owned: release them in
-  `Sketch.run_state ~on_stop` while SDL is alive. Audio is SDL3_mixer-backed
-  and never silently a no-op.
-- No fake placeholders: implement a real `result`-returning boundary or leave
-  the operation out. Prefer explicit `result` errors at backend boundaries.
-- Every public module has an `.mli`; sibling libraries stay wrapped. Changing
-  the high-level design updates `specification/api.md`, an example, and tests.
-
-## Coordinates and native runtime
-
-Sketch sizes, `Frame.input.size`, Scene coordinates, pointer positions, and PXUI
-layout are logical points. `Frame.pixel_scale` is the explicit
-native-pixel boundary; conversion to drawable pixels happens once, inside the
-GPU backend. Details: `lib/runtime/AGENTS.md`.
-
-## Determinism and domains
-
-- SDL, Metal, texture, font, audio, event, and cache operations run on the
-  initial domain. Never create a domain or thread per frame or item.
-- Use the shared `Parallel` worker pool for coarse pure work on immutable
-  or disjointly owned data, with a tunable grain and a sequential cutoff.
-- Parallel results are byte-identical to the sequential path; every parallel
-  change has an exact one-domain vs multi-domain regression.
-- Use immutable `Rand.t`, never global `Stdlib.Random`, in parallel-capable
-  code; split generators before independent work. `Sketch.Fixed dt` and
-  `Sketch.export` are artifact-deterministic.
-
-## Performance
-
-Performance is correctness on hot paths. Measure before changing one (wall
-time, allocations, input size, domains, profile, machine) and hand off with the
-benchmark command and before/after numbers. Packed arrays, not lists, for dense
-data; no `List.nth`, `@`, or repeated `List.length` in hot loops; pre-size or
-grow geometrically; int keys over polymorphic hash. Every cache has an explicit
-capacity. Frame work must not scale with unchanged scene size. Never claim
-"linear", "zero allocation", or "production-ready" without evidence. Full
-contract: `lib/rdk/AGENTS.md`.
-
-## UI
-
-`Pxui.Ui` is the only UI engine: build widgets each frame inside `Ui.frame`,
-keep their values in the immutable model, destroy the handle in `on_stop`.
-Every host shares its capture, focus, hit list, and renderer; never add a
-second hit-test, capture, text-entry, or painting path. New widgets are
-functions over `Ui.box`/`Ui.signal`/`Ui.draw`, drawn with the kit's tokens and marks (rev 3,
-`specification/pxui.md`: `Pxui.Theme` inks, lines and fills, `Ui.Paint.cap`/`brackets`/`chevron`,
-`Pxui_shell.Kit.button`/`segments`): a field is a value on a hairline, a button is its text, no
-radius, shadow or ink fill. `tools/ui_shot.exe FILE.rays OUT.png` renders an editor without a
-window; `sketches/ws_layout` is the layout the design reference is compared with. UI code returns intents and does
-not mutate the model during `Ui.frame`. A drag that carries a value between panes is `Ui.carry` / `Ui.drop_target` (one payload on the handle,
-no second hit-test or capture); `specification/flow.md` §7.12. Preserve the design kit (`Pxui.Theme`,
-Pragmasevka, 24-point rows and bars, 20-point controls); `lib/pxui/test_ui_parity` guards it pixel for pixel
-against goldens this kit drew with DepartureMono (the test sets `RAYS_UI_FONT`; refresh them only for a
-design change, with `RAYS_UPDATE_FIXTURES=<dir>`). Host and editor rules: `lib/rays_editor/AGENTS.md`.
+Mark deliberate shortcuts with known ceilings using `ponytail:` and an upgrade trigger.
+Never shortcut correctness, input validation, lifetime safety, security or accessibility.

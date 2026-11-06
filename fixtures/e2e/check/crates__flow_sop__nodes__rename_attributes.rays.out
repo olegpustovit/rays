@@ -1,0 +1,13 @@
+exit 1
+File "crates/flow_sop/nodes/rename_attributes.rays", line 2, characters 0-59:
+Error [E_NAME]: Invalid, reserved or duplicate name: rename_attributes_owner.
+File "crates/flow_sop/nodes/rename_attributes.rays", line 11, characters 0-62:
+Error [E_NAME]: Invalid, reserved or duplicate name: rename_attributes_conflict.
+File "crates/flow_sop/nodes/rename_attributes.rays", line 16, characters 0-63:
+Error [E_NAME]: Invalid, reserved or duplicate name: rename_attributes_normalize.
+File "crates/flow_sop/nodes/rename_attributes.rays", line 24, characters 0-95:
+Error [E_NAME]: Invalid, reserved or duplicate name: rename_attributes_rewrite_validate.
+File "crates/flow_sop/nodes/rename_attributes.rays", line 28, characters 0-57:
+Error [E_NAME]: Invalid, reserved or duplicate name: sop/rename_attributes.
+File "crates/flow_sop/nodes/rename_attributes.rays", line 1, characters 0-33:
+Error [E_NO_GRAPH]: A workspace needs at least one graph.

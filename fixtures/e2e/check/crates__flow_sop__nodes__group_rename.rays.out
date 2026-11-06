@@ -1,0 +1,11 @@
+exit 1
+File "crates/flow_sop/nodes/group_rename.rays", line 2, characters 0-54:
+Error [E_NAME]: Invalid, reserved or duplicate name: group_rename_owner.
+File "crates/flow_sop/nodes/group_rename.rays", line 11, characters 0-57:
+Error [E_NAME]: Invalid, reserved or duplicate name: group_rename_conflict.
+File "crates/flow_sop/nodes/group_rename.rays", line 16, characters 0-58:
+Error [E_NAME]: Invalid, reserved or duplicate name: group_rename_normalize.
+File "crates/flow_sop/nodes/group_rename.rays", line 24, characters 0-74:
+Error [E_NAME]: Invalid, reserved or duplicate name: sop/group_rename.
+File "crates/flow_sop/nodes/group_rename.rays", line 1, characters 0-28:
+Error [E_NO_GRAPH]: A workspace needs at least one graph.
