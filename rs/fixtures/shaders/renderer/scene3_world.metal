@@ -267,13 +267,13 @@ fragment float4 world_fragment(
   uint r332=0u;
   float r338=as_type<float>(0x3e906ec1u),r348=as_type<float>(0x3efa2a2cu),r379=as_type<float>(0x3f8bd89du);
   uint r447=64u;
-  float r475=0.0f,r476=as_type<float>(0x3f800000u),r528=as_type<float>(0x3f000000u),r536=as_type<float>(0x0u),r550=0.0f,r568=as_type<float>(0x0u),r570=as_type<float>(0x3f800000u);
-  uint r596=2u,r598=1u,r600=0u;
-  int r601=0;
-  float r602=0,r669=0.0f,r684=as_type<float>(0x38d1b717u),r706=as_type<float>(0x40490fdbu),r747=0.0f,r748=0.0f,r749=0.0f;
-  int r758=0;
-  float r759=0,r760=0,r761=0,r1272=as_type<float>(0x4020a3d7u),r1279=as_type<float>(0x401b851fu),r1280=as_type<float>(0x3f170a3du),r1284=as_type<float>(0x3e0f5c29u),r1297=as_type<float>(0x3ee8ba2eu),r1301=as_type<float>(0x437f0000u),r1305=0.0f,r1309=0.0f,r1313=0.0f;
-  float r1314=0.0f,r1315=0.0f,r1316=0.0f,r1317=0.0f;
+  float r475=0.0f,r476=as_type<float>(0x3f800000u),r528=as_type<float>(0x3f000000u),r536=as_type<float>(0x0u),r538=0.0f,r539=as_type<float>(0x0u),r543=as_type<float>(0x3f800000u),r551=0.0f,r552=0.0f,r570=as_type<float>(0x0u),r572=as_type<float>(0x3f800000u);
+  uint r598=2u,r600=1u,r602=0u;
+  int r603=0;
+  float r604=0,r671=0.0f,r686=as_type<float>(0x38d1b717u),r708=as_type<float>(0x40490fdbu),r749=0.0f,r750=0.0f,r751=0.0f;
+  int r760=0;
+  float r761=0,r762=0,r763=0,r1274=as_type<float>(0x4020a3d7u),r1281=as_type<float>(0x401b851fu),r1282=as_type<float>(0x3f170a3du),r1286=as_type<float>(0x3e0f5c29u),r1299=as_type<float>(0x3ee8ba2eu),r1303=as_type<float>(0x437f0000u),r1307=0.0f,r1311=0.0f,r1315=0.0f;
+  float r1316=0.0f,r1317=0.0f,r1318=0.0f,r1319=0.0f;
   float r15=buffer6[(27u)*1+0];
   float r20=((in.color.x)*(texture7.sample(sampler8,float2((in.uv.x),(in.uv.y))).x));
   float r21=((in.color.y)*(texture7.sample(sampler8,float2((in.uv.x),(in.uv.y))).y));
@@ -407,516 +407,520 @@ fragment float4 world_fragment(
         float r527=(r524==0.0f?0.0f:(fma(r476,(buffer6[(51u)*1+0]),(fma((in.world.z),(buffer6[(50u)*1+0]),(fma((in.world.y),(buffer6[(49u)*1+0]),(((in.world.x)*(buffer6[(48u)*1+0])))))))))/r524);
         float r529=fma(((r524==0.0f?0.0f:(fma(r476,(buffer6[(43u)*1+0]),(fma((in.world.z),(buffer6[(42u)*1+0]),(fma((in.world.y),(buffer6[(41u)*1+0]),(((in.world.x)*(buffer6[(40u)*1+0])))))))))/r524)),r528,r528);
         float r532=fma((((as_type<float>(0xbf800000u))*((r524==0.0f?0.0f:(fma(r476,(buffer6[(47u)*1+0]),(fma((in.world.z),(buffer6[(46u)*1+0]),(fma((in.world.y),(buffer6[(45u)*1+0]),(((in.world.x)*(buffer6[(44u)*1+0])))))))))/r524)))),r528,r528);
-        r550=((((((buffer6[(39u)*1+0])<r528))!=0.0f||((r524<=r536))!=0.0f))!=0.0f||((((((((r529<r536))!=0.0f||((r532<r536))!=0.0f))!=0.0f||((((r529>r476))!=0.0f||((r532>r476))!=0.0f))!=0.0f))!=0.0f||((((r527<r536))!=0.0f||((r527>r476))!=0.0f))!=0.0f))!=0.0f);
-        if(r550==0.0f) {
-          float r555=rsqrt(fabs((fma((in.normal.z),(in.normal.z),(fma((in.normal.y),(in.normal.y),(((in.normal.x)*(in.normal.x)))))))));
-          float r578=(r527-(fma((buffer6[(57u)*1+0]),((r570-(min((max((fma((((in.normal.z)*r555)),(buffer6[(30u)*1+0]),(fma((((in.normal.y)*r555)),(buffer6[(29u)*1+0]),(((((in.normal.x)*r555))*(buffer6[(28u)*1+0]))))))),r568)),r570)))),(buffer6[(56u)*1+0]))));
-          float r580=buffer6[(60u)*1+0];
-          long r581=long(r580);
-          float r583=buffer6[(61u)*1+0];
-          long r584=long(r583);
-          long r587=long((buffer6[(59u)*1+0]));
-          long r590=long(floor(((r529*(trunc(r580))))));
-          long r591=r590;
-          long r594=long(floor(((r532*(trunc(r583))))));
-          long r595=r594;
-          long r599=(as_type<long>(ulong((ulong(((as_type<long>(ulong((ulong(r587)*ulong(long(r596))))<<1)>>1)))+ulong(long(r598))))<<1)>>1);
-          bool over601=r599>long(r600) && ulong(r599-long(r600))>4096uL;
-          sb|=over601?1u:0u;
-          r602=r568;
-          for(r601=long(r600);r601<(over601?long(r600):r599);r601++){
-  uint r603=0u;
-  int r604=0;
-  float r605=0,r659=0.0f;
+        r538=((((buffer6[(39u)*1+0])<r528))!=0.0f||((r524<=r536))!=0.0f);
+        if(r538==0.0f) {
+          r551=(((((((r529<r539))!=0.0f||((r532<r539))!=0.0f))!=0.0f||((((r529>r543))!=0.0f||((r532>r543))!=0.0f))!=0.0f))!=0.0f||((((r527<r539))!=0.0f||((r527>r543))!=0.0f))!=0.0f);
+        }
+        r552=(r538!=0.0f||r551!=0.0f);
+        if(r552==0.0f) {
+          float r557=rsqrt(fabs((fma((in.normal.z),(in.normal.z),(fma((in.normal.y),(in.normal.y),(((in.normal.x)*(in.normal.x)))))))));
+          float r580=(r527-(fma((buffer6[(57u)*1+0]),((r572-(min((max((fma((((in.normal.z)*r557)),(buffer6[(30u)*1+0]),(fma((((in.normal.y)*r557)),(buffer6[(29u)*1+0]),(((((in.normal.x)*r557))*(buffer6[(28u)*1+0]))))))),r570)),r572)))),(buffer6[(56u)*1+0]))));
+          float r582=buffer6[(60u)*1+0];
+          long r583=long(r582);
+          float r585=buffer6[(61u)*1+0];
+          long r586=long(r585);
+          long r589=long((buffer6[(59u)*1+0]));
+          long r592=long(floor(((r529*(trunc(r582))))));
+          long r593=r592;
+          long r596=long(floor(((r532*(trunc(r585))))));
+          long r597=r596;
+          long r601=(as_type<long>(ulong((ulong(((as_type<long>(ulong((ulong(r589)*ulong(long(r598))))<<1)>>1)))+ulong(long(r600))))<<1)>>1);
+          bool over603=r601>long(r602) && ulong(r601-long(r602))>4096uL;
+          sb|=over603?1u:0u;
+          r604=r570;
+          for(r603=long(r602);r603<(over603?long(r602):r601);r603++){
+  uint r605=0u;
+  int r606=0;
+  float r607=0,r661=0.0f;
   if(r30==0.0f) {
     if(r184==0.0f) {
       if(r475!=0.0f) {
-        if(r550==0.0f) {
-          bool over604=r599>long(r603) && ulong(r599-long(r603))>4096uL;
-          sb|=over604?1u:0u;
-          r605=r602;
-          for(r604=long(r603);r604<(over604?long(r603):r599);r604++){
-  uint r610=0u;
-  float r617=0.0f,r622=0.0f,r629=as_type<float>(0x437f0000u),r640=as_type<float>(0x43800000u),r645=0.0f,r650=0.0f,r652=0.0f,r655=0.0f,r657=0.0f;
+        if(r552==0.0f) {
+          bool over606=r601>long(r605) && ulong(r601-long(r605))>4096uL;
+          sb|=over606?1u:0u;
+          r607=r604;
+          for(r606=long(r605);r606<(over606?long(r605):r601);r606++){
+  uint r612=0u;
+  float r619=0.0f,r624=0.0f,r631=as_type<float>(0x437f0000u),r642=as_type<float>(0x43800000u),r647=0.0f,r652=0.0f,r654=0.0f,r657=0.0f,r659=0.0f;
   if(r30==0.0f) {
     if(r184==0.0f) {
       if(r475!=0.0f) {
-        if(r550==0.0f) {
-          long r606=(as_type<long>(ulong((ulong(r604)-ulong(r587)))<<1)>>1);
-          long r607=(as_type<long>(ulong((ulong(r591)+ulong(r606)))<<1)>>1);
-          long r608=(as_type<long>(ulong((ulong(r601)-ulong(r587)))<<1)>>1);
-          long r609=(as_type<long>(ulong((ulong(r595)+ulong(r608)))<<1)>>1);
-          r617=(((((r607<long(r610)?1.0f:0.0f))!=0.0f||((r609<long(r610)?1.0f:0.0f))!=0.0f))!=0.0f||((((r607>=r581?1.0f:0.0f))!=0.0f||((r609>=r584?1.0f:0.0f))!=0.0f))!=0.0f);
-          if(r617==0.0f) {
-            r622=((buffer6[(39u)*1+0])>(as_type<float>(0x3fc00000u)));
-            if(r622!=0.0f) {
-              float r623=float(r607);
-              float r624=float(r609);
-              float r630=((texture13.read(uint2(r623,r624)).x)*r629);
-              long r631=long(round(r630));
-              float r633=((texture13.read(uint2(r623,r624)).y)*r629);
-              long r634=long(round(r633));
-              float r635=round(r633);
-              float r636=((texture13.read(uint2(r623,r624)).z)*r629);
-              r645=((as_type<float>(0x4b7fffffu))==0.0f?0.0f:(((fma((round(r630)),(as_type<float>(0x47800000u)),(float((r634*256L)))))+(round(r636))))/(as_type<float>(0x4b7fffffu)));
+        if(r552==0.0f) {
+          long r608=(as_type<long>(ulong((ulong(r606)-ulong(r589)))<<1)>>1);
+          long r609=(as_type<long>(ulong((ulong(r593)+ulong(r608)))<<1)>>1);
+          long r610=(as_type<long>(ulong((ulong(r603)-ulong(r589)))<<1)>>1);
+          long r611=(as_type<long>(ulong((ulong(r597)+ulong(r610)))<<1)>>1);
+          r619=(((((r609<long(r612)?1.0f:0.0f))!=0.0f||((r611<long(r612)?1.0f:0.0f))!=0.0f))!=0.0f||((((r609>=r583?1.0f:0.0f))!=0.0f||((r611>=r586?1.0f:0.0f))!=0.0f))!=0.0f);
+          if(r619==0.0f) {
+            r624=((buffer6[(39u)*1+0])>(as_type<float>(0x3fc00000u)));
+            if(r624!=0.0f) {
+              float r625=float(r609);
+              float r626=float(r611);
+              float r632=((texture13.read(uint2(r625,r626)).x)*r631);
+              long r633=long(round(r632));
+              float r635=((texture13.read(uint2(r625,r626)).y)*r631);
+              long r636=long(round(r635));
+              float r637=round(r635);
+              float r638=((texture13.read(uint2(r625,r626)).z)*r631);
+              r647=((as_type<float>(0x4b7fffffu))==0.0f?0.0f:(((fma((round(r632)),(as_type<float>(0x47800000u)),(float((r636*256L)))))+(round(r638))))/(as_type<float>(0x4b7fffffu)));
             }
-            if(r622==0.0f) {
-              uint r647=(((uint(r609)*uint(r581)))+uint(r607));
-              r650=buffer6[(((64u)+r647))*1+0];
+            if(r624==0.0f) {
+              uint r649=(((uint(r611)*uint(r583)))+uint(r609));
+              r652=buffer6[(((64u)+r649))*1+0];
             }
-            r652=(r578<=((r622!=0.0f?r645:r650)));
-            r655=(r652!=0.0f?(as_type<float>(0x3f800000u)):(as_type<float>(0x0u)));
+            r654=(r580<=((r624!=0.0f?r647:r652)));
+            r657=(r654!=0.0f?(as_type<float>(0x3f800000u)):(as_type<float>(0x0u)));
           }
-          r657=(r605+((r617!=0.0f?(as_type<float>(0x3f800000u)):r655)));
+          r659=(r607+((r619!=0.0f?(as_type<float>(0x3f800000u)):r657)));
         }
       }
     }
   }
-  float next604_0=r657;
-  r605=next604_0;
+  float next606_0=r659;
+  r607=next606_0;
           }
-          r659=r605;
+          r661=r607;
         }
       }
     }
   }
-  float next601_0=r659;
-  r602=next601_0;
+  float next603_0=r661;
+  r604=next603_0;
           }
-          float r663=buffer6[(58u)*1+0];
-          r669=(((r570-r663))+(((float(((as_type<long>(ulong((ulong(r599)*ulong(r599)))<<1)>>1))))==0.0f?0.0f:((r663*(r602)))/(float(((as_type<long>(ulong((ulong(r599)*ulong(r599)))<<1)>>1)))))));
+          float r665=buffer6[(58u)*1+0];
+          r671=(((r572-r665))+(((float(((as_type<long>(ulong((ulong(r601)*ulong(r601)))<<1)>>1))))==0.0f?0.0f:((r665*(r604)))/(float(((as_type<long>(ulong((ulong(r601)*ulong(r601)))<<1)>>1)))))));
         }
-        float r670=(r550!=0.0f?(as_type<float>(0x3f800000u)):r669);
-        float r671=(r463+r228);
-        float r672=(r465+r229);
-        float r673=(r467+r230);
-        float r677=rsqrt(fabs((fma(r673,r673,(fma(r672,r672,((r671*r671))))))));
-        float r678=(r671*r677);
-        float r679=(r672*r677);
-        float r680=(r673*r677);
-        float r685=max((fma(r214,r467,(fma(r213,r465,((r212*r463)))))),r684);
-        float r689=max((fma(r214,r230,(fma(r213,r229,((r212*r228)))))),r684);
-        float r693=max((fma(r214,r680,(fma(r213,r679,((r212*r678)))))),r536);
-        float r702=fma(((r476-r251)),(pow(fabs(((r476-(max((fma(r230,r680,(fma(r229,r679,((r228*r678)))))),r684))))),(as_type<float>(0x40a00000u)))),r251);
-        float r705=fma(((r693*r693)),((r249-r476)),r476);
-        float r712=(r476-r249);
-        float r724=(((r284*((((((r706*r705))*r705))==0.0f?0.0f:r249/((((r706*r705))*r705))))))*(((max(((((r685*(sqrt(fabs((fma(((r689*r689)),r712,r249)))))))+((r689*(sqrt(fabs((fma(((r685*r685)),r712,r249))))))))),(as_type<float>(0x358637bdu))))==0.0f?0.0f:r528/(max(((((r685*(sqrt(fabs((fma(((r689*r689)),r712,r249)))))))+((r689*(sqrt(fabs((fma(((r685*r685)),r712,r249))))))))),(as_type<float>(0x358637bdu)))))));
-        float r725=(r476-r702);
-        r747=fma((((((fma(r724,r702,((r706==0.0f?0.0f:((r241*r725))/r706))))*(buffer6[(32u)*1+0])))*r470)),r670,r459);
-        r748=fma((((((fma(r724,r702,((r706==0.0f?0.0f:((r242*r725))/r706))))*(buffer6[(33u)*1+0])))*r470)),r670,r460);
-        r749=fma((((((fma(r724,r702,((r706==0.0f?0.0f:((r243*r725))/r706))))*(buffer6[(34u)*1+0])))*r470)),r670,r461);
+        float r672=(r552!=0.0f?(as_type<float>(0x3f800000u)):r671);
+        float r673=(r463+r228);
+        float r674=(r465+r229);
+        float r675=(r467+r230);
+        float r679=rsqrt(fabs((fma(r675,r675,(fma(r674,r674,((r673*r673))))))));
+        float r680=(r673*r679);
+        float r681=(r674*r679);
+        float r682=(r675*r679);
+        float r687=max((fma(r214,r467,(fma(r213,r465,((r212*r463)))))),r686);
+        float r691=max((fma(r214,r230,(fma(r213,r229,((r212*r228)))))),r686);
+        float r695=max((fma(r214,r682,(fma(r213,r681,((r212*r680)))))),r536);
+        float r704=fma(((r476-r251)),(pow(fabs(((r476-(max((fma(r230,r682,(fma(r229,r681,((r228*r680)))))),r686))))),(as_type<float>(0x40a00000u)))),r251);
+        float r707=fma(((r695*r695)),((r249-r476)),r476);
+        float r714=(r476-r249);
+        float r726=(((r284*((((((r708*r707))*r707))==0.0f?0.0f:r249/((((r708*r707))*r707))))))*(((max(((((r687*(sqrt(fabs((fma(((r691*r691)),r714,r249)))))))+((r691*(sqrt(fabs((fma(((r687*r687)),r714,r249))))))))),(as_type<float>(0x358637bdu))))==0.0f?0.0f:r528/(max(((((r687*(sqrt(fabs((fma(((r691*r691)),r714,r249)))))))+((r691*(sqrt(fabs((fma(((r687*r687)),r714,r249))))))))),(as_type<float>(0x358637bdu)))))));
+        float r727=(r476-r704);
+        r749=fma((((((fma(r726,r704,((r708==0.0f?0.0f:((r241*r727))/r708))))*(buffer6[(32u)*1+0])))*r470)),r672,r459);
+        r750=fma((((((fma(r726,r704,((r708==0.0f?0.0f:((r242*r727))/r708))))*(buffer6[(33u)*1+0])))*r470)),r672,r460);
+        r751=fma((((((fma(r726,r704,((r708==0.0f?0.0f:((r243*r727))/r708))))*(buffer6[(34u)*1+0])))*r470)),r672,r461);
       }
-      long r755=long((buffer2[(73u)*1+0]));
-      long r757=(((r755<long(r447)?1.0f:0.0f))!=0.0f?r755:long(r447));
-      bool over758=r757>long(r332) && ulong(r757-long(r332))>4096uL;
-      sb|=over758?1u:0u;
-      r759=((r475!=0.0f?r747:r459));
-      r760=((r475!=0.0f?r748:r460));
-      r761=((r475!=0.0f?r749:r461));
-      for(r758=long(r332);r758<(over758?long(r332):r757);r758++){
-  uint r762=20u;
-  float r768=0.0f;
-  uint r770=8u,r773=1u,r778=2u;
-  float r782=0.0f,r783=as_type<float>(0xbf800000u),r791=0.0f,r792=0.0f,r793=0.0f,r795=0.0f,r803=as_type<float>(0x0u),r804=0.0f,r805=0.0f,r806=0.0f,r807=0.0f,r808=as_type<float>(0x0u);
-  float r809=0.0f,r810=0.0f,r811=0.0f,r812=as_type<float>(0x3fc00000u);
-  uint r815=9u,r818=2u,r822=1u;
-  float r828=0.0f,r829=0.0f,r832=as_type<float>(0xbf800000u),r852=0.0f;
-  uint r853=13u;
-  float r856=0.0f;
-  uint r860=14u;
-  float r863=0.0f,r865=0.0f,r866=0.0f;
-  uint r867=9u,r870=1u,r873=2u;
-  float r885=0.0f,r886=as_type<float>(0x0u),r888=as_type<float>(0x0u),r893=as_type<float>(0xbf800000u);
-  uint r919=14u;
-  float r929=as_type<float>(0x0u);
-  uint r930=0u;
-  int r931=0;
-  float r932=0,r933=0,r934=0,r935=0,r1022=0.0f,r1027=0.0f,r1032=0.0f,r1033=0.0f,r1034=0.0f,r1035=as_type<float>(0x0u),r1036=0.0f,r1037=0.0f;
-  float r1038=0.0f,r1039=0.0f,r1040=0.0f,r1041=0.0f,r1042=0.0f,r1043=0.0f,r1044=0.0f,r1045=0.0f,r1046=0.0f;
-  uint r1047=9u,r1050=1u,r1053=2u,r1056=12u,r1063=15u,r1070=8u;
-  float r1079=as_type<float>(0x0u);
-  uint r1080=0u,r1081=0;
-  float r1082=0,r1083=0,r1084=0,r1085=0,r1146=0.0f,r1151=0.0f,r1156=0.0f,r1157=0.0f,r1158=0.0f,r1159=as_type<float>(0x0u),r1160=0.0f,r1161=0.0f;
-  float r1162=0.0f,r1170=as_type<float>(0x0u),r1173=0.0f,r1187=as_type<float>(0x38d1b717u),r1202=as_type<float>(0x3f800000u),r1211=as_type<float>(0x40490fdbu);
-  uint r1241=4u,r1244=1u,r1247=2u;
-  float r1259=0.0f,r1260=0.0f,r1261=0.0f,r1262=0.0f,r1263=0.0f,r1264=0.0f;
+      long r757=long((buffer2[(73u)*1+0]));
+      long r759=(((r757<long(r447)?1.0f:0.0f))!=0.0f?r757:long(r447));
+      bool over760=r759>long(r332) && ulong(r759-long(r332))>4096uL;
+      sb|=over760?1u:0u;
+      r761=((r475!=0.0f?r749:r459));
+      r762=((r475!=0.0f?r750:r460));
+      r763=((r475!=0.0f?r751:r461));
+      for(r760=long(r332);r760<(over760?long(r332):r759);r760++){
+  uint r764=20u;
+  float r770=0.0f;
+  uint r772=8u,r775=1u,r780=2u;
+  float r784=0.0f,r785=as_type<float>(0xbf800000u),r793=0.0f,r794=0.0f,r795=0.0f,r797=0.0f,r805=as_type<float>(0x0u),r806=0.0f,r807=0.0f,r808=0.0f,r809=0.0f,r810=as_type<float>(0x0u);
+  float r811=0.0f,r812=0.0f,r813=0.0f,r814=as_type<float>(0x3fc00000u);
+  uint r817=9u,r820=2u,r824=1u;
+  float r830=0.0f,r831=0.0f,r834=as_type<float>(0xbf800000u),r854=0.0f;
+  uint r855=13u;
+  float r858=0.0f;
+  uint r862=14u;
+  float r865=0.0f,r867=0.0f,r868=0.0f;
+  uint r869=9u,r872=1u,r875=2u;
+  float r887=0.0f,r888=as_type<float>(0x0u),r890=as_type<float>(0x0u),r895=as_type<float>(0xbf800000u);
+  uint r921=14u;
+  float r931=as_type<float>(0x0u);
+  uint r932=0u;
+  int r933=0;
+  float r934=0,r935=0,r936=0,r937=0,r1024=0.0f,r1029=0.0f,r1034=0.0f,r1035=0.0f,r1036=0.0f,r1037=as_type<float>(0x0u),r1038=0.0f,r1039=0.0f;
+  float r1040=0.0f,r1041=0.0f,r1042=0.0f,r1043=0.0f,r1044=0.0f,r1045=0.0f,r1046=0.0f,r1047=0.0f,r1048=0.0f;
+  uint r1049=9u,r1052=1u,r1055=2u,r1058=12u,r1065=15u,r1072=8u;
+  float r1081=as_type<float>(0x0u);
+  uint r1082=0u,r1083=0;
+  float r1084=0,r1085=0,r1086=0,r1087=0,r1148=0.0f,r1153=0.0f,r1158=0.0f,r1159=0.0f,r1160=0.0f,r1161=as_type<float>(0x0u),r1162=0.0f,r1163=0.0f;
+  float r1164=0.0f,r1172=as_type<float>(0x0u),r1175=0.0f,r1189=as_type<float>(0x38d1b717u),r1204=as_type<float>(0x3f800000u),r1213=as_type<float>(0x40490fdbu);
+  uint r1243=4u,r1246=1u,r1249=2u;
+  float r1261=0.0f,r1262=0.0f,r1263=0.0f,r1264=0.0f,r1265=0.0f,r1266=0.0f;
   if(r30==0.0f) {
     if(r184==0.0f) {
-      uint r763=(uint(r758)*r762);
-      uint r765=((84u)+r763);
-      r768=((buffer2[r765*1+0])<(as_type<float>(0x40600000u)));
-      if(r768!=0.0f) {
-        float r769=buffer2[r765*1+0];
-        float r772=buffer2[((r765+r770))*1+0];
-        uint r774=(r765+r773);
-        float r775=buffer2[r774*1+0];
-        float r777=buffer2[((r774+r773))*1+0];
-        float r780=buffer2[((r774+r778))*1+0];
-        r782=(r769<(as_type<float>(0x3f000000u)));
-        if(r782!=0.0f) {
-          float r784=(r775*r783);
-          float r785=(r777*r783);
-          float r786=(r780*r783);
-          float r790=rsqrt(fabs((fma(r786,r786,(fma(r785,r785,((r784*r784))))))));
-          r791=(r784*r790);
-          r792=(r785*r790);
-          r793=(r786*r790);
+      uint r765=(uint(r760)*r764);
+      uint r767=((84u)+r765);
+      r770=((buffer2[r767*1+0])<(as_type<float>(0x40600000u)));
+      if(r770!=0.0f) {
+        float r771=buffer2[r767*1+0];
+        float r774=buffer2[((r767+r772))*1+0];
+        uint r776=(r767+r775);
+        float r777=buffer2[r776*1+0];
+        float r779=buffer2[((r776+r775))*1+0];
+        float r782=buffer2[((r776+r780))*1+0];
+        r784=(r771<(as_type<float>(0x3f000000u)));
+        if(r784!=0.0f) {
+          float r786=(r777*r785);
+          float r787=(r779*r785);
+          float r788=(r782*r785);
+          float r792=rsqrt(fabs((fma(r788,r788,(fma(r787,r787,((r786*r786))))))));
+          r793=(r786*r792);
+          r794=(r787*r792);
+          r795=(r788*r792);
         }
-        if(r782==0.0f) {
-          r795=(r769<(as_type<float>(0x40200000u)));
-          if(r795!=0.0f) {
-            float r796=(r775-(in.world.x));
-            float r797=(r777-(in.world.y));
-            float r798=(r780-(in.world.z));
-            float r802=sqrt(fabs((fma(r798,r798,(fma(r797,r797,((r796*r796))))))));
-            r804=(r802>r803);
-            if(r804!=0.0f) {
-              r805=(r802==0.0f?0.0f:r796/r802);
-              r806=(r802==0.0f?0.0f:r797/r802);
-              r807=(r802==0.0f?0.0f:r798/r802);
+        if(r784==0.0f) {
+          r797=(r771<(as_type<float>(0x40200000u)));
+          if(r797!=0.0f) {
+            float r798=(r777-(in.world.x));
+            float r799=(r779-(in.world.y));
+            float r800=(r782-(in.world.z));
+            float r804=sqrt(fabs((fma(r800,r800,(fma(r799,r799,((r798*r798))))))));
+            r806=(r804>r805);
+            if(r806!=0.0f) {
+              r807=(r804==0.0f?0.0f:r798/r804);
+              r808=(r804==0.0f?0.0f:r799/r804);
+              r809=(r804==0.0f?0.0f:r800/r804);
             }
-            r809=(r804!=0.0f?r805:r808);
-            r810=(r804!=0.0f?r806:r808);
-            r811=(r804!=0.0f?r807:r808);
-            uint r816=(((r769<r812))!=0.0f?r815:(15u));
-            uint r817=(r765+r816);
-            float r827=fma((((buffer2[((r817+r818))*1+0])*r802)),r802,(fma((buffer2[((r817+r822))*1+0]),r802,(buffer2[r817*1+0]))));
-            r828=(r827>r803);
-            if(r828!=0.0f) {
-              r829=(r827==0.0f?0.0f:r772/r827);
+            r811=(r806!=0.0f?r807:r810);
+            r812=(r806!=0.0f?r808:r810);
+            r813=(r806!=0.0f?r809:r810);
+            uint r818=(((r771<r814))!=0.0f?r817:(15u));
+            uint r819=(r767+r818);
+            float r829=fma((((buffer2[((r819+r820))*1+0])*r804)),r804,(fma((buffer2[((r819+r824))*1+0]),r804,(buffer2[r819*1+0]))));
+            r830=(r829>r805);
+            if(r830!=0.0f) {
+              r831=(r829==0.0f?0.0f:r774/r829);
             }
-            float r831=(r828!=0.0f?r829:(as_type<float>(0x0u)));
-            uint r836=(r765+r815);
-            float r837=buffer2[r836*1+0];
-            float r839=buffer2[((r836+r822))*1+0];
-            float r841=buffer2[((r836+r818))*1+0];
-            float r845=rsqrt(fabs((fma(r841,r841,(fma(r839,r839,((r837*r837))))))));
-            float r851=fma(((r811*r832)),((r841*r845)),(fma(((r810*r832)),((r839*r845)),((((r809*r832))*((r837*r845)))))));
-            r852=(r769>=r812);
-            if(r852!=0.0f) {
-              r856=(r851<(buffer2[((r765+r853))*1+0]));
-              if(r856==0.0f) {
-                r863=pow(fabs((max(r851,(as_type<float>(0x0u))))),(buffer2[((r765+r860))*1+0]));
+            float r833=(r830!=0.0f?r831:(as_type<float>(0x0u)));
+            uint r838=(r767+r817);
+            float r839=buffer2[r838*1+0];
+            float r841=buffer2[((r838+r824))*1+0];
+            float r843=buffer2[((r838+r820))*1+0];
+            float r847=rsqrt(fabs((fma(r843,r843,(fma(r841,r841,((r839*r839))))))));
+            float r853=fma(((r813*r834)),((r843*r847)),(fma(((r812*r834)),((r841*r847)),((((r811*r834))*((r839*r847)))))));
+            r854=(r771>=r814);
+            if(r854!=0.0f) {
+              r858=(r853<(buffer2[((r767+r855))*1+0]));
+              if(r858==0.0f) {
+                r865=pow(fabs((max(r853,(as_type<float>(0x0u))))),(buffer2[((r767+r862))*1+0]));
               }
-              r865=(r831*((r856!=0.0f?(as_type<float>(0x0u)):r863)));
+              r867=(r833*((r858!=0.0f?(as_type<float>(0x0u)):r865)));
             }
-            r866=(r852!=0.0f?r865:r831);
+            r868=(r854!=0.0f?r867:r833);
           }
-          if(r795==0.0f) {
-            uint r868=(r765+r867);
-            float r869=buffer2[r868*1+0];
-            float r872=buffer2[((r868+r870))*1+0];
-            float r875=buffer2[((r868+r873))*1+0];
-            float r879=rsqrt(fabs((fma(r875,r875,(fma(r872,r872,((r869*r869))))))));
-            float r880=(r869*r879);
-            float r881=(r872*r879);
-            float r882=(r875*r879);
-            r885=((fabs(r882))<(as_type<float>(0x3f7fbe77u)));
-            float r890=(r885!=0.0f?r886:r888);
-            float r891=(r885!=0.0f?r886:(as_type<float>(0x3f800000u)));
-            float r892=(r885!=0.0f?(as_type<float>(0x3f800000u)):r888);
-            float r896=fma(r891,r882,((r893*((r892*r881)))));
-            float r899=fma(r892,r880,((r893*((r890*r882)))));
-            float r902=fma(r890,r881,((r893*((r891*r880)))));
-            float r906=rsqrt(fabs((fma(r902,r902,(fma(r899,r899,((r896*r896))))))));
-            float r907=(r896*r906);
-            float r908=(r899*r906);
-            float r909=(r902*r906);
-            float r912=fma(r881,r909,((r893*((r882*r908)))));
-            float r915=fma(r882,r907,((r893*((r880*r909)))));
-            float r918=fma(r880,r908,((r893*((r881*r907)))));
-            long r923=long(round((sqrt(fabs((buffer2[((r765+r919))*1+0]))))));
-            long r924=r923;
-            long r926=(((r924<long(r870)?1.0f:0.0f))!=0.0f?long(r870):r924);
-            long r927=(as_type<long>(ulong((ulong(r926)*ulong(r926)))<<1)>>1);
-            float r928=float(r927);
-            bool over931=r926>long(r930) && ulong(r926-long(r930))>4096uL;
-            sb|=over931?1u:0u;
-            r932=r929;
-            r933=r929;
-            r934=r929;
-            r935=r929;
-            for(r931=long(r930);r931<(over931?long(r930):r926);r931++){
-  uint r936=0u;
-  int r937=0;
-  float r938=0,r939=0,r940=0,r941=0,r1014=0.0f,r1015=0.0f,r1016=0.0f,r1017=0.0f;
+          if(r797==0.0f) {
+            uint r870=(r767+r869);
+            float r871=buffer2[r870*1+0];
+            float r874=buffer2[((r870+r872))*1+0];
+            float r877=buffer2[((r870+r875))*1+0];
+            float r881=rsqrt(fabs((fma(r877,r877,(fma(r874,r874,((r871*r871))))))));
+            float r882=(r871*r881);
+            float r883=(r874*r881);
+            float r884=(r877*r881);
+            r887=((fabs(r884))<(as_type<float>(0x3f7fbe77u)));
+            float r892=(r887!=0.0f?r888:r890);
+            float r893=(r887!=0.0f?r888:(as_type<float>(0x3f800000u)));
+            float r894=(r887!=0.0f?(as_type<float>(0x3f800000u)):r890);
+            float r898=fma(r893,r884,((r895*((r894*r883)))));
+            float r901=fma(r894,r882,((r895*((r892*r884)))));
+            float r904=fma(r892,r883,((r895*((r893*r882)))));
+            float r908=rsqrt(fabs((fma(r904,r904,(fma(r901,r901,((r898*r898))))))));
+            float r909=(r898*r908);
+            float r910=(r901*r908);
+            float r911=(r904*r908);
+            float r914=fma(r883,r911,((r895*((r884*r910)))));
+            float r917=fma(r884,r909,((r895*((r882*r911)))));
+            float r920=fma(r882,r910,((r895*((r883*r909)))));
+            long r925=long(round((sqrt(fabs((buffer2[((r767+r921))*1+0]))))));
+            long r926=r925;
+            long r928=(((r926<long(r872)?1.0f:0.0f))!=0.0f?long(r872):r926);
+            long r929=(as_type<long>(ulong((ulong(r928)*ulong(r928)))<<1)>>1);
+            float r930=float(r929);
+            bool over933=r928>long(r932) && ulong(r928-long(r932))>4096uL;
+            sb|=over933?1u:0u;
+            r934=r931;
+            r935=r931;
+            r936=r931;
+            r937=r931;
+            for(r933=long(r932);r933<(over933?long(r932):r928);r933++){
+  uint r938=0u;
+  int r939=0;
+  float r940=0,r941=0,r942=0,r943=0,r1016=0.0f,r1017=0.0f,r1018=0.0f,r1019=0.0f;
   if(r30==0.0f) {
     if(r184==0.0f) {
-      if(r768!=0.0f) {
-        if(r782==0.0f) {
-          if(r795==0.0f) {
-            bool over937=r926>long(r936) && ulong(r926-long(r936))>4096uL;
-            sb|=over937?1u:0u;
-            r938=r932;
-            r939=r933;
+      if(r770!=0.0f) {
+        if(r784==0.0f) {
+          if(r797==0.0f) {
+            bool over939=r928>long(r938) && ulong(r928-long(r938))>4096uL;
+            sb|=over939?1u:0u;
             r940=r934;
             r941=r935;
-            for(r937=long(r936);r937<(over937?long(r936):r926);r937++){
-  float r943=as_type<float>(0x3f000000u);
-  uint r952=12u,r956=13u;
-  float r974=0.0f,r978=as_type<float>(0xbf800000u),r985=as_type<float>(0x0u);
-  uint r987=15u,r989=2u,r993=1u;
-  float r999=0.0f,r1002=0.0f,r1005=0.0f,r1006=0.0f,r1007=0.0f,r1008=0.0f,r1009=0.0f,r1010=0.0f,r1011=0.0f,r1012=0.0f;
+            r942=r936;
+            r943=r937;
+            for(r939=long(r938);r939<(over939?long(r938):r928);r939++){
+  float r945=as_type<float>(0x3f000000u);
+  uint r954=12u,r958=13u;
+  float r976=0.0f,r980=as_type<float>(0xbf800000u),r987=as_type<float>(0x0u);
+  uint r989=15u,r991=2u,r995=1u;
+  float r1001=0.0f,r1004=0.0f,r1007=0.0f,r1008=0.0f,r1009=0.0f,r1010=0.0f,r1011=0.0f,r1012=0.0f,r1013=0.0f,r1014=0.0f;
   if(r30==0.0f) {
     if(r184==0.0f) {
-      if(r768!=0.0f) {
-        if(r782==0.0f) {
-          if(r795==0.0f) {
-            float r945=float(r926);
-            float r955=(((((r945==0.0f?0.0f:(((float(r937))+r943))/r945))-r943))*(buffer2[((r765+r952))*1+0]));
-            float r959=(((((r945==0.0f?0.0f:(((float(r931))+r943))/r945))-r943))*(buffer2[((r765+r956))*1+0]));
-            float r966=((fma(r959,r912,(fma(r955,r907,r775))))-(in.world.x));
-            float r967=((fma(r959,r915,(fma(r955,r908,r777))))-(in.world.y));
-            float r968=((fma(r959,r918,(fma(r955,r909,r780))))-(in.world.z));
-            float r972=sqrt(fabs((fma(r968,r968,(fma(r967,r967,((r966*r966))))))));
-            r974=(r972>(as_type<float>(0x0u)));
-            if(r974!=0.0f) {
-              float r975=(r972==0.0f?0.0f:r966/r972);
-              float r976=(r972==0.0f?0.0f:r967/r972);
-              float r977=(r972==0.0f?0.0f:r968/r972);
-              uint r988=(r765+r987);
-              float r998=fma((((buffer2[((r988+r989))*1+0])*r972)),r972,(fma((buffer2[((r988+r993))*1+0]),r972,(buffer2[r988*1+0]))));
-              r999=(r998>r985);
-              if(r999!=0.0f) {
-                r1002=(((r928*r998))==0.0f?0.0f:((r772*(max((fma(r882,((r977*r978)),(fma(r881,((r976*r978)),((r880*((r975*r978)))))))),r985))))/((r928*r998)));
+      if(r770!=0.0f) {
+        if(r784==0.0f) {
+          if(r797==0.0f) {
+            float r947=float(r928);
+            float r957=(((((r947==0.0f?0.0f:(((float(r939))+r945))/r947))-r945))*(buffer2[((r767+r954))*1+0]));
+            float r961=(((((r947==0.0f?0.0f:(((float(r933))+r945))/r947))-r945))*(buffer2[((r767+r958))*1+0]));
+            float r968=((fma(r961,r914,(fma(r957,r909,r777))))-(in.world.x));
+            float r969=((fma(r961,r917,(fma(r957,r910,r779))))-(in.world.y));
+            float r970=((fma(r961,r920,(fma(r957,r911,r782))))-(in.world.z));
+            float r974=sqrt(fabs((fma(r970,r970,(fma(r969,r969,((r968*r968))))))));
+            r976=(r974>(as_type<float>(0x0u)));
+            if(r976!=0.0f) {
+              float r977=(r974==0.0f?0.0f:r968/r974);
+              float r978=(r974==0.0f?0.0f:r969/r974);
+              float r979=(r974==0.0f?0.0f:r970/r974);
+              uint r990=(r767+r989);
+              float r1000=fma((((buffer2[((r990+r991))*1+0])*r974)),r974,(fma((buffer2[((r990+r995))*1+0]),r974,(buffer2[r990*1+0]))));
+              r1001=(r1000>r987);
+              if(r1001!=0.0f) {
+                r1004=(((r930*r1000))==0.0f?0.0f:((r774*(max((fma(r884,((r979*r980)),(fma(r883,((r978*r980)),((r882*((r977*r980)))))))),r987))))/((r930*r1000)));
               }
-              float r1004=(r999!=0.0f?r1002:(as_type<float>(0x0u)));
-              r1005=fma(r975,r1004,r938);
-              r1006=fma(r976,r1004,r939);
-              r1007=fma(r977,r1004,r940);
-              r1008=(r941+r1004);
+              float r1006=(r1001!=0.0f?r1004:(as_type<float>(0x0u)));
+              r1007=fma(r977,r1006,r940);
+              r1008=fma(r978,r1006,r941);
+              r1009=fma(r979,r1006,r942);
+              r1010=(r943+r1006);
             }
-            r1009=(r974!=0.0f?r1005:r938);
-            r1010=(r974!=0.0f?r1006:r939);
-            r1011=(r974!=0.0f?r1007:r940);
-            r1012=(r974!=0.0f?r1008:r941);
+            r1011=(r976!=0.0f?r1007:r940);
+            r1012=(r976!=0.0f?r1008:r941);
+            r1013=(r976!=0.0f?r1009:r942);
+            r1014=(r976!=0.0f?r1010:r943);
           }
         }
       }
     }
   }
-  float next937_0=r1009;
-  float next937_1=r1010;
-  float next937_2=r1011;
-  float next937_3=r1012;
-  r938=next937_0;
-  r939=next937_1;
-  r940=next937_2;
-  r941=next937_3;
+  float next939_0=r1011;
+  float next939_1=r1012;
+  float next939_2=r1013;
+  float next939_3=r1014;
+  r940=next939_0;
+  r941=next939_1;
+  r942=next939_2;
+  r943=next939_3;
             }
-            r1014=r938;
-            r1015=r939;
             r1016=r940;
             r1017=r941;
+            r1018=r942;
+            r1019=r943;
           }
         }
       }
     }
   }
-  float next931_0=r1014;
-  float next931_1=r1015;
-  float next931_2=r1016;
-  float next931_3=r1017;
-  r932=next931_0;
-  r933=next931_1;
-  r934=next931_2;
-  r935=next931_3;
+  float next933_0=r1016;
+  float next933_1=r1017;
+  float next933_2=r1018;
+  float next933_3=r1019;
+  r934=next933_0;
+  r935=next933_1;
+  r936=next933_2;
+  r937=next933_3;
             }
-            float r1019=r932;
-            float r1020=r933;
             float r1021=r934;
-            r1022=r935;
-            r1027=((sqrt(fabs((fma(r1021,r1021,(fma(r1020,r1020,((r1019*r1019)))))))))>r929);
-            if(r1027!=0.0f) {
-              float r1031=rsqrt(fabs((fma(r1021,r1021,(fma(r1020,r1020,((r1019*r1019))))))));
-              r1032=(r1019*r1031);
-              r1033=(r1020*r1031);
-              r1034=(r1021*r1031);
+            float r1022=r935;
+            float r1023=r936;
+            r1024=r937;
+            r1029=((sqrt(fabs((fma(r1023,r1023,(fma(r1022,r1022,((r1021*r1021)))))))))>r931);
+            if(r1029!=0.0f) {
+              float r1033=rsqrt(fabs((fma(r1023,r1023,(fma(r1022,r1022,((r1021*r1021))))))));
+              r1034=(r1021*r1033);
+              r1035=(r1022*r1033);
+              r1036=(r1023*r1033);
             }
-            r1036=(r1027!=0.0f?r1032:r1035);
-            r1037=(r1027!=0.0f?r1033:r1035);
-            r1038=(r1027!=0.0f?r1034:r1035);
+            r1038=(r1029!=0.0f?r1034:r1037);
+            r1039=(r1029!=0.0f?r1035:r1037);
+            r1040=(r1029!=0.0f?r1036:r1037);
           }
-          r1039=(r795!=0.0f?r809:r1036);
-          r1040=(r795!=0.0f?r810:r1037);
-          r1041=(r795!=0.0f?r811:r1038);
-          r1042=(r795!=0.0f?r866:r1022);
+          r1041=(r797!=0.0f?r811:r1038);
+          r1042=(r797!=0.0f?r812:r1039);
+          r1043=(r797!=0.0f?r813:r1040);
+          r1044=(r797!=0.0f?r868:r1024);
         }
-        r1043=(r782!=0.0f?r791:r1039);
-        r1044=(r782!=0.0f?r792:r1040);
-        r1045=(r782!=0.0f?r793:r1041);
-        r1046=(r782!=0.0f?r772:r1042);
+        r1045=(r784!=0.0f?r793:r1041);
+        r1046=(r784!=0.0f?r794:r1042);
+        r1047=(r784!=0.0f?r795:r1043);
+        r1048=(r784!=0.0f?r774:r1044);
       }
-      if(r768==0.0f) {
-        uint r1048=(r765+r1047);
-        float r1049=buffer2[r1048*1+0];
-        float r1052=buffer2[((r1048+r1050))*1+0];
-        float r1055=buffer2[((r1048+r1053))*1+0];
-        uint r1057=(r765+r1056);
-        float r1058=buffer2[r1057*1+0];
-        float r1060=buffer2[((r1057+r1050))*1+0];
-        float r1062=buffer2[((r1057+r1053))*1+0];
-        uint r1064=(r765+r1063);
-        float r1065=buffer2[r1064*1+0];
-        float r1067=buffer2[((r1064+r1050))*1+0];
-        float r1069=buffer2[((r1064+r1053))*1+0];
-        float r1072=buffer2[((r765+r1070))*1+0];
-        uint r1073=(r765+r1050);
-        float r1074=buffer2[r1073*1+0];
-        float r1076=buffer2[((r1073+r1050))*1+0];
-        float r1078=buffer2[((r1073+r1053))*1+0];
-        bool over1081=long(r1053)>long(r1080) && ulong(long(r1053)-long(r1080))>4096uL;
-        sb|=over1081?1u:0u;
-        r1082=r1079;
-        r1083=r1079;
-        r1084=r1079;
-        r1085=r1079;
-        for(r1081=r1080;r1081<(over1081?r1080:r1053);r1081++){
-  uint r1086=0u,r1087=2u,r1088=0;
-  float r1089=0,r1090=0,r1091=0,r1092=0,r1138=0.0f,r1139=0.0f,r1140=0.0f,r1141=0.0f;
+      if(r770==0.0f) {
+        uint r1050=(r767+r1049);
+        float r1051=buffer2[r1050*1+0];
+        float r1054=buffer2[((r1050+r1052))*1+0];
+        float r1057=buffer2[((r1050+r1055))*1+0];
+        uint r1059=(r767+r1058);
+        float r1060=buffer2[r1059*1+0];
+        float r1062=buffer2[((r1059+r1052))*1+0];
+        float r1064=buffer2[((r1059+r1055))*1+0];
+        uint r1066=(r767+r1065);
+        float r1067=buffer2[r1066*1+0];
+        float r1069=buffer2[((r1066+r1052))*1+0];
+        float r1071=buffer2[((r1066+r1055))*1+0];
+        float r1074=buffer2[((r767+r1072))*1+0];
+        uint r1075=(r767+r1052);
+        float r1076=buffer2[r1075*1+0];
+        float r1078=buffer2[((r1075+r1052))*1+0];
+        float r1080=buffer2[((r1075+r1055))*1+0];
+        bool over1083=long(r1055)>long(r1082) && ulong(long(r1055)-long(r1082))>4096uL;
+        sb|=over1083?1u:0u;
+        r1084=r1081;
+        r1085=r1081;
+        r1086=r1081;
+        r1087=r1081;
+        for(r1083=r1082;r1083<(over1083?r1082:r1055);r1083++){
+  uint r1088=0u,r1089=2u,r1090=0;
+  float r1091=0,r1092=0,r1093=0,r1094=0,r1140=0.0f,r1141=0.0f,r1142=0.0f,r1143=0.0f;
   if(r30==0.0f) {
     if(r184==0.0f) {
-      if(r768==0.0f) {
-        bool over1088=long(r1087)>long(r1086) && ulong(long(r1087)-long(r1086))>4096uL;
-        sb|=over1088?1u:0u;
-        r1089=r1082;
-        r1090=r1083;
+      if(r770==0.0f) {
+        bool over1090=long(r1089)>long(r1088) && ulong(long(r1089)-long(r1088))>4096uL;
+        sb|=over1090?1u:0u;
         r1091=r1084;
         r1092=r1085;
-        for(r1088=r1086;r1088<(over1088?r1086:r1087);r1088++){
-  float r1094=as_type<float>(0x3f000000u),r1111=0.0f,r1116=as_type<float>(0xbf800000u),r1129=0.0f,r1130=0.0f,r1131=0.0f,r1132=0.0f,r1133=0.0f,r1134=0.0f,r1135=0.0f,r1136=0.0f;
+        r1093=r1086;
+        r1094=r1087;
+        for(r1090=r1088;r1090<(over1090?r1088:r1089);r1090++){
+  float r1096=as_type<float>(0x3f000000u),r1113=0.0f,r1118=as_type<float>(0xbf800000u),r1131=0.0f,r1132=0.0f,r1133=0.0f,r1134=0.0f,r1135=0.0f,r1136=0.0f,r1137=0.0f,r1138=0.0f;
   if(r30==0.0f) {
     if(r184==0.0f) {
-      if(r768==0.0f) {
-        float r1095=((float(r1088))-r1094);
-        float r1097=((float(r1081))-r1094);
-        float r1104=((fma(r1097,r1058,(fma(r1095,r1049,r1074))))-(in.world.x));
-        float r1105=((fma(r1097,r1060,(fma(r1095,r1052,r1076))))-(in.world.y));
-        float r1106=((fma(r1097,r1062,(fma(r1095,r1055,r1078))))-(in.world.z));
-        float r1109=fma(r1106,r1106,(fma(r1105,r1105,((r1104*r1104)))));
-        r1111=(r1109>(as_type<float>(0x0u)));
-        if(r1111!=0.0f) {
-          float r1112=rsqrt(fabs(r1109));
-          float r1113=(r1104*r1112);
-          float r1114=(r1105*r1112);
-          float r1115=(r1106*r1112);
-          float r1128=((((as_type<float>(0x40800000u))*r1109))==0.0f?0.0f:((r1072*(max((fma(r1069,((r1115*r1116)),(fma(r1067,((r1114*r1116)),((r1065*((r1113*r1116)))))))),(as_type<float>(0x0u))))))/(((as_type<float>(0x40800000u))*r1109)));
-          r1129=fma(r1113,r1128,r1089);
-          r1130=fma(r1114,r1128,r1090);
-          r1131=fma(r1115,r1128,r1091);
-          r1132=(r1092+r1128);
+      if(r770==0.0f) {
+        float r1097=((float(r1090))-r1096);
+        float r1099=((float(r1083))-r1096);
+        float r1106=((fma(r1099,r1060,(fma(r1097,r1051,r1076))))-(in.world.x));
+        float r1107=((fma(r1099,r1062,(fma(r1097,r1054,r1078))))-(in.world.y));
+        float r1108=((fma(r1099,r1064,(fma(r1097,r1057,r1080))))-(in.world.z));
+        float r1111=fma(r1108,r1108,(fma(r1107,r1107,((r1106*r1106)))));
+        r1113=(r1111>(as_type<float>(0x0u)));
+        if(r1113!=0.0f) {
+          float r1114=rsqrt(fabs(r1111));
+          float r1115=(r1106*r1114);
+          float r1116=(r1107*r1114);
+          float r1117=(r1108*r1114);
+          float r1130=((((as_type<float>(0x40800000u))*r1111))==0.0f?0.0f:((r1074*(max((fma(r1071,((r1117*r1118)),(fma(r1069,((r1116*r1118)),((r1067*((r1115*r1118)))))))),(as_type<float>(0x0u))))))/(((as_type<float>(0x40800000u))*r1111)));
+          r1131=fma(r1115,r1130,r1091);
+          r1132=fma(r1116,r1130,r1092);
+          r1133=fma(r1117,r1130,r1093);
+          r1134=(r1094+r1130);
         }
-        r1133=(r1111!=0.0f?r1129:r1089);
-        r1134=(r1111!=0.0f?r1130:r1090);
-        r1135=(r1111!=0.0f?r1131:r1091);
-        r1136=(r1111!=0.0f?r1132:r1092);
+        r1135=(r1113!=0.0f?r1131:r1091);
+        r1136=(r1113!=0.0f?r1132:r1092);
+        r1137=(r1113!=0.0f?r1133:r1093);
+        r1138=(r1113!=0.0f?r1134:r1094);
       }
     }
   }
-  float next1088_0=r1133;
-  float next1088_1=r1134;
-  float next1088_2=r1135;
-  float next1088_3=r1136;
-  r1089=next1088_0;
-  r1090=next1088_1;
-  r1091=next1088_2;
-  r1092=next1088_3;
+  float next1090_0=r1135;
+  float next1090_1=r1136;
+  float next1090_2=r1137;
+  float next1090_3=r1138;
+  r1091=next1090_0;
+  r1092=next1090_1;
+  r1093=next1090_2;
+  r1094=next1090_3;
         }
-        r1138=r1089;
-        r1139=r1090;
         r1140=r1091;
         r1141=r1092;
+        r1142=r1093;
+        r1143=r1094;
       }
     }
   }
-  float next1081_0=r1138;
-  float next1081_1=r1139;
-  float next1081_2=r1140;
-  float next1081_3=r1141;
-  r1082=next1081_0;
-  r1083=next1081_1;
-  r1084=next1081_2;
-  r1085=next1081_3;
+  float next1083_0=r1140;
+  float next1083_1=r1141;
+  float next1083_2=r1142;
+  float next1083_3=r1143;
+  r1084=next1083_0;
+  r1085=next1083_1;
+  r1086=next1083_2;
+  r1087=next1083_3;
         }
-        float r1143=r1082;
-        float r1144=r1083;
         float r1145=r1084;
-        r1146=r1085;
-        r1151=((sqrt(fabs((fma(r1145,r1145,(fma(r1144,r1144,((r1143*r1143)))))))))>r1079);
-        if(r1151!=0.0f) {
-          float r1155=rsqrt(fabs((fma(r1145,r1145,(fma(r1144,r1144,((r1143*r1143))))))));
-          r1156=(r1143*r1155);
-          r1157=(r1144*r1155);
-          r1158=(r1145*r1155);
+        float r1146=r1085;
+        float r1147=r1086;
+        r1148=r1087;
+        r1153=((sqrt(fabs((fma(r1147,r1147,(fma(r1146,r1146,((r1145*r1145)))))))))>r1081);
+        if(r1153!=0.0f) {
+          float r1157=rsqrt(fabs((fma(r1147,r1147,(fma(r1146,r1146,((r1145*r1145))))))));
+          r1158=(r1145*r1157);
+          r1159=(r1146*r1157);
+          r1160=(r1147*r1157);
         }
-        r1160=(r1151!=0.0f?r1156:r1159);
-        r1161=(r1151!=0.0f?r1157:r1159);
-        r1162=(r1151!=0.0f?r1158:r1159);
+        r1162=(r1153!=0.0f?r1158:r1161);
+        r1163=(r1153!=0.0f?r1159:r1161);
+        r1164=(r1153!=0.0f?r1160:r1161);
       }
-      float r1163=(r768!=0.0f?r1043:r1160);
-      float r1164=(r768!=0.0f?r1044:r1161);
-      float r1165=(r768!=0.0f?r1045:r1162);
-      float r1166=(r768!=0.0f?r1046:r1146);
-      float r1169=fma(r214,r1165,(fma(r213,r1164,((r212*r1163)))));
-      r1173=(((r1169>r1170))!=0.0f&&((r1166>r1170))!=0.0f);
-      if(r1173!=0.0f) {
-        float r1174=(r1163+r228);
-        float r1175=(r1164+r229);
-        float r1176=(r1165+r230);
-        float r1180=rsqrt(fabs((fma(r1176,r1176,(fma(r1175,r1175,((r1174*r1174))))))));
-        float r1181=(r1174*r1180);
-        float r1182=(r1175*r1180);
-        float r1183=(r1176*r1180);
-        float r1188=max((fma(r214,r1165,(fma(r213,r1164,((r212*r1163)))))),r1187);
-        float r1192=max((fma(r214,r230,(fma(r213,r229,((r212*r228)))))),r1187);
-        float r1197=max((fma(r214,r1183,(fma(r213,r1182,((r212*r1181)))))),(as_type<float>(0x0u)));
-        float r1207=fma(((r1202-r251)),(pow(fabs(((r1202-(max((fma(r230,r1183,(fma(r229,r1182,((r228*r1181)))))),r1187))))),(as_type<float>(0x40a00000u)))),r251);
-        float r1210=fma(((r1197*r1197)),((r249-r1202)),r1202);
-        float r1217=(r1202-r249);
-        float r1230=(((r284*((((((r1211*r1210))*r1210))==0.0f?0.0f:r249/((((r1211*r1210))*r1210))))))*(((max(((((r1188*(sqrt(fabs((fma(((r1192*r1192)),r1217,r249)))))))+((r1192*(sqrt(fabs((fma(((r1188*r1188)),r1217,r249))))))))),(as_type<float>(0x358637bdu))))==0.0f?0.0f:(as_type<float>(0x3f000000u))/(max(((((r1188*(sqrt(fabs((fma(((r1192*r1192)),r1217,r249)))))))+((r1192*(sqrt(fabs((fma(((r1188*r1188)),r1217,r249))))))))),(as_type<float>(0x358637bdu)))))));
-        float r1231=(r1202-r1207);
-        uint r1242=(r765+r1241);
-        r1259=fma((((((((fma(r1230,r1207,((r1211==0.0f?0.0f:((r241*r1231))/r1211))))*(buffer2[r1242*1+0])))*r1166))*r1211)),r1169,r759);
-        r1260=fma((((((((fma(r1230,r1207,((r1211==0.0f?0.0f:((r242*r1231))/r1211))))*(buffer2[((r1242+r1244))*1+0])))*r1166))*r1211)),r1169,r760);
-        r1261=fma((((((((fma(r1230,r1207,((r1211==0.0f?0.0f:((r243*r1231))/r1211))))*(buffer2[((r1242+r1247))*1+0])))*r1166))*r1211)),r1169,r761);
+      float r1165=(r770!=0.0f?r1045:r1162);
+      float r1166=(r770!=0.0f?r1046:r1163);
+      float r1167=(r770!=0.0f?r1047:r1164);
+      float r1168=(r770!=0.0f?r1048:r1148);
+      float r1171=fma(r214,r1167,(fma(r213,r1166,((r212*r1165)))));
+      r1175=(((r1171>r1172))!=0.0f&&((r1168>r1172))!=0.0f);
+      if(r1175!=0.0f) {
+        float r1176=(r1165+r228);
+        float r1177=(r1166+r229);
+        float r1178=(r1167+r230);
+        float r1182=rsqrt(fabs((fma(r1178,r1178,(fma(r1177,r1177,((r1176*r1176))))))));
+        float r1183=(r1176*r1182);
+        float r1184=(r1177*r1182);
+        float r1185=(r1178*r1182);
+        float r1190=max((fma(r214,r1167,(fma(r213,r1166,((r212*r1165)))))),r1189);
+        float r1194=max((fma(r214,r230,(fma(r213,r229,((r212*r228)))))),r1189);
+        float r1199=max((fma(r214,r1185,(fma(r213,r1184,((r212*r1183)))))),(as_type<float>(0x0u)));
+        float r1209=fma(((r1204-r251)),(pow(fabs(((r1204-(max((fma(r230,r1185,(fma(r229,r1184,((r228*r1183)))))),r1189))))),(as_type<float>(0x40a00000u)))),r251);
+        float r1212=fma(((r1199*r1199)),((r249-r1204)),r1204);
+        float r1219=(r1204-r249);
+        float r1232=(((r284*((((((r1213*r1212))*r1212))==0.0f?0.0f:r249/((((r1213*r1212))*r1212))))))*(((max(((((r1190*(sqrt(fabs((fma(((r1194*r1194)),r1219,r249)))))))+((r1194*(sqrt(fabs((fma(((r1190*r1190)),r1219,r249))))))))),(as_type<float>(0x358637bdu))))==0.0f?0.0f:(as_type<float>(0x3f000000u))/(max(((((r1190*(sqrt(fabs((fma(((r1194*r1194)),r1219,r249)))))))+((r1194*(sqrt(fabs((fma(((r1190*r1190)),r1219,r249))))))))),(as_type<float>(0x358637bdu)))))));
+        float r1233=(r1204-r1209);
+        uint r1244=(r767+r1243);
+        r1261=fma((((((((fma(r1232,r1209,((r1213==0.0f?0.0f:((r241*r1233))/r1213))))*(buffer2[r1244*1+0])))*r1168))*r1213)),r1171,r761);
+        r1262=fma((((((((fma(r1232,r1209,((r1213==0.0f?0.0f:((r242*r1233))/r1213))))*(buffer2[((r1244+r1246))*1+0])))*r1168))*r1213)),r1171,r762);
+        r1263=fma((((((((fma(r1232,r1209,((r1213==0.0f?0.0f:((r243*r1233))/r1213))))*(buffer2[((r1244+r1249))*1+0])))*r1168))*r1213)),r1171,r763);
       }
-      r1262=(r1173!=0.0f?r1259:r759);
-      r1263=(r1173!=0.0f?r1260:r760);
-      r1264=(r1173!=0.0f?r1261:r761);
+      r1264=(r1175!=0.0f?r1261:r761);
+      r1265=(r1175!=0.0f?r1262:r762);
+      r1266=(r1175!=0.0f?r1263:r763);
     }
   }
-  float next758_0=r1262;
-  float next758_1=r1263;
-  float next758_2=r1264;
-  r759=next758_0;
-  r760=next758_1;
-  r761=next758_2;
+  float next760_0=r1264;
+  float next760_1=r1265;
+  float next760_2=r1266;
+  r761=next760_0;
+  r762=next760_1;
+  r763=next760_2;
       }
-      float r1269=((r759)*r15);
-      float r1270=((r760)*r15);
       float r1271=((r761)*r15);
-      float r1302=fma((pow(fabs((min((max((((fma(r1269,(fma(r1279,r1269,r1280)),r1284))==0.0f?0.0f:((r1269*(fma(r1272,r1269,r246))))/(fma(r1269,(fma(r1279,r1269,r1280)),r1284)))),r282)),r258))),r1297)),r1301,r203);
-      long r1303=long(r1302);
-      r1305=(r1301==0.0f?0.0f:(trunc(r1302))/r1301);
-      float r1306=fma((pow(fabs((min((max((((fma(r1270,(fma(r1279,r1270,r1280)),r1284))==0.0f?0.0f:((r1270*(fma(r1272,r1270,r246))))/(fma(r1270,(fma(r1279,r1270,r1280)),r1284)))),r282)),r258))),r1297)),r1301,r203);
-      long r1307=long(r1306);
-      r1309=(r1301==0.0f?0.0f:(trunc(r1306))/r1301);
-      float r1310=fma((pow(fabs((min((max((((fma(r1271,(fma(r1279,r1271,r1280)),r1284))==0.0f?0.0f:((r1271*(fma(r1272,r1271,r246))))/(fma(r1271,(fma(r1279,r1271,r1280)),r1284)))),r282)),r258))),r1297)),r1301,r203);
-      long r1311=long(r1310);
-      r1313=(r1301==0.0f?0.0f:(trunc(r1310))/r1301);
+      float r1272=((r762)*r15);
+      float r1273=((r763)*r15);
+      float r1304=fma((pow(fabs((min((max((((fma(r1271,(fma(r1281,r1271,r1282)),r1286))==0.0f?0.0f:((r1271*(fma(r1274,r1271,r246))))/(fma(r1271,(fma(r1281,r1271,r1282)),r1286)))),r282)),r258))),r1299)),r1303,r203);
+      long r1305=long(r1304);
+      r1307=(r1303==0.0f?0.0f:(trunc(r1304))/r1303);
+      float r1308=fma((pow(fabs((min((max((((fma(r1272,(fma(r1281,r1272,r1282)),r1286))==0.0f?0.0f:((r1272*(fma(r1274,r1272,r246))))/(fma(r1272,(fma(r1281,r1272,r1282)),r1286)))),r282)),r258))),r1299)),r1303,r203);
+      long r1309=long(r1308);
+      r1311=(r1303==0.0f?0.0f:(trunc(r1308))/r1303);
+      float r1312=fma((pow(fabs((min((max((((fma(r1273,(fma(r1281,r1273,r1282)),r1286))==0.0f?0.0f:((r1273*(fma(r1274,r1273,r246))))/(fma(r1273,(fma(r1281,r1273,r1282)),r1286)))),r282)),r258))),r1299)),r1303,r203);
+      long r1313=long(r1312);
+      r1315=(r1303==0.0f?0.0f:(trunc(r1312))/r1303);
     }
-    r1314=(r184!=0.0f?r191:r1305);
-    r1315=(r184!=0.0f?r192:r1309);
-    r1316=(r184!=0.0f?r193:r1313);
-    r1317=(((((buffer2[(59u)*1+0])*(in.color.w)))*(texture7.sample(sampler8,float2((in.uv.x),(in.uv.y))).w)));
+    r1316=(r184!=0.0f?r191:r1307);
+    r1317=(r184!=0.0f?r192:r1311);
+    r1318=(r184!=0.0f?r193:r1315);
+    r1319=(((((buffer2[(59u)*1+0])*(in.color.w)))*(texture7.sample(sampler8,float2((in.uv.x),(in.uv.y))).w)));
   }
-  float r1318=(r30!=0.0f?r172:r1314);
-  float r1319=(r30!=0.0f?r176:r1315);
-  float r1320=(r30!=0.0f?r180:r1316);
-  float r1321=(r30!=0.0f?r32:r1317);
-  colour.x=r1318;
-  colour.y=r1319;
-  colour.z=r1320;
-  colour.w=r1321;
+  float r1320=(r30!=0.0f?r172:r1316);
+  float r1321=(r30!=0.0f?r176:r1317);
+  float r1322=(r30!=0.0f?r180:r1318);
+  float r1323=(r30!=0.0f?r32:r1319);
+  colour.x=r1320;
+  colour.y=r1321;
+  colour.z=r1322;
+  colour.w=r1323;
   return colour;
 }

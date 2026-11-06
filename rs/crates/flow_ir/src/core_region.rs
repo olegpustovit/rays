@@ -272,6 +272,20 @@ fn helper_body(at: &Term, residual: ResidualId, bindings: &[(String, Value)], fu
     }
 }
 
+/// A few operators over names and literals: cheaper to evaluate than to branch around, so the right
+/// operand of `and`/`or` stays eager (a value-preserving choice: both forms give the same result).
+fn cheap(t: &Term, budget: &mut i32) -> bool {
+    *budget -= 1;
+    let arena = t.arena();
+    *budget >= 0 && match t.node {
+        Node::Lit(_) | Node::Nil | Node::Time | Node::RefBinding(_) => true,
+        Node::Get(id) => cheap(&t.child(arena.get(id).value), budget),
+        Node::Expanded(id) => cheap(&t.child(arena.expanded(id).body), budget),
+        Node::Op(id) => t.name(arena.op(id).op) != "error" && arena.fields(arena.op(id).args).iter().all(|f| cheap(&t.child(f.term), budget)),
+        _ => false,
+    }
+}
+
 fn literal_function(f: &Term) -> bool {
     match f.node {
         Node::Fn(id) => f.arena().function(id).capture.map(|value| literal_function(&f.child(value))).unwrap_or(true),
@@ -1597,6 +1611,28 @@ impl Lower {
             }
             Node::Op(id) if t.name(arena.op(id).op) == "color/hsl" && arena.fields(arena.op(id).args).iter().map(|field| t.name(field.name)).eq(["h", "s", "l"]) => {
                 self.hsl(env, t, arena.fields(arena.op(id).args))
+            }
+            // `and`/`or` short-circuit: a costly right operand runs only under a guard on the left. The
+            // eager binary then combines them; the unguarded register is never the deciding one.
+            Node::Op(id)
+                if matches!(t.name(arena.op(id).op), "and" | "or")
+                    && arena.fields(arena.op(id).args).len() == 2
+                    && !cheap(&t.child(arena.fields(arena.op(id).args)[1].term), &mut 16) =>
+            {
+                let (op_name, args) = (t.name(arena.op(id).op), arena.fields(arena.op(id).args));
+                let first = self.expression(env, &t.child(args[0].term))?;
+                let first = self.as_float(&first)?;
+                if let Some(v) = &first.constant {
+                    if V::truthy(v)? == (op_name == "or") { return self.literal(t, &Value::Bool(op_name == "or")); }
+                }
+                let second = match (&first.constant, first.registers.as_slice()) {
+                    (None, [c]) => self.with_guard(*c, op_name == "and", &mut |me| me.expression(env, &t.child(args[1].term)))?,
+                    _ => self.expression(env, &t.child(args[1].term))?,
+                };
+                let extra = Residual::residual_ops(self.residual);
+                let declaration = op::find(&extra, op_name, &context::value()).ok_or_else(|| refusal(t, "E_PACKED_OPERATOR", &format!("Operator {} is unavailable.", op_name)))?;
+                let kind = op::packed_kind(&declaration).ok_or_else(|| refusal(t, "E_PACKED_OPERATOR", &format!("Operator {} is not a canonical scalar declaration.", op_name)))?;
+                self.operation_value(t, op_name, args, &declaration, kind, &[first, second])
             }
             Node::Op(id) => self.operation(env, t, t.name(arena.op(id).op), arena.fields(arena.op(id).args)),
             Node::Expanded(id) => self.expression(env, &t.child(arena.expanded(id).body)),

@@ -15,41 +15,45 @@ kernel void triangle_indices(
   uint r9=256u,r16=255u,r21=0u;
   float r23=0.0f;
   uint r24=0u,r26=1u,r28=2u,r36=3u;
-  float r41=0.0f,r43=0.0f,r46=0.0f,r47=0.0f,r67=0.0f;
-  uint r69=1u,r72=2u;
-  float r76=0.0f;
-  uint r77=3u;
-  long r79=0;
-  float r87=0.0f,r89=0.0f;
-  uint r91=1u,r94=2u,r99=3u,r100=0u,r101=3u,r104=1u,r107=2u;
-  float r206=0.0f;
-  uint r210=0u,r211=0u;
-  float r213=0.0f,r215=0.0f,r217=0.0f,r219=0.0f,r221=0.0f,r222=0.0f,r224=0.0f,r225=0.0f,r228=0.0f,r229=0.0f,r232=0.0f,r233=0.0f;
-  float r236=0.0f,r237=0.0f,r256=0.0f,r266=0.0f,r277=0.0f,r278=0.0f,r309=0.0f;
-  long r317=0,r319=0,r321=0;
-  uint r322=0u;
-  float r324=0.0f,r335=0.0f,r336=0.0f,r367=0.0f;
-  long r375=0,r377=0,r379=0,r381=0,r382=long(-1L);
-  float r384=0.0f,r395=0.0f,r396=0.0f,r427=0.0f;
-  long r435=0,r437=0,r439=0,r441=0;
-  float r443=0.0f,r454=0.0f,r455=0.0f,r486=0.0f;
-  long r494=0,r496=0,r498=0,r500=0;
-  uint r502=1u;
-  float r503=0.0f;
-  uint r504=1u;
-  float r505=0.0f,r507=0.0f;
-  long r512=0,r514=0,r515=0;
-  float r517=0.0f,r519=0.0f;
-  uint r521=1u,r524=2u,r528=0u;
-  float r530=0.0f;
-  uint r532=1u,r535=2u,r539=0u;
-  float r541=0.0f;
-  uint r543=1u,r546=2u,r550=0u,r552=1u,r555=2u,r559=0u,r560=0u,r561=0u,r563=3u,r571=0u,r578=0u,r585=0u;
-  uint r592=0u,r593=0u,r594=0u,r597=6u,r598=0u,r599=0u,r600=0u,r601=0u,r602=0u,r603=0u,r605=0u,r606=0u;
-  int r607=0;
-  uint r608=0,r618=0u,scan619_before=0u,scan619_total=0u;
-  float r624=0.0f;
-  uint r625=0u,r627=0u,r628=0u;
+  float r41=0.0f,r43=0.0f,r45=0.0f;
+  uint r46=1u;
+  float r48=0.0f,r49=0.0f,r51=0.0f,r52=0.0f,r55=0.0f,r60=0.0f;
+  uint r61=2u,r66=3u;
+  float r71=0.0f,r72=0.0f,r73=0.0f,r74=0.0f;
+  uint r76=1u,r79=2u;
+  float r83=0.0f;
+  uint r84=3u;
+  long r86=0;
+  float r94=0.0f,r96=0.0f;
+  uint r98=1u,r101=2u,r106=3u,r107=0u,r108=3u,r111=1u,r114=2u;
+  float r213=0.0f;
+  uint r217=0u,r218=0u;
+  float r220=0.0f,r222=0.0f,r224=0.0f,r226=0.0f,r228=0.0f,r229=0.0f,r231=0.0f,r232=0.0f,r235=0.0f,r236=0.0f,r239=0.0f,r240=0.0f;
+  float r243=0.0f,r244=0.0f,r263=0.0f,r273=0.0f,r284=0.0f,r285=0.0f,r316=0.0f;
+  long r324=0,r326=0,r328=0;
+  uint r329=0u;
+  float r331=0.0f,r342=0.0f,r343=0.0f,r374=0.0f;
+  long r382=0,r384=0,r386=0,r388=0,r389=long(-1L);
+  float r391=0.0f,r402=0.0f,r403=0.0f,r434=0.0f;
+  long r442=0,r444=0,r446=0,r448=0;
+  float r450=0.0f,r461=0.0f,r462=0.0f,r493=0.0f;
+  long r501=0,r503=0,r505=0,r507=0;
+  uint r509=1u;
+  float r510=0.0f;
+  uint r511=1u;
+  float r512=0.0f,r514=0.0f;
+  long r519=0,r521=0,r522=0;
+  float r524=0.0f,r526=0.0f;
+  uint r528=1u,r531=2u,r535=0u;
+  float r537=0.0f;
+  uint r539=1u,r542=2u,r546=0u;
+  float r548=0.0f;
+  uint r550=1u,r553=2u,r557=0u,r559=1u,r562=2u,r566=0u,r567=0u,r568=0u,r570=3u,r578=0u,r585=0u,r592=0u;
+  uint r599=0u,r600=0u,r601=0u,r604=6u,r605=0u,r606=0u,r607=0u,r608=0u,r609=0u,r610=0u,r612=0u,r613=0u;
+  int r614=0;
+  uint r615=0,r625=0u,scan626_before=0u,scan626_total=0u;
+  float r631=0.0f;
+  uint r632=0u,r634=0u,r635=0u;
   long r0=long(gid);
   long r11=long(buffer7[(2u)*1+0]);
   long r13=long(buffer7[(3u)*1+0]);
@@ -69,8 +73,7 @@ kernel void triangle_indices(
       long r27=long(buffer7[r26*1+0]);
       long r29=long(buffer7[r28*1+0]);
       long r30=long(buffer2[r0*1+0]);
-      long r31=(as_type<long>(ulong((ulong(r0)+ulong(long(r26))))<<1)>>1);
-      long r32=long(buffer2[r31*1+0]);
+      long r32=long(buffer2[((uint(r0)+r26))*1+0]);
       long r33=(as_type<long>(ulong((ulong(r32)-ulong(r30)))<<1)>>1);
       long r34=(as_type<long>(ulong((ulong(r0)*ulong(long(r28))))<<1)>>1);
       long r37=(as_type<long>(ulong((ulong(((as_type<long>(ulong((ulong(r30)-ulong(r34)))<<1)>>1)))*ulong(long(r36))))<<1)>>1);
@@ -79,322 +82,338 @@ kernel void triangle_indices(
       if(r41!=0.0f) {
         r43=(r30==long((0u))?1.0f:0.0f);
       }
-      r46=(r31==r29?1.0f:0.0f);
-      if(r46!=0.0f) {
-        r47=(r32==r27?1.0f:0.0f);
-      }
-      long r60=(as_type<long>(ulong((ulong(((as_type<long>(ulong((ulong(r33)-ulong(long(r28))))<<1)>>1)))*ulong(long(r36))))<<1)>>1);
-      r67=(((((r41!=0.0f?r43:(as_type<float>(0x3f800000u))))!=0.0f&&((r46!=0.0f?r47:(as_type<float>(0x3f800000u))))!=0.0f))!=0.0f&&(((((long(buffer3[r0*1+0]))==long(r24)?1.0f:0.0f))!=0.0f&&((((((r33==long(r36)?1.0f:0.0f))!=0.0f||((r33==long((4u))?1.0f:0.0f))!=0.0f))!=0.0f&&((((r30>=r34?1.0f:0.0f))!=0.0f&&((((r32<=r27?1.0f:0.0f))!=0.0f&&((((as_type<long>(ulong((ulong(r37)+ulong(r60)))<<1)>>1))<=((as_type<long>(ulong((ulong(((as_type<long>(ulong((ulong(r27)-ulong(r38)))<<1)>>1)))*ulong(long(r36))))<<1)>>1))?1.0f:0.0f))!=0.0f))!=0.0f))!=0.0f))!=0.0f))!=0.0f);
-      if(r67!=0.0f) {
-        long r68=long(buffer1[r30*1+0]);
-        long r71=long(buffer1[((uint(r30)+r69))*1+0]);
-        long r74=long(buffer1[((uint(r30)+r72))*1+0]);
-        r76=(r33==long((4u))?1.0f:0.0f);
-        if(r76!=0.0f) {
-          r79=long(buffer1[((uint(r30)+r77))*1+0]);
+      r45=(r41!=0.0f?r43:(as_type<float>(0x3f800000u)));
+      if(r45!=0.0f) {
+        r48=(((as_type<long>(ulong((ulong(r0)+ulong(long(r46))))<<1)>>1))==r29?1.0f:0.0f);
+        if(r48!=0.0f) {
+          r49=(r32==r27?1.0f:0.0f);
         }
-        long r80=(r76!=0.0f?r79:r74);
-        r87=(((r68<r25?1.0f:0.0f))!=0.0f&&((((r71<r25?1.0f:0.0f))!=0.0f&&((((r74<r25?1.0f:0.0f))!=0.0f&&((r80<r25?1.0f:0.0f))!=0.0f))!=0.0f))!=0.0f);
-        if(r87!=0.0f) {
-          r89=(r33==long((3u))?1.0f:0.0f);
-          if(r89!=0.0f) {
-            uint r90=(buffer4[uint(r37)]=uint(r68),1u);
-            uint r93=(buffer4[((uint(r37)+r91))]=uint(r71),1u);
-            uint r96=(buffer4[((uint(r37)+r94))]=uint(r74),1u);
-            uint r97=(r93+r96);
-            r100=(((r90+r97))-r99);
+        r51=(r48!=0.0f?r49:(as_type<float>(0x3f800000u)));
+      }
+      r52=(r45!=0.0f&&r51!=0.0f);
+      if(r52!=0.0f) {
+        r55=((long(buffer3[r0*1+0]))==long((0u))?1.0f:0.0f);
+        if(r55!=0.0f) {
+          r60=(((r33==long((3u))?1.0f:0.0f))!=0.0f||((r33==long((4u))?1.0f:0.0f))!=0.0f);
+          if(r60!=0.0f) {
+            long r67=(as_type<long>(ulong((ulong(((as_type<long>(ulong((ulong(r33)-ulong(long(r61))))<<1)>>1)))*ulong(long(r66))))<<1)>>1);
+            r71=(((r30>=((as_type<long>(ulong((ulong(r0)*ulong(long(r61))))<<1)>>1))?1.0f:0.0f))!=0.0f&&((((r32<=r27?1.0f:0.0f))!=0.0f&&((((as_type<long>(ulong((ulong(r37)+ulong(r67)))<<1)>>1))<=((as_type<long>(ulong((ulong(((as_type<long>(ulong((ulong(r27)-ulong(r38)))<<1)>>1)))*ulong(long(r36))))<<1)>>1))?1.0f:0.0f))!=0.0f))!=0.0f);
           }
-          if(r89==0.0f) {
-            uint r102=(uint(r68)*r101);
-            float r103=buffer0[r102*1+0];
-            float r106=buffer0[((r102+r104))*1+0];
-            float r109=buffer0[((r102+r107))*1+0];
-            uint r110=(uint(r71)*r101);
-            float r111=buffer0[r110*1+0];
-            float r113=buffer0[((r110+r104))*1+0];
-            float r115=buffer0[((r110+r107))*1+0];
-            uint r116=(uint(r74)*r101);
-            float r117=buffer0[r116*1+0];
-            float r119=buffer0[((r116+r104))*1+0];
-            float r121=buffer0[((r116+r107))*1+0];
-            uint r122=(uint(r80)*r101);
-            float r123=buffer0[r122*1+0];
-            float r125=buffer0[((r122+r104))*1+0];
-            float r127=buffer0[((r122+r107))*1+0];
-            float r150=max((max((max((fabs(r103)),(max((fabs(r106)),(fabs(r109)))))),(max((fabs(r111)),(max((fabs(r113)),(fabs(r115)))))))),(max((max((fabs(r117)),(max((fabs(r119)),(fabs(r121)))))),(max((fabs(r123)),(max((fabs(r125)),(fabs(r127)))))))));
-            float r155=(((((r150*r150))*(as_type<float>(0x358637bdu))))+(as_type<float>(0x2edbe6ffu)));
-            float r201=fabs(((((((((((r106-r113))*((r109+r115))))+((((r113-r119))*((r115+r121))))))+((((r119-r125))*((r121+r127))))))+((((r125-r106))*((r127+r109)))))));
-            float r202=fabs(((((((((((r109-r115))*((r103+r111))))+((((r115-r121))*((r111+r117))))))+((((r121-r127))*((r117+r123))))))+((((r127-r109))*((r123+r103)))))));
-            float r203=fabs(((((((((((r103-r111))*((r106+r113))))+((((r111-r117))*((r113+r119))))))+((((r117-r123))*((r119+r125))))))+((((r123-r103))*((r125+r106)))))));
-            r206=(((r201>=r202))!=0.0f&&((r201>=r203))!=0.0f);
-            if(r206==0.0f) {
-              r210=(((r202>=r203))!=0.0f?(1u):(2u));
-            }
-            uint r212=(r206!=0.0f?r211:r210);
-            r213=(long(r212)==long(r211)?1.0f:0.0f);
-            if(r213!=0.0f) {
-              r215=(r201-(max(r202,r203)));
-            }
+          r72=(r60!=0.0f&&r71!=0.0f);
+        }
+        r73=(r55!=0.0f&&r72!=0.0f);
+      }
+      r74=(r52!=0.0f&&r73!=0.0f);
+      if(r74!=0.0f) {
+        long r75=long(buffer1[r30*1+0]);
+        long r78=long(buffer1[((uint(r30)+r76))*1+0]);
+        long r81=long(buffer1[((uint(r30)+r79))*1+0]);
+        r83=(r33==long((4u))?1.0f:0.0f);
+        if(r83!=0.0f) {
+          r86=long(buffer1[((uint(r30)+r84))*1+0]);
+        }
+        long r87=(r83!=0.0f?r86:r81);
+        r94=(((r75<r25?1.0f:0.0f))!=0.0f&&((((r78<r25?1.0f:0.0f))!=0.0f&&((((r81<r25?1.0f:0.0f))!=0.0f&&((r87<r25?1.0f:0.0f))!=0.0f))!=0.0f))!=0.0f);
+        if(r94!=0.0f) {
+          r96=(r33==long((3u))?1.0f:0.0f);
+          if(r96!=0.0f) {
+            uint r97=(buffer4[uint(r37)]=uint(r75),1u);
+            uint r100=(buffer4[((uint(r37)+r98))]=uint(r78),1u);
+            uint r103=(buffer4[((uint(r37)+r101))]=uint(r81),1u);
+            uint r104=(r100+r103);
+            r107=(((r97+r104))-r106);
+          }
+          if(r96==0.0f) {
+            uint r109=(uint(r75)*r108);
+            float r110=buffer0[r109*1+0];
+            float r113=buffer0[((r109+r111))*1+0];
+            float r116=buffer0[((r109+r114))*1+0];
+            uint r117=(uint(r78)*r108);
+            float r118=buffer0[r117*1+0];
+            float r120=buffer0[((r117+r111))*1+0];
+            float r122=buffer0[((r117+r114))*1+0];
+            uint r123=(uint(r81)*r108);
+            float r124=buffer0[r123*1+0];
+            float r126=buffer0[((r123+r111))*1+0];
+            float r128=buffer0[((r123+r114))*1+0];
+            uint r129=(uint(r87)*r108);
+            float r130=buffer0[r129*1+0];
+            float r132=buffer0[((r129+r111))*1+0];
+            float r134=buffer0[((r129+r114))*1+0];
+            float r157=max((max((max((fabs(r110)),(max((fabs(r113)),(fabs(r116)))))),(max((fabs(r118)),(max((fabs(r120)),(fabs(r122)))))))),(max((max((fabs(r124)),(max((fabs(r126)),(fabs(r128)))))),(max((fabs(r130)),(max((fabs(r132)),(fabs(r134)))))))));
+            float r162=(((((r157*r157))*(as_type<float>(0x358637bdu))))+(as_type<float>(0x2edbe6ffu)));
+            float r208=fabs(((((((((((r113-r120))*((r116+r122))))+((((r120-r126))*((r122+r128))))))+((((r126-r132))*((r128+r134))))))+((((r132-r113))*((r134+r116)))))));
+            float r209=fabs(((((((((((r116-r122))*((r110+r118))))+((((r122-r128))*((r118+r124))))))+((((r128-r134))*((r124+r130))))))+((((r134-r116))*((r130+r110)))))));
+            float r210=fabs(((((((((((r110-r118))*((r113+r120))))+((((r118-r124))*((r120+r126))))))+((((r124-r130))*((r126+r132))))))+((((r130-r110))*((r132+r113)))))));
+            r213=(((r208>=r209))!=0.0f&&((r208>=r210))!=0.0f);
             if(r213==0.0f) {
-              r217=(long(r212)==long((1u))?1.0f:0.0f);
-              if(r217!=0.0f) {
-                r219=(r202-(max(r201,r203)));
-              }
-              if(r217==0.0f) {
-                r221=(r203-(max(r201,r202)));
-              }
-              r222=(r217!=0.0f?r219:r221);
-              r224=r103;
-              r225=(r217!=0.0f?r109:r106);
+              r217=(((r209>=r210))!=0.0f?(1u):(2u));
             }
-            float r226=(r213!=0.0f?r106:r224);
-            float r227=(r213!=0.0f?r109:r225);
-            if(r213==0.0f) {
-              r228=r111;
-              r229=(r217!=0.0f?r115:r113);
+            uint r219=(r213!=0.0f?r218:r217);
+            r220=(long(r219)==long(r218)?1.0f:0.0f);
+            if(r220!=0.0f) {
+              r222=(r208-(max(r209,r210)));
             }
-            float r230=(r213!=0.0f?r113:r228);
-            float r231=(r213!=0.0f?r115:r229);
-            if(r213==0.0f) {
-              r232=r117;
-              r233=(r217!=0.0f?r121:r119);
+            if(r220==0.0f) {
+              r224=(long(r219)==long((1u))?1.0f:0.0f);
+              if(r224!=0.0f) {
+                r226=(r209-(max(r208,r210)));
+              }
+              if(r224==0.0f) {
+                r228=(r210-(max(r208,r209)));
+              }
+              r229=(r224!=0.0f?r226:r228);
+              r231=r110;
+              r232=(r224!=0.0f?r116:r113);
             }
-            float r234=(r213!=0.0f?r119:r232);
-            float r235=(r213!=0.0f?r121:r233);
-            if(r213==0.0f) {
-              r236=r123;
-              r237=(r217!=0.0f?r127:r125);
+            float r233=(r220!=0.0f?r113:r231);
+            float r234=(r220!=0.0f?r116:r232);
+            if(r220==0.0f) {
+              r235=r118;
+              r236=(r224!=0.0f?r122:r120);
             }
-            float r238=(r213!=0.0f?r125:r236);
-            float r239=(r213!=0.0f?r127:r237);
-            float r254=(((((((((r226*r231))-((r230*r227))))+((((r230*r235))-((r234*r231))))))+((((r234*r239))-((r238*r235))))))+((((r238*r227))-((r226*r239)))));
-            r256=(r254>(as_type<float>(0x0u)));
-            float r259=(r256!=0.0f?(as_type<float>(0x3f800000u)):(as_type<float>(0xbf800000u)));
-            r266=(((r150<(as_type<float>(0x5368d4a5u))))!=0.0f&&((((((r213!=0.0f?r215:r222))>r155))!=0.0f&&(((fabs(r254))>r155))!=0.0f))!=0.0f);
-            if(r266!=0.0f) {
-              float r274=(((((((r226-r238))*((r231-r239))))-((((r227-r239))*((r230-r238))))))*r259);
-              r277=(r274<((r155*(as_type<float>(0xbf800000u)))));
-              if(r277==0.0f) {
-                r278=(r274>r155);
-                if(r278!=0.0f) {
-                  float r286=(((((((r226-r238))*((r235-r239))))-((((r227-r239))*((r234-r238))))))*r259);
-                  float r294=(((((((r230-r226))*((r235-r227))))-((((r231-r227))*((r234-r226))))))*r259);
-                  float r302=(((((((r238-r230))*((r235-r231))))-((((r239-r231))*((r234-r230))))))*r259);
-                  float r304=(r155*(as_type<float>(0xbf800000u)));
-                  r309=(((r286<r304))!=0.0f||((((r294<r304))!=0.0f||((r302<r304))!=0.0f))!=0.0f);
-                  if(r309==0.0f) {
-                    r317=(((((r286>r155))!=0.0f&&((((r294>r155))!=0.0f&&((r302>r155))!=0.0f))!=0.0f))!=0.0f?long((0u)):(long(-1L)));
+            float r237=(r220!=0.0f?r120:r235);
+            float r238=(r220!=0.0f?r122:r236);
+            if(r220==0.0f) {
+              r239=r124;
+              r240=(r224!=0.0f?r128:r126);
+            }
+            float r241=(r220!=0.0f?r126:r239);
+            float r242=(r220!=0.0f?r128:r240);
+            if(r220==0.0f) {
+              r243=r130;
+              r244=(r224!=0.0f?r134:r132);
+            }
+            float r245=(r220!=0.0f?r132:r243);
+            float r246=(r220!=0.0f?r134:r244);
+            float r261=(((((((((r233*r238))-((r237*r234))))+((((r237*r242))-((r241*r238))))))+((((r241*r246))-((r245*r242))))))+((((r245*r234))-((r233*r246)))));
+            r263=(r261>(as_type<float>(0x0u)));
+            float r266=(r263!=0.0f?(as_type<float>(0x3f800000u)):(as_type<float>(0xbf800000u)));
+            r273=(((r157<(as_type<float>(0x5368d4a5u))))!=0.0f&&((((((r220!=0.0f?r222:r229))>r162))!=0.0f&&(((fabs(r261))>r162))!=0.0f))!=0.0f);
+            if(r273!=0.0f) {
+              float r281=(((((((r233-r245))*((r238-r246))))-((((r234-r246))*((r237-r245))))))*r266);
+              r284=(r281<((r162*(as_type<float>(0xbf800000u)))));
+              if(r284==0.0f) {
+                r285=(r281>r162);
+                if(r285!=0.0f) {
+                  float r293=(((((((r233-r245))*((r242-r246))))-((((r234-r246))*((r241-r245))))))*r266);
+                  float r301=(((((((r237-r233))*((r242-r234))))-((((r238-r234))*((r241-r233))))))*r266);
+                  float r309=(((((((r245-r237))*((r242-r238))))-((((r246-r238))*((r241-r237))))))*r266);
+                  float r311=(r162*(as_type<float>(0xbf800000u)));
+                  r316=(((r293<r311))!=0.0f||((((r301<r311))!=0.0f||((r309<r311))!=0.0f))!=0.0f);
+                  if(r316==0.0f) {
+                    r324=(((((r293>r162))!=0.0f&&((((r301>r162))!=0.0f&&((r309>r162))!=0.0f))!=0.0f))!=0.0f?long((0u)):(long(-1L)));
                   }
-                  r319=(r309!=0.0f?long((1u)):r317);
+                  r326=(r316!=0.0f?long((1u)):r324);
                 }
-                r321=(r278!=0.0f?r319:(long(-1L)));
+                r328=(r285!=0.0f?r326:(long(-1L)));
               }
-              long r323=(r277!=0.0f?long(r322):r321);
-              r324=(r323==long(r322)?1.0f:0.0f);
-              if(r324!=0.0f) {
-                float r332=(((((((r230-r226))*((r235-r227))))-((((r231-r227))*((r234-r226))))))*r259);
-                r335=(r332<((r155*(as_type<float>(0xbf800000u)))));
-                if(r335==0.0f) {
-                  r336=(r332>r155);
-                  if(r336!=0.0f) {
-                    float r344=(((((((r230-r226))*((r239-r227))))-((((r231-r227))*((r238-r226))))))*r259);
-                    float r352=(((((((r234-r230))*((r239-r231))))-((((r235-r231))*((r238-r230))))))*r259);
-                    float r360=(((((((r226-r234))*((r239-r235))))-((((r227-r235))*((r238-r234))))))*r259);
-                    float r362=(r155*(as_type<float>(0xbf800000u)));
-                    r367=(((r344<r362))!=0.0f||((((r352<r362))!=0.0f||((r360<r362))!=0.0f))!=0.0f);
-                    if(r367==0.0f) {
-                      r375=(((((r344>r155))!=0.0f&&((((r352>r155))!=0.0f&&((r360>r155))!=0.0f))!=0.0f))!=0.0f?long((0u)):(long(-1L)));
+              long r330=(r284!=0.0f?long(r329):r328);
+              r331=(r330==long(r329)?1.0f:0.0f);
+              if(r331!=0.0f) {
+                float r339=(((((((r237-r233))*((r242-r234))))-((((r238-r234))*((r241-r233))))))*r266);
+                r342=(r339<((r162*(as_type<float>(0xbf800000u)))));
+                if(r342==0.0f) {
+                  r343=(r339>r162);
+                  if(r343!=0.0f) {
+                    float r351=(((((((r237-r233))*((r246-r234))))-((((r238-r234))*((r245-r233))))))*r266);
+                    float r359=(((((((r241-r237))*((r246-r238))))-((((r242-r238))*((r245-r237))))))*r266);
+                    float r367=(((((((r233-r241))*((r246-r242))))-((((r234-r242))*((r245-r241))))))*r266);
+                    float r369=(r162*(as_type<float>(0xbf800000u)));
+                    r374=(((r351<r369))!=0.0f||((((r359<r369))!=0.0f||((r367<r369))!=0.0f))!=0.0f);
+                    if(r374==0.0f) {
+                      r382=(((((r351>r162))!=0.0f&&((((r359>r162))!=0.0f&&((r367>r162))!=0.0f))!=0.0f))!=0.0f?long((0u)):(long(-1L)));
                     }
-                    r377=(r367!=0.0f?long((1u)):r375);
+                    r384=(r374!=0.0f?long((1u)):r382);
                   }
-                  r379=(r336!=0.0f?r377:(long(-1L)));
+                  r386=(r343!=0.0f?r384:(long(-1L)));
                 }
-                r381=(r335!=0.0f?long((0u)):r379);
+                r388=(r342!=0.0f?long((0u)):r386);
               }
-              long r383=(r324!=0.0f?r381:r382);
-              r384=(r383==long(r322)?1.0f:0.0f);
-              if(r384!=0.0f) {
-                float r392=(((((((r234-r230))*((r239-r231))))-((((r235-r231))*((r238-r230))))))*r259);
-                r395=(r392<((r155*(as_type<float>(0xbf800000u)))));
-                if(r395==0.0f) {
-                  r396=(r392>r155);
-                  if(r396!=0.0f) {
-                    float r404=(((((((r234-r230))*((r227-r231))))-((((r235-r231))*((r226-r230))))))*r259);
-                    float r412=(((((((r238-r234))*((r227-r235))))-((((r239-r235))*((r226-r234))))))*r259);
-                    float r420=(((((((r230-r238))*((r227-r239))))-((((r231-r239))*((r226-r238))))))*r259);
-                    float r422=(r155*(as_type<float>(0xbf800000u)));
-                    r427=(((r404<r422))!=0.0f||((((r412<r422))!=0.0f||((r420<r422))!=0.0f))!=0.0f);
-                    if(r427==0.0f) {
-                      r435=(((((r404>r155))!=0.0f&&((((r412>r155))!=0.0f&&((r420>r155))!=0.0f))!=0.0f))!=0.0f?long((0u)):(long(-1L)));
+              long r390=(r331!=0.0f?r388:r389);
+              r391=(r390==long(r329)?1.0f:0.0f);
+              if(r391!=0.0f) {
+                float r399=(((((((r241-r237))*((r246-r238))))-((((r242-r238))*((r245-r237))))))*r266);
+                r402=(r399<((r162*(as_type<float>(0xbf800000u)))));
+                if(r402==0.0f) {
+                  r403=(r399>r162);
+                  if(r403!=0.0f) {
+                    float r411=(((((((r241-r237))*((r234-r238))))-((((r242-r238))*((r233-r237))))))*r266);
+                    float r419=(((((((r245-r241))*((r234-r242))))-((((r246-r242))*((r233-r241))))))*r266);
+                    float r427=(((((((r237-r245))*((r234-r246))))-((((r238-r246))*((r233-r245))))))*r266);
+                    float r429=(r162*(as_type<float>(0xbf800000u)));
+                    r434=(((r411<r429))!=0.0f||((((r419<r429))!=0.0f||((r427<r429))!=0.0f))!=0.0f);
+                    if(r434==0.0f) {
+                      r442=(((((r411>r162))!=0.0f&&((((r419>r162))!=0.0f&&((r427>r162))!=0.0f))!=0.0f))!=0.0f?long((0u)):(long(-1L)));
                     }
-                    r437=(r427!=0.0f?long((1u)):r435);
+                    r444=(r434!=0.0f?long((1u)):r442);
                   }
-                  r439=(r396!=0.0f?r437:(long(-1L)));
+                  r446=(r403!=0.0f?r444:(long(-1L)));
                 }
-                r441=(r395!=0.0f?long((0u)):r439);
+                r448=(r402!=0.0f?long((0u)):r446);
               }
-              long r442=(r384!=0.0f?r441:r382);
-              r443=(r442==long(r322)?1.0f:0.0f);
-              if(r443!=0.0f) {
-                float r451=(((((((r238-r234))*((r227-r235))))-((((r239-r235))*((r226-r234))))))*r259);
-                r454=(r451<((r155*(as_type<float>(0xbf800000u)))));
-                if(r454==0.0f) {
-                  r455=(r451>r155);
-                  if(r455!=0.0f) {
-                    float r463=(((((((r238-r234))*((r231-r235))))-((((r239-r235))*((r230-r234))))))*r259);
-                    float r471=(((((((r226-r238))*((r231-r239))))-((((r227-r239))*((r230-r238))))))*r259);
-                    float r479=(((((((r234-r226))*((r231-r227))))-((((r235-r227))*((r230-r226))))))*r259);
-                    float r481=(r155*(as_type<float>(0xbf800000u)));
-                    r486=(((r463<r481))!=0.0f||((((r471<r481))!=0.0f||((r479<r481))!=0.0f))!=0.0f);
-                    if(r486==0.0f) {
-                      r494=(((((r463>r155))!=0.0f&&((((r471>r155))!=0.0f&&((r479>r155))!=0.0f))!=0.0f))!=0.0f?long((0u)):(long(-1L)));
+              long r449=(r391!=0.0f?r448:r389);
+              r450=(r449==long(r329)?1.0f:0.0f);
+              if(r450!=0.0f) {
+                float r458=(((((((r245-r241))*((r234-r242))))-((((r246-r242))*((r233-r241))))))*r266);
+                r461=(r458<((r162*(as_type<float>(0xbf800000u)))));
+                if(r461==0.0f) {
+                  r462=(r458>r162);
+                  if(r462!=0.0f) {
+                    float r470=(((((((r245-r241))*((r238-r242))))-((((r246-r242))*((r237-r241))))))*r266);
+                    float r478=(((((((r233-r245))*((r238-r246))))-((((r234-r246))*((r237-r245))))))*r266);
+                    float r486=(((((((r241-r233))*((r238-r234))))-((((r242-r234))*((r237-r233))))))*r266);
+                    float r488=(r162*(as_type<float>(0xbf800000u)));
+                    r493=(((r470<r488))!=0.0f||((((r478<r488))!=0.0f||((r486<r488))!=0.0f))!=0.0f);
+                    if(r493==0.0f) {
+                      r501=(((((r470>r162))!=0.0f&&((((r478>r162))!=0.0f&&((r486>r162))!=0.0f))!=0.0f))!=0.0f?long((0u)):(long(-1L)));
                     }
-                    r496=(r486!=0.0f?long((1u)):r494);
+                    r503=(r493!=0.0f?long((1u)):r501);
                   }
-                  r498=(r455!=0.0f?r496:(long(-1L)));
+                  r505=(r462!=0.0f?r503:(long(-1L)));
                 }
-                r500=(r454!=0.0f?long((0u)):r498);
+                r507=(r461!=0.0f?long((0u)):r505);
               }
-              r503=(r323==long(r502)?1.0f:0.0f);
-              if(r503==0.0f) {
-                r505=(r383==long(r504)?1.0f:0.0f);
-                if(r505==0.0f) {
-                  r507=(r442==long((1u))?1.0f:0.0f);
-                  if(r507==0.0f) {
-                    r512=(((((r443!=0.0f?r500:r382))==long((1u))?1.0f:0.0f))!=0.0f?long((3u)):(long(-1L)));
+              r510=(r330==long(r509)?1.0f:0.0f);
+              if(r510==0.0f) {
+                r512=(r390==long(r511)?1.0f:0.0f);
+                if(r512==0.0f) {
+                  r514=(r449==long((1u))?1.0f:0.0f);
+                  if(r514==0.0f) {
+                    r519=(((((r450!=0.0f?r507:r389))==long((1u))?1.0f:0.0f))!=0.0f?long((3u)):(long(-1L)));
                   }
-                  r514=(r507!=0.0f?long((2u)):r512);
+                  r521=(r514!=0.0f?long((2u)):r519);
                 }
-                r515=(r505!=0.0f?long(r504):r514);
+                r522=(r512!=0.0f?long(r511):r521);
               }
-              long r516=(r503!=0.0f?long(r322):r515);
-              r517=(r516<long(r322)?1.0f:0.0f);
-              if(r517==0.0f) {
-                r519=(r516==long((0u))?1.0f:0.0f);
-                if(r519!=0.0f) {
-                  uint r520=(buffer4[uint(r37)]=uint(r80),1u);
-                  uint r523=(buffer4[((uint(r37)+r521))]=uint(r68),1u);
-                  uint r526=(buffer4[((uint(r37)+r524))]=uint(r71),1u);
-                  uint r527=(r523+r526);
-                  r528=(r520+r527);
+              long r523=(r510!=0.0f?long(r329):r522);
+              r524=(r523<long(r329)?1.0f:0.0f);
+              if(r524==0.0f) {
+                r526=(r523==long((0u))?1.0f:0.0f);
+                if(r526!=0.0f) {
+                  uint r527=(buffer4[uint(r37)]=uint(r87),1u);
+                  uint r530=(buffer4[((uint(r37)+r528))]=uint(r75),1u);
+                  uint r533=(buffer4[((uint(r37)+r531))]=uint(r78),1u);
+                  uint r534=(r530+r533);
+                  r535=(r527+r534);
                 }
-                if(r519==0.0f) {
-                  r530=(r516==long((1u))?1.0f:0.0f);
-                  if(r530!=0.0f) {
-                    uint r531=(buffer4[uint(r37)]=uint(r68),1u);
-                    uint r534=(buffer4[((uint(r37)+r532))]=uint(r71),1u);
-                    uint r537=(buffer4[((uint(r37)+r535))]=uint(r74),1u);
-                    uint r538=(r534+r537);
-                    r539=(r531+r538);
+                if(r526==0.0f) {
+                  r537=(r523==long((1u))?1.0f:0.0f);
+                  if(r537!=0.0f) {
+                    uint r538=(buffer4[uint(r37)]=uint(r75),1u);
+                    uint r541=(buffer4[((uint(r37)+r539))]=uint(r78),1u);
+                    uint r544=(buffer4[((uint(r37)+r542))]=uint(r81),1u);
+                    uint r545=(r541+r544);
+                    r546=(r538+r545);
                   }
-                  if(r530==0.0f) {
-                    r541=(r516==long((2u))?1.0f:0.0f);
-                    if(r541!=0.0f) {
-                      uint r542=(buffer4[uint(r37)]=uint(r71),1u);
-                      uint r545=(buffer4[((uint(r37)+r543))]=uint(r74),1u);
-                      uint r548=(buffer4[((uint(r37)+r546))]=uint(r80),1u);
-                      uint r549=(r545+r548);
-                      r550=(r542+r549);
+                  if(r537==0.0f) {
+                    r548=(r523==long((2u))?1.0f:0.0f);
+                    if(r548!=0.0f) {
+                      uint r549=(buffer4[uint(r37)]=uint(r78),1u);
+                      uint r552=(buffer4[((uint(r37)+r550))]=uint(r81),1u);
+                      uint r555=(buffer4[((uint(r37)+r553))]=uint(r87),1u);
+                      uint r556=(r552+r555);
+                      r557=(r549+r556);
                     }
-                    if(r541==0.0f) {
-                      uint r551=(buffer4[uint(r37)]=uint(r74),1u);
-                      uint r554=(buffer4[((uint(r37)+r552))]=uint(r80),1u);
-                      uint r557=(buffer4[((uint(r37)+r555))]=uint(r68),1u);
-                      uint r558=(r554+r557);
-                      r559=(r551+r558);
+                    if(r548==0.0f) {
+                      uint r558=(buffer4[uint(r37)]=uint(r81),1u);
+                      uint r561=(buffer4[((uint(r37)+r559))]=uint(r87),1u);
+                      uint r564=(buffer4[((uint(r37)+r562))]=uint(r75),1u);
+                      uint r565=(r561+r564);
+                      r566=(r558+r565);
                     }
-                    r560=(r541!=0.0f?r550:r559);
+                    r567=(r548!=0.0f?r557:r566);
                   }
-                  r561=(r530!=0.0f?r539:r560);
+                  r568=(r537!=0.0f?r546:r567);
                 }
-                uint r564=(uint(r37)+r563);
-                if(r519!=0.0f) {
-                  uint r565=(buffer4[r564]=uint(r71),1u);
-                  uint r567=(buffer4[((r564+r521))]=uint(r74),1u);
-                  uint r569=(buffer4[((r564+r524))]=uint(r80),1u);
-                  uint r570=(r567+r569);
-                  r571=(r565+r570);
+                uint r571=(uint(r37)+r570);
+                if(r526!=0.0f) {
+                  uint r572=(buffer4[r571]=uint(r78),1u);
+                  uint r574=(buffer4[((r571+r528))]=uint(r81),1u);
+                  uint r576=(buffer4[((r571+r531))]=uint(r87),1u);
+                  uint r577=(r574+r576);
+                  r578=(r572+r577);
                 }
-                if(r519==0.0f) {
-                  if(r530!=0.0f) {
-                    uint r572=(buffer4[r564]=uint(r68),1u);
-                    uint r574=(buffer4[((r564+r532))]=uint(r74),1u);
-                    uint r576=(buffer4[((r564+r535))]=uint(r80),1u);
-                    uint r577=(r574+r576);
-                    r578=(r572+r577);
+                if(r526==0.0f) {
+                  if(r537!=0.0f) {
+                    uint r579=(buffer4[r571]=uint(r75),1u);
+                    uint r581=(buffer4[((r571+r539))]=uint(r81),1u);
+                    uint r583=(buffer4[((r571+r542))]=uint(r87),1u);
+                    uint r584=(r581+r583);
+                    r585=(r579+r584);
                   }
-                  if(r530==0.0f) {
-                    if(r541!=0.0f) {
-                      uint r579=(buffer4[r564]=uint(r68),1u);
-                      uint r581=(buffer4[((r564+r543))]=uint(r71),1u);
-                      uint r583=(buffer4[((r564+r546))]=uint(r80),1u);
-                      uint r584=(r581+r583);
-                      r585=(r579+r584);
-                    }
-                    if(r541==0.0f) {
-                      uint r586=(buffer4[r564]=uint(r68),1u);
-                      uint r588=(buffer4[((r564+r552))]=uint(r71),1u);
-                      uint r590=(buffer4[((r564+r555))]=uint(r74),1u);
+                  if(r537==0.0f) {
+                    if(r548!=0.0f) {
+                      uint r586=(buffer4[r571]=uint(r75),1u);
+                      uint r588=(buffer4[((r571+r550))]=uint(r78),1u);
+                      uint r590=(buffer4[((r571+r553))]=uint(r87),1u);
                       uint r591=(r588+r590);
                       r592=(r586+r591);
                     }
-                    r593=(r541!=0.0f?r585:r592);
+                    if(r548==0.0f) {
+                      uint r593=(buffer4[r571]=uint(r75),1u);
+                      uint r595=(buffer4[((r571+r559))]=uint(r78),1u);
+                      uint r597=(buffer4[((r571+r562))]=uint(r81),1u);
+                      uint r598=(r595+r597);
+                      r599=(r593+r598);
+                    }
+                    r600=(r548!=0.0f?r592:r599);
                   }
-                  r594=(r530!=0.0f?r578:r593);
+                  r601=(r537!=0.0f?r585:r600);
                 }
-                uint r595=(r519!=0.0f?r571:r594);
-                r598=(((((r519!=0.0f?r528:r561))+r595))-r597);
+                uint r602=(r526!=0.0f?r578:r601);
+                r605=(((((r526!=0.0f?r535:r568))+r602))-r604);
               }
-              r599=(r517!=0.0f?r502:r598);
+              r606=(r524!=0.0f?r509:r605);
             }
-            r600=(r266!=0.0f?r599:r104);
+            r607=(r273!=0.0f?r606:r111);
           }
-          r601=(r89!=0.0f?r100:r600);
+          r608=(r96!=0.0f?r107:r607);
         }
-        r602=(r87!=0.0f?r601:r69);
+        r609=(r94!=0.0f?r608:r76);
       }
-      r603=(r67!=0.0f?r602:r26);
+      r610=(r74!=0.0f?r609:r26);
     }
-    r605=(r23!=0.0f?r603:(0u));
+    r612=(r23!=0.0f?r610:(0u));
   }
   if(r22==0.0f) {
-    bool over607=r20>long(r606) && ulong(r20-long(r606))>4096uL;
-    sb|=over607?1u:0u;
-    r608=r606;
-    for(r607=long(r606);r607<(over607?long(r606):r20);r607++){
-  uint r609=256u;
-  float r612=0.0f;
-  long r613=0;
-  uint r616=0u;
+    bool over614=r20>long(r613) && ulong(r20-long(r613))>4096uL;
+    sb|=over614?1u:0u;
+    r615=r613;
+    for(r614=long(r613);r614<(over614?long(r613):r20);r614++){
+  uint r616=256u;
+  float r619=0.0f;
+  long r620=0;
+  uint r623=0u;
   if(r22==0.0f) {
-    long r610=(as_type<long>(ulong((ulong(r607)*ulong(long(r609))))<<1)>>1);
-    long r611=(as_type<long>(ulong((ulong(r15)+ulong(r610)))<<1)>>1);
-    r612=(r611<r18?1.0f:0.0f);
-    if(r612!=0.0f) {
-      r613=long(buffer5[r611*1+0]);
+    long r617=(as_type<long>(ulong((ulong(r614)*ulong(long(r616))))<<1)>>1);
+    long r618=(as_type<long>(ulong((ulong(r15)+ulong(r617)))<<1)>>1);
+    r619=(r618<r18?1.0f:0.0f);
+    if(r619!=0.0f) {
+      r620=long(buffer5[r618*1+0]);
     }
-    uint r615=(r612!=0.0f?uint(r613):(0u));
-    r616=(r608+r615);
+    uint r622=(r619!=0.0f?uint(r620):(0u));
+    r623=(r615+r622);
   }
-  uint next607_0=r616;
-  r608=next607_0;
+  uint next614_0=r623;
+  r615=next614_0;
     }
-    r618=r608;
+    r625=r615;
   }
-  threadgroup uint scan619[256];
-  {uint v=((r22!=0.0f?r605:r618));scan619[lid]=v;for(uint d=1u;d<256u;d<<=1u){threadgroup_barrier(mem_flags::mem_threadgroup);uint w=lid>=d?scan619[lid-d]:0u;threadgroup_barrier(mem_flags::mem_threadgroup);v+=w;scan619[lid]=v;}threadgroup_barrier(mem_flags::mem_threadgroup);scan619_before=v-((r22!=0.0f?r605:r618));scan619_total=scan619[256-1];}
-  uint r620=scan619_total;
-  float r622=(r15==long(r21)?1.0f:0.0f);
-  if(r622!=0.0f) {
-    r624=(r13==long((0u))?1.0f:0.0f);
-    if(r624!=0.0f) {
-      r625=(buffer5[uint(r14)]=r620,1u);
+  threadgroup uint scan626[256];
+  {uint v=((r22!=0.0f?r612:r625));scan626[lid]=v;for(uint d=1u;d<256u;d<<=1u){threadgroup_barrier(mem_flags::mem_threadgroup);uint w=lid>=d?scan626[lid-d]:0u;threadgroup_barrier(mem_flags::mem_threadgroup);v+=w;scan626[lid]=v;}threadgroup_barrier(mem_flags::mem_threadgroup);scan626_before=v-((r22!=0.0f?r612:r625));scan626_total=scan626[256-1];}
+  uint r627=scan626_total;
+  float r629=(r15==long(r21)?1.0f:0.0f);
+  if(r629!=0.0f) {
+    r631=(r13==long((0u))?1.0f:0.0f);
+    if(r631!=0.0f) {
+      r632=(buffer5[uint(r14)]=r627,1u);
     }
-    if(r624==0.0f) {
-      r627=(buffer6[(0u)]=r620,1u);
+    if(r631==0.0f) {
+      r634=(buffer6[(0u)]=r627,1u);
     }
-    r628=(r624!=0.0f?r625:r627);
+    r635=(r631!=0.0f?r632:r634);
   }
-  uint r629=(r622!=0.0f?r628:r21);
-  (void)float(r629);
+  uint r636=(r629!=0.0f?r635:r21);
+  (void)float(r636);
 }

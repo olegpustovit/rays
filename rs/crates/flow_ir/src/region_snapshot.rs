@@ -275,6 +275,14 @@ mod tests {
     }
 
     #[test]
+    fn and_or_guard_only_a_costly_right_operand() {
+        let guarded = |body: &str| region_of(body).code.iter().any(|i| matches!(i, R::Instruction::Guarded(..)));
+        assert!(guarded("(map (fn [x] (and (> x 1.) (let* [y (* x t)] (< y 3.)))) (array/range 4))"));
+        assert!(guarded("(map (fn [x] (or (> x 1.) (let* [y (* x t)] (< y 3.)))) (array/range 4))"));
+        assert!(!guarded("(map (fn [x] (or (> x 1.) (< (* x t) 3.))) (array/range 4))"));
+    }
+
+    #[test]
     fn registers_match_the_ocaml_oracle() {
         let cases = include_str!("../golden/region_cases.txt");
         let expected = include_str!("../golden/region_cases.expected");
