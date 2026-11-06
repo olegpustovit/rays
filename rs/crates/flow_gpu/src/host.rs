@@ -199,6 +199,9 @@ pub(crate) struct Data {
     /// 0., 1., 2., ... on the device, for range sources
     iota: RefCell<Option<(Buffer, i64)>>,
     iota_uint32: RefCell<Option<(Buffer, i64)>>,
+    /// the largest uint32 index count asked for, so a frame whose index buffer a holder took makes
+    /// one buffer of the size it ends at, not one per growth step
+    iota_uint32_hint: Cell<i64>,
     /// outgrown index buffers, each with the newest epoch that can read it: named at the next
     /// scope, when the scope that outgrew it has committed; destroyed once that epoch completes
     retired_buffers: RefCell<Vec<(Buffer, Option<i64>)>>,
@@ -318,6 +321,7 @@ pub fn create(_clock: &dyn Fn() -> f64, gpu_: &renderer::renderer::gpu) -> T {
         flight: RefCell::new(vec![]),
         iota: RefCell::new(None),
         iota_uint32: RefCell::new(None),
+        iota_uint32_hint: Cell::new(0),
         retired_buffers: RefCell::new(vec![]),
         buffers: RefCell::new(HashMap::new()),
         closed: Cell::new(false),
@@ -719,6 +723,8 @@ impl Scope {
         let Some((c, encoder)) = self.s.borrow_mut().pending.take() else { return Ok(()) };
         let _ = b::end_compute(&encoder);
         if let Err(d) = admit(&self.t) {
+            // an index buffer filled in these commands was never written
+            *self.t.0.iota_uint32.borrow_mut() = None;
             let _ = b::abandon(&c);
             return Err(d);
         }
@@ -842,17 +848,30 @@ impl Scope {
                 return Some(buffer.clone());
             }
         }
-        let capacity = 1.max(length.max(2 * old.as_ref().map_or(0, |o| o.1)));
-        if capacity >= 1 << 18 {
-            run::admit(capacity * 4).ok()?;
-        }
-        let buffer = b::create_mapped_buffer(
-            &device_of(t),
-            BufferDescriptor { label: Some("Flow uint32 indices".to_owned()), size: capacity * 4, usage: vec![BufferUsage::Storage, BufferUsage::CopySrc, BufferUsage::CopyDst] },
-        )
-        .ok()?;
-        t.0.resident_buffers.set(t.0.resident_buffers.get() + 1);
-        if run::fill_indices(None, &self.queue, &t.0.pipelines, &buffer, capacity).is_err() {
+        // ponytail: the hint never shrinks; decay it if a workspace's counts fall for good
+        let wanted = 1.max(length.max(2 * old.as_ref().map_or(0, |o| o.1)).max(t.0.iota_uint32_hint.get()));
+        t.0.iota_uint32_hint.set(wanted);
+        let device = device_of(t);
+        // a buffer a dropped holder gave back (last frame's taken index buffer, say) before a new one
+        let (buffer, capacity) = match run::recycled(&t.0.shared, &device, wanted * 4) {
+            Some((buffer, bytes)) => (buffer, bytes / 4),
+            None => {
+                let size = run::size_class(wanted * 4);
+                if size >= 1 << 20 {
+                    run::admit(size).ok()?;
+                    run::created(&t.0.shared, size);
+                }
+                let buffer = b::create_mapped_buffer(
+                    &device,
+                    BufferDescriptor { label: Some("Flow uint32 indices".to_owned()), size, usage: vec![BufferUsage::Storage, BufferUsage::CopySrc, BufferUsage::CopyDst] },
+                )
+                .ok()?;
+                t.0.resident_buffers.set(t.0.resident_buffers.get() + 1);
+                (buffer, size / 4)
+            }
+        };
+        // ordered before this scope's dispatches by its serial encoder: no wait
+        if self.commands().and_then(|(_, encoder)| run::encode_fill(&encoder, &t.0.pipelines, None, &buffer, capacity)).is_err() {
             let _ = b::destroy_buffer(&buffer);
             return None;
         }
@@ -909,15 +928,7 @@ impl Scope {
                 return Ok((buffer, bytes));
             }
         }
-        let size = if !large {
-            bytes
-        } else {
-            let mut n = 1i64 << 20;
-            while n < bytes {
-                n *= 2;
-            }
-            n
-        };
+        let size = if large { run::size_class(bytes) } else { bytes };
         if large {
             run::admit(size)?;
             run::created(&t.0.shared, size);
@@ -1883,10 +1894,7 @@ impl Scope {
                     }
                 }
                 let buffer = self.alloc(&slot, 4.max(length * 4))?;
-                let r = (|| -> Result<(), Diagnostic> {
-                    self.flush()?;
-                    run::fill_indices(Some(*x), &self.queue, &self.t.0.pipelines, &buffer.0, length)
-                })();
+                let r = self.commands().and_then(|(_, encoder)| run::encode_fill(&encoder, &self.t.0.pipelines, Some(*x), &buffer.0, length));
                 match r {
                     Ok(()) => Ok(Some(self.placeholder(false, false, i64::MAX, None, &slot, ty, buffer, None, length))),
                     Err(e) => {
@@ -2436,10 +2444,11 @@ pub fn close(t: &T) {
     d.closed.set(true);
 }
 
-/// Shared display storage: at most four free buffers per size and 64 sizes, and the kept outputs'
-/// free bytes in all: a mesh whose count moves each frame finds no size again.
+/// Shared display storage: at most four free buffers per size class and 64 classes, and the kept
+/// outputs' free bytes in all.
 fn return_display_buffer(t: &T, bytes: i64, out: &Buffer) {
     assert!(me() == t.0.domain, "Host display buffer released on another domain");
+    let bytes = run::size_class(bytes);
     let (free_len, known, sizes, idle) = {
         let bs = t.0.buffers.borrow();
         (bs.get(&bytes).map_or(0, |v| v.len()), bs.contains_key(&bytes), bs.len(), bs.iter().map(|(size, v)| size * v.len() as i64).sum::<i64>())
@@ -2452,6 +2461,8 @@ fn return_display_buffer(t: &T, bytes: i64, out: &Buffer) {
 }
 
 fn display_buffer(t: &T, bytes: i64) -> Result<Buffer, Diagnostic> {
+    // by size class: a mesh whose triangle count moves each frame finds last frame's buffer
+    let bytes = run::size_class(bytes);
     if let Some(bs) = t.0.buffers.borrow_mut().get_mut(&bytes) {
         if !bs.is_empty() {
             return Ok(bs.remove(0));

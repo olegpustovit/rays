@@ -62,6 +62,13 @@ fold on WebGPU (count records, compaction, one readback) and display regions dra
 target's path lands in the other with a parity check (`@tools/qualification-web`). The design summary and the
 task plan are `specification/web-export/plan.md`.
 
+## Rust port
+
+`rs/` is the Cargo port (`rs/CHECKPOINT.md`). Byte-for-byte parity with the OCaml build is no longer
+a goal: the Rust build must be fast and lean, in release and in debug, and beat native OCaml on both.
+Change Rust goldens, shaders or pixels when a faster path needs it, and refresh them in the same change;
+correctness (Lisp semantics, determinism, parallel == sequential) still holds.
+
 ## Libraries
 
 | Library | Owns |

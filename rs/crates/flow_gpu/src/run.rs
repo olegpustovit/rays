@@ -46,6 +46,16 @@ fn e_gpu(message: &str) -> Diagnostic {
 fn e_kernel(message: &str) -> Diagnostic {
     value::fail("E_KERNEL", message)
 }
+/// A device buffer's size for `bytes`: eight classes an octave above 1 MiB (at most 12.5% unused, where
+/// doubling left up to half of a 100 MB mesh attribute empty), whole below; never under 256 bytes.
+pub fn size_class(bytes: i64) -> i64 {
+    if bytes <= 1 << 20 {
+        return bytes.max(256);
+    }
+    let step = (1i64 << (63 - (bytes - 1).leading_zeros())) / 8;
+    (bytes + step - 1) / step * step
+}
+
 pub(crate) fn admit(n: i64) -> Result<(), Diagnostic> {
     mem::admit_bytes(mem::Pool::Device, n).map_err(|r| value::fail("E_ARRAY_MEMORY", &r.to_string()))
 }
@@ -690,10 +700,7 @@ fn ensure(d: &Data, slot: &mut Slot, creations: &mut i64, mapped: bool, length: 
         slot.low = 0;
     }
     if length > slot.capacity {
-        let mut capacity = 256.max(slot.capacity);
-        while capacity < length {
-            if capacity > MAX_STRING / 2 { capacity = length } else { capacity *= 2 }
-        }
+        let capacity = size_class(length);
         let descriptor = BufferDescriptor { label: Some("Flow packed compute".to_owned()), size: capacity, usage: vec![BufferUsage::Storage, BufferUsage::CopySrc, BufferUsage::CopyDst] };
         if capacity >= 1 << 20 {
             admit(capacity)?;
@@ -2033,9 +2040,9 @@ fn one_pass(queue: &Queue, f: &dyn Fn(&Commands) -> Result<(), Diagnostic>) -> R
     }
 }
 
-/// Writes `0..count-1`, or the supplied constant `value`, as exact uint32 words on the device and
-/// waits for completion. No size-dependent CPU staging.
-pub fn fill_indices(value: Option<i64>, queue: &Queue, pipelines: &pipelines::T, buffer: &Buffer, count: i64) -> Result<(), Diagnostic> {
+/// Encodes into `encoder` the writing of `0..count-1`, or the constant `value`, as exact uint32 words:
+/// a later dispatch of the same serial encoder, or of a later command buffer on its queue, reads them.
+pub fn encode_fill(encoder: &ComputeEncoder, pipelines: &pipelines::T, value: Option<i64>, buffer: &Buffer, count: i64) -> Result<(), Diagnostic> {
     if count < 0 || count > b::buffer_size(buffer) / 4 {
         return Err(e_gpu("Integer fill count exceeds its buffer capacity."));
     }
@@ -2043,18 +2050,27 @@ pub fn fill_indices(value: Option<i64>, queue: &Queue, pipelines: &pipelines::T,
         return Ok(());
     }
     let compiled = pipelines::get(pipelines, kernels::indices())?;
+    gpu(b::set_pipeline(encoder, &compiled.pipeline))?;
+    gpu(b::set_buffer(encoder, 0, buffer))?;
+    let mut word = [0u8; 12];
+    pack_uint32(&mut word, 0, count as f64)?;
+    pack_uint32(&mut word, 4, if value.is_none() { 0.0 } else { 1.0 })?;
+    pack_uint32(&mut word, 8, value.unwrap_or(0) as f64)?;
+    gpu(b::set_bytes(encoder, 1, &word))?;
+    gpu(b::dispatch_threads(encoder, (count, 1, 1), (256, 1, 1)))
+}
+
+/// `encode_fill` in a command buffer of its own, waited for: no size-dependent CPU staging.
+pub fn fill_indices(value: Option<i64>, queue: &Queue, pipelines: &pipelines::T, buffer: &Buffer, count: i64) -> Result<(), Diagnostic> {
+    if count < 0 || count > b::buffer_size(buffer) / 4 {
+        return Err(e_gpu("Integer fill count exceeds its buffer capacity."));
+    }
+    if count == 0 {
+        return Ok(());
+    }
     one_pass(queue, &|commands| {
         let encoder = gpu(b::compute_encoder(commands))?;
-        let r = (|| -> Result<(), Diagnostic> {
-            gpu(b::set_pipeline(&encoder, &compiled.pipeline))?;
-            gpu(b::set_buffer(&encoder, 0, buffer))?;
-            let mut word = [0u8; 12];
-            pack_uint32(&mut word, 0, count as f64)?;
-            pack_uint32(&mut word, 4, if value.is_none() { 0.0 } else { 1.0 })?;
-            pack_uint32(&mut word, 8, value.unwrap_or(0) as f64)?;
-            gpu(b::set_bytes(&encoder, 1, &word))?;
-            gpu(b::dispatch_threads(&encoder, (count, 1, 1), (256, 1, 1)))
-        })();
+        let r = encode_fill(&encoder, pipelines, value, buffer, count);
         let _ = b::end_compute(&encoder);
         r
     })
@@ -2589,5 +2605,21 @@ pub fn clear_thread_state() {
     };
     for request in mine {
         answer(&request, Err("Run.materialise: a device output was read after its owner closed".to_owned()));
+    }
+}
+
+#[cfg(test)]
+mod size_class_tests {
+    #[test]
+    fn classes_waste_at_most_an_eighth() {
+        use super::size_class;
+        assert_eq!(size_class(10), 256);
+        assert_eq!(size_class(1 << 20), 1 << 20);
+        assert_eq!(size_class(1 << 26), 1 << 26);
+        assert_eq!(size_class((1 << 26) + 1), (1 << 26) + (1 << 23));
+        for bytes in [(1 << 20) + 1, 3_000_000, 68_985_984, 134_217_729] {
+            let c = size_class(bytes);
+            assert!(c >= bytes && c - bytes <= bytes / 8, "{bytes} -> {c}");
+        }
     }
 }

@@ -5,6 +5,12 @@ toolchain 1.99.1, std + `cc` only). Plan and rules: `port/artifact-src/index.htm
 microapps artifact `15ksz3bazstq`). This is a live completion ledger; checked items require executable
 evidence. The current completion pass is recorded below; untouched historical measurements are not fresh verification. This is a work-in-progress checkpoint, not a green shipping release.
 
+**Policy change (2026-11-06): OCaml byte parity is no longer a goal.** Speed and memory come first, in
+release *and* debug builds; the Rust build must beat native OCaml on both. Goldens, shaders and pixels may
+diverge from OCaml when a faster or leaner path needs it: refresh the Rust goldens in the same change and
+say what moved. Correctness still holds (Lisp semantics, determinism, one-domain vs multi-domain
+equality); bit-identity with the OCaml oracle does not. `port/post_parity_backlog.md` is unblocked.
+
 ## Where it stands
 
 Wrap-up: implementation changes through `9109258c` are committed and pushed on
@@ -15,7 +21,7 @@ cleanup was inspected but not started. The overall port remains unfinished.
 | Area | State |
 |---|---|
 | Code ported | every OCaml library has its crate, plus the `rays` binary (check, fmt, mem, web, editor); one large missing feature found by audit (eval guards) is now ported |
-| Byte parity with OCaml | sketch goldens, shaders (renderer/ogpu_metal/flow_gpu), web export and qualified PXUI pixels match; result-view invalidation fixed and verified on Metal; broader native editor qualification remains open |
+| Byte parity with OCaml (no longer required, see policy above) | sketch goldens, shaders (renderer/ogpu_metal/flow_gpu), web export and qualified PXUI pixels match; result-view invalidation fixed and verified on Metal; broader native editor qualification remains open |
 | GPU backends | `rays` selects ogpu_vulkan on Windows, ogpu_metal on macOS; release build runs window-free on the Mac mini (basic, sop_gallery, ws_tree, ws_morph, gpu_sea exit 0) |
 | Native sketches | all formerly failing sketches (deadlock, recursion, morph, memory aborts) run to the end window-free; gpu_sea root cause fixed at 8b9dd63c (re-measure) |
 | Crash containment | node cook panic -> `uncaught_node_exception`; static kernel panic -> `E_PACKED_EXECUTION` refusal |
