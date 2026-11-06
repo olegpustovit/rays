@@ -209,6 +209,8 @@ val copy :
 (** A resident [array/concat]'s part: [words] raw words of [src] from word [from] into [dst] from
     word [into], encoded on [encoder] (queue order makes it see what was encoded before it). *)
 
+val topology_status_bytes : int
+
 val validate_topology :
   ?on_read:(int -> unit) ->
   Ogpu.Backend.queue ->
@@ -220,8 +222,9 @@ val validate_topology :
   point_count:int ->
   max_polygon_size:int ->
   (unit, Diagnostic.t) result
-(** One workgroup checks exact uint32 topology, reading only a 36-byte status record. Counts are
-    actual element counts within buffer capacity; status needs 36 bytes. No input ownership
+(** Groups of 256 across the grid check exact uint32 topology, reading back one 36-byte status
+    record a group (one group per 65,536 rows, at most 64). Counts are actual element counts within
+    buffer capacity; status needs 36 bytes a group, {!topology_status_bytes} at most. No input ownership
     transfers. Polygon sizes above [max_polygon_size] refuse. [on_read] records successful status
     bytes even when validation rejects the mesh. *)
 

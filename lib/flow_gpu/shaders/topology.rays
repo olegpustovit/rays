@@ -1,5 +1,6 @@
-; One workgroup validates exact uint32 topology. Each lane visits disjoint rows;
-; nine collective sums produce a fixed 36-byte status, independent of mesh size.
+; Groups across the grid validate exact uint32 topology. Each lane visits disjoint rows, the grid's
+; width (bound[5]) apart, in an iterate (a range fold stops at 4,096 rows a lane); each group's nine
+; collective sums make a 36-byte record at group x 9, and the host ORs the records.
 (defmacro check-bit [flags bit]
   `(gpu/group-scan (if (int/eq (int/and ~flags ~bit) 0) 0 1)))
 (defn topology-check :context value
@@ -11,9 +12,10 @@
          nk (array/nth bound 3)
          limit (array/nth bound 4)
          n (if (int/gt nv no) (if (int/gt nv nk) nv nk) (if (int/gt no nk) no nk))
-         chunks (int/div (int/add n (int/sub size 1)) size)
-         flags (fold [flags 0] [chunk (range chunks)]
-           (let* [i (int/add id (int/mul chunk size))
+         lanes (array/nth bound 5)
+         chunks (int/div (int/add n (int/sub lanes 1)) lanes)
+         walk (iterate chunks {:i id :flags 0} (fn [w]
+           (let* [i w.i
                   vertex (if (int/lt i nv) (if (int/ge (array/nth vertices i) points) 16 0) 0)
                   kind (if (int/lt i nk) (if (int/gt (array/nth kinds i) 2) 64 0) 0)
                   primitive (if (int/lt (int/add i 1) no)
@@ -27,20 +29,21 @@
                             (int/or (if (int/lt count minimum) 128 0)
                                     (if (if (int/eq k 0) (int/gt count limit) false) 256 0)))
                           0))) 0)]
-             (int/or flags (int/or vertex (int/or kind primitive)))))
-         checked (int/or flags
+             {:i (int/add i lanes) :flags (int/or w.flags (int/or vertex (int/or kind primitive)))})))
+         checked (int/or walk.flags
            (if (int/eq id 0)
              (int/or (if (int/eq no 0) 1 (if (int/eq (array/nth offsets 0) 0) 0 2))
                (int/or (if (int/eq no 0) 0 (if (int/eq (array/nth offsets (int/sub no 1)) nv) 0 4))
                        (if (int/eq no (int/add nk 1)) 0 8))) 0))
          a (check-bit checked 1) b (check-bit checked 2) c (check-bit checked 4)
          d (check-bit checked 8) e (check-bit checked 16) f (check-bit checked 32)
-         g (check-bit checked 64) h (check-bit checked 128) j (check-bit checked 256)]
-    (if (int/eq id 0)
+         g (check-bit checked 64) h (check-bit checked 128) j (check-bit checked 256)
+         at (int/mul (int/div id size) 9)]
+    (if (int/eq (int/mod id size) 0)
       (int/add
-        (int/add (int/add (gpu/store-int out 0 a.total) (gpu/store-int out 1 b.total))
-                 (int/add (gpu/store-int out 2 c.total) (gpu/store-int out 3 d.total)))
-        (int/add (int/add (gpu/store-int out 4 e.total) (gpu/store-int out 5 f.total))
-                 (int/add (gpu/store-int out 6 g.total)
-                          (int/add (gpu/store-int out 7 h.total) (gpu/store-int out 8 j.total)))))
+        (int/add (int/add (gpu/store-int out at a.total) (gpu/store-int out (int/add at 1) b.total))
+                 (int/add (gpu/store-int out (int/add at 2) c.total) (gpu/store-int out (int/add at 3) d.total)))
+        (int/add (int/add (gpu/store-int out (int/add at 4) e.total) (gpu/store-int out (int/add at 5) f.total))
+                 (int/add (gpu/store-int out (int/add at 6) g.total)
+                          (int/add (gpu/store-int out (int/add at 7) h.total) (gpu/store-int out (int/add at 8) j.total)))))
       0)))

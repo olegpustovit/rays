@@ -1739,7 +1739,7 @@ let validation_status t =
           buffer)
         (Result.map_error Run.Private.diagnostic
            (Ogpu.Backend.create_buffer (Renderer.gpu_device t.gpu)
-              { label = Some "Flow topology validation"; size = 36L;
+              { label = Some "Flow topology validation"; size = Int64.of_int Run.topology_status_bytes;
                 usage = [ Storage; Copy_src ] }))
 
 let validate_topology t ~vertices ~offsets ~kinds ~point_count ~max_polygon_size =

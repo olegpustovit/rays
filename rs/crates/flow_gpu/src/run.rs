@@ -1418,9 +1418,13 @@ fn materialise(kept: &Kept) -> Arc<Vec<Vec<f64>>> {
     materialise_owned(&kept.fate, &d.pool.0.shared, kept.id).unwrap_or_else(|message| panic!("{message}"))
 }
 
-/// A settled, unread vec3 output's bounds, reduced where it is (shaders/bounds.rays): one group of
-/// 1,024 lanes, each lane's min and max (of every 1,024th element) read back (24 KB at most) and
-/// finished here. On the creating thread; `None` elsewhere, once read or on any device failure.
+// ponytail: fixed lane count (groups of 1,024 to fill an 8-core M1); tune per device if one underfills.
+const BOUNDS_LANES: i64 = 16 * 1024;
+
+/// A settled, unread vec3 output's bounds, reduced where it is (shaders/bounds.rays): up to
+/// `BOUNDS_LANES` lanes across the grid, each lane's min and max (of every lanes-th element) read
+/// back (24 bytes a lane) and finished here. On the creating thread; `None` elsewhere, once read or
+/// on any device failure.
 fn bounds_of(kept: &Kept) -> Option<Vec<f64>> {
     let t = &kept.owner;
     let d = &*t.0;
@@ -1431,7 +1435,8 @@ fn bounds_of(kept: &Kept) -> Option<Vec<f64>> {
         return box_;
     }
     let n = kept.count;
-    let lanes = n.min(1024);
+    let grid = ((n + 1023) / 1024 * 1024).min(BOUNDS_LANES);
+    let lanes = n.min(grid);
     let compute = || -> Result<Option<Vec<f64>>, Diagnostic> {
         let compiled = pipelines::get(&d.pipelines, kernels::bounds())?;
         let out = {
@@ -1439,14 +1444,15 @@ fn bounds_of(kept: &Kept) -> Option<Vec<f64>> {
             match &st.bounds_out {
                 Some(out) => out.clone(),
                 None => {
-                    let out = gpu(b::create_buffer(&d.device, BufferDescriptor { label: Some("Flow bounds".to_owned()), size: 1024 * 24, usage: vec![BufferUsage::Storage, BufferUsage::CopySrc] }, None))?;
+                    let out = gpu(b::create_buffer(&d.device, BufferDescriptor { label: Some("Flow bounds".to_owned()), size: BOUNDS_LANES * 24, usage: vec![BufferUsage::Storage, BufferUsage::CopySrc] }, None))?;
                     st.bounds_out = Some(out.clone());
                     out
                 }
             }
         };
-        let mut count = [0u8; 4];
+        let mut count = [0u8; 8];
         put_i32(&mut count, 0, n as i32);
+        put_i32(&mut count, 4, grid as i32);
         let commands = gpu(b::begin_commands(&d.queue))?;
         let receipt = (|| -> Result<b::Receipt, Diagnostic> {
             let encoder = gpu(b::compute_encoder(&commands))?;
@@ -1455,7 +1461,7 @@ fn bounds_of(kept: &Kept) -> Option<Vec<f64>> {
                 gpu(b::set_buffer(&encoder, 0, &kept.buffer))?;
                 gpu(b::set_buffer(&encoder, 1, &out))?;
                 gpu(b::set_bytes(&encoder, 2, &count))?;
-                gpu(b::dispatch_threads(&encoder, (1024, 1, 1), (1024, 1, 1)))
+                gpu(b::dispatch_threads(&encoder, (grid, 1, 1), (1024, 1, 1)))
             })();
             let _ = b::end_compute(&encoder);
             r?;
@@ -2080,10 +2086,19 @@ pub fn compact_blocks(count: i64) -> i64 {
     8 * 1.max((count + 1023) / 1024)
 }
 
-/// One workgroup checks exact uint32 topology, reading only a 36-byte status record. Counts are
-/// actual element counts within buffer capacity; status needs 36 bytes. No input ownership
-/// transfers. Polygon sizes above `max_polygon_size` refuse. `on_read` records successful status
-/// bytes even when validation rejects the mesh.
+// ponytail: at most 64 groups (fills an 8-core M1); raise it for a wider device.
+pub const TOPOLOGY_STATUS_BYTES: i64 = 64 * 36;
+
+/// One group per 65,536 rows (a small mesh reads back one record), at most 64.
+fn topology_groups(n: i64) -> i64 {
+    ((n + 65535) / 65536).clamp(1, TOPOLOGY_STATUS_BYTES / 36)
+}
+
+/// Groups of 256 across the grid check exact uint32 topology, reading back one 36-byte status record
+/// a group (`topology_groups`: one up to 65,536 rows). Counts are actual element counts within
+/// buffer capacity; status needs 36 bytes a group, `TOPOLOGY_STATUS_BYTES` at most. No input
+/// ownership transfers. Polygon sizes above `max_polygon_size` refuse. `on_read` records successful
+/// status bytes even when validation rejects the mesh.
 pub fn validate_topology(
     on_read: &dyn Fn(i64),
     queue: &Queue,
@@ -2095,13 +2110,14 @@ pub fn validate_topology(
     point_count: i64,
     max_polygon_size: i64,
 ) -> Result<(), Diagnostic> {
-    for (buffer, count) in [vertices, offsets, kinds, (status, 9)] {
+    let groups = topology_groups(vertices.1.max(offsets.1).max(kinds.1));
+    for (buffer, count) in [vertices, offsets, kinds, (status, 9 * groups)] {
         if count < 0 || count > b::buffer_size(buffer) / 4 {
             return Err(value::fail("E_TOPOLOGY", "Topology: array count exceeds buffer capacity"));
         }
     }
-    let mut bound = [0u8; 20];
-    for (i, n) in [point_count, vertices.1, offsets.1, kinds.1, max_polygon_size].iter().enumerate() {
+    let mut bound = [0u8; 24];
+    for (i, n) in [point_count, vertices.1, offsets.1, kinds.1, max_polygon_size, groups * 256].iter().enumerate() {
         pack_uint32(&mut bound, i * 4, *n as f64)?;
     }
     let compiled = pipelines::get(pipelines, kernels::topology())?;
@@ -2113,14 +2129,14 @@ pub fn validate_topology(
                 gpu(b::set_buffer(&encoder, index as i64, buffer))?;
             }
             gpu(b::set_bytes(&encoder, 4, &bound))?;
-            gpu(b::dispatch_threads(&encoder, (256, 1, 1), (256, 1, 1)))
+            gpu(b::dispatch_threads(&encoder, (groups * 256, 1, 1), (256, 1, 1)))
         })();
         let _ = b::end_compute(&encoder);
         r
     })?;
-    let bytes = gpu(b::read_buffer(status, 0, 36))?;
-    on_read(36);
-    let failed = |i: usize| get_i32(&bytes, 4 * i) != 0;
+    let bytes = gpu(b::read_buffer(status, 0, groups * 36))?;
+    on_read(groups * 36);
+    let failed = |i: usize| (0..groups as usize).any(|g| get_i32(&bytes, 4 * (g * 9 + i)) != 0);
     let table: [(usize, &str, &str); 9] = [
         (6, "E_TOPOLOGY_KIND", "Primitive kinds are 0 (polygon), 1 (open polyline) or 2 (closed polyline)."),
         (0, "E_TOPOLOGY", "Topology: primitive offsets must contain the initial zero"),

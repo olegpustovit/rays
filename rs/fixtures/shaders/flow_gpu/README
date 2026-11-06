@@ -1,3 +1,5 @@
 Generated from the OCaml working tree (HEAD 8533a749 plus uncommitted lib/flow_shader changes) by lib/flow_shader print_shader flow_gpu
 (dune build lib/flow_gpu/NAME.metal lib/flow_gpu/NAME.comp.spv) from lib/flow_gpu/shaders/*.rays.
-The Rust flow_shader crate reproduces them byte for byte (tests/goldens.rs). Entry/threadgroup sizes are print_shader.ml's `compute` table.
+bounds and topology (grid-wide since perf/wide-mesh-kernels) are printed by the Rust printer: `print_shader flow_gpu`
+(rs/crates/flow_shader) run from a directory whose `shaders/` is lib/flow_gpu/shaders.
+The Rust flow_shader crate reproduces them byte for byte (tests/goldens.rs). Entry/threadgroup sizes are print.rs's `compute_table`.

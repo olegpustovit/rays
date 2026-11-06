@@ -1221,10 +1221,13 @@ let materialise t kept =
       Option.get (Atomic.get kept.fate.planes)
       end
 
-(* A settled, unread vec3 output's bounds, reduced where it is (shaders/bounds.rays): one group of
-   1,024 lanes, each lane's min and max (of every 1,024th element) read back (24 KB at most) and finished here. On the
+(* A settled, unread vec3 output's bounds, reduced where it is (shaders/bounds.rays): up to
+   [bounds_lanes] lanes across the grid, each lane's min and max (of every lanes-th element) read back
+   (24 bytes a lane) and finished here. On the
    owner's domain; [None] elsewhere, once read (its planes are then the host's to scan) or on any
    device failure. Reduced once per output, into one buffer the runner keeps. *)
+let bounds_lanes = 16 * 1024
+
 let bounds_of t kept =
   if
     kept.kept_width <> 3 || kept.kept_count = 0 || t.closed
@@ -1238,7 +1241,8 @@ let bounds_of t kept =
     | Some box -> box
     | None ->
         let n = kept.kept_count in
-        let lanes = min n 1024 in
+        let grid = min bounds_lanes ((n + 1023) / 1024 * 1024) in
+        let lanes = min n grid in
         let box =
           try
             let compiled =
@@ -1255,15 +1259,16 @@ let bounds_of t kept =
                       (B.create_buffer t.device
                          {
                            label = Some "Flow bounds";
-                           size = Int64.of_int (1024 * 24);
+                           size = Int64.of_int (bounds_lanes * 24);
                            usage = [ Storage; Copy_src ];
                          })
                   in
                   t.bounds_out <- Some out;
                   out
             in
-            let count = Bytes.create 4 in
+            let count = Bytes.create 8 in
             Bytes.set_int32_le count 0 (Int32.of_int n);
+            Bytes.set_int32_le count 4 (Int32.of_int grid);
             let commands = get (B.begin_commands t.queue) in
             let committed = ref false in
             let receipt =
@@ -1279,7 +1284,7 @@ let bounds_of t kept =
                       get (B.set_buffer encoder ~index:1 out);
                       get (B.set_bytes encoder ~index:2 count);
                       get
-                        (B.dispatch_threads encoder ~threads:(1024, 1, 1) ~threadgroup:(1024, 1, 1)));
+                        (B.dispatch_threads encoder ~threads:(grid, 1, 1) ~threadgroup:(1024, 1, 1)));
                   let receipt = get (B.commit commands) in
                   committed := true;
                   receipt)
@@ -1669,18 +1674,23 @@ let fill_indices ?value queue pipelines buffer ~count =
 
 let compact_blocks count = 8 * max 1 ((count + 1023) / 1024)
 
+let topology_status_bytes = 64 * 36
+
+let topology_groups n = max 1 (min (topology_status_bytes / 36) ((n + 65535) / 65536))
+
 let validate_topology ?(on_read = fun _ -> ()) queue pipelines ~vertices:(vertices, nv) ~offsets:(offsets, no)
     ~kinds:(kinds, nk) ~status ~point_count ~max_polygon_size =
+  let groups = topology_groups (max nv (max no nk)) in
   try
     List.iter
       (fun (buffer, count) ->
         if count < 0 || Int64.of_int count > Int64.div (B.buffer_size buffer) 4L then
           raise (Diagnostic.Error
                    (Diagnostic.error ~code:"E_TOPOLOGY" "Topology: array count exceeds buffer capacity")))
-      [ (vertices, nv); (offsets, no); (kinds, nk); (status, 9) ];
-    let bound = Bytes.create 20 in
+      [ (vertices, nv); (offsets, no); (kinds, nk); (status, 9 * groups) ];
+    let bound = Bytes.create 24 in
     List.iteri (fun i n -> pack_uint32 bound (i * 4) (float n))
-      [ point_count; nv; no; nk; max_polygon_size ];
+      [ point_count; nv; no; nk; max_polygon_size; groups * 256 ];
     let compiled =
       match Pipelines.get pipelines Kernels.topology with
       | Ok p -> p
@@ -1696,13 +1706,16 @@ let validate_topology ?(on_read = fun _ -> ()) queue pipelines ~vertices:(vertic
             List.iteri (fun index buffer -> get (B.set_buffer encoder ~index buffer))
               [ vertices; offsets; kinds; status ];
             get (B.set_bytes encoder ~index:4 bound);
-            get (B.dispatch_threads encoder ~threads:(256, 1, 1) ~threadgroup:(256, 1, 1)));
+            get (B.dispatch_threads encoder ~threads:(groups * 256, 1, 1) ~threadgroup:(256, 1, 1)));
         let receipt = get (B.commit commands) in
         committed := true;
         get (B.complete_through queue receipt.epoch));
-    let bytes = get (B.read_buffer status ~offset:0L ~length:36) in
-    on_read 36;
-    let failed i = Bytes.get_int32_le bytes (4 * i) <> 0l in
+    let bytes = get (B.read_buffer status ~offset:0L ~length:(groups * 36)) in
+    on_read (groups * 36);
+    let failed i =
+      let rec any g = g < groups && (Bytes.get_int32_le bytes (4 * ((g * 9) + i)) <> 0l || any (g + 1)) in
+      any 0
+    in
     let failure =
       List.find_opt (fun (bit, _, _) -> failed bit)
         [ (6, "E_TOPOLOGY_KIND", "Primitive kinds are 0 (polygon), 1 (open polyline) or 2 (closed polyline).");

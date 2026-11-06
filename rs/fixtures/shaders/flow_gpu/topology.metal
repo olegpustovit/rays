@@ -6,18 +6,18 @@ kernel void topology_check(
     device const uint* buffer2 [[buffer(2)]],
     device uint* buffer3 [[buffer(3)]],
     device const uint* buffer4 [[buffer(4)]],
+    uint gid [[thread_position_in_grid]],
     uint lid [[thread_position_in_threadgroup]]) {
   uint sb=0u;
   uint r6=256u,r7=0u,r9=1u,r11=2u,r15=4u;
-  long r19=0,r21=0;
-  uint r23=255u;
-  int r26=0;
-  uint r27=0,r85=0u;
-  float r86=0.0f;
-  uint r87=0u,r91=0u,r92=1u,r94=1u,r99=0u,r103=8u,r106=0u,scan111_before=0u,scan111_total=0u,scan116_before=0u,scan116_total=0u,scan121_before=0u;
-  uint scan121_total=0u,r124=8u,scan127_before=0u,scan127_total=0u,r130=16u,scan133_before=0u,scan133_total=0u,r136=32u,scan139_before=0u,scan139_total=0u,r142=64u,scan145_before=0u;
-  uint scan145_total=0u,r148=128u,scan151_before=0u,scan151_total=0u,scan156_before=0u,scan156_total=0u,r181=0u;
-  long r0=long(lid);
+  long r19=0,r21=0,r28=0,r29=0;
+  uint r30=0,r87=0u;
+  float r88=0.0f;
+  uint r89=0u,r93=0u,r94=1u,r96=1u,r101=0u,r108=0u,scan113_before=0u,scan113_total=0u,scan118_before=0u,scan118_total=0u,scan123_before=0u,scan123_total=0u;
+  uint r126=8u,scan129_before=0u,scan129_total=0u,r132=16u,scan135_before=0u,scan135_total=0u,r138=32u,scan141_before=0u,scan141_total=0u,r144=64u,scan147_before=0u,scan147_total=0u;
+  uint r150=128u,scan153_before=0u,scan153_total=0u,scan158_before=0u,scan158_total=0u,r162=9u,r167=1u,r171=2u,r174=3u,r179=4u,r182=5u,r186=6u;
+  uint r189=7u,r192=8u,r198=0u;
+  long r0=long(gid);
   long r8=long(buffer4[r7*1+0]);
   long r10=long(buffer4[r9*1+0]);
   long r12=long(buffer4[r11*1+0]);
@@ -30,36 +30,35 @@ kernel void topology_check(
   if(r17==0.0f) {
     r21=(((r12>r14?1.0f:0.0f))!=0.0f?r12:r14);
   }
-  long r25=(as_type<long>(ulong((long(r6)==0?0:((as_type<long>(ulong((ulong(((r17!=0.0f?r19:r21)))+ulong(long(r23))))<<1)>>1))/long(r6)))<<1)>>1);
-  sb|=(r6==0)?2u:0u;
-  bool over26=r25>long(r7) && ulong(r25-long(r7))>4096uL;
-  sb|=over26?1u:0u;
-  r27=r7;
-  for(r26=long(r7);r26<(over26?long(r7):r25);r26++){
-  uint r28=256u,r36=0u,r37=0u,r45=0u,r47=1u,r51=1u;
+  long r24=long(buffer4[(5u)*1+0]);
+  long r25=(as_type<long>(ulong((ulong(r24)-ulong(long(r9))))<<1)>>1);
+  long r27=(as_type<long>(ulong((r24==0?0:((as_type<long>(ulong((ulong(((r17!=0.0f?r19:r21)))+ulong(r25)))<<1)>>1))/r24))<<1)>>1);
+  sb|=(r24==0)?2u:0u;
+  r29=r0;
+  r30=r7;
+  for(r28=long(r7);r28<r27;r28++){
+  uint r36=0u,r37=0u,r45=0u,r47=1u,r51=1u;
   float r54=0.0f,r55=0.0f;
   uint r64=0u;
   float r67=0.0f,r68=0.0f;
   uint r73=0u,r75=0u,r77=0u;
-  long r29=(as_type<long>(ulong((ulong(r26)*ulong(long(r28))))<<1)>>1);
-  long r30=(as_type<long>(ulong((ulong(r0)+ulong(r29)))<<1)>>1);
-  float r31=(r30<r10?1.0f:0.0f);
+  float r31=(r29<r10?1.0f:0.0f);
   if(r31!=0.0f) {
-    r36=((((long(buffer0[r30*1+0]))>=r8?1.0f:0.0f))!=0.0f?(16u):(0u));
+    r36=((((long(buffer0[r29*1+0]))>=r8?1.0f:0.0f))!=0.0f?(16u):(0u));
   }
-  float r39=(r30<r14?1.0f:0.0f);
+  float r39=(r29<r14?1.0f:0.0f);
   if(r39!=0.0f) {
-    r45=((((long(buffer2[r30*1+0]))>long((2u))?1.0f:0.0f))!=0.0f?(64u):(0u));
+    r45=((((long(buffer2[r29*1+0]))>long((2u))?1.0f:0.0f))!=0.0f?(64u):(0u));
   }
-  float r49=(((as_type<long>(ulong((ulong(r30)+ulong(long(r47))))<<1)>>1))<r12?1.0f:0.0f);
+  float r49=(((as_type<long>(ulong((ulong(r29)+ulong(long(r47))))<<1)>>1))<r12?1.0f:0.0f);
   if(r49!=0.0f) {
-    long r50=long(buffer1[r30*1+0]);
-    long r53=long(buffer1[((uint(r30)+r51))*1+0]);
+    long r50=long(buffer1[r29*1+0]);
+    long r53=long(buffer1[((uint(r29)+r51))*1+0]);
     r54=(r50>r53?1.0f:0.0f);
     if(r54==0.0f) {
-      r55=(r30<r14?1.0f:0.0f);
+      r55=(r29<r14?1.0f:0.0f);
       if(r55!=0.0f) {
-        long r56=long(buffer2[r30*1+0]);
+        long r56=long(buffer2[r29*1+0]);
         long r57=(as_type<long>(ulong((ulong(r53)-ulong(r50)))<<1)>>1);
         r67=(r56==long(r64)?1.0f:0.0f);
         if(r67!=0.0f) {
@@ -73,67 +72,75 @@ kernel void topology_check(
     r77=(r54!=0.0f?(32u):r75);
   }
   uint r78=(r49!=0.0f?r77:r37);
-  uint r79=(((r39!=0.0f?r45:r37))|r78);
-  uint r80=(((r31!=0.0f?r36:r37))|r79);
-  uint next26_0=((r27|r80));
-  r27=next26_0;
+  uint r80=(((r39!=0.0f?r45:r37))|r78);
+  uint r81=(((r31!=0.0f?r36:r37))|r80);
+  long next28_0=((as_type<long>(ulong((ulong(r29)+ulong(r24)))<<1)>>1));
+  uint next28_1=((r30|r81));
+  r29=next28_0;
+  r30=next28_1;
   }
-  float r84=(r0==long(r7)?1.0f:0.0f);
-  if(r84!=0.0f) {
-    r86=(r12==long(r85)?1.0f:0.0f);
-    if(r86==0.0f) {
-      r91=((((long(buffer1[r87*1+0]))==long(r87)?1.0f:0.0f))!=0.0f?r87:(2u));
-      r99=((((long(buffer1[((uint(r12)-r94))*1+0]))==r10?1.0f:0.0f))!=0.0f?r87:(4u));
+  float r86=(r0==long(r7)?1.0f:0.0f);
+  if(r86!=0.0f) {
+    r88=(r12==long(r87)?1.0f:0.0f);
+    if(r88==0.0f) {
+      r93=((((long(buffer1[r89*1+0]))==long(r89)?1.0f:0.0f))!=0.0f?r89:(2u));
+      r101=((((long(buffer1[((uint(r12)-r96))*1+0]))==r10?1.0f:0.0f))!=0.0f?r89:(4u));
     }
-    uint r104=(((r12==((as_type<long>(ulong((ulong(r14)+ulong(long(r92))))<<1)>>1))?1.0f:0.0f))!=0.0f?r85:r103);
-    uint r105=(((r86!=0.0f?r85:r99))|r104);
-    r106=(((r86!=0.0f?r92:r91))|r105);
+    uint r106=(((r12==((as_type<long>(ulong((ulong(r14)+ulong(long(r94))))<<1)>>1))?1.0f:0.0f))!=0.0f?r87:(8u));
+    uint r107=(((r88!=0.0f?r87:r101))|r106);
+    r108=(((r88!=0.0f?r94:r93))|r107);
   }
-  uint r107=(r84!=0.0f?r106:r7);
-  uint r108=((r27)|r107);
-  threadgroup uint scan111[256];
-  {uint v=((((long(((r108&r9)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan111[lid]=v;for(uint d=1u;d<256u;d<<=1u){threadgroup_barrier(mem_flags::mem_threadgroup);uint w=lid>=d?scan111[lid-d]:0u;threadgroup_barrier(mem_flags::mem_threadgroup);v+=w;scan111[lid]=v;}threadgroup_barrier(mem_flags::mem_threadgroup);scan111_before=v-((((long(((r108&r9)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan111_total=scan111[256-1];}
-  uint r112=scan111_total;
-  threadgroup uint scan116[256];
-  {uint v=((((long(((r108&r11)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan116[lid]=v;for(uint d=1u;d<256u;d<<=1u){threadgroup_barrier(mem_flags::mem_threadgroup);uint w=lid>=d?scan116[lid-d]:0u;threadgroup_barrier(mem_flags::mem_threadgroup);v+=w;scan116[lid]=v;}threadgroup_barrier(mem_flags::mem_threadgroup);scan116_before=v-((((long(((r108&r11)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan116_total=scan116[256-1];}
-  uint r117=scan116_total;
-  threadgroup uint scan121[256];
-  {uint v=((((long(((r108&r15)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan121[lid]=v;for(uint d=1u;d<256u;d<<=1u){threadgroup_barrier(mem_flags::mem_threadgroup);uint w=lid>=d?scan121[lid-d]:0u;threadgroup_barrier(mem_flags::mem_threadgroup);v+=w;scan121[lid]=v;}threadgroup_barrier(mem_flags::mem_threadgroup);scan121_before=v-((((long(((r108&r15)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan121_total=scan121[256-1];}
-  uint r122=scan121_total;
-  threadgroup uint scan127[256];
-  {uint v=((((long(((r108&r124)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan127[lid]=v;for(uint d=1u;d<256u;d<<=1u){threadgroup_barrier(mem_flags::mem_threadgroup);uint w=lid>=d?scan127[lid-d]:0u;threadgroup_barrier(mem_flags::mem_threadgroup);v+=w;scan127[lid]=v;}threadgroup_barrier(mem_flags::mem_threadgroup);scan127_before=v-((((long(((r108&r124)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan127_total=scan127[256-1];}
-  uint r128=scan127_total;
-  threadgroup uint scan133[256];
-  {uint v=((((long(((r108&r130)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan133[lid]=v;for(uint d=1u;d<256u;d<<=1u){threadgroup_barrier(mem_flags::mem_threadgroup);uint w=lid>=d?scan133[lid-d]:0u;threadgroup_barrier(mem_flags::mem_threadgroup);v+=w;scan133[lid]=v;}threadgroup_barrier(mem_flags::mem_threadgroup);scan133_before=v-((((long(((r108&r130)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan133_total=scan133[256-1];}
-  uint r134=scan133_total;
-  threadgroup uint scan139[256];
-  {uint v=((((long(((r108&r136)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan139[lid]=v;for(uint d=1u;d<256u;d<<=1u){threadgroup_barrier(mem_flags::mem_threadgroup);uint w=lid>=d?scan139[lid-d]:0u;threadgroup_barrier(mem_flags::mem_threadgroup);v+=w;scan139[lid]=v;}threadgroup_barrier(mem_flags::mem_threadgroup);scan139_before=v-((((long(((r108&r136)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan139_total=scan139[256-1];}
-  uint r140=scan139_total;
-  threadgroup uint scan145[256];
-  {uint v=((((long(((r108&r142)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan145[lid]=v;for(uint d=1u;d<256u;d<<=1u){threadgroup_barrier(mem_flags::mem_threadgroup);uint w=lid>=d?scan145[lid-d]:0u;threadgroup_barrier(mem_flags::mem_threadgroup);v+=w;scan145[lid]=v;}threadgroup_barrier(mem_flags::mem_threadgroup);scan145_before=v-((((long(((r108&r142)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan145_total=scan145[256-1];}
-  uint r146=scan145_total;
-  threadgroup uint scan151[256];
-  {uint v=((((long(((r108&r148)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan151[lid]=v;for(uint d=1u;d<256u;d<<=1u){threadgroup_barrier(mem_flags::mem_threadgroup);uint w=lid>=d?scan151[lid-d]:0u;threadgroup_barrier(mem_flags::mem_threadgroup);v+=w;scan151[lid]=v;}threadgroup_barrier(mem_flags::mem_threadgroup);scan151_before=v-((((long(((r108&r148)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan151_total=scan151[256-1];}
-  uint r152=scan151_total;
-  threadgroup uint scan156[256];
-  {uint v=((((long(((r108&r6)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan156[lid]=v;for(uint d=1u;d<256u;d<<=1u){threadgroup_barrier(mem_flags::mem_threadgroup);uint w=lid>=d?scan156[lid-d]:0u;threadgroup_barrier(mem_flags::mem_threadgroup);v+=w;scan156[lid]=v;}threadgroup_barrier(mem_flags::mem_threadgroup);scan156_before=v-((((long(((r108&r6)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan156_total=scan156[256-1];}
-  uint r157=scan156_total;
-  if(r84!=0.0f) {
-    uint r159=(buffer3[r85]=r112,1u);
-    uint r160=(buffer3[r92]=r117,1u);
-    uint r163=(buffer3[(2u)]=r122,1u);
-    uint r165=(buffer3[(3u)]=r128,1u);
-    uint r166=(r163+r165);
-    uint r169=(buffer3[(4u)]=r134,1u);
-    uint r171=(buffer3[(5u)]=r140,1u);
-    uint r174=(buffer3[(6u)]=r146,1u);
-    uint r176=(buffer3[(7u)]=r152,1u);
-    uint r177=(buffer3[r103]=r157,1u);
-    uint r178=(r176+r177);
-    uint r179=(r174+r178);
-    uint r180=(((r169+r171))+r179);
-    r181=(((((r159+r160))+r166))+r180);
+  uint r109=(r86!=0.0f?r108:r7);
+  uint r110=((r30)|r109);
+  threadgroup uint scan113[256];
+  {uint v=((((long(((r110&r9)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan113[lid]=v;for(uint d=1u;d<256u;d<<=1u){threadgroup_barrier(mem_flags::mem_threadgroup);uint w=lid>=d?scan113[lid-d]:0u;threadgroup_barrier(mem_flags::mem_threadgroup);v+=w;scan113[lid]=v;}threadgroup_barrier(mem_flags::mem_threadgroup);scan113_before=v-((((long(((r110&r9)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan113_total=scan113[256-1];}
+  uint r114=scan113_total;
+  threadgroup uint scan118[256];
+  {uint v=((((long(((r110&r11)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan118[lid]=v;for(uint d=1u;d<256u;d<<=1u){threadgroup_barrier(mem_flags::mem_threadgroup);uint w=lid>=d?scan118[lid-d]:0u;threadgroup_barrier(mem_flags::mem_threadgroup);v+=w;scan118[lid]=v;}threadgroup_barrier(mem_flags::mem_threadgroup);scan118_before=v-((((long(((r110&r11)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan118_total=scan118[256-1];}
+  uint r119=scan118_total;
+  threadgroup uint scan123[256];
+  {uint v=((((long(((r110&r15)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan123[lid]=v;for(uint d=1u;d<256u;d<<=1u){threadgroup_barrier(mem_flags::mem_threadgroup);uint w=lid>=d?scan123[lid-d]:0u;threadgroup_barrier(mem_flags::mem_threadgroup);v+=w;scan123[lid]=v;}threadgroup_barrier(mem_flags::mem_threadgroup);scan123_before=v-((((long(((r110&r15)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan123_total=scan123[256-1];}
+  uint r124=scan123_total;
+  threadgroup uint scan129[256];
+  {uint v=((((long(((r110&r126)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan129[lid]=v;for(uint d=1u;d<256u;d<<=1u){threadgroup_barrier(mem_flags::mem_threadgroup);uint w=lid>=d?scan129[lid-d]:0u;threadgroup_barrier(mem_flags::mem_threadgroup);v+=w;scan129[lid]=v;}threadgroup_barrier(mem_flags::mem_threadgroup);scan129_before=v-((((long(((r110&r126)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan129_total=scan129[256-1];}
+  uint r130=scan129_total;
+  threadgroup uint scan135[256];
+  {uint v=((((long(((r110&r132)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan135[lid]=v;for(uint d=1u;d<256u;d<<=1u){threadgroup_barrier(mem_flags::mem_threadgroup);uint w=lid>=d?scan135[lid-d]:0u;threadgroup_barrier(mem_flags::mem_threadgroup);v+=w;scan135[lid]=v;}threadgroup_barrier(mem_flags::mem_threadgroup);scan135_before=v-((((long(((r110&r132)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan135_total=scan135[256-1];}
+  uint r136=scan135_total;
+  threadgroup uint scan141[256];
+  {uint v=((((long(((r110&r138)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan141[lid]=v;for(uint d=1u;d<256u;d<<=1u){threadgroup_barrier(mem_flags::mem_threadgroup);uint w=lid>=d?scan141[lid-d]:0u;threadgroup_barrier(mem_flags::mem_threadgroup);v+=w;scan141[lid]=v;}threadgroup_barrier(mem_flags::mem_threadgroup);scan141_before=v-((((long(((r110&r138)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan141_total=scan141[256-1];}
+  uint r142=scan141_total;
+  threadgroup uint scan147[256];
+  {uint v=((((long(((r110&r144)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan147[lid]=v;for(uint d=1u;d<256u;d<<=1u){threadgroup_barrier(mem_flags::mem_threadgroup);uint w=lid>=d?scan147[lid-d]:0u;threadgroup_barrier(mem_flags::mem_threadgroup);v+=w;scan147[lid]=v;}threadgroup_barrier(mem_flags::mem_threadgroup);scan147_before=v-((((long(((r110&r144)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan147_total=scan147[256-1];}
+  uint r148=scan147_total;
+  threadgroup uint scan153[256];
+  {uint v=((((long(((r110&r150)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan153[lid]=v;for(uint d=1u;d<256u;d<<=1u){threadgroup_barrier(mem_flags::mem_threadgroup);uint w=lid>=d?scan153[lid-d]:0u;threadgroup_barrier(mem_flags::mem_threadgroup);v+=w;scan153[lid]=v;}threadgroup_barrier(mem_flags::mem_threadgroup);scan153_before=v-((((long(((r110&r150)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan153_total=scan153[256-1];}
+  uint r154=scan153_total;
+  threadgroup uint scan158[256];
+  {uint v=((((long(((r110&r6)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan158[lid]=v;for(uint d=1u;d<256u;d<<=1u){threadgroup_barrier(mem_flags::mem_threadgroup);uint w=lid>=d?scan158[lid-d]:0u;threadgroup_barrier(mem_flags::mem_threadgroup);v+=w;scan158[lid]=v;}threadgroup_barrier(mem_flags::mem_threadgroup);scan158_before=v-((((long(((r110&r6)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan158_total=scan158[256-1];}
+  uint r159=scan158_total;
+  long r161=(as_type<long>(ulong((long(r6)==0?0:r0/long(r6)))<<1)>>1);
+  sb|=(r6==0)?2u:0u;
+  uint r163=(uint(r161)*r162);
+  long r164=(as_type<long>(ulong((long(r6)==0?0:r0%long(r6)))<<1)>>1);
+  sb|=(r6==0)?2u:0u;
+  float r165=(r164==long(r7)?1.0f:0.0f);
+  if(r165!=0.0f) {
+    uint r166=(buffer3[r163]=r114,1u);
+    uint r169=(buffer3[((r163+r167))]=r119,1u);
+    uint r173=(buffer3[((r163+r171))]=r124,1u);
+    uint r176=(buffer3[((r163+r174))]=r130,1u);
+    uint r177=(r173+r176);
+    uint r181=(buffer3[((r163+r179))]=r136,1u);
+    uint r184=(buffer3[((r163+r182))]=r142,1u);
+    uint r188=(buffer3[((r163+r186))]=r148,1u);
+    uint r191=(buffer3[((r163+r189))]=r154,1u);
+    uint r194=(buffer3[((r163+r192))]=r159,1u);
+    uint r195=(r191+r194);
+    uint r196=(r188+r195);
+    uint r197=(((r181+r184))+r196);
+    r198=(((((r166+r169))+r177))+r197);
   }
-  uint r182=(r84!=0.0f?r181:r7);
-  (void)float(r182);
+  uint r199=(r165!=0.0f?r198:r7);
+  (void)float(r199);
 }

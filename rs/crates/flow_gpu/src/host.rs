@@ -2404,7 +2404,7 @@ fn validation_status(t: &T) -> Result<Buffer, Diagnostic> {
     if let Some(b_) = &*t.0.validation_status.borrow() {
         return Ok(b_.clone());
     }
-    let buffer = gpu_r(b::create_buffer(&device_of(t), BufferDescriptor { label: Some("Flow topology validation".to_owned()), size: 36, usage: vec![BufferUsage::Storage, BufferUsage::CopySrc] }, None))?;
+    let buffer = gpu_r(b::create_buffer(&device_of(t), BufferDescriptor { label: Some("Flow topology validation".to_owned()), size: run::TOPOLOGY_STATUS_BYTES, usage: vec![BufferUsage::Storage, BufferUsage::CopySrc] }, None))?;
     *t.0.validation_status.borrow_mut() = Some(buffer.clone());
     t.0.resident_buffers.set(t.0.resident_buffers.get() + 1);
     Ok(buffer)

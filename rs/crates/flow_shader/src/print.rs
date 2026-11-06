@@ -31,10 +31,10 @@ fn compute_table(owner: &str) -> Vec<(&'static str, &'static str, &'static str, 
             ("compact", "compact", "compact-mask", true, 1024, 1024),
             ("compact_uint32", "compact", "compact-mask-uint32", true, 1024, 1024),
             ("indices", "indices", "write-indices", true, 256, 256),
-            ("topology", "topology", "topology-check", false, 256, 256),
+            ("topology", "topology", "topology-check", true, 256, 256),
             ("triangles", "triangles", "triangle-indices", true, 256, 256),
             // a resident P's bounds
-            ("bounds", "bounds", "chunk-bounds", false, 1024, 1024),
+            ("bounds", "bounds", "chunk-bounds", true, 1024, 1024),
             // a triangle mesh's display normals from its resident P
             ("normals", "normals", "point-normal", true, 256, 256),
             // a resident array/concat's copy

@@ -88,7 +88,7 @@ let topology =
     source = Topology_source.source;
     spirv = spirv Spirv_kernels.topology_comp (List.init 5 Fun.id);
     entry = "topology_check";
-    uniform_bytes = 20;
+    uniform_bytes = 24;
     interface =
       List.init 5 (fun binding ->
           S.{ group = 0; binding;
@@ -127,7 +127,7 @@ let bounds =
     source = Bounds_source.source;
     spirv = spirv Spirv_kernels.bounds_comp (List.init 3 Fun.id);
     entry = "chunk_bounds";
-    uniform_bytes = 4;
+    uniform_bytes = 8;
     output_widths = [| 6 |];
     input_widths = [| 3 |];
     interface =

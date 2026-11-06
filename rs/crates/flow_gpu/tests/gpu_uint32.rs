@@ -330,7 +330,7 @@ fn topology() {
         }
         x
     };
-    let status = buffer(&[-1; 9]);
+    let status = buffer(&vec![-1; (run::TOPOLOGY_STATUS_BYTES / 4) as usize]);
     let check = |points: i64, limit: i64, vertices: &[i64], offsets: &[i64], kinds: &[i64], expected: Option<(&str, String)>| {
         let (vb, ob, kb) = (buffer(vertices), buffer(offsets), buffer(kinds));
         let (v, o, k) = ((&vb, vertices.len() as i64), (&ob, offsets.len() as i64), (&kb, kinds.len() as i64));
@@ -339,7 +339,8 @@ fn topology() {
         let hosted = host::validate_topology(&h, v, o, k, points, limit);
         assert_eq!(hosted.as_ref().map_err(|d| (d.code.clone(), d.message.clone())), result.as_ref().map_err(|d| (d.code.clone(), d.message.clone())));
         let after = host::stats(&h);
-        assert_eq!(after.validation_readback_bytes, before.validation_readback_bytes + 36);
+        let rows = vertices.len().max(offsets.len()).max(kinds.len()) as i64;
+        assert_eq!(after.validation_readback_bytes, before.validation_readback_bytes + 36 * ((rows + 65535) / 65536).clamp(1, 64));
         assert_eq!(after.payload_readback_bytes, 0);
         assert_eq!(after.readback_bytes, 0);
         assert_eq!(after.buffer_creations, 1);
@@ -376,6 +377,13 @@ fn topology() {
     check(4, 3, &quad, &[0, 4], &[0], err("polygon exceeds the supported vertex count"));
     check(16777218, max, &[16777217, 1, 2], &[0, 3], &[0], None);
     check(4294967295, max, &[4294967294, 1, 2], &[0, 3], &[0], None);
+    // past 4,096 rows a lane of one group (the old single-group kernel skipped these): a bad last vertex
+    let m = 300_000;
+    let mut big: Vec<i64> = (0..4 * m).map(|i| i % 4).collect();
+    let (offsets, kinds) = ((0..=m).map(|i| i * 4).collect::<Vec<_>>(), vec![0; m as usize]);
+    check(4, max, &big, &offsets, &kinds, None);
+    *big.last_mut().unwrap() = 4;
+    check(4, max, &big, &offsets, &kinds, err("vertex references an invalid point"));
     let n = 1025;
     check(n, max, &(0..3 * n).map(|i| i % n).collect::<Vec<_>>(), &(0..=n).map(|i| i * 3).collect::<Vec<_>>(), &vec![0; n as usize], None);
     check(4, max, &quad, &[0, 4], &[0], None);

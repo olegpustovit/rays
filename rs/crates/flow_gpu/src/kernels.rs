@@ -118,7 +118,7 @@ pub fn topology() -> &'static Kernel {
             source: source.to_owned(),
             spirv: spirv(bytes, &range(5)),
             entry: "topology_check".to_owned(),
-            uniform_bytes: 20,
+            uniform_bytes: 24,
             interface: interface(5, 4),
             ..compaction_uint32().clone()
         }
@@ -142,9 +142,9 @@ pub fn dispatch_arguments() -> &'static Kernel {
     })
 }
 
-/// A resident packed float3 array's bounds: each lane of one threadgroup of 1,024 the min and max
-/// of every 1,024th element from it, at lane x 6, finished on the host. Buffers: the array, the
-/// lanes' floats, the count.
+/// A resident packed float3 array's bounds: each lane of the grid the min and max of every
+/// lanes-th element from it, at lane x 6, finished on the host. Buffers: the array, the lanes'
+/// floats, {count, lanes}.
 pub fn bounds() -> &'static Kernel {
     static KERNEL: std::sync::OnceLock<Kernel> = std::sync::OnceLock::new();
     KERNEL.get_or_init(|| {
@@ -153,7 +153,7 @@ pub fn bounds() -> &'static Kernel {
             source: source.to_owned(),
             spirv: spirv(bytes, &range(3)),
             entry: "chunk_bounds".to_owned(),
-            uniform_bytes: 4,
+            uniform_bytes: 8,
             output_widths: vec![6],
             input_widths: vec![3],
             interface: interface(3, 2),
