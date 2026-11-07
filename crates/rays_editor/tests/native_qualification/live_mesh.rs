@@ -77,7 +77,26 @@ const TRAIL: &str = r###"(workspace trail
                 :kinds (exact (array/int triangles 0))))))"###;
 
 pub fn cases()->Vec<(&'static str,fn())> {
-    vec![("native_live_mesh",live_mesh),("native_holder_frames",holder_frames),("native_sea_frames",sea_frames),("native_orrery_frames",orrery_frames)]
+    vec![("native_live_mesh",live_mesh),("native_holder_frames",holder_frames),("native_sea_frames",sea_frames),("native_sea_initial_close",sea_initial_close),("native_orrery_frames",orrery_frames)]
+}
+
+fn sea_initial_close() {
+    use rays_editor::{Editor,Workspace};
+    assert!(super::common::gpu(),"native GPU required");
+    let doc=Workspace::load(None,Vec::new(),None,include_str!("../../../../sketches/gpu_sea.rays")).unwrap_or_else(|d|panic!("{d:?}"));
+    let gpu=wg::create(None);
+    let editor=Editor::create(Editor::Create {gpu_owner:Some(gpu.clone()),await_:Some(false),domains:Some(1),..Default::default()},&doc,None,Editor::prepare_fn(),Editor::draw_fn()).unwrap();
+    let frame=rays::frame::t {input:input::Frame {dt:1./60.,frame:1,tick:1,size:(320,240),pointer:(-100.,-100.),..input::at_time(1./60.)},pixel_scale:(1.,1.),fps:60.,mouse_delta:(0.,0.)};
+    let editor=Editor::update(editor,&frame);
+    let started=std::time::Instant::now();
+    while matches!(rays_editor::cook::status(&editor.core.cook),sop::async_cook::Status::Cooking {queued:true,..}) && started.elapsed()<std::time::Duration::from_millis(100) {
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert!(matches!(rays_editor::cook::status(&editor.core.cook),sop::async_cook::Status::Cooking {queued:false,..}),"initial sea cook did not start");
+    let started=std::time::Instant::now();
+    Editor::close(&editor); wg::close(&gpu);
+    println!("sea initial close {:?}",started.elapsed());
+    assert!(started.elapsed()<std::time::Duration::from_millis(250),"closing waited for the initial sea cook");
 }
 
 fn sea_frames() {

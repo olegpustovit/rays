@@ -1152,11 +1152,12 @@ fn mesh_cook(
                     ak::resolve(Some(&context), &lookup(geoms.clone(), sources.clone()), v)
                 })
             };
-            Executor::force(
-                &program,
-                &Executor::ForceOptions { resident, state: opts.state.clone(), elems: opts.elems.clone(), resolve: Some(resolve), reference: env.reference, strict: env.strict_body },
-                sctx::input(context),
-            )
+            let options = Executor::ForceOptions { resident, state: opts.state.clone(), elems: opts.elems.clone(), resolve: Some(resolve), reference: env.reference, strict: env.strict_body };
+            // Core and evaluator loops must observe the cook's cancellation, including a first cook.
+            let cancel = sctx::cancel_token(context).clone();
+            let mut result = Err(fail("E_CANCELLED", "Mesh kernel cancelled."));
+            E::with_interrupt(Arc::new(move || rdk::cancel::is_cancelled(&cancel)), &mut || result = Executor::force(&program, &options, sctx::input(context)));
+            result
         };
         let scope = if device { env.gpu.backend.as_ref().and_then(|b| (b.residency)(true)) } else { None };
         match scope {
@@ -4025,22 +4026,22 @@ fn structural_cook(env: &StructEnv, node_id: i64, context: &sctx::T, payloads: &
                 }
             }
         });
-        flow_ir::core_exec::execute(
-            &env.prepared,
-            sctx::input(context),
-            &flow_ir::core_exec::Options {
-                host_source: host_source.map(|f| Arc::new(f) as flow_ir::core_exec::HostSourceFn),
-                resident: scope.map(|s| s.executor.clone()),
-                resolve: Some(run.resolve_fn()),
-                strict: true,
-                force: Some(Arc::new({
-                    let run = run.clone();
-                    let live = sctx::input(context).clone();
-                    move |program: &flow_ir::packed::T| flow_ir::packed::force(program, &live, &flow_ir::packed::ForceOptions { resolve: Some(run.resolve_fn()), strict: true, ..Default::default() })
-                })),
-                ..Default::default()
-            },
-        )
+        let options = flow_ir::core_exec::Options {
+            host_source: host_source.map(|f| Arc::new(f) as flow_ir::core_exec::HostSourceFn),
+            resident: scope.map(|s| s.executor.clone()),
+            resolve: Some(run.resolve_fn()),
+            strict: true,
+            force: Some(Arc::new({
+                let run = run.clone();
+                let live = sctx::input(context).clone();
+                move |program: &flow_ir::packed::T| flow_ir::packed::force(program, &live, &flow_ir::packed::ForceOptions { resolve: Some(run.resolve_fn()), strict: true, ..Default::default() })
+            })),
+            ..Default::default()
+        };
+        let cancel = sctx::cancel_token(context).clone();
+        let mut result = Err(fail("E_CANCELLED", "Geometry kernel cancelled."));
+        E::with_interrupt(Arc::new(move || rdk::cancel::is_cancelled(&cancel)), &mut || result = flow_ir::core_exec::execute(&env.prepared, sctx::input(context), &options));
+        result
     };
     let on_device = || -> R<Value> {
         used_device.set(scope.is_some());
