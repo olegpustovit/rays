@@ -53,6 +53,7 @@ pub fn comparison(name: &str) -> Option<Comparison> { COMPARISONS.iter().find(|(
 pub fn integer_name(operation: Integer) -> &'static str { INTEGERS.iter().find(|(_, op)| *op == operation).expect("complete integer operation table").0 }
 pub fn comparison_name(operation: Comparison) -> &'static str { COMPARISONS.iter().find(|(_, op)| *op == operation).expect("complete integer comparison table").0 }
 
+#[inline]
 pub fn integer_apply(operation: Integer, a: i64, b: i64) -> Result<i64, crate::Diagnostic> {
     let a = ocaml_int::wrap_int63(a);
     let b = ocaml_int::wrap_int63(b);
@@ -75,6 +76,7 @@ pub fn integer_apply(operation: Integer, a: i64, b: i64) -> Result<i64, crate::D
     };
     Ok(result)
 }
+#[inline]
 pub fn comparison_apply(operation: Comparison, a: i64, b: i64) -> bool {
     let a = ocaml_int::wrap_int63(a);
     let b = ocaml_int::wrap_int63(b);

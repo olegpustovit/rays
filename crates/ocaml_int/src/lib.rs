@@ -1,4 +1,5 @@
 /// Wraps an `i64` to OCaml's signed 63-bit `int` range.
+#[inline]
 pub fn wrap_int63(value: i64) -> i64 {
     let low = (value as u64) & ((1_u64 << 63) - 1);
     ((low << 1) as i64) >> 1
@@ -6,6 +7,7 @@ pub fn wrap_int63(value: i64) -> i64 {
 
 /// Performs OCaml's logical right shift on a signed 63-bit integer.
 /// OCaml masks the shift count to the low six bits of the machine word.
+#[inline]
 pub fn lsr(value: i64, amount: i64) -> i64 {
     let bits = (wrap_int63(value) as u64) & ((1_u64 << 63) - 1);
     wrap_int63((bits >> ((amount as u64 & 63) as u32)) as i64)
