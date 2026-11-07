@@ -1,4 +1,4 @@
-lockfile_version = 2
+lockfile_version = 3
 
 [meta]
 name = 'rays'
@@ -13,3 +13,4 @@ owner = 'dietrichgebert'
 repo = 'ponytail'
 commit = 'e3ba2aa6f1e6f0bc4d69eb09c9f0d0a93af56156'
 cache_key = 'a8e9bee7c0847c01c5f5eddf53560846fdc7802a173a245c957f3a51fb772ef7'
+content_hash = 'sha256-tree-v1:7370387fae75c73e75611d2b2328d6b3f88953b03f7063553e6a7966b5293564'
