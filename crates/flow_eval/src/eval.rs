@@ -3001,7 +3001,11 @@ pub fn map_kernel(site: Option<(i64, Path, Vec<i64>)>, path: Option<Path>, signa
     Host::map_function(site, path, signature, function, values)
 }
 pub fn bind_captures(function: FnId, replace: &dyn Fn(&Value) -> Value) -> FnId {
-    Host::map_function_bindings(function, replace)
+    let Some(arena) = arena_for_function(function) else { return function; };
+    // Compiler bindings belong to a new closure: a declined kernel must leave the
+    // original callable intact for sibling kernels and reference execution.
+    let bound = peek(&arena, |arena| arena.functions.get(&function).cloned().map(|f| closure_id(arena, f)));
+    Host::map_function_bindings(bound.unwrap_or(function), replace)
 }
 struct InterruptScope { id: std::thread::ThreadId, previous: Option<Interrupt> }
 impl Drop for InterruptScope {
@@ -4558,6 +4562,20 @@ mod ownership_tests {
         for value in values { assert!(state_dependent(value), "cached residuals in either home must see edited function captures"); }
         Host::map_function_bindings(function, &|_| Value::Float(0.));
         for value in values { assert!(!state_dependent(value), "removing state must invalidate cached positive answers too"); }
+    }
+
+    #[test]
+    fn compiler_capture_binding_preserves_original_closure() {
+        let checked = crate::test_workspace_eval::check("(workspace w (graph g :context host [(bias : float 3)]
+          (let* [f (fn [(x : float)] (+ x bias))] (map f (array/float 2)))))");
+        let evaluation = r#static(&checked, true, None).unwrap();
+        let Value::Fn(function) = evaluation.records.iter().find(|(p, _)| p == &["g", "f"]).unwrap().1[0].1 else { panic!("closure"); };
+        let before = Residual::function_bindings(function);
+        assert!(!before.is_empty());
+        let bound = bind_captures(function, &|_| Value::Float(7.));
+        assert_ne!(bound, function);
+        assert_eq!(Residual::function_bindings(function), before);
+        assert!(Residual::function_bindings(bound).iter().all(|(_, v)| *v == Value::Float(7.)));
     }
 
     #[test]
