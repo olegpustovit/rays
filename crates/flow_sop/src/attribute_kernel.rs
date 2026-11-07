@@ -2427,7 +2427,8 @@ impl Kernel {
         };
         let expired: Arc<dyn Fn() -> bool + Send + Sync> = {
             let (probe, clock) = (probe.clone(), self.clock.clone());
-            Arc::new(move || probe.lock().unwrap().is_some_and(|(stop, _)| clock() > stop))
+            let cancel = context::cancel_token(context).clone();
+            Arc::new(move || cancel::is_cancelled(&cancel) || probe.lock().unwrap().is_some_and(|(stop, _)| clock() > stop))
         };
         let mut outcome: Option<Result<geometry::T, Diagnostic>> = None;
         let completed = E::with_interrupt(expired, &mut || outcome = Some(attempt()));

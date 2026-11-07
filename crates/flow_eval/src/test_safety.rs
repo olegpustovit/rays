@@ -100,6 +100,17 @@ fn interrupts_only_abandon_work_when_a_stop_was_observed() {
     assert!(!ran);
     assert!(current_interrupt().is_none(), "the outer scope is restored");
     assert!(!with_interrupt(Arc::new(|| true), &mut || {
+        assert!(!with_interrupt(Arc::new(|| false), &mut || {
+            assert!(interruptible(&mut || panic!("nested probe masked cancellation")).is_err());
+        }));
+    }), "a nested timing probe must preserve its caller's cancellation");
+    assert!(with_interrupt(Arc::new(|| false), &mut || {
+        assert!(!with_interrupt(Arc::new(|| true), &mut || {
+            assert!(interruptible(&mut || panic!("expired probe ran")).is_err());
+        }));
+        assert!(interruptible(&mut || {}).is_ok());
+    }), "a local deadline must leave its caller usable for a retry");
+    assert!(!with_interrupt(Arc::new(|| true), &mut || {
         let inherited = current_interrupt().unwrap();
         std::thread::spawn(move || {
             assert!(!with_interrupt(inherited, &mut || {

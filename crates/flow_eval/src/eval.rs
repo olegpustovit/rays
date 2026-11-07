@@ -2988,10 +2988,11 @@ impl Drop for InterruptScope {
 }
 pub fn with_interrupt(expired: Arc<dyn Fn() -> bool + Send + Sync>, f: &mut dyn FnMut()) -> bool {
     let id = std::thread::current().id();
+    let parent = current_interrupt();
     let fired = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let observed = fired.clone();
     let probe: Interrupt = Arc::new(move || {
-        if observed.load(Ordering::Relaxed) || expired() { observed.store(true, Ordering::Relaxed); true } else { false }
+        if observed.load(Ordering::Relaxed) || parent.as_ref().is_some_and(|stop| stop()) || expired() { observed.store(true, Ordering::Relaxed); true } else { false }
     });
     let previous = INTERRUPTS.lock().unwrap().insert(id, probe);
     let _scope = InterruptScope { id, previous };
