@@ -3004,8 +3004,12 @@ pub fn bind_captures(function: FnId, replace: &dyn Fn(&Value) -> Value) -> FnId 
     let Some(arena) = arena_for_function(function) else { return function; };
     // Compiler bindings belong to a new closure: a declined kernel must leave the
     // original callable intact for sibling kernels and reference execution.
-    let bound = peek(&arena, |arena| arena.functions.get(&function).cloned().map(|f| closure_id(arena, f)));
-    Host::map_function_bindings(bound.unwrap_or(function), replace)
+    let Some(Function::Closure(closure)) = peek(&arena, |arena| arena.functions.get(&function).cloned()) else { return function; };
+    let bindings = closure.env.iter().map(|(name, value)| (name.clone(), replace(value))).collect();
+    if *closure.env == bindings { return function; }
+    let mut closure = unshare(closure);
+    closure.env = Arc::new(bindings);
+    peek(&arena, |arena| closure_id(arena, Function::Closure(Arc::new(closure))))
 }
 struct InterruptScope { id: std::thread::ThreadId, previous: Option<Interrupt> }
 impl Drop for InterruptScope {
@@ -4572,6 +4576,7 @@ mod ownership_tests {
         let Value::Fn(function) = evaluation.records.iter().find(|(p, _)| p == &["g", "f"]).unwrap().1[0].1 else { panic!("closure"); };
         let before = Residual::function_bindings(function);
         assert!(!before.is_empty());
+        assert_eq!(bind_captures(function, &Value::clone), function);
         let bound = bind_captures(function, &|_| Value::Float(7.));
         assert_ne!(bound, function);
         assert_eq!(Residual::function_bindings(function), before);

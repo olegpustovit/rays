@@ -415,7 +415,7 @@ fn front(job: &mut front_job, name: &str) -> Result<front_result, String> {
     let started = std::time::Instant::now();
     let f = fn_in(job, name)?;
     let check_done = started.elapsed();
-    let bound = e::Host::map_function_bindings(f, &*replace_sources(job.values.clone()));
+    let bound = e::bind_captures(f, &*replace_sources(job.values.clone()));
     let inputs = if name == "trace" { vec![job.pixels.clone(), job.pixels.clone()] } else { vec![job.pixels.clone()] };
     let residual = deferred(name, bound, &inputs, Ty::Vec4)?;
     let term = e::Residual::residual_view(residual).map_err(|d| rays_diagnostic::to_string(&d))?.term;
@@ -595,7 +595,7 @@ pub fn gather_kernel(lease: &renderer::renderer::gpu, pipes: &pipelines::T) -> R
         _ => return Err("path tracer gather is not a function".to_string()),
     };
     let replacement = src.clone();
-    let bound = e::Host::map_function_bindings(f, &move |v| match v {
+    let bound = e::bind_captures(f, &move |v| match v {
         Value::Source(n, _, l) if n == "pt/src" && l.is_empty() => replacement.clone(),
         v => v.clone(),
     });
@@ -664,7 +664,7 @@ fn cpu_run(facts: &facts, checked: &mut Option<w::Workspace>, words: Vec<(String
     let (fns, _keep) = functions(facts, previews.contains(&name), checked)?;
     let f = fns.iter().find(|(n, _)| n == name).map(|(_, f)| *f).ok_or_else(|| format!("no path tracer kernel {name}"))?;
     let types: Vec<(String, Ty)> = uniforms().into_iter().chain(tables()).map(|(n, ty)| (n.to_string(), ty)).collect();
-    let bound = e::Host::map_function_bindings(f, &|v| match v {
+    let bound = e::bind_captures(f, &|v| match v {
         Value::Source(n, _, l) if n.starts_with("pt/") && l.is_empty() => {
             let n = &n[3..];
             let ty = &types.iter().find(|(k, _)| k == n).expect("pt placeholder").1;

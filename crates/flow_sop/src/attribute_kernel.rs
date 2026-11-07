@@ -766,7 +766,7 @@ impl Specializer<'_> {
                     return done.clone();
                 }
                 let changed = std::cell::Cell::new(false);
-                let mapped = E::Host::map_function_bindings(*f, &|v| {
+                let mapped = E::bind_captures(*f, &|v| {
                     let (m, c) = self.map(v);
                     if c {
                         changed.set(true);
@@ -3319,6 +3319,19 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
         let record = Value::Record(vec![("t".into(), source("sop/context_time", &[])), ("k".into(), Value::Int(1))]);
         assert_eq!(specialize(&context, &record), Value::Record(vec![("t".into(), Value::Float(1.5)), ("k".into(), Value::Int(1))]));
         assert_eq!(context_reads(&record), D::one(D::Fact::Time));
+        let forms=flow_syntax::syntax::parse("(workspace w (graph g :context value [(bias : float 0)] (let* [f (fn [(x : float)] (+ x bias))] 0)))").unwrap();
+        let (workspace,diagnostics)=W::check(&[],false,false,None,&flow_check::catalog::Catalog {version:1,kinds:vec![]},&forms);
+        assert!(diagnostics.is_empty());
+        let evaluated=E::r#static(&workspace.unwrap(),true,None).unwrap();
+        let Value::Fn(original)=evaluated.records.iter().find(|(p,_)|p==&["g","f"]).unwrap().1[0].1 else {panic!("closure")};
+        let captured=source("sop/context_time",&[]);
+        E::Host::map_function_bindings(original,&|_|captured.clone());
+        for time in [1.5,2.5] {
+            let context=context::create(context::Options {time:Some(time),..Default::default()}).unwrap();
+            let Value::Fn(bound)=specialize(&context,&Value::Fn(original)) else {panic!("bound closure")};
+            assert!(E::Residual::function_bindings(bound).iter().all(|(_,v)|*v==Value::Float(time)));
+            assert!(E::Residual::function_bindings(original).iter().all(|(_,v)|*v==captured));
+        }
         assert_eq!(D::to_list(context_reads(&seeded)), vec![D::Fact::Seed]);
         // the salt is the low 63 bits of a word
         assert_eq!(seed_for(-1, 7, "a", "b"), seed_for(i64::MAX, 7, "a", "b"));
