@@ -88,5 +88,5 @@ fn ogpu_metal_present_matches_the_ocaml_printer() {
 #[test]
 fn flow_gpu_shaders_match_the_ocaml_printer() {
     let compared = compare("flow_gpu", "flow_gpu", "flow_gpu", &[]);
-    assert_eq!(compared.len(), 18);
+    assert_eq!(compared.len(), 24);
 }

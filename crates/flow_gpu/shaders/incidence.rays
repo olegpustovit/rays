@@ -1,0 +1,61 @@
+; Stable radix partition of vertex indices by their point. Three passes per bit: block counts,
+; prefix of the block counts, then scatter. Stability preserves the host's vertex order in each
+; point's incidence list, independently of GPU scheduling. The first bit starts from implicit iota.
+(defn imin :context value [(a : int) (b : int)] (if (int/lt a b) a b))
+(defn blocks-of :context value [(n : int) (size : int)] (int/div (int/add n (int/sub size 1)) size))
+(defn incidence-partition :context value
+  [(id : int) (vertices : (array int)) (input : (array int)) (output : (array int))
+   (blocks : (array int)) (bound : (array int)) (size : int)]
+  (let* [n (array/nth bound 0) bit (array/nth bound 1) pass (array/nth bound 2)
+         group (int/div id size) lane (int/mod id size) groups (blocks-of n size)
+         chunk (blocks-of groups size) lo (imin groups (int/mul lane chunk))
+         hi (imin groups (int/add lo chunk))
+         vertex (if (and (int/lt id n) (not (int/eq pass 1)))
+                  (if (int/eq bit 0) id (array/nth input id)) 0)
+         zero (if (and (int/lt id n) (not (int/eq pass 1)))
+                (if (int/eq (int/and (int/shr (array/nth vertices vertex) bit) 1) 0) 1 0) 0)
+         prefix (gpu/group-scan
+                  (if (int/eq pass 1)
+                    (fold [acc 0] [k (range lo hi)] (int/add acc (array/nth blocks k))) zero))]
+    (if (int/eq pass 0)
+      (if (int/eq lane 0) (gpu/store-int blocks group prefix.total) 0)
+      (if (int/eq pass 1)
+        (int/add
+          (fold [at prefix.before] [k (range lo hi)]
+            (int/add at (int/mul (array/nth blocks k)
+                         (gpu/store-int blocks (int/add groups k) at))))
+          (if (int/eq lane 0) (gpu/store-int blocks (int/mul groups 2) prefix.total) 0))
+        (if (int/lt id n)
+          (let* [before (int/add (array/nth blocks (int/add groups group)) prefix.before)
+                 at (if (int/eq zero 1) before (int/add (array/nth blocks (int/mul groups 2)) (int/sub id before)))]
+            (gpu/store-int output at vertex)) 0)))))
+
+; Binary searches are bounded by the uint32 array range. Empty intervals do no reads.
+(defn point-start :context value [(point : int) (n : int) (vertices : (array int)) (sorted : (array int))]
+  (let* [found (iterate 32 {:lo 0 :hi n} (fn [s]
+                (if (int/lt s.lo s.hi)
+                  (let* [mid (int/div (int/add s.lo s.hi) 2)]
+                    (if (int/lt (array/nth vertices (array/nth sorted mid)) point)
+                      {:lo (int/add mid 1) :hi s.hi} {:lo s.lo :hi mid})) s)))]
+    found.lo))
+(defn primitive-of :context value [(vertex : int) (n : int) (offsets : (array int))]
+  (let* [found (iterate 32 {:lo 0 :hi n} (fn [s]
+                (if (int/lt s.lo s.hi)
+                  (let* [mid (int/div (int/add s.lo s.hi) 2)]
+                    (if (int/le (array/nth offsets (int/add mid 1)) vertex)
+                      {:lo (int/add mid 1) :hi s.hi} {:lo s.lo :hi mid})) s)))]
+    found.lo))
+(defn incidence-tables :context value
+  [(id : int) (vertices : (array int)) (offsets : (array int)) (kinds : (array int))
+   (sorted : (array int)) (point-offsets : (array int)) (primitive : (array int))
+   (first : (array int)) (corners : (array int)) (bound : (array int)) (size : int)]
+  (let* [points (array/nth bound 0) nv (array/nth bound 1) np (array/nth bound 2)]
+    (int/add
+      (if (int/le id points) (gpu/store-int point-offsets id (point-start id nv vertices sorted)) 0)
+      (if (int/lt id nv)
+        (let* [v (array/nth sorted id) p (primitive-of v np offsets)
+               a (array/nth offsets p) b (array/nth offsets (int/add p 1))
+               count (int/sub b a)]
+          (int/add (gpu/store-int primitive v p)
+            (int/add (gpu/store-int first id a)
+              (gpu/store-int corners id (if (and (int/eq (array/nth kinds p) 0) (int/ge count 3)) count 0))))) 0))))

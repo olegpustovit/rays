@@ -2102,6 +2102,99 @@ pub fn compact_blocks(count: i64) -> i64 {
     8 * 1.max((count + 1023) / 1024)
 }
 
+/// Coordinate planes into a packed float3 buffer. The caller validated and settled the planes.
+pub fn pack_planes(queue: &Queue, pipelines: &pipelines::T, planes: [&Buffer; 3], output: &Buffer, count: i64) -> Result<(), Diagnostic> {
+    if count < 0 || planes.iter().any(|p| count > b::buffer_size(p) / 4) || count > b::buffer_size(output) / 12 {
+        return Err(e_gpu("Coordinate plane count exceeds buffer capacity."));
+    }
+    if count == 0 { return Ok(()); }
+    let compiled = pipelines::get(pipelines, kernels::planes())?;
+    one_pass(queue, &|commands| {
+        let encoder = gpu(b::compute_encoder(commands))?;
+        let result = (|| {
+            gpu(b::set_pipeline(&encoder, &compiled.pipeline))?;
+            for (i, buffer) in planes.into_iter().chain([output]).enumerate() {
+                gpu(b::set_buffer(&encoder, i as i64, buffer))?;
+            }
+            gpu(b::set_bytes(&encoder, 4, &(count as u32).to_le_bytes()))?;
+            gpu(b::dispatch_threads(&encoder, (count, 1, 1), (256, 1, 1)))
+        })();
+        let ended = gpu(b::end_compute(&encoder));
+        result.and(ended)
+    })
+}
+
+/// Device outputs of the point incidence CSR, plus fan data in the CSR's slot order.
+pub struct Incidence<'a> {
+    pub point_offsets: &'a Buffer,
+    pub point_vertices: &'a Buffer,
+    pub primitive_of_vertex: &'a Buffer,
+    pub first: &'a Buffer,
+    pub corners: &'a Buffer,
+}
+
+/// Build exact, deterministically ordered point incidence and polygon fans from validated topology.
+/// `scratch` needs `vertices.1` words; `blocks` needs `compact_blocks(vertices.1) + 4` bytes.
+/// Every size-dependent operation stays on the device; this call performs no readbacks or uploads.
+pub fn point_incidence(
+    queue: &Queue, pipelines: &pipelines::T, point_count: i64,
+    vertices: (&Buffer, i64), offsets: (&Buffer, i64), kinds: (&Buffer, i64),
+    out: &Incidence<'_>, scratch: &Buffer, blocks: &Buffer,
+) -> Result<(), Diagnostic> {
+    let nv = vertices.1;
+    let np = kinds.1;
+    if !(0..=1 << 30).contains(&point_count) || !(0..=1 << 30).contains(&nv)
+        || np < 0 || offsets.1 != np + 1 || (nv > 0 && (point_count == 0 || np == 0))
+        || b::buffer_size(blocks) < compact_blocks(nv) + 4
+    {
+        return Err(e_gpu("Point incidence requires validated, bounded topology."));
+    }
+    for (buffer, words) in [vertices, offsets, kinds, (out.point_offsets, point_count + 1),
+        (out.point_vertices, nv), (out.primitive_of_vertex, nv), (out.first, nv), (out.corners, nv), (scratch, nv)]
+    {
+        if words < 0 || words > b::buffer_size(buffer) / 4 {
+            return Err(e_gpu("Point incidence count exceeds buffer capacity."));
+        }
+    }
+    let partition = pipelines::get(pipelines, kernels::incidence_partition())?;
+    let tables = pipelines::get(pipelines, kernels::incidence_tables())?;
+    // At least one bit also writes implicit iota for a topology containing only point zero.
+    let bits = (64 - (point_count - 1).max(0).leading_zeros()).max(1);
+    let groups = (nv + 1023) / 1024;
+    one_pass(queue, &|commands| {
+        let encoder = gpu(b::compute_encoder(commands))?;
+        let result = (|| {
+            if nv > 0 {
+                gpu(b::set_pipeline(&encoder, &partition.pipeline))?;
+                gpu(b::set_buffer(&encoder, 0, vertices.0))?;
+                gpu(b::set_buffer(&encoder, 3, blocks))?;
+                for bit in 0..bits {
+                    let output = if (bits - bit) % 2 == 1 { out.point_vertices } else { scratch };
+                    let input = if (bits - bit) % 2 == 1 { scratch } else { out.point_vertices };
+                    gpu(b::set_buffer(&encoder, 1, input))?;
+                    gpu(b::set_buffer(&encoder, 2, output))?;
+                    for pass in 0..3 {
+                        let mut bound = [0u8; 12];
+                        for (i, n) in [nv, bit as i64, pass].into_iter().enumerate() { put_i32(&mut bound, i * 4, n as i32); }
+                        gpu(b::set_bytes(&encoder, 4, &bound))?;
+                        gpu(b::dispatch_threads(&encoder, (1024 * if pass == 1 { 1 } else { groups }, 1, 1), (1024, 1, 1)))?;
+                    }
+                }
+            }
+            gpu(b::set_pipeline(&encoder, &tables.pipeline))?;
+            for (i, buffer) in [vertices.0, offsets.0, kinds.0, out.point_vertices, out.point_offsets,
+                out.primitive_of_vertex, out.first, out.corners].into_iter().enumerate()
+            { gpu(b::set_buffer(&encoder, i as i64, buffer))?; }
+            let mut bound = [0u8; 12];
+            for (i, n) in [point_count, nv, np].into_iter().enumerate() { put_i32(&mut bound, i * 4, n as i32); }
+            gpu(b::set_bytes(&encoder, 8, &bound))?;
+            gpu(b::dispatch_threads(&encoder, (nv.max(point_count + 1), 1, 1), (256, 1, 1)))
+        })();
+        let ended = gpu(b::end_compute(&encoder));
+        result.and(ended)
+    })
+}
+
 // ponytail: at most 64 groups (fills an 8-core M1); raise it for a wider device.
 pub const TOPOLOGY_STATUS_BYTES: i64 = 64 * 36;
 

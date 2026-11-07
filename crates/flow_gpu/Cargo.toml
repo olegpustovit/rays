@@ -88,5 +88,9 @@ name = "gpu_resident"
 harness = false
 
 [[test]]
+name = "gpu_incidence"
+harness = false
+
+[[test]]
 name = "gpu_sop_mesh"
 harness = false

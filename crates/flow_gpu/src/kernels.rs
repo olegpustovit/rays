@@ -125,6 +125,42 @@ pub fn topology() -> &'static Kernel {
     })
 }
 
+pub fn incidence_partition() -> &'static Kernel {
+    static KERNEL: std::sync::OnceLock<Kernel> = std::sync::OnceLock::new();
+    KERNEL.get_or_init(|| {
+        let (source, bytes) = shader!("incidence_partition");
+        Kernel {
+            source: source.to_owned(), spirv: spirv(bytes, &range(5)),
+            entry: "incidence_partition".to_owned(), uniform_bytes: 12,
+            interface: interface(5, 4), ..compaction_uint32().clone()
+        }
+    })
+}
+
+pub fn incidence_tables() -> &'static Kernel {
+    static KERNEL: std::sync::OnceLock<Kernel> = std::sync::OnceLock::new();
+    KERNEL.get_or_init(|| {
+        let (source, bytes) = shader!("incidence_tables");
+        Kernel {
+            source: source.to_owned(), spirv: spirv(bytes, &range(9)),
+            entry: "incidence_tables".to_owned(), uniform_bytes: 12,
+            interface: interface(9, 8), ..compaction_uint32().clone()
+        }
+    })
+}
+
+pub fn planes() -> &'static Kernel {
+    static KERNEL: std::sync::OnceLock<Kernel> = std::sync::OnceLock::new();
+    KERNEL.get_or_init(|| {
+        let (source, bytes) = shader!("planes");
+        Kernel {
+            source: source.to_owned(), spirv: spirv(bytes, &range(5)),
+            entry: "pack_planes".to_owned(), uniform_bytes: 4,
+            interface: interface(5, 4), ..compaction().clone()
+        }
+    })
+}
+
 /// A resident dispatch's threadgroup counts from a count cell, one thread. Buffers: the cell,
 /// {capacity, mul, div, group}, the three counts.
 pub fn dispatch_arguments() -> &'static Kernel {
