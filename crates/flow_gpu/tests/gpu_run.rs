@@ -334,6 +334,25 @@ fn specialized_captures() {
     pipelines::close(&pipes);
 }
 
+fn guarded_gather() {
+    let Some((lease,pipes))=start() else {return};
+    let program=tp::compile("(let* [table (array/int 8 1)]
+      (map (fn [(i : int)]
+        (if (and (> (array/nth table i) 0)
+                 (= (if (< (float i) (+ 7.0 (* t 0.0))) (array/nth table (int/add i 1)) 0) 0)) 1.0 0.0))
+        (array/range 8 :type int)))");
+    let shader=tp::ok(emit::kernel(&emit::Options {fast:true,uint32_tables:vec![0],..Default::default()},&program));
+    assert_eq!(shader.gather_uint32,vec![true,true],"every guarded read of the table must retain its integer type");
+    let device=renderer::renderer::gpu_device(&lease);
+    let table=ogpu::backend::create_buffer(&device,ogpu::types::BufferDescriptor {label:None,size:32,usage:vec![ogpu::types::BufferUsage::Storage,ogpu::types::BufferUsage::CopyDst]},None).unwrap();
+    ogpu::backend::write_buffer(&table,0,&[1u32.to_le_bytes();8].concat()).unwrap();
+    let r=run::create(None,&lease,&pipes,&shader);
+    let output=tp::ok(run::dispatch(&r,&Default::default(),None,Some(&|_|Some((table.clone(),8))),&prepare(&program,true,0.)));
+    let actual=array(&tp::ok(run::readback(&output,None)));
+    assert_eq!(actual,array(&force(&program,0.,false)));
+    run::close(&r,false);ogpu::backend::destroy_buffer(&table).unwrap();pipelines::close(&pipes);
+}
+
 fn main() {
-    common::window::run(&[("specialized_captures", specialized_captures), ("fixtures", fixtures), ("carried", carried), ("statuses", statuses), ("empty_and_outputs", empty_and_outputs), ("refusals", refusals), ("gather_and_region", gather_and_region), ("selected_outputs", selected_outputs)]);
+    common::window::run(&[("guarded_gather",guarded_gather),("specialized_captures", specialized_captures), ("fixtures", fixtures), ("carried", carried), ("statuses", statuses), ("empty_and_outputs", empty_and_outputs), ("refusals", refusals), ("gather_and_region", gather_and_region), ("selected_outputs", selected_outputs)]);
 }

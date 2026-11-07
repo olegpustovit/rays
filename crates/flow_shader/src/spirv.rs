@@ -2860,9 +2860,12 @@ pub fn kernel(options: &Options, program: &packed::T) -> Result<T, Diagnostic> {
     }
     let mut gather_uint32 = vec![false; layout.gathers.len()];
     for t in &options.uint32_tables {
-        match layout.gathers.iter().position(|(_, (index, width))| index == t && *width == 1) {
-            Some(k) if fast => gather_uint32[k] = true,
-            _ => return Err(fail_d("Uint32 table requires a scalar gathered buffer in fast precision.")),
+        let mut found = false;
+        for (k, (_, (index, width))) in layout.gathers.iter().enumerate() {
+            if index == t && *width == 1 { gather_uint32[k] = true; found = true; }
+        }
+        if !fast || !found {
+            return Err(fail_d("Uint32 table requires a scalar gathered buffer in fast precision."));
         }
     }
     let mut output_uint32 = vec![false; layout.output_count as usize];
