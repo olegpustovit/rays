@@ -92,8 +92,8 @@ four-byte word per element; default float32 inputs/outputs, binding numbers and
 uniform layouts are unchanged. Integer loads/stores bypass float32 conversion.
 Selected output values outside 0..2^32-1 set status bit 64 and return
 `E_GPU_UINT32_RANGE`. Readback returns exact `Int_array` storage; planar reads
-convert the decoded words directly to doubles. Uint32 inputs require explicitly
-bound device buffers (`E_GPU_UINT32_BINDING` otherwise), or the internal
+convert the decoded words directly to doubles. Uint32 inputs require typed
+retained storage, explicitly bound device buffers (`E_GPU_UINT32_BINDING` otherwise), or the internal
 `Run.dispatch ~uint32_cpu:true` checked host-array upload. Implicit float32 held
 arrays always refuse. `uint32_scalars` selects exact unsigned integer captures
 and frame words without changing their uniform offsets. `Host.resident` has an
@@ -103,13 +103,30 @@ separate integration step: `Run.keep` refuses `E_GPU_UINT32_KEEP` rather than
 handing a uint32 buffer to the float32 planar-holder path.
 
 `Run.keep_uint32` transfers a typed output to an integer holder using the
-existing bounded pool, retirement budget and close lifecycle. It never
-registers a float binding. Settled workers decode raw uint32 words exactly,
+existing bounded pool, retirement budget and close lifecycle. It
+registers a typed numeric carrier whose storage remains uint32. Prepared consumers
+select uint32 source/table loads from that identity; released or materialised
+streams stop offering resident inputs. Settled workers decode raw uint32 words exactly,
 cache integers and read payload once; an unread settled stream can be pinned
 for a native consumer. A runner close preserves live holders by materialising
 them unless discard was requested. Both holder codecs check dispatch status
 before an initial-domain materialisation; failed uint32 outputs never become
 readable geometry.
+
+Mesh and coordinate-plane mesh generators can retain positions and topology
+without payload transfers. Coordinate planes are packed on the device. Point
+incidence and polygon fan tables are built lazily by a stable GPU radix partition,
+preserving the CPU's vertex order within each point. Those tables stay with their
+topology and bind directly to subsequent kernels. Static topology reuse holds weak
+references to the original topology rather than materialising a host copy.
+Placement calibration prices transfer costs without forcing unused readbacks.
+
+Large constant numeric arrays and ranges remain constructor instructions through
+static evaluation and Core lowering. Resident execution fills them on the GPU;
+float and uint32 range buffers are both device-generated. `native_sea_frames`
+renders the unchanged million-point sketch and requires resident P, N and
+topology, zero geometry input uploads, zero payload readbacks, stable warm buffer
+counts, and prompt cancellation on close.
 
 The neutral integer carrier preserves an extensible backend storage token.
 `Run.integers` wraps the same UInt32 holder without a copy or new ownership;

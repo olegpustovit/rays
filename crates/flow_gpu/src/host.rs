@@ -437,18 +437,13 @@ fn iota(t: &T, length: i64) -> Option<Buffer> {
         }
     }
     let old = t.0.iota.borrow().clone();
-    let capacity = length.max(2 * old.as_ref().map_or(0, |o| o.1));
-    let mut bytes = vec![0u8; (capacity * 4) as usize];
-    for k in 0..capacity as usize {
-        bytes[k * 4..k * 4 + 4].copy_from_slice(&(k as f32).to_le_bytes());
-    }
-    let buffer = b::create_buffer(
+    let capacity = 1.max(length.max(2 * old.as_ref().map_or(0, |o| o.1)));
+    let buffer = b::create_mapped_buffer(
         &device_of(t),
-        BufferDescriptor { label: Some("Flow resident indices".to_owned()), size: capacity * 4, usage: vec![BufferUsage::Storage, BufferUsage::CopyDst] },
-        None,
+        BufferDescriptor { label: Some("Flow resident indices".to_owned()), size: capacity * 4, usage: vec![BufferUsage::Storage, BufferUsage::CopySrc, BufferUsage::CopyDst] },
     )
     .ok()?;
-    if b::write_buffer(&buffer, 0, &bytes).is_err() {
+    if run::fill_float_indices(&queue_of(t), &t.0.pipelines, &buffer, capacity).is_err() {
         let _ = b::destroy_buffer(&buffer);
         return None;
     }
@@ -594,6 +589,7 @@ pub struct Residency {
     pub executor: Arc<core_exec::Resident>,
     pub retain_uint32: Box<dyn Fn(&Value) -> Option<Uint32Holder>>,
     pub retain_float: Box<dyn Fn(&Value) -> Option<G::Planes>>,
+    pub pack_planes: Box<dyn Fn(&[Value; 3]) -> Result<Option<Value>, Diagnostic>>,
     pub uint32_stream: Box<dyn Fn(&Value) -> Option<(Buffer, i64)>>,
     pub ready: Box<dyn Fn() -> bool>,
 }
@@ -705,12 +701,31 @@ struct Level {
 }
 
 impl Scope {
+    fn pack_planes(&self, values: &[Value; 3]) -> Result<Option<Value>, Diagnostic> {
+        for value in values {
+            if self.find(value).is_none() && float_array(value).is_some_and(|a| a.iter().any(|x| !(*x as f32).is_finite())) { return Ok(None); }
+        }
+        let Some(planes) = values.iter().map(|v| self.held_or_adopted(v)).collect::<Option<Vec<_>>>() else { return Ok(None) };
+        if planes.iter().any(|p| p.uint32 || p.kind != 1) { return Ok(None); }
+        self.settle_inner()?;
+        let count = self.count_of(&planes[0])?;
+        for p in &planes[1..] {
+            if self.count_of(p)? != count { return Err(value::fail("E_ARRAY_COUNT", "Mesh coordinate planes need the same element count.")); }
+        }
+        let slot = self.range_slot();
+        if !self.s.borrow().extra_slots.iter().any(|s| Rc::ptr_eq(s, &slot)) { self.s.borrow_mut().extra_slots.push(slot.clone()); }
+        let buffer = self.alloc(&slot, (count * 12).max(4))?;
+        let made = self.placeholder(false, true, i64::MAX, None, &slot, &Ty::Array(Box::new(Ty::Vec3)), buffer.clone(), None, count);
+        run::pack_planes(&self.queue, &self.t.0.pipelines, [&planes[0].buffer.0, &planes[1].buffer.0, &planes[2].buffer.0], &buffer.0, count)?;
+        Ok(Some(made))
+    }
     fn live_ok(&self) -> bool {
         live(&self.t)
     }
 
     // a level's command buffer and its one compute encoder, which orders its dispatches
     fn commands(&self) -> Result<(Commands, ComputeEncoder), Diagnostic> {
+        self.s.borrow_mut().settled = false;
         if let Some(c) = &self.s.borrow().pending {
             return Ok(c.clone());
         }
@@ -1872,13 +1887,14 @@ impl Scope {
     /// after the loop: `array/range` of a kept array's count over `div` is the index buffer,
     /// counted by that array's cell
     fn range(&self, ty: &Ty, v: &Value, div: i64, length: i64) -> Result<Option<Value>, Diagnostic> {
-        if self.uint32 && *ty != int_array_ty() {
+        let integer = *ty == int_array_ty();
+        if self.uint32 && !(integer || *ty == Ty::Array(Box::new(Ty::Float))) {
             return Ok(None);
         }
         let found = self.find(v);
-        if let (Value::Int(n), true) = (v, self.uint32) {
-            if *n >= 0 && div > 0 && length == n / div {
-                let Some(buffer) = self.iota(Some(true), length) else { return Ok(None) };
+        if let Value::Int(n) = v {
+            if (self.uint32 || !integer) && *n >= 0 && div > 0 && length == n / div {
+                let Some(buffer) = self.iota(Some(self.uint32 && integer), length) else { return Ok(None) };
                 let slot = self.range_slot();
                 {
                     let mut s = self.s.borrow_mut();
@@ -1898,7 +1914,7 @@ impl Scope {
         }
         match found {
             Some(p) if self.s.borrow().post && p.cell.is_some() && div > 0 => {
-                let Some(buffer) = self.iota(None, length) else { return Ok(None) };
+                let Some(buffer) = self.iota(Some(self.uint32 && integer), length) else { return Ok(None) };
                 let (kind, a) = match ty {
                     Ty::Array(i) if **i == Ty::Float => (1, Value::Float_array(Arc::new(vec![0.0]))),
                     _ => (0, Value::Int_array(Arc::new(vec![0]))),
@@ -1907,6 +1923,7 @@ impl Scope {
                 copy.key = raw(&a).unwrap();
                 copy.hold = a.clone();
                 copy.kind = kind;
+                copy.uint32 = self.uint32 && integer;
                 copy.buffer = (buffer, 0);
                 copy.length = length;
                 copy.counted = false;
@@ -2391,11 +2408,12 @@ pub fn resident_scope(uint32: bool, fast: bool, t: &T) -> Residency {
         }),
         range: Box::new(move |ty, v, div, length| with!(g13, Ok(None), |s| s.range(ty, v, div, length))),
     };
-    let (ga, gb, gc, gd) = (g.clone(), g.clone(), g.clone(), g.clone());
+    let (ga, gb, gc, gd, ge) = (g.clone(), g.clone(), g.clone(), g.clone(), g.clone());
     Residency {
         executor: Arc::new(executor),
         retain_uint32: Box::new(move |v| scope_of(&ga).and_then(|s| s.retain_uint32(v))),
         retain_float: Box::new(move |v| scope_of(&gb).and_then(|s| s.retain_float(v))),
+        pack_planes: Box::new(move |v| scope_of(&ge).map_or(Ok(None), |s| s.pack_planes(v))),
         uint32_stream: Box::new(move |v| {
             let s = scope_of(&gc)?;
             let p = s.find(v).filter(|p| p.uint32)?;
@@ -2710,6 +2728,47 @@ pub fn forget_producer(t: &T, identity: i64) {
 
 /// The backend: owns at most 64 runners and 64 pipelines. An absent cost keeps production CPU
 /// placement until native measurements supply a model. The caller owns the GPU lease.
+fn build_incidence(t: &T, points: i64, streams: [Arc<G::Integers>; 3]) -> Result<Option<G::Incidence>, Diagnostic> {
+    let mut pins: Vec<run::Pin> = Vec::new();
+    for stream in &streams {
+        match run::pin_integers(stream) {
+            Some(pin) => pins.push(pin),
+            None => { for (_, _, _, unpin) in pins { unpin(); } return Ok(None); }
+        }
+    }
+    let (scope, _guard) = new_scope(t, true);
+    let slot = scope.range_slot();
+    scope.s.borrow_mut().extra_slots.push(slot.clone());
+    let mut retained: Vec<Arc<G::Integers>> = Vec::new();
+    let result = (|| {
+        let nv = streams[0].count;
+        let mut values = Vec::new();
+        let mut buffers = Vec::new();
+        for count in [points + 1, nv, nv, nv, nv] {
+            let buffer = scope.alloc(&slot, (count * 4).max(4))?;
+            values.push(scope.placeholder(false, true, i64::MAX, None, &slot, &int_array_ty(), buffer.clone(), None, count));
+            buffers.push(buffer.0);
+        }
+        let scratch = scope.alloc(&slot, (nv * 4).max(4))?;
+        slot.spent.borrow_mut().push(scratch.clone());
+        let blocks = scope.alloc(&slot, run::compact_blocks(nv) + 4)?;
+        slot.spent.borrow_mut().push(blocks.clone());
+        run::point_incidence(&scope.queue, &t.0.pipelines, points,
+            (&pins[0].0, nv), (&pins[1].0, streams[1].count), (&pins[2].0, streams[2].count),
+            &run::Incidence { point_offsets: &buffers[0], point_vertices: &buffers[1], primitive_of_vertex: &buffers[2], first: &buffers[3], corners: &buffers[4] },
+            &scratch.0, &blocks.0)?;
+        for value in &values {
+            let kept = scope.retain_uint32(value).ok_or_else(|| value::fail("E_GPU", "Point incidence could not retain its output."))?;
+            retained.push(Arc::new(run::integers(&kept)));
+        }
+        Ok(G::Incidence { point_offsets: retained[0].clone(), point_vertices: retained[1].clone(), primitive_of_vertex: retained[2].clone(), first: retained[3].clone(), corners: retained[4].clone() })
+    })();
+    scope.close();
+    for (_, _, _, unpin) in pins { unpin(); }
+    if result.is_err() { for stream in &retained { (stream.release)(false); } }
+    result.map(Some)
+}
+
 pub fn backend(t: &T) -> G::Backend {
     let id = t.0.id;
     let standard = standard_backend(t);
@@ -2720,12 +2779,17 @@ pub fn backend(t: &T) -> G::Backend {
                 return None;
             }
             let scope = Rc::new(resident_scope(true, fast, &t));
-            let (s1, s2, s3, s4) = (scope.clone(), scope.clone(), scope.clone(), scope.clone());
+            let (s1, s2, s3, s4, s5) = (scope.clone(), scope.clone(), scope.clone(), scope.clone(), scope.clone());
             let t2 = t.clone();
             Some(G::Residency {
                 executor: scope.executor.clone(),
                 retain_uint32: Box::new(move |v| (s1.retain_uint32)(v).map(|holder| run::integers(&holder))),
                 retain_float: Box::new(move |v| (s2.retain_float)(v)),
+                pack_planes: Box::new(move |v| (s5.pack_planes)(v)),
+                incidence: Arc::new(move |points, streams| match host_of(id).filter(live) {
+                    Some(t) => build_incidence(&t, points, streams),
+                    None => error("GPU host is closed or called from another domain."),
+                }),
                 validate_topology: Box::new(move |point_count, vertices, offsets, kinds, max_polygon_size| {
                     match ((s3.uint32_stream)(vertices), (s3.uint32_stream)(offsets), (s3.uint32_stream)(kinds)) {
                         (Some(v), Some(o), Some(k)) => Some(validate_topology(&t2, (&v.0, v.1), (&o.0, o.1), (&k.0, k.1), point_count, max_polygon_size)),

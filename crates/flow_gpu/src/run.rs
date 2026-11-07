@@ -1790,7 +1790,13 @@ pub struct Uint32Holder {
 /// The same holder through the backend-neutral integer carrier, with shared ownership.
 pub fn integers(holder: &Uint32Holder) -> Gpu::Integers {
     let (m, r) = (holder.materialise.clone(), holder.release.clone());
-    Gpu::Integers { count: holder.count, resident: holder.resident.clone(), storage: Some(Arc::new(holder.clone())), materialise: Box::new(move || m()), release: Box::new(move |held| r(held)) }
+    let resident = holder.resident.clone();
+    let live = holder.input.as_ref().and_then(held_storage).map(|(kept, _)| (kept.fate.clone(), kept.settled.clone()));
+    Gpu::Integers {
+        count: holder.count,
+        resident: Box::new(move || live.as_ref().filter(|(f, s)| s.load(Ordering::SeqCst) && !f.destroyed() && f.planes().is_none()).and_then(|_| resident.clone())),
+        storage: Some(Arc::new(holder.clone())), materialise: Box::new(move || m()), release: Box::new(move |held| r(held)),
+    }
 }
 
 /// Borrow native UInt32 storage without materialising it. Other backend tokens decline.
@@ -2142,6 +2148,22 @@ pub fn fill_indices(value: Option<i64>, queue: &Queue, pipelines: &pipelines::T,
         let r = encode_fill(&encoder, pipelines, value, buffer, count);
         let _ = b::end_compute(&encoder);
         r
+    })
+}
+
+pub fn fill_float_indices(queue: &Queue, pipelines: &pipelines::T, buffer: &Buffer, count: i64) -> Result<(), Diagnostic> {
+    if count < 0 || count > u32::MAX as i64 || count > b::buffer_size(buffer) / 4 { return Err(e_gpu("Float range exceeds its buffer capacity.")); }
+    if count == 0 { return Ok(()); }
+    let compiled = pipelines::get(pipelines, kernels::float_indices())?;
+    one_pass(queue, &|commands| {
+        let encoder = gpu(b::compute_encoder(commands))?;
+        let result = (|| {
+            gpu(b::set_pipeline(&encoder, &compiled.pipeline))?;
+            gpu(b::set_buffer(&encoder, 0, buffer))?;
+            gpu(b::set_bytes(&encoder, 1, &(count as u32).to_le_bytes()))?;
+            gpu(b::dispatch_threads(&encoder, (count, 1, 1), (256, 1, 1)))
+        })();
+        result.and(gpu(b::end_compute(&encoder)))
     })
 }
 

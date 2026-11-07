@@ -544,14 +544,15 @@ fn proxy_residency(shared: &Arc<Shared>, real: &Arc<G::Backend>, fast: bool) -> 
             reap_scopes();
             let scope = (r.residency)(fast).map(|scope| {
                 let id = NEXT_SCOPE.fetch_add(1, Ordering::SeqCst);
+                let incidence = scope.incidence.clone();
                 SCOPES.with(|s| s.borrow_mut().insert(id, Rc::new(scope)));
-                id
+                (id, incidence)
             });
             Box::new(scope) as Box<dyn Any + Send>
         }),
     )
     .ok()?;
-    let id = (*made.downcast::<Option<i64>>().expect("route type"))?;
+    let (id, incidence) = (*made.downcast::<Option<(i64, G::IncidenceBuilder)>>().expect("route type"))?;
     let guard = Arc::new(ScopeGuard(id));
     let s = shared.clone();
     let value_opt = |s: &Arc<Shared>, g: &Arc<ScopeGuard>| (s.clone(), g.clone());
@@ -641,6 +642,22 @@ fn proxy_residency(shared: &Arc<Shared>, real: &Arc<G::Backend>, fast: bool) -> 
     };
     Some(G::Residency {
         executor: Arc::new(executor),
+        pack_planes: {
+            let (s, g) = value_opt(&s, &guard);
+            Box::new(move |values| {
+                let (values, g) = (values.clone(), g.clone());
+                ready_first(&s, g.0);
+                route_value_opt(&s, false, Box::new(move || scope_of(g.0).and_then(|r| (r.pack_planes)(&values))))
+            })
+        },
+        incidence: {
+            let s = s.clone();
+            Arc::new(move |points, streams| {
+                let incidence = incidence.clone();
+                route(&s, false, Box::new(move || Box::new(incidence(points, streams)) as Box<dyn Any + Send>))
+                    .and_then(|b| *b.downcast::<Result<Option<G::Incidence>, Diagnostic>>().expect("route type"))
+            })
+        },
         retain_uint32: Box::new(move |value: &Value| {
             let (value, g) = (value.clone(), g14.clone());
             ready_first(&s14, g.0);

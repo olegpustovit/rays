@@ -274,8 +274,11 @@ fn holders() {
     let first = dispatch();
     let neutral = run::integers(&first);
     assert!(neutral.count == first.count);
+    assert!((neutral.resident)().is_none(), "an unsettled stream was published");
     assert!(run::pin_integers(&neutral).is_none());
     tp::ok((first.settle)());
+    let resident = run::integers(&first).resident;
+    assert!(resident().is_some());
     assert_eq!(run::Private::readback_bytes(&r), 0);
     let (_, count, valid, unpin) = run::pin_integers(&neutral).expect("pin");
     assert!(count == 1025 && valid());
@@ -289,6 +292,7 @@ fn holders() {
     }
     assert_eq!(run::Private::readback_bytes(&r), 1025 * 4);
     assert_eq!(run::Private::materialisations(&r), 1);
+    assert!(resident().is_none(), "a materialised stream retained an opaque device input");
     assert!(valid());
     unpin();
     unpin();
@@ -547,7 +551,7 @@ fn resident_inputs() {
     let holder = tp::ok(run::keep_uint32(&output, None));
     tp::ok((holder.settle)());
     let native = run::integers(&holder);
-    let numeric = phost::floats(native.resident.as_ref().expect("resident integer input")).unwrap().unwrap();
+    let numeric = phost::floats(&(native.resident)().expect("resident integer input")).unwrap().unwrap();
     assert!(run::uint32_input(&numeric));
     let h = host::create(&|| 0., &lease);
     for gather in [false, true] {

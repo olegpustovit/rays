@@ -679,7 +679,6 @@ pub mod chain {
     pub struct State {
         pub sites: HashMap<String, Samples>,
         pub last: HashMap<String, (i64, i64)>,
-        pub materialise: f64,
     }
 
     static REGISTRY: Mutex<Vec<(Weak<Gpu::Backend>, Arc<Mutex<State>>)>> = Mutex::new(Vec::new());
@@ -691,7 +690,7 @@ pub mod chain {
         if let Some((_, state)) = registry.iter().find(|(weak, _)| weak.upgrade().is_some_and(|b| Arc::ptr_eq(&b, backend))) {
             return state.clone();
         }
-        let state = Arc::new(Mutex::new(State { sites: HashMap::new(), last: HashMap::new(), materialise: f64::INFINITY }));
+        let state = Arc::new(Mutex::new(State { sites: HashMap::new(), last: HashMap::new() }));
         registry.push((Arc::downgrade(backend), state.clone()));
         state
     }
@@ -714,23 +713,6 @@ pub mod chain {
             }
             Value::Record(fields) => fields.iter().rev().find_map(|(_, v)| site_of(v)),
             _ => None,
-        }
-    }
-
-    /// what a CPU reader of the mesh forces: positions, topology and every attribute
-    pub fn force_host(geometry: &rdk::geometry::T) {
-        let positions = rdk::geometry::positions(geometry);
-        if rdk::packed::Float3::length(positions) > 0 {
-            let _ = rdk::packed::Float3::get(positions, 0);
-        }
-        let topology = rdk::geometry::topology(geometry);
-        if rdk::topology::primitive_count(topology) > 0 {
-            let _ = rdk::topology::point_of_vertex(topology, 0);
-            let _ = rdk::topology::primitive_vertex_range(topology, 0);
-            let _ = rdk::topology::primitive_kind(topology, 0);
-        }
-        for a in rdk::geometry::attributes(geometry) {
-            let _ = rdk::attribute::storage(&a);
         }
     }
 
@@ -766,7 +748,7 @@ pub mod chain {
         Placed { route, record: Box::new(|_, _, _| {}), abandoned: Box::new(|| {}) }
     }
 
-    pub fn place(gpu: &Gpu::Config, profile: &Arc<Profile::T>, clock: &Clock, owner: (W::Path, Vec<i64>), readers: Option<i64>) -> Placed {
+    pub fn place(gpu: &Gpu::Config, profile: &Arc<Profile::T>, owner: (W::Path, Vec<i64>), readers: Option<i64>) -> Placed {
         if gpu.policy == Gpu::Policy::Qualification {
             return unplaced(Route::Device);
         }
@@ -781,12 +763,12 @@ pub mod chain {
         let gpu_c = gpu.clone();
         let device_cost = {
             let gpu = gpu.clone();
-            move |state: &State, samples: &Samples, floats: i64| -> Option<f64> {
+            move |samples: &Samples, floats: i64| -> Option<f64> {
                 let moved = Cost::readback(Some(&gpu), floats, 1);
                 let rate = |r: f64, fallback: f64| if r < f64::INFINITY { r * floats as f64 } else { fallback };
                 let (_, resident_sink) = gpu.backend.as_ref().map_or((f64::INFINITY, f64::INFINITY), ak::Display_sink::rates);
                 ak::Display_sink::priced(&samples.device, floats).map(|s| {
-                    s + rate(resident_sink, 0.0) + if readers.unwrap_or(0) == 0 { 0.0 } else { rate(state.materialise, moved) }
+                    s + rate(resident_sink, 0.0) + if readers.unwrap_or(0) == 0 { 0.0 } else { moved }
                 })
             }
         };
@@ -802,7 +784,7 @@ pub mod chain {
                 let rate = |r: f64, fallback: f64| if r < f64::INFINITY { r * floats as f64 } else { fallback };
                 let (host_sink, _) = gpu.backend.as_ref().map_or((f64::INFINITY, f64::INFINITY), ak::Display_sink::rates);
                 let cpu_seconds = ak::Display_sink::priced(&samples.cpu, floats).map(|s| s + rate(host_sink, moved));
-                let device_seconds = device_cost(st, samples, floats);
+                let device_seconds = device_cost(samples, floats);
                 let reason = Cost::choose(cpu_seconds, device_seconds, false, cpu_consumers);
                 report(Some(points), reason, cpu_seconds, device_seconds);
                 reason
@@ -824,7 +806,7 @@ pub mod chain {
         };
         let evidence = Arc::new(evidence);
         let record: Box<dyn Fn(&rdk::geometry::T, bool, f64) + Send + Sync> = {
-            let (state, site, clock, evidence, decide) = (state.clone(), site.clone(), clock.clone(), evidence.clone(), decide.clone());
+            let (state, site, evidence, decide) = (state.clone(), site.clone(), evidence.clone(), decide.clone());
             Box::new(move |geometry: &rdk::geometry::T, device: bool, seconds: f64| {
                 let Some(state) = &state else { return };
                 let points = rdk::geometry::point_count(geometry);
@@ -833,21 +815,8 @@ pub mod chain {
                     return;
                 }
                 evidence(state);
-                let materialise = {
-                    let n_device = state.lock().unwrap().sites.get(&site).map_or(0, |s| s.device.len());
-                    if device && readers.is_some_and(|n| n > 0) && n_device < 2 {
-                        let began = clock();
-                        force_host(geometry);
-                        Some((clock() - began) / floats as f64)
-                    } else {
-                        None
-                    }
-                };
                 {
                     let mut st = state.lock().unwrap();
-                    if let Some(r) = materialise {
-                        st.materialise = st.materialise.min(r);
-                    }
                     let sample = (floats, seconds / floats as f64);
                     let samples = st.sites.get_mut(&site).unwrap();
                     let keep = |l: &Vec<(i64, f64)>| -> Vec<(i64, f64)> { std::iter::once(sample).chain(l.iter().take(7).copied()).collect() };
@@ -898,7 +867,7 @@ pub mod chain {
                                 let budget = {
                                     let st = state.lock().unwrap();
                                     let samples = st.sites.get(&site).unwrap();
-                                    Cost::probe_budget(device_cost(&st, samples, floats).unwrap_or(0.0))
+                                    Cost::probe_budget(device_cost(samples, floats).unwrap_or(0.0))
                                 };
                                 let abandoned: Box<dyn Fn() + Send + Sync> = {
                                     let (state, site, decide) = (state.clone(), site.clone(), decide.clone());
@@ -1153,14 +1122,11 @@ fn mesh_cook(
 ) -> R<node::GeometryCooked> {
     let cancelled = || sctx::cancelled(context);
     let error = || Err(fail("E_CANCELLED", "Mesh kernel cancelled."));
-    // planes never stay resident (`mesh_resident` keeps Vec3 points), so a device cook of them
-    // reads its topology back: a static one, cooked once, has nothing to win
-    let eligible = !env.reference && env.gpu.fast && (operation == "sop/mesh" || (operation == "sop/mesh_planes" && E::frame_dependent(data)));
+    let eligible = !env.reference && env.gpu.fast && matches!(operation, "sop/mesh" | "sop/mesh_planes");
     let placed = if eligible {
         chain::place(
             &env.gpu,
             &env.profile,
-            &env.clock,
             chain::site_of(&Value::Record(args.to_vec())).unwrap_or((vec![operation.to_owned()], Vec::new())),
             sctx::cpu_consumers(context, node_id),
         )
@@ -4004,7 +3970,7 @@ struct HostLowering {
 fn structural_cook(env: &StructEnv, node_id: i64, context: &sctx::T, payloads: &[payload::T]) -> R<node::Cooked> {
     let eligible = !env.reference && env.gpu.fast && env.state_slots == 0;
     let placed = if eligible {
-        chain::place(&env.gpu, &env.profile, &env.clock, chain::site_of(&Value::Residual(env.residual)).expect("a residual has a site"), sctx::cpu_consumers(context, node_id))
+        chain::place(&env.gpu, &env.profile, chain::site_of(&Value::Residual(env.residual)).expect("a residual has a site"), sctx::cpu_consumers(context, node_id))
     } else {
         chain::unplaced(chain::Route::Cpu)
     };

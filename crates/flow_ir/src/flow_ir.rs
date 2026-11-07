@@ -95,11 +95,22 @@ pub mod Gpu {
 
     pub struct Integers {
         pub count: i64,
-        pub resident: Option<super::Value>,
+        /// Unread, live device storage; a materialised or released stream declines.
+        pub resident: Box<dyn Fn() -> Option<super::Value> + Send + Sync>,
         pub storage: Option<IntegerStorage>,
         pub materialise: Box<dyn Fn() -> Vec<i64> + Send + Sync>,
         pub release: Box<dyn Fn(bool) + Send + Sync>,
     }
+
+    pub struct Incidence {
+        pub point_offsets: Arc<Integers>,
+        pub point_vertices: Arc<Integers>,
+        pub primitive_of_vertex: Arc<Integers>,
+        pub first: Arc<Integers>,
+        pub corners: Arc<Integers>,
+    }
+
+    pub type IncidenceBuilder = Arc<dyn Fn(i64, [Arc<Integers>; 3]) -> Result<Option<Incidence>, Diagnostic> + Send + Sync>;
 
     /// A backend-neutral resident value scope. Validate topology before retaining its fields;
     /// retain final streams before closing the executor. `None` declines an unsupported stream.
@@ -107,6 +118,9 @@ pub mod Gpu {
         pub executor: Arc<core_exec::Resident>,
         pub retain_uint32: Box<dyn Fn(&super::Value) -> Option<Integers>>,
         pub retain_float: Box<dyn Fn(&super::Value) -> Option<Planes>>,
+        pub pack_planes: Box<dyn Fn(&[super::Value; 3]) -> Result<Option<super::Value>, Diagnostic>>,
+        /// May be called after closing the executor; its retained input streams own the data.
+        pub incidence: IncidenceBuilder,
         /// point_count, vertices, offsets, kinds, max_polygon_size
         pub validate_topology: Box<dyn Fn(i64, &super::Value, &super::Value, &super::Value, i64) -> Option<Result<(), Diagnostic>>>,
         /// Commits the scope's encoded work and says, without waiting, whether the device has
@@ -943,6 +957,10 @@ impl Qualifier {
         let Ok(view) = e::Residual::residual_view(residual) else { return false };
         let value = Value::Residual(residual);
         if view.context != context::sop() || e::frame_dependent(&value) || e::state_dependent(&value) { return false; }
+        if matches!(view.term.node, w::Node::Op(id) if matches!(view.term.name(view.term.arena().op(id).op), "array/range" | "array/int" | "array/float" | "array/vec3" | "array/vec4")) {
+            Profile::deferred();
+            return true;
+        }
         match packed::compile(&packed::CompileOptions::default(), residual, &view.term) {
             None => false,
             Some(_) => {

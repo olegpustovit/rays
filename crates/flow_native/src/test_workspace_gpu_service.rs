@@ -121,6 +121,8 @@ let owner: Arc<dyn Fn() + Send + Sync> = {        let calls = calls.clone();    
             assert!(fast);
 let mut os: Vec<Arc<dyn Fn() + Send + Sync>> = (0..16).map(|_| owner.clone()).collect();            let (o16, o15, o14, o13, o12, o11, o10, o9, o8, o7, o6, o5, o4, o3, o2, o1) = (os.pop().unwrap(), os.pop().unwrap(), os.pop().unwrap(), os.pop().unwrap(), os.pop().unwrap(), os.pop().unwrap(), os.pop().unwrap(), os.pop().unwrap(), os.pop().unwrap(), os.pop().unwrap(), os.pop().unwrap(), os.pop().unwrap(), os.pop().unwrap(), os.pop().unwrap(), os.pop().unwrap(), os.pop().unwrap());
             Some(G::Residency {
+                pack_planes: Box::new(|_| Ok(None)),
+                incidence: Arc::new(|_, _| Ok(None)),
                 executor: Arc::new(Resident {
                     fill: Box::new(move |_, _, _| {
                         o1();
@@ -175,7 +177,7 @@ let mut os: Vec<Arc<dyn Fn() + Send + Sync>> = (0..16).map(|_| owner.clone()).co
                 }),
                 retain_uint32: Box::new(move |_| {
                     o14();
-                    Some(G::Integers { count: 1, resident: None, storage: None, materialise: Box::new(|| vec![16777217]), release: Box::new(|_| {}) })
+                    Some(G::Integers { count: 1, resident: Box::new(|| None), storage: None, materialise: Box::new(|| vec![16777217]), release: Box::new(|_| {}) })
                 }),
                 retain_float: Box::new(move |_| {
                     o15();

@@ -1847,7 +1847,7 @@ impl Ctx {
                 Arc::new(move |st| {
                     let mut result = None;
                     if let Some(r) = st.resident.clone() {
-                        if st.resident_on && program.locals[ix(n)] == Ty::Array(Box::new(Ty::Int)) {
+                        if st.resident_on && matches!(&program.locals[ix(n)], Ty::Array(t) if matches!(**t, Ty::Int | Ty::Float)) {
                             let length = op::array_count(Some(op::MAX_WOSIZE), "array/range", &st.values[ix(count)])? as i64;
                             result = (r.range)(&program.locals[ix(n)], &Value::Int(length), 1, length)?;
                         }

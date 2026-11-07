@@ -86,7 +86,7 @@ fn constant_arrays() {
     let host = flow_gpu::host::create(&|| 0., &gpu);
     for count in [0, 1, 1025] {
         for (kind, literal, row) in [("float", "-0.", vec![-0.]), ("vec3", "[1.25 -0. -3.]", vec![1.25, -0., -3.]),
-            ("vec4", "[1. -2. 3. -4.]", vec![1., -2., 3., -4.])]
+            ("vec4", "[1. -2. 3. -4.]", vec![1., -2., 3., -4.]), ("range", ":type \"float\"", vec![0.])]
         {
             let body = format!("(array/{kind} (int/add {count} (frame/index)) {literal})");
             let ws = common::test_program::check_workspace(&format!("(workspace w (graph g :context value (let* [tested {body}] 0.)))"));
@@ -105,7 +105,8 @@ fn constant_arrays() {
             assert_eq!((kept.count, kept.width), (count, row.len() as i64));
             let planes = (kept.materialise)();
             for (column, expected) in planes.iter().zip(row) {
-                assert_eq!(column.iter().map(|x| x.to_bits()).collect::<Vec<_>>(), vec![f64::to_bits(expected); count as usize]);
+                let expected = if kind == "range" { (0..count).map(|i| (i as f64).to_bits()).collect() } else { vec![f64::to_bits(expected); count as usize] };
+                assert_eq!(column.iter().map(|x| x.to_bits()).collect::<Vec<_>>(), expected);
             }
             (kept.release)(false);
         }

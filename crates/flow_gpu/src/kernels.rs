@@ -95,6 +95,15 @@ pub fn indices() -> &'static Kernel {
     })
 }
 
+pub fn float_indices() -> &'static Kernel {
+    static KERNEL: std::sync::OnceLock<Kernel> = std::sync::OnceLock::new();
+    KERNEL.get_or_init(|| {
+        let (source, bytes) = shader!("float_indices");
+        Kernel { source: source.to_owned(), spirv: spirv(bytes, &range(2)), entry: "write_float_indices".to_owned(),
+            uniform_bytes: 4, interface: interface(2, 1), ..compaction().clone() }
+    })
+}
+
 pub fn triangles() -> &'static Kernel {
     static KERNEL: std::sync::OnceLock<Kernel> = std::sync::OnceLock::new();
     KERNEL.get_or_init(|| {

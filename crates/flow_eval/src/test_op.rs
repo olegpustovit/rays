@@ -226,6 +226,29 @@ fn checked(ops: &[Op], body: &str) -> W::Workspace {
 fn value_of(body: &str) -> Value { result_of(&run0(&checked(&[], body)), "g") }
 
 #[test]
+fn large_array_constructors_defer_through_compiled_scalar_calls() {
+    for body in [
+        "(array/range 5000 :type int)",
+        "(array/float 5000 -0.)",
+        "(array/vec3 5000 [1. -0. 3.])",
+        "(array/vec4 5000 [1. 2. 3. 4.])",
+        "(let* [make (fn [(n : int)] (array/int n 7))] (make 5000))",
+    ] {
+        let workspace = checked(&[], body);
+        let handlers = ResidualHandlers { defer: Some(Arc::new(|_| true)), ..Default::default() };
+        let deferred = Residual::handle(handlers, &mut || Host::static_with_requests(None, false, None, &workspace)).unwrap();
+        let value = result_of(&deferred, "g");
+        assert!(matches!(value, Value::Residual(_)), "eager constant array: {body}");
+        assert_eq!(Host::force_reference(&value, &input::at_time(0.), None, None, None).unwrap(), value_of(body));
+    }
+    let invalid = checked(&[], "(array/int 1152921504606846976 0)");
+    let expected = Host::static_with_requests(None, false, None, &invalid).err().unwrap();
+    let handlers = ResidualHandlers { defer: Some(Arc::new(|_| true)), ..Default::default() };
+    let actual = Residual::handle(handlers, &mut || Host::static_with_requests(None, false, None, &invalid)).err().unwrap();
+    assert_eq!((actual.code, actual.message), (expected.code, expected.message));
+}
+
+#[test]
 fn high_integers_stay_exact_end_to_end() {
     let high = (1i64 << 53) + 1;
     let text = high.to_string();

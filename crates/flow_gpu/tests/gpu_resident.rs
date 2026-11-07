@@ -328,7 +328,8 @@ fn host_counters() {
         let evicted = host::stats(&h);
         assert!(evicted.runners_created >= 65);
         assert_eq!(evicted.runners_released, evicted.runners_created - 64);
-        assert_eq!((evicted.pipeline_compilations, evicted.status_reads), (1, 65));
+        // The program and its shared device-generated float range each compile once.
+        assert_eq!((evicted.pipeline_compilations, evicted.status_reads), (2, 65));
         assert_eq!(evicted.buffer_creations, 65 * initial.buffer_creations);
         assert_eq!(evicted.input_uploads, 65 * initial.input_uploads);
         assert_eq!(evicted.input_uploaded_bytes, 65 * initial.input_uploaded_bytes);
@@ -345,7 +346,7 @@ fn host_counters() {
         let closed = host::stats(&h);
         assert_eq!(closed.runners_created, renewed.runners_created);
         assert_eq!(closed.runners_released, closed.runners_created);
-        assert_eq!((closed.pipeline_compilations, closed.pipeline_releases), (1, 1));
+        assert_eq!((closed.pipeline_compilations, closed.pipeline_releases), (2, 2));
         assert_eq!(closed.status_reads, renewed.status_reads);
         assert_eq!(closed.readback_bytes, initial.readback_bytes);
         assert_eq!(closed.buffer_creations, renewed.buffer_creations);

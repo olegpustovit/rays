@@ -1,6 +1,6 @@
 //! Port of lib/flow_sop/topology_kernel_impl.ml: topology data sources over cooked geometry, the
 //! mesh constructor (host and device-resident), `sop/remap` and `sop/concat`.
-use flow_ir::flow_ir::Gpu::{Integers, Planes, Residency};
+use flow_ir::flow_ir::Gpu::{self, Integers, Planes, Residency};
 use flow_syntax::ty::{self, Ty};
 use flow_syntax::value::{self, Value};
 use rays_diagnostic::Diagnostic;
@@ -9,7 +9,7 @@ use rdk::packed::{Deferred, Float3};
 use rdk::{analysis, attribute, cancel, edge_group, error, group, point_index, topology, topology_index};
 use rdk_core::{polygon_triangulation, topology_remap as remap_core};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 pub type Args = [(String, Value)];
 pub type Positions = Box<dyn Fn() -> Result<Float3::T, Diagnostic> + Send + Sync>;
@@ -421,6 +421,9 @@ pub struct ResidentTopology {
     pub vertices: Arc<Integers>,
     pub offsets: Arc<Integers>,
     pub kinds: Arc<Integers>,
+    point_count: i64,
+    incidence: OnceLock<Result<Option<Gpu::Incidence>, Diagnostic>>,
+    build_incidence: Gpu::IncidenceBuilder,
 }
 impl Deferred::Holder for ResidentTopology {}
 
@@ -454,7 +457,7 @@ pub fn resident_points_of(holder: &Arc<dyn Deferred::Holder>) -> Option<Arc<Resi
 
 /// Unread resident vertex points, primitive offsets and kinds, with their logical lengths. Counts
 /// and holder lookup do not materialise topology.
-pub fn resident(geometry: &Geometry) -> Option<(Arc<Integers>, Arc<Integers>, Arc<Integers>)> {
+fn resident_topology(geometry: &Geometry) -> Option<Arc<ResidentTopology>> {
     let topology = geometry::topology(geometry);
     let holder = topology::holder(topology)?;
     let at = address(&holder);
@@ -466,10 +469,37 @@ pub fn resident(geometry: &Geometry) -> Option<(Arc<Integers>, Arc<Integers>, Ar
         && found.offsets.count == topology::primitive_count(topology) + 1
         && found.kinds.count == topology::primitive_count(topology)
     {
-        Some((found.vertices.clone(), found.offsets.clone(), found.kinds.clone()))
+        Some(found)
     } else {
         None
     }
+}
+
+pub fn resident(geometry: &Geometry) -> Option<(Arc<Integers>, Arc<Integers>, Arc<Integers>)> {
+    resident_topology(geometry).map(|h| (h.vertices.clone(), h.offsets.clone(), h.kinds.clone()))
+}
+
+/// A topology source bound directly by a device consumer. The CPU resolver remains materialising.
+pub fn resident_source(geometry: &Geometry, operation: &str, component: &str) -> Option<(Value, i64)> {
+    let holder = resident_topology(geometry)?;
+    let stream = match (operation, component) {
+        ("sop/topology", "vertex_points") => &holder.vertices,
+        ("sop/topology", "primitive_offsets") => &holder.offsets,
+        ("sop/topology", "kinds") => &holder.kinds,
+        ("sop/adjacency", "point_vertex_offsets" | "point_vertices" | "primitive_of_vertex") | ("sop/fans", "first" | "corners") => {
+            let index = holder.incidence.get_or_init(|| (holder.build_incidence)(holder.point_count, [holder.vertices.clone(), holder.offsets.clone(), holder.kinds.clone()]));
+            let index = index.as_ref().ok()?.as_ref()?;
+            match component {
+                "point_vertex_offsets" => &index.point_offsets,
+                "point_vertices" => &index.point_vertices,
+                "primitive_of_vertex" => &index.primitive_of_vertex,
+                "first" => &index.first,
+                _ => &index.corners,
+            }
+        }
+        _ => return None,
+    };
+    (stream.resident)().map(|value| (value, stream.count))
 }
 
 /// A host topology beside points the device computes: built here, so the points stay where they are.
@@ -482,7 +512,7 @@ fn host_topology(point_count: i64, vertices: &[i64], offsets: &[i64], kinds: &[i
 }
 
 /// A topology that depends on nothing a frame changes, kept from its mesh's first device cook by the
-/// mesh's data (the same value while its node lives), as host data.
+/// mesh's data (the same value while its node lives). Its owners keep the storage alive.
 enum StaticKey {
     Floats(Weak<Vec<f64>>),
     Ints(Weak<Vec<i64>>),
@@ -492,7 +522,7 @@ enum StaticKey {
 struct StaticTopology {
     key: StaticKey,
     point_count: i64,
-    topology: topology::T,
+    topology: topology::WeakTopology,
 }
 static STATIC_TOPOLOGIES: Mutex<Vec<StaticTopology>> = Mutex::new(Vec::new());
 
@@ -522,8 +552,8 @@ fn key_of(value: &Value) -> Option<StaticKey> {
 
 fn find_static(key: &Value) -> Option<(i64, topology::T)> {
     let mut all = STATIC_TOPOLOGIES.lock().unwrap();
-    all.retain(|entry| !key_dead(&entry.key));
-    all.iter().find(|entry| key_matches(&entry.key, key)).map(|entry| (entry.point_count, entry.topology.clone()))
+    all.retain(|entry| !key_dead(&entry.key) && topology::upgrade(&entry.topology).is_some());
+    all.iter().find(|entry| key_matches(&entry.key, key)).and_then(|entry| topology::upgrade(&entry.topology).map(|t| (entry.point_count, t)))
 }
 
 /// Whether a static mesh's topology is kept already: its cook need not compute it again.
@@ -531,21 +561,16 @@ pub fn static_cached(key: &Value) -> bool {
     find_static(key).is_some()
 }
 
-fn keep_static(key: &Value, point_count: i64, topology: topology::T) {
+fn keep_static(key: &Value, point_count: i64, topology: &topology::T) {
     let Some(stored) = key_of(key) else { return };
     let mut all = STATIC_TOPOLOGIES.lock().unwrap();
-    all.retain(|entry| !key_dead(&entry.key));
+    all.retain(|entry| !key_dead(&entry.key) && topology::upgrade(&entry.topology).is_some());
     all.retain(|entry| !key_matches(&entry.key, key));
     // ponytail: 64 meshes, oldest dropped
     if all.len() >= 64 {
         all.remove(0);
     }
-    // ponytail: a residual key never dies, so only the 4 newest keep their host topology
-    while all.iter().filter(|e| matches!(e.key, StaticKey::Residual(..))).count() >= 4 {
-        let at = all.iter().position(|e| matches!(e.key, StaticKey::Residual(..))).unwrap();
-        all.remove(at);
-    }
-    all.push(StaticTopology { key: stored, point_count, topology });
+    all.push(StaticTopology { key: stored, point_count, topology: topology::downgrade(topology) });
 }
 
 fn positions_of(planes: Arc<Planes>, count: i64) -> Result<(Float3::T, Option<Arc<ResidentPoints>>), Diagnostic> {
@@ -579,6 +604,32 @@ fn count_of(scope: &Residency, value: &Value) -> Option<i64> {
 /// The device cook of a mesh: `None` leaves it to the host path. `static_key` is the mesh's data
 /// when its topology depends on nothing a frame changes.
 pub fn mesh_resident(static_key: Option<&Value>, scope: &Residency, args: &Args) -> Option<Result<Geometry, Diagnostic>> {
+    if let Some(Value::Record(fields)) = arg(args, "points") {
+        if fields.len() != 3 { return None; }
+        let planes: Option<Vec<Value>> = ["x", "y", "z"].iter().map(|name| arg(fields, name).filter(|v| matches!(v, Value::Float_array(_))).cloned()).collect();
+        let planes: [Value; 3] = planes?.try_into().ok()?;
+        let mut counts = Vec::new();
+        for (_, value) in fields {
+            let n = match (scope.executor.count)(value) {
+                Ok(Some(n)) => n,
+                Ok(None) => {
+                    if let Err(d) = value::validate(value) { return Some(Err(d)); }
+                    value::array_length(value).ok()? as i64
+                }
+                Err(d) => return Some(Err(d)),
+            };
+            // All fields are validated before the shape error, matching mesh_points.
+            counts.push(n);
+        }
+        if counts.iter().any(|n| *n != counts[0]) { return Some(fail("E_ARRAY_COUNT", "Mesh coordinate planes need the same element count.")); }
+        let points = match (scope.pack_planes)(&planes) {
+            Ok(Some(value)) => value,
+            Ok(None) => return None,
+            Err(d) => return Some(Err(d)),
+        };
+        let args: Vec<_> = args.iter().map(|(n, v)| (n.clone(), if n == "points" { points.clone() } else { v.clone() })).collect();
+        return mesh_resident(static_key, scope, &args);
+    }
     let cached = static_key.and_then(find_static);
     if let (Some((n, topology)), Some(points @ Value::Vec3_array(_))) = (&cached, arg(args, "points")) {
         if count_of(scope, points) == Some(*n) {
@@ -599,13 +650,7 @@ pub fn mesh_resident(static_key: Option<&Value>, scope: &Residency, args: &Args)
     }
     let remember = |topology: &topology::T, point_count: i64| {
         let Some(key) = static_key else { return };
-        // the host copy: read back once
-        let Ok(view) = topology::View::view(topology) else { return };
-        let kinds: Vec<topology::PrimitiveKind> =
-            (0..topology::primitive_count(topology)).map(|p| topology::primitive_kind(topology, p).unwrap_or(topology::PrimitiveKind::Polygon)).collect();
-        if let Ok(owned) = topology::create_owned(point_count, view.vertex_points.to_vec(), view.primitive_offsets.to_vec(), kinds) {
-            keep_static(key, point_count, owned);
-        }
+        keep_static(key, point_count, topology);
     };
     let (points, vertices, offsets, kinds) = (arg(args, "points"), arg(args, "vertex_points"), arg(args, "primitive_offsets"), arg(args, "kinds"));
     if let (Some(points @ Value::Vec3_array(_)), Some(Value::Int_array(v)), Some(Value::Int_array(o)), Some(Value::Int_array(k))) =
@@ -692,7 +737,8 @@ pub fn mesh_resident(static_key: Option<&Value>, scope: &Residency, args: &Args)
         };
         let (iv, io, ik) = (integer(&vertices)?, integer(&offsets)?, integer(&kinds)?);
         // the session keeps this: the streams' releases, not the streams
-        let holder = Arc::new(ResidentTopology { vertices: iv.clone(), offsets: io.clone(), kinds: ik.clone() });
+        let holder = Arc::new(ResidentTopology { vertices: iv.clone(), offsets: io.clone(), kinds: ik.clone(),
+            point_count, incidence: OnceLock::new(), build_incidence: scope.incidence.clone() });
         register_topology(&holder);
         let release: Deferred::Release = {
             let holder = holder.clone();
@@ -700,6 +746,9 @@ pub fn mesh_resident(static_key: Option<&Value>, scope: &Residency, args: &Args)
                 (holder.vertices.release)(held);
                 (holder.offsets.release)(held);
                 (holder.kinds.release)(held);
+                if let Some(Ok(Some(index))) = holder.incidence.get() {
+                    for stream in [&index.point_offsets, &index.point_vertices, &index.primitive_of_vertex, &index.first, &index.corners] { (stream.release)(held); }
+                }
             })
         };
         let materialise = {
@@ -1456,14 +1505,16 @@ mod static_residual {
         let other_arena = Value::Residual(value::ResidualId(9_001, 4));
         assert!(!static_cached(&key));
         let topology = topology::create_owned(3, vec![0, 1, 2], vec![0, 3], vec![topology::PrimitiveKind::Polygon]).unwrap();
-        keep_static(&key, 3, topology);
+        keep_static(&key, 3, &topology);
         assert!(static_cached(&again));
         assert!(!static_cached(&other_arena));
         for i in 0..10 {
-            keep_static(&Value::Residual(value::ResidualId(9_100 + i, 3)), 3, topology::create_owned(3, vec![0, 1, 2], vec![0, 3], vec![topology::PrimitiveKind::Polygon]).unwrap());
+            keep_static(&Value::Residual(value::ResidualId(9_100 + i, 3)), 3, &topology);
         }
         let held = STATIC_TOPOLOGIES.lock().unwrap().iter().filter(|e| matches!(e.key, StaticKey::Residual(..))).count();
-        assert!(held <= 4, "residual keys never die, so they are capped: {held}");
+        assert!(held <= 64, "weak topology cache is bounded: {held}");
+        drop(topology);
+        assert!(!static_cached(&again), "the cache retained unowned topology storage");
     }
 }
 

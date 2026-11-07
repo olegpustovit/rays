@@ -51,6 +51,11 @@ pub struct T {
 
 pub type Topology = T;
 
+pub struct WeakTopology(std::sync::Weak<Inner>);
+
+pub fn downgrade(value: &T) -> WeakTopology { WeakTopology(Arc::downgrade(&value.inner)) }
+pub fn upgrade(value: &WeakTopology) -> Option<T> { value.0.upgrade().map(|inner| T { inner }) }
+
 fn make_owned(
     point_count: i64,
     vertex_points: Vec<i64>,

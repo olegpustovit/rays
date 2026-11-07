@@ -86,6 +86,7 @@ fn sea_frames() {
     let started=std::time::Instant::now();
     let source=include_str!("../../../../sketches/gpu_sea.rays");
     let doc=Workspace::load(None,Vec::new(),None,source).unwrap_or_else(|d|panic!("{d:?}"));
+    let canvas=rays::canvas::create(320,240).unwrap();
     let gpu=wg::create(None);
     let mut editor=Editor::create(Editor::Create {gpu_owner:Some(gpu.clone()),await_:Some(true),domains:Some(1),..Default::default()},&doc,None,Editor::prepare_fn(),Editor::draw_fn()).unwrap();
     println!("sea open {:?}",started.elapsed());
@@ -100,10 +101,13 @@ fn sea_frames() {
         assert_eq!(g::primitive_count(geometry),1_996_002);
         assert!(p::resident(g::positions(geometry)),"sea positions left the GPU");
         assert!(a::holder(&attribute(geometry,"N")).is_some(),"sea normals left the GPU");
+        assert!(flow_sop::topology_kernel::resident(geometry).is_some(),"sea topology left the GPU");
+        rays::canvas::render(Some(1),&canvas,&Editor::scene(&editor,&frame)).unwrap();
+        assert!(wg::displays(&gpu)>0,"sea mesh did not bind the resident display");
         let stats=wg::image_stats(&gpu).0;
         assert_eq!(stats.payload_readback_bytes,0);
         assert_eq!(stats.bounds_readback_bytes,tick*24);
-        assert!(stats.input_uploaded_bytes<128*1024*1024,"redundant calibration uploaded the resident chain's tables again");
+        assert_eq!(stats.input_uploaded_bytes,0,"sea generated geometry through a host staging array");
         if let Some((uploads,buffers))=previous {
             assert_eq!(stats.input_uploads,uploads,"animation uploaded immutable inputs again");
             if tick>3 {assert_eq!(stats.buffer_creations,buffers,"steady animation allocated more GPU buffers");}
@@ -117,7 +121,7 @@ fn sea_frames() {
     editor=Editor::update(editor,&frame);
     println!("sea closing {:?}",rays_editor::cook::status(&editor.core.cook));
     let started=std::time::Instant::now();
-    Editor::close(&editor); wg::close(&gpu);
+    Editor::close(&editor); wg::close(&gpu); rays::canvas::destroy(&canvas).unwrap();
     println!("sea close {:?}",started.elapsed());
     assert!(started.elapsed()<std::time::Duration::from_millis(250),"closing waited for an obsolete sea cook");
 }

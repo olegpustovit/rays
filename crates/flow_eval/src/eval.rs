@@ -1377,6 +1377,27 @@ fn eval_raw(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Value, Di
     if !PROFILE_ON.load(Ordering::Relaxed) { return eval_raw_body(a, c, env, t); }
     prof_enter(t); let r = eval_raw_body(a, c, env, t); prof_exit(); r
 }
+
+fn large_constant_array(name: &str, values: &[(String, Value)]) -> bool {
+    matches!(name, "array/range" | "array/int" | "array/float" | "array/vec3" | "array/vec4")
+        && values.iter().any(|(k, v)| k == "count" && match v { Value::Int(n) => *n > MAX_ITERATIONS as i64, Value::Float(n) => *n > MAX_ITERATIONS as f64, _ => false })
+}
+fn defer_constant_array(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, name: &str, values: &[(String, Value)]) -> Result<Option<Value>, Diagnostic> {
+    if a.time.is_some() || !large_constant_array(name, values) || values.iter().any(|(_, v)| is_live_value(v)) { return Ok(None); }
+    let Some(defer) = current_residual_handlers().and_then(|h| h.defer) else { return Ok(None) };
+    let workspace = a.workspace.clone();
+    let (Some(actual), Some(builtin)) = (find_op(a, &workspace, name, &c.context), op::find_ref(&[], name, &c.context)) else { return Ok(None) };
+    if actual.live || !Arc::ptr_eq(&actual.body, &builtin.body) || !Arc::ptr_eq(&actual.check, &builtin.check) { return Ok(None); }
+    if name == "array/range" {
+        (actual.check)(values)?;
+        op::array_count(None, name, &values.iter().find(|(k, _)| k == "count").unwrap().1)?;
+    } else {
+        let Value::Source(_, _, fields) = op::constant_array_descriptor(name, values)? else { unreachable!() };
+        if !matches!(fields.first(), Some((_, Value::Int(n))) if *n > MAX_ITERATIONS as i64) { return Ok(None); }
+    }
+    let residual = make_residual(a, term, env, c, false, None);
+    Ok(call_lent(a, residual, &|id| defer(id).then_some(Value::Residual(id))))
+}
 pub static EVAL_STEPS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Value, Diagnostic> {
     EVAL_STEPS.fetch_add(1, Ordering::Relaxed);
@@ -1491,7 +1512,10 @@ fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Valu
                     let count = args[..index].iter().filter(|other| other.name == arg.name).count();
                     values[index].1 = if count == 0 { eval_named(a, c, name, env, &term)? } else { eval_sub(a, c, format!("{}#{}", name, count).into(), env, &term)? };
                 }
-                let result = apply_op_in(a, c, t.form().id, name, &mut values);
+                let result = match defer_constant_array(a, c, env, t, name, &values)? {
+                    Some(value) => Ok(value),
+                    None => apply_op_in(a, c, t.form().id, name, &mut values),
+                };
                 if values.len() == args.len() { for entry in values.iter_mut() { entry.1 = Value::No_geo; } a.arg_pool.insert(key, values); }
                 return result;
             };
@@ -4107,6 +4131,7 @@ impl Run {
     }
     fn apply(&mut self, a: &Arena, op: OpRef, values: &[(String, Value)], named: &[bool]) -> Result<Value, Abandon> {
         let found = op_at(&self.workspace, op);
+        if a.time.is_none() && large_constant_array(&found.name, values) && current_residual_handlers().is_some_and(|h| h.defer.is_some()) { return Err(Abandon); }
         (found.check)(values).map_err(|_| Abandon)?;
         let mut types: [Ty; 4] = [Ty::Any, Ty::Any, Ty::Any, Ty::Any];
         let mut count = 0;

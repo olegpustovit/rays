@@ -1066,12 +1066,13 @@ pub fn install_deferred(owner: Owner, kind: &str, name: &str, planes: &Arc<Gpu::
 /// placeholder and count, which the device binds to the held buffer without reading it back.
 fn resident_read(geometry: &GeometryLookup, value: &Value) -> Option<(Value, i64)> {
     let (Value::Struct(name, _, args) | Value::Source(name, _, args)) = value else { return None };
-    if name != "sop/attr" || assoc(args, "component").is_some() {
-        return None;
-    }
     let id = assoc(args, "geometry").and_then(geometry_id)?;
-    let attribute_name = assoc(args, "attribute").and_then(text_of)?;
     let g = geometry(id)?;
+    if name != "sop/attr" {
+        return topology_kernel_impl::resident_source(&g, name, &assoc(args, "component").and_then(text_of)?);
+    }
+    if assoc(args, "component").is_some() { return None; }
+    let attribute_name = assoc(args, "attribute").and_then(text_of)?;
     let (owner, kind) = options(args).ok()?;
     let holder = if owner == Owner::Point && attribute_name == "P" {
         Float3::holder(geometry::positions(&g))

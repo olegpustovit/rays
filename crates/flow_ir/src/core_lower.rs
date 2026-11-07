@@ -363,6 +363,16 @@ fn storage_argument(ty: &Ty) -> bool {
     match ty { Ty::Array(_) => true, Ty::Record(fields) => fields.iter().any(|(_, t)| storage_argument(t)), _ => false }
 }
 
+// Keep size-dependent allocation in Core: the resident executor may generate it on the device.
+fn large_array_constructor(name: &str, args: &[(String, Lowered)]) -> bool {
+    matches!(name, "array/range" | "array/int" | "array/float" | "array/vec3" | "array/vec4")
+        && args.iter().any(|(n, v)| n == "count" && match v {
+            Known(Value::Int(n)) => *n > 4096,
+            Known(Value::Float(n)) => *n > 4096.,
+            _ => false,
+        })
+}
+
 fn primitive_of_name(name: &str) -> Option<C::Primitive> {
     use C::Primitive as P;
     if let Some(op) = PO::binary(name) { return Some(P::Numeric(op)); }
@@ -1954,7 +1964,7 @@ impl Lowerer {
                     args.push((n, v.clone()));
                 }
                 match known_values(&args) {
-                    Some(known) if !o.live => {
+                    Some(known) if !o.live && !large_array_constructor(name, &args) => {
                         let nm = name.clone();
                         let _ = nm;
                         Ok(Known((o.body)(&input::at_time(0.), &|_, _| Err(refusal_diag(name)), &known)?))
@@ -2029,7 +2039,7 @@ impl Lowerer {
                 _ => false,
             }
         }
-        let prototype: Option<Value> = if o.live { None } else {
+        let prototype: Option<Value> = if o.live || (shipped(&o) && large_array_constructor(name, &largs)) { None } else {
             let proto: Vec<(String, Value)> = largs.iter().enumerate().map(|(i, (n, value))| {
                 (n.clone(), match value {
                     Known(v) => v.clone(),
@@ -2057,7 +2067,7 @@ impl Lowerer {
             return self.operation(s, source, x.ty(), name, &largs);
         }
         match known_values(&largs) {
-            Some(values) if !o.live => match (o.body)(&input::at_time(0.), &|_, _| Err(refusal_diag(name)), &values) {
+            Some(values) if !o.live && !large_array_constructor(name, &largs) => match (o.body)(&input::at_time(0.), &|_, _| Err(refusal_diag(name)), &values) {
                 Ok(v) => Ok(Known(v)),
                 Err(d) => {
                     if d.code == "$unsupported" { return Err(Stop::from(d)); }

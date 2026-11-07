@@ -86,4 +86,32 @@ macro_rules! scenario{($name:ident,$case:literal)=>{fn $name(){run_case($case,fa
 fn valid_01(){run_case("valid",true)}
 scenario!(valid_02,"valid");scenario!(valid_03,"valid");scenario!(valid_04,"valid");scenario!(valid_05,"valid");scenario!(valid_06,"valid");scenario!(valid_07,"valid");scenario!(valid_08,"valid");scenario!(valid_09,"valid");scenario!(valid_10,"valid");scenario!(valid_11,"valid");scenario!(valid_12,"valid");scenario!(valid_13,"valid");scenario!(valid_14,"valid");scenario!(valid_15,"valid");scenario!(valid_16,"valid");scenario!(valid_17,"valid");scenario!(valid_18,"valid");scenario!(valid_19,"valid");scenario!(valid_20,"valid");
 scenario!(vertex,"vertex");scenario!(negative,"negative");scenario!(missing,"missing");scenario!(start,"start");scenario!(terminal,"terminal");scenario!(order,"order");scenario!(minimum,"minimum");scenario!(length,"length");scenario!(kind,"kind");scenario!(dynamic,"dynamic");scenario!(cpu,"cpu");scenario!(cancel,"cancel");scenario!(host,"host");scenario!(host_twice,"host_twice");scenario!(host_cpu,"host_cpu");scenario!(host_cancel,"host_cancel");scenario!(host_vertex,"host_vertex");scenario!(host_points,"host_points");scenario!(host_negative,"host_negative");scenario!(host_dynamic,"host_dynamic");scenario!(overflow,"overflow");scenario!(host_overflow,"host_overflow");
-fn main(){common::window::run(&[("valid_01",valid_01),("valid_02",valid_02),("valid_03",valid_03),("valid_04",valid_04),("valid_05",valid_05),("valid_06",valid_06),("valid_07",valid_07),("valid_08",valid_08),("valid_09",valid_09),("valid_10",valid_10),("valid_11",valid_11),("valid_12",valid_12),("valid_13",valid_13),("valid_14",valid_14),("valid_15",valid_15),("valid_16",valid_16),("valid_17",valid_17),("valid_18",valid_18),("valid_19",valid_19),("valid_20",valid_20),("vertex",vertex),("negative",negative),("missing",missing),("start",start),("terminal",terminal),("order",order),("minimum",minimum),("length",length),("kind",kind),("dynamic",dynamic),("cpu",cpu),("cancel",cancel),("host",host),("host_twice",host_twice),("host_cpu",host_cpu),("host_cancel",host_cancel),("host_vertex",host_vertex),("host_points",host_points),("host_negative",host_negative),("host_dynamic",host_dynamic),("overflow",overflow),("host_overflow",host_overflow)]);}
+fn static_topology_stays_resident() {
+    assert!(common::gpu());
+    let gpu = common::lease();
+    let host = h::create(&|| 0., &gpu);
+    let config = Gpu::Config { backend: Some(Arc::new(h::backend(&host))), fast: true, policy: Gpu::Policy::Qualification, ..Gpu::default() };
+    let text = "(workspace static_mesh (graph g :context sop (sop/mesh :points (exact (map (fn [(i : int)] [(+ (float i) t) 0. 0.]) (array/range 15000 :type int))) :vertex_points (exact (array/range 15000 :type int)) :primitive_offsets (exact (map (fn [(i : int)] (int/mul i 3)) (array/range 5001 :type int))) :kinds (array/int 5000))))";
+    let lowered = lower::workspace(None, Vec::new(), lower::Options { gpu: config, defer: true, ..Default::default() }, &syntax::parse(text).unwrap()).unwrap();
+    let graph = &lowered.graphs[0];
+    let root = edit::compile_node(&graph.network.geometry, graph.root.unwrap()).unwrap();
+    let mut session = session::create(0, 0).unwrap();
+    let mut previous = None;
+    for frame in 0..4 {
+        let context = ctx::create(ctx::Options { time: Some(frame as f64), domains: Some(1), ..Default::default() }).unwrap();
+        let out = session::cook(&mut session, Some(0), &context, &root).unwrap();
+        let geometry = payload::geometry(&out.payload).unwrap();
+        assert!(Float3::resident(g::positions(&geometry)));
+        assert!(topology_kernel::resident(&geometry).is_some());
+        if let Some(old) = &previous {
+            assert_eq!(topology::data_id(g::topology(old)), topology::data_id(g::topology(&geometry)), "animated points rebuilt immutable topology");
+        }
+        assert_eq!(h::stats(&host).payload_readback_bytes, 0);
+        assert_eq!(h::stats(&host).input_uploaded_bytes, 0);
+        previous = Some(geometry);
+    }
+    drop(previous);
+    session::close(&mut session);
+    h::close(&host);
+}
+fn main(){common::window::run(&[("static_topology_stays_resident",static_topology_stays_resident),("valid_01",valid_01),("valid_02",valid_02),("valid_03",valid_03),("valid_04",valid_04),("valid_05",valid_05),("valid_06",valid_06),("valid_07",valid_07),("valid_08",valid_08),("valid_09",valid_09),("valid_10",valid_10),("valid_11",valid_11),("valid_12",valid_12),("valid_13",valid_13),("valid_14",valid_14),("valid_15",valid_15),("valid_16",valid_16),("valid_17",valid_17),("valid_18",valid_18),("valid_19",valid_19),("valid_20",valid_20),("vertex",vertex),("negative",negative),("missing",missing),("start",start),("terminal",terminal),("order",order),("minimum",minimum),("length",length),("kind",kind),("dynamic",dynamic),("cpu",cpu),("cancel",cancel),("host",host),("host_twice",host_twice),("host_cpu",host_cpu),("host_cancel",host_cancel),("host_vertex",host_vertex),("host_points",host_points),("host_negative",host_negative),("host_dynamic",host_dynamic),("overflow",overflow),("host_overflow",host_overflow)]);}
