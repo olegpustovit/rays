@@ -76,83 +76,142 @@
 
 ; Trails swept into tubes, keijiro's tube template: `positions` holds `points` points of each of
 ; `tubes` curves, step-major (point s of tube id at s * tubes + id). A ring of `sides` points of
-; `radius` turns about each point's tangent, its normal across the tangent and the radius through
-; it; `gradient` is a cosine gradient a + b cos(2 pi (c x + d)) along and across the tubes.
+; `radius` turns about each point's tangent, carrying the frame along each curve as in the original.
+; `gradient` is a cosine gradient a + b cos(2 pi (c x + d)) along and across the tubes.
 (defmacro tube-sweep [positions tubes points sides radius gradient]
   `(let* [positions# ~positions
           last# (- ~points 1)
           gradient# ~gradient
           ; the tangent at a point: its neighbours' chord, one-sided at the ends
-          tangent# (fn [(k# : int)]
-                     (let* [along# (int/div k# ~tubes)]
-                       (normalize (- (array/nth positions#
-                                                (if (< along# last#) (int/add k# ~tubes) k#))
-                                     (array/nth positions#
-                                                (if (> along# 0) (int/sub k# ~tubes) k#))))))
-          ; a point's normal: across its tangent and the radius through it, as the original frames a
-          ; tube's first point (a tangent along the radius takes any perpendicular)
-          normals# (map (fn [(k# : int)]
-                          (let* [t# (tangent# k#)
-                                 out# (cross t#
-                                             (normalize (array/nth positions# k#)))
-                                 side# (if (> (dot out# out#) 0.000001)
-                                           out#
-                                           (cross t# [0.0 1.0 0.0]))]
-                            (normalize (cross side# t#))))
-                        (array/range (* ~tubes ~points) :type int))
+          tangents# (map (fn [(k# : int)]
+                           (let* [along# (int/div k# ~tubes)]
+                             (normalize (- (array/nth positions#
+                                                      (if (< along# last#) (int/add k# ~tubes) k#))
+                                           (array/nth positions#
+                                                      (if (> along# 0) (int/sub k# ~tubes) k#))))))
+                         (array/range (* ~tubes ~points) :type int))
+          ; Only seed the first ring from its position. Re-seeding every ring flips the frame
+          ; wherever the curve's tangent crosses its radial direction.
+          first# (map (fn [(k# : int)]
+                        (let* [t# (array/nth tangents# k#)
+                               out# (cross t# (normalize (array/nth positions# k#)))
+                               axis# (if (< (abs t#.y) 0.9)
+                                         [0.0 1.0 0.0]
+                                         [1.0 0.0 0.0])
+                               side# (if (> (dot out# out#) 0.000001)
+                                         out#
+                                         (cross t# axis#))]
+                          (let* [n# (normalize (cross side# t#))]
+                            [n#.x n#.y n#.z (float k#)])))
+                      (array/range ~tubes :type int))
+          ; ponytail: carry the point index in float4 so the existing one-source GPU unfold runs
+          ; a whole tube per lane. Use typed multi-source unfold above 2^24 trail points.
+          checked_first# (if (> (* ~tubes ~points) 16777216)
+                             (error "E_RANGE"
+                                    "tube-sweep supports at most 16777216 trail points")
+                             first#)
+          frames# (iterate last#
+                           {:head checked_first# :normals checked_first#}
+                           (fn [(walk# : {:head (array vec4) :normals (array vec4)})]
+                             (let* [previous_heads# walk#.head
+                                    head# (map (fn [(previous# : vec4)]
+                                                 (let* [k# (int/add (int previous#.w) ~tubes)
+                                                        b# (cross (array/nth tangents# (int/sub k# ~tubes))
+                                                                  [previous#.x previous#.y previous#.z])
+                                                        n# (normalize (cross b# (array/nth tangents# k#)))]
+                                                   [n#.x n#.y n#.z (float k#)]))
+                                               previous_heads#)]
+                               {:head head#
+                                :normals (array/concat walk#.normals head#)})))
+          normal_history# frames#.normals
+          normals# (map (fn [(n# : vec4)] [n#.x n#.y n#.z]) normal_history#)
           rings# (* (* ~tubes ~points) ~sides)
+          vertices# (+ rings# (* ~tubes 2))
+          ; Body vertices are followed by one centre point for each end cap.
+          ring-of# (fn [(v# : int)]
+                     (if (< v# rings#)
+                         (int/div v# ~sides)
+                         (let* [cap# (int/sub v# rings#)]
+                           (int/add (* (int/div cap# 2) ~points)
+                                    (if (= (mod cap# 2) 0) 0 last#)))))
           ; a ring point's outward normal: the tube's normal turned by its angle about the tangent
           around# (fn [(v# : int)]
-                    (let* [ring# (int/div v# ~sides)
+                    (let* [ring# (ring-of# v#)
                            ; rings are tube-major for the mesh, points step-major
                            k# (int/add (* (mod ring# ~points) ~tubes)
                                        (int/div ring# ~points))
                            phi# (* (/ (float (mod v# ~sides)) ~sides)
                                    6.283185307179586)
                            n# (array/nth normals# k#)]
-                      (+ (* n# (cos phi#)) (* (cross (tangent# k#) n#) (sin phi#)))))
-          ring_normals# (map around# (array/range rings# :type int))
+                      (if (< v# rings#)
+                          (+ (* n# (cos phi#))
+                             (* (cross (array/nth tangents# k#) n#) (sin phi#)))
+                          (* (array/nth tangents# k#)
+                             (if (= (mod (int/sub v# rings#) 2) 0) -1.0 1.0)))))
+          ring_normals# (map around# (array/range vertices# :type int))
           ; a ring point is its curve's point pushed out along its normal
           ring_points# (map (fn [(v# : int) (n# : vec3)]
-                              (let* [ring# (int/div v# ~sides)
+                              (let* [ring# (ring-of# v#)
                                      k# (int/add (* (mod ring# ~points) ~tubes)
                                                  (int/div ring# ~points))]
-                                (+ (array/nth positions# k#) (* n# ~radius))))
-                            (array/range rings# :type int)
+                                (+ (array/nth positions# k#)
+                                   (* n# (if (< v# rings#) ~radius 0.0)))))
+                            (array/range vertices# :type int)
                             ring_normals#)
           ; keijiro's cosine gradient, a + b cos(2 pi (c x + d)), over the tube and along it, to linear
           colors# (map (fn [(v# : int)]
-                         (let* [ring# (int/div v# ~sides)
+                         (let* [ring# (ring-of# v#)
                                 x# (+ (/ (float (mod ring# ~points)) ~points)
                                       (/ (float (int/div ring# ~points)) ~tubes))
                                 wave# [(cos (* 6.283185307179586 (+ (* gradient#.c.x x#) gradient#.d.x))) (cos (* 6.283185307179586 (+ (* gradient#.c.y x#) gradient#.d.y))) (cos (* 6.283185307179586 (+ (* gradient#.c.z x#) gradient#.d.z)))]
                                 c# (+ gradient#.a
                                       [(* gradient#.b.x wave#.x) (* gradient#.b.y wave#.y) (* gradient#.b.z wave#.z)])]
                            [(pow (min (max c#.x 0.0) 1.0) 2.2) (pow (min (max c#.y 0.0) 1.0) 2.2) (pow (min (max c#.z 0.0) 1.0) 2.2)]))
-                       (array/range rings# :type int))
+                       (array/range vertices# :type int))
           ; each segment of a ring is a quad of two triangles, as the original's tube template
           quads# (* (* ~tubes last#) ~sides)
-          triangles# (* quads# 2)
+          body_triangles# (* quads# 2)
+          triangles# (+ body_triangles# (* (* ~tubes 2) ~sides))
+          body_corner# (fn [(w# : int)]
+                         (let* [triangle# (int/div w# 3)
+                                q# (int/div triangle# 2)
+                                ; triangles (0 1 2) and (0 2 3) of the quad's corners
+                                k# (mod w# 3)
+                                corner# (if (= k# 0)
+                                            0
+                                            (int/add k# (mod triangle# 2)))
+                                side# (mod q# ~sides)
+                                segment# (int/div q# ~sides)
+                                id# (int/div segment# last#)
+                                base# (* (int/add (* id# ~points)
+                                                  (mod segment# last#))
+                                         ~sides)
+                                next_side# (mod (int/add side# 1) ~sides)
+                                offset_side# (if (or (= corner# 0) (= corner# 3))
+                                                 side#
+                                                 next_side#)
+                                offset_ring# (if (< corner# 2) 0 ~sides)]
+                           (int/add (int/add base# offset_ring#) offset_side#)))
+          cap_corner# (fn [(w# : int)]
+                        (let* [triangle# (int/div w# 3)
+                               cap# (int/div triangle# ~sides)
+                               side# (mod triangle# ~sides)
+                               next# (mod (int/add side# 1) ~sides)
+                               k# (mod w# 3)
+                               head# (= (mod cap# 2) 0)
+                               base# (* (int/add (* (int/div cap# 2) ~points)
+                                                 (if head# 0 last#))
+                                        ~sides)]
+                          (if (= k# 0)
+                              (int/add rings# cap#)
+                              (int/add base#
+                                       (if (= k# 1)
+                                           (if head# next# side#)
+                                           (if head# side# next#))))))
           corners# (map (fn [(w# : int)]
-                          (let* [triangle# (int/div w# 3)
-                                 q# (int/div triangle# 2)
-                                 ; triangles (0 1 2) and (0 2 3) of the quad's corners
-                                 k# (mod w# 3)
-                                 corner# (if (= k# 0)
-                                             0
-                                             (int/add k# (mod triangle# 2)))
-                                 side# (mod q# ~sides)
-                                 segment# (int/div q# ~sides)
-                                 id# (int/div segment# last#)
-                                 base# (* (int/add (* id# ~points)
-                                                   (mod segment# last#))
-                                          ~sides)
-                                 next_side# (mod (int/add side# 1) ~sides)
-                                 offset_side# (if (or (= corner# 0) (= corner# 3))
-                                                  side#
-                                                  next_side#)
-                                 offset_ring# (if (< corner# 2) 0 ~sides)]
-                            (int/add (int/add base# offset_ring#) offset_side#)))
+                          (if (< w# (* body_triangles# 3))
+                              (body_corner# w#)
+                              (cap_corner# (int/sub w# (* body_triangles# 3)))))
                         (array/range (* triangles# 3) :type int))
           mesh# (sop/mesh :points (exact ring_points#)
                           :vertex_points (exact corners#)

@@ -77,7 +77,91 @@ const TRAIL: &str = r###"(workspace trail
                 :kinds (exact (array/int triangles 0))))))"###;
 
 pub fn cases()->Vec<(&'static str,fn())> {
-    vec![("native_live_mesh",live_mesh),("native_holder_frames",holder_frames),("native_sea_frames",sea_frames),("native_sea_initial_close",sea_initial_close),("native_orrery_frames",orrery_frames)]
+    vec![("native_voxel_neighbors",voxel_neighbors),("native_swarm_frames",swarm_frames),("native_live_mesh",live_mesh),("native_holder_frames",holder_frames),("native_sea_frames",sea_frames),("native_sea_initial_close",sea_initial_close),("native_orrery_frames",orrery_frames)]
+}
+
+fn voxel_neighbors() {
+    assert!(super::common::gpu());
+    let prefix=MESH.split("faces (array/compact").next().unwrap().replace("%d","8");
+    let text=format!(r#"{prefix} result (map (fn [(face : int)] (let* [index (int/div face 6) p (cell index side)
+      delta (nth directions (mod face 6))]
+      [(float (array/nth voxels index)) (float (if (and (> (array/nth voxels index) 0) (= (occupied voxels side (+ p delta)) 0)) 1 0)) delta.x])) (array/range (* (* side side) (* side 6)) :type int))]
+      (sop/mesh :points (exact result) :vertex_points (array/int 0) :primitive_offsets (array/int 1) :kinds (array/int 0)))))"#);
+    let mut host=None;
+    cook(&text,None,&[0.],None,false,|_,g|host=Some(g::positions(g).clone()));
+    let gpu=wg::create(None);wg::qualification(&gpu);
+    wg::with_backend(&gpu,true,&mut |config|cook(&text,Some(config.clone()),&[0.],None,true,|_,g|same(g::positions(g),host.as_ref().unwrap())));
+    wg::close(&gpu);
+}
+
+fn swarm_frames() {
+    assert!(super::common::gpu(),"native GPU required");
+    let library=include_str!("../../../../sketches/swarm_lib.rays");
+    // An off-centre circle passes through points whose tangent is radial. Re-seeding
+    // every ring from its position flips the frame there and turns the tube inside out.
+    let text=format!(r#"(workspace frames {library}
+      (graph g :context sop
+        (let* [positions (map (fn [(i : int)]
+                                (let* [step (int/div i 2) a (* (float step) (/ 6.283185307179586 256.0))]
+                                  (if (= (mod i 2) 0)
+                                    [(+ 2.0 (cos a)) (sin a) (* t 0.1)]
+                                    [0.0 (+ 1.0 (+ (* (float step) 0.03) (* t 0.1))) 0.0])))
+                              (array/range 514 :type int))]
+          (tube-sweep positions 2 257 5 0.05
+            {{:a [(+ 0.8 (* t 0.01)) 0.4 0.2] :b [0.0 0.0 0.0] :c [1.0 1.0 1.0] :d [0.0 0.0 0.0]}}))))"#);
+    let times=[0.,1./6.];
+    let mut hosts=Vec::new();
+    cook(&text,None,&times,None,false,|_,g|hosts.push(g.clone()));
+    for host in &hosts {
+      let normals=vec3(host,"N");
+      for tube in 0..2 { for ring in 1..257 {
+        let (x,y,z)=p::get(&normals,(tube*257+ring-1)*5).unwrap();
+        let (u,v,w)=p::get(&normals,(tube*257+ring)*5).unwrap();
+        assert!((u*u+v*v+w*w-1.).abs()<1e-6,"collapsed tube frame");
+        assert!(x*u+y*v+z*w>0.98,"tube {tube} frame flipped at ring {ring}");
+      }}
+    }
+    let topo=rdk::topology::View::view(g::topology(&hosts[0])).unwrap();
+    let mut edges=std::collections::BTreeMap::new();
+    for triangle in topo.vertex_points.chunks_exact(3) {
+        for (a,b) in [(triangle[0],triangle[1]),(triangle[1],triangle[2]),(triangle[2],triangle[0])] {
+            let (count,winding)=edges.entry((a.min(b),a.max(b))).or_insert((0,0));
+            *count+=1; *winding+=if a<b {1}else{-1};
+        }
+    }
+    assert!(edges.values().all(|e|*e==(2,0)),"tube must be closed with consistent winding");
+    let gpu=wg::create(None); wg::qualification(&gpu);
+    let canvas=rays::canvas::create(128,128).unwrap();
+    let camera=rays::camera::perspective(None,None,None,rays_math::vec3::create(2.,0.,5.),rays_math::vec3::create(2.,0.,0.)).unwrap();
+    let picture=|geo:&g::T,resident:bool| {
+        let surface=rdk_rays::surface::of_geometry(None,geo).unwrap();
+        let display=|g:&g::T|binding(&gpu,g);
+        let scene=rdk_rays::surface::scene3(None,if resident {Some(&display)}else{None},&surface).unwrap();
+        rays::canvas::render(None,&canvas,&[rays::scene::clear(rays_math::color::black()),rays::scene::view3d(None,&camera,scene)]).unwrap();
+        rays::canvas::pixels(&canvas).unwrap()
+    };
+    wg::with_backend(&gpu,true,&mut |config|cook(&text,Some(config.clone()),&times,None,true,|frame,g|{
+        let host=&hosts[frame];
+        let expected=picture(host,false);
+        assert!(expected.iter().any(|p|p.r>0));
+        assert!(p::resident(g::positions(g)),"{:?}",flow_ir::fallback::seen());
+        assert!(flow_sop::topology_kernel::resident(g).is_some(),"tube topology left the GPU");
+        assert!(wg::display(&gpu,g).is_some(),"{:?}",wg::display_refusal(&gpu));
+        let before=wg::image_stats(&gpu).0.payload_readback_bytes;
+        let actual=picture(g,true);
+        assert_eq!(wg::image_stats(&gpu).0.payload_readback_bytes,before);
+        for (a,b) in actual.iter().zip(&expected) {
+            for (a,b) in [(a.r,b.r),(a.g,b.g),(a.b,b.b)] {assert!((a-b).abs()<=1,"resident raster differs from host mesh");}
+        }
+        same(g::positions(g),g::positions(host));
+        let actual_normals=vec3(g,"N"); let expected_normals=vec3(host,"N");
+        for i in 0..p::length(&actual_normals) {
+            let (x,y,z)=p::get(&actual_normals,i).unwrap(); let (u,v,w)=p::get(&expected_normals,i).unwrap();
+            // Tangents subtract nearby float32 positions before normalizing.
+            assert!((x-u).abs()<1e-5 && (y-v).abs()<1e-5 && (z-w).abs()<1e-5,"normal {i}");
+        }
+    }));
+    rays::canvas::destroy(&canvas).unwrap(); wg::close(&gpu);
 }
 
 fn sea_initial_close() {
@@ -170,7 +254,7 @@ fn same(a:&p::T,b:&p::T) {
     assert_eq!(p::length(a),p::length(b));
     for i in 0..p::length(a) {
         let (x,y,z)=p::get(a,i).unwrap(); let (u,v,w)=p::get(b,i).unwrap();
-        assert!((x-u).abs()<=1e-6 && (y-v).abs()<=1e-6 && (z-w).abs()<=1e-6,"point {i}");
+        assert!((x-u).abs()<=1e-6 && (y-v).abs()<=1e-6 && (z-w).abs()<=1e-6,"point {i}: ({x}, {y}, {z}) != ({u}, {v}, {w})");
     }
 }
 fn binding(gpu:&wg::t,geo:&g::T)->Option<rdk_rays::surface::DeviceBinding> {
@@ -186,7 +270,7 @@ fn resident(gpu:&wg::t,config:&Gpu::Config,side:i64,times:&[f64],compare:bool,di
         let stats=wg::image_stats(gpu).0;
         if frame>0 { assert_eq!(stats.input_uploads,uploads); } uploads=stats.input_uploads;
         if displayed { assert!(g::point_count(g)>4_000_000); assert!(wg::display(gpu,g).is_some(),"{:?}",wg::display_refusal(gpu)); }
-        if compare { let (p,n,cd,count)=&cpu[frame]; assert_eq!(g::primitive_count(g),*count); same(g::positions(g),p); same(&vec3(g,"N"),n); same(&vec3(g,"Cd"),cd); }
+        if compare { let (p,n,cd,count)=&cpu[frame]; assert_eq!(g::primitive_count(g),*count,"side {side} frame {frame}"); same(g::positions(g),p); same(&vec3(g,"N"),n); same(&vec3(g,"Cd"),cd); }
     });
 }
 fn traced(gpu:&wg::t,config:&Gpu::Config) {
@@ -215,12 +299,13 @@ fn traced(gpu:&wg::t,config:&Gpu::Config) {
 }
 fn live_mesh() {
     assert!(super::common::gpu(),"native GPU required");
-    let gpu=wg::create(None);
+    let gpu=wg::create(None); wg::qualification(&gpu);
     wg::with_backend(&gpu,true,&mut |config|{
         resident(&gpu,config,8,&[0.,1./6.],true,false);
         traced(&gpu,config);
         assert!(flow_ir::fallback::seen().is_empty(),"{:?}",flow_ir::fallback::seen());
-        let broken=text(16).replace("(mod vertex 4)","(mod vertex (+ 4 (* 0 (array/count vertices))))");
+        // Sorting within a per-vertex map remains a CPU-only form.
+        let broken=text(16).replace("(mod vertex 4)","(nth (sort-by (fn [(n : int)] n) (list (mod vertex 4))) 0)");
         cook(&broken,Some(config.clone()),&[0.],None,false,|_,_|{});
         assert!(flow_ir::fallback::seen().iter().any(|(site,reason,_)|site.ends_with("positions")&&!reason.is_empty()));
         flow_ir::fallback::reset();
@@ -237,7 +322,7 @@ fn live_mesh() {
             cook(source,Some(config.clone()),&times,None,false,|frame,g| { if frame>=threshold {assert!(p::resident(g::positions(g)));} same(g::positions(g),&cpu[frame]); });
         }
         let root=std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../sketches");
-        let swarm=std::fs::read_to_string(root.join("swarm.rays")).unwrap().replace("(import \"swarm_lib.rays\")","").replacen("(workspace swarm",&format!("(workspace swarm\n{}",std::fs::read_to_string(root.join("swarm_lib.rays")).unwrap()),1).replace("(tubes : int 4000) (points : int 257)","(tubes : int 300) (points : int 32)");
+        let swarm=std::fs::read_to_string(root.join("swarm.rays")).unwrap().replace("(import \"swarm_lib.rays\")","").replacen("(workspace swarm",&format!("(workspace swarm\n{}",std::fs::read_to_string(root.join("swarm_lib.rays")).unwrap()),1).replace("(tubes : int 4000)","(tubes : int 300)").replace("(points : int 257)","(points : int 32)");
         flow_ir::fallback::reset();
         cook(&swarm,Some(config.clone()),&(0..=5).map(|i|i as f64/60.).collect::<Vec<_>>(),Some("swirling"),true,|frame,g|{
             if frame>=3 { assert!(p::resident(g::positions(g))); assert!(wg::display(&gpu,g).is_some(),"{:?}",wg::display_refusal(&gpu)); }
