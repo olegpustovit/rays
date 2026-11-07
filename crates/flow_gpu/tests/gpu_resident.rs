@@ -155,6 +155,44 @@ fn resident_history() {
     host::close(&h);
 }
 
+// A device-mapped head has an exact length even though it still owns a count cell.
+fn resident_unfold() {
+    let Some(gpu) = start() else { return };
+    let h = host::create(&|| 0.0, &gpu);
+    let value = tp::composition_value(r#"(let* [
+      starts (map (fn [(i : int)] [(float i) t 0.0]) (array/range 1025 :type int))
+      trail (iterate 4 {:head starts :points starts}
+        (fn [(walk : {:head (array vec3) :points (array vec3)})]
+          (let* [previous walk.head
+                 head (map (fn [(p : vec3)] (+ p [0.0 1.0 0.5])) previous)]
+            {:head head :points (array/concat walk.points head)})))
+      history trail.points] history)"#);
+    let (_, program) = tp::composition_core(&value);
+    let prepared = tp::prepare(&program);
+    for t in [0.0, 1.0, 2.0] {
+        let live = input::at_time(t);
+        let expected = tp::ok(c::execute(&prepared, &live, &c::Options { strict: true, ..Default::default() }));
+        let base = unique(host::resident(false, true, &h));
+        let unfold = base.unfold;
+        let ran = Arc::new(AtomicUsize::new(0));
+        let calls = ran.clone();
+        let resident = Arc::new(c::Resident {
+            unfold: Box::new(move |p, args, steps, source, locals, live| {
+                let value = unfold(p, args, steps, source, locals, live)?;
+                if value.is_some() { calls.fetch_add(1, Ordering::Relaxed); }
+                Ok(value)
+            }),
+            ..base
+        });
+        let actual = tp::ok(c::execute(&prepared, &live, &c::Options { strict: true, resident: Some(resident.clone()), ..Default::default() }));
+        assert_eq!(tp::ok(c::host_value(&resident, &actual)), expected);
+        (resident.close)();
+        assert_eq!(ran.load(Ordering::Relaxed), 1,
+            "an exact device-mapped head must unfold");
+    }
+    host::close(&h);
+}
+
 fn same_identity(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Int_array(a), Value::Int_array(b)) => Arc::ptr_eq(a, b),
@@ -371,5 +409,5 @@ fn resident_scenarios() {
     assert_eq!(ogpu::impl_::live_handles().expect("native handles"), baseline);
 }
 fn main() {
-    common::window::run(&[("resident_scenarios", resident_scenarios)]);
+    common::window::run(&[("resident_unfold", resident_unfold), ("resident_scenarios", resident_scenarios)]);
 }

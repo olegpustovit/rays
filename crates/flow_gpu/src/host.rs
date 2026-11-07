@@ -1381,7 +1381,12 @@ impl Scope {
             Err(reason) => return Ok(self.off(packed, &format!("its inputs could not be bound: {reason}")).map(|v| vec![v])),
             Ok(level) => level,
         };
-        let Level { count, n, held: held_, inputs, bound_arrays, bound_tables } = level;
+        let Level { mut count, n, held: held_, inputs, bound_arrays, bound_tables } = level;
+        // A mapped head can still carry a count cell although its length is exact.
+        // Unfold needs the exact length, not an indirect dispatch from that cell.
+        if steps > 0 && source.and_then(|v| self.find(v)).is_some_and(|p| p.known && p.length == n) {
+            count = None;
+        }
         let slot = self.slot(&site, locals);
         let order = {
             let mut s = self.s.borrow_mut();
