@@ -283,7 +283,7 @@ pub fn scene3_result(
             match device.and_then(|device| device(g)) {
                 Some((key, normals, device_index_count, device_color_width, keep)) => {
                     let indices = if mode == mesh::mode::Triangles && device_index_count.is_none() {
-                        Some(topology::View::view(geometry::topology(g)).map_err(text)?.vertex_points.to_vec())
+                        Some(topology::View::view(geometry::topology(g)).map_err(text)?.vertex_points)
                     } else {
                         None
                     };

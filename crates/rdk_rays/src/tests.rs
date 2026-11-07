@@ -24,6 +24,28 @@ fn holder() -> Option<Arc<dyn Deferred::Holder>> {
 }
 
 #[test]
+fn animated_device_surfaces_share_unchanged_topology() {
+    use std::rc::Rc;
+    let topo=topology::polygons_owned(3,vec![0,1,2],vec![0,3]).unwrap();
+    let corners=topology::View::view(&topo).unwrap().vertex_points;
+    let camera=rays::camera::perspective(None,None,None,rays_math::vec3::create(0.,0.,3.),rays_math::vec3::zero()).unwrap();
+    let mut previous=None;
+    for frame in 0..3 {
+        let positions=packed::Float3::deferred(holder(),None,None,3,Arc::new(||panic!("device preview read positions back"))).unwrap();
+        let geometry=geometry::create(positions,topo.clone(),None,None,None).unwrap();
+        let surface=surface::of_geometry(None,&geometry).unwrap();
+        let device=|_:&geometry::T|Some((format!("animated-{frame}"),false,None,0,Rc::new(||{}) as Rc<dyn Fn()>));
+        let scene=surface::scene3_result(None,Some(&device),&surface).unwrap();
+        let drawing=rays::scene3::Walk::drawings(&scene).remove(0);
+        assert!(Arc::ptr_eq(&rays::mesh::View::unread(&drawing.mesh).indices,&corners),"a new position stream copied the topology");
+        let prepared=rays::scene::Layer::stage_native(32,32,&[rays::scene::view3d(None,&camera,scene)]).unwrap();
+        let indices=prepared.scene3[0].entries[0].draw.mesh.indices.clone();
+        if let Some(previous)=previous { assert!(Rc::ptr_eq(&indices,&previous),"unchanged topology was packed again"); }
+        previous=Some(indices);
+    }
+}
+
+#[test]
 fn surface_failure() {
     let x = vec![0.0, 1.0, 0.0, 1.0];
     let y = vec![0.0, 1.0, 1.0, 0.0];

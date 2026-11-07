@@ -16,6 +16,7 @@ use renderer::scene_execution as se;
 use scene_command::ui_batch;
 use std::cell::Cell;
 use std::rc::Rc;
+use std::sync::Arc;
 
 fn word32(bytes: &[u8], word: usize) -> f64 {
     f32::from_bits(u32::from_le_bytes([bytes[word * 4], bytes[word * 4 + 1], bytes[word * 4 + 2], bytes[word * 4 + 3]])) as f64
@@ -181,7 +182,7 @@ fn device_host_copy_made_once() {
     let bounds: Rc<dyn Fn() -> Option<(vec3::T, vec3::T)>> = Rc::new(move || box_);
     let m = mesh::View::create_device(
         mesh::View::device_args {
-            indices: Some(vec![0, 1, 2]),
+            indices: Some(Arc::new(vec![0, 1, 2])),
             host: Some(host),
             bounds: Some(bounds),
             key: "k".to_string(),
@@ -214,7 +215,7 @@ fn resident_streams() {
             mesh::View::create_device(
                 mesh::View::device_args {
                     mode: Some(mode),
-                    indices,
+                    indices: indices.map(Arc::new),
                     colors,
                     tex_coords,
                     host: Some(host.clone()),
@@ -265,7 +266,7 @@ fn resident_streams() {
         let _ = stage(d3::render_mode::Vertices);
         let _ = mesh::View::packed_view(&m);
         assert_eq!(made.get(), 1);
-        let indices = (*mesh::View::packed_view(&m).unwrap().indices).clone();
+        let indices = mesh::View::packed_view(&m).unwrap().indices;
         let legacy = mesh::View::create_device(
             mesh::View::device_args {
                 indices: Some(indices),

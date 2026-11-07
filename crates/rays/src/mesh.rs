@@ -512,7 +512,7 @@ pub mod View {
     #[derive(Default)]
     pub struct device_args {
         pub mode: Option<mode>,
-        pub indices: Option<Vec<i64>>,
+        pub indices: Option<Arc<Vec<i64>>>,
         pub colors: Option<Vec<color::T>>,
         pub tex_coords: Option<Vec<vec2::T>>,
         pub host: Option<Rc<dyn Fn() -> Result<t, String>>>,
@@ -547,7 +547,7 @@ pub mod View {
         // a frame's device mesh has the last one's indices: the same cloud identity, the same
         // topology's corners, so neither is made or checked again
         let indices: Arc<Vec<i64>> = match indices {
-            Some(indices) => Arc::new(indices),
+            Some(indices) => indices,
             None if device_index_count.is_some() => Arc::new(Vec::new()),
             None => {
                 let mut identity = DEVICE_IDENTITY.lock().expect("device identity");
