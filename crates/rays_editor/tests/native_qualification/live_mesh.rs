@@ -77,7 +77,49 @@ const TRAIL: &str = r###"(workspace trail
                 :kinds (exact (array/int triangles 0))))))"###;
 
 pub fn cases()->Vec<(&'static str,fn())> {
-    vec![("native_live_mesh",live_mesh),("native_holder_frames",holder_frames),("native_orrery_frames",orrery_frames)]
+    vec![("native_live_mesh",live_mesh),("native_holder_frames",holder_frames),("native_sea_frames",sea_frames),("native_orrery_frames",orrery_frames)]
+}
+
+fn sea_frames() {
+    use rays_editor::{Editor,Workspace};
+    assert!(super::common::gpu(),"native GPU required");
+    let started=std::time::Instant::now();
+    let source=include_str!("../../../../sketches/gpu_sea.rays");
+    let doc=Workspace::load(None,Vec::new(),None,source).unwrap_or_else(|d|panic!("{d:?}"));
+    let gpu=wg::create(None);
+    let mut editor=Editor::create(Editor::Create {gpu_owner:Some(gpu.clone()),await_:Some(true),domains:Some(1),..Default::default()},&doc,None,Editor::prepare_fn(),Editor::draw_fn()).unwrap();
+    println!("sea open {:?}",started.elapsed());
+    let mut previous=None;
+    for tick in 1..=6 {
+        let started=std::time::Instant::now();
+        let frame=rays::frame::t {input:input::Frame {dt:1./60.,frame:tick,tick,size:(320,240),pointer:(-100.,-100.),..input::at_time(tick as f64/60.)},pixel_scale:(1.,1.),fps:60.,mouse_delta:(0.,0.)};
+        editor=Editor::update(editor,&frame);
+        assert!(editor.core.cook.error.is_none(),"{:?}",editor.core.cook.error);
+        let geometry=&editor.core.cook.pieces[0].prepared.geometry;
+        assert_eq!(g::point_count(geometry),1_000_000);
+        assert_eq!(g::primitive_count(geometry),1_996_002);
+        assert!(p::resident(g::positions(geometry)),"sea positions left the GPU");
+        assert!(a::holder(&attribute(geometry,"N")).is_some(),"sea normals left the GPU");
+        let stats=wg::image_stats(&gpu).0;
+        assert_eq!(stats.payload_readback_bytes,0);
+        assert_eq!(stats.bounds_readback_bytes,tick*24);
+        assert!(stats.input_uploaded_bytes<128*1024*1024,"redundant calibration uploaded the resident chain's tables again");
+        if let Some((uploads,buffers))=previous {
+            assert_eq!(stats.input_uploads,uploads,"animation uploaded immutable inputs again");
+            if tick>3 {assert_eq!(stats.buffer_creations,buffers,"steady animation allocated more GPU buffers");}
+        }
+        previous=Some((stats.input_uploads,stats.buffer_creations));
+        println!("sea frame {tick} {:?}: uploaded {} B, payload read {} B, bounds read {} B",started.elapsed(),stats.input_uploaded_bytes,stats.payload_readback_bytes,stats.bounds_readback_bytes);
+        editor=Editor::after_present(editor,&frame);
+    }
+    Rc::make_mut(&mut editor.core.cook).await_=false;
+    let frame=rays::frame::t {input:input::Frame {dt:1./60.,frame:7,tick:7,size:(320,240),pointer:(-100.,-100.),..input::at_time(7./60.)},pixel_scale:(1.,1.),fps:60.,mouse_delta:(0.,0.)};
+    editor=Editor::update(editor,&frame);
+    println!("sea closing {:?}",rays_editor::cook::status(&editor.core.cook));
+    let started=std::time::Instant::now();
+    Editor::close(&editor); wg::close(&gpu);
+    println!("sea close {:?}",started.elapsed());
+    assert!(started.elapsed()<std::time::Duration::from_millis(250),"closing waited for an obsolete sea cook");
 }
 fn text(side:i64)->String { MESH.replace("%d",&side.to_string()) }
 fn lower_text(text:&str,gpu:Option<Gpu::Config>,defer:bool)->lower::T {

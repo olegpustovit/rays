@@ -2365,8 +2365,9 @@ pub mod Executor {
                     })
                     .map(|seconds| seconds + held_readback + o.cpu_penalty);
                     let first = if cpu_seconds.is_none() { o.device_first.clone() } else { None };
-                    // no CPU evidence and no device-first rule decides nothing, so it calibrates nothing
-                    let device_seconds = if cpu_seconds.is_none() && first.is_none() {
+                    // With no CPU evidence, held input already takes the device-first path below.
+                    // Calibrating cannot change that choice and would upload its tables four times.
+                    let device_seconds = if cpu_seconds.is_none() && (first.is_none() || held) {
                         None
                     } else {
                         (backend.cost)(inputs, true, &merged, count).and_then(|seconds| {
