@@ -456,8 +456,18 @@ pub fn compile_result(options: &CompileOptions, residual: ResidualId, term: &Ter
     let source = options.count_source.clone().unwrap_or_else(none_source);
     // Captures lower as uniforms so a changed parameter reuses the compiled shader (a 36 KB MSL
     // kernel costs 150-450 ms to compile); a body that needs a capture as a constant falls back.
-    let compiled = compile_impl(options.through_exact, options.fusion, true, &source, residual, term)
-        .or_else(|_| compile_impl(options.through_exact, options.fusion, false, &source, residual, term));
+    let fixed = || compile_impl(options.through_exact, options.fusion, false, &source, residual, term);
+    // A producer that needs a capture as a constant (a noise seed) is not fused into the uniform
+    // program: it stays a separate source, run on the host. When constants fuse more stages, they win
+    // (live captures stay uniforms either way).
+    let compiled = match compile_impl(options.through_exact, options.fusion, true, &source, residual, term) {
+        Ok(dynamic) if options.fusion => match fixed() {
+            Ok(fixed) if fixed.stages.len() > dynamic.stages.len() => Ok(fixed),
+            _ => Ok(dynamic),
+        },
+        Ok(dynamic) => Ok(dynamic),
+        Err(_) => fixed(),
+    };
     traced(&options.trace, compiled)
 }
 
@@ -4567,6 +4577,14 @@ pub mod host {
         result.unwrap_or_else(|| Err(value::fail("E_KERNEL", "Kernel inputs need reference evaluation.")))
     }
 
+    /// A source or request compiled as the consumer was: captures as uniforms, then (as `compile_result`
+    /// does) as constants for a body that needs one (a noise seed), live ones staying uniforms. Without
+    /// the retry such a source is interpreted on the host, element by element, every frame.
+    fn compile_source(t: &T, residual: ResidualId, term: &Term) -> Result<T, Vec<Diagnostic>> {
+        compile_impl(false, t.fusion, t.dynamic, &t.count_source, residual, term)
+            .or_else(|e| if t.dynamic { compile_impl(false, t.fusion, false, &t.count_source, residual, term) } else { Err(e) })
+    }
+
     fn pv_eval_term(pv: &Pv, resolve: &Option<Resolve>, residual: ResidualId, term: &Term) -> Result<Value, Diagnostic> {
         let (p, r) = (pv.clone(), resolve.clone());
         with_kernel(Arc::new(move |id| pv_execute_request(&p, &r, id)), &mut || {
@@ -4579,8 +4597,7 @@ pub mod host {
             return None;
         }
         let term = E::Residual::residual_term(residual)?;
-        let t = &pv.t;
-        match compile_impl(false, t.fusion, t.dynamic, &t.count_source, residual, &term) {
+        match compile_source(&pv.t, residual, &term) {
             Ok(program) => pv_force(pv, resolve, &program).ok(),
             Err(_) => None,
         }
@@ -4606,8 +4623,7 @@ pub mod host {
     }
 
     fn pv_materialize(pv: &Pv, resolve: &Option<Resolve>, residual: ResidualId, term: &Term) -> Result<Value, KErrOrDiag> {
-        let t = &pv.t;
-        match compile_impl(false, t.fusion, t.dynamic, &t.count_source, residual, term) {
+        match compile_source(&pv.t, residual, term) {
             Ok(program) if forwards(&program) => {
                 // a region that only copies its one source (a branch chosen by constants) is that
                 // source: the same array, which a device holding it does not upload again
