@@ -488,30 +488,39 @@ fn standard_backend(t: &T) -> G::Backend {
             // would overwrite an earlier drawing's borrowed output.
             let key = NEXT.fetch_add(1, Ordering::SeqCst).to_string();
             let make_runner = {
-                let (key, msl) = (key.clone(), msl.clone());
-                move |t: &T| -> Rc<Runner> {
+                let (key, msl, packed) = (key.clone(), msl.clone(), packed.clone());
+                move |t: &T, inputs: Option<&phost::Inputs>| -> Result<Rc<Runner>, Diagnostic> {
+                    let uint32_inputs: Vec<i64> = inputs.into_iter().flat_map(|i| i.arrays.iter().enumerate()).filter_map(|(i, a)| run::uint32_input(a).then_some(i as i64)).collect();
+                    let uint32_tables: Vec<i64> = inputs.into_iter().flat_map(|i| i.tables.iter().enumerate()).filter_map(|(i, a)| run::uint32_input(a).then_some(i as i64)).collect();
+                    let typed = !uint32_inputs.is_empty() || !uint32_tables.is_empty();
+                    let key = if typed { format!("{key}:{uint32_inputs:?}:{uint32_tables:?}") } else { key.clone() };
                     if let Some(r) = t.0.runners.borrow_mut().find(&|k, _| *k == key) {
-                        return r.clone();
+                        return Ok(r.clone());
                     }
+                    let typed_msl;
+                    let msl = if typed {
+                        typed_msl = emit::kernel(&emit::Options { spirv: is_vulkan(), fast, uint32_inputs, uint32_tables, ..emit::Options::default() }, &packed)?;
+                        &typed_msl
+                    } else { &msl };
                     let runner = Rc::new(Runner {
                         identity: NEXT.fetch_add(1, Ordering::SeqCst),
-                        run: run::create(Some(&t.0.shared), &t.0.gpu, &t.0.pipelines, &msl),
+                        run: run::create(Some(&t.0.shared), &t.0.gpu, &t.0.pipelines, msl),
                         stamp: Cell::new(0),
                         output: RefCell::new(None),
                     });
                     t.0.created.set(t.0.created.get() + 1);
                     t.0.runners.borrow_mut().add(key.clone(), runner.clone());
-                    runner
+                    Ok(runner)
                 }
             };
-            let _ = make_runner(&t);
+            let _ = make_runner(&t, None)?;
             let (m1, m2) = (make_runner.clone(), make_runner);
             Ok(Arc::new(G::Kernel {
                 run: Box::new(move |inputs| {
                     let Some(t) = host_of(id).filter(live) else {
                         return error("GPU host is closed or called from another domain.");
                     };
-                    let runner = m1(&t);
+                    let runner = m1(&t, Some(inputs))?;
                     *runner.output.borrow_mut() = None;
                     if fast {
                         admit(&t)?;
@@ -2122,29 +2131,7 @@ impl Scope {
             let view = if aliases.iter().all(|(_, n)| *n == length) {
                 holder.clone()
             } else {
-                let cached: Arc<std::sync::Mutex<Option<Arc<Vec<i64>>>>> = Arc::new(std::sync::Mutex::new(None));
-                let (h1, h2, h3) = (holder.clone(), holder.clone(), holder.clone());
-                Uint32Holder {
-                    count,
-                    materialise: Arc::new(move || {
-                        let mut g = cached.lock().unwrap();
-                        if let Some(values) = &*g {
-                            return (**values).clone();
-                        }
-                        let values = if count == 0 {
-                            vec![]
-                        } else {
-                            let values = (h1.materialise)();
-                            if count == length { values } else { values[..count as usize].to_vec() }
-                        };
-                        *g = Some(Arc::new(values.clone()));
-                        values
-                    }),
-                    settle: holder.settle.clone(),
-                    // ponytail: shared views retire together; reference-count releases if memory pressure warrants it.
-                    release: Arc::new(move |_| (h2.release)(true)),
-                    pin: Arc::new(move || (h3.pin)().map(|(b_, _, valid, unpin)| (b_, count, valid, unpin))),
-                }
+                run::uint32_view(&holder, count)
             };
             views.push((count, view.clone()));
             view

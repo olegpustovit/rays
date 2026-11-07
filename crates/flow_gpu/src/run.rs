@@ -153,7 +153,7 @@ pub struct Kept {
 thread_local! {
     static KEPT: RefCell<HashMap<i64, Rc<Kept>>> = RefCell::new(HashMap::new());
     /// Kept outputs a later dispatch may bind by their placeholder, on the creating thread.
-    static BINDABLE: RefCell<Vec<(Weak<Vec<f64>>, Weak<Token>, i64)>> = const { RefCell::new(Vec::new()) };
+    static BINDABLE: RefCell<Vec<(Weak<Vec<f64>>, Weak<Token>, i64, i64)>> = const { RefCell::new(Vec::new()) };
 }
 
 fn kept_of(id: i64) -> Option<Rc<Kept>> {
@@ -161,27 +161,39 @@ fn kept_of(id: i64) -> Option<Rc<Kept>> {
 }
 
 fn bindable_live() {
-    BINDABLE.with(|b| b.borrow_mut().retain(|(p, t, _)| p.strong_count() > 0 && t.strong_count() > 0));
+    BINDABLE.with(|b| b.borrow_mut().retain(|(p, t, _, _)| p.strong_count() > 0 && t.strong_count() > 0));
 }
 
 /// The held buffer a placeholder stands for and the floats it holds, while its holder has not read
 /// it back (its buffer is then released).
-pub fn held(array: &Arc<Vec<f64>>) -> Option<(Buffer, i64)> {
+fn held_storage(array: &Arc<Vec<f64>>) -> Option<(Rc<Kept>, i64)> {
     bindable_live();
-    let id = BINDABLE.with(|b| {
-        b.borrow().iter().find(|(p, _, _)| p.upgrade().is_some_and(|p| Arc::ptr_eq(&p, array))).map(|(_, _, id)| *id)
+    let (id, length) = BINDABLE.with(|b| {
+        b.borrow().iter().find(|(p, _, _, _)| p.upgrade().is_some_and(|p| Arc::ptr_eq(&p, array))).map(|(_, _, id, length)| (*id, *length))
     })?;
     let kept = kept_of(id)?;
     if kept.fate.planes().is_none() && !kept.fate.destroyed() {
-        Some((kept.buffer.clone(), kept.count * kept.width))
+        Some((kept, length))
     } else {
         None
     }
 }
 
+pub fn held(array: &Arc<Vec<f64>>) -> Option<(Buffer, i64)> {
+    held_storage(array).map(|(kept, length)| (kept.buffer.clone(), length))
+}
+
+pub fn uint32_input(array: &Arc<Vec<f64>>) -> bool {
+    held_storage(array).is_some_and(|(kept, _)| kept.uint32)
+}
+
+fn typed_held(array: &Arc<Vec<f64>>, uint32: bool) -> Option<(Buffer, i64)> {
+    held_storage(array).filter(|(kept, _)| kept.uint32 == uint32).map(|(kept, length)| (kept.buffer.clone(), length))
+}
+
 /// ... as an input, when it covers `length` floats
-fn held_input(array: &Arc<Vec<f64>>, length: i64) -> Option<Buffer> {
-    held(array).and_then(|(buffer, floats)| if floats >= length { Some(buffer) } else { None })
+fn held_input(array: &Arc<Vec<f64>>, length: i64, uint32: bool) -> Option<Buffer> {
+    typed_held(array, uint32).and_then(|(buffer, words)| if words >= length { Some(buffer) } else { None })
 }
 
 /// a uniform layout entry, parsed once per runner: a dispatch only writes it
@@ -791,13 +803,9 @@ pub fn dispatch(t: &T, o: &Options, explicit_input: Bound, explicit_table: Bound
         if let Some(found) = explicit_table_f(u) {
             return Some(found);
         }
-        if let Some(k) = kernel.gathers.iter().position(|(index, _)| *index == u) {
-            if kernel.gather_uint32[k] {
-                return None;
-            }
-        }
+        let uint32 = kernel.gathers.iter().position(|(index, _)| *index == u).is_some_and(|k| kernel.gather_uint32[k]);
         if u >= 0 && (u as usize) < values.tables.len() && values.tables[u as usize].len() <= 4 {
-            return held(&values.tables[u as usize]);
+            return typed_held(&values.tables[u as usize], uint32);
         }
         None
     };
@@ -806,12 +814,10 @@ pub fn dispatch(t: &T, o: &Options, explicit_input: Bound, explicit_table: Bound
         if let Some(found) = explicit_input_f(index) {
             return Some(found);
         }
-        if index >= 0 && (index as usize) < kernel.input_uint32.len() && kernel.input_uint32[index as usize] {
-            return None;
-        }
+        let uint32 = index >= 0 && (index as usize) < kernel.input_uint32.len() && kernel.input_uint32[index as usize];
         if index >= 0 && (index as usize) < values.arrays.len() && values.arrays[index as usize].len() <= 4 {
             let width = kernel.input_widths[(index as usize).min(kernel.input_widths.len().saturating_sub(1))];
-            return held_input(&values.arrays[index as usize], values.count * width);
+            return held_input(&values.arrays[index as usize], values.count * width, uint32);
         }
         None
     };
@@ -850,13 +856,13 @@ pub fn dispatch(t: &T, o: &Options, explicit_input: Bound, explicit_table: Bound
     if values.count > 0 {
         let mut missing = false;
         for (i, typed) in kernel.input_uint32.iter().enumerate() {
-            if *typed && explicit_input_f(i as i64).is_none() && (!o.uint32_cpu || held(&values.arrays[i]).is_some()) {
+            if *typed && bound(i as i64).is_none() && (!o.uint32_cpu || held(&values.arrays[i]).is_some()) {
                 missing = true;
             }
         }
         for (k, typed) in kernel.gather_uint32.iter().enumerate() {
             let u = kernel.gathers[k].0;
-            if *typed && explicit_table_f(u).is_none() && (!o.uint32_cpu || u as usize >= values.tables.len() || held(&values.tables[u as usize]).is_some()) {
+            if *typed && bound_table(u).is_none() && (!o.uint32_cpu || u as usize >= values.tables.len() || held(&values.tables[u as usize]).is_some()) {
                 missing = true;
             }
         }
@@ -1631,9 +1637,7 @@ fn hold(t: &T, uint32: bool, buffer: &Buffer, capacity: i64, count: i64, width: 
     d.state.borrow_mut().kept.insert(0, KeptRef { epoch, settled: settled.clone(), token: weak.clone(), id });
     d.pool.0.s.borrow_mut().held.insert(id, (buffer.clone(), capacity, fate.clone()));
     KEPT.with(|k| k.borrow_mut().insert(id, kept.clone()));
-    if !uint32 {
-        BINDABLE.with(|b| b.borrow_mut().insert(0, (Arc::downgrade(&kept.placeholder), weak.clone(), id)));
-    }
+    BINDABLE.with(|b| b.borrow_mut().insert(0, (Arc::downgrade(&kept.placeholder), weak.clone(), id, count * width)));
     let resident = match width {
         1 => Value::Float_array(kept.placeholder.clone()),
         2 => Value::Vec2_array(kept.placeholder.clone()),
@@ -1775,6 +1779,8 @@ fn pin_kept(kept: &Kept) -> Option<Pin> {
 #[derive(Clone)]
 pub struct Uint32Holder {
     pub count: i64,
+    pub resident: Option<Value>,
+    input: Option<Arc<Vec<f64>>>,
     pub materialise: Arc<dyn Fn() -> Vec<i64> + Send + Sync>,
     pub settle: Arc<dyn Fn() -> Result<(), Diagnostic> + Send + Sync>,
     pub release: Arc<dyn Fn(bool) + Send + Sync>,
@@ -1784,7 +1790,7 @@ pub struct Uint32Holder {
 /// The same holder through the backend-neutral integer carrier, with shared ownership.
 pub fn integers(holder: &Uint32Holder) -> Gpu::Integers {
     let (m, r) = (holder.materialise.clone(), holder.release.clone());
-    Gpu::Integers { count: holder.count, storage: Some(Arc::new(holder.clone())), materialise: Box::new(move || m()), release: Box::new(move |held| r(held)) }
+    Gpu::Integers { count: holder.count, resident: holder.resident.clone(), storage: Some(Arc::new(holder.clone())), materialise: Box::new(move || m()), release: Box::new(move |held| r(held)) }
 }
 
 /// Borrow native UInt32 storage without materialising it. Other backend tokens decline.
@@ -1796,8 +1802,16 @@ fn integer_holder(domain: ThreadId, planes: Gpu::Planes, kept: Option<Rc<Kept>>)
     let cache: Arc<Mutex<Option<Arc<Vec<i64>>>>> = Arc::new(Mutex::new(None));
     let kept_id = kept.as_ref().map(|k| k.id);
     let Gpu::Planes { count, materialise, settle, release, .. } = planes;
+    let input = kept.as_ref().map(|k| k.placeholder.clone());
+    let resident = kept_id.map(|id| {
+        let values = Arc::new(vec![id]);
+        flow_ir::packed::host::register_integer_input(&values, input.as_ref().unwrap());
+        Value::Int_array(values)
+    });
     Uint32Holder {
         count,
+        resident,
+        input,
         materialise: Arc::new(move || {
             // not under the lock: a foreign reader waits for the owner, who may be reading too
             if let Some(values) = &*cache.lock().unwrap() {
@@ -1818,8 +1832,41 @@ fn integer_holder(domain: ThreadId, planes: Gpu::Planes, kept: Option<Rc<Kept>>)
     }
 }
 
+/// A logical prefix of shared integer storage. Views retain their exact gather bound.
+pub(crate) fn uint32_view(holder: &Uint32Holder, count: i64) -> Uint32Holder {
+    assert!((0..=holder.count).contains(&count));
+    let cache: Arc<Mutex<Option<Vec<i64>>>> = Arc::new(Mutex::new(None));
+    let (h1, h2, h3) = (holder.clone(), holder.clone(), holder.clone());
+    let (resident, input) = match (&holder.resident, &holder.input) {
+        (Some(Value::Int_array(old)), Some(input)) => {
+            let values = Arc::new(vec![old[0], count]);
+            let view = Arc::new(vec![input[0], count as f64]);
+            let binding = BINDABLE.with(|b| b.borrow().iter().find(|(p, _, _, _)| p.upgrade().is_some_and(|p| Arc::ptr_eq(&p, input))).map(|(_, token, id, _)| (token.clone(), *id)));
+            if let Some((token, id)) = binding {
+                BINDABLE.with(|b| b.borrow_mut().insert(0, (Arc::downgrade(&view), token, id, count)));
+            }
+            flow_ir::packed::host::register_integer_input(&values, &view);
+            (Some(Value::Int_array(values)), Some(view))
+        }
+        _ => (None, None),
+    };
+    Uint32Holder {
+        count, resident, input,
+        materialise: Arc::new(move || {
+            if let Some(values) = &*cache.lock().unwrap() { return values.clone(); }
+            let values = if count == 0 { Vec::new() } else { (h1.materialise)()[..count as usize].to_vec() };
+            *cache.lock().unwrap() = Some(values.clone());
+            values
+        }),
+        settle: holder.settle.clone(),
+        // ponytail: shared views retire together; reference-count releases if memory pressure warrants it.
+        release: Arc::new(move |_| (h2.release)(true)),
+        pin: Arc::new(move || (h3.pin)().map(|(b, _, valid, unpin)| (b, count, valid, unpin))),
+    }
+}
+
 /// Transfers an unsigned output into an exact integer holder, using the same bounded pool and
-/// release lifecycle as `keep`, without registering a float input binding.
+/// release lifecycle as `keep`. Its numeric input carrier preserves the UInt32 storage type.
 pub fn keep_uint32(output: &Output, index: Option<i64>) -> Result<Uint32Holder, Diagnostic> {
     let (planes, kept) = keep_storage(true, index, output)?;
     Ok(integer_holder(output.owner.0.domain, planes, kept))
@@ -1856,9 +1903,9 @@ pub fn adopt_float(t: &T, buffer: &Buffer, count: i64, width: i64) -> Result<Gpu
 /// buffer. `None` for an unsettled, freed or unknown output. Creating thread.
 pub fn pin(placeholder: &Arc<Vec<f64>>) -> Option<Pin> {
     bindable_live();
-    let id = BINDABLE.with(|b| b.borrow().iter().find(|(p, _, _)| p.upgrade().is_some_and(|p| Arc::ptr_eq(&p, placeholder))).map(|(_, _, id)| *id))?;
+    let id = BINDABLE.with(|b| b.borrow().iter().find(|(p, _, _, _)| p.upgrade().is_some_and(|p| Arc::ptr_eq(&p, placeholder))).map(|(_, _, id, _)| *id))?;
     let kept = kept_of(id)?;
-    if kept.fate.destroyed() || !kept.settled.load(Ordering::SeqCst) {
+    if kept.uint32 || kept.fate.destroyed() || !kept.settled.load(Ordering::SeqCst) {
         None
     } else {
         Some(borrow(&kept))

@@ -144,6 +144,11 @@ fn resident_values() {
         let second = (scope.retain_uint32)(if small_first { &large_value } else { &small_value }).unwrap();
         let (small, large) = if small_first { (first, second) } else { (second, first) };
         assert!(small.count == 17 && large.count == 1025);
+        for (holder, count) in [(&small, 17), (&large, 1025)] {
+            let input = phost::floats(holder.resident.as_ref().unwrap()).unwrap().unwrap();
+            assert!(run::uint32_input(&input));
+            assert_eq!(run::held(&input).unwrap().1, count, "resident view lost its logical bound");
+        }
         assert!(Arc::ptr_eq(&(scope.retain_uint32)(&small_value).unwrap().materialise, &small.materialise));
         assert_eq!((resident.count)(&small_value).unwrap(), Some(17));
         assert_eq!((resident.count)(&large_value).unwrap(), Some(1025));
@@ -534,6 +539,43 @@ fn scalars_and_ranges() {
     pipelines::close(&pipes);
 }
 
+fn resident_inputs() {
+    let Some((lease, pipes)) = setup() else { return };
+    let producer = program("(int/add 16777217 (int/mod (frame/index) 1))");
+    let r = run::create(None, &lease, &pipes, &u32_kernel(&producer));
+    let output = tp::ok(run::dispatch(&r, &Default::default(), None, None, &prepare(&producer, 0.)));
+    let holder = tp::ok(run::keep_uint32(&output, None));
+    tp::ok((holder.settle)());
+    let native = run::integers(&holder);
+    let numeric = phost::floats(native.resident.as_ref().expect("resident integer input")).unwrap().unwrap();
+    assert!(run::uint32_input(&numeric));
+    let h = host::create(&|| 0., &lease);
+    for gather in [false, true] {
+        let inner = "(map (fn [(i : int)] (int/add i (frame/index))) (array/range 1025 :type int))";
+        let body = if gather {
+            format!("(let* [xs {inner}] (map (fn [(i : int)] (if (int/eq (array/nth xs i) 16777217) 1. 0.)) (array/range 1025 :type int)))")
+        } else { format!("(map (fn [(i : int)] (if (int/eq i 16777217) 1. 0.)) {inner})") };
+        let consumer = tp::compile_unfused(&body);
+        let mut inputs = prepare(&consumer, 0.);
+        if gather {
+            let u = consumer.code.iter().find_map(|c| match c {
+                flow_ir::core_ir::Region::Instruction::Array_prepare(u, _) => Some(*u as usize), _ => None,
+            }).expect("integer table capture");
+            inputs.tables[u] = numeric.clone();
+        } else { inputs.arrays[0] = numeric.clone(); }
+        let backend = host::backend(&h);
+        let kernel = tp::ok((backend.prepare)(true, &consumer));
+        let out = tp::ok((kernel.run)(&inputs));
+        let result = tp::ok((kernel.readback)(&out));
+        assert_eq!(result, Value::Float_array(Arc::new(vec![1.; 1025])), "resident gather={gather}");
+        assert_eq!(run::Private::readback_bytes(&r), 0, "consumer read its integer producer back");
+    }
+    (holder.release)(false);
+    host::close(&h);
+    run::close(&r, false);
+    pipelines::close(&pipes);
+}
+
 fn main() {
     common::window::run(&[
         ("compaction_cases", compaction_cases),
@@ -543,5 +585,6 @@ fn main() {
         ("topology", topology),
         ("outputs", outputs),
         ("scalars_and_ranges", scalars_and_ranges),
+        ("resident_inputs", resident_inputs),
     ]);
 }

@@ -4643,7 +4643,20 @@ pub mod host {
     static INT_FLOATS: LazyLock<Mutex<Vec<(Arc<Vec<i64>>, Arc<Vec<f64>>)>>> = LazyLock::new(|| Mutex::new(Vec::new()));
     const INT_FLOATS_CAPACITY: usize = 8;
 
+    // Backend-owned integer arrays travel through the numeric input carrier by identity. Both
+    // sides are weak: this table neither owns device storage nor retains an expired placeholder.
+    static INTEGER_INPUTS: Mutex<Vec<(std::sync::Weak<Vec<i64>>, std::sync::Weak<Vec<f64>>)>> = Mutex::new(Vec::new());
+
+    pub fn register_integer_input(values: &Arc<Vec<i64>>, input: &Arc<Vec<f64>>) {
+        let mut all = INTEGER_INPUTS.lock().unwrap();
+        all.retain(|(v, p)| v.strong_count() > 0 && p.strong_count() > 0);
+        all.push((Arc::downgrade(values), Arc::downgrade(input)));
+    }
+
     fn int_floats(values: &Arc<Vec<i64>>) -> Result<Arc<Vec<f64>>, Diagnostic> {
+        if let Some(input) = INTEGER_INPUTS.lock().unwrap().iter().find_map(|(v, p)| {
+            v.upgrade().filter(|v| Arc::ptr_eq(v, values)).and_then(|_| p.upgrade())
+        }) { return Ok(input); }
         let mut cache = INT_FLOATS.lock().unwrap();
         if let Some(pos) = cache.iter().position(|(k, _)| Arc::ptr_eq(k, values)) {
             let entry = cache.remove(pos);

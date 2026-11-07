@@ -95,6 +95,7 @@ pub mod Gpu {
 
     pub struct Integers {
         pub count: i64,
+        pub resident: Option<super::Value>,
         pub storage: Option<IntegerStorage>,
         pub materialise: Box<dyn Fn() -> Vec<i64> + Send + Sync>,
         pub release: Box<dyn Fn(bool) + Send + Sync>,

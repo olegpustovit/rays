@@ -175,7 +175,7 @@ let mut os: Vec<Arc<dyn Fn() + Send + Sync>> = (0..16).map(|_| owner.clone()).co
                 }),
                 retain_uint32: Box::new(move |_| {
                     o14();
-                    Some(G::Integers { count: 1, storage: None, materialise: Box::new(|| vec![16777217]), release: Box::new(|_| {}) })
+                    Some(G::Integers { count: 1, resident: None, storage: None, materialise: Box::new(|| vec![16777217]), release: Box::new(|_| {}) })
                 }),
                 retain_float: Box::new(move |_| {
                     o15();
