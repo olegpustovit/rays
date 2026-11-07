@@ -7,75 +7,75 @@ kernel void chunk_bounds(
     uint gid [[thread_position_in_grid]],
     uint lid [[thread_position_in_threadgroup]]) {
   uint sb=0u;
-  uint r5=1u,r7=0u,r9=1073741823u,r15=3u,r18=1u,r21=2u;
-  long r25=0,r26=0;
-  float r27=0,r28=0,r29=0,r30=0,r31=0,r32=0;
-  uint r60=6u,r72=4u,r75=5u,r79=0u;
+  uint r5=1u,r7=0u,r9=1073741823u,r17=3u,r20=1u,r23=2u;
+  long r27=0,r28=0;
+  float r29=0,r30=0,r31=0,r32=0,r33=0,r34=0;
+  uint r62=6u,r74=4u,r77=5u,r81=0u;
   long r0=long(gid);
   long r6=long(buffer2[r5*1+0]);
   uint r10=(uint((long(buffer2[r7*1+0])))&r9);
   long r11=(as_type<long>(ulong((ulong(r6)-ulong(long(r5))))<<1)>>1);
   long r13=(as_type<long>(ulong((r6==0?0:((as_type<long>(ulong((ulong(long(r10))+ulong(r11)))<<1)>>1))/r6))<<1)>>1);
   sb|=(r6==0)?2u:0u;
-  float r14=(r0<long(r10)?1.0f:0.0f);
-  if(r14!=0.0f) {
-    uint r16=(uint(r0)*r15);
-    float r17=buffer0[r16*1+0];
-    float r20=buffer0[((r16+r18))*1+0];
-    float r23=buffer0[((r16+r21))*1+0];
-    r26=r0;
-    r27=r17;
-    r28=r20;
-    r29=r23;
-    r30=r17;
-    r31=r20;
-    r32=r23;
-    for(r25=long((0u));r25<r13;r25++){
-  uint r33=3u,r36=1u,r39=2u;
-  long r42=0;
-  float r43=0.0f,r44=0.0f,r45=0.0f,r46=0.0f,r47=0.0f,r48=0.0f,r51=0.0f;
-  if(r14!=0.0f) {
-    uint r34=(uint(r26)*r33);
-    float r35=buffer0[r34*1+0];
-    float r38=buffer0[((r34+r36))*1+0];
-    float r41=buffer0[((r34+r39))*1+0];
-    r42=(as_type<long>(ulong((ulong(r26)+ulong(r6)))<<1)>>1);
-    r43=min(r27,r35);
-    r44=min(r28,r38);
-    r45=min(r29,r41);
-    r46=max(r30,r35);
-    r47=max(r31,r38);
-    r48=max(r32,r41);
-    r51=(((((r42>=long(r10)?1.0f:0.0f))==0.0f))==0.0f);
+  float r16=(((r0<long(r10)?1.0f:0.0f))!=0.0f&&((r0<r6?1.0f:0.0f))!=0.0f);
+  if(r16!=0.0f) {
+    uint r18=(uint(r0)*r17);
+    float r19=buffer0[r18*1+0];
+    float r22=buffer0[((r18+r20))*1+0];
+    float r25=buffer0[((r18+r23))*1+0];
+    r28=r0;
+    r29=r19;
+    r30=r22;
+    r31=r25;
+    r32=r19;
+    r33=r22;
+    r34=r25;
+    for(r27=long((0u));r27<r13;r27++){
+  uint r35=3u,r38=1u,r41=2u;
+  long r44=0;
+  float r45=0.0f,r46=0.0f,r47=0.0f,r48=0.0f,r49=0.0f,r50=0.0f,r53=0.0f;
+  if(r16!=0.0f) {
+    uint r36=(uint(r28)*r35);
+    float r37=buffer0[r36*1+0];
+    float r40=buffer0[((r36+r38))*1+0];
+    float r43=buffer0[((r36+r41))*1+0];
+    r44=(as_type<long>(ulong((ulong(r28)+ulong(r6)))<<1)>>1);
+    r45=min(r29,r37);
+    r46=min(r30,r40);
+    r47=min(r31,r43);
+    r48=max(r32,r37);
+    r49=max(r33,r40);
+    r50=max(r34,r43);
+    r53=(((((r44>=long(r10)?1.0f:0.0f))==0.0f))==0.0f);
   }
-  bool stop25=r51!=0.0f;
-  long next25_0=r42;
-  float next25_1=r43;
-  float next25_2=r44;
-  float next25_3=r45;
-  float next25_4=r46;
-  float next25_5=r47;
-  float next25_6=r48;
-  r26=next25_0;
-  r27=next25_1;
-  r28=next25_2;
-  r29=next25_3;
-  r30=next25_4;
-  r31=next25_5;
-  r32=next25_6;
-  if(stop25)break;
+  bool stop27=r53!=0.0f;
+  long next27_0=r44;
+  float next27_1=r45;
+  float next27_2=r46;
+  float next27_3=r47;
+  float next27_4=r48;
+  float next27_5=r49;
+  float next27_6=r50;
+  r28=next27_0;
+  r29=next27_1;
+  r30=next27_2;
+  r31=next27_3;
+  r32=next27_4;
+  r33=next27_5;
+  r34=next27_6;
+  if(stop27)break;
     }
-    uint r61=(uint(r0)*r60);
-    uint r62=(buffer1[r61]=(r27),1u);
-    uint r64=(buffer1[((r61+r18))]=(r28),1u);
-    uint r67=(buffer1[((r61+r21))]=(r29),1u);
-    uint r69=(buffer1[((r61+r15))]=(r30),1u);
-    uint r70=(r67+r69);
-    uint r74=(buffer1[((r61+r72))]=(r31),1u);
-    uint r77=(buffer1[((r61+r75))]=(r32),1u);
-    uint r78=(r74+r77);
-    r79=(((((r62+r64))+r70))+r78);
+    uint r63=(uint(r0)*r62);
+    uint r64=(buffer1[r63]=(r29),1u);
+    uint r66=(buffer1[((r63+r20))]=(r30),1u);
+    uint r69=(buffer1[((r63+r23))]=(r31),1u);
+    uint r71=(buffer1[((r63+r17))]=(r32),1u);
+    uint r72=(r69+r71);
+    uint r76=(buffer1[((r63+r74))]=(r33),1u);
+    uint r79=(buffer1[((r63+r77))]=(r34),1u);
+    uint r80=(r76+r79);
+    r81=(((((r64+r66))+r72))+r80);
   }
-  uint r80=(r14!=0.0f?r79:r7);
-  (void)float(r80);
+  uint r82=(r16!=0.0f?r81:r7);
+  (void)float(r82);
 }

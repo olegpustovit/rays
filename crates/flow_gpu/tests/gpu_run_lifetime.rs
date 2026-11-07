@@ -315,8 +315,9 @@ fn bounds_and_foreign_owned_readback() {
         let sea = run::create_owned(None, device, queue, cache, &tp::ok(emit::kernel(&emit::Options::default(), &packed)));
         let values = prepare(&packed);
         let first = settled(&sea, &values); let c0 = f.creates.get();
-        (first.bounds)(); let read = run::Private::readback_bytes(&sea);
-        assert_eq!((f.creates.get() - c0, read), (1, 1024 * 24));
+        assert_eq!((first.bounds)(), Some(vec![0., 1., 0., 1023., 1., 0.]));
+        let read = run::Private::readback_bytes(&sea);
+        assert_eq!((f.creates.get() - c0, read), (2, 24));
         (first.bounds)(); assert_eq!(run::Private::readback_bytes(&sea), read);
         let second = settled(&sea, &values); let c1 = f.creates.get();
         (second.bounds)(); assert_eq!(f.creates.get(), c1);
@@ -331,6 +332,21 @@ fn bounds_and_foreign_owned_readback() {
         (first.release)(false); (second.release)(false); run::close(&sea, false);
     });
 }
+
+fn reduced_bounds_cover_every_point() {
+    with_fixture(|Fixture { device, queue, cache, .. }| {
+        for count in [1, 1023, 1024, 1025, 16383, 16384, 16385, 1_000_003] {
+            let packed = tp::compile(&format!("(map (fn [x] [(- 17.0 x) x (- t x)]) (array/range {count}))"));
+            let sea = run::create_owned(None, device, queue, cache, &tp::ok(emit::kernel(&emit::Options::default(), &packed)));
+            let output = settled(&sea, &prepare(&packed));
+            let last = (count - 1) as f64;
+            assert_eq!((output.bounds)(), Some(vec![17. - last, 0., 1. - last, 17., last, 1.]), "count {count}");
+            assert_eq!(run::Private::bounds_readback_bytes(&sea), 24);
+            (output.release)(false);
+            run::close(&sea, false);
+        }
+    });
+}
 fn main() {
     common::window::run(&[
         ("failed_commands_and_uploads", failed_commands_and_uploads),
@@ -341,5 +357,6 @@ fn main() {
         ("slot_shrink_hysteresis", slot_shrink_hysteresis),
         ("failed_table_upload_retries", failed_table_upload_retries),
         ("bounds_and_foreign_owned_readback", bounds_and_foreign_owned_readback),
+        ("reduced_bounds_cover_every_point", reduced_bounds_cover_every_point),
     ]);
 }

@@ -442,7 +442,7 @@ struct State {
     uniforms: Vec<u8>,
     closed: bool,
     /// the reduction's lanes, made once and reused
-    bounds_out: Option<Buffer>,
+    bounds_out: Option<[Buffer; 2]>,
     creations: i64,
     input_uploads: i64,
     input_uploaded_bytes: i64,
@@ -1428,9 +1428,9 @@ fn materialise(kept: &Kept) -> Arc<Vec<Vec<f64>>> {
 // ponytail: fixed lane count (groups of 1,024 to fill an 8-core M1); tune per device if one underfills.
 const BOUNDS_LANES: i64 = 16 * 1024;
 
-/// A settled, unread vec3 output's bounds, reduced where it is (shaders/bounds.rays): up to
-/// `BOUNDS_LANES` lanes across the grid, each lane's min and max (of every lanes-th element) read
-/// back (24 bytes a lane) and finished here. On the creating thread; `None` elsewhere, once read or
+/// A settled, unread vec3 output's bounds, reduced where it is (shaders/bounds.rays). Each pass
+/// treats the preceding min/max pairs as float3 points, down to six floats (24 bytes) read back.
+/// On the creating thread; `None` elsewhere, once read or
 /// on any device failure.
 fn bounds_of(kept: &Kept) -> Option<Vec<f64>> {
     let t = &kept.owner;
@@ -1442,8 +1442,6 @@ fn bounds_of(kept: &Kept) -> Option<Vec<f64>> {
         return box_;
     }
     let n = kept.count;
-    let grid = ((n + 1023) / 1024 * 1024).min(BOUNDS_LANES);
-    let lanes = n.min(grid);
     let compute = || -> Result<Option<Vec<f64>>, Diagnostic> {
         let compiled = pipelines::get(&d.pipelines, kernels::bounds())?;
         let out = {
@@ -1451,27 +1449,45 @@ fn bounds_of(kept: &Kept) -> Option<Vec<f64>> {
             match &st.bounds_out {
                 Some(out) => out.clone(),
                 None => {
-                    let out = gpu(b::create_buffer(&d.device, BufferDescriptor { label: Some("Flow bounds".to_owned()), size: BOUNDS_LANES * 24, usage: vec![BufferUsage::Storage, BufferUsage::CopySrc] }, None))?;
+                    let make = |lanes| gpu(b::create_buffer(&d.device, BufferDescriptor { label: Some("Flow bounds".to_owned()), size: lanes * 24, usage: vec![BufferUsage::Storage, BufferUsage::CopySrc] }, None));
+                    let first = make(BOUNDS_LANES)?;
+                    let second = match make(1024) {
+                        Ok(out) => out,
+                        Err(e) => { let _ = b::destroy_buffer(&first); return Err(e); }
+                    };
+                    let out = [first, second];
                     st.bounds_out = Some(out.clone());
                     out
                 }
             }
         };
-        let mut count = [0u8; 8];
-        put_i32(&mut count, 0, n as i32);
-        put_i32(&mut count, 4, grid as i32);
         let commands = gpu(b::begin_commands(&d.queue))?;
+        let mut input = kept.buffer.clone();
+        let mut points = n;
+        let mut lanes = n.min(BOUNDS_LANES);
+        let mut pass = 0;
         let receipt = (|| -> Result<b::Receipt, Diagnostic> {
-            let encoder = gpu(b::compute_encoder(&commands))?;
-            let r = (|| -> Result<(), Diagnostic> {
-                gpu(b::set_pipeline(&encoder, &compiled.pipeline))?;
-                gpu(b::set_buffer(&encoder, 0, &kept.buffer))?;
-                gpu(b::set_buffer(&encoder, 1, &out))?;
-                gpu(b::set_bytes(&encoder, 2, &count))?;
-                gpu(b::dispatch_threads(&encoder, (grid, 1, 1), (1024, 1, 1)))
-            })();
-            let _ = b::end_compute(&encoder);
-            r?;
+            loop {
+                let mut count = [0u8; 8];
+                put_i32(&mut count, 0, points as i32);
+                put_i32(&mut count, 4, lanes as i32);
+                let encoder = gpu(b::compute_encoder(&commands))?;
+                let r = (|| -> Result<(), Diagnostic> {
+                    gpu(b::set_pipeline(&encoder, &compiled.pipeline))?;
+                    gpu(b::set_buffer(&encoder, 0, &input))?;
+                    gpu(b::set_buffer(&encoder, 1, &out[pass % 2]))?;
+                    gpu(b::set_bytes(&encoder, 2, &count))?;
+                    gpu(b::dispatch_threads(&encoder, (lanes, 1, 1), (lanes.min(1024), 1, 1)))
+                })();
+                let ended = gpu(b::end_compute(&encoder));
+                r?;
+                ended?;
+                input = out[pass % 2].clone();
+                if lanes == 1 { break; }
+                points = lanes * 2;
+                lanes = if lanes > 1024 { 1024 } else { 1 };
+                pass += 1;
+            }
             gpu(b::commit(&commands))
         })();
         let receipt = match receipt {
@@ -1482,23 +1498,16 @@ fn bounds_of(kept: &Kept) -> Option<Vec<f64>> {
             }
         };
         gpu(b::complete_through(&d.queue, receipt.epoch))?;
-        let (lane, finite) = unpack_array(&gpu(b::read_buffer(&out, 0, lanes * 24))?, (lanes * 6) as usize);
+        let (bounds, finite) = unpack_array(&gpu(b::read_buffer(&input, 0, 24))?, 6);
         {
             let mut st = d.state.borrow_mut();
-            st.readback_bytes += lanes * 24;
-            st.bounds_readback_bytes += lanes * 24;
+            st.readback_bytes += 24;
+            st.bounds_readback_bytes += 24;
         }
         if !finite {
             return Ok(None);
         }
-        let mut bx = lane[0..6].to_vec();
-        for l in 1..lanes as usize {
-            for c in 0..3 {
-                bx[c] = bx[c].min(lane[l * 6 + c]);
-                bx[c + 3] = bx[c + 3].max(lane[l * 6 + c + 3]);
-            }
-        }
-        Ok(Some(bx))
+        Ok(Some(bounds))
     };
     let result = compute().unwrap_or(None);
     *kept.bounds_memo.borrow_mut() = Some(result.clone());
@@ -1939,8 +1948,8 @@ pub fn close(t: &T, discard: bool) {
     }
     {
         let mut st = d.state.borrow_mut();
-        if let Some(buffer) = st.bounds_out.take() {
-            let _ = b::destroy_buffer(&buffer);
+        if let Some(buffers) = st.bounds_out.take() {
+            for buffer in buffers { let _ = b::destroy_buffer(&buffer); }
         }
     }
     if d.own_pool {

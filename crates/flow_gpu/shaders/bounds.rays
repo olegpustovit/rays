@@ -1,15 +1,15 @@
 ; A resident packed float3 array's bounds (Flow_gpu.Run.bounds), grid-wide. Each lane takes the min and
 ; max of the elements lane, lane + lanes, lane + 2 lanes, ... below the array's count (bound[0]), lanes
 ; being the grid's width (bound[1]), neighbouring lanes reading neighbouring elements, and stores them at
-; lane x 6 (min x y z, max x y z); a lane at or past the count stores nothing, and the host finishes over
-; the stored lanes. min and max of float32 values are exact, so the result is the host's scan.
+; lane x 6 (min x y z, max x y z). Later passes reduce those pairs down to one box. A lane outside the
+; count or lane limit stores nothing. Float32 min/max are exact, so the result is the host's scan.
 (defn chunk-bounds :context value [(id : int) (p : (array float)) (out : (array float)) (bound : (array int))
                                    (size : int)]
   (let* [lane id
          lanes (array/nth bound 1)
          n (int/and (array/nth bound 0) 1073741823)
          chunk (int/div (int/add n (int/sub lanes 1)) lanes)]
-    (if (int/lt lane n)
+    (if (and (int/lt lane n) (int/lt lane lanes))
       (let* [x (array/nth p (int/mul lane 3))
              y (array/nth p (int/add (int/mul lane 3) 1))
              z (array/nth p (int/add (int/mul lane 3) 2))
