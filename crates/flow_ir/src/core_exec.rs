@@ -80,6 +80,18 @@ pub fn host_value(resident: &Resident, value: &Value) -> Result<Value, Diagnosti
     })
 }
 
+/// A validated constant-array descriptor can be filled by the resident backend directly.
+pub fn fill_constant(resident: &Resident, value: &Value) -> Result<Option<Value>, Diagnostic> {
+    let Value::Source(name, ty, fields) = value else { return Ok(None) };
+    let Some(operation) = name.strip_prefix("$core/constant-array/") else { return Ok(None) };
+    let Value::Source(_, actual, fields) = op::constant_array_descriptor(operation, fields)? else { unreachable!() };
+    if *ty != actual { return Err(v::fail("E_ARRAY_TYPE", "Constant array descriptor has the wrong declared type.")); }
+    match fields.as_slice() {
+        [(a, Value::Int(length)), (b, initial)] if a == "count" && b == "value" => (resident.fill)(ty, *length, initial),
+        _ => unreachable!("constant_array_descriptor validates the fields"),
+    }
+}
+
 /// what a state stores from a resident run: device arrays stay there, the rest is read back
 fn kept_value(resident: &Resident, value: &Value) -> Result<Value, Diagnostic> {
     fn fields(r: &Resident, fs: &[(String, Value)]) -> Result<Vec<(String, Value)>, Diagnostic> {
@@ -1514,13 +1526,9 @@ impl Ctx {
                     if let Some(operation) = name.strip_prefix(prefix) {
                         let value = op::constant_array_descriptor(operation, &given)?;
                         if v::ty_of(&value) != ty { return Err(v::fail("E_ARRAY_TYPE", "Constant array descriptor has the wrong declared type.")); }
-                        if let (Some(resident), Value::Source(_, Ty::Array(inner), fields)) = (&st.resident, &value) {
-                            if st.resident_on && **inner == Ty::Int {
-                                if let [(a, Value::Int(length)), (b, initial)] = fields.as_slice() {
-                                    if a == "count" && b == "value" {
-                                        if let Some(made) = (resident.fill)(&ty, *length, initial)? { return Ok(made); }
-                                    }
-                                }
+                        if let Some(resident) = &st.resident {
+                            if st.resident_on {
+                                if let Some(made) = fill_constant(resident, &value)? { return Ok(made); }
                             }
                         }
                         Ok(value)
@@ -1557,10 +1565,17 @@ impl Ctx {
             },
             Expr::Prim(operation, args) => {
                 let run = primitive(self.track, &program.locals, operation, args);
+                let constant = matches!(operation, Primitive::Array_int | Primitive::Array_float | Primitive::Array_vec3 | Primitive::Array_vec4).then(|| c::primitive_name(operation));
+                let named_args = if constant.is_some() { args.clone() } else { Vec::new() };
                 let args: Vec<i64> = args.iter().map(|(_, n)| *n).collect();
                 Arc::new(move |st| {
                     if let Some(r) = st.resident.clone() {
                         if st.resident_on {
+                            if let Some(name) = constant {
+                                let given: Vec<(String, Value)> = named_args.iter().map(|(name, n)| (name.clone(), st.values[ix(*n)].clone())).collect();
+                                let descriptor = op::constant_array_descriptor(name, &given)?;
+                                if let Some(made) = fill_constant(&r, &descriptor)? { return Ok(made); }
+                            }
                             for n in &args {
                                 let value = host_value(&r, &st.values[ix(*n)])?;
                                 st.values[ix(*n)] = value;

@@ -1923,6 +1923,25 @@ impl Scope {
     }
 
     fn fill(&self, ty: &Ty, length: i64, v: &Value) -> Result<Option<Value>, Diagnostic> {
+        let row = match (ty, v) {
+            (Ty::Array(t), Value::Float(x)) if **t == Ty::Float => vec![*x],
+            (Ty::Array(t), Value::Vec2(x,y)) if **t == Ty::Vec2 => vec![*x,*y],
+            (Ty::Array(t), Value::Vec3(x,y,z)) if **t == Ty::Vec3 => vec![*x,*y,*z],
+            (Ty::Array(t), Value::Vec4(x,y,z,w)) if **t == Ty::Vec4 => vec![*x,*y,*z,*w],
+            _ => Vec::new(),
+        };
+        if !row.is_empty() && (0..=1 << 26).contains(&length) && row.iter().all(|x| (*x as f32).is_finite()) {
+            let slot = self.range_slot();
+            if !self.s.borrow().extra_slots.iter().any(|s| Rc::ptr_eq(s, &slot)) {
+                self.s.borrow_mut().extra_slots.push(slot.clone());
+            }
+            let buffer = self.alloc(&slot, (length * row.len() as i64 * 4).max(4))?;
+            let result = self.commands().and_then(|(_, encoder)| run::encode_float_fill(&encoder, &self.t.0.pipelines, &buffer.0, length, &row));
+            return match result {
+                Ok(()) => Ok(Some(self.placeholder(false, true, i64::MAX, None, &slot, ty, buffer, None, length))),
+                Err(e) => { slot.spent.borrow_mut().push(buffer); Err(e) }
+            };
+        }
         match (ty, v) {
             (Ty::Array(i), Value::Int(x)) if **i == Ty::Int && self.uint32 && *x >= 0 && *x <= 4294967295 && length >= 0 && length <= run::MAX_STRING / 4 => {
                 let slot = self.range_slot();

@@ -161,6 +161,18 @@ pub fn planes() -> &'static Kernel {
     })
 }
 
+pub fn fill_vectors() -> &'static Kernel {
+    static KERNEL: std::sync::OnceLock<Kernel> = std::sync::OnceLock::new();
+    KERNEL.get_or_init(|| {
+        let (source, bytes) = shader!("fill_vectors");
+        Kernel {
+            source: source.to_owned(), spirv: spirv(bytes, &range(2)),
+            entry: "fill_vectors".to_owned(), uniform_bytes: 24,
+            interface: interface(2, 1), ..compaction_uint32().clone()
+        }
+    })
+}
+
 /// A resident dispatch's threadgroup counts from a count cell, one thread. Buffers: the cell,
 /// {capacity, mul, div, group}, the three counts.
 pub fn dispatch_arguments() -> &'static Kernel {

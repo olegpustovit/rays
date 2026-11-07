@@ -7,3 +7,9 @@
       (int/add (gpu/store out at (array/nth x id))
         (int/add (gpu/store out (int/add at 1) (array/nth y id))
                  (gpu/store out (int/add at 2) (array/nth z id))))) 0))
+
+; Scalar/vector constant arrays use their float32 words directly, including signed zero.
+(defn fill-vectors :context value
+  [(id : int) (out : (array int)) (bound : (array int)) (size : int)]
+  (if (int/lt id (array/nth bound 0))
+    (gpu/store-int out id (array/nth bound (int/add 2 (int/mod id (array/nth bound 1))))) 0))

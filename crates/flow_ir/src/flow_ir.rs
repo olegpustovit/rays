@@ -1656,6 +1656,9 @@ pub mod Executor {
                     self.walk(&result)
                 }
                 Value::Source(..) | Value::Struct(_, Ty::Array(_), _) => {
+                    if let Some(resident) = &self.o.resident {
+                        if let Some(made) = core_exec::fill_constant(resident, value)? { return Ok(made); }
+                    }
                     let forced = reference(self, value, &state)?;
                     self.walk(&forced)
                 }

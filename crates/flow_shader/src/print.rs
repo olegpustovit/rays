@@ -35,6 +35,7 @@ fn compute_table(owner: &str) -> Vec<(&'static str, &'static str, &'static str, 
             ("incidence_partition", "incidence", "incidence-partition", true, 1024, 1024),
             ("incidence_tables", "incidence", "incidence-tables", true, 256, 256),
             ("planes", "planes", "pack-planes", true, 256, 256),
+            ("fill_vectors", "planes", "fill-vectors", true, 256, 256),
             ("triangles", "triangles", "triangle-indices", true, 256, 256),
             // a resident P's bounds
             ("bounds", "bounds", "chunk-bounds", true, 1024, 1024),

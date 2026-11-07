@@ -2145,6 +2145,23 @@ pub fn fill_indices(value: Option<i64>, queue: &Queue, pipelines: &pipelines::T,
     })
 }
 
+/// Encode a repeated scalar/vector row without constructing a dense CPU array.
+pub fn encode_float_fill(encoder: &ComputeEncoder, pipelines: &pipelines::T, buffer: &Buffer, count: i64, row: &[f64]) -> Result<(), Diagnostic> {
+    if !(1..=4).contains(&row.len()) || count < 0 || count > b::buffer_size(buffer) / (row.len() as i64 * 4)
+        || row.iter().any(|x| !(*x as f32).is_finite()) || count * row.len() as i64 > u32::MAX as i64
+    { return Err(e_gpu("Float fill exceeds buffer capacity or float32 range.")); }
+    if count == 0 { return Ok(()); }
+    let compiled = pipelines::get(pipelines, kernels::fill_vectors())?;
+    let mut bound = [0u8; 24];
+    put_i32(&mut bound, 0, (count * row.len() as i64) as i32);
+    put_i32(&mut bound, 4, row.len() as i32);
+    for (i, x) in row.iter().enumerate() { put_i32(&mut bound, 8 + i * 4, (*x as f32).to_bits() as i32); }
+    gpu(b::set_pipeline(encoder, &compiled.pipeline))?;
+    gpu(b::set_buffer(encoder, 0, buffer))?;
+    gpu(b::set_bytes(encoder, 1, &bound))?;
+    gpu(b::dispatch_threads(encoder, (count * row.len() as i64, 1, 1), (256, 1, 1)))
+}
+
 pub fn compact_blocks(count: i64) -> i64 {
     8 * 1.max((count + 1023) / 1024)
 }

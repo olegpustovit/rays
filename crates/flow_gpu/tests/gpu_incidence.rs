@@ -1,6 +1,8 @@
 //! GPU-only construction of deterministic incidence/fan tables and packed coordinate planes.
 mod common;
 use flow_gpu::{pipelines, run};
+use flow_ir::flow_ir::Executor;
+use flow_syntax::{ty::Ty, value::Value};
 use ogpu::{backend as b, types::{BufferDescriptor, BufferUsage}};
 
 fn buffer(device: &b::Device, words: i64) -> b::Buffer {
@@ -78,4 +80,40 @@ fn planes() {
     }
     pipelines::close(&pipes);
 }
-fn main() { common::window::run(&[("incidence", incidence), ("planes", planes)]); }
+fn constant_arrays() {
+    assert!(common::gpu());
+    let gpu = common::lease();
+    let host = flow_gpu::host::create(&|| 0., &gpu);
+    for count in [0, 1, 1025] {
+        for (kind, literal, row) in [("float", "-0.", vec![-0.]), ("vec3", "[1.25 -0. -3.]", vec![1.25, -0., -3.]),
+            ("vec4", "[1. -2. 3. -4.]", vec![1., -2., 3., -4.])]
+        {
+            let body = format!("(array/{kind} (int/add {count} (frame/index)) {literal})");
+            let ws = common::test_program::check_workspace(&format!("(workspace w (graph g :context value (let* [tested {body}] 0.)))"));
+            let evaluated = flow_eval::r#static(&ws, true, None).unwrap();
+            let value = &evaluated.records.iter().find(|(p, _)| p == &["g", "tested"]).unwrap().1[0].1;
+            let compiled = Executor::compile(value, &Executor::CompileOptions { strict: true, ..Default::default() }).unwrap();
+            let scope = ((flow_gpu::host::backend(&host)).residency)(true).unwrap();
+            let before = flow_gpu::host::stats(&host);
+            let made = Executor::force(&compiled, &Executor::ForceOptions { strict: true, resident: Some(scope.executor.clone()), ..Default::default() }, &input::at_time(1.)).unwrap();
+            assert_eq!((scope.executor.count)(&made).unwrap(), Some(count));
+            let kept = (scope.retain_float)(&made).expect("constant array stayed on the CPU");
+            (scope.executor.close)();
+            let after = flow_gpu::host::stats(&host);
+            assert_eq!(after.input_uploaded_bytes, before.input_uploaded_bytes);
+            assert_eq!(after.payload_readback_bytes, before.payload_readback_bytes);
+            assert_eq!((kept.count, kept.width), (count, row.len() as i64));
+            let planes = (kept.materialise)();
+            for (column, expected) in planes.iter().zip(row) {
+                assert_eq!(column.iter().map(|x| x.to_bits()).collect::<Vec<_>>(), vec![f64::to_bits(expected); count as usize]);
+            }
+            (kept.release)(false);
+        }
+    }
+    let scope = flow_gpu::host::resident_scope(true, true, &host);
+    assert!((scope.executor.fill)(&Ty::Array(Box::new(Ty::Float)), 1, &Value::Float(f64::MAX)).unwrap().is_none());
+    assert!((scope.executor.fill)(&Ty::Array(Box::new(Ty::Text)), 1, &Value::Text(Vec::new())).unwrap().is_none());
+    (scope.executor.close)();
+    flow_gpu::host::close(&host);
+}
+fn main() { common::window::run(&[("incidence", incidence), ("planes", planes), ("constant_arrays", constant_arrays)]); }
