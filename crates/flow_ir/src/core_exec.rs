@@ -2030,6 +2030,7 @@ impl Ctx {
                     if count > limit { return Err(v::fail("E_ITER_BOUND", "Core iteration exceeds its bound.")); }
                     setup(st)?;
                     for i in 0..count {
+                        if i & 1023 == 0 { e::interruptible(&mut || {})?; }
                         st.values[index] = Value::Int(i);
                         st.values[item] = match &source {
                             Value::List(xs) => xs[i as usize].clone(),
@@ -2059,6 +2060,7 @@ impl Ctx {
                         match stop {
                             None => {
                                 for i in 0..length {
+                                    if i & 1023 == 0 { e::interruptible(&mut || {})?; }
                                     st.values[index] = Value::Int(i);
                                     st.values[item] = Value::Int(first_v + i);
                                     body(st)?;
@@ -2067,6 +2069,7 @@ impl Ctx {
                             Some(stop) => {
                                 let mut i = 0;
                                 while i < length && !v::truthy(&st.values[stop])? {
+                                    if i & 1023 == 0 { e::interruptible(&mut || {})?; }
                                     st.values[index] = Value::Int(i);
                                     st.values[item] = Value::Int(first_v + i);
                                     body(st)?;
@@ -2486,6 +2489,7 @@ fn new_state(prepared: &Prepared, values: Vec<Value>, arena: Option<Arena>, live
 }
 
 fn general(prepared: &Prepared, live: &Frame, o: &Options) -> Result<Value, Diagnostic> {
+    e::interruptible(&mut || {})?;
     if let Err(message) = input::validate(live) {
         return Err(v::fail("E_FRAME", &message));
     }
@@ -2548,7 +2552,7 @@ pub fn execute(prepared: &Prepared, live: &Frame, o: &Options) -> Result<Value, 
         Some(r) => match result {
             Ok(_) => result,
             Err(d) if d.code == "E_CORE_RESIDENT" => Err(d),
-            Err(d) if o.strict || o.resolve.is_some() || !o.rerun_on_error => {
+            Err(d) if d.code == "cancelled" || d.code == "E_CANCELLED" || o.strict || o.resolve.is_some() || !o.rerun_on_error => {
                 restore();
                 Err(d)
             }

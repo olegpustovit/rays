@@ -43,6 +43,31 @@ fn reference(value: &Value, live: &Frame) -> Result<Value, Diagnostic> { E::Host
 
 fn live_frame(frame: i64) -> Frame { Frame { frame, ..input::at_time(frame as f64 * 0.25) } }
 
+#[test]
+fn core_loops_observe_cancellation_without_restarting_the_walker() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    for body in [
+        "(fold [s \"\"] [i (range 4096)] (str s (if (< t 0.) \"a\" \"b\")))",
+        "(fold [s \"\"] [i (array/range 4096 :type int)] (str s (if (< t 0.) \"a\" \"b\")))",
+        "(iterate 4096 \"\" (fn [(s : text)] (str s (if (< t 0.) \"a\" \"b\"))) :until (fn [before after] false))",
+    ] {
+        let Value::Residual(root) = recorded(body) else { panic!("live loop expected") };
+        let core = core_lower::lower(None,None,false,None,None,root).expect("core loop");
+        assert!(core.regions.is_empty(),"the regression must exercise core loops, not packed kernels");
+        let prepared = core_exec::prepare(&core,false,false,&Default::default(),false);
+        let walked = Arc::new(AtomicUsize::new(0));
+        let walks = walked.clone();
+        let options = Options {root:Some(root),on_walk:Some(Arc::new(move || {walks.fetch_add(1,Ordering::Relaxed);})),..Default::default()};
+        let probes = Arc::new(AtomicUsize::new(0));
+        let calls = probes.clone();
+        assert!(!E::with_interrupt(Arc::new(move || calls.fetch_add(1,Ordering::Relaxed)>=2),&mut || {
+            assert_eq!(core_exec::execute(&prepared,&input::at_time(1.),&options).unwrap_err().code,"cancelled");
+        }));
+        assert_eq!(walked.load(Ordering::Relaxed),0);
+        assert_eq!(core_exec::execute(&prepared,&input::at_time(1.),&options).unwrap(),Value::Text(vec![b'b';4096]));
+    }
+}
+
 fn state_values(state: &E::State) -> Value { Value::List(Arc::new(E::Host::state_values(state))) }
 
 fn compile_strict(value: &Value) -> crate::flow_ir::Executor::Program {
