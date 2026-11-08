@@ -193,6 +193,42 @@ fn resident_unfold() {
     host::close(&h);
 }
 
+fn resident_state() {
+    let Some(gpu) = start() else { return };
+    let h = host::create(&|| 0.0, &gpu);
+    let value = tp::composition_value(r#"(state [previous (exact (array/vec3 262144 [0.0 0.0 0.0]))]
+        (map (fn [(p : vec3)] (+ p [1.0 0.5 0.25])) previous))"#);
+    let (root, program) = tp::composition_core(&value);
+    let prepared = tp::prepare(&program);
+    let state = flow_eval::create_state();
+    let owner = mem::plan_in(mem::Pool::Device, "flow_gpu.held");
+    let before = owner.bytes();
+    let mut last = Value::No_geo;
+    for frame in 0..32 {
+        let live = input::Frame { frame, tick: frame, ..input::at_time(frame as f64 / 60.) };
+        tp::ok(flow_eval::Residual::bind_live(root, &live, Some(&state)));
+        let resident = host::resident(false, true, &h);
+        last = tp::ok(c::execute(&prepared, &live, &c::Options { root: Some(root), strict: true, resident: Some(resident.clone()), ..Default::default() }));
+        assert!(flow_eval::Device::held_by_device(&last));
+        (resident.close)();
+        assert_eq!(host::stats(&h).payload_readback_bytes, 0, "state read back at frame {frame}");
+        assert!(owner.bytes() - before <= 6 * run::size_class(262144 * 3 * 4), "old state buffers retained at frame {frame}: {} bytes", owner.bytes() - before);
+    }
+    let materialised = flow_eval::Device::thaw(&last);
+    assert_eq!(array(&materialised).len(), 262144 * 3);
+    assert!(array(&materialised).chunks_exact(3).all(|p| p == [32.0, 16.0, 8.0]));
+    // CPU placement can peek this frame's device result or advance the next frame.
+    for frame in [31, 32] {
+        let live = input::Frame { frame, tick: frame, ..input::at_time(frame as f64 / 60.) };
+        tp::ok(flow_eval::Residual::bind_live(root, &live, Some(&state)));
+        let cpu = tp::ok(c::execute(&prepared, &live, &c::Options { root: Some(root), strict: true, ..Default::default() }));
+        assert_eq!(array(&cpu).len(), 262144 * 3);
+        let step = (frame + 1) as f64;
+        assert!(array(&cpu).chunks_exact(3).all(|p| p == [step, step * 0.5, step * 0.25]));
+    }
+    host::close(&h);
+}
+
 fn same_identity(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Int_array(a), Value::Int_array(b)) => Arc::ptr_eq(a, b),
@@ -409,5 +445,5 @@ fn resident_scenarios() {
     assert_eq!(ogpu::impl_::live_handles().expect("native handles"), baseline);
 }
 fn main() {
-    common::window::run(&[("resident_unfold", resident_unfold), ("resident_scenarios", resident_scenarios)]);
+    common::window::run(&[("resident_state", resident_state), ("resident_unfold", resident_unfold), ("resident_scenarios", resident_scenarios)]);
 }

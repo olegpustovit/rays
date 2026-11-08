@@ -141,7 +141,8 @@ pub struct Kept {
     uint32: bool,
     fate: Arc<Fate>,
     /// its contents are its id: a cache keying values by contents tells two held arrays apart
-    placeholder: Arc<Vec<f64>>,
+    /// Uint32 holders need an input marker; float markers belong to their returned planes.
+    placeholder: Option<Arc<Vec<f64>>>,
     epoch: i64,
     /// completed, its status read: CPU readers may read it
     settled: Arc<AtomicBool>,
@@ -1619,6 +1620,7 @@ fn hold(t: &T, uint32: bool, buffer: &Buffer, capacity: i64, count: i64, width: 
         materialised: d.materialised.clone(), materialised_bytes: d.materialised_bytes.clone(),
     });
     let settled = Arc::new(AtomicBool::new(settled));
+    let placeholder = Arc::new(vec![id as f64; width as usize]);
     let kept = Rc::new(Kept {
         id,
         buffer: buffer.clone(),
@@ -1626,7 +1628,7 @@ fn hold(t: &T, uint32: bool, buffer: &Buffer, capacity: i64, count: i64, width: 
         width,
         uint32,
         fate: fate.clone(),
-        placeholder: Arc::new(vec![id as f64; width as usize]),
+        placeholder: uint32.then(|| placeholder.clone()),
         epoch,
         settled: settled.clone(),
         bounds_memo: RefCell::new(None),
@@ -1637,12 +1639,12 @@ fn hold(t: &T, uint32: bool, buffer: &Buffer, capacity: i64, count: i64, width: 
     d.state.borrow_mut().kept.insert(0, KeptRef { epoch, settled: settled.clone(), token: weak.clone(), id });
     d.pool.0.s.borrow_mut().held.insert(id, (buffer.clone(), capacity, fate.clone()));
     KEPT.with(|k| k.borrow_mut().insert(id, kept.clone()));
-    BINDABLE.with(|b| b.borrow_mut().insert(0, (Arc::downgrade(&kept.placeholder), weak.clone(), id, count * width)));
+    BINDABLE.with(|b| b.borrow_mut().insert(0, (Arc::downgrade(&placeholder), weak.clone(), id, count * width)));
     let resident = match width {
-        1 => Value::Float_array(kept.placeholder.clone()),
-        2 => Value::Vec2_array(kept.placeholder.clone()),
-        3 => Value::Vec3_array(kept.placeholder.clone()),
-        _ => Value::Vec4_array(kept.placeholder.clone()),
+        1 => Value::Float_array(placeholder),
+        2 => Value::Vec2_array(placeholder),
+        3 => Value::Vec3_array(placeholder),
+        _ => Value::Vec4_array(placeholder),
     };
     let (t1, t2, t4) = (token.clone(), token.clone(), token.clone());
     // A release callback observes the fate, not the holder's liveness (as does a display pin).
@@ -1808,7 +1810,7 @@ fn integer_holder(domain: ThreadId, planes: Gpu::Planes, kept: Option<Rc<Kept>>)
     let cache: Arc<Mutex<Option<Arc<Vec<i64>>>>> = Arc::new(Mutex::new(None));
     let kept_id = kept.as_ref().map(|k| k.id);
     let Gpu::Planes { count, materialise, settle, release, .. } = planes;
-    let input = kept.as_ref().map(|k| k.placeholder.clone());
+    let input = kept.as_ref().and_then(|k| k.placeholder.clone());
     let resident = kept_id.map(|id| {
         let values = Arc::new(vec![id]);
         flow_ir::packed::host::register_integer_input(&values, input.as_ref().unwrap());

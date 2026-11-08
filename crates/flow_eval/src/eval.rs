@@ -299,6 +299,9 @@ pub type T = Eval;
 /// These roots live outside arenas, so mutually captured functions cannot form owner cycles.
 #[derive(Clone, Default)]
 pub struct Roots(Vec<Arc<Slot>>);
+impl std::fmt::Debug for Roots {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.debug_list().entries(self.0.iter().map(|home| home.id)).finish() }
+}
 impl Roots {
     pub fn is_empty(&self) -> bool { self.0.is_empty() }
 }
@@ -2064,7 +2067,7 @@ fn state_data(value: Value) -> Result<Value, Diagnostic> {
         Value::List(values) => Ok(Value::List(Arc::new(values.iter().cloned().map(state_data).collect::<Result<Vec<_>, _>>()?))),
         Value::Record(fields) => Ok(Value::Record(fields.into_iter().map(|(name, value)| Ok((name, state_data(value)?))).collect::<Result<Vec<_>, Diagnostic>>()?)),
         Value::Struct(name, ty, fields) => Ok(Value::Struct(name, ty, fields.into_iter().map(|(name, value)| Ok((name, state_data(value)?))).collect::<Result<Vec<_>, Diagnostic>>()?)),
-        value => Ok(Device::thaw(&value)),
+        value => Ok(value),
     }
 }
 fn state_previous(a: &mut Arena, c: &ExecCtx, env: &Env, zone: &Path, init: &Term) -> Result<Value, Diagnostic> {
@@ -2082,7 +2085,9 @@ fn state_previous(a: &mut Arena, c: &ExecCtx, env: &Env, zone: &Path, init: &Ter
             state_data.before.get(&key).cloned()
         }
     };
-    match previous { Some(value) => state_data(value), None => state_data(eval_at(a, c, env, init)?) }
+    let value = match previous { Some(value) => state_data(value), None => state_data(eval_at(a, c, env, init)?) }?;
+    // The interpreter needs host data; compiled state reads keep device placeholders.
+    Ok(Device::thaw(&value))
 }
 fn state_write(a: &mut Arena, c: &ExecCtx, zone: &Path, value: Value) -> Result<Value, Diagnostic> {
     let value = state_data(concrete(a, value)?)?;
@@ -3300,7 +3305,7 @@ pub mod Residual {
         let context = state_location(&residual, instance, path, iter, host);
         let state = arena.state.as_ref()?.inner.lock().ok()?;
         let value = if host { state.host.as_ref()?.next.get(&state_key(&context, &[])).cloned() } else { state.next.get(&state_key(&context, &[])).cloned() }?;
-        Some(Device::thaw(&value))
+        Some(value)
     }
     pub fn state_write(id: ResidualId, instance: i64, path: Path, iter: Vec<i64>, host: bool, value: Value) -> Result<Value, Diagnostic> {
         let arena = arena_for_residual(&id).ok_or_else(|| error("E_RESIDUAL_ID", "Residual belongs to an expired evaluation."))?;
@@ -3390,9 +3395,26 @@ fn arena_for_value(value: &Value) -> Option<Arc<Slot>> {
 }
 // A rewrite runs the host's `replace`, `fresh` and `retarget` between short accesses of the value's home arena and holds none across them, so
 // a callback may rewrite again (a folded write copying an earlier one): each copy gets its own fresh id, as in OCaml.
+// A bound kernel owns a fresh capture arena; dropping it releases that frame's arrays,
+// including closures evaluation creates while preparing the bound inputs.
+fn rewrite_home(home: &Arc<Slot>, owned: &mut Option<HashMap<i64, Arc<Slot>>>) -> Arc<Slot> {
+    let Some(homes) = owned else { return home.clone(); };
+    homes.entry(home.id).or_insert_with(|| {
+        let id = NEXT_ARENA.fetch_add(1, Ordering::Relaxed);
+        let arena = peek(home, |a| {
+            let mut copy = Arena::fresh(id, a.workspace.clone(), false, a.budget, current_interrupt(), true);
+            copy.source_key = a.source_key.clone();
+            copy
+        });
+        let slot = Arc::new(Slot { id, cell: Mutex::new(Some(arena)), returned: Condvar::new() });
+        ARENAS.lock().unwrap().insert(id, Arc::downgrade(&slot));
+        slot
+    }).clone()
+}
 fn rewrite_value(
     value: &Value, replace: &dyn Fn(&Value) -> Option<Value>, fresh: &dyn Fn() -> i64,
     retarget: &RetargetResidual, residuals: &mut HashMap<(i64, i64), ResidualId>, functions: &mut HashMap<(i64, i64), FnId>,
+    owned: &mut Option<HashMap<i64, Arc<Slot>>>,
 ) -> Value {
     if let Some(value) = replace(value) { return value; }
     match value {
@@ -3404,18 +3426,19 @@ fn rewrite_value(
             let original_bindings = residual.env.iter().map(|(name, value)| (name.clone(), value.clone())).collect::<Vec<_>>();
             // an unretargeted copy shares its term (one term, not one per copy along a write chain)
             let (term, overrides) = retarget(&residual.term, &original_bindings).map(|(term, overrides)| (Arc::new(term), overrides)).unwrap_or_else(|| (residual.term.clone(), Vec::new()));
-            let copy = ResidualId(fresh(), id.1);
+            let target = rewrite_home(&home, owned);
+            let copy = ResidualId(fresh(), target.id);
             residuals.insert(key, copy);
             residual.term = term;
             let names = overrides.iter().map(|(name, _)| name.clone()).collect::<BTreeSet<_>>();
             let mut env = BTreeMap::new();
             for (name, value) in residual.env.iter() {
                 if names.contains(name) { env.insert(name.clone(), value.clone()); }
-                else { env.insert(name.clone(), rewrite_value(value, replace, fresh, retarget, residuals, functions)); }
+                else { env.insert(name.clone(), rewrite_value(value, replace, fresh, retarget, residuals, functions, owned)); }
             }
             env.extend(overrides);
             residual.env = Arc::new(env);
-            peek(&home, |arena| { arena.residuals.insert(copy, residual); });
+            peek(&target, |arena| { arena.residuals.insert(copy, residual); });
             Value::Residual(copy)
         }
         Value::Fn(id) => {
@@ -3424,17 +3447,18 @@ fn rewrite_value(
             let Some(home) = slot_of(id.1) else { return value.clone(); };
             let Some(Function::Closure(closure)) = peek(&home, |arena| arena.functions.get(id).cloned()) else { return value.clone(); };
             let mut closure = unshare(closure);
-            let copy = FnId(fresh(), id.1);
+            let target = rewrite_home(&home, owned);
+            let copy = FnId(fresh(), target.id);
             functions.insert(key, copy);
-            peek(&home, |arena| { arena.functions.insert(copy, Function::Closure(Arc::new(closure.clone()))); });
-            closure.env = Arc::new(Arc::unwrap_or_clone(closure.env).into_iter().map(|(name, value)| (name, rewrite_value(&value, replace, fresh, retarget, residuals, functions))).collect());
-            peek(&home, |arena| replace_fn(arena, copy, Function::Closure(Arc::new(closure))));
+            peek(&target, |arena| { arena.functions.insert(copy, Function::Closure(Arc::new(closure.clone()))); });
+            closure.env = Arc::new(Arc::unwrap_or_clone(closure.env).into_iter().map(|(name, value)| (name, rewrite_value(&value, replace, fresh, retarget, residuals, functions, owned))).collect());
+            peek(&target, |arena| replace_fn(arena, copy, Function::Closure(Arc::new(closure))));
             Value::Fn(copy)
         }
-        Value::List(values) => Value::List(Arc::new(values.iter().map(|value| rewrite_value(value, replace, fresh, retarget, residuals, functions)).collect())),
-        Value::Record(fields) => Value::Record(fields.iter().map(|(name, value)| (name.clone(), rewrite_value(value, replace, fresh, retarget, residuals, functions))).collect()),
-        Value::Struct(name, ty, fields) => Value::Struct(name.clone(), ty.clone(), fields.iter().map(|(name, value)| (name.clone(), rewrite_value(value, replace, fresh, retarget, residuals, functions))).collect()),
-        Value::Source(name, ty, fields) => Value::Source(name.clone(), ty.clone(), fields.iter().map(|(name, value)| (name.clone(), rewrite_value(value, replace, fresh, retarget, residuals, functions))).collect()),
+        Value::List(values) => Value::List(Arc::new(values.iter().map(|value| rewrite_value(value, replace, fresh, retarget, residuals, functions, owned)).collect())),
+        Value::Record(fields) => Value::Record(fields.iter().map(|(name, value)| (name.clone(), rewrite_value(value, replace, fresh, retarget, residuals, functions, owned))).collect()),
+        Value::Struct(name, ty, fields) => Value::Struct(name.clone(), ty.clone(), fields.iter().map(|(name, value)| (name.clone(), rewrite_value(value, replace, fresh, retarget, residuals, functions, owned))).collect()),
+        Value::Source(name, ty, fields) => Value::Source(name.clone(), ty.clone(), fields.iter().map(|(name, value)| (name.clone(), rewrite_value(value, replace, fresh, retarget, residuals, functions, owned))).collect()),
         _ => value.clone(),
     }
 }
@@ -3487,8 +3511,15 @@ pub mod Host {
     pub fn rewrite(value: &Value, replace: &dyn Fn(&Value) -> Option<Value>) -> Value {
         rewrite_with(value, replace, &|| NEXT_BULK.fetch_add(-1, Ordering::Relaxed), &|_, _| None)
     }
+    /// Bind temporary compiler captures outside the source evaluation's lifetime.
+    pub fn rewrite_owned(value: &Value, replace: &dyn Fn(&Value) -> Option<Value>) -> (Value, Roots) {
+        let mut homes = Some(HashMap::new());
+        let value = rewrite_value(value, replace, &|| NEXT_BULK.fetch_add(-1, Ordering::Relaxed), &|_, _| None, &mut HashMap::new(), &mut HashMap::new(), &mut homes);
+        let roots = roots(std::iter::once(&value));
+        (value, roots)
+    }
     pub fn rewrite_with(value: &Value, replace: &dyn Fn(&Value) -> Option<Value>, fresh: &dyn Fn() -> i64, retarget: &RetargetResidual) -> Value {
-        rewrite_value(value, replace, fresh, retarget, &mut HashMap::new(), &mut HashMap::new())
+        rewrite_value(value, replace, fresh, retarget, &mut HashMap::new(), &mut HashMap::new(), &mut None)
     }
     pub fn remap_function_geometry(sources: &[(i64, i64)], function: FnId) -> FnId {
         let Some(arena) = arena_for_function(function) else { return function; };

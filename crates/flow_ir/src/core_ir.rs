@@ -413,6 +413,7 @@ pub mod Region {
     /// Heavy fields are `Arc`s: `rebuild`/`with_captures` copy a region without copying its code.
     #[derive(Clone, Debug)]
     pub struct T {
+        pub capture_roots: flow_eval::Roots,
         pub destination: Option<Arc<Destination>>,
         pub slot_plan: Arc<OnceLock<Registers>>,
         pub float_slot_plan: Arc<OnceLock<Registers>>,
@@ -979,8 +980,14 @@ pub mod Region {
         }
     }
 
+    fn capture_roots(t: &T) -> flow_eval::Roots {
+        flow_eval::roots(std::iter::once(Value::Residual(t.residual)).chain(t.uniforms.iter().cloned())
+            .chain(t.sources.iter().chain(&t.stages).map(|(r, _)| Value::Residual(*r))).collect::<Vec<_>>().iter())
+    }
+
     pub fn make(p: Parts) -> Result<T, Vec<Diagnostic>> {
-        validate(T {
+        let mut t = validate(T {
+            capture_roots: Default::default(),
             destination: None,
             slot_plan: Arc::new(OnceLock::new()),
             float_slot_plan: Arc::new(OnceLock::new()),
@@ -1005,12 +1012,15 @@ pub mod Region {
             body: p.body,
             binding_fn: p.binding_fn,
             sites: Arc::new(p.sites),
-        })
+        })?;
+        t.capture_roots = capture_roots(&t);
+        Ok(t)
     }
 
     /// `rebuild t ?... ()`: re-validates, with fresh caches and no destination (as `make`).
     pub fn rebuild(t: &T, o: Rebuild) -> Result<T, Vec<Diagnostic>> {
-        validate(T {
+        let mut t = validate(T {
+            capture_roots: t.capture_roots.clone(),
             destination: None,
             slot_plan: Arc::new(OnceLock::new()),
             float_slot_plan: Arc::new(OnceLock::new()),
@@ -1035,7 +1045,9 @@ pub mod Region {
             body: o.body.unwrap_or_else(|| t.body.clone()),
             binding_fn: o.binding_fn.unwrap_or_else(|| t.binding_fn.clone()),
             sites: o.sites.map(Arc::new).unwrap_or_else(|| t.sites.clone()),
-        })
+        })?;
+        t.capture_roots = capture_roots(&t);
+        Ok(t)
     }
 
     pub mod Private {
@@ -1057,7 +1069,9 @@ pub mod Region {
             {
                 return Err(diagnostic);
             }
-            Ok(T { residual, uniforms, sources, stages, count, ..t.clone() })
+            let mut bound = T { residual, uniforms, sources, stages, count, ..t.clone() };
+            bound.capture_roots = capture_roots(&bound);
+            Ok(bound)
         }
     }
 }

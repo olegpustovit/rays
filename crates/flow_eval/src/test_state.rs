@@ -43,6 +43,35 @@ fn forked_states_diverge() {
 }
 
 #[test]
+fn compiled_state_keeps_device_arrays_until_an_interpreter_reads_them() {
+    let evaluation = static_eval(&checked("(array/sum (state [p (exact (array/range 3))] p))")).unwrap();
+    let Value::Residual(root) = evaluation.states[0] else { panic!("state residual") };
+    let view = Residual::residual_view(root).unwrap();
+    let flow_check::workspace::Node::State(id) = view.term.node else { panic!("state term") };
+    let arena = view.term.arena();
+    let mut path = view.prefix.clone();
+    path.extend(arena.path(arena.state(id).zone).iter().map(|id| view.term.name(*id).to_owned()));
+    let state = create_state();
+    let reads = Arc::new(AtomicI64::new(0));
+    let data = Value::Float_array(Arc::new(vec![0.]));
+    let count = reads.clone();
+    Device::add(&data, Arc::new(move || {
+        count.fetch_add(1, O::SeqCst);
+        Value::Float_array(Arc::new(vec![2., 3., 4.]))
+    })).unwrap();
+    let live = at(0., 0, 0);
+    Residual::bind_live(root, &live, Some(&state)).unwrap();
+    let read = || Residual::state_read(root, view.instance, path.clone(), view.iter.clone(), false, &|| data.clone()).unwrap();
+    assert!(Device::held_by_device(&read()));
+    let stored = Residual::state_write(root, view.instance, path.clone(), view.iter.clone(), false, data).unwrap();
+    assert!(Device::held_by_device(&stored));
+    assert!(Device::held_by_device(&Residual::state_peek(root, view.instance, path.clone(), view.iter.clone(), false).unwrap()));
+    assert_eq!(reads.load(O::SeqCst), 0);
+    assert_eq!(Host::force_reference(&Value::Residual(root), &live, Some(&state), None, None).unwrap(), Value::Float_array(Arc::new(vec![2., 3., 4.])));
+    assert!(reads.load(O::SeqCst) > 0);
+}
+
+#[test]
 fn graph_state_clocks_and_snapshots_agree() {
     let workspace = checked_src("(workspace references\n    (graph level :context value [(step : float 2)] (state [n 0.0] (+ n step)))\n    (graph host :context host (state [n 0] (+ n 3)))\n    (graph inline :context value (if (< (ref level) 4) 2 4))\n    (graph bound :context value (let* [n (ref level)] (if (< n 4) 2 4)))\n    (graph override_inline :context value (if (< (ref level :step 4) 8) 4 8))\n    (graph override_bound :context value\n      (let* [n (ref level :step 4.0)] (if (< n 8) 4 8)))\n    (graph other :context value (if (< (ref level :step 6) 12) 6 12))\n    (graph shared :context value (+ (ref level :step 4) (ref level :step 4.0)))\n    (graph host_inline :context value (if (< (ref host) 6) 3 6))\n    (graph host_bound :context value (let* [n (ref host)] (if (< n 6) 3 6))))");
     let evaluation = r#static(&workspace, false, None).unwrap();

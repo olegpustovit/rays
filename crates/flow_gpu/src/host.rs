@@ -2232,8 +2232,9 @@ impl Scope {
         if self.s.borrow().adopted.contains(&p.key) {
             return Ok(None);
         }
-        let Some(holder) = self.retain_float(v) else { return Ok(None) };
-        let Some(placeholder) = holder.resident.clone() else { return Ok(None) };
+        let Some(mut holder) = self.retain_float(v) else { return Ok(None) };
+        // The registry's reader must not own its own weakly keyed placeholder.
+        let Some(placeholder) = holder.resident.take() else { return Ok(None) };
         // a host read copies: the state's buffer stays its, for the next step to bind
         let buffer = p.buffer.0.clone();
         let (count, width) = (holder.count, holder.width);

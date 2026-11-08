@@ -4281,7 +4281,8 @@ pub mod host {
                 _ => None,
             }
         };
-        let Value::List(rewritten) = E::Host::rewrite(&Value::List(Arc::new(all)), &replace) else {
+        let (rewritten, _roots) = E::Host::rewrite_owned(&Value::List(Arc::new(all)), &replace);
+        let Value::List(rewritten) = rewritten else {
             return Err(value::fail("E_CORE_ARGUMENT", "Compiled region rewrite changed shape."));
         };
         let residual_of = |v: &Value| -> Result<ResidualId, Diagnostic> {

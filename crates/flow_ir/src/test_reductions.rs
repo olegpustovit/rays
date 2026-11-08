@@ -174,6 +174,25 @@ fn empty_body_reduction_and_argument_binding() {
 }
 
 #[test]
+fn bound_arguments_release_arrays_with_the_last_region_clone() {
+    let captured = value("(let* [data (state [p (exact (array/range 32))] (map (fn [x] (+ x t)) p))] (map (fn [x] (+ x (array/nth data 0))) (array/range 32)))");
+    let core = lower_strict(residual(&captured)).unwrap();
+    let p = core.regions.iter().rev().find(|p| packed::host::argument_types(p).unwrap() == vec![Ty::Array(Box::new(Ty::Float))]).expect("array argument");
+    for frame in 0..32 {
+        let data = Arc::new(vec![frame as f64; 32]);
+        let weak = Arc::downgrade(&data);
+        let bound = ok(packed::host::bind_arguments(p, &[Value::Float_array(data)], None));
+        let clone = bound.clone();
+        drop(bound);
+        assert!(weak.upgrade().is_some(), "a region clone still owns the argument");
+        let forced = ok(packed::force(&clone, &live_at(1.), &packed::ForceOptions { strict: true, ..Default::default() }));
+        assert_eq!(forced, floats(&(0..32).map(|i| (i + frame) as f64).collect::<Vec<_>>()));
+        drop(clone);
+        assert!(weak.upgrade().is_none(), "finished bindings retained frame {frame}'s array");
+    }
+}
+
+#[test]
 fn source_column_and_unsupported_producer() {
     let source = value_with(
         "[(data : (array float) (array/float 0))]",

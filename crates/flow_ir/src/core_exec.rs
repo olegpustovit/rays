@@ -2209,7 +2209,8 @@ impl Ctx {
                     let value = e::Residual::state_read(root, instance, path, iter, host, &seed);
                     drop(cell);
                     if let Some(d) = failed.into_inner() { return Err(d); }
-                    st.values[result] = value?;
+                    let value = value?;
+                    st.values[result] = if st.resident_on { value } else { e::Device::thaw(&value) };
                     Ok(())
                 })
             }
@@ -2221,7 +2222,8 @@ impl Ctx {
                     let root = state_root(st)?;
                     let pending = e::Residual::state_peek(root, instance, path, iter, host);
                     st.values[found] = Value::Bool(pending.is_some());
-                    st.values[value] = pending.unwrap_or(Value::No_geo);
+                    let pending = pending.unwrap_or(Value::No_geo);
+                    st.values[value] = if st.resident_on { pending } else { e::Device::thaw(&pending) };
                     Ok(())
                 })
             }

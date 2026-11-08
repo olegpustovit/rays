@@ -245,8 +245,7 @@ fn compute(
 ) -> Result<Resolved, Diagnostic> {
     let reference = plan.network.reference;
     if let Some(program) = &plan.states {
-        // a step runs on the device when fast precision has one; what the state stores is read
-        // back as it is written (Core_exec's State_write), so nothing here outlives the scope
+        // Device state owns its holders beyond this scope; host consumers read them on demand.
         let scope = if gpu.fast && !reference { gpu.backend.as_ref().and_then(|b| (b.residency)(true)) } else { None };
         match scope {
             Some(scope) => {
