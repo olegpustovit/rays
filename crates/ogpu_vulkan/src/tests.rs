@@ -169,13 +169,13 @@ fn render_target(texture: &Texture, load: Load, store: Store, clear: (f64, f64, 
 /// A device on a fresh driver with fatal validation, or None where there is no Vulkan device.
 fn open() -> Option<Device> {
     let driver = create_with_validation((true, true));
-    match (driver.create_device)() {
+    match driver.create_device() {
         Err(failure) if failure.kind == ErrorKind::NoAdapter => {
             eprintln!("OGPU conformance (Vulkan): skipped (no device)");
             return None;
         }
         Err(failure) => panic!("{}", error::to_string(&failure)),
-        Ok(raw) => (raw.destroy_device)().unwrap_or_else(|failure| die(failure)),
+        Ok(raw) => raw.destroy_device().unwrap_or_else(|failure| die(failure)),
     }
     Some(be::create_device(driver).unwrap_or_else(|failure| die(failure)))
 }
@@ -183,7 +183,7 @@ fn open() -> Option<Device> {
 fn finish(device: &Device) {
     be::destroy_device(device).unwrap_or_else(|failure| die(failure));
     assert_eq!(impl_::live_handles(), 0, "Vulkan backend leaked handles");
-    assert_eq!(vulkan::Device::validation_messages(), 0, "validation messages");
+    assert_eq!(crate::vulkan::Device::validation_messages(), 0, "validation messages");
 }
 
 fn encode_rows(format: TextureFormat, width: usize, texel: &dyn Fn(usize, usize, usize) -> f64) -> Vec<u8> {
@@ -1492,21 +1492,21 @@ fn gpu_conformance_render() {
 #[test]
 fn gpu_out_of_device_memory_is_capacity() {
     let driver = create_with_validation((true, true));
-    let raw = match (driver.create_device)() {
+    let raw = match driver.create_device() {
         Err(failure) if failure.kind == ErrorKind::NoAdapter => return,
         Err(failure) => panic!("{}", error::to_string(&failure)),
         Ok(raw) => raw,
     };
-    let size = 2 * (raw.recommended_working_set)();
-    match (raw.create_buffer)(Memory::DeviceLocal, &buf("", size, &[BufferUsage::Storage])) {
+    let size = 2 * raw.recommended_working_set();
+    match raw.create_buffer(Memory::DeviceLocal, &buf("", size, &[BufferUsage::Storage])) {
         Err(failure) if failure.kind == ErrorKind::Capacity => (),
         Err(failure) => panic!("out of device memory is not Capacity: {}", error::to_string(&failure)),
         Ok(resource) => {
-            let _ = (resource.destroy)();
+            let _ = resource.destroy();
             panic!("a buffer of twice the working set was created");
         }
     }
-    (raw.destroy_device)().unwrap_or_else(|failure| die(failure));
+    raw.destroy_device().unwrap_or_else(|failure| die(failure));
     assert_eq!(impl_::live_handles(), 0, "out-of-memory test leaked handles");
-    assert_eq!(vulkan::Device::validation_messages(), 0, "out-of-memory test: validation messages");
+    assert_eq!(crate::vulkan::Device::validation_messages(), 0, "out-of-memory test: validation messages");
 }
