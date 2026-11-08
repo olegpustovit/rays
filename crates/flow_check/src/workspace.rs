@@ -562,6 +562,12 @@ struct Closure{params:Vec<(Syntax,Option<Ty>)>,body:Syntax,env:ScopeStack,ctx:Co
 struct Sig{name:String,ctx:Context,params:Vec<(String,Ty,Option<Syntax>)>,body:Syntax,form:Syntax}
 #[derive(Clone)]
 struct Cx{env:ScopeStack,ctx:Context,path:Path,scope:String,in_def:bool,stack:Vec<String>,depth:usize,zone:Option<usize>,zbody:bool}
+impl Cx {
+    /// A clone at another path, without copying the path it replaces.
+    fn with_path(&self, path: Path) -> Cx {
+        Cx { env: self.env.clone(), ctx: self.ctx.clone(), path, scope: self.scope.clone(), stack: self.stack.clone(), ..*self }
+    }
+}
 #[derive(Clone)]
 struct Arg{key:Option<String>,form:Syntax,term:TermId,info:Info}
 
@@ -587,7 +593,7 @@ struct Checker {
     def_terms: BTreeMap<String, Graph>,
     kind_fns: BTreeMap<String, (String, Context, Vec<catalog::Slot>)>,
     inline: BTreeMap<Path, usize>,
-    input_paths: BTreeMap<(Path, String, i64), Path>,
+    input_paths: BTreeMap<Path, BTreeMap<(i64, String), Path>>,
     checked_defs: BTreeSet<String>,
     graph_order: Vec<String>,
     def_order: Vec<String>,
@@ -886,8 +892,8 @@ impl Checker {
      if !head.contains('/') && !self.macros.contains_key(head) && !opaque_head(head) {
          return self.infer(cx, form);
      }
-     let memo = (cx.path.clone(), key.to_owned(), form.id);
-     let path = if let Some(path) = self.input_paths.get(&memo) {
+     let memo = (form.id, key.to_owned());
+     let path = if let Some(path) = self.input_paths.get(&cx.path).and_then(|paths| paths.get(&memo)) {
          path.clone()
      } else {
          let mut stem = cx.path.clone();
@@ -904,14 +910,13 @@ impl Checker {
              unique
          };
          *count += 1;
-         self.input_paths.insert(memo, path.clone());
+         self.input_paths.entry(cx.path.clone()).or_default().insert(memo, path.clone());
          path
      };
      if opaque_head(head) {
          return self.binding(cx, form, path);
      }
-     let mut inner = cx.clone();
-     inner.path = path.clone();
+     let inner = cx.with_path(path.clone());
      let (term, value) = self.infer(&inner, form);
      self.mark(path.clone(), &value);
      let term = if *self.terms.ty(term) == ty::drawing() || *self.terms.ty(term) == ty::image() {
@@ -1060,8 +1065,7 @@ impl Checker {
 
  fn path_term(&mut self,cx:&Cx,f:&Syntax,term:TermId,v:Info)->(TermId,Info){let t=self.set_path(term,cx.path.clone());self.mark(cx.path.clone(),&v);(t,v)}
  fn binding(&mut self, cx: &Cx, x: &Syntax, id: Path) -> (TermId, Info) {
-     let mut inner = cx.clone();
-     inner.path = id.clone();
+     let inner = cx.with_path(id.clone());
      let head = match x.node {
          SNode::List(range) if x.meta().is_empty() => {
              let items = x.range(range);
@@ -1120,8 +1124,7 @@ impl Checker {
      } else {
          path.push(format!("@result#{key}"));
      }
-     let mut inner = cx.clone();
-     inner.path = path.clone();
+     let inner = cx.with_path(path.clone());
      let (mut term, value) = self.body(&inner, form);
      if syntax::head(form) != Some("let*") {
          term = self.make_term(form, value.ty.clone(), Draft::Let(Vec::new(), term));
@@ -1149,14 +1152,14 @@ impl Checker {
          let p=&f.child(pair[0]);let expr=&f.child(pair[1]);
          if !self.check_pattern(cx,p,&mut seen,&env,"let*"){continue}
          let mut path=base.clone();path.push(Self::pattern_key(p));
-         let mut inner=cx.clone();inner.env=env.snapshot();inner.path=path.clone();inner.zbody=false;
+         let mut inner=cx.with_path(path.clone());inner.env=env.snapshot();inner.zbody=false;
          let(t,v)=if expr.meta().is_empty()&&matches!(p.node,SNode::Sym(_))&&syntax::head(expr)==Some("fn"){
              let args=expr.children();
              self.make_fn(&inner,expr,&args[1..],Self::pattern_key(p).as_str(),Some(path.clone()))
          }else{self.binding(&inner,expr,path.clone())};
          let t=self.set_path(t,path.clone());self.mark(path.clone(),&v);
          if cx.zbody&&!cx.zone.is_some_and(|z|v.vary.contains(&z)){self.invariant.insert(path.clone());}
-         {let mut bcx=cx.clone();bcx.path=base.clone();self.bind(&bcx,p,v.clone(),"",env.top_mut(base_id));}
+         {let bcx=cx.with_path(base.clone());self.bind(&bcx,p,v.clone(),"",env.top_mut(base_id));}
          out.push((Self::pattern(p),t));
      }
      let mut inner=cx.clone();inner.env=env.snapshot();inner.zbody=false;
@@ -1400,9 +1403,8 @@ impl Checker {
      let zone_id = self.terms.path(&zone);
      let mut env = cx.env.push(zone_id);
      self.bind(cx, pattern, init_value.clone(), ":", env.top_mut(zone_id));
-     let mut inner = cx.clone();
+     let mut inner = cx.with_path(zone.clone());
      inner.env = env.snapshot();
-     inner.path = zone.clone();
      let (step, step_value) = self.body(&inner, &form.child(args[1]));
      self.no_fn(form, &step_value.ty, "A state step");
      if !ty::fits(&step_value.ty, &init_value.ty) || shape_ty(&step_value.ty) {
@@ -1484,8 +1486,7 @@ impl Checker {
          Some((form.child(accs[0]), t, v))
      } else { None };
      let last = id.last().cloned().unwrap_or_else(|| name.to_owned());
-     let mut zcx = cx.clone();
-     zcx.path = id.clone();
+     let zcx = cx.with_path(id.clone());
      let acc_live0 = init.as_ref().is_some_and(|(_, _, v)| v.live);
      let mut run_live = acc_live0;
      let zone_path_id = self.terms.path(&id);
@@ -1530,9 +1531,8 @@ impl Checker {
              lens.push(cv.len);
              outer.push(cv);
          }
-         let mut inner = cx.clone();
+         let mut inner = cx.with_path(id.clone());
          inner.env = env.snapshot();
-         inner.path = id.clone();
          inner.scope = format!("{} › {}", cx.scope, last);
          inner.zone = Some(zid);
          inner.zbody = true;
@@ -1635,8 +1635,7 @@ impl Checker {
      if args.len() != 2 { return self.fail_term(f, "E_FN", "fn is (fn [params] body)."); }
      let SNode::Vec(ps) = f.arena().row(args[0]).node else { return self.fail_term(f, "E_FN", "fn is (fn [params] body)."); };
      let path = at.unwrap_or_else(|| self.inline_path(cx, "~fn"));
-     let mut bcx = cx.clone();
-     bcx.path = path.clone();
+     let bcx = cx.with_path(path.clone());
      let mut params = Vec::new();
      let fn_scope = self.terms.path(&path);
      let mut env = cx.env.push(fn_scope);
@@ -1656,9 +1655,8 @@ impl Checker {
          params.push((pat.clone(), annot.clone()));
          self.bind(&bcx, &pat, Info::leaf(annot.unwrap_or(Ty::Any)), ":", env.top_mut(fn_scope));
      }
-     let mut inner = cx.clone();
+     let mut inner = cx.with_path(path.clone());
      inner.env = env.snapshot();
-     inner.path = path.clone();
      inner.scope = format!("{} › {name}", cx.scope);
      let body = f.child(args[1]);
      let (bt, bv) = self.body(&inner, &body);
@@ -1712,7 +1710,7 @@ impl Checker {
      if cx.depth>64{return self.fail_term(f,"E_DEPTH","Call depth exceeds 64.")}
      let call_scope = self.terms.path(&c.path);
      let mut env = c.env.push(call_scope);
-     let mut pcx=cx.clone();pcx.path=c.path.clone();
+     let pcx=cx.with_path(c.path.clone());
      for ((pattern,annotation),arg) in c.params.iter().zip(args){
          let mut value=arg.info.clone();
          if let Some(want)=annotation{
