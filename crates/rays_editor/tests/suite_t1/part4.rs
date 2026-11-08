@@ -79,9 +79,10 @@ pub fn run_loop_copies() {
     select_row(&mut r, 1);
     let x = |r: &Run| objects(&r.e).iter().map(|i| field_of(i, "translate_x")).collect::<Vec<_>>();
     check(objects(&r.e).len() == 3 && x(&r).iter().all(|v| *v == f(0.)), "the loop did not make three objects at the origin");
-    // the head is 118 tall at the test's 11 points, then Inputs (4 + 24, 24), Geometry (16 + 24, two switch
-    // rows) and Transform (16 + 24): the translate row is 118 + 52 + 88 + 40 = 298 down, its middle 12 more
-    drag_slider(&mut r, 310);
+    // the head is 118 tall at the test's 11 points, then Inputs (4 + 24, 24), Geometry (16 + 24, three switch
+    // rows since 55482c94 added Cull) and Transform (16 + 24): the translate row is 118 + 52 + 112 + 40 = 322
+    // down, its middle 12 more
+    drag_slider(&mut r, 334);
     let moved = x(&r);
     check(moved.iter().all(|v| *v == moved[0] && *v != f(0.)), "dragging a literal field of one copy did not move all three");
     check(count_of(&r.source(), ":translate [") == 1, &format!("the template was not edited once: {}", r.source()));

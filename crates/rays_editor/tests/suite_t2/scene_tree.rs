@@ -322,7 +322,8 @@ fn sec_c(r: &mut Run, _cx: &Ctx, cooks: &Rc<Cell<i64>>) {
     r.select("geo1", 8);
     r.step(vec![]);
     let (ix, iy, _, _) = editor::panes(&r.e, &tframe((450, 320), vec![], &[], &[], 0)).inspector;
-    let slider = |x: i64| (ix + 100 + x, iy + 346);
+    // the Translate row's middle: 346 before 55482c94 added the 24-point Cull row above it
+    let slider = |x: i64| (ix + 100 + x, iy + 370);
     let translate_x = |e: &Ed| editor::selected_node(e).and_then(|n| n.fields.into_iter().find(|f| f.name == "translate_x").map(|f| f.current));
     let before = translate_x(&r.e);
     r.step_with(slider(0), &[], &[MouseButton::LeftButton], vec![Event::Pointer_pressed(MouseButton::LeftButton, at(slider(0)))]);
