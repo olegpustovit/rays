@@ -103,10 +103,6 @@ fn choice_tables_follow_their_enum_discriminants() {
     for (i, mode) in KERNEL_MODE.iter().enumerate() {
         assert_eq!(*mode as usize, i);
     }
-    for (i, kind) in NUMERIC_KIND.iter().enumerate() {
-        assert_eq!(*kind as usize, i);
-        assert_eq!(numeric_kind_of_value(&numeric_kind_value(*kind)), *kind);
-    }
     for owner in GROUP_OWNERS {
         assert_eq!(group_owner_of_value(&group_owner_value(owner)), owner);
     }

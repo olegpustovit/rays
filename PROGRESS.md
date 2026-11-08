@@ -10,7 +10,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 
 | Wave | Done | Active | Pending |
 |------|------|--------|---------|
-| A | 7/8 | A2, A6 | — |
+| A | 7/8 | A6 | — |
 | B | 0/6 | B0 | 4 |
 | M | 0/21 | — | 21 |
 | I | 0/1 | — | 1 |
@@ -22,7 +22,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | ID | Status | Commit / evidence |
 |----|--------|-------------------|
 | A1 | done | `6802a325` — delete `rays_collections` / `rays_hash`; gate bans generics |
-| A2 | active | `ec5c1b1b` re-exports; `5a6e7269` support prune; **this session** — drop `mixed_seed`, privatize internal helpers; restore `uv_ops` / `point_index` re-exports |
+| A2 | done | `30623d6e` — `e10bff22` edge_transport; `ec5c1b1b`/`992093ce` rdk re-exports; `5a6e7269`/`da178e93` support (−631 vs OCaml root); `NumericKind` test dropped |
 | A3 | done | `1a8ee31b` — rdk `MAX_ARRAY_LENGTH` trimmed; `boolean_materialization` packing kept |
 | A4 | done | `a60fcced` — `md5_hex` in `rays_math::hash`; 5 duplicate modules removed |
 | A5 | active | `ec5c1b1b` — `region_snapshot` test-only; **this session** — dead `window_to_values`, `live_delay()`; `Editor::Private` behind `test-hooks` feature (+ `required-features` on GPU/window tests); pxui_graph accessors still open |
@@ -66,3 +66,4 @@ Cursor `Task` subagents unavailable in this harness; workers are `omp launch -p`
 - 2026-11-08: `f980cbf9` A7 ocaml_trim; `cargo t -p sop` 52 pass (~20s).
 - 2026-11-08: A7 `rdk_core` trim helper; B4 buildtime W1 editor chain; `cargo check -p buildtime`.
 - 2026-11-08: A7 surface_index → `point_triangle_barycentric_into`; `rdk_core::ocaml_trim`; rdk_ops + sop OCaml blank-name checks; `cargo t -p rdk_geom surface` 9 pass (~7s).
+- 2026-11-08: `30623d6e` A2 closed — dead enums/`NumericKind` in `da178e93`; PROGRESS + `cargo t -p sop` 52 pass (~19s).
