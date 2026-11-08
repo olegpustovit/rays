@@ -266,7 +266,7 @@ fn validate_range(operation: &str, total: u64, offset: u64, length: usize) -> Re
     if offset > total || length > total - offset { Err(error(operation, ErrorKind::InvalidArgument, "range exceeds the buffer")) } else { Ok(()) }
 }
 
-pub mod ReleaseQueue {
+pub mod release_queue {
     use super::{metal_raw, sys_error, enter_main, Error};
     #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
     pub struct Stats { pub pending: usize, pub live_handles: usize, pub total_created: u64, pub total_released: u64, pub external_deallocations: u64, pub external_deallocation_mismatches: u64, pub resident_bytes: u64 }
@@ -898,7 +898,7 @@ impl ComputeEncoder {
             }
             let count = threadgroup.0.checked_mul(threadgroup.1).and_then(|value| value.checked_mul(threadgroup.2)).ok_or_else(|| error(operation, ErrorKind::InvalidArgument, "threadgroup cardinality overflows"))?;
             if count > pipeline.max_total_threads() { return Err(error(operation, ErrorKind::InvalidArgument, "threadgroup exceeds the pipeline's maximum total thread count")); }
-            let make_size = |(width, height, depth)| metal_sys::registry::Record::Mtl_size_int { width, height, depth };
+            let make_size = |(width, height, depth)| metal_sys::registry::record::Mtl_size_int { width, height, depth };
             metal_sys::registry::compute_encoder_dispatch(&self.0.raw, make_size(threads), make_size(threadgroup)).map_err(|failure| sys_error(operation, failure))
         })()
     }
@@ -913,7 +913,7 @@ impl ComputeEncoder {
             if offset % 4 != 0 || offset > arguments.0.length || 12 > arguments.0.length - offset { return Err(error(operation, ErrorKind::InvalidArgument, "indirect arguments range is invalid")); }
             let count = threadgroup.0.checked_mul(threadgroup.1).and_then(|value| value.checked_mul(threadgroup.2)).ok_or_else(|| error(operation, ErrorKind::InvalidArgument, "threadgroup cardinality overflows"))?;
             if count > pipeline.max_total_threads() { return Err(error(operation, ErrorKind::InvalidArgument, "threadgroup exceeds the pipeline's maximum total thread count")); }
-            let size = metal_sys::registry::Record::Mtl_size_int { width: threadgroup.0, height: threadgroup.1, depth: threadgroup.2 };
+            let size = metal_sys::registry::record::Mtl_size_int { width: threadgroup.0, height: threadgroup.1, depth: threadgroup.2 };
             metal_sys::registry::compute_encoder_dispatch_indirect(&self.0.raw, arguments.raw(), offset, size).map_err(|failure| sys_error(operation, failure))?;
             self.0.command_buffer.retain_buffer(arguments);
             Ok(())

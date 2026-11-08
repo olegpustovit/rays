@@ -16,12 +16,12 @@ fn reject(kind: ErrorKind, result: Option<Error>) {
         None => panic!("operation unexpectedly succeeded, expected {kind:?}"),
     }
 }
-fn stats() -> ReleaseQueue::Stats { ReleaseQueue::stats().unwrap_or_else(|failure| die(failure)) }
+fn stats() -> release_queue::Stats { release_queue::stats().unwrap_or_else(|failure| die(failure)) }
 fn i32_bytes(values: &[i32]) -> Vec<u8> { values.iter().flat_map(|v| v.to_le_bytes()).collect() }
 fn shared(device: &Device, length: u64) -> Buffer { Buffer::create(device, length, StorageMode::Shared, CpuCacheMode::DefaultCache, None).unwrap_or_else(|failure| die(failure)) }
-fn settle(expected_live: usize) -> ReleaseQueue::Stats {
+fn settle(expected_live: usize) -> release_queue::Stats {
     for _ in 0..8 {
-        ReleaseQueue::drain().unwrap_or_else(|failure| die(failure));
+        release_queue::drain().unwrap_or_else(|failure| die(failure));
         let s = stats();
         if s.pending == 0 && s.live_handles == expected_live { return s; }
     }
@@ -30,7 +30,7 @@ fn settle(expected_live: usize) -> ReleaseQueue::Stats {
 }
 // Every rejection in `operation` is decided before Metal is asked for an object.
 fn without_handles(name: &str, operation: &mut dyn FnMut()) {
-    ReleaseQueue::drain().unwrap_or_else(|failure| die(failure));
+    release_queue::drain().unwrap_or_else(|failure| die(failure));
     let before = stats();
     operation();
     let after = stats();
@@ -154,14 +154,14 @@ fn gpu_command_buffer() {
     command.commit().unwrap_or_else(|failure| die(failure));
     command.wait_until_completed().unwrap_or_else(|failure| die(failure));
     command.destroy().unwrap_or_else(|failure| die(failure));
-    ReleaseQueue::drain().unwrap_or_else(|failure| die(failure));
+    release_queue::drain().unwrap_or_else(|failure| die(failure));
     let before = stats().live_handles;
     {
         let command = CommandBuffer::create(&queue).unwrap_or_else(|failure| die(failure));
         command.commit().unwrap_or_else(|failure| die(failure));
         command.wait_until_completed().unwrap_or_else(|failure| die(failure));
     }
-    ReleaseQueue::drain().unwrap_or_else(|failure| die(failure));
+    release_queue::drain().unwrap_or_else(|failure| die(failure));
     assert_eq!(stats().live_handles, before, "abandoned command buffer retained a native handle");
     queue.destroy().unwrap_or_else(|failure| die(failure));
     device.destroy().unwrap_or_else(|failure| die(failure));
@@ -313,7 +313,7 @@ fn gpu_resource_bounds() {
     let device = Device::system_default().unwrap_or_else(|failure| die(failure));
     let info = device.info().unwrap_or_else(|failure| die(failure));
     let reject_without_native_work = |name: &str, operation: &dyn Fn() -> Result<(), Error>| {
-        ReleaseQueue::drain().unwrap_or_else(|failure| die(failure));
+        release_queue::drain().unwrap_or_else(|failure| die(failure));
         let before = stats();
         match operation() {
             Err(e) if e.kind == ErrorKind::InvalidArgument => {}
@@ -340,7 +340,7 @@ fn gpu_resource_bounds() {
     assert_eq!(buffer.read_bytes(31, 1).unwrap_or_else(|failure| die(failure)), vec![1u8], "the last byte was not readable");
     buffer.destroy().unwrap_or_else(|failure| die(failure));
     device.destroy().unwrap_or_else(|failure| die(failure));
-    ReleaseQueue::drain().unwrap_or_else(|failure| die(failure));
+    release_queue::drain().unwrap_or_else(|failure| die(failure));
 }
 
 fn gpu_sampler() {

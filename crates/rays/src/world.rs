@@ -10,7 +10,7 @@
 //! and sun included: layers are evaluated at azimuth `phi - rotation`.
 use crate::num::{fmax, fmin, int_of_float};
 use renderer::side_lru::{self, Table, TableKey};
-use rays_math::color::Linear;
+use rays_math::color::linear;
 use rays_math::rand;
 use rays_math::vec3;
 use std::cell::RefCell;
@@ -18,10 +18,10 @@ use std::f64::consts::PI as pi;
 use std::rc::Rc;
 use std::sync::{Arc, LazyLock, Mutex};
 
-pub type rgb = Linear::T;
+pub type rgb = linear::T;
 
 pub fn rgb(r: f64, g: f64, b: f64) -> rgb {
-    Linear::rgb(r, g, b)
+    linear::rgb(r, g, b)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -227,7 +227,7 @@ fn white() -> rgb {
 }
 
 fn scale_rgb(k: f64, c: rgb) -> rgb {
-    Linear::T { r: k * c.r, g: k * c.g, b: k * c.b }
+    linear::T { r: k * c.r, g: k * c.g, b: k * c.b }
 }
 
 // ---- parallel rows ----

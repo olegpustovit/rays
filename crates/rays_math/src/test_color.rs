@@ -20,7 +20,7 @@ fn color_hex_unit_floats_hsl_hsv_aces_and_linear() {
     assert!(close(hr, 0.0) && close(hg, 1.0) && close(hb, 0.0));
     assert_eq!(Color::aces(0.0), 0.0);
     assert!(close(Color::aces(1.0), 2.54 / 3.16));
-    assert_eq!(Color::Linear::rgb(1.5, -0.25, 4.0), Color::Linear::T { r: 1.5, g: -0.25, b: 4.0 });
+    assert_eq!(Color::linear::rgb(1.5, -0.25, 4.0), Color::linear::T { r: 1.5, g: -0.25, b: 4.0 });
 }
 
 #[test]

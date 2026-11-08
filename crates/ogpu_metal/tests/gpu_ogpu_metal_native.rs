@@ -39,8 +39,8 @@ fn expect(kind: ErrorKind, result: Option<Error>) {
 
 /// Native handles alive after the release queue drains.
 fn live() -> usize {
-    metal::ReleaseQueue::drain().expect("drain");
-    metal::ReleaseQueue::stats().expect("stats").live_handles
+    metal::release_queue::drain().expect("drain");
+    metal::release_queue::stats().expect("stats").live_handles
 }
 
 fn buffer_descriptor(size: i64, usage: &[BufferUsage]) -> BufferDescriptor {

@@ -152,8 +152,7 @@ pub fn to_hex_string(color: T) -> String {
     }
 }
 
-#[allow(non_snake_case)]
-pub mod Linear {
+pub mod linear {
     #[derive(Clone, Copy, Debug, PartialEq)]
     pub struct T {
         pub r: f64,

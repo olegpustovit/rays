@@ -1004,7 +1004,7 @@ pub fn create() -> Box<dyn Driver> {
 
 /// Native handles still alive on this thread (the release queue drained first).
 pub fn live_handles() -> i64 {
-    match (metal::ReleaseQueue::drain(), metal::ReleaseQueue::stats()) {
+    match (metal::release_queue::drain(), metal::release_queue::stats()) {
         (Ok(_), Ok(stats)) => stats.live_handles as i64,
         _ => unreachable!("the release queue answers on the thread that owns the Metal handles"),
     }

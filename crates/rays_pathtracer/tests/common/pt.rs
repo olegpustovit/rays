@@ -1,10 +1,10 @@
 //! Shared helpers of the path tracer tests (the OCaml Test_pathtracer.pixels and the `get` unwrap).
 #![allow(dead_code)]
-use rays_math::color::Linear;
+use rays_math::color::linear;
 use rays_pathtracer::rays_pathtracer as p;
 
-pub fn rgb(r: f64, g: f64, b: f64) -> Linear::T {
-    Linear::rgb(r, g, b)
+pub fn rgb(r: f64, g: f64, b: f64) -> linear::T {
+    linear::rgb(r, g, b)
 }
 
 pub fn get<T>(result: Result<T, String>) -> T {
@@ -30,7 +30,7 @@ pub fn options(spp: i64) -> p::CreateOptions {
     p::CreateOptions { spp: Some(spp), ..Default::default() }
 }
 
-pub fn material(albedo: Linear::T) -> p::Material {
+pub fn material(albedo: linear::T) -> p::Material {
     p::material(None, None, None, None, albedo)
 }
 

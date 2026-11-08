@@ -15,7 +15,7 @@ pub fn put_u32(bytes: &mut [u8], offset: usize, value: i64) {
     bytes[offset..offset + 4].copy_from_slice(&(value as i32).to_le_bytes());
 }
 
-pub fn color_tuple(color: &rays_math::color::Linear::T) -> (f64, f64, f64) {
+pub fn color_tuple(color: &rays_math::color::linear::T) -> (f64, f64, f64) {
     (color.r, color.g, color.b)
 }
 

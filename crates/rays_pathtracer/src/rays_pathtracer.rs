@@ -14,15 +14,15 @@ use crate::mesh_build::{advance_build, destroy_gpu, discard_build, finish_build,
 use crate::mesh_data;
 use ogpu_core::backend::{self as b, Accel, AccelDescriptor, Buffer, Commands, Device, Geometry, Queue, Receipt, Status, Texture};
 use ogpu_core::types::{BufferUsage, Memory};
-use rays_math::color::Linear;
+use rays_math::color::linear;
 use rays_math::vec3;
 use std::rc::Rc;
 
-pub use rays_math::color::Linear as Linear_color;
+pub use rays_math::color::linear as Linear_color;
 
 /// Linear floating-point RGB for materials and light. Channels are not quantized or clamped, so dim and HDR
 /// values survive GPU upload.
-pub type LinearColor = Linear::T;
+pub type LinearColor = linear::T;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Material {
@@ -41,7 +41,7 @@ pub fn material(roughness: Option<f64>, metallic: Option<f64>, emission: Option<
         albedo,
         roughness: roughness.unwrap_or(0.5),
         metallic: metallic.unwrap_or(0.),
-        emission: emission.unwrap_or(Linear::rgb(0., 0., 0.)),
+        emission: emission.unwrap_or(linear::rgb(0., 0., 0.)),
         round: round.unwrap_or(0.),
     }
 }
@@ -59,7 +59,7 @@ pub struct Panel {
 }
 
 pub fn panel(softness: Option<f64>, intensity: f64, width: f64, height: f64, direction: vec3::T) -> Panel {
-    Panel { direction, width, height, softness: softness.unwrap_or(0.05), color: Linear::rgb(1., 1., 1.), intensity }
+    Panel { direction, width, height, softness: softness.unwrap_or(0.05), color: linear::rgb(1., 1., 1.), intensity }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -84,7 +84,7 @@ pub struct Light {
 }
 
 pub fn rect_light(intensity: f64, size: (f64, f64), target: vec3::T, at: vec3::T) -> Light {
-    Light { at, target, size, color: Linear::rgb(1., 1., 1.), intensity }
+    Light { at, target, size, color: linear::rgb(1., 1., 1.), intensity }
 }
 
 /// The rect that lights like a raster `Light.t` with physical 1/d^2 attenuation: a white matte face at
@@ -93,7 +93,7 @@ pub fn rect_light(intensity: f64, size: (f64, f64), target: vec3::T, at: vec3::T
 /// RGB; the rect's radiance is `pi * intensity / (width * height)`.
 pub fn light_of(l: &rays::light::t) -> Light {
     let c = l.diffuse;
-    let color = Linear::rgb(c.r as f64 / 255., c.g as f64 / 255., c.b as f64 / 255.);
+    let color = linear::rgb(c.r as f64 / 255., c.g as f64 / 255., c.b as f64 / 255.);
     let rect = |at: vec3::T, target: vec3::T, distance2: f64, (w, h): (f64, f64)| Light { at, target, size: (w, h), color, intensity: std::f64::consts::PI * l.intensity * distance2 / (w * h) };
     match &l.kind {
         rays::light::kind::Area { position, direction, width, height, .. } => rect(*position, vec3::add(*position, *direction), 1., (*width, *height)),

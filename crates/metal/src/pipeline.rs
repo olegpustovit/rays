@@ -434,7 +434,7 @@ impl RenderEncoder {
             if ![viewport.x, viewport.y, viewport.width, viewport.height, viewport.znear, viewport.zfar].iter().all(|value| value.is_finite()) || viewport.width <= 0.0 || viewport.height <= 0.0 || viewport.znear < 0.0 || viewport.znear > 1.0 || viewport.zfar < 0.0 || viewport.zfar > 1.0 || viewport.znear > viewport.zfar {
                 return Err(error(OP, ErrorKind::InvalidArgument, "viewport is non-finite, empty, or outside the depth range"));
             }
-            metal_sys::registry::render_encoder_set_viewport(&self.0.raw, metal_sys::registry::Record::Mtl_viewport { originX: viewport.x, originY: viewport.y, width: viewport.width, height: viewport.height, znear: viewport.znear, zfar: viewport.zfar }).map_err(|failure| sys_error(OP, failure))
+            metal_sys::registry::render_encoder_set_viewport(&self.0.raw, metal_sys::registry::record::Mtl_viewport { originX: viewport.x, originY: viewport.y, width: viewport.width, height: viewport.height, znear: viewport.znear, zfar: viewport.zfar }).map_err(|failure| sys_error(OP, failure))
         })()
     }
     pub fn set_scissor(&self, scissor: Scissor) -> Result<(), Error> {
@@ -450,7 +450,7 @@ impl RenderEncoder {
             if width == 0 || height == 0 || x > self.0.target_width || width > self.0.target_width - x || y > self.0.target_height || height > self.0.target_height - y {
                 return Err(error(OP, ErrorKind::InvalidArgument, "scissor rectangle is outside the render pass"));
             }
-            let record = metal_sys::registry::Record::Mtl_scissor_rect { x, y, width, height };
+            let record = metal_sys::registry::record::Mtl_scissor_rect { x, y, width, height };
             metal_sys::registry::render_encoder_set_scissor(&self.0.raw, record).map_err(|failure| sys_error(OP, failure))
         })()
     }

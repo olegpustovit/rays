@@ -100,8 +100,6 @@ pub type mouse_button = MouseButton;
 pub type scroll_phase = ScrollPhase;
 #[allow(non_camel_case_types)]
 pub type event = Event;
-#[allow(non_camel_case_types)]
-pub type t = Frame;
 
 pub fn at_time(time: f64) -> Frame {
     Frame {
@@ -442,14 +440,14 @@ pub fn word_held(platform: Platform, keys: &[Key]) -> bool {
     keys.contains(&match platform { Platform::Apple => Key::Alt, Platform::Other => Key::Ctrl })
 }
 
-#[allow(non_snake_case, non_camel_case_types)]
-pub mod Gate {
+#[allow(non_camel_case_types)]
+pub mod gate {
     use super::{Event, Frame, Key};
 
     pub type frame = Frame;
 
     #[derive(Clone, Debug)]
-    pub struct t {
+    pub struct Gate {
         pub prompt: bool,
         pub menu: bool,
         pub leader: bool,
@@ -472,7 +470,7 @@ pub mod Gate {
         matches!(event, Event::Key_pressed(_) | Event::Key_released(_) | Event::Text_input(_) | Event::Text_editing { .. })
     }
 
-    pub fn gate(g: &t, live: &Frame) -> (Frame, Vec<Key>) {
+    pub fn gate(g: &Gate, live: &Frame) -> (Frame, Vec<Key>) {
         let on_picture = !g.prompt && !g.menu && g.pointer_on_picture && g.window_key;
         let mut live = live.clone();
         if !( !g.previous.buttons.is_empty() || ((live.buttons.is_empty() || g.pressed) && on_picture) ) {
@@ -504,8 +502,8 @@ mod tests {
     fn input(keys: Vec<Key>, buttons: Vec<MouseButton>, pointer: (f64, f64), events: Vec<Event>) -> Frame {
         Frame { t: 0.0, dt: 1.0 / 60.0, frame: 0, tick: 0, size: (100, 100), pointer, buttons, keys, events }
     }
-    fn open() -> Gate::t {
-        Gate::t {
+    fn open() -> gate::Gate {
+        gate::Gate {
             prompt: false, menu: false, leader: false, text_focus: false,
             focus_on_picture: true, pointer_on_picture: true, window_key: true,
             pressed: false, previous: input(vec![], vec![], (10.0, 10.0), vec![]), blocked: vec![],
@@ -523,52 +521,52 @@ mod tests {
         let open = open();
         for (what, gate, reaches) in [
             ("a viewer or canvas in focus", open.clone(), true),
-            ("the graph pane in focus", Gate::t { focus_on_picture: false, ..open.clone() }, false),
-            ("the text pane in focus", Gate::t { focus_on_picture: false, text_focus: true, ..open.clone() }, false),
-            ("a leader half typed", Gate::t { leader: true, ..open.clone() }, false),
-            ("a prompt", Gate::t { prompt: true, ..open.clone() }, false),
-            ("a menu", Gate::t { menu: true, ..open.clone() }, false),
-            ("a text field in a canvas in focus", Gate::t { text_focus: true, ..open.clone() }, false),
+            ("the graph pane in focus", gate::Gate { focus_on_picture: false, ..open.clone() }, false),
+            ("the text pane in focus", gate::Gate { focus_on_picture: false, text_focus: true, ..open.clone() }, false),
+            ("a leader half typed", gate::Gate { leader: true, ..open.clone() }, false),
+            ("a prompt", gate::Gate { prompt: true, ..open.clone() }, false),
+            ("a menu", gate::Gate { menu: true, ..open.clone() }, false),
+            ("a text field in a canvas in focus", gate::Gate { text_focus: true, ..open.clone() }, false),
         ] {
             for key in [Key::Escape, Key::KeyChar('q')] {
-                let (seen, _) = Gate::gate(&gate, &presses(key));
+                let (seen, _) = gate::gate(&gate, &presses(key));
                 assert_eq!(sees(&seen, key), reaches, "{}: {} {} the sketch", what, key_name(key), if reaches { "did not reach" } else { "reached" });
                 assert_eq!(seen.events.iter().any(|event| matches!(event, Event::Text_input(_))), reaches, "{}: typed text and the key disagree", what);
             }
         }
 
-        let closing = Gate::t { leader: true, ..open.clone() };
-        let (seen, blocked) = Gate::gate(&closing, &presses(Key::Escape));
+        let closing = gate::Gate { leader: true, ..open.clone() };
+        let (seen, blocked) = gate::gate(&closing, &presses(Key::Escape));
         assert!(!sees(&seen, Key::Escape) && blocked == vec![Key::Escape], "the leader's Esc reached the sketch or was not remembered");
         let held = input(vec![Key::Escape], vec![], (10.0, 10.0), vec![]);
-        let (seen, blocked) = Gate::gate(&Gate::t { blocked: blocked.clone(), ..open.clone() }, &held);
+        let (seen, blocked) = gate::gate(&gate::Gate { blocked: blocked.clone(), ..open.clone() }, &held);
         assert!(!sees(&seen, Key::Escape) && blocked == vec![Key::Escape], "a held Esc leaked when the keyboard came back");
-        let (seen, blocked) = Gate::gate(
-            &Gate::t { blocked: blocked.clone(), ..open.clone() },
+        let (seen, blocked) = gate::gate(
+            &gate::Gate { blocked: blocked.clone(), ..open.clone() },
             &input(vec![Key::Escape, Key::KeyChar('q')], vec![], (10.0, 10.0), vec![Event::Key_pressed(Key::KeyChar('q'))]),
         );
         assert!(!sees(&seen, Key::Escape) && sees(&seen, Key::KeyChar('q')) && blocked == vec![Key::Escape], "another key was hidden with the held one");
-        let (seen, blocked) = Gate::gate(&Gate::t { blocked: blocked.clone(), ..open.clone() }, &input(vec![], vec![], (10.0, 10.0), vec![Event::Key_released(Key::Escape)]));
+        let (seen, blocked) = gate::gate(&gate::Gate { blocked: blocked.clone(), ..open.clone() }, &input(vec![], vec![], (10.0, 10.0), vec![Event::Key_released(Key::Escape)]));
         assert!(blocked.is_empty() && seen.keys.is_empty(), "a released key stayed hidden");
-        let (seen, _) = Gate::gate(&Gate::t { blocked, ..open.clone() }, &presses(Key::Escape));
+        let (seen, _) = gate::gate(&gate::Gate { blocked, ..open.clone() }, &presses(Key::Escape));
         assert!(sees(&seen, Key::Escape), "a fresh press after the release did not reach the sketch");
 
         let moved = input(vec![], vec![], (50.0, 50.0), vec![Event::Pointer_moved((50.0, 50.0))]);
-        let away = Gate::t { pointer_on_picture: false, previous: input(vec![], vec![], (5.0, 5.0), vec![]), ..open.clone() };
-        let (seen, _) = Gate::gate(&away, &moved);
+        let away = gate::Gate { pointer_on_picture: false, previous: input(vec![], vec![], (5.0, 5.0), vec![]), ..open.clone() };
+        let (seen, _) = gate::gate(&away, &moved);
         assert!(seen.pointer == (5.0, 5.0) && seen.events.is_empty(), "the pointer left the picture and the sketch followed");
-        let (seen, _) = Gate::gate(&Gate::t { pointer_on_picture: true, ..away.clone() }, &moved);
+        let (seen, _) = gate::gate(&gate::Gate { pointer_on_picture: true, ..away.clone() }, &moved);
         assert!(seen.pointer == (50.0, 50.0) && !seen.events.is_empty(), "the pointer over the picture was hidden");
-        let (seen, _) = Gate::gate(&Gate::t { window_key: false, pointer_on_picture: true, ..away.clone() }, &moved);
+        let (seen, _) = gate::gate(&gate::Gate { window_key: false, pointer_on_picture: true, ..away.clone() }, &moved);
         assert!(seen.pointer == (5.0, 5.0) && seen.events.is_empty(), "a pointer over an unfocused window reached the sketch");
-        let (seen, _) = Gate::gate(&Gate::t { prompt: true, pointer_on_picture: true, ..away.clone() }, &moved);
+        let (seen, _) = gate::gate(&gate::Gate { prompt: true, pointer_on_picture: true, ..away.clone() }, &moved);
         assert!(seen.pointer == (5.0, 5.0), "a prompt did not hold the pointer");
         let drag = input(vec![], vec![MouseButton::LeftButton], (50.0, 50.0), vec![Event::Pointer_moved((50.0, 50.0))]);
-        let (seen, _) = Gate::gate(&Gate::t { previous: input(vec![], vec![MouseButton::LeftButton], (5.0, 5.0), vec![]), ..away.clone() }, &drag);
+        let (seen, _) = gate::gate(&gate::Gate { previous: input(vec![], vec![MouseButton::LeftButton], (5.0, 5.0), vec![]), ..away.clone() }, &drag);
         assert!(seen.pointer == (50.0, 50.0), "a drag that began on the picture was cut off");
-        let (seen, _) = Gate::gate(&away, &drag);
+        let (seen, _) = gate::gate(&away, &drag);
         assert!(seen.buttons.is_empty() && seen.pointer == (5.0, 5.0), "a drag that began elsewhere became the sketch's");
-        let (seen, _) = Gate::gate(&Gate::t { pointer_on_picture: true, pressed: true, ..away }, &drag);
+        let (seen, _) = gate::gate(&gate::Gate { pointer_on_picture: true, pressed: true, ..away }, &drag);
         assert!(!seen.buttons.is_empty(), "a press on the picture was hidden");
     }
     

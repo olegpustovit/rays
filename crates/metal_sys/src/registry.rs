@@ -3,7 +3,7 @@ use super::{Error, Handle};
 use std::ffi::{CStr, CString};
 use std::mem::MaybeUninit;
 
-#[allow(non_snake_case)] pub mod Record {
+#[allow(non_snake_case)] pub mod record {
     #[repr(C)]
     #[derive(Clone, Copy, Debug, Default, PartialEq)]
     pub struct Mtl_viewport {
@@ -113,8 +113,8 @@ BindingMetadata { name: "drawable10_snapshot_presentedTime", receiver: "Metal_dr
 ];
 #[derive(Clone, Copy, Debug)] pub struct EnumCase { pub name: &'static str, pub symbol: &'static str, pub value: i64, pub since: (u32,u32,u32) }
 #[derive(Clone, Copy, Debug)] pub struct EnumMetadata { pub name: &'static str, pub feature: Feature, pub cases: &'static [EnumCase] }
-#[allow(non_snake_case, non_upper_case_globals)]
-pub mod Mtl_data_type { pub type Value = i64;
+#[allow(non_upper_case_globals)]
+pub mod mtl_data_type { pub type Value = i64;
 pub const mtl_data_type_array: Value = 2i64;
 pub const mtl_data_type_b_float: Value = 121i64;
 pub const mtl_data_type_b_float2: Value = 122i64;
@@ -313,7 +313,7 @@ pub fn of_int64(value: i64) -> Option<Value> { match value {
 140 => Some(value),
 _ => None, } }
 }
-pub mod Mtl_feature_set { pub type Value = i64;
+pub mod mtl_feature_set { pub type Value = i64;
 pub const mtl_feature_set_osx_gpu_family1_v1: Value = 10000i64;
 pub const mtl_feature_set_osx_gpu_family1_v2: Value = 10001i64;
 pub const mtl_feature_set_osx_read_write_texture_tier2: Value = 10002i64;
@@ -1064,7 +1064,7 @@ pub fn render_depth_stencil(receiver: &Handle, arg0: Option<&Handle>) -> Result<
     Ok(())
 }
 #[cfg(target_vendor = "apple")] unsafe extern "C" { #[link_name = "rays_metal_render_depth_stencil"] fn ffi_rays_metal_render_depth_stencil(receiver: *mut super::NativeHandle, arg0: *mut super::NativeHandle, message: *mut *const std::ffi::c_char) -> i32; }
-pub fn render_encoder_set_viewport(receiver: &Handle, arg0: Record::Mtl_viewport) -> Result<(), Error> {
+pub fn render_encoder_set_viewport(receiver: &Handle, arg0: record::Mtl_viewport) -> Result<(), Error> {
     let receiver_ptr = receiver.as_native_ptr()?;
     let mut message = std::ptr::null();
     #[cfg(target_vendor = "apple")] let status = unsafe { ffi_rays_metal_render_encoder_set_viewport(receiver_ptr, arg0, &mut message) };
@@ -1072,8 +1072,8 @@ pub fn render_encoder_set_viewport(receiver: &Handle, arg0: Record::Mtl_viewport
     if status != 0 { return Err(unsafe { Error::from_native(status, message) }); }
     Ok(())
 }
-#[cfg(target_vendor = "apple")] unsafe extern "C" { #[link_name = "rays_metal_render_encoder_set_viewport"] fn ffi_rays_metal_render_encoder_set_viewport(receiver: *mut super::NativeHandle, arg0: Record::Mtl_viewport, message: *mut *const std::ffi::c_char) -> i32; }
-pub fn render_encoder_set_scissor(receiver: &Handle, arg0: Record::Mtl_scissor_rect) -> Result<(), Error> {
+#[cfg(target_vendor = "apple")] unsafe extern "C" { #[link_name = "rays_metal_render_encoder_set_viewport"] fn ffi_rays_metal_render_encoder_set_viewport(receiver: *mut super::NativeHandle, arg0: record::Mtl_viewport, message: *mut *const std::ffi::c_char) -> i32; }
+pub fn render_encoder_set_scissor(receiver: &Handle, arg0: record::Mtl_scissor_rect) -> Result<(), Error> {
     let receiver_ptr = receiver.as_native_ptr()?;
     let mut message = std::ptr::null();
     #[cfg(target_vendor = "apple")] let status = unsafe { ffi_rays_metal_render_encoder_set_scissor(receiver_ptr, arg0, &mut message) };
@@ -1081,7 +1081,7 @@ pub fn render_encoder_set_scissor(receiver: &Handle, arg0: Record::Mtl_scissor_r
     if status != 0 { return Err(unsafe { Error::from_native(status, message) }); }
     Ok(())
 }
-#[cfg(target_vendor = "apple")] unsafe extern "C" { #[link_name = "rays_metal_render_encoder_set_scissor"] fn ffi_rays_metal_render_encoder_set_scissor(receiver: *mut super::NativeHandle, arg0: Record::Mtl_scissor_rect, message: *mut *const std::ffi::c_char) -> i32; }
+#[cfg(target_vendor = "apple")] unsafe extern "C" { #[link_name = "rays_metal_render_encoder_set_scissor"] fn ffi_rays_metal_render_encoder_set_scissor(receiver: *mut super::NativeHandle, arg0: record::Mtl_scissor_rect, message: *mut *const std::ffi::c_char) -> i32; }
 pub fn render_encoder_set_cull_mode(receiver: &Handle, arg0: i64) -> Result<(), Error> {
     let receiver_ptr = receiver.as_native_ptr()?;
     let mut message = std::ptr::null();
@@ -1384,7 +1384,7 @@ pub fn compute_encoder_set_texture(receiver: &Handle, arg0: &Handle, arg1: usize
     Ok(())
 }
 #[cfg(target_vendor = "apple")] unsafe extern "C" { #[link_name = "rays_metal_compute_encoder_set_texture"] fn ffi_rays_metal_compute_encoder_set_texture(receiver: *mut super::NativeHandle, arg0: *mut super::NativeHandle, arg1: usize, message: *mut *const std::ffi::c_char) -> i32; }
-pub fn compute_encoder_dispatch(receiver: &Handle, arg0: Record::Mtl_size_int, arg1: Record::Mtl_size_int) -> Result<(), Error> {
+pub fn compute_encoder_dispatch(receiver: &Handle, arg0: record::Mtl_size_int, arg1: record::Mtl_size_int) -> Result<(), Error> {
     let receiver_ptr = receiver.as_native_ptr()?;
     let mut message = std::ptr::null();
     #[cfg(target_vendor = "apple")] let status = unsafe { ffi_rays_metal_compute_encoder_dispatch(receiver_ptr, arg0, arg1, &mut message) };
@@ -1392,8 +1392,8 @@ pub fn compute_encoder_dispatch(receiver: &Handle, arg0: Record::Mtl_size_int, a
     if status != 0 { return Err(unsafe { Error::from_native(status, message) }); }
     Ok(())
 }
-#[cfg(target_vendor = "apple")] unsafe extern "C" { #[link_name = "rays_metal_compute_encoder_dispatch"] fn ffi_rays_metal_compute_encoder_dispatch(receiver: *mut super::NativeHandle, arg0: Record::Mtl_size_int, arg1: Record::Mtl_size_int, message: *mut *const std::ffi::c_char) -> i32; }
-pub fn compute_encoder_dispatch_indirect(receiver: &Handle, arg0: &Handle, arg1: u64, arg2: Record::Mtl_size_int) -> Result<(), Error> {
+#[cfg(target_vendor = "apple")] unsafe extern "C" { #[link_name = "rays_metal_compute_encoder_dispatch"] fn ffi_rays_metal_compute_encoder_dispatch(receiver: *mut super::NativeHandle, arg0: record::Mtl_size_int, arg1: record::Mtl_size_int, message: *mut *const std::ffi::c_char) -> i32; }
+pub fn compute_encoder_dispatch_indirect(receiver: &Handle, arg0: &Handle, arg1: u64, arg2: record::Mtl_size_int) -> Result<(), Error> {
     let receiver_ptr = receiver.as_native_ptr()?;
     let mut message = std::ptr::null();
     #[cfg(target_vendor = "apple")] let status = unsafe { ffi_rays_metal_compute_encoder_dispatch_indirect(receiver_ptr, arg0.as_native_ptr()?, arg1, arg2, &mut message) };
@@ -1401,7 +1401,7 @@ pub fn compute_encoder_dispatch_indirect(receiver: &Handle, arg0: &Handle, arg1:
     if status != 0 { return Err(unsafe { Error::from_native(status, message) }); }
     Ok(())
 }
-#[cfg(target_vendor = "apple")] unsafe extern "C" { #[link_name = "rays_metal_compute_encoder_dispatch_indirect"] fn ffi_rays_metal_compute_encoder_dispatch_indirect(receiver: *mut super::NativeHandle, arg0: *mut super::NativeHandle, arg1: u64, arg2: Record::Mtl_size_int, message: *mut *const std::ffi::c_char) -> i32; }
+#[cfg(target_vendor = "apple")] unsafe extern "C" { #[link_name = "rays_metal_compute_encoder_dispatch_indirect"] fn ffi_rays_metal_compute_encoder_dispatch_indirect(receiver: *mut super::NativeHandle, arg0: *mut super::NativeHandle, arg1: u64, arg2: record::Mtl_size_int, message: *mut *const std::ffi::c_char) -> i32; }
 pub fn compute35_acceleration(receiver: &Handle, arg0: Option<&Handle>, arg1: u64) -> Result<(), Error> {
     let receiver_ptr = receiver.as_native_ptr()?;
     let mut message = std::ptr::null();

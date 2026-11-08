@@ -791,7 +791,7 @@ pub fn gated(value: &mut t, frame_: &frame::t, text_focus: bool, host_events: Ve
             None => false,
         },
     };
-    let gate = input::Gate::t {
+    let gate = input::gate::Gate {
         prompt: value.prompt.is_some(),
         menu: value.menu.is_some(),
         leader: value.leader != router::State::Idle,
@@ -803,7 +803,7 @@ pub fn gated(value: &mut t, frame_: &frame::t, text_focus: bool, host_events: Ve
         previous: value.live_frame.clone(),
         blocked: value.sketch_blocked.clone(),
     };
-    let (mut live_frame, sketch_blocked) = input::Gate::gate(&gate, &flow_native::live_frame::of_frame(frame_));
+    let (mut live_frame, sketch_blocked) = input::gate::gate(&gate, &flow_native::live_frame::of_frame(frame_));
     if !host_events.is_empty() {
         let mut events = host_events;
         events.extend(live_frame.events.clone());
