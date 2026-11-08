@@ -1,11 +1,8 @@
 //! Port of lib/flow_sop (typed SOP/value overlay over flow + flow_ir + sop). One module per OCaml file.
 //! Lisp SOP bodies stay in crates/flow_sop/nodes/*.rays (the contract), read in place.
-pub mod port;
-pub mod curve;
-pub mod network;
-pub mod catalog;
-pub mod encoded_parameters;
+pub use flow_sop_catalog::{catalog, encoded_parameters, network, port};
 pub mod manifest;
+pub mod curve;
 pub mod flow_manifest;
 pub mod lisp_node;
 pub mod trace_scene;
@@ -22,3 +19,13 @@ pub mod topology_kernel_impl;
 pub mod attribute_kernel;
 pub mod lower;
 #[cfg(any(test, feature = "test-support"))] pub mod lisp_sop;
+
+#[cfg(test)]
+#[path = "test_manifest_golden.rs"]
+mod test_manifest_golden;
+#[cfg(test)]
+#[path = "test_encoded_parameters.rs"]
+mod test_encoded_parameters;
+#[cfg(test)]
+#[path = "test_catalog_ops.rs"]
+mod test_catalog_ops;

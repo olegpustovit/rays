@@ -34,7 +34,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | B4 | done | W1 `flow_ir` touch → `rays_bin` check in `tools/buildtime` (env overrides) |
 | B1 | active | `3455ea12` — term_arena: drop `Debug`/`PartialEq` on 31 table payload rows (ids + manual `Term` debug/eq unchanged); ponytail static builtin op table + workspace scope stack in `op.rs`; no `cargo-llvm-lines` (op.rs 935 LOC, 141× `Arc::new`) |
 | B2 | done | `96fab43d` — dev `opt-level=0` for rays_editor, pxui_graph, editor_document, flow_graph, flow_native |
-| B5 | pending | |
+| B5 | done (partial) | `flow_sop_catalog` crate; `editor_document` → catalog/port/network/manifest; `flow_sop` re-exports + `generate()` wrapper; operator tests in `flow_sop`; **rdk delete deferred** (sop/flow_sop/flow_gpu/flow_native/rays_editor) |
 | M2 | done | `bbe7f6ae` — `editor_graph_ref`; `panel_key` / layouts borrow graph name |
 | M10 | done | `c425eefa` — detach alias slots before store; `cargo t -p flow_ir store` 3 pass |
 | M20 | done | `f6ca915b` — remove `mem_sys` TEMP alloc sampler |
@@ -92,6 +92,7 @@ Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s
 
 ## Session log
 
+- 2026-11-08: B5 — `flow_sop_catalog` (catalog/manifest/port/network/encoded_parameters); `editor_document` direct dep; `cargo check -p flow_sop_catalog -p flow_sop -p editor_document -p rays_bin`.
 - 2026-11-08: `f6ca915b` M20, `bbe7f6ae` M2, `96fab43d` B2; `cargo check -p rays_bin` ~23s after profile shift.
 - 2026-11-08: B0 — invalidation checklist + script audit in PROGRESS §B0; warm pair flow_check 0.15 s / 0.07 s; log `.subagent-logs/b0.log`.
 - 2026-11-08: **Wave A closed** `3a293e9b` A6; plan audit appended; m10/b0 workers queued.

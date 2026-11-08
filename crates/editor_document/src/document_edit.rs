@@ -26,7 +26,7 @@ fn factories_of(factories: Option<&[Factory]>) -> Vec<Factory> {
 }
 
 fn catalog_of(factories: Option<&[Factory]>) -> R<Catalog> {
-    kinds::catalog(flow_sop::manifest::VERSION, &factories_of(factories))
+    kinds::catalog(flow_sop_catalog::manifest::VERSION, &factories_of(factories))
 }
 
 /// One gesture on a workspace document: rewrite and re-check the source, then lower it into the

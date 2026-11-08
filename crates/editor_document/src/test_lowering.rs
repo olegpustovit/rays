@@ -19,7 +19,7 @@ fn factories() -> Vec<sop::edit_graph::Factory> {
 }
 
 fn catalog() -> Catalog {
-    kinds::catalog(flow_sop::manifest::VERSION, &factories()).expect("catalog")
+    kinds::catalog(flow_sop_catalog::manifest::VERSION, &factories()).expect("catalog")
 }
 
 fn ws_of_text(text: &str) -> workspace_doc::T {
@@ -130,7 +130,7 @@ fn unchanged_scene_and_network_are_kept() {
     let again = lower(Some(&doc), &ws);
     assert!(kg::same(&doc.scene, &again.scene));
     let (a, b) = (doc.networks.values().next().unwrap(), again.networks.values().next().unwrap());
-    assert!(flow_sop::network::ptr_eq(&a.graph, &b.graph), "the unchanged network was replaced");
+    assert!(flow_sop_catalog::network::ptr_eq(&a.graph, &b.graph), "the unchanged network was replaced");
     assert!(crate::settings::same_values(&doc.settings, &again.settings));
     assert_eq!(doc.scene.iter().map(|n| n.id).collect::<Vec<_>>(), again.scene.iter().map(|n| n.id).collect::<Vec<_>>(), "ids stay");
 }

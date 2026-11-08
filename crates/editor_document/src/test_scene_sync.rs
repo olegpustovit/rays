@@ -33,7 +33,7 @@ fn factories() -> Vec<Factory> {
 }
 
 fn catalog() -> Catalog {
-    kinds::catalog(flow_sop::manifest::VERSION, &factories()).expect("catalog")
+    kinds::catalog(flow_sop_catalog::manifest::VERSION, &factories()).expect("catalog")
 }
 
 fn contains(text: &str, piece: &str) -> bool {
@@ -293,7 +293,7 @@ fn camera_write_back_keeps_precision_and_identity() {
         // a camera move that rebuilt either would recook and re-prepare the scene every frame
         check(settings::same_values(&saved.settings, &doc.settings), "a camera write-back rebuilt the unchanged settings");
         check(
-            saved.networks.iter().all(|(id, network)| doc.networks.get(id).map_or(false, |n| flow_sop::network::ptr_eq(&n.graph, &network.graph))),
+            saved.networks.iter().all(|(id, network)| doc.networks.get(id).map_or(false, |n| flow_sop_catalog::network::ptr_eq(&n.graph, &network.graph))),
             "a camera write-back rebuilt an unchanged network",
         );
         same_after_reload(&saved, "camera precision");

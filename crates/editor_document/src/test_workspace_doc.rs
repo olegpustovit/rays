@@ -212,7 +212,7 @@ fn build(previous: Option<&crate::document::T>, ws: &doc::T) -> crate::document:
 /// OCaml `full_edit`: the checked edit without the literal fast path.
 fn full_edit(catalog: &Catalog, d: &doc::T, op: &Op) -> Result<(Vec<s::Syntax>, flow_check::workspace::Workspace), rays_diagnostic::Diagnostic> {
     let (ops, library) = (d.checked.ops.clone(), d.fragment);
-    let checker = move |catalog: &Catalog, forms: &[s::Syntax]| flow_sop::catalog::check_workspace(&ops, library, None, catalog, forms);
+    let checker = move |catalog: &Catalog, forms: &[s::Syntax]| flow_sop_catalog::catalog::check_workspace(&ops, library, None, catalog, forms);
     e::apply_checked_with(&d.checked.ops, d.fragment, Some(&checker), catalog, &d.source, op)
 }
 
@@ -268,7 +268,7 @@ fn part_contexts() {
     assert_eq!(d.active_camera, Some(ops("camera")[0].id), "the workspace's camera is the active one");
     let (flower, accent_id) = (ops("geometry")[0].id, ops("geometry")[1].id);
     let (nf, na) = (d.networks.get(&flower).unwrap(), d.networks.get(&accent_id).unwrap());
-    assert!(nf.displayed.is_some() && na.displayed.is_some() && !flow_sop::network::ptr_eq(&nf.graph, &na.graph), "two refs of one graph with different inputs are two networks");
+    assert!(nf.displayed.is_some() && na.displayed.is_some() && !flow_sop_catalog::network::ptr_eq(&nf.graph, &na.graph), "two refs of one graph with different inputs are two networks");
     let world_node = ops("world")[0].clone();
     assert_eq!(world_node.label, "Bloom study", "the World's name");
     let w = layers::to_world(None, &world_node, crate::document::layers(&d, world_node.id).unwrap()).expect("the World does not read");

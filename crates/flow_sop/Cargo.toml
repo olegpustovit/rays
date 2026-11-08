@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+flow_sop_catalog = { path = "../flow_sop_catalog" }
 flow_syntax = { path = "../flow_syntax" }
 flow_check = { path = "../flow_check" }
 flow_eval = { path = "../flow_eval" }

@@ -23,7 +23,7 @@ use crate::settings;
 use crate::workspace_doc;
 use flow_check::workspace as w;
 use flow_graph::flow_edit::{self as f, ArgKey, Op};
-use flow_sop::port;
+use flow_sop_catalog::port;
 use flow_syntax::context;
 use flow_syntax::lisp;
 use flow_syntax::syntax::{self as s, Node, Syntax};
@@ -1162,7 +1162,7 @@ pub fn set_fields(factories: Option<&[Factory]>, doc: &document::T, level: Level
 
 fn networks_same(a: &document::T, b: &document::T) -> bool {
     a.networks.len() == b.networks.len()
-        && a.networks.iter().all(|(id, na)| b.networks.get(id).map_or(false, |nb| na.context == nb.context && na.displayed == nb.displayed && flow_sop::network::ptr_eq(&na.graph, &nb.graph)))
+        && a.networks.iter().all(|(id, na)| b.networks.get(id).map_or(false, |nb| na.context == nb.context && na.displayed == nb.displayed && flow_sop_catalog::network::ptr_eq(&na.graph, &nb.graph)))
 }
 
 fn layers_same(a: &document::T, b: &document::T) -> bool {

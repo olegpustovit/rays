@@ -14,7 +14,7 @@ use flow_check::workspace::{self as w, Workspace};
 use flow_eval::Plan;
 use flow_graph::flow_edit::{self, ArgKey, Op};
 use flow_graph::projection;
-use flow_sop::catalog as fsc;
+use flow_sop_catalog::catalog as fsc;
 use flow_syntax::context::{self, Context};
 use flow_syntax::lisp;
 use flow_syntax::syntax::{self as s, Node, Syntax};

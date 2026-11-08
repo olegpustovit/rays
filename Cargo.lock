@@ -52,6 +52,7 @@ dependencies = [
  "flow_graph",
  "flow_ir",
  "flow_sop",
+ "flow_sop_catalog",
  "flow_syntax",
  "input",
  "param",
@@ -212,6 +213,7 @@ dependencies = [
  "flow_eval",
  "flow_graph",
  "flow_ir",
+ "flow_sop_catalog",
  "flow_syntax",
  "flow_web",
  "input",
@@ -224,6 +226,22 @@ dependencies = [
  "rays_math",
  "rdk",
  "rdk_core",
+ "sop",
+]
+
+[[package]]
+name = "flow_sop_catalog"
+version = "0.1.0"
+dependencies = [
+ "flow_check",
+ "flow_eval",
+ "flow_ir",
+ "flow_syntax",
+ "input",
+ "mem",
+ "param",
+ "rays_diagnostic",
+ "rays_math",
  "sop",
 ]
 

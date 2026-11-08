@@ -11,8 +11,8 @@ use editor_core::panels;
 use flow_check::catalog::Catalog;
 use flow_graph::flow_edit::{arg_of, arg_text, ArgKey};
 use flow_sop::lower as l;
-use flow_sop::network as net;
-use flow_sop::port;
+use flow_sop_catalog::network as net;
+use flow_sop_catalog::port;
 use flow_syntax::context::{self, Context};
 use flow_syntax::lisp;
 use flow_syntax::syntax::{self as s, Node, Syntax};
@@ -184,7 +184,7 @@ impl LazyCatalog {
         }
     }
     pub fn force(&self) -> &Result<Catalog, Diagnostic> {
-        self.cell.get_or_init(|| crate::kinds::catalog(flow_sop::manifest::VERSION, &self.factories))
+        self.cell.get_or_init(|| crate::kinds::catalog(flow_sop_catalog::manifest::VERSION, &self.factories))
     }
 }
 

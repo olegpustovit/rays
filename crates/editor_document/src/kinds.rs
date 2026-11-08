@@ -2,16 +2,16 @@
 //! layer (`world/sky`) and the workspace settings record (`settings/config`), generated from their
 //! schemas, with the window the settings graph asks of the host.
 //!
-//! These plug into the catalog as `flow_sop::catalog::Descriptor`s passed as `extra` to
-//! `flow_sop::catalog::of_factories` (see `catalog` below); a manifest generator that wants them in
+//! These plug into the catalog as `flow_sop_catalog::catalog::Descriptor`s passed as `extra` to
+//! `flow_sop_catalog::catalog::of_factories` (see `catalog` below); a manifest generator that wants them in
 //! `flow_manifest.sexp` appends `descriptors()` to the factory descriptors.
 use crate::kind_graph::{self as g, chc, int, kind_fields, schema_of};
 use crate::layers;
 use crate::objects;
 use flow_check::catalog::Catalog;
-use flow_sop::port::Parameter;
-use flow_sop::catalog::{self as fcat, Descriptor};
-use flow_sop::port;
+use flow_sop_catalog::port::Parameter;
+use flow_sop_catalog::catalog::{self as fcat, Descriptor};
+use flow_sop_catalog::port;
 use param::{FieldView, Impact, KindView, Schema, Value};
 use rays_diagnostic::Diagnostic;
 use sop::decl;

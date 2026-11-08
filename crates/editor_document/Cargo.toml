@@ -16,6 +16,7 @@ flow_check = { path = "../flow_check" }
 flow_eval = { path = "../flow_eval" }
 flow_ir = { path = "../flow_ir" }
 flow_sop = { path = "../flow_sop" }
+flow_sop_catalog = { path = "../flow_sop_catalog" }
 flow_graph = { path = "../flow_graph" }
 editor_core = { path = "../editor_core" }
 cfmt = { path = "../cfmt" }

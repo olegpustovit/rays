@@ -11,8 +11,8 @@ use flow_check::term_arena::{Draft as TermDraft, TermArena, TermBuilder, TermId}
 use flow_syntax::arena::{SyntaxBuilder, SyntaxId};
 use flow_graph::flow_edit::{arg_text, ArgKey, Op};
 use flow_sop::lower as l;
-use flow_sop::network as net;
-use flow_sop::port::Port;
+use flow_sop_catalog::network as net;
+use flow_sop_catalog::port::Port;
 use flow_syntax::lisp;
 use flow_syntax::syntax::{self as s, Node, Syntax};
 use flow_syntax::ty::Ty;
@@ -518,7 +518,7 @@ mod compact_span_tests {
         }).collect();
         use flow_check::term_arena::Literal;
         assert_eq!(values, vec![Literal::Int(9), Literal::Float(2.5), Literal::Int(-3)]);
-        let (full, diagnostics) = flow_sop::catalog::check_workspace(&doc.checked.ops, false, None, &catalog, &checked.source);
+        let (full, diagnostics) = flow_sop_catalog::catalog::check_workspace(&doc.checked.ops, false, None, &catalog, &checked.source);
         let full = full.unwrap_or_else(|| panic!("{diagnostics:?}"));
         assert_eq!(checked.graphs[0].body, full.graphs[0].body);
         let patched = flow_eval::static_with(&checked, true, None, None).unwrap();
@@ -545,7 +545,7 @@ mod compact_span_tests {
         assert!(same(&once.graphs[0], &twice.graphs[0]), "a graph before the literal was rebuilt");
         assert!(once.defs.iter().zip(twice.defs.iter()).all(|(a, b)| same(a, b)), "a defn or library body was rebuilt");
         assert!(!same(&once.graphs[1], &twice.graphs[1]));
-        let (full, diagnostics) = flow_sop::catalog::check_workspace(&doc.checked.ops, false, None, &catalog, &twice.source);
+        let (full, diagnostics) = flow_sop_catalog::catalog::check_workspace(&doc.checked.ops, false, None, &catalog, &twice.source);
         let full = full.unwrap_or_else(|| panic!("{diagnostics:?}"));
         for (patched, checked) in twice.graphs.iter().zip(full.graphs.iter()).chain(twice.defs.iter().zip(full.defs.iter())) {
             assert_eq!(patched.body, checked.body, "{}", patched.name);
