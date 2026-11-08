@@ -2514,7 +2514,7 @@ fn run_typed(
             }
         }
     };
-    let regs = Region::registers(t, None);
+    let regs = Region::registers(t);
     let mut sh_ranges = ranges.clone();
     let _ = &mut sh_ranges;
     let ucells: Vec<UCell> = t

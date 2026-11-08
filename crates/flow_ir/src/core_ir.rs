@@ -416,7 +416,6 @@ pub mod Region {
         pub capture_roots: flow_eval::Roots,
         pub destination: Option<Arc<Destination>>,
         pub slot_plan: Arc<OnceLock<Registers>>,
-        pub float_slot_plan: Arc<OnceLock<Registers>>,
         pub residual: ResidualId,
         pub term: Arc<Term>,
         pub sources: Sources,
@@ -584,7 +583,7 @@ pub mod Region {
     /// its last read, and never to an operand of the instruction it defines. A guarded result keeps its
     /// own slot, and a guard condition too. Array handles have no slot. Regions with loops keep one
     /// slot per register.
-    fn plan_registers(extra: &[(i64, i64)], t: &T) -> Registers {
+    fn plan_registers(t: &T) -> Registers {
         let n = t.code.len();
         let identity = || {
             let defs: Vec<i64> = (0..n as i64).collect();
@@ -609,7 +608,6 @@ pub mod Region {
                 for (c, _) in guards { dedicated[*c as usize] = true; }
             }
         }
-        for (r, at) in extra { last[*r as usize] = last[*r as usize].max(*at); }
         for output in t.outputs.iter() { for r in output { last[*r as usize] = n as i64; } }
         let mut defs = vec![0_i64; n];
         let mut free: [Vec<i64>; 3] = [Vec::new(), Vec::new(), Vec::new()];
@@ -653,11 +651,9 @@ pub mod Region {
         }
     }
 
-    /// A CPU run's linear-scan register slots, cached per runner (the float runner passes `extra`:
-    /// further reads as (register, instruction)).
-    pub fn registers<'a>(t: &'a T, extra: Option<&dyn Fn() -> Vec<(i64, i64)>>) -> &'a Registers {
-        let cache = if extra.is_some() { &t.float_slot_plan } else { &t.slot_plan };
-        cache.get_or_init(|| plan_registers(&match extra { Some(f) => f(), None => Vec::new() }, t))
+    /// A CPU run's linear-scan register slots, cached per region.
+    pub fn registers(t: &T) -> &Registers {
+        t.slot_plan.get_or_init(|| plan_registers(t))
     }
 
     fn dependent_of(code: &[Instruction]) -> Vec<bool> {
@@ -990,7 +986,6 @@ pub mod Region {
             capture_roots: Default::default(),
             destination: None,
             slot_plan: Arc::new(OnceLock::new()),
-            float_slot_plan: Arc::new(OnceLock::new()),
             residual: p.residual,
             term: p.term,
             sources: p.sources,
@@ -1023,7 +1018,6 @@ pub mod Region {
             capture_roots: t.capture_roots.clone(),
             destination: None,
             slot_plan: Arc::new(OnceLock::new()),
-            float_slot_plan: Arc::new(OnceLock::new()),
             residual: o.residual.unwrap_or(t.residual),
             term: o.term.unwrap_or_else(|| t.term.clone()),
             sources: o.sources.unwrap_or_else(|| t.sources.clone()),
