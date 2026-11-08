@@ -1,4 +1,4 @@
-use crate::subdivide_refine::AInts;
+use rdk_core::support::Windows;
 use rdk_core::{attribute, cancel, error, geometry, group, support, topology, topology_remap};
 
 fn make(operation: &str, code: &str, message: String) -> error::T {
@@ -62,41 +62,50 @@ fn reverse(
         None => true,
         Some(selection) => group::cardinality(selection) == primitive_count as i64,
     };
-    let vertex_points = AInts::new(vertex_count as i64, 0);
-    let vertex_map = AInts::new(vertex_count as i64, 0);
-    if !full_selection {
-        for vertex in 0..vertex_count {
-            vertex_points.set(vertex as i64, source.vertex_points[vertex]);
-            vertex_map.set(vertex as i64, vertex as i64);
-        }
-    }
+    let (mut vertex_points, mut vertex_map): (Vec<i64>, Vec<i64>) = if full_selection {
+        (vec![0; vertex_count], vec![0; vertex_count])
+    } else {
+        (source.vertex_points[..vertex_count].to_vec(), (0..vertex_count as i64).collect())
+    };
     let average_primitive_size = if primitive_count == 0 { 1 } else { (vertex_count / primitive_count).max(1) };
     let primitive_grain = (grain / average_primitive_size as i64).max(1);
-    support::parallel_for(cancel_value, primitive_grain, primitive_count as i64, &|primitive| {
-        let primitive = primitive as usize;
-        if !selected(primitive) {
-            return Ok(());
-        }
-        let first = source.primitive_offsets[primitive];
-        let count = source.primitive_offsets[primitive + 1] - first;
-        let shift = match operation {
-            Operation::ReverseVertices => 0,
-            Operation::ShiftVertices(offset) => normalized_shift(count, offset),
+    {
+        // Primitive range `r` owns the vertices of its primitives: a disjoint window per range.
+        let bound = |range: i64| {
+            source.primitive_offsets[((range * primitive_grain) as usize).min(primitive_count)] as usize
         };
-        for local in 0..count {
-            let old_local = match operation {
-                Operation::ReverseVertices => count - local - 1,
-                Operation::ShiftVertices(_) => (local + shift) % count,
-            };
-            let vertex = first + local;
-            let old_vertex = first + old_local;
-            vertex_points.set(vertex, source.vertex_points[old_vertex as usize]);
-            vertex_map.set(vertex, old_vertex);
-        }
-        Ok(())
-    })?;
-    let vertex_points = vertex_points.into_vec();
-    let vertex_map = vertex_map.into_vec();
+        let ranges = support::range_count(primitive_count as i64, primitive_grain);
+        let points = Windows::new(&mut vertex_points, ranges, bound);
+        let map = Windows::new(&mut vertex_map, ranges, bound);
+        support::run_indexed_ranges(primitive_grain, primitive_count as i64, &|range, first, last| {
+            let (points, map) = (points.take(range), map.take(range));
+            let base = source.primitive_offsets[first as usize];
+            for primitive in first..last {
+                support::poll(cancel_value, primitive)?;
+                let primitive = primitive as usize;
+                if !selected(primitive) {
+                    continue;
+                }
+                let first = source.primitive_offsets[primitive];
+                let count = source.primitive_offsets[primitive + 1] - first;
+                let shift = match operation {
+                    Operation::ReverseVertices => 0,
+                    Operation::ShiftVertices(offset) => normalized_shift(count, offset),
+                };
+                for local in 0..count {
+                    let old_local = match operation {
+                        Operation::ReverseVertices => count - local - 1,
+                        Operation::ShiftVertices(_) => (local + shift) % count,
+                    };
+                    let at = (first + local - base) as usize;
+                    let old_vertex = first + old_local;
+                    points[at] = source.vertex_points[old_vertex as usize];
+                    map[at] = old_vertex;
+                }
+            }
+            Ok(())
+        })?;
+    }
     let new_topology = topology::View::create_validated_owned(
         geometry::point_count(geometry_value),
         vertex_points,
