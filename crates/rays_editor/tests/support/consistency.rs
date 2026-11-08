@@ -23,8 +23,7 @@ pub fn diag_text(ds: &[rays_diagnostic::Diagnostic]) -> String {
 }
 
 pub fn catalog() -> flow_check::catalog::Catalog {
-    thread_local! { static C: flow_check::catalog::Catalog = rays_editor::workspace_catalog(None).expect("catalog"); }
-    C.with(|c| c.clone())
+    (*rays_editor::workspace_catalog(None).expect("catalog")).clone()
 }
 
 pub fn parse(text: &str) -> Syntax {

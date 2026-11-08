@@ -172,9 +172,28 @@ pub fn descriptors() -> Vec<Descriptor> {
 }
 
 /// `Flow_sop.Catalog.of_factories` with `descriptors`: what a workspace text is checked against.
-/// Not cached: a `Document.t` keeps its own.
+/// Not cached: see `shared`.
 pub fn catalog(version: i64, factories: &[Factory]) -> Result<Catalog, Diagnostic> {
     fcat::of_factories(version, &descriptors(), None, factories)
+}
+
+/// The catalog of `factories` (default `sop::nodes::factories`) at the manifest version, shared: built
+/// again only when the factories differ from the few last asked (a lowering per edit must not
+/// rebuild every kind).
+pub fn shared(factories: Option<&[Factory]>) -> Result<Arc<Catalog>, Diagnostic> {
+    type Entry = (Vec<Factory>, Result<Arc<Catalog>, Diagnostic>);
+    thread_local! { static CACHE: std::cell::RefCell<Vec<Entry>> = const { std::cell::RefCell::new(Vec::new()) }; }
+    let all = factories.map(<[Factory]>::to_vec).unwrap_or_else(sop::nodes::factories);
+    CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some((_, found)) = cache.iter().find(|(f, _)| f.len() == all.len() && f.iter().zip(&all).all(|(a, b)| sop::edit_graph::same_factory(a, b))) {
+            return found.clone();
+        }
+        let built = catalog(flow_sop_catalog::manifest::VERSION, &all).map(Arc::new);
+        cache.insert(0, (all, built.clone()));
+        cache.truncate(4);
+        built
+    })
 }
 
 /// The parameters of a qualified kind; none for an unknown one.

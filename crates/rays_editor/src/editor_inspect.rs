@@ -28,7 +28,7 @@ use sop::edit_graph;
 use sop::node;
 
 use crate::cook;
-use crate::editor_model::{change, preview, scope_key, t as Model};
+use crate::editor_model::{change, flow_catalog, preview, scope_key, t as Model};
 use crate::navigator;
 use crate::text_pane;
 
@@ -409,7 +409,7 @@ pub fn kind_fields(value: &Model, graph: &str, head: &str, authored: &dyn Fn(&st
             field("emission", text_value("#000000"), KindView::Text),
         ]);
     }
-    let catalog = value.flow_catalog.force().clone()?;
+    let catalog = flow_catalog(value)?;
     let context = ctx?;
     let kind: fcat::Kind = match declaration {
         Some(n) if n.kind.context == context => n.kind.clone(),
@@ -1362,13 +1362,10 @@ pub fn workspace_inspector(value: &Model, ui: &mut Ui, width: f64, path: &[Strin
         let height = 160.0f64.min(width * h as f64 / w as f64);
         let bx = ui.box_("image-thumbnail", pxui::ui::BoxOpts::default().w(pxui::ui::Size::Px(width)).h(pxui::ui::Size::Px(height)));
         let image = image.clone();
-        ui.draw(
-            &bx,
-            Box::new(move |paint, (x, y, bw, bh)| {
-                let scale = (bw / w as f64).min(bh / h as f64);
-                paint.image(x, y, w as f64 * scale, h as f64 * scale, &image);
-            }),
-        );
+        ui.draw(&bx, move |paint, (x, y, bw, bh)| {
+            let scale = (bw / w as f64).min(bh / h as f64);
+            paint.image(x, y, w as f64 * scale, h as f64 * scale, &image);
+        });
     }
     // a loop or scope says what it is, then the rows of its rail
     let zone_text: Option<(&'static str, fn(&str) -> String)> = n.zone.as_ref().map(|z| zone_words(z.kind));

@@ -56,5 +56,5 @@ fn main() {
         su / n, sr / n, (su + sr) / n, 1000. / ((su + sr) / n), worst, alloc / 1024);
     Editor::close(&editor);
     flow_native::workspace_gpu::close(&gpu);
-    rays::canvas::destroy(canvas).unwrap();
+    rays::canvas::destroy(&canvas).unwrap();
 }

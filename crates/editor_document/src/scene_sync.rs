@@ -21,6 +21,8 @@ use crate::lowering::{self, Options};
 use crate::objects::{self, root};
 use crate::settings;
 use crate::workspace_doc;
+use flow_check::catalog::Catalog;
+use std::sync::Arc;
 use flow_check::workspace as w;
 use flow_graph::flow_edit::{self as f, ArgKey, Op};
 use flow_sop_catalog::port;
@@ -155,8 +157,7 @@ fn non_default(node: &g::Node, builder: &mut SyntaxBuilder) -> Vec<(String, Synt
 // ---- applying ops to the text ----
 
 struct State {
-    /// shared, not copied: an orbit frame edits through it
-    catalog: document::LazyCatalog,
+    catalog: Arc<Catalog>,
     workspace: workspace_doc::T,
     /// Homes already made bindings.
     unfolded: Vec<(Home, Path)>,
@@ -168,15 +169,13 @@ struct State {
     source_changed: bool,
 }
 
-fn state(doc: &document::T) -> R<State> {
-    if let Err(d) = doc.workspace.catalog.force() {
-        return Err(diag(d));
-    }
-    Ok(State { catalog: doc.workspace.catalog.clone(), workspace: doc.workspace.ws.clone(), unfolded: Vec::new(), adopted: false, changed: false, source_changed: false })
+fn state(factories: Option<&[Factory]>, doc: &document::T) -> R<State> {
+    let catalog = kinds::shared(factories).map_err(|d| diag(&d))?;
+    Ok(State { catalog, workspace: doc.workspace.ws.clone(), unfolded: Vec::new(), adopted: false, changed: false, source_changed: false })
 }
 
 fn apply(st: &mut State, op: Op) -> R<()> {
-    match workspace_doc::edit(st.catalog.force().as_ref().expect("checked by state"), &st.workspace, &op) {
+    match workspace_doc::edit(&st.catalog, &st.workspace, &op) {
         Ok(workspace) => {
             st.workspace = workspace;
             st.changed = true;
@@ -1115,7 +1114,7 @@ pub fn write(factories: Option<&[Factory]>, doc: &document::T, level: Level, edi
     if !writes(doc, level, edit) {
         return Ok(None);
     }
-    let mut st = state(doc)?;
+    let mut st = state(factories, doc)?;
     let note = write_edit(&mut st, doc, level, edit)?;
     // what the text does not say is the document's; what it says is lowered over this
     let doc = match edit {
@@ -1177,7 +1176,7 @@ fn run(factories: Option<&[Factory]>, adopt: bool, before: &document::T, after: 
     if g::same(&before.scene, &after.scene) && networks_same(before, after) && layers_same(before, after) {
         return Ok(after.clone());
     }
-    let mut st = state(before)?;
+    let mut st = state(factories, before)?;
     object_changes(&mut st, before, &document::scene_graph(after))?;
     if adopt && unhomed_changes(before, after) {
         adopt_objects(&mut st, after)?;
@@ -1205,7 +1204,7 @@ pub fn reconcile(factories: Option<&[Factory]>, adopt: Option<bool>, before: &do
 /// The scene graph of a document that has none, written from the objects the host made (an empty
 /// one when there are none).
 pub fn adopt(factories: Option<&[Factory]>, doc: &document::T) -> R<document::T> {
-    let mut st = state(doc)?;
+    let mut st = state(factories, doc)?;
     adopt_objects(&mut st, doc)?;
     lower(factories, doc, &st.workspace)
 }
@@ -1213,7 +1212,7 @@ pub fn adopt(factories: Option<&[Factory]>, doc: &document::T) -> R<document::T>
 /// The binding that holds a home, made by unfolding what is written in place (several rewrites,
 /// one new document); an error when a loop or an expression made it.
 pub fn bind_home(factories: Option<&[Factory]>, doc: &document::T, home: &Home) -> R<(document::T, Vec<String>)> {
-    let mut st = state(doc)?;
+    let mut st = state(factories, doc)?;
     let path = bind(&mut st, home)?;
     if !st.changed {
         Ok((doc.clone(), path))

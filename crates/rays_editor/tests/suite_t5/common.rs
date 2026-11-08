@@ -277,8 +277,7 @@ pub fn replace(text: &str, from: &str, by: &str) -> String {
 }
 
 pub fn catalog() -> flow_check::catalog::Catalog {
-    thread_local! { static C: flow_check::catalog::Catalog = rays_editor::workspace_catalog(None).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d))); }
-    C.with(|c| c.clone())
+    (*rays_editor::workspace_catalog(None).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)))).clone()
 }
 
 /// `Editor_prepare.empty`.

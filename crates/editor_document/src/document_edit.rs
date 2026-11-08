@@ -25,16 +25,12 @@ fn factories_of(factories: Option<&[Factory]>) -> Vec<Factory> {
     factories.map(|f| f.to_vec()).unwrap_or_else(sop::nodes::factories)
 }
 
-fn catalog_of(factories: Option<&[Factory]>) -> R<Catalog> {
-    kinds::catalog(flow_sop_catalog::manifest::VERSION, &factories_of(factories))
-}
-
 /// One gesture on a workspace document: rewrite and re-check the source, then lower it into the
 /// document's objects. Atomic: an error changes nothing.
 fn edit_result(apply: &dyn Fn(&Catalog, &workspace_doc::T) -> R<workspace_doc::T>, factories: Option<&[Factory]>, doc: &document::T) -> R<document::T> {
     let missing = |d: &document::T| !d.workspace.ws.checked.graphs.iter().any(|g| g.name == "scene");
     let run = |d: &document::T| -> R<document::T> {
-        let catalog = catalog_of(factories)?;
+        let catalog = kinds::shared(factories)?;
         let workspace = apply(&catalog, &d.workspace.ws)?;
         lowering::of_workspace(&lowering::Options { factories: Some(factories_of(factories)), previous: Some(d.clone()), ..Default::default() }, &workspace)
     };
@@ -90,7 +86,7 @@ pub fn syntax_batch(factories: Option<&[Factory]>, doc: &document::T, ops: &[Op]
 /// The whole workspace text, edited: parsed and checked as a document, lowered, atomic.
 pub fn text_edit(imports: Option<&[(String, String)]>, factories: Option<&[Factory]>, doc: &document::T, text: &str) -> Result<document::T, Vec<Diagnostic>> {
     let workspace = &doc.workspace.ws;
-    let catalog = catalog_of(factories).map_err(|d| vec![d])?;
+    let catalog = kinds::shared(factories).map_err(|d| vec![d])?;
     let options = TextOptions {
         ops: Some(workspace.checked.ops.clone()),
         imports: imports.map(|i| i.to_vec()).unwrap_or_else(|| workspace_doc::import_texts(workspace)),

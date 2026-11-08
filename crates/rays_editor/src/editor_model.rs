@@ -5,7 +5,7 @@
 //! - `doc` is an `Arc<Document>`: it is `History`'s present, and OCaml's physical equality of
 //!   documents is `Arc::ptr_eq` (a no-op edit is detected with `same_document`).
 //! - `ui` is an `Rc<RefCell<Ui>>`: the one immediate-mode handle, shared by every copy of the model.
-//! - OCaml `Lazy.t` fields are `Lazy_catalog` / `Lazy_vocab`.
+//! - OCaml `Lazy.t` fields are `Lazy_vocab`.
 //! - `'panel` of `frame_result` / `update` is the sketch-owned inspector result: `Panel_result`.
 //! - `Level_map` is an association list (`Document.level` has no `Ord`).
 #![allow(non_camel_case_types, non_upper_case_globals)]
@@ -414,23 +414,9 @@ pub struct carry {
     pub hint: Option<String>,
 }
 
-/// OCaml `Lazy.t` of the factories' catalog.
-#[derive(Clone)]
-pub struct Lazy_catalog {
-    cell: Rc<OnceCell<Option<Catalog>>>,
-    init: Rc<dyn Fn() -> Option<Catalog>>,
-}
-
-impl Lazy_catalog {
-    pub fn new(init: Rc<dyn Fn() -> Option<Catalog>>) -> Lazy_catalog {
-        Lazy_catalog { cell: Rc::new(OnceCell::new()), init }
-    }
-    pub fn get(&self) -> Option<&Catalog> {
-        self.force()
-    }
-    pub fn force(&self) -> Option<&Catalog> {
-        self.cell.get_or_init(|| (self.init)()).as_ref()
-    }
+/// The catalog of the editor's factories, shared with every other asker (`kinds::shared`).
+pub fn flow_catalog(value: &t) -> Option<Arc<Catalog>> {
+    editor_document::kinds::shared(Some(&value.factories)).ok()
 }
 
 /// OCaml `Lazy.t` of the text pane's vocabulary.
@@ -505,7 +491,6 @@ pub struct t {
     /// nodes to select once the pane shows their graph
     pub select_later: Vec<w::Path>,
     pub open_import: Option<String>,
-    pub flow_catalog: Lazy_catalog,
     /// what the text pane completes and describes
     pub lisp_vocab: Lazy_vocab,
     pub tree: tree::Tree,
@@ -601,11 +586,16 @@ pub fn pane_selection(value: &t) -> &selection::t {
     &pane(value).picked
 }
 pub fn with_pane(mut value: t, f: &dyn Fn(&graph_pane) -> graph_pane) -> t {
-    value.panes = panel_map::update(f, value.panes);
+    let pane = panel_map::active_mut(&mut value.panes);
+    *pane = f(pane);
     value
 }
-pub fn with_selection(value: t, picked: selection::t) -> t {
-    with_pane(value, &|pane| graph_pane { picked: picked.clone(), ..pane.clone() })
+pub fn set_selection(value: &mut t, picked: selection::t) {
+    panel_map::active_mut(&mut value.panes).picked = picked;
+}
+pub fn with_selection(mut value: t, picked: selection::t) -> t {
+    set_selection(&mut value, picked);
+    value
 }
 
 /// What `reduce` hands back for a frame.

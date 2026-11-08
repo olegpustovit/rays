@@ -28,7 +28,7 @@ use flow_sop_catalog::network as net;
 use flow_sop_catalog::port;
 use flow_syntax::context::{self, Context};
 use flow_syntax::ty::{self, Ty};
-use flow_syntax::value::Value as E;
+use flow_syntax::value::{Value as E, struct_value};
 use param::Value as PV;
 use rays::camera as rcamera;
 use rays_diagnostic::Diagnostic;
@@ -95,7 +95,7 @@ fn check_context_time(workspace: &workspace_doc::T, plan: &Plan) -> R<()> {
     fn live_field(path: &str, v: &E) -> Option<String> {
         match v {
             E::Residual(_) => Some(path.to_owned()),
-            E::Struct(kind, _, args) => args.iter().find_map(|(key, value)| if live_light_field(kind, key) { None } else { live_field(&format!("{kind}.{key}"), value) }),
+            E::Struct(g) => g.fields.iter().find_map(|(key, value)| if live_light_field(&g.name, key) { None } else { live_field(&format!("{}.{key}", g.name), value) }),
             E::Record(args) => args.iter().find_map(|(key, value)| live_field(&format!("{path}.{key}"), value)),
             E::List(values) => values.iter().find_map(|v| live_field(path, v)),
             _ => None,
@@ -131,7 +131,8 @@ pub fn has_settings(workspace: &workspace_doc::T) -> bool {
 
 fn settings_of(value: &E) -> R<settings::T> {
     match value {
-        E::Struct(k, _, args) if k == "settings/config" => {
+        E::Struct(g) if g.name == "settings/config" => {
+            let args = &g.fields;
             let changes = changes("settings/config", args)?;
             let schema = window_schema();
             let base = settings::make(&schema, schema.default().to_vec());
@@ -202,8 +203,9 @@ type Below<'a> = &'a dyn Fn(&str) -> Option<&'static str>;
 /// Calls with no term to read (graph inputs, loops, macro expansions): reachable but unwritable.
 fn loose(want: Want, below: Below, v: &E) -> Vec<Call> {
     match v {
-        E::Struct(k, _, args) if k == "scene/merge" => args.iter().flat_map(|(_, v)| loose(want, below, v)).collect(),
-        E::Struct(kind, _, args) if want(kind) => {
+        E::Struct(g) if g.name == "scene/merge" => g.fields.iter().flat_map(|(_, v)| loose(want, below, v)).collect(),
+        E::Struct(g) if want(&g.name) => {
+            let (kind, args) = (&g.name, &g.fields);
             let mut out = match below(kind).and_then(|slot| args.iter().find(|(n, _)| n == slot)) {
                 Some((_, under)) => loose(want, below, under),
                 None => Vec::new(),
@@ -315,7 +317,8 @@ fn walk(want: Want, below: Below, iter: &[usize], env: &Env, place: Option<(Home
             Some((_, bound)) => walk(want, below, iter, env, None, &t.child(*bound), v),
             None => loose(want, below, v),
         },
-        (WNode::Call(id), E::Struct(k, _, vargs)) if k == t.name(arena.call(id).kind) && want(k) => {
+        (WNode::Call(id), E::Struct(vg)) if vg.name == t.name(arena.call(id).kind) && want(&vg.name) => {
+            let vargs = &vg.fields;
             let call = arena.call(id);
             let kind = t.name(call.kind);
             let targs = arena.fields(call.args);
@@ -334,7 +337,8 @@ fn walk(want: Want, below: Below, iter: &[usize], env: &Env, place: Option<(Home
             out.push(Call { kind: kind.to_owned(), args: vargs.clone(), home: here, via });
             out
         }
-        (WNode::Op(id), E::Struct(k, _, vargs)) if t.name(arena.op(id).op) == "scene/merge" && k == "scene/merge" => {
+        (WNode::Op(id), E::Struct(vg)) if t.name(arena.op(id).op) == "scene/merge" && vg.name == "scene/merge" => {
+            let vargs = &vg.fields;
             let op = arena.op(id);
             let all = arena.fields(op.args);
             let kp = kept(arena, iter, arena.skip(op.skip), all);
@@ -461,7 +465,7 @@ fn world_kind(qualified: &str) -> kg::Kind {
 
 fn forced_args(forced: E) -> Vec<(String, E)> {
     match forced {
-        E::Struct(_, _, args) => args,
+        E::Struct(g) => g.fields,
         _ => Vec::new(),
     }
 }
@@ -478,7 +482,7 @@ fn item_of(lowered: &lower_mod::T, call: &Call) -> R<Item> {
     }
     dyn_params.reverse();
     let drives = if dyn_params.is_empty() { None } else { Some((kind.clone(), dyn_params)) };
-    let forced = force0(&E::Struct(kind.clone(), ty::scene(), args.clone()))?;
+    let forced = force0(&struct_value(kind.clone(), ty::scene(), args.clone()))?;
     let args = forced_args(forced);
     let kind_of = scene_kind(kind);
     let values = changes(kind, &args)?;
@@ -532,7 +536,7 @@ fn root_params(values: &[(String, PV)]) -> R<root::Parameters> {
 /// The item a camera value is: the call whose arguments it carries.
 fn find_call(calls: &[&Call], value: &E) -> Option<usize> {
     match value {
-        E::Struct(_, _, cargs) => calls.iter().position(|c| c.args == *cargs),
+        E::Struct(g) => calls.iter().position(|c| c.args == g.fields),
         _ => None,
     }
 }
@@ -542,7 +546,7 @@ fn root_of(all: &[Call]) -> R<Root> {
         None => Ok(Root { params: root::default(), root_home: None, camera: None }),
         Some(call) => {
             let own: Vec<(String, E)> = call.args.iter().filter(|(key, _)| !SLOT_NAMES.contains(&key.as_str())).cloned().collect();
-            let forced = force0(&E::Struct("scene/root".to_owned(), ty::scene(), own))?;
+            let forced = force0(&struct_value("scene/root", ty::scene(), own))?;
             let values = changes("scene/root", &forced_args(forced))?;
             let params = root_params(&values)?;
             let others: Vec<&Call> = all.iter().filter(|c| c.kind != "scene/root").collect();
@@ -608,8 +612,8 @@ fn scene_calls(value: &E) -> Vec<Call> {
 /// Everything a scene value holds, through merges, roots and parts.
 fn members(v: &E) -> Vec<E> {
     match v {
-        E::Struct(k, _, args) if k == "scene/merge" => args.iter().flat_map(|(_, v)| members(v)).collect(),
-        E::Struct(k, _, args) if k == "scene/root" => args.iter().find(|(n, _)| n == "scene").map_or(Vec::new(), |(_, v)| members(v)),
+        E::Struct(g) if g.name == "scene/merge" => g.fields.iter().flat_map(|(_, v)| members(v)).collect(),
+        E::Struct(g) if g.name == "scene/root" => g.fields.iter().find(|(n, _)| n == "scene").map_or(Vec::new(), |(_, v)| members(v)),
         E::List(xs) => xs.iter().flat_map(members).collect(),
         E::Struct(..) => vec![v.clone()],
         _ => Vec::new(),
@@ -619,8 +623,8 @@ fn members(v: &E) -> Vec<E> {
 /// A root wired into a merge or another root: it renders, so it is always last.
 fn nested_root(under: bool, v: &E) -> bool {
     match v {
-        E::Struct(k, _, args) if k == "scene/root" => under || args.iter().find(|(n, _)| n == "scene").map_or(false, |(_, v)| nested_root(true, v)),
-        E::Struct(k, _, args) if k == "scene/merge" => args.iter().any(|(_, v)| nested_root(true, v)),
+        E::Struct(g) if g.name == "scene/root" => under || g.fields.iter().find(|(n, _)| n == "scene").map_or(false, |(_, v)| nested_root(true, v)),
+        E::Struct(g) if g.name == "scene/merge" => g.fields.iter().any(|(_, v)| nested_root(true, v)),
         E::List(xs) => xs.iter().any(|x| nested_root(under, x)),
         _ => false,
     }
@@ -646,10 +650,10 @@ fn check_scene(workspace: &workspace_doc::T, plan: &Plan) -> R<()> {
             let name = |c: &Call| document::describe(&workspace.source, &c.home);
             return refuse("E_SCENE_WORLD", format!("Graph {}: two Worlds reach one root, {} and {}. A scene has one World; take one out of the merge.", g.name, name(worlds[0]), name(worlds[1])));
         }
-        if let E::Struct(k, _, args) = value {
-            if k == "scene/root" {
-                match args.iter().find(|(n, _)| n == "camera").map(|(_, v)| v) {
-                    Some(camera @ E::Struct(ck, _, _)) if ck == "scene/camera" && members(value).iter().any(|m| m == camera) => {}
+        if let E::Struct(g) = value {
+            if g.name == "scene/root" {
+                match g.fields.iter().find(|(n, _)| n == "camera").map(|(_, v)| v) {
+                    Some(camera @ E::Struct(c)) if c.name == "scene/camera" && members(value).iter().any(|m| m == camera) => {}
                     Some(_) => return refuse("E_SCENE_CAMERA", format!("Graph {}: the root's :camera is not a camera in its scene.", g.name)),
                     None => {}
                 }
@@ -703,7 +707,7 @@ fn instance(id: Option<i64>, kind: &kg::Kind, label: &str, values: &[(String, PV
 /// object is built like any scene object, from the fields its call writes.
 fn instance_camera(value: Option<&E>) -> Option<rcamera::t> {
     match value {
-        Some(v @ E::Struct(k, _, _)) if k == "scene/camera" => {
+        Some(v @ E::Struct(g)) if g.name == "scene/camera" => {
             let built = (|| -> R<Option<rcamera::t>> {
                 let forced = force0(v)?;
                 let values = changes("scene/camera", &forced_args(forced))?;
@@ -720,10 +724,11 @@ fn instance_camera(value: Option<&E>) -> Option<rcamera::t> {
 /// part.
 pub fn instance_root(value: &E) -> Option<ViewRoot> {
     match value {
-        E::Struct(k, _, args) if k == "scene/root" => {
+        E::Struct(g) if g.name == "scene/root" => {
+            let args = &g.fields;
             let own: Vec<(String, E)> = args.iter().filter(|(key, _)| !SLOT_NAMES.contains(&key.as_str())).cloned().collect();
-            match force0(&E::Struct("scene/root".to_owned(), ty::scene(), own)) {
-                Ok(E::Struct(_, _, forced)) => match changes("scene/root", &forced) {
+            match force0(&struct_value("scene/root", ty::scene(), own)) {
+                Ok(E::Struct(forced)) => match changes("scene/root", &forced.fields) {
                     Ok(values) => root_params(&values).ok().map(|params| ViewRoot { params, camera: instance_camera(args.iter().find(|(n, _)| n == "camera").map(|(_, v)| v)) }),
                     Err(_) => None,
                 },
@@ -1090,7 +1095,7 @@ pub fn of_workspace(options: &Options, workspace: &workspace_doc::T) -> R<docume
     };
     let settings_calls = calls(&|k| k == "settings/config", &no_below, workspace, &lowered.plan, context::settings())?;
     let settings = match settings_calls.first() {
-        Some(Call { kind, args, .. }) => settings_of(&E::Struct(kind.clone(), ty::settings(), args.clone()))?,
+        Some(Call { kind, args, .. }) => settings_of(&struct_value(kind.clone(), ty::settings(), args.clone()))?,
         None => workspace.settings.clone(),
     };
     // settings the previous document already has are kept physically, like a network: the cook
@@ -1162,7 +1167,6 @@ pub fn of_workspace(options: &Options, workspace: &workspace_doc::T) -> R<docume
         workspace: document::Workspace {
             ws: workspace,
             lowered: Arc::new(lowered),
-            catalog: document::LazyCatalog::new(previous.map(|d| &d.workspace.catalog), factories),
             fast,
         },
     })

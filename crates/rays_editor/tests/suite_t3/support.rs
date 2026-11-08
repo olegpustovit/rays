@@ -342,8 +342,7 @@ use flow_check::workspace::Workspace;
 
 /// `Editor_document.Kinds.catalog ~version:1 Sop.Nodes.factories` (the Lisp SOP nodes included).
 pub fn catalog() -> Catalog {
-    thread_local! { static C: Catalog = rays_editor::workspace_catalog(None).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d))); }
-    C.with(|c| c.clone())
+    (*rays_editor::workspace_catalog(None).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)))).clone()
 }
 
 pub fn checked(text: &str) -> Workspace {

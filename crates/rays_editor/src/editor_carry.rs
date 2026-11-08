@@ -56,11 +56,11 @@ pub fn carry_shown(c: &carry) -> Arc<Document> {
 /// reason and the write.  A put that takes longer than the budget (or onto a cook that does) is
 /// said and not shown.
 pub fn carry_try(value: &t, c: &carry, place: &Place) -> carry_preview {
-    let Some(catalog) = value.flow_catalog.force() else {
+    let Some(catalog) = flow_catalog(value) else {
         return carry_preview::Refused { place: place.clone(), reason: "The catalog is unavailable".to_string() };
     };
     let start = (value.clock)();
-    let result = carry_mod::put(Some(&value.factories), catalog, &c.original, &c.payload, place);
+    let result = carry_mod::put(Some(&value.factories), &catalog, &c.original, &c.payload, place);
     let spent = (value.clock)() - start;
     match result {
         Err(reason) => carry_preview::Refused { place: place.clone(), reason },
@@ -87,9 +87,9 @@ pub fn carry_targets(value: &t, c: carry) -> carry {
             return c;
         }
     }
-    let found = match value.flow_catalog.force() {
+    let found = match flow_catalog(value) {
         None => Vec::new(),
-        Some(catalog) => carry_mod::targets(Some(&value.factories), catalog, None, &c.original, &c.payload, graph.as_deref()),
+        Some(catalog) => carry_mod::targets(Some(&value.factories), &catalog, None, &c.original, &c.payload, graph.as_deref()),
     };
     let letters: Vec<char> = carry_letters.chars().collect();
     let targets = found.into_iter().enumerate().map(|(i, (place, label))| (letters[i].to_string(), place, label)).collect();

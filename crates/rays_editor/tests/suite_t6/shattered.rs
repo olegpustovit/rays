@@ -66,7 +66,7 @@ pub fn shattered_studio() {
         .collect();
     let count = dense.len() as i64;
     assert!(count >= 1000, "{count} pieces");
-    let parts = rdk_core::deletion::primitive_partitions(count, &membership, &g).unwrap();
+    let parts = rdk_ops::deletion::primitive_partitions(count, &membership, &g).unwrap();
     for part in &parts {
         assert!(edge_counts(part) == (0, 0));
     }

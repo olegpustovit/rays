@@ -167,34 +167,12 @@ impl LazyBool {
     }
 }
 
-/// The factories' kinds, built when an edit first asks.
-#[derive(Clone)]
-pub struct LazyCatalog {
-    cell: Arc<OnceLock<Result<Catalog, Diagnostic>>>,
-    factories: Vec<edit_graph::Factory>,
-}
-
-impl LazyCatalog {
-    /// `previous`'s catalog when it is of the same factories: a lowering per orbit frame must not
-    /// rebuild every kind.
-    pub fn new(previous: Option<&LazyCatalog>, factories: Vec<edit_graph::Factory>) -> LazyCatalog {
-        match previous {
-            Some(p) if p.factories.len() == factories.len() && p.factories.iter().zip(&factories).all(|(a, b)| edit_graph::same_factory(a, b)) => p.clone(),
-            _ => LazyCatalog { cell: Arc::new(OnceLock::new()), factories },
-        }
-    }
-    pub fn force(&self) -> &Result<Catalog, Diagnostic> {
-        self.cell.get_or_init(|| crate::kinds::catalog(flow_sop_catalog::manifest::VERSION, &self.factories))
-    }
-}
-
 /// The authored document, its lowering and the window's precision, read once with the lowering.
 #[derive(Clone)]
 pub struct Workspace {
     pub ws: workspace_doc::T,
     pub lowered: Arc<l::T>,
     pub fast: LazyBool,
-    pub catalog: LazyCatalog,
 }
 
 #[derive(Clone)]

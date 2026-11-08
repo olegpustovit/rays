@@ -22,9 +22,8 @@ use sop::edit_graph::Factory;
 /// The catalog a workspace text is checked against (`Workspace_doc::of_text`): the SOP factories
 /// (default `sop::nodes::factories`) plus the scene, world and settings kinds generated from the
 /// editor's schemas.
-pub fn workspace_catalog(factories: Option<&[Factory]>) -> Result<flow_check::catalog::Catalog, rays_diagnostic::Diagnostic> {
-    let factories: Vec<Factory> = factories.map(|f| f.to_vec()).unwrap_or_else(sop::nodes::factories);
-    kinds::catalog(flow_sop::manifest::VERSION, &factories)
+pub fn workspace_catalog(factories: Option<&[Factory]>) -> Result<std::sync::Arc<flow_check::catalog::Catalog>, rays_diagnostic::Diagnostic> {
+    kinds::shared(factories)
 }
 
 pub fn workspace_window(doc: &editor_document::workspace_doc::T) -> Result<window, rays_diagnostic::Diagnostic> {
@@ -372,7 +371,7 @@ pub mod Reduce {
     pub fn spreadsheet(editor: &Editor::t, path: &[usize]) -> (i64, Option<rdk_rays::geometry_view::T>) {
         let key = editor_shell::panel_key(&editor.core.doc, path);
         let pane = editor_panes::shown_as(&editor.core, (&key, &path.to_vec(), &Panel::Spreadsheet));
-        (editor_panes::local_of(&editor.core, &key).sheet_owner, editor_inspect::spreadsheet_source(&pane).cloned())
+        (editor_panes::local_of(&editor.core.locals, &key).sheet_owner, editor_inspect::spreadsheet_source(&pane).cloned())
     }
 
     /// Select the checked lexical path; unstable test/diagnostic hook.

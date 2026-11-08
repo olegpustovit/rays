@@ -6,19 +6,8 @@ use rays_diagnostic::{Diagnostic, Severity};
 
 pub type Fail = String;
 
-thread_local! { static CATALOG: std::cell::RefCell<Option<flow_check::catalog::Catalog>> = const { std::cell::RefCell::new(None) }; }
-
-fn catalog() -> Result<flow_check::catalog::Catalog, Fail> {
-    if let Some(c) = CATALOG.with(|c| c.borrow().clone()) {
-        return Ok(c);
-    }
-    let c = build_catalog()?;
-    CATALOG.with(|slot| *slot.borrow_mut() = Some(c.clone()));
-    Ok(c)
-}
-
-fn build_catalog() -> Result<flow_check::catalog::Catalog, Fail> {
-    editor_document::kinds::catalog(flow_sop::manifest::VERSION, &sop::nodes::factories()).map_err(|d| format!("rays: catalog: {}", rays_diagnostic::to_string(&d)))
+fn catalog() -> Result<std::sync::Arc<flow_check::catalog::Catalog>, Fail> {
+    editor_document::kinds::shared(None).map_err(|d| format!("rays: catalog: {}", rays_diagnostic::to_string(&d)))
 }
 
 fn lower_error(message: String) -> Diagnostic {

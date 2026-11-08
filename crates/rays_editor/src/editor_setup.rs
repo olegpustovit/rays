@@ -161,7 +161,7 @@ pub fn create(opts: create_opts, workspace: &workspace_doc::T, prepare: cook::Pr
         gpu, settings: given_settings, seed_scene, name, presets, state_key, factories, seed, grain, domains, max_entries, max_payload_bytes, await_, carry_budget, clock, preferences, ui_text_size, platform, ui_font, opened,
     } = opts;
     let factories = if factories.is_empty() { sop::nodes::factories() } else { factories };
-    let platform = platform.unwrap_or_else(runtime_input::platform);
+    let platform = platform.unwrap_or_else(runtime::runtime_input::platform);
     let state_key = state_key.unwrap_or_else(|| name.clone());
     let clock: cook::Clock = clock.unwrap_or_else(|| Arc::new(wall_clock));
     let mut workspace = workspace.clone();
@@ -197,7 +197,6 @@ pub fn create(opts: create_opts, workspace: &workspace_doc::T, prepare: cook::Pr
     let keep: Arc<dyn Fn(&Document) -> document::Snapshot> = Arc::new(document::snapshot);
     let bytes: Arc<dyn Fn(&document::Snapshot) -> i64> = Arc::new(|s| document::snapshot_bytes(s) as i64);
     let history = history::create(None, Some(64 * 1024 * 1024), Some(bytes), keep, doc.clone())?;
-    let catalog_factories = factories.clone();
     let vocab = vocabulary(&factories, &doc);
     let file = format!("{}.rays", doc.workspace.ws.checked.name);
     let value = t {
@@ -230,7 +229,6 @@ pub fn create(opts: create_opts, workspace: &workspace_doc::T, prepare: cook::Pr
         edit_phases: phase_timer::empty(),
         select_later: Vec::new(),
         open_import: None,
-        flow_catalog: Lazy_catalog::new(Rc::new(move || kinds::catalog(manifest::VERSION, &catalog_factories).ok())),
         lisp_vocab: vocab,
         tree: tree::create(),
         outline: navigator::initial(),

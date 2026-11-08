@@ -118,8 +118,7 @@ pub fn delete(directory: &str, name: &str) -> Result<(), String> {
 /// apply to. An unreadable, unchecked or unlowerable file is an `Err` carrying the diagnostic text.
 pub fn load_with_ops(gpu: Option<flow_ir::flow_ir::Gpu::Config>, ops: Vec<FlowOp>, path: &str, factories: Option<&[Factory]>, settings_value: &settings::T) -> Result<Loaded, String> {
     let text = editor_core::store::read_text(path)?;
-    let factories_v = factories.map(|f| f.to_vec()).unwrap_or_else(sop::nodes::factories);
-    let catalog = kinds::catalog(1, &factories_v).map_err(|d| rays_diagnostic::to_string(&d))?;
+    let catalog = kinds::shared(factories).map_err(|d| rays_diagnostic::to_string(&d))?;
     let options = TextOptions { ops: Some(std::sync::Arc::new(ops)), settings: Some(settings::defaults(settings_value)), ..Default::default() };
     let mut workspace = workspace_doc::of_text(&options, &catalog, &text)
         .map_err(|ds| ds.iter().map(rays_diagnostic::to_string).collect::<Vec<_>>().join("\n"))?;
@@ -135,7 +134,7 @@ pub fn load_with_ops(gpu: Option<flow_ir::flow_ir::Gpu::Config>, ops: Vec<FlowOp
             builder.freeze().handle(root)
         }
     };
-    let doc = lowering::of_workspace(&lowering::Options { factories: Some(factories_v), gpu, ..Default::default() }, &workspace).map_err(|d| rays_diagnostic::to_string(&d))?;
+    let doc = lowering::of_workspace(&lowering::Options { factories: Some(factories.map(|f| f.to_vec()).unwrap_or_else(sop::nodes::factories)), gpu, ..Default::default() }, &workspace).map_err(|d| rays_diagnostic::to_string(&d))?;
     document::validate(&doc)?;
     Ok(Loaded { doc, view })
 }

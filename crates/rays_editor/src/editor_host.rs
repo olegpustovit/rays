@@ -267,7 +267,7 @@ pub fn material_graph(value: &t, path: &str) -> Option<String> {
     }
     let ev = pane_laid(value)?.evaluated.as_ref()?;
     ev.results.iter().find_map(|(graph, v)| match v {
-        EvalValue::Struct(kind, _, fields) if kind == "material/standard" && materials.contains(graph) && fields.iter().find(|(k, _)| k == "name").map(|(_, v)| v) == Some(&EvalValue::Text(path.as_bytes().to_vec())) => Some(graph.clone()),
+        EvalValue::Struct(g) if g.name == "material/standard" && materials.contains(graph) && g.fields.iter().find(|(k, _)| k == "name").map(|(_, v)| v) == Some(&EvalValue::Text(path.as_bytes().to_vec())) => Some(graph.clone()),
         _ => None,
     })
 }
@@ -362,7 +362,7 @@ pub fn pick(view: Option<&str>, alt: bool, value: t, origin: vec3::T, direction:
             let (value, scope) = if root == laid_graph(&value) {
                 (value, scope)
             } else {
-                match value.flow_catalog.force().map(|catalog| fproj::of_graph(catalog, &workspace.ws.checked, &root)) {
+                match flow_catalog(&value).map(|catalog| fproj::of_graph(&catalog, &workspace.ws.checked, &root)) {
                     Some(Ok(found)) => {
                         let shown = root.clone();
                         (with_pane(value, &|pane| graph_pane { shown: Some(shown.clone()), ..pane.clone() }), Rc::new(found))

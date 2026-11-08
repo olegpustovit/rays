@@ -21,8 +21,7 @@ fn read(p: &str) -> String {
     fs::read_to_string(p).unwrap()
 }
 fn catalog() -> flow_check::catalog::Catalog {
-    thread_local! { static C: flow_check::catalog::Catalog = rays_editor::workspace_catalog(None).unwrap(); }
-    C.with(|c| c.clone())
+    (*rays_editor::workspace_catalog(None).unwrap()).clone()
 }
 fn doc_of(text: &str, imports: Vec<(String, String)>) -> Result<Doc::T, Vec<rays_diagnostic::Diagnostic>> {
     Doc::of_text(&Doc::TextOptions { imports, ..Default::default() }, &catalog(), text)
