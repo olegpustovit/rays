@@ -66,22 +66,15 @@ fn run_sticky() {
     check(key(&first) == key(&moved), "reordering bindings moved a card");
 }
 
-fn at_of(entries: Vec<(&'static str, (f64, f64))>) -> Rc<dyn Fn(&[String]) -> Option<(f64, f64)>> {
-    Rc::new(move |q: &[String]| {
-        if q.len() == 2 && q[0] == "g" {
-            entries.iter().find(|(n, _)| *n == q[1]).map(|(_, pt)| *pt)
-        } else {
-            None
-        }
-    })
+fn at_of(entries: Vec<(&'static str, (f64, f64))>) -> ScopeOpts {
+    saved_opts(TestSaved { at: entries.into_iter().map(|(n, pt)| (path(&["g", n]), pt)).collect(), ..Default::default() })
 }
 
 /// Selecting a node lights its chain; a long wire is a tag until its chain is lit.
 fn run_readable() {
     let mut ui = new_ui();
     let ws = checked("(workspace r (graph g :context sop (let* [a (sop/box) b (sop/transform a) c (sop/transform b) d (sop/transform a) e (sop/merge c d a)] e)))");
-    let mut opts = ScopeOpts::default();
-    opts.at = at_of(vec![("a", (0.0, 0.0)), ("b", (288.0, 0.0)), ("c", (576.0, 0.0)), ("d", (288.0, 240.0)), ("@result", (4000.0, 0.0)), ("e", (864.0, 0.0))]);
+    let opts = at_of(vec![("a", (0.0, 0.0)), ("b", (288.0, 0.0)), ("c", (576.0, 0.0)), ("d", (288.0, 240.0)), ("@result", (4000.0, 0.0)), ("e", (864.0, 0.0))]);
     let (view, _) = scope_view(opts, &ws, "g");
     let (view, _) = scope_step(&mut ui, view, &frame0());
     check(scope::inspect::chain(&view).is_none(), "a chain was lit with nothing selected");
@@ -96,8 +89,7 @@ fn run_readable() {
         None => fail("selecting a node lit no chain"),
     }
     // a node 4,000 points to the right reads [a] through a tag, until a or e is selected
-    let mut opts = ScopeOpts::default();
-    opts.at = at_of(vec![("e", (4000.0, 0.0)), ("a", (0.0, 0.0)), ("b", (288.0, 0.0)), ("c", (576.0, 0.0)), ("d", (288.0, 240.0))]);
+    let opts = at_of(vec![("e", (4000.0, 0.0)), ("a", (0.0, 0.0)), ("b", (288.0, 0.0)), ("c", (576.0, 0.0)), ("d", (288.0, 240.0))]);
     let (far, _) = scope_view(opts, &ws, "g");
     let (far, _) = scope_step(&mut ui, far, &frame0());
     check(scope::inspect::tagged_wires(&far) >= 1, "a wire four thousand points long was not a tag");

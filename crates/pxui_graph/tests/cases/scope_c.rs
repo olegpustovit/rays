@@ -288,7 +288,13 @@ fn scope_gestures_4() {
     let upstream = path(&["g", "a"]);
     check(p::find(&sc, &result).expect("result").synthetic, "crossing fixture has no unnamed result");
     for level in [p::Level::Card, p::Level::Chip, p::Level::Point] {
-        let opts = ScopeOpts { level: Rc::new(move |_: &[String]| Some((level, true))), ..ScopeOpts::default() };
+        struct Every(p::Level);
+        impl pxui_graph::scope_state::Saved for Every {
+            fn level(&self, _: &[String]) -> Option<(p::Level, bool)> {
+                Some((self.0, true))
+            }
+        }
+        let opts = ScopeOpts { saved: Rc::new(Every(level)), ..ScopeOpts::default() };
         let view = scope::with_scope(opts, "g", sc.clone(), scope::create(Some(3000), Some(2000)));
         let view = g::settled(&mut ui, view);
         let (x, y, wd, h) = scope::inspect::box_of(&view, &result).expect("box");
