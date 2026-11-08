@@ -117,6 +117,27 @@ fn resident_fold() {
     ] { fold_case(&gpu, n, levels, predicate, slot, range); }
 }
 
+/// Sibling maps of one count run as one multi-output dispatch (`invoke_all`); a host reading int
+/// arrays as uint32 needs every int output written as uint32, not only the first (here the second,
+/// after a vec3). Before the fix the int output read back as f32 bit patterns.
+fn resident_sibling_ints() {
+    use flow_syntax::ty::Ty;
+    let Some(gpu) = start() else { return };
+    let positions = tp::compile("(map (fn [x] [(+ x 1.0) t 0]) (array/range 300))");
+    let tripled = tp::compile("(map (fn [x] (int/mul (int (+ x t)) 3)) (array/range 300))");
+    let merged = flow_ir::core_fuse::merge(&[positions, tripled.clone()]).expect("sibling regions merge");
+    let live = input::at_time(1.0);
+    let expected = tp::ok(phost::reference(&tripled, &live, None, None, None));
+    let h = host::create(&|| 0.0, &gpu);
+    for uint32 in [false, true] {
+        let r = host::resident(uint32, true, &h);
+        let tys = [Ty::Array(Box::new(Ty::Vec3)), Ty::Array(Box::new(Ty::Int))];
+        let Some(Value::List(made)) = tp::ok(r.invoke_all(&merged, &tys, &[], &[], &live)) else { panic!("sibling dispatch declined") };
+        assert_eq!(tp::ok(r.finish(&made[1])), expected, "sibling int output (uint32 {uint32})");
+        r.close();
+    }
+    host::close(&h);
+}
 fn resident_history() {
     let Some(gpu) = start() else { return };
     let (program, root) = draw_program("(let* [p (fold [b (map (fn [i] [i (* i 2) 0]) (array/range 2000))] [d (range 3)] (let* [kept (filter (fn [i] (< (int/mod (int i) 8) (int t))) (array/range (array/count b)))] (map (fn [i] (let* [q (array/nth b (int (array/nth kept (int/div (int i) 2))))] [(+ q.x d) (+ q.y (mod i 2)) 0])) (array/range (* (array/count kept) 2)))))] (draw/points p))");
@@ -398,6 +419,7 @@ fn resident_scenarios() {
     common::release_keepalive();
     let baseline = ogpu_core::impl_::live_handles().expect("native handles");
     resident_fold();
+    resident_sibling_ints();
     resident_history();
     resident_value();
     counted();

@@ -666,6 +666,20 @@ fn same_buffer(a: &Buffer, b_: &Buffer) -> bool {
     b::buffer_id(a) == b::buffer_id(b_)
 }
 
+/// Every output an int array's placeholder reads back as uint32: each scalar integer register, not
+/// only the first output (a resident fold's sibling maps dispatch as one multi-output kernel).
+fn integer_outputs(packed: &Packed) -> Vec<i64> {
+    let mut outputs = Vec::new();
+    for (k, registers) in packed.outputs.iter().enumerate() {
+        if let [slot] = registers.as_slice() {
+            if flow_ir::core_ir::Region::integer_register(&packed.code[*slot as usize]) {
+                outputs.push(k as i64);
+            }
+        }
+    }
+    outputs
+}
+
 fn int_array_ty() -> Ty {
     Ty::Array(Box::new(Ty::Int))
 }
@@ -997,7 +1011,6 @@ impl Scope {
 
     /// a region's kernel; `unfold` n runs it n passes in each lane (`Emit.kernel ~unfold`)
     fn emit(&self, unfold: Option<i64>, packed: &Packed) -> Result<Kernel, Diagnostic> {
-        let ty = packed.term.ty();
         let base = emit::Options { spirv: is_vulkan(), fast: true, unfold, ..emit::Options::default() };
         if !self.uint32 {
             return emit::kernel(&base, packed);
@@ -1016,7 +1029,7 @@ impl Scope {
         tables.sort();
         tables.dedup();
         emit::kernel(
-            &emit::Options { uint32_scalars: true, uint32_inputs: inputs, uint32_tables: tables, uint32_outputs: if *ty == int_array_ty() { vec![0] } else { vec![] }, ..base },
+            &emit::Options { uint32_scalars: true, uint32_inputs: inputs, uint32_tables: tables, uint32_outputs: integer_outputs(packed), ..base },
             packed,
         )
     }
