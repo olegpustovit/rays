@@ -136,6 +136,10 @@ Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s
 
 ## Session log
 
+- 2026-11-08: `282695fa` perf: cooked-selection programs are prepared at first cook. Preparing is infallible and forced before the placement timer, so the workspace's discarded inlined copy no longer prepares. `4dd7baca`: regression checks a single body build in `root`/`card_node`, zero rebuilds over new inputs and one shared prepared program; it fails with either fix reverted. subdivide build: cold 1.10 s, warm 0.48 s. The remaining second build is a genuinely different program (workspace constants vs factory inputs). Deferring its fallible first compile would move lowering errors to cook time, so it was not done.
+  - Full flow_sop: all 709 pass, 65.4 s wall / 261 s summed. Default-cap runs stop at 60 s after 602-623 cases with no failures.
+  - Summed time: workspace checks ~50 s (library re-check per process ~27 s), lowerings ~31 s, `operators::parity` ~22 s. Parity is the current timeboxed target.
+
 - 2026-11-08: `91cda944` perf: the BUILT memo keys Lisp-node stand-in inputs by slot, scoped to one Lisp-node environment (`CallEnvShared::id`, `Options::body_of`). `restore` and editor input edits reuse the body, so a node build does 2 body builds instead of 3. subdivide build: cold 1.47 -> 1.20 s, warm 0.80 -> 0.57 s. Regression `a_lisp_node_rebuilt_over_new_inputs_builds_its_body_once` checks byte-identical cooks.
   - Full flow_sop: 709 pass, 64.7 s wall / 257.9 s summed (cap lifted, load ~8); still over 60 s.
   - Checks: flow_ir/eval/check 483 pass; gpu_editor sopcat_ 8, orrery, run_ops and run_panels pass.
