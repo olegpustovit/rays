@@ -1,0 +1,9 @@
+Rays /Users/snowbear/WORK/GIT/rays dev. AGENTS.md ponytail. Wave M10 ONLY.
+
+Fix O(n²) array stores in flow_ir/src/core_exec.rs ~2157-2176 and ~2649-2657 per plan: avoid Arc::make_mut copy when refcount stays 2 on alias writeback.
+
+Read docs/history/port-simplification/index.html M10 row. Grep core_exec for make_mut on slot stores; smallest fix that preserves semantics.
+
+cargo t -p flow_ir with narrow filter touching core_exec stores. Commit "M10:". Update PROGRESS.md M10 row only + summary M count. No artifact.
+
+Return: commit, test command, one-line mechanism.

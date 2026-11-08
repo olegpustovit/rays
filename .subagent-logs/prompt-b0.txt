@@ -1,0 +1,7 @@
+Rays /Users/snowbear/WORK/GIT/rays dev. AGENTS.md ponytail. Wave B0 ONLY.
+
+Document in PROGRESS.md (no code unless trivial): what invalidates shared target incremental cache per AGENTS.md + plan B0. Run ONE warm pair: touch crates/flow_check/src/catalog.rs marker comment, cargo check -p flow_check twice; record wall times in session log.
+
+If you find accidental RUSTFLAGS/CARGO_TARGET_DIR issues in repo scripts, fix in single commit "B0:". Do NOT clean target.
+
+No artifact. Return times + findings.

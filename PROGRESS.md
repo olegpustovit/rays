@@ -48,10 +48,18 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | review | `.subagent-logs/review.log` | plan audit (read-only) |
 | b3 | `.subagent-logs/b3.log` | B3 gpu test merge |
 
+| m10 | `.subagent-logs/m10.log` | M10 store alias fix |
+| b0 | `.subagent-logs/b0.log` | B0 incremental notes |
+
 Cursor `Task` subagents unavailable in this harness; workers are `omp launch -p` (pids in shell history).
+
+## Plan audit (2026-11-08)
+
+Read-only review in `.subagent-logs/review.log`: Wave A runbook **5/6 bullets done**, bullet 3 partial (`pxui` `ocaml_int` → Wave **I**); A4 MD5 done, optional `guarded`/`ocaml_min` dedup still scattered. **~8/63** plan IDs closed (A1–A8 + B4); M/I/C/D not started. A6 closed at `3a293e9b` after review snapshot.
 
 ## Session log
 
+- 2026-11-08: **Wave A closed** `3a293e9b` A6; plan audit appended; m10/b0 workers queued.
 - 2026-11-08: omp subagents landed `0cad884b` A5, `7a63b07b`/`30623d6e` A2, `da178e93` A7; Wave A 7/8.
 - 2026-11-08: omp subagents A2/A5/A6/A7-geom launched; logs under `.subagent-logs/`.
 - 2026-11-08: Resume execution; A1 verified on `dev`.
