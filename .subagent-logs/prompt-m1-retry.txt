@@ -1,0 +1,5 @@
+Rays dev AGENTS.md ponytail. M1 smallest slice in flow_eval eval.rs ONLY.
+
+Goal: cache evaluator site path in ExecCtx.site (Arc<Path>) via base_of; extend routes cache to store site Arc. sub() MUST take (&mut Arena, &ExecCtx, Seg) but NEVER call sub inside eval_at(..., &sub(...)) — always let cx = sub(a,c,seg); then eval_at(a,&cx,...). Fix root_ctx to take &mut Arena. No M14 Value boxing.
+
+cargo check -p flow_eval; cargo t -p flow_eval test_workspace_eval narrow. Commit "M1:". PROGRESS M1 only. No artifact.

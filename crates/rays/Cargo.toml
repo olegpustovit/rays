@@ -21,7 +21,6 @@ parallel = { path = "../parallel" }
 mem = { path = "../mem" }
 ogpu = { path = "../ogpu" }
 cfmt = { path = "../cfmt" }
-ocaml_int = { path = "../ocaml_int" }
 
 [target.'cfg(windows)'.dev-dependencies]
 ogpu_vulkan = { path = "../ogpu_vulkan" }

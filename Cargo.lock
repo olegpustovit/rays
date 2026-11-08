@@ -456,7 +456,6 @@ dependencies = [
  "input",
  "lru",
  "mem",
- "ocaml_int",
  "ogpu",
  "ogpu_metal",
  "ogpu_vulkan",
