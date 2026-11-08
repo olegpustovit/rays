@@ -41,7 +41,11 @@ pub fn prompt_name(value: &t) -> &'static str {
 }
 
 pub fn level_name(value: &t) -> String {
-    match pane_level(value) {
+    level_name_at(value, pane_level(value))
+}
+
+pub fn level_name_at(value: &t, level: editor_document::document::Level) -> String {
+    match level {
         editor_document::document::Level::Scene => "scene".to_string(),
         editor_document::document::Level::Inside(id) => {
             format!("scene \u{203a} {}", editor_document::kind_graph::find(&scene(value), id).map(|n| n.label).unwrap_or_else(|| "?".to_string()))

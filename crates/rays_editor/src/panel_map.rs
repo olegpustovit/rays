@@ -29,6 +29,10 @@ pub fn active(t: &t) -> &Pane {
     &t.panes.iter().find(|(key, _)| *key == t.in_use).expect("Panel_map: in_use is always a key of panes").1
 }
 
+pub fn find<'a>(t: &'a t, key: &Key) -> Option<&'a Pane> {
+    t.panes.iter().find(|(k, _)| k == key).map(|(_, pane)| pane)
+}
+
 /// The pane in use, to change in place.
 pub fn active_mut(t: &mut t) -> &mut Pane {
     let in_use = &t.in_use;

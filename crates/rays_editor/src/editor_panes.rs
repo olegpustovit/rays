@@ -49,9 +49,13 @@ type S = Syntax;
 pub type Key = Vec<String>;
 
 pub fn stored_projection(value: &t) -> projection {
-    match level_map_find(pane_views(value), pane_level(value)) {
+    projection_in(value, pane(value))
+}
+
+fn projection_in(value: &t, pane: &graph_pane) -> projection {
+    match level_map_find(&pane.views, pane.at) {
         Some(p) => p,
-        None => match pane_level(value) {
+        None => match pane.at {
             Level::Scene => List_view,
             Level::Inside(id) if kind(value, id).as_deref() == Some("geometry") => Graph_view,
             Level::Inside(_) => List_view,
@@ -128,7 +132,7 @@ pub fn panel_hosts(value: &t) -> Vec<Host> {
             Panel::List => Some(Host_kind::List),
             Panel::Lisp => Some(Host_kind::Text),
             Panel::Outline => Some(Host_kind::Outline),
-            Panel::Graph => match projection_of(&as_pane(value, (&key, &path))) {
+            Panel::Graph => match projection_in(value, &pane_at(value, (&key, &path))) {
                 List_view => Some(Host_kind::List),
                 Text_view => Some(Host_kind::Text),
                 Graph_view => None,
@@ -142,8 +146,25 @@ pub fn panel_hosts(value: &t) -> Vec<Host> {
     out
 }
 
-/// The editor as the graph panel a leaf shows has it: a graph leaf its own, a leaf tied by `:of`
-/// that panel's, any other the pane in use.
+/// The graph state a leaf reads, with its resolved graph path, without copying the editor model.
+pub fn shown_pane<'a>(value: &'a t, (key, path, panel): (&Key, &layout::Path, &Panel)) -> (Cow<'a, graph_pane>, Option<layout::Path>) {
+    let at = |key: &Key, path: &layout::Path| {
+        let resolved = value.doc.shell.as_ref().and_then(|_| {
+            if panel_map::key(&value.panes).as_ref() == Some(key) { graph_path(value) } else { Some(path.clone()) }
+        });
+        (pane_at(value, (key, path)), resolved)
+    };
+    if *panel == Panel::Graph {
+        at(key, path)
+    } else {
+        match tied(value, path) {
+            Some((key, path)) => at(&key, &path),
+            None => (Cow::Borrowed(pane(value)), value.doc.shell.as_ref().and_then(|_| graph_path(value))),
+        }
+    }
+}
+
+/// The model with the graph pane a leaf follows in use.
 pub fn shown_as<'a>(value: &'a t, (key, path, panel): (&Key, &layout::Path, &Panel)) -> Cow<'a, t> {
     if *panel == Panel::Graph {
         as_pane(value, (key, path))
@@ -278,7 +299,7 @@ pub fn follow_start(value: t) -> t {
         if panel_map::key(&value.panes).as_ref() == Some(&key) {
             value = with_pane(value, &|pane| graph_pane { views: level_map_add(pane.views.clone(), pane.at, view), ..pane.clone() });
         } else if let Some((path, _)) = path_of(&value, &key) {
-            let pane = panel_map::active(&as_pane(&value, (&key, &path)).panes).clone();
+            let pane = pane_at(&value, (&key, &path)).into_owned();
             let pane = graph_pane { views: level_map_add(pane.views.clone(), pane.at, view), ..pane };
             panel_map::set(&mut value.panes, &key, pane);
         }
@@ -309,15 +330,20 @@ pub fn graph_of_object(value: &t, id: i64) -> Option<String> {
 }
 
 pub fn graph_name(value: &t) -> Option<String> {
+    let path = value.doc.shell.as_ref().and_then(|_| graph_path(value));
+    graph_name_at(value, pane_level(value), pane_shown(value).map(String::as_str), path.as_deref())
+}
+
+pub fn graph_name_at(value: &t, level: Level, shown: Option<&str>, path: Option<&[usize]>) -> Option<String> {
     let ws = &value.doc.workspace.ws;
     let exists = |name: &str| -> bool {
         ws.checked.graphs.iter().any(|g| g.name == name)
             || (name.len() > 4 && &name[..4] == "def:" && ws.checked.defs.iter().any(|g| format!("def:{}", g.name) == name))
     };
     // the graph the pane's own leaf pins
-    let named: Option<String> = value.doc.shell.as_ref().and_then(|s| graph_path(value).and_then(|path| s.named.iter().find(|(p_, _)| *p_ == path).map(|(_, n)| n.clone())));
-    let chosen = if pane_shown(value).is_some() { pane_shown(value).cloned() } else { named };
-    match (chosen, pane_level(value)) {
+    let named = || value.doc.shell.as_ref().and_then(|s| path.and_then(|path| s.named.iter().find(|(p, _)| p.as_slice() == path).map(|(_, n)| n.clone())));
+    let chosen = shown.map(str::to_owned).or_else(named);
+    match (chosen, level) {
         (Some(name), _) if exists(&name) => Some(name),
         (_, Level::Inside(id)) if kind(value, id).as_deref() == Some("geometry") => match graph_of_object(value, id) {
             Some(name) => Some(name),
@@ -335,7 +361,11 @@ pub fn graph_name(value: &t) -> Option<String> {
 pub fn graph_panels(value: &t) -> String {
     graph_leaves(value)
         .iter()
-        .map(|leaf| graph_name(&as_pane(value, (&leaf.0, &leaf.1))).unwrap_or_else(|| "-".to_owned()))
+        .map(|(key, path)| {
+            let pane = pane_at(value, (key, path));
+            let path = if panel_map::key(&value.panes).as_ref() == Some(key) { graph_path(value) } else { Some(path.clone()) };
+            graph_name_at(value, pane.at, pane.shown.as_deref(), path.as_deref()).unwrap_or_else(|| "-".to_owned())
+        })
         .collect::<Vec<_>>()
         .join(", ")
 }
@@ -476,15 +506,17 @@ pub fn viewport_target(value: &t) -> Option<String> {
 
 /// The route taken, as the graph header shows it: scene > shards > cobalt (the last three).
 pub fn route(value: &t) -> String {
-    let mut names: Vec<String> = pane_route(value)
+    let path = value.doc.shell.as_ref().and_then(|_| graph_path(value));
+    route_in(value, pane(value), path.as_deref())
+}
+
+pub fn route_in(value: &t, pane: &graph_pane, path: Option<&[usize]>) -> String {
+    let mut names: Vec<String> = pane.route
         .iter()
         .rev()
-        .filter_map(|(at, shown)| {
-            let (at, shown) = (*at, shown.clone());
-            graph_name(&with_pane(value.clone(), &|pane| graph_pane { at, shown: shown.clone(), ..pane.clone() }))
-        })
+        .filter_map(|(at, shown)| graph_name_at(value, *at, shown.as_deref(), path))
         .collect();
-    names.extend(graph_name(value));
+    names.extend(graph_name_at(value, pane.at, pane.shown.as_deref(), path));
     let skip = names.len().saturating_sub(3);
     names.into_iter().skip(skip).collect::<Vec<_>>().join(" > ")
 }

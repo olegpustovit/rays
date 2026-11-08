@@ -310,3 +310,39 @@ fn inactive_text_intents_reuse_the_owned_model() {
         editor_host_close(&value);
     });
 }
+
+#[test]
+fn route_labels_borrow_model_state() {
+    big_stack(|| {
+        let mut value = model();
+        value.preferences = "x".repeat(100_000);
+        let active = crate::editor_shell::with_pane_in_use(value, (&vec!["active".into()], &vec![0]));
+        let mut value = active;
+        let active = crate::panel_map::active_mut(&mut value.panes);
+        active.shown = Some("g".into());
+        active.route = vec![(Level::Scene, Some("g".into())); 2];
+        let key = vec!["inactive".into()];
+        let path = vec![1];
+        let mut inactive = pane(&value).clone();
+        inactive.at = Level::Inside(i64::MAX);
+        inactive.picked = selection::select(7);
+        crate::panel_map::set(&mut value.panes, &key, inactive);
+        {
+            let resolved = crate::editor_shell::pane_at(&value, (&key, &path));
+            assert!(matches!(resolved, std::borrow::Cow::Owned(_)));
+            assert_eq!(resolved.at, Level::Scene);
+            assert!(selection::selected(&resolved.picked).is_none());
+            assert_eq!(crate::panel_map::find(&value.panes, &key).unwrap().at, Level::Inside(i64::MAX));
+            let active = crate::editor_shell::pane_at(&value, (&vec!["active".into()], &vec![0]));
+            assert!(matches!(active, std::borrow::Cow::Borrowed(_)));
+            assert!(std::ptr::eq(active.as_ref(), pane(&value)));
+        }
+        mem_sys::local_reset();
+        let route = crate::editor_panes::route(&value);
+        let peak = mem_sys::local_peak_bytes();
+        eprintln!("route labels: {peak} peak bytes");
+        assert_eq!(route, "g > g > g");
+        assert!(peak <= 512, "route labels copied model state: {peak} peak bytes");
+        editor_host_close(&value);
+    });
+}

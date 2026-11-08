@@ -24,9 +24,9 @@ use crate::editor_commands::{self, action};
 use crate::editor_inspect::{inspector_paths, scene};
 use crate::editor_list::scene_rows;
 use crate::editor_model::*;
-use crate::editor_panes::{graph_name, graph_of_object, peek_target, route, shown_as};
+use crate::editor_panes::{graph_name, graph_of_object, peek_target, route_in, shown_pane, graph_name_at};
 use crate::editor_shell::{layouts, panel_key, panel_state, shell_tree};
-use crate::editor_status::level_name;
+use crate::editor_status::level_name_at;
 use crate::editor_add::add_target;
 use crate::navigator;
 use crate::selection;
@@ -35,8 +35,8 @@ use crate::text_pane;
 /// A panel header's title: its type, and where a looped panel comes from (register E1).
 pub fn panel_title(value: &t, leaf: &Leaf) -> String {
     // a graph panel's title is its own pane's
-    let value = shown_as(value, (&panel_key(&value.doc, &leaf.path), &leaf.path, &leaf.panel));
-    let graph = graph_name(&value).unwrap_or_default();
+    let (pane, path) = shown_pane(value, (&panel_key(&value.doc, &leaf.path), &leaf.path, &leaf.panel));
+    let graph = graph_name_at(value, pane.at, pane.shown.as_deref(), path.as_deref()).unwrap_or_default();
     let (name, sub): (&str, String) = match &leaf.panel {
         Panel::Canvas(_) => ("Canvas", String::new()),
         Panel::View(_) => {
@@ -52,15 +52,15 @@ pub fn panel_title(value: &t, leaf: &Leaf) -> String {
                 String::new()
             } else {
                 let ctx = value.doc.workspace.ws.checked.graphs.iter().find(|g| g.name == graph).map(|g| flow_check::workspace::context_name(&g.context));
-                let head = if pane_route(&value).is_empty() {
+                let head = if pane.route.is_empty() {
                     graph.clone()
                 } else {
-                    route(&value).split('>').map(|p| p.trim().to_string()).collect::<Vec<_>>().join(" / ")
+                    route_in(value, &pane, path.as_deref()).split('>').map(|p| p.trim().to_string()).collect::<Vec<_>>().join(" / ")
                 };
                 head + &ctx.map(|c| format!(" / {c}")).unwrap_or_default()
             },
         ),
-        Panel::List => ("List", level_name(&value)),
+        Panel::List => ("List", level_name_at(value, pane.at)),
         Panel::Lisp => (
             "Lisp",
             if leaf.frame.2 < 400 {
@@ -74,11 +74,11 @@ pub fn panel_title(value: &t, leaf: &Leaf) -> String {
             },
         ),
         Panel::Inspector => {
-            let paths = if pane_laid(&value).is_none() { Vec::new() } else { inspector_paths(scope::selected(pane_view(&value))) };
+            let paths = if pane.laid.is_none() { Vec::new() } else { inspector_paths(scope::selected(&pane.view)) };
             let sub = match paths.as_slice() {
                 [path] if !graph.is_empty() => {
                     // the node's title (a result is `result`, not `@result`); the narrow column has the node alone
-                    let title = match pane_laid(&value).and_then(|k| fproj::find(&k.scope, path)) {
+                    let title = match pane.laid.as_deref().and_then(|k| fproj::find(&k.scope, path)) {
                         Some(n) => fproj::title(&n),
                         None => {
                             let last = path.last().cloned().unwrap_or_default();

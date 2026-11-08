@@ -239,6 +239,28 @@ pub fn start_views(doc: &Document, level: Level, path: &[usize]) -> Level_map {
     }
 }
 
+fn new_pane(doc: &Document, at: Level, path: &[usize]) -> graph_pane {
+    graph_pane { view: scope::create(None, None), laid: None, shown: None, route: Vec::new(), views: start_views(doc, at, path), at, picked: selection::empty() }
+}
+
+/// The pane's graph state, borrowed unless it is new or its level disappeared.
+pub fn pane_at<'a>(value: &'a t, (key, path): (&Vec<String>, &layout::Path)) -> Cow<'a, graph_pane> {
+    if panel_map::key(&value.panes).as_ref() == Some(key) {
+        return Cow::Borrowed(pane(value));
+    }
+    let mut pane = match panel_map::find(&value.panes, key) {
+        Some(pane) => Cow::Borrowed(pane),
+        None => Cow::Owned(new_pane(&value.doc, pane_level(value), path)),
+    };
+    let at = editor_document::document::resolve_level(&value.doc, pane.at);
+    if at != pane.at {
+        let pane = pane.to_mut();
+        pane.picked = selection::empty();
+        pane.at = at;
+    }
+    pane
+}
+
 /// The editor as the graph panel `key` at `path` has it: its own pane is the one in use.  A pane
 /// made now starts at the level of the one it replaces.  The document may have changed under a
 /// pane that waited (an undo from another panel): its level is resolved again, and a level that is
@@ -257,10 +279,8 @@ pub fn with_pane_in_use(mut value: t, (key, path): (&Vec<String>, &layout::Path)
         return value;
     }
     let level = pane_level(&value);
-    let views = start_views(&value.doc, level, path);
-    let create = move || graph_pane { view: scope::create(None, None), laid: None, shown: None, route: Vec::new(), views: views.clone(), at: level, picked: selection::empty() };
     let doc = value.doc.clone();
-    panel_map::activate(&mut value.panes, key, &create);
+    panel_map::activate(&mut value.panes, key, &|| new_pane(&doc, level, path));
     panel_map::set_leaf(&mut value.panes, Some(path.clone()));
     let pane = panel_map::active_mut(&mut value.panes);
     let at = editor_document::document::resolve_level(&doc, pane.at);
