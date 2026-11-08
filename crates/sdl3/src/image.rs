@@ -1,7 +1,7 @@
 use std::fmt;
 
-use sdl3::{Rgba, Version};
-use sdl3_image_sys as sys;
+use crate::{Rgba, Version};
+use sdl3_sys::image as sys;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ErrorKind {
@@ -51,7 +51,7 @@ pub fn compiled_version() -> Version {
 }
 
 pub fn check_version(release: bool) -> std::result::Result<(), Error> {
-    sdl3::validate_version_for("SDL3_image", compiled_version(), release, linked_version())
+    crate::validate_version_for("SDL3_image", compiled_version(), release, linked_version())
         .map_err(|source| error("SDL3_image.check_version", ErrorKind::IncompatibleVersion, source.message()))
 }
 
@@ -270,7 +270,7 @@ mod tests;
 // The test harness never runs a test on the process main thread, so a test claims that role.
 #[cfg(not(test))]
 fn main_thread() -> bool {
-    sdl3::thread::is_initial_domain() && sdl3::thread::is_sdl_main_thread()
+    crate::thread::is_initial_domain() && crate::thread::is_sdl_main_thread()
 }
 
 #[cfg(test)]

@@ -813,9 +813,6 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("scene_command", &[][..]),
         ("parallel", &[][..]),
         ("sdl3_sys", &["native_layer_token_sys"][..]),
-        ("sdl3_image_sys", &[][..]),
-        ("sdl3_ttf_sys", &[][..]),
-        ("sdl3_mixer_sys", &[][..]),
         ("metal_sys", &[][..]),
         ("vulkan_sys", &[][..]),
         // OCaml metal: threads, native_layer_token (merged into native_layer_token_sys::portable).
@@ -831,7 +828,7 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
             "parallel",
         ][..]),
         ("runtime", &["sdl3", "ogpu", "input"][..]),
-        ("runtime_resources", &["sdl3", "sdl3_image", "sdl3_ttf", "sdl3_mixer", "ogpu"][..]),
+        ("runtime_resources", &["sdl3", "ogpu"][..]),
         ("renderer", &["ogpu", "scene_command", "runtime", "lru", "rays_math", "runtime_resources"][..]),
         ("flow_syntax", &["param", "rays_diagnostic", "input", "rays_math"][..]),
         ("flow_check", &["flow_syntax", "param", "rays_diagnostic", "input", "rays_math"][..]),
@@ -874,7 +871,7 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("editor_core", &["param", "rays", "rays_math", "flow_syntax", "flow_check", "flow_eval", "runtime_resources"][..]),
         ("web_export", &[
             "flow_syntax", "flow_check", "flow_eval", "flow_ir", "flow_web", "flow_sop", "editor_document", "input",
-            "param", "scene_command", "sdl3_image",
+            "param", "scene_command", "sdl3",
         ][..]),
         ("rays_pathtracer", &[
             "rays", "ogpu", "renderer", "flow_syntax", "flow_check", "flow_eval", "flow_ir", "flow_gpu", "input",
@@ -886,7 +883,7 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
 
 fn local_workspace_only() -> HashSet<&'static str> {
     HashSet::from([
-        "diagnostic", "sdl3", "sdl3_image", "sdl3_ttf", "sdl3_mixer", "editor_document", "rays_editor",
+        "diagnostic", "sdl3", "editor_document", "rays_editor",
         "workspace_parity", "ogpu_conformance", "rdk_test_support", "flow_ir_test_support", "golden_fixtures",
     ])
 }
@@ -919,7 +916,7 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
         "web_export", "rays_editor",
     ];
     let gpu = [
-        "sdl3", "sdl3_image", "sdl3_ttf", "sdl3_mixer", "metal", "vulkan_sys", "ogpu",
+        "sdl3", "metal", "vulkan_sys", "ogpu",
         "ogpu_mock", "ogpu_metal", "ogpu_metal_native", "ogpu_vulkan", "ogpu_native", "runtime",
         "runtime_resources", "renderer",
     ];
@@ -928,8 +925,8 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
     let foundational = [
         "cfmt",
         "diagnostic", "rays_diagnostic", "native_layer_token_sys", "mem", "mem_sys",
-        "lru", "ocaml_int", "param", "input", "rays_math", "rays_math_sys", "parallel", "scene_command", "sdl3", "sdl3_image",
-        "sdl3_ttf", "sdl3_mixer", "metal", "vulkan_sys", "ogpu",
+        "lru", "ocaml_int", "param", "input", "rays_math", "rays_math_sys", "parallel", "scene_command", "sdl3",
+        "metal", "vulkan_sys", "ogpu",
         "rdk_core",
     ];
     for library in foundational {
@@ -1251,7 +1248,7 @@ fn deps(workspace: &Path) -> Result<Vec<String>, String> {
             if let Some(target) = resolved {
                 if package.crate_name == "rays"
                     && dependency.kind != "dev-dependencies"
-                    && ["sdl3", "sdl3_image", "sdl3_ttf", "sdl3_mixer"].contains(&target.crate_name.as_str())
+                    && ["sdl3"].contains(&target.crate_name.as_str())
                 {
                     errors.push(format!(
                         "{path}:{}: rays depends directly on {} (SDL services belong to runtime)",

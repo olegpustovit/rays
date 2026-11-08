@@ -805,7 +805,7 @@ impl Export<'_> {
             "image/load" => match node_arg(node, "path", Value::Int(0)) {
                 Value::Text(path) => {
                     let path = String::from_utf8_lossy(&path).into_owned();
-                    let decoded = sdl3_image::load_file(&path).map_err(|e| {
+                    let decoded = sdl3::image::load_file(&path).map_err(|e| {
                         err("E_WEB_IMAGE", &format!("Cannot bundle image {:?}: {}", path, e), Some(lowered.span.clone()))
                     })?;
                     self.assets.push((id, decoded.width as i64, decoded.height as i64, decoded.pixels));

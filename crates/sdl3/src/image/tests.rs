@@ -1,15 +1,15 @@
-use crate::{ErrorKind, check_version, compiled_version, linked_version, load_file};
-use sdl3::Rgba;
+use super::{ErrorKind, check_version, compiled_version, linked_version, load_file};
+use crate::Rgba;
 
 fn root() -> String {
-    format!("{}/../../crates/sdl3_image/fixtures", env!("CARGO_MANIFEST_DIR"))
+    format!("{}/fixtures", env!("CARGO_MANIFEST_DIR"))
 }
 
 fn fixture(name: &str) -> String {
     format!("{}/{}", root(), name)
 }
 
-fn get_image(result: std::result::Result<Rgba, crate::Error>) -> Rgba {
+fn get_image(result: std::result::Result<Rgba, super::Error>) -> Rgba {
     result.unwrap_or_else(|error| panic!("{error}"))
 }
 
@@ -108,7 +108,7 @@ fn check_reload() {
 fn cpu_decode_conformance() {
     claim_main();
     assert!(std::path::Path::new(&root()).exists(), "expected the SDL3_image fixture directory");
-    let triple = |v: sdl3::Version| (v.major, v.minor, v.patch);
+    let triple = |v: crate::Version| (v.major, v.minor, v.patch);
     let floor = lock_floor("sdl3_image");
     assert!(triple(compiled_version()) >= floor && triple(linked_version()) >= floor, "installed SDL3_image is below the lock floor");
     if let Err(error) = check_version(true) {

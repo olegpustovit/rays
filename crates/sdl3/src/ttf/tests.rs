@@ -1,6 +1,6 @@
-use crate::font::{Alignment, Font, Hinting, system_path};
-use crate::{ErrorKind, check_version, compiled_version, init, linked_version};
-use sdl3::Rgba;
+use super::font::{Alignment, Font, Hinting, system_path};
+use super::{ErrorKind, check_version, compiled_version, init, linked_version};
+use crate::Rgba;
 
 fn has_visible_alpha(pixels: &[u8]) -> bool {
     pixels.len() >= 4 && pixels.iter().skip(3).step_by(4).any(|&alpha| alpha != 0)
@@ -20,7 +20,7 @@ fn lock_floor(key: &str) -> (i32, i32, i32) {
     (parts[0], parts[1], parts[2])
 }
 
-fn some(result: std::result::Result<Option<Rgba>, crate::Error>, what: &str) -> Rgba {
+fn some(result: std::result::Result<Option<Rgba>, super::Error>, what: &str) -> Rgba {
     result.unwrap().unwrap_or_else(|| panic!("{what}"))
 }
 
@@ -29,7 +29,7 @@ fn cpu_font_conformance() {
     claim_main();
     let font_path = system_path(None).unwrap();
     assert!(std::path::Path::new(&font_path).exists(), "installed system font discovery returned a missing path");
-    let triple = |v: sdl3::Version| (v.major, v.minor, v.patch);
+    let triple = |v: crate::Version| (v.major, v.minor, v.patch);
     let floor = lock_floor("sdl3_ttf");
     assert!(triple(compiled_version()) >= floor && triple(linked_version()) >= floor, "installed SDL3_ttf is below the lock floor");
     check_version(true).unwrap();

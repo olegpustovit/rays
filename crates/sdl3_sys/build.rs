@@ -3,22 +3,25 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-// Locate SDL3: $SDL3_DIR (include/ and lib/ beneath it), then pkg-config, then the MSYS2 prefix.
-fn run_pkg_config(argument: &str) -> String {
+// Locate SDL3 or one of its satellites (`pkg` is the pkg-config name, `lib` the library, e.g. SDL3_image):
+// $SDL3_DIR (include/ and lib/ beneath it), then pkg-config, then the MSYS2 prefix.
+fn run_pkg_config(pkg: &str, lib: &str, argument: &str) -> String {
     println!("cargo:rerun-if-env-changed=SDL3_DIR");
     println!("cargo:rerun-if-env-changed=PKG_CONFIG");
     let prefix = |dir: &str| {
         if argument == "--cflags" {
             format!("-I{dir}/include")
-        } else {
+        } else if lib == "SDL3" {
             format!("-L{dir}/lib -lSDL3")
+        } else {
+            format!("-L{dir}/lib -l{lib} -lSDL3")
         }
     };
     if let Some(dir) = env::var_os("SDL3_DIR") {
         return prefix(&dir.to_string_lossy().replace('\\', "/"));
     }
     let program = env::var_os("PKG_CONFIG").unwrap_or_else(|| "pkg-config".into());
-    if let Ok(output) = Command::new(program).arg(argument).arg("sdl3").output() {
+    if let Ok(output) = Command::new(program).arg(argument).arg(pkg).output() {
         if output.status.success() {
             return String::from_utf8(output.stdout).expect("pkg-config output must be UTF-8");
         }
@@ -28,12 +31,82 @@ fn run_pkg_config(argument: &str) -> String {
         .find(|dir| std::path::Path::new(dir).join("include/SDL3/SDL.h").exists());
     match msys {
         Some(dir) => prefix(dir),
-        None => build_failure(format!("SDL3 not found: set SDL3_DIR, or install pkg-config with the SDL3 development package")),
+        None => build_failure(format!("{pkg} not found: set SDL3_DIR, or install pkg-config with its development package")),
     }
 }
 
 fn words(value: &str) -> Vec<&str> {
     value.split_whitespace().collect()
+}
+
+fn apply_cflags(c: &mut cc::Build, cflags: &str) {
+    for flag in words(cflags) {
+        if let Some(path) = flag.strip_prefix("-I") {
+            c.include(path);
+        } else if let Some(definition) = flag.strip_prefix("-D") {
+            c.define(definition.split('=').next().unwrap(), definition.split_once('=').map(|(_, value)| value));
+        } else {
+            c.flag(flag);
+        }
+    }
+}
+
+fn emit_link_flags(libs: &str) {
+    let library_flags: Vec<_> = words(libs);
+    let mut index = 0;
+    while index < library_flags.len() {
+        let flag = library_flags[index];
+        if let Some(path) = flag.strip_prefix("-L") {
+            println!("cargo:rustc-link-search=native={path}");
+        } else if let Some(path) = flag.strip_prefix("-F") {
+            println!("cargo:rustc-link-search=framework={path}");
+        } else if let Some(library) = flag.strip_prefix("-l") {
+            println!("cargo:rustc-link-lib={library}");
+        } else if flag == "-pthread" {
+            println!("cargo:rustc-link-arg=-pthread");
+        } else if flag == "-framework" {
+            index += 1;
+            println!("cargo:rustc-link-lib=framework={}", library_flags[index]);
+        } else if let Some(framework) = flag.strip_prefix("-framework=") {
+            println!("cargo:rustc-link-lib=framework={framework}");
+        } else {
+            println!("cargo:rustc-link-arg={flag}");
+        }
+        index += 1;
+    }
+}
+
+// One bridge per satellite (`{key}` of the lock entry); the lock floor becomes a compile-time assertion on its headers.
+fn satellite(root: &std::path::Path, out: &std::path::Path, lock: &str, key: &str, pkg: &str, lib: &str) {
+    let source = format!("src/{}_bridge.c", key.trim_start_matches("sdl3_"));
+    println!("cargo:rerun-if-changed={source}");
+    let entry = lock
+        .lines()
+        .map(|line| line.trim().trim_start_matches('('))
+        .find(|line| line.starts_with(&format!("{key} ")))
+        .unwrap_or_else(|| build_failure(format!("{key} entry in packaging/sdl3.lock")));
+    let floor = entry
+        .split("(floor ")
+        .nth(1)
+        .and_then(|rest| rest.split(')').next())
+        .expect("floor in packaging/sdl3.lock");
+    let v: Vec<u32> = floor.split('.').map(|part| part.parse().expect("numeric floor")).collect();
+    assert_eq!(v.len(), 3, "floor must be major.minor.patch");
+    let dir = out.join(key);
+    fs::create_dir_all(&dir).expect("create satellite out dir");
+    fs::write(
+        dir.join("floor.h"),
+        format!(
+            "#define RAYS_FLOOR_MAJOR {}\n#define RAYS_FLOOR_MINOR {}\n#define RAYS_FLOOR_PATCH {}\n",
+            v[0], v[1], v[2]
+        ),
+    )
+    .expect("write floor.h");
+    let mut c = cc::Build::new();
+    c.file(root.join(&source)).include(&dir).std("c11").warnings(true).flag_if_supported("-Werror");
+    apply_cflags(&mut c, &run_pkg_config(pkg, lib, "--cflags"));
+    c.compile(&format!("rays_{key}_sys"));
+    emit_link_flags(&run_pkg_config(pkg, lib, "--libs"));
 }
 
 fn main() {
@@ -109,43 +182,15 @@ fn main() {
         .std("c11")
         .warnings(true)
         .flag_if_supported("-Werror");
-    let cflags = run_pkg_config("--cflags");
-    for flag in words(&cflags) {
-        if let Some(path) = flag.strip_prefix("-I") {
-            c.include(path);
-        } else if let Some(definition) = flag.strip_prefix("-D") {
-            c.define(definition.split('=').next().unwrap(), definition.split_once('=').map(|(_, value)| value));
-        } else {
-            c.flag(flag);
-        }
-    }
+    apply_cflags(&mut c, &run_pkg_config("sdl3", "SDL3", "--cflags"));
     if target == "macos" {
         c.define("RAYS_SDL3_MACOS", None).flag_if_supported("-fblocks");
     }
     c.compile("rays_sdl3_sys");
 
-    let libs = run_pkg_config("--libs");
-    let library_flags: Vec<_> = words(&libs);
-    let mut index = 0;
-    while index < library_flags.len() {
-        let flag = library_flags[index];
-        if let Some(path) = flag.strip_prefix("-L") {
-            println!("cargo:rustc-link-search=native={path}");
-        } else if let Some(path) = flag.strip_prefix("-F") {
-            println!("cargo:rustc-link-search=framework={path}");
-        } else if let Some(library) = flag.strip_prefix("-l") {
-            println!("cargo:rustc-link-lib={library}");
-        } else if flag == "-pthread" {
-            println!("cargo:rustc-link-arg=-pthread");
-        } else if flag == "-framework" {
-            index += 1;
-            println!("cargo:rustc-link-lib=framework={}", library_flags[index]);
-        } else if let Some(framework) = flag.strip_prefix("-framework=") {
-            println!("cargo:rustc-link-lib=framework={framework}");
-        } else {
-            println!("cargo:rustc-link-arg={flag}");
-        }
-        index += 1;
+    emit_link_flags(&run_pkg_config("sdl3", "SDL3", "--libs"));
+    for (key, pkg, lib) in [("sdl3_image", "sdl3-image", "SDL3_image"), ("sdl3_ttf", "sdl3-ttf", "SDL3_ttf"), ("sdl3_mixer", "sdl3-mixer", "SDL3_mixer")] {
+        satellite(&root, &out, &lock, key, pkg, lib);
     }
     if target == "macos" {
         println!("cargo:rustc-link-lib=objc");

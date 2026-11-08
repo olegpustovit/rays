@@ -1,8 +1,8 @@
-use crate::audio::Audio;
-use crate::channels::Channels;
-use crate::mixer::Mixer;
-use crate::music::Music;
-use crate::{ErrorKind, check_version, compiled_version, init, linked_version};
+use super::audio::Audio;
+use super::channels::Channels;
+use super::mixer::Mixer;
+use super::music::Music;
+use super::{ErrorKind, check_version, compiled_version, init, linked_version};
 
 /// Reads `(floor ...)` for `key` from packaging/sdl3.lock.
 fn lock_floor(key: &str) -> (i32, i32, i32) {
@@ -51,7 +51,7 @@ fn track_device_and_memory_conformance() {
     if std::env::var("SDL_AUDIODRIVER").ok().as_deref() != Some("dummy") {
         return;
     }
-    let triple = |v: sdl3::Version| (v.major, v.minor, v.patch);
+    let triple = |v: crate::Version| (v.major, v.minor, v.patch);
     let floor = lock_floor("sdl3_mixer");
     assert!(triple(compiled_version()) >= floor && triple(linked_version()) >= floor, "installed SDL3_mixer is below the lock floor");
     check_version(true).unwrap();

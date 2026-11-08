@@ -647,9 +647,6 @@ dependencies = [
  "ogpu",
  "ogpu_mock",
  "sdl3",
- "sdl3_image",
- "sdl3_mixer",
- "sdl3_ttf",
 ]
 
 [[package]]
@@ -665,56 +662,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "sdl3_image"
-version = "0.1.0"
-dependencies = [
- "sdl3",
- "sdl3_image_sys",
-]
-
-[[package]]
-name = "sdl3_image_sys"
-version = "0.1.0"
-dependencies = [
- "cc",
-]
-
-[[package]]
-name = "sdl3_mixer"
-version = "0.1.0"
-dependencies = [
- "sdl3",
- "sdl3_mixer_sys",
-]
-
-[[package]]
-name = "sdl3_mixer_sys"
-version = "0.1.0"
-dependencies = [
- "cc",
-]
-
-[[package]]
 name = "sdl3_sys"
 version = "0.1.0"
 dependencies = [
  "cc",
  "native_layer_token_sys",
-]
-
-[[package]]
-name = "sdl3_ttf"
-version = "0.1.0"
-dependencies = [
- "sdl3",
- "sdl3_ttf_sys",
-]
-
-[[package]]
-name = "sdl3_ttf_sys"
-version = "0.1.0"
-dependencies = [
- "cc",
 ]
 
 [[package]]
@@ -762,6 +714,6 @@ dependencies = [
  "rays_diagnostic",
  "rays_math",
  "scene_command",
- "sdl3_image",
+ "sdl3",
  "sop",
 ]

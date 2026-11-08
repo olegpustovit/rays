@@ -223,7 +223,7 @@ pub mod Image {
     /// another copy.
     pub fn load_file(path: &str) -> Result<t, error> {
         enter("Image.load_file")?;
-        match sdl3_image::load_file(path) {
+        match sdl3::image::load_file(path) {
             Err(e) => Err(err_value("Image.load_file", ErrorKind::Decode, &e.to_string())),
             Ok(decoded) => {
                 let (w, h) = (decoded.width as i64, decoded.height as i64);
@@ -999,7 +999,7 @@ pub mod Text {
 #[allow(non_snake_case)]
 pub mod Font {
     use super::*;
-    use sdl3_ttf::font as ttf_font;
+    use sdl3::ttf::font as ttf_font;
 
     #[allow(non_camel_case_types)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1043,12 +1043,12 @@ pub mod Font {
         if x.dead { Err(err_value(op, ErrorKind::Destroyed, "font is destroyed")) } else { Ok(()) }
     }
 
-    fn ttf_error(op: &str, e: &sdl3_ttf::Error) -> error {
+    fn ttf_error(op: &str, e: &sdl3::ttf::Error) -> error {
         err_value(op, ErrorKind::Decode, &e.to_string())
     }
 
     fn ensure_init(op: &str) -> Result<(), error> {
-        if sdl3_ttf::init::initialized().map_err(|e| ttf_error(op, &e))? { Ok(()) } else { sdl3_ttf::init::init().map_err(|e| ttf_error(op, &e)) }
+        if sdl3::ttf::init::initialized().map_err(|e| ttf_error(op, &e))? { Ok(()) } else { sdl3::ttf::init::init().map_err(|e| ttf_error(op, &e)) }
     }
 
     pub fn open_file(path: &str, size: f64) -> Result<t, error> {
@@ -1170,7 +1170,7 @@ pub mod Font {
             x.raw.destroy().map_err(|e| ttf_error("Font.destroy", &e))?;
             x.dead = true;
             if USERS.fetch_sub(1, Ordering::SeqCst) == 1 {
-                let _ = sdl3_ttf::init::quit();
+                let _ = sdl3::ttf::init::quit();
             }
             Ok(())
     }
@@ -1183,7 +1183,7 @@ pub mod Font {
 #[allow(non_snake_case)]
 pub mod Audio {
     use super::*;
-    use sdl3_mixer::{audio, channels, init, mixer, music};
+    use sdl3::mixer::{audio, channels, init, mixer, music};
     use std::cell::Cell;
 
     #[allow(non_camel_case_types)]
@@ -1205,7 +1205,7 @@ pub mod Audio {
         dead: bool,
     }
 
-    fn mix_error(op: &str, e: &sdl3_mixer::Error) -> error {
+    fn mix_error(op: &str, e: &sdl3::mixer::Error) -> error {
         err_value(op, ErrorKind::Decode, &e.to_string())
     }
 

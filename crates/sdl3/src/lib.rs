@@ -353,6 +353,11 @@ pub mod window {
 
 pub use window::{Flag as WindowFlag, Window};
 
+/// Safe wrappers over the SDL3_image, SDL3_ttf and SDL3_mixer satellites.
+pub mod image;
+pub mod mixer;
+pub mod ttf;
+
 pub mod cursor {
     use super::{Error, ErrorKind, before_main, error, native_error, sys};
 

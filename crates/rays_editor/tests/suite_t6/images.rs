@@ -285,7 +285,7 @@ fn image_map_replan() {
 }
 
 fn sample_png() -> String {
-    format!("{}/../../crates/sdl3_image/fixtures/sample.png", env!("CARGO_MANIFEST_DIR").replace('\\', "/"))
+    format!("{}/../../crates/sdl3/fixtures/sample.png", env!("CARGO_MANIFEST_DIR").replace('\\', "/"))
 }
 
 /// images: two-pixel CPU noise, drawing modes, one load/upload, exact ownership and missing-file diagnostic.
