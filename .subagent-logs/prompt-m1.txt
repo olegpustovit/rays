@@ -1,0 +1,1 @@
+Rays dev AGENTS.md ponytail. M1 ONE slice in flow_eval eval.rs: reduce per-node path Vec<String> allocation on hot route (plan ~556,609). Reuse existing interned Route/sub_at if present; smallest diff. cargo t -p flow_eval narrow filter. Commit "M1:". PROGRESS M1 row only. No artifact.

@@ -11,7 +11,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | Wave | Done | Active | Pending |
 |------|------|--------|---------|
 | A | 8/8 | — | — |
-| B | 5/6 | B5 (rdk) | 0 |
+| B | 6/6 | B5 (partial) | 0 |
 | M | 11/21 | — | 10 |
 | I | 0/1 | — | 1 |
 | C | 0/21 | — | 21 |
@@ -32,7 +32,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | B0 | done | §B0 checklist + warm pair `flow_check` 0.15s/0.07s; `catalog.rs` marker |
 | B3 | done | `5fdb5fb3` — `gpu_editor` + `tests/support`; 7× `gpu_suite_t*` + qual → 2 test links; `cargo t -p rays_editor run_lowering` ~2.9s |
 | B4 | done | W1 `flow_ir` touch → `rays_bin` check in `tools/buildtime` (env overrides) |
-| B1 | done | `533489ee` term_arena; `e16247cd` delegates; `21bf87ff` `ScopeStack` keyed by `PathId` in `workspace.rs`; `cargo t -p flow_check workspace_and_prelude` + `retained_memory` |
+| B1 | done | `533489ee` term_arena; `e16247cd` delegates; `ba113180` `ScopeStack`/`PathId` in `workspace.rs`; `cargo t -p flow_check` workspace memory + term_arena |
 | B2 | done | `96fab43d` — dev `opt-level=0` for rays_editor, pxui_graph, editor_document, flow_graph, flow_native |
 | B5 | done (partial) | `94aa4546` catalog split; `35df934e` `flow_native`; `7b374363` `flow_gpu`; **this session** `rays_editor` → `rdk_core` + `rdk_ops` (tests); **rdk delete deferred** (`sop`, `flow_sop`) |
 | M2 | done | `bbe7f6ae` — `editor_graph_ref`; `panel_key` / layouts borrow graph name |
@@ -45,7 +45,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | M12 | done | `b5be8904` — `record_slot_open` skips `record_packed` / `note` past per-path cap; `cargo t -p flow_eval test_workspace_eval` |
 | M8 | done | `66136b7f` — side_lru `find_*_by`; sampler keys `mix::sampler`; `cargo check -p renderer` |
 | M6 | done | `69d08a8a` — `plan_entry` prepends via `with_capacity`+extend (no `insert(0)`); `cargo check -p renderer` |
-| M18 | done (partial) | **this session** — `vertex_primitive` `AtomicI32` scratch in `make_topology`; `cargo t -p rdk_ops m18_vertex_primitive_scratch` 2 pass; **deferred** six remaining per-vertex scratch arrays |
+| M18 | done (partial) | `ed08c91b` — `vertex_primitive` `AtomicI32` scratch in `make_topology`; `cargo t -p rdk_ops m18_vertex_primitive_scratch` 2 pass; **deferred** five other per-vertex scratch arrays |
 | M1,M3,M5,M13–M17,M19,M21 | pending | |
 | I | pending | |
 | C1–C21 | pending | |
@@ -71,7 +71,7 @@ Cursor `Task` subagents unavailable in this harness; workers are `omp launch -p`
 
 ## Plan audit (2026-11-08)
 
-Read-only reviews: `.subagent-logs/review.log` (Wave A snapshot); `.subagent-logs/review2.log` (63-ID tally); `.subagent-logs/review3.log` (2026-11-08) — **~25/63** with evidence, **2 partial** (B1, B5); next impact **I**, **M1**, **M14**, **C1**, **C3**; `rdk` facade remains for `sop`/`flow_sop` only.
+Read-only reviews: `.subagent-logs/review.log` (Wave A snapshot); `.subagent-logs/review2.log` (63-ID tally); `.subagent-logs/review3.log` (2026-11-08) — **~27/63** with evidence, **2 partial** (B5, M18); next impact **I**, **M1**, **M14**, **C1**, **C3**; `rdk` facade remains for `sop`/`flow_sop` only.
 
 ## B0 — shared `target/` incremental invalidation
 
@@ -100,7 +100,8 @@ Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s
 
 ## Session log
 
-- 2026-11-08: `6f75543d` B5 `rays_editor`; B1 marked partial; review3 + m18 worker; `rdk` only `sop`/`flow_sop`; ~25/63 IDs.
+- 2026-11-08: `ba113180` B1 `ScopeStack`; `ed08c91b` M18 partial; Wave B **6/6** (B5 partial); M **11/21**; ~27/63 IDs.
+- 2026-11-08: `6f75543d` B5 `rays_editor`; review3; `rdk` only `sop`/`flow_sop`.
 - 2026-11-08: `69d08a8a` M6; `66136b7f` M8; `7b374363` B5 `flow_gpu`; M wave 10/21; ~24/63 IDs.
 - 2026-11-08: B5 — `flow_gpu` dropped `rdk` dev-dep (`rdk_core`/`rdk_ops` in gpu_* tests); `cargo check -p flow_gpu -p flow_native`.
 - 2026-11-08: B5 — `flow_native` no longer depends on `rdk` facade (`rdk_core` direct); `cargo check -p flow_native -p rays_editor`.
