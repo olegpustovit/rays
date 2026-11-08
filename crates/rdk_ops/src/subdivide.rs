@@ -362,11 +362,6 @@ pub fn resolve_triangle_subdivision(
     }
 }
 
-/// OCaml `String.trim`.
-fn ocaml_trim_is_empty(value: &str) -> bool {
-    value.bytes().all(|byte| matches!(byte, b' ' | 0x0c | b'\n' | b'\r' | b'\t'))
-}
-
 /// The optional arguments of `subdivide_polygons`.
 #[derive(Clone)]
 pub struct PolygonOptions {
@@ -446,7 +441,7 @@ fn validate_crease_arguments(
         }
     }
     if let Some(name) = resulting_crease_group {
-        if ocaml_trim_is_empty(name) {
+        if rdk_core::support::ocaml_trim_is_empty(name) {
             return Err(failm("resulting crease group name must not be empty"));
         }
         if !generate_resulting_creases {

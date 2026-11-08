@@ -33,10 +33,6 @@ pub fn invalid_arg(message: String) -> error::T {
         .unwrap_or_else(|built| built)
 }
 
-fn ocaml_trim_is_empty(value: &str) -> bool {
-    value.bytes().all(|byte| matches!(byte, b' ' | 0x0c | b'\n' | b'\r' | b'\t'))
-}
-
 /// OCaml `%S`.
 fn quoted(value: &str) -> String {
     let mut out = String::from("\"");
@@ -68,7 +64,7 @@ pub struct ProjectionScratch {
 
 pub fn validate_name(label: &str, name: Option<&str>) -> Result<(), error::T> {
     match name {
-        Some(name) if ocaml_trim_is_empty(name) => Err(fail(&format!("{label} name must not be empty"))),
+        Some(name) if rdk_core::support::ocaml_trim_is_empty(name) => Err(fail(&format!("{label} name must not be empty"))),
         _ => Ok(()),
     }
 }
@@ -128,7 +124,7 @@ pub fn target_values(
     let Some(name) = name else {
         return Ok(None);
     };
-    if ocaml_trim_is_empty(name) {
+    if rdk_core::support::ocaml_trim_is_empty(name) {
         return Err(fail("target-size attribute name must not be empty"));
     }
     match geometry::find_attribute(Owner::Point, name, geometry_value) {
