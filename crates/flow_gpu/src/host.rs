@@ -195,7 +195,7 @@ pub(crate) struct Data {
     retired: Rc<RefCell<Stats>>,
     /// resident fold sites by their code
     sites: RefCell<List<(Arc<Vec<Instruction>>, bool), Rc<Site>>>,
-    /// fast dispatches' epochs, newest first
+    /// fast dispatches' epochs, oldest first
     flight: RefCell<Vec<i64>>,
     /// 0., 1., 2., ... on the device, for range sources
     iota: RefCell<Option<(Buffer, i64)>>,
@@ -262,7 +262,7 @@ fn destroy_resident(buffer: &Buffer) {
 
 fn purge(slot: &HSlot) {
     for (_, bs) in slot.free.borrow_mut().drain() {
-        bs.iter().for_each(destroy_resident);
+        bs.iter().rev().for_each(destroy_resident);
     }
 }
 
@@ -379,12 +379,14 @@ fn admit(t: &T) -> Result<(), Diagnostic> {
     t.0.flight.borrow_mut().retain(|e| *e > completed);
     let older = {
         let f = t.0.flight.borrow();
-        if f.len() >= 2 { Some(f[1]) } else { None }
+        if f.len() >= 2 { Some(f[f.len() - 2]) } else { None }
     };
     match older {
         Some(older) => {
             complete(t, older)?;
-            t.0.flight.borrow_mut().truncate(1);
+            let mut f = t.0.flight.borrow_mut();
+            let stale = f.len().saturating_sub(1);
+            f.drain(..stale);
             Ok(())
         }
         None => Ok(()),
@@ -393,7 +395,7 @@ fn admit(t: &T) -> Result<(), Diagnostic> {
 
 fn record(t: &T, epoch: i64) {
     if epoch > 0 {
-        t.0.flight.borrow_mut().insert(0, epoch);
+        t.0.flight.borrow_mut().push(epoch);
     }
 }
 
@@ -450,7 +452,7 @@ fn iota(t: &T, length: i64) -> Option<Buffer> {
     }
     mem::charge(&IOTA_OWNER, buffer_bytes(&buffer));
     if let Some((old, _)) = old {
-        t.0.retired_buffers.borrow_mut().insert(0, (old, None));
+        t.0.retired_buffers.borrow_mut().push((old, None));
     }
     *t.0.iota.borrow_mut() = Some((buffer.clone(), capacity));
     Some(buffer)
@@ -580,11 +582,11 @@ const SITE_SLOTS: usize = 64;
 /// An outgrown index buffer goes when nothing can read it. A scope may still encode with one it
 /// outgrew, so it is named at the next scope, by the newest dispatch then.
 fn drain_retired(t: &T, queue: &Queue) {
-    let newest = t.0.flight.borrow().first().copied().unwrap_or(0);
+    let newest = t.0.flight.borrow().last().copied().unwrap_or(0);
     let completed = b::completed_epoch(queue);
     let old = std::mem::take(&mut *t.0.retired_buffers.borrow_mut());
     let mut keep = vec![];
-    for (buffer, epoch) in old {
+    for (buffer, epoch) in old.into_iter().rev() {
         let epoch = epoch.unwrap_or(newest);
         if completed >= epoch {
             destroy_owned(&IOTA_OWNER, &buffer);
@@ -592,6 +594,7 @@ fn drain_retired(t: &T, queue: &Queue) {
             keep.push((buffer, Some(epoch)));
         }
     }
+    keep.reverse();
     *t.0.retired_buffers.borrow_mut() = keep;
 }
 
@@ -743,7 +746,7 @@ impl Scope {
     }
 
     fn lookup(&self, key: usize) -> Option<Rc<Placeholder>> {
-        self.s.borrow().table.iter().find(|p| p.key == key && !p.dead.get()).cloned()
+        self.s.borrow().table.iter().rev().find(|p| p.key == key && !p.dead.get()).cloned()
     }
 
     fn find(&self, v: &Value) -> Option<Rc<Placeholder>> {
@@ -784,7 +787,7 @@ impl Scope {
             origin: None,
         });
         let mut s = self.s.borrow_mut();
-        s.table.insert(0, p.clone());
+        s.table.push(p.clone());
         s.durables.push(p.key);
         Some(p)
     }
@@ -831,8 +834,8 @@ impl Scope {
             dead: Cell::new(false),
             origin,
         });
-        self.s.borrow_mut().table.insert(0, p.clone());
-        slot.held.borrow_mut().insert(0, p);
+        self.s.borrow_mut().table.push(p.clone());
+        slot.held.borrow_mut().push(p);
         v
     }
 
@@ -885,7 +888,7 @@ impl Scope {
         }
         mem::charge(&IOTA_OWNER, buffer_bytes(&buffer));
         if let Some((old, _)) = old {
-            t.0.retired_buffers.borrow_mut().insert(0, (old, None));
+            t.0.retired_buffers.borrow_mut().push((old, None));
         }
         *t.0.iota_uint32.borrow_mut() = Some((buffer.clone(), capacity));
         Some(buffer)
@@ -909,20 +912,20 @@ impl Scope {
     }
 
     fn give_back(&self, slot: &HSlot, (buffer, bytes): (Buffer, i64)) {
-        slot.free.borrow_mut().entry(bytes).or_default().insert(0, buffer);
+        slot.free.borrow_mut().entry(bytes).or_default().push(buffer);
     }
 
     /// a slot's buffer sizes repeat the last draw's; close hands them back
     fn alloc(&self, slot: &HSlot, bytes: i64) -> Result<(Buffer, i64), Diagnostic> {
         {
             let mut spare = slot.spare.borrow_mut();
-            if let Some(at) = spare.iter().position(|(_, n)| *n == bytes) {
+            if let Some(at) = spare.iter().rposition(|(_, n)| *n == bytes) {
                 return Ok(spare.remove(at));
             }
         }
         if let Some(bs) = slot.free.borrow_mut().get_mut(&bytes) {
             if !bs.is_empty() {
-                return Ok((bs.remove(0), bytes));
+                return Ok((bs.pop().unwrap(), bytes));
             }
         }
         // a large buffer comes from what retained outputs gave back; sizes by class, so a mesh
@@ -988,9 +991,9 @@ impl Scope {
             origin: None,
         });
         let mut s = self.s.borrow_mut();
-        s.table.insert(0, p.clone());
-        slot.held.borrow_mut().insert(0, p.clone());
-        s.adopted.insert(0, p.key);
+        s.table.push(p.clone());
+        slot.held.borrow_mut().push(p.clone());
+        s.adopted.push(p.key);
         Some(p)
     }
 
@@ -1059,19 +1062,19 @@ impl Scope {
     fn take(&self, slot: &HSlot) {
         let mut given: Vec<i64> = vec![];
         let held: Vec<Rc<Placeholder>> = std::mem::take(&mut *slot.held.borrow_mut());
-        for p in held.iter() {
+        for p in held.iter().rev() {
             if !p.dead.get() {
                 p.dead.set(true);
                 if p.owned.get() && !given.contains(&b::buffer_id(&p.buffer.0)) {
                     given.push(b::buffer_id(&p.buffer.0));
-                    slot.spare.borrow_mut().insert(0, p.buffer.clone());
+                    slot.spare.borrow_mut().push(p.buffer.clone());
                 }
             }
         }
         let spent: Vec<(Buffer, i64)> = std::mem::take(&mut *slot.spent.borrow_mut());
         let mut spare = slot.spare.borrow_mut();
-        for x in spent {
-            spare.insert(0, x);
+        for x in spent.into_iter().rev() {
+            spare.push(x);
         }
     }
 
@@ -1079,7 +1082,7 @@ impl Scope {
         {
             let mut s = self.s.borrow_mut();
             if !s.touched.iter().any(|x| Rc::ptr_eq(x, site)) {
-                s.touched.insert(0, site.clone());
+                s.touched.push(site.clone());
             }
         }
         let free = |s: &HSlot| s.held.borrow().iter().all(|p| p.dead.get() || !Self::held_by(locals, p.key));
@@ -1333,7 +1336,7 @@ impl Scope {
                 Some(r) => r,
                 None => {
                     let r = self.emit(Some(steps), packed).ok().map(|msl| run::create(None, &self.t.0.gpu, &self.t.0.pipelines, &msl));
-                    site.unfolds.borrow_mut().insert(0, (steps, r.clone()));
+                    site.unfolds.borrow_mut().push((steps, r.clone()));
                     r
                 }
             }
@@ -1469,10 +1472,10 @@ impl Scope {
                     let mut s = self.s.borrow_mut();
                     s.settled = false;
                     if reset_status {
-                        s.status_runs.insert(0, run_.clone());
+                        s.status_runs.push(run_.clone());
                     }
                 }
-                slot.spent.borrow_mut().insert(0, cell);
+                slot.spent.borrow_mut().push(cell);
                 Ok(Some(vec![self.placeholder(false, true, i64::MAX, None, &slot, &tys[0], output, None, length * steps)]))
             }
             Ok(_) => {
@@ -1480,7 +1483,7 @@ impl Scope {
                     let mut s = self.s.borrow_mut();
                     s.settled = false;
                     if reset_status {
-                        s.status_runs.insert(0, run_.clone());
+                        s.status_runs.push(run_.clone());
                     }
                 }
                 let known = length == n
@@ -1532,8 +1535,8 @@ impl Scope {
                         self.s.borrow_mut().settled = false;
                         {
                             let mut spent = slot.spent.borrow_mut();
-                            spent.insert(0, groups_.clone());
-                            spent.insert(0, blocks_.clone());
+                            spent.push(groups_.clone());
+                            spent.push(blocks_.clone());
                         }
                         let v = self.placeholder(false, false, i64::MAX, None, &slot, &int_array_ty(), kept_.clone(), Some(total_.clone()), p.length);
                         self.flush()?;
@@ -1558,8 +1561,8 @@ impl Scope {
                 alias.hold = nv.clone();
                 alias.kind = 1;
                 let alias = Rc::new(alias);
-                self.s.borrow_mut().table.insert(0, alias.clone());
-                p.slot.held.borrow_mut().insert(0, alias);
+                self.s.borrow_mut().table.push(alias.clone());
+                p.slot.held.borrow_mut().push(alias);
                 Ok(Some(nv))
             }
             (Ty::Array(i), Some(p)) if **i == Ty::Int && p.uint32 => Ok(Some(v.clone())),
@@ -1612,7 +1615,7 @@ impl Scope {
             }
             let b_ = self.alloc(&slot, bytes.len() as i64).ok()?;
             if b::write_buffer(&b_.0, 0, &bytes).is_ok() {
-                slot.spent.borrow_mut().insert(0, b_.clone());
+                slot.spent.borrow_mut().push(b_.clone());
                 Some(b_.0)
             } else {
                 self.give_back(&slot, b_);
@@ -1650,7 +1653,7 @@ impl Scope {
                 let mut s = self.s.borrow_mut();
                 let id = b::buffer_id(&buffer.0);
                 s.appended.retain(|(i, _)| *i != id);
-                s.appended.insert(0, (id, total));
+                s.appended.push((id, total));
                 s.settled = false;
             }
             Some(self.placeholder(false, true, i64::MAX, None, &slot, &ty, buffer, None, total / w))
@@ -1702,7 +1705,7 @@ impl Scope {
         self.flush()?;
         let table: Vec<Rc<Placeholder>> = self.s.borrow().table.clone();
         let mut first = i64::MAX;
-        for p in table.iter() {
+        for p in table.iter().rev() {
             if p.clamped < first && self.count_of(p)? == p.length {
                 first = p.clamped;
             }
@@ -1717,7 +1720,7 @@ impl Scope {
             let mut s = self.s.borrow_mut();
             (std::mem::take(&mut s.status_runs), s.epoch)
         };
-        for r in runners {
+        for r in runners.into_iter().rev() {
             run::Private::check_status(&r, epoch)?;
         }
         self.s.borrow_mut().settled = true;
@@ -1809,7 +1812,7 @@ impl Scope {
             let mut s = self.s.borrow_mut();
             s.post = false;
             s.settled = false;
-            let mut slots: Vec<Rc<HSlot>> = s.touched.iter().flat_map(|site| site.slots.borrow().clone()).collect();
+            let mut slots: Vec<Rc<HSlot>> = s.touched.iter().rev().flat_map(|site| site.slots.borrow().clone()).collect();
             slots.extend(std::mem::take(&mut s.extra_slots));
             s.touched.clear();
             s.invoked = 0;
@@ -1823,15 +1826,15 @@ impl Scope {
         let mut buffers: Vec<(Rc<HSlot>, (Buffer, i64))> = vec![];
         let mut add = |slot: &Rc<HSlot>, x: (Buffer, i64)| {
             if !buffers.iter().any(|(_, (b2, _))| same_buffer(b2, &x.0)) {
-                buffers.insert(0, (slot.clone(), x));
+                buffers.push((slot.clone(), x));
             }
         };
         for s in touched_slots.iter() {
-            for x in s.spent.borrow().iter().chain(s.spare.borrow().iter()) {
+            for x in s.spent.borrow().iter().rev().chain(s.spare.borrow().iter().rev()) {
                 add(s, x.clone());
             }
         }
-        for p in table.iter() {
+        for p in table.iter().rev() {
             if !p.owned.get() {
                 continue;
             }
@@ -1847,13 +1850,13 @@ impl Scope {
             }
         }
         let mut purged: Vec<Rc<HSlot>> = vec![];
-        for (s, _) in buffers.iter() {
+        for (s, _) in buffers.iter().rev() {
             if s.kept.get() && !purged.iter().any(|x| Rc::ptr_eq(x, s)) {
                 purged.push(s.clone());
             }
         }
         purged.iter().for_each(|s| purge(s));
-        for (slot, b_) in buffers {
+        for (slot, b_) in buffers.into_iter().rev() {
             if slot.kept.get() {
                 self.give_back(&slot, b_);
             } else {
@@ -1887,16 +1890,16 @@ impl Scope {
                 {
                     let mut s = self.s.borrow_mut();
                     if !s.extra_slots.iter().any(|x| Rc::ptr_eq(x, &slot)) {
-                        s.extra_slots.insert(0, slot.clone());
+                        s.extra_slots.push(slot.clone());
                     }
                 }
                 let value = self.placeholder(false, false, i64::MAX, None, &slot, ty, (buffer, 0), None, length);
                 // the placeholder's table entry is a copy that is not owned
                 let mut s = self.s.borrow_mut();
-                let head = s.table.remove(0);
+                let head = s.table.pop().unwrap();
                 let copy = head.copy();
                 copy.owned.set(false);
-                s.table.insert(0, Rc::new(copy));
+                s.table.push(Rc::new(copy));
                 return Ok(Some(value));
             }
         }
@@ -1920,7 +1923,7 @@ impl Scope {
                 copy.owned.set(false);
                 copy.dead.set(false);
                 copy.origin = p.origin.as_ref().map(|(c, m, d)| (c.clone(), *m, d * div));
-                self.s.borrow_mut().table.insert(0, Rc::new(copy));
+                self.s.borrow_mut().table.push(Rc::new(copy));
                 Ok(Some(a))
             }
             _ => Ok(None),
@@ -1953,7 +1956,7 @@ impl Scope {
                 {
                     let mut s = self.s.borrow_mut();
                     if !s.extra_slots.iter().any(|y| Rc::ptr_eq(y, &slot)) {
-                        s.extra_slots.insert(0, slot.clone());
+                        s.extra_slots.push(slot.clone());
                     }
                 }
                 let buffer = self.alloc(&slot, 4.max(length * 4))?;
@@ -1961,7 +1964,7 @@ impl Scope {
                 match r {
                     Ok(()) => Ok(Some(self.placeholder(false, false, i64::MAX, None, &slot, ty, buffer, None, length))),
                     Err(e) => {
-                        slot.spent.borrow_mut().insert(0, buffer);
+                        slot.spent.borrow_mut().push(buffer);
                         Err(e)
                     }
                 }
@@ -2115,7 +2118,7 @@ impl Scope {
                 if alias.owned.get() {
                     if let Some(cell) = alias.cell.clone() {
                         let a2 = alias.clone();
-                        self.s.borrow_mut().on_close.insert(0, Box::new(move || a2.slot.spent.borrow_mut().insert(0, cell)));
+                        self.s.borrow_mut().on_close.push(Box::new(move || a2.slot.spent.borrow_mut().push(cell)));
                     }
                 }
                 alias.owned.set(false);
@@ -2137,7 +2140,7 @@ impl Scope {
         let aliases: Vec<(Rc<Placeholder>, i64)> = {
             let table = self.s.borrow().table.clone();
             let mut v = vec![];
-            for a in table.iter().filter(|a| !a.dead.get() && same_buffer(&a.buffer.0, &p.buffer.0)) {
+            for a in table.iter().rev().filter(|a| !a.dead.get() && same_buffer(&a.buffer.0, &p.buffer.0)) {
                 v.push((a.clone(), self.count_of(a).ok()?));
             }
             v
@@ -2145,7 +2148,7 @@ impl Scope {
         let length = aliases.iter().map(|(_, c)| *c).fold(0, i64::max);
         let holder = run::adopt_uint32(&self.owner(), &p.buffer.0, length).ok()?;
         if let Some((_, _, _, unpin)) = (holder.pin)() {
-            self.s.borrow_mut().on_close.insert(0, Box::new(move || unpin()));
+            self.s.borrow_mut().on_close.push(Box::new(move || unpin()));
         }
         let mut views: Vec<(i64, Uint32Holder)> = vec![];
         let mut view = |count: i64| -> Uint32Holder {
@@ -2183,11 +2186,11 @@ impl Scope {
         }
         let p = self.find(value_).filter(|p| !p.uint32 && p.kind > 0 && !self.s.borrow().durables.contains(&p.key))?;
         self.settle_inner().ok()?;
-        let aliases: Vec<Rc<Placeholder>> = self.s.borrow().table.iter().filter(|a| !a.dead.get() && same_buffer(&a.buffer.0, &p.buffer.0)).cloned().collect();
+        let aliases: Vec<Rc<Placeholder>> = self.s.borrow().table.iter().rev().filter(|a| !a.dead.get() && same_buffer(&a.buffer.0, &p.buffer.0)).cloned().collect();
         let holder = run::adopt_float(&self.owner(), &p.buffer.0, self.count_of(&p).ok()?, p.kind).ok()?;
         if let Some(Value::Float_array(a) | Value::Vec2_array(a) | Value::Vec3_array(a) | Value::Vec4_array(a)) = &holder.resident {
             if let Some((_, _, _, unpin)) = run::pin(a) {
-                self.s.borrow_mut().on_close.insert(0, Box::new(move || unpin()));
+                self.s.borrow_mut().on_close.push(Box::new(move || unpin()));
             }
         }
         let G::Planes { count, width, resident, ops } = holder;
@@ -2498,13 +2501,13 @@ pub fn close(t: &T) {
     let mut doomed: Vec<Buffer> = vec![];
     doomed.extend(d.iota.borrow_mut().take().map(|x| x.0));
     doomed.extend(d.iota_uint32.borrow_mut().take().map(|x| x.0));
-    doomed.extend(std::mem::take(&mut *d.retired_buffers.borrow_mut()).into_iter().map(|x| x.0));
+    doomed.extend(std::mem::take(&mut *d.retired_buffers.borrow_mut()).into_iter().rev().map(|x| x.0));
     doomed.iter().for_each(|x| destroy_owned(&IOTA_OWNER, x));
     if let Some(b_) = d.validation_status.borrow_mut().take() {
         let _ = b::destroy_buffer(&b_);
     }
     for (_, bs) in d.buffers.borrow_mut().drain() {
-        bs.iter().for_each(|x| destroy_owned(&DISPLAY_OWNER, x));
+        bs.iter().rev().for_each(|x| destroy_owned(&DISPLAY_OWNER, x));
     }
     d.tables.borrow_mut().clear();
     pipelines::close(&d.pipelines);
@@ -2522,7 +2525,7 @@ fn return_display_buffer(t: &T, bytes: i64, out: &Buffer) {
         (bs.get(&bytes).map_or(0, |v| v.len()), bs.contains_key(&bytes), bs.len(), bs.iter().map(|(size, v)| size * v.len() as i64).sum::<i64>())
     };
     if live(t) && free_len < 4 && (known || sizes < 64) && idle + bytes <= run::free_budget.max(4 * bytes) {
-        t.0.buffers.borrow_mut().entry(bytes).or_default().insert(0, out.clone());
+        t.0.buffers.borrow_mut().entry(bytes).or_default().push(out.clone());
     } else {
         destroy_owned(&DISPLAY_OWNER, out);
     }
@@ -2533,7 +2536,7 @@ fn display_buffer(t: &T, bytes: i64) -> Result<Buffer, Diagnostic> {
     let bytes = run::size_class(bytes);
     if let Some(bs) = t.0.buffers.borrow_mut().get_mut(&bytes) {
         if !bs.is_empty() {
-            return Ok(bs.remove(0));
+            return Ok(bs.pop().unwrap());
         }
     }
     if bytes >= 1 << 20 {

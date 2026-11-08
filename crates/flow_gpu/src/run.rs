@@ -170,7 +170,7 @@ fn bindable_live() {
 fn held_storage(array: &Arc<Vec<f64>>) -> Option<(Rc<Kept>, i64)> {
     bindable_live();
     let (id, length) = BINDABLE.with(|b| {
-        b.borrow().iter().find(|(p, _, _, _)| p.upgrade().is_some_and(|p| Arc::ptr_eq(&p, array))).map(|(_, _, id, length)| (*id, *length))
+        b.borrow().iter().rev().find(|(p, _, _, _)| p.upgrade().is_some_and(|p| Arc::ptr_eq(&p, array))).map(|(_, _, id, length)| (*id, *length))
     })?;
     let kept = kept_of(id)?;
     if kept.fate.planes().is_none() && !kept.fate.destroyed() {
@@ -293,15 +293,18 @@ fn drain_pool(pool: &Pool) {
             .map(|(buffer, _)| tick - s.free_ages.get(&b::buffer_id(buffer)).copied().unwrap_or(tick) > free_idle_drains)
             .collect();
         let free = std::mem::take(&mut s.free);
-        for ((buffer, capacity), old) in free.into_iter().zip(stale) {
+        let mut keep = vec![];
+        for ((buffer, capacity), old) in free.into_iter().zip(stale).rev() {
             if old {
                 mem::release(&FREE_OWNER, capacity);
                 s.free_ages.remove(&b::buffer_id(&buffer));
                 let _ = b::destroy_buffer(&buffer);
             } else {
-                s.free.push((buffer, capacity));
+                keep.push((buffer, capacity));
             }
         }
+        keep.reverse();
+        s.free = keep;
     }
     let ids = std::mem::take(&mut *pool.0.shared.released.lock().unwrap());
     for id in ids {
@@ -334,7 +337,7 @@ fn drain_pool(pool: &Pool) {
             let _ = b::release_mapped_view(&buffer);
             let tick = s.tick;
             s.free_ages.insert(b::buffer_id(&buffer), tick);
-            s.free.insert(0, (buffer, capacity));
+            s.free.push((buffer, capacity));
         } else {
             let _ = b::destroy_buffer(&buffer);
         }
@@ -343,7 +346,7 @@ fn drain_pool(pool: &Pool) {
 
 fn take_free(pool: &Pool, length: i64) -> Option<(Buffer, i64)> {
     let mut s = pool.0.s.borrow_mut();
-    let at = s.free.iter().position(|(_, capacity)| *capacity >= length && *capacity <= 2 * length)?;
+    let at = s.free.iter().rposition(|(_, capacity)| *capacity >= length && *capacity <= 2 * length)?;
     let (buffer, capacity) = s.free.remove(at);
     s.free_ages.remove(&b::buffer_id(&buffer));
     mem::release(&FREE_OWNER, capacity);
@@ -408,7 +411,7 @@ pub fn created(pool: &Pool, bytes: i64) {
 pub fn close_pool(pool: &Pool) {
     drain_pool(pool);
     let mut s = pool.0.s.borrow_mut();
-    for w in s.orphans.drain(..) {
+    for w in s.orphans.drain(..).rev() {
         if let Some(token) = w.upgrade() {
             let _g = token.fate.lock.lock().unwrap();
             token.fate.destroy();
@@ -427,7 +430,7 @@ pub fn close_pool(pool: &Pool) {
         mem::release(&HELD_OWNER, capacity);
         let _ = b::destroy_buffer(&buffer);
     }
-    for (buffer, capacity) in s.free.drain(..) {
+    for (buffer, capacity) in s.free.drain(..).rev() {
         mem::release(&FREE_OWNER, capacity);
         let _ = b::destroy_buffer(&buffer);
     }
@@ -468,7 +471,7 @@ struct State {
     last_epoch: i64,
     /// live holders, materialised at close, with each one's epoch and settled flag
     kept: Vec<KeptRef>,
-    /// failed statuses of superseded dispatches no one had settled, newest first, at most 8
+    /// failed statuses of superseded dispatches no one had settled, oldest first, at most 8
     verdicts: Vec<(i64, Diagnostic)>,
 }
 
@@ -1004,8 +1007,9 @@ pub fn dispatch(t: &T, o: &Options, explicit_input: Bound, explicit_table: Bound
             let flags = get_i32(&gpu(b::read_buffer(&status, 0, 4))?, 0);
             st.status_reads += 1;
             if flags != 0 {
-                st.verdicts.insert(0, (st.last_epoch, kernel_status(flags)));
-                st.verdicts.truncate(8);
+                st.verdicts.push((st.last_epoch, kernel_status(flags)));
+                let stale = st.verdicts.len().saturating_sub(8);
+                st.verdicts.drain(..stale);
             }
         }
         put_i32(&mut st.status.bytes, 0, 0);
@@ -1179,7 +1183,7 @@ pub(crate) fn check_status(t: &T, epoch: i64) -> Result<(), Diagnostic> {
         gpu(b::complete_through(&d.queue, epoch))?;
     }
     if epoch < st.last_epoch {
-        return match st.verdicts.iter().find(|(e, _)| *e == epoch) {
+        return match st.verdicts.iter().rev().find(|(e, _)| *e == epoch) {
             Some((_, diagnostic)) => Err(diagnostic.clone()),
             None => Ok(()),
         };
@@ -1655,10 +1659,10 @@ fn hold(t: &T, uint32: bool, buffer: &Buffer, capacity: i64, count: i64, width: 
     });
     let token = Arc::new(Token { id, owner: d.domain, fate: fate.clone(), shared: d.pool.0.shared.clone(), settled: settled.clone() });
     let weak = Arc::downgrade(&token);
-    d.state.borrow_mut().kept.insert(0, KeptRef { epoch, settled: settled.clone(), token: weak.clone(), id });
+    d.state.borrow_mut().kept.push(KeptRef { epoch, settled: settled.clone(), token: weak.clone(), id });
     d.pool.0.s.borrow_mut().held.insert(id, (buffer.clone(), capacity, fate.clone()));
     KEPT.with(|k| k.borrow_mut().insert(id, kept.clone()));
-    BINDABLE.with(|b| b.borrow_mut().insert(0, (Arc::downgrade(&placeholder), weak.clone(), id, count * width)));
+    BINDABLE.with(|b| b.borrow_mut().push((Arc::downgrade(&placeholder), weak.clone(), id, count * width)));
     let resident = match width {
         1 => Value::Float_array(placeholder),
         2 => Value::Vec2_array(placeholder),
@@ -1834,9 +1838,9 @@ pub(crate) fn uint32_view(holder: &Uint32Holder, count: i64) -> Uint32Holder {
         (Some(Value::Int_array(old)), Some(input)) => {
             let values = Arc::new(vec![old[0], count]);
             let view = Arc::new(vec![input[0], count as f64]);
-            let binding = BINDABLE.with(|b| b.borrow().iter().find(|(p, _, _, _)| p.upgrade().is_some_and(|p| Arc::ptr_eq(&p, input))).map(|(_, token, id, _)| (token.clone(), *id)));
+            let binding = BINDABLE.with(|b| b.borrow().iter().rev().find(|(p, _, _, _)| p.upgrade().is_some_and(|p| Arc::ptr_eq(&p, input))).map(|(_, token, id, _)| (token.clone(), *id)));
             if let Some((token, id)) = binding {
-                BINDABLE.with(|b| b.borrow_mut().insert(0, (Arc::downgrade(&view), token, id, count)));
+                BINDABLE.with(|b| b.borrow_mut().push((Arc::downgrade(&view), token, id, count)));
             }
             flow_ir::packed::host::register_integer_input(&values, &view);
             (Some(Value::Int_array(values)), Some(view))
@@ -1896,7 +1900,7 @@ pub fn adopt_float(t: &T, buffer: &Buffer, count: i64, width: i64) -> Result<Gpu
 /// buffer. `None` for an unsettled, freed or unknown output. Creating thread.
 pub fn pin(placeholder: &Arc<Vec<f64>>) -> Option<Pin> {
     bindable_live();
-    let id = BINDABLE.with(|b| b.borrow().iter().find(|(p, _, _, _)| p.upgrade().is_some_and(|p| Arc::ptr_eq(&p, placeholder))).map(|(_, _, id, _)| *id))?;
+    let id = BINDABLE.with(|b| b.borrow().iter().rev().find(|(p, _, _, _)| p.upgrade().is_some_and(|p| Arc::ptr_eq(&p, placeholder))).map(|(_, _, id, _)| *id))?;
     let kept = kept_of(id)?;
     if kept.uint32 || kept.fate.destroyed() || !kept.settled.load(Ordering::SeqCst) {
         None
@@ -1956,7 +1960,7 @@ pub fn close(t: &T, discard: bool) {
     drain(d, &mut d.state.borrow_mut());
     let kept: Vec<(i64, Weak<Token>)> = d.state.borrow().kept.iter().map(|k| (k.id, k.token.clone())).collect();
     d.state.borrow_mut().kept.clear();
-    for (id, weak) in kept {
+    for (id, weak) in kept.into_iter().rev() {
         let Some(k) = kept_of(id) else { continue };
         if weak.upgrade().is_none() {
             continue;
@@ -1966,7 +1970,7 @@ pub fn close(t: &T, discard: bool) {
             continue;
         }
         if !discard && !d.own_pool && settle(t, k.epoch, &k.settled, &k.fate).is_ok() {
-            d.pool.0.s.borrow_mut().orphans.insert(0, weak);
+            d.pool.0.s.borrow_mut().orphans.push(weak);
         } else {
             let (buffer, capacity) = {
                 let s = d.pool.0.s.borrow();
@@ -2052,7 +2056,7 @@ pub mod Private {
         super::create_owned(pool, device, queue, pipelines, kernel)
     }
     pub fn pool_free_floats(pool: &Pool) -> Vec<b::Floats> {
-        pool.0.s.borrow().free.iter().map(|(buffer, capacity)| {
+        pool.0.s.borrow().free.iter().rev().map(|(buffer, capacity)| {
             gpu(b::invalidate_mapped(buffer, *capacity)).expect("inspect free GPU buffer");
             view(buffer)
         }).collect()
@@ -2071,7 +2075,7 @@ pub mod Private {
         let mut s = pool.0.s.borrow_mut();
         let tick = s.tick;
         s.free_ages.insert(b::buffer_id(&buffer), tick);
-        s.free.insert(0, (buffer, bytes));
+        s.free.push((buffer, bytes));
     }
     pub const slot_shrink_after: i64 = super::slot_shrink_after;
     /// Holders freed unread (`release(false)`).
