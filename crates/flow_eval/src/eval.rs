@@ -497,8 +497,35 @@ impl Route {
         out
     }
 }
+// the iteration path of a call or loop pass, newest index first and shared between the contexts that extend it (plan M15):
+// extending it is one node, not a copy of the whole path
+#[derive(Clone, Default)]
+struct Iter(Option<Arc<IterNode>>);
+struct IterNode { index: i64, len: usize, up: Iter }
+impl Iter {
+    fn len(&self) -> usize { self.0.as_ref().map_or(0, |node| node.len) }
+    fn push(&self, index: i64) -> Iter { Iter(Some(Arc::new(IterNode { index, len: self.len() + 1, up: self.clone() }))) }
+    fn from_slice(indices: &[i64]) -> Iter { indices.iter().fold(Iter::default(), |up, index| up.push(*index)) }
+    fn to_vec(&self) -> Vec<i64> {
+        let mut out = Vec::with_capacity(self.len());
+        let mut at = &self.0;
+        while let Some(node) = at { out.push(node.index); at = &node.up.0; }
+        out.reverse();
+        out
+    }
+    fn same(&self, other: &Iter) -> bool {
+        let (mut x, mut y) = (&self.0, &other.0);
+        loop {
+            match (x, y) {
+                (None, None) => return true,
+                (Some(p), Some(q)) => { if Arc::ptr_eq(p, q) { return true; } if p.index != q.index || p.len != q.len { return false; } x = &p.up.0; y = &q.up.0; }
+                _ => return false,
+            }
+        }
+    }
+}
 #[derive(Clone)]
-struct ExecCtx { arena: i64, inst: i64, prefix: Arc<Path>, base: Arc<Path>, route: Route, site: Arc<Path>, iter: Arc<Vec<i64>>, depth: usize, record: bool, data: bool, geometry: bool, host: bool, context: Context, card: Option<Arc<str>> }
+struct ExecCtx { arena: i64, inst: i64, prefix: Arc<Path>, base: Arc<Path>, route: Route, site: Arc<Path>, iter: Iter, depth: usize, record: bool, data: bool, geometry: bool, host: bool, context: Context, card: Option<Arc<str>> }
 // A scope: the captured bindings it starts from, and the names bound since, newest first (a bind is one node, not a map copy).
 struct EnvNode { name: Arc<str>, value: Value, next: Option<Arc<EnvNode>> }
 impl Drop for EnvNode {
@@ -570,7 +597,7 @@ fn insert_residual(a: &mut Arena, id: ResidualId, residual: ResidualData) {
 }
 fn root_ctx(a: &mut Arena) -> ExecCtx {
     let site = base_of(a, &Path::new());
-    ExecCtx { arena: a.id, inst: -1, prefix: Arc::new(Vec::new()), base: Arc::new(Vec::new()), route: Route(None), site, iter: Arc::new(Vec::new()), depth: 0, record: true, data: false, geometry: false, host: false, context: flow_syntax::context::host(), card: None }
+    ExecCtx { arena: a.id, inst: -1, prefix: Arc::new(Vec::new()), base: Arc::new(Vec::new()), route: Route(None), site, iter: Iter::default(), depth: 0, record: true, data: false, geometry: false, host: false, context: flow_syntax::context::host(), card: None }
 }
 fn sync_site(a: &mut Arena, c: &mut ExecCtx) {
     let mut path = (*c.prefix).clone();
@@ -616,7 +643,7 @@ fn eval_concrete_sub(a: &mut Arena, c: &ExecCtx, seg: Seg, env: &Env, t: &Term) 
 fn record_slot_open(a: &Arena, path: &Path) -> bool {
     a.records.get(path).map_or(true, |e| e.len() < MAX_ITERATIONS)
 }
-fn note(a:&mut Arena,c:&ExecCtx,path:Path,v:Value){if a.record&&c.record&&record_slot_open(a,&path){let e=a.records.entry(path).or_default();if e.len()<MAX_ITERATIONS{e.push(((*c.iter).clone(),v));}}}
+fn note(a:&mut Arena,c:&ExecCtx,path:Path,v:Value){if a.record&&c.record&&record_slot_open(a,&path){let e=a.records.entry(path).or_default();if e.len()<MAX_ITERATIONS{e.push((c.iter.to_vec(),v));}}}
 fn named_args(a: &mut Arena, c: &ExecCtx, env: &Env, owner: &Term, args: &[flow_check::term_arena::Field]) -> Result<Vec<(String, Value)>, Diagnostic> {
     let mut values = Vec::with_capacity(args.len());
     for (index, arg) in args.iter().enumerate() {
@@ -649,7 +676,7 @@ fn mk_node(a:&mut Arena,c:&ExecCtx,authored:i64,ty:Ty,kind:String,args:Vec<(Stri
 fn push_node(a: &mut Arena, c: &ExecCtx, authored: i64, ty: Ty, kind: String, args: Vec<(String, Value)>) -> Result<Value, Diagnostic> {
     if c.data{return eval_error("E_ARRAY_TYPE","Packed-array functions produce data, not graph nodes.")}
     if a.time.is_some(){return Err(errorf("E_LIVE_GEOMETRY",format!("{} makes geometry; geometry cannot be created while evaluating a live value.",kind)))}
-    let i=a.nodes.len() as i64;let node=Node{id:i,inst:c.inst,site:site(c),iter:(*c.iter).clone(),kind,ty:ty.clone(),args,error:None};
+    let i=a.nodes.len() as i64;let node=Node{id:i,inst:c.inst,site:site(c),iter:c.iter.to_vec(),kind,ty:ty.clone(),args,error:None};
     a.nodes.push(node);a.authored.push(authored);Ok(Value::Deferred(ty,i))
 }
 fn context_result(ctx:Context)->Ty{flow_syntax::context::result(ctx)}
@@ -1150,7 +1177,7 @@ fn inline_entry(a: &Arena, c: &ExecCtx, region: &InlineRegion, value: &Value, in
     if !rs.iter().all(|id| made_r.contains(id)) || !fs.iter().all(|id| made_f.contains(id)) { return None; }
     Some(InlineEntry {
         nodes, authored: a.authored[region.authored..].to_vec(), value: value.clone(), observed, lo: region.nodes as i64, inputs,
-        site: site(c), iter: (*c.iter).clone(), residuals, functions, guards: guards.to_vec(),
+        site: site(c), iter: c.iter.to_vec(), residuals, functions, guards: guards.to_vec(),
     })
 }
 struct Reloc { lo: i64, count: i64, new_lo: i64, inputs: Vec<(i64, i64)>, rmap: HashMap<ResidualId, ResidualId>, fmap: HashMap<FnId, FnId>, site: Path, iter: Vec<i64>, new_site: Path, new_iter: Vec<i64>, arena: i64, inst: i64 }
@@ -1168,7 +1195,7 @@ impl Reloc {
         let mut y = x.clone();
         y.arena = self.arena; y.inst = self.inst;
         y.prefix = Arc::new(self.path(&x.prefix));
-        y.iter = Arc::new(self.iter(&x.iter));
+        y.iter = Iter::from_slice(&self.iter(&x.iter.to_vec()));
         let mut path = (*y.prefix).clone();
         path.extend(y.base.iter().cloned());
         path.extend(y.route.to_vec());
@@ -1210,7 +1237,7 @@ fn replay_inline(a: &mut Arena, c: &ExecCtx, e: &InlineEntry, inputs: &[i64]) ->
     if inputs.len() != e.inputs.len() { return None; }
     let mut reloc = Reloc {
         lo: e.lo, count: e.nodes.len() as i64, new_lo: a.nodes.len() as i64, inputs: e.inputs.iter().copied().zip(inputs.iter().copied()).collect(),
-        rmap: HashMap::new(), fmap: HashMap::new(), site: e.site.clone(), iter: e.iter.clone(), new_site: site(c), new_iter: (*c.iter).clone(), arena: c.arena, inst: c.inst,
+        rmap: HashMap::new(), fmap: HashMap::new(), site: e.site.clone(), iter: e.iter.clone(), new_site: site(c), new_iter: c.iter.to_vec(), arena: c.arena, inst: c.inst,
     };
     for (id, _) in &e.residuals { reloc.rmap.insert(*id, new_rid(a)); }
     for (id, _, _) in &e.functions { reloc.fmap.insert(*id, new_fid(a)); }
@@ -1579,7 +1606,7 @@ fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Valu
                 let mut kept = Vec::new();
                 for (index, arg) in args.iter().enumerate() {
                     let arg_name = t.name(arg.name);
-                    let mut tuple = c.iter.iter().map(|index| usize::try_from(*index).unwrap_or(usize::MAX)).collect::<Vec<_>>();
+                    let mut tuple = c.iter.to_vec().iter().map(|index| usize::try_from(*index).unwrap_or(usize::MAX)).collect::<Vec<_>>();
                     tuple.push(index);
                     if skip.iter().any(|indices| arena.indices(*indices) == tuple) { continue; }
                     let count = counts.entry(arg_name.to_owned()).or_default();
@@ -2022,7 +2049,7 @@ fn call_fn_walked(a: &mut Arena, c: &ExecCtx, id: FnId, values: &[Value], body: 
             context.base = base_of(a, &closure.zone);
             context.route = Route(None);
             sync_site(a, &mut context);
-            Arc::make_mut(&mut context.iter).push(index);
+            context.iter = context.iter.push(index);
             context.depth += 1;
             let mut env = Env::of(closure.env.clone());
             for (parameter, value) in params.iter().zip(values) {
@@ -2039,7 +2066,7 @@ fn call_fn_walked(a: &mut Arena, c: &ExecCtx, id: FnId, values: &[Value], body: 
             a.functions.insert(id, Function::Named(named.clone()));
             if a.workspace.defs.iter().any(|graph| graph.name == named.name) {
                 let mut context = c.clone();
-                Arc::make_mut(&mut context.iter).push(index);
+                context.iter = context.iter.push(index);
                 return apply_def(a, &context, &named.name, values, body);
             }
             if let Some(operation) = op::find_indexed(&a.workspace.ops, &named.name, &c.context) {
@@ -2110,7 +2137,7 @@ fn graph_value(a: &mut Arena, c: &ExecCtx, name: &str, over: &[(String, Value)],
     a.cells[instance as usize].result = value.clone();
     Ok(value)
 }
-fn eval_graph_body(a:&mut Arena,c:&ExecCtx,g:&Graph,over:&[(String,Value)],record:bool,inst:i64)->Result<(Value,Vec<(String,Value)>),Diagnostic>{let mut cx=c.clone();cx.inst=inst;cx.prefix=Arc::new(Vec::new());cx.base=Arc::new(vec![g.name.clone()]);cx.route = Route(None);sync_site(a,&mut cx);cx.iter=Arc::new(Vec::new());cx.depth+=1;cx.record=record;cx.context=g.context.clone();cx.host=g.context==flow_syntax::context::host();let mut env=Env::empty();let mut ins=Vec::new();for(n,ty,default)in &g.inputs{let v=if let Some((_,v))=over.iter().find(|(k,_)|k==n){coerce(ty,v)?}else if let Some(t)=default{coerce(ty,&eval_at_sub(a, &cx, n.clone().into(), &env, t)?)?}else{return Err(errorf("E_INPUT_DEFAULT",format!("Graph input {} of {} needs a default.",n,g.name)))};let mut p=vec![g.name.clone(),format!(":{}",n)];note(a,&cx,p.clone(),v.clone());env.bind(intern(a,n),v.clone());ins.push((n.clone(),v));}let v=eval_at(a,&cx,&env,&g.body)?;Ok((v,ins))}
+fn eval_graph_body(a:&mut Arena,c:&ExecCtx,g:&Graph,over:&[(String,Value)],record:bool,inst:i64)->Result<(Value,Vec<(String,Value)>),Diagnostic>{let mut cx=c.clone();cx.inst=inst;cx.prefix=Arc::new(Vec::new());cx.base=Arc::new(vec![g.name.clone()]);cx.route = Route(None);sync_site(a,&mut cx);cx.iter=Iter::default();cx.depth+=1;cx.record=record;cx.context=g.context.clone();cx.host=g.context==flow_syntax::context::host();let mut env=Env::empty();let mut ins=Vec::new();for(n,ty,default)in &g.inputs{let v=if let Some((_,v))=over.iter().find(|(k,_)|k==n){coerce(ty,v)?}else if let Some(t)=default{coerce(ty,&eval_at_sub(a, &cx, n.clone().into(), &env, t)?)?}else{return Err(errorf("E_INPUT_DEFAULT",format!("Graph input {} of {} needs a default.",n,g.name)))};let mut p=vec![g.name.clone(),format!(":{}",n)];note(a,&cx,p.clone(),v.clone());env.bind(intern(a,n),v.clone());ins.push((n.clone(),v));}let v=eval_at(a,&cx,&env,&g.body)?;Ok((v,ins))}
 fn state_plane(a: &Arena, c: &ExecCtx) -> Result<(State, i64), Diagnostic> {
     let state = a.state.clone().ok_or_else(|| error("E_STATE", "State is not available."))?;
     let frame = a.time.as_ref().map_or(0, |frame| if c.host { frame.tick } else { frame.frame });
@@ -2120,7 +2147,7 @@ fn state_plane(a: &Arena, c: &ExecCtx) -> Result<(State, i64), Diagnostic> {
 fn state_key(c: &ExecCtx, zone: &[String]) -> StateKey {
     let mut path = (*c.prefix).clone();
     path.extend(zone.to_vec());
-    StateKey { instance: c.inst, path, iter: (*c.iter).clone() }
+    StateKey { instance: c.inst, path, iter: c.iter.to_vec() }
 }
 fn begin_frame(state: &mut StateData, source: &str, frame: i64) {
     if state.source != source || state.frame.is_some_and(|old| frame < old) {
@@ -2251,7 +2278,7 @@ fn check_packed_block(a: &mut Arena, iter: &mut usize, packed: bool, saved_steps
 }
 struct MapProgress { finish: Option<StaticMapFinish>, head: usize, tail: usize, completed: bool }
 fn map_residual(a: &mut Arena, c: &ExecCtx, term: &Term, env: &Env) -> ResidualId {
-    a.observed.iter().rev().find(|id| own_res(a, id).is_some_and(|residual| residual.term.identity() == term.identity() && residual.ctx.iter == c.iter && site(&residual.ctx) == site(c))).copied()
+    a.observed.iter().rev().find(|id| own_res(a, id).is_some_and(|residual| residual.term.identity() == term.identity() && residual.ctx.iter.same(&c.iter) && site(&residual.ctx) == site(c))).copied()
         .unwrap_or_else(|| { let env = capture_in(a, term, env); residual_id(a, ResidualData { term: Arc::new(term.clone()), env, ctx: c.clone(), previous: false, live: None }) })
 }
 fn function_call_offset(a: &Arena, function: FnId) -> i64 {
@@ -2570,9 +2597,9 @@ fn eval_loop(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, node: &flow_che
         cx.base = zone.clone();
         cx.route = Route(None);
         sync_site(a, &mut cx);
-        Arc::make_mut(&mut cx.iter).push(ordinal as i64);
+        cx.iter = cx.iter.push(ordinal as i64);
         // OCaml matches the skip tuples against the iteration path: the outer iteration plus this flat ordinal.
-        let skipped = skip.iter().any(|indices| owner.arena().indices(*indices).iter().copied().map(|index| index as i64).eq(cx.iter.iter().copied()));
+        let skipped = skip.iter().any(|indices| owner.arena().indices(*indices).iter().copied().map(|index| index as i64).eq(cx.iter.to_vec().into_iter()));
         let mut local = env.clone();
         for (binding, value) in clauses.iter().zip(selected.iter()) {
             record_packed(a, &cx, zone, owner.arena(), binding.pattern, value)?;
@@ -2628,7 +2655,7 @@ fn eval_geometry_loop(a: &mut Arena, c: &ExecCtx, env: &Env, arena: &TermArena, 
     context.base = zone.clone();
     context.route = Route(None);
     sync_site(a, &mut context);
-    Arc::make_mut(&mut context.iter).push(0);
+    context.iter = context.iter.push(0);
     context.geometry = true;
     let element_name = element_key(zone);
     let lo = a.nodes.len() as i64;
@@ -2959,7 +2986,7 @@ fn structure_path(out: &mut String, path: &[String]) {
 }
 fn structure_context(out: &mut String, context: &ExecCtx) {
     out.push_str(&format!("{}:{}:{}:{}:{}:{}:{}:{}:{}",
-        context.inst, context.depth, context.iter.iter().map(i64::to_string).collect::<Vec<_>>().join(","),
+        context.inst, context.depth, context.iter.to_vec().iter().map(i64::to_string).collect::<Vec<_>>().join(","),
         context.record as u8, context.data as u8, context.geometry as u8, context.host as u8,
         context.card.as_deref().unwrap_or(""), context.context.as_str()));
     structure_path(out, &context.prefix);
@@ -3103,7 +3130,7 @@ fn map_function(site: Option<(i64, Path, Vec<i64>)>, path: Option<Path>, signatu
         env.insert(name, value.clone());
     }
     let mut context = closure.at.clone();
-    if let Some((instance, prefix, iter)) = site { context.inst = instance; context.prefix = Arc::new(prefix); context.base = Arc::new(Vec::new()); context.route = Route(None); sync_site(arena, &mut context); context.iter = Arc::new(iter); }
+    if let Some((instance, prefix, iter)) = site { context.inst = instance; context.prefix = Arc::new(prefix); context.base = Arc::new(Vec::new()); context.route = Route(None); sync_site(arena, &mut context); context.iter = Iter::from_slice(&iter); }
     context.data = true;
     context.record = false;
     let id = builder.push(path.as_deref(), &Ty::Array(Box::new(result)), form, Draft::Hof(W::HofKind::Map, terms));
@@ -3312,7 +3339,7 @@ pub mod Residual {
         let residual = own_res(arena, &id).ok_or_else(|| error("E_RESIDUAL_ID", "Residual belongs to an expired evaluation."))?;
         Ok(View {
             term: residual.term.clone(), bindings: residual.env.iter().map(|(name, value)| (name.to_string(), value.clone())).collect(), site: site(&residual.ctx),
-            owner: (*residual.ctx.base).clone(), iter: (*residual.ctx.iter).clone(), instance: residual.ctx.inst,
+            owner: (*residual.ctx.base).clone(), iter: residual.ctx.iter.to_vec(), instance: residual.ctx.inst,
             prefix: (*residual.ctx.prefix).clone(), previous: residual.previous, host: residual.ctx.host,
             geometry: residual.ctx.geometry, context: residual.ctx.context.clone(),
         })
@@ -3388,7 +3415,7 @@ pub mod Residual {
     }
     fn state_location(a: &mut Arena, residual: &ResidualData, instance: i64, path: Path, iter: Vec<i64>, host: bool) -> ExecCtx {
         let mut context = residual.ctx.clone();
-        context.inst = instance; context.prefix = Arc::new(path); context.iter = Arc::new(iter); context.host = host;
+        context.inst = instance; context.prefix = Arc::new(path); context.iter = Iter::from_slice(&iter); context.host = host;
         sync_site(a, &mut context);
         context
     }
@@ -3653,7 +3680,7 @@ pub mod Host {
             Function::Closure(closure) => {
                 let mut path = (*closure.at.prefix).clone();
                 path.extend(closure.zone.clone());
-                Some((path, (*closure.at.iter).clone()))
+                Some((path, closure.at.iter.to_vec()))
             }
             Function::Named(_) => None,
         }
@@ -4266,7 +4293,7 @@ impl Run {
                 context.base = base_of(a, &closure.zone);
                 context.route = Route(None);
                 sync_site(a, &mut context);
-                Arc::make_mut(&mut context.iter).push(*index);
+                context.iter = context.iter.push(*index);
                 context.depth += 1;
                 context
             }

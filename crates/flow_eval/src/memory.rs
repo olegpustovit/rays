@@ -55,7 +55,8 @@ impl Storage {
     fn context(&mut self, context: &ExecCtx) {
         if self.shared(&context.prefix) { self.path(&context.prefix); }
         if self.shared(&context.base) { self.path(&context.base); }
-        if self.shared(&context.iter) { self.buffer(&context.iter); }
+        let mut at = &context.iter.0;
+        while let Some(node) = at { if !self.heap.allocation(Arc::as_ptr(node), std::mem::size_of::<IterNode>()) { break; } at = &node.up.0; }
     }
     fn env(&mut self, env: &Captured) {
         if self.heap.allocation(Arc::as_ptr(env) as *const u8, std::mem::size_of_val(&**env)) { for (name, value) in env.iter() { self.name(name); self.value(value); } }
