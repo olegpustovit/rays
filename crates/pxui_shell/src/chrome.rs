@@ -353,30 +353,27 @@ pub fn update(
                 ui.to_front(order, &boxed);
                 let l = l.clone();
                 let moving = moving.clone();
-                ui.draw_over(
-                    &boxed,
-                    Box::new(move |paint, (x, y, w, h)| {
-                        let line = edge_color(&theme, &moving, &l.path);
-                        let hy = l.header.1;
-                        let fy = l.frame.1;
-                        paint.fill(x, y, w, (hy - fy) as f64, theme.input);
-                        // a viewport window: the sheet's white round the picture and a line-2 frame on it
-                        if matches!(l.panel, Panel::View(_)) && l.body.2 > 0 {
-                            let (bx, by, bw, bh) = l.body;
-                            let (bx, by, bw, bh) = (bx as f64, by as f64, bw as f64, bh as f64);
-                            let hy = hy as f64;
-                            paint.fill(x, hy, w, by - hy, theme.input);
-                            paint.fill(x, by, bx - x, y + h - by, theme.input);
-                            paint.fill(bx + bw, by, x + w - bx - bw, y + h - by, theme.input);
-                            paint.fill(bx, by + bh, bw, y + h - by - bh, theme.input);
-                            paint.frame(bx, by, bw, bh, theme::edge(&theme));
-                        }
-                        paint.fill(x, y, w, 1.0, line);
-                        paint.fill(x, y, 1.0, h, line);
-                        paint.fill(x + w - 1.0, y, 1.0, h, line);
-                        paint.fill(x, y + h - 1.0, w, 1.0, line);
-                    }),
-                );
+                ui.draw_over(&boxed, move |paint, (x, y, w, h)| {
+                    let line = edge_color(&theme, &moving, &l.path);
+                    let hy = l.header.1;
+                    let fy = l.frame.1;
+                    paint.fill(x, y, w, (hy - fy) as f64, theme.input);
+                    // a viewport window: the sheet's white round the picture and a line-2 frame on it
+                    if matches!(l.panel, Panel::View(_)) && l.body.2 > 0 {
+                        let (bx, by, bw, bh) = l.body;
+                        let (bx, by, bw, bh) = (bx as f64, by as f64, bw as f64, bh as f64);
+                        let hy = hy as f64;
+                        paint.fill(x, hy, w, by - hy, theme.input);
+                        paint.fill(x, by, bx - x, y + h - by, theme.input);
+                        paint.fill(bx + bw, by, x + w - bx - bw, y + h - by, theme.input);
+                        paint.fill(bx, by + bh, bw, y + h - by - bh, theme.input);
+                        paint.frame(bx, by, bw, bh, theme::edge(&theme));
+                    }
+                    paint.fill(x, y, w, 1.0, line);
+                    paint.fill(x, y, 1.0, h, line);
+                    paint.fill(x + w - 1.0, y, 1.0, h, line);
+                    paint.fill(x, y + h - 1.0, w, 1.0, line);
+                });
             }
             // docked, its picture is only its body: the margin over its header is the ground every
             // other pane stands on, not whatever the picture under the chrome shows
@@ -385,12 +382,9 @@ pub fn update(
                 let hy = l.header.1;
                 if hy > fy {
                     let boxed = floating(ui, NO_FLAGS, l.frame, &format!("workspace-margin{}", key(&l.path)));
-                    ui.draw(
-                        &boxed,
-                        Box::new(move |paint, (x, y, w, _)| {
-                            paint.fill(x, y, w, (hy - fy) as f64, theme.panel);
-                        }),
-                    );
+                    ui.draw(&boxed, move |paint, (x, y, w, _)| {
+                        paint.fill(x, y, w, (hy - fy) as f64, theme.panel);
+                    });
                 }
             }
             p => {
@@ -406,18 +400,15 @@ pub fn update(
                 let is_floating = l.floating;
                 let path = l.path.clone();
                 let moving = moving.clone();
-                ui.draw(
-                    &boxed,
-                    Box::new(move |paint, (x, y, w, h)| {
-                        // a window is a sheet with one line-3 edge; a docked panel is the ground
-                        if is_floating {
-                            paint.fill(x, y, w, h, theme.input);
-                            paint.stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, edge_color(&theme, &moving, &path));
-                        } else {
-                            paint.fill(x, y, w, h, theme.panel);
-                        }
-                    }),
-                );
+                ui.draw(&boxed, move |paint, (x, y, w, h)| {
+                    // a window is a sheet with one line-3 edge; a docked panel is the ground
+                    if is_floating {
+                        paint.fill(x, y, w, h, theme.input);
+                        paint.stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, edge_color(&theme, &moving, &path));
+                    } else {
+                        paint.fill(x, y, w, h, theme.panel);
+                    }
+                });
             }
         }
     }
@@ -426,7 +417,7 @@ pub fn update(
     let mut tip: Option<(i64, i64, i64)> = None;
     for (n, s) in geometry.splitters.iter().enumerate() {
         let boxed = floating(ui, NO_FLAGS, s.bounds, &format!("workspace-gutter-{n}"));
-        ui.draw(&boxed, Box::new(move |paint, (x, y, w, h)| paint.fill(x, y, w, h, theme::edge(&theme))));
+        ui.draw(&boxed, move |paint, (x, y, w, h)| paint.fill(x, y, w, h, theme::edge(&theme)));
     }
     let mut headers: Vec<Header> = Vec::new();
     for (order, l) in geometry.leaves.iter().enumerate() {
@@ -471,19 +462,16 @@ pub fn update(
             }
             let hovered = signal.hovered;
             let focused = ui.focused(&dock);
-            ui.draw(
-                &dock,
-                Box::new(move |paint, (x, y, w, h)| {
-                    if hovered {
-                        paint.fill(x, y, w, h, theme::hover_fill(&theme));
-                    }
-                    if focused {
-                        paint.fill(x, y + h - 1.0, w, 1.0, theme.accent);
-                    }
-                    // the dock mark: a chevron-down in ink-2, as the sheet's window rows
-                    paint.chevron((x + (w / 2.0), y + (h / 2.0)), Dir::Down, theme::ink_2(&theme));
-                }),
-            );
+            ui.draw(&dock, move |paint, (x, y, w, h)| {
+                if hovered {
+                    paint.fill(x, y, w, h, theme::hover_fill(&theme));
+                }
+                if focused {
+                    paint.fill(x, y + h - 1.0, w, 1.0, theme.accent);
+                }
+                // the dock mark: a chevron-down in ink-2, as the sheet's window rows
+                paint.chevron((x + (w / 2.0), y + (h / 2.0)), Dir::Down, theme::ink_2(&theme));
+            });
         }
         let grip = floating(
             ui,
@@ -580,15 +568,12 @@ pub fn update(
         let ty = 4.0f64.max(wy as f64 - 30.0);
         let boxed = ui.box_("workspace-drag-tip", BoxOpts::default().w(Size::Px(w)).h(Size::Px(20.0)).at((tx, ty)));
         ui.to_front(i64::MAX, &boxed);
-        ui.draw(
-            &boxed,
-            Box::new(move |paint, (x, y, w, h)| {
-                paint.fill(x, y, w, h, theme.input);
-                paint.stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, theme::edge(&theme));
-                let cy = kit::cap_y_paint(paint, y, h);
-                paint.text_s((x + 7.0, cy), size, theme.foreground, words);
-            }),
-        );
+        ui.draw(&boxed, move |paint, (x, y, w, h)| {
+            paint.fill(x, y, w, h, theme.input);
+            paint.stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, theme::edge(&theme));
+            let cy = kit::cap_y_paint(paint, y, h);
+            paint.text_s((x + 7.0, cy), size, theme.foreground, words);
+        });
     }
     let moving_path = moving.borrow().clone();
     if let Some(path) = moving_path {
@@ -598,12 +583,9 @@ pub fn update(
                 let boxed = floating(ui, NO_FLAGS, (fx - 8, fy - 8, fw + 16, fh + 16), "workspace-moving");
                 ui.to_front(i64::MAX - 1, &boxed);
                 // the padding box of the window, brackets 4 points outside it
-                ui.draw(
-                    &boxed,
-                    Box::new(move |paint, _| {
-                        paint.brackets(fx as f64 + 1.0, fy as f64 + 1.0, fw as f64 - 2.0, fh as f64 - 2.0, 4.0, 8.0, 2.0, theme.accent);
-                    }),
-                );
+                ui.draw(&boxed, move |paint, _| {
+                    paint.brackets(fx as f64 + 1.0, fy as f64 + 1.0, fw as f64 - 2.0, fh as f64 - 2.0, 4.0, 8.0, 2.0, theme.accent);
+                });
             }
         }
     }
@@ -612,10 +594,7 @@ pub fn update(
         let collapse_hovered = ui.signal(&hd.button).hovered;
         // the keyboard's mark is the sheet's: an accent line over the last row of the button
         if ui.focused(&hd.button) {
-            ui.draw_over(
-                &hd.button,
-                Box::new(move |paint, (x, y, w, h)| paint.fill(x, y + h - 1.0, w, 1.0, theme.accent)),
-            );
+            ui.draw_over(&hd.button, move |paint, (x, y, w, h)| paint.fill(x, y + h - 1.0, w, 1.0, theme.accent));
         }
         let panel_state = state(&l.path);
         let collapsed = panel_state.collapsed || hidden.contains(&l.panel);
@@ -630,84 +609,81 @@ pub fn update(
         let l = l.clone();
         let text = hd.title.clone();
         let cap = kit::cap_size(ui);
-        ui.draw(
-            &text_box,
-            Box::new(move |paint, (x, y, w, h)| {
-                paint.fill(x, y, w, h, if l.floating { theme.input } else { theme.panel });
-                let ink_2 = theme::ink_2(&theme);
-                let ink_3 = theme::ink_3(&theme);
-                // "Title<TAB>a / b": the kind as a label, then the breadcrumb, its last part in ink
-                let (main, sub) = split_title(&text);
-                if w >= 60.0 {
-                    let mut tx = x + 12.0;
-                    // the accent square marks the focused pane, docked or floating; the title ends
-                    // before what follows it: the pane's tabs, then the window's tools; a square or a
-                    // label with no room is left out whole, and the breadcrumb with it
-                    let mut limit = limit_slots;
-                    if focused {
-                        if tx + 6.0 <= limit {
-                            paint.fill(tx, y + (h / 2.0) - 3.0, 6.0, 6.0, theme.accent);
-                        }
-                        tx += 12.0;
+        ui.draw(&text_box, move |paint, (x, y, w, h)| {
+            paint.fill(x, y, w, h, if l.floating { theme.input } else { theme.panel });
+            let ink_2 = theme::ink_2(&theme);
+            let ink_3 = theme::ink_3(&theme);
+            // "Title<TAB>a / b": the kind as a label, then the breadcrumb, its last part in ink
+            let (main, sub) = split_title(&text);
+            if w >= 60.0 {
+                let mut tx = x + 12.0;
+                // the accent square marks the focused pane, docked or floating; the title ends
+                // before what follows it: the pane's tabs, then the window's tools; a square or a
+                // label with no room is left out whole, and the breadcrumb with it
+                let mut limit = limit_slots;
+                if focused {
+                    if tx + 6.0 <= limit {
+                        paint.fill(tx, y + (h / 2.0) - 3.0, 6.0, 6.0, theme.accent);
                     }
-                    let labelled = tx + paint.cap_width(&main) <= limit;
-                    if !labelled {
-                        limit = tx;
-                    }
-                    if labelled {
-                        let cy = kit::cap_y_paint(paint, y, h);
-                        paint.cap((tx, cy), Some(if focused { theme.foreground } else { ink_2 }), &main);
-                    }
-                    tx += paint.cap_width(&main) + 8.0;
-                    let ty = paint.text_top(None, y, h);
-                    // put: cut to the room left, paint, and advance
-                    let put = |paint: &mut Paint, tx: &mut f64, color: rays_math::color::T, part: &str| {
-                        let part = cut(paint, None, limit - *tx, part);
-                        if !part.is_empty() {
-                            paint.text_c((*tx, ty), color, &part);
-                        }
-                        *tx = *tx + paint.text_width(None, &part) + 8.0;
-                    };
-                    // a window's title row: the path is one string in ink-2 at the label size
-                    if !sub.is_empty() && l.floating && !collapsed {
-                        // the subject follows the kind, 8 points on (windows.html's title row)
-                        let size = cap;
-                        let cy = kit::cap_y_paint(paint, y, h);
-                        let shown = cut(paint, Some(size), limit - tx, &sub);
-                        paint.text_s((tx, cy), size, rays_math::color::with_alpha(ink_2, 179), &shown);
-                    } else if !sub.is_empty() && !collapsed {
-                        let parts = split_crumbs(&sub);
-                        let fitted = fit_crumbs(&mut |p| paint.text_width(None, p), limit - tx, &parts);
-                        let count = fitted.len();
-                        for (i, (_, part)) in fitted.iter().enumerate() {
-                            if i + 1 == count {
-                                put(paint, &mut tx, if has_crumbs(&sub) { theme.foreground } else { ink_2 }, part);
-                            } else {
-                                put(paint, &mut tx, ink_2, part);
-                                put(paint, &mut tx, ink_3, "/");
-                            }
-                        }
-                    }
-                    if collapsed {
-                        put(paint, &mut tx, ink_3, "collapsed");
-                    }
+                    tx += 12.0;
                 }
-                let cx = x + w - 18.0;
-                let cy = y + (h / 2.0);
-                if collapse_hovered {
-                    paint.fill(cx - 10.0, cy - 10.0, 20.0, 20.0, theme::hover_fill(&theme));
+                let labelled = tx + paint.cap_width(&main) <= limit;
+                if !labelled {
+                    limit = tx;
                 }
-                if windowed {
-                    // the window's close mark is the label-size multiplication sign, centred in its button
+                if labelled {
+                    let cy = kit::cap_y_paint(paint, y, h);
+                    paint.cap((tx, cy), Some(if focused { theme.foreground } else { ink_2 }), &main);
+                }
+                tx += paint.cap_width(&main) + 8.0;
+                let ty = paint.text_top(None, y, h);
+                // put: cut to the room left, paint, and advance
+                let put = |paint: &mut Paint, tx: &mut f64, color: rays_math::color::T, part: &str| {
+                    let part = cut(paint, None, limit - *tx, part);
+                    if !part.is_empty() {
+                        paint.text_c((*tx, ty), color, &part);
+                    }
+                    *tx = *tx + paint.text_width(None, &part) + 8.0;
+                };
+                // a window's title row: the path is one string in ink-2 at the label size
+                if !sub.is_empty() && l.floating && !collapsed {
+                    // the subject follows the kind, 8 points on (windows.html's title row)
                     let size = cap;
-                    let tw = paint.text_width(Some(size), "\u{d7}");
-                    let ty = kit::cap_y_paint(paint, y, h);
-                    paint.text_s((cx - (tw / 2.0), ty), size, ink_2, "\u{d7}");
-                } else {
-                    paint.chevron((cx, cy), if collapsed { Dir::Down } else { Dir::Left }, if l.floating { ink_2 } else { theme.foreground });
+                    let cy = kit::cap_y_paint(paint, y, h);
+                    let shown = cut(paint, Some(size), limit - tx, &sub);
+                    paint.text_s((tx, cy), size, rays_math::color::with_alpha(ink_2, 179), &shown);
+                } else if !sub.is_empty() && !collapsed {
+                    let parts = split_crumbs(&sub);
+                    let fitted = fit_crumbs(&mut |p| paint.text_width(None, p), limit - tx, &parts);
+                    let count = fitted.len();
+                    for (i, (_, part)) in fitted.iter().enumerate() {
+                        if i + 1 == count {
+                            put(paint, &mut tx, if has_crumbs(&sub) { theme.foreground } else { ink_2 }, part);
+                        } else {
+                            put(paint, &mut tx, ink_2, part);
+                            put(paint, &mut tx, ink_3, "/");
+                        }
+                    }
                 }
-            }),
-        );
+                if collapsed {
+                    put(paint, &mut tx, ink_3, "collapsed");
+                }
+            }
+            let cx = x + w - 18.0;
+            let cy = y + (h / 2.0);
+            if collapse_hovered {
+                paint.fill(cx - 10.0, cy - 10.0, 20.0, 20.0, theme::hover_fill(&theme));
+            }
+            if windowed {
+                // the window's close mark is the label-size multiplication sign, centred in its button
+                let size = cap;
+                let tw = paint.text_width(Some(size), "\u{d7}");
+                let ty = kit::cap_y_paint(paint, y, h);
+                paint.text_s((cx - (tw / 2.0), ty), size, ink_2, "\u{d7}");
+            } else {
+                paint.chevron((cx, cy), if collapsed { Dir::Down } else { Dir::Left }, if l.floating { ink_2 } else { theme.foreground });
+            }
+        });
     }
     intents
 }
@@ -778,30 +754,27 @@ pub fn drop_targets(ui: &mut Ui, dragging: Option<(Path, bool)>, geometry: &Geom
         for (side, suffix, boxed, hovered) in edges {
             if under {
                 let label = format!("split {suffix}");
-                ui.draw(
-                    &boxed,
-                    Box::new(move |paint, _| {
-                        let color = if hovered { theme.accent } else { theme::border(&theme) };
-                        match side {
-                            Side::Top => paint.fill(fx + (fw / 2.0) - 24.0, fy + 6.0, 48.0, 4.0, color),
-                            Side::Bottom => paint.fill(fx + (fw / 2.0) - 24.0, fy + fh - 10.0, 48.0, 4.0, color),
-                            Side::Left => paint.fill(fx + 6.0, fy + (fh / 2.0) - 24.0, 4.0, 48.0, color),
-                            Side::Right => paint.fill(fx + fw - 10.0, fy + (fh / 2.0) - 24.0, 4.0, 48.0, color),
-                        }
-                        if hovered {
-                            let (hx, hy, hw, hh) = match side {
-                                Side::Top => (fx, fy, fw, fh / 2.0),
-                                Side::Bottom => (fx, fy + (fh / 2.0), fw, fh / 2.0),
-                                Side::Left => (fx, fy, fw / 2.0, fh),
-                                Side::Right => (fx + (fw / 2.0), fy, fw / 2.0, fh),
-                            };
-                            paint.fill(hx, hy, hw, hh, theme::tint(&theme));
-                            paint.dashed_rect(hx + 0.5, hy + 0.5, hw - 1.0, hh - 1.0, theme.accent);
-                            let cw = paint.cap_width(&label);
-                            paint.cap((hx + ((hw - cw) / 2.0), hy + (hh / 2.0) - 6.0), Some(theme.accent), &label);
-                        }
-                    }),
-                );
+                ui.draw(&boxed, move |paint, _| {
+                    let color = if hovered { theme.accent } else { theme::border(&theme) };
+                    match side {
+                        Side::Top => paint.fill(fx + (fw / 2.0) - 24.0, fy + 6.0, 48.0, 4.0, color),
+                        Side::Bottom => paint.fill(fx + (fw / 2.0) - 24.0, fy + fh - 10.0, 48.0, 4.0, color),
+                        Side::Left => paint.fill(fx + 6.0, fy + (fh / 2.0) - 24.0, 4.0, 48.0, color),
+                        Side::Right => paint.fill(fx + fw - 10.0, fy + (fh / 2.0) - 24.0, 4.0, 48.0, color),
+                    }
+                    if hovered {
+                        let (hx, hy, hw, hh) = match side {
+                            Side::Top => (fx, fy, fw, fh / 2.0),
+                            Side::Bottom => (fx, fy + (fh / 2.0), fw, fh / 2.0),
+                            Side::Left => (fx, fy, fw / 2.0, fh),
+                            Side::Right => (fx + (fw / 2.0), fy, fw / 2.0, fh),
+                        };
+                        paint.fill(hx, hy, hw, hh, theme::tint(&theme));
+                        paint.dashed_rect(hx + 0.5, hy + 0.5, hw - 1.0, hh - 1.0, theme.accent);
+                        let cw = paint.cap_width(&label);
+                        paint.cap((hx + ((hw - cw) / 2.0), hy + (hh / 2.0) - 6.0), Some(theme.accent), &label);
+                    }
+                });
             }
             if under && released && hovered {
                 out.push(Intent::Dock_panel(source.clone(), leaf.path.clone(), side));
@@ -838,7 +811,7 @@ pub fn splitters(state: Option<&dyn Fn(&[usize]) -> panels::State>, hidden: Opti
         }
         if signal.held {
             let accent = theme.accent;
-            ui.draw(&boxed, Box::new(move |paint, (x, y, w, h)| paint.fill(x, y, w, h, accent)));
+            ui.draw(&boxed, move |paint, (x, y, w, h)| paint.fill(x, y, w, h, accent));
             // the ratio it makes, in a tip beside the gutter: "58 / 42"
             let (first, second) = sides(s);
             let a = (100.0 * first as f64 / (1.max(first + second)) as f64).round() as i64;
@@ -847,13 +820,10 @@ pub fn splitters(state: Option<&dyn Fn(&[usize]) -> panels::State>, hidden: Opti
             let (tx, ty) = if s.axis == Axis::H { ((x + 8) as f64, py - 10.0) } else { (px + 8.0, (y + 8) as f64) };
             let tip = ui.box_("workspace-gutter-tip", BoxOpts::default().w(Size::Px(tw)).h(Size::Px(20.0)).at((tx, ty)));
             ui.to_front(i64::MAX, &tip);
-            ui.draw(
-                &tip,
-                Box::new(move |paint, (x, y, _, h)| {
-                    let cy = kit::cap_y_paint(paint, y, h);
-                    paint.ratio((x, cy), a, 100 - a);
-                }),
-            );
+            ui.draw(&tip, move |paint, (x, y, _, h)| {
+                let cy = kit::cap_y_paint(paint, y, h);
+                paint.ratio((x, cy), a, 100 - a);
+            });
         }
         let (dx, dy) = signal.drag;
         if (signal.held || signal.released) && (if s.axis == Axis::H { dx } else { dy }) != 0.0 {
@@ -929,14 +899,11 @@ pub fn splitters(state: Option<&dyn Fn(&[usize]) -> panels::State>, hidden: Opti
             }
         }
         let ink = theme::ink_3(&theme);
-        ui.draw(
-            &boxed,
-            Box::new(move |paint, (x, y, w, h)| {
-                // an 8-point corner of two 1-point lines, 4 points in from the window's edges
-                paint.fill(x + w - 5.0, y + h - 12.0, 1.0, 8.0, ink);
-                paint.fill(x + w - 12.0, y + h - 5.0, 8.0, 1.0, ink);
-            }),
-        );
+        ui.draw(&boxed, move |paint, (x, y, w, h)| {
+            // an 8-point corner of two 1-point lines, 4 points in from the window's edges
+            paint.fill(x + w - 5.0, y + h - 12.0, 1.0, 8.0, ink);
+            paint.fill(x + w - 12.0, y + h - 5.0, 8.0, 1.0, ink);
+        });
     }
     intents
 }

@@ -2274,13 +2274,13 @@ impl Ui {
     }
 
     /// Paint with the box's final laid-out rectangle, before its children.
-    pub fn draw(&mut self, b: &UiBox, painter: Box<dyn Fn(&mut Paint, Rect)>) {
-        self.boxes[b.index].painters.push(Rc::from(painter));
+    pub fn draw(&mut self, b: &UiBox, painter: impl Fn(&mut Paint, Rect) + 'static) {
+        self.boxes[b.index].painters.push(Rc::new(painter));
     }
 
     /// Paint after the box's children, outside its content clip.
-    pub fn draw_over(&mut self, b: &UiBox, painter: Box<dyn Fn(&mut Paint, Rect)>) {
-        self.boxes[b.index].overlays.push(Rc::from(painter));
+    pub fn draw_over(&mut self, b: &UiBox, painter: impl Fn(&mut Paint, Rect) + 'static) {
+        self.boxes[b.index].overlays.push(Rc::new(painter));
     }
 
     /// Raise a root box and its children above ordinary boxes, below modal popups. Higher `order`
@@ -3055,8 +3055,7 @@ impl Ui {
         let shown = visible;
         if shown || ((w <= 0.0 || h <= 0.0) && flags & CLIP == 0) {
             if shown {
-                let painters = self.boxes[index].painters.clone();
-                self.run_painters(&painters, index, clip_rect, paint);
+                self.run_painters(&self.boxes[index].painters, index, clip_rect, paint);
             }
             let child_clip = if flags & CLIP != 0 {
                 let padding = self.boxes[index].padding;
@@ -3071,8 +3070,7 @@ impl Ui {
                 child = self.boxes[child].next;
             }
             if shown {
-                let overlays = self.boxes[index].overlays.clone();
-                self.run_painters(&overlays, index, clip_rect, paint);
+                self.run_painters(&self.boxes[index].overlays, index, clip_rect, paint);
             }
             if shown && self.keyboard_focus && self.focus == self.boxes[index].key && flags & FOCUS_MARK == 0 {
                 paint.clip_rect = clip_rect;
@@ -3160,23 +3158,17 @@ impl Ui {
         let tip_w = 2.0 + 12.0 + tw1 + 6.0 + tw2;
         let tip = self.box_("ui-carry-tip", BoxOpts::default().w(Size::Px(tip_w)).h(Size::Px(20.0)).at((px + 14.0, py + 14.0 + 20.0 + 8.0)));
         let value = payload.value.clone();
-        self.draw_over(
-            &ghost,
-            Box::new(move |paint, (x, y, w, h)| {
-                paint.fill(x, y, w, h, theme.input);
-                paint.text_s((x + 6.0, y + ((20 - size) as f64 / 2.0).floor()), size, theme.foreground, &value);
-            }),
-        );
-        self.draw_over(
-            &tip,
-            Box::new(move |paint, (x, y, w, h)| {
-                paint.fill(x, y, w, h, theme.input);
-                paint.stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, theme::edge(&theme));
-                let ty = y + ((20 - small) as f64 / 2.0).floor();
-                paint.text_s((x + 7.0, ty), small, theme.foreground, tip_text);
-                paint.text_s((x + 7.0 + tw1 + 6.0, ty), small, theme::ink_3(&theme), tip_key);
-            }),
-        );
+        self.draw_over(&ghost, move |paint, (x, y, w, h)| {
+            paint.fill(x, y, w, h, theme.input);
+            paint.text_s((x + 6.0, y + ((20 - size) as f64 / 2.0).floor()), size, theme.foreground, &value);
+        });
+        self.draw_over(&tip, move |paint, (x, y, w, h)| {
+            paint.fill(x, y, w, h, theme.input);
+            paint.stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, theme::edge(&theme));
+            let ty = y + ((20 - small) as f64 / 2.0).floor();
+            paint.text_s((x + 7.0, ty), small, theme.foreground, tip_text);
+            paint.text_s((x + 7.0 + tw1 + 6.0, ty), small, theme::ink_3(&theme), tip_key);
+        });
         // `(max_int, tip) :: (max_int, ghost) :: foreground` in OCaml's newest-first list
         self.foreground.push((i64::MAX, tip.index));
         self.foreground.push((i64::MAX, ghost.index));
@@ -3392,21 +3384,18 @@ impl Ui {
         let tip = self.box_("ui-tooltip", BoxOpts::default().w(Size::Px(width)).h(Size::Px(height)).at((x, y)));
         self.overlays.push(tip.index);
         let theme = self.theme;
-        self.draw(
-            &tip,
-            Box::new(move |paint, (x, y, w, h)| {
-                paint.fill(x, y, w, h, theme.input);
-                paint.frame(x, y, w, h, theme::edge(&theme));
-                for (i, line) in lines.iter().enumerate() {
-                    paint.text_s(
-                        (x + 7.0, y + 14.0 * i as f64 + ((20 - size) as f64 / 2.0).floor()),
-                        size,
-                        theme.foreground,
-                        line,
-                    );
-                }
-            }),
-        );
+        self.draw(&tip, move |paint, (x, y, w, h)| {
+            paint.fill(x, y, w, h, theme.input);
+            paint.frame(x, y, w, h, theme::edge(&theme));
+            for (i, line) in lines.iter().enumerate() {
+                paint.text_s(
+                    (x + 7.0, y + 14.0 * i as f64 + ((20 - size) as f64 / 2.0).floor()),
+                    size,
+                    theme.foreground,
+                    line,
+                );
+            }
+        });
         self.leave(saved);
     }
 

@@ -189,18 +189,15 @@ pub fn draw(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts) {
             BoxOpts::default().flags(CLIP).w(Size::Px(width as f64)).h(Size::Px(height as f64)).at((x as f64, y as f64)),
         );
         let o = o.clone();
-        ui.draw(
-            &boxed,
-            Box::new(move |paint, b| {
-                let (x, y, w, h) = ground(paint, b);
-                let right = trail(paint, (x, y, w, h), &o.notes, &o.readout, &o.layout, o.fps);
-                let limit = if o.kind.is_none() && o.selection.is_none() { right } else { right - 160.0 };
-                let after = lead(paint, (x, y, h), &o.file, o.state, limit, &o.text);
-                if o.kind.is_some() || o.selection.is_some() {
-                    focus_labels(paint, (y, h), true, false, after, o.kind.as_deref(), o.selection.as_deref());
-                }
-            }),
-        );
+        ui.draw(&boxed, move |paint, b| {
+            let (x, y, w, h) = ground(paint, b);
+            let right = trail(paint, (x, y, w, h), &o.notes, &o.readout, &o.layout, o.fps);
+            let limit = if o.kind.is_none() && o.selection.is_none() { right } else { right - 160.0 };
+            let after = lead(paint, (x, y, h), &o.file, o.state, limit, &o.text);
+            if o.kind.is_some() || o.selection.is_some() {
+                focus_labels(paint, (y, h), true, false, after, o.kind.as_deref(), o.selection.as_deref());
+            }
+        });
     }
 }
 
@@ -226,17 +223,14 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
             );
             let o = o.clone();
             let pending = pending.clone();
-            ui.draw(
-                &boxed,
-                Box::new(move |paint, b| {
-                    let (x, y, w, h) = ground(paint, b);
-                    trail(paint, (x, y, w, h), &o.notes, &o.readout, &o.layout, o.fps);
-                    let after = lead(paint, (x, y, h), &o.file, o.state, x + 320.0f64.min(w / 4.0), &o.text);
-                    let tx = focus_labels(paint, (y, h), true, true, after, Some(&pending), None);
-                    let ty = paint.text_top(None, y, h);
-                    paint.text_c((tx, ty), theme::ink_2(&theme), "waiting for a key");
-                }),
-            );
+            ui.draw(&boxed, move |paint, b| {
+                let (x, y, w, h) = ground(paint, b);
+                trail(paint, (x, y, w, h), &o.notes, &o.readout, &o.layout, o.fps);
+                let after = lead(paint, (x, y, h), &o.file, o.state, x + 320.0f64.min(w / 4.0), &o.text);
+                let tx = focus_labels(paint, (y, h), true, true, after, Some(&pending), None);
+                let ty = paint.text_top(None, y, h);
+                paint.text_c((tx, ty), theme::ink_2(&theme), "waiting for a key");
+            });
         }
         None => {
             let bar = ui.box_(
@@ -326,27 +320,24 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
             }
             let o2 = o.clone();
             let accent = o.accent;
-            ui.draw(
-                &bar,
-                Box::new(move |paint, b| {
-                    let (x, y, w, h) = ground(paint, b);
-                    trail(paint, (x, y, w, h), &o2.notes, &o2.readout, &o2.layout, o2.fps);
-                    // the file and its state, to the rule, then the labels
-                    if has_lead {
-                        lead(paint, (x, y, h), &o2.file, o2.state, lead_limit, &o2.text);
-                        focus_labels(paint, (y, h), true, accent, after_lead, kind.as_deref(), selection.as_deref());
-                    } else {
-                        focus_labels(paint, (y, h), false, accent, x - 5.0, kind.as_deref(), selection.as_deref());
-                    }
-                    // each key in ink-3 at the label size before what it does in ink-2, 8 apart
-                    for (tx, key, label, kw) in &pairs {
-                        let cy = kit::cap_y_paint(paint, y, h);
-                        paint.text_s((*tx, cy), small, theme::ink_3(&theme), key);
-                        let ty = paint.text_top(None, y, h);
-                        paint.text_c((tx + kw + 8.0, ty), theme::ink_2(&theme), label);
-                    }
-                }),
-            );
+            ui.draw(&bar, move |paint, b| {
+                let (x, y, w, h) = ground(paint, b);
+                trail(paint, (x, y, w, h), &o2.notes, &o2.readout, &o2.layout, o2.fps);
+                // the file and its state, to the rule, then the labels
+                if has_lead {
+                    lead(paint, (x, y, h), &o2.file, o2.state, lead_limit, &o2.text);
+                    focus_labels(paint, (y, h), true, accent, after_lead, kind.as_deref(), selection.as_deref());
+                } else {
+                    focus_labels(paint, (y, h), false, accent, x - 5.0, kind.as_deref(), selection.as_deref());
+                }
+                // each key in ink-3 at the label size before what it does in ink-2, 8 apart
+                for (tx, key, label, kw) in &pairs {
+                    let cy = kit::cap_y_paint(paint, y, h);
+                    paint.text_s((*tx, cy), small, theme::ink_3(&theme), key);
+                    let ty = paint.text_top(None, y, h);
+                    paint.text_c((tx + kw + 8.0, ty), theme::ink_2(&theme), label);
+                }
+            });
             if ui.signal(&bar).hovered {
                 let names: Vec<String> = keys.iter().map(|(k, _)| k.clone()).collect();
                 ui.tooltip("guide-strip", &format!("{} \u{b7} {} \u{b7} / ?: all keys", title, names.join("  ")));
@@ -386,21 +377,18 @@ pub fn tips(ui: &mut Ui, bounds: (i64, i64, i64, i64), avoid: &[(f64, f64, f64, 
             );
             let kind = *kind;
             let text = text.clone();
-            ui.draw(
-                &boxed,
-                Box::new(move |paint, (x, y, w, h)| {
-                    paint.fill(x, y, w, h, theme.input);
-                    paint.frame(x, y, w, h, theme::edge(&theme));
-                    let ty = paint.text_top(None, y, h);
-                    match kind {
-                        TipKind::Info => {
-                            paint.circle((x + 10.0, y + (h / 2.0)), 3.0, Some(theme::ports(&theme).hint), None);
-                            paint.text_c((x + 19.0, ty), theme.foreground, &text);
-                        }
-                        TipKind::Refusal => paint.text_c((x + 7.0, ty), theme::invalid(), &text),
+            ui.draw(&boxed, move |paint, (x, y, w, h)| {
+                paint.fill(x, y, w, h, theme.input);
+                paint.frame(x, y, w, h, theme::edge(&theme));
+                let ty = paint.text_top(None, y, h);
+                match kind {
+                    TipKind::Info => {
+                        paint.circle((x + 10.0, y + (h / 2.0)), 3.0, Some(theme::ports(&theme).hint), None);
+                        paint.text_c((x + 19.0, ty), theme.foreground, &text);
                     }
-                }),
-            );
+                    TipKind::Refusal => paint.text_c((x + 7.0, ty), theme::invalid(), &text),
+                }
+            });
         }
     }
 }

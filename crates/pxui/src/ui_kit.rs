@@ -53,16 +53,13 @@ impl Ui {
         {
             let stops = stops.clone();
             let headers = headers.to_vec();
-            self.draw(
-                &header,
-                Box::new(move |paint, (x, y, _, _)| {
-                    for (i, title) in headers.iter().enumerate() {
-                        let ty = paint.text_top(None, y, row_h);
-                        paint.text_c((x + stops[i] + 8.0, ty), theme::ink_2(&theme), title);
-                    }
-                    paint.line((x, y + row_h - 0.5), (x + w, y + row_h - 0.5), theme::border(&theme));
-                }),
-            );
+            self.draw(&header, move |paint, (x, y, _, _)| {
+                for (i, title) in headers.iter().enumerate() {
+                    let ty = paint.text_top(None, y, row_h);
+                    paint.text_c((x + stops[i] + 8.0, ty), theme::ink_2(&theme), title);
+                }
+                paint.line((x, y + row_h - 0.5), (x + w, y + row_h - 0.5), theme::border(&theme));
+            });
         }
         let body_h = 0.0f64.max(h - row_h);
         let body = self.box_(
@@ -93,19 +90,16 @@ impl Ui {
             let stops = stops.clone();
             let columns = headers.len();
             let cell = cell.clone();
-            self.draw(
-                &row,
-                Box::new(move |paint, (x, y, _, _)| {
-                    for column in 0..columns {
-                        let value = cell(index, column as i64);
-                        let right = x + stops[column + 1] - 8.0;
-                        let tw = paint.text_width(None, &value);
-                        let ty = paint.text_top(None, y, row_h);
-                        paint.text_c((right - tw, ty), theme.foreground, &value);
-                    }
-                    paint.line((x, y + row_h - 0.5), (x + w, y + row_h - 0.5), theme::faint_border(&theme));
-                }),
-            );
+            self.draw(&row, move |paint, (x, y, _, _)| {
+                for column in 0..columns {
+                    let value = cell(index, column as i64);
+                    let right = x + stops[column + 1] - 8.0;
+                    let tw = paint.text_width(None, &value);
+                    let ty = paint.text_top(None, y, row_h);
+                    paint.text_c((right - tw, ty), theme.foreground, &value);
+                }
+                paint.line((x, y + row_h - 0.5), (x + w, y + row_h - 0.5), theme::faint_border(&theme));
+            });
         }
         self.leave(saved_extent);
         self.leave(saved_body);
@@ -366,36 +360,30 @@ impl Ui {
         let index = panel.index;
         let slot = panel.box_slot;
         let stroke = opts.stroke;
-        self.draw(
-            &panel,
-            Box::new(move |paint, (x, y, w, h)| {
-                // a floating sheet (a menu, a window) is the input white; a docked panel is the ground
-                paint.fill(x, y, w, h, if stroke.is_some() { theme.input } else { theme.panel });
-            }),
-        );
-        self.draw_over(
-            &panel,
-            Box::new(move |paint, rect| {
-                if let Some(color) = stroke {
-                    let (x, y, w, h) = rect;
-                    paint.frame(x, y, w, h, color);
-                }
-                let (x, y, width, height) = ints(rect);
-                let content = paint.l_content[index] as i64;
-                let maximum = 0.max(content - height);
-                if maximum > 0 {
-                    let track_x = x + width - 6;
-                    let track_y = y + padding;
-                    let track_height = 1.max(height - 2 * padding);
-                    let thumb_height = track_height.min(20.max(track_height * height / 1.max(content)));
-                    let travel = track_height - thumb_height;
-                    let scroll_y = paint.scroll_y[slot] as i64;
-                    let thumb_y = track_y + scroll_y * travel / maximum;
-                    // no track, no arrows: a 4-point thumb
-                    paint.fill(track_x as f64, thumb_y as f64, 4.0, thumb_height as f64, theme::border(&theme));
-                }
-            }),
-        );
+        self.draw(&panel, move |paint, (x, y, w, h)| {
+            // a floating sheet (a menu, a window) is the input white; a docked panel is the ground
+            paint.fill(x, y, w, h, if stroke.is_some() { theme.input } else { theme.panel });
+        });
+        self.draw_over(&panel, move |paint, rect| {
+            if let Some(color) = stroke {
+                let (x, y, w, h) = rect;
+                paint.frame(x, y, w, h, color);
+            }
+            let (x, y, width, height) = ints(rect);
+            let content = paint.l_content[index] as i64;
+            let maximum = 0.max(content - height);
+            if maximum > 0 {
+                let track_x = x + width - 6;
+                let track_y = y + padding;
+                let track_height = 1.max(height - 2 * padding);
+                let thumb_height = track_height.min(20.max(track_height * height / 1.max(content)));
+                let travel = track_height - thumb_height;
+                let scroll_y = paint.scroll_y[slot] as i64;
+                let thumb_y = track_y + scroll_y * travel / maximum;
+                // no track, no arrows: a 4-point thumb
+                paint.fill(track_x as f64, thumb_y as f64, 4.0, thumb_height as f64, theme::border(&theme));
+            }
+        });
         let previous = (self.row_height(), self.kit_window_flag());
         self.set_kit_row_height(row_height);
         self.set_kit_window(opts.window);
@@ -451,26 +439,23 @@ impl Ui {
         let hovered = self.hovered_within(&row);
         let label = label.to_owned();
         let font_size = self.font_size();
-        self.draw(
-            &row,
-            Box::new(move |paint, (x, y, w, h)| {
-                if hovered {
-                    paint.fill(x, y, w, h, theme::faint_border(&theme));
+        self.draw(&row, move |paint, (x, y, w, h)| {
+            if hovered {
+                paint.fill(x, y, w, h, theme::faint_border(&theme));
+            }
+            // the pin dot: filled ink when the row is on its card, an ink-3 ring when it is not
+            if let Some(on) = pin {
+                let at = (x + 15.0, y + h / 2.0);
+                if on {
+                    paint.circle(at, 3.0, Some(theme.foreground), None);
+                } else {
+                    paint.circle(at, 2.5, None, Some(theme::ink_3(&theme)));
                 }
-                // the pin dot: filled ink when the row is on its card, an ink-3 ring when it is not
-                if let Some(on) = pin {
-                    let at = (x + 15.0, y + h / 2.0);
-                    if on {
-                        paint.circle(at, 3.0, Some(theme.foreground), None);
-                    } else {
-                        paint.circle(at, 2.5, None, Some(theme::ink_3(&theme)));
-                    }
-                }
-                let shown = inspector_fit(paint, font_size, label_w, &label);
-                let ty = paint.text_top(None, y, h);
-                paint.text_c((x + label_x, ty), theme::ink_2(&theme), &shown);
-            }),
-        );
+            }
+            let shown = inspector_fit(paint, font_size, label_w, &label);
+            let ty = paint.text_top(None, y, h);
+            paint.text_c((x + label_x, ty), theme::ink_2(&theme), &shown);
+        });
         (row, control_x, 2.0, 40.0f64.max(width - control_x - 12.0))
     }
 
@@ -491,16 +476,13 @@ impl Ui {
         }
         let theme = self.theme();
         let label = label.to_owned();
-        self.draw(
-            &title,
-            Box::new(move |paint, (x, y, w, h)| {
-                let (y, h) = (y + gap, h - gap);
-                // the sheet has no hover state on a section header
-                let cy = cap_y(paint, y, h);
-                paint.cap((x + SIDE as f64, cy), Some(theme::ink_3(&theme)), &label);
-                paint.chevron((x + w - SIDE as f64 - 3.0, y + h / 2.0), if open { Dir::Down } else { Dir::Right }, theme.foreground);
-            }),
-        );
+        self.draw(&title, move |paint, (x, y, w, h)| {
+            let (y, h) = (y + gap, h - gap);
+            // the sheet has no hover state on a section header
+            let cy = cap_y(paint, y, h);
+            paint.cap((x + SIDE as f64, cy), Some(theme::ink_3(&theme)), &label);
+            paint.chevron((x + w - SIDE as f64 - 3.0, y + h / 2.0), if open { Dir::Down } else { Dir::Right }, theme.foreground);
+        });
         if open {
             f(self);
         }
@@ -520,7 +502,7 @@ impl Ui {
         let control = self.box_(key, BoxOpts::default().flags(CLICKABLE | TAB_STOP).at(at).w(Size::Px(28.0)).h(Size::Px(20.0)));
         let value = if self.signal(&control).clicked { !value } else { value };
         let theme = self.theme();
-        self.draw(&control, Box::new(move |paint, (x, y, _, _)| paint_switch(paint, &theme, x, y + 3.0, value)));
+        self.draw(&control, move |paint, (x, y, _, _)| paint_switch(paint, &theme, x, y + 3.0, value));
         value
     }
 
@@ -541,16 +523,13 @@ impl Ui {
         let theme = self.theme();
         let font_size = self.font_size();
         let label = label.to_owned();
-        self.draw(
-            &row,
-            Box::new(move |paint, (x, y, w, h)| {
-                let shown = inspector_fit(paint, font_size, w - 24.0, &label);
-                let tw = paint.text_width(None, &shown);
-                paint_button_ground(paint, &theme, signal.held, signal.hovered, false, false, (x + 6.0, y + 2.0, tw + 12.0, h - 4.0));
-                let ty = paint.text_top(None, y, h);
-                paint.text_c((x + SIDE as f64, ty), theme.foreground, &shown);
-            }),
-        );
+        self.draw(&row, move |paint, (x, y, w, h)| {
+            let shown = inspector_fit(paint, font_size, w - 24.0, &label);
+            let tw = paint.text_width(None, &shown);
+            paint_button_ground(paint, &theme, signal.held, signal.hovered, false, false, (x + 6.0, y + 2.0, tw + 12.0, h - 4.0));
+            let ty = paint.text_top(None, y, h);
+            paint.text_c((x + SIDE as f64, ty), theme.foreground, &shown);
+        });
         signal.clicked
     }
 
@@ -560,15 +539,12 @@ impl Ui {
         let theme = self.theme();
         let font_size = self.font_size();
         let value = value.to_owned();
-        self.draw(
-            &row,
-            Box::new(move |paint, (x, y, _, h)| {
-                let shown = inspector_fit(paint, font_size, control_width, &value);
-                let tw = paint.text_width(None, &shown);
-                let ty = paint.text_top(None, y, h);
-                paint.text_c((x + control_x + control_width - tw, ty), theme.foreground, &shown);
-            }),
-        );
+        self.draw(&row, move |paint, (x, y, _, h)| {
+            let shown = inspector_fit(paint, font_size, control_width, &value);
+            let tw = paint.text_width(None, &shown);
+            let ty = paint.text_top(None, y, h);
+            paint.text_c((x + control_x + control_width - tw, ty), theme.foreground, &shown);
+        });
     }
 
     /// The scrolling part of an inspector under its head (the head stays): a column that takes the
@@ -582,21 +558,18 @@ impl Ui {
         let theme = self.theme();
         let index = body.index;
         let slot = body.box_slot;
-        self.draw_over(
-            &body,
-            Box::new(move |paint, (x, y, w, h)| {
-                let content = paint.l_content[index];
-                if content > h {
-                    let track_y = y + 6.0;
-                    let track_h = 1.0f64.max(h - 12.0);
-                    let thumb_h = track_h.min(20.0f64.max(track_h * h / content));
-                    let travel = track_h - thumb_h;
-                    let maximum = content - h;
-                    let thumb_y = track_y + paint.scroll_y[slot] * travel / maximum;
-                    paint.fill(x + w - 6.0, thumb_y, 4.0, thumb_h, theme::border(&theme));
-                }
-            }),
-        );
+        self.draw_over(&body, move |paint, (x, y, w, h)| {
+            let content = paint.l_content[index];
+            if content > h {
+                let track_y = y + 6.0;
+                let track_h = 1.0f64.max(h - 12.0);
+                let thumb_h = track_h.min(20.0f64.max(track_h * h / content));
+                let travel = track_h - thumb_h;
+                let maximum = content - h;
+                let thumb_y = track_y + paint.scroll_y[slot] * travel / maximum;
+                paint.fill(x + w - 6.0, thumb_y, 4.0, thumb_h, theme::border(&theme));
+            }
+        });
         self.within(&body, f);
     }
 
@@ -610,29 +583,26 @@ impl Ui {
         let bar = self.box_("inspector-bar", BoxOpts::default().w(Size::Grow).h(Size::Px(line + 1.0)));
         let theme = self.theme();
         let hints = hints.to_vec();
-        self.draw(
-            &bar,
-            Box::new(move |paint, (x, y, w, _)| {
-                paint.fill(x, y, w, 1.0, theme::edge(&theme));
-                let y = y + 1.0;
-                let mut at = x + 12.0;
-                for (key, what) in &hints {
-                    let ty = paint.text_top(Some(small), y, line);
-                    paint.text_s((at, ty), small, theme::ink_3(&theme), key);
-                    at += mono_width(0.0, small, key) + 8.0;
-                    let ty = paint.text_top(None, y, line);
-                    paint.text_c((at, ty), theme::ink_2(&theme), what);
-                    at += mono_width(0.0, font_size, what) + 8.0;
-                }
-                let label = format!("{} on card", count);
-                // the sheet's tracking follows the last letter too: the ink ends that much before the 12
-                let label_w = paint.cap_width(&label) + paint.cap_tracking();
-                let left = x + w - 12.0 - label_w;
-                let cy = cap_y(paint, y, line);
-                paint.cap((left, cy), Some(theme::ink_2(&theme)), &label);
-                paint.circle((left - 11.0, y + line / 2.0), 3.0, Some(theme.foreground), None);
-            }),
-        );
+        self.draw(&bar, move |paint, (x, y, w, _)| {
+            paint.fill(x, y, w, 1.0, theme::edge(&theme));
+            let y = y + 1.0;
+            let mut at = x + 12.0;
+            for (key, what) in &hints {
+                let ty = paint.text_top(Some(small), y, line);
+                paint.text_s((at, ty), small, theme::ink_3(&theme), key);
+                at += mono_width(0.0, small, key) + 8.0;
+                let ty = paint.text_top(None, y, line);
+                paint.text_c((at, ty), theme::ink_2(&theme), what);
+                at += mono_width(0.0, font_size, what) + 8.0;
+            }
+            let label = format!("{} on card", count);
+            // the sheet's tracking follows the last letter too: the ink ends that much before the 12
+            let label_w = paint.cap_width(&label) + paint.cap_tracking();
+            let left = x + w - 12.0 - label_w;
+            let cy = cap_y(paint, y, line);
+            paint.cap((left, cy), Some(theme::ink_2(&theme)), &label);
+            paint.circle((left - 11.0, y + line / 2.0), 3.0, Some(theme.foreground), None);
+        });
     }
 
     pub fn inspector_message(&mut self, key: &str, message: &str) {
@@ -642,14 +612,11 @@ impl Ui {
         let font_size = self.font_size();
         let row_height = self.row_height();
         let message = message.to_owned();
-        self.draw(
-            &row,
-            Box::new(move |paint, (x, y, w, h)| {
-                paint.circle((x + 15.0, y + h / 2.0), 3.0, Some(theme.accent), None);
-                let shown = inspector_fit(paint, font_size, w - 38.0, &message);
-                paint.text_c((x + 26.0, y + label_y(font_size, 0, row_height) as f64), theme::ink_2(&theme), &shown);
-            }),
-        );
+        self.draw(&row, move |paint, (x, y, w, h)| {
+            paint.circle((x + 15.0, y + h / 2.0), 3.0, Some(theme.accent), None);
+            let shown = inspector_fit(paint, font_size, w - 38.0, &message);
+            paint.text_c((x + 26.0, y + label_y(font_size, 0, row_height) as f64), theme::ink_2(&theme), &shown);
+        });
     }
 
     /// A floating panel dismissed by Escape, focus loss, or a press outside its last laid-out
@@ -742,13 +709,10 @@ impl Ui {
         let row = self.box_(text, BoxOpts::default().flags(NO_FLAGS).w(Size::Grow).h(Size::Px(gap + self.row_height() as f64)));
         let theme = self.theme();
         let shown = display(text);
-        self.draw(
-            &row,
-            Box::new(move |paint, (x, y, _, h)| {
-                let cy = cap_y(paint, y + gap, h - gap);
-                paint.cap((x + SIDE as f64, cy), Some(theme::ink_2(&theme)), &shown);
-            }),
-        );
+        self.draw(&row, move |paint, (x, y, _, h)| {
+            let cy = cap_y(paint, y + gap, h - gap);
+            paint.cap((x + SIDE as f64, cy), Some(theme::ink_2(&theme)), &shown);
+        });
     }
 
     /// A window's foot: a line-2 hairline under 4 points of space, then the keys in ink-3 each
@@ -759,25 +723,22 @@ impl Ui {
         let size = 8.max(self.font_size() - 2);
         let hints = hints.to_vec();
         let right = right.map(|s| s.to_owned());
-        self.draw(
-            &row,
-            Box::new(move |paint, (x, y, w, h)| {
-                paint.fill(x, y + 4.0, w, 1.0, theme::edge(&theme));
-                let key_y = paint.text_top(Some(size), y + 5.0, h - 5.0);
-                let hint_y = paint.text_top(None, y + 5.0, h - 5.0);
-                let mut pen = x + SIDE as f64;
-                for (key, what) in &hints {
-                    paint.text_s((pen, key_y), size, theme::ink_3(&theme), key);
-                    pen += paint.text_width(Some(size), key) + 8.0;
-                    paint.text_c((pen, hint_y), theme::ink_2(&theme), what);
-                    pen += paint.text_width(None, what) + 8.0;
-                }
-                if let Some(text) = &right {
-                    let cw = paint.cap_width(text);
-                    paint.cap((x + w - SIDE as f64 - cw, key_y), None, text);
-                }
-            }),
-        );
+        self.draw(&row, move |paint, (x, y, w, h)| {
+            paint.fill(x, y + 4.0, w, 1.0, theme::edge(&theme));
+            let key_y = paint.text_top(Some(size), y + 5.0, h - 5.0);
+            let hint_y = paint.text_top(None, y + 5.0, h - 5.0);
+            let mut pen = x + SIDE as f64;
+            for (key, what) in &hints {
+                paint.text_s((pen, key_y), size, theme::ink_3(&theme), key);
+                pen += paint.text_width(Some(size), key) + 8.0;
+                paint.text_c((pen, hint_y), theme::ink_2(&theme), what);
+                pen += paint.text_width(None, what) + 8.0;
+            }
+            if let Some(text) = &right {
+                let cw = paint.cap_width(text);
+                paint.cap((x + w - SIDE as f64 - cw, key_y), None, text);
+            }
+        });
     }
 
     /// `true` on the frame a press and release both land inside the button.
@@ -809,40 +770,37 @@ impl Ui {
         let signal = self.signal(&row);
         let theme = self.theme();
         let focus = self.focused(&row);
-        self.draw(
-            &row,
-            Box::new(move |paint, rect| {
-                let (x, y, w, h) = rect;
-                let (cx, cy, cw, ch) = extent((x, y, w, h));
-                let ink = ink.unwrap_or(if bare { theme::ink_2(&theme) } else { theme.foreground });
-                paint_button_ground(paint, &theme, signal.held, signal.hovered, false, false, (cx, cy, cw, ch));
-                // the keyboard's mark: the accent over the last row of the box, its whole width
-                if focus {
-                    paint.fill(cx, cy + ch - 1.0, cw, 1.0, theme.accent);
+        self.draw(&row, move |paint, rect| {
+            let (x, y, w, h) = rect;
+            let (cx, cy, cw, ch) = extent((x, y, w, h));
+            let ink = ink.unwrap_or(if bare { theme::ink_2(&theme) } else { theme.foreground });
+            paint_button_ground(paint, &theme, signal.held, signal.hovered, false, false, (cx, cy, cw, ch));
+            // the keyboard's mark: the accent over the last row of the box, its whole width
+            if focus {
+                paint.fill(cx, cy + ch - 1.0, cw, 1.0, theme.accent);
+            }
+            let pad = if icon {
+                ((cw - measure) / 2.0).floor()
+            } else if bare {
+                5.0
+            } else {
+                7.0
+            };
+            let direction = match (icon, shown.as_str()) {
+                (true, "<") => Some(Dir::Left),
+                (true, ">") => Some(Dir::Right),
+                (true, "v") => Some(Dir::Down),
+                (true, "^") => Some(Dir::Up),
+                _ => None,
+            };
+            match direction {
+                Some(direction) => paint.chevron((cx + cw / 2.0, cy + ch / 2.0), direction, ink),
+                None => {
+                    let ty = paint.text_top(None, y, h);
+                    paint.text_c((cx + pad, ty), ink, &shown);
                 }
-                let pad = if icon {
-                    ((cw - measure) / 2.0).floor()
-                } else if bare {
-                    5.0
-                } else {
-                    7.0
-                };
-                let direction = match (icon, shown.as_str()) {
-                    (true, "<") => Some(Dir::Left),
-                    (true, ">") => Some(Dir::Right),
-                    (true, "v") => Some(Dir::Down),
-                    (true, "^") => Some(Dir::Up),
-                    _ => None,
-                };
-                match direction {
-                    Some(direction) => paint.chevron((cx + cw / 2.0, cy + ch / 2.0), direction, ink),
-                    None => {
-                        let ty = paint.text_top(None, y, h);
-                        paint.text_c((cx + pad, ty), ink, &shown);
-                    }
-                }
-            }),
-        );
+            }
+        });
         signal.clicked
     }
 
@@ -855,19 +813,16 @@ impl Ui {
         let shown = display(text);
         let hovered = signal.hovered;
         let font_size = self.font_size();
-        self.draw(
-            &row,
-            Box::new(move |paint, rect| {
-                let bounds = ints(rect);
-                let (x, y, _, h) = bounds;
-                let (cx, cy, _, _) = toggle_control(bounds);
-                if hovered {
-                    hover_row(paint, &theme, bounds);
-                }
-                kit_text(paint, Some(theme.foreground), x + SIDE, label_y(font_size, y, h), &shown);
-                paint_switch(paint, &theme, cx as f64, cy as f64, value);
-            }),
-        );
+        self.draw(&row, move |paint, rect| {
+            let bounds = ints(rect);
+            let (x, y, _, h) = bounds;
+            let (cx, cy, _, _) = toggle_control(bounds);
+            if hovered {
+                hover_row(paint, &theme, bounds);
+            }
+            kit_text(paint, Some(theme.foreground), x + SIDE, label_y(font_size, y, h), &shown);
+            paint_switch(paint, &theme, cx as f64, cy as f64, value);
+        });
         value
     }
 }

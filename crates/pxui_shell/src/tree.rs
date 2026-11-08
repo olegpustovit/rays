@@ -567,129 +567,126 @@ pub fn update(t: Tree, ui: &mut Ui, _frame: &frame::t, bounds: (i64, i64, i64, i
         let hover_pointer = signal.pointer.1;
         let build_scroll = scroll;
         let sticky_rows = rows_rc.clone();
-        ui.draw(
-            &boxed,
-            Box::new(move |paint, _| {
-                let rows: &[Row] = &rows_rc;
-                let at = |k: usize| &rows[shown[k]];
-                let is_selected = |id: i64| selected.contains(&id);
-                let scroll = paint.scroll_y[slot];
-                let first = 0.max((scroll / height).floor() as i64);
-                let last = (count as i64 - 1).min(((scroll + body) / height).ceil() as i64);
-                let sticky = sticky_of(&sticky_rows, &shown, height, scroll);
-                paint.fill(x, y, w, h, theme.panel);
-                let ink_2 = theme::ink_2(&theme);
-                let ink_3 = theme::ink_3(&theme);
-                // the row under the pointer, sticky rows first (as `row_at` finds it)
-                let hover: Option<usize> = if signal.hovered && !dragging {
-                    let py = hover_pointer;
-                    let slot_k = ((py - top) / height).floor() as i64;
-                    let hit = if py < top || slot_k < 0 { None } else { sticky_of(&sticky_rows, &shown, height, build_scroll).get(slot_k as usize).copied() };
-                    match hit {
-                        Some(k) => Some(k),
-                        None => {
-                            let k = ((py - top + build_scroll) / height).floor() as i64;
-                            if py < top || k < 0 || k >= count as i64 { None } else { Some(k as usize) }
-                        }
+        ui.draw(&boxed, move |paint, _| {
+            let rows: &[Row] = &rows_rc;
+            let at = |k: usize| &rows[shown[k]];
+            let is_selected = |id: i64| selected.contains(&id);
+            let scroll = paint.scroll_y[slot];
+            let first = 0.max((scroll / height).floor() as i64);
+            let last = (count as i64 - 1).min(((scroll + body) / height).ceil() as i64);
+            let sticky = sticky_of(&sticky_rows, &shown, height, scroll);
+            paint.fill(x, y, w, h, theme.panel);
+            let ink_2 = theme::ink_2(&theme);
+            let ink_3 = theme::ink_3(&theme);
+            // the row under the pointer, sticky rows first (as `row_at` finds it)
+            let hover: Option<usize> = if signal.hovered && !dragging {
+                let py = hover_pointer;
+                let slot_k = ((py - top) / height).floor() as i64;
+                let hit = if py < top || slot_k < 0 { None } else { sticky_of(&sticky_rows, &shown, height, build_scroll).get(slot_k as usize).copied() };
+                match hit {
+                    Some(k) => Some(k),
+                    None => {
+                        let k = ((py - top + build_scroll) / height).floor() as i64;
+                        if py < top || k < 0 || k >= count as i64 { None } else { Some(k as usize) }
                     }
-                } else {
-                    None
+                }
+            } else {
+                None
+            };
+            let flag_filter_none = filter.is_none();
+            let draw_row = |paint: &mut Paint, k: usize, row_y: f64| {
+                let row = at(k);
+                let index = shown[k];
+                let selected = is_selected(row.id);
+                // current (the keyboard cursor) and selected are the control fill; selected adds the
+                // accent brackets, drawn once the rows are down
+                paint.fill(x, row_y, w, height, theme.panel);
+                if selected {
+                    paint.fill(x + 6.0, row_y, w - 12.0, height, theme.control);
+                } else if focus == Some(row.id) {
+                    paint.fill(x, row_y, w, height, theme.control);
+                } else if hover == Some(k) {
+                    paint.fill(x, row_y, w, height, theme::faint_border(&theme));
+                }
+                let indent = |level: i64| x + 12.0 + (level as f64 * INDENT_STEP);
+                let text_y = paint.text_top(None, row_y, height);
+                if has_children(rows, index) {
+                    paint.chevron(
+                        (indent(row.depth) + 3.0, row_y + (height / 2.0)),
+                        if folded.contains(&row.id) && flag_filter_none { Dir::Right } else { Dir::Down },
+                        ink_2,
+                    );
+                }
+                // the kind: a letter in the label style, in ink once selected
+                let badge_x = indent(row.depth) + 14.0;
+                let letter: &str = if row.link { "\u{21b3}" } else { &row.badge.0 };
+                let cy = kit::cap_y_paint(paint, row_y, height);
+                paint.cap((badge_x, cy), Some(if selected || focus == Some(row.id) { theme.foreground } else { ink_2 }), letter);
+                let label_x = badge_x + paint.cap_width(letter) + 8.0;
+                let hidden = match row.flags.first() {
+                    Some(shown) => !shown,
+                    None => false,
                 };
-                let flag_filter_none = filter.is_none();
-                let draw_row = |paint: &mut Paint, k: usize, row_y: f64| {
-                    let row = at(k);
-                    let index = shown[k];
-                    let selected = is_selected(row.id);
-                    // current (the keyboard cursor) and selected are the control fill; selected adds the
-                    // accent brackets, drawn once the rows are down
-                    paint.fill(x, row_y, w, height, theme.panel);
-                    if selected {
-                        paint.fill(x + 6.0, row_y, w - 12.0, height, theme.control);
-                    } else if focus == Some(row.id) {
-                        paint.fill(x, row_y, w, height, theme.control);
-                    } else if hover == Some(k) {
-                        paint.fill(x, row_y, w, height, theme::faint_border(&theme));
-                    }
-                    let indent = |level: i64| x + 12.0 + (level as f64 * INDENT_STEP);
-                    let text_y = paint.text_top(None, row_y, height);
-                    if has_children(rows, index) {
-                        paint.chevron(
-                            (indent(row.depth) + 3.0, row_y + (height / 2.0)),
-                            if folded.contains(&row.id) && flag_filter_none { Dir::Right } else { Dir::Down },
-                            ink_2,
-                        );
-                    }
-                    // the kind: a letter in the label style, in ink once selected
-                    let badge_x = indent(row.depth) + 14.0;
-                    let letter: &str = if row.link { "\u{21b3}" } else { &row.badge.0 };
-                    let cy = kit::cap_y_paint(paint, row_y, height);
-                    paint.cap((badge_x, cy), Some(if selected || focus == Some(row.id) { theme.foreground } else { ink_2 }), letter);
-                    let label_x = badge_x + paint.cap_width(letter) + 8.0;
-                    let hidden = match row.flags.first() {
-                        Some(shown) => !shown,
-                        None => false,
-                    };
-                    let color = if row.ghost || row.link || hidden { ink_3 } else { theme.foreground };
-                    paint.text_c((label_x, text_y), color, &row.label);
-                    if !row.detail.is_empty() {
-                        // the detail sits before the flags, where the label leaves room
-                        let dw = paint.text_width(None, &row.detail);
-                        let dx = columns_x - 8.0 - dw;
-                        if dx > label_x + paint.text_width(None, &row.label) + 8.0 {
-                            paint.text_c((dx, text_y), ink_2, &row.detail);
-                        }
-                    }
-                    // Flags: a square for the first column (visible), a round one for the others.
-                    for (column, value) in row.flags.iter().enumerate() {
-                        let cx = columns_x + (column as f64 * FLAG_WIDTH) + 6.0;
-                        let cy = row_y + (height / 2.0);
-                        paint.flag((cx, cy), column > 0, *value);
-                    }
-                };
-                for k in first..=last {
-                    draw_row(paint, k as usize, top + (k as f64 * height) - scroll);
-                }
-                // the sheet's brackets: 4 points out of the fill, which is 6 in from the list's edge; after
-                // every row, since they reach into the rows above and below, whose ground would cover them
-                let mark = |paint: &mut Paint, k: usize, row_y: f64| {
-                    if is_selected(at(k).id) {
-                        paint.brackets(x + 6.0, row_y, w - 12.0, height, 4.0, 8.0, 2.0, theme.accent);
-                    }
-                };
-                for k in first..=last {
-                    mark(paint, k as usize, top + (k as f64 * height) - scroll);
-                }
-                for (slot, k) in sticky.iter().enumerate() {
-                    draw_row(paint, *k, top + (slot as f64 * height));
-                }
-                for (slot, k) in sticky.iter().enumerate() {
-                    mark(paint, *k, top + (slot as f64 * height));
-                }
-                if !sticky.is_empty() {
-                    paint.fill(x, top + (sticky.len() as f64 * height), w, 1.0, theme::edge(&theme));
-                }
-                if let Some((k, drop)) = drop_hint {
-                    let row_y = top + (k as f64 * height) - scroll;
-                    match drop {
-                        DropAt::Inside => paint.frame_w(x, row_y, w, height, 2.0, theme.accent),
-                        DropAt::Before | DropAt::After => {
-                            let line_y = if drop == DropAt::Before { row_y } else { row_y + height };
-                            paint.line_w((x, line_y), (x + w, line_y), 2.0, theme.accent);
-                        }
+                let color = if row.ghost || row.link || hidden { ink_3 } else { theme.foreground };
+                paint.text_c((label_x, text_y), color, &row.label);
+                if !row.detail.is_empty() {
+                    // the detail sits before the flags, where the label leaves room
+                    let dw = paint.text_width(None, &row.detail);
+                    let dx = columns_x - 8.0 - dw;
+                    if dx > label_x + paint.text_width(None, &row.label) + 8.0 {
+                        paint.text_c((dx, text_y), ink_2, &row.detail);
                     }
                 }
-                // Header: the level as a section label and the flag columns, or the filter under a prompt.
-                paint.fill(x, y, w, height, theme.panel);
-                if filter.is_none() {
-                    let cy = kit::cap_y_paint(paint, y, height);
-                    paint.cap((x + 12.0, cy), Some(ink_3), &title);
-                    for (column, name) in columns.iter().enumerate() {
-                        let nw = paint.cap_width(name);
-                        paint.cap((columns_x + (column as f64 * FLAG_WIDTH) + 6.0 - (nw / 2.0), cy), Some(ink_2), name);
+                // Flags: a square for the first column (visible), a round one for the others.
+                for (column, value) in row.flags.iter().enumerate() {
+                    let cx = columns_x + (column as f64 * FLAG_WIDTH) + 6.0;
+                    let cy = row_y + (height / 2.0);
+                    paint.flag((cx, cy), column > 0, *value);
+                }
+            };
+            for k in first..=last {
+                draw_row(paint, k as usize, top + (k as f64 * height) - scroll);
+            }
+            // the sheet's brackets: 4 points out of the fill, which is 6 in from the list's edge; after
+            // every row, since they reach into the rows above and below, whose ground would cover them
+            let mark = |paint: &mut Paint, k: usize, row_y: f64| {
+                if is_selected(at(k).id) {
+                    paint.brackets(x + 6.0, row_y, w - 12.0, height, 4.0, 8.0, 2.0, theme.accent);
+                }
+            };
+            for k in first..=last {
+                mark(paint, k as usize, top + (k as f64 * height) - scroll);
+            }
+            for (slot, k) in sticky.iter().enumerate() {
+                draw_row(paint, *k, top + (slot as f64 * height));
+            }
+            for (slot, k) in sticky.iter().enumerate() {
+                mark(paint, *k, top + (slot as f64 * height));
+            }
+            if !sticky.is_empty() {
+                paint.fill(x, top + (sticky.len() as f64 * height), w, 1.0, theme::edge(&theme));
+            }
+            if let Some((k, drop)) = drop_hint {
+                let row_y = top + (k as f64 * height) - scroll;
+                match drop {
+                    DropAt::Inside => paint.frame_w(x, row_y, w, height, 2.0, theme.accent),
+                    DropAt::Before | DropAt::After => {
+                        let line_y = if drop == DropAt::Before { row_y } else { row_y + height };
+                        paint.line_w((x, line_y), (x + w, line_y), 2.0, theme.accent);
                     }
                 }
-            }),
-        );
+            }
+            // Header: the level as a section label and the flag columns, or the filter under a prompt.
+            paint.fill(x, y, w, height, theme.panel);
+            if filter.is_none() {
+                let cy = kit::cap_y_paint(paint, y, height);
+                paint.cap((x + 12.0, cy), Some(ink_3), &title);
+                for (column, name) in columns.iter().enumerate() {
+                    let nw = paint.cap_width(name);
+                    paint.cap((columns_x + (column as f64 * FLAG_WIDTH) + 6.0 - (nw / 2.0), cy), Some(ink_2), name);
+                }
+            }
+        });
     }
     // The filter field sits in the header; Escape clears it.
     if let Some(query) = t.filter.clone() {

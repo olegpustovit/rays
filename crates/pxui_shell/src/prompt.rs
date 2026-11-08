@@ -43,14 +43,11 @@ pub fn name(ui: &mut Ui, key: &str, title: &str, description: &str, label: &str,
         let line = ui.box_("prompt-description", BoxOpts::default().w(Size::Grow).h(Size::Px(24.0)));
         let theme = ui.theme();
         let description = description.to_string();
-        ui.draw(
-            &line,
-            Box::new(move |paint, (x, y, w, h)| {
-                let ty = paint.text_top(None, y, h);
-                let shown = ellipsis(&mut |s| paint.text_width(None, s), w - 16.0, &description);
-                paint.text_c((x + 8.0, ty), theme::ink_2(&theme), &shown);
-            }),
-        );
+        ui.draw(&line, move |paint, (x, y, w, h)| {
+            let ty = paint.text_top(None, y, h);
+            let shown = ellipsis(&mut |s| paint.text_width(None, s), w - 16.0, &description);
+            paint.text_c((x + 8.0, ty), theme::ink_2(&theme), &shown);
+        });
         let mut picked: (String, Pick) = (String::new(), Pick::None);
         ui.col(4.0, "prompt-field", &mut |ui| {
             let opts = PickerOpts { slash: false, ..PickerOpts::default() };

@@ -605,7 +605,7 @@ pub fn window_pxui_modal_4() {
             ui.to_front(0, &front);
             let back = ui.box_("back", BoxOpts::default().flags(CLICKABLE).at((0.0, 0.0)).w(Size::Px(100.0)).h(Size::Px(60.0)));
             for b in [&front, &back] {
-                ui.draw(b, Box::new(|paint, (x, y, w, h)| paint.fill(x, y, w, h, color::white())));
+                ui.draw(b, |paint, (x, y, w, h)| paint.fill(x, y, w, h, color::white()));
             }
             out = (ui.signal(&front).clicked, ui.signal(&back).clicked);
         });

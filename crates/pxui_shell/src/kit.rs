@@ -73,39 +73,36 @@ pub fn button(ui: &mut Ui, key: &str, at: (f64, f64), w: f64, o: &ButtonOpts, la
     let hint = o.hint.clone();
     let label = label.to_string();
     let size = cap_size(ui);
-    ui.draw(
-        &boxed,
-        Box::new(move |paint, (x, y, w, h)| {
-            paint_button_ground(paint, &theme, held, hovered, active, primary, (x, y, w, h));
-            let color = if enabled { theme.foreground } else { theme::ink_3(&theme) };
-            let tx = match icon {
-                None if centered => x + ((w - paint.text_width(None, &label)) / 2.0).floor(),
-                None => x + 7.0,
-                Some(shape) => {
-                    let cy = y + (h / 2.0);
-                    match shape {
-                        Icon::Play => {
-                            // the sheet's 7 x 8 triangle: half-point scanlines, so a Retina pixel row is one
-                            for row in 0..=15 {
-                                let top = cy - 4.0 + (0.5 * row as f64);
-                                let reach = 1.0 - ((top + 0.25 - cy).abs() / 4.0);
-                                paint.fill(x + 7.0, top, 7.0 * reach, 0.5, color);
-                            }
+    ui.draw(&boxed, move |paint, (x, y, w, h)| {
+        paint_button_ground(paint, &theme, held, hovered, active, primary, (x, y, w, h));
+        let color = if enabled { theme.foreground } else { theme::ink_3(&theme) };
+        let tx = match icon {
+            None if centered => x + ((w - paint.text_width(None, &label)) / 2.0).floor(),
+            None => x + 7.0,
+            Some(shape) => {
+                let cy = y + (h / 2.0);
+                match shape {
+                    Icon::Play => {
+                        // the sheet's 7 x 8 triangle: half-point scanlines, so a Retina pixel row is one
+                        for row in 0..=15 {
+                            let top = cy - 4.0 + (0.5 * row as f64);
+                            let reach = 1.0 - ((top + 0.25 - cy).abs() / 4.0);
+                            paint.fill(x + 7.0, top, 7.0 * reach, 0.5, color);
                         }
-                        Icon::Stop => paint.fill(x + 7.0, cy - 4.0, 8.0, 8.0, color),
                     }
-                    x + 20.0
+                    Icon::Stop => paint.fill(x + 7.0, cy - 4.0, 8.0, 8.0, color),
                 }
-            };
-            let ty = paint.text_top(None, y, h);
-            paint.text_c((tx, ty), color, &label);
-            if let Some(hint) = &hint {
-                let hy = cap_y_of(paint, y, h);
-                let lw = paint.text_width(None, &label);
-                paint.text_s((tx + lw + 6.0, hy), size, theme::ink_3(&theme), hint);
+                x + 20.0
             }
-        }),
-    );
+        };
+        let ty = paint.text_top(None, y, h);
+        paint.text_c((tx, ty), color, &label);
+        if let Some(hint) = &hint {
+            let hy = cap_y_of(paint, y, h);
+            let lw = paint.text_width(None, &label);
+            paint.text_s((tx + lw + 6.0, hy), size, theme::ink_3(&theme), hint);
+        }
+    });
     signal.clicked && enabled
 }
 
@@ -119,14 +116,11 @@ pub fn colour(ui: &mut Ui, key: &str, at: (f64, f64), w: f64, swatch: Color, hex
     let (x, y) = at;
     let boxed = ui.box_(&format!("swatch-{key}"), BoxOpts::default().at((x, y)).w(Size::Px(20.0)).h(Size::Px(20.0)));
     let edge = theme::edge(&ui.theme());
-    ui.draw(
-        &boxed,
-        Box::new(move |paint, (sx, sy, sw, sh)| {
-            // a 20-point square with its border inside
-            paint.fill(sx, sy, sw, sh, swatch);
-            paint.stroke(sx + 0.5, sy + 0.5, sw - 1.0, sh - 1.0, edge);
-        }),
-    );
+    ui.draw(&boxed, move |paint, (sx, sy, sw, sh)| {
+        // a 20-point square with its border inside
+        paint.fill(sx, sy, sw, sh, swatch);
+        paint.stroke(sx + 0.5, sy + 0.5, sw - 1.0, sh - 1.0, edge);
+    });
     let opts = ValueFieldOpts { left: true, ..ValueFieldOpts::default() };
     let valid = |t: &str| color::hex(t).is_ok();
     ui.value_field((x + 28.0, y), w - 28.0, 20.0, &opts, &valid, &format!("hex-{key}"), hex).0
@@ -139,7 +133,7 @@ pub fn switch(ui: &mut Ui, key: &str, at: (f64, f64), on: bool) -> bool {
     let boxed = ui.box_(key, BoxOpts::default().flags(CLICKABLE | BLOCKING).w(Size::Px(28.0)).h(Size::Px(14.0)).at((sx, sy)));
     let signal = ui.signal(&boxed);
     let theme = ui.theme();
-    ui.draw(&boxed, Box::new(move |paint, (x, y, _, _)| paint_switch(paint, &theme, x, y, on)));
+    ui.draw(&boxed, move |paint, (x, y, _, _)| paint_switch(paint, &theme, x, y, on));
     signal.clicked
 }
 
@@ -167,17 +161,14 @@ pub fn segments(ui: &mut Ui, key: &str, right: f64, y: f64, labels: &[String], a
         }
         let hovered = signal.hovered;
         let label = label.clone();
-        ui.draw(
-            &boxed,
-            Box::new(move |paint, (x, y, w, h)| {
-                let on = index as i64 == active;
-                let ty = paint.text_top(None, y, h);
-                paint.text_c((x + 4.0, ty), if on || hovered { theme.foreground } else { theme::ink_3(&theme) }, &label);
-                if on {
-                    paint.fill(x + 4.0, y + h - 1.0, w - 8.0, 1.0, theme.foreground);
-                }
-            }),
-        );
+        ui.draw(&boxed, move |paint, (x, y, w, h)| {
+            let on = index as i64 == active;
+            let ty = paint.text_top(None, y, h);
+            paint.text_c((x + 4.0, ty), if on || hovered { theme.foreground } else { theme::ink_3(&theme) }, &label);
+            if on {
+                paint.fill(x + 4.0, y + h - 1.0, w - 8.0, 1.0, theme.foreground);
+            }
+        });
         x += w + 12.0;
     }
     (clicked, right - total)
@@ -231,13 +222,10 @@ pub fn vector(ui: &mut Ui, boxed: &UiBox, at: (f64, f64), w: f64, reserve: f64, 
         let fx = start.round();
         let fw = (start + cell_w).round() - start.round();
         let axis = axis.to_string();
-        ui.draw(
-            boxed,
-            Box::new(move |paint, (x, y, _, _)| {
-                let ty = cap_y_paint(paint, y + cy - 0.5, 20.0);
-                paint.text_s((x + fx + 2.0, ty), cap, theme::ink_3(&theme), &axis);
-            }),
-        );
+        ui.draw(boxed, move |paint, (x, y, _, _)| {
+            let ty = cap_y_paint(paint, y + cy - 0.5, 20.0);
+            paint.text_s((x + fx + 2.0, ty), cap, theme::ink_3(&theme), &axis);
+        });
         cell(ui, index, fx, fw);
     }
 }

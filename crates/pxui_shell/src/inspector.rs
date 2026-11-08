@@ -144,21 +144,18 @@ fn action(ui: &mut Ui, cx: &Ctx, key: &str, label: &str, x: f64, y: f64, enabled
         let (hovered, foreground, ink_3) = (signal.hovered, cx.theme.foreground, cx.ink_3);
         let label = label.to_string();
         let cap = kit::cap_size(ui);
-        ui.draw(
-            &boxed,
-            Box::new(move |paint, (x, y, w, h)| {
-                let color = if enabled && hovered { foreground } else { ink_3 };
-                if label == "\u{d7}" {
-                    let cx = x + (w / 2.0);
-                    let cy = y + (h / 2.0);
-                    paint.line((cx - 3.5, cy - 3.5), (cx + 3.5, cy + 3.5), color);
-                    paint.line((cx - 3.5, cy + 3.5), (cx + 3.5, cy - 3.5), color);
-                } else {
-                    let ty = kit::cap_y_paint(paint, y, h);
-                    paint.text_s((x + 1.0, ty), cap, color, &label);
-                }
-            }),
-        );
+        ui.draw(&boxed, move |paint, (x, y, w, h)| {
+            let color = if enabled && hovered { foreground } else { ink_3 };
+            if label == "\u{d7}" {
+                let cx = x + (w / 2.0);
+                let cy = y + (h / 2.0);
+                paint.line((cx - 3.5, cy - 3.5), (cx + 3.5, cy + 3.5), color);
+                paint.line((cx - 3.5, cy + 3.5), (cx + 3.5, cy - 3.5), color);
+            } else {
+                let ty = kit::cap_y_paint(paint, y, h);
+                paint.text_s((x + 1.0, ty), cap, color, &label);
+            }
+        });
     }
     clicked
 }
@@ -275,22 +272,19 @@ fn input(
             ui.set_state(&boxed, if open { 1 } else { 0 });
             let chip = cx.chip(&choices[index]);
             let shown = choices[index].clone();
-            ui.draw(
-                &boxed,
-                Box::new(move |paint, (x, y, w, h)| {
-                    paint.fill(x, y + h - 1.0, w, 1.0, if open { theme.accent } else { theme::edge(&theme) });
-                    let pad = match chip {
-                        Some(color) => {
-                            paint.rect(x + 2.0, y + 6.0, 8.0, 8.0, Some(color), Some(theme::edge(&theme)));
-                            14.0
-                        }
-                        None => 0.0,
-                    };
-                    let ty = paint.text_top(None, y - 0.5, h);
-                    paint.text_c((x + 2.0 + pad, ty), theme.foreground, &shown);
-                    paint.chevron((x + w - 5.0, y + (h / 2.0)), if open { Dir::Up } else { Dir::Down }, theme.foreground);
-                }),
-            );
+            ui.draw(&boxed, move |paint, (x, y, w, h)| {
+                paint.fill(x, y + h - 1.0, w, 1.0, if open { theme.accent } else { theme::edge(&theme) });
+                let pad = match chip {
+                    Some(color) => {
+                        paint.rect(x + 2.0, y + 6.0, 8.0, 8.0, Some(color), Some(theme::edge(&theme)));
+                        14.0
+                    }
+                    None => 0.0,
+                };
+                let ty = paint.text_top(None, y - 0.5, h);
+                paint.text_c((x + 2.0 + pad, ty), theme.foreground, &shown);
+                paint.chevron((x + w - 5.0, y + (h / 2.0)), if open { Dir::Up } else { Dir::Down }, theme.foreground);
+            });
             if !open || just_opened {
                 return Vec::new();
             }
@@ -363,27 +357,24 @@ fn driven(ui: &mut Ui, cx: &Ctx, path: &str, title: &str, source: &str, live: Op
             let ink_2 = cx.ink_2;
             let source = source.to_string();
             let live = live.clone();
-            ui.draw(
-                &boxed,
-                Box::new(move |paint, (x, y, _, _)| {
-                    let ty = paint.text_top(None, y + control_y - 0.5, 20.0);
-                    let left = x + control_x + 2.0;
-                    let right = x + control_x + control_w - 2.0;
-                    paint.text_c((left, ty), theme.accent, "\u{2190}");
-                    let source_x = left + paint.text_width(None, "\u{2190}") + 6.0;
-                    let live_w = match &live {
-                        Some(v) => paint.text_width(None, v) + 6.0,
-                        None => 0.0,
-                    };
-                    let size = paint.font_size;
-                    let shown = ellipsis(&mut |s| paint.text_width(Some(size), s), right - source_x - live_w, &source);
-                    paint.text_c((source_x, ty), ink_2, &shown);
-                    if let Some(value) = &live {
-                        let vw = paint.text_width(None, value);
-                        paint.text_c((right - vw, ty), theme.foreground, value);
-                    }
-                }),
-            );
+            ui.draw(&boxed, move |paint, (x, y, _, _)| {
+                let ty = paint.text_top(None, y + control_y - 0.5, 20.0);
+                let left = x + control_x + 2.0;
+                let right = x + control_x + control_w - 2.0;
+                paint.text_c((left, ty), theme.accent, "\u{2190}");
+                let source_x = left + paint.text_width(None, "\u{2190}") + 6.0;
+                let live_w = match &live {
+                    Some(v) => paint.text_width(None, v) + 6.0,
+                    None => 0.0,
+                };
+                let size = paint.font_size;
+                let shown = ellipsis(&mut |s| paint.text_width(Some(size), s), right - source_x - live_w, &source);
+                paint.text_c((source_x, ty), ink_2, &shown);
+                if let Some(value) = &live {
+                    let vw = paint.text_width(None, value);
+                    paint.text_c((right - vw, ty), theme.foreground, value);
+                }
+            });
             if followed { vec![FlowChange::Follow(path.to_string())] } else { Vec::new() }
         };
         let reset = hovered && action(ui, cx, &format!("reset-{path}"), "\u{d7}", cx.width - 32.0, control_y, true);

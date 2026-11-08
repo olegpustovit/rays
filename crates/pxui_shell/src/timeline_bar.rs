@@ -28,15 +28,12 @@ pub fn draw(ui: &mut Ui, bounds: (i64, i64, i64, i64), edge: bool, playing: bool
     let (fx, fy, fw, fh) = (x as f64, y as f64, width as f64, height as f64);
     let bar = ui.box_("workspace-timeline", BoxOpts::default().flags(CLIP | CLICKABLE).w(Size::Px(fw)).h(Size::Px(fh)).at((fx, fy)));
     let top = if edge { 1.0 } else { 0.0 };
-    ui.draw(
-        &bar,
-        Box::new(move |paint, (x, y, w, h)| {
-            paint.fill(x, y, w, h, theme.panel);
-            if edge {
-                paint.fill(x, y, w, 1.0, theme::edge(&theme));
-            }
-        }),
-    );
+    ui.draw(&bar, move |paint, (x, y, w, h)| {
+        paint.fill(x, y, w, h, theme.panel);
+        if edge {
+            paint.fill(x, y, w, 1.0, theme::edge(&theme));
+        }
+    });
     let tall = fh - top >= 56.0;
     let bar_h = if tall { 24.0 } else { fh - top };
     let mut out: Vec<Intent> = Vec::new();
@@ -105,63 +102,57 @@ pub fn draw(ui: &mut Ui, bounds: (i64, i64, i64, i64), edge: bool, playing: bool
         } else {
             None
         };
-        ui.draw(
-            &bar,
-            Box::new(move |paint, (x, y, w, _)| {
-                let y = y + top;
-                let h = bar_h;
-                let cy = kit::cap_y_paint(paint, y, h);
-                paint.cap((x + frame_label, cy), None, if tall { "Frame" } else { "F" });
-                if tall {
-                    paint.cap((x + time_label, cy), None, "Time");
-                    let ew = paint.cap_width("End");
-                    paint.cap((x + end_x - 8.0 - ew, cy), None, "End");
-                    paint.fill(x + rule_x, y + ((h - 12.0) / 2.0), 1.0, 12.0, theme::border(&theme));
-                    paint.fill(x, y + bar_h, w, 1.0, theme::edge(&theme));
-                }
-                let ty = paint.text_top(None, y, h);
-                paint.text_c((x + readout_x, ty), if tall { theme.foreground } else { theme::ink_2(&theme) }, &readout);
-            }),
-        );
+        ui.draw(&bar, move |paint, (x, y, w, _)| {
+            let y = y + top;
+            let h = bar_h;
+            let cy = kit::cap_y_paint(paint, y, h);
+            paint.cap((x + frame_label, cy), None, if tall { "Frame" } else { "F" });
+            if tall {
+                paint.cap((x + time_label, cy), None, "Time");
+                let ew = paint.cap_width("End");
+                paint.cap((x + end_x - 8.0 - ew, cy), None, "End");
+                paint.fill(x + rule_x, y + ((h - 12.0) / 2.0), 1.0, 12.0, theme::border(&theme));
+                paint.fill(x, y + bar_h, w, 1.0, theme::edge(&theme));
+            }
+            let ty = paint.text_top(None, y, h);
+            paint.text_c((x + readout_x, ty), if tall { theme.foreground } else { theme::ink_2(&theme) }, &readout);
+        });
         let cap = kit::cap_size(ui);
-        ui.draw(
-            &ruler,
-            Box::new(move |paint, (x, y, w, h)| {
-                paint.fill(x, y, w, h, theme.input);
-                if !tall {
-                    paint.fill(x, y, 1.0, h, theme::edge(&theme));
-                }
-                let left = x + inner_x;
-                let at = |fraction: f64| left + (fraction * span).floor();
-                let head = at(frame as f64 / 1.0f64.max(range));
-                paint.fill(left, y, head - left, h, theme::tint(&theme));
-                // a strip has fifty minor ticks and a major one in five; a taller ruler a tick a
-                // hundredth and a major one in ten, numbered
-                let minors: i64 = if tall { 100 } else { 50 };
-                let every: i64 = if tall { 10 } else { 5 };
-                let minor_h = if tall { 6.0 } else { 5.0 };
-                let major_h = if tall { 14.0 } else { 10.0 };
-                for tick in 0..minors {
-                    let tx = at(tick as f64 / minors as f64);
-                    if tick % every == 0 {
-                        paint.fill(tx, y + h - major_h, 1.0, major_h, theme::border(&theme));
-                        if tall {
-                            let cy = kit::cap_y_paint(paint, y + 16.0, 24.0);
-                            let number = (range * tick as f64 / minors as f64).round() as i64;
-                            paint.text_s((tx + 4.0, cy), cap, theme::ink_3(&theme), &number.to_string());
-                        }
-                    } else {
-                        paint.fill(tx, y + h - minor_h, 1.0, minor_h, theme::edge(&theme));
+        ui.draw(&ruler, move |paint, (x, y, w, h)| {
+            paint.fill(x, y, w, h, theme.input);
+            if !tall {
+                paint.fill(x, y, 1.0, h, theme::edge(&theme));
+            }
+            let left = x + inner_x;
+            let at = |fraction: f64| left + (fraction * span).floor();
+            let head = at(frame as f64 / 1.0f64.max(range));
+            paint.fill(left, y, head - left, h, theme::tint(&theme));
+            // a strip has fifty minor ticks and a major one in five; a taller ruler a tick a
+            // hundredth and a major one in ten, numbered
+            let minors: i64 = if tall { 100 } else { 50 };
+            let every: i64 = if tall { 10 } else { 5 };
+            let minor_h = if tall { 6.0 } else { 5.0 };
+            let major_h = if tall { 14.0 } else { 10.0 };
+            for tick in 0..minors {
+                let tx = at(tick as f64 / minors as f64);
+                if tick % every == 0 {
+                    paint.fill(tx, y + h - major_h, 1.0, major_h, theme::border(&theme));
+                    if tall {
+                        let cy = kit::cap_y_paint(paint, y + 16.0, 24.0);
+                        let number = (range * tick as f64 / minors as f64).round() as i64;
+                        paint.text_s((tx + 4.0, cy), cap, theme::ink_3(&theme), &number.to_string());
                     }
+                } else {
+                    paint.fill(tx, y + h - minor_h, 1.0, minor_h, theme::edge(&theme));
                 }
-                // the 2-point accent playhead, and the frame as an accent label right of it
-                let head = if tall { head - 1.0 } else { head };
-                paint.fill(head, y, 2.0, h, theme.accent);
-                let tag_h = if tall { 24.0 } else { 14.0 };
-                let cy = kit::cap_y_paint(paint, y, tag_h);
-                paint.cap((head + 2.0, cy), Some(theme.accent), &frame.to_string());
-            }),
-        );
+            }
+            // the 2-point accent playhead, and the frame as an accent label right of it
+            let head = if tall { head - 1.0 } else { head };
+            paint.fill(head, y, 2.0, h, theme.accent);
+            let tag_h = if tall { 24.0 } else { 14.0 };
+            let cy = kit::cap_y_paint(paint, y, tag_h);
+            paint.cap((head + 2.0, cy), Some(theme.accent), &frame.to_string());
+        });
         // a typed frame clamps to the timeline: 0 to the last frame
         if typed != current {
             if let Some(n) = int_of_string_opt(&typed) {

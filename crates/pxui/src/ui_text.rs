@@ -943,80 +943,77 @@ impl Ui {
         let theme = self.theme();
         let o = o.clone();
         let size = o.size;
-        self.draw(
-            &bx,
-            Box::new(move |paint, rect| {
-                let bounds = ints(rect);
-                let (x, y, w, h) = bounds;
-                let previous_clip = paint.clip_rect;
-                paint.clip_rect = intersect(previous_clip, (x as f64, y as f64, w as f64, h as f64));
-                if invalid || editing || !o.bare {
-                    underline(
-                        paint,
-                        bounds,
-                        if invalid {
-                            theme::invalid()
-                        } else if editing {
-                            theme.accent
+        self.draw(&bx, move |paint, rect| {
+            let bounds = ints(rect);
+            let (x, y, w, h) = bounds;
+            let previous_clip = paint.clip_rect;
+            paint.clip_rect = intersect(previous_clip, (x as f64, y as f64, w as f64, h as f64));
+            if invalid || editing || !o.bare {
+                underline(
+                    paint,
+                    bounds,
+                    if invalid {
+                        theme::invalid()
+                    } else if editing {
+                        theme.accent
+                    } else {
+                        o.line.unwrap_or(theme::edge(&theme))
+                    },
+                );
+            }
+            // the content is centred in the 19 points above the hairline: a body line starts half a point up
+            let text_y = match size {
+                Some(size) => (y + 0.max((h - size) / 2)) as f64,
+                None => y as f64 + (h - 1 - paint.font_size) as f64 / 2.0 - 0.5,
+            };
+            if editing && focused_now {
+                let ty = y + 0.max((h - size.unwrap_or(paint.font_size)) / 2);
+                paint_text_edit(paint, size, false, 2.0, true, bounds, ty, &composition, &edit);
+            } else {
+                // the 2-point line under the value is its position in the soft range
+                if let Some(f) = o.fraction {
+                    paint.fill(x as f64, (y + h - 3) as f64, w as f64 * 0.0f64.max(1.0f64.min(f)), 2.0, theme::ink_2(&theme));
+                }
+                let tracking = o.tracking.unwrap_or(0.0);
+                match (&o.lead, &o.trail) {
+                    (None, None) if shown.is_empty() && o.placeholder.is_some() => {
+                        paint.text_with(((x + 2) as f64, text_y), size, 0.0, Some(theme::ink_3(&theme)), o.placeholder.as_ref().unwrap());
+                    }
+                    (None, None) => {
+                        let width = paint.text_width(size, &shown);
+                        let tx = if o.left { (x + 2) as f64 } else { (x + w - 2) as f64 - width };
+                        paint.text_with((tx, text_y), size, tracking, None, &shown);
+                    }
+                    _ => {
+                        // a lead (the expression's f) and a trail (its live value) frame the value: 6 between
+                        let mut draw_part = |paint: &mut Paint, right: bool, text: &str, color: Color| -> f64 {
+                            let width = paint.text_width(size, text);
+                            let tx = if right { (x + w - 2) as f64 - width } else { (x + 2) as f64 };
+                            paint.text_with((tx, text_y), size, 0.0, Some(color), text);
+                            width
+                        };
+                        let lead_w = match &o.lead {
+                            Some((t, c)) => draw_part(paint, false, t, *c) + 6.0,
+                            None => 0.0,
+                        };
+                        let trail_w = match &o.trail {
+                            Some((t, c)) => draw_part(paint, true, t, *c) + 6.0,
+                            None => 0.0,
+                        };
+                        // with no lead the value sits against its trail (a unit: [35 mm])
+                        let fit_size = size.unwrap_or(paint.font_size);
+                        let fitted = inspector_fit(paint, fit_size, w as f64 - 4.0 - lead_w - trail_w, &shown);
+                        let value_x = if o.lead.is_none() && !o.left {
+                            (x + w - 2) as f64 - trail_w - paint.text_width(size, &fitted)
                         } else {
-                            o.line.unwrap_or(theme::edge(&theme))
-                        },
-                    );
-                }
-                // the content is centred in the 19 points above the hairline: a body line starts half a point up
-                let text_y = match size {
-                    Some(size) => (y + 0.max((h - size) / 2)) as f64,
-                    None => y as f64 + (h - 1 - paint.font_size) as f64 / 2.0 - 0.5,
-                };
-                if editing && focused_now {
-                    let ty = y + 0.max((h - size.unwrap_or(paint.font_size)) / 2);
-                    paint_text_edit(paint, size, false, 2.0, true, bounds, ty, &composition, &edit);
-                } else {
-                    // the 2-point line under the value is its position in the soft range
-                    if let Some(f) = o.fraction {
-                        paint.fill(x as f64, (y + h - 3) as f64, w as f64 * 0.0f64.max(1.0f64.min(f)), 2.0, theme::ink_2(&theme));
-                    }
-                    let tracking = o.tracking.unwrap_or(0.0);
-                    match (&o.lead, &o.trail) {
-                        (None, None) if shown.is_empty() && o.placeholder.is_some() => {
-                            paint.text_with(((x + 2) as f64, text_y), size, 0.0, Some(theme::ink_3(&theme)), o.placeholder.as_ref().unwrap());
-                        }
-                        (None, None) => {
-                            let width = paint.text_width(size, &shown);
-                            let tx = if o.left { (x + 2) as f64 } else { (x + w - 2) as f64 - width };
-                            paint.text_with((tx, text_y), size, tracking, None, &shown);
-                        }
-                        _ => {
-                            // a lead (the expression's f) and a trail (its live value) frame the value: 6 between
-                            let mut draw_part = |paint: &mut Paint, right: bool, text: &str, color: Color| -> f64 {
-                                let width = paint.text_width(size, text);
-                                let tx = if right { (x + w - 2) as f64 - width } else { (x + 2) as f64 };
-                                paint.text_with((tx, text_y), size, 0.0, Some(color), text);
-                                width
-                            };
-                            let lead_w = match &o.lead {
-                                Some((t, c)) => draw_part(paint, false, t, *c) + 6.0,
-                                None => 0.0,
-                            };
-                            let trail_w = match &o.trail {
-                                Some((t, c)) => draw_part(paint, true, t, *c) + 6.0,
-                                None => 0.0,
-                            };
-                            // with no lead the value sits against its trail (a unit: [35 mm])
-                            let fit_size = size.unwrap_or(paint.font_size);
-                            let fitted = inspector_fit(paint, fit_size, w as f64 - 4.0 - lead_w - trail_w, &shown);
-                            let value_x = if o.lead.is_none() && !o.left {
-                                (x + w - 2) as f64 - trail_w - paint.text_width(size, &fitted)
-                            } else {
-                                (x + 2) as f64 + lead_w
-                            };
-                            paint.text_with((value_x, text_y), size, 0.0, Some(theme.foreground), &fitted);
-                        }
+                            (x + 2) as f64 + lead_w
+                        };
+                        paint.text_with((value_x, text_y), size, 0.0, Some(theme.foreground), &fitted);
                     }
                 }
-                paint.clip_rect = previous_clip;
-            }),
-        );
+            }
+            paint.clip_rect = previous_clip;
+        });
         (value, editing)
     }
 
@@ -1130,54 +1127,51 @@ impl Ui {
         let index = index.map(|s| s.to_owned());
         let title_own = title.to_owned();
         let detail = detail.to_owned();
-        self.draw(
-            &header,
-            Box::new(move |paint, (x, y, w, h)| {
-                if !win {
-                    paint.fill(x, y + h - 1.0, w, 1.0, theme::edge(&theme));
+        self.draw(&header, move |paint, (x, y, w, h)| {
+            if !win {
+                paint.fill(x, y + h - 1.0, w, 1.0, theme::edge(&theme));
+            }
+            if chips {
+                let at = y + 12.0 + paint.text_top(Some(small), 0.0, line);
+                let mut cx = x + 8.0;
+                // the kind gives way when the index and badge need the room
+                let per = small as f64 / 2.0 + 0.08 * small as f64;
+                let taken = index.as_ref().map(|t| mono_width(0.0, small, t) + 6.0).unwrap_or(0.0)
+                    + badge.as_ref().map(|t| mono_width(0.08 * small as f64, small, t) + 6.0).unwrap_or(0.0);
+                if let Some(text) = &kind {
+                    let room = ((w - 16.0 - taken) / per) as i64;
+                    let text: String = if text.len() as i64 <= room {
+                        text.clone()
+                    } else if room <= 1 {
+                        String::new()
+                    } else {
+                        format!("{}.", &text[..(room - 1) as usize])
+                    };
+                    paint.cap((cx, at), None, &text);
+                    // the glyphs run a little wider than the design's metrics: never closer than 6
+                    cx += mono_width(0.08 * small as f64, small, &text).max(paint.cap_width(&text)) + 6.0;
                 }
-                if chips {
-                    let at = y + 12.0 + paint.text_top(Some(small), 0.0, line);
-                    let mut cx = x + 8.0;
-                    // the kind gives way when the index and badge need the room
-                    let per = small as f64 / 2.0 + 0.08 * small as f64;
-                    let taken = index.as_ref().map(|t| mono_width(0.0, small, t) + 6.0).unwrap_or(0.0)
-                        + badge.as_ref().map(|t| mono_width(0.08 * small as f64, small, t) + 6.0).unwrap_or(0.0);
-                    if let Some(text) = &kind {
-                        let room = ((w - 16.0 - taken) / per) as i64;
-                        let text: String = if text.len() as i64 <= room {
-                            text.clone()
-                        } else if room <= 1 {
-                            String::new()
-                        } else {
-                            format!("{}.", &text[..(room - 1) as usize])
-                        };
-                        paint.cap((cx, at), None, &text);
-                        // the glyphs run a little wider than the design's metrics: never closer than 6
-                        cx += mono_width(0.08 * small as f64, small, &text).max(paint.cap_width(&text)) + 6.0;
-                    }
-                    if let Some(text) = &badge {
-                        paint.cap((cx, at), Some(theme.accent), text);
-                    }
-                    // the sheet's 0.04em tracking follows every letter, the last too, so it ends 8 from the edge
-                    if let Some(text) = &index {
-                        let tracking = 0.04 * small as f64;
-                        let count = text.bytes().filter(|b| b & 0xc0 != 0x80).count();
-                        let tw = paint.text_width(Some(small), text);
-                        paint.text_with((x + w - 8.0 - tw - tracking * count as f64, at), Some(small), tracking, Some(theme::ink_3(&theme)), text);
-                    }
+                if let Some(text) = &badge {
+                    paint.cap((cx, at), Some(theme.accent), text);
                 }
-                if !renaming {
-                    let dy = if win { paint.text_top(Some(display_size), 0.0, title_h) } else { 2.0 };
-                    let fitted = inspector_fit(paint, display_size, w - 2.0 * text_x, &title_own);
-                    paint.text_with((x + text_x, y + y_title + dy), Some(display_size), -0.01 * display_size as f64, Some(theme.foreground), &fitted);
+                // the sheet's 0.04em tracking follows every letter, the last too, so it ends 8 from the edge
+                if let Some(text) = &index {
+                    let tracking = 0.04 * small as f64;
+                    let count = text.bytes().filter(|b| b & 0xc0 != 0x80).count();
+                    let tw = paint.text_width(Some(small), text);
+                    paint.text_with((x + w - 8.0 - tw - tracking * count as f64, at), Some(small), tracking, Some(theme::ink_3(&theme)), text);
                 }
-                let ty = paint.text_top(None, 0.0, line);
-                let fs = paint.font_size;
-                let fitted = inspector_fit(paint, fs, w - 2.0 * text_x, &detail);
-                paint.text_c((x + text_x, y + y_detail + ty), theme::ink_2(&theme), &fitted);
-            }),
-        );
+            }
+            if !renaming {
+                let dy = if win { paint.text_top(Some(display_size), 0.0, title_h) } else { 2.0 };
+                let fitted = inspector_fit(paint, display_size, w - 2.0 * text_x, &title_own);
+                paint.text_with((x + text_x, y + y_title + dy), Some(display_size), -0.01 * display_size as f64, Some(theme.foreground), &fitted);
+            }
+            let ty = paint.text_top(None, 0.0, line);
+            let fs = paint.font_size;
+            let fitted = inspector_fit(paint, fs, w - 2.0 * text_x, &detail);
+            paint.text_c((x + text_x, y + y_detail + ty), theme::ink_2(&theme), &fitted);
+        });
         Head { renamed: title_shown, chosen: pressed, reset_pressed }
     }
 
@@ -1213,26 +1207,23 @@ impl Ui {
         let small = 8.max(font_size - 2);
         let label = label.to_owned();
         let hint = hint.to_owned();
-        self.draw(
-            &b,
-            Box::new(move |paint, rect| {
-                let (x, y, _, h) = rect;
-                paint_button_ground(paint, &theme, enabled && signal.held, enabled && signal.hovered, on, false, rect);
-                let ty = paint.text_top(None, y, h);
-                let ink = if !enabled {
-                    theme::ink_3(&theme)
-                } else if dim {
-                    theme::ink_2(&theme)
-                } else {
-                    theme.foreground
-                };
-                paint.text_c((x + 1.0 + pad, ty), ink, &label);
-                if !hint.is_empty() {
-                    let hy = paint.text_top(Some(small), y, h);
-                    paint.text_s((x + 1.0 + pad + mono_width(0.0, font_size, &label) + 6.0, hy), small, theme::ink_3(&theme), &hint);
-                }
-            }),
-        );
+        self.draw(&b, move |paint, rect| {
+            let (x, y, _, h) = rect;
+            paint_button_ground(paint, &theme, enabled && signal.held, enabled && signal.hovered, on, false, rect);
+            let ty = paint.text_top(None, y, h);
+            let ink = if !enabled {
+                theme::ink_3(&theme)
+            } else if dim {
+                theme::ink_2(&theme)
+            } else {
+                theme.foreground
+            };
+            paint.text_c((x + 1.0 + pad, ty), ink, &label);
+            if !hint.is_empty() {
+                let hy = paint.text_top(Some(small), y, h);
+                paint.text_s((x + 1.0 + pad + mono_width(0.0, font_size, &label) + 6.0, hy), small, theme::ink_3(&theme), &hint);
+            }
+        });
     }
 
     /// A single-line field. A click places the caret and Shift-click or a drag extends the
@@ -1274,26 +1265,23 @@ impl Ui {
         }
         let font_size = self.font_size();
         let shown_value = value.clone();
-        self.draw(
-            &row,
-            Box::new(move |paint, rect| {
-                let bounds = ints(rect);
-                let (x, y, _, h) = bounds;
-                let control = value_control(bounds);
-                let (cx, cy, cw, ch) = control;
-                if hovered {
-                    hover_row(paint, &theme, bounds);
-                }
-                kit_text(paint, Some(theme::ink_2(&theme)), x + SIDE, label_y(font_size, y, h), &shown);
-                underline(paint, control, if focused { theme.accent } else { theme::edge(&theme) });
-                if focused {
-                    paint_text_edit(paint, None, false, 2.0, true, control, label_y(font_size, y, h), &composition, &edit);
-                } else {
-                    paint.input_region(0.0, cx as f64, cy as f64, cw as f64, ch as f64, false);
-                    kit_text(paint, Some(theme.foreground), cx + 2, label_y(font_size, y, h), &shown_value);
-                }
-            }),
-        );
+        self.draw(&row, move |paint, rect| {
+            let bounds = ints(rect);
+            let (x, y, _, h) = bounds;
+            let control = value_control(bounds);
+            let (cx, cy, cw, ch) = control;
+            if hovered {
+                hover_row(paint, &theme, bounds);
+            }
+            kit_text(paint, Some(theme::ink_2(&theme)), x + SIDE, label_y(font_size, y, h), &shown);
+            underline(paint, control, if focused { theme.accent } else { theme::edge(&theme) });
+            if focused {
+                paint_text_edit(paint, None, false, 2.0, true, control, label_y(font_size, y, h), &composition, &edit);
+            } else {
+                paint.input_region(0.0, cx as f64, cy as f64, cw as f64, ch as f64, false);
+                kit_text(paint, Some(theme.foreground), cx + 2, label_y(font_size, y, h), &shown_value);
+            }
+        });
         value
     }
 
@@ -1341,25 +1329,22 @@ impl Ui {
         let font_size = self.font_size();
         let placeholder = placeholder.to_owned();
         let pedit = edit.clone();
-        self.draw(
-            &field,
-            Box::new(move |paint, rect| {
-                let control = ints(rect);
-                let (x, y, _, h) = control;
-                underline(paint, control, if focused { theme.accent } else { theme::edge(&theme) });
-                if focused {
-                    paint_text_edit(paint, None, false, 2.0, true, control, label_y(font_size, y, h), &composition, &pedit);
-                } else {
-                    kit_text(
-                        paint,
-                        Some(if pedit.text.is_empty() { theme::ink_3(&theme) } else { theme.foreground }),
-                        x + 2,
-                        label_y(font_size, y, h),
-                        if pedit.text.is_empty() { &placeholder } else { &pedit.text },
-                    );
-                }
-            }),
-        );
+        self.draw(&field, move |paint, rect| {
+            let control = ints(rect);
+            let (x, y, _, h) = control;
+            underline(paint, control, if focused { theme.accent } else { theme::edge(&theme) });
+            if focused {
+                paint_text_edit(paint, None, false, 2.0, true, control, label_y(font_size, y, h), &composition, &pedit);
+            } else {
+                kit_text(
+                    paint,
+                    Some(if pedit.text.is_empty() { theme::ink_3(&theme) } else { theme.foreground }),
+                    x + 2,
+                    label_y(font_size, y, h),
+                    if pedit.text.is_empty() { &placeholder } else { &pedit.text },
+                );
+            }
+        });
         (edit.text, step)
     }
 }
@@ -2435,36 +2420,30 @@ impl Ui {
             self.set_at(container, (px, py));
             let selected = st.selected;
             let doc = items[selected].doc.clone();
-            self.draw(
-                container,
-                Box::new(move |paint, (x, y, w, h)| {
-                    paint.fill(x, y, w, h, theme.input);
-                    paint.frame(x, y, w, h, theme::edge(&theme));
-                    if !doc.is_empty() {
-                        paint.text_c((x + 8.0, y + h - 18.0), theme::muted(&theme), &display(&doc));
-                    }
-                }),
-            );
+            self.draw(container, move |paint, (x, y, w, h)| {
+                paint.fill(x, y, w, h, theme.input);
+                paint.frame(x, y, w, h, theme::edge(&theme));
+                if !doc.is_empty() {
+                    paint.text_c((x + 8.0, y + h - 18.0), theme::muted(&theme), &display(&doc));
+                }
+            });
             for (i, r) in boxes.iter().enumerate() {
                 let c = items[first + i].clone();
                 let hovered = self.signal(r).hovered;
                 let is_sel = first + i == selected;
                 let font_size = self.font_size();
-                self.draw(
-                    r,
-                    Box::new(move |paint, rect| {
-                        let bounds = ints(rect);
-                        let (rx, ry, rw, rh) = bounds;
-                        if is_sel {
-                            fill_i(paint, bounds, theme.control);
-                        } else if hovered {
-                            hover_row(paint, &theme, bounds);
-                        }
-                        kit_text(paint, Some(theme.foreground), rx + SIDE, label_y(font_size, ry, rh), &c.label);
-                        let dw = paint.text_width(None, &c.detail) as i64;
-                        kit_text(paint, Some(theme::muted(&theme)), rx + rw - dw - SIDE, label_y(font_size, ry, rh), &c.detail);
-                    }),
-                );
+                self.draw(r, move |paint, rect| {
+                    let bounds = ints(rect);
+                    let (rx, ry, rw, rh) = bounds;
+                    if is_sel {
+                        fill_i(paint, bounds, theme.control);
+                    } else if hovered {
+                        hover_row(paint, &theme, bounds);
+                    }
+                    kit_text(paint, Some(theme.foreground), rx + SIDE, label_y(font_size, ry, rh), &c.label);
+                    let dw = paint.text_width(None, &c.detail) as i64;
+                    kit_text(paint, Some(theme::muted(&theme)), rx + rw - dw - SIDE, label_y(font_size, ry, rh), &c.detail);
+                });
             }
         }
         // the text area's painting: gutter, selection, runs, diagnostics, caret
@@ -2492,7 +2471,7 @@ impl Ui {
             gutter,
             theme,
         };
-        self.draw(&body, Box::new(move |paint, rect| painted.paint(paint, rect)));
+        self.draw(&body, move |paint, rect| painted.paint(paint, rect));
         (edit.text, st.submitted)
     }
 }
@@ -2839,25 +2818,22 @@ impl Ui {
         let (slash, at_rest) = (o.slash, o.at_rest);
         {
             let edit = edit.clone();
-            self.draw(
-                &search,
-                Box::new(move |paint, rect| {
-                    let (x, y, w, h) = ints(rect);
-                    let field = (x + 4, y + 4, 1.max(w - 8), 1.max(h - 8));
-                    let (cx, cy, cw, ch) = field;
-                    // a field that has not been typed in yet can sit at rest: the hairline and no caret
-                    let resting = at_rest && edit.text.is_empty();
-                    underline(paint, field, if resting { theme::edge(&theme) } else { theme.accent });
-                    if slash {
-                        kit_text(paint, Some(theme::ink_2(&theme)), cx + 2, label_y(font_size, cy, ch), "/");
-                    }
-                    let control = (cx + prefix, cy, 1.max(cw - prefix), ch);
-                    if edit.text.is_empty() {
-                        paint.text_c(((cx + prefix) as f64 + inset, label_y(font_size, cy, ch) as f64), theme::ink_3(&theme), &placeholder);
-                    }
-                    paint_text_edit(paint, None, false, inset, !edit.text.is_empty(), control, label_y(font_size, cy, ch), &composition, &edit);
-                }),
-            );
+            self.draw(&search, move |paint, rect| {
+                let (x, y, w, h) = ints(rect);
+                let field = (x + 4, y + 4, 1.max(w - 8), 1.max(h - 8));
+                let (cx, cy, cw, ch) = field;
+                // a field that has not been typed in yet can sit at rest: the hairline and no caret
+                let resting = at_rest && edit.text.is_empty();
+                underline(paint, field, if resting { theme::edge(&theme) } else { theme.accent });
+                if slash {
+                    kit_text(paint, Some(theme::ink_2(&theme)), cx + 2, label_y(font_size, cy, ch), "/");
+                }
+                let control = (cx + prefix, cy, 1.max(cw - prefix), ch);
+                if edit.text.is_empty() {
+                    paint.text_c(((cx + prefix) as f64 + inset, label_y(font_size, cy, ch) as f64), theme::ink_3(&theme), &placeholder);
+                }
+                paint_text_edit(paint, None, false, inset, !edit.text.is_empty(), control, label_y(font_size, cy, ch), &composition, &edit);
+            });
         }
         let saved = self.enter(&list);
         let row_height = self.row_height();
@@ -2883,86 +2859,83 @@ impl Ui {
             let has_mark = o.mark.is_some();
             let unavailable = off(index);
             let query = query.clone();
-            self.draw(
-                &row,
-                Box::new(move |paint, rect| {
-                    let bounds = ints(rect);
-                    let (x, y, w, h) = bounds;
-                    // the keyboard cursor is the control fill; a row armed for deletion reads in the error colour
-                    if doomed {
-                        fill_i(paint, bounds, theme::pressed_fill(&theme));
-                    } else if current {
-                        fill_i(paint, bounds, theme.control);
-                    } else if hovered {
-                        hover_row(paint, &theme, bounds);
+            self.draw(&row, move |paint, rect| {
+                let bounds = ints(rect);
+                let (x, y, w, h) = bounds;
+                // the keyboard cursor is the control fill; a row armed for deletion reads in the error colour
+                if doomed {
+                    fill_i(paint, bounds, theme::pressed_fill(&theme));
+                } else if current {
+                    fill_i(paint, bounds, theme.control);
+                } else if hovered {
+                    hover_row(paint, &theme, bounds);
+                }
+                let text_x = if !has_mark { x + SIDE } else { x + SIDE + 16 };
+                // a label that would run into the detail is cut with an ellipsis
+                let key_size = 8.max(paint.font_size - 2);
+                let key_text = "\u{21b5}";
+                let right = if current {
+                    (x + w - SIDE) as f64 - paint.text_width(Some(key_size), key_text) - 8.0
+                } else {
+                    (x + w - SIDE) as f64
+                };
+                let limit = right - paint.text_width(None, &detail) - 12.0 - text_x as f64;
+                let text = ellipsis(&mut |s| paint.text_width(None, s), limit, &text);
+                if let Some(color) = swatch {
+                    fill_i(paint, (x + SIDE, y + (h - 8) / 2, 8, 8), if unavailable { theme::ink_3(&theme) } else { color });
+                }
+                // the query's letters, matched in order, in the accent
+                let q = query.to_ascii_lowercase();
+                let lower = text.to_ascii_lowercase();
+                let mut matched = vec![false; text.len()];
+                let mut next = 0usize;
+                for (at, c) in text.char_indices() {
+                    if next < q.len() && lower.len() > at && lower.as_bytes()[at] == q.as_bytes()[next] {
+                        matched[at] = true;
+                        next += 1;
                     }
-                    let text_x = if !has_mark { x + SIDE } else { x + SIDE + 16 };
-                    // a label that would run into the detail is cut with an ellipsis
-                    let key_size = 8.max(paint.font_size - 2);
-                    let key_text = "\u{21b5}";
-                    let right = if current {
-                        (x + w - SIDE) as f64 - paint.text_width(Some(key_size), key_text) - 8.0
-                    } else {
-                        (x + w - SIDE) as f64
-                    };
-                    let limit = right - paint.text_width(None, &detail) - 12.0 - text_x as f64;
-                    let text = ellipsis(&mut |s| paint.text_width(None, s), limit, &text);
-                    if let Some(color) = swatch {
-                        fill_i(paint, (x + SIDE, y + (h - 8) / 2, 8, 8), if unavailable { theme::ink_3(&theme) } else { color });
+                    let _ = c;
+                }
+                let mut pen = text_x as f64;
+                let mut start = 0usize;
+                while start < text.len() {
+                    let flag = matched[start];
+                    let mut stop = start;
+                    while stop < text.len() && (stop == start || matched[stop] == flag || text.as_bytes()[stop] & 0xc0 == 0x80) {
+                        stop += 1;
                     }
-                    // the query's letters, matched in order, in the accent
-                    let q = query.to_ascii_lowercase();
-                    let lower = text.to_ascii_lowercase();
-                    let mut matched = vec![false; text.len()];
-                    let mut next = 0usize;
-                    for (at, c) in text.char_indices() {
-                        if next < q.len() && lower.len() > at && lower.as_bytes()[at] == q.as_bytes()[next] {
-                            matched[at] = true;
-                            next += 1;
-                        }
-                        let _ = c;
-                    }
-                    let mut pen = text_x as f64;
-                    let mut start = 0usize;
-                    while start < text.len() {
-                        let flag = matched[start];
-                        let mut stop = start;
-                        while stop < text.len() && (stop == start || matched[stop] == flag || text.as_bytes()[stop] & 0xc0 == 0x80) {
-                            stop += 1;
-                        }
-                        let run = &text[start..stop];
-                        paint.text_c(
-                            (pen, label_y(paint.font_size, y, h) as f64),
-                            if doomed {
-                                theme::invalid()
-                            } else if unavailable {
-                                theme::ink_3(&theme)
-                            } else if flag {
-                                theme.accent
-                            } else {
-                                theme.foreground
-                            },
-                            run,
-                        );
-                        pen += paint.text_width(None, run);
-                        start = stop;
-                    }
-                    let right = if current {
-                        let width = paint.text_width(Some(key_size), key_text);
-                        let ty = paint.text_top(Some(key_size), y as f64, h as f64);
-                        paint.text_s(((x + w - SIDE) as f64 - width, ty), key_size, theme::ink_3(&theme), key_text);
-                        (x + w - SIDE) as f64 - width - 8.0
-                    } else {
-                        (x + w - SIDE) as f64
-                    };
-                    let dw = paint.text_width(None, &detail);
+                    let run = &text[start..stop];
                     paint.text_c(
-                        (right - dw, label_y(paint.font_size, y, h) as f64),
-                        if unavailable { theme::ink_3(&theme) } else { theme::muted(&theme) },
-                        &detail,
+                        (pen, label_y(paint.font_size, y, h) as f64),
+                        if doomed {
+                            theme::invalid()
+                        } else if unavailable {
+                            theme::ink_3(&theme)
+                        } else if flag {
+                            theme.accent
+                        } else {
+                            theme.foreground
+                        },
+                        run,
                     );
-                }),
-            );
+                    pen += paint.text_width(None, run);
+                    start = stop;
+                }
+                let right = if current {
+                    let width = paint.text_width(Some(key_size), key_text);
+                    let ty = paint.text_top(Some(key_size), y as f64, h as f64);
+                    paint.text_s(((x + w - SIDE) as f64 - width, ty), key_size, theme::ink_3(&theme), key_text);
+                    (x + w - SIDE) as f64 - width - 8.0
+                } else {
+                    (x + w - SIDE) as f64
+                };
+                let dw = paint.text_width(None, &detail);
+                paint.text_c(
+                    (right - dw, label_y(paint.font_size, y, h) as f64),
+                    if unavailable { theme::ink_3(&theme) } else { theme::muted(&theme) },
+                    &detail,
+                );
+            });
         }
         self.leave(saved);
         self.set_state(&search, cursor);
@@ -3028,7 +3001,7 @@ impl Ui {
             let index = index as i64;
             if text.is_empty() {
                 let line = self.box_(&format!("separator-{}", index), BoxOpts::default().flags(BLOCKING).w(Size::Grow).h(Size::Px(m.gap)));
-                self.draw(&line, Box::new(move |paint, (x, y, w, _)| paint.fill(x, y + 4.0, w, 1.0, theme::edge(&theme))));
+                self.draw(&line, move |paint, (x, y, w, _)| paint.fill(x, y + 4.0, w, 1.0, theme::edge(&theme)));
             } else {
                 let enabled = *enabled;
                 let row = self.kit_row(Some(if enabled { CLICKABLE | FOCUSABLE | BLOCKING | TAB_ONLY } else { BLOCKING }), None, text);
@@ -3046,48 +3019,45 @@ impl Ui {
                 let key_size = m.key_size;
                 let key = m.keys.get(index as usize).filter(|k| !k.is_empty()).cloned();
                 let lead = lead_of(index);
-                self.draw(
-                    &row,
-                    Box::new(move |paint, rect| {
-                        let bounds = ints(rect);
-                        let (rx, y, w, h) = bounds;
-                        if enabled && (signal.hovered || opened == Some(index)) {
-                            fill_i(paint, bounds, theme.control);
-                        }
-                        // the current choice: a 6-point accent square before the label
-                        if selected == Some(index) {
-                            paint.fill(rx as f64 + SIDE as f64, y as f64 + h as f64 / 2.0 - 3.0, 6.0, 6.0, theme.accent);
-                        }
-                        if let Some(color) = swatch {
-                            let sx = (rx + SIDE + lead) as f64;
-                            let sy = y as f64 + h as f64 / 2.0 - 4.0;
-                            paint.fill(sx, sy, 8.0, 8.0, color);
-                            paint.frame(sx, sy, 8.0, 8.0, theme::edge(&theme));
-                        }
-                        // the destructive row reads in the error ink
-                        kit_text(
-                            paint,
-                            Some(if !enabled {
-                                theme::ink_3(&theme)
-                            } else if danger {
-                                theme::invalid()
-                            } else {
-                                theme.foreground
-                            }),
-                            rx + SIDE + lead + swatch_pad as i64,
-                            label_y(font_size, y, h),
-                            &shown,
-                        );
-                        if chevron {
-                            paint.chevron(((rx + w) as f64 - 15.25, y as f64 + h as f64 / 2.0), Dir::Right, theme::ink_2(&theme));
-                        }
-                        if let Some(key) = &key {
-                            let kw = paint.text_width(Some(key_size), key);
-                            let ty = paint.text_top(Some(key_size), y as f64, h as f64);
-                            paint.text_s(((rx + w - SIDE) as f64 - kw, ty), key_size, theme::ink_2(&theme), key);
-                        }
-                    }),
-                );
+                self.draw(&row, move |paint, rect| {
+                    let bounds = ints(rect);
+                    let (rx, y, w, h) = bounds;
+                    if enabled && (signal.hovered || opened == Some(index)) {
+                        fill_i(paint, bounds, theme.control);
+                    }
+                    // the current choice: a 6-point accent square before the label
+                    if selected == Some(index) {
+                        paint.fill(rx as f64 + SIDE as f64, y as f64 + h as f64 / 2.0 - 3.0, 6.0, 6.0, theme.accent);
+                    }
+                    if let Some(color) = swatch {
+                        let sx = (rx + SIDE + lead) as f64;
+                        let sy = y as f64 + h as f64 / 2.0 - 4.0;
+                        paint.fill(sx, sy, 8.0, 8.0, color);
+                        paint.frame(sx, sy, 8.0, 8.0, theme::edge(&theme));
+                    }
+                    // the destructive row reads in the error ink
+                    kit_text(
+                        paint,
+                        Some(if !enabled {
+                            theme::ink_3(&theme)
+                        } else if danger {
+                            theme::invalid()
+                        } else {
+                            theme.foreground
+                        }),
+                        rx + SIDE + lead + swatch_pad as i64,
+                        label_y(font_size, y, h),
+                        &shown,
+                    );
+                    if chevron {
+                        paint.chevron(((rx + w) as f64 - 15.25, y as f64 + h as f64 / 2.0), Dir::Right, theme::ink_2(&theme));
+                    }
+                    if let Some(key) = &key {
+                        let kw = paint.text_width(Some(key_size), key);
+                        let ty = paint.text_top(Some(key_size), y as f64, h as f64);
+                        paint.text_s(((rx + w - SIDE) as f64 - kw, ty), key_size, theme::ink_2(&theme), key);
+                    }
+                });
                 if enabled && signal.clicked && !chevron && picked.is_none() {
                     picked = Some(index);
                 }
