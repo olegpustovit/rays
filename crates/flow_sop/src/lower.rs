@@ -1738,6 +1738,23 @@ pub fn build_call(
         nodes: checked.nodes.iter().filter(|d| d.kind.qualified != definition.kind.qualified).cloned().collect::<Vec<_>>().into(),
         ..checked.clone()
     };
+    // The catalog's packed sites of helpers this body does not reach can never be observed here; a
+    // qualification still gave each one a pending refusal (38,740 sites per edit in a full catalog).
+    let reached_names: std::collections::HashSet<&str> = library.defs.iter().map(|d| d.name.as_str()).collect();
+    // another kind's body cooks as its own node (`lower_default`), never inline in this one
+    let own_body = format!("node:{}", definition.kind.qualified);
+    let reached_owner = |path: &W::Path| {
+        path.first().is_none_or(|owner| match (owner.strip_prefix("def:"), owner.starts_with("node:")) {
+            (Some(name), _) => reached_names.contains(name),
+            (None, true) => *owner == own_body,
+            (None, false) => true,
+        })
+    };
+    let library = Workspace {
+        packed: library.packed.iter().filter(|(path, _)| reached_owner(path)).cloned().collect::<Vec<_>>().into(),
+        packed_roots: library.packed_roots.iter().filter(|(_, path)| reached_owner(path)).cloned().collect(),
+        ..library.clone()
+    };
     let overrides: Vec<(String, Vec<(String, Value)>)> = library
         .graphs
         .iter()
