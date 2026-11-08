@@ -2161,6 +2161,14 @@ impl Ctx {
                     let i = v::int_of(&st.values[ix(index)])?;
                     // the builder is unpublished: take it, write in place, put it back
                     let x = st.values[ix(value)].clone();
+                    // drop alias slots sharing this builder so the buffer is uniquely owned (avoids Arc::make_mut copy on the next store)
+                    for m in &aliases {
+                        let same = match (&st.builders[ix(*m)], &st.builders[ix(sequence)]) {
+                            (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+                            _ => false,
+                        };
+                        if same { st.values[ix(*m)] = Value::No_geo; }
+                    }
                     let mut target = std::mem::replace(&mut st.values[ix(sequence)], Value::No_geo);
                     if matches!(target, Value::List(_)) { seal(st, value); }
                     let stored = store_value(&mut target, i, &x);
