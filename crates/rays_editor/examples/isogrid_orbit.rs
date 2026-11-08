@@ -30,10 +30,7 @@ fn main() {
     let mut tick = 0;
     for _ in 0..30 { tick += 1; let f = frame(tick, at, vec![], false, (0., 0.)); editor = step(editor, &f).0; }
     let idle0 = mem_sys::alloc_bytes_total();
-    mem_sys::TRACE.store(std::env::var("IDLE_TRACE").is_ok(), std::sync::atomic::Ordering::Relaxed);
     for _ in 0..30 { tick += 1; let f = frame(tick, at, vec![], false, (0., 0.)); editor = step(editor, &f).0; }
-    mem_sys::TRACE.store(false, std::sync::atomic::Ordering::Relaxed);
-    if let Ok(p) = std::env::var("IDLE_TRACE") { std::fs::write(p, mem_sys::SAMPLES.lock().unwrap().join("\n=====\n")).unwrap(); return; }
     println!("idle alloc {} KB/frame", (mem_sys::alloc_bytes_total() - idle0) / 30 / 1024);
     // press with Alt held
     tick += 1;
@@ -43,8 +40,6 @@ fn main() {
     let (mut su, mut sr, mut worst) = (0., 0., 0f64);
     let mut p = at;
     let alloc0 = mem_sys::alloc_bytes_total();
-    let tracing = std::env::var("ALLOC_TRACE").is_ok();
-    mem_sys::TRACE.store(tracing, std::sync::atomic::Ordering::Relaxed);
     for _ in 0..frames {
         tick += 1;
         p.0 += 4.;
@@ -53,8 +48,6 @@ fn main() {
         editor = e; su += u; sr += r; worst = worst.max(u + r);
         if u + r > 30. { eprintln!("slow frame {tick}: update {u:.1} ms render {r:.1} ms"); }
     }
-    mem_sys::TRACE.store(false, std::sync::atomic::Ordering::Relaxed);
-    if tracing { std::fs::write(std::env::var("ALLOC_TRACE").unwrap(), mem_sys::SAMPLES.lock().unwrap().join("\n=====\n")).unwrap(); }
     let alloc = (mem_sys::alloc_bytes_total() - alloc0) / frames as u64;
     let cam1 = format!("{:?}", rays::camera::position(&Editor::view_camera(&editor)));
     let n = frames as f64;
@@ -63,5 +56,5 @@ fn main() {
         su / n, sr / n, (su + sr) / n, 1000. / ((su + sr) / n), worst, alloc / 1024);
     Editor::close(&editor);
     flow_native::workspace_gpu::close(&gpu);
-    rays::canvas::destroy(&canvas).unwrap();
+    rays::canvas::destroy(canvas).unwrap();
 }
