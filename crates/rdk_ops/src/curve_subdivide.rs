@@ -3,11 +3,10 @@
 //! OCaml raises `Error.Fail`, `Invalid_argument` and `Cancel.Cancelled` out of `iterate`; here each
 //! is an `error::T`: a failure has code `invalid_parameter` and the OCaml message, a cancellation
 //! has code `cancelled`.
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use rdk_core::{
-    attribute, cancel, edge_group, error, geometry, group, packed, ragged_ops, support, topology,
+    attribute, cancel, edge_group, error, geometry, group, packed, support, topology,
     topology_index, topology_remap,
 };
 use rdk_core::error::Code;
@@ -553,62 +552,10 @@ fn remap_attribute(
 ) -> Result<attribute::T, error::T> {
     let owner = attribute::owner(value);
     let chunk = grain.unwrap_or(16_384);
-    let storage = match attribute::View::storage(value)? {
-        attribute::Storage::Float(values) => {
-            attribute::Storage::Float(Arc::new(numeric(cancel_value, grain, plan, owner, values)?))
-        }
-        attribute::Storage::Int(values) => attribute::Storage::Int(Arc::new(topology_remap::select_int(
-            cancel_value,
-            chunk,
-            None,
-            &discrete_mapping(plan, owner),
-            values,
-        )?)),
-        attribute::Storage::Text(values) => attribute::Storage::Text(Arc::new(topology_remap::select_text(
-            cancel_value,
-            chunk,
-            None,
-            &discrete_mapping(plan, owner),
-            values,
-        )?)),
-        attribute::Storage::IntArray(values) => attribute::Storage::IntArray(ragged_ops::remap_int(
-            cancel_value,
-            grain,
-            &discrete_mapping(plan, owner),
-            values,
-        )?),
-        attribute::Storage::FloatArray(values) => {
-            attribute::Storage::FloatArray(ragged_ops::remap_float(
-                cancel_value,
-                grain,
-                &discrete_mapping(plan, owner),
-                values,
-            )?)
-        }
-        attribute::Storage::Float2(values) => {
-            let view = packed::Float2::View::view(values);
-            attribute::Storage::Float2(packed::Float2::of_owned(
-                numeric(cancel_value, grain, plan, owner, &view.x)?,
-                numeric(cancel_value, grain, plan, owner, &view.y)?,
-            )?)
-        }
-        attribute::Storage::Float3(values) => {
-            let view = packed::Float3::View::view(values)?;
-            attribute::Storage::Float3(packed::Float3::View::of_owned_exn(
-                numeric(cancel_value, grain, plan, owner, &view.x)?,
-                numeric(cancel_value, grain, plan, owner, &view.y)?,
-                numeric(cancel_value, grain, plan, owner, &view.z)?,
-            )?)
-        }
-        attribute::Storage::Float4(values) => {
-            let view = packed::Float4::View::view(values);
-            attribute::Storage::Float4(packed::Float4::of_owned(
-                numeric(cancel_value, grain, plan, owner, &view.x)?,
-                numeric(cancel_value, grain, plan, owner, &view.y)?,
-                numeric(cancel_value, grain, plan, owner, &view.z)?,
-                numeric(cancel_value, grain, plan, owner, &view.w)?,
-            )?)
-        }
+    let source = attribute::View::storage(value)?;
+    let storage = match attribute::map_float_planes(source, |plane| numeric(cancel_value, grain, plan, owner, plane))? {
+        Some(storage) => storage,
+        None => topology_remap::select_storage(cancel_value, chunk, false, &discrete_mapping(plan, owner), source)?,
     };
     attribute::create_owned(attribute::name(value), owner, storage)
 }
@@ -754,6 +701,7 @@ pub fn iterate(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     fn polyline(closed: bool) -> geometry::T {
         let positions = packed::Float3::of_owned(
@@ -807,6 +755,52 @@ mod tests {
         assert_eq!(xs(&single), xs(&tiny));
         let shared = iterate(None, Some(1), false, Scheme::CatmullClark, 2, &polyline(true)).unwrap();
         assert_eq!(xs(&shared), xs(&iterate(None, None, false, Scheme::CatmullClark, 2, &polyline(true)).unwrap()));
+    }
+
+    #[test]
+    fn remapping_keeps_all_storage_kinds_and_rows() {
+        use attribute::{Owner, Storage};
+        let plane = vec![0.0, 4.0, 8.0, 12.0];
+        let storages = [
+            Storage::Float(Arc::new(plane.clone())),
+            Storage::Float2(packed::Float2::of_owned(plane.clone(), plane.clone()).unwrap()),
+            Storage::Float3(packed::Float3::of_owned(plane.clone(), plane.clone(), plane.clone()).unwrap()),
+            Storage::Float4(packed::Float4::of_owned(plane.clone(), plane.clone(), plane.clone(), plane).unwrap()),
+            Storage::Int(Arc::new(vec![10, 20, 30, 40])),
+            Storage::Text(Arc::new([&b"a"[..], &b""[..], &b"\xff"[..], &b"d"[..]].into_iter().collect())),
+            Storage::IntArray(packed::IntArray::create_owned(vec![0, 1, 1, 3, 4], vec![10, 30, 31, 40]).unwrap()),
+            Storage::FloatArray(packed::FloatArray::create_owned(vec![0, 1, 1, 3, 4], vec![10.0, 30.0, 31.0, 40.0]).unwrap()),
+        ];
+        for grain in [1, 97] {
+            for storage in &storages {
+                let source = attribute::create_owned("values", Owner::Point, storage.clone()).unwrap();
+                let input = geometry::with_attribute(source.clone(), &polyline(false)).unwrap();
+                let output = iterate(None, Some(grain), false, Scheme::Bilinear, 1, &input).unwrap();
+                let output = geometry::find_attribute(Owner::Point, "values", &output).unwrap();
+                assert_eq!(attribute::kind_name(&output), attribute::kind_name(&source));
+                assert_eq!(attribute::length(&output), 7);
+                let storage = attribute::View::storage(&output).unwrap();
+                match storage {
+                    Storage::Int(values) => assert_eq!(**values, [10, 20, 30, 40, 10, 20, 30]),
+                    Storage::Text(values) => assert_eq!(values.iter().collect::<Vec<_>>(), [
+                        &b"a"[..], &b""[..], &b"\xff"[..], &b"d"[..], &b"a"[..], &b""[..], &b"\xff"[..],
+                    ]),
+                    Storage::IntArray(values) => {
+                        let view = packed::IntArray::View::view(values);
+                        assert_eq!(&*view.offsets, &[0, 1, 1, 3, 4, 5, 5, 7]);
+                        assert_eq!(&*view.values, &[10, 30, 31, 40, 10, 30, 31]);
+                    }
+                    Storage::FloatArray(values) => {
+                        let view = packed::FloatArray::View::view(values);
+                        assert_eq!(&*view.offsets, &[0, 1, 1, 3, 4, 5, 5, 7]);
+                        assert_eq!(&*view.values, &[10.0, 30.0, 31.0, 40.0, 10.0, 30.0, 31.0]);
+                    }
+                    storage => for plane in attribute::float_planes(storage).unwrap().unwrap() {
+                        assert_eq!(plane, &[0.0, 4.0, 8.0, 12.0, 2.0, 6.0, 10.0]);
+                    },
+                }
+            }
+        }
     }
 
     #[test]

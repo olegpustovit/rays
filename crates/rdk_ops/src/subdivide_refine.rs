@@ -5,7 +5,7 @@ use rays_math::text_array::TextArray;
 use rdk_core::attribute::{self, Owner, Storage};
 use rdk_core::support::Windows;
 use rdk_core::{
-    cancel, edge_group, error, geometry, group, packed, ragged_ops, support, topology,
+    cancel, edge_group, error, geometry, group, packed, support, topology,
     topology_index, topology_remap,
 };
 use rdk_core::error::Code;
@@ -2358,20 +2358,6 @@ pub fn discrete_mapping(
     })
 }
 
-fn discrete_map_ints(mapping: &[i64], source: &[i64]) -> Result<Vec<i64>, error::T> {
-    if source.is_empty() {
-        return Err(invalid_arg("index out of bounds".to_owned()));
-    }
-    Ok(mapping.iter().map(|&at| gi(source, at)).collect())
-}
-
-fn discrete_map_text(mapping: &[i64], source: &TextArray) -> Result<TextArray, error::T> {
-    if source.is_empty() {
-        return Err(invalid_arg("index out of bounds".to_owned()));
-    }
-    Ok(source.gather(mapping.iter().map(|&at| at as usize)))
-}
-
 pub fn vertex_edge_discrete_map(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
@@ -2414,25 +2400,6 @@ fn fvar_enabled(
     owner == Owner::Vertex
         && face_varying_interpolation != SubdivideFvarAll
         && plan.scheme != Scheme::Bilinear
-}
-
-#[allow(clippy::too_many_arguments)]
-fn map_planes(
-    cancel_token: Option<&cancel::T>,
-    grain: Option<i64>,
-    plan: &Plan,
-    owner: Owner,
-    fvar: &Option<FvarRefinement>,
-    planes: &[&[f64]],
-) -> Result<Vec<Vec<f64>>, error::T> {
-    let mut out = Vec::with_capacity(planes.len());
-    for values in planes {
-        out.push(match fvar {
-            None => numeric_map(cancel_token, grain, plan, owner, values)?,
-            Some(fvar) => fvar_float(cancel_token, grain, fvar, values)?,
-        });
-    }
-    Ok(out)
 }
 
 pub fn remap_attribute(
@@ -2480,116 +2447,26 @@ pub fn remap_attribute(
             Storage::Float(Arc::new(output)),
         )?));
     }
-    let use_fvar = fvar_enabled(owner, face_varying_interpolation, plan);
-    let storage = match attribute::View::storage(attribute_value)? {
-        Storage::Float(values) => {
-            let mapped = if use_fvar {
-                let fvar = fvar_refinement(
-                    cancel_token,
-                    grain,
-                    face_varying_interpolation,
-                    plan,
-                    &|left, right| float_equal(gf(values, left), gf(values, right)),
-                )?;
-                fvar_float(cancel_token, grain, &fvar, values)?
-            } else {
-                numeric_map(cancel_token, grain, plan, owner, values)?
-            };
-            Storage::Float(Arc::new(mapped))
-        }
-        Storage::Int(values) => {
-            let mapping = discrete_mapping(cancel_token, grain, plan, owner)?;
-            Storage::Int(Arc::new(discrete_map_ints(&mapping, values)?))
-        }
-        Storage::Text(values) => {
-            let mapping = discrete_mapping(cancel_token, grain, plan, owner)?;
-            Storage::Text(Arc::new(discrete_map_text(&mapping, values)?))
-        }
-        Storage::IntArray(values) => {
-            let mapping = discrete_mapping(cancel_token, grain, plan, owner)?;
-            Storage::IntArray(ragged_ops::remap_int(cancel_token, grain, &mapping, values)?)
-        }
-        Storage::FloatArray(values) => {
-            let mapping = discrete_mapping(cancel_token, grain, plan, owner)?;
-            Storage::FloatArray(ragged_ops::remap_float(cancel_token, grain, &mapping, values)?)
-        }
-        Storage::Float2(values) => {
-            let view = packed::Float2::View::view(values);
-            let fvar = if use_fvar {
-                Some(fvar_refinement(
-                    cancel_token,
-                    grain,
-                    face_varying_interpolation,
-                    plan,
-                    &|left, right| {
-                        float_equal(gf(&view.x, left), gf(&view.x, right))
-                            && float_equal(gf(&view.y, left), gf(&view.y, right))
-                    },
-                )?)
-            } else {
-                None
-            };
-            let mut planes = map_planes(cancel_token, grain, plan, owner, &fvar, &[&view.x, &view.y])?;
-            let y = planes.pop().unwrap_or_default();
-            let x = planes.pop().unwrap_or_default();
-            Storage::Float2(packed::Float2::of_owned(x, y)?)
-        }
-        Storage::Float3(values) => {
-            let view = packed::Float3::View::view(values)?;
-            let fvar = if use_fvar {
-                Some(fvar_refinement(
-                    cancel_token,
-                    grain,
-                    face_varying_interpolation,
-                    plan,
-                    &|left, right| {
-                        float_equal(gf(&view.x, left), gf(&view.x, right))
-                            && float_equal(gf(&view.y, left), gf(&view.y, right))
-                            && float_equal(gf(&view.z, left), gf(&view.z, right))
-                    },
-                )?)
-            } else {
-                None
-            };
-            let mut planes =
-                map_planes(cancel_token, grain, plan, owner, &fvar, &[&view.x, &view.y, &view.z])?;
-            let z = planes.pop().unwrap_or_default();
-            let y = planes.pop().unwrap_or_default();
-            let x = planes.pop().unwrap_or_default();
-            Storage::Float3(packed::Float3::View::of_owned_exn(x, y, z)?)
-        }
-        Storage::Float4(values) => {
-            let view = packed::Float4::View::view(values);
-            let fvar = if use_fvar {
-                Some(fvar_refinement(
-                    cancel_token,
-                    grain,
-                    face_varying_interpolation,
-                    plan,
-                    &|left, right| {
-                        float_equal(gf(&view.x, left), gf(&view.x, right))
-                            && float_equal(gf(&view.y, left), gf(&view.y, right))
-                            && float_equal(gf(&view.z, left), gf(&view.z, right))
-                            && float_equal(gf(&view.w, left), gf(&view.w, right))
-                    },
-                )?)
-            } else {
-                None
-            };
-            let mut planes = map_planes(
+    let source = attribute::View::storage(attribute_value)?;
+    let storage = if let Some(planes) = attribute::float_planes(source)? {
+        let fvar = if fvar_enabled(owner, face_varying_interpolation, plan) {
+            Some(fvar_refinement(
                 cancel_token,
                 grain,
+                face_varying_interpolation,
                 plan,
-                owner,
-                &fvar,
-                &[&view.x, &view.y, &view.z, &view.w],
-            )?;
-            let w = planes.pop().unwrap_or_default();
-            let z = planes.pop().unwrap_or_default();
-            let y = planes.pop().unwrap_or_default();
-            let x = planes.pop().unwrap_or_default();
-            Storage::Float4(packed::Float4::of_owned(x, y, z, w)?)
-        }
+                &|left, right| planes.iter().all(|plane| float_equal(gf(plane, left), gf(plane, right))),
+            )?)
+        } else {
+            None
+        };
+        attribute::map_float_planes(source, |plane| match &fvar {
+            Some(fvar) => fvar_float(cancel_token, grain, fvar, plane),
+            None => numeric_map(cancel_token, grain, plan, owner, plane),
+        })?.expect("a float-kind storage has planes")
+    } else {
+        let mapping = discrete_mapping(cancel_token, grain, plan, owner)?;
+        topology_remap::select_storage(cancel_token, grain_of(grain)?, false, &mapping, source)?
     };
     Ok(Some(attribute::create_owned(name, owner, storage)?))
 }

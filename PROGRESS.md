@@ -6,7 +6,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 
 **Order:** A ∥ B ∥ M ∥ I, then C, then D. One commit per bullet in Wave A runbook where practical.
 
-**Final state (2026-11-08, wrap-up):** `cargo check --workspace --all-targets` clean at HEAD; tree committed. Artifact **not** updated. Crates 67 -> 51.
+**Current state (2026-11-08, resumed):** implementation and qualification remain open. The previous stage reported a clean `cargo check --workspace --all-targets`; that is not completion evidence for the full plan. Artifact v5 source SHA-256 matches the repository mirror (`bd1c9fe2…`). Artifact unchanged. Crates 67 -> 51.
 
 ## Summary
 
@@ -16,8 +16,8 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | B | B0-B5 | - | - |
 | M | M1-M2, M4-M20 (M3 via C6), M21 | M3 | - |
 | I | I1-I6 | - | - |
-| C | C1-C9, C12-C16, C17-C21 | C6, C10, C11 | - |
-| D | D1-D5 | D1 (see notes) | D6 |
+| C | C1-C5, C7-C9, C12-C21 | C6, C10, C11 | - |
+| D | D2-D3 | D1, D4 (benchmark evidence missing) | D5-D6 |
 
 ## Items (commits)
 
@@ -45,7 +45,7 @@ A1-A8, B0-B4: see earlier rows below in git history (`6802a325` ... `96fab43d`);
 | C1 | done | `dc2ee86b` `ef645352` `e6ae19d5` `2612f106` `b4b90916`; Vulkan only type-checked on macOS; source lines grew, gain is allocations/closure types |
 | C2 | done | `33e163b0` `faa8090e` |
 | C3 | done | ~30 commits `25726291`..`141a4afe`; only 2 test-only mutex slots remain |
-| C4 | partial | `a08c927c` six sites converted (`map_float_planes`, `select_storage`); ~18 other files still match storage kinds |
+| C4 | done for shared gather/select | `a08c927c` central selector + plane mapper; resumed stage routes polygon/curve subdivision through them too, deleting per-kind remapping and three private helpers. The four named gather implementations now share `topology_remap::select_storage`; specialised operations still inspect storage kinds. New `remapping_keeps_all_storage_kinds_and_rows` checks all eight kinds, empty CSR rows, opaque text and two grains. |
 | C5 | done | `a12b1efb` |
 | C6 | partial | `4cfcff4a` `7d7241ae`: panel_map plain struct, Cow panes, Rc core; reducers do NOT take `&mut t`, `reduce` still clones once; basic 2509 -> 2089 allocs/frame, empty 5732 -> 4549 |
 | C7, C8 | done | `8e6e0e51`, `69fe4afd` |
@@ -63,7 +63,7 @@ A1-A8, B0-B4: see earlier rows below in git history (`6802a325` ... `96fab43d`);
 | D1 | partial | `959d5dae` `b72ab30d` `b4f74ecf` goldens `9a17f5d7` `1a5de4fe` `8fc3feb4`; 56 prepends removed; some incidental-order spots in spirv.rs left |
 | D2 | done | `37691759` .. `2e224106` + `a0809e01` (5 stages): rdk errors `{operation, code: Code, message}`, typed cancellation |
 | D3 | done | `4e8e7193` one WGSL printer, goldens byte-identical |
-| D4 | done | `8bf0c0d0` `18180e84` packed.rs one CPU engine (-1560/+? lines in diff; now 4714 lines); `1455271c` bench_core example |
+| D4 | implemented; qualification open | `8bf0c0d0` `18180e84` packed.rs one CPU engine (-1560/+? lines in diff; now 4714 lines); `1455271c` bench_core example |
 | D5 | not started | `Value` four float-array variants -> `Floats(width, ..)` (90 sites, 23 files) |
 | D6 | not started | OCaml module names (`Gpu/Profile/Cost`, `t`) - ~67 files, deferred |
 
@@ -127,6 +127,10 @@ Policy (`AGENTS.md`, `docs/history/build-speed.md`, plan B0): one warm workspace
 Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s under load; this run is healthy (not stale).
 
 ## Session log
+
+- 2026-11-08: C4 follow-up: `cargo t -p rdk_ops subdivide` baseline 14 pass / 22.065 s; after change 15 pass / 11.228 s (slowest 0.031 s). `cargo t -p rdk_ops -p sop`: 319 pass / 13.512 s (slowest `attribute_interpolate::tests::parallel_exactness_at_scale`, 1.199 s). `cargo t -p flow_sop test_alloc_budget`: 3 pass / 40.894 s including 40.07 s rebuild (slowest 0.136 s); existing bounds unchanged. `cargo check -p rdk_ops -p sop -p flow_sop`: pass / 18.47 s including build-lock wait, pre-existing warnings only. `git diff --check`: clean. No goldens or boundaries changed.
+
+- 2026-11-08: resumed from `c5bf57b6`; previous turn classified as progress (committed D2 evidence). Re-read live artifact v5 and verified its source matches the mirror. Corrected contradictory C/D summary and final-state claim. Next: complete C4 shared attribute remapping, then C6 and remaining D work; preserve all open qualification requirements.
 
 - 2026-11-08: **pause** — `9dae5ebd` M1 squash; M14 WIP reverted; **~28/63**; artifact unchanged; next **I**, **M14**, **B5** `rdk`.
 - 2026-11-08: M1 landed (site cache); `cargo check -p rays_bin` ~7.4s.
