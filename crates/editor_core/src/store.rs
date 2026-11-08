@@ -22,12 +22,12 @@ pub fn read_text(filename: &str) -> Result<String, String> {
 pub fn user_folder(platform: Platform, pref: Option<&str>, home: &str) -> String {
     match (platform, pref) {
         (Platform::Other, Some(folder)) => folder.to_string(),
-        (Platform::Apple, _) | (Platform::Other, None) => concat(home, ".rays"),
+        (Platform::Apple, _) | (Platform::Other, None) => filename_concat(home, ".rays"),
     }
 }
 
 /// OCaml's `Filename.concat`: a separator only when the directory does not end in one.
-fn concat(dir: &str, file: &str) -> String {
+pub fn filename_concat(dir: &str, file: &str) -> String {
     let (sep, ends) = if cfg!(windows) {
         ("\\", dir.is_empty() || dir.ends_with('/') || dir.ends_with('\\'))
     } else {

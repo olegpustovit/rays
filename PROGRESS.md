@@ -27,7 +27,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | A4 | done | `a60fcced` — `md5_hex` in `rays_math::hash`; 5 duplicate modules removed |
 | A5 | active | `ec5c1b1b` — `region_snapshot` test-only; **this session** — dead `window_to_values`, `live_delay()`; `Editor::Private` behind `test-hooks` feature (+ `required-features` on GPU/window tests); pxui_graph accessors still open |
 | A6 | active | `09ce8574` — unused deps on rays_bin / UI (pxui still has `ocaml_int` until I) |
-| A7 | active | `d01750db` — `cap_y_paint` dedupe; **this session** — shared `point_triangle_*` in `rdk_geom::point_grid`; `ocaml_trim` / path concat still open |
+| A7 | active | `d01750db` — `cap_y_paint`; triangle dedupe; **this session** — `editor_core::store::filename_concat` (editor_setup duplicate removed); `ocaml_trim` still open |
 | A8 | active | `ec5c1b1b` — op.rs prune; **this session** — term_arena in-place setters, param `Field` getters, `presentation_facts_`; `Native::runtime_of` kept (in use) |
 | B0 | active | Warm incremental: `touch rays_math` → `cargo check -p flow_check` ~1.6s (healthy). Staleness likely from `cargo clean`, non-dev profile, or RUSTFLAGS — per AGENTS.md avoid. |
 | B1–B5 | pending | |

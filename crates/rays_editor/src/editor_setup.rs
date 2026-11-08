@@ -61,10 +61,6 @@ pub fn workspace_doc(
     Ok(doc)
 }
 
-fn concat(dir: &str, file: &str) -> String {
-    if dir.ends_with('/') || dir.ends_with('\\') { format!("{dir}{file}") } else { format!("{dir}/{file}") }
-}
-
 pub fn user_folder(platform: Platform) -> String {
     let pref = match platform {
         Platform::Apple => None,
@@ -77,7 +73,7 @@ pub fn user_folder(platform: Platform) -> String {
 pub fn preferences_file(platform: Platform, given: Option<&str>) -> String {
     match given {
         Some(path) if !path.is_empty() => path.to_string(),
-        _ => concat(&user_folder(platform), "preferences.rays"),
+        _ => editor_core::store::filename_concat(&user_folder(platform), "preferences.rays"),
     }
 }
 
@@ -93,7 +89,7 @@ pub fn save_guide(filename: &str, guide: bool) -> Result<(), String> {
 }
 
 pub fn state_directory(value: &t) -> String {
-    concat(&value.presets, "state")
+    editor_core::store::filename_concat(&value.presets, "state")
 }
 
 pub fn state_file(value: &t) -> String {
@@ -177,7 +173,7 @@ pub fn create(opts: create_opts, workspace: &workspace_doc::T, prepare: cook::Pr
     let shell = shell { tree: layout_default(), hidden: vec![panels::Panel::Timeline], live: None, window_live: None, restored: false };
     let presets = match presets {
         Some(directory) => directory,
-        None => concat(&user_folder(platform), &preset::sanitize(&name)),
+        None => editor_core::store::filename_concat(&user_folder(platform), &preset::sanitize(&name)),
     };
     let level = Level::Scene;
     let preferences = preferences_file(platform, preferences.as_deref());
