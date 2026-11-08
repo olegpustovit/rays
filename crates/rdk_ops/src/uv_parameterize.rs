@@ -10,6 +10,7 @@ use crate::transform_ops::ocaml_quote;
 use rdk_core::{
     attribute, cancel, edge_group, error, geometry, group, packed, support, topology, topology_index,
 };
+use rdk_core::error::Code;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BoundaryMode {
@@ -30,13 +31,7 @@ pub struct Params {
 }
 
 fn fail(message: &str) -> error::T {
-    error::make(
-        "Uv_parameterize.solve".to_owned(),
-        "invalid_parameter".to_owned(),
-        message.to_owned(),
-        None,
-    )
-    .unwrap_or_else(|bad| bad)
+    error::new("Uv_parameterize.solve", Code::InvalidParameter, message.to_owned())
 }
 
 fn finite(value: f64) -> bool {

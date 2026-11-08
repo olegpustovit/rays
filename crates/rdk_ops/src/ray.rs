@@ -4,6 +4,7 @@ use rdk_core::{
     attribute, attribute_pattern, cancel, element_selection, error, geometry, group, packed, support, topology,
     topology_index,
 };
+use rdk_core::error::Code;
 use rdk_core::support::Windows;
 use rdk_geom::point_grid::float_max;
 use rdk_geom::surface_index::View::RayDirections;
@@ -65,8 +66,8 @@ pub struct Params {
     pub match_groups: bool,
 }
 
-fn fail(code: &str, message: &str) -> error::T {
-    error::make("ray".to_owned(), code.to_owned(), message.to_owned(), None).unwrap_or_else(|e| e)
+fn fail(code: Code, message: &str) -> error::T {
+    error::new("ray", code, message.to_owned())
 }
 
 fn blank(value: &str) -> bool {
@@ -76,8 +77,8 @@ fn blank(value: &str) -> bool {
 fn validate_name(label: &str, name: &Option<String>) -> Result<(), error::T> {
     match name {
         None => Ok(()),
-        Some(name) if blank(name) => Err(fail("invalid_name", &format!("{label} must not be empty"))),
-        Some(name) if name == "P" => Err(fail("invalid_name", &format!("{label} cannot be P"))),
+        Some(name) if blank(name) => Err(fail(Code::InvalidName, &format!("{label} must not be empty"))),
+        Some(name) if name == "P" => Err(fail(Code::InvalidName, &format!("{label} cannot be P"))),
         Some(_) => Ok(()),
     }
 }
@@ -108,7 +109,7 @@ fn point_selection(
 ) -> Result<Option<group::T>, error::T> {
     let topology_value = geometry::topology(geometry_value);
     deform::validate_selection(topology_value, selection)
-        .map_err(|e| fail("invalid_selection", error::message(&e)))?;
+        .map_err(|e| fail(Code::InvalidSelection, error::message(&e)))?;
     match selection {
         None => Ok(None),
         Some(element_selection::T::SelectedPoints(item)) => Ok(Some(item.clone())),
@@ -142,24 +143,24 @@ fn direction_planes(
     match direction {
         Direction::RayVector(value) => {
             if !(value.x.is_finite() && value.y.is_finite() && value.z.is_finite()) {
-                return Err(fail("invalid_direction", "ray direction vector must be finite"));
+                return Err(fail(Code::InvalidDirection, "ray direction vector must be finite"));
             }
             if value.x == 0.0 && value.y == 0.0 && value.z == 0.0 {
-                return Err(fail("invalid_direction", "ray direction vector must be non-zero"));
+                return Err(fail(Code::InvalidDirection, "ray direction vector must be non-zero"));
             }
             Ok(RayDirections::ConstantDirection { x: value.x, y: value.y, z: value.z })
         }
         Direction::RayAttribute(name) => {
             if blank(name) {
-                return Err(fail("invalid_direction", "ray direction attribute name must not be empty"));
+                return Err(fail(Code::InvalidDirection, "ray direction attribute name must not be empty"));
             }
             let values = deform::point_vector_attribute("Rdk.Ray.ray", name, source)
-                .map_err(|e| fail("invalid_direction", error::message(&e)))?;
+                .map_err(|e| fail(Code::InvalidDirection, error::message(&e)))?;
             per_query(values)
         }
         Direction::RayNormal => {
             let values = deform::resolve_directions(cancel_ref, grain, source)
-                .map_err(|e| fail("invalid_direction", error::message(&e)))?;
+                .map_err(|e| fail(Code::InvalidDirection, error::message(&e)))?;
             per_query(values)
         }
     }
@@ -363,7 +364,7 @@ fn raycast_samples_into(
     out_hit_counts: &mut [i64],
     normals: Option<(&mut [f64], &mut [f64], &mut [f64])>,
 ) -> Result<(), error::T> {
-    let invalid = |m: &str| fail("invalid_parameter", m);
+    let invalid = |m: &str| fail(Code::InvalidParameter, m);
     if grain <= 0 {
         return Err(invalid("Surface_index: grain must be positive"));
     }
@@ -601,7 +602,7 @@ fn raycast_average_drivers_into(
 ) -> Result<(), error::T> {
     let query_count = packed::Float3::length(queries) as usize;
     if direction_signs.len() < query_count || hit_counts.len() < query_count || offsets.len() != query_count + 1 {
-        return Err(fail("invalid_parameter", "Surface_index: average ray driver arrays do not match queries"));
+        return Err(fail(Code::InvalidParameter, "Surface_index: average ray driver arrays do not match queries"));
     }
     let queries = packed::Float3::View::view(queries)?;
     // Range `r` writes the driver slots of its queries: `offsets[first..last + 1]`.
@@ -662,7 +663,7 @@ fn raycast_average_drivers_into(
                     }
                 }
                 if at as i64 != offsets[query + 1] {
-                    return Err(fail("invalid_parameter", "Surface_index: average ray driver recount differed"));
+                    return Err(fail(Code::InvalidParameter, "Surface_index: average ray driver recount differed"));
                 }
             }
         }
@@ -675,7 +676,7 @@ fn existing_point_float(name: &str, count: usize, source: &geometry::T, default:
         None => Ok(vec![default; count]),
         Some(found) => match attribute::View::storage(&found)? {
             attribute::Storage::Float(values) => Ok(values.to_vec()),
-            _ => Err(fail("invalid_output", &format!("point output attribute \"{name}\" must have float storage"))),
+            _ => Err(fail(Code::InvalidOutput, &format!("point output attribute \"{name}\" must have float storage"))),
         },
     }
 }
@@ -685,7 +686,7 @@ fn existing_point_int(name: &str, count: usize, source: &geometry::T, default: i
         None => Ok(vec![default; count]),
         Some(found) => match attribute::View::storage(&found)? {
             attribute::Storage::Int(values) => Ok(values.to_vec()),
-            _ => Err(fail("invalid_output", &format!("point output attribute \"{name}\" must have integer storage"))),
+            _ => Err(fail(Code::InvalidOutput, &format!("point output attribute \"{name}\" must have integer storage"))),
         },
     }
 }
@@ -700,7 +701,7 @@ fn existing_point_float3(name: &str, count: usize, source: &geometry::T) -> Resu
                 let values = packed::Float3::View::view(values)?;
                 Ok((values.x.to_vec(), values.y.to_vec(), values.z.to_vec()))
             }
-            _ => Err(fail("invalid_output", &format!("point output attribute \"{name}\" must have float3 storage"))),
+            _ => Err(fail(Code::InvalidOutput, &format!("point output attribute \"{name}\" must have float3 storage"))),
         },
     }
 }
@@ -713,17 +714,16 @@ pub fn run(
     collision: &geometry::T,
 ) -> Result<geometry::T, error::T> {
     run_inner(cancel_token, params, source, collision).map_err(|value| {
-        let code = error::code(&value);
+        let code = error::kind(&value);
         let message = error::message(&value);
-        if code == "cancelled" {
-            fail("cancelled", "ray projection was cancelled")
-        } else if code == "invalid_parameter" && message.starts_with("Surface_index: selected ray origins") {
-            fail("invalid_query", message)
-        } else if code == "invalid_parameter" && message.starts_with("Surface_index: selected ray directions") {
-            fail("invalid_direction", message)
+        if code == Code::Cancelled {
+            error::cancelled("ray")
+        } else if code == Code::InvalidParameter && message.starts_with("Surface_index: selected ray origins") {
+            fail(Code::InvalidQuery, message)
+        } else if code == Code::InvalidParameter && message.starts_with("Surface_index: selected ray directions") {
+            fail(Code::InvalidDirection, message)
         } else {
-            error::make("ray".to_owned(), code.to_owned(), message.to_owned(), Some(error::hints(&value).to_vec()))
-                .unwrap_or_else(|e| e)
+            error::new("ray", code, message.to_owned())
         }
     })
 }
@@ -744,38 +744,38 @@ fn run_inner(
     let min_distance = params.min_distance;
     let tolerance = params.tolerance;
     if grain <= 0 {
-        return Err(fail("invalid_parameter", "grain must be positive"));
+        return Err(fail(Code::InvalidParameter, "grain must be positive"));
     }
     if !(1..=1024).contains(&samples) {
-        return Err(fail("invalid_parameter", "ray samples must be between 1 and 1024"));
+        return Err(fail(Code::InvalidParameter, "ray samples must be between 1 and 1024"));
     }
     if !(params.jitter_scale.is_finite() && params.jitter_scale >= 0.0) {
-        return Err(fail("invalid_parameter", "ray jitter scale must be finite and non-negative"));
+        return Err(fail(Code::InvalidParameter, "ray jitter scale must be finite and non-negative"));
     }
     if method == Method::RayMinimumDistance && samples != 1 {
-        return Err(fail("invalid_parameter", "multiple samples require directional projection"));
+        return Err(fail(Code::InvalidParameter, "multiple samples require directional projection"));
     }
     if !(scale.is_finite() && lift.is_finite()) {
-        return Err(fail("invalid_parameter", "scale and lift must be finite"));
+        return Err(fail(Code::InvalidParameter, "scale and lift must be finite"));
     }
     if !(min_distance.is_finite() && min_distance >= 0.0) {
-        return Err(fail("invalid_distance", "minimum distance must be finite and non-negative"));
+        return Err(fail(Code::InvalidDistance, "minimum distance must be finite and non-negative"));
     }
     if !(tolerance.is_finite() && tolerance >= 0.0 && tolerance <= f64::MAX.sqrt()) {
-        return Err(fail("invalid_distance", "ray tolerance must be finite, non-negative, and safely squarable"));
+        return Err(fail(Code::InvalidDistance, "ray tolerance must be finite, non-negative, and safely squarable"));
     }
     let maximum = match params.max_distance {
         None => f64::INFINITY,
         Some(value) if value.is_finite() && value >= min_distance => value,
         Some(_) => {
             return Err(fail(
-                "invalid_distance",
+                Code::InvalidDistance,
                 "maximum distance must be finite and at least the minimum distance",
             ));
         }
     };
     if method == Method::RayMinimumDistance && maximum != f64::INFINITY && maximum > f64::MAX.sqrt() {
-        return Err(fail("invalid_distance", "maximum closest distance is too large to square"));
+        return Err(fail(Code::InvalidDistance, "maximum closest distance is too large to square"));
     }
     for (label, name) in [
         ("distance attribute", &params.distance_attribute),
@@ -788,7 +788,7 @@ fn run_inner(
     }
     if let Some(name) = &params.hit_group {
         if blank(name) {
-            return Err(fail("invalid_name", "hit group name must not be empty"));
+            return Err(fail(Code::InvalidName, "hit group name must not be empty"));
         }
     }
     if params.match_groups
@@ -796,10 +796,10 @@ fn run_inner(
         && params.vertex_pattern.is_none()
         && params.primitive_pattern.is_none()
     {
-        return Err(fail("invalid_pattern", "group interpolation requires a point, vertex, or primitive pattern"));
+        return Err(fail(Code::InvalidPattern, "group interpolation requires a point, vertex, or primitive pattern"));
     }
     if params.source_vertex_numbers_attribute.is_some() != params.source_vertex_weights_attribute.is_some() {
-        return Err(fail("invalid_name", "source vertex number and weight outputs must be requested together"));
+        return Err(fail(Code::InvalidName, "source vertex number and weight outputs must be requested together"));
     }
     let output_names: Vec<String> = [
         &params.distance_attribute,
@@ -816,7 +816,7 @@ fn run_inner(
         sorted.sort();
         sorted.dedup();
         if sorted.len() != output_names.len() {
-            return Err(fail("invalid_name", "ray output attribute names must be distinct"));
+            return Err(fail(Code::InvalidName, "ray output attribute names must be distinct"));
         }
     }
     let point_count = geometry::point_count(source) as usize;
@@ -864,7 +864,7 @@ fn run_inner(
             }
         }
         Method::RayProject => {
-            let directions = directions.as_ref().ok_or_else(|| fail("invalid_direction", "missing ray directions"))?;
+            let directions = directions.as_ref().ok_or_else(|| fail(Code::InvalidDirection, "missing ray directions"))?;
             if samples == 1 {
                 surface_index::View::raycast_many_into(
                     cancel_ref,
@@ -972,7 +972,7 @@ fn run_inner(
                         coordinate_scale * (wa * cz_(a) + wb * cz_(b) + wc * cz_(c)),
                     )
                 } else {
-                    let directions = directions.as_ref().ok_or_else(|| fail("invalid_direction", "missing ray directions"))?;
+                    let directions = directions.as_ref().ok_or_else(|| fail(Code::InvalidDirection, "missing ray directions"))?;
                     let (vx, vy, vz) = match directions {
                         RayDirections::ConstantDirection { x, y, z } => (*x, *y, *z),
                         RayDirections::PerQueryDirections(values) => (values.x[point], values.y[point], values.z[point]),
@@ -1035,7 +1035,7 @@ fn run_inner(
     }
     if let Some(point) = errors.iter().find(|&&point| point >= 0) {
         return Err(fail(
-            "non_finite_output",
+            Code::NonFiniteOutput,
             &format!("ray transform produced a non-finite position at point {point}"),
         ));
     }
@@ -1131,7 +1131,7 @@ fn run_inner(
         let mut numbers = vec![0i64; value_count];
         let mut weights = vec![0.0f64; value_count];
         if average_drivers {
-            let directions = directions.as_ref().ok_or_else(|| fail("invalid_direction", "missing ray directions"))?;
+            let directions = directions.as_ref().ok_or_else(|| fail(Code::InvalidDirection, "missing ray directions"))?;
             raycast_average_drivers_into(
                 cancel_ref,
                 selection.as_ref(),
@@ -1207,7 +1207,7 @@ fn run_inner(
     let output = if !needs_interpolation {
         target
     } else {
-        let hit = hit_selection.clone().ok_or_else(|| fail("invalid_output", "missing hit selection"))?;
+        let hit = hit_selection.clone().ok_or_else(|| fail(Code::InvalidOutput, "missing hit selection"))?;
         attribute_ops::interpolate(&attribute_ops::Params {
             cancel: None,
             grain: Some(grain),
@@ -1638,41 +1638,41 @@ mod tests {
     fn validation() {
         let source = source_points(&[(0.0, 2.0, 0.0)]);
         let collision = plane(4.0, 0.0);
-        let check = |p: Params, code: &str| expect_code(ray(&p, &source, &collision), code);
+        let check = |p: Params, code: Code| expect_code(ray(&p, &source, &collision), code);
         let mut p = base();
         p.grain = 0;
-        check(p, "invalid_parameter");
+        check(p, Code::InvalidParameter);
         let mut p = base();
         p.max_distance = Some(-1.0);
-        check(p, "invalid_distance");
+        check(p, Code::InvalidDistance);
         let mut p = base();
         p.direction = Direction::RayVector(vec3(0.0, 0.0, 0.0));
-        check(p, "invalid_direction");
+        check(p, Code::InvalidDirection);
         let mut p = base();
         p.direction = Direction::RayAttribute("missing".to_owned());
-        check(p, "invalid_direction");
+        check(p, Code::InvalidDirection);
         let mut p = base();
         p.distance_attribute = Some("P".to_owned());
-        check(p, "invalid_name");
+        check(p, Code::InvalidName);
         let mut p = base();
         p.distance_attribute = Some("same".to_owned());
         p.primitive_attribute = Some("same".to_owned());
-        check(p, "invalid_name");
+        check(p, Code::InvalidName);
         let mut p = base();
         p.source_vertex_numbers_attribute = Some("vertices".to_owned());
-        check(p, "invalid_name");
+        check(p, Code::InvalidName);
         let mut p = base();
         p.match_groups = true;
-        check(p, "invalid_pattern");
+        check(p, Code::InvalidPattern);
         let mut p = base();
         p.samples = 0;
-        check(p, "invalid_parameter");
+        check(p, Code::InvalidParameter);
         let mut p = base();
         p.samples = 1025;
-        check(p, "invalid_parameter");
+        check(p, Code::InvalidParameter);
         let mut p = base();
         p.jitter_scale = -1.0;
-        check(p, "invalid_parameter");
+        check(p, Code::InvalidParameter);
         let mut p = base();
         p.samples = 2;
         p.jitter_scale = f64::MAX;
@@ -1683,13 +1683,13 @@ mod tests {
         let mut p = base();
         p.method = Method::RayMinimumDistance;
         p.samples = 2;
-        check(p, "invalid_parameter");
+        check(p, Code::InvalidParameter);
         let wrong = group::init(None, group::Owner::Point, "wrong", geometry::point_count(&collision), &|_| true).unwrap();
         let mut p = base();
         p.collision_primitives = Some(wrong);
-        check(p, "invalid_group");
+        check(p, Code::InvalidGroup);
         let curve = geom(vec![-1.0, 1.0], vec![0.0; 2], vec![0.0; 2], &[(PrimitiveKind::OpenPolyline, vec![0, 1])]);
-        expect_code(ray(&base(), &source, &curve), "invalid_surface");
+        expect_code(ray(&base(), &source, &curve), Code::InvalidSurface);
         let bad = packed::Float3::View::of_owned_exn(vec![0.0], vec![f64::NAN], vec![0.0]).unwrap();
         let bad_source = geometry::with_attribute(
             attribute::create_owned("bad", attribute::Owner::Point, attribute::Storage::Float3(bad)).unwrap(),
@@ -1698,10 +1698,10 @@ mod tests {
         .unwrap();
         let mut p = base();
         p.direction = Direction::RayAttribute("bad".to_owned());
-        expect_code(ray(&p, &bad_source, &collision), "invalid_direction");
+        expect_code(ray(&p, &bad_source, &collision), Code::InvalidDirection);
         let token = cancel::create();
         cancel::cancel(&token);
-        expect_code(run(Some(&token), &base(), &source, &collision), "cancelled");
+        expect_code(run(Some(&token), &base(), &source, &collision), Code::Cancelled);
     }
 
     #[test]

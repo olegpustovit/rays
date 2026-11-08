@@ -4,6 +4,7 @@ use rdk_core::support::Windows;
 use rdk_core::{
     attribute, cancel, edge_group, error, geometry, group, packed, support, topology, topology_index,
 };
+use rdk_core::error::Code;
 use rdk_geom::point_grid::float_max;
 
 use crate::{deform, edge_collapse, fuse_reduce, triangulate};
@@ -53,12 +54,12 @@ struct Plan {
     removed_primitives: i64,
 }
 
-fn make(code: &str, message: &str) -> error::T {
-    error::make("poly_reduce".to_owned(), code.to_owned(), message.to_owned(), None).unwrap_or_else(|e| e)
+fn make(code: Code, message: &str) -> error::T {
+    error::new("poly_reduce", code, message.to_owned())
 }
 
 fn fail(message: &str) -> error::T {
-    make("invalid_topology", message)
+    make(Code::InvalidTopology, message)
 }
 
 fn blank(value: &str) -> bool {
@@ -547,12 +548,9 @@ fn unique_edge_name(base: &str, geometry_value: &geometry::T) -> String {
 pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     let grain = params.grain.unwrap_or(16_384);
     if grain <= 0 {
-        return Err(make("invalid_topology", "Rdk.Poly_reduce.poly_reduce: grain must be positive"));
+        return Err(make(Code::InvalidTopology, "Rdk.Poly_reduce.poly_reduce: grain must be positive"));
     }
-    run_inner(params, grain, geometry_value).map_err(|value| match error::code(&value) {
-        "cancelled" => make("cancelled", "geometry operation was cancelled"),
-        _ => make("invalid_topology", error::message(&value)),
-    })
+    run_inner(params, grain, geometry_value).map_err(|value| error::guard(value, "poly_reduce", Code::InvalidTopology))
 }
 
 #[allow(clippy::too_many_lines)]
@@ -913,7 +911,7 @@ mod tests {
         cancel::cancel(&token);
         let mut p = Params::new(Target::ReduceRatio(0.5));
         p.cancel = Some(token);
-        expect_code(run(&p, &source), "cancelled");
+        expect_code(run(&p, &source), Code::Cancelled);
     }
 
     #[test]

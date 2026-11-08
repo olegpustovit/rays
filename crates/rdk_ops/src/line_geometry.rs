@@ -1,7 +1,8 @@
 //! Packed point clouds and straight/open/closed polylines.
 use rdk_core::{error, geometry, packed, topology};
+use rdk_core::error::Code;
 
-use crate::attribute_ops::{make_error, recode};
+use crate::attribute_ops::{make_error};
 
 pub struct Params {
     pub closed: bool,
@@ -19,7 +20,7 @@ pub fn points(values: &[(f64, f64, f64)]) -> Result<geometry::T, error::T> {
 
 pub fn polyline(params: &Params, values: &[(f64, f64, f64)]) -> Result<geometry::T, error::T> {
     polyline_inner(params, values)
-        .map_err(|failure| recode(&failure, "polyline", "invalid_parameter", "geometry operation was cancelled"))
+        .map_err(|failure| error::guard(failure, "polyline", Code::InvalidParameter))
 }
 
 fn polyline_inner(params: &Params, values: &[(f64, f64, f64)]) -> Result<geometry::T, error::T> {
@@ -28,7 +29,7 @@ fn polyline_inner(params: &Params, values: &[(f64, f64, f64)]) -> Result<geometr
     if count < minimum {
         return Err(make_error(
             "polyline",
-            "invalid_parameter",
+            Code::InvalidParameter,
             &format!(
                 "Rdk.Line_geometry.polyline: {} polylines require at least {minimum} points",
                 if params.closed { "closed" } else { "open" }
@@ -36,7 +37,7 @@ fn polyline_inner(params: &Params, values: &[(f64, f64, f64)]) -> Result<geometr
         ));
     }
     if values.iter().any(|&(x, y, z)| !(x.is_finite() && y.is_finite() && z.is_finite())) {
-        return Err(make_error("polyline", "invalid_parameter", "Rdk.Line_geometry.polyline: positions must be finite"));
+        return Err(make_error("polyline", Code::InvalidParameter, "Rdk.Line_geometry.polyline: positions must be finite"));
     }
     let cloud = points(values)?;
     let mut builder = topology::Builder::create(count as i64, Some(count as i64), Some(1))?;
@@ -79,7 +80,7 @@ mod tests {
         assert_eq!(topology::primitive_kind(geometry::topology(&closed), 0).unwrap(), PrimitiveKind::ClosedPolyline);
         let too_short = polyline(&Params { closed: true }, &values[..2]);
         let failure = too_short.err().unwrap();
-        assert_eq!(error::code(&failure), "invalid_parameter");
+        assert_eq!(error::kind(&failure), Code::InvalidParameter);
         assert_eq!(
             error::message(&failure),
             "Rdk.Line_geometry.polyline: closed polylines require at least 3 points"

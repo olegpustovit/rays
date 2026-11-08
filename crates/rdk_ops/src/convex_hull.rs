@@ -11,6 +11,7 @@ use rdk_core::{
     attribute, cancel, element_selection, error, geometry, group, packed, support, topology,
     topology_remap,
 };
+use rdk_core::error::Code;
 use rdk_geom::predicates::{self, Sign};
 
 const OPERATION: &str = "Rdk_mesh.Convex_hull.convex_hull";
@@ -27,27 +28,27 @@ pub struct Params {
     pub hull_group: Option<String>,
 }
 
-fn make(code: &str, message: String) -> error::T {
-    error::make(GUARD_OPERATION.to_owned(), code.to_owned(), message, None).unwrap_or_else(|bad| bad)
+fn make(code: Code, message: String) -> error::T {
+    error::new(GUARD_OPERATION, code, message)
 }
 
 /// OCaml `invalid_arg`/`Fail`: reported as `invalid_geometry` under this operation.
 fn fail(message: String) -> error::T {
-    make("invalid_geometry", message)
+    make(Code::InvalidGeometry, message)
 }
 
 /// An error that was a plain string in OCaml: re-coded under this operation.
 fn lift(value: error::T) -> error::T {
-    if error::code(&value) == "cancelled" {
-        make("cancelled", "geometry operation was cancelled".to_owned())
+    if error::is_cancelled(&value) {
+        error::cancelled(GUARD_OPERATION)
     } else {
         fail(error::message(&value).to_owned())
     }
 }
 
 fn norm(value: error::T) -> error::T {
-    if error::code(&value) == "cancelled" {
-        make("cancelled", "geometry operation was cancelled".to_owned())
+    if error::is_cancelled(&value) {
+        error::cancelled(GUARD_OPERATION)
     } else {
         value
     }
@@ -816,10 +817,10 @@ mod tests {
         ).unwrap()
     }
 
-    fn expect_error(value: Result<geometry::T, error::T>, code: &str) {
+    fn expect_error(value: Result<geometry::T, error::T>, code: Code) {
         match value {
-            Err(failure) => assert_eq!(error::code(&failure), code, "{}", error::to_string(&failure)),
-            Ok(_) => panic!("expected {code} error"),
+            Err(failure) => assert_eq!(error::kind(&failure), code, "{}", error::to_string(&failure)),
+            Ok(_) => panic!("expected {code:?} error"),
         }
     }
 
@@ -1091,25 +1092,25 @@ mod tests {
         assert!(geometry::point_count(&exact) == 4 && geometry::primitive_count(&exact) == 4, "subnormal hull");
         check_closed(&exact, "subnormal hull incidence");
         let exact_source = point_cloud(&[(0., 0., 0.), (1., 0., 0.), (0., 1., 0.), (0., 0., tiny)]);
-        expect_error(run_with(Params::default(), &point_cloud(&[])), "invalid_geometry");
-        expect_error(run_with(Params { grain: Some(0), ..Params::default() }, &exact_source), "invalid_geometry");
+        expect_error(run_with(Params::default(), &point_cloud(&[])), Code::InvalidGeometry);
+        expect_error(run_with(Params { grain: Some(0), ..Params::default() }, &exact_source), Code::InvalidGeometry);
         expect_error(
             run_with(Params { source_point_attribute: Some("P".to_owned()), ..Params::default() }, &exact_source),
-            "invalid_geometry",
+            Code::InvalidGeometry,
         );
         let bad = point_cloud(&[(0., 0., 0.), (f64::NAN, 0., 0.)]);
-        expect_error(run_with(Params::default(), &bad), "invalid_geometry");
+        expect_error(run_with(Params::default(), &bad), Code::InvalidGeometry);
         let wrong = group::init(Some(1), group::Owner::Point, "wrong", 3, &|_| true).unwrap();
         expect_error(
             run_with(
                 Params { selection: Some(element_selection::T::SelectedPoints(wrong)), ..Params::default() },
                 &exact_source,
             ),
-            "invalid_geometry",
+            Code::InvalidGeometry,
         );
         let token = Arc::new(cancel::create());
         cancel::cancel(&token);
-        expect_error(run_with(Params { cancel: Some(token), ..Params::default() }, &exact_source), "cancelled");
+        expect_error(run_with(Params { cancel: Some(token), ..Params::default() }, &exact_source), Code::Cancelled);
     }
 
     #[test]

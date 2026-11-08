@@ -302,6 +302,6 @@ mod tests {
             group::init(None, group::Owner::Vertex, "corners", 3, &|_| true).unwrap();
         let selection = T::SelectedPoints(vertices);
         let error = validate("normals", &topology_value, Some(&selection)).unwrap_err();
-        assert_eq!(error::code(&error), "invalid_selection");
+        assert_eq!(error::kind(&error), Code::InvalidSelection);
     }
 }

@@ -405,7 +405,7 @@ mod tests {
         let token = cancel::create();
         cancel::cancel(&token);
         match build(Some(&token), None, &constraints, &arrangement, Side::Left, 0) {
-            Err(e) => assert_eq!(error::code(&e), "cancelled"),
+            Err(e) => assert_eq!(error::kind(&e), Code::Cancelled),
             Ok(_) => panic!("cancelled face CDT completed"),
         }
     }

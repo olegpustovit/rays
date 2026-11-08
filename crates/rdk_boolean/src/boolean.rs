@@ -666,7 +666,7 @@ mod tests {
         );
         params.point_conflict = PointConflict::Reject;
         match run(&params, &left) {
-            Err(failure) if error::code(&failure) == "point_payload_conflict" => {}
+            Err(failure) if error::kind(&failure) == Code::PointPayloadConflict => {}
             Err(failure) => panic!("unexpected public point conflict: {}", error::to_string(&failure)),
             Ok(_) => panic!("public Boolean ignored its reject point-conflict policy"),
         }

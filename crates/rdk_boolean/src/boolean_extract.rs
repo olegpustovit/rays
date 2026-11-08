@@ -1402,12 +1402,12 @@ mod tests {
         validate_materialized(false, &[0., 1., 0.], &[0., 0., 1.], &[0., 0., 0.], &[0, 1, 2])
             .expect("valid rounded triangle failed");
         match validate_materialized(false, &[0., 0.], &[0., 0.], &[0., 0.], &[]) {
-            Err(failure) if error::code(&failure) == "rounding_collision" => {}
+            Err(failure) if error::kind(&failure) == Code::RoundingCollision => {}
             Err(failure) => panic!("unexpected rounding collision error: {}", error::to_string(&failure)),
             Ok(()) => panic!("rounded exact-point collision was accepted"),
         }
         match validate_materialized(false, &[0., 1., 2.], &[0., 0., 0.], &[0., 0., 0.], &[0, 1, 2]) {
-            Err(failure) if error::code(&failure) == "rounding_degenerate" => {}
+            Err(failure) if error::kind(&failure) == Code::RoundingDegenerate => {}
             Err(failure) => panic!("unexpected rounding degeneracy error: {}", error::to_string(&failure)),
             Ok(()) => panic!("rounded collinear output triangle was accepted"),
         }
@@ -1436,7 +1436,7 @@ mod tests {
             topology::polygons_owned(4, vec![0, 2, 1, 0, 1, 3, 1, 2, 3, 2, 0, 3], vec![0, 3, 6, 9, 12]).unwrap();
         validate_closed_topology(&tetra).expect("closed tetrahedron rejected");
         let open = topology::polygons_owned(3, vec![0, 1, 2], vec![0, 3]).unwrap();
-        assert_eq!(error::code(&validate_closed_topology(&open).unwrap_err()), "open_output");
+        assert_eq!(error::kind(&validate_closed_topology(&open).unwrap_err()), Code::OpenOutput);
         assert!(evaluate(&difference(), true, false) && !evaluate(&difference(), true, true));
         assert!(evaluate(&xor(), true, false) && !evaluate(&xor(), true, true));
         assert!(evaluate(&union(), false, true) && !evaluate(&intersection(), false, true));

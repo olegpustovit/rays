@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use rdk_core::attribute::Owner;
 use rdk_core::{attribute, attribute_pattern, cancel, error, geometry, group, packed, topology_index};
+use rdk_core::error::Code;
 
 use crate::attribute_blur;
 use crate::attribute_ops;
@@ -26,7 +27,7 @@ pub struct Params {
     pub attributes: String,
 }
 
-fn fail(code: &str, message: &str) -> error::T {
+fn fail(code: Code, message: &str) -> error::T {
     attribute_ops::make_error("smooth", code, message)
 }
 
@@ -38,11 +39,11 @@ fn validate_point_group(
     match selection {
         None => Ok(()),
         Some(selection) if group::owner(selection) != group::Owner::Point => {
-            Err(fail("invalid_selection", &format!("{label} must own points")))
+            Err(fail(Code::InvalidSelection, &format!("{label} must own points")))
         }
         Some(selection) if group::length(selection) != geometry::point_count(geometry_value) => {
             Err(fail(
-                "invalid_selection",
+                Code::InvalidSelection,
                 &format!("{label} length does not match point count"),
             ))
         }
@@ -100,24 +101,18 @@ fn make_update_selection(
     )?))
 }
 
-fn remap_error(failure: &error::T) -> error::T {
-    error::make(
-        "smooth".to_owned(),
-        error::code(failure).to_owned(),
-        error::message(failure).to_owned(),
-        Some(error::hints(failure).to_vec()),
-    )
-    .unwrap_or_else(|built| built)
+fn remap_error(failure: error::T) -> error::T {
+    error::new("smooth", error::kind(&failure), error::message(&failure).to_owned())
 }
 
 fn cancelled() -> error::T {
-    fail("cancelled", "smoothing was cancelled")
+    error::cancelled("smooth")
 }
 
 pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     let grain = params.grain.unwrap_or(16_384);
     if grain <= 0 {
-        return Err(fail("invalid_parameter", "grain must be positive"));
+        return Err(fail(Code::InvalidParameter, "grain must be positive"));
     }
     let cancel_token = params.cancel.as_deref();
     let in_run = || -> Result<geometry::T, error::T> {
@@ -127,7 +122,7 @@ pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T,
             params.constrained_points.as_ref(),
         )?;
         let attribute_pattern = match attribute_pattern::compile(&params.attributes) {
-            Err(failure) => return Err(fail("invalid_blur", error::message(&failure))),
+            Err(failure) => return Err(fail(Code::InvalidBlur, error::message(&failure))),
             Ok(pattern) => pattern,
         };
         let topology_value = geometry::topology(geometry_value);
@@ -158,7 +153,7 @@ pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T,
             },
             geometry_value,
         )
-        .map_err(|failure| remap_error(&failure))?;
+        .map_err(remap_error)?;
         let positions_changed =
             packed::Float3::data_id(geometry::positions(&output)) != source_position_id;
         if params.recompute_normals
@@ -170,13 +165,13 @@ pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T,
                 deform::Params { cancel: params.cancel.clone(), grain, primitives: None },
                 &output,
             )
-            .map_err(|failure| fail("invalid_normals", error::message(&failure)))
+            .map_err(|failure| fail(Code::InvalidNormals, error::message(&failure)))
         } else {
             Ok(output)
         }
     };
     in_run().map_err(|failure| {
-        if error::code(&failure) == "cancelled" && error::operation(&failure) != "smooth" {
+        if error::is_cancelled(&failure) && error::operation(&failure) != "smooth" {
             cancelled()
         } else {
             failure
@@ -291,11 +286,11 @@ mod tests {
         .unwrap()
     }
 
-    fn expect_code(result: Result<geometry::T, error::T>, code: &str) {
+    fn expect_code(result: Result<geometry::T, error::T>, code: Code) {
         match result {
-            Err(failure) if error::code(&failure) == code => {}
-            Err(failure) => panic!("expected {code}, got {}", error::to_string(&failure)),
-            Ok(_) => panic!("expected {code}, got success"),
+            Err(failure) if error::kind(&failure) == code => {}
+            Err(failure) => panic!("expected {code:?}, got {}", error::to_string(&failure)),
+            Ok(_) => panic!("expected {code:?}, got success"),
         }
     }
 
@@ -425,12 +420,12 @@ mod tests {
         let wrong_length = group::init(None, group::Owner::Point, "wrong_length", 1, &|_| true).unwrap();
         expect_code(
             run_with(&grid_value, &|p| p.constrained_points = Some(wrong_length.clone())),
-            "invalid_selection",
+            Code::InvalidSelection,
         );
-        expect_code(run_with(&grid_value, &|p| p.grain = Some(0)), "invalid_parameter");
+        expect_code(run_with(&grid_value, &|p| p.grain = Some(0)), Code::InvalidParameter);
         let token = Arc::new(cancel::create());
         cancel::cancel(&token);
-        expect_code(run_with(&grid_value, &|p| p.cancel = Some(token.clone())), "cancelled");
+        expect_code(run_with(&grid_value, &|p| p.cancel = Some(token.clone())), Code::Cancelled);
     }
 
     #[test]

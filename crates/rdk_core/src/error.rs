@@ -31,6 +31,7 @@ codes! {
     Cancelled = "cancelled",
     DegenerateTriangle = "degenerate_triangle",
     ExactConstructionFailed = "exact_construction_failed",
+    Fail = "fail",
     GeometryMismatch = "geometry_mismatch",
     Internal = "internal",
     InvalidArgument = "invalid_argument",

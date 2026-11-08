@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use rdk_core::support::Windows;
+use rdk_core::error::Code;
 use rdk_core::{attribute, attribute_pattern, cancel, error, geometry, group, packed, support, topology};
 use rays_math::text_array::TextArray;
 use rdk_geom::{spatial_index, surface_index};
@@ -126,26 +127,26 @@ pub struct AllParams {
 
 /// An `Error msg` of the OCaml API (coded `invalid_transfer`).
 fn fail(message: &str) -> error::T {
-    make_error("attribute_transfer", "invalid_transfer", message)
+    make_error("attribute_transfer", Code::InvalidTransfer, message)
 }
 
 /// An `invalid_arg msg` of the OCaml API (coded `invalid_position`).
 fn invalid(message: &str) -> error::T {
-    make_error("attribute_transfer", "invalid_position", message)
+    make_error("attribute_transfer", Code::InvalidPosition, message)
 }
 
 /// The `Error.guard` of an entry point: cancellation becomes its own message and the operation name
 /// is stamped on; `string`-result failures stay `invalid_transfer`, `Invalid_argument` stays
 /// `invalid_position`.
-fn finish(result: Result<geometry::T, error::T>, operation: &str, cancelled: &str) -> Result<geometry::T, error::T> {
+fn finish(result: Result<geometry::T, error::T>, operation: &str) -> Result<geometry::T, error::T> {
     result.map_err(|failure| {
-        let code = error::code(&failure);
-        if code == "cancelled" {
-            make_error(operation, "cancelled", cancelled)
-        } else if code == "invalid_position" {
-            make_error(operation, "invalid_position", error::message(&failure))
+        let code = error::kind(&failure);
+        if code == Code::Cancelled {
+            error::cancelled(operation)
+        } else if code == Code::InvalidPosition {
+            make_error(operation, Code::InvalidPosition, error::message(&failure))
         } else {
-            make_error(operation, "invalid_transfer", error::message(&failure))
+            make_error(operation, Code::InvalidTransfer, error::message(&failure))
         }
     })
 }
@@ -153,7 +154,7 @@ fn finish(result: Result<geometry::T, error::T>, operation: &str, cancelled: &st
 /// `Error.get` inside a guard: any non-cancelled failure becomes `invalid_transfer`.
 fn flatten(result: Result<geometry::T, error::T>) -> Result<geometry::T, error::T> {
     result.map_err(|failure| {
-        if error::code(&failure) == "cancelled" {
+        if error::is_cancelled(&failure) {
             failure
         } else {
             fail(error::message(&failure))
@@ -619,7 +620,7 @@ fn spatial_transfer(
     let target_points = target_elements.map(|value| group::View::with_owner(group::Owner::Point, value));
     let index = spatial_index::create(cancel_token, Some(grain), source_points.as_ref(), &source_positions).map_err(
         |failure| {
-            if error::code(&failure) == "cancelled" {
+            if error::is_cancelled(&failure) {
                 failure
             } else {
                 fail(&error::to_string(&failure))
@@ -873,7 +874,7 @@ fn spatial(owner: attribute::Owner, params: &SpatialParams) -> Result<geometry::
             target,
         )
     })();
-    finish(result, "attribute_transfer", "attribute transfer was cancelled")
+    finish(result, "attribute_transfer")
 }
 
 pub fn transfer_points(params: &SpatialParams) -> Result<geometry::T, error::T> {
@@ -897,7 +898,7 @@ pub fn transfer_detail(params: &DetailParams) -> Result<geometry::T, error::T> {
         validate_target_kinds(operation, attribute::Owner::Detail, &attributes, &params.target)?;
         install_attributes_batch(attributes, &params.target)
     })();
-    finish(result, "attribute_transfer", "geometry operation was cancelled")
+    finish(result, "attribute_transfer")
 }
 
 pub fn surface_attribute(
@@ -905,7 +906,7 @@ pub fn surface_attribute(
     owner: attribute::Owner,
     name: &str,
 ) -> Result<SurfaceAttribute, error::T> {
-    let bad = |message: &str| make_error("surface_attribute", "invalid_argument", message);
+    let bad = |message: &str| make_error("surface_attribute", Code::InvalidArgument, message);
     if owner == attribute::Owner::Detail {
         return Err(bad("Rdk.Attribute_ops.surface_attribute: detail ownership is not spatial"));
     }
@@ -923,11 +924,7 @@ pub fn surface_attribute(
 }
 
 pub fn transfer_surface(params: &SurfaceParams) -> Result<geometry::T, error::T> {
-    finish(
-        transfer_surface_inner(params),
-        "attribute_transfer_surface",
-        "surface attribute transfer was cancelled",
-    )
+    finish(transfer_surface_inner(params), "attribute_transfer_surface")
 }
 
 fn transfer_surface_inner(params: &SurfaceParams) -> Result<geometry::T, error::T> {
@@ -1095,7 +1092,7 @@ fn transfer_surface_inner(params: &SurfaceParams) -> Result<geometry::T, error::
         source,
     )
     .map_err(|failure| {
-        if error::code(&failure) == "cancelled" {
+        if error::is_cancelled(&failure) {
             failure
         } else {
             fail(&error::to_string(&failure))
@@ -1305,7 +1302,7 @@ pub fn transfer_vertices(params: &VerticesParams) -> Result<geometry::T, error::
             target: params.target.clone(),
         }))
     })();
-    finish(result, "attribute_transfer", "attribute transfer was cancelled")
+    finish(result, "attribute_transfer")
 }
 
 pub fn transfer_all(params: &AllParams) -> Result<geometry::T, error::T> {
@@ -1365,7 +1362,7 @@ pub fn transfer_all(params: &AllParams) -> Result<geometry::T, error::T> {
         }
         Ok(target)
     })();
-    finish(result, "attribute_transfer_all", "multi-owner attribute transfer was cancelled")
+    finish(result, "attribute_transfer_all")
 }
 
 #[cfg(test)]

@@ -2,6 +2,7 @@
 use std::sync::Arc;
 
 use rdk_core::{cancel, error, geometry, group};
+use rdk_core::error::Code;
 
 use crate::curve_join;
 
@@ -18,27 +19,6 @@ pub struct Params {
     pub keep_originals: Option<bool>,
     pub tolerance: Option<f64>,
     pub wrap: Option<bool>,
-}
-
-/// `Error.guard ~operation ~code`: a failure takes the guard's operation and code, a cancellation
-/// keeps code `cancelled`.
-fn protected(operation: &str, code: &str, failure: &error::T) -> error::T {
-    let made = if error::code(failure) == "cancelled" {
-        error::make(
-            operation.to_owned(),
-            "cancelled".to_owned(),
-            "geometry operation was cancelled".to_owned(),
-            None,
-        )
-    } else {
-        error::make(
-            operation.to_owned(),
-            code.to_owned(),
-            error::message(failure).to_owned(),
-            None,
-        )
-    };
-    made.unwrap_or_else(|bad| bad)
 }
 
 pub fn join_curves(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T> {
@@ -58,7 +38,7 @@ pub fn join_curves(params: &Params, value: &geometry::T) -> Result<geometry::T, 
         },
         value,
     )
-    .map_err(|failure| protected("join_curves", "invalid_geometry", &failure))
+    .map_err(|failure| error::guard(failure, "join_curves", Code::InvalidGeometry))
 }
 
 #[cfg(test)]
@@ -105,7 +85,7 @@ mod tests {
             panic!("expected failure")
         };
         assert_eq!(error::operation(&failure), "join_curves");
-        assert_eq!(error::code(&failure), "invalid_geometry");
+        assert_eq!(error::kind(&failure), Code::InvalidGeometry);
         assert_eq!(error::message(&failure), "Curve Join tolerance must be finite and non-negative");
     }
 }

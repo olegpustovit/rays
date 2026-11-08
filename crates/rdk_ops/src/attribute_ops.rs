@@ -3,21 +3,12 @@
 use std::sync::Mutex;
 
 use rdk_core::{cancel, error, support};
+use rdk_core::error::Code;
 use rays_math::text_array::TextArray;
 
 /// `Error.make` for an operation, code and message (neither operation nor code is blank here).
-pub fn make_error(operation: &str, code: &str, message: &str) -> error::T {
-    error::make(operation.to_owned(), code.to_owned(), message.to_owned(), None).unwrap_or_else(|bad| bad)
-}
-
-/// `Error.guard`/`Result.map_error (Error.make ~operation ~code)`: a cancellation becomes this
-/// operation's cancelled error, any other failure keeps only its message under the given code.
-pub fn recode(failure: &error::T, operation: &str, code: &str, cancelled: &str) -> error::T {
-    if error::code(failure) == "cancelled" {
-        make_error(operation, "cancelled", cancelled)
-    } else {
-        make_error(operation, code, error::message(failure))
-    }
+pub fn make_error(operation: &str, code: Code, message: &str) -> error::T {
+    error::new(operation, code, message.to_owned())
 }
 
 /// OCaml `String.trim s = ""`.
@@ -180,7 +171,7 @@ pub fn delete(
     geometry_value: &geometry::T,
 ) -> Result<geometry::T, error::T> {
     attribute_lifecycle::delete(params, geometry_value).map_err(|failure| {
-        recode(&failure, "attribute_delete", "invalid_attribute", "attribute deletion was cancelled")
+        error::guard(failure, "attribute_delete", Code::InvalidAttribute)
     })
 }
 
@@ -190,7 +181,7 @@ pub fn rename(
     geometry_value: &geometry::T,
 ) -> Result<geometry::T, error::T> {
     attribute_lifecycle::rename(cancel_token, rules, geometry_value).map_err(|failure| {
-        recode(&failure, "attribute_rename", "invalid_attribute", "attribute renaming was cancelled")
+        error::guard(failure, "attribute_rename", Code::InvalidAttribute)
     })
 }
 
@@ -200,7 +191,7 @@ pub fn swap(
     geometry_value: &geometry::T,
 ) -> Result<geometry::T, error::T> {
     attribute_lifecycle::swap(cancel_token, rules, geometry_value).map_err(|failure| {
-        recode(&failure, "attribute_swap", "invalid_attribute", "attribute swap was cancelled")
+        error::guard(failure, "attribute_swap", Code::InvalidAttribute)
     })
 }
 
@@ -238,7 +229,7 @@ pub fn interpolate_attribute(
     owner: attribute::Owner,
     name: &str,
 ) -> Result<InterpolateAttribute, error::T> {
-    let bad = |message: &str| make_error("attribute_interpolate", "invalid_argument", message);
+    let bad = |message: &str| make_error("attribute_interpolate", Code::InvalidArgument, message);
     if is_blank(name) {
         return Err(bad("Rdk.Attribute_ops.interpolate_attribute: empty source name"));
     }
@@ -344,11 +335,11 @@ pub fn interpolate(params: &Params) -> Result<geometry::T, error::T> {
     let invalid_interpolate = |failure: &error::T| {
         let code = error::code(failure);
         if code == "cancelled" {
-            make_error(OP, "cancelled", "attribute interpolation was cancelled")
+            error::cancelled(OP)
         } else if code == "invalid_parameter" {
-            make_error(OP, "invalid_parameter", error::message(failure))
+            make_error(OP, Code::InvalidParameter, error::message(failure))
         } else {
-            make_error(OP, "invalid_interpolate", error::message(failure))
+            make_error(OP, Code::InvalidInterpolate, error::message(failure))
         }
     };
     let unmatched = match params.unmatched {
@@ -367,7 +358,7 @@ pub fn interpolate(params: &Params) -> Result<geometry::T, error::T> {
         &params.detail_pattern,
         &params.source,
     )
-    .map_err(|failure| make_error(OP, "invalid_interpolate", error::message(&failure)))?;
+    .map_err(|failure| make_error(OP, Code::InvalidInterpolate, error::message(&failure)))?;
     let mut all_attributes = params.attributes.clone();
     all_attributes.extend(expanded);
     let specs: Vec<attribute_interpolate::Spec> = all_attributes
@@ -387,7 +378,7 @@ pub fn interpolate(params: &Params) -> Result<geometry::T, error::T> {
                 attribute::Owner::Primitive | attribute::Owner::Detail => {
                     return Err(make_error(
                         OP,
-                        "invalid_interpolate",
+                        Code::InvalidInterpolate,
                         "Attribute Interpolate: computed weights require point or vertex ownership",
                     ))
                 }
@@ -406,7 +397,7 @@ pub fn interpolate(params: &Params) -> Result<geometry::T, error::T> {
         if compute.is_some() {
             return Err(make_error(
                 OP,
-                "invalid_interpolate",
+                Code::InvalidInterpolate,
                 "Attribute Interpolate: computed weights require primitive/UVW mode",
             ));
         }

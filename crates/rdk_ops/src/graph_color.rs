@@ -1,14 +1,9 @@
 //! First-fit greedy graph coloring over CSR neighbour rows.
 use rdk_core::error;
+use rdk_core::error::Code;
 
 fn fail(message: &str) -> error::T {
-    error::make(
-        "Error.Fail".to_owned(),
-        "invalid_parameter".to_owned(),
-        message.to_owned(),
-        None,
-    )
-    .unwrap_or_else(|bad| bad)
+    error::new("Error.Fail", Code::InvalidParameter, message.to_owned())
 }
 
 /// The smallest color in the window `[base, limit)` whose mark is not `stamp`, the element being colored.

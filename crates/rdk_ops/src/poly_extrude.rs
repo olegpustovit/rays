@@ -6,6 +6,7 @@ use rdk_core::{
     attribute, cancel, edge_group, error, face_normals, geometry, group, packed, support, topology,
     topology_edge_lookup, topology_index, topology_remap,
 };
+use rdk_core::error::Code;
 use rdk_core::support::Windows;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -55,12 +56,12 @@ impl Params {
     }
 }
 
-fn make(code: &str, message: &str) -> error::T {
-    error::make("poly_extrude".to_owned(), code.to_owned(), message.to_owned(), None).unwrap_or_else(|e| e)
+fn make(code: Code, message: &str) -> error::T {
+    error::new("poly_extrude", code, message.to_owned())
 }
 
 fn fail(message: &str) -> error::T {
-    make("invalid_geometry", message)
+    make(Code::InvalidGeometry, message)
 }
 
 fn blank(value: &str) -> bool {
@@ -931,7 +932,7 @@ pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T,
     let grain = params.grain.unwrap_or(1_024);
     let cancel_ref = params.cancel.as_deref();
     let result = if grain <= 0 {
-        Err(make("invalid_argument", "Rdk_mesh.Poly_extrude.poly_extrude: grain must be positive"))
+        Err(make(Code::InvalidArgument, "Rdk_mesh.Poly_extrude.poly_extrude: grain must be positive"))
     } else if params.primitives.is_none()
         && params.split_edges.is_none()
         && params.divide == Divide::ExtrudeIndividual
@@ -949,10 +950,10 @@ pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T,
     } else {
         run_general(params, cancel_ref, grain, geometry_value)
     };
-    result.map_err(|value| match error::code(&value) {
-        "cancelled" => make("cancelled", "geometry operation was cancelled"),
-        "invalid_argument" => value,
-        _ => make("invalid_geometry", error::message(&value)),
+    result.map_err(|value| match error::kind(&value) {
+        Code::Cancelled => error::cancelled("poly_extrude"),
+        Code::InvalidArgument => value,
+        _ => make(Code::InvalidGeometry, error::message(&value)),
     })
 }
 
@@ -1012,7 +1013,7 @@ mod tests {
         let mut p = Params::new(1.0);
         p.primitives = Some(curve_selection);
         p.divide = Divide::ExtrudeConnectedComponents;
-        expect_code(run(&p, &mixed), "invalid_geometry");
+        expect_code(run(&p, &mixed), Code::InvalidGeometry);
 
         let non_manifold = polygons(
             vec![0.0, 1.0, 0.0, 0.0, 0.0],
@@ -1022,7 +1023,7 @@ mod tests {
         );
         let mut p = Params::new(1.0);
         p.divide = Divide::ExtrudeConnectedComponents;
-        expect_code(run(&p, &non_manifold), "invalid_geometry");
+        expect_code(run(&p, &non_manifold), Code::InvalidGeometry);
     }
 
     #[test]
@@ -1032,7 +1033,7 @@ mod tests {
         let mut p = Params::new(1.0);
         p.cancel = Some(token);
         match run(&p, &grid(2, 2)) {
-            Err(e) => assert_eq!(error::code(&e), "cancelled"),
+            Err(e) => assert_eq!(error::kind(&e), Code::Cancelled),
             Ok(_) => panic!("expected cancellation"),
         }
     }
@@ -1079,8 +1080,8 @@ mod tests {
         assert_eq!(z.iter().filter(|&&v| v == 2.0).count(), 4);
         let mut p = Params::new(1.0);
         p.grain = Some(0);
-        expect_code(run(&p, &quad), "invalid_argument");
-        expect_code(run(&Params::new(f64::NAN), &quad), "invalid_geometry");
+        expect_code(run(&p, &quad), Code::InvalidArgument);
+        expect_code(run(&Params::new(f64::NAN), &quad), Code::InvalidGeometry);
     }
 
     #[test]

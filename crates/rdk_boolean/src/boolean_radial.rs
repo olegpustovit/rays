@@ -264,7 +264,7 @@ mod tests {
         let token = cancel::create();
         cancel::cancel(&token);
         match build(Some(&token), &value) {
-            Err(failure) => assert_eq!(error::code(&failure), "cancelled"),
+            Err(failure) => assert_eq!(error::kind(&failure), Code::Cancelled),
             Ok(_) => panic!("cancelled radial ordering completed"),
         }
     }

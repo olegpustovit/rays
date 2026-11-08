@@ -11,6 +11,7 @@ use rdk_core::{
     attribute, cancel, element_selection, error, geometry, group, normal_ops, packed, support,
     topology_index,
 };
+use rdk_core::error::Code;
 use rdk_core::support::Windows;
 use rdk_geom::point_grid::{float_max, float_min};
 use rdk_geom::{spatial_index, surface_index};
@@ -64,28 +65,7 @@ pub enum DistanceFromGeometryReference {
 }
 
 fn fail(message: String) -> error::T {
-    error::make("Error.Fail".to_owned(), "invalid_parameter".to_owned(), message, None)
-        .unwrap_or_else(|bad| bad)
-}
-
-/// `Error.guard`: a failure takes the guard's operation and code, a cancellation keeps its own code.
-fn recode(operation: &str, code: &str, failure: &error::T) -> error::T {
-    let made = if error::code(failure) == "cancelled" {
-        error::make(
-            operation.to_owned(),
-            "cancelled".to_owned(),
-            "geometry operation was cancelled".to_owned(),
-            None,
-        )
-    } else {
-        error::make(
-            operation.to_owned(),
-            code.to_owned(),
-            error::message(failure).to_owned(),
-            None,
-        )
-    };
-    made.unwrap_or_else(|bad| bad)
+    error::new("Error.Fail", Code::InvalidParameter, message)
 }
 
 /// OCaml `%S`: a quoted string with OCaml escapes (non-ASCII bytes as decimal `\ddd`).
@@ -200,7 +180,7 @@ fn compose(params: &ComposeTransformParams) -> Result<mat4::T, error::T> {
 }
 
 pub fn compose_transform(params: &ComposeTransformParams) -> Result<mat4::T, error::T> {
-    compose(params).map_err(|failure| recode("compose_transform", "invalid_transform", &failure))
+    compose(params).map_err(|failure| error::guard(failure, "compose_transform", Code::InvalidTransform))
 }
 
 fn transform_matrix_finite(matrix: &mat4::T) -> bool {
@@ -629,7 +609,7 @@ pub fn distance_from_geometry(
     source: &geometry::T,
 ) -> Result<geometry::T, error::T> {
     run_distance_from_geometry(params, source)
-        .map_err(|failure| recode("distance_from_geometry", "invalid_distance", &failure))
+        .map_err(|failure| error::guard(failure, "distance_from_geometry", Code::InvalidDistance))
 }
 
 fn soft_attribute_weights(
@@ -848,7 +828,7 @@ pub fn soft_transform(
     value: &geometry::T,
 ) -> Result<geometry::T, error::T> {
     run_soft_transform(params, matrix, value)
-        .map_err(|failure| recode("soft_transform", "invalid_transform", &failure))
+        .map_err(|failure| error::guard(failure, "soft_transform", Code::InvalidTransform))
 }
 
 #[cfg(test)]
@@ -955,7 +935,7 @@ mod tests {
         let back = mat4::transform_point(&inverse, mat4::transform_point(&forward, source));
         assert!(close(source.x, back.x) && close(source.y, back.y) && close(source.z, back.z));
         let singular = compose_transform(&ComposeTransformParams { scale: vec3::zero(), invert: true, ..compose_params() });
-        assert_eq!(error::code(&singular.unwrap_err()), "invalid_transform");
+        assert_eq!(error::kind(&singular.unwrap_err()), Code::InvalidTransform);
         let bad = compose_transform(&ComposeTransformParams { shear: v3(f64::NAN, 0.0, 0.0), ..compose_params() })
             .unwrap_err();
         assert_eq!(error::message(&bad), "Rdk.Transform_ops.compose_transform: non-finite shear");

@@ -6,7 +6,8 @@ use rdk_core::{
 };
 use rdk_geom::spatial_index;
 
-use crate::attribute_ops::{is_blank, make_error, map_ints, map_planes, map_texts, ocaml_quote, recode};
+use rdk_core::error::Code;
+use crate::attribute_ops::{is_blank, make_error, map_ints, map_planes, map_texts, ocaml_quote};
 use rays_math::text_array::TextArray;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -71,7 +72,7 @@ struct Mapping {
 }
 
 const OPERATION: &str = "attribute_mirror";
-const CODE: &str = "invalid_attribute_mirror";
+const CODE: Code = Code::InvalidAttributeMirror;
 
 fn fail(message: &str) -> error::T {
     make_error(OPERATION, CODE, message)
@@ -667,7 +668,7 @@ fn position_attribute(
 
 pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     run_inner(params, geometry_value)
-        .map_err(|failure| recode(&failure, OPERATION, CODE, "geometry operation was cancelled"))
+        .map_err(|failure| error::guard(failure, OPERATION, CODE))
 }
 
 fn run_inner(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {

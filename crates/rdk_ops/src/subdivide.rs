@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use rdk_core::attribute::{self, Owner, Storage};
 use rdk_core::{cancel, edge_group, error, geometry, group, support, topology, topology_index};
+use rdk_core::error::Code;
 
 use crate::curve_subdivide;
 use crate::deform;
@@ -878,7 +879,7 @@ pub struct Params {
 /// OCaml's `Invalid_argument` caught inside the curve path becomes a plain failure message.
 fn invalid_argument_to_failure(result: Result<geometry::T, error::T>) -> Result<geometry::T, error::T> {
     match result {
-        Err(failure) if error::code(&failure) == "invalid_argument" => {
+        Err(failure) if error::kind(&failure) == Code::InvalidArgument => {
             Err(fail(error::message(&failure).to_owned()))
         }
         other => other,
@@ -1075,20 +1076,11 @@ fn mixed_subdivide(
 fn guard(result: Result<geometry::T, error::T>) -> Result<geometry::T, error::T> {
     match result {
         Ok(value) => Ok(value),
-        Err(failure) => {
-            let code = error::code(&failure);
-            let message = error::message(&failure).to_owned();
-            let (code, message) = if code == "cancelled" {
-                ("cancelled", "geometry operation was cancelled".to_owned())
-            } else if code == "invalid_argument" {
-                // OCaml lets Invalid_argument escape the guard as an exception.
-                ("invalid_argument", message)
-            } else {
-                ("invalid_topology", message)
-            };
-            Err(error::make("subdivide".to_owned(), code.to_owned(), message, None)
-                .unwrap_or_else(|built| built))
+        // OCaml lets Invalid_argument escape the guard as an exception.
+        Err(failure) if error::kind(&failure) == Code::InvalidArgument => {
+            Err(error::new("subdivide", Code::InvalidArgument, error::message(&failure).to_owned()))
         }
+        Err(failure) => Err(error::guard(failure, "subdivide", Code::InvalidTopology)),
     }
 }
 
@@ -1431,7 +1423,7 @@ mod tests {
     #[test]
     fn checked_loop_quad_error() {
         match sub(&quad(None, None, None), &|p| p.scheme = Scheme::Loop) {
-            Err(failure) if error::code(&failure) == "invalid_topology" => {}
+            Err(failure) if error::kind(&failure) == Code::InvalidTopology => {}
             _ => panic!("Loop Subdivide accepted a quad"),
         }
     }
@@ -1888,7 +1880,7 @@ mod tests {
             p.cancel = Some(token.clone());
             p.boundary_interpolation = SubdivideBoundaryNone;
         }) {
-            Err(failure) if error::code(&failure) == "cancelled" => {}
+            Err(failure) if error::is_cancelled(&failure) => {}
             _ => panic!("cancelled boundary-hole classification published geometry"),
         }
     }
@@ -2376,7 +2368,7 @@ mod tests {
             p.cancel = Some(token.clone());
             p.face_varying_interpolation = SubdivideFvarNone;
         }) {
-            Err(failure) if error::code(&failure) == "cancelled" => {}
+            Err(failure) if error::is_cancelled(&failure) => {}
             _ => panic!("cancelled face-varying refinement published geometry"),
         }
     }
@@ -2635,7 +2627,7 @@ mod tests {
         cancel::cancel(&token);
         match sub(&curve_network(), &|p| p.cancel = Some(token.clone())) {
             Ok(_) => panic!("polygon-curve Subdivide ignored cancellation"),
-            Err(failure) => assert_eq!(error::code(&failure), "cancelled"),
+            Err(failure) => assert_eq!(error::kind(&failure), Code::Cancelled),
         }
         match sub(&curve_network(), &|p| p.scheme = Scheme::Loop) {
             Ok(_) => panic!("Subdivide accepted polygon curves under Loop"),

@@ -643,7 +643,7 @@ mod tests {
         let topo = topology::View::create_validated_owned(2, vec![0, 1], vec![0, 2], vec![1]);
         let geom = geometry::create(positions, topo, None, None, None).unwrap();
         let failure = create(None, None, None, &geom).err().unwrap();
-        assert_eq!(error::code(&failure), "invalid_surface");
+        assert_eq!(error::kind(&failure), Code::InvalidSurface);
         assert_eq!(error::message(&failure), "primitive 0 segment 0 is degenerate");
     }
 }

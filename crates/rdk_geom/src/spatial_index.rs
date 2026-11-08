@@ -507,10 +507,10 @@ mod tests {
     fn rejects_bad_grain_and_non_finite_positions() {
         let good = points(&[0.0, 1.0], &[0.0, 1.0], &[0.0, 1.0]);
         let zero = create(None, Some(0), None, &good).err().unwrap();
-        assert_eq!(error::code(&zero), "invalid_parameter");
+        assert_eq!(error::kind(&zero), Code::InvalidParameter);
         let bad = points(&[f64::NAN], &[0.0], &[0.0]);
         let non_finite = create(None, None, None, &bad).err().unwrap();
-        assert_eq!(error::code(&non_finite), "invalid_position");
+        assert_eq!(error::kind(&non_finite), Code::InvalidPosition);
     }
 
     #[test]

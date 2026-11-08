@@ -4,6 +4,7 @@ use rdk_core::{
     attribute, cancel, edge_group, error, geometry, group, packed, topology, topology_index,
     topology_remap,
 };
+use rdk_core::error::Code;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TopologyPolicy {
@@ -22,23 +23,17 @@ pub struct Plan {
     pub unchanged: bool,
 }
 
-fn make(operation: &str, code: &str, message: String) -> error::T {
-    error::make(operation.to_owned(), code.to_owned(), message, None).unwrap_or_else(|e| e)
+fn make(operation: &str, code: Code, message: String) -> error::T {
+    error::new(operation, code, message)
 }
 
 // An Error.Fail of the original: guard turns it into the operation's error.
 fn fail(message: &str) -> error::T {
-    make("Rdk.Deletion", "fail", format!("Rdk.Deletion.delete: {message}"))
+    make("Rdk.Deletion", Code::Fail, format!("Rdk.Deletion.delete: {message}"))
 }
 
-fn guard(operation: &str, code: &str, result: Result<geometry::T, error::T>) -> Result<geometry::T, error::T> {
-    result.map_err(|failure| {
-        if error::code(&failure) == "cancelled" {
-            make(operation, "cancelled", "geometry operation was cancelled".to_owned())
-        } else {
-            make(operation, code, error::message(&failure).to_owned())
-        }
-    })
+fn guard(operation: &str, code: Code, result: Result<geometry::T, error::T>) -> Result<geometry::T, error::T> {
+    result.map_err(|failure| error::guard(failure, operation, code))
 }
 
 fn minimum_vertices(kind: u8) -> i64 {
@@ -348,7 +343,7 @@ fn members(value: &edge_group::T) -> Vec<i64> {
 }
 
 fn invalid_argument(message: &str) -> error::T {
-    make("Rdk.Deletion", "invalid_argument", message.to_owned())
+    make("Rdk.Deletion", Code::InvalidArgument, message.to_owned())
 }
 
 pub fn primitive_partitions(
@@ -543,7 +538,7 @@ pub fn delete(
 ) -> Result<geometry::T, error::T> {
     let cancel_value = params.cancel.as_deref();
     let policy = TopologyPolicy::DestroyTouchedPrimitives;
-    guard("delete", "invalid_selection", (|| {
+    guard("delete", Code::InvalidSelection, (|| {
         cancel::check_opt(cancel_value)?;
         validate_selection(selection, geometry_value)?;
         let deletes_none = if params.selected {
@@ -579,7 +574,7 @@ pub fn delete_primitives(
     if group::owner(selection) != group::Owner::Primitive {
         return Err(make(
             "delete_primitives",
-            "invalid_selection",
+            Code::InvalidSelection,
             "selection must own primitives".to_owned(),
         ));
     }
@@ -594,7 +589,7 @@ pub fn delete_primitives(
         geometry_value,
     )
     .map_err(|failure| {
-        make("delete_primitives", error::code(&failure), error::message(&failure).to_owned())
+        make("delete_primitives", error::kind(&failure), error::message(&failure).to_owned())
     })
 }
 
@@ -654,7 +649,7 @@ mod tests {
         let g = payload();
         let wrong_length = group::init(None, group::Owner::Primitive, "bad", 3, &|_| true).unwrap();
         let failure = err(delete(&delete_params(true, false), &wrong_length, &g));
-        assert_eq!(error::code(&failure), "invalid_selection");
+        assert_eq!(error::kind(&failure), Code::InvalidSelection);
         assert_eq!(
             error::message(&failure),
             "Rdk.Deletion.delete: selection length 3 does not match its primitive owner count 2"
@@ -665,7 +660,7 @@ mod tests {
             &points,
             &g,
         ));
-        assert_eq!(error::code(&failure), "invalid_selection");
+        assert_eq!(error::kind(&failure), Code::InvalidSelection);
         assert_eq!(error::operation(&failure), "delete_primitives");
         let token = std::sync::Arc::new(cancel::create());
         cancel::cancel(&token);
@@ -675,7 +670,7 @@ mod tests {
             &first,
             &g,
         ));
-        assert_eq!(error::code(&failure), "cancelled");
+        assert_eq!(error::kind(&failure), Code::Cancelled);
     }
 
     #[test]

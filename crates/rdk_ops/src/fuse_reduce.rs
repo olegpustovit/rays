@@ -1,4 +1,5 @@
 use rdk_core::{attribute, cancel, edge_group, error, geometry, packed, support, topology, topology_index};
+use rdk_core::error::Code;
 use rdk_geom::point_clusters::Clusters;
 use rdk_geom::point_grid::{float_max, float_min};
 
@@ -38,8 +39,7 @@ pub struct Params {
 }
 
 fn fail(message: String) -> error::T {
-    error::make("Rdk.Fuse_reduce".to_owned(), "invalid_parameter".to_owned(), message, None)
-        .unwrap_or_else(|e| e)
+    error::new("Rdk.Fuse_reduce", Code::InvalidParameter, message)
 }
 
 fn average_plane(
@@ -366,7 +366,7 @@ pub fn apply(
     geometry_value: &geometry::T,
 ) -> Result<geometry::T, error::T> {
     reduce(cancel_value, params, clusters, geometry_value).map_err(|failure| {
-        if error::code(&failure) == "cancelled" || error::code(&failure) == "invalid_parameter" {
+        if error::is_cancelled(&failure) || error::kind(&failure) == Code::InvalidParameter {
             failure
         } else {
             fail(error::message(&failure).to_owned())
@@ -489,7 +489,7 @@ mod tests {
         let token = cancel::create();
         cancel::cancel(&token);
         let failure = apply(Some(&token), &params(Position::First, true, true), &clusters(), &line()).err().unwrap();
-        assert_eq!(error::code(&failure), "cancelled");
+        assert_eq!(error::kind(&failure), Code::Cancelled);
     }
 
     #[test]

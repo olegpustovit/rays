@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use rdk_core::{attribute, cancel, error, geometry, group, packed, support};
+use rdk_core::error::Code;
 use rdk_geom::surface_index;
 use rdk_geom::triangle_intersection::{self, EVENT_STRIDE, MAX_EVENTS};
 
@@ -45,12 +46,12 @@ impl Default for Params {
     }
 }
 
-fn make(code: &str, message: String) -> error::T {
-    error::make(OPERATION.to_owned(), code.to_owned(), message, None).unwrap_or_else(|bad| bad)
+fn make(code: Code, message: String) -> error::T {
+    error::new(OPERATION, code, message)
 }
 
 fn cancelled() -> error::T {
-    make("cancelled", "Boolean Detect was cancelled".to_owned())
+    error::cancelled(OPERATION)
 }
 
 struct Outputs {
@@ -133,7 +134,7 @@ fn install_outputs(
     let mut output = geometry_value.clone();
     // Failures building these outputs are `invalid_output`; cancellation is not.
     let wrap = |value: error::T| {
-        if error::code(&value) == "cancelled" { value } else { make("invalid_output", error::message(&value).to_owned()) }
+        if error::is_cancelled(&value) { value } else { make(Code::InvalidOutput, error::message(&value).to_owned()) }
     };
     if let Some(name) = intersecting_group {
         let counts = &outputs.unique_counts;
@@ -268,7 +269,7 @@ fn duplicate_name(names: &[&str]) -> bool {
 }
 
 fn invalid(message: &str) -> error::T {
-    make("invalid_parameter", message.to_owned())
+    make(Code::InvalidParameter, message.to_owned())
 }
 
 fn run(params: &Params, collision: &geometry::T, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
@@ -383,7 +384,7 @@ fn run(params: &Params, collision: &geometry::T, geometry_value: &geometry::T) -
 /// `params.intersecting_group` defaults to `boolean_intersections`; `None` omits it.
 pub fn run_checked(params: &Params, collision: &geometry::T, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     run(params, collision, geometry_value).map_err(|value| {
-        if error::code(&value) == "cancelled" { cancelled() } else { value }
+        if error::is_cancelled(&value) { cancelled() } else { value }
     })
 }
 
@@ -463,10 +464,10 @@ mod tests {
         )
     }
 
-    fn expect(code: &str, value: Result<geometry::T, error::T>) {
+    fn expect(code: Code, value: Result<geometry::T, error::T>) {
         match value {
-            Err(failure) => assert_eq!(error::code(&failure), code, "{}", error::to_string(&failure)),
-            Ok(_) => panic!("expected {code}"),
+            Err(failure) => assert_eq!(error::kind(&failure), code, "{}", error::to_string(&failure)),
+            Ok(_) => panic!("expected {code:?}"),
         }
     }
 
@@ -671,7 +672,7 @@ mod tests {
             int_array("self_hits", &self_detect(&quad)).1.is_empty(),
             "exposed one polygon's triangulation diagonal as AxA"
         );
-        expect("invalid_parameter", run_checked(&Params { grain: 0, ..Params::default() }, &collision(), &source()));
+        expect(Code::InvalidParameter, run_checked(&Params { grain: 0, ..Params::default() }, &collision(), &source()));
     }
 
     fn grid(columns: i64, rows: i64, size: f64) -> (Vec<(f64, f64, f64)>, Vec<i64>) {

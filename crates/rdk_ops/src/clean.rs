@@ -3,6 +3,7 @@ use std::sync::Arc;
 use rays_math::hash;
 use rdk_core::support::Windows;
 use rdk_core::{attribute_pattern, cancel, error, geometry, group, packed, support, topology};
+use rdk_core::error::Code;
 use rdk_geom::point_grid::float_max;
 
 use crate::attribute_lifecycle;
@@ -14,12 +15,12 @@ use crate::reverse_faces;
 
 const OCAML_MAX_INT: i64 = (1i64 << 62) - 1;
 
-fn make(operation: &str, code: &str, message: String) -> error::T {
-    error::make(operation.to_owned(), code.to_owned(), message, None).unwrap_or_else(|e| e)
+fn make(operation: &str, code: Code, message: String) -> error::T {
+    error::new(operation, code, message)
 }
 
 fn message_error(message: &str) -> error::T {
-    make("Rdk_mesh.Clean", "invalid_parameter", message.to_owned())
+    make("Rdk_mesh.Clean", Code::InvalidParameter, message.to_owned())
 }
 
 fn clean_length(dx: f64, dy: f64, dz: f64) -> f64 {
@@ -564,7 +565,7 @@ fn clean(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, e
     if grain <= 0 {
         return Err(make(
             "Rdk_mesh.Clean",
-            "invalid_argument",
+            Code::InvalidArgument,
             "Rdk_mesh.Clean.clean: grain must be positive".to_owned(),
         ));
     }
@@ -662,10 +663,10 @@ fn clean(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, e
 
 pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     clean(params, geometry_value).map_err(|failure| {
-        if error::code(&failure) == "cancelled" {
-            make("clean", "cancelled", "geometry operation was cancelled".to_owned())
+        if error::is_cancelled(&failure) {
+            error::cancelled("clean")
         } else {
-            make("clean", "invalid_geometry", error::message(&failure).to_owned())
+            make("clean", Code::InvalidGeometry, error::message(&failure).to_owned())
         }
     })
 }
@@ -848,13 +849,13 @@ mod tests {
         let out = run(&base(), &valid).unwrap();
         assert_eq!(geometry::data_id(&out), geometry::data_id(&valid));
         let negative = err(run(&Params { consolidate_distance: Some(-1.0), ..base() }, &valid));
-        assert_eq!(error::code(&negative), "invalid_geometry");
+        assert_eq!(error::kind(&negative), Code::InvalidGeometry);
         let pattern = err(run(&Params { point_attributes: Some("[".to_owned()), ..base() }, &valid));
-        assert_eq!(error::code(&pattern), "invalid_geometry");
+        assert_eq!(error::kind(&pattern), Code::InvalidGeometry);
         let token = std::sync::Arc::new(cancel::create());
         cancel::cancel(&token);
         let cancelled = err(run(&Params { cancel: Some(token), ..base() }, &valid));
-        assert_eq!(error::code(&cancelled), "cancelled");
+        assert_eq!(error::kind(&cancelled), Code::Cancelled);
         assert_eq!(error::code(&err(run(&Params { epsilon: -1.0, ..base() }, &valid))), "invalid_geometry");
     }
 

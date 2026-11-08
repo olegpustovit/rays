@@ -4,6 +4,7 @@ use rays_math::text_array::TextArray;
 use rdk_core::{
     attribute, cancel, edge_group, error, geometry, packed, support, topology, topology_index,
 };
+use rdk_core::error::Code;
 use rdk_geom::point_clusters::Clusters;
 
 use crate::deform;
@@ -11,12 +12,12 @@ use crate::fuse_cleanup;
 use crate::fuse_reduce::{self, Position};
 use crate::fuse_rules::DefaultAttributes;
 
-fn make(operation: &str, code: &str, message: String) -> error::T {
-    error::make(operation.to_owned(), code.to_owned(), message, None).unwrap_or_else(|e| e)
+fn make(operation: &str, code: Code, message: String) -> error::T {
+    error::new(operation, code, message)
 }
 
 fn fail(message: &str) -> error::T {
-    make("Rdk.Edge_collapse", "invalid_parameter", message.to_owned())
+    make("Rdk.Edge_collapse", Code::InvalidParameter, message.to_owned())
 }
 
 fn same_ragged_i64(offsets: &[i64], values: &[i64], left: usize, right: usize) -> bool {
@@ -107,7 +108,7 @@ pub fn raw(
     if grain <= 0 {
         return Err(make(
             "Rdk.Edge_collapse",
-            "invalid_argument",
+            Code::InvalidArgument,
             "Rdk.Edge_collapse.edge_collapse: grain must be positive".to_owned(),
         ));
     }
@@ -307,10 +308,10 @@ pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T,
         geometry_value,
     )
     .map_err(|failure| {
-        if error::code(&failure) == "cancelled" {
-            make("edge_collapse", "cancelled", "geometry operation was cancelled".to_owned())
+        if error::is_cancelled(&failure) {
+            error::cancelled("edge_collapse")
         } else {
-            make("edge_collapse", "invalid_topology", error::message(&failure).to_owned())
+            make("edge_collapse", Code::InvalidTopology, error::message(&failure).to_owned())
         }
     })
 }

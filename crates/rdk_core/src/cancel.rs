@@ -47,6 +47,7 @@ pub fn poll(value: Option<&T>, index: i64, mask: i64) -> Result<(), error::T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::Code;
 
     #[test]
     fn cancellation_is_shared_and_poll_respects_mask() {
@@ -56,7 +57,7 @@ mod tests {
         assert!(poll(Some(&token), 1, 3).is_ok());
         cancel(&token);
         assert!(is_cancelled(&token));
-        assert_eq!(error::code(&check(&token).unwrap_err()), "cancelled");
-        assert_eq!(error::code(&poll(Some(&token), 4, 3).unwrap_err()), "cancelled");
+        assert_eq!(error::kind(&check(&token).unwrap_err()), Code::Cancelled);
+        assert_eq!(error::kind(&poll(Some(&token), 4, 3).unwrap_err()), Code::Cancelled);
     }
 }

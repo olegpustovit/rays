@@ -169,7 +169,7 @@ mod tests {
         assert_eq!(find(&lookup, 7, 1), -1);
         assert!(matches!(
             endpoints(&lookup, 5),
-            Err(error) if crate::error::code(&error) == "invalid_topology_edge_lookup"
+            Err(error) if error::kind(&error) == Code::InvalidTopologyEdgeLookup
         ));
     }
 

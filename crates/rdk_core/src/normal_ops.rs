@@ -785,12 +785,12 @@ mod tests {
         let token = cancel::create();
         cancel::cancel(&token);
         let error = run(&params(Some(token), Some(0)), &geometry_value).err().unwrap();
-        assert_eq!(error::code(&error), "invalid_topology");
+        assert_eq!(error::kind(&error), Code::InvalidTopology);
 
         let token = cancel::create();
         cancel::cancel(&token);
         let error = run(&params(Some(token), Some(1)), &geometry_value).err().unwrap();
-        assert_eq!(error::code(&error), "cancelled");
+        assert_eq!(error::kind(&error), Code::Cancelled);
     }
 
     #[test]

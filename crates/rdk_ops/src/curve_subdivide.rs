@@ -10,6 +10,7 @@ use rdk_core::{
     attribute, cancel, edge_group, error, geometry, group, packed, ragged_ops, support, topology,
     topology_index, topology_remap,
 };
+use rdk_core::error::Code;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Scheme {
@@ -35,13 +36,7 @@ pub struct Plan {
 }
 
 fn fail(message: &str) -> error::T {
-    error::make(
-        "Rdk_curve.Curve_subdivide".to_owned(),
-        "invalid_parameter".to_owned(),
-        message.to_owned(),
-        None,
-    )
-    .unwrap_or_else(|bad| bad)
+    error::new("Rdk_curve.Curve_subdivide", Code::InvalidParameter, message.to_owned())
 }
 
 fn checked_add(name: &str, left: i64, right: i64) -> Result<i64, error::T> {
@@ -825,6 +820,6 @@ mod tests {
         let Err(stopped) = iterate(Some(&cancelled), None, false, Scheme::Bilinear, 1, &polyline(false)) else {
             panic!("expected cancellation")
         };
-        assert_eq!(error::code(&stopped), "cancelled");
+        assert_eq!(error::kind(&stopped), Code::Cancelled);
     }
 }

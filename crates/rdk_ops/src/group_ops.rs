@@ -4,9 +4,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use rdk_core::{attribute, attribute_pattern, cancel, edge_group, error, geometry, group, topology_index};
+use rdk_core::error::Code;
 use rdk_geom::{proximity_index, spatial_index};
 
-use crate::attribute_ops::{is_blank, make_error, ocaml_quote, recode};
+use crate::attribute_ops::{is_blank, make_error, ocaml_quote};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Owner {
@@ -172,7 +173,6 @@ pub struct TransferParams {
     pub target: geometry::T,
 }
 
-const DEFAULT_CANCELLED: &str = "geometry operation was cancelled";
 
 fn owner_name(owner: Owner) -> &'static str {
     match owner {
@@ -272,7 +272,7 @@ fn store_add(store: &mut GroupStore, owner: Owner, name: &str, value: &Selection
     if store.table.contains_key(&(owner, name.to_owned())) {
         return Err(make_error(
             "group_transfer",
-            "invalid_group",
+            Code::InvalidGroup,
             "Group operation: duplicate local group-store key",
         ));
     }
@@ -367,7 +367,7 @@ fn selection_boolean(
         }
         _ => Err(make_error(
             "group_ops",
-            "invalid_group",
+            Code::InvalidGroup,
             "Group operation: cannot combine ordinary and native-edge groups",
         )),
     }
@@ -398,7 +398,7 @@ fn rename_entry(
             RenameConflict::RenameSkip => Ok(()),
             RenameConflict::RenameError => Err(make_error(
                 "group_rename",
-                "invalid_group",
+                Code::InvalidGroup,
                 &format!(
                     "Group Rename: destination {} group {} already exists",
                     owner_name(owner),
@@ -422,7 +422,7 @@ fn rename_entry(
 
 pub fn rename(rules: &[RenameRule], geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     rename_inner(rules, geometry_value)
-        .map_err(|failure| recode(&failure, "group_rename", "invalid_group", DEFAULT_CANCELLED))
+        .map_err(|failure| error::guard(failure, "group_rename", Code::InvalidGroup))
 }
 
 fn rename_inner(rules: &[RenameRule], geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
@@ -441,7 +441,7 @@ fn rename_inner(rules: &[RenameRule], geometry_value: &geometry::T) -> Result<ge
             if is_blank(&new_name) {
                 return Err(make_error(
                     "group_rename",
-                    "invalid_group",
+                    Code::InvalidGroup,
                     "Group Rename: rewrite produced an empty group name",
                 ));
             }
@@ -454,7 +454,7 @@ fn rename_inner(rules: &[RenameRule], geometry_value: &geometry::T) -> Result<ge
 
 pub fn delete(params: &DeleteParams, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     delete_inner(params, geometry_value)
-        .map_err(|failure| recode(&failure, "group_delete", "invalid_group", DEFAULT_CANCELLED))
+        .map_err(|failure| error::guard(failure, "group_delete", Code::InvalidGroup))
 }
 
 fn delete_inner(params: &DeleteParams, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
@@ -534,7 +534,7 @@ fn copied_selection(
         source >= 0 && selection_mem(source_group, source)
     };
     let cancelled = || {
-        make_error("group_transfer", "cancelled", DEFAULT_CANCELLED)
+        error::cancelled("group_transfer")
     };
     match ordinary_owner(owner) {
         Some(group_owner) => {
@@ -600,7 +600,7 @@ fn unique_suffix(store: &GroupStore, owner: Owner, base: &str) -> Result<String,
     let mut candidate = format!("{base}2");
     while store_find(store, owner, &candidate).is_some() {
         if suffix == MAX_INT {
-            return Err(make_error("group_transfer", "invalid_group", "Group Copy: suffix space exhausted"));
+            return Err(make_error("group_transfer", Code::InvalidGroup, "Group Copy: suffix space exhausted"));
         }
         suffix += 1;
         candidate = format!("{base}{suffix}");
@@ -652,7 +652,7 @@ fn transfer_mapping(
         ),
         Owner::GroupVertices => Err(make_error(
             "group_transfer",
-            "invalid_group",
+            Code::InvalidGroup,
             "Group Transfer: vertex groups are not supported",
         )),
     }
@@ -667,7 +667,7 @@ fn point_proximity_map(
     target: &geometry::T,
 ) -> Result<ElementMap, error::T> {
     let index = spatial_index::create(cancel_token, Some(grain), None, geometry::positions(source))
-        .map_err(|failure| make_error("group_transfer", "invalid_group", &error::to_string(&failure)))?;
+        .map_err(|failure| make_error("group_transfer", Code::InvalidGroup, &error::to_string(&failure)))?;
     let count = geometry::point_count(target) as usize;
     let mut indices = vec![-1_i64; count];
     let mut distances = vec![f64::INFINITY; count];
@@ -689,13 +689,13 @@ fn point_proximity_map(
 
 pub fn transfer(params: &TransferParams) -> Result<geometry::T, error::T> {
     transfer_inner(params)
-        .map_err(|failure| recode(&failure, "group_transfer", "invalid_group", DEFAULT_CANCELLED))
+        .map_err(|failure| error::guard(failure, "group_transfer", Code::InvalidGroup))
 }
 
 fn transfer_inner(params: &TransferParams) -> Result<geometry::T, error::T> {
     let cancel_token = params.cancel.as_deref();
     let grain = params.grain.unwrap_or(16_384);
-    let fail = |message: &str| make_error("group_transfer", "invalid_group", message);
+    let fail = |message: &str| make_error("group_transfer", Code::InvalidGroup, message);
     if grain <= 0 {
         return Err(fail("Group Transfer: grain must be positive"));
     }

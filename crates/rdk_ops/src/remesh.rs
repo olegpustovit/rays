@@ -6,6 +6,7 @@ use rdk_core::attribute::{self, Owner, Storage};
 use rdk_core::{
     cancel, edge_group, error, geometry, group, packed, support, topology, topology_index,
 };
+use rdk_core::error::Code;
 use rdk_core::support::Windows;
 
 use crate::subdivide_refine::{
@@ -19,19 +20,12 @@ const OPERATION: &str = "Rdk_mesh.Remesh.remesh";
 
 /// `fail message = Error (operation ^ ": " ^ message)`.
 pub fn fail(message: &str) -> error::T {
-    error::make(
-        "remesh".to_owned(),
-        "invalid_remesh".to_owned(),
-        format!("{OPERATION}: {message}"),
-        None,
-    )
-    .unwrap_or_else(|built| built)
+    error::new("remesh", Code::InvalidRemesh, format!("{OPERATION}: {message}"))
 }
 
 /// OCaml `Invalid_argument`; the public entry turns it into a prefixed failure.
 pub fn invalid_arg(message: String) -> error::T {
-    error::make("remesh".to_owned(), "invalid_argument".to_owned(), message, None)
-        .unwrap_or_else(|built| built)
+    error::new("remesh", Code::InvalidArgument, message)
 }
 
 /// OCaml `%S`.
@@ -2357,22 +2351,13 @@ pub struct Params {
 fn guard(result: Result<geometry::T, error::T>) -> Result<geometry::T, error::T> {
     match result {
         Ok(value) => Ok(value),
-        Err(failure) => {
-            let (code, message) = if error::code(&failure) == "cancelled" {
-                ("cancelled", "geometry operation was cancelled".to_owned())
-            } else {
-                ("invalid_remesh", error::message(&failure).to_owned())
-            };
-            Err(error::make("remesh".to_owned(), code.to_owned(), message, None)
-                .unwrap_or_else(|built| built))
-        }
+        Err(failure) => Err(error::guard(failure, "remesh", Code::InvalidRemesh)),
     }
 }
 
 /// A failure that stops the iteration loop but not the process: the message becomes the result.
 fn recoverable(failure: error::T) -> Result<String, error::T> {
-    let code = error::code(&failure);
-    if code == "cancelled" || code == "invalid_argument" {
+    if matches!(error::kind(&failure), Code::Cancelled | Code::InvalidArgument) {
         Err(failure)
     } else {
         Ok(error::message(&failure).to_owned())
@@ -2438,7 +2423,7 @@ fn remesh_body(params: &Params, geometry_value: &geometry::T) -> Result<geometry
         match rdk_geom::surface_index::create(cancel_token, Some(grain), None, None, None, geometry_value)
         {
             Ok(surface) => Some(surface),
-            Err(failure_value) if error::code(&failure_value) == "cancelled" => {
+            Err(failure_value) if error::is_cancelled(&failure_value) => {
                 return Err(failure_value);
             }
             Err(failure_value) => {
@@ -2544,7 +2529,7 @@ fn remesh_body(params: &Params, geometry_value: &geometry::T) -> Result<geometry
                         },
                         &current,
                     ) {
-                        Err(smooth_failure) if error::code(&smooth_failure) == "cancelled" => {
+                        Err(smooth_failure) if error::is_cancelled(&smooth_failure) => {
                             return Err(smooth_failure);
                         }
                         Err(smooth_failure) => failure = Some(error::to_string(&smooth_failure)),
@@ -2575,8 +2560,7 @@ fn remesh_body(params: &Params, geometry_value: &geometry::T) -> Result<geometry
         iteration += 1;
     }
     if let Some(message) = failure {
-        return Err(error::make("remesh".to_owned(), "invalid_remesh".to_owned(), message, None)
-            .unwrap_or_else(|built| built));
+        return Err(error::new("remesh", Code::InvalidRemesh, message));
     }
     let output = geometry::without_attribute(Owner::Point, "N", &current);
     let output = geometry::without_attribute(Owner::Vertex, "N", &output);
@@ -2606,7 +2590,7 @@ fn remesh_body(params: &Params, geometry_value: &geometry::T) -> Result<geometry
 pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     // `with Invalid_argument message -> fail message`: the message is prefixed once more.
     let result = remesh_body(params, geometry_value).map_err(|failure| {
-        if error::code(&failure) == "invalid_argument" {
+        if error::kind(&failure) == Code::InvalidArgument {
             fail(error::message(&failure))
         } else {
             failure

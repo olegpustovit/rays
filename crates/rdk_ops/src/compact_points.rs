@@ -1,9 +1,10 @@
 use rdk_core::{
     attribute, cancel, error, geometry, group, packed, support, topology, topology_remap,
 };
+use rdk_core::error::Code;
 
-fn make(operation: &str, code: &str, message: String) -> error::T {
-    error::make(operation.to_owned(), code.to_owned(), message, None).unwrap_or_else(|e| e)
+fn make(operation: &str, code: Code, message: String) -> error::T {
+    error::new(operation, code, message)
 }
 
 fn compact(
@@ -14,7 +15,7 @@ fn compact(
     if grain <= 0 {
         return Err(make(
             "Rdk.Compact_points",
-            "invalid_argument",
+            Code::InvalidArgument,
             "Rdk.Compact_points.compact_points: grain must be positive".to_owned(),
         ));
     }
@@ -87,10 +88,10 @@ pub fn run(
     value: &geometry::T,
 ) -> Result<geometry::T, error::T> {
     compact(cancel_value, grain.unwrap_or(16_384), value).map_err(|failure| {
-        if error::code(&failure) == "cancelled" {
-            make("compact_points", "cancelled", "geometry operation was cancelled".to_owned())
+        if error::is_cancelled(&failure) {
+            error::cancelled("compact_points")
         } else {
-            make("compact_points", "invalid_geometry", error::message(&failure).to_owned())
+            make("compact_points", Code::InvalidGeometry, error::message(&failure).to_owned())
         }
     })
 }
@@ -435,7 +436,7 @@ mod tests {
         let token = cancel::create();
         cancel::cancel(&token);
         let failure = err(run(Some(&token), None, &g));
-        assert_eq!(error::code(&failure), "cancelled");
+        assert_eq!(error::kind(&failure), Code::Cancelled);
         assert_eq!(error::code(&err(run(None, Some(0), &g))), "invalid_geometry");
     }
 

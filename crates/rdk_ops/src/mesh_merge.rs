@@ -11,6 +11,7 @@ use rays_math::text_array::TextArray;
 use rdk_core::{
     attribute, cancel, edge_group, error, geometry, group, packed, ragged_ops, support, topology, topology_index,
 };
+use rdk_core::error::Code;
 
 const OPERATION: &str = "merge";
 
@@ -33,21 +34,21 @@ pub struct RunTaggedParams {
 /// The primitive int attribute the editor's merge lowering writes.
 pub const PROVENANCE_ATTRIBUTE: &str = "__flow_src";
 
-fn make(code: &str, message: String) -> error::T {
-    error::make(OPERATION.to_owned(), code.to_owned(), message, None).unwrap_or_else(|bad| bad)
+fn make(code: Code, message: String) -> error::T {
+    error::new(OPERATION, code, message)
 }
 
 /// Any OCaml string error, wrapped by `Error.guard ~operation:"merge" ~code:"schema_mismatch"`.
 fn fail(message: &str) -> error::T {
-    make("schema_mismatch", message.to_owned())
+    make(Code::SchemaMismatch, message.to_owned())
 }
 
 /// A core error that was a plain string in OCaml: re-coded under this operation.
 fn lift(value: error::T) -> error::T {
-    if error::code(&value) == "cancelled" {
-        make("cancelled", "geometry operation was cancelled".to_owned())
+    if error::is_cancelled(&value) {
+        error::cancelled(OPERATION)
     } else {
-        make("schema_mismatch", error::message(&value).to_owned())
+        make(Code::SchemaMismatch, error::message(&value).to_owned())
     }
 }
 
@@ -209,7 +210,7 @@ fn merge_plain(
 ) -> Result<geometry::T, error::T> {
     let grain = grain.unwrap_or(16_384);
     if grain <= 0 {
-        return Err(make("invalid_argument", "Rdk.Mesh_merge.merge: grain must be positive".to_owned()));
+        return Err(make(Code::InvalidArgument, "Rdk.Mesh_merge.merge: grain must be positive".to_owned()));
     }
     let Some(first) = geometries.first() else {
         return empty_points();
@@ -528,7 +529,7 @@ mod tests {
         inputs[1] = polyline(&[(10., 0., 0.), (12., 0., 0.)]);
         match run(&params(None, None), &inputs) {
             Err(failure) => {
-                assert_eq!(error::code(&failure), "schema_mismatch");
+                assert_eq!(error::kind(&failure), Code::SchemaMismatch);
                 assert_eq!(error::message(&failure), "Rdk.Mesh_merge.merge: attribute schemas must match exactly");
             }
             Ok(_) => panic!("expected schema mismatch"),

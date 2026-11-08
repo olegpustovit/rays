@@ -9,6 +9,7 @@ use rdk_core::{
     attribute, cancel, edge_group, error, geometry, group, packed, support, topology, topology_index,
     topology_remap,
 };
+use rdk_core::error::Code;
 use rdk_core::support::Windows;
 
 use crate::curve_join;
@@ -49,28 +50,7 @@ pub struct Params {
 }
 
 fn fail(message: String) -> error::T {
-    error::make("Error.Fail".to_owned(), "invalid_parameter".to_owned(), message, None)
-        .unwrap_or_else(|bad| bad)
-}
-
-/// `Error.guard`: a failure takes the guard's operation and code, a cancellation keeps its own code.
-fn recode(operation: &str, code: &str, failure: &error::T) -> error::T {
-    let made = if error::code(failure) == "cancelled" {
-        error::make(
-            operation.to_owned(),
-            "cancelled".to_owned(),
-            "geometry operation was cancelled".to_owned(),
-            None,
-        )
-    } else {
-        error::make(
-            operation.to_owned(),
-            code.to_owned(),
-            error::message(failure).to_owned(),
-            None,
-        )
-    };
-    made.unwrap_or_else(|bad| bad)
+    error::new("Error.Fail", Code::InvalidParameter, message)
 }
 
 /// Start offset of the `grain`-sized range `range` over `count` items whose output begins at `offsets[item]`.
@@ -1410,7 +1390,7 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
 
 /// Packed polygon-curve cutting kernel.
 pub fn cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T> {
-    run_cut(params, value).map_err(|failure| recode("poly_cut", "invalid_poly_cut", &failure))
+    run_cut(params, value).map_err(|failure| error::guard(failure, "poly_cut", Code::InvalidPolyCut))
 }
 
 #[cfg(test)]

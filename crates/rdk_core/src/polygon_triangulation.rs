@@ -239,7 +239,7 @@ mod tests {
         let mut scratch = create_scratch();
         let mut emit = |_: i64, _: i64, _: i64, _: i64| {};
         let error = primitive(None, &positions, &topology, Some(&mut scratch), 0, &mut emit).unwrap_err();
-        assert_eq!(crate::error::code(&error), "invalid_polygon");
+        assert_eq!(error::kind(&error), Code::InvalidPolygon);
         assert_eq!(crate::error::message(&error), "primitive 0 has degenerate projected area");
     }
 }

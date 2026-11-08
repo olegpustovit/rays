@@ -4,6 +4,7 @@ use rdk_core::{
     attribute, cancel, edge_group, element_selection, error, geometry, group, packed, support,
     topology, topology_index, topology_remap,
 };
+use rdk_core::error::Code;
 use rdk_geom::contour_triangulation;
 use rdk_geom::point_grid::{float_max, float_min};
 
@@ -59,12 +60,12 @@ impl Params {
     }
 }
 
-fn make(operation: &str, code: &str, message: &str) -> error::T {
-    error::make(operation.to_owned(), code.to_owned(), message.to_owned(), None).unwrap_or_else(|e| e)
+fn make(operation: &str, code: Code, message: &str) -> error::T {
+    error::new(operation, code, message.to_owned())
 }
 
 fn fail(message: &str) -> error::T {
-    make("clip", "invalid_geometry", message)
+    make("clip", Code::InvalidGeometry, message)
 }
 
 fn blank(value: &str) -> bool {
@@ -1419,10 +1420,10 @@ fn float_plane(
 }
 
 pub fn clip(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
-    run(params, geometry_value).map_err(|value| match error::code(&value) {
-        "cancelled" => make("clip", "cancelled", "geometry operation was cancelled"),
-        "invalid_argument" => value,
-        _ => make("clip", "invalid_geometry", error::message(&value)),
+    run(params, geometry_value).map_err(|value| match error::kind(&value) {
+        Code::Cancelled => error::cancelled("clip"),
+        Code::InvalidArgument => value,
+        _ => make("clip", Code::InvalidGeometry, error::message(&value)),
     })
 }
 
@@ -1430,7 +1431,7 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
     let cancel_ref = params.cancel.as_deref();
     let grain = params.grain;
     if grain <= 0 {
-        return Err(make("clip", "invalid_argument", "Rdk.Plane_clip.clip: grain must be positive"));
+        return Err(make("clip", Code::InvalidArgument, "Rdk.Plane_clip.clip: grain must be positive"));
     }
     cancel::check_opt(cancel_ref)?;
     let (ox, oy, oz) = (params.origin.x, params.origin.y, params.origin.z);
@@ -2179,6 +2180,7 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
 
 #[cfg(test)]
 pub(crate) mod test_util {
+    use rdk_core::error::Code;
     use rdk_core::{attribute, error, geometry, packed, topology};
     use std::sync::Mutex;
 
@@ -2352,10 +2354,10 @@ pub(crate) mod test_util {
             && geometry::groups(a).len() == geometry::groups(b).len()
     }
 
-    pub fn expect_code(result: Result<geometry::T, error::T>, code: &str) {
+    pub fn expect_code(result: Result<geometry::T, error::T>, code: Code) {
         match result {
-            Err(e) => assert_eq!(error::code(&e), code, "{}", error::to_string(&e)),
-            Ok(_) => panic!("expected error {code}"),
+            Err(e) => assert_eq!(error::kind(&e), code, "{}", error::to_string(&e)),
+            Ok(_) => panic!("expected error {code:?}"),
         }
     }
 
@@ -2561,7 +2563,7 @@ mod tests {
             edge_group::init(None, geometry::topology(&foreign), &foreign_index, "foreign", &|e| e == 0).unwrap();
         let mut p = params();
         p.selection = Some(element_selection::T::SelectedEdges(foreign_edges));
-        expect_code(clip(&p, &source), "invalid_geometry");
+        expect_code(clip(&p, &source), Code::InvalidGeometry);
     }
 
     #[test]
@@ -2651,16 +2653,16 @@ mod tests {
         let source = triangle();
         let mut p = params();
         p.clip_attribute = String::new();
-        expect_code(clip(&p, &source), "invalid_geometry");
+        expect_code(clip(&p, &source), Code::InvalidGeometry);
         let mut p = params();
         p.clip_attribute = "missing".to_owned();
-        expect_code(clip(&p, &source), "invalid_geometry");
+        expect_code(clip(&p, &source), Code::InvalidGeometry);
         let mut p = params();
         p.distance = f64::NAN;
-        expect_code(clip(&p, &source), "invalid_geometry");
+        expect_code(clip(&p, &source), Code::InvalidGeometry);
         let mut p = params();
         p.clipped_edge_group = Some(" ".to_owned());
-        expect_code(clip(&p, &source), "invalid_geometry");
+        expect_code(clip(&p, &source), Code::InvalidGeometry);
         let text = with_attribute(
             "field",
             attribute::Storage::Text(std::sync::Arc::new(vec![b"a".to_vec(), b"b".to_vec(), b"c".to_vec()].into())),
@@ -2668,12 +2670,12 @@ mod tests {
         );
         let mut p = params();
         p.clip_attribute = "field".to_owned();
-        expect_code(clip(&p, &text), "invalid_geometry");
+        expect_code(clip(&p, &text), Code::InvalidGeometry);
         let non_finite = with_attribute("field", attribute::Storage::Float(Arc::new(vec![-1.0, f64::INFINITY, 1.0])), &source);
-        expect_code(clip(&p, &non_finite), "invalid_geometry");
+        expect_code(clip(&p, &non_finite), Code::InvalidGeometry);
         let mut p = params();
         p.grain = 0;
-        expect_code(clip(&p, &source), "invalid_argument");
+        expect_code(clip(&p, &source), Code::InvalidArgument);
     }
 
     #[test]
@@ -2907,9 +2909,9 @@ mod tests {
         let mut p = params();
         p.grain = 1;
         p.fill = true;
-        expect_code(clip(&p, &merge(&[outer.clone(), overlap_a, overlap_b])), "invalid_geometry");
+        expect_code(clip(&p, &merge(&[outer.clone(), overlap_a, overlap_b])), Code::InvalidGeometry);
         let same = merge(&[outer, bx((0.0, -0.3, 0.0), 2.0, 2.0), bx((0.0, 0.3, 0.0), 2.0, 2.0)]);
-        expect_code(clip(&p, &same), "invalid_geometry");
+        expect_code(clip(&p, &same), Code::InvalidGeometry);
     }
 
     #[test]

@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use rays_math::mat4;
 use rays_math::text_array::TextArray;
 use rdk_core::{attribute, cancel, edge_group, error, geometry, group, packed, ragged_ops, support, topology, topology_index};
+use rdk_core::error::Code;
 
 const OPERATION: &str = "materialize_instances";
 const NAME: &str = "Rdk.Instance_copy.materialize_instances";
@@ -15,17 +16,17 @@ const NAME: &str = "Rdk.Instance_copy.materialize_instances";
 const DEFAULT_GRAIN: i64 = 16_384;
 
 
-fn make(code: &str, message: String) -> error::T {
-    error::make(OPERATION.to_owned(), code.to_owned(), message, None).unwrap_or_else(|bad| bad)
+fn make(code: Code, message: String) -> error::T {
+    error::new(OPERATION, code, message)
 }
 
 fn fail(message: String) -> error::T {
-    make("invalid_parameter", message)
+    make(Code::InvalidParameter, message)
 }
 
 fn lift(value: error::T) -> error::T {
-    if error::code(&value) == "cancelled" {
-        make("cancelled", "geometry operation was cancelled".to_owned())
+    if error::is_cancelled(&value) {
+        error::cancelled(OPERATION)
     } else {
         fail(error::message(&value).to_owned())
     }
@@ -176,7 +177,7 @@ fn repeat_group(cancel_value: Option<&cancel::T>, grain: i64, copies: i64, sourc
     )
     .map_err(lift)?;
     if cancelled.load(Ordering::Relaxed) {
-        return Err(make("cancelled", "geometry operation was cancelled".to_owned()));
+        return Err(error::cancelled(OPERATION));
     }
     match group::View::order_view(source) {
         None => Ok(target),
@@ -518,7 +519,7 @@ mod tests {
         let bad = mat4::of_rows((f64::NAN, 0., 0., 0.), (0., 1., 0., 0.), (0., 0., 1., 0.), (0., 0., 0., 1.));
         match materialize_instances(&[mat4::identity(), bad], &source) {
             Err(failure) => {
-                assert_eq!(error::code(&failure), "invalid_parameter");
+                assert_eq!(error::kind(&failure), Code::InvalidParameter);
                 assert_eq!(
                     error::message(&failure),
                     "Rdk.Instance_copy.materialize_instances: transform 1 must be finite"

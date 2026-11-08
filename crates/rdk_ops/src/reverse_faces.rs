@@ -1,8 +1,9 @@
 use rdk_core::support::Windows;
 use rdk_core::{attribute, cancel, error, geometry, group, support, topology, topology_remap};
+use rdk_core::error::Code;
 
-fn make(operation: &str, code: &str, message: String) -> error::T {
-    error::make(operation.to_owned(), code.to_owned(), message, None).unwrap_or_else(|e| e)
+fn make(operation: &str, code: Code, message: String) -> error::T {
+    error::new(operation, code, message)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -18,7 +19,7 @@ fn reverse(
     let grain = 16_384i64;
     let operation = Operation::ReverseVertices;
     let primitives: Option<&group::T> = None;
-    let invalid = |m: &str| make("reverse", "invalid_topology", m.to_owned());
+    let invalid = |m: &str| make("reverse", Code::InvalidTopology, m.to_owned());
     cancel::check_opt(cancel_value)?;
     let topology_value = geometry::topology(geometry_value);
     let source = topology::View::view(topology_value)?;
@@ -157,10 +158,10 @@ pub fn run(
     geometry_value: &geometry::T,
 ) -> Result<geometry::T, error::T> {
     reverse(cancel_value, geometry_value).map_err(|failure| {
-        if error::code(&failure) == "cancelled" {
-            make("reverse", "cancelled", "geometry operation was cancelled".to_owned())
+        if error::is_cancelled(&failure) {
+            error::cancelled("reverse")
         } else {
-            make("reverse", "invalid_topology", error::message(&failure).to_owned())
+            make("reverse", Code::InvalidTopology, error::message(&failure).to_owned())
         }
     })
 }
@@ -200,7 +201,7 @@ mod tests {
         let token = cancel::create();
         cancel::cancel(&token);
         let failure = err(run(Some(&token), &grid(1, 1, 1.0, true)));
-        assert_eq!(error::code(&failure), "cancelled");
+        assert_eq!(error::kind(&failure), Code::Cancelled);
         assert_eq!(error::operation(&failure), "reverse");
     }
 

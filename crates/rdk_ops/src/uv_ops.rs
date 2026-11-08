@@ -1,6 +1,7 @@
 //! Checked UV flatten and relax over the mean-value parameterization.
 use rays_math::vec3;
 use rdk_core::{error, geometry};
+use rdk_core::error::Code;
 
 use crate::uv_parameterize::{self, BoundaryMode};
 
@@ -13,35 +14,14 @@ pub enum Projection {
     Spherical { origin: vec3::T, axis: vec3::T, seam: vec3::T },
 }
 
-/// `Error.guard ~operation ~code`: a failure takes the guard's operation and code, a cancellation
-/// keeps code `cancelled`.
-fn guard(operation: &str, code: &str, failure: &error::T) -> error::T {
-    let made = if error::code(failure) == "cancelled" {
-        error::make(
-            operation.to_owned(),
-            "cancelled".to_owned(),
-            "geometry operation was cancelled".to_owned(),
-            None,
-        )
-    } else {
-        error::make(
-            operation.to_owned(),
-            code.to_owned(),
-            error::message(failure).to_owned(),
-            None,
-        )
-    };
-    made.unwrap_or_else(|bad| bad)
-}
-
 pub fn flatten(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T> {
     uv_parameterize::solve(params, BoundaryMode::Circle, value)
-        .map_err(|failure| guard("uv_flatten", "invalid_uv", &failure))
+        .map_err(|failure| error::guard(failure, "uv_flatten", Code::InvalidUv))
 }
 
 pub fn relax(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T> {
     uv_parameterize::solve(params, BoundaryMode::Preserve, value)
-        .map_err(|failure| guard("uv_relax", "invalid_uv", &failure))
+        .map_err(|failure| error::guard(failure, "uv_relax", Code::InvalidUv))
 }
 
 #[cfg(test)]
@@ -141,7 +121,7 @@ mod tests {
         }
         let Err(missing) = relax(&params(), &mesh) else { panic!("expected failure") };
         assert_eq!(error::operation(&missing), "uv_relax");
-        assert_eq!(error::code(&missing), "invalid_uv");
+        assert_eq!(error::kind(&missing), Code::InvalidUv);
         assert_eq!(error::message(&missing), "UV Relax requires vertex float2 attribute \"uv\"");
     }
 
@@ -164,7 +144,7 @@ mod tests {
         let token = Arc::new(rdk_core::cancel::create());
         rdk_core::cancel::cancel(&token);
         let Err(stopped) = flatten(&Params { cancel: Some(token), ..params() }, &mesh) else { panic!("expected cancel") };
-        assert_eq!(error::code(&stopped), "cancelled");
+        assert_eq!(error::kind(&stopped), Code::Cancelled);
         let wrong_seams = group::init(Some(1), group::Owner::Point, "s", 9, &|_| false).unwrap();
         assert_eq!(
             message(flatten(&Params { seams: Some(wrong_seams), ..params() }, &mesh)),

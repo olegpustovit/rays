@@ -763,7 +763,7 @@ mod tests {
             None,
         )
         .err().unwrap();
-        assert_eq!(error::code(&error), "invalid_geometry");
+        assert_eq!(error::kind(&error), Code::InvalidGeometry);
     }
     #[test]
     fn point_range_generator_keeps_fixed_plane_lengths() {

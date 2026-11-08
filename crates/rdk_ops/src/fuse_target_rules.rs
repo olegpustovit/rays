@@ -4,6 +4,7 @@ use std::collections::HashSet;
 
 use rdk_core::support::Windows;
 use rdk_core::{attribute, attribute_pattern, cancel, error, geometry, group, packed, support};
+use rdk_core::error::Code;
 
 use crate::fuse_rules::{AttributeMethod, AttributeRule, GroupRule};
 
@@ -19,17 +20,15 @@ struct CompiledGroupRule {
 }
 
 fn fail(message: String) -> error::T {
-    error::make(
-        "Rdk_mesh.Fuse_target_rules".to_owned(),
-        "invalid_argument".to_owned(),
+    error::new(
+        "Rdk_mesh.Fuse_target_rules",
+        Code::InvalidArgument,
         format!("Rdk_mesh.Fuse_target_rules.fuse: {message}"),
-        None,
     )
-    .unwrap_or_else(|e| e)
 }
 
 fn core_fail(failure: error::T) -> error::T {
-    if error::code(&failure) == "cancelled" {
+    if error::is_cancelled(&failure) {
         failure
     } else {
         fail(error::message(&failure).to_owned())

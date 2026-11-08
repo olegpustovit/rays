@@ -917,7 +917,7 @@ mod tests {
         let token = cancel::create();
         cancel::cancel(&token);
         match build(Some(&token), &params(), &value) {
-            Err(failure) => assert_eq!(error::code(&failure), "cancelled"),
+            Err(failure) => assert_eq!(error::kind(&failure), Code::Cancelled),
             Ok(_) => panic!("cancelled Boolean seam extraction completed"),
         }
     }
@@ -927,12 +927,12 @@ mod tests {
         let value = disjoint_complex();
         let grain = Params { grain: 0, ..params() };
         match build(None, &grain, &value) {
-            Err(failure) => assert_eq!(error::code(&failure), "invalid_parameter"),
+            Err(failure) => assert_eq!(error::kind(&failure), Code::InvalidParameter),
             Ok(_) => panic!("zero Boolean seam grain was accepted"),
         }
         let cutoff = Params { parallel_cutoff: 0, ..params() };
         match build(None, &cutoff, &value) {
-            Err(failure) => assert_eq!(error::code(&failure), "invalid_parameter"),
+            Err(failure) => assert_eq!(error::kind(&failure), Code::InvalidParameter),
             Ok(_) => panic!("zero Boolean seam parallel cutoff was accepted"),
         }
     }
@@ -975,7 +975,7 @@ mod tests {
             &[open, open],
         );
         let crossing_error = match verify(&crossing) {
-            Err(failure) if error::code(&failure) == "seam_self_intersection" => error::to_string(&failure),
+            Err(failure) if error::kind(&failure) == Code::SeamSelfIntersection => error::to_string(&failure),
             Err(failure) => panic!("unexpected seam verification error: {}", error::to_string(&failure)),
             Ok(()) => panic!("crossing rounded seam curves passed verification"),
         };
@@ -995,7 +995,7 @@ mod tests {
             &[open, open],
         );
         match verify(&overlap) {
-            Err(failure) if error::code(&failure) == "seam_self_intersection" => {}
+            Err(failure) if error::kind(&failure) == Code::SeamSelfIntersection => {}
             Err(failure) => panic!("unexpected overlap error: {}", error::to_string(&failure)),
             Ok(()) => panic!("overlapping rounded seam segments passed verification"),
         }
@@ -1005,7 +1005,7 @@ mod tests {
             &[PrimitiveKind::ClosedPolyline],
         );
         match verify(&bow_tie) {
-            Err(failure) if error::code(&failure) == "seam_self_intersection" => {}
+            Err(failure) if error::kind(&failure) == Code::SeamSelfIntersection => {}
             Err(failure) => panic!("unexpected closed-curve error: {}", error::to_string(&failure)),
             Ok(()) => panic!("self-crossing closed seam passed verification"),
         }
@@ -1019,7 +1019,7 @@ mod tests {
         let subnormal = curve_geometry(&[(0., 0., 0.), (tiny, 0., 0.)], &[vec![0, 1]], &[open]);
         verify(&subnormal).unwrap();
         match verify(&triangle(&[(0., 0., 0.), (1., 0., 0.), (0., 1., 0.)])) {
-            Err(failure) if error::code(&failure) == "invalid_output" => {}
+            Err(failure) if error::kind(&failure) == Code::InvalidOutput => {}
             Err(failure) => panic!("unexpected polygon verification error: {}", error::to_string(&failure)),
             Ok(()) => panic!("polygon entered seam curve verification"),
         }

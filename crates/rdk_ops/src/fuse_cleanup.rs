@@ -1,16 +1,11 @@
 use rdk_core::support::{self, Windows};
 use rdk_core::{attribute, cancel, edge_group, error, geometry, group, packed, topology, topology_index, topology_remap};
+use rdk_core::error::Code;
 
 const OCAML_MAX_INT: i64 = (1i64 << 62) - 1;
 
 fn fail(message: &str) -> error::T {
-    error::make(
-        "Rdk_mesh.Fuse_cleanup".to_owned(),
-        "invalid_parameter".to_owned(),
-        format!("Rdk_mesh.Fuse_cleanup.fuse: {message}"),
-        None,
-    )
-    .unwrap_or_else(|e| e)
+    error::new("Rdk_mesh.Fuse_cleanup", Code::InvalidParameter, format!("Rdk_mesh.Fuse_cleanup.fuse: {message}"))
 }
 
 fn minimum_vertices(kind: u8) -> i64 {
@@ -393,7 +388,7 @@ mod tests {
         assert_eq!(geometry::data_id(&out), geometry::data_id(&clean));
         let token = cancel::create();
         cancel::cancel(&token);
-        assert_eq!(error::code(&apply(Some(&token), 1, true, false, false, &source).err().unwrap()), "cancelled");
+        assert_eq!(error::kind(&apply(Some(&token), 1, true, false, false, &source).err().unwrap()), Code::Cancelled);
     }
 
     #[test]

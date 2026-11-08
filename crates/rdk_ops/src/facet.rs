@@ -8,6 +8,7 @@ use rdk_core::{
     attribute, cancel, edge_group, element_selection, error, face_normals, geometry, group, packed, support,
     topology, topology_index, topology_remap,
 };
+use rdk_core::error::Code;
 use rdk_geom::point_clusters::{self, Metric};
 
 use crate::clean;
@@ -39,29 +40,29 @@ pub struct Params {
     pub reverse_normals: Option<bool>,
 }
 
-fn make(code: &str, message: String) -> error::T {
-    error::make(GUARD_OPERATION.to_owned(), code.to_owned(), message, None).unwrap_or_else(|bad| bad)
+fn make(code: Code, message: String) -> error::T {
+    error::new(GUARD_OPERATION, code, message)
 }
 
 /// A plain OCaml string error.
 fn fail(message: &str) -> error::T {
-    make("invalid_geometry", message.to_owned())
+    make(Code::InvalidGeometry, message.to_owned())
 }
 
 fn failf(message: String) -> error::T {
-    make("invalid_geometry", message)
+    make(Code::InvalidGeometry, message)
 }
 
 fn cancelled_error() -> error::T {
-    make("cancelled", "geometry operation was cancelled".to_owned())
+    error::cancelled(GUARD_OPERATION)
 }
 
 /// Every error leaves `Error.guard` as the message under this operation, or as a cancellation.
 fn lift(value: error::T) -> error::T {
-    if error::code(&value) == "cancelled" {
+    if error::is_cancelled(&value) {
         cancelled_error()
     } else {
-        make("invalid_geometry", error::message(&value).to_owned())
+        make(Code::InvalidGeometry, error::message(&value).to_owned())
     }
 }
 
@@ -2033,7 +2034,7 @@ fn facet(options: &Options, primitives: Option<&group::T>, geometry_value: &geom
 pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     let grain = params.grain.unwrap_or(16_384);
     if grain <= 0 {
-        return Err(make("invalid_argument", "Rdk_mesh.Facet.run: grain must be positive".to_owned()));
+        return Err(make(Code::InvalidArgument, "Rdk_mesh.Facet.run: grain must be positive".to_owned()));
     }
     let cancel_value = params.cancel.as_deref();
     let primitives = match &params.selection {
@@ -2129,9 +2130,9 @@ mod tests {
         geometry::data_id(left) == geometry::data_id(right)
     }
 
-    fn expect_code(value: Result<geometry::T, error::T>, code: &str, message: &str) {
+    fn expect_code(value: Result<geometry::T, error::T>, code: Code, message: &str) {
         match value {
-            Err(failure) if error::code(&failure) == code => {}
+            Err(failure) if error::kind(&failure) == code => {}
             _ => panic!("{message}"),
         }
     }
@@ -2481,7 +2482,7 @@ mod tests {
         let wrong = group::init(None, group::Owner::Primitive, "wrong", 2, &|_| true).unwrap();
         expect_code(
             run_facet(Params { selection: Some(element_selection::T::SelectedPoints(wrong)), ..unique() }, &source),
-            "invalid_geometry",
+            Code::InvalidGeometry,
             "Facet accepted a typed selection with the wrong owner",
         );
         let foreign = geometry::create(
@@ -2495,7 +2496,7 @@ mod tests {
         let foreign_edge = edge_group::init(None, geometry::topology(&foreign), &foreign_index, "foreign", &|e| e == 0).unwrap();
         expect_code(
             run_facet(Params { selection: Some(element_selection::T::SelectedEdges(foreign_edge)), ..unique() }, &source),
-            "invalid_geometry",
+            Code::InvalidGeometry,
             "Facet accepted a foreign-topology edge selection",
         );
     }
@@ -2614,7 +2615,7 @@ mod tests {
         for distance in [-0.1, f64::NAN] {
             expect_code(
                 run_facet(consolidate(distance), &source),
-                "invalid_geometry",
+                Code::InvalidGeometry,
                 "Facet accepted an invalid normal consolidation distance",
             );
         }
@@ -2623,7 +2624,7 @@ mod tests {
                 Params { consolidate_distance: Some(0.), consolidate_normals_distance: Some(0.), ..Params::default() },
                 &source,
             ),
-            "invalid_geometry",
+            Code::InvalidGeometry,
             "Facet accepted mutually exclusive consolidation modes",
         );
         let wrong = add_attribute(
@@ -2634,7 +2635,7 @@ mod tests {
         );
         expect_code(
             run_facet(consolidate(0.01), &wrong),
-            "invalid_geometry",
+            Code::InvalidGeometry,
             "Facet accepted scalar N for normal consolidation",
         );
     }
@@ -2754,7 +2755,7 @@ mod tests {
         for distance in [-0.1, f64::NAN] {
             expect_code(
                 run_facet(inline_params(Some(distance)), &source),
-                "invalid_geometry",
+                Code::InvalidGeometry,
                 "Facet accepted an invalid inline distance",
             );
         }
@@ -2817,7 +2818,7 @@ mod tests {
         ).unwrap();
         expect_code(
             run_facet(Params { orient_polygons: Some(true), ..Params::default() }, &nonmanifold),
-            "invalid_geometry",
+            Code::InvalidGeometry,
             "Facet Orient Polygons accepted a non-manifold edge",
         );
     }
@@ -2916,7 +2917,7 @@ mod tests {
             check(near(length, 1.), "Facet cusped post normal");
         }
         for angle in [-0.1, std::f64::consts::PI + 0.1, f64::NAN] {
-            expect_code(run_facet(cusp(angle), &source), "invalid_geometry", "Facet accepted an invalid cusp angle");
+            expect_code(run_facet(cusp(angle), &source), Code::InvalidGeometry, "Facet accepted an invalid cusp angle");
         }
         let curve = geometry::create(
             f3(vec![0., 1.], vec![0., 0.], vec![0., 0.]),
@@ -2925,7 +2926,7 @@ mod tests {
             None,
             None,
         ).unwrap();
-        expect_code(run_facet(cusp(1.), &curve), "invalid_geometry", "Facet Cusp Polygons accepted curve topology");
+        expect_code(run_facet(cusp(1.), &curve), Code::InvalidGeometry, "Facet Cusp Polygons accepted curve topology");
     }
 
     #[test]
@@ -3030,7 +3031,7 @@ mod tests {
         ).unwrap();
         check(same(&facet_ok(planar(), &curve), &curve), "Facet Make Planar changed a polygon curve");
         let degenerate = geometry::create(f3(vec![0., 1., 2., 3.], vec![0.; 4], vec![0.; 4]), planar_topology, None, None, None).unwrap();
-        expect_code(run_facet(planar(), &degenerate), "invalid_geometry", "Facet Make Planar accepted a plane-less polygon");
+        expect_code(run_facet(planar(), &degenerate), Code::InvalidGeometry, "Facet Make Planar accepted a plane-less polygon");
         let nonfinite = geometry::create(
             f3(
                 vec![0., 1., 1., 0., 2., 3., 3., 2.],
@@ -3050,7 +3051,7 @@ mod tests {
         let all = primitive_group(&nonfinite, &|_| true);
         expect_code(
             run_facet(Params { selection: selection(&all), ..planar() }, &nonfinite),
-            "invalid_geometry",
+            Code::InvalidGeometry,
             "Facet Make Planar accepted a selected non-finite polygon",
         );
     }
@@ -3140,20 +3141,20 @@ mod tests {
         check(same(&facet_ok(Params::default(), &source), &source), "Facet default is not identity");
         expect_code(
             run_facet(Params { consolidate_distance: Some(-1.), ..Params::default() }, &source),
-            "invalid_geometry",
+            Code::InvalidGeometry,
             "Facet accepted a negative consolidation distance",
         );
         let wrong = add_attribute(attribute::Owner::Point, "N", attribute::Storage::Float(Arc::new(vec![1.; 5])), &source);
         expect_code(
             run_facet(Params { make_normals_unit_length: Some(true), ..Params::default() }, &wrong),
-            "invalid_geometry",
+            Code::InvalidGeometry,
             "Facet accepted non-vector normals",
         );
         let cancelled = Arc::new(cancel::create());
         cancel::cancel(&cancelled);
         let with_cancel = |params: Params| Params { cancel: Some(cancelled.clone()), ..params };
         let cancelled_code = |params: Params, value: &geometry::T, message: &str| {
-            expect_code(run_facet(with_cancel(params), value), "cancelled", message)
+            expect_code(run_facet(with_cancel(params), value), Code::Cancelled, message)
         };
         cancelled_code(Params { unique_points: Some(true), ..Params::default() }, &source, "Facet ignored cancellation");
         cancelled_code(Params { remove_inline_points: Some(true), ..Params::default() }, &source, "Facet inline removal ignored cancellation");
@@ -3185,7 +3186,7 @@ mod tests {
                     },
                     &source,
                 ),
-                "invalid_geometry",
+                Code::InvalidGeometry,
                 "Facet accepted a malformed primitive selection",
             );
         }

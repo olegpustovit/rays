@@ -13,6 +13,7 @@ use rays_math::{color, vec2};
 use rdk_core::attribute::{self, Owner, Storage};
 use rdk_core::topology::{self, PrimitiveKind};
 use rdk_core::{error, geometry, normal_ops, packed, topology_remap};
+use rdk_core::error::Code;
 use rdk_ops::triangulate;
 
 enum Planes {
@@ -305,7 +306,7 @@ fn to_mesh_raw_impl(g: &geometry::T) -> Result<mesh::t, String> {
 
 fn protected(operation: &str, work: &dyn Fn() -> Result<mesh::t, String>) -> Result<mesh::t, error::T> {
     work().map_err(|message| {
-        error::make(operation.to_owned(), "mesh_conversion".to_owned(), message, None).unwrap_or_else(|e| e)
+        error::new(operation, Code::MeshConversion, message)
     })
 }
 
@@ -415,6 +416,6 @@ pub fn to_mesh(g: &geometry::T) -> Result<mesh::t, error::T> {
 
 pub fn of_mesh(m: &mesh::t) -> Result<geometry::T, error::T> {
     of_mesh_raw_impl(m).map_err(|message| {
-        error::make("of_mesh".to_owned(), "mesh_conversion".to_owned(), message, None).unwrap_or_else(|e| e)
+        error::new("of_mesh", Code::MeshConversion, message)
     })
 }

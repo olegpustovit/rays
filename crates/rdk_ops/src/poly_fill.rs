@@ -5,6 +5,7 @@ use rdk_core::{
     attribute, cancel, edge_group, error, geometry, group, packed, polygon_triangulation, support, topology_remap,
     topology, topology_index,
 };
+use rdk_core::error::Code;
 use rdk_geom::point_grid::{float_max, float_min};
 
 use crate::deform;
@@ -44,12 +45,12 @@ impl Params {
 
 const OPERATION: &str = "Rdk.Poly_fill.poly_fill";
 
-fn make(code: &str, message: &str) -> error::T {
-    error::make("poly_fill".to_owned(), code.to_owned(), message.to_owned(), None).unwrap_or_else(|e| e)
+fn make(code: Code, message: &str) -> error::T {
+    error::new("poly_fill", code, message.to_owned())
 }
 
 fn fail(message: String) -> error::T {
-    make("invalid_geometry", &message)
+    make(Code::InvalidGeometry, &message)
 }
 
 fn blank(value: &str) -> bool {
@@ -738,12 +739,9 @@ fn remap_edge_groups(
 pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     let grain = params.grain.unwrap_or(16_384);
     if grain <= 0 {
-        return Err(make("invalid_argument", &format!("{OPERATION}: grain must be positive")));
+        return Err(make(Code::InvalidArgument, &format!("{OPERATION}: grain must be positive")));
     }
-    run_inner(params, grain, geometry_value).map_err(|value| match error::code(&value) {
-        "cancelled" => make("cancelled", "geometry operation was cancelled"),
-        _ => make("invalid_geometry", error::message(&value)),
-    })
+    run_inner(params, grain, geometry_value).map_err(|value| error::guard(value, "poly_fill", Code::InvalidGeometry))
 }
 
 #[allow(clippy::too_many_lines)]
@@ -1323,7 +1321,7 @@ mod tests {
         let bad = edge_group::init(None, &topology_value, &index, "bad", &|e| e == interior).unwrap();
         let mut p = Params::new(Mode::FillSinglePolygon);
         p.boundary = Some(bad);
-        expect_code(run(&p, &merged), "invalid_geometry");
+        expect_code(run(&p, &merged), Code::InvalidGeometry);
         let empty = edge_group::init(None, &topology_value, &index, "empty", &|_| false).unwrap();
         let mut p = Params::new(Mode::FillSinglePolygon);
         p.boundary = Some(empty);
@@ -1334,27 +1332,27 @@ mod tests {
         let foreign = edge_group::init(None, geometry::topology(&other), &other_index, "foreign", &|e| e == 0).unwrap();
         let mut p = Params::new(Mode::FillSinglePolygon);
         p.boundary = Some(foreign);
-        expect_code(run(&p, &merged), "invalid_geometry");
+        expect_code(run(&p, &merged), Code::InvalidGeometry);
         let branched = polygons(
             vec![0.0, 1.0, 0.0, -1.0, 0.0],
             vec![0.0, 0.0, 1.0, 0.0, -1.0],
             vec![0.0; 5],
             &[vec![0, 1, 2], vec![0, 3, 4]],
         );
-        expect_code(run(&Params::new(Mode::FillSinglePolygon), &branched), "invalid_geometry");
+        expect_code(run(&Params::new(Mode::FillSinglePolygon), &branched), Code::InvalidGeometry);
         let nonfinite = open_box(0.0);
         let (mut nx, ny, nz) = xyz(&nonfinite);
         nx[4] = f64::NAN;
         let nonfinite = geometry::with_positions(packed::Float3::View::of_owned_exn(nx, ny, nz).unwrap(), &nonfinite).unwrap();
-        expect_code(run(&Params::new(Mode::FillSinglePolygon), &nonfinite), "invalid_geometry");
+        expect_code(run(&Params::new(Mode::FillSinglePolygon), &nonfinite), Code::InvalidGeometry);
         let mut p = Params::new(Mode::FillSinglePolygon);
         p.patch_group = Some(String::new());
-        expect_code(run(&p, &merged), "invalid_geometry");
+        expect_code(run(&p, &merged), Code::InvalidGeometry);
         let concave = polygon_of(&[(0.0, 0.0, 0.0), (2.0, 0.0, 0.0), (2.0, 2.0, 0.0), (1.0, 0.8, 0.0), (0.0, 2.0, 0.0)]);
         let concave_fill = run(&Params::new(Mode::FillTriangles), &concave).unwrap();
         assert!(geometry::primitive_count(&concave_fill) == 4 && geometry::vertex_count(&concave_fill) == 14);
         let crossed = polygon_of(&[(0.0, 0.0, 0.0), (2.0, 2.0, 0.0), (0.0, 2.0, 0.0), (2.0, 0.0, 0.0)]);
-        expect_code(run(&Params::new(Mode::FillTriangles), &crossed), "invalid_geometry");
+        expect_code(run(&Params::new(Mode::FillTriangles), &crossed), Code::InvalidGeometry);
         let diagonal_source = open_box(0.0);
         let dt = topo(&diagonal_source);
         let mut vertex_points = dt.vertex_points.to_vec();
@@ -1388,7 +1386,7 @@ mod tests {
         cancel::cancel(&token);
         let mut p = Params::new(Mode::FillSinglePolygon);
         p.cancel = Some(token);
-        expect_code(run(&p, &merged), "cancelled");
+        expect_code(run(&p, &merged), Code::Cancelled);
     }
 
     fn many_open_boxes(count: usize) -> geometry::T {

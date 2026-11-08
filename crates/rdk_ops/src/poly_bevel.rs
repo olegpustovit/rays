@@ -5,6 +5,7 @@ use rdk_core::{
     attribute, cancel, edge_group, error, face_normals, geometry, group, packed, support, topology,
     topology_edge_lookup, topology_index, topology_remap,
 };
+use rdk_core::error::Code;
 
 use crate::deform;
 
@@ -53,12 +54,12 @@ impl Params {
 
 const PREFIX: &str = "Rdk_mesh.Poly_bevel.poly_bevel";
 
-fn make(code: &str, message: &str) -> error::T {
-    error::make("poly_bevel".to_owned(), code.to_owned(), message.to_owned(), None).unwrap_or_else(|e| e)
+fn make(code: Code, message: &str) -> error::T {
+    error::new("poly_bevel", code, message.to_owned())
 }
 
 fn fail(message: String) -> error::T {
-    make("invalid_topology", &message)
+    make(Code::InvalidTopology, &message)
 }
 
 fn blank(value: &str) -> bool {
@@ -239,12 +240,9 @@ fn union_corners(parent: &mut [usize], left: usize, right: usize) {
 pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     let grain = params.grain.unwrap_or(16_384);
     if grain <= 0 {
-        return Err(make("invalid_argument", &format!("{PREFIX}: grain must be positive")));
+        return Err(make(Code::InvalidArgument, &format!("{PREFIX}: grain must be positive")));
     }
-    run_inner(params, grain, geometry_value).map_err(|value| match error::code(&value) {
-        "cancelled" => make("cancelled", "geometry operation was cancelled"),
-        _ => make("invalid_topology", error::message(&value)),
-    })
+    run_inner(params, grain, geometry_value).map_err(|value| error::guard(value, "poly_bevel", Code::InvalidTopology))
 }
 
 #[allow(clippy::too_many_lines)]
@@ -1498,16 +1496,16 @@ mod tests {
         assert_eq!(geometry::data_id(&run(&p, &flat).unwrap()), geometry::data_id(&flat));
         let mut p = Params::new(0.1);
         p.divisions = 0;
-        expect_code(run(&p, &source), "invalid_topology");
+        expect_code(run(&p, &source), Code::InvalidTopology);
         let mut p = Params::new(0.1);
         p.shape = Shape::BevelRound { convexity: 2.0 };
-        expect_code(run(&p, &source), "invalid_topology");
+        expect_code(run(&p, &source), Code::InvalidTopology);
         let mut p = Params::new(0.1);
         p.ignore_flat_angle = Some(-0.1);
-        expect_code(run(&p, &source), "invalid_topology");
+        expect_code(run(&p, &source), Code::InvalidTopology);
         let mut p = Params::new(0.1);
         p.edges = Some(flat_group);
-        expect_code(run(&p, &source), "invalid_topology");
+        expect_code(run(&p, &source), Code::InvalidTopology);
         let scale = |zero_at: usize, value: f64| -> geometry::T {
             let values: Vec<f64> = (0..8).map(|p| if p == zero_at { value } else { 1.0 }).collect();
             geometry::with_attribute(
@@ -1518,14 +1516,14 @@ mod tests {
         };
         let mut p = Params::new(0.1);
         p.point_scale_attribute = Some("scale".to_owned());
-        expect_code(run(&p, &scale(3, -1.0)), "invalid_topology");
+        expect_code(run(&p, &scale(3, -1.0)), Code::InvalidTopology);
         let zero = run(&p, &scale(0, 0.0)).unwrap();
         validate_closed_manifold(&zero);
         let token = Arc::new(cancel::create());
         cancel::cancel(&token);
         let mut p = Params::new(0.1);
         p.cancel = Some(token);
-        expect_code(run(&p, &source), "cancelled");
+        expect_code(run(&p, &source), Code::Cancelled);
     }
 
     #[test]

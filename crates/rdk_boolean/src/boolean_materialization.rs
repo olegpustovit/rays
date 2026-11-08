@@ -1537,7 +1537,7 @@ fn repair_step(
                 verify_materialized_seam_curves(cancel, grain, seam)?;
                 Ok(Step::Done(cleanup.clone()))
             }
-            Err(initial) if error::code(&initial) != "surface_self_intersection" => Err(initial),
+            Err(initial) if error::kind(&initial) != Code::SurfaceSelfIntersection => Err(initial),
             Err(initial) => {
                 let (contacts, repairable, candidates) =
                     rounded_self_contact_edges(cancel, grain, &cleanup.cleanup_geometry)?;

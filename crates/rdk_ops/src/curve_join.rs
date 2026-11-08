@@ -10,6 +10,7 @@ use rdk_core::{
     attribute, cancel, edge_group, error, geometry, group, packed, support, topology,
     topology_index, topology_remap,
 };
+use rdk_core::error::Code;
 
 const OPEN_POLYLINE: u8 = 1;
 const MAX_INT: i64 = (1_i64 << 62) - 1;
@@ -27,13 +28,7 @@ pub struct CurveJoinPick {
 }
 
 fn fail(message: String) -> error::T {
-    error::make(
-        "Curve_join.join".to_owned(),
-        "invalid_parameter".to_owned(),
-        message,
-        None,
-    )
-    .unwrap_or_else(|bad| bad)
+    error::new("Curve_join.join", Code::InvalidParameter, message)
 }
 
 fn validate_selection(
@@ -1236,7 +1231,7 @@ mod tests {
         let Err(failure) = join(&Params { cancel: Some(cancelled), ..params() }, &input) else {
             panic!("expected cancellation")
         };
-        assert_eq!(error::code(&failure), "cancelled");
+        assert_eq!(error::kind(&failure), Code::Cancelled);
     }
 
     #[test]

@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use rdk_core::topology::PrimitiveKind;
 use rdk_core::{attribute, cancel, edge_group, error, geometry, normal_ops, packed, topology, topology_index, topology_remap};
+use rdk_core::error::Code;
 
 use crate::fuse_cleanup;
 
@@ -18,17 +19,17 @@ pub enum BridgePolicy {
     DeleteBridgePolygons,
 }
 
-fn make(operation: &str, code: &str, message: String) -> error::T {
-    error::make(operation.to_owned(), code.to_owned(), message, None).unwrap_or_else(|e| e)
+fn make(operation: &str, code: Code, message: String) -> error::T {
+    error::new(operation, code, message)
 }
 
 fn fail(message: &str) -> error::T {
-    make("Rdk.Dissolve", "invalid_parameter", format!("Rdk.Dissolve.dissolve: {message}"))
+    make("Rdk.Dissolve", Code::InvalidParameter, format!("Rdk.Dissolve.dissolve: {message}"))
 }
 
 // Error.get / get_ok of the original: a cancellation stays one, any other message gains the prefix.
 fn recode(failure: error::T) -> error::T {
-    if error::code(&failure) == "cancelled" { failure } else { fail(error::message(&failure)) }
+    if error::is_cancelled(&failure) { failure } else { fail(error::message(&failure)) }
 }
 
 #[allow(non_snake_case)]
@@ -617,10 +618,10 @@ fn dissolve(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T
 
 pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     dissolve(params, geometry_value).map_err(|failure| {
-        if error::code(&failure) == "cancelled" {
-            make("dissolve", "cancelled", "geometry operation was cancelled".to_owned())
+        if error::is_cancelled(&failure) {
+            error::cancelled("dissolve")
         } else {
-            make("dissolve", "invalid_topology", error::message(&failure).to_owned())
+            make("dissolve", Code::InvalidTopology, error::message(&failure).to_owned())
         }
     })
 }

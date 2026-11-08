@@ -7,6 +7,7 @@ use rdk_core::{
     attribute, cancel, edge_group, element_selection, error, geometry, group, normal_ops, packed, ragged_ops, support,
     topology, topology_index, topology_remap,
 };
+use rdk_core::error::Code;
 use rdk_geom::implicit_point;
 use rdk_geom::delaunay2;
 use rdk_geom::planar_cdt;
@@ -105,13 +106,13 @@ impl Default for Params {
     }
 }
 
-fn make(code: &str, message: String) -> error::T {
-    error::make(GUARD_OPERATION.to_owned(), code.to_owned(), message, None).unwrap_or_else(|bad| bad)
+fn make(code: Code, message: String) -> error::T {
+    error::new(GUARD_OPERATION, code, message)
 }
 
 /// `Error.guard ~code:"invalid_triangulation"`: every OCaml string error.
 fn fail(message: String) -> error::T {
-    make("invalid_triangulation", message)
+    make(Code::InvalidTriangulation, message)
 }
 
 fn invalid(message: &str) -> error::T {
@@ -121,7 +122,7 @@ fn invalid(message: &str) -> error::T {
 /// A core error that was a plain string in OCaml, inside the `try` that reports cancellation as
 /// a string error.
 fn lift(value: error::T) -> error::T {
-    if error::code(&value) == "cancelled" {
+    if error::is_cancelled(&value) {
         fail(format!("{OPERATION}: triangulation was cancelled"))
     } else {
         fail(error::message(&value).to_owned())
@@ -130,8 +131,8 @@ fn lift(value: error::T) -> error::T {
 
 /// `Error.get`: cancellation stays cancellation, everything else becomes a failure message.
 fn get_core(value: error::T) -> error::T {
-    if error::code(&value) == "cancelled" {
-        make("cancelled", "geometry operation was cancelled".to_owned())
+    if error::is_cancelled(&value) {
+        error::cancelled(GUARD_OPERATION)
     } else {
         fail(error::message(&value).to_owned())
     }
@@ -139,7 +140,7 @@ fn get_core(value: error::T) -> error::T {
 
 /// Core errors that OCaml raised as Rdk exceptions keep their identity, except cancellation.
 fn pass(value: error::T) -> error::T {
-    if error::code(&value) == "cancelled" {
+    if error::is_cancelled(&value) {
         fail(format!("{OPERATION}: triangulation was cancelled"))
     } else {
         value

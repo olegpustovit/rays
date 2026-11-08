@@ -8,6 +8,7 @@ use rdk_core::{
     cancel, edge_group, error, geometry, group, packed, ragged_ops, support, topology,
     topology_index, topology_remap,
 };
+use rdk_core::error::Code;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Scheme {
@@ -65,13 +66,7 @@ pub const EDGE_ANCESTRY_PREFIX: &str = "__rdk_subdivide_edge_ancestry_";
 
 /// OCaml `Error.Fail message`: the guard at the public entry rebuilds it with the operation's code.
 pub fn fail(message: String) -> error::T {
-    error::make(
-        "Rdk_mesh.Subdivide.subdivide".to_owned(),
-        "invalid_parameter".to_owned(),
-        message,
-        None,
-    )
-    .unwrap_or_else(|failure| failure)
+    error::new("Rdk_mesh.Subdivide.subdivide", Code::InvalidParameter, message)
 }
 
 pub fn failm(message: &str) -> error::T {
@@ -80,13 +75,7 @@ pub fn failm(message: &str) -> error::T {
 
 /// OCaml `Invalid_argument`.
 pub fn invalid_arg(message: String) -> error::T {
-    error::make(
-        "Rdk_mesh.Subdivide.subdivide".to_owned(),
-        "invalid_argument".to_owned(),
-        message,
-        None,
-    )
-    .unwrap_or_else(|failure| failure)
+    error::new("Rdk_mesh.Subdivide.subdivide", Code::InvalidArgument, message)
 }
 
 /// OCaml `max_int` is 2^62 - 1.
@@ -4796,7 +4785,7 @@ pub fn triangulate_divided_boundary(
                 &mut |_, a, b, c| triangles.push((a, b, c)),
             );
             if let Err(failure) = result {
-                if error::code(&failure) == "cancelled" {
+                if error::is_cancelled(&failure) {
                     return Err(failure);
                 }
                 return Err(fail(format!(

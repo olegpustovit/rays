@@ -3,6 +3,7 @@ use std::collections::HashMap;
 
 use rdk_core::support::Windows;
 use rdk_core::{attribute, attribute_pattern, cancel, error, geometry, group, packed, ragged_ops, support};
+use rdk_core::error::Code;
 use rdk_geom::point_clusters::Clusters;
 use rdk_geom::point_grid::{float_max, float_min};
 use rays_math::text_array::TextArray;
@@ -69,17 +70,11 @@ struct CompiledGroupRule {
 }
 
 fn fail(message: String) -> error::T {
-    error::make(
-        "Rdk_mesh.Fuse_rules".to_owned(),
-        "invalid_argument".to_owned(),
-        format!("Rdk_mesh.Fuse_rules.fuse: {message}"),
-        None,
-    )
-    .unwrap_or_else(|e| e)
+    error::new("Rdk_mesh.Fuse_rules", Code::InvalidArgument, format!("Rdk_mesh.Fuse_rules.fuse: {message}"))
 }
 
 fn core_fail(failure: error::T) -> error::T {
-    if error::code(&failure) == "cancelled" {
+    if error::is_cancelled(&failure) {
         failure
     } else {
         fail(error::message(&failure).to_owned())

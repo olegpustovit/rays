@@ -2,32 +2,12 @@
 use std::sync::Mutex;
 
 use rdk_core::{attribute, cancel, error, geometry, group, support, topology, topology_remap};
+use rdk_core::error::Code;
 
 type Slot = Mutex<Option<(Vec<i64>, Vec<i64>)>>;
 
 fn fail(message: String) -> error::T {
-    error::make("Error.Fail".to_owned(), "invalid_parameter".to_owned(), message, None)
-        .unwrap_or_else(|bad| bad)
-}
-
-/// `Error.guard`: a plain failure takes the guard's operation and code, a cancellation keeps its own code.
-fn recode(operation: &str, code: &str, failure: &error::T) -> error::T {
-    let made = if error::code(failure) == "cancelled" {
-        error::make(
-            operation.to_owned(),
-            "cancelled".to_owned(),
-            "geometry operation was cancelled".to_owned(),
-            None,
-        )
-    } else {
-        error::make(
-            operation.to_owned(),
-            code.to_owned(),
-            error::message(failure).to_owned(),
-            None,
-        )
-    };
-    made.unwrap_or_else(|bad| bad)
+    error::new("Error.Fail", Code::InvalidParameter, message)
 }
 
 fn apply_primitives(
@@ -149,7 +129,7 @@ pub fn sort_primitives(
         order.sort_by(|&a, &b| keys[a as usize].cmp(&keys[b as usize]));
         apply_primitives(cancel_value, grain, &order, value)
     };
-    run().map_err(|failure| recode("sort", "invalid_sort", &failure))
+    run().map_err(|failure| error::guard(failure, "sort", Code::InvalidSort))
 }
 
 #[cfg(test)]
@@ -184,7 +164,7 @@ mod tests {
         }
         let Err(missing) = sort_primitives(None, None, "nope", &triangles()) else { panic!("expected failure") };
         assert_eq!(error::operation(&missing), "sort");
-        assert_eq!(error::code(&missing), "invalid_sort");
+        assert_eq!(error::kind(&missing), Code::InvalidSort);
         assert_eq!(error::message(&missing), "missing sort attribute nope");
     }
 

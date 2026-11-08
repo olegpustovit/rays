@@ -4,8 +4,9 @@ use std::sync::Arc;
 use rdk_core::{
     attribute, attribute_pattern, cancel, error, geometry, group, packed, support, topology_index,
 };
+use rdk_core::error::Code;
 
-use crate::attribute_ops::{make_error, recode};
+use crate::attribute_ops::{make_error};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Mode {
@@ -34,16 +35,16 @@ const OPERATION: &str = "attribute_blur";
 const PREFIX: &str = "Rdk.Attribute_ops.blur_points: ";
 
 fn invalid(message: &str) -> error::T {
-    make_error(OPERATION, "invalid_blur", &format!("{PREFIX}{message}"))
+    make_error(OPERATION, Code::InvalidBlur, &format!("{PREFIX}{message}"))
 }
 
 pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     run_inner(params, geometry_value)
         .map_err(|failure| {
-            if error::code(&failure) == "invalid_parameter" {
+            if error::kind(&failure) == Code::InvalidParameter {
                 failure
             } else {
-                recode(&failure, OPERATION, "invalid_blur", "attribute blur was cancelled")
+                error::guard(failure, OPERATION, Code::InvalidBlur)
             }
         })
 }
@@ -54,7 +55,7 @@ fn run_inner(params: &Params, geometry_value: &geometry::T) -> Result<geometry::
     if grain <= 0 {
         return Err(make_error(
             OPERATION,
-            "invalid_parameter",
+            Code::InvalidParameter,
             &format!("{PREFIX}grain must be positive"),
         ));
     }

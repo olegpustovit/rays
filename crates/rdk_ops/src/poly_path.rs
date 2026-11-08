@@ -3,15 +3,10 @@
 //! OCaml returns `(.., string) result`; here a failure is an `error::T` with operation
 //! `Poly_path.chains`, code `invalid_parameter` and the OCaml message.
 use rdk_core::error;
+use rdk_core::error::Code;
 
 fn fail(message: &str) -> error::T {
-    error::make(
-        "Poly_path.chains".to_owned(),
-        "invalid_parameter".to_owned(),
-        message.to_owned(),
-        None,
-    )
-    .unwrap_or_else(|bad| bad)
+    error::new("Poly_path.chains", Code::InvalidParameter, message.to_owned())
 }
 
 struct Traced {

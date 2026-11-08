@@ -5,6 +5,7 @@
 use std::sync::{Arc, Mutex};
 
 use rdk_core::{attribute, cancel, error, geometry, group, packed, support, topology};
+use rdk_core::error::Code;
 use rdk_geom::curve_intersection;
 use rdk_geom::linear_piece_index::{self, Kind};
 use rdk_geom::point_clusters::{self, Metric};
@@ -46,21 +47,21 @@ impl Default for Params {
     }
 }
 
-fn make(code: &str, message: String) -> error::T {
-    error::make(OPERATION.to_owned(), code.to_owned(), message, None).unwrap_or_else(|bad| bad)
+fn make(code: Code, message: String) -> error::T {
+    error::new(OPERATION, code, message)
 }
 
 /// OCaml `invalid_arg`: reported as `invalid_geometry`; cancellation keeps its own code.
 fn lift(value: error::T) -> error::T {
-    if error::code(&value) == "cancelled" {
-        make("cancelled", "Intersection Analysis was cancelled".to_owned())
+    if error::is_cancelled(&value) {
+        error::cancelled(OPERATION)
     } else {
-        make("invalid_geometry", error::message(&value).to_owned())
+        make(Code::InvalidGeometry, error::message(&value).to_owned())
     }
 }
 
 fn index_result(role: &str, value: error::T) -> error::T {
-    make(error::code(&value), format!("{role}: {}", error::message(&value)))
+    make(error::kind(&value), format!("{role}: {}", error::message(&value)))
 }
 
 fn duplicate_name(names: &[Option<&str>]) -> bool {
@@ -240,7 +241,7 @@ fn event_pass(
     for slot in slots {
         let part = slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner);
         let Some(part) = part else {
-            return Err(make("invalid_geometry", "Intersection Analysis count/fill drift".to_owned()));
+            return Err(make(Code::InvalidGeometry, "Intersection Analysis count/fill drift".to_owned()));
         };
         for event in part.floats.chunks_exact(EVENT_STRIDE) {
             raw.x.push(event[0]);
@@ -477,8 +478,8 @@ fn validate_name(name: &Option<String>) -> bool {
 /// analysis; two inputs perform AxB analysis.
 pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     run_inner(params, geometry_value).map_err(|value| {
-        if error::code(&value) == "cancelled" {
-            make("cancelled", "Intersection Analysis was cancelled".to_owned())
+        if error::is_cancelled(&value) {
+            error::cancelled(OPERATION)
         } else {
             value
         }
@@ -490,10 +491,10 @@ fn run_inner(params: &Params, geometry_value: &geometry::T) -> Result<geometry::
     let grain = params.grain.unwrap_or(16_384);
     let tolerance = params.tolerance;
     if grain <= 0 {
-        return Err(make("invalid_parameter", "grain must be positive".to_owned()));
+        return Err(make(Code::InvalidParameter, "grain must be positive".to_owned()));
     }
     if !tolerance.is_finite() || tolerance < 0.0 {
-        return Err(make("invalid_parameter", "tolerance must be finite and non-negative".to_owned()));
+        return Err(make(Code::InvalidParameter, "tolerance must be finite and non-negative".to_owned()));
     }
     let names = [
         &params.input_attribute,
@@ -502,11 +503,11 @@ fn run_inner(params: &Params, geometry_value: &geometry::T) -> Result<geometry::
         &params.point_attribute,
     ];
     if !names.iter().all(|name| validate_name(name)) {
-        return Err(make("invalid_parameter", "output attribute names must not be empty".to_owned()));
+        return Err(make(Code::InvalidParameter, "output attribute names must not be empty".to_owned()));
     }
     let optional: Vec<Option<&str>> = names.iter().map(|name| name.as_deref()).collect();
     if duplicate_name(&optional) {
-        return Err(make("invalid_parameter", "output attribute names must be distinct".to_owned()));
+        return Err(make(Code::InvalidParameter, "output attribute names must be distinct".to_owned()));
     }
     cancel::check_opt(cancel_value)?;
     let is_self = params.collision.is_none();

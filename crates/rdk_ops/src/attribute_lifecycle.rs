@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use rdk_core::{attribute, attribute_pattern, cancel, error, geometry, packed};
+use rdk_core::error::Code;
 
 use crate::attribute_ops::{is_blank, make_error, ocaml_quote};
 
@@ -48,7 +49,7 @@ pub struct SwapRule {
 }
 
 fn fail(message: String) -> error::T {
-    make_error("attribute_lifecycle", "invalid_attribute", &message)
+    make_error("attribute_lifecycle", Code::InvalidAttribute, &message)
 }
 
 fn owner_index(owner: attribute::Owner) -> usize {

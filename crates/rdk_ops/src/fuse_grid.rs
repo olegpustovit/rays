@@ -3,6 +3,7 @@ use rays_math::text_array::TextArray;
 
 use rdk_core::support::Windows;
 use rdk_core::{attribute, cancel, error, geometry, group, packed, support};
+use rdk_core::error::Code;
 use rdk_geom::point_clusters::{self, Clusters};
 use rdk_geom::point_snap;
 
@@ -28,12 +29,12 @@ enum FuseAttributeView {
     Text(Arc<TextArray>),
 }
 
-fn make(operation: &str, code: &str, message: String) -> error::T {
-    error::make(operation.to_owned(), code.to_owned(), message, None).unwrap_or_else(|e| e)
+fn make(operation: &str, code: Code, message: String) -> error::T {
+    error::new(operation, code, message)
 }
 
 fn fail(message: &str) -> error::T {
-    make("Rdk.Fuse_grid", "invalid_parameter", message.to_owned())
+    make("Rdk.Fuse_grid", Code::InvalidParameter, message.to_owned())
 }
 
 struct ClusterOptions {
@@ -64,7 +65,7 @@ fn fuse_clusters(
     if grain <= 0 {
         return Err(make(
             "Rdk.Fuse_grid",
-            "invalid_argument",
+            Code::InvalidArgument,
             "Rdk.Fuse_grid.fuse: grain must be positive".to_owned(),
         ));
     }
@@ -502,10 +503,10 @@ fn fuse_advanced(params: &Params, geometry_value: &geometry::T) -> Result<geomet
 
 pub fn fuse(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     fuse_inner(params, geometry_value).map_err(|failure| {
-        if error::code(&failure) == "cancelled" {
-            make("fuse", "cancelled", "geometry operation was cancelled".to_owned())
+        if error::is_cancelled(&failure) {
+            error::cancelled("fuse")
         } else {
-            make("fuse", "invalid_geometry", error::message(&failure).to_owned())
+            make("fuse", Code::InvalidGeometry, error::message(&failure).to_owned())
         }
     })
 }

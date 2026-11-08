@@ -2,6 +2,7 @@ use rdk_core::{
     attribute, cancel, edge_group, element_selection, error, face_normals, geometry, group, normal_ops,
     packed, topology, topology_index,
 };
+use rdk_core::error::Code;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Planes {
@@ -11,8 +12,7 @@ pub struct Planes {
 }
 
 fn fail(message: String) -> error::T {
-    error::make("Rdk.Deform".to_owned(), "invalid_parameter".to_owned(), message, None)
-        .unwrap_or_else(|e| e)
+    error::new("Rdk.Deform", Code::InvalidParameter, message)
 }
 
 pub fn validate_selection(

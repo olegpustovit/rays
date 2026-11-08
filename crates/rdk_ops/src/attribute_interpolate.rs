@@ -10,6 +10,7 @@ use rays_math::text_array::TextArray;
 use rdk_core::{
     attribute, cancel, error, geometry, group, packed, support, topology,
 };
+use rdk_core::error::Code;
 
 use crate::attribute_ops::{make_error, ocaml_quote};
 
@@ -89,12 +90,12 @@ const MAX_INT: i64 = (1_i64 << 62) - 1;
 
 /// An `Error msg` of the OCaml API (the caller codes it `invalid_interpolate`).
 fn fail(message: &str) -> error::T {
-    make_error(OPERATION, "invalid_interpolate", message)
+    make_error(OPERATION, Code::InvalidInterpolate, message)
 }
 
 /// An `invalid_arg msg` of the OCaml API (the caller codes it `invalid_parameter`).
 fn invalid(message: &str) -> error::T {
-    make_error(OPERATION, "invalid_parameter", message)
+    make_error(OPERATION, Code::InvalidParameter, message)
 }
 
 fn is_blank(text: &str) -> bool {

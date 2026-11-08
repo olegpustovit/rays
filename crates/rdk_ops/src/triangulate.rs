@@ -2,6 +2,7 @@ use rdk_core::support::Windows;
 use rdk_core::{
     cancel, error, geometry, group, packed, polygon_triangulation, support, topology, topology_remap,
 };
+use rdk_core::error::Code;
 use rdk_geom::point_grid::float_max;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 
@@ -13,12 +14,12 @@ pub struct Params {
     pub primitives: Option<group::T>,
 }
 
-fn make(operation: &str, code: &str, message: String) -> error::T {
-    error::make(operation.to_owned(), code.to_owned(), message, None).unwrap_or_else(|e| e)
+fn make(operation: &str, code: Code, message: String) -> error::T {
+    error::new(operation, code, message)
 }
 
 fn fail(message: String) -> error::T {
-    make("triangulate", "fail", message)
+    make("triangulate", Code::Fail, message)
 }
 
 // Which corner of a quad with exactly one collapsed edge the single triangle drops, or -1.
@@ -294,10 +295,10 @@ pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T,
     let grain = params.grain.unwrap_or(16_384);
     triangulate(params.cancel.as_deref(), grain, params.primitives.as_ref(), geometry_value).map_err(
         |failure| {
-            if error::code(&failure) == "cancelled" {
-                make("triangulate", "cancelled", "geometry operation was cancelled".to_owned())
+            if error::is_cancelled(&failure) {
+                error::cancelled("triangulate")
             } else {
-                make("triangulate", "invalid_topology", error::message(&failure).to_owned())
+                make("triangulate", Code::InvalidTopology, error::message(&failure).to_owned())
             }
         },
     )
@@ -357,7 +358,7 @@ mod tests {
             None,
         );
         let failure = err(run(&params(), &degenerate));
-        assert_eq!(error::code(&failure), "invalid_topology");
+        assert_eq!(error::kind(&failure), Code::InvalidTopology);
         assert_eq!(
             error::message(&failure),
             "Rdk_mesh.Triangulate.triangulate: primitive 0 has degenerate projected area"
@@ -409,7 +410,7 @@ mod tests {
         cancel::cancel(&token);
         let quads = grid(1, 1, 1.0, true);
         let failure = err(run(&Params { cancel: Some(token), ..params() }, &quads));
-        assert_eq!(error::code(&failure), "cancelled");
+        assert_eq!(error::kind(&failure), Code::Cancelled);
         let mixed = geom(
             &[0., 1., 1., 0., 2.],
             &[0., 0., 1., 1., 2.],
