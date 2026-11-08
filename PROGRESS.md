@@ -37,8 +37,20 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | C1–C21 | pending | |
 | D1–D6 | pending | |
 
+## Subagents (omp)
+
+| ID | log | scope |
+|----|-----|-------|
+| a2 | `.subagent-logs/a2.log` | A2 sop/rdk dead code |
+| a5 | `.subagent-logs/a5.log` | A5 test-only gates |
+| a6 | `.subagent-logs/a6.log` | A6 Cargo dep hygiene |
+| a7-geom | `.subagent-logs/a7-geom.log` | A7 rdk_geom trim/triangle |
+
+Cursor `Task` subagents unavailable in this harness; workers are `omp launch -p` (pids in shell history).
+
 ## Session log
 
+- 2026-11-08: omp subagents A2/A5/A6/A7-geom launched; logs under `.subagent-logs/`.
 - 2026-11-08: Resume execution; A1 verified on `dev`.
 - 2026-11-08: `3c86b2a1` — gpu_suite sharding removed.
 - 2026-11-08: `e10bff22` / `10a405ae` / `1a8ee31b` — A2 edge_transport; A3 rdk array limits.
