@@ -1339,6 +1339,11 @@ mod parity {
     // OCaml's 63-bit int bounds.
     const MIN_INT: i64 = i64::MIN;
     const MAX_INT: i64 = i64::MAX;
+    /// Lanes per parity fixture: over the 4,096-lane parallel floor, 9 blocks of at most 1,024
+    /// lanes, so 5 chunks of 2+ blocks at 8 domains with a partial last block and chunk. The reference
+    /// walker is linear in lanes and dominates these cases. `random_three_outputs_match_native`
+    /// keeps 100,000 lanes (no walker) for the 16-blocks-a-chunk cap of `packed::block_layout`.
+    const LANES: usize = 8193;
 
     /// The prelude's helpers, less the ones in the sop context (they call Lisp-registered nodes,
     /// absent from this bare catalog).
@@ -1437,14 +1442,14 @@ mod parity {
         js_exact(program,live,expected);
     }
     fn rand_range(seed:i64){
-        let count=100000;
+        let count=LANES as i64;
         let mapped=value(None,&format!("(map (fn [i] (rand_at (frame/index) i)) (array/range {count} :type int))"));
         let program=compile(&mapped);let live=at_frame(seed);
         let expected=(0..count).map(|i|native(seed,i)).collect::<Vec<_>>();
         random_proof(&mapped,&program,&live,&expected);
     }
     fn rand_indices(seed:i64,primitive:bool){
-        let indices=indices(100000);let input=Value::Int_array(Arc::new(indices.clone()));
+        let indices=indices(LANES);let input=Value::Int_array(Arc::new(indices.clone()));
         let(mapped,program,live)=if primitive{
             let(m,p)=map(Some(seed),Ty::Int,input,"(rand/at (int/add seed (frame/index)) i)");(m,p,input::at_time(0.))
         }else if seed<0{
@@ -1491,7 +1496,7 @@ mod parity {
     }
     #[test]
     fn random_exact_seed_and_index_columns(){
-        let indices=indices(100000);
+        let indices=indices(LANES);
         let live=input::at_time(0.0);
         let b = bases();
         let seeds: Vec<i64> = (0..indices.len()).map(|i| b[i / 7 % b.len()].wrapping_add((i / b.len()) as i64)).collect();
@@ -1515,7 +1520,7 @@ mod parity {
     }
 
     fn noise3_strict_packed_matches_the_reference(seed:i64,octaves:i64,lacunarity:f64,gain:f64,special_only:bool) {
-        let all = points(if special_only {6}else{100000});
+        let all = points(if special_only {6}else{LANES});
         let check = |pts: &[(f64, f64, f64)], seed: i64, octaves: i64, lacunarity: f64, gain: f64| {
             let (mapped, program) = map(
                 None,
@@ -1602,7 +1607,7 @@ mod parity {
         }
         // a live lacunarity and gain are the region's registers: one program whose bytes at each
         // time, and whose refusal, are the walker's
-        let all = points(100000);
+        let all = points(LANES);
         let input = vec3_input(&all);
         let (mapped, program) = map(None, Ty::Vec3, input.clone(), "(noise3 i :seed 7 :octaves 5 :lacunarity (+ 1.7 t) :gain (- 0.62 t))");
         for time in [0.0, 0.25] {
@@ -1652,7 +1657,7 @@ mod parity {
     }
 
     fn packed_math_case(body: &str, input_ty: Ty, output_ty: Ty, time: f64) {
-        let count = 32769;
+        let count = LANES;
         let input = if input_ty == Ty::Float {
             Value::Floats(1, Arc::new((0..count).map(|i| if i == 0 { -0.0 } else { (i as f64 * 0.31).sin() * 0.8 }).collect()))
         } else {
@@ -1720,7 +1725,7 @@ mod parity {
             (limit, limit, -limit, limit),
         ];
         let input = Value::Floats(4, Arc::new(
-            (0..32769 * 4)
+            (0..LANES * 4)
                 .map(|index| {
                     let (x, y, z, w) = cases[index / 4 % cases.len()];
                     [x, y, z, w][index % 4]
