@@ -279,141 +279,9 @@ fn enter_with(condition: &dyn Fn(i64) -> String, scope: &mut Scope::T, guards: &
 }
 
 /// Plain f32 kernel (the non-fast precision), or with `image` a pixel-center UV kernel.
-pub fn kernel(image: bool, program: &packed::T) -> Result<Wgsl, Diagnostic> {
-    if let Some(reason) = packed::gpu_refusals(false, false, program).into_iter().next() {
-        return Err(reason);
-    }
-    let layout = kernel_layout::plan(PlanOptions { image, ..Default::default() }, program);
-    let view = &layout.view;
-    let count = layout.input_count;
-    let outputs = layout.output_count;
-    if image && (view.widths != [2] || view.outputs.iter().map(|o| o.len()).collect::<Vec<_>>() != [4]) {
-        return Err(fail("An image kernel needs one UV input and one vec4 output."));
-    }
-    let image_width = layout.image_width.unwrap_or(0);
-    let image_height = layout.image_height.unwrap_or(0);
-    let has = |operation: &dyn Fn(&Instruction) -> bool| view.code.iter().enumerate().any(|(slot, i)| layout.used[slot] && operation(unguarded(i)));
-    let table = |seed: i64| -> i64 {
-        match layout.table_seeds.iter().position(|s| *s == seed) {
-            Some(index) => index as i64 * 512,
-            None => unreachable!("noise seed without its table"),
-        }
-    };
-    let mut root = Scope::create(None, None, 0);
-    for (slot, instruction) in view.code.iter().enumerate() {
-        if !layout.used[slot] {
-            continue;
-        }
-        let (guards, instruction) = guarded(instruction);
-        enter_with(&|r| register(r), &mut root, &guards);
-        let indentation = Scope::indent(&root);
-        let expression = match instruction {
-            Instruction::Const(v) => float_bits(*v),
-            Instruction::Input(_, _, component) if image => format!(
-                "pixel_uv({}, bitcast<f32>({}))",
-                if *component == 0 { "i % image_width" } else { "i / image_width" },
-                word(if *component == 0 { image_width } else { image_height })
-            ),
-            Instruction::Input(input, width, component) => format!("input{input}[i * {width}u + {component}u]"),
-            Instruction::Uniform(index, component) => format!("bitcast<f32>({})", word(layout.uniforms[*index as usize] + component)),
-            Instruction::Frame(_) => format!("bitcast<f32>({})", word(layout.frames[slot])),
-            Instruction::Accumulator(_) => unreachable!("accumulator in a collecting kernel"),
-            Instruction::Binary(op, a, b) => binary(*op, &register(*a), &register(*b))?,
-            Instruction::Unary(op, a) => unary(*op, &register(*a)),
-            Instruction::Checked_mul(..) | Instruction::Checked_fma(..) => return Err(fail("Checked arithmetic requires binary64 overflow status.")),
-            Instruction::Trace(..) => return Err(fail("scene/trace needs a native ray-query host.")),
-            Instruction::Stage(..) => return Err(fail("A raster-stage intrinsic runs only in a fragment stage.")),
-            Instruction::Array_prepare(..) | Instruction::Gather(..) | Instruction::Int_gather(..) => return Err(fail("Indexed array reads stay on the CPU.")),
-            Instruction::Text_const(_) | Instruction::Text_input(_) | Instruction::Text_uniform(_) | Instruction::Text_gather(..) | Instruction::Text_select(..) => {
-                return Err(fail("Text kernels stay on the CPU."))
-            }
-            Instruction::Select(condition, yes, no) => format!("select({}, {}, {} != 0.0)", register(*no), register(*yes), register(*condition)),
-            Instruction::Noise3(x, y, z, seed, octaves, lacunarity, gain) => noise_call(
-                &|r| register(r),
-                &|_| Err(fail("Integer instructions are not supported by the WGSL kernel.")),
-                &float_bits,
-                &table,
-                (*x, *y, *z, *seed, *octaves, *lacunarity, *gain),
-            )?,
-            _ => return Err(fail("Integer instructions and conversions are not supported by the WGSL kernel target.")),
-        };
-        if guards.is_empty() {
-            let _ = writeln!(root.code, "{indentation}let r{slot}: f32 = {expression};");
-        } else {
-            let _ = writeln!(root.decls, "  var r{slot}: f32 = 0.0;");
-            let _ = writeln!(root.code, "{indentation}r{slot} = {expression};");
-        }
-        if layout.finite_checks[slot] {
-            let _ = writeln!(root.code, "{indentation}if (!wfinite(r{slot})) {{ sb |= 1u; }}");
-        }
-    }
-    enter_with(&|r| register(r), &mut root, &[]);
-    let mut body = String::with_capacity(4096);
-    body.push_str(&root.decls);
-    body.push_str(&root.code);
-    let _ = writeln!(body, "  {FLUSH_STATUS}");
-    let output_name = |k: i64| if outputs == 1 { "outbuf".to_owned() } else { format!("outbuf{k}") };
-    for (k, registers) in view.outputs.iter().enumerate() {
-        for (component, slot) in registers.iter().enumerate() {
-            let _ = writeln!(body, "  {}[i * {}u + {}u] = r{};", output_name(k as i64), registers.len(), component, slot);
-        }
-    }
-    let uniform_words = kernel_layout::uniform_words(&layout);
-    let mut declarations = String::with_capacity(512);
-    let mut interface: Vec<Binding> = Vec::new();
-    let mut bind = |binding: i64, kind: Kind, decl: String| {
-        interface.push(Binding { group: 0, binding, kind });
-        let _ = writeln!(declarations, "@group(0) @binding({binding}) var{} {decl};", kind_text(kind));
-    };
-    for (index, used) in layout.input_used.iter().enumerate() {
-        if *used {
-            bind(index as i64, Kind::Storage_read, format!("input{index}: array<f32>"));
-        }
-    }
-    for k in 0..outputs {
-        bind(count + k, Kind::Storage_read_write, format!("{}: array<f32>", output_name(k)));
-    }
-    bind(layout.uniform_binding, Kind::Uniform_buffer, format!("uniforms: array<vec4<u32>, {uniform_words}>"));
-    bind(layout.status_binding, Kind::Storage_read_write, "status: atomic<u32>".to_owned());
-    if let Some(binding) = layout.table_binding {
-        bind(binding, Kind::Storage_read, "table: array<i32>".to_owned());
-    }
-    let mut prefix = declarations;
-    prefix.push_str(FINITE);
-    if image {
-        prefix.push_str(IMAGE_UV);
-    }
-    if has(&is_pow) {
-        prefix.push_str(POWER);
-    }
-    if !layout.table_seeds.is_empty() {
-        prefix.push_str(PERLIN);
-    }
-    if has(&fractal_noise) {
-        prefix.push_str(PERLIN_FRACTAL);
-    }
-    let signature = "(@builtin(global_invocation_id) gid: vec3<u32>)";
-    let mut head = String::from("  let i = gid.x;\n  if (i >= uniforms[0].x) { return; }\n  var sb: u32 = 0u;\n");
-    if image {
-        let _ = writeln!(head, "  let image_width = u32(bitcast<f32>({}));", word(image_width));
-    }
-    head.push_str(&body);
-    let body = head;
-    let entry = format!("kernel_{}", md5_hex(format!("{prefix}{signature}{body}").as_bytes()));
-    let source = format!("{prefix}@compute @workgroup_size(64)\nfn {entry}{signature} {{\n{body}}}\n");
-    Ok(Wgsl {
-        source,
-        entry,
-        interface,
-        uniform_layout: layout.uniform_layout.clone(),
-        uniform_bytes: uniform_words * 16,
-        table_seeds: layout.table_seeds.clone(),
-        output_widths: view.outputs.iter().map(|o| o.len() as i64).collect(),
-        input_widths: if image { Vec::new() } else { view.widths.clone() },
-        gathers: Vec::new(),
-        counts: None,
-    })
-}
+/// The precise (f32-only) kernel: integer instructions, indexed array reads and text stay on the CPU.
+/// `image` prints the one-UV-input, one-vec4-output image form.
+pub fn kernel(image: bool, program: &packed::T) -> Result<Wgsl, Diagnostic> { print(false, image, None, program) }
 
 /// Fast precision's 64-bit integer registers as `vec2<u32>` (low, high), as the Metal kernel's
 /// `long`s: wrapping add, sub and mul, truncating division (`0` for a zero divisor), logical right
@@ -506,15 +374,19 @@ enum Placement { Compute(Compute), Vertex(bool, Stage), Fragment(String, Stage) 
 fn identifier(name: &str) -> String { name.replace('-', "_") }
 
 /// The web counterpart of `Flow_shader.Emit.kernel ~fast`.
-pub fn kernel_fast(program: &packed::T) -> Result<Wgsl, Diagnostic> { fast_kernel(None, program) }
+pub fn kernel_fast(program: &packed::T) -> Result<Wgsl, Diagnostic> { print(true, false, None, program) }
 
 /// A compute stage (Flow_shader.Raster's) as the module of entry `name`.
 pub fn compute(size: i64, name: &str, buffers: &[(i64, i64, bool, bool)], program: &packed::T) -> Result<String, Diagnostic> {
-    fast_kernel(Some(Placement::Compute(Compute { size, name: name.to_owned(), buffers: buffers.to_vec() })), program).map(|w| w.source)
+    print(true, false, Some(Placement::Compute(Compute { size, name: name.to_owned(), buffers: buffers.to_vec() })), program).map(|w| w.source)
 }
 
-/// The fast-kernel instruction printer, one per kernel; `Visit` walks its layout.
-struct Fast {
+/// The kernel instruction printer, one per kernel; `Visit` walks its layout. `fast` selects fast
+/// precision (64-bit integer registers, gathers, loops, placed stages); without it the kernel is the
+/// precise f32-only form, which refuses what `fast` prints.
+struct Printer {
+    fast: bool,
+    image: bool,
     layout: Arc<kernel_layout::T>,
     placement: Option<Placement>,
     buffers: Vec<(i64, i64, bool, bool)>,
@@ -528,7 +400,7 @@ struct Fast {
     failure: Option<Diagnostic>,
 }
 
-impl Fast {
+impl Printer {
     fn integer(&self, slot: i64) -> bool { Region::integer_register(&self.layout.view.code[slot as usize]) }
 
     fn int_of(&self, r: i64) -> String {
@@ -571,6 +443,9 @@ impl Fast {
 
     /// an integer-valued register as a 64-bit expression (as `Flow_shader.Emit`'s)
     fn whole(&self, r: i64) -> Option<String> {
+        if !self.fast {
+            return None;
+        }
         if self.integer(r) {
             return Some(self.int_of(r));
         }
@@ -733,15 +608,36 @@ impl Fast {
         if self.layout.narrow[slot as usize] { "0u" } else if self.integer(slot) { "vec2<u32>(0u, 0u)" } else { "0.0" }
     }
 
+    /// What the precise kernel refuses at the instruction (the fast printer prints all of it).
+    fn precise_refusal(&self, instruction: &Instruction) -> Result<(), Diagnostic> {
+        match instruction {
+            Instruction::Const(_) | Instruction::Input(..) | Instruction::Uniform(..) | Instruction::Frame(_) | Instruction::Accumulator(_)
+            | Instruction::Binary(..) | Instruction::Unary(..) | Instruction::Select(..) => Ok(()),
+            Instruction::Noise3(_, _, _, _, LiveInt::Live(_), _, _) => Err(fail("Integer instructions are not supported by the WGSL kernel.")),
+            Instruction::Noise3(..) => Ok(()),
+            Instruction::Checked_mul(..) | Instruction::Checked_fma(..) => Err(fail("Checked arithmetic requires binary64 overflow status.")),
+            Instruction::Trace(..) => Err(fail("scene/trace needs a native ray-query host.")),
+            Instruction::Stage(..) => Err(fail("A raster-stage intrinsic runs only in a fragment stage.")),
+            Instruction::Array_prepare(..) | Instruction::Gather(..) | Instruction::Int_gather(..) => Err(fail("Indexed array reads stay on the CPU.")),
+            Instruction::Text_const(_) | Instruction::Text_input(_) | Instruction::Text_uniform(_) | Instruction::Text_gather(..) | Instruction::Text_select(..) => {
+                Err(fail("Text kernels stay on the CPU."))
+            }
+            _ => Err(fail("Integer instructions and conversions are not supported by the WGSL kernel target.")),
+        }
+    }
+
     fn print_instruction(&mut self, current: &mut Scope::T, slot: usize, instruction: &Instruction) -> Result<(), Diagnostic> {
         let layout = self.layout.clone();
         let s = slot as i64;
-        if !(layout.used[slot] && !matches!(unguarded(instruction), Instruction::Array_prepare(..))) {
+        if !layout.used[slot] || (self.fast && matches!(unguarded(instruction), Instruction::Array_prepare(..))) {
             return Ok(());
         }
         let (guards, instruction) = guarded(instruction);
+        if !self.fast {
+            self.precise_refusal(instruction)?;
+        }
         let constant = match instruction {
-            Instruction::Const(_) | Instruction::Int_const(_) => !layout.finite_checks[slot],
+            Instruction::Const(_) | Instruction::Int_const(_) => self.fast && !layout.finite_checks[slot],
             _ => false,
         };
         if !constant {
@@ -777,6 +673,11 @@ impl Fast {
                 Instruction::Stage(stage, r) if compute => format!("vec2<u32>({}, 0u)", self.group(current, guards.is_empty(), &indentation, stage, r)?),
                 Instruction::Stage(stage, r) if raster => self.intrinsic(stage, r)?,
                 Instruction::Input(input, width, component) if raster => self.varying(*input, *width, *component)?,
+                Instruction::Input(_, _, component) if self.image => format!(
+                    "pixel_uv({}, bitcast<f32>({}))",
+                    if *component == 0 { "i % image_width" } else { "i / image_width" },
+                    word(if *component == 0 { layout.image_width.unwrap_or(0) } else { layout.image_height.unwrap_or(0) })
+                ),
                 Instruction::Gather(prepared, index, width, component) if placed => self.read(*prepared, *index, *width, *component)?,
                 Instruction::Int_gather(prepared, index) if placed => format!("vec2<u32>({}, 0u)", self.read(*prepared, *index, 1, 0)?),
                 Instruction::Input(input, width, component) => format!("input{input}[i * {width}u + {component}u]"),
@@ -972,7 +873,7 @@ impl Fast {
     }
 }
 
-impl Visit for Fast {
+impl Visit for Printer {
     fn instruction(&mut self, slot: usize, instruction: &Instruction) {
         if self.failure.is_some() {
             return;
@@ -995,11 +896,15 @@ impl Visit for Fast {
     }
 }
 
-fn fast_kernel(placement: Option<Placement>, program: &packed::T) -> Result<Wgsl, Diagnostic> {
-    if let Some(reason) = packed::gpu_refusals(true, true, program).into_iter().next() {
+/// One kernel in the precision `fast` selects; `image` (precise only) is the UV-to-vec4 image form.
+fn print(fast: bool, image: bool, placement: Option<Placement>, program: &packed::T) -> Result<Wgsl, Diagnostic> {
+    if let Some(reason) = packed::gpu_refusals(fast, fast, program).into_iter().next() {
         return Err(reason);
     }
-    let layout = kernel_layout::plan(PlanOptions { fast: true, ..Default::default() }, program);
+    let layout = kernel_layout::plan(PlanOptions { fast, image, ..Default::default() }, program);
+    if image && (layout.view.widths != [2] || layout.view.outputs.iter().map(|o| o.len()).collect::<Vec<_>>() != [4]) {
+        return Err(fail("An image kernel needs one UV input and one vec4 output."));
+    }
     let buffers = match &placement {
         Some(Placement::Compute(c)) => c.buffers.clone(),
         Some(Placement::Vertex(_, s) | Placement::Fragment(_, s)) => s.buffers.iter().map(|(u, b, w)| (*u, *b, *w, false)).collect(),
@@ -1008,7 +913,9 @@ fn fast_kernel(placement: Option<Placement>, program: &packed::T) -> Result<Wgsl
     let compute = matches!(placement, Some(Placement::Compute(_)));
     let placed = placement.is_some();
     let raster = placed && !compute;
-    let mut printer = Fast {
+    let mut printer = Printer {
+        fast,
+        image,
         layout: Arc::new(layout.clone()),
         placement: placement.clone(),
         buffers,
@@ -1096,7 +1003,7 @@ fn fast_kernel(placement: Option<Placement>, program: &packed::T) -> Result<Wgsl
             Ok(empty(source, name.clone()))
         }
         None => {
-            if layout.output_checks {
+            if fast && layout.output_checks {
                 for registers in &view.outputs {
                     for slot in registers {
                         if !printer.integer(*slot) {
@@ -1112,7 +1019,6 @@ fn fast_kernel(placement: Option<Placement>, program: &packed::T) -> Result<Wgsl
                     let _ = writeln!(body, "  {}[i * {}u + {}u] = {};", output_name(k as i64), registers.len(), component, printer.float_of(*slot));
                 }
             }
-            let counts = layout.counts.expect("fast layout has count words");
             let uniform_words = kernel_layout::uniform_words(&layout);
             let mut declarations = String::with_capacity(512);
             let mut interface: Vec<Binding> = Vec::new();
@@ -1133,14 +1039,21 @@ fn fast_kernel(placement: Option<Placement>, program: &packed::T) -> Result<Wgsl
             if let Some(binding) = layout.table_binding {
                 bind(binding, Kind::Storage_read, "table: array<i32>".to_owned());
             }
-            for k in 0..layout.gathers.len() as i64 {
-                bind(layout.gather_base + k, Kind::Storage_read, format!("gather{k}: array<f32>"));
+            if fast {
+                for k in 0..layout.gathers.len() as i64 {
+                    bind(layout.gather_base + k, Kind::Storage_read, format!("gather{k}: array<f32>"));
+                }
+                bind(layout.count_base, Kind::Storage_read, "count_in: array<u32>".to_owned());
+                bind(layout.count_base + 1, Kind::Storage_read_write, "count_out: array<u32>".to_owned());
             }
-            bind(layout.count_base, Kind::Storage_read, "count_in: array<u32>".to_owned());
-            bind(layout.count_base + 1, Kind::Storage_read_write, "count_out: array<u32>".to_owned());
             let mut prefix = declarations;
             prefix.push_str(FINITE);
-            prefix.push_str(INT64);
+            if image {
+                prefix.push_str(IMAGE_UV);
+            }
+            if fast {
+                prefix.push_str(INT64);
+            }
             if has(&is_pow) {
                 prefix.push_str(POWER);
             }
@@ -1154,13 +1067,22 @@ fn fast_kernel(placement: Option<Placement>, program: &packed::T) -> Result<Wgsl
                 prefix.push_str(PERLIN_LIVE);
             }
             let signature = "(@builtin(global_invocation_id) gid: vec3<u32>)";
-            let w = counts / 4;
-            let head = format!(
-                "  let i = gid.x;\n  var n = uniforms[0].x;\n  if ({} != 0u) {{ n = min(n, count_in[0] * {} / {}); }}\n  if (i == 0u) {{ count_out[0] = n; count_out[1] = 6u * n; count_out[2] = 1u; count_out[3] = 0u; count_out[4] = 0u; count_out[5] = 0u; count_out[6] = 6u; count_out[7] = n; count_out[8] = 0u; count_out[9] = 0u; }}\n  if (i >= n) {{ return; }}\n  var sb: u32 = 0u;\n",
-                word(w + 2),
-                word(w),
-                word(w + 1)
-            );
+            let counts = layout.counts;
+            let mut head = match counts {
+                Some(counts) => {
+                    let w = counts / 4;
+                    format!(
+                        "  let i = gid.x;\n  var n = uniforms[0].x;\n  if ({} != 0u) {{ n = min(n, count_in[0] * {} / {}); }}\n  if (i == 0u) {{ count_out[0] = n; count_out[1] = 6u * n; count_out[2] = 1u; count_out[3] = 0u; count_out[4] = 0u; count_out[5] = 0u; count_out[6] = 6u; count_out[7] = n; count_out[8] = 0u; count_out[9] = 0u; }}\n  if (i >= n) {{ return; }}\n  var sb: u32 = 0u;\n",
+                        word(w + 2),
+                        word(w),
+                        word(w + 1)
+                    )
+                }
+                None => String::from("  let i = gid.x;\n  if (i >= uniforms[0].x) { return; }\n  var sb: u32 = 0u;\n"),
+            };
+            if image {
+                let _ = writeln!(head, "  let image_width = u32(bitcast<f32>({}));", word(layout.image_width.unwrap_or(0)));
+            }
             let body = format!("{head}{body}");
             let entry = format!("kernel_{}", md5_hex(format!("{prefix}{signature}{body}").as_bytes()));
             let source = format!("{prefix}@compute @workgroup_size(64)\nfn {entry}{signature} {{\n{body}}}\n");
@@ -1172,9 +1094,9 @@ fn fast_kernel(placement: Option<Placement>, program: &packed::T) -> Result<Wgsl
                 uniform_bytes: uniform_words * 16,
                 table_seeds: layout.table_seeds.clone(),
                 output_widths: view.outputs.iter().map(|o| o.len() as i64).collect(),
-                input_widths: view.widths.clone(),
+                input_widths: if image { Vec::new() } else { view.widths.clone() },
                 gathers: layout.gathers.iter().map(|(_, g)| *g).collect(),
-                counts: Some(counts),
+                counts,
             })
         }
     }
@@ -1237,8 +1159,8 @@ pub fn raster(pipelines: &[(bool, Stage, Stage)]) -> Result<String, Diagnostic> 
                 }
             }
         }
-        let vertex = fast_kernel(Some(Placement::Vertex(*quads, v.clone())), &v.program)?;
-        let fragment = fast_kernel(Some(Placement::Fragment(out.clone(), f.clone())), &f.program)?;
+        let vertex = print(true, false, Some(Placement::Vertex(*quads, v.clone())), &v.program)?;
+        let fragment = print(true, false, Some(Placement::Fragment(out.clone(), f.clone())), &f.program)?;
         text.push(format!("struct {out} {{\n{fields}}}\n{}{}", vertex.source, fragment.source));
     }
     // OCaml's `compare` on polymorphic variants orders by tag hash: `Texture` before `Buffer`

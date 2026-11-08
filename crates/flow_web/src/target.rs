@@ -15,27 +15,29 @@ fn error(packed: &packed::T, code: &str, message: String) -> Diagnostic {
     d
 }
 
-/// Why the region cannot run as a web kernel, each with the region's span.
-pub fn region(packed: &packed::T, count: Option<i64>) -> Vec<Diagnostic> {
-    match wgsl::kernel(false, packed) {
-        Err(mut d) => {
-            if d.span.is_none() {
-                d.span = Some(packed.term.form().span.clone());
-            }
-            vec![d]
+/// The region's web kernel, or why it cannot run as one, each reason with the region's span. The kernel
+/// is printed once: the refusals are what `wgsl::kernel` reports plus the buffer and element limits.
+pub fn kernel(packed: &packed::T, count: Option<i64>) -> Result<wgsl::Wgsl, Vec<Diagnostic>> {
+    let kernel = wgsl::kernel(false, packed).map_err(|mut d| {
+        if d.span.is_none() {
+            d.span = Some(packed.term.form().span.clone());
         }
-        Ok(kernel) => {
-            let buffers = kernel.interface.iter().filter(|b| b.kind != Kind::Uniform_buffer).count() as i64;
-            let mut out = Vec::new();
-            if buffers > MAX_STORAGE_BUFFERS {
-                out.push(error(packed, "E_WEB_BUFFERS", format!("This kernel binds {buffers} storage buffers; WebGPU guarantees {MAX_STORAGE_BUFFERS} per shader stage.")));
-            }
-            if let Some(n) = count {
-                if n > MAX_ELEMENTS {
-                    out.push(error(packed, "E_WEB_ELEMENTS", format!("This kernel runs {n} elements in one dispatch; WebGPU guarantees {MAX_ELEMENTS}.")));
-                }
-            }
-            out
+        vec![d]
+    })?;
+    let buffers = kernel.interface.iter().filter(|b| b.kind != Kind::Uniform_buffer).count() as i64;
+    let mut out = Vec::new();
+    if buffers > MAX_STORAGE_BUFFERS {
+        out.push(error(packed, "E_WEB_BUFFERS", format!("This kernel binds {buffers} storage buffers; WebGPU guarantees {MAX_STORAGE_BUFFERS} per shader stage.")));
+    }
+    if let Some(n) = count {
+        if n > MAX_ELEMENTS {
+            out.push(error(packed, "E_WEB_ELEMENTS", format!("This kernel runs {n} elements in one dispatch; WebGPU guarantees {MAX_ELEMENTS}.")));
         }
     }
+    if out.is_empty() { Ok(kernel) } else { Err(out) }
+}
+
+/// Why the region cannot run as a web kernel, each with the region's span.
+pub fn region(packed: &packed::T, count: Option<i64>) -> Vec<Diagnostic> {
+    kernel(packed, count).err().unwrap_or_default()
 }

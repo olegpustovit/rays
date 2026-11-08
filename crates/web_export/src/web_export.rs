@@ -379,7 +379,7 @@ fn fixed_members(kept: Option<i64>, data: &dyn Fn(&Value) -> (i64, i64), f: &Fix
 /// A region the web target can run as a kernel: a static count of at least 1,024 and nothing the
 /// target refuses.
 fn web_kernel(f: &Fixed) -> Option<wgsl::Wgsl> {
-    if f.count >= 1024 && target::region(&f.packed, Some(f.count)).is_empty() { wgsl::kernel(false, &f.packed).ok() } else { None }
+    if f.count >= 1024 { target::kernel(&f.packed, Some(f.count)).ok() } else { None }
 }
 
 struct RegionEntry {
