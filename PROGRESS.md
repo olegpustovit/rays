@@ -6,7 +6,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 
 **Order:** A ∥ B ∥ M ∥ I, then C, then D. One commit per bullet in Wave A runbook where practical.
 
-**Current state (2026-11-08): finished.** All 63 plan items (waves A, B, M, I, C, D) are done on `dev`; see the Summary below and the session log for evidence. Artifact v6 is published with a status section, and its source SHA-256 (`9d5c9925…`) matches the repository mirror. Crates went from 67 to 51. Final qualification: workspace 2,823 of 2,839 in one run, with its three assertion failures fixed afterwards; native editor suite 321 of 325, and its remaining timeouts were fixed afterwards. The follow-ups outside the plan are listed in the last session-log entries and on the artifact.
+**Current state (2026-11-09): finished.** All 63 plan items (waves A, B, M, I, C, D) are done on `dev`; see the Summary below and the session log for evidence. Artifact v7 is published with the final status, and its source SHA-256 (`6754cee3…`) matches the repository mirror. Crates went from 67 to 51. Final qualification on the final code: workspace 2,843 cases with no failures; native editor suite 325/325. The follow-ups outside the plan are listed in the last session-log entries and on the artifact.
 
 ## Summary
 
@@ -135,6 +135,14 @@ Policy (`AGENTS.md`, `docs/history/build-speed.md`, plan B0): one warm workspace
 Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s under load; this run is healthy (not stale).
 
 ## Session log
+
+- 2026-11-09: **final qualification on the final code** (`5a575954`, docs-only commits after it):
+  - `RAYS_T_TIMEOUT=7200 cargo t --workspace`: 2,843 cases, exit 0, no failures or timeouts, 234.5 s wall (load 5.8).
+  - `RAYS_T_TIMEOUT=3600 cargo t -p rays_editor --features test-hooks --test gpu_editor`: 325/325, exit 0, 205.2 s wall (load 8.9).
+  - The whole-run cap is lifted only for these broad runs. Every case met the unchanged 5 s per-case limit.
+  - Remaining caveats:
+    - A focused `cargo t -p flow_sop` sits at its 60 s whole-run cap (59.9 s pass / 60.2 s timeout at load 6.4-6.7).
+    - Windows Vulkan and the shared cross-platform goldens are unverified: no Windows machine is reachable from this session.
 
 - 2026-11-08: `5a575954` qual: `operators::parity` runs `LANES = 8193` (above packed's 4,096-lane threading threshold; 9 blocks / 5 chunks at 8 threads, with a partial last block) instead of 100,000/32,769. The 100,000-lane `random_three_outputs_match_native` keeps the 16-blocks-per-chunk cap. Parity: 37.1 -> 15.1 s summed; slowest case 1.90 -> 0.40 s.
   - Full flow_sop with default caps: 709/709 in 59.9 s at load 6.4; timed out at 60.2 s (693/709, no failures) at load 6.7. 709/709 in 59.4 s with the cap lifted.
