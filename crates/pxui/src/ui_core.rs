@@ -810,7 +810,6 @@ pub struct Ui {
 /// One text left behind: its key, value and its undo and redo stacks.
 pub type ShelfEntry = (i64, String, Vec<(String, usize, usize)>, Vec<(String, usize, usize)>);
 
-pub type t = Ui;
 
 fn nonfinite(x: f64) -> bool {
     !x.is_finite()

@@ -415,7 +415,7 @@ fn with_runtime_facts(coordinator: &rr::Renderer) -> Result<runtime::presentatio
     out.unwrap_or_else(|| Err(startup_error("Sketch.run_state", ErrorKind::InvalidState, "no runtime")))
 }
 
-fn run_runtime(coordinator: &rr::Renderer, f: &dyn Fn(&mut runtime::t) -> Result<(), error>) -> Result<(), error> {
+fn run_runtime(coordinator: &rr::Renderer, f: &dyn Fn(&mut runtime::Runtime) -> Result<(), error>) -> Result<(), error> {
     let mut out = None;
     native::runtime_of_mut(coordinator, &mut |r| out = Some(f(r)));
     out.unwrap_or_else(|| Err(startup_error("Sketch.run_state", ErrorKind::InvalidState, "no runtime")))
@@ -555,9 +555,9 @@ fn run_state_internal(
     };
     let save: canvas_runtime::save = Rc::new(move |filename: &str| {
         let (width, height, bytes) = capture()?;
-        let canvas = runtime_resources::Canvas::of_rgba_bytes(width, height, bytes).map_err(|e| error_to_string(&e))?;
-        let saved = runtime_resources::Canvas::save_png(&canvas, filename).map_err(|e| error_to_string(&e));
-        let _ = runtime_resources::Canvas::destroy(&canvas);
+        let canvas = runtime_resources::canvas::of_rgba_bytes(width, height, bytes).map_err(|e| error_to_string(&e))?;
+        let saved = runtime_resources::canvas::save_png(&canvas, filename).map_err(|e| error_to_string(&e));
+        let _ = runtime_resources::canvas::destroy(&canvas);
         saved
     });
 

@@ -168,7 +168,7 @@ pub fn probe_caption<'a>(value: impl Into<ModelView<'a>>) -> Option<String> {
 }
 
 /// The status strip under the view: kit text on the ground, under a hairline.
-pub fn status_box<'a>(value: impl Into<ModelView<'a>>, ui: &mut Ui, frame: &frame::t, render_status: Option<&str>, error_status: Option<&str>, context: guide_context::t) {
+pub fn status_box<'a>(value: impl Into<ModelView<'a>>, ui: &mut Ui, frame: &frame::t, render_status: Option<&str>, error_status: Option<&str>, context: guide_context::GuideContext) {
     let value = &value.into();
     let g = geometry(value, &value.workspace, frame);
     // the pane really in use: the focus when a leaf of its kind is open, else the first leaf
@@ -283,7 +283,7 @@ pub fn status_box<'a>(value: impl Into<ModelView<'a>>, ui: &mut Ui, frame: &fram
     } else if let router::State::Pending(p) = &value.leader {
         // an open leader: the pending prefix in the accent and what the strip waits for
         let prefix = if !p.is_empty() { format!("/ {p}") } else { "/".to_string() };
-        status_bar::guide(ui, bounds, &Opts { leader: Some(prefix), ..base }, guide_context::t::Leader);
+        status_bar::guide(ui, bounds, &Opts { leader: Some(prefix), ..base }, guide_context::GuideContext::Leader);
     } else if let Some(moving) = moving {
         status_bar::guide(
             ui,
@@ -294,7 +294,7 @@ pub fn status_box<'a>(value: impl Into<ModelView<'a>>, ui: &mut Ui, frame: &fram
                 extra: vec![pair("drag to an edge", "dock"), pair("/ o f", "float or dock"), pair("/ n", "new window")],
                 ..base
             },
-            guide_context::t::Canvas,
+            guide_context::GuideContext::Canvas,
         );
     } else if state != State::Error && value.carry.is_none() && value.guide {
         status_bar::guide(ui, bounds, &Opts { extra, kind: Some(kind_text), selection, ..base }, context);

@@ -15,7 +15,7 @@ fn syn(op: e::Op) -> Change {
 }
 
 fn wires(view: &Pane) -> Vec<Vec<(f64, f64)>> {
-    (0..scope::Inspect::wire_count(view)).map(|i| scope::Inspect::wire_points(view, i)).collect()
+    (0..scope::inspect::wire_count(view)).map(|i| scope::inspect::wire_points(view, i)).collect()
 }
 
 fn settle(ui: &mut Ui, view: Pane) -> Pane {
@@ -34,7 +34,7 @@ fn scope_curve() {
     let mut ui = new_ui();
     let w = checked("(workspace c (graph g :context sop (let* [a (sop/box) b (sop/transform a :translate [0 3 0])] b)))");
     let view = settle(&mut ui, scope_view(ScopeOpts::default(), &w, "g").0);
-    let pts = scope::Inspect::wire_points(&view, 0);
+    let pts = scope::inspect::wire_points(&view, 0);
     let level = |v: &[(f64, f64)]| v.len() >= 2 && (v[1].1 - v[0].1).abs() < 0.5;
     let rev: Vec<_> = pts.iter().rev().cloned().collect();
     check(pts.len() > 2 && level(&pts) && level(&rev), "a curve wire does not leave and enter level");
@@ -50,13 +50,13 @@ fn scope_curve() {
     let view = settle(&mut ui, view);
     check(p::find(&sc, &path(&["g", "a#0#c1"])).is_some(), "the call in a vector cell is not a card");
     check(
-        (0..scope::Inspect::wire_count(&view)).any(|i| scope::Inspect::wire_target(&view, i) == Some((path(&["g", "a#0"]), e::ArgKey::Cell(1)))),
+        (0..scope::inspect::wire_count(&view)).any(|i| scope::inspect::wire_target(&view, i) == Some((path(&["g", "a#0"]), e::ArgKey::Cell(1)))),
         "no wire ends at the vector's cell",
     );
     // taking the wire off from the row's own port disconnects just that cell
     let a_node = p::find(&sc, &path(&["g", "a"])).expect("a");
     let k = a_node.rows.iter().position(|r| !r.cells.is_empty()).expect("cell row");
-    let (rx, ry) = scope::Inspect::row_center(&view, &path(&["g", "a"]), k).expect("row center");
+    let (rx, ry) = scope::inspect::row_center(&view, &path(&["g", "a"]), k).expect("row center");
     let at = (rx as i64, ry as i64);
     let (hovered, _) = scope_step(&mut ui, view, &frame_ev(at, vec![mouse_move(at)]));
     let (_, ch) = scope::run_command(hovered, Command::Delete);
@@ -68,15 +68,15 @@ fn scope_curve() {
     let w = checked("(workspace f (graph g :context host (let* [f (fn [(p : vec3) (h : float)] (+ p [0.0 (* 2.0 h) 0.0])) m (map f (list [0.0 0.0 0.0]) (list 1.0))] m)))");
     let (view, sc) = scope_view(ScopeOpts::default(), &w, "g");
     let view = settle(&mut ui, view);
-    let (zx, zy, zw, zh) = scope::Inspect::box_of(&view, &path(&["g", "f"])).expect("zone");
+    let (zx, zy, zw, zh) = scope::inspect::box_of(&view, &path(&["g", "f"])).expect("zone");
     let inner: Vec<p::Node> = p::zones(&sc).iter().flat_map(|z| z.zone.as_ref().expect("zone").scope.nodes.clone()).filter(|n| n.path.len() == 3).collect();
     check(inner.len() >= 2, "the function's body has its cards");
     for n in &inner {
-        let (x, y, w, h) = scope::Inspect::box_of(&view, &n.path).expect("box");
+        let (x, y, w, h) = scope::inspect::box_of(&view, &n.path).expect("box");
         check(x >= zx - 0.5 && y >= zy - 0.5 && x + w <= zx + zw + 0.5 && y + h <= zy + zh + 0.5, &format!("{} leaves its zone", n.path.join("/")));
     }
     // a wire does not run over a card it neither leaves nor enters
-    let cards: Vec<(f64, f64, f64, f64)> = sc.nodes.iter().chain(inner.iter()).filter(|n| n.zone.is_none()).filter_map(|n| scope::Inspect::box_of(&view, &n.path)).collect();
+    let cards: Vec<(f64, f64, f64, f64)> = sc.nodes.iter().chain(inner.iter()).filter(|n| n.zone.is_none()).filter_map(|n| scope::inspect::box_of(&view, &n.path)).collect();
     let inside = |(x, y): (f64, f64), (bx, by, bw, bh): (f64, f64, f64, f64)| x > bx - 0.5 && x < bx + bw + 0.5 && y > by - 0.5 && y < by + bh + 0.5;
     let shrunk = |(bx, by, bw, bh): (f64, f64, f64, f64)| (bx + 3.0, by + 3.0, bw - 6.0, bh - 6.0);
     for pts in wires(&view) {
@@ -102,7 +102,7 @@ fn scope_field_formula() {
     let pth = path(&["g", "r"]);
     let sc = p::of_graph(&scope_catalog(), &w, "g").expect("scope");
     let row = p::find(&sc, &pth).expect("r").rows.iter().position(|r| r.key == e::ArgKey::Field("x".into())).expect("row");
-    let (x, y) = scope::Inspect::expr_chip(&view, &pth, row).expect("chip");
+    let (x, y) = scope::inspect::expr_chip(&view, &pth, row).expect("chip");
     // a double click on the formula opens it, as its glyph does
     let at = (x as i64, y as i64);
     let (v, _) = scope_click(&mut ui, view, at);
@@ -143,10 +143,10 @@ fn scope_spine() {
     let mut ui = new_ui();
     let view = view_of(&mut ui, "(workspace s (graph g :context value (let* [ys (map (fn [i] (* i 2.0)) (array/range 3))] (array/nth ys 0))))");
     let into_f: Vec<Vec<(f64, f64)>> =
-        (0..scope::Inspect::wire_count(&view)).filter(|i| scope::Inspect::wire_target(&view, *i) == Some((path(&["g", "ys"]), e::ArgKey::Pos(0)))).map(|i| scope::Inspect::wire_points(&view, i)).collect();
+        (0..scope::inspect::wire_count(&view)).filter(|i| scope::inspect::wire_target(&view, *i) == Some((path(&["g", "ys"]), e::ArgKey::Pos(0)))).map(|i| scope::inspect::wire_points(&view, i)).collect();
     // the wire leaves the function zone's out-port on its right edge and enters map's f on its left edge
-    let (zx, zy, zw, zh) = scope::Inspect::box_of(&view, &path(&["g", "ys#0"])).expect("zone");
-    let (mx, my, _, _) = scope::Inspect::box_of(&view, &path(&["g", "ys"])).expect("map");
+    let (zx, zy, zw, zh) = scope::inspect::box_of(&view, &path(&["g", "ys#0"])).expect("zone");
+    let (mx, my, _, _) = scope::inspect::box_of(&view, &path(&["g", "ys"])).expect("map");
     check(
         match into_f.as_slice() {
             [pts] => {
@@ -168,16 +168,16 @@ fn scope_spine() {
         _ => None,
     });
     let view = settle(&mut ui, scope_view(o, &w, "g").0);
-    let (zx, zy, zw, zh) = scope::Inspect::box_of(&view, &path(&["g", "ys#0"])).expect("zone");
-    let (kx, ky, kw, _) = scope::Inspect::box_of(&view, &path(&["g", "k"])).expect("k");
-    let (rx, ry, _, _) = scope::Inspect::box_of(&view, &path(&["g", "r"])).expect("r");
+    let (zx, zy, zw, zh) = scope::inspect::box_of(&view, &path(&["g", "ys#0"])).expect("zone");
+    let (kx, ky, kw, _) = scope::inspect::box_of(&view, &path(&["g", "k"])).expect("k");
+    let (rx, ry, _, _) = scope::inspect::box_of(&view, &path(&["g", "r"])).expect("r");
     // the straight line between the two ends passes through the zone
     let line = |x: f64| ky + 12.0 + ((ry - ky) * (x - (kx + kw)) / (rx - kx - kw));
     check(line(zx + zw / 2.0) > zy && line(zx + zw / 2.0) < zy + zh, "the zone is off the line");
-    for i in 0..scope::Inspect::wire_count(&view) {
-        if let Some((t, _)) = scope::Inspect::wire_target(&view, i) {
+    for i in 0..scope::inspect::wire_count(&view) {
+        if let Some((t, _)) = scope::inspect::wire_target(&view, i) {
             if t == path(&["g", "r"]) {
-                for (x, y) in scope::Inspect::wire_points(&view, i) {
+                for (x, y) in scope::inspect::wire_points(&view, i) {
                     check(!(x > zx + 1.0 && x < zx + zw - 1.0 && y > zy + 1.0 && y < zy + zh - 1.0), "a wire that does not enter a zone runs through it");
                 }
             }
@@ -192,9 +192,9 @@ fn scope_zone_footer_paths() {
     let f = scope::zoom(&view);
     let (view, _) = scope_step(&mut ui, view, &frame_ev(mouse, vec![mouse_move(mouse), Event::Pinched(2.5 / f)]));
     let (view, _) = scope_step(&mut ui, view, &frame_ev(mouse, vec![]));
-    let (ax, _, aw, _) = scope::Inspect::box_of(&view, &path(&["g", "a"])).expect("a");
+    let (ax, _, aw, _) = scope::inspect::box_of(&view, &path(&["g", "a"])).expect("a");
     check(ax + aw < 0.0, "the geometry node is meant to be off screen");
-    check(scope::Inspect::footer_paths(&view).contains(&path(&["g", "a"])), "a zone in view lost its geometry");
+    check(scope::inspect::footer_paths(&view).contains(&path(&["g", "a"])), "a zone in view lost its geometry");
 }
 
 // ---------------------------------------------------------------- gestures 1
@@ -259,7 +259,7 @@ fn scope_gestures_1() {
     let view = g::settled(&mut ui, g::scope_view(&w, "flower").0);
     let node = p::find(&p::of_graph(&scope_catalog(), &w, "flower").expect("scope"), &heart).expect("heart");
     let i = node.rows.iter().position(|r| r.label == "radius").expect("radius");
-    let (fx, fy) = scope::Inspect::row_center(&view, &heart, i).expect("row");
+    let (fx, fy) = scope::inspect::row_center(&view, &heart, i).expect("row");
     let from = (fx as i64, fy as i64);
     let (view, _) = scope_step(&mut ui, view, &g::frame(from, vec![], vec![mouse_move(from), mouse_press(MouseButton::LeftButton, from)]));
     let towards = (from.0 + 40, from.1);
@@ -280,8 +280,8 @@ fn scope_gestures_1b() {
         let view = g::settled(ui, g::scope_view(&nw, "g").0);
         let node = p::find(&p::of_graph(&scope_catalog(), &nw, "g").expect("scope"), &pth).expect("node");
         let i = node.rows.iter().position(|r| r.label == label).expect("row");
-        let (bx, _, bw, _) = scope::Inspect::box_of(&view, &pth).expect("box");
-        let ry = scope::Inspect::row_center(&view, &pth, i).expect("row").1;
+        let (bx, _, bw, _) = scope::inspect::box_of(&view, &pth).expect("box");
+        let ry = scope::inspect::row_center(&view, &pth, i).expect("row").1;
         (view, ((bx + bw - inset) as i64, ry as i64))
     };
     // at two places: a second press at one would be a double-click, which types

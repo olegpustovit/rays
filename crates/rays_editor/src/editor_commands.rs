@@ -106,7 +106,7 @@ pub enum action {
 
 /// A command's scope is a kind of panel: any viewport is `View ""`, and the list and the lisp panel
 /// are the graph pane's other projections.
-pub type Command = command::t;
+pub type Command = command::Command;
 
 pub fn scope(panel: &Panel) -> Panel {
     match panel {
@@ -132,10 +132,10 @@ struct Builder {
 impl Builder {
     /// `command ?trigger ?scope ?guide ~id ~label action`: a leader key is listed by the leader
     /// sheet.
-    fn command(&mut self, id: &str, label: &str, trigger: Option<Trigger>, scope: Option<Panel>, guide: &[gc::t], act: action) {
-        let mut g: Vec<gc::t> = Vec::new();
+    fn command(&mut self, id: &str, label: &str, trigger: Option<Trigger>, scope: Option<Panel>, guide: &[gc::GuideContext], act: action) {
+        let mut g: Vec<gc::GuideContext> = Vec::new();
         if matches!(trigger, Some(Trigger::Leader(_))) {
-            g.push(gc::t::Leader);
+            g.push(gc::GuideContext::Leader);
         }
         g.extend_from_slice(guide);
         let code = self.actions.len();
@@ -157,9 +157,9 @@ fn build() -> Table {
     let graph = Some(Panel::Graph);
     let view = Some(Panel::View(String::new()));
     let ch = Key::KeyChar;
-    use gc::t::{Canvas, Hints, List, Multi, Node};
+    use gc::GuideContext::{Canvas, Hints, List, Multi, Node};
     use action::*;
-    b.command("guide.toggle", "toggle guide", chord(ch('/'), &[Key::Shift]), None, &[Canvas, Node, Multi, Hints, gc::t::Leader, List], Guide_toggle);
+    b.command("guide.toggle", "toggle guide", chord(ch('/'), &[Key::Shift]), None, &[Canvas, Node, Multi, Hints, gc::GuideContext::Leader, List], Guide_toggle);
     b.command("guide.toggle", "toggle guide", chord(ch('?'), &[]), None, &[], Guide_toggle);
     b.command("guide.keys", "all keys", leader("?"), None, &[Canvas, Node, Multi, Hints, List], Guide_keys);
     b.command("preset.save", "save preset", leader("s"), None, &[], Save_preset);

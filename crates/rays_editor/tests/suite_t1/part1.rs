@@ -20,9 +20,9 @@ pub fn run_lowering() {
     let shell = shell_of(&doc);
     check(panels::to_string(&shell.tree) == "(h outline (h (v graph lisp) (tile view view view view)))", &format!("the variations shell: {}", panels::to_string(&shell.tree)));
     match &shell.tree {
-        panels::t::Split { size: Size::Ratio(ratio), b, .. } => match &**b {
-            panels::t::Split { size: Size::Ratio(inner), a, .. } => match &**a {
-                panels::t::Split { size: Size::Ratio(left), .. } => check(*ratio == 0.13 && *inner == 0.5 && *left == 0.58, "ratios come from the editor graph"),
+        panels::Panels::Split { size: Size::Ratio(ratio), b, .. } => match &**b {
+            panels::Panels::Split { size: Size::Ratio(inner), a, .. } => match &**a {
+                panels::Panels::Split { size: Size::Ratio(left), .. } => check(*ratio == 0.13 && *inner == 0.5 && *left == 0.58, "ratios come from the editor graph"),
                 _ => fail("root split"),
             },
             _ => fail("root split"),
@@ -62,7 +62,7 @@ pub fn run_lowering() {
     check(shell_of(&named).named == vec![(vec![0usize], "scene".to_string())], "ui/graph names its graph");
     check(panels::to_string(&shell_of(&named).tree) == "(v graph view)", "ui/split is an even split");
     match shell_of(&named).tree {
-        panels::t::Split { size: Size::Ratio(ratio), .. } => check(ratio == 0.5, "ui/split halves"),
+        panels::Panels::Split { size: Size::Ratio(ratio), .. } => check(ratio == 0.5, "ui/split halves"),
         _ => fail("split"),
     }
     // negative: what the checker or the evaluator refuses leaves no layout

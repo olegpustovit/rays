@@ -13,7 +13,7 @@ use ogpu_core::types::{AddressMode, MipFilter, SamplerDescriptor, SamplerFilter}
 use rays_math::color;
 use renderer::renderer::Resource as retained_resource;
 use renderer::scene_execution as se;
-use runtime_resources::{Canvas as RCanvas, Image as RImage, Text as RText};
+use runtime_resources::{canvas as RCanvas, Image as RImage, text as RText};
 use scene_command::display_list::{self, Segment};
 use scene_command::render_ir::{self, Command, Geometry, Transform};
 use scene_command::shape2;

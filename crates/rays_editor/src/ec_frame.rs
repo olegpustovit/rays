@@ -2,8 +2,8 @@
 use editor_core::frame as ec;
 use rays::frame;
 
-pub fn to(frame: &frame::t) -> ec::t {
-    ec::t {
+pub fn to(frame: &frame::t) -> ec::Frame {
+    ec::Frame {
         input: frame.input.clone(),
         pixel_scale: frame.pixel_scale,
         fps: frame.fps,
@@ -11,7 +11,7 @@ pub fn to(frame: &frame::t) -> ec::t {
     }
 }
 
-pub fn apply(base: &frame::t, routed: ec::t) -> frame::t {
+pub fn apply(base: &frame::t, routed: ec::Frame) -> frame::t {
     frame::t {
         input: routed.input,
         pixel_scale: base.pixel_scale,

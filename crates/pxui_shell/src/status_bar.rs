@@ -207,7 +207,7 @@ pub fn draw(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts) {
 /// `notes`, the layout in use and the frame rate at the right. With `leader` (the pending prefix)
 /// the strip is the sheet's `09` one: the file, a rule, the prefix in the accent and `waiting for a
 /// key`.
-pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide_context::t) {
+pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide_context::GuideContext) {
     let (x, y, width, height) = bounds;
     if height <= 0 {
         return;
@@ -246,11 +246,11 @@ pub fn guide(ui: &mut Ui, bounds: (i64, i64, i64, i64), o: &Opts, context: guide
             // the kind and what is selected; a context that is no node's (the leader, a search) names itself
             let kind: Option<String> = Some(o.kind.clone().unwrap_or_else(|| title.to_string()));
             let selection: Option<String> = match context {
-                guide_context::t::Canvas
-                | guide_context::t::Node
-                | guide_context::t::Multi
-                | guide_context::t::List
-                | guide_context::t::Text => o.selection.clone(),
+                guide_context::GuideContext::Canvas
+                | guide_context::GuideContext::Node
+                | guide_context::GuideContext::Multi
+                | guide_context::GuideContext::List
+                | guide_context::GuideContext::Text => o.selection.clone(),
                 _ => Some(title.to_string()),
             };
             let fx = x as f64;

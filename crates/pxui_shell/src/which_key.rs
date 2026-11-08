@@ -23,7 +23,7 @@ fn byte_at(sequence: &str, i: usize) -> String {
 
 /// One page per typed prefix: a key that continues into longer sequences shows as a "+group" row
 /// named by the first word of its first command.
-fn page(platform: Platform, keymap: &[command::t], prefix: &str, scope: Option<&Panel>) -> Rows {
+fn page(platform: Platform, keymap: &[command::Command], prefix: &str, scope: Option<&Panel>) -> Rows {
     let mut rows: Rows = Vec::new();
     for command in keymap {
         match &command.trigger {
@@ -63,10 +63,10 @@ fn ordered_titles(titles: &[String]) -> Vec<String> {
 /// into longer sequences is "+" and a name from `describe`, else the first word of its first
 /// command.
 fn by_category(
-    keymap: &[command::t],
+    keymap: &[command::Command],
     prefix: &str,
     focus: &Panel,
-    category: &dyn Fn(&command::t) -> String,
+    category: &dyn Fn(&command::Command) -> String,
     describe: &dyn Fn(&str) -> Option<String>,
     order: &dyn Fn(&str) -> Vec<String>,
 ) -> Sections {
@@ -165,10 +165,10 @@ fn no_order(_: &str) -> Vec<String> {
 /// the sections are the commands everywhere and those of the focused pane, with the key chords.
 pub fn panel(
     ui: &mut Ui,
-    category: Option<&dyn Fn(&command::t) -> String>,
+    category: Option<&dyn Fn(&command::Command) -> String>,
     describe: Option<&dyn Fn(&str) -> Option<String>>,
     order: Option<&dyn Fn(&str) -> Vec<String>>,
-    keymap: &[command::t],
+    keymap: &[command::Command],
     prefix: &str,
     focus: &Panel,
     focus_name: &str,
@@ -219,13 +219,13 @@ pub fn panel(
 /// sheet's sections first.
 pub fn sheet_sections(
     platform: Platform,
-    category: Option<&dyn Fn(&command::t) -> String>,
+    category: Option<&dyn Fn(&command::Command) -> String>,
     text_keys: &[(String, Trigger)],
-    keymap: &[command::t],
+    keymap: &[command::Command],
 ) -> Sections {
-    let keys_category = |_: &command::t| "Keys".to_string();
-    let category: &dyn Fn(&command::t) -> String = category.unwrap_or(&keys_category);
-    let mut commands: Vec<&command::t> = Vec::new();
+    let keys_category = |_: &command::Command| "Keys".to_string();
+    let category: &dyn Fn(&command::Command) -> String = category.unwrap_or(&keys_category);
+    let mut commands: Vec<&command::Command> = Vec::new();
     for command in keymap {
         if command.trigger.is_none() || commands.iter().any(|previous| previous.id == command.id) {
             continue;
@@ -280,9 +280,9 @@ pub fn sheet_sections(
 pub fn sheet(
     ui: &mut Ui,
     context: &str,
-    category: Option<&dyn Fn(&command::t) -> String>,
+    category: Option<&dyn Fn(&command::Command) -> String>,
     text_keys: &[(String, Trigger)],
-    keymap: &[command::t],
+    keymap: &[command::Command],
 ) -> bool {
     let sections = sheet_sections(ui.platform(), category, text_keys, keymap);
     let mut result: Option<bool> = None;

@@ -10,7 +10,7 @@ use ogpu_core::error::{self as oerror, Error, ErrorKind};
 use ogpu_core::pipeline::Blend;
 use ogpu_core::types::{AddressMode, BufferDescriptor, BufferUsage, MipFilter, SamplerDescriptor, SamplerFilter};
 use runtime::{frame_facts, presentation_facts};
-use runtime_resources::{Assets, Canvas, Image, Text};
+use runtime_resources::{assets, canvas, Image, text};
 use scene_command::render_ir::{self as ir, Command, RenderIr};
 use scene_command::ui_batch::Table as Shapes;
 use scene_command::{marks, ui_batch};
@@ -296,7 +296,7 @@ pub const ZERO_STATS: Stats = Stats {
 };
 
 pub struct RendererData {
-    runtime: RefCell<runtime::t>,
+    runtime: RefCell<runtime::Runtime>,
     shared_device_lease: bool,
     owns_device_lease: bool,
     gpu_owner: GpuOwner,
@@ -304,7 +304,7 @@ pub struct RendererData {
     renderer_facts: Cell<frame_facts>,
     counters: RefCell<StatsCounters>,
     scaled: RefCell<ScaledCache>,
-    assets: RefCell<Assets::t>,
+    assets: RefCell<assets::Assets>,
     dead: Cell<bool>,
     snapshots: RefCell<side_lru::Table>,
     lowering: RefCell<renderer_lowering::Lowering>,
@@ -342,7 +342,7 @@ pub struct RetainedView {
 
 pub struct RetainedTarget {
     exec: Renderer,
-    canvas: Canvas::t,
+    canvas: canvas::Canvas,
     ir: Rc<RenderIr>,
 }
 
@@ -482,7 +482,7 @@ fn valid_configuration(operation: &str, configuration_: &Configuration) -> Resul
     }
 }
 
-fn finish_create(shared_device_lease: bool, owns_device_lease: bool, gpu_owner_: GpuOwner, runtime_: runtime::t, renderer: scene_execution::SceneExecution) -> Renderer {
+fn finish_create(shared_device_lease: bool, owns_device_lease: bool, gpu_owner_: GpuOwner, runtime_: runtime::Runtime, renderer: scene_execution::SceneExecution) -> Renderer {
     let facts = runtime::frame_facts(&runtime_);
     Renderer(Rc::new(RendererData {
         runtime: RefCell::new(runtime_),
@@ -493,7 +493,7 @@ fn finish_create(shared_device_lease: bool, owns_device_lease: bool, gpu_owner_:
         scaled: RefCell::new(new_scaled_cache()),
         shared_device_lease,
         owns_device_lease,
-        assets: RefCell::new(Assets::create()),
+        assets: RefCell::new(assets::create()),
         dead: Cell::new(false),
         snapshots: RefCell::new(side_lru::create(
             lru::cache("renderer.snapshot"),
@@ -836,21 +836,21 @@ fn snapshot(value: &Renderer, policy_: &lease_policy, density: i64, source: reta
         retained_resource::Text(text) => {
             // Text snapshots are immutable and uniquely identified, like images: a hit touches no
             // pixels, a miss copies them once.
-            let key = format!("text:{}", Text::identity(&text));
-            let generation = Text::generation(&text);
-            if !Text::destroyed(&text)
+            let key = format!("text:{}", text::identity(&text));
+            let generation = text::generation(&text);
+            if !text::destroyed(&text)
                 && let Some(cached) = find(&key, generation) {
                     return Ok(cached);
                 }
-            match (Text::size(&text), Text::borrow_pixels(&text)) {
+            match (text::size(&text), text::borrow_pixels(&text)) {
                 (Ok((width, height)), Ok(pixels)) => finish(true, &key, generation, width, height, &pixels),
                 (Err(e), _) | (_, Err(e)) => Err(resource_error_value(operation, &e)),
             }
         }
         retained_resource::Canvas(canvas) => {
-            let key = format!("canvas:{}", Canvas::identity(&canvas));
+            let key = format!("canvas:{}", canvas::identity(&canvas));
             // A canvas rendered on this window's device is sampled in place.
-            let gpu_ = match Canvas::gpu_snapshot(&canvas) {
+            let gpu_ = match canvas::gpu_snapshot(&canvas) {
                 Some((width, height, generation, texture)) if runtime::is_window(&value.0.runtime.borrow()) => {
                     let (device_id, _) = backend::texture_driver_token(&texture);
                     let device = scene_execution::device(&value.0.renderer.borrow());
@@ -866,7 +866,7 @@ fn snapshot(value: &Renderer, policy_: &lease_policy, density: i64, source: reta
                 Some((width, height, generation, texture)) => {
                     Ok((width, height, gpu_texture(texture_key(&key, density, generation), width, height, texture)))
                 }
-                None => match Canvas::snapshot(&canvas) {
+                None => match canvas::snapshot(&canvas) {
                     Ok((width, height, generation, pixels)) => finish(false, &key, generation, width, height, &new_bytes(pixels)),
                     Err(e) => Err(resource_error_value(operation, &e)),
                 },
@@ -1438,7 +1438,7 @@ fn release_view(view: &Rc<RetainedView>) {
     let target = view.target.borrow_mut().take();
     if let Some(target) = target {
         view.retain_after.set(if view.seen.get() < RETAIN_LIVE { RETAIN_LIVE } else { RETAIN_SOON });
-        let _ = Canvas::destroy(&target.canvas);
+        let _ = canvas::destroy(&target.canvas);
         let _ = destroy(&target.exec);
     }
 }
@@ -1464,7 +1464,7 @@ pub fn destroy(value: &Renderer) -> Result<(), Error> {
     for submission_ in &open {
         close_submission(submission_);
     }
-    let assets = Assets::destroy(&mut value.0.assets.borrow_mut());
+    let assets = assets::destroy(&mut value.0.assets.borrow_mut());
     side_lru::clear(&mut value.0.snapshots.borrow_mut());
     renderer_retained_plans::clear(&mut value.0.retained_plans.borrow_mut());
     value.0.last_step_draws.borrow_mut().clear();
@@ -1507,19 +1507,19 @@ fn make_retained_target(f: &presentation_facts, draws: &[Draw]) -> Option<Retain
     })
     .ok()?;
     // (OCaml evaluates the three of the tuple right to left: canvas, target, step)
-    let canvas = Canvas::create(dw, dh);
+    let canvas = canvas::create(dw, dh);
     let target = offscreen_target(&exec);
     let stepped = step(Some((0.0, 0.0, 0.0, 0.0)), &exec, draws);
-    let fail_with = |canvas: Option<&Canvas::t>| -> Option<RetainedTarget> {
+    let fail_with = |canvas: Option<&canvas::Canvas>| -> Option<RetainedTarget> {
         if let Some(c) = canvas {
-            let _ = Canvas::destroy(c);
+            let _ = canvas::destroy(c);
         }
         let _ = destroy(&exec);
         None
     };
     match (stepped, target, canvas) {
         (Ok(()), Ok(texture), Ok(canvas)) => {
-            let published = Canvas::publish_gpu(&canvas, &texture);
+            let published = canvas::publish_gpu(&canvas, &texture);
             let command = ir::create(vec![Command::Image(ir::Image {
                 resource_id: 1,
                 source: ir::Rect { x: 0.0, y: 0.0, width: dw as f64, height: dh as f64 },
@@ -1660,7 +1660,6 @@ pub fn release_gpu(value: &Gpu) {
     }
 }
 
-#[allow(non_snake_case)]
 pub mod native {
     use super::*;
 
@@ -1668,12 +1667,12 @@ pub mod native {
     pub use super::{adopt_draws, adopt_retained_view, begin_submission};
 
     /// The borrowed SDL/runtime shell; its lifetime remains owned by `t`.
-    pub fn runtime_of(value: &Renderer, f: &mut dyn FnMut(&runtime::t)) {
+    pub fn runtime_of(value: &Renderer, f: &mut dyn FnMut(&runtime::Runtime)) {
         f(&value.0.runtime.borrow())
     }
 
     /// The same shell, mutably (an offscreen shell refuses an IME area and a cursor).
-    pub fn runtime_of_mut(value: &Renderer, f: &mut dyn FnMut(&mut runtime::t)) {
+    pub fn runtime_of_mut(value: &Renderer, f: &mut dyn FnMut(&mut runtime::Runtime)) {
         f(&mut value.0.runtime.borrow_mut())
     }
 

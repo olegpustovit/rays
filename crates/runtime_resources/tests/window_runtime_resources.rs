@@ -7,11 +7,11 @@ use ogpu_core::error::ErrorKind;
 use runtime_resources::*;
 
 // A canvas is written a pixel at a time: [0xRRGGBBAA] at every point.
-fn fill(canvas: &Canvas::t, color: i32) {
-    let (width, height) = Canvas::size(canvas).unwrap();
+fn fill(canvas: &canvas::Canvas, color: i32) {
+    let (width, height) = canvas::size(canvas).unwrap();
     for y in 0..height {
         for x in 0..width {
-            Canvas::set_pixel(canvas, x, y, color).unwrap();
+            canvas::set_pixel(canvas, x, y, color).unwrap();
         }
     }
 }
@@ -64,28 +64,28 @@ fn image_and_canvas() {
             && Image::pixels(&image).unwrap() == b"\xff\x00\x00\xff",
         "image identity/generation"
     );
-    let canvas = Canvas::create(4, 4).unwrap();
-    let canvas_generation = Canvas::generation(&canvas);
-    Canvas::set_pixel(&canvas, 1, 2, 0x010203ff).unwrap();
-    Canvas::set_pixel(&canvas, 3, 3, 0x7f7f7f7f).unwrap();
-    assert_eq!(Canvas::generation(&canvas), canvas_generation + 2, "canvas mutation generation");
+    let canvas = canvas::create(4, 4).unwrap();
+    let canvas_generation = canvas::generation(&canvas);
+    canvas::set_pixel(&canvas, 1, 2, 0x010203ff).unwrap();
+    canvas::set_pixel(&canvas, 3, 3, 0x7f7f7f7f).unwrap();
+    assert_eq!(canvas::generation(&canvas), canvas_generation + 2, "canvas mutation generation");
     for (x, y) in [(-1, 0), (0, -1), (4, 0), (0, 4)] {
         assert!(
-            match Canvas::set_pixel(&canvas, x, y, 0) { Ok(_) => panic!("expected an error"), Err(e) => e.kind } == ErrorKind::InvalidArgument
-                && Canvas::generation(&canvas) == canvas_generation + 2,
+            match canvas::set_pixel(&canvas, x, y, 0) { Ok(_) => panic!("expected an error"), Err(e) => e.kind } == ErrorKind::InvalidArgument
+                && canvas::generation(&canvas) == canvas_generation + 2,
             "canvas accepted a pixel outside its extent"
         );
     }
     let mut expected = vec![0u8; 64];
     expected[(2 * 4 + 1) * 4..][..4].copy_from_slice(b"\x01\x02\x03\xff");
     expected[(3 * 4 + 3) * 4..][..4].copy_from_slice(b"\x7f\x7f\x7f\x7f");
-    let snapshot = Canvas::snapshot(&canvas).unwrap();
-    assert_eq!(snapshot, (4, 4, Canvas::generation(&canvas), expected.clone()), "canvas atomic snapshot");
+    let snapshot = canvas::snapshot(&canvas).unwrap();
+    assert_eq!(snapshot, (4, 4, canvas::generation(&canvas), expected.clone()), "canvas atomic snapshot");
     let bulk_bytes = b"\x01\x02\x03\xff\x10\x20\x30\x40".to_vec();
-    let bulk = Canvas::of_rgba_bytes(2, 1, bulk_bytes.clone()).unwrap();
-    assert_eq!(Canvas::snapshot(&bulk).unwrap().3, bulk_bytes, "bulk RGBA canvas changed pixel bytes");
-    assert_eq!(match Canvas::of_rgba_bytes(2, 1, vec![0; 7]) { Ok(_) => panic!("expected an error"), Err(e) => e.kind }, ErrorKind::InvalidArgument, "bulk RGBA accepted a short buffer");
-    Canvas::destroy(&bulk).unwrap();
+    let bulk = canvas::of_rgba_bytes(2, 1, bulk_bytes.clone()).unwrap();
+    assert_eq!(canvas::snapshot(&bulk).unwrap().3, bulk_bytes, "bulk RGBA canvas changed pixel bytes");
+    assert_eq!(match canvas::of_rgba_bytes(2, 1, vec![0; 7]) { Ok(_) => panic!("expected an error"), Err(e) => e.kind }, ErrorKind::InvalidArgument, "bulk RGBA accepted a short buffer");
+    canvas::destroy(&bulk).unwrap();
     let stable = Image::create(4, 4, &[0; 64]).unwrap();
     let stable_identity = Image::identity(&stable);
     let moved = Image::create(4, 4, &[0x42; 64]).unwrap();
@@ -152,14 +152,14 @@ fn image_and_canvas() {
     assert_eq!(&destroy_bytes[..], b"\x12\x34\x56\x78", "destroy invalidated leased image bytes");
     Image::release_snapshot(&mut destroy_lease);
     Image::release_snapshot(&mut destroy_lease);
-    let direct = Canvas::create(640, 480).unwrap();
-    assert!(Canvas::gpu_snapshot(&direct).is_none(), "fresh Canvas reports a GPU frame");
+    let direct = canvas::create(640, 480).unwrap();
+    assert!(canvas::gpu_snapshot(&direct).is_none(), "fresh Canvas reports a GPU frame");
     // A canvas published every frame: a capture lends the canvas storage, the next write moves
     // the canvas to its spare, and destroying the previous capture returns that storage.
-    let mut published = Canvas::capture(&direct).unwrap();
+    let mut published = canvas::capture(&direct).unwrap();
     let mut publish = |frame: i64| {
-        Canvas::set_pixel(&direct, frame % 640, frame % 480, ((((frame & 255) << 24) | 0x111fff) as u32) as i32).unwrap();
-        let next = Canvas::capture(&direct).unwrap();
+        canvas::set_pixel(&direct, frame % 640, frame % 480, ((((frame & 255) << 24) | 0x111fff) as u32) as i32).unwrap();
+        let next = canvas::capture(&direct).unwrap();
         Image::destroy(&published).unwrap();
         published = next;
     };
@@ -170,45 +170,45 @@ fn image_and_canvas() {
     let at = (601 % 480 * 640 + 601) * 4;
     assert_eq!(&last[at..at + 4], b"\x59\x11\x1f\xff", "the published capture is not the canvas after its last write");
     Image::destroy(&published).unwrap();
-    Canvas::destroy(&direct).unwrap();
+    canvas::destroy(&direct).unwrap();
     // A capture is a picture of its moment: later canvas writes and a replacement of another
     // capture leave it alone.
-    let bank_canvas = Canvas::create(4, 4).unwrap();
+    let bank_canvas = canvas::create(4, 4).unwrap();
     fill(&bank_canvas, 0x2468acffu32 as i32);
-    let bank_image = Canvas::capture(&bank_canvas).unwrap();
+    let bank_image = canvas::capture(&bank_canvas).unwrap();
     for round in 1..=100_000 {
-        Canvas::set_pixel(&bank_canvas, round & 3, 0, 0x2468acffu32 as i32).unwrap();
-        Image::destroy(&Canvas::capture(&bank_canvas).unwrap()).unwrap();
+        canvas::set_pixel(&bank_canvas, round & 3, 0, 0x2468acffu32 as i32).unwrap();
+        Image::destroy(&canvas::capture(&bank_canvas).unwrap()).unwrap();
     }
     let first_pixels = Image::pixels(&bank_image).unwrap();
     assert_eq!(first_pixels, solid(16, b"\x24\x68\xac\xff"), "capture is not the canvas pixels");
-    let second = Canvas::capture(&bank_canvas).unwrap();
+    let second = canvas::capture(&bank_canvas).unwrap();
     fill(&bank_canvas, 0x010203ff);
     assert!(
         Image::pixels(&bank_image).unwrap() == first_pixels && Image::pixels(&second).unwrap() == first_pixels,
         "a canvas write changed its captures"
     );
     Image::replace(&bank_image, 4, 4, &[0x3c; 64]).unwrap();
-    assert_eq!(Canvas::snapshot(&bank_canvas).unwrap().3, solid(16, b"\x01\x02\x03\xff"), "external image replacement changed canvas");
+    assert_eq!(canvas::snapshot(&bank_canvas).unwrap().3, solid(16, b"\x01\x02\x03\xff"), "external image replacement changed canvas");
     Image::destroy(&bank_image).unwrap();
     Image::destroy(&second).unwrap();
-    Canvas::destroy(&bank_canvas).unwrap();
-    let (captures_before, _) = Canvas::pixel_stats(&canvas);
+    canvas::destroy(&bank_canvas).unwrap();
+    let (captures_before, _) = canvas::pixel_stats(&canvas);
     for _ in 0..4 {
-        let capture = Canvas::capture(&canvas).unwrap();
+        let capture = canvas::capture(&canvas).unwrap();
         assert!(Image::size(&capture).unwrap() == (4, 4) && Image::pixels(&capture).unwrap() == expected, "capture");
         Image::destroy(&capture).unwrap();
     }
-    assert_eq!(Canvas::pixel_stats(&canvas), (captures_before + 4, 0), "CPU Canvas successful capture/readback counters");
+    assert_eq!(canvas::pixel_stats(&canvas), (captures_before + 4, 0), "CPU Canvas successful capture/readback counters");
     let png = std::env::temp_dir().join(format!("rays-next-{}.png", std::process::id()));
-    Canvas::save_png(&canvas, png.to_str().unwrap()).unwrap();
+    canvas::save_png(&canvas, png.to_str().unwrap()).unwrap();
     let signature = std::fs::read(&png).unwrap();
     std::fs::remove_file(&png).unwrap();
     assert_eq!(&signature[..8], b"\x89PNG\r\n\x1a\n", "PNG");
-    Canvas::destroy(&canvas).unwrap();
-    Canvas::destroy(&canvas).unwrap();
+    canvas::destroy(&canvas).unwrap();
+    canvas::destroy(&canvas).unwrap();
     assert!(
-        match Canvas::set_pixel(&canvas, 0, 0, 0) { Ok(_) => panic!("expected an error"), Err(e) => e.kind } == ErrorKind::Destroyed && match Canvas::capture(&canvas) { Ok(_) => panic!("expected an error"), Err(e) => e.kind } == ErrorKind::Destroyed,
+        match canvas::set_pixel(&canvas, 0, 0, 0) { Ok(_) => panic!("expected an error"), Err(e) => e.kind } == ErrorKind::Destroyed && match canvas::capture(&canvas) { Ok(_) => panic!("expected an error"), Err(e) => e.kind } == ErrorKind::Destroyed,
         "a destroyed canvas was written or captured"
     );
     Image::destroy(&image).unwrap();
@@ -230,15 +230,15 @@ fn image_and_canvas() {
 // Mutation through a captured mirror reuses storage by identity: the capture shares the
 // canvas's bytes until the canvas writes, then the canvas moves to a second buffer.
 fn capture_shares_storage_until_write() {
-    let canvas = Canvas::create(2, 2).unwrap();
-    let image = Canvas::capture(&canvas).unwrap();
+    let canvas = canvas::create(2, 2).unwrap();
+    let image = canvas::capture(&canvas).unwrap();
     let (_, _, _, before, mut lease) = Image::borrow_snapshot(&image).unwrap();
-    Canvas::set_pixel(&canvas, 0, 0, 0x01020304).unwrap();
+    canvas::set_pixel(&canvas, 0, 0, 0x01020304).unwrap();
     assert_eq!(&before[..4], &[0, 0, 0, 0], "the capture changed with the canvas");
-    assert_eq!(Canvas::snapshot(&canvas).unwrap().3[..4], [1, 2, 3, 4]);
+    assert_eq!(canvas::snapshot(&canvas).unwrap().3[..4], [1, 2, 3, 4]);
     Image::release_snapshot(&mut lease);
     Image::destroy(&image).unwrap();
-    Canvas::destroy(&canvas).unwrap();
+    canvas::destroy(&canvas).unwrap();
 }
 
 fn png_scanlines(png: &[u8]) -> Vec<u8> {
@@ -272,17 +272,17 @@ fn png_scanlines(png: &[u8]) -> Vec<u8> {
 fn png_rows() {
     let (width, height) = (257usize, 129usize);
     let pixels: Vec<u8> = (0..257 * 129 * 4).map(|i: usize| ((i * 37 + 19) & 255) as u8).collect();
-    let canvas = Canvas::create(width as i64, height as i64).unwrap();
+    let canvas = canvas::create(width as i64, height as i64).unwrap();
     let path = std::env::temp_dir().join(format!("rays-png-rows-{}.png", std::process::id()));
     for y in 0..height {
         for x in 0..width {
             let o = (y * width + x) * 4;
-            Canvas::set_pixel(&canvas, x as i64, y as i64, i32::from_be_bytes(pixels[o..o + 4].try_into().unwrap())).unwrap();
+            canvas::set_pixel(&canvas, x as i64, y as i64, i32::from_be_bytes(pixels[o..o + 4].try_into().unwrap())).unwrap();
         }
     }
     let mut previous: Option<Vec<u8>> = None;
     for _ in 0..16 {
-        Canvas::save_png(&canvas, path.to_str().unwrap()).unwrap();
+        canvas::save_png(&canvas, path.to_str().unwrap()).unwrap();
         let png = std::fs::read(&path).unwrap();
         let raw = png_scanlines(&png);
         assert_eq!(raw.len(), height * (width * 4 + 1));
@@ -297,58 +297,58 @@ fn png_rows() {
         previous = Some(png);
     }
     std::fs::remove_file(&path).unwrap();
-    Canvas::destroy(&canvas).unwrap();
+    canvas::destroy(&canvas).unwrap();
 }
 
 fn font() {
-    let mut font = Font::open_system(14.).unwrap();
-    Font::set_hinting(&mut font, Font::hinting::Light_hinting).unwrap();
+    let mut font = font::open_system(14.).unwrap();
+    font::set_hinting(&mut font, font::hinting::Light_hinting).unwrap();
     let white = (255, 255, 255, 255);
-    assert!(Font::render(&mut font, None, None, 1, white, b"").unwrap().is_none(), "empty text");
-    assert_eq!(match Font::render(&mut font, None, None, 1, white, b"\xc0\x80") { Ok(_) => panic!("expected an error"), Err(e) => e.kind }, ErrorKind::InvalidArgument, "UTF-8");
-    let mut transferred = Font::render(&mut font, None, None, 1, white, b"transfer").unwrap().unwrap();
-    let mut expected = Text::pixels(&transferred).unwrap();
-    let image = Text::into_image(&mut transferred).unwrap();
-    assert!(Text::destroyed(&transferred) && Image::pixels(&image).unwrap() == expected, "text-to-image ownership transfer changed pixels");
+    assert!(font::render(&mut font, None, None, 1, white, b"").unwrap().is_none(), "empty text");
+    assert_eq!(match font::render(&mut font, None, None, 1, white, b"\xc0\x80") { Ok(_) => panic!("expected an error"), Err(e) => e.kind }, ErrorKind::InvalidArgument, "UTF-8");
+    let mut transferred = font::render(&mut font, None, None, 1, white, b"transfer").unwrap().unwrap();
+    let mut expected = text::pixels(&transferred).unwrap();
+    let image = text::into_image(&mut transferred).unwrap();
+    assert!(text::destroyed(&transferred) && Image::pixels(&image).unwrap() == expected, "text-to-image ownership transfer changed pixels");
     expected.fill(0);
     assert!(Image::pixels(&image).unwrap() != expected, "public text pixels still alias the transferred image");
-    Text::destroy(&mut transferred).unwrap();
+    text::destroy(&mut transferred).unwrap();
     Image::destroy(&image).unwrap();
-    let mut advance = |density| Font::glyph_metrics_at(&mut font, density, 'A' as i64).unwrap().advance;
+    let mut advance = |density| font::glyph_metrics_at(&mut font, density, 'A' as i64).unwrap().advance;
     let (a1, a2) = (advance(1), advance(2));
     assert!(a1 > 0 && a2 > a1, "glyph metrics");
     assert!(
-        matches!(Font::glyph_metrics_at(&mut font, 0, 'A' as i64), Err(e) if e.kind == ErrorKind::InvalidArgument)
-            && match Font::render(&mut font, None, None, 17, (0, 0, 0, 255), b"x") { Ok(_) => panic!("expected an error"), Err(e) => e.kind } == ErrorKind::InvalidArgument,
+        matches!(font::glyph_metrics_at(&mut font, 0, 'A' as i64), Err(e) if e.kind == ErrorKind::InvalidArgument)
+            && match font::render(&mut font, None, None, 17, (0, 0, 0, 255), b"x") { Ok(_) => panic!("expected an error"), Err(e) => e.kind } == ErrorKind::InvalidArgument,
         "density outside 1..16 accepted"
     );
     // Rendered text is its own picture: twice the density is about twice the size, and neither a
     // font mutation nor the font's teardown shortens it.
     let mut size = |density| {
-        let mut text = Font::render(&mut font, None, None, density, (255, 0, 0, 255), b"explicit").unwrap().unwrap();
-        let size = Text::size(&text).unwrap();
-        Text::destroy(&mut text).unwrap();
+        let mut text = font::render(&mut font, None, None, density, (255, 0, 0, 255), b"explicit").unwrap().unwrap();
+        let size = text::size(&text).unwrap();
+        text::destroy(&mut text).unwrap();
         size
     };
     let (w1, h1) = size(1);
-    let mut explicit = Font::render(&mut font, None, None, 2, (255, 0, 0, 255), b"explicit").unwrap().unwrap();
-    let (width, height) = Text::size(&explicit).unwrap();
+    let mut explicit = font::render(&mut font, None, None, 2, (255, 0, 0, 255), b"explicit").unwrap().unwrap();
+    let (width, height) = text::size(&explicit).unwrap();
     assert!(width > 0 && height > 0 && (width - 2 * w1).abs() <= 4 && (height - 2 * h1).abs() <= 2, "explicit text");
-    let generation = Text::generation(&explicit);
-    let pixels = Text::pixels(&explicit).unwrap();
-    Font::set_hinting(&mut font, Font::hinting::Mono_hinting).unwrap();
-    Font::destroy(&mut font).unwrap();
+    let generation = text::generation(&explicit);
+    let pixels = text::pixels(&explicit).unwrap();
+    font::set_hinting(&mut font, font::hinting::Mono_hinting).unwrap();
+    font::destroy(&mut font).unwrap();
     assert!(
-        !Text::destroyed(&explicit)
-            && Text::size(&explicit).unwrap() == (width, height)
-            && Text::generation(&explicit) == generation
-            && Text::pixels(&explicit).unwrap() == pixels,
+        !text::destroyed(&explicit)
+            && text::size(&explicit).unwrap() == (width, height)
+            && text::generation(&explicit) == generation
+            && text::pixels(&explicit).unwrap() == pixels,
         "font mutation or teardown shortened text lifetime"
     );
-    Text::destroy(&mut explicit).unwrap();
-    assert!(Text::destroyed(&explicit), "text survived its own destroy");
-    Font::destroy(&mut font).unwrap();
-    assert_eq!(match Font::render(&mut font, None, None, 1, (0, 0, 0, 0), b"dead") { Ok(_) => panic!("expected an error"), Err(e) => e.kind }, ErrorKind::Destroyed, "stale font");
+    text::destroy(&mut explicit).unwrap();
+    assert!(text::destroyed(&explicit), "text survived its own destroy");
+    font::destroy(&mut font).unwrap();
+    assert_eq!(match font::render(&mut font, None, None, 1, (0, 0, 0, 0), b"dead") { Ok(_) => panic!("expected an error"), Err(e) => e.kind }, ErrorKind::Destroyed, "stale font");
 }
 
 fn wav() -> Vec<u8> {
@@ -382,31 +382,31 @@ fn wav() -> Vec<u8> {
 }
 
 fn audio() {
-    let owner = Audio::create_device(16).unwrap();
+    let owner = audio::create_device(16).unwrap();
     let mut encoded = wav();
-    let mut sample = Audio::load_sample_bytes(&owner, &encoded).unwrap();
+    let mut sample = audio::load_sample_bytes(&owner, &encoded).unwrap();
     encoded.fill(0);
-    assert!(matches!(Audio::load_sample_bytes(&owner, b"bad"), Err(e) if e.kind == ErrorKind::Decode), "undecodable sample accepted");
+    assert!(matches!(audio::load_sample_bytes(&owner, b"bad"), Err(e) if e.kind == ErrorKind::Decode), "undecodable sample accepted");
     // The sample owns its copy of the bytes: it still plays after the caller zeroed them.
-    let channel = Audio::play_sample(&owner, Some(1), Some(0.5), &sample).unwrap();
+    let channel = audio::play_sample(&owner, Some(1), Some(0.5), &sample).unwrap();
     assert!((0..16).contains(&channel), "sample played outside the channel bank");
     for volume in [1.5, -0.1, f64::NAN] {
-        assert_eq!(match Audio::play_sample(&owner, None, Some(volume), &sample) { Ok(_) => panic!("expected an error"), Err(e) => e.kind }, ErrorKind::InvalidArgument, "volume outside 0..1 accepted");
+        assert_eq!(match audio::play_sample(&owner, None, Some(volume), &sample) { Ok(_) => panic!("expected an error"), Err(e) => e.kind }, ErrorKind::InvalidArgument, "volume outside 0..1 accepted");
     }
-    let second = Audio::play_sample(&owner, None, None, &sample).unwrap();
+    let second = audio::play_sample(&owner, None, None, &sample).unwrap();
     assert_ne!(second, channel, "a second voice took the playing channel");
-    Audio::destroy_sample(&mut sample).unwrap();
-    Audio::destroy_sample(&mut sample).unwrap();
-    assert_eq!(match Audio::play_sample(&owner, None, None, &sample) { Ok(_) => panic!("expected an error"), Err(e) => e.kind }, ErrorKind::Destroyed, "destroyed sample played");
-    Audio::destroy(&owner).unwrap();
-    Audio::destroy(&owner).unwrap();
-    assert!(matches!(Audio::load_sample_bytes(&owner, &wav()), Err(e) if e.kind == ErrorKind::Destroyed), "stale audio");
+    audio::destroy_sample(&mut sample).unwrap();
+    audio::destroy_sample(&mut sample).unwrap();
+    assert_eq!(match audio::play_sample(&owner, None, None, &sample) { Ok(_) => panic!("expected an error"), Err(e) => e.kind }, ErrorKind::Destroyed, "destroyed sample played");
+    audio::destroy(&owner).unwrap();
+    audio::destroy(&owner).unwrap();
+    assert!(matches!(audio::load_sample_bytes(&owner, &wav()), Err(e) if e.kind == ErrorKind::Destroyed), "stale audio");
 }
 
 fn assets() {
-    let mut assets = Assets::create();
-    Assets::destroy(&mut assets).unwrap();
-    Assets::destroy(&mut assets).unwrap();
+    let mut assets = assets::create();
+    assets::destroy(&mut assets).unwrap();
+    assets::destroy(&mut assets).unwrap();
 }
 
 fn main() {

@@ -1330,7 +1330,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::Gpu::Config>, pump: Option<&dyn Fn(
         Some(k) if scope_name(&*value2).is_some() => {
             // only the footers drawn and the selection are counted, not every node of the graph
             let view = pane_view(&*value2);
-            let mut shown = pxui_graph::scope_frame::Inspect::footer_paths(view);
+            let mut shown = pxui_graph::scope_frame::inspect::footer_paths(view);
             shown.extend(scope::selected(view));
             k.targets.iter().filter_map(|(path, target)| if shown.contains(path) { Some(*target) } else { None }).collect()
         }

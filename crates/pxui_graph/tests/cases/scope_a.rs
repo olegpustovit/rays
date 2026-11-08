@@ -46,12 +46,12 @@ fn scope_zoom_geometry() {
         let z0 = scope::zoom(&view);
         let (view, _) = scope_step(&mut ui, view, &frame_ev(mouse, vec![mouse_move(mouse), Event::Pinched(factor / z0)]));
         let (view, _) = scope_step(&mut ui, view, &frame_ev(mouse, vec![]));
-        let ports: Vec<(f64, f64)> = paths.iter().flat_map(|q| scope::Inspect::ports(&view, q)).collect();
+        let ports: Vec<(f64, f64)> = paths.iter().flat_map(|q| scope::inspect::ports(&view, q)).collect();
         let at = |x: f64, y: f64| ports.iter().any(|(px, py)| (px - x).abs() < 0.01 && (py - y).abs() < 0.01);
-        let count = scope::Inspect::wire_count(&view);
+        let count = scope::inspect::wire_count(&view);
         check(count > 0, "no wires to check");
         for i in 0..count {
-            let pts = scope::Inspect::wire_points(&view, i);
+            let pts = scope::inspect::wire_points(&view, i);
             match pts.first() {
                 Some(first) => {
                     let last = pts[pts.len() - 1];
@@ -62,15 +62,15 @@ fn scope_zoom_geometry() {
         }
         check(expect(scope::zoom(&view)), "the pinch did not reach the zoom under test");
         // the zoom never reduces a card: b has a written row at every zoom
-        let (_, _, _, bh) = scope::Inspect::box_of(&view, &path(&["g", "b"])).unwrap();
+        let (_, _, _, bh) = scope::inspect::box_of(&view, &path(&["g", "b"])).unwrap();
         check(bh > ((p::HEAD_HEIGHT + p::ROW_HEIGHT) * scope::zoom(&view)) - 0.01, &format!("zoom {:.2}: a card lost its rows", scope::zoom(&view)));
         // footers are drawn (so counted) only for cards in view and not too small to read
-        let fp = scope::Inspect::footer_paths(&view);
+        let fp = scope::inspect::footer_paths(&view);
         check((scope::zoom(&view) < 0.4 && fp.is_empty()) || fp.contains(&path(&["g", "b"])), &format!("zoom {:.2}: footer paths", scope::zoom(&view)));
         // a click on a node's box, at whatever level it is shown, selects it
         if scope::zoom(&view) < 0.5 {
             for q in &paths {
-                let (x, y, w, h) = scope::Inspect::box_of(&view, q).unwrap();
+                let (x, y, w, h) = scope::inspect::box_of(&view, q).unwrap();
                 let (view2, _) = scope_click(&mut ui, view.clone(), ((x + w / 2.0) as i64, (y + (h / 2.0).min(11.0 * scope::zoom(&view))) as i64));
                 check(scope::selected(&view2) == vec![q.clone()], &format!("a click on {} did not select it", q.join("/")));
             }
@@ -110,13 +110,13 @@ fn scope_levels_a() {
     let o = saved_opts(TestSaved { at: vec![(a.clone(), (24.0, 24.0))], level: vec![(a2, (Level::Point, false))], ..Default::default() });
     let (pview, _) = scope_view(o, &ws, "g");
     let (pview, _) = scope_step(&mut ui, pview, &frame0());
-    let (_, _, pw, ph) = scope::Inspect::box_of(&pview, &a).unwrap();
+    let (_, _, pw, ph) = scope::inspect::box_of(&pview, &a).unwrap();
     check(ph == p::POINT_SIZE * scope::zoom(&pview) && pw < 100.0 * scope::zoom(&pview), "a point is the 14-point disc and its name");
     let (_back, changes) = scope::run_command(scope::select(vec![a.clone()], pview), Command::Point_level);
     check(matches!(changes.as_slice(), [Change::Level_set(l)] if l.len() == 1 && l[0].0 == a && l[0].1.is_none() && !l[0].2), "p on a point does not go back to the card");
     // the header's in-port takes a wire: dropped anywhere on the header it is Connect on the first slot
-    let (sx, sy) = scope::Inspect::output_socket(&view, &b).unwrap();
-    let (tx, ty) = scope::Inspect::row_center(&view, &c, 0).unwrap();
+    let (sx, sy) = scope::inspect::output_socket(&view, &b).unwrap();
+    let (tx, ty) = scope::inspect::row_center(&view, &c, 0).unwrap();
     let start = (sx as i64, sy as i64);
     let stop = (tx as i64, ty as i64);
     let (v, _) = scope_step(&mut ui, view.clone(), &frame_ev(start, vec![mouse_move(start), mouse_press(MouseButton::LeftButton, start)]));
@@ -133,14 +133,14 @@ fn scope_levels_a() {
     let (v, changes) = scope_step(&mut ui, v, &frame_ev(empty, vec![mouse_release(MouseButton::LeftButton, empty)]));
     check(changes.contains(&Change::Selected(vec![b.clone()])) && menu_requested(&changes) && scope::selected(&v) == vec![b.clone()], "a wire let go on empty canvas did not ask for the node menu after its source");
     // a wire itself pulled into empty canvas does the same, and stays selected: the host inserts on it
-    let i = (0..scope::Inspect::wire_count(&view)).find(|i| matches!(scope::Inspect::wire_target(&view, *i), Some((n, _)) if n == c));
+    let i = (0..scope::inspect::wire_count(&view)).find(|i| matches!(scope::inspect::wire_target(&view, *i), Some((n, _)) if n == c));
     let i = match i {
         None => fail("no wire into c"),
         Some(i) => i,
     };
-    let (ax, _, aw, _) = scope::Inspect::box_of(&view, &a).unwrap();
-    let (bx, _, _, _) = scope::Inspect::box_of(&view, &b).unwrap();
-    let (mx, my) = scope::Inspect::wire_points(&view, i).into_iter().find(|(x, _)| *x > ax + aw + 4.0 && *x < bx - 4.0).expect("wire point");
+    let (ax, _, aw, _) = scope::inspect::box_of(&view, &a).unwrap();
+    let (bx, _, _, _) = scope::inspect::box_of(&view, &b).unwrap();
+    let (mx, my) = scope::inspect::wire_points(&view, i).into_iter().find(|(x, _)| *x > ax + aw + 4.0 && *x < bx - 4.0).expect("wire point");
     let mid = (mx as i64, my as i64);
     let (v, _) = scope_step(&mut ui, view.clone(), &frame_ev(mid, vec![mouse_move(mid), mouse_press(MouseButton::LeftButton, mid)]));
     let (v, _) = scope_step(&mut ui, v, &frame_ev(empty, vec![mouse_move(empty)]));
@@ -172,12 +172,12 @@ fn scope_levels_b() {
     let mw = checked("(workspace m (graph g :context value (let* [boxes (array/vec3 8) ys (map (fn [i] (let* [p (array/nth boxes (int i))] [p.x p.y 0])) (array/range 4))] (array/count ys))))");
     let (mview, _) = scope_view(ScopeOpts::default(), &mw, "g");
     let (mview, _) = scope_step(&mut ui, mview, &frame0());
-    let (zx, zy, zw, _) = scope::Inspect::box_of(&mview, &path(&["g", "ys#0"])).unwrap();
+    let (zx, zy, zw, _) = scope::inspect::box_of(&mview, &path(&["g", "ys#0"])).unwrap();
     let z = scope::zoom(&mview);
-    let from_i: Vec<i64> = (0..scope::Inspect::wire_count(&mview)).filter(|i| matches!(scope::Inspect::wire_points(&mview, *i).first(), Some((x, _)) if *x > zx && *x <= zx + 24.0 * z)).collect();
+    let from_i: Vec<i64> = (0..scope::inspect::wire_count(&mview)).filter(|i| matches!(scope::inspect::wire_points(&mview, *i).first(), Some((x, _)) if *x > zx && *x <= zx + 24.0 * z)).collect();
     check(!from_i.is_empty(), "the frame's variable has no wire from its begin bar");
     for i in from_i {
-        for (x, y) in scope::Inspect::wire_points(&mview, i) {
+        for (x, y) in scope::inspect::wire_points(&mview, i) {
             check(x >= zx && x <= zx + zw - 3.0 * z && y > zy + p::HEAD_HEIGHT * z, "a frame's variable wire left the frame or crossed its label row");
         }
     }
@@ -220,7 +220,7 @@ fn scope_levels_c() {
     let sw = checked("(workspace s (graph g :context sop (sop/box)) (graph scene :context scene (let* [g (scene/geometry (ref g))] (scene/merge g))))");
     let (sview, _) = scope_view(ScopeOpts::default(), &sw, "scene");
     let (sview, _) = scope_step(&mut ui, sview, &frame0());
-    check((0..scope::Inspect::wire_count(&sview)).all(|i| !matches!(scope::Inspect::wire_target(&sview, i), Some((q, _)) if q == path(&["scene", "g"]))), "a node that refers to a graph of its own name is wired to itself");
+    check((0..scope::inspect::wire_count(&sview)).all(|i| !matches!(scope::inspect::wire_target(&sview, i), Some((q, _)) if q == path(&["scene", "g"]))), "a node that refers to a graph of its own name is wired to itself");
     // v on a node inside a loop asks for it too: the host shows it at the probed iteration
     let lw = checked("(workspace l (graph g :context sop [(n : int 3)] (let* [k 0.4 a (sop/uv_sphere :radius k :segments n) copies (for [i (range 2)] (sop/transform a :translate [i 0 0]))] (sop/merge copies))))");
     let (lview, lscope) = scope_view(ScopeOpts::default(), &lw, "g");
@@ -232,15 +232,15 @@ fn scope_levels_c() {
     let sphere = path(&["g", "a"]);
     let rows = p::find(&lscope, &sphere).unwrap().rows;
     let row = |label: &str| rows.iter().position(|r| r.label == label).unwrap();
-    check(scope::Inspect::fold_button(&lview, &sphere, row("segments")).is_none(), "a row wired from an input has a fold button");
-    let (fx, fy) = match scope::Inspect::fold_button(&lview, &sphere, row("radius")) {
+    check(scope::inspect::fold_button(&lview, &sphere, row("segments")).is_none(), "a row wired from an input has a fold button");
+    let (fx, fy) = match scope::inspect::fold_button(&lview, &sphere, row("radius")) {
         Some(at) => at,
         None => fail("a row wired from a single-use node has no fold button"),
     };
     let (_, changes) = scope_click(&mut ui, lview.clone(), (fx as i64, fy as i64));
     check(changes.contains(&Change::Syntax_edit(Op::FoldInto { node: path(&["g", "k"]) })), "a click on the fold button did not fold the source into the row");
     // taking the wire off a named argument writes the value it carried (k is 0.4): the row stays on the card
-    let (rx, ry) = scope::Inspect::row_center(&lview, &sphere, row("radius")).unwrap();
+    let (rx, ry) = scope::inspect::row_center(&lview, &sphere, row("radius")).unwrap();
     let at = (rx as i64, ry as i64);
     let (hovered, _) = scope_step(&mut ui, lview, &frame_ev(at, vec![mouse_move(at)]));
     match scope::run_command(hovered, Command::Delete).1.as_slice() {
@@ -263,14 +263,14 @@ fn scope_connection_hover() {
         let point = (point.0 as i64, point.1 as i64);
         let (hovered, changes) = scope_step(ui, view.clone(), &frame_ev(point, vec![mouse_move(point)]));
         check(changes.is_empty(), "hover edited the graph");
-        scope::Inspect::highlighted_connections(&hovered)
+        scope::inspect::highlighted_connections(&hovered)
     };
-    let source = scope::Inspect::output_socket(&view, &path(&["g", "a"])).unwrap();
+    let source = scope::inspect::output_socket(&view, &path(&["g", "a"])).unwrap();
     let fanout = highlight(&mut ui, source);
     check(fanout.len() == 2, "an output hover did not highlight its two connections");
     let (ax, ay) = source;
-    let (bx, _, _, _) = scope::Inspect::box_of(&view, &path(&["g", "c"])).unwrap();
-    let (_, by) = scope::Inspect::row_center(&view, &path(&["g", "c"]), 0).unwrap();
+    let (bx, _, _, _) = scope::inspect::box_of(&view, &path(&["g", "c"])).unwrap();
+    let (_, by) = scope::inspect::row_center(&view, &path(&["g", "c"]), 0).unwrap();
     let wire_hover = highlight(&mut ui, ((ax + bx) / 2.0, (ay + by) / 2.0));
     check(wire_hover.len() == 1, &format!("hover on a wire did not isolate its connection: {} at {:.1} {:.1}", wire_hover.len(), (ax + bx) / 2.0, (ay + by) / 2.0));
     check(highlight(&mut ui, (bx, by)).len() == 1, "an input hover did not isolate its connection");
@@ -285,10 +285,10 @@ fn scope_connection_hover() {
     let (view, _) = scope_view(ScopeOpts::default(), &ws, "g");
     let (view, _) = scope_step(&mut ui, view, &frame0());
     // a captured value is wired straight across the zone's edge from the node that makes it
-    let (ax, ay) = scope::Inspect::output_socket(&view, &path(&["g", "a"])).unwrap();
+    let (ax, ay) = scope::inspect::output_socket(&view, &path(&["g", "a"])).unwrap();
     let point = (ax as i64, ay as i64);
     let (hovered, changes) = scope_step(&mut ui, view, &frame_ev(point, vec![mouse_move(point)]));
-    check(changes.is_empty() && scope::Inspect::highlighted_connections(&hovered).len() == 1, "hover on a captured value's socket missed its outer connection");
+    check(changes.is_empty() && scope::inspect::highlighted_connections(&hovered).len() == 1, "hover on a captured value's socket missed its outer connection");
 }
 
 // ---------------------------------------------------------------- idle frame
@@ -331,11 +331,11 @@ fn scope_suspend() {
     let mut held = frame_ev(empty, vec![mouse_move(empty), mouse_press(MouseButton::RightButton, empty)]);
     held.input.buttons = vec![MouseButton::RightButton];
     let (panning, _) = scope_step(&mut ui, view, &held);
-    check(scope::Inspect::grabbed(&panning), "a right-button press on the canvas did not begin a pan");
+    check(scope::inspect::grabbed(&panning), "a right-button press on the canvas did not begin a pan");
     let (naming, _) = scope::run_command(scope::select(vec![path(&["flower", "heart"])], panning), Command::Edit_name);
-    check(scope::editing(&naming) && scope::Inspect::grabbed(&naming), "the name field did not open during the pan");
+    check(scope::editing(&naming) && scope::inspect::grabbed(&naming), "the name field did not open during the pan");
     let idle = scope::suspend(naming);
-    check(!scope::Inspect::grabbed(&idle) && !scope::editing(&idle), "suspend left the grab or the field");
+    check(!scope::inspect::grabbed(&idle) && !scope::editing(&idle), "suspend left the grab or the field");
     // suspending an idle pane makes no new value: the sharing (layout) and the open state are unchanged
     let again = scope::suspend(idle.clone());
     check(Rc::ptr_eq(&again.layout, &idle.layout) && again.drag.is_none() && again.context.is_none() && again.highlighted.is_empty(), "suspending an idle pane made a new value");
@@ -343,7 +343,7 @@ fn scope_suspend() {
     let (after, mut changes) = scope_step(&mut ui, idle, &frame_ev(empty, vec![mouse_release(MouseButton::RightButton, empty)]));
     let (after, later) = scope_step(&mut ui, after, &frame_ev(empty, vec![]));
     changes.extend(later);
-    check(!scope::Inspect::grabbed(&after) && !scope::editing(&after) && !changes.iter().any(|c| matches!(c, Change::Syntax_edit(_) | Change::Moved(_))), "the pane woke with a grab, a field or an edit");
+    check(!scope::inspect::grabbed(&after) && !scope::editing(&after) && !changes.iter().any(|c| matches!(c, Change::Syntax_edit(_) | Change::Moved(_))), "the pane woke with a grab, a field or an edit");
 }
 
 // ---------------------------------------------------------------- pinch
@@ -407,7 +407,7 @@ fn scope_carry() {
     let (view, _) = crate::support::g::scope_view(&w, "flower");
     let heart = path(&["flower", "heart"]);
     let view = scope_step(&mut ui, view, &frame0()).0;
-    let (x, y, bw, bh) = scope::Inspect::box_of(&view, &heart).unwrap();
+    let (x, y, bw, bh) = scope::inspect::box_of(&view, &heart).unwrap();
     let over = ((x + bw / 2.0) as i64, (y + bh - 4.0) as i64);
     let nothing = (2900, 1900);
     // idle frames report nothing
@@ -443,11 +443,11 @@ fn scope_ghost_values() {
         let v = scope::with_scope(o, "g", sc.clone(), scope::create(Some(1000), Some(700)));
         scope::with_records(recorded(&w), v)
     };
-    let ghost = |ui: &mut Ui, index: i64, q: &[&str]| scope::Inspect::ghost(&scope_step(ui, view(index), &frame0()).0, &path(q));
+    let ghost = |ui: &mut Ui, index: i64, q: &[&str]| scope::inspect::ghost(&scope_step(ui, view(index), &frame0()).0, &path(q));
     check(ghost(&mut ui, 0, &["g", "k"]) == Some("6".to_owned()), "a card below Full showed no value beside its out-port");
     check(ghost(&mut ui, 0, &["g", "ys", "b"]) == Some("1".to_owned()) && ghost(&mut ui, 3, &["g", "ys", "b"]) == Some("19".to_owned()), "the ghost value did not follow the pinned iteration");
     let bare = scope::with_scope(ScopeOpts::default(), "g", sc.clone(), scope::create(Some(1000), Some(700)));
-    check(scope::Inspect::ghost(&scope_step(&mut ui, bare, &frame0()).0, &path(&["g", "k"])).is_none(), "a ghost value without records");
+    check(scope::inspect::ghost(&scope_step(&mut ui, bare, &frame0()).0, &path(&["g", "k"])).is_none(), "a ghost value without records");
 }
 
 pub const CASES: &[(&str, fn())] = &[

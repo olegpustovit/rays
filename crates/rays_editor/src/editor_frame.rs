@@ -426,7 +426,7 @@ pub fn follow_press<'a>(value: impl Into<ModelView<'a>>, workspace: &shell, fram
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn draw_notice<'a>(value: impl Into<ModelView<'a>>, frame_: &frame::t, roots: &[(Leaf, UiBox)], header_focus: &Option<layout::Path>, graph_body: layout::Bounds, scope_view: &scope::t, scope_active: bool, ui: &mut Ui) {
+pub fn draw_notice<'a>(value: impl Into<ModelView<'a>>, frame_: &frame::t, roots: &[(Leaf, UiBox)], header_focus: &Option<layout::Path>, graph_body: layout::Bounds, scope_view: &scope::Pane, scope_active: bool, ui: &mut Ui) {
     let value = &value.into();
     // echo, the sheet's [08]: messages only (saved, undo and redo results, refusals), never a key
     // press; the last one fades after 3 seconds.  It stands at the bottom-left of the focused pane,
@@ -437,9 +437,9 @@ pub fn draw_notice<'a>(value: impl Into<ModelView<'a>>, frame_: &frame::t, roots
                 Some((l, _)) => l.body,
                 None => graph_body,
             };
-            fn cards(view: &scope::t, s: &fproj::Scope, out: &mut Vec<(f64, f64, f64, f64)>) {
+            fn cards(view: &scope::Pane, s: &fproj::Scope, out: &mut Vec<(f64, f64, f64, f64)>) {
                 for n in &s.nodes {
-                    out.extend(pxui_graph::scope_frame::Inspect::box_of(view, &n.path));
+                    out.extend(pxui_graph::scope_frame::inspect::box_of(view, &n.path));
                     if let Some(z) = &n.zone {
                         cards(view, &z.scope, out);
                     }
@@ -577,7 +577,7 @@ pub fn draw_inspectors<'a>(
     inspector_visible: bool,
     unchanged: &editor_document::settings::T,
     g: &layout::Geometry,
-    scope_view: &scope::t,
+    scope_view: &scope::Pane,
     selection: &selection::t,
     scope_active: bool,
     graph_shown: bool,
@@ -690,7 +690,7 @@ pub fn list_rows<'a>(value: impl Into<ModelView<'a>>, listing_: bool, list_drawn
 }
 
 /// `/ a`: the node menu of the graph the pane shows.
-pub fn node_menu_step<'a>(value: impl Into<ModelView<'a>>, workspace: &shell, frame_: &frame::t, actions: &[action], graph_shown: bool) -> (Option<node_menu::t>, Vec<change>) {
+pub fn node_menu_step<'a>(value: impl Into<ModelView<'a>>, workspace: &shell, frame_: &frame::t, actions: &[action], graph_shown: bool) -> (Option<node_menu::Menu>, Vec<change>) {
     let value = &value.into();
     if actions.contains(&action::Add_node) && graph_shown {
         let (gx, gy, gw, gh) = match graph_leaf(value, &geometry(value, workspace, frame_)) {
@@ -1314,15 +1314,15 @@ pub fn update_frame(
             let (selection, grab, handle_ops, handle_changes) = draw_handles(&*value, &workspace, selection, &selected_obj, lowered_level, scope_active, &active, &view_root, view_handles, ui);
             changes.extend(handle_ops);
             let context = match &leader {
-                router::State::Pending(_) => guide_context::t::Leader,
-                router::State::Idle if value.prompt.is_some() || menu2.is_some() || scope::editing(&scope_view2) => guide_context::t::Search,
-                router::State::Idle if listing_ => guide_context::t::List,
+                router::State::Pending(_) => guide_context::GuideContext::Leader,
+                router::State::Idle if value.prompt.is_some() || menu2.is_some() || scope::editing(&scope_view2) => guide_context::GuideContext::Search,
+                router::State::Idle if listing_ => guide_context::GuideContext::List,
                 router::State::Idle => {
                     let count = if scope_active { scope::selected(&scope_view2).len() } else { selection::selected_nodes(&selection).len() };
                     match count {
-                        0 => guide_context::t::Canvas,
-                        1 => guide_context::t::Node,
-                        _ => guide_context::t::Multi,
+                        0 => guide_context::GuideContext::Canvas,
+                        1 => guide_context::GuideContext::Node,
+                        _ => guide_context::GuideContext::Multi,
                     }
                 }
             };

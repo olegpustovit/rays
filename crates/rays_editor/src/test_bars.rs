@@ -4,15 +4,15 @@ use editor_core::panels::{self, Axis, Panel, Size};
 
 #[test]
 fn tree_text_binds_every_leaf_and_split() {
-    let tree = panels::t::Split {
+    let tree = panels::Panels::Split {
         axis: Axis::H,
         size: Size::Ratio(0.45),
-        a: Box::new(panels::t::Leaf(panels::main())),
-        b: Box::new(panels::t::Split {
+        a: Box::new(panels::Panels::Leaf(panels::main())),
+        b: Box::new(panels::Panels::Split {
             axis: Axis::V,
             size: Size::First(120),
-            a: Box::new(panels::t::Leaf(Panel::Graph)),
-            b: Box::new(panels::t::Leaf(Panel::Graph)),
+            a: Box::new(panels::Panels::Leaf(Panel::Graph)),
+            b: Box::new(panels::Panels::Leaf(Panel::Graph)),
         }),
     };
     let (text, names) = bars::tree_text("editor", "scene", &tree);

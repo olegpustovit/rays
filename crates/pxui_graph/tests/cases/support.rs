@@ -197,7 +197,7 @@ pub mod g {
     }
 
     pub fn center_of(view: &Pane, path: &[String]) -> (f64, f64, f64, f64) {
-        scope::Inspect::box_of(view, path).expect("box")
+        scope::inspect::box_of(view, path).expect("box")
     }
 
     pub fn settled(ui: &mut Ui, view: Pane) -> Pane {

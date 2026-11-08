@@ -1,5 +1,5 @@
 use crate::side_lru::{self, Item, TableKey};
-use runtime_resources::{Canvas, Image, Text};
+use runtime_resources::{canvas, Image, text};
 use scene_command::render_ir::{Command, RenderIr};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -9,8 +9,8 @@ use std::rc::Rc;
 #[derive(Clone)]
 pub enum Resource {
     Image(Image::t),
-    Text(Rc<Text::t>),
-    Canvas(Canvas::t),
+    Text(Rc<text::Text>),
+    Canvas(canvas::Canvas),
 }
 
 /// The id a command names, the resource's identity (the OCaml physical equality) and its generation.
@@ -171,17 +171,17 @@ pub fn resource_stamps(resolve: &dyn Fn(i64) -> Option<Resource>, commands: &[Co
                 }
             }
             Some(Resource::Text(text)) => {
-                if Text::destroyed(&text) {
+                if text::destroyed(&text) {
                     missing = true;
                 } else {
-                    stamps.push(ResourceStamp::TextStamp(id, Text::identity(&text), Text::generation(&text)));
+                    stamps.push(ResourceStamp::TextStamp(id, text::identity(&text), text::generation(&text)));
                 }
             }
             Some(Resource::Canvas(canvas)) => {
-                if Canvas::destroyed(&canvas) {
+                if canvas::destroyed(&canvas) {
                     missing = true;
                 } else {
-                    stamps.push(ResourceStamp::CanvasStamp(id, Canvas::identity(&canvas), Canvas::generation(&canvas)));
+                    stamps.push(ResourceStamp::CanvasStamp(id, canvas::identity(&canvas), canvas::generation(&canvas)));
                 }
             }
         }

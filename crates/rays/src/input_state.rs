@@ -55,7 +55,7 @@ fn button_rank(button: &MouseButton) -> i64 {
 }
 
 pub struct t {
-    source: ri::t,
+    source: ri::RuntimeInput,
     /// Sorted, distinct (OCaml's `Set`).
     pressed_keys: Vec<Key>,
     pressed_buttons: Vec<MouseButton>,

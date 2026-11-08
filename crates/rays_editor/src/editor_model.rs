@@ -134,7 +134,7 @@ pub struct scope_key {
 /// What a graph panel keeps of its own while another one has the focus.
 #[derive(Clone)]
 pub struct graph_pane {
-    pub view: scope::t,
+    pub view: scope::Pane,
     pub laid: Option<Rc<scope_key>>,
     pub shown: Option<String>,
     /// level and pane graph, latest first
@@ -222,7 +222,7 @@ pub struct trace {
 /// the document's layout.
 #[derive(Clone)]
 pub struct shell {
-    pub tree: panels::t,
+    pub tree: panels::Panels,
     pub hidden: Vec<Panel>,
     /// the split being dragged, its size
     pub live: Option<(layout::Path, panels::Size)>,
@@ -313,10 +313,10 @@ pub struct frame_result {
     /// the focused leaf itself, for its panel keys
     pub focus_path: Option<layout::Path>,
     pub pane_keys: Vec<(i64, (Panel, Option<layout::Path>))>,
-    pub scope_view: scope::t,
+    pub scope_view: scope::Pane,
     pub scope_changes: Vec<scope::Change>,
     pub selection: selection::t,
-    pub menu: Option<node_menu::t>,
+    pub menu: Option<node_menu::Menu>,
     /// the node menu's entry picked this frame
     pub menu_pick: Option<String>,
     pub tree: tree::Tree,
@@ -473,7 +473,7 @@ pub struct t {
     /// the SOP catalog
     pub factories: Vec<Factory>,
     /// the node menu, while it is open
-    pub menu: Option<node_menu::t>,
+    pub menu: Option<node_menu::Menu>,
     /// the iteration each zone shows: view state, not history
     pub probes: PathMap<i64>,
     /// viewport requests, outside the document and history
@@ -599,7 +599,7 @@ pub fn pane<'a>(value: impl Into<ModelView<'a>>) -> &'a graph_pane {
     value.pane
 }
 /// the workspace document's graph pane
-pub fn pane_view<'a>(value: impl Into<ModelView<'a>>) -> &'a scope::t {
+pub fn pane_view<'a>(value: impl Into<ModelView<'a>>) -> &'a scope::Pane {
     let value = &value.into();
     &pane(value).view
 }

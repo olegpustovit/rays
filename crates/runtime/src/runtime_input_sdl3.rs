@@ -160,7 +160,7 @@ pub fn in_points(unit: f64, event: SdlEvent) -> SdlEvent {
     }
 }
 
-pub fn push(value: &mut runtime_input::t, event: SdlEvent) -> Result<(), String> {
+pub fn push(value: &mut runtime_input::RuntimeInput, event: SdlEvent) -> Result<(), String> {
     let event = in_points(runtime_input::unit(value), event);
     match event {
         SdlEvent::MouseMotion { x, y, dx, dy } => {
@@ -175,14 +175,14 @@ pub fn push(value: &mut runtime_input::t, event: SdlEvent) -> Result<(), String>
 }
 
 // One bad event never drops the rest of the batch; the first error is returned.
-pub fn push_all(value: &mut runtime_input::t, events: Vec<SdlEvent>) -> Result<(), String> {
+pub fn push_all(value: &mut runtime_input::RuntimeInput, events: Vec<SdlEvent>) -> Result<(), String> {
     events.into_iter().fold(Ok(()), |first, event| match (push(value, event), first) {
         (Err(error), Ok(())) => Err(error),
         (_, first) => first,
     })
 }
 
-pub fn pump(value: &mut runtime_input::t) -> Result<(), String> {
+pub fn pump(value: &mut runtime_input::RuntimeInput) -> Result<(), String> {
     match sdl3::event::poll_coalesced() {
         Err(error) => Err(error.to_string()),
         Ok(events) => push_all(value, events),

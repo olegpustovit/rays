@@ -77,7 +77,7 @@ pub fn preferences_file(platform: Platform, given: Option<&str>) -> String {
     }
 }
 
-pub fn read_preferences(filename: &str) -> Result<store::settings::t, String> {
+pub fn read_preferences(filename: &str) -> Result<store::settings::Settings, String> {
     store::settings::load("rays-editor", filename)
 }
 
@@ -283,6 +283,6 @@ pub fn create(opts: create_opts, workspace: &workspace_doc::T, prepare: cook::Pr
     Ok(value)
 }
 
-fn layout_default() -> panels::t {
+fn layout_default() -> panels::Panels {
     layout::default()
 }

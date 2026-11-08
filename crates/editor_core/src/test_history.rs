@@ -28,7 +28,7 @@ enum Act {
     Add,
 }
 
-type Cmd = command::t;
+type Cmd = command::Command;
 
 const ACTS: [Act; 9] = [Act::Toggle, Act::Layout, Act::Undo, Act::Redo, Act::Delete, Act::Frame, Act::Palette, Act::AddLight, Act::Add];
 
@@ -37,7 +37,7 @@ fn unact(code: usize) -> Act {
     ACTS[code]
 }
 
-fn make(trigger: Option<Trigger>, scope: Option<Panel>, guide: Vec<crate::guide_context::t>, id: &str, label: &str, action: Act) -> Cmd {
+fn make(trigger: Option<Trigger>, scope: Option<Panel>, guide: Vec<crate::guide_context::GuideContext>, id: &str, label: &str, action: Act) -> Cmd {
     command::make(trigger, scope, guide, id, label, action as usize)
 }
 
@@ -73,16 +73,16 @@ fn bindings() -> Vec<Cmd> {
     ]
 }
 
-fn frame_with(events: Vec<Event>) -> frame::t {
+fn frame_with(events: Vec<Event>) -> frame::Frame {
     let mut input = input::at_time(0.);
     input.frame = 0;
     input.tick = 0;
     input.size = (10, 10);
     input.events = events;
-    frame::t { input, pixel_scale: (1., 1.), fps: 0., mouse_delta: (0., 0.) }
+    frame::Frame { input, pixel_scale: (1., 1.), fps: 0., mouse_delta: (0., 0.) }
 }
 
-fn with_keys(mut frame: frame::t, keys: Vec<Key>) -> frame::t {
+fn with_keys(mut frame: frame::Frame, keys: Vec<Key>) -> frame::Frame {
     frame.input.keys = keys;
     frame
 }
@@ -101,7 +101,7 @@ fn route(
     commands: &[Cmd],
     focus: Panel,
     text_focus: bool,
-    frame: frame::t,
+    frame: frame::Frame,
     state: State,
 ) -> (State, Vec<Act>, Vec<Event>) {
     let (state, matched, frame) =

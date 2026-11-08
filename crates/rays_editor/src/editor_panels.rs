@@ -485,7 +485,7 @@ pub fn layout_intents<'a>(value: impl Into<ModelView<'a>>, workspace: &shell, in
     };
     let beside = |path: &layout::Path| -> &'static str {
         match panels::at_ref(path, &base) {
-            Some(panels::t::Leaf(panel)) => panel_kinds::beside(panel_kind(panel)),
+            Some(panels::Panels::Leaf(panel)) => panel_kinds::beside(panel_kind(panel)),
             _ => panel_kinds::beside(""),
         }
     };

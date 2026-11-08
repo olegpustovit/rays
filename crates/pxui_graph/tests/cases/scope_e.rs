@@ -84,10 +84,10 @@ fn run_readable() {
     opts.at = at_of(vec![("a", (0.0, 0.0)), ("b", (288.0, 0.0)), ("c", (576.0, 0.0)), ("d", (288.0, 240.0)), ("@result", (4000.0, 0.0)), ("e", (864.0, 0.0))]);
     let (view, _) = scope_view(opts, &ws, "g");
     let (view, _) = scope_step(&mut ui, view, &frame0());
-    check(scope::Inspect::chain(&view).is_none(), "a chain was lit with nothing selected");
-    check(scope::Inspect::tagged_wires(&view) == 0, "a short graph drew a tag");
+    check(scope::inspect::chain(&view).is_none(), "a chain was lit with nothing selected");
+    check(scope::inspect::tagged_wires(&view) == 0, "a short graph drew a tag");
     let view = scope::select(vec![path(&["g", "b"])], view);
-    match scope::Inspect::chain(&view) {
+    match scope::inspect::chain(&view) {
         Some((up, down)) => {
             let has = |l: &Vec<Vec<String>>, n: &str| l.contains(&path(&["g", n]));
             check(has(&up, "a") && has(&up, "b") && !has(&up, "c") && !has(&up, "d"), "upstream of b is not a and b");
@@ -100,11 +100,11 @@ fn run_readable() {
     opts.at = at_of(vec![("e", (4000.0, 0.0)), ("a", (0.0, 0.0)), ("b", (288.0, 0.0)), ("c", (576.0, 0.0)), ("d", (288.0, 240.0))]);
     let (far, _) = scope_view(opts, &ws, "g");
     let (far, _) = scope_step(&mut ui, far, &frame0());
-    check(scope::Inspect::tagged_wires(&far) >= 1, "a wire four thousand points long was not a tag");
+    check(scope::inspect::tagged_wires(&far) >= 1, "a wire four thousand points long was not a tag");
     let lit = scope::select(vec![path(&["g", "a"])], far.clone());
-    check(scope::Inspect::tagged_wires(&lit) == 0, "selecting the source did not show the real wire");
+    check(scope::inspect::tagged_wires(&lit) == 0, "selecting the source did not show the real wire");
     let (off, _) = scope::run_command(far, scope::Command::Toggle_tags);
-    check(scope::Inspect::tagged_wires(&off) == 0, "the tags toggle left a tag");
+    check(scope::inspect::tagged_wires(&off) == 0, "the tags toggle left a tag");
     // Unfold all: one Unfold per call written in a row of the card
     let ws = checked("(workspace u (graph g :context sop (let* [a (sop/merge (sop/box) (sop/box))] a)))");
     let (view, _) = scope_view(ScopeOpts::default(), &ws, "g");
@@ -147,7 +147,7 @@ fn bench_scope_big() {
     time("2001 nodes: Point_all", if verbose { 5 } else { 1 }, &mut || {
         let _ = scope::run_command(pv.clone(), scope::Command::Point_all);
     });
-    check(scope::Inspect::wire_count(&view) > 0, "the big scope has no wires");
+    check(scope::inspect::wire_count(&view) > 0, "the big scope has no wires");
 }
 
 pub const CASES: &[(&str, fn())] = &[("run_sticky", run_sticky), ("run_readable", run_readable), ("bench_scope_big", bench_scope_big)];

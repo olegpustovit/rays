@@ -3,7 +3,7 @@
 use input::{Event, Key, MouseButton};
 use pxui::ui::*;
 use pxui_shell::chrome::{self, Intent, Side};
-use pxui_shell::layout::{self as L, Axis, Panel, Size as PSize, t};
+use pxui_shell::layout::{self as L, Axis, Panel, Size as PSize, Panels};
 use pxui_shell::prompt::{self, Macro, MacroResult};
 use pxui_shell::status_bar::{self, TipKind};
 use pxui_shell::timeline_bar;
@@ -120,7 +120,7 @@ pub fn window_shell_tools_start() {
     ui.destroy();
 }
 
-fn chrome_frame(ui: &mut Ui, tree: &t, mouse: (f64, f64), events: Vec<Event>) -> Vec<Intent> {
+fn chrome_frame(ui: &mut Ui, tree: &Panels, mouse: (f64, f64), events: Vec<Event>) -> Vec<Intent> {
     let f = fr((1000, 600), mouse, events);
     let mut out: Vec<Intent> = Vec::new();
     ui.frame(&f, &mut |ui| {
@@ -149,7 +149,7 @@ pub fn window_shell_splitter_drag_and_menus() {
     let released = chrome_frame(&mut ui, &default, (300.0, 100.0), vec![left_release((300.0, 100.0))]);
     assert!(released.contains(&Intent::Settled), "a drag did not settle");
     // the gutter of a fixed split reports whole points of its fixed side
-    let sized = t::Split { axis: Axis::H, size: PSize::Second(320), a: Box::new(t::Leaf(Panel::Graph)), b: Box::new(t::Leaf(Panel::Inspector)) };
+    let sized = Panels::Split { axis: Axis::H, size: PSize::Second(320), a: Box::new(Panels::Leaf(Panel::Graph)), b: Box::new(Panels::Leaf(Panel::Inspector)) };
     chrome_frame(&mut ui, &sized, (679.0, 100.0), vec![moved((679.0, 100.0))]);
     chrome_frame(&mut ui, &sized, (679.0, 100.0), vec![left_press((679.0, 100.0))]);
     let fixed = chrome_frame(&mut ui, &sized, (599.4, 100.0), vec![moved((599.4, 100.0))]);
@@ -201,7 +201,7 @@ pub fn window_shell_window_past_the_edge() {
     let mut ui = new_ui();
     let past = editor_core::panels::State { collapsed: false, window: Some((900, 50, 300, 200)) };
     let state = move |path: &[usize]| -> editor_core::panels::State { if path.is_empty() { past } else { editor_core::panels::default_state() } };
-    let tree = t::Leaf(Panel::Graph);
+    let tree = Panels::Leaf(Panel::Graph);
     let windowed = |ui: &mut Ui, mouse: (f64, f64), events: Vec<Event>| -> Vec<Intent> {
         let f = fr((1000, 600), mouse, events);
         let mut out = Vec::new();
@@ -228,7 +228,7 @@ pub fn window_shell_window_past_the_edge() {
 pub fn window_shell_breadcrumb_clicks() {
     // the parts of a docked header's breadcrumb before its last are buttons
     let mut ui = new_ui();
-    let tree = t::Leaf(Panel::Graph);
+    let tree = Panels::Leaf(Panel::Graph);
     let title = |_: &L::Leaf| "Graph\tfirst / second / third / sop".to_string();
     let crumbed = |ui: &mut Ui, mouse: (f64, f64), events: Vec<Event>| -> Vec<Intent> {
         let f = fr((1000, 600), mouse, events);
@@ -282,7 +282,7 @@ pub fn window_shell_drop_targets() {
 }
 
 pub fn window_shell_status_and_guide_draw() {
-    let bindings: Vec<editor_core::command::t> = vec![
+    let bindings: Vec<editor_core::command::Command> = vec![
         editor_core::command::make(Some(editor_core::keymap::Trigger::Leader("s".into())), None, vec![], "save", "Save", 0),
         editor_core::command::make(Some(editor_core::keymap::Trigger::Leader("v".into())), Some(editor_core::panels::Panel::View(String::new())), vec![], "view", "View", 0),
     ];
@@ -409,7 +409,7 @@ pub fn window_shell_status_rule_drags() {
                 fps: Some(60),
                 ..status_bar::Opts::default()
             };
-            status_bar::guide(ui, (0, 272, 1000, 28), &o, editor_core::guide_context::t::Canvas);
+            status_bar::guide(ui, (0, 272, 1000, 28), &o, editor_core::guide_context::GuideContext::Canvas);
         });
     };
     let rule_x = |ui: &mut Ui| -> i64 {

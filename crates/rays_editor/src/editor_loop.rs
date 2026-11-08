@@ -899,7 +899,7 @@ pub fn crash_dump(value: &t, directory: &str) -> Result<(), String> {
         editor_panes::route(core),
         text_pane::summary(&core.text),
         core.map_view,
-        pxui_graph::scope_frame::Inspect::grabbed(m::pane_view(core)),
+        pxui_graph::scope_frame::inspect::grabbed(m::pane_view(core)),
         core.guide,
         core.hud.as_ref().map(|(h, _)| h.clone()).unwrap_or_else(|| "-".to_string()),
         selected,

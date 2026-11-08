@@ -132,20 +132,20 @@ impl Names {
         name
     }
 
-    fn go(&mut self, scene: &str, path: &[usize], tree: &panels::t) -> String {
+    fn go(&mut self, scene: &str, path: &[usize], tree: &panels::Panels) -> String {
         let name = self.node(scene, path, tree);
         self.names.push((path.to_vec(), name.clone()));
         name
     }
 
-    fn node(&mut self, scene: &str, path: &[usize], tree: &panels::t) -> String {
+    fn node(&mut self, scene: &str, path: &[usize], tree: &panels::Panels) -> String {
         let child = |i: usize| {
             let mut p = path.to_vec();
             p.push(i);
             p
         };
         match tree {
-            panels::t::Leaf(p) => {
+            panels::Panels::Leaf(p) => {
                 let (base, form) = match p {
                     Panel::Canvas(key) => ("canvas", format!("(ui/canvas (ref {key}))")),
                     Panel::View(_) => ("preview", format!("(ui/viewport (ref {scene}))")),
@@ -159,7 +159,7 @@ impl Names {
                 };
                 self.bind(base, form)
             }
-            panels::t::Split { axis, size, a, b } => {
+            panels::Panels::Split { axis, size, a, b } => {
                 let a = self.go(scene, &child(0), a);
                 let b = self.go(scene, &child(1), b);
                 let axis = if *axis == Axis::H { "horizontal" } else { "vertical" };
@@ -172,14 +172,14 @@ impl Names {
                 };
                 self.bind("split", form)
             }
-            panels::t::Tile(cells) => {
+            panels::Panels::Tile(cells) => {
                 let mut names = Vec::new();
                 for (i, c) in cells.iter().enumerate() {
                     names.push(self.go(scene, &child(i), c));
                 }
                 self.bind("tile", format!("(ui/tile {})", names.join(" ")))
             }
-            panels::t::Float(t) => {
+            panels::Panels::Float(t) => {
                 let inner = self.go(scene, &child(0), t);
                 self.bind("floating", format!("(ui/floating {inner})"))
             }
@@ -191,7 +191,7 @@ impl Names {
 /// binding; names are kind_n, not the study's prose names (ponytail). The editor graph `name` (a
 /// document without one is given its host layout before its first panel edit): every leaf and split
 /// is a binding, and the function names the binding of a leaf by its path.
-pub fn tree_text(name: &str, scene: &str, tree: &panels::t) -> (String, Box<dyn Fn(&Path) -> Option<String>>) {
+pub fn tree_text(name: &str, scene: &str, tree: &panels::Panels) -> (String, Box<dyn Fn(&Path) -> Option<String>>) {
     let mut st = Names { used: HashMap::new(), bindings: Vec::new(), names: Vec::new() };
     let root = st.go(scene, &[], tree);
     let lines: Vec<String> = st.bindings.iter().map(|(n, f)| format!("{n} {f}")).collect();

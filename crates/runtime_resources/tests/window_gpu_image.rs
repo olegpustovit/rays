@@ -5,7 +5,7 @@ mod common;
 use ogpu_core::backend::{self as b, Driver, DriverDevice, DriverResource, Texture};
 use ogpu_core::error::{self, ErrorKind};
 use ogpu_core::types::{TextureDescriptor, TextureFormat, TextureUsage};
-use runtime_resources::{Canvas, Image as I, error as Error};
+use runtime_resources::{canvas, Image as I, error as Error};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -181,11 +181,11 @@ fn gpu_image() {
     *read_error.borrow_mut() = Some(backend_error.clone());
     let failed_image = I::of_gpu(1024, 1024, from(&large_source)).unwrap();
     assert_eq!(I::pixels(&failed_image).err(), Some(backend_error.clone()), "Image.pixels changed the backend readback error");
-    let failed_canvas = Canvas::create(1024, 1024).unwrap();
-    Canvas::publish_gpu(&failed_canvas, &large).unwrap();
-    assert_eq!(Canvas::snapshot(&failed_canvas).err(), Some(backend_error), "Canvas.snapshot changed the backend readback error");
+    let failed_canvas = canvas::create(1024, 1024).unwrap();
+    canvas::publish_gpu(&failed_canvas, &large).unwrap();
+    assert_eq!(canvas::snapshot(&failed_canvas).err(), Some(backend_error), "Canvas.snapshot changed the backend readback error");
     *read_error.borrow_mut() = None;
-    Canvas::destroy(&failed_canvas).unwrap();
+    canvas::destroy(&failed_canvas).unwrap();
     I::destroy(&failed_image).unwrap();
     let destroyed = I::create(1, 1, &[0x5a; 4]).unwrap();
     let (_, _, _, saved, mut lease) = I::borrow_snapshot(&destroyed).unwrap();

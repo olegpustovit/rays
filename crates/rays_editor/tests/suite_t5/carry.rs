@@ -2,7 +2,7 @@
 //! graph and a camera carried by pointer and by keys onto nodes, panels and surfaces.
 use super::t5c::*;
 use editor_core::keymap::Trigger;
-use editor_core::panels::{Axis, Panel, Size, t as Tree};
+use editor_core::panels::{Axis, Panel, Size, Panels as Tree};
 use input::{Event, Key, MouseButton};
 use pxui_shell::layout as L;
 use rays_editor::navigator as N;

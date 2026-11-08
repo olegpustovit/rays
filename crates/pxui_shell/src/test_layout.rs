@@ -1,6 +1,6 @@
 //! Port of the pure layout and header-slot sections of lib/pxui_shell/test_shell.ml.
 use crate::chrome;
-use crate::layout::{self as L, Axis, Panel, Size, t};
+use crate::layout::{self as L, Axis, Panel, Size, Panels};
 use editor_core::panels;
 use rays::frame;
 
@@ -10,16 +10,16 @@ pub fn frame_of(size: (i64, i64)) -> frame::t {
     frame::t { input, pixel_scale: (1.0, 1.0), fps: 0.0, mouse_delta: (0.0, 0.0) }
 }
 
-fn leaf(p: Panel) -> t {
-    t::Leaf(p)
+fn leaf(p: Panel) -> Panels {
+    Panels::Leaf(p)
 }
 
-fn split(axis: Axis, size: Size, a: t, b: t) -> t {
-    t::Split { axis, size, a: Box::new(a), b: Box::new(b) }
+fn split(axis: Axis, size: Size, a: Panels, b: Panels) -> Panels {
+    Panels::Split { axis, size, a: Box::new(a), b: Box::new(b) }
 }
 
-fn views(n: usize) -> t {
-    t::Tile((0..n).map(|i| leaf(Panel::View(i.to_string()))).collect())
+fn views(n: usize) -> Panels {
+    Panels::Tile((0..n).map(|i| leaf(Panel::View(i.to_string()))).collect())
 }
 
 #[test]
@@ -54,7 +54,7 @@ fn default_layout_goldens() {
 
 #[test]
 fn every_tree_covers_the_area_once() {
-    let trees: Vec<(&str, t)> = vec![
+    let trees: Vec<(&str, Panels)> = vec![
         ("default", L::default()),
         (
             "sheet",
@@ -135,7 +135,7 @@ fn every_tree_covers_the_area_once() {
 #[test]
 fn floats_overlay_their_parent_and_come_last() {
     let wide = frame_of((1000, 300));
-    let floated = split(Axis::H, Size::Ratio(0.5), leaf(Panel::Graph), t::Float(Box::new(leaf(Panel::Inspector))));
+    let floated = split(Axis::H, Size::Ratio(0.5), leaf(Panel::Graph), Panels::Float(Box::new(leaf(Panel::Inspector))));
     let g = L::geometry(None, None, &floated, &wide);
     assert_eq!(g.leaves.iter().map(|l| l.floating).collect::<Vec<_>>(), vec![false, true], "authored floats lost their painting precedence");
     assert_eq!(g.leaves.iter().map(|l| l.panel.clone()).collect::<Vec<_>>(), vec![Panel::Graph, Panel::Inspector]);

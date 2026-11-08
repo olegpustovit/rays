@@ -22,9 +22,8 @@ struct pair {
     py: f64,
 }
 
-#[allow(non_camel_case_types)]
 #[derive(Debug)]
-pub struct t {
+pub struct RuntimeInput {
     max_events: i64,
     events: VecDeque<Event>,
     pointer: pair,
@@ -37,13 +36,13 @@ pub struct t {
     unit: f64,
 }
 
-pub fn create(max_events: i64, logical_width: i64, logical_height: i64) -> Result<t, String> {
+pub fn create(max_events: i64, logical_width: i64, logical_height: i64) -> Result<RuntimeInput, String> {
     if max_events <= 0 {
         Err("max_events must be positive".to_string())
     } else if logical_width <= 0 || logical_height <= 0 {
         Err("logical dimensions must be positive".to_string())
     } else {
-        Ok(t {
+        Ok(RuntimeInput {
             max_events,
             events: VecDeque::new(),
             pointer: pair { px: 0., py: 0. },
@@ -55,7 +54,7 @@ pub fn create(max_events: i64, logical_width: i64, logical_height: i64) -> Resul
     }
 }
 
-fn apply(value: &mut t, event: &Event) {
+fn apply(value: &mut RuntimeInput, event: &Event) {
     match *event {
         Event::Pointer_moved((x, y)) => {
             if !value.relative {
@@ -91,7 +90,7 @@ fn apply(value: &mut t, event: &Event) {
     }
 }
 
-pub fn push(value: &mut t, event: event) -> Result<(), String> {
+pub fn push(value: &mut RuntimeInput, event: event) -> Result<(), String> {
     let error = match &event {
         Event::File_dropped(path) if path.is_empty() || path.contains('\0') => {
             Some("file-drop path is malformed")
@@ -122,41 +121,41 @@ pub fn push(value: &mut t, event: event) -> Result<(), String> {
     Ok(())
 }
 
-pub fn drain(value: &mut t) -> Vec<event> {
+pub fn drain(value: &mut RuntimeInput) -> Vec<event> {
     value.events.drain(..).collect()
 }
 
-pub fn set_relative(value: &mut t, relative: bool) {
+pub fn set_relative(value: &mut RuntimeInput, relative: bool) {
     value.relative = relative;
 }
 
-pub fn relative(value: &t) -> bool {
+pub fn relative(value: &RuntimeInput) -> bool {
     value.relative
 }
 
-pub fn set_unit(value: &mut t, unit: f64) {
+pub fn set_unit(value: &mut RuntimeInput, unit: f64) {
     if unit.is_finite() && unit > 0. {
         value.unit = unit;
     }
 }
 
-pub fn unit(value: &t) -> f64 {
+pub fn unit(value: &RuntimeInput) -> f64 {
     value.unit
 }
 
-pub fn add_motion(value: &mut t, dx: f64, dy: f64) {
+pub fn add_motion(value: &mut RuntimeInput, dx: f64, dy: f64) {
     if value.relative {
         value.mouse_delta.px += dx;
         value.mouse_delta.py += dy;
     }
 }
 
-pub fn begin_frame(value: &mut t) {
+pub fn begin_frame(value: &mut RuntimeInput) {
     value.mouse_delta.px = 0.;
     value.mouse_delta.py = 0.;
 }
 
-pub fn set_extent(_value: &t, logical_width: i64, logical_height: i64) -> Result<(), String> {
+pub fn set_extent(_value: &RuntimeInput, logical_width: i64, logical_height: i64) -> Result<(), String> {
     if logical_width <= 0 || logical_height <= 0 {
         Err("logical dimensions must be positive".to_string())
     } else {
@@ -164,7 +163,7 @@ pub fn set_extent(_value: &t, logical_width: i64, logical_height: i64) -> Result
     }
 }
 
-pub fn snapshot(value: &t) -> snapshot {
+pub fn snapshot(value: &RuntimeInput) -> snapshot {
     snapshot {
         pointer: (value.pointer.px, value.pointer.py),
         mouse_delta: (value.mouse_delta.px, value.mouse_delta.py),

@@ -844,7 +844,7 @@ pub fn draw_graph_header<'a>(
 }
 
 /// What the graph pane gave back: its body bounds, the pane, its changes, the menu and the pick.
-pub type Graph_pane_result = (layout::Bounds, scope::t, Vec<scope::Change>, Option<node_menu::t>, Option<String>);
+pub type Graph_pane_result = (layout::Bounds, scope::Pane, Vec<scope::Change>, Option<node_menu::Menu>, Option<String>);
 
 /// Draw the graph pane and its node menu. `open_menu` opens the menu at a point, for the pane's view.
 #[allow(clippy::too_many_arguments)]
@@ -853,7 +853,7 @@ pub fn draw_graph_pane<'a>(
     frame_: &frame::t,
     value: impl Into<ModelView<'a>>,
     shortcut_frame: &frame::t,
-    scope_view: scope::t,
+    scope_view: scope::Pane,
     scope_active: bool,
     guide: bool,
     carry_lit: Vec<(Vec<String>, String)>,
@@ -861,8 +861,8 @@ pub fn draw_graph_pane<'a>(
     graph_root: &UiBox,
     graph_host: &Option<Leaf>,
     workspace: &shell,
-    menu: Option<node_menu::t>,
-    open_menu: &dyn Fn(Option<&scope::t>, ModelView<'a>, (i64, i64)) -> Option<node_menu::t>,
+    menu: Option<node_menu::Menu>,
+    open_menu: &dyn Fn(Option<&scope::Pane>, ModelView<'a>, (i64, i64)) -> Option<node_menu::Menu>,
 ) -> Graph_pane_result {
     let value = &value.into();
     let graph_body = match graph_host {

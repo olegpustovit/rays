@@ -59,7 +59,7 @@ pub fn completion_names(value: &t) -> lisp_text::Names {
 
 /// The tree drawn now: the editor graph's (the host's when the document has none, or after
 /// "Restore layout"), with the split being dragged at its live ratio.
-pub fn shell_tree<'a>(value: &'a t, shell: &'a shell) -> Cow<'a, panels::t> {
+pub fn shell_tree<'a>(value: &'a t, shell: &'a shell) -> Cow<'a, panels::Panels> {
     let base = match &value.doc.shell {
         Some(s) if !shell.restored => &s.tree,
         _ => &shell.tree,
@@ -89,7 +89,7 @@ fn panel_key_ref<'a>(doc: &'a Document, path: &'a [usize]) -> (&'a str, KeyTail<
     }
     // [name (ui/floating (ui/inspector))]: the window is the float's binding
     if let Some((0, up)) = path.split_last().map(|(last, up)| (*last, up)) {
-        let is_float = doc.shell.as_ref().and_then(|s| panels::at_ref(up, &s.tree)).is_some_and(|t| matches!(t, panels::t::Float(_)));
+        let is_float = doc.shell.as_ref().and_then(|s| panels::at_ref(up, &s.tree)).is_some_and(|t| matches!(t, panels::Panels::Float(_)));
         if is_float {
             if let Some(Origin::Bound(name)) = origin(up) {
                 return (graph, KeyTail::Name(name));
@@ -239,7 +239,7 @@ pub fn graph_path<'a>(value: impl Into<ModelView<'a>>) -> Option<layout::Path> {
     if value.key == panel_map::key_ref(&value.model.panes) {
         if let (Some(key), Some(path)) = (value.key, panel_map::leaf(&value.model.panes)) {
             let tree = shell_tree(&value, &value.workspace);
-            if matches!(panels::at_ref(&path, &tree), Some(panels::t::Leaf(Panel::Graph))) && key_is(key, &panel_key_ref(&value.doc, &path)) {
+            if matches!(panels::at_ref(&path, &tree), Some(panels::Panels::Leaf(Panel::Graph))) && key_is(key, &panel_key_ref(&value.doc, &path)) {
                 return Some(path);
             }
         }

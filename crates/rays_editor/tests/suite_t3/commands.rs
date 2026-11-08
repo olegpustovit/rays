@@ -1,7 +1,7 @@
 //! Port of lib/rays_editor/test/test_editor_commands.ml.
 use super::t3c::*;
 use editor_core::command;
-use editor_core::guide_context::t as Ctx;
+use editor_core::guide_context::GuideContext as Ctx;
 use editor_core::keymap::{self, Trigger};
 use editor_core::panels::Panel;
 use editor_core::router;
@@ -301,7 +301,7 @@ pub fn keys_and_guide() {
         "shared key labels lost a modifier or alias"
     );
     let bindings = scope::bindings();
-    let cmds: Vec<command::t> = bindings.iter().map(|(c, _)| c.clone()).collect();
+    let cmds: Vec<command::Command> = bindings.iter().map(|(c, _)| c.clone()).collect();
     let ids = |ctx: Ctx| -> Vec<String> { command::for_guide(&cmds, &Panel::Graph, ctx).into_iter().map(|c| c.id).collect() };
     let mem = |v: &Vec<String>, s: &str| v.iter().any(|x| x == s);
     let (canvas, node, multi) = (ids(Ctx::Canvas), ids(Ctx::Node), ids(Ctx::Multi));
@@ -363,8 +363,8 @@ pub fn keys_and_guide() {
             && host_ids(&l::scope(&Panel::Outline), Ctx::Canvas) != host_ids(&Panel::Graph, Ctx::Canvas),
         "a lisp or second viewport panel routed to the wrong scope"
     );
-    let table: Vec<command::t> = bindings.iter().map(|(c, _)| command::t { scope: Some(Panel::Graph), ..c.clone() }).collect();
-    let refs: Vec<&command::t> = table.iter().collect();
+    let table: Vec<command::Command> = bindings.iter().map(|(c, _)| command::Command { scope: Some(Panel::Graph), ..c.clone() }).collect();
+    let refs: Vec<&command::Command> = table.iter().collect();
     use pxui_graph::scope_state::{Command as SC, Direction};
     let cases: Vec<(Key, Vec<Key>, SC)> = vec![
         (Key::ArrowLeft, vec![], SC::Walk(Direction::Left)),

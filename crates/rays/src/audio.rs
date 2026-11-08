@@ -1,8 +1,8 @@
 //! SDL3_mixer-backed audio: a default playback device and decoded samples.
-use runtime_resources::Audio as Resource;
+use runtime_resources::audio as Resource;
 
 pub struct t {
-    audio: Resource::t,
+    audio: Resource::Audio,
 }
 
 fn message(operation: &str, error: &runtime_resources::error) -> String {

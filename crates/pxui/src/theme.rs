@@ -14,7 +14,6 @@ pub struct Theme {
     pub ink_ground: Option<Color>,
 }
 
-pub type t = Theme;
 
 fn hex(value: &str) -> Color {
     color::hex_exn(value).expect("Theme: bad colour constant")

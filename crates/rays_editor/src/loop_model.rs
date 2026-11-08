@@ -55,7 +55,7 @@ use crate::timeline;
 use crate::viewport as V;
 use crate::world_map::world_drag;
 
-pub type layout = pxui_shell::layout::t;
+pub type layout = pxui_shell::layout::Panels;
 
 /// How the editor draws a prepared object (the sketch's `draw`).
 pub type Draw_fn = Rc<dyn Fn(&node::T, &cook::prepared) -> Result<d3::t, ConversionError>>;
@@ -362,7 +362,7 @@ pub fn set_probe(value: t, zone: &[String], index: i64) -> t {
 }
 
 pub fn node_box(value: &t, path: &[String]) -> Option<(i64, i64, i64, i64)> {
-    pxui_graph::scope_frame::Inspect::box_of(m::pane_view(&value.core), path).map(|(x, y, w, h)| (x as i64, y as i64, w as i64, h as i64))
+    pxui_graph::scope_frame::inspect::box_of(m::pane_view(&value.core), path).map(|(x, y, w, h)| (x as i64, y as i64, w as i64, h as i64))
 }
 
 pub fn edit(mut value: t, op: &fe::Op) -> Result<t, String> {

@@ -6,7 +6,7 @@ use crate::renderer_lowering::default_state;
 use crate::scene_execution::{empty_bytes, GeometryDraw, Mesh, MeshKey, PipelineFamily, SampledDraw};
 use ogpu_core::pipeline::Blend;
 use ogpu_core::render_pass::Primitive;
-use runtime::{Change_flag, frame_facts};
+use runtime::{change_flag, frame_facts};
 use std::rc::Rc;
 
 fn facts(drawable_width: i64, drawable_height: i64, scale_x: f64, scale_y: f64) -> frame_facts {
@@ -66,16 +66,16 @@ fn renderer_scaling() {
     assert!(bypass.iter().zip(many.iter()).all(|(a, b)| Rc::ptr_eq(a, b)), "1x facts did not bypass the cache");
     // A window is not asked for its size every frame: SDL announces a change, and one announcement
     // costs exactly one query however many arrive.
-    let mut flag = Change_flag::create();
+    let mut flag = change_flag::create();
     let mut queries = 0;
     for _ in 0..1000 {
-        assert!(!Change_flag::refresh(&mut flag, &mut || queries += 1), "a frame with no size event queried the window");
+        assert!(!change_flag::refresh(&mut flag, &mut || queries += 1), "a frame with no size event queried the window");
     }
     assert_eq!(queries, 0, "quiet frames queried the window");
-    Change_flag::announce(&mut flag);
-    Change_flag::announce(&mut flag);
-    assert!(Change_flag::refresh(&mut flag, &mut || queries += 1) && queries == 1, "an announced change did not query the window once");
-    assert!(!Change_flag::refresh(&mut flag, &mut || queries += 1), "one announcement queried the window twice");
-    Change_flag::announce(&mut flag);
-    assert!(Change_flag::refresh(&mut flag, &mut || queries += 1) && queries == 2, "a later announcement was lost");
+    change_flag::announce(&mut flag);
+    change_flag::announce(&mut flag);
+    assert!(change_flag::refresh(&mut flag, &mut || queries += 1) && queries == 1, "an announced change did not query the window once");
+    assert!(!change_flag::refresh(&mut flag, &mut || queries += 1), "one announcement queried the window twice");
+    change_flag::announce(&mut flag);
+    assert!(change_flag::refresh(&mut flag, &mut || queries += 1) && queries == 2, "a later announcement was lost");
 }

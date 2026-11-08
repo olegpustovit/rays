@@ -2,7 +2,7 @@
 use crate::scope_state::{self as st, Change, Command, Direction, Drag, Editing, Fr, HintTarget, Hinting, Pane, PathSet};
 use crate::scope_wires::{self as w, fallback, line_of_row, root_name, rows_top};
 use editor_core::editor_core::command;
-use editor_core::editor_core::guide_context::t as Ctx;
+use editor_core::editor_core::guide_context::GuideContext as Ctx;
 use editor_core::editor_core::keymap::Trigger;
 use flow_check::workspace::Path;
 use flow_graph::edit_tree::ArgKey;
@@ -758,7 +758,7 @@ pub fn run_command(t: Pane, command: Command) -> (Pane, Vec<Change>) {
 }
 
 /// A binding and the scope command it runs (`command::t.action` is the host's code, unused here).
-pub type Cmd = (command::t, Command);
+pub type Cmd = (command::Command, Command);
 
 fn make(guide: &[Ctx], id: &str, label: &str, action: Command, key: Key, modifiers: &[Key]) -> Cmd {
     (command::make(Some(Trigger::Chord(key, modifiers.to_vec())), None, guide.to_vec(), &format!("scope.{}", id), label, 0), action)

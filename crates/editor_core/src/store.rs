@@ -116,7 +116,7 @@ pub mod settings {
         Pair(f64, f64),
     }
 
-    pub type t = Vec<(String, Value)>;
+    pub type Settings = Vec<(String, Value)>;
 
     fn encode(value: &Value) -> Syntax {
         match value {
@@ -233,7 +233,7 @@ pub mod settings {
         write_text(filename, &print(&form)?)
     }
 
-    pub fn load(sketch: &str, filename: &str) -> Result<t, String> {
+    pub fn load(sketch: &str, filename: &str) -> Result<Settings, String> {
         let text = read_text(filename)?;
         let forms = flow_syntax::syntax::parse(&text).map_err(|d| rays_diagnostic::to_string(&d))?;
         let form = match forms.as_slice() {
@@ -244,7 +244,7 @@ pub mod settings {
             Some((head, rest)) if matches!(form.arena().row(*head).node, Node::Sym(s) if form.name(s) == "settings") => rest,
             _ => return Err("a settings file is one (settings ...) form".into()),
         };
-        let mut acc: t = Vec::new();
+        let mut acc: Settings = Vec::new();
         let mut rest = items;
         loop {
             match rest {
@@ -268,25 +268,25 @@ pub mod settings {
     }
 
     /// The first entry named `name` (OCaml's `List.assoc_opt`), when it has the right kind.
-    fn first_named(settings: &t, name: &str) -> Option<Value> {
+    fn first_named(settings: &Settings, name: &str) -> Option<Value> {
         settings.iter().find(|(key, _)| key == name).map(|(_, value)| value.clone())
     }
 
-    pub fn bool(settings: &t, name: &str) -> Option<bool> {
+    pub fn bool(settings: &Settings, name: &str) -> Option<bool> {
         match first_named(settings, name)? {
             Value::Bool(v) => Some(v),
             _ => None,
         }
     }
 
-    pub fn float(settings: &t, name: &str) -> Option<f64> {
+    pub fn float(settings: &Settings, name: &str) -> Option<f64> {
         match first_named(settings, name)? {
             Value::Float(v) => Some(v),
             _ => None,
         }
     }
 
-    pub fn int(settings: &t, name: &str) -> Option<i64> {
+    pub fn int(settings: &Settings, name: &str) -> Option<i64> {
         match first_named(settings, name)? {
             Value::Int(v) => Some(v),
             _ => None,

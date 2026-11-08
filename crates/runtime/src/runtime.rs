@@ -29,29 +29,27 @@ pub struct presentation_facts {
 /// SDL announces a change of size or density with an event instead of making every frame ask.
 /// The announcement is one bit: set by the event, taken by the next frame, which re-reads the
 /// window only if it was set.
-#[allow(non_snake_case)]
-pub mod Change_flag {
-    #[allow(non_camel_case_types)]
+pub mod change_flag {
     #[derive(Debug)]
-    pub struct t {
+    pub struct ChangeFlag {
         announced: bool,
     }
 
-    pub fn create() -> t {
-        t { announced: false }
+    pub fn create() -> ChangeFlag {
+        ChangeFlag { announced: false }
     }
 
-    pub fn announce(flag: &mut t) {
+    pub fn announce(flag: &mut ChangeFlag) {
         flag.announced = true;
     }
 
     /// Clears the announcement and says whether there was one.
-    pub fn take(flag: &mut t) -> bool {
+    pub fn take(flag: &mut ChangeFlag) -> bool {
         std::mem::replace(&mut flag.announced, false)
     }
 
     /// `query` runs once per announcement, however many arrived; true when it ran.
-    pub fn refresh(flag: &mut t, query: &mut dyn FnMut()) -> bool {
+    pub fn refresh(flag: &mut ChangeFlag, query: &mut dyn FnMut()) -> bool {
         let announced = take(flag);
         if announced {
             query();
@@ -77,14 +75,13 @@ struct window {
     cursors: Vec<(cursor_shape, Cursor)>,
     cursor_shape: Option<cursor_shape>,
     text_input: bool,
-    changed: Change_flag::t,
+    changed: change_flag::ChangeFlag,
     /// window coordinates per logical point: SDL's display scale over its pixel density
     unit: f64,
 }
 
 /// One render target: a presenting window, or (`window = None`) an owned offscreen texture.
-#[allow(non_camel_case_types)]
-pub struct t {
+pub struct Runtime {
     window: Option<window>,
     facts: frame_facts,
     presentation: Option<presentation_facts>,
@@ -191,7 +188,7 @@ pub fn create(
     title: Option<&str>,
     width: i64,
     height: i64,
-) -> Result<t, Error> {
+) -> Result<Runtime, Error> {
     let op = "Runtime.create";
     let vsync = vsync.unwrap_or(true);
     let hidden = hidden.unwrap_or(true);
@@ -202,7 +199,7 @@ pub fn create(
     }
     sdl3::init::init(&[sdl3::init::Subsystem::Video]).map_err(|failure| sdl_error(op, &failure))?;
     // The window and view release themselves when `build` returns; a failure then quits video.
-    let build = || -> Result<t, Error> {
+    let build = || -> Result<Runtime, Error> {
         // SDL itself turns a Control-click into the secondary click.
         sdl3::hint::control_click_is_right_click(true).map_err(|failure| sdl_error(op, &failure))?;
         if cfg!(windows) {
@@ -228,7 +225,7 @@ pub fn create(
         // Size the renderer for the actual drawable once, rather than allocating a
         // logical-size target and immediately resizing it.
         let facts = facts(&handle)?;
-        Ok(t {
+        Ok(Runtime {
             window: Some(window {
                 handle,
                 view,
@@ -236,7 +233,7 @@ pub fn create(
                 cursors: Vec::new(),
                 cursor_shape: None,
                 text_input: false,
-                changed: Change_flag::create(),
+                changed: change_flag::create(),
                 unit,
             }),
             facts,
@@ -263,12 +260,12 @@ fn offscreen_facts(logical_width: i64, logical_height: i64, width: i64, height: 
 }
 
 /// An offscreen frame-facts source; GPU resources are owned by `Renderer`.
-pub fn create_offscreen(logical_width: i64, logical_height: i64, width: i64, height: i64) -> Result<t, Error> {
+pub fn create_offscreen(logical_width: i64, logical_height: i64, width: i64, height: i64) -> Result<Runtime, Error> {
     let op = "Runtime.create_offscreen";
     if width <= 0 || height <= 0 || logical_width <= 0 || logical_height <= 0 {
         Err(error::make(op, ErrorKind::InvalidArgument, "dimensions must be positive"))
     } else {
-        Ok(t {
+        Ok(Runtime {
             window: None,
             facts: offscreen_facts(logical_width, logical_height, width, height),
             presentation: None,
@@ -294,9 +291,9 @@ pub fn map_logical_rect(facts: &frame_facts, rect: (i64, i64, i64, i64)) -> (i64
 // A window's drawable follows SDL, which announces each change as a size event
 // (`window_changed`); an offscreen target changes only through `resize`. A frame costs no SDL
 // call while nothing was announced.
-pub fn sync_facts(value: &mut t) -> Result<(), Error> {
+pub fn sync_facts(value: &mut Runtime) -> Result<(), Error> {
     let Some(window) = value.window.as_mut() else { return Ok(()) };
-    if !Change_flag::take(&mut window.changed) {
+    if !change_flag::take(&mut window.changed) {
         return Ok(());
     }
     window.unit = window_unit(&window.handle)?;
@@ -315,7 +312,7 @@ pub fn sync_facts(value: &mut t) -> Result<(), Error> {
 
 /// Resizes to `width`x`height` logical points. A window's drawable follows its display; an
 /// offscreen target uses a 1x drawable.
-pub fn resize(value: &mut t, width: i64, height: i64) -> Result<(), Error> {
+pub fn resize(value: &mut Runtime, width: i64, height: i64) -> Result<(), Error> {
     let op = "Runtime.resize";
     if value.dead {
         return Err(stale_error(op));
@@ -338,17 +335,17 @@ pub fn resize(value: &mut t, width: i64, height: i64) -> Result<(), Error> {
     }
 }
 
-pub fn frame_facts(value: &t) -> frame_facts {
+pub fn frame_facts(value: &Runtime) -> frame_facts {
     value.facts
 }
 
 /// Window coordinates per logical point: 1 on macOS and offscreen, the monitor's scaling (1.5 at
 /// 150%) on Windows, whose SDL events and sizes are in pixels. Input divides by it.
-pub fn window_unit_of(value: &t) -> f64 {
+pub fn window_unit_of(value: &Runtime) -> f64 {
     value.window.as_ref().map_or(1., |w| w.unit)
 }
 
-fn live_window(operation: &str, value: &mut t, callback: &mut dyn FnMut(&mut window) -> Result<(), Error>) -> Result<(), Error> {
+fn live_window(operation: &str, value: &mut Runtime, callback: &mut dyn FnMut(&mut window) -> Result<(), Error>) -> Result<(), Error> {
     if value.dead {
         return Err(stale_error(operation));
     }
@@ -358,7 +355,7 @@ fn live_window(operation: &str, value: &mut t, callback: &mut dyn FnMut(&mut win
     }
 }
 
-fn query_presentation(value: &t) -> Result<presentation_facts, Error> {
+fn query_presentation(value: &Runtime) -> Result<presentation_facts, Error> {
     let f = &value.facts;
     let pixel_density = match value.window.as_ref() {
         None => f.pixel_scale_x,
@@ -374,7 +371,7 @@ fn query_presentation(value: &t) -> Result<presentation_facts, Error> {
 }
 
 /// Cached presentation facts, requeried when the drawable changes and after resize or show.
-pub fn presentation_facts(value: &mut t) -> Result<presentation_facts, Error> {
+pub fn presentation_facts(value: &mut Runtime) -> Result<presentation_facts, Error> {
     if value.dead {
         return Err(stale_error("Runtime.presentation_facts"));
     }
@@ -395,15 +392,15 @@ pub fn presentation_facts(value: &mut t) -> Result<presentation_facts, Error> {
 
 /// Tell a window target that SDL announced a size or density change, so the next frame re-reads
 /// its facts. The window is not polled between announcements.
-pub fn window_changed(value: &mut t) {
+pub fn window_changed(value: &mut Runtime) {
     if !value.dead {
         if let Some(window) = value.window.as_mut() {
-            Change_flag::announce(&mut window.changed);
+            change_flag::announce(&mut window.changed);
         }
     }
 }
 
-pub fn set_resizable(value: &mut t, enabled: bool) -> Result<(), Error> {
+pub fn set_resizable(value: &mut Runtime, enabled: bool) -> Result<(), Error> {
     live_window("Runtime.set_resizable", value, &mut |w| {
         w.handle.set_resizable(enabled).map_err(|failure| sdl_error("Runtime.set_resizable", &failure))
     })
@@ -411,20 +408,20 @@ pub fn set_resizable(value: &mut t, enabled: bool) -> Result<(), Error> {
 
 /// The native window's own background (sRGB, 0..1): what the title bar shows, since a Rays window
 /// hides its title and keeps only the traffic lights.
-pub fn set_window_background(value: &mut t, color: (f64, f64, f64)) -> Result<(), Error> {
+pub fn set_window_background(value: &mut Runtime, color: (f64, f64, f64)) -> Result<(), Error> {
     live_window("Runtime.set_window_background", value, &mut |w| {
         w.handle.set_background(color.0 as f32, color.1 as f32, color.2 as f32).map_err(|failure| sdl_error("Runtime.set_window_background", &failure))
     })
 }
 
 /// Hide and capture the pointer, reporting relative motion (fly cameras).
-pub fn set_relative_mouse(value: &mut t, enabled: bool) -> Result<(), Error> {
+pub fn set_relative_mouse(value: &mut Runtime, enabled: bool) -> Result<(), Error> {
     live_window("Runtime.set_relative_mouse", value, &mut |w| {
         w.handle.set_relative_mouse(enabled).map_err(|failure| sdl_error("Runtime.set_relative_mouse", &failure))
     })
 }
 
-pub fn set_cursor(value: &mut t, shape: cursor_shape) -> Result<(), Error> {
+pub fn set_cursor(value: &mut Runtime, shape: cursor_shape) -> Result<(), Error> {
     live_window("Runtime.set_cursor", value, &mut |window| {
         if window.cursor_shape == Some(shape) {
             return Ok(());
@@ -453,7 +450,7 @@ pub fn set_cursor(value: &mut t, shape: cursor_shape) -> Result<(), Error> {
 /// Text input runs only while a text field has focus: `Some (region, cursor)` (logical points)
 /// starts it and places the input method there, `None` stops it. Repeating the same answer costs
 /// no SDL call.
-pub fn set_text_input(value: &mut t, area: Option<((i64, i64, i64, i64), i64)>) -> Result<(), Error> {
+pub fn set_text_input(value: &mut Runtime, area: Option<((i64, i64, i64, i64), i64)>) -> Result<(), Error> {
     let operation = "Runtime.set_text_input";
     live_window(operation, value, &mut |window| match area {
         None => {
@@ -479,10 +476,10 @@ pub fn set_text_input(value: &mut t, area: Option<((i64, i64, i64, i64), i64)>) 
     })
 }
 
-pub fn show(value: &mut t) -> Result<(), Error> {
+pub fn show(value: &mut Runtime) -> Result<(), Error> {
     live_window("Runtime.show", value, &mut |window| {
         reveal(&window.handle).map_err(|failure| sdl_error("Runtime.show", &failure))?;
-        Change_flag::announce(&mut window.changed);
+        change_flag::announce(&mut window.changed);
         Ok(())
     })?;
     let synced = sync_facts(value);
@@ -496,7 +493,7 @@ pub fn show(value: &mut t) -> Result<(), Error> {
 /// `Input.File_dialog` carrying the same id. `pattern` lists extensions separated by semicolons
 /// ("png;jpg"), or "*". At most 8 dialogs are open at once; a ninth is an error.
 pub fn show_dialog(
-    value: &mut t,
+    value: &mut Runtime,
     filters: Option<&[dialog_filter]>,
     default_location: Option<&str>,
     kind: dialog_kind,
@@ -523,7 +520,7 @@ pub fn show_dialog(
 
 /// Shown and neither minimized nor covered. SDL announces the start of occlusion and not its end,
 /// so a caller that saw the window hidden asks this once per frame to learn when it is back.
-pub fn visible(value: &mut t) -> Result<bool, Error> {
+pub fn visible(value: &mut Runtime) -> Result<bool, Error> {
     let mut seen = false;
     live_window("Runtime.visible", value, &mut |window| {
         let state = window.handle.state().map_err(|failure| sdl_error("Runtime.visible", &failure))?;
@@ -533,7 +530,7 @@ pub fn visible(value: &mut t) -> Result<bool, Error> {
     Ok(seen)
 }
 
-pub fn destroy(value: &mut t) -> Result<(), Error> {
+pub fn destroy(value: &mut Runtime) -> Result<(), Error> {
     if value.dead {
         return Ok(());
     }
@@ -564,11 +561,11 @@ pub fn destroy(value: &mut t) -> Result<(), Error> {
     }
 }
 
-pub fn is_window(value: &t) -> bool {
+pub fn is_window(value: &Runtime) -> bool {
     value.window.is_some()
 }
 
-pub fn surface_configuration(value: &mut t) -> Result<surface::Configuration, Error> {
+pub fn surface_configuration(value: &mut Runtime) -> Result<surface::Configuration, Error> {
     let layer = match value.window.as_mut() {
         None => None,
         Some(w) => Some(w.view.layer().map_err(|failure| sdl_error("Runtime.surface_configuration", &failure))?),

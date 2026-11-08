@@ -68,7 +68,7 @@ fn scrub_and_show() {
 #[test]
 fn key_sheet_lists_every_command_once_under_its_section() {
     // the key sheet lists every command a key reaches, once, under its host's section
-    let command = |scope: Option<Panel>, id: &str, trigger: Trigger| -> command::t { command::make(Some(trigger), scope, Vec::new(), id, id, 0) };
+    let command = |scope: Option<Panel>, id: &str, trigger: Trigger| -> command::Command { command::make(Some(trigger), scope, Vec::new(), id, id, 0) };
     let keymap = vec![
         command(None, "file.save", Trigger::Chord(Key::KeyChar('s'), vec![Key::Meta])),
         command(None, "file.save", Trigger::Chord(Key::KeyChar('s'), vec![Key::Ctrl])),
@@ -77,7 +77,7 @@ fn key_sheet_lists_every_command_once_under_its_section() {
         command(None, "panel.close", Trigger::Leader("ox".to_string())),
         command::make(None, None, Vec::new(), "palette.only", "no key", 0),
     ];
-    let category = |c: &command::t| -> String {
+    let category = |c: &command::Command| -> String {
         if c.scope.is_some() {
             "Graph".to_string()
         } else if c.id.starts_with("panel.") {
@@ -98,14 +98,14 @@ fn key_sheet_lists_every_command_once_under_its_section() {
 
 #[test]
 fn leader_pages_by_category_and_chords() {
-    let c = |scope: Option<Panel>, trigger: Trigger, id: &str, label: &str| -> command::t { command::make(Some(trigger), scope, Vec::new(), id, label, 0) };
+    let c = |scope: Option<Panel>, trigger: Trigger, id: &str, label: &str| -> command::Command { command::make(Some(trigger), scope, Vec::new(), id, label, 0) };
     let keymap = vec![
         c(None, Trigger::Leader("ps".to_string()), "panel.split", "Split right"),
         c(None, Trigger::Leader("pc".to_string()), "panel.close", "Close panel"),
         c(None, Trigger::Leader("s".to_string()), "file.save", "Save"),
         c(Some(Panel::Graph), Trigger::Leader("g".to_string()), "graph.go", "Go there"),
     ];
-    let category = |c: &command::t| -> String { if c.id.starts_with("panel.") { "Panel".to_string() } else { "File".to_string() } };
+    let category = |c: &command::Command| -> String { if c.id.starts_with("panel.") { "Panel".to_string() } else { "File".to_string() } };
     // the pure page builders are private; the key sheet is the public face of the same table
     let sections = which_key::sheet_sections(Platform::Other, Some(&category), &[], &keymap);
     assert_eq!(sections.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), vec!["Panel", "File"]);

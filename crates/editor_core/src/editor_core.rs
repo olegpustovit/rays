@@ -130,7 +130,7 @@ pub mod keymap {
 
 pub mod guide_context {
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub enum t {
+    pub enum GuideContext {
         Canvas,
         Node,
         Multi,
@@ -141,16 +141,16 @@ pub mod guide_context {
         Text,
     }
 
-    pub fn name(context: t) -> &'static str {
+    pub fn name(context: GuideContext) -> &'static str {
         match context {
-            t::Canvas => "Canvas",
-            t::Node => "Node",
-            t::Multi => "Selection",
-            t::Hints => "Hints",
-            t::Leader => "Leader",
-            t::Search => "Search",
-            t::List => "List",
-            t::Text => "Text",
+            GuideContext::Canvas => "Canvas",
+            GuideContext::Node => "Node",
+            GuideContext::Multi => "Selection",
+            GuideContext::Hints => "Hints",
+            GuideContext::Leader => "Leader",
+            GuideContext::Search => "Search",
+            GuideContext::List => "List",
+            GuideContext::Text => "Text",
         }
     }
 }
@@ -165,7 +165,7 @@ pub mod command {
     /// index into its action table; editor_core cannot name the host's action type, so the table
     /// stays with the host).
     #[derive(Clone, Debug, PartialEq)]
-    pub struct t {
+    pub struct Command {
         /// Stable, e.g. "edit.undo"; entries sharing an id are one command.
         pub id: String,
         /// Shown in which-key and the palette.
@@ -175,7 +175,7 @@ pub mod command {
         /// `None`: global; else only while that pane has focus.
         pub scope: Option<Panel>,
         /// Contexts where the guide strip lists this command.
-        pub guide: Vec<guide_context::t>,
+        pub guide: Vec<guide_context::GuideContext>,
         pub action: usize,
     }
 
@@ -183,16 +183,16 @@ pub mod command {
     pub fn make(
         trigger: Option<Trigger>,
         scope: Option<Panel>,
-        guide: Vec<guide_context::t>,
+        guide: Vec<guide_context::GuideContext>,
         id: &str,
         label: &str,
         action: usize,
-    ) -> t {
-        t { id: id.into(), label: label.into(), trigger, scope, guide, action }
+    ) -> Command {
+        Command { id: id.into(), label: label.into(), trigger, scope, guide, action }
     }
 
     /// Applicable commands in their original table order.
-    pub fn for_guide(commands: &[t], focus: &Panel, context: guide_context::t) -> Vec<t> {
+    pub fn for_guide(commands: &[Command], focus: &Panel, context: guide_context::GuideContext) -> Vec<Command> {
         commands
             .iter()
             .filter(|command| {
@@ -207,7 +207,7 @@ pub mod command {
 
 
 pub mod router {
-    use super::command::t as Command;
+    use super::command::Command as Command;
     use crate::panels::Panel;
     use super::keymap::{resolve, shifted, Trigger};
     use crate::frame;
@@ -258,7 +258,7 @@ pub mod router {
 
     /// In fly mode, keep pointer/window events and pass / to the leader router after ending the
     /// mode. Escape ends fly without opening a shortcut.
-    pub fn fly(mut frame: frame::t) -> (bool, frame::t) {
+    pub fn fly(mut frame: frame::Frame) -> (bool, frame::Frame) {
         let exits = frame.input.events.iter().any(|event| {
             matches!(
                 event,
@@ -286,8 +286,8 @@ pub mod router {
         keymap: &[&Command],
         focus: &Panel,
         previous_keys: &[Key],
-        mut frame: frame::t,
-    ) -> (Vec<Command>, frame::t) {
+        mut frame: frame::Frame,
+    ) -> (Vec<Command>, frame::Frame) {
         let global: Vec<&Command> =
             keymap.iter().copied().filter(|command| command.scope.is_none()).collect();
         let owned = |key: Key| match key {
@@ -327,9 +327,9 @@ pub mod router {
         keymap: &[&Command],
         focus: &Panel,
         text_focus: bool,
-        mut frame: frame::t,
+        mut frame: frame::Frame,
         state: State,
-    ) -> (State, Vec<Command>, frame::t) {
+    ) -> (State, Vec<Command>, frame::Frame) {
         if text_focus {
             let (actions, frame) = text_chords(platform, keymap, focus, previous_keys, frame);
             return (State::Idle, actions, frame);

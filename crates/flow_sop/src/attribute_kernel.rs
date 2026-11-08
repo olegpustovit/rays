@@ -1775,16 +1775,20 @@ fn write_planes(
         return Ok(None);
     }
     let is_p = owner == Owner::Point && kind == "vec3" && name == "P";
-    let original = Float3::View::view(geometry::positions(target)).map_err(|e| attr_err(rerr(&e)))?;
-    let original = [original.x, original.y, original.z];
+    use flow_ir::core_ir::Region::Instruction as I;
+    // Only an output that copies an input can keep the target's own plane: viewing P otherwise
+    // would read back positions a device still holds, for a write that never reads them.
+    let original = if is_p && region.outputs[0].iter().any(|r| matches!(region.code[*r as usize], I::Input(..))) {
+        let view = Float3::View::view(geometry::positions(target)).map_err(|e| attr_err(rerr(&e)))?;
+        Some([view.x, view.y, view.z])
+    } else {
+        None
+    };
     let count = owner_count(target, owner);
     let source_geometry = geometry.clone();
     let column_source: flow_ir::packed::ColumnSource = Arc::new(move |residual, term| borrowed_source(&source_geometry, residual, term));
     let unchanged = |component: usize, register: i64| -> bool {
-        if !is_p {
-            return false;
-        }
-        use flow_ir::core_ir::Region::Instruction as I;
+        let Some(original) = &original else { return false };
         match &region.code[register as usize] {
             I::Input(input, _, index) => {
                 let (residual, term) = &region.sources[*input as usize];
@@ -1815,7 +1819,7 @@ fn write_planes(
     if is_p {
         let planes: Vec<Arc<Vec<f64>>> = (0..3).map(|c| match filled[c].take() {
             Some(data) => Arc::new(data),
-            None => original[c].clone(),
+            None => original.as_ref().expect("a kept plane is the target's")[c].clone(),
         }).collect();
         install_planes(owner, kind, name, planes, target).map(Some)
     } else {
@@ -2195,7 +2199,7 @@ impl Kernel {
                         device_first,
                         gpu: self.gpu.clone(),
                     };
-                    let r = Executor::record_on_device(program, &options, &live)?; eprintln!("PROBE P={} consumers={:?} penalty={} whole={} device={} {}", name, options.cpu_consumers, options.cpu_penalty, whole, r.is_some(), 0); r
+                    Executor::record_on_device(program, &options, &live)?
                 };
                 let Some(fields) = device else {
                     *cpu_began.lock().unwrap() = Some((self.clock)());

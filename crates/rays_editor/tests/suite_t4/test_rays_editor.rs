@@ -186,7 +186,7 @@ pub fn layout_panes() {
     let camera_binding = |key: &str, action: rays_editor::editor_commands::action| rays_editor::editor_commands::keymap().iter().any(|c| c.trigger == Some(editor_core::keymap::Trigger::Leader(key.into())) && *rays_editor::editor_commands::action_of(c) == action);
     assert!(camera_binding("h", rays_editor::editor_commands::action::Hide_ui) && camera_binding("c", rays_editor::editor_commands::action::Open_camera), "camera visibility commands missing from the host keymap");
     let workspace = L::default();
-    let panes = |hidden: Option<&[panels::Panel]>, tree: &L::t, f: &frame::t| L::panes(&L::geometry(None, hidden, tree, f));
+    let panes = |hidden: Option<&[panels::Panel]>, tree: &L::Panels, f: &frame::t| L::panes(&L::geometry(None, hidden, tree, f));
     let initial = panes(None, &workspace, &frame_ex(1000, 640, None, vec![], 0));
     let header = L::find(&L::geometry(None, None, &workspace, &frame_ex(1000, 640, None, vec![], 0)), &panels::main()).unwrap().header;
     // a header is one 24-point row under a 4-point margin

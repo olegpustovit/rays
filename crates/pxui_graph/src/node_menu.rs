@@ -43,7 +43,6 @@ pub struct Menu {
     after: Option<String>,
 }
 
-pub type t = Menu;
 
 const MENU_WIDTH: i64 = 320;
 const MENU_LIMIT: i64 = 10;

@@ -627,8 +627,7 @@ mod png {
 // Canvas
 // ---------------------------------------------------------------------------------------------
 
-#[allow(non_snake_case)]
-pub mod Canvas {
+pub mod canvas {
     use super::*;
 
     #[allow(non_camel_case_types)]
@@ -651,18 +650,17 @@ pub mod Canvas {
         dead: bool,
     }
 
-    #[allow(non_camel_case_types)]
     #[derive(Clone)]
-    pub struct t(Rc<RefCell<canvas_data>>);
+    pub struct Canvas(Rc<RefCell<canvas_data>>);
 
-    pub fn generation(x: &t) -> i64 {
+    pub fn generation(x: &Canvas) -> i64 {
         x.0.borrow().generation
     }
-    pub fn destroyed(x: &t) -> bool {
+    pub fn destroyed(x: &Canvas) -> bool {
         x.0.borrow().dead
     }
 
-    fn check(op: &str, x: &t) -> Result<(), error> {
+    fn check(op: &str, x: &Canvas) -> Result<(), error> {
         enter(op)?;
         if x.0.borrow().dead { Err(err_value(op, ErrorKind::Destroyed, "canvas is destroyed")) } else { Ok(()) }
     }
@@ -675,8 +673,8 @@ pub mod Canvas {
         }
     }
 
-    fn make(width: i64, height: i64, rgba: bytes) -> t {
-        t(Rc::new(RefCell::new(canvas_data {
+    fn make(width: i64, height: i64, rgba: bytes) -> Canvas {
+        Canvas(Rc::new(RefCell::new(canvas_data {
             identity: fresh_identity(),
             generation: 1,
             width,
@@ -693,14 +691,14 @@ pub mod Canvas {
         })))
     }
 
-    pub fn create(width: i64, height: i64) -> Result<t, error> {
+    pub fn create(width: i64, height: i64) -> Result<Canvas, error> {
         enter("Canvas.create")?;
         Ok(make(width, height, storage("Canvas.create", width, height)?))
     }
 
     /// Adopt a packed RGBA byte buffer without copying it. The caller must not read or mutate
     /// `rgba` after a successful call.
-    pub fn of_rgba_bytes(width: i64, height: i64, rgba: Vec<u8>) -> Result<t, error> {
+    pub fn of_rgba_bytes(width: i64, height: i64, rgba: Vec<u8>) -> Result<Canvas, error> {
         enter("Canvas.of_rgba_bytes")?;
             let rgba = new_bytes(rgba);
             if !valid_storage(width, height, rgba.len()) {
@@ -710,7 +708,7 @@ pub mod Canvas {
             }
     }
 
-    pub fn size(x: &t) -> Result<(i64, i64), error> {
+    pub fn size(x: &Canvas) -> Result<(i64, i64), error> {
         check("Canvas.size", x)?;
         let mut guard = x.0.borrow_mut();
         let d = &mut *guard;
@@ -824,7 +822,7 @@ pub mod Canvas {
     }
 
     /// `[0xRRGGBBAA]` at (x, y).
-    pub fn set_pixel(x: &t, px: i64, py: i64, color: i32) -> Result<(), error> {
+    pub fn set_pixel(x: &Canvas, px: i64, py: i64, color: i32) -> Result<(), error> {
         check("Canvas.set_pixel", x)?;
         let mut guard = x.0.borrow_mut();
         let d = &mut *guard;
@@ -841,7 +839,7 @@ pub mod Canvas {
 
     /// Atomically replace `image` with the current canvas pixels while retaining the image
     /// identity. Equal extents reuse the image's owned storage.
-    pub fn snapshot(x: &t) -> Result<(i64, i64, i64, Vec<u8>), error> {
+    pub fn snapshot(x: &Canvas) -> Result<(i64, i64, i64, Vec<u8>), error> {
         check("Canvas.snapshot", x)?;
         let mut guard = x.0.borrow_mut();
         let d = &mut *guard;
@@ -849,7 +847,7 @@ pub mod Canvas {
             Ok((d.width, d.height, d.generation, d.rgba.to_vec()))
     }
 
-    pub fn capture(x: &t) -> Result<Image::t, error> {
+    pub fn capture(x: &Canvas) -> Result<Image::t, error> {
         check("Canvas.capture", x)?;
         let mut guard = x.0.borrow_mut();
         let d = &mut *guard;
@@ -868,7 +866,7 @@ pub mod Canvas {
             Ok(image)
     }
 
-    pub fn save_png(x: &t, path: &str) -> Result<(), error> {
+    pub fn save_png(x: &Canvas, path: &str) -> Result<(), error> {
         check("Canvas.save_png", x)?;
         let mut guard = x.0.borrow_mut();
         let d = &mut *guard;
@@ -880,12 +878,12 @@ pub mod Canvas {
             }
     }
 
-    pub fn identity(x: &t) -> i64 {
+    pub fn identity(x: &Canvas) -> i64 {
         x.0.borrow().identity
     }
 
     /// Successful captures and actual successful GPU pixel readbacks.
-    pub fn pixel_stats(x: &t) -> (i64, i64) {
+    pub fn pixel_stats(x: &Canvas) -> (i64, i64) {
         let d = x.0.borrow();
         (d.captures, d.readbacks)
     }
@@ -893,7 +891,7 @@ pub mod Canvas {
     /// Adopts the canvas execution's completed frame texture (borrowed; the execution owns it)
     /// as the authoritative pixels and bumps the generation. CPU readers read it back lazily;
     /// CPU writers forget it.
-    pub fn publish_gpu(x: &t, texture: &Texture) -> Result<(), error> {
+    pub fn publish_gpu(x: &Canvas, texture: &Texture) -> Result<(), error> {
         check("Canvas.publish_gpu", x)?;
         let mut guard = x.0.borrow_mut();
         let d = &mut *guard;
@@ -911,14 +909,14 @@ pub mod Canvas {
             Ok(())
     }
 
-    pub fn gpu_snapshot(x: &t) -> Option<(i64, i64, i64, Texture)> {
+    pub fn gpu_snapshot(x: &Canvas) -> Option<(i64, i64, i64, Texture)> {
         check("Canvas.gpu_snapshot", x).ok()?;
         let guard = x.0.borrow();
         let d = &*guard;
         d.gpu.clone().map(|tx| (d.width, d.height, d.generation, tx))
     }
 
-    pub fn destroy(x: &t) -> Result<(), error> {
+    pub fn destroy(x: &Canvas) -> Result<(), error> {
         enter("Canvas.destroy")?;
             let mut d = x.0.borrow_mut();
             if d.dead {
@@ -939,12 +937,10 @@ pub mod Canvas {
 // Text
 // ---------------------------------------------------------------------------------------------
 
-#[allow(non_snake_case)]
-pub mod Text {
+pub mod text {
     use super::*;
 
-    #[allow(non_camel_case_types)]
-    pub struct t {
+    pub struct Text {
         generation: i64,
         width: i64,
         height: i64,
@@ -952,33 +948,33 @@ pub mod Text {
         dead: bool,
     }
 
-    pub fn generation(x: &t) -> i64 {
+    pub fn generation(x: &Text) -> i64 {
         x.generation
     }
-    pub fn destroyed(x: &t) -> bool {
+    pub fn destroyed(x: &Text) -> bool {
         x.dead
     }
 
-    fn check(op: &str, x: &t) -> Result<(), error> {
+    fn check(op: &str, x: &Text) -> Result<(), error> {
         enter(op)?;
         if x.dead { Err(err_value(op, ErrorKind::Destroyed, "text snapshot is destroyed")) } else { Ok(()) }
     }
 
-    pub(crate) fn owned(width: i64, height: i64, rgba: Vec<u8>) -> t {
-        t { generation: fresh_identity(), width, height, rgba: new_bytes(rgba), dead: false }
+    pub(crate) fn owned(width: i64, height: i64, rgba: Vec<u8>) -> Text {
+        Text { generation: fresh_identity(), width, height, rgba: new_bytes(rgba), dead: false }
     }
 
-    pub fn size(x: &t) -> Result<(i64, i64), error> {
+    pub fn size(x: &Text) -> Result<(i64, i64), error> {
         check("Text.size", x)?;
         Ok((x.width, x.height))
     }
 
-    pub fn pixels(x: &t) -> Result<Vec<u8>, error> {
+    pub fn pixels(x: &Text) -> Result<Vec<u8>, error> {
         check("Text.pixels", x)?;
         Ok(x.rgba.to_vec())
     }
 
-    pub fn destroy(x: &mut t) -> Result<(), error> {
+    pub fn destroy(x: &mut Text) -> Result<(), error> {
         enter("Text.destroy")?;
             if !x.dead {
                 x.dead = true;
@@ -987,19 +983,19 @@ pub mod Text {
             Ok(())
     }
 
-    pub fn identity(x: &t) -> i64 {
+    pub fn identity(x: &Text) -> i64 {
         x.generation
     }
 
     /// The owned RGBA storage, borrowed without a copy. Do not mutate or retain it:
     /// `into_image` may later hand it to an image.
-    pub fn borrow_pixels(x: &t) -> Result<bytes, error> {
+    pub fn borrow_pixels(x: &Text) -> Result<bytes, error> {
         check("Text.borrow_pixels", x)?;
         Ok(x.rgba.clone())
     }
 
     /// Consume the text and transfer its owned RGBA storage to an image.
-    pub fn into_image(x: &mut t) -> Result<Image::t, error> {
+    pub fn into_image(x: &mut Text) -> Result<Image::t, error> {
         check("Text.into_image", x)?;
         let image = Image::of_owned_rgba(x.width, x.height, x.rgba.clone());
         x.dead = true;
@@ -1012,8 +1008,7 @@ pub mod Text {
 // Font
 // ---------------------------------------------------------------------------------------------
 
-#[allow(non_snake_case)]
-pub mod Font {
+pub mod font {
     use super::*;
     use sdl3::ttf::font as ttf_font;
 
@@ -1042,8 +1037,7 @@ pub mod Font {
         pub ascent: i64,
     }
 
-    #[allow(non_camel_case_types)]
-    pub struct t {
+    pub struct Font {
         raw: ttf_font::Font,
         base_size: f64,
         generation: i64,
@@ -1054,7 +1048,7 @@ pub mod Font {
 
     static USERS: AtomicI64 = AtomicI64::new(0);
 
-    fn check(op: &str, x: &t) -> Result<(), error> {
+    fn check(op: &str, x: &Font) -> Result<(), error> {
         enter(op)?;
         if x.dead { Err(err_value(op, ErrorKind::Destroyed, "font is destroyed")) } else { Ok(()) }
     }
@@ -1067,7 +1061,7 @@ pub mod Font {
         if sdl3::ttf::init::initialized().map_err(|e| ttf_error(op, &e))? { Ok(()) } else { sdl3::ttf::init::init().map_err(|e| ttf_error(op, &e)) }
     }
 
-    pub fn open_file(path: &str, size: f64) -> Result<t, error> {
+    pub fn open_file(path: &str, size: f64) -> Result<Font, error> {
         enter("Font.open_file")?;
             if !size.is_finite() || size <= 0. {
                 return Err(err_value("Font.open_file", ErrorKind::InvalidArgument, "font size must be finite and positive"));
@@ -1075,16 +1069,16 @@ pub mod Font {
             ensure_init("Font.open_file")?;
             let raw = ttf_font::Font::open_file(path, size).map_err(|e| ttf_error("Font.open_file", &e))?;
             USERS.fetch_add(1, Ordering::SeqCst);
-            Ok(t { raw, base_size: size, generation: 1, density: 1, align: alignment::Left, dead: false })
+            Ok(Font { raw, base_size: size, generation: 1, density: 1, align: alignment::Left, dead: false })
     }
 
-    pub fn open_system(size: f64) -> Result<t, error> {
+    pub fn open_system(size: f64) -> Result<Font, error> {
         enter("Font.open_system")?;
             let path = ttf_font::system_path(None).map_err(|e| ttf_error("Font.open_system", &e))?;
             open_file(&path, size)
     }
 
-    fn invalidate(x: &mut t) {
+    fn invalidate(x: &mut Font) {
         x.generation += 1;
     }
 
@@ -1098,20 +1092,20 @@ pub mod Font {
         }
     }
 
-    pub fn set_hinting(x: &mut t, value: hinting) -> Result<(), error> {
+    pub fn set_hinting(x: &mut Font, value: hinting) -> Result<(), error> {
         check("Font.set_hinting", x)?;
             x.raw.set_hinting(native_hinting(value)).map_err(|e| ttf_error("Font.set_hinting", &e))?;
             invalidate(x);
             Ok(())
     }
 
-    fn glyph_metrics_raw(x: &mut t, glyph: i64) -> Result<glyph_metrics, error> {
+    fn glyph_metrics_raw(x: &mut Font, glyph: i64) -> Result<glyph_metrics, error> {
         check("Font.glyph_metrics", x)?;
             let m = x.raw.glyph_metrics(glyph).map_err(|e| ttf_error("Font.glyph_metrics", &e))?;
             Ok(glyph_metrics { advance: m.advance })
     }
 
-    fn set_density(x: &mut t, density: i64) -> Result<(), error> {
+    fn set_density(x: &mut Font, density: i64) -> Result<(), error> {
         if density == x.density {
             return Ok(());
         }
@@ -1120,7 +1114,7 @@ pub mod Font {
         Ok(())
     }
 
-    fn set_align(x: &mut t, align: alignment) -> Result<(), error> {
+    fn set_align(x: &mut Font, align: alignment) -> Result<(), error> {
         if align == x.align {
             return Ok(());
         }
@@ -1130,7 +1124,7 @@ pub mod Font {
     }
 
     /// Logical-point measurements: density 1, matching `render ~density:1`.
-    pub fn metrics(x: &mut t) -> Result<metrics, error> {
+    pub fn metrics(x: &mut Font) -> Result<metrics, error> {
         check("Font.metrics", x)?;
             set_density(x, 1)?;
             let m = x.raw.metrics().map_err(|e| ttf_error("Font.metrics", &e))?;
@@ -1139,13 +1133,13 @@ pub mod Font {
 
     /// `text` must be strict UTF-8; anything else is `Invalid_argument`.
     pub fn render(
-        x: &mut t,
+        x: &mut Font,
         wrap_width: Option<i64>,
         align: Option<alignment>,
         density: i64,
         color: (i64, i64, i64, i64),
         text: &[u8],
-    ) -> Result<Option<Text::t>, error> {
+    ) -> Result<Option<text::Text>, error> {
         let align = align.unwrap_or(alignment::Left);
         check("Font.render", x)?;
             if density <= 0 || density > 16 {
@@ -1165,11 +1159,11 @@ pub mod Font {
                 None => x.raw.render_blended(color, text),
                 Some(width) => x.raw.render_blended_wrapped(color, width * density, text),
             };
-            Ok(rendered.map_err(|e| ttf_error("Font.render", &e))?.map(|p| Text::owned(p.width as i64, p.height as i64, p.pixels)))
+            Ok(rendered.map_err(|e| ttf_error("Font.render", &e))?.map(|p| text::owned(p.width as i64, p.height as i64, p.pixels)))
     }
 
     /// Metrics at the backing density a matching `render` rasterizes with.
-    pub fn glyph_metrics_at(x: &mut t, density: i64, glyph: i64) -> Result<glyph_metrics, error> {
+    pub fn glyph_metrics_at(x: &mut Font, density: i64, glyph: i64) -> Result<glyph_metrics, error> {
         check("Font.glyph_metrics_at", x)?;
             if density <= 0 || density > 16 {
                 return Err(err_value("Font.glyph_metrics_at", ErrorKind::InvalidArgument, "density must be in 1..16"));
@@ -1178,7 +1172,7 @@ pub mod Font {
             glyph_metrics_raw(x, glyph)
     }
 
-    pub fn destroy(x: &mut t) -> Result<(), error> {
+    pub fn destroy(x: &mut Font) -> Result<(), error> {
         enter("Font.destroy")?;
             if x.dead {
                 return Ok(());
@@ -1196,8 +1190,7 @@ pub mod Font {
 // Audio
 // ---------------------------------------------------------------------------------------------
 
-#[allow(non_snake_case)]
-pub mod Audio {
+pub mod audio {
     use super::*;
     use sdl3::mixer::{audio, channels, init, mixer, music};
     use std::cell::Cell;
@@ -1210,13 +1203,12 @@ pub mod Audio {
         dead: Cell<bool>,
     }
 
-    #[allow(non_camel_case_types)]
     #[derive(Clone)]
-    pub struct t(Rc<audio_data>);
+    pub struct Audio(Rc<audio_data>);
 
     #[allow(non_camel_case_types)]
     pub struct sample {
-        owner: t,
+        owner: Audio,
         raw: audio::Audio,
         dead: bool,
     }
@@ -1225,7 +1217,7 @@ pub mod Audio {
         err_value(op, ErrorKind::Decode, &e.to_string())
     }
 
-    fn check(op: &str, x: &t) -> Result<(), error> {
+    fn check(op: &str, x: &Audio) -> Result<(), error> {
         enter(op)?;
         if x.0.dead.get() { Err(err_value(op, ErrorKind::Destroyed, "audio owner is destroyed")) } else { Ok(()) }
     }
@@ -1235,7 +1227,7 @@ pub mod Audio {
         if x.dead { Err(err_value(op, ErrorKind::Destroyed, "audio sample is destroyed")) } else { Ok(()) }
     }
 
-    fn attach(op: &str, max_channels: i64, mixer: mixer::Mixer) -> Result<t, error> {
+    fn attach(op: &str, max_channels: i64, mixer: mixer::Mixer) -> Result<Audio, error> {
         let channel_bank = match channels::Channels::create(&mixer, max_channels).map_err(|e| mix_error(op, &e)) {
             Ok(c) => c,
             Err(e) => {
@@ -1244,7 +1236,7 @@ pub mod Audio {
             }
         };
         match music::Music::create(&mixer).map_err(|e| mix_error(op, &e)) {
-            Ok(music) => Ok(t(Rc::new(audio_data { mixer, channels: channel_bank, music, dead: Cell::new(false) }))),
+            Ok(music) => Ok(Audio(Rc::new(audio_data { mixer, channels: channel_bank, music, dead: Cell::new(false) }))),
             Err(e) => {
                 let _ = channel_bank.destroy();
                 let _ = mixer.destroy();
@@ -1254,7 +1246,7 @@ pub mod Audio {
     }
 
     /// Mixes to the default playback device.
-    pub fn create_device(max_channels: i64) -> Result<t, error> {
+    pub fn create_device(max_channels: i64) -> Result<Audio, error> {
         let op = "Audio.create_device";
         enter(op)?;
             init::init().map_err(|e| mix_error(op, &e))?;
@@ -1262,7 +1254,7 @@ pub mod Audio {
             attach(op, max_channels, mixer)
     }
 
-    pub fn load_sample_bytes(x: &t, encoded: &[u8]) -> Result<sample, error> {
+    pub fn load_sample_bytes(x: &Audio, encoded: &[u8]) -> Result<sample, error> {
         check("Audio.load_sample_bytes", x)?;
         let d = &x.0;
             let raw = audio::Audio::load_bytes(&d.mixer, encoded).map_err(|e| mix_error("Audio.load_sample_bytes", &e))?;
@@ -1273,7 +1265,7 @@ pub mod Audio {
         x.is_finite() && (0. ..=1.).contains(&x)
     }
 
-    pub fn play_sample(x: &t, loops: Option<i64>, volume: Option<f64>, sample: &sample) -> Result<i64, error> {
+    pub fn play_sample(x: &Audio, loops: Option<i64>, volume: Option<f64>, sample: &sample) -> Result<i64, error> {
         let loops = loops.unwrap_or(0);
         let volume = volume.unwrap_or(1.);
         sample_check("Audio.play_sample", sample)?;
@@ -1295,7 +1287,7 @@ pub mod Audio {
             Ok(())
     }
 
-    pub fn destroy(x: &t) -> Result<(), error> {
+    pub fn destroy(x: &Audio) -> Result<(), error> {
         enter("Audio.destroy")?;
             if x.0.dead.get() {
                 return Ok(());
@@ -1313,21 +1305,19 @@ pub mod Audio {
 // Assets
 // ---------------------------------------------------------------------------------------------
 
-#[allow(non_snake_case)]
-pub mod Assets {
+pub mod assets {
     use super::*;
 
-    #[allow(non_camel_case_types)]
-    pub struct t {
+    pub struct Assets {
         hooks: Vec<Box<dyn Fn() -> Result<(), error>>>,
         dead: bool,
     }
 
-    pub fn create() -> t {
-        t { hooks: Vec::new(), dead: false }
+    pub fn create() -> Assets {
+        Assets { hooks: Vec::new(), dead: false }
     }
 
-    pub fn destroy(x: &mut t) -> Result<(), error> {
+    pub fn destroy(x: &mut Assets) -> Result<(), error> {
         enter("Assets.destroy")?;
             if x.dead {
                 return Ok(());

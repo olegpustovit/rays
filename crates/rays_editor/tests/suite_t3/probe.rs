@@ -206,13 +206,13 @@ pub fn hoist() {
     let mut ui = pg::new_ui();
     let (view, _) = pg::scope_step(&mut ui, view, &pg::frame0());
     let turn = path(&["sunflower", "seeds_each", "turn"]);
-    let (x, y, tw, th) = scope::Inspect::box_of(&view, &turn).expect("turn box");
+    let (x, y, tw, th) = scope::inspect::box_of(&view, &turn).expect("turn box");
     let z = scope::zoom(&view);
     let point = ((x + tw - 30. * z) as i64, (y + th - 10. * z) as i64);
     let (_, _changes) = pg::scope_click(&mut ui, view.clone(), point);
     // the footer's hoist button moved to the context menu; a node that varies has none
     let r = path(&["sunflower", "seeds_each", "r"]);
-    let (x, y, tw, th) = scope::Inspect::box_of(&view, &r).expect("r box");
+    let (x, y, tw, th) = scope::inspect::box_of(&view, &r).expect("r box");
     let (_, changes) = pg::scope_click(&mut ui, view, ((x + tw - 30. * z) as i64, (y + th - 10. * z) as i64));
     check(!changes.iter().any(|c| matches!(c, Change::Syntax_edit(fe::Op::Hoist { .. }))), "r offered a hoist");
     ui.destroy();

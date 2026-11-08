@@ -1959,7 +1959,7 @@ pub fn selected_wire(t: &Pane) -> Option<(Path, ArgKey)> {
     t.selected_wire.as_ref().map(|(path, key, _)| (path.clone(), key.clone()))
 }
 
-pub mod Inspect {
+pub mod inspect {
     use super::*;
 
     pub fn grabbed(t: &Pane) -> bool {

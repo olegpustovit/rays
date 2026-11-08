@@ -22,7 +22,7 @@ fn diag(code: &str, message: &str) -> Diagnostic {
 
 #[derive(Clone)]
 pub struct Editor {
-    pub tree: panels::t,
+    pub tree: panels::Panels,
     pub origins: Vec<(panels::Path, Origin)>,
     pub named: Vec<(panels::Path, String)>,
     pub start: Start,
@@ -69,11 +69,11 @@ fn arg(name: &str, args: &[(String, E)]) -> R<E> {
     }
 }
 
-fn leaf(acc: &mut Acc, path: &[usize], args: &[(String, E)], panel: Panel) -> R<panels::t> {
+fn leaf(acc: &mut Acc, path: &[usize], args: &[(String, E)], panel: Panel) -> R<panels::Panels> {
     if flag("focus", args) && acc.start.focus.is_none() {
         acc.start.focus = Some(path.to_vec());
     }
-    Ok(panels::t::Leaf(panel))
+    Ok(panels::Panels::Leaf(panel))
 }
 
 fn child(path: &[usize], i: usize) -> Vec<usize> {
@@ -82,7 +82,7 @@ fn child(path: &[usize], i: usize) -> Vec<usize> {
     p
 }
 
-fn go(acc: &mut Acc, path: &[usize], v: &E) -> R<panels::t> {
+fn go(acc: &mut Acc, path: &[usize], v: &E) -> R<panels::Panels> {
     match v {
         E::Struct(g) if g.name == "ui/canvas" => {
             let args = &g.fields;
@@ -149,7 +149,7 @@ fn go(acc: &mut Acc, path: &[usize], v: &E) -> R<panels::t> {
                 Some((_, E::Text(t))) if t == b"vertical" => panels::Axis::V,
                 _ => panels::Axis::H,
             };
-            Ok(panels::t::Split { axis, size, a: Box::new(a), b: Box::new(b) })
+            Ok(panels::Panels::Split { axis, size, a: Box::new(a), b: Box::new(b) })
         }
         E::Struct(g) if g.name == "ui/tile" => {
             let args = &g.fields;
@@ -157,13 +157,13 @@ fn go(acc: &mut Acc, path: &[usize], v: &E) -> R<panels::t> {
             for (i, (_, v)) in args.iter().enumerate() {
                 cells.push(go(acc, &child(path, i), v)?);
             }
-            Ok(panels::t::Tile(cells))
+            Ok(panels::Panels::Tile(cells))
         }
         E::Struct(g) if g.name == "ui/floating" => {
             let args = &g.fields;
             let p = arg("panel", args)?;
             let t = go(acc, &child(path, 0), &p)?;
-            Ok(panels::t::Float(Box::new(t)))
+            Ok(panels::Panels::Float(Box::new(t)))
         }
         // a switch is transparent: its active layout sits at the switch's own place in the tree, and
         // a layout that is not showing registers nothing but its shape
@@ -178,7 +178,7 @@ fn go(acc: &mut Acc, path: &[usize], v: &E) -> R<panels::t> {
                 acc.switch = Some(Switch { layouts: Vec::new(), active });
             }
             let kids: Vec<&E> = args.iter().filter(|(n, _)| n != "active").map(|(_, v)| v).collect();
-            let mut trees: Vec<panels::t> = Vec::new();
+            let mut trees: Vec<panels::Panels> = Vec::new();
             for (i, kid) in kids.iter().enumerate() {
                 let saved = (acc.named.clone(), acc.viewports.clone(), acc.canvases.clone(), acc.start.clone());
                 let tree = go(acc, path, kid)?;
@@ -199,7 +199,7 @@ fn go(acc: &mut Acc, path: &[usize], v: &E) -> R<panels::t> {
     }
 }
 
-type Tree = (panels::t, Vec<(panels::Path, String)>, Start, Vec<(String, E)>, Vec<(String, E)>, Option<Switch>);
+type Tree = (panels::Panels, Vec<(panels::Path, String)>, Start, Vec<(String, E)>, Vec<(String, E)>, Option<Switch>);
 
 /// The tree of a `ui/workspace` value, with the graph a `ui/graph` names and the scene of each
 /// viewport; the origins come from walking the terms beside the values.
@@ -349,14 +349,14 @@ fn authored(source: &[flow_syntax::syntax::Syntax], home: &Home) -> Option<flow_
     }
 }
 
-fn remap(key: &dyn Fn(&str) -> String, t: &panels::t) -> panels::t {
+fn remap(key: &dyn Fn(&str) -> String, t: &panels::Panels) -> panels::Panels {
     match t {
-        panels::t::Leaf(Panel::View(old)) => panels::t::Leaf(Panel::View(key(old))),
-        panels::t::Leaf(Panel::Canvas(old)) => panels::t::Leaf(Panel::Canvas(key(old))),
-        panels::t::Leaf(p) => panels::t::Leaf(p.clone()),
-        panels::t::Split { axis, size, a, b } => panels::t::Split { axis: *axis, size: *size, a: Box::new(remap(key, a)), b: Box::new(remap(key, b)) },
-        panels::t::Tile(cells) => panels::t::Tile(cells.iter().map(|c| remap(key, c)).collect()),
-        panels::t::Float(p) => panels::t::Float(Box::new(remap(key, p))),
+        panels::Panels::Leaf(Panel::View(old)) => panels::Panels::Leaf(Panel::View(key(old))),
+        panels::Panels::Leaf(Panel::Canvas(old)) => panels::Panels::Leaf(Panel::Canvas(key(old))),
+        panels::Panels::Leaf(p) => panels::Panels::Leaf(p.clone()),
+        panels::Panels::Split { axis, size, a, b } => panels::Panels::Split { axis: *axis, size: *size, a: Box::new(remap(key, a)), b: Box::new(remap(key, b)) },
+        panels::Panels::Tile(cells) => panels::Panels::Tile(cells.iter().map(|c| remap(key, c)).collect()),
+        panels::Panels::Float(p) => panels::Panels::Float(Box::new(remap(key, p))),
     }
 }
 

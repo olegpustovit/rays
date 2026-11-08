@@ -7,12 +7,12 @@ use crate::world;
 use ogpu_core::backend::Texture;
 use rays_math::color;
 use renderer::renderer as rr;
-use runtime_resources::Canvas as RCanvas;
+use runtime_resources::canvas as RCanvas;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 pub struct canvas_data {
-    resource: RCanvas::t,
+    resource: RCanvas::Canvas,
     execution: RefCell<Option<rr::Renderer>>,
     destroyed: Cell<bool>,
     caches: Layer::cache_context,

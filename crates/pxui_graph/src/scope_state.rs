@@ -277,7 +277,6 @@ pub struct Pane {
     pub chain: Rc<RefCell<ChainCache>>,
 }
 
-pub type t = Pane;
 
 /// The font size a zoom draws text in.
 pub fn font_of(zoom: f64) -> i64 {

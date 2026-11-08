@@ -4,7 +4,7 @@
 use crate::kit;
 use crate::layout::*;
 use crate::layout::Size as PSize;
-use crate::layout::{Axis, t};
+use crate::layout::{Axis, Panels};
 use editor_core::panels;
 use input::Key;
 use pxui::theme;
@@ -330,7 +330,7 @@ pub fn update(
     groups: Option<&dyn Fn(&Leaf) -> Vec<f64>>,
     key_of: Option<&dyn Fn(&str) -> String>,
     focus: Option<&Path>,
-    tree: &t,
+    tree: &Panels,
     ui: &mut Ui,
     frame: &frame::t,
 ) -> Vec<Intent> {
@@ -786,7 +786,7 @@ pub fn drop_targets(ui: &mut Ui, dragging: Option<(Path, bool)>, geometry: &Geom
 
 /// The draggable gutters, wider than they are drawn. Build them after the panes so they sit on
 /// top of the neighbours' hit rectangles.
-pub fn splitters(state: Option<&dyn Fn(&[usize]) -> panels::State>, hidden: Option<&[Panel]>, tree: &t, ui: &mut Ui, frame: &frame::t) -> Vec<Intent> {
+pub fn splitters(state: Option<&dyn Fn(&[usize]) -> panels::State>, hidden: Option<&[Panel]>, tree: &Panels, ui: &mut Ui, frame: &frame::t) -> Vec<Intent> {
     let state: &dyn Fn(&[usize]) -> panels::State = state.unwrap_or(&|_: &[usize]| panels::default_state());
     let mut intents: Vec<Intent> = Vec::new();
     let geo = geometry(Some(state), hidden, tree, frame);

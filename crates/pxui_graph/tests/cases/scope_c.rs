@@ -47,7 +47,7 @@ fn records(nodes: &[p::Node]) -> Vec<p::Node> {
 fn add_row(view: &scope::Pane, sc: &p::Scope, path: &[String]) -> (i64, i64) {
     let n = find_node(&sc.nodes, path).expect("node");
     let i = n.rows.iter().position(|r| r.kind == p::RowKind::Add).expect("add row");
-    ipt(scope::Inspect::row_center(view, path, i).expect("row center"))
+    ipt(scope::inspect::row_center(view, path, i).expect("row center"))
 }
 
 fn scope_gestures_3() {
@@ -60,16 +60,16 @@ fn scope_gestures_3() {
     let widths = path(&["kit", "widths"]);
     let node = p::find(&kit_scope, &widths).expect("widths");
     let add = node.rows.iter().position(|r| r.kind == p::RowKind::Add).expect("add");
-    let (ax, ay) = scope::Inspect::row_center(&view, &widths, add).expect("c");
+    let (ax, ay) = scope::inspect::row_center(&view, &widths, add).expect("c");
     let (_, changes) = g::scope_click(&mut ui, view.clone(), (ax as i64, ay as i64));
     check(changes.contains(&syn(Op::AddItem { node: widths.clone() })), "the + item row did not become Add_item");
     let (bx, _by, bw, _) = g::center_of(&view, &widths);
     let second = node.rows.iter().position(|r| r.key == ArgKey::Pos(1)).expect("second");
     let ux = bx + bw - (14.0 * scope::zoom(&view));
-    let uy = scope::Inspect::row_center(&view, &widths, second).expect("c").1;
+    let uy = scope::inspect::row_center(&view, &widths, second).expect("c").1;
     let (_, changes) = g::scope_click(&mut ui, view.clone(), (ux as i64, uy as i64));
     check(changes.contains(&syn(Op::MoveItem { node: widths.clone(), pos: 1 })), "the row arrow did not become Move_item");
-    let hover = (scope::Inspect::row_center(&view, &widths, second).expect("c").0 as i64, uy as i64);
+    let hover = (scope::inspect::row_center(&view, &widths, second).expect("c").0 as i64, uy as i64);
     let (hovered, _) = scope_step(&mut ui, view.clone(), &g::frame(hover, Vec::new(), vec![mouse_move(hover)]));
     check(scope::run_command(hovered.clone(), Command::Item_up).1 == vec![syn(Op::MoveItem { node: widths.clone(), pos: 1 })], "Alt-Up: Move_item");
     check(scope::run_command(hovered.clone(), Command::Item_down).1 == vec![syn(Op::MoveItem { node: widths.clone(), pos: 2 })], "Alt-Down: Move_item");
@@ -82,7 +82,7 @@ fn scope_gestures_3() {
     match records(&kit_scope.nodes).first() {
         Some(record) => {
             let add = record.rows.iter().position(|r| r.kind == p::RowKind::Add).expect("add");
-            if let Some((rx, ry)) = scope::Inspect::row_center(&view, &record.path, add) {
+            if let Some((rx, ry)) = scope::inspect::row_center(&view, &record.path, add) {
                 let (_, changes) = g::scope_click(&mut ui, view.clone(), (rx as i64, ry as i64));
                 check(
                     changes.iter().any(|c| matches!(c, Change::Syntax_edit(Op::AddField { node, .. }) if *node == record.path)),
@@ -98,15 +98,15 @@ fn scope_gestures_3() {
     let (rview, _) = scope_step(&mut ui, rview, &frame0());
     let rn = p::find(&rscope, &path(&["g", "r"])).expect("r");
     let ri = rn.rows.iter().position(|r| r.kind == p::RowKind::Add).expect("add");
-    let (rx, ry) = scope::Inspect::row_center(&rview, &path(&["g", "r"]), ri).expect("c");
+    let (rx, ry) = scope::inspect::row_center(&rview, &path(&["g", "r"]), ri).expect("c");
     let (_, changes) = g::scope_click(&mut ui, rview, (rx as i64, ry as i64));
     check(changes.iter().any(|c| matches!(c, Change::Syntax_edit(Op::AddField { name, .. }) if name == "f1")), "the + field row did not pick the first unused name");
     // a wire taken off a variadic input takes the item with it: no nil is left behind
     let mw = checked("(workspace m (graph g :context sop (let* [a (sop/box) b (sop/box) m (sop/merge a b)] m)))");
     let mview = g::settled(&mut ui, g::scope_view(&mw, "g").0);
     let target = Some((path(&["g", "m"]), ArgKey::Pos(1)));
-    let wi = (0..scope::Inspect::wire_count(&mview)).find(|i| scope::Inspect::wire_target(&mview, *i) == target).expect("wire");
-    let (wx, wy) = scope::Inspect::wire_midpoint(&mview, wi).expect("mid");
+    let wi = (0..scope::inspect::wire_count(&mview)).find(|i| scope::inspect::wire_target(&mview, *i) == target).expect("wire");
+    let (wx, wy) = scope::inspect::wire_midpoint(&mview, wi).expect("mid");
     let (picked, _) = g::scope_click(&mut ui, mview, (wx as i64, wy as i64));
     check(
         scope::run_command(picked, Command::Delete).1 == vec![syn(Op::Disconnect { node: path(&["g", "m"]), key: ArgKey::Pos(1), fallback: None })],
@@ -132,7 +132,7 @@ fn scope_gestures_3() {
     // a click on the name a row reads selects that binding, so the inspector follows it
     let ys = p::find(&cscope, &path(&["g", "ys"])).expect("ys");
     let ri = ys.rows.iter().position(|r| r.chip == p::Chip::Name("xs".into())).expect("xs row");
-    let (x, y) = scope::Inspect::ref_chip(&cview, &path(&["g", "ys"]), ri).expect("chip");
+    let (x, y) = scope::inspect::ref_chip(&cview, &path(&["g", "ys"]), ri).expect("chip");
     let (_, changes) = g::scope_click(&mut ui, cview, (x as i64, y as i64));
     check(changes.contains(&Change::Selected(vec![path(&["g", "xs"])])), "a click on a read name did not select its binding");
     // a click on an expression chip selects its card and the row, [holder @ [":" ^ label]]
@@ -142,7 +142,7 @@ fn scope_gestures_3() {
     let eb = p::find(&escope, &path(&["g", "b"])).expect("b");
     let ei = eb.rows.iter().position(|r| matches!(r.chip, p::Chip::Inline { .. })).expect("inline");
     let label = eb.rows[ei].label.clone();
-    let (x, y) = scope::Inspect::expr_chip(&eview, &path(&["g", "b"]), ei).expect("chip");
+    let (x, y) = scope::inspect::expr_chip(&eview, &path(&["g", "b"]), ei).expect("chip");
     let (eview, changes) = g::scope_click(&mut ui, eview, (x as i64, y as i64));
     let want = vec![path(&["g", "b"]), vec!["g".to_owned(), "b".to_owned(), format!(":{}", label)]];
     check(changes.contains(&Change::Selected(want.clone())), "a click on an expression chip did not select its row");
@@ -226,8 +226,8 @@ fn scope_gestures_4() {
     let (carried, _) = scope_step(&mut ui, framed.clone(), &g::frame(title_at, Vec::new(), vec![mouse_move(title_at), mouse_press(MouseButton::LeftButton, title_at)]));
     let (carried, _) = scope_step(&mut ui, carried, &g::frame(towards, Vec::new(), vec![mouse_move(towards)]));
     let (carried, _) = scope_step(&mut ui, carried, &g::frame(towards, Vec::new(), Vec::new()));
-    let moved_box = scope::Inspect::box_of(&carried, &heart);
-    let still_box = scope::Inspect::box_of(&framed, &heart);
+    let moved_box = scope::inspect::box_of(&carried, &heart);
+    let still_box = scope::inspect::box_of(&framed, &heart);
     check(matches!((moved_box, still_box), (Some(m), Some(s0)) if m.0 > s0.0 + 10.0), "the nodes did not travel with the frame while it was dragged");
     let (_, changes) = scope_step(&mut ui, carried, &g::frame(towards, Vec::new(), vec![mouse_release(MouseButton::LeftButton, towards)]));
     let placed: Vec<&Vec<(Vec<String>, f64, f64)>> = changes.iter().filter_map(|c| if let Change::Moved(m) = c { Some(m) } else { None }).collect();
@@ -248,7 +248,7 @@ fn scope_gestures_4() {
     // f frames the selection, with nothing selected all of it
     let far = scope::with_bounds(0, 0, 400, 300, framed.clone());
     let zoomed = scope::run_command(scope::select(vec![heart.clone()], far.clone()), Command::Frame_selection).0;
-    match scope::Inspect::box_of(&zoomed, &heart) {
+    match scope::inspect::box_of(&zoomed, &heart) {
         Some((x, y, w2, h2)) => check(x >= 0.0 && y >= 0.0 && x + w2 <= 400.0 && y + h2 <= 300.0 && w2 * h2 > 0.0, "framing the selection left the node out of view"),
         None => fail("the framed node has no box"),
     }
@@ -259,7 +259,7 @@ fn scope_gestures_4() {
     // marquee: a drag on empty canvas selects the nodes of one scope it covers; Shift adds
     let view = g::settled(&mut ui, g::scope_view(&w, "flower").0);
     let sc = p::of_graph(&scope_catalog(), &w, "flower").expect("flower");
-    let boxes: Vec<(f64, f64, f64, f64)> = sc.nodes.iter().map(|n| scope::Inspect::box_of(&view, &n.path).expect("box")).collect();
+    let boxes: Vec<(f64, f64, f64, f64)> = sc.nodes.iter().map(|n| scope::inspect::box_of(&view, &n.path).expect("box")).collect();
     let x0 = boxes.iter().fold(f64::INFINITY, |a, b| a.min(b.0)) - 8.0;
     let y0 = boxes.iter().fold(f64::INFINITY, |a, b| a.min(b.1)) - 8.0;
     let x1 = boxes.iter().fold(f64::NEG_INFINITY, |a, b| a.max(b.0 + b.2)) + 8.0;
@@ -272,7 +272,7 @@ fn scope_gestures_4() {
     check(covered.len() >= 4 && covered.contains(&heart), "a marquee over the graph did not select its nodes");
     check(changes.iter().any(|c| matches!(c, Change::Selected(l) if l.contains(&heart))), "a marquee did not emit Selected");
     let view = g::settled(&mut ui, scope::select(vec![heart.clone()], g::scope_view(&w, "flower").0));
-    let (rx, ry, rw, rh) = scope::Inspect::box_of(&view, &path(&["flower", "result"])).expect("result");
+    let (rx, ry, rw, rh) = scope::inspect::box_of(&view, &path(&["flower", "result"])).expect("result");
     let ra = ((rx - 4.0) as i64, (ry - 4.0) as i64);
     let rb = ((rx + rw + 4.0) as i64, (ry + rh + 4.0) as i64);
     let (view, _) = drag(&mut ui, view, true, ra, rb);
@@ -291,7 +291,7 @@ fn scope_gestures_4() {
         let opts = ScopeOpts { level: Rc::new(move |_: &[String]| Some((level, true))), ..ScopeOpts::default() };
         let view = scope::with_scope(opts, "g", sc.clone(), scope::create(Some(3000), Some(2000)));
         let view = g::settled(&mut ui, view);
-        let (x, y, wd, h) = scope::Inspect::box_of(&view, &result).expect("box");
+        let (x, y, wd, h) = scope::inspect::box_of(&view, &result).expect("box");
         let a = ((x + (wd / 2.0) - 6.0) as i64, (y - 12.0) as i64);
         let b = ((x + (wd / 2.0) + 6.0) as i64, (y + h + 12.0) as i64);
         for (a, b) in [(a, b), (b, a)] {

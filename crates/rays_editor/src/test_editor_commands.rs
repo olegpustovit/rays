@@ -17,7 +17,7 @@ fn every_command_names_its_action_and_scope() {
     // the leader keys are listed by the leader sheet
     let save = find("preset.save")[0];
     assert_eq!(save.trigger, Some(Trigger::Leader("s".to_string())));
-    assert!(save.guide.contains(&editor_core::guide_context::t::Leader));
+    assert!(save.guide.contains(&editor_core::guide_context::GuideContext::Leader));
     // the graph pane's own keys carry the pane as their scope
     let tab = find("graph.add-after")[0];
     assert_eq!((tab.scope.clone(), c::action_of(tab).clone()), (Some(Panel::Graph), c::action::Add_node));

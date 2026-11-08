@@ -111,7 +111,7 @@ pub struct ViewRoot {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Switch {
-    pub layouts: Vec<panels::t>,
+    pub layouts: Vec<panels::Panels>,
     pub active: i64,
 }
 
@@ -133,7 +133,7 @@ pub struct Start {
 /// scene other than the default one, the scene objects of that instance.
 #[derive(Clone)]
 pub struct Shell {
-    pub tree: panels::t,
+    pub tree: panels::Panels,
     pub origins: Vec<(panels::Path, Origin)>,
     pub named: Vec<(panels::Path, String)>,
     /// The bindings several leaves are made from: those leaves are keyed by place.

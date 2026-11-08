@@ -50,8 +50,8 @@ pub fn run_ops() {
     let clamped = tree(&ok("Resize panel", L::SetLayoutSize { node: p(&["editor", "left"]), size: LSize::Ratio(5.) }));
     check(
         match &clamped {
-            panels::t::Split { b, .. } => match &**b {
-                panels::t::Split { a, .. } => matches!(&**a, panels::t::Split { size: Size::Ratio(x), .. } if *x == 0.9),
+            panels::Panels::Split { b, .. } => match &**b {
+                panels::Panels::Split { a, .. } => matches!(&**a, panels::Panels::Split { size: Size::Ratio(x), .. } if *x == 0.9),
                 _ => false,
             },
             _ => false,

@@ -4,7 +4,7 @@
 use crate::image;
 use renderer::side_lru::{self, Table, TableKey};
 use rays_math::color;
-use runtime_resources::Font as RFont;
+use runtime_resources::font as RFont;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -31,7 +31,7 @@ pub enum alignment {
 const TEXT_CACHE_CAPACITY: i64 = 256;
 
 pub struct font_data {
-    resource: RefCell<RFont::t>,
+    resource: RefCell<RFont::Font>,
     generation: Cell<i64>,
     cache: RefCell<Table>,
 }
@@ -66,7 +66,7 @@ fn message(operation: &str, error: &runtime_resources::error) -> String {
     format!("{operation}: {}", ogpu_core::error::to_string(error))
 }
 
-fn make(resource: Result<RFont::t, runtime_resources::error>) -> Result<t, String> {
+fn make(resource: Result<RFont::Font, runtime_resources::error>) -> Result<t, String> {
     match resource {
         Ok(resource) => Ok(t(Rc::new(font_data {
             resource: RefCell::new(resource),
@@ -106,14 +106,14 @@ fn paint(density: i64, wrap: Option<i64>, align: alignment, font: &t, text: &str
         Ok(Some(mut value)) => {
             // `into_image` hands the pixels over; the text is then dead, destroy is a no-op.
             let result = image_of_text(&mut value);
-            let _ = runtime_resources::Text::destroy(&mut value);
+            let _ = runtime_resources::text::destroy(&mut value);
             result
         }
     }
 }
 
-fn image_of_text(text: &mut runtime_resources::Text::t) -> Result<image::t, String> {
-    match runtime_resources::Text::into_image(text) {
+fn image_of_text(text: &mut runtime_resources::text::Text) -> Result<image::t, String> {
+    match runtime_resources::text::into_image(text) {
         Ok(img) => image::of_resource(img),
         Err(error) => Err(message("Font.image", &error)),
     }
@@ -397,9 +397,9 @@ pub mod Raster {
         match rendered {
             None => Ok(glyph { glyph_width: 0, glyph_height: 0, glyph_advance: metrics.advance, glyph_alpha: Vec::new() }),
             Some(mut rendered) => {
-                let size = runtime_resources::Text::size(&rendered);
-                let pixels = runtime_resources::Text::pixels(&rendered);
-                let _ = runtime_resources::Text::destroy(&mut rendered);
+                let size = runtime_resources::text::size(&rendered);
+                let pixels = runtime_resources::text::pixels(&rendered);
+                let _ = runtime_resources::text::destroy(&mut rendered);
                 match (size, pixels) {
                     (Ok((width, height)), Ok(rgba)) => Ok(glyph {
                         glyph_width: width,
