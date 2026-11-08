@@ -438,7 +438,7 @@ struct Arena {
     nodes: Shared<Vec<Node>>, authored: Vec<i64>, cells: Shared<Vec<GraphCell>>, cache: Shared<HashMap<String,usize>>, states: Shared<Vec<Value>>, records: Shared<BTreeMap<Path, Vec<(Vec<i64>,Value)>>>,
     observed: Vec<ResidualId>, res_log: Shared<Vec<ResidualId>>, fn_log: Shared<Vec<FnId>>, approx: u64, policies: Shared<HashMap<String, Option<Arc<InlineParameterPolicy>>>>,
     record: bool, time: Option<Frame>, resolve: Option<Arc<dyn Fn(&Value)->Result<Value,Diagnostic> + Send + Sync>>,
-    state: Option<State>, elems: BTreeMap<String,Value>, step_count: usize, budget: usize, fn_calls: Shared<IdMap<FnId, i64>>, memo: Shared<IdMap<ResidualId, Value>>, interrupt: Option<Interrupt>, owns_index: bool, lent: u32, bases: Shared<HashSet<Arc<Path>>>, ops_seen: Shared<HashMap<String, (&'static str, OpRef)>>, names: Shared<HashSet<Arc<str>>>, arg_pool: Shared<AddrMap<Vec<(String, Value)>>>, routes: Shared<AddrMap<(usize, Seg, Route, Arc<Path>)>>, plans: Shared<AddrMap<CodePlan>>, fn_plans: Shared<AddrMap<CodePlan>>, pure: Shared<AddrMap<(&'static str, Option<usize>)>>, terms: Shared<AddrMap<(Stamp, Arc<Term>)>>, frees: Shared<AddrMap<(Stamp, Arc<Vec<Arc<str>>>)>>,
+    state: Option<State>, elems: BTreeMap<String,Value>, step_count: usize, budget: usize, fn_calls: Shared<IdMap<FnId, i64>>, memo: Shared<IdMap<ResidualId, Value>>, interrupt: Option<Interrupt>, owns_index: bool, lent: u32, bases: Shared<HashSet<Arc<Path>>>, ops_seen: Shared<HashMap<String, (&'static str, OpRef)>>, names: Shared<HashSet<Arc<str>>>, arg_pool: Shared<AddrMap<Vec<(String, Value)>>>, routes: Shared<AddrMap<(usize, Seg, Route, Arc<Path>, Arc<Path>)>>, plans: Shared<AddrMap<CodePlan>>, fn_plans: Shared<AddrMap<CodePlan>>, pure: Shared<AddrMap<(&'static str, Option<usize>)>>, terms: Shared<AddrMap<(Stamp, Arc<Term>)>>, frees: Shared<AddrMap<(Stamp, Arc<Vec<Arc<str>>>)>>,
     packed_bases: Shared<IdMap<(u64, flow_check::term_arena::PathId), Arc<Path>>>,
     // while an inlined body with a live argument evaluates: its deferred checks, oldest first (OCaml st.guards, newest first). A test that reads
     // only frame facts and selects an arm that fails statically is checked when the card cooks: the card fails with that diagnostic when the test is that bool
@@ -617,11 +617,12 @@ fn eval_named(a: &mut Arena, c: &ExecCtx, name: &str, env: &Env, t: &Term) -> Re
 fn sub_at(a: &mut Arena, c: &ExecCtx, t: &Term, seg: Seg) -> ExecCtx {
     let key = t.identity();
     let parent = c.route.0.as_ref().map_or(0, |node| Arc::as_ptr(node) as usize);
-    if let Some((at, known, route, site)) = a.routes.get(&key) {
-        if *at == parent && known.same(&seg) { let mut cx = c.clone(); cx.route = route.clone(); cx.site = site.clone(); return cx; }
+    // the site is the parent's site plus the segment: valid only under the same parent site (the same route node can sit under another prefix or base)
+    if let Some((at, known, route, site, under)) = a.routes.get(&key) {
+        if *at == parent && Arc::ptr_eq(under, &c.site) && known.same(&seg) { let mut cx = c.clone(); cx.route = route.clone(); cx.site = site.clone(); return cx; }
     }
     let cx = sub(a, c, seg.clone());
-    a.routes.insert(key, (parent, seg, cx.route.clone(), cx.site.clone()));
+    a.routes.insert(key, (parent, seg, cx.route.clone(), cx.site.clone(), c.site.clone()));
     cx
 }
 fn sub(a: &mut Arena, c: &ExecCtx, seg: Seg) -> ExecCtx {
@@ -3515,6 +3516,7 @@ pub mod Residual {
         let mut context = residual.ctx;
         context.inst = instance;
         context.prefix = Arc::new(prefix);
+        sync_site(arena, &mut context);
         let mut builder = TermBuilder::new();
         let form = builder.import_form(&body.form());
         let body_id = builder.import(&body);
