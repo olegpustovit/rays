@@ -11,7 +11,6 @@ use rdk_core::{attribute, cancel, edge_group, error, geometry, group, packed, ra
 const OPERATION: &str = "materialize_instances";
 const NAME: &str = "Rdk.Instance_copy.materialize_instances";
 /// `Sys.max_array_length` on a 64-bit OCaml.
-const MAX_ARRAY_LENGTH: i64 = (1 << 54) - 1;
 const DEFAULT_GRAIN: i64 = 16_384;
 
 
@@ -300,11 +299,9 @@ fn transform_single_instance(
 }
 
 fn product(label: &str, total: i64, count: i64) -> Result<i64, error::T> {
-    if count != 0 && total > MAX_ARRAY_LENGTH / count {
-        Err(fail(format!("{NAME}: {label} output exceeds array limits")))
-    } else {
-        Ok(total * count)
-    }
+    total
+        .checked_mul(count)
+        .ok_or_else(|| fail(format!("{NAME}: {label} output exceeds array limits")))
 }
 
 fn materialize(transforms: &[mat4::T], geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
@@ -333,9 +330,6 @@ fn materialize(transforms: &[mat4::T], geometry_value: &geometry::T) -> Result<g
     let output_points = product("point", total, source_points)?;
     let output_vertices = product("vertex", total, source_vertices)?;
     let output_primitives = product("primitive", total, source_primitives)?;
-    if output_primitives == MAX_ARRAY_LENGTH {
-        return Err(fail(format!("{NAME}: primitive-offset output exceeds array limits")));
-    }
     let source_positions = packed::Float3::View::view(geometry::positions(geometry_value)).map_err(lift)?;
     let rows: Vec<Rows> = matrices.iter().map(mat4::to_rows).collect();
     let (x, y, z) = build_xyz(cancel_value, grain, output_points, &|index| {

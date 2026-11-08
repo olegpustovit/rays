@@ -12,7 +12,6 @@ use crate::implicit_point::{self, Error as PointError};
 use crate::planar_cdt;
 use crate::predicates::Sign;
 
-const MAX_ARRAY_LENGTH: i64 = (1 << 54) - 1;
 const MASK63: u64 = (1u64 << 63) - 1;
 const MAX_INT: i64 = (1 << 62) - 1;
 
@@ -372,17 +371,17 @@ struct Buckets {
 }
 
 fn buckets_capacity(expected: i64) -> Result<usize, String> {
-    if expected < 0 || expected > MAX_ARRAY_LENGTH / 2 {
+    if expected < 0 {
         return Err("Planar refinement coordinate table exceeds array limits".to_owned());
     }
+    let needed = std::cmp::max(16, expected.saturating_mul(2));
     let mut capacity: i64 = 16;
-    while capacity < std::cmp::max(16, expected * 2) {
-        if capacity > MAX_ARRAY_LENGTH / 2 {
-            return Err("Planar refinement coordinate table exceeds array limits".to_owned());
-        }
-        capacity *= 2;
+    while capacity < needed {
+        capacity = capacity
+            .checked_mul(2)
+            .ok_or_else(|| "Planar refinement coordinate table exceeds array limits".to_owned())?;
     }
-    Ok(capacity as usize)
+    usize::try_from(capacity).map_err(|_| "Planar refinement coordinate table exceeds array limits".to_owned())
 }
 
 fn buckets_create(expected: i64) -> Result<Buckets, String> {
@@ -415,10 +414,11 @@ fn buckets_slot(keys: &[i64], key: i64) -> usize {
 }
 
 fn buckets_grow(table: &mut Buckets) -> Result<(), String> {
-    if table.keys.len() as i64 > MAX_ARRAY_LENGTH / 2 {
-        return Err("Planar refinement coordinate table exceeds array limits".to_owned());
-    }
-    let size = table.keys.len() * 2;
+    let size = table
+        .keys
+        .len()
+        .checked_mul(2)
+        .ok_or_else(|| "Planar refinement coordinate table exceeds array limits".to_owned())?;
     let mut keys = vec![-1i64; size];
     let mut heads = vec![-1i64; size];
     for index in 0..table.keys.len() {
@@ -438,10 +438,9 @@ fn buckets_ensure_next(table: &mut Buckets, index: i64) -> Result<(), String> {
     if index >= table.next.len() as i64 {
         let mut size = table.next.len() as i64;
         while size <= index {
-            if size > MAX_ARRAY_LENGTH / 2 {
-                return Err("Planar refinement coordinate chain exceeds array limits".to_owned());
-            }
-            size *= 2;
+            size = size
+                .checked_mul(2)
+                .ok_or_else(|| "Planar refinement coordinate chain exceeds array limits".to_owned())?;
         }
         table.next.resize(size as usize, -1);
     }
@@ -598,9 +597,6 @@ fn mesh_index(
     constraints: &[i64],
 ) -> Result<MeshIndex, String> {
     let triangle_count = triangles.len() / 3;
-    if triangle_count as i64 > MAX_ARRAY_LENGTH / 3 {
-        return Err("Planar refinement edge cardinality exceeds array limits".to_owned());
-    }
     let edge_count = triangle_count * 3;
     let mut edge_a = vec![0i64; edge_count];
     let mut edge_b = vec![0i64; edge_count];
@@ -641,9 +637,6 @@ fn mesh_index(
         incidence[last] += 1;
     }
     let unique = unique_a.len();
-    if unique as i64 > MAX_ARRAY_LENGTH / 2 {
-        return Err("Planar refinement neighbor cardinality exceeds array limits".to_owned());
-    }
     let pc = point_count as usize;
     let mut neighbor_counts = vec![0i64; pc];
     let mut fixed = vec![0u8; pc];
@@ -820,7 +813,7 @@ fn run(
         return Err("Planar refinement constraint winding array is malformed".to_owned());
     }
     let initial_len = initial_points.len() as i64;
-    if initial_len > MAX_ARRAY_LENGTH - maximum_new_points {
+    if initial_len.checked_add(maximum_new_points).is_none() {
         return Err("Planar refinement point limit exceeds array limits".to_owned());
     }
     // OCaml `initial_points.(0)` raises Invalid_argument "index out of bounds" when empty.

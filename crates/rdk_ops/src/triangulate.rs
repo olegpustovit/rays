@@ -5,7 +5,6 @@ use rdk_core::{
 use rdk_geom::point_grid::float_max;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 
-const MAX_ARRAY_LENGTH: i64 = (1i64 << 54) - 1;
 const PREFIX: &str = "Rdk_mesh.Triangulate.triangulate: ";
 
 pub struct Params {
@@ -161,9 +160,13 @@ fn triangulate(
         cancel::poll(cancel_value, primitive as i64, 4095)?;
         let next_primitives = primitive_bases[primitive + 1];
         let next_vertices = if full_selection { next_primitives * 3 } else { vertex_bases[primitive + 1] };
-        if primitive_bases[primitive] > MAX_ARRAY_LENGTH - next_primitives
-            || (!full_selection && vertex_bases[primitive] > MAX_ARRAY_LENGTH - next_vertices)
-            || (full_selection && primitive_bases[primitive] > (MAX_ARRAY_LENGTH / 3) - next_primitives)
+        if primitive_bases[primitive].checked_add(next_primitives).is_none()
+            || (!full_selection && vertex_bases[primitive].checked_add(next_vertices).is_none())
+            || (full_selection
+                && next_primitives
+                    .checked_mul(3)
+                    .and_then(|extra| primitive_bases[primitive].checked_add(extra))
+                    .is_none())
         {
             return Err(too_big());
         }
@@ -175,9 +178,6 @@ fn triangulate(
     let output_primitives = primitive_bases[primitive_count];
     let output_vertex_count =
         if full_selection { primitive_bases[primitive_count] * 3 } else { vertex_bases[primitive_count] };
-    if output_primitives >= MAX_ARRAY_LENGTH {
-        return Err(too_big());
-    }
     let output_vertices = AInts::new(output_vertex_count, 0);
     let vertex_map = AInts::new(output_vertex_count, 0);
     let output_offsets = AInts::new(output_primitives + 1, 0);

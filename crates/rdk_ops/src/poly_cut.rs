@@ -14,7 +14,6 @@ use rdk_core::{
 use crate::curve_join;
 use crate::transform_ops::ocaml_quote;
 
-const MAX_ARRAY_LENGTH: i64 = (1_i64 << 54) - 1;
 const OPEN_POLYLINE: u8 = 1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -483,7 +482,7 @@ fn edge_remove_fast(
     let mut primitive_bases = vec![0_i64; primitive_count as usize + 1];
     for primitive in 0..primitive_count as usize {
         let count = fragment_counts[primitive];
-        if primitive_bases[primitive] > MAX_ARRAY_LENGTH - count {
+        if primitive_bases[primitive].checked_add(count).is_none() {
             return Err(fail("output primitive cardinality exceeds array limits".to_owned()));
         }
         primitive_bases[primitive + 1] = primitive_bases[primitive] + count;
@@ -562,7 +561,7 @@ fn edge_remove_fast(
     let mut primitive_offsets = vec![0_i64; opc + 1];
     for primitive in 0..opc {
         let size = fragment_sizes[primitive];
-        if primitive_offsets[primitive] > MAX_ARRAY_LENGTH - size {
+        if primitive_offsets[primitive].checked_add(size).is_none() {
             return Err(fail("output corner cardinality exceeds array limits".to_owned()));
         }
         primitive_offsets[primitive + 1] = primitive_offsets[primitive] + size;
@@ -866,7 +865,7 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
                                 (true, -1.0, 0, 0)
                             } else {
                                 let ratio = distance / *threshold;
-                                if !ratio.is_finite() || ratio > MAX_ARRAY_LENGTH as f64 {
+                                if !ratio.is_finite() || ratio > i64::MAX as f64 {
                                     if first_error < 0 {
                                         first_error = vertex;
                                         first_kind = 3;
@@ -1027,12 +1026,12 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
         let mut count = 0_i64;
         for vertex in first..last {
             let parts = edge_parts[vertex as usize];
-            if count > MAX_ARRAY_LENGTH - parts {
+            if count.checked_add(parts).is_none() {
                 return Err(fail("expanded cut-segment cardinality exceeds array limits".to_owned()));
             }
             count += parts;
         }
-        if primitive_segment_offsets[primitive] > MAX_ARRAY_LENGTH - count {
+        if primitive_segment_offsets[primitive].checked_add(count).is_none() {
             return Err(fail("expanded cut-segment cardinality exceeds array limits".to_owned()));
         }
         primitive_segment_offsets[primitive + 1] = primitive_segment_offsets[primitive] + count;
@@ -1101,7 +1100,7 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
     let mut primitive_bases = vec![0_i64; pc + 1];
     for primitive in 0..pc {
         let count = fragment_counts[primitive];
-        if primitive_bases[primitive] > MAX_ARRAY_LENGTH - count {
+        if primitive_bases[primitive].checked_add(count).is_none() {
             return Err(fail("output primitive cardinality exceeds array limits".to_owned()));
         }
         primitive_bases[primitive + 1] = primitive_bases[primitive] + count;
@@ -1166,7 +1165,7 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
     let mut primitive_offsets = vec![0_i64; opc + 1];
     for primitive in 0..opc {
         let size = fragment_sizes[primitive];
-        if primitive_offsets[primitive] > MAX_ARRAY_LENGTH - size {
+        if primitive_offsets[primitive].checked_add(size).is_none() {
             return Err(fail("output corner cardinality exceeds array limits".to_owned()));
         }
         primitive_offsets[primitive + 1] = primitive_offsets[primitive] + size;
@@ -1269,7 +1268,7 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
             base_point_count += 1;
         }
     }
-    if base_point_count > MAX_ARRAY_LENGTH - generated_count {
+    if base_point_count.checked_add(generated_count).is_none() {
         return Err(fail("output point cardinality exceeds array limits".to_owned()));
     }
     let output_point_count = base_point_count + generated_count;

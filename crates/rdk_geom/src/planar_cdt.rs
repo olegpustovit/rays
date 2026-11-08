@@ -11,8 +11,6 @@ use crate::predicates::Sign;
 
 const MAX_INT: i64 = (1 << 62) - 1;
 const MIN_INT: i64 = -(1 << 62);
-const MAX_ARRAY_LENGTH: i64 = (1 << 54) - 1;
-
 
 pub struct T {
     triangle_points: Arc<[i64]>,
@@ -81,18 +79,17 @@ struct Table {
 }
 
 fn table_capacity_for(expected: i64) -> Result<usize, String> {
-    if expected < 0 || expected > MAX_ARRAY_LENGTH / 2 {
+    if expected < 0 {
         return Err(err_message("Planar CDT edge cardinality exceeds array limits"));
     }
-    let needed = std::cmp::max(16, expected * 2);
+    let needed = std::cmp::max(16, expected.saturating_mul(2));
     let mut capacity: i64 = 16;
     while capacity < needed {
-        if capacity > MAX_ARRAY_LENGTH / 2 {
-            return Err(err_message("Planar CDT edge table exceeds array limits"));
-        }
-        capacity *= 2;
+        capacity = capacity
+            .checked_mul(2)
+            .ok_or_else(|| err_message("Planar CDT edge table exceeds array limits"))?;
     }
-    Ok(capacity as usize)
+    usize::try_from(capacity).map_err(|_| err_message("Planar CDT edge table exceeds array limits"))
 }
 
 fn table_with_capacity(capacity: usize) -> Table {
@@ -232,10 +229,10 @@ fn table_prepare_insert(table: &mut Table) -> Result<(), String> {
     let capacity = table.keys.len() as i64;
     let used = table.edge_count + table.tombstone_count + 1;
     if used >= capacity - capacity / 3 {
-        if capacity > MAX_ARRAY_LENGTH / 2 {
-            return Err(err_message("Planar CDT edge table exceeds array limits"));
-        }
-        table_rehash(table, (capacity * 2) as usize)?;
+        let next = capacity
+            .checked_mul(2)
+            .ok_or_else(|| err_message("Planar CDT edge table exceeds array limits"))? as usize;
+        table_rehash(table, next)?;
     } else if table.tombstone_count > table.edge_count && table.tombstone_count > 64 {
         table_rehash(table, capacity as usize)?;
     }
@@ -316,11 +313,11 @@ fn checked_edge_capacity(triangle_capacity: i64) -> Result<i64, String> {
 }
 
 pub fn create_workspace(point_capacity: Option<i64>, triangle_capacity: i64) -> Result<Workspace, String> {
-    if triangle_capacity < 0 || triangle_capacity > MAX_ARRAY_LENGTH {
+    if triangle_capacity < 0 {
         return Err(err_message("Planar CDT workspace triangle capacity exceeds array limits"));
     }
     let point_capacity = point_capacity.unwrap_or(std::cmp::max(1, triangle_capacity + 2));
-    if point_capacity <= 0 || point_capacity > MAX_ARRAY_LENGTH {
+    if point_capacity <= 0 {
         return Err(err_message("Planar CDT workspace point capacity exceeds array limits"));
     }
     let capacity = std::cmp::max(1, triangle_capacity);
@@ -344,14 +341,11 @@ pub fn create_workspace(point_capacity: Option<i64>, triangle_capacity: i64) -> 
 fn ensure_workspace(workspace: &mut Workspace, required: i64) {
     let have = workspace.triangle_a.len() as i64;
     if required > have {
-        let mut capacity = have;
+        let mut capacity = have.max(1);
         while capacity < required {
-            if capacity > MAX_ARRAY_LENGTH / 2 {
-                capacity = required;
-            } else {
-                capacity = std::cmp::min(MAX_ARRAY_LENGTH, capacity * 2);
-            }
+            capacity = capacity.checked_mul(2).unwrap_or(required);
         }
+        capacity = capacity.max(required);
         workspace.triangle_a.resize(u(capacity), 0);
         workspace.triangle_b.resize(u(capacity), 0);
         workspace.triangle_c.resize(u(capacity), 0);
@@ -360,14 +354,11 @@ fn ensure_workspace(workspace: &mut Workspace, required: i64) {
 
 fn prepare_workspace_points(workspace: &mut Workspace, required: i64) {
     if required > workspace.key_stride {
-        let mut capacity = workspace.key_stride;
+        let mut capacity = workspace.key_stride.max(1);
         while capacity < required {
-            if capacity > MAX_ARRAY_LENGTH / 2 {
-                capacity = required;
-            } else {
-                capacity = std::cmp::min(MAX_ARRAY_LENGTH, capacity * 2);
-            }
+            capacity = capacity.checked_mul(2).unwrap_or(required);
         }
+        capacity = capacity.max(required);
         workspace.point_triangle = vec![-1; u(capacity)];
         workspace.key_stride = capacity;
     }
@@ -2095,9 +2086,6 @@ pub fn build(
     }
     let insert_points = insert_points.unwrap_or(&[]);
     let initial_triangle_count = triangle_points.len() / 3;
-    if insert_points.len() as i64 > (MAX_ARRAY_LENGTH - initial_triangle_count as i64) / 2 {
-        return Err(err_message("Planar CDT inserted-point cardinality exceeds array limits"));
-    }
     let all_true = |_: i64, _: i64, _: i64, _: i64| true;
     let overlap: &dyn Fn(i64, i64, i64, i64) -> bool = match bounds_overlap_fn {
         Some(f) => f,
