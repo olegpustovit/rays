@@ -8,7 +8,7 @@ use flow_check::workspace as w;
 use flow_eval as e;
 use flow_syntax::syntax;
 use flow_syntax::ty::Ty;
-use flow_syntax::value::Value;
+use flow_syntax::value::{Value, source_value};
 use rays_diagnostic::Diagnostic;
 use std::sync::Arc;
 
@@ -207,7 +207,7 @@ fn source_column_and_unsupported_producer() {
             let resolve: crate::core_exec::ResolveFn = {
                 let data = data.clone();
                 Arc::new(move |v: &Value| match v {
-                    Value::Source(name, _, args) if name == "fixture/column" && args.is_empty() => Ok(data.clone()),
+                    Value::Source(g) if g.name == "fixture/column" && g.fields.is_empty() => Ok(data.clone()),
                     _ => Err(flow_syntax::value::fail("E_DATA_SOURCE", "Unexpected reduction fixture source.")),
                 })
             };

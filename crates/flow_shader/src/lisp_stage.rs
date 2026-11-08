@@ -153,7 +153,7 @@ pub fn compile(shared: &[(String, i64)], declarations: &str, entry: &str) -> Res
                 out: Arc::new(move |_| Ok(out_ty.clone())),
                 shape: Shape::Struct { splice: false },
                 check: Arc::new(|_| Ok(())),
-                body: Arc::new(move |_, _, _| Ok(Value::Source(body_name.clone(), body_ty.clone(), vec![]))),
+                body: Arc::new(move |_, _, _| Ok(flow_syntax::value::source_value(body_name.clone(), body_ty.clone(), vec![]))),
                 ..noise3.clone()
             }
         })
@@ -194,8 +194,8 @@ pub fn compile(shared: &[(String, i64)], declarations: &str, entry: &str) -> Res
         bound.push(dummy(slot, ty)?);
     }
     let function = E::bind_captures(function, &|v: &Value| match v {
-        Value::Source(source, _, f) if f.is_empty() && source.starts_with("raster/buffer") => {
-            bound[source[13..].parse::<usize>().expect("buffer index")].clone()
+        Value::Source(g) if g.fields.is_empty() && g.name.starts_with("raster/buffer") => {
+            bound[g.name[13..].parse::<usize>().expect("buffer index")].clone()
         }
         other => other.clone(),
     });

@@ -617,7 +617,7 @@ fn cooked_geometry(a: &mut Arena, value: &Value) -> bool {
     match value {
         Value::Residual(id) if id.1 == a.id => own_res(a, id).is_some_and(|residual| *residual.term.ty() == flow_syntax::ty::geometry()),
         Value::Residual(id) => { let id = *id; lend(a, || slot_of(id.1).and_then(|home| peek(&home, |home| own_res(home, &id).map(|residual| *residual.term.ty() == flow_syntax::ty::geometry()))).unwrap_or(false)) }
-        v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_fields().unwrap().iter().any(|(_, value)| cooked_geometry(a, value)),
+        v @ (Value::Record(_) | Value::Struct(_)) => v.geo_fields().unwrap().iter().any(|(_, value)| cooked_geometry(a, value)),
         _ => false,
     }
 }
@@ -913,10 +913,10 @@ fn guardable(a: &mut Arena, v: &Value) -> bool {
                 seen.insert(*id);
                 own_res(a, id).is_some_and(|r| r.env.values().all(|v| free(a, v, seen)) && !reads_elem(&r.term))
             },
-            value if unresolved_data_source(value) => false,
+            value if value.is_data_source() => false,
             Value::Deferred(ty, _) => !flow_syntax::ty::is_cooked(ty),
             Value::List(xs) => xs.iter().all(|x| free(a, x, seen)),
-            v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_fields().unwrap().iter().all(|(_, v)| free(a, v, seen)),
+            v @ (Value::Record(_) | Value::Struct(_)) => v.geo_fields().unwrap().iter().all(|(_, v)| free(a, v, seen)),
             Value::Fn(id) => match own_fn(a, id) {
                 Some(Function::Closure(cl)) => { let cl = cl.clone(); cl.env.values().all(|v| free(a, v, seen)) && !reads_elem(&cl.body) }
                 Some(Function::Named(_)) => true,
@@ -999,13 +999,10 @@ fn kernel_value(a: &mut Arena, id: ResidualId, ty: &Ty) -> Option<Value> {
     if value::ty_of(&value) != *ty || value::validate(&value).is_err() { return None; }
     Some(value)
 }
-fn unresolved_data_source(value: &Value) -> bool {
-    matches!(value, Value::Source(_)) || matches!(value, Value::Struct(g) if matches!(g.ty, Ty::Array(_)))
-}
 fn concrete(a: &mut Arena, value: Value) -> Result<Value, Diagnostic> {
     match value {
         Value::Residual(id) => if a.time.is_none() { need_time() } else { force_res(a, id) },
-        value if unresolved_data_source(&value) => {
+        value if value.is_data_source() => {
             if a.time.is_none() { return need_time(); }
             resolve_source(a, &value)
         }
@@ -1807,7 +1804,7 @@ fn resolve_source(a: &mut Arena, source: &Value) -> Result<Value, Diagnostic> {
     let resolve = a.resolve.clone().ok_or_else(|| error("E_DATA_SOURCE", "This data source needs its host's cooked data."))?;
     let value = lend(a, || resolve(source))?;
     check_value_nesting(&value)?;
-    if unresolved_data_source(&value) { return eval_error("E_DATA_SOURCE", "The host returned an unresolved data source."); }
+    if value.is_data_source() { return eval_error("E_DATA_SOURCE", "The host returned an unresolved data source."); }
     if value::ty_of(source) != Ty::Any && value::ty_of(source) != value::ty_of(&value) { return eval_error("E_DATA_SOURCE", "The host returned a data source of the wrong type."); }
     value::validate(&value)?;
     Ok(value)
@@ -2759,7 +2756,7 @@ fn force_general(value: &Value, live: &Frame, state: Option<&State>, elems: Opti
             // OCaml's `go (force_res c r)`: a result that still holds residuals (captured record fields) is forced again.
             if is_live_value(&forced) { force_general(&forced, live, state, elems, resolve) } else { Ok(forced) }
         }
-        value if unresolved_data_source(value) => {
+        value if value.is_data_source() => {
             if let Some(slot) = arena_for_value(value) {
                 let (previous, saved_live) = peek(&slot, |arena| {
                     let previous = arena.state.clone();
@@ -2793,7 +2790,7 @@ fn force_general(value: &Value, live: &Frame, state: Option<&State>, elems: Opti
 fn resolve_source_with(resolve: &Arc<dyn Fn(&Value) -> Result<Value, Diagnostic> + Send + Sync>, source: &Value) -> Result<Value, Diagnostic> {
     let value = resolve(source)?;
     check_value_nesting(&value)?;
-    if unresolved_data_source(&value) { return eval_error("E_DATA_SOURCE", "The host returned an unresolved data source."); }
+    if value.is_data_source() { return eval_error("E_DATA_SOURCE", "The host returned an unresolved data source."); }
     if value::ty_of(source) != Ty::Any && value::ty_of(source) != value::ty_of(&value) { return eval_error("E_DATA_SOURCE", "The host returned a data source of the wrong type."); }
     value::validate(&value)?;
     Ok(value)
@@ -2842,7 +2839,8 @@ pub fn show(v: &Value) -> Vec<u8> { value::show_with(&|v| v.clone(), v) }
 pub fn is_live(value: &Value) -> bool { is_live_value(value) }
 pub fn is_live_value(value: &Value) -> bool {
     match value {
-        value if unresolved_data_source(value) => true,
+        Value::Residual(_) => true,
+        value if value.is_data_source() => true,
         Value::List(values) => values.iter().any(is_live_value),
         v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_fields().unwrap().iter().any(|(_, value)| is_live_value(value)),
         _ => false,
@@ -4214,7 +4212,7 @@ impl Run {
         let mut at = value;
         let mut owned;
         for field_name in fields {
-            if matches!(at, Value::Residual(_)) || unresolved_data_source(at) { return Err(Abandon); }
+            if matches!(at, Value::Residual(_)) || at.is_data_source() { return Err(Abandon); }
             match at {
                 Value::Record(entries) => at = &entries.iter().find(|(name, _)| name == field_name).ok_or(Abandon)?.1,
                 other => { owned = field(other.clone(), field_name, String::new).map_err(|_| Abandon)?; at = &owned; }

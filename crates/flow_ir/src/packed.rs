@@ -17,7 +17,7 @@ use flow_eval::{Live, State};
 use flow_syntax::context;
 use flow_syntax::packed_ops::{self, Binary, Comparison, Conversion, Integer, Unary};
 use flow_syntax::ty::Ty;
-use flow_syntax::value::{self, ResidualId, Value, struct_value, source_value};
+use flow_syntax::value::{self, ResidualId, Value, struct_value};
 use rays_diagnostic::Diagnostic;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -3929,7 +3929,7 @@ fn force_values(run: &Run, value: &Value, residual: &dyn Fn(ResidualId) -> Resul
             let forced = residual(*r)?;
             force_values(run, &forced, residual)
         }
-        value if matches!(value, Value::Source(_)) || matches!(value, Value::Struct(g) if matches!(g.ty, Ty::Array(_))) => {
+        value if value.is_data_source() => {
             let forced = reference(value)?;
             force_values(run, &forced, residual)
         }
@@ -4882,7 +4882,7 @@ pub mod host {
         // placeholder, bound there as the table, never read back
         let held = |value: &Value| -> Option<Value> {
             match (&o.resident, value) {
-                (Some(resident), value) if matches!(value, Value::Source(_)) || matches!(value, Value::Struct(g) if matches!(g.ty, Ty::Array(_))) => resident(value).map(|(p, _)| p),
+                (Some(resident), value) if value.is_data_source() => resident(value).map(|(p, _)| p),
                 _ => None,
             }
         };

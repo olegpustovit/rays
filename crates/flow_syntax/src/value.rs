@@ -78,6 +78,14 @@ impl Value {
             _ => None,
         }
     }
+    /// A host data source awaiting resolution: any `Source`, or a `Struct` of array type.
+    pub fn is_data_source(&self) -> bool {
+        match self {
+            Value::Source(_) => true,
+            Value::Struct(g) => matches!(g.ty, Ty::Array(_)),
+            _ => false,
+        }
+    }
 }
 
 fn diagnostic(code: &str, message: &str) -> Diagnostic {

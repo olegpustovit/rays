@@ -9,7 +9,7 @@ use crate::packed;
 use crate::test_support::*;
 use flow_eval as e;
 use flow_syntax::ty::{self, FnSignature, Ty};
-use flow_syntax::value::Value;
+use flow_syntax::value::{Value, source_value};
 use rays_diagnostic::Diagnostic;
 use std::sync::{Arc, Mutex};
 

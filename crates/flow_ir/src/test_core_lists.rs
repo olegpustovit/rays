@@ -200,16 +200,16 @@ fn known_5001_geometry_map_filter_captures() {
     let n = if std::env::var("RAYS_SLOW").as_deref() == Ok("1") { 5001 } else { 257 };
     let xs: Vec<Value> = (0..n).map(|i| if i % 11 == 10 { Value::No_geo } else { Value::Deferred(ty::geometry(), if i % 2 == 0 { 17 } else { 23 }) }).collect();
     let resolve: crate::core_exec::ResolveFn = Arc::new(|value: &Value| match value {
-        Value::Source(name, ty, args) if name == "$core/cooked" && *ty == ty::geometry() => match args.as_slice() {
-            [(_, Value::Int(id))] => Ok(Value::Deferred(ty.clone(), *id)),
-            _ => Err(ts_error(format!("Unexpected capture source: {name}"))),
+        Value::Source(g) if g.name == "$core/cooked" && g.ty == ty::geometry() => match g.fields.as_slice() {
+            [(_, Value::Int(id))] => Ok(Value::Deferred(g.ty.clone(), *id)),
+            _ => Err(ts_error(format!("Unexpected capture source: {}", g.name))),
         },
-        Value::Source(name, ty, args) if name == "$core/operator" && *ty == ty::geometry() && matches!(args.first(), Some((n, Value::Text(t))) if n == "$name" && (t == b"nth" || t == b"first")) => {
-            let Some((_, Value::Text(text))) = args.first() else { unreachable!("matched above") };
+        Value::Source(g) if g.name == "$core/operator" && g.ty == ty::geometry() && matches!(g.fields.first(), Some((n, Value::Text(t))) if n == "$name" && (t == b"nth" || t == b"first")) => {
+            let Some((_, Value::Text(text))) = g.fields.first() else { unreachable!("matched above") };
             let op = op::find(&[], &String::from_utf8_lossy(text), &context::host()).expect("collection op");
-            (op.body)(&input::at_time(0.), &|_, _| panic!("Collection selector unexpectedly constructed a node"), &args[..])
+            (op.body)(&input::at_time(0.), &|_, _| panic!("Collection selector unexpectedly constructed a node"), &g.fields[..])
         }
-        Value::Source(name, ty, args) => Err(ts_error(format!("Unexpected capture source: {name} : {} {}", ty::to_string(ty), args.iter().map(|(n, v)| format!("{n}={}", String::from_utf8_lossy(&E::show(v)))).collect::<Vec<_>>().join("; ")))),
+        Value::Source(g) => Err(ts_error(format!("Unexpected capture source: {} : {} {}", g.name, ty::to_string(&g.ty), g.fields.iter().map(|(n, v)| format!("{n}={}", String::from_utf8_lossy(&E::show(v)))).collect::<Vec<_>>().join("; ")))),
         value => Err(ts_error(format!("Unexpected capture value: {}", String::from_utf8_lossy(&E::show(value))))),
     });
     for body in [

@@ -655,7 +655,7 @@ fn size_dependencies(plan: &e::Plan, root: i64) -> (bool, bool) {
                 }
             }
             Value::List(values) => values.iter().for_each(|x| visit(w, x)),
-            v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_v.geo_fields().unwrap()().unwrap().iter().for_each(|(_, x)| visit(w, x)),
+            v @ (Value::Record(_) | Value::Struct(_)) => v.geo_fields().unwrap().iter().for_each(|(_, x)| visit(w, x)),
             Value::Fn(f) if !w.functions.contains(&f.0) => {
                 w.functions.insert(f.0);
                 for (_, x) in e::Residual::function_bindings(*f) {
@@ -704,7 +704,7 @@ fn image_dependencies(plan: &e::Plan, root: i64) -> (Vec<i64>, (bool, deps::T)) 
                 }
             }
             Value::List(values) => values.iter().for_each(|x| visit(w, x)),
-            v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_v.geo_fields().unwrap()().unwrap().iter().for_each(|(_, x)| visit(w, x)),
+            v @ (Value::Record(_) | Value::Struct(_)) => v.geo_fields().unwrap().iter().for_each(|(_, x)| visit(w, x)),
             Value::Fn(f) if !w.functions.contains(&f.0) => {
                 w.functions.insert(f.0);
                 for (_, x) in e::Residual::function_bindings(*f) {

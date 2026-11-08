@@ -793,7 +793,7 @@ fn hidden(frame: bool, value: &Value) -> bool {
         }
         Value::Deferred(..) => true,
         Value::List(xs) => xs.iter().any(|x| hidden(frame, x)),
-        v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_fields().unwrap().iter().any(|(_, x)| hidden(frame, x)),
+        v @ (Value::Record(_) | Value::Struct(_)) => v.geo_fields().unwrap().iter().any(|(_, x)| hidden(frame, x)),
         _ => false,
     }
 }
@@ -1493,7 +1493,7 @@ impl Ctx {
                     };
                     match offered? {
                         Some(value) => {
-                            if matches!(&value, Value::Source(_)) || matches!(&value, Value::Struct(g) if matches!(g.ty, Ty::Array(_))) {
+                            if value.is_data_source() {
                                 return Err(v::fail("E_DATA_SOURCE", "The host returned an unresolved data source."));
                             }
                             if ty != Ty::Any && v::ty_of(&value) != ty {

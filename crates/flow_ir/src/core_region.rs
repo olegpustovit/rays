@@ -241,7 +241,7 @@ fn field_step(value: Value, field: &str) -> Res<Value> {
     Ok(match (&value, field) {
             (Value::Residual(r), f) => field_residual(*r, &value, f)?,
             (Value::Record(fs), f) => fs.iter().find(|(n, _)| n == f).map(|(_, v)| v.clone()).ok_or(Stop::Unsupported)?,
-            (Value::Struct(g) | Value::Source(g), f) => g.fields.iter().find(|(n, _)| n == f).map(|(_, v)| v.clone()).ok_or(Stop::Unsupported)?,
+            (Value::Struct(g), f) => g.fields.iter().find(|(n, _)| n == f).map(|(_, v)| v.clone()).ok_or(Stop::Unsupported)?,
             (Value::Fn(function), f) => Residual::function_bindings(*function).into_iter().find(|(n, _)| n == f).map(|(_, v)| v).ok_or(Stop::Unsupported)?,
             (Value::Vec3(x, _, _), "x") | (Value::Vec3(_, x, _), "y") | (Value::Vec3(_, _, x), "z") => Value::Float(*x),
             (Value::Vec2(x, _), "x") | (Value::Vec2(_, x), "y") => Value::Float(*x),

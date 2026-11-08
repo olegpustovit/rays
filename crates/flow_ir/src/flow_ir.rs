@@ -1255,7 +1255,7 @@ pub mod Executor {
                     let mut captured = e::Residual::residual_binding(residual, arena.name(binding.name));
                     for &field in arena.name_ids(binding.fields) {
                         captured = captured.and_then(|x| match x {
-                            v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_fields().unwrap().iter().find(|(n, _)| n == arena.name(field)).map(|(_, x)| x.clone()),
+                            v @ (Value::Record(_) | Value::Struct(_)) => v.geo_fields().unwrap().iter().find(|(n, _)| n == arena.name(field)).map(|(_, x)| x.clone()),
                             _ => None,
                         });
                     }
@@ -1678,7 +1678,7 @@ pub mod Executor {
                     self.forced.lock().unwrap().insert(key, result.clone());
                     self.walk(&result)
                 }
-                value if matches!(value, Value::Source(_)) || matches!(value, Value::Struct(g) if matches!(g.ty, Ty::Array(_))) => {
+                value if value.is_data_source() => {
                     if let Some(resident) = &self.o.resident {
                         if let Some(made) = core_exec::fill_constant(resident, value)? { return Ok(made); }
                     }
@@ -2857,7 +2857,8 @@ mod tests {
             | (Value::Vec2_array(xs), Value::Vec2_array(ys))
             | (Value::Vec3_array(xs), Value::Vec3_array(ys))
             | (Value::Vec4_array(xs), Value::Vec4_array(ys)) => xs.len() == ys.len() && xs.iter().zip(ys.iter()).all(|(a, b)| a.to_bits() == b.to_bits()),
-            (Value::Record(fs), Value::Record(gs)) | (Value::Struct(a), Value::Struct(b)) => {
+            (a @ (Value::Record(_) | Value::Struct(_)), b @ (Value::Record(_) | Value::Struct(_))) if std::mem::discriminant(a) == std::mem::discriminant(b) => {
+                let (fs, gs) = (a.geo_fields().unwrap(), b.geo_fields().unwrap());
                 fs.len() == gs.len() && fs.iter().zip(gs.iter()).all(|((n, a), (m, b))| n == m && same_bits(a, b))
             }
             (Value::Fn(_), Value::Fn(_)) => true,
@@ -3305,7 +3306,7 @@ mod tests {
                     || has_fields(&view.bindings)
             }
             Value::List(xs) => xs.iter().any(has_region),
-            v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_fields().unwrap().iter().any(has_region),
+            v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => has_fields(v.geo_fields().unwrap()),
             Value::Fn(f) => has_fields(&e::Residual::function_bindings(*f)),
             _ => false,
         }

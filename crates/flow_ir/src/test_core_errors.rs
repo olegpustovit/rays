@@ -8,7 +8,7 @@ use flow_check::workspace as W;
 use flow_eval as E;
 use flow_syntax::context;
 use flow_syntax::syntax;
-use flow_syntax::value::{ResidualId, Value, struct_value, source_value};
+use flow_syntax::value::{ResidualId, Value, source_value};
 use input::Frame;
 use rays_diagnostic::Diagnostic;
 use std::sync::Arc;

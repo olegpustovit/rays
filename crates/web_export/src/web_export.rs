@@ -497,7 +497,7 @@ fn image_arguments(canvas: bool, lowered: &Lowered, node: &E::Node, values: &[Va
         match v {
             Value::Residual(r) => Some(*r),
             Value::List(xs) => xs.iter().find_map(residual),
-            v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_v.geo_fields().unwrap()().unwrap().iter().find_map(|(_, v)| residual(v)),
+            v @ (Value::Record(_) | Value::Struct(_)) => v.geo_fields().unwrap().iter().find_map(|(_, v)| residual(v)),
             _ => None,
         }
     }

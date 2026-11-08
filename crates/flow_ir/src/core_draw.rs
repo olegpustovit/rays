@@ -11,7 +11,7 @@ use crate::{core_fuse, packed};
 use flow_check::workspace::Paths;
 use flow_eval as E;
 use flow_syntax::ty::{self, Ty};
-use flow_syntax::value::{ResidualId, Value, struct_value, source_value};
+use flow_syntax::value::{ResidualId, Value, source_value};
 use std::collections::HashMap;
 
 /// Regions read exclusively as compatible mark-set attributes, and their per-batch groups in
@@ -316,7 +316,7 @@ fn find_residual(v: &Value) -> Option<ResidualId> {
     match v {
         Value::Residual(r) => Some(*r),
         Value::List(xs) => xs.iter().find_map(find_residual),
-        v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_fields().unwrap().iter().find_map(|(_, v)| find_residual(v)),
+        v @ (Value::Record(_) | Value::Struct(_)) => v.geo_fields().unwrap().iter().find_map(|(_, v)| find_residual(v)),
         _ => None,
     }
 }

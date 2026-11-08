@@ -12,7 +12,7 @@ use flow_eval as e;
 use flow_syntax::packed_ops::Binary;
 use flow_syntax::syntax;
 use flow_syntax::ty::{FnSignature, Ty};
-use flow_syntax::value::{self as v, Value, struct_value, source_value};
+use flow_syntax::value::{self as v, Value, struct_value};
 use rays_diagnostic::Diagnostic;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -175,7 +175,7 @@ fn data(ty: &Ty, count: usize, time: f64) -> Value {
 }
 fn resolve_source(current: Arc<Mutex<Value>>) -> ResolveArc {
     Arc::new(move |v: &Value| match v {
-        Value::Struct(name, _, _) if name == "probe/data" => Ok(current.lock().unwrap().clone()),
+        Value::Struct(g) if g.name == "probe/data" => Ok(current.lock().unwrap().clone()),
         _ => Err(v::fail("E_DATA_SOURCE", "Unexpected source.")),
     })
 }

@@ -12,7 +12,7 @@ use flow_eval as e;
 use flow_syntax::packed_ops::Unary;
 use flow_syntax::syntax;
 use flow_syntax::ty::{FnSignature, Ty};
-use flow_syntax::value::{self as v, Value, struct_value, source_value};
+use flow_syntax::value::{self as v, Value, source_value};
 use rays_diagnostic::Diagnostic;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

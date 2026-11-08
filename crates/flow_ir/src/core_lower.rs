@@ -14,7 +14,7 @@ use flow_eval as E;
 use flow_syntax::packed_ops as PO;
 use flow_syntax::syntax::Node as SNode;
 use flow_syntax::ty::{self, Ty};
-use flow_syntax::value::{self as V, ResidualId, Value, struct_value, source_value};
+use flow_syntax::value::{self as V, ResidualId, Value, source_value};
 use flow_syntax::{context, Diagnostic};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
@@ -530,10 +530,11 @@ impl Lowerer {
                 let l = self.residual(s, *r)?;
                 self.ensure(s, source, &l)
             }
-            Known(value) if closure_free(value) && value.geo_payload().is_some_and(|g| matches!(g.ty, Ty::Array(_))) => {
+            Known(value) if closure_free(value) && value.is_data_source() => {
                 Ok(self.emit_n(s, source, &V::ty_of(value), C::Expr::Source(value.clone())))
             }
-            Known(Value::Source(g)) | Known(Value::Struct(g)) if matches!(g.ty, Ty::Array(_)) => {
+            Known(v) if v.is_data_source() => {
+                let g = v.geo_payload().unwrap();
                 // a capture inside a source is lowered here, so the program holds plain data only
                 let mut args = Vec::new();
                 for (field, v) in &g.fields { args.push((field.clone(), self.ensure(s, source, &Known(v.clone()))?)); }
@@ -1142,7 +1143,8 @@ impl Lowerer {
 
     fn descriptor(&mut self, s: &mut Scope, source: &C::Source, l: &Lowered) -> R<Lowered> {
         match l {
-            Known(Value::Source(g)) | Known(Value::Struct(g)) if matches!(g.ty, Ty::Array(_)) && storage_argument(&g.ty) => {
+            Known(v) if v.is_data_source() && v.geo_payload().is_some_and(|g| storage_argument(&g.ty)) => {
+                let g = v.geo_payload().unwrap();
                 let mut args = Vec::new();
                 for (n, v) in &g.fields { args.push((n.clone(), self.ensure(s, source, &Known(v.clone()))?)); }
                 Ok(self.emit(s, source, &g.ty, C::Expr::Source_descriptor { name: g.name.clone(), ty: g.ty.clone(), args }))
@@ -1998,7 +2000,8 @@ impl Lowerer {
                 let Value::Int(index) = &g.fields[0].1 else { unreachable!() };
                 Ok(args[*index as usize].1.clone())
             }
-            Value::Source(g) | Value::Struct(g) if matches!(g.ty, Ty::Array(_)) => {
+            Value::Source(_) | Value::Struct(_) if v.is_data_source() => {
+                let g = v.geo_payload().unwrap();
                 let mut all_known = true;
                 for (_, f) in &g.fields {
                     if !matches!(self.host(s, source, borrow, args, f)?, Known(_)) { all_known = false; break; }
@@ -2034,7 +2037,7 @@ impl Lowerer {
         }
         fn data_source(v: &Value) -> bool {
             match v {
-                value if matches!(value, Value::Source(_)) || matches!(value, Value::Struct(g) if matches!(g.ty, Ty::Array(_))) => true,
+                value if value.is_data_source() => true,
                 Value::Record(fields) => fields.iter().any(|(_, v)| data_source(v)),
                 _ => false,
             }
@@ -3330,11 +3333,12 @@ mod tests {
             let log = calls.clone();
             let (geometry, image, reason) = (geometry.clone(), image.clone(), reason.clone());
             let resolve: core_exec::ResolveFn = Arc::new(move |v: &Value| match v {
-                Value::Source(name, Ty::Bool, f) if name == "test/selected" && f.is_empty() => {
+                Value::Source(g) if g.ty == Ty::Bool && g.name == "test/selected" && g.fields.is_empty() => {
                     log.lock().unwrap().push((Ty::Bool, 0));
                     Ok(Value::Bool(time > 0.))
                 }
-                Value::Source(name, ty, f) if name == "$core/cooked" => {
+                Value::Source(g) if g.name == "$core/cooked" => {
+                    let (ty, f) = (&g.ty, &g.fields);
                     let Some((_, Value::Int(id))) = f.first() else { panic!("cooked id") };
                     log.lock().unwrap().push((ty.clone(), *id));
                     if (*ty == geometry || *ty == image) && (*id == 11 || (allow_bad && *id == 99)) { Ok(Value::Deferred(ty.clone(), *id)) } else { Err(reason.clone()) }
@@ -3391,7 +3395,7 @@ mod tests {
             live: false,
             arithmetic: None,
             packed_extension: None,
-            body: Arc::new(|_, _, args| Ok(Value::Source("test/storage".into(), ty::geometry(), args.to_vec()))),
+            body: Arc::new(|_, _, args| Ok(source_value("test/storage", ty::geometry(), args.to_vec()))),
             ..base
         };
         let program = |body: &str| -> C::Program {
@@ -3413,7 +3417,8 @@ mod tests {
             let received: Arc<Mutex<Option<Value>>> = Arc::new(Mutex::new(None));
             let log = received.clone();
             let resolve: core_exec::ResolveFn = Arc::new(move |v: &Value| match v {
-                Value::Source(name, _, args) if name == "$core/operator" => {
+                Value::Source(g) if g.name == "$core/operator" => {
+                    let args = &g.fields;
                     *log.lock().unwrap() = args.iter().find(|(k, _)| k == "values").map(|(_, v)| v.clone());
                     Ok(Value::Deferred(ty::geometry(), 1))
                 }
@@ -3429,9 +3434,9 @@ mod tests {
             let (result, received) = run(&only, time);
             assert_eq!(result, Ok(Value::Deferred(ty::geometry(), 1)));
             match received {
-                Some(Value::Source(name, Ty::Array(e), f)) if *e == Ty::Vec4 && matches!(f.as_slice(), [(c, Value::Int(_)), (v, _)] if c == "count" && v == "value") => {
-                    let Value::Int(n) = f[0].1 else { unreachable!() };
-                    assert!(name == "$core/constant-array/array/vec4" && n == time as i64);
+                Some(Value::Source(g)) if matches!(&g.ty, Ty::Array(e) if **e == Ty::Vec4) && matches!(g.fields.as_slice(), [(c, Value::Int(_)), (v, _)] if c == "count" && v == "value") => {
+                    let Value::Int(n) = g.fields[0].1 else { unreachable!() };
+                    assert!(g.name == "$core/constant-array/array/vec4" && n == time as i64);
                 }
                 other => panic!("Unexpected constant descriptor: {other:?}\n{}", C::pp(&only)),
             }
@@ -3509,7 +3514,7 @@ mod tests {
         let prepared = core_exec::prepare(&program, false, false, &Paths::new(), false);
         let live = input::at_time(2.);
         let resolve: core_exec::ResolveFn = Arc::new(|v: &Value| match v {
-            Value::Source(name, _, f) if name == "test/source" => Ok(f[0].1.clone()),
+            Value::Source(g) if g.name == "test/source" => Ok(g.fields[0].1.clone()),
             _ => panic!("unexpected source"),
         });
         let with = |offer: Result<Option<Value>, Diagnostic>| {
