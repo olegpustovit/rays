@@ -155,63 +155,62 @@ fn discard_test_error() -> crate::error::Error {
     )
 }
 
-fn discard_test_surface(
-    fail_first: bool,
-    attempts: std::rc::Rc<std::cell::Cell<i64>>,
-) -> crate::backend::DriverSurface {
-    use crate::backend::{DriverAcquire, DriverFrame, DriverSurface};
-    DriverSurface {
-        configure: Box::new(|_| Ok(())),
-        acquire_sync: Box::new(|| Ok(DriverAcquire::Acquired(DriverFrame { frame_token: 7 }))),
-        discard: Box::new(move |_| {
-            let current = attempts.get();
-            attempts.set(current + 1);
-            if fail_first && current == 0 {
-                Err(crate::error::make(
-                    "discard test",
-                    ErrorKind::Io,
-                    "driver discard failed",
-                ))
-            } else {
-                Ok(())
-            }
-        }),
-        destroy_surface: Box::new(|| Ok(())),
+struct DiscardSurface { fail_first: bool, attempts: std::rc::Rc<std::cell::Cell<i64>> }
+impl crate::backend::DriverSurface for DiscardSurface {
+    fn configure(&self, _: &crate::surface::Configuration) -> Result<(), crate::error::Error> { Ok(()) }
+    fn acquire_sync(&self) -> Result<crate::backend::DriverAcquire, crate::error::Error> {
+        Ok(crate::backend::DriverAcquire::Acquired(crate::backend::DriverFrame { frame_token: 7 }))
+    }
+    fn discard(&self, _: crate::backend::DriverFrame) -> Result<(), crate::error::Error> {
+        let current = self.attempts.get();
+        self.attempts.set(current + 1);
+        if self.fail_first && current == 0 {
+            Err(crate::error::make("discard test", ErrorKind::Io, "driver discard failed"))
+        } else {
+            Ok(())
+        }
+    }
+    fn destroy_surface(&self) -> Result<(), crate::error::Error> { Ok(()) }
+}
+
+/// A device whose every operation but surfaces is unsupported.
+struct DiscardDevice { fail_first: bool, attempts: std::rc::Rc<std::cell::Cell<i64>> }
+impl crate::backend::DriverDevice for DiscardDevice {
+    fn device_handle(&self) -> handle::Device { handle::create_device() }
+    fn capabilities(&self) -> caps::Caps { caps::minimum_m1() }
+    fn allocated_size(&self) -> i64 { 0 }
+    fn recommended_working_set(&self) -> i64 { 0 }
+    fn create_buffer(&self, _: types::Memory, _: &types::BufferDescriptor) -> Result<Box<dyn crate::backend::DriverResource>, crate::error::Error> { Err(discard_test_error()) }
+    fn create_mapped_buffer(&self, _: &types::BufferDescriptor) -> Result<crate::backend::DriverMapped, crate::error::Error> { Err(discard_test_error()) }
+    fn create_texture(&self, _: &types::TextureDescriptor) -> Result<Box<dyn crate::backend::DriverResource>, crate::error::Error> { Err(discard_test_error()) }
+    fn create_depth_texture(&self, _: &types::TextureDescriptor) -> Result<Box<dyn crate::backend::DriverResource>, crate::error::Error> { Err(discard_test_error()) }
+    fn create_memoryless_texture(&self, _: bool, _: &types::TextureDescriptor) -> Result<Box<dyn crate::backend::DriverResource>, crate::error::Error> { Err(discard_test_error()) }
+    fn create_library(&self, _: &shader::Shader) -> Result<Box<dyn crate::backend::DriverLibrary>, crate::error::Error> { Err(discard_test_error()) }
+    fn warm_library(&self, _: &shader::Shader) -> Option<crate::backend::Warm> { None }
+    fn create_accel(&self, _: &crate::backend::DriverAccelDescriptor) -> Result<Box<dyn crate::backend::DriverAccel>, crate::error::Error> { Err(discard_test_error()) }
+    fn instance_layout(&self, _: crate::backend::InstanceKind) -> Vec<i64> { vec![64; 12] }
+    fn create_sampler(&self, _: &types::SamplerDescriptor) -> Result<Box<dyn crate::backend::DriverSampler>, crate::error::Error> { Err(discard_test_error()) }
+    fn create_render_pipeline(&self, _: crate::backend::RenderPipelineOptions, _: &pipeline::RenderDescriptor) -> Result<Box<dyn crate::backend::DriverPipeline>, crate::error::Error> { Err(discard_test_error()) }
+    fn create_icb(&self, _: i64) -> Result<Box<dyn crate::backend::DriverIcb>, crate::error::Error> { Err(discard_test_error()) }
+    fn create_argument(&self, _: i64, _: crate::backend::ShaderStage, _: i64) -> Result<Box<dyn crate::backend::DriverArgument>, crate::error::Error> { Err(discard_test_error()) }
+    fn create_queue(&self) -> Result<Box<dyn crate::backend::DriverQueue>, crate::error::Error> { Err(discard_test_error()) }
+    fn create_surface(&self, _: &surface::Configuration) -> Result<Box<dyn crate::backend::DriverSurface>, crate::error::Error> {
+        Ok(Box::new(DiscardSurface { fail_first: self.fail_first, attempts: self.attempts.clone() }))
+    }
+    fn destroy_device(&self) -> Result<(), crate::error::Error> { Ok(()) }
+}
+
+struct DiscardDriver { fail_first: bool, attempts: std::rc::Rc<std::cell::Cell<i64>> }
+impl crate::backend::Driver for DiscardDriver {
+    fn create_device(&self) -> Result<Box<dyn crate::backend::DriverDevice>, crate::error::Error> {
+        Ok(Box::new(DiscardDevice { fail_first: self.fail_first, attempts: self.attempts.clone() }))
     }
 }
 
 fn discard_test_device(fail_first: bool) -> (crate::backend::Device, std::rc::Rc<std::cell::Cell<i64>>) {
-    use crate::backend::*;
     let attempts = std::rc::Rc::new(std::cell::Cell::new(0));
-    let attempts2 = std::rc::Rc::clone(&attempts);
-    let driver = Driver {
-        create_device: Box::new(move || {
-            let surface_attempts = std::rc::Rc::clone(&attempts2);
-            Ok(DriverDevice {
-                device_handle: handle::create_device(),
-                capabilities: caps::minimum_m1(),
-                allocated_size: Box::new(|| 0),
-                recommended_working_set: Box::new(|| 0),
-                create_buffer: Box::new(|_, _| Err(discard_test_error())),
-                create_mapped_buffer: Box::new(|_| Err(discard_test_error())),
-                create_texture: Box::new(|_| Err(discard_test_error())),
-                create_depth_texture: Box::new(|_| Err(discard_test_error())),
-                create_memoryless_texture: Box::new(|_, _| Err(discard_test_error())),
-                create_library: Box::new(|_| Err(discard_test_error())),
-                warm_library: Box::new(|_| None),
-                create_accel: Box::new(|_| Err(discard_test_error())),
-                instance_layout: Box::new(|_| vec![64; 12]),
-                create_sampler: Box::new(|_| Err(discard_test_error())),
-                create_render_pipeline: Box::new(|_, _| Err(discard_test_error())),
-                create_icb: Box::new(|_| Err(discard_test_error())),
-                create_argument: Box::new(|_, _, _| Err(discard_test_error())),
-                create_queue: Box::new(|| Err(discard_test_error())),
-                create_surface: Box::new(move |_| Ok(discard_test_surface(fail_first, std::rc::Rc::clone(&surface_attempts)))),
-                destroy_device: Box::new(|| Ok(())),
-            })
-        }),
-    };
-    let device = create_device(driver).unwrap_or_else(|_| panic!("test device creation failed"));
+    let driver = Box::new(DiscardDriver { fail_first, attempts: attempts.clone() });
+    let device = crate::backend::create_device(driver).unwrap_or_else(|_| panic!("test device creation failed"));
     (device, attempts)
 }
 
