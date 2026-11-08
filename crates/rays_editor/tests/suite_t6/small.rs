@@ -7,7 +7,7 @@ use rdk::packed::Float3;
 use sop::node::{self, CookMode};
 use sop::{context, custom, edit_graph, session};
 
-use crate::support::*;
+use super::super::support::*;
 
 fn tri() -> rdk::geometry::T {
     let positions = Float3::View::of_owned_exn(vec![-0.5, 0.5, 0.], vec![-0.5, -0.5, 0.5], vec![0., 0., 0.]).unwrap();

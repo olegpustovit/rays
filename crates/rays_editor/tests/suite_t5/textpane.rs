@@ -1,6 +1,6 @@
 //! Editor-driven sections of lib/rays_editor/test/test_text_pane.ml: editor_text, editor_binding, editor_w9,
 //! editor_active_scrub, editor_literal_scrub, editor_text_drop, editor_command_click, editor_text_find.
-use crate::t5c::*;
+use super::t5c::*;
 use editor_document::workspace_doc as wd;
 use flow_graph::flow_edit::{self as fe, ArgKey};
 use flow_syntax::syntax::{self as syn, Node};

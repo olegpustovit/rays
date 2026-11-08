@@ -1,8 +1,8 @@
 //! Port of lib/rays_editor/test/test_viewport_pick.ml (W6: viewport provenance, CPU ray picks,
 //! the highlight, and the editor's click-to-select), using the original sketches.
-use crate::probe_t::fixture as case_text;
+use super::probe_t::fixture as case_text;
 
-use crate::t3c::*;
+use super::t3c::*;
 use flow_sop::lower;
 use input::{Event, Key, MouseButton};
 use rays::camera;
@@ -47,7 +47,7 @@ fn cooked(lit: &pick::Set, existing: Option<cook::t>, lowered: &lower::T, prepar
     let objects: Vec<_> = lower::objects(lowered).into_iter().map(|(id, n, d)| (id as i64, n, d)).collect();
     let mut f = frame_at((0., 0.), vec![], 0);
     f.input.dt = 0.;
-    let update = cook::update(None, None, false, &[], lit, None, &cook, &crate::cook_t::none_settings(), &objects.iter().map(|(i, n, d)| (*i, n, *d)).collect::<Vec<_>>(), None, param::Effects::default(), &[], &rays_editor::Timeline::create(), &f, None);
+    let update = cook::update(None, None, false, &[], lit, None, &cook, &super::cook_t::none_settings(), &objects.iter().map(|(i, n, d)| (*i, n, *d)).collect::<Vec<_>>(), None, param::Effects::default(), &[], &rays_editor::Timeline::create(), &f, None);
     check(update.edit_error.is_none(), "cook error");
     update.cook
 }
@@ -99,11 +99,11 @@ pub fn pick_sunflower() {
     let geometry = geometry_of(&piece);
     let tags = pick::tags(&geometry).expect("tags");
     let of_iteration = |i: i64| -> Vec<i64> { sunflower.provenance.iter().filter(|(_, o)| o.iter == vec![i]).map(|(t, _)| *t).collect() };
-    let iteration = crate::probe_t::SEEDS / 2;
+    let iteration = super::probe_t::SEEDS / 2;
     let tag = of_iteration(iteration)[0];
     let origin = &sunflower.provenance[&tag];
     check(origin.iter == vec![iteration] && origin.input == iteration, "the provenance table names the iteration");
-    check(tags.len() as i64 == rdk::geometry::primitive_count(&geometry) && sunflower.provenance.len() as i64 == crate::probe_t::SEEDS, "a tag per primitive, one origin per seed");
+    check(tags.len() as i64 == rdk::geometry::primitive_count(&geometry) && sunflower.provenance.len() as i64 == super::probe_t::SEEDS, "a tag per primitive, one origin per seed");
     match cook::pick(&piece, above(&geometry, tag), vec3::create(0., -1., 0.)) {
         Some((_, hit)) => check(hit == tag, "the ray finds the seed"),
         None => fail("the ray missed the seed"),

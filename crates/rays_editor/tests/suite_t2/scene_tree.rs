@@ -3,7 +3,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use super::common;
+use crate::common;
 use super::support::*;
 use editor_document::kind_graph as kg;
 use editor_document::workspace_doc as wd;

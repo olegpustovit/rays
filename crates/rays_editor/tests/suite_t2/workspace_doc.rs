@@ -1,7 +1,7 @@
 //! test_workspace_doc.ml, the Editor-driven parts: part_editor, part_conditional_history,
 //! part_live, part_preset, part_pane_layout, part_editor_contexts, part_projection_reuse
 //! (the pure Workspace_doc parts live in editor_document's own tests).
-use super::common;
+use crate::common;
 use super::support::*;
 use editor_document::preset;
 use editor_document::settings;

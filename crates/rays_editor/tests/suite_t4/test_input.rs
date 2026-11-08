@@ -39,7 +39,7 @@ fn rotation(d: &Driver, dir: &str) -> f64 {
 }
 
 pub fn run() {
-    if !super::common::gpu() {
+    if !crate::common::gpu() {
         return;
     }
     let name = "Editor";

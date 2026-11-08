@@ -8,7 +8,7 @@ use rays::scene3;
 use rays_math::vec3;
 use sop::{context, node, session};
 
-use crate::support::read_repo;
+use super::super::support::read_repo;
 
 
 fn graph(forms: &[Syntax], name: &str) -> Syntax {

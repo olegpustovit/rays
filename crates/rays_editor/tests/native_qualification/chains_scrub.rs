@@ -28,11 +28,11 @@ fn document(text:&str,gpu:&Gpu::Config)->document::T {
 }
 pub(super) fn child()->bool {
     let Some(path)=std::env::var_os("RAYS_NATIVE_SCRUB_INPUT") else {return false};
-    assert!(super::super::common::gpu(),"native GPU required");let source=std::fs::read_to_string(path).unwrap();let gpu=wg::create(None);wg::qualification(&gpu);
+    assert!(crate::common::gpu(),"native GPU required");let source=std::fs::read_to_string(path).unwrap();let gpu=wg::create(None);wg::qualification(&gpu);
     wg::with_backend(&gpu,true,&mut |config|std::fs::write(std::env::var_os("RAYS_NATIVE_SCRUB_OUTPUT").expect("child output path"),cook_doc(&document(&source,config))).unwrap());wg::close(&gpu);true
 }
 pub(super) fn run() {
-    assert!(super::super::common::gpu(),"native GPU required");let catalog=rays_editor::workspace_catalog(None).unwrap();let n=side();
+    assert!(crate::common::gpu(),"native GPU required");let catalog=rays_editor::workspace_catalog(None).unwrap();let n=side();
     let source=std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"),"/../../sketches/gpu_sea.rays")).unwrap().replace("(side : int 1000)",&format!("(side : int {n})"));
     let gpu=wg::create(None);wg::qualification(&gpu);
     wg::with_backend(&gpu,true,&mut |config|{

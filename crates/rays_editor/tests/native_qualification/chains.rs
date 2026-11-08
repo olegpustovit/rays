@@ -62,7 +62,7 @@ fn counted(config: &Gpu::Config, count: &Arc<AtomicUsize>) -> Gpu::Config {
     })), ..config.clone() }
 }
 fn grid() {
-    assert!(super::common::gpu(), "native GPU required");
+    assert!(crate::common::gpu(), "native GPU required");
     let n = side();
     let text = format!("(workspace g (graph g :context sop (sop/grid :counts \"Point counts\" :connectivity \"Points\" :columns {n} :rows {n} :size 3.0 :rotation 0.3)))");
     let start=std::time::Instant::now();let cpu_node=node(&text,None,None);let cpu_seconds=start.elapsed();let cpu=cook(&cpu_node);
@@ -80,7 +80,7 @@ fn grid() {
     }
 }
 fn chain() {
-    assert!(super::common::gpu(), "native GPU required");
+    assert!(crate::common::gpu(), "native GPU required");
     let n=side();
     let first=format!("(-> (sop/grid :counts \"Point counts\" :connectivity \"Points\" :columns {n} :rows {n}) (sop/attribute_noise :name \"noise\" :seed 7) (sop/transform :translate [0.0 1.0 0.0]))");
     let single=format!("(workspace chain (graph g :context sop {first}))");

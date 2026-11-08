@@ -2,8 +2,8 @@
 //! exactness (the file's main body), `face_materials_preserve_explosion` and the editor outline /
 //! follow-and-back / rename / assign test (`follow_tests`). Not ported: `carry_tests` and
 //! `viewport_carry_tests` (see the report).
-use crate::support::*;
-use crate::t3c::*;
+use super::support::*;
+use super::t3c::*;
 use flow_graph::flow_edit as fe;
 use input::{Event, Key, MouseButton};
 use rays_editor::navigator as n;

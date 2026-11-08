@@ -1,5 +1,5 @@
 //! Port of lib/rays_editor/test/test_editor_commands.ml.
-use crate::t3c::*;
+use super::t3c::*;
 use editor_core::command;
 use editor_core::guide_context::t as Ctx;
 use editor_core::keymap::{self, Trigger};

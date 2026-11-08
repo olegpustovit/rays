@@ -25,7 +25,7 @@ fn with_editor<R>(ws: &editor_document::workspace_doc::T, run: impl FnOnce(&mut 
 }
 
 pub fn host_effects_edge() {
-    if !super::common::gpu() {
+    if !crate::common::gpu() {
         return;
     }
     let doc = effects_workspace("(list (host/quit (key/down \"q\")))");
@@ -45,7 +45,7 @@ pub fn host_effects_edge() {
 }
 
 pub fn host_effects_export() {
-    if !super::common::gpu() {
+    if !crate::common::gpu() {
         return;
     }
     for effects in ["(list (host/quit true))", "(list (host/dialog \"open_file\" true))"] {

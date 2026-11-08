@@ -59,7 +59,7 @@ const TEXT: &str = r#"(workspace transactions
       (sop/merge first second))))"#;
 
 pub fn run() {
-    if !super::common::gpu() {
+    if !crate::common::gpu() {
         return;
     }
     let mut factories = vec![factory()];

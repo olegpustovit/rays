@@ -51,7 +51,7 @@ fn normal_check(cpu:&g::T,device:&g::T) {
     for (i,s) in sums.iter().enumerate() {let l=(s[0]*s[0]+s[1]*s[1]+s[2]*s[2]).sqrt();let (x,y,z)=p::get(&dn,i as i64).unwrap();for (a,b) in [(s[0]/l,x),(s[1]/l,y),(s[2]/l,z)] {assert!((a-b).abs()<=1e-6);}}
 }
 pub(super) fn run() {
-    assert!(super::super::common::gpu(),"native GPU required");
+    assert!(crate::common::gpu(),"native GPU required");
     let cases=[
         (":offset [(get (frame/input) :t) 0.0 0.0]",":translate [0.0 1.0 0.0]","Points"),
         (":octaves 3 :lacunarity (+ 1.5 (get (frame/input) :t)) :roughness (+ 0.25 (* (get (frame/input) :t) 0.5))",":translate [0.0 1.0 0.0]","Points"),

@@ -1,48 +1,42 @@
-//! Ported OCaml editor tests, group t3 (see docs/history/rays_editor_plan.md): test_editor_commands,
-//! test_editor_cook, test_probe, test_workspace_live, test_viewport_pick, test_sop_ui,
-//! test_packed_pieces, test_drawing, test_materials and the editor-driven sections of
-//! test_text_pane. Cases run on the main thread via the shared window runner.
-#[path = "../../rays/tests/common/mod.rs"]
-mod common;
-#[path = "suite_t3/common.rs"]
+//! Editor suite t3: commands, cook, probe, live, pick, sop_ui, packed, drawing, materials, textpane.
+mod support {
+    pub use crate::support::t3::*;
+}
+#[path = "../suite_t3/common.rs"]
 mod t3c;
-#[path = "suite_t3/commands.rs"]
+#[path = "../suite_t3/commands.rs"]
 mod commands;
-#[path = "suite_t3/support.rs"]
-mod support;
-#[path = "suite_t3/cook.rs"]
+#[path = "../suite_t3/cook.rs"]
 mod cook_t;
-#[path = "../../pxui_graph/tests/cases/support.rs"]
+#[path = "../../../pxui_graph/tests/cases/support.rs"]
 mod pg;
-#[path = "suite_t3/probe.rs"]
+#[path = "../suite_t3/probe.rs"]
 mod probe_t;
-#[path = "suite_t3/live.rs"]
+#[path = "../suite_t3/live.rs"]
 mod live_t;
-#[path = "suite_t3/pick.rs"]
+#[path = "../suite_t3/pick.rs"]
 mod pick_t;
-#[path = "suite_t3/sop_ui.rs"]
+#[path = "../suite_t3/sop_ui.rs"]
 mod sop_ui_t;
-#[path = "suite_t3/packed.rs"]
+#[path = "../suite_t3/packed.rs"]
 mod packed_t;
-#[path = "suite_t3/drawing.rs"]
+#[path = "../suite_t3/drawing.rs"]
 mod drawing_t;
-#[path = "suite_t3/materials.rs"]
+#[path = "../suite_t3/materials.rs"]
 mod materials_t;
-#[path = "suite_t3/textpane.rs"]
+#[path = "../suite_t3/textpane.rs"]
 mod textpane_t;
 
-/// A case that needs the device: the lease is taken inside the case (see the plan).
 macro_rules! gpu_case {
     ($name:ident, $path:path) => {
         fn $name() {
-            if !common::gpu() {
+            if !crate::common::gpu() {
                 return;
             }
             $path();
         }
     };
 }
-
 
 gpu_case!(commands_canvas_preview, commands::canvas_preview);
 gpu_case!(commands_canvas_frame_size, commands::canvas_frame_size);
@@ -88,11 +82,8 @@ gpu_case!(materials_follow, materials_t::follow_tests);
 gpu_case!(textpane_graph_drafts, textpane_t::graph_drafts);
 gpu_case!(textpane_fn_frames, textpane_t::fn_frames);
 
-fn main() {
-    // Headless, as crates/rays_editor/dune sets SDL_VIDEODRIVER=dummy; the hint precedes SDL init.
-    sdl3::hint::set(sdl3::hint::VIDEO_DRIVER, "dummy").expect("video driver hint");
-    sdl3::init::init(&[sdl3::init::Subsystem::Video, sdl3::init::Subsystem::Events]).expect("SDL init");
-    let cases: Vec<(&str, fn())> = vec![
+pub fn cases() -> Vec<(&'static str, fn())> {
+    vec![
         ("commands_canvas_preview", commands_canvas_preview),
         ("commands_canvas_frame_size", commands_canvas_frame_size),
         ("commands_menu_forms", commands_menu_forms),
@@ -149,6 +140,5 @@ fn main() {
         ("materials_follow", materials_follow),
         ("textpane_graph_drafts", textpane_graph_drafts),
         ("textpane_fn_frames", textpane_fn_frames),
-    ];
-    common::window::run(&cases);
+    ]
 }

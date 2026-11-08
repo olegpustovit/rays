@@ -2,7 +2,7 @@
 //! state and the picture.
 use std::sync::Arc;
 
-use super::common;
+use crate::common;
 use super::support::*;
 use editor_core::panels::Panel;
 use editor_document::document;

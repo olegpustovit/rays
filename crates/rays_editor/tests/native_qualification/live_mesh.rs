@@ -81,7 +81,7 @@ pub fn cases()->Vec<(&'static str,fn())> {
 }
 
 fn voxel_neighbors() {
-    assert!(super::common::gpu());
+    assert!(crate::common::gpu());
     let prefix=MESH.split("faces (array/compact").next().unwrap().replace("%d","8");
     let text=format!(r#"{prefix} result (map (fn [(face : int)] (let* [index (int/div face 6) p (cell index side)
       delta (nth directions (mod face 6))]
@@ -95,7 +95,7 @@ fn voxel_neighbors() {
 }
 
 fn swarm_frames() {
-    assert!(super::common::gpu(),"native GPU required");
+    assert!(crate::common::gpu(),"native GPU required");
     let library=include_str!("../../../../sketches/swarm_lib.rays");
     // An off-centre circle passes through points whose tangent is radial. Re-seeding
     // every ring from its position flips the frame there and turns the tube inside out.
@@ -166,7 +166,7 @@ fn swarm_frames() {
 
 fn particles_frames() {
     use rays_editor::{Editor, Workspace};
-    assert!(super::common::gpu(), "native GPU required");
+    assert!(crate::common::gpu(), "native GPU required");
     let doc = Workspace::load(None, Vec::new(), None, include_str!("../../../../sketches/flow_particles_gpu.rays")).unwrap_or_else(|d| panic!("{d:?}"));
     let canvas = rays::canvas::create(800, 600).unwrap();
     let gpu = wg::create(None);
@@ -210,7 +210,7 @@ fn particles_frames() {
 
 fn sea_initial_close() {
     use rays_editor::{Editor,Workspace};
-    assert!(super::common::gpu(),"native GPU required");
+    assert!(crate::common::gpu(),"native GPU required");
     let doc=Workspace::load(None,Vec::new(),None,include_str!("../../../../sketches/gpu_sea.rays")).unwrap_or_else(|d|panic!("{d:?}"));
     let gpu=wg::create(None);
     let editor=Editor::create(Editor::Create {gpu_owner:Some(gpu.clone()),await_:Some(false),domains:Some(1),..Default::default()},&doc,None,Editor::prepare_fn(),Editor::draw_fn()).unwrap();
@@ -229,7 +229,7 @@ fn sea_initial_close() {
 
 fn sea_frames() {
     use rays_editor::{Editor,Workspace};
-    assert!(super::common::gpu(),"native GPU required");
+    assert!(crate::common::gpu(),"native GPU required");
     let started=std::time::Instant::now();
     let source=include_str!("../../../../sketches/gpu_sea.rays");
     let doc=Workspace::load(None,Vec::new(),None,source).unwrap_or_else(|d|panic!("{d:?}"));
@@ -342,7 +342,7 @@ fn traced(gpu:&wg::t,config:&Gpu::Config) {
     });
 }
 fn live_mesh() {
-    assert!(super::common::gpu(),"native GPU required");
+    assert!(crate::common::gpu(),"native GPU required");
     let gpu=wg::create(None); wg::qualification(&gpu);
     wg::with_backend(&gpu,true,&mut |config|{
         resident(&gpu,config,8,&[0.,1./6.],true,false);
@@ -378,7 +378,7 @@ fn live_mesh() {
 }
 fn holder_frames() {
     use rays_editor::{Editor,Workspace};
-    assert!(super::common::gpu(),"native GPU required");
+    assert!(crate::common::gpu(),"native GPU required");
     for (name,side,topology) in [("gpu_sea",128,false),("isogrid_city",8,true)] {
         let source=std::fs::read_to_string(format!("{}/../../sketches/{name}.rays",env!("CARGO_MANIFEST_DIR"))).unwrap();
         // Replace the numeric side default only; keep the sketch itself and all six frames.
@@ -409,7 +409,7 @@ fn holder_frames() {
 
 fn orrery_frames() {
     use rays_editor::{Editor,Workspace,Timeline};
-    assert!(super::common::gpu(),"native GPU required");
+    assert!(crate::common::gpu(),"native GPU required");
     let source=std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"),"/../../sketches/ws_orrery.rays")).unwrap();
     let doc=Workspace::load(None,Vec::new(),None,&source).unwrap_or_else(|d|panic!("{d:?}"));
     let canvas=rays::canvas::create(320,240).unwrap(); let gpu=wg::create(None);

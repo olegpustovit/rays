@@ -1,20 +1,17 @@
-//! Ported OCaml editor tests, group t5: the editor-driven sections of test_text_pane.ml, the carry tests of
-//! test_materials.ml and the editor-driven part of test_scene_sync.ml.
-#[path = "../../rays/tests/common/mod.rs"]
-mod common;
-#[path = "suite_t5/common.rs"]
+//! Editor suite t5: text pane, carry, scene sync.
+#[path = "../suite_t5/common.rs"]
 mod t5c;
-#[path = "suite_t5/textpane.rs"]
+#[path = "../suite_t5/textpane.rs"]
 mod textpane;
-#[path = "suite_t5/carry.rs"]
+#[path = "../suite_t5/carry.rs"]
 mod carry_t;
-#[path = "suite_t5/scene_sync.rs"]
+#[path = "../suite_t5/scene_sync.rs"]
 mod scene_sync_t;
 
 macro_rules! gpu_case {
     ($name:ident, $path:path) => {
         fn $name() {
-            if !common::gpu() {
+            if !crate::common::gpu() {
                 return;
             }
             $path();
@@ -34,10 +31,8 @@ gpu_case!(scene_sync_add_by_key, scene_sync_t::add_by_key);
 gpu_case!(materials_carry, carry_t::carry_tests);
 gpu_case!(materials_viewport_carry, carry_t::viewport_carry_tests);
 
-fn main() {
-    sdl3::hint::set(sdl3::hint::VIDEO_DRIVER, "dummy").expect("video driver hint");
-    sdl3::init::init(&[sdl3::init::Subsystem::Video, sdl3::init::Subsystem::Events]).expect("SDL init");
-    let cases: Vec<(&str, fn())> = vec![
+pub fn cases() -> Vec<(&'static str, fn())> {
+    vec![
         ("text_editor_text", text_editor_text),
         ("text_editor_binding", text_editor_binding),
         ("text_editor_w9", text_editor_w9),
@@ -49,6 +44,5 @@ fn main() {
         ("scene_sync_add_by_key", scene_sync_add_by_key),
         ("materials_carry", materials_carry),
         ("materials_viewport_carry", materials_viewport_carry),
-    ];
-    common::window::run(&cases);
+    ]
 }

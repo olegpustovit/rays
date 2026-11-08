@@ -1,6 +1,6 @@
 //! test_editor_consistency.ml, second half: viewport interaction, renderers, live-light failure,
 //! camera menus and the compiled probe panels.
-use super::common;
+use crate::common;
 use super::consistency::*;
 use super::support::*;
 use editor_core::panels::Panel;

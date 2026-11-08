@@ -11,7 +11,7 @@ use rays_editor::{Editor, Measure};
 const TEXT: &str = "\n(workspace memory\n  (graph picture :context draw\n    (let* [a 1.0]\n      (draw/background \"#14161c\"))))\n";
 
 pub fn history() {
-    if !super::common::gpu() {
+    if !crate::common::gpu() {
         return;
     }
     let workspace = of_text(None, TEXT);
@@ -55,7 +55,7 @@ pub fn history() {
 const BUDGET: &str = "\n(workspace budget\n  (graph g :context sop\n    (sop/box)))\n";
 
 pub fn budget() {
-    if !super::common::gpu() {
+    if !crate::common::gpu() {
         return;
     }
     let workspace = of_text(None, BUDGET);

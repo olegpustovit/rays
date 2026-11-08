@@ -166,7 +166,7 @@ fn enter_geo1(ed: Editor::t, count: i64) -> Editor::t {
 }
 
 pub fn layout_panes() {
-    if !super::common::gpu() {
+    if !crate::common::gpu() {
         return;
     }
     use editor_core::panels;
@@ -220,7 +220,7 @@ pub fn layout_panes() {
 }
 
 pub fn camera_nodes() {
-    if !super::common::gpu() {
+    if !crate::common::gpu() {
         return;
     }
     // Camera nodes: a default camera following the viewport joins a document without one, exactly
@@ -311,7 +311,7 @@ pub fn camera_nodes() {
 }
 
 pub fn sketch_settings() {
-    if !super::common::gpu() {
+    if !crate::common::gpu() {
         return;
     }
     // Sketch settings live in the document: [prepare] reads them, a change recooks, and undo
@@ -355,7 +355,7 @@ fn Editor_settings_get(schema: &param::Schema, settings: &rays_editor::Settings:
 }
 
 pub fn preset_and_look_through() {
-    if !super::common::gpu() {
+    if !crate::common::gpu() {
         return;
     }
     // Every document is a workspace, so every document saves: the prompt owns the keyboard while it
@@ -411,7 +411,7 @@ pub fn preset_and_look_through() {
 }
 
 pub fn workspace_walk() {
-    if !super::common::gpu() {
+    if !crate::common::gpu() {
         return;
     }
     let mut o = options(None);

@@ -11,7 +11,7 @@ use flow_syntax::syntax as S;
 use rays_editor::{cook, Editor};
 use sop::async_cook;
 
-use crate::support::*;
+use super::super::support::*;
 
 #[derive(Default)]
 struct Gate {

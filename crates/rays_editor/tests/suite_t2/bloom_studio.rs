@@ -2,7 +2,7 @@
 //! and opens a graph or node from a click, the host bars run commands, Make defn writes a function.
 use std::rc::Rc;
 
-use super::common;
+use crate::common;
 use super::support::*;
 use editor_core::panels::Panel;
 use editor_document::document;

@@ -1,5 +1,5 @@
 //! Behavioral ports of test_workspace_gpu_native.ml and test_workspace_gpu_marks.ml.
-use super::common;
+use crate::common;
 use flow_eval as e;
 use flow_native::{drawing, workspace_gpu as wg, workspace_images as wi, workspace_resources as wr};
 use flow_sop::{lower as l, network, value_lane};

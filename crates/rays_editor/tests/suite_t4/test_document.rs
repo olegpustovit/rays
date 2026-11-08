@@ -14,7 +14,7 @@ const TEXT: &str = r#"(workspace document
 pub fn run() {
     let t0 = std::time::Instant::now();
     let lap = |s: &str| if std::env::var("T4_TRACE").is_ok() { eprintln!("[t4 doc] {s} {:.2}", t0.elapsed().as_secs_f64()) };
-    if !super::common::gpu() {
+    if !crate::common::gpu() {
         return;
     }
     let directory = temp_dir("document");

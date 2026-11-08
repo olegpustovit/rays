@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use super::common;
+use crate::common;
 use super::support::{load, options, repo_root};
 use flow_eval::{Plan, State};
 use flow_syntax::{ty, value::Value};

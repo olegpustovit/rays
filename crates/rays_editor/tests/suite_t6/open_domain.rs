@@ -18,7 +18,7 @@ use flow_syntax::value::Value;
 use input::{Event, Key, MouseButton};
 use rays_editor::Editor;
 
-use crate::support::*;
+use super::super::support::*;
 
 fn contains(text: &str, fragment: &str) -> bool {
     text.contains(fragment)

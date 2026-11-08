@@ -1,8 +1,8 @@
 //! Port of lib/rays_editor/test/test_editor_cook.ml. The worker-side `prepare` barriers of the OCaml
 //! test (a prepare that blocks in the cook worker) are expressed with a node cook that blocks, because
 //! the Rust cook prepares on the initial domain (cook.rs `Raw`/`finish`).
-use crate::t3c::*;
-use crate::support::*;
+use super::t3c::*;
+use super::support::*;
 use editor_document::settings;
 use flow_sop::network::{self, Network};
 use param::{Effects, Value};

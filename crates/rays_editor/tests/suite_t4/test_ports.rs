@@ -124,7 +124,7 @@ fn parity(name: &str, workspace: &Doc::T) -> Vec<Vec<u8>> {
 
 
 pub fn moving_circles() {
-    if !super::common::gpu() {
+    if !crate::common::gpu() {
         return;
     }
     let text = r##"(workspace moving
@@ -141,13 +141,13 @@ macro_rules! per_sketch {
     ($($id:ident => $name:expr),*) => {
         $(pub mod $id {
             pub fn save() {
-                if !super::super::common::gpu() {
+                if !crate::common::gpu() {
                     return;
                 }
                 super::save_roundtrip($name);
             }
             pub fn parity() {
-                if !super::super::common::gpu() {
+                if !crate::common::gpu() {
                     return;
                 }
                 super::parity($name, &super::load($name));

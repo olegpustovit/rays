@@ -1,34 +1,29 @@
-//! Ported OCaml editor tests, group t1: lib/rays_editor/test/test_workspace_shell.ml.
-#[path = "../../rays/tests/common/mod.rs"]
-mod common;
-
-mod suite_t1 {
-    #[path = "../suite_t1/support.rs"]
-    pub mod support;
-    #[path = "../suite_t1/part1.rs"]
-    pub mod part1;
-    #[path = "../suite_t1/part2.rs"]
-    pub mod part2;
-    #[path = "../suite_t1/part3.rs"]
-    pub mod part3;
-    #[path = "../suite_t1/part4.rs"]
-    pub mod part4;
-    #[path = "../suite_t1/part5.rs"]
-    pub mod part5;
-    #[path = "../suite_t1/part6.rs"]
-    pub mod part6;
-    #[path = "../suite_t1/part7.rs"]
-    pub mod part7;
-    #[path = "../suite_t1/part8.rs"]
-    pub mod part8;
-    #[path = "../suite_t1/part9.rs"]
-    pub mod part9;
+//! Editor suite t1: test_workspace_shell.ml
+mod support {
+    pub use crate::support::shell::*;
 }
-use suite_t1::*;
+#[path = "../suite_t1/part1.rs"]
+pub mod part1;
+#[path = "../suite_t1/part2.rs"]
+pub mod part2;
+#[path = "../suite_t1/part3.rs"]
+pub mod part3;
+#[path = "../suite_t1/part4.rs"]
+pub mod part4;
+#[path = "../suite_t1/part5.rs"]
+pub mod part5;
+#[path = "../suite_t1/part6.rs"]
+pub mod part6;
+#[path = "../suite_t1/part7.rs"]
+pub mod part7;
+#[path = "../suite_t1/part8.rs"]
+pub mod part8;
+#[path = "../suite_t1/part9.rs"]
+pub mod part9;
 
 macro_rules! cases {
     ($($name:ident => $path:path;)*) => {
-        fn all() -> Vec<(&'static str, fn())> {
+        pub fn cases() -> Vec<(&'static str, fn())> {
             vec![$((stringify!($name), $path as fn())),*]
         }
     };
@@ -84,10 +79,4 @@ cases! {
     run_outline_button => part8::run_outline_button;
     run_idle_rest => part8::run_idle_rest;
     run_roots => part9::run_roots;
-}
-
-fn main() {
-    sdl3::hint::set(sdl3::hint::VIDEO_DRIVER, "dummy").expect("video driver hint");
-    sdl3::init::init(&[sdl3::init::Subsystem::Video, sdl3::init::Subsystem::Events]).expect("SDL init");
-    common::window::run(&all());
 }

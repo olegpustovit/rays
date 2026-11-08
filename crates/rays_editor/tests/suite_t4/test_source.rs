@@ -52,7 +52,7 @@ fn printed(doc: &Doc::T) -> String {
 }
 
 fn gpu() -> bool {
-    super::common::gpu()
+    crate::common::gpu()
 }
 
 pub fn files() {

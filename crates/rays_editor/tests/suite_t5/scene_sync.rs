@@ -1,7 +1,7 @@
 //! The editor-driven end of lib/rays_editor/test/test_scene_sync.ml: a workspace with no scene graph gets one when
 //! an object is added through `Editor::edit`. (The rest of the file is Document/Scene_sync work, ported in
 //! editor_document.)
-use crate::t5c::*;
+use super::t5c::*;
 use flow_graph::flow_edit as fe;
 use flow_syntax::syntax::{Draft, SyntaxBuilder};
 use rays_editor::Editor;

@@ -1,6 +1,6 @@
 //! carry_tests and viewport_carry_tests of lib/rays_editor/test/test_materials.ml: a material, a SOP graph, a scene
 //! graph and a camera carried by pointer and by keys onto nodes, panels and surfaces.
-use crate::t5c::*;
+use super::t5c::*;
 use editor_core::keymap::Trigger;
 use editor_core::panels::{Axis, Panel, Size, t as Tree};
 use input::{Event, Key, MouseButton};

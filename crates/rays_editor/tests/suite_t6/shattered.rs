@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use rdk::packed::Float3;
 use sop::{context, node, session};
 
-use crate::support::*;
+use super::super::support::*;
 
 fn with_cook<R>(domains: i64, f: &dyn Fn(&dyn Fn(&node::T) -> session::Output) -> R) -> R {
     let mut s = session::create(32, 256 * 1024 * 1024).unwrap();

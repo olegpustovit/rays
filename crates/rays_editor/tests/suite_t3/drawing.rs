@@ -3,8 +3,8 @@
 //! (`Flow_ir.Gpu.backend` record), the 100000-circle and static-canvas allocation measurements
 //! (`Gc.allocated_bytes` has no Rust counterpart), the native byte-for-byte export and the benchmark
 //! (their own aliases in OCaml, `--bench`/directory arguments).
-use crate::support::*;
-use crate::t3c::*;
+use super::support::*;
+use super::t3c::*;
 use flow_eval::Value;
 use flow_graph::flow_edit as fe;
 use flow_native::drawing;

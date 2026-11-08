@@ -3,7 +3,7 @@
 //! editor_binding, editor_w9, editor_active_scrub, editor_command_click, editor_literal_scrub,
 //! editor_text_drop, editor_text_find) lower the 240-seed sunflower/rosette sketches and drive
 //! pixel-exact clicks; see the report.
-use crate::t3c::*;
+use super::t3c::*;
 use input::{Event, Key, MouseButton};
 use rays_editor::Editor;
 

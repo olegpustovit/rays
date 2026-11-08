@@ -49,9 +49,7 @@ runtime_resources = { path = "../runtime_resources" }
 mem_sys = { path = "../mem_sys" }
 scene_command = { path = "../scene_command" }
 
-# Window/GPU suites (see rs/port/rays_editor_plan.md) are added per bundle, each
-#   [[test]] name = "window_editor_<x>" / "gpu_editor_<x>"  harness = false
-# like crates/pxui (own main, rays/tests/common/window.rs runner).
+# Window smoke + merged offscreen `gpu_editor` suite (B3); harness = false, rays/tests/common/window.rs.
 
 [target.'cfg(windows)'.dev-dependencies]
 ogpu_vulkan = { path = "../ogpu_vulkan" }
@@ -67,39 +65,7 @@ required-features = ["test-hooks"]
 
 
 [[test]]
-name = "gpu_suite_t1"
-path = "tests/gpu_suite_t1.rs"
-harness = false
-required-features = ["test-hooks"]
-
-[[test]]
-name = "gpu_suite_t2"
-path = "tests/gpu_suite_t2.rs"
-harness = false
-required-features = ["test-hooks"]
-
-[[test]]
-name = "gpu_suite_t3"
-path = "tests/gpu_suite_t3.rs"
-harness = false
-required-features = ["test-hooks"]
-
-[[test]]
-name = "gpu_suite_t4"
-harness = false
-required-features = ["test-hooks"]
-
-[[test]]
-name = "gpu_suite_t5"
-harness = false
-required-features = ["test-hooks"]
-
-[[test]]
-name = "gpu_suite_t6"
-harness = false
-required-features = ["test-hooks"]
-
-[[test]]
-name = "gpu_native_qualification"
+name = "gpu_editor"
+path = "tests/gpu_editor.rs"
 harness = false
 required-features = ["test-hooks"]

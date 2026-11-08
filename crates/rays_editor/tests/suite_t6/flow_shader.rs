@@ -11,7 +11,7 @@ use flow_syntax::value::Value;
 use rays_editor::navigator as N;
 use sop::{context, session};
 
-use crate::support::*;
+use super::super::support::*;
 
 pub fn flow_shader() {
     let text = read_repo("sketches/flow_shader.rays");
