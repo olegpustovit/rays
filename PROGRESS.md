@@ -14,7 +14,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 |------|------|---------|----------|
 | A | A1-A8 | - | - |
 | B | B0-B5 | - | - |
-| M | M1-M21 implementation | empty-frame guard target | - |
+| M | M1-M21, empty-frame target (1,206/frame) | - | - |
 | I | I1-I6 | - | - |
 | C | C1-C21 | - | - |
 | D | D1-D6 | D4 release `map` fast path | - |
@@ -135,6 +135,32 @@ Policy (`AGENTS.md`, `docs/history/build-speed.md`, plan B0): one warm workspace
 Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s under load; this run is healthy (not stale).
 
 ## Session log
+
+- 2026-11-08: editor round 2.
+  - Allocations/frame (Rust allocations in the harness), with caps lowered each stage:
+
+    | Case | Before | After | Cap |
+    |---|---|---|---|
+    | empty | 1,698 / 105,039 B | 1,206 / 81,998 B | 1,210 / 82,500 |
+    | bare | 1,918 | 1,417 | 1,420 / 97,000 |
+    | basic | 1,521 | 1,384 | 1,390 / 157,500 |
+
+    This meets the plan's ~1,200 empty-editor target (the plan's 1,121 was an injected-malloc measurement on the real app, so the two are close rather than identical). Commits:
+    - `170875d3`: single-sample 2D batches share one render pass (was 12 passes/frame).
+    - `669001fd`: Metal residency declared once per pass.
+    - `73fe6b64`: graph pane edited in place.
+    - `d3982e1f`: inspector fields borrowed; panel_intents lays out only when needed.
+    - `b5a0df4a`: one layout shared by composition and focus.
+    - `4810ffc7`: pxui box entry saves stack depths instead of cloning.
+    - `c1f7f4e1`: chrome labels written directly.
+    - `6d9f1861`: inspector borrows the scene graph.
+  - Fixes:
+    - `11d73658`: GPU handle "leak" was lazily created Metal depth-stencil states cached on the shared device. They are now created and released with the device, which fixes placement_retained, isogrid_viewport x8 and images x2.
+    - `cab81140`: threading test path.
+    - `bbfe3b39`: export skips on SDL "(dummy)" (export needs a window).
+    - `deeeeddf`: slider offsets account for the Cull row added in `55482c94`.
+  - Tests: rays_editor 64, pxui 28, pxui_shell 34, pxui_graph test-hooks 31; gpu_editor placement 4/4, consistency 33/33, marks_scene 18/18, scene_tree 9/9; workspace check clean.
+  - Open: renderer `window_all` x2 time out (pre-existing); run_panel_keys and run_panels sit at 4.4-5.0 s.
 
 - 2026-11-08: native suite triage. All 37 dev failures also fail at the pre-plan baseline `11988707` (full suite built and run at both commits in a throwaway worktree, plus `RAYS_SLOW=1` timing runs), so none is a plan regression. The plan made most slow cases faster (e.g. sopcat_graph_edits 16.0 -> 6.7 s, node_inputs 17.9 -> 6.8 s; orrery no longer hits its 444 MB OOM). The chain failure point moved at `537345e4`, which fixed a pre-baseline fuse bug and exposed hidden assertions: warm re-upload, 16 vs 12 B/pt. Pre-existing bugs to fix:
   - GPU handle leaks after close: images x2, isogrid_viewport x8, placement_retained.
