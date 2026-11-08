@@ -2,7 +2,6 @@
 //!
 //! OCaml returns `(int array, string) result`; here a failure is an `error::T` with code
 //! `invalid_parameter` and the OCaml message (prefix included), a cancellation has code `cancelled`.
-use std::sync::atomic::{AtomicI64, Ordering};
 
 use rdk_core::{attribute, cancel, error, geometry, group, packed, support};
 
@@ -154,14 +153,6 @@ fn validate_positions(
     Ok(positions)
 }
 
-fn collect(output: Vec<AtomicI64>) -> Vec<i64> {
-    output.into_iter().map(AtomicI64::into_inner).collect()
-}
-
-fn atomics(count: usize) -> Vec<AtomicI64> {
-    (0..count).map(|_| AtomicI64::new(-1)).collect()
-}
-
 fn specified(
     cancel_value: Option<&cancel::T>,
     grain: i64,
@@ -191,8 +182,8 @@ fn specified(
         }
     };
     let same = geometry::data_id(source) == geometry::data_id(target);
-    let output = atomics(source_count as usize);
-    support::parallel_for(cancel_value, grain, source_count, &|query| {
+    let mut output = vec![-1_i64; source_count as usize];
+    support::par_fill(cancel_value, grain, &mut output, &|query| {
         if queries.is_none_or(|selected| group::mem(query, selected)) {
             let destination = values[query as usize];
             if destination >= 0
@@ -200,12 +191,12 @@ fn specified(
                 && targets.is_none_or(|selected| group::mem(destination, selected))
                 && (!same || destination != query)
             {
-                output[query as usize].store(destination, Ordering::Relaxed);
+                return Ok(destination);
             }
         }
-        Ok(())
+        Ok(-1)
     })?;
-    Ok(collect(output))
+    Ok(output)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -304,11 +295,11 @@ fn near(
     }
     let same = geometry::data_id(source) == geometry::data_id(target);
     let neighbor_delta: i64 = if exact { 0 } else { 1 };
-    let output = atomics(source_count as usize);
-    support::parallel_for(cancel_value, grain, source_count, &|query| {
+    let mut output = vec![-1_i64; source_count as usize];
+    support::par_fill(cancel_value, grain, &mut output, &|query| {
         if let Some(selected) = queries {
             if !group::mem(query, selected) {
-                return Ok(());
+                return Ok(-1);
             }
         }
         let query_index = query as usize;
@@ -333,7 +324,7 @@ fn near(
             }
         };
         let Some((cx, cy, cz)) = query_cell else {
-            return Ok(());
+            return Ok(-1);
         };
         let mut best = -1_i64;
         let mut best_distance = f64::INFINITY;
@@ -409,10 +400,9 @@ fn near(
                 }
             }
         }
-        output[query_index].store(best, Ordering::Relaxed);
-        Ok(())
+        Ok(best)
     })?;
-    Ok(collect(output))
+    Ok(output)
 }
 
 /// Return one target point number per source point, or `-1` for no snap. Only selected queries are

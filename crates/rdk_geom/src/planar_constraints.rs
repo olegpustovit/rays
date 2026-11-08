@@ -1,10 +1,9 @@
 //! Exact arrangement of projected planar constraint segments.
 use std::cmp::Ordering;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicI64, Ordering as AtomicOrdering};
 use std::sync::Arc;
 
-use rdk_core::{cancel, error};
+use rdk_core::{cancel, error, support};
 
 use crate::bounds2_index;
 use crate::implicit_point::{self, Projection};
@@ -225,17 +224,6 @@ fn explicit_of(
     Ok(value)
 }
 
-/// Runs `work` over `start..=finish` through the shared worker pool, mapping the pool's string
-/// errors back to the arrangement's.
-fn parallel_for(
-    grain: i64,
-    finish: i64,
-    work: &(dyn Fn(i64) -> Result<(), error::T> + Send + Sync),
-) -> Result<(), error::T> {
-    parallel::for_(grain, 0, finish, &|index| work(index).map_err(|e| message_of(&e)))
-        .map_err(invalid_string)
-}
-
 fn run(
     cancel_value: Option<&cancel::T>,
     grain: i64,
@@ -411,9 +399,8 @@ fn run(
                 },
             )
         };
-        let counts: Vec<AtomicI64> = (0..embedded_count).map(|_| AtomicI64::new(0)).collect();
-        let count = |index: i64| -> Result<(), error::T> {
-            cancel::poll(cancel_value, index, 4095)?;
+        let mut counts = vec![0_i64; embedded_count];
+        support::par_fill(cancel_value, grain, &mut counts, &|index| {
             let mut value: i64 = 0;
             query(embedded_points[index as usize], &mut |_| {
                 if value == MAX_INT {
@@ -424,55 +411,45 @@ fn run(
                 value += 1;
                 Ok(())
             })?;
-            counts[index as usize].store(value, AtomicOrdering::Relaxed);
-            Ok(())
-        };
-        if embedded_count as i64 > grain {
-            parallel_for(grain, embedded_count as i64 - 1, &count)?;
-        } else {
-            for index in 0..embedded_count as i64 {
-                count(index)?;
-            }
-        }
+            Ok(value)
+        })?;
         let mut offsets = vec![0i64; embedded_count + 1];
         for index in 0..embedded_count {
-            let c = counts[index].load(AtomicOrdering::Relaxed);
-            let Some(next) = offsets[index].checked_add(c) else {
+            let Some(next) = offsets[index].checked_add(counts[index]) else {
                 return Err(invalid(
                     "Planar embedded incidence cardinality exceeds array limits",
                 ));
             };
             offsets[index + 1] = next;
         }
-        let incidences: Vec<AtomicI64> = (0..offsets[embedded_count])
-            .map(|_| AtomicI64::new(0))
-            .collect();
-        let fill = |index: i64| -> Result<(), error::T> {
-            cancel::poll(cancel_value, index, 4095)?;
-            let mut at = offsets[index as usize];
-            query(embedded_points[index as usize], &mut |segment| {
-                incidences[at as usize].store(segment, AtomicOrdering::Relaxed);
-                at += 1;
-                Ok(())
-            })?;
-            if at != offsets[index as usize + 1] {
-                return Err(invalid(
-                    "Planar embedded incidence count changed between passes",
-                ));
+        let mut incidences = vec![0_i64; offsets[embedded_count] as usize];
+        let embedded = embedded_count as i64;
+        let windows = support::Windows::new(&mut incidences, support::range_count(embedded, grain), |range| {
+            offsets[range.saturating_mul(grain).min(embedded) as usize] as usize
+        });
+        support::run_indexed_ranges(grain, embedded, &|range, first, last| {
+            let window = windows.take(range);
+            let base = offsets[first as usize];
+            for index in first..last {
+                cancel::poll(cancel_value, index, 4095)?;
+                let mut at = offsets[index as usize];
+                query(embedded_points[index as usize], &mut |segment| {
+                    window[(at - base) as usize] = segment;
+                    at += 1;
+                    Ok(())
+                })?;
+                if at != offsets[index as usize + 1] {
+                    return Err(invalid(
+                        "Planar embedded incidence count changed between passes",
+                    ));
+                }
             }
             Ok(())
-        };
-        if embedded_count as i64 > grain {
-            parallel_for(grain, embedded_count as i64 - 1, &fill)?;
-        } else {
-            for index in 0..embedded_count as i64 {
-                fill(index)?;
-            }
-        }
+        })?;
         for index in 0..embedded_count {
             let point = embedded_points[index];
             for incidence in offsets[index]..offsets[index + 1] {
-                split_segments.push(incidences[incidence as usize].load(AtomicOrdering::Relaxed));
+                split_segments.push(incidences[incidence as usize]);
                 split_points.push(point);
             }
         }
