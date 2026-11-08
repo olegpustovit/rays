@@ -3075,8 +3075,10 @@ mod tests {
         );
         assert_eq!(
             fixture_hash(&output),
-            // Remesh uses libm transcendentals: this golden is the Windows/macOS libm result, the other is glibc's.
-            if cfg!(any(windows, target_os = "macos")) { 3_181_404_250_202_190_309 } else { 212_434_250_856_407_980 },
+            // One value on every platform: the only libm call is hypot, and a naive sqrt(x*x+y*y) or a
+            // libm pow in place of the folded powf(2.0) give this same hash. OCaml's 212434250856407980
+            // (non-Windows) was its own output, not a libm difference in this port.
+            3_181_404_250_202_190_309,
             "Remesh payload fixture drifted from the chained kernels"
         );
         let flips_only = ok(&source, 0.8, &|p| {
