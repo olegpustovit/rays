@@ -136,6 +136,11 @@ Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s
 
 ## Session log
 
+- 2026-11-08: `91cda944` perf: the BUILT memo keys Lisp-node stand-in inputs by slot, scoped to one Lisp-node environment (`CallEnvShared::id`, `Options::body_of`). `restore` and editor input edits reuse the body, so a node build does 2 body builds instead of 3. subdivide build: cold 1.47 -> 1.20 s, warm 0.80 -> 0.57 s. Regression `a_lisp_node_rebuilt_over_new_inputs_builds_its_body_once` checks byte-identical cooks.
+  - Full flow_sop: 709 pass, 64.7 s wall / 257.9 s summed (cap lifted, load ~8); still over 60 s.
+  - Checks: flow_ir/eval/check 483 pass; gpu_editor sopcat_ 8, orrery, run_ops and run_panels pass.
+  - Next: reuse the first lowering in `root`/`card_node` (option b) and remove the helpers' wasted workspace lowering.
+
 - 2026-11-08: `228cd80f` perf: residual site lookup without copying the residual; subdivide node build 1.05 -> 0.80 s. `dfe28ee9` qual: 21 more test_parallel_exact fixtures shrunk under the `8f3cedb6` rules (98 cases); the module goes 137.8 -> 97.4 s summed. Full flow_sop: 708 pass, 69.2 s wall / 258.7 s summed with the cap lifted; it still exceeds the 60 s cap (58-60 s at load 8-9). Root cause: each Lisp node body is lowered three times (workspace lowering, `root`/`card_node`, `restore`), and the memo never hits because stand-in input nodes get fresh ids. Fixing that in the product now.
 
 - 2026-11-08: closing the remaining gaps.
