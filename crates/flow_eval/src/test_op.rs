@@ -330,6 +330,8 @@ fn typed_and_source_operators() {
     let live = input::at_time(0.);
     assert_eq!(host::force_reference(&marker, &live, None, None, resolve.clone()), Ok(Value::Bool(false)));
     assert_eq!(host::force_reference(&static_of("(if (test/present) (sqrt -1) 7)"), &live, None, None, resolve.clone()), Ok(Value::Int(7)));
+    // the arena keeps no resolver after its call: it captures the cook's geometries and their device buffers
+    assert_eq!(Arc::strong_count(resolve.as_ref().unwrap()), 1);
     match host::force_reference(&marker, &live, None, None, None) { Err(d) => assert_eq!(d.code, "E_DATA_SOURCE"), Ok(_) => panic!() }
     for resolved in [marker.clone(), Value::Float(1.)] {
         let r: Option<Arc<dyn Fn(&Value) -> Result<Value, Diagnostic> + Send + Sync>> = Some(Arc::new(move |_| Ok(resolved.clone())));

@@ -141,7 +141,9 @@ fn live_fields(a: &Arena) -> LiveSaved {
     LiveSaved { time: a.time.clone(), state: a.state.clone(), resolve: a.resolve.clone(), elems: a.elems.clone(), step_count: a.step_count, fn_calls: a.fn_calls.clone(), memo: a.memo.clone(), record: a.record }
 }
 fn restore_live(a: &mut Arena, saved: Option<LiveSaved>) {
-    let Some(saved) = saved else { return; };
+    // The outermost call's resolver captures its cook's geometries: kept, it would hold their
+    // device buffers until the arena's next call.
+    let Some(saved) = saved else { a.resolve = None; a.elems = Default::default(); return; };
     (a.time, a.state, a.resolve, a.elems, a.step_count, a.fn_calls, a.memo, a.record) = (saved.time, saved.state, saved.resolve, saved.elems, saved.step_count, saved.fn_calls, saved.memo, saved.record);
 }
 // A residual handler's callback runs outside that handler, as an OCaml effect handler's does: an evaluation the callback starts (a kernel
