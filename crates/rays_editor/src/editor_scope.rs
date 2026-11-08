@@ -174,8 +174,7 @@ impl scope::Saved for DocSaved {
 /// or a frame.
 pub fn sync_scope(value: &mut EditorModel) {
     sync_views(value);
-    if let Some(key) = pane_laid(&*value).cloned() {
-        let display = viewed_path(&*value, &key.scope);
+    if let Some(display) = pane_laid(&*value).map(|key| viewed_path(&*value, &key.scope)) {
         let view = &mut crate::panel_map::active_mut(&mut value.panes).view;
         if view.display != display {
             view.display = display;
@@ -186,7 +185,7 @@ pub fn sync_scope(value: &mut EditorModel) {
     let document = value.doc.clone();
     let workspace = &document.workspace;
     let (ws, lowered) = (&workspace.ws, &workspace.lowered);
-    let previous = pane_laid(&*value).cloned();
+    let previous: Option<Rc<scope_key>> = pane(&*value).laid.clone();
     let arguments: Option<Vec<editor_document::literal_edit::Change>> = previous.as_ref().and_then(|k| {
         if k.graph != name || k.ws.layout.collapsed != ws.layout.collapsed {
             None

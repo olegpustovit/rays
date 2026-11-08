@@ -1195,7 +1195,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     value2.doc = doc.clone();
     value2.lisp_vocab = vocab;
     value2.workspace = workspace;
-    with_pane(value2, &|pane| graph_pane { at: level, ..pane.clone() });
+    pane_mut(value2).at = level;
     // the selection keeps the nodes that still exist in the open network
     let mut selection = if level != previous_level || loaded_flag {
         selection::empty()
@@ -1227,8 +1227,9 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
         })
         .or_else(|| value2.open_import.clone());
     {
-        let sel = selection.clone();
-        with_pane(value2, &|pane| graph_pane { picked: sel.clone(), view: picked_view.clone(), ..pane.clone() });
+        let pane = pane_mut(value2);
+        pane.picked = selection.clone();
+        pane.view = picked_view;
     }
     if let Some(level) = target {
         if level != pane_level(&*value2) {
@@ -1294,7 +1295,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::gpu::Config>, pump: Option<&dyn Fn(
     value2.text = text;
     value2.rows = Rc::new(row_sets);
     value2.live_cook = result.live_cook;
-    with_pane(value2, &|pane| graph_pane { views: projections.clone(), ..pane.clone() });
+    pane_mut(value2).views = projections;
     value2.locals = locals;
     for c in &result.changes {
         if let change::Follow_source(path) = c {

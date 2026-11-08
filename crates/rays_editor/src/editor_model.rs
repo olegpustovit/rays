@@ -630,6 +630,10 @@ pub fn pane_selection<'a>(value: impl Into<ModelView<'a>>) -> &'a selection::Sel
     let value = &value.into();
     value.selection
 }
+/// The pane in use, to edit a field in place (`with_pane` rebuilds it whole).
+pub fn pane_mut(value: &mut EditorModel) -> &mut graph_pane {
+    panel_map::active_mut(&mut value.panes)
+}
 pub fn with_pane(value: &mut EditorModel, f: &dyn Fn(&graph_pane) -> graph_pane) {
     let pane = panel_map::active_mut(&mut value.panes);
     *pane = f(pane);
