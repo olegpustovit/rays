@@ -105,7 +105,7 @@ fn compare(body: &str) {
     let (value, program) = compiled(body, true);
     let mut source = script();
     open_frame(&mut source, &program, true);
-    source.push_str("const invoke=rt.invoke;rt.invoke=async function(k,args,plan){assert.ok(plan,'computed dependency needs a plan');const before=snapshot(args);try{return await invoke.call(this,k,args,plan)}finally{assert.deepEqual(snapshot(args),before,'arguments mutated')}};\n");
+    source.push_str("const invoke=rt.invoke;rt.invoke=async function(k,args,plan){assert.ok(plan,'computed dependency needs a plan');assert.equal(plan.countLimit,9223372036854775807n,'native i64 iteration limit');const before=snapshot(args);try{return await invoke.call(this,k,args,plan)}finally{assert.deepEqual(snapshot(args),before,'arguments mutated')}};\n");
     for &(frame, time) in FRAMES {
         let live = input(&mut source, frame, time);
         expectation(&mut source, E::Host::force_reference(&value, &live, None, None, None));

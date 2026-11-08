@@ -1353,7 +1353,7 @@ fn binding_plan(fast: bool, kernel: Option<String>, packed: &packed::T) -> Resul
         r.code.len(),
         r.outputs[0].len(),
         flow_check::op::MAX_WOSIZE,
-        (1i64 << 62) - 1,
+        i64::MAX,
         match &kernel {
             Some(id) => escape(id),
             None => "null".to_owned(),

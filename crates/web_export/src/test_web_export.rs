@@ -97,9 +97,7 @@ sketches!(
     noise,
     particles,
     pxui,
-    #[ignore = "upstream: flow_sop::lower::of_checked hangs on the workspace's sop graph (sop/grid + attr_from_image; the static-map deadlock in parity_backlog)"]
     flow_image,
-    #[ignore = "upstream: flow_sop::lower::of_checked hangs on the workspace's sop graphs (static-map deadlock in parity_backlog)"]
     flow_particles_gpu,
     recursive_signals,
     recursive_rectangles
