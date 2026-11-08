@@ -1,15 +1,79 @@
 //! Port of lib/editor_core/store.ml: atomic file writes and the s-expression state stored beside
-//! documents (a sketch's or the editor's saved settings, and the viewport of a preset).
+//! documents (a sketch's or the editor's saved settings; viewport camera forms live in rays_editor).
 
-use flow_syntax::syntax::{make as make_node, Draft, Node, Syntax, SyntaxBuilder, SyntaxId};
-use flow_syntax::lisp;
 use input::Platform;
-use rays::{camera, easy_camera};
-use rays_math::vec3;
+use std::sync::atomic::{AtomicI64, Ordering};
 
-/// Write atomically through the shared filesystem helper; creates the directory.
+pub mod form;
+
+static TEMPORARY: AtomicI64 = AtomicI64::new(0);
+
+fn ensure_directory(path: &str) -> Result<(), String> {
+    if path.is_empty() || path == "." {
+        return Ok(());
+    }
+    match std::fs::metadata(path) {
+        Ok(meta) if meta.is_dir() => Ok(()),
+        Ok(_) => Err(format!("{path}: not a directory")),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            let parent = match std::path::Path::new(path).parent() {
+                Some(p) if p.as_os_str().is_empty() => ".".to_string(),
+                Some(p) => p.to_string_lossy().into_owned(),
+                None => return Err(format!("{path}: no parent directory")),
+            };
+            if parent == path {
+                return Err(format!("{path}: no parent directory"));
+            }
+            ensure_directory(&parent)?;
+            match std::fs::create_dir(path) {
+                Ok(()) => Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => ensure_directory(path),
+                Err(e) => Err(format!("{path}: {e}")),
+            }
+        }
+        Err(e) => Err(format!("{path}: {e}")),
+    }
+}
+
+fn write_atomic(filename: &str, write: &dyn Fn(&str) -> Result<(), String>) -> Result<(), String> {
+    let filename = match std::fs::canonicalize(filename) {
+        Ok(p) => {
+            let p = p.to_string_lossy().into_owned();
+            p.strip_prefix(r"\\?\").map(str::to_owned).unwrap_or(p)
+        }
+        Err(_) => filename.to_owned(),
+    };
+    let directory = match std::path::Path::new(&filename).parent() {
+        Some(p) if p.as_os_str().is_empty() => ".".to_string(),
+        Some(p) => p.to_string_lossy().into_owned(),
+        None => ".".to_string(),
+    };
+    ensure_directory(&directory)?;
+    let unique = TEMPORARY.fetch_add(1, Ordering::Relaxed);
+    let temporary = std::path::Path::new(&directory)
+        .join(format!(".rays-{:x}{:x}.tmp", std::process::id(), unique))
+        .to_string_lossy()
+        .into_owned();
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)
+        .map_err(|e| e.to_string())?;
+    let finish = || -> Result<(), String> {
+        write(&temporary)?;
+        let file = std::fs::OpenOptions::new().write(true).open(&temporary).map_err(|e| e.to_string())?;
+        file.sync_all().map_err(|e| e.to_string())?;
+        drop(file);
+        std::fs::rename(&temporary, &filename).map_err(|e| e.to_string())
+    };
+    let result = finish();
+    let _ = std::fs::remove_file(&temporary);
+    result
+}
+
+/// Write atomically; creates the parent directory when needed.
 pub fn write_text(filename: &str, text: &str) -> Result<(), String> {
-    runtime_resources::write_text(filename, text)
+    write_atomic(filename, &|temporary| std::fs::write(temporary, text).map_err(|e| e.to_string()))
 }
 
 pub fn read_text(filename: &str) -> Result<String, String> {
@@ -36,121 +100,11 @@ pub fn filename_concat(dir: &str, file: &str) -> String {
     if ends { format!("{}{}", dir, file) } else { format!("{}{}{}", dir, sep, file) }
 }
 
-// ---- the forms stored beside the documents: all s-expressions ----
-
-fn kw(name: &str) -> Syntax {
-    make_node(Draft::Kw(name.to_string()))
-}
-
-fn number(x: f64) -> Syntax {
-    make_node(Draft::Num(lisp::float(x)))
-}
-
-fn vec_of_numbers(xs: &[f64]) -> Syntax {
-    container(Draft::Vec, xs.iter().map(|x| number(*x)).collect())
-}
-
-fn container(kind: fn(Vec<SyntaxId>) -> Draft, items: Vec<Syntax>) -> Syntax {
-    let mut builder = SyntaxBuilder::new();
-    let children = items.iter().map(|form| builder.import(form)).collect();
-    let root = builder.push_draft(0, kind(children), rays_diagnostic::Span { start: 0, finish: 0 }, None);
-    builder.freeze().handle(root)
-}
-
-fn map(pairs: Vec<(&str, Syntax)>) -> Syntax {
-    let mut items = Vec::with_capacity(pairs.len() * 2);
-    for (k, v) in pairs {
-        items.push(kw(k));
-        items.push(v);
-    }
-    container(Draft::Map, items)
-}
-
-fn print(form: &Syntax) -> Result<String, String> {
-    lisp::print(std::slice::from_ref(form)).map(|(text, _)| text).map_err(|error| rays_diagnostic::to_string(&error))
-}
-
-/// OCaml's `float_of_string_opt` on a number form, finite only.
-fn num_of(form: &Syntax) -> Option<f64> {
-    match &form.node {
-        Node::Num(n) => cfmt::parse_ocaml_float(form.name(*n)).filter(|v| v.is_finite()),
-        _ => None,
-    }
-}
-
-fn vec_values(form: &Syntax) -> Option<Vec<f64>> {
-    match &form.node {
-        Node::Vec(xs) => {
-            form.range(*xs).iter().map(|id| num_of(&form.child(*id))).collect()
-        }
-        _ => None,
-    }
-}
-
-/// The value after keyword `name` in a map form.
-fn field(form: &Syntax, name: &str) -> Option<Syntax> {
-    match &form.node {
-        Node::Map(items) => {
-            let items = form.range(*items);
-            let mut i = 0;
-            while i + 1 < items.len() {
-                if let Node::Kw(k) = form.arena().row(items[i]).node {
-                    if form.name(k) == name {
-                        return Some(form.child(items[i + 1]));
-                    }
-                }
-                i += 2;
-            }
-            None
-        }
-        _ => None,
-    }
-}
-
-/// The environment's view state in a preset: the viewport camera.
-pub mod viewport {
-    use super::*;
-
-    pub fn encode(easy: &easy_camera::t, look_through: bool) -> Result<Syntax, String> {
-        let camera = easy_camera::camera(easy)?;
-        let vector = |v: vec3::T| vec_of_numbers(&[v.x, v.y, v.z]);
-        Ok(map(vec![
-            ("eye", vector(camera::position(&camera))),
-            ("target", vector(camera::target(&camera))),
-            ("fov", number(easy_camera::fov_y(easy))),
-            ("look_through", make_node(Draft::Sym(look_through.to_string()))),
-        ]))
-    }
-
-    pub fn decode(easy: easy_camera::t, form: &Syntax) -> (easy_camera::t, bool) {
-        let vector = |name: &str| match field(form, name).as_ref().and_then(vec_values) {
-            Some(values) if values.len() == 3 => {
-                Some(vec3::create(values[0], values[1], values[2]))
-            }
-            _ => None,
-        };
-        let easy = match (vector("eye"), vector("target")) {
-            (Some(eye), Some(target)) => easy_camera::of_view(eye, target, &easy),
-            _ => easy,
-        };
-        let easy = match field(form, "fov").as_ref().and_then(num_of) {
-            // the range guard makes with_fov_y's own validation unreachable here
-            Some(fov) if fov > 0. && fov < std::f64::consts::PI => {
-                easy_camera::with_fov_y(fov, &easy).unwrap_or_else(|_| easy.clone())
-            }
-            _ => easy,
-        };
-        let look_through = matches!(
-            field(form, "look_through"),
-            Some(value) if matches!(value.node, Node::Sym(s) if value.name(s) == "true")
-        );
-        (easy, look_through)
-    }
-}
-
 /// A sketch's or the editor's saved settings: one `(settings :sketch "name" :key value ...)` form.
 pub mod settings {
-    use super::*;
+    use super::{read_text, write_text};
+    use super::form::{container, kw, num_of, print, vec_of_numbers, vec_values};
+    use flow_syntax::syntax::{make as make_node, Draft, Node, Syntax};
 
     #[derive(Clone, Debug, PartialEq)]
     pub enum Value {
@@ -167,7 +121,7 @@ pub mod settings {
     fn encode(value: &Value) -> Syntax {
         match value {
             Value::Bool(v) => make_node(Draft::Sym(v.to_string())),
-            Value::Float(v) => number(*v),
+            Value::Float(v) => super::form::number(*v),
             Value::Int(v) => make_node(Draft::Num(v.to_string())),
             Value::Text(v) => make_node(Draft::Str(v.clone().into_bytes())),
             Value::Choice(v) => container(Draft::List, vec![

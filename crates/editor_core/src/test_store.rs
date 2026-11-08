@@ -1,7 +1,6 @@
 //! Port of lib/editor_core/test_store.ml.
-use crate::store::{read_text, settings, user_folder, viewport, write_text};
+use crate::store::{read_text, settings, user_folder, write_text};
 use input::Platform;
-use rays::easy_camera;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -55,7 +54,7 @@ fn symlink_save_keeps_link() {
 }
 
 #[test]
-fn settings_round_trip_and_viewport() {
+fn settings_round_trip() {
     let root = temp_dir("rays-store");
     let directory = root.join("nested");
     let path = directory.join("settings.rays");
@@ -79,14 +78,6 @@ fn settings_round_trip_and_viewport() {
             .is_err()
     );
     assert!(settings::load("test", filename).unwrap() == values);
-
-    let view3 = easy_camera::create(None, Some(9.), None, None, Some(0.8), None).unwrap();
-    let (loaded3, look) = viewport::decode(
-        easy_camera::create(None, None, None, None, None, None).unwrap(),
-        &viewport::encode(&view3, true).unwrap(),
-    );
-    assert!(look && (easy_camera::distance(&loaded3) - 9.).abs() < 0.000001);
-    assert!(easy_camera::fov_y(&loaded3) == easy_camera::fov_y(&view3));
     println!("editor store: atomic s-expression round-trip");
 }
 

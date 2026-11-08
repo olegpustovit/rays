@@ -3,8 +3,8 @@ use crate::command;
 use crate::keymap::{label, Trigger};
 use crate::panels::Panel;
 use crate::router::{self, State};
+use crate::frame;
 use input::{Event, Key, Platform};
-use rays::frame;
 
 /// The scopes the tests use, as the panels they are.
 struct Scope;

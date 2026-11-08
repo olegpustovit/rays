@@ -38,10 +38,7 @@ dependencies = [
  "flow_syntax",
  "input",
  "ogpu_mock",
- "rays",
  "rays_diagnostic",
- "rays_math",
- "runtime_resources",
 ]
 
 [[package]]

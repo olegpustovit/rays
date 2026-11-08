@@ -210,8 +210,8 @@ pub mod router {
     use super::command::t as Command;
     use crate::panels::Panel;
     use super::keymap::{resolve, shifted, Trigger};
+    use crate::frame;
     use input::{Event, Key, Platform};
-    use rays::frame;
 
     /// Tab cancels leader routing, runs its exact-modifier host binding or passes to UI traversal,
     /// then hands the remaining ordered events to the UI (including a same-frame /).

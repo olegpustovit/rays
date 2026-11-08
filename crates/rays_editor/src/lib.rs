@@ -2,6 +2,7 @@
 pub mod bars;
 pub mod carry;
 pub mod cook;
+pub mod ec_frame;
 pub mod echo;
 pub mod editor_actions;
 pub mod editor_add;
@@ -31,6 +32,7 @@ pub mod loop_view;
 pub mod navigator;
 pub mod panel_map;
 pub mod pick;
+pub mod preset_viewport;
 pub mod rays_editor;
 pub mod editor_renderer;
 pub mod schedule;
@@ -59,6 +61,8 @@ mod test_selection;
 mod test_bars;
 #[cfg(test)]
 mod test_editor_commands;
+#[cfg(test)]
+mod test_preset_viewport;
 #[cfg(test)]
 mod test_source_file;
 

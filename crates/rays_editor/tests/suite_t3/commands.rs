@@ -266,7 +266,15 @@ pub fn text_keys_are_handled() {
 fn router_actions(focus: &Panel, events: Vec<Event>) -> Vec<l::action> {
     let keymap = l::keymap();
     let refs: Vec<&l::Command> = keymap.iter().collect();
-    let (_, actions, _) = router::step(&[], Platform::Apple, &refs, focus, false, frame_at((500., 400.), events, 1), router::State::Idle);
+    let (_, actions, _) = router::step(
+        &[],
+        Platform::Apple,
+        &refs,
+        focus,
+        false,
+        rays_editor::ec_frame::to(&frame_at((500., 400.), events, 1)),
+        router::State::Idle,
+    );
     actions.iter().map(|c| l::action_of(c).clone()).collect()
 }
 
@@ -376,10 +384,26 @@ pub fn keys_and_guide() {
     for (pressed, modifiers, expected) in cases {
         let events: Vec<Event> = modifiers.iter().map(|m| key(m.clone())).chain(std::iter::once(key(pressed))).collect();
         let route = |focus: &Panel| -> usize {
-            let (_, actions, _) = router::step(&[], Platform::Apple, &refs, focus, false, frame_at((500., 400.), events.clone(), 1), router::State::Idle);
+            let (_, actions, _) = router::step(
+                &[],
+                Platform::Apple,
+                &refs,
+                focus,
+                false,
+                rays_editor::ec_frame::to(&frame_at((500., 400.), events.clone(), 1)),
+                router::State::Idle,
+            );
             actions.len()
         };
-        let (_, actions, _) = router::step(&[], Platform::Apple, &refs, &Panel::Graph, false, frame_at((500., 400.), events.clone(), 1), router::State::Idle);
+        let (_, actions, _) = router::step(
+            &[],
+            Platform::Apple,
+            &refs,
+            &Panel::Graph,
+            false,
+            rays_editor::ec_frame::to(&frame_at((500., 400.), events.clone(), 1)),
+            router::State::Idle,
+        );
         let routed: Vec<SC> = actions.iter().map(|c| bindings[table.iter().position(|t| t.id == c.id && t.trigger == c.trigger).expect("a binding")].1.clone()).collect();
         assert!(routed == vec![expected], "a graph pane key routed the wrong action");
         assert!(route(&view) == 0 && route(&Panel::Inspector) == 0, "a graph pane key escaped graph scope");

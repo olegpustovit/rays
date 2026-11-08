@@ -10,7 +10,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 
 | Wave | Done | Active | Pending |
 |------|------|--------|---------|
-| A | 7/8 | A6 | — |
+| A | 8/8 | — | — |
 | B | 0/6 | B0 | 4 |
 | M | 0/21 | — | 21 |
 | I | 0/1 | — | 1 |
@@ -26,7 +26,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | A3 | done | `1a8ee31b` — rdk `MAX_ARRAY_LENGTH` trimmed; `boolean_materialization` packing kept |
 | A4 | done | `a60fcced` — `md5_hex` in `rays_math::hash`; 5 duplicate modules removed |
 | A5 | done | `0cad884b` `ec5c1b1b` `fa967abe` `992093ce` — `region_snapshot` `#[cfg(test)]`; dead `window_to_values`/`live_delay()` removed; `Editor::Private`, `Reduce`, `with_core` + `pxui_graph::Inspect` test accessors behind `test-hooks` (prod keeps `box_of`/`grabbed`/`footer_paths`); `rays_editor::test-hooks` enables `pxui_graph/test-hooks` |
-| A6 | active | `09ce8574` — unused deps on rays_bin / UI (pxui still has `ocaml_int` until I) |
+| A6 | done | `09ce8574` UI/rays_bin; **this session** — `editor_core` drops `rays` + `runtime_resources` (local frame + atomic write; viewport in `rays_editor`) |
 | A7 | done | `992093ce` triangle → `point_grid`; `626a1f70` Filename.concat; `f980cbf9`/`8093ff64` ocaml trim; **this session** `rdk_core::ocaml_trim`, rdk_ops/sop blank-name sweep |
 | A8 | done | op/term_arena/param/renderer trims; `Native::runtime_of` kept (in use) |
 | B0 | active | Warm incremental OK; staleness = clean / non-dev profile / RUSTFLAGS (AGENTS.md) |
@@ -60,6 +60,7 @@ Cursor `Task` subagents unavailable in this harness; workers are `omp launch -p`
 - 2026-11-08: `5a6e7269` — A2 sop::support dead helpers (−297 lines); `cargo t -p sop` 52 tests.
 - 2026-11-08: `1a8ee31b` / `a60fcced` — A3 closed for rdk; A4 MD5 merge.
 - 2026-11-08: `09ce8574` — A6 partial dep hygiene.
+- 2026-11-08: A6 — `editor_core` trims `rays`/`runtime_resources`; `cargo check -p editor_core -p editor_document -p rays_editor -p rays_bin`; `cargo t -p editor_core` 7 tests ~0.25s.
 - 2026-11-08: Wave A runbook: gpu_suite sharding (`3c86b2a1`).
 - 2026-11-08: `ec5c1b1b` — rdk re-exports / sop support / flow_ir region_snapshot / flow_check op prune.
 - 2026-11-08: `d01750db` — pxui_shell `cap_y_paint` dedupe.

@@ -11,7 +11,6 @@ use std::rc::Rc;
 
 use editor_core::panels::{self, Panel};
 use editor_core::router;
-use editor_core::store;
 use editor_document::document::{self, ViewRoot};
 use editor_document::kind_graph as kg;
 use editor_document::lowering;
@@ -495,8 +494,8 @@ pub fn begin_frame(extra_: &extra, frame_: frame::t) -> (extra, frame::t) {
             (if lost { release(extra_) } else { extra_.clone() }, frame_)
         }
         Some(_) => {
-            let (ended, frame_) = router::fly(frame_);
-            (if ended { release(extra_) } else { extra_.clone() }, frame_)
+            let (ended, routed) = router::fly(crate::ec_frame::to(&frame_));
+            (if ended { release(extra_) } else { extra_.clone() }, crate::ec_frame::apply(&frame_, routed))
         }
     }
 }
@@ -555,7 +554,7 @@ pub fn panel(ui: &mut Ui, control_: &control, camera_: &camera, extra_: &extra, 
 }
 
 pub fn section(camera_: &camera, extra_: &extra) -> Syntax {
-    let form = store::viewport::encode(camera_, look_through(extra_)).expect("viewport form");
+    let form = crate::preset_viewport::encode(camera_, look_through(extra_)).expect("viewport form");
     match &form.node {
         SNode::Map(fields) => {
             let mut builder = flow_syntax::arena::SyntaxBuilder::new();
@@ -570,7 +569,7 @@ pub fn section(camera_: &camera, extra_: &extra) -> Syntax {
 }
 
 pub fn restore(camera_: &camera, extra_: &extra, json: &Syntax) -> (camera, extra) {
-    let (camera_, look) = store::viewport::decode(camera_.clone(), json);
+    let (camera_, look) = crate::preset_viewport::decode(camera_.clone(), json);
     fn find(form: &Syntax, items: &[flow_syntax::arena::SyntaxId]) -> Option<renderer::Mode> {
         match items {
             [key, value, rest @ ..] => match (form.arena().row(*key).node, form.arena().row(*value).node) {

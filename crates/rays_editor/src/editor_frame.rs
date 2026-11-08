@@ -957,7 +957,16 @@ pub fn update_frame(
     let held_keys = frame_.input.keys.clone();
     let platform = ui_platform(&value);
     let keymap_refs: Vec<&Command> = keymap.iter().collect();
-    let (leader, commands, frame_after) = router::step(&value.held_keys, platform, &keymap_refs, &editor_commands::scope(&focus), text_focus, frame_.clone(), value.leader.clone());
+    let (leader, commands, routed) = router::step(
+        &value.held_keys,
+        platform,
+        &keymap_refs,
+        &editor_commands::scope(&focus),
+        text_focus,
+        crate::ec_frame::to(frame_),
+        value.leader.clone(),
+    );
+    let frame_after = crate::ec_frame::apply(frame_, routed);
     let frame_ = &frame_after;
     let hud = hud_of(&value, &leader, frame_, &commands);
     let mut actions: Vec<action> = commands.iter().map(|c| action_of(c).clone()).collect();
