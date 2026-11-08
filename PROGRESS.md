@@ -6,71 +6,78 @@ Repo mirror: `docs/history/port-simplification/index.html`
 
 **Order:** A ∥ B ∥ M ∥ I, then C, then D. One commit per bullet in Wave A runbook where practical.
 
-**Checkpoint (2026-11-08, later):** see Items for per-ID commit evidence; artifact **not** updated this session.
+**Final state (2026-11-08, wrap-up):** `cargo check --workspace --all-targets` clean at HEAD; tree committed. Artifact **not** updated. Crates 67 -> 51.
 
 ## Summary
 
-| Wave | Done | Active | Pending |
-|------|------|--------|---------|
-| A | 8/8 | — | — |
-| B | 6/6 | B5 (rdk crate delete) | 0 |
-| M | 17/21 | M3, M13, M19, M21 | 4 |
-| I | 3/6 steps | I4–I6 | 3 steps |
-| C | 9/21 | C2, C4, C6–C8, C15, C17, C18, C20 | rest |
-| D | 0/6 | — | 6 |
+| Wave | Done | Partial | Not done |
+|------|------|---------|----------|
+| A | A1-A8 | - | - |
+| B | B0-B5 | - | - |
+| M | M1-M2, M4-M20 (M3 via C6), M21 | M3 | - |
+| I | I1-I6 | - | - |
+| C | C1-C9, C12-C16, C17-C21 | C6, C10, C11 | - |
+| D | D1-D5 | D1 (see notes) | D6 |
 
-## Items
+## Items (commits)
+
+A1-A8, B0-B4: see earlier rows below in git history (`6802a325` ... `96fab43d`); all done.
 
 | ID | Status | Commit / evidence |
 |----|--------|-------------------|
-| A1 | done | `6802a325` — delete `rays_collections` / `rays_hash`; gate bans generics |
-| A2 | done | `30623d6e` — `e10bff22` edge_transport; `ec5c1b1b`/`992093ce` rdk re-exports; `5a6e7269`/`da178e93` support (−631 vs OCaml root); `NumericKind` test dropped |
-| A3 | done | `1a8ee31b` — rdk `MAX_ARRAY_LENGTH` trimmed; `boolean_materialization` packing kept |
-| A4 | done | `a60fcced` — `md5_hex` in `rays_math::hash`; 5 duplicate modules removed |
-| A5 | done | `0cad884b` `ec5c1b1b` `fa967abe` `992093ce` — `region_snapshot` `#[cfg(test)]`; dead `window_to_values`/`live_delay()` removed; `Editor::Private`, `Reduce`, `with_core` + `pxui_graph::Inspect` test accessors behind `test-hooks` (prod keeps `box_of`/`grabbed`/`footer_paths`); `rays_editor::test-hooks` enables `pxui_graph/test-hooks` |
-| A6 | done | `09ce8574` UI/rays_bin; **this session** — `editor_core` drops `rays` + `runtime_resources` (local frame + atomic write; viewport in `rays_editor`) |
-| A7 | done | `992093ce` triangle → `point_grid`; `626a1f70` Filename.concat; `f980cbf9`/`8093ff64` ocaml trim; **this session** `rdk_core::ocaml_trim`, rdk_ops/sop blank-name sweep |
-| A8 | done | op/term_arena/param/renderer trims; `Native::runtime_of` kept (in use) |
-| B0 | done | §B0 checklist + warm pair `flow_check` 0.15s/0.07s; `catalog.rs` marker |
-| B3 | done | `5fdb5fb3` — `gpu_editor` + `tests/support`; 7× `gpu_suite_t*` + qual → 2 test links; `cargo t -p rays_editor run_lowering` ~2.9s |
-| B4 | done | W1 `flow_ir` touch → `rays_bin` check in `tools/buildtime` (env overrides) |
-| B1 | done | `533489ee` term_arena; `e16247cd` delegates; `ba113180` `ScopeStack`/`PathId` in `workspace.rs`; `cargo t -p flow_check` workspace memory + term_arena |
-| B2 | done | `96fab43d` — dev `opt-level=0` for rays_editor, pxui_graph, editor_document, flow_graph, flow_native |
-| B5 | done (partial) | `94aa4546` catalog split; `35df934e` `flow_native`; `7b374363` `flow_gpu`; **this session** `rays_editor` → `rdk_core` + `rdk_ops` (tests); **rdk delete deferred** (`sop`, `flow_sop`) |
-| M2 | done | `bbe7f6ae` — `editor_graph_ref`; `panel_key` / layouts borrow graph name |
-| M10 | done | `c425eefa` — detach alias slots before store; `cargo t -p flow_ir store` 3 pass |
-| M20 | done | `f6ca915b` — remove `mem_sys` TEMP alloc sampler |
-| M4 | done | `0f3804c3` — `Profile::execution_count` / `probe_run::report_count`; `sync_scope` defers profile clone until after `!moved && !fresh`; `cargo check -p rays_editor`; `cargo t -p flow_native probe_run` 3 pass |
-| M9 | done | `20c1dfb3` — `panels::at_ref`; shell `graph_path` / `panel_key` + `beside` borrow; `cargo check -p editor_core -p rays_editor` |
-| M11 | done | `49ec71f3` — lazy `field()` error `form`; `Keys` pattern name once; `cargo t -p flow_eval test_workspace_eval` 2 pass |
-| M7 | done | `dca77b6f` — texture/sampler `retain_for`; `keep_sampler` dedup; `cargo check -p ogpu_metal` |
-| M12 | done | `b5be8904` — `record_slot_open` skips `record_packed` / `note` past per-path cap; `cargo t -p flow_eval test_workspace_eval` |
-| M8 | done | `66136b7f` — side_lru `find_*_by`; sampler keys `mix::sampler`; `cargo check -p renderer` |
-| M6 | done | `69d08a8a` — `plan_entry` prepends via `with_capacity`+extend (no `insert(0)`); `cargo check -p renderer` |
-| M18 | done | `ed08c91b` vertex_primitive i32; `21da1965` five remaining per-vertex scratch arrays i32; `INT_FLOATS` i64→f64 copy in `packed.rs:4643` not yet charged (open) |
-| M1 | done | `9dae5ebd` — `ExecCtx.site` interned (`sub`/`sub_at`/`sync_site`); route cache; `eval_at_sub`/`eval_concrete_sub`/`arm_error_sub`; `cargo t -p flow_eval test_workspace_eval` 29 pass (~13s) |
-| M14 | done | `GeoPayload` + boxed `Struct`/`Source`; `struct_value`/`source_value`; `geo_fields`/`geo_payload`; call sites migrated; `cargo check` flow_eval/flow_ir/flow_check/renderer/flow_graph; `cargo t -p flow_eval test_workspace_eval` |
-| M5 | done | `ef645352` — ogpu_metal render encoder is one struct (no per-encoder closures) |
-| M15 | done | `38bfb307` — `ExecCtx.iter` persistent `Iter` list; `cargo t -p flow_eval` 105 pass |
-| M16 | done | `00c4d596` — closure/residual env `Arc<[(Arc<str>, Value)]>` interned names; unit test `captured_bindings_are_sorted_unique_and_found_by_name` |
-| M17 | done | `25726291` `bd2a526f` `8afb4996` + C3 commits — `support::Windows`/`par_fill`; attribute_kernel ranges write column windows |
-| M3, M13, M19, M21 | pending | M21: worker finding that `runtime_resources` bytes are mutated in production (premise disputed) — under review |
-| I1–I3 | done | `a06df67a` spec; `c9c2b12a` native i64 core; `74942f50` `ocaml_int` deleted, `wrap_int63`/`lsr` in `rays_math::hash` |
-| I4–I6 | pending | RDK `checked_*` guards; MSL/SPIR-V + fixtures; WGSL/JS/web |
-| C1 | done | `dc2ee86b` traits, `ef645352` metal, `e6ae19d5` mock, `2612f106` vulkan (type-checked on macOS only), `b4b90916` consumers |
-| C3 | done | `25726291`…`141a4afe` (~30 commits) — atomics/mutex slots → disjoint windows; mem_sys thread-local alloc counters |
-| C5 | done | `a12b1efb` — `materialise` returns `Result`, `guarded_force` narrowed |
-| C9 | done | `e0afebff` — `Ui::draw` takes `impl Fn` |
-| C10 | partial | `d87c7c95` `625ffd0f` (ogpu_core kept as crate `ogpu`) `5b15cb29` `04b5ae16` `9bf5f9be` `74942f50` (ocaml_int→hash) — rename `ogpu`→`ogpu_core` and `ocaml_int→rays_math::int63` naming deviate from plan text |
-| C11 | partial | `51ebdf92` `rays::table` → `renderer::side_lru`; `rays::idlist` remains |
-| C12 | done | `34ea546d` |
-| C13 | done | `b9816d3a` — 7M floats identical to old search |
+| B5 | done | `94aa4546` `35df934e` `7b374363` `6f75543d`; `a6dd5ea8` `rdk` facade deleted, `sop`/`flow_sop` use `rdk_*` directly; gate 30 -> 28 violations |
+| M1 | done | `9dae5ebd`; regression in `sub_at` route cache fixed `2ba0d306` (broke test_lisp_fusion) |
+| M2, M4, M6-M12, M20 | done | see git log (`bbe7f6ae` `0f3804c3` `69d08a8a` `dca77b6f` `66136b7f` `20c1dfb3` `c425eefa` `49ec71f3` `b5be8904` `f6ca915b`) |
+| M5 | done | `ef645352` |
+| M13 | done | `6f88bce2` Arc<Vec<T>> attributes; COLUMNS ring + FLOW_COPIES deleted; guard `attribute_round_trip_bytes` |
+| M14 | done | `a0e5d08e` + repair `19868fbe` etc. (boxed `GeoPayload`) |
+| M15, M16 | done | `38bfb307`, `00c4d596` |
+| M17 | done | via C3 commits (`25726291` ... `141a4afe`), `bd2a526f`, `8afb4996` |
+| M18 | done | `ed08c91b` `21da1965` i32 scratch; `INT_FLOATS` charged to ledger in `8bf0c0d0` |
+| M19 | done | `13abe74c` `rays_math::text_array::TextArray` (offsets+bytes); 1M rows = 8 allocs; text literals as `Arc<[u8]>` skipped (hundreds of sites) |
+| M21 | done, deviates | `1ccd60fc` `Rc<[u8]>` with `unique()` copy-on-write; plan premise "nothing mutates" was false (set_pixel, Image::replace, readback) |
+| M3 | partial | via C6 |
+| I1-I3 | done | `a06df67a` spec; `c9c2b12a` i64 core; `74942f50` `ocaml_int` deleted |
+| I4 | done | `edc27be2` checked_* in ~12 RDK sites (plan said ~25; all hand-written overflow guards found) |
+| I5 | done | `b946570e` `859aff62` MSL/SPIR-V + 42 fixtures |
+| I6 | done | `4bcb5ba4` WGSL/JS/web, 185 web fixtures; `flow_image`/`flow_particles_gpu` web_export fixtures not regenerated (tests `#[ignore]`) |
+| I fallout | done | `49737e72` scatter `sc_rf`; `2c7ebd25` sort/prelude/operators; `e2e2ed18` gpu_run carried fixture |
+| C1 | done | `dc2ee86b` `ef645352` `e6ae19d5` `2612f106` `b4b90916`; Vulkan only type-checked on macOS; source lines grew, gain is allocations/closure types |
+| C2 | done | `33e163b0` `faa8090e` |
+| C3 | done | ~30 commits `25726291`..`141a4afe`; only 2 test-only mutex slots remain |
+| C4 | partial | `a08c927c` six sites converted (`map_float_planes`, `select_storage`); ~18 other files still match storage kinds |
+| C5 | done | `a12b1efb` |
+| C6 | partial | `4cfcff4a` `7d7241ae`: panel_map plain struct, Cow panes, Rc core; reducers do NOT take `&mut t`, `reduce` still clones once; basic 2509 -> 2089 allocs/frame, empty 5732 -> 4549 |
+| C7, C8 | done | `8e6e0e51`, `69fe4afd` |
+| C9 | done | `e0afebff` |
+| C10 | partial | `d87c7c95` `625ffd0f` (crate kept named `ogpu`, not `ogpu_core`) `5b15cb29` `04b5ae16` `9bf5f9be`; `ocaml_int` deleted outright (I3) rather than moved to `int63` |
+| C11 | partial | `51ebdf92` `rays::table` -> `renderer::side_lru`; `rays::idlist` not unified (identity-equality keys, cannot hash) |
+| C12, C13 | done | `34ea546d`; `b9816d3a` (7M floats identical) |
 | C14 | done | `f3b38af3` |
+| C15 | done | `b268ff32` `support::Choice<T>` (net -100, plan -400..500) |
 | C16 | done | `8afb4996` |
-| C19 | done | `dd441536` (PartialEq derived; Hash not derivable with f64 ogpu types) |
-| C21 | done | `7e9376dc` |
-| C2, C4, C6–C8, C15, C17, C18, C20 | in progress | workers active |
-| D1–D6 | pending | |
+| C17 | done | `84662760` `Gpu::Evidence` on `Config` (not on `Backend` trait: ~16 implementors) |
+| C18, C20 | done | `b5aead5f`; `01b90841` `fold.rs` + `lru::Memo` (+163 net lines, not -140) |
+| C19 | done | `dd441536` PartialEq derived (Hash impossible: f64 in ogpu types) |
+| C21 | done | `7e9376dc` clippy::all allow removed; ~30 test-target lints remain |
+| D1 | partial | `959d5dae` `b72ab30d` `b4f74ecf` goldens `9a17f5d7` `1a5de4fe` `8fc3feb4`; 56 prepends removed; some incidental-order spots in spirv.rs left |
+| D2 | done | `37691759` .. `2e224106` (5 stages): rdk errors `{operation, code: Code, message}`, typed cancellation |
+| D3 | done | `4e8e7193` one WGSL printer, goldens byte-identical |
+| D4 | done | `8bf0c0d0` `18180e84` packed.rs one CPU engine (-1560/+? lines in diff; now 4714 lines); `1455271c` bench_core example |
+| D5 | not started | `Value` four float-array variants -> `Floats(width, ..)` (90 sites, 23 files) |
+| D6 | not started | OCaml module names (`Gpu/Profile/Cost`, `t`) - ~67 files, deferred |
+
+## Known failures / open risks
+
+- `cargo t` full suites were **not** run on final HEAD under load (load avg 50-450). Focused runs per item passed (see worker reports in item rows).
+- Pre-existing at baseline `11988707` (bisected by LowerClean): `test_node_facts::declared_preserved_topology`, `test_keyword_ports::keyword_manifest_defaults_projection_checked_gestures` (E_SHADOW), `test_settle::in_flight_device_writes_settle_at_a_cooks_end`, `test_projection::snapshots_of_the_scene_fixtures`, `lend_session_tests::escaped_zone_nodes_own_only_their_cook_context`.
+- `flow_ir test_static_map::sop_deferral`: root cause `4ed6baf8` (constructor deferral); test rewritten (`a3e8c6df`); `StaticMap.deferred` now effectively dead.
+- Unconfirmed after D4: `flow_web test_fma::checked_arithmetic_regions_match_exact_binary64` (E_NONFINITE) and `flow_ir test_core_operators::text_arrays_part_*` near the 5 s limit; `rays_editor` full suite and `pxui_graph --features test-hooks` unverified after C6.
+- Remesh macOS golden switched to the Windows hash constant (`3107f153`); cause (libm) unverified.
+- Per-cook guards: (c) round trip and (d) subdivide peak and 1M-text exist in `flow_sop/src/test_alloc_budget.rs`; (a) walker and (b) aliased store guards **not added**. Per-frame guards `alloc_budget_basic`/`alloc_budget_empty` exist (`e74d3f1d`; empty-editor limit 4650, plan said ~1200 - plan figure does not match full-layout editor).
+- Not measured: B-wave compile-time gains, bench_core before/after for D4 (PackedMerge reported no regression sign only from one noisy run).
+- `gate deps`: 28 pre-existing violations, none new.
+- Throwaway worktrees `/tmp/rays-m13b`, `/tmp/rays-base`, `/tmp/rays-snap` can be deleted.
 
 ## Subagents (omp)
 
