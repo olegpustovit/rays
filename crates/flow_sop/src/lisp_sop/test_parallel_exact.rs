@@ -1,6 +1,14 @@
 //! lib/sop/test_parallel_exact.ml's 84 registered sections map to 97 enabled tests: the first 14
 //! use generated_* names, attributes expands into 14 attributes_* checks, all others keep source names.
-//! Original fixture scales, one/four domains, grain 97 and seed 42 are retained.
+//! One/four domains, grain 97 and seed 42 are retained, and so are the original fixture scales except
+//! in six cases shrunk to fit the 5 s debug case budget (originals 5.2-9.3 s; the floor is per-process
+//! node lowering plus debug kernel work). Each still splits its dominant owner into >= 8 grain-97
+//! chunks per domain at four domains: named_count 200,003 -> 20,003 points (empty every 101st and 32
+//! piece names kept); general_backbone 257 -> 65 backbone points (3,074 primitives); curve_samples
+//! keeps the 6,145-point curve for its > 4,096-point carve and uses a 769-point curve merged with a 64x48
+//! grid (was 128x96) for the grouped carves; all_edge_source and hole_indices 120x80 -> 48x32 quads
+//! (16 faces each after two iterations, holes every 7th kept); detail_source 60x40 -> 32x24 cells
+//! (4,608 vertices, 24,576 output triangles).
 use std::sync::Arc;
 use rdk_core::{attribute, edge_group, geometry as geo, group, packed, topology, topology_index};
 use rdk_ops::line_geometry;
@@ -890,7 +898,7 @@ fn filters_constrained_source() {
 
 #[test]
 fn subdivision_all_edge_source() {
-    let source=grid(120,80,8.0,true);
+    let source=grid(48,32,8.0,true);
     let count=topology_index::edge_count(&topology_index::create(None,geo::topology(&source)).unwrap());
     let source=super::snapshot(&source);
     let one=exact(&bind(&[("all_edge_source",&source)],r###"(sop/subdivide
@@ -951,13 +959,13 @@ fn subdivision_crease_topology() {
 
 #[test]
 fn subdivision_hole_indices() {
-    let holes=(0..120*80).step_by(7).collect::<Vec<i64>>();
+    let holes=(0..48*32).step_by(7).collect::<Vec<i64>>();
     let text=r###"(-> (sop/grid
    :width_mode "Auto"
    :height_mode "Auto"
    :connectivity "Quads"
-   :columns 120
-   :rows 80
+   :columns 48
+   :rows 32
    :size 8.0)
      (sop/ordered_group :owner "Primitives" :name "subdivision_hole" :elements %S)
      (sop/subdivide
@@ -967,7 +975,7 @@ fn subdivision_hole_indices() {
        :remove_holes true
        :generate_resulting_creases true
        :iterations 2))"###.replace("%S",&format!("{:?}",holes.iter().map(|i|i.to_string()).collect::<Vec<_>>().join(" ")));
-    let one=exact(&super::node(&[],&text));assert_eq!(geo::primitive_count(&one),(120*80-holes.len() as i64)*16);
+    let one=exact(&super::node(&[],&text));assert_eq!(geo::primitive_count(&one),(48*32-holes.len() as i64)*16);
 }
 
 #[test]
@@ -1098,7 +1106,7 @@ fn subdivision_fvar_all() {
 
 #[test]
 fn subdivision_detail_source() {
-    let source=grid(60,40,8.0,false);let count=geo::vertex_count(&source);
+    let source=grid(32,24,8.0,false);let count=geo::vertex_count(&source);
     let source=add(&source,Owner::Vertex,"fvar_sample",Storage::Float(Arc::new((0..count).map(|v|((v%127) as f64).powi(2)).collect())));
     let mut source=add(&source,Owner::Vertex,"creaseweight",Storage::Float(Arc::new((0..count).map(|v|((v*17%41) as f64)/10.0).collect())));
     source=add(&source,Owner::Detail,"osd_scheme",Storage::Text(Arc::new(vec![b"catmull-clark".to_vec()].into())));
@@ -1239,19 +1247,20 @@ fn modeling_curve_samples() {
      (sop/carve :first 0.137 :last 0.863)
      (sop/ends :mode "Close straight"))"###.replace("%s",&points));
     assert!(geo::point_count(&exact(&source))>4_096);
+    let short=curve((0..769).map(|p|{let x=p as f64*(20.0/768.0);(x,(x*0.7).sin(),(x*0.31).cos())}));
     let source=super::node(&[],&r###"(-> (sop/curve %s)
      (sop/normals :weighting "Face area" :owner "Point")
      (-> (sop/grid
            :width_mode "Auto"
            :height_mode "Auto"
            :connectivity "Quads"
-           :columns 128
-           :rows 96
+           :columns 64
+           :rows 48
            :size 8.0)
          (sop/merge))
      (sop/group_range :owner "Primitives" :name "carve_curve" :end_ 0)
-     (sop/carve :group "carve_curve" :first 0.137 :last 0.863))"###.replace("%s",&points));
-    let one=exact(&source);assert_eq!(geo::primitive_count(&one),12_289);assert_eq!(topology::primitive_kind(geo::topology(&one),1).unwrap(),topology::PrimitiveKind::Polygon);
+     (sop/carve :group "carve_curve" :first 0.137 :last 0.863))"###.replace("%s",&short));
+    let one=exact(&source);assert_eq!(geo::primitive_count(&one),3_073);assert_eq!(topology::primitive_kind(geo::topology(&one),1).unwrap(),topology::PrimitiveKind::Polygon);
     let source=super::snapshot(&one);
     let one=exact(&bind(&[("grouped_carve",&source)],r###"(sop/carve
    (sop/ext_grouped_carve)
@@ -1259,7 +1268,7 @@ fn modeling_curve_samples() {
    :first 0.2
    :last 0.8
    :keep "Inside and outside")"###));
-    assert_eq!(geo::primitive_count(&one),12_291);assert_eq!(topology::primitive_kind(geo::topology(&one),3).unwrap(),topology::PrimitiveKind::Polygon);
+    assert_eq!(geo::primitive_count(&one),3_075);assert_eq!(topology::primitive_kind(geo::topology(&one),3).unwrap(),topology::PrimitiveKind::Polygon);
     let one=exact(&bind(&[("grouped_carve",&source)],r###"(sop/carve
    (sop/ext_grouped_carve)
    :group "carve_curve"
@@ -1267,7 +1276,7 @@ fn modeling_curve_samples() {
    :last 0.9
    :extract_points true
    :divisions 5001)"###));
-    assert_eq!(geo::primitive_count(&one),12_288);assert!(geo::point_count(&one)>5_001);assert_eq!(geo::vertex_count(&one),49_152);
+    assert_eq!(geo::primitive_count(&one),3_072);assert!(geo::point_count(&one)>5_001);assert_eq!(geo::vertex_count(&one),12_288);
 }
 
 #[test]
@@ -1311,7 +1320,7 @@ fn combining_many_wires() {
 
 #[test]
 fn combining_general_backbone() {
-    let points=curve((0..257).map(|p|{let t=p as f64*(10.0/256.0);(0.3*(t*0.71).sin(),0.2*(t*0.43).cos(),t)}));
+    let points=curve((0..65).map(|p|{let t=p as f64*(10.0/64.0);(0.3*(t*0.71).sin(),0.2*(t*0.43).cos(),t)}));
     let backbone=super::node(&[],&r###"(-> (sop/curve %s)
      (sop/set_float :name "pscale" :value 0.85)
      (sop/group_edges :name "backbone_edges"))"###.replace("%s",&points));
@@ -1327,7 +1336,7 @@ fn combining_general_backbone() {
    :twist 2.3
    :caps true
    :cap_group "sweep_caps")"###));
-    assert_eq!((geo::point_count(&one),geo::primitive_count(&one)),(6_168,12_290));assert!(has(&one,Owner::Point,"cross_section_profile_id"));
+    assert_eq!((geo::point_count(&one),geo::primitive_count(&one)),(1_560,3_074));assert!(has(&one,Owner::Point,"cross_section_profile_id"));
 }
 
 #[test]
@@ -1382,8 +1391,8 @@ fn combining_columns() {
 
 #[test]
 fn combining_named_count() {
-    let source=line_geometry::points(&(0..200_003).map(|p|(p as f64,0.0,0.0)).collect::<Vec<_>>()).unwrap();
-    let source=super::snapshot(&add(&source,Owner::Point,"piece_name",Storage::Text(Arc::new((0..200_003).map(|p|if p%101==0 {Vec::new()}else{format!("piece_{:02}",p%32).into_bytes()}).collect()))));
+    let source=line_geometry::points(&(0..20_003).map(|p|(p as f64,0.0,0.0)).collect::<Vec<_>>()).unwrap();
+    let source=super::snapshot(&add(&source,Owner::Point,"piece_name",Storage::Text(Arc::new((0..20_003).map(|p|if p%101==0 {Vec::new()}else{format!("piece_{:02}",p%32).into_bytes()}).collect()))));
     let named=bind(&[("named_source",&source)],r###"(sop/groups_from_name (sop/ext_named_source) :owner "Point" :attribute "piece_name")"###);exact(&named);
     exact(&bind(&[("named",&named)],r###"(sop/name_from_groups
    (sop/ext_named)
