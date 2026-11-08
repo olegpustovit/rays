@@ -107,19 +107,6 @@ pub fn parse_ocaml_float(text: &str) -> Option<f64> {
 fn same_float(text: &str, bits: u64) -> bool {
     parse_ocaml_float(text).is_some_and(|value| value.to_bits() == bits)
 }
-fn shortest_g(value: f64, bits: u64, lo: usize, hi: isize, best: String) -> String {
-    if hi < lo as isize {
-        return best;
-    }
-    let precision = (lo + hi as usize) / 2;
-    let text = g(value, precision);
-    if same_float(&text, bits) {
-        shortest_g(value, bits, lo, precision as isize - 1, text)
-    } else {
-        shortest_g(value, bits, precision + 1, hi, best)
-    }
-}
-
 /// Writes an OCaml-compatible shortest float, with [decimal] selecting workspace literal spelling.
 pub fn ocaml_float(value: f64, decimal: bool) -> String {
     if value.is_nan() {
@@ -134,32 +121,14 @@ pub fn ocaml_float(value: f64, decimal: bool) -> String {
     }
 
     let bits = value.to_bits();
-    let mut text = g(value, 15);
-    if !same_float(&text, bits) {
-        text = g(value, 16);
-        if !same_float(&text, bits) {
-            text = g(value, 17);
-        }
-    } else {
-        let end = text.find('e').unwrap_or(text.len());
-        let mut count = 0;
-        let mut started = false;
-        for byte in text.as_bytes()[..end].iter().copied() {
-            if byte.is_ascii_digit() {
-                if byte != b'0' {
-                    started = true;
-                }
-                if started {
-                    count += 1;
-                }
-            }
-        }
-        if count > 1 {
-            let shorter = g(value, count - 1);
-            if same_float(&shorter, bits) {
-                text = shortest_g(value, bits, 1, count as isize - 2, shorter);
-            }
-        }
+    // Rust's `{:e}` is the shortest round-trip digit string; `%g` at that precision matches it
+    // unless correct rounding to that many digits misses the float, so widen up to 17.
+    let digits = format!("{value:e}").split('e').next().unwrap().bytes().filter(u8::is_ascii_digit).count();
+    let mut precision = digits;
+    let mut text = g(value, precision);
+    while precision < 17 && !same_float(&text, bits) {
+        precision += 1;
+        text = g(value, precision);
     }
 
     match text.find('e') {
