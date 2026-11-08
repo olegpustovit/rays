@@ -87,7 +87,8 @@ pub type Drawn = BTreeMap<i64, drawn_entry>;
 
 #[derive(Clone)]
 pub struct t {
-    pub core: m::t,
+    /// shared with the model the sketch keeps while the next is made: a frame copies it once
+    pub core: Rc<m::t>,
     pub rest: Option<rest>,
     /// the orbit of the focused viewport
     pub camera: V::camera,
@@ -254,7 +255,7 @@ pub fn create(o: create_options, workspace: &workspace_doc::T, source: Option<so
             let opened = document::text(&core.doc);
             let saved_doc = std::sync::Arc::downgrade(&core.doc);
             Ok(t {
-                core,
+                core: Rc::new(core),
                 rest: None,
                 camera,
                 control: V::create_control(),
@@ -351,11 +352,11 @@ pub fn probe(value: &t, zone: &[String]) -> Option<i64> {
 
 /// The model with a replaced core: what a test or tool does outside a frame. Drops `rest`.
 pub fn with_core(value: t, core: m::t) -> t {
-    t { core, rest: None, ..value }
+    t { core: Rc::new(core), rest: None, ..value }
 }
 
 pub fn set_probe(value: t, zone: &[String], index: i64) -> t {
-    let mut core = value.core.clone();
+    let mut core = (*value.core).clone();
     core.probes.insert(zone.to_vec(), index);
     with_core(value, core)
 }
@@ -423,7 +424,7 @@ pub fn settings(value: &t) -> editor_document::settings::T {
 }
 
 pub fn set_settings(value: t, settings: &editor_document::settings::T) -> t {
-    let core = editor_host::set_settings(value.core.clone(), settings);
+    let core = editor_host::set_settings((*value.core).clone(), settings);
     with_core(value, core)
 }
 
@@ -465,10 +466,17 @@ pub fn view_camera(value: &t) -> rays::camera::t {
     camera_of(value, &focus_key(value))
 }
 
+/// Which viewport the orbit belongs to, and the orbits of the others.
+pub struct Focus {
+    pub viewing: Option<String>,
+    pub camera: V::camera,
+    pub cameras: Vec<(String, V::camera)>,
+}
+
 /// Focus moves to another viewport: the orbit of the one left is kept, the new one starts from the
-/// orbit it last had, else from a copy of the one in use.
-pub fn follow_focus(value: t, frame_: &frame::t) -> t {
-    let core = &value.core;
+/// orbit it last had, else from a copy of the one in use. `core` is the model whose panels say
+/// which viewport has the focus.
+pub fn follow_focus(value: &t, core: &m::t, frame_: &frame::t) -> Focus {
     let g = editor_shell::geometry(core, &core.workspace, frame_);
     let keys: Vec<String> = g
         .leaves
@@ -478,12 +486,12 @@ pub fn follow_focus(value: t, frame_: &frame::t) -> t {
             _ => None,
         })
         .collect();
-    let mut value = value;
-    value.cameras.retain(|(key, _)| keys.contains(key));
-    let g = editor_shell::geometry(&value.core, &value.core.workspace, frame_);
-    match editor_shell::active_view(&value.core, &g) {
+    let mut cameras = value.cameras.clone();
+    cameras.retain(|(key, _)| keys.contains(key));
+    let unchanged = Focus { viewing: value.viewing.clone(), camera: value.camera.clone(), cameras };
+    match editor_shell::active_view(core, &g) {
         Some(leaf) => match leaf.panel {
-            Panel::View(key) if Some(&key) != value.viewing.as_ref() => match value.viewing.clone() {
+            Panel::View(key) if Some(&key) != value.viewing.as_ref() => match &value.viewing {
                 None => {
                     // the first focus: every other viewport starts as a copy of the orbit in use
                     let others: Vec<(String, V::camera)> = g
@@ -494,24 +502,24 @@ pub fn follow_focus(value: t, frame_: &frame::t) -> t {
                             _ => None,
                         })
                         .collect();
-                    t { viewing: Some(key), cameras: others, ..value }
+                    Focus { viewing: Some(key), cameras: others, ..unchanged }
                 }
                 Some(previous) => {
-                    let mut kept: Vec<(String, V::camera)> = if keys.contains(&previous) {
+                    let mut kept: Vec<(String, V::camera)> = if keys.contains(previous) {
                         let mut k = vec![(previous.clone(), value.camera.clone())];
-                        k.extend(value.cameras.iter().filter(|(p, _)| *p != previous).cloned());
+                        k.extend(unchanged.cameras.iter().filter(|(p, _)| p != previous).cloned());
                         k
                     } else {
-                        value.cameras.clone()
+                        unchanged.cameras.clone()
                     };
                     let camera = kept.iter().find(|(k, _)| *k == key).map(|(_, c)| c.clone()).unwrap_or_else(|| value.camera.clone());
                     kept.retain(|(k, _)| *k != key);
-                    t { viewing: Some(key), camera, cameras: kept, ..value }
+                    Focus { viewing: Some(key), camera, cameras: kept }
                 }
             },
-            _ => value,
+            _ => unchanged,
         },
-        None => value,
+        None => unchanged,
     }
 }
 
@@ -596,7 +604,7 @@ fn same_baked_views(a: &[(String, baked_pair)], b: &[(String, baked_pair)]) -> b
     a.len() == b.len() && a.iter().zip(b).all(|((k, (_, x)), (k2, (_, y)))| k == k2 && Rc::ptr_eq(x, y))
 }
 
-pub fn compose(value: &t, core: &m::t, update_: &update, baked: &Option<Rc<world::baked>>, baked_views: &[(String, baked_pair)], scene: &kg::T) -> composed_out {
+pub fn compose(value: &t, core: &m::t, changed: bool, baked: &Option<Rc<world::baked>>, baked_views: &[(String, baked_pair)], scene: &kg::T) -> composed_out {
     let draw_errors = |drawn: &Drawn, errors: &[String]| -> Vec<String> {
         let mut out: Vec<String> = errors.to_vec();
         for e in drawn.values() {
@@ -634,10 +642,7 @@ pub fn compose(value: &t, core: &m::t, update_: &update, baked: &Option<Rc<world
         None => false,
     };
     if !(texture_changed
-        || update_.prepared_changed
-        || update_.scene_changed
-        || update_.effects.view
-        || update_.effects.export
+        || changed
         || !same
         || !same_baked(baked, &value.baked)
         || !same_baked_views(baked_views, &value.baked_views)

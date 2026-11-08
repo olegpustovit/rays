@@ -6,6 +6,7 @@
 //! ?host_events`) are the trailing parameters of `update`; callbacks that need the `ui` while the
 //! chrome holds it (`groups`, `tools_from`) are answered from tables computed just before.
 #![allow(non_camel_case_types)]
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -281,39 +282,36 @@ pub fn prompt_panel(value: &t, focus: &Panel, keymap: &[Command], frame_: &frame
             let theme = ui.theme();
             let painted = leaf.clone();
             let name = panels::name(&panel).to_uppercase();
-            ui.draw_over(
-                &b,
-                Box::new(move |paint, _| {
-                    let Some(l) = &painted else { return };
-                    let (x, y, w, h) = l.frame;
-                    let (x, y, w, h) = (x as f64, y as f64, w as f64, h as f64);
-                    let cut = if axis == Axis::H { x + w * ratio } else { y + h * ratio };
-                    let (nx, ny, nw, nh) = if axis == Axis::H { (cut, y, x + w - cut, h) } else { (x, cut, w, y + h - cut) };
-                    // the panel being split is tinted, the room of the new one more
-                    let tint = |alpha: i64| rays_math::color::with_alpha(theme.accent, alpha);
-                    paint.fill(x, y, w, h, tint(22));
-                    paint.fill(nx, ny, nw, nh, tint(56));
-                    // the new panel's room: accent brackets 6 inside its corners; the panel kept stays as it is
-                    paint.brackets(nx + 6.0, ny + 6.0, nw - 12.0, nh - 12.0, 0.0, 12.0, 1.0, theme.accent);
-                    // the cut: a hairline through the panel with a short accent cap at each end
-                    let (a, b2, (ux, uy)) = if axis == Axis::H { ((cut, y), (cut, y + h), (0.0, 1.0)) } else { ((x, cut), (x + w, cut), (1.0, 0.0)) };
-                    paint.line_w(a, b2, 1.0, theme.accent);
-                    for (px, py, sgn) in [(a.0, a.1, 1.0), (b2.0, b2.1, -1.0)] {
-                        let (px, py) = (px + sgn * ux, py + sgn * uy);
-                        paint.line_w((px - 5.0 * uy, py - 5.0 * ux), (px + 5.0 * uy, py + 5.0 * ux), 3.0, theme.accent);
-                    }
-                    // what is being made, in the new panel's room, and the keys that steer it
-                    let (cx, cy) = (nx + nw / 2.0, ny + nh / 2.0);
-                    if nw > 90.0 && nh > 40.0 {
-                        let cw = paint.cap_width(&name);
-                        paint.cap((cx - cw / 2.0, cy - 14.0), Some(theme.accent), &name);
-                        let hint = "TAB  TURN   ESC  CANCEL";
-                        let hw = paint.cap_width(hint);
-                        paint.cap((cx - hw / 2.0, cy + 4.0), Some(pxui::theme::ink_3(&theme)), hint);
-                    }
-                    paint.ratio((mx + 12.0, my + 12.0), (ratio * 100.0) as i64, 100 - (ratio * 100.0) as i64);
-                }),
-            );
+            ui.draw_over(&b, move |paint, _| {
+                let Some(l) = &painted else { return };
+                let (x, y, w, h) = l.frame;
+                let (x, y, w, h) = (x as f64, y as f64, w as f64, h as f64);
+                let cut = if axis == Axis::H { x + w * ratio } else { y + h * ratio };
+                let (nx, ny, nw, nh) = if axis == Axis::H { (cut, y, x + w - cut, h) } else { (x, cut, w, y + h - cut) };
+                // the panel being split is tinted, the room of the new one more
+                let tint = |alpha: i64| rays_math::color::with_alpha(theme.accent, alpha);
+                paint.fill(x, y, w, h, tint(22));
+                paint.fill(nx, ny, nw, nh, tint(56));
+                // the new panel's room: accent brackets 6 inside its corners; the panel kept stays as it is
+                paint.brackets(nx + 6.0, ny + 6.0, nw - 12.0, nh - 12.0, 0.0, 12.0, 1.0, theme.accent);
+                // the cut: a hairline through the panel with a short accent cap at each end
+                let (a, b2, (ux, uy)) = if axis == Axis::H { ((cut, y), (cut, y + h), (0.0, 1.0)) } else { ((x, cut), (x + w, cut), (1.0, 0.0)) };
+                paint.line_w(a, b2, 1.0, theme.accent);
+                for (px, py, sgn) in [(a.0, a.1, 1.0), (b2.0, b2.1, -1.0)] {
+                    let (px, py) = (px + sgn * ux, py + sgn * uy);
+                    paint.line_w((px - 5.0 * uy, py - 5.0 * ux), (px + 5.0 * uy, py + 5.0 * ux), 3.0, theme.accent);
+                }
+                // what is being made, in the new panel's room, and the keys that steer it
+                let (cx, cy) = (nx + nw / 2.0, ny + nh / 2.0);
+                if nw > 90.0 && nh > 40.0 {
+                    let cw = paint.cap_width(&name);
+                    paint.cap((cx - cw / 2.0, cy - 14.0), Some(theme.accent), &name);
+                    let hint = "TAB  TURN   ESC  CANCEL";
+                    let hw = paint.cap_width(hint);
+                    paint.cap((cx - hw / 2.0, cy + 4.0), Some(pxui::theme::ink_3(&theme)), hint);
+                }
+                paint.ratio((mx + 12.0, my + 12.0), (ratio * 100.0) as i64, 100 - (ratio * 100.0) as i64);
+            });
             let signal = ui.signal(&b);
             let cancel = pressed(Key::Escape) || frame_.input.events.iter().any(|e| matches!(e, Event::Pointer_pressed(MouseButton::RightButton, _)));
             if cancel {
@@ -564,8 +562,8 @@ type Inspected = (Option<Panel_result>, Vec<change>, Vec<(String, Value)>, bool,
 
 /// Every inspector leaf: the one in use over the frame's state, the others over their own pane.
 #[allow(clippy::too_many_arguments)]
-pub fn draw_inspectors(
-    value: &t,
+pub fn draw_inspectors<'a>(
+    value: &'a t,
     workspace: &shell,
     image: &dyn Fn(i64) -> Option<rays::image::t>,
     camera_panel: &dyn Fn(&mut Ui) -> Panel_result,
@@ -578,7 +576,7 @@ pub fn draw_inspectors(
     graph_shown: bool,
     focus: &Panel,
     focus_path: &Option<layout::Path>,
-    pane_of: &dyn Fn(&Host) -> t,
+    pane_of: &dyn Fn(&Host) -> Cow<'a, t>,
     in_use: &dyn Fn(&t) -> bool,
     roots: &[(Leaf, UiBox)],
     ui: &mut Ui,
@@ -654,7 +652,7 @@ pub fn carry_marks(value: &t) -> Marks {
 type RowSet = (row_source, (Option<i64>, Option<i64>), (Vec<tree::Row>, Vec<String>));
 
 /// The rows of a level's list and of every list that draws, by panel key.
-pub fn list_rows(value: &t, listing_: bool, list_drawn: bool, pane_of: &dyn Fn(&Host) -> t, list_hosts: &[Host]) -> (Vec<RowSet>, Vec<tree::Row>, Vec<String>, Vec<(Key_, (Vec<tree::Row>, Vec<String>))>) {
+pub fn list_rows<'a>(value: &'a t, listing_: bool, list_drawn: bool, pane_of: &dyn Fn(&Host) -> Cow<'a, t>, list_hosts: &[Host]) -> (Vec<RowSet>, Vec<tree::Row>, Vec<String>, Vec<(Key_, (Vec<tree::Row>, Vec<String>))>) {
     // the rows of a level's list, made once per network and kept while a list shows them
     let rows_of = |sets: &mut Vec<RowSet>, pane: &t| -> (Vec<tree::Row>, Vec<String>) {
         let (source, made) = rows(pane);
@@ -703,7 +701,7 @@ pub fn node_menu_step(value: &t, workspace: &shell, frame_: &frame::t, actions: 
 type TextState = (Option<Host>, text_pane::State, Option<text_pane::Shown>, Vec<(Key_, layout::Path, text_pane::State, text_pane::Shown)>);
 
 /// What each text pane shows: its state and what it is showing.
-pub fn text_state(value: &t, actions: &[action], pane_of: &dyn Fn(&Host) -> t, text_hosts: &[Host]) -> Result<TextState, rays_diagnostic::Diagnostic> {
+pub fn text_state<'a>(value: &'a t, actions: &[action], pane_of: &dyn Fn(&Host) -> Cow<'a, t>, text_hosts: &[Host]) -> Result<TextState, rays_diagnostic::Diagnostic> {
     let ws = &value.doc.workspace.ws;
     let text_of = |state: &text_pane::State, host: &Host| -> Result<Option<(text_pane::State, text_pane::Shown)>, rays_diagnostic::Diagnostic> {
         let pane = pane_of(host);
@@ -743,7 +741,7 @@ pub fn text_state(value: &t, actions: &[action], pane_of: &dyn Fn(&Host) -> t, t
         if Some(&host.0) == value.text_at.as_ref() {
             continue;
         }
-        if let Some((state, shown)) = text_of(&local_of(value, &host.0).code, host)? {
+        if let Some((state, shown)) = text_of(&local_of(&value.locals, &host.0).code, host)? {
             other_texts.push((host.0.clone(), host.1.clone(), state, shown));
         }
     }
@@ -1007,10 +1005,11 @@ pub fn update_frame(
         leaves.dedup_by(|a, b| a.0 == b.0);
         leaves
             .into_iter()
-            .filter_map(|(key, path)| if panel_map::key(&value.panes).as_ref() == Some(&key) { None } else { Some((key.clone(), path.clone(), sync_scope(as_pane(&value, (&key, &path))))) })
+            .filter_map(|(key, path)| if panel_map::key(&value.panes).as_ref() == Some(&key) { None } else { Some((key.clone(), path.clone(), sync_scope(as_pane(&value, (&key, &path)).into_owned()))) })
             .collect()
     };
-    let vw = {
+    // the model as this frame's actions leave the panels; the build below keeps editing this one
+    let mut vw = {
         let mut v = value.clone();
         v.workspace = workspace.clone();
         v.focus = focus.clone();
@@ -1024,13 +1023,13 @@ pub fn update_frame(
     // What a text pane shows: a graph panel's own graph and selection, a lisp panel the ones of the
     // graph pane in use (the first graph of the workspace when none is open).
     // a panel's pane, laid out: the one in use, or one of the others
-    let pane_of = |host: &Host| -> t {
+    let pane_of = |host: &Host| -> Cow<'_, t> {
         let pane = shown_as(&value, (&host.0, &host.1, &host.2));
         if panel_map::key(&pane.panes) == panel_map::key(&value.panes) {
-            value.clone()
+            Cow::Borrowed(&value)
         } else {
             match other_panes.iter().find(|(k, _, _)| Some(k) == panel_map::key(&pane.panes).as_ref()) {
-                Some((_, _, synced)) => synced.clone(),
+                Some((_, _, synced)) => Cow::Borrowed(synced),
                 None => pane,
             }
         }
@@ -1191,7 +1190,6 @@ pub fn update_frame(
             let layout_leaf = focused_leaf(&geometry(&value, &workspace, frame_), &focus, focus_path.as_deref());
             let (workspace, mut layout_changes) = layout_intents(&vw, &workspace, &intents);
             layout_changes.extend(layout_actions(&value, &workspace, layout_leaf.as_ref(), &actions));
-            let mut vw = vw.clone();
             vw.workspace = workspace.clone();
             let g = geometry(&value, &workspace, frame_);
             // the graph panel's toolbar; a click is one command or edit
@@ -1325,14 +1323,11 @@ pub fn update_frame(
                 }
             };
             {
-                let mut status_value = value.clone();
-                status_value.workspace = workspace.clone();
-                status_value.status_fps = status_fps;
-                status_value.guide = guide;
-                status_value.focus = focus.clone();
-                status_value.leader = leader.clone();
-                let status_value = with_selection(status_value, selection.clone());
-                status_box(&status_value, ui, frame_, render_status.as_deref(), text_error.as_deref().or(prompt_error.as_deref()).or(error_status.as_deref()), context);
+                vw.status_fps = status_fps;
+                vw.guide = guide;
+                vw.leader = leader.clone();
+                set_selection(&mut vw, selection.clone());
+                status_box(&vw, ui, frame_, render_status.as_deref(), text_error.as_deref().or(prompt_error.as_deref()).or(error_status.as_deref()), context);
             }
             draw_notice(&value, frame_, &roots, &header_focus, graph_body, &scope_view2, scope_active, ui);
             let (focus2, focus_path2, pane_keys) = follow_press(&value, &workspace, frame_, &roots, &timeline_root, focus.clone(), focus_path.clone(), ui);

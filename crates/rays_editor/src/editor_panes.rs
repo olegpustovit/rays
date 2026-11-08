@@ -6,6 +6,8 @@
 //! OCaml signature lists them.
 #![allow(non_camel_case_types)]
 
+use std::borrow::Cow;
+
 use editor_core::panels::{self as panels, Panel};
 use editor_document::document::{self as doc_mod, Level};
 use editor_document::kind_graph;
@@ -81,8 +83,8 @@ pub fn fresh_local() -> local {
     local { rows: tree::create(), code: text_pane::initial(), nav: navigator::initial(), sheet_owner: 0 }
 }
 
-pub fn local_of(value: &t, key: &Key) -> local {
-    match value.locals.iter().find(|(k, _)| k == key) {
+pub fn local_of(locals: &[(Key, local)], key: &Key) -> local {
+    match locals.iter().find(|(k, _)| k == key) {
         Some((_, l)) => l.clone(),
         None => fresh_local(),
     }
@@ -141,13 +143,13 @@ pub fn panel_hosts(value: &t) -> Vec<Host> {
 
 /// The editor as the graph panel a leaf shows has it: a graph leaf its own, a leaf tied by `:of`
 /// that panel's, any other the pane in use.
-pub fn shown_as(value: &t, (key, path, panel): (&Key, &layout::Path, &Panel)) -> t {
+pub fn shown_as<'a>(value: &'a t, (key, path, panel): (&Key, &layout::Path, &Panel)) -> Cow<'a, t> {
     if *panel == Panel::Graph {
         as_pane(value, (key, path))
     } else {
         match tied(value, path) {
             Some(target) => as_pane(value, (&target.0, &target.1)),
-            None => value.clone(),
+            None => Cow::Borrowed(value),
         }
     }
 }
@@ -179,7 +181,7 @@ pub fn follow_hosts(value: t, focus_path: Option<&layout::Path>, hosts: &[Host])
                 v.locals = put_local(&old, &|l| local { rows: saved.clone(), ..l }, &v.locals);
                 let v = t_set_list(v, Some(key.clone()));
                 let mut v = v;
-                v.tree = local_of(&v, &key).rows;
+                v.tree = local_of(&v.locals, &key).rows;
                 v
             }
         }
@@ -200,7 +202,7 @@ pub fn follow_hosts(value: t, focus_path: Option<&layout::Path>, hosts: &[Host])
                 let saved = v.text.clone();
                 v.locals = put_local(&old, &|l| local { code: saved.clone(), ..l }, &v.locals);
                 v.text_at = Some(key.clone());
-                v.text = local_of(&v, &key).code;
+                v.text = local_of(&v.locals, &key).code;
                 v
             }
         }
@@ -220,7 +222,7 @@ pub fn follow_hosts(value: t, focus_path: Option<&layout::Path>, hosts: &[Host])
             let saved = v.outline.clone();
             v.locals = put_local(&old, &|l| local { nav: saved.clone(), ..l }, &v.locals);
             v.outline_at = Some(key.clone());
-            v.outline = local_of(&v, &key).nav;
+            v.outline = local_of(&v.locals, &key).nav;
             v
         }
     }
@@ -277,7 +279,7 @@ pub fn follow_start(value: t) -> t {
         } else if let Some((path, _)) = path_of(&value, &key) {
             let pane = panel_map::active(&as_pane(&value, (&key, &path)).panes).clone();
             let pane = graph_pane { views: level_map_add(pane.views.clone(), pane.at, view), ..pane };
-            value.panes = panel_map::set(&key, pane, value.panes.clone());
+            panel_map::set(&mut value.panes, &key, pane);
         }
     }
     for (key, tab) in changed(&now.tabs, &was.tabs) {
@@ -361,12 +363,12 @@ pub fn panels_line(value: &t) -> String {
             );
             let own = hosts.iter().find_map(|(k, p_, _, kind)| if *k == key && p_ == path { Some(*kind) } else { None });
             match own {
-                Some(Host_kind::Text) => format!("{}: {}", name, text_pane::summary(&if Some(&key) == value.text_at.as_ref() { value.text.clone() } else { local_of(value, &key).code })),
-                Some(Host_kind::List) => format!("{}: {}", name, tree::summary(&if Some(&key) == value.list_at.as_ref() { value.tree.clone() } else { local_of(value, &key).rows })),
+                Some(Host_kind::Text) => format!("{}: {}", name, text_pane::summary(&if Some(&key) == value.text_at.as_ref() { value.text.clone() } else { local_of(&value.locals, &key).code })),
+                Some(Host_kind::List) => format!("{}: {}", name, tree::summary(&if Some(&key) == value.list_at.as_ref() { value.tree.clone() } else { local_of(&value.locals, &key).rows })),
                 Some(Host_kind::Outline) => format!(
                     "{}: search {:?}",
                     name,
-                    navigator::query(&if Some(&key) == value.outline_at.as_ref() { value.outline.clone() } else { local_of(value, &key).nav })
+                    navigator::query(&if Some(&key) == value.outline_at.as_ref() { value.outline.clone() } else { local_of(&value.locals, &key).nav })
                 ),
                 None => name,
             }
@@ -551,13 +553,13 @@ pub type Root_at<'a> = &'a dyn Fn(&layout::Path) -> Option<(Leaf, UiBox)>;
 /// The lists of every list host: the in-use one draws the live rows, the others their cached ones.
 /// Returns the tree, the intents and the locals.
 #[allow(clippy::too_many_arguments)]
-pub fn draw_list_panes(
+pub fn draw_list_panes<'a>(
     ui: &mut Ui,
     shortcut_frame: &frame::t,
-    value: &t,
+    value: &'a t,
     hosted: &[Host],
     root_at: Root_at,
-    pane_of: &dyn Fn(&Host) -> t,
+    pane_of: &dyn Fn(&Host) -> Cow<'a, t>,
     in_use: &dyn Fn(&t) -> bool,
     title_of: &dyn Fn(&t) -> String,
     rows: &[tree::Row],
@@ -597,7 +599,7 @@ pub fn draw_list_panes(
                 intents.extend(emitted);
             }
         } else {
-            let (state, emitted) = draw(ui, local_of(value, key).rows);
+            let (state, emitted) = draw(ui, local_of(&value.locals, key).rows);
             if mine {
                 intents.extend(emitted);
             }
@@ -679,7 +681,7 @@ pub fn draw_outline_panes(
             outline = o;
             intents.extend(emitted);
         } else {
-            let (state, emitted) = draw(ui, &local_of(value, key).nav);
+            let (state, emitted) = draw(ui, &local_of(&value.locals, key).nav);
             intents.extend(emitted);
             locals = put_local(key, &|l| local { nav: state.clone(), ..l }, &locals);
         }
@@ -693,7 +695,7 @@ pub fn draw_spreadsheet_panes(ui: &mut Ui, value: &t, panes: &[(Leaf, UiBox)], l
     for (leaf, root) in panes {
         let key = panel_key(&value.doc, &leaf.path);
         let pane = shown_as(value, (&key, &leaf.path, &leaf.panel));
-        let owner = local_of(&t_with_locals(value, &locals), &key).sheet_owner;
+        let owner = local_of(&locals, &key).sheet_owner;
         let mut changed = None;
         ui.within(root, &mut |ui| {
             changed = spreadsheet::view(ui, leaf.body, owner, spreadsheet_source(&pane));
@@ -703,12 +705,6 @@ pub fn draw_spreadsheet_panes(ui: &mut Ui, value: &t, panes: &[(Leaf, UiBox)], l
         }
     }
     locals
-}
-
-fn t_with_locals(value: &t, locals: &[(Key, local)]) -> t {
-    let mut v = value.clone();
-    v.locals = locals.to_vec();
-    v
 }
 
 /// The keys down this frame that were not down in the last: the edges panes act on.

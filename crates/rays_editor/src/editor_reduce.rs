@@ -840,7 +840,7 @@ pub fn view_input(value: &t, result: &frame_result) -> frame::t {
     value.ui.borrow().input(owner)
 }
 
-pub fn timeline_step(value: &t, timeline: timeline::t, timeline_changes: Vec<timeline::Change>, result: &frame_result) -> (timeline::t, Vec<timeline::Change>, t) {
+pub fn timeline_step(value: &t, timeline: timeline::t, timeline_changes: Vec<timeline::Change>, result: &frame_result) -> (timeline::t, Vec<timeline::Change>, i64) {
     let mut timeline = timeline;
     let mut changes = timeline_changes;
     for intent in &result.timeline_intents {
@@ -855,13 +855,13 @@ pub fn timeline_step(value: &t, timeline: timeline::t, timeline_changes: Vec<tim
         changes.extend(emitted);
     }
     // the End field of a tall timeline: the scrub range (view state, like the playhead)
-    let mut value = value.clone();
+    let mut frames = value.timeline_frames;
     for intent in &result.timeline_intents {
         if let timeline_intent::Set_end(last) = intent {
-            value.timeline_frames = (*last).max(1);
+            frames = (*last).max(1);
         }
     }
-    (timeline, changes, value)
+    (timeline, changes, frames)
 }
 
 /// What the frame around the panes hands the reducer.
@@ -1045,8 +1045,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::Gpu::Config>, pump: Option<&dyn Fn(
     result.settings = new_settings;
     result.label = label;
     let _ = original_document;
-    let (timeline, timeline_changes, value_t) = timeline_step(value, timeline, timeline_changes, &result);
-    let value = &value_t;
+    let (timeline, timeline_changes, timeline_frames) = timeline_step(value, timeline, timeline_changes, &result);
     let (prompt, notice, loaded) = prompt_step(value, &*view_state, &result);
     let loaded_flag = loaded.is_some();
     // Shared undo stack: every document change (a parameter, a workspace gesture, an inspector
@@ -1170,6 +1169,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::Gpu::Config>, pump: Option<&dyn Fn(
     // The open level must still exist after undo or a preset load.
     let level = document::resolve_level(&doc, if loaded_flag { Level::Scene } else { pane_level(value) });
     let mut value2 = value.clone();
+    value2.timeline_frames = timeline_frames;
     value2.doc = doc.clone();
     value2.lisp_vocab = vocabulary_for(value, &doc);
     value2.workspace = unrestore(&value.doc, &doc, result.workspace.clone());
@@ -1400,7 +1400,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::Gpu::Config>, pump: Option<&dyn Fn(
     core.focus = result.focus.clone();
     core.focus_path = result.focus_path.clone();
     core.pane_keys = result.pane_keys.clone();
-    core.panes = panel_map::with_others(result.graph_panes.clone(), core.panes);
+    panel_map::with_others(&mut core.panes, result.graph_panes.clone());
     core.leader = leader;
     core.held_keys = held_keys;
     core.prompt = prompt;

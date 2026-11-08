@@ -235,22 +235,22 @@ pub fn preview_images(value: &t, frame_: &frame::t) -> Vec<String> {
 /// are reduced before sealing its history. Returns the core, the drag still in flight, the input
 /// with the drag's pointer events taken out, the held modifiers at the end of the frame, and the
 /// pane's press and release for the camera's pointer grab.
-pub fn world_drag_frame(value: &t, update_: &update, core: m::t, area: Bounds) -> (m::t, Option<world_drag>, frame::t, Vec<Key>, (bool, bool)) {
+pub fn world_drag_frame(value: &t, loaded: bool, actions: &[action], sent: &frame::t, core: m::t, area: Bounds) -> (m::t, Option<world_drag>, frame::t, Vec<Key>, (bool, bool)) {
     let seal = |mut core: m::t| -> m::t {
         core.history = history::seal(false, core.history.clone());
         core
     };
-    let world_drag = if update_.loaded_view.is_some()
+    let world_drag = if loaded
         || m::pane_level(&core) != m::pane_level(&value.core)
         || core.map_view != value.core.map_view
-        || update_.actions.iter().any(|a| matches!(a, action::Undo | action::Redo | action::Hide_ui))
+        || actions.iter().any(|a| matches!(a, action::Undo | action::Redo | action::Hide_ui))
     {
         None
     } else {
         value.world_drag.clone()
     };
-    let modifiers = input::keys_before(&value.core.held_keys, &update_.input.input.keys, &update_.input.input.events);
-    let modifiers = update_.input.input.events.iter().fold(modifiers, |keys, e| input::keys_after(&keys, e));
+    let modifiers = input::keys_before(&value.core.held_keys, &sent.input.keys, &sent.input.events);
+    let modifiers = sent.input.events.iter().fold(modifiers, |keys, e| input::keys_after(&keys, e));
     let ui = value.core.ui.borrow();
     let view = value.core.pane_keys.iter().find_map(|(key, (panel, _))| if matches!(panel, Panel::View(_)) { ui.box_of_key(*key) } else { None });
     let signal = view.as_ref().map(|b| ui.signal(b));
@@ -278,14 +278,14 @@ pub fn world_drag_frame(value: &t, update_: &update, core: m::t, area: Bounds) -
     };
     // the drag's pointer events are the drag's: the camera and picking see a cancelled press
     let input = if !engaged {
-        update_.input.clone()
+        sent.clone()
     } else {
-        let mut events: Vec<Event> = update_.input.input.events.iter().filter(|e| !matches!(e, Event::Pointer_pressed(MouseButton::LeftButton, _) | Event::Pointer_moved(_) | Event::Pointer_released(MouseButton::LeftButton, _))).cloned().collect();
+        let mut events: Vec<Event> = sent.input.events.iter().filter(|e| !matches!(e, Event::Pointer_pressed(MouseButton::LeftButton, _) | Event::Pointer_moved(_) | Event::Pointer_released(MouseButton::LeftButton, _))).cloned().collect();
         events.push(Event::Pointer_cancelled(MouseButton::LeftButton));
         frame::t {
-            input: input::Frame { events, buttons: update_.input.input.buttons.iter().filter(|b| **b != MouseButton::LeftButton).cloned().collect(), ..update_.input.input.clone() },
+            input: input::Frame { events, buttons: sent.input.buttons.iter().filter(|b| **b != MouseButton::LeftButton).cloned().collect(), ..sent.input.clone() },
             mouse_delta: (0., 0.),
-            ..update_.input.clone()
+            ..sent.clone()
         }
     };
     let grab = match &signal {
@@ -335,7 +335,7 @@ pub fn with_view_overlays(value: &t, now: f64, extra: &V::extra, viewing: &Optio
 /// The frame's clicks pick in the view, and a payload carried over a viewport finds its surface.
 /// Returns the core and the press still waiting for its release.
 #[allow(clippy::too_many_arguments)]
-pub fn pick_in_views(value: &t, focused: &t, core: m::t, camera: &V::camera, extra: &V::extra, area: Bounds, modifiers: &[Key], input: &frame::t, raw_frame: &frame::t) -> (m::t, Option<(f64, f64)>) {
+pub fn pick_in_views(value: &t, focused: &Focus, core: m::t, camera: &V::camera, extra: &V::extra, area: Bounds, modifiers: &[Key], input: &frame::t, raw_frame: &frame::t) -> (m::t, Option<(f64, f64)>) {
     // A press and release within the drag threshold is a click: the view picks.
     let mut press = value.pick_press;
     let mut clicks: Vec<(f64, f64)> = Vec::new();
@@ -353,7 +353,7 @@ pub fn pick_in_views(value: &t, focused: &t, core: m::t, camera: &V::camera, ext
             _ => {}
         }
     }
-    let pending = focused.pending_render.is_some();
+    let pending = value.pending_render.is_some();
     let mut core = core;
     if !core.map_view {
         for at in clicks.iter().rev() {
@@ -411,7 +411,9 @@ fn error_status_of(value: &t, image_errors: &[String]) -> Option<String> {
 
 pub fn update_with(value: t, frame_: &frame::t, inspector: &dyn Fn(&mut Ui) -> Rc<dyn Any>) -> (t, Option<Rc<dyn Any>>) {
     let drawn_before = value.drawn.clone();
-    let value = follow_focus(value, frame_);
+    let mut value = value;
+    let followed = follow_focus(&value, &value.core, frame_);
+    (value.viewing, value.camera, value.cameras) = (followed.viewing, followed.camera, followed.cameras);
     let ui = value.core.ui.clone();
     let raw_frame = frame_.clone();
     let (extra, frame) = V::begin_frame(&value.extra, frame_.clone());
@@ -455,7 +457,7 @@ pub fn update_with(value: t, frame_: &frame::t, inspector: &dyn Fn(&mut Ui) -> R
             };
             let image = |id: i64| workspace_images::peek(&images, &lowered.plan, id);
             updated = Some(editor_frame::update(
-                value.core.clone(),
+                (*value.core).clone(),
                 visible,
                 text_focus,
                 &camera_panel,
@@ -475,7 +477,7 @@ pub fn update_with(value: t, frame_: &frame::t, inspector: &dyn Fn(&mut Ui) -> R
     let (value, update_) = open_dialog(value, update_, &frame.input.events);
     let (value, update_) = open_import(value, update_);
     let (value, mut update_) = reload_source(value, update_, frame.input.t);
-    let focused = follow_focus(t { core: update_.core.clone(), ..value.clone() }, &frame);
+    let focused = follow_focus(&value, &update_.core, &frame);
     let panes = editor_shell::panes(&update_.core, &frame);
     let panel_out: Option<Rc<V::panel_out>> = update_.panel.take().and_then(|p| Rc::downcast::<V::panel_out>(p).ok());
     let (control, camera, requests, extra, inspected) = match panel_out {
@@ -506,7 +508,7 @@ pub fn update_with(value: t, frame_: &frame::t, inspector: &dyn Fn(&mut Ui) -> R
             }
         }
     }
-    let core = V::on_doc(&value.core, update_.core.clone(), &camera);
+    let core = V::on_doc(&value.core, update_.core, &camera);
     // Command-S with a draft in a text pane applies it first; one that does not check keeps the
     // save waiting, since the file would not have what the pane shows
     let (core, source) = if !update_.actions.contains(&action::Save_source) {
@@ -525,7 +527,7 @@ pub fn update_with(value: t, frame_: &frame::t, inspector: &dyn Fn(&mut Ui) -> R
         value.held = None;
     }
     let area = if visible { panes.view } else { (0, 0, frame.input.size.0, frame.input.size.1) };
-    let (core, world_drag, input, modifiers, grab) = world_drag_frame(&value, &update_, core, area);
+    let (core, world_drag, input, modifiers, grab) = world_drag_frame(&value, update_.loaded_view.is_some(), &update_.actions, &update_.input, core, area);
     let (core, pick_press) = pick_in_views(&value, &focused, core, &camera, &extra, area, &modifiers, &input, &raw_frame);
     let (camera, extra) = if core.map_view { (camera, V::release(&extra)) } else { V::navigate(area, grab, &control, &camera, &extra, &core, &raw_frame, &input) };
     let (camera, render_status) = match &update_.framed {
@@ -574,7 +576,7 @@ pub fn update_with(value: t, frame_: &frame::t, inspector: &dyn Fn(&mut Ui) -> R
     };
     let context_error = if image_errors.is_empty() { scene_error.clone() } else { Some(image_errors.join("; ")) };
     let (canvases, context_error) = canvas_pictures(context_error, &value, &live_input, &raw_frame, &core, &control);
-    let composed_ = compose(&value, &core, &update_, &baked, &baked_views, &scene);
+    let composed_ = compose(&value, &core, update_.prepared_changed || update_.scene_changed || update_.effects.view || update_.effects.export, &baked, &baked_views, &scene);
     workspace_gpu::frame(&gpu_t, if composed_.drawn_changed { Some(display_keys(&composed_.drawn)) } else { None }.as_deref());
     let context_error = if composed_.errors.is_empty() { context_error } else { Some(composed_.errors.join("; ")) };
     let rendered = composed_.rendered.clone();
@@ -605,7 +607,7 @@ pub fn update_with(value: t, frame_: &frame::t, inspector: &dyn Fn(&mut Ui) -> R
     };
     let pending_render = requests.last().cloned();
     let render_status = if pending_render.is_some() && rendered.is_none() { Some("Render unavailable until the first cook completes".to_string()) } else { render_status };
-    value.core = core;
+    value.core = Rc::new(core);
     value.camera = camera;
     value.cameras = focused.cameras.clone();
     value.viewing = focused.viewing.clone();
@@ -785,7 +787,7 @@ pub fn update(value: t, frame_: &frame::t) -> t {
                 let timeline_ = editor_list::timeline(&saved.core);
                 let (moved, _) = timeline::update(&timeline_, frame_);
                 if moved != timeline_ {
-                    saved.core.timeline = moved;
+                    Rc::make_mut(&mut saved.core).timeline = moved;
                 }
                 if saved.state_error == before_error {
                     saved
@@ -839,7 +841,7 @@ pub fn memory_boundary(mut value: t) -> t {
     let mut verdict = mem::retreat_with(options(device_bytes));
     let mut core_changed = false;
     if matches!(verdict, mem::Verdict::Over(_)) && history::depth(&value.core.history) > 16 {
-        value.core.history = history::shed(16, value.core.history.clone());
+        Rc::make_mut(&mut value.core).history = history::shed(16, value.core.history.clone());
         core_changed = true;
         verdict = mem::retreat_with(options(device_bytes));
     }
@@ -850,7 +852,7 @@ pub fn memory_boundary(mut value: t) -> t {
         }
         mem::Verdict::Within => {
             if cook::out_of_memory(&value.core.cook) && mem::retry_worthwhile() {
-                value.core.cook = std::rc::Rc::new(cook::force(&value.core.cook));
+                Rc::make_mut(&mut value.core).cook = std::rc::Rc::new(cook::force(&value.core.cook));
                 core_changed = true;
             }
             // a refused cook stays refused, though the process is back under: the last good frame shows

@@ -363,7 +363,7 @@ pub mod Reduce {
     use crate::editor_shell;
 
     pub fn open_import(editor: Editor::t, file: &str) -> Editor::t {
-        let mut core = editor.core.clone();
+        let mut core = (*editor.core).clone();
         core.open_import = Some(file.to_string());
         Editor::with_core(editor, core)
     }
@@ -378,7 +378,7 @@ pub mod Reduce {
     pub fn select_path(editor: Editor::t, path: &[String]) -> Editor::t {
         match path.first() {
             Some(graph) => {
-                let mut core = editor_panes::go(editor.core.clone(), graph);
+                let mut core = editor_panes::go((*editor.core).clone(), graph);
                 core.select_later = vec![path.to_vec()];
                 Editor::with_core(editor, core)
             }
@@ -388,7 +388,7 @@ pub mod Reduce {
 
     /// `v` on the checked lexical path, as the graph pane requests it; unstable test hook.
     pub fn view(editor: Editor::t, path: &[String]) -> Editor::t {
-        let core = editor_scope::view_node(editor.core.clone(), path);
+        let core = editor_scope::view_node((*editor.core).clone(), path);
         Editor::with_core(editor, core)
     }
 

@@ -483,7 +483,7 @@ pub fn apply_text_at(value: t, key: &Vec<String>, intents: &[Intent]) -> t {
     }
     let mine = value.text.clone();
     let mut inner = value.clone();
-    inner.text = local_of(&value, key).code;
+    inner.text = local_of(&value.locals, key).code;
     let v = apply_text(inner, intents);
     let mine = if intents.iter().any(|i| matches!(i, Intent::SelectBinding(_) | Intent::JumpDefinition(_))) { text_pane::State { target: None, ..mine } } else { mine };
     let mut out = v.clone();

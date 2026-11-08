@@ -3,6 +3,7 @@
 //!
 //! Functions that return an updated model take it by value (OCaml `{ value with .. }`).
 #![allow(non_camel_case_types)]
+use std::borrow::Cow;
 use editor_core::panels::{self, Panel};
 use editor_document::document::{Level, Origin, T as Document};
 use editor_document::workspace_doc;
@@ -242,8 +243,16 @@ pub fn start_views(doc: &Document, level: Level, path: &[usize]) -> Level_map {
 /// made now starts at the level of the one it replaces.  The document may have changed under a
 /// pane that waited (an undo from another panel): its level is resolved again, and a level that is
 /// gone takes its selection with it.
-pub fn as_pane(value: &t, (key, path): (&Vec<String>, &layout::Path)) -> t {
-    let mut value = value.clone();
+pub fn as_pane<'a>(value: &'a t, (key, path): (&Vec<String>, &layout::Path)) -> Cow<'a, t> {
+    if panel_map::key(&value.panes).as_ref() == Some(key) {
+        Cow::Borrowed(value)
+    } else {
+        Cow::Owned(with_pane_in_use(value.clone(), (key, path)))
+    }
+}
+
+/// `as_pane` of a model owned: no copy.
+pub fn with_pane_in_use(mut value: t, (key, path): (&Vec<String>, &layout::Path)) -> t {
     if panel_map::key(&value.panes).as_ref() == Some(key) {
         return value;
     }
@@ -251,16 +260,14 @@ pub fn as_pane(value: &t, (key, path): (&Vec<String>, &layout::Path)) -> t {
     let views = start_views(&value.doc, level, path);
     let create = move || graph_pane { view: scope::create(None, None), laid: None, shown: None, route: Vec::new(), views: views.clone(), at: level, picked: selection::empty() };
     let doc = value.doc.clone();
-    let panes = panel_map::activate(key, &create, value.panes);
-    let panes = panel_map::set_leaf(Some(path.clone()), panes);
-    let panes = panel_map::update(
-        &|pane: &graph_pane| {
-            let at = editor_document::document::resolve_level(&doc, pane.at);
-            graph_pane { at, picked: if at == pane.at { pane.picked.clone() } else { selection::empty() }, ..pane.clone() }
-        },
-        panes,
-    );
-    value.panes = panes;
+    panel_map::activate(&mut value.panes, key, &create);
+    panel_map::set_leaf(&mut value.panes, Some(path.clone()));
+    let pane = panel_map::active_mut(&mut value.panes);
+    let at = editor_document::document::resolve_level(&doc, pane.at);
+    if at != pane.at {
+        pane.picked = selection::empty();
+        pane.at = at;
+    }
     value
 }
 
@@ -277,7 +284,7 @@ pub fn tied(value: &t, path: &[usize]) -> Option<(Vec<String>, layout::Path)> {
 pub fn follow_graph(mut value: t, focus: &Panel, focus_path: Option<&[usize]>) -> t {
     let all = graph_leaves(&value);
     let at = panel_map::key(&value.panes).and_then(|key| all.iter().find(|(k, _)| *k == key).map(|(_, p)| p.clone()));
-    value.panes = panel_map::set_leaf(at, value.panes);
+    panel_map::set_leaf(&mut value.panes, at);
     let leaves: Vec<(Vec<String>, layout::Path)> = all.iter().filter(|(_, path)| !panel_state(&value, path).collapsed).cloned().collect();
     // the focused graph leaf, or the one the focused leaf is tied to: its edits land there
     let focused = focus_path.and_then(|path| {
@@ -295,15 +302,15 @@ pub fn follow_graph(mut value: t, focus: &Panel, focus_path: Option<&[usize]>) -
         (Some((key, _)), Some(current)) if key == current => value,
         (Some((key, path)), None) => {
             // the first pane: the state so far is its
-            let panes = panel_map::adopt(&key, value.panes);
-            value.panes = panel_map::set_leaf(Some(path), panes);
+            panel_map::adopt(&mut value.panes, &key);
+            panel_map::set_leaf(&mut value.panes, Some(path));
             value
         }
         (Some((key, path)), Some(_)) => {
             // the pane left keeps its canvas, selection, graph and route in the map
-            let mut value = as_pane(&value, (&key, &path));
+            let mut value = with_pane_in_use(value, (&key, &path));
             let keys: Vec<Vec<String>> = all.iter().map(|(k, _)| k.clone()).collect();
-            value.panes = panel_map::retain(&|key| keys.contains(key), value.panes);
+            panel_map::retain(&mut value.panes, &|key| keys.contains(key));
             value
         }
     }
