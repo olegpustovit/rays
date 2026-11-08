@@ -36,7 +36,7 @@ fn calibration() {
     let program = compile("(+ (sin (+ i t)) 0.25)");
     with_owner(|owner,config| {
         assert_eq!(config.policy,Gpu::Policy::Measured);
-        let backend = &*config.evidence;
+        let backend = config.backend.as_ref().unwrap();
         let stats = || gpu::image_stats(owner).0;
         let cost = |p: &packed::T, i: Option<&packed::Inputs>| backend.cost(i,true,p,32768);
         let before = stats();
@@ -212,11 +212,11 @@ fn chain_counterexamples() {
             }
             sop::session::close(&mut session);
         }
-        let backend = config.backend.as_ref().unwrap();
-        flow_sop::attribute_kernel::Display_sink::observe(backend,false,1_000_000,1.);
-        let base = flow_sop::attribute_kernel::Display_sink::rates(backend).0;
-        for seconds in [2.,1.,3.] {flow_sop::attribute_kernel::Display_sink::observe_draw(backend,1_000_000,seconds);}
-        assert!((flow_sop::attribute_kernel::Display_sink::rates(backend).0-base-1e-6).abs()<=1e-12);
+        let evidence = &config.evidence;
+        flow_sop::attribute_kernel::Display_sink::observe(evidence,false,1_000_000,1.);
+        let base = flow_sop::attribute_kernel::Display_sink::rates(evidence).0;
+        for seconds in [2.,1.,3.] {flow_sop::attribute_kernel::Display_sink::observe_draw(evidence,1_000_000,seconds);}
+        assert!((flow_sop::attribute_kernel::Display_sink::rates(evidence).0-base-1e-6).abs()<=1e-12);
     });
 }
 fn retained_generations() {
