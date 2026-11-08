@@ -28,7 +28,7 @@ mod fold;
 use fold::{fold_mesh_writes, fold_writes, template_flags};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, OnceLock, Weak};
 
 type R<T> = Result<T, Diagnostic>;
@@ -2314,6 +2314,8 @@ pub struct Options {
     pub compiled_ids: PathMap,
     pub sites: Vec<W::Path>,
     pub inputs: Option<Vec<(String, Vec<(String, Value)>)>>,
+    /// The Lisp-node environment (`CallEnvShared::id`) whose body this lowering builds; 0 otherwise.
+    pub body_of: u64,
 }
 
 pub fn default_clock() -> Clock {
@@ -2336,6 +2338,7 @@ impl Default for Options {
             compiled_ids: PathMap::new(),
             sites: Vec::new(),
             inputs: None,
+            body_of: 0,
         }
     }
 }
@@ -2418,6 +2421,8 @@ impl std::ops::Deref for ZoneCook {
 }
 
 pub struct CallEnvShared {
+    /// Unique per environment: its bodies' builds share the operators and factories they close over.
+    id: u64,
     checked: Arc<Workspace>,
     factories: Vec<Factory>,
     o: Options,
@@ -2538,14 +2543,18 @@ impl CookServices {
     /// input its id and the facts along its pass-throughs; a node built for a device is taken only
     /// for that device.
     fn reuse(&self, node: Option<&ENode>, state: &Option<State>, elems: &Option<Vec<(String, Value)>>, what: &str, data: &Value, inputs: &[node::T], build_fn: &dyn Fn() -> R<node::T>) -> R<node::T> {
-        fn input_key(input: &node::T) -> String {
+        fn input_key(body_of: u64, input: &node::T) -> String {
             let facts = node::facts(input);
             let inputs = build::input_array(input);
-            let mut s = format!("{}{:?}", node::id(input), facts);
+            // A Lisp body's captured input is a fresh stand-in per build (its parameters name the
+            // cooked node it forwards): within one environment (its operators and factories) the
+            // body's nodes read only its slot, so the slot keys them across rebuilds and edits.
+            let operation = node::operation(input);
+            let mut s = if body_of != 0 && operation.starts_with("lisp_capture_") { format!("{operation}@{body_of}{facts:?}") } else { format!("{}{:?}", node::id(input), facts) };
             if let CookMode::DuplicateInput(i) | CookMode::InPlace(i) | CookMode::InstanceInput(i) | CookMode::Passthrough(i) = facts.cook_mode {
                 if i >= 0 && (i as usize) < inputs.len() {
                     s.push('<');
-                    s.push_str(&input_key(&inputs[i as usize]));
+                    s.push_str(&input_key(body_of, &inputs[i as usize]));
                 }
             }
             s
@@ -2564,7 +2573,7 @@ impl CookServices {
             self.o.gpu.fast.to_string(),
             (self.o.gpu.policy == gpu::Policy::Qualification).to_string(),
         ];
-        parts.extend(inputs.iter().map(input_key));
+        parts.extend(inputs.iter().map(|input| input_key(self.o.body_of, input)));
         let key = parts.join("\0");
         if let Some((backend, n)) = BUILT.get(&key).map(|entry| (*entry).clone()) {
             let same = match (&backend, &self.o.gpu.backend) {
@@ -2576,7 +2585,7 @@ impl CookServices {
                 return Ok(build::rebuild_with_inputs(&n, inputs));
             }
         }
-        let n = build_fn()?;
+        let n = { let _phase = flow_syntax::phase_timer::measure("lower.inlined_build"); build_fn()? };
         // a hit rebuilds over its own inputs: keeping this cook's would pin its whole input graph
         BUILT.insert(key, (self.o.gpu.backend.clone(), build::without_inputs(&n)));
         Ok(n)
@@ -3670,7 +3679,7 @@ impl CallEnvShared {
         let o = &self.o;
         lower_checked(
             factories,
-            Options { reference: o.reference, gpu: o.gpu.clone(), strict_body: true, defer_body_errors: true, kernel_bindings, provenance_tags: o.provenance_tags, tag_base: provenance.unwrap_or(0), on_profile: o.on_profile.clone(), inputs: Some(inputs), ..Options::default() },
+            Options { reference: o.reference, gpu: o.gpu.clone(), strict_body: true, defer_body_errors: true, kernel_bindings, provenance_tags: o.provenance_tags, tag_base: provenance.unwrap_or(0), on_profile: o.on_profile.clone(), inputs: Some(inputs), body_of: self.id, ..Options::default() },
             checked,
         )
     }
@@ -4797,7 +4806,7 @@ fn make_lowerer(factories: Vec<Factory>, o: Options, checked_in: Workspace) -> R
     };
     let nodes = plan.nodes.iter().map(|n| failed_card_as_call(n, &plan, &checked)).collect();
     let plan = Plan { id: E::fresh_plan_id(), nodes, ..plan };
-    let shared = Arc::new(CallEnvShared { checked: checked.clone(), factories: factories.clone(), o: o.clone(), def_context_use: OnceLock::new() });
+    let shared = Arc::new(CallEnvShared { id: { static NEXT: AtomicU64 = AtomicU64::new(1); NEXT.fetch_add(1, Ordering::Relaxed) }, checked: checked.clone(), factories: factories.clone(), o: o.clone(), def_context_use: OnceLock::new() });
     let lisp_factories: Vec<Factory> = (0..checked.nodes.len()).map(|index| lisp_factory(&shared, &kernel_source, None, &[], None, index)).collect();
     let templ = template_flags(&plan.nodes);
     let sites = o.sites.clone();

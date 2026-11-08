@@ -1059,3 +1059,29 @@ fn context_time_is_a_float_time_dependency_in_bodies_only() {
         Ok(_) => panic!("context time outside a defnode body was accepted"),
     }
 }
+
+/// A Lisp node's body is lowered over fresh stand-ins for its inputs on every build: the factory
+/// node (`card_node`) and its rebuild over other inputs (`restore`, an input edit) share one build
+/// of the body's nodes, and the rebuilt node cooks exactly as a fresh one.
+#[test]
+fn a_lisp_node_rebuilt_over_new_inputs_builds_its_body_once() {
+    let l = lower::workspace(None, Vec::new(), lower::Options::default(), &parse("(workspace w (graph g :context sop (sop/subdivide (sop/box) :iterations 1 :hole_group \"\")))"))
+        .unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
+    let graph = l.graphs.iter().find(|g| g.default).expect("a default graph");
+    let builds = |run: &mut dyn FnMut() -> node::T| -> (node::T, i64) {
+        let start = std::time::Instant::now();
+        let guard = flow_syntax::phase_timer::SampleGuard::start_with_clock(Box::new(move || start.elapsed().as_secs_f64()));
+        let n = run();
+        (n, flow_syntax::phase_timer::calls(&guard.finish(), "lower.inlined_build"))
+    };
+    let (n, _) = builds(&mut || lisp_sop::root(&l, graph).expect("graph root"));
+    assert_eq!(node::operation(&n), "subdivide", "the root is the factory node");
+    with_session(&mut |s| {
+        let input = cook_with(s, 1, 97, 0, &node::inputs(&n)[0]);
+        let (rebuilt, count) = builds(&mut || build::rebuild_with_inputs(&n, &[lisp_sop::snapshot(&input)]));
+        assert_eq!(count, 0, "a rebuild over new inputs built the body's nodes again");
+        let expected = geometry_bytes(&cook_with(s, 1, 97, 0, &edit::compile_node(&graph.network.geometry, graph.root.unwrap()).unwrap()));
+        assert!(geometry_bytes(&cook_with(s, 1, 97, 0, &n)) == expected, "the factory node cooks differently from the inlined body");
+        assert!(geometry_bytes(&cook_with(s, 1, 97, 0, &rebuilt)) == expected, "the rebuilt node cooks differently");
+    });
+}
