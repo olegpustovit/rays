@@ -1,4 +1,5 @@
-// A real window: native frames 1/2/60/600 and a resize, zero handle delta. A missing window or
+// A real window: native frames 1/2/60/300 and a resize, zero handle delta (300: past the renderer's
+// 240-frame uniform shrink; each presented frame waits ~10 ms on the compositor for its drawable). A missing window or
 // device is a skip, as in the OCaml test.
 use crate::common;
 use ::renderer::renderer::{self, PipelineFamily, native};
@@ -10,7 +11,7 @@ fn window_runtime_render() {
         return;
     }
     let before = ogpu_core::impl_::live_handles().unwrap();
-    // Exercise all 600 frames without waiting for the display's refresh clock.
+    // Exercise all 300 frames without waiting for the display's refresh clock.
     let cfg = renderer::Configuration { logical_width: 4, logical_height: 4, drawable_width: 4, drawable_height: 4, vsync: false, ..renderer::default_configuration() };
     let value = match renderer::create(&cfg) {
         Ok(value) => value,
@@ -57,11 +58,11 @@ fn window_runtime_render() {
         runtime::runtime_input_sdl3::pump(&mut input).unwrap();
         runtime::runtime_input::drain(&mut input);
     };
-    for frame in 1..=600 {
+    for frame in 1..=300 {
         pump();
         let draws = if frame == 2 { vec![draw.clone(), draw.clone()] } else { vec![draw.clone()] };
         assert!(renderer::draw(None, &value, &draws).unwrap(), "runtime frame {frame} was not presented");
-        if [1, 2, 60, 600].contains(&frame) {
+        if [1, 2, 60, 300].contains(&frame) {
             let facts = renderer::presentation_facts_of(&value).unwrap();
             let bytes = renderer::read_pixels(&value, facts.drawable_width * 4).unwrap();
             assert!(bytes[0] == 64 && bytes[1] == 128 && bytes[2] == 191, "renderer exact pixel");
@@ -76,7 +77,7 @@ fn window_runtime_render() {
     renderer::destroy(&value).unwrap();
     assert_eq!(ogpu_core::impl_::live_handles().unwrap(), before, "renderer native live-handle delta");
     let _ = scene_execution::empty_bytes;
-    println!("renderer: {} frames 1/2/60/600 and resize, zero delta", ogpu_core::impl_::backend().unwrap());
+    println!("renderer: {} frames 1/2/60/300 and resize, zero delta", ogpu_core::impl_::backend().unwrap());
 }
 
 pub const CASES: &[(&str, fn())] = &[("window_runtime_render", window_runtime_render)];

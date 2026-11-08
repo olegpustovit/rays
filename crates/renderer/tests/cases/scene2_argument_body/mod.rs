@@ -1,6 +1,6 @@
 //! The body of lib/renderer/test_scene2_argument.ml, run on a window renderer (window_scene2_argument)
 //! and on an offscreen one (gpu_scene2_argument). Omitted from the OCaml test: the `Gc` allocation and
-//! promotion bounds of the animated-affine loop (no OCaml GC here); the 100 frames still run.
+//! promotion bounds of the animated-affine loop (no OCaml GC here); the frames still run.
 use ::renderer::renderer::{self, prepared_draw};
 use ::renderer::scene_execution::{self, GeometryDraw, Mesh, MeshKey, new_bytes, PipelineFamily, SampledTexture, State, TextureLevel};
 use ogpu_core::pipeline::Blend;
@@ -31,7 +31,18 @@ fn describe(s: &renderer::Stats) -> String {
     format!("misses {} hits {}", s.retained_plan_misses, s.retained_plan_hits)
 }
 
-pub fn run(runtime: &renderer::Renderer, mut before_draw: impl FnMut()) {
+/// How many frames each sweep runs. A presented window frame waits ~10 ms on the compositor for its
+/// drawable, so the window run shortens the churn, mixed and animated sweeps; the offscreen run keeps
+/// the OCaml lengths. The 80-identity plan churn is two whole cycles in both.
+pub struct Frames {
+    pub churn: i64,
+    pub mixed: i64,
+    pub animated: i64,
+}
+pub const OCAML: Frames = Frames { churn: 300, mixed: 100, animated: 100 };
+pub const WINDOW: Frames = Frames { churn: 60, mixed: 30, animated: 20 };
+
+pub fn run(runtime: &renderer::Renderer, frames: &Frames, mut before_draw: impl FnMut()) {
     let mut render = |draws: &[renderer::Draw]| {
         before_draw();
         renderer::draw(None, runtime, draws)
@@ -112,7 +123,7 @@ pub fn run(runtime: &renderer::Renderer, mut before_draw: impl FnMut()) {
     assert!(counters(&retained) == (2, 18), "scene2 retained argument counters are not exact: {}", describe(&retained));
     let mut settled_release = None;
     let mut peak_live = 0;
-    for frame in 1..=300 {
+    for frame in 1..=frames.churn {
         let rgba = if frame & 1 == 0 { SAMPLE } else { [0x99, 0x55, 0x22, 0xff] };
         // Managed-image keys carry their generation: same-key image bytes are never re-hashed, and a
         // new generation recycles the same-shape texture.
@@ -123,9 +134,10 @@ pub fn run(runtime: &renderer::Renderer, mut before_draw: impl FnMut()) {
         assert!(pixels == rgba, "managed-image churn exact pixel mismatch at frame {frame}: got {pixels:?} expected {rgba:?}");
         // Sample after the automatic plan is admitted (frame 2): the live handle count must then
         // stay flat across all generations.
-        if frame % 100 == 0 {
+        // three samples, the first well after the plan is admitted
+        if frame % (frames.churn / 3) == 0 {
             let current = live_handles();
-            if frame == 100 {
+            if frame == frames.churn / 3 {
                 settled_release = Some(current);
             }
             peak_live = peak_live.max(current);
@@ -133,20 +145,20 @@ pub fn run(runtime: &renderer::Renderer, mut before_draw: impl FnMut()) {
     }
     let churn = renderer::stats(runtime).unwrap();
     // The churn frames admit one new automatic plan (two misses, one build) that replaces the earlier
-    // one, then replay it for 298 frames while the same-shape texture is recycled with one upload per
-    // generation.
-    assert!(counters(&churn) == (4, 316), "managed-image churn rebuilt its retained render plan: {}", describe(&churn));
-    assert_eq!(churn.uploaded_bytes - uploaded, 76800, "managed-image churn upload cardinality is not exact");
+    // one, then replay it for churn - 2 frames while the same-shape texture is recycled with one upload
+    // (256 bytes) per generation.
+    assert!(counters(&churn) == (4, 18 + frames.churn - 2), "managed-image churn rebuilt its retained render plan: {}", describe(&churn));
+    assert_eq!(churn.uploaded_bytes - uploaded, 256 * frames.churn, "managed-image churn upload cardinality is not exact");
     assert_eq!(Some(peak_live), settled_release, "managed-image churn grew native live-handle state");
     let plain_mesh = Mesh { key: MeshKey::Host("scene2-retained-plain".into()), ..triangle.clone() };
     let plain_draw = prepared_draw(PipelineFamily::Scene2, Some(Blend::Replace), None, None, None, None, GeometryDraw { mesh: plain_mesh.clone(), state: st.clone() });
     let textured_draw = textured(Blend::Alpha, texture.clone());
-    for _ in 1..=100 {
+    for _ in 1..=frames.mixed {
         assert!(render(&[plain_draw.clone(), textured_draw.clone()]).unwrap(), "mixed canonical Scene2 frame was not presented");
     }
     assert_eq!(first_pixel(runtime), SAMPLE, "mixed canonical Scene2 exact pixel mismatch");
     let mixed = renderer::stats(runtime).unwrap();
-    assert!(counters(&mixed) == (6, 414), "mixed plain/textured Scene2 did not retain one stable plan: {}", describe(&mixed));
+    assert!(counters(&mixed) == (6, counters(&churn).1 + frames.mixed - 2), "mixed plain/textured Scene2 did not retain one stable plan: {}", describe(&mixed));
     for frame in 0..160 {
         let identity = frame % 80;
         let m = Mesh { key: MeshKey::Host(format!("scene2-plan-churn-{identity:02}")), ..triangle.clone() };
@@ -175,7 +187,7 @@ pub fn run(runtime: &renderer::Renderer, mut before_draw: impl FnMut()) {
     for frame in 0..20 {
         assert!(render(&[animated(if frame & 1 == 0 { 0. } else { 2. })]).unwrap(), "animated affine warm-up frame was not presented");
     }
-    for frame in 0..100 {
+    for frame in 0..frames.animated {
         assert!(render(&[animated(if frame & 1 == 0 { 0. } else { 2. })]).unwrap(), "animated affine frame was not presented");
     }
     assert!(render(&[animated(2.)]).unwrap(), "translated affine frame was not presented");

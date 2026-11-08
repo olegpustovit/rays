@@ -19,7 +19,7 @@ fn window_scene2_argument() {
     };
     // AppKit presentation needs the same event pumping as the real application loop.
     let mut input = runtime::runtime_input::create(4096, 4, 4).unwrap();
-    scene2_argument_body::run(&runtime, || {
+    scene2_argument_body::run(&runtime, &scene2_argument_body::WINDOW, || {
         runtime::runtime_input::begin_frame(&mut input);
         runtime::runtime_input_sdl3::pump(&mut input).unwrap();
         runtime::runtime_input::drain(&mut input);
