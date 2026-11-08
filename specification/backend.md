@@ -301,8 +301,8 @@ control. It owns bounded per-viewport tracing resources and inserts their images
 through the existing Scene presentation path. Raster and wireframe use Scene3;
 all three modes run on the native Metal backend. This adds no dependency from
 the renderer or foundational libraries back into the editor.
-`sop` depends on `rdk`, `rays_math` (vectors, matrices, colors), `parallel`
-and `lru`; it never reaches `rays` or the GPU
+`sop` depends on `rdk_core`, `rdk_geom`, `rdk_ops`, `rdk_boolean` (the Rust port has no `rdk`
+facade crate), `rays_math` (vectors, matrices, colors), `parallel` and `lru`; it never reaches `rays` or the GPU
 runtime, and the dependency gate keeps it so. The Rays-dependent geometry glue
 (`Surface`, `Packed_pieces`) lives in `rdk_rays` and accepts geometry/parameter
 values, without a dependency on SOP or the editor.
