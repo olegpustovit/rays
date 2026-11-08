@@ -1636,36 +1636,7 @@ pub fn build_call(
             .collect()
     };
     let capture_factories = make_capture_factories(&[]);
-    let mut body = ck::specialize(provenance, context, label, &definition.body)?;
-    let mut builder = TermBuilder::new();
-    let blank = builder.import_form(&empty_form());
-    let body_id = builder.import(&body.body);
-    let graph_form = builder.import_form(&body.form);
-    let call_node = |kind: String, ctx| Draft::Call { kind, ctx, args: Vec::new() };
-    // inputs bound to captured cooked inputs
-    let mut input_ids = Vec::with_capacity(body.inputs.len());
-    for (name, ty, default) in &body.inputs {
-        let default = match bindings.iter().find(|(n, _)| n == name) {
-            None => default.as_ref().map(|term| builder.import(term)),
-            Some((_, indices)) => {
-                let element_ty = match ty { Ty::List(element) => (**element).clone(), _ => ty.clone() };
-                let capture = |builder: &mut TermBuilder, index: usize| {
-                    let (key, _) = &capture_factories[index];
-                    builder.push(None, &element_ty, blank, call_node(format!("sop/{key}"), if element_ty == ty::image() { fctx::image() } else { fctx::sop() }))
-                };
-                Some(match (ty, indices.as_slice()) {
-                    (Ty::List(_), _) => {
-                        let terms = indices.iter().map(|&i| capture(&mut builder, i)).collect();
-                        builder.push(None, ty, blank, Draft::ListLit(terms))
-                    }
-                    (_, [index]) => capture(&mut builder, *index),
-                    (_, []) => builder.push(None, ty, blank, Draft::Nil),
-                    _ => return Err("A fixed Lisp slot has several inputs".to_owned()),
-                })
-            }
-        };
-        input_ids.push((name.clone(), ty.clone(), default));
-    }
+    let specialized = ck::specialize(provenance, context, label, &definition.body)?;
     // callable slots forwarded as kernels
     let mut forwarded: Vec<(String, FnId, usize)> = Vec::new();
     for (name, value) in functions {
@@ -1708,17 +1679,68 @@ pub fn build_call(
             geometry_captures.push((key, source, index, factory));
         }
     }
-    let mut new_inputs = Vec::new();
-    for (name, key) in forwarded.iter().map(|(name, _, index)| (name.clone(), format!("sop/{}", capture_factories[*index].0)))
-        .chain(geometry_captures.iter().map(|(name, ..)| (name.clone(), format!("sop/{name}")))) {
-        let term = builder.push(None, &ty::geometry(), blank, call_node(key, fctx::sop()));
-        new_inputs.push((name, ty::geometry(), Some(term)));
-    }
-    new_inputs.extend(input_ids);
-    let arena = builder.freeze();
-    body.body = arena.handle(body_id);
-    body.form = arena.syntax().handle(graph_form);
-    body.inputs = new_inputs.into_iter().map(|(name, ty, default)| (name, ty, default.map(|id| arena.handle(id)))).collect();
+    // The body over its slots: a pure function of the specialized graph and the slot bindings
+    // when no function is forwarded (each parameter edit would otherwise import it again).
+    let assemble = |mut body: WGraph| -> Result<WGraph, String> {
+        let mut builder = TermBuilder::new();
+        let blank = builder.import_form(&empty_form());
+        let body_id = builder.import(&body.body);
+        let graph_form = builder.import_form(&body.form);
+        let call_node = |kind: String, ctx| Draft::Call { kind, ctx, args: Vec::new() };
+        // inputs bound to captured cooked inputs
+        let mut input_ids = Vec::with_capacity(body.inputs.len());
+        for (name, ty, default) in &body.inputs {
+            let default = match bindings.iter().find(|(n, _)| n == name) {
+                None => default.as_ref().map(|term| builder.import(term)),
+                Some((_, indices)) => {
+                    let element_ty = match ty { Ty::List(element) => (**element).clone(), _ => ty.clone() };
+                    let capture = |builder: &mut TermBuilder, index: usize| {
+                        let (key, _) = &capture_factories[index];
+                        builder.push(None, &element_ty, blank, call_node(format!("sop/{key}"), if element_ty == ty::image() { fctx::image() } else { fctx::sop() }))
+                    };
+                    Some(match (ty, indices.as_slice()) {
+                        (Ty::List(_), _) => {
+                            let terms = indices.iter().map(|&i| capture(&mut builder, i)).collect();
+                            builder.push(None, ty, blank, Draft::ListLit(terms))
+                        }
+                        (_, [index]) => capture(&mut builder, *index),
+                        (_, []) => builder.push(None, ty, blank, Draft::Nil),
+                        _ => return Err("A fixed Lisp slot has several inputs".to_owned()),
+                    })
+                }
+            };
+            input_ids.push((name.clone(), ty.clone(), default));
+        }
+        let mut new_inputs = Vec::new();
+        for (name, key) in forwarded.iter().map(|(name, _, index)| (name.clone(), format!("sop/{}", capture_factories[*index].0)))
+            .chain(geometry_captures.iter().map(|(name, ..)| (name.clone(), format!("sop/{name}")))) {
+            let term = builder.push(None, &ty::geometry(), blank, call_node(key, fctx::sop()));
+            new_inputs.push((name, ty::geometry(), Some(term)));
+        }
+        new_inputs.extend(input_ids);
+        let arena = builder.freeze();
+        body.body = arena.handle(body_id);
+        body.form = arena.syntax().handle(graph_form);
+        body.inputs = new_inputs.into_iter().map(|(name, ty, default)| (name, ty, default.map(|id| arena.handle(id)))).collect();
+        Ok(body)
+    };
+    type AssembledKey = (String, (u64, u32), (u64, u32), Vec<(String, String, Option<(u64, u32)>)>, Vec<(String, Vec<usize>)>);
+    static ASSEMBLED: LazyLock<lru::Memo<AssembledKey, WGraph>> = LazyLock::new(|| lru::Memo::new("flow_sop.assembled_bodies", 256));
+    let body = if forwarded.is_empty() {
+        let key: AssembledKey = (
+            specialized.name.clone(),
+            specialized.body.identity(),
+            specialized.form.identity(),
+            specialized.inputs.iter().map(|(name, ty, default)| (name.clone(), ty::to_string(ty), default.as_ref().map(|t| t.identity()))).collect(),
+            bindings.to_vec(),
+        );
+        match ASSEMBLED.get(&key) {
+            Some(hit) => (*hit).clone(),
+            None => (*ASSEMBLED.insert(key, assemble(specialized)?)).clone(),
+        }
+    } else {
+        assemble(specialized)?
+    };
     let validations: Vec<WGraph> = definition
         .validations
         .iter()

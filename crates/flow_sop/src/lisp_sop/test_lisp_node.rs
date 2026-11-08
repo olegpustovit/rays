@@ -456,6 +456,11 @@ fn a_defnode_keeps_its_operation_inputs_schema_and_cache_identity() {
     let result = cook(&mut s, &context, &changed);
     assert!(!same(&result, &first), "changed parameter hit old cache");
     assert!(position(&result, 0).0 == ix + 3.0, "parameter edit did not rebuild the Lisp body");
+    // edits share one specialized, assembled body; each still reads its own values
+    for distance in [2.0, 5.0, 3.0] {
+        let (edited, _) = node::apply_parameters(&changed, &[("distance".to_owned(), param::Value::Float(distance))]).unwrap();
+        assert!(position(&cook(&mut s, &context, &edited), 0).0 == ix + distance, "a shared body kept an earlier value");
+    }
     session::close(&mut s);
 }
 
