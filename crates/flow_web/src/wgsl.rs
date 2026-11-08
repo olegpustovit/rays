@@ -1112,8 +1112,8 @@ fn wgsl_type(ty: &Ty) -> String {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-enum Resource { Texture(i64), Buffer(i64) }
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, PartialOrd, Ord)]
+enum Resource { Buffer(i64), Texture(i64) }
 
 /// Raster pipelines `(quads, vertex, fragment)` as one module: every resource in group 0 at its
 /// binding (a binding of words declared `u32`, a float binding `f32`), texture t with its sampler
@@ -1163,14 +1163,9 @@ pub fn raster(pipelines: &[(bool, Stage, Stage)]) -> Result<String, Diagnostic> 
         let fragment = print(true, false, Some(Placement::Fragment(out.clone(), f.clone())), &f.program)?;
         text.push(format!("struct {out} {{\n{fields}}}\n{}{}", vertex.source, fragment.source));
     }
-    // OCaml's `compare` on polymorphic variants orders by tag hash: `Texture` before `Buffer`
-    let mut keyed = resources;
-    keyed.sort_by_key(|(k, _)| match k {
-        Resource::Texture(t) => (0, *t),
-        Resource::Buffer(b) => (1, *b),
-    });
+    resources.sort_by_key(|(k, _)| *k);
     let mut declarations = String::new();
-    for (key, words) in keyed {
+    for (key, words) in resources {
         match key {
             Resource::Buffer(b) => {
                 let _ = writeln!(declarations, "@group(0) @binding({b}) var<storage, read> buffer{b}: array<{}>;", if words { "u32" } else { "f32" });

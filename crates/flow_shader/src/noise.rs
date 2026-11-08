@@ -64,15 +64,14 @@ pub fn expand(program: &packed::T) -> Result<(packed::T, Back), Diagnostic> {
                 let fractal = count.is_none() || *lacunarity != LiveFloat::Fixed(2.0) || *gain != LiveFloat::Fixed(0.5);
                 let helper = helper(fractal, count)?;
                 let guards: Vec<(i64, bool)> = guards.iter().map(|(c, yes)| (map[*c as usize], *yes)).collect();
-                // an OCaml array literal evaluates right to left: gain's constant is pushed first
                 let register = |v: &LiveFloat, out: &mut Vec<Instruction>, back: &mut Vec<i64>| match v {
                     LiveFloat::Fixed(v) => push(out, back, -1, Instruction::Const(*v)),
                     LiveFloat::Live(r) => map[*r as usize],
                 };
                 let mut operands = vec![map[*x as usize], map[*y as usize], map[*z as usize]];
                 if fractal {
-                    let g = register(gain, &mut out, &mut back);
                     let l = register(lacunarity, &mut out, &mut back);
+                    let g = register(gain, &mut out, &mut back);
                     operands.push(l);
                     operands.push(g);
                 }

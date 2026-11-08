@@ -2,9 +2,8 @@
 //! modules (port of lib/flow_shader/spirv.ml). Opcodes and operands follow the Khronos unified
 //! SPIR-V grammar: <https://registry.khronos.org/SPIR-V/>.
 //!
-//! Id allocation order is part of the output: OCaml evaluates function arguments, list and array
-//! elements and tuple components right to left, so a nested call here is bound to temporaries in
-//! that order whenever more than one operand allocates an id or a constant.
+//! Id allocation order is part of the output: nested calls are bound to temporaries left to right
+//! whenever more than one operand allocates an id or a constant.
 #![allow(non_snake_case)]
 use crate::noise;
 use crate::trace;
@@ -239,9 +238,9 @@ impl Emitter {
         self.result(ty, 12, &all)
     }
     fn uniform(&mut self, word: i64) -> i64 {
-        let c = self.u(word % 4);
-        let b = self.u(word / 4);
         let a = self.u(0);
+        let b = self.u(word / 4);
+        let c = self.u(word % 4);
         let ty = self.uniform_pointer;
         let pointer = self.result(ty, 65, &[self.uniform, a, b, c]);
         let uint = self.uint;
@@ -279,16 +278,16 @@ impl Emitter {
         self.body(62, &[pointer, value]);
     }
     fn offset(&mut self, index: i64, width: i64, component: i64) -> i64 {
-        let c = self.u(component);
         let w = self.u(width);
         let uint = self.uint;
         let m = self.result(uint, 132, &[index, w]);
+        let c = self.u(component);
         self.result(uint, 128, &[m, c])
     }
     fn non_finite(&mut self, value: i64) -> i64 {
         let ty = self.boolean;
-        let b = self.result(ty, 157, &[value]);
         let a = self.result(ty, 156, &[value]);
+        let b = self.result(ty, 157, &[value]);
         self.result(ty, 166, &[a, b])
     }
     fn label(&mut self, id: i64) {
@@ -302,8 +301,8 @@ impl Emitter {
     fn record_status(&mut self, condition: i64, bits: i64) {
         let uint = self.uint;
         let old = self.result(uint, 61, &[self.status_bits]);
-        let zero = self.u(0);
         let b = self.u(bits);
+        let zero = self.u(0);
         let bit = self.result(uint, 169, &[condition, b, zero]);
         let or = self.result(uint, 197, &[old, bit]);
         self.body(62, &[self.status_bits, or]);
@@ -363,17 +362,17 @@ fn binary(e: &mut Emitter, operation: Binary, a: i64, b: i64) -> i64 {
         }
         Binary::Pow => {
             // zero = select (b == 0) 1 (select (b > 0) 0 infinity)
-            let inf = e.f(f64::INFINITY);
             let z = e.f(0.0);
-            let c186 = e.compare(186, b, z);
-            let inner = e.select_f(c186, z, inf);
-            let one = e.f(1.0);
             let c180 = e.compare(180, b, z);
+            let one = e.f(1.0);
+            let c186 = e.compare(186, b, z);
+            let inf = e.f(f64::INFINITY);
+            let inner = e.select_f(c186, z, inf);
             let zero = e.select_f(c180, one, inner);
-            let abs = e.ext(4, &[a]);
-            let pow = e.ext(26, &[abs, b]);
             let z0 = e.f(0.0);
             let c = e.compare(180, a, z0);
+            let abs = e.ext(4, &[a]);
+            let pow = e.ext(26, &[abs, b]);
             e.select_f(c, zero, pow)
         }
         Binary::Min => e.ext(37, &[a, b]),
@@ -390,14 +389,14 @@ fn binary(e: &mut Emitter, operation: Binary, a: i64, b: i64) -> i64 {
             e.numeric_truth(c)
         }
         Binary::And => {
-            let tb = e.truth(b);
             let ta = e.truth(a);
+            let tb = e.truth(b);
             let c = e.result(boolean, 167, &[ta, tb]);
             e.numeric_truth(c)
         }
         Binary::Or => {
-            let tb = e.truth(b);
             let ta = e.truth(a);
+            let tb = e.truth(b);
             let c = e.result(boolean, 166, &[ta, tb]);
             e.numeric_truth(c)
         }
@@ -460,32 +459,32 @@ fn unary(e: &mut Emitter, operation: Unary, value: i64) -> i64 {
             e.numeric_truth(c)
         }
         Unary::Asin | Unary::Acos => {
-            let one = e.f(1.0);
             let minus = e.f(-1.0);
+            let one = e.f(1.0);
             let clamped = e.ext(43, &[value, minus, one]);
             let r = e.ext(if operation == Unary::Asin { 16 } else { 17 }, &[clamped]);
-            let nan = e.f(f64::NAN);
             let abs = e.ext(4, &[value]);
             let c = e.compare(186, abs, one);
+            let nan = e.f(f64::NAN);
             e.select_f(c, nan, r)
         }
         Unary::Exp => e.ext(27, &[value]),
         Unary::Log => {
             let z = e.f(0.0);
             let positive = e.compare(186, value, z);
-            let nan = e.f(f64::NAN);
             let one = e.f(1.0);
             let s = e.select_f(positive, value, one);
             let l = e.ext(28, &[s]);
+            let nan = e.f(f64::NAN);
             e.select_f(positive, l, nan)
         }
         Unary::Sign => {
-            let minus = e.f(-1.0);
             let z = e.f(0.0);
-            let c184 = e.compare(184, value, z);
-            let inner = e.select_f(c184, minus, value);
-            let one = e.f(1.0);
             let c186 = e.compare(186, value, z);
+            let one = e.f(1.0);
+            let c184 = e.compare(184, value, z);
+            let minus = e.f(-1.0);
+            let inner = e.select_f(c184, minus, value);
             e.select_f(c186, one, inner)
         }
     }
@@ -498,9 +497,8 @@ fn storage_type(words: &mut Words, scalar: i64) -> (i64, i64) {
     instruction(&mut words.annotations, 71, &[array, 6, 4]);
     instruction(&mut words.annotations, 71, &[structure, 2]);
     instruction(&mut words.annotations, 72, &[structure, 0, 35, 0]);
-    // a tuple evaluates right to left: the scalar pointer first
-    let b = words.declare(32, &[12, scalar]);
     let a = words.declare(32, &[12, structure]);
+    let b = words.declare(32, &[12, scalar]);
     (a, b)
 }
 
@@ -514,8 +512,8 @@ fn integer_binary(e: &mut Emitter, operation: Integer, a: i64, b: i64) -> i64 {
             let c31 = e.l(31);
             let kk = e.result(long, 199, &[k, c31]);
             let shifted = e.result(long, if operation == Integer::Ishl { 196 } else { 194 }, &[a, kk]);
-            let z = e.l(0);
             let c = e.compare(173, k, c31);
+            let z = e.l(0);
             e.select_l(c, z, shifted)
         }
         Integer::Iadd => e.result(long, 128, &[a, b]),
@@ -546,21 +544,21 @@ fn integer_binary(e: &mut Emitter, operation: Integer, a: i64, b: i64) -> i64 {
                 e.result(long, 130, &[z, x])
             }
             fn magnitude(e: &mut Emitter, x: i64) -> i64 {
-                let n = negate(e, x);
                 let c = negative(e, x);
+                let n = negate(e, x);
                 e.select_l(c, n, x)
             }
-            let mb = magnitude(e, b);
-            let one = e.l(1);
-            let divisor = e.select_l(zero, one, mb);
-            let ud = e.result(ulong, 124, &[divisor]);
             let ma = magnitude(e, a);
             let ua = e.result(ulong, 124, &[ma]);
+            let one = e.l(1);
+            let mb = magnitude(e, b);
+            let divisor = e.select_l(zero, one, mb);
+            let ud = e.result(ulong, 124, &[divisor]);
             let division = e.result(ulong, if operation == Integer::Idiv { 134 } else { 137 }, &[ua, ud]);
             let value = e.result(long, 124, &[division]);
             let flip = if operation == Integer::Idiv {
-                let nb = negative(e, b);
                 let na = negative(e, a);
+                let nb = negative(e, b);
                 let boolean = e.boolean;
                 e.result(boolean, 165, &[na, nb])
             } else {
@@ -591,10 +589,10 @@ fn integer_float_binary(e: &mut Emitter, operation: Binary, a: i64, b: i64) -> i
             let r = integer_binary(e, Integer::Imod, a, b);
             let boolean = e.boolean;
             let zb = e.l(0);
-            let cb = e.compare(177, b, zb);
-            let cr = e.compare(177, r, zb);
-            let sign = e.result(boolean, 165, &[cr, cb]);
             let c171 = e.compare(171, r, zb);
+            let cr = e.compare(177, r, zb);
+            let cb = e.compare(177, b, zb);
+            let sign = e.result(boolean, 165, &[cr, cb]);
             let adjust = e.result(boolean, 167, &[c171, sign]);
             let sum = integer_binary(e, Integer::Iadd, r, b);
             e.select_l(adjust, sum, r)
@@ -637,11 +635,11 @@ fn round_float(e: &mut Emitter, op: &Conversion, value: i64) -> i64 {
         Conversion::Floor => e.ext(8, &[value]),
         Conversion::Ceil => e.ext(9, &[value]),
         _ => {
+            let sign = unary(e, Unary::Sign, value);
             let half = e.f(0.5);
             let abs = e.ext(4, &[value]);
             let sum = e.floating(129, &[abs, half]);
             let floor = e.ext(8, &[sum]);
-            let sign = unary(e, Unary::Sign, value);
             e.floating(133, &[sign, floor])
         }
     }
@@ -660,11 +658,11 @@ fn int_compare_opcode(op: Comparison) -> i64 {
 /// A ray query: initialise `query` over origin, direction, tmin and tmax.
 fn ray_query_init(e: &mut Emitter, scene: &Scene, query: i64, accel: i64, flags: i64, origin: [i64; 3], tmin: i64, direction: [i64; 3], tmax: i64) {
     let v3 = scene.vec3;
-    let vd = e.result(v3, 80, &[direction[0], direction[1], direction[2]]);
-    let vo = e.result(v3, 80, &[origin[0], origin[1], origin[2]]);
-    let c255 = e.u(255);
-    let cflags = e.u(flags);
     let loaded = e.result(scene.accel_type, 61, &[accel]);
+    let cflags = e.u(flags);
+    let c255 = e.u(255);
+    let vo = e.result(v3, 80, &[origin[0], origin[1], origin[2]]);
+    let vd = e.result(v3, 80, &[direction[0], direction[1], direction[2]]);
     e.body(4473, &[query, loaded, cflags, c255, vo, tmin, vd, tmax]);
 }
 
@@ -704,15 +702,15 @@ fn triangle_test(e: &mut Emitter, scene: &Scene, ray: &[i64], primitive: i64, ti
         let c = e.u(k);
         e.result(uint, 132, &[a, c])
     }
-    let one_f = e.f(1.0);
     let zero_f = e.f(0.0);
+    let one_f = e.f(1.0);
     let time = e.ext(43, &[time, zero_f, one_f]);
     let vertices = scene.vertices_end.expect("flat motion vertices");
     let corner = |e: &mut Emitter, corner: i64| -> [i64; 3] {
         let mut out = [0i64; 3];
         for axis in 0..3 {
-            let cc = e.u(corner);
             let p3 = times(e, primitive, 3);
+            let cc = e.u(corner);
             let s = add(e, p3, cc);
             let t = times(e, s, 3);
             let ca = e.u(axis);
@@ -731,30 +729,28 @@ fn triangle_test(e: &mut Emitter, scene: &Scene, ray: &[i64], primitive: i64, ti
     let direction = sub3(ray, 3);
     let origin = sub3(ray, 0);
     let (dx, dy, dz) = (direction[0], direction[1], direction[2]);
-    // a tuple evaluates right to left
-    let az = e.ext(4, &[dz]);
-    let ay = e.ext(4, &[dy]);
     let ax = e.ext(4, &[dx]);
-    let c_az = e.compare(186, ax, az);
+    let ay = e.ext(4, &[dy]);
+    let az = e.ext(4, &[dz]);
     let c_ay = e.compare(186, ax, ay);
+    let c_az = e.compare(186, ax, az);
     let x_major = e.result(boolean, 167, &[c_ay, c_az]);
     let y_major = e.compare(186, ay, az);
-    let u2 = e.u(2);
-    let u1 = e.u(1);
-    let inner = e.select_u(y_major, u1, u2);
     let u0 = e.u(0);
+    let u1 = e.u(1);
+    let u2 = e.u(2);
+    let inner = e.select_u(y_major, u1, u2);
     let kz = e.select_u(x_major, u0, inner);
-    let u3 = e.u(3);
     let t = e.result(uint, 128, &[kz, u1]);
+    let u3 = e.u(3);
     let kx = e.result(uint, 137, &[t, u3]);
     let t = e.result(uint, 128, &[kx, u1]);
     let ky = e.result(uint, 137, &[t, u3]);
     let direction_vector = e.result(scene.vec3, 80, &direction);
     let kz_value = e.result(float, 77, &[direction_vector, kz]);
     let swap = e.compare(184, kz_value, zero_f);
-    // (select swap ky kx, select swap kx ky): the second component first
-    let ky_new = e.select_u(swap, kx, ky);
     let kx_new = e.select_u(swap, ky, kx);
+    let ky_new = e.select_u(swap, kx, ky);
     let (kx, ky) = (kx_new, ky_new);
     fn component(e: &mut Emitter, vec3: i64, vector: &[i64; 3], axis: i64) -> i64 {
         let float = e.float;
@@ -775,11 +771,11 @@ fn triangle_test(e: &mut Emitter, scene: &Scene, ray: &[i64], primitive: i64, ti
             translated[k] = e.floating(131, &[point[k], origin[k]]);
         }
         let z = component(e, vec3, &translated, kz);
-        let m = e.floating(133, &[sx, z]);
         let cx = component(e, vec3, &translated, kx);
+        let m = e.floating(133, &[sx, z]);
         let x = e.floating(131, &[cx, m]);
-        let m = e.floating(133, &[sy, z]);
         let cy = component(e, vec3, &translated, ky);
+        let m = e.floating(133, &[sy, z]);
         let y = e.floating(131, &[cy, m]);
         (x, y, e.floating(133, &[sz, z]))
     };
@@ -787,22 +783,22 @@ fn triangle_test(e: &mut Emitter, scene: &Scene, ray: &[i64], primitive: i64, ti
     let (bx, by, bz) = projected(e, &b);
     let (cx, cy, cz) = projected(e, &c);
     let edge = |e: &mut Emitter, x0: i64, y0: i64, x1: i64, y1: i64| -> i64 {
-        let r = e.floating(133, &[y0, x1]);
         let l = e.floating(133, &[x0, y1]);
+        let r = e.floating(133, &[y0, x1]);
         e.floating(131, &[l, r])
     };
     let e0 = edge(e, bx, by, cx, cy);
     let e1 = edge(e, cx, cy, ax, ay);
     let e2 = edge(e, ax, ay, bx, by);
-    let n2 = e.compare(184, e2, zero_f);
-    let n1 = e.compare(184, e1, zero_f);
     let n0 = e.compare(184, e0, zero_f);
+    let n1 = e.compare(184, e1, zero_f);
     let inner = e.result(boolean, 166, &[n0, n1]);
+    let n2 = e.compare(184, e2, zero_f);
     let has_negative = e.result(boolean, 166, &[inner, n2]);
-    let p2 = e.compare(186, e2, zero_f);
-    let p1 = e.compare(186, e1, zero_f);
     let p0 = e.compare(186, e0, zero_f);
+    let p1 = e.compare(186, e1, zero_f);
     let inner = e.result(boolean, 166, &[p0, p1]);
+    let p2 = e.compare(186, e2, zero_f);
     let has_positive = e.result(boolean, 166, &[inner, p2]);
     let sum = e.floating(129, &[e0, e1]);
     let determinant = e.floating(129, &[sum, e2]);
@@ -810,17 +806,16 @@ fn triangle_test(e: &mut Emitter, scene: &Scene, ray: &[i64], primitive: i64, ti
     let valid_edges = e.result(boolean, 168, &[both]);
     let c180 = e.compare(180, determinant, zero_f);
     let safe_determinant = e.select_f(c180, one_f, determinant);
-    let t2 = e.floating(133, &[e2, cz]);
-    let t1 = e.floating(133, &[e1, bz]);
     let t0 = e.floating(133, &[e0, az]);
+    let t1 = e.floating(133, &[e1, bz]);
     let s = e.floating(129, &[t0, t1]);
+    let t2 = e.floating(133, &[e2, cz]);
     let scaled_t = e.floating(129, &[s, t2]);
     let distance = e.floating(136, &[scaled_t, safe_determinant]);
     let u_value = e.floating(136, &[e1, safe_determinant]);
     let v_value = e.floating(136, &[e2, safe_determinant]);
-    // second list element first: (distance >= tmin) && (distance <= tmax)
-    let le = e.compare(188, distance, ray[7]);
     let ge = e.compare(190, distance, ray[6]);
+    let le = e.compare(188, distance, ray[7]);
     let range = e.result(boolean, 167, &[ge, le]);
     let c180 = e.compare(180, determinant, zero_f);
     let nonzero = e.result(boolean, 168, &[c180]);
@@ -873,8 +868,8 @@ fn moving_triangles_query(e: &mut Emitter, scene: &Scene, ray: &[i64], any: bool
     let z = e.u(0);
     let primitive = e.select_u(hit, raw_primitive, z);
     let (_test, _, bary_u, bary_v) = triangle_test(e, scene, ray, primitive, ray[8]);
-    let zero = e.u(0);
     let t = e.result(float, 6018, &[query, one]);
+    let zero = e.u(0);
     vec![t, primitive, bary_u, bary_v, hit, zero]
 }
 
@@ -889,8 +884,8 @@ fn motion_instance_ray(e: &mut Emitter, scene: &Scene, ray: &[i64], instance: i6
         let c = e.u(index);
         e.result(uint, 128, &[base, c])
     };
-    let one = e.f(1.0);
     let zero = e.f(0.0);
+    let one = e.f(1.0);
     let time = e.ext(43, &[ray[8], zero, one]);
     let mut matrix = [0i64; 12];
     for k in 0..12 {
@@ -908,7 +903,7 @@ fn motion_instance_ray(e: &mut Emitter, scene: &Scene, ray: &[i64], instance: i6
     let (a, b, c, tx) = (matrix[0], matrix[1], matrix[2], matrix[3]);
     let (d, e_, f_, ty) = (matrix[4], matrix[5], matrix[6], matrix[7]);
     let (g, h, i, tz) = (matrix[8], matrix[9], matrix[10], matrix[11]);
-    // the nine cofactors, an array literal: last first
+    // the nine cofactors
     let mut cofactors = [0i64; 9];
     let pairs: [((i64, i64), (i64, i64)); 9] = [
         ((e_, i), (f_, h)),
@@ -921,17 +916,16 @@ fn motion_instance_ray(e: &mut Emitter, scene: &Scene, ray: &[i64], instance: i6
         ((b, g), (a, h)),
         ((a, e_), (b, d)),
     ];
-    for k in (0..9).rev() {
+    for k in 0..9 {
         let ((p, q), (r, s)) = pairs[k];
-        // sub (mul p q) (mul r s): the second argument first
-        let m2 = mul(e, r, s);
         let m1 = mul(e, p, q);
+        let m2 = mul(e, r, s);
         cofactors[k] = sub(e, m1, m2);
     }
-    let m6 = mul(e, c, cofactors[6]);
-    let m3 = mul(e, b, cofactors[3]);
     let m0 = mul(e, a, cofactors[0]);
+    let m3 = mul(e, b, cofactors[3]);
     let s1 = add(e, m0, m3);
+    let m6 = mul(e, c, cofactors[6]);
     let determinant = add(e, s1, m6);
     let boolean = e.boolean;
     let cz = e.compare(180, determinant, zero);
@@ -943,25 +937,22 @@ fn motion_instance_ray(e: &mut Emitter, scene: &Scene, ray: &[i64], instance: i6
         let x = sub(e, vector[0], translation[0]);
         let y = sub(e, vector[1], translation[1]);
         let z = sub(e, vector[2], translation[2]);
-        // an array literal: the last component first
         let mut out = [0i64; 3];
-        for row in (0..3).rev() {
+        for row in 0..3 {
             let c0 = cofactors[row * 3];
             let c1 = cofactors[row * 3 + 1];
             let c2 = cofactors[row * 3 + 2];
-            // add (add (mul c0 x) (mul c1 y)) (mul c2 z): the last operand first
-            let mz = mul(e, c2, z);
-            let my = mul(e, c1, y);
             let mx = mul(e, c0, x);
+            let my = mul(e, c1, y);
             let s = add(e, mx, my);
+            let mz = mul(e, c2, z);
             let t = add(e, s, mz);
             out[row] = e.floating(136, &[t, safe_determinant]);
         }
         out
     };
-    // a tuple: the last component first
-    let direction = invert(e, sub3(ray, 3), [zero, zero, zero]);
     let origin = invert(e, sub3(ray, 0), [tx, ty, tz]);
+    let direction = invert(e, sub3(ray, 3), [zero, zero, zero]);
     let _ = float;
     (valid, origin, direction)
 }
@@ -1001,8 +992,8 @@ fn nested_instance_trace(e: &mut Emitter, scene: &Scene, query: i64, origin: [i6
     let raw_t = e.result(float, 6018, &[query, one]);
     let distance = e.select_f(hit, raw_t, zero_f);
     let barycentrics = e.result(scene.vec2, 6024, &[query, one]);
-    let v = e.result(float, 81, &[barycentrics, 1]);
     let u_ = e.result(float, 81, &[barycentrics, 0]);
+    let v = e.result(float, 81, &[barycentrics, 1]);
     (hit, distance, primitive, u_, v)
 }
 
@@ -1081,25 +1072,13 @@ fn moving_instances_query(e: &mut Emitter, scene: &Scene, ray: &[i64], any: bool
         let loaded = e.result(ty, 61, &[value]);
         e.select(ty, hit, loaded, zero)
     }
-    // an array literal of six outputs: the last first
     let z = e.u(0);
+    let zf = e.f(0.0);
+    let t = output(e, hit, best_t, float, zf);
+    let p = output(e, hit, best_primitive, uint, z);
+    let bu = output(e, hit, best_bary_u, float, zf);
+    let bv = output(e, hit, best_bary_v, float, zf);
     let instance = output(e, hit, best_instance, uint, z);
-    let bv = {
-        let zf = e.f(0.0);
-        output(e, hit, best_bary_v, float, zf)
-    };
-    let bu = {
-        let zf = e.f(0.0);
-        output(e, hit, best_bary_u, float, zf)
-    };
-    let p = {
-        let z = e.u(0);
-        output(e, hit, best_primitive, uint, z)
-    };
-    let t = {
-        let zf = e.f(0.0);
-        output(e, hit, best_t, float, zf)
-    };
     vec![t, p, bu, bv, hit, instance]
 }
 
@@ -1129,7 +1108,7 @@ fn capsule_intersection(e: &mut Emitter, ray: &[i64], primitive: i64) -> (i64, i
     let origin = sub3(ray, 0);
     let direction = sub3(ray, 3);
     let dot = |e: &mut Emitter, a: &[i64; 3], b: &[i64; 3]| -> i64 {
-        // ext 50 [a2; b2; ext 50 [a1; b1; mul a0 b0]]: the last operand first
+        // ext 50 [a2; b2; ext 50 [a1; b1; mul a0 b0]]
         let m = mul(e, a[0], b[0]);
         let inner = e.ext(50, &[a[1], b[1], m]);
         e.ext(50, &[a[2], b[2], inner])
@@ -1174,20 +1153,20 @@ fn capsule_intersection(e: &mut Emitter, ray: &[i64], primitive: i64) -> (i64, i
     let baoa = dot(e, &ba, &oa);
     let bb = mul(e, bard, bard);
     let qa = sub(e, baba, bb);
-    let m2 = mul(e, baoa, bard);
     let d_oa = dot(e, &direction, &oa);
     let m1 = mul(e, baba, d_oa);
+    let m2 = mul(e, baoa, bard);
     let qb = sub(e, m1, m2);
-    // sub (sub (mul baba (dot oa oa)) (mul baoa baoa)) (mul (mul radius radius) baba): last operand first
-    let rr = mul(e, radius, radius);
-    let rrb = mul(e, rr, baba);
-    let m_bb = mul(e, baoa, baoa);
+    // sub (sub (mul baba (dot oa oa)) (mul baoa baoa)) (mul (mul radius radius) baba)
     let ooa = dot(e, &oa, &oa);
     let m_ba = mul(e, baba, ooa);
+    let m_bb = mul(e, baoa, baoa);
     let s = sub(e, m_ba, m_bb);
+    let rr = mul(e, radius, radius);
+    let rrb = mul(e, rr, baba);
     let qc = sub(e, s, rrb);
-    let qaqc = mul(e, qa, qc);
     let qbqb = mul(e, qb, qb);
+    let qaqc = mul(e, qa, qc);
     let discriminant = sub(e, qbqb, qaqc);
     let root = sqrt(e, discriminant);
     let one = e.f(1.0);
@@ -1205,8 +1184,8 @@ fn capsule_intersection(e: &mut Emitter, ray: &[i64], primitive: i64) -> (i64, i
     let m = mul(e, t1, bard);
     let y1 = add(e, baoa, m);
     let within = |e: &mut Emitter, t: i64| {
-        let le = e.compare(188, t, tmax);
         let ge = e.compare(190, t, tmin);
+        let le = e.compare(188, t, tmax);
         logical_and(e, ge, le)
     };
     let nearer = |e: &mut Emitter, best: i64, t: i64, valid: i64| -> i64 {
@@ -1216,15 +1195,15 @@ fn capsule_intersection(e: &mut Emitter, ray: &[i64], primitive: i64) -> (i64, i
         let valid = logical_and(e, valid, lt);
         e.select_f(valid, t, best)
     };
-    let c190 = e.compare(190, discriminant, zero);
     let c186 = e.compare(186, qa, zero);
+    let c190 = e.compare(190, discriminant, zero);
     let side = logical_and(e, c186, c190);
-    let lt = e.compare(184, y0, baba);
     let c = e.compare(186, y0, zero);
+    let lt = e.compare(184, y0, baba);
     let inner = logical_and(e, c, lt);
     let side0 = logical_and(e, side, inner);
-    let lt = e.compare(184, y1, baba);
     let c = e.compare(186, y1, zero);
+    let lt = e.compare(184, y1, baba);
     let inner = logical_and(e, c, lt);
     let side1 = logical_and(e, side, inner);
     let inf = e.f(f64::INFINITY);
@@ -1277,10 +1256,10 @@ fn capsule_intersection(e: &mut Emitter, ray: &[i64], primitive: i64) -> (i64, i
     let inf2 = e.f(f64::INFINITY);
     let hit = e.compare(184, best, inf2);
     let safe_best = e.select_f(hit, best, zero);
-    let c = e.compare(186, baba, zero);
-    let safe_baba = e.select_f(c, baba, one);
     let m = mul(e, safe_best, bard);
     let sum = add(e, baoa, m);
+    let c = e.compare(186, baba, zero);
+    let safe_baba = e.select_f(c, baba, one);
     let q = div(e, sum, safe_baba);
     let parameter = e.ext(43, &[q, zero, one]);
     let shifted = add(e, best, shift);
@@ -1339,12 +1318,12 @@ fn curves_query(e: &mut Emitter, ray: &[i64], any: bool) -> Vec<i64> {
     let values = if any {
         vec![hit]
     } else {
-        let zf = e.f(0.0);
         let t = e.result(float, 6018, &[query, one]);
+        let zf = e.f(0.0);
         let first = e.select_f(hit, t, zf);
         vec![first, primitive, parameter, hit]
     };
-    e.trace_cache.insert(0, (key, e.block, values.clone()));
+    e.trace_cache.push((key, e.block, values.clone()));
     values
 }
 
@@ -1376,16 +1355,15 @@ fn query(e: &mut Emitter, r: &[i64], any: bool) -> Vec<i64> {
             vec![hit]
         } else {
             let barycentrics = e.result(scene.vec2, 6024, &[query, one]);
-            // an array literal: the last element first
-            let instance = e.result(uint, 6020, &[query, one]);
-            let v = e.result(float, 81, &[barycentrics, 1]);
-            let u_ = e.result(float, 81, &[barycentrics, 0]);
-            let p = e.result(uint, 6023, &[query, one]);
             let t = e.result(float, 6018, &[query, one]);
+            let p = e.result(uint, 6023, &[query, one]);
+            let u_ = e.result(float, 81, &[barycentrics, 0]);
+            let v = e.result(float, 81, &[barycentrics, 1]);
+            let instance = e.result(uint, 6020, &[query, one]);
             vec![t, p, u_, v, hit, instance]
         }
     };
-    e.trace_cache.insert(0, (key, e.block, values.clone()));
+    e.trace_cache.push((key, e.block, values.clone()));
     values
 }
 
@@ -1405,9 +1383,8 @@ fn narrow_binary(e: &mut Emitter, operation: Integer, a: i64, b: i64) -> i64 {
             let c31 = e.u(31);
             let kk = e.result(uint, 199, &[k, c31]);
             let shifted = e.result(uint, if operation == Integer::Ishl { 196 } else { 194 }, &[a, kk]);
-            // select (k > 31) 0 shifted: the zero constant is the last argument's sibling
-            let z = e.u(0);
             let c = e.compare(172, k, c31);
+            let z = e.u(0);
             e.select_u(c, z, shifted)
         }
         Integer::Idiv | Integer::Imod => {
@@ -1546,8 +1523,8 @@ impl StageState {
             e.result(p, 65, &[shared, index])
         }
         fn barrier(e: &mut Emitter) {
-            let c108 = e.u(0x108);
             let c2 = e.u(2);
+            let c108 = e.u(0x108);
             e.body(224, &[c2, c2, c108]);
         }
         let a = at(self, e, shared, lid);
@@ -1558,8 +1535,8 @@ impl StageState {
             barrier(e);
             let ud = e.u(d);
             let reach = e.result(boolean, 174, &[lid, ud]);
-            let z = e.u(0);
             let sub = e.result(uint, 130, &[lid, ud]);
+            let z = e.u(0);
             let s = e.select_u(reach, sub, z);
             let a = at(self, e, shared, s);
             let w = e.result(uint, 61, &[a]);
@@ -1631,10 +1608,10 @@ impl StageState {
             Stage::Fwidth => e.result(float, 209, &[operands[0]]),
             Stage::Float_bits => e.result(float, 124, &[operands[0]]),
             Stage::Sample(t, c) | Stage::Sample_level(t, c) => {
-                let s = self.sampler_of(e, *t);
-                let ls = e.result(self.sampler, 61, &[s]);
                 let tx = self.texture(e, *t);
                 let li = e.result(self.image, 61, &[tx]);
+                let s = self.sampler_of(e, *t);
+                let ls = e.result(self.sampler, 61, &[s]);
                 let combined = e.result(self.sampled, 86, &[li, ls]);
                 let uv = e.result(self.vec2, 80, &[operands[0], operands[1]]);
                 let texel = match stage {
@@ -1646,8 +1623,8 @@ impl StageState {
             Stage::Read(t, c) => {
                 let sint = e.sint;
                 let ivec2 = self.typ(e, 23, &[sint, 2]);
-                let y = e.result(sint, 110, &[operands[1]]);
                 let x = e.result(sint, 110, &[operands[0]]);
+                let y = e.result(sint, 110, &[operands[1]]);
                 let at = e.result(ivec2, 80, &[x, y]);
                 let tx = self.texture(e, *t);
                 let li = e.result(self.image, 61, &[tx]);
@@ -1658,8 +1635,8 @@ impl StageState {
                 self.sizes = true;
                 let sint = e.sint;
                 let i = self.texture(e, *t);
-                let zero = e.words.constant(sint, 0);
                 let li = e.result(self.image, 61, &[i]);
+                let zero = e.words.constant(sint, 0);
                 let ivec2 = self.typ(e, 23, &[sint, 2]);
                 let size = e.result(ivec2, 103, &[li, zero]);
                 let extracted = e.result(sint, 81, &[size, *c]);
@@ -1795,9 +1772,9 @@ impl EP {
     fn to_int(&mut self, value: i64) -> i64 {
         let boolean = self.e.boolean;
         let hi = self.e.f(9223372036854775808.0);
-        let c184 = self.e.compare(184, value, hi);
         let lo = self.e.f(-9223372036854775808.0);
         let c190 = self.e.compare(190, value, lo);
+        let c184 = self.e.compare(184, value, hi);
         let valid = self.e.result(boolean, 167, &[c190, c184]);
         let not_valid = self.e.result(boolean, 168, &[valid]);
         self.mark_invalid(not_valid);
@@ -2007,10 +1984,10 @@ impl EP {
                     }
                 };
                 let vertices = if *ending { scene.vertices_end.expect("end vertices") } else { scene.vertices };
-                let uc = e.u(*c);
                 let t1 = times(e, base, 3);
                 let a = add(e, t1, index[2]);
                 let t2 = times(e, a, 3);
+                let uc = e.u(*c);
                 let at = add(e, t2, uc);
                 e.load(vertices, at)
             }
@@ -2020,16 +1997,16 @@ impl EP {
                 e.load(scene.instances.expect("an instance table"), at)
             }
             Stage::Scene_sphere(c) => {
-                let uc = e.u(*c);
                 let t = times(e, index[0], 4);
+                let uc = e.u(*c);
                 let at = add(e, t, uc);
                 e.load(scene.spheres, at)
             }
             Stage::Scene_strand(c) => {
-                let uc = e.u(*c);
                 let t1 = times(e, index[0], 2);
                 let a = add(e, t1, index[1]);
                 let t2 = times(e, a, 4);
+                let uc = e.u(*c);
                 let at = add(e, t2, uc);
                 e.load(e.strands.expect("strand segments"), at)
             }
@@ -2045,10 +2022,10 @@ impl EP {
             }
             Integer::Ishl | Integer::Ishr => {
                 let boolean = self.e.boolean;
-                let c63 = self.e.l(63);
-                let hi = self.e.compare(173, b, c63);
                 let z = self.e.l(0);
                 let lo = self.e.compare(177, b, z);
+                let c63 = self.e.l(63);
+                let hi = self.e.compare(173, b, c63);
                 let c = self.e.result(boolean, 166, &[lo, hi]);
                 self.e.record_status(c, 4);
             }
@@ -2094,18 +2071,18 @@ impl EP {
                 Instruction::Int_binary(op, a, b) => {
                     let ib = self.int_of(*b);
                     self.integer_status(*op, ib);
-                    let lb = self.low(*b);
                     let la = self.low(*a);
+                    let lb = self.low(*b);
                     narrow_binary(&mut self.e, *op, la, lb)
                 }
                 Instruction::Int_select(condition, yes, no) => {
                     if yes == no {
                         self.low(*yes)
                     } else {
-                        let n = self.low(*no);
-                        let y = self.low(*yes);
                         let f = self.float_of(*condition);
                         let t = self.e.truth(f);
+                        let y = self.low(*yes);
+                        let n = self.low(*no);
                         self.e.select_u(t, y, n)
                     }
                 }
@@ -2205,15 +2182,15 @@ impl EP {
             Instruction::Uniform(input, component) => self.e.uniform_float(self.layout.uniforms[*input as usize] + component),
             Instruction::Frame(_) | Instruction::Guarded(..) => panic!("frames and guards are resolved before printing"),
             Instruction::Binary(op @ (Binary::Add | Binary::Sub | Binary::Mul | Binary::Mod | Binary::Min | Binary::Max), a, b) if self.known(*a) && self.known(*b) => {
-                let wb = self.whole_of(*b);
                 let wa = self.whole_of(*a);
+                let wb = self.whole_of(*b);
                 let value = integer_float_binary(&mut self.e, *op, wa, wb);
                 self.whole[slot as usize] = Some(value);
                 self.e.from_long(value)
             }
             Instruction::Binary(op, a, b) => {
-                let fb = self.float_of(*b);
                 let fa = self.float_of(*a);
+                let fb = self.float_of(*b);
                 binary(&mut self.e, *op, fa, fb)
             }
             Instruction::Unary(op, a) => {
@@ -2221,22 +2198,22 @@ impl EP {
                 unary(&mut self.e, *op, fa)
             }
             Instruction::Fma(a, b, c) => {
-                let fc = self.float_of(*c);
-                let fb = self.float_of(*b);
                 let fa = self.float_of(*a);
+                let fb = self.float_of(*b);
+                let fc = self.float_of(*c);
                 self.e.ext(50, &[fa, fb, fc])
             }
             Instruction::Checked_mul(projection, a, b) | Instruction::Checked_fma(projection, a, b, _) => {
                 let value = match instruction {
                     Instruction::Checked_fma(_, _, _, c) => {
-                        let fc = self.float_of(*c);
-                        let fb = self.float_of(*b);
                         let fa = self.float_of(*a);
+                        let fb = self.float_of(*b);
+                        let fc = self.float_of(*c);
                         self.e.ext(50, &[fa, fb, fc])
                     }
                     _ => {
-                        let fb = self.float_of(*b);
                         let fa = self.float_of(*a);
+                        let fb = self.float_of(*b);
                         self.e.floating(133, &[fa, fb])
                     }
                 };
@@ -2255,10 +2232,10 @@ impl EP {
                 if yes == no {
                     self.float_of(*yes)
                 } else {
-                    let n = self.float_of(*no);
-                    let y = self.float_of(*yes);
                     let f = self.float_of(*condition);
                     let t = self.e.truth(f);
+                    let y = self.float_of(*yes);
+                    let n = self.float_of(*no);
                     self.e.select_f(t, y, n)
                 }
             }
@@ -2300,27 +2277,27 @@ impl EP {
                 integer_binary(&mut self.e, *op, a, b)
             }
             Instruction::Int_compare(op, a, b) => {
-                let ib = self.int_of(*b);
                 let ia = self.int_of(*a);
+                let ib = self.int_of(*b);
                 let c = self.e.compare(int_compare_opcode(*op), ia, ib);
                 self.e.numeric_truth(c)
             }
             Instruction::Int_abs(a) => {
                 let value = self.int_of(*a);
-                let long = self.e.long();
-                let abs = self.e.result(long, 126, &[value]);
                 let z = self.e.l(0);
                 let c = self.e.compare(177, value, z);
+                let long = self.e.long();
+                let abs = self.e.result(long, 126, &[value]);
                 self.e.select_l(c, abs, value)
             }
             Instruction::Int_select(condition, yes, no) => {
                 if yes == no {
                     self.int_of(*yes)
                 } else {
-                    let n = self.int_of(*no);
-                    let y = self.int_of(*yes);
                     let f = self.float_of(*condition);
                     let t = self.e.truth(f);
+                    let y = self.int_of(*yes);
+                    let n = self.int_of(*no);
                     self.e.select_l(t, y, n)
                 }
             }
@@ -2472,8 +2449,8 @@ impl EP {
         let long = self.e.long();
         let index_type = if self.narrow(h) { uint } else { long };
         let (index_first, index_last) = if self.narrow(h) {
-            let l = self.low(control.last);
             let f = self.low(control.first);
+            let l = self.low(control.last);
             (f, l)
         } else {
             (first, last)
@@ -2563,8 +2540,8 @@ impl EP {
             None => none,
             Some(phi) => self.e.result(boolean, 168, &[phi]),
         };
-        let not_too_long = self.e.result(boolean, 168, &[too_long]);
         let both = self.e.result(boolean, 167, &[in_range, not_stopped]);
+        let not_too_long = self.e.result(boolean, 168, &[too_long]);
         let condition = self.e.result(boolean, 167, &[both, not_too_long]);
         self.e.body(246, &[finished, continuing, 0]);
         self.e.body(250, &[condition, loop_body, finished]);
@@ -2616,10 +2593,10 @@ impl EP {
                         let zero = self.e.l(0);
                         self.e.compare(177, value, zero)
                     } else {
-                        let top = self.e.l(0xffff_ffff);
-                        let c172 = self.e.compare(172, value, top);
                         let zero = self.e.l(0);
                         let c177 = self.e.compare(177, value, zero);
+                        let top = self.e.l(0xffff_ffff);
+                        let c172 = self.e.compare(172, value, top);
                         self.e.result(boolean, 166, &[c177, c172])
                     };
                     self.e.record_status(c, 64);
@@ -2715,22 +2692,22 @@ fn resident_count(e: &mut Emitter, layout: &kernel_layout::T, index: i64, buffer
         (Some(bytes), Some((input, output))) => {
             let word = bytes / 4;
             let uint = e.uint;
-            let z = e.u(0);
             let w2 = e.uniform(word + 2);
+            let z = e.u(0);
             let cond = e.compare(171, w2, z);
             let n = e.conditional(
                 uint,
                 cond,
                 &mut |e: &mut Emitter| {
                     let uint = e.uint;
-                    let uw = e.uniform(word);
                     let z = e.u(0);
                     let l = e.load_uint(input, z);
+                    let uw = e.uniform(word);
                     let product = e.result(uint, 132, &[l, uw]);
                     let divisor = e.uniform(word + 1);
-                    let one = e.u(1);
                     let z = e.u(0);
                     let c = e.compare(170, divisor, z);
+                    let one = e.u(1);
                     let divisor = e.select_u(c, one, divisor);
                     let bound = e.result(uint, 134, &[product, divisor]);
                     let c = e.compare(176, n, bound);
@@ -2745,10 +2722,10 @@ fn resident_count(e: &mut Emitter, layout: &kernel_layout::T, index: i64, buffer
                 c,
                 &mut |e: &mut Emitter| {
                     let uint = e.uint;
-                    let z = e.u(0);
-                    let one = e.u(1);
                     let six = e.u(6);
                     let sixn = e.result(uint, 132, &[n, six]);
+                    let one = e.u(1);
+                    let z = e.u(0);
                     let values = [n, sixn, one, z, z, z];
                     for (slot, value) in values.iter().enumerate() {
                         let us = e.u(slot as i64);
@@ -2884,9 +2861,8 @@ pub fn kernel(options: &Options, program: &packed::T) -> Result<T, Diagnostic> {
     let (long, ulong) = if options.fast && needs_integer(&layout) {
         (Some(sint), Some(uint))
     } else if needs_integer(&layout) {
-        // a tuple evaluates right to left: the unsigned type first
-        let ulong = m.words.declare(21, &[64, 0]);
         let long = m.words.declare(21, &[64, 1]);
+        let ulong = m.words.declare(21, &[64, 0]);
         (Some(long), Some(ulong))
     } else {
         (None, None)
@@ -2951,17 +2927,16 @@ pub fn kernel(options: &Options, program: &packed::T) -> Result<T, Diagnostic> {
                 m.bind(p, 0, strand_binding + 1, BindingKind::AccelerationStructure)
             });
             let motion_best = if layout.scene_motion && instances.is_some() {
-                // a 5-tuple evaluates right to left
-                let p = m.words.declare(32, &[6, float]);
-                let v5 = m.variable(p, 6);
-                let p = m.words.declare(32, &[6, float]);
-                let v4 = m.variable(p, 6);
-                let p = m.words.declare(32, &[6, uint]);
-                let v3 = m.variable(p, 6);
-                let p = m.words.declare(32, &[6, uint]);
-                let v2 = m.variable(p, 6);
                 let p = m.words.declare(32, &[6, float]);
                 let v1 = m.variable(p, 6);
+                let p = m.words.declare(32, &[6, uint]);
+                let v2 = m.variable(p, 6);
+                let p = m.words.declare(32, &[6, uint]);
+                let v3 = m.variable(p, 6);
+                let p = m.words.declare(32, &[6, float]);
+                let v4 = m.variable(p, 6);
+                let p = m.words.declare(32, &[6, float]);
+                let v5 = m.variable(p, 6);
                 Some((v1, v2, v3, v4, v5))
             } else {
                 None
@@ -2981,9 +2956,8 @@ pub fn kernel(options: &Options, program: &packed::T) -> Result<T, Diagnostic> {
                 let p = m.words.declare(32, &[0, accel_type]);
                 m.bind(p, 0, slot, BindingKind::AccelerationStructure)
             });
-            // a record's fields evaluate right to left: vec2 is declared before vec3
-            let vec2 = m.words.declare(23, &[float, 2]);
             let vec3 = m.words.declare(23, &[float, 3]);
+            let vec2 = m.words.declare(23, &[float, 2]);
             Some(Scene {
                 accel,
                 accel_type,
@@ -3042,10 +3016,9 @@ pub fn kernel(options: &Options, program: &packed::T) -> Result<T, Diagnostic> {
     // an unfolded kernel's carried value and pass, function variables (the entry block's first)
     let carried = options.unfold.map(|_| {
         let float_function_pointer = e.words.declare(32, &[7, float]);
-        // a tuple evaluates right to left: the pass variable first
+        let vars: Vec<i64> = (0..layout.view.widths[0]).map(|_| e.result(float_function_pointer, 59, &[7])).collect();
         let z = e.u(0);
         let pass = e.result(uint_function_pointer, 59, &[7, z]);
-        let vars: Vec<i64> = (0..layout.view.widths[0]).map(|_| e.result(float_function_pointer, 59, &[7])).collect();
         (vars, pass)
     });
     let gid = e.result(vector3, 61, &[invocation]);
@@ -3204,8 +3177,8 @@ pub fn stage(s: &StageSpec, program: &packed::T) -> Result<Vec<u8>, Diagnostic> 
     let sint = words.declare(21, &[32, 1]);
     let float = words.declare(22, &[32]);
     let (long, ulong) = if needs_integer(&layout) || layout.view.code.iter().any(|i| Region::integer_register(unguarded(i))) {
-        let ulong = words.declare(21, &[64, 0]);
         let long = words.declare(21, &[64, 1]);
+        let ulong = words.declare(21, &[64, 0]);
         (Some(long), Some(ulong))
     } else {
         (None, None)
@@ -3231,8 +3204,8 @@ pub fn stage(s: &StageSpec, program: &packed::T) -> Result<Vec<u8>, Diagnostic> 
         interface: vec![],
         output_widths: layout.view.outputs.iter().map(|o| o.len()).collect(),
     };
-    st.vec4 = st.vector(&mut e, 4);
     st.vec2 = st.vector(&mut e, 2);
+    st.vec4 = st.vector(&mut e, 4);
     let (storage, storage_pointer) = storage_type(&mut e.words, float);
     let (uint_storage, uint_storage_pointer) = storage_type(&mut e.words, uint);
     for (location, width, flat) in &s.inputs {
