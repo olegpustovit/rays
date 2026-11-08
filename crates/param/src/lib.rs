@@ -380,37 +380,6 @@ impl Field {
         &self.meta.name
     }
 
-    pub fn label_text(&self) -> &str {
-        &self.meta.label
-    }
-
-    pub fn description_text(&self) -> Option<&str> {
-        self.meta.description.as_deref()
-    }
-
-    pub fn folder_path(&self) -> &[String] {
-        &self.meta.folder
-    }
-
-    pub fn impact_kind(&self) -> Impact {
-        self.meta.impact
-    }
-
-    pub fn is_primary(&self) -> bool {
-        self.meta.primary
-    }
-
-    pub fn unit_suffix(&self) -> Option<&str> {
-        self.meta.unit.as_deref()
-    }
-
-    pub fn vec3_component(&self) -> Option<(&str, i64)> {
-        self.meta
-            .vec3
-            .as_ref()
-            .map(|(group, component)| (group.as_str(), *component))
-    }
-
     pub fn kind_view(&self) -> KindView {
         self.kind.view()
     }

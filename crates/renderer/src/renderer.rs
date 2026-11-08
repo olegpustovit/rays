@@ -173,7 +173,6 @@ pub fn close_gpu_marks(value: &gpu_marks) {
     }
 }
 
-pub type presentation_facts_ = presentation_facts;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum submission_state {

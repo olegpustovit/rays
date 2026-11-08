@@ -86,14 +86,6 @@ pub fn vec3_copy(value: &rays_math::vec3::T) -> rays_math::vec3::T {
     *value
 }
 
-/// OCaml `mixed_seed`: Int64 arithmetic wraps; the result is an OCaml int (63-bit).
-pub fn mixed_seed(context: &crate::context::T, identity: i64) -> i64 {
-    let mixed = crate::context::seed(context) ^ identity.wrapping_mul(0x9e3779b97f4a7c15_u64 as i64);
-    let value = mixed ^ (((mixed as u64) >> 32) as i64);
-    // Int64.to_int drops the top bit
-    (value << 1) >> 1
-}
-
 pub fn encode_table(rows: &[Vec<Vec<u8>>]) -> Vec<u8> {
     param::string_table::encode(rows)
 }
@@ -517,7 +509,7 @@ pub fn group_owner_of_value(value: &Value) -> GroupOpsOwner {
 pub fn group_owner_value(owner: GroupOpsOwner) -> Value {
     choice_value(&GROUP_OWNER_LABELS, group_owner_position(owner))
 }
-pub fn group_owner_position(owner: GroupOpsOwner) -> usize {
+fn group_owner_position(owner: GroupOpsOwner) -> usize {
     GROUP_OWNERS.iter().position(|item| *item == owner).unwrap()
 }
 
@@ -648,7 +640,7 @@ pub fn transfer_falloff_of(falloff: TransferFalloff, bias: f64) -> rdk::attribut
 
 // ---------------------------------------------------------------- tokens
 
-pub fn attribute_owner_of_token(token: &str) -> Result<attribute::Owner, String> {
+fn attribute_owner_of_token(token: &str) -> Result<attribute::Owner, String> {
     match token {
         "point" | "points" => Ok(attribute::Owner::Point),
         "vertex" | "vertices" => Ok(attribute::Owner::Vertex),
@@ -915,7 +907,7 @@ pub fn uv_parameterize_seams(
     ))
 }
 
-pub fn attribute_group_owner(owner: attribute::Owner) -> Option<group::Owner> {
+fn attribute_group_owner(owner: attribute::Owner) -> Option<group::Owner> {
     match owner {
         attribute::Owner::Point => Some(group::Owner::Point),
         attribute::Owner::Vertex => Some(group::Owner::Vertex),
@@ -928,7 +920,7 @@ pub fn attribute_mirror_group_owner(owner: attribute::Owner) -> group::Owner {
     attribute_group_owner(owner).expect("Attribute Mirror: detail attributes cannot be mirrored")
 }
 
-pub fn group_length(owner: group::Owner, geometry_value: &geometry::T) -> i64 {
+fn group_length(owner: group::Owner, geometry_value: &geometry::T) -> i64 {
     match owner {
         group::Owner::Point => geometry::point_count(geometry_value),
         group::Owner::Vertex => geometry::vertex_count(geometry_value),

@@ -7,7 +7,7 @@ use std::sync::Mutex;
 use rdk_core::{cancel, error, geometry, packed, polygon_triangulation, support, topology, topology_index};
 
 use crate::bounds3_index;
-use crate::point_grid::{float_max, float_min};
+use crate::point_grid::{float_max, float_min, point_triangle_squared};
 
 const OPERATION: &str = "proximity_index";
 
@@ -322,75 +322,6 @@ fn clamp01(value: f64) -> f64 {
     } else {
         value
     }
-}
-
-fn point_point_squared(px: f64, py: f64, pz: f64, qx: f64, qy: f64, qz: f64) -> f64 {
-    let dx = px - qx;
-    let dy = py - qy;
-    let dz = pz - qz;
-    (dx * dx) + (dy * dy) + (dz * dz)
-}
-
-#[allow(clippy::too_many_arguments)]
-fn point_triangle_squared(
-    px: f64, py: f64, pz: f64, ax: f64, ay: f64, az: f64, bx: f64, by: f64, bz: f64, cx: f64, cy: f64, cz: f64,
-) -> f64 {
-    let abx = bx - ax;
-    let aby = by - ay;
-    let abz = bz - az;
-    let acx = cx - ax;
-    let acy = cy - ay;
-    let acz = cz - az;
-    let apx = px - ax;
-    let apy = py - ay;
-    let apz = pz - az;
-    let d1 = (abx * apx) + (aby * apy) + (abz * apz);
-    let d2 = (acx * apx) + (acy * apy) + (acz * apz);
-    if d1 <= 0.0 && d2 <= 0.0 {
-        return point_point_squared(px, py, pz, ax, ay, az);
-    }
-    let bpx = px - bx;
-    let bpy = py - by;
-    let bpz = pz - bz;
-    let d3 = (abx * bpx) + (aby * bpy) + (abz * bpz);
-    let d4 = (acx * bpx) + (acy * bpy) + (acz * bpz);
-    if d3 >= 0.0 && d4 <= d3 {
-        return point_point_squared(px, py, pz, bx, by, bz);
-    }
-    let vc = (d1 * d4) - (d3 * d2);
-    if vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0 {
-        let v = d1 / (d1 - d3);
-        return point_point_squared(px, py, pz, ax + (v * abx), ay + (v * aby), az + (v * abz));
-    }
-    let cpx = px - cx;
-    let cpy = py - cy;
-    let cpz = pz - cz;
-    let d5 = (abx * cpx) + (aby * cpy) + (abz * cpz);
-    let d6 = (acx * cpx) + (acy * cpy) + (acz * cpz);
-    if d6 >= 0.0 && d5 <= d6 {
-        return point_point_squared(px, py, pz, cx, cy, cz);
-    }
-    let vb = (d5 * d2) - (d1 * d6);
-    if vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0 {
-        let w = d2 / (d2 - d6);
-        return point_point_squared(px, py, pz, ax + (w * acx), ay + (w * acy), az + (w * acz));
-    }
-    let va = (d3 * d6) - (d5 * d4);
-    if va <= 0.0 && d4 - d3 >= 0.0 && d5 - d6 >= 0.0 {
-        let w = (d4 - d3) / (d4 - d3 + (d5 - d6));
-        return point_point_squared(px, py, pz, bx + (w * (cx - bx)), by + (w * (cy - by)), bz + (w * (cz - bz)));
-    }
-    let inverse = 1.0 / (va + vb + vc);
-    let v = vb * inverse;
-    let w = vc * inverse;
-    point_point_squared(
-        px,
-        py,
-        pz,
-        ax + (v * abx) + (w * acx),
-        ay + (v * aby) + (w * acy),
-        az + (v * abz) + (w * acz),
-    )
 }
 
 #[allow(clippy::too_many_arguments)]

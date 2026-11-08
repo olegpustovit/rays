@@ -1821,9 +1821,6 @@ pub enum Intent {
 
 /// Seconds a draft rests before `view` parses it.
 pub const LIVE_DELAY: f64 = 0.3;
-pub fn live_delay() -> f64 {
-    LIVE_DELAY
-}
 
 fn dirty(state: &State, shown: &Shown) -> Result<bool, Diagnostic> {
     Ok(match &state.draft {

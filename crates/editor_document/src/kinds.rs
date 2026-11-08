@@ -104,17 +104,6 @@ pub fn window_of_values(values: &[Value]) -> Window {
     Window { title, width: r.i("width"), height: r.i("height"), fps: r.i("fps"), seed: r.i("seed"), fast: r.c("precision") == "fast" }
 }
 
-pub fn window_to_values(w: &Window) -> Vec<Value> {
-    vec![
-        Value::Text(w.title.as_bytes().to_vec()),
-        Value::Int(w.width),
-        Value::Int(w.height),
-        Value::Int(w.fps),
-        Value::Int(w.seed),
-        Value::Choice(if w.fast { "fast" } else { "exact" }.to_owned()),
-    ]
-}
-
 pub fn window_default() -> Window {
     window_of_values(window_schema().default())
 }

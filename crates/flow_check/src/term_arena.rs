@@ -264,14 +264,6 @@ impl TermBuilder {
         case: cases -> Case, function: functions -> Function, hof: hofs -> Hof, get: gets -> Get,
         assoc: assocs -> Assoc, list_op: list_ops -> ListOp, expanded: expanded -> Expanded,
     }
-    pub fn set_type(&mut self, id: TermId, ty: &Ty) {
-        let ty = self.type_id(ty);
-        self.tables.rows[id.0 as usize].ty = ty;
-    }
-    pub fn set_form(&mut self, id: TermId, form: &Syntax) {
-        let form = self.import_form(form);
-        self.tables.rows[id.0 as usize].form = form;
-    }
     /// Metadata-only rewrites share immutable payload/edge ranges, never copy a subtree.
     pub fn with_path(&mut self, id: TermId, path: Option<&[String]>) -> TermId {
         let mut row = *self.row(id);
@@ -390,10 +382,6 @@ impl TermBuilder {
         let id = index(self.tables.bytes.len());
         self.tables.bytes.push(bytes);
         id
-    }
-    pub fn set_path(&mut self, id: TermId, path: Option<&[String]>) {
-        let path = path.map(|path| self.path(path));
-        self.tables.rows[id.0 as usize].path = path;
     }
     pub fn push(&mut self, path: Option<&[String]>, ty: &Ty, form: SyntaxId, draft: Draft) -> TermId {
         self.syntax.row(form);
