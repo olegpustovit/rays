@@ -17,17 +17,9 @@
   (or (text/blank? (text/trim pattern)) (equal? (text/glob_error (text/trim pattern)) "")))
 (defn sc_finite :context value [(x : float)] (= (- x x) 0.0))
 (defn sc_pos :context value [(x : float)] (if (> x 0.0) x 0.0))
-(defn sc_mix :context value [(v : int)]
-  (let* [a (int/xor v (int/shr v 30))
-         b (int/mul a 4564476756301768121)
-         c (int/xor b (int/shr b 27))
-         d (int/mul c 1499779743744070123)]
-    (int/xor d (int/shr d 31))))
-; Native random_float_into: the keyed hash of (index * 8 + stream).
+; Native random_float_into: the keyed hash of (index * 8 + stream), the frozen rand/at.
 (defn sc_rf :context value [(seed : int) (index : int) (stream : int)]
-  (let* [sample (int/add (int/mul index 8) stream)
-         keyed (int/xor seed (int/mul (int/add sample 1276007651554290947) 2177342782468422677))]
-    (* (float (int/shr (sc_mix keyed) 10)) 0.00000000000000011102230246251565)))
+  (rand/at seed (int/add (int/mul index 8) stream)))
 (defn sc_imin :context value [(a : int) (b : int)] (if (int/lt a b) a b))
 ; Cross product of the scaled corner differences (native: the second product of each difference fuses).
 ; Cross product of the corner differences of already scaled corners (native: the second product of each
