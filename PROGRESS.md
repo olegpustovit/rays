@@ -49,7 +49,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | M6 | done | `69d08a8a` — `plan_entry` prepends via `with_capacity`+extend (no `insert(0)`); `cargo check -p renderer` |
 | M18 | done (partial) | `ed08c91b` — `vertex_primitive` `AtomicI32` scratch in `make_topology`; `cargo t -p rdk_ops m18_vertex_primitive_scratch` 2 pass; **deferred** five other per-vertex scratch arrays |
 | M1 | done | `9dae5ebd` — `ExecCtx.site` interned (`sub`/`sub_at`/`sync_site`); route cache; `eval_at_sub`/`eval_concrete_sub`/`arm_error_sub`; `cargo t -p flow_eval test_workspace_eval` 29 pass (~13s) |
-| M14 | pending | WIP reverted 2026-11-08 (incomplete `GeoPayload`); resume after clean tree |
+| M14 | done | `GeoPayload` + boxed `Struct`/`Source`; `struct_value`/`source_value`; `geo_fields`/`geo_payload`; call sites migrated; `cargo check` flow_eval/flow_ir/flow_check/renderer/flow_graph; `cargo t -p flow_eval test_workspace_eval` |
 | M3,M5,M13–M17,M19,M21 | pending | |
 | I | pending | |
 | C1–C21 | pending | |

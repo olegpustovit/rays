@@ -207,7 +207,7 @@ fn unused(value: Value, mut program: C::Program) -> C::Program {
     program.regions = program.regions.iter().map(|r| {
         let index = packed::host::argument_types(r).unwrap_or_else(|d| die(d)).len();
         let mut uniforms = r.uniforms.clone();
-        uniforms.push(Value::Source("$core/argument".into(), ty.clone(), vec![("index".into(), Value::Int(index as i64))]));
+        uniforms.push(source_value("$core/argument", ty.clone(), vec![("index".into(), Value::Int(index as i64))]));
         let mut names = r.uniform_names.as_ref().clone();
         names.push((String::new(), vec![]));
         let r = Region::rebuild(r, Region::Rebuild { uniforms: Some(uniforms), uniform_names: Some(names), ..Default::default() }).expect("unused declaration");
@@ -325,7 +325,7 @@ fn refused(program: &C::Program, message: Option<&str>) {
 #[test]
 fn capture_preparation_refusals() {
     let (_, table) = compiled(TABLE, true);
-    refused(&replace_table(&table, Value::Source("$host/unavailable".into(), Ty::Array(Box::new(Ty::Float)), vec![])), None);
+    refused(&replace_table(&table, source_value("$host/unavailable", Ty::Array(Box::new(Ty::Float)), vec![])), None);
     let ws = checked("(workspace capture (graph g :context host [(source : (array float) (array/float 0))] (map (fn [x] (+ x t)) source)))");
     let inputs = vec![("g".into(), vec![("source".into(), Value::Float_array(Arc::new((0..32769).map(|i| i as f64).collect())))])];
     let evaluation = E::static_with(&ws, false, Some(&inputs), None).unwrap_or_else(|d| die(d));

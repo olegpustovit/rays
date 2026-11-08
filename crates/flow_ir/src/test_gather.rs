@@ -12,7 +12,7 @@ use flow_eval as e;
 use flow_syntax::packed_ops::Unary;
 use flow_syntax::syntax;
 use flow_syntax::ty::{FnSignature, Ty};
-use flow_syntax::value::{self as v, Value};
+use flow_syntax::value::{self as v, Value, struct_value, source_value};
 use rays_diagnostic::Diagnostic;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -33,7 +33,7 @@ fn source(ty: &Ty) -> Op {
     };
     o.shape = op::Shape::Struct { splice: false };
     o.check = Arc::new(|_| Ok(()));
-    o.body = Arc::new(move |_, _, _| Ok(Value::Source("probe/table".into(), out.clone(), vec![])));
+    o.body = Arc::new(move |_, _, _| Ok(source_value("probe/table", out.clone(), vec![])));
     o
 }
 
@@ -66,7 +66,7 @@ fn instantiate_with(table: Option<Value>, bindings: &str, ty: &Ty, body: &str, i
     let mut f = make_fn(bindings, ty, body);
     if let Some(table) = table {
         f = e::Host::map_function_bindings(f, &|value| match value {
-            Value::Source(name, _, _) if name == "probe/table" => table.clone(),
+            Value::Source(g) if g.name == "probe/table" => table.clone(),
             other => other.clone(),
         });
     }
@@ -207,7 +207,7 @@ fn host_tables_resolve_once_on_the_initial_domain() {
     let resolve: ResolveArc = {
         let (calls, table) = (calls.clone(), table.clone());
         resolver(move |s| match s {
-            Value::Source(name, _, _) if name == "probe/table" => {
+            Value::Source(g) if g.name == "probe/table" => {
                 assert_eq!(std::thread::current().id(), thread);
                 calls.fetch_add(1, Ordering::SeqCst);
                 Ok(table.clone())
@@ -235,7 +235,7 @@ fn host_tables_resolve_once_on_the_initial_domain() {
 
 fn failing_table() -> ResolveArc {
     resolver(|s| match s {
-        Value::Source(name, _, _) if name == "probe/table" => Err(data_source_error("E_DATA_SOURCE", "Missing table", Some("table first"))),
+        Value::Source(g) if g.name == "probe/table" => Err(data_source_error("E_DATA_SOURCE", "Missing table", Some("table first"))),
         _ => panic!("unexpected source"),
     })
 }
@@ -603,9 +603,9 @@ fn late_bounds_versus_earlier_table_cause() {
     let fields = Ty::Record(vec![("a".into(), arr(Ty::Text)), ("b".into(), arr(Ty::Text))]);
     let closure = make_fn("", &fields, "(fn [(index : int)] (let* [chosen (array/nth data.a index)] (if (int/eq index 1) (array/nth data.b 0) chosen)))");
     let closure = e::Host::map_function_bindings(closure, &|value| match value {
-        Value::Source(name, _, _) if name == "probe/table" => Value::Record(vec![
-            ("a".into(), Value::Source("probe/a".into(), arr(Ty::Text), vec![])),
-            ("b".into(), Value::Source("probe/b".into(), arr(Ty::Text), vec![])),
+        Value::Source(g) if g.name == "probe/table" => Value::Record(vec![
+            ("a".into(), source_value("probe/a", arr(Ty::Text), vec![])),
+            ("b".into(), source_value("probe/b", arr(Ty::Text), vec![])),
         ]),
         other => other.clone(),
     });
@@ -622,12 +622,12 @@ fn late_bounds_versus_earlier_table_cause() {
             let advancing = advancing.clone();
             let live = live.clone();
             resolver(move |s| match s {
-                Value::Source(name, _, _) if name == "probe/a" => {
+                Value::Source(g) if g.name == "probe/a" => {
                     assert_eq!(std::thread::current().id(), thread);
                     calls.lock().unwrap().push("a");
                     Ok(texts(&[b"a0", b"a1"]))
                 }
-                Value::Source(name, _, _) if name == "probe/b" => {
+                Value::Source(g) if g.name == "probe/b" => {
                     assert_eq!(std::thread::current().id(), thread);
                     calls.lock().unwrap().push("b");
                     ok(e::Host::force_reference(&advancing, &live, Some(&state), None, None));
@@ -738,7 +738,7 @@ fn text_select_and_error_causes() {
 
     let closure = make_fn("", &arr(Ty::Text), "(fn [(index : int) (old : text)] (if (int/ge index 0) (array/nth data (int/mod index 7)) old))");
     let closure = e::Host::map_function_bindings(closure, &|value| match value {
-        Value::Source(name, _, _) if name == "probe/table" => table.clone(),
+        Value::Source(g) if g.name == "probe/table" => table.clone(),
         other => other.clone(),
     });
     let indices: Vec<i64> = (0..2049).map(|i| if i % 5 == 0 { -1 } else { i }).collect();
@@ -890,7 +890,7 @@ fn inline_table_choices_keep_selected_lane_forcing() {
                         let resolve: ResolveArc = {
                             let calls = calls.clone();
                             resolver(move |s| match s {
-                                Value::Source(name, _, _) if name == "probe/table" => {
+                                Value::Source(g) if g.name == "probe/table" => {
                                     assert_eq!(std::thread::current().id(), thread);
                                     calls.fetch_add(1, Ordering::SeqCst);
                                     Ok(ints(&[MIN_INT, MAX_INT, 9007199254740993]))
@@ -959,7 +959,7 @@ fn list_tables_exact_widths_and_range_guards() {
     }
     let closure = make_fn("", &list_int, "(fn [(index : float)] (nth data index))");
     let closure = e::Host::map_function_bindings(closure, &|value| match value {
-        Value::Source(name, _, _) if name == "probe/table" => table.clone(),
+        Value::Source(g) if g.name == "probe/table" => table.clone(),
         other => other.clone(),
     });
     for index in [-1., 3., 0.5, 2.0000000001, f64::MAX] {
@@ -1005,7 +1005,7 @@ fn text_select_reference_inside_domains() {
     let table = Value::Text_array(Arc::new(strs.clone()));
     let closure = make_fn("", &arr(Ty::Text), "(fn [(index : int) (old : text)] (if (int/ge index 0) (array/nth data (int/mod index 7)) old))");
     let closure = e::Host::map_function_bindings(closure, &|value| match value {
-        Value::Source(name, _, _) if name == "probe/table" => table.clone(),
+        Value::Source(g) if g.name == "probe/table" => table.clone(),
         other => other.clone(),
     });
     let indices: Vec<i64> = (0..2049).map(|i| if i % 5 == 0 { -1 } else { i }).collect();
@@ -1023,14 +1023,14 @@ fn text_select_reference_inside_domains() {
 fn index_error_versus_table_source_errors() {
     let live = live_at(0.25);
     let ordered = instantiate(None, &arr(Ty::Int), "(fn [(index : int)] (array/nth data (int/div index 0)))", vec![0]);
-    for returned in [Value::Float_array(Arc::new(vec![1.])), Value::Source("probe/table".into(), arr(Ty::Int), vec![])] {
+    for returned in [Value::Float_array(Arc::new(vec![1.])), source_value("probe/table", arr(Ty::Int), vec![])] {
         let resolve = ok_value(returned);
         same_error(&force_r(&pk(&ordered), &live, &resolve), &reference_r(&ordered, &live, &resolve));
     }
     let bad = instantiate(None, &arr(Ty::Text), "(fn [(index : int)] (array/nth data (int/div index 0)))", vec![0]);
     let failing = resolver(|_| Err(data_source_error("E_DATA_SOURCE", "Text source failed", Some("\u{3}"))));
     same_error(&force_r(&pk(&bad), &live, &failing), &reference_r(&bad, &live, &failing));
-    for returned in [Value::Float_array(Arc::new(vec![0.])), Value::Source("probe/table".into(), arr(Ty::Text), vec![])] {
+    for returned in [Value::Float_array(Arc::new(vec![0.])), source_value("probe/table", arr(Ty::Text), vec![])] {
         let resolve = ok_value(returned);
         same_error(&force_r(&pk(&bad), &live, &resolve), &reference_r(&bad, &live, &resolve));
     }

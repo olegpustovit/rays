@@ -8,7 +8,7 @@ use flow_check::workspace as W;
 use flow_eval as E;
 use flow_syntax::context;
 use flow_syntax::syntax;
-use flow_syntax::value::{ResidualId, Value};
+use flow_syntax::value::{ResidualId, Value, struct_value, source_value};
 use input::Frame;
 use rays_diagnostic::Diagnostic;
 use std::sync::Arc;
@@ -140,7 +140,7 @@ fn strict_validation_distinguishes_equal_residual_numbers_in_different_homes() {
     assert!(diagnostics.is_empty(), "{}", ts::show_ds(&diagnostics));
     let scalar = scalar.unwrap();
     let argument = |index| {
-        let marker = Value::Source("$core/argument".into(), flow_syntax::ty::Ty::Float, vec![("index".into(), Value::Int(index))]);
+        let marker = source_value("$core/argument", flow_syntax::ty::Ty::Float, vec![("index".into(), Value::Int(index))]);
         let inputs = vec![("g".into(), vec![("x".into(), marker)])];
         rewrite(ok(E::static_with(&scalar, false, Some(&inputs), None)).results[0].1.clone())
     };

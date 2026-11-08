@@ -11,7 +11,7 @@ use crate::{core_fuse, packed};
 use flow_check::workspace::Paths;
 use flow_eval as E;
 use flow_syntax::ty::{self, Ty};
-use flow_syntax::value::{ResidualId, Value};
+use flow_syntax::value::{ResidualId, Value, struct_value, source_value};
 use std::collections::HashMap;
 
 /// Regions read exclusively as compatible mark-set attributes, and their per-batch groups in
@@ -244,7 +244,7 @@ pub fn device_groups(approx: &Paths, fast: bool, program: &C::Program, width: &d
             let locals = &info[*k as usize].as_ref().unwrap().args;
             let values: Vec<Value> = locals
                 .iter()
-                .map(|local| Value::Source("$core/argument".into(), program.locals[*local as usize].clone(), vec![("index".into(), Value::Int(indices[local]))]))
+                .map(|local| source_value("$core/argument", program.locals[*local as usize].clone(), vec![("index".into(), Value::Int(indices[local]))]))
                 .collect();
             match packed::host::bind_arguments(&program.regions[*k as usize], &values, Some(false)) {
                 Ok(region) => normalized.push(region),
@@ -316,7 +316,7 @@ fn find_residual(v: &Value) -> Option<ResidualId> {
     match v {
         Value::Residual(r) => Some(*r),
         Value::List(xs) => xs.iter().find_map(find_residual),
-        Value::Record(fields) | Value::Struct(_, _, fields) => fields.iter().find_map(|(_, v)| find_residual(v)),
+        v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_fields().unwrap().iter().find_map(|(_, v)| find_residual(v)),
         _ => None,
     }
 }

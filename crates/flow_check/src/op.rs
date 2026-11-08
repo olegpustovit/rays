@@ -480,7 +480,7 @@ fn array_descriptor(name:&str,args:&Args)->Result<Value,Diagnostic>{
     if matches!(ty,Ty::Float|Ty::Vec2|Ty::Vec3|Ty::Vec4)&&count>MAX_WOSIZE/width{return Err(fail("E_ARRAY_RANGE","Array length is outside native storage bounds."))}
     let made=value::array_init(&ty,count.min(1) as i64,&|_|value.clone())?;
     let sample=if count==0{default}else{value::array_get(&made,0)?};
-    Ok(Value::Source(format!("$core/constant-array/{name}"),arr(ty),vec![("count".into(),Value::Int(count as i64)),("value".into(),sample)]))
+    Ok(value::source_value(format!("$core/constant-array/{name}"), arr(ty), vec![("count".into(), Value::Int(count as i64)), ("value".into(), sample)]))
 }
 pub fn constant_array_descriptor(name:&str,args:&Args)->Result<Value,Diagnostic>{array_descriptor(name,args)}
 fn array_limit(element:&str)->Option<usize>{Some(match element{"int"|"text"=>MAX_WOSIZE,"float"=>MAX_WOSIZE,"vec2"=>MAX_WOSIZE/2,"vec3"=>MAX_WOSIZE/3,"vec4"=>MAX_WOSIZE/4,_=>return None})}
@@ -617,7 +617,7 @@ fn image_ops()->Vec<Op>{
 }
 fn structure_op(name:&str,ctx:Context,pos:Vec<(&str,Ty)>,optv:Vec<(&str,Ty)>,rest:Option<(&str,Ty)>,kw:Vec<(&str,Ty)>,out:Ty,splice:bool,category:&str)->Op{
     let result=if ctx==context::sop(){list(Ty::Any)}else{out.clone()};
-    let owned=name.to_owned();let body:Body=Arc::new(move |_,_,args|Ok(Value::Struct(owned.clone(),result.clone(),args.to_vec())));
+    let owned=name.to_owned();let body:Body=Arc::new(move |_,_,args|Ok(value::struct_value(owned.clone(),result.clone(),args.to_vec())));
     let _=category;let mut op=op_with(name,ctx,pos,optv,rest,kw,out,"Math",body);op.shape=Shape::Struct{splice};op
 }
 fn stage_ops()->Vec<Op>{
@@ -653,8 +653,8 @@ fn eq_fn(a:&Value,b:&Value)->Option<bool>{
         (Value::Fn(_),Value::Fn(_))=>None,
         (Value::List(x),Value::List(y))=>{if x.len()!=y.len(){return Some(false)}for(p,q)in x.iter().zip(y.iter()){match eq_fn(p,q){Some(true)=>{}other=>return other}}Some(true)}
         (Value::Record(f),Value::Record(g))=>fields(f,g),
-        (Value::Struct(n,t,f),Value::Struct(m,u,g))=>if n!=m||t!=u{Some(false)}else{fields(f,g)},
-        (Value::Source(n,t,f),Value::Source(m,u,g))=>if n!=m||t!=u{Some(false)}else{fields(f,g)},
+        (Value::Struct(a),Value::Struct(b))=>if a.name!=b.name||a.ty!=b.ty{Some(false)}else{fields(&a.fields,&b.fields)},
+        (Value::Source(a),Value::Source(b))=>if a.name!=b.name||a.ty!=b.ty{Some(false)}else{fields(&a.fields,&b.fields)},
         _=>Some(a==b),
     }
 }

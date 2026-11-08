@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::*;
 use crate::test_workspace::{base_catalog, bad_text, good, parse, run_in, run_src, show_ds, errors};
 use flow_check::{op, workspace as W};
-use flow_syntax::{syntax::{self, Syntax}, ty};
+use flow_syntax::{syntax::{self, Syntax}, ty, value};
 use std::collections::{BTreeSet, HashSet};
 use rays_diagnostic::Diagnostic;
 
@@ -618,13 +618,13 @@ fn l16_skip_leaves_iterations_out() {
     assert_eq!(recs(&rs, &["g", "xs", "@result"]).iter().map(|x| x.0.clone()).collect::<Vec<_>>(), vec![vec![0], vec![1], vec![3]]);
     let scene = |body: &str| format!("(workspace w (graph s :context scene {body}))");
     let r = |body: &str| result(&run_ws(&check(&scene(body)), 0.), "s");
-    let args = |v: &Value| match v { Value::Struct(_, _, a) => a.len() as i64, _ => -1 };
+    let args = |v: &Value| match v { Value::Struct(g) => g.fields.len() as i64, _ => -1 };
     assert_eq!(args(&r("(scene/merge (scene/light) (scene/light) (scene/light))")), 3);
     assert_eq!(args(&r("(scene/merge (scene/light) (scene/light) (scene/light) :skip [1])")), 2);
     assert_eq!(args(&r("(scene/merge (scene/light) (scene/light) :skip [[0] [1]])")), 0);
     // inside a loop the tuple starts with the loop's iteration
     match r("(scene/merge (for [i (range 2)] (scene/merge (scene/light) (scene/light) :skip [[1 0]])))") {
-        Value::Struct(_, _, f) if f.len() == 2 => assert!(args(&f[0].1) == 2 && args(&f[1].1) == 1),
+        Value::Struct(g) if g.fields.len() == 2 => assert!(args(&g.fields[0].1) == 2 && args(&g.fields[1].1) == 1),
         o => panic!("the merge of merges: {o:?}"),
     }
 }
@@ -806,7 +806,7 @@ fn iterate_widens_scalars_and_coerces_record_fields() {
     assert_eq!(g_value("(workspace w (graph g :context host (iterate 3 {:n 0} (fn [s] {:n (+ s.n 0.25)}))))"), Value::Record(vec![("n".into(), Value::Int(0))]));
     let ws = check("(workspace w (graph g :context host [(seed : {:n int :data (array float)} {:n 0 :data (array/float 1)})]
         (iterate 2 seed (fn [s] {:n (int/add s.n 1) :data s.data}))))");
-    let data = Value::Source("test/iterate_data".into(), Ty::Array(Box::new(Ty::Float)), vec![]);
+    let data = value::source_value("test/iterate_data", Ty::Array(Box::new(Ty::Float)), vec![]);
     let inputs = vec![("g".into(), vec![("seed".into(), Value::Record(vec![("n".into(), Value::Int(0)), ("data".into(), data)]))])];
     let evaluation = ok(static_with(&ws, false, Some(&inputs), None));
     let residual = result(&evaluation, "g");

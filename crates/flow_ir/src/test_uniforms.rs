@@ -12,7 +12,7 @@ use flow_eval as e;
 use flow_syntax::packed_ops::Binary;
 use flow_syntax::syntax;
 use flow_syntax::ty::{FnSignature, Ty};
-use flow_syntax::value::{self as v, Value};
+use flow_syntax::value::{self as v, Value, struct_value, source_value};
 use rays_diagnostic::Diagnostic;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -65,7 +65,7 @@ fn source(ty: &Ty) -> Op {
     };
     o.shape = op::Shape::Struct { splice: false };
     o.check = Arc::new(|_| Ok(()));
-    o.body = Arc::new(move |_, _, _| Ok(Value::Struct("probe/data".into(), array.clone(), vec![])));
+    o.body = Arc::new(move |_, _, _| Ok(struct_value("probe/data", array.clone(), vec![])));
     o
 }
 

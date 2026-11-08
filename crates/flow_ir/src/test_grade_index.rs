@@ -232,8 +232,8 @@ fn inputs() -> Vec<(String, Vec<(String, Value)>)> {
     vec![(
         "g".to_string(),
         vec![
-            ("keys".to_string(), Value::Source("fixture/keys".into(), Ty::Array(Box::new(Ty::Int)), vec![])),
-            ("queries".to_string(), Value::Source("fixture/queries".into(), Ty::Array(Box::new(Ty::Int)), vec![])),
+            ("keys".to_string(), source_value("fixture/keys", Ty::Array(Box::new(Ty::Int)), vec![])),
+            ("queries".to_string(), source_value("fixture/queries", Ty::Array(Box::new(Ty::Int)), vec![])),
         ],
     )]
 }
@@ -260,8 +260,8 @@ fn derived_arrays_have_no_count_origin() {
             let resolve: ResolveArc = {
                 let current = current.clone();
                 Arc::new(move |v: &Value| match v {
-                    Value::Source(name, _, _) if name == "fixture/keys" => Ok(ints(&current.lock().unwrap().0)),
-                    Value::Source(name, _, _) if name == "fixture/queries" => Ok(ints(&current.lock().unwrap().1)),
+                    Value::Source(g) if g.name == "fixture/keys" => Ok(ints(&current.lock().unwrap().0)),
+                    Value::Source(g) if g.name == "fixture/queries" => Ok(ints(&current.lock().unwrap().1)),
                     _ => panic!("unexpected source"),
                 })
             };
@@ -285,8 +285,8 @@ fn derived_arrays_have_no_count_origin() {
             let p = ok_ds(compile_region(r, fusion, Some(count_source())));
             assert!(crate::packed::count_origin(&p).is_none() && crate::packed::static_count(&p).is_none() && p.sources.len() == 2);
             let resolve: ResolveArc = Arc::new(|v: &Value| match v {
-                Value::Source(name, _, _) if name == "fixture/keys" => Ok(ints(&[2, 1, 2, 0])),
-                Value::Source(name, _, _) if name == "fixture/queries" => Ok(ints(&[1, 9])),
+                Value::Source(g) if g.name == "fixture/keys" => Ok(ints(&[2, 1, 2, 0])),
+                Value::Source(g) if g.name == "fixture/queries" => Ok(ints(&[1, 9])),
                 _ => panic!("unexpected source"),
             });
             let live = live_at(1.);
@@ -301,12 +301,12 @@ fn source_errors_untaken_sources_and_state() {
     let executor = executor_compile(&value, true);
     let live = live_at(1.);
     let missing: ResolveArc = Arc::new(|v: &Value| match v {
-        Value::Source(name, _, _) if name == "fixture/keys" => {
+        Value::Source(g) if g.name == "fixture/keys" => {
             let mut d = flow_syntax::value::fail("E_DATA_SOURCE", "missing keys");
             d.cause = Some("lookup source cause".into());
             Err(d)
         }
-        Value::Source(name, _, _) if name == "fixture/queries" => Ok(ints(&[])),
+        Value::Source(g) if g.name == "fixture/queries" => Ok(ints(&[])),
         _ => panic!("unexpected source"),
     });
     same(&exec_force(&executor, &live, None, Some(missing.clone())), &reference_with(&value, &live, None, Some(missing)));

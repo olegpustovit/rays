@@ -196,7 +196,7 @@ fn bound_arguments_release_arrays_with_the_last_region_clone() {
 fn source_column_and_unsupported_producer() {
     let source = value_with(
         "[(data : (array float) (array/float 0))]",
-        Some(&[("g".to_string(), vec![("data".to_string(), Value::Source("fixture/column".into(), Ty::Array(Box::new(Ty::Float)), vec![]))])]),
+        Some(&[("g".to_string(), vec![("data".to_string(), source_value("fixture/column", Ty::Array(Box::new(Ty::Float)), vec![]))])]),
         "(let* [minimum (array/min data) sample {:nested {:column data :bias minimum}}\n      shift (fn [x] (+ x sample.nested.bias))] (map shift sample.nested.column))",
     );
     let compiled = executor_compile(&source, true);

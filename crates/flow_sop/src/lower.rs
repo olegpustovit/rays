@@ -2060,7 +2060,7 @@ fn cooked_sources(value: &Value) -> Vec<i64> {
                     }
                 }
             }
-            Value::Record(fields) | Value::Struct(_, _, fields) | Value::Source(_, _, fields) => fields.iter().for_each(|(_, v)| visit(v, residuals, functions, ids)),
+            v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_v.geo_fields().unwrap()().unwrap().iter().for_each(|(_, v)| visit(v, residuals, functions, ids)),
             Value::List(values) => values.iter().for_each(|v| visit(v, residuals, functions, ids)),
             _ => {}
         }
@@ -2489,7 +2489,7 @@ fn fold_writes(device: bool, defer: bool, plan: &Plan) -> R<Plan> {
                 found
             }
             Value::List(vs) => vs.iter().any(|v| recounts(nodes, v, recount, seen)),
-            Value::Record(fs) | Value::Struct(_, _, fs) | Value::Source(_, _, fs) => fs.iter().any(|(_, v)| recounts(nodes, v, recount, seen)),
+            v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_v.geo_fields().unwrap()().unwrap().iter().any(|(_, v)| recounts(nodes, v, recount, seen)),
             _ => false,
         }
     }
@@ -3037,7 +3037,7 @@ impl CookServices {
                             match v {
                                 Value::Residual(_) | Value::Fn(_) => true,
                                 Value::List(xs) => xs.iter().any(terms),
-                                Value::Record(fs) | Value::Struct(_, _, fs) | Value::Source(_, _, fs) => fs.iter().any(|(_, v)| terms(v)),
+                                v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_v.geo_fields().unwrap()().unwrap().iter().any(|(_, v)| terms(v)),
                                 _ => false,
                             }
                         }
@@ -3623,7 +3623,7 @@ impl HostRun {
 
     fn deferred(v: &Value) -> bool {
         match v {
-            Value::Source(..) | Value::Struct(_, Ty::Array(_), _) => true,
+            Value::Source(..) | Value::Struct(g) if matches!(g.ty, Ty::Array(_)) => true,
             Value::Record(fields) => fields.iter().any(|(_, v)| Self::deferred(v)),
             Value::List(values) => values.iter().any(Self::deferred),
             _ => false,
@@ -3631,7 +3631,7 @@ impl HostRun {
     }
 
     fn constant(v: &Value) -> bool {
-        matches!(v, Value::Source(name, _, _) if name.starts_with("$core/constant-array/"))
+        matches!(v, Value::Source(g) if name.starts_with("$core/constant-array/"))
     }
 
     fn resolve_fn(self: &Arc<Self>) -> flow_ir::core_exec::ResolveFn {
@@ -3857,7 +3857,7 @@ impl HostRun {
             match v {
                 Value::Fn(_) => true,
                 Value::List(vs) => vs.iter().any(callable),
-                Value::Record(fs) | Value::Struct(_, _, fs) => fs.iter().any(|(_, v)| callable(v)),
+                v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_v.geo_fields().unwrap()().unwrap().iter().any(|(_, v)| callable(v)),
                 _ => false,
             }
         }
@@ -3907,7 +3907,7 @@ impl HostRun {
                         None => Err(fail("E_DIAGNOSTIC_CONTEXT", "Host diagnosis needs a failing row.")),
                     }
                 }
-                Value::Source(name, _, _) if name == "$core/diagnostic_index" => Err(fail("E_DIAGNOSTIC_CONTEXT", "Host diagnosis needs typed rows and policy.")),
+                Value::Source(g) if name == "$core/diagnostic_index" => Err(fail("E_DIAGNOSTIC_CONTEXT", "Host diagnosis needs typed rows and policy.")),
                 Value::Source(name, ty, args) if name == "$core/complete" => match args.as_slice() {
                     [(k, Value::Deferred(actual, id))] if k == "value" && actual == ty && ty::is_cooked(ty) => {
                         self.snapshot(ty, *id)?;

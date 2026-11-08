@@ -2,7 +2,7 @@
 //! mesh constructor (host and device-resident), `sop/remap` and `sop/concat`.
 use flow_ir::flow_ir::Gpu::{self, Integers, Planes, Residency};
 use flow_syntax::ty::{self, Ty};
-use flow_syntax::value::{self, Value};
+use flow_syntax::value::{self, Value, struct_value, source_value};
 use rays_diagnostic::Diagnostic;
 use rdk::geometry::{self, T as Geometry};
 use rdk::packed::{Deferred, Float3};
@@ -1173,7 +1173,7 @@ mod tests {
             vec![("geometry".into(), Value::Deferred(ty::geometry(), 7)), ("element".into(), text("points"))],
         );
         assert_eq!(resolve(&lookup, &source).unwrap(), Value::Int(3));
-        let missing = Value::Source("sop/count".into(), Ty::Int, vec![("geometry".into(), Value::Deferred(ty::geometry(), 8))]);
+        let missing = source_value("sop/count", Ty::Int, vec![("geometry".into(), Value::Deferred(ty::geometry(), 8))]);
         assert_eq!(resolve(&lookup, &missing).err().unwrap().message, "Topology source has not been cooked.");
     }
 }
@@ -1351,7 +1351,7 @@ mod integration {
         }
         let resolve = |geometry: Value| {
             let lookup = lookup_of(None);
-            attribute_kernel::resolve(None, &lookup, &Value::Source("sop/adjacency".into(), Ty::Array(Box::new(Ty::Int)), vec![("geometry".into(), geometry), ("component".into(), text("next_vertex"))]))
+            attribute_kernel::resolve(None, &lookup, &source_value("sop/adjacency", Ty::Array(Box::new(Ty::Int)), vec![("geometry".into(), geometry), ("component".into(), text("next_vertex"))]))
         };
         for geometry in [Value::No_geo, Value::Deferred(ty::geometry(), 7)] {
             assert_eq!(resolve(geometry).err().unwrap().code, "E_DATA_SOURCE");
@@ -1476,17 +1476,17 @@ mod integration {
         };
         let geometry = fixtures().into_iter().find(|(n, _)| *n == "shared-polygons").unwrap().1;
         let handle = |id| Value::Deferred(ty::geometry(), id);
-        let count = |geometry: Value, element: &str| Value::Source("sop/count".into(), Ty::Int, vec![("geometry".into(), geometry), ("element".into(), text(element))]);
+        let count = |geometry: Value, element: &str| source_value("sop/count", Ty::Int, vec![("geometry".into(), geometry), ("element".into(), text(element))]);
         refused(lookup_of(None), count(handle(7), "points"), "E_DATA_SOURCE");
         refused(
             lookup_of(None),
-            Value::Source("sop/edges".into(), Ty::Array(Box::new(Ty::Int)), vec![("geometry".into(), Value::No_geo), ("component".into(), text("a"))]),
+            source_value("sop/edges", Ty::Array(Box::new(Ty::Int)), vec![("geometry".into(), Value::No_geo), ("component".into(), text("a"))]),
             "E_DATA_SOURCE",
         );
         refused(lookup_of(Some(geometry.clone())), count(handle(7), "detail"), "E_TOPOLOGY_COUNT");
         refused(
             lookup_of(Some(geometry)),
-            Value::Source("sop/edges".into(), Ty::Array(Box::new(Ty::Int)), vec![("geometry".into(), handle(7)), ("component".into(), text("unknown"))]),
+            source_value("sop/edges", Ty::Array(Box::new(Ty::Int)), vec![("geometry".into(), handle(7)), ("component".into(), text("unknown"))]),
             "E_DATA_SOURCE",
         );
     }

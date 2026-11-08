@@ -12,7 +12,7 @@ use flow_ir::flow_ir::{Cost, Executor, Gpu, Sink};
 use flow_ir::packed::Column;
 use flow_syntax::context as fctx;
 use flow_syntax::ty::{self, Ty};
-use flow_syntax::value::{self as V, Value};
+use flow_syntax::value::{self as V, Value, struct_value, source_value};
 use rays_diagnostic::Diagnostic;
 use rdk::attribute::{self, Owner, Storage};
 use rdk::cancel;
@@ -94,7 +94,7 @@ pub fn sources(value: &Value) -> Vec<i64> {
                     }
                 }
             }
-            Value::Record(fs) | Value::Struct(_, _, fs) | Value::Source(_, _, fs) => {
+            v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => {
                 fs.iter().for_each(|(_, v)| visit(v, seen, ids))
             }
             _ => {}
@@ -113,7 +113,7 @@ const ATTR_OPS: [&str; 5] = ["sop/attr", "sop/attr_checked", "sop/attr_planes", 
 
 fn field_of(value: Option<Value>, field: &str) -> Option<Value> {
     match value? {
-        Value::Record(fs) | Value::Struct(_, _, fs) => assoc(&fs, field).cloned(),
+        v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => assoc(&v.geo_v.geo_fields().unwrap()().unwrap(), field).cloned(),
         _ => None,
     }
 }
@@ -258,7 +258,7 @@ fn visit_reads(safe: &[i64], value: &Value, st: &mut Reads) {
             }
         }
         Value::List(values) => values.iter().for_each(|v| visit_reads(safe, v, st)),
-        Value::Record(fs) | Value::Struct(_, _, fs) | Value::Source(_, _, fs) => {
+        v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => {
             fs.iter().for_each(|(_, v)| visit_reads(safe, v, st))
         }
         _ => {}
@@ -697,7 +697,7 @@ pub fn context_reads(value: &Value) -> D::T {
                     E::Residual::function_bindings(*f).iter().for_each(|(_, v)| visit(v, seen, found));
                 }
             }
-            Value::Record(fs) | Value::Struct(_, _, fs) => fs.iter().for_each(|(_, v)| visit(v, seen, found)),
+            v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_v.geo_fields().unwrap()().unwrap().iter().for_each(|(_, v)| visit(v, seen, found)),
             _ => {}
         }
     }
@@ -888,10 +888,10 @@ pub fn resolve(context: Option<&context::T>, geometry: &GeometryLookup, value: &
                 let args = concrete_args(context, geometry, args)?;
                 topology_kernel_impl::resolve(&**geometry, &Value::Source(name.clone(), ty.clone(), args))
             }
-            Value::Source(name, _, _) if ["sop/count", "sop/edges", "sop/topology", "sop/adjacency", "sop/triangles", "sop/fans"].contains(&name.as_str()) => {
+            Value::Source(g) if ["sop/count", "sop/edges", "sop/topology", "sop/adjacency", "sop/triangles", "sop/fans"].contains(&name.as_str()) => {
                 topology_kernel_impl::resolve(&**geometry, value)
             }
-            Value::Source(name, _, _) if ["sop/attr_type", "sop/attr_names", "sop/attr_entries"].contains(&name.as_str()) => {
+            Value::Source(g) if ["sop/attr_type", "sop/attr_names", "sop/attr_entries"].contains(&name.as_str()) => {
                 attribute_metadata::resolve(&**geometry, value)
             }
             Value::Source(name, ty, args) if ["graph/shortest_paths", "graph/forest", "graph/color", "graph/chains"].contains(&name.as_str()) => {
@@ -2927,9 +2927,9 @@ mod tests {
             }
         }
         for source in [
-            Value::Source("$core/constant-array/array/vec4".into(), array_of(Ty::Int), vec![("count".into(), Value::Int(1)), ("value".into(), Value::Vec4(0.0, 0.0, 0.0, 0.0))]),
-            Value::Source("$core/constant-array/array/vec4".into(), array_of(Ty::Vec4), vec![]),
-            Value::Source("$core/constant-array/missing".into(), array_of(Ty::Float), vec![("count".into(), Value::Int(1))]),
+            source_value("$core/constant-array/array/vec4", array_of(Ty::Int), vec![("count".into(), Value::Int(1)), ("value".into(), Value::Vec4(0.0, 0.0, 0.0, 0.0))]),
+            source_value("$core/constant-array/array/vec4", array_of(Ty::Vec4), vec![]),
+            source_value("$core/constant-array/missing", array_of(Ty::Float), vec![("count".into(), Value::Int(1))]),
         ] {
             assert_eq!(code(resolve(None, &geo, &source)), "E_ARRAY_TYPE");
         }
@@ -3204,7 +3204,7 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
     fn missing_geometry_source_is_refused() {
         let lookup: GeometryLookup = Arc::new(|_| None);
         for geometry in [Value::No_geo, Value::Deferred(ty::geometry(), 7), Value::Deferred(Ty::Float, 7)] {
-            let source = Value::Source("sop/topology".into(), array_of(Ty::Int), vec![("geometry".into(), geometry), ("component".into(), Value::Text(b"vertex_points".to_vec()))]);
+            let source = source_value("sop/topology", array_of(Ty::Int), vec![("geometry".into(), geometry), ("component".into(), Value::Text(b"vertex_points".to_vec()))]);
             assert_eq!(code(resolve(None, &lookup, &source)), "E_DATA_SOURCE");
         }
     }
@@ -3233,9 +3233,9 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
         assert_eq!(reads(&value), vec!["*".to_owned()], "a bare geometry is opaque");
         let named = Value::List(Arc::new(vec![attr_source("sop/attr", "P", &[]), attr_source("sop/attr_checked", "Cd", &[]), attr_source("sop/attr", "P", &[])]));
         assert_eq!(reads(&named), vec!["Cd".to_owned(), "P".to_owned()]);
-        let topology = Value::Source("sop/count".into(), Ty::Int, vec![("geometry".into(), Value::Deferred(ty::geometry(), 7)), ("element".into(), Value::Text(b"points".to_vec()))]);
+        let topology = source_value("sop/count", Ty::Int, vec![("geometry".into(), Value::Deferred(ty::geometry(), 7)), ("element".into(), Value::Text(b"points".to_vec()))]);
         assert!(reads(&topology).is_empty(), "topology-only readers read no attribute");
-        let names = Value::Source("sop/attr_names".into(), array_of(Ty::Text), vec![("geometry".into(), Value::Deferred(ty::geometry(), 7))]);
+        let names = source_value("sop/attr_names", array_of(Ty::Text), vec![("geometry".into(), Value::Deferred(ty::geometry(), 7))]);
         assert_eq!(reads(&names), vec!["*".to_owned()]);
         assert!(sources(&Value::Int(1)).is_empty());
     }

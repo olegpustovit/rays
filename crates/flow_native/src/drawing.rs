@@ -65,7 +65,7 @@ pub fn prepare(o: &PrepareOptions, plan: &e::Plan, root: &Value) -> Result<prepa
             Value::Deferred(t, id) if *t == ty::drawing() => node(plan, known, *id),
             Value::Deferred(_, _) => false,
             Value::List(values) => values.iter().all(|x| static_(plan, known, x)),
-            Value::Record(fields) | Value::Struct(_, _, fields) => fields.iter().all(|(_, x)| static_(plan, known, x)),
+            v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_v.geo_fields().unwrap()().unwrap().iter().all(|(_, x)| static_(plan, known, x)),
             other => !e::is_live(other),
         }
     }

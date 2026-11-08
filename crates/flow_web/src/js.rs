@@ -973,7 +973,7 @@ fn draw(ctx: &mut Context, d: &Draw) -> String {
 /// An argument declaration `$core/argument`: its index.
 fn argument_index(v: &Value) -> Option<i64> {
     match v {
-        Value::Source(name, _, fields) if name == "$core/argument" => match fields.as_slice() {
+        Value::Source(g) if g.name == "$core/argument" => match fields.as_slice() {
             [(f, Value::Int(i))] if f == "index" => Some(*i),
             _ => None,
         },

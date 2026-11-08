@@ -41,9 +41,9 @@ impl Storage {
                     if self.shared(values) && self.buffer(values) { for bytes in values.iter() { self.buffer(bytes); } }
                 }
                 Value::List(values) => { if self.shared(values) && self.buffer(values) { pending.extend(values.iter()); } }
-                Value::Struct(name, _, fields) | Value::Source(name, _, fields) => {
-                    self.text(name);
-                    if self.buffer(fields) { for (name, value) in fields { self.text(name); pending.push(value); } }
+                Value::Struct(g) | Value::Source(g) => {
+                    self.text(&g.name);
+                    if self.buffer(&g.fields) { for (name, value) in &g.fields { self.text(name); pending.push(value); } }
                 }
                 Value::Record(fields) => {
                     if self.buffer(fields) { for (name, value) in fields { self.text(name); pending.push(value); } }

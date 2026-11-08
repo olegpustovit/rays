@@ -21,6 +21,14 @@ macro_rules! by_id {
 by_id!(FnId);
 by_id!(ResidualId);
 
+/// Struct/Source payload; boxed so `Value` stays 40 bytes (plan M14).
+#[derive(Clone, Debug, PartialEq)]
+pub struct GeoPayload {
+    pub name: String,
+    pub ty: Ty,
+    pub fields: Vec<(String, Value)>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     Int(i64),
@@ -40,13 +48,37 @@ pub enum Value {
     Record(Vec<(String, Value)>),
     Deferred(Ty, i64),
     No_geo,
-    Struct(String, Ty, Vec<(String, Value)>),
-    Source(String, Ty, Vec<(String, Value)>),
+    Struct(Box<GeoPayload>),
+    Source(Box<GeoPayload>),
     Fn(FnId),
     Residual(ResidualId),
 }
 
 pub type T = Value;
+
+pub fn struct_value(name: impl Into<String>, ty: Ty, fields: Vec<(String, Value)>) -> Value {
+    Value::Struct(Box::new(GeoPayload { name: name.into(), ty, fields }))
+}
+pub fn source_value(name: impl Into<String>, ty: Ty, fields: Vec<(String, Value)>) -> Value {
+    Value::Source(Box::new(GeoPayload { name: name.into(), ty, fields }))
+}
+
+impl Value {
+    /// Record-like fields for Record / Struct / Source (plan M14).
+    pub fn geo_fields(&self) -> Option<&[(String, Value)]> {
+        match self {
+            Value::Record(fields) => Some(fields),
+            Value::Struct(g) | Value::Source(g) => Some(&g.fields),
+            _ => None,
+        }
+    }
+    pub fn geo_payload(&self) -> Option<&GeoPayload> {
+        match self {
+            Value::Struct(g) | Value::Source(g) => Some(g),
+            _ => None,
+        }
+    }
+}
 
 fn diagnostic(code: &str, message: &str) -> Diagnostic {
     Diagnostic {
@@ -127,7 +159,8 @@ pub fn ty_of(value: &Value) -> Ty {
         Value::Vec3_array(_) => Ty::Array(Box::new(Ty::Vec3)),
         Value::Vec4_array(_) => Ty::Array(Box::new(Ty::Vec4)),
         Value::Record(fields) => Ty::Record(fields.iter().map(|(name, value)| (name.clone(), ty_of(value))).collect()),
-        Value::Deferred(ty, _) | Value::Struct(_, ty, _) | Value::Source(_, ty, _) => ty.clone(),
+        Value::Deferred(ty, _) => ty.clone(),
+        Value::Struct(g) | Value::Source(g) => g.ty.clone(),
         Value::No_geo => ty::geometry(),
         Value::Fn(_) => Ty::Fn(None),
         Value::Residual(_) => Ty::Any,
@@ -137,7 +170,8 @@ pub fn elem_ty(values: &[Value]) -> Ty {
     let mut current = Ty::Any;
     for value in values {
         // a deferred/struct element already of the running type needs no clone and no join
-        if let Value::Deferred(ty, _) | Value::Struct(_, ty, _) | Value::Source(_, ty, _) = value { if *ty == current { continue; } }
+        if let Value::Deferred(ty, _) = value { if *ty == current { continue; } }
+        if let Value::Struct(g) | Value::Source(g) = value { if g.ty == current { continue; } }
         current = ty::join(&current, &ty_of(value)).unwrap_or(current);
     }
     current
@@ -392,14 +426,14 @@ pub fn key_of(residual: &dyn Fn(ResidualId) -> i64, value: &Value) -> Vec<u8> {
         Value::Deferred(ty, id) if *ty == ty::image() => format!("image:{id}").into_bytes(),
         Value::Deferred(ty, id) => format!("node:{}:{id}", ty::to_string(ty)).into_bytes(),
         Value::No_geo => b"G".to_vec(),
-        Value::Struct(name, _, fields) => {
-            let mut key = format!("S{name}").into_bytes();
-            key.extend(key_of(residual, &Value::Record(fields.clone())));
+        Value::Struct(g) => {
+            let mut key = format!("S{}", g.name).into_bytes();
+            key.extend(key_of(residual, &Value::Record(g.fields.clone())));
             key
         }
-        Value::Source(name, ty, fields) => {
-            let mut key = format!("source:{name}:{}", ty::to_string(ty)).into_bytes();
-            key.extend(key_of(residual, &Value::Record(fields.clone())));
+        Value::Source(g) => {
+            let mut key = format!("source:{}:{}", g.name, ty::to_string(&g.ty)).into_bytes();
+            key.extend(key_of(residual, &Value::Record(g.fields.clone())));
             key
         }
         Value::Fn(_) => b"fn".to_vec(),
@@ -547,7 +581,9 @@ pub fn validate(value: &Value) -> Result<(), Diagnostic> {
             else { FINITE_ARRAYS.validate_once(values, &|| check_float_array(values))?; }
         }
         Value::List(values) => for value in values.iter() { validate(value)?; },
-        Value::Record(fields) | Value::Struct(_, _, fields) | Value::Source(_, _, fields) => for (_, value) in fields { validate(value)?; },
+        value if value.geo_fields().is_some() => {
+            for (_, value) in value.geo_fields().unwrap() { validate(value)?; }
+        }
         _ => (),
     }
     Ok(())
@@ -711,7 +747,7 @@ mod tests {
         expected_array_key.extend(0_u8..=255);
         expected_array_key.push(b']');
         assert_eq!(key_of(&|id| id.0, &byte_array), expected_array_key);
-        let source = Value::Source("texts".into(), Ty::Array(Box::new(Ty::Text)), vec![("values".into(), array.clone())]);
+        let source = source_value("texts", Ty::Array(Box::new(Ty::Text)), vec![("values".into(), array.clone())]);
         assert_eq!(ty_of(&source), Ty::Array(Box::new(Ty::Text)));
         assert_ne!(key_of(&|id| id.0, &source), key_of(&|id| id.0, &array));
         assert_eq!(general(1e-5), "1e-05");

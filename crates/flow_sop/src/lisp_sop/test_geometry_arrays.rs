@@ -176,7 +176,7 @@ fn errors(planes:bool) {
 fn unavailable_topology_sources_refuse(){
     let lookup:ak::GeometryLookup=Arc::new(|_|None);
     for g in [Value::No_geo,Value::Deferred(ty::geometry(),7),Value::Deferred(Ty::Float,7)] {
-        let source=Value::Source("sop/topology".into(),Ty::Array(Box::new(Ty::Int)),vec![("geometry".into(),g),("component".into(),Value::Text(b"vertex_points".to_vec()))]);
+        let source=source_value("sop/topology", Ty::Array(Box::new(Ty::Int)), vec![("geometry".into(),g),("component".into(),Value::Text(b"vertex_points".to_vec()))]);
         assert_eq!(ak::resolve(None,&lookup,&source).unwrap_err().code,"E_DATA_SOURCE");
     }
 }
@@ -327,7 +327,7 @@ fn text_attribute_eval_read_write_preserves_every_byte() {
     let rows = vec![bytes.clone(), bytes.iter().rev().copied().collect(), vec![255], Vec::new(), [b"\xe7\x8c\xab".as_slice(), &[255]].concat()];
     let input = geo::with_attribute(attribute::create_owned("bytes", Owner::Point, Storage::Text(rows.clone())).unwrap(), &fixture(1)).unwrap();
     let lookup: ak::GeometryLookup = Arc::new({ let input = input.clone(); move |_| Some(input.clone()) });
-    let source = Value::Source("sop/attr".into(), Ty::Array(Box::new(Ty::Text)), vec![
+    let source = source_value("sop/attr", Ty::Array(Box::new(Ty::Text)), vec![
         ("geometry".into(), Value::Deferred(ty::geometry(), 7)),
         ("attribute".into(), Value::Text(b"bytes".to_vec())),
         ("type".into(), Value::Text(b"text".to_vec())),

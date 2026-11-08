@@ -248,7 +248,7 @@ fn describe_value(v: &Value) -> String {
         Value::Record(fs) => format!("{{{}}}", fs.iter().map(|(f, v)| format!("{} {}", f, describe_value(v))).collect::<Vec<_>>().join(" · ")),
         Value::Deferred(t, _) => ty::to_string(t),
         Value::No_geo => "nil".to_owned(),
-        Value::Struct(op, _, _) | Value::Source(op, _, _) => op.clone(),
+        Value::Struct(g) | Value::Source(g) => g.name.clone(),
         Value::Fn(_) => "function".to_owned(),
         Value::Residual(_) => "?".to_owned(),
     }

@@ -17,12 +17,12 @@ const MIN_INT: i64 = -(1i64 << 62);
 fn nominal(ty: &Ty) -> Option<Value> {
     let n = match ty { Ty::Named(n) => n.as_str(), _ => return None };
     Some(match n {
-        "panel" => Value::Struct("ui/outline".into(), ty::panel(), vec![]),
-        "scene" => Value::Struct("scene/merge".into(), ty::scene(), vec![]),
-        "world" => Value::Struct("world/none".into(), ty::world(), vec![]),
-        "settings" => Value::Struct("settings/config".into(), ty::settings(), vec![]),
-        "editor" => Value::Struct("ui/workspace".into(), ty::editor(), vec![]),
-        "material" => Value::Struct("material/standard".into(), ty::material(), vec![]),
+        "panel" => value::struct_value("ui/outline", ty::panel(), vec![]),
+        "scene" => value::struct_value("scene/merge", ty::scene(), vec![]),
+        "world" => value::struct_value("world/none", ty::world(), vec![]),
+        "settings" => value::struct_value("settings/config", ty::settings(), vec![]),
+        "editor" => value::struct_value("ui/workspace", ty::editor(), vec![]),
+        "material" => value::struct_value("material/standard", ty::material(), vec![]),
         "geometry" => Value::No_geo,
         _ => return None,
     })
@@ -192,14 +192,14 @@ fn contexts_checks_and_custom_kinds() {
     let (ws, ds) = wcheck(&[], &c1, "(workspace w (graph g :context scene (root)))");
     assert!(ds.is_empty());
     let evaluated = run0(&ws.unwrap());
-    assert_eq!(result_of(&evaluated, "g"), Value::Struct("custom/root".into(), ty::scene(), vec![]));
+    assert_eq!(result_of(&evaluated, "g"), value::struct_value("custom/root", ty::scene(), vec![]));
     assert_eq!(evaluated.plan.nodes.len(), 0);
     k.slots = vec![Slot { name: "child".into(), required: true, rest: false, ty: None }];
     let c2 = Catalog { version: 1, kinds: vec![k] };
     let (ws, ds) = wcheck(&[], &c2, "(workspace w (graph g :context scene (first (map root (list nil)))))");
     assert!(ds.is_empty());
     let evaluated = run0(&ws.unwrap());
-    assert_eq!(result_of(&evaluated, "g"), Value::Struct("custom/root".into(), ty::scene(), vec![na("child", Value::No_geo)]));
+    assert_eq!(result_of(&evaluated, "g"), value::struct_value("custom/root", ty::scene(), vec![na("child", Value::No_geo)]));
     assert_eq!(evaluated.plan.nodes.len(), 0);
 }
 
@@ -318,11 +318,11 @@ fn typed_and_source_operators() {
     source.choices = vec![];
     source.out_args = None;
     source.out = Arc::new(|_| Ok(Ty::Bool));
-    source.body = Arc::new(|_, _, _| Ok(Value::Source("test/present".into(), Ty::Bool, vec![])));
+    source.body = Arc::new(|_, _, _| Ok(value::source_value("test/present", Ty::Bool, vec![])));
     let sources = vec![source];
     let static_of = |body: &str| result_of(&r#static(&checked(&sources, body), false, None).unwrap(), "g");
     let resolve: Option<Arc<dyn Fn(&Value) -> Result<Value, Diagnostic> + Send + Sync>> = Some(Arc::new(|v| match v {
-        Value::Source(n, Ty::Bool, f) if n == "test/present" && f.is_empty() => Ok(Value::Bool(false)),
+        Value::Source(g) if g.name == "test/present" && g.fields.is_empty() => Ok(Value::Bool(false)),
         _ => panic!("unexpected source"),
     }));
     let marker = static_of("(test/present)");
@@ -346,8 +346,8 @@ fn host_error(cause: &str, code: &str, message: &str) -> Diagnostic {
 fn host_forcing_agrees_with_supplied_state() {
     let live = input::at_time(2.);
     let state = create_state();
-    let marker = Value::Source("test/array".into(), Ty::Array(Box::new(Ty::Float)), vec![na("count", Value::Int(2))]);
-    let legacy = Value::Struct("test/array".into(), Ty::Array(Box::new(Ty::Float)), vec![na("count", Value::Int(2))]);
+    let marker = value::source_value("test/array", Ty::Array(Box::new(Ty::Float)), vec![na("count", Value::Int(2))]);
+    let legacy = value::struct_value("test/array", Ty::Array(Box::new(Ty::Float)), vec![na("count", Value::Int(2))]);
     let data = fa(&[0., -0.]);
     for marker in [marker.clone(), legacy] {
         for supplied in [None, Some(&state)] {
@@ -374,19 +374,19 @@ fn host_forcing_agrees_with_supplied_state() {
     assert!(ds.is_empty());
     let dynamic = result_of(&r#static(&ws.unwrap(), false, None).unwrap(), "g");
     let fields = vec![na("value", dynamic)];
-    let marker = Value::Source("test/nested".into(), Ty::Any, vec![]);
+    let marker = value::source_value("test/nested", Ty::Any, vec![]);
     let calls = Arc::new(Mutex::new(0));
     let (c, f) = (calls.clone(), fields.clone());
     let resolve: Resolve = Arc::new(move |_| { *c.lock().unwrap() += 1; Ok(Value::Record(f.clone())) });
     assert_eq!(Host::force_reference(&marker, &live, None, None, Some(resolve)), Ok(Value::Record(vec![na("value", Value::Float(3.))])));
     assert_eq!(*calls.lock().unwrap(), 1);
-    let marker = Value::Source("test/live_argument".into(), Ty::Float, fields);
+    let marker = value::source_value("test/live_argument", Ty::Float, fields);
     let m2 = marker.clone();
     let resolve: Resolve = Arc::new(move |actual| { assert_eq!(*actual, m2); Ok(Value::Float(7.)) });
     assert_eq!(Host::force_reference(&marker, &live, None, None, Some(resolve)), Ok(Value::Float(7.)));
-    let descriptor = Value::Source("test/borrowed".into(), Ty::Array(Box::new(Ty::Float)), vec![na("geometry", Value::Deferred(ty::geometry(), 17)), na("owner", t("point"))]);
-    let legacy = Value::Struct("test/borrowed".into(), Ty::Array(Box::new(Ty::Int)), vec![na("count", Value::Int(2))]);
-    let nested = Value::Source("test/write".into(), Ty::Array(Box::new(Ty::Float)), vec![na("values", Value::Record(vec![na("offsets", legacy), na("values", descriptor)]))]);
+    let descriptor = value::source_value("test/borrowed", Ty::Array(Box::new(Ty::Float)), vec![na("geometry", Value::Deferred(ty::geometry(), 17)), na("owner", t("point"))]);
+    let legacy = value::struct_value("test/borrowed", Ty::Array(Box::new(Ty::Int)), vec![na("count", Value::Int(2))]);
+    let nested = value::source_value("test/write", Ty::Array(Box::new(Ty::Float)), vec![na("values", Value::Record(vec![na("offsets", legacy), na("values", descriptor)]))]);
     for supplied in [None, Some(&state)] {
         let calls = Arc::new(Mutex::new(0));
         let (c, d, n) = (calls.clone(), data.clone(), nested.clone());
@@ -446,10 +446,10 @@ fn constant_array_descriptors_match_dense_constructor_errors() {
             let expected = capture(&|| (o.body)(&input::at_time(0.), &no_node, &args));
             match (actual, expected) {
                 (Err(a), Err(b)) => assert_eq!(a, b),
-                (Ok(Value::Source(_, ty, f)), Ok(data)) => {
-                    assert!(matches!(f.as_slice(), [(c, Value::Int(n)), (v, _)] if c == "count" && v == "value" && *n == count));
-                    assert_eq!(ty, value::ty_of(&data));
-                    if count > 0 { let row = &f[1].1; assert_eq!(*row, value::array_get(&data, 0).unwrap()); }
+                (Ok(Value::Source(g)), Ok(data)) => {
+                    assert!(matches!(g.fields.as_slice(), [(c, Value::Int(n)), (v, _)] if c == "count" && v == "value" && *n == count));
+                    assert_eq!(g.ty, value::ty_of(&data));
+                    if count > 0 { let row = &g.fields[1].1; assert_eq!(*row, value::array_get(&data, 0).unwrap()); }
                 }
                 other => panic!("{name} {count}: {other:?}"),
             }
@@ -471,7 +471,7 @@ fn constant_array_descriptors_match_dense_constructor_errors() {
         assert_eq!(capture(&|| op::constant_array_descriptor("array/vec4", &args)), expected);
     }
     match op::constant_array_descriptor("array/vec4", &[na("count", Value::Int(0)), na("value", t("unused"))]) {
-        Ok(Value::Source(_, _, f)) => assert_eq!(f, vec![na("count", Value::Int(0)), na("value", Value::Vec4(0., 0., 0., 0.))]),
+        Ok(Value::Source(g)) => assert_eq!(g.fields, vec![na("count", Value::Int(0)), na("value", Value::Vec4(0., 0., 0., 0.))]),
         other => panic!("{other:?}"),
     }
     for args in [vec![], vec![na("count", Value::Int(1)), na("count", Value::Int(1))], vec![na("count", Value::Int(1)), na("extra", Value::Int(0))]] {

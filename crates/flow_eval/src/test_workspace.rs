@@ -160,8 +160,8 @@ fn canvas_accepts_an_image_through_the_drawing_operator() {
     assert!(drawing.ty() == &ty::drawing() && root.child(args[0].term).ty() == &ty::image());
     let evaluated = static_ok(&ws);
     match results_of(&evaluated, "editor") {
-        Value::Struct(n, _, f) if n == "ui/workspace" && f.len() == 1 && f[0].0 == "root" => match &f[0].1 {
-            Value::Struct(n, _, f) if n == "ui/canvas" && f.len() == 1 && f[0].0 == "drawing" => match &f[0].1 {
+        Value::Struct(g) if g.name == "ui/workspace" && g.fields.len() == 1 && g.fields[0].0 == "root" => match &g.fields[0].1 {
+            Value::Struct(g) if g.name == "ui/canvas" && g.fields.len() == 1 && g.fields[0].0 == "drawing" => match &g.fields[0].1 {
                 Value::Deferred(t, id) => {
                     let drawing = &evaluated.plan.nodes[*id as usize];
                     assert!(*t == ty::drawing() && drawing.kind == "draw/image");

@@ -382,7 +382,7 @@ fn fill(source: &Source, width: i64) -> Option<Vec<I>> {
 fn attribute_read(source: &Source) -> Option<Vec<u8>> {
     match resolved(source.0, &source.1) {
         Resolved::Value(v @ (Value::Struct(..) | Value::Source(..))) => {
-            let (name, fields) = match &v { Value::Struct(n, _, f) | Value::Source(n, _, f) => (n, f), _ => return None };
+            let (name, fields) = match &v { Value::Struct(g) | Value::Source(g) => (&g.name, &g.fields), _ => return None };
             if name == "sop/attr" && fields.iter().all(|(_, f)| !matches!(f, Value::Residual(_))) {
                 Some(V::key_of(&|id| id.0, &v))
             } else {

@@ -255,7 +255,8 @@ fn check_value_nesting(value: &Value) -> Result<(), Diagnostic> {
         if depth >= MAX_AUTHORED_NESTING { return Err(depth_error()); }
         match value {
             Value::List(values) => { pending.try_reserve(values.len()).map_err(|_| array_memory_error())?; pending.extend(values.iter().map(|value| (value, depth + 1))); },
-            Value::Record(fields) | Value::Struct(_, _, fields) | Value::Source(_, _, fields) => {
+            value if value.geo_fields().is_some() => {
+                let fields = value.geo_fields().unwrap();
                 pending.try_reserve(fields.len()).map_err(|_| array_memory_error())?;
                 pending.extend(fields.iter().map(|(_, value)| (value, depth + 1)));
             },
@@ -324,8 +325,8 @@ pub fn roots<'a>(values: impl IntoIterator<Item = &'a Value>) -> Roots {
                 }
             }
             Value::List(values) => for value in values.iter() { visit(value, roots, seen); },
-            Value::Record(fields) | Value::Struct(_, _, fields) | Value::Source(_, _, fields) => {
-                for (_, value) in fields { visit(value, roots, seen); }
+            value if value.geo_fields().is_some() => {
+                for (_, value) in value.geo_fields().unwrap() { visit(value, roots, seen); }
             }
             _ => (),
         }
@@ -616,7 +617,7 @@ fn cooked_geometry(a: &mut Arena, value: &Value) -> bool {
     match value {
         Value::Residual(id) if id.1 == a.id => own_res(a, id).is_some_and(|residual| *residual.term.ty() == flow_syntax::ty::geometry()),
         Value::Residual(id) => { let id = *id; lend(a, || slot_of(id.1).and_then(|home| peek(&home, |home| own_res(home, &id).map(|residual| *residual.term.ty() == flow_syntax::ty::geometry()))).unwrap_or(false)) }
-        Value::Record(fields) | Value::Struct(_, _, fields) => fields.iter().any(|(_, value)| cooked_geometry(a, value)),
+        v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_fields().unwrap().iter().any(|(_, value)| cooked_geometry(a, value)),
         _ => false,
     }
 }
@@ -638,7 +639,7 @@ fn push_node(a: &mut Arena, c: &ExecCtx, authored: i64, ty: Ty, kind: String, ar
 }
 fn context_result(ctx:Context)->Ty{flow_syntax::context::result(ctx)}
 fn catalog_call(a:&mut Arena,c:&ExecCtx,authored:i64,kind:String,ctx:Context,args:Vec<(String,Value)>)->Result<Value,Diagnostic>{
-    if !flow_syntax::context::supports_values(ctx)||ctx==flow_syntax::context::material(){return Ok(Value::Struct(kind,context_result(ctx),args))}
+    if !flow_syntax::context::supports_values(ctx)||ctx==flow_syntax::context::material(){return Ok(value::struct_value(kind,context_result(ctx),args))}
     mk_node(a,c,authored,context_result(ctx),kind,args)
 }
 fn literal_case(x: &flow_syntax::syntax::Syntax) -> Result<Value, Diagnostic> {
@@ -677,7 +678,7 @@ fn field<F: FnOnce() -> String>(v: Value, name: &str, form: F) -> Result<Value, 
 }
 fn elem_type(vs:&[Value])->Ty{value::elem_ty(vs)}
 fn join_list(vs:Vec<Value>)->Value{let ty=elem_type(&vs);Value::List(Arc::new(vs.iter().map(|v|coerce(&ty,v).unwrap_or_else(|_|v.clone())).collect()))}
-fn live_in(v:&Value,a:&Arena)->bool{match v{Value::Residual(_)|Value::Source(..)=>true,Value::Struct(_,Ty::Array(_),_)=>true,Value::List(v)=>v.iter().any(|x|live_in(x,a)),Value::Record(fs)|Value::Struct(_,_,fs)=>fs.iter().any(|(_,v)|live_in(v,a)),_=>false}}
+fn live_in(v:&Value,a:&Arena)->bool{match v{Value::Residual(_)|Value::Source(_)=>true,Value::Struct(g) if matches!(g.ty,Ty::Array(_))=>true,Value::List(v)=>v.iter().any(|x|live_in(x,a)),value if value.geo_fields().is_some()=>value.geo_fields().unwrap().iter().any(|(_,v)|live_in(v,a)),_=>false}}
 fn packed_pattern_name(arena: &TermArena, pattern: PatternId) -> String {
     match arena.pattern(pattern) {
         PatternNode::Name(name) => arena.name(name).to_owned(),
@@ -912,10 +913,10 @@ fn guardable(a: &mut Arena, v: &Value) -> bool {
                 seen.insert(*id);
                 own_res(a, id).is_some_and(|r| r.env.values().all(|v| free(a, v, seen)) && !reads_elem(&r.term))
             },
-            Value::Source(..) | Value::Struct(_, Ty::Array(_), _) => false,
+            value if unresolved_data_source(value) => false,
             Value::Deferred(ty, _) => !flow_syntax::ty::is_cooked(ty),
             Value::List(xs) => xs.iter().all(|x| free(a, x, seen)),
-            Value::Record(fs) | Value::Struct(_, _, fs) => fs.iter().all(|(_, v)| free(a, v, seen)),
+            v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_fields().unwrap().iter().all(|(_, v)| free(a, v, seen)),
             Value::Fn(id) => match own_fn(a, id) {
                 Some(Function::Closure(cl)) => { let cl = cl.clone(); cl.env.values().all(|v| free(a, v, seen)) && !reads_elem(&cl.body) }
                 Some(Function::Named(_)) => true,
@@ -998,10 +999,13 @@ fn kernel_value(a: &mut Arena, id: ResidualId, ty: &Ty) -> Option<Value> {
     if value::ty_of(&value) != *ty || value::validate(&value).is_err() { return None; }
     Some(value)
 }
+fn unresolved_data_source(value: &Value) -> bool {
+    matches!(value, Value::Source(_)) || matches!(value, Value::Struct(g) if matches!(g.ty, Ty::Array(_)))
+}
 fn concrete(a: &mut Arena, value: Value) -> Result<Value, Diagnostic> {
     match value {
         Value::Residual(id) => if a.time.is_none() { need_time() } else { force_res(a, id) },
-        Value::Source(..) | Value::Struct(_, Ty::Array(_), _) => {
+        value if unresolved_data_source(&value) => {
             if a.time.is_none() { return need_time(); }
             resolve_source(a, &value)
         }
@@ -1023,7 +1027,7 @@ fn function_value(value: &Value) -> bool {
     match value {
         Value::Fn(_) => true,
         Value::List(values) => values.iter().any(function_value),
-        Value::Record(fields) | Value::Struct(_, _, fields) | Value::Source(_, _, fields) => fields.iter().any(|(_, value)| function_value(value)),
+        v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_fields().unwrap().iter().any(|(_, value)| function_value(value)),
         _ => false,
     }
 }
@@ -1067,7 +1071,7 @@ fn has_fn(value: &Value) -> bool {
     match value {
         Value::Fn(_) => true,
         Value::List(values) => values.iter().any(has_fn),
-        Value::Record(fields) | Value::Struct(_, _, fields) | Value::Source(_, _, fields) => fields.iter().any(|(_, value)| has_fn(value)),
+        v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_fields().unwrap().iter().any(|(_, value)| has_fn(value)),
         _ => false,
     }
 }
@@ -1112,7 +1116,7 @@ fn value_ids(value: &Value, residuals: &mut Vec<ResidualId>, functions: &mut Vec
         Value::Residual(id) => residuals.push(*id),
         Value::Fn(id) => functions.push(*id),
         Value::List(values) => for value in values.iter() { value_ids(value, residuals, functions); },
-        Value::Record(fields) | Value::Struct(_, _, fields) | Value::Source(_, _, fields) => for (_, value) in fields { value_ids(value, residuals, functions); },
+        v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => for (_, value) in v.geo_fields().unwrap() { value_ids(value, residuals, functions); },
         _ => (),
     }
 }
@@ -1168,7 +1172,7 @@ impl Reloc {
             Value::Residual(id) => self.rmap.get(id).is_some_and(|new| new != id),
             Value::Fn(id) => self.fmap.get(id).is_some_and(|new| new != id),
             Value::List(values) => values.iter().any(|value| self.changes(value)),
-            Value::Record(fields) | Value::Struct(_, _, fields) | Value::Source(_, _, fields) => fields.iter().any(|(_, value)| self.changes(value)),
+            v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_fields().unwrap().iter().any(|(_, value)| self.changes(value)),
             _ => false,
         }
     }
@@ -1178,8 +1182,8 @@ impl Reloc {
             Value::List(values) if !values.iter().any(|value| self.changes(value)) => Value::List(values.clone()),
             Value::List(values) => Value::List(Arc::new(values.iter().map(|value| self.value(value)).collect())),
             Value::Record(fields) => Value::Record(self.fields(fields)),
-            Value::Struct(name, ty, fields) => Value::Struct(name.clone(), ty.clone(), self.fields(fields)),
-            Value::Source(name, ty, fields) => Value::Source(name.clone(), ty.clone(), self.fields(fields)),
+            Value::Struct(g) => value::struct_value(g.name.clone(), g.ty.clone(), self.fields(&g.fields)),
+            Value::Source(g) => value::source_value(g.name.clone(), g.ty.clone(), self.fields(&g.fields)),
             Value::Residual(id) => Value::Residual(*self.rmap.get(id).unwrap_or(id)),
             Value::Fn(id) => Value::Fn(*self.fmap.get(id).unwrap_or(id)),
             value => value.clone(),
@@ -1455,8 +1459,8 @@ fn defer_constant_array(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, name
         (actual.check)(values)?;
         op::array_count(None, name, &values.iter().find(|(k, _)| k == "count").unwrap().1)?;
     } else {
-        let Value::Source(_, _, fields) = op::constant_array_descriptor(name, values)? else { unreachable!() };
-        if !matches!(fields.first(), Some((_, Value::Int(n))) if *n > MAX_ITERATIONS as i64) { return Ok(None); }
+        let Value::Source(g) = op::constant_array_descriptor(name, values)? else { unreachable!() };
+        if !matches!(g.fields.first(), Some((_, Value::Int(n))) if *n > MAX_ITERATIONS as i64) { return Ok(None); }
     }
     let residual = make_residual(a, term, env, c, false, None);
     Ok(call_lent(a, residual, &|id| defer(id).then_some(Value::Residual(id))))
@@ -1803,7 +1807,7 @@ fn resolve_source(a: &mut Arena, source: &Value) -> Result<Value, Diagnostic> {
     let resolve = a.resolve.clone().ok_or_else(|| error("E_DATA_SOURCE", "This data source needs its host's cooked data."))?;
     let value = lend(a, || resolve(source))?;
     check_value_nesting(&value)?;
-    if matches!(value, Value::Source(..) | Value::Struct(_, Ty::Array(_), _)) { return eval_error("E_DATA_SOURCE", "The host returned an unresolved data source."); }
+    if unresolved_data_source(&value) { return eval_error("E_DATA_SOURCE", "The host returned an unresolved data source."); }
     if value::ty_of(source) != Ty::Any && value::ty_of(source) != value::ty_of(&value) { return eval_error("E_DATA_SOURCE", "The host returned a data source of the wrong type."); }
     value::validate(&value)?;
     Ok(value)
@@ -1813,7 +1817,7 @@ fn concrete_data(a: &mut Arena, value: Value) -> Result<Value, Diagnostic> {
     match value {
         Value::List(values) => Ok(Value::List(Arc::new(values.iter().cloned().map(|value| concrete_data(a, value)).collect::<Result<Vec<_>, _>>()?))),
         Value::Record(fields) => Ok(Value::Record(fields.into_iter().map(|(name, value)| Ok((name, concrete_data(a, value)?))).collect::<Result<Vec<_>, Diagnostic>>()?)),
-        Value::Struct(name, ty, fields) => Ok(Value::Struct(name, ty, fields.into_iter().map(|(name, value)| Ok((name, concrete_data(a, value)?))).collect::<Result<Vec<_>, Diagnostic>>()?)),
+        Value::Struct(g) => Ok(value::struct_value(g.name.clone(), g.ty.clone(), g.fields.into_iter().map(|(name, value)| Ok((name, concrete_data(a, value)?))).collect::<Result<Vec<_>, Diagnostic>>()?)),
         value => concrete(a, value),
     }
 }
@@ -1824,7 +1828,7 @@ fn eval_with_error(a: &mut Arena, c: &ExecCtx, env: &Env, protected: &Term, mapp
         let protected = eval_sub(a, c, "0".into(), env, protected)?;
         match concrete_data(a, protected)? {
             Value::Deferred(ty, id) if flow_syntax::ty::is_cooked(&ty) => {
-                let source = Value::Source("$core/complete".into(), ty.clone(), vec![("value".into(), Value::Deferred(ty, id))]);
+                let source = value::source_value("$core/complete", ty.clone(), vec![("value".into(), Value::Deferred(ty, id))]);
                 resolve_source(a, &source)
             }
             value => Ok(value),
@@ -1876,7 +1880,7 @@ fn eval_error_rows(a: &mut Arena, c: &ExecCtx, env: &Env, rows: &Term, policy: W
     };
     let Some(first) = value::error_row_index(&rows, None, None)? else { return Ok(Value::No_geo); };
     let index = if a.resolve.is_some() {
-        match resolve_source(a, &Value::Source("$core/diagnostic_index".into(), Ty::Int, vec![("rows".into(), rows.clone()), ("policy".into(), text(policy_name))]))? {
+        match resolve_source(a, &value::source_value("$core/diagnostic_index", Ty::Int, vec![("rows".into(), rows.clone()), ("policy".into(), text(policy_name))]))? {
             Value::Int(index) => index,
             _ => return eval_error("E_DIAGNOSTIC_CONTEXT", "Host diagnosis returns one integer row."),
         }
@@ -2139,11 +2143,11 @@ fn state_data(value: Value) -> Result<Value, Diagnostic> {
     let _nesting = EvalNesting::enter()?;
     match value {
         Value::Deferred(..) | Value::No_geo => eval_error("E_STATE_TYPE", "State stores data, not deferred nodes or layouts."),
-        Value::Struct(_, ty, _) if flow_syntax::ty::shape(&ty) => eval_error("E_STATE_TYPE", "State stores data, not deferred nodes or layouts."),
+        Value::Struct(g) if flow_syntax::ty::shape(&g.ty) => eval_error("E_STATE_TYPE", "State stores data, not deferred nodes or layouts."),
         Value::Fn(_) => eval_error("E_FN_ESCAPES", "A function value cannot be stored in state."),
         Value::List(values) => Ok(Value::List(Arc::new(values.iter().cloned().map(state_data).collect::<Result<Vec<_>, _>>()?))),
         Value::Record(fields) => Ok(Value::Record(fields.into_iter().map(|(name, value)| Ok((name, state_data(value)?))).collect::<Result<Vec<_>, Diagnostic>>()?)),
-        Value::Struct(name, ty, fields) => Ok(Value::Struct(name, ty, fields.into_iter().map(|(name, value)| Ok((name, state_data(value)?))).collect::<Result<Vec<_>, Diagnostic>>()?)),
+        Value::Struct(g) => Ok(value::struct_value(g.name.clone(), g.ty.clone(), g.fields.into_iter().map(|(name, value)| Ok((name, state_data(value)?))).collect::<Result<Vec<_>, Diagnostic>>()?)),
         value => Ok(value),
     }
 }
@@ -2456,7 +2460,7 @@ fn loop_values(source: Value) -> Result<Vec<Value>, Diagnostic> {
             for index in 0..count { output.push(array_get(&source, index)?); }
             Ok(output)
         }
-        Value::Struct(op, Ty::List(_), _) => Err(errorf("E_ZONE", format!("{op}: only a for with one clause and no :skip can iterate the elements of geometry."))),
+        Value::Struct(g) if matches!(g.ty, Ty::List(_)) => Err(errorf("E_ZONE", format!("{}: only a for with one clause and no :skip can iterate the elements of geometry.", g.name))),
         _ => Err(error("E_TYPE", "Expected a list or packed array.")),
     }
 }
@@ -2508,12 +2512,12 @@ fn eval_loop(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, node: &flow_che
     let first = {
         let binding = &clauses[0];
         let source = eval_concrete_sub(a, c, "in0".into(), env, &term.child(binding.term))?;
-        match source {
-            Value::Struct(_, Ty::List(_), _) if kind == &W::LoopKind::For && clauses.len() == 1 && skip.is_empty() => {
+        if let Value::Struct(g) = &source {
+            if matches!(g.ty, Ty::List(_)) && kind == &W::LoopKind::For && clauses.len() == 1 && skip.is_empty() {
                 return eval_geometry_loop(a, c, env, arena, binding.pattern, body, zone, source);
             }
-            source => loop_values(source)?,
         }
+        loop_values(source)?
     };
     let lists = [first];
     let mut output = Vec::new();
@@ -2599,9 +2603,12 @@ fn eval_loop(a: &mut Arena, c: &ExecCtx, env: &Env, term: &Term, node: &flow_che
     result
 }
 fn eval_geometry_loop(a: &mut Arena, c: &ExecCtx, env: &Env, arena: &TermArena, pattern: PatternId, body: &Term, zone: &Arc<Path>, source: Value) -> Result<Value, Diagnostic> {
-    let (operation, fields) = match source { Value::Struct(operation, Ty::List(_), fields) => (operation, fields), _ => return eval_error("E_ZONE", "Geometry loop source is malformed.") };
+    let (operation, fields) = match source {
+        Value::Struct(g) if matches!(g.ty, Ty::List(_)) => (g.name.clone(), g.fields.clone()),
+        _ => return eval_error("E_ZONE", "Geometry loop source is malformed."),
+    };
     let source_id = match fields.iter().find(|(name, _)| name == "geometry").map(|(_, value)| value) {
-        Some(Value::Deferred(ty, id)) if flow_syntax::ty::is_geometry(ty) => *id,
+        Some(Value::Deferred(ty, id)) if flow_syntax::ty::is_geometry(&ty) => *id,
         _ => return Err(errorf("E_TYPE", format!("{}: {} needs geometry.", path_text(zone), operation))),
     };
     let points = operation == "sop/point_list";
@@ -2698,7 +2705,7 @@ pub fn force(value:&Value,live:&Frame,state:Option<&State>)->Result<Value,Diagno
 type ResolveFn = Arc<dyn Fn(&Value) -> Result<Value, Diagnostic> + Send + Sync>;
 fn static_source_fields(value: &Value) -> bool {
     match value {
-        Value::Source(_, _, f) | Value::Struct(_, _, f) | Value::Record(f) => f.iter().all(|(_, v)| static_source_fields(v)),
+        v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_fields().unwrap().iter().all(|(_, v)| static_source_fields(v)),
         Value::List(vs) => vs.iter().all(static_source_fields),
         v => !is_live_value(v),
     }
@@ -2708,11 +2715,17 @@ pub fn force_with(value: &Value, live: &Frame, state: Option<&State>, elems: Opt
     let _nesting = EvalNesting::enter()?;
     check_value_nesting(value)?;
     if !is_live_value(value) { return Ok(value.clone()); }
-    if let (Value::Source(_, _, fields) | Value::Struct(_, Ty::Array(_), fields), None, None, Some(resolve)) = (value, state, elems, &resolve) {
-        if fields.iter().all(|(_, v)| static_source_fields(v)) {
-            fail_frame(live)?;
-            let resolved = resolve_source_with(resolve, value)?;
-            return if is_live_value(&resolved) { force_with(&resolved, live, None, None, Some(resolve.clone())) } else { Ok(resolved) };
+    if state.is_none() && elems.is_none() && resolve.is_some() {
+        if let Some(fields) = match value {
+            Value::Source(g) => Some(&g.fields[..]),
+            Value::Struct(g) if matches!(g.ty, Ty::Array(_)) => Some(&g.fields[..]),
+            _ => None,
+        } {
+            if fields.iter().all(|(_, v)| static_source_fields(v)) {
+                fail_frame(live)?;
+                let resolved = resolve_source_with(resolve.as_ref().unwrap(), value)?;
+                return if is_live_value(&resolved) { force_with(&resolved, live, None, None, resolve.clone()) } else { Ok(resolved) };
+            }
         }
     }
     let owned = state.cloned().unwrap_or_default();
@@ -2746,7 +2759,7 @@ fn force_general(value: &Value, live: &Frame, state: Option<&State>, elems: Opti
             // OCaml's `go (force_res c r)`: a result that still holds residuals (captured record fields) is forced again.
             if is_live_value(&forced) { force_general(&forced, live, state, elems, resolve) } else { Ok(forced) }
         }
-        Value::Source(..) | Value::Struct(_, Ty::Array(_), _) => {
+        value if unresolved_data_source(value) => {
             if let Some(slot) = arena_for_value(value) {
                 let (previous, saved_live) = peek(&slot, |arena| {
                     let previous = arena.state.clone();
@@ -2772,14 +2785,15 @@ fn force_general(value: &Value, live: &Frame, state: Option<&State>, elems: Opti
         }
         Value::List(values) => Ok(Value::List(Arc::new(values.iter().map(|value| force_general(value, live, state, elems, resolve.clone())).collect::<Result<Vec<_>, _>>()?))),
         Value::Record(fields) => Ok(Value::Record(fields.iter().map(|(name, value)| Ok((name.clone(), force_general(value, live, state, elems, resolve.clone())?))).collect::<Result<Vec<_>, Diagnostic>>()?)),
-        Value::Struct(name, ty, fields) => Ok(Value::Struct(name.clone(), ty.clone(), fields.iter().map(|(name, value)| Ok((name.clone(), force_general(value, live, state, elems, resolve.clone())?))).collect::<Result<Vec<_>, Diagnostic>>()?)),
+        Value::Struct(g) => Ok(value::struct_value(g.name.clone(), g.ty.clone(), g.fields.iter().map(|(name, value)| Ok((name.clone(), force_general(value, live, state, elems, resolve.clone())?))).collect::<Result<Vec<_>, Diagnostic>>()?)),
+        Value::Source(g) => Ok(value::source_value(g.name.clone(), g.ty.clone(), g.fields.iter().map(|(name, value)| Ok((name.clone(), force_general(value, live, state, elems, resolve.clone())?))).collect::<Result<Vec<_>, Diagnostic>>()?)),
         _ => Ok(value.clone()),
     }
 }
 fn resolve_source_with(resolve: &Arc<dyn Fn(&Value) -> Result<Value, Diagnostic> + Send + Sync>, source: &Value) -> Result<Value, Diagnostic> {
     let value = resolve(source)?;
     check_value_nesting(&value)?;
-    if matches!(value, Value::Source(..) | Value::Struct(_, Ty::Array(_), _)) { return eval_error("E_DATA_SOURCE", "The host returned an unresolved data source."); }
+    if unresolved_data_source(&value) { return eval_error("E_DATA_SOURCE", "The host returned an unresolved data source."); }
     if value::ty_of(source) != Ty::Any && value::ty_of(source) != value::ty_of(&value) { return eval_error("E_DATA_SOURCE", "The host returned a data source of the wrong type."); }
     value::validate(&value)?;
     Ok(value)
@@ -2828,9 +2842,9 @@ pub fn show(v: &Value) -> Vec<u8> { value::show_with(&|v| v.clone(), v) }
 pub fn is_live(value: &Value) -> bool { is_live_value(value) }
 pub fn is_live_value(value: &Value) -> bool {
     match value {
-        Value::Residual(_) | Value::Source(..) | Value::Struct(_, Ty::Array(_), _) => true,
+        value if unresolved_data_source(value) => true,
         Value::List(values) => values.iter().any(is_live_value),
-        Value::Record(fields) | Value::Struct(_, _, fields) => fields.iter().any(|(_, value)| is_live_value(value)),
+        v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_fields().unwrap().iter().any(|(_, value)| is_live_value(value)),
         _ => false,
     }
 }
@@ -2856,7 +2870,7 @@ fn read_value(arena: &mut Arena, value: &Value, frame: bool, reads: &mut BTreeSe
             }
         }
         Value::List(values) => values.iter().fold(false, |found, value| read_value(arena, value, frame, reads, residuals, functions, named) || found),
-        Value::Record(fields) | Value::Struct(_, _, fields) | Value::Source(_, _, fields) => fields.iter().fold(false, |found, (_, value)| read_value(arena, value, frame, reads, residuals, functions, named) || found),
+        v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_fields().unwrap().iter().fold(false, |found, (_, value)| read_value(arena, value, frame, reads, residuals, functions, named) || found),
         _ => false,
     }
 }
@@ -3004,11 +3018,11 @@ fn structure_value(
             for (name, value) in fields { structure_bytes(out, name.as_bytes()); structure_value(out, value, arena, seen_residuals, seen_functions, next); }
             out.push('}');
         }
-        Value::Struct(name, ty, fields) | Value::Source(name, ty, fields) => {
-            out.push(if matches!(value, Value::Struct(..)) { 'S' } else { 'Q' });
-            structure_bytes(out, name.as_bytes());
-            structure_bytes(out, ty::to_string(ty).as_bytes());
-            for (name, value) in fields { structure_bytes(out, name.as_bytes()); structure_value(out, value, arena, seen_residuals, seen_functions, next); }
+        Value::Struct(g) | Value::Source(g) => {
+            out.push(if matches!(value, Value::Struct(_)) { 'S' } else { 'Q' });
+            structure_bytes(out, g.name.as_bytes());
+            structure_bytes(out, ty::to_string(&g.ty).as_bytes());
+            for (name, value) in &g.fields { structure_bytes(out, name.as_bytes()); structure_value(out, value, arena, seen_residuals, seen_functions, next); }
             out.push('}');
         }
         Value::Text(bytes) => { out.push('s'); structure_bytes(out, bytes); }
@@ -3160,7 +3174,7 @@ pub mod Device {
             Value::Float_array(data) | Value::Vec2_array(data) | Value::Vec3_array(data) | Value::Vec4_array(data) => reader(data).map_or_else(|| value.clone(), |read| read()),
             Value::List(values) => Value::List(Arc::new(values.iter().map(thaw).collect())),
             Value::Record(fields) => Value::Record(fields.iter().map(|(name, value)| (name.clone(), thaw(value))).collect()),
-            Value::Struct(name, ty, fields) => Value::Struct(name.clone(), ty.clone(), fields.iter().map(|(name, value)| (name.clone(), thaw(value))).collect()),
+            Value::Struct(g) => value::struct_value(g.name.clone(), g.ty.clone(), g.fields.iter().map(|(name, value)| (name.clone(), thaw(value))).collect()),
             _ => value.clone(),
         }
     }
@@ -3202,8 +3216,14 @@ fn replace_array(value: &mut Value, original: &Value, replacement: &Value) {
     if same_array_storage(value, original) { *value = replacement.clone(); return; }
     match value {
         Value::List(values) => for value in Arc::make_mut(values).iter_mut() { replace_array(value, original, replacement); },
-        Value::Record(fields) | Value::Struct(_, _, fields) | Value::Source(_, _, fields) => {
-            for (_, value) in fields { replace_array(value, original, replacement); }
+        Value::Struct(g) => {
+            for (_, field) in &mut g.fields { replace_array(field, original, replacement); }
+        }
+        Value::Source(g) => {
+            for (_, field) in &mut g.fields { replace_array(field, original, replacement); }
+        }
+        Value::Record(fields) => {
+            for (_, field) in fields { replace_array(field, original, replacement); }
         }
         _ => (),
     }
@@ -3472,7 +3492,7 @@ fn arena_for_value(value: &Value) -> Option<Arc<Slot>> {
         Value::Residual(id) => arena_for_residual(id),
         Value::Fn(id) => arena_for_function(*id),
         Value::List(values) => values.iter().find_map(arena_for_value),
-        Value::Record(fields) | Value::Struct(_, _, fields) | Value::Source(_, _, fields) => fields.iter().find_map(|(_, value)| arena_for_value(value)),
+        v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_fields().unwrap().iter().find_map(|(_, value)| arena_for_value(value)),
         _ => None,
     }
 }
@@ -3540,8 +3560,8 @@ fn rewrite_value(
         }
         Value::List(values) => Value::List(Arc::new(values.iter().map(|value| rewrite_value(value, replace, fresh, retarget, residuals, functions, owned)).collect())),
         Value::Record(fields) => Value::Record(fields.iter().map(|(name, value)| (name.clone(), rewrite_value(value, replace, fresh, retarget, residuals, functions, owned))).collect()),
-        Value::Struct(name, ty, fields) => Value::Struct(name.clone(), ty.clone(), fields.iter().map(|(name, value)| (name.clone(), rewrite_value(value, replace, fresh, retarget, residuals, functions, owned))).collect()),
-        Value::Source(name, ty, fields) => Value::Source(name.clone(), ty.clone(), fields.iter().map(|(name, value)| (name.clone(), rewrite_value(value, replace, fresh, retarget, residuals, functions, owned))).collect()),
+        Value::Struct(g) => value::struct_value(g.name.clone(), g.ty.clone(), g.fields.iter().map(|(name, value)| (name.clone(), rewrite_value(value, replace, fresh, retarget, residuals, functions, owned))).collect()),
+        Value::Source(g) => value::source_value(g.name.clone(), g.ty.clone(), g.fields.iter().map(|(name, value)| (name.clone(), rewrite_value(value, replace, fresh, retarget, residuals, functions, owned))).collect()),
         _ => value.clone(),
     }
 }
@@ -3567,8 +3587,8 @@ fn remap_value(arena: &mut Arena, value: &Value, sources: &[(i64, i64)], residua
         }
         Value::List(values) => Value::List(Arc::new(values.iter().map(|value| remap_value(arena, value, sources, residuals, functions)).collect())),
         Value::Record(fields) => Value::Record(fields.iter().map(|(name, value)| (name.clone(), remap_value(arena, value, sources, residuals, functions))).collect()),
-        Value::Struct(name, ty, fields) => Value::Struct(name.clone(), ty.clone(), fields.iter().map(|(name, value)| (name.clone(), remap_value(arena, value, sources, residuals, functions))).collect()),
-        Value::Source(name, ty, fields) => Value::Source(name.clone(), ty.clone(), fields.iter().map(|(name, value)| (name.clone(), remap_value(arena, value, sources, residuals, functions))).collect()),
+        Value::Struct(g) => value::struct_value(g.name.clone(), g.ty.clone(), g.fields.iter().map(|(name, value)| (name.clone(), remap_value(arena, value, sources, residuals, functions))).collect()),
+        Value::Source(g) => value::source_value(g.name.clone(), g.ty.clone(), g.fields.iter().map(|(name, value)| (name.clone(), remap_value(arena, value, sources, residuals, functions))).collect()),
         _ => value.clone(),
     }
 }
@@ -3711,8 +3731,8 @@ mod tests {
         assert!(Arc::ptr_eq(&values, &shared));
         let nested = |node, input, residual, function| Value::List(Arc::new(vec![
             Value::Record(vec![("node".into(), Value::Deferred(Ty::Int, node))]),
-            Value::Struct("s".into(), Ty::Any, vec![("input".into(), Value::Deferred(Ty::Int, input))]),
-            Value::Source("host".into(), Ty::Any, vec![("residual".into(), Value::Residual(residual)), ("fn".into(), Value::Fn(function))]),
+            value::struct_value("s", Ty::Any, vec![("input".into(), Value::Deferred(Ty::Int, input))]),
+            value::source_value("host", Ty::Any, vec![("residual".into(), Value::Residual(residual)), ("fn".into(), Value::Fn(function))]),
             Value::Deferred(Ty::Int, 5),
         ]));
         let env = Arc::new(BTreeMap::from([("nested".into(), nested(10, 3, ResidualId(1, 1), FnId(7, 1)))]));
@@ -3899,7 +3919,7 @@ fn dep_value(arena: &mut Arena, value: &Value, frame: bool, active: &mut HashSet
             }
         },
         Value::List(values) => values.iter().any(|value| dep_value(arena, value, frame, active, named)),
-        Value::Record(fields) | Value::Struct(_, _, fields) | Value::Source(_, _, fields) => fields.iter().any(|(_, value)| dep_value(arena, value, frame, active, named)),
+        v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_fields().unwrap().iter().any(|(_, value)| dep_value(arena, value, frame, active, named)),
         _ => false,
     }
 }
@@ -4194,7 +4214,7 @@ impl Run {
         let mut at = value;
         let mut owned;
         for field_name in fields {
-            if matches!(at, Value::Residual(_) | Value::Source(..) | Value::Struct(_, Ty::Array(_), _)) { return Err(Abandon); }
+            if matches!(at, Value::Residual(_)) || unresolved_data_source(at) { return Err(Abandon); }
             match at {
                 Value::Record(entries) => at = &entries.iter().find(|(name, _)| name == field_name).ok_or(Abandon)?.1,
                 other => { owned = field(other.clone(), field_name, String::new).map_err(|_| Abandon)?; at = &owned; }

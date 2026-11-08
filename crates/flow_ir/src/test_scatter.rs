@@ -165,8 +165,8 @@ fn host_inputs() -> Vec<(String, Vec<(String, Value)>)> {
     vec![(
         "g".to_string(),
         vec![
-            ("indices".to_string(), Value::Source("fixture/indices".into(), Ty::Array(Box::new(Ty::Int)), vec![])),
-            ("data".to_string(), Value::Source("fixture/values".into(), Ty::Array(Box::new(Ty::Float)), vec![])),
+            ("indices".to_string(), source_value("fixture/indices", Ty::Array(Box::new(Ty::Int)), vec![])),
+            ("data".to_string(), source_value("fixture/values", Ty::Array(Box::new(Ty::Float)), vec![])),
         ],
     )]
 }
@@ -182,11 +182,11 @@ fn host_sources_order_errors_and_laziness() {
     let resolve: ResolveArc = {
         let (data, calls) = (data.clone(), calls.clone());
         Arc::new(move |s: &Value| match s {
-            Value::Source(name, _, _) if name == "fixture/indices" => {
+            Value::Source(g) if g.name == "fixture/indices" => {
                 calls.lock().unwrap().push("indices");
                 Ok(ints(&[0, 1, 0]))
             }
-            Value::Source(name, _, _) if name == "fixture/values" => {
+            Value::Source(g) if g.name == "fixture/values" => {
                 calls.lock().unwrap().push("values");
                 Ok(data.lock().unwrap().clone())
             }
@@ -208,7 +208,7 @@ fn host_sources_order_errors_and_laziness() {
     }
     let live = live_at(1.);
     let wrong: ResolveArc = Arc::new(|s: &Value| match s {
-        Value::Source(name, _, _) if name == "fixture/indices" => Ok(floats(&[0., 1., 0.])),
+        Value::Source(g) if g.name == "fixture/indices" => Ok(floats(&[0., 1., 0.])),
         _ => panic!("unexpected source"),
     });
     same(&exec_force(&executable, &live, None, Some(wrong.clone())), &reference_with(&v, &live, None, Some(wrong)));
@@ -219,7 +219,7 @@ fn host_sources_order_errors_and_laziness() {
     same(&exec_force(&skipped_program, &live, None, Some(no_source.clone())), &reference_with(&skipped, &live, None, Some(no_source)));
 
     let failed: ResolveArc = Arc::new(|s: &Value| match s {
-        Value::Source(name, _, _) if name == "fixture/indices" => {
+        Value::Source(g) if g.name == "fixture/indices" => {
             let mut d = flow_syntax::value::fail("E_DATA_SOURCE", "missing indices");
             d.cause = Some("scatter input cause".into());
             Err(d)

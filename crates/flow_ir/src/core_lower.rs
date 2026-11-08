@@ -14,7 +14,7 @@ use flow_eval as E;
 use flow_syntax::packed_ops as PO;
 use flow_syntax::syntax::Node as SNode;
 use flow_syntax::ty::{self, Ty};
-use flow_syntax::value::{self as V, ResidualId, Value};
+use flow_syntax::value::{self as V, ResidualId, Value, struct_value, source_value};
 use flow_syntax::{context, Diagnostic};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
@@ -76,7 +76,7 @@ fn closure_free(v: &Value) -> bool {
     match v {
         Value::Fn(_) | Value::Residual(_) => false,
         Value::List(values) => values.iter().all(closure_free),
-        Value::Record(fields) | Value::Struct(_, _, fields) | Value::Source(_, _, fields) => fields.iter().all(|(_, v)| closure_free(v)),
+        v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_fields().unwrap().iter().all(|(_, v)| closure_free(v)),
         _ => true,
     }
 }
@@ -530,21 +530,21 @@ impl Lowerer {
                 let l = self.residual(s, *r)?;
                 self.ensure(s, source, &l)
             }
-            Known(value @ (Value::Source(..) | Value::Struct(_, Ty::Array(_), _))) if closure_free(value) => {
+            Known(value) if closure_free(value) && value.geo_payload().is_some_and(|g| matches!(g.ty, Ty::Array(_))) => {
                 Ok(self.emit_n(s, source, &V::ty_of(value), C::Expr::Source(value.clone())))
             }
-            Known(Value::Source(name, ty, fields)) | Known(Value::Struct(name, ty @ Ty::Array(_), fields)) => {
+            Known(Value::Source(g)) | Known(Value::Struct(g)) if matches!(g.ty, Ty::Array(_)) => {
                 // a capture inside a source is lowered here, so the program holds plain data only
                 let mut args = Vec::new();
-                for (field, v) in fields { args.push((field.clone(), self.ensure(s, source, &Known(v.clone()))?)); }
-                Ok(self.emit_n(s, source, ty, C::Expr::Host_source { name: name.clone(), ty: ty.clone(), args }))
+                for (field, v) in &g.fields { args.push((field.clone(), self.ensure(s, source, &Known(v.clone()))?)); }
+                Ok(self.emit_n(s, source, &g.ty, C::Expr::Host_source { name: g.name.clone(), ty: g.ty.clone(), args }))
             }
             Known(Value::Deferred(ty, id)) if ty::is_cooked(ty) => {
                 let key = CacheKey::Cooked(ty::to_string(ty), *id);
                 let value = match s.cache.get(&key) {
                     Some(v) => v.clone(),
                     None => {
-                        let value = self.emit(s, source, ty, C::Expr::Source(Value::Source("$core/cooked".into(), ty.clone(), vec![("id".into(), Value::Int(*id))])));
+                        let value = self.emit(s, source, ty, C::Expr::Source(source_value("$core/cooked", ty.clone(), vec![("id".into(), Value::Int(*id))])));
                         s.cache.insert(key, value.clone());
                         value
                     }
@@ -1142,10 +1142,10 @@ impl Lowerer {
 
     fn descriptor(&mut self, s: &mut Scope, source: &C::Source, l: &Lowered) -> R<Lowered> {
         match l {
-            Known(Value::Source(name, ty, fields)) | Known(Value::Struct(name, ty @ Ty::Array(_), fields)) if storage_argument(ty) => {
+            Known(Value::Source(g)) | Known(Value::Struct(g)) if matches!(g.ty, Ty::Array(_)) && storage_argument(&g.ty) => {
                 let mut args = Vec::new();
-                for (n, v) in fields { args.push((n.clone(), self.ensure(s, source, &Known(v.clone()))?)); }
-                Ok(self.emit(s, source, ty, C::Expr::Source_descriptor { name: name.clone(), ty: ty.clone(), args }))
+                for (n, v) in &g.fields { args.push((n.clone(), self.ensure(s, source, &Known(v.clone()))?)); }
+                Ok(self.emit(s, source, &g.ty, C::Expr::Source_descriptor { name: g.name.clone(), ty: g.ty.clone(), args }))
             }
             Known(Value::Record(fields)) => {
                 let mut out = Vec::new();
@@ -1195,7 +1195,7 @@ impl Lowerer {
                     Some(i) => i,
                     None => { arguments.push(*id); arguments.len() - 1 }
                 };
-                Ok(Value::Source("$core/argument".into(), ty.clone(), vec![("index".into(), Value::Int(index as i64))]))
+                Ok(source_value("$core/argument", ty.clone(), vec![("index".into(), Value::Int(index as i64))]))
             }
             Record_fields(fields) => {
                 let mut out = Vec::new();
@@ -1994,25 +1994,25 @@ impl Lowerer {
 
     fn host(&mut self, s: &mut Scope, source: &C::Source, borrow: bool, args: &[(String, Lowered)], v: &Value) -> R<Lowered> {
         match v {
-            Value::Source(name, _, fields) if name == "$core/argument" && matches!(fields.as_slice(), [(k, Value::Int(_))] if k == "index") => {
-                let Value::Int(index) = &fields[0].1 else { unreachable!() };
+            Value::Source(g) if g.name == "$core/argument" && matches!(g.fields.as_slice(), [(k, Value::Int(_))] if k == "index") => {
+                let Value::Int(index) = &g.fields[0].1 else { unreachable!() };
                 Ok(args[*index as usize].1.clone())
             }
-            Value::Source(name, ty, fields) | Value::Struct(name, ty @ Ty::Array(_), fields) => {
+            Value::Source(g) | Value::Struct(g) if matches!(g.ty, Ty::Array(_)) => {
                 let mut all_known = true;
-                for (_, f) in fields {
+                for (_, f) in &g.fields {
                     if !matches!(self.host(s, source, borrow, args, f)?, Known(_)) { all_known = false; break; }
                 }
                 if all_known { return Ok(Known(v.clone())); }
                 let mut lowered = Vec::new();
-                for (n, f) in fields {
+                for (n, f) in &g.fields {
                     let h = self.host(s, source, borrow, args, f)?;
                     lowered.push((n.clone(), self.ensure(s, source, &h)?));
                 }
-                Ok(self.emit(s, source, ty, if borrow && storage_argument(ty) {
-                    C::Expr::Source_descriptor { name: name.clone(), ty: ty.clone(), args: lowered }
+                Ok(self.emit(s, source, &g.ty, if borrow && storage_argument(&g.ty) {
+                    C::Expr::Source_descriptor { name: g.name.clone(), ty: g.ty.clone(), args: lowered }
                 } else {
-                    C::Expr::Host_source { name: name.clone(), ty: ty.clone(), args: lowered }
+                    C::Expr::Host_source { name: g.name.clone(), ty: g.ty.clone(), args: lowered }
                 }))
             }
             Value::Record(fields) => {
@@ -2034,7 +2034,7 @@ impl Lowerer {
         }
         fn data_source(v: &Value) -> bool {
             match v {
-                Value::Source(..) | Value::Struct(_, Ty::Array(_), _) => true,
+                value if matches!(value, Value::Source(_)) || matches!(value, Value::Struct(g) if matches!(g.ty, Ty::Array(_))) => true,
                 Value::Record(fields) => fields.iter().any(|(_, v)| data_source(v)),
                 _ => false,
             }
@@ -2043,7 +2043,7 @@ impl Lowerer {
             let proto: Vec<(String, Value)> = largs.iter().enumerate().map(|(i, (n, value))| {
                 (n.clone(), match value {
                     Known(v) => v.clone(),
-                    _ => Value::Source("$core/argument".into(), self.type_of(value), vec![("index".into(), Value::Int(i as i64))]),
+                    _ => source_value("$core/argument", self.type_of(value), vec![("index".into(), Value::Int(i as i64))]),
                 })
             }).collect();
             (o.body)(&input::at_time(0.), &|_, _| Err(refusal_diag(name)), &proto).ok()
@@ -3042,7 +3042,7 @@ fn argument_index(residual: ResidualId, term: &Term) -> Option<i64> {
 }
 fn argument_value(v: &Value) -> Option<i64> {
     match v {
-        Value::Source(name, _, fields) if name == "$core/argument" => match fields.as_slice() {
+        Value::Source(g) if g.name == "$core/argument" => match g.fields.as_slice() {
             [(k, Value::Int(index))] if k == "index" => Some(*index),
             _ => None,
         },
@@ -3311,7 +3311,7 @@ mod tests {
             let ws = check_with(&ops, &format!(
                 "(workspace handles (graph g :context value [(selected : bool false) (geo : geometry (handle_geometry)) (img : image (handle_image)) (bad : geometry (handle_geometry))] (let* [tested (if selected {body} {body})] 0.)))"));
             let inputs = vec![("g".to_owned(), vec![
-                ("selected".to_owned(), Value::Source("test/selected".into(), Ty::Bool, vec![])),
+                ("selected".to_owned(), source_value("test/selected", Ty::Bool, vec![])),
                 ("geo".to_owned(), Value::Deferred(geometry.clone(), 11)),
                 ("img".to_owned(), Value::Deferred(image.clone(), 11)),
                 ("bad".to_owned(), Value::Deferred(geometry.clone(), 99)),
@@ -3497,7 +3497,7 @@ mod tests {
         let Value::Residual(r) = result_g(&evaluation) else { panic!("residual") };
         let view = E::Residual::residual_view(r).unwrap();
         let Some((_, Value::Residual(inner))) = view.bindings.iter().find(|(n, _)| n == "s").cloned() else { panic!("inner") };
-        let r = E::Residual::with_bindings(r, &view.term, &[("s".to_owned(), Value::Source("test/source".into(), Ty::Float, vec![("value".into(), Value::Residual(inner))]))]).unwrap();
+        let r = E::Residual::with_bindings(r, &view.term, &[("s".to_owned(), source_value("test/source", Ty::Float, vec![("value".into(), Value::Residual(inner))]))]).unwrap();
         let program = lowered(r);
         let mut host = false;
         C::iter(&mut |s| match &s.node {
@@ -3519,6 +3519,6 @@ mod tests {
         assert_eq!(with(Ok(None)), Ok(Value::Float(4.)));
         assert_eq!(with(Ok(Some(Value::Float(8.)))), Ok(Value::Float(9.)));
         assert_eq!(with(Ok(Some(Value::Int(8)))).expect_err("wrong declared type").code, "E_DATA_SOURCE");
-        assert_eq!(with(Ok(Some(Value::Source("unresolved".into(), Ty::Float, vec![])))).expect_err("unresolved").code, "E_DATA_SOURCE");
+        assert_eq!(with(Ok(Some(source_value("unresolved", Ty::Float, vec![])))).expect_err("unresolved").code, "E_DATA_SOURCE");
     }
 }

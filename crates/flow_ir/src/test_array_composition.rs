@@ -202,7 +202,7 @@ fn programs_error_cases() {
 }
 
 fn table_inputs(array_ty: &Ty) -> Vec<(String, Vec<(String, Value)>)> {
-    vec![("g".to_string(), vec![("data".to_string(), Value::Source("fixture/table".into(), array_ty.clone(), vec![]))])]
+    vec![("g".to_string(), vec![("data".to_string(), source_value("fixture/table", array_ty.clone(), vec![]))])]
 }
 
 /// Invariant tables may capture live host data; no prepared array survives a force. Source
@@ -217,7 +217,7 @@ fn source_checks(ty: Ty) {
     let resolve: ResolveArc = {
         let current = current.clone();
         Arc::new(move |v: &Value| match v {
-            Value::Source(name, _, _) if name == "fixture/table" => Ok(current.lock().unwrap().clone()),
+            Value::Source(g) if g.name == "fixture/table" => Ok(current.lock().unwrap().clone()),
             _ => panic!("unexpected source"),
         })
     };
@@ -301,7 +301,7 @@ fn argument_errors_precede_the_table() {
         "(let* [unused (array/concat data data)] (error \"E_INDEX\" \"after alias\"))",
         "(if (int/lt i 0) (array/nth (array/concat data data) 0) i)",
     ] {
-        let value = instantiated(&Ty::Int, Value::Source("fixture/order".into(), Ty::Array(Box::new(Ty::Int)), vec![]), body, vec![0, 1, 2]);
+        let value = instantiated(&Ty::Int, source_value("fixture/order", Ty::Array(Box::new(Ty::Int)), vec![]), body, vec![0, 1, 2]);
         let p = ok_ds(compile_region(residual(&value), true, None));
         let calls = Arc::new(Mutex::new(0));
         let resolve: ResolveArc = {

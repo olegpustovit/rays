@@ -166,14 +166,14 @@ fn unsupported_producer_and_dynamic_count_refuse() {
 }
 
 fn mask_inputs() -> Vec<(String, Vec<(String, Value)>)> {
-    vec![("g".to_string(), vec![("data".to_string(), Value::Source("fixture/mask".into(), Ty::Array(Box::new(Ty::Int)), vec![]))])]
+    vec![("g".to_string(), vec![("data".to_string(), source_value("fixture/mask", Ty::Array(Box::new(Ty::Int)), vec![]))])]
 }
 fn dynamic(body: &str) -> Value {
     dynamic_value(&mask_inputs(), "[(data : (array int) (array/int 0))]", body)
 }
 fn resolver(current: Arc<Mutex<Vec<i64>>>) -> ResolveArc {
     Arc::new(move |v: &Value| match v {
-        Value::Source(name, _, _) if name == "fixture/mask" => Ok(ints(&current.lock().unwrap())),
+        Value::Source(g) if g.name == "fixture/mask" => Ok(ints(&current.lock().unwrap())),
         _ => panic!("unexpected source"),
     })
 }
@@ -214,7 +214,7 @@ fn zipped_derived_arrays_have_no_origin() {
             let p = ok_ds(compile_region(r, fusion, Some(data_count_source())));
             assert!(crate::packed::count_origin(&p).is_none() && crate::packed::static_count(&p).is_none() && p.sources.len() == 2);
             let resolve: ResolveArc = Arc::new(|v: &Value| match v {
-                Value::Source(name, _, _) if name == "fixture/mask" => Ok(ints(&[1, 0, 1, 0])),
+                Value::Source(g) if g.name == "fixture/mask" => Ok(ints(&[1, 0, 1, 0])),
                 _ => panic!("unexpected source"),
             });
             let live = live_at(1.);

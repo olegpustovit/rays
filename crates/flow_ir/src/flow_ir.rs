@@ -16,7 +16,7 @@ use flow_check::workspace::{self as w, Path, Paths, Term};
 use flow_eval as e;
 use flow_syntax::context;
 use flow_syntax::ty::Ty;
-use flow_syntax::value::{self as v, ResidualId, Value};
+use flow_syntax::value::{self as v, ResidualId, Value, struct_value, source_value};
 use input::Frame;
 use rays_diagnostic::Diagnostic;
 use std::cell::RefCell;
@@ -503,7 +503,7 @@ fn scalar_uniforms(packed: &Packed) -> bool {
     packed.uniforms.iter().all(|u| match u {
         Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Vec2(..) | Value::Vec3(..) | Value::Vec4(..) | Value::Text(_) => true,
         Value::Residual(r) => e::Residual::residual_ty(*r).is_some_and(|ty| scalar(&ty)),
-        Value::Source(_, ty, _) | Value::Struct(_, ty, _) => scalar(ty),
+        Value::Struct(g) | Value::Source(g) => scalar(&g.ty),
         _ => false,
     })
 }
@@ -761,7 +761,7 @@ fn plain_value(value: &Value) -> bool {
     match value {
         Value::Fn(_) => false,
         Value::List(xs) => xs.iter().all(plain_value),
-        Value::Record(fs) | Value::Struct(_, _, fs) | Value::Source(_, _, fs) => fs.iter().all(|(_, x)| plain_value(x)),
+        v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_fields().unwrap().iter().all(|(_, x)| plain_value(x)),
         _ => true,
     }
 }
@@ -1255,7 +1255,7 @@ pub mod Executor {
                     let mut captured = e::Residual::residual_binding(residual, arena.name(binding.name));
                     for &field in arena.name_ids(binding.fields) {
                         captured = captured.and_then(|x| match x {
-                            Value::Record(fs) | Value::Struct(_, _, fs) => fs.iter().find(|(n, _)| n == arena.name(field)).map(|(_, x)| x.clone()),
+                            v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_fields().unwrap().iter().find(|(n, _)| n == arena.name(field)).map(|(_, x)| x.clone()),
                             _ => None,
                         });
                     }
@@ -1292,7 +1292,7 @@ pub mod Executor {
                                 .iter()
                                 .enumerate()
                                 .map(|(index, (name, ty, _))| {
-                                    (name.clone(), Value::Source("$core/argument".into(), ty.clone(), vec![("index".into(), Value::Int(index as i64))]))
+                                    (name.clone(), source_value("$core/argument", ty.clone(), vec![("index".into(), Value::Int(index as i64))]))
                                 })
                                 .collect();
                             let nested = e::Residual::with_bindings(residual, &arena.handle(body), &bindings).ok()?;
@@ -1323,7 +1323,7 @@ pub mod Executor {
                             .enumerate()
                             .map(|(index, param)| {
                                 let name = match arena.pattern(param.pattern) { flow_check::term_arena::PatternNode::Name(name) => arena.name(name).to_owned(), _ => unreachable!() };
-                                (name, Value::Source("$core/argument".into(), param_ty(index).expect("typed").clone(), vec![("index".into(), Value::Int(index as i64))]))
+                                (name, source_value("$core/argument", param_ty(index).expect("typed").clone(), vec![("index".into(), Value::Int(index as i64))]))
                             })
                             .collect();
                         let nested = e::Residual::with_bindings(residual, &arena.handle(function.body), &bindings).ok()?;
@@ -1356,7 +1356,7 @@ pub mod Executor {
                     self.unsupported_source(*r, &term)
                 }
                 Value::List(xs) => xs.iter().find_map(|x| self.unsupported_captured(x)),
-                Value::Record(fs) | Value::Struct(_, _, fs) | Value::Source(_, _, fs) => fs.iter().find_map(|(_, x)| self.unsupported_captured(x)),
+                v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_fields().unwrap().iter().find_map(|(_, x)| self.unsupported_captured(x)),
                 _ => None,
             }
         }
@@ -1390,8 +1390,8 @@ pub mod Executor {
                     for x in xs.iter() { self.validate_value(x)?; }
                     Ok(())
                 }
-                Value::Record(fs) | Value::Struct(_, _, fs) | Value::Source(_, _, fs) => {
-                    for (_, x) in fs { self.validate_value(x)?; }
+                v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => {
+                    for (_, x) in v.geo_fields().unwrap() { self.validate_value(x)?; }
                     Ok(())
                 }
                 Value::Fn(f) => {
@@ -1678,7 +1678,7 @@ pub mod Executor {
                     self.forced.lock().unwrap().insert(key, result.clone());
                     self.walk(&result)
                 }
-                Value::Source(..) | Value::Struct(_, Ty::Array(_), _) => {
+                value if matches!(value, Value::Source(_)) || matches!(value, Value::Struct(g) if matches!(g.ty, Ty::Array(_))) => {
                     if let Some(resident) = &self.o.resident {
                         if let Some(made) = core_exec::fill_constant(resident, value)? { return Ok(made); }
                     }
@@ -1687,7 +1687,7 @@ pub mod Executor {
                 }
                 Value::List(values) => Ok(Value::List(Arc::new(values.iter().map(|x| self.walk(x)).collect::<Result<_, _>>()?))),
                 Value::Record(fields) => Ok(Value::Record(self.walk_fields(fields)?)),
-                Value::Struct(name, ty, fields) => Ok(Value::Struct(name.clone(), ty.clone(), self.walk_fields(fields)?)),
+                Value::Struct(g) => Ok(struct_value(g.name.clone(), g.ty.clone(), self.walk_fields(&g.fields)?)),
                 other => Ok(other.clone()),
             }
         }
@@ -2857,7 +2857,7 @@ mod tests {
             | (Value::Vec2_array(xs), Value::Vec2_array(ys))
             | (Value::Vec3_array(xs), Value::Vec3_array(ys))
             | (Value::Vec4_array(xs), Value::Vec4_array(ys)) => xs.len() == ys.len() && xs.iter().zip(ys.iter()).all(|(a, b)| a.to_bits() == b.to_bits()),
-            (Value::Record(fs), Value::Record(gs)) | (Value::Struct(_, _, fs), Value::Struct(_, _, gs)) => {
+            (Value::Record(fs), Value::Record(gs)) | (Value::Struct(a), Value::Struct(b)) => {
                 fs.len() == gs.len() && fs.iter().zip(gs.iter()).all(|((n, a), (m, b))| n == m && same_bits(a, b))
             }
             (Value::Fn(_), Value::Fn(_)) => true,
@@ -3305,7 +3305,7 @@ mod tests {
                     || has_fields(&view.bindings)
             }
             Value::List(xs) => xs.iter().any(has_region),
-            Value::Record(fs) | Value::Struct(_, _, fs) | Value::Source(_, _, fs) => has_fields(fs),
+            v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_fields().unwrap().iter().any(has_region),
             Value::Fn(f) => has_fields(&e::Residual::function_bindings(*f)),
             _ => false,
         }

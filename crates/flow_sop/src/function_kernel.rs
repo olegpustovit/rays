@@ -43,7 +43,7 @@ fn storage(values: &[Value]) -> i64 {
             Value::Float_array(xs) | Value::Vec2_array(xs) | Value::Vec3_array(xs) | Value::Vec4_array(xs) => xs.len() as i64 * 8,
             Value::Text(s) => s.len() as i64,
             Value::List(xs) => xs.iter().fold(0, |bytes, x| add_bytes(bytes, visit(seen, x))),
-            Value::Record(fs) | Value::Struct(_, _, fs) => fields(seen, fs),
+            v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_v.geo_fields().unwrap()().unwrap()(seen, v.geo_fields().unwrap()),
             Value::Fn(f) if seen.functions.insert(*f) => fields(seen, &e::Residual::function_bindings(*f)),
             Value::Residual(r) if seen.residuals.insert(*r) => match e::Residual::residual_view(*r) {
                 Ok(view) => fields(seen, &view.bindings),

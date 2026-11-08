@@ -17,7 +17,7 @@ use flow_eval::{Live, State};
 use flow_syntax::context;
 use flow_syntax::packed_ops::{self, Binary, Comparison, Conversion, Integer, Unary};
 use flow_syntax::ty::Ty;
-use flow_syntax::value::{self, ResidualId, Value};
+use flow_syntax::value::{self, ResidualId, Value, struct_value, source_value};
 use rays_diagnostic::Diagnostic;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -3929,7 +3929,7 @@ fn force_values(run: &Run, value: &Value, residual: &dyn Fn(ResidualId) -> Resul
             let forced = residual(*r)?;
             force_values(run, &forced, residual)
         }
-        Value::Source(..) | Value::Struct(_, Ty::Array(_), _) => {
+        value if matches!(value, Value::Source(_)) || matches!(value, Value::Struct(g) if matches!(g.ty, Ty::Array(_))) => {
             let forced = reference(value)?;
             force_values(run, &forced, residual)
         }
@@ -3947,12 +3947,12 @@ fn force_values(run: &Run, value: &Value, residual: &dyn Fn(ResidualId) -> Resul
             }
             Ok(Value::Record(out))
         }
-        Value::Struct(name, ty, fields) => {
-            let mut out = Vec::with_capacity(fields.len());
-            for (field, v) in fields {
+        Value::Struct(g) => {
+            let mut out = Vec::with_capacity(g.fields.len());
+            for (field, v) in &g.fields {
                 out.push((field.clone(), force_values(run, v, residual)?));
             }
-            Ok(Value::Struct(name.clone(), ty.clone(), out))
+            Ok(struct_value(g.name.clone(), g.ty.clone(), out))
         }
         other => Ok(other.clone()),
     }
@@ -4178,8 +4178,8 @@ pub mod host {
 
     fn argument_index(v: &Value) -> Result<Option<(Ty, i64)>, Diagnostic> {
         match v {
-            Value::Source(name, ty, fields) if name == "$core/argument" => match fields.as_slice() {
-                [(f, Value::Int(index))] if f == "index" => Ok(Some((ty.clone(), *index))),
+            Value::Source(g) if g.name == "$core/argument" => match g.fields.as_slice() {
+                [(f, Value::Int(index))] if f == "index" => Ok(Some((g.ty.clone(), *index))),
                 _ => Err(value::fail("E_CORE_ARGUMENT", "Invalid compiled argument declaration.")),
             },
             _ => Ok(None),
@@ -4215,8 +4215,8 @@ pub mod host {
                         value(v, types, visited)?;
                     }
                 }
-                Value::Record(fields) | Value::Struct(_, _, fields) | Value::Source(_, _, fields) => {
-                    for (_, v) in fields {
+                v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => {
+                    for (_, v) in v.geo_fields().unwrap() {
                         value(v, types, visited)?;
                     }
                 }
@@ -4882,7 +4882,7 @@ pub mod host {
         // placeholder, bound there as the table, never read back
         let held = |value: &Value| -> Option<Value> {
             match (&o.resident, value) {
-                (Some(resident), Value::Source(..) | Value::Struct(_, Ty::Array(_), _)) => resident(value).map(|(p, _)| p),
+                (Some(resident), value) if matches!(value, Value::Source(_)) || matches!(value, Value::Struct(g) if matches!(g.ty, Ty::Array(_))) => resident(value).map(|(p, _)| p),
                 _ => None,
             }
         };

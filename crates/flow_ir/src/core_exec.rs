@@ -16,7 +16,7 @@ use flow_check::workspace::{DiagnosticPolicy, Paths};
 use flow_eval as e;
 use flow_syntax::context;
 use flow_syntax::ty::Ty;
-use flow_syntax::value::{self as v, ResidualId, Value};
+use flow_syntax::value::{self as v, ResidualId, Value, struct_value, source_value};
 use input::Frame;
 use rays_diagnostic::Diagnostic;
 use std::collections::{BTreeMap, BTreeSet};
@@ -74,20 +74,20 @@ pub fn host_value(resident: &Resident, value: &Value) -> Result<Value, Diagnosti
     Ok(match value {
         Value::Record(fs) => Value::Record(fields(resident, fs)?),
         Value::List(xs) => Value::List(Arc::new(xs.iter().map(|x| host_value(resident, x)).collect::<Result<_, _>>()?)),
-        Value::Source(n, t, fs) => Value::Source(n.clone(), t.clone(), fields(resident, fs)?),
-        Value::Struct(n, t, fs) => Value::Struct(n.clone(), t.clone(), fields(resident, fs)?),
+        Value::Source(g) => source_value(g.name.clone(), g.ty.clone(), fields(resident, &g.fields)?),
+        Value::Struct(g) => struct_value(g.name.clone(), g.ty.clone(), fields(resident, &g.fields)?),
         other => (resident.finish)(other)?,
     })
 }
 
 /// A validated constant-array descriptor can be filled by the resident backend directly.
 pub fn fill_constant(resident: &Resident, value: &Value) -> Result<Option<Value>, Diagnostic> {
-    let Value::Source(name, ty, fields) = value else { return Ok(None) };
-    let Some(operation) = name.strip_prefix("$core/constant-array/") else { return Ok(None) };
-    let Value::Source(_, actual, fields) = op::constant_array_descriptor(operation, fields)? else { unreachable!() };
-    if *ty != actual { return Err(v::fail("E_ARRAY_TYPE", "Constant array descriptor has the wrong declared type.")); }
-    match fields.as_slice() {
-        [(a, Value::Int(length)), (b, initial)] if a == "count" && b == "value" => (resident.fill)(ty, *length, initial),
+    let Value::Source(g) = value else { return Ok(None) };
+    let Some(operation) = g.name.strip_prefix("$core/constant-array/") else { return Ok(None) };
+    let Value::Source(desc) = op::constant_array_descriptor(operation, &g.fields)? else { unreachable!() };
+    if g.ty != desc.ty { return Err(v::fail("E_ARRAY_TYPE", "Constant array descriptor has the wrong declared type.")); }
+    match desc.fields.as_slice() {
+        [(a, Value::Int(length)), (b, initial)] if a == "count" && b == "value" => (resident.fill)(&desc.ty, *length, initial),
         _ => unreachable!("constant_array_descriptor validates the fields"),
     }
 }
@@ -100,7 +100,7 @@ fn kept_value(resident: &Resident, value: &Value) -> Result<Value, Diagnostic> {
     Ok(match value {
         Value::Record(fs) => Value::Record(fields(resident, fs)?),
         Value::List(xs) => Value::List(Arc::new(xs.iter().map(|x| kept_value(resident, x)).collect::<Result<_, _>>()?)),
-        Value::Struct(n, t, fs) => Value::Struct(n.clone(), t.clone(), fields(resident, fs)?),
+        Value::Struct(g) => struct_value(g.name.clone(), g.ty.clone(), fields(resident, &g.fields)?),
         other => match (resident.keep)(other)? {
             Some(kept) => kept,
             None => (resident.finish)(other)?,
@@ -785,7 +785,7 @@ fn builds(statements: &[Statement]) -> bool {
 /// state, is an input the loop's key does not see
 fn hidden(frame: bool, value: &Value) -> bool {
     match value {
-        Value::Source(name, _, _) => name != "$core/argument",
+        Value::Source(g) => g.name != "$core/argument",
         Value::Residual(r) => {
             (!frame && e::frame_dependent(value))
                 || e::state_dependent(value)
@@ -793,7 +793,7 @@ fn hidden(frame: bool, value: &Value) -> bool {
         }
         Value::Deferred(..) => true,
         Value::List(xs) => xs.iter().any(|x| hidden(frame, x)),
-        Value::Record(fs) | Value::Struct(_, _, fs) => fs.iter().any(|(_, x)| hidden(frame, x)),
+        v @ (Value::Record(_) | Value::Struct(_) | Value::Source(_)) => v.geo_fields().unwrap().iter().any(|(_, x)| hidden(frame, x)),
         _ => false,
     }
 }
@@ -1488,12 +1488,12 @@ impl Ctx {
                         None => Ok(None),
                         Some(offer) => {
                             let fields = args.iter().map(|(n, i)| (n.clone(), st.values[ix(*i)].clone())).collect();
-                            offer(&Value::Source(name.clone(), ty.clone(), fields))
+                            offer(&source_value(name.clone(), ty.clone(), fields))
                         }
                     };
                     match offered? {
                         Some(value) => {
-                            if matches!(&value, Value::Source(..) | Value::Struct(_, Ty::Array(_), _)) {
+                            if matches!(&value, Value::Source(_)) || matches!(&value, Value::Struct(g) if matches!(g.ty, Ty::Array(_))) {
                                 return Err(v::fail("E_DATA_SOURCE", "The host returned an unresolved data source."));
                             }
                             if ty != Ty::Any && v::ty_of(&value) != ty {
@@ -1511,7 +1511,7 @@ impl Ctx {
                             if name == "$core/complete" && ty == flow_syntax::ty::geometry() && given.len() == 1 && given[0].0 == "value" && given[0].1 == Value::No_geo {
                                 Ok(Value::No_geo)
                             } else {
-                                let value = Value::Source(name.clone(), ty.clone(), given);
+                                let value = source_value(name.clone(), ty.clone(), given);
                                 e::Host::force_reference(&value, &st.live, None, None, st.resolve.clone())
                             }
                         }
@@ -1533,7 +1533,7 @@ impl Ctx {
                         }
                         Ok(value)
                     } else {
-                        Ok(Value::Source(name.clone(), ty.clone(), given))
+                        Ok(source_value(name.clone(), ty.clone(), given))
                     }
                 })
             }
@@ -1962,8 +1962,8 @@ impl Ctx {
                                     DiagnosticPolicy::First => "first",
                                     DiagnosticPolicy::RangeLast => "range-last",
                                 };
-                                let source = Value::Source(
-                                    "$core/diagnostic_index".into(),
+                                let source = source_value(
+                                    "$core/diagnostic_index",
                                     Ty::Int,
                                     vec![("rows".into(), value.clone()), ("policy".into(), text_value(policy))],
                                 );
