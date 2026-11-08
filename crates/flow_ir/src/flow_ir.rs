@@ -346,7 +346,7 @@ pub mod Profile {
             refusal: Vec::new(),
         }));
         CURRENT.with(|c| {
-            if let Some((_, stack)) = c.borrow_mut().as_mut() { stack.insert(0, pending.clone()); }
+            if let Some((_, stack)) = c.borrow_mut().as_mut() { stack.push(pending.clone()); }
         });
         let site = site.clone();
         Arc::new(move |head, tail, completed| {
@@ -380,7 +380,7 @@ pub mod Profile {
 
     /// Run a static-map attempt at `tier`: `run` is given a function to record a refusal.
     pub fn attempt(tier: Tier, run: &mut dyn FnMut(&dyn Fn(Vec<Diagnostic>)) -> Option<Value>) -> Option<Value> {
-        let current = CURRENT.with(|c| c.borrow().as_ref().and_then(|(p, stack)| stack.first().map(|s| (p.clone(), s.clone()))));
+        let current = CURRENT.with(|c| c.borrow().as_ref().and_then(|(p, stack)| stack.last().map(|s| (p.clone(), s.clone()))));
         match current {
             Some((profile, pending)) => {
                 let began = (profile.clock)();
@@ -407,7 +407,7 @@ pub mod Profile {
     pub fn deferred() {
         CURRENT.with(|c| {
             if let Some((_, stack)) = c.borrow().as_ref() {
-                if let Some(p) = stack.first() { p.lock().unwrap().deferred = true; }
+                if let Some(p) = stack.last() { p.lock().unwrap().deferred = true; }
             }
         });
     }
@@ -696,7 +696,7 @@ impl Walker {
         let form = arena.syntax().row(arena.row(id).form);
         let entries = self.t.callable_owners.entry(form.id).or_default();
         if !entries.iter().any(|(key, path)| key_same(key, form) && path == owner) {
-            entries.insert(0, (key_of_form(form), owner.clone()));
+            entries.push((key_of_form(form), owner.clone()));
         }
     }
 
@@ -720,7 +720,7 @@ impl Walker {
         let same = |x: &(FormKey, Path, Paths)| key_same(&x.0, form) && x.1 == *owner;
         let mut merged = entries.iter().position(same).map(|i| entries.remove(i).2).unwrap_or_default();
         merged.extend(producers);
-        entries.insert(0, (key_of_form(form), owner.clone(), merged));
+        entries.push((key_of_form(form), owner.clone(), merged));
     }
 
     fn walk(&mut self, owner: &Path, arena: &Arc<flow_check::term_arena::TermArena>, id: flow_check::term_arena::TermId) {
@@ -769,7 +769,7 @@ impl Walker {
                         let paths = self.called_seen.entry(identity).or_default();
                         if !paths.contains(&call_owner) { paths.push(call_owner.clone()); }
                     } else {
-                        walked.insert(0, (body, call_owner.clone()));
+                        walked.push((body, call_owner.clone()));
                         self.walk(&call_owner, arena, body_id);
                     }
                 }
@@ -937,7 +937,7 @@ impl Qualifier {
                     .collect();
                 if reasons.is_empty() {
                     if let Some(key) = &key {
-                        self.accepted.lock().unwrap().entry(key.clone()).or_default().insert(0, (path.clone(), view.term.clone()));
+                        self.accepted.lock().unwrap().entry(key.clone()).or_default().push((path.clone(), view.term.clone()));
                     }
                 }
                 let mut outcomes = self.outcomes.lock().unwrap();
@@ -1020,7 +1020,7 @@ pub fn qualify_workspace(options: &QualifyOptions, workspace: &w::Workspace) -> 
     let gpu = options.gpu.clone().unwrap_or_else(Gpu::default);
     let mut roots: HashMap<i64, Vec<(FormKey, Path)>> = HashMap::new();
     for (form, path) in &workspace.packed_roots {
-        roots.entry(form.id).or_default().insert(0, (key_of_form(form), path.clone()));
+        roots.entry(form.id).or_default().push((key_of_form(form), path.clone()));
     }
     let mut walker = Walker {
         collect: true,
@@ -1103,9 +1103,8 @@ pub fn qualify_workspace(options: &QualifyOptions, workspace: &w::Workspace) -> 
             w::PackedForm::Refused(reasons) => reasons.clone(),
             w::PackedForm::Candidate(producers) => producers.iter().flat_map(|p| reasons(p)).collect(),
         };
-        if refused.is_empty() { approx.insert(path.clone()); } else { approx_reasons.insert(0, (path.clone(), refused)); }
+        if refused.is_empty() { approx.insert(path.clone()); } else { approx_reasons.push((path.clone(), refused)); }
     }
-    approx_reasons.reverse();
     let mut qualified = workspace.clone();
     qualified.approx = approx;
     qualified.approx_reasons = approx_reasons.into();
@@ -1223,7 +1222,7 @@ pub mod Executor {
             let inline = std::rc::Rc::new(RefCell::new(Vec::new()));
             let hook = {
                 let inline = inline.clone();
-                std::rc::Rc::new(move |r: ResidualId| inline.borrow_mut().insert(0, (r.1, r.0))) as core_lower::LoweredHook
+                std::rc::Rc::new(move |r: ResidualId| inline.borrow_mut().push((r.1, r.0))) as core_lower::LoweredHook
             };
             let core = core_lower::lower(None, trace.clone(), true, None, Some(hook), residual);
             let ids = inline.borrow().clone();
@@ -2209,8 +2208,8 @@ pub mod Executor {
                 store: Box::new(move |(b, _, p, kernel)| {
                     let mut k = kernels2.lock().unwrap();
                     k.retain(|(f, _, q, _)| !(*f == gpu_fast && Arc::ptr_eq(&q.code, &p.code)));
-                    k.insert(0, (gpu_fast, b, p, kernel));
-                    k.truncate(64);
+                    k.push((gpu_fast, b, p, kernel));
+                    if k.len() > 64 { k.remove(0); }
                 }),
             };
             let result = display_packed(state, resolve, Some(&source), &self.gpu, &self.approx, true, &self.profile, &cache, false, packed_region, live)?;
@@ -2249,8 +2248,8 @@ pub mod Executor {
                 None => {
                     let kernel = backend.prepare(gpu.fast, packed_region)?;
                     let mut kernels = self.kernels.lock().unwrap();
-                    kernels.insert(0, (gpu.fast, key, backend.clone(), kernel.clone()));
-                    kernels.truncate(16);
+                    kernels.push((gpu.fast, key, backend.clone(), kernel.clone()));
+                    if kernels.len() > 16 { kernels.remove(0); }
                     kernel
                 }
             };
@@ -2469,7 +2468,7 @@ pub mod Executor {
                             let mut h = held.lock().unwrap();
                             if !h.1.iter().any(|old| old == v0) {
                                 h.0 = true;
-                                h.1.insert(0, v0.clone());
+                                h.1.push(v0.clone());
                                 let width = match v0 { Value::Vec2_array(_) => 2, Value::Vec3_array(_) => 3, Value::Vec4_array(_) => 4, _ => 1 };
                                 h.2 += Cost::readback(Some(&gpu), *count, width);
                             }
@@ -2673,7 +2672,7 @@ mod tests {
                 Value::Vec3_array(_) => Value::Vec3_array(Arc::new(vec![-999.0; count * 3])),
                 _ => panic!("unexpected device value"),
             };
-            self.held.lock().unwrap().insert(0, (placeholder.clone(), value.clone()));
+            self.held.lock().unwrap().push((placeholder.clone(), value.clone()));
             placeholder
         }
     }

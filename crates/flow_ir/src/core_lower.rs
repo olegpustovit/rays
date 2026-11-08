@@ -1,8 +1,8 @@
 //! Port of lib/flow_ir/core_lower.ml: frame lowering of residuals into structured core programs.
 //! OCaml exceptions (`Unsupported`, `Diagnostic.Error`) are the `Stop` error; statement lists are
-//! built by pushing (the OCaml code prepends and reverses); a scope is a statement list with its
+//! built by pushing; a scope is a statement list with its
 //! cache, copied or fresh exactly where the OCaml code copies or creates a Hashtbl.
-//! Argument evaluation order follows OCaml (right to left in literal lists) wherever it numbers locals.
+//! Locals are numbered in source order.
 #![allow(non_camel_case_types, non_snake_case, clippy::too_many_arguments)]
 
 use crate::core_ir as C;
@@ -2618,15 +2618,15 @@ impl Lowerer {
                 let mut b = Vec::new();
                 for c in ["x", "y", "z"] { b.push(self.field(s, source, &Ty::Float, &bv, c)?); }
                 let (x, y, z, u, v, w) = (&a[0], &a[1], &a[2], &b[0], &b[1], &b[2]);
-                // OCaml evaluates the list literals right to left: the later operand lowers first
+                // components in x, y, z order
                 let component = |l: &mut Lowerer, sc: &mut Scope, a: &Lowered, b: &Lowered, c: &Lowered, d: &Lowered| -> R<Lowered> {
                     let ab = l.calc(sc, source, &Ty::Float, PO::Binary::Mul, a, b)?;
                     let neg = l.calc(sc, source, &Ty::Float, PO::Binary::Mul, &float(-1.), c)?;
                     l.primitive(sc, source, &Ty::Float, C::Primitive::Fma, vec![("a", neg), ("b", d.clone()), ("c", ab)])
                 };
-                let third = component(self, s, x, v, y, u)?;
-                let second = component(self, s, z, u, x, w)?;
                 let first = component(self, s, y, w, z, v)?;
+                let second = component(self, s, z, u, x, w)?;
+                let third = component(self, s, x, v, y, u)?;
                 self.vec(s, source, &[first, second, third])
             }
             "length" | "normalize" => {

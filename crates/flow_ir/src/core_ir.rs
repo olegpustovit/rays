@@ -29,7 +29,7 @@ pub enum Literal {
     Record(Vec<(String, Literal)>),
     Array { width: i64, data: Arc<Vec<f64>> },
     Int_array(Arc<Vec<i64>>),
-    Text_array(Arc<Vec<Vec<u8>>>),
+    Text_array(Arc<rays_math::text_array::TextArray>),
     Empty_geometry,
 }
 
@@ -702,7 +702,7 @@ pub mod Region {
 
     fn controls_valid(code: &[Instruction], outputs: &[Vec<i64>]) -> bool {
         let n = code.len();
-        let mut scopes: Vec<Vec<i64>> = vec![Vec::new(); n]; // head of an OCaml list = last element
+        let mut scopes: Vec<Vec<i64>> = vec![Vec::new(); n];
         let mut closed = vec![false; n];
         let mut active: Vec<i64> = Vec::new();
         let mut valid = true;

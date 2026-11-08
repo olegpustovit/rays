@@ -1,8 +1,7 @@
 //! Port of lib/flow_ir/core_draw.ml: the lowering rules of the draw operators, and the device
 //! placement and sibling fusion of a lowered program's mark sets. A rule names the inputs it needs,
 //! supplies the defaults (white ink and fill, width 1) and writes statements; every check of a
-//! value is the executor's. Argument order of the OCaml record/list literals (right to left) decides
-//! which default numbers its constant first; it is kept here.
+//! value is the executor's.
 #![allow(non_camel_case_types, non_snake_case)]
 
 use crate::core_ir as C;
@@ -429,17 +428,15 @@ fn rule(ctx: &mut dyn DrawContext, plan: &E::Plan, n: &E::Node, source: &C::Sour
         "draw/line" | "draw/lines" => {
             let from = need("from")?;
             let to = need("to")?;
-            // the list literal is built right to left: width before color
-            let width = default(ctx, source, locals, "width", &Value::Float(1.))?;
             let color = default(ctx, source, locals, "color", &white)?;
+            let width = default(ctx, source, locals, "width", &Value::Float(1.))?;
             let a = args(&[("from", from), ("to", to), ("color", color), ("width", width)]);
             if n.kind == "draw/line" { emit(ctx, C::Draw::Mark { mark: C::Mark::Line, args: a }); } else { emit(ctx, C::Draw::Batch { mark: C::Mark::Line, args: a }); }
         }
         "draw/circles" => {
             let positions = need("positions")?;
-            // `[...] @ style ()`: the style lowers first
-            let st = style(ctx, source, locals, &white)?;
             let radius = default(ctx, source, locals, "radius", &Value::Float(1.))?;
+            let st = style(ctx, source, locals, &white)?;
             let mut a = args(&[("positions", positions), ("radius", radius)]);
             a.extend(st);
             emit(ctx, C::Draw::Batch { mark: C::Mark::Circle, args: a });
@@ -459,9 +456,8 @@ fn rule(ctx: &mut dyn DrawContext, plan: &E::Plan, n: &E::Node, source: &C::Sour
         "draw/text" => {
             let at = need("at")?;
             let text = need("text")?;
-            // record fields are built right to left: size before ink
-            let size = default(ctx, source, locals, "size", &Value::Int(16))?;
             let ink = default(ctx, source, locals, "color", &white)?;
+            let size = default(ctx, source, locals, "size", &Value::Int(16))?;
             emit(ctx, C::Draw::Text_run { at, text, ink, size });
         }
         "draw/image" => {
@@ -470,16 +466,16 @@ fn rule(ctx: &mut dyn DrawContext, plan: &E::Plan, n: &E::Node, source: &C::Sour
                 Some(_) => return Err(refuse("draw_image".into())),
                 None => return Err(Stop::Missing(format!("{} needs image.", n.kind))),
             };
-            let angle = default(ctx, source, locals, "angle", &Value::Float(0.))?;
-            let scale = default(ctx, source, locals, "scale", &Value::Float(1.))?;
             let at = default(ctx, source, locals, "at", &Value::Vec3(0., 0., 0.))?;
+            let scale = default(ctx, source, locals, "scale", &Value::Float(1.))?;
+            let angle = default(ctx, source, locals, "angle", &Value::Float(0.))?;
             emit(ctx, C::Draw::Image { source: image, at, scale, angle });
         }
         "draw/rounded_rect" => {
             let at = need("at")?;
             let size = need("size")?;
-            let st = style(ctx, source, locals, &white)?;
             let radius = default(ctx, source, locals, "radius", &Value::Int(0))?;
+            let st = style(ctx, source, locals, &white)?;
             let mut a = args(&[("at", at), ("size", size), ("radius", radius)]);
             a.extend(st);
             emit(ctx, C::Draw::Path { path: C::PathKind::Rounded_rect, args: a });

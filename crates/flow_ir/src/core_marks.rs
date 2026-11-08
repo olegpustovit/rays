@@ -127,9 +127,8 @@ fn point(value: &Value) -> Result<(i64, i64), Diagnostic> {
             Ok(x as i64)
         }
     };
-    // OCaml evaluates the tuple right to left.
-    let y = int(y)?;
     let x = int(x)?;
+    let y = int(y)?;
     Ok((x, y))
 }
 
@@ -258,9 +257,8 @@ fn mark(sink: &mut Sink, batch: bool, kind: Mark, raw: &[(String, i64)], values:
             Some(value) => colour_attr(sink, count, value),
             None => Ok(ColorAttr::Constant(0)),
         };
-        // OCaml evaluates the tuple right to left.
-        let stroke = get("stroke")?;
         let fill = get("fill")?;
+        let stroke = get("stroke")?;
         Ok((fill, stroke))
     };
     let n_of_positions = |sink: &mut Sink, key: &str| -> Result<(i64, PairAttr), Diagnostic> {
@@ -352,9 +350,8 @@ fn mark(sink: &mut Sink, batch: bool, kind: Mark, raw: &[(String, i64)], values:
                 PairAttr::Constant(pair(arg("to")?)?)
             };
             check_colors(n, &args)?;
-            // OCaml evaluates record fields right to left: the width, then the stroke.
-            let stroke_width = ScalarAttr::Constant(v::num(arg("width")?)?);
             let stroke = colour_attr(sink, n, arg("color")?)?;
+            let stroke_width = ScalarAttr::Constant(v::num(arg("width")?)?);
             push(sink, Entry::MarkSet { count: n, kind: Kind::Line { position, end, stroke, stroke_width } })
         }
     }
@@ -381,9 +378,8 @@ fn path(sink: &mut Sink, kind: PathKind, raw: &[(String, i64)], values: &[Value]
     match kind {
         PathKind::Polygon => {
             let points = points()?;
-            // `~fill ~stroke` labelled arguments evaluate right to left.
-            let stroke = opt("stroke")?;
             let fill = opt("fill")?;
+            let stroke = opt("stroke")?;
             geometry(sink, shape2::polygon(&points, fill, stroke))
         }
         PathKind::Polyline => {
@@ -435,9 +431,8 @@ pub fn compile(draw: &Draw) -> Compiled {
             };
             if !text.is_empty() {
                 let (x, y) = point(&vals[at as usize])?;
-                // record fields evaluate right to left: the colour, then the size
-                let color = ink(&vals[i as usize])?;
                 let size = v::int_of(&vals[size as usize])?;
+                let color = ink(&vals[i as usize])?;
                 push(sink, Entry::Text { x, y, size, color, text })?;
             }
             Ok(())

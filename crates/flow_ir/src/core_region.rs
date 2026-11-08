@@ -3,9 +3,7 @@
 //!
 //! OCaml exceptions: `Unsupported` / `Compile_refused d` / `Diagnostic.Error d` are the variants of
 //! [`Stop`]; `Invalid_argument` (an out-of-bounds register read, `Option.get`) is `Stop::Invalid`.
-//! OCaml evaluates function arguments, tuples, constructor and array-literal fields right to left;
-//! every place where that order changes the numbering of emitted registers is written out as
-//! explicit lets in OCaml's actual order.
+//! Registers are numbered in source order: first operand first.
 use crate::core_ir::Region::{
     self as R, CountSource, Instruction as I, Iteration, LiveFloat, LiveInt, Loop, Parts, Projection, RegionResult, Stage,
 };
@@ -165,7 +163,6 @@ fn integer_work(instruction: &I) -> bool {
 }
 
 fn paths(view: &Residual::View, sites: &mut Vec<(i64, Path, Vec<i64>)>, t: &Term) {
-    // `sites` is the OCaml list reversed: its head is the last element.
     if let Some(path) = t.path() {
         sites.push((view.instance, path.iter().map(|name| t.name(*name).to_owned()).collect(), view.iter.clone()));
     }
@@ -944,9 +941,7 @@ impl Lower {
             return Err(Stop::Refused(diag(Some(control.span.clone()), "E_PACKED_TYPE", "A carried loop requires at least one scalar leaf.")));
         }
         let header = self.emit(I::Loop_begin(control))?;
-        let previous = self.control_scope.clone();
-        self.control_scope.insert(0, header);
-        // `scope := header :: previous`: the head is the most recent; keep the OCaml order.
+        self.control_scope.push(header);
         let body = (|| -> Res<()> {
             let mut component = 0;
             let carried = {
@@ -962,7 +957,7 @@ impl Lower {
             self.loop_finishes.insert(header, finish);
             Ok(())
         })();
-        self.control_scope = previous;
+        self.control_scope.pop();
         body?;
         let mut component = 0;
         let me: &mut Lower = self;
@@ -974,8 +969,7 @@ impl Lower {
     }
 
     fn hsl(&mut self, env: &Env, owner: &Term, args: &[Field]) -> Res<Expression> {
-        // Flow.Op.hsl_channels, step for step, with a select per hue sector. Emission order is
-        // OCaml's right-to-left argument order.
+        // Flow.Op.hsl_channels, step for step, with a select per hue sector.
         let arg = |me: &mut Lower, name: &str| -> Res<i64> {
             let term = owner.child(args.iter().find(|field| owner.name(field.name) == name).ok_or_else(|| invalid("Not_found"))?.term);
             let e = me.expression(env, &term)?;
@@ -987,15 +981,15 @@ impl Lower {
         let l = arg(self, "l")?;
         // unit v = bin Max (k 0.) (bin Min (k 1.) v)
         fn unit(me: &mut Lower, v: i64) -> Res<i64> {
+            let c0 = me.k(0.0)?;
             let c1 = me.k(1.0)?;
             let lo = me.bin(Binary::Min, c1, v)?;
-            let c0 = me.k(0.0)?;
             me.bin(Binary::Max, c0, lo)
         }
         // hue = bin Div (bin Mod h (k 360.)) (k 60.)
-        let c60 = self.k(60.0)?;
         let c360 = self.k(360.0)?;
         let modulo = self.bin(Binary::Mod, h, c360)?;
+        let c60 = self.k(60.0)?;
         let hue = self.bin(Binary::Div, modulo, c60)?;
         let s = unit(self, s)?;
         let l = unit(self, l)?;
@@ -1003,33 +997,32 @@ impl Lower {
         let c1 = self.k(1.0)?;
         let c2 = self.k(2.0)?;
         let twice = self.bin(Binary::Mul, c2, l)?;
-        let diff = self.bin(Binary::Sub, twice, c1)?;
-        let abs1 = self.emit(I::Unary(Unary::Abs, diff))?;
         let c1b = self.k(1.0)?;
-        let rest = self.bin(Binary::Sub, c1b, abs1)?;
+        let diff = self.bin(Binary::Sub, twice, c1b)?;
+        let abs1 = self.emit(I::Unary(Unary::Abs, diff))?;
+        let rest = self.bin(Binary::Sub, c1, abs1)?;
         let chroma = self.bin(Binary::Mul, rest, s)?;
         // x = bin Mul chroma (bin Sub (k 1.) (abs (bin Sub (bin Mod hue (k 2.)) (k 1.))))
         let c1c = self.k(1.0)?;
         let c2b = self.k(2.0)?;
         let hm = self.bin(Binary::Mod, hue, c2b)?;
-        let hd = self.bin(Binary::Sub, hm, c1c)?;
-        let abs2 = self.emit(I::Unary(Unary::Abs, hd))?;
         let c1d = self.k(1.0)?;
-        let inv = self.bin(Binary::Sub, c1d, abs2)?;
+        let hd = self.bin(Binary::Sub, hm, c1d)?;
+        let abs2 = self.emit(I::Unary(Unary::Abs, hd))?;
+        let inv = self.bin(Binary::Sub, c1c, abs2)?;
         let x = self.bin(Binary::Mul, chroma, inv)?;
         let zero = self.k(0.0)?;
         let sector = |me: &mut Lower, c: [i64; 6]| -> Res<i64> {
             // pick limit yes no = emit (Select (bin Lt hue (k limit), yes, no)), nested to the right.
-            fn pick(me: &mut Lower, hue: i64, limit: f64, yes: i64, no: i64) -> Res<i64> {
-                let limit_register = me.k(limit)?;
+            fn pick(me: &mut Lower, hue: i64, c: &[i64]) -> Res<i64> {
+                let [yes, rest @ ..] = c else { unreachable!() };
+                if rest.is_empty() { return Ok(*yes); }
+                let limit_register = me.k((7 - c.len()) as f64)?;
                 let condition = me.bin(Binary::Lt, hue, limit_register)?;
-                me.emit(I::Select(condition, yes, no))
+                let no = pick(me, hue, rest)?;
+                me.emit(I::Select(condition, *yes, no))
             }
-            let p5 = pick(me, hue, 5.0, c[4], c[5])?;
-            let p4 = pick(me, hue, 4.0, c[3], p5)?;
-            let p3 = pick(me, hue, 3.0, c[2], p4)?;
-            let p2 = pick(me, hue, 2.0, c[1], p3)?;
-            pick(me, hue, 1.0, c[0], p2)
+            pick(me, hue, &c)
         };
         // m = bin Sub l (bin Div chroma (k 2.))
         let c2c = self.k(2.0)?;
@@ -1037,24 +1030,23 @@ impl Lower {
         let m = self.bin(Binary::Sub, l, half)?;
         let byte = |me: &mut Lower, v: i64| -> Res<i64> {
             // bin Div (float (int (bin Add (bin Mul (unit (bin Add v m)) (k 255.)) (k 0.5)))) (k 255.)
-            let c255 = me.k(255.0)?;
-            let c05 = me.k(0.5)?;
-            let c255b = me.k(255.0)?;
             let sum = me.bin(Binary::Add, v, m)?;
             let clamped = unit(me, sum)?;
-            let scaled = me.bin(Binary::Mul, clamped, c255b)?;
+            let c255 = me.k(255.0)?;
+            let scaled = me.bin(Binary::Mul, clamped, c255)?;
+            let c05 = me.k(0.5)?;
             let rounded = me.bin(Binary::Add, scaled, c05)?;
             let truncated = me.emit(I::Convert(Conversion::Truncate, rounded))?;
             let as_float = me.emit(I::Convert(Conversion::ToFloat, truncated))?;
-            me.bin(Binary::Div, as_float, c255)
+            let c255b = me.k(255.0)?;
+            me.bin(Binary::Div, as_float, c255b)
         };
-        // An array literal evaluates its elements right to left.
-        let s2 = sector(self, [zero, zero, x, chroma, chroma, x])?;
-        let b2 = byte(self, s2)?;
-        let s1 = sector(self, [x, chroma, chroma, x, zero, zero])?;
-        let b1 = byte(self, s1)?;
         let s0 = sector(self, [chroma, x, zero, zero, x, chroma])?;
         let b0 = byte(self, s0)?;
+        let s1 = sector(self, [x, chroma, chroma, x, zero, zero])?;
+        let b1 = byte(self, s1)?;
+        let s2 = sector(self, [zero, zero, x, chroma, chroma, x])?;
+        let b2 = byte(self, s2)?;
         Ok(regs(vec![b0, b1, b2]))
     }
 
@@ -1109,13 +1101,7 @@ impl Lower {
                 if registers.len() != 10 {
                     return Err(refusal(t, "E_PACKED_TYPE", "scene/trace needs an integer scene and scalar or vec3 arguments."));
                 }
-                let f0 = one(self.emit(I::Trace(0, registers.clone()))?);
-                let f1 = self.emit(I::Trace(1, registers.clone()))?;
-                let prim = one(self.emit(I::Convert(Conversion::Truncate, f1))?);
-                let u = one(self.emit(I::Trace(2, registers.clone()))?);
-                let v = one(self.emit(I::Trace(3, registers.clone()))?);
-                // record fields and array elements evaluate right to left in OCaml
-                Ok(self.trace_record(&registers, f0, prim, u, v)?)
+                Ok(self.trace_record(&registers)?)
             }
             PackedKind::Stage => self.stage(t, op_name, args, expressions),
             PackedKind::CheckedMul | PackedKind::CheckedFma => {
@@ -1131,34 +1117,30 @@ impl Lower {
                     };
                     Ok(one(me.emit(ins)?))
                 };
-                // `[ ("value", field Value); ("valid", field Valid) ]`: right to left
-                let valid = instruction(self, Projection::Valid)?;
                 let value = instruction(self, Projection::Value)?;
+                let valid = instruction(self, Projection::Valid)?;
                 Ok(fields_of(vec![("value".to_owned(), value), ("valid".to_owned(), valid)]))
             }
             _ => self.arithmetic(t, op_name, declaration, &kind, expressions, args),
         }
     }
 
-    fn trace_record(&mut self, registers: &[i64], f0: Expression, prim: Expression, u: Expression, v: Expression) -> Res<Expression> {
-        // The list literal evaluates last to first: instance, hit, normal, v, u, prim, t. The
-        // callers above built t, prim, u, v in field order, so rebuild in OCaml's order here.
-        let _ = (f0, prim, u, v);
+    fn trace_record(&mut self, registers: &[i64]) -> Res<Expression> {
         let at = |me: &mut Lower, k: i64| -> Res<Expression> { Ok(one(me.emit(I::Trace(k, registers.to_vec()))?)) };
         let conv = |me: &mut Lower, k: i64| -> Res<Expression> {
             let f = me.emit(I::Trace(k, registers.to_vec()))?;
             Ok(one(me.emit(I::Convert(Conversion::Truncate, f))?))
         };
-        let instance = conv(self, 8)?;
-        let hit = at(self, 7)?;
+        let t0 = at(self, 0)?;
+        let prim = conv(self, 1)?;
+        let u = at(self, 2)?;
+        let v = at(self, 3)?;
         let n4 = self.emit(I::Trace(4, registers.to_vec()))?;
         let n5 = self.emit(I::Trace(5, registers.to_vec()))?;
         let n6 = self.emit(I::Trace(6, registers.to_vec()))?;
         let normal = regs(vec![n4, n5, n6]);
-        let v = at(self, 3)?;
-        let u = at(self, 2)?;
-        let prim = conv(self, 1)?;
-        let t0 = at(self, 0)?;
+        let hit = at(self, 7)?;
+        let instance = conv(self, 8)?;
         Ok(fields_of(vec![
             ("t".to_owned(), t0),
             ("prim".to_owned(), prim),
@@ -1193,7 +1175,7 @@ impl Lower {
                 let lo = self.emit(I::Int_compare(Comparison::Ige, r, zero))?;
                 let bound = self.emit(I::Int_const(count))?;
                 let hi = self.emit(I::Int_compare(Comparison::Ilt, r, bound))?;
-                // Binary (And, lo, hi) after both operands: matches OCaml's let-bound order.
+                // Binary (And, lo, hi) after both operands.
                 let valid = self.emit(I::Binary(Binary::And, lo, hi))?;
                 (converted, valid)
             } else {
@@ -1288,9 +1270,8 @@ impl Lower {
             }
             "gpu/scene-instance" => stage(self, Stage::Scene_instance),
             "gpu/group-scan" => {
-                // [ ("before", stage (Group_scan 0)); ("total", stage (Group_scan 1)) ]: right to left
-                let total = stage(self, Stage::Group_scan(1))?;
                 let before = stage(self, Stage::Group_scan(0))?;
+                let total = stage(self, Stage::Group_scan(1))?;
                 Ok(fields_of(vec![("before".to_owned(), before), ("total".to_owned(), total)]))
             }
             "gpu/store" | "gpu/store-int" => stage(self, Stage::Store),
@@ -1374,7 +1355,7 @@ impl Lower {
                     Err(d) => return Err(refusal(t, "E_PACKED_CONSTANT", &d.message)),
                 };
                 let find = |name: &str| live.iter().rev().find(|(n, _)| n == name).map(|(_, r)| *r);
-                // `live` was consed (latest first): the first match in OCaml's list is the latest push.
+                // `live` is in push order: the newest match wins.
                 let lacunarity = match find("lacunarity") { Some(r) => LiveFloat::Live(r), None => LiveFloat::Fixed(lacunarity) };
                 let gain = match find("gain") { Some(r) => LiveFloat::Live(r), None => LiveFloat::Fixed(gain) };
                 if !packed_ops::supported_noise_octaves(octaves) {
@@ -1407,10 +1388,9 @@ impl Lower {
                     let q = me.emit(I::Binary(Binary::Mul, negative, a.registers[j]))?;
                     me.emit(I::Fma(q, b.registers[i], p))
                 };
-                // `[| component 1 2; component 2 0; component 0 1 |]`: right to left
-                let c2 = component(self, 0, 1)?;
-                let c1 = component(self, 2, 0)?;
                 let c0 = component(self, 1, 2)?;
+                let c1 = component(self, 2, 0)?;
+                let c2 = component(self, 0, 1)?;
                 vec![c0, c1, c2]
             }
             (PackedKind::Normalize, [a]) if a.registers.len() == 3 => {
@@ -1864,13 +1844,12 @@ impl Lower {
             }
             _ => {
                 let (yes, no) = if *ty == Ty::Int || *ty == Ty::Text {
-                    // OCaml evaluates the tuple `(coerce yes, coerce no)` right to left
-                    let n = self.coerce(t, ty, no)?;
                     let y = self.coerce(t, ty, yes)?;
+                    let n = self.coerce(t, ty, no)?;
                     (y, n)
                 } else {
-                    let n = self.as_float(no)?;
                     let y = self.as_float(yes)?;
+                    let n = self.as_float(no)?;
                     (y, n)
                 };
                 let width = yes.registers.len().max(no.registers.len());
@@ -1969,12 +1948,11 @@ impl Lower {
                     let failed = me.under(condition, false, I::Raise(Ty::Int, "E_ARRAY_RANGE".to_owned(), message.to_owned(), None))?;
                     me.emit(I::Int_select(condition, value, failed))
                 };
-                // both (compare Ige first (constant 0)) (compare Ile first (constant max_floatarray_length)):
-                // arguments right to left
-                let max_len = constant(self, MAX_FLOATARRAY_LENGTH)?;
-                let le = self.emit(I::Int_compare(Comparison::Ile, first, max_len))?;
+                // both (compare Ige first (constant 0)) (compare Ile first (constant max_floatarray_length))
                 let c0 = constant(self, 0)?;
                 let ge = self.emit(I::Int_compare(Comparison::Ige, first, c0))?;
+                let max_len = constant(self, MAX_FLOATARRAY_LENGTH)?;
+                let le = self.emit(I::Int_compare(Comparison::Ile, first, max_len))?;
                 let ok = self.emit(I::Binary(Binary::And, ge, le))?;
                 let first = require(self, ok, "array/slice needs a non-negative whole length.", first)?;
                 // valid = both (compare Ile first length) (compare Ile (constant n) (emit (Int_binary (Isub, length, first))))
@@ -2203,8 +2181,7 @@ fn lower_inner(fusion: bool, dynamic: bool, count_source: &CountSource, residual
             _ => return Err(refuse("E_PACKED_FORM", "Packed parameters require name patterns.")),
         }
     }
-    // The accumulator comes first in the OCaml list (`name, ... :: env`), so it shadows nothing here
-    // but is searched first: push it last.
+    // The accumulator is pushed last, so a lookup from the end finds it first.
     match (&accumulator, &result) {
         (Some((Pattern::Name(name), annotation)), RegionResult::Accumulate(seed, _)) => {
             if !matches!(seed.ty(), Ty::Float | Ty::Int | Ty::Vec2 | Ty::Vec3 | Ty::Vec4) {
@@ -2290,7 +2267,6 @@ fn lower_inner(fusion: bool, dynamic: bool, count_source: &CountSource, residual
             }
         }
     }
-    sites.reverse();
     let skip = iteration_skips(&view.iter, &skip);
     let code = finish_loops(&lower.loop_finishes, std::mem::take(&mut lower.code));
     let code: Vec<I> = if code.iter().any(integer_work) {

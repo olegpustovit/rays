@@ -126,7 +126,7 @@ pub fn arena_buffers(first: &[i64], last: &[i64], size: &[i64]) -> Vec<i64> {
         let fits = |class: i64, members: &Vec<usize>| {
             class == size[n] && members.iter().all(|m| last[*m] < first[n] || last[n] < first[*m])
         };
-        // the first fitting buffer in creation order (the OCaml list is reversed once, then searched)
+        // the first fitting buffer in creation order
         match buffers.iter().position(|(class, members)| fits(*class, members)) {
             Some(i) => {
                 assignment[n] = i as i64;
@@ -1082,7 +1082,7 @@ fn remember(reads: Vec<i64>, writes: Vec<i64>, run: Run) -> Run {
         let key: Vec<Value> = reads.iter().map(|n| st.values[ix(*n)].clone()).collect();
         let hit = {
             let t = table.lock().unwrap();
-            t.iter().find(|(k, _)| k.len() == key.len() && k.iter().zip(key.iter()).all(|(p, q)| same_input(p, q))).map(|(_, vals)| vals.clone())
+            t.iter().rev().find(|(k, _)| k.len() == key.len() && k.iter().zip(key.iter()).all(|(p, q)| same_input(p, q))).map(|(_, vals)| vals.clone())
         };
         match hit {
             Some(values) => {
@@ -1096,8 +1096,8 @@ fn remember(reads: Vec<i64>, writes: Vec<i64>, run: Run) -> Run {
                 // next; a kept device array lives as long as the draw
                 if st.kept.is_empty() && !values.iter().any(core_marks::is_device) {
                     let mut t = table.lock().unwrap();
-                    t.insert(0, (key, values));
-                    t.truncate(4);
+                    t.push((key, values));
+                    if t.len() > 4 { t.remove(0); }
                 }
                 Ok(())
             }
@@ -1156,7 +1156,7 @@ fn arena_plan(remember_loops: bool, excluded: &dyn Fn(i64, i64) -> bool, program
     if first.iter().all(|at| *at < 0) { return None; }
     let mut dying: Vec<Vec<i64>> = vec![Vec::new(); program.body.len()];
     for (n, at) in first.iter().enumerate() {
-        if *at >= 0 { dying[ix(last[n])].insert(0, n as i64); }
+        if *at >= 0 { dying[ix(last[n])].push(n as i64); }
     }
     Some(Arc::new(ArenaPlan { first, last, dying }))
 }
@@ -2648,7 +2648,12 @@ fn store_value(target: &mut Value, i: i64, x: &Value) -> Result<(), Diagnostic> 
         Value::Text_array(data) => {
             if i < 0 || i as usize >= data.len() { return Err(range_error()); }
             match x {
-                Value::Text(text) => Arc::make_mut(data)[i as usize] = text.clone(),
+                Value::Text(text) => {
+                    // ponytail: a row store rebuilds the offsets+bytes array, O(n) per store; give TextArray an in-place replace if text stores get hot
+                    let mut rows = rays_math::text_array::TextArray::with_capacity(data.len(), data.byte_len() + text.len());
+                    for (j, row) in data.iter().enumerate() { rows.push(if j == i as usize { text } else { row }); }
+                    *data = Arc::new(rows);
+                }
                 _ => return Err(v::fail("E_ARRAY_TYPE", "Text arrays contain text values.")),
             }
             Ok(())
