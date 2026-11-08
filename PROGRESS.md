@@ -12,7 +12,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 |------|------|--------|---------|
 | A | 8/8 | — | — |
 | B | 5/6 | B1 | 1 |
-| M | 7/21 | — | 14 |
+| M | 8/21 | — | 13 |
 | I | 0/1 | — | 1 |
 | C | 0/21 | — | 21 |
 | D | 0/6 | — | 6 |
@@ -34,15 +34,16 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | B4 | done | W1 `flow_ir` touch → `rays_bin` check in `tools/buildtime` (env overrides) |
 | B1 | active | `533489ee` term_arena; `e16247cd` `BUILTIN_DELEGATE`/`GPU_STAGE_ONLY` + `EMPTY_CHECK`; ponytail workspace `PathId` scope stack; op.rs ~138× `Arc::new` (was 141) |
 | B2 | done | `96fab43d` — dev `opt-level=0` for rays_editor, pxui_graph, editor_document, flow_graph, flow_native |
-| B5 | done (partial) | `flow_sop_catalog` crate; `editor_document` → catalog/port/network/manifest; `flow_sop` re-exports + `generate()` wrapper; **`flow_native` dropped `rdk` → `rdk_core`**; **rdk delete deferred** (sop/flow_sop/flow_gpu/rays_editor) |
+| B5 | done (partial) | `94aa4546` catalog split; `35df934e` `flow_native` → `rdk_core`; **rdk delete deferred** (sop/flow_sop/flow_gpu/rays_editor) |
 | M2 | done | `bbe7f6ae` — `editor_graph_ref`; `panel_key` / layouts borrow graph name |
 | M10 | done | `c425eefa` — detach alias slots before store; `cargo t -p flow_ir store` 3 pass |
 | M20 | done | `f6ca915b` — remove `mem_sys` TEMP alloc sampler |
 | M4 | done | `0f3804c3` — `Profile::execution_count` / `probe_run::report_count`; `sync_scope` defers profile clone until after `!moved && !fresh`; `cargo check -p rays_editor`; `cargo t -p flow_native probe_run` 3 pass |
 | M9 | done | `20c1dfb3` — `panels::at_ref`; shell `graph_path` / `panel_key` + `beside` borrow; `cargo check -p editor_core -p rays_editor` |
 | M11 | done | `49ec71f3` — lazy `field()` error `form`; `Keys` pattern name once; `cargo t -p flow_eval test_workspace_eval` 2 pass |
-| M7 | done | (this session) `retain_for` on texture/sampler; `keep_texture` / `keep_sampler` dedup like `keep_buffer`; `cargo check -p ogpu_metal` |
-| M1,M3,M5–M6,M8,M12–M19,M21 | pending | |
+| M7 | done | `dca77b6f` — texture/sampler `retain_for`; `keep_sampler` dedup; `cargo check -p ogpu_metal` |
+| M12 | done | `b5be8904` — `record_slot_open` skips `record_packed` / `note` past per-path cap; `cargo t -p flow_eval test_workspace_eval` |
+| M1,M3,M5–M6,M8,M13–M19,M21 | pending | |
 | I | pending | |
 | C1–C21 | pending | |
 | D1–D6 | pending | |
@@ -98,7 +99,7 @@ Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s
 
 - 2026-11-08: B5 — `flow_native` no longer depends on `rdk` facade (`rdk_core` direct); `cargo check -p flow_native -p rays_editor`.
 - 2026-11-08: B5 — `flow_sop_catalog` (catalog/manifest/port/network/encoded_parameters); `editor_document` direct dep; `cargo check -p flow_sop_catalog -p flow_sop -p editor_document -p rays_bin`.
-- 2026-11-08: `20c1dfb3` M9; `49ec71f3` M11; `0f3804c3` M4; `e16247cd` B1; B5 + `cargo t -p flow_sop catalog` 2 pass.
+- 2026-11-08: `b5be8904` M12; `dca77b6f` M7; `35df934e` B5 rdk in flow_native; `20c1dfb3` M9; `49ec71f3` M11.
 - 2026-11-08: review2 — 16 done, 2 partial, 45 pending (PROGRESS ↔ git aligned).
 - 2026-11-08: `f6ca915b` M20, `bbe7f6ae` M2, `96fab43d` B2; `cargo check -p rays_bin` ~23s after profile shift.
 - 2026-11-08: B0 — invalidation checklist + script audit in PROGRESS §B0; warm pair flow_check 0.15 s / 0.07 s; log `.subagent-logs/b0.log`.
