@@ -61,7 +61,7 @@ A1-A8, B0-B4: see earlier rows below in git history (`6802a325` ... `96fab43d`);
 | C19 | done | `dd441536` PartialEq derived (Hash impossible: f64 in ogpu types) |
 | C21 | done | `7e9376dc` clippy::all allow removed; ~30 test-target lints remain |
 | D1 | partial | `959d5dae` `b72ab30d` `b4f74ecf` goldens `9a17f5d7` `1a5de4fe` `8fc3feb4`; 56 prepends removed; some incidental-order spots in spirv.rs left |
-| D2 | done | `37691759` .. `2e224106` (5 stages): rdk errors `{operation, code: Code, message}`, typed cancellation |
+| D2 | done | `37691759` .. `2e224106` + `a0809e01` (5 stages): rdk errors `{operation, code: Code, message}`, typed cancellation |
 | D3 | done | `4e8e7193` one WGSL printer, goldens byte-identical |
 | D4 | done | `8bf0c0d0` `18180e84` packed.rs one CPU engine (-1560/+? lines in diff; now 4714 lines); `1455271c` bench_core example |
 | D5 | not started | `Value` four float-array variants -> `Floats(width, ..)` (90 sites, 23 files) |
@@ -69,7 +69,7 @@ A1-A8, B0-B4: see earlier rows below in git history (`6802a325` ... `96fab43d`);
 
 ## Known failures / open risks
 
-- `cargo t` full suites were **not** run on final HEAD under load (load avg 50-450). Focused runs per item passed (see worker reports in item rows).
+- `cargo t -p flow_sop` on the D2 tree: 700 tests, 696 pass; the 4 failures are the baseline ones below (`lend_session_tests` confirmed pre-existing by LowerClean at `11988707`). `cargo t -p rdk_core/rdk_geom/rdk_boolean/rdk_ops/sop`: 523 pass; `rdk_rays` 10 pass. Other full suites were **not** run on final HEAD under load (load avg 50-450). Focused runs per item passed (see worker reports in item rows).
 - Pre-existing at baseline `11988707` (bisected by LowerClean): `test_node_facts::declared_preserved_topology`, `test_keyword_ports::keyword_manifest_defaults_projection_checked_gestures` (E_SHADOW), `test_settle::in_flight_device_writes_settle_at_a_cooks_end`, `test_projection::snapshots_of_the_scene_fixtures`, `lend_session_tests::escaped_zone_nodes_own_only_their_cook_context`.
 - `flow_ir test_static_map::sop_deferral`: root cause `4ed6baf8` (constructor deferral); test rewritten (`a3e8c6df`); `StaticMap.deferred` now effectively dead.
 - Unconfirmed after D4: `flow_web test_fma::checked_arithmetic_regions_match_exact_binary64` (E_NONFINITE) and `flow_ir test_core_operators::text_arrays_part_*` near the 5 s limit; `rays_editor` full suite and `pxui_graph --features test-hooks` unverified after C6.
