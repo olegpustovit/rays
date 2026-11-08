@@ -9,4 +9,4 @@ name = "ogpu"
 path = "src/lib.rs"
 
 [dependencies]
-ogpu_core = { path = "../ogpu_core" }
+native_layer_token_sys = { path = "../native_layer_token_sys" }

@@ -1,6 +1,6 @@
 //! The Metal implementation of `ogpu::impl_`.
 use crate::backend;
-use ogpu_core::backend::{Driver, Implementation as Impl};
+use ogpu::backend::{Driver, Implementation as Impl};
 
 pub const BACKEND: &str = "metal";
 

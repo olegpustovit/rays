@@ -5,7 +5,7 @@ use crate::{
     device::{fail, of_metal_error, Device},
 };
 use metal::acceleration as ma;
-use ogpu_core::{
+use ogpu::{
     backend::{DriverAccelDescriptor, DriverGeometry, DriverKeyframe, InstanceKind, Token},
     error::{Error, ErrorKind},
 };

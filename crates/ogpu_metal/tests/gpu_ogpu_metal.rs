@@ -6,7 +6,7 @@
 // target (common::run) runs the tests on it.
 mod common;
 use ogpu_metal::{backend, impl_};
-use ogpu_core::{
+use ogpu::{
     acceleration::InstanceKind,
     backend::{
         self as be, Accel, AccelDescriptor, BatchDraw, Border, Buffer, ColorAttachment, CurveBasis,

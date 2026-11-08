@@ -1,11 +1,21 @@
-//! The virtual public API: ogpu_core's modules plus `impl_`, the backend selected at startup.
-pub use ogpu_core::{
-    acceleration, backend, binding, caps, error, handle, pipeline, render_pass, shader, surface, types,
-    validation,
-};
-
+//! OGPU: the portable device/buffer/pipeline API and its validation (`backend`), plus `impl_`, the
+//! backend selected at startup. Metal, Vulkan and mock implement the `backend::Driver*` traits.
+pub mod acceleration;
+pub mod backend;
+pub mod binding;
+pub mod caps;
+pub mod error;
+pub mod handle;
 pub mod impl_;
+pub mod pipeline;
+pub mod render_pass;
+pub mod shader;
+pub mod surface;
+pub mod types;
+pub mod validation;
 
+#[cfg(test)]
+mod tests;
 #[cfg(test)]
 mod test_ogpu_acceleration;
 #[cfg(test)]

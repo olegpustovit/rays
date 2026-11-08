@@ -1,5 +1,5 @@
 //! Ogpu_metal.Render_encoder: the driver's render encoder record over a Metal render encoder.
-use ogpu_core::error::Error;
+use ogpu::error::Error;
 use crate::{
     command_control::{CommandContext, OpenEncoder, Resource},
     device::{fail, of_metal_error},
@@ -9,7 +9,7 @@ use metal::{
     pipeline::{CullMode, IndexType, Primitive, RenderResource, RenderStage, ResourceUsage, Scissor, Viewport, Winding},
     LoadAction, RenderEncoder, RenderPassDescriptor, StoreAction,
 };
-use ogpu_core::{
+use ogpu::{
     backend::{DepthState, DriverBatchDraw, DriverRenderEncoder, DriverRenderTarget, ShaderStage, Token, Winding as OgpuWinding},
     error::ErrorKind,
     render_pass::{Cull, IndexType as OgpuIndex, Load, Primitive as OgpuPrimitive, Rect, Store},

@@ -18,12 +18,14 @@ device's registry identifier remains `Device_lost`, with source operation
 
 ## Ownership and dependency direction
 
-The Rust backend factory record lives in `ogpu_core::backend::Implementation`.
-`ogpu::impl_::Impl` re-exports that same type; startup selection and its thread-local
-state remain in `ogpu`. Metal, Vulkan and mock production crates construct the core
-record without depending upward on `ogpu`; their conformance tests use `ogpu` only
-through dev-dependencies. This preserves the core/backend/public-API dependency
-direction without changing selection behavior or adding a default implementation.
+The Rust `ogpu` crate holds the portable types, validation, the `backend` layer and the startup
+selection (`ogpu::impl_`, thread-local state, no default implementation). The backend factory record is
+`ogpu::backend::Implementation`; its `create_driver` returns a `Box<dyn Driver>`. A backend implements the
+driver *traits* in `ogpu::backend` (`Driver`, `DriverDevice`, `DriverQueue`, `DriverCommands`,
+`DriverRenderEncoder`, `DriverResource`, ... one trait per native object kind) instead of filling closure
+records: a driver object is one struct, an encoder is one boxed object rather than a boxed closure per
+operation, and the `backend` layer keeps its liveness/state guards around each `&self` call. Metal, Vulkan
+and mock depend only on `ogpu`; `native_layer_token` lives in `native_layer_token_sys::portable`.
 
 The Rust renderer does not expose a raw SDL window accessor. Window ownership and
 resizing stay in `runtime`; renderer callers use its typed native-runtime bridge
@@ -259,10 +261,10 @@ examples / sketches / pxui / editor / rdk_rays
                       runtime ------> sdl3     runtime_resources ---> sdl3,
                          |                     (used by rays and      sdl3_image,
                          v                      renderer)       sdl3_ttf, sdl3_mixer
-                     ogpu (virtual) ---> ogpu_core ---> native_layer_token
+                     ogpu ---> native_layer_token_sys
 
                     ogpu_metal (implementation) ---> ogpu_metal_native ---> metal
-                    ogpu_mock  (implementation) ---> ogpu_core
+                    ogpu_mock  (implementation) ---> ogpu
 ```
 
 The RDK split currently puts packed identity, storage, topology, groups, and

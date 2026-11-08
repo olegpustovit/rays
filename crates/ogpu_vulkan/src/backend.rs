@@ -1,6 +1,6 @@
 //! OGPU's driver records over the Vulkan bridge. Tokens name native objects; the checks live in
-//! `ogpu_core::backend`, as for Metal.
-use ogpu_core::{
+//! `ogpu::backend`, as for Metal.
+use ogpu::{
     backend::{
         DepthState, Driver, DriverAccel, DriverAccelDescriptor, DriverAccelEncoder, DriverAcquire, DriverArgument,
         DriverBatchDraw, DriverBlitEncoder, DriverCommands, DriverComputeEncoder, DriverDevice, DriverFrame,
@@ -341,7 +341,7 @@ struct Mapping {
     id: Token,
     count: usize,
     view: Rc<RefCell<Option<Floats>>>,
-    readback: ogpu_core::backend::OwnedReadback,
+    readback: ogpu::backend::OwnedReadback,
 }
 
 impl Mapping {
@@ -352,7 +352,7 @@ impl Mapping {
 }
 
 impl DriverMapping for Mapping {
-    fn readback(&self) -> ogpu_core::backend::OwnedReadback {
+    fn readback(&self) -> ogpu::backend::OwnedReadback {
         self.readback.clone()
     }
     fn view(&self) -> Option<Floats> {
@@ -400,7 +400,7 @@ fn create_mapped_buffer(dev: &Rc<Dev>, descriptor: &BufferDescriptor) -> Result<
     // Native staged reads serialize their transfer queue under the device qlock; no OGPU queue,
     // encoder, SDL operation or mutable backend cache is accessed by the reader.
     let readback_buffer = dev.find_buffer(MAPPED_OP, id)?.buffer.borrow().clone();
-    let readback: ogpu_core::backend::OwnedReadback = std::sync::Arc::new(move |offset, length| {
+    let readback: ogpu::backend::OwnedReadback = std::sync::Arc::new(move |offset, length| {
         let offset = u64::try_from(offset).map_err(|_| fail(MAPPED_OP, ErrorKind::InvalidArgument, "negative read offset"))?;
         if offset > readback_buffer.size() || length as u64 > readback_buffer.size() - offset {
             return Err(fail(MAPPED_OP, ErrorKind::InvalidArgument, "range exceeds the buffer"));
@@ -1082,14 +1082,14 @@ fn build_accel(
 struct OwnedAccel {
     dev: Rc<Dev>,
     id: Token,
-    sizes: ogpu_core::backend::AccelSizes,
+    sizes: ogpu::backend::AccelSizes,
 }
 
 impl DriverAccel for OwnedAccel {
     fn accel_token(&self) -> Token {
         self.id
     }
-    fn accel_sizes(&self) -> ogpu_core::backend::AccelSizes {
+    fn accel_sizes(&self) -> ogpu::backend::AccelSizes {
         self.sizes
     }
     fn destroy_accel(&self) -> Result<(), Error> {
@@ -1124,7 +1124,7 @@ fn create_accel(dev: &Rc<Dev>, descriptor: &DriverAccelDescriptor) -> Result<Box
     Ok(Box::new(OwnedAccel {
         dev: dev.clone(),
         id,
-        sizes: ogpu_core::backend::AccelSizes {
+        sizes: ogpu::backend::AccelSizes {
             structure_size: sizes.structure_bytes as i64,
             build_scratch_size: sizes.build_scratch_bytes as i64,
             refit_scratch_size: sizes.update_scratch_bytes as i64,

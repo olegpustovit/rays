@@ -11,7 +11,6 @@ path = "src/lib.rs"
 [dependencies]
 rays = { path = "../rays" }
 ogpu = { path = "../ogpu" }
-ogpu_core = { path = "../ogpu_core" }
 renderer = { path = "../renderer" }
 runtime_resources = { path = "../runtime_resources" }
 rays_math = { path = "../rays_math" }

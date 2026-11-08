@@ -1,7 +1,7 @@
 //! Ogpu_metal.Texture
 use crate::device::{fail, of_metal_error, Device};
 use metal::{StorageMode, TextureKind, TextureRegion, TextureUsage as MetalUsage};
-use ogpu_core::{
+use ogpu::{
     error::Error,
     error::ErrorKind,
     handle::{self, ResourceHandle},

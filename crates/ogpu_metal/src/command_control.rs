@@ -1,6 +1,6 @@
 //! Ogpu_metal.Command_control: what the encoders share while one command buffer records, and the
 //! token tables of the device behind them.
-use ogpu_core::error::Error;
+use ogpu::error::Error;
 use crate::{
     acceleration::Acceleration,
     buffer::Buffer,
@@ -11,7 +11,7 @@ use crate::{
     texture::Texture,
 };
 use metal::{CompareFunction, DepthStencil, DepthStencilDescriptor};
-use ogpu_core::{
+use ogpu::{
     backend::DepthState,
     error::ErrorKind,
     render_pass::Comparison,

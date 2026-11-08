@@ -9,7 +9,6 @@ name = "renderer"
 path = "src/lib.rs"
 
 [dependencies]
-ogpu_core = { path = "../ogpu_core" }
 ogpu = { path = "../ogpu" }
 scene_command = { path = "../scene_command" }
 runtime = { path = "../runtime" }

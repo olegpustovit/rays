@@ -108,7 +108,6 @@ dependencies = [
  "mem",
  "mem_sys",
  "ogpu",
- "ogpu_core",
  "ogpu_metal",
  "ogpu_mock",
  "ogpu_vulkan",
@@ -197,7 +196,7 @@ dependencies = [
  "flow_eval",
  "flow_ir",
  "flow_syntax",
- "ogpu_core",
+ "ogpu",
  "rays_diagnostic",
  "rays_math",
 ]
@@ -328,13 +327,6 @@ version = "0.1.0"
 name = "ogpu"
 version = "0.1.0"
 dependencies = [
- "ogpu_core",
-]
-
-[[package]]
-name = "ogpu_core"
-version = "0.1.0"
-dependencies = [
  "native_layer_token_sys",
 ]
 
@@ -344,7 +336,6 @@ version = "0.1.0"
 dependencies = [
  "metal",
  "ogpu",
- "ogpu_core",
 ]
 
 [[package]]
@@ -352,7 +343,6 @@ name = "ogpu_mock"
 version = "0.1.0"
 dependencies = [
  "ogpu",
- "ogpu_core",
 ]
 
 [[package]]
@@ -361,7 +351,6 @@ version = "0.1.0"
 dependencies = [
  "native_layer_token_sys",
  "ogpu",
- "ogpu_core",
  "vulkan_sys",
 ]
 
@@ -559,7 +548,6 @@ dependencies = [
  "flow_syntax",
  "input",
  "ogpu",
- "ogpu_core",
  "ogpu_metal",
  "ogpu_vulkan",
  "param",
@@ -641,7 +629,6 @@ dependencies = [
  "mem",
  "mem_sys",
  "ogpu",
- "ogpu_core",
  "ogpu_metal",
  "ogpu_mock",
  "ogpu_vulkan",

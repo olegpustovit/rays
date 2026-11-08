@@ -1,6 +1,6 @@
 //! The mock implementation of `ogpu::impl_`.
 use crate::backend_mock::{self, Control};
-use ogpu_core::backend::{Driver, Implementation as Impl};
+use ogpu::backend::{Driver, Implementation as Impl};
 use std::cell::RefCell;
 
 thread_local! {

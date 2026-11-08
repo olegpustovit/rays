@@ -1,6 +1,6 @@
 //! Ogpu_metal.Queue: one command queue, its frames-in-flight epochs and GPU timings.
 use crate::device::{fail, of_metal_error, Device};
-use ogpu_core::error::{Error, ErrorKind};
+use ogpu::error::{Error, ErrorKind};
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,

@@ -1,12 +1,12 @@
 //! The virtual `Impl` of the OCaml library: one backend record, chosen once per thread at startup
 //! by the executable (`select`); unselected is a typed error, never a default.
-use ogpu_core::{
+use crate::{
     backend::Driver,
     error::{self, Error, ErrorKind},
 };
 use std::{cell::RefCell, rc::Rc};
 
-pub use ogpu_core::backend::Implementation as Impl;
+pub use crate::backend::Implementation as Impl;
 
 thread_local! {
     static SELECTED: RefCell<Option<Rc<Impl>>> = const { RefCell::new(None) };
@@ -26,7 +26,7 @@ pub fn backend() -> Result<String, Error> {
     Ok(selected("Ogpu.Impl.backend")?.backend.clone())
 }
 
-pub fn create_driver() -> Result<Driver, Error> {
+pub fn create_driver() -> Result<Box<dyn Driver>, Error> {
     Ok((selected("Ogpu.Impl.create_driver")?.create_driver)())
 }
 

@@ -842,10 +842,10 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("flow_ir", &[
             "flow_syntax", "flow_check", "flow_eval", "param", "rays_math", "scene_command", "lru", "parallel",
         ][..]),
-        ("flow_shader", &["flow_syntax", "flow_check", "flow_eval", "flow_ir", "ogpu_core"][..]),
+        ("flow_shader", &["flow_syntax", "flow_check", "flow_eval", "flow_ir", "ogpu"][..]),
         ("flow_gpu", &[
-            "flow_syntax", "flow_check", "flow_eval", "flow_ir", "flow_shader", "param", "rays_math", "ogpu_core",
-            "ogpu", "renderer", "lru", "mem", "parallel",
+            "flow_syntax", "flow_check", "flow_eval", "flow_ir", "flow_shader", "param", "rays_math", "ogpu",
+            "renderer", "lru", "mem", "parallel",
         ][..]),
         ("flow_web", &[
             "flow_syntax", "flow_check", "flow_eval", "flow_ir", "param", "rays_math", "scene_command", "parallel",
@@ -860,13 +860,12 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
             "flow_graph", "flow_ir", "flow_gpu", "flow_sop", "scene_command", "renderer", "lru", "runtime_resources",
             "parallel", "sop",
         ][..]),
-        ("ogpu_core", &["native_layer_token_sys"][..]),
-        ("ogpu", &["ogpu_core"][..]),
-        ("ogpu_mock", &["ogpu_core"][..]),
+        ("ogpu", &["native_layer_token_sys"][..]),
+        ("ogpu_mock", &["ogpu"][..]),
         // Rust merges OCaml's ogpu_metal_native into ogpu_metal.
-        ("ogpu_metal", &["ogpu_metal_native", "ogpu_core", "metal", "lru"][..]),
-        ("ogpu_metal_native", &["ogpu_core", "metal", "lru"][..]),
-        ("ogpu_vulkan", &["ogpu_core", "vulkan_sys", "native_layer_token_sys"][..]),
+        ("ogpu_metal", &["ogpu_metal_native", "ogpu", "metal", "lru"][..]),
+        ("ogpu_metal_native", &["ogpu", "metal", "lru"][..]),
+        ("ogpu_vulkan", &["ogpu", "vulkan_sys", "native_layer_token_sys"][..]),
         ("ogpu_native", &["ogpu_metal", "ogpu_vulkan"][..]),
         ("scene_execution_fixtures", &["renderer", "ogpu"][..]),
         ("pxui", &["rays", "rays_math", "param", "mem"][..]),
@@ -922,7 +921,7 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
         "web_export", "rays_editor",
     ];
     let gpu = [
-        "sdl3", "sdl3_image", "sdl3_ttf", "sdl3_mixer", "metal", "vulkan_sys", "ogpu_core", "ogpu",
+        "sdl3", "sdl3_image", "sdl3_ttf", "sdl3_mixer", "metal", "vulkan_sys", "ogpu",
         "ogpu_mock", "ogpu_metal", "ogpu_metal_native", "ogpu_vulkan", "ogpu_native", "runtime",
         "runtime_input", "runtime_resources", "renderer",
     ];
@@ -932,7 +931,7 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
         "cfmt", "cfmt_sys",
         "diagnostic", "rays_diagnostic", "native_layer_token_sys", "mem", "mem_sys",
         "lru", "ocaml_int", "param", "input", "rays_math", "rays_math_sys", "parallel", "scene_command", "sdl3", "sdl3_image",
-        "sdl3_ttf", "sdl3_mixer", "metal", "vulkan_sys", "ogpu_core", "ogpu",
+        "sdl3_ttf", "sdl3_mixer", "metal", "vulkan_sys", "ogpu",
         "rdk_core",
     ];
     for library in foundational {

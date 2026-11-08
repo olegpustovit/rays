@@ -1,6 +1,6 @@
 //! Ogpu_metal.Device: one Metal device with its OGPU capability profile and live-resource count.
 use metal::ErrorKind as MetalKind;
-use ogpu_core::{
+use ogpu::{
     caps::{self, Caps, Limits},
     error::{self, Error, ErrorKind},
     handle,

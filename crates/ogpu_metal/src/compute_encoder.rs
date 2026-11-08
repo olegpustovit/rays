@@ -1,11 +1,11 @@
 //! Ogpu_metal.Compute_encoder: the driver's compute encoder over a Metal compute encoder.
-use ogpu_core::error::Error;
+use ogpu::error::Error;
 use crate::{
     command_control::{CommandContext, OpenEncoder, Resource},
     device::{fail, of_metal_error},
     pipeline::Native,
 };
-use ogpu_core::{backend::{DriverComputeEncoder, Token}, error::ErrorKind};
+use ogpu::{backend::{DriverComputeEncoder, Token}, error::ErrorKind};
 use std::rc::Rc;
 
 fn size(t: (i64, i64, i64)) -> (usize, usize, usize) {

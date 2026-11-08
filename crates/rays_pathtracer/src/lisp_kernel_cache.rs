@@ -8,7 +8,7 @@ use crate::lisp_kernel::{self, front_result, previews, T};
 use flow_ir::packed::host as phost;
 use flow_shader::emit;
 use flow_syntax::ty::Ty;
-use ogpu_core::shader::{Binding, BindingKind, Stage};
+use ogpu::shader::{Binding, BindingKind, Stage};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, OnceLock};

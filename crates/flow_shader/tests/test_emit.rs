@@ -10,7 +10,7 @@ use flow_ir::packed;
 use flow_shader::emit::{self, Options};
 use flow_syntax::context;
 use flow_syntax::packed_ops;
-use ogpu_core::shader;
+use ogpu::shader;
 use std::fs;
 use support as tp;
 

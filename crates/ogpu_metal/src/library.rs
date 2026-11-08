@@ -1,6 +1,6 @@
 //! Ogpu_metal.Library: a compiled Metal source library with a count of the pipelines made from it.
 use crate::device::{fail, of_metal_error, Device};
-use ogpu_core::{
+use ogpu::{
     error::Error,
     error::ErrorKind,
     handle::{self, ResourceHandle},

@@ -279,7 +279,7 @@ pub fn create_renderer(
     device: Option<Device>,
     gpu_vertices: Option<scene_execution::gpu_vertices_owner>,
     offscreen: bool,
-    driver: backend::Driver,
+    driver: Box<dyn backend::Driver>,
     configuration: &Configuration,
 ) -> Result<scene_execution::t, Error> {
     if backend_name != "metal" && backend_name != "vulkan" {

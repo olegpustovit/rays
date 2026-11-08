@@ -14,7 +14,6 @@ flow_check = { path = "../flow_check" }
 flow_eval = { path = "../flow_eval" }
 flow_ir = { path = "../flow_ir" }
 flow_shader = { path = "../flow_shader" }
-ogpu_core = { path = "../ogpu_core" }
 ogpu = { path = "../ogpu" }
 renderer = { path = "../renderer" }
 lru = { path = "../lru" }

@@ -13,7 +13,7 @@ use flow_ir::kernel_layout::{self, Visit};
 use flow_ir::packed;
 use flow_syntax::packed_ops::{self, Binary, Comparison, Conversion, Integer, Unary};
 use flow_syntax::value;
-use ogpu_core::shader::{Binding, BindingKind, Stage as ShaderStage};
+use ogpu::shader::{Binding, BindingKind, Stage as ShaderStage};
 use rays_diagnostic::Diagnostic;
 use std::collections::HashMap;
 use std::sync::Arc;

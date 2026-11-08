@@ -1,7 +1,7 @@
 //! Ogpu_metal.Blit_encoder: buffer-to-texture copies.
 use crate::{command_control::{CommandContext, OpenEncoder}, device::of_metal_error};
-use ogpu_core::error::Error;
-use ogpu_core::{backend::{DriverBlitEncoder, Token}, types::{Extent, Origin}};
+use ogpu::error::Error;
+use ogpu::{backend::{DriverBlitEncoder, Token}, types::{Extent, Origin}};
 use std::rc::Rc;
 
 struct Blit {

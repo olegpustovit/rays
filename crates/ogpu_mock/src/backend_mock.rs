@@ -1,7 +1,7 @@
 //! The portable mock: host memory behind the driver record. It never executes compute, ray
 //! tracing or rasterization (those are `Unsupported`); it stores buffers and textures, replays
 //! recorded buffer-to-texture blits at commit, and counts what is alive.
-use ogpu_core::{
+use ogpu::{
     backend::{
         Driver, DriverAccel, DriverAccelDescriptor, DriverAccelEncoder, DriverAcquire, DriverArgument,
         DriverBlitEncoder, DriverCommands, DriverComputeEncoder, DriverDevice, DriverFrame, DriverIcb,
