@@ -30,12 +30,12 @@ pub fn layouts(value: &t) -> Vec<(String, bool)> {
         return panels::labels(&sw.layouts).into_iter().enumerate().map(|(i, name)| (name, i as i64 == sw.active)).collect();
     }
     let doc = &value.doc.workspace.ws;
-    let current = workspace_doc::editor_graph(doc).map(|g| g.name);
+    let current = workspace_doc::editor_graph_ref(doc).map(|g| &g.name);
     let gs: Vec<_> = doc.checked.graphs.iter().filter(|g| g.context == context::editor()).collect();
     if gs.len() <= 1 {
         return Vec::new();
     }
-    gs.iter().map(|g| (g.name.clone(), Some(&g.name) == current.as_ref())).collect()
+    gs.iter().map(|g| (g.name.clone(), current == Some(&g.name))).collect()
 }
 
 /// What the text pane completes beyond its own text: the graphs, the materials, the cameras of the
@@ -78,7 +78,9 @@ pub fn visible(shell: &shell, panel: &Panel) -> bool {
 }
 
 pub fn panel_key(doc: &Document, path: &[usize]) -> Vec<String> {
-    let graph = workspace_doc::editor_graph(&doc.workspace.ws).map(|g| g.name).unwrap_or_else(|| "@default".to_string());
+    let graph = workspace_doc::editor_graph_ref(&doc.workspace.ws)
+        .map(|g| g.name.clone())
+        .unwrap_or_else(|| "@default".to_string());
     let origin = |path: &[usize]| -> Option<&Origin> { doc.shell.as_ref().and_then(|s| s.origins.iter().find(|(p, _)| p == path).map(|(_, o)| o)) };
     // a binding several leaves are made from names none of them: each is keyed by its place
     let once = |name: &str| !doc.shell.as_ref().is_some_and(|s| s.repeated.iter().any(|r| r == name));

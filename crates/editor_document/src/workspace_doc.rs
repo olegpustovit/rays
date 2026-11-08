@@ -122,12 +122,14 @@ pub fn literal_changes(previous: &T, next: &T) -> Option<Vec<Change>> {
 }
 
 /// The selected named editor layout, or the first editor graph when none is selected.
+pub fn editor_graph_ref<'a>(t: &'a T) -> Option<&'a w::Graph> {
+    t.checked.graphs.iter().find(|g| {
+        g.context == context::editor() && t.layout.editor.as_ref().map_or(true, |e| *e == g.name)
+    })
+}
+
 pub fn editor_graph(t: &T) -> Option<w::Graph> {
-    t.checked
-        .graphs
-        .iter()
-        .find(|g| g.context == context::editor() && t.layout.editor.as_ref().map_or(true, |e| *e == g.name))
-        .cloned()
+    editor_graph_ref(t).cloned()
 }
 
 fn head(f: &S) -> Option<&str> {
