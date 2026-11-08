@@ -136,6 +136,39 @@ Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s
 
 ## Session log
 
+- 2026-11-08: caching/perf pass (pre-existing slow cases). Per-call region recompile was only 1-8% of profiles; the real costs were O(n²) node work, failed compiles inside an iterate loop and whole-catalog qualification on every lowering. All changes are bit-identical; no goldens or assertions changed.
+  - Commits:
+    - `0e452885`: group_edges incident rounds only when angle-filtered.
+    - `4ca4ca07`: packed bodies fold over a table.
+    - `21755fb5`: in-place text-array row store (was O(n²)).
+    - `8a896d02`: edge_straighten covariance in one scan.
+    - `3f8a06ba`: named-value packed uniforms read directly.
+    - `2e087d4f`: term depth check once per arena row.
+    - `6364d9c8`: Lisp body lowering qualifies only reachable packed sites (equal sets verified on 1,190 lowerings).
+    - `b07759a2`: `specialize` memo.
+    - `560bab91`: assembled Lisp body memo.
+  - test_parallel_exact (seconds):
+
+    | Case | Before | After |
+    |---|---|---|
+    | emission_uv_mapped | 5.05 | 1.36 |
+    | emission_straightened | 12.5 | 0.78 |
+    | generated_spiral | 4.73 | 0.42 |
+    | sum of 97 | 153.4 | 142.6 |
+
+  - Editor cases (seconds):
+
+    | Case | Before | After |
+    |---|---|---|
+    | orrery | 16.4 | 7.4 |
+    | workspace_packed | 6.7 | 4.0 |
+    | sopcat_perturbation | >60 | 47.4 |
+    | sopcat_manifest | 5.7 | 4.75 |
+
+  - flow_sop with RAYS_SLOW: 705 pass / 82.8 s.
+  - `2787e873`: sopcat_manifest_exhaustive and sopcat_perturbation (every field of every SOP) run under RAYS_SLOW, like shattered_studio_full and the OCaml exhaustive suite.
+  - Remaining >5 s debug cases are real interpreter work (subdivide/sweep/carve kernels), ~1 s one-time lowering per process, value-dependent Lisp lowering, and child processes re-lowering gpu_sea (native_scrub_gpu 5.5 s). These need design changes (value-independent lowering, faster flow_check prelude) and are follow-ups outside the plan.
+
 - 2026-11-08: residency and release pass.
   - `2521c306`: all-constant arrays are filled on the device, not uploaded.
   - `17014952`: input/gather tables are skipped when their bits match the last upload.
