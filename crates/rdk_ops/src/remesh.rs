@@ -3091,7 +3091,8 @@ mod tests {
         );
         assert_eq!(
             fixture_hash(&output),
-            if cfg!(windows) { 3_181_404_250_202_190_309 } else { 212_434_250_856_407_980 },
+            // Remesh uses libm transcendentals: this golden is the Windows/macOS libm result, the other is glibc's.
+            if cfg!(any(windows, target_os = "macos")) { 3_181_404_250_202_190_309 } else { 212_434_250_856_407_980 },
             "Remesh payload fixture drifted from the chained kernels"
         );
         let flips_only = ok(&source, 0.8, &|p| {
