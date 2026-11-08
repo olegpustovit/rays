@@ -195,7 +195,8 @@ pub fn chips(ev: &flow_eval::Eval) -> Vec<(String, Color)> {
     ev.results
         .iter()
         .filter_map(|(name, v)| match v {
-            Value::Struct(kind, _, fields) if kind == "material/standard" => {
+            Value::Struct(p) if p.name == "material/standard" => {
+                let fields = &p.fields;
                 let colour = match field(fields, "color") {
                     Some(Value::Vec3(r, g, b)) => Some(color::rgb(byte(*r), byte(*g), byte(*b))),
                     Some(Value::Text(hex)) => color::hex(&String::from_utf8_lossy(hex)).ok(),
@@ -214,7 +215,7 @@ pub fn notes(ev: &flow_eval::Eval) -> Vec<(String, String)> {
     ev.results
         .iter()
         .filter_map(|(name, v)| match v {
-            Value::Struct(kind, _, fields) if kind == "material/standard" => match field(fields, "roughness") {
+            Value::Struct(p) if p.name == "material/standard" => match field(&p.fields, "roughness") {
                 Some(Value::Float(r)) => Some((name.clone(), format!("rough {}", cfmt::g(*r, 2)))),
                 Some(Value::Int(r)) => Some((name.clone(), format!("rough {}", r))),
                 _ => None,
@@ -945,20 +946,17 @@ fn paint_rows(ui: &mut Ui, content: &UiBox, c: PaintCtx) {
     let c = Rc::new(c);
     let _ = ui;
     let c2 = c.clone();
-    ui.draw(
-        content,
-        Box::new(move |paint, _| {
-            let c = &c2;
-            paint.fill(c.x, c.top, c.w, c.body, c.theme.panel);
-            for (k, row) in c.rows.iter().enumerate() {
-                let ry = c.top + c.tops[k] - c.scroll;
-                let rhh = c.tops[k + 1] - c.tops[k];
-                if ry + rhh > c.top && ry < c.top + c.body {
-                    paint_row(paint, c, k, row);
-                }
+    ui.draw(content, move |paint, _| {
+        let c = &c2;
+        paint.fill(c.x, c.top, c.w, c.body, c.theme.panel);
+        for (k, row) in c.rows.iter().enumerate() {
+            let ry = c.top + c.tops[k] - c.scroll;
+            let rhh = c.tops[k + 1] - c.tops[k];
+            if ry + rhh > c.top && ry < c.top + c.body {
+                paint_row(paint, c, k, row);
             }
-        }),
-    );
+        }
+    });
 }
 
 /// the wide sheet's bar of its keys and the graph count
@@ -969,41 +967,35 @@ fn paint_footer(ui: &mut Ui, theme: Theme, muted: Color, rh: f64, bounds: (f64, 
     let (x, y, w, h) = bounds;
     let boxed = ui.box_("navigator-footer", BoxOpts::default().w(Size::Px(w)).h(Size::Px(footer)).at((x, y + h - footer)));
     let small = kit::cap_size(ui);
-    ui.draw(
-        &boxed,
-        Box::new(move |paint, (fx, fy, fw, _)| {
-            paint.fill(fx, fy, fw, footer, theme.panel);
-            paint.fill(fx, fy, fw, 1.0, theme::edge(&theme));
-            let mut tx = fx + 12.0;
-            // each key in ink-3 at the label size, what it does in ink-2, 8 apart
-            for (key, what) in [("s", "filter"), ("i", "enter"), ("/ j", "jump")] {
-                paint.text_s((tx, kit::cap_y_paint(paint, fy + 1.0, rh)), small, theme::ink_3(&theme), key);
-                tx += paint.text_width(Some(small), key) + 8.0;
-                paint.text_c((tx, paint.text_top(None, fy + 1.0, rh)), muted, what);
-                tx += paint.text_width(None, what) + 8.0;
-            }
-            let count = plural(graphs as i64, "graph");
-            let cw = paint.cap_width(&count);
-            paint.cap((fx + fw - 12.0 - cw, kit::cap_y_paint(paint, fy + 1.0, rh)), None, &count);
-        }),
-    );
+    ui.draw(&boxed, move |paint, (fx, fy, fw, _)| {
+        paint.fill(fx, fy, fw, footer, theme.panel);
+        paint.fill(fx, fy, fw, 1.0, theme::edge(&theme));
+        let mut tx = fx + 12.0;
+        // each key in ink-3 at the label size, what it does in ink-2, 8 apart
+        for (key, what) in [("s", "filter"), ("i", "enter"), ("/ j", "jump")] {
+            paint.text_s((tx, kit::cap_y_paint(paint, fy + 1.0, rh)), small, theme::ink_3(&theme), key);
+            tx += paint.text_width(Some(small), key) + 8.0;
+            paint.text_c((tx, paint.text_top(None, fy + 1.0, rh)), muted, what);
+            tx += paint.text_width(None, what) + 8.0;
+        }
+        let count = plural(graphs as i64, "graph");
+        let cw = paint.cap_width(&count);
+        paint.cap((fx + fw - 12.0 - cw, kit::cap_y_paint(paint, fy + 1.0, rh)), None, &count);
+    });
 }
 
 fn paint_thumb(ui: &mut Ui, theme: Theme, total: f64, rh: f64, boxed: &UiBox) {
     // the scroll thumb: 4 points wide, 2 from the edge, line-3, over a track 6 points in from both ends
     let scroll = ui.scroll_position(boxed);
-    ui.draw_over(
-        boxed,
-        Box::new(move |paint, (bx, by, bw, bh)| {
-            let content = total + rh;
-            if content > bh {
-                let track = (bh - 12.0).max(1.0);
-                let thumb = track.min((track * bh / content).max(20.0));
-                let y = by + 6.0 + (track - thumb) * (scroll / (content - bh).max(1.0)).max(0.0).min(1.0);
-                paint.fill(bx + bw - 6.0, y, 4.0, thumb, theme::border(&theme));
-            }
-        }),
-    );
+    ui.draw_over(boxed, move |paint, (bx, by, bw, bh)| {
+        let content = total + rh;
+        if content > bh {
+            let track = (bh - 12.0).max(1.0);
+            let thumb = track.min((track * bh / content).max(20.0));
+            let y = by + 6.0 + (track - thumb) * (scroll / (content - bh).max(1.0)).max(0.0).min(1.0);
+            paint.fill(bx + bw - 6.0, y, 4.0, thumb, theme::border(&theme));
+        }
+    });
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1092,15 +1084,12 @@ pub fn view(state: &State, ui: &mut Ui, bounds: (i64, i64, i64, i64), pa: &Param
     if state.query.is_empty() && !typing && state.rename.is_none() {
         let boxed = ui.box_("navigator-placeholder", BoxOpts::default().flags(CLIP).w(Size::Px(field_w - 4.0)).h(Size::Px(20.0)).at((x + 10.0, y + 6.0)));
         let wide_field = w >= 300.0;
-        ui.draw(
-            &boxed,
-            Box::new(move |paint, (px, py, pw, h)| {
-                let ty = paint.text_top(None, py, h);
-                paint.text_c((px, ty), muted, "/");
-                let cut = ell(paint, pw - 12.5, if wide_field { "go to node, graph, function" } else { "go to" });
-                paint.text_c((px + 12.5, ty), theme::ink_3(&theme), &cut);
-            }),
-        );
+        ui.draw(&boxed, move |paint, (px, py, pw, h)| {
+            let ty = paint.text_top(None, py, h);
+            paint.text_c((px, ty), muted, "/");
+            let cut = ell(paint, pw - 12.5, if wide_field { "go to node, graph, function" } else { "go to" });
+            paint.text_c((px + 12.5, ty), theme::ink_3(&theme), &cut);
+        });
     }
     let rows = rows(w >= 300.0, &state, pa);
     let tops = tops(rh, &rows);

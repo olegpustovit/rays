@@ -231,19 +231,16 @@ pub fn update(menu: Menu, ui: &mut Ui, bounds: (i64, i64, i64, i64)) -> (Option<
             // size, the node the new one goes after
             let title = ui.box_("pxui-graph-menu-title", BoxOpts::default().w(Size::Grow).h(Size::Px((4 + row) as f64)));
             let after = m.after.clone();
-            ui.draw(
-                &title,
-                Box::new(move |paint, (x, y, w, h)| {
-                    let size = paint.label_size();
-                    let top = paint.text_top(Some(size), y + 4.0, h - 4.0);
-                    paint.cap((x + 12.0, top), None, "Add node");
-                    if let Some(name) = &after {
-                        let text = format!("after {}", name);
-                        let tw = paint.text_width(Some(size), &text);
-                        paint.text_s((x + w - 8.0 - tw, top), size, theme::ink_2(&theme), &text);
-                    }
-                }),
-            );
+            ui.draw(&title, move |paint, (x, y, w, h)| {
+                let size = paint.label_size();
+                let top = paint.text_top(Some(size), y + 4.0, h - 4.0);
+                paint.cap((x + 12.0, top), None, "Add node");
+                if let Some(name) = &after {
+                    let text = format!("after {}", name);
+                    let tw = paint.text_width(Some(size), &text);
+                    paint.text_s((x + w - 8.0 - tw, top), size, theme::ink_2(&theme), &text);
+                }
+            });
             // the rows, kept so that a row's square and unavailability are known
             let latest: Rc<RefCell<Vec<Entry>>> = Rc::new(RefCell::new(Vec::new()));
             let (l1, l2, l3) = (latest.clone(), latest.clone(), latest.clone());
@@ -269,10 +266,10 @@ pub fn update(menu: Menu, ui: &mut Ui, bounds: (i64, i64, i64, i64)) -> (Option<
             );
             if !query.is_empty() {
                 let muted = theme::muted(&ui.theme());
-                ui.draw(&clear, Box::new(move |paint, (cx, cy, _, _)| {
+                ui.draw(&clear, move |paint, (cx, cy, _, _)| {
                     let ty = paint.text_top(None, cy, 20.0);
                     paint.text_c((cx + 6.5, ty), muted, "\u{d7}");
-                }));
+                });
             }
             let query = if ui.signal(&clear).clicked { String::new() } else { query };
             let right = format!("{} of {}", rows(&m, &query).len(), m.items.len());

@@ -138,15 +138,12 @@ pub fn draw_viewport_pane(
         let layer = view_layer(ui, leaf.body, "viewport-caption");
         let theme = ui.theme();
         let text = text.clone();
-        ui.draw(
-            &layer,
-            Box::new(move |paint, (x, y, _, h)| {
-                let (px, py) = (x + 12.0, y + h - 24.0);
-                let w = paint.cap_width(&text) + 8.0;
-                paint.fill(px - 4.0, py, w, 16.0, theme.panel);
-                paint.cap((px, py + 2.0), None, &text);
-            }),
-        );
+        ui.draw(&layer, move |paint, (x, y, _, h)| {
+            let (px, py) = (x + 12.0, y + h - 24.0);
+            let w = paint.cap_width(&text) + 8.0;
+            paint.fill(px - 4.0, py, w, 16.0, theme.panel);
+            paint.cap((px, py + 2.0), None, &text);
+        });
     }
     // over each view, in the kit's marks (viewport.html): the render frame and its label, the traced
     // readout at the upper left, the render camera at the upper right, the selected object's
@@ -174,13 +171,10 @@ pub fn draw_viewport_pane(
                 );
                 ui.to_front(i64::MAX, &boxed);
                 let size = kit::cap_size(ui);
-                ui.draw(
-                    &boxed,
-                    Box::new(move |paint, (x, y, _, h)| {
-                        let cy = paint.text_top(Some(size), y, h);
-                        paint.cap((x + 4.0, cy), None, &text);
-                    }),
-                );
+                ui.draw(&boxed, move |paint, (x, y, _, h)| {
+                    let cy = paint.text_top(Some(size), y, h);
+                    paint.cap((x + 4.0, cy), None, &text);
+                });
             }
         }
     }
@@ -217,71 +211,68 @@ pub fn draw_viewport_pane(
         // camera readout, no object count; a wide one follows viewport.html
         let narrow = bw < 1000;
         let fps = value.status_fps;
-        ui.draw(
-            &overlay,
-            Box::new(move |paint, (x, y, w, h)| {
-                if let Some((gx, gy, gw, gh)) = gate {
-                    let (gx, gy, gw, gh) = (gx as f64, gy as f64, gw as f64, gh as f64);
-                    paint.stroke(gx + 0.5, gy + 0.5, gw - 1.0, gh - 1.0, theme::edge(&theme));
-                    // the corner marks lie on the frame's own edge: 16 points, 1 wide, in ink
-                    paint.brackets(gx, gy, gw, gh, 0.0, 16.0, 1.0, theme.foreground);
-                    // the label stands over the frame's left end with no ground of its own; the traced
-                    // readout, drawn after it, covers its head where the sheet's does
-                    let at = kit::cap_y_paint(paint, if gy - y >= 20.0 { gy - 20.0 } else { gy + 4.0 }, rh);
-                    paint.cap((gx, at), None, &format!("Render frame \u{b7} {} \u{d7} {}", root.width, root.height));
-                }
-                // a traced viewport's readout: the path tracer and its backend as labels, the samples as a
-                // 20-point count over a 4-point bar, the film as a label; 4 apart, on the ground
-                if let Some(t) = &traced {
-                    traced_readout(paint, &theme, rh, narrow, (x, y, w, h), t);
-                }
-                if let Some(((sx, sy, sw, sh), name)) = &boxed {
-                    let (sx, sy, sw, sh) = (*sx as f64, *sy as f64, *sw as f64, *sh as f64);
-                    if sw > 8.0 && sh > 8.0 {
-                        paint.brackets(sx, sy, sw, sh, 4.0, 8.0, 2.0, theme.accent);
-                        // the name in the accent, in the row that ends where the brackets begin, then how
-                        // many points the object cooked to, on the ground
-                        let ny = sy - 4.0 - rh;
-                        let cy = kit::cap_y_paint(paint, ny, rh);
-                        paint.cap((sx - 4.0, cy), Some(theme.accent), name);
-                        if let Some(n) = points {
-                            let lx = sx - 4.0 + paint.cap_width(name) + 8.0;
-                            label(paint, &theme, rh, lx, ny, 4.0, 4.0, Some(theme::ink_2(&theme)), &format!("{} pts", group_digits(n)));
-                        }
+        ui.draw(&overlay, move |paint, (x, y, w, h)| {
+            if let Some((gx, gy, gw, gh)) = gate {
+                let (gx, gy, gw, gh) = (gx as f64, gy as f64, gw as f64, gh as f64);
+                paint.stroke(gx + 0.5, gy + 0.5, gw - 1.0, gh - 1.0, theme::edge(&theme));
+                // the corner marks lie on the frame's own edge: 16 points, 1 wide, in ink
+                paint.brackets(gx, gy, gw, gh, 0.0, 16.0, 1.0, theme.foreground);
+                // the label stands over the frame's left end with no ground of its own; the traced
+                // readout, drawn after it, covers its head where the sheet's does
+                let at = kit::cap_y_paint(paint, if gy - y >= 20.0 { gy - 20.0 } else { gy + 4.0 }, rh);
+                paint.cap((gx, at), None, &format!("Render frame \u{b7} {} \u{d7} {}", root.width, root.height));
+            }
+            // a traced viewport's readout: the path tracer and its backend as labels, the samples as a
+            // 20-point count over a 4-point bar, the film as a label; 4 apart, on the ground
+            if let Some(t) = &traced {
+                traced_readout(paint, &theme, rh, narrow, (x, y, w, h), t);
+            }
+            if let Some(((sx, sy, sw, sh), name)) = &boxed {
+                let (sx, sy, sw, sh) = (*sx as f64, *sy as f64, *sw as f64, *sh as f64);
+                if sw > 8.0 && sh > 8.0 {
+                    paint.brackets(sx, sy, sw, sh, 4.0, 8.0, 2.0, theme.accent);
+                    // the name in the accent, in the row that ends where the brackets begin, then how
+                    // many points the object cooked to, on the ground
+                    let ny = sy - 4.0 - rh;
+                    let cy = kit::cap_y_paint(paint, ny, rh);
+                    paint.cap((sx - 4.0, cy), Some(theme.accent), name);
+                    if let Some(n) = points {
+                        let lx = sx - 4.0 + paint.cap_width(name) + 8.0;
+                        label(paint, &theme, rh, lx, ny, 4.0, 4.0, Some(theme::ink_2(&theme)), &format!("{} pts", group_digits(n)));
                     }
                 }
-                if !narrow {
-                    if let Some(node) = &camera {
-                        camera_readout(paint, &theme, rh, (x, y, w, h), node);
-                    }
+            }
+            if !narrow {
+                if let Some(node) = &camera {
+                    camera_readout(paint, &theme, rh, (x, y, w, h), node);
                 }
-                // the scene's size and the frame rate: labels 12 apart, the rate in ink, in the row that
-                // ends 12 (6 on a narrow body) above the pane's foot
-                let edge = if narrow { 8.0 } else { 12.0 };
-                let row_y = y + h - (if narrow { 6.0 } else { 12.0 }) - rh;
-                let mut items: Vec<(String, Option<Color>)> = vec![(format!("{} tris", group_digits(tris)), None)];
-                if !narrow {
-                    items.push((format!("{objects} object{}", if objects == 1 { "" } else { "s" }), None));
-                }
-                if let Some(fps) = fps {
-                    items.push((format!("{fps} fps"), Some(theme.foreground)));
-                }
-                let mut total = 12.0 * (items.len() as f64 - 1.0);
-                for (text, _) in &items {
-                    total += paint.cap_width(text);
-                }
-                // the wide sheet's readout stands on a patch of the ground; the narrow one on the view
-                if !narrow {
-                    paint.fill(x + w - edge - total - 8.0, row_y, total + 8.0, rh, theme.panel);
-                }
-                let mut at = x + w - edge - total;
-                for (text, color) in &items {
-                    let cy = kit::cap_y_paint(paint, row_y, rh);
-                    paint.cap((at, cy), *color, text);
-                    at += paint.cap_width(text) + 12.0;
-                }
-            }),
-        );
+            }
+            // the scene's size and the frame rate: labels 12 apart, the rate in ink, in the row that
+            // ends 12 (6 on a narrow body) above the pane's foot
+            let edge = if narrow { 8.0 } else { 12.0 };
+            let row_y = y + h - (if narrow { 6.0 } else { 12.0 }) - rh;
+            let mut items: Vec<(String, Option<Color>)> = vec![(format!("{} tris", group_digits(tris)), None)];
+            if !narrow {
+                items.push((format!("{objects} object{}", if objects == 1 { "" } else { "s" }), None));
+            }
+            if let Some(fps) = fps {
+                items.push((format!("{fps} fps"), Some(theme.foreground)));
+            }
+            let mut total = 12.0 * (items.len() as f64 - 1.0);
+            for (text, _) in &items {
+                total += paint.cap_width(text);
+            }
+            // the wide sheet's readout stands on a patch of the ground; the narrow one on the view
+            if !narrow {
+                paint.fill(x + w - edge - total - 8.0, row_y, total + 8.0, rh, theme.panel);
+            }
+            let mut at = x + w - edge - total;
+            for (text, color) in &items {
+                let cy = kit::cap_y_paint(paint, row_y, rh);
+                paint.cap((at, cy), *color, text);
+                at += paint.cap_width(text) + 12.0;
+            }
+        });
     }
     match active {
         Some(leaf) => roots.iter().find(|(l, _)| l.path == leaf.path).map(|(_, b)| b.clone()).unwrap_or_else(|| none_root(ui)),

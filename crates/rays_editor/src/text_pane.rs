@@ -1877,13 +1877,10 @@ fn colour_popup(ui: &mut Ui, at: (f64, f64), text: &str, range: (i64, i64)) -> O
                 let ax_x = sliders_x + (index as f64 * (field_w + 8.0));
                 let (cap_y, size, ink) = (kit::cap_y(ui, cy, 20.0), kit::cap_size(ui), theme::ink_3(&theme));
                 let boxed2 = boxed.clone();
-                ui.draw(
-                    &boxed2,
-                    Box::new(move |paint, (x, y, _, _)| {
-                        let _ = cap_y;
-                        paint.text_s((x + ax_x + 2.0, kit::cap_y_paint(paint, y + cy, 20.0)), size, ink, axis);
-                    }),
-                );
+                ui.draw(&boxed2, move |paint, (x, y, _, _)| {
+                    let _ = cap_y;
+                    paint.text_s((x + ax_x + 2.0, kit::cap_y_paint(paint, y + cy, 20.0)), size, ink, axis);
+                });
                 let display = format!("{:.2}", cur);
                 let o = ValueFieldOpts {
                     display: Some(display.clone()),
@@ -1951,7 +1948,7 @@ fn find_button(ui: &mut Ui, key: &str, right: &mut f64, active: bool, name: &str
 fn rule(ui: &mut Ui, theme: &Theme, key: &str, x: f64, width: f64, name: &str, at: f64) {
     let boxed = ui.box_(&format!("{}{}", key, name), BoxOpts::default().w(Size::Px(width)).h(Size::Px(1.0)).at((x, at)));
     let edge = theme::edge(theme);
-    ui.draw(&boxed, Box::new(move |paint, (x, y, w, h)| paint.fill(x, y, w, h, edge)));
+    ui.draw(&boxed, move |paint, (x, y, w, h)| paint.fill(x, y, w, h, edge));
 }
 
 /// the find bar between the text and the footer: one row, two with the replace row
@@ -2008,13 +2005,10 @@ fn find_bar(
     let count_w = 76.0;
     let boxed = ui.box_(&format!("{}-find-count", key), BoxOpts::default().w(Size::Px(count_w)).h(Size::Px(find_row)).at((right - count_w, ry)));
     let (bad, ink2) = (total == 0 && !f.query.is_empty(), theme::ink_2(theme));
-    ui.draw(
-        &boxed,
-        Box::new(move |paint, (x, y, w, h)| {
-            let tw = paint.text_width(None, &count);
-            paint.text_c((x + w - tw, paint.text_top(None, y, h)), if bad { theme::invalid() } else { ink2 }, &count);
-        }),
-    );
+    ui.draw(&boxed, move |paint, (x, y, w, h)| {
+        let tw = paint.text_width(None, &count);
+        paint.text_c((x + w - tw, paint.text_top(None, y, h)), if bad { theme::invalid() } else { ink2 }, &count);
+    });
     let (query, step) = ui.line_field(
         (x + 12.0, ry + 4.0),
         (right - count_w - 8.0 - x - 12.0).max(60.0),
@@ -2424,14 +2418,11 @@ fn editor_area(
         }
         let boxed = ui.box_(&format!("{}-parinfer-label", key), BoxOpts::default().w(Size::Px(80.0)).h(Size::Px(c.bar)).at((switch_x - 8.0 - 80.0, ty + 1.0)));
         let ink2 = theme::ink_2(&theme);
-        ui.draw(
-            &boxed,
-            Box::new(move |paint, (x, y, w, h)| {
-                let label = "parinfer";
-                let tw = paint.text_width(None, label);
-                paint.text_c((x + w - tw, paint.text_top(None, y, h)), ink2, label);
-            }),
-        );
+        ui.draw(&boxed, move |paint, (x, y, w, h)| {
+            let label = "parinfer";
+            let tw = paint.text_width(None, label);
+            paint.text_c((x + w - tw, paint.text_top(None, y, h)), ink2, label);
+        });
         rule(ui, &theme, key, c.x, c.width, "-rule2", ty + 1.0 + c.bar);
     }
     let wrong = !errors.is_empty();
@@ -2452,46 +2443,43 @@ fn editor_area(
             let w = if label.is_empty() { 0.0 } else { kit::cap_width(ui, &label) };
             (label, w)
         };
-        ui.draw(
-            &msg,
-            Box::new(move |paint, (x, y, w, h)| {
-                // the state: a dot in the error colour or the accent for a draft, then what it says; the
-                // first error is "n errors" in the error colour and its line and message in ink-2
-                let tx = if wrong || can_apply {
-                    paint.circle((x + 15.0, y + (h / 2.0)), 3.0, Some(if wrong { theme::invalid() } else { accent }), None);
-                    x + 26.0
-                } else {
-                    x + 12.0
-                };
-                // the label at the row's end: where the caret is, and whether the text is a draft
-                let tail = if !state_label.is_empty() { cap_w + 20.0 } else { 12.0 };
-                let ty = paint.text_top(None, y, h);
-                match errors.first() {
-                    Some(first) => {
-                        let count = format!("{} error{}", errors.len(), if errors.len() == 1 { "" } else { "s" });
-                        paint.text_c((tx, ty), theme::invalid(), &count);
-                        let dx = tx + paint.text_width(None, &count) + 8.0;
-                        let detail = format!(
-                            "{}{}",
-                            match line_of(&text_c, first) {
-                                Some(l) => format!("line {} \u{b7} ", l),
-                                None => String::new(),
-                            },
-                            first_line(&diagnostic::to_string(first))
-                        );
-                        let cut = ellipsis(&mut |s| paint.text_width(None, s), x + w - tail - dx, &detail);
-                        paint.text_c((dx, ty), ink2, &cut);
-                    }
-                    None => {
-                        let cut = ellipsis(&mut |s| paint.text_width(None, s), x + w - tail - tx, &message);
-                        paint.text_c((tx, ty), ink2, &cut);
-                    }
+        ui.draw(&msg, move |paint, (x, y, w, h)| {
+            // the state: a dot in the error colour or the accent for a draft, then what it says; the
+            // first error is "n errors" in the error colour and its line and message in ink-2
+            let tx = if wrong || can_apply {
+                paint.circle((x + 15.0, y + (h / 2.0)), 3.0, Some(if wrong { theme::invalid() } else { accent }), None);
+                x + 26.0
+            } else {
+                x + 12.0
+            };
+            // the label at the row's end: where the caret is, and whether the text is a draft
+            let tail = if !state_label.is_empty() { cap_w + 20.0 } else { 12.0 };
+            let ty = paint.text_top(None, y, h);
+            match errors.first() {
+                Some(first) => {
+                    let count = format!("{} error{}", errors.len(), if errors.len() == 1 { "" } else { "s" });
+                    paint.text_c((tx, ty), theme::invalid(), &count);
+                    let dx = tx + paint.text_width(None, &count) + 8.0;
+                    let detail = format!(
+                        "{}{}",
+                        match line_of(&text_c, first) {
+                            Some(l) => format!("line {} \u{b7} ", l),
+                            None => String::new(),
+                        },
+                        first_line(&diagnostic::to_string(first))
+                    );
+                    let cut = ellipsis(&mut |s| paint.text_width(None, s), x + w - tail - dx, &detail);
+                    paint.text_c((dx, ty), ink2, &cut);
                 }
-                if !state_label.is_empty() {
-                    paint.cap((x + w - 12.0 - cap_w, kit::cap_y_paint(paint, y, h)), None, &state_label);
+                None => {
+                    let cut = ellipsis(&mut |s| paint.text_width(None, s), x + w - tail - tx, &message);
+                    paint.text_c((tx, ty), ink2, &cut);
                 }
-            }),
-        );
+            }
+            if !state_label.is_empty() {
+                paint.cap((x + w - 12.0 - cap_w, kit::cap_y_paint(paint, y, h)), None, &state_label);
+            }
+        });
     }
     if let Some(at) = state.menu {
         let items: Vec<(String, bool)> = vec![
@@ -2686,10 +2674,10 @@ pub fn view(ui: &mut Ui, bounds: (i64, i64, i64, i64), tabs_right: Option<f64>, 
             let boxed = ui.box_("text-print-error", BoxOpts::default().flags(CLIP)
                 .w(Size::Px(width as f64)).h(Size::Px(height as f64)).at((x as f64, y as f64)));
             let message = diagnostic::to_string(&error);
-            ui.draw(&boxed, Box::new(move |paint, (x, y, _, _)| {
+            ui.draw(&boxed, move |paint, (x, y, _, _)| {
                 let top = paint.text_top(None, y, 24.0);
                 paint.text_c((x + 12.0, top), theme::invalid(), &message);
-            }));
+            });
             vec![Intent::PrintError(error)]
         }
     }

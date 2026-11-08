@@ -91,7 +91,7 @@ pub fn rule(ui: &mut Ui, key: &str, header: Header, from: f64) {
         BoxOpts::default().w(UiSize::Px(1.0)).h(UiSize::Px(12.0)).at((hx as f64 + from - 13.0, hy as f64 + ((hh - 12) as f64 / 2.0))),
     );
     let border = pxui::theme::border(&ui.theme());
-    ui.draw(&b, Box::new(move |paint, (x, y, w, h)| paint.fill(x, y, w, h, border)));
+    ui.draw(&b, move |paint, (x, y, w, h)| paint.fill(x, y, w, h, border));
 }
 
 /// The toolbar in a panel header, `from` points after the header's left edge; the tool clicked this

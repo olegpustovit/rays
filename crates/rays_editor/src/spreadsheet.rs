@@ -30,7 +30,7 @@ pub fn view(ui: &mut Ui, bounds: (i64, i64, i64, i64), owner: i64, geometry: Opt
                 "sheet-empty",
                 BoxOpts::default().at((x as f64, y as f64 + 24.0)).w(Size::Px(w as f64)).h(Size::Px(24.0)),
             );
-            ui.draw(&b, Box::new(|paint, (x, y, _, _)| paint.text((x + 8.0, y + 5.0), "Select a cooked geometry node.")));
+            ui.draw(&b, |paint, (x, y, _, _)| paint.text((x + 8.0, y + 5.0), "Select a cooked geometry node."));
         }
         Some(geometry) => {
             let columns = Rc::new(columns(owner, geometry));
