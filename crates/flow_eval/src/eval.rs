@@ -3321,6 +3321,12 @@ pub mod residual {
         let mut cell = held(&arena); let arena = cell.as_mut().expect("filled");
         arena.residuals.get(&id).map(|r| r.term.ty().clone())
     }
+    /// `residual_view`'s `(instance, site, iter)` without cloning the term and every binding.
+    pub fn residual_site(id: ResidualId) -> Option<(i64, Path, Vec<i64>)> {
+        let arena = arena_for_residual(&id)?;
+        let mut cell = held(&arena); let arena = cell.as_mut().expect("filled");
+        own_res(arena, &id).map(|r| (r.ctx.inst, site(&r.ctx), r.ctx.iter.to_vec()))
+    }
     pub fn residual_term(id: ResidualId) -> Option<Arc<Term>> {
         let arena = arena_for_residual(&id)?;
         let mut cell = held(&arena); let arena = cell.as_mut().expect("filled");

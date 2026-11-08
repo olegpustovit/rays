@@ -200,10 +200,10 @@ pub fn device_groups(approx: &Paths, fast: bool, program: &C::Program, width: &d
     let static_ = static_invokes(program);
     let rate = |k: i64| info[k as usize].as_ref().map(|i| static_[i.result as usize]).unwrap_or(false);
     let precision = |k: i64| {
-        fast || {
+        fast || (!approx.is_empty() && {
             let (_, site, _) = packed::site(&program.regions[k as usize]);
             approx.contains(&site)
-        }
+        })
     };
     let single = |k: i64| {
         let i = info[k as usize].as_ref().expect("invoked region");

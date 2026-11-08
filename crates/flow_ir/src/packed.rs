@@ -500,9 +500,9 @@ pub fn provenance(t: &T) -> Vec<(i64, Path, Vec<i64>)> {
 
 /// The consuming stage, where the group's single timing belongs.
 pub fn site(t: &T) -> (i64, Path, Vec<i64>) {
-    match E::residual::residual_view(t.residual) {
-        Ok(view) => (view.instance, t.term.path().map(|ids| ids.iter().map(|&id| t.term.name(id).to_owned()).collect()).unwrap_or(view.site), view.iter),
-        Err(_) => (0, t.term.path().map(|ids| ids.iter().map(|&id| t.term.name(id).to_owned()).collect()).unwrap_or_default(), Vec::new()),
+    match E::residual::residual_site(t.residual) {
+        Some((instance, site, iter)) => (instance, t.term.path().map(|ids| ids.iter().map(|&id| t.term.name(id).to_owned()).collect()).unwrap_or(site), iter),
+        None => (0, t.term.path().map(|ids| ids.iter().map(|&id| t.term.name(id).to_owned()).collect()).unwrap_or_default(), Vec::new()),
     }
 }
 
