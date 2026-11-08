@@ -1,7 +1,6 @@
 //! Breadth-first tree scan over a parent array: the shared core of Edge Transport Parent and the
 //! Lisp `graph/forest`.
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
 
 use rdk_core::{error, support};
 
@@ -38,17 +37,14 @@ fn normalize(
     if point_count <= 0 {
         return Ok(Vec::new());
     }
-    let ranges = ((point_count - 1) / GRAIN + 1) as usize;
-    let slots: Vec<Mutex<Vec<i64>>> = (0..ranges).map(|_| Mutex::new(Vec::new())).collect();
+    let mut output = vec![0; point_count as usize];
+    let windows = support::Windows::even(&mut output, GRAIN);
     support::run_indexed_ranges(GRAIN, point_count, &|range, first, last| {
-        let local: Vec<i64> = (first..last).map(value).collect();
-        *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = local;
+        for (point, slot) in (first..last).zip(windows.take(range)) {
+            *slot = value(point);
+        }
         Ok(())
     })?;
-    let mut output = Vec::with_capacity(point_count as usize);
-    for slot in slots {
-        output.extend(slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner));
-    }
     Ok(output)
 }
 

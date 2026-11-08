@@ -2,7 +2,6 @@
 //!
 //! Output ranges are filled by disjoint parallel ranges joined in range order, so every result is
 //! byte-identical to the sequential path.
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use rays_math::mat4;
@@ -30,41 +29,22 @@ fn lift(value: error::T) -> error::T {
     }
 }
 
-fn range_count(length: i64, grain: i64) -> usize {
-    if length <= 0 { 0 } else { ((length - 1) / grain + 1) as usize }
-}
-
-fn build_i64(cancel_value: Option<&cancel::T>, grain: i64, length: i64, value: &(dyn Fn(i64) -> i64 + Sync)) -> Result<Vec<i64>, error::T> {
-    let slots: Vec<Mutex<Vec<i64>>> = (0..range_count(length, grain)).map(|_| Mutex::new(Vec::new())).collect();
-    support::run_ranges(Some(grain), length, &|first, last| {
+fn build<T: Default + Clone + Send>(
+    cancel_value: Option<&cancel::T>,
+    grain: i64,
+    length: i64,
+    value: &(dyn Fn(i64) -> T + Sync),
+) -> Result<Vec<T>, error::T> {
+    let mut output = vec![T::default(); length.max(0) as usize];
+    let windows = support::Windows::even(&mut output, grain);
+    support::run_indexed_ranges(grain, length, &|range, first, last| {
         cancel::check_opt(cancel_value)?;
-        let part: Vec<i64> = (first..last).map(value).collect();
-        let index = (first / grain) as usize;
-        *slots[index].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = part;
+        for (index, slot) in (first..last).zip(windows.take(range)) {
+            *slot = value(index);
+        }
         Ok(())
     })
     .map_err(lift)?;
-    let mut output = Vec::with_capacity(length.max(0) as usize);
-    for slot in slots {
-        output.extend(slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner));
-    }
-    Ok(output)
-}
-
-fn build_f64(cancel_value: Option<&cancel::T>, grain: i64, length: i64, value: &(dyn Fn(i64) -> f64 + Sync)) -> Result<Vec<f64>, error::T> {
-    let slots: Vec<Mutex<Vec<f64>>> = (0..range_count(length, grain)).map(|_| Mutex::new(Vec::new())).collect();
-    support::run_ranges(Some(grain), length, &|first, last| {
-        cancel::check_opt(cancel_value)?;
-        let part: Vec<f64> = (first..last).map(value).collect();
-        let index = (first / grain) as usize;
-        *slots[index].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = part;
-        Ok(())
-    })
-    .map_err(lift)?;
-    let mut output = Vec::with_capacity(length.max(0) as usize);
-    for slot in slots {
-        output.extend(slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner));
-    }
     Ok(output)
 }
 
@@ -76,29 +56,23 @@ fn build_xyz(
     length: i64,
     value: &(dyn Fn(i64) -> (f64, f64, f64) + Sync),
 ) -> Result<Xyz, error::T> {
-    let slots: Vec<Mutex<Xyz>> =
-        (0..range_count(length, grain)).map(|_| Mutex::new((Vec::new(), Vec::new(), Vec::new()))).collect();
-    support::run_ranges(Some(grain), length, &|first, last| {
+    let length_usize = length.max(0) as usize;
+    let (mut x, mut y, mut z) = (vec![0.0; length_usize], vec![0.0; length_usize], vec![0.0; length_usize]);
+    let (wx, wy, wz) = (
+        support::Windows::even(&mut x, grain),
+        support::Windows::even(&mut y, grain),
+        support::Windows::even(&mut z, grain),
+    );
+    support::run_indexed_ranges(grain, length, &|range, first, last| {
         cancel::check_opt(cancel_value)?;
-        let (mut x, mut y, mut z) = (Vec::new(), Vec::new(), Vec::new());
+        let (ox, oy, oz) = (wx.take(range), wy.take(range), wz.take(range));
         for index in first..last {
-            let (px, py, pz) = value(index);
-            x.push(px);
-            y.push(py);
-            z.push(pz);
+            let at = (index - first) as usize;
+            (ox[at], oy[at], oz[at]) = value(index);
         }
-        let index = (first / grain) as usize;
-        *slots[index].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = (x, y, z);
         Ok(())
     })
     .map_err(lift)?;
-    let (mut x, mut y, mut z) = (Vec::new(), Vec::new(), Vec::new());
-    for slot in slots {
-        let (px, py, pz) = slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner);
-        x.extend(px);
-        y.extend(py);
-        z.extend(pz);
-    }
     Ok((x, y, z))
 }
 
@@ -107,7 +81,7 @@ fn repeat_f64(cancel_value: Option<&cancel::T>, grain: i64, copies: i64, source:
     if copies == 0 || length == 0 {
         return Ok(Vec::new());
     }
-    build_f64(cancel_value, grain, copies * length, &|index| source[(index % length) as usize])
+    build(cancel_value, grain, copies * length, &|index| source[(index % length) as usize])
 }
 
 fn repeat_i64(cancel_value: Option<&cancel::T>, grain: i64, copies: i64, source: &[i64]) -> Result<Vec<i64>, error::T> {
@@ -115,7 +89,7 @@ fn repeat_i64(cancel_value: Option<&cancel::T>, grain: i64, copies: i64, source:
     if copies == 0 || length == 0 {
         return Ok(Vec::new());
     }
-    build_i64(cancel_value, grain, copies * length, &|index| source[(index % length) as usize])
+    build(cancel_value, grain, copies * length, &|index| source[(index % length) as usize])
 }
 
 fn repeat_text(copies: i64, source: &[Vec<u8>]) -> Vec<Vec<u8>> {
@@ -338,12 +312,12 @@ fn materialize(transforms: &[mat4::T], geometry_value: &geometry::T) -> Result<g
         apply_row(&rows[copy as usize], source_positions.x[point], source_positions.y[point], source_positions.z[point])
     })?;
     let source_topology = topology::View::view(geometry::topology(geometry_value)).map_err(lift)?;
-    let vertex_points = build_i64(cancel_value, grain, output_vertices, &|index| {
+    let vertex_points = build(cancel_value, grain, output_vertices, &|index| {
         let copy = index / source_vertices;
         let at = (index - copy * source_vertices) as usize;
         source_topology.vertex_points[at] + copy * source_points
     })?;
-    let mut primitive_offsets = build_i64(cancel_value, grain, output_primitives, &|index| {
+    let mut primitive_offsets = build(cancel_value, grain, output_primitives, &|index| {
         let copy = index / source_primitives;
         let at = (index - copy * source_primitives) as usize;
         source_topology.primitive_offsets[at] + copy * source_vertices
@@ -437,6 +411,7 @@ mod tests {
     use crate::mesh_merge;
     use rays_math::vec3;
     use rdk_core::topology::PrimitiveKind;
+    use std::sync::Mutex;
 
     type P3 = (f64, f64, f64);
 

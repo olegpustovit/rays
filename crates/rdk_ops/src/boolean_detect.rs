@@ -2,7 +2,7 @@
 //!
 //! Both inputs are deterministically triangulated only inside packed surface indexes. Broad phase,
 //! narrow testing, row sorting, and packed group output use deterministic disjoint parallel ranges.
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use rdk_core::{attribute, cancel, error, geometry, group, packed, support};
 use rdk_geom::surface_index;
@@ -53,10 +53,6 @@ fn cancelled() -> error::T {
     make("cancelled", "Boolean Detect was cancelled".to_owned())
 }
 
-fn range_count(count: i64, grain: i64) -> i64 {
-    if count <= 0 { 0 } else { (count - 1) / grain + 1 }
-}
-
 struct Outputs {
     unique_counts: Vec<i64>,
     offsets: Vec<i64>,
@@ -76,28 +72,44 @@ fn unique_rows(
         cancel::poll(cancel_value, primitive as i64, 4095)?;
         raw_offsets[primitive + 1] = raw_offsets[primitive] + raw_counts[primitive];
     }
-    let slots: Vec<Mutex<(Vec<i64>, Vec<i64>)>> = (0..range_count(primitive_count, grain)).map(|_| Mutex::new((Vec::new(), Vec::new()))).collect();
+    // Rows are sorted/deduped in place inside a copy of the raw values (range windows follow the raw
+    // offsets, fixed by `grain`); a sequential memmove then closes the gaps dedup left between ranges.
+    let step = grain.max(1);
+    let ranges = support::range_count(primitive_count, step);
+    let bound = |range: i64| raw_offsets[range.saturating_mul(step).min(primitive_count) as usize] as usize;
+    let mut values = raw_values.to_vec();
+    let mut unique_counts = vec![0_i64; primitive_count as usize];
+    let (w_values, w_counts) =
+        (support::Windows::new(&mut values, ranges, bound), support::Windows::even(&mut unique_counts, step));
     support::run_indexed_ranges(grain, primitive_count, &|range, first, last| {
-        let mut counts = Vec::with_capacity((last - first) as usize);
-        let mut values = Vec::new();
+        let (window, counts) = (w_values.take(range), w_counts.take(range));
+        let base = raw_offsets[first as usize];
+        let mut used = 0;
         for primitive in first..last {
             cancel::poll(cancel_value, primitive, 4095)?;
-            let mut row = raw_values[raw_offsets[primitive as usize] as usize..raw_offsets[primitive as usize + 1] as usize].to_vec();
-            row.sort_unstable();
-            row.dedup();
-            counts.push(row.len() as i64);
-            values.extend(row);
+            let start = (raw_offsets[primitive as usize] - base) as usize;
+            let end = (raw_offsets[primitive as usize + 1] - base) as usize;
+            window[start..end].sort_unstable();
+            let row_start = used;
+            for index in start..end {
+                if used == row_start || window[index] != window[used - 1] {
+                    window[used] = window[index];
+                    used += 1;
+                }
+            }
+            counts[(primitive - first) as usize] = (used - row_start) as i64;
         }
-        *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = (counts, values);
         Ok(())
     })?;
-    let mut unique_counts = Vec::with_capacity(primitive_count as usize);
-    let mut values = Vec::new();
-    for slot in slots {
-        let (counts, part) = slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner);
-        unique_counts.extend(counts);
-        values.extend(part);
+    let mut end = 0;
+    for range in 0..ranges {
+        let (first, last) = ((range * step) as usize, ((range + 1) * step).min(primitive_count) as usize);
+        let used = unique_counts[first..last].iter().sum::<i64>() as usize;
+        let start = bound(range);
+        values.copy_within(start..start + used, end);
+        end += used;
     }
+    values.truncate(end);
     let mut offsets = vec![0_i64; primitive_count as usize + 1];
     for primitive in 0..primitive_count as usize {
         cancel::poll(cancel_value, primitive as i64, 4095)?;
@@ -171,13 +183,13 @@ fn detect_pairs(
     let collision_narrow = triangle_intersection::surface(Arc::clone(collision_surface), collision_geometry)?;
     let byte_count = (candidates + 7) / 8;
     let byte_grain = (grain / 8).max(1);
-    let slots: Vec<Mutex<Vec<u8>>> = (0..range_count(byte_count, byte_grain)).map(|_| Mutex::new(Vec::new())).collect();
+    let mut keep = vec![0_u8; byte_count as usize];
+    let windows = support::Windows::even(&mut keep, byte_grain);
     support::run_indexed_ranges(byte_grain, byte_count, &|range, first_byte, last_byte| {
         let mut scratch = [0.0_f64; 26];
         let mut point_info = [0_i64; 10];
         let mut events = [0.0_f64; MAX_EVENTS * EVENT_STRIDE];
-        let mut bytes = Vec::with_capacity((last_byte - first_byte) as usize);
-        for byte in first_byte..last_byte {
+        for (byte, slot) in (first_byte..last_byte).zip(windows.take(range)) {
             let first = byte * 8;
             let last = candidates.min(first + 8);
             let mut bits = 0_u8;
@@ -199,15 +211,10 @@ fn detect_pairs(
                     bits |= 1 << (candidate - first);
                 }
             }
-            bytes.push(bits);
+            *slot = bits;
         }
-        *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = bytes;
         Ok(())
     })?;
-    let mut keep: Vec<u8> = Vec::with_capacity(byte_count as usize);
-    for slot in slots {
-        keep.extend(slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner));
-    }
     let primitive_count = geometry::primitive_count(source_geometry) as usize;
     let mut raw_counts = vec![0_i64; primitive_count];
     let mut exact = 0_usize;
@@ -384,6 +391,7 @@ pub fn run_checked(params: &Params, collision: &geometry::T, geometry_value: &ge
 mod tests {
     use super::*;
     use rdk_core::topology;
+    use std::sync::Mutex;
 
     fn mesh(points: &[(f64, f64, f64)], triangles: &[i64]) -> geometry::T {
         let x = points.iter().map(|p| p.0).collect();

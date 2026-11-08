@@ -1,5 +1,5 @@
 //! Geometry adapter for the shared packed planar Delaunay kernel.
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use rays_math::vec3;
@@ -345,22 +345,16 @@ fn par_i64(
     count: i64,
     value: &(dyn Fn(i64) -> Result<i64, error::T> + Sync),
 ) -> Result<Vec<i64>, error::T> {
-    let ranges = if count <= 0 { 0 } else { (count - 1) / grain + 1 };
-    let slots: Vec<Mutex<Vec<i64>>> = (0..ranges).map(|_| Mutex::new(Vec::new())).collect();
+    let mut output = vec![0; count.max(0) as usize];
+    let windows = support::Windows::even(&mut output, grain);
     support::run_indexed_ranges(grain, count, &|range, first, last| {
-        let mut part = Vec::with_capacity((last - first) as usize);
-        for index in first..last {
+        for (index, slot) in (first..last).zip(windows.take(range)) {
             cancel::poll(cancel_value, index, 4095)?;
-            part.push(value(index)?);
+            *slot = value(index)?;
         }
-        *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = part;
         Ok(())
     })
     .map_err(pass)?;
-    let mut output = Vec::with_capacity(count.max(0) as usize);
-    for slot in slots {
-        output.extend(slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner));
-    }
     Ok(output)
 }
 
@@ -371,26 +365,19 @@ fn par_xy(
     count: i64,
     value: &(dyn Fn(i64) -> Result<(f64, f64), error::T> + Sync),
 ) -> Result<(Vec<f64>, Vec<f64>), error::T> {
-    let ranges = if count <= 0 { 0 } else { (count - 1) / grain + 1 };
-    let slots: Vec<Mutex<(Vec<f64>, Vec<f64>)>> = (0..ranges).map(|_| Mutex::new((Vec::new(), Vec::new()))).collect();
+    let length = count.max(0) as usize;
+    let (mut x, mut y) = (vec![0.0; length], vec![0.0; length]);
+    let (wx, wy) = (support::Windows::even(&mut x, grain), support::Windows::even(&mut y, grain));
     support::run_indexed_ranges(grain, count, &|range, first, last| {
-        let (mut x, mut y) = (Vec::new(), Vec::new());
+        let (ox, oy) = (wx.take(range), wy.take(range));
         for index in first..last {
             cancel::poll(cancel_value, index, 4095)?;
-            let (px, py) = value(index)?;
-            x.push(px);
-            y.push(py);
+            let at = (index - first) as usize;
+            (ox[at], oy[at]) = value(index)?;
         }
-        *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = (x, y);
         Ok(())
     })
     .map_err(pass)?;
-    let (mut x, mut y) = (Vec::with_capacity(count.max(0) as usize), Vec::with_capacity(count.max(0) as usize));
-    for slot in slots {
-        let (px, py) = slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner);
-        x.extend(px);
-        y.extend(py);
-    }
     Ok((x, y))
 }
 
@@ -1008,14 +995,13 @@ fn finish_unrestored(
     if local_x.len() as i64 != local_count || local_y.len() as i64 != local_count {
         return Err(invalid("projected point materialization is malformed"));
     }
-    // Embedded positions in disjoint ranges, joined in range order.
-    let ranges = if local_count <= 0 { 0 } else { (local_count - 1) / grain + 1 };
-    let slots: Vec<Mutex<Vec<(f64, f64, f64)>>> = (0..ranges).map(|_| Mutex::new(Vec::new())).collect();
+    // Embedded positions in disjoint ranges, then scattered to their output slots.
+    let mut embedded = vec![(0.0, 0.0, 0.0); local_count.max(0) as usize];
     {
         let view: &PointMaterialization = &result;
+        let windows = support::Windows::even(&mut embedded, grain);
         support::run_indexed_ranges(grain, local_count, &|range, first, last| {
-            let mut part = Vec::with_capacity((last - first) as usize);
-            for index in first..last {
+            for (index, slot) in (first..last).zip(windows.take(range)) {
                 cancel::poll(cancel_value, index, 4095)?;
                 let (px, py, pz) = embed(local_x[index as usize], local_y[index as usize]);
                 if !finite3(px, py, pz) {
@@ -1024,22 +1010,17 @@ fn finish_unrestored(
                         view.local_to_output(index)
                     )));
                 }
-                part.push((px, py, pz));
+                *slot = (px, py, pz);
             }
-            *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = part;
             Ok(())
         })
         .map_err(pass)?;
     }
-    let mut local = 0_i64;
-    for slot in slots {
-        for (px, py, pz) in slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner) {
-            let output = result.local_to_output(local) as usize;
-            x[output] = px;
-            y[output] = py;
-            z[output] = pz;
-            local += 1;
-        }
+    for (local, (px, py, pz)) in embedded.into_iter().enumerate() {
+        let output = result.local_to_output(local as i64) as usize;
+        x[output] = px;
+        y[output] = py;
+        z[output] = pz;
     }
     result.positions = packed::Float3::View::of_owned_exn(x, y, z).map_err(pass)?;
     Ok(result)
@@ -1835,6 +1816,7 @@ fn triangulate(cancel_value: Option<&cancel::T>, params: &Params, geometry_value
 mod tests {
     use super::*;
     use rdk_core::topology::PrimitiveKind;
+    use std::sync::Mutex;
 
     type P3 = (f64, f64, f64);
 

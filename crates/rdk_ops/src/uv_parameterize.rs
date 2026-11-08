@@ -4,7 +4,7 @@
 //! an `error::T` with operation `Uv_parameterize.solve`, code `invalid_parameter` and the OCaml
 //! message, and a cancellation keeps code `cancelled`.
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::transform_ops::ocaml_quote;
 use rdk_core::{
@@ -121,7 +121,7 @@ fn edge_corner_variables(
     Ok((corner_to_variable[a as usize], corner_to_variable[b as usize]))
 }
 
-/// One float per index in `0..count`, computed in ranges of `grain` and joined in range order.
+/// One float per index in `0..count`, computed in ranges of `grain`.
 fn pmap(
     grain: i64,
     count: i64,
@@ -130,20 +130,14 @@ fn pmap(
     if count <= 0 {
         return Ok(Vec::new());
     }
-    let ranges = ((count - 1) / grain + 1) as usize;
-    let slots: Vec<Mutex<Vec<f64>>> = (0..ranges).map(|_| Mutex::new(Vec::new())).collect();
+    let mut output = vec![0.0; count as usize];
+    let windows = support::Windows::even(&mut output, grain);
     support::run_indexed_ranges(grain, count, &|range, first, last| {
-        let mut local = Vec::with_capacity((last - first) as usize);
-        for index in first..last {
-            local.push(value(index)?);
+        for (index, slot) in (first..last).zip(windows.take(range)) {
+            *slot = value(index)?;
         }
-        *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = local;
         Ok(())
     })?;
-    let mut output = Vec::with_capacity(count as usize);
-    for slot in slots {
-        output.extend(slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner));
-    }
     Ok(output)
 }
 
@@ -152,19 +146,20 @@ fn parallel_dot(grain: i64, count: i64, left: &[f64], right: &[f64]) -> Result<f
     if count <= 0 {
         return Ok(0.0);
     }
-    let ranges = ((count - 1) / grain + 1) as usize;
-    let sums: Vec<Mutex<f64>> = (0..ranges).map(|_| Mutex::new(0.0)).collect();
+    let ranges = support::range_count(count, grain);
+    let mut sums = vec![0.0; ranges as usize];
+    let windows = support::Windows::new(&mut sums, ranges, |range| range as usize);
     support::run_indexed_ranges(grain, count, &|range, first, last| {
         let mut sum = 0.0;
         for variable in first..last {
             sum += left[variable as usize] * right[variable as usize];
         }
-        *sums[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = sum;
+        windows.take(range)[0] = sum;
         Ok(())
     })?;
     let mut sum = 0.0;
     for part in sums {
-        sum += part.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner);
+        sum += part;
     }
     Ok(sum)
 }

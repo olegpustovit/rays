@@ -5,7 +5,7 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{self, AtomicI64};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use rdk_core::{
     attribute, cancel, element_selection, error, geometry, group, packed, support, topology,
@@ -594,19 +594,15 @@ enum Hull {
 }
 
 fn gather(cancel_value: Option<&cancel::T>, grain: i64, point_map: &[i64], source: &[f64]) -> Result<Vec<f64>, error::T> {
-    let count = point_map.len() as i64;
-    let slots: Vec<Mutex<Vec<f64>>> =
-        (0..((count + grain - 1) / grain).max(0)).map(|_| Mutex::new(Vec::new())).collect();
-    support::run_indexed_ranges(grain, count, &|range, first, last| {
+    let mut output = vec![0.0; point_map.len()];
+    let windows = support::Windows::even(&mut output, grain);
+    support::run_indexed_ranges(grain, point_map.len() as i64, &|range, first, last| {
         cancel::poll(cancel_value, first, 4095)?;
-        let part: Vec<f64> = (first..last).map(|point| source[point_map[point as usize] as usize]).collect();
-        *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = part;
+        for (point, slot) in (first..last).zip(windows.take(range)) {
+            *slot = source[point_map[point as usize] as usize];
+        }
         Ok(())
     })?;
-    let mut output = Vec::with_capacity(point_map.len());
-    for slot in slots {
-        output.extend(slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner));
-    }
     Ok(output)
 }
 
@@ -818,6 +814,7 @@ fn run_inner(params: &Params, geometry_value: &geometry::T) -> Result<geometry::
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
 
     fn point_cloud(values: &[(f64, f64, f64)]) -> geometry::T {
         let x = values.iter().map(|v| v.0).collect();

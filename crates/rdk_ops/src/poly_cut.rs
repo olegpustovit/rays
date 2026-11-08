@@ -3,7 +3,7 @@
 //!
 //! OCaml wraps `cut` in `Error.guard ~operation:"poly_cut" ~code:"invalid_poly_cut"`: a failure has
 //! those fields and the OCaml message, a cancellation has code `cancelled`.
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use rdk_core::{
     attribute, cancel, edge_group, error, geometry, group, packed, support, topology, topology_index,
@@ -304,14 +304,12 @@ fn remap_edge_groups(
             )));
         }
         let byte_count = (edge_count + 7) / 8;
-        let mut bits: Vec<u8> = Vec::with_capacity(byte_count as usize);
+        let mut bits = vec![0_u8; byte_count as usize];
         if byte_count > 0 {
             let chunk = (grain / 8).max(1);
-            let ranges = ((byte_count - 1) / chunk + 1) as usize;
-            let slots: Vec<Mutex<Vec<u8>>> = (0..ranges).map(|_| Mutex::new(Vec::new())).collect();
+            let windows = Windows::even(&mut bits, chunk);
             support::run_indexed_ranges(chunk, byte_count, &|range, first, last| {
-                let mut local = Vec::with_capacity((last - first) as usize);
-                for byte in first..last {
+                for (byte, slot) in (first..last).zip(windows.take(range)) {
                     cancel::poll(cancel_value, byte, 511)?;
                     let mut value = 0_u8;
                     for bit in 0..8 {
@@ -323,14 +321,10 @@ fn remap_edge_groups(
                             }
                         }
                     }
-                    local.push(value);
+                    *slot = value;
                 }
-                *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = local;
                 Ok(())
             })?;
-            for slot in slots {
-                bits.extend(slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner));
-            }
         }
         output.push(edge_group::View::of_owned_bits(
             target_topology,
@@ -1322,46 +1316,24 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
         }
     }
     let source_positions = packed::Float3::View::view(geometry::positions(value))?;
-    let position_blocks = if output_point_count == 0 { 0 } else { 1 + (output_point_count - 1) / grain };
-    let position_slots: Vec<Mutex<Option<(Vec<f64>, Vec<f64>, Vec<f64>, i64)>>> =
-        (0..position_blocks).map(|_| Mutex::new(None)).collect();
+    let (mut x, mut y, mut z) = (vec![0.0; opcount], vec![0.0; opcount], vec![0.0; opcount]);
     if output_point_count > 0 {
+        let (wx, wy, wz) = (Windows::even(&mut x, grain), Windows::even(&mut y, grain), Windows::even(&mut z, grain));
         support::run_indexed_ranges(grain, output_point_count, &|block, first, last| {
             cancel::check_opt(cancel_value)?;
-            let mut first_error = -1_i64;
-            let n = (last - first) as usize;
-            let (mut xs, mut ys, mut zs) = (Vec::with_capacity(n), Vec::with_capacity(n), Vec::with_capacity(n));
+            let (xs, ys, zs) = (wx.take(block), wy.take(block), wz.take(block));
             for point in first..last {
                 let (left, right) = (output_point_left[point as usize] as usize, output_point_right[point as usize] as usize);
                 let weight = output_point_weight[point as usize];
-                let px = interpolate(source_positions.x[left], source_positions.x[right], weight);
-                let py = interpolate(source_positions.y[left], source_positions.y[right], weight);
-                let pz = interpolate(source_positions.z[left], source_positions.z[right], weight);
-                if first_error < 0 && !(px.is_finite() && py.is_finite() && pz.is_finite()) {
-                    first_error = point;
-                }
-                xs.push(px);
-                ys.push(py);
-                zs.push(pz);
+                let at = (point - first) as usize;
+                xs[at] = interpolate(source_positions.x[left], source_positions.x[right], weight);
+                ys[at] = interpolate(source_positions.y[left], source_positions.y[right], weight);
+                zs[at] = interpolate(source_positions.z[left], source_positions.z[right], weight);
             }
-            *position_slots[block as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
-                Some((xs, ys, zs, first_error));
             Ok(())
         })?;
     }
-    let (mut x, mut y, mut z) = (Vec::with_capacity(opcount), Vec::with_capacity(opcount), Vec::with_capacity(opcount));
-    let mut position_error: Option<i64> = None;
-    for slot in position_slots {
-        if let Some((xs, ys, zs, first_error)) = slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner) {
-            if position_error.is_none() && first_error >= 0 {
-                position_error = Some(first_error);
-            }
-            x.extend(xs);
-            y.extend(ys);
-            z.extend(zs);
-        }
-    }
-    if let Some(point) = position_error {
+    if let Some(point) = (0..opcount).find(|&point| !(x[point].is_finite() && y[point].is_finite() && z[point].is_finite())) {
         return Err(fail(format!("interpolated position is non-finite at output point {point}")));
     }
     let output_topology = topology::create_owned(
@@ -1445,6 +1417,7 @@ pub fn cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
 mod tests {
     use super::*;
     use rdk_core::packed;
+    use std::sync::Mutex;
 
     fn with_attribute(
         owner: attribute::Owner,
