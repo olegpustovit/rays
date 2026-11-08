@@ -19,6 +19,7 @@ use rdk::cancel;
 use rdk::error as rerror;
 use rdk::geometry;
 use rdk::packed::{Float2, Float3, Float4, FloatArray, IntArray};
+use rdk_core::support;
 use sop::context::{self, dependencies as D};
 use sop::node::{self, build, CookMode, Elementwise, Facts, InputUse, Topology};
 
@@ -414,29 +415,25 @@ fn typed_storage(owner: Owner, name: &str, kind: &str, g: &geometry::T) -> Resul
 
 // ---- parallel pieces -------------------------------------------------------------------------
 
-/// Run `piece(first, last)` for each grain-sized chunk of `0..count` on the shared pool; a piece is
-/// `columns` vectors of `(last - first) * stride[c]` floats. The pieces are stitched in chunk order,
-/// so the result is byte-identical to the sequential path.
-fn ranges(grain: i64, count: usize, strides: &[usize], piece: &(dyn Fn(usize, usize) -> Vec<Vec<f64>> + Send + Sync)) -> Vec<Vec<f64>> {
-    let grain = grain.max(1) as usize;
-    let chunks = if count == 0 { 0 } else { (count - 1) / grain + 1 };
-    let slots: Vec<Mutex<Option<Vec<Vec<f64>>>>> = (0..chunks).map(|_| Mutex::new(None)).collect();
-    if chunks > 0 {
-        parallel::for_(1, 0, chunks as i64 - 1, &|chunk| {
-            let first = chunk as usize * grain;
-            let last = count.min(first + grain);
-            *slots[chunk as usize].lock().unwrap() = Some(piece(first, last));
-            Ok(())
+/// Fill `strides.len()` columns of `count * stride[c]` floats: `piece(first, last, columns)` writes
+/// the disjoint `(last - first) * stride[c]` window of each column for one grain-sized range on the
+/// shared pool, so the result is byte-identical to the sequential path.
+fn ranges(grain: i64, count: usize, strides: &[usize], piece: &(dyn Fn(usize, usize, &mut [&mut [f64]]) + Send + Sync)) -> Vec<Vec<f64>> {
+    let grain = grain.max(1);
+    let mut out: Vec<Vec<f64>> = strides.iter().map(|s| vec![0.0; count * s]).collect();
+    let windows: Vec<support::Windows<f64>> = out
+        .iter_mut()
+        .zip(strides)
+        .map(|(column, &stride)| {
+            support::Windows::new(column, support::range_count(count as i64, grain), |range| (range * grain).min(count as i64) as usize * stride)
         })
-        .expect("attribute_kernel ranges");
-    }
-    let mut out: Vec<Vec<f64>> = strides.iter().map(|s| Vec::with_capacity(count * s)).collect();
-    for slot in slots {
-        let piece = slot.into_inner().unwrap().expect("chunk ran");
-        for (column, part) in out.iter_mut().zip(piece) {
-            column.extend_from_slice(&part);
-        }
-    }
+        .collect();
+    support::run_indexed_ranges(grain, count as i64, &|range, first, last| {
+        let mut columns: Vec<&mut [f64]> = windows.iter().map(|window| window.take(range)).collect();
+        piece(first as usize, last as usize, &mut columns);
+        Ok(())
+    })
+    .expect("attribute_kernel ranges");
     out
 }
 
@@ -482,40 +479,33 @@ static CHECKED_VALID: Ring<Result<Value, Diagnostic>> = Ring::new();
 fn interleave(count: usize, planes: &[&[f64]], grain: i64) -> Value {
     let width = planes.len();
     let planes_owned: Vec<&[f64]> = planes.to_vec();
-    let columns = ranges(grain, count, &[width], &move |first, last| {
+    let columns = ranges(grain, count, &[width], &move |first, last, cols| {
         // One loop per width: no inner component loop for the common widths.
-        let mut out = Vec::with_capacity((last - first) * width);
+        let out = &mut *cols[0];
         match planes_owned.as_slice() {
             [x, y, z] => {
-                for i in first..last {
-                    out.push(x[i]);
-                    out.push(y[i]);
-                    out.push(z[i]);
+                for (row, i) in out.chunks_exact_mut(3).zip(first..last) {
+                    (row[0], row[1], row[2]) = (x[i], y[i], z[i]);
                 }
             }
             [x, y] => {
-                for i in first..last {
-                    out.push(x[i]);
-                    out.push(y[i]);
+                for (row, i) in out.chunks_exact_mut(2).zip(first..last) {
+                    (row[0], row[1]) = (x[i], y[i]);
                 }
             }
             [x, y, z, w] => {
-                for i in first..last {
-                    out.push(x[i]);
-                    out.push(y[i]);
-                    out.push(z[i]);
-                    out.push(w[i]);
+                for (row, i) in out.chunks_exact_mut(4).zip(first..last) {
+                    (row[0], row[1], row[2], row[3]) = (x[i], y[i], z[i], w[i]);
                 }
             }
             _ => {
                 for i in first..last {
-                    for plane in &planes_owned {
-                        out.push(plane[i]);
+                    for (c, plane) in planes_owned.iter().enumerate() {
+                        out[(i - first) * width + c] = plane[i];
                     }
                 }
             }
         }
-        vec![out]
     });
     let values = columns.into_iter().next().unwrap_or_default();
     wide_array(width, values)
@@ -574,19 +564,19 @@ fn read_checked(component: &str, owner: Owner, kind: &str, name: &str, g: &geome
     let valid_only = component == "valid";
     let build = || -> Result<Value, Diagnostic> {
         let stride = if valid_only { 1 } else { width };
-        let columns = ranges(16_384, count, &[stride], &|first, last| {
-            let mut out = Vec::with_capacity((last - first) * stride);
+        let columns = ranges(16_384, count, &[stride], &|first, last, cols| {
+            let out = &mut *cols[0];
             for i in first..last {
+                let row = (i - first) * stride;
                 let finite = planes.iter().all(|p| p[i].is_finite());
                 if valid_only {
-                    out.push(if finite { 1.0 } else { 0.0 });
+                    out[row] = if finite { 1.0 } else { 0.0 };
                 } else {
-                    for p in &planes {
-                        out.push(if finite { p[i] } else { 0.0 });
+                    for (c, p) in planes.iter().enumerate() {
+                        out[row + c] = if finite { p[i] } else { 0.0 };
                     }
                 }
             }
-            vec![out]
         });
         let data = columns.into_iter().next().unwrap_or_default();
         Ok(if valid_only { Value::Int_array(Arc::new(data.into_iter().map(|x| x as i64).collect())) } else { wide_array(width, data) })
@@ -1005,25 +995,13 @@ fn install(owner: Owner, kind: &str, name: &str, planes: Vec<Vec<f64>>, g: &geom
     install_planes(owner, kind, name, Planes::Owned(planes), g)
 }
 
-static POINT_HOLDERS: Mutex<Vec<(usize, Weak<topology_kernel_impl::ResidentPoints>)>> = Mutex::new(Vec::new());
-
-fn holder_address(holder: &Arc<dyn rdk::packed::Deferred::Holder>) -> usize {
-    Arc::as_ptr(holder) as *const () as usize
-}
-
-/// OCaml `Resident (v, count)` read back from a holder: the ones this module made, then the mesh's.
+/// OCaml `Resident (v, count)` read back from a holder.
 fn resident_of(holder: &Arc<dyn rdk::packed::Deferred::Holder>) -> Option<(Value, i64)> {
-    let at = holder_address(holder);
-    let ours = POINT_HOLDERS.lock().unwrap().iter().find(|(key, _)| *key == at).and_then(|(_, w)| w.upgrade());
-    ours.or_else(|| topology_kernel_impl::resident_points_of(holder)).map(|r| (r.value.clone(), r.count))
+    topology_kernel_impl::resident_points_of(holder).map(|r| (r.value.clone(), r.count))
 }
 
 fn new_holder(value: Value, count: i64) -> Arc<dyn rdk::packed::Deferred::Holder> {
-    let holder = Arc::new(topology_kernel_impl::ResidentPoints { value, count });
-    let mut all = POINT_HOLDERS.lock().unwrap();
-    all.retain(|(_, w)| w.strong_count() > 0);
-    all.push((Arc::as_ptr(&holder) as *const () as usize, Arc::downgrade(&holder)));
-    holder
+    Arc::new(topology_kernel_impl::ResidentPoints { value, count })
 }
 
 /// A device output as an attribute's storage, read from the device only when a CPU reader first
@@ -1032,11 +1010,11 @@ pub fn install_deferred(owner: Owner, kind: &str, name: &str, planes: &Arc<Gpu::
     let holder = planes.resident.clone().map(|v| new_holder(v, planes.count));
     let release: rdk::packed::Deferred::Release = {
         let p = planes.clone();
-        Arc::new(move |held| (p.release)(held))
+        Arc::new(move |held| p.release(held))
     };
     let materialise = {
         let p = planes.clone();
-        move || (p.materialise)()
+        move || p.materialise()
     };
     let like = make_storage(kind, Planes::Owned(vec![Vec::new(); width(kind).max(1)])).map_err(attr_err)?;
     if owner == Owner::Point && name == "P" {
@@ -1044,7 +1022,7 @@ pub fn install_deferred(owner: Owner, kind: &str, name: &str, planes: &Arc<Gpu::
             Storage::Float3(_) => {
                 let bounds: Float3::Bounds = {
                     let p = planes.clone();
-                    Arc::new(move || (p.bounds)())
+                    Arc::new(move || p.bounds())
                 };
                 let positions = Float3::deferred(holder, Some(release), Some(bounds), planes.count, Arc::new(move || materialise().map_err(crate::topology_kernel_impl::rdk_error)))
                     .map_err(|e| attr_err(rerr(&e)))?;
@@ -1318,18 +1296,16 @@ pub fn write_storage(owned_fields: &[&str], grain: i64, owner: Owner, kind: &str
                 return install(owner, kind, name, (0..w).map(|c| vec![values[c]]).collect(), g);
             }
             let finite = AtomicBool::new(true);
-            let planes = ranges(grain, count, &vec![1; w], &|first, last| {
-                let mut cols: Vec<Vec<f64>> = (0..w).map(|_| Vec::with_capacity(last - first)).collect();
+            let planes = ranges(grain, count, &vec![1; w], &|first, last, cols| {
                 for i in first..last {
                     for (c, col) in cols.iter_mut().enumerate() {
                         let v = values[i * w + c];
                         if !v.is_finite() {
                             finite.store(false, Ordering::Relaxed);
                         }
-                        col.push(v);
+                        col[i - first] = v;
                     }
                 }
-                cols
             });
             if !finite.load(Ordering::Relaxed) {
                 return err("E_NONFINITE", "Attribute values must be finite.");
@@ -1466,11 +1442,10 @@ pub fn write_selected(grain: i64, owner: Owner, kind: &str, name: &str, values: 
     let planes: Vec<Vec<f64>> = if all_selected {
         (0..w).map(|c| vec![vals[c]; count]).collect()
     } else {
-        ranges(grain, count, &vec![1; w], &|first, last| {
-            let mut cols: Vec<Vec<f64>> = (0..w).map(|_| Vec::with_capacity(last - first)).collect();
+        ranges(grain, count, &vec![1; w], &|first, last, cols| {
             for i in first..last {
                 for (c, col) in cols.iter_mut().enumerate() {
-                    col.push(if selection[i] == 1 {
+                    col[i - first] = if selection[i] == 1 {
                         let row = if constant_count.is_none() { i * w } else { 0 };
                         vals[row + c]
                     } else {
@@ -1478,10 +1453,9 @@ pub fn write_selected(grain: i64, owner: Owner, kind: &str, name: &str, values: 
                             Some(old) => old[c][i],
                             None => default_row[c],
                         }
-                    });
+                    };
                 }
             }
-            cols
         })
     };
     install(owner, kind, name, planes, g)
@@ -2023,9 +1997,9 @@ pub mod Display_sink {
         devices: HashMap<String, i64>,
     }
 
-    static REGISTRY: Mutex<Vec<(Weak<Gpu::Backend>, Rates)>> = Mutex::new(Vec::new());
+    static REGISTRY: Mutex<Vec<(Weak<dyn Gpu::Backend>, Rates)>> = Mutex::new(Vec::new());
 
-    fn with_rates<R>(backend: &Arc<Gpu::Backend>, f: impl FnOnce(&mut Rates) -> R) -> R {
+    fn with_rates<R>(backend: &Arc<dyn Gpu::Backend>, f: impl FnOnce(&mut Rates) -> R) -> R {
         let mut registry = REGISTRY.lock().unwrap();
         registry.retain(|(weak, _)| weak.strong_count() > 0);
         let at = Arc::as_ptr(backend);
@@ -2041,7 +2015,7 @@ pub mod Display_sink {
     }
 
     /// Seconds the editor spent preparing a mesh of `floats` floats for display.
-    pub fn observe(backend: &Arc<Gpu::Backend>, resident: bool, floats: i64, seconds: f64) {
+    pub fn observe(backend: &Arc<dyn Gpu::Backend>, resident: bool, floats: i64, seconds: f64) {
         if floats > 0 {
             let rate = seconds / floats as f64;
             with_rates(backend, |r| {
@@ -2056,7 +2030,7 @@ pub mod Display_sink {
 
     /// Seconds from a host mesh's frame to its presentation: the renderer's conversion and upload,
     /// which preparation does not see. The smallest rate is kept.
-    pub fn observe_draw(backend: &Arc<Gpu::Backend>, floats: i64, seconds: f64) {
+    pub fn observe_draw(backend: &Arc<dyn Gpu::Backend>, floats: i64, seconds: f64) {
         if floats > 0 {
             let rate = seconds / floats as f64;
             with_rates(backend, |r| r.draw = r.draw.min(rate));
@@ -2065,7 +2039,7 @@ pub mod Display_sink {
 
     /// Seconds per float (host mesh, resident mesh); infinity while unmeasured. A host mesh's
     /// includes its first draw once seen.
-    pub fn rates(backend: &Arc<Gpu::Backend>) -> (f64, f64) {
+    pub fn rates(backend: &Arc<dyn Gpu::Backend>) -> (f64, f64) {
         with_rates(backend, |r| (r.host + if r.draw < f64::INFINITY { r.draw } else { 0.0 }, r.resident))
     }
 
@@ -2084,7 +2058,7 @@ pub mod Display_sink {
 
     /// Whether a write site with no CPU measurement stays on the device: for its first two priced
     /// cooks, or while the device cannot price it. False: sample the CPU under a budget.
-    pub fn device_first(backend: &Arc<Gpu::Backend>, site: &str, device_seconds: Option<f64>) -> bool {
+    pub fn device_first(backend: &Arc<dyn Gpu::Backend>, site: &str, device_seconds: Option<f64>) -> bool {
         if device_seconds.is_none() {
             return true;
         }
@@ -2103,12 +2077,12 @@ pub mod Display_sink {
     }
 
     /// The measured seconds of an attribute write site's CPU route at `count` elements.
-    pub fn cpu_write(backend: &Arc<Gpu::Backend>, site: &str, count: i64) -> Option<f64> {
+    pub fn cpu_write(backend: &Arc<dyn Gpu::Backend>, site: &str, count: i64) -> Option<f64> {
         with_rates(backend, |r| priced(r.writes.get(site).map_or(&[][..], |v| v.as_slice()), count))
     }
 
     /// One CPU cook of a write site.
-    pub fn observe_cpu_write(backend: &Arc<Gpu::Backend>, site: &str, count: i64, seconds: f64) {
+    pub fn observe_cpu_write(backend: &Arc<dyn Gpu::Backend>, site: &str, count: i64, seconds: f64) {
         if count > 0 {
             with_rates(backend, |r| {
                 let mut old = r.writes.get(site).cloned().unwrap_or_default();
@@ -2216,7 +2190,7 @@ impl Kernel {
         };
         let live = context::input(context).clone();
         // the site and count a measured decision asked about, and when it left this cook to the CPU
-        let asked: Arc<Mutex<Option<(Arc<Gpu::Backend>, String, i64)>>> = Arc::new(Mutex::new(None));
+        let asked: Arc<Mutex<Option<(Arc<dyn Gpu::Backend>, String, i64)>>> = Arc::new(Mutex::new(None));
         let cpu_began: Mutex<Option<f64>> = Mutex::new(None);
         // set when this cook samples the CPU: when that sample has lost, and its cost
         let probe: Arc<Mutex<Option<(f64, f64)>>> = Arc::new(Mutex::new(None));
@@ -2325,7 +2299,7 @@ impl Kernel {
                 let kept: Vec<(String, Arc<Gpu::Planes>)> = fields.into_iter().map(|(k, p)| (k, Arc::new(p))).collect();
                 if let Some((_, first)) = kept.first() {
                     let first = first.clone();
-                    context::defer(context, node_id, Box::new(move || (first.settle)()));
+                    context::defer(context, node_id, Box::new(move || first.settle()));
                 }
                 write(&|key, n, k, g| {
                     let planes = &kept.iter().find(|(f, _)| f == key).expect("record field").1;
@@ -2333,8 +2307,8 @@ impl Kernel {
                     if width(k) as i64 == planes.width && planes.count == count as i64 {
                         install_deferred(owner, k, n, planes, g)
                     } else {
-                        let _ = (planes.settle)();
-                        let data = (planes.materialise)()?;
+                        let _ = planes.settle();
+                        let data = planes.materialise()?;
                         let values = match (k, data.len()) {
                             ("int", 1) => Value::Int_array(Arc::new(data[0].iter().map(|x| *x as i64).collect())),
                             (_, 1) => float_array(data.into_iter().next().unwrap()),
@@ -3230,7 +3204,7 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
     fn attr_source(name: &str, attribute: &str, extra: &[(&str, Value)]) -> Value {
         let mut args = vec![("geometry".to_owned(), Value::Deferred(ty::geometry(), 7)), ("attribute".to_owned(), Value::Text(attribute.as_bytes().to_vec()))];
         args.extend(extra.iter().map(|(k, v)| ((*k).to_owned(), v.clone())));
-        Value::Source(name.to_owned(), array_of(Ty::Vec3), args)
+        source_value(name, array_of(Ty::Vec3), args)
     }
 
     /// `sources` and `reads` of plain source values: named attributes, topology-only readers and
@@ -3319,7 +3293,7 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
     fn context_sources_specialize() {
         let context = context::create(context::Options { frame: Some(5), time: Some(1.5), seed: Some(42), ..Default::default() }).unwrap();
         let lookup = no_geometry();
-        let source = |name: &str, extra: &[(&str, Value)]| Value::Source(name.to_owned(), Ty::Float, extra.iter().map(|(k, v)| ((*k).to_owned(), v.clone())).collect());
+        let source = |name: &str, extra: &[(&str, Value)]| source_value(name, Ty::Float, extra.iter().map(|(k, v)| ((*k).to_owned(), v.clone())).collect());
         assert_eq!(resolve(Some(&context), &lookup, &source("sop/context_frame", &[])).unwrap(), Value::Float(5.0));
         assert_eq!(resolve(Some(&context), &lookup, &source("sop/context_time", &[])).unwrap(), Value::Float(1.5));
         let seeded = source("sop/context_seed", &[("namespace", Value::Text(b"n".to_vec())), ("salt", Value::Int(3))]);
@@ -3354,11 +3328,11 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
         assert_eq!(Display_sink::priced(&[(100, 2.0)], 10), None);
         // the two samples nearest 400 are 100 and 1000; the cheaper per-unit rate wins
         assert_eq!(Display_sink::priced(&[(100, 3.0), (1000, 2.0), (1_000_000, 0.5)], 400), Some(2.0 * 400.0));
-        let backend = Arc::new(Gpu::Backend {
-            residency: Box::new(|_| None),
-            cost: Box::new(|_, _, _, _| None),
-            prepare: Box::new(|_, _| Err(fail("E_TEST", "no kernel"))),
-        });
+        struct NoKernel;
+        impl Gpu::Backend for NoKernel {
+            fn prepare(&self, _: bool, _: &flow_ir::Packed) -> Result<Arc<dyn Gpu::Kernel>, Diagnostic> { Err(fail("E_TEST", "no kernel")) }
+        }
+        let backend: Arc<dyn Gpu::Backend> = Arc::new(NoKernel);
         let live = Display_sink::live();
         assert_eq!(Display_sink::rates(&backend), (f64::INFINITY, f64::INFINITY));
         Display_sink::observe(&backend, false, 100, 1.0);

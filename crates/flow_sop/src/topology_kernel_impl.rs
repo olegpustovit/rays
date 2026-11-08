@@ -431,44 +431,16 @@ pub struct ResidentTopology {
 }
 impl Deferred::Holder for ResidentTopology {}
 
-// rdk's `Holder` cannot be downcast, so the holders made here are found again by address.
-// ponytail: unbounded only by live holders; dead entries are pruned on insert.
-static TOPOLOGY_HOLDERS: Mutex<Vec<(usize, Weak<ResidentTopology>)>> = Mutex::new(Vec::new());
-static POINT_HOLDERS: Mutex<Vec<(usize, Weak<ResidentPoints>)>> = Mutex::new(Vec::new());
-
-fn address(holder: &Arc<dyn Deferred::Holder>) -> usize {
-    Arc::as_ptr(holder) as *const () as usize
-}
-
-fn register_topology(holder: &Arc<ResidentTopology>) {
-    let mut all = TOPOLOGY_HOLDERS.lock().unwrap();
-    all.retain(|(_, weak)| weak.strong_count() > 0);
-    all.push((Arc::as_ptr(holder) as *const () as usize, Arc::downgrade(holder)));
-}
-
-fn register_points(holder: &Arc<ResidentPoints>) {
-    let mut all = POINT_HOLDERS.lock().unwrap();
-    all.retain(|(_, weak)| weak.strong_count() > 0);
-    all.push((Arc::as_ptr(holder) as *const () as usize, Arc::downgrade(holder)));
-}
-
 /// A positions holder made by `mesh_resident`.
 pub fn resident_points_of(holder: &Arc<dyn Deferred::Holder>) -> Option<Arc<ResidentPoints>> {
-    let at = address(holder);
-    let all = POINT_HOLDERS.lock().unwrap();
-    all.iter().find(|(key, _)| *key == at).and_then(|(_, weak)| weak.upgrade())
+    holder.clone().downcast()
 }
 
 /// Unread resident vertex points, primitive offsets and kinds, with their logical lengths. Counts
 /// and holder lookup do not materialise topology.
 fn resident_topology(geometry: &Geometry) -> Option<Arc<ResidentTopology>> {
     let topology = geometry::topology(geometry);
-    let holder = topology::holder(topology)?;
-    let at = address(&holder);
-    let found = {
-        let all = TOPOLOGY_HOLDERS.lock().unwrap();
-        all.iter().find(|(key, _)| *key == at).and_then(|(_, weak)| weak.upgrade())?
-    };
+    let found = topology::holder(topology)?.downcast::<ResidentTopology>()?;
     if found.vertices.count == topology::vertex_count(topology)
         && found.offsets.count == topology::primitive_count(topology) + 1
         && found.kinds.count == topology::primitive_count(topology)
@@ -503,7 +475,7 @@ pub fn resident_source(geometry: &Geometry, operation: &str, component: &str) ->
         }
         _ => return None,
     };
-    (stream.resident)().map(|value| (value, stream.count))
+    stream.resident().map(|value| (value, stream.count))
 }
 
 /// A host topology beside points the device computes: built here, so the points stay where they are.
@@ -579,42 +551,39 @@ fn keep_static(key: &Value, point_count: i64, topology: &topology::T) {
 
 fn positions_of(planes: Arc<Planes>, count: i64) -> Result<(Float3::T, Option<Arc<ResidentPoints>>), Diagnostic> {
     let holder = planes.resident.clone().map(|value| Arc::new(ResidentPoints { value, count }));
-    if let Some(h) = &holder {
-        register_points(h);
-    }
     let dyn_holder: Option<Arc<dyn Deferred::Holder>> = holder.clone().map(|h| h as Arc<dyn Deferred::Holder>);
     let release: Deferred::Release = {
         let planes = planes.clone();
-        Arc::new(move |held| (planes.release)(held))
+        Arc::new(move |held| planes.release(held))
     };
     let bounds: Float3::Bounds = {
         let planes = planes.clone();
-        Arc::new(move || (planes.bounds)())
+        Arc::new(move || planes.bounds())
     };
     let materialise: Float3::Materialise = {
         let planes = planes.clone();
-        Arc::new(move || (planes.materialise)().map_err(rdk_error))
+        Arc::new(move || planes.materialise().map_err(rdk_error))
     };
     let positions = Float3::deferred(dyn_holder, Some(release), Some(bounds), count, materialise)
         .map_err(|e| diag("E_TOPOLOGY", &rdk_message(&e)))?;
     Ok((positions, holder))
 }
 
-fn count_of(scope: &Residency, value: &Value) -> Option<i64> {
-    (scope.executor.count)(value).ok().flatten()
+fn count_of(scope: &dyn Residency, value: &Value) -> Option<i64> {
+    scope.executor().count(value).ok().flatten()
 }
 
 
 /// The device cook of a mesh: `None` leaves it to the host path. `static_key` is the mesh's data
 /// when its topology depends on nothing a frame changes.
-pub fn mesh_resident(static_key: Option<&Value>, scope: &Residency, args: &Args) -> Option<Result<Geometry, Diagnostic>> {
+pub fn mesh_resident(static_key: Option<&Value>, scope: &dyn Residency, args: &Args) -> Option<Result<Geometry, Diagnostic>> {
     if let Some(Value::Record(fields)) = arg(args, "points") {
         if fields.len() != 3 { return None; }
         let planes: Option<Vec<Value>> = ["x", "y", "z"].iter().map(|name| arg(fields, name).filter(|v| matches!(v, Value::Float_array(_))).cloned()).collect();
         let planes: [Value; 3] = planes?.try_into().ok()?;
         let mut counts = Vec::new();
         for (_, value) in fields {
-            let n = match (scope.executor.count)(value) {
+            let n = match scope.executor().count(value) {
                 Ok(Some(n)) => n,
                 Ok(None) => {
                     if let Err(d) = value::validate(value) { return Some(Err(d)); }
@@ -626,7 +595,7 @@ pub fn mesh_resident(static_key: Option<&Value>, scope: &Residency, args: &Args)
             counts.push(n);
         }
         if counts.iter().any(|n| *n != counts[0]) { return Some(fail("E_ARRAY_COUNT", "Mesh coordinate planes need the same element count.")); }
-        let points = match (scope.pack_planes)(&planes) {
+        let points = match scope.pack_planes(&planes) {
             Ok(Some(value)) => value,
             Ok(None) => return None,
             Err(d) => return Some(Err(d)),
@@ -637,17 +606,17 @@ pub fn mesh_resident(static_key: Option<&Value>, scope: &Residency, args: &Args)
     let cached = static_key.and_then(find_static);
     if let (Some((n, topology)), Some(points @ Value::Vec3_array(_))) = (&cached, arg(args, "points")) {
         if count_of(scope, points) == Some(*n) {
-            let planes = Arc::new((scope.retain_float)(points)?);
+            let planes = Arc::new(scope.retain_float(points)?);
             let (positions, _) = match positions_of(planes.clone(), *n) {
                 Ok(v) => v,
                 Err(e) => {
-                    (planes.release)(false);
+                    planes.release(false);
                     return Some(Err(e));
                 }
             };
             let result = geometry::create(positions, topology.clone(), None, None, None).map_err(|e| diag("E_TOPOLOGY", &rdk_message(&e)));
             if result.is_err() {
-                (planes.release)(false);
+                planes.release(false);
             }
             return Some(result);
         }
@@ -669,12 +638,12 @@ pub fn mesh_resident(static_key: Option<&Value>, scope: &Residency, args: &Args)
                 Ok(t) => t,
                 Err(message) => return Some(Err(diag("E_TOPOLOGY", &message))),
             };
-            let planes = Arc::new((scope.retain_float)(points)?);
+            let planes = Arc::new(scope.retain_float(points)?);
             let result = positions_of(planes.clone(), point_count).and_then(|(positions, _)| {
                 geometry::create(positions, topology, None, None, None).map_err(|e| diag("E_TOPOLOGY", &rdk_message(&e)))
             });
             if result.is_err() {
-                (planes.release)(false);
+                planes.release(false);
             }
             return Some(result);
         }
@@ -690,12 +659,12 @@ pub fn mesh_resident(static_key: Option<&Value>, scope: &Residency, args: &Args)
                 return Some(value.clone());
             }
             match value {
-                Value::Int_array(a) if a.is_empty() => (scope.executor.fill)(&Ty::Array(Box::new(Ty::Int)), 0, &Value::Int(0)).ok().flatten(),
+                Value::Int_array(a) if a.is_empty() => scope.executor().fill(&Ty::Array(Box::new(Ty::Int)), 0, &Value::Int(0)).ok().flatten(),
                 _ => None,
             }
         };
         let (v, o, k) = (stream(vertices)?, stream(offsets)?, stream(kinds)?);
-        let valid = (scope.validate_topology)(0, &v, &o, &k, 4294967295)?;
+        let valid = scope.validate_topology(0, &v, &o, &k, 4294967295)?;
         return Some(valid.and_then(|()| {
             mesh(&[
                 ("points".to_owned(), points.clone()),
@@ -711,7 +680,7 @@ pub fn mesh_resident(static_key: Option<&Value>, scope: &Residency, args: &Args)
     let device = |v: &Value| -> Value {
         if let Value::Int_array(a) = v {
             if on_device && count_of(scope, v).is_none() && !a.is_empty() && a.iter().all(|x| *x == a[0]) {
-                if let Ok(Some(filled)) = (scope.executor.fill)(&Ty::Array(Box::new(Ty::Int)), a.len() as i64, &Value::Int(a[0])) {
+                if let Ok(Some(filled)) = scope.executor().fill(&Ty::Array(Box::new(Ty::Int)), a.len() as i64, &Value::Int(a[0])) {
                     return filled;
                 }
             }
@@ -724,7 +693,7 @@ pub fn mesh_resident(static_key: Option<&Value>, scope: &Residency, args: &Args)
     else {
         return None;
     };
-    match (scope.validate_topology)(point_count, &vertices, &offsets, &kinds, 4294967295)? {
+    match scope.validate_topology(point_count, &vertices, &offsets, &kinds, 4294967295)? {
         Err(e) => return Some(Err(e)),
         Ok(()) => {}
     }
@@ -732,34 +701,33 @@ pub fn mesh_resident(static_key: Option<&Value>, scope: &Residency, args: &Args)
     let mut acquired_ints: Vec<Arc<Integers>> = Vec::new();
     let built = (|| -> Result<Geometry, Diagnostic> {
         let retain_error = || diag("E_GPU", "Validated mesh stream could not be retained.");
-        let planes = Arc::new((scope.retain_float)(points).ok_or_else(retain_error)?);
+        let planes = Arc::new(scope.retain_float(points).ok_or_else(retain_error)?);
         acquired_floats.push(planes.clone());
         let mut integer = |value: &Value| -> Result<Arc<Integers>, Diagnostic> {
-            let kept = Arc::new((scope.retain_uint32)(value).ok_or_else(retain_error)?);
+            let kept = Arc::new(scope.retain_uint32(value).ok_or_else(retain_error)?);
             acquired_ints.push(kept.clone());
             Ok(kept)
         };
         let (iv, io, ik) = (integer(&vertices)?, integer(&offsets)?, integer(&kinds)?);
         // the session keeps this: the streams' releases, not the streams
         let holder = Arc::new(ResidentTopology { vertices: iv.clone(), offsets: io.clone(), kinds: ik.clone(),
-            point_count, incidence: OnceLock::new(), build_incidence: scope.incidence.clone() });
-        register_topology(&holder);
+            point_count, incidence: OnceLock::new(), build_incidence: scope.incidence() });
         let release: Deferred::Release = {
             let holder = holder.clone();
             Arc::new(move |held| {
-                (holder.vertices.release)(held);
-                (holder.offsets.release)(held);
-                (holder.kinds.release)(held);
+                holder.vertices.release(held);
+                holder.offsets.release(held);
+                holder.kinds.release(held);
                 if let Some(Ok(Some(index))) = holder.incidence.get() {
-                    for stream in [&index.point_offsets, &index.point_vertices, &index.primitive_of_vertex, &index.first, &index.corners] { (stream.release)(held); }
+                    for stream in [&index.point_offsets, &index.point_vertices, &index.primitive_of_vertex, &index.first, &index.corners] { stream.release(held); }
                 }
             })
         };
         let materialise = {
             let holder = holder.clone();
             Arc::new(move || {
-                let kinds: Vec<topology::PrimitiveKind> = (holder.kinds.materialise)().map_err(rdk_error)?.iter().map(|k| kind_of(*k)).collect();
-                topology::create_owned(point_count, (holder.vertices.materialise)().map_err(rdk_error)?, (holder.offsets.materialise)().map_err(rdk_error)?, kinds)
+                let kinds: Vec<topology::PrimitiveKind> = holder.kinds.materialise().map_err(rdk_error)?.iter().map(|k| kind_of(*k)).collect();
+                topology::create_owned(point_count, holder.vertices.materialise().map_err(rdk_error)?, holder.offsets.materialise().map_err(rdk_error)?, kinds)
             })
         };
         let topology = topology::deferred(None, Some(holder.clone() as Arc<dyn Deferred::Holder>), Some(release), point_count, vertex_count, primitive_count, materialise)
@@ -770,10 +738,10 @@ pub fn mesh_resident(static_key: Option<&Value>, scope: &Residency, args: &Args)
     })();
     if built.is_err() {
         for planes in &acquired_floats {
-            (planes.release)(false);
+            planes.release(false);
         }
         for kept in &acquired_ints {
-            (kept.release)(false);
+            kept.release(false);
         }
     }
     Some(built)
@@ -1172,8 +1140,8 @@ mod tests {
     fn resolve_sources() {
         let g = triangle();
         let lookup = move |id: i64| if id == 7 { Some(g.clone()) } else { None };
-        let source = Value::Source(
-            "sop/count".into(),
+        let source = source_value(
+            "sop/count",
             Ty::Int,
             vec![("geometry".into(), Value::Deferred(ty::geometry(), 7)), ("element".into(), text("points"))],
         );
@@ -1534,7 +1502,6 @@ mod resident_identity {
     fn resident_vec3_returns_the_placeholder_itself() {
         let placeholder = Arc::new(vec![7.0, 0.0, 0.0, 8.0, 0.0, 0.0]);
         let holder = Arc::new(ResidentPoints { value: Value::Vec3_array(placeholder.clone()), count: 2 });
-        register_points(&holder);
         let dynamic: Arc<dyn Deferred::Holder> = holder.clone();
         let materialise: Float3::Materialise = Arc::new(|| Ok(vec![vec![7.0, 8.0], vec![0.0, 0.0], vec![0.0, 0.0]]));
         let positions = Float3::deferred(Some(dynamic), None, None, 2, materialise).unwrap();

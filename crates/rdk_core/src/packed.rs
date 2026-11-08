@@ -294,7 +294,15 @@ pub mod Deferred {
         AttributeStorage(crate::attribute::Storage),
     }
 
-    pub trait Holder: Send + Sync {}
+    pub trait Holder: std::any::Any + Send + Sync {}
+
+    impl dyn Holder {
+        /// The concrete holder, if this is a `T` (`Arc::downcast` through `Any`).
+        pub fn downcast<T: Holder>(self: Arc<Self>) -> Option<Arc<T>> {
+            let any: Arc<dyn std::any::Any + Send + Sync> = self;
+            any.downcast().ok()
+        }
+    }
 
     pub type Make = Arc<dyn Fn() -> Result<Value, error::T> + Send + Sync>;
     pub type Release = Arc<dyn Fn(bool) + Send + Sync>;
@@ -785,6 +793,18 @@ pub mod Float4 {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Resident(i64);
+    impl Deferred::Holder for Resident {}
+    struct Other;
+    impl Deferred::Holder for Other {}
+
+    #[test]
+    fn holders_downcast_to_their_concrete_type() {
+        let holder: Arc<dyn Deferred::Holder> = Arc::new(Resident(7));
+        assert!(holder.clone().downcast::<Other>().is_none());
+        assert_eq!(holder.downcast::<Resident>().unwrap().0, 7);
+    }
 
     #[test]
     fn csr_validation_views_and_copy_access_match_storage() {
