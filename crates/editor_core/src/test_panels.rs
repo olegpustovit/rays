@@ -1,5 +1,5 @@
 //! Port of lib/editor_core/test_panels.ml.
-use crate::panels::{label, labels, set_size, t, to_string, valid, Axis, Panel, Size};
+use crate::panels::{each_leaf, label, labels, leaves, set_size, t, to_string, valid, Axis, Panel, Size};
 
 fn v() -> t {
     t::Leaf(Panel::View("main".into()))
@@ -76,4 +76,17 @@ fn layout_labels() {
                 "Graph".to_string()
             ]
     );
+}
+
+#[test]
+fn leaves_put_floats_last_and_a_floats_own_before_its_floats() {
+    let float = |x: t| t::Float(Box::new(x));
+    let tree = h(float(h(t::Leaf(Panel::Lisp), float(t::Leaf(Panel::Inspector)))), h(g(), float(t::Leaf(Panel::Outline))));
+    let all = leaves(&tree);
+    let expected: Vec<(Vec<usize>, Panel)> =
+        vec![(vec![1, 0], Panel::Graph), (vec![0, 0, 0], Panel::Lisp), (vec![0, 0, 1, 0], Panel::Inspector), (vec![1, 1, 0], Panel::Outline)];
+    assert_eq!(all, expected);
+    let mut seen = 0;
+    assert!(each_leaf(&tree, &mut |path, p| { seen += 1; *p == Panel::Inspector && path == [0, 0, 1, 0] }));
+    assert_eq!(seen, 3, "each_leaf stops at the first true");
 }

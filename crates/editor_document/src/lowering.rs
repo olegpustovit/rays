@@ -1158,7 +1158,7 @@ pub fn of_workspace(options: &Options, workspace: &workspace_doc::T) -> R<docume
         active_camera,
         root: root.params,
         settings,
-        shell,
+        shell: shell.map(Arc::new),
         view_worlds,
         view_roots,
         homes,

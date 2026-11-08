@@ -89,45 +89,44 @@ pub fn name(panel: &Panel) -> &'static str {
     }
 }
 
-type Walked = (Vec<(Path, Panel)>, Vec<(Path, Panel)>);
-
-// one path buffer and one pair of lists for the whole walk; floats are collected after the rest,
-// a float's own leaves before the floats inside it
-fn walk(path: &mut Path, tree: &t, acc: &mut Walked) {
+// Leaves outside floats in tree order (`docked`), else only the floats met outside other floats.
+fn walk(path: &mut Path, tree: &t, docked: bool, f: &mut dyn FnMut(&[usize], &Panel) -> bool) -> bool {
+    let mut under = |path: &mut Path, i: usize, sub: &t, f: &mut dyn FnMut(&[usize], &Panel) -> bool| {
+        path.push(i);
+        let stop = walk(path, sub, docked, f);
+        path.pop();
+        stop
+    };
     match tree {
-        t::Leaf(p) => acc.0.push((path.clone(), p.clone())),
-        t::Split { a, b, .. } => {
-            for (i, child) in [a.as_ref(), b.as_ref()].into_iter().enumerate() {
-                path.push(i);
-                walk(path, child, acc);
-                path.pop();
-            }
-        }
-        t::Tile(cells) => {
-            for (i, child) in cells.iter().enumerate() {
-                path.push(i);
-                walk(path, child, acc);
-                path.pop();
-            }
-        }
-        t::Float(inner) => {
-            let mut own: Walked = (Vec::new(), Vec::new());
+        t::Leaf(p) => docked && f(path, p),
+        t::Split { a, b, .. } => under(path, 0, a, f) || under(path, 1, b, f),
+        t::Tile(cells) => cells.iter().enumerate().any(|(i, c)| under(path, i, c, f)),
+        t::Float(inner) => !docked && {
             path.push(0);
-            walk(path, inner, &mut own);
+            let stop = each_leaf_at(path, inner, f);
             path.pop();
-            acc.1.extend(own.0);
-            acc.1.extend(own.1);
-        }
+            stop
+        },
     }
 }
 
-/// Every leaf in tree order, floats last.
+fn each_leaf_at(path: &mut Path, tree: &t, f: &mut dyn FnMut(&[usize], &Panel) -> bool) -> bool {
+    walk(path, tree, true, f) || walk(path, tree, false, f)
+}
+
+/// Every leaf in [`leaves`] order, without allocating, until `f` returns true; whether it did.
+pub fn each_leaf(tree: &t, f: &mut dyn FnMut(&[usize], &Panel) -> bool) -> bool {
+    each_leaf_at(&mut Vec::new(), tree, f)
+}
+
+/// Every leaf in tree order, floats last: a float's own leaves before the floats inside it.
 pub fn leaves(tree: &t) -> Vec<(Path, Panel)> {
-    let mut acc: Walked = (Vec::new(), Vec::new());
-    walk(&mut Vec::new(), tree, &mut acc);
-    let (mut docked, floats) = acc;
-    docked.extend(floats);
-    docked
+    let mut out = Vec::new();
+    each_leaf(tree, &mut |path, p| {
+        out.push((path.to_vec(), p.clone()));
+        false
+    });
+    out
 }
 
 /// The subtree at a path of [`leaves`]; `None` when the tree has no such place.

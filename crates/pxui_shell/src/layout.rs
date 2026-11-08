@@ -140,7 +140,17 @@ fn child(path: &[usize], i: usize) -> Path {
     p
 }
 
-fn presence(state: &dyn Fn(&[usize]) -> State, hidden: &[Panel], path: &[usize], tree: &t) -> Presence {
+/// `f` with `path` extended by `more`; layout walks one path buffer.
+fn at<R>(path: &mut Path, more: &[usize], f: impl FnOnce(&mut Path) -> R) -> R {
+    let n = path.len();
+    path.extend_from_slice(more);
+    let r = f(path);
+    path.truncate(n);
+    r
+}
+
+fn presence(state: &dyn Fn(&[usize]) -> State, hidden: &[Panel], path: &mut Path, tree: &t) -> Presence {
+    let under = |path: &mut Path, i: usize, sub: &t| at(path, &[i], |path| presence(state, hidden, path, sub));
     match tree {
         t::Leaf(_) if state(path).window.is_some() => Presence::Gone,
         // it has no header to keep
@@ -157,12 +167,13 @@ fn presence(state: &dyn Fn(&[usize]) -> State, hidden: &[Panel], path: &[usize],
         }
         t::Float(_) => Presence::Gone,
         t::Split { a, b, .. } => {
-            join(presence(state, hidden, &child(path, 0), a), presence(state, hidden, &child(path, 1), b))
+            let pa = under(path, 0, a);
+            join(pa, under(path, 1, b))
         }
         t::Tile(cells) => {
             let mut acc = Presence::Gone;
             for (i, c) in cells.iter().enumerate() {
-                acc = join(acc, presence(state, hidden, &child(path, i), c));
+                acc = join(acc, under(path, i, c));
             }
             acc
         }
@@ -176,13 +187,13 @@ fn is_float(tree: &t) -> bool {
 /// A run of splits by ratio along one axis is one row of columns whose weights are the products
 /// of the ratios, so `[0.45 | 0.55 * 0.6364 | ...]` divides the width once. A split with a fixed
 /// side is one column of the run and is placed on its own.
-fn columns(axis: Axis, weight: f64, path: Path, tree: &t, out: &mut Vec<(f64, Path, t)>) {
+fn columns<'a>(axis: Axis, weight: f64, path: Path, tree: &'a t, out: &mut Vec<(f64, Path, &'a t)>) {
     match tree {
         t::Split { axis: a, size: Size::Ratio(ratio), a: ta, b: tb } if *a == axis && !(is_float(ta) || is_float(tb)) => {
             columns(axis, weight * ratio, child(&path, 0), ta, out);
             columns(axis, weight * (1.0 - ratio), child(&path, 1), tb, out);
         }
-        _ => out.push((weight, path, tree.clone())),
+        _ => out.push((weight, path, tree)),
     }
 }
 
@@ -283,10 +294,10 @@ fn prefix(under: &[usize], path: &[usize]) -> bool {
     path.len() >= under.len() && path[..under.len()] == *under
 }
 
-struct Acc {
+struct Acc<'a> {
     leaves: Vec<Leaf>,
     splitters: Vec<Splitter>,
-    floats: Vec<(Bounds, Path, t)>,
+    floats: Vec<(Bounds, Path, &'a t)>,
 }
 
 fn leaf(acc: &mut Acc, state: &dyn Fn(&[usize]) -> State, floating: bool, path: &[usize], panel: &Panel, outer: Bounds) {
@@ -336,7 +347,7 @@ fn rect_at(horizontal: bool, x: i64, y: i64, w: i64, h: i64, from: i64, extent: 
     if horizontal { (from, y, extent, h) } else { (x, from, w, extent) }
 }
 
-fn place(acc: &mut Acc, state: &dyn Fn(&[usize]) -> State, hidden: &[Panel], floating: bool, rect: Bounds, path: &[usize], tree: &t) {
+fn place<'a>(acc: &mut Acc<'a>, state: &dyn Fn(&[usize]) -> State, hidden: &[Panel], floating: bool, rect: Bounds, path: &mut Path, tree: &'a t) {
     let (x, y, w, h) = rect;
     match tree {
         t::Leaf(p) => {
@@ -345,11 +356,11 @@ fn place(acc: &mut Acc, state: &dyn Fn(&[usize]) -> State, hidden: &[Panel], flo
             }
         }
         t::Float(inner) => {
-            acc.floats.push(((x + w / 8, y + h / 8, w - w / 4, h - h / 4), child(path, 0), (**inner).clone()));
+            acc.floats.push(((x + w / 8, y + h / 8, w - w / 4, h - h / 4), child(path, 0), &**inner));
         }
         t::Split { a, b, .. } if is_float(a) || is_float(b) => {
-            place(acc, state, hidden, floating, rect, &child(path, 0), a);
-            place(acc, state, hidden, floating, rect, &child(path, 1), b);
+            at(path, &[0], |path| place(acc, state, hidden, floating, rect, path, a));
+            at(path, &[1], |path| place(acc, state, hidden, floating, rect, path, b));
         }
         t::Split { axis, size: size @ (Size::First(_) | Size::Second(_)), a, b } => {
             let points = match size {
@@ -358,14 +369,14 @@ fn place(acc: &mut Acc, state: &dyn Fn(&[usize]) -> State, hidden: &[Panel], flo
             };
             // one side keeps its points, the other takes the rest: the other keeps its minimum
             // first, then the fixed side shrinks, never below one point
-            let pa = presence(state, hidden, &child(path, 0), a);
-            let pb = presence(state, hidden, &child(path, 1), b);
+            let pa = at(path, &[0], |path| presence(state, hidden, path, a));
+            let pb = at(path, &[1], |path| presence(state, hidden, path, b));
             if pb == Presence::Gone {
                 if pa != Presence::Gone {
-                    place(acc, state, hidden, floating, rect, &child(path, 0), a);
+                    at(path, &[0], |path| place(acc, state, hidden, floating, rect, path, a));
                 }
             } else if pa == Presence::Gone {
-                place(acc, state, hidden, floating, rect, &child(path, 1), b);
+                at(path, &[1], |path| place(acc, state, hidden, floating, rect, path, b));
             } else {
                 let axis = *axis;
                 let horizontal = axis == Axis::H;
@@ -382,7 +393,7 @@ fn place(acc: &mut Acc, state: &dyn Fn(&[usize]) -> State, hidden: &[Panel], flo
                 };
                 let size_a = if first { fixed } else { available - fixed };
                 let origin = if horizontal { x } else { y };
-                place(acc, state, hidden, floating, rect_at(horizontal, x, y, w, h, origin, size_a), &child(path, 0), a);
+                at(path, &[0], |path| place(acc, state, hidden, floating, rect_at(horizontal, x, y, w, h, origin, size_a), path, a));
                 acc.splitters.push(Splitter {
                     node: Some(path.to_vec()),
                     axis,
@@ -391,27 +402,18 @@ fn place(acc: &mut Acc, state: &dyn Fn(&[usize]) -> State, hidden: &[Panel], flo
                     start: origin,
                     span: total,
                 });
-                place(
-                    acc,
-                    state,
-                    hidden,
-                    floating,
-                    rect_at(horizontal, x, y, w, h, origin + size_a + SPLITTER_WIDTH, available - size_a),
-                    &child(path, 1),
-                    b,
-                );
+                let rest = rect_at(horizontal, x, y, w, h, origin + size_a + SPLITTER_WIDTH, available - size_a);
+                at(path, &[1], |path| place(acc, state, hidden, floating, rest, path, b));
             }
         }
         t::Split { axis, .. } => {
             let axis = *axis;
-            let mut cols: Vec<(f64, Path, t)> = Vec::new();
+            let mut cols: Vec<(f64, Path, &t)> = Vec::new();
             columns(axis, 1.0, Vec::new(), tree, &mut cols);
             let info: Vec<(Presence, f64, i64, i64)> = cols
                 .iter()
                 .map(|(weight, col_path, sub)| {
-                    let mut full = path.to_vec();
-                    full.extend_from_slice(col_path);
-                    let p = presence(state, hidden, &full, sub);
+                    let p = at(path, col_path, |path| presence(state, hidden, path, sub));
                     let fixed = match (p, sub) {
                         (Presence::Strip, _) => strip(axis),
                         (Presence::Live, t::Leaf(Panel::Timeline)) if axis == Axis::V => TIMELINE_HEIGHT,
@@ -436,9 +438,7 @@ fn place(acc: &mut Acc, state: &dyn Fn(&[usize]) -> State, hidden: &[Panel], flo
                         cursor += SPLITTER_WIDTH;
                     }
                     let r = if horizontal { (cursor, y, sizes[i], h) } else { (x, cursor, w, sizes[i]) };
-                    let mut full = path.to_vec();
-                    full.extend_from_slice(col_path);
-                    place(acc, state, hidden, floating, r, &full, sub);
+                    at(path, col_path, |path| place(acc, state, hidden, floating, r, path, sub));
                     placed.push((col_path.clone(), (cursor, sizes[i])));
                     cursor += sizes[i];
                     prior = Some(col_path.clone());
@@ -472,7 +472,7 @@ fn place(acc: &mut Acc, state: &dyn Fn(&[usize]) -> State, hidden: &[Panel], flo
             let cells: Vec<(usize, &t)> = cells
                 .iter()
                 .enumerate()
-                .filter(|(i, cell)| is_float(cell) || presence(state, hidden, &child(path, *i), cell) != Presence::Gone)
+                .filter(|(i, cell)| is_float(cell) || at(path, &[*i], |path| presence(state, hidden, path, cell)) != Presence::Gone)
                 .collect();
             let n = cells.len() as i64;
             if n > 0 {
@@ -514,15 +514,8 @@ fn place(acc: &mut Acc, state: &dyn Fn(&[usize]) -> State, hidden: &[Panel], flo
                             span: 1,
                         });
                     }
-                    place(
-                        acc,
-                        state,
-                        hidden,
-                        floating,
-                        (cx, cy, widths[r as usize][c as usize], heights[r as usize]),
-                        &child(path, *original),
-                        cell,
-                    );
+                    let rect = (cx, cy, widths[r as usize][c as usize], heights[r as usize]);
+                    at(path, &[*original], |path| place(acc, state, hidden, floating, rect, path, cell));
                 }
             }
         }
@@ -544,10 +537,9 @@ pub fn geometry(state: Option<&dyn Fn(&[usize]) -> State>, hidden: Option<&[Pane
     let state: &dyn Fn(&[usize]) -> State = state.unwrap_or(&no_state);
     let default_hidden = [Panel::Timeline];
     let hidden: &[Panel] = hidden.unwrap_or(&default_hidden);
-    let all = panels::leaves(tree);
     let (fw, fh) = frame.input.size;
     let header = HEADER_HEIGHT.min(0.max(fh - 1));
-    let timeline = if hidden.contains(&Panel::Timeline) || all.iter().any(|(_, p)| *p == Panel::Timeline) {
+    let timeline = if hidden.contains(&Panel::Timeline) || panels::each_leaf(tree, &mut |_, p| *p == Panel::Timeline) {
         0
     } else {
         TIMELINE_STRIP.min(0.max(fh - header - 1))
@@ -556,14 +548,14 @@ pub fn geometry(state: Option<&dyn Fn(&[usize]) -> State>, hidden: Option<&[Pane
     let status = STATUS_HEIGHT.min(0.max(fh - header - timeline - 1));
     let bottom = fh - status - timeline;
     let mut acc = Acc { leaves: Vec::new(), splitters: Vec::new(), floats: Vec::new() };
-    place(&mut acc, state, hidden, false, (0, 0, fw, 1.max(bottom)), &[], tree);
+    place(&mut acc, state, hidden, false, (0, 0, fw, 1.max(bottom)), &mut Vec::new(), tree);
     while !acc.floats.is_empty() {
         let queue = std::mem::take(&mut acc.floats);
-        for (rect, path, sub) in queue {
-            place(&mut acc, state, hidden, true, rect, &path, &sub);
+        for (rect, mut path, sub) in queue {
+            place(&mut acc, state, hidden, true, rect, &mut path, sub);
         }
     }
-    for (path, panel) in &all {
+    panels::each_leaf(tree, &mut |path, panel| {
         if let Some((x, y, w, h)) = state(path).window {
             let w = fw.min(w);
             let h = fh.min(h);
@@ -571,7 +563,8 @@ pub fn geometry(state: Option<&dyn Fn(&[usize]) -> State>, hidden: Option<&[Pane
             let y = 0.max(y.min(fh - HEADER_HEIGHT));
             leaf(&mut acc, state, true, path, panel, (x, y, w, h.min(fh - y)));
         }
-    }
+        false
+    });
     Geometry {
         leaves: acc.leaves,
         splitters: acc.splitters,

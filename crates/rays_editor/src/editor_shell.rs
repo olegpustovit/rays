@@ -164,7 +164,7 @@ pub fn shell_hidden<'a>(value: impl Into<ModelView<'a>>, shell: &shell) -> Vec<P
     let value = &value.into();
     if shell.restored {
         shell.hidden.clone()
-    } else if panel_state(value, &[HOST_BAR]).collapsed && !panels::leaves(&shell_tree(value, shell)).iter().any(|(_, p)| *p == Panel::Timeline) {
+    } else if panel_state(value, &[HOST_BAR]).collapsed && !panels::each_leaf(&shell_tree(value, shell), &mut |_, p| *p == Panel::Timeline) {
         vec![Panel::Timeline]
     } else {
         Vec::new()
@@ -181,7 +181,7 @@ pub fn geometry<'a>(value: impl Into<ModelView<'a>>, shell: &shell, frame: &fram
 pub fn has_panel<'a>(value: impl Into<ModelView<'a>>, panel: &Panel) -> bool {
     let value = &value.into();
     visible(&value.workspace, panel)
-        && panels::leaves(&shell_tree(value, &value.workspace)).iter().any(|(path, p)| p == panel && !panel_state(value, path).collapsed)
+        && panels::each_leaf(&shell_tree(value, &value.workspace), &mut |path, p| p == panel && !panel_state(value, path).collapsed)
 }
 
 /// The viewport that keyboard focus and the camera follow: the focused one, else the first.
@@ -218,7 +218,7 @@ pub fn view_bodies<'a>(value: impl Into<ModelView<'a>>, frame: &frame::t) -> Vec
 
 pub fn view_visible<'a>(value: impl Into<ModelView<'a>>) -> bool {
     let value = &value.into();
-    panels::leaves(&shell_tree(value, &value.workspace)).iter().any(|(path, p)| match p {
+    panels::each_leaf(&shell_tree(value, &value.workspace), &mut |path, p| match p {
         Panel::View(_) => visible(&value.workspace, p) && !panel_state(value, path).collapsed,
         _ => false,
     })

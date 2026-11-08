@@ -68,7 +68,7 @@ pub fn replace(text: &str, from: &str, by: &str) -> String {
     }
 }
 pub fn shell_of(doc: &document::T) -> document::Shell {
-    doc.shell.clone().unwrap_or_else(|| fail("no editor graph"))
+    doc.shell.as_deref().cloned().unwrap_or_else(|| fail("no editor graph"))
 }
 /// The variations workspace with its editor graph replaced.
 pub fn with_editor(body: &str) -> String {

@@ -190,7 +190,8 @@ pub struct T {
     pub root: root::Parameters,
     pub settings: settings::T,
     /// The `editor` graph of the workspace, if it has one.
-    pub shell: Option<Shell>,
+    /// Shared: read many times a frame, replaced only when the editor graph changes.
+    pub shell: Option<Arc<Shell>>,
     /// A viewport over a scene instance that names another World than the document's: its World
     /// (none: that instance has none); a viewport not listed shows the document's.
     pub view_worlds: Vec<(String, Option<ViewWorld>)>,
