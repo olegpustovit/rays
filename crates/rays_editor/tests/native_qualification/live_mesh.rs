@@ -417,21 +417,24 @@ fn orrery_frames() {
     let canvas=rays::canvas::create(320,240).unwrap(); let gpu=wg::create(None);
     let mut editor=editor::create(editor::Create {gpu_owner:Some(gpu.clone()),ui_text_size:Some(11),await_:Some(true),domains:Some(1),..Default::default()},&doc,None,editor::prepare_fn(),editor::draw_fn()).unwrap();
     let frame=|tick|rays::frame::Frame {input:input::Frame {dt:1./60.,frame:tick,tick,size:(320,240),pointer:(-100.,-100.),..input::at_time(tick as f64/60.)},pixel_scale:(1.,1.),fps:60.,mouse_delta:(0.,0.)};
+    // Each animated frame relowers the driven Lisp body (~0.2 s in debug); twelve show the steady
+    // state, then thirty idle frames prove nothing is rebuilt.
+    let frames=12;
     let document=editor.core.doc.clone(); let mut first=None;
-    for tick in 1..=30 {
+    for tick in 1..=frames {
         let f=frame(tick); editor=editor::update(editor,&f);
         assert!(editor.core.cook.error.is_none(),"{:?}",editor.core.cook.error);
         assert!(Arc::ptr_eq(&document,&editor.core.doc),"playback re-lowered the document");
         let geometry=&editor.core.cook.pieces[0].prepared.geometry;
         let positions=g::positions(geometry).clone();
-        if tick==1 {first=Some(positions);} else if tick==30 {
+        if tick==1 {first=Some(positions);} else if tick==frames {
             assert!((0..p::length(&positions)).any(|i|p::get(&positions,i).unwrap()!=p::get(first.as_ref().unwrap(),i).unwrap()),"orrery did not animate");
         }
         rays::canvas::render(Some(1),&canvas,&editor::scene(&editor,&f)).unwrap();
         editor=editor::after_present(editor,&f);
     }
     Rc::make_mut(&mut editor.core).timeline=timeline::toggle_pause(&editor.core.timeline).0;
-    let mut f=frame(31); f.input.dt=0.;
+    let mut f=frame(frames+1); f.input.dt=0.;
     editor=editor::update(editor,&f);
     rays::canvas::render(Some(1),&canvas,&editor::scene(&editor,&f)).unwrap();
     editor=editor::after_present(editor,&f);
@@ -441,7 +444,7 @@ fn orrery_frames() {
     let warm=wg::image_stats(&gpu).0;
     let renderer=rays::canvas::private::native_stats(&canvas).unwrap();
     assert!(renderer.pipeline_cache_entries>0,"native renderer did not use GPU pipelines");
-    for tick in 32..=61 {
+    for tick in frames+2..=frames+31 {
         f.input.frame=tick; f.input.tick=tick; f.input.t=tick as f64/60.;
         editor=editor::update(editor,&f);
         assert!(Arc::ptr_eq(&document,&editor.core.doc),"idle frame re-lowered the document");
