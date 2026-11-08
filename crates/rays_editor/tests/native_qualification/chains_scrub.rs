@@ -39,16 +39,28 @@ pub(super) fn run() {
         let mut doc=document(&source,config);drop(cook_doc(&doc));
         let nested=edit::nested_leaf("waves",&ArgKey::Pos(0)).unwrap();
         let steps=[("waves","seed",vec![],"9"),("waves","octaves",vec![],"5"),("waves","seed",vec![],"11"),("waves","lacunarity",vec![1],"2.25"),(nested.as_str(),"width",vec![],"7.5"),("waves","seed",vec![],"9"),("waves","seed",vec![],"11"),("waves","seed",vec![],"9")];
-        let dir=std::env::temp_dir().join(format!("rays-native-scrub-{}",std::process::id()));std::fs::create_dir_all(&dir).unwrap();let input=dir.join("source.rays");let output=dir.join("geometry.bin");
+        let dir=std::env::temp_dir().join(format!("rays-native-scrub-{}",std::process::id()));std::fs::create_dir_all(&dir).unwrap();
+        // Fresh processes run concurrently, one per distinct text (step 7 repeats step 5's text), and are checked after the scrub.
+        let mut fresh:Vec<(String,std::path::PathBuf,std::process::Child)>=Vec::new();let mut checks=Vec::new();
         for (i,(node,key,sub,value)) in steps.into_iter().enumerate() {
             let op=Op::SetArg {node:vec!["sea".into(),node.into()],key:ArgKey::Kw(key.into()),sub,value:ok(flow_syntax::syntax::parse(value)).remove(0)};
             let ws=ok(wd::edit(&catalog,&doc.workspace.ws,&op));let before=wg::image_stats(&gpu).0;
             doc=ok(lowering::of_workspace(&lowering::Options {previous:Some(doc.clone()),..Default::default()},&ws));let scrubbed=cook_doc(&doc);let after=wg::image_stats(&gpu).0;
             let compiled=after.pipeline_compilations-before.pipeline_compilations;println!("scrub {key} {value}: {compiled} pipelines, {} runners",after.runners_created-before.runners_created);
-            std::fs::write(&input,wd::to_text(&ws).unwrap()).unwrap();
-            let result=std::process::Command::new(std::env::current_exe().unwrap()).env("RAYS_NATIVE_SCRUB_INPUT",&input).env("RAYS_NATIVE_SCRUB_OUTPUT",&output).output().unwrap();
-            assert!(result.status.success(),"fresh cook failed: {}",String::from_utf8_lossy(&result.stderr));assert_eq!(scrubbed,std::fs::read(&output).unwrap(),"{key} {value}: scrub differs from fresh process");if i==7 {assert_eq!(compiled,0,"scrub back compiled pipeline");}
+            if i==7 {assert_eq!(compiled,0,"scrub back compiled pipeline");}
+            let text=wd::to_text(&ws).unwrap();
+            let index=fresh.iter().position(|(t,_,_)|*t==text).unwrap_or_else(|| {
+                let (input,output)=(dir.join(format!("source{i}.rays")),dir.join(format!("geometry{i}.bin")));std::fs::write(&input,&text).unwrap();
+                let child=std::process::Command::new(std::env::current_exe().unwrap()).env("RAYS_NATIVE_SCRUB_INPUT",&input).env("RAYS_NATIVE_SCRUB_OUTPUT",&output)
+                    .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::piped()).spawn().unwrap();
+                fresh.push((text,output,child));fresh.len()-1
+            });
+            checks.push((key,value,scrubbed,index));
         }
-        std::fs::remove_file(input).unwrap();std::fs::remove_file(output).unwrap();std::fs::remove_dir(dir).unwrap();
+        let fresh:Vec<Vec<u8>>=fresh.into_iter().map(|(_,output,child)| {
+            let result=child.wait_with_output().unwrap();assert!(result.status.success(),"fresh cook failed: {}",String::from_utf8_lossy(&result.stderr));std::fs::read(output).unwrap()
+        }).collect();
+        for (key,value,scrubbed,index) in checks {assert_eq!(scrubbed,fresh[index],"{key} {value}: scrub differs from fresh process");}
+        std::fs::remove_dir_all(dir).unwrap();
     });wg::close(&gpu);
 }
