@@ -321,11 +321,17 @@ fn specialized_captures() {
     let start = std::time::Instant::now();
     let generic = pipelines::private::count(&pipes);
     let waited = pipelines::private::compilations(&pipes);
-    while pipelines::private::count(&pipes) == generic && start.elapsed().as_secs_f64() < 3.0 {
+    // Vulkan runs SPIR-V, which has no source to fold words into: the generic kernel stays
+    let vulkan = pipelines::is_vulkan();
+    while pipelines::private::count(&pipes) == generic && start.elapsed().as_secs_f64() < if vulkan { 0.05 } else { 3.0 } {
         assert_eq!(array(&tp::ok(run::readback(&tp::ok(dispatch(&r, &values)), None))), expected);
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
-    assert!(pipelines::private::count(&pipes) > generic, "a specialized kernel compiled");
+    if vulkan {
+        assert_eq!(pipelines::private::count(&pipes), generic, "Vulkan does not specialize");
+    } else {
+        assert!(pipelines::private::count(&pipes) > generic, "a specialized kernel compiled");
+    }
     // the background variant is not a compile any dispatch waited for (a scrub back stays at 0)
     assert_eq!(pipelines::private::compilations(&pipes), waited, "a specialization counted as a waited compile");
     assert_eq!(array(&tp::ok(run::readback(&tp::ok(dispatch(&r, &values)), None))), expected);

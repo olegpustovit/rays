@@ -136,6 +136,15 @@ Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s
 
 ## Session log
 
+- 2026-11-09: `55d989a8` qual: flow_sop shares light test processes. 98 test_parallel_exact cases become 39 tests (17 grouped `light_*`); 129 manifest goldens become 5; parity 75 -> 21. Each failure still names its section. Full `cargo t -p flow_sop` with default caps passes in 50.5-57.5 s at load 8-14 (472 tests, ~200 s summed).
+- 2026-11-09: **Windows verification** on kyiv-win-1 (RTX 2080 Ti, MSYS2 UCRT64, synced with git bundles and no push).
+  - `6a2d6505` fix: the `isogrid_orbit` example named `ogpu_metal` unconditionally since the port, so it did not compile on Windows. All Windows targets now compile.
+  - Machine fix, approved by the owner: HKLM `SOFTWARE\Khronos\Vulkan\ExplicitLayers` registered the MINGW64 validation layer, whose libstdc++ conflicts with the UCRT64 test binaries (loader error 127, `VK_ERROR_LAYER_NOT_PRESENT`). Elevated SSH sessions ignore `VK_LAYER_PATH`. The UCRT64 layer is now added with value 0 and the MINGW64 entry set to 1. Undo (PowerShell): `Set-ItemProperty HKLM:\SOFTWARE\Khronos\Vulkan\ExplicitLayers 'C:\msys64\mingw64\bin\VkLayer_khronos_validation.json' 0; Remove-ItemProperty HKLM:\SOFTWARE\Khronos\Vulkan\ExplicitLayers 'C:\msys64\ucrt64\bin\VkLayer_khronos_validation.json'`.
+  - Windows `cargo t --workspace` at `55d989a8`: 2,560 of 2,579 ok. Open:
+    - crash: `gpu_run::specialized_captures` access violation.
+    - libm: `test_shape2` round stroke, `web_export` particles data.bin.
+    - over 5 s on this machine: flow_sop keyword_manifest, combining_general_backbone, optional_rest, variations, wave; gpu_pathtracer instanced; gpu_world furnace_mis and mirror; gpu_frame_alloc recursive_signals.
+
 - 2026-11-09: **final qualification on the final code** (`5a575954`, docs-only commits after it):
   - `RAYS_T_TIMEOUT=7200 cargo t --workspace`: 2,843 cases, exit 0, no failures or timeouts, 234.5 s wall (load 5.8).
   - `RAYS_T_TIMEOUT=3600 cargo t -p rays_editor --features test-hooks --test gpu_editor`: 325/325, exit 0, 205.2 s wall (load 8.9).

@@ -20,8 +20,13 @@ pub fn run(tests: &[(&str, fn())]) {
             continue;
         }
         let started = std::time::Instant::now();
-        // A failing test panics and ends the process with the panic message and exit code 101.
-        test();
+        // A failing test panics: the hook prints its message, then the shared device is released
+        // before exit code 101, as on success. A device left to process teardown crashes the
+        // Vulkan driver on Windows (0xc0000005), hiding the failure.
+        if std::panic::catch_unwind(test).is_err() {
+            super::release_keepalive();
+            std::process::exit(101);
+        }
         println!("test {name} ... ok ({:.2}s)", started.elapsed().as_secs_f64());
     }
     super::release_keepalive();
