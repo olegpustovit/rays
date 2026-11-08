@@ -341,11 +341,7 @@ pub fn select(
     let mut upper = last;
     while lower < upper {
         cancel::check_opt(cancel_value).map_err(|_| {
-            error::new(
-                "Support.select",
-                Code::Cancelled,
-                "geometry operation was cancelled".to_owned(),
-            )
+            error::cancelled("Support.select")
         })?;
         let middle = lower + (upper - lower) / 2;
         let pivot = median_pivot(keys, order, lower, middle, upper);
@@ -443,7 +439,7 @@ fn lock_failure(
 
 
 fn cancelled(operation: &str) -> error::T {
-    error::new(operation, Code::Cancelled, "geometry operation was cancelled".to_owned())
+    error::cancelled(operation)
 }
 
 pub fn parallel_for(

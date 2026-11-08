@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use rdk_core::{error, geometry, packed, topology};
+use rdk_core::error::Code;
 
 use crate::point_grid::{float_max, float_min};
 use crate::surface_index;
@@ -416,13 +417,11 @@ pub fn events_points_into(
     right_c: i64,
 ) -> Result<usize, error::T> {
     if scratch.len() < 26 || point_info.len() < 10 || events.len() < MAX_EVENTS * EVENT_STRIDE {
-        return Err(error::make(
-            "triangle_intersection".to_owned(),
-            "invalid_parameter".to_owned(),
+        return Err(error::new(
+            "triangle_intersection",
+            Code::InvalidParameter,
             "Triangle_intersection.events_into: scratch is too small".to_owned(),
-            None,
-        )
-        .unwrap_or_else(|bad| bad));
+        ));
     }
     if !prepare_points(
         scratch, point_info, is_self, tolerance, left_positions, left_a, left_b, left_c, right_positions, right_a,

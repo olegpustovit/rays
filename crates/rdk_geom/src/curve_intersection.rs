@@ -3,6 +3,7 @@
 //! Event records use `Triangle_intersection::EVENT_STRIDE`: world position, then left and right
 //! primitive UVW triplets. A curve UVW is `(u, 0, 0)` and a triangle UVW is barycentric.
 use rdk_core::{error, packed};
+use rdk_core::error::Code;
 
 use crate::point_grid::{float_max, float_min};
 use crate::triangle_intersection::{clamp01, EVENT_STRIDE as STRIDE};
@@ -105,13 +106,11 @@ fn emit_segment_segment(
 }
 
 fn too_small(operation: &str) -> error::T {
-    error::make(
-        "curve_intersection".to_owned(),
-        "invalid_parameter".to_owned(),
+    error::new(
+        "curve_intersection",
+        Code::InvalidParameter,
         format!("Curve_intersection.{operation}: scratch too small"),
-        None,
     )
-    .unwrap_or_else(|bad| bad)
 }
 
 fn restore_world(scratch: &[f64], events: &mut [f64], count: usize) {

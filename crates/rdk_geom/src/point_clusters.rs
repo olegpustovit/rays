@@ -4,6 +4,7 @@
 //! `error::T`: a plain failure has code `invalid_parameter` and the OCaml message, a cancellation
 //! has code `cancelled`.
 use rdk_core::{cancel, error, geometry, group, packed};
+use rdk_core::error::Code;
 
 use crate::point_grid;
 
@@ -29,13 +30,7 @@ pub enum T {
 }
 
 fn failure(operation: &str, message: String) -> error::T {
-    error::make(
-        operation.to_owned(),
-        "invalid_parameter".to_owned(),
-        message,
-        None,
-    )
-    .unwrap_or_else(|bad| bad)
+    error::new(operation, Code::InvalidParameter, message)
 }
 
 /// Root of `point` with full path compression.

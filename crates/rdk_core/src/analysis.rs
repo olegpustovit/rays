@@ -114,12 +114,8 @@ fn make_error(message: String) -> error::T {
     error::new("connectivity", Code::InvalidConnectivity, message)
 }
 fn connectivity_error(value: error::T) -> error::T {
-    if error::code(&value) == "cancelled" {
-        error::new(
-            "connectivity",
-            Code::Cancelled,
-            "connectivity classification was cancelled".to_owned(),
-        )
+    if error::is_cancelled(&value) {
+        error::cancelled("connectivity")
     } else {
         make_error(error::message(&value).to_owned())
     }

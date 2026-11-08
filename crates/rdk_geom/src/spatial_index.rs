@@ -7,6 +7,7 @@ use std::cmp::Ordering;
 use std::sync::Mutex;
 
 use rdk_core::{cancel, error, group, packed, support};
+use rdk_core::error::Code;
 
 use crate::point_grid::{float_max, float_min};
 
@@ -18,18 +19,16 @@ pub struct T {
     axes: Vec<i64>,
 }
 
-fn fail(code: &str, message: &str) -> error::T {
-    error::make("spatial_index".to_owned(), code.to_owned(), message.to_owned(), None)
-        .unwrap_or_else(|failure| failure)
+fn fail(code: Code, message: &str) -> error::T {
+    error::new("spatial_index", code, message.to_owned())
 }
 
 fn invalid(operation: &str, message: &str) -> error::T {
-    error::make(operation.to_owned(), "invalid_argument".to_owned(), message.to_owned(), None)
-        .unwrap_or_else(|failure| failure)
+    error::new(operation, Code::InvalidArgument, message.to_owned())
 }
 
 fn cancelled() -> error::T {
-    fail("cancelled", "spatial-index construction was cancelled")
+    fail(Code::Cancelled, "spatial-index construction was cancelled")
 }
 
 fn cancel_check(cancel_value: Option<&cancel::T>) -> Result<(), error::T> {
@@ -37,7 +36,7 @@ fn cancel_check(cancel_value: Option<&cancel::T>) -> Result<(), error::T> {
 }
 
 fn pool_error(message: String) -> error::T {
-    fail("internal", &message)
+    fail(Code::Internal, &message)
 }
 
 fn length(value: &T) -> i64 {
@@ -53,7 +52,7 @@ pub fn create(
 ) -> Result<T, error::T> {
     let grain = grain.unwrap_or(DEFAULT_GRAIN);
     if grain <= 0 {
-        return Err(fail("invalid_parameter", "grain must be positive"));
+        return Err(fail(Code::InvalidParameter, "grain must be positive"));
     }
     let positions = packed::Float3::View::view(source)?;
     let count = packed::Float3::length(source);
@@ -61,11 +60,11 @@ pub fn create(
         None => (0..count).collect(),
         Some(selection) => {
             if !matches!(group::owner(selection), group::Owner::Point) {
-                return Err(fail("invalid_group", "source selection must be a point group"));
+                return Err(fail(Code::InvalidGroup, "source selection must be a point group"));
             }
             if group::length(selection) != count {
                 return Err(fail(
-                    "invalid_group",
+                    Code::InvalidGroup,
                     "source point group length does not match positions",
                 ));
             }
@@ -80,7 +79,7 @@ pub fn create(
         let point = order[slot] as usize;
         let (x, y, z) = (positions.x[point], positions.y[point], positions.z[point]);
         if !(x.is_finite() && y.is_finite() && z.is_finite()) {
-            return Err(fail("invalid_position", "source positions must be finite"));
+            return Err(fail(Code::InvalidPosition, "source positions must be finite"));
         }
         for (axis, value) in [x, y, z].into_iter().enumerate() {
             min[axis] = float_min(min[axis], value);

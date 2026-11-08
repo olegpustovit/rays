@@ -17,11 +17,7 @@ pub struct T {
 pub type Index = T;
 
 fn cancelled_error() -> error::T {
-    error::new(
-        "Point_index.create",
-        Code::Cancelled,
-        "geometry operation was cancelled".to_owned(),
-    )
+    error::cancelled("Point_index.create")
 }
 
 fn create_uncached(
@@ -175,7 +171,7 @@ mod tests {
         let result = create(Some(&token), &source);
         assert!(matches!(
             &result,
-            Err(error) if error::code(error) == "cancelled"
+            Err(error) if error::is_cancelled(error)
         ));
     }
 }

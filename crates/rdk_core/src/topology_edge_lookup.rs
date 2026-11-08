@@ -11,11 +11,7 @@ pub struct T {
 }
 
 fn cancelled_error() -> error::T {
-    error::new(
-        "Topology_edge_lookup.create",
-        Code::Cancelled,
-        "geometry operation was cancelled".to_owned(),
-    )
+    error::cancelled("Topology_edge_lookup.create")
 }
 
 fn invalid_table_error(message: &str) -> error::T {
@@ -208,7 +204,7 @@ mod tests {
         );
         assert!(matches!(
             &result,
-            Err(error) if crate::error::code(error) == "cancelled"
+            Err(error) if crate::error::is_cancelled(error)
         ));
     }
 }

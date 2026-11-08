@@ -12,11 +12,7 @@ fn selection_error(operation: &str, message: String) -> error::T {
 }
 
 fn cancelled_error() -> error::T {
-    error::new(
-        "element selection",
-        Code::Cancelled,
-        "element selection was cancelled".to_owned(),
-    )
+    error::cancelled("element selection")
 }
 
 pub fn validate(

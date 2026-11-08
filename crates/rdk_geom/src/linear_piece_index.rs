@@ -3,6 +3,7 @@
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use rdk_core::{cancel, error, geometry, group, packed, support, topology};
+use rdk_core::error::Code;
 
 use crate::bounds3_index;
 use crate::point_grid::{float_max, float_min};
@@ -45,21 +46,13 @@ pub struct T {
 
 const OPERATION: &str = "linear_piece_index";
 
-fn fail(code: &str, message: String) -> error::T {
-    error::make(OPERATION.to_owned(), code.to_owned(), message, None).unwrap_or_else(|bad| bad)
+fn fail(code: Code, message: String) -> error::T {
+    error::new(OPERATION, code, message)
 }
 
-/// Maps a cancellation to this operation's own message, as OCaml's `Error.run ~cancelled` does.
-pub(crate) fn recode(result: Result<T, error::T>, operation: &str, cancelled: &str) -> Result<T, error::T> {
-    result.map_err(|failure| remap(failure, operation, cancelled))
-}
-
-pub(crate) fn remap(failure: error::T, operation: &str, cancelled: &str) -> error::T {
-    if error::code(&failure) == "cancelled" {
-        error::make(operation.to_owned(), "cancelled".to_owned(), cancelled.to_owned(), None).unwrap_or_else(|bad| bad)
-    } else {
-        failure
-    }
+/// A cancellation takes this operation's name; any other failure passes through.
+pub(crate) fn remap(failure: error::T, operation: &str) -> error::T {
+    if error::is_cancelled(&failure) { error::cancelled(operation) } else { failure }
 }
 
 /// Ascending members of a group (`Group.iter` order).
@@ -111,7 +104,7 @@ fn create_inner(
     geometry_value: &geometry::T,
 ) -> Result<T, error::T> {
     if grain <= 0 {
-        return Err(fail("invalid_parameter", "Linear_piece_index: grain must be positive".to_owned()));
+        return Err(fail(Code::InvalidParameter, "Linear_piece_index: grain must be positive".to_owned()));
     }
     cancel::check_opt(cancel_value)?;
     let positions = packed::Float3::View::view(geometry::positions(geometry_value))?;
@@ -121,10 +114,10 @@ fn create_inner(
         None => (0..primitive_count).collect(),
         Some(selection) => {
             if group::owner(selection) != group::Owner::Primitive {
-                return Err(fail("invalid_group", "selection must be a primitive group".to_owned()));
+                return Err(fail(Code::InvalidGroup, "selection must be a primitive group".to_owned()));
             }
             if group::length(selection) != primitive_count {
-                return Err(fail("invalid_group", "primitive group length does not match geometry".to_owned()));
+                return Err(fail(Code::InvalidGroup, "primitive group length does not match geometry".to_owned()));
             }
             members(selection)
         }
@@ -141,7 +134,7 @@ fn create_inner(
             0 => {
                 if size != 3 {
                     return Err(fail(
-                        "invalid_surface",
+                        Code::InvalidSurface,
                         format!("primitive {primitive} is a polygon with {size} corners, not a triangle"),
                     ));
                 }
@@ -149,7 +142,7 @@ fn create_inner(
             }
             1 => size - 1,
             2 => size,
-            _ => return Err(fail("invalid_surface", format!("primitive {primitive} has an invalid kind"))),
+            _ => return Err(fail(Code::InvalidSurface, format!("primitive {primitive} has an invalid kind"))),
         };
         piece_offsets[slot + 1] = piece_offsets[slot] + pieces;
     }
@@ -301,7 +294,7 @@ fn create_inner(
         Ok(())
     })?;
     if let Some(message) = failures.into_iter().flatten().next() {
-        return Err(fail("invalid_surface", message));
+        return Err(fail(Code::InvalidSurface, message));
     }
     let tree = bounds3_index::create(
         cancel_value,
@@ -359,11 +352,8 @@ pub fn create(
     primitives: Option<&group::T>,
     geometry_value: &geometry::T,
 ) -> Result<T, error::T> {
-    recode(
-        create_inner(cancel_value, grain.unwrap_or(16_384), primitives, geometry_value),
-        OPERATION,
-        "linear-piece index construction was cancelled",
-    )
+    create_inner(cancel_value, grain.unwrap_or(16_384), primitives, geometry_value)
+        .map_err(|failure| remap(failure, OPERATION))
 }
 
 pub fn piece_count(value: &T) -> i64 {
@@ -391,8 +381,7 @@ fn piece_bounds_overlap(tolerance: f64, left: &T, left_piece: usize, right: &T, 
 }
 
 fn invalid_argument(message: &str) -> error::T {
-    error::make(OPERATION.to_owned(), "invalid_parameter".to_owned(), message.to_owned(), None)
-        .unwrap_or_else(|bad| bad)
+    error::new(OPERATION, Code::InvalidParameter, message.to_owned())
 }
 
 fn pairs_of(

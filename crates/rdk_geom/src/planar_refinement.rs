@@ -6,6 +6,7 @@ use std::cmp::Ordering;
 use std::sync::Arc;
 
 use rdk_core::{cancel, error};
+use rdk_core::error::Code;
 
 use crate::bounds2_index;
 use crate::implicit_point::{self, Error as PointError};
@@ -33,14 +34,7 @@ pub struct T {
 }
 
 fn invalid(message: &str) -> error::T {
-    match error::make(
-        "Planar_refinement".to_owned(),
-        "invalid_argument".to_owned(),
-        message.to_owned(),
-        None,
-    ) {
-        Ok(value) | Err(value) => value,
-    }
+    error::new("Planar_refinement", Code::InvalidArgument, message.to_owned())
 }
 
 fn point_count_of(value: &T) -> i64 {
@@ -514,7 +508,7 @@ fn cancelled() -> String {
 
 /// Maps an `error::T` raised by a helper (cancellation or invalid argument) to the OCaml message.
 fn conv(value: error::T) -> String {
-    if error::code(&value) == "cancelled" {
+    if error::is_cancelled(&value) {
         cancelled()
     } else {
         error::message(&value).to_owned()

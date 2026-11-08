@@ -2,6 +2,7 @@
 use std::sync::Mutex;
 
 use rdk_core::{cancel, error, support};
+use rdk_core::error::Code;
 
 /// Per-node data computed by a caller's `extend` callback (the surface index's shared-point
 /// fan and diagonal K-DOP slabs).
@@ -48,8 +49,7 @@ struct Node {
 }
 
 fn pool_error(message: String) -> error::T {
-    error::make("Bounds3_index.create".to_owned(), "internal".to_owned(), message, None)
-        .unwrap_or_else(|failure| failure)
+    error::new("Bounds3_index.create", Code::Internal, message)
 }
 
 /// Builds the subtree for `order` (the range's slice) into `nodes`; `node` is the absolute index of

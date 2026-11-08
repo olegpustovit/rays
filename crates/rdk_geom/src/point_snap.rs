@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use rdk_core::{attribute, cancel, error, geometry, group, packed, support};
+use rdk_core::error::Code;
 
 use crate::point_clusters::Metric;
 use crate::point_grid::{self, float_max, float_min};
@@ -31,13 +32,7 @@ pub enum Targeting {
 const PREFIX: &str = "Rdk_spatial.Point_snap.fuse: ";
 
 fn fail(message: String) -> error::T {
-    error::make(
-        "Rdk_spatial.Point_snap.fuse".to_owned(),
-        "invalid_parameter".to_owned(),
-        format!("{PREFIX}{message}"),
-        None,
-    )
-    .unwrap_or_else(|bad| bad)
+    error::new("Rdk_spatial.Point_snap.fuse", Code::InvalidParameter, format!("{PREFIX}{message}"))
 }
 
 fn validate_group(label: &str, owner_count: i64, value: Option<&group::T>) -> Result<(), error::T> {

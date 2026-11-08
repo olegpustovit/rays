@@ -10,7 +10,7 @@ fn invalid_ragged(message: String) -> error::T {
 }
 
 fn cancelled_error() -> error::T {
-    error::new("ragged_ops", Code::Cancelled, "ragged operation was cancelled".to_owned())
+    error::cancelled("ragged_ops")
 }
 fn run_indexed_ranges(
     grain: i64,

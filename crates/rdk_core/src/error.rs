@@ -110,10 +110,14 @@ pub fn new(operation: &str, code: Code, message: String) -> T {
     T { operation: operation.to_owned(), code, message }
 }
 
-/// `Error.guard`: a failure takes the guard's operation and code; a cancellation keeps its code.
+/// A cancelled operation. Cancellation is the code, never a message to compare.
+pub fn cancelled(operation: &str) -> T {
+    new(operation, Code::Cancelled, "geometry operation was cancelled".to_owned())
+}
+
+/// `Error.guard`: a failure takes the guard's operation and code; a cancellation stays a cancellation.
 pub fn guard(failure: T, operation: &str, code: Code) -> T {
-    let code = if failure.code == Code::Cancelled { Code::Cancelled } else { code };
-    new(operation, code, failure.message)
+    if is_cancelled(&failure) { cancelled(operation) } else { new(operation, code, failure.message) }
 }
 
 pub fn make(
@@ -133,6 +137,10 @@ pub fn make(
         code: Code::parse(&code).unwrap_or_else(|| panic!("unknown rdk error code {code}")),
         message,
     })
+}
+
+pub fn is_cancelled(value: &T) -> bool {
+    value.code == Code::Cancelled
 }
 
 pub fn operation(value: &T) -> &str {
@@ -165,8 +173,8 @@ mod tests {
         assert_eq!(to_string(&error), "mesh [invalid_topology]: bad offsets");
         let guarded = guard(error, "outer", Code::InvalidParameter);
         assert_eq!((operation(&guarded), code(&guarded), message(&guarded)), ("outer", "invalid_parameter", "bad offsets"));
-        let cancelled = guard(new("inner", Code::Cancelled, "stop".to_owned()), "outer", Code::InvalidParameter);
-        assert_eq!((operation(&cancelled), cancelled.code), ("outer", Code::Cancelled));
+        let stopped = guard(cancelled("inner"), "outer", Code::InvalidParameter);
+        assert_eq!((operation(&stopped), stopped.code), ("outer", Code::Cancelled));
         let invalid = make(String::new(), "bad".to_owned(), String::new(), None).unwrap_err();
         assert_eq!(code(&invalid), "invalid_argument");
         assert_eq!(message(&invalid), "Rdk.Error.make: empty operation");

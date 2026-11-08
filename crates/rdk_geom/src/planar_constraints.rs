@@ -4,6 +4,7 @@ use std::sync::Mutex;
 use std::sync::Arc;
 
 use rdk_core::{cancel, error, support};
+use rdk_core::error::Code;
 
 use crate::bounds2_index;
 use crate::implicit_point::{self, Projection};
@@ -27,30 +28,16 @@ pub struct T {
 }
 
 fn invalid(message: &str) -> error::T {
-    match error::make(
-        "Planar_constraints".to_owned(),
-        "invalid_argument".to_owned(),
-        message.to_owned(),
-        None,
-    ) {
-        Ok(value) | Err(value) => value,
-    }
+    error::new("Planar_constraints", Code::InvalidArgument, message.to_owned())
 }
 
 fn invalid_string(message: String) -> error::T {
-    match error::make(
-        "Planar_constraints".to_owned(),
-        "invalid_argument".to_owned(),
-        message,
-        None,
-    ) {
-        Ok(value) | Err(value) => value,
-    }
+    error::new("Planar_constraints", Code::InvalidArgument, message)
 }
 
 /// Maps an internal error to the OCaml `Error` message.
 fn message_of(value: &error::T) -> String {
-    if error::code(value) == "cancelled" {
+    if error::is_cancelled(value) {
         "Planar constraint arrangement was cancelled".to_owned()
     } else {
         error::message(value).to_owned()

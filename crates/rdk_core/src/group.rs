@@ -375,12 +375,8 @@ pub fn union_many(
         Ok(())
     };
     support::parallel_for(cancel_value, chunk, count, &work).map_err(|failure| {
-        if error::code(&failure) == "cancelled" {
-            error::new(
-                "Group.union_many",
-                Code::Cancelled,
-                error::message(&failure).to_owned(),
-            )
+        if error::is_cancelled(&failure) {
+            error::cancelled("Group.union_many")
         } else {
             failure
         }

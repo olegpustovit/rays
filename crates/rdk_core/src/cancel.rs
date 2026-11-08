@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::error::{self, Code};
+use crate::error;
 
 pub struct T {
     cancelled: AtomicBool,
@@ -22,11 +22,7 @@ pub fn is_cancelled(value: &T) -> bool {
 
 pub fn check(value: &T) -> Result<(), error::T> {
     if is_cancelled(value) {
-        Err(error::new(
-            "Cancel.check",
-            Code::Cancelled,
-            "geometry operation was cancelled".to_owned(),
-        ))
+        Err(error::cancelled("Cancel.check"))
     } else {
         Ok(())
     }

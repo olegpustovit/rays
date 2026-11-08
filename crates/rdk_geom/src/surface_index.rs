@@ -8,6 +8,7 @@
 //! every result is byte-identical to the sequential path.
 
 use rdk_core::{cancel, error, geometry, group, packed, polygon_triangulation, support, topology};
+use rdk_core::error::Code;
 
 use crate::bounds3_index::{self, Extra};
 use crate::linear_piece_index::{join_pairs, members, plane_windows, remap, take_planes};
@@ -77,16 +78,16 @@ pub enum RaySurfaceHit {
     RayLastSurface,
 }
 
-fn fail_code(code: &str, message: String) -> error::T {
-    error::make(OPERATION.to_owned(), code.to_owned(), message, None).unwrap_or_else(|bad| bad)
+fn fail_code(code: Code, message: String) -> error::T {
+    error::new(OPERATION, code, message)
 }
 
 fn fail(message: String) -> error::T {
-    fail_code("invalid_surface", message)
+    fail_code(Code::InvalidSurface, message)
 }
 
 fn invalid_argument(message: &str) -> error::T {
-    fail_code("invalid_parameter", message.to_owned())
+    fail_code(Code::InvalidParameter, message.to_owned())
 }
 
 const DIAGONAL_COUNT: usize = 4;
@@ -191,11 +192,11 @@ fn create_with(
     let primitive_count = topology_view.primitive_kinds.len() as i64;
     if let Some(vertex_group) = vertices {
         if group::owner(vertex_group) != group::Owner::Vertex {
-            return Err(fail_code("invalid_group", "source vertex selection must be a vertex group".to_owned()));
+            return Err(fail_code(Code::InvalidGroup, "source vertex selection must be a vertex group".to_owned()));
         }
         if group::length(vertex_group) != topology_view.vertex_points.len() as i64 {
             return Err(fail_code(
-                "invalid_group",
+                Code::InvalidGroup,
                 "source vertex group length does not match geometry".to_owned(),
             ));
         }
@@ -204,11 +205,11 @@ fn create_with(
         None => (0..primitive_count).collect(),
         Some(primitive_group) => {
             if group::owner(primitive_group) != group::Owner::Primitive {
-                return Err(fail_code("invalid_group", "source selection must be a primitive group".to_owned()));
+                return Err(fail_code(Code::InvalidGroup, "source selection must be a primitive group".to_owned()));
             }
             if group::length(primitive_group) != primitive_count {
                 return Err(fail_code(
-                    "invalid_group",
+                    Code::InvalidGroup,
                     "source primitive group length does not match geometry".to_owned(),
                 ));
             }
@@ -300,7 +301,7 @@ fn create_with(
                         },
                     );
                     if let Err(problem) = result {
-                        if error::code(&problem) == "cancelled" {
+                        if error::is_cancelled(&problem) {
                             return Err(problem);
                         }
                         *failure = Some(error::message(&problem).to_owned());
@@ -538,7 +539,7 @@ fn create_remapped(
         validated_triangles,
         geometry_value,
     )
-    .map_err(|failure| remap(failure, OPERATION, "surface-index construction was cancelled"))
+    .map_err(|failure| remap(failure, OPERATION))
 }
 
 /// `primitives` restricts construction to a matching primitive group. `vertices` additionally
@@ -1761,8 +1762,7 @@ pub fn raycast(
         &mut distance,
     )
     .map_err(|failure| {
-        error::make(OPERATION.to_owned(), "invalid_ray".to_owned(), error::message(&failure).to_owned(), None)
-            .unwrap_or_else(|bad| bad)
+        error::new(OPERATION, Code::InvalidRay, error::message(&failure).to_owned())
     })?;
     Ok(if primitive[0] < 0 { None } else { Some(Hit { primitive: primitive[0], distance: distance[0] }) })
 }

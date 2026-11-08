@@ -5,11 +5,7 @@ fn invalid_polygon(message: String) -> error::T {
 }
 
 fn cancelled_error() -> error::T {
-    error::new(
-        "polygon_triangulation",
-        Code::Cancelled,
-        "polygon triangulation was cancelled".to_owned(),
-    )
+    error::cancelled("polygon_triangulation")
 }
 
 pub struct T {

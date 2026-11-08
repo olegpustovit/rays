@@ -5,6 +5,7 @@ use std::cmp::Ordering;
 
 use rays_math::rand;
 use rdk_core::{cancel, error};
+use rdk_core::error::Code;
 
 use crate::exact_dyadic;
 use crate::predicates::{self, Sign};
@@ -19,14 +20,7 @@ pub struct T {
 }
 
 fn invalid(label: &str, message: String) -> error::T {
-    match error::make(
-        label.to_owned(),
-        "invalid_argument".to_owned(),
-        message,
-        None,
-    ) {
-        Ok(value) | Err(value) => value,
-    }
+    error::new(label, Code::InvalidArgument, message)
 }
 
 fn check_index(label: &str, count: i64, index: i64) -> Result<(), error::T> {

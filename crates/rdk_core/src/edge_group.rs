@@ -331,11 +331,7 @@ pub mod View {
 }
 
 fn cancelled_error(operation: &str) -> error::T {
-    error::new(
-        operation,
-        Code::Cancelled,
-        "geometry operation was cancelled".to_owned(),
-    )
+    error::cancelled(operation)
 }
 
 pub fn remap(

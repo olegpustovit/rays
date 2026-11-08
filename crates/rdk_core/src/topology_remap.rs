@@ -9,7 +9,7 @@ fn invalid_remap(message: String) -> error::T {
 }
 
 fn cancelled_error() -> error::T {
-    error::new("topology_remap", Code::Cancelled, "topology remap was cancelled".to_owned())
+    error::cancelled("topology_remap")
 }
 fn run_indexed_ranges(
     grain: i64,

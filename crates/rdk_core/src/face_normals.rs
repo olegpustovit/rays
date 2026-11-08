@@ -12,14 +12,14 @@ fn invalid(operation: &str, message: String) -> error::T {
 }
 
 fn cancelled(operation: &str) -> error::T {
-    error::new(operation, Code::Cancelled, "geometry operation was cancelled".to_owned())
+    error::cancelled(operation)
 }
 
 fn poll(cancel_value: Option<&cancel::T>, operation: &str, index: i64, mask: i64) -> Result<(), error::T> {
     cancel::poll(cancel_value, index, mask).map_err(|_| cancelled(operation))
 }
 fn view_error(operation: &str, value: error::T) -> error::T {
-    if error::code(&value) == "cancelled" {
+    if error::is_cancelled(&value) {
         value
     } else {
         invalid(operation, error::message(&value).to_owned())

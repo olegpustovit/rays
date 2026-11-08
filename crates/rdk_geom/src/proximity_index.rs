@@ -5,6 +5,7 @@
 use std::sync::Mutex;
 
 use rdk_core::{cancel, error, geometry, packed, polygon_triangulation, support, topology, topology_index};
+use rdk_core::error::Code;
 
 use crate::bounds3_index;
 use crate::point_grid::{float_max, float_min, point_triangle_squared};
@@ -41,7 +42,7 @@ const SEGMENT: u8 = 0;
 const TRIANGLE: u8 = 1;
 
 fn failure(message: String) -> error::T {
-    error::make(OPERATION.to_owned(), "invalid_parameter".to_owned(), message, None).unwrap_or_else(|bad| bad)
+    error::new(OPERATION, Code::InvalidParameter, message)
 }
 
 fn feature_count(features: &Features) -> usize {
@@ -131,7 +132,7 @@ pub fn primitive_features(
                         },
                     );
                     if let Err(problem) = result {
-                        if error::code(&problem) == "cancelled" {
+                        if error::is_cancelled(&problem) {
                             return Err(problem);
                         }
                         chunk.failure = Some(error::message(&problem).to_owned());

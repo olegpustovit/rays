@@ -50,7 +50,7 @@ fn blank_attribute_name(name: &str) -> bool {
 }
 
 fn remap_error(value: error::T) -> error::T {
-    if error::code(&value) == "cancelled" {
+    if error::is_cancelled(&value) {
         make_error(Code::Cancelled, "geometry operation was cancelled".to_owned())
     } else {
         make_error(Code::InvalidTopology, error::message(&value).to_owned())

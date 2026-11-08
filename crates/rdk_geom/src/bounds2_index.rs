@@ -1,5 +1,6 @@
 //! Packed immutable BVH over two-dimensional closed bounds.
 use rdk_core::{cancel, error, support};
+use rdk_core::error::Code;
 
 #[derive(Clone, Debug)]
 pub struct T {
@@ -20,14 +21,7 @@ pub struct T {
 }
 
 fn invalid(operation: &str, message: &str) -> error::T {
-    match error::make(
-        operation.to_owned(),
-        "invalid_argument".to_owned(),
-        message.to_owned(),
-        None,
-    ) {
-        Ok(value) | Err(value) => value,
-    }
+    error::new(operation, Code::InvalidArgument, message.to_owned())
 }
 
 fn omin(a: f64, b: f64) -> f64 {

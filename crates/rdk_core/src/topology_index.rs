@@ -30,11 +30,7 @@ pub struct T {
 pub type Index = T;
 
 fn cancelled_error() -> error::T {
-    error::new(
-        "Topology_index.create",
-        Code::Cancelled,
-        "geometry operation was cancelled".to_owned(),
-    )
+    error::cancelled("Topology_index.create")
 }
 
 fn table_error(message: &str) -> error::T {
@@ -541,7 +537,7 @@ mod tests {
         let result = create(Some(&token), &source);
         assert!(matches!(
             &result,
-            Err(error) if error::code(error) == "cancelled"
+            Err(error) if error::is_cancelled(error)
         ));
     }
 }
