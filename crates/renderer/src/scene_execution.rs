@@ -375,7 +375,7 @@ struct prepared_run {
     prepared_bytes: i64,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 struct automatic_signature {
     signature_family: pipeline_family,
     signature_blend: Blend,
@@ -436,8 +436,7 @@ struct prepared_submission {
 
 struct automatic_candidate {
     candidate_clear: (f64, f64, f64, f64),
-    candidate_length: i64,
-    candidate_fingerprint: i64,
+    candidate_payloads: Vec<automatic_signature>,
 }
 
 struct prepared_slot {
@@ -887,7 +886,7 @@ pub fn create(
     gpu_vertices: Option<gpu_vertices_owner>,
     sun_depth: Option<sun_factory>,
     offscreen: bool,
-    driver: backend::Driver,
+    driver: Box<dyn backend::Driver>,
     configuration: &Configuration,
     make: &dyn Fn(&Device, pipeline_family, Blend, i64) -> Result<Pipeline, Error>,
 ) -> Result<t, Error> {
@@ -2083,145 +2082,6 @@ fn clear_prepared_scratch(scratch: &mut prepared_scratch) {
     scratch.scratch_length = 0;
 }
 
-fn same_automatic_slot(signature: &automatic_signature, slot: &prepared_slot) -> bool {
-    let (Some(state), Some(item)) = (&slot.slot_state, &slot.slot_mesh) else { return false };
-    let item = item.borrow();
-    let left = &signature.signature_state;
-    let same_state = left.viewport == state.viewport
-        && left.scissor == state.scissor
-        && left.cull == state.cull
-        && left.depth_compare == state.depth_compare
-        && left.depth_write == state.depth_write
-        && left.depth_load == state.depth_load
-        && left.depth_clear == state.depth_clear
-        && (slot.slot_uniform.is_some() || left.transform_uniforms == state.transform_uniforms);
-    let same_texture = match (&signature.signature_texture, &slot.slot_texture) {
-        (None, None) => true,
-        (Some((id, sampler)), Some((source, cached))) => {
-            *id == backend::texture_id(&cached.borrow().texture) && *sampler == source.sampler
-        }
-        _ => false,
-    };
-    let same_auxiliary = match (&signature.signature_auxiliary, &slot.slot_auxiliary) {
-        (None, None) => true,
-        (Some((buffer_id, texture_id, sampler)), Some(entry)) => {
-            *buffer_id == backend::buffer_id(&entry.1.borrow().auxiliary_buffer)
-                && *texture_id == backend::texture_id(&entry.2.borrow().texture)
-                && *sampler == entry.0.texture.sampler
-        }
-        _ => false,
-    };
-    signature.signature_family == slot.slot_family
-        && signature.signature_blend == slot.slot_blend
-        && signature.signature_samples == slot.slot_samples
-        && signature.signature_environment == slot.slot_environment.as_ref().map(|(source, cached)| texture_signature(source, cached))
-        && same_state
-        && same_texture
-        && same_auxiliary
-        && signature.signature_buffer == backend::buffer_id(&item.buffer)
-        && signature.signature_gpu_vertices == slot.slot_gpu_vertices.as_ref().map(gpu_identity)
-        && signature.signature_vertex_attributes == slot.slot_vertex_attributes.as_ref().map(|a| backend::buffer_id(&a.borrow().auxiliary_buffer))
-        && signature.signature_index_offset == item.index_offset
-        && signature.signature_uniform_buffer == slot.slot_uniform.as_ref().map(|u| backend::buffer_id(&u.uniform_buffer))
-        && signature.signature_uniform_offset == slot.slot_uniform.as_ref().map(|u| u.uniform_offset)
-        && signature.signature_vertex_count == item.vertex_count
-        && signature.signature_index_count == item.index_count
-}
-
-fn same_scratch_payloads(payloads: &[automatic_signature], scratch: &prepared_scratch) -> bool {
-    payloads.len() == scratch.scratch_length
-        && payloads.iter().zip(scratch.scratch_slots.iter()).all(|(signature, slot)| same_automatic_slot(signature, slot))
-}
-
-struct mix(u64);
-
-impl mix {
-    fn word(&mut self, value: u64) {
-        self.0 = (self.0 ^ value).wrapping_mul(0x9E3779B97F4A7C15).rotate_left(29);
-    }
-    fn text(&mut self, value: &str) {
-        for b in value.bytes() {
-            self.word(b as u64);
-        }
-    }
-    fn sampler(&mut self, sampler: &SamplerDescriptor) {
-        self.text(sampler.label.as_deref().unwrap_or(""));
-        self.word(sampler.min_filter as u64);
-        self.word(sampler.mag_filter as u64);
-        self.word(sampler.mip_filter as u64);
-        self.word(sampler.address_u as u64);
-        self.word(sampler.address_v as u64);
-        self.word(sampler.lod_min.to_bits());
-        self.word(sampler.lod_max.to_bits());
-        self.word(sampler.max_anisotropy as u64);
-    }
-}
-
-/// A compact value that is only an admission hint. Replay still requires `same_scratch_payloads`,
-/// so a hash collision cannot submit stale work. (The OCaml hash is `Hashtbl.seeded_hash`; this one
-/// mixes the same values, and nothing outside this renderer reads it.)
-fn automatic_candidate_fingerprint(scratch: &prepared_scratch) -> i64 {
-    let mut h = mix(0x41c64e6d);
-    for slot in &scratch.scratch_slots[..scratch.scratch_length] {
-        let state = slot.slot_state.as_ref().expect("slot state");
-        let mesh = slot.slot_mesh.as_ref().expect("slot mesh").borrow();
-        h.word(slot.slot_family as u64);
-        h.word(slot.slot_blend as u64);
-        h.word(slot.slot_samples as u64);
-        for v in [state.viewport, state.scissor] {
-            for w in [v.0, v.1, v.2, v.3] {
-                h.word(w as u64);
-            }
-        }
-        h.word(state.cull as u64);
-        h.word(state.depth_compare as u64);
-        h.word(state.depth_write as u64);
-        h.word(state.depth_load as u64);
-        h.word(state.depth_clear.to_bits());
-        if let Some(b) = &state.transform_uniforms {
-            for byte in b.borrow().iter() {
-                h.word(*byte as u64);
-            }
-        }
-        if let Some((source, cached)) = &slot.slot_texture {
-            let (id, sampler) = texture_signature(source, cached);
-            h.word(id as u64);
-            h.sampler(&sampler);
-        }
-        if let Some(entry) = &slot.slot_auxiliary {
-            let (buffer, texture, sampler) = auxiliary_signature(entry);
-            h.word(buffer as u64);
-            h.word(texture as u64);
-            h.sampler(&sampler);
-        }
-        if let Some((source, cached)) = &slot.slot_environment {
-            let (id, sampler) = texture_signature(source, cached);
-            h.word(id as u64);
-            h.sampler(&sampler);
-        }
-        h.word(backend::buffer_id(&mesh.buffer) as u64);
-        h.word(mesh.index_offset as u64);
-        if let Some(source) = &slot.slot_gpu_vertices {
-            let (key, buffer, ids) = gpu_identity(source);
-            h.text(&key);
-            h.word(buffer as u64);
-            for id in ids {
-                h.word(id as u64);
-            }
-        }
-        if let Some(a) = &slot.slot_vertex_attributes {
-            h.word(backend::buffer_id(&a.borrow().auxiliary_buffer) as u64);
-        }
-        if let Some(u) = &slot.slot_uniform {
-            h.word(backend::buffer_id(&u.uniform_buffer) as u64);
-            h.word(u.uniform_offset as u64);
-        }
-        h.word(mesh.vertex_count as u64);
-        h.word(mesh.index_count as u64);
-    }
-    (h.0 >> 1) as i64
-}
-
 fn has_depth(family: pipeline_family) -> bool {
     !matches!(family, Scene2 | Scene2_textured | Ui | Marks)
 }
@@ -2271,6 +2131,30 @@ fn render_target(
         }],
         depth,
     })
+}
+
+struct mix(u64);
+
+impl mix {
+    fn word(&mut self, value: u64) {
+        self.0 = (self.0 ^ value).wrapping_mul(0x9E3779B97F4A7C15).rotate_left(29);
+    }
+    fn text(&mut self, value: &str) {
+        for b in value.bytes() {
+            self.word(b as u64);
+        }
+    }
+    fn sampler(&mut self, sampler: &SamplerDescriptor) {
+        self.text(sampler.label.as_deref().unwrap_or(""));
+        self.word(sampler.min_filter as u64);
+        self.word(sampler.mag_filter as u64);
+        self.word(sampler.mip_filter as u64);
+        self.word(sampler.address_u as u64);
+        self.word(sampler.address_v as u64);
+        self.word(sampler.lod_min.to_bits());
+        self.word(sampler.lod_max.to_bits());
+        self.word(sampler.max_anisotropy as u64);
+    }
 }
 
 fn sampler_key(descriptor: &SamplerDescriptor) -> u64 {
@@ -2793,11 +2677,8 @@ fn assoc(table: &[(i64, i64)], slot: i64) -> i64 {
     table.iter().find(|(from, _)| *from == slot).map_or(slot, |(_, to)| *to)
 }
 
-type plan_entry_result = (plan_draw, Option<automatic_signature>);
-
 /// One draw's plan: the bindings its pipeline's Lisp declaration order expects.
-/// `keep`: the plan is retained, and replays when each slot matches its signature.
-fn plan_entry(value: &mut t, index: usize, keep: bool) -> Result<plan_entry_result, Error> {
+fn plan_entry(value: &mut t, index: usize) -> Result<plan_draw, Error> {
     let slot = &value.prepared_scratch.scratch_slots[index];
     let family = slot.slot_family;
     let blend = slot.slot_blend;
@@ -2810,7 +2691,6 @@ fn plan_entry(value: &mut t, index: usize, keep: bool) -> Result<plan_entry_resu
     let slot_gpu_vertices = slot.slot_gpu_vertices.clone();
     let slot_vertex_attributes = slot.slot_vertex_attributes.clone();
     let transform_uniforms = slot.slot_state.as_ref().expect("slot state").transform_uniforms.clone();
-    let signature = keep.then(|| automatic_signature(slot));
     let sun_requested = sun_key_of(slot).is_some();
     let item = item_ref.borrow();
     if let Some(source) = &slot_gpu_vertices {
@@ -3010,24 +2890,21 @@ fn plan_entry(value: &mut t, index: usize, keep: bool) -> Result<plan_entry_resu
         _ => 1,
     };
     let driver_pipeline = value.pipelines[variant].pipeline.clone();
-    Ok((
-        plan_draw {
-            plan_draw: BatchDraw {
-                pipeline: driver_pipeline,
-                buffers,
-                primitive: item.primitive,
-                index,
-                vertex_start: 0,
-                vertex_count: item.vertex_count,
-                instances,
-            },
-            plan_textures: textures,
-            plan_samplers: samplers,
-            plan_resident: resident,
-            plan_indirect: slot_gpu_vertices.as_ref().and_then(|source| source.gpu_indirect.clone()),
+    Ok(plan_draw {
+        plan_draw: BatchDraw {
+            pipeline: driver_pipeline,
+            buffers,
+            primitive: item.primitive,
+            index,
+            vertex_start: 0,
+            vertex_count: item.vertex_count,
+            instances,
         },
-        signature,
-    ))
+        plan_textures: textures,
+        plan_samplers: samplers,
+        plan_resident: resident,
+        plan_indirect: slot_gpu_vertices.as_ref().and_then(|source| source.gpu_indirect.clone()),
+    })
 }
 
 fn batch_resources_of(value: &t, draws: &[plan_draw]) -> Vec<ResourceUse> {
@@ -3067,9 +2944,9 @@ fn batch_resources_of(value: &t, draws: &[plan_draw]) -> Vec<ResourceUse> {
     resources
 }
 
-fn plan_batches(value: &mut t, keep: bool) -> Result<Vec<(Rc<batch_plan>, Vec<automatic_signature>)>, Error> {
+fn plan_batches(value: &mut t) -> Result<Vec<Rc<batch_plan>>, Error> {
     let length = value.prepared_scratch.scratch_length;
-    let mut planned: Vec<(Rc<batch_plan>, Vec<automatic_signature>)> = Vec::new();
+    let mut planned: Vec<Rc<batch_plan>> = Vec::new();
     let mut first = true;
     let mut index = 0;
     while index < length {
@@ -3091,11 +2968,8 @@ fn plan_batches(value: &mut t, keep: bool) -> Result<Vec<(Rc<batch_plan>, Vec<au
             }
         }
         let mut draws: Vec<plan_draw> = Vec::with_capacity(next - index);
-        let mut signatures: Vec<automatic_signature> = Vec::with_capacity(if keep { next - index } else { 0 });
         for slot_index in index..next {
-            let (draw, signature) = plan_entry(value, slot_index, keep)?;
-            draws.push(draw);
-            signatures.extend(signature);
+            draws.push(plan_entry(value, slot_index)?);
         }
         let batch = batch_plan {
             batch_family: family,
@@ -3107,7 +2981,7 @@ fn plan_batches(value: &mut t, keep: bool) -> Result<Vec<(Rc<batch_plan>, Vec<au
             batch_draws: draws,
             batch_icb: RefCell::new(None),
         };
-        planned.push((Rc::new(batch), signatures));
+        planned.push(Rc::new(batch));
         first = false;
         index = next;
     }
@@ -3124,19 +2998,16 @@ fn plan_batches(value: &mut t, keep: bool) -> Result<Vec<(Rc<batch_plan>, Vec<au
             depth_clear: 1.0,
             transform_uniforms: None,
         };
-        planned.push((
-            Rc::new(batch_plan {
-                batch_family: Scene2,
-                batch_samples: 1,
-                batch_state: state,
-                batch_first: true,
-                batch_draws: vec![],
-                batch_driver_draws: vec![],
-                batch_resources: vec![],
-                batch_icb: RefCell::new(None),
-            }),
-            vec![],
-        ));
+        planned.push(Rc::new(batch_plan {
+            batch_family: Scene2,
+            batch_samples: 1,
+            batch_state: state,
+            batch_first: true,
+            batch_draws: vec![],
+            batch_driver_draws: vec![],
+            batch_resources: vec![],
+            batch_icb: RefCell::new(None),
+        }));
     }
     Ok(planned)
 }
@@ -3150,13 +3021,14 @@ fn finish_prepared_frame(
     uniform_slices: Vec<Option<uniform_slice>>,
     after_prepare: &mut dyn FnMut(),
 ) -> Result<bool, Error> {
-    let candidate_fingerprint = automatic_candidate_fingerprint(&value.prepared_scratch);
     after_prepare();
+    let mut signatures: Vec<automatic_signature> =
+        value.prepared_scratch.scratch_slots[..value.prepared_scratch.scratch_length].iter().map(automatic_signature).collect();
     let hit = match &value.automatic_submission {
         Some(plan)
             if plan.replay_clear == clear
                 && plan.replay_gpu_vertices.iter().all(gpu_vertices_valid)
-                && same_scratch_payloads(&plan.replay_payloads, &value.prepared_scratch) =>
+                && plan.replay_payloads == signatures =>
         {
             Some(plan.clone())
         }
@@ -3179,32 +3051,24 @@ fn finish_prepared_frame(
         return encode_frame(value, &frame, clear, &plan.replay_batches).map(|()| true);
     }
     value.icb_stats.icb_misses += 1;
-    let payload_count = value.prepared_scratch.scratch_length as i64;
-    let admit = match &value.automatic_candidate {
-        Some(candidate) => {
-            candidate.candidate_clear == clear
-                && candidate.candidate_length == payload_count
-                && candidate.candidate_fingerprint == candidate_fingerprint
-        }
-        None => false,
-    };
+    let admit = value.automatic_candidate.as_ref().is_some_and(|c| c.candidate_clear == clear && c.candidate_payloads == signatures);
     // a plan nothing keeps (a frame unlike the last, without a prepared key) is encoded only
     let retained = prepared_key.is_some() || admit;
-    let planned = match plan_batches(value, retained) {
+    let plan_batches_ = match plan_batches(value) {
         Ok(planned) => planned,
         Err(e) => {
             discard(&frame);
             return Err(e);
         }
     };
-    let mut plan_batches_: Vec<Rc<batch_plan>> = Vec::with_capacity(planned.len());
-    let mut payloads: Vec<automatic_signature> = Vec::with_capacity(if retained { payload_count as usize } else { 0 });
-    for (batch, signatures) in planned {
-        plan_batches_.push(batch);
-        if retained {
-            payloads.extend(signatures);
-        }
-    }
+    // an admitted plan takes the signatures; otherwise the next frame compares against them
+    let payloads = if !retained {
+        Vec::new()
+    } else if admit {
+        std::mem::take(&mut signatures)
+    } else {
+        signatures.clone()
+    };
     let gpu_vertices: Vec<gpu_vertices> = if retained {
         value.prepared_scratch.scratch_slots[..value.prepared_scratch.scratch_length].iter().rev().filter_map(|slot| slot.slot_gpu_vertices.clone()).collect()
     } else {
@@ -3239,8 +3103,7 @@ fn finish_prepared_frame(
         value.automatic_candidate = None;
     } else {
         value.automatic_submission = None;
-        value.automatic_candidate =
-            Some(automatic_candidate { candidate_clear: clear, candidate_length: payload_count, candidate_fingerprint });
+        value.automatic_candidate = Some(automatic_candidate { candidate_clear: clear, candidate_payloads: signatures });
     }
     Ok(true)
 }
