@@ -11,7 +11,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | Wave | Done | Active | Pending |
 |------|------|--------|---------|
 | A | 8/8 | — | — |
-| B | 5/6 | — | 1 |
+| B | 5/6 | B1 | 1 |
 | M | 3/21 | — | 18 |
 | I | 0/1 | — | 1 |
 | C | 0/21 | — | 21 |
@@ -93,6 +93,7 @@ Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s
 ## Session log
 
 - 2026-11-08: B5 — `flow_sop_catalog` (catalog/manifest/port/network/encoded_parameters); `editor_document` direct dep; `cargo check -p flow_sop_catalog -p flow_sop -p editor_document -p rays_bin`.
+- 2026-11-08: B5 `94aa4546` + catalog tests; B1 `533489ee` term_arena trim; `cargo t -p flow_sop catalog` 2 pass.
 - 2026-11-08: `f6ca915b` M20, `bbe7f6ae` M2, `96fab43d` B2; `cargo check -p rays_bin` ~23s after profile shift.
 - 2026-11-08: B0 — invalidation checklist + script audit in PROGRESS §B0; warm pair flow_check 0.15 s / 0.07 s; log `.subagent-logs/b0.log`.
 - 2026-11-08: **Wave A closed** `3a293e9b` A6; plan audit appended; m10/b0 workers queued.
