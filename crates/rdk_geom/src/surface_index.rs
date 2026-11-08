@@ -4,9 +4,8 @@
 //! materializing another geometry, builds a median-split AABB hierarchy, and retains original
 //! primitive/corner identities.
 //!
-//! Parallel ranges never share an output slot: each range fills local buffers that are joined in
-//! range order, so every result is byte-identical to the sequential path.
-use std::sync::Mutex;
+//! Parallel ranges never share an output slot: each range writes its own fixed output window, so
+//! every result is byte-identical to the sequential path.
 
 use rdk_core::{cancel, error, geometry, group, packed, polygon_triangulation, support, topology};
 
@@ -149,8 +148,12 @@ fn empty_bounds(length: usize) -> Bounds {
     }
 }
 
-fn range_count(count: i64, chunk: i64) -> usize {
-    if count <= 0 { 0 } else { ((count - 1) / chunk + 1) as usize }
+fn plane_windows<'a>(planes: &'a mut [Vec<f64>], grain: i64) -> Vec<support::Windows<'a, f64>> {
+    planes.iter_mut().map(|plane| support::Windows::even(plane, grain)).collect()
+}
+
+fn take_planes<'a>(windows: &[support::Windows<'a, f64>], range: i64) -> Vec<&'a mut [f64]> {
+    windows.iter().map(|window| window.take(range)).collect()
 }
 
 /// Keeps the entries of `items` (in order) for which `keep` holds, one parallel range at a time.
@@ -161,25 +164,18 @@ fn filter_items(
     keep: &(dyn Fn(i64) -> bool + Sync),
 ) -> Result<Vec<i64>, error::T> {
     let count = items.len() as i64;
-    let slots: Vec<Mutex<Option<Vec<i64>>>> = (0..range_count(count, chunk)).map(|_| Mutex::new(None)).collect();
-    support::run_indexed_ranges(chunk, count, &|range, first, last| {
-        let mut retained = Vec::new();
-        for at in first..last {
-            cancel::poll(cancel_value, at, 4095)?;
-            if keep(items[at as usize]) {
-                retained.push(items[at as usize]);
+    let mut kept = vec![false; items.len()];
+    {
+        let windows = support::Windows::even(&mut kept, chunk);
+        support::run_indexed_ranges(chunk, count, &|range, first, last| {
+            for (at, flag) in (first..last).zip(windows.take(range)) {
+                cancel::poll(cancel_value, at, 4095)?;
+                *flag = keep(items[at as usize]);
             }
-        }
-        *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(retained);
-        Ok(())
-    })?;
-    let mut output = Vec::new();
-    for slot in slots {
-        if let Some(part) = slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner) {
-            output.extend(part);
-        }
+            Ok(())
+        })?;
     }
-    Ok(output)
+    Ok(items.iter().zip(&kept).filter(|&(_, &flag)| flag).map(|(&item, _)| item).collect())
 }
 
 fn create_with(
@@ -270,70 +266,58 @@ fn create_with(
             support::ceiling_div(triangle_total, selected_count as i64)?.max(1)
         };
         let primitive_chunk = (grain / average).max(1);
-        let slots: Vec<Mutex<Option<(Triangles, Option<String>)>>> =
-            (0..range_count(selected_count as i64, primitive_chunk)).map(|_| Mutex::new(None)).collect();
-        support::run_indexed_ranges(primitive_chunk, selected_count as i64, &|range, first_selected, last_selected| {
-            let base = triangle_offsets[first_selected as usize];
-            let length = (triangle_offsets[last_selected as usize] - base) as usize;
-            let mut local = Triangles {
-                primitives: vec![0; length],
-                vertex_a: vec![0; length],
-                vertex_b: vec![0; length],
-                vertex_c: vec![0; length],
-            };
-            let mut failure: Option<String> = None;
-            let mut scratch = polygon_triangulation::create_scratch();
-            for at in first_selected..last_selected {
-                cancel::poll(cancel_value, at, 4095)?;
-                if failure.is_some() {
-                    continue;
-                }
-                let primitive = selected_primitives[at as usize];
-                let offset = (triangle_offsets[at as usize] - base) as usize;
-                let result = polygon_triangulation::primitive(
-                    cancel_value,
-                    &positions,
-                    &topology_view,
-                    Some(&mut scratch),
-                    primitive,
-                    &mut |index, a, b, c| {
-                        let triangle = offset + index as usize;
-                        local.primitives[triangle] = primitive;
-                        local.vertex_a[triangle] = a;
-                        local.vertex_b[triangle] = b;
-                        local.vertex_c[triangle] = c;
-                    },
-                );
-                if let Err(problem) = result {
-                    if error::code(&problem) == "cancelled" {
-                        return Err(problem);
-                    }
-                    failure = Some(error::message(&problem).to_owned());
-                }
-            }
-            *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((local, failure));
-            Ok(())
-        })?;
+        let selected_total = selected_count as i64;
+        let ranges = support::range_count(selected_total, primitive_chunk);
         let n = triangle_total as usize;
-        let mut joined = Triangles {
-            primitives: Vec::with_capacity(n),
-            vertex_a: Vec::with_capacity(n),
-            vertex_b: Vec::with_capacity(n),
-            vertex_c: Vec::with_capacity(n),
-        };
-        let mut first_failure: Option<String> = None;
-        for slot in slots {
-            if let Some((part, failure)) = slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner) {
-                if first_failure.is_none() {
-                    first_failure = failure;
+        let mut joined = Triangles { primitives: vec![0; n], vertex_a: vec![0; n], vertex_b: vec![0; n], vertex_c: vec![0; n] };
+        let mut failures: Vec<Option<String>> = vec![None; ranges as usize];
+        {
+            let bound = |range: i64| triangle_offsets[(range * primitive_chunk).min(selected_total) as usize] as usize;
+            let (primitive_windows, a_windows, b_windows, c_windows) = (
+                support::Windows::new(&mut joined.primitives, ranges, bound),
+                support::Windows::new(&mut joined.vertex_a, ranges, bound),
+                support::Windows::new(&mut joined.vertex_b, ranges, bound),
+                support::Windows::new(&mut joined.vertex_c, ranges, bound),
+            );
+            let failure_windows = support::Windows::even(&mut failures, 1);
+            support::run_indexed_ranges(primitive_chunk, selected_total, &|range, first_selected, last_selected| {
+                let base = triangle_offsets[first_selected as usize];
+                let (primitives, vertex_a, vertex_b, vertex_c) =
+                    (primitive_windows.take(range), a_windows.take(range), b_windows.take(range), c_windows.take(range));
+                let failure = &mut failure_windows.take(range)[0];
+                let mut scratch = polygon_triangulation::create_scratch();
+                for at in first_selected..last_selected {
+                    cancel::poll(cancel_value, at, 4095)?;
+                    if failure.is_some() {
+                        continue;
+                    }
+                    let primitive = selected_primitives[at as usize];
+                    let offset = (triangle_offsets[at as usize] - base) as usize;
+                    let result = polygon_triangulation::primitive(
+                        cancel_value,
+                        &positions,
+                        &topology_view,
+                        Some(&mut scratch),
+                        primitive,
+                        &mut |index, a, b, c| {
+                            let triangle = offset + index as usize;
+                            primitives[triangle] = primitive;
+                            vertex_a[triangle] = a;
+                            vertex_b[triangle] = b;
+                            vertex_c[triangle] = c;
+                        },
+                    );
+                    if let Err(problem) = result {
+                        if error::code(&problem) == "cancelled" {
+                            return Err(problem);
+                        }
+                        *failure = Some(error::message(&problem).to_owned());
+                    }
                 }
-                joined.primitives.extend(part.primitives);
-                joined.vertex_a.extend(part.vertex_a);
-                joined.vertex_b.extend(part.vertex_b);
-                joined.vertex_c.extend(part.vertex_c);
-            }
+                Ok(())
+            })?;
         }
-        if let Some(message) = first_failure {
+        if let Some(message) = failures.into_iter().flatten().next() {
             return Err(fail(message));
         }
         joined
@@ -341,146 +325,122 @@ fn create_with(
     if let Some(vertex_group) = vertices {
         let bits = group::View::bits_view(vertex_group);
         let count = triangles.primitives.len() as i64;
-        let slots: Vec<Mutex<Option<Triangles>>> = (0..range_count(count, grain)).map(|_| Mutex::new(None)).collect();
-        support::run_indexed_ranges(grain, count, &|range, first, last| {
-            let mut local = Triangles {
-                primitives: Vec::new(),
-                vertex_a: Vec::new(),
-                vertex_b: Vec::new(),
-                vertex_c: Vec::new(),
-            };
-            for triangle in first..last {
-                cancel::poll(cancel_value, triangle, 4095)?;
-                let t = triangle as usize;
-                let a = selected(bits, triangles.vertex_a[t]);
-                let b = selected(bits, triangles.vertex_b[t]);
-                let c = selected(bits, triangles.vertex_c[t]);
-                let keep = match vertex_selection {
-                    VertexSelection::AllTriangleVertices => a && b && c,
-                    VertexSelection::AnyTriangleVertex => a || b || c,
-                };
-                if keep {
-                    local.primitives.push(triangles.primitives[t]);
-                    local.vertex_a.push(triangles.vertex_a[t]);
-                    local.vertex_b.push(triangles.vertex_b[t]);
-                    local.vertex_c.push(triangles.vertex_c[t]);
+        let mut keep = vec![false; count as usize];
+        {
+            let windows = support::Windows::even(&mut keep, grain);
+            support::run_indexed_ranges(grain, count, &|range, first, last| {
+                for (triangle, flag) in (first..last).zip(windows.take(range)) {
+                    cancel::poll(cancel_value, triangle, 4095)?;
+                    let t = triangle as usize;
+                    let a = selected(bits, triangles.vertex_a[t]);
+                    let b = selected(bits, triangles.vertex_b[t]);
+                    let c = selected(bits, triangles.vertex_c[t]);
+                    *flag = match vertex_selection {
+                        VertexSelection::AllTriangleVertices => a && b && c,
+                        VertexSelection::AnyTriangleVertex => a || b || c,
+                    };
                 }
-            }
-            *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(local);
-            Ok(())
-        })?;
+                Ok(())
+            })?;
+        }
+        // ponytail: the kept count is only known after the mask, so compaction is one sequential pass.
         let mut joined = Triangles {
             primitives: Vec::new(),
             vertex_a: Vec::new(),
             vertex_b: Vec::new(),
             vertex_c: Vec::new(),
         };
-        for slot in slots {
-            if let Some(part) = slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner) {
-                joined.primitives.extend(part.primitives);
-                joined.vertex_a.extend(part.vertex_a);
-                joined.vertex_b.extend(part.vertex_b);
-                joined.vertex_c.extend(part.vertex_c);
-            }
+        for t in (0..keep.len()).filter(|&t| keep[t]) {
+            joined.primitives.push(triangles.primitives[t]);
+            joined.vertex_a.push(triangles.vertex_a[t]);
+            joined.vertex_b.push(triangles.vertex_b[t]);
+            joined.vertex_c.push(triangles.vertex_c[t]);
         }
         triangles = joined;
     }
     let count = triangles.primitives.len();
     let total = count as i64;
-    let bound_slots: Vec<Mutex<Option<(Bounds, Option<String>)>>> = (0..range_count(total, grain)).map(|_| Mutex::new(None)).collect();
     let vertex_points = &topology_view.vertex_points;
-    support::run_indexed_ranges(grain, total, &|range, first_slot, last_slot| {
-        let length = (last_slot - first_slot) as usize;
-        let mut local = empty_bounds(length);
-        let mut failure: Option<String> = None;
-        for slot in first_slot..last_slot {
-            cancel::poll(cancel_value, slot, 4095)?;
-            if failure.is_some() {
-                continue;
+    let mut bounds = empty_bounds(count);
+    let mut failures: Vec<Option<String>> = vec![None; support::range_count(total, grain) as usize];
+    {
+        let Bounds { centroid, min, max, min_d, max_d } = &mut bounds;
+        let (centroid_windows, min_windows, max_windows) =
+            (plane_windows(centroid, grain), plane_windows(min, grain), plane_windows(max, grain));
+        let (min_d_windows, max_d_windows) = (plane_windows(min_d, grain), plane_windows(max_d, grain));
+        let failure_windows = support::Windows::even(&mut failures, 1);
+        support::run_indexed_ranges(grain, total, &|range, first_slot, last_slot| {
+            let (mut centroid, mut min, mut max) = (
+                take_planes(&centroid_windows, range),
+                take_planes(&min_windows, range),
+                take_planes(&max_windows, range),
+            );
+            let (mut min_d, mut max_d) = (take_planes(&min_d_windows, range), take_planes(&max_d_windows, range));
+            let failure = &mut failure_windows.take(range)[0];
+            for slot in first_slot..last_slot {
+                cancel::poll(cancel_value, slot, 4095)?;
+                if failure.is_some() {
+                    continue;
+                }
+                let s = slot as usize;
+                let at = s - first_slot as usize;
+                let primitive = triangles.primitives[s];
+                let a = vertex_points[triangles.vertex_a[s] as usize];
+                let b = vertex_points[triangles.vertex_b[s] as usize];
+                let c = vertex_points[triangles.vertex_c[s] as usize];
+                let (ax, ay, az) = (positions.x[a as usize], positions.y[a as usize], positions.z[a as usize]);
+                let (bx, by, bz) = (positions.x[b as usize], positions.y[b as usize], positions.z[b as usize]);
+                let (cx, cy, cz) = (positions.x[c as usize], positions.y[c as usize], positions.z[c as usize]);
+                if !validated_triangles
+                    && !(ax.is_finite()
+                        && ay.is_finite()
+                        && az.is_finite()
+                        && bx.is_finite()
+                        && by.is_finite()
+                        && bz.is_finite()
+                        && cx.is_finite()
+                        && cy.is_finite()
+                        && cz.is_finite())
+                {
+                    *failure = Some(format!("primitive {primitive} has a non-finite position"));
+                    continue;
+                }
+                let degenerate = if validated_triangles {
+                    false
+                } else {
+                    let xy = predicates::orient2d_packed(&positions.x, &positions.y, a, b, c);
+                    let yz = predicates::orient2d_packed(&positions.y, &positions.z, a, b, c);
+                    let zx = predicates::orient2d_packed(&positions.z, &positions.x, a, b, c);
+                    xy == predicates::Sign::Zero && yz == predicates::Sign::Zero && zx == predicates::Sign::Zero
+                };
+                if degenerate {
+                    *failure = Some(format!("primitive {primitive} is degenerate"));
+                    continue;
+                }
+                centroid[0][at] = (ax + bx + cx) / 3.0;
+                centroid[1][at] = (ay + by + cy) / 3.0;
+                centroid[2][at] = (az + bz + cz) / 3.0;
+                min[0][at] = float_min(ax, float_min(bx, cx));
+                min[1][at] = float_min(ay, float_min(by, cy));
+                min[2][at] = float_min(az, float_min(bz, cz));
+                max[0][at] = float_max(ax, float_max(bx, cx));
+                max[1][at] = float_max(ay, float_max(by, cy));
+                max[2][at] = float_max(az, float_max(bz, cz));
+                for axis in 0..DIAGONAL_COUNT {
+                    min_d[axis][at] = float_min(
+                        diagonal_lower(axis, ax, ay, az),
+                        float_min(diagonal_lower(axis, bx, by, bz), diagonal_lower(axis, cx, cy, cz)),
+                    );
+                    max_d[axis][at] = float_max(
+                        diagonal_upper(axis, ax, ay, az),
+                        float_max(diagonal_upper(axis, bx, by, bz), diagonal_upper(axis, cx, cy, cz)),
+                    );
+                }
             }
-            let s = slot as usize;
-            let at = s - first_slot as usize;
-            let primitive = triangles.primitives[s];
-            let a = vertex_points[triangles.vertex_a[s] as usize];
-            let b = vertex_points[triangles.vertex_b[s] as usize];
-            let c = vertex_points[triangles.vertex_c[s] as usize];
-            let (ax, ay, az) = (positions.x[a as usize], positions.y[a as usize], positions.z[a as usize]);
-            let (bx, by, bz) = (positions.x[b as usize], positions.y[b as usize], positions.z[b as usize]);
-            let (cx, cy, cz) = (positions.x[c as usize], positions.y[c as usize], positions.z[c as usize]);
-            if !validated_triangles
-                && !(ax.is_finite()
-                    && ay.is_finite()
-                    && az.is_finite()
-                    && bx.is_finite()
-                    && by.is_finite()
-                    && bz.is_finite()
-                    && cx.is_finite()
-                    && cy.is_finite()
-                    && cz.is_finite())
-            {
-                failure = Some(format!("primitive {primitive} has a non-finite position"));
-                continue;
-            }
-            let degenerate = if validated_triangles {
-                false
-            } else {
-                let xy = predicates::orient2d_packed(&positions.x, &positions.y, a, b, c);
-                let yz = predicates::orient2d_packed(&positions.y, &positions.z, a, b, c);
-                let zx = predicates::orient2d_packed(&positions.z, &positions.x, a, b, c);
-                xy == predicates::Sign::Zero && yz == predicates::Sign::Zero && zx == predicates::Sign::Zero
-            };
-            if degenerate {
-                failure = Some(format!("primitive {primitive} is degenerate"));
-                continue;
-            }
-            local.centroid[0][at] = (ax + bx + cx) / 3.0;
-            local.centroid[1][at] = (ay + by + cy) / 3.0;
-            local.centroid[2][at] = (az + bz + cz) / 3.0;
-            local.min[0][at] = float_min(ax, float_min(bx, cx));
-            local.min[1][at] = float_min(ay, float_min(by, cy));
-            local.min[2][at] = float_min(az, float_min(bz, cz));
-            local.max[0][at] = float_max(ax, float_max(bx, cx));
-            local.max[1][at] = float_max(ay, float_max(by, cy));
-            local.max[2][at] = float_max(az, float_max(bz, cz));
-            for axis in 0..DIAGONAL_COUNT {
-                local.min_d[axis][at] = float_min(
-                    diagonal_lower(axis, ax, ay, az),
-                    float_min(diagonal_lower(axis, bx, by, bz), diagonal_lower(axis, cx, cy, cz)),
-                );
-                local.max_d[axis][at] = float_max(
-                    diagonal_upper(axis, ax, ay, az),
-                    float_max(diagonal_upper(axis, bx, by, bz), diagonal_upper(axis, cx, cy, cz)),
-                );
-            }
-        }
-        *bound_slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((local, failure));
-        Ok(())
-    })?;
-    let mut bounds = Bounds {
-        centroid: std::array::from_fn(|_| Vec::with_capacity(count)),
-        min: std::array::from_fn(|_| Vec::with_capacity(count)),
-        max: std::array::from_fn(|_| Vec::with_capacity(count)),
-        min_d: std::array::from_fn(|_| Vec::with_capacity(count)),
-        max_d: std::array::from_fn(|_| Vec::with_capacity(count)),
-    };
-    let mut first_failure: Option<String> = None;
-    for slot in bound_slots {
-        if let Some((part, failure)) = slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner) {
-            if first_failure.is_none() {
-                first_failure = failure;
-            }
-            for axis in 0..3 {
-                bounds.centroid[axis].extend(&part.centroid[axis]);
-                bounds.min[axis].extend(&part.min[axis]);
-                bounds.max[axis].extend(&part.max[axis]);
-            }
-            for axis in 0..DIAGONAL_COUNT {
-                bounds.min_d[axis].extend(&part.min_d[axis]);
-                bounds.max_d[axis].extend(&part.max_d[axis]);
-            }
-        }
+            Ok(())
+        })?;
     }
-    if let Some(message) = first_failure {
+    if let Some(message) = failures.into_iter().flatten().next() {
         return Err(fail(message));
     }
     let extend = |order: &[i64]| -> Extra {
@@ -752,7 +712,7 @@ fn triangle_pairs_of(
     // ponytail: OCaml's non-single-pass mode counts then fills; per-range buffers joined in range
     // order give the same bytes in one traversal, so both modes share this path.
     let range_size = if single_pass { grain.max(128) } else { grain.max(1) };
-    let ranges = range_count(left_count, range_size);
+    let ranges = support::range_count(left_count, range_size) as usize;
     let slots = pair_slots(ranges);
     support::run_indexed_ranges(range_size, left_count, &|range, first, last| {
         let mut node_stack = [0_i64; 65];
@@ -1056,8 +1016,6 @@ fn query_closest(value: &T, qx: f64, qy: f64, qz: f64, maximum: f64, scratch: &m
     }
 }
 
-type ClosestChunk = (Vec<i64>, Vec<i64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>);
-
 #[allow(clippy::too_many_arguments)]
 pub fn closest_many_into(
     cancel_value: Option<&cancel::T>,
@@ -1103,26 +1061,24 @@ pub fn closest_many_into(
         return Err(invalid_argument("Surface_index: output arrays are too short"));
     }
     let query_view = packed::Float3::View::view(queries)?;
-    let slots: Vec<Mutex<Option<ClosestChunk>>> = (0..range_count(query_count, grain)).map(|_| Mutex::new(None)).collect();
     {
-        let (ro_primitives, ro_triangles, ro_a, ro_b, ro_c, ro_d) = (
-            &*primitives,
-            &*triangles,
-            &*barycentric_a,
-            &*barycentric_b,
-            &*barycentric_c,
-            &*distances_squared,
+        let windows = (
+            support::Windows::even(&mut primitives[..n], grain),
+            support::Windows::even(&mut triangles[..n], grain),
+            support::Windows::even(&mut barycentric_a[..n], grain),
+            support::Windows::even(&mut barycentric_b[..n], grain),
+            support::Windows::even(&mut barycentric_c[..n], grain),
+            support::Windows::even(&mut distances_squared[..n], grain),
         );
         support::run_indexed_ranges(grain, query_count, &|range, first, last| {
-            let (f, l) = (first as usize, last as usize);
             // Unselected slots keep the caller's initialized values.
-            let mut chunk: ClosestChunk = (
-                ro_primitives[f..l].to_vec(),
-                ro_triangles[f..l].to_vec(),
-                ro_a[f..l].to_vec(),
-                ro_b[f..l].to_vec(),
-                ro_c[f..l].to_vec(),
-                ro_d[f..l].to_vec(),
+            let (out_primitives, out_triangles, out_a, out_b, out_c, out_d) = (
+                windows.0.take(range),
+                windows.1.take(range),
+                windows.2.take(range),
+                windows.3.take(range),
+                windows.4.take(range),
+                windows.5.take(range),
             );
             let mut scratch = [0.0_f64; 8];
             for query in first..last {
@@ -1138,30 +1094,16 @@ pub fn closest_many_into(
                     }
                     let result = query_closest(value, qx, qy, qz, max_distance_squared, &mut scratch);
                     let at = (query - first) as usize;
-                    chunk.0[at] = result.primitive;
-                    chunk.1[at] = result.triangle;
-                    chunk.2[at] = result.a;
-                    chunk.3[at] = result.b;
-                    chunk.4[at] = result.c;
-                    chunk.5[at] = result.distance;
+                    out_primitives[at] = result.primitive;
+                    out_triangles[at] = result.triangle;
+                    out_a[at] = result.a;
+                    out_b[at] = result.b;
+                    out_c[at] = result.c;
+                    out_d[at] = result.distance;
                 }
             }
-            *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(chunk);
             Ok(())
         })?;
-    }
-    let mut at = 0_usize;
-    for slot in slots {
-        if let Some(chunk) = slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner) {
-            let end = at + chunk.0.len();
-            primitives[at..end].copy_from_slice(&chunk.0);
-            triangles[at..end].copy_from_slice(&chunk.1);
-            barycentric_a[at..end].copy_from_slice(&chunk.2);
-            barycentric_b[at..end].copy_from_slice(&chunk.3);
-            barycentric_c[at..end].copy_from_slice(&chunk.4);
-            distances_squared[at..end].copy_from_slice(&chunk.5);
-            at = end;
-        }
     }
     Ok(())
 }
@@ -1217,11 +1159,10 @@ pub fn closest_distances_many_into(
         return Err(invalid_argument("Surface_index: output array is too short"));
     }
     let query_view = packed::Float3::View::view(queries)?;
-    let slots: Vec<Mutex<Option<Vec<f64>>>> = (0..range_count(query_count, grain)).map(|_| Mutex::new(None)).collect();
     {
-        let existing = &*distances_squared;
+        let windows = support::Windows::even(&mut distances_squared[..query_count as usize], grain);
         support::run_indexed_ranges(grain, query_count, &|range, first, last| {
-            let mut chunk = existing[first as usize..last as usize].to_vec();
+            let chunk = windows.take(range);
             let mut scratch = [0.0_f64; 8];
             for query in first..last {
                 cancel::poll(cancel_value, query, 4095)?;
@@ -1239,16 +1180,8 @@ pub fn closest_distances_many_into(
                     chunk[(query - first) as usize] = if scratch[1] == 0.0 { f64::INFINITY } else { scratch[0] };
                 }
             }
-            *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(chunk);
             Ok(())
         })?;
-    }
-    let mut at = 0_usize;
-    for slot in slots {
-        if let Some(chunk) = slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner) {
-            distances_squared[at..at + chunk.len()].copy_from_slice(&chunk);
-            at += chunk.len();
-        }
     }
     Ok(())
 }
@@ -1641,8 +1574,6 @@ pub mod View {
 
 use View::RayDirections;
 
-type RayChunk = (Vec<i64>, Vec<i64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>);
-
 #[allow(clippy::too_many_arguments)]
 fn raycast_many_into(
     cancel_value: Option<&cancel::T>,
@@ -1698,17 +1629,29 @@ fn raycast_many_into(
         return Err(invalid_argument("Surface_index: ray output arrays are too short"));
     }
     let query_view = packed::Float3::View::view(queries)?;
-    let slots: Vec<Mutex<Option<RayChunk>>> = (0..range_count(query_count, grain)).map(|_| Mutex::new(None)).collect();
+    let windows = (
+        support::Windows::even(&mut primitives[..n], grain),
+        support::Windows::even(&mut triangles[..n], grain),
+        support::Windows::even(&mut barycentric_a[..n], grain),
+        support::Windows::even(&mut barycentric_b[..n], grain),
+        support::Windows::even(&mut barycentric_c[..n], grain),
+        support::Windows::even(&mut distances[..n], grain),
+    );
     support::run_indexed_ranges(grain, query_count, &|range, first, last| {
-        let length = (last - first) as usize;
-        let mut chunk: RayChunk = (
-            vec![-1; length],
-            vec![-1; length],
-            vec![0.0; length],
-            vec![0.0; length],
-            vec![0.0; length],
-            vec![f64::INFINITY; length],
+        let (out_primitives, out_triangles, out_a, out_b, out_c, out_d) = (
+            windows.0.take(range),
+            windows.1.take(range),
+            windows.2.take(range),
+            windows.3.take(range),
+            windows.4.take(range),
+            windows.5.take(range),
         );
+        out_primitives.fill(-1);
+        out_triangles.fill(-1);
+        out_a.fill(0.0);
+        out_b.fill(0.0);
+        out_c.fill(0.0);
+        out_d.fill(f64::INFINITY);
         let mut scratch = [0.0_f64; 8];
         let mut node_stack = [0_i64; 65];
         let mut integer_results = [-1_i64; 4];
@@ -1776,30 +1719,16 @@ fn raycast_many_into(
             let floating = chosen * 4;
             if integer_results[integer] >= 0 {
                 let at = (query - first) as usize;
-                chunk.0[at] = integer_results[integer];
-                chunk.1[at] = integer_results[integer + 1];
-                chunk.2[at] = float_results[floating + 1];
-                chunk.3[at] = float_results[floating + 2];
-                chunk.4[at] = float_results[floating + 3];
-                chunk.5[at] = float_results[floating];
+                out_primitives[at] = integer_results[integer];
+                out_triangles[at] = integer_results[integer + 1];
+                out_a[at] = float_results[floating + 1];
+                out_b[at] = float_results[floating + 2];
+                out_c[at] = float_results[floating + 3];
+                out_d[at] = float_results[floating];
             }
         }
-        *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(chunk);
         Ok(())
     })?;
-    let mut at = 0_usize;
-    for slot in slots {
-        if let Some(chunk) = slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner) {
-            let end = at + chunk.0.len();
-            primitives[at..end].copy_from_slice(&chunk.0);
-            triangles[at..end].copy_from_slice(&chunk.1);
-            barycentric_a[at..end].copy_from_slice(&chunk.2);
-            barycentric_b[at..end].copy_from_slice(&chunk.3);
-            barycentric_c[at..end].copy_from_slice(&chunk.4);
-            distances[at..end].copy_from_slice(&chunk.5);
-            at = end;
-        }
-    }
     Ok(())
 }
 
