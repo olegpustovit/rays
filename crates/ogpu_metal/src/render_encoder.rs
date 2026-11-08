@@ -125,34 +125,33 @@ fn draw_batch(context: &CommandContext, encoder: &RenderEncoder, draws: &[Driver
     Ok(())
 }
 
-fn use_resources(context: &CommandContext, encoder: &RenderEncoder, tokens: &[i64]) -> Result<(), Error> {
-    let mut buffers: Vec<metal::Buffer> = Vec::new();
-    let mut textures: Vec<metal::Texture> = Vec::new();
-    let mut seen: Vec<i64> = Vec::new();
+/// Declares residency once per pass: `declared` holds the tokens this encoder already uses (a pass
+/// shared by several batches repeats their atlases).
+fn use_resources(context: &CommandContext, encoder: &RenderEncoder, tokens: &[i64], declared: &mut Vec<i64>) -> Result<(), Error> {
+    let mut buffers: Vec<RenderResource> = Vec::new();
+    let mut textures: Vec<RenderResource> = Vec::new();
     for token in tokens {
-        if seen.contains(token) {
+        if declared.contains(token) {
             continue;
         }
-        seen.push(*token);
+        declared.push(*token);
         match context.resource(*token) {
             Some(Resource::Buffer(buffer)) => {
                 context.keep_buffer(&buffer)?;
-                buffers.push(buffer.metal().clone());
+                buffers.push(RenderResource::Buffer(buffer.metal().clone()));
             }
             Some(Resource::Texture(texture)) => {
                 context.keep_texture(&texture)?;
-                textures.push(texture.metal().clone());
+                textures.push(RenderResource::Texture(texture.metal().clone()));
             }
             None => return Err(fail(context.operation, ErrorKind::InvalidArgument, "resource graph is incomplete")),
         }
     }
     if !buffers.is_empty() {
-        let resources: Vec<RenderResource> = buffers.iter().map(|buffer| RenderResource::Buffer(buffer.clone())).collect();
-        encoder.use_resources(&resources, &[ResourceUsage::Read], &[RenderStage::Vertex, RenderStage::Fragment]).map_err(|value| of_metal_error(context.operation, &value))?;
+        encoder.use_resources(&buffers, &[ResourceUsage::Read], &[RenderStage::Vertex, RenderStage::Fragment]).map_err(|value| of_metal_error(context.operation, &value))?;
     }
     if !textures.is_empty() {
-        let resources: Vec<RenderResource> = textures.iter().map(|texture| RenderResource::Texture(texture.clone())).collect();
-        encoder.use_resources(&resources, &[ResourceUsage::Sample], &[RenderStage::Fragment]).map_err(|value| of_metal_error(context.operation, &value))?;
+        encoder.use_resources(&textures, &[ResourceUsage::Sample], &[RenderStage::Fragment]).map_err(|value| of_metal_error(context.operation, &value))?;
     }
     Ok(())
 }
@@ -162,6 +161,7 @@ struct Render {
     context: Rc<CommandContext>,
     encoder: RenderEncoder,
     pass: RenderPassDescriptor,
+    declared: std::cell::RefCell<Vec<i64>>,
 }
 
 pub fn create(context: &Rc<CommandContext>, target: &DriverRenderTarget) -> Result<Box<dyn DriverRenderEncoder>, Error> {
@@ -205,7 +205,7 @@ pub fn create(context: &Rc<CommandContext>, target: &DriverRenderTarget) -> Resu
     pass.set_actions(load_action(color.color_load), color_store, depth_load, depth_store_action, depth_clear, LoadAction::Clear, StoreAction::Store, 0).map_err(&fail_pass)?;
     let encoder = RenderEncoder::create(&context.native, &pass).map_err(&fail_pass)?;
     *context.open_encoder.borrow_mut() = Some(OpenEncoder::Render(encoder.clone(), pass.clone()));
-    Ok(Box::new(Render { context: context.clone(), encoder, pass }))
+    Ok(Box::new(Render { context: context.clone(), encoder, pass, declared: std::cell::RefCell::new(Vec::new()) }))
 }
 
 impl DriverRenderEncoder for Render {
@@ -315,7 +315,7 @@ impl DriverRenderEncoder for Render {
     }
 
     fn use_resources(&self, tokens: &[Token]) -> Result<(), Error> {
-        use_resources(&self.context, &self.encoder, tokens)
+        use_resources(&self.context, &self.encoder, tokens, &mut self.declared.borrow_mut())
     }
 
     fn execute_icb(&self, token: Token, location: i64, length: i64) -> Result<(), Error> {
