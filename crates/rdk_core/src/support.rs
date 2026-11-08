@@ -467,6 +467,67 @@ pub fn parallel_for(
     })
 }
 
+/// Number of `grain`-sized ranges `run_indexed_ranges` splits `count` elements into.
+pub fn range_count(count: i64, grain: i64) -> i64 {
+    if count <= 0 { 0 } else { (count - 1) / grain.max(1) + 1 }
+}
+
+/// Cancellation poll shared by every element loop (every 4096th element).
+pub fn poll(cancel_value: Option<&cancel::T>, element: i64) -> Result<(), error::T> {
+    cancel::poll(cancel_value, element, 4095).map_err(|_| cancelled("Support.parallel_for"))
+}
+
+/// Disjoint output windows for `run_indexed_ranges` closures: range `r` owns `out[bound(r)..bound(r + 1)]`
+/// (bounds nondecreasing; elements outside `bound(0)..bound(ranges)` are never handed out).
+/// Boundaries are fixed by the caller, so sequential and parallel runs write identical bytes.
+pub struct Windows<'a, T>(Vec<Mutex<Option<&'a mut [T]>>>);
+
+impl<'a, T: Send> Windows<'a, T> {
+    pub fn new(out: &'a mut [T], ranges: i64, bound: impl Fn(i64) -> usize) -> Self {
+        let mut previous = bound(0);
+        let mut rest = &mut out[previous..];
+        let windows = (0..ranges)
+            .map(|range| {
+                let next = bound(range + 1);
+                let (window, tail) = std::mem::take(&mut rest).split_at_mut(next - previous);
+                (rest, previous) = (tail, next);
+                Mutex::new(Some(window))
+            })
+            .collect();
+        Windows(windows)
+    }
+
+    /// `grain`-sized windows aligned with `run_indexed_ranges(grain, out.len())`.
+    pub fn even(out: &'a mut [T], grain: i64) -> Self {
+        let (len, grain) = (out.len(), grain.max(1) as usize);
+        Self::new(out, range_count(len as i64, grain as i64), |range| (range as usize).saturating_mul(grain).min(len))
+    }
+
+    /// The window of `range`; each range runs once, so a second take is a bug.
+    pub fn take(&self, range: i64) -> &'a mut [T] {
+        let mut window = self.0[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        window.take().expect("output window taken twice")
+    }
+}
+
+/// `out[i] = work(i)` over `grain`-sized ranges, polling cancellation like `parallel_for`.
+pub fn par_fill<T: Send>(
+    cancel_value: Option<&cancel::T>,
+    grain: i64,
+    out: &mut [T],
+    work: &(dyn Fn(i64) -> Result<T, error::T> + Sync),
+) -> Result<(), error::T> {
+    let (count, grain) = (out.len() as i64, grain.max(1));
+    let windows = Windows::even(out, grain);
+    run_indexed_ranges(grain, count, &|range, first, last| {
+        for (element, slot) in (first..last).zip(windows.take(range)) {
+            poll(cancel_value, element)?;
+            *slot = work(element)?;
+        }
+        Ok(())
+    })
+}
+
 pub fn run_indexed_ranges(
     grain: i64,
     count: i64,
@@ -561,6 +622,41 @@ mod tests {
         drop(second);
         assert_eq!(owner.bytes(), 0);
     }
+    #[test]
+    fn par_fill_and_windows_are_deterministic_across_domains() {
+        let run = |domains| {
+            let result = Mutex::new((Vec::new(), Vec::new()));
+            parallel::run_unit(Some(domains), &|| {
+                let mut squares = vec![0_i64; 10_007];
+                par_fill(None, 64, &mut squares, &|i| Ok(i * i)).unwrap();
+                // ragged: row r owns r % 3 + 1 values, ranges of 5 rows
+                let rows = 1_000_i64;
+                let starts: Vec<usize> = (0..=rows).scan(0, |at, r| { let start = *at; *at += (r % 3 + 1) as usize; Some(start) }).collect();
+                let mut values = vec![0_i64; starts[rows as usize]];
+                let windows = Windows::new(&mut values, range_count(rows, 7), |range| starts[(range * 7).min(rows) as usize]);
+                run_indexed_ranges(7, rows, &|range, first, last| {
+                    let window = windows.take(range);
+                    let base = starts[first as usize];
+                    for row in first..last {
+                        for at in starts[row as usize]..starts[row as usize + 1] {
+                            window[at - base] = row * 10 + (at - starts[row as usize]) as i64;
+                        }
+                    }
+                    Ok(())
+                })
+                .unwrap();
+                *result.lock().unwrap() = (squares, values);
+                Ok(())
+            })
+            .unwrap();
+            result.into_inner().unwrap()
+        };
+        let (squares, values) = run(1);
+        assert_eq!(squares[10_006], 10_006 * 10_006);
+        assert_eq!(values[0], 0);
+        assert_eq!((squares.clone(), values.clone()), run(4));
+    }
+
     #[test]
     fn run_tasks_returns_the_lowest_failing_range() {
         let result = Mutex::new(None);

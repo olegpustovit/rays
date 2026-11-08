@@ -2,6 +2,7 @@
 pub mod windows_process;
 
 use std::alloc::{GlobalAlloc, Layout, System};
+use std::cell::Cell;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::Mutex;
 
@@ -17,7 +18,23 @@ pub struct CountingAllocator;
 #[global_allocator]
 static GLOBAL: CountingAllocator = CountingAllocator;
 
+// Per-thread (live delta, peak delta, alloc count) since `local_reset`; const + no Drop, so safe inside the allocator.
+thread_local! { static LOCAL: Cell<(i64, i64, u64)> = const { Cell::new((0, 0, 0)) }; }
+
+fn note_local(delta: i64, allocs: u64) {
+    LOCAL.with(|local| {
+        let (live, peak, count) = local.get();
+        local.set((live + delta, peak.max(live + delta), count + allocs));
+    });
+}
+
+pub fn local_reset() { LOCAL.with(|local| local.set((0, 0, 0))); }
+/// Peak bytes live above the `local_reset` baseline on this thread.
+pub fn local_peak_bytes() -> i64 { LOCAL.with(|local| local.get().1) }
+pub fn local_alloc_count() -> u64 { LOCAL.with(|local| local.get().2) }
+
 fn add_live(size: usize) {
+    note_local(size as i64, 1);
     let size = size as u64;
     ALLOCS.fetch_add(1, Ordering::Relaxed);
     TOTAL.fetch_add(size, Ordering::Relaxed);
@@ -34,6 +51,7 @@ fn add_live(size: usize) {
 }
 
 fn subtract_live(size: usize) {
+    note_local(-(size as i64), 0);
     let size = size as u64;
     let _ = LIVE.try_update(Ordering::Relaxed, Ordering::Relaxed, |live| {
         Some(live.saturating_sub(size))
