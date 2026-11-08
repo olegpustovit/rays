@@ -636,7 +636,7 @@ pub fn update_with(value: t, frame_: &frame::t, inspector: &dyn Fn(&mut Ui) -> R
             value.context_error = Some(rays_diagnostic::to_string(&diagnostic));
         }
     }
-    let mut first_draws: Vec<rdk::geometry::T> = Vec::new();
+    let mut first_draws: Vec<rdk_core::geometry::T> = Vec::new();
     for (id, entry) in value.drawn.iter() {
         match drawn_before.get(id) {
             Some(known) if Rc::ptr_eq(&known.prepared, &entry.prepared) => {}

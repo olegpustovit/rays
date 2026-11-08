@@ -289,7 +289,7 @@ pub fn run_panel_states() {
     let prepared = Editor::prepared(&r.e);
     let same = |r: &Run| match (&Editor::prepared(&r.e), &prepared) {
         // physical equality has no Rust identity (Editor::prepared clones): compare the geometry by size
-        (Some(a), Some(b)) => rdk::geometry::point_count(a) == rdk::geometry::point_count(b),
+        (Some(a), Some(b)) => rdk_core::geometry::point_count(a) == rdk_core::geometry::point_count(b),
         (None, None) => true,
         _ => false,
     };

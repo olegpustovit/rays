@@ -11,7 +11,7 @@ use sop::edit_graph::{self as edit, Factory};
 use sop::node::{self, build, CookMode};
 use sop::payload;
 use std::collections::HashMap;
-use rdk::geometry as geo;
+use rdk_core::geometry as geo;
 use sop::context::{self as sctx, Options as ContextOptions};
 use sop::session;
 use std::sync::Arc;
@@ -22,8 +22,8 @@ pub fn factories() -> Vec<Factory> {
 
 /// A generator node holding an already built geometry: the one OCaml-only source, used through
 /// `with_`.
-pub fn snapshot(geometry: &rdk::geometry::T) -> node::T {
-    let parameters = format!("data_id={};bytes={}", rdk::geometry::data_id(geometry), rdk::geometry::payload_bytes(geometry));
+pub fn snapshot(geometry: &rdk_core::geometry::T) -> node::T {
+    let parameters = format!("data_id={};bytes={}", rdk_core::geometry::data_id(geometry), rdk_core::geometry::payload_bytes(geometry));
     let geometry = geometry.clone();
     build::make_geometry(
         build::Args { parameters: parameters.into_bytes(), cook_mode: CookMode::Generator, ..build::args("snapshot") },
@@ -218,32 +218,32 @@ pub fn cook_once(domains: i64, n: &node::T) -> geo::T {
 pub fn geometry_bytes(g: &geo::T) -> Vec<u8> {
     let mut out = String::new();
     let positions = geo::positions(g);
-    for i in 0..rdk::packed::Float3::length(positions) {
-        let (x, y, z) = rdk::packed::Float3::get(positions, i).expect("position");
+    for i in 0..rdk_core::packed::Float3::length(positions) {
+        let (x, y, z) = rdk_core::packed::Float3::get(positions, i).expect("position");
         out.push_str(&format!("{:016x}{:016x}{:016x};", x.to_bits(), y.to_bits(), z.to_bits()));
     }
-    if let Ok(view) = rdk::topology::View::view(geo::topology(g)) {
+    if let Ok(view) = rdk_core::topology::View::view(geo::topology(g)) {
         out.push_str(&format!("T{}|{:?}|{:?}|{:?};", view.point_count, view.vertex_points, view.primitive_offsets, view.primitive_kinds));
     }
     for a in geo::attributes(g) {
-        out.push_str(&format!("A{:?}:{}:{};", rdk::attribute::owner(&a), rdk::attribute::name(&a), rdk::attribute::kind_name(&a)));
-        match rdk::attribute::storage(&a) {
-            Ok(rdk::attribute::Storage::Float(v)) => out.push_str(&v.iter().map(|x| format!("{:016x}", x.to_bits())).collect::<String>()),
-            Ok(rdk::attribute::Storage::Int(v)) => out.push_str(&format!("{v:?}")),
-            Ok(rdk::attribute::Storage::Text(v)) => out.push_str(&format!("{v:?}")),
-            Ok(rdk::attribute::Storage::Float2(v)) => {
-                for i in 0..rdk::packed::Float2::length(&v) {
-                    out.push_str(&format!("{:?}", rdk::packed::Float2::get(&v, i).map(|(x, y)| (x.to_bits(), y.to_bits()))));
+        out.push_str(&format!("A{:?}:{}:{};", rdk_core::attribute::owner(&a), rdk_core::attribute::name(&a), rdk_core::attribute::kind_name(&a)));
+        match rdk_core::attribute::storage(&a) {
+            Ok(rdk_core::attribute::Storage::Float(v)) => out.push_str(&v.iter().map(|x| format!("{:016x}", x.to_bits())).collect::<String>()),
+            Ok(rdk_core::attribute::Storage::Int(v)) => out.push_str(&format!("{v:?}")),
+            Ok(rdk_core::attribute::Storage::Text(v)) => out.push_str(&format!("{v:?}")),
+            Ok(rdk_core::attribute::Storage::Float2(v)) => {
+                for i in 0..rdk_core::packed::Float2::length(&v) {
+                    out.push_str(&format!("{:?}", rdk_core::packed::Float2::get(&v, i).map(|(x, y)| (x.to_bits(), y.to_bits()))));
                 }
             }
-            Ok(rdk::attribute::Storage::Float3(v)) => {
-                for i in 0..rdk::packed::Float3::length(&v) {
-                    out.push_str(&format!("{:?}", rdk::packed::Float3::get(&v, i).map(|(x, y, z)| (x.to_bits(), y.to_bits(), z.to_bits()))));
+            Ok(rdk_core::attribute::Storage::Float3(v)) => {
+                for i in 0..rdk_core::packed::Float3::length(&v) {
+                    out.push_str(&format!("{:?}", rdk_core::packed::Float3::get(&v, i).map(|(x, y, z)| (x.to_bits(), y.to_bits(), z.to_bits()))));
                 }
             }
-            Ok(rdk::attribute::Storage::Float4(v)) => {
-                for i in 0..rdk::packed::Float4::length(&v) {
-                    out.push_str(&format!("{:?}", rdk::packed::Float4::get(&v, i).map(|(a, b, c, d)| (a.to_bits(), b.to_bits(), c.to_bits(), d.to_bits()))));
+            Ok(rdk_core::attribute::Storage::Float4(v)) => {
+                for i in 0..rdk_core::packed::Float4::length(&v) {
+                    out.push_str(&format!("{:?}", rdk_core::packed::Float4::get(&v, i).map(|(a, b, c, d)| (a.to_bits(), b.to_bits(), c.to_bits(), d.to_bits()))));
                 }
             }
             Ok(_) => out.push_str("array"),
@@ -252,9 +252,9 @@ pub fn geometry_bytes(g: &geo::T) -> Vec<u8> {
         out.push(';');
     }
     for group in geo::groups(g) {
-        out.push_str(&format!("G{:?}:{}:", rdk::group::owner(&group), rdk::group::name(&group)));
-        for i in 0..rdk::group::length(&group) {
-            out.push(if rdk::group::mem(i, &group) { '1' } else { '0' });
+        out.push_str(&format!("G{:?}:{}:", rdk_core::group::owner(&group), rdk_core::group::name(&group)));
+        for i in 0..rdk_core::group::length(&group) {
+            out.push(if rdk_core::group::mem(i, &group) { '1' } else { '0' });
         }
         out.push(';');
     }
@@ -288,8 +288,8 @@ pub fn prepared_at(x: f64) -> Result<cook::prepared, String> {
 }
 
 fn prepared_of(x: Vec<f64>, y: Vec<f64>, z: Vec<f64>, points: i64) -> Result<cook::prepared, String> {
-    let positions = rdk::packed::Float3::of_owned(x, y, z).map_err(|e| format!("{e:?}"))?;
-    let topology = rdk::topology::empty(points).map_err(|e| format!("{e:?}"))?;
+    let positions = rdk_core::packed::Float3::of_owned(x, y, z).map_err(|e| format!("{e:?}"))?;
+    let topology = rdk_core::topology::empty(points).map_err(|e| format!("{e:?}"))?;
     let geometry = geo::create(positions, topology, None, None, None).map_err(|e| format!("{e:?}"))?;
     let surface = rdk_rays::surface::of_geometry(None, &geometry)?;
     Ok(cook::prepared { geometry, surface })
@@ -305,7 +305,7 @@ pub fn prepare_empty() -> cook::Prepare_fn {
 }
 
 pub fn first_point(p: &cook::prepared) -> (f64, f64, f64) {
-    rdk::packed::Float3::get(geo::positions(&p.geometry), 0).expect("a first point")
+    rdk_core::packed::Float3::get(geo::positions(&p.geometry), 0).expect("a first point")
 }
 
 pub fn x_of(p: &cook::prepared) -> f64 {

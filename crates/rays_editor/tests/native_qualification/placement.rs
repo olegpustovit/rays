@@ -4,7 +4,7 @@ use flow_native::workspace_gpu as gpu;
 use flow_ir::{flow_ir::{Gpu, Executor, Profile, Cost, Placement, PlacementReason as Reason}, packed};
 use flow_sop::{lower, value_lane};
 use flow_syntax::value::Value;
-use rdk::{geometry as g, packed::Float3};
+use rdk_core::{geometry as g, packed::Float3};
 use rays::{canvas, scene3};
 use rays_math::vec3;
 use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
@@ -275,7 +275,7 @@ fn retained_generations() {
         assert!(heap_delta<=262144*std::mem::size_of::<usize>() as i64,"retained bytes {heap_delta}");
         assert_eq!(last.payload_readback_bytes,0);
         assert!(Profile::placements(&lowered.profile).iter().any(|p| p.cpu_consumers==Some(0) && Cost::on_device(p.reason)));
-        let cancel=Arc::new(rdk::cancel::create());rdk::cancel::cancel(&cancel);
+        let cancel=Arc::new(rdk_core::cancel::create());rdk_core::cancel::cancel(&cancel);
         let context=sop::context::create(sop::context::Options {domains:Some(1),cancel:Some(cancel),time:Some(201.),..Default::default()}).unwrap();
         match sop::session::cook(&mut session,Some(0),&context,&node) {Err(d)=>assert!(d.code=="E_CANCELLED" || d.code=="cancelled"),Ok(_)=>panic!("cancelled placement cook published geometry")}
         assert_eq!(gpu::image_stats(owner).0.payload_readback_bytes,0);

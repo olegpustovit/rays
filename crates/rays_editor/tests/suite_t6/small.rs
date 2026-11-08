@@ -3,21 +3,21 @@
 use std::sync::Arc;
 
 use param::Value;
-use rdk::packed::Float3;
+use rdk_core::packed::Float3;
 use sop::node::{self, CookMode};
 use sop::{context, custom, edit_graph, session};
 
 use super::super::support::*;
 
-fn tri() -> rdk::geometry::T {
+fn tri() -> rdk_core::geometry::T {
     let positions = Float3::View::of_owned_exn(vec![-0.5, 0.5, 0.], vec![-0.5, -0.5, 0.5], vec![0., 0., 0.]).unwrap();
-    let topology = rdk::topology::polygons_owned(3, vec![0, 2, 1], vec![0, 3]).unwrap();
+    let topology = rdk_core::topology::polygons_owned(3, vec![0, 2, 1], vec![0, 3]).unwrap();
     let values = Float3::View::of_owned_exn(vec![0.; 3], vec![0.; 3], vec![-1.; 3]).unwrap();
-    let normal = rdk::attribute::create_owned("N", rdk::attribute::Owner::Vertex, rdk::attribute::Storage::Float3(values)).unwrap();
-    rdk::geometry::create(positions, topology, Some(vec![normal]), None, None).unwrap()
+    let normal = rdk_core::attribute::create_owned("N", rdk_core::attribute::Owner::Vertex, rdk_core::attribute::Storage::Float3(values)).unwrap();
+    rdk_core::geometry::create(positions, topology, Some(vec![normal]), None, None).unwrap()
 }
 
-fn mesh(g: &rdk::geometry::T) -> Result<rays::mesh::t, String> {
+fn mesh(g: &rdk_core::geometry::T) -> Result<rays::mesh::t, String> {
     rdk_rays::rays_mesh::to_mesh(g).map_err(|e| format!("{e:?}"))
 }
 
@@ -48,9 +48,9 @@ pub fn terminal_normals() {
         assert!(w.join().unwrap() == one, "terminal normal worker drift");
     }
     let source = tri();
-    let bad = rdk::attribute::create_owned("N", rdk::attribute::Owner::Vertex, rdk::attribute::Storage::Float2(rdk::packed::Float2::of_owned(vec![0.; 3], vec![0.; 3]).unwrap())).unwrap();
-    let source = rdk::geometry::without_attribute(rdk::attribute::Owner::Vertex, "N", &source);
-    let source = rdk::geometry::with_attribute(bad, &source).unwrap();
+    let bad = rdk_core::attribute::create_owned("N", rdk_core::attribute::Owner::Vertex, rdk_core::attribute::Storage::Float2(rdk_core::packed::Float2::of_owned(vec![0.; 3], vec![0.; 3]).unwrap())).unwrap();
+    let source = rdk_core::geometry::without_attribute(rdk_core::attribute::Owner::Vertex, "N", &source);
+    let source = rdk_core::geometry::with_attribute(bad, &source).unwrap();
     assert!(mesh(&source).is_err(), "malformed terminal N was accepted");
 }
 
@@ -69,11 +69,11 @@ fn float_of(v: &Value) -> f64 {
     }
 }
 
-fn x_of(g: &rdk::geometry::T) -> f64 {
-    Float3::get(rdk::geometry::positions(g), 0).unwrap().0
+fn x_of(g: &rdk_core::geometry::T) -> f64 {
+    Float3::get(rdk_core::geometry::positions(g), 0).unwrap().0
 }
 
-fn cook(s: &mut session::T, c: &context::T, n: &node::T) -> rdk::geometry::T {
+fn cook(s: &mut session::T, c: &context::T, n: &node::T) -> rdk_core::geometry::T {
     match session::cook(s, None, c, n) {
         Ok(out) => sop::payload::geometry(&out.payload).unwrap(),
         Err(e) => panic!("{}", rays_diagnostic::error_to_string(&e)),
@@ -81,7 +81,7 @@ fn cook(s: &mut session::T, c: &context::T, n: &node::T) -> rdk::geometry::T {
 }
 
 pub fn custom_sop() {
-    let input = flow_sop::lisp_sop::snapshot(&rdk::line_geometry::points(&[(0., 0., 0.)]).unwrap());
+    let input = flow_sop::lisp_sop::snapshot(&rdk_ops::line_geometry::points(&[(0., 0., 0.)]).unwrap());
     let dependencies = context::dependencies::one(context::dependencies::Fact::Time);
     let schema = controls_schema();
     let key_schema = schema.clone();
@@ -101,7 +101,7 @@ pub fn custom_sop() {
                         return Err("expected one input".into());
                     }
                     let offset = float_of(&params[0]) + float_of(&params[1]) * context::time(context);
-                    let p = rdk::geometry::positions(&geometries[0]);
+                    let p = rdk_core::geometry::positions(&geometries[0]);
                     let n = Float3::length(p);
                     let (mut xs, mut ys, mut zs) = (vec![], vec![], vec![]);
                     for i in 0..n {
@@ -111,7 +111,7 @@ pub fn custom_sop() {
                         zs.push(z);
                     }
                     let positions = Float3::of_owned(xs, ys, zs).map_err(|e| format!("{e:?}"))?;
-                    rdk::geometry::with_positions(positions, &geometries[0]).map_err(|e| format!("{e:?}"))
+                    rdk_core::geometry::with_positions(positions, &geometries[0]).map_err(|e| format!("{e:?}"))
                 }),
             ))
         }),
@@ -134,7 +134,7 @@ pub fn custom_sop() {
     let mut factories = vec![edit_graph::factory(
         edit_graph::factory_args("my_custom_sop", "My Custom SOP", &["Custom"]),
         0,
-        Arc::new(|inputs| if inputs.is_empty() { Ok(flow_sop::lisp_sop::snapshot(&rdk::line_geometry::points(&[(0., 0., 0.)]).unwrap())) } else { Err("none".into()) }),
+        Arc::new(|inputs| if inputs.is_empty() { Ok(flow_sop::lisp_sop::snapshot(&rdk_ops::line_geometry::points(&[(0., 0., 0.)]).unwrap())) } else { Err("none".into()) }),
     )];
     factories.extend(sop::nodes::factories());
     let text = "(workspace test_custom

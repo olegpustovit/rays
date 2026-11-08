@@ -2,7 +2,7 @@
 #![allow(dead_code, unused_imports)]
 use std::collections::HashMap;
 
-use rdk::packed::Float3;
+use rdk_core::packed::Float3;
 use sop::{context, node, session};
 
 use super::super::support::*;
@@ -16,11 +16,11 @@ fn with_cook<R>(domains: i64, f: &dyn Fn(&dyn Fn(&node::T) -> session::Output) -
     r
 }
 
-fn edge_counts(g: &rdk::geometry::T) -> (i64, i64) {
-    let index = rdk::topology_index::create(None, rdk::geometry::topology(g)).unwrap();
+fn edge_counts(g: &rdk_core::geometry::T) -> (i64, i64) {
+    let index = rdk_core::topology_index::create(None, rdk_core::geometry::topology(g)).unwrap();
     let (mut boundary, mut non_manifold) = (0, 0);
-    for edge in 0..rdk::topology_index::edge_count(&index) {
-        let n = rdk::topology_index::edge_incidence_count(&index, edge).unwrap();
+    for edge in 0..rdk_core::topology_index::edge_count(&index) {
+        let n = rdk_core::topology_index::edge_incidence_count(&index, edge).unwrap();
         if n == 1 {
             boundary += 1;
         }
@@ -42,16 +42,16 @@ pub fn shattered_studio() {
     let four = with_cook(4, &|cook| cook(&fracture));
     let g = sop::payload::geometry(&one.payload).unwrap();
     let h = sop::payload::geometry(&four.payload).unwrap();
-    assert!(rdk::geometry::point_count(&g) == rdk::geometry::point_count(&h));
-    assert!(rdk::geometry::primitive_count(&g) == rdk::geometry::primitive_count(&h));
-    for i in 0..rdk::geometry::point_count(&g) {
-        assert!(Float3::get(rdk::geometry::positions(&g), i) == Float3::get(rdk::geometry::positions(&h), i));
+    assert!(rdk_core::geometry::point_count(&g) == rdk_core::geometry::point_count(&h));
+    assert!(rdk_core::geometry::primitive_count(&g) == rdk_core::geometry::primitive_count(&h));
+    for i in 0..rdk_core::geometry::point_count(&g) {
+        assert!(Float3::get(rdk_core::geometry::positions(&g), i) == Float3::get(rdk_core::geometry::positions(&h), i));
     }
-    let tg = rdk::topology::View::view(rdk::geometry::topology(&g)).unwrap();
-    let th = rdk::topology::View::view(rdk::geometry::topology(&h)).unwrap();
+    let tg = rdk_core::topology::View::view(rdk_core::geometry::topology(&g)).unwrap();
+    let th = rdk_core::topology::View::view(rdk_core::geometry::topology(&h)).unwrap();
     assert!(tg.vertex_points == th.vertex_points && tg.primitive_offsets == th.primitive_offsets);
-    let pieces = |geometry: &rdk::geometry::T| match rdk::attribute::storage(&rdk::geometry::find_attribute(rdk::attribute::Owner::Primitive, "piece", geometry).expect("piece")).unwrap() {
-        rdk::attribute::Storage::Int(a) => a,
+    let pieces = |geometry: &rdk_core::geometry::T| match rdk_core::attribute::storage(&rdk_core::geometry::find_attribute(rdk_core::attribute::Owner::Primitive, "piece", geometry).expect("piece")).unwrap() {
+        rdk_core::attribute::Storage::Int(a) => a,
         _ => panic!("fracture lost its piece IDs"),
     };
     let piece_ids = pieces(&g);
@@ -66,14 +66,14 @@ pub fn shattered_studio() {
         .collect();
     let count = dense.len() as i64;
     assert!(count >= 1000, "{count} pieces");
-    let parts = rdk::deletion::primitive_partitions(count, &membership, &g).unwrap();
+    let parts = rdk_core::deletion::primitive_partitions(count, &membership, &g).unwrap();
     for part in &parts {
         assert!(edge_counts(part) == (0, 0));
     }
     let source = sop::node::inputs(&fracture).remove(0);
     let source = with_cook(1, &|cook| cook(&source));
-    let original_volume = rdk::analysis::signed_volume(&sop::payload::geometry(&source.payload).unwrap()).unwrap();
-    let fractured_volume = rdk::analysis::signed_volume(&g).unwrap();
+    let original_volume = rdk_core::analysis::signed_volume(&sop::payload::geometry(&source.payload).unwrap()).unwrap();
+    let fractured_volume = rdk_core::analysis::signed_volume(&g).unwrap();
     assert!((original_volume - fractured_volume).abs() < 1e-7 * original_volume.abs());
     let colored = with_cook(1, &|cook| cook(&graph));
     let geometry = sop::payload::geometry(&colored.payload).unwrap();

@@ -45,7 +45,7 @@ fn cook(domains: i64, node: &sop::node::T) -> sop::session::Output {
     out
 }
 
-fn geometry_of(o: &sop::session::Output) -> rdk::geometry::T {
+fn geometry_of(o: &sop::session::Output) -> rdk_core::geometry::T {
     ok(sop::payload::geometry(&o.payload))
 }
 
@@ -55,18 +55,18 @@ fn surface_scene(node: &sop::node::T, surface: &rdk_rays::surface::T) -> Vec<ray
     rays::scene3::Walk::drawings(&scene)
 }
 
-fn attr(name: &str, g: &rdk::geometry::T) -> rdk::attribute::Storage {
-    let a = rdk::geometry::find_attribute(rdk::attribute::Owner::Primitive, name, g).unwrap_or_else(|| fail(&format!("no {name}")));
-    ok(rdk::attribute::storage(&a))
+fn attr(name: &str, g: &rdk_core::geometry::T) -> rdk_core::attribute::Storage {
+    let a = rdk_core::geometry::find_attribute(rdk_core::attribute::Owner::Primitive, name, g).unwrap_or_else(|| fail(&format!("no {name}")));
+    ok(rdk_core::attribute::storage(&a))
 }
 
-fn signature(g: &rdk::geometry::T) -> Vec<String> {
+fn signature(g: &rdk_core::geometry::T) -> Vec<String> {
     ["shop_materialpath", "material_roughness", "material_color", "material_emission"]
         .iter()
         .map(|name| match attr(name, g) {
-            rdk::attribute::Storage::Text(a) => format!("{a:?}"),
-            rdk::attribute::Storage::Float(a) => format!("{:?}", a.iter().map(|x| x.to_bits()).collect::<Vec<_>>()),
-            rdk::attribute::Storage::Float4(a) => format!("{:?}", (0..rdk::packed::Float4::length(&a)).map(|i| rdk::packed::Float4::get(&a, i).map(|(w, x, y, z)| (w.to_bits(), x.to_bits(), y.to_bits(), z.to_bits()))).collect::<Vec<_>>()),
+            rdk_core::attribute::Storage::Text(a) => format!("{a:?}"),
+            rdk_core::attribute::Storage::Float(a) => format!("{:?}", a.iter().map(|x| x.to_bits()).collect::<Vec<_>>()),
+            rdk_core::attribute::Storage::Float4(a) => format!("{:?}", (0..rdk_core::packed::Float4::length(&a)).map(|i| rdk_core::packed::Float4::get(&a, i).map(|(w, x, y, z)| (w.to_bits(), x.to_bits(), y.to_bits(), z.to_bits()))).collect::<Vec<_>>()),
             _ => fail("unexpected material attribute"),
         })
         .collect()
@@ -80,8 +80,8 @@ pub fn face_materials_preserve_explosion() {
     };
     let merged = node(&[("in2".to_string(), piece(-2., 0)), ("in3".to_string(), piece(2., 1))], "(sop/merge (sop/ext_in2) (sop/ext_in3))");
     let geometry = geometry_of(&cook(1, &merged));
-    let group = ok(rdk::group::init(None, rdk::group::Owner::Primitive, "one_face", rdk::geometry::primitive_count(&geometry), &|i| i == 0));
-    let with_group = ok(rdk::geometry::with_group(group, &geometry));
+    let group = ok(rdk_core::group::init(None, rdk_core::group::Owner::Primitive, "one_face", rdk_core::geometry::primitive_count(&geometry), &|i| i == 0));
+    let with_group = ok(rdk_core::geometry::with_group(group, &geometry));
     let n = node(
         &[("in4".to_string(), snapshot(&with_group))],
         r#"(-> (sop/material
@@ -122,9 +122,9 @@ pub fn material_refs() {
     let node = graphs.iter().find(|(n, _)| n == "geo").expect("geo").1.clone();
     let (one, four) = (cook(1, &node), cook(4, &node));
     check(signature(&geometry_of(&one)) == signature(&geometry_of(&four)), "domain exactness");
-    check(rdk::geometry::primitive_count(&geometry_of(&one)) == 6, "six primitives");
+    check(rdk_core::geometry::primitive_count(&geometry_of(&one)) == 6, "six primitives");
     match (attr("shop_materialpath", &geometry_of(&one)), attr("material_roughness", &geometry_of(&one))) {
-        (rdk::attribute::Storage::Text(names), rdk::attribute::Storage::Float(rough)) => {
+        (rdk_core::attribute::Storage::Text(names), rdk_core::attribute::Storage::Float(rough)) => {
             check(names[0] == b"white" && rough[0] == 0.8, "the accent face");
             check(names[1..6].iter().all(|n| n == b"blue") && rough[1..6].iter().all(|r| *r == 0.3), "the other faces");
         }

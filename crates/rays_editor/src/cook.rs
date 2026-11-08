@@ -28,7 +28,7 @@ use crate::schedule;
 use crate::timeline;
 
 pub type bounds = (vec3::T, vec3::T);
-pub type Geometry = rdk::geometry::T;
+pub type Geometry = rdk_core::geometry::T;
 pub type Key2 = (i64, i64);
 
 /// One geometry object's latest cook: its displayed SOP graph, the sketch's prepared value, and
@@ -376,8 +376,8 @@ pub fn prepare_cached(
     let made = made?;
     // Geometry's payload is metadata-only, including for a resident carrier. Budget both that input
     // and the derived display arrays conservatively.
-    let source = sop::payload::geometry(&output.payload).map(|g| rdk::geometry::payload_bytes(&g)).unwrap_or(0);
-    let bytes = rdk::geometry::payload_bytes(&made.geometry);
+    let source = sop::payload::geometry(&output.payload).map(|g| rdk_core::geometry::payload_bytes(&g)).unwrap_or(0);
+    let bytes = rdk_core::geometry::payload_bytes(&made.geometry);
     // preparing a device's output is a few records, and cached it holds the frame's buffers, bytes
     // this budget never sees: a live cook's old frames, asked for never again
     let cacheable = flow_sop::attribute_kernel::resident_vec3(&made.geometry, "P").is_none()

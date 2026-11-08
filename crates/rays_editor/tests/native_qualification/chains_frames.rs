@@ -35,7 +35,7 @@ fn trace(tracer:&mut Option<pt::t>,mesh:rays::mesh::t,camera:&rays::camera::t)->
     let t=tracer.as_mut().unwrap();pt::reset(t);pt::render(t,camera).unwrap();pt::flush(t).unwrap();let elapsed=start.elapsed();(rays::image::pixels(&pt::image(t)).unwrap(),elapsed)
 }
 fn normal_check(cpu:&g::T,device:&g::T) {
-    let topo=rdk::topology::View::view(g::topology(device)).unwrap();let positions=g::positions(device);let mut sums=vec![[0.;3];g::point_count(device) as usize];
+    let topo=rdk_core::topology::View::view(g::topology(device)).unwrap();let positions=g::positions(device);let mut sums=vec![[0.;3];g::point_count(device) as usize];
     for prim in 0..topo.primitive_kinds.len() {
         let first=topo.primitive_offsets[prim] as usize;let last=topo.primitive_offsets[prim+1] as usize;
         let (ax,ay,az)=p::get(positions,topo.vertex_points[first]).unwrap();let mut sum=[0.;3];

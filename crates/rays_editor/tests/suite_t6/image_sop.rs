@@ -85,9 +85,9 @@ pub fn image_sop() {
     let mut s = session::create(16, 65536).unwrap();
     let out = session::cook(&mut s, None, &context::create(Default::default()).unwrap(), &node).unwrap_or_else(|d| panic!("{}", rays_diagnostic::error_to_string(&d)));
     let geometry = sop::payload::geometry(&out.payload).unwrap();
-    let attr = rdk::geometry::find_attribute(rdk::attribute::Owner::Point, "sample", &geometry).expect("sample attribute");
-    assert!(rdk::geometry::point_count(&geometry) == 4 && rdk::attribute::length(&attr) == 4);
-    let values = rdk::attribute::get(&rdk::attribute::key("sample", rdk::attribute::Owner::Point, rdk::attribute::float()), &attr).unwrap();
-    match values { Some(rdk::attribute::Storage::Float(v)) => assert!(v.iter().all(|x| *x == 1.)), _ => panic!("sample is not a float attribute") }
+    let attr = rdk_core::geometry::find_attribute(rdk_core::attribute::Owner::Point, "sample", &geometry).expect("sample attribute");
+    assert!(rdk_core::geometry::point_count(&geometry) == 4 && rdk_core::attribute::length(&attr) == 4);
+    let values = rdk_core::attribute::get(&rdk_core::attribute::key("sample", rdk_core::attribute::Owner::Point, rdk_core::attribute::float()), &attr).unwrap();
+    match values { Some(rdk_core::attribute::Storage::Float(v)) => assert!(v.iter().all(|x| *x == 1.)), _ => panic!("sample is not a float attribute") }
     session::close(&mut s);
 }

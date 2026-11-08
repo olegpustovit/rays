@@ -79,7 +79,7 @@ fn player(domains: i64, lowered: lower::T) -> Player {
     Player { root: graph.root.unwrap(), graph, lowered, lane: value_lane::create(None), session, previous: None, domains }
 }
 
-fn frame(p: &mut Player, time: f64) -> (value_lane::Resolved, rdk::geometry::T) {
+fn frame(p: &mut Player, time: f64) -> (value_lane::Resolved, rdk_core::geometry::T) {
     let resolved = value_lane::resolve(None, None, &p.lane, time, &p.graph.network).unwrap_or_else(|d| fail(&rays_diagnostic::to_string(&d)));
     let compiled = std::sync::Arc::new(edit::compile_all(p.previous.as_deref(), &resolved.geometry));
     p.previous = Some(compiled.clone());
@@ -253,7 +253,7 @@ pub fn editor_cook_path() {
     use rays_editor::timeline as tl;
     let orrery = lower_text(&case_text("orrery"));
     let objects: Vec<_> = lower::objects(&orrery).into_iter().map(|(id, n, d)| (id as i64, n, d)).collect();
-    let digest = |g: &rdk::geometry::T| geometry_bytes(g);
+    let digest = |g: &rdk_core::geometry::T| geometry_bytes(g);
     let mut cook = cook::create(prepare_surface(), 42, 97, Some(1), Some(true), None, 512, 256 * 1024 * 1024).expect("cook");
     cook::set_volatile(&cook, lower::is_volatile(&orrery));
     let mut reference = player(1, orrery.clone());

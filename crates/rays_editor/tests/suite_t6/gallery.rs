@@ -1,7 +1,7 @@
 //! test_gallery_shapes.ml: the gallery's Lisp graphs against independent OCaml-side inputs.
 #![allow(dead_code, unused_imports)]
 use flow_syntax::syntax::{self as S, Node, Syntax};
-use rdk::packed::Float3;
+use rdk_core::packed::Float3;
 use rdk_rays::rays_mesh;
 use rays::scene::{self, Layer};
 use rays::scene3;
@@ -41,11 +41,11 @@ fn replace(head: &str, replacement: &Syntax, form: &Syntax) -> Syntax {
     builder.freeze().handle(id)
 }
 
-fn polygon(points: &[(f64, f64, f64)]) -> rdk::geometry::T {
+fn polygon(points: &[(f64, f64, f64)]) -> rdk_core::geometry::T {
     let count = points.len() as i64;
     let positions = Float3::View::of_owned_exn(points.iter().map(|p| p.0).collect(), points.iter().map(|p| p.1).collect(), points.iter().map(|p| p.2).collect()).unwrap();
-    let topology = rdk::topology::polygons_owned(count, (0..count).collect(), vec![0, count]).unwrap();
-    rdk::geometry::create(positions, topology, None, None, None).unwrap()
+    let topology = rdk_core::topology::polygons_owned(count, (0..count).collect(), vec![0, count]).unwrap();
+    rdk_core::geometry::create(positions, topology, None, None, None).unwrap()
 }
 
 type Fixture = (&'static str, node::T, node::T);
@@ -58,19 +58,19 @@ fn fixtures() -> Vec<Fixture> {
         let r = if i % 2 == 0 { 1. } else { 0.45 };
         (r * a.cos(), 0., r * a.sin())
     }).collect::<Vec<_>>());
-    let fibonacci = rdk::line_geometry::points(&(0..1000).map(|i| {
+    let fibonacci = rdk_ops::line_geometry::points(&(0..1000).map(|i| {
         let a = i as f64 * 2.399963;
         let h = 1. - 2. * i as f64 / 999.;
         let r = (1. - h * h).max(0.).sqrt();
         (r * a.cos(), h, r * a.sin())
     }).collect::<Vec<_>>()).unwrap();
-    let disc = rdk::line_geometry::points(&(0..80).map(|i| {
+    let disc = rdk_ops::line_geometry::points(&(0..80).map(|i| {
         let a = i as f64 * 2.399963;
         let r = 1.8 * (i as f64 / 79.).sqrt();
         (r * a.cos(), r * a.sin(), 0.)
     }).collect::<Vec<_>>()).unwrap();
     let external = S::parse("(sop/ext_source)").unwrap().remove(0);
-    let pair = |name: &'static str, input: &rdk::geometry::T, body: Syntax, head: &str| -> Fixture {
+    let pair = |name: &'static str, input: &rdk_core::geometry::T, body: Syntax, head: &str| -> Fixture {
         (
             name,
             flow_sop::lisp_sop::node(&[], &flow_syntax::lisp::flat(&body)),
@@ -98,31 +98,31 @@ fn fixtures() -> Vec<Fixture> {
     ]
 }
 
-fn cook(s: &mut session::T, n: &node::T) -> rdk::geometry::T {
+fn cook(s: &mut session::T, n: &node::T) -> rdk_core::geometry::T {
     let c = context::create(context::Options { domains: Some(1), ..Default::default() }).unwrap();
     let out = session::cook(s, None, &c, n).unwrap_or_else(|e| panic!("{}", rays_diagnostic::error_to_string(&e)));
     sop::payload::geometry(&out.payload).unwrap()
 }
 
-fn bounds(g: &rdk::geometry::T) -> [f64; 6] {
-    let p = Float3::View::view(rdk::geometry::positions(g)).unwrap();
+fn bounds(g: &rdk_core::geometry::T) -> [f64; 6] {
+    let p = Float3::View::view(rdk_core::geometry::positions(g)).unwrap();
     let range = |a: &[f64]| a.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| (lo.min(*v), hi.max(*v)));
     let (x, y, z) = (range(&p.x), range(&p.y), range(&p.z));
     [x.0, y.0, z.0, x.1, y.1, z.1]
 }
 
-fn scene_of(g: &rdk::geometry::T) -> scene3::t {
+fn scene_of(g: &rdk_core::geometry::T) -> scene3::t {
     let m = rays_mesh::to_mesh(g).unwrap();
     scene3::create(None, None, None, None, vec![scene3::mesh(Some(rays::material::unlit(rays_math::color::white())), None, None, Some(scene3::cull::Cull_none), None, m)]).unwrap()
 }
 
-fn packed(g: &rdk::geometry::T) -> std::rc::Rc<renderer::scene_execution::sampled_draw> {
+fn packed(g: &rdk_core::geometry::T) -> std::rc::Rc<renderer::scene_execution::sampled_draw> {
     let camera = rays::camera::orthographic(4., vec3::create(0., 0., 4.), vec3::zero()).unwrap();
     let staged = Layer::stage_native(128, 128, &[scene::view3d(None, &camera, scene_of(g))]).unwrap();
     staged.scene3[0].entries[0].clone()
 }
 
-fn geometry_check(name: &str, actual: &rdk::geometry::T, expected: &rdk::geometry::T) {
+fn geometry_check(name: &str, actual: &rdk_core::geometry::T, expected: &rdk_core::geometry::T) {
     let (a, e) = (bounds(actual), bounds(expected));
     for (a, e) in a.iter().zip(e.iter()) {
         assert!((a - e).abs() <= 1e-10, "{name} gallery bounds: {a:.17} <> {e:.17}");
@@ -139,11 +139,11 @@ fn geometry_check(name: &str, actual: &rdk::geometry::T, expected: &rdk::geometr
             "{name} gallery packed GPU inputs differ"
         );
     } else {
-        assert!((rdk::analysis::signed_volume(actual).unwrap() - rdk::analysis::signed_volume(expected).unwrap()).abs() < 1e-9);
+        assert!((rdk_core::analysis::signed_volume(actual).unwrap() - rdk_core::analysis::signed_volume(expected).unwrap()).abs() < 1e-9);
     }
 }
 
-fn pixels(canvas: &rays::canvas::t, camera: &rays::camera::t, g: &rdk::geometry::T) -> Vec<rays_math::color::T> {
+fn pixels(canvas: &rays::canvas::t, camera: &rays::camera::t, g: &rdk_core::geometry::T) -> Vec<rays_math::color::T> {
     rays::canvas::render(None, canvas, &[scene::clear(rays_math::color::black()), scene::view3d(None, camera, scene_of(g))]).unwrap();
     rays::canvas::pixels(canvas).unwrap()
 }

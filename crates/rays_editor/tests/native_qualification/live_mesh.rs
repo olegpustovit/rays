@@ -2,7 +2,7 @@
 use flow_native::workspace_gpu as wg;
 use flow_ir::flow_ir::Gpu;
 use flow_sop::{lower,value_lane};
-use rdk::{geometry as g, attribute as a, packed::Float3 as p};
+use rdk_core::{geometry as g, attribute as a, packed::Float3 as p};
 use std::{sync::{Arc,Weak},rc::Rc};
 fn ok<T>(r:Result<T,rays_diagnostic::Diagnostic>)->T { r.unwrap_or_else(|d|panic!("{}",rays_diagnostic::to_string(&d))) }
 const MESH: &str = r###"(workspace live_mesh
@@ -121,7 +121,7 @@ fn swarm_frames() {
         assert!(x*u+y*v+z*w>0.98,"tube {tube} frame flipped at ring {ring}");
       }}
     }
-    let topo=rdk::topology::View::view(g::topology(&hosts[0])).unwrap();
+    let topo=rdk_core::topology::View::view(g::topology(&hosts[0])).unwrap();
     let mut edges=std::collections::BTreeMap::new();
     for triangle in topo.vertex_points.chunks_exact(3) {
         for (a,b) in [(triangle[0],triangle[1]),(triangle[1],triangle[2]),(triangle[2],triangle[0])] {

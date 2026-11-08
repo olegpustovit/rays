@@ -5,7 +5,7 @@ use flow_graph::flow_edit::{self as edit,Op,ArgKey};
 fn bytes(geo:&g::T)->Vec<u8> {
     let mut out=Vec::new();let mut number=|v:f64|out.extend_from_slice(&v.to_bits().to_le_bytes());
     for i in 0..g::point_count(geo) {let (x,y,z)=p::get(g::positions(geo),i).unwrap();for v in [x,y,z]{number(v);}}
-    let t=rdk::topology::View::view(g::topology(geo)).unwrap();
+    let t=rdk_core::topology::View::view(g::topology(geo)).unwrap();
     for v in t.vertex_points.iter().chain(t.primitive_offsets.iter()) {out.extend_from_slice(&v.to_le_bytes());}out.extend_from_slice(&t.primitive_kinds);
     for at in g::View::attributes(geo) {
         out.extend_from_slice(format!("{:?}:{}:{};",a::owner(at),a::name(at),a::kind_name(at)).as_bytes());

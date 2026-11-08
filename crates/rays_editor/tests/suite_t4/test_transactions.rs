@@ -22,8 +22,8 @@ pub fn schema() -> Arc<param::Schema> {
 }
 
 /// Lisp_sop.snapshot: a generator node holding an already built geometry.
-pub fn snapshot(geometry: &rdk::geometry::T) -> node::T {
-    let parameters = format!("data_id={};bytes={}", rdk::geometry::data_id(geometry), rdk::geometry::payload_bytes(geometry));
+pub fn snapshot(geometry: &rdk_core::geometry::T) -> node::T {
+    let parameters = format!("data_id={};bytes={}", rdk_core::geometry::data_id(geometry), rdk_core::geometry::payload_bytes(geometry));
     let geometry = geometry.clone();
     build::make_geometry(
         build::Args { parameters: parameters.into_bytes(), cook_mode: CookMode::Generator, ..build::args("snapshot") },
@@ -41,7 +41,7 @@ fn source(schema: &Arc<param::Schema>, value: i64) -> node::T {
         };
         Ok(source(&s, v))
     });
-    let base = snapshot(&rdk::line_geometry::points(&[(value as f64, 0., 0.)]).unwrap());
+    let base = snapshot(&rdk_ops::line_geometry::points(&[(value as f64, 0., 0.)]).unwrap());
     node::parameterize(schema.clone(), vec![Value::Int(value)], rebuild, &base).unwrap()
 }
 

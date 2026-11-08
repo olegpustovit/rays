@@ -70,8 +70,8 @@ fn undo(e: Ed, c: i64) -> Ed {
     Editor::update(e, &fr(&[Key::Meta], vec![ch('z')], c))
 }
 
-fn first_x(g: &rdk::geometry::T) -> f64 {
-    rdk::packed::Float3::View::view(rdk::geometry::positions(g)).unwrap().x[0]
+fn first_x(g: &rdk_core::geometry::T) -> f64 {
+    rdk_core::packed::Float3::View::view(rdk_core::geometry::positions(g)).unwrap().x[0]
 }
 
 fn objects(e: &Ed) -> Vec<(String, String)> {
@@ -93,7 +93,7 @@ fn part_editor() {
         e = Editor::update(e, &fr(&[], vec![], count));
         count += 1;
     }
-    assert!(rdk::geometry::data_id(&Editor::prepared(&e).unwrap()) == rdk::geometry::data_id(&before), "static nodes stay cached");
+    assert!(rdk_core::geometry::data_id(&Editor::prepared(&e).unwrap()) == rdk_core::geometry::data_id(&before), "static nodes stay cached");
     assert!(Editor::undo_label(&e).is_none(), "no edit yet");
     let scrub = |v: &str| Op::SetArg { node: s(&["g", "a"]), key: ArgKey::Kw("radius".into()), sub: vec![], value: syn::make(Node::Num(v.into())) };
     e = Editor::edit(e, &scrub("0.6")).unwrap_or_else(|m| panic!("{m}"));
@@ -106,7 +106,7 @@ fn part_editor() {
     assert_eq!(Editor::undo_label(&e).as_deref(), Some("Repeat"), "repeat label");
     assert!(Editor::edit(e.clone(), &Op::Rename { node: s(&["g", "a"]), to_: "moved".into() }).is_err(), "a refused edit is an error");
     assert_eq!(Editor::undo_label(&e).as_deref(), Some("Repeat"), "a refused edit records nothing");
-    let (mut e, count) = settle(e, count + 1, &|e| Editor::prepared(e).map(|g| rdk::geometry::point_count(&g) > rdk::geometry::point_count(&before)).unwrap_or(false));
+    let (mut e, count) = settle(e, count + 1, &|e| Editor::prepared(e).map(|g| rdk_core::geometry::point_count(&g) > rdk_core::geometry::point_count(&before)).unwrap_or(false));
     e = undo(e, count);
     assert!(Editor::undo_label(&e).as_deref() == Some("Rename") && Editor::redo_label(&e).as_deref() == Some("Repeat"), "undo Repeat: undo={:?} redo={:?}", Editor::undo_label(&e), Editor::redo_label(&e));
     e = undo(e, count + 1);

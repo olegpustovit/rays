@@ -101,7 +101,7 @@ fn capture_context() {
                 Arc::new(move |_, context, _| {
                     observed.store(sop::context::domains(context), Ordering::SeqCst);
                     let point = (sop::context::seed(context) as f64 / 256., sop::context::grain(context) as f64 / 1024., 0.);
-                    node::build::cook(&flow_sop::lisp_sop::snapshot(&rdk::line_geometry::points(&[point]).unwrap()), context, &[])
+                    node::build::cook(&flow_sop::lisp_sop::snapshot(&rdk_ops::line_geometry::points(&[point]).unwrap()), context, &[])
                 }),
             )
         }

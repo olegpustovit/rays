@@ -328,13 +328,13 @@ pub fn run_spreadsheet() {
     r.step((0., 0.), vec![]);
     r.step((0., 0.), vec![]);
     let geometry = Reduce::spreadsheet(&r.e, &[1, 0]).1.expect("geometry");
-    check(rdk::geometry::point_count(&geometry) == 8 && Reduce::spreadsheet(&r.e, &[1, 0]).0 == 3, "spreadsheet recook kept stale geometry or reset owner");
+    check(rdk_core::geometry::point_count(&geometry) == 8 && Reduce::spreadsheet(&r.e, &[1, 0]).0 == 3, "spreadsheet recook kept stale geometry or reset owner");
     let columns = sheet::columns(0, &geometry);
     check(columns.len() >= 4 && (0..4).map(|i| columns[i].0.clone()).collect::<Vec<_>>() == ["index", "P.x", "P.y", "P.z"], "canonical position tuple columns");
-    let attr = rdk::attribute::create_owned("label", rdk::attribute::Owner::Point, rdk::attribute::Storage::Text(vec![b"sample".to_vec(); 8])).expect("attribute");
-    let geometry = rdk::geometry::with_attribute(attr, &geometry).expect("with_attribute");
-    let group = rdk::group::init(None, rdk::group::Owner::Point, "odd", 8, &|i| i % 2 == 1).expect("group");
-    let geometry = rdk::geometry::with_group(group, &geometry).expect("with_group");
+    let attr = rdk_core::attribute::create_owned("label", rdk_core::attribute::Owner::Point, rdk_core::attribute::Storage::Text(vec![b"sample".to_vec(); 8])).expect("attribute");
+    let geometry = rdk_core::geometry::with_attribute(attr, &geometry).expect("with_attribute");
+    let group = rdk_core::group::init(None, rdk_core::group::Owner::Point, "odd", 8, &|i| i % 2 == 1).expect("group");
+    let geometry = rdk_core::geometry::with_group(group, &geometry).expect("with_group");
     let columns = sheet::columns(0, &geometry);
     let col = |name: &str| &columns.iter().find(|(n, _)| n == name).unwrap_or_else(|| fail(&format!("no column {name}"))).1;
     check(col("label")(7) == "sample" && col("group:odd")(0) == "0" && col("group:odd")(7) == "1", "text values/group membership columns");

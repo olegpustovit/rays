@@ -7,7 +7,7 @@ pub fn scrub_child() -> bool { scrub::child() }
 use flow_ir::flow_ir::Gpu;
 use flow_native::workspace_gpu as wg;
 use flow_sop::{lower, value_lane};
-use rdk::{attribute as a, geometry as g, packed::Float3 as p};
+use rdk_core::{attribute as a, geometry as g, packed::Float3 as p};
 use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 
 pub fn cases() -> Vec<(&'static str, fn())> {

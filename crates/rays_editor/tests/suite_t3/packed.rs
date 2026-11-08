@@ -15,14 +15,14 @@ fn ok<T, E: std::fmt::Debug>(r: Result<T, E>) -> T {
 }
 
 /// Two triangles side by side, authored vertex normals and a `class` primitive attribute.
-fn geometry() -> rdk::geometry::T {
-    let positions = ok(rdk::packed::Float3::of_owned(vec![-2.5, -1.5, -2., 1.5, 2.5, 2.], vec![-0.5, -0.5, 0.5, -0.5, -0.5, 0.5], vec![0.; 6]));
-    let topology = ok(rdk::topology::polygons_owned(6, vec![0, 1, 2, 3, 4, 5], vec![0, 3, 6]));
-    let geometry = ok(rdk::geometry::create(positions, topology, None, None, None));
-    let normals = ok(rdk::attribute::create_owned("N", rdk::attribute::Owner::Vertex, rdk::attribute::Storage::Float3(ok(rdk::packed::Float3::of_owned(vec![0.; 6], vec![1.; 6], vec![0.; 6])))));
-    let geometry = ok(rdk::geometry::with_attribute(normals, &geometry));
-    let pieces = ok(rdk::attribute::create_owned("class", rdk::attribute::Owner::Primitive, rdk::attribute::Storage::Int(vec![0, 1])));
-    ok(rdk::geometry::with_attribute(pieces, &geometry))
+fn geometry() -> rdk_core::geometry::T {
+    let positions = ok(rdk_core::packed::Float3::of_owned(vec![-2.5, -1.5, -2., 1.5, 2.5, 2.], vec![-0.5, -0.5, 0.5, -0.5, -0.5, 0.5], vec![0.; 6]));
+    let topology = ok(rdk_core::topology::polygons_owned(6, vec![0, 1, 2, 3, 4, 5], vec![0, 3, 6]));
+    let geometry = ok(rdk_core::geometry::create(positions, topology, None, None, None));
+    let normals = ok(rdk_core::attribute::create_owned("N", rdk_core::attribute::Owner::Vertex, rdk_core::attribute::Storage::Float3(ok(rdk_core::packed::Float3::of_owned(vec![0.; 6], vec![1.; 6], vec![0.; 6])))));
+    let geometry = ok(rdk_core::geometry::with_attribute(normals, &geometry));
+    let pieces = ok(rdk_core::attribute::create_owned("class", rdk_core::attribute::Owner::Primitive, rdk_core::attribute::Storage::Int(vec![0, 1])));
+    ok(rdk_core::geometry::with_attribute(pieces, &geometry))
 }
 
 fn positions(mesh: &rays::mesh::t) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
@@ -102,9 +102,9 @@ pub fn boolean_fracture() {
     };
     session::close(&mut s);
     let g = ok(sop::payload::geometry(&output.payload));
-    let pieces = rdk::geometry::find_attribute(rdk::attribute::Owner::Primitive, "piece", &g).expect("a piece attribute");
-    match ok(rdk::attribute::storage(&pieces)) {
-        rdk::attribute::Storage::Int(values) => {
+    let pieces = rdk_core::geometry::find_attribute(rdk_core::attribute::Owner::Primitive, "piece", &g).expect("a piece attribute");
+    match ok(rdk_core::attribute::storage(&pieces)) {
+        rdk_core::attribute::Storage::Int(values) => {
             let maximum = values.iter().copied().fold(-1, i64::max);
             if maximum != 1 {
                 fail("one cutting plane did not produce exactly two Boolean cells");

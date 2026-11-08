@@ -1,7 +1,7 @@
 //! Native IsoGrid viewport qualification, ported from test_isogrid_viewport.ml.
 use flow_native::workspace_gpu as gpu;
 use flow_ir::flow_ir::Gpu;
-use rdk::{geometry as g, packed::Float3, topology};
+use rdk_core::{geometry as g, packed::Float3, topology};
 use rays::{canvas, scene, scene3};
 use rays_math::{color, vec3};
 use flow_sop::lower;
@@ -36,7 +36,7 @@ pub(super) fn cook(session: &mut sop::session::T, node: &sop::node::T, time: f64
     ok(sop::payload::geometry(&output.payload))
 }
 pub(super) fn resident(geometry: &g::T) -> bool {
-    let attr = |name| g::find_attribute(rdk::attribute::Owner::Point, name, geometry).is_some_and(|a| rdk::attribute::resident(&a));
+    let attr = |name| g::find_attribute(rdk_core::attribute::Owner::Point, name, geometry).is_some_and(|a| rdk_core::attribute::resident(&a));
     Float3::resident(g::positions(geometry)) && topology::resident(g::topology(geometry)) && attr("N") && attr("Cd")
 }
 pub(super) fn placed(session: &mut sop::session::T, node: &sop::node::T) -> g::T {

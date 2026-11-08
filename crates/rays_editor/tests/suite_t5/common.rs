@@ -283,10 +283,10 @@ pub fn catalog() -> flow_check::catalog::Catalog {
 
 /// `Editor_prepare.empty`.
 pub fn prepare_empty() -> rays_editor::cook::Prepare_fn {
-    use rdk::geometry as geo;
+    use rdk_core::geometry as geo;
     std::rc::Rc::new(|_, _| {
-        let positions = rdk::packed::Float3::of_owned(Vec::new(), Vec::new(), Vec::new()).map_err(|e| format!("{e:?}"))?;
-        let topology = rdk::topology::empty(0).map_err(|e| format!("{e:?}"))?;
+        let positions = rdk_core::packed::Float3::of_owned(Vec::new(), Vec::new(), Vec::new()).map_err(|e| format!("{e:?}"))?;
+        let topology = rdk_core::topology::empty(0).map_err(|e| format!("{e:?}"))?;
         let geometry = geo::create(positions, topology, None, None, None).map_err(|e| format!("{e:?}"))?;
         let surface = rdk_rays::surface::of_geometry(None, &geometry)?;
         Ok(rays_editor::cook::prepared { geometry, surface })

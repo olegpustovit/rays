@@ -57,15 +57,15 @@ fn primitives_of(tags: &[i64], tag: i64) -> Vec<usize> {
 }
 
 /// A point just above the highest primitive of `tag`.
-fn above(geometry: &rdk::geometry::T, tag: i64) -> vec3::T {
+fn above(geometry: &rdk_core::geometry::T, tag: i64) -> vec3::T {
     let tags = pick::tags(geometry).expect("tags");
-    let topology = rdk::geometry::topology(geometry);
-    let points = rdk::geometry::positions(geometry);
+    let topology = rdk_core::geometry::topology(geometry);
+    let points = rdk_core::geometry::positions(geometry);
     let centre = |primitive: usize| -> (f64, f64, f64) {
-        let (first, last) = rdk::topology::primitive_vertex_range(topology, primitive as i64).expect("range");
+        let (first, last) = rdk_core::topology::primitive_vertex_range(topology, primitive as i64).expect("range");
         let mut sum = (0., 0., 0.);
         for v in first..last {
-            let (x, y, z) = rdk::packed::Float3::get(points, rdk::topology::point_of_vertex(topology, v).expect("point")).expect("position");
+            let (x, y, z) = rdk_core::packed::Float3::get(points, rdk_core::topology::point_of_vertex(topology, v).expect("point")).expect("position");
             sum = (sum.0 + x, sum.1 + y, sum.2 + z);
         }
         let n = (last - first) as f64;
@@ -83,11 +83,11 @@ fn above(geometry: &rdk::geometry::T, tag: i64) -> vec3::T {
     vec3::create(x, y + 1e-3, z)
 }
 
-fn present(geometry: &rdk::geometry::T, tag: i64) -> bool {
+fn present(geometry: &rdk_core::geometry::T, tag: i64) -> bool {
     pick::tags(geometry).expect("tags").contains(&tag)
 }
 
-fn geometry_of(piece: &cook::piece) -> rdk::geometry::T {
+fn geometry_of(piece: &cook::piece) -> rdk_core::geometry::T {
     sop::payload::geometry(&piece.output.payload).expect("geometry")
 }
 
@@ -103,7 +103,7 @@ pub fn pick_sunflower() {
     let tag = of_iteration(iteration)[0];
     let origin = &sunflower.provenance[&tag];
     check(origin.iter == vec![iteration] && origin.input == iteration, "the provenance table names the iteration");
-    check(tags.len() as i64 == rdk::geometry::primitive_count(&geometry) && sunflower.provenance.len() as i64 == super::probe_t::SEEDS, "a tag per primitive, one origin per seed");
+    check(tags.len() as i64 == rdk_core::geometry::primitive_count(&geometry) && sunflower.provenance.len() as i64 == super::probe_t::SEEDS, "a tag per primitive, one origin per seed");
     match cook::pick(&piece, above(&geometry, tag), vec3::create(0., -1., 0.)) {
         Some((_, hit)) => check(hit == tag, "the ray finds the seed"),
         None => fail("the ray missed the seed"),
@@ -142,14 +142,14 @@ pub fn pick_sunflower() {
     check(prepared.get() == before + 1, "a new highlight prepares the piece once");
     check(cook::stats(&cook).misses == misses, "the highlight does not recook");
     let lit_piece = cook::pieces(&cook)[0].clone();
-    let colours = rdk::geometry::find_attribute(rdk::attribute::Owner::Vertex, "Cd", &lit_piece.prepared.geometry);
-    match colours.map(|a| rdk::attribute::storage(&a)) {
-        Some(Ok(rdk::attribute::Storage::Float4(c))) => {
-            let topology = rdk::geometry::topology(&lit_piece.prepared.geometry);
-            let corner = |p: usize| rdk::topology::primitive_vertex_range(topology, p as i64).expect("range").0;
+    let colours = rdk_core::geometry::find_attribute(rdk_core::attribute::Owner::Vertex, "Cd", &lit_piece.prepared.geometry);
+    match colours.map(|a| rdk_core::attribute::storage(&a)) {
+        Some(Ok(rdk_core::attribute::Storage::Float4(c))) => {
+            let topology = rdk_core::geometry::topology(&lit_piece.prepared.geometry);
+            let corner = |p: usize| rdk_core::topology::primitive_vertex_range(topology, p as i64).expect("range").0;
             let seed = primitives_of(&tags, tag)[0];
             let other = primitives_of(&tags, of_iteration(0)[0])[0];
-            let red = |i: i64| rdk::packed::Float4::get(&c, i).expect("colour").0;
+            let red = |i: i64| rdk_core::packed::Float4::get(&c, i).expect("colour").0;
             check((red(corner(other)) - 0.3).abs() < 1e-9, "the rest is dimmed");
             check(red(corner(seed)) > red(corner(other)), "the probed iteration is tinted");
         }
@@ -160,7 +160,7 @@ pub fn pick_sunflower() {
     let cook = cooked(&pick::Set::new(), Some(cook), &sunflower, &prepared);
     check(prepared.get() == before + 1, "deselecting takes the first preparation back from the cache");
     check(cook::stats(&cook).misses == misses, "deselecting does not recook");
-    check(rdk::geometry::data_id(&cook::pieces(&cook)[0].prepared.geometry) == rdk::geometry::data_id(&geometry), "deselect restores the geometry");
+    check(rdk_core::geometry::data_id(&cook::pieces(&cook)[0].prepared.geometry) == rdk_core::geometry::data_id(&geometry), "deselect restores the geometry");
     cook::close(&cook);
 }
 

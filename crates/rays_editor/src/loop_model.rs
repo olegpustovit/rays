@@ -143,7 +143,7 @@ pub struct t {
     pub canvases: Vec<(String, canvas_picture)>,
     pub host: Rc<std::cell::RefCell<workspace_host::t>>,
     /// when this frame's update ended, and the meshes it draws for the first time
-    pub presenting: Option<(f64, Vec<rdk::geometry::T>)>,
+    pub presenting: Option<(f64, Vec<rdk_core::geometry::T>)>,
 }
 
 /// Scene objects a sketch starts with: its lights as light objects.
@@ -308,7 +308,7 @@ pub fn network(value: &t) -> Option<sop::edit_graph::T> {
     editor_inspect::network(&value.core).map(|n| n.graph.geometry.clone())
 }
 
-pub fn prepared(value: &t) -> Option<rdk::geometry::T> {
+pub fn prepared(value: &t) -> Option<rdk_core::geometry::T> {
     editor_list::prepared(&value.core).map(|p| p.geometry.clone())
 }
 

@@ -172,7 +172,7 @@ pub fn layers(e: &Ed) -> Staged {
 }
 
 fn geometry_len(e: &Ed) -> Option<(i64, i64)> {
-    Editor::prepared(e).map(|g| (rdk::geometry::point_count(&g), rdk::geometry::primitive_count(&g)))
+    Editor::prepared(e).map(|g| (rdk_core::geometry::point_count(&g), rdk_core::geometry::primitive_count(&g)))
 }
 
 pub const SCENE_TEXT: &str = r#"(workspace picture

@@ -75,7 +75,7 @@ pub fn run_idle_follow() {
         r.step(m, vec![]);
     }
     let doc = r.source();
-    let prepared = Editor::prepared(&r.e).map(|g| rdk::geometry::point_count(&g));
+    let prepared = Editor::prepared(&r.e).map(|g| rdk_core::geometry::point_count(&g));
     let status = Editor::Private::status_text(&r.e);
     let scene = Editor::Private::resolved_scene(&r.e);
     let sig = |k: &editor_document::kind_graph::T| k.iter().map(|n| (n.id, n.kind.clone(), n.label.clone(), editor_document::kind_graph::field(n, "translate_x"))).collect::<Vec<_>>();
@@ -85,7 +85,7 @@ pub fn run_idle_follow() {
     }
     check(sig(&Editor::Private::resolved_scene(&r.e)) == sig(&scene), "a roaming pointer re-resolved the scene");
     check(r.source() == doc, "an idle frame wrote the document");
-    check(Editor::prepared(&r.e).map(|g| rdk::geometry::point_count(&g)) == prepared, "an idle frame cooked a new displayed mesh");
+    check(Editor::prepared(&r.e).map(|g| rdk_core::geometry::point_count(&g)) == prepared, "an idle frame cooked a new displayed mesh");
     check(Editor::Private::status_text(&r.e) == status, &format!("the status moved while idle: {status} -> {}", Editor::Private::status_text(&r.e)));
     r.close();
 }

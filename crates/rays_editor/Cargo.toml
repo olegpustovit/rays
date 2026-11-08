@@ -35,13 +35,14 @@ lru = { path = "../lru" }
 cfmt = { path = "../cfmt" }
 parallel = { path = "../parallel" }
 flow_ir = { path = "../flow_ir" }
-rdk = { path = "../rdk" }
+rdk_core = { path = "../rdk_core" }
 rays_diagnostic = { path = "../rays_diagnostic" }
 param = { path = "../param" }
 mem = { path = "../mem" }
 flow_gpu = { path = "../flow_gpu" }
 
 [dev-dependencies]
+rdk_ops = { path = "../rdk_ops" }
 ogpu = { path = "../ogpu" }
 renderer = { path = "../renderer" }
 flow_sop = { path = "../flow_sop", features = ["test-support"] }

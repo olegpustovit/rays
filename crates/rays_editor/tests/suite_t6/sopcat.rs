@@ -7,11 +7,11 @@ use std::sync::Arc;
 use flow_sop::{catalog, lisp_sop, lower, manifest, operators};
 use flow_syntax::syntax::{self, Node};
 use param::{Effects, FieldView, Impact, KindView, Value};
-use rdk::attribute::{self as attr, Owner, Storage};
-use rdk::geometry as geo;
-use rdk::group;
-use rdk::packed::{Float3, Float4};
-use rdk::topology::{self, PrimitiveKind};
+use rdk_core::attribute::{self as attr, Owner, Storage};
+use rdk_core::geometry as geo;
+use rdk_core::group;
+use rdk_core::packed::{Float3, Float4};
+use rdk_core::topology::{self, PrimitiveKind};
 use sop::context::{self as sctx, Options as CtxOptions};
 use sop::edit_graph::{self as edit, Factory, InputRequirement};
 use sop::node;
@@ -139,7 +139,7 @@ fn bytes(g: &geo::T) -> String {
             Ok(Storage::Float(v)) => out.push_str(&format!("{:?}", v.iter().map(|x| x.to_bits()).collect::<Vec<_>>())),
             Ok(Storage::Int(v)) => out.push_str(&format!("{v:?}")),
             Ok(Storage::Text(v)) => out.push_str(&format!("{v:?}")),
-            Ok(Storage::Float2(v)) => out.push_str(&format!("{:?}", (0..rdk::packed::Float2::length(&v)).map(|i| rdk::packed::Float2::get(&v, i).map(|(a, b)| (a.to_bits(), b.to_bits()))).collect::<Vec<_>>())),
+            Ok(Storage::Float2(v)) => out.push_str(&format!("{:?}", (0..rdk_core::packed::Float2::length(&v)).map(|i| rdk_core::packed::Float2::get(&v, i).map(|(a, b)| (a.to_bits(), b.to_bits()))).collect::<Vec<_>>())),
             Ok(Storage::Float3(v)) => out.push_str(&format!("{:?}", (0..Float3::length(&v)).map(|i| Float3::get(&v, i).map(|(a, b, c)| (a.to_bits(), b.to_bits(), c.to_bits()))).collect::<Vec<_>>())),
             Ok(Storage::Float4(v)) => out.push_str(&format!("{:?}", (0..Float4::length(&v)).map(|i| Float4::get(&v, i).map(|(a, b, c, d)| (a.to_bits(), b.to_bits(), c.to_bits(), d.to_bits()))).collect::<Vec<_>>())),
             Ok(_) => out.push_str("array"),
@@ -223,8 +223,8 @@ fn gallery_grid_warning() {
 
 fn motion() {
     let mut s = session::create(32, 16_000_000).unwrap();
-    let previous = lisp_sop::snapshot(&rdk::line_geometry::points(&[(0., 0., 0.), (1., 1., 1.)]).unwrap());
-    let current = lisp_sop::snapshot(&rdk::line_geometry::points(&[(1., 2., 3.), (3., 5., 7.)]).unwrap());
+    let previous = lisp_sop::snapshot(&rdk_ops::line_geometry::points(&[(0., 0., 0.), (1., 1., 1.)]).unwrap());
+    let current = lisp_sop::snapshot(&rdk_ops::line_geometry::points(&[(1., 2., 3.), (3., 5., 7.)]).unwrap());
     let rested = catalog_node("rest_position", &[Some(current.clone()), None], &[]);
     let graph = catalog_node("point_velocity", &[Some(rested), Some(previous.clone()), None], &[pv("dt", Value::Float(0.5)), pv("add_x", Value::Float(1.)), pv("add_z", Value::Float(-1.))]);
     let output = cook(&mut s, &graph);
@@ -553,7 +553,7 @@ fn run_body() {
     let points = edit::instantiate(&points_factory, &[]).unwrap();
     check(node::operation(&points) == "points" && edit::factory_arity(&points_factory) == 0, "point-generation editor factory has the wrong node or arity");
     let mut point_session = session::create(2, 1_000_000).unwrap();
-    let point_mesh = rdk_rays::rays_mesh::to_mesh(&cook(&mut point_session, &points)).unwrap_or_else(|e| panic!("{}", rdk::error::to_string(&e)));
+    let point_mesh = rdk_rays::rays_mesh::to_mesh(&cook(&mut point_session, &points)).unwrap_or_else(|e| panic!("{}", rdk_core::error::to_string(&e)));
     check(matches!(rays::mesh::mode(&point_mesh), rays::mesh::mode::Points) && rays::mesh::vertex_count(&point_mesh) == 50, "point-only SOP output did not retain point rendering mode");
     session::close(&mut point_session);
     let explosion = rdk_rays::packed_pieces::explosion(node::operation(&graph), &node::parameter_fields(&graph)).unwrap();
@@ -608,8 +608,8 @@ fn morph_sketch() {
         geo::point_count(&vase) == 6 * 32 && geo::primitive_count(&vase) == 5 * 32 && skin.as_ref().map(members) == Some(5 * 32),
         &format!("Skin made {} primitives over {} points", geo::primitive_count(&vase), geo::point_count(&vase)),
     );
-    let index = rdk::topology_index::create(None, geo::topology(&vase)).unwrap();
-    let non_manifold = (0..rdk::topology_index::edge_count(&index)).filter(|e| rdk::topology_index::edge_incidence_count(&index, *e).unwrap() > 2).count();
+    let index = rdk_core::topology_index::create(None, geo::topology(&vase)).unwrap();
+    let non_manifold = (0..rdk_core::topology_index::edge_count(&index)).filter(|e| rdk_core::topology_index::edge_incidence_count(&index, *e).unwrap() > 2).count();
     check(non_manifold == 0, "Skin wall has non-manifold edges");
     check(geo::find_group(group::Owner::Point, "rim", &vase).and_then(|g| group::ordered_elements(&g)) == Some(vec![0, 8, 16, 24]), "Group Ordered lost its authored order");
     // an unwired Blend Shapes passes its input through
@@ -627,7 +627,7 @@ fn node_inputs() {
         let a = attr::create_owned(name, owner, storage).unwrap();
         geo::with_attribute(a, &g).unwrap()
     };
-    let line = |xs: &[f64]| rdk::line_geometry::points(&xs.iter().map(|x| (*x, 0., 0.)).collect::<Vec<_>>()).unwrap();
+    let line = |xs: &[f64]| rdk_ops::line_geometry::points(&xs.iter().map(|x| (*x, 0., 0.)).collect::<Vec<_>>()).unwrap();
     let point = Owner::Point;
     let xs = |g: &geo::T| positions(g).0;
     let both = |message: &str, n: &node::T| {

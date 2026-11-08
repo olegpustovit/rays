@@ -59,7 +59,7 @@ fn inspect_packed(p: &l::T, domains: i64, state: &e::State, live: &input::Frame,
     let mut session = session::create(0, 0).unwrap();
     let ctx = context::create(context::Options { domains: Some(domains), ..Default::default() }).unwrap();
     let output = ok(session::cook(&mut session, None, &ctx, &root));
-    assert_eq!(rdk::geometry::point_count(&payload::geometry(&output.payload).unwrap()), 3);
+    assert_eq!(rdk_core::geometry::point_count(&payload::geometry(&output.payload).unwrap()), 3);
     assert_eq!(output.instances.as_ref().unwrap().len(), 2);
     session::close(&mut session);
 }
@@ -276,12 +276,12 @@ fn frozen_capacity(w: i64, h: i64) {
 fn frozen_capacity_small() { frozen_capacity(7, 3); }
 fn frozen_capacity_large() { frozen_capacity(65, 17); }
 
-fn capture_geometry(count: i64) -> rdk::geometry::T {
-    let mut b = rdk::packed::Float3::Builder::create(count).unwrap();
-    rdk::packed::Float3::Builder::set(&mut b, 0, 0.03125, 0., 0.).unwrap();
-    rdk::geometry::create(rdk::packed::Float3::Builder::freeze(&mut b).unwrap(), rdk::topology::empty(count).unwrap(), None, None, None).unwrap()
+fn capture_geometry(count: i64) -> rdk_core::geometry::T {
+    let mut b = rdk_core::packed::Float3::Builder::create(count).unwrap();
+    rdk_core::packed::Float3::Builder::set(&mut b, 0, 0.03125, 0., 0.).unwrap();
+    rdk_core::geometry::create(rdk_core::packed::Float3::Builder::freeze(&mut b).unwrap(), rdk_core::topology::empty(count).unwrap(), None, None, None).unwrap()
 }
-fn lower_budget(geometry: rdk::geometry::T) -> l::T {
+fn lower_budget(geometry: rdk_core::geometry::T) -> l::T {
     let factory = edit_graph::factory(edit_graph::factory_args("capture_budget", "Capture budget", &["Test"]), 0, Arc::new(move |args| {
         assert!(args.is_empty());
         let geometry = geometry.clone();
@@ -298,7 +298,7 @@ fn lower_budget(geometry: rdk::geometry::T) -> l::T {
 fn capture_budget() {
     assert!(common::gpu(), "native Vulkan device required");
     let large = capture_geometry(64 * 1024 * 1024 / 24 + 1);
-    assert!(rdk::geometry::payload_bytes(&large) > 64 * 1024 * 1024);
+    assert!(rdk_core::geometry::payload_bytes(&large) > 64 * 1024 * 1024);
     let o = Owner::new(1, true); let before = handles();
     let run = |p: &l::T, time| {
         wi::bind(&o.images, p);
