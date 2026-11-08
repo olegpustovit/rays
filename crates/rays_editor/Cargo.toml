@@ -64,32 +64,17 @@ harness = false
 
 
 [[test]]
-name = "gpu_suite_t1_a"
+name = "gpu_suite_t1"
 path = "tests/gpu_suite_t1.rs"
 harness = false
 
 [[test]]
-name = "gpu_suite_t1_b"
-path = "tests/gpu_suite_t1.rs"
-harness = false
-
-[[test]]
-name = "gpu_suite_t2_a"
+name = "gpu_suite_t2"
 path = "tests/gpu_suite_t2.rs"
 harness = false
 
 [[test]]
-name = "gpu_suite_t2_b"
-path = "tests/gpu_suite_t2.rs"
-harness = false
-
-[[test]]
-name = "gpu_suite_t3_a"
-path = "tests/gpu_suite_t3.rs"
-harness = false
-
-[[test]]
-name = "gpu_suite_t3_b"
+name = "gpu_suite_t3"
 path = "tests/gpu_suite_t3.rs"
 harness = false
 
