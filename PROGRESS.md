@@ -17,7 +17,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | M | M1-M21 implementation | empty-frame guard target | - |
 | I | I1-I6 | - | - |
 | C | C1-C21 | - | - |
-| D | D2-D3, D5 | D1, D4 (benchmark evidence missing) | D6 |
+| D | D1-D6 | D4 release `map` fast path | - |
 
 ## Items (commits)
 
@@ -67,7 +67,7 @@ A1-A8, B0-B4: see earlier rows below in git history (`6802a325` ... `96fab43d`);
 | D3 | done | `4e8e7193` one WGSL printer, goldens byte-identical |
 | D4 | done (release `map` open) | `8bf0c0d0` `18180e84` packed.rs one CPU engine (historical implementation size 4,714 lines); `1455271c` bench_core example |
 | D5 | done | Replaced the four float-array variants with `Value::Floats(width, Arc<Vec<f64>>)` throughout production and tests. Shared slicing, concatenation, reductions, literal conversion, cache/physical equality and GPU readback retain width. Validation rejects widths outside 1–4 and incomplete rows before indexing. `Value` remains 40 bytes; original type-specific keys, Lisp display and numerical data are preserved. 902 selected tests pass; one web FMA failure is reproduced on committed baseline `b52600c7`. |
-| D6 | partial | `f680001d` `d3b9fa62` `597110e1` `0bc18308` `cb8a0ade` (+ `da51a0c7` stale C8 test-hooks cases): rust-analyzer rename codemod; `pub mod [A-Z]` 87 -> 37, `pub type/struct t` 52 -> 4; 15 naming `allow`s removed. Remaining: 12 in Flow crates + 29 still referenced from Flow crates (rdk_core packed/View types, flow_eval Device/Residual/Host, rays image/canvas/texture) |
+| D6 | done | `f680001d` `d3b9fa62` `597110e1` `0bc18308` `cb8a0ade` `d3109b85` `c0de6479` `cc0680a2` `6570d563` (+ `da51a0c7` stale C8 test-hooks cases): rust-analyzer rename codemod plus perl for macro args and test-hooks code; `pub mod [A-Z]` 87 -> 0, `t` types 52 -> 0, capitalised re-export aliases 6 -> 0; 15 naming allows removed; 4 dead suite support copies deleted. 653 tests across flow_ir/gpu/eval, rdk_core and rays pass; gate deps 28 |
 
 ## Known failures / open risks
 
