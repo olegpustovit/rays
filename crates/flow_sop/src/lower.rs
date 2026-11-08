@@ -684,10 +684,10 @@ pub mod chain {
         pub last: HashMap<String, (i64, i64)>,
     }
 
-    static REGISTRY: Mutex<Vec<(Weak<Gpu::Backend>, Arc<Mutex<State>>)>> = Mutex::new(Vec::new());
+    static REGISTRY: Mutex<Vec<(Weak<dyn Gpu::Backend>, Arc<Mutex<State>>)>> = Mutex::new(Vec::new());
     const SITES_CAP: usize = 256;
 
-    pub fn state_of(backend: &Arc<Gpu::Backend>) -> Arc<Mutex<State>> {
+    pub fn state_of(backend: &Arc<dyn Gpu::Backend>) -> Arc<Mutex<State>> {
         let mut registry = REGISTRY.lock().unwrap();
         registry.retain(|(weak, _)| weak.strong_count() > 0);
         if let Some((_, state)) = registry.iter().find(|(weak, _)| weak.upgrade().is_some_and(|b| Arc::ptr_eq(&b, backend))) {
@@ -929,15 +929,15 @@ fn mesh_host_attributes(grain: i64, fields: &[(String, Value)], geometry: rdk::g
 
 /// On the device each attribute keeps its buffer. A stream that is not resident, or whose count is
 /// not the mesh's, takes the host writer, which reports the count error as a CPU cook does.
-fn mesh_resident_attributes(grain: i64, scope: &Gpu::Residency, fields: &[(String, Value)], geometry: rdk::geometry::T) -> R<rdk::geometry::T> {
+fn mesh_resident_attributes(grain: i64, scope: &dyn Gpu::Residency, fields: &[(String, Value)], geometry: rdk::geometry::T) -> R<rdk::geometry::T> {
     let points = rdk::geometry::point_count(&geometry);
     let mut current = geometry.clone();
     let mut result: R<()> = Ok(());
     for (name, kind, values) in mesh_attributes(fields) {
-        let retained = if (scope.executor.count)(&values)? == Some(points) { (scope.retain_float)(&values) } else { None };
+        let retained = if scope.executor().count(&values)? == Some(points) { scope.retain_float(&values) } else { None };
         let next = match retained {
             Some(planes) => ak::install_deferred(rdk::attribute::Owner::Point, &kind, &name, &Arc::new(planes), &current),
-            None => flow_ir::core_exec::host_value(&scope.executor, &values).and_then(|v| ak::write(grain, rdk::attribute::Owner::Point, &kind, &name, &v, &current)),
+            None => flow_ir::core_exec::host_value(scope.executor().as_ref(), &values).and_then(|v| ak::write(grain, rdk::attribute::Owner::Point, &kind, &name, &v, &current)),
         };
         match next {
             Ok(g) => current = g,
@@ -1155,7 +1155,7 @@ fn mesh_cook(
         let topology_key = get(args, "vertex_points").cloned().unwrap_or_else(|| data.clone());
         let cached = static_topology && device && tki::static_cached(&topology_key);
         let program: Executor::Program = if cached { points_program.get().cloned().unwrap_or_else(|| program.clone())? } else { program.clone()? };
-        let force = |resident: Option<Arc<flow_ir::core_exec::Resident>>| -> R<Value> {
+        let force = |resident: Option<Arc<dyn flow_ir::core_exec::Resident>>| -> R<Value> {
             let resolve: flow_ir::core_exec::ResolveFn = {
                 let (context, geoms, sources) = (context.clone(), geometries.to_vec(), sources.to_vec());
                 Arc::new(move |v: &Value| {
@@ -1169,26 +1169,26 @@ fn mesh_cook(
             E::with_interrupt(Arc::new(move || rdk::cancel::is_cancelled(&cancel)), &mut || result = Executor::force(&program, &options, sctx::input(context)));
             result
         };
-        let scope = if device { env.gpu.backend.as_ref().and_then(|b| (b.residency)(true)) } else { None };
+        let scope = if device { env.gpu.backend.as_ref().and_then(|b| b.residency(true)) } else { None };
         match scope {
             Some(scope) => {
                 on_device.set(true);
                 let out = (|| -> R<rdk::geometry::T> {
-                    match force(Some(scope.executor.clone()))? {
+                    match force(Some(scope.executor().clone()))? {
                         Value::Record(fields) => {
                             if cancelled() {
                                 return error();
                             }
                             let static_key = if static_topology { Some(&topology_key) } else { None };
-                            let result = match tki::mesh_resident(static_key, &scope, &fields) {
+                            let result = match tki::mesh_resident(static_key, &*scope, &fields) {
                                 Some(r) => r,
                                 None => {
                                     let host: R<Vec<(String, Value)>> =
-                                        fields.iter().map(|(k, v)| Ok((k.clone(), flow_ir::core_exec::host_value(&scope.executor, v)?))).collect();
+                                        fields.iter().map(|(k, v)| Ok((k.clone(), flow_ir::core_exec::host_value(scope.executor().as_ref(), v)?))).collect();
                                     tk::mesh(&host?)
                                 }
                             };
-                            let result = result.and_then(|g| mesh_resident_attributes(sctx::grain(context), &scope, &fields, g));
+                            let result = result.and_then(|g| mesh_resident_attributes(sctx::grain(context), &*scope, &fields, g));
                             result.and_then(|geometry| {
                                 if cancelled() {
                                     for (_, release) in rdk::geometry::releasers(&geometry) {
@@ -1203,7 +1203,7 @@ fn mesh_cook(
                         _ => Err(fail("E_TOPOLOGY_TYPE", "Mesh data must be a record.")),
                     }
                 })();
-                (scope.executor.close)();
+                scope.executor().close();
                 out
             }
             None => match force(None)? {
@@ -1984,11 +1984,11 @@ pub fn build_call(
     })
 }
 
-type BuiltEntry = (Option<Arc<Gpu::Backend>>, node::T);
+type BuiltEntry = (Option<Arc<dyn Gpu::Backend>>, node::T);
 static BUILT: LazyLock<lru::Memo<String, BuiltEntry>> = LazyLock::new(|| lru::Memo::new("flow_sop.built", 64));
 
 /// Drops the inlined-body nodes built for a closed owner's backend.
-pub fn forget_backend(backend: &Arc<Gpu::Backend>) {
+pub fn forget_backend(backend: &Arc<dyn Gpu::Backend>) {
     BUILT.remove_where(|(held, _)| held.as_ref().is_some_and(|b| Arc::ptr_eq(b, backend)));
 }
 
@@ -3393,7 +3393,7 @@ fn structural_cook(env: &StructEnv, node_id: i64, context: &sctx::T, payloads: &
     let clock = env.clock.clone();
     let began = std::cell::Cell::new(clock());
     let used_device = std::cell::Cell::new(false);
-    let scope = if placed.route != chain::Route::Cpu { env.gpu.backend.as_ref().and_then(|b| (b.residency)(true)).map(Arc::new) } else { None };
+    let scope = if placed.route != chain::Route::Cpu { env.gpu.backend.as_ref().and_then(|b| b.residency(true)).map(Arc::new) } else { None };
     let run = Arc::new(HostRun {
         env: env.clone(),
         context: context.clone(),
@@ -3406,7 +3406,7 @@ fn structural_cook(env: &StructEnv, node_id: i64, context: &sctx::T, payloads: &
     for (index, (id, ty, _)) in env.captures.iter().enumerate() {
         run.handles.lock().unwrap().insert(*id, (ty.clone(), None, Some(sop::session::Output { payload: payloads[index].clone(), instances: None })));
     }
-    let execute = |scope: Option<&Arc<Gpu::Residency>>| -> R<Value> {
+    let execute = |scope: Option<&Arc<Box<dyn Gpu::Residency>>>| -> R<Value> {
         let host_source = scope.map(|scope| {
             let (run, scope) = (run.clone(), scope.clone());
             move |value: &Value| -> R<Option<Value>> {
@@ -3414,7 +3414,7 @@ fn structural_cook(env: &StructEnv, node_id: i64, context: &sctx::T, payloads: &
                     Value::Source(g) if g.name == "$core/operator" && is_geometry_ty(&g.ty) && get(&g.fields, "$name") == Some(&Value::Text(b"sop/mesh".to_vec())) => {
                         let (ty, args) = (&g.ty, &g.fields);
                         let points = match get(args, "points") {
-                            Some(p) => scope_count(&scope, p)?,
+                            Some(p) => scope_count(&**scope, p)?,
                             None => None,
                         };
                         if points.is_none() {
@@ -3422,7 +3422,7 @@ fn structural_cook(env: &StructEnv, node_id: i64, context: &sctx::T, payloads: &
                         } else if sctx::cancelled(&run.context) {
                             Err(fail("E_CANCELLED", "Mesh kernel cancelled."))
                         } else {
-                            match tki::mesh_resident(None, &scope, args) {
+                            match tki::mesh_resident(None, &**scope, args) {
                                 None => Ok(None),
                                 Some(result) => {
                                     let geometry = result?;
@@ -3444,7 +3444,7 @@ fn structural_cook(env: &StructEnv, node_id: i64, context: &sctx::T, payloads: &
         });
         let options = flow_ir::core_exec::Options {
             host_source: host_source.map(|f| Arc::new(f) as flow_ir::core_exec::HostSourceFn),
-            resident: scope.map(|s| s.executor.clone()),
+            resident: scope.map(|s| s.executor().clone()),
             resolve: Some(run.resolve_fn()),
             strict: true,
             force: Some(Arc::new({
@@ -3464,7 +3464,7 @@ fn structural_cook(env: &StructEnv, node_id: i64, context: &sctx::T, payloads: &
         match execute(scope.as_ref()) {
             Err(_) if scope.is_some() && !sctx::cancelled(context) => {
                 if let Some(s) = &scope {
-                    (s.executor.close)();
+                    s.executor().close();
                 }
                 used_device.set(false);
                 execute(None)
@@ -3494,7 +3494,7 @@ fn structural_cook(env: &StructEnv, node_id: i64, context: &sctx::T, payloads: &
         _ => Err(data_source("Cooked selection must return a geometry handle.")),
     });
     if let Some(s) = &scope {
-        (s.executor.close)();
+        s.executor().close();
     }
     if let Some(session) = run.session.lock().unwrap().as_mut() {
         sop::session::close(session);
@@ -3509,8 +3509,8 @@ fn structural_cook(env: &StructEnv, node_id: i64, context: &sctx::T, payloads: &
     })
 }
 
-fn scope_count(scope: &Gpu::Residency, value: &Value) -> R<Option<i64>> {
-    (scope.executor.count)(value)
+fn scope_count(scope: &dyn Gpu::Residency, value: &Value) -> R<Option<i64>> {
+    scope.executor().count(value)
 }
 
 fn failed_node(d: Diagnostic) -> node::T {
