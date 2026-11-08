@@ -2281,13 +2281,19 @@ fn plain_draws(draws: &[PlanDraw]) -> bool {
     draws.iter().all(|draw| draw.textures.is_empty() && draw.samplers.is_empty() && draw.indirect.is_none())
 }
 
-fn encode_batch(
+/// A batch that draws straight into the frame's target with no depth: consecutive ones share one
+/// render pass (its viewport, scissor and cull are per batch), so a 2D frame is not a pass per clip.
+fn joins_pass(batch: &BatchPlan) -> bool {
+    batch.samples == 1 && !has_depth(batch.family)
+}
+
+fn begin_pass(
     value: &mut SceneExecution,
     commands: &backend::Commands,
     clear: (f64, f64, f64, f64),
     later: &[Rc<BatchPlan>],
     batch: &BatchPlan,
-) -> Result<(), Error> {
+) -> Result<backend::RenderEncoder, Error> {
     let same_samples = |next: &Rc<BatchPlan>| next.samples == batch.samples;
     let target = render_target(
         value,
@@ -2299,7 +2305,10 @@ fn encode_batch(
         later.iter().any(same_samples),
         later.iter().any(|next| same_samples(next) && has_depth(next.family) && next.state.depth_load == Load::Load),
     )?;
-    let encoder = backend::render_encoder(commands, &target)?;
+    backend::render_encoder(commands, &target)
+}
+
+fn encode_batch(value: &mut SceneExecution, encoder: &backend::RenderEncoder, batch: &BatchPlan) -> Result<(), Error> {
     let bound_w = value.configuration.physical_width;
     let bound_h = value.configuration.physical_height;
     // A viewport or scissor with no pixel on the target draws nothing. The viewport is passed
@@ -2372,7 +2381,7 @@ fn encode_batch(
             }
         }
     }
-    backend::end_render(&encoder)
+    Ok(())
 }
 
 fn build_icb(value: &mut SceneExecution, batch: &BatchPlan) -> Result<(), Error> {
@@ -2446,8 +2455,19 @@ fn encode_frame(value: &mut SceneExecution, frame: &Acquired, clear: (f64, f64, 
         }
     };
     let encoded = (|| -> Result<(), Error> {
+        let mut open: Option<backend::RenderEncoder> = None;
         for (index, batch) in batches.iter().enumerate() {
-            encode_batch(value, &commands, clear, &batches[index + 1..], batch)?;
+            let later = &batches[index + 1..];
+            let encoder = match open.take() {
+                Some(encoder) => encoder,
+                None => begin_pass(value, &commands, clear, later, batch)?,
+            };
+            encode_batch(value, &encoder, batch)?;
+            if joins_pass(batch) && later.first().is_some_and(|next| joins_pass(next)) {
+                open = Some(encoder);
+            } else {
+                backend::end_render(&encoder)?;
+            }
         }
         Ok(())
     })();
