@@ -1,10 +1,11 @@
 //! Port of lib/rdk/ops/mesh/subdivide_stitch.ml: crack closure by pulling or stitching the
 //! subdivided boundary to the unselected faces.
 use rdk_core::attribute::{self, Owner, Storage};
+use rdk_core::support::{self, Windows};
 use rdk_core::{cancel, geometry, packed, topology, topology_index};
 
 use crate::subdivide_refine::{
-    checked_add, checked_mul, failm, fmax, fmin, gf, gi, run, AFloats, DividedBoundary,
+    checked_add, checked_mul, failm, fmax, fmin, gf, gi, invalid_arg, DividedBoundary,
     InterfaceChains, PointWeld, PullPlan, TriangleAppend,
 };
 
@@ -127,34 +128,42 @@ pub fn pull_boundary_no_edge_division(
     }
     let source_positions = packed::Float3::View::view(&plan.source_positions)?;
     let positions = packed::Float3::View::view(geometry::positions(geometry_value))?;
-    let x = AFloats::from_slice(&positions.x);
-    let y = AFloats::from_slice(&positions.y);
-    let z = AFloats::from_slice(&positions.z);
-    run(grain, cancel_token, topology_view.point_count, &|point| {
-        let edge = gi(&first_edge, point);
-        if edge >= 0 {
-            let (px, py, pz) = if gi(&common_endpoint, point) >= 0 {
-                packed::Float3::get(&plan.source_positions, gi(&common_endpoint, point))?
-            } else {
-                project_to_source_edge(
-                    &source_positions,
-                    &source_index,
-                    edge,
-                    gf(&positions.x, point),
-                    gf(&positions.y, point),
-                    gf(&positions.z, point),
-                )
-            };
-            if !(px.is_finite() && py.is_finite() && pz.is_finite()) {
-                return Err(failm("Pull Closed generated a non-finite boundary position"));
+    let grain = grain.unwrap_or(16_384);
+    if grain <= 0 {
+        return Err(invalid_arg("Rdk_mesh.Subdivide.subdivide: grain must be positive".to_owned()));
+    }
+    let (mut x, mut y, mut z) = (positions.x.to_vec(), positions.y.to_vec(), positions.z.to_vec());
+    {
+        let (wx, wy, wz) = (Windows::even(&mut x, grain), Windows::even(&mut y, grain), Windows::even(&mut z, grain));
+        support::run_indexed_ranges(grain, topology_view.point_count, &|range, first, last| {
+            let (x, y, z) = (wx.take(range), wy.take(range), wz.take(range));
+            for point in first..last {
+                support::poll(cancel_token, point)?;
+                let edge = gi(&first_edge, point);
+                if edge >= 0 {
+                    let (px, py, pz) = if gi(&common_endpoint, point) >= 0 {
+                        packed::Float3::get(&plan.source_positions, gi(&common_endpoint, point))?
+                    } else {
+                        project_to_source_edge(
+                            &source_positions,
+                            &source_index,
+                            edge,
+                            gf(&positions.x, point),
+                            gf(&positions.y, point),
+                            gf(&positions.z, point),
+                        )
+                    };
+                    if !(px.is_finite() && py.is_finite() && pz.is_finite()) {
+                        return Err(failm("Pull Closed generated a non-finite boundary position"));
+                    }
+                    let at = (point - first) as usize;
+                    (x[at], y[at], z[at]) = (px, py, pz);
+                }
             }
-            x.set(point, px);
-            y.set(point, py);
-            z.set(point, pz);
-        }
-        Ok(())
-    })?;
-    let positions = packed::Float3::View::of_owned_exn(x.into_vec(), y.into_vec(), z.into_vec())?;
+            Ok(())
+        })?;
+    }
+    let positions = packed::Float3::View::of_owned_exn(x, y, z)?;
     let moved = geometry::with_positions(positions, geometry_value)?;
     Ok(geometry::without_attribute(Owner::Vertex, &plan.ancestry_attribute, &moved))
 }

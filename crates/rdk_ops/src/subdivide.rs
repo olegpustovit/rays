@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use rdk_core::attribute::{self, Owner, Storage};
-use rdk_core::{cancel, edge_group, error, geometry, group, topology, topology_index};
+use rdk_core::{cancel, edge_group, error, geometry, group, support, topology, topology_index};
 
 use crate::curve_subdivide;
 use crate::deform;
@@ -139,8 +139,12 @@ pub fn automatic_boundary_holes(
     let index = topology_index::View::view(&index_value);
     let point_count = topology_view.point_count;
     let point_byte_count = (point_count >> 3) + if point_count & 7 == 0 { 0 } else { 1 };
-    let boundary_points = ABytes::new(point_byte_count, 0);
-    run(grain, cancel_token, point_byte_count, &|byte| {
+    let grain = grain.unwrap_or(16_384);
+    if grain <= 0 {
+        return Err(invalid_arg("Rdk_mesh.Subdivide.subdivide: grain must be positive".to_owned()));
+    }
+    let mut boundary_points = vec![0_u8; point_byte_count as usize];
+    support::par_fill(cancel_token, grain, &mut boundary_points, &|byte| {
         let base = byte << 3;
         let mut value = 0_u8;
         for bit in 0..=(7.min(point_count - base - 1)) {
@@ -159,14 +163,12 @@ pub fn automatic_boundary_holes(
                 value |= 1 << bit;
             }
         }
-        boundary_points.set(byte, value);
-        Ok(())
+        Ok(value)
     })?;
-    let boundary_points = boundary_points.into_vec();
     let primitive_count = topology_view.primitive_kinds.len() as i64;
     let byte_count = (primitive_count >> 3) + if primitive_count & 7 == 0 { 0 } else { 1 };
-    let hole_bits = ABytes::new(byte_count, 0);
-    run(grain, cancel_token, byte_count, &|byte| {
+    let mut hole_bits = vec![0_u8; byte_count as usize];
+    support::par_fill(cancel_token, grain, &mut hole_bits, &|byte| {
         let base = byte << 3;
         let mut value = 0_u8;
         for bit in 0..=(7.min(primitive_count - base - 1)) {
@@ -187,14 +189,13 @@ pub fn automatic_boundary_holes(
                 value |= 1 << bit;
             }
         }
-        hole_bits.set(byte, value);
-        Ok(())
+        Ok(value)
     })?;
     let holes = group::View::of_owned_bits(
         group::Owner::Primitive,
         "subdivision_hole",
         primitive_count,
-        hole_bits.into_vec(),
+        hole_bits,
     )?;
     Ok(if group::cardinality(&holes) == 0 { None } else { Some(holes) })
 }
