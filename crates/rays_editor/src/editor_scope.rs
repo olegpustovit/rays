@@ -185,7 +185,7 @@ pub fn sync_scope(value: t) -> t {
     };
     let now = (value.clock)();
     let summaries = value.cook.summaries.clone();
-    let executions = probe_run::reports(&lowered.profile);
+    let execution_count = probe_run::report_count(&lowered.profile);
     // a moving clock or pointer re-forces the probes at most five times a second: a forced frame
     // sets the quiet time to four times its own length, so forcing never takes more than a fifth
     // of the time
@@ -196,7 +196,7 @@ pub fn sync_scope(value: t) -> t {
     let fresh = match &previous {
         Some(k) => !(k.evaluated.as_ref().map_or(false, |e| Arc::ptr_eq(e, &evaluated))
             && k.summaries == summaries
-            && probe_run::same_count(&k.executions, &executions)
+            && execution_count == k.executions.len()
             && (match (&k.time, &time) {
                 (Some(a), Some(b)) => !sop_context::input_changed(**lowered.reads, a, b),
                 (None, None) => true,
@@ -211,6 +211,7 @@ pub fn sync_scope(value: t) -> t {
             ..pane.clone()
         });
     }
+    let executions = probe_run::reports(&lowered.profile);
     let stamp = match &previous {
         Some(k) if !fresh => k.stamp,
         _ => now,

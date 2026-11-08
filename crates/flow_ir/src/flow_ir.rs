@@ -242,6 +242,11 @@ pub mod Profile {
         })
     }
 
+    /// Number of recorded groups without cloning the snapshot (cheap footer freshness check).
+    pub fn execution_count(profile: &T) -> usize {
+        profile.executions.lock().unwrap().len()
+    }
+
     /// Immutable snapshot of at most 512 recent groups. Each packed group has one timing,
     /// excluding input materialization and nested groups.
     pub fn executions(profile: &T) -> Vec<Execution> { profile.executions.lock().unwrap().clone() }

@@ -12,7 +12,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 |------|------|--------|---------|
 | A | 8/8 | — | — |
 | B | 5/6 | B1 | 1 |
-| M | 3/21 | — | 18 |
+| M | 4/21 | — | 17 |
 | I | 0/1 | — | 1 |
 | C | 0/21 | — | 21 |
 | D | 0/6 | — | 6 |
@@ -38,7 +38,8 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | M2 | done | `bbe7f6ae` — `editor_graph_ref`; `panel_key` / layouts borrow graph name |
 | M10 | done | `c425eefa` — detach alias slots before store; `cargo t -p flow_ir store` 3 pass |
 | M20 | done | `f6ca915b` — remove `mem_sys` TEMP alloc sampler |
-| M1,M3–M9,M11–M19,M21 | pending | |
+| M4 | done | `5b5c36a9` — `Profile::execution_count` / `probe_run::report_count`; `sync_scope` defers profile clone until after `!moved && !fresh`; `cargo check -p rays_editor`; `cargo t -p flow_native probe_run` 3 pass |
+| M1,M3,M5–M9,M11–M19,M21 | pending | |
 | I | pending | |
 | C1–C21 | pending | |
 | D1–D6 | pending | |

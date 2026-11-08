@@ -12,6 +12,10 @@ use std::rc::Rc;
 /// The profile of the executed groups (a snapshot of at most 512).
 pub type reports = Vec<flow_ir::flow_ir::Execution>;
 
+pub fn report_count(profile: &Profile::T) -> usize {
+    Profile::execution_count(profile)
+}
+
 pub fn reports(profile: &Profile::T) -> reports {
     Profile::executions(profile)
 }
