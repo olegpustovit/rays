@@ -21,7 +21,7 @@ use flow_gpu::{pipelines, run};
 use flow_ir::packed::{self, host as phost};
 use flow_shader::emit::{self, Curves};
 use flow_syntax::ty::{FnSignature, Ty};
-use flow_syntax::value::{FnId, Value};
+use flow_syntax::value::{FnId, Value, source_value};
 use flow_syntax::{context, syntax};
 use ogpu::backend::{Accel, Buffer, Commands};
 use rays_diagnostic::Diagnostic;
@@ -108,7 +108,7 @@ fn placeholder_op(name: &str, ty: Ty) -> Op {
     o.out = Arc::new(move |_| Ok(out.clone()));
     o.shape = Shape::Struct { splice: false };
     o.check = Arc::new(|_| Ok(()));
-    o.body = Arc::new(move |_, _, _| Ok(Value::Source(full.clone(), ty.clone(), vec![])));
+    o.body = Arc::new(move |_, _, _| Ok(source_value(full.clone(), ty.clone(), vec![])));
     o
 }
 
@@ -397,7 +397,7 @@ pub type front_result = (emit::Kernel, phost::Inputs, Vec<Option<(String, Ty)>>)
 
 fn replace_sources(values: Vec<(String, (Ty, Value))>) -> Box<dyn Fn(&Value) -> Value> {
     Box::new(move |value| match value {
-        Value::Source(n, _, list) if n.starts_with("pt/") && list.is_empty() => values.iter().find(|(k, _)| *k == n[3..]).map(|(_, (_, p))| p.clone()).expect("pt placeholder"),
+        Value::Source(p) if p.name.starts_with("pt/") && p.fields.is_empty() => values.iter().find(|(k, _)| *k == p.name[3..]).map(|(_, (_, p))| p.clone()).expect("pt placeholder"),
         value => value.clone(),
     })
 }
@@ -596,7 +596,7 @@ pub fn gather_kernel(lease: &renderer::renderer::gpu, pipes: &pipelines::T) -> R
     };
     let replacement = src.clone();
     let bound = e::bind_captures(f, &move |v| match v {
-        Value::Source(n, _, l) if n == "pt/src" && l.is_empty() => replacement.clone(),
+        Value::Source(p) if p.name == "pt/src" && p.fields.is_empty() => replacement.clone(),
         v => v.clone(),
     });
     let residual = deferred("gather", bound, &[Value::Int_array(Arc::new(vec![0]))], Ty::Vec3)?;
@@ -665,8 +665,8 @@ fn cpu_run(facts: &facts, checked: &mut Option<w::Workspace>, words: Vec<(String
     let f = fns.iter().find(|(n, _)| n == name).map(|(_, f)| *f).ok_or_else(|| format!("no path tracer kernel {name}"))?;
     let types: Vec<(String, Ty)> = uniforms().into_iter().chain(tables()).map(|(n, ty)| (n.to_string(), ty)).collect();
     let bound = e::bind_captures(f, &|v| match v {
-        Value::Source(n, _, l) if n.starts_with("pt/") && l.is_empty() => {
-            let n = &n[3..];
+        Value::Source(p) if p.name.starts_with("pt/") && p.fields.is_empty() => {
+            let n = &p.name[3..];
             let ty = &types.iter().find(|(k, _)| k == n).expect("pt placeholder").1;
             match ty {
                 Ty::Array(_) => value(n),
