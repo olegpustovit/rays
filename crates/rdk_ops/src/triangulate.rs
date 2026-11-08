@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use rdk_core::support::Windows;
 use rdk_core::{
     cancel, error, geometry, group, packed, polygon_triangulation, support, topology, topology_remap,
@@ -307,6 +306,7 @@ pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
     use crate::compact_points::fixtures::*;
     use rdk_core::attribute::{Owner, Storage};
     use rdk_core::topology::PrimitiveKind;

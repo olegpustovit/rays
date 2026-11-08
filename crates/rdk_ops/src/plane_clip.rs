@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use rdk_core::{
-    attribute, cancel, edge_group, element_selection, error, geometry, group, packed, ragged_ops, support,
-    topology, topology_index,
+    attribute, cancel, edge_group, element_selection, error, geometry, group, packed, support,
+    topology, topology_index, topology_remap,
 };
 use rdk_geom::contour_triangulation;
 use rdk_geom::point_grid::{float_max, float_min};
@@ -1418,20 +1418,6 @@ fn float_plane(
     Ok(output)
 }
 
-fn nearest_plane(
-    cancel_ref: Option<&cancel::T>,
-    grain: i64,
-    source: &[f64],
-    primitive_source: &[i64],
-) -> Result<Vec<f64>, error::T> {
-    let mut output = vec![0.0; primitive_source.len()];
-    support::par_fill(cancel_ref, grain, &mut output, &|index| {
-        let input = primitive_source[index as usize];
-        Ok(if input >= 0 { source[input as usize] } else { 0.0 })
-    })?;
-    Ok(output)
-}
-
 pub fn clip(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     run(params, geometry_value).map_err(|value| match error::code(&value) {
         "cancelled" => make("clip", "cancelled", "geometry operation was cancelled"),
@@ -1870,56 +1856,7 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
         match owner {
             attribute::Owner::Detail => Ok(source.clone()),
             attribute::Owner::Primitive => {
-                let storage = match storage {
-                    attribute::Storage::Float(values) => {
-                        attribute::Storage::Float(Arc::new(nearest_plane(cancel_ref, grain, values, primitive_source)?))
-                    }
-                    attribute::Storage::Int(values) => attribute::Storage::Int(Arc::new(
-                        primitive_source
-                            .iter()
-                            .map(|&input| if input >= 0 { values[input as usize] } else { 0 })
-                            .collect(),
-                    )),
-                    attribute::Storage::IntArray(values) => attribute::Storage::IntArray(ragged_ops::remap_int(
-                        cancel_ref,
-                        Some(grain),
-                        primitive_source,
-                        values,
-                    )?),
-                    attribute::Storage::FloatArray(values) => attribute::Storage::FloatArray(
-                        ragged_ops::remap_float(cancel_ref, Some(grain), primitive_source, values)?,
-                    ),
-                    attribute::Storage::Text(values) => attribute::Storage::Text(
-                        primitive_source
-                            .iter()
-                            .map(|&input| if input >= 0 { values[input as usize].clone() } else { Vec::new() })
-                            .collect(),
-                    ),
-                    attribute::Storage::Float2(values) => {
-                        let values = packed::Float2::View::view(values);
-                        attribute::Storage::Float2(packed::Float2::of_owned(
-                            nearest_plane(cancel_ref, grain, &values.x, primitive_source)?,
-                            nearest_plane(cancel_ref, grain, &values.y, primitive_source)?,
-                        )?)
-                    }
-                    attribute::Storage::Float3(values) => {
-                        let values = packed::Float3::View::view(values)?;
-                        attribute::Storage::Float3(packed::Float3::View::of_owned_exn(
-                            nearest_plane(cancel_ref, grain, &values.x, primitive_source)?,
-                            nearest_plane(cancel_ref, grain, &values.y, primitive_source)?,
-                            nearest_plane(cancel_ref, grain, &values.z, primitive_source)?,
-                        )?)
-                    }
-                    attribute::Storage::Float4(values) => {
-                        let values = packed::Float4::View::view(values);
-                        attribute::Storage::Float4(packed::Float4::of_owned(
-                            nearest_plane(cancel_ref, grain, &values.x, primitive_source)?,
-                            nearest_plane(cancel_ref, grain, &values.y, primitive_source)?,
-                            nearest_plane(cancel_ref, grain, &values.z, primitive_source)?,
-                            nearest_plane(cancel_ref, grain, &values.w, primitive_source)?,
-                        )?)
-                    }
-                };
+                let storage = topology_remap::select_storage(cancel_ref, grain, true, primitive_source, storage)?;
                 attribute::create_owned(name, owner, storage)
             }
             attribute::Owner::Point | attribute::Owner::Vertex => {
@@ -1947,67 +1884,33 @@ fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, err
                 let is_normal = name == "N";
                 let plane = |values: &[f64]| float_plane(cancel_ref, grain, values, mapping_a, mapping_b, mapping_t);
                 let storage = match storage {
-                    attribute::Storage::Float(values) => attribute::Storage::Float(Arc::new(plane(values)?)),
-                    attribute::Storage::Int(values) => attribute::Storage::Int(Arc::new(
-                        nearest_mapping
-                            .iter()
-                            .map(|&source| if source >= 0 { values[source as usize] } else { 0 })
-                            .collect(),
-                    )),
-                    attribute::Storage::IntArray(values) => attribute::Storage::IntArray(ragged_ops::remap_int(
-                        cancel_ref,
-                        Some(grain),
-                        &nearest_mapping,
-                        values,
-                    )?),
-                    attribute::Storage::FloatArray(values) => attribute::Storage::FloatArray(
-                        ragged_ops::remap_float(cancel_ref, Some(grain), &nearest_mapping, values)?,
-                    ),
-                    attribute::Storage::Text(values) => attribute::Storage::Text(
-                        nearest_mapping
-                            .iter()
-                            .map(|&source| if source >= 0 { values[source as usize].clone() } else { Vec::new() })
-                            .collect(),
-                    ),
-                    attribute::Storage::Float2(values) => {
-                        let values = packed::Float2::View::view(values);
-                        attribute::Storage::Float2(packed::Float2::of_owned(plane(&values.x)?, plane(&values.y)?)?)
-                    }
-                    attribute::Storage::Float3(values) => {
+                    attribute::Storage::Float3(values) if is_normal => {
                         let values = packed::Float3::View::view(values)?;
                         let mut x = plane(&values.x)?;
                         let mut y = plane(&values.y)?;
                         let mut z = plane(&values.z)?;
-                        if is_normal {
-                            for index in 0..count {
-                                let cap_side = if owner == attribute::Owner::Point { -1 } else { corner_cap_side[index] };
-                                if cap_side >= 0 {
-                                    let direction = if cap_side == 0 { -1.0 } else { 1.0 };
-                                    x[index] = direction * nx;
-                                    y[index] = direction * ny;
-                                    z[index] = direction * nz;
-                                } else {
-                                    let length =
-                                        (x[index] * x[index] + y[index] * y[index] + z[index] * z[index]).sqrt();
-                                    if length > 1e-20 {
-                                        x[index] /= length;
-                                        y[index] /= length;
-                                        z[index] /= length;
-                                    }
+                        for index in 0..count {
+                            let cap_side = if owner == attribute::Owner::Point { -1 } else { corner_cap_side[index] };
+                            if cap_side >= 0 {
+                                let direction = if cap_side == 0 { -1.0 } else { 1.0 };
+                                x[index] = direction * nx;
+                                y[index] = direction * ny;
+                                z[index] = direction * nz;
+                            } else {
+                                let length = (x[index] * x[index] + y[index] * y[index] + z[index] * z[index]).sqrt();
+                                if length > 1e-20 {
+                                    x[index] /= length;
+                                    y[index] /= length;
+                                    z[index] /= length;
                                 }
                             }
                         }
                         attribute::Storage::Float3(packed::Float3::View::of_owned_exn(x, y, z)?)
                     }
-                    attribute::Storage::Float4(values) => {
-                        let values = packed::Float4::View::view(values);
-                        attribute::Storage::Float4(packed::Float4::of_owned(
-                            plane(&values.x)?,
-                            plane(&values.y)?,
-                            plane(&values.z)?,
-                            plane(&values.w)?,
-                        )?)
-                    }
+                    storage => match attribute::map_float_planes(storage, plane)? {
+                        Some(blended) => blended,
+                        None => topology_remap::select_storage(cancel_ref, grain, true, &nearest_mapping, storage)?,
+                    },
                 };
                 attribute::create_owned(name, owner, storage)
             }

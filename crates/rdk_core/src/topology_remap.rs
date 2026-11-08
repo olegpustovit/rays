@@ -95,6 +95,35 @@ pub fn select_float(
     select(cancel_value, grain, ("Topology_remap.select_float", "Parallel.for_: chunk size must be positive"), missing, mapping, source)
 }
 
+/// `storage` selected through `mapping` (output row to source row; `-1` is a default row when `defaults`).
+pub fn select_storage(
+    cancel_value: Option<&cancel::T>,
+    grain: i64,
+    defaults: bool,
+    mapping: &[i64],
+    storage: &attribute::Storage,
+) -> Result<attribute::Storage, error::T> {
+    use attribute::Storage;
+    Ok(match storage {
+        Storage::Int(values) => {
+            Storage::Int(Arc::new(select_int(cancel_value, grain, defaults.then_some(0), mapping, values)?))
+        }
+        Storage::Text(values) => {
+            Storage::Text(select_text(cancel_value, grain, defaults.then_some(&[][..]), mapping, values)?)
+        }
+        Storage::IntArray(values) => Storage::IntArray(ragged_ops::remap_int(cancel_value, Some(grain), mapping, values)?),
+        Storage::FloatArray(values) => {
+            Storage::FloatArray(ragged_ops::remap_float(cancel_value, Some(grain), mapping, values)?)
+        }
+        Storage::Float(_) | Storage::Float2(_) | Storage::Float3(_) | Storage::Float4(_) => {
+            attribute::map_float_planes(storage, |plane| {
+                select_float(cancel_value, grain, defaults.then_some(0.0), mapping, plane)
+            })?
+            .expect("a float-kind storage has planes")
+        }
+    })
+}
+
 fn attribute_result(
     cancel_value: Option<&cancel::T>,
     grain: i64,
@@ -102,49 +131,8 @@ fn attribute_result(
     mapping: &[i64],
     value: &attribute::T,
 ) -> Result<attribute::T, error::T> {
-    let owner = attribute::owner(value);
-    let storage = match attribute::View::storage(value)? {
-        attribute::Storage::Float(values) => attribute::Storage::Float(Arc::new(select_float(
-            cancel_value, grain, defaults.then_some(0.0), mapping, values,
-        )?)),
-        attribute::Storage::Int(values) => attribute::Storage::Int(Arc::new(select_int(
-            cancel_value, grain, defaults.then_some(0), mapping, values,
-        )?)),
-        attribute::Storage::Text(values) => attribute::Storage::Text(select_text(
-            cancel_value, grain, defaults.then_some(&[][..]), mapping, values,
-        )?),
-        attribute::Storage::IntArray(values) => attribute::Storage::IntArray(ragged_ops::remap_int(
-            cancel_value, Some(grain), mapping, values,
-        )?),
-        attribute::Storage::FloatArray(values) => attribute::Storage::FloatArray(ragged_ops::remap_float(
-            cancel_value, Some(grain), mapping, values,
-        )?),
-        attribute::Storage::Float2(values) => {
-            let view = packed::Float2::View::view(values);
-            attribute::Storage::Float2(packed::Float2::of_owned(
-                select_float(cancel_value, grain, defaults.then_some(0.0), mapping, &view.x)?,
-                select_float(cancel_value, grain, defaults.then_some(0.0), mapping, &view.y)?,
-            )?)
-        }
-        attribute::Storage::Float3(values) => {
-            let view = packed::Float3::View::view(values)?;
-            attribute::Storage::Float3(packed::Float3::View::of_owned_exn(
-                select_float(cancel_value, grain, defaults.then_some(0.0), mapping, &view.x)?,
-                select_float(cancel_value, grain, defaults.then_some(0.0), mapping, &view.y)?,
-                select_float(cancel_value, grain, defaults.then_some(0.0), mapping, &view.z)?,
-            )?)
-        }
-        attribute::Storage::Float4(values) => {
-            let view = packed::Float4::View::view(values);
-            attribute::Storage::Float4(packed::Float4::of_owned(
-                select_float(cancel_value, grain, defaults.then_some(0.0), mapping, &view.x)?,
-                select_float(cancel_value, grain, defaults.then_some(0.0), mapping, &view.y)?,
-                select_float(cancel_value, grain, defaults.then_some(0.0), mapping, &view.z)?,
-                select_float(cancel_value, grain, defaults.then_some(0.0), mapping, &view.w)?,
-            )?)
-        }
-    };
-    attribute::create_owned(attribute::name(value), owner, storage)
+    let storage = select_storage(cancel_value, grain, defaults, mapping, attribute::View::storage(value)?)?;
+    attribute::create_owned(attribute::name(value), attribute::owner(value), storage)
 }
 
 pub fn attribute(
@@ -567,61 +555,35 @@ pub fn blend_attribute(
     weight: &[f64],
     value: &attribute::T,
 ) -> Result<attribute::T, error::T> {
-    let nearest = || nearest_rows(left, right, weight);
     let owner = attribute::owner(value);
     let float = |source: &[f64]| blend_float(cancel_value, grain, left, right, weight, source);
     let storage = match attribute::View::storage(value)? {
-        attribute::Storage::Float(source) => attribute::Storage::Float(Arc::new(float(source)?)),
-        attribute::Storage::Int(source) => {
-            let mapping = nearest()?;
-            attribute::Storage::Int(Arc::new(select_int(cancel_value, grain, None, &mapping, source)?))
-        }
-        attribute::Storage::Text(source) => {
-            let mapping = nearest()?;
-            attribute::Storage::Text(select_text(cancel_value, grain, None, &mapping, source)?)
-        }
-        attribute::Storage::IntArray(source) => {
-            let mapping = nearest()?;
-            attribute::Storage::IntArray(ragged_ops::remap_int(cancel_value, Some(grain), &mapping, source)?)
-        }
-        attribute::Storage::FloatArray(source) => {
-            let mapping = nearest()?;
-            attribute::Storage::FloatArray(ragged_ops::remap_float(cancel_value, Some(grain), &mapping, source)?)
-        }
-        attribute::Storage::Float2(source) => {
-            let view = packed::Float2::View::view(source);
-            attribute::Storage::Float2(packed::Float2::of_owned(float(&view.x)?, float(&view.y)?)?)
-        }
-        attribute::Storage::Float3(source) => {
+        attribute::Storage::Float3(source) if attribute::name(value) == "N" => {
             let view = packed::Float3::View::view(source)?;
             let mut x = float(&view.x)?;
             let mut y = float(&view.y)?;
             let mut z = float(&view.z)?;
-            if attribute::name(value) == "N" {
-                let chunk = grain as usize;
-                let mut first = 0;
-                while first < x.len() {
-                    cancel::check_opt(cancel_value)?;
-                    let last = first.saturating_add(chunk).min(x.len());
-                    for index in first..last {
-                        let length = (x[index] * x[index] + y[index] * y[index] + z[index] * z[index]).sqrt();
-                        if length > 1e-20 {
-                            x[index] /= length;
-                            y[index] /= length;
-                            z[index] /= length;
-                        }
+            let chunk = grain as usize;
+            let mut first = 0;
+            while first < x.len() {
+                cancel::check_opt(cancel_value)?;
+                let last = first.saturating_add(chunk).min(x.len());
+                for index in first..last {
+                    let length = (x[index] * x[index] + y[index] * y[index] + z[index] * z[index]).sqrt();
+                    if length > 1e-20 {
+                        x[index] /= length;
+                        y[index] /= length;
+                        z[index] /= length;
                     }
-                    first = last;
                 }
+                first = last;
             }
             attribute::Storage::Float3(packed::Float3::View::of_owned_exn(x, y, z)?)
         }
-        attribute::Storage::Float4(source) => {
-            let view = packed::Float4::View::view(source);
-            attribute::Storage::Float4(packed::Float4::of_owned(
-                float(&view.x)?, float(&view.y)?, float(&view.z)?, float(&view.w)?,
-            )?)
-        }
+        source => match attribute::map_float_planes(source, float)? {
+            Some(blended) => blended,
+            None => select_storage(cancel_value, grain, false, &nearest_rows(left, right, weight)?, source)?,
+        },
     };
     attribute::create_owned(attribute::name(value), owner, storage)
 }

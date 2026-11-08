@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::cell::RefCell;
 
 use rdk_core::{
@@ -602,6 +601,7 @@ pub fn delete_primitives(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
     use crate::compact_points::fixtures::*;
     use rdk_core::attribute::{Owner, Storage};
 

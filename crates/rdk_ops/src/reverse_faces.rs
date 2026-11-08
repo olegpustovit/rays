@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use rdk_core::support::Windows;
 use rdk_core::{attribute, cancel, error, geometry, group, support, topology, topology_remap};
 
@@ -169,6 +168,7 @@ pub fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
     use crate::compact_points::fixtures::*;
     use rdk_core::attribute::{Owner, Storage};
 

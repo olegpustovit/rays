@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use rdk_core::{
     attribute, cancel, edge_group, element_selection, error, face_normals, geometry, group, normal_ops,
     packed, topology, topology_index,
@@ -254,6 +253,7 @@ pub fn normals(params: Params, geometry_value: &geometry::T) -> Result<geometry:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
     use crate::compact_points::fixtures::*;
     use rdk_core::attribute::{Owner, Storage};
 

@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use rdk_core::{attribute, cancel, edge_group, error, geometry, packed, support, topology, topology_index};
 use rdk_geom::point_clusters::Clusters;
 use rdk_geom::point_grid::{float_max, float_min};
@@ -378,6 +377,7 @@ pub fn apply(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
     use crate::compact_points::fixtures::*;
     use rdk_core::attribute::{Owner, Storage};
     use rdk_core::topology::PrimitiveKind;

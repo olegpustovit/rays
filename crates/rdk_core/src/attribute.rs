@@ -416,6 +416,24 @@ pub fn float_planes(storage: &Storage) -> Result<Option<Vec<&[f64]>>, error::T> 
     }
 }
 
+/// `plane` applied to every float plane of a float-kind storage, rebuilt in the same kind (`None`
+/// for integer, text and CSR storage).
+pub fn map_float_planes(
+    storage: &Storage,
+    mut plane: impl FnMut(&[f64]) -> Result<Vec<f64>, error::T>,
+) -> Result<Option<Storage>, error::T> {
+    let Some(planes) = float_planes(storage)? else { return Ok(None) };
+    let planes = planes.into_iter().map(|source| plane(source).map(Arc::new)).collect::<Result<Vec<_>, _>>()?;
+    let mut planes = planes.into_iter();
+    let mut next = || planes.next().expect("one output plane per source plane");
+    Ok(Some(match storage {
+        Storage::Float(_) => Storage::Float(next()),
+        Storage::Float2(_) => Storage::Float2(packed::Float2::of_shared(next(), next())?),
+        Storage::Float3(_) => Storage::Float3(packed::Float3::View::of_shared_exn(next(), next(), next())?),
+        _ => Storage::Float4(packed::Float4::of_shared(next(), next(), next(), next())?),
+    }))
+}
+
 pub fn of_float_planes(
     like: &Storage,
     planes: &[&[f64]],

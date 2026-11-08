@@ -593,19 +593,6 @@ enum Hull {
     Solid(Faces, Vec<usize>),
 }
 
-fn gather(cancel_value: Option<&cancel::T>, grain: i64, point_map: &[i64], source: &[f64]) -> Result<Vec<f64>, error::T> {
-    let mut output = vec![0.0; point_map.len()];
-    let windows = support::Windows::even(&mut output, grain);
-    support::run_indexed_ranges(grain, point_map.len() as i64, &|range, first, last| {
-        cancel::poll(cancel_value, first, 4095)?;
-        for (point, slot) in (first..last).zip(windows.take(range)) {
-            *slot = source[point_map[point as usize] as usize];
-        }
-        Ok(())
-    })?;
-    Ok(output)
-}
-
 #[allow(clippy::too_many_arguments)]
 fn remap_output(
     cancel_value: Option<&cancel::T>,
@@ -619,9 +606,9 @@ fn remap_output(
 ) -> Result<geometry::T, error::T> {
     let source = positions_of(geometry_value)?;
     let positions = packed::Float3::View::of_owned_exn(
-        gather(cancel_value, grain, point_map, &source.x)?,
-        gather(cancel_value, grain, point_map, &source.y)?,
-        gather(cancel_value, grain, point_map, &source.z)?,
+        topology_remap::select_float(cancel_value, grain, None, point_map, &source.x)?,
+        topology_remap::select_float(cancel_value, grain, None, point_map, &source.y)?,
+        topology_remap::select_float(cancel_value, grain, None, point_map, &source.z)?,
     )?;
     let mut attributes = Vec::new();
     for item in geometry::attributes(geometry_value) {

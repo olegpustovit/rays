@@ -5,7 +5,7 @@ use rdk_core::attribute::{self, Owner, Storage};
 use rdk_core::support::Windows;
 use rdk_core::{
     cancel, edge_group, error, geometry, group, packed, ragged_ops, support, topology,
-    topology_index,
+    topology_index, topology_remap,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -3787,74 +3787,14 @@ pub fn select_floats(
     filled(cancel_token, grain, count, &|point| Ok(gf(source, gi(mapping, point))))
 }
 
-pub fn select_ints(
-    cancel_token: Option<&cancel::T>,
-    grain: Option<i64>,
-    mapping: &[i64],
-    source: &[i64],
-) -> Result<Vec<i64>, error::T> {
-    let count = mapping.len() as i64;
-    if count == 0 {
-        return Ok(Vec::new());
-    }
-    filled(cancel_token, grain, count, &|point| Ok(gi(source, gi(mapping, point))))
-}
-
-pub fn select_texts(
-    cancel_token: Option<&cancel::T>,
-    mapping: &[i64],
-    source: &[Vec<u8>],
-) -> Result<Vec<Vec<u8>>, error::T> {
-    let mut output = Vec::with_capacity(mapping.len());
-    for (point, &at) in mapping.iter().enumerate() {
-        cancel::poll(cancel_token, point as i64, 4095)?;
-        output.push(source[at as usize].clone());
-    }
-    Ok(output)
-}
-
-/// Every attribute storage selected through `mapping` (output row to source row).
-pub fn select_storage(
+/// `select_storage` over the refiner's grain.
+fn select_storage(
     cancel_token: Option<&cancel::T>,
     grain: Option<i64>,
     mapping: &[i64],
     storage: &Storage,
 ) -> Result<Storage, error::T> {
-    Ok(match storage {
-        Storage::Float(values) => Storage::Float(Arc::new(select_floats(cancel_token, grain, mapping, values)?)),
-        Storage::Int(values) => Storage::Int(Arc::new(select_ints(cancel_token, grain, mapping, values)?)),
-        Storage::Text(values) => Storage::Text(select_texts(cancel_token, mapping, values)?),
-        Storage::Float2(values) => {
-            let values = packed::Float2::View::view(values);
-            Storage::Float2(packed::Float2::of_owned(
-                select_floats(cancel_token, grain, mapping, &values.x)?,
-                select_floats(cancel_token, grain, mapping, &values.y)?,
-            )?)
-        }
-        Storage::Float3(values) => {
-            let values = packed::Float3::View::view(values)?;
-            Storage::Float3(packed::Float3::View::of_owned_exn(
-                select_floats(cancel_token, grain, mapping, &values.x)?,
-                select_floats(cancel_token, grain, mapping, &values.y)?,
-                select_floats(cancel_token, grain, mapping, &values.z)?,
-            )?)
-        }
-        Storage::Float4(values) => {
-            let values = packed::Float4::View::view(values);
-            Storage::Float4(packed::Float4::of_owned(
-                select_floats(cancel_token, grain, mapping, &values.x)?,
-                select_floats(cancel_token, grain, mapping, &values.y)?,
-                select_floats(cancel_token, grain, mapping, &values.z)?,
-                select_floats(cancel_token, grain, mapping, &values.w)?,
-            )?)
-        }
-        Storage::IntArray(values) => {
-            Storage::IntArray(ragged_ops::remap_int(cancel_token, grain, mapping, values)?)
-        }
-        Storage::FloatArray(values) => {
-            Storage::FloatArray(ragged_ops::remap_float(cancel_token, grain, mapping, values)?)
-        }
-    })
+    topology_remap::select_storage(cancel_token, grain_of(grain)?, false, mapping, storage)
 }
 
 pub fn duplicate_point_attribute(
@@ -4346,38 +4286,12 @@ pub fn interpolate_owned_attribute(
             (primitive_source, primitive_source, &zeros)
         }
     };
-    let storage = match attribute::View::storage(attribute_value)? {
-        Storage::Float(values) => {
-            Storage::Float(Arc::new(interpolate_array(cancel_token, grain, left, right, weight, values)?))
-        }
-        Storage::Float2(values) => {
-            let values = packed::Float2::View::view(values);
-            Storage::Float2(packed::Float2::of_owned(
-                interpolate_array(cancel_token, grain, left, right, weight, &values.x)?,
-                interpolate_array(cancel_token, grain, left, right, weight, &values.y)?,
-            )?)
-        }
-        Storage::Float3(values) => {
-            let values = packed::Float3::View::view(values)?;
-            Storage::Float3(packed::Float3::View::of_owned_exn(
-                interpolate_array(cancel_token, grain, left, right, weight, &values.x)?,
-                interpolate_array(cancel_token, grain, left, right, weight, &values.y)?,
-                interpolate_array(cancel_token, grain, left, right, weight, &values.z)?,
-            )?)
-        }
-        Storage::Float4(values) => {
-            let values = packed::Float4::View::view(values);
-            Storage::Float4(packed::Float4::of_owned(
-                interpolate_array(cancel_token, grain, left, right, weight, &values.x)?,
-                interpolate_array(cancel_token, grain, left, right, weight, &values.y)?,
-                interpolate_array(cancel_token, grain, left, right, weight, &values.z)?,
-                interpolate_array(cancel_token, grain, left, right, weight, &values.w)?,
-            )?)
-        }
-        other => {
-            let mapping = representative_map(left, right, weight);
-            select_storage(cancel_token, grain, &mapping, other)?
-        }
+    let source = attribute::View::storage(attribute_value)?;
+    let storage = match attribute::map_float_planes(source, |plane| {
+        interpolate_array(cancel_token, grain, left, right, weight, plane)
+    })? {
+        Some(storage) => storage,
+        None => select_storage(cancel_token, grain, &representative_map(left, right, weight), source)?,
     };
     attribute::create_owned(attribute::name(attribute_value), owner, storage)
 }

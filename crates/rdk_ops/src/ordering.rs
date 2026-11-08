@@ -1,5 +1,4 @@
 //! Stable reorder of primitives by an integer primitive attribute.
-use std::sync::Arc;
 use std::sync::Mutex;
 
 use rdk_core::{attribute, cancel, error, geometry, group, support, topology, topology_remap};
@@ -156,6 +155,7 @@ pub fn sort_primitives(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
     use rdk_core::packed;
 
     fn triangles() -> geometry::T {

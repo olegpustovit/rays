@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use rdk_core::{
     attribute, cancel, error, geometry, group, packed, support, topology, topology_remap,
 };
@@ -389,6 +388,7 @@ pub mod fixtures {
 mod tests {
     use super::fixtures::*;
     use super::*;
+    use std::sync::Arc;
     use rdk_core::attribute::{Owner, Storage};
 
     #[test]

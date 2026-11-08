@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use rdk_core::support::Windows;
 use rdk_core::{
-    attribute, cancel, edge_group, error, face_normals, geometry, group, packed, ragged_ops, support, topology,
+    attribute, cancel, edge_group, error, face_normals, geometry, group, packed, support, topology,
     topology_edge_lookup, topology_index, topology_remap,
 };
 
@@ -163,42 +163,12 @@ fn interpolate_attribute(
         }
         attribute::Owner::Vertex => {
             let nearest = nearest_mapping(vertex_left, vertex_right, vertex_weight);
-            let plane = |values: &[f64]| interpolate_float(vertex_left, vertex_right, vertex_weight, values);
-            let storage = match attribute::View::storage(source)? {
-                attribute::Storage::Float(values) => attribute::Storage::Float(Arc::new(plane(values))),
-                attribute::Storage::Int(values) => {
-                    attribute::Storage::Int(Arc::new(nearest.iter().map(|&m| values[m as usize]).collect()))
-                }
-                attribute::Storage::Text(values) => {
-                    attribute::Storage::Text(nearest.iter().map(|&m| values[m as usize].clone()).collect())
-                }
-                attribute::Storage::IntArray(values) => {
-                    attribute::Storage::IntArray(ragged_ops::remap_int(cancel_ref, Some(grain), &nearest, values)?)
-                }
-                attribute::Storage::FloatArray(values) => {
-                    attribute::Storage::FloatArray(ragged_ops::remap_float(cancel_ref, Some(grain), &nearest, values)?)
-                }
-                attribute::Storage::Float2(values) => {
-                    let values = packed::Float2::View::view(values);
-                    attribute::Storage::Float2(packed::Float2::of_owned(plane(&values.x), plane(&values.y))?)
-                }
-                attribute::Storage::Float3(values) => {
-                    let values = packed::Float3::View::view(values)?;
-                    attribute::Storage::Float3(packed::Float3::View::of_owned_exn(
-                        plane(&values.x),
-                        plane(&values.y),
-                        plane(&values.z),
-                    )?)
-                }
-                attribute::Storage::Float4(values) => {
-                    let values = packed::Float4::View::view(values);
-                    attribute::Storage::Float4(packed::Float4::of_owned(
-                        plane(&values.x),
-                        plane(&values.y),
-                        plane(&values.z),
-                        plane(&values.w),
-                    )?)
-                }
+            let source_storage = attribute::View::storage(source)?;
+            let storage = match attribute::map_float_planes(source_storage, |values| {
+                Ok(interpolate_float(vertex_left, vertex_right, vertex_weight, values))
+            })? {
+                Some(interpolated) => interpolated,
+                None => topology_remap::select_storage(cancel_ref, grain, false, &nearest, source_storage)?,
             };
             Ok(Some(attribute::create_owned(attribute::name(source), owner, storage)?))
         }
