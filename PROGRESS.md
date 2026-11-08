@@ -15,7 +15,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | A | A1-A8 | - | - |
 | B | B0-B5 | - | - |
 | M | M1-M2, M4-M16, M18-M21 | M3, M17 | - |
-| I | I3-I5 | I1-I2 (builtin abs/token parser), I6 (exported loop count limit) | - |
+| I | I1-I5 | I6 (exported loop count limit) | - |
 | C | C1-C2, C4-C5, C7-C9, C12-C21 | C3, C6, C10, C11 | - |
 | D | D2-D3 | D1, D4 (benchmark evidence missing) | D5-D6 |
 
@@ -37,8 +37,8 @@ A1-A8, B0-B4: see earlier rows below in git history (`6802a325` ... `96fab43d`);
 | M19 | done | `13abe74c` `rays_math::text_array::TextArray` (offsets+bytes); 1M rows = 8 allocs; text literals as `Arc<[u8]>` skipped (hundreds of sites) |
 | M21 | done, deviates | `1ccd60fc` `Rc<[u8]>` with `unique()` copy-on-write; plan premise "nothing mutates" was false (set_pixel, Image::replace, readback) |
 | M3 | partial | via C6 |
-| I1 | partial | `a06df67a` main spec changed; core.md token-reader and scatter rows still say 63-bit. Correct them with the remaining builtin fixes. |
-| I2 | partial | `c9c2b12a` i64 core; resumed audit found `flow_check::op::parse_int_token` still rejects native i64 tokens outside the old 63-bit range, and builtin `abs` still treats −2^62 as the minimum. Fix shared builtin bodies and add boundary parity coverage. |
+| I1 | done | `a06df67a` plus resumed closure: core.md token-reader/scatter rows now say 64-bit; frozen seed aliasing is described modulo 2^63, matching `wrap_int63`. |
+| I2 | done | `c9c2b12a` plus resumed closure: builtin `abs` uses `wrapping_abs`; text token parsing relies on the native `i64` parser. Boundary regression failed on the old walker (`abs(-2^62)` returned negative), then passed for walker, strict Core and executor. Matching Node/runtime cases cover MIN/MAX, old 63-bit edges, signs, whitespace and out-of-range tokens. |
 | I3 | done | `74942f50` `ocaml_int` deleted; frozen hashes remain in `rays_math::hash`. |
 | I4 | done | `edc27be2` plus resumed native-boundary closure: RDK count helpers/key packing use checked i64 arithmetic, count/generation limits use native constants, SOP context accepts the full nonnegative frame range, reader accounting is checked, and node reservations reject native overflow. Node allocation checks exhaustion before wrapping. Frozen geometry/hash masks unchanged. Six focused boundary tests and 530 RDK/SOP cases pass. |
 | I5 | done | `b946570e` `859aff62` MSL/SPIR-V + 42 fixtures |
@@ -71,12 +71,12 @@ A1-A8, B0-B4: see earlier rows below in git history (`6802a325` ... `96fab43d`);
 
 ## Known failures / open risks
 
-- Resumed audit next work: finish I1/I2 builtin boundary fixes and I6 loop count metadata; finish C3/M17 remaining chunk slots and C6/M3 ownership/borrowed panes; then C10/C11/D1/D4 audit, D5/D6 and full qualification. `fee04de1` and `23d4bb15` are completed stages, not completion of the full artifact plan.
+- Resumed audit next work: finish I6 loop count metadata and export fixtures; finish C3/M17 remaining chunk slots and C6/M3 ownership/borrowed panes; then C10/C11/D1/D4 audit, D5/D6 and full qualification. `fee04de1` and `23d4bb15` are completed stages, not completion of the full artifact plan.
 
 - `cargo t -p flow_sop` on the D2 tree: 700 tests, 696 pass; the 4 failures are the baseline ones below (`lend_session_tests` confirmed pre-existing by LowerClean at `11988707`). `cargo t -p rdk_core/rdk_geom/rdk_boolean/rdk_ops/sop`: 523 pass; `rdk_rays` 10 pass. Other full suites were **not** run on final HEAD under load (load avg 50-450). Focused runs per item passed (see worker reports in item rows).
 - Pre-existing at baseline `11988707` (bisected by LowerClean): `test_node_facts::declared_preserved_topology`, `test_keyword_ports::keyword_manifest_defaults_projection_checked_gestures` (E_SHADOW), `test_settle::in_flight_device_writes_settle_at_a_cooks_end`, `test_projection::snapshots_of_the_scene_fixtures`, `lend_session_tests::escaped_zone_nodes_own_only_their_cook_context`.
 - `flow_ir test_static_map::sop_deferral`: root cause `4ed6baf8` (constructor deferral); test rewritten (`a3e8c6df`); `StaticMap.deferred` now effectively dead.
-- Unconfirmed after D4: `flow_web test_fma::checked_arithmetic_regions_match_exact_binary64` (E_NONFINITE) and `flow_ir test_core_operators::text_arrays_part_*` near the 5 s limit; `rays_editor` full suite and `pxui_graph --features test-hooks` unverified after C6.
+- Unconfirmed after D4: `flow_web test_fma::checked_arithmetic_regions_match_exact_binary64` (E_NONFINITE) ; all four `flow_ir test_core_operators` text-array parts now pass (slowest 2.923 s on the resumed I2 tree); `rays_editor` full suite and `pxui_graph --features test-hooks` unverified after C6.
 - Remesh macOS golden switched to the Windows hash constant (`3107f153`); cause (libm) unverified.
 - Per-cook guards (a) walker, (b) aliased 4096-element store, (c) round trip, (d) subdivide peak and 1M-text now exist in `flow_sop/src/test_alloc_budget.rs`. The walker uses `Host::force_reference`, bypassing compiled execution. The store guard was verified with a temporary negative control: disabling alias release produced 8,204 allocations and failed the guard; restored code uses 12. All five pass. Per-frame guards `alloc_budget_basic`/`alloc_budget_empty` exist (`e74d3f1d`; empty-editor limit 4650, plan said ~1200 - plan figure does not match full-layout editor).
 - Not measured: B-wave compile-time gains, bench_core before/after for D4 (PackedMerge reported no regression sign only from one noisy run).
@@ -131,6 +131,8 @@ Policy (`AGENTS.md`, `docs/history/build-speed.md`, plan B0): one warm workspace
 Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s under load; this run is healthy (not stale).
 
 ## Session log
+
+- 2026-11-08: I1/I2 closure: confirmed the builtin abs regression before changing the implementation (red test 12.518 s including build); green boundary test 5.936 s, case 0.051 s. `cargo t -p flow_web builtin_integer_boundaries_match_native_i64`: Node present, pass / 3.663 s, case 0.237 s. `cargo t -p flow_check -p flow_eval -p flow_syntax`: 181 pass / 16.485 s, slowest deterministic threaded evaluation 2.809 s. `cargo t -p flow_ir test_core_operators`: 9 pass / 3.149 s, slowest text-array part 2.923 s. `cargo check -p rays_bin`: pass / 7.38 s with pre-existing warnings. `git diff --check`: clean. Live artifact rechecked: still v5, unchanged SHA-256. I6 count metadata, C3/M17, C6/M3 and remaining C/D work remain open.
 
 - 2026-11-08: I4 closure: native helper/ID/frame boundary checks: `cargo t -p rdk_geom -p rdk_ops -p sop native_i64`, 6 pass / 19.367 s including rebuild, slowest 0.029 s. `cargo t -p rdk_core -p rdk_geom -p rdk_ops -p rdk_boolean -p sop`: 530 pass / 6.632 s, slowest `attribute_interpolate::tests::parallel_exactness_at_scale` 1.127 s. `cargo t -p flow_sop test_alloc_budget -- --nocapture`: 5 pass / 3.565 s, slowest 0.115 s, limits unchanged. Rebuilt HEAD `3b847b50` temporarily in the shared target and restored all working changes in `finally`, then rebuilt the native-boundary stage: `cargo build -p rays_bin` wall 21.467 / 9.782 s (incremental cache states differ; no compile-speed claim). Seven measured runs after one warmup of `rays check` on basic, gpu_sea and million_marks: median 0.620483 / 0.589764 s; no observed debug runtime regression. Evidence `/tmp/rays-i4-perf.json`; `git diff --check` clean. Further audit reopened C3/M17 and I1/I2/I6 with concrete source evidence rather than leaving false completion labels.
 

@@ -267,6 +267,33 @@ fn force_strict(program: &Executor::Program, live: &Frame) -> Result<Value, Diag
     Executor::force(program, &Executor::ForceOptions { strict: true, ..Default::default() }, live)
 }
 
+#[test]
+fn builtin_integer_boundaries_match_native_i64() {
+    let mut cases = vec![
+        ("(abs (int/add -4611686018427387904 (frame/index)))".to_owned(), Value::Int(1 << 62)),
+        ("(abs (int/add -9223372036854775808 (frame/index)))".to_owned(), Value::Int(i64::MIN)),
+        ("(abs (int/add -9223372036854775807 (frame/index)))".to_owned(), Value::Int(i64::MAX)),
+    ];
+    for (token, expected) in [
+        ("  +9223372036854775807  ", Some(i64::MAX)), ("-9223372036854775808", Some(i64::MIN)),
+        ("4611686018427387904", Some(1 << 62)), ("-4611686018427387905", Some(-(1 << 62) - 1)),
+        ("9223372036854775808", None), ("-9223372036854775809", None), ("1.0", None),
+    ] {
+        cases.push((format!("(text/to_int (if (> t 0.) \"{token}\" \"{token}\"))"), Value::Record(vec![
+            ("value".into(), Value::Int(expected.unwrap_or(0))), ("valid".into(), Value::Bool(expected.is_some())),
+        ])));
+    }
+    let live = input::at_time(0.0);
+    for (body, expected) in cases {
+        let value = live_value(&body);
+        let core = ts::lower_strict(residual_of(&value)).unwrap_or_else(|form| panic!("{body}: {form}"));
+        let program = ok(Executor::compile(&value, &Executor::CompileOptions { strict: true, ..Default::default() }));
+        assert_eq!(ok(E::Host::force_reference(&value, &live, None, None, None)), expected, "walker: {body}");
+        assert_eq!(ok(ts::run_simple(&core, &live)), expected, "core: {body}");
+        assert_eq!(ok(force_strict(&program, &live)), expected, "executor: {body}");
+    }
+}
+
 const TEXT_BODIES: [&str; 13] = [
         r##"(map (fn [x] (if (> t 0.) x "😀")) (array/text 5001 "猫"))"##,
         r##"(map (fn [x] (text/trim (if (> t 0.) x "　A "))) (array/text 5001 " \tABéÉ日本😀\r\n"))"##,

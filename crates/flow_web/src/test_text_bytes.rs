@@ -83,3 +83,26 @@ console.log('Text codec: all byte values, invalid UTF-8, NUL, Unicode, BOM, repr
     );
     run_ok(&js);
 }
+
+#[test]
+fn builtin_integer_boundaries_match_native_i64() {
+    if !node_available() { eprintln!("node is absent: SKIPPED"); return; }
+    let js = format!("import * as p from {};\n", json_string(&runtime_url("prims.js")));
+    run_ok(&(js + r#"
+for (const [input, expected] of [
+  [-4611686018427387904n, 4611686018427387904n],
+  [-9223372036854775808n, -9223372036854775808n],
+  [-9223372036854775807n, 9223372036854775807n],
+]) if (p.abs(input) !== expected) throw Error('native i64 abs boundary');
+for (const [text, expected] of [
+  ['  +9223372036854775807  ', 9223372036854775807n], ['-9223372036854775808', -9223372036854775808n],
+  ['4611686018427387904', 4611686018427387904n], ['-4611686018427387905', -4611686018427387905n],
+  ['9223372036854775808', null], ['-9223372036854775809', null], ['1.0', null],
+]) {
+  const result = p.text_to_int(text);
+  if (result.get('valid') !== (expected !== null) || result.get('value') !== (expected ?? 0n))
+    throw Error('native i64 token boundary: ' + text);
+}
+console.log('native i64 builtin boundaries agree');
+"#));
+}

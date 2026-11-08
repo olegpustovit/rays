@@ -442,8 +442,7 @@ fn parse_float_token(bytes:&[u8])->Option<f64>{
 fn parse_int_token(bytes:&[u8])->Option<i64>{
     let s=std::str::from_utf8(trim_ascii(bytes)).ok()?;let b=s.as_bytes();let i=usize::from(!b.is_empty()&&(b[0]==b'+'||b[0]==b'-'));
     if i==b.len()||!b[i..].iter().all(u8::is_ascii_digit){return None}
-    let value=s.strip_prefix('+').unwrap_or(s).parse::<i64>().ok()?;
-    ((-(1i64<<62))..=((1i64<<62)-1)).contains(&value).then_some(value)
+    s.strip_prefix('+').unwrap_or(s).parse::<i64>().ok()
 }
 fn table_decode(bytes:&[u8])->Result<Value,Diagnostic>{
     if bytes.is_empty(){return Ok(Value::List(Arc::new(vec![])))}
@@ -674,7 +673,7 @@ fn unary_math_ops()->Vec<Op>{
     for (name,f) in entries{
         let body:Body=Arc::new(move |_,_,a|{let x=num(a.get_arg("x")?)?;Ok(Value::Float(fin(name,f(x))?))});
         let mut op=value_op(name,vec![("x",Ty::Float)],vec![],None,vec![],Ty::Float,"Math",body);
-        if name=="abs"{op.out=Arc::new(|ts|Ok(if ts.first()==Some(&Ty::Int){Ty::Int}else{Ty::Float}));op.body=Arc::new(|_,_,a|match a.get_arg("x")?{Value::Int(x)=>Ok(Value::Int(if *x==-(1i64<<62){*x}else if *x<0{x.wrapping_neg()}else{*x})),v=>Ok(Value::Float(num(v)?.abs()))})}
+        if name=="abs"{op.out=Arc::new(|ts|Ok(if ts.first()==Some(&Ty::Int){Ty::Int}else{Ty::Float}));op.body=Arc::new(|_,_,a|match a.get_arg("x")?{Value::Int(x)=>Ok(Value::Int(x.wrapping_abs())),v=>Ok(Value::Float(num(v)?.abs()))})}
         ops.push(op)
     }
     let sqrt=value_op("sqrt",vec![("x",Ty::Float)],vec![],None,vec![],Ty::Float,"Math",Arc::new(|_,_,a|Ok(Value::Float(num(a.get_arg("x")?)?.abs().sqrt()))));ops.push(sqrt);
