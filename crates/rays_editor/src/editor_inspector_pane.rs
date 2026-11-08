@@ -148,11 +148,11 @@ pub fn inspect_panel<'a>(
                             section_live = Some(ui.inspector_toggle("live-cook", "Live update", value.live_cook));
                         });
                         live = section_live.unwrap_or(value.live_cook);
-                        let fields: Vec<FieldView> = settings::fields(unchanged).into_iter().filter(|f| f.name != "renderer").collect();
+                        let mut fields: Vec<FieldView> = settings::fields(unchanged).into_iter().filter(|f| f.name != "renderer").collect();
                         if !fields.is_empty() {
                             ui.scope("sketch-settings", &mut |ui| {
                                 ui.inspector_section("sketch-settings-section", true, None, "Settings", &mut |ui| {
-                                    changes = insp::fields(ui, &[], Some(bounds.2 as f64), &fields);
+                                    changes = insp::fields(ui, &[], Some(bounds.2 as f64), std::mem::take(&mut fields));
                                 });
                             });
                         }

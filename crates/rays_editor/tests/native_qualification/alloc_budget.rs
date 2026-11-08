@@ -14,10 +14,12 @@ const FRAMES: i64 = 30;
 // M: consecutive 2D batches share a render pass: basic 1,446 / 161,821; empty 1,533 / 94,820;
 // bare 1,783 / 112,996.
 // M: residency declared once per pass, reducer edits the pane in place: basic 1,426 / 161,357;
-// empty 1,424 / 92,082; bare 1,736 / 111,812. Never raise.
-const BASIC: (u64, u64) = (1_430, 162_000);
-const EMPTY: (u64, u64) = (1_430, 92_500);
-const BARE: (u64, u64) = (1_740, 112_500);
+// empty 1,424 / 92,082; bare 1,736 / 111,812.
+// M: inspector rows own their views, header geometry once: basic 1,419 / 160,010; empty 1,371 / 88,603;
+// bare 1,643 / 106,394. Never raise.
+const BASIC: (u64, u64) = (1_425, 160_500);
+const EMPTY: (u64, u64) = (1_375, 89_000);
+const BARE: (u64, u64) = (1_650, 107_000);
 
 fn per_frame(source: &str, max: (u64, u64)) -> (u64, u64, String) {
     assert!(crate::common::gpu(), "native GPU required");

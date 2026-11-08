@@ -591,10 +591,10 @@ pub fn flow_fields(ui: &mut Ui, o: &FlowOpts, on_choice: Option<&dyn Fn(&str, &U
 
 /// One inspector row per field inside the current panel; folders become sections, open when their
 /// "/"-joined path is in `expanded`. Returns this frame's edits, empty when nothing changed.
-pub fn fields(ui: &mut Ui, expanded: &[String], width: Option<f64>, views: &[FieldView]) -> Vec<(String, Value)> {
+pub fn fields(ui: &mut Ui, expanded: &[String], width: Option<f64>, views: Vec<FieldView>) -> Vec<(String, Value)> {
     let rows: Vec<FlowRow> = views
-        .iter()
-        .map(|field| FlowRow { path: field.name.clone(), fields: vec![field.clone()], shown: false, locked: true, drive: None, live: None })
+        .into_iter()
+        .map(|field| FlowRow { path: field.name.clone(), fields: vec![field], shown: false, locked: true, drive: None, live: None })
         .collect();
     let o = FlowOpts { expanded: expanded.to_vec(), width, ..FlowOpts::default() };
     flow_fields(ui, &o, None, &rows)
@@ -609,6 +609,6 @@ pub fn fields(ui: &mut Ui, expanded: &[String], width: Option<f64>, views: &[Fie
 /// `fields` over a typed record, edits applied through `Schema::apply_all`.
 pub fn record(ui: &mut Ui, schema: &Schema, values: &[Value]) -> Result<(Vec<Value>, Effects), String> {
     let views = schema.view(values)?;
-    let changes = fields(ui, &[], None, &views);
+    let changes = fields(ui, &[], None, views);
     if changes.is_empty() { Ok((values.to_vec(), param::NO_EFFECTS)) } else { schema.apply_all(values, &changes) }
 }

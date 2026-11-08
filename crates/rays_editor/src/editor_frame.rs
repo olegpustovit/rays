@@ -838,8 +838,10 @@ pub fn panel_intents<'a>(value: impl Into<ModelView<'a>>, leaves: &[(layout::Pat
             _ => {}
         }
     }
-    // / o ...: the focused panel's split, close and retype, as its header menu
-    if let Some(leaf) = focused_leaf(&geometry(value, workspace, frame_), focus, focus_path) {
+    // / o ...: the focused panel's split, close and retype, as its header menu; the geometry only
+    // when one was asked for
+    let on_focused = actions.iter().any(|a| matches!(a, action::Panel_split(_) | action::Panel_close | action::Panel_retype(_)));
+    if let Some(leaf) = on_focused.then(|| focused_leaf(&geometry(value, workspace, frame_), focus, focus_path)).flatten() {
         for a in actions {
             match a {
                 action::Panel_split(axis) => intents.push(chrome::Intent::Split_panel(leaf.path.clone(), *axis)),
@@ -1191,7 +1193,7 @@ pub fn update_frame(
             let mut intents = chrome::update(Some(&state_fn), Some(&workspace.hidden), Some(&title_fn), Some(&header_groups), Some(&key_of), header_focus.as_ref(), &shell_tree(&*value, &workspace), ui, &shortcut_frame);
             let leaves = panels::leaves(&shell_tree(&*value, &workspace));
             intents.extend(panel_intents(&*value, &leaves, &workspace, frame_, &focus, focus_path.as_deref(), &actions));
-            let layout_leaf = focused_leaf(&geometry(&*value, &workspace, frame_), &focus, focus_path.as_deref());
+            let layout_leaf = focused_leaf(&geo0, &focus, focus_path.as_deref());
             let (workspace, mut layout_changes) = layout_intents(&vw, &workspace, &intents);
             layout_changes.extend(layout_actions(&*value, &workspace, layout_leaf.as_ref(), &actions));
             vw.workspace = &workspace;

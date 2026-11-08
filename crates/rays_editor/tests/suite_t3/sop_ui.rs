@@ -84,7 +84,7 @@ pub fn inspector_rows() {
                 ui.scope("selected", &mut |ui: &mut Ui| {
                     ui.label("Selected shape");
                     let views = schema.view(&v).expect("view");
-                    let changes = inspector::fields(ui, &["Geometry".to_string()], None, &views);
+                    let changes = inspector::fields(ui, &["Geometry".to_string()], None, views.clone());
                     out = if changes.is_empty() { (v.clone(), param::NO_EFFECTS) } else { schema.apply_all(&v, &changes).unwrap_or_else(|m| fail(&m)) };
                 });
             });
