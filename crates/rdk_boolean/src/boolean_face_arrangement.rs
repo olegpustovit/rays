@@ -2,10 +2,12 @@
 //! non-coplanar Boolean constraints.
 #![allow(non_snake_case)]
 
-use std::collections::{HashMap, HashSet};
+use std::cmp::Ordering;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use rdk_core::{cancel, error};
+use rdk_geom::bounds2_index;
 use rdk_geom::implicit_point::{self, Projection};
 use rdk_geom::predicates::Sign;
 
@@ -214,128 +216,40 @@ struct Planes {
     v_max: Vec<f64>,
 }
 
-struct StableBoundsBvh {
-    item: Planes,
-    node: Planes,
-    node_left: Vec<i64>,
-    node_right: Vec<i64>,
-    node_first: Vec<usize>,
-    node_last: Vec<usize>,
-    node_count: usize,
+fn bounds_index(cancel_value: Option<&cancel::T>, planes: &Planes) -> Result<bounds2_index::T, error::T> {
+    bounds2_index::create(cancel_value, &planes.u_min, &planes.v_min, &planes.u_max, &planes.v_max)
 }
 
-impl StableBoundsBvh {
-    fn build(item: Planes) -> Result<StableBoundsBvh, error::T> {
-        let item_count = item.u_min.len();
-        if item.u_max.len() != item_count || item.v_min.len() != item_count || item.v_max.len() != item_count {
-            return Err(invalid("Boolean face arrangement BVH plane cardinality mismatch"));
-        }
-        if item_count == 0 {
-            return Err(invalid("Boolean face arrangement BVH is empty"));
-        }
-        let capacity = item_count * 2 - 1;
-        let mut value = StableBoundsBvh {
-            item,
-            node: Planes {
-                u_min: vec![0.; capacity],
-                u_max: vec![0.; capacity],
-                v_min: vec![0.; capacity],
-                v_max: vec![0.; capacity],
-            },
-            node_left: vec![-1; capacity],
-            node_right: vec![-1; capacity],
-            node_first: vec![0; capacity],
-            node_last: vec![0; capacity],
-            node_count: 0,
-        };
-        value.make(0, item_count);
-        Ok(value)
-    }
-
-    fn make(&mut self, first: usize, last: usize) -> i64 {
-        let node = self.node_count;
-        self.node_count += 1;
-        self.node_first[node] = first;
-        self.node_last[node] = last;
-        let mut u_min = self.item.u_min[first];
-        let mut u_max = self.item.u_max[first];
-        let mut v_min = self.item.v_min[first];
-        let mut v_max = self.item.v_max[first];
-        for item in (first + 1)..last {
-            u_min = fmin(u_min, self.item.u_min[item]);
-            u_max = fmax(u_max, self.item.u_max[item]);
-            v_min = fmin(v_min, self.item.v_min[item]);
-            v_max = fmax(v_max, self.item.v_max[item]);
-        }
-        self.node.u_min[node] = u_min;
-        self.node.u_max[node] = u_max;
-        self.node.v_min[node] = v_min;
-        self.node.v_max[node] = v_max;
-        if last - first > 8 {
-            let middle = first + (last - first) / 2;
-            self.node_left[node] = self.make(first, middle);
-            self.node_right[node] = self.make(middle, last);
-        }
-        node as i64
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn query(
-        &self,
-        cancel_value: Option<&cancel::T>,
-        stack: &mut [i64],
-        output: &mut [i64],
-        after: i64,
-        u_min: f64,
-        u_max: f64,
-        v_min: f64,
-        v_max: f64,
-    ) -> Result<usize, error::T> {
-        if stack.len() < self.node_count || output.len() < self.item.u_min.len() {
-            return Err(invalid("Boolean face arrangement BVH scratch plane is too small"));
-        }
-        let overlaps = |a_min: f64, a_max: f64, b_min: f64, b_max: f64, o_u_min: f64, o_u_max: f64, o_v_min: f64, o_v_max: f64| {
-            a_max >= o_u_min && o_u_max >= a_min && b_max >= o_v_min && o_v_max >= b_min
-        };
-        let mut stack_count = 1usize;
-        let mut output_count = 0usize;
-        let mut visited = 0i64;
-        stack[0] = 0;
-        while stack_count > 0 {
-            stack_count -= 1;
-            let node = stack[stack_count] as usize;
-            if overlaps(u_min, u_max, v_min, v_max, self.node.u_min[node], self.node.u_max[node], self.node.v_min[node], self.node.v_max[node]) {
-                let left = self.node_left[node];
-                if left < 0 {
-                    for item in self.node_first[node]..self.node_last[node] {
-                        if (item as i64) > after
-                            && overlaps(u_min, u_max, v_min, v_max, self.item.u_min[item], self.item.u_max[item], self.item.v_min[item], self.item.v_max[item])
-                        {
-                            output[output_count] = item as i64;
-                            output_count += 1;
-                        }
-                    }
-                } else {
-                    // Push right first so ascending index ranges are visited in order.
-                    stack[stack_count] = self.node_right[node];
-                    stack_count += 1;
-                    stack[stack_count] = left;
-                    stack_count += 1;
-                }
+/// Items of `index` overlapping the closed box of `planes[item]` with a number above `after`, ascending.
+fn overlapping_after(
+    cancel_value: Option<&cancel::T>,
+    index: &bounds2_index::T,
+    after: i64,
+    planes: &Planes,
+    item: usize,
+    found: &mut Vec<i64>,
+) -> Result<(), error::T> {
+    found.clear();
+    bounds2_index::query(
+        cancel_value,
+        index,
+        planes.u_min[item],
+        planes.v_min[item],
+        planes.u_max[item],
+        planes.v_max[item],
+        &mut |hit| {
+            if hit > after {
+                found.push(hit);
             }
-            visited += 1;
-            poll(cancel_value, visited, 1023)?;
-        }
-        Ok(output_count)
-    }
+            Ok(())
+        },
+    )?;
+    found.sort_unstable();
+    Ok(())
 }
 
-struct ExactPointIndex {
-    left: Vec<i64>,
-    right: Vec<i64>,
-    height: Vec<i64>,
-    root: i64,
-}
+/// An exact implicit point ordered by (x, y, z), so a `BTreeMap` finds equal points.
+struct PointKey(implicit_point::T);
 
 fn compare_xyz(first: &implicit_point::T, second: &implicit_point::T) -> i64 {
     let comparison = implicit_point::compare_x(first, second);
@@ -349,130 +263,25 @@ fn compare_xyz(first: &implicit_point::T, second: &implicit_point::T) -> i64 {
     implicit_point::compare_z(first, second)
 }
 
-impl ExactPointIndex {
-    fn create(expected: usize) -> ExactPointIndex {
-        let capacity = expected.max(4);
-        ExactPointIndex { left: vec![-1; capacity], right: vec![-1; capacity], height: vec![0; capacity], root: -1 }
-    }
-
-    fn ensure(&mut self, needed: usize) {
-        if needed > self.left.len() {
-            let mut capacity = self.left.len();
-            while capacity < needed {
-                capacity = (capacity + 1).max(capacity * 2);
-            }
-            self.left.resize(capacity, -1);
-            self.right.resize(capacity, -1);
-            self.height.resize(capacity, 0);
-        }
-    }
-
-    fn node_height(&self, node: i64) -> i64 {
-        if node < 0 { 0 } else { self.height[node as usize] }
-    }
-
-    fn update(&mut self, node: i64) {
-        let n = node as usize;
-        self.height[n] = 1 + self.node_height(self.left[n]).max(self.node_height(self.right[n]));
-    }
-
-    fn rotate_left(&mut self, node: i64) -> i64 {
-        let n = node as usize;
-        let replacement = self.right[n];
-        self.right[n] = self.left[replacement as usize];
-        self.left[replacement as usize] = node;
-        self.update(node);
-        self.update(replacement);
-        replacement
-    }
-
-    fn rotate_right(&mut self, node: i64) -> i64 {
-        let n = node as usize;
-        let replacement = self.left[n];
-        self.left[n] = self.right[replacement as usize];
-        self.right[replacement as usize] = node;
-        self.update(node);
-        self.update(replacement);
-        replacement
-    }
-
-    fn balance(&mut self, node: i64) -> i64 {
-        self.update(node);
-        let n = node as usize;
-        let difference = self.node_height(self.left[n]) - self.node_height(self.right[n]);
-        if difference > 1 {
-            let left = self.left[n];
-            if self.node_height(self.left[left as usize]) < self.node_height(self.right[left as usize]) {
-                self.left[n] = self.rotate_left(left);
-            }
-            self.rotate_right(node)
-        } else if difference < -1 {
-            let right = self.right[n];
-            if self.node_height(self.right[right as usize]) < self.node_height(self.left[right as usize]) {
-                self.right[n] = self.rotate_right(right);
-            }
-            self.rotate_left(node)
-        } else {
-            node
-        }
-    }
-
-    fn make(&mut self, order: &[usize], first: usize, last: usize) -> i64 {
-        if first == last {
-            return -1;
-        }
-        let middle = first + (last - first) / 2;
-        let node = order[middle];
-        self.left[node] = self.make(order, first, middle);
-        self.right[node] = self.make(order, middle + 1, last);
-        self.update(node as i64);
-        node as i64
-    }
-
-    fn build(&mut self, points: &[implicit_point::T], count: usize) {
-        self.ensure(count);
-        let mut order: Vec<usize> = (0..count).collect();
-        order.sort_by(|&l, &r| compare_xyz(&points[l], &points[r]).cmp(&0).then(l.cmp(&r)));
-        self.root = self.make(&order, 0, count);
-    }
-
-    fn find(&self, points: &[implicit_point::T], point: &implicit_point::T) -> i64 {
-        let mut current = self.root;
-        while current >= 0 {
-            let comparison = compare_xyz(point, &points[current as usize]);
-            if comparison == 0 {
-                return current;
-            }
-            current = if comparison < 0 { self.left[current as usize] } else { self.right[current as usize] };
-        }
-        -1
-    }
-
-    fn insert(&mut self, points: &[implicit_point::T], node: i64, current: i64) -> Result<i64, error::T> {
-        if current < 0 {
-            return Ok(node);
-        }
-        let comparison = compare_xyz(&points[node as usize], &points[current as usize]);
-        let c = current as usize;
-        if comparison < 0 {
-            self.left[c] = self.insert(points, node, self.left[c])?;
-        } else if comparison > 0 {
-            self.right[c] = self.insert(points, node, self.right[c])?;
-        } else {
-            return Err(invalid("Boolean face arrangement point index duplicated a point"));
-        }
-        Ok(self.balance(current))
-    }
-
-    fn add(&mut self, points: &[implicit_point::T], node: i64) -> Result<(), error::T> {
-        self.ensure(node as usize + 1);
-        self.left[node as usize] = -1;
-        self.right[node as usize] = -1;
-        self.height[node as usize] = 1;
-        self.root = self.insert(points, node, self.root)?;
-        Ok(())
+impl Ord for PointKey {
+    fn cmp(&self, other: &Self) -> Ordering {
+        compare_xyz(&self.0, &other.0).cmp(&0)
     }
 }
+
+impl PartialOrd for PointKey {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for PointKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl Eq for PointKey {}
 
 fn poll(cancel_value: Option<&cancel::T>, index: i64, mask: i64) -> Result<(), error::T> {
     cancel::poll(cancel_value, index, mask).map_err(|_| fail("cancelled", "Boolean face arrangement was cancelled"))
@@ -734,7 +543,7 @@ struct State {
     segment_support_first: Vec<i64>,
     segment_support_second: Vec<i64>,
     orientation_cache: HashMap<(i64, i64, i64), Sign>,
-    point_index: ExactPointIndex,
+    point_index: BTreeMap<PointKey, i64>,
     split_segments: Vec<i64>,
     split_points: Vec<i64>,
     split_next: Vec<i64>,
@@ -781,14 +590,14 @@ impl State {
         if inversions & 1 == 0 { sign } else { reverse(sign) }
     }
 
-    fn intern_point(&mut self, point: implicit_point::T) -> Result<i64, error::T> {
-        let existing = self.point_index.find(&self.points, &point);
-        if existing >= 0 {
-            return Ok(existing);
+    fn intern_point(&mut self, point: implicit_point::T) -> i64 {
+        let key = PointKey(point);
+        if let Some(&existing) = self.point_index.get(&key) {
+            return existing;
         }
-        let point_id = self.append_point(point, -1);
-        self.point_index.add(&self.points, point_id)?;
-        Ok(point_id)
+        let point_id = self.append_point(key.0.clone(), -1);
+        self.point_index.insert(key, point_id);
+        point_id
     }
 
     fn add_split(&mut self, segment: i64, point: i64) {
@@ -929,7 +738,7 @@ impl State {
                 match point {
                     Err(_) => return Err(invalid("exact construction failed at proper constraint crossing")),
                     Ok(point) => {
-                        let point = self.intern_point(point)?;
+                        let point = self.intern_point(point);
                         self.add_split(left, point);
                         self.add_split(right, point);
                     }
@@ -1091,8 +900,8 @@ pub fn build(
         .map(|local| implicit_point::explicit(&source, face_triangle_point(constraints_ref, side, triangle, local)).unwrap())
         .collect();
     let projection_axis = projection(&face_points);
-    let mut point_index = ExactPointIndex::create(points.len());
-    point_index.build(&points, points.len());
+    let point_index: BTreeMap<PointKey, i64> =
+        points.iter().enumerate().map(|(id, point)| (PointKey(point.clone()), id as i64)).collect();
     let split_capacity = (raw_segment_count * 2).max(4);
     let mut state = State {
         constraints: constraints.clone(),
@@ -1146,25 +955,13 @@ pub fn build(
             let point_planes = projected_bounds(&state.points, state.points.len(), projection_axis);
             let planes = segment_bounds(&state.segment_first, &state.segment_second, raw_segment_count, &point_planes);
             let planes = choose_sweep_axis(planes);
-            let (u_min, u_max, v_min, v_max) =
-                (planes.u_min.clone(), planes.u_max.clone(), planes.v_min.clone(), planes.v_max.clone());
-            let index = StableBoundsBvh::build(planes)?;
-            let mut stack = vec![0i64; index.node_count];
-            let mut found = vec![0i64; raw_segment_count];
+            let index = bounds_index(cancel_value, &planes)?;
+            let mut found = Vec::new();
             for left in 0..raw_segment_count {
                 poll(cancel_value, left as i64, 255)?;
-                let count = index.query(
-                    cancel_value,
-                    &mut stack,
-                    &mut found,
-                    left as i64,
-                    u_min[left],
-                    u_max[left],
-                    v_min[left],
-                    v_max[left],
-                )?;
-                for slot in 0..count {
-                    state.process_segment_pair(left as i64, found[slot])?;
+                overlapping_after(cancel_value, &index, left as i64, &planes, left, &mut found)?;
+                for &right in &found {
+                    state.process_segment_pair(left as i64, right)?;
                 }
             }
         }
@@ -1200,29 +997,15 @@ pub fn build(
             let seg_planes = segment_bounds(&state.segment_first, &state.segment_second, raw_segment_count, &point_planes);
             let swap = interval_score(&seg_planes.v_min, &seg_planes.v_max)
                 < interval_score(&seg_planes.u_min, &seg_planes.u_max);
-            let (point, seg) = if swap {
-                (swap_axes(point_planes), swap_axes(seg_planes))
-            } else {
-                (point_planes, seg_planes)
-            };
-            let point_total = state.points.len();
-            let index = StableBoundsBvh::build(point)?;
-            let mut stack = vec![0i64; index.node_count];
-            let mut found = vec![0i64; point_total];
+            let point_planes = if swap { swap_axes(point_planes) } else { point_planes };
+            let seg = if swap { swap_axes(seg_planes) } else { seg_planes };
+            let index = bounds_index(cancel_value, &point_planes)?;
+            let mut found = Vec::new();
             for segment in 0..raw_segment_count {
                 poll(cancel_value, segment as i64, 255)?;
-                let count = index.query(
-                    cancel_value,
-                    &mut stack,
-                    &mut found,
-                    -1,
-                    seg.u_min[segment],
-                    seg.u_max[segment],
-                    seg.v_min[segment],
-                    seg.v_max[segment],
-                )?;
-                for slot in 0..count {
-                    state.process_point_segment(segment as i64, found[slot]);
+                overlapping_after(cancel_value, &index, -1, &seg, segment, &mut found)?;
+                for &point_id in &found {
+                    state.process_point_segment(segment as i64, point_id);
                 }
             }
         }
@@ -1303,6 +1086,36 @@ mod tests {
     use rdk_core::topology::PrimitiveKind;
     use rdk_core::{geometry, packed, topology};
     use std::sync::Mutex;
+
+    #[test]
+    fn bounds_index_overlaps_match_a_brute_force_scan_in_ascending_order() {
+        let mut seed = 7_u64;
+        let mut next = move || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (seed >> 33) as f64 / (1_u64 << 31) as f64 * 100.0
+        };
+        let mut planes = Planes { u_min: vec![], u_max: vec![], v_min: vec![], v_max: vec![] };
+        for _ in 0..300 {
+            let (u, v, w, h) = (next(), next(), next() / 5.0, next() / 5.0);
+            planes.u_min.push(u);
+            planes.u_max.push(u + w);
+            planes.v_min.push(v);
+            planes.v_max.push(v + h);
+        }
+        let index = bounds_index(None, &planes).unwrap();
+        let overlap = |a: usize, b: usize| {
+            planes.u_max[a] >= planes.u_min[b] && planes.u_max[b] >= planes.u_min[a]
+                && planes.v_max[a] >= planes.v_min[b] && planes.v_max[b] >= planes.v_min[a]
+        };
+        let mut found = Vec::new();
+        for item in 0..300 {
+            for after in [-1, item as i64, 150] {
+                overlapping_after(None, &index, after, &planes, item, &mut found).unwrap();
+                let expected: Vec<i64> = (0..300).filter(|&other| other as i64 > after && overlap(item, other)).map(|other| other as i64).collect();
+                assert_eq!(found, expected);
+            }
+        }
+    }
 
     type P = (f64, f64, f64);
 

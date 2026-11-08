@@ -2,7 +2,8 @@
 //!
 //! Its ear clip is not `Polygon_triangulation.find_ear`: it uses exact orientation predicates and
 //! takes the lowest-point ear, not the first.
-use std::collections::HashMap;
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap};
 use std::sync::Arc;
 
 use rdk_core::cancel;
@@ -392,52 +393,6 @@ pub mod View {
     }
 }
 
-struct KeyHeap {
-    values: Vec<i64>,
-}
-
-fn heap_push(heap: &mut KeyHeap, key: i64) {
-    let mut slot = heap.values.len();
-    heap.values.push(key);
-    while slot > 0 && heap.values[(slot - 1) / 2] > key {
-        let parent = (slot - 1) / 2;
-        heap.values[slot] = heap.values[parent];
-        slot = parent;
-    }
-    heap.values[slot] = key;
-}
-
-fn heap_pop(heap: &mut KeyHeap) -> Option<i64> {
-    if heap.values.is_empty() {
-        return None;
-    }
-    let result = heap.values[0];
-    let last = heap.values.pop().unwrap_or(0);
-    let count = heap.values.len();
-    if count > 0 {
-        let mut slot = 0usize;
-        loop {
-            let left = slot * 2 + 1;
-            if left >= count {
-                break;
-            }
-            let right = left + 1;
-            let child = if right < count && heap.values[right] < heap.values[left] {
-                right
-            } else {
-                left
-            };
-            if heap.values[child] >= last {
-                break;
-            }
-            heap.values[slot] = heap.values[child];
-            slot = child;
-        }
-        heap.values[slot] = last;
-    }
-    Some(result)
-}
-
 fn opposite_sign(left: Sign, right: Sign) -> bool {
     matches!(
         (left, right),
@@ -607,7 +562,7 @@ struct St {
     constraints: Vec<i64>,
     constraint_winding: Vec<i64>,
     walk_start: i64,
-    insertion_queue: KeyHeap,
+    insertion_queue: BinaryHeap<Reverse<i64>>,
     strip_marks: Vec<u8>,
     boundary_stamps: Vec<i64>,
     boundary_edges: HashMap<i64, i64>,
@@ -843,13 +798,13 @@ fn enqueue_opposite(st: &mut St, point: i64, triangle: i64) -> Result<(), String
     let (a, b, c) = tri(st, triangle);
     if a == point {
         let k = ek(st, b, c)?;
-        heap_push(&mut st.insertion_queue, k);
+        st.insertion_queue.push(Reverse(k));
     } else if b == point {
         let k = ek(st, c, a)?;
-        heap_push(&mut st.insertion_queue, k);
+        st.insertion_queue.push(Reverse(k));
     } else if c == point {
         let k = ek(st, a, b)?;
-        heap_push(&mut st.insertion_queue, k);
+        st.insertion_queue.push(Reverse(k));
     }
     Ok(())
 }
@@ -863,12 +818,12 @@ fn is_illegal(orientation: Sign, circle: Sign, a_key: i64, key: i64) -> bool {
 }
 
 fn legalize_inserted(st: &mut St, cb: &(&dyn Fn(i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> bool), point: i64, triangles: &[i64]) -> Result<(), String> {
-    st.insertion_queue.values.clear();
+    st.insertion_queue.clear();
     for &triangle in triangles {
         enqueue_opposite(st, point, triangle)?;
     }
     let mut flips: i64 = 0;
-    while let Some(key) = heap_pop(&mut st.insertion_queue) {
+    while let Some(Reverse(key)) = st.insertion_queue.pop() {
         let slot = table_find(&st.table, key);
         if slot >= 0 && st.table.second_triangles[u(slot)] >= 0 {
             let s = u(slot);
@@ -1821,17 +1776,17 @@ fn filter_outside(
 }
 
 fn delaunay_repair(st: &mut St, cancel_value: Option<&cancel::T>, cb: &(&dyn Fn(i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> Sign, &dyn Fn(i64, i64, i64, i64) -> bool)) -> Result<(), String> {
-    let mut queue = KeyHeap { values: Vec::new() };
+    let mut queue = BinaryHeap::new();
     for slot in 0..st.table.keys.len() {
         if st.table.keys[slot] >= 0
             && st.table.second_triangles[slot] >= 0
             && st.table.constrained[slot] == 0
         {
-            heap_push(&mut queue, st.table.keys[slot]);
+            queue.push(Reverse(st.table.keys[slot]));
         }
     }
     let mut flips: i64 = 0;
-    while let Some(key) = heap_pop(&mut queue) {
+    while let Some(Reverse(key)) = queue.pop() {
         poll(cancel_value, flips, 255)?;
         let slot = table_find(&st.table, key);
         if slot >= 0
@@ -1856,9 +1811,9 @@ fn delaunay_repair(st: &mut St, cancel_value: Option<&cancel::T>, cb: &(&dyn Fn(
                 flip(st, cb, left, right, lo, ro, ea, eb)?;
                 for triangle in [left, right] {
                     let (a, b, c) = tri(st, triangle);
-                    heap_push(&mut queue, ek(st, a, b)?);
-                    heap_push(&mut queue, ek(st, b, c)?);
-                    heap_push(&mut queue, ek(st, c, a)?);
+                    queue.push(Reverse(ek(st, a, b)?));
+                    queue.push(Reverse(ek(st, b, c)?));
+                    queue.push(Reverse(ek(st, c, a)?));
                 }
             }
         }
@@ -2138,7 +2093,7 @@ pub fn build(
                 constraints: Vec::new(),
                 constraint_winding: Vec::new(),
                 walk_start: 0,
-                insertion_queue: KeyHeap { values: Vec::new() },
+                insertion_queue: BinaryHeap::new(),
                 strip_marks: vec![0; u(triangle_capacity)],
                 boundary_stamps: vec![0; u(point_count)],
                 boundary_edges: HashMap::new(),
@@ -2186,7 +2141,7 @@ pub fn build(
                 constraints: Vec::new(),
                 constraint_winding: Vec::new(),
                 walk_start: 0,
-                insertion_queue: KeyHeap { values: Vec::new() },
+                insertion_queue: BinaryHeap::new(),
                 strip_marks: vec![0; u(triangle_capacity)],
                 boundary_stamps: vec![0; u(point_count)],
                 boundary_edges: HashMap::new(),
