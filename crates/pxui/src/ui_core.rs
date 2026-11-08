@@ -1869,10 +1869,11 @@ impl BoxOpts {
     }
 }
 
-/// What `enter`, `scope` and `enter_root` change; `leave` puts it back.
-pub struct Saved {
-    parents: Vec<usize>,
-    seeds: Vec<i64>,
+/// What `enter`, `scope` and `enter_root` change; `leave` puts it back. `enter` and `scope` only
+/// push, so they keep the depths; the roots replace the stacks and keep them whole.
+pub enum Saved {
+    Depths(usize, usize),
+    Stacks(Vec<usize>, Vec<i64>),
 }
 
 #[derive(Clone, Debug)]
@@ -2018,15 +2019,23 @@ impl Ui {
     /// Start building children of `b`; give the result to `leave`.
     pub fn enter(&mut self, b: &UiBox) -> Saved {
         self.require_building();
-        let saved = Saved { parents: self.parents.clone(), seeds: self.seeds.clone() };
+        let saved = Saved::Depths(self.parents.len(), self.seeds.len());
         self.parents.push(b.index);
         self.seeds.push(b.box_key);
         saved
     }
 
     pub fn leave(&mut self, saved: Saved) {
-        self.parents = saved.parents;
-        self.seeds = saved.seeds;
+        match saved {
+            Saved::Depths(parents, seeds) => {
+                self.parents.truncate(parents);
+                self.seeds.truncate(seeds);
+            }
+            Saved::Stacks(parents, seeds) => {
+                self.parents = parents;
+                self.seeds = seeds;
+            }
+        }
     }
 
     /// Build children of `b`.
@@ -2039,7 +2048,7 @@ impl Ui {
     /// Mix a label into the keys of boxes built inside, without a box.
     pub fn scope(&mut self, label: &str, f: &mut dyn FnMut(&mut Ui)) {
         self.require_building();
-        let saved = Saved { parents: self.parents.clone(), seeds: self.seeds.clone() };
+        let saved = Saved::Depths(self.parents.len(), self.seeds.len());
         let seed = key_of(self.current_seed(), label);
         self.seeds.push(seed);
         f(self);
@@ -2049,10 +2058,7 @@ impl Ui {
     /// Build at the root under the root's own seed, wherever the caller is in the tree: what is
     /// built is laid out in the window, clipped by no pane.
     pub(crate) fn enter_root(&mut self) -> Saved {
-        Saved {
-            parents: std::mem::replace(&mut self.parents, vec![0]),
-            seeds: std::mem::replace(&mut self.seeds, vec![ROOT_KEY]),
-        }
+        Saved::Stacks(std::mem::replace(&mut self.parents, vec![0]), std::mem::replace(&mut self.seeds, vec![ROOT_KEY]))
     }
 
     pub fn box_of_key(&self, key: i64) -> Option<UiBox> {
@@ -3445,7 +3451,7 @@ impl Ui {
 
     /// Popups live at the root: the parents are the root alone, the seeds stay.
     pub(crate) fn enter_root_parent(&mut self) -> Saved {
-        Saved { parents: std::mem::replace(&mut self.parents, vec![0]), seeds: self.seeds.clone() }
+        Saved::Stacks(std::mem::replace(&mut self.parents, vec![0]), self.seeds.clone())
     }
 
     fn belongs(&mut self, target: i64, key: i64, related: &[i64]) -> bool {
