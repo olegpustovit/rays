@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use rays_math::text_array::TextArray;
+
 use crate::{error, packed, support};
 use crate::error::Code;
 
@@ -21,7 +23,7 @@ pub enum Storage {
     Float3(packed::Float3::T),
     Float4(packed::Float4::T),
     /// Opaque byte strings; attribute names and schema identifiers remain UTF-8.
-    Text(Vec<Vec<u8>>),
+    Text(Arc<TextArray>),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -349,12 +351,7 @@ fn storage_payload_bytes(storage: &Storage) -> i64 {
         Storage::Float2(values) => packed::Float2::payload_bytes(values),
         Storage::Float3(values) => packed::Float3::payload_bytes(values),
         Storage::Float4(values) => packed::Float4::payload_bytes(values),
-        Storage::Text(values) => values.iter().fold(
-            i64::try_from(values.len())
-                .unwrap_or(i64::MAX)
-                .saturating_mul(std::mem::size_of::<usize>() as i64),
-            |total, text| total.saturating_add(i64::try_from(text.len()).unwrap_or(i64::MAX)),
-        ),
+        Storage::Text(values) => i64::try_from(values.payload_bytes()).unwrap_or(i64::MAX),
     }
 }
 
@@ -593,12 +590,12 @@ mod tests {
     fn text_storage_and_remap_preserve_every_byte() {
         let bytes: Vec<u8> = (0..=255).collect();
         let reversed: Vec<u8> = bytes.iter().rev().copied().collect();
-        let source = super::create_owned("bytes", Owner::Point, Storage::Text(vec![bytes.clone(), reversed.clone()])).unwrap();
-        assert!(matches!(super::View::storage(&source).unwrap(), Storage::Text(values) if values == &vec![bytes.clone(), reversed.clone()]));
+        let source = super::create_owned("bytes", Owner::Point, Storage::Text(Arc::new(vec![bytes.clone(), reversed.clone()].into()))).unwrap();
+        assert!(matches!(super::View::storage(&source).unwrap(), Storage::Text(values) if **values == vec![bytes.clone(), reversed.clone()]));
         for grain in [1, 97] {
             let remapped = crate::topology_remap::attribute(None, grain, Some(true), &[1, -1, 0, 1], &source).unwrap();
-            assert!(matches!(super::storage(&remapped).unwrap(), Storage::Text(values) if values == vec![reversed.clone(), Vec::new(), bytes.clone(), reversed.clone()]));
+            assert!(matches!(super::storage(&remapped).unwrap(), Storage::Text(values) if *values == vec![reversed.clone(), Vec::new(), bytes.clone(), reversed.clone()]));
         }
-        assert!(matches!(super::storage(&source).unwrap(), Storage::Text(values) if values == vec![bytes, reversed]));
+        assert!(matches!(super::storage(&source).unwrap(), Storage::Text(values) if *values == vec![bytes, reversed]));
     }
 }

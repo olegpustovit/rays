@@ -1078,7 +1078,7 @@ mod tests {
         let g = add(
             attribute::Owner::Point,
             "point_tag",
-            attribute::Storage::Text((0..8).map(|p| format!("p{p}").into_bytes()).collect()),
+            attribute::Storage::Text(Arc::new((0..8).map(|p| format!("p{p}").into_bytes()).collect())),
             &g,
         );
         let g = add(

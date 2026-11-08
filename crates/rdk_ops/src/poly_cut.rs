@@ -1568,7 +1568,7 @@ mod tests {
         attributes.push(mk(
             attribute::Owner::Point,
             "label",
-            attribute::Storage::Text(vec![b"a".to_vec(), b"b".to_vec(), b"c".to_vec()]),
+            attribute::Storage::Text(std::sync::Arc::new(vec![b"a".to_vec(), b"b".to_vec(), b"c".to_vec()].into())),
         ));
         attributes.push(mk(
             attribute::Owner::Point,
@@ -1580,7 +1580,7 @@ mod tests {
         attributes.push(mk(
             attribute::Owner::Vertex,
             "corner_label",
-            attribute::Storage::Text(vec![b"va".to_vec(), b"vb".to_vec(), b"vc".to_vec()]),
+            attribute::Storage::Text(std::sync::Arc::new(vec![b"va".to_vec(), b"vb".to_vec(), b"vc".to_vec()].into())),
         ));
         attributes.push(mk(
             attribute::Owner::Vertex,
@@ -1589,7 +1589,7 @@ mod tests {
                 packed::IntArray::create_owned(vec![0, 1, 3, 4], vec![10, 20, 21, 30]).unwrap(),
             ),
         ));
-        attributes.push(mk(attribute::Owner::Detail, "author", attribute::Storage::Text(vec![b"polycut".to_vec()])));
+        attributes.push(mk(attribute::Owner::Detail, "author", attribute::Storage::Text(std::sync::Arc::new(vec![b"polycut".to_vec()].into()))));
         let groups = vec![
             group::ordered(group::Owner::Point, "marked_points", 3, &[1]).unwrap(),
             group::ordered(group::Owner::Vertex, "marked_vertices", 3, &[1]).unwrap(),
@@ -1607,7 +1607,7 @@ mod tests {
         let text = |owner, name: &str| {
             let item = geometry::find_attribute(owner, name, &output).expect(name);
             match attribute::View::storage(&item).unwrap() {
-                attribute::Storage::Text(values) => values.clone(),
+                attribute::Storage::Text(values) => (**values).clone(),
                 _ => panic!("{name} storage"),
             }
         };

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use rays_math::text_array::TextArray;
 
 use crate::{attribute, cancel, edge_group, error, geometry, group, packed, ragged_ops, support, topology, topology_edge_lookup, topology_index};
 use crate::error::Code;
@@ -76,14 +77,29 @@ pub fn select_int(
     select(cancel_value, grain, ("Topology_remap.select", "Support.run_ranges: grain must be positive"), missing, mapping, source)
 }
 
+// ponytail: sequential copy; variable-length rows cannot be written through fixed windows. Parallel only if text
+// selection ever shows up in a profile (it is a memcpy per row).
 pub fn select_text(
     cancel_value: Option<&cancel::T>,
     grain: i64,
     missing: Option<&[u8]>,
     mapping: &[i64],
-    source: &[Vec<u8>],
-) -> Result<Vec<Vec<u8>>, error::T> {
-    select(cancel_value, grain, ("Topology_remap.select", "Support.run_ranges: grain must be positive"), missing.map(<[u8]>::to_vec), mapping, source)
+    source: &TextArray,
+) -> Result<TextArray, error::T> {
+    if mapping.is_empty() {
+        return Ok(TextArray::new());
+    }
+    if grain <= 0 {
+        return Err(invalid_remap("Support.run_ranges: grain must be positive".to_owned()));
+    }
+    cancel::poll(cancel_value, 0, 4095).map_err(|_| cancelled_error())?;
+    validate_mapping("Topology_remap.select", checked_count(source.len(), "Topology_remap.select")?, mapping, missing.is_some())?;
+    let mut output = TextArray::with_capacity(mapping.len(), 0);
+    for (element, &index) in mapping.iter().enumerate() {
+        cancel::poll(cancel_value, element as i64, 4095).map_err(|_| cancelled_error())?;
+        output.push(if index < 0 { missing.unwrap_or_default() } else { &source[index as usize] });
+    }
+    Ok(output)
 }
 
 pub fn select_float(
@@ -110,7 +126,7 @@ pub fn select_storage(
             Storage::Int(Arc::new(select_int(cancel_value, grain, defaults.then_some(0), mapping, values)?))
         }
         Storage::Text(values) => {
-            Storage::Text(select_text(cancel_value, grain, defaults.then_some(&[][..]), mapping, values)?)
+            Storage::Text(Arc::new(select_text(cancel_value, grain, defaults.then_some(&[][..]), mapping, values)?))
         }
         Storage::IntArray(values) => Storage::IntArray(ragged_ops::remap_int(cancel_value, Some(grain), mapping, values)?),
         Storage::FloatArray(values) => {
@@ -689,7 +705,7 @@ mod tests {
         cancel::cancel(&token);
         let integer = select_int(Some(&token), 1, None, &[-1], &[1]).unwrap_err();
         assert_eq!(error::code(&integer), "cancelled");
-        let text = select_text(Some(&token), 1, None, &[-1], &[b"value".to_vec()]).unwrap_err();
+        let text = select_text(Some(&token), 1, None, &[-1], &vec![b"value"].into()).unwrap_err();
         assert_eq!(error::code(&text), "cancelled");
     }
     #[test]

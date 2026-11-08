@@ -5,6 +5,7 @@
 //! order, which is byte-identical to the sequential path for any domain count.
 use std::collections::HashSet;
 use std::sync::Arc;
+use rays_math::text_array::TextArray;
 
 use rdk_core::{
     attribute, cancel, error, geometry, group, packed, support, topology,
@@ -103,7 +104,7 @@ fn is_blank(text: &str) -> bool {
 enum Data {
     F(Vec<Arc<Vec<f64>>>),
     I(Arc<Vec<i64>>),
-    T(Vec<Vec<u8>>),
+    T(Arc<TextArray>),
     IntArray(packed::IntArray::View::View),
     FloatArray(packed::FloatArray::View::View),
 }
@@ -112,6 +113,7 @@ enum Data {
 struct Out {
     f: Vec<Vec<f64>>,
     i: Vec<i64>,
+    /// Random-access scratch rows; packed into one `TextArray` when stored.
     t: Vec<Vec<u8>>,
     choices: Vec<i64>,
 }
@@ -380,7 +382,7 @@ fn create_job(
         (Data::F(planes), _) => out.f = (0..planes.len()).map(|_| vec![0.0; count]).collect(),
         (Data::I(_), Some(Data::I(old))) => out.i = old.to_vec(),
         (Data::I(_), _) => out.i = vec![0; count],
-        (Data::T(_), Some(Data::T(old))) => out.t = old.clone(),
+        (Data::T(_), Some(Data::T(old))) => out.t = old.to_rows(),
         (Data::T(_), _) => out.t = vec![Vec::new(); count],
         (Data::IntArray(_) | Data::FloatArray(_), _) => out.choices = vec![-1; count],
     }
@@ -541,7 +543,7 @@ fn set_numeric(job: &Job, cell: &mut Cell, source: i64) {
 fn set_discrete(job: &Job, cell: &mut Cell, source: i64) {
     match &job.source {
         Data::I(values) => cell.i = values[source as usize],
-        Data::T(values) => cell.t = values[source as usize].clone(),
+        Data::T(values) => cell.t = values[source as usize].to_vec(),
         Data::IntArray(_) | Data::FloatArray(_) => cell.choice = source,
         Data::F(_) => {}
     }
@@ -581,7 +583,7 @@ fn blend_job(job: &Job, destination: usize, cell: &mut Cell, blend: f64) {
         (Data::T(_), existing) => {
             if blend < 0.5 {
                 cell.t = match existing {
-                    Some(Data::T(old)) => old[destination].clone(),
+                    Some(Data::T(old)) => old[destination].to_vec(),
                     _ => Vec::new(),
                 };
             }
@@ -804,7 +806,7 @@ fn storage_of_job(
             }
         }
         Data::I(_) => attribute::Storage::Int(Arc::new(job.out.i.clone())),
-        Data::T(_) => attribute::Storage::Text(job.out.t.clone()),
+        Data::T(_) => attribute::Storage::Text(Arc::new(job.out.t.iter().collect())),
         Data::IntArray(source) => {
             let existing = match &job.existing {
                 Some(Data::IntArray(view)) => Some(view),
@@ -1765,7 +1767,7 @@ mod tests {
         let g = polygons(&[(0.0, 0.0, 0.0), (2.0, 0.0, 0.0), (0.0, 2.0, 0.0)], &[vec![0, 1, 2]]);
         let g = add_values(Point, "weight", vec![0.0, 10.0, 20.0], &g);
         let g = add_ints(Point, "id", vec![10, 20, 30], &g);
-        let g = add_storage(Point, "label", attribute::Storage::Text(vec![b"a".to_vec(), b"b".to_vec(), b"c".to_vec()]), &g);
+        let g = add_storage(Point, "label", attribute::Storage::Text(std::sync::Arc::new(vec![b"a".to_vec(), b"b".to_vec(), b"c".to_vec()].into())), &g);
         let g = add_storage(
             Point,
             "uv",
@@ -2240,7 +2242,7 @@ mod tests {
         let incompatible = add_storage(
             Point,
             "weight",
-            attribute::Storage::Text(vec![b"bad".to_vec()]),
+            attribute::Storage::Text(std::sync::Arc::new(vec![b"bad".to_vec()].into())),
             &add_drivers(Point, vec![0], &[(0.0, 0.0, 0.0)], &blank_points(1)),
         );
         assert_eq!(err_code(attribute_ops::interpolate(&base(&source, &incompatible, Point, weight_spec()))), "invalid_interpolate");
@@ -2293,7 +2295,7 @@ mod tests {
         let source = polygons(&[(0.0, 0.0, 0.0), (0.0, 1.0, 0.0), (1.0, 1.0, 0.0), (1.0, 0.0, 0.0)], &[vec![0, 1, 2, 3]]);
         let source = add_storage(Point, "weight", attribute::Storage::Float(Arc::new(vec![0.0, 1.0, 2.0, 3.0])), &source);
         let source = add_ints(Point, "id", vec![3, 5, 7, 11], &source);
-        let source = add_storage(Point, "label", attribute::Storage::Text(vec![b"a".to_vec(), b"b".to_vec(), b"c".to_vec(), b"d".to_vec()]), &source);
+        let source = add_storage(Point, "label", attribute::Storage::Text(std::sync::Arc::new(vec![b"a".to_vec(), b"b".to_vec(), b"c".to_vec(), b"d".to_vec()].into())), &source);
         let source = add_storage(
             Point,
             "tuple4",

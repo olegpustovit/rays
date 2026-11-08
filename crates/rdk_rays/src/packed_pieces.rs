@@ -13,6 +13,7 @@ use std::sync::Arc;
 use param::{FieldView, Value};
 use rays::mesh::{self, Vec3_buffer};
 use rays::num::{fmax, fmin};
+use rays_math::text_array::TextArray;
 use rays_math::{color, noise, vec2, vec3};
 use rdk_core::attribute::{self, Owner, Storage};
 use rdk_core::{error, geometry, topology};
@@ -53,13 +54,13 @@ fn dense_int(values: &[i64]) -> (Vec<usize>, usize) {
     (dense, table.len())
 }
 
-fn dense_text(values: &[Vec<u8>]) -> (Vec<usize>, usize) {
-    let mut table: HashMap<Vec<u8>, usize> = HashMap::with_capacity((values.len() / 4).max(16));
+fn dense_text(values: &TextArray) -> (Vec<usize>, usize) {
+    let mut table: HashMap<&[u8], usize> = HashMap::with_capacity((values.len() / 4).max(16));
     let dense = values
         .iter()
         .map(|value| {
             let next = table.len();
-            *table.entry(value.clone()).or_insert(next)
+            *table.entry(value).or_insert(next)
         })
         .collect();
     (dense, table.len())

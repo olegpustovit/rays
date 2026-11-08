@@ -252,7 +252,7 @@ fn wildcard_names_and_refusals() {
             let compiled = ok(rdk_core::attribute_pattern::compile(pattern));
             let printed = flow_syntax::lisp::quote_string(pattern.as_bytes());
             let expected: Vec<Vec<u8>> = names.iter().filter(|n| rdk_core::attribute_pattern::matches(&compiled, n)).map(|n| n.as_bytes().to_vec()).collect();
-            exact(&g, &format!("(sop/group_names geo {printed} :owner {owner})"), &Value::Text_array(Arc::new(expected)));
+            exact(&g, &format!("(sop/group_names geo {printed} :owner {owner})"), &Value::Text_array(Arc::new(expected.into())));
         }
     }
     let mut s = create_session();
@@ -459,8 +459,8 @@ fn group_frame_folds_recook_exact_masks() {
 #[test]
 fn glob_literal_rewrite_and_group_entries() {
     let geometry = fixtures().remove(1);
-    exact(&geometry, r#"(map (fn [(value : text)] (text/glob_literal value)) (array/text 5001 "a*"))"#, &Value::Text_array(Arc::new(vec![b"a\\*".to_vec(); 5001])));
-    exact(&geometry, r#"(map (fn [(value : text)] (text/glob_rewrite "a*" "b*" value)) (array/text 5001 "a猫"))"#, &Value::Text_array(Arc::new(vec!["b猫".as_bytes().to_vec(); 5001])));
+    exact(&geometry, r#"(map (fn [(value : text)] (text/glob_literal value)) (array/text 5001 "a*"))"#, &Value::Text_array(Arc::new(vec![b"a\\*".to_vec(); 5001].into())));
+    exact(&geometry, r#"(map (fn [(value : text)] (text/glob_rewrite "a*" "b*" value)) (array/text 5001 "a猫"))"#, &Value::Text_array(Arc::new(vec!["b猫".as_bytes().to_vec(); 5001].into())));
     let cat = catalog0();
     let checker = |c: &flow_check::catalog::Catalog, forms: &[syntax::Syntax]| flow_check::workspace::check(operators::all(), false, false, None, c, forms);
     let forms = parse(

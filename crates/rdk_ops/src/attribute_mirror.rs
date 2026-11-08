@@ -7,6 +7,7 @@ use rdk_core::{
 use rdk_geom::spatial_index;
 
 use crate::attribute_ops::{is_blank, make_error, map_ints, map_planes, map_texts, ocaml_quote, recode};
+use rays_math::text_array::TextArray;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GroupUse {
@@ -429,13 +430,13 @@ fn copy_ints(cancel_token: Option<&cancel::T>, grain: i64, mapping: &Mapping, va
     })
 }
 
-fn copy_texts(cancel_token: Option<&cancel::T>, grain: i64, mapping: &Mapping, values: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, error::T> {
+fn copy_texts(cancel_token: Option<&cancel::T>, grain: i64, mapping: &Mapping, values: &TextArray) -> Result<TextArray, error::T> {
     if values.is_empty() {
-        return Ok(Vec::new());
+        return Ok(TextArray::new());
     }
-    let blanks = vec![Vec::new(); mapping.source_of_output.len()];
+    let blanks: TextArray = std::iter::repeat_n(&[][..], mapping.source_of_output.len()).collect();
     map_texts(cancel_token, grain, &blanks, &|element, slot| {
-        *slot = values[mapping.source_of_output[element as usize] as usize].clone();
+        *slot = values[mapping.source_of_output[element as usize] as usize].to_vec();
         Ok(())
     })
 }
@@ -565,26 +566,27 @@ fn remap_attribute(
         attribute::Storage::Text(values) => {
             let mut output = copy_texts(cancel_token, grain, mapping, values)?;
             if let Some((search, replacement)) = string_replace {
-                for (element, text) in output.iter_mut().enumerate() {
-                    if mapping.pair_destination[element] == 1 {
-                        let mut remaining = text.as_slice();
-                        let mut next = remaining.windows(search.len()).position(|window| window == search.as_slice());
-                        if next.is_none() {
-                            continue;
-                        }
-                        let mut output = Vec::with_capacity(text.len());
-                        while let Some(at) = next {
-                            output.extend_from_slice(&remaining[..at]);
-                            output.extend_from_slice(replacement);
-                            remaining = &remaining[at + search.len()..];
-                            next = remaining.windows(search.len()).position(|window| window == search.as_slice());
-                        }
-                        output.extend_from_slice(remaining);
-                        *text = output;
+                let mut replaced = TextArray::with_capacity(output.len(), output.byte_len());
+                for (element, text) in output.iter().enumerate() {
+                    let mut remaining = text;
+                    let mut next = remaining.windows(search.len()).position(|window| window == search.as_slice());
+                    if mapping.pair_destination[element] != 1 || next.is_none() {
+                        replaced.push(text);
+                        continue;
                     }
+                    let mut row = Vec::with_capacity(text.len());
+                    while let Some(at) = next {
+                        row.extend_from_slice(&remaining[..at]);
+                        row.extend_from_slice(replacement);
+                        remaining = &remaining[at + search.len()..];
+                        next = remaining.windows(search.len()).position(|window| window == search.as_slice());
+                    }
+                    row.extend_from_slice(remaining);
+                    replaced.push(&row);
                 }
+                output = replaced;
             }
-            attribute::Storage::Text(output)
+            attribute::Storage::Text(Arc::new(output))
         }
         attribute::Storage::Float2(values) => {
             let view = packed::Float2::View::view(values);
@@ -856,7 +858,7 @@ mod tests {
         let g = add_storage(
             Point,
             "label",
-            attribute::Storage::Text(["left_A", "left_B", "old", "old"].iter().map(|s| s.as_bytes().to_vec()).collect()),
+            attribute::Storage::Text(Arc::new(["left_A", "left_B", "old", "old"].iter().map(|s| s.as_bytes()).collect())),
             &g,
         );
         let g = add_storage(
@@ -1106,7 +1108,7 @@ mod tests {
     #[test]
     fn text_replacement_preserves_arbitrary_bytes() {
         let rows = vec![b"\xff\0\xff\0".to_vec(), b"\0\x80\xff\0z".to_vec(), Vec::new(), Vec::new()];
-        let source = add_storage(Point, "label", attribute::Storage::Text(rows.clone()), &point_fixture());
+        let source = add_storage(Point, "label", attribute::Storage::Text(Arc::new(rows.clone().into())), &point_fixture());
         let mut p = params(Point, mapping("map", &destination_of(&source)));
         p.attributes = "label".to_owned();
         p.string_replace = Some((b"\xff\0".to_vec(), b"\x80\xff".to_vec()));

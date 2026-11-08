@@ -1591,7 +1591,7 @@ mod tests {
         let collision = add(
             "material",
             attribute::Owner::Primitive,
-            attribute::Storage::Text((0..primitives).map(|p| format!("m{p}").into_bytes()).collect()),
+            attribute::Storage::Text(std::sync::Arc::new((0..primitives).map(|p| format!("m{p}").into_bytes()).collect())),
             &collision,
         );
         let collision = add("revision", attribute::Owner::Detail, attribute::Storage::Int(Arc::new(vec![7])), &collision);
@@ -1617,7 +1617,7 @@ mod tests {
             "did not interpolate imported numeric fields at the hit"
         );
         match attribute::View::storage(&geometry::find_attribute(attribute::Owner::Point, "material", &output).unwrap()).unwrap() {
-            attribute::Storage::Text(values) => assert_eq!(values[0], b"m1"),
+            attribute::Storage::Text(values) => assert_eq!(&values[0], b"m1"),
             _ => panic!("material output storage"),
         }
         assert_eq!(int_attribute(attribute::Owner::Point, "revision", &output)[0], 7);

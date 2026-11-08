@@ -38,7 +38,7 @@ impl Storage {
                     if self.shared(values) { self.buffer(values); }
                 }
                 Value::Text_array(values) => {
-                    if self.shared(values) && self.buffer(values) { for bytes in values.iter() { self.buffer(bytes); } }
+                    self.heap.allocation(Arc::as_ptr(values), std::mem::size_of_val(&**values) + values.payload_bytes());
                 }
                 Value::List(values) => { if self.shared(values) && self.buffer(values) { pending.extend(values.iter()); } }
                 Value::Struct(g) | Value::Source(g) => {

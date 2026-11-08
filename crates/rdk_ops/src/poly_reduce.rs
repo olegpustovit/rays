@@ -836,7 +836,7 @@ mod tests {
         let detail = attribute::create_owned(
             "tag",
             attribute::Owner::Detail,
-            attribute::Storage::Text(vec![b"reduce-fixture".to_vec()]),
+            attribute::Storage::Text(std::sync::Arc::new(vec![b"reduce-fixture".to_vec()].into())),
         )
         .unwrap();
         let ordered = group::ordered(group::Owner::Point, "ordered_points", points, &[3, 7, 11, 15, 19]).unwrap();

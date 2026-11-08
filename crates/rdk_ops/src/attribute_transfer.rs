@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use rdk_core::support::Windows;
 use rdk_core::{attribute, attribute_pattern, cancel, error, geometry, group, packed, support, topology};
+use rays_math::text_array::TextArray;
 use rdk_geom::{spatial_index, surface_index};
 
 use crate::attribute_ops::{is_blank, make_error, map_ints, map_planes, map_texts};
@@ -334,17 +335,18 @@ fn initial_text(
     unmatched: Unmatched,
     target_attribute: &Option<attribute::T>,
     count: usize,
-) -> Result<Vec<Vec<u8>>, error::T> {
+) -> Result<TextArray, error::T> {
     if let Some(item) = existing_storage(unmatched, selection, target_attribute) {
         if let attribute::Storage::Text(values) = attribute::View::storage(&item)? {
-            let mut output = values.clone();
             if unmatched == Unmatched::DefaultValue {
-                reset_selected(selection, &mut |element| output[element] = Vec::new());
+                let mut reset = vec![false; values.len()];
+                reset_selected(selection, &mut |element| reset[element] = true);
+                return Ok(values.iter().zip(reset).map(|(row, reset)| if reset { &[][..] } else { row }).collect());
             }
-            return Ok(output);
+            return Ok((**values).clone());
         }
     }
-    Ok(vec![Vec::new(); count])
+    Ok(std::iter::repeat_n(&[][..], count).collect())
 }
 
 /// Output planes for a Float..Float4 storage `like`: copies of the existing target's planes
@@ -811,12 +813,12 @@ fn spatial_transfer(
             }
             attribute::Storage::Text(source_values) => {
                 let output = initial_text(target_elements, unmatched, &existing, target_count as usize)?;
-                attribute::Storage::Text(map_texts(cancel_token, grain, &output, &|target_element, slot| {
+                attribute::Storage::Text(Arc::new(map_texts(cancel_token, grain, &output, &|target_element, slot| {
                     if discrete_selected(target_element) {
-                        *slot = source_values[neighbors[(target_element * neighbor_capacity) as usize] as usize].clone();
+                        *slot = source_values[neighbors[(target_element * neighbor_capacity) as usize] as usize].to_vec();
                     }
                     Ok(())
-                })?)
+                })?))
             }
             attribute::Storage::IntArray(_) | attribute::Storage::FloatArray(_) => {
                 return Err(fail(&format!("{operation}: array attributes cannot be sampled")))
@@ -1069,7 +1071,7 @@ fn transfer_surface_inner(params: &SurfaceParams) -> Result<geometry::T, error::
                     attribute::Storage::Int(Arc::new(initial_int(target_elements, unmatched, &existing, target_count)?))
                 }
                 attribute::Storage::Text(_) => {
-                    attribute::Storage::Text(initial_text(target_elements, unmatched, &existing, target_count)?)
+                    attribute::Storage::Text(Arc::new(initial_text(target_elements, unmatched, &existing, target_count)?))
                 }
                 attribute::Storage::IntArray(_) | attribute::Storage::FloatArray(_) => {
                     return Err(fail("array attributes cannot be sampled"))
@@ -1240,14 +1242,13 @@ fn transfer_surface_inner(params: &SurfaceParams) -> Result<geometry::T, error::
             }
             attribute::Storage::Text(values) => {
                 let output = initial_text(target_elements, unmatched, &existing, target_count)?;
-                attribute::Storage::Text(map_texts(cancel_token, grain, &output, &|point, slot| {
+                attribute::Storage::Text(Arc::new(map_texts(cancel_token, grain, &output, &|point, slot| {
                     if let Some(local) = discrete_local(owner, point as usize) {
                         let primitive = primitives[point as usize];
-                        *slot = values[source_element(owner, primitive, triangles[point as usize], local) as usize]
-                            .clone();
+                        *slot = values[source_element(owner, primitive, triangles[point as usize], local) as usize].to_vec();
                     }
                     Ok(())
-                })?)
+                })?))
             }
             attribute::Storage::IntArray(_) | attribute::Storage::FloatArray(_) => {
                 return Err(fail("array attributes cannot be sampled"))
@@ -1784,7 +1785,7 @@ mod tests {
         point_group.source_elements = Some(source_second);
         assert_eq!(err_code(attribute_ops::transfer_primitives(&point_group)), "invalid_transfer");
 
-        let asset = attribute::create_owned("asset", Detail, attribute::Storage::Text(vec![b"oak".to_vec()])).unwrap();
+        let asset = attribute::create_owned("asset", Detail, attribute::Storage::Text(std::sync::Arc::new(vec![b"oak".to_vec()].into()))).unwrap();
         let detail_source = geometry::with_attribute(asset.clone(), &primitive_source).unwrap();
         let detail_target = attribute_ops::transfer_detail(&DetailParams {
             names: None,

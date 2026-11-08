@@ -3,6 +3,7 @@
 use std::sync::Mutex;
 
 use rdk_core::{cancel, error, support};
+use rays_math::text_array::TextArray;
 
 /// `Error.make` for an operation, code and message (neither operation nor code is blank here).
 pub fn make_error(operation: &str, code: &str, message: &str) -> error::T {
@@ -46,7 +47,7 @@ pub fn ocaml_quote(text: impl AsRef<[u8]>) -> String {
 enum Chunk {
     Planes(Vec<Vec<f64>>),
     Ints(Vec<i64>),
-    Texts(Vec<Vec<u8>>),
+    Texts(TextArray),
 }
 
 type Slots = Vec<Mutex<Option<Chunk>>>;
@@ -139,24 +140,28 @@ pub fn map_ints(
 pub fn map_texts(
     cancel_token: Option<&cancel::T>,
     grain: i64,
-    init: &[Vec<u8>],
+    init: &TextArray,
     work: &(dyn Fn(i64, &mut Vec<u8>) -> Result<(), error::T> + Sync),
-) -> Result<Vec<Vec<u8>>, error::T> {
+) -> Result<TextArray, error::T> {
     let count = init.len() as i64;
     let slots: Slots = new_slots(count, grain);
     support::run_indexed_ranges(grain, count, &|range, first, last| {
-        let mut local = init[first as usize..last as usize].to_vec();
+        let mut local = TextArray::new();
+        let mut row = Vec::new();
         for element in first..last {
             cancel::poll(cancel_token, element, 4095)?;
-            work(element, &mut local[(element - first) as usize])?;
+            row.clear();
+            row.extend_from_slice(&init[element as usize]);
+            work(element, &mut row)?;
+            local.push(&row);
         }
         put(&slots, range, Chunk::Texts(local));
         Ok(())
     })?;
-    let mut output = Vec::new();
+    let mut output = TextArray::new();
     for chunk in take(slots) {
         if let Chunk::Texts(values) = chunk {
-            output.extend(values);
+            output.extend(values.iter());
         }
     }
     Ok(output)
@@ -595,9 +600,9 @@ pub(crate) mod fixtures {
         }
     }
 
-    pub fn texts(owner: attribute::Owner, name: &str, geometry_value: &geometry::T) -> Vec<Vec<u8>> {
+    pub fn texts(owner: attribute::Owner, name: &str, geometry_value: &geometry::T) -> rays_math::text_array::TextArray {
         match attribute::storage(&find(owner, name, geometry_value)).unwrap() {
-            attribute::Storage::Text(values) => values,
+            attribute::Storage::Text(values) => (*values).clone(),
             _ => panic!("wrong text storage for {name}"),
         }
     }

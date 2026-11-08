@@ -2663,7 +2663,7 @@ mod tests {
         expect_code(clip(&p, &source), "invalid_geometry");
         let text = with_attribute(
             "field",
-            attribute::Storage::Text(vec![b"a".to_vec(), b"b".to_vec(), b"c".to_vec()]),
+            attribute::Storage::Text(std::sync::Arc::new(vec![b"a".to_vec(), b"b".to_vec(), b"c".to_vec()].into())),
             &source,
         );
         let mut p = params();

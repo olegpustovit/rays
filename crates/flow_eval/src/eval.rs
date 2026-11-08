@@ -2464,8 +2464,8 @@ fn pack(ty: &Ty, values: Vec<Value>) -> Result<Value, Diagnostic> {
             Ok(Value::Int_array(Arc::new(data)))
         },
         Ty::Text => {
-            let mut data = value::array_buffer(values.len())?;
-            for value in values { match value { Value::Text(bytes) => data.push(bytes), _ => return eval_error("E_ARRAY_TYPE", "Text arrays contain text values.") } }
+            let mut data = rays_math::text_array::TextArray::try_with_capacity(values.len()).map_err(|_| error("E_ARRAY_MEMORY", "Frame data exceeds available memory."))?;
+            for value in values { match value { Value::Text(bytes) => data.push(&bytes), _ => return eval_error("E_ARRAY_TYPE", "Text arrays contain text values.") } }
             Ok(Value::Text_array(Arc::new(data)))
         },
         Ty::Float | Ty::Vec2 | Ty::Vec3 | Ty::Vec4 => {

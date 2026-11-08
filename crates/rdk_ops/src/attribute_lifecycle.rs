@@ -809,7 +809,7 @@ mod tests {
             ),
             &g,
         );
-        add_storage(Detail, "left_text", attribute::Storage::Text(vec![b"payload".to_vec()]), &g)
+        add_storage(Detail, "left_text", attribute::Storage::Text(std::sync::Arc::new(vec![b"payload".to_vec()].into())), &g)
     }
 
     #[test]

@@ -2867,7 +2867,7 @@ mod tests {
         .unwrap();
         let value = add_attribute(&base, Owner::Vertex, "uv", Storage::Float2(uv));
         let value = add_attribute(&value, Owner::Point, "target", Storage::Float(Arc::new(vec![0.4; 4])));
-        let value = add_attribute(&value, Owner::Detail, "tag", Storage::Text(vec![b"fixture".to_vec()]));
+        let value = add_attribute(&value, Owner::Detail, "tag", Storage::Text(std::sync::Arc::new(vec![b"fixture".to_vec()].into())));
         let hard_points = group::init(None, group::Owner::Point, "pin", 4, &|point| point == 0).unwrap();
         (value, hard_points)
     }
@@ -3029,13 +3029,13 @@ mod tests {
             &source,
             Owner::Primitive,
             "material",
-            Storage::Text(
+            Storage::Text(Arc::new(
                 (0..primitive_count)
-                    .map(|primitive| if primitive % 3 == 0 { b"red".to_vec() } else { b"blue".to_vec() })
+                    .map(|primitive| if primitive % 3 == 0 { &b"red"[..] } else { &b"blue"[..] })
                     .collect(),
-            ),
+            )),
         );
-        let source = add_attribute(&source, Owner::Detail, "tag", Storage::Text(vec![b"payload".to_vec()]));
+        let source = add_attribute(&source, Owner::Detail, "tag", Storage::Text(std::sync::Arc::new(vec![b"payload".to_vec()].into())));
         let ordered_members: Vec<i64> =
             (0..point_count / 2).map(|index| point_count - 1 - (index * 2)).collect();
         let ordered =

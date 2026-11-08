@@ -69,7 +69,7 @@ fn source_with(canonical: bool, count: i64) -> geo::T {
             ),
             ("float", Storage::Float(Arc::new(floats(0)))),
             ("int", Storage::Int(Arc::new((0..n as i64).map(|i| (1 << 55) + i).collect()))),
-            ("text", Storage::Text((0..n).map(|i| if i % 2 == 0 { [0xe7,0x8c,0xab,0xff].to_vec() } else { [0xf0,0x9f,0x98,0x80,0].to_vec() }).collect())),
+            ("text", Storage::Text(Arc::new((0..n).map(|i| if i % 2 == 0 { [0xe7,0x8c,0xab,0xff].to_vec() } else { [0xf0,0x9f,0x98,0x80,0].to_vec() }).collect()))),
             ("vec2", Storage::Float2(ok(Float2::of_owned(floats(1), floats(2))))),
             ("vec3", Storage::Float3(ok(Float3::View::of_owned_exn(floats(3), floats(4), floats(5))))),
             ("vec4", Storage::Float4(ok(Float4::of_owned(floats(2), floats(3), floats(4), floats(5))))),
@@ -335,7 +335,7 @@ fn minus_one_rows_are_defaults_and_in_no_group() {
                         }
                         (Storage::Text(x), Storage::Text(y)) => {
                             for (i, e) in x.iter().enumerate() {
-                                assert!(*e == if map[i] >= 0 { y[i].clone() } else { Vec::new() }, "created text row is not empty");
+                                assert!(e == if map[i] >= 0 { &y[i] } else { &[][..] }, "created text row is not empty");
                             }
                         }
                         (Storage::Float2(x), Storage::Float2(y)) => {

@@ -51,7 +51,7 @@ fn members(value: &group::T) -> Vec<i64> {
 enum Scalar {
     Float(Arc<Vec<f64>>),
     Int(Arc<Vec<i64>>),
-    Text(Vec<Vec<u8>>),
+    Text(Arc<rays_math::text_array::TextArray>),
 }
 
 fn scalar_attribute(label: &str, name: &str, geometry_value: &geometry::T) -> Result<Scalar, error::T> {
@@ -105,7 +105,7 @@ fn radius_at(values: &Option<(Scalar, f64)>, point: usize) -> f64 {
 enum MatchViews {
     Float(Arc<Vec<f64>>, Arc<Vec<f64>>),
     Int(Arc<Vec<i64>>, Arc<Vec<i64>>),
-    Text(Vec<Vec<u8>>, Vec<Vec<u8>>),
+    Text(Arc<rays_math::text_array::TextArray>, Arc<rays_math::text_array::TextArray>),
 }
 
 fn match_views(name: &str, source: &geometry::T, target: &geometry::T) -> Result<MatchViews, error::T> {

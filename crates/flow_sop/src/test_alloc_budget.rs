@@ -79,7 +79,7 @@ fn attribute_round_trip_bytes() {
         ("Cd", Storage::Float4(packed::Float4::of_owned(vec![0.25; n], vec![0.5; n], vec![0.75; n], vec![1.0; n]).unwrap())),
         ("mass", Storage::Float(std::sync::Arc::new((0..n).map(|i| i as f64).collect()))),
         ("id", Storage::Int(std::sync::Arc::new((0..n as i64).collect()))),
-        ("tag", Storage::Text((0..n).map(|i| format!("t{i}").into_bytes()).collect())),
+        ("tag", Storage::Text(std::sync::Arc::new((0..n).map(|i| format!("t{i}").into_bytes()).collect()))),
     ] {
         source = geometry::with_attribute(attribute::create_owned(name, Owner::Point, storage).unwrap(), &source).unwrap();
     }
@@ -101,6 +101,35 @@ fn attribute_round_trip_bytes() {
     assert!(allocs.get() <= ROUND_TRIP_ALLOCS, "round trip allocs {} > {ROUND_TRIP_ALLOCS}", allocs.get());
 }
 
-// Measured after M13: 17_264_704 B / 201_176 allocs (18_872_512 B / 201_220 before; the allocs are the text rows).
-const ROUND_TRIP_PEAK: i64 = 17_300_000;
-const ROUND_TRIP_ALLOCS: u64 = 201_200;
+// Measured after M19: 11_258_675 B / 195 allocs (17_264_704 B / 201_176 after M13: the text rows were one allocation each).
+const ROUND_TRIP_PEAK: i64 = 11_300_000;
+const ROUND_TRIP_ALLOCS: u64 = 200;
+
+/// (e) A Flow read then write of a 1M-row text attribute: the rows are one offsets vector and one byte
+/// buffer shared by the geometry and the Flow value, so the round trip allocates a handful of times, not per row.
+#[test]
+fn text_attribute_million_rows() {
+    let n = 1_000_000usize;
+    let topology = topology::polygons_owned(n as i64, Vec::new(), vec![0]).unwrap();
+    let zeros = || vec![0.0; n];
+    let source = geometry::create(packed::Float3::View::of_owned_exn(zeros(), zeros(), zeros()).unwrap(), topology, Some(Vec::new()), None, None).unwrap();
+    let tag = Storage::Text(std::sync::Arc::new((0..n).map(|i| format!("t{i}")).collect()));
+    let source = geometry::with_attribute(attribute::create_owned("tag", Owner::Point, tag).unwrap(), &source).unwrap();
+    let (peak, allocs) = (std::cell::Cell::new(0), std::cell::Cell::new(0));
+    parallel::run_unit(Some(1), &|| {
+        mem_sys::local_reset();
+        let value = attribute_kernel::read(None, Owner::Point, "text", "tag", &source).unwrap();
+        let out = attribute_kernel::write(16_384, Owner::Point, "text", "tag", &value, &source).unwrap();
+        (peak.set(mem_sys::local_peak_bytes()), allocs.set(mem_sys::local_alloc_count()));
+        assert_eq!(geometry::point_count(&out), n as i64);
+        Ok(())
+    })
+    .unwrap();
+    eprintln!("text 1M peak bytes: {} allocs: {}", peak.get(), allocs.get());
+    assert!(peak.get() <= TEXT_PEAK, "text round trip peak {} > {TEXT_PEAK}", peak.get());
+    assert!(allocs.get() <= TEXT_ALLOCS, "text round trip allocs {} > {TEXT_ALLOCS}", allocs.get());
+}
+
+// Measured: 267 B / 8 allocs for 1M rows (Arc clones; the rows are never copied).
+const TEXT_PEAK: i64 = 400;
+const TEXT_ALLOCS: u64 = 8;

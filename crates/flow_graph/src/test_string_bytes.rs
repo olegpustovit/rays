@@ -21,7 +21,7 @@ fn string_bytes() {
         &Op::SetArg { node: card.path.clone(), key: ArgKey::Pos(1), sub: vec![], value: s::make(s::Draft::Str(bytes.clone())) },
     )
     .unwrap();
-    let expected = Value::Text_array(Arc::new(vec![bytes.clone()]));
+    let expected = Value::Text_array(Arc::new(vec![bytes.clone()].into()));
     assert_eq!(result(&workspace, 0.0), expected);
     let saved = lisp::print(&edited).unwrap().0;
     let restored = check(&parse(&saved));

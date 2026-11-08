@@ -48,7 +48,7 @@ pub fn decode(source:&str)->R<geo::T>{
     let attrs=children("attributes",a,unique("attributes")?)?.iter().map(|&id|{let [o,n,k,p]=children("attribute",a,id)? else{return Err(bad("invalid attribute"))};let p=array(a,*p)?;
         let storage=match(sym(a,*k)?,p){
             ("float",[v])=>Storage::Float(Arc::new(float_array(a,*v)?)),("int",[v])=>Storage::Int(Arc::new(int_array(a,*v)?)),
-            ("text",[v])=>Storage::Text(array(a,*v)?.iter().map(|&id|text(a,id).map(<[u8]>::to_vec)).collect::<R<Vec<_>>>()?),
+            ("text",[v])=>Storage::Text(Arc::new(array(a,*v)?.iter().map(|&id|text(a,id)).collect::<R<Vec<_>>>()?.into())),
             ("float2",[x,y])=>Storage::Float2(rk(packed::Float2::of_owned(float_array(a,*x)?,float_array(a,*y)?))?),
             ("float3",[x,y,z])=>Storage::Float3(rk(packed::Float3::of_owned(float_array(a,*x)?,float_array(a,*y)?,float_array(a,*z)?))?),
             ("float4",[x,y,z,w])=>Storage::Float4(rk(packed::Float4::of_owned(float_array(a,*x)?,float_array(a,*y)?,float_array(a,*z)?,float_array(a,*w)?))?),

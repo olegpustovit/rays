@@ -6,6 +6,7 @@ pub mod mat4;
 pub mod noise;
 pub mod quat;
 pub mod rand;
+pub mod text_array;
 pub mod vec2;
 pub mod vec3;
 

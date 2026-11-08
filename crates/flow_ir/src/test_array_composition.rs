@@ -26,7 +26,7 @@ fn sample(ty: &Ty, count: usize) -> Value {
             let p = [MIN_INT, MAX_INT, 9007199254740993, -1, 0];
             Value::Int_array(Arc::new((0..count).map(|i| p[i % 5]).collect()))
         }
-        Ty::Text => Value::Text_array(Arc::new((0..count).map(|i| if i % 2 == 0 { all_bytes() } else { "é日本😀\0".as_bytes().to_vec() }).collect())),
+        Ty::Text => Value::Text_array(Arc::new((0..count).map(|i| if i % 2 == 0 { all_bytes() } else { "é日本😀\0".as_bytes().to_vec() }).collect::<rays_math::text_array::TextArray>())),
         ty => {
             let width = flow_syntax::packed_ops::scalar_width(ty).unwrap();
             let p = [-0., 0., f64::from_bits(1), 1., -1.];
@@ -48,7 +48,7 @@ fn concat_expected(a: &Value, b: &Value) -> Value {
     }
     match (a, b) {
         (Value::Int_array(a), Value::Int_array(b)) => Value::Int_array(cat(a, b)),
-        (Value::Text_array(a), Value::Text_array(b)) => Value::Text_array(cat(a, b)),
+        (Value::Text_array(a), Value::Text_array(b)) => Value::Text_array(Arc::new(a.iter().chain(b.iter()).collect())),
         (Value::Float_array(a), Value::Float_array(b)) => Value::Float_array(cat(a, b)),
         (Value::Vec2_array(a), Value::Vec2_array(b)) => Value::Vec2_array(cat(a, b)),
         (Value::Vec3_array(a), Value::Vec3_array(b)) => Value::Vec3_array(cat(a, b)),
@@ -62,7 +62,7 @@ fn slice_expected(a: &Value, first: usize, count: usize) -> Value {
     }
     match a {
         Value::Int_array(a) => Value::Int_array(sub(a, 1, first, count)),
-        Value::Text_array(a) => Value::Text_array(sub(a, 1, first, count)),
+        Value::Text_array(a) => Value::Text_array(Arc::new(a.iter().skip(first).take(count).collect())),
         Value::Float_array(a) => Value::Float_array(sub(a, 1, first, count)),
         Value::Vec2_array(a) => Value::Vec2_array(sub(a, 2, first, count)),
         Value::Vec3_array(a) => Value::Vec3_array(sub(a, 3, first, count)),

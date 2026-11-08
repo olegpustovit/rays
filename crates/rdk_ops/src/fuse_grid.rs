@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use rays_math::text_array::TextArray;
 
 use rdk_core::support::Windows;
 use rdk_core::{attribute, cancel, error, geometry, group, packed, support};
@@ -24,7 +25,7 @@ enum FuseAttributeView {
     Float4(Arc<Vec<f64>>, Arc<Vec<f64>>, Arc<Vec<f64>>, Arc<Vec<f64>>),
     IntArray(Arc<Vec<i64>>, Arc<Vec<i64>>),
     FloatArray(Arc<Vec<i64>>, Arc<Vec<f64>>),
-    Text(Vec<Vec<u8>>),
+    Text(Arc<TextArray>),
 }
 
 fn make(operation: &str, code: &str, message: String) -> error::T {
@@ -1167,7 +1168,7 @@ mod tests {
             &linked,
             Owner::Point,
             "rule_text",
-            Storage::Text((0..total).map(|p| if p < half { b"q" } else { b"t" }.to_vec()).collect()),
+            Storage::Text(Arc::new((0..total).map(|p| if p < half { &b"q"[..] } else { &b"t"[..] }).collect())),
         );
         let linked = geometry::with_group(point_group("rule_group", total, &|p| p & 1 == 0), &linked).unwrap();
         let rules_run = |domains: i64| {

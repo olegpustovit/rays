@@ -569,13 +569,13 @@ fn remap_attribute(
             &discrete_mapping(plan, owner),
             values,
         )?)),
-        attribute::Storage::Text(values) => attribute::Storage::Text(topology_remap::select_text(
+        attribute::Storage::Text(values) => attribute::Storage::Text(Arc::new(topology_remap::select_text(
             cancel_value,
             chunk,
             None,
             &discrete_mapping(plan, owner),
             values,
-        )?),
+        )?)),
         attribute::Storage::IntArray(values) => attribute::Storage::IntArray(ragged_ops::remap_int(
             cancel_value,
             grain,

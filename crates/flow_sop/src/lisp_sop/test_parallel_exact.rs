@@ -1101,7 +1101,7 @@ fn subdivision_detail_source() {
     let source=grid(60,40,8.0,false);let count=geo::vertex_count(&source);
     let source=add(&source,Owner::Vertex,"fvar_sample",Storage::Float(Arc::new((0..count).map(|v|((v%127) as f64).powi(2)).collect())));
     let mut source=add(&source,Owner::Vertex,"creaseweight",Storage::Float(Arc::new((0..count).map(|v|((v*17%41) as f64)/10.0).collect())));
-    source=add(&source,Owner::Detail,"osd_scheme",Storage::Text(vec![b"catmull-clark".to_vec()]));
+    source=add(&source,Owner::Detail,"osd_scheme",Storage::Text(Arc::new(vec![b"catmull-clark".to_vec()].into())));
     for (name,value) in [("osd_vtxboundaryinterpolation",2),("osd_fvarlinearinterpolation",0),("osd_creasingmethod",1),("osd_trianglesubdiv",1)] {source=add(&source,Owner::Detail,name,Storage::Int(Arc::new(vec![value])));}
     let source=super::snapshot(&source);
     let one=exact(&bind(&[("detail_source",&source)],r###"(sop/subdivide
@@ -1383,7 +1383,7 @@ fn combining_columns() {
 #[test]
 fn combining_named_count() {
     let source=line_geometry::points(&(0..200_003).map(|p|(p as f64,0.0,0.0)).collect::<Vec<_>>()).unwrap();
-    let source=super::snapshot(&add(&source,Owner::Point,"piece_name",Storage::Text((0..200_003).map(|p|if p%101==0 {Vec::new()}else{format!("piece_{:02}",p%32).into_bytes()}).collect())));
+    let source=super::snapshot(&add(&source,Owner::Point,"piece_name",Storage::Text(Arc::new((0..200_003).map(|p|if p%101==0 {Vec::new()}else{format!("piece_{:02}",p%32).into_bytes()}).collect()))));
     let named=bind(&[("named_source",&source)],r###"(sop/groups_from_name (sop/ext_named_source) :owner "Point" :attribute "piece_name")"###);exact(&named);
     exact(&bind(&[("named",&named)],r###"(sop/name_from_groups
    (sop/ext_named)

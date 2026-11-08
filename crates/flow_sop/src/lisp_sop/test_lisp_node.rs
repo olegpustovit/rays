@@ -409,7 +409,7 @@ fn a_lisp_body_keeps_topology_attributes_and_ordered_groups() {
     let attributes: Vec<rdk_core::attribute::T> = vec![
         (Owner::Point, "weight", Storage::Float(Arc::new(vec![0.25, 0.5, 0.75]))),
         (Owner::Point, "id", Storage::Int(Arc::new(vec![2, 1, 0]))),
-        (Owner::Point, "tag", Storage::Text(vec![b"one".to_vec(), b"two".to_vec(), b"three".to_vec()])),
+        (Owner::Point, "tag", Storage::Text(Arc::new(vec![b"one".to_vec(), b"two".to_vec(), b"three".to_vec()].into()))),
         (Owner::Point, "weights", Storage::FloatArray(rdk_ok(rdk_core::packed::FloatArray::create_owned(vec![0, 0, 2, 3], vec![0.25, 0.5, 0.75])))),
         (Owner::Vertex, "uv", Storage::Float3(positions.clone())),
         (Owner::Primitive, "material", Storage::Int(Arc::new(vec![7]))),

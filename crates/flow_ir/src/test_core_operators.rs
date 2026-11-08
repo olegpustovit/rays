@@ -315,7 +315,7 @@ fn text_arrays_dependent_clauses_and_nested_numeric_bodies_refuse_honestly() {
     let dependent = live_value(r##"(for [x (array/text 2 "猫") y (array/text (if (equal? x "猫") 2501 0) "😀")] (if (> t 0.) x y))"##);
     assert_eq!(ts::lower_strict(residual_of(&dependent)).err().as_deref(), Some("text_collect_dependent_clause"));
     assert!(Executor::compile(&dependent, &Executor::CompileOptions { strict: true, ..Default::default() }).is_err());
-    assert!(ok(E::Host::force_reference(&dependent, &input::at_time(1.), None, None, None)) == Value::Text_array(Arc::new(vec!["猫".as_bytes().to_vec(); 5002])));
+    assert!(ok(E::Host::force_reference(&dependent, &input::at_time(1.), None, None, None)) == Value::Text_array(Arc::new(vec!["猫".as_bytes().to_vec(); 5002].into())));
     let nested_numeric = live_value(
         "(map (fn [x] (text/trim (text/lower (str (array/sum (map (fn [y] (value/rand y t)) (array/float 2))))))) (array/text 2))",
     );

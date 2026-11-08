@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use rays_math::text_array::TextArray;
 
 use rdk_core::{
     attribute, cancel, edge_group, error, geometry, packed, support, topology, topology_index,
@@ -32,7 +33,7 @@ enum Connectivity {
     Always,
     Float(Arc<Vec<f64>>),
     Int(Arc<Vec<i64>>),
-    Text(Vec<Vec<u8>>),
+    Text(Arc<TextArray>),
     Float2(Arc<Vec<f64>>, Arc<Vec<f64>>),
     Float3(Arc<Vec<f64>>, Arc<Vec<f64>>, Arc<Vec<f64>>),
     Float4(Arc<Vec<f64>>, Arc<Vec<f64>>, Arc<Vec<f64>>, Arc<Vec<f64>>),
@@ -346,14 +347,14 @@ mod tests {
             &g,
             Owner::Point,
             "label",
-            Storage::Text(["a", "b", "c", "d"].iter().map(|s| s.as_bytes().to_vec()).collect()),
+            Storage::Text(Arc::new(["a", "b", "c", "d"].iter().map(|s| s.as_bytes()).collect())),
         );
         let rows = packed::IntArray::create_owned(vec![0, 1, 2, 3, 4], vec![10, 11, 12, 13]).unwrap();
         let g = with_attr(&g, Owner::Point, "rows", Storage::IntArray(rows));
         let g = with_attr(&g, Owner::Point, "__rdk_edge_collapse_target", Storage::Int(Arc::new(vec![9, 8, 7, 6])));
         let g = with_attr(&g, Owner::Point, "N", float3_attr(vec![1.; 4], vec![0.; 4], vec![0.; 4]));
         let g = with_attr(&g, Owner::Vertex, "corner", Storage::Float(Arc::new(vec![10., 20., 30., 40.])));
-        let g = with_attr(&g, Owner::Primitive, "material", Storage::Text(vec![b"panel".to_vec()]));
+        let g = with_attr(&g, Owner::Primitive, "material", Storage::Text(std::sync::Arc::new(vec![b"panel".to_vec()].into())));
         let g = with_attr(&g, Owner::Detail, "meta", Storage::Int(Arc::new(vec![42])));
         let ordered = group::ordered(group::Owner::Point, "ordered", 4, &[1, 0, 2]).unwrap();
         let corners = group::init(None, group::Owner::Vertex, "corners", 4, &|v| v < 3).unwrap();

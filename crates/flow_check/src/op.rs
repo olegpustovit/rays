@@ -2,6 +2,7 @@ use flow_syntax::{context::{self, Context}, packed_ops, ty::{self, Ty}, value::{
 use input::{self, Event, Frame};
 use param;
 use rays_diagnostic::Diagnostic;
+use rays_math::text_array::TextArray;
 use std::sync::{Arc, LazyLock, Mutex};
 use flow_syntax::value::int_of;
 
@@ -222,8 +223,9 @@ fn array_memory_error()->Diagnostic{fail("E_ARRAY_MEMORY","Frame data exceeds av
 fn copied<T:Copy>(source:&[T])->Result<Vec<T>,Diagnostic>{
     let mut result=value::array_buffer(source.len())?;result.extend_from_slice(source);Ok(result)
 }
-fn copied_text(source:&[Vec<u8>])->Result<Vec<Vec<u8>>,Diagnostic>{
-    let mut result=value::array_buffer(source.len())?;for text in source{result.push(copied(text)?);}Ok(result)
+fn text_buffer(rows:usize)->Result<TextArray,Diagnostic>{TextArray::try_with_capacity(rows).map_err(|_|array_memory_error())}
+fn copied_text(source:&TextArray,first:usize,count:usize)->Result<TextArray,Diagnostic>{
+    let mut result=text_buffer(count)?;for text in source.iter().skip(first).take(count){result.push(text);}Ok(result)
 }
 fn joined<T:Copy>(a:&[T],b:&[T])->Result<Vec<T>,Diagnostic>{
     let mut result=value::array_buffer(a.len().checked_add(b.len()).ok_or_else(array_memory_error)?)?;
@@ -334,7 +336,7 @@ fn grade(values:&Value,descending:bool)->Result<Value,Diagnostic>{
 fn index_of(keys:&Value,queries:&Value)->Result<Value,Diagnostic>{
     let result=match (keys,queries){
         (Value::Int_array(k),Value::Int_array(q))=>{let mut map=std::collections::HashMap::new();map.try_reserve(k.len()).map_err(|_|array_memory_error())?;for (i,x) in k.iter().enumerate(){map.entry(*x).or_insert(i as i64);}let mut result=value::array_buffer(q.len())?;result.extend(q.iter().map(|x|*map.get(x).unwrap_or(&-1)));result},
-        (Value::Text_array(k),Value::Text_array(q))=>{let mut map=std::collections::HashMap::new();map.try_reserve(k.len()).map_err(|_|array_memory_error())?;for (i,x) in k.iter().enumerate(){map.entry(x.as_slice()).or_insert(i as i64);}let mut result=value::array_buffer(q.len())?;result.extend(q.iter().map(|x|*map.get(x.as_slice()).unwrap_or(&-1)));result},
+        (Value::Text_array(k),Value::Text_array(q))=>{let mut map=std::collections::HashMap::new();map.try_reserve(k.len()).map_err(|_|array_memory_error())?;for (i,x) in k.iter().enumerate(){map.entry(x).or_insert(i as i64);}let mut result=value::array_buffer(q.len())?;result.extend(q.iter().map(|x|*map.get(x).unwrap_or(&-1)));result},
         _=>return Err(fail("E_ARRAY_TYPE","Index lookup needs matching int or text arrays."))};
     Ok(Value::Int_array(Arc::new(result)))
 }
@@ -422,10 +424,10 @@ fn frame_ops()->Vec<Op>{
     let key_body:Body=Arc::new(|f,_,args|{let key=text_string(args.get_arg("key")?)?;Ok(Value::Bool(f.keys.iter().any(|k|input::key_name(*k)==key)))});
     let mut key=value_op("key/down",vec![("key",Ty::Text)],vec![],None,vec![],Ty::Bool,"Frame",key_body);key.live=true;out.push(key);out
 }
-fn bytes_split(source:&[u8],separator:&[u8])->Vec<Vec<u8>>{
-    let mut out=Vec::new();let mut start=0;let mut i=0;
-    while i+separator.len()<=source.len(){if &source[i..i+separator.len()]==separator{out.push(source[start..i].to_vec());i+=separator.len();start=i}else{i+=1}}
-    out.push(source[start..].to_vec());out
+fn bytes_split(source:&[u8],separator:&[u8])->TextArray{
+    let mut out=TextArray::new();let mut start=0;let mut i=0;
+    while i+separator.len()<=source.len(){if &source[i..i+separator.len()]==separator{out.push(&source[start..i]);i+=separator.len();start=i}else{i+=1}}
+    out.push(&source[start..]);out
 }
 fn trim_ascii(bytes:&[u8])->&[u8]{let mut start=0;let mut end=bytes.len();while start<end&&bytes[start].is_ascii_whitespace(){start+=1}while end>start&&bytes[end-1].is_ascii_whitespace(){end-=1}&bytes[start..end]}
 fn parse_float_token(bytes:&[u8])->Option<f64>{
@@ -482,7 +484,7 @@ fn array_constructor(ty:Ty,count:usize,fill:&Value)->Result<Value,Diagnostic>{
     if matches!(ty,Ty::Float|Ty::Vec2|Ty::Vec3|Ty::Vec4)&&count>MAX_WOSIZE/width{return Err(fail("E_ARRAY_RANGE","Array length is outside native storage bounds."))}
     if ty==Ty::Text{
         let Value::Text(bytes)=fill else{return Err(fail("E_ARRAY_TYPE","Text arrays contain text values."))};
-        let mut values=value::array_buffer(count)?;for _ in 0..count{values.push(copied(bytes)?);}return Ok(Value::Text_array(Arc::new(values)))
+        let mut values=text_buffer(count)?;for _ in 0..count{values.push(bytes);}return Ok(Value::Text_array(Arc::new(values)))
     }
     let count=i64::try_from(count).map_err(|_|fail("E_ARRAY_RANGE","Array length is outside native storage bounds."))?;
     value::array_init(&ty,count,&|_|fill.clone())
@@ -522,7 +524,7 @@ fn array_ops()->Vec<Op>{
     let slice_out:Out=Arc::new(|ts|Ok(ts.first().filter(|t|matches!(t,Ty::Array(_))).cloned().unwrap_or(arr(Ty::Any))));
     ops.push(with_defaults(mk("array/slice",context::value(),signature(vec![("array",arr(Ty::Any)),("first",Ty::Int),("count",Ty::Int)],vec![],None,vec![]),slice_out,Arc::new(|_,_,a|{
         let source=a.get_arg("array")?;let first=checked_count("array/slice",a.get_arg("first")?,MAX_WOSIZE)?;let count=checked_count("array/slice",a.get_arg("count")?,MAX_WOSIZE)?;let n=value::array_length(source)?;if first>n||count>n-first{return Err(fail("E_ARRAY_RANGE","An array slice must be within its source."))}
-        match source{Value::Int_array(x)=>Ok(Value::Int_array(Arc::new(copied(&x[first..first+count])?))),Value::Text_array(x)=>Ok(Value::Text_array(Arc::new(copied_text(&x[first..first+count])?))),Value::Float_array(x)=>Ok(Value::Float_array(Arc::new(copied(&x[first..first+count])?))),Value::Vec2_array(x)=>Ok(Value::Vec2_array(Arc::new(copied(&x[first*2..(first+count)*2])?))),Value::Vec3_array(x)=>Ok(Value::Vec3_array(Arc::new(copied(&x[first*3..(first+count)*3])?))),Value::Vec4_array(x)=>Ok(Value::Vec4_array(Arc::new(copied(&x[first*4..(first+count)*4])?))),_=>Err(fail("E_TYPE","Expected a packed array."))}
+        match source{Value::Int_array(x)=>Ok(Value::Int_array(Arc::new(copied(&x[first..first+count])?))),Value::Text_array(x)=>Ok(Value::Text_array(Arc::new(copied_text(x,first,count)?))),Value::Float_array(x)=>Ok(Value::Float_array(Arc::new(copied(&x[first..first+count])?))),Value::Vec2_array(x)=>Ok(Value::Vec2_array(Arc::new(copied(&x[first*2..(first+count)*2])?))),Value::Vec3_array(x)=>Ok(Value::Vec3_array(Arc::new(copied(&x[first*3..(first+count)*3])?))),Value::Vec4_array(x)=>Ok(Value::Vec4_array(Arc::new(copied(&x[first*4..(first+count)*4])?))),_=>Err(fail("E_TYPE","Expected a packed array."))}
     })),"Array"));
     let concat_out:Out=Arc::new(|ts|Ok(ts.first().filter(|t|matches!(t,Ty::Array(_))).cloned().unwrap_or(arr(Ty::Any))));
     ops.push(with_defaults(mk("array/concat",context::value(),signature(vec![("first",arr(Ty::Any)),("second",arr(Ty::Any))],vec![],None,vec![]),concat_out,Arc::new(|_,_,a|{let x=a.get_arg("first")?;let y=a.get_arg("second")?;concat_arrays(x,y)})),"Array"));
@@ -753,7 +755,7 @@ fn text_ops()->Vec<Op>{
     ops.push(value_op("text/lower",vec![("text",Ty::Text)],vec![],None,vec![],Ty::Text,"Text",Arc::new(|_,_,a|Ok(Value::Text(text_bytes(a.get_arg("text")?)?.iter().map(u8::to_ascii_lowercase).collect())))));
     ops.push(value_op("text/repr",vec![("text",Ty::Text)],vec![],None,vec![],Ty::Text,"Text",Arc::new(|_,_,a|Ok(Value::Text(text_repr(text_bytes(a.get_arg("text")?)?))))));
     ops.push(value_op("text/split",vec![("text",Ty::Text),("separator",Ty::Text)],vec![],None,vec![],arr(Ty::Text),"Text",Arc::new(|_,_,a|{let source=text_bytes(a.get_arg("text")?)?;let separator=text_bytes(a.get_arg("separator")?)?;if separator.is_empty(){return Err(fail("E_TEXT_SEPARATOR","text/split needs a nonempty separator."))}Ok(Value::Text_array(Arc::new(bytes_split(source,separator))))})));
-    ops.push(value_op("text/tokens",vec![("text",Ty::Text)],vec![],None,vec![],arr(Ty::Text),"Text",Arc::new(|_,_,a|{let b=text_bytes(a.get_arg("text")?)?;let mut out=Vec::new();let mut start=0;for i in 0..=b.len(){if i==b.len()||matches!(b[i],b' '|b','|b'\t'|b'\n'){if i>start{out.push(b[start..i].to_vec())}start=i+1}}Ok(Value::Text_array(Arc::new(out)))})));
+    ops.push(value_op("text/tokens",vec![("text",Ty::Text)],vec![],None,vec![],arr(Ty::Text),"Text",Arc::new(|_,_,a|{let b=text_bytes(a.get_arg("text")?)?;let mut out=TextArray::new();let mut start=0;for i in 0..=b.len(){if i==b.len()||matches!(b[i],b' '|b','|b'\t'|b'\n'){if i>start{out.push(&b[start..i])}start=i+1}}Ok(Value::Text_array(Arc::new(out)))})));
     for (name,float_result) in [("text/to_float",true),("text/to_int",false)]{
         let result=if float_result{Ty::Float}else{Ty::Int};
         ops.push(value_op(name,vec![("text",Ty::Text)],vec![],None,vec![],rec(vec![("value",result.clone()),("valid",Ty::Bool)]),"Text",Arc::new(move |_,_,a|{
@@ -957,7 +959,7 @@ fn concat_arrays(x:&Value,y:&Value)->Result<Value,Diagnostic>{
     if count>MAX_WOSIZE/width{return Err(fail("E_ARRAY_RANGE","Array length is outside native storage bounds."))}
     match (x,y){
         (Value::Int_array(a),Value::Int_array(b))=>Ok(Value::Int_array(Arc::new(joined(a,b)?))),
-        (Value::Text_array(a),Value::Text_array(b))=>{let mut result=value::array_buffer(a.len().checked_add(b.len()).ok_or_else(array_memory_error)?)?;for text in a.iter().chain(b.iter()){result.push(copied(text)?);}Ok(Value::Text_array(Arc::new(result)))},
+        (Value::Text_array(a),Value::Text_array(b))=>{let mut result=text_buffer(a.len().checked_add(b.len()).ok_or_else(array_memory_error)?)?;for text in a.iter().chain(b.iter()){result.push(text);}Ok(Value::Text_array(Arc::new(result)))},
         (Value::Float_array(a),Value::Float_array(b))=>Ok(Value::Float_array(Arc::new(joined(a,b)?))),
         (Value::Vec2_array(a),Value::Vec2_array(b))=>Ok(Value::Vec2_array(Arc::new(joined(a,b)?))),
         (Value::Vec3_array(a),Value::Vec3_array(b))=>Ok(Value::Vec3_array(Arc::new(joined(a,b)?))),

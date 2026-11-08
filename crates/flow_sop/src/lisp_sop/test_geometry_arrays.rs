@@ -330,21 +330,21 @@ fn deferred_malformed_mesh_publishes_no_cache_entry(){
 fn text_attribute_eval_read_write_preserves_every_byte() {
     let bytes: Vec<u8> = (0..=255).collect();
     let rows = vec![bytes.clone(), bytes.iter().rev().copied().collect(), vec![255], Vec::new(), [b"\xe7\x8c\xab".as_slice(), &[255]].concat()];
-    let input = geo::with_attribute(attribute::create_owned("bytes", Owner::Point, Storage::Text(rows.clone())).unwrap(), &fixture(1)).unwrap();
+    let input = geo::with_attribute(attribute::create_owned("bytes", Owner::Point, Storage::Text(Arc::new(rows.clone().into()))).unwrap(), &fixture(1)).unwrap();
     let lookup: ak::GeometryLookup = Arc::new({ let input = input.clone(); move |_| Some(input.clone()) });
     let source = source_value("sop/attr", Ty::Array(Box::new(Ty::Text)), vec![
         ("geometry".into(), Value::Deferred(ty::geometry(), 7)),
         ("attribute".into(), Value::Text(b"bytes".to_vec())),
         ("type".into(), Value::Text(b"text".to_vec())),
     ]);
-    assert_eq!(ak::resolve(None, &lookup, &source).unwrap(), Value::Text_array(Arc::new(rows.clone())));
+    assert_eq!(ak::resolve(None, &lookup, &source).unwrap(), Value::Text_array(Arc::new(rows.clone().into())));
     let literal = flow_syntax::lisp::quote_string(&bytes);
     let cases = [
-        (r#"(exact (map (fn [(value : text)] (str value "\000")) (sop/attr geo "bytes" :type text)))"#.to_owned(), rows.iter().map(|row| [row.as_slice(), &[0]].concat()).collect()),
+        (r#"(exact (map (fn [(value : text)] (str value "\000")) (sop/attr geo "bytes" :type text)))"#.to_owned(), rows.iter().map(|row| [row.as_slice(), &[0]].concat()).collect::<Vec<Vec<u8>>>()),
         (format!("(array/text (sop/count geo :points) {literal})"), vec![bytes; rows.len()]),
     ];
     for (values, expected) in cases {
-        let expected = geo::with_attribute(attribute::create_owned("copied", Owner::Point, Storage::Text(expected)).unwrap(), &input).unwrap();
+        let expected = geo::with_attribute(attribute::create_owned("copied", Owner::Point, Storage::Text(Arc::new(expected.into()))).unwrap(), &input).unwrap();
         for reference in [false, true] {
             let root = authored(reference, &input, &wrapped(&format!("(sop/with_attr geo \"copied\" {values} :type text)")));
             for domains in [1, 8] {

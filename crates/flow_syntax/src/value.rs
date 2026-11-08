@@ -1,5 +1,6 @@
 use crate::{packed_ops, ty::{self, Ty}};
 use rays_diagnostic::{Diagnostic, Severity};
+use rays_math::text_array::TextArray;
 use std::sync::{Arc, LazyLock, Mutex, Weak};
 
 /// A function / residual value: its id and the evaluation (arena) it lives in. OCaml's value carries its
@@ -40,7 +41,7 @@ pub enum Value {
     Vec4(f64, f64, f64, f64),
     List(Arc<Vec<Value>>),
     Int_array(Arc<Vec<i64>>),
-    Text_array(Arc<Vec<Vec<u8>>>),
+    Text_array(Arc<TextArray>),
     Float_array(Arc<Vec<f64>>),
     Vec2_array(Arc<Vec<f64>>),
     Vec3_array(Arc<Vec<f64>>),
@@ -250,12 +251,12 @@ pub fn show_with(conc: &dyn Fn(&Value) -> Value, value: &Value) -> Vec<u8> {
 #[derive(Clone)]
 enum MemoKey {
     Int(Weak<Vec<i64>>),
-    Text(Weak<Vec<Vec<u8>>>),
+    Text(Weak<TextArray>),
     Float(Weak<Vec<f64>>),
 }
 impl MemoKey {
     fn int(values: &Arc<Vec<i64>>) -> Self { Self::Int(Arc::downgrade(values)) }
-    fn text(values: &Arc<Vec<Vec<u8>>>) -> Self { Self::Text(Arc::downgrade(values)) }
+    fn text(values: &Arc<TextArray>) -> Self { Self::Text(Arc::downgrade(values)) }
     fn float(values: &Arc<Vec<f64>>) -> Self { Self::Float(Arc::downgrade(values)) }
     fn live(&self) -> bool {
         match self { Self::Int(key) => key.strong_count() > 0, Self::Text(key) => key.strong_count() > 0, Self::Float(key) => key.strong_count() > 0 }
@@ -356,9 +357,9 @@ fn digest_int_array(values: &[i64]) -> String {
     for value in values { for byte in value.to_le_bytes() { hash = (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3); } }
     format!("{:016x}", hash)
 }
-fn digest_text_array(values: &[Vec<u8>]) -> String {
+fn digest_text_array(values: &TextArray) -> String {
     let mut hash = 0xcbf29ce484222325_u64;
-    for value in values {
+    for value in values.iter() {
         for byte in (value.len() as u64).to_le_bytes() { hash = (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3); }
         for byte in value { hash = (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3); }
     }
@@ -375,7 +376,7 @@ fn key_int_array(values: &Arc<Vec<i64>>) -> Vec<u8> {
     let digest = memo_digest(MemoKey::int(values), &|| digest_int_array(values));
     format!("AI#{}:{digest}", values.len()).into_bytes()
 }
-fn key_text_array(values: &Arc<Vec<Vec<u8>>>) -> Vec<u8> {
+fn key_text_array(values: &Arc<TextArray>) -> Vec<u8> {
     if values.len() <= 4096 {
         let mut key = b"AT[".to_vec();
         for (index, text) in values.iter().enumerate() {
@@ -545,8 +546,8 @@ pub fn array_buffer<T>(count: usize) -> Result<Vec<T>, Diagnostic> {
 pub fn array_init(element: &Ty, count: i64, f: &dyn Fn(usize) -> Value) -> Result<Value, Diagnostic> {
     if *element == Ty::Text {
         let count = allocation_count_ok(count, 1)?;
-        let mut values = array_buffer(count)?;
-        for index in 0..count { match f(index) { Value::Text(text) => values.push(text), _ => return Err(fail("E_ARRAY_TYPE", "Text arrays contain text values.")) } }
+        let mut values = TextArray::try_with_capacity(count).map_err(|_| fail("E_ARRAY_MEMORY", "Frame data exceeds available memory."))?;
+        for index in 0..count { match f(index) { Value::Text(text) => values.push(&text), _ => return Err(fail("E_ARRAY_TYPE", "Text arrays contain text values.")) } }
         return Ok(Value::Text_array(Arc::new(values)));
     }
     if *element == Ty::Int {
@@ -706,8 +707,8 @@ mod tests {
         assert_eq!(show_with(&|value| value.clone(), &packed), "6 × int".as_bytes().to_vec());
         assert_ne!(key_of(&|id| id.0, &packed), key_of(&|id| id.0, &Value::Float_array(Arc::new(integers.iter().map(|n| *n as f64).collect()))));
         assert_eq!(array_init(&Ty::Int, 0, &|_| unreachable!()).unwrap(), Value::Int_array(Arc::new(vec![])));
-        assert_eq!(array_init(&Ty::Text, 0, &|_| unreachable!()).unwrap(), Value::Text_array(Arc::new(vec![])));
-        assert_eq!(array_init(&Ty::Text, 2, &|index| Value::Text(vec![0xff, index as u8])).unwrap(), Value::Text_array(Arc::new(vec![vec![0xff, 0], vec![0xff, 1]])));
+        assert_eq!(array_init(&Ty::Text, 0, &|_| unreachable!()).unwrap(), Value::Text_array(Arc::new(TextArray::new())));
+        assert_eq!(array_init(&Ty::Text, 2, &|index| Value::Text(vec![0xff, index as u8])).unwrap(), Value::Text_array(Arc::new(vec![vec![0xff, 0], vec![0xff, 1]].into())));
         assert_eq!(array_init(&Ty::Text, 1, &|_| Value::Int(0)).unwrap_err().code, "E_ARRAY_TYPE");
         for count in [-1, i64::MAX] { assert_eq!(array_init(&Ty::Int, count, &|_| unreachable!()).unwrap_err().code, "E_ARRAY_RANGE"); }
         for element in [Ty::Int, Ty::Float, Ty::Vec2, Ty::Vec3, Ty::Vec4, Ty::Text] {
@@ -737,11 +738,11 @@ mod tests {
         validate(&state).unwrap();
         assert_eq!(array_get(&packed, -1).unwrap_err().code, "E_ARRAY_RANGE");
         assert_eq!(array_get(&packed, integers.len() as i64).unwrap_err().code, "E_ARRAY_RANGE");
-        let texts = Arc::new(vec![Vec::new(), "猫".as_bytes().to_vec(), b"a\0b".to_vec(), "é".as_bytes().to_vec(), "😀".as_bytes().to_vec(), b"quote\"\\\n".to_vec()]);
+        let texts = Arc::new(TextArray::from(vec![Vec::new(), "猫".as_bytes().to_vec(), b"a\0b".to_vec(), "é".as_bytes().to_vec(), "😀".as_bytes().to_vec(), b"quote\"\\\n".to_vec()]));
         let array = Value::Text_array(texts.clone());
         assert_eq!(ty_of(&array), Ty::Array(Box::new(Ty::Text)));
         assert_eq!(array_length(&array), Ok(texts.len()));
-        for (index, text) in texts.iter().enumerate() { assert_eq!(array_get(&array, index as i64), Ok(Value::Text(text.clone()))); }
+        for (index, text) in texts.iter().enumerate() { assert_eq!(array_get(&array, index as i64), Ok(Value::Text(text.to_vec()))); }
         assert_eq!(show_with(&|value| value.clone(), &array), "6 × text".as_bytes().to_vec());
         let bytes = (0_u8..=255).collect::<Vec<_>>();
         let every_byte = Value::Text(bytes.clone());
@@ -749,7 +750,7 @@ mod tests {
         let mut expected_key = b"s256:".to_vec();
         expected_key.extend(0_u8..=255);
         assert_eq!(key_of(&|id| id.0, &every_byte), expected_key);
-        let byte_array = Value::Text_array(Arc::new(vec![(0_u8..=255).collect()]));
+        let byte_array = Value::Text_array(Arc::new(vec![(0_u8..=255).collect::<Vec<u8>>()].into()));
         assert_eq!(array_get(&byte_array, 0), Ok(Value::Text((0_u8..=255).collect())));
         let mut expected_array_key = b"AT[256:".to_vec();
         expected_array_key.extend(0_u8..=255);
@@ -806,12 +807,12 @@ mod tests {
         finite.validate_once(&values, &check).unwrap();
         assert_eq!(checks.load(Ordering::Relaxed), 1);
         let large_ints = Value::Int_array(Arc::new(vec![7; 4097]));
-        let large_texts = Value::Text_array(Arc::new(vec![b"x".to_vec(); 4097]));
+        let large_texts = Value::Text_array(Arc::new(vec![b"x".to_vec(); 4097].into()));
         assert_eq!(key_of(&|id| id.0, &packed), key_of(&|id| id.0, &packed));
         assert_eq!(key_of(&|id| id.0, &large_ints), key_of(&|id| id.0, &large_ints));
         assert_eq!(key_of(&|id| id.0, &large_texts), key_of(&|id| id.0, &large_texts));
-        let large_invalid = Value::Text_array(Arc::new(vec![vec![0xff]; 4097]));
-        let large_other = Value::Text_array(Arc::new(vec![vec![0xfe]; 4097]));
+        let large_invalid = Value::Text_array(Arc::new(vec![vec![0xff]; 4097].into()));
+        let large_other = Value::Text_array(Arc::new(vec![vec![0xfe]; 4097].into()));
         assert_ne!(key_of(&|id| id.0, &large_invalid), key_of(&|id| id.0, &large_other));
         assert!(remembered().iter().any(|entry| entry.owner == "array_key" && entry.bytes > 0));
         assert!(remembered().iter().any(|entry| entry.owner == "finite_arrays" && entry.bytes > 0));

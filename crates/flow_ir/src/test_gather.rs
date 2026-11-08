@@ -130,7 +130,7 @@ fn text_bytes(parts: &[&[u8]]) -> Vec<Vec<u8>> {
     parts.iter().map(|p| p.to_vec()).collect()
 }
 fn texts(parts: &[&[u8]]) -> Value {
-    Value::Text_array(Arc::new(text_bytes(parts)))
+    Value::Text_array(Arc::new(text_bytes(parts).into()))
 }
 fn lit(bytes: &[u8]) -> String {
     text_literal(bytes)
@@ -520,7 +520,7 @@ fn malformed_public_region_input_is_checked_when_selected() {
             let p = Region::rebuild(&template, rebuild).unwrap_or_else(|ds| panic!("{}", show_ds(&ds)));
             for domains in [1, 4, 8] {
                 with_domains(domains, &|| match force(&p, &live) {
-                    Ok(result) => assert!(!selected && result == Value::Text_array(Arc::new(vec![b"safe\xff\0".to_vec(); count]))),
+                    Ok(result) => assert!(!selected && result == Value::Text_array(Arc::new(vec![b"safe\xff\0".to_vec(); count].into()))),
                     Err(d) => assert!(selected && d.code == "E_ARRAY_TYPE" && d.message == "Kernel input changed its packed element type.", "{}", d.message),
                 });
             }
@@ -666,7 +666,7 @@ fn text_nested_guards_and_error_arm() {
     // Nested one-lane guards change across blocks; the last lane alone takes the error arm, and
     // untaken invalid reads must never execute.
     let live = live_at(0.25);
-    let table = Value::Text_array(Arc::new(strings()));
+    let table = Value::Text_array(Arc::new(strings().into()));
     for count in [2048usize, 2049] {
         let value = instantiate(
             Some(&table),
@@ -694,7 +694,7 @@ fn text_nested_guards_and_error_arm() {
 fn text_leaves_are_immutable_byte_copies() {
     let live = live_at(0.25);
     let strs = strings();
-    let table = Value::Text_array(Arc::new(strs.clone()));
+    let table = Value::Text_array(Arc::new(strs.clone().into()));
     for count in [0usize, 1, 13, 2049] {
         let value = instantiate(Some(&table), &arr(Ty::Text), "(fn [(index : int)] (if (int/ge index 0) (array/nth data (int/mod index 7)) \"untaken\"))", (0..count as i64).collect());
         let reference = ok(force_reference(&value, &live));
@@ -725,7 +725,7 @@ fn text_leaves_are_immutable_byte_copies() {
 fn text_helper_lookup() {
     let live = live_at(0.25);
     let strs = strings();
-    let table = Value::Text_array(Arc::new(strs.clone()));
+    let table = Value::Text_array(Arc::new(strs.clone().into()));
     let value = instantiate_with(Some(table.clone()), "lookup (fn [(names : (array text)) (index : int)] (array/nth names index))", &arr(Ty::Text), "(fn [(index : int)] (let* [alias data] (lookup alias (int/mod index 7))))", (0..2049).collect());
     assert_eq!(bits(&ok(force(&pk(&value), &live))), bits(&ok(force_reference(&value, &live))));
 }
@@ -734,7 +734,7 @@ fn text_helper_lookup() {
 fn text_select_and_error_causes() {
     let live = live_at(0.25);
     let strs = strings();
-    let table = Value::Text_array(Arc::new(strs.clone()));
+    let table = Value::Text_array(Arc::new(strs.clone().into()));
 
     let closure = make_fn("", &arr(Ty::Text), "(fn [(index : int) (old : text)] (if (int/ge index 0) (array/nth data (int/mod index 7)) old))");
     let closure = e::Host::map_function_bindings(closure, &|value| match value {
@@ -743,7 +743,7 @@ fn text_select_and_error_causes() {
     });
     let indices: Vec<i64> = (0..2049).map(|i| if i % 5 == 0 { -1 } else { i }).collect();
     let old: Vec<Vec<u8>> = (0..2049).map(|i| strs[(i + 2) % 7].clone()).collect();
-    let selected = ok(e::Host::map_function(None, None, &FnSignature { params: vec![Ty::Int, Ty::Text], result: Ty::Text }, closure, &[Value::Int_array(Arc::new(indices.clone())), Value::Text_array(Arc::new(old.clone()))]));
+    let selected = ok(e::Host::map_function(None, None, &FnSignature { params: vec![Ty::Int, Ty::Text], result: Ty::Text }, closure, &[Value::Int_array(Arc::new(indices.clone())), Value::Text_array(Arc::new(old.clone().into()))]));
     let selected_reference = bits(&ok(force_reference(&selected, &live)));
     for domains in [1, 4, 8] {
         with_domains(domains, &|| {
@@ -773,7 +773,7 @@ fn text_select_and_error_causes() {
 fn text_identity_uniform_and_failures() {
     let live = live_at(0.25);
     let strs = strings();
-    let table = Value::Text_array(Arc::new(strs.clone()));
+    let table = Value::Text_array(Arc::new(strs.clone().into()));
     let thread = std::thread::current().id();
     let identity = recorded(&arr(Ty::Text), "(map (fn [(old : text)] old) data)");
     assert!(!packed::gpu_refusals(false, false, &pk(&identity)).is_empty());
@@ -802,7 +802,7 @@ fn text_identity_uniform_and_failures() {
             Ok(Value::Text(three.clone()))
         })
     };
-    assert_eq!(ok(force_r(&pk(&uniform), &live, &text_resolve)), Value::Text_array(Arc::new(vec![three.clone(); 2049])));
+    assert_eq!(ok(force_r(&pk(&uniform), &live, &text_resolve)), Value::Text_array(Arc::new(vec![three.clone(); 2049].into())));
     assert_eq!(calls.load(Ordering::SeqCst), 1);
 
     let bad = instantiate(None, &arr(Ty::Text), "(fn [(index : int)] (array/nth data (int/div index 0)))", vec![0]);
@@ -832,7 +832,7 @@ fn text_identity_uniform_and_failures() {
 #[test]
 fn text_products_changing_tables_fusion_and_refusals() {
     let live = live_at(0.25);
-    let table = Value::Text_array(Arc::new(strings()));
+    let table = Value::Text_array(Arc::new(strings().into()));
     let resolve = ok_value(table.clone());
     let product = recorded(&arr(Ty::Text), "(for [i (array/range 2049 :type int) j (array/range 3 :type int)] :skip [4] (if (int/eq i 1) (if (int/eq j 1) (array/nth data -1) \"old\") (array/nth data (int/mod i 7))))");
     for domains in [1, 4, 8] {
@@ -1002,7 +1002,7 @@ fn list_tables_exact_widths_and_range_guards() {
 fn text_select_reference_inside_domains() {
     let live = live_at(0.25);
     let strs = strings();
-    let table = Value::Text_array(Arc::new(strs.clone()));
+    let table = Value::Text_array(Arc::new(strs.clone().into()));
     let closure = make_fn("", &arr(Ty::Text), "(fn [(index : int) (old : text)] (if (int/ge index 0) (array/nth data (int/mod index 7)) old))");
     let closure = e::Host::map_function_bindings(closure, &|value| match value {
         Value::Source(g) if g.name == "probe/table" => table.clone(),
@@ -1010,7 +1010,7 @@ fn text_select_reference_inside_domains() {
     });
     let indices: Vec<i64> = (0..2049).map(|i| if i % 5 == 0 { -1 } else { i }).collect();
     let old: Vec<Vec<u8>> = (0..2049).map(|i| strs[(i + 2) % 7].clone()).collect();
-    let selected = ok(e::Host::map_function(None, None, &FnSignature { params: vec![Ty::Int, Ty::Text], result: Ty::Text }, closure, &[Value::Int_array(Arc::new(indices)), Value::Text_array(Arc::new(old))]));
+    let selected = ok(e::Host::map_function(None, None, &FnSignature { params: vec![Ty::Int, Ty::Text], result: Ty::Text }, closure, &[Value::Int_array(Arc::new(indices)), Value::Text_array(Arc::new(old.into()))]));
     for domains in [1, 4, 8] {
         with_domains(domains, &|| {
             assert_eq!(bits(&ok(force(&pk(&selected), &live))), bits(&ok(force_reference(&selected, &live))));
@@ -1048,7 +1048,7 @@ fn text_helper_then_select_same_thread() {
 #[test]
 fn text_error_cause_raw_bytes() {
     let live = live_at(0.25);
-    let table = Value::Text_array(Arc::new(strings()));
+    let table = Value::Text_array(Arc::new(strings().into()));
     let error = instantiate(Some(&table), &arr(Ty::Text), &format!("(fn [(index : int)] (if (int/lt index 0) (error \"E_TEXT\" \"selected\" :cause {}) (array/nth data index)))", lit(b"raw\xff\0cause")), vec![-1, 0]);
     for domains in [1, 4, 8] {
         with_domains(domains, &|| {

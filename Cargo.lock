@@ -83,6 +83,7 @@ dependencies = [
  "mem_sys",
  "param",
  "rays_diagnostic",
+ "rays_math",
 ]
 
 [[package]]

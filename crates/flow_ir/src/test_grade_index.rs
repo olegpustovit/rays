@@ -18,7 +18,7 @@ fn floats(v: &[f64]) -> Value {
     Value::Float_array(Arc::new(v.to_vec()))
 }
 fn texts(v: &[Vec<u8>]) -> Value {
-    Value::Text_array(Arc::new(v.to_vec()))
+    Value::Text_array(Arc::new(v.to_vec().into()))
 }
 fn grade(keys: Value, descending: bool) -> Result<Value, Diagnostic> {
     call_op("array/grade", vec![("keys", keys), ("descending", Value::Bool(descending))])

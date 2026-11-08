@@ -305,7 +305,7 @@ fn geometry_view_reads() {
 fn geometry_view_keeps_opaque_bytes_and_validates_material_identifiers() {
     use rays_math::vec3;
     let bytes: Vec<u8> = (0..=255).collect();
-    let g = geometry::with_attribute(attribute::create_owned("tag", Owner::Primitive, Storage::Text(vec![bytes.clone(), "猫".as_bytes().to_vec()])).unwrap(), &two_pieces()).unwrap();
+    let g = geometry::with_attribute(attribute::create_owned("tag", Owner::Primitive, Storage::Text(std::sync::Arc::new(vec![bytes.clone(), "猫".as_bytes().to_vec()].into()))).unwrap(), &two_pieces()).unwrap();
     let columns = geometry_view::columns(2, &g);
     let (_, cell) = columns.iter().find(|(name, _)| name == "tag").unwrap();
     assert_eq!(cell(0), rdk_ops::attribute_ops::ocaml_quote(&bytes));
@@ -313,7 +313,7 @@ fn geometry_view_keeps_opaque_bytes_and_validates_material_identifiers() {
     let surface = geometry_view::surface(&g);
     let origin = vec3::create(2.0, 0.0, 5.0);
     let direction = vec3::create(0.0, 0.0, -1.0);
-    let paths = |path| geometry::with_attribute(attribute::create_owned("shop_materialpath", Owner::Primitive, Storage::Text(vec![Vec::new(), path])).unwrap(), &g).unwrap();
+    let paths = |path| geometry::with_attribute(attribute::create_owned("shop_materialpath", Owner::Primitive, Storage::Text(std::sync::Arc::new(vec![Vec::new(), path].into()))).unwrap(), &g).unwrap();
     assert_eq!(geometry_view::cast_material(surface.as_ref(), &paths("猫".as_bytes().to_vec()), origin, direction).unwrap().1, Some("猫".to_owned()));
     assert!(geometry_view::cast_material(surface.as_ref(), &paths(bytes), origin, direction).is_none());
     let fields = vec![field("amount", Value::Float(1.0)), field("piece_attribute", Value::Text(vec![255]))];

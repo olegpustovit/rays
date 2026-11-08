@@ -997,7 +997,7 @@ mod tests {
         let detail = attribute::create_owned(
             "tag",
             attribute::Owner::Detail,
-            attribute::Storage::Text(vec![b"cube".to_vec()]),
+            attribute::Storage::Text(std::sync::Arc::new(vec![b"cube".to_vec()].into())),
         ).unwrap();
         let corners = group::ordered(group::Owner::Point, "corners", points as i64, &[7, 0, 3, 4]).unwrap();
         geometry::create(

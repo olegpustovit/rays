@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use rays_math::mat4;
+use rays_math::text_array::TextArray;
 use rdk_core::{attribute, cancel, edge_group, error, geometry, group, packed, ragged_ops, support, topology, topology_index};
 
 const OPERATION: &str = "materialize_instances";
@@ -93,10 +94,11 @@ fn repeat_i64(cancel_value: Option<&cancel::T>, grain: i64, copies: i64, source:
     build(cancel_value, grain, copies * length, &|index| source[(index % length) as usize])
 }
 
-fn repeat_text(copies: i64, source: &[Vec<u8>]) -> Vec<Vec<u8>> {
-    let mut output = Vec::with_capacity(source.len() * copies.max(0) as usize);
+fn repeat_text(copies: i64, source: &TextArray) -> TextArray {
+    let copies = copies.max(0) as usize;
+    let mut output = TextArray::with_capacity(source.len() * copies, source.byte_len() * copies);
     for _ in 0..copies {
-        output.extend(source.iter().cloned());
+        output.extend(source.iter());
     }
     output
 }
@@ -109,7 +111,7 @@ fn repeat_attribute(cancel_value: Option<&cancel::T>, grain: i64, copies: i64, i
     let storage = match attribute::View::storage(item).map_err(lift)? {
         Storage::Float(values) => Storage::Float(Arc::new(repeat_f64(cancel_value, grain, copies, values)?)),
         Storage::Int(values) => Storage::Int(Arc::new(repeat_i64(cancel_value, grain, copies, values)?)),
-        Storage::Text(values) => Storage::Text(repeat_text(copies, values)),
+        Storage::Text(values) => Storage::Text(Arc::new(repeat_text(copies, values))),
         Storage::Float2(values) => {
             let view = packed::Float2::View::view(values);
             Storage::Float2(

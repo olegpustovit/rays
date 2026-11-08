@@ -6,6 +6,7 @@
 //! (default 0) plus the index of the input it came from. An input that already has the attribute
 //! keeps its values, so a merge of merges keeps the innermost tag.
 use std::sync::Arc;
+use rays_math::text_array::TextArray;
 
 use rdk_core::{
     attribute, cancel, edge_group, error, geometry, group, packed, ragged_ops, support, topology, topology_index,
@@ -107,14 +108,14 @@ fn concatenate_attribute(template: &attribute::T, attributes: &[attribute::T]) -
             Storage::Int(Arc::new(out))
         }
         Storage::Text(_) => {
-            let mut out = Vec::new();
+            let mut out = TextArray::new();
             for item in &storages {
                 match item {
-                    Storage::Text(values) => out.extend(values.iter().cloned()),
+                    Storage::Text(values) => out.extend(values.iter()),
                     _ => return Err(mismatch()),
                 }
             }
-            Storage::Text(out)
+            Storage::Text(Arc::new(out))
         }
         Storage::Float2(_) => {
             let (mut x, mut y) = (Vec::new(), Vec::new());

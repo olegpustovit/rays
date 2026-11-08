@@ -527,7 +527,7 @@ pub(crate) fn read(component: Option<&str>, owner: Owner, kind: &str, name: &str
     let Some(planes) = columns(storage)? else {
         return match (storage, component) {
             (Storage::Int(data), None) => Ok(Value::Int_array(data.clone())),
-            (Storage::Text(data), None) => Ok(Value::Text_array(Arc::new(data.clone()))),
+            (Storage::Text(data), None) => Ok(Value::Text_array(data.clone())),
             (Storage::FloatArray(data), Some("offsets")) => Ok(Value::Int_array(FloatArray::View::view(data).offsets)),
             (Storage::FloatArray(data), Some("values")) => Ok(Value::Float_array(FloatArray::View::view(data).values)),
             (Storage::IntArray(data), Some("offsets")) => Ok(Value::Int_array(IntArray::View::view(data).offsets)),
@@ -1209,7 +1209,7 @@ pub fn write_storage(owned_fields: &[&str], grain: i64, owner: Owner, kind: &str
             if data.len() != count {
                 return err("E_ATTR_COUNT", "Text attribute count differs from owner count.");
             }
-            semantic_owned(owner, name, Storage::Text(data.as_ref().clone()), g)
+            semantic_owned(owner, name, Storage::Text(data.clone()), g)
         }
         ("vec2" | "vec3" | "vec4", Value::Record(fields)) => {
             let names: &[&str] = match kind {
@@ -1451,7 +1451,7 @@ pub fn write_constant_source(
         (Some(selection), Some(default)) => write_selected(grain, owner, kind, name, values, selection, default, g).map(Some),
         (None, None) => match &value {
             Value::Int(n) => semantic_owned(owner, name, Storage::Int(Arc::new(vec![*n; count])), g).map(Some),
-            Value::Text(t) => semantic_owned(owner, name, Storage::Text(vec![t.clone(); count]), g).map(Some),
+            Value::Text(t) => semantic_owned(owner, name, Storage::Text(Arc::new(std::iter::repeat_n(t.as_slice(), count).collect())), g).map(Some),
             Value::Float(x) => install(owner, kind, name, vec![vec![*x; count]], g).map(Some),
             Value::Vec3(x, y, z) => install(owner, kind, name, [*x, *y, *z].iter().map(|v| vec![*v; count]).collect(), g).map(Some),
             Value::Vec4(x, y, z, q) => install(owner, kind, name, [*x, *y, *z, *q].iter().map(|v| vec![*v; count]).collect(), g).map(Some),
@@ -2890,7 +2890,7 @@ use rdk_ops::line_geometry;
                 base = geometry::create(geometry::positions(&base).clone(), t, None, None, None).unwrap();
             }
             let raw = attribute::create_owned("untouched", Owner::Detail, Storage::Float(Arc::new(vec![f64::from_bits(0x7ff8000000001234)]))).unwrap();
-            let text = attribute::create_owned("bytes", Owner::Detail, Storage::Text(vec!["é".as_bytes().to_vec()])).unwrap();
+            let text = attribute::create_owned("bytes", Owner::Detail, Storage::Text(Arc::new(vec!["é".as_bytes().to_vec()].into()))).unwrap();
             let matrix = FloatArray::create_owned(vec![0, 16], (0..16).map(|i| if i == 0 { -0.0 } else { i as f64 }).collect()).unwrap();
             let mut original = base;
             for a in [raw, text, attribute::create_owned("matrix", Owner::Detail, Storage::FloatArray(matrix)).unwrap()] {

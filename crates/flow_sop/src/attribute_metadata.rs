@@ -13,6 +13,7 @@ use rdk_ops::attribute_lifecycle::{self, RenameConflict, RenameRule, SwapMethod,
 use rdk_ops::attribute_ops;
 use rdk_core::attribute_pattern;
 use rdk_core::geometry;
+use rays_math::text_array::TextArray;
 use rdk_ops::group_ops::{self, DeleteParams, DeleteRule};
 use rdk_core::error as rdk_error;
 use rdk_ops::group_ops::Owner as GroupOwner;
@@ -454,10 +455,10 @@ fn type_of(owner: Owner, name: &str, value: &geometry::T) -> Result<Value, Diagn
 fn names(owner: Owner, pattern: &str, value: &geometry::T) -> Result<Value, Diagnostic> {
     let compiled = attribute_pattern::compile(pattern)
         .map_err(|failure| error("E_ATTR_PATTERN", rdk_error::message(&failure)))?;
-    let found: Vec<Vec<u8>> = geometry::View::attributes(value)
+    let found: TextArray = geometry::View::attributes(value)
         .iter()
         .filter(|a| attribute::owner(a) == owner && attribute_pattern::matches(&compiled, attribute::name(a)))
-        .map(|a| attribute::name(a).as_bytes().to_vec())
+        .map(|a| attribute::name(a).as_bytes())
         .collect();
     Ok(Value::Text_array(Arc::new(found)))
 }
@@ -473,10 +474,10 @@ pub fn entries(owner: Option<Owner>, component: &str, value: &geometry::T) -> Re
         "owner" => |a| Ok(owner_word(Some(attribute::owner(a))).to_owned()),
         _ => return Err(error("E_ATTR_ENTRIES", "Attribute entry component is name, type or owner.")),
     };
-    let mut out: Vec<Vec<u8>> = Vec::new();
+    let mut out = TextArray::new();
     for attribute in geometry::View::attributes(value) {
         if owner.is_none() || owner == Some(attribute::owner(attribute)) {
-            out.push(column(attribute)?.into_bytes());
+            out.push(column(attribute)?.as_bytes());
         }
     }
     Ok(Value::Text_array(Arc::new(out)))
@@ -566,7 +567,7 @@ mod tests {
     fn fixture() -> geometry::T {
         let points = line_geometry::points(&[(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (2.0, 0.0, 0.0)]).expect("points");
         let colour = attribute::create_owned("Cd", Owner::Point, attribute::Storage::Float(Arc::new(vec![0.25; 3]))).expect("Cd");
-        let tag = attribute::create_owned("tag", Owner::Detail, attribute::Storage::Text(vec![b"a".to_vec()])).expect("tag");
+        let tag = attribute::create_owned("tag", Owner::Detail, attribute::Storage::Text(Arc::new(vec![b"a".to_vec()].into()))).expect("tag");
         let geometry = geometry::with_attribute(colour, &points).expect("with Cd");
         geometry::with_attribute(tag, &geometry).expect("with tag")
     }
@@ -604,9 +605,9 @@ mod tests {
         assert_eq!(kind(Owner::Detail, "tag", &geometry).as_deref(), Some("text"));
         assert_eq!(kind(Owner::Point, "nope", &geometry), None);
         let names = entries(Some(Owner::Point), "name", &geometry).expect("names");
-        assert_eq!(names, Value::Text_array(Arc::new(vec![b"Cd".to_vec()])));
+        assert_eq!(names, Value::Text_array(Arc::new(vec![b"Cd".to_vec()].into())));
         let types = entries(None, "type", &geometry).expect("types");
-        assert_eq!(types, Value::Text_array(Arc::new(vec![b"float".to_vec(), b"text".to_vec()])));
+        assert_eq!(types, Value::Text_array(Arc::new(vec![b"float".to_vec(), b"text".to_vec()].into())));
         assert_eq!(entries(None, "bogus", &geometry).unwrap_err().code, "E_ATTR_ENTRIES");
         let found = geometry.clone();
         let lookup = move |id: i64| if id == 7 { Some(found.clone()) } else { None };
@@ -621,9 +622,9 @@ mod tests {
         let missing = source("sop/attr_type", vec![("attribute", text("zz"))]);
         assert_eq!(resolve(&lookup, &missing).unwrap_err().code, "E_ATTR_TYPE");
         let listing = source("sop/attr_names", vec![("pattern", text("*"))]);
-        assert_eq!(resolve(&lookup, &listing).expect("names"), Value::Text_array(Arc::new(vec![b"Cd".to_vec()])));
+        assert_eq!(resolve(&lookup, &listing).expect("names"), Value::Text_array(Arc::new(vec![b"Cd".to_vec()].into())));
         let table = source("sop/attr_entries", vec![("component", text("owner")), ("owner", text("any"))]);
-        assert_eq!(resolve(&lookup, &table).expect("owners"), Value::Text_array(Arc::new(vec![b"point".to_vec(), b"detail".to_vec()])));
+        assert_eq!(resolve(&lookup, &table).expect("owners"), Value::Text_array(Arc::new(vec![b"point".to_vec(), b"detail".to_vec()].into())));
         let uncooked = |_: i64| None;
         assert_eq!(resolve(&uncooked, &attr_type).unwrap_err().code, "E_DATA_SOURCE");
         assert_eq!(resolve(&lookup, &Value::Int(1)).unwrap_err().code, "E_DATA_SOURCE");

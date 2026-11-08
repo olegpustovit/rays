@@ -2410,10 +2410,10 @@ mod tests {
             attr(
                 Owner::Vertex,
                 "label",
-                Storage::Text(["a", "b", "c", "d"].iter().map(|s| s.as_bytes().to_vec()).collect()),
+                Storage::Text(Arc::new(["a", "b", "c", "d"].iter().map(|s| s.as_bytes()).collect())),
             ),
             attr(Owner::Primitive, "material", Storage::Int(Arc::new(vec![7, 9]))),
-            attr(Owner::Detail, "tag", Storage::Text(vec![b"curves".to_vec()])),
+            attr(Owner::Detail, "tag", Storage::Text(std::sync::Arc::new(vec![b"curves".to_vec()].into()))),
         ];
         let point_group = group::ordered(group::Owner::Point, "picked_points", 3, &[1, 0]).unwrap();
         let vertex_group = group::ordered(group::Owner::Vertex, "picked_vertices", 4, &[1, 0]).unwrap();
@@ -2528,7 +2528,7 @@ mod tests {
         let bp = positions(&bilinear);
         assert!(bp.x[1] == 1.0 && bp.y[1] == 2.0, "bilinear polygon-curve refinement moved an old point");
         let overridden = ok(
-            &with_detail(&curve_network(), "osd_scheme", Storage::Text(vec![b"bilinear".to_vec()])),
+            &with_detail(&curve_network(), "osd_scheme", Storage::Text(std::sync::Arc::new(vec![b"bilinear".to_vec()].into()))),
             &|p| p.scheme = Scheme::CatmullClark,
         );
         let overridden = geometry::without_attribute(Owner::Detail, "osd_scheme", &overridden);
@@ -2658,7 +2658,7 @@ mod tests {
             ),
             float_attr(Owner::Vertex, "u", vec![0.0, 2.0, 3.0, 4.0, 5.0, 6.0, 10.0, 14.0]),
             attr(Owner::Primitive, "source_kind", Storage::Int(Arc::new(vec![1, 0, 1]))),
-            attr(Owner::Detail, "tag", Storage::Text(vec![b"mixed".to_vec()])),
+            attr(Owner::Detail, "tag", Storage::Text(std::sync::Arc::new(vec![b"mixed".to_vec()].into()))),
         ];
         geometry::create(
             packed::Float3::View::of_owned_exn(
@@ -2713,7 +2713,7 @@ mod tests {
         let tag = geometry::find_attribute(Owner::Detail, "tag", &one).unwrap();
         assert!(matches!(
             attribute::View::storage(&tag).unwrap(),
-            Storage::Text(values) if values == &vec![b"mixed".to_vec()]
+            Storage::Text(values) if **values == vec![b"mixed".to_vec()]
         ));
         let selection = primitive_group("local", 3, &[0, 1]);
         let local_one = run_mixed(1, Some(&selection), false, false);

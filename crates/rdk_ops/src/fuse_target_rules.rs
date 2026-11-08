@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use rays_math::text_array::TextArray;
 use std::collections::HashSet;
 
 use rdk_core::support::Windows;
@@ -146,14 +147,13 @@ fn mapped_i64(cancel_value: Option<&cancel::T>, grain: i64, destinations: &[i64]
     Ok(output)
 }
 
-fn mapped_string(cancel_value: Option<&cancel::T>, grain: i64, destinations: &[i64], source: &[Vec<u8>], target: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, error::T> {
-    let mut output = source.to_vec();
+fn mapped_string(cancel_value: Option<&cancel::T>, grain: i64, destinations: &[i64], source: &TextArray, target: &TextArray) -> Result<TextArray, error::T> {
+    let mut output: Vec<&[u8]> = vec![&[]; source.len()];
     support::par_fill(cancel_value, grain, &mut output, &|point| {
         let destination = destinations[point as usize];
-        let value = if destination >= 0 { &target[destination as usize] } else { &source[point as usize] };
-        Ok(value.clone())
+        Ok(if destination >= 0 { &target[destination as usize] } else { &source[point as usize] })
     })?;
-    Ok(output)
+    Ok(output.into_iter().collect())
 }
 
 fn scalar_int_array(cancel_value: Option<&cancel::T>, grain: i64, destinations: &[i64], source: &[i64], target: &[i64]) -> Result<packed::IntArray::T, error::T> {
@@ -314,7 +314,7 @@ fn apply_attribute(
             if !supported {
                 return Err(incompatible());
             }
-            attribute::Storage::Text(mapped_string(cancel_value, grain, destinations, s, t)?)
+            attribute::Storage::Text(Arc::new(mapped_string(cancel_value, grain, destinations, s, t)?))
         }
         (attribute::Storage::Float2(s), attribute::Storage::Float2(t)) => {
             if concatenate(method) {
@@ -548,7 +548,7 @@ mod tests {
             let g = geom(&(0..n).map(|p| p as f64).collect::<Vec<_>>(), &z, &z, &[], &[0], None);
             let g = with_attr(&g, Owner::Point, "f", Storage::Float(Arc::new((0..n).map(|p| (p + salt) as f64 * 0.5).collect())));
             let g = with_attr(&g, Owner::Point, "i", Storage::Int(Arc::new((0..n).map(|p| p * 3 + salt).collect())));
-            let g = with_attr(&g, Owner::Point, "t", Storage::Text((0..n).map(|p| format!("s{}", p + salt).into_bytes()).collect()));
+            let g = with_attr(&g, Owner::Point, "t", Storage::Text(Arc::new((0..n).map(|p| format!("s{}", p + salt).into_bytes()).collect())));
             let offsets: Vec<i64> = std::iter::once(0).chain((1..=n).scan(0, |at, p| { *at += p % 4; Some(*at) })).collect();
             let values: Vec<f64> = (0..offsets[n as usize]).map(|v| v as f64 + salt as f64).collect();
             let rows = packed::FloatArray::View::create_validated_owned(offsets, values);

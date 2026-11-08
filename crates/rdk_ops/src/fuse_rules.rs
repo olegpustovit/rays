@@ -5,6 +5,7 @@ use rdk_core::support::Windows;
 use rdk_core::{attribute, attribute_pattern, cancel, error, geometry, group, packed, ragged_ops, support};
 use rdk_geom::point_clusters::Clusters;
 use rdk_geom::point_grid::{float_max, float_min};
+use rays_math::text_array::TextArray;
 
 const MAX_STRING_LENGTH: i64 = (1i64 << 57) - 9;
 
@@ -181,11 +182,11 @@ pub fn expand_i64(clusters: &Clusters, compact: bool, values: Vec<i64>) -> Vec<i
     }
 }
 
-pub fn expand_string(clusters: &Clusters, compact: bool, values: Vec<Vec<u8>>) -> Vec<Vec<u8>> {
+pub fn expand_string(clusters: &Clusters, compact: bool, values: TextArray) -> TextArray {
     if compact {
         values
     } else {
-        clusters.of_point.iter().map(|&cluster| values[cluster as usize].clone()).collect()
+        values.gather(clusters.of_point.iter().map(|&cluster| cluster as usize))
     }
 }
 
@@ -203,8 +204,8 @@ pub fn select_i64(source: &[i64], mapping: &[i64]) -> Vec<i64> {
     mapping.iter().map(|&index| source[index as usize]).collect()
 }
 
-pub fn select_string(source: &[Vec<u8>], mapping: &[i64]) -> Vec<Vec<u8>> {
-    mapping.iter().map(|&index| source[index as usize].clone()).collect()
+pub fn select_string(source: &TextArray, mapping: &[i64]) -> TextArray {
+    source.gather(mapping.iter().map(|&index| index as usize))
 }
 
 /// OCaml Float.compare: nan equals itself and sorts before every other float.
@@ -436,14 +437,14 @@ fn sorted_text(
     cancel_value: Option<&cancel::T>,
     grain: i64,
     clusters: &Clusters,
-    source: &[Vec<u8>],
+    source: &TextArray,
     method: AttributeMethod,
 ) -> Result<Vec<Vec<u8>>, error::T> {
     let mut output = vec![Vec::new(); clusters.count as usize];
     support::par_fill(cancel_value, grain, &mut output, &|cluster| {
         let first = clusters.offsets[cluster as usize] as usize;
         let last = clusters.offsets[cluster as usize + 1] as usize;
-        let mut values: Vec<Vec<u8>> = clusters.members[first..last].iter().map(|&point| source[point as usize].clone()).collect();
+        let mut values: Vec<Vec<u8>> = clusters.members[first..last].iter().map(|&point| source[point as usize].to_vec()).collect();
         let mut points = clusters.members[first..last].to_vec();
         let (first, last) = (0usize, last - first);
         sort_range_string(&mut values, &mut points, first, last);
@@ -765,7 +766,7 @@ fn concatenate_text(
     cancel_value: Option<&cancel::T>,
     grain: i64,
     clusters: &Clusters,
-    source: &[Vec<u8>],
+    source: &TextArray,
     ordered_members: &[i64],
 ) -> Result<Vec<Vec<u8>>, error::T> {
     let mut output = vec![Vec::new(); clusters.count as usize];
@@ -794,16 +795,19 @@ fn reduce_text(
     grain: i64,
     name: &str,
     clusters: &Clusters,
-    source: &[Vec<u8>],
+    source: &TextArray,
     method: AttributeMethod,
     weights: Option<&[f64]>,
     ordered_members: &[i64],
-) -> Result<Vec<Vec<u8>>, error::T> {
+) -> Result<TextArray, error::T> {
     if let Some(mapping) = source_mapping(clusters, method, weights) {
         return Ok(select_string(source, &mapping));
     }
+    // Mode/median/concatenate fill per-cluster scratch rows in parallel, packed once at the end.
     match method {
-        AttributeMethod::Mode | AttributeMethod::Median => sorted_text(cancel_value, grain, clusters, source, method),
+        AttributeMethod::Mode | AttributeMethod::Median => {
+            Ok(sorted_text(cancel_value, grain, clusters, source, method)?.iter().collect())
+        }
         AttributeMethod::Minimum | AttributeMethod::Maximum => Ok((0..clusters.count as usize)
             .map(|cluster| {
                 let first = clusters.offsets[cluster] as usize;
@@ -820,11 +824,11 @@ fn reduce_text(
                         value = candidate;
                     }
                 }
-                value.clone()
+                value
             })
             .collect()),
         AttributeMethod::Concatenate | AttributeMethod::ConcatenateWeightOrder => {
-            concatenate_text(cancel_value, grain, clusters, source, ordered_members)
+            Ok(concatenate_text(cancel_value, grain, clusters, source, ordered_members)?.iter().collect())
         }
         _ => Err(fail(format!("attribute {name:?} method is unsupported for text storage"))),
     }
@@ -1058,11 +1062,11 @@ fn reduced_attribute(
         }
         attribute::Storage::Float(values) => attribute::Storage::Float(Arc::new(plane_float(values)?)),
         attribute::Storage::Int(values) => attribute::Storage::Int(Arc::new(plane_int(values)?)),
-        attribute::Storage::Text(values) => attribute::Storage::Text(expand_string(
+        attribute::Storage::Text(values) => attribute::Storage::Text(Arc::new(expand_string(
             clusters,
             compact,
             reduce_text(cancel_value, grain, &name, clusters, values, method, weights, &ordered)?,
-        )),
+        ))),
         attribute::Storage::Float2(values) => {
             if is_concatenate(method) {
                 return Err(concat_scalar_message());
@@ -1160,7 +1164,7 @@ fn default_attribute(
         attribute::Storage::Float(values) => attribute::Storage::Float(Arc::new(plane(values))),
         attribute::Storage::Int(values) => attribute::Storage::Int(Arc::new(select_i64(values, &representatives))),
         attribute::Storage::Text(values) => {
-            attribute::Storage::Text(select_string(values, &representatives))
+            attribute::Storage::Text(Arc::new(select_string(values, &representatives)))
         }
         attribute::Storage::Float2(values) => {
             let view = packed::Float2::View::view(values);
@@ -1355,8 +1359,8 @@ mod tests {
         let g = geom(&[0., 1., 2., 3.], &[0.; 4], &[0.; 4], &[], &[0], None);
         let g = with_attr(&g, Owner::Point, "f", Storage::Float(Arc::new(vec![1., 5., 10., 2.])));
         let g = with_attr(&g, Owner::Point, "i", Storage::Int(Arc::new(vec![3, 3, 7, 9])));
-        let text = ["b", "a", "z", "c"].iter().map(|s| s.as_bytes().to_vec()).collect();
-        let g = with_attr(&g, Owner::Point, "t", Storage::Text(text));
+        let text = ["b", "a", "z", "c"].iter().map(|s| s.as_bytes()).collect();
+        let g = with_attr(&g, Owner::Point, "t", Storage::Text(Arc::new(text)));
         let g = with_attr(&g, Owner::Point, "w", Storage::Float(Arc::new(vec![1., 1., 1., 4.])));
         geometry::with_group(group::init(None, group::Owner::Point, "g1", 4, &|p| p == 0 || p == 2).unwrap(), &g).unwrap()
     }
@@ -1443,7 +1447,7 @@ mod tests {
         let texts = |method: AttributeMethod| match attribute::View::storage(&find(&reduce("t", method, true).unwrap(), "t"))
             .unwrap()
         {
-            Storage::Text(values) => values.clone(),
+            Storage::Text(values) => (**values).clone(),
             _ => panic!("not text"),
         };
         assert_eq!(texts(Minimum), vec![b"a".to_vec(), b"z".to_vec()]);
@@ -1583,7 +1587,7 @@ mod tests {
         let g = geom(&(0..n).map(|p| p as f64).collect::<Vec<_>>(), &z, &z, &[], &[0], None);
         let g = with_attr(&g, Owner::Point, "f", Storage::Float(Arc::new((0..n).map(|p| ((p * 7919) % 101) as f64 * 0.37).collect())));
         let g = with_attr(&g, Owner::Point, "i", Storage::Int(Arc::new((0..n).map(|p| (p * 31) % 17).collect())));
-        let g = with_attr(&g, Owner::Point, "t", Storage::Text((0..n).map(|p| format!("t{}", (p * 13) % 29).into_bytes()).collect()));
+        let g = with_attr(&g, Owner::Point, "t", Storage::Text(Arc::new((0..n).map(|p| format!("t{}", (p * 13) % 29).into_bytes()).collect())));
         let g = with_attr(&g, Owner::Point, "w", Storage::Float(Arc::new((0..n).map(|p| 1.0 + (p % 5) as f64).collect())));
         for method in [Average, Median, Mode, Sum, SumSquares, RootMeanSquare, WeightedAverage, ConcatenateWeightOrder] {
             let patterns: &[&str] = if matches!(method, Mode | Median | ConcatenateWeightOrder) { &["f", "i", "t"] } else { &["f", "i"] };

@@ -152,7 +152,7 @@ fn array_init_past_the_native_bound_is_a_range_error() {
 #[test]
 fn direct_non_text_type_is_array_type() {
     let op = op::find(&[], "array/max_length", &context::value()).unwrap();
-    for arg in [Value::Int(1), Value::Bool(true), Value::Text_array(std::sync::Arc::new(vec![b"float".to_vec()]))] {
+    for arg in [Value::Int(1), Value::Bool(true), Value::Text_array(std::sync::Arc::new(vec![b"float".to_vec()].into()))] {
         failure("E_ARRAY_TYPE", (op.body)(&input::at_time(0.), &|_, _| panic!("node"), &vec![("type".into(), arg)]));
     }
 }

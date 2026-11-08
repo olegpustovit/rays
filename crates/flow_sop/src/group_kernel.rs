@@ -4,6 +4,7 @@ use crate::attribute_metadata;
 use flow_syntax::ty;
 use flow_syntax::value::Value;
 use rays_diagnostic::Diagnostic;
+use rays_math::text_array::TextArray;
 use rdk_core::geometry::{self, T as Geometry};
 use rdk_ops::group_ops;
 use rdk_core::{attribute_pattern, edge_group, element_selection, group, topology_index};
@@ -165,7 +166,7 @@ fn entries(selected_owner: &str, pattern: &str, component: &str, geometry: &Geom
     for item in geometry::edge_groups(geometry) {
         all.push((group_ops::Owner::GroupEdges, edge_group::name(&item).to_owned()));
     }
-    let values: Vec<Vec<u8>> = all
+    let values: TextArray = all
         .into_iter()
         .filter(|(owner, name)| (selected.is_none() || selected == Some(*owner)) && attribute_pattern::matches(&pattern, name))
         .map(|(owner, name)| {
@@ -366,11 +367,11 @@ mod tests {
         let g = write(None, Owner::Ordinary(group::Owner::Primitive), "quad", &[1], &triangle()).unwrap();
         assert_eq!(
             names(Owner::Ordinary(group::Owner::Primitive), "*", &g).unwrap(),
-            Value::Text_array(Arc::new(vec![b"quad".to_vec()]))
+            Value::Text_array(Arc::new(vec![b"quad".to_vec()].into()))
         );
         assert_eq!(
             entries("any", "*", "owners", &g).unwrap(),
-            Value::Text_array(Arc::new(vec![b"primitive".to_vec()]))
+            Value::Text_array(Arc::new(vec![b"primitive".to_vec()].into()))
         );
     }
 }

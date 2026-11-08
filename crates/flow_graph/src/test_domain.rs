@@ -60,7 +60,7 @@ fn lookup_of_text() {
     assert_eq!(card.ty, Ty::Text);
     let (_, edited) = apply_checked(&catalog(), &source, &set_arg(&card.path, ArgKey::Pos(1), num("2"))).unwrap();
     let t = "é日本😀".as_bytes().to_vec();
-    assert_eq!(result(&edited, 0.0), Value::Text_array(Arc::new(vec![t.clone(), t.clone(), t])));
+    assert_eq!(result(&edited, 0.0), Value::Text_array(Arc::new(vec![t.clone(), t.clone(), t].into())));
 }
 
 #[test]

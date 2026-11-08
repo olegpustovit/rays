@@ -108,7 +108,7 @@ fn malformed_inputs() {
     reject("E_ARRAY_RANGE", scatter(ints(&[]), Value::Vec4_array(Arc::new(vec![])), Value::Int(MAX_WOSIZE as i64 / 4 + 1)));
     reject("E_ARRAY_COUNT", scatter(ints(&[0]), ints(&[]), Value::Int(1)));
     reject("E_ARRAY_TYPE", scatter(floats(&[0.]), floats(&[1.]), Value::Int(1)));
-    reject("E_ARRAY_TYPE", scatter(ints(&[]), Value::Text_array(Arc::new(vec![])), Value::Int(1)));
+    reject("E_ARRAY_TYPE", scatter(ints(&[]), Value::Text_array(Arc::new(Vec::<Vec<u8>>::new().into())), Value::Int(1)));
     reject("E_ARRAY_TYPE", scatter(ints(&[0]), Value::Vec3_array(Arc::new(vec![1., 2.])), Value::Int(1)));
     reject("E_ARRAY_TYPE", scatter(ints(&[]), ints(&[]), Value::Float(1.)));
     // Error order is source-row, then component. A later invalid index cannot replace an earlier

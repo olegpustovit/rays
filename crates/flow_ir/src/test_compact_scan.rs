@@ -103,7 +103,7 @@ fn bad_masks_and_types() {
             Value::Float_array(Arc::new(vec![])),
             Value::Float_array(Arc::new(vec![0., 1.])),
             Value::Vec3_array(Arc::new(vec![0., 1.])),
-            Value::Text_array(Arc::new(vec![b"0".to_vec()])),
+            Value::Text_array(Arc::new(vec![b"0".to_vec()].into())),
             Value::Int(1),
             Value::Bool(true),
             Value::List(Arc::new(vec![Value::Int(1)])),

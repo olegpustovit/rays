@@ -1071,7 +1071,7 @@ fn interpolate_point_attribute(
             ragged_ops::remap_float(cancel_value, Some(grain), &plan.representative, values).map_err(pass)?,
         ),
         Storage::Text(values) => {
-            Storage::Text(plan.representative.iter().map(|&r| values[r as usize].clone()).collect())
+            Storage::Text(Arc::new(values.gather(plan.representative.iter().map(|&r| r as usize))))
         }
         Storage::Float2(values) => {
             let values = packed::Float2::View::view(values);
@@ -1136,9 +1136,9 @@ fn defaulted_attribute(
         Storage::Int(values) => {
             Storage::Int(Arc::new(mapping.iter().map(|&index| if index >= 0 { values[index as usize] } else { 0 }).collect()))
         }
-        Storage::Text(values) => Storage::Text(
-            mapping.iter().map(|&index| if index >= 0 { values[index as usize].clone() } else { Vec::new() }).collect(),
-        ),
+        Storage::Text(values) => Storage::Text(Arc::new(
+            mapping.iter().map(|&index| if index >= 0 { &values[index as usize] } else { &[][..] }).collect(),
+        )),
         Storage::IntArray(values) => {
             Storage::IntArray(ragged_ops::remap_int(cancel_value, Some(grain), mapping, values).map_err(pass)?)
         }
@@ -2129,7 +2129,7 @@ mod tests {
             attr(
                 "primitive_label",
                 attribute::Owner::Primitive,
-                attribute::Storage::Text(vec![b"surface".to_vec(), b"constraint".to_vec(), b"guide".to_vec()]),
+                attribute::Storage::Text(std::sync::Arc::new(vec![b"surface".to_vec(), b"constraint".to_vec(), b"guide".to_vec()].into())),
             ),
             attr("detail_id", attribute::Owner::Detail, attribute::Storage::Int(Arc::new(vec![73]))),
         ];
@@ -2230,7 +2230,7 @@ mod tests {
         }
         match storage(attribute::Owner::Primitive, "primitive_label", &output) {
             attribute::Storage::Text(values) => check(
-                values[0] == b"surface" && values[1] == b"guide" && values[2..].iter().all(|s| s.is_empty()),
+                &values[0] == b"surface" && &values[1] == b"guide" && values.iter().skip(2).all(|s| s.is_empty()),
                 "Keep Primitives primitive payload/defaults",
             ),
             _ => panic!("Keep Primitives primitive storage changed"),
@@ -2348,7 +2348,7 @@ mod tests {
         let label = attr(
             "label",
             attribute::Owner::Point,
-            attribute::Storage::Text(["a", "b", "c", "d"].iter().map(|s| s.as_bytes().to_vec()).collect()),
+            attribute::Storage::Text(Arc::new(["a", "b", "c", "d"].iter().map(|s| s.as_bytes()).collect())),
         );
         let selected = pgroup(group::Owner::Point, "selected", 4, &|p| p == 2);
         let constraints = pgroup(group::Owner::Primitive, "constraints", 2, &|_| true);
@@ -2399,7 +2399,7 @@ mod tests {
             attribute::Storage::Text(values) => values,
             _ => panic!("text storage changed"),
         };
-        check(int_values(p, "id", &output)[4] == 12 && labels[4] == b"c", "crossing discrete payload policy");
+        check(int_values(p, "id", &output)[4] == 12 && &labels[4] == b"c", "crossing discrete payload policy");
         check(group::mem(4, &find_group(group::Owner::Point, "selected", &output)), "split point group ancestry");
         let crossings = find_group(group::Owner::Point, "crossings", &output);
         check(group::cardinality(&crossings) == 1 && group::mem(4, &crossings), "split output group");

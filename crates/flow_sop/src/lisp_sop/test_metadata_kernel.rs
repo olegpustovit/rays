@@ -194,7 +194,7 @@ fn all_owners_and_storages_rename_without_copying() {
             ("vec2", Storage::Float2(ok(Float2::of_owned(plane(-0.0), plane(2.0))))),
             ("vec3", Storage::Float3(ok(Float3::View::of_owned_exn(plane(1.0), plane(2.0), plane(3.0))))),
             ("vec4", Storage::Float4(ok(Float4::of_owned(plane(1.0), plane(2.0), plane(3.0), plane(4.0))))),
-            ("text", Storage::Text(vec!["preserved \u{2713}\n".as_bytes().to_vec(); count])),
+            ("text", Storage::Text(Arc::new(vec!["preserved \u{2713}\n".as_bytes().to_vec(); count].into()))),
             ("float_array", Storage::FloatArray(ok(FloatArray::create_owned(offsets.clone(), vec![0.25; count * 16])))),
             ("int_array", Storage::IntArray(ok(IntArray::create_owned(offsets, vec![MIN_INT; count * 16])))),
         ]
@@ -219,7 +219,7 @@ fn all_owners_and_storages_rename_without_copying() {
     match attr_names(Owner::Point, "b_*", &renamed) {
         Ok(Value::Text_array(names)) => {
             // the query's array is a copy: changing it leaves the geometry alone
-            let mut copy = (*names).clone();
+            let mut copy = names.to_rows();
             copy[0] = b"mutated copy".to_vec();
             assert!(geo::find_attribute(Owner::Point, "b_float", &renamed).is_some(), "name query shared mutable geometry state");
         }
@@ -251,7 +251,7 @@ fn attr_entries_columns_keep_native_order_and_owner_filter() {
     let input = fixture();
     let texts = |owner: Option<Owner>, component: &str| -> Vec<String> {
         match attribute_metadata::entries(owner, component, &input) {
-            Ok(Value::Text_array(values)) => values.iter().map(|v| String::from_utf8(v.clone()).unwrap()).collect(),
+            Ok(Value::Text_array(values)) => values.iter().map(|v| String::from_utf8(v.to_vec()).unwrap()).collect(),
             _ => panic!("attr_entries column is not text"),
         }
     };

@@ -1,6 +1,7 @@
 //! Port of lib/web_export/web_export.ml: the static 2D workspace export, with its JavaScript/WGSL
 //! runtime embedded. `lower` checks and lowers the first draw graph; `files` prints the export.
 use rays_math::hash::md5_hex;
+use rays_math::text_array::TextArray;
 use crate::web_runtime;
 use editor_document::workspace_doc as doc;
 use flow_check::workspace::{self as W, Graph, Node, Term};
@@ -325,8 +326,8 @@ fn fixed_inputs(r: &C::RegionT) -> R<Fixed> {
     Ok(Fixed { packed, view, arrays: a.arrays, uniforms: a.uniforms, count: a.count, frame })
 }
 
-fn texts(values: &[Vec<u8>]) -> String {
-    format!("{{\"texts\":{}}}", list(&|b: &Vec<u8>| json_bytes(b), values))
+fn texts(values: &TextArray) -> String {
+    format!("{{\"texts\":[{}]}}", values.iter().map(json_bytes).collect::<Vec<_>>().join(", "))
 }
 
 fn is_int_array(v: &Value) -> bool {

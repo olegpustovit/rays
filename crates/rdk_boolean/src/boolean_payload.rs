@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use rays_math::text_array::TextArray;
 use rdk_core::attribute::{self, Owner as AttributeOwner, Storage};
 use rdk_core::{cancel, edge_group, error, geometry, group, packed, topology, topology_index};
 
@@ -333,22 +334,17 @@ fn interpolate_fixed(
     if pair.kind == 7 {
         let text_of = text_of_storage;
         let (left, right) = (text_of(left), text_of(right));
-        let mut output = vec![Vec::new(); corner_count];
+        let mut output = TextArray::new();
         for corner in 0..corner_count {
             corner_poll(cancel_value, corner)?;
             let primitive = corner / 3;
             let values = if is_left(view, primitive) { left } else { right };
-            if let Some(values) = values {
-                output[corner] = values[source_index(
-                    view,
-                    pair.source_owner,
-                    primitive,
-                    dominant_corner(view, corner),
-                )]
-                .clone();
-            }
+            output.push(match values {
+                Some(values) => &values[source_index(view, pair.source_owner, primitive, dominant_corner(view, corner))],
+                None => &[],
+            });
         }
-        return Ok(Storage::Text(output));
+        return Ok(Storage::Text(Arc::new(output)));
     }
     Err(payload_fail("unsupported_storage", format!(
             "{} attribute {:?} uses CSR storage not yet handled by the fixed-width interpolator",
@@ -526,13 +522,13 @@ fn consolidate_to_points(
             Ok(Storage::Int(Arc::new(output)))
         }
         Storage::Text(source) => {
-            let output: Vec<Vec<u8>> = (0..point_count).map(|point| source[rep(point)].clone()).collect();
+            let output: TextArray = (0..point_count).map(|point| &source[rep(point)]).collect();
             for (corner, &point) in vertex_points.iter().enumerate() {
                 if output[point as usize] != source[corner] {
                     return Err(conflict_fail(name, point as usize));
                 }
             }
-            Ok(Storage::Text(output))
+            Ok(Storage::Text(Arc::new(output)))
         }
         Storage::Float2(value) => {
             let source = packed::Float2::View::view(&value);
@@ -1007,15 +1003,16 @@ fn copy_attribute(
     if pair.kind == 7 {
         let text_of = text_of_storage;
         let (left, right) = (text_of(left), text_of(right));
-        let mut output = vec![Vec::new(); primitive_count];
+        let mut output = TextArray::new();
         for primitive in 0..primitive_count {
             corner_poll(cancel_value, primitive)?;
             let (is_left, index) = selected_primitive(ancestry, primitive);
-            if let Some(values) = if is_left { left } else { right } {
-                output[primitive] = values[index].clone();
-            }
+            output.push(match if is_left { left } else { right } {
+                Some(values) => &values[index],
+                None => &[],
+            });
         }
-        return make_attribute(pair, Storage::Text(output));
+        return make_attribute(pair, Storage::Text(Arc::new(output)));
     }
     if pair.kind == 2 {
         let view_of = |storage: Option<&Storage>| -> Option<packed::IntArray::View::View> {
@@ -1194,7 +1191,7 @@ fn int_of_storage(storage: Option<&Storage>) -> Option<&Vec<i64>> {
     }
 }
 
-fn text_of_storage(storage: Option<&Storage>) -> Option<&Vec<Vec<u8>>> {
+fn text_of_storage(storage: Option<&Storage>) -> Option<&TextArray> {
     match storage {
         Some(Storage::Text(values)) => Some(values),
         _ => None,

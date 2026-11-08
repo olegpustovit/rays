@@ -44,7 +44,7 @@ fn with_vec3(name: &str, k: i64, g: &geo::T) -> geo::T {
 
 fn with_text(name: &str, g: &geo::T) -> geo::T {
     let n = geo::primitive_count(g) as usize;
-    let storage = Storage::Text((0..n).map(|i| if i % 2 == 0 { "猫".as_bytes().to_vec() } else { b"x\0".to_vec() }).collect());
+    let storage = Storage::Text(Arc::new((0..n).map(|i| if i % 2 == 0 { "猫".as_bytes().to_vec() } else { b"x\0".to_vec() }).collect()));
     rk(geo::with_attribute(rk(attribute::create_owned(name, Owner::Primitive, storage)), g))
 }
 

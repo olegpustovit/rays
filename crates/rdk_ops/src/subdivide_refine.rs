@@ -1,6 +1,7 @@
 //! Port of lib/rdk/ops/mesh/subdivide_refine.ml: stencil plans, creases, face-varying refinement,
 //! attribute/group remapping and local-part combination for polygon subdivision.
 use std::sync::Arc;
+use rays_math::text_array::TextArray;
 use rdk_core::attribute::{self, Owner, Storage};
 use rdk_core::support::Windows;
 use rdk_core::{
@@ -2375,11 +2376,11 @@ fn discrete_map_ints(mapping: &[i64], source: &[i64]) -> Result<Vec<i64>, error:
     Ok(mapping.iter().map(|&at| gi(source, at)).collect())
 }
 
-fn discrete_map_text(mapping: &[i64], source: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, error::T> {
+fn discrete_map_text(mapping: &[i64], source: &TextArray) -> Result<TextArray, error::T> {
     if source.is_empty() {
         return Err(invalid_arg("index out of bounds".to_owned()));
     }
-    Ok(mapping.iter().map(|&at| source[at as usize].clone()).collect())
+    Ok(source.gather(mapping.iter().map(|&at| at as usize)))
 }
 
 pub fn vertex_edge_discrete_map(
@@ -2513,7 +2514,7 @@ pub fn remap_attribute(
         }
         Storage::Text(values) => {
             let mapping = discrete_mapping(cancel_token, grain, plan, owner)?;
-            Storage::Text(discrete_map_text(&mapping, values)?)
+            Storage::Text(Arc::new(discrete_map_text(&mapping, values)?))
         }
         Storage::IntArray(values) => {
             let mapping = discrete_mapping(cancel_token, grain, plan, owner)?;
@@ -3010,7 +3011,7 @@ pub fn concatenate_part_attribute(
             Storage::Int(Arc::new(output))
         }
         Storage::Text(_) => {
-            let mut output = vec![Vec::new(); total as usize];
+            let mut output = TextArray::new();
             let mut offset = 0_i64;
             for (count, found) in counts.iter().zip(attributes.iter()) {
                 cancel::check_opt(cancel_token)?;
@@ -3021,15 +3022,18 @@ pub fn concatenate_part_attribute(
                     if values.len() as i64 != *count {
                         return Err(failm("text attribute cardinality mismatch"));
                     }
-                    output[offset as usize..(offset + count) as usize].clone_from_slice(values);
+                    output.extend(values.iter());
+                } else {
+                    output.extend(std::iter::repeat_n(&[][..], *count as usize));
                 }
                 offset = checked_add("combined attribute offset", offset, *count)?;
             }
-            for (extra, &source) in extra_sources.iter().enumerate() {
+            for &source in extra_sources {
                 check_source(source, "attribute")?;
-                output[base_total as usize + extra] = output[source as usize].clone();
+                let row = output[source as usize].to_vec();
+                output.push(&row);
             }
-            Storage::Text(output)
+            Storage::Text(Arc::new(output))
         }
         Storage::IntArray(_) => {
             let mut views = Vec::with_capacity(attributes.len());
@@ -3337,20 +3341,20 @@ pub fn concatenate_welded_point_attribute(
         }
         Storage::Text(_) => {
             let rows = representative_rows()?;
-            let mut output = Vec::with_capacity(rows.len());
+            let mut output = TextArray::new();
             for row in rows {
                 output.push(match row {
-                    None => Vec::new(),
+                    None => &[],
                     Some((local, part)) => {
                         let found = attributes[part].as_ref().ok_or_else(wrong_storage)?;
                         match attribute::View::storage(found)? {
-                            Storage::Text(values) => values[local as usize].clone(),
+                            Storage::Text(values) => &values[local as usize],
                             _ => return Err(wrong_storage()),
                         }
                     }
                 });
             }
-            Storage::Text(output)
+            Storage::Text(Arc::new(output))
         }
         Storage::IntArray(_) => {
             let rows = representative_rows()?;
