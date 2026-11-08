@@ -310,7 +310,7 @@ fn same_source(a: &Source, b: &Source) -> bool {
 /// limit declines.
 pub fn merge(regions: &[RegionT]) -> Option<RegionT> {
     let first = regions.first()?;
-    let one = |r: &RegionT| r.result == RegionResult::Collect && r.iteration == Iteration::Zip && r.skip.is_empty() && r.outputs.len() == 1 && r.dynamic == first.dynamic;
+    let one = |r: &RegionT| r.result == RegionResult::Collect && r.iteration == Iteration::Zip && r.skip.is_empty() && r.outputs.len() == 1;
     let same_count = |r: &RegionT| {
         (first.count.is_some() && r.count == first.count)
             || (first.origin.is_some() && r.origin == first.origin)
@@ -335,6 +335,8 @@ pub fn merge(regions: &[RegionT]) -> Option<RegionT> {
         R::rebuild(first, R::Rebuild {
             sources: Some(sources), widths: Some(widths), uniforms: Some(uniforms), code: Some(code), outputs: Some(outputs),
             stages: Some(regions.iter().flat_map(|r| r.stages.iter().cloned()).collect()),
+            // compile_result picks uniforms or constants per region, so one record mixes them
+            dynamic: Some(regions.iter().all(|r| r.dynamic)),
             sites: Some(regions.iter().flat_map(|r| r.sites.iter().cloned()).collect()),
             ..Default::default()
         })
