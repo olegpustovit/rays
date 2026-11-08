@@ -699,7 +699,7 @@ fn node_inputs() {
 }
 
 pub fn cases() -> Vec<(&'static str, fn())> {
-    vec![
+    let mut cases: Vec<(&'static str, fn())> = vec![
         ("sopcat_gallery_grid_warning", gallery_grid_warning),
         ("sopcat_motion", motion),
         ("sopcat_set_color", set_color),
@@ -708,9 +708,13 @@ pub fn cases() -> Vec<(&'static str, fn())> {
         ("sopcat_graph_edits", run_body),
         ("sopcat_morph_sketch", morph_sketch),
         ("sopcat_node_inputs", node_inputs),
-        ("sopcat_manifest_exhaustive", manifest_exhaustive),
-        ("sopcat_perturbation", perturbation),
-    ]
+    ];
+    // every field of every registered SOP: exhaustive qualification, as in the OCaml suite
+    if std::env::var("RAYS_SLOW").as_deref() == Ok("1") {
+        cases.push(("sopcat_manifest_exhaustive", manifest_exhaustive));
+        cases.push(("sopcat_perturbation", perturbation));
+    }
+    cases
 }
 fn trace(line: &str) {
     if let Ok(path) = std::env::var("RAYS_T_TRACE") {
