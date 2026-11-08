@@ -145,17 +145,12 @@
                    ux (exact (map (fn [(v : float) (k : float) (s : int)] (- (/ v k) (array/nth cx s))) mx member_scale owner))
                    uy (exact (map (fn [(v : float) (k : float) (s : int)] (- (/ v k) (array/nth cy s))) my member_scale owner))
                    uz (exact (map (fn [(v : float) (k : float) (s : int)] (- (/ v k) (array/nth cz s))) mz member_scale owner))
-                   ; sequential fma accumulation per component, in point order
-                   grown (exact (map (fn [(s : int)] (int/add (array/nth offsets s) s)) (array/range (int/add segments 1) :type int)))
+                   ; sequential fma accumulation per component, in point order: one scan restarting
+                   ; from 0.0 at each component's first member, read at its last
                    cov (fn [(left : (array float)) (right : (array float))]
-                     (get (iterate (array/max sizes) {:acc (array/float segments) :k 0}
-                       (fn [(c : {:acc (array float) :k int})]
-                         {:acc (exact (map (fn [(s : int) (v : float)]
-                              (if (int/lt c.k (array/nth sizes s))
-                                (let* [at (int/add (array/nth offsets s) c.k)]
-                                  (fma (array/nth left at) (array/nth right at) v))
-                                v)) rows c.acc))
-                          :k (int/add c.k 1)})) :acc))
+                     (let* [running (exact (scan [acc 0.0] [j (array/range total :type int)]
+                              (fma (array/nth left j) (array/nth right j) (if (int/eq (array/nth boundary j) 1) 0.0 acc))))]
+                       (exact (map (fn [(s : int)] (array/nth running (int/sub (array/nth offsets (int/add s 1)) 1))) rows))))
                    xx (cov ux ux) xy (cov ux uy) xz (cov ux uz) yy (cov uy uy) yz (cov uy uz) zz (cov uz uz)
                    nonzero (exact (map (fn [(qa : float) (qb : float) (qc : float)]
                      (if (or (not (= qa 0.0)) (or (not (= qb 0.0)) (not (= qc 0.0)))) 1 0)) xx yy zz))
