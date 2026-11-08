@@ -15,7 +15,7 @@ there and wrong on a GPU thread:
 |---|---|---|
 | Control flow as per-instruction guards (`Guarded`) | `float r=0; if(c0!=0&&c1==0){ r=...; }` around each instruction | No real branches. Every variable is declared at function scope and conditionally assigned, which keeps everything live and inflates register pressure. The compiler sees thousands of tiny ifs instead of a few regions. |
 | One flat register file, `r0..rN`, never reused | 8,200 lines; the register limit had to be raised to 16,384 | Live ranges span the whole kernel, causing spills and low occupancy. |
-| Every integer is a 63-bit `long` (`as_type<long>(ulong(x)<<1)>>1`) | 64-bit multiply, shift and compare for PCG, indices and loop counters | Apple GPUs run 64-bit integers several times slower than 32-bit. |
+| Every integer is a 64-bit `long` (formerly a 63-bit `long` wrapped with `as_type<long>(ulong(x)<<1)>>1`) | 64-bit multiply, shift and compare for PCG, indices and loop counters | Apple GPUs run 64-bit integers several times slower than 32-bit. |
 | Booleans are floats (`!=0.0f`) | Float compares and selects for every condition | Extra ALU work and registers. |
 | Error parity with the CPU walker: a finite check after each op | About 1,100 `atomic_fetch_or_explicit(status, …)` calls on device memory | An atomic per op serializes the thread, fences the compiler, and blocks reordering and fusion. |
 | Gathers read one scalar component at a time with a clamp | `as_type<float>(gather[clamp(int(i),0,max(int(u)-1,0))*w+c])`, repeated per component | No vector loads, and the bounds math is redone per field. |

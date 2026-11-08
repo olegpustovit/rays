@@ -241,7 +241,7 @@ by their owner, on the initial domain or browser main thread.
 | Value | Layout and admissible uses |
 | --- | --- |
 | Float | One binary64 frame/CPU component; a binary32 GPU-region component. Non-finite inputs and results fail at the existing checked boundaries. |
-| Int | The native signed 63-bit integer domain; distinct from Float even when their numeric values match. Explicit integer operations retain integer semantics. |
+| Int | A native signed 64-bit integer (two's-complement, wrapping); distinct from Float even when their numeric values match. Explicit integer operations retain integer semantics. |
 | Bool | One boolean frame value; region comparisons encode false as 0 and true as 1. |
 | Text | A decoded byte string; no quotes are added on a text read or concatenation. Collect regions may copy, select and gather immutable Text leaves. |
 | Vec2, Vec3, Vec4 | Two, three or four floating components. Field names are static `x`, `y`, `z`, `w`; a scalar broadcast is explicit. |
@@ -433,7 +433,7 @@ unlisted calls in `prims.js`.
 | `sin`, `cos`, `tan`, `asin`, `acos`, `sqrt`, `exp`, `log`, `abs`, `sign`, `atan2`, `hypot` | 12 | Scalar math with named finite-result checks, except the existing `sqrt(abs(x))` and floating `abs` contracts. `abs` retains an Int input's tag. `atan2(a,b)` takes the ordinate first; `hypot` preserves native overflow/underflow-safe length calculation. `sign` returns -1 or +1 for a nonzero input and preserves either signed zero. |
 | `floor`, `ceil`, `round`, `int`, `float` | 5 | Numeric conversion; explicit `int` truncates. `round` uses the source explicit-round rule, while type coercion to Int uses the separate coercion rule. |
 | `<`, `<=`, `>`, `>=`, `=`, `and`, `or`, `not` | 8 | Numeric comparisons and numeric boolean truth. These are not generic string/array comparisons, nor JavaScript truthiness. |
-| `int/add`, `int/sub`, `int/mul`, `int/div`, `int/mod`, `int/and`, `int/or`, `int/xor`, `int/shl`, `int/shr` | 10 | Exact signed 63-bit integer operations, including wrapping overflow, division and remainder, bitwise operations and checked shifts; zero integer divisor is `E_RANGE`. No 32-bit JavaScript bitwise truncation. |
+| `int/add`, `int/sub`, `int/mul`, `int/div`, `int/mod`, `int/and`, `int/or`, `int/xor`, `int/shl`, `int/shr` | 10 | Exact signed 64-bit integer operations, including wrapping overflow, division and remainder, bitwise operations and checked shifts; zero integer divisor is `E_RANGE`. No 32-bit JavaScript bitwise truncation. |
 | `int/lt`, `int/le`, `int/gt`, `int/ge`, `int/eq` | 5 | Exact integer comparisons without a floating conversion. |
 | `equal?`, `show`, `text/concat` | 3 | Typed structural equality, source value display, and ordered text concatenation. `show` has display formatting, distinct from workspace source-number printing. |
 | `text/blank?` | 1 | True exactly when `String.trim` yields empty text: only ASCII space, tab, LF, CR and form feed are whitespace. Vertical tab, NUL and Unicode spaces remain nonblank; wrong input storage is `E_TYPE`. |
@@ -447,10 +447,10 @@ unlisted calls in `prims.js`.
 | `array/grade`, `array/index_of` | 2 | Whole-array CPU operations returning fresh IntArray indices. Grade accepts Int/finite Float/native-byte Text keys and stably grades original indices; descending mode swaps comparator orientation while retaining equal-key order, including ±0. Index_of accepts matching Int or Text keys/queries, preserves query order/count, returns the first original key index or -1, and allows duplicate keys. Inputs are immutable. Grade count is keys count; lookup count is queries count, never an implicit first-input owner origin. Text uses unsigned byte order/equality through the reversible JS codec, without Unicode normalization/UTF-16 collation. No Region/GPU sort or lookup instruction is implied. |
 | `array/compact`, `array/scan_sum` | 2 | Whole-array ordered Int operations, structured Core on CPU. Compact accepts an Int 0/1 mask (`E_ARRAY_MASK` otherwise) and returns fresh increasing kept indices. Scan returns fresh exclusive boundary offsets of length n+1: initial zero then ordered signed63 `int/add` prefixes, including the terminal total; empty input gives `[0]`. Negative entries and wrap remain ordinary integer arithmetic. n must be below native Int-array capacity before n+1 is formed. No count/topology origin is inherited: compact cardinality depends on mask data, scan cardinality is n+1. Strict packed producers/consumers remain numeric kernels; dynamic per-row compact/scan is refused by the Region/GPU tier. |
 | `array/scatter_add` | 1 | Fresh, zero-filled Int/Float/Vec2/3/4 array of the specified Int size. Indices must be IntArray and have exactly the values' length (`E_ARRAY_COUNT`). Source rows and vector components are added in order, including duplicate indices; Int additions wrap at signed 63 bits and Float additions round separately and reject nonfinite inputs/sums (`E_NONFINITE`). Each index must be inside the output (`E_ARRAY_RANGE`). No atomic GPU scatter or index regrouping is implied: the whole-array operation runs on the CPU; strict packed input maps retain their ordinary qualification. |
-| `array/min`, `array/max`, `array/segment_sum`, `array/segment_min`, `array/segment_max` | 5 | Ordered typed numeric reductions, componentwise for vectors. Integer sums wrap at signed 63 bits; floating extrema retain `Float.min`/`Float.max` signed-zero semantics. Segment offsets must be an integer array starting at zero, nondecreasing and ending at the value count (`E_ARRAY_OFFSETS`). Duplicate offsets yield typed zero for sums and `E_ARRAY_EMPTY` for extrema. Global empty extrema also fail; offsets `[0]` yield zero output rows. Independent contiguous segments may use the shared pool; additions within each segment retain source order. These operations do not gather or rearrange values. |
+| `array/min`, `array/max`, `array/segment_sum`, `array/segment_min`, `array/segment_max` | 5 | Ordered typed numeric reductions, componentwise for vectors. Integer sums wrap at signed 64 bits; floating extrema retain `Float.min`/`Float.max` signed-zero semantics. Segment offsets must be an integer array starting at zero, nondecreasing and ending at the value count (`E_ARRAY_OFFSETS`). Duplicate offsets yield typed zero for sums and `E_ARRAY_EMPTY` for extrema. Global empty extrema also fail; offsets `[0]` yield zero output rows. Independent contiguous segments may use the shared pool; additions within each segment retain source order. These operations do not gather or rearrange values. |
 | `array/segment_argmax` | 1 | Int or Float values with the same segment offsets (`E_ARRAY_OFFSETS`, `E_ARRAY_TYPE` for vectors, text or non-integer offsets): an IntArray with one entry per segment, the index into `values` (not relative to the segment) of the first maximum, so ties keep the earliest and signed zeros compare equal; -1 for an empty segment (no error). Float values must be finite (`E_NONFINITE`). Independent segments may use the shared pool; the result does not depend on the domain count. |
 | `value/rand`, `noise3`, `color/parse`, `color/byte` | 4 | The deterministic keyed hash, seeded Perlin/fBm sample, source drawing-color decoding, and channel conversion. `noise3` takes constant `:seed`, `:octaves` (1 to 64), `:lacunarity` (finite, positive, default 2) and `:gain` (0 to 1, default 0.5); with more than one octave the bytes equal `Noise.fbm3_with_scratch` (and `Noise.fbm3` at the defaults), the CPU kernel and JavaScript twin agree, and Metal and WGSL refuse non-default shapes of more than one octave as `E_GPU_FORM`. Static noise permutations become data; dynamic-seed caches are bounded to 16 entries. Color conversion preserves native byte quantization. |
-| `rand/at` | 1 | Two exact signed63 integers, seed and index, to a Float with the exact `Rand.float_at` keyed-hash bits. No floating conversion precedes hashing. The independently authored `rand_at` Lisp arithmetic helper remains an oracle, rather than a compiler-recognized name. |
+| `rand/at` | 1 | Two exact signed 64-bit integers, seed and index, to a Float with the exact `Rand.float_at` keyed-hash bits. No floating conversion precedes hashing. The independently authored `rand_at` Lisp arithmetic helper remains an oracle, rather than a compiler-recognized name. |
 | `fma` | 1 | Explicit scalar binary64 fused multiply-add: the exact product and sum round once, matching `Float.fma` including signed zero, subnormals and finite overflow cancellation. Nonfinite inputs or final output fail with `E_NONFINITE`; an overflowing intermediate product alone is allowed. JavaScript computes the exact significands with BigInt and rounds to nearest, ties to even. This primitive does not contract ordinary `*` and `+`. GPU targets refuse it when exact binary64 single rounding is unavailable. |
 | `float/next_after` | 1 | `(float/next_after x y)`: the adjacent binary64 value after `x` in the direction of `y`, exactly `Float.next_after`: `y` when `x = y` (so `(next_after 0.0 -0.0)` is `-0.0`), the smallest subnormal of `y`'s sign from a zero `x`, otherwise one ulp step on the bit pattern. Both inputs and the result must be finite (`E_NONFINITE`; the result of a finite pair always is). JavaScript steps the BigUint64 bit pattern of a Float64 view. Pure scalar Core operation with no packed kernel, GPU or WGSL form. |
 | `float/mul_checked`, `float/fma_checked` | 2 | Finite scalar inputs produce an ordered record `{:value float :valid bool}`. Finite results preserve exact binary64 bits, including signed zero; overflowing results produce positive zero and false. Multiplication rounds separately; FMA rounds once and permits finite cancellation of an overflowing exact product. Invalid inputs retain `E_NONFINITE`. No nonfinite value is published, and ordinary `*`/`fma` retain their errors. GPU targets refuse binary64 overflow-status instructions. |
@@ -500,8 +500,8 @@ a selection or clamp. Constants qualified as finite, comparisons, selections,
 absolute value, absolute-input square root, min and max need no additional
 check after their operand producers have been checked.
 
-Native Int has 63 signed bits: minimum -4,611,686,018,427,387,904 (`-2^62`),
-maximum 4,611,686,018,427,387,903 (`2^62-1`). This range is distinct from the
+Native Int is a signed 64-bit integer: minimum -9,223,372,036,854,775,808 (`-2^63`),
+maximum 9,223,372,036,854,775,807 (`2^63-1`), with two's-complement wrapping. This range is distinct from the
 checked float-to-int boundary: that conversion accepts only a finite double
 with absolute value strictly less than `4e18`, then truncates toward zero.
 An exact existing Int is not put through that narrower float boundary unless
@@ -572,23 +572,23 @@ negative value.
 
 For an `int/*` operand, an existing Int is used directly; a Float or Bool
 passes through `Value.int_of`, not explicit `int` truncation. Integer
-operations then work in the signed 63-bit domain:
+operations then work in the signed 64-bit domain:
 
 | Integer primitive | Behavior |
 | --- | --- |
-| `int/add(a,b)`, `int/sub(a,b)` | Exact addition/subtraction followed by signed 63-bit wrapping. |
-| `int/mul(a,b)` | Multiply exactly, keep the low 63 bits, interpret those bits as signed. `int/mul(max_int,2) = -2`. |
+| `int/add(a,b)`, `int/sub(a,b)` | Exact addition/subtraction followed by signed 64-bit wrapping. |
+| `int/mul(a,b)` | Multiply exactly, keep the low 64 bits, interpret those bits as signed. `int/mul(max_int,2) = -2`. |
 | `int/div(a,b)` | Signed quotient truncated toward zero. Zero divisor is `E_RANGE` ("Integer division by zero."). The overflow pair `min_int / -1` wraps to `min_int`. |
 | `int/mod(a,b)` | Signed remainder `a - trunc(a/b)*b`, with the dividend's sign. Zero divisor has the same `E_RANGE`; `-7 mod 3 = -1`, `7 mod -3 = 1`, and `min_int mod -1 = 0`. |
-| `int/and(a,b)` | Bitwise AND of their 63-bit two's-complement representations, then signed interpretation. |
+| `int/and(a,b)` | Bitwise AND of their 64-bit two's-complement representations, then signed interpretation. |
 | `int/or(a,b)` | Bitwise OR of those representations, then signed interpretation. |
 | `int/xor(a,b)` | Bitwise XOR of those representations, then signed interpretation. `min_int xor max_int = -1`. |
-| `int/shl(a,b)`, `int/shr(a,b)` | Checked shift count 0 through 62; left shift wraps and right shift fills with zero bits, matching native logical `lsr`. Other counts produce `E_RANGE`. |
+| `int/shl(a,b)`, `int/shr(a,b)` | Checked shift count 0 through 63; left shift wraps and right shift fills with zero bits (logical). `shl(1,63) = min_int`, `shr(-1,1) = max_int`. Other counts produce `E_RANGE`. |
 | `int/lt`, `int/le`, `int/gt`, `int/ge`, `int/eq` | Compare signed integer operands exactly and return Bool. |
 
 The JavaScript target represents Int as `BigInt` and Float as `Number`.
 Integer literals are emitted as decimal BigInt literals, never parsed through
-Number first. `int/*` arithmetic wraps with `BigInt.asIntN(63, value)`; BigInt
+Number first. `int/*` arithmetic wraps with `BigInt.asIntN(64, value)`; BigInt
 division/remainder have the required truncation/sign, with explicit zero
 checks and wrapping for quotient overflow. The target uses `Number(integer)`
 only at the numeric-double conversion boundary. A checked Float-to-Int
@@ -828,9 +828,9 @@ always returns the four-Float List, even for opaque alpha.
    add 0.5, truncate toward zero, then clamp the integer to [0,255].
 2. **Unclamped input** (Vec3/List color): multiply the finite channel by 255,
    add 0.5, perform the native Apple-Silicon float-to-integer conversion, then
-   clamp the resulting signed 63-bit integer to [0,255]. It is not the checked
+   clamp the resulting signed 64-bit integer to [0,255]. It is not the checked
    `int` leaf. The intermediate double may overflow: truncate toward zero and
-   saturate to signed 64-bit bounds, then keep the low 63 bits and interpret
+   saturate to signed 64-bit bounds, then keep the low 64 bits and interpret
    them as signed; NaN converts to zero. Positive overflow/infinity therefore
    becomes -1, negative overflow/infinity becomes zero. The input finite check
    still rejects an authored non-finite channel before this conversion.
@@ -839,7 +839,7 @@ For example native `Color.of_floats 1e20 (-1e20) 0.5 1.` is RGBA 0,0,128,255;
 clamping inputs first would incorrectly make its red channel 255. This mode
 also preserves ordinary slightly negative values and half-byte rounding.
 JavaScript implements the signed conversion using BigInt after double
-arithmetic, then `BigInt.asIntN(63, ...)`, with explicit saturation at +/-2^63.
+arithmetic, then `BigInt.asIntN(64, ...)`, with explicit saturation at +/-2^63.
 This is a color leaf parameter, not an extra numeric language operator.
 
 `value/hsv` is a compiler expansion, with hue in turns and no saturation/value
@@ -957,9 +957,9 @@ new collection of shader operations:
 | `Noise3(x,y,z,seed,octaves)` | A seeded numeric sample; seed and octaves satisfy packed qualification. |
 | `Fma(a,b,c)` | Explicit binary64 single-rounding multiply-add of three numeric registers. Input conversion is explicit where needed; untaken guarded instructions do not execute. CPU and JavaScript match `Float.fma` bits; GPU qualification refuses unavailable binary64 arithmetic. Ordinary multiply/add instructions retain their separate rounding. |
 | `Checked_mul(projection,a,b)`, `Checked_fma(projection,a,b,c)` | `Value` emits the finite binary64 result or positive zero; `Valid` emits exactly one or zero. Compiler-only record fields connect the two registers. Both projections use existing guards, so untaken branches do not execute. No nonfinite register is published. The single-destination representation computes each projection separately; duplicate FMA work is a measured optimization candidate, not a speed claim. GPU targets refuse these instructions. |
-| `Rand_at(seed,index)` | Exact signed63 integer registers to the native `Rand.float_at` Float result. CPU and emitted JavaScript retain all integer bits; GPU qualification refuses this instruction explicitly. |
+| `Rand_at(seed,index)` | Exact signed 64-bit integer registers to the native `Rand.float_at` Float result. CPU and emitted JavaScript retain all integer bits; GPU qualification refuses this instruction explicitly. |
 | `Array_prepare(uniform,type)` | Lazily materialize a checked invariant Int/Float/Vec2/3/4/Text table at its argument's evaluation position. Its compiler-local handle is neither a numeric register nor an output. The table is separate from iteration sources and count/origin proofs. |
-| `Gather(table,index,width,component)`, `Int_gather(table,index)` | Read one component or exact signed63 integer from a prepared immutable table. Check the integer element index against native bounds and row count before component address multiplication. GPU targets refuse table preparation and indexed reads, including Float-output kernels. |
+| `Gather(table,index,width,component)`, `Int_gather(table,index)` | Read one component or exact signed 64-bit integer from a prepared immutable table. Check the integer element index against native bounds and row count before component address multiplication. GPU targets refuse table preparation and indexed reads, including Float-output kernels. |
 | `Text_const(text)`, `Text_input(source)`, `Text_uniform(capture)`, `Text_gather(table,index)`, `Text_select(condition,yes,no)` | Immutable Text leaves in Collect regions: constants, source/capture reads, exact indexed lookup and selected copying. Text has a separate register bank, not a numeric width. Outputs allocate a fresh string array while sharing immutable strings. Text arithmetic, transformations and reductions remain unsupported in regions and use structured Core where eligible. GPU targets refuse all Text registers. |
 | `Select(condition,yes,no)` | Selects by condition unequal to zero; branch instructions carry their execution guards. |
 | `Guarded(conditions,instruction)` | Executes the instruction and its finite checks only when every condition selects this branch. Metal and WGSL declare the result at the top of its scope (the kernel or loop body) and assign it inside one block shared by consecutive instructions with the same guards (`Kernel_layout.Scope`), so later selections retain the same lazy behavior. An unselected overflow is unevaluated; `min` and `max` still evaluate both arguments. |
@@ -993,15 +993,15 @@ reference lane-error ordering; an untaken or empty body is unevaluated.
 JavaScript supports the same controls, including exact Int bounds above 2^53.
 Metal and fast WGSL visit their scopes through `Kernel_layout.iter`, keeping
 their existing 64-bit integer representations.
-Int operations and abs normalize those representations to signed63 results;
-logical right shifts first retain the native 63-bit input representation.
+Int operations and abs normalize those representations to signed 64-bit results;
+logical right shifts act on the 64-bit representation.
 This applies to the Metal, fast WGSL/JavaScript and SPIR-V printers. Their
 separate whole-Float arithmetic helpers retain 64-bit intermediate storage.
 Device kernels OR their status bits into a thread-local word and publish it to
 the shared status word with the kernel's one atomic, at its end (a loop over its
 pass limit flags bit 0 and runs no pass): bit 0
 records nonfinite output, bit 1 a zero integer divisor, and bit 2 an integer
-shift count outside `[0,62]`. Fast (approximate-tier) kernels check their inputs
+shift count outside `[0,63]`. Fast (approximate-tier) kernels check their inputs
 and outputs only, not each operation, and keep only the loop-body instructions
 that reach an output, a next value or a stop (`specification/gpu-codegen.md`);
 the other tiers check every operation that can introduce a nonfinite value. Guards and empty loops retain lazy errors. Native readback and buffer
@@ -1503,7 +1503,7 @@ finite ordinary values before preparing sources. Source preparation keeps writte
 Zip/Product order, including suppression after an empty Product clause. Actual
 source lengths determine iteration and output counts; native language capacity
 checks precede the separate browser addressing/allocation guard. Output storage
-follows the terminal registers, including exact signed63 Int and immutable Text.
+follows the terminal registers, including exact signed 64-bit Int and immutable Text.
 
 Captured uniforms are compiled synchronous functions, memoized only when a
 selected instruction reads their slot. Empty outputs and untaken guards do not
@@ -1694,7 +1694,7 @@ runtime primitive.
 | `array/sum` | region | Ordered packed reduction, or the structured array reduction rule when not a numeric region. |
 | `error` | primitive | Typed code/message failure; preserves authored control-flow laziness. |
 | `int/add` | primitive | Exact signed integer addition with the existing wrapping contract. |
-| `int/shr` | primitive | Exact logical right shift of the integer's 63-bit representation, with checked shift count. |
+| `int/shr` | primitive | Exact logical right shift of the integer's 64-bit representation, with checked shift count. |
 | `build-volume` | compiler rule | Inline checked body: `fold` over recipe commands, record fields and `command`. |
 | `carve` | compiler rule | Inline checked body: packed voxel `map`, `random-at` integer hashes, comparisons and selected old/new cell values. |
 | `cell` | compiler rule | Inline checked body: index arithmetic and vec3 construction. |
@@ -1724,3 +1724,13 @@ uniforms and provenance stages reuse that copy. The memo is local to one bind,
 so another invocation never inherits arguments or frame values. Physical identity
 also distinguishes separately rebound views that share a residual ID. Storage,
 arity and finite-value validation remain the same as before this sharing rule.
+
+### Integer width (64-bit)
+
+Int is a native signed 64-bit integer with two's-complement wrapping; every
+`int/*` operation is `i64` wrapping arithmetic. `i64::MIN` is a reachable value:
+`MAX+1 = MIN`, `MIN / -1 = MIN`, `MIN mod -1 = 0`, `abs(MIN) = MIN`. `rand/at`,
+`Rand.float_at` and the geometry hashes keep their historical bit-exact results:
+they are named hash functions that wrap their intermediates to the former signed
+63-bit range internally (`rays_math::hash::wrap_int63`), so seeds that differ only
+in bit 62 or above alias one another. This is deterministic and part of the contract.

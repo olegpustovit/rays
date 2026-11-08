@@ -89,7 +89,7 @@ vec4)` annotations accept them. The Metal emitter uses the same scalar register
 instructions for each component. There are no new array constructors or kernel
 instructions; GPU eligibility remains governed by the checker.
 
-`(array int)` stores native signed 63-bit integers without converting through
+`(array int)` stores native signed 64-bit integers without converting through
 double precision. `array/int count [value]` fills this storage (zero by default),
 and `array/range count :type int` emits exact indices; omitting `:type` retains
 the float range. Map, for, scan, filtering, sorting, slice and concatenation
@@ -1505,7 +1505,7 @@ gives 0; a float converts to Int truncated and saturated to the 32-bit range; `+
 registers, exact within 32 bits and wrapping past them; a uint32 word from 2^31 reads as a negative
 Int, which a uint32 output refuses; a constant loop bound past 32 bits saturates, so `(iterate
 4611686018427387903 ... :until ...)` still runs; integers travel between kernels as floats, exact to
-2^24). Raster stages, the web export and exact precision keep 63-bit integers. A compute kernel's
+2^24). Raster stages, the web export and exact precision keep 64-bit integers. A compute kernel's
 float `mod` of integral operands under 2^23 skips the precise `fmod` with the same bits. A region of
 4,096 elements or more that a drawing computes with runs on the device and is read back (`Executor.region_readback`, kernels kept by form, at most 16). A drawing's `filter` of
 an `array/range` lowers to an Int mask region and `array/compact`, so a fold's filter packs too.
@@ -2266,7 +2266,7 @@ shuts down audio only if it initialized it.
 
 The example ports also use `array/slice array first count` (a checked owned slice) and
 `array/concat first second` (matching packed element types), retaining packed stroke data.
-`int/mul`, `int/div`, `int/and` and `int/xor` preserve native OCaml integer bits, including
+`int/mul`, `int/div`, `int/and` and `int/xor` preserve native 64-bit integer bits, including
 wrapping multiplication. They support the recursive rectangle example's original palette hash
 without converting its large integer products through a float. Division by zero is `E_RANGE`.
 
