@@ -100,6 +100,7 @@ Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s
 
 ## Session log
 
+- 2026-11-08: `684b3d58` **I prep** — `rays` drops unused `ocaml_int`; M1 site-cache rolled back; `m1-retry` worker queued.
 - 2026-11-08: `ba113180` B1 `ScopeStack`; `ed08c91b` M18 partial; Wave B **6/6** (B5 partial); M **11/21**; ~27/63 IDs.
 - 2026-11-08: `6f75543d` B5 `rays_editor`; review3; `rdk` only `sop`/`flow_sop`.
 - 2026-11-08: `69d08a8a` M6; `66136b7f` M8; `7b374363` B5 `flow_gpu`; M wave 10/21; ~24/63 IDs.
