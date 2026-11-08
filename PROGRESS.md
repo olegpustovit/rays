@@ -11,8 +11,8 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | Wave | Done | Active | Pending |
 |------|------|--------|---------|
 | A | 8/8 | — | — |
-| B | 0/6 | B0 | 4 |
-| M | 0/21 | — | 21 |
+| B | 2/6 | — | 3 |
+| M | 1/21 | — | 20 |
 | I | 0/1 | — | 1 |
 | C | 0/21 | — | 21 |
 | D | 0/6 | — | 6 |
@@ -29,10 +29,12 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | A6 | done | `09ce8574` UI/rays_bin; **this session** — `editor_core` drops `rays` + `runtime_resources` (local frame + atomic write; viewport in `rays_editor`) |
 | A7 | done | `992093ce` triangle → `point_grid`; `626a1f70` Filename.concat; `f980cbf9`/`8093ff64` ocaml trim; **this session** `rdk_core::ocaml_trim`, rdk_ops/sop blank-name sweep |
 | A8 | done | op/term_arena/param/renderer trims; `Native::runtime_of` kept (in use) |
-| B0 | active | Warm incremental OK; staleness = clean / non-dev profile / RUSTFLAGS (AGENTS.md) |
+| B0 | done | §B0 checklist + warm pair `flow_check` 0.15s/0.07s; `catalog.rs` marker |
+| B3 | done | `gpu_editor` harness; 7× `gpu_suite_t*` + qual wrapper → 2 test links |
 | B4 | done | W1 `flow_ir` touch → `rays_bin` check in `tools/buildtime` (env overrides) |
-| B1–B3,B5 | pending | |
-| M1–M21 | pending | |
+| B1,B2,B5 | pending | |
+| M10 | done | detach alias slots sharing builder before store; `cargo t -p flow_ir store` 3 pass |
+| M1–M9,M11–M21 | pending | |
 | I | pending | |
 | C1–C21 | pending | |
 | D1–D6 | pending | |
@@ -57,8 +59,34 @@ Cursor `Task` subagents unavailable in this harness; workers are `omp launch -p`
 
 Read-only review in `.subagent-logs/review.log`: Wave A runbook **5/6 bullets done**, bullet 3 partial (`pxui` `ocaml_int` → Wave **I**); A4 MD5 done, optional `guarded`/`ocaml_min` dedup still scattered. **~8/63** plan IDs closed (A1–A8 + B4); M/I/C/D not started. A6 closed at `3a293e9b` after review snapshot.
 
+## B0 — shared `target/` incremental invalidation
+
+Policy (`AGENTS.md`, `docs/history/build-speed.md`, plan B0): one warm workspace-root `target/` for the dev edit loop; 41 s vs 7.6 s on the same touch means something below invalidated Flow crate incremental state.
+
+**Invalidates or bypasses dev incremental cache (shared dir):**
+
+| Cause | Effect |
+|-------|--------|
+| `cargo clean` (whole tree or `-p` on hot crates) | Removes incremental objects; next touch is cold. |
+| Non-`dev` profile in the same dir (`--release`, `--profile e2e\|gpu\|slow`, `Makefile` `build`) | Separate output trees; changing `[profile.*]` or per-package `opt-level` can leave stale mixed-profile objects — recovery: `cargo clean -p <crate>` (`build-speed.md` llvm link failure note). |
+| `RUSTFLAGS` / `cargo --config …` overrides for a build that shares `target/` | Re-hashes crate fingerprints; avoid on shared dir (policy #3 in `build-speed.md`). |
+| `CARGO_TARGET_DIR` pointing away from root `target/` | Not invalidation, but edits do not warm the shared cache agents expect. |
+| Toolchain / `.cargo/config.toml` `rustflags` change | Legitimate fingerprint change; full rebuild once. |
+
+**Repo script audit (2026-11-08):** no checked-in `export RUSTFLAGS`, `CARGO_TARGET_DIR=`, or `--config` profile overrides. `tools/buildtime` / `tools/t` only *read* `CARGO_TARGET_DIR` if the shell sets it. `Makefile` uses `cargo build --release` for install only (intentional). Stray env from agents/CI remains the main unrepo’d risk for the 41 s regression.
+
+**Warm pair** (`catalog.rs` marker `// b0: warm incremental smoke`, `cargo check -p flow_check` ×2, shared `target/`, M1):
+
+| Run | `real` (wall) | Cargo `Finished` |
+|-----|---------------|------------------|
+| 1 (post-touch) | 0.15 s | 0.08 s |
+| 2 (no edit) | 0.07 s | 0.02 s |
+
+Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s under load; this run is healthy (not stale).
+
 ## Session log
 
+- 2026-11-08: B0 — invalidation checklist + script audit in PROGRESS §B0; warm pair flow_check 0.15 s / 0.07 s; log `.subagent-logs/b0.log`.
 - 2026-11-08: **Wave A closed** `3a293e9b` A6; plan audit appended; m10/b0 workers queued.
 - 2026-11-08: omp subagents landed `0cad884b` A5, `7a63b07b`/`30623d6e` A2, `da178e93` A7; Wave A 7/8.
 - 2026-11-08: omp subagents A2/A5/A6/A7-geom launched; logs under `.subagent-logs/`.
