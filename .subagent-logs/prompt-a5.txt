@@ -1,0 +1,9 @@
+Rays /Users/snowbear/WORK/GIT/rays dev. AGENTS.md + ponytail.
+
+Wave A5: test-only library code — region_snapshot (may exist), Editor::Private behind test-hooks (partial), pxui_graph accessors only used by tests, remove dead window_to_values/live_delay if still present.
+
+Read PROGRESS.md. Grep pxui_graph pub fn uses; production editor uses Inspect — do not break. cargo check -p pxui_graph -p rays_editor --features test-hooks.
+
+git pull --rebase before commit. "A5:" commits. Update PROGRESS.md only.
+
+Return: done vs skipped with evidence, commit hash.

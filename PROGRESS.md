@@ -25,7 +25,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | A2 | done | `30623d6e` — `e10bff22` edge_transport; `ec5c1b1b`/`992093ce` rdk re-exports; `5a6e7269`/`da178e93` support (−631 vs OCaml root); `NumericKind` test dropped |
 | A3 | done | `1a8ee31b` — rdk `MAX_ARRAY_LENGTH` trimmed; `boolean_materialization` packing kept |
 | A4 | done | `a60fcced` — `md5_hex` in `rays_math::hash`; 5 duplicate modules removed |
-| A5 | done | `ec5c1b1b` `fa967abe` `992093ce` — `region_snapshot` `#[cfg(test)]`; dead `window_to_values`/`live_delay()` removed; `Editor::Private`, `Reduce`, `with_core` + `pxui_graph::Inspect` test accessors behind `test-hooks` (prod keeps `box_of`/`grabbed`/`footer_paths`); `rays_editor::test-hooks` enables `pxui_graph/test-hooks` |
+| A5 | done | `0cad884b` `ec5c1b1b` `fa967abe` `992093ce` — `region_snapshot` `#[cfg(test)]`; dead `window_to_values`/`live_delay()` removed; `Editor::Private`, `Reduce`, `with_core` + `pxui_graph::Inspect` test accessors behind `test-hooks` (prod keeps `box_of`/`grabbed`/`footer_paths`); `rays_editor::test-hooks` enables `pxui_graph/test-hooks` |
 | A6 | active | `09ce8574` — unused deps on rays_bin / UI (pxui still has `ocaml_int` until I) |
 | A7 | done | `992093ce` triangle → `point_grid`; `626a1f70` Filename.concat; `f980cbf9`/`8093ff64` ocaml trim; **this session** `rdk_core::ocaml_trim`, rdk_ops/sop blank-name sweep |
 | A8 | done | op/term_arena/param/renderer trims; `Native::runtime_of` kept (in use) |
@@ -45,11 +45,14 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | a5 | `.subagent-logs/a5.log` | A5 test-only gates |
 | a6 | `.subagent-logs/a6.log` | A6 Cargo dep hygiene |
 | a7-geom | `.subagent-logs/a7-geom.log` | A7 rdk_geom trim/triangle |
+| review | `.subagent-logs/review.log` | plan audit (read-only) |
+| b3 | `.subagent-logs/b3.log` | B3 gpu test merge |
 
 Cursor `Task` subagents unavailable in this harness; workers are `omp launch -p` (pids in shell history).
 
 ## Session log
 
+- 2026-11-08: omp subagents landed `0cad884b` A5, `7a63b07b`/`30623d6e` A2, `da178e93` A7; Wave A 7/8.
 - 2026-11-08: omp subagents A2/A5/A6/A7-geom launched; logs under `.subagent-logs/`.
 - 2026-11-08: Resume execution; A1 verified on `dev`.
 - 2026-11-08: `3c86b2a1` — gpu_suite sharding removed.

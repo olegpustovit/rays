@@ -1,0 +1,9 @@
+Rays /Users/snowbear/WORK/GIT/rays dev. AGENTS.md ponytail. Wave B3 only.
+
+Merge gpu_suite_t1..t6 qualification into fewer bins per docs/history/port-simplification/index.html B3. gpu_suite *_b already removed.
+
+Read rays_editor/Cargo.toml [[test]] targets. Goal: ~2 links, one shared test support module; keep RAYS_SLOW qualification behavior.
+
+cargo t -p rays_editor with one filter after change. Commit "B3:". Update PROGRESS.md. No artifact.
+
+Return: test targets before/after, commit hash.

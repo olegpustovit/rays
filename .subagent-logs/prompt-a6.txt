@@ -1,0 +1,9 @@
+Rays /Users/snowbear/WORK/GIT/rays dev. AGENTS.md + ponytail.
+
+A6: unused Cargo.toml deps — editor_core rays+runtime_resources, rays_bin editor_core/input removal per plan wave A bullet 3. grep imports; remove only zero-use deps.
+
+Do NOT remove ocaml_int from pxui (Wave I). cargo check each touched crate + one consumer.
+
+git pull --rebase before commit. "A6:". Update PROGRESS.md.
+
+Return: deps removed, commit hash, check output.

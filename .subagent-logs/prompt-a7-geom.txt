@@ -1,0 +1,11 @@
+Rays /Users/snowbear/WORK/GIT/rays dev. AGENTS.md + ponytail.
+
+A7 slice ONLY rdk_geom: unify closest-point-on-triangle — surface_index.rs vs point_grid::point_triangle_squared (PROGRESS says partially done). Wire surface_index to shared helper; delete duplicate math.
+
+Also grep rdk_ops/sop for remaining manual blank-name trim not using rdk_core::support::ocaml_trim_is_empty or sop::support::ocaml_trim (per PROGRESS).
+
+cargo check -p rdk_geom -p rdk_ops; cargo t -p rdk_geom with smallest filter that hits surface/proximity.
+
+git pull --rebase before commit. "A7:" commit. Update PROGRESS.md.
+
+Return commit + test command output tail.

@@ -1,0 +1,9 @@
+Rays repo /Users/snowbear/WORK/GIT/rays, branch dev. Follow AGENTS.md and ponytail.
+
+Wave A finding A2: delete dead sop::support fns, dead edge_transport, bad rdk re-exports (see docs/history/port-simplification/index.html master table A2).
+
+Read PROGRESS.md first. grep every pub fn in crates/sop/src/support.rs before deleting. cargo check -p sop -p rdk -p rdk_ops; cargo t -p sop.
+
+Before commit: git pull --rebase if needed. Commit message prefix "A2:". Update PROGRESS.md (mark done if complete) + session log. Do NOT art publish or edit artifact HTML.
+
+Reply with commit hash, checks, line count removed.
