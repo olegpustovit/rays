@@ -276,6 +276,12 @@ pub fn pool() -> Pool {
     }))
 }
 
+/// An upload's source is its content: a recook that rebuilds the same array (a fresh session, a
+/// constant fill) reuses the buffer. Bits, not `==`: -0.0 and 0.0 upload differently.
+fn same_values(old: &Arc<Vec<f64>>, new: &Arc<Vec<f64>>) -> bool {
+    Arc::ptr_eq(old, new) || (old.len() == new.len() && old.iter().zip(new.iter()).all(|(a, b)| a.to_bits() == b.to_bits()))
+}
+
 /// on the creating thread: recycle or destroy what collected or read holders gave back (a buffer a
 /// reader is still converting waits for the next drain)
 fn drain_pool(pool: &Pool) {
@@ -950,7 +956,7 @@ pub fn dispatch(t: &T, o: &Options, explicit_input: Bound, explicit_table: Bound
                 let length = values.count * kernel.input_widths[index] * 4;
                 let buffer = ensure(d, &mut st.inputs[index], &mut st.creations, !kernel.input_uint32[index], length)?;
                 let source = &values.arrays[index];
-                let same = matches!(&st.inputs[index].uploaded, Some((old, covered)) if Arc::ptr_eq(old, source) && *covered == length);
+                let same = matches!(&st.inputs[index].uploaded, Some((old, covered)) if *covered == length && same_values(old, source));
                 if !same {
                     // A failed write may have partially replaced the previous source.
                     st.inputs[index].uploaded = None;
@@ -1044,7 +1050,7 @@ pub fn dispatch(t: &T, o: &Options, explicit_input: Bound, explicit_table: Bound
                 let source = &values.tables[u as usize];
                 let length = 4.max(source.len() as i64 * 4);
                 let buffer = ensure(d, &mut st.gathers[k], &mut st.creations, !kernel.gather_uint32[k], length)?;
-                let same = matches!(&st.gathers[k].uploaded, Some((old, covered)) if Arc::ptr_eq(old, source) && *covered == length);
+                let same = matches!(&st.gathers[k].uploaded, Some((old, covered)) if *covered == length && same_values(old, source));
                 if !same {
                     st.gathers[k].uploaded = None;
                     if kernel.gather_uint32[k] {

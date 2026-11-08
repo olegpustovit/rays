@@ -1,4 +1,4 @@
-//! All six eight-frame chain cases, including triangle tracing and device-computed normals.
+//! The six eight-frame chain cases, one test each, including triangle tracing and device-computed normals.
 use super::*;
 use rays_pathtracer::rays_pathtracer as pt;
 use rays_math::{vec3,color};
@@ -50,7 +50,8 @@ fn normal_check(cpu:&g::T,device:&g::T) {
     same(&cn,&dn,1e-4);
     for (i,s) in sums.iter().enumerate() {let l=(s[0]*s[0]+s[1]*s[1]+s[2]*s[2]).sqrt();let (x,y,z)=p::get(&dn,i as i64).unwrap();for (a,b) in [(s[0]/l,x),(s[1]/l,y),(s[2]/l,z)] {assert!((a-b).abs()<=1e-6);}}
 }
-pub(super) fn run() {
+/// Case `index` of the six, each its own test so each stays inside the per-test budget.
+pub(super) fn run(index: usize) {
     assert!(crate::common::gpu(),"native GPU required");
     let cases=[
         (":offset [(get (frame/input) :t) 0.0 0.0]",":translate [0.0 1.0 0.0]","Points"),
@@ -60,7 +61,7 @@ pub(super) fn run() {
         (":offset [0.5 0.0 0.0]",":translate [0.0 (get (frame/input) :t) 0.0] :shear_xy (* (get (frame/input) :t) 0.5) :recompute_normals true","Triangles"),
         (":offset [0.5 0.0 0.0]",":translate [0.0 (get (frame/input) :t) 0.0] :shear_xy (* (get (frame/input) :t) 0.5)","Bare")];
     let override_case=std::env::var("DRIVE").ok().map(|d|(d,std::env::var("XDRIVE").unwrap_or_else(|_|":translate [0.0 1.0 0.0]".into()),std::env::var("CONNECTIVITY").unwrap_or_else(|_|"Points".into())));
-    let cases=match override_case.as_ref(){Some((d,x,c))=>vec![(d.as_str(),x.as_str(),c.as_str())],None=>cases.to_vec()};
+    let cases=match override_case.as_ref(){Some((d,x,c))=>if index==0 {vec![(d.as_str(),x.as_str(),c.as_str())]} else {vec![]},None=>vec![cases[index]]};
     for (drive,xdrive,connectivity) in cases {
         let bare=connectivity=="Bare";let triangles=connectivity!="Points";let recompute=xdrive.contains("recompute_normals");let connectivity=if triangles {"Triangles"}else{"Points"};let n=side();
         let grid=format!("(sop/grid :counts \"Point counts\" :connectivity \"{connectivity}\" :columns {n} :rows {n}) (sop/attribute_noise :name \"noise\" :seed 7 {drive})");

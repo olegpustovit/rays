@@ -13,7 +13,8 @@ use rdk_core::{attribute as a, geometry as g, packed::float3 as p};
 use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 
 pub fn cases() -> Vec<(&'static str, fn())> {
-    vec![("native_grid_gpu", grid), ("native_chain_gpu", chain), ("native_chain_frames", frames::run), ("native_scrub_gpu", scrub::run)]
+    vec![("native_grid_gpu", grid), ("native_chain_gpu", chain), ("native_chain_frames_offset", || frames::run(0)), ("native_chain_frames_octaves", || frames::run(1)), ("native_chain_frames_int_octaves", || frames::run(2)),
+        ("native_chain_frames_triangles", || frames::run(3)), ("native_chain_frames_normals", || frames::run(4)), ("native_chain_frames_bare", || frames::run(5)), ("native_scrub_gpu", scrub::run)]
 }
 fn ok<T>(v: Result<T, rays_diagnostic::Diagnostic>) -> T { v.unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d))) }
 fn side() -> i64 { std::env::var("GRID_SIDE").map(|s| s.parse().expect("GRID_SIDE integer")).unwrap_or(256) }
