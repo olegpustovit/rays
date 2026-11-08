@@ -2,7 +2,7 @@
 //! `Renderer`. Port of lib/rays_editor/rays_editor.ml (and its .mli). OCaml's modules are Rust
 //! modules with the same names; the crate root re-exports them (`rays_editor::Editor`).
 //!
-//! OCaml optional arguments: `Editor::create` takes a `Create` record (`loop_model::create_options`),
+//! OCaml optional arguments: `Editor::create` takes a `Create` record (`loop_model::Create`),
 //! `Editor::update_with` an `inspector` callback answering `Rc<dyn Any>`, and `Measure::run` a
 //! `MeasureOptions` record. `editor::Editor` is a plain `Clone` value: a test keeps the one it is given
 //! and passes it by value to the functions that return the next.
@@ -49,7 +49,7 @@ pub mod editor {
     use crate::viewport as V;
 
     pub use crate::editor_model::picked;
-    pub use crate::loop_model::create_options as Create;
+    pub use crate::loop_model::Create;
     pub use crate::loop_model::Draw_fn;
     pub use crate::loop_model::{
         camera, can_redo, can_undo, carry_line, carrying, displayed_node, document, edit, edit_layout, edit_phases, level, network, node_box, panes, prepared, probe, redo_label, scene_document, selected_node, set_probe, set_settings, settings, timeline,
@@ -520,7 +520,7 @@ pub mod workspace {
                 (None, _) => base,
             };
             editor_loop::run(
-                loop_model::create_options {
+                loop_model::Create {
                     inputs: inputs.clone(),
                     gpu_owner: Some(gpu_owner.clone()),
                     lights,

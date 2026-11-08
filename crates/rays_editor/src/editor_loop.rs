@@ -946,7 +946,7 @@ pub fn close(value: &LoopModel) {
 /// OCaml's `run`: the editor as a sketch program.
 #[allow(clippy::too_many_arguments)]
 pub fn run(
-    options: create_options,
+    options: Create,
     max_frames: Option<i64>,
     crash_dir: Option<String>,
     profile: Option<bool>,
@@ -956,7 +956,7 @@ pub fn run(
     prepare: cook::Prepare_fn,
     draw: Draw_fn,
 ) -> Result<(), sketch::error> {
-    let create_options { inputs, name, presets, factories, gpu_owner, settings, lights, camera, background, seed, grain, domains, max_entries, max_payload_bytes, await_: _, carry_budget, preferences, ui_text_size, platform, ui_font, opened } = options;
+    let Create { inputs, name, presets, factories, gpu_owner, settings, lights, camera, background, seed, grain, domains, max_entries, max_payload_bytes, await_: _, carry_budget, preferences, ui_text_size, platform, ui_font, opened } = options;
     let name = name.unwrap_or_else(|| workspace_doc::name(&workspace));
     // `opened`, the caller's document of this workspace, is handed to the editor once and not kept by
     // the loop: after an edit or a reload only the history decides how long it lives.
@@ -970,7 +970,7 @@ pub fn run(
             let opened = handed.borrow_mut().take();
             let (inputs, presets, factories, gpu_owner, settings, lights, camera, background, preferences, platform, ui_font) = slots.borrow_mut().take().expect("init runs once");
             let value = create(
-                create_options {
+                Create {
                     inputs,
                     name: Some(name.clone()),
                     presets,

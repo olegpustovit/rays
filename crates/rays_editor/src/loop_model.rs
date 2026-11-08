@@ -161,7 +161,7 @@ pub fn seed_lights(lights: &[light::Light], scene: kg::T) -> kg::T {
 
 /// OCaml's optional arguments of `create`.
 #[derive(Default)]
-pub struct create_options {
+pub struct Create {
     pub inputs: Option<Rc<workspace_doc::Inputs>>,
     pub name: Option<String>,
     pub presets: Option<String>,
@@ -201,7 +201,7 @@ fn real_path(file: &str) -> String {
     }
 }
 
-pub fn create(o: create_options, workspace: &workspace_doc::T, source: Option<source_file::SourceFile>, prepare: cook::Prepare_fn, draw: Draw_fn) -> Result<LoopModel, String> {
+pub fn create(o: Create, workspace: &workspace_doc::T, source: Option<source_file::SourceFile>, prepare: cook::Prepare_fn, draw: Draw_fn) -> Result<LoopModel, String> {
     let mut workspace = workspace.clone();
     if let Some(inputs) = o.inputs {
         workspace.inputs = std::sync::Arc::new((*inputs).clone());
