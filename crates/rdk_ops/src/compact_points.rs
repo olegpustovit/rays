@@ -1,4 +1,3 @@
-use crate::subdivide_refine::AInts;
 use rdk_core::{
     attribute, cancel, error, geometry, group, packed, support, topology, topology_remap,
 };
@@ -46,13 +45,10 @@ fn compact(
     let py = topology_remap::select_float(cancel_value, grain, None, &new_to_old, &positions.y)?;
     let pz = topology_remap::select_float(cancel_value, grain, None, &new_to_old, &positions.z)?;
     let positions = packed::Float3::View::of_owned_exn(px, py, pz)?;
-    let vertex_count = source.vertex_points.len() as i64;
-    let remapped = AInts::new(vertex_count, 0);
-    support::parallel_for(cancel_value, grain, vertex_count, &|vertex| {
-        remapped.set(vertex, old_to_new[source.vertex_points[vertex as usize] as usize]);
-        Ok(())
+    let mut vertex_points = vec![0i64; source.vertex_points.len()];
+    support::par_fill(cancel_value, grain, &mut vertex_points, &|vertex| {
+        Ok(old_to_new[source.vertex_points[vertex as usize] as usize])
     })?;
-    let vertex_points = remapped.into_vec();
     let new_topology = topology::View::create_validated_owned(
         retained,
         vertex_points,
@@ -262,13 +258,13 @@ pub mod fixtures {
 
     /// Runs `work` under `domains` worker domains and returns its geometry.
     pub fn at_domains(domains: i64, work: &(dyn Fn() -> geometry::T + Sync)) -> geometry::T {
-        let slot: std::sync::Mutex<Option<geometry::T>> = std::sync::Mutex::new(None);
+        let slot = std::cell::Cell::new(None);
         parallel::run_unit(Some(domains), &|| {
-            *slot.lock().unwrap() = Some(work());
+            slot.set(Some(work()));
             Ok(())
         })
         .unwrap();
-        slot.into_inner().unwrap().unwrap()
+        slot.take().unwrap()
     }
 
     /// The one-domain result of `work`, after asserting four domains give the same geometry.
@@ -281,13 +277,13 @@ pub mod fixtures {
 
     /// Runs `work` under `domains` worker domains and returns its value.
     pub fn at_domains_strings(domains: i64, work: &(dyn Fn() -> Vec<String> + Sync)) -> Vec<String> {
-        let slot: std::sync::Mutex<Option<Vec<String>>> = std::sync::Mutex::new(None);
+        let slot = std::cell::Cell::new(None);
         parallel::run_unit(Some(domains), &|| {
-            *slot.lock().unwrap() = Some(work());
+            slot.set(Some(work()));
             Ok(())
         })
         .unwrap();
-        slot.into_inner().unwrap().unwrap()
+        slot.take().unwrap()
     }
 
     /// The one-domain value of `work`, after asserting four domains give an equal value.

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use rays_math::hash;
-use crate::subdivide_refine::{ABytes, AInts};
+use rdk_core::support::Windows;
 use rdk_core::{attribute_pattern, cancel, error, geometry, group, packed, support, topology};
 use rdk_geom::point_grid::float_max;
 
@@ -150,32 +150,30 @@ pub fn delete_degenerate(
     let positions = packed::Float3::View::view(geometry::positions(geometry_value))?;
     let topology_value = geometry::topology(geometry_value);
     let view = topology::View::view(topology_value)?;
-    let flags = ABytes::new(primitive_count, 0);
+    let mut flags = vec![0u8; primitive_count as usize];
     if topology::all_triangles(topology_value)? {
-        support::parallel_for(cancel_value, params.grain, primitive_count, &|primitive| {
+        support::par_fill(cancel_value, params.grain, &mut flags, &|primitive| {
             let primitive = primitive as usize;
             let first = view.primitive_offsets[primitive] as usize;
-            if selected(primitive)
-                && clean_triangle_is_degenerate(
-                    epsilon,
-                    &positions,
-                    view.vertex_points[first] as usize,
-                    view.vertex_points[first + 1] as usize,
-                    view.vertex_points[first + 2] as usize,
-                )
-            {
-                flags.set(primitive as i64, 1);
-            }
-            Ok(())
+            Ok(u8::from(
+                selected(primitive)
+                    && clean_triangle_is_degenerate(
+                        epsilon,
+                        &positions,
+                        view.vertex_points[first] as usize,
+                        view.vertex_points[first + 1] as usize,
+                        view.vertex_points[first + 2] as usize,
+                    ),
+            ))
         })?;
     } else {
-        support::parallel_for(cancel_value, params.grain, primitive_count, &|primitive| {
+        support::par_fill(cancel_value, params.grain, &mut flags, &|primitive| {
             let primitive = primitive as usize;
             let first = view.primitive_offsets[primitive];
             let last = view.primitive_offsets[primitive + 1];
             let kind = view.primitive_kinds[primitive];
             if !selected(primitive) {
-                return Ok(());
+                return Ok(0);
             }
             if kind == 0 {
                 let (mut sb, mut sc, mut sd) = (0.0f64, 0.0f64, 0.0f64);
@@ -236,7 +234,7 @@ pub fn delete_degenerate(
                         flag = 1;
                     }
                 }
-                flags.set(primitive as i64, flag);
+                Ok(flag)
             } else {
                 let size = last - first;
                 let edges = size - 1 + if kind == 1 { 0 } else { 1 };
@@ -246,14 +244,10 @@ pub fn delete_degenerate(
                     let b = view.vertex_points[(first + ((edge + 1) % size)) as usize] as usize;
                     length += clean_point_distance(&positions, a, b);
                 }
-                if !length.is_finite() || length <= epsilon {
-                    flags.set(primitive as i64, 1);
-                }
+                Ok(u8::from(!length.is_finite() || length <= epsilon))
             }
-            Ok(())
         })?;
     }
-    let flags = flags.into_vec();
     if flags.iter().all(|&flag| flag == 0) {
         return Ok(geometry_value.clone());
     }
@@ -278,15 +272,11 @@ fn delete_nan_points(
     if point_count == 0 {
         return Ok(geometry_value.clone());
     }
-    let flags = ABytes::new(point_count, 0);
-    support::parallel_for(cancel_value.as_deref(), grain, point_count, &|point| {
+    let mut flags = vec![0u8; point_count as usize];
+    support::par_fill(cancel_value.as_deref(), grain, &mut flags, &|point| {
         let point = point as usize;
-        if positions.x[point].is_nan() || positions.y[point].is_nan() || positions.z[point].is_nan() {
-            flags.set(point as i64, 1);
-        }
-        Ok(())
+        Ok(u8::from(positions.x[point].is_nan() || positions.y[point].is_nan() || positions.z[point].is_nan()))
     })?;
-    let flags = flags.into_vec();
     if flags.iter().all(|&flag| flag == 0) {
         return Ok(geometry_value.clone());
     }
@@ -341,50 +331,58 @@ fn delete_overlaps_general(
 ) -> Result<geometry::T, error::T> {
     let view = topology::View::view(geometry::topology(geometry_value))?;
     let primitive_count = geometry::primitive_count(geometry_value) as usize;
-    let sizes = AInts::new(primitive_count as i64, 0);
-    let starts = AInts::new(primitive_count as i64, 0);
-    let directions = AInts::new(primitive_count as i64, 1);
-    let hashes = AInts::new(primitive_count as i64, 0);
+    let (mut sizes, mut starts) = (vec![0i64; primitive_count], vec![0i64; primitive_count]);
+    let (mut directions, mut hashes) = (vec![1i64; primitive_count], vec![0i64; primitive_count]);
     let polygon_count = (0..primitive_count).filter(|&p| view.primitive_kinds[p] == 0).count() as i64;
     if polygon_count == 0 {
         return Ok(geometry_value.clone());
     }
-    support::parallel_for(cancel_value.as_deref(), grain, primitive_count as i64, &|primitive| {
-        let primitive = primitive as usize;
-        if view.primitive_kinds[primitive] != 0 {
-            return Ok(());
-        }
-        let first = view.primitive_offsets[primitive];
-        let size = view.primitive_offsets[primitive + 1] - first;
-        let mut start = clean_minimal_rotation(&view, first, size, 1);
-        let mut direction = 1i64;
-        let reverse_start = clean_minimal_rotation(&view, first, size, -1);
-        let mut offset = 0i64;
-        let mut comparison = 0i64;
-        while offset < size && comparison == 0 {
-            let a = clean_cycle_point(&view, first, size, start, 1, offset);
-            let b = clean_cycle_point(&view, first, size, reverse_start, -1, offset);
-            comparison = if a < b { -1 } else if a > b { 1 } else { 0 };
-            offset += 1;
-        }
-        if comparison > 0 {
-            start = reverse_start;
-            direction = -1;
-        }
-        let mut hash_value = 17 ^ size;
-        for offset in 0..size {
-            hash_value = hash::mix(
-                hash_value,
-                clean_cycle_point(&view, first, size, start, direction, offset),
-            ) & OCAML_MAX_INT;
-        }
-        starts.set(primitive as i64, start);
-        directions.set(primitive as i64, direction);
-        hashes.set(primitive as i64, hash_value);
-        sizes.set(primitive as i64, size);
-        Ok(())
-    })?;
-    let (sizes, starts, directions, hashes) = (sizes.into_vec(), starts.into_vec(), directions.into_vec(), hashes.into_vec());
+    let grain = grain.max(1);
+    {
+        let (size_windows, start_windows) = (Windows::even(&mut sizes, grain), Windows::even(&mut starts, grain));
+        let (direction_windows, hash_windows) = (Windows::even(&mut directions, grain), Windows::even(&mut hashes, grain));
+        support::run_indexed_ranges(grain, primitive_count as i64, &|range, chunk_first, chunk_last| {
+            let (sizes, starts) = (size_windows.take(range), start_windows.take(range));
+            let (directions, hashes) = (direction_windows.take(range), hash_windows.take(range));
+            for primitive in chunk_first..chunk_last {
+                support::poll(cancel_value.as_deref(), primitive)?;
+                let slot = (primitive - chunk_first) as usize;
+                let primitive = primitive as usize;
+                if view.primitive_kinds[primitive] != 0 {
+                    continue;
+                }
+                let first = view.primitive_offsets[primitive];
+                let size = view.primitive_offsets[primitive + 1] - first;
+                let mut start = clean_minimal_rotation(&view, first, size, 1);
+                let mut direction = 1i64;
+                let reverse_start = clean_minimal_rotation(&view, first, size, -1);
+                let mut offset = 0i64;
+                let mut comparison = 0i64;
+                while offset < size && comparison == 0 {
+                    let a = clean_cycle_point(&view, first, size, start, 1, offset);
+                    let b = clean_cycle_point(&view, first, size, reverse_start, -1, offset);
+                    comparison = if a < b { -1 } else if a > b { 1 } else { 0 };
+                    offset += 1;
+                }
+                if comparison > 0 {
+                    start = reverse_start;
+                    direction = -1;
+                }
+                let mut hash_value = 17 ^ size;
+                for offset in 0..size {
+                    hash_value = hash::mix(
+                        hash_value,
+                        clean_cycle_point(&view, first, size, start, direction, offset),
+                    ) & OCAML_MAX_INT;
+                }
+                starts[slot] = start;
+                directions[slot] = direction;
+                hashes[slot] = hash_value;
+                sizes[slot] = size;
+            }
+            Ok(())
+        })?;
+    }
     let capacity = table_capacity(polygon_count);
     let mut table = vec![-1i64; capacity];
     let mask = (capacity - 1) as i64;
@@ -450,30 +448,37 @@ fn delete_triangle_overlaps(
         return Ok(geometry_value.clone());
     }
     let count = primitive_count as usize;
-    let first_points = AInts::new(count as i64, 0);
-    let second_points = AInts::new(count as i64, 0);
-    let third_points = AInts::new(count as i64, 0);
-    let hashes = AInts::new(count as i64, 0);
-    support::parallel_for(cancel_value.as_deref(), grain, count as i64, &|primitive| {
-        let primitive = primitive as usize;
-        let first = view.primitive_offsets[primitive] as usize;
-        let (p0, p1, p2) = (view.vertex_points[first], view.vertex_points[first + 1], view.vertex_points[first + 2]);
-        let (low, high) = if p0 <= p1 { (p0, p1) } else { (p1, p0) };
-        let (a, b, c) = if p2 <= low {
-            (p2, low, high)
-        } else if p2 >= high {
-            (low, high, p2)
-        } else {
-            (low, p2, high)
-        };
-        first_points.set(primitive as i64, a);
-        second_points.set(primitive as i64, b);
-        third_points.set(primitive as i64, c);
-        hashes.set(primitive as i64, hash::mix(hash::mix(hash::mix(17 ^ 3, a), b), c) & OCAML_MAX_INT);
-        Ok(())
-    })?;
-    let (first_points, second_points, third_points, hashes) =
-        (first_points.into_vec(), second_points.into_vec(), third_points.into_vec(), hashes.into_vec());
+    let (mut first_points, mut second_points) = (vec![0i64; count], vec![0i64; count]);
+    let (mut third_points, mut hashes) = (vec![0i64; count], vec![0i64; count]);
+    let grain = grain.max(1);
+    {
+        let (first_windows, second_windows) = (Windows::even(&mut first_points, grain), Windows::even(&mut second_points, grain));
+        let (third_windows, hash_windows) = (Windows::even(&mut third_points, grain), Windows::even(&mut hashes, grain));
+        support::run_indexed_ranges(grain, count as i64, &|range, chunk_first, chunk_last| {
+            let (firsts, seconds) = (first_windows.take(range), second_windows.take(range));
+            let (thirds, hashes) = (third_windows.take(range), hash_windows.take(range));
+            for primitive in chunk_first..chunk_last {
+                support::poll(cancel_value.as_deref(), primitive)?;
+                let slot = (primitive - chunk_first) as usize;
+                let primitive = primitive as usize;
+                let first = view.primitive_offsets[primitive] as usize;
+                let (p0, p1, p2) = (view.vertex_points[first], view.vertex_points[first + 1], view.vertex_points[first + 2]);
+                let (low, high) = if p0 <= p1 { (p0, p1) } else { (p1, p0) };
+                let (a, b, c) = if p2 <= low {
+                    (p2, low, high)
+                } else if p2 >= high {
+                    (low, high, p2)
+                } else {
+                    (low, p2, high)
+                };
+                firsts[slot] = a;
+                seconds[slot] = b;
+                thirds[slot] = c;
+                hashes[slot] = hash::mix(hash::mix(hash::mix(17 ^ 3, a), b), c) & OCAML_MAX_INT;
+            }
+            Ok(())
+        })?;
+    }
     let capacity = table_capacity(primitive_count);
     let mut table = vec![-1i64; capacity];
     let mask = (capacity - 1) as i64;
