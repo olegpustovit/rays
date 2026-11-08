@@ -4,13 +4,14 @@
 //! code (`compose_transform` / `soft_transform` / `distance_from_geometry`) and the OCaml message,
 //! a cancellation has code `cancelled`.
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use rays_math::{mat4, vec3};
 use rdk_core::{
     attribute, cancel, element_selection, error, geometry, group, normal_ops, packed, support,
     topology_index,
 };
+use rdk_core::support::Windows;
 use rdk_geom::point_grid::{float_max, float_min};
 use rdk_geom::{spatial_index, surface_index};
 
@@ -225,36 +226,16 @@ fn soft_transform_weight(falloff: SoftTransformFalloff, distance: f64, radius: f
     }
 }
 
-type Slot = Mutex<Option<Vec<f64>>>;
-
 /// One value per index in `0..count`, computed in ranges of `grain` (cancellation polled every 4096th
-/// index) and joined in range order.
+/// index).
 fn map_floats(
     cancel_value: Option<&cancel::T>,
     grain: i64,
     count: i64,
     value: &(dyn Fn(i64) -> f64 + Sync),
 ) -> Result<Vec<f64>, error::T> {
-    if count <= 0 {
-        return Ok(Vec::new());
-    }
-    let ranges = ((count - 1) / grain + 1) as usize;
-    let slots: Vec<Slot> = (0..ranges).map(|_| Mutex::new(None)).collect();
-    support::run_indexed_ranges(grain, count, &|range, first, last| {
-        let mut local = Vec::with_capacity((last - first) as usize);
-        for index in first..last {
-            cancel::poll(cancel_value, index, 4095)?;
-            local.push(value(index));
-        }
-        *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(local);
-        Ok(())
-    })?;
-    let mut output = Vec::with_capacity(count as usize);
-    for slot in slots {
-        if let Some(local) = slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner) {
-            output.extend(local);
-        }
-    }
+    let mut output = vec![0.0; count.max(0) as usize];
+    support::par_fill(cancel_value, grain, &mut output, &|index| Ok(value(index)))?;
     Ok(output)
 }
 
@@ -717,12 +698,6 @@ pub struct SoftTransformParams {
     pub recompute_normals: bool,
 }
 
-struct Moved {
-    x: Vec<f64>,
-    y: Vec<f64>,
-    z: Vec<f64>,
-}
-
 fn run_soft_transform(
     params: &SoftTransformParams,
     matrix: &mat4::T,
@@ -800,21 +775,14 @@ fn run_soft_transform(
     let moves_positions = !mat4::nearly_equal(matrix, &mat4::identity(), 0.0);
     let ((m00, m01, m02, m03), (m10, m11, m12, m13), (m20, m21, m22, m23), (m30, m31, m32, m33)) =
         mat4::to_rows(matrix);
-    let slots: Vec<Mutex<Option<Moved>>> = if count > 0 {
-        (0..((count - 1) / grain + 1) as usize).map(|_| Mutex::new(None)).collect()
-    } else {
-        Vec::new()
-    };
-    if count > 0 {
+    let (mut x, mut y, mut z) = (vec![0.0; count as usize], vec![0.0; count as usize], vec![0.0; count as usize]);
+    {
+        let (wx, wy, wz) = (Windows::even(&mut x, grain), Windows::even(&mut y, grain), Windows::even(&mut z, grain));
         support::run_indexed_ranges(grain, count, &|range, first, last| {
-            let mut moved = Moved {
-                x: Vec::with_capacity((last - first) as usize),
-                y: Vec::with_capacity((last - first) as usize),
-                z: Vec::with_capacity((last - first) as usize),
-            };
+            let (moved_x, moved_y, moved_z) = (wx.take(range), wy.take(range), wz.take(range));
             for point in first..last {
-                cancel::poll(cancel_value, point, 4095)?;
-                let p = point as usize;
+                support::poll(cancel_value, point)?;
+                let (p, at) = (point as usize, (point - first) as usize);
                 let weight = weights[p];
                 let (vx, vy, vz) = (positions.x[p], positions.y[p], positions.z[p]);
                 if moves_positions && weight != 0.0 {
@@ -824,31 +792,20 @@ fn run_soft_transform(
                     let oz = m20 * vx + m21 * vy + m22 * vz + m23;
                     let ow = m30 * vx + m31 * vy + m32 * vz + m33;
                     let (tx, ty, tz) = if ow.abs() <= 1e-12 { (ox, oy, oz) } else { (ox / ow, oy / ow, oz / ow) };
-                    moved.x.push(vx + weight * (tx - vx));
-                    moved.y.push(vy + weight * (ty - vy));
-                    moved.z.push(vz + weight * (tz - vz));
+                    moved_x[at] = vx + weight * (tx - vx);
+                    moved_y[at] = vy + weight * (ty - vy);
+                    moved_z[at] = vz + weight * (tz - vz);
                 } else {
-                    moved.x.push(vx);
-                    moved.y.push(vy);
-                    moved.z.push(vz);
+                    moved_x[at] = vx;
+                    moved_y[at] = vy;
+                    moved_z[at] = vz;
                 }
             }
-            *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(moved);
             Ok(())
         })?;
     }
     let did_change = changed.load(Ordering::Relaxed);
     let mut output = if did_change {
-        let mut x = Vec::with_capacity(count as usize);
-        let mut y = Vec::with_capacity(count as usize);
-        let mut z = Vec::with_capacity(count as usize);
-        for slot in slots {
-            if let Some(moved) = slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner) {
-                x.extend(moved.x);
-                y.extend(moved.y);
-                z.extend(moved.z);
-            }
-        }
         geometry::with_positions(packed::Float3::View::of_owned_exn(x, y, z)?, value)?
     } else {
         value.clone()
@@ -898,6 +855,7 @@ pub fn soft_transform(
 mod tests {
     use super::*;
     use rdk_core::topology;
+    use std::sync::Mutex;
 
     fn close(left: f64, right: f64) -> bool {
         (left - right).abs() <= 1e-10

@@ -1,7 +1,8 @@
 //! Attribute transfer: spatial (points, primitives), detail, surface, vertices and multi-owner.
 use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
+use rdk_core::support::Windows;
 use rdk_core::{attribute, attribute_pattern, cancel, error, geometry, group, packed, support, topology};
 use rdk_geom::{spatial_index, surface_index};
 
@@ -514,10 +515,8 @@ fn install_attributes_batch(attributes: Vec<attribute::T>, target: &geometry::T)
     geometry::View::with_merged_attributes_owned(attributes, target)
 }
 
-type WeightSlots = Vec<Mutex<Option<Vec<f64>>>>;
-
 /// Per-target weight rows: `work(target, row)` fills `row` (`capacity` values, initialised from
-/// `distances`) and rows are joined in range order.
+/// `distances`) and rows are written into disjoint windows of one output.
 fn weight_rows(
     cancel_token: Option<&cancel::T>,
     grain: i64,
@@ -526,25 +525,22 @@ fn weight_rows(
     distances: &[f64],
     work: &(dyn Fn(i64, &mut [f64]) + Sync),
 ) -> Result<Vec<f64>, error::T> {
-    let ranges = if target_count <= 0 { 0 } else { ((target_count - 1) / grain + 1) as usize };
-    let slots: WeightSlots = (0..ranges).map(|_| Mutex::new(None)).collect();
-    support::run_indexed_ranges(grain, target_count, &|range, first, last| {
-        let mut local = distances[(first * capacity) as usize..(last * capacity) as usize].to_vec();
-        for target_element in first..last {
-            cancel::poll(cancel_token, target_element, 4095)?;
-            let at = ((target_element - first) * capacity) as usize;
-            work(target_element, &mut local[at..at + capacity as usize]);
-        }
-        *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(local);
-        Ok(())
-    })?;
-    let mut output = Vec::with_capacity(distances.len());
-    for slot in slots {
-        output.extend(slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner).unwrap_or_default());
+    let mut output = distances[..(target_count.max(0) * capacity) as usize].to_vec();
+    {
+        let ranges = support::range_count(target_count, grain);
+        let rows = Windows::new(&mut output, ranges, |range| ((range * grain).min(target_count) * capacity) as usize);
+        support::run_indexed_ranges(grain, target_count, &|range, first, last| {
+            let local = rows.take(range);
+            for target_element in first..last {
+                support::poll(cancel_token, target_element)?;
+                let at = ((target_element - first) * capacity) as usize;
+                work(target_element, &mut local[at..at + capacity as usize]);
+            }
+            Ok(())
+        })?;
     }
     Ok(output)
 }
-
 
 #[allow(clippy::too_many_arguments)]
 fn spatial_transfer(
