@@ -25,7 +25,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | A2 | done | `30623d6e` — `e10bff22` edge_transport; `ec5c1b1b`/`992093ce` rdk re-exports; `5a6e7269`/`da178e93` support (−631 vs OCaml root); `NumericKind` test dropped |
 | A3 | done | `1a8ee31b` — rdk `MAX_ARRAY_LENGTH` trimmed; `boolean_materialization` packing kept |
 | A4 | done | `a60fcced` — `md5_hex` in `rays_math::hash`; 5 duplicate modules removed |
-| A5 | active | `ec5c1b1b` — `region_snapshot` test-only; **this session** — dead `window_to_values`, `live_delay()`; `Editor::Private` behind `test-hooks` feature (+ `required-features` on GPU/window tests); pxui_graph accessors still open |
+| A5 | done | `ec5c1b1b` `fa967abe` `992093ce` — `region_snapshot` `#[cfg(test)]`; dead `window_to_values`/`live_delay()` removed; `Editor::Private`, `Reduce`, `with_core` + `pxui_graph::Inspect` test accessors behind `test-hooks` (prod keeps `box_of`/`grabbed`/`footer_paths`); `rays_editor::test-hooks` enables `pxui_graph/test-hooks` |
 | A6 | active | `09ce8574` — unused deps on rays_bin / UI (pxui still has `ocaml_int` until I) |
 | A7 | done | `992093ce` triangle → `point_grid`; `626a1f70` Filename.concat; `f980cbf9`/`8093ff64` ocaml trim; **this session** `rdk_core::ocaml_trim`, rdk_ops/sop blank-name sweep |
 | A8 | done | op/term_arena/param/renderer trims; `Native::runtime_of` kept (in use) |
@@ -63,6 +63,7 @@ Cursor `Task` subagents unavailable in this harness; workers are `omp launch -p`
 - 2026-11-08: verify — `cargo t -p flow_ir` 337 tests; bg `flow_sop` 133 tests (~66s).
 - 2026-11-08: A5 dead window/live_delay; A7 triangle closest-point unify; A8 term_arena/param/renderer trim; A2 sop + rdk re-export fix; `cargo t -p rdk_geom planar` pass.
 - 2026-11-08: A5 `test-hooks` gates `Editor::Private`; B0 warm incremental smoke on `flow_check`.
+- 2026-11-08: A5 closed — pxui_graph `Inspect` hooks file + `Reduce`/`with_core` gated; `cargo check -p pxui_graph -p rays_editor` with/without `test-hooks`.
 - 2026-11-08: `f980cbf9` A7 ocaml_trim; `cargo t -p sop` 52 pass (~20s).
 - 2026-11-08: A7 `rdk_core` trim helper; B4 buildtime W1 editor chain; `cargo check -p buildtime`.
 - 2026-11-08: A7 surface_index → `point_triangle_barycentric_into`; `rdk_core::ocaml_trim`; rdk_ops + sop OCaml blank-name checks; `cargo t -p rdk_geom surface` 9 pass (~7s).
