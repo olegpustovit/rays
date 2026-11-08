@@ -166,12 +166,8 @@ pub fn delete(guard: Option<Guard>, owner: &str, pattern: &str, input: &node::T)
     )
 }
 
-fn ocaml_trim(text: &str) -> &str {
-    text.trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\r' | '\u{c}'))
-}
-
 fn lowered(text: &str) -> String {
-    ocaml_trim(text).to_ascii_lowercase()
+    sop::support::ocaml_trim(text).to_ascii_lowercase()
 }
 
 pub fn attribute_owner(text: &str) -> Result<Option<Owner>, Diagnostic> {

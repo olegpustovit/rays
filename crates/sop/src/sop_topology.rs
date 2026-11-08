@@ -110,7 +110,7 @@ fn vs(values: &[Value], index: usize) -> String {
 
 /// OCaml `String.trim t = ""`.
 fn blank(text: &str) -> bool {
-    text.trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\r' | '\x0c')).is_empty()
+    support::ocaml_trim(text).is_empty()
 }
 
 /// `List.length l <> List.length (List.sort_uniq compare l)`.
@@ -794,7 +794,7 @@ pub mod convex_hull {
     }
 
     pub fn validate(values: &[Value]) -> Result<(), String> {
-        if ocaml_trim(&from_values(values).source_point_attribute) == "P" {
+        if support::ocaml_trim(&from_values(values).source_point_attribute) == "P" {
             return refuse("convex_hull", "source point attribute must not be P");
         }
         Ok(())
@@ -854,11 +854,6 @@ pub mod convex_hull {
     pub fn factory() -> Factory {
         decl::factory(&decl())
     }
-}
-
-/// OCaml `String.trim`: ASCII whitespace only.
-fn ocaml_trim(text: &str) -> &str {
-    text.trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\r' | '\x0c'))
 }
 
 // ---------------------------------------------------------------- Clean

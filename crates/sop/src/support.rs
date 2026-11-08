@@ -11,6 +11,11 @@ use crate::node::GeometryCooked;
 
 // ---------------------------------------------------------------- choice helpers
 
+/// OCaml's `String.trim`: space, tab, newline, form feed and carriage return.
+pub fn ocaml_trim(text: &str) -> &str {
+    text.trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\r' | '\x0c'))
+}
+
 pub fn labels(table: &[&str]) -> Vec<String> {
     table.iter().map(|label| (*label).to_owned()).collect()
 }
