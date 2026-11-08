@@ -1,9 +1,10 @@
-//! The OCaml `Lru.Make (K)` table for values that are not `Send` (OGPU handles are `Rc`). The shared
-//! `lru::Cache` keeps ordering, capacities and the ledger, with an id as its value; the values live
-//! here, and the ids a release names are settled into the caller's release function.
-use lru::{Cache, CacheOptions, Key as LruKey, Value};
+//! The OCaml `Lru.Make (K)` table for values that are not `Send` (OGPU handles, images, fonts and
+//! scenes are `Rc`). The shared `lru::Cache` keeps ordering, capacities and the ledger, with an id as
+//! its value; the values live here, and the ids a release names are settled into the caller's
+//! release function. An entry can be pinned (the OCaml `~evictable:(fun _ e -> e.references = 0)`).
+use lru::{Cache, CacheOptions, Evictable, Key as LruKey, Value};
 use std::any::Any;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
@@ -15,6 +16,9 @@ pub enum TableKey {
     Int(i64),
 }
 
+/// The `byte_capacity` of a table that only bounds its entry count.
+pub const UNBOUNDED_BYTES: i64 = (1 << 62) - 1;
+
 pub type Item = Rc<dyn Any>;
 pub type Release = Box<dyn Fn(&TableKey, Item)>;
 
@@ -23,6 +27,7 @@ pub struct Table {
     items: HashMap<i64, (TableKey, Item)>,
     next: i64,
     evicted: Arc<Mutex<Vec<i64>>>,
+    pinned: Arc<Mutex<HashSet<i64>>>,
     release: Release,
 }
 
@@ -50,13 +55,17 @@ fn same_key(stored: &LruKey, probe: &(dyn Any + Send + Sync)) -> bool {
 /// `create ~owner ?charges ?byte_capacity ?release capacity`
 pub fn create(owner: lru::Owner, charges: bool, byte_capacity: i64, release: Release, capacity: i64) -> Table {
     let evicted: Arc<Mutex<Vec<i64>>> = Arc::new(Mutex::new(Vec::new()));
+    let pinned: Arc<Mutex<HashSet<i64>>> = Arc::new(Mutex::new(HashSet::new()));
     let sink = Arc::clone(&evicted);
+    let guard = Arc::clone(&pinned);
+    let evictable: Evictable = Arc::new(move |_key: &LruKey, value: &Value| !guard.lock().expect("pinned ids").contains(&id_of(value)));
     let options = CacheOptions {
         charges,
         byte_capacity,
         release: Some(Arc::new(move |_key: &LruKey, value: &Value| {
             sink.lock().expect("evicted ids").push(id_of(value));
         })),
+        evictable: Some(evictable),
         ..CacheOptions::default()
     };
     Table {
@@ -64,6 +73,7 @@ pub fn create(owner: lru::Owner, charges: bool, byte_capacity: i64, release: Rel
         items: HashMap::new(),
         next: 1,
         evicted,
+        pinned,
         release,
     }
 }
@@ -72,6 +82,7 @@ pub fn create(owner: lru::Owner, charges: bool, byte_capacity: i64, release: Rel
 fn settle(table: &mut Table) {
     let ids: Vec<i64> = std::mem::take(&mut *table.evicted.lock().expect("evicted ids"));
     for id in ids {
+        table.pinned.lock().expect("pinned ids").remove(&id);
         if let Some((key, item)) = table.items.remove(&id) {
             (table.release)(&key, item);
         }
@@ -93,12 +104,33 @@ pub fn peek(table: &mut Table, key: &TableKey) -> Option<Item> {
 }
 
 pub fn add(table: &mut Table, bytes: i64, key: TableKey, item: Item) {
+    add_pinned(table, bytes, key, item, false);
+}
+
+/// Adds `item`; a `pinned` entry is not evictable until `set_pinned(.., false)`.
+pub fn add_pinned(table: &mut Table, bytes: i64, key: TableKey, item: Item, pinned: bool) {
     settle(table);
     let id = table.next;
     table.next += 1;
     table.items.insert(id, (key.clone(), item));
+    if pinned {
+        table.pinned.lock().expect("pinned ids").insert(id);
+    }
     table.cache.add(lru_key(&key), Arc::new(id), bytes);
     settle(table);
+}
+
+/// Pins or unpins the entry under `key`, if present; pinned entries are not evictable.
+pub fn set_pinned(table: &mut Table, key: &TableKey, pinned: bool) {
+    if let Some(value) = table.cache.peek_by(hash_of(key), key) {
+        let id = id_of(&value);
+        let mut set = table.pinned.lock().expect("pinned ids");
+        if pinned {
+            set.insert(id);
+        } else {
+            set.remove(&id);
+        }
+    }
 }
 
 pub fn remove(table: &mut Table, key: &TableKey) {
@@ -111,8 +143,9 @@ pub fn remove(table: &mut Table, key: &TableKey) {
 pub fn take(table: &mut Table, key: &TableKey) -> Option<Item> {
     settle(table);
     let hash = hash_of(key);
-    let value = table.cache.take_by(hash, key)?;
-    table.items.remove(&id_of(&value)).map(|(_, item)| item)
+    let id = id_of(&table.cache.take_by(hash, key)?);
+    table.pinned.lock().expect("pinned ids").remove(&id);
+    table.items.remove(&id).map(|(_, item)| item)
 }
 
 /// Oldest inserted first, without reordering.

@@ -14,7 +14,6 @@ pub mod canvas_runtime;
 pub mod audio;
 pub mod mesh;
 pub mod camera;
-pub mod table;
 pub mod font;
 pub mod world;
 pub mod idlist;

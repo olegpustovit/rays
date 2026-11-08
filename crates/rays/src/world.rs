@@ -9,7 +9,7 @@
 //! `((i + 0.5) / w, (j + 0.5) / h)`. `rotation` (radians, about +Y) turns the whole World, lights
 //! and sun included: layers are evaluated at azimuth `phi - rotation`.
 use crate::num::{fmax, fmin, int_of_float};
-use crate::table::{self, Table, TableKey};
+use renderer::side_lru::{self, Table, TableKey};
 use rays_math::color::Linear;
 use rays_math::rand;
 use rays_math::vec3;
@@ -1200,7 +1200,7 @@ thread_local! {
 
 pub fn create_cache_context() -> cache_context {
     cache_context(Rc::new(context_data {
-        cache: RefCell::new(table::create(lru::cache("rays.world"), 4, None, Box::new(|_, _| {}))),
+        cache: RefCell::new(side_lru::create(lru::cache("rays.world"), true, side_lru::UNBOUNDED_BYTES, Box::new(|_, _| {}), 4)),
     }))
 }
 
@@ -1239,12 +1239,12 @@ pub fn bake_cached(width: i64, height: i64, world: &t) -> Result<baked, String> 
     let baked_ = match context {
         None => bake(None, Some(light_radius), width, height, &plain)?,
         Some(context) => {
-            let found = table::find(&mut context.0.cache.borrow_mut(), &key).and_then(|item| item.downcast::<baked>().ok());
+            let found = side_lru::find(&mut context.0.cache.borrow_mut(), &key).and_then(|item| item.downcast::<baked>().ok());
             match found {
                 Some(b) => (*b).clone(),
                 None => {
                     let b = bake(None, Some(light_radius), width, height, &plain)?;
-                    table::add(&mut context.0.cache.borrow_mut(), baked_bytes(&b), key, Rc::new(b.clone()), false);
+                    side_lru::add(&mut context.0.cache.borrow_mut(), baked_bytes(&b), key, Rc::new(b.clone()));
                     b
                 }
             }

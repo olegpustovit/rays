@@ -7,7 +7,7 @@ use crate::image;
 use crate::path as path_mod;
 use crate::scene3;
 use crate::scene3_native_lowering as lowering;
-use crate::table::{self, Table, TableKey};
+use renderer::side_lru::{self, Table, TableKey};
 use crate::texture;
 use ogpu::types::{AddressMode, MipFilter, SamplerDescriptor, SamplerFilter};
 use rays_math::color;
@@ -139,9 +139,9 @@ thread_local! {
 
 fn create_shape_cache_context() -> shape_cache_context {
     shape_cache_context {
-        path_geometry: RefCell::new(table::create(lru::cache("rays.path_geometry"), PATH_GEOMETRY_CACHE_CAPACITY, None, Box::new(|_, _| {}))),
-        rounded: RefCell::new(table::create(lru::cache("rays.rounded"), ROUNDED_CACHE_CAPACITY, None, Box::new(|_, _| {}))),
-        ellipse: RefCell::new(table::create(lru::cache("rays.ellipse"), ELLIPSE_CACHE_CAPACITY, None, Box::new(|_, _| {}))),
+        path_geometry: RefCell::new(side_lru::create(lru::cache("rays.path_geometry"), true, side_lru::UNBOUNDED_BYTES, Box::new(|_, _| {}), PATH_GEOMETRY_CACHE_CAPACITY)),
+        rounded: RefCell::new(side_lru::create(lru::cache("rays.rounded"), true, side_lru::UNBOUNDED_BYTES, Box::new(|_, _| {}), ROUNDED_CACHE_CAPACITY)),
+        ellipse: RefCell::new(side_lru::create(lru::cache("rays.ellipse"), true, side_lru::UNBOUNDED_BYTES, Box::new(|_, _| {}), ELLIPSE_CACHE_CAPACITY)),
         fonts: font::Raster::create_cache_context(),
     }
 }
@@ -164,13 +164,13 @@ fn path_geometry_cached(key: TableKey, make: &dyn Fn() -> Result<node, String>) 
     let Some(context) = context else {
         return make();
     };
-    if let Some(item) = table::find(&mut context.path_geometry.borrow_mut(), &key) {
+    if let Some(item) = side_lru::find(&mut context.path_geometry.borrow_mut(), &key) {
         if let Ok(n) = item.downcast::<node>() {
             return Ok((*n).clone());
         }
     }
     let value = make()?;
-    table::add(&mut context.path_geometry.borrow_mut(), node_bytes(&value), key, Rc::new(value.clone()), false);
+    side_lru::add(&mut context.path_geometry.borrow_mut(), node_bytes(&value), key, Rc::new(value.clone()));
     Ok(value)
 }
 
@@ -229,13 +229,13 @@ pub fn rounded_rect(at: (i64, i64), w: i64, h: i64, radius: i64, fill: Option<co
     let geometry = match context {
         None => make()?,
         Some(context) => {
-            let found = table::find(&mut context.rounded.borrow_mut(), &key).and_then(|i| i.downcast::<Vec<node>>().ok());
+            let found = side_lru::find(&mut context.rounded.borrow_mut(), &key).and_then(|i| i.downcast::<Vec<node>>().ok());
             match found {
                 Some(found) => found,
                 None => {
                     let value = make()?;
                     let bytes = value.iter().map(node_bytes).sum();
-                    table::add(&mut context.rounded.borrow_mut(), bytes, key, value.clone(), false);
+                    side_lru::add(&mut context.rounded.borrow_mut(), bytes, key, value.clone());
                     value
                 }
             }
@@ -254,12 +254,12 @@ fn ellipse(at: (i64, i64), rx: i64, ry: i64, fill: Option<color::T>, stroke: Opt
     match context {
         None => make(),
         Some(context) => {
-            let found = table::find(&mut context.ellipse.borrow_mut(), &key).and_then(|i| i.downcast::<node>().ok());
+            let found = side_lru::find(&mut context.ellipse.borrow_mut(), &key).and_then(|i| i.downcast::<node>().ok());
             match found {
                 Some(found) => Ok((*found).clone()),
                 None => {
                     let value = make()?;
-                    table::add(&mut context.ellipse.borrow_mut(), node_bytes(&value), key, Rc::new(value.clone()), false);
+                    side_lru::add(&mut context.ellipse.borrow_mut(), node_bytes(&value), key, Rc::new(value.clone()));
                     Ok(value)
                 }
             }
@@ -474,12 +474,13 @@ struct lower_cache_context {
 
 fn create_lower_cache_context() -> lower_cache_context {
     lower_cache_context {
-        texture_levels: RefCell::new(table::create(lru::cache("rays.texture_levels"), 64, Some(CONVERTED_BYTE_CAPACITY), Box::new(|_, _| {}))),
-        scene2_layers: RefCell::new(table::create(
+        texture_levels: RefCell::new(side_lru::create(lru::cache("rays.texture_levels"), true, CONVERTED_BYTE_CAPACITY, Box::new(|_, _| {}), 64)),
+        scene2_layers: RefCell::new(side_lru::create(
             lru::cache("rays.scene2_layers"),
-            SCENE2_LAYER_CACHE_CAPACITY,
-            Some(SCENE2_LAYER_CACHE_BYTE_CAPACITY),
+            true,
+            SCENE2_LAYER_CACHE_BYTE_CAPACITY,
             Box::new(|_, _| {}),
+            SCENE2_LAYER_CACHE_CAPACITY,
         )),
     }
 }
@@ -531,11 +532,12 @@ pub mod Layer {
             shapes: Rc::new(create_shape_cache_context()),
             lower: Rc::new(create_lower_cache_context()),
             scene3: lowering::create_cache_context(),
-            native_stages: RefCell::new(table::create(
+            native_stages: RefCell::new(side_lru::create(
                 lru::cache("rays.native_stage"),
-                NATIVE_STAGE_CACHE_CAPACITY,
-                Some(NATIVE_STAGE_CACHE_BYTE_CAPACITY),
+                true,
+                NATIVE_STAGE_CACHE_BYTE_CAPACITY,
                 Box::new(|_, _| {}),
+                NATIVE_STAGE_CACHE_CAPACITY,
             )),
             next_identity: Cell::new(0),
         }))
@@ -1090,14 +1092,14 @@ pub mod Layer {
             return Ok(Rc::new(create()?));
         };
         let key = TableKey::Int(id);
-        if let Some(item) = table::find(&mut context.texture_levels.borrow_mut(), &key) {
+        if let Some(item) = side_lru::find(&mut context.texture_levels.borrow_mut(), &key) {
             if let Ok(levels) = item.downcast::<Vec<se::texture_level>>() {
                 return Ok(levels);
             }
         }
         let levels = Rc::new(create()?);
         let bytes = levels.iter().map(|l| l.bytes.borrow().len() as i64).sum();
-        table::add(&mut context.texture_levels.borrow_mut(), bytes, key, levels.clone(), false);
+        side_lru::add(&mut context.texture_levels.borrow_mut(), bytes, key, levels.clone());
         Ok(levels)
     }
 
@@ -1107,7 +1109,7 @@ pub mod Layer {
         let lower = CURRENT_LOWER.with(|c| c.borrow().clone());
         let key = TableKey::Int(mix(hash_native_scene(nodes), density));
         if let Some(context) = &lower {
-            if let Some(item) = table::find(&mut context.scene2_layers.borrow_mut(), &key) {
+            if let Some(item) = side_lru::find(&mut context.scene2_layers.borrow_mut(), &key) {
                 if let Ok(entry) = item.downcast::<layer_entry>() {
                     if entry.density == density && same_native_scene(&entry.scene, nodes) && entry.versions == versions {
                         return Ok((entry.ir.clone(), resources));
@@ -1119,7 +1121,7 @@ pub mod Layer {
         if let Some(context) = &lower {
             let bytes = scene2_layer_bytes(&ir) + (versions.len() * 7 * 8) as i64;
             let entry = Rc::new(layer_entry { scene: nodes.to_vec(), density, ir: ir.clone(), versions });
-            table::add(&mut context.scene2_layers.borrow_mut(), bytes, key, entry, false);
+            side_lru::add(&mut context.scene2_layers.borrow_mut(), bytes, key, entry);
         }
         Ok((ir, resources))
     }
@@ -1396,7 +1398,7 @@ pub mod Layer {
         }
         let hash = mix(mix(mix(mix(hash_native_scene(scene), aggregate as i64), density), width), height);
         let key = TableKey::Int(hash);
-        let cached = table::find(&mut context.0.native_stages.borrow_mut(), &key).and_then(|i| i.downcast::<native_stage_cache_entry>().ok());
+        let cached = side_lru::find(&mut context.0.native_stages.borrow_mut(), &key).and_then(|i| i.downcast::<native_stage_cache_entry>().ok());
         if let Some(entry) = &cached {
             if entry.cached_aggregate == aggregate
                 && entry.cached_density == density
@@ -1409,7 +1411,7 @@ pub mod Layer {
             }
         }
         if cached.is_some() {
-            table::remove(&mut context.0.native_stages.borrow_mut(), &key);
+            side_lru::remove(&mut context.0.native_stages.borrow_mut(), &key);
         }
         let mut stage = uncached()?;
         let ui = stage.layers.iter().any(|l| matches!(l, native_layer::Ui_layer(..)));
@@ -1417,13 +1419,13 @@ pub mod Layer {
             // UI packets change with status text every frame. Keep the latest frame and replace
             // its submission, rather than retaining 64 copies.
             let mut old = Vec::new();
-            table::iter(&mut context.0.native_stages.borrow_mut(), &mut |k, v| {
+            side_lru::iter(&mut context.0.native_stages.borrow_mut(), &mut |k, v| {
                 if v.downcast_ref::<native_stage_cache_entry>().is_some_and(|e| e.cached_ui) {
                     old.push(k.clone());
                 }
             });
             for k in old {
-                table::remove(&mut context.0.native_stages.borrow_mut(), &k);
+                side_lru::remove(&mut context.0.native_stages.borrow_mut(), &k);
             }
         }
         if stage.retained.is_none() {
@@ -1445,16 +1447,16 @@ pub mod Layer {
         });
         if entry.cached_device {
             let mut devices = Vec::new();
-            table::iter(&mut context.0.native_stages.borrow_mut(), &mut |k, v| {
+            side_lru::iter(&mut context.0.native_stages.borrow_mut(), &mut |k, v| {
                 if v.downcast_ref::<native_stage_cache_entry>().is_some_and(|e| e.cached_device) {
                     devices.push(k.clone());
                 }
             });
             for k in devices {
-                table::remove(&mut context.0.native_stages.borrow_mut(), &k);
+                side_lru::remove(&mut context.0.native_stages.borrow_mut(), &k);
             }
         }
-        table::add(&mut context.0.native_stages.borrow_mut(), native_stage_bytes(&stage), key, entry, false);
+        side_lru::add(&mut context.0.native_stages.borrow_mut(), native_stage_bytes(&stage), key, entry);
         Ok(stage)
     }
 

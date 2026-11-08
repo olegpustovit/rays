@@ -2,7 +2,7 @@
 //!
 //! The OCaml `[`Msg of string]` errors are plain `String`s here.
 use crate::image;
-use crate::table::{self, Table, TableKey};
+use renderer::side_lru::{self, Table, TableKey};
 use rays_math::color;
 use runtime_resources::Font as RFont;
 use std::cell::{Cell, RefCell};
@@ -52,14 +52,14 @@ fn image_bytes(img: &image::t) -> i64 {
     }
 }
 
-fn destroy_image_item(_key: &TableKey, item: table::Item) {
+fn destroy_image_item(_key: &TableKey, item: side_lru::Item) {
     if let Ok(img) = item.downcast::<image::t>() {
         let _ = image::destroy(&img);
     }
 }
 
 fn text_cache() -> Table {
-    table::create(lru::cache("rays.font.text"), TEXT_CACHE_CAPACITY, None, Box::new(destroy_image_item))
+    side_lru::create(lru::cache("rays.font.text"), true, side_lru::UNBOUNDED_BYTES, Box::new(destroy_image_item), TEXT_CACHE_CAPACITY)
 }
 
 fn message(operation: &str, error: &runtime_resources::error) -> String {
@@ -128,18 +128,18 @@ pub fn cached_text(wrap: Option<i64>, align: Option<alignment>, density: Option<
     let align = align.unwrap_or(alignment::Left);
     let density = density.unwrap_or(1);
     let k = key(wrap, align, density, 0, text, mode);
-    if let Some(item) = table::find(&mut font.0.cache.borrow_mut(), &k) {
+    if let Some(item) = side_lru::find(&mut font.0.cache.borrow_mut(), &k) {
         if let Ok(img) = item.downcast::<image::t>() {
             return Ok((*img).clone());
         }
     }
     let img = paint(density, wrap, align, font, text, mode)?;
-    table::add(&mut font.0.cache.borrow_mut(), image_bytes(&img), k, Rc::new(img.clone()), false);
+    side_lru::add(&mut font.0.cache.borrow_mut(), image_bytes(&img), k, Rc::new(img.clone()));
     Ok(img)
 }
 
 fn clear_cache(font: &t) {
-    table::clear(&mut font.0.cache.borrow_mut());
+    side_lru::clear(&mut font.0.cache.borrow_mut());
 }
 
 fn resource_hinting(h: hinting) -> RFont::hinting {
@@ -209,10 +209,10 @@ pub mod Raster {
 
     pub fn create_cache_context() -> cache_context {
         cache_context(Rc::new(context_data {
-            automatic_cache: RefCell::new(table::create(
+            automatic_cache: RefCell::new(side_lru::create(
                 lru::cache("rays.font.text_ctx"),
-                CAPACITY,
-                None,
+                true,
+                side_lru::UNBOUNDED_BYTES,
                 Box::new(|_key, item| {
                     if let Ok(entry) = item.downcast::<automatic_entry>() {
                         entry.cached.set(false);
@@ -221,17 +221,19 @@ pub mod Raster {
                         }
                     }
                 }),
+                CAPACITY,
             )),
             // count only: an open font per size, its memory in the font library
-            automatic_fonts: RefCell::new(table::create(
+            automatic_fonts: RefCell::new(side_lru::create(
                 lru::cache("rays.font.auto"),
-                FONT_CAPACITY,
-                None,
+                true,
+                side_lru::UNBOUNDED_BYTES,
                 Box::new(|_key, item| {
                     if let Ok(font) = item.downcast::<super::t>() {
                         super::destroy(&font);
                     }
                 }),
+                FONT_CAPACITY,
             )),
             automatic_references: Cell::new(0),
         }))
@@ -253,19 +255,19 @@ pub mod Raster {
     }
 
     pub fn clear_cache_context(context: &cache_context) {
-        table::clear(&mut context.0.automatic_cache.borrow_mut());
-        table::clear(&mut context.0.automatic_fonts.borrow_mut());
+        side_lru::clear(&mut context.0.automatic_cache.borrow_mut());
+        side_lru::clear(&mut context.0.automatic_fonts.borrow_mut());
     }
 
     fn font(context: &cache_context, size: i64) -> Result<super::t, String> {
         let k = TableKey::Int(size);
-        if let Some(item) = table::find(&mut context.0.automatic_fonts.borrow_mut(), &k) {
+        if let Some(item) = side_lru::find(&mut context.0.automatic_fonts.borrow_mut(), &k) {
             if let Ok(value) = item.downcast::<super::t>() {
                 return Ok((*value).clone());
             }
         }
         let value = system(Some(size))?;
-        table::add(&mut context.0.automatic_fonts.borrow_mut(), 0, k, Rc::new(value.clone()), false);
+        side_lru::add(&mut context.0.automatic_fonts.borrow_mut(), 0, k, Rc::new(value.clone()));
         Ok(value)
     }
 
@@ -291,11 +293,11 @@ pub mod Raster {
                 released: Cell::new(false),
             });
         };
-        let found = table::find(&mut context.0.automatic_cache.borrow_mut(), &k);
+        let found = side_lru::find(&mut context.0.automatic_cache.borrow_mut(), &k);
         if let Some(item) = found {
             if let Ok(entry) = item.downcast::<automatic_entry>() {
                 entry.references.set(entry.references.get() + 1);
-                table::set_pinned(&mut context.0.automatic_cache.borrow_mut(), &k, true);
+                side_lru::set_pinned(&mut context.0.automatic_cache.borrow_mut(), &k, true);
                 context.0.automatic_references.set(context.0.automatic_references.get() + 1);
                 return Ok(automatic { entry, context: Some(context), released: Cell::new(false) });
             }
@@ -303,14 +305,14 @@ pub mod Raster {
         let font = font(&context, size)?;
         let image = paint(density, wrap, align, &font, text, mode)?;
         // Borrowed entries remain pinned until their scene is released.
-        let can_cache = table::length(&mut context.0.automatic_cache.borrow_mut()) < CAPACITY
-            || table::find_first(&mut context.0.automatic_cache.borrow_mut(), &|_, item| {
+        let can_cache = side_lru::length(&mut context.0.automatic_cache.borrow_mut()) < CAPACITY
+            || side_lru::find_first(&mut context.0.automatic_cache.borrow_mut(), &|_, item| {
                 item.downcast_ref::<automatic_entry>().is_some_and(|e| e.references.get() == 0)
             })
             .is_some();
         let entry = Rc::new(automatic_entry { image: image.clone(), references: Cell::new(1), cached: Cell::new(can_cache) });
         if can_cache {
-            table::add(&mut context.0.automatic_cache.borrow_mut(), image_bytes(&image), k, entry.clone(), true);
+            side_lru::add_pinned(&mut context.0.automatic_cache.borrow_mut(), image_bytes(&image), k, entry.clone(), true);
         }
         context.0.automatic_references.set(context.0.automatic_references.get() + 1);
         Ok(automatic { entry, context: Some(context), released: Cell::new(false) })
@@ -344,7 +346,7 @@ pub mod Raster {
     // the table is keyed by text: find this entry by scanning for its pointer
     fn unpin_entry(context: &cache_context, entry: &Rc<automatic_entry>) {
         let mut keys = Vec::new();
-        table::iter(&mut context.0.automatic_cache.borrow_mut(), &mut |key, item| {
+        side_lru::iter(&mut context.0.automatic_cache.borrow_mut(), &mut |key, item| {
             if let Some(e) = item.downcast_ref::<automatic_entry>() {
                 if std::ptr::eq(e, Rc::as_ptr(entry)) {
                     keys.push(key.clone());
@@ -352,7 +354,7 @@ pub mod Raster {
             }
         });
         for key in keys {
-            table::set_pinned(&mut context.0.automatic_cache.borrow_mut(), &key, false);
+            side_lru::set_pinned(&mut context.0.automatic_cache.borrow_mut(), &key, false);
         }
     }
 
@@ -362,8 +364,8 @@ pub mod Raster {
         match context {
             None => (0, 0, 0),
             Some(context) => (
-                table::length(&mut context.0.automatic_cache.borrow_mut()),
-                table::length(&mut context.0.automatic_fonts.borrow_mut()),
+                side_lru::length(&mut context.0.automatic_cache.borrow_mut()),
+                side_lru::length(&mut context.0.automatic_fonts.borrow_mut()),
                 context.0.automatic_references.get(),
             ),
         }
