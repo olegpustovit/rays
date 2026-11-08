@@ -573,7 +573,10 @@ fn sub_at(a: &mut Arena, c: &ExecCtx, t: &Term, seg: Seg) -> ExecCtx {
     cx
 }
 fn sub(c:&ExecCtx,seg:Seg)->ExecCtx{let mut c=c.clone();c.route=Route(Some(Arc::new(RouteNode{seg,up:c.route.clone()})));c}
-fn note(a:&mut Arena,c:&ExecCtx,path:Path,v:Value){if a.record&&c.record{let e=a.records.entry(path).or_default();if e.len()<MAX_ITERATIONS{e.push(((*c.iter).clone(),v));}}}
+fn record_slot_open(a: &Arena, path: &Path) -> bool {
+    a.records.get(path).map_or(true, |e| e.len() < MAX_ITERATIONS)
+}
+fn note(a:&mut Arena,c:&ExecCtx,path:Path,v:Value){if a.record&&c.record&&record_slot_open(a,&path){let e=a.records.entry(path).or_default();if e.len()<MAX_ITERATIONS{e.push(((*c.iter).clone(),v));}}}
 fn named_args(a: &mut Arena, c: &ExecCtx, env: &Env, owner: &Term, args: &[flow_check::term_arena::Field]) -> Result<Vec<(String, Value)>, Diagnostic> {
     let mut values = Vec::with_capacity(args.len());
     for (index, arg) in args.iter().enumerate() {
@@ -693,8 +696,12 @@ fn bind_packed(a: &mut Arena, c: &ExecCtx, env: &mut Env, arena: &TermArena, pat
 }
 fn record_packed(a: &mut Arena, c: &ExecCtx, zone: &Path, arena: &TermArena, pattern: PatternId, value: &Value) -> Result<(), Diagnostic> {
     if !a.record || !c.record { return Ok(()); }
+    let pattern_name = packed_pattern_name(arena, pattern);
     let mut path = zone.clone();
-    path.push(format!(":{}", packed_pattern_name(arena, pattern)));
+    path.push(format!(":{pattern_name}"));
+    if !record_slot_open(a, &path) {
+        return Ok(());
+    }
     note(a, c, path, value.clone());
     match arena.pattern(pattern) {
         PatternNode::Name(_) => (),
@@ -711,11 +718,15 @@ fn record_packed(a: &mut Arena, c: &ExecCtx, zone: &Path, arena: &TermArena, pat
             for (pattern, value) in patterns.iter().zip(values.iter()) { record_packed(a, c, zone, arena, *pattern, value)?; }
         }
         PatternNode::Keys(range) => {
-            let pattern_name = packed_pattern_name(arena, pattern);
             for name in arena.name_ids(range) {
                 let name = arena.name(*name);
+                let mut path = zone.clone();
+                path.push(format!(":{name}"));
+                if !record_slot_open(a, &path) {
+                    continue;
+                }
                 let value = field(value.clone(), name, || pattern_name.clone())?;
-                let mut path = zone.clone(); path.push(format!(":{name}")); note(a, c, path, value);
+                note(a, c, path, value);
             }
         }
     }
