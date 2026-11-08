@@ -1,5 +1,9 @@
-/// Use the target C `fma` so results match OCaml's one-rounding implementation.
+/// Correctly rounded fused multiply-add. `f64::mul_add` is a single instruction on aarch64; the
+/// Windows target keeps the C `fma` because its software fallback rounded subnormals wrongly.
+#[cfg(windows)]
 pub fn fma(a: f64, b: f64, c: f64) -> f64 { rays_math_sys::fma(a, b, c) }
+#[cfg(not(windows))]
+pub fn fma(a: f64, b: f64, c: f64) -> f64 { a.mul_add(b, c) }
 
 #[cfg(test)]
 mod tests {
