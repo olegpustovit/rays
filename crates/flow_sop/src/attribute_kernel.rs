@@ -1776,9 +1776,23 @@ fn write_planes(
     }
     let is_p = owner == Owner::Point && kind == "vec3" && name == "P";
     use flow_ir::core_ir::Region::Instruction as I;
-    // Only an output that copies an input can keep the target's own plane: viewing P otherwise
-    // would read back positions a device still holds, for a write that never reads them.
-    let original = if is_p && region.outputs[0].iter().any(|r| matches!(region.code[*r as usize], I::Input(..))) {
+    // A P component that copies a borrowed column may keep the target's own plane. Only then is P
+    // viewed: otherwise the view would read back positions a device still holds, for a write that
+    // never reads them.
+    let copied: Vec<Option<flow_ir::packed::Column>> = region.outputs[0]
+        .iter()
+        .map(|register| match &region.code[*register as usize] {
+            I::Input(input, _, index) if is_p => {
+                let (residual, term) = &region.sources[*input as usize];
+                match borrowed_source(geometry, *residual, term) {
+                    Ok(Some(columns)) => columns.get(*index as usize).cloned(),
+                    _ => None,
+                }
+            }
+            _ => None,
+        })
+        .collect();
+    let original = if copied.iter().any(Option::is_some) {
         let view = Float3::View::view(geometry::positions(target)).map_err(|e| attr_err(rerr(&e)))?;
         Some([view.x, view.y, view.z])
     } else {
@@ -1787,23 +1801,14 @@ fn write_planes(
     let count = owner_count(target, owner);
     let source_geometry = geometry.clone();
     let column_source: flow_ir::packed::ColumnSource = Arc::new(move |residual, term| borrowed_source(&source_geometry, residual, term));
-    let unchanged = |component: usize, register: i64| -> bool {
-        let Some(original) = &original else { return false };
-        match &region.code[register as usize] {
-            I::Input(input, _, index) => {
-                let (residual, term) = &region.sources[*input as usize];
-                match borrowed_source(geometry, *residual, term) {
-                    Ok(Some(columns)) => {
-                        let column = &columns[*index as usize];
-                        Arc::ptr_eq(&column.data, &original[component]) && column.offset == 0 && column.stride == 1
-                    }
-                    _ => false,
-                }
-            }
+    let keep: Vec<bool> = copied
+        .iter()
+        .enumerate()
+        .map(|(c, column)| match (column, &original) {
+            (Some(column), Some(original)) => Arc::ptr_eq(&column.data, &original[c]) && column.offset == 0 && column.stride == 1,
             _ => false,
-        }
-    };
-    let keep: Vec<bool> = region.outputs[0].iter().enumerate().map(|(c, r)| unchanged(c, *r)).collect();
+        })
+        .collect();
     let outputs = Arc::new(Mutex::new(vec![keep.iter().map(|k| if *k { None } else { Some(vec![0.0; count]) }).collect::<Vec<Option<Vec<f64>>>>()]));
     let options = Executor::ForceOptions { state: state.cloned(), elems: elems.map(|e| e.to_vec()), resolve: Some(resolve.clone()), strict, ..Default::default() };
     let forced = Executor::force_into(&options, gpu.cloned(), column_source, count as i64, outputs.clone(), program, live).map_err(|mut d| {

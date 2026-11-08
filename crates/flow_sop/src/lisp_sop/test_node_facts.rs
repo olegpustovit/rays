@@ -133,3 +133,26 @@ fn declared_preserved_topology_holds_at_one_and_eight_domains() {
     assert!(reads.iter().any(|r| r == "direction") && !reads.iter().any(|r| r == "N"), "PPX rebuild retained stale facts");
     session::close(&mut evaluator);
 }
+
+/// A P write that computes every component replaces positions without reading them: positions a
+/// device still holds stay unread (no payload readback) on the CPU route.
+#[test]
+fn replacing_p_leaves_held_positions_unread() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    let reads = Arc::new(AtomicUsize::new(0));
+    let counted = reads.clone();
+    let plain = rdk_ok(rdk_ops::line_geometry::points(&[(0., 0., 0.); 8]));
+    let held = rdk_ok(rdk_core::packed::Float3::deferred(None, None, None, 8, Arc::new(move || {
+        counted.fetch_add(1, Ordering::SeqCst);
+        Ok(vec![vec![0.0; 8]; 3])
+    })));
+    let g = rdk_ok(geo::create(held, geo::topology(&plain).clone(), None, None, None));
+    let source = lisp_sop::snapshot(&g);
+    let n = lisp_sop::node(&[("source".to_owned(), source)], "(sop/with_attr (sop/ext_source) :P (map (fn [i] [i (+ i t) 0]) (array/range 8)))");
+    let mut s = new_eval_session();
+    let out = cook(&mut s, &ctx(1), &n);
+    assert_eq!(rdk_core::packed::Float3::get(geo::positions(&out), 3).unwrap().0, 3.0);
+    assert_eq!(reads.load(Ordering::SeqCst), 0, "the replaced positions were read back");
+    session::close(&mut s);
+}
