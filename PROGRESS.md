@@ -6,7 +6,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 
 **Order:** A ∥ B ∥ M ∥ I, then C, then D. One commit per bullet in Wave A runbook where practical.
 
-**Current state (2026-11-08, resumed):** implementation and qualification remain open. C6/M3 use a mutable native lifecycle and borrowed frame views; C11 shares one local cache adapter and cache engine. `cargo check --workspace --all-targets` passes; full implementation and qualification are still incomplete. Artifact v5 source SHA-256 matches the repository mirror (`bd1c9fe2…`). Artifact unchanged. Crates 67 -> 51.
+**Current state (2026-11-08, user-requested checkpoint):** implementation and qualification remain open. C6/M3 use a mutable native lifecycle and borrowed frame views; C11 shares one local cache adapter and cache engine; D5 uses one width-tagged float-array value representation. `cargo check --workspace --all-targets` passes; full implementation and qualification are still incomplete. Artifact v5 source SHA-256 matches the repository mirror (`bd1c9fe2…`). Artifact unchanged. Crates 67 -> 51.
 
 ## Summary
 
@@ -17,7 +17,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | M | M1-M21 implementation | empty-frame guard target | - |
 | I | I1-I6 | - | - |
 | C | C1-C21 | - | - |
-| D | D2-D3 | D1, D4 (benchmark evidence missing) | D5-D6 |
+| D | D2-D3, D5 | D1, D4 (benchmark evidence missing) | D6 |
 
 ## Items (commits)
 
@@ -53,7 +53,7 @@ A1-A8, B0-B4: see earlier rows below in git history (`6802a325` ... `96fab43d`);
 | C7, C8 | done | `8e6e0e51`, `69fe4afd` |
 | C9 | done | `e0afebff` |
 | C10 | done | `d87c7c95` `625ffd0f` `5b15cb29` `04b5ae16` `9bf5f9be`, plus canonical-name closure below: the merged GPU API/backend package, library, directory, Cargo dependencies and Rust imports are `ogpu_core`. No alias/facade crate retained. The other thin owners remain folded; `ocaml_int` was deleted outright (I3), with only intentional frozen hashes retaining 63-bit mixing. |
-| C11 | done | `51ebdf92` plus shared-cache closure below: `rays::table` and `rays::idlist` both use `renderer::side_lru`, backed by `lru::Cache` for ordering, capacity and ledger accounting. Local non-Send identity keys stay in the adapter; borrowed predicates preserve custom equality, newest-equivalent-key selection and exact MRU promotion. Value keys retain second-chance eviction. Drop releases charges/callbacks; basic frame allocations fall 2,002 -> 1,980. |
+| C11 | done | `51ebdf92` `b52600c7` plus shared-cache closure below: `rays::table` and `rays::idlist` both use `renderer::side_lru`, backed by `lru::Cache` for ordering, capacity and ledger accounting. Local non-Send identity keys stay in the adapter; borrowed predicates preserve custom equality, newest-equivalent-key selection and exact MRU promotion. Value keys retain second-chance eviction. Drop releases charges/callbacks; basic frame allocations fall 2,002 -> 1,980. |
 | C12, C13 | done | `34ea546d`; `b9816d3a` (7M floats identical) |
 | C14 | done | `f3b38af3` |
 | C15 | done | `b268ff32` `support::Choice<T>` (net -100, plan -400..500) |
@@ -65,27 +65,29 @@ A1-A8, B0-B4: see earlier rows below in git history (`6802a325` ... `96fab43d`);
 | D1 | partial | `959d5dae` `b72ab30d` `b4f74ecf` goldens `9a17f5d7` `1a5de4fe` `8fc3feb4`; 56 prepends removed; some incidental-order spots in spirv.rs left |
 | D2 | done | `37691759` .. `2e224106` + `a0809e01` (5 stages): rdk errors `{operation, code: Code, message}`, typed cancellation |
 | D3 | done | `4e8e7193` one WGSL printer, goldens byte-identical |
-| D4 | implemented; qualification open | `8bf0c0d0` `18180e84` packed.rs one CPU engine (-1560/+? lines in diff; now 4714 lines); `1455271c` bench_core example |
-| D5 | not started | `Value` four float-array variants -> `Floats(width, ..)` (90 sites, 23 files) |
+| D4 | implemented; qualification open | `8bf0c0d0` `18180e84` packed.rs one CPU engine (historical implementation size 4,714 lines); `1455271c` bench_core example |
+| D5 | done | Replaced the four float-array variants with `Value::Floats(width, Arc<Vec<f64>>)` throughout production and tests. Shared slicing, concatenation, reductions, literal conversion, cache/physical equality and GPU readback retain width. Validation rejects widths outside 1–4 and incomplete rows before indexing. `Value` remains 40 bytes; original type-specific keys, Lisp display and numerical data are preserved. 902 selected tests pass; one web FMA failure is reproduced on committed baseline `b52600c7`. |
 | D6 | not started | OCaml module names (`Gpu/Profile/Cost`, `t`) - ~67 files, deferred |
 
 ## Known failures / open risks
 
-- Resumed audit next work: D1/D4 audit, D5/D6, empty-frame allocation target and full qualification; C6/M3 and C11 implementation are closed. `fee04de1` and `23d4bb15` are completed stages, not completion of the full artifact plan.
+Resume with the remaining SPIR-V ordering audit (D1), D4 FMA diagnosis and full matched benchmarks, D6 naming/API migration, the empty-editor allocation gap, then final slow/native qualification. Do not mark the full artifact plan complete from the D5 checkpoint.
+
+- Resumed audit next work: D1/D4 audit, D6, empty-frame allocation target and full qualification; C6/M3, C11 and D5 implementation are closed. User requested a committed checkpoint after D5; the full plan is not complete. `fee04de1` and `23d4bb15` are completed stages, not completion of the full artifact plan.
 
 - `cargo t -p flow_sop` on the D2 tree: 700 tests, 696 pass; the 4 failures are the baseline ones below (`lend_session_tests` confirmed pre-existing by LowerClean at `11988707`). `cargo t -p rdk_core/rdk_geom/rdk_boolean/rdk_ops/sop`: 523 pass; `rdk_rays` 10 pass. Other full suites were **not** run on final HEAD under load (load avg 50-450). Focused runs per item passed (see worker reports in item rows).
 - Pre-existing at baseline `11988707` (bisected by LowerClean): `test_node_facts::declared_preserved_topology`, `test_keyword_ports::keyword_manifest_defaults_projection_checked_gestures` (E_SHADOW), `test_settle::in_flight_device_writes_settle_at_a_cooks_end`, `test_projection::snapshots_of_the_scene_fixtures`, `lend_session_tests::escaped_zone_nodes_own_only_their_cook_context`.
 - `flow_ir test_static_map::sop_deferral`: root cause `4ed6baf8` (constructor deferral); test rewritten (`a3e8c6df`); `StaticMap.deferred` now effectively dead.
 - Studio qualification: `run_studio` and `run_studio_keywords` exceed the unchanged five-second case budget on both pre-text-change HEAD `3e4826d8` and the text-ownership tree; `run_studio_tail` passes on both. The mutable-loop closure still exceeds those limits (5.000/5.003 s); tail passes. These scenarios need reduced shared fixture cost or other measured runtime work; deadlines unchanged.
 - Native editor qualification restored to compiling: `placement.rs` still called backend `cost`/`prepare` on `Evidence`, and passed a backend to `Display_sink` evidence APIs. Corrected the stale test calls. Calibration passes; `native_placement_chain_counterexamples` now exposes `placement.rs:206` missing placement-profile entry (`Option::unwrap()`); still open, not disabled.
-- Unconfirmed after D4: `flow_web test_fma::checked_arithmetic_regions_match_exact_binary64` (E_NONFINITE); all four `flow_ir test_core_operators` text-array parts now pass (slowest 2.923 s on the resumed I2 tree); `rays_editor` 64 unit tests, rays/native window cases and the selected pane/text/undo/carry/source/camera/world/drawing/picking checks pass after mutable lifecycle closure; the full native suite and `pxui_graph --features test-hooks` remain unverified after C6.
+- Confirmed still open during D5: `flow_web test_fma::checked_arithmetic_regions_match_exact_binary64` fails with `E_NONFINITE` on both committed baseline `b52600c7` and the D5 tree (baseline case 0.111 s). D5 does not introduce this failure. All four `flow_ir test_core_operators` text-array parts pass in D5 (slowest 2.985 s); `rays_editor` 64 unit tests, rays/native window cases and the selected pane/text/undo/carry/source/camera/world/drawing/picking checks pass after mutable lifecycle closure; the full native suite and `pxui_graph --features test-hooks` remain unverified after C6.
 - Remesh macOS golden switched to the Windows hash constant (`3107f153`); cause (libm) unverified.
 - Per-cook guards (a) walker, (b) aliased 4096-element store, (c) round trip, (d) subdivide peak and 1M-text now exist in `flow_sop/src/test_alloc_budget.rs`. The walker uses `Host::force_reference`, bypassing compiled execution. The store guard was verified with a temporary negative control: disabling alias release produced 8,204 allocations and failed the guard; restored code uses 12. All six pass after C3 adds the shared numeric-mapper guard. Per-frame guards `alloc_budget_basic`/`alloc_budget_empty` exist (`e74d3f1d`); caps are now basic 1,988 / 184,000 B and empty 4,350 / 186,000 B. **The artifact's empty-editor target (~1,200 allocations/frame) remains unmet**: measured 4,335. Verify the intended workload and reduce its remaining allocation sites; do not excuse the gap as a layout difference without evidence or raise limits.
 - Not measured: B-wave compile-time gains, bench_core before/after for D4 (PackedMerge reported no regression sign only from one noisy run).
 - `gate deps`: 28 pre-existing violations, none new.
 - Throwaway worktrees `/tmp/rays-m13b`, `/tmp/rays-base`, `/tmp/rays-snap` can be deleted.
 
-## Subagents (omp)
+## Historical agent logs
 
 | ID | log | scope |
 |----|-----|-------|
@@ -101,11 +103,11 @@ A1-A8, B0-B4: see earlier rows below in git history (`6802a325` ... `96fab43d`);
 | b1 | `.subagent-logs/b1.log` | B1 flow_check |
 | b5 | `.subagent-logs/b5.log` | B5 flow_sop split (queued) |
 
-Cursor `Task` subagents unavailable in this harness; workers are `omp launch -p` (pids in shell history).
+These are archived logs from earlier stages, committed at the user-requested D5 checkpoint. They describe historical workers, not active jobs. C11 and D5 were completed by one agent.
 
-## Plan audit (2026-11-08)
+## Historical plan audits (2026-11-08)
 
-Read-only reviews: `.subagent-logs/review.log` (Wave A snapshot); `.subagent-logs/review2.log` (63-ID tally); `.subagent-logs/review3.log` (2026-11-08) — **~27/63** with evidence, **2 partial** (B5, M18); next impact **I**, **M1**, **M14**, **C1**, **C3**; `rdk` facade remains for `sop`/`flow_sop` only.
+The snapshot totals in these old reviews are superseded by the current Summary above. Read-only reviews: `.subagent-logs/review.log` (Wave A snapshot); `.subagent-logs/review2.log` (63-ID tally); `.subagent-logs/review3.log` (2026-11-08) — **~27/63** with evidence, **2 partial** (B5, M18); next impact **I**, **M1**, **M14**, **C1**, **C3**; `rdk` facade remains for `sop`/`flow_sop` only.
 
 ## B0 — shared `target/` incremental invalidation
 
@@ -133,6 +135,14 @@ Policy (`AGENTS.md`, `docs/history/build-speed.md`, plan B0): one warm workspace
 Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s under load; this run is healthy (not stale).
 
 ## Session log
+
+- 2026-11-08: D5 checkpoint requested by the user: consolidated `Float_array`/`Vec2_array`/`Vec3_array`/`Vec4_array` into `Value::Floats(usize, Arc<Vec<f64>>)`. Migrated all production and test callers, including shader/raster, CPU interpreters, GPU placeholders/readback, SOP attributes/topology/images, path tracing, web export and editor qualification. Collapsed shared storage branches and width-dependent constructors. Equality and identity checks still require the same width, even when two views share one Arc. Type-specific key prefixes and web key hashes remain unchanged. Width validation precedes division/indexing and finite-value memo lookup. No dependencies, profiles, crate boundaries or goldens changed. Updated the current marks contract; historical OCaml and CSR storage names are intentionally retained.
+  - New value regression checks widths 1–4, original exact key strings, row counts/types/display/init/get, Arc identity, width-sensitive equality, invalid widths 0/5/usize::MAX and the unchanged 40-byte `Value` size. Focused value run: four pass / 3.400 s including rebuild, slowest new regression 0.032 s. Existing composition regression now checks actual `core_exec::phys_eq` and rejects cross-width concatenation over shared storage. Temporary removal of its width guard fails (6.883 s including rebuild, case 0.024 s); exact bytes restored in `finally`. Composition suite: 25 pass / 24.503 s including rebuild, slowest exact-copy case 0.986 s.
+  - `cargo t -p flow_syntax -p flow_check -p flow_eval`: 182 pass / 16.177 s, slowest threaded determinism 3.408 s. `cargo t -p flow_ir`: 340 pass / 11.510 s, slowest text-array part2 2.985 s. `cargo t -p flow_shader -p flow_graph -p web_export`: 82 pass / 18.238 s, slowest particles export 0.672 s; existing goldens match. `cargo t -p flow_web`: 120 pass and the known FMA failure / 13.897 s, slowest all-byte text 1.523 s. Restoring all changed Rust files to `b52600c7` reproduces the same `E_NONFINITE` FMA failure (17.847 s including rebuild, case 0.111 s); working bytes restored in `finally`.
+  - `cargo t -p flow_sop FILTER`: `attribute_kernel::tests` 12 pass / 27.750 s including rebuild (slowest selected numeric writes 0.140 s); `test_alloc_budget` six / 0.482 s (million-text 0.130 s); `topology_kernel_impl::` 13 / 0.508 s (counts/edges 0.052 s); `test_geometry_arrays` 38 / 2.541 s (multiblock planes 1.272 s). These exercise shared buffers, width changes, signed zero/subnormal bits, finite/type/count errors, cancellation and exact one/eight-domain equality. Existing allocation limits unchanged.
+  - Native `cargo t -p flow_gpu --test gpu_run --test gpu_resident --test gpu_uint32`: 20 pass / 10.859 s, slowest resident scenarios 0.818 s. `cargo t -p flow_gpu --test gpu_run_lifetime --test gpu_image_sink_native --test gpu_pathtrace --test gpu_sampling --test gpu_trace --test gpu_sop_mesh`: 62 pass / 20.692 s, slowest pathtrace resolve 0.565 s. `cargo t -p flow_native`: 20 / 6.505 s, slowest recursive frame allocation 0.973 s. `cargo t -p rays_pathtracer --lib --test gpu_lisp`: five / 7.290 s, slowest world 0.971 s. Metal exercised on this Mac; Windows Vulkan execution remains unqualified.
+  - `cargo t -p rays_editor --features test-hooks --test gpu_editor alloc_budget`: two pass / 17.651 s including rebuild, slowest basic 0.387 s. Counts unchanged: basic 1,980 / 182,989 B, empty 4,335 / 184,728 B per frame; no caps raised. `cargo check --workspace --all-targets`: pass / 3.812 s, existing warnings. Main validation batches: 902 passing cases, one independently reproduced baseline failure. Full slow qualification and the other known failures above remain open.
+  - Before/after debug `cargo run -p flow_ir --example bench_core -- '1,024'`: digest `c4bbf006c82014c7` matches reference and both domain counts. Sampled min/median ms: one domain 0.0146/0.0183 -> 0.0129/0.0185; eight 0.0104/0.0132 -> 0.0110/0.0146. No speed gain claim; D4's full before/after benchmark remains open. Baseline `cargo check -p flow_syntax -p flow_eval -p flow_ir` wall 0.165 s; post-stage warm check passes. Live artifact rechecked: v5, source SHA-256 matches the mirror, unchanged. `git diff --check`: clean. Evidence `/tmp/rays-d5-*.log`, `/tmp/rays-d5-{before,validation,native-validation}.json`; prior agent logs are archived under `.subagent-logs/`.
 
 - 2026-11-08: C11 closure: removed the separate local identity-cache queue. `rays::idlist` is an 18-line adapter over generic `renderer::side_lru`; the shared `lru::Cache` owns linked ordering, capacity and memory charges. The core stores integer IDs only; local `Rc` keys/values and custom equality stay on their owning thread. Borrowed predicates support comparator-only keys without unsafe Send or new dependencies. Identity hits promote exactly, peek does not, and mutable keys that become equivalent resolve newest first. Value-keyed tables keep their existing second-chance policy. Identity caches retain their previous no-pressure-eviction behavior (`Shed::Never`); constant-hash scans have a documented O(n) ceiling. Drop settles local releases and ledger charges; take transfers ownership without releasing. Iteration keeps its original ordering; all-kept retention avoids an intermediate allocation. No dependencies, profiles, crate boundaries or goldens changed.
   - One focused regression covers non-Send mutable-key equality, MRU/peek/head/iteration/filter/clear, replacement/eviction, equivalent mutable keys, negative-byte clamping, zero capacity, release callbacks, Drop ledger balance, value-key second chances, pinning and take. Baseline fails on a leaked 9-byte Drop charge (2.272 s including rebuild, case 0.049 s). Temporary promotion disable fails (`find did not promote the hit`, 4.597 s / case 0.025 s); restored in `finally`. The newly equivalent-key case first failed (2.456 s / case 0.030 s), then passed after fixing the shared lookup (5.618 s / case 0.051 s).

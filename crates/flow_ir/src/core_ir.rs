@@ -496,7 +496,7 @@ pub mod Region {
 
     pub fn floats_for(t: &T, length: usize) -> Vec<f64> {
         if let Some(d) = &t.destination {
-            if let Value::Float_array(data) = &d.buffer {
+            if let Value::Floats(1, data) = &d.buffer {
                 if data.len() == length && t.outputs.len() == 1 { return (**data).clone(); }
             }
         }
@@ -1267,10 +1267,7 @@ pub fn literal_of_value(value: &Value) -> Option<Literal> {
             Value::Record(xs) => Literal::Record(xs.iter().map(|(n, v)| convert(v).map(|l| (n.clone(), l))).collect::<Option<Vec<_>>>()?),
             Value::Int_array(data) => Literal::Int_array(data.clone()),
             Value::Text_array(data) => Literal::Text_array(data.clone()),
-            Value::Float_array(data) => Literal::Array { width: 1, data: data.clone() },
-            Value::Vec2_array(data) => Literal::Array { width: 2, data: data.clone() },
-            Value::Vec3_array(data) => Literal::Array { width: 3, data: data.clone() },
-            Value::Vec4_array(data) => Literal::Array { width: 4, data: data.clone() },
+            Value::Floats(width @ 1..=4, data) => Literal::Array { width: *width as i64, data: data.clone() },
             Value::No_geo => Literal::Empty_geometry,
             _ => return None,
         })
@@ -1295,10 +1292,7 @@ pub fn value_of_literal(literal: &Literal) -> Value {
         Literal::Record(xs) => Value::Record(xs.iter().map(|(n, v)| (n.clone(), value_of_literal(v))).collect()),
         Literal::Int_array(data) => Value::Int_array(data.clone()),
         Literal::Text_array(data) => Value::Text_array(data.clone()),
-        Literal::Array { width: 1, data } => Value::Float_array(data.clone()),
-        Literal::Array { width: 2, data } => Value::Vec2_array(data.clone()),
-        Literal::Array { width: 3, data } => Value::Vec3_array(data.clone()),
-        Literal::Array { width: 4, data } => Value::Vec4_array(data.clone()),
+        Literal::Array { width: width @ 1..=4, data } => Value::Floats(*width as usize, data.clone()),
         Literal::Empty_geometry => Value::No_geo,
         Literal::Array { .. } => panic!("Core.value_of_literal: width"),
     }

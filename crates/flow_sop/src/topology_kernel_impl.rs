@@ -333,7 +333,7 @@ const PLANES_MESSAGE: &str = "Mesh planes require exactly x, y and z float array
 /// never adopted by geometry).
 pub fn mesh_points(points: &Value) -> Result<(i64, Positions), Diagnostic> {
     match points {
-        Value::Vec3_array(array) => {
+        Value::Floats(3, array) => {
             value::validate(points)?;
             let count = array.len() / 3;
             let array = array.clone();
@@ -349,7 +349,7 @@ pub fn mesh_points(points: &Value) -> Result<(i64, Positions), Diagnostic> {
                 owned_planes(x, y, z)
             };
             let key = match points {
-                Value::Vec3_array(a) => a.clone(),
+                Value::Floats(3, a) => a.clone(),
                 _ => unreachable!("matched above"),
             };
             Ok((count as i64, Box::new(move || if count > 4096 { point_planes(&key, &planes) } else { planes() })))
@@ -357,7 +357,7 @@ pub fn mesh_points(points: &Value) -> Result<(i64, Positions), Diagnostic> {
         Value::Record(fields) if fields.len() == 3 => {
             let find = |name: &str| fields.iter().find(|(key, _)| key == name).map(|(_, v)| v);
             match (find("x"), find("y"), find("z")) {
-                (Some(Value::Float_array(x)), Some(Value::Float_array(y)), Some(Value::Float_array(z))) => {
+                (Some(Value::Floats(1, x)), Some(Value::Floats(1, y)), Some(Value::Floats(1, z))) => {
                     // Validation is per field in order: the first failing field's error. The
                     // OCaml parallel path above 65536 elements reports the same error.
                     for (_, field) in fields {
@@ -504,7 +504,7 @@ static STATIC_TOPOLOGIES: Mutex<Vec<StaticTopology>> = Mutex::new(Vec::new());
 
 fn key_matches(key: &StaticKey, value: &Value) -> bool {
     match (key, value) {
-        (StaticKey::Floats(weak), Value::Float_array(a) | Value::Vec2_array(a) | Value::Vec3_array(a) | Value::Vec4_array(a)) => alive(weak, a),
+        (StaticKey::Floats(weak), Value::Floats(1..=4, a)) => alive(weak, a),
         (StaticKey::Ints(weak), Value::Int_array(a)) => weak.upgrade().is_some_and(|k| Arc::ptr_eq(&k, a)),
         (StaticKey::Residual(id, home), Value::Residual(r)) => r.0 == *id && r.1 == *home,
         _ => false,
@@ -519,7 +519,7 @@ fn key_dead(key: &StaticKey) -> bool {
 }
 fn key_of(value: &Value) -> Option<StaticKey> {
     match value {
-        Value::Float_array(a) | Value::Vec2_array(a) | Value::Vec3_array(a) | Value::Vec4_array(a) => Some(StaticKey::Floats(Arc::downgrade(a))),
+        Value::Floats(1..=4, a) => Some(StaticKey::Floats(Arc::downgrade(a))),
         Value::Int_array(a) => Some(StaticKey::Ints(Arc::downgrade(a))),
         Value::Residual(r) => Some(StaticKey::Residual(r.0, r.1)),
         _ => None,
@@ -579,7 +579,7 @@ fn count_of(scope: &dyn Residency, value: &Value) -> Option<i64> {
 pub fn mesh_resident(static_key: Option<&Value>, scope: &dyn Residency, args: &Args) -> Option<Result<Geometry, Diagnostic>> {
     if let Some(Value::Record(fields)) = arg(args, "points") {
         if fields.len() != 3 { return None; }
-        let planes: Option<Vec<Value>> = ["x", "y", "z"].iter().map(|name| arg(fields, name).filter(|v| matches!(v, Value::Float_array(_))).cloned()).collect();
+        let planes: Option<Vec<Value>> = ["x", "y", "z"].iter().map(|name| arg(fields, name).filter(|v| matches!(v, Value::Floats(1, _))).cloned()).collect();
         let planes: [Value; 3] = planes?.try_into().ok()?;
         let mut counts = Vec::new();
         for (_, value) in fields {
@@ -604,7 +604,7 @@ pub fn mesh_resident(static_key: Option<&Value>, scope: &dyn Residency, args: &A
         return mesh_resident(static_key, scope, &args);
     }
     let cached = static_key.and_then(find_static);
-    if let (Some((n, topology)), Some(points @ Value::Vec3_array(_))) = (&cached, arg(args, "points")) {
+    if let (Some((n, topology)), Some(points @ Value::Floats(3, _))) = (&cached, arg(args, "points")) {
         if count_of(scope, points) == Some(*n) {
             let planes = Arc::new(scope.retain_float(points)?);
             let (positions, _) = match positions_of(planes.clone(), *n) {
@@ -626,7 +626,7 @@ pub fn mesh_resident(static_key: Option<&Value>, scope: &dyn Residency, args: &A
         keep_static(key, point_count, topology);
     };
     let (points, vertices, offsets, kinds) = (arg(args, "points"), arg(args, "vertex_points"), arg(args, "primitive_offsets"), arg(args, "kinds"));
-    if let (Some(points @ Value::Vec3_array(_)), Some(Value::Int_array(v)), Some(Value::Int_array(o)), Some(Value::Int_array(k))) =
+    if let (Some(points @ Value::Floats(3, _)), Some(Value::Int_array(v)), Some(Value::Int_array(o)), Some(Value::Int_array(k))) =
         (points, vertices, offsets, kinds)
     {
         if count_of(scope, points).is_some()
@@ -648,7 +648,7 @@ pub fn mesh_resident(static_key: Option<&Value>, scope: &dyn Residency, args: &A
             return Some(result);
         }
     }
-    let (Some(points @ Value::Vec3_array(device_points)), Some(vertices), Some(offsets), Some(kinds)) = (points, vertices, offsets, kinds) else {
+    let (Some(points @ Value::Floats(3, device_points)), Some(vertices), Some(offsets), Some(kinds)) = (points, vertices, offsets, kinds) else {
         return None;
     };
     if device_points.is_empty() {
@@ -853,7 +853,7 @@ fn mapping(cancel: Option<&cancel::T>, args: &Args, name: &str, source_count: i6
             names.sort();
             let find = |key: &str| fields.iter().find(|(n, _)| n == key).map(|(_, v)| v);
             match (names.as_slice(), find("a"), find("b"), find("t")) {
-                (["a", "b", "t"], Some(Value::Int_array(a)), Some(Value::Int_array(b)), Some(Value::Float_array(t))) => {
+                (["a", "b", "t"], Some(Value::Int_array(a)), Some(Value::Int_array(b)), Some(Value::Floats(1, t))) => {
                     if t.len() as i64 != target_count {
                         return fail("E_REMAP_COUNT", &format!("Remap {name} map must match target owner count."));
                     }
@@ -1071,7 +1071,7 @@ mod tests {
         Value::Text(s.as_bytes().to_vec())
     }
     fn floats(v: Vec<f64>) -> Value {
-        Value::Vec3_array(Arc::new(v))
+        Value::Floats(3, Arc::new(v))
     }
     fn triangle() -> Geometry {
         mesh(&[
@@ -1500,7 +1500,7 @@ mod resident_identity {
     #[test]
     fn resident_vec3_returns_the_placeholder_itself() {
         let placeholder = Arc::new(vec![7.0, 0.0, 0.0, 8.0, 0.0, 0.0]);
-        let holder = Arc::new(ResidentPoints { value: Value::Vec3_array(placeholder.clone()), count: 2 });
+        let holder = Arc::new(ResidentPoints { value: Value::Floats(3, placeholder.clone()), count: 2 });
         let dynamic: Arc<dyn Deferred::Holder> = holder.clone();
         let materialise: Float3::Materialise = Arc::new(|| Ok(vec![vec![7.0, 8.0], vec![0.0, 0.0], vec![0.0, 0.0]]));
         let positions = Float3::deferred(Some(dynamic), None, None, 2, materialise).unwrap();

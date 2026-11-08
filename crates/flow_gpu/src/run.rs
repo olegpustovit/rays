@@ -1317,12 +1317,7 @@ pub fn readback(output: &Output, index: Option<i64>) -> Result<Value, Diagnostic
         return nonfinite_output();
     }
     let a = Arc::new(values);
-    Ok(match width {
-        2 => Value::Vec2_array(a),
-        3 => Value::Vec3_array(a),
-        4 => Value::Vec4_array(a),
-        _ => Value::Float_array(a),
-    })
+    Ok(Value::Floats(width as usize, a))
 }
 
 /// `width` planes of `count` doubles from float32 contents.
@@ -1663,12 +1658,7 @@ fn hold(t: &T, uint32: bool, buffer: &Buffer, capacity: i64, count: i64, width: 
     d.pool.0.s.borrow_mut().held.insert(id, (buffer.clone(), capacity, fate.clone()));
     KEPT.with(|k| k.borrow_mut().insert(id, kept.clone()));
     BINDABLE.with(|b| b.borrow_mut().push((Arc::downgrade(&placeholder), weak.clone(), id, count * width)));
-    let resident = match width {
-        1 => Value::Float_array(placeholder),
-        2 => Value::Vec2_array(placeholder),
-        3 => Value::Vec3_array(placeholder),
-        _ => Value::Vec4_array(placeholder),
-    };
+    let resident = Value::Floats(width as usize, placeholder);
     let planes = Gpu::Planes { count, width, resident: if uint32 { None } else { Some(resident) }, ops: Box::new(Held(token)) };
     (planes, kept)
 }

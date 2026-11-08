@@ -1,0 +1,3 @@
+Rays dev AGENTS.md ponytail. M8 smallest slice in renderer side_lru OR scene_execution sampler key.
+
+Avoid format!("{:?}") or per-find Arc clone in lru_key if safe. One commit "M8:". cargo check -p renderer. PROGRESS M8 only. No artifact.

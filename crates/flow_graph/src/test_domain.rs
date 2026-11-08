@@ -350,7 +350,7 @@ fn scatter_add_is_typed() {
         vec![("indices".to_owned(), array_of(Ty::Int)), ("values".to_owned(), array_of(Ty::Any)), ("size".to_owned(), Ty::Int)]
     );
     let (edited_source, edited) = apply_checked(&catalog(), &source, &set_arg(&card.path, ArgKey::Pos(2), num("3"))).unwrap();
-    assert_eq!(result(&edited, 0.0), Value::Vec3_array(Arc::new(vec![3., 6., 9., 0., 0., 0., 0., 0., 0.])));
+    assert_eq!(result(&edited, 0.0), Value::Floats(3, Arc::new(vec![3., 6., 9., 0., 0., 0., 0., 0., 0.])));
     let saved = lisp::print(&edited_source).unwrap().0;
     let restored = parse(&saved);
     assert!(matches!(flow_check::workspace::check(&[], false, false, None, &catalog(), &restored), (Some(_), ds) if ds.is_empty()));

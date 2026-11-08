@@ -42,10 +42,8 @@ pub enum Value {
     List(Arc<Vec<Value>>),
     Int_array(Arc<Vec<i64>>),
     Text_array(Arc<TextArray>),
-    Float_array(Arc<Vec<f64>>),
-    Vec2_array(Arc<Vec<f64>>),
-    Vec3_array(Arc<Vec<f64>>),
-    Vec4_array(Arc<Vec<f64>>),
+    /// Packed float/vector rows; width is 1..=4 and storage must contain complete rows.
+    Floats(usize, Arc<Vec<f64>>),
     Record(Vec<(String, Value)>),
     Deferred(Ty, i64),
     No_geo,
@@ -163,10 +161,7 @@ pub fn ty_of(value: &Value) -> Ty {
         Value::List(values) => Ty::List(Box::new(elem_ty(values))),
         Value::Int_array(_) => Ty::Array(Box::new(Ty::Int)),
         Value::Text_array(_) => Ty::Array(Box::new(Ty::Text)),
-        Value::Float_array(_) => Ty::Array(Box::new(Ty::Float)),
-        Value::Vec2_array(_) => Ty::Array(Box::new(Ty::Vec2)),
-        Value::Vec3_array(_) => Ty::Array(Box::new(Ty::Vec3)),
-        Value::Vec4_array(_) => Ty::Array(Box::new(Ty::Vec4)),
+        Value::Floats(width, _) => Ty::Array(Box::new(match width { 1 => Ty::Float, 2 => Ty::Vec2, 3 => Ty::Vec3, 4 => Ty::Vec4, _ => Ty::Any })),
         Value::Record(fields) => Ty::Record(fields.iter().map(|(name, value)| (name.clone(), ty_of(value))).collect()),
         Value::Deferred(ty, _) => ty.clone(),
         Value::Struct(g) | Value::Source(g) => g.ty.clone(),
@@ -198,7 +193,7 @@ pub fn coerce_to(want: &Ty, value: &Value) -> Result<Value, Diagnostic> {
         (Ty::Vec2, Value::Int(_) | Value::Float(_)) => { let n = num(value)?; Ok(Value::Vec2(n, n)) },
         (Ty::Vec4, Value::Int(_) | Value::Float(_)) => { let n = num(value)?; Ok(Value::Vec4(n, n, n, n)) },
         (Ty::List(element), Value::List(values)) => Ok(Value::List(Arc::new(values.iter().map(|value| coerce_to(element, value)).collect::<Result<Vec<_>, _>>()?))),
-        (Ty::Array(element), Value::Int_array(values)) if **element == Ty::Float => Ok(Value::Float_array(Arc::new(values.iter().map(|value| *value as f64).collect()))),
+        (Ty::Array(element), Value::Int_array(values)) if **element == Ty::Float => Ok(Value::Floats(1, Arc::new(values.iter().map(|value| *value as f64).collect()))),
         (Ty::Record(wanted), Value::Record(fields)) => Ok(Value::Record(fields.iter().map(|(name, value)| {
             Ok((name.clone(), wanted.iter().find(|(field, _)| field == name).map_or_else(|| Ok(value.clone()), |(_, want)| coerce_to(want, value))?))
         }).collect::<Result<Vec<_>, Diagnostic>>()?)),
@@ -226,10 +221,7 @@ pub fn show_with(conc: &dyn Fn(&Value) -> Value, value: &Value) -> Vec<u8> {
         }
         Value::Int_array(values) => format!("{} × int", values.len()).into_bytes(),
         Value::Text_array(values) => format!("{} × text", values.len()).into_bytes(),
-        Value::Float_array(values) => format!("{} × float", values.len()).into_bytes(),
-        Value::Vec2_array(values) => format!("{} × vec2", values.len() / 2).into_bytes(),
-        Value::Vec3_array(values) => format!("{} × vec3", values.len() / 3).into_bytes(),
-        Value::Vec4_array(values) => format!("{} × vec4", values.len() / 4).into_bytes(),
+        value @ Value::Floats(width, _) => format!("{} × {}", array_length(&value).unwrap_or(0), match width { 1 => "float", 2 => "vec2", 3 => "vec3", 4 => "vec4", _ => "any" }).into_bytes(),
         Value::Record(fields) => {
             let mut output = vec![b'{'];
             for (index, (name, value)) in fields.iter().enumerate() {
@@ -416,10 +408,7 @@ pub fn key_of(residual: &dyn Fn(ResidualId) -> i64, value: &Value) -> Vec<u8> {
         }
         Value::Int_array(values) => key_int_array(values),
         Value::Text_array(values) => key_text_array(values),
-        Value::Float_array(values) => key_float_array(values, "A"),
-        Value::Vec2_array(values) => key_float_array(values, "V2"),
-        Value::Vec3_array(values) => key_float_array(values, "V"),
-        Value::Vec4_array(values) => key_float_array(values, "V4"),
+        Value::Floats(width, values) => key_float_array(values, match width { 1 => "A", 2 => "V2", 3 => "V", 4 => "V4", _ => return key_float_array(values, &format!("invalid{width}")) }),
         Value::Record(fields) => {
             let mut key = vec![b'{'];
             for (index, (name, value)) in fields.iter().enumerate() {
@@ -487,13 +476,13 @@ pub fn array_length(value: &Value) -> Result<usize, Diagnostic> {
     match value {
         Value::Int_array(values) => Ok(values.len()),
         Value::Text_array(values) => Ok(values.len()),
-        Value::Float_array(values) => Ok(values.len()),
-        Value::Vec2_array(values) if values.len() % 2 == 0 => Ok(values.len() / 2),
-        Value::Vec3_array(values) if values.len() % 3 == 0 => Ok(values.len() / 3),
-        Value::Vec4_array(values) if values.len() % 4 == 0 => Ok(values.len() / 4),
-        Value::Vec2_array(_) => Err(fail("E_ARRAY_TYPE", "Packed vec2 storage has two coordinates per element.")),
-        Value::Vec3_array(_) => Err(fail("E_ARRAY_TYPE", "Packed vec3 storage has three coordinates per element.")),
-        Value::Vec4_array(_) => Err(fail("E_ARRAY_TYPE", "Packed vec4 storage has four coordinates per element.")),
+        Value::Floats(width @ 1..=4, values) if values.len() % width == 0 => Ok(values.len() / width),
+        Value::Floats(width, _) => Err(fail("E_ARRAY_TYPE", match width {
+            2 => "Packed vec2 storage has two coordinates per element.",
+            3 => "Packed vec3 storage has three coordinates per element.",
+            4 => "Packed vec4 storage has four coordinates per element.",
+            _ => "Packed float storage needs a width from one to four.",
+        })),
         _ => Err(fail("E_ARRAY_TYPE", "Expected a packed array.")),
     }
 }
@@ -504,10 +493,10 @@ pub fn array_get(value: &Value, index: i64) -> Result<Value, Diagnostic> {
     let value = match value {
         Value::Int_array(values) => Value::Int(values[index]),
         Value::Text_array(values) => { let mut text = array_buffer(values[index].len())?; text.extend_from_slice(&values[index]); Value::Text(text) },
-        Value::Float_array(values) => Value::Float(values[index]),
-        Value::Vec2_array(values) => Value::Vec2(values[index * 2], values[index * 2 + 1]),
-        Value::Vec3_array(values) => Value::Vec3(values[index * 3], values[index * 3 + 1], values[index * 3 + 2]),
-        Value::Vec4_array(values) => Value::Vec4(values[index * 4], values[index * 4 + 1], values[index * 4 + 2], values[index * 4 + 3]),
+        Value::Floats(1, values) => Value::Float(values[index]),
+        Value::Floats(2, values) => Value::Vec2(values[index * 2], values[index * 2 + 1]),
+        Value::Floats(3, values) => Value::Vec3(values[index * 3], values[index * 3 + 1], values[index * 3 + 2]),
+        Value::Floats(4, values) => Value::Vec4(values[index * 4], values[index * 4 + 1], values[index * 4 + 2], values[index * 4 + 3]),
         _ => return Err(fail("E_ARRAY_TYPE", "Expected a packed array.")),
     };
     Ok(value)
@@ -571,7 +560,7 @@ pub fn array_init(element: &Ty, count: i64, f: &dyn Fn(usize) -> Value) -> Resul
     values.resize(slots, 0.0);
     for index in 0..count { array_put(&mut values, width, index, &f(index))?; }
     let values = Arc::new(values);
-    Ok(match width { 2 => Value::Vec2_array(values), 3 => Value::Vec3_array(values), 4 => Value::Vec4_array(values), _ => Value::Float_array(values) })
+    Ok(Value::Floats(width, values))
 }
 
 fn check_float_array(values: &[f64]) -> Result<(), Diagnostic> {
@@ -584,7 +573,7 @@ pub fn validate(value: &Value) -> Result<(), Diagnostic> {
         Value::Vec2(x, y) => { fin("input", *x)?; fin("input", *y)?; },
         Value::Vec3(x, y, z) => { fin("input", *x)?; fin("input", *y)?; fin("input", *z)?; },
         Value::Vec4(x, y, z, w) => { fin("input", *x)?; fin("input", *y)?; fin("input", *z)?; fin("input", *w)?; },
-        Value::Float_array(values) | Value::Vec2_array(values) | Value::Vec3_array(values) | Value::Vec4_array(values) => {
+        Value::Floats(_, values) => {
             array_length(value)?;
             if values.len() <= 4096 { check_float_array(values)?; }
             else { FINITE_ARRAYS.validate_once(values, &|| check_float_array(values))?; }
@@ -705,7 +694,7 @@ mod tests {
         for (index, value) in integers.iter().enumerate() { assert_eq!(array_get(&packed, index as i64), Ok(Value::Int(*value))); }
         validate(&packed).unwrap();
         assert_eq!(show_with(&|value| value.clone(), &packed), "6 × int".as_bytes().to_vec());
-        assert_ne!(key_of(&|id| id.0, &packed), key_of(&|id| id.0, &Value::Float_array(Arc::new(integers.iter().map(|n| *n as f64).collect()))));
+        assert_ne!(key_of(&|id| id.0, &packed), key_of(&|id| id.0, &Value::Floats(1, Arc::new(integers.iter().map(|n| *n as f64).collect()))));
         assert_eq!(array_init(&Ty::Int, 0, &|_| unreachable!()).unwrap(), Value::Int_array(Arc::new(vec![])));
         assert_eq!(array_init(&Ty::Text, 0, &|_| unreachable!()).unwrap(), Value::Text_array(Arc::new(TextArray::new())));
         assert_eq!(array_init(&Ty::Text, 2, &|index| Value::Text(vec![0xff, index as u8])).unwrap(), Value::Text_array(Arc::new(vec![vec![0xff, 0], vec![0xff, 1]].into())));
@@ -764,21 +753,58 @@ mod tests {
     }
 
     #[test]
+    fn float_array_widths_preserve_types_keys_and_storage() {
+        assert_eq!(std::mem::size_of::<Value>(), 40);
+        let data = Arc::new(vec![0.25; 12]);
+        let types = [Ty::Float, Ty::Vec2, Ty::Vec3, Ty::Vec4];
+        let tags = ["A", "V2", "V", "V4"];
+        let names = ["float", "vec2", "vec3", "vec4"];
+        for width in 1..=4 {
+            let value = Value::Floats(width, data.clone());
+            assert_eq!(ty_of(&value), Ty::Array(Box::new(types[width - 1].clone())));
+            assert_eq!(array_length(&value), Ok(12 / width));
+            assert_eq!(show_with(&Clone::clone, &value), format!("{} × {}", 12 / width, names[width - 1]).as_bytes());
+            let expected = format!("{}[{}]", tags[width - 1], vec!["3fd0000000000000"; 12].join(","));
+            assert_eq!(key_of(&|id| id.0, &value), expected.as_bytes());
+            let Value::Floats(cloned_width, cloned) = value.clone() else { unreachable!() };
+            assert_eq!(cloned_width, width);
+            assert!(Arc::ptr_eq(&cloned, &data));
+            let expected_row = match width { 1 => Value::Float(0.25), 2 => Value::Vec2(0.25, 0.25), 3 => Value::Vec3(0.25, 0.25, 0.25), _ => Value::Vec4(0.25, 0.25, 0.25, 0.25) };
+            assert_eq!(array_get(&value, (12 / width - 1) as i64), Ok(expected_row.clone()));
+            assert_eq!(array_init(&types[width - 1], (12 / width) as i64, &|_| expected_row.clone()), Ok(value.clone()));
+            validate(&value).unwrap();
+            for other_width in 1..=4 {
+                let other = Value::Floats(other_width, data.clone());
+                assert_eq!(value == other, width == other_width);
+                assert_eq!(key_of(&|id| id.0, &value) == key_of(&|id| id.0, &other), width == other_width);
+            }
+        }
+        for width in [0, 5, usize::MAX] {
+            for data in [Arc::new(Vec::new()), data.clone()] {
+                let invalid = Value::Floats(width, data);
+                assert_eq!(array_length(&invalid).unwrap_err().code, "E_ARRAY_TYPE");
+                assert_eq!(validate(&invalid).unwrap_err().code, "E_ARRAY_TYPE");
+                assert_eq!(array_get(&invalid, 0).unwrap_err().code, "E_ARRAY_TYPE");
+            }
+        }
+    }
+
+    #[test]
     fn arrays_validation_memo_and_error_rows() {
-        for (width, kind) in [(1, 0), (2, 1), (3, 2), (4, 3)] {
+        for width in 1..=4 {
             let values = Arc::new(vec![0.25; width * 16]);
-            let packed = match kind { 0 => Value::Float_array(values.clone()), 1 => Value::Vec2_array(values.clone()), 2 => Value::Vec3_array(values.clone()), _ => Value::Vec4_array(values.clone()) };
+            let packed = Value::Floats(width, values.clone());
             validate(&packed).unwrap();
             for index in 0..values.len() {
                 let invalid = Arc::new((0..values.len()).map(|i| if i == index { f64::NAN } else { 0.25 }).collect());
-                let bad = match kind { 0 => Value::Float_array(invalid), 1 => Value::Vec2_array(invalid), 2 => Value::Vec3_array(invalid), _ => Value::Vec4_array(invalid) };
+                let bad = Value::Floats(width, invalid);
                 assert_eq!(validate(&bad).unwrap_err().code, "E_NONFINITE");
             }
         }
-        let malformed = [Value::Vec2_array(Arc::new(vec![f64::NAN])), Value::Vec3_array(Arc::new(vec![f64::INFINITY, 0.0])), Value::Vec4_array(Arc::new(vec![f64::NEG_INFINITY, 0.0, 0.0]))];
+        let malformed = [Value::Floats(2, Arc::new(vec![f64::NAN])), Value::Floats(3, Arc::new(vec![f64::INFINITY, 0.0])), Value::Floats(4, Arc::new(vec![f64::NEG_INFINITY, 0.0, 0.0]))];
         for value in malformed { assert_eq!(validate(&value).unwrap_err().code, "E_ARRAY_TYPE"); }
         let large = Arc::new(vec![0.25; 3 * 16_384]);
-        let packed = Value::Vec3_array(large.clone());
+        let packed = Value::Floats(3, large.clone());
         validate(&packed).unwrap();
         let original = large.clone();
         validate(&packed).unwrap();

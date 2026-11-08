@@ -1,0 +1,23 @@
+Working...
+Targeting M1: reduce per-node `Vec<String>` path allocation on the hot route in `flow_eval` — inspecting eval.rs and existing Route/sub_at interning.
+
+Implementing incremental `site` on `ExecCtx`, wired through `sub`/`sub_at` and `base_of`.
+
+Re-applying the M1 changes as one coherent patch after the partial revert.
+
+**M1 done** — commit `b2e82846` (`511813ae` holds the main eval change).
+
+### Change
+- **`ExecCtx.site: Arc<Path>`** — full site path kept incrementally; `sub()` appends one segment via `base_of`, not `prefix + base + route.to_vec()`.
+- **`sub_at` route cache** — stores `(parent, seg, route, site)` so cache hits restore both route and materialized site.
+- **`site(c)`** — `(*c.site).clone()` (e.g. `push_node` at ~628); `sync_site` on prefix/base/route resets (defs, closures, loops, inlined nodes, kernel map, walker).
+- **Borrow helpers** — `eval_at_sub` / `eval_concrete_sub` where `sub` + `eval_*` would double-borrow `a`.
+
+### Verify
+```bash
+cargo t -p flow_eval test_workspace_eval
+```
+29 passed, ~5.7s wall.
+
+### PROGRESS
+Wave **M 12/21**; M1 row updated (`d6b86ef1` sets evidence hash).

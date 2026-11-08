@@ -267,7 +267,7 @@ fn iterate_over_a_packed_array_is_one_region_and_one_counted_loop() {
     let live = input::at_time(0.);
     let want = E::Host::force_reference(&Value::Residual(r), &live, None, None, None);
     match (ts::run_simple(&core, &live), want) {
-        (Ok(Value::Float_array(a)), Ok(Value::Float_array(b))) => assert!(a.len() == width && a.iter().zip(b.iter()).all(|(x, y)| x.to_bits() == y.to_bits())),
+        (Ok(Value::Floats(1, a)), Ok(Value::Floats(1, b))) => assert!(a.len() == width && a.iter().zip(b.iter()).all(|(x, y)| x.to_bits() == y.to_bits())),
         (a, b) => panic!("iterate packed: {} <> {}", show(&a), show(&b)),
     }
 }

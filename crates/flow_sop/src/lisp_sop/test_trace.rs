@@ -66,7 +66,7 @@ fn packed_trace_matches_the_walker_and_a_direct_raycast() {
         })
         .unwrap();
     }
-    let Value::Vec4_array(values) = &reference else { panic!("vec4 array expected, got {reference:?}") };
+    let Value::Floats(4, values) = &reference else { panic!("vec4 array expected, got {reference:?}") };
     let index = surface::create(None, None, None, None, None, &quad).unwrap();
     let mut hits = 0;
     for i in 0..COUNT {

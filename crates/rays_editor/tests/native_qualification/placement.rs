@@ -96,7 +96,7 @@ fn calibration() {
         let producer_inputs = inputs(&ranged,true,0.);
         let kept = ok(producer.planes(&ok(producer.run(&producer_inputs))));
         ok(kept.settle());
-        let placeholder = match kept.resident.as_ref().unwrap() { Value::Float_array(v)=>v.clone(),_=>panic!("float resident expected") };
+        let placeholder = match kept.resident.as_ref().unwrap() { Value::Floats(1, v)=>v.clone(),_=>panic!("float resident expected") };
         let held_inputs = packed::Inputs { arrays:vec![placeholder,mixed_inputs.arrays[1].clone()],..mixed_inputs.clone() };
         let before_held = stats();
         let held_cost = cost(&mixed,Some(&held_inputs));

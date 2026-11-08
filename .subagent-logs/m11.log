@@ -1,0 +1,22 @@
+Working...
+Implementing M11: lazy error messages / buffer reuse in `flow_eval` `eval.rs` without changing diagnostics. Inspecting the code and PROGRESS.
+
+Implementing lazy `field()` form and removing success-path path building.
+
+Committing the PROGRESS update; code is already in `49ec71f3`.
+
+## M11 slice
+
+**Commits**
+- `49ec71f3` — `M11: lazy field error strings on eval walker paths`
+- `35594a29` — PROGRESS M11 row (already on `dev`)
+
+**Change** (`crates/flow_eval/src/eval.rs`)
+- `field()` takes `FnOnce() -> String` so error labels build only on failure.
+- `{:keys}` bind/record: `packed_pattern_name` once per pattern, not per field.
+- `RefBinding` walk: `walked: Vec<&str>` + in-place join on error instead of `format!` per field on the success path.
+
+**Tests**
+- `cargo t -p flow_eval test_workspace` — **58 passed**, rays-t wall **4.07s** (includes `test_workspace_eval` cases: `E_FIELD`, `E_PATTERN`, record field walks).
+
+Diagnostics unchanged; success-path path strings dropped.

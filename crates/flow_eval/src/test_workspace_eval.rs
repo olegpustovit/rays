@@ -408,7 +408,7 @@ fn named_arguments_and_residual_capture() {
     let ws = check(&value("(let* [outer 7.0 unused 99.0 mapped (map (fn [x] (+ x (+ outer t))) (array/range 2))] 0.0)"));
     let Value::Residual(residual) = static_rec(&ws).records.iter().find(|(q, _)| *q == p(&["g", "mapped"])).unwrap().1[0].1.clone() else { panic!() };
     assert_eq!(Residual::residual_view(residual).unwrap().bindings.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>(), vec!["outer"]);
-    assert_eq!(residual_eval(residual, &input::at_time(2.), None), Ok(Value::Float_array(std::sync::Arc::new(vec![9., 10.]))));
+    assert_eq!(residual_eval(residual, &input::at_time(2.), None), Ok(Value::Floats(1, std::sync::Arc::new(vec![9., 10.]))));
     let ws = check(&value("(let* [outside 7.0 unused 8.0] (let* [local (+ outside t) f (fn [x] (+ x (+ local outside))) mapped (map f (list 1.0 2.0))] 0.0))"));
     let root = &ws.graphs[0].body;
     let W::Node::Let(id) = root.node else { panic!() };
@@ -723,7 +723,7 @@ fn static_bulk_maps() {
     let ws = check("(workspace bulk\n      (graph g :context host\n        (let* [f (fn [i] (let* [twice (* i 2)] [twice (+ i 0.5) 0]))\n               large (map f (array/range 5000))\n               again (map f (array/range 4100))\n               small (map f (array/range 4096))\n               floats (map (fn [i] (* i 0.25)) (array/range 4097))]\n          {:large large :again again :small small :floats floats})))");
     let ordinary = static_rec(&ws);
     let field = |r: &Eval, name: &str| match result(r, "g") { Value::Record(fields) => fields.into_iter().find(|(n, _)| n == name).unwrap().1, _ => panic!("g is a record") };
-    let data = |v: &Value| match v { Value::Float_array(d) | Value::Vec2_array(d) | Value::Vec3_array(d) | Value::Vec4_array(d) => d.clone(), _ => panic!("packed") };
+    let data = |v: &Value| match v { Value::Floats(1..=4, d) => d.clone(), _ => panic!("packed") };
     let record_counts = |r: &Eval| r.records.iter().map(|(q, v)| (q.clone(), v.len())).collect::<Vec<_>>();
     let same_as_ordinary = |r: &Eval| {
         for name in ["large", "again", "small", "floats"] { assert_eq!(field(r, name), field(&ordinary, name), "{name}"); }
@@ -772,7 +772,7 @@ fn static_bulk_maps() {
         let f = |name: &str| match result(&o2, "g") { Value::Record(fs) => fs.into_iter().find(|(k, _)| k == name).unwrap().1, _ => panic!() };
         ["large", "again", "floats"].iter().find_map(|name| { let v = f(name); (flow_syntax::value::array_length(&v).unwrap() == n).then_some(v) }).map(|v| {
             let mut d = (*arc_data(&v)).clone(); d[7] += 1.;
-            match v { Value::Float_array(_) => Value::Float_array(Arc::new(d)), _ => Value::Vec3_array(Arc::new(d)) }
+            match v { Value::Floats(1, _) => Value::Floats(1, Arc::new(d)), _ => Value::Floats(3, Arc::new(d)) }
         })
     }));
     same_as_ordinary(&wrong);
@@ -781,7 +781,7 @@ fn static_bulk_maps() {
     let o4 = ordinary.clone();
     same_as_ordinary(&run_bulk(Arc::new(move |n| {
         let f = |name: &str| match result(&o4, "g") { Value::Record(fs) => fs.into_iter().find(|(k, _)| k == name).unwrap().1, _ => panic!() };
-        ["large", "again", "floats"].iter().find_map(|name| { let v = f(name); (flow_syntax::value::array_length(&v).unwrap() == n).then_some(v) }).map(|v| Value::Vec2_array(arc_data(&v)))
+        ["large", "again", "floats"].iter().find_map(|name| { let v = f(name); (flow_syntax::value::array_length(&v).unwrap() == n).then_some(v) }).map(|v| Value::Floats(2, arc_data(&v)))
     })));
     same_as_ordinary(&run_bulk(Arc::new(|_| Some(Value::Int(1)))));
     let _ = data;
@@ -798,7 +798,7 @@ fn static_bulk_maps() {
     assert!(matches!(result(&r, "g"), Value::Residual(_)), "a live map stays a residual");
     assert_eq!(*asked.lock().unwrap(), 0);
 }
-fn arc_data(v: &Value) -> std::sync::Arc<Vec<f64>> { match v { Value::Float_array(d) | Value::Vec2_array(d) | Value::Vec3_array(d) | Value::Vec4_array(d) => d.clone(), _ => panic!("packed") } }
+fn arc_data(v: &Value) -> std::sync::Arc<Vec<f64>> { match v { Value::Floats(1..=4, d) => d.clone(), _ => panic!("packed") } }
 
 #[test]
 fn iterate_widens_scalars_and_coerces_record_fields() {
@@ -811,7 +811,7 @@ fn iterate_widens_scalars_and_coerces_record_fields() {
     let evaluation = ok(static_with(&ws, false, Some(&inputs), None));
     let residual = result(&evaluation, "g");
     assert!(matches!(residual, Value::Residual(_)), "a record accumulator must defer when its updated data needs cooking");
-    let data = Value::Float_array(Arc::new(vec![2.0]));
+    let data = Value::Floats(1, Arc::new(vec![2.0]));
     let resolved = data.clone();
     let forced = force_with(&residual, &input::at_time(0.0), None, None, Some(Arc::new(move |_| Ok(resolved.clone())))).unwrap();
     assert_eq!(forced, Value::Record(vec![("n".into(), Value::Int(2)), ("data".into(), data)]));
@@ -823,7 +823,7 @@ fn iterate_widens_scalars_and_coerces_record_fields() {
 #[test]
 fn evaluation_is_deterministic_across_runs_and_threads() {
     let iterate = "(workspace w (graph g :context host (let* [seed (array/float 4 1.0) r (iterate 3 seed (fn [p] (map (fn [x] (* x 0.5)) p)))] r)))";
-    let expected = Value::Float_array(std::sync::Arc::new(vec![0.125; 4]));
+    let expected = Value::Floats(1, std::sync::Arc::new(vec![0.125; 4]));
     let residual = {
         let ws = check(&value("(let* [a t b (+ a a)] (+ b b))"));
         match result(&static_ws(&ws), "g") { Value::Residual(id) => id, other => panic!("live value expected, got {other:?}") }

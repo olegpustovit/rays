@@ -1,0 +1,24 @@
+Working...
+Starting Wave A2: reading PROGRESS and A2 spec, then auditing `support.rs` pub fns before removals.
+
+
+
+Removing dead enums, privatizing `labels` and `missing_group`, and dropping unused `NumericKind` helpers.
+
+Edits were lost—reapplying the dead-code removal.
+
+Bad commit reverted a prior trim—restoring the correct `support.rs` and amending.
+
+**Commit:** `7a63b07b` (`A2: drop dead sop::support enums and NumericKind choice hooks`)
+
+**Checks**
+- `cargo check -p sop -p rdk -p rdk_ops` — OK  
+- `cargo t -p sop` — 52 tests, ~19s wall (warm ~0.5s)  
+- `git pull --rebase` — skipped (0 behind `origin/dev`, 27 ahead)
+
+**Lines removed**
+- This commit: **4** (`NUMERIC_KIND` round-trip removed from `test_nodes.rs`; PROGRESS updated)  
+- Wave A2 cumulative on `crates/sop/src/support.rs`: **631** net vs OCaml root (`57487bbd..HEAD` on that file), including `5a6e7269` (−297), `da178e93` (−237 dead Lisp-era enums + `NumericKind`, privatized `labels`/`missing_group`), and earlier steps  
+- `rdk_ops::edge_transport` deleted in `e10bff22` (−62 in that file); bad `rdk` re-exports fixed in `ec5c1b1b` / `992093ce` (`uv_ops`, `point_index` restored)
+
+**A2 closed:** dead `sop::support` surface pruned, `edge_transport` gone, `rdk` façade corrected; all `pub fn` in `support.rs` still referenced.

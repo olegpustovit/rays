@@ -49,7 +49,7 @@ fn pixels(output: &s::Output, width: i64) -> Vec<u8> {
     b::read_texture(&s::texture(output).unwrap(), width * 4).unwrap()
 }
 fn expected(program: &ex::Program, width: i64, height: i64, time: f64) -> Vec<u8> {
-    let values = match tp::ok(ex::force(program, &Default::default(), &input::at_time(time))) { Value::Vec4_array(v) => v, _ => panic!("vec4 pixels") };
+    let values = match tp::ok(ex::force(program, &Default::default(), &input::at_time(time))) { Value::Floats(4, v) => v, _ => panic!("vec4 pixels") };
     let context = sop::context::create(Default::default()).unwrap();
     let image = tp::ok(sop::image::of_vec4(&context, width, height, &values));
     sop::image::rgba8(&image).unwrap().to_vec()

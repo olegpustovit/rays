@@ -91,7 +91,7 @@ pub mod Gpu {
     /// `planes` from a `readback`, deinterleaving its array.
     pub fn planes_of(readback: &dyn Fn(&Value) -> Result<super::Value, Diagnostic>, value: &Value) -> Result<Planes, Diagnostic> {
         match readback(value)? {
-            super::Value::Float_array(data) | super::Value::Vec2_array(data) | super::Value::Vec3_array(data) | super::Value::Vec4_array(data) => {
+            super::Value::Floats(1..=4, data) => {
                 let width = value.width;
                 let count = data.len() as i64 / width.max(1);
                 let planes: Vec<Vec<f64>> = (0..width)
@@ -585,10 +585,7 @@ pub const STATIC_VERIFICATION_FAILED: &str = "E_STATIC_VERIFICATION_FAILED";
 fn same_bits(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Int_array(a), Value::Int_array(b)) => a == b,
-        (Value::Float_array(a), Value::Float_array(b))
-        | (Value::Vec2_array(a), Value::Vec2_array(b))
-        | (Value::Vec3_array(a), Value::Vec3_array(b))
-        | (Value::Vec4_array(a), Value::Vec4_array(b)) => a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x.to_bits() == y.to_bits()),
+        (Value::Floats(aw @ 1..=4, a), Value::Floats(bw, b)) if aw == bw => a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x.to_bits() == y.to_bits()),
         _ => false,
     }
 }
@@ -924,7 +921,7 @@ impl Qualifier {
                                     Some(path.clone()),
                                     &flow_syntax::ty::FnSignature { params: vec![Ty::Vec2], result: Ty::Vec4 },
                                     function,
-                                    &[Value::Vec2_array(Arc::new(vec![0.5, 0.5]))],
+                                    &[Value::Floats(2, Arc::new(vec![0.5, 0.5]))],
                                 ),
                                 _ => Err(v::fail("E_KERNEL_FORM", "Image map needs a pixel function.")),
                             });
@@ -2299,7 +2296,7 @@ pub mod Executor {
             // the device carries integers as floats: an Int map comes back as the Int array it is
             let value = kernel.readback(&output)?;
             Ok(Some(match (value, packed_region.term.ty()) {
-                (Value::Float_array(xs), Ty::Array(inner)) if **inner == Ty::Int => Value::Int_array(Arc::new(xs.iter().map(|x| *x as i64).collect())),
+                (Value::Floats(1, xs), Ty::Array(inner)) if **inner == Ty::Int => Value::Int_array(Arc::new(xs.iter().map(|x| *x as i64).collect())),
                 (value, _) => value,
             }))
         }
@@ -2344,10 +2341,7 @@ pub mod Executor {
                 ) {
                     Ok(Some(Displayed::Cpu(value))) => {
                         let (data, width) = match &value {
-                            Value::Float_array(d) => (Some(d.clone()), 1),
-                            Value::Vec2_array(d) => (Some(d.clone()), 2),
-                            Value::Vec3_array(d) => (Some(d.clone()), 3),
-                            Value::Vec4_array(d) => (Some(d.clone()), 4),
+                            Value::Floats(width @ 1..=4, d) => (Some(d.clone()), *width),
                             _ => (None, 0),
                         };
                         let planes = outputs.lock().unwrap()[0].len();
@@ -2511,7 +2505,7 @@ pub mod Executor {
                             if !h.1.iter().any(|old| old == v0) {
                                 h.0 = true;
                                 h.1.push(v0.clone());
-                                let width = match v0 { Value::Vec2_array(_) => 2, Value::Vec3_array(_) => 3, Value::Vec4_array(_) => 4, _ => 1 };
+                                let width = match v0 { Value::Floats(width, _) => *width as i64, _ => 1 };
                                 h.2 += Cost::readback(Some(&gpu), *count, width);
                             }
                         }
@@ -2711,7 +2705,7 @@ mod tests {
             let count = v::array_length(value).unwrap() + 3;
             let placeholder = match value {
                 Value::Int_array(_) => Value::Int_array(Arc::new(vec![-999; count])),
-                Value::Vec3_array(_) => Value::Vec3_array(Arc::new(vec![-999.0; count * 3])),
+                Value::Floats(3, _) => Value::Floats(3, Arc::new(vec![-999.0; count * 3])),
                 _ => panic!("unexpected device value"),
             };
             self.held.lock().unwrap().push((placeholder.clone(), value.clone()));
@@ -2913,10 +2907,7 @@ mod tests {
             (Value::Vec3(a, b, c), Value::Vec3(x, y, z)) => a.to_bits() == x.to_bits() && b.to_bits() == y.to_bits() && c.to_bits() == z.to_bits(),
             (Value::Vec4(a, b, c, d), Value::Vec4(x, y, z, w)) => a.to_bits() == x.to_bits() && b.to_bits() == y.to_bits() && c.to_bits() == z.to_bits() && d.to_bits() == w.to_bits(),
             (Value::List(xs), Value::List(ys)) => xs.len() == ys.len() && xs.iter().zip(ys.iter()).all(|(a, b)| same_bits(a, b)),
-            (Value::Float_array(xs), Value::Float_array(ys))
-            | (Value::Vec2_array(xs), Value::Vec2_array(ys))
-            | (Value::Vec3_array(xs), Value::Vec3_array(ys))
-            | (Value::Vec4_array(xs), Value::Vec4_array(ys)) => xs.len() == ys.len() && xs.iter().zip(ys.iter()).all(|(a, b)| a.to_bits() == b.to_bits()),
+            (Value::Floats(aw @ 1..=4, xs), Value::Floats(bw, ys)) if aw == bw => xs.len() == ys.len() && xs.iter().zip(ys.iter()).all(|(a, b)| a.to_bits() == b.to_bits()),
             (a @ (Value::Record(_) | Value::Struct(_)), b @ (Value::Record(_) | Value::Struct(_))) if std::mem::discriminant(a) == std::mem::discriminant(b) => {
                 let (fs, gs) = (a.geo_fields().unwrap(), b.geo_fields().unwrap());
                 fs.len() == gs.len() && fs.iter().zip(gs.iter()).all(|((n, a), (m, b))| n == m && same_bits(a, b))
@@ -3312,9 +3303,9 @@ mod tests {
             let gpu = Gpu::Config { backend: Some(Arc::new(backend)), fast: true, policy: Gpu::Policy::Measured, readback_per_float, ..Gpu::default() };
             let result = Profile::sample(&profile, &mut || ok(qualify_workspace(&QualifyOptions { record: true, gpu: Some(gpu.clone()), ..Default::default() }, &ws)));
             let expected_value = if width == 1 {
-                Value::Float_array(Arc::new((0..4097).map(|i| i as f64 + 0.25).collect()))
+                Value::Floats(1, Arc::new((0..4097).map(|i| i as f64 + 0.25).collect()))
             } else {
-                Value::Vec4_array(Arc::new((0..4097 * 4).map(|i| match i % 4 { 0 => (i / 4) as f64, 1 => 0.25, 2 => 0.5, _ => 1.0 }).collect()))
+                Value::Floats(4, Arc::new((0..4097 * 4).map(|i| match i % 4 { 0 => (i / 4) as f64, 1 => 0.25, 2 => 0.5, _ => 1.0 }).collect()))
             };
             let g = result.1.results.iter().find(|(n, _)| n == "g").unwrap().1.clone();
             assert_eq!(g, expected_value);
@@ -3511,7 +3502,7 @@ mod tests {
                     let result = forced(&program, &live).map_err(|d| rays_diagnostic::to_string(&d))?;
                     ensure(same_bits(&result, &reference), "noise matches the reference")?;
                     match &result {
-                        Value::Float_array(xs) => {
+                        Value::Floats(1, xs) => {
                             let expected = rays_math::noise::sample3(&rays_math::noise::create(0), 0.3 + time, 0.7, -0.2);
                             ensure(xs.len() == 2051 && xs.iter().all(|x| x.to_bits() == expected.to_bits()), "samples equal")
                         }
@@ -3533,7 +3524,7 @@ mod tests {
         assert!(Executor::packed_region(&program).is_none());
         assert!(same(&forced(&program, &live), &e::Host::force_reference(&v, &live, None, None, None)));
         match ok(forced(&program, &live)) {
-            Value::Float_array(xs) => assert!(xs.iter().all(|x| *x == 0.125)),
+            Value::Floats(1, xs) => assert!(xs.iter().all(|x| *x == 0.125)),
             other => panic!("{other:?}"),
         }
     }
@@ -3594,7 +3585,7 @@ mod tests {
         assert!(same_bits(&one, &reference));
         assert!(same_bits(&one, &eight));
         match one {
-            Value::Float_array(xs) => {
+            Value::Floats(1, xs) => {
                 assert_eq!(xs.len(), 8192);
                 for (i, x) in xs.iter().enumerate() {
                     assert_eq!(x.to_bits(), ((i as f64 * 0.25) + 1.25).sin().to_bits());

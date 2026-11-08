@@ -126,16 +126,16 @@ pub fn placeholder(ty: &Ty) -> Value {
         Ty::Vec3 => Value::Vec3(s, s + 0.25, s + 0.75),
         Ty::Float => Value::Float(s),
         Ty::Int => Value::Int(1_000_000 * k + 7),
-        Ty::Array(inner) if **inner == Ty::Vec4 => Value::Vec4_array(Arc::new(vec![0.; 4])),
-        Ty::Array(inner) if **inner == Ty::Vec3 => Value::Vec3_array(Arc::new(vec![0.; 3])),
+        Ty::Array(inner) if **inner == Ty::Vec4 => Value::Floats(4, Arc::new(vec![0.; 4])),
+        Ty::Array(inner) if **inner == Ty::Vec3 => Value::Floats(3, Arc::new(vec![0.; 3])),
         Ty::Array(inner) if **inner == Ty::Int => Value::Int_array(Arc::new(vec![0])),
-        _ => Value::Float_array(Arc::new(vec![0.])),
+        _ => Value::Floats(1, Arc::new(vec![0.])),
     }
 }
 
 fn same_placeholder(a: &Value, b: &Value) -> bool {
     match (a, b) {
-        (Value::Float_array(x), Value::Float_array(y)) | (Value::Vec3_array(x), Value::Vec3_array(y)) | (Value::Vec4_array(x), Value::Vec4_array(y)) => Arc::ptr_eq(x, y),
+        (Value::Floats(1, x), Value::Floats(1, y)) | (Value::Floats(3, x), Value::Floats(3, y)) | (Value::Floats(4, x), Value::Floats(4, y)) => Arc::ptr_eq(x, y),
         (Value::Int_array(x), Value::Int_array(y)) => Arc::ptr_eq(x, y),
         _ => a == b,
     }
@@ -576,7 +576,7 @@ pub struct Gather {
 }
 
 pub fn gather_kernel(lease: &renderer::renderer::Gpu, pipes: &pipelines::T) -> Result<Gather, String> {
-    let src = Value::Vec3_array(Arc::new(vec![0.; 3]));
+    let src = Value::Floats(3, Arc::new(vec![0.; 3]));
     let text = "(workspace pt (graph g :context value (let* [src (pt/src) gather (fn [(v : int)] (array/nth src v))] 0.0)))";
     let src_op = {
         let mut o = placeholder_op("src", array_of(Ty::Vec3));

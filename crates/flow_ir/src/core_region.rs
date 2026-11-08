@@ -302,7 +302,7 @@ pub fn count_of(residual: ResidualId, s: &Term) -> Option<i64> {
                 value = field_step(value, s.name(*name)).ok()?;
             }
             match value {
-                v @ (Value::Int_array(_) | Value::Text_array(_) | Value::Float_array(_) | Value::Vec2_array(_) | Value::Vec3_array(_) | Value::Vec4_array(_)) => V::array_length(&v).ok().map(|n| n as i64),
+                v @ (Value::Int_array(_) | Value::Text_array(_) | Value::Floats(1..=4, _)) => V::array_length(&v).ok().map(|n| n as i64),
                 _ => None,
             }
         }
@@ -590,7 +590,7 @@ impl Lower {
 
     fn literal(&mut self, at: &Term, v: &Value) -> Res<Expression> {
         match v {
-            Value::Int_array(_) | Value::Text_array(_) | Value::Float_array(_) | Value::Vec2_array(_) | Value::Vec3_array(_) | Value::Vec4_array(_) => {
+            Value::Int_array(_) | Value::Text_array(_) | Value::Floats(1..=4, _) => {
                 self.table(at, (String::new(), Vec::new()), v)
             }
             Value::Record(fs) => {

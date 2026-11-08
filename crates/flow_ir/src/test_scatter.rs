@@ -15,7 +15,7 @@ fn ints(v: &[i64]) -> Value {
     Value::Int_array(Arc::new(v.to_vec()))
 }
 fn floats(v: &[f64]) -> Value {
-    Value::Float_array(Arc::new(v.to_vec()))
+    Value::Floats(1, Arc::new(v.to_vec()))
 }
 fn scatter(indices: Value, values: Value, size: Value) -> Result<Value, Diagnostic> {
     call_op("array/scatter_add", vec![("indices", indices), ("values", values), ("size", size)])
@@ -42,15 +42,15 @@ fn reference(width: usize, indices: &[i64], values: &[f64], size: usize) -> Vec<
 fn wrap(width: usize, a: Vec<f64>) -> Value {
     let a = Arc::new(a);
     match width {
-        1 => Value::Float_array(a),
-        2 => Value::Vec2_array(a),
-        3 => Value::Vec3_array(a),
-        _ => Value::Vec4_array(a),
+        1 => Value::Floats(1, a),
+        2 => Value::Floats(2, a),
+        3 => Value::Floats(3, a),
+        _ => Value::Floats(4, a),
     }
 }
 fn flat(v: &Value) -> &Arc<Vec<f64>> {
     match v {
-        Value::Float_array(a) | Value::Vec2_array(a) | Value::Vec3_array(a) | Value::Vec4_array(a) => a,
+        Value::Floats(1..=4, a) => a,
         _ => panic!("expected a float array"),
     }
 }
@@ -105,11 +105,11 @@ fn malformed_inputs() {
     for size in [-1, MAX_WOSIZE as i64 + 1, MAX_INT] {
         reject("E_ARRAY_RANGE", scatter(ints(&[]), ints(&[]), Value::Int(size)));
     }
-    reject("E_ARRAY_RANGE", scatter(ints(&[]), Value::Vec4_array(Arc::new(vec![])), Value::Int(MAX_WOSIZE as i64 / 4 + 1)));
+    reject("E_ARRAY_RANGE", scatter(ints(&[]), Value::Floats(4, Arc::new(vec![])), Value::Int(MAX_WOSIZE as i64 / 4 + 1)));
     reject("E_ARRAY_COUNT", scatter(ints(&[0]), ints(&[]), Value::Int(1)));
     reject("E_ARRAY_TYPE", scatter(floats(&[0.]), floats(&[1.]), Value::Int(1)));
     reject("E_ARRAY_TYPE", scatter(ints(&[]), Value::Text_array(Arc::new(Vec::<Vec<u8>>::new().into())), Value::Int(1)));
-    reject("E_ARRAY_TYPE", scatter(ints(&[0]), Value::Vec3_array(Arc::new(vec![1., 2.])), Value::Int(1)));
+    reject("E_ARRAY_TYPE", scatter(ints(&[0]), Value::Floats(3, Arc::new(vec![1., 2.])), Value::Int(1)));
     reject("E_ARRAY_TYPE", scatter(ints(&[]), ints(&[]), Value::Float(1.)));
     // Error order is source-row, then component. A later invalid index cannot replace an earlier
     // overflowing sum; an earlier index wins the reverse.

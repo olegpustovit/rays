@@ -1,0 +1,11 @@
+Rays /Users/snowbear/WORK/GIT/rays dev. AGENTS.md ponytail. Wave B1.
+
+flow_check codegen outlier per plan: static op table, scope stack, trim term_arena Debug/PartialEq if safe.
+
+Read docs/history/port-simplification/index.html B1 row + flow_check/src/op.rs workspace.rs term_arena.rs.
+
+If cargo-llvm-lines missing, use grep + file size heuristic; still implement smallest high-impact slice (one item only).
+
+cargo check -p flow_check -p flow_ir; cargo t -p flow_check with narrow filter. Commit "B1:". Update PROGRESS.md B1 only. No artifact.
+
+Return: what changed, commit hash, check/test output.

@@ -1400,7 +1400,7 @@ mod parity {
         e::Host::force_reference(mapped, live, None, None, None)
     }
     fn same(expected: &[f64], actual: &Value) {
-        let Value::Float_array(actual) = actual else { panic!("float array expected") };
+        let Value::Floats(1, actual) = actual else { panic!("float array expected") };
         assert_eq!(actual.len(), expected.len());
         for (i, (x, y)) in expected.iter().zip(actual.iter()).enumerate() {
             assert_eq!(x.to_bits(), y.to_bits(), "differs at index {i}: {x:?} <> {y:?}");
@@ -1485,7 +1485,7 @@ mod parity {
         let live = input::at_time(0.0);
         let expected: Vec<f64> = (0..count * 3).map(|i| native(42 + (i % 3) as i64, (i / 3) as i64)).collect();
         domains(&|| match force(&program, &live).unwrap() {
-            Value::Vec3_array(actual) => same(&expected, &Value::Float_array(actual)),
+            Value::Floats(3, actual) => same(&expected, &Value::Floats(1, actual)),
             other => panic!("vec3 array expected, got {other:?}"),
         });
     }
@@ -1511,7 +1511,7 @@ mod parity {
         (0..count).map(|i| if i < special.len() { special[i] } else { (i as f64 * 0.137 - 256.2, (i as f64 * 0.37).sin(), (i % 19) as f64 * -0.31) }).collect()
     }
     fn vec3_input(points: &[(f64, f64, f64)]) -> Value {
-        Value::Vec3_array(Arc::new(points.iter().flat_map(|(x, y, z)| [*x, *y, *z]).collect()))
+        Value::Floats(3, Arc::new(points.iter().flat_map(|(x, y, z)| [*x, *y, *z]).collect()))
     }
 
     fn noise3_strict_packed_matches_the_reference(seed:i64,octaves:i64,lacunarity:f64,gain:f64,special_only:bool) {
@@ -1524,7 +1524,7 @@ mod parity {
                 &format!("(noise3 (+ i [t 0.0 0.0]) :seed {seed} :octaves {octaves} :lacunarity {lacunarity:?} :gain {gain:?})"),
             );
             let live = input::at_time(0.0);
-            let Value::Float_array(expected) = reference(&mapped, &live).unwrap() else { panic!("floats expected") };
+            let Value::Floats(1, expected) = reference(&mapped, &live).unwrap() else { panic!("floats expected") };
             domains(&|| same(&expected, &force(&program, &live).unwrap()));
             // the native noise, within 4 ULP of the Lisp-evaluated value
             let noise = rays_math::noise::create(seed);
@@ -1607,7 +1607,7 @@ mod parity {
         let (mapped, program) = map(None, Ty::Vec3, input.clone(), "(noise3 i :seed 7 :octaves 5 :lacunarity (+ 1.7 t) :gain (- 0.62 t))");
         for time in [0.0, 0.25] {
             let live = input::at_time(time);
-            let Value::Float_array(expected) = reference(&mapped, &live).unwrap() else { panic!("floats expected") };
+            let Value::Floats(1, expected) = reference(&mapped, &live).unwrap() else { panic!("floats expected") };
             same(&expected, &force(&program, &live).unwrap());
         }
         let live = input::at_time(0.75);
@@ -1617,7 +1617,7 @@ mod parity {
         let (mapped, program) = map(None, Ty::Vec3, input, "(noise3 i :seed 7 :octaves (int (+ 1.0 (* t 8.0))) :lacunarity 1.9)");
         for time in [0.0, 0.25, 3.875] {
             let live = input::at_time(time);
-            let Value::Float_array(expected) = reference(&mapped, &live).unwrap() else { panic!("floats expected") };
+            let Value::Floats(1, expected) = reference(&mapped, &live).unwrap() else { panic!("floats expected") };
             same(&expected, &force(&program, &live).unwrap());
         }
         let live = input::at_time(8.0);
@@ -1646,7 +1646,7 @@ mod parity {
     }
     fn bytes(value: &Value) -> Vec<u64> {
         match value {
-            Value::Float_array(xs) | Value::Vec3_array(xs) | Value::Vec4_array(xs) => xs.iter().map(|x| x.to_bits()).collect(),
+            Value::Floats(1, xs) | Value::Floats(3, xs) | Value::Floats(4, xs) => xs.iter().map(|x| x.to_bits()).collect(),
             other => panic!("float arrays expected, got {other:?}"),
         }
     }
@@ -1654,9 +1654,9 @@ mod parity {
     fn packed_math_case(body: &str, input_ty: Ty, output_ty: Ty, time: f64) {
         let count = 32769;
         let input = if input_ty == Ty::Float {
-            Value::Float_array(Arc::new((0..count).map(|i| if i == 0 { -0.0 } else { (i as f64 * 0.31).sin() * 0.8 }).collect()))
+            Value::Floats(1, Arc::new((0..count).map(|i| if i == 0 { -0.0 } else { (i as f64 * 0.31).sin() * 0.8 }).collect()))
         } else {
-            Value::Vec3_array(Arc::new((0..count * 3).map(|i| if i < 3 { -0.0 } else { (i as f64 * 0.73).sin() * 2f64.powi((i % 40) as i32 - 20) }).collect()))
+            Value::Floats(3, Arc::new((0..count * 3).map(|i| if i < 3 { -0.0 } else { (i as f64 * 0.73).sin() * 2f64.powi((i % 40) as i32 - 20) }).collect()))
         };
         let (mapped, program) = math_compile(input_ty, output_ty, input, body);
         let live = input::at_time(time);
@@ -1695,12 +1695,12 @@ mod parity {
 
     #[test]
     fn packed_hypot_extremes_and_invalid_domains_refuse() {
-        let (mapped, program) = math_compile(Ty::Float, Ty::Float, Value::Float_array(Arc::new(vec![1e308, 1e-300, f64::from_bits(1), -0.0])), "(hypot x (+ x t))");
+        let (mapped, program) = math_compile(Ty::Float, Ty::Float, Value::Floats(1, Arc::new(vec![1e308, 1e-300, f64::from_bits(1), -0.0])), "(hypot x (+ x t))");
         let live = input::at_time(0.0);
         let expected = bytes(&reference(&mapped, &live).unwrap());
         domains(&|| assert_eq!(bytes(&force(&program, &live).unwrap()), expected));
         for body in ["(asin (+ x t))", "(acos (+ x t))", "(log (+ x t))", "(exp (+ (* x 1000.0) t))"] {
-            let (mapped, program) = math_compile(Ty::Float, Ty::Float, Value::Float_array(Arc::new(vec![2.0, -2.0])), body);
+            let (mapped, program) = math_compile(Ty::Float, Ty::Float, Value::Floats(1, Arc::new(vec![2.0, -2.0])), body);
             for result in [reference(&mapped, &live), force(&program, &live)] {
                 assert_eq!(result.err().unwrap_or_else(|| panic!("{body}: expected nonfinite error")).code, "E_NONFINITE", "{body}");
             }
@@ -1719,7 +1719,7 @@ mod parity {
             (limit * 0.5, limit * 0.25, 0.0, -limit * 0.25),
             (limit, limit, -limit, limit),
         ];
-        let input = Value::Vec4_array(Arc::new(
+        let input = Value::Floats(4, Arc::new(
             (0..32769 * 4)
                 .map(|index| {
                     let (x, y, z, w) = cases[index / 4 % cases.len()];
@@ -1759,7 +1759,7 @@ mod parity {
             _=>panic!("numeric uniform expected")
         };
         let arrays=inputs.arrays.iter().map(|a|match a{
-            Value::Float_array(xs)|Value::Vec3_array(xs)|Value::Vec4_array(xs)=>format!("Float64Array.from([{}])",xs.iter().map(|x|flow_syntax::lisp::float(*x)).collect::<Vec<_>>().join(",")),
+            Value::Floats(1, xs)|Value::Floats(3, xs)|Value::Floats(4, xs)=>format!("Float64Array.from([{}])",xs.iter().map(|x|flow_syntax::lisp::float(*x)).collect::<Vec<_>>().join(",")),
             Value::Int_array(xs)=>format!("BigInt64Array.from([{}])",xs.iter().map(|x|format!("{x}n")).collect::<Vec<_>>().join(",")),
             _=>panic!("numeric input array expected")
         }).collect::<Vec<_>>().join(",");
@@ -1776,7 +1776,7 @@ mod parity {
         let cases:[[f64;3];4]=[[0.,0.,0.],[-0.,0.,-0.],[0.3,-0.7,1.2],[1e-150,-2e-150,3e-150]];
         let input=(0..5001*3).map(|i|cases[i/3%4][i%3]).collect::<Vec<_>>();
         let expected=(0..5001*3).map(|i|{let[x,y,z]=cases[i/3%4];[(-z).mul_add(y,y*z),(-x).mul_add(z,z*x),(-y).mul_add(x,x*y)][i%3]}).collect();
-        fma_proof(Ty::Vec3,Ty::Vec3,Value::Vec3_array(Arc::new(input)),body,expected);
+        fma_proof(Ty::Vec3,Ty::Vec3,Value::Floats(3, Arc::new(input)),body,expected);
     }
     #[test]fn cross_intrinsic_native_fma_all_tiers_js(){cross_fma("(cross x x)")}
     #[test]fn cross_helper_native_fma_all_tiers_js(){cross_fma("(vec3_cross x x)")}
@@ -1785,10 +1785,10 @@ mod parity {
         let right=[[2.,3.,-1.,4.],[5.,-2.,6.,-3.],[1.,4.,3.,2.],[0.2,-0.1,0.4,2.]];
         let input=(0..5001*4).map(|i|rows[i/4%3][i%4]).collect::<Vec<_>>();
         let expected=(0..5001*4).map(|i|{let mut out=0.;for k in 0..4{out=rows[i/4%3][k].mul_add(right[k][i%4],out);}out}).collect();
-        fma_proof(Ty::Vec4,Ty::Vec4,Value::Vec4_array(Arc::new(input)),"(get (mat4_mul {:r0 x :r1 [0.0 0.0 0.0 0.0] :r2 [0.0 0.0 0.0 0.0] :r3 [0.0 0.0 0.0 0.0]} {:r0 [2.0 3.0 -1.0 4.0] :r1 [5.0 -2.0 6.0 -3.0] :r2 [1.0 4.0 3.0 2.0] :r3 [0.2 -0.1 0.4 2.0]}) :r0)",expected);
+        fma_proof(Ty::Vec4,Ty::Vec4,Value::Floats(4, Arc::new(input)),"(get (mat4_mul {:r0 x :r1 [0.0 0.0 0.0 0.0] :r2 [0.0 0.0 0.0 0.0] :r3 [0.0 0.0 0.0 0.0]} {:r0 [2.0 3.0 -1.0 4.0] :r1 [5.0 -2.0 6.0 -3.0] :r2 [1.0 4.0 3.0 2.0] :r3 [0.2 -0.1 0.4 2.0]}) :r0)",expected);
     }
     #[test]fn cross_overflow_refuses_both_execution_tiers(){
-        let(value,program)=math_compile(Ty::Vec3,Ty::Vec3,Value::Vec3_array(Arc::new(vec![0.,f64::MAX,0.])),"(cross x [0.0 0.0 2.0])");
+        let(value,program)=math_compile(Ty::Vec3,Ty::Vec3,Value::Floats(3, Arc::new(vec![0.,f64::MAX,0.])),"(cross x [0.0 0.0 2.0])");
         let live=input::at_time(0.0);for result in [reference(&value,&live),force(&program,&live)]{assert_eq!(result.unwrap_err().code,"E_NONFINITE");}
     }
 }

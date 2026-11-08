@@ -241,10 +241,7 @@ fn describe_value(v: &Value) -> String {
         }
         Value::Int_array(xs) => format!("{} × int", xs.len()),
         Value::Text_array(xs) => format!("{} × text", xs.len()),
-        Value::Float_array(xs) => format!("{} × float", xs.len()),
-        Value::Vec2_array(xs) => format!("{} × vec2", xs.len() / 2),
-        Value::Vec3_array(xs) => format!("{} × vec3", xs.len() / 3),
-        Value::Vec4_array(xs) => format!("{} × vec4", xs.len() / 4),
+        Value::Floats(_, _) => String::from_utf8(flow_syntax::value::show_with(&Clone::clone, v)).expect("array description is UTF-8"),
         Value::Record(fs) => format!("{{{}}}", fs.iter().map(|(f, v)| format!("{} {}", f, describe_value(v))).collect::<Vec<_>>().join(" · ")),
         Value::Deferred(t, _) => ty::to_string(t),
         Value::No_geo => "nil".to_owned(),

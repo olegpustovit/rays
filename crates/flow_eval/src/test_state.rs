@@ -53,11 +53,11 @@ fn compiled_state_keeps_device_arrays_until_an_interpreter_reads_them() {
     path.extend(arena.path(arena.state(id).zone).iter().map(|id| view.term.name(*id).to_owned()));
     let state = create_state();
     let reads = Arc::new(AtomicI64::new(0));
-    let data = Value::Float_array(Arc::new(vec![0.]));
+    let data = Value::Floats(1, Arc::new(vec![0.]));
     let count = reads.clone();
     Device::add(&data, Arc::new(move || {
         count.fetch_add(1, O::SeqCst);
-        Value::Float_array(Arc::new(vec![2., 3., 4.]))
+        Value::Floats(1, Arc::new(vec![2., 3., 4.]))
     })).unwrap();
     let live = at(0., 0, 0);
     Residual::bind_live(root, &live, Some(&state)).unwrap();
@@ -67,7 +67,7 @@ fn compiled_state_keeps_device_arrays_until_an_interpreter_reads_them() {
     assert!(Device::held_by_device(&stored));
     assert!(Device::held_by_device(&Residual::state_peek(root, view.instance, path.clone(), view.iter.clone(), false).unwrap()));
     assert_eq!(reads.load(O::SeqCst), 0);
-    assert_eq!(Host::force_reference(&Value::Residual(root), &live, Some(&state), None, None).unwrap(), Value::Float_array(Arc::new(vec![2., 3., 4.])));
+    assert_eq!(Host::force_reference(&Value::Residual(root), &live, Some(&state), None, None).unwrap(), Value::Floats(1, Arc::new(vec![2., 3., 4.])));
     assert!(reads.load(O::SeqCst) > 0);
 }
 
@@ -181,7 +181,7 @@ fn exact_images_cannot_be_state() {
     assert_eq!(value_of(&run(&checked("(state [s (exact 1.0)] (+ s 1))"), false, None, None, None, 0.)), Value::Float(2.));
     let array_state = create_state();
     assert_eq!(value_of(&run(&checked("(array/sum (state [s (exact (array/range 3))] s))"), false, None, Some(&array_state), None, 0.)), Value::Float(3.));
-    assert!(Host::state_values(&array_state).contains(&Value::Float_array(Arc::new(vec![0., 1., 2.]))));
+    assert!(Host::state_values(&array_state).contains(&Value::Floats(1, Arc::new(vec![0., 1., 2.]))));
     // An opaque extension can conceal resources from static types. Check the seed before the step
     // reads it, and the step before it reaches next.
     for wrap in 0..4 {

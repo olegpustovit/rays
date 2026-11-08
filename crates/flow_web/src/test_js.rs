@@ -14,7 +14,7 @@ fn numbers(values: &[f64]) -> String { values.iter().map(|v| param::float_text(*
 
 fn flatten(v: &Value) -> Vec<f64> {
     match v {
-        Value::Float_array(a) | Value::Vec2_array(a) | Value::Vec3_array(a) | Value::Vec4_array(a) => (**a).clone(),
+        Value::Floats(1..=4, a) => (**a).clone(),
         Value::Float(x) => vec![*x],
         Value::Vec2(x, y) => vec![*x, *y],
         Value::Vec3(x, y, z) => vec![*x, *y, *z],

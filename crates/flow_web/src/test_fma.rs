@@ -29,7 +29,7 @@ fn host_value(body: &str, data: Vec<f64>) -> Value {
         (Some(ws), ds) if ds.is_empty() => ws,
         (_, ds) => panic!("{}", ds.iter().map(rays_diagnostic::to_string).collect::<Vec<_>>().join(";")),
     };
-    let inputs = vec![("g".to_owned(), vec![("data".to_owned(), Value::Vec3_array(Arc::new(data)))])];
+    let inputs = vec![("g".to_owned(), vec![("data".to_owned(), Value::Floats(3, Arc::new(data)))])];
     let evaluation = ((E::static_with(&ws, false, Some(&inputs), None))).unwrap_or_else(|d| die(d));
     evaluation.results.iter().find(|(n, _)| n == "g").expect("g").1.clone()
 }
@@ -250,7 +250,7 @@ fn checked_arithmetic_regions_match_exact_binary64() {
     )
     .expect("guarded region");
     match ((packed::force(&guarded, &live(), &packed::ForceOptions { strict: true, ..Default::default() }))).unwrap_or_else(|d| die(d)) {
-        Value::Float_array(values) => assert!(values.iter().all(|v| *v == 0.0)),
+        Value::Floats(1, values) => assert!(values.iter().all(|v| *v == 0.0)),
         other => panic!("unexpected {other:?}"),
     }
     script.push_str("{\n");

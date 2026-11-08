@@ -152,7 +152,7 @@ fn shortest_paths(args: &[(String, Value)]) -> Result<(Vec<f64>, Vec<i64>, Vec<i
     let PointGraph { points, edges, point_edge_offsets, point_edges, edge_a, edge_b } =
         point_graph(args.named("adjacency"))?;
     let lengths = match args.named("lengths") {
-        Some(Value::Float_array(lengths)) if lengths.len() == edges => lengths.clone(),
+        Some(Value::Floats(1, lengths)) if lengths.len() == edges => lengths.clone(),
         _ => return Err(refuse("E_GRAPH_LENGTH", "Graph lengths is a float array with one entry per edge.")),
     };
     if lengths.iter().any(|length| !(*length >= 0.0)) {
@@ -354,7 +354,7 @@ pub fn resolve(value: &Value) -> Result<Value, Diagnostic> {
         "graph/shortest_paths" => {
             let (distance, parent, path, order) = shortest_paths(args)?;
             match component.as_str() {
-                "distance" => Ok(Value::Float_array(Arc::new(distance))),
+                "distance" => Ok(Value::Floats(1, Arc::new(distance))),
                 "parent" => Ok(ints(parent)),
                 "path" => Ok(ints(path)),
                 "order" => Ok(ints(order)),
@@ -417,12 +417,12 @@ mod tests {
     fn shortest_paths_on_a_path_graph() {
         let args = vec![
             ("adjacency".to_owned(), path_adjacency()),
-            ("lengths".to_owned(), Value::Float_array(Arc::new(vec![1.0, 2.0]))),
+            ("lengths".to_owned(), Value::Floats(1, Arc::new(vec![1.0, 2.0]))),
             ("roots".to_owned(), Value::Int_array(Arc::new(vec![0]))),
             ("target".to_owned(), Value::Int(2)),
         ];
         let distance = resolve(&source("graph/shortest_paths", "distance", args.clone())).expect("distance");
-        assert_eq!(distance, Value::Float_array(Arc::new(vec![0.0, 1.0, 3.0])));
+        assert_eq!(distance, Value::Floats(1, Arc::new(vec![0.0, 1.0, 3.0])));
         let path = resolve(&source("graph/shortest_paths", "path", args.clone())).expect("path");
         assert_eq!(path, Value::Int_array(Arc::new(vec![0, 1, 2])));
         let mut hopped = args.clone();

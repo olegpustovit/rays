@@ -642,7 +642,7 @@ pub(crate) struct Scope {
 
 fn raw(v: &Value) -> Option<usize> {
     match v {
-        Value::Float_array(a) | Value::Vec2_array(a) | Value::Vec3_array(a) | Value::Vec4_array(a) => Some(Arc::as_ptr(a) as usize),
+        Value::Floats(1..=4, a) => Some(Arc::as_ptr(a) as usize),
         Value::Int_array(a) => Some(Arc::as_ptr(a) as usize),
         _ => None,
     }
@@ -650,16 +650,14 @@ fn raw(v: &Value) -> Option<usize> {
 
 fn kind_of(v: &Value) -> i64 {
     match v {
-        Value::Float_array(_) => 1,
-        Value::Vec2_array(_) => 2,
-        Value::Vec3_array(_) => 3,
+        Value::Floats(width @ 1..=4, _) => *width as i64,
         _ => 4,
     }
 }
 
 fn float_array(v: &Value) -> Option<&Arc<Vec<f64>>> {
     match v {
-        Value::Float_array(a) | Value::Vec2_array(a) | Value::Vec3_array(a) | Value::Vec4_array(a) => Some(a),
+        Value::Floats(1..=4, a) => Some(a),
         _ => None,
     }
 }
@@ -751,7 +749,7 @@ impl Scope {
 
     fn find(&self, v: &Value) -> Option<Rc<Placeholder>> {
         match v {
-            Value::Float_array(a) | Value::Vec2_array(a) | Value::Vec3_array(a) | Value::Vec4_array(a) => {
+            Value::Floats(1..=4, a) => {
                 self.lookup(Arc::as_ptr(a) as usize).or_else(|| self.durable(v))
             }
             Value::Int_array(a) => self.lookup(Arc::as_ptr(a) as usize),
@@ -807,10 +805,10 @@ impl Scope {
     fn placeholder(&self, counted: bool, known: bool, clamped: i64, origin: Option<(Buffer, i64, i64)>, slot: &Rc<HSlot>, ty: &Ty, buffer: (Buffer, i64), cell: Option<(Buffer, i64)>, length: i64) -> Value {
         let v = match ty {
             Ty::Array(inner) if **inner == Ty::Int => Value::Int_array(Arc::new(vec![0])),
-            Ty::Array(inner) if **inner == Ty::Float => Value::Float_array(Arc::new(vec![0.0])),
-            Ty::Array(inner) if **inner == Ty::Vec2 => Value::Vec2_array(Arc::new(vec![0.0; 2])),
-            Ty::Array(inner) if **inner == Ty::Vec3 => Value::Vec3_array(Arc::new(vec![0.0; 3])),
-            _ => Value::Vec4_array(Arc::new(vec![0.0; 4])),
+            Ty::Array(inner) if **inner == Ty::Float => Value::Floats(1, Arc::new(vec![0.0])),
+            Ty::Array(inner) if **inner == Ty::Vec2 => Value::Floats(2, Arc::new(vec![0.0; 2])),
+            Ty::Array(inner) if **inner == Ty::Vec3 => Value::Floats(3, Arc::new(vec![0.0; 3])),
+            _ => Value::Floats(4, Arc::new(vec![0.0; 4])),
         };
         let kind = match &v {
             Value::Int_array(_) => 0,
@@ -1154,7 +1152,7 @@ impl Scope {
     }
 
     fn unbound_table(&self, v: &Value) -> Value {
-        if self.find(v).is_none() { v.clone() } else { Value::Float_array(Arc::new(vec![])) }
+        if self.find(v).is_none() { v.clone() } else { Value::Floats(1, Arc::new(vec![])) }
     }
 
     /// A region's inputs, through its site's plan (from the arguments, nothing bound or
@@ -1296,7 +1294,7 @@ impl Scope {
         }
         let bound_tables: Vec<Option<(Buffer, i64)>> = values.uniforms.iter().map(|v| self.bound_table_of(v)).collect();
         let device_values = phost::ValueInputs {
-            arrays: values.arrays.iter().enumerate().map(|(i, v)| if bound_inputs[i].is_none() { v.clone() } else { Value::Float_array(Arc::new(vec![])) }).collect(),
+            arrays: values.arrays.iter().enumerate().map(|(i, v)| if bound_inputs[i].is_none() { v.clone() } else { Value::Floats(1, Arc::new(vec![])) }).collect(),
             uniforms: values.uniforms.iter().map(|v| self.unbound_table(v)).collect(),
             frame: values.frame.clone(),
             count: values.count,
@@ -1555,7 +1553,7 @@ impl Scope {
     fn coerce(&self, ty: &Ty, v: &Value) -> Result<Option<Value>, Diagnostic> {
         match (ty, self.find(v)) {
             (Ty::Array(i), Some(p)) if **i == Ty::Float && !p.uint32 => {
-                let nv = Value::Float_array(Arc::new(vec![0.0]));
+                let nv = Value::Floats(1, Arc::new(vec![0.0]));
                 let mut alias = p.copy();
                 alias.key = raw(&nv).unwrap();
                 alias.hold = nv.clone();
@@ -1581,10 +1579,7 @@ impl Scope {
             Host(Arc<Vec<f64>>),
         }
         let width = |v: &Value| match v {
-            Value::Float_array(_) => Some(1),
-            Value::Vec2_array(_) => Some(2),
-            Value::Vec3_array(_) => Some(3),
-            Value::Vec4_array(_) => Some(4),
+            Value::Floats(width @ 1..=4, _) => Some(*width as i64),
             _ => None,
         };
         let side = |v: &Value| -> Option<Side> {
@@ -1732,12 +1727,7 @@ impl Scope {
         let (count, width) = (holder.count as usize, holder.width as usize);
         let data: Vec<f64> = (0..count * width).map(|i| planes[i % width][i / width]).collect();
         let a = Arc::new(data);
-        Ok(match width {
-            1 => Value::Float_array(a),
-            2 => Value::Vec2_array(a),
-            3 => Value::Vec3_array(a),
-            _ => Value::Vec4_array(a),
-        })
+        Ok(Value::Floats(width, a))
     }
 
     fn finish(&self, v: &Value) -> Result<Value, Diagnostic> {
@@ -1759,9 +1749,7 @@ impl Scope {
         }
         let length = self.count_of(&p)?;
         let width = match v {
-            Value::Vec2_array(_) => 2,
-            Value::Vec3_array(_) => 3,
-            Value::Vec4_array(_) => 4,
+            Value::Floats(width, _) => *width as i64,
             _ => 1,
         };
         let epoch = self.s.borrow().epoch;
@@ -1775,10 +1763,8 @@ impl Scope {
         t.0.resident_payload_bytes.set(t.0.resident_payload_bytes.get() + length * width * 4);
         Ok(match v {
             Value::Int_array(_) => Value::Int_array(Arc::new(xs.iter().map(|x| *x as i64).collect())),
-            Value::Float_array(_) => Value::Float_array(Arc::new(xs)),
-            Value::Vec2_array(_) => Value::Vec2_array(Arc::new(xs)),
-            Value::Vec3_array(_) => Value::Vec3_array(Arc::new(xs)),
-            _ => Value::Vec4_array(Arc::new(xs)),
+            Value::Floats(width, _) => Value::Floats(*width, Arc::new(xs)),
+            _ => Value::Floats(4, Arc::new(xs)),
         })
     }
 
@@ -1907,7 +1893,7 @@ impl Scope {
             Some(p) if self.s.borrow().post && p.cell.is_some() && div > 0 => {
                 let Some(buffer) = self.iota(Some(self.uint32 && integer), length) else { return Ok(None) };
                 let (kind, a) = match ty {
-                    Ty::Array(i) if **i == Ty::Float => (1, Value::Float_array(Arc::new(vec![0.0]))),
+                    Ty::Array(i) if **i == Ty::Float => (1, Value::Floats(1, Arc::new(vec![0.0]))),
                     _ => (0, Value::Int_array(Arc::new(vec![0]))),
                 };
                 let mut copy = p.copy();
@@ -2046,7 +2032,7 @@ impl Scope {
             }
             let bound_tables: Vec<Option<(Buffer, i64)>> = values.uniforms.iter().map(|v| self.bound_table_of(v)).collect();
             let device_values = phost::ValueInputs {
-                arrays: values.arrays.iter().enumerate().map(|(i, v)| if bound_inputs[i].is_none() { v.clone() } else { Value::Float_array(Arc::new(vec![])) }).collect(),
+                arrays: values.arrays.iter().enumerate().map(|(i, v)| if bound_inputs[i].is_none() { v.clone() } else { Value::Floats(1, Arc::new(vec![])) }).collect(),
                 uniforms: values.uniforms.iter().map(|v| self.unbound_table(v)).collect(),
                 frame: values.frame.clone(),
                 count: values.count,
@@ -2188,7 +2174,7 @@ impl Scope {
         self.settle_inner().ok()?;
         let aliases: Vec<Rc<Placeholder>> = self.s.borrow().table.iter().rev().filter(|a| !a.dead.get() && same_buffer(&a.buffer.0, &p.buffer.0)).cloned().collect();
         let holder = run::adopt_float(&self.owner(), &p.buffer.0, self.count_of(&p).ok()?, p.kind).ok()?;
-        if let Some(Value::Float_array(a) | Value::Vec2_array(a) | Value::Vec3_array(a) | Value::Vec4_array(a)) = &holder.resident {
+        if let Some(Value::Floats(1..=4, a)) = &holder.resident {
             if let Some((_, _, _, unpin)) = run::pin(a) {
                 self.s.borrow_mut().on_close.push(Box::new(move || unpin()));
             }
@@ -2235,12 +2221,7 @@ impl Scope {
                 let (c, w) = (count as usize, width as usize);
                 let xs: Vec<f64> = (0..c * w).map(|i| planes[i % w][i / w]).collect();
                 let a = Arc::new(xs);
-                match w {
-                    1 => Value::Float_array(a),
-                    2 => Value::Vec2_array(a),
-                    3 => Value::Vec3_array(a),
-                    _ => Value::Vec4_array(a),
-                }
+                Value::Floats(w, a)
             })
         };
         flow_eval::Device::add(&placeholder, read)?;
@@ -2283,7 +2264,7 @@ fn share_planes(holder: &SharedPlanes) -> G::Planes {
 fn a_shared_view_does_not_own_the_placeholder() {
     let placeholder = Arc::new(vec![0.0]);
     let weak = Arc::downgrade(&placeholder);
-    let holder = SharedPlanes { count: 1, width: 1, resident: Some(Value::Float_array(placeholder)), ops: Arc::new(G::ReadPlanes(Arc::new(vec![vec![0.0]]))) };
+    let holder = SharedPlanes { count: 1, width: 1, resident: Some(Value::Floats(1, placeholder)), ops: Arc::new(G::ReadPlanes(Arc::new(vec![vec![0.0]]))) };
     let mut view = share_planes(&holder);
     // what `keep` does before it registers a reader holding the view
     view.resident.take();

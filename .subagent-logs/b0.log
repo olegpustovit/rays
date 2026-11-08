@@ -1,0 +1,33 @@
+B0 incremenWave B0: documenting cache invalidation, running the warm `cargo check` pair, and scanning repo scripts for `RUSTFLAGS`/`CARGO_TARGET_DIR`.
+
+Adding the B0 marker and running the warm `cargo check` pair. No repo scripts set `RUSTFLAGS` or `CARGO_TARGET_DIR`.
+
+## Warm pair (`flow_check`, shared `target/`, dev)
+
+| Run | Wall (`real`) | Cargo `Finished` |
+|-----|---------------|------------------|
+| 1 (after `catalog.rs` marker touch) | **0.15 s** | 0.08 s |
+| 2 (no edit) | **0.07 s** | 0.02 s |
+
+Within the 0.4–0.5 s warm-check band from `build-speed.md`; not the stale 41 s case.
+
+## Script audit (`RUSTFLAGS` / `CARGO_TARGET_DIR`)
+
+- No checked-in `export RUSTFLAGS`, `CARGO_TARGET_DIR=`, or `--config` profile overrides.
+- `tools/buildtime` and `tools/t` only honor `CARGO_TARGET_DIR` if the shell sets it.
+- `Makefile` only runs `cargo build --release` for install (intentional).
+- **No `B0:` commit** — nothing to fix in-repo.
+
+## Invalidation checklist (also `PROGRESS.md` §B0)
+
+Shared dev incremental cache is lost or bypassed when:
+
+1. **`cargo clean`** (tree or `-p` on hot Flow crates).
+2. **Non-dev profile** in the same dir (`--release`, `--profile e2e|gpu|slow`, `make build`) or **per-crate `opt-level` / profile edits** — stale mixed-profile objects; fix with `cargo clean -p <crate>` per `build-speed.md`.
+3. **`RUSTFLAGS` or `cargo --config`** on builds that share `target/` — re-fingerprints everything.
+4. **`CARGO_TARGET_DIR` elsewhere** — does not poison shared cache, but work does not warm it.
+5. **Toolchain / `.cargo/config.toml` `rustflags` change** — one legitimate full rebuild.
+
+Primary **unrepo’d** risk for the historical 41 s vs 7.6 s regression: agent shell env or concurrent profile/`--config` experiments on shared `target/`.
+
+Session log: `.subagent-logs/b0.log`. Marker left in `crates/flow_check/src/catalog.rs` (same idea as buildtime touches).

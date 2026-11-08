@@ -2485,7 +2485,7 @@ fn pack(ty: &Ty, values: Vec<Value>) -> Result<Value, Diagnostic> {
                 }
             }
             let data = Arc::new(data);
-            Ok(match width { 1 => Value::Float_array(data), 2 => Value::Vec2_array(data), 3 => Value::Vec3_array(data), _ => Value::Vec4_array(data) })
+            Ok(Value::Floats(width, data))
         }
         _ => Ok(join_list(values)),
     }
@@ -2493,7 +2493,7 @@ fn pack(ty: &Ty, values: Vec<Value>) -> Result<Value, Diagnostic> {
 fn loop_values(source: Value) -> Result<Vec<Value>, Diagnostic> {
     match source {
         Value::List(values) => { let mut output = value::array_buffer(values.len())?; output.extend(values.iter().cloned()); Ok(output) },
-        Value::Int_array(_) | Value::Text_array(_) | Value::Float_array(_) | Value::Vec2_array(_) | Value::Vec3_array(_) | Value::Vec4_array(_) => {
+        Value::Int_array(_) | Value::Text_array(_) | Value::Floats(1..=4, _) => {
             let count = array_len(&source)?;
             let mut output = value::array_buffer(count)?;
             for index in 0..count { output.push(array_get(&source, index)?); }
@@ -3108,7 +3108,7 @@ fn map_function(site: Option<(i64, Path, Vec<i64>)>, path: Option<Path>, signatu
     if signature.params.len() != arrays.len() || !signature.params.iter().zip(arrays).all(|(ty, value)| value::ty_of(value) == Ty::Array(Box::new(ty.clone()))) {
         return eval_error("E_ARRAY_TYPE", "Bulk function columns must match their declared parameter types.");
     }
-    if arrays.iter().any(|value| !matches!(value, Value::Int_array(_) | Value::Text_array(_) | Value::Float_array(_) | Value::Vec2_array(_) | Value::Vec3_array(_) | Value::Vec4_array(_))) {
+    if arrays.iter().any(|value| !matches!(value, Value::Int_array(_) | Value::Text_array(_) | Value::Floats(1..=4, _))) {
         return eval_error("E_ARRAY_TYPE", "Bulk function inputs must be packed arrays.");
     }
     for array in arrays { value::validate(array)?; }
@@ -3192,7 +3192,7 @@ pub mod Device {
     use super::*;
     pub fn add(placeholder: &Value, read: Arc<dyn Fn() -> Value + Send + Sync>) -> Result<(), Diagnostic> {
         let data = match placeholder {
-            Value::Float_array(data) | Value::Vec2_array(data) | Value::Vec3_array(data) | Value::Vec4_array(data) => data,
+            Value::Floats(1..=4, data) => data,
             _ => return Err(error("E_INVALID_ARGUMENT", "Eval.Device.add")),
         };
         let key = Arc::as_ptr(data) as usize;
@@ -3212,7 +3212,7 @@ pub mod Device {
     }
     pub fn thaw(value: &Value) -> Value {
         match value {
-            Value::Float_array(data) | Value::Vec2_array(data) | Value::Vec3_array(data) | Value::Vec4_array(data) => reader(data).map_or_else(|| value.clone(), |read| read()),
+            Value::Floats(1..=4, data) => reader(data).map_or_else(|| value.clone(), |read| read()),
             Value::List(values) => Value::List(Arc::new(values.iter().map(thaw).collect())),
             Value::Record(fields) => Value::Record(fields.iter().map(|(name, value)| (name.clone(), thaw(value))).collect()),
             Value::Struct(g) => value::struct_value(g.name.clone(), g.ty.clone(), g.fields.iter().map(|(name, value)| (name.clone(), thaw(value))).collect()),
@@ -3220,7 +3220,7 @@ pub mod Device {
         }
     }
     pub fn held_by_device(value: &Value) -> bool {
-        matches!(value, Value::Float_array(data) | Value::Vec2_array(data) | Value::Vec3_array(data) | Value::Vec4_array(data) if reader(data).is_some())
+        matches!(value, Value::Floats(1..=4, data) if reader(data).is_some())
     }
 }
 
@@ -3228,10 +3228,7 @@ fn same_array_storage(left: &Value, right: &Value) -> bool {
     match (left, right) {
         (Value::Int_array(left), Value::Int_array(right)) => Arc::ptr_eq(left, right),
         (Value::Text_array(left), Value::Text_array(right)) => Arc::ptr_eq(left, right),
-        (Value::Float_array(left), Value::Float_array(right)) => Arc::ptr_eq(left, right),
-        (Value::Vec2_array(left), Value::Vec2_array(right)) => Arc::ptr_eq(left, right),
-        (Value::Vec3_array(left), Value::Vec3_array(right)) => Arc::ptr_eq(left, right),
-        (Value::Vec4_array(left), Value::Vec4_array(right)) => Arc::ptr_eq(left, right),
+        (Value::Floats(aw @ 1..=4, left), Value::Floats(bw, right)) if aw == bw => Arc::ptr_eq(left, right),
         _ => false,
     }
 }

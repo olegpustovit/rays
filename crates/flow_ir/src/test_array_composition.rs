@@ -32,10 +32,10 @@ fn sample(ty: &Ty, count: usize) -> Value {
             let p = [-0., 0., f64::from_bits(1), 1., -1.];
             let data = Arc::new((0..count * width).map(|i| p[i % 5]).collect::<Vec<f64>>());
             match ty {
-                Ty::Float => Value::Float_array(data),
-                Ty::Vec2 => Value::Vec2_array(data),
-                Ty::Vec3 => Value::Vec3_array(data),
-                Ty::Vec4 => Value::Vec4_array(data),
+                Ty::Float => Value::Floats(1, data),
+                Ty::Vec2 => Value::Floats(2, data),
+                Ty::Vec3 => Value::Floats(3, data),
+                Ty::Vec4 => Value::Floats(4, data),
                 _ => unreachable!(),
             }
         }
@@ -49,10 +49,10 @@ fn concat_expected(a: &Value, b: &Value) -> Value {
     match (a, b) {
         (Value::Int_array(a), Value::Int_array(b)) => Value::Int_array(cat(a, b)),
         (Value::Text_array(a), Value::Text_array(b)) => Value::Text_array(Arc::new(a.iter().chain(b.iter()).collect())),
-        (Value::Float_array(a), Value::Float_array(b)) => Value::Float_array(cat(a, b)),
-        (Value::Vec2_array(a), Value::Vec2_array(b)) => Value::Vec2_array(cat(a, b)),
-        (Value::Vec3_array(a), Value::Vec3_array(b)) => Value::Vec3_array(cat(a, b)),
-        (Value::Vec4_array(a), Value::Vec4_array(b)) => Value::Vec4_array(cat(a, b)),
+        (Value::Floats(1, a), Value::Floats(1, b)) => Value::Floats(1, cat(a, b)),
+        (Value::Floats(2, a), Value::Floats(2, b)) => Value::Floats(2, cat(a, b)),
+        (Value::Floats(3, a), Value::Floats(3, b)) => Value::Floats(3, cat(a, b)),
+        (Value::Floats(4, a), Value::Floats(4, b)) => Value::Floats(4, cat(a, b)),
         _ => unreachable!(),
     }
 }
@@ -63,10 +63,10 @@ fn slice_expected(a: &Value, first: usize, count: usize) -> Value {
     match a {
         Value::Int_array(a) => Value::Int_array(sub(a, 1, first, count)),
         Value::Text_array(a) => Value::Text_array(Arc::new(a.iter().skip(first).take(count).collect())),
-        Value::Float_array(a) => Value::Float_array(sub(a, 1, first, count)),
-        Value::Vec2_array(a) => Value::Vec2_array(sub(a, 2, first, count)),
-        Value::Vec3_array(a) => Value::Vec3_array(sub(a, 3, first, count)),
-        Value::Vec4_array(a) => Value::Vec4_array(sub(a, 4, first, count)),
+        Value::Floats(1, a) => Value::Floats(1, sub(a, 1, first, count)),
+        Value::Floats(2, a) => Value::Floats(2, sub(a, 2, first, count)),
+        Value::Floats(3, a) => Value::Floats(3, sub(a, 3, first, count)),
+        Value::Floats(4, a) => Value::Floats(4, sub(a, 4, first, count)),
         _ => unreachable!(),
     }
 }
@@ -75,10 +75,7 @@ fn shares_storage(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Int_array(a), Value::Int_array(b)) => Arc::ptr_eq(a, b),
         (Value::Text_array(a), Value::Text_array(b)) => Arc::ptr_eq(a, b),
-        (Value::Float_array(a), Value::Float_array(b))
-        | (Value::Vec2_array(a), Value::Vec2_array(b))
-        | (Value::Vec3_array(a), Value::Vec3_array(b))
-        | (Value::Vec4_array(a), Value::Vec4_array(b)) => Arc::ptr_eq(a, b),
+        (Value::Floats(aw @ 1..=4, a), Value::Floats(bw, b)) if aw == bw => Arc::ptr_eq(a, b),
         _ => false,
     }
 }
@@ -97,6 +94,17 @@ fn instantiated(ty: &Ty, table: Value, body: &str, indices: Vec<i64>) -> Value {
 
 #[test]
 fn concat_and_slice_copy_exactly() {
+    let shared = Arc::new(vec![0.25; 12]);
+    for width in 1..=4 {
+        let a = Value::Floats(width, shared.clone());
+        for other_width in 1..=4 {
+            let b = Value::Floats(other_width, shared.clone());
+            assert_eq!(crate::core_exec::phys_eq(&a, &b), width == other_width);
+            if width != other_width {
+                reject("E_ARRAY_TYPE", call("array/concat", vec![("first", a.clone()), ("second", b)]));
+            }
+        }
+    }
     for ty in composition_types() {
         for count in [0usize, 1, 13, 4097, 5001, 32769] {
             let a = sample(&ty, count);
@@ -248,8 +256,8 @@ fn source_checks(ty: Ty) {
                 Err(d)
             }),
             Arc::new(|_| Ok(Value::Int(0))),
-            Arc::new(|_| Ok(Value::Vec3_array(Arc::new(vec![1., 2.])))),
-            Arc::new(|_| Ok(Value::Float_array(Arc::new(vec![f64::NAN])))),
+            Arc::new(|_| Ok(Value::Floats(3, Arc::new(vec![1., 2.])))),
+            Arc::new(|_| Ok(Value::Floats(1, Arc::new(vec![f64::NAN])))),
         ];
         for r in resolvers {
             same(&packed_force(&p, &live, true, Some(r.clone())), &reference_with(&value, &live, None, Some(r)));

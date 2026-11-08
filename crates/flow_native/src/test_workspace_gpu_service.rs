@@ -108,7 +108,7 @@ impl G::Kernel for CountingKernel {
     fn readback(&self, _: &G::Value) -> Result<Value, Diagnostic> {
         assert!(on_owner(self.main));
         self.counters.reads.fetch_add(1, Ordering::SeqCst);
-        Ok(Value::Vec3_array(self.rounded.clone()))
+        Ok(Value::Floats(3, self.rounded.clone()))
     }
     fn planes(&self, value: &G::Value) -> Result<G::Planes, Diagnostic> {
         assert!(on_owner(self.main));

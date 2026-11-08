@@ -1,0 +1,72 @@
+Working...
+Auditing repo state against the port-simplification plan: reading PROGRESS.md, the master table, and recent commits.
+
+Verifying repo evidence for Wave A items and scanning commits for out-of-scope work.
+
+### (1) Wave A — runbook bullets (`index.html` §Wave A)
+
+| # | Runbook bullet | Status | File / commit evidence |
+|---|----------------|--------|-------------------------|
+| 1 | Delete `rays_collections` / `rays_hash`; gate bans generics | **done** | Crates absent from workspace; `tools/gate/src/main.rs` (`generic items are not allowed`); `6802a325` |
+| 2 | Delete uncalled `sop::support`, `edge_transport`, empty `rdk_ops` modules, unused `rdk` re-exports (~550 lines) | **done** | No `crates/**/edge_transport.rs`; `e10bff22`, `5a6e7269`, `7a63b07b`, `ec5c1b1b`, `992093ce` (`crates/sop/src/support.rs`, `crates/rdk/src/lib.rs`) |
+| 3 | Remove unused deps (`ocaml_int` from four UI crates, `flow_eval` from pxui_graph prod, `editor_core`/`input` from `rays_bin`) | **partial** | `09ce8574` — removed from `pxui_graph`/`pxui_shell`/`rays_editor`/`editor_document`/`rays_bin`; **`crates/pxui/Cargo.toml`** still `ocaml_int`; **`crates/editor_core/Cargo.toml`** still `rays` + `runtime_resources` (A6 plan row) |
+| 4 | Remove `gpu_suite_*_b` targets and `shard()` | **done** | No `gpu_suite_*_b` in `crates/rays_editor/Cargo.toml`; no `shard(` in `crates/rays/tests/common/window.rs`; `3c86b2a1` |
+| 5 | Delete `MAX_ARRAY_LENGTH` OCaml array-limit checks in `rdk_*` | **done** | No `MAX_ARRAY_LENGTH` under `crates/rdk*`; `e10bff22`, `10a405ae`, `1a8ee31b` |
+| 6 | Merge six MD5 copies; `region_snapshot` test-only; `Editor::Private` + pxui_graph test accessors test-only | **partial** | MD5 → `crates/rays_math/src/hash.rs::md5_hex`, dup modules removed (`a60fcced`); `region_snapshot` `#[cfg(test)]` in `crates/flow_ir/src/lib.rs:14-15`; `test-hooks` on `pxui_graph`/`rays_editor` (`764a307a`, `fa967abe`); **not done:** plan A4 also lists merged `guarded`, `ocaml_min/max`, `ldexp`, `format_g` — still scattered (e.g. multiple `fn guarded` in `flow_shader`, `flow_web`, `flow_ir`) |
+
+### (1b) Master table Wave A IDs (A1–A8)
+
+| ID | Status | Evidence |
+|----|--------|----------|
+| A1 | **done** | `6802a325`; gate generics ban |
+| A2 | **done** | `edge_transport` removed; `sop::support` pruned; `7a63b07b`, `992093ce`, `ec5c1b1b` |
+| A3 | **done** | `rdk_*` `MAX_ARRAY_LENGTH` cleared; `1a8ee31b` / `10a405ae` |
+| A4 | **partial** | MD5 consolidated (`a60fcced`); `guarded` / `ocaml_min|max` / `ldexp` / `format_g` dedup **not** closed per plan row |
+| A5 | **done** | `window_to_values` / `live_delay` gone; `region_snapshot` test-only; `test-hooks` + `scope_frame_inspect_hooks.rs`; `764a307a` |
+| A6 | **partial** | `09ce8574`; **remaining:** `editor_core` → `rays`/`runtime_resources`; `pxui` → `ocaml_int` (blocked on Wave I per PROGRESS) |
+| A7 | **done** | `point_triangle_barycentric_into` in `rdk_geom/src/point_grid.rs`; `ocaml_trim` shared (`f980cbf9`, `8093ff64`, `da178e93`); `Filename.concat` via `editor_core/src/store.rs` (`626a1f70`); `cap_y_paint` dedupe in chrome (`d01750db`; `kit.rs` still has thin `cap_y_of` wrapper) |
+| A8 | **done** | `op::finder` / `arithmetic` gone; trims in `992093ce` (`flow_check/term_arena.rs`, `param/src/lib.rs`); `presentation_facts_` → `presentation_facts_of`; `Native::runtime_of` **kept** (in use) |
+
+`PROGRESS.md` summary: **7/8** Wave A (A6 active). Auditor: **6 done, 2 partial** (A4, A6); **7 done** if A4 MD5-only closure accepted.
+
+---
+
+### (2) Commits since `6802a325` outside plan execution scope
+
+| Commit | Subject | Why out of scope |
+|--------|---------|------------------|
+| `7b6f876c` | Artifact: embed plan-seed tracker | Only `docs/history/port-simplification/index.html` tracker seed |
+| `af07f9a6` | PROGRESS: A3/A4 done; A6 partial | `PROGRESS.md` only |
+| `b3f2b429` | PROGRESS: A3 rdk limits done; A2 support prune | `PROGRESS.md` only |
+| `ffd94204` | PROGRESS: log A2/A3 commits | `PROGRESS.md` only |
+| `07257305` | docs: refresh PROGRESS after ec5c1b1b | `PROGRESS.md` only |
+| `b885973a` | docs: PROGRESS A7 partial | `PROGRESS.md` only |
+| `aa83e295` | docs: PROGRESS f980cbf9 A7 | `PROGRESS.md` only |
+| `77878e36` | docs: PROGRESS A8 done, B4 | `PROGRESS.md` only |
+| `886afa07` | docs: PROGRESS omp subagent tracking | `PROGRESS.md` only |
+| `46e4d69c` | docs: PROGRESS subagent results | `PROGRESS.md` + `.subagent-logs/prompt-*.txt` (harness, not plan bullets) |
+
+**In plan, parallel order OK:** `cacc312e` (B4 / `tools/buildtime` W1) — runbook: A ∥ B ∥ M ∥ I.
+
+**Note:** Many wave commits also touch `PROGRESS.md`; code changes still map to A/B IDs.
+
+---
+
+### (3) Gaps vs **63 items** goal (`index.html` tracker IDs: 8+6+21+1+21+6)
+
+| Wave | Plan IDs | Done (repo) | Active | Pending | Gap |
+|------|----------|-------------|--------|---------|-----|
+| A | A1–A8 (8) | 6–7 | A6 (+ A4 residual) | 0–1 | A6 dep slimming; optional A4 helper dedup |
+| B | B0–B5 (6) | 1 (B4) | B0 | B1–B3, B5 | Incremental cache root cause; `llvm-lines`; UI `opt-level`; gpu_suite merge; `flow_sop` catalog split + drop `rdk` |
+| M | M1–M21 (21) | 0 | — | 21 | No alloc guards / `mem_sys` TEMP removal / per-frame fixes |
+| I | I (1) | 0 | — | 1 | Full i64 migration + `ocaml_int` delete |
+| C | C1–C21 (21) | 0 | — | 21 | All OCaml-pattern refactors |
+| D | D1–D6 (6) | 0 | — | 6 | Golden-refresh wave (last) |
+| **Total** | **63** | **~8** | **2** | **~53–54** | **~87% remaining** |
+
+| Metric | Plan (`index.html` + `PROGRESS.md`) | Measured |
+|--------|--------------------------------------|----------|
+| Items closed | 63 total | **~8** (A1–A3, A5, A7, A8, B4; A4/A6 partial) |
+| Wave A runbook | 6 bullets, one commit each where practical | **5 done, 1 partial** (dep bullet); bullet 6 partial on A4 helper dedup |
+| `plan-seed` in HTML | A1 `done` @ `6802a325` only | Rest **pending** in embedded seed (live db may differ) |
+| Order vs runbook | A∥B∥M∥I, then C, then D | **On track** for A (+ early B4); **M, I, C, D not started** |

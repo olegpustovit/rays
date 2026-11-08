@@ -15,15 +15,15 @@ use std::sync::Arc;
 
 fn column_value(column: &Column) -> Value {
     match column {
-        Column::Floats(xs) => Value::Float_array(Arc::new(xs.clone())),
-        Column::Vec3s(xs) => Value::Vec3_array(Arc::new(xs.clone())),
+        Column::Floats(xs) => Value::Floats(1, Arc::new(xs.clone())),
+        Column::Vec3s(xs) => Value::Floats(3, Arc::new(xs.clone())),
     }
 }
 
 fn to_column(value: Value) -> Result<Column, Diagnostic> {
     match value {
-        Value::Float_array(xs) => Ok(Column::Floats((*xs).clone())),
-        Value::Vec3_array(xs) => Ok(Column::Vec3s((*xs).clone())),
+        Value::Floats(1, xs) => Ok(Column::Floats((*xs).clone())),
+        Value::Floats(3, xs) => Ok(Column::Vec3s((*xs).clone())),
         _ => Err(value::fail("E_KERNEL_FORM", "Bulk function did not produce a packed column.")),
     }
 }
@@ -40,7 +40,7 @@ fn storage(values: &[Value]) -> i64 {
     }
     fn visit(seen: &mut Seen, value: &Value) -> i64 {
         match value {
-            Value::Float_array(xs) | Value::Vec2_array(xs) | Value::Vec3_array(xs) | Value::Vec4_array(xs) => xs.len() as i64 * 8,
+            Value::Floats(1..=4, xs) => xs.len() as i64 * 8,
             Value::Text(s) => s.len() as i64,
             Value::List(xs) => xs.iter().fold(0, |bytes, x| add_bytes(bytes, visit(seen, x))),
             v @ (Value::Record(_) | Value::Struct(_)) => fields(seen, v.geo_fields().unwrap()),

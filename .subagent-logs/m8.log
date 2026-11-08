@@ -1,0 +1,20 @@
+Working...
+M8: trace `lru_key` in renderer (`side_lru` / scene_execution sampler) and remove `format!("{:?}")` or per-find `Arc` clone if safe.
+
+Smallest slice: `side_lru` — route lookups through `find_opt_by` / `*_by` instead of allocating `lru_key` per call.
+
+Applying both M8 slices: `side_lru` probe lookups and `u64` sampler keys.
+
+**M8 done** — commit `66136b7f`.
+
+### `side_lru.rs`
+`find` / `peek` / `remove` / `take` use `find_opt_by` / `peek_by` / `remove_by` / `take_by` with `hash_of(key)` and a `&TableKey` probe. `lru_key` (Arc + clone) stays only on `add`.
+
+### `scene_execution.rs`
+- `sampler_key` → `u64` via existing `mix::sampler` (replaces `format!("{:?}")`).
+- `samplers: HashMap<u64, Sampler>` and argument `slices: HashMap<(i64, u64), i64>`.
+
+### Verify
+`cargo check -p renderer` — **1.02s**, clean.
+
+**PROGRESS:** M wave **9/21**; M8 marked done.

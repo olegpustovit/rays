@@ -8,7 +8,7 @@ use flow_syntax::ty::Ty;
 
 fn first(v: &Value) -> f64 {
     match v {
-        Value::Float_array(a) => a[0],
+        Value::Floats(1, a) => a[0],
         _ => panic!("not a float array: {:?}", v),
     }
 }

@@ -1,0 +1,12 @@
+Working...
+Inspecting `panels.rs` leaves/walk hot path for avoidable clones or duplicate walks.
+
+
+
+Uncommitted `at_ref` work looks complete. Running tests and committing.
+
+**Commit:** `20c1dfb3` (`docs: PROGRESS M9` → `6436356e`)
+
+**Change:** Added `panels::at_ref` for borrow-only subtree lookup; `at()` clones only when ownership is needed; `editor_shell` / `editor_panels` frame paths use `at_ref` instead of cloning subtrees.
+
+**Check:** `cargo check -p editor_core`; `cargo t -p editor_core panels` — 2 pass, ~1.9s wall.

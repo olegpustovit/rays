@@ -179,20 +179,8 @@ fn key_hash(v: &Value) -> u64 {
             mix(1);
             a.iter().for_each(|x| mix(*x as u64));
         }
-        Value::Float_array(a) => {
-            mix(2);
-            a.iter().for_each(|x| mix(bits(*x)));
-        }
-        Value::Vec2_array(a) => {
-            mix(3);
-            a.iter().for_each(|x| mix(bits(*x)));
-        }
-        Value::Vec3_array(a) => {
-            mix(4);
-            a.iter().for_each(|x| mix(bits(*x)));
-        }
-        Value::Vec4_array(a) => {
-            mix(5);
+        Value::Floats(width @ 1..=4, a) => {
+            mix(*width as u64 + 1);
             a.iter().for_each(|x| mix(bits(*x)));
         }
         _ => {}
@@ -204,10 +192,7 @@ fn same_key(a: &Value, b: &Value) -> bool {
     let f = |x: &Arc<Vec<f64>>, y: &Arc<Vec<f64>>| x.len() == y.len() && x.iter().zip(y.iter()).all(|(p, q)| same_float(*p, *q));
     match (a, b) {
         (Value::Int_array(x), Value::Int_array(y)) => x == y,
-        (Value::Float_array(x), Value::Float_array(y)) => f(x, y),
-        (Value::Vec2_array(x), Value::Vec2_array(y)) => f(x, y),
-        (Value::Vec3_array(x), Value::Vec3_array(y)) => f(x, y),
-        (Value::Vec4_array(x), Value::Vec4_array(y)) => f(x, y),
+        (Value::Floats(aw @ 1..=4, x), Value::Floats(bw, y)) if aw == bw => f(x, y),
         _ => false,
     }
 }
@@ -225,7 +210,7 @@ fn store(shared: &Shared, values: &Value) -> (i64, i64) {
             a.iter().for_each(|x| s.data.extend_from_slice(&x.to_le_bytes()));
             a.len()
         }
-        Value::Float_array(a) | Value::Vec2_array(a) | Value::Vec3_array(a) | Value::Vec4_array(a) => {
+        Value::Floats(1..=4, a) => {
             a.iter().for_each(|x| s.data.extend_from_slice(&x.to_bits().to_le_bytes()));
             a.len()
         }
@@ -270,7 +255,7 @@ fn region_instruction(i: &Region::Instruction) -> &Region::Instruction {
 
 fn uniform_components(v: &Value) -> Vec<f64> {
     match v {
-        Value::Float_array(a) | Value::Vec2_array(a) | Value::Vec3_array(a) | Value::Vec4_array(a) => (**a).clone(),
+        Value::Floats(1..=4, a) => (**a).clone(),
         Value::Vec2(x, y) => vec![*x, *y],
         Value::Vec3(x, y, z) => vec![*x, *y, *z],
         Value::Vec4(x, y, z, w) => vec![*x, *y, *z, *w],
@@ -356,7 +341,7 @@ fn fixed_members(kept: Option<i64>, data: &dyn Fn(&Value) -> (i64, i64), f: &Fix
             match (integer, v) {
                 (_, Value::Text_array(t)) => texts(t),
                 (_, Value::Text(t)) => format!("{{\"text\":{}}}", json_bytes(t)),
-                (_, Value::Int_array(_) | Value::Float_array(_) | Value::Vec2_array(_) | Value::Vec3_array(_) | Value::Vec4_array(_)) => {
+                (_, Value::Int_array(_) | Value::Floats(1..=4, _)) => {
                     let (offset, length) = data(v);
                     format!("{{\"table\":[{},{},{}]}}", offset, length, is_int_array(v))
                 }
@@ -540,7 +525,7 @@ fn map_entry(lowered: &Lowered, id: usize) -> R<MapEntry> {
     match node_arg(node, "function", Value::Int(0)) {
         Value::Fn(f) => {
             let signature = FnSignature { params: vec![Ty::Vec2], result: Ty::Vec4 };
-            let pixels = E::Host::map_function(Some((node.inst, node.site.clone(), node.iter.clone())), None, &signature, f, &[Value::Vec2_array(Arc::new(vec![0.5, 0.5]))])?;
+            let pixels = E::Host::map_function(Some((node.inst, node.site.clone(), node.iter.clone())), None, &signature, f, &[Value::Floats(2, Arc::new(vec![0.5, 0.5]))])?;
             match pixels {
                 Value::Residual(r) => {
                     let view = E::Residual::residual_view(r)?;
@@ -681,7 +666,7 @@ impl Export<'_> {
                 move |k| g.get(k as usize).copied().unwrap_or(false)
             })),
             store: Some(Arc::new(move |values: &[f64]| {
-                let (offset, length) = store(&storing, &Value::Float_array(Arc::new(values.to_vec())));
+                let (offset, length) = store(&storing, &Value::Floats(1, Arc::new(values.to_vec())));
                 format!("new Float64Array(rt.data, {offset}, {length})")
             })),
             ..Default::default()

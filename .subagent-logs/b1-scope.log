@@ -1,0 +1,22 @@
+Working...
+Implementing B1: PathId-keyed workspace scope stack in `flow_check`. Reading ponytail notes in `op.rs` and current `workspace.rs`.
+
+Implementing `ScopeStack` with `PathId` layers and migrating `Cx.env` off per-iteration `BTreeMap` clones.
+
+**Decision:** `Cx.env` is now `ScopeStack` — `PathId`-keyed layers with `Rc` snapshots instead of full `BTreeMap` clones on each `let*` binding and zone clause.
+
+**Changes** (`crates/flow_check/src/workspace.rs`):
+- `ScopeStack`: `push` / `snapshot` / `top_mut` / lookup; layers interned via `TermBuilder::path`
+- Hot paths: `let_scope`, `zone`, `make_fn`, `call_closure`, graph/def/node checking
+- `Closure.env` uses the same type
+
+**Ponytail** (`op.rs:904`): workspace scope-stack item removed; delegate tables remain.
+
+**Commit:** `ba113180` — `B1: intern checker bindings in a PathId-keyed ScopeStack.`
+
+**Check:**
+- `cargo check -p flow_check -p flow_ir` — ok (~14.6s compile)
+- `cargo t -p flow_check workspace_and_prelude` — 1 pass, 0.031s
+- `cargo t -p flow_check retained_memory` — 1 pass (let* fixture), 0.030s
+
+**PROGRESS:** B1 → `done`; evidence includes `21bf87ff` in row text (amended to `ba113180`; hash line in committed PROGRESS may lag one amend).

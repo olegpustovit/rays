@@ -780,7 +780,7 @@ fn mix_of(count: i64, shift: i64, n: i64) -> Mix {
 
 fn mix_args(pc: &Mix, vc: &Mix, rc: &Mix, policy: &str, offsets: &[i64], ancestors: &[i64]) -> Args {
     let ints = |a: &[i64]| Value::Int_array(Arc::new(a.to_vec()));
-    let floats = |a: &[f64]| Value::Float_array(Arc::new(a.to_vec()));
+    let floats = |a: &[f64]| Value::Floats(1, Arc::new(a.to_vec()));
     vec![
         ("pa".into(), ints(&pc.0)),
         ("pb".into(), ints(&pc.1)),
@@ -1002,7 +1002,7 @@ fn weighted_remap_refusals() {
     let all = mix_body(true, true, true);
     let ints = |a: Vec<i64>| Value::Int_array(Arc::new(a));
     for (key, value, code) in [
-        ("pt", Value::Float_array(Arc::new(vec![0.5; np as usize - 1])), "E_REMAP_COUNT"),
+        ("pt", Value::Floats(1, Arc::new(vec![0.5; np as usize - 1])), "E_REMAP_COUNT"),
         ("pa", ints(vec![4; np as usize]), "E_REMAP_INDEX"),
         ("pb", ints(vec![-1; np as usize]), "E_REMAP_INDEX"),
         ("va", ints(vec![6; nv as usize]), "E_REMAP_INDEX"),
@@ -1015,7 +1015,7 @@ fn weighted_remap_refusals() {
     }
     // a non-finite weight never reaches the kernel: the array input is refused first
     for weight in [f64::NAN, f64::INFINITY] {
-        match compile_result(false, true, &all, &src, &dst, &with("pt", Value::Float_array(Arc::new(vec![weight; np as usize])))) {
+        match compile_result(false, true, &all, &src, &dst, &with("pt", Value::Floats(1, Arc::new(vec![weight; np as usize])))) {
             Err(m) => assert!(m.starts_with("E_NONFINITE"), "non-finite weight refused with another code: {m}"),
             Ok(node) => assert!(run(&node).is_err(), "non-finite weight accepted"),
         }

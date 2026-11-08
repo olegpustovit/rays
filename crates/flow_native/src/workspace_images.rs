@@ -569,7 +569,7 @@ fn resolve_capture(d: &Data, request: &RequestRef, live: &Frame, sources: &[(i64
     let resolved = attribute_kernel::resolve(None, &lookup, value)?;
     d.attribute_flattens.set(d.attribute_flattens.get() + 1);
     let size = match &resolved {
-        Value::Vec3_array(values) => values.len() as i64 * 8 + 16,
+        Value::Floats(3, values) => values.len() as i64 * 8 + 16,
         _ => 0,
     };
     let bytes = if size > ((1i64 << 62) - 1) - c.bytes { (1i64 << 62) - 1 } else { c.bytes + size };

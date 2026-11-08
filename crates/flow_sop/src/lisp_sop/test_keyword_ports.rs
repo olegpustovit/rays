@@ -38,12 +38,12 @@ fn live_cache(domains:i64){
     let first=lowered(false,None,&text(7));let functions=first.plan.nodes.iter().filter(|n|n.kind=="sop/test_field").map(|n|{let Value::Fn(f)=n.args.iter().find(|(k,_)|k=="field").unwrap().1 else{panic!("function input")};f}).collect::<Vec<_>>();assert_eq!(functions.len(),2);
     let values=std::sync::Mutex::new(vec![Value::No_geo;functions.len()]);
     parallel::run_unit(Some(domains),&||parallel::for_(1,0,functions.len()as i64-1,&|i|{
-        let v=flow_eval::Host::map_function(None,None,&FnSignature{params:vec![Ty::Vec3,Ty::Float],result:Ty::Vec3},functions[i as usize],&[Value::Vec3_array(Arc::new(vec![2.,0.,0.])),Value::Float_array(Arc::new(vec![0.]))]).unwrap();
+        let v=flow_eval::Host::map_function(None,None,&FnSignature{params:vec![Ty::Vec3,Ty::Float],result:Ty::Vec3},functions[i as usize],&[Value::Floats(3, Arc::new(vec![2.,0.,0.])),Value::Floats(1, Arc::new(vec![0.]))]).unwrap();
         let p=ak::prepare(None,false,None,None,&[],&[],&v).unwrap();let packed=Executor::packed_region(&p).unwrap();let live=input::at_time(0.5);
         let a=flow_ir::packed::force(&packed,&live,&Default::default()).unwrap();let b=Executor::force(&p,&Executor::ForceOptions{reference:true,..Default::default()},&live).unwrap();assert_eq!(a,b);
         values.lock().unwrap()[i as usize]=a;Ok(())
     })).unwrap();
-    assert_eq!(*values.lock().unwrap(),vec![Value::Vec3_array(Arc::new(vec![9.5;3])),Value::Vec3_array(Arc::new(vec![6.5;3]))]);
+    assert_eq!(*values.lock().unwrap(),vec![Value::Floats(3, Arc::new(vec![9.5;3])),Value::Floats(3, Arc::new(vec![6.5;3]))]);
     let n=root(&first);let mut s=new_session(32,65536);assert_eq!(points(&mut s,domains,0.,&n),vec![(9.,0.,0.),(6.,0.,0.)]);let cooks=session::stats(&s).cooks;assert_eq!(points(&mut s,domains,0.,&n),vec![(9.,0.,0.),(6.,0.,0.)]);assert_eq!(session::stats(&s).cooks,cooks);assert_eq!(points(&mut s,domains,0.5,&n),vec![(9.5,0.,0.),(6.5,0.,0.)]);assert_eq!(points(&mut s,domains,0.5,&root(&lowered(true,None,&text(7)))),vec![(9.5,0.,0.),(6.5,0.,0.)]);let edited=root(&lowered(false,Some(&first),&text(10)));assert_eq!(node::id(&edited),node::id(&n));assert_eq!(points(&mut s,domains,0.,&edited),vec![(12.,0.,0.),(6.,0.,0.)]);session::close(&mut s);
 }
 #[test]fn keyword_live_cache_one_domain(){live_cache(1)}

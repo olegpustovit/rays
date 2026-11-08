@@ -92,10 +92,7 @@ fn same(a: &Value, b: &Value) -> bool {
         (Value::Float(x), Value::Float(y)) => bits(*x, *y),
         (Value::Vec3(a, b, c), Value::Vec3(x, y, z)) => bits(*a, *x) && bits(*b, *y) && bits(*c, *z),
         (Value::List(a), Value::List(b)) => a.len() == b.len() && a.iter().zip(b.iter()).all(|(a, b)| same(a, b)),
-        (Value::Float_array(a), Value::Float_array(b))
-        | (Value::Vec2_array(a), Value::Vec2_array(b))
-        | (Value::Vec3_array(a), Value::Vec3_array(b))
-        | (Value::Vec4_array(a), Value::Vec4_array(b)) => a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| bits(*x, *y)),
+        (Value::Floats(aw @ 1..=4, a), Value::Floats(bw, b)) if aw == bw => a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| bits(*x, *y)),
         (a, b) => a == b,
     }
 }
@@ -530,6 +527,6 @@ fn deeply_nested_scalar_body_compiles_on_default_stack() {
     let program = ts::compile(&format!("(map (fn [x] {body}) (array/range 1))"));
     assert_eq!(
         ok(packed::force(&program, &input::at_time(0.25), &strict())),
-        Value::Float_array(Arc::new(vec![expected])),
+        Value::Floats(1, Arc::new(vec![expected])),
     );
 }

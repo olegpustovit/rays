@@ -20,7 +20,7 @@ const PRELUDE: &str = r#"[seed (pixel-seed (int/mod i 1000) (int/div i 1000))
  ns (normalize [(- (* r1 2.) 1.) (- (* r2 2.) 1.) (+ r3 0.1)]) v (normalize [r2 r3 (+ r1 0.2)])
  a2 (+ 0.01 (* r4 0.5)) ps (+ 0.05 (* r1 0.9)) bsm (bsdf-sample ns v ps a2 r1 r2 r3)
  ls (light-sample [(- (* r1 2.) 1.) (- (* r2 2.) 1.) 3.] [1. r3 0.] [0. 1. r4] (if (> r4 0.5) 1. 0.) [0. 0. 0.] r2 r3)]"#;
-fn vec4(v: Value) -> Vec<f64> { match v { Value::Vec4_array(a) => (*a).clone(), _ => panic!("vec4 array expected") } }
+fn vec4(v: Value) -> Vec<f64> { match v { Value::Floats(4, a) => (*a).clone(), _ => panic!("vec4 array expected") } }
 fn sampling() {
     let bodies = [
         "[(float (int/and seed 16777215)) (float (int/and (int/shr seed 8) 16777215)) (+ cr.o.x (* 0. t)) cr.d.x]",

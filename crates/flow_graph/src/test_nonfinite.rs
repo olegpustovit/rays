@@ -68,7 +68,7 @@ fn nonfinite_literals_round_trip() {
             &catalog::Term { node: TermNode::Literal(PValue::Float(expected)), ty: Some(PortType::Float) },
         );
         assert_eq!(codes, vec![(Severity::ErrorSeverity, "E_NONFINITE".to_owned())]);
-        match value::validate(&Value::Float_array(std::sync::Arc::new(vec![expected]))) {
+        match value::validate(&Value::Floats(1, std::sync::Arc::new(vec![expected]))) {
             Ok(()) => panic!("validate accepted a nonfinite array"),
             Err(d) => assert_eq!(d.code, "E_NONFINITE"),
         }
@@ -112,7 +112,7 @@ fn nonfinite_primitives() {
             &catalog::Term { node: TermNode::Literal(PValue::Float(expected)), ty: Some(PortType::Float) },
         );
         assert_eq!(codes, vec![(Severity::ErrorSeverity, "E_NONFINITE".to_owned())]);
-        match value::validate(&Value::Float_array(std::sync::Arc::new(vec![expected]))) {
+        match value::validate(&Value::Floats(1, std::sync::Arc::new(vec![expected]))) {
             Ok(()) => panic!("validate accepted a nonfinite array"),
             Err(d) => assert_eq!(d.code, "E_NONFINITE"),
         }

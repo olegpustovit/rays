@@ -122,7 +122,7 @@ fn with_error_nests() {
 
 #[test]
 fn with_error_passes_a_large_packed_array() {
-    assert!(compare(&format!("(with_error (exact (map (fn [x] (+ x 1.0)) (array/float 32769 2.0))) {MAPPER})")) == Ok(Value::Float_array(Arc::new(vec![3.; 32769]))));
+    assert!(compare(&format!("(with_error (exact (map (fn [x] (+ x 1.0)) (array/float 32769 2.0))) {MAPPER})")) == Ok(Value::Floats(1, Arc::new(vec![3.; 32769]))));
 }
 
 #[test]
@@ -234,7 +234,7 @@ mod graph_edits {
         let (forms, checked) = ok(apply_checked(&catalog(), &forms, &Op::SetArg { node: card.path.clone(), key: ArgKey::Pos(1), sub: vec![], value: make(Node::Num("4.0".into())) }));
         let evaluation = ok(E::run(&checked, true, None, None, None, 0.));
         let path = vec!["g".to_owned(), "tested".to_owned()];
-        assert!(evaluation.records.iter().find(|(p, _)| *p == path).unwrap().1[0].1 == Value::Float_array(Arc::new(vec![4., 4.])));
+        assert!(evaluation.records.iter().find(|(p, _)| *p == path).unwrap().1[0].1 == Value::Floats(1, Arc::new(vec![4., 4.])));
         let forms_again = ok(syntax::parse(&lisp::print(&forms).unwrap().0));
         let (_, ds) = W::check(&[], false, false, None, &catalog(), &forms_again);
         assert!(!has_error(&ds));

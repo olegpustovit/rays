@@ -1,0 +1,10 @@
+Working...
+Locating `subdivide_refine` and any per-vertex i64 scratch buffers in `rdk_ops`.
+
+Implementing `AIntsI32` scratch for `vertex_primitive` in `make_topology` (~line 1220).
+
+**M18 slice:** `make_topology` (`subdivide_refine.rs` ~1220) now builds `vertex_primitive` with `VertexPrimitiveScratch` — `AtomicI32` when `count ≤ i32::MAX`, else existing `AInts`. Output stays `Vec<i64>` in `Built`; topology untouched.
+
+**Verification:** `cargo t -p rdk_ops m18_vertex_primitive_scratch` (2 tests, ~18s compile wall) and `cargo t -p rdk_ops checked_loop_quad`.
+
+**Commits:** `ed08c91b` `M18: i32 scratch for vertex_primitive in make_topology`; `3b206df2` `docs: PROGRESS M18 partial` (11/21, six scratch arrays still `AInts` per ponytail).

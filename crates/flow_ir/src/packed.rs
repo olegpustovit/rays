@@ -647,7 +647,7 @@ struct Blk {
 // A summed or accumulated chunk whose additions stay in reference order.
 fn chunk_ordered(sh: &TS, chunk: usize) -> K<()> {
     let source = match &sh.inputs[0] {
-        Value::Float_array(d) | Value::Vec2_array(d) | Value::Vec3_array(d) | Value::Vec4_array(d) => d,
+        Value::Floats(1..=4, d) => d,
         _ => unreachable!("ordered add over a float array"),
     };
     let first = chunk * sh.blocks_per_chunk * sh.block_size;
@@ -1192,7 +1192,7 @@ fn fast_path(sh: &TS, fo: &Forcer<'_>) -> K<Option<Fast>> {
                 columns.push(borrowed.clone());
                 inputs.push(Arc::new(Vec::new()));
             }
-            (None, Value::Float_array(d), 1) | (None, Value::Vec2_array(d), 2) | (None, Value::Vec3_array(d), 3) | (None, Value::Vec4_array(d), 4) => {
+            (None, Value::Floats(actual @ 1..=4, d), width) if *actual == width => {
                 columns.push((0..width).map(|c| Column { data: d.clone(), offset: c as i64, stride: width as i64 }).collect());
                 inputs.push(d.clone());
             }
@@ -1259,13 +1259,7 @@ fn seconds_since(measure: &Measure, started: f64) -> f64 {
 }
 
 fn float_value_of(width: usize, data: Vec<f64>) -> Value {
-    let data = Arc::new(data);
-    match width {
-        2 => Value::Vec2_array(data),
-        3 => Value::Vec3_array(data),
-        4 => Value::Vec4_array(data),
-        _ => Value::Float_array(data),
-    }
+    Value::Floats(width, Arc::new(data))
 }
 
 fn scalar_value_of(width: usize, a: &[f64]) -> Value {
@@ -1295,8 +1289,7 @@ fn concrete(v: &Value) -> bool {
     matches!(
         v,
         Value::Int(_) | Value::Text(_) | Value::Float(_) | Value::Bool(_) | Value::Vec2(..) | Value::Vec3(..) | Value::Vec4(..)
-            | Value::Int_array(_) | Value::Text_array(_) | Value::Float_array(_) | Value::Vec2_array(_) | Value::Vec3_array(_)
-            | Value::Vec4_array(_)
+            | Value::Int_array(_) | Value::Text_array(_) | Value::Floats(1..=4, _)
     )
 }
 
@@ -1758,7 +1751,7 @@ fn texec(
         Instruction::Gather(array, index, width, component) => {
             let array = sh.table(*array)?;
             let data = match (array, *width) {
-                (Value::Float_array(d), 1) | (Value::Vec2_array(d), 2) | (Value::Vec3_array(d), 3) | (Value::Vec4_array(d), 4) => d,
+                (Value::Floats(actual @ 1..=4, d), width) if *actual as i64 == width => d,
                 _ => return Err(fail("E_ARRAY_TYPE", "Float lookup changed its packed element width.")),
             };
             for j in first..last {
@@ -1820,7 +1813,7 @@ fn texec(
                 }
             } else {
                 let direct = match (&sh.inputs[i], width) {
-                    (Value::Float_array(d), 1) | (Value::Vec2_array(d), 2) | (Value::Vec3_array(d), 3) | (Value::Vec4_array(d), 4) => Some(d),
+                    (Value::Floats(actual @ 1..=4, d), width) if *actual == width => Some(d),
                     _ => None,
                 };
                 match direct {
@@ -2193,7 +2186,7 @@ fn safe(sh: &TS, regs: &Region::Registers, tc: &TC, length: usize, guards: Vec<(
             _ => false,
         },
         Instruction::Gather(array, index, width, _) => match (cached_table(sh, *array), *width) {
-            (Some(Value::Float_array(data)), 1) | (Some(Value::Vec2_array(data)), 2) | (Some(Value::Vec3_array(data)), 3) | (Some(Value::Vec4_array(data)), 4) => {
+            (Some(Value::Floats(actual @ 1..=4, data)), want) if *actual as i64 == want => {
                 data.len() % *width as usize == 0 && valid_indices(sh, regs, tc, length, &guards, *index, data.len() / *width as usize)
             }
             _ => false,
@@ -2702,19 +2695,19 @@ fn run_typed(
     sh.contiguous = t.iteration == Iteration::Zip && sh.skip.is_empty();
     sh.ordered = ordered_add(t)
         && sh.borrowed[0].is_none()
-        && matches!((&sh.inputs[0], t.widths[0]), (Value::Float_array(_), 1) | (Value::Vec2_array(_), 2) | (Value::Vec3_array(_), 3) | (Value::Vec4_array(_), 4));
+        && matches!((&sh.inputs[0], t.widths[0]), (Value::Floats(actual @ 1..=4, _), want) if *actual as i64 == want);
     sh.fast = if sh.ordered { None } else { fast_path(&sh, &measured_uniform)? };
     let sh = sh;
     // A Cartesian projection repeats one checked row. Its unused outer input is concrete integers
     // or a checked range; removing those loads cannot hide a type or finite-value error.
     let outer_ok = |i: usize| sh.ranges[i].is_some() || matches!(sh.inputs[i], Value::Int_array(_));
     let repeated_row: Option<(usize, Arc<Vec<f64>>)> = match (t.iteration, &t.result, sh.skip.is_empty(), sh.inputs.as_slice(), t.code.as_slice(), t.outputs.as_slice()) {
-        (Iteration::Product, RegionResult::Collect, true, [_, Value::Float_array(row)], [Instruction::Int_input(0), Instruction::Input(1, 1, 0)], [o])
+        (Iteration::Product, RegionResult::Collect, true, [_, Value::Floats(1, row)], [Instruction::Int_input(0), Instruction::Input(1, 1, 0)], [o])
             if o.as_slice() == [1] && outer_ok(0) =>
         {
             Some((sh.lengths[0], row.clone()))
         }
-        (Iteration::Product, RegionResult::Collect, true, [_, Value::Float_array(row)], [Instruction::Input(1, 1, 0), Instruction::Int_input(0)], [o])
+        (Iteration::Product, RegionResult::Collect, true, [_, Value::Floats(1, row)], [Instruction::Input(1, 1, 0), Instruction::Int_input(0)], [o])
             if o.as_slice() == [0] && outer_ok(0) =>
         {
             Some((sh.lengths[0], row.clone()))
@@ -2953,10 +2946,7 @@ fn same_term(a: &Arc<Term>, b: &Arc<Term>) -> bool {
 
 fn same_value(a: &Value, b: &Value) -> bool {
     match (a, b) {
-        (Value::Float_array(x), Value::Float_array(y))
-        | (Value::Vec2_array(x), Value::Vec2_array(y))
-        | (Value::Vec3_array(x), Value::Vec3_array(y))
-        | (Value::Vec4_array(x), Value::Vec4_array(y)) => Arc::ptr_eq(x, y),
+        (Value::Floats(aw @ 1..=4, x), Value::Floats(bw, y)) if aw == bw => Arc::ptr_eq(x, y),
         (Value::Int_array(x), Value::Int_array(y)) => Arc::ptr_eq(x, y),
         (Value::Text_array(x), Value::Text_array(y)) => Arc::ptr_eq(x, y),
         _ => a == b,
@@ -3939,7 +3929,7 @@ pub mod host {
     /// A numeric array as a device input's floats (an integer array's copy kept by its identity).
     pub fn floats(v: &Value) -> Result<Option<Arc<Vec<f64>>>, Diagnostic> {
         Ok(match v {
-            Value::Float_array(values) | Value::Vec2_array(values) | Value::Vec3_array(values) | Value::Vec4_array(values) => Some(values.clone()),
+            Value::Floats(1..=4, values) => Some(values.clone()),
             Value::Int_array(values) if values.is_empty() => Some(Arc::new(Vec::new())),
             Value::Int_array(values) => Some(int_floats(values)?),
             _ => None,
@@ -4045,7 +4035,7 @@ pub mod host {
             let value = if known[i].is_some() {
                 match term.ty() {
                     Ty::Array(inner) if **inner == Ty::Int => Value::Int_array(Arc::new(Vec::new())),
-                    Ty::Array(inner) if **inner == Ty::Float => Value::Float_array(Arc::new(Vec::new())),
+                    Ty::Array(inner) if **inner == Ty::Float => Value::Floats(1, Arc::new(Vec::new())),
                     _ => return Err(KErr::Unsupported),
                 }
             } else if empty_product {
@@ -4053,10 +4043,10 @@ pub mod host {
                     Ty::Array(inner) => match **inner {
                         Ty::Int => Value::Int_array(Arc::new(Vec::new())),
                         Ty::Text => Value::Text_array(Arc::new(rays_math::text_array::TextArray::new())),
-                        Ty::Float => Value::Float_array(Arc::new(Vec::new())),
-                        Ty::Vec2 => Value::Vec2_array(Arc::new(Vec::new())),
-                        Ty::Vec3 => Value::Vec3_array(Arc::new(Vec::new())),
-                        Ty::Vec4 => Value::Vec4_array(Arc::new(Vec::new())),
+                        Ty::Float => Value::Floats(1, Arc::new(Vec::new())),
+                        Ty::Vec2 => Value::Floats(2, Arc::new(Vec::new())),
+                        Ty::Vec3 => Value::Floats(3, Arc::new(Vec::new())),
+                        Ty::Vec4 => Value::Floats(4, Arc::new(Vec::new())),
                         _ => return Err(KErr::Unsupported),
                     },
                     _ => return Err(KErr::Unsupported),
@@ -4319,10 +4309,7 @@ mod tests {
     fn value_same(a: &Value, b: &Value) -> bool {
         match (a, b) {
             (Value::Float(x), Value::Float(y)) => x.to_bits() == y.to_bits(),
-            (Value::Float_array(x), Value::Float_array(y))
-            | (Value::Vec2_array(x), Value::Vec2_array(y))
-            | (Value::Vec3_array(x), Value::Vec3_array(y))
-            | (Value::Vec4_array(x), Value::Vec4_array(y)) => floats_same(x, y),
+            (Value::Floats(aw @ 1..=4, x), Value::Floats(bw, y)) if aw == bw => floats_same(x, y),
             (a, b) => a == b,
         }
     }
@@ -4387,7 +4374,7 @@ mod tests {
         });
         assert!(completed, "A completed CPU result must not be abandoned just because its budget is now expired.");
         assert_eq!(runs.load(Ordering::Relaxed), 1);
-        assert_eq!(output.unwrap().unwrap(), Value::Float_array(Arc::new(vec![1.5; 5])));
+        assert_eq!(output.unwrap().unwrap(), Value::Floats(1, Arc::new(vec![1.5; 5])));
     }
 
     #[test]
@@ -4441,7 +4428,7 @@ mod tests {
             let first = evaluate(&run, &None, program.residual, &program.term).unwrap();
             let second = evaluate(&run, &None, program.residual, &program.term).unwrap();
             match (&first, &second) {
-                (Value::Float_array(a), Value::Float_array(b)) => assert!(Arc::ptr_eq(a, b)),
+                (Value::Floats(1, a), Value::Floats(1, b)) => assert!(Arc::ptr_eq(a, b)),
                 _ => panic!("Expected shared packed array captures."),
             }
             assert_eq!(runs.load(Ordering::Relaxed), 1);
@@ -4616,7 +4603,7 @@ mod tests {
                         assert!(same(&force(&packed, &live, &strict()), &reference));
                         let mut out = vec![vec![Some(vec![0.0; count])]];
                         force_into(&packed, &live, &strict(), &source, count as i64, &mut out).unwrap();
-                        let produced = Value::Float_array(Arc::new(out[0][0].take().unwrap()));
+                        let produced = Value::Floats(1, Arc::new(out[0][0].take().unwrap()));
                         assert!(same(&Ok(produced), &reference));
                         let mut skipped = vec![vec![None]];
                         force_into(&packed, &live, &strict(), &source, count as i64, &mut skipped).unwrap();
@@ -4649,7 +4636,7 @@ mod tests {
     fn scaled_noise_skips_untaken_overflow_and_refuses_selected_overflow() {
         let (_, packed) = compile_body("(map (fn [p] (if (> t 1e308) (noise3 (* p t)) 0.0)) (array/vec3 2051 [2.0 3.0 4.0]))", true);
         match force(&packed, &input::at_time(1e308), &strict()) {
-            Ok(Value::Float_array(values)) => assert!(values.iter().all(|x| *x == 0.0)),
+            Ok(Value::Floats(1, values)) => assert!(values.iter().all(|x| *x == 0.0)),
             other => panic!("Untaken scaled noise branch was evaluated: {other:?}"),
         }
         assert!(force(&packed, &input::at_time(f64::MAX), &strict()).is_err());

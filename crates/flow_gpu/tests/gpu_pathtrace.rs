@@ -21,7 +21,7 @@ const HELPERS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../c
 
 fn vec4(v: &Value) -> Vec<f64> {
     match v {
-        Value::Vec4_array(a) => (**a).clone(),
+        Value::Floats(4, a) => (**a).clone(),
         _ => panic!("vec4 array expected"),
     }
 }

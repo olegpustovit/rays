@@ -1,0 +1,8 @@
+Rays /Users/snowbear/WORK/GIT/rays dev. AGENTS.md ponytail. Wave M4 OR M9 (pick one, smallest diff).
+
+M4: editor_scope sync_scope — compare counts before materializing full profile (plan editor_scope.rs ~144,188,210).
+M9: panels::at — avoid clone in hot path OR reduce walk duplication if trivial (editor_core panels.rs).
+
+One commit "M4:" or "M9:". cargo check affected crate + one test filter. Update PROGRESS.md row only. No artifact.
+
+Return: commit, mechanism in one line.

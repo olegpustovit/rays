@@ -68,7 +68,7 @@ pub fn prepare(
         }
     }
     let signature = FnSignature { params: vec![Ty::Vec2], result: Ty::Vec4 };
-    let values = e::Host::map_function(site, path.clone(), &signature, function, &[Value::Vec2_array(Arc::new(uv))])?;
+    let values = e::Host::map_function(site, path.clone(), &signature, function, &[Value::Floats(2, Arc::new(uv))])?;
     let approx = if path.is_none() { Paths::new() } else { approx.unwrap_or_default() };
     let program = attribute_kernel::prepare(None, false, Some(approx), Some(Sink::Display("image/map".to_owned())), sources, inputs, &values)?;
     match Executor::packed_region(&program) {
@@ -139,7 +139,7 @@ pub fn node(state: Option<&e::State>, t: &T) -> node::T {
             let resolve: packed::Resolve = Arc::new(move |v| attribute_kernel::resolve(None, &lookup, v));
             let options = packed::ForceOptions { state: state.clone(), resolve: Some(resolve), ..Default::default() };
             match packed::force(&packed, context::input(ctx), &options)? {
-                Value::Vec4_array(rgba) => {
+                Value::Floats(4, rgba) => {
                     let image = sop::image::of_vec4(ctx, width, height, &rgba)?;
                     Ok(Cooked { payload: payload::T::Image(image), instances: None })
                 }
@@ -212,7 +212,7 @@ mod tests {
         assert_eq!(one, eight);
         assert_eq!(one.len(), 387 * 91 * 4);
         let reference = match Executor::force(&program(&kernel), &Executor::ForceOptions { reference: true, ..Default::default() }, &input::at_time(0.0)).unwrap() {
-            Value::Vec4_array(xs) => xs,
+            Value::Floats(4, xs) => xs,
             _ => panic!("vec4 pixels expected"),
         };
         let uv_byte = |i: i64, size: i64| {
@@ -281,7 +281,7 @@ mod tests {
                     assert_eq!(actual, walked);
                     assert_eq!(e::Host::state_values(&state), e::Host::state_values(&reference));
                     match actual {
-                        Value::Vec4_array(xs) => blues.push(xs[2]),
+                        Value::Floats(4, xs) => blues.push(xs[2]),
                         _ => panic!("vec4 pixels expected"),
                     }
                 }

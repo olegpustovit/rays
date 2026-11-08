@@ -1711,12 +1711,12 @@ pub mod private {
         let film_accum = live_film(t).accum.clone();
         let value = |name: &str| -> Value {
             if name == "accum" {
-                return Value::Vec4_array(std::sync::Arc::new(accum.to_vec()));
+                return Value::Floats(4, std::sync::Arc::new(accum.to_vec()));
             }
             // the history and order tables are the preview's and the resolve's (device-local on a discrete GPU, and
             // never read by the trace kernel)
             if matches!(name, "geo" | "pgeo" | "pcol") {
-                return Value::Vec4_array(std::sync::Arc::new(vec![0.; 4]));
+                return Value::Floats(4, std::sync::Arc::new(vec![0.; 4]));
             }
             if name == "order" {
                 return Value::Int_array(std::sync::Arc::new(vec![0]));
@@ -1727,17 +1727,17 @@ pub mod private {
             let bytes = b::read_buffer(&buffer, 0, 4 * length as i64).expect("table read");
             let a: Vec<f64> = (0..length).map(|i| f32::from_le_bytes(bytes[4 * i..4 * i + 4].try_into().unwrap()) as f64).collect();
             match ty {
-                flow_syntax::ty::Ty::Array(inner) if **inner == flow_syntax::ty::Ty::Vec4 => Value::Vec4_array(std::sync::Arc::new(a)),
-                flow_syntax::ty::Ty::Array(inner) if **inner == flow_syntax::ty::Ty::Vec3 => Value::Vec3_array(std::sync::Arc::new(a)),
+                flow_syntax::ty::Ty::Array(inner) if **inner == flow_syntax::ty::Ty::Vec4 => Value::Floats(4, std::sync::Arc::new(a)),
+                flow_syntax::ty::Ty::Array(inner) if **inner == flow_syntax::ty::Ty::Vec3 => Value::Floats(3, std::sync::Arc::new(a)),
                 flow_syntax::ty::Ty::Array(inner) if **inner == flow_syntax::ty::Ty::Int => Value::Int_array(std::sync::Arc::new(a.iter().map(|v| *v as i64).collect())),
-                _ => Value::Float_array(std::sync::Arc::new(a)),
+                _ => Value::Floats(1, std::sync::Arc::new(a)),
             }
         };
         let words: Vec<(String, Vec<f64>)> = values.iter().map(|(n, w)| (n.to_string(), w.clone())).collect();
         let tables_: Vec<(String, Value)> = types.iter().map(|(n, _)| (n.to_string(), value(n))).collect();
         let pixels = Value::Int_array(std::sync::Arc::new((0..n).collect()));
         match lisp_kernel::cpu(&kernels, words, tables_, pixels, "trace")? {
-            Value::Vec4_array(v) => Ok((*v).clone()),
+            Value::Floats(4, v) => Ok((*v).clone()),
             _ => Err("path tracer CPU film is not vec4".to_string()),
         }
     }

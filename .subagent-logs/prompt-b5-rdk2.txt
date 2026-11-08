@@ -1,0 +1,3 @@
+Rays dev AGENTS.md ponytail. B5: drop rdk facade from flow_gpu OR sop (one crate).
+
+Same pattern as 35df934e flow_native → rdk_core direct deps. cargo check touched + one consumer. Commit "B5:". PROGRESS B5 row. No artifact.

@@ -1,0 +1,16 @@
+Working...
+Searching for rdk re-exports and checking PROGRESS for B5 context.
+
+
+
+`flow_native` only touches `rdk_core` symbols—dropping the `rdk` facade there.
+
+**Commit:** `35df934e` — `B5: drop rdk facade from flow_native (use rdk_core).`
+
+**Change:** `flow_native` dropped the `rdk` path dependency; uses `rdk_core` directly. All `rdk::` in `workspace_gpu.rs`, `workspace_images.rs`, and `test_workspace_gpu_service.rs` are now `rdk_core::` (geometry, attribute, topology, packed only).
+
+**Check:** `cargo check -p flow_native -p rays_editor` — finished OK.
+
+**PROGRESS:** B5 row + session log updated in that commit.
+
+**Still on `rdk` facade:** `sop`, `flow_sop`, `flow_gpu` (dev-deps/tests), `rays_editor`.

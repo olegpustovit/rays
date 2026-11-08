@@ -851,7 +851,7 @@ impl Lowerer {
         match &sequence {
             Selected(items, index) => self.select(s, source, &Ty::Int, items, index, &mut |l, sc, v| l.sequence_count(sc, source, v)),
             Known(Value::List(xs)) => Ok(int(xs.len() as i64)),
-            Known(v @ (Value::Text_array(_) | Value::Int_array(_) | Value::Float_array(_) | Value::Vec2_array(_) | Value::Vec3_array(_) | Value::Vec4_array(_))) => {
+            Known(v @ (Value::Text_array(_) | Value::Int_array(_) | Value::Floats(1..=4, _))) => {
                 Ok(int(V::array_length(v)? as i64))
             }
             _ => {
@@ -3443,7 +3443,7 @@ mod tests {
         let mixed = program("(let* [colors (array/vec4 (int t) [-0.0 1.0 2.0 3.0])] (test/storage colors :later (float (array/count colors))))");
         assert_eq!(count_descriptors(&mixed), 0);
         match run(&mixed, 3.).1 {
-            Some(Value::Vec4_array(data)) => assert_eq!(data.len(), 12),
+            Some(Value::Floats(4, data)) => assert_eq!(data.len(), 12),
             other => panic!("{other:?}"),
         }
         let ambiguous = program("(let* [colors (array/vec4 (int t) [-0.0 1.0 2.0 3.0]) alias (if (> t 1.) colors colors)] (test/storage alias))");

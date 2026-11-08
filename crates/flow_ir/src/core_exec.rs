@@ -187,7 +187,7 @@ fn arena_kill(value: &mut Value) {
         Value::Int_array(data) => {
             if let Some(d) = Arc::get_mut(data) { d.iter_mut().for_each(|x| *x = i64::MIN); }
         }
-        Value::Float_array(data) | Value::Vec2_array(data) | Value::Vec3_array(data) | Value::Vec4_array(data) => {
+        Value::Floats(1..=4, data) => {
             if let Some(d) = Arc::get_mut(data) { d.iter_mut().for_each(|x| *x = f64::NAN); }
         }
         _ => {}
@@ -205,7 +205,7 @@ fn arena_die(a: &mut Arena, values: &mut [Value], n: i64) {
             -1 => {}
             buffer => {
                 a.buffers[ix(buffer)] = match value {
-                    Value::Vec2_array(d) | Value::Vec3_array(d) | Value::Vec4_array(d) => Value::Float_array(d),
+                    Value::Floats(_, d) => Value::Floats(1, d),
                     other => other,
                 };
             }
@@ -218,10 +218,7 @@ pub fn phys_eq(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Int_array(x), Value::Int_array(y)) => Arc::ptr_eq(x, y),
         (Value::Text_array(x), Value::Text_array(y)) => Arc::ptr_eq(x, y),
-        (Value::Float_array(x), Value::Float_array(y))
-        | (Value::Vec2_array(x), Value::Vec2_array(y))
-        | (Value::Vec3_array(x), Value::Vec3_array(y))
-        | (Value::Vec4_array(x), Value::Vec4_array(y)) => Arc::ptr_eq(x, y),
+        (Value::Floats(aw @ 1..=4, x), Value::Floats(bw, y)) if aw == bw => Arc::ptr_eq(x, y),
         (Value::No_geo, Value::No_geo) => true,
         (Value::Int(x), Value::Int(y)) => x == y,
         (Value::Float(x), Value::Float(y)) => x.to_bits() == y.to_bits(),
@@ -246,7 +243,7 @@ fn arena_ran(a: &mut Arena, result: i64, args: &[i64], d: &c::Region::Destinatio
     if a.plan.first[ix(result)] >= 0 {
         let size = match value {
             Value::Int_array(data) if ran => (2 * data.len() as i64) + 1,
-            Value::Float_array(data) | Value::Vec2_array(data) | Value::Vec3_array(data) | Value::Vec4_array(data) if ran => {
+            Value::Floats(1..=4, data) if ran => {
                 2 * data.len() as i64
             }
             _ => -1,
@@ -631,12 +628,7 @@ fn primitive(track: bool, locals: &[Ty], operation: &Primitive, args: &[(String,
                                 return Err(v::fail("E_ARRAY_RANGE", "Array length is outside native storage bounds."));
                             }
                             let data = Arc::new(vec![0.0f64; (count * width) as usize]);
-                            Ok(match width {
-                                2 => Value::Vec2_array(data),
-                                3 => Value::Vec3_array(data),
-                                4 => Value::Vec4_array(data),
-                                _ => Value::Float_array(data),
-                            })
+                            Ok(Value::Floats(width as usize, data))
                         }
                     }
                 }
@@ -1057,10 +1049,7 @@ fn same_input(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::List(x), Value::List(y)) => x.len() == y.len() && x.len() <= 4096 && x.iter().zip(y.iter()).all(|(p, q)| same_input(p, q)),
         (Value::Record(x), Value::Record(y)) => x.len() == y.len() && x.iter().zip(y.iter()).all(|((n, p), (m, q))| n == m && same_input(p, q)),
-        (Value::Float_array(x), Value::Float_array(y))
-        | (Value::Vec2_array(x), Value::Vec2_array(y))
-        | (Value::Vec3_array(x), Value::Vec3_array(y))
-        | (Value::Vec4_array(x), Value::Vec4_array(y)) => same_floats(x, y),
+        (Value::Floats(aw @ 1..=4, x), Value::Floats(bw, y)) if aw == bw => same_floats(x, y),
         (Value::Float(x), Value::Float(y)) => x.to_bits() == y.to_bits(),
         (Value::Vec2(a, b), Value::Vec2(c, d)) => a.to_bits() == c.to_bits() && b.to_bits() == d.to_bits(),
         (Value::Vec3(a, b, c), Value::Vec3(d, e, f)) => a.to_bits() == d.to_bits() && b.to_bits() == e.to_bits() && c.to_bits() == f.to_bits(),
@@ -2643,7 +2632,7 @@ fn _unused(_: &Draw) {}
 /// caller refreshes the builder's aliases).
 fn store_value(target: &mut Value, i: i64, x: &Value) -> Result<(), Diagnostic> {
     let range_error = || v::fail("E_LIST_RANGE", "Core store is outside its sequence.");
-    let width = match target { Value::Vec2_array(_) => 2, Value::Vec3_array(_) => 3, Value::Vec4_array(_) => 4, _ => 1 };
+    let width = match target { Value::Floats(width, _) => *width, _ => 1 };
     match target {
         Value::Text_array(data) => {
             if i < 0 || i as usize >= data.len() { return Err(range_error()); }
@@ -2662,7 +2651,7 @@ fn store_value(target: &mut Value, i: i64, x: &Value) -> Result<(), Diagnostic> 
             if i < 0 || i as usize >= data.len() { return Err(range_error()); }
             v::int_array_put(Arc::make_mut(data).as_mut_slice(), i as usize, x)
         }
-        Value::Float_array(data) | Value::Vec2_array(data) | Value::Vec3_array(data) | Value::Vec4_array(data) => {
+        Value::Floats(1..=4, data) => {
             if i < 0 || i as usize >= data.len() / width { return Err(range_error()); }
             v::array_put(Arc::make_mut(data).as_mut_slice(), width, i as usize, x)
         }

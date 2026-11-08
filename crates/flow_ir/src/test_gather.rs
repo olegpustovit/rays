@@ -96,10 +96,10 @@ fn array(ty: &Ty, count: usize) -> Value {
     let p = [-0., 0., f64::from_bits(1), 0.25, -0.75];
     let values = Arc::new((0..count * width).map(|i| p[i % 5]).collect::<Vec<f64>>());
     match width {
-        1 => Value::Float_array(values),
-        2 => Value::Vec2_array(values),
-        3 => Value::Vec3_array(values),
-        _ => Value::Vec4_array(values),
+        1 => Value::Floats(1, values),
+        2 => Value::Floats(2, values),
+        3 => Value::Floats(3, values),
+        _ => Value::Floats(4, values),
     }
 }
 fn recorded(ty: &Ty, body: &str) -> Value {
@@ -313,7 +313,7 @@ fn skips_force_into_and_trust_boundaries() {
     // Iteration skips exclude the body, while discarded sinks still execute it.
     let value = recorded(&arr(Ty::Int), "(for [i (array/range 13 :type int)] :skip [4] (if (int/eq i 4) (array/nth data -1) (int/add (array/nth data (int/mod i 3)) (frame/index))))");
     assert_eq!(bits(&ok(force_r(&pk(&value), &live, &resolve))), bits(&ok(reference_r(&value, &live, &resolve))));
-    let value = instantiate(Some(&Value::Float_array(Arc::new(vec![0., -0., 1.]))), &arr(Ty::Float), "(fn [(index : int)] (array/nth data index))", vec![3]);
+    let value = instantiate(Some(&Value::Floats(1, Arc::new(vec![0., -0., 1.]))), &arr(Ty::Float), "(fn [(index : int)] (array/nth data index))", vec![3]);
     let column_source: packed::ColumnSource = Arc::new(|_, _| Ok(None));
     let mut outputs = vec![vec![None]];
     let forced = packed::force_into(&pk(&value), &live, &packed::ForceOptions { strict: true, ..Default::default() }, &column_source, 1, &mut outputs).map(|_| Value::Int(0));
@@ -322,7 +322,7 @@ fn skips_force_into_and_trust_boundaries() {
     let ordered = instantiate(None, &arr(Ty::Int), "(fn [(index : int)] (array/nth data (int/div index 0)))", vec![0]);
     let bad = instantiate(None, &arr(Ty::Float), "(fn [(index : int)] (array/nth data index))", vec![0]);
     for x in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-        let resolve = ok_value(Value::Float_array(Arc::new(vec![x])));
+        let resolve = ok_value(Value::Floats(1, Arc::new(vec![x])));
         same_error(&force_r(&pk(&bad), &live, &resolve), &reference_r(&bad, &live, &resolve));
     }
     let empty = instantiate(None, &arr(Ty::Int), "(fn [(index : int)] (array/nth data index))", vec![]);
@@ -378,7 +378,7 @@ fn borrowed_columns_are_not_written() {
     let borrowed = recorded(&arr(Ty::Float), &format!("(map (fn [x] (array/nth data (int/mod (int x) 3))) (array/range {n}))"));
     let storage: Arc<Vec<f64>> = Arc::new((0..2 * n + 1).map(|i| if i >= 2 && i % 2 == 0 { ((i - 2) / 2) as f64 } else { f64::NAN }).collect());
     let original = format!("{:?}", float_bits_of(&storage));
-    let resolve = ok_value(Value::Float_array(Arc::new(vec![-0., 0., 0.25])));
+    let resolve = ok_value(Value::Floats(1, Arc::new(vec![-0., 0., 0.25])));
     let column_source: packed::ColumnSource = {
         let storage = storage.clone();
         Arc::new(move |_, _| Ok(Some(vec![packed::Column { data: storage.clone(), offset: 2, stride: 2 }])))
@@ -386,7 +386,7 @@ fn borrowed_columns_are_not_written() {
     let mut outputs = vec![vec![Some(vec![0.; n])]];
     ok(packed::force_into(&pk(&borrowed), &live, &packed::ForceOptions { strict: true, resolve: Some(resolve.clone()), ..Default::default() }, &column_source, n as i64, &mut outputs));
     assert_eq!(format!("{:?}", float_bits_of(&storage)), original);
-    let output = Value::Float_array(Arc::new(outputs[0][0].clone().unwrap()));
+    let output = Value::Floats(1, Arc::new(outputs[0][0].clone().unwrap()));
     assert_eq!(bits(&output), bits(&ok(reference_r(&borrowed, &live, &resolve))));
 }
 fn float_bits_of(a: &[f64]) -> Vec<u64> {
@@ -426,7 +426,7 @@ fn one_lane_copies_constants_and_uniforms() {
     let live = live_at(0.25);
     let cases: Vec<(Ty, Value, String, Value)> = vec![
         (Ty::Int, ints(&[MAX_INT]), MIN_INT.to_string(), Value::Int(9007199254740993)),
-        (Ty::Float, Value::Float_array(Arc::new(vec![f64::from_bits(1)])), "-0.0".into(), Value::Float(-0.)),
+        (Ty::Float, Value::Floats(1, Arc::new(vec![f64::from_bits(1)])), "-0.0".into(), Value::Float(-0.)),
         (Ty::Text, texts(&[b"\xff\0"]), "\"constant\"".into(), Value::Text(b"\x80\0uniform".to_vec())),
     ];
     let thread = std::thread::current().id();
@@ -506,7 +506,7 @@ fn malformed_public_region_input_is_checked_when_selected() {
     let row = builder.push(None, term.ty(), form, flow_check::term_arena::Draft::RefBinding("bad_storage".into(), vec![]));
     let term = builder.freeze().handle(row);
     for count in [1usize, 2049] {
-        let rid = ok(e::Residual::with_bindings(rid, &term, &[("bad_storage".to_string(), Value::Float_array(Arc::new(vec![0.; count])))]));
+        let rid = ok(e::Residual::with_bindings(rid, &term, &[("bad_storage".to_string(), Value::Floats(1, Arc::new(vec![0.; count])))]));
         for selected in [false, true] {
             let rebuild = Region::Rebuild {
                 sources: Some(vec![(rid, Arc::new(term.clone()))]),
@@ -963,7 +963,7 @@ fn list_tables_exact_widths_and_range_guards() {
         other => other.clone(),
     });
     for index in [-1., 3., 0.5, 2.0000000001, f64::MAX] {
-        let value = ok(e::Host::map_function(None, None, &FnSignature { params: vec![Ty::Float], result: Ty::Int }, closure, &[Value::Float_array(Arc::new(vec![index]))]));
+        let value = ok(e::Host::map_function(None, None, &FnSignature { params: vec![Ty::Float], result: Ty::Int }, closure, &[Value::Floats(1, Arc::new(vec![index]))]));
         let actual = force(&pk(&value), &live);
         assert_eq!(actual.as_ref().err().expect("range error").code, "E_LIST_RANGE");
         same_error(&packed_force(&pk(&value), &live, false, None), &force_reference(&value, &live));
@@ -1023,14 +1023,14 @@ fn text_select_reference_inside_domains() {
 fn index_error_versus_table_source_errors() {
     let live = live_at(0.25);
     let ordered = instantiate(None, &arr(Ty::Int), "(fn [(index : int)] (array/nth data (int/div index 0)))", vec![0]);
-    for returned in [Value::Float_array(Arc::new(vec![1.])), source_value("probe/table", arr(Ty::Int), vec![])] {
+    for returned in [Value::Floats(1, Arc::new(vec![1.])), source_value("probe/table", arr(Ty::Int), vec![])] {
         let resolve = ok_value(returned);
         same_error(&force_r(&pk(&ordered), &live, &resolve), &reference_r(&ordered, &live, &resolve));
     }
     let bad = instantiate(None, &arr(Ty::Text), "(fn [(index : int)] (array/nth data (int/div index 0)))", vec![0]);
     let failing = resolver(|_| Err(data_source_error("E_DATA_SOURCE", "Text source failed", Some("\u{3}"))));
     same_error(&force_r(&pk(&bad), &live, &failing), &reference_r(&bad, &live, &failing));
-    for returned in [Value::Float_array(Arc::new(vec![0.])), source_value("probe/table", arr(Ty::Text), vec![])] {
+    for returned in [Value::Floats(1, Arc::new(vec![0.])), source_value("probe/table", arr(Ty::Text), vec![])] {
         let resolve = ok_value(returned);
         same_error(&force_r(&pk(&bad), &live, &resolve), &reference_r(&bad, &live, &resolve));
     }

@@ -1,0 +1,36 @@
+Working...
+Running Wave B2: locating the plan and current Cargo profile setup before cold/warm `cargo check -p rays_editor` A/B.
+
+Baseline is global `dev` opt-level 1. Running cold/warm `cargo check -p rays_editor`, then A/B with per-package opt-level 0 on the five off-hot-path UI crates.
+
+Adding per-crate opt-level=0 overrides and re-measuring.
+
+Checking debug-run impact on an editor path (plan: no runtime regression):
+
+Restoring broken `flow_check` WIP so we can run the debug-run A/B.
+
+Using session start measurements (workspace broken by in-flight B5). Updating PROGRESS.md and restoring Cargo.toml.
+
+Fixing accidental inclusion of staged B1 `flow_check` changes in the docs commit.
+
+## B2 result: **KEEP** (`96fab43d`)
+
+Per-package `opt-level = 0` on the five UI crates off the `rays check` hot path; workspace dev stays at `opt-level = 1` for `flow_check` / `flow_ir` / `flow_eval`.
+
+### Times (`cargo clean -p` ×5 → `cargo check -p rays_editor`, M1)
+
+| Config | Cold wall (`real`) | Cargo `Finished` (cold) | Cargo `Finished` (warm) |
+|--------|--------------------|-------------------------|-------------------------|
+| **O1** — no UI overrides (pre-B2) | 6.94 s | 6.89 s | 0.02 s |
+| **O0** — `rays_editor`, `pxui_graph`, `editor_document`, `flow_graph`, `flow_native` | 3.75 s | 3.70 s | 0.02 s |
+
+Cold codegen on this canary: **−3.2 s (~46%)**; warm incremental unchanged in noise.
+
+### Debug-run
+
+`rays check` path untouched (those crates not on it). Micro-test `editor_document::settings::tests::none_is_one_shared_value` at **0.054 s** on O0 build — no measured regression vs O1 on that case.
+
+### Repo state
+
+- **Cargo.toml:** kept — already in `96fab43d`
+- **PROGRESS.md:** §B2 table + decision in `595f8838`

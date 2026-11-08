@@ -1,0 +1,63 @@
+Working...
+Gathering PROGRESS.md, port-simplification index, and how waves are tracked against HEAD.
+
+Verifying HEAD against PROGRESS commit evidence and review logs.
+
+## Snapshot
+
+**HEAD:** `aa975efb` — docs-only tip; **61** code commits since plan baseline `6802a325` (~31 non-`PROGRESS` subjects). **HTML mirror** still pinned `dev @ 6802a325`; `plan-seed` JSON has **only A1** done.
+
+---
+
+## Counts per wave (63 IDs)
+
+| Wave | PROGRESS.md (done / active / pending) | Git @ HEAD (matches PROGRESS claims) |
+|------|--------------------------------------|--------------------------------------|
+| **A** | 8 / — / — | 8 IDs with landing commits (`6802a325`…`3a293e9b`, A2–A8) |
+| **B** | 5 / **B1** / — | B0,B2,B3,B4 done; **B5** multi-commit; **B1** two commits (`533489ee`, `e16247cd`) — not closed |
+| **M** | 10 / — / 11 | M2,M4,M6–M12,M20 on HEAD; M1,M3,M5,M13–M19,M21 not landed |
+| **I** | 0 / — / 1 | no i64 / `ocaml_int` delete work |
+| **C** | 0 / — / 21 | none |
+| **D** | 0 / — / 6 | none |
+
+**Rollup (PROGRESS summary table):** **23** IDs counted toward progress (8+5+10), **1** active (**B1**), **39** pending, **1** partial (**B5**) inside the “5/6” B bucket.
+
+**PROGRESS ↔ git:** All **done** rows have matching commits; no ID where PROGRESS says done but git lacks evidence (per `review2.log` pattern, extended by later M/B commits).
+
+**PROGRESS ↔ HTML:** **~22-ID gap** — static seed/tracker vs live `PROGRESS.md`.
+
+**PROGRESS internal drift:** §Plan audit (L73) still says **~8/63**, “M/I/C/D not started”; summary table + session log say **~24/63**, M **10/21** — audit block is stale.
+
+**PROGRESS ↔ plan wording (residuals on HEAD):**
+- **B5:** `crates/rdk` still present; consumers moved to `rdk_core`/`rdk_ops`.
+- **A / deps:** `pxui` still depends on `ocaml_int` — plan defers to **I**; `editor_core` no longer pulls `rays`/`runtime_resources` (`3a293e9b`).
+- **A4:** PROGRESS marks done; plan row still allows scattered `guarded` / `ocaml_min|max` / `ldexp` / `format_g` (11 `fn guarded` sites remain).
+
+---
+
+## Partial IDs
+
+| ID | PROGRESS label | What’s left (plan / repo) |
+|----|----------------|---------------------------|
+| **B1** | active | Static op table started; scope stack / `llvm-lines` work open (`ponytail` on `PathId` stack; ~138× `Arc::new` in `op.rs` per PROGRESS) |
+| **B5** | done (partial) | `flow_sop_catalog` split landed; **`rdk` facade delete** + any remaining `editor_document`→`flow_sop` weight |
+
+No other IDs marked partial/active in PROGRESS.
+
+---
+
+## Next 5 highest plan-impact **pending** (`index.html`)
+
+Ranked by compile path, alloc measurements, and wave order (A∥B∥M∥I → C → D). **B1** is active, not pending — still #1 open impact overall (∼**−10 s/cascade**, 14 crates on `flow_check`).
+
+| Rank | ID | Why (plan evidence) |
+|------|-----|---------------------|
+| 1 | **I** | Drop `ocaml_int`; plain `i64` + spec; **1 crate**, fixes pxui dep hygiene; runs parallel with A |
+| 2 | **M1** | **~14k allocs/frame** on `gpu_sea`; interned routes — largest measured **pending** frame win (−5…10k) |
+| 3 | **M14** | `Value` 72→40 B; **222 sites**; −44% on list/slot/env nodes — next M-wave tranche after quick wins |
+| 4 | **C1** | OGPU driver closure records → traits; **−600…900** lines; compile “large”; unlocks **M5** |
+| 5 | **C3** | Atomics/mutex slots → `chunks_mut`; **−600…900** lines; faster debug; pairs **M17** |
+
+**Near-miss (partial, not pending):** finish **B5** — delete **`rdk`**; plan **−1…1.5 s/edit** on catalog chain.
+
+**Deferred by plan (pending but blocked on C):** **M3**→C6, **M5**→C1, **M15/M17**→C3 — high frame/cook impact, but wave M text lands them inside C.

@@ -1,0 +1,18 @@
+Working...
+B5: mirror 35df934e — drop the rdk facade in flow_gpu or sop; verifying current deps and PROGRESS.
+
+Target: `flow_gpu` — lib has no `rdk`; only three dev-dep tests use the facade.
+
+**B5 slice:** `flow_gpu` — same pattern as `35df934e` on `flow_native`.
+
+**Why `flow_gpu`:** `src/` never depended on `rdk`; only dev-deps did (`gpu_trace`, `gpu_triangles`, `gpu_sop_mesh`). `sop`/`flow_sop` still route most geometry through the facade.
+
+**Changes**
+- `Cargo.toml`: `rdk` out; `rdk_core` + `rdk_ops` (for `triangulate` in `gpu_triangles`)
+- Tests: `rdk_core::{geometry, topology, packed, cancel, error}`; `rdk_ops::triangulate`
+
+**Check:** `cargo check -p flow_gpu -p flow_native` — pass (~5.2s)
+
+**Commit:** `7b374363` — `B5: drop rdk facade from flow_gpu (use rdk_core/rdk_ops).`
+
+**PROGRESS:** B5 row + session log; deferred rdk delete: `sop` / `flow_sop` / `rays_editor`.

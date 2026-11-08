@@ -52,7 +52,7 @@ fn geometry_id(value: &Value) -> Option<i64> {
     }
 }
 fn float_array(v: Vec<f64>) -> Value {
-    Value::Float_array(Arc::new(v))
+    Value::Floats(1, Arc::new(v))
 }
 fn max_floats(width: usize) -> usize {
     op::MAX_WOSIZE / width.max(1)
@@ -513,12 +513,7 @@ fn interleave(count: usize, planes: &[&[f64]], grain: i64) -> Value {
 }
 
 fn wide_array(width: usize, values: Vec<f64>) -> Value {
-    match width {
-        1 => Value::Float_array(Arc::new(values)),
-        2 => Value::Vec2_array(Arc::new(values)),
-        3 => Value::Vec3_array(Arc::new(values)),
-        _ => Value::Vec4_array(Arc::new(values)),
-    }
+    Value::Floats(width, Arc::new(values))
 }
 
 pub(crate) fn read(component: Option<&str>, owner: Owner, kind: &str, name: &str, g: &geometry::T) -> Result<Value, Diagnostic> {
@@ -529,7 +524,7 @@ pub(crate) fn read(component: Option<&str>, owner: Owner, kind: &str, name: &str
             (Storage::Int(data), None) => Ok(Value::Int_array(data.clone())),
             (Storage::Text(data), None) => Ok(Value::Text_array(data.clone())),
             (Storage::FloatArray(data), Some("offsets")) => Ok(Value::Int_array(FloatArray::View::view(data).offsets)),
-            (Storage::FloatArray(data), Some("values")) => Ok(Value::Float_array(FloatArray::View::view(data).values)),
+            (Storage::FloatArray(data), Some("values")) => Ok(Value::Floats(1, FloatArray::View::view(data).values)),
             (Storage::IntArray(data), Some("offsets")) => Ok(Value::Int_array(IntArray::View::view(data).offsets)),
             (Storage::IntArray(data), Some("values")) => Ok(Value::Int_array(IntArray::View::view(data).values)),
             _ => err("E_ATTR_TYPE", "This attribute storage requires its typed array foundation."),
@@ -542,7 +537,7 @@ pub(crate) fn read(component: Option<&str>, owner: Owner, kind: &str, name: &str
     }
     if let Storage::Float(data) = storage {
         if data.len() == count {
-            return Ok(Value::Float_array(data.clone()));
+            return Ok(Value::Floats(1, data.clone()));
         }
     }
     if count * width > 4096 && planes.iter().all(|p| p.len() == count) {
@@ -1065,7 +1060,7 @@ pub fn resident_vec3(g: &geometry::T, name: &str) -> Option<Arc<Vec<f64>>> {
         geometry::find_attribute(Owner::Point, name, g).and_then(|a| attribute::holder(&a))
     }?;
     match resident_of(&holder)? {
-        (Value::Vec3_array(placeholder), count) if count == geometry::point_count(g) => Some(placeholder),
+        (Value::Floats(3, placeholder), count) if count == geometry::point_count(g) => Some(placeholder),
         _ => None,
     }
 }
@@ -1074,8 +1069,8 @@ pub fn resident_vec3(g: &geometry::T, name: &str) -> Option<Arc<Vec<f64>>> {
 pub fn resident_color(g: &geometry::T) -> Option<(Arc<Vec<f64>>, usize)> {
     let holder = geometry::find_attribute(Owner::Point, "Cd", g).and_then(|a| attribute::holder(&a))?;
     match resident_of(&holder)? {
-        (Value::Vec3_array(p), count) if count == geometry::point_count(g) => Some((p, 3)),
-        (Value::Vec4_array(p), count) if count == geometry::point_count(g) => Some((p, 4)),
+        (Value::Floats(3, p), count) if count == geometry::point_count(g) => Some((p, 3)),
+        (Value::Floats(4, p), count) if count == geometry::point_count(g) => Some((p, 4)),
         _ => None,
     }
 }
@@ -1221,13 +1216,13 @@ pub fn write_storage(owned_fields: &[&str], grain: i64, owner: Owner, kind: &str
             have.sort();
             let mut want = names.to_vec();
             want.sort();
-            if have != want || !fields.iter().all(|(_, v)| matches!(v, Value::Float_array(_))) {
+            if have != want || !fields.iter().all(|(_, v)| matches!(v, Value::Floats(1, _))) {
                 return err("E_ATTR_TYPE", &format!("sop/with_attr requires {kind} storage."));
             }
             let planes: Vec<&Arc<Vec<f64>>> = names
                 .iter()
                 .filter_map(|n| match assoc(fields, n) {
-                    Some(Value::Float_array(d)) => Some(d),
+                    Some(Value::Floats(1, d)) => Some(d),
                     _ => None,
                 })
                 .collect();
@@ -1247,7 +1242,7 @@ pub fn write_storage(owned_fields: &[&str], grain: i64, owner: Owner, kind: &str
                 }
                 let values_owned = owned_fields.contains(&"values");
                 match (kind, values) {
-                    ("float_array", Value::Float_array(data)) => {
+                    ("float_array", Value::Floats(1, data)) => {
                         if !values_owned && !all_finite(data) {
                             return err("E_NONFINITE", "Attribute values must be finite.");
                         }
@@ -1265,7 +1260,7 @@ pub fn write_storage(owned_fields: &[&str], grain: i64, owner: Owner, kind: &str
         },
         _ => {
             let data = match (kind, values) {
-                ("float", Value::Float_array(d)) | ("vec2", Value::Vec2_array(d)) | ("vec3", Value::Vec3_array(d)) | ("vec4", Value::Vec4_array(d)) => Some(d),
+                ("float", Value::Floats(1, d)) | ("vec2", Value::Floats(2, d)) | ("vec3", Value::Floats(3, d)) | ("vec4", Value::Floats(4, d)) => Some(d),
                 _ => None,
             };
             let Some(values) = data else { return err("E_ATTR_TYPE", &format!("sop/with_attr requires {kind} storage.")) };
@@ -1350,7 +1345,7 @@ pub fn write_selected(grain: i64, owner: Owner, kind: &str, name: &str, values: 
     let constant = constant_source(values);
     // (row data, constant count)
     let vals: Option<(Vec<f64>, Option<usize>)> = match (kind, values) {
-        ("float", Value::Float_array(d)) | ("vec2", Value::Vec2_array(d)) | ("vec3", Value::Vec3_array(d)) | ("vec4", Value::Vec4_array(d)) => {
+        ("float", Value::Floats(1, d)) | ("vec2", Value::Floats(2, d)) | ("vec3", Value::Floats(3, d)) | ("vec4", Value::Floats(4, d)) => {
             Some((d.to_vec(), None))
         }
         (_, Value::Source(..)) => match &constant {
@@ -2740,7 +2735,7 @@ use rdk_ops::line_geometry;
             for domains in [1, 8] {
                 let mut session = sop::session::create(32, 64 * 1024 * 1024).unwrap();
                 let source = values.clone();
-                let node_for = |v: Vec<f64>| node(None, &NodeOptions { source: "xyz-write".into(), ..Default::default() }, "Cd", &Value::Vec3_array(Arc::new(v)), &[0], &[input.clone()]);
+                let node_for = |v: Vec<f64>| node(None, &NodeOptions { source: "xyz-write".into(), ..Default::default() }, "Cd", &Value::Floats(3, Arc::new(v)), &[0], &[input.clone()]);
                 let output = cook(&mut session, domains, &node_for(source.clone())).unwrap();
                 let packed = Float3::View::view(&match attribute::storage(&geometry::find_attribute(Owner::Point, "Cd", &output).unwrap()).unwrap() {
                     Storage::Float3(p) => p,
@@ -2903,7 +2898,7 @@ use rdk_ops::line_geometry;
                     dup.extend(fields.clone());
                     let mut int_x = vec![("x".to_owned(), Value::Int_array(Arc::new(vec![0; count])))];
                     int_x.extend(fields[1..].iter().cloned());
-                    let mut vec3_x = vec![("x".to_owned(), Value::Vec3_array(Arc::new(vec![])))];
+                    let mut vec3_x = vec![("x".to_owned(), Value::Floats(3, Arc::new(vec![])))];
                     vec3_x.extend(fields[1..].iter().cloned());
                     for f in [rest, extra, dup, int_x, vec3_x] {
                         error(&Value::Record(f), "E_ATTR_TYPE", None);
@@ -3109,7 +3104,7 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
 
     fn wide_bits(v: &Value) -> Vec<u64> {
         match v {
-            Value::Vec3_array(d) | Value::Float_array(d) => d.iter().map(|x| x.to_bits()).collect(),
+            Value::Floats(3, d) | Value::Floats(1, d) => d.iter().map(|x| x.to_bits()).collect(),
             _ => panic!("a float array"),
         }
     }
@@ -3165,7 +3160,7 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
                 }
             }
             match first.unwrap() {
-                Value::Vec3_array(data) => {
+                Value::Floats(3, data) => {
                     assert_eq!(data.len(), count * 3);
                     for i in 0..count {
                         assert_eq!(data[3 * i + 1].to_bits(), y[i].to_bits());
@@ -3185,12 +3180,12 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
                 other => panic!("valid reads as ints, got {other:?}"),
             }
             match read(&attr_source("sop/attr_checked", "P", &[("component", component("values"))])) {
-                Value::Vec3_array(v) => assert!(v.iter().all(|x| x.is_finite())),
+                Value::Floats(3, v) => assert!(v.iter().all(|x| x.is_finite())),
                 other => panic!("values read as vec3, got {other:?}"),
             }
             assert_eq!(read(&attr_source("sop/attr_planes", "P", &[("component", component("width"))])), Value::Int(3));
             match read(&attr_source("sop/attr_planes", "P", &[("component", component("y"))])) {
-                Value::Float_array(p) => assert_eq!(&p[..], &y[..]),
+                Value::Floats(1, p) => assert_eq!(&p[..], &y[..]),
                 other => panic!("plane reads as floats, got {other:?}"),
             }
             assert_eq!(read(&attr_source("sop/has_attr", "P", &[])), Value::Bool(true));

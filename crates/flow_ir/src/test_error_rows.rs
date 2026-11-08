@@ -133,7 +133,7 @@ fn malformed_context_cancellation_and_laziness() {
         Err(d) => assert!(d.code == "cancelled" && d.message == "mapper cancel" && d.cause.as_deref() == Some(b"original cancel")),
         _ => panic!("expected the mapper cancellation"),
     }
-    match V::error_row_index(&Value::Float_array(Arc::new(vec![1.])), None, None) {
+    match V::error_row_index(&Value::Floats(1, Arc::new(vec![1.])), None, None) {
         Err(d) => assert!(d.code == "E_DIAGNOSTIC_ROWS"),
         Ok(_) => panic!("float rows were accepted"),
     }

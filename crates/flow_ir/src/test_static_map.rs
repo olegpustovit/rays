@@ -36,7 +36,7 @@ fn check_source(source: &str) -> w::Workspace {
 
 fn same(a: &Value, b: &Value) -> bool {
     match (a, b) {
-        (Value::Float_array(_) | Value::Vec2_array(_) | Value::Vec3_array(_) | Value::Vec4_array(_), _) => {
+        (Value::Floats(1..=4, _), _) => {
             flow_syntax::value::ty_of(a) == flow_syntax::value::ty_of(b) && bits(a) == bits(b)
         }
         (Value::Record(x), Value::Record(y)) => x.len() == y.len() && x.iter().zip(y).all(|((n, v), (m, w))| n == m && same(v, w)),
@@ -120,7 +120,7 @@ fn kernel_makes_the_elements_past_the_head() {
     let profile = Profile::create(clock_zero());
     let fast = ok(Profile::sample(&profile, &mut || fast_static(&ws)));
     match result_of(&fast, "g") {
-        Value::Vec3_array(d) => assert!(d.len() == 60000 && d[3 * 19999] == 19999f64.sin()),
+        Value::Floats(3, d) => assert!(d.len() == 60000 && d[3 * 19999] == 19999f64.sin()),
         _ => panic!("a vec3 array"),
     }
     let maps = Profile::static_maps(&profile);
@@ -516,7 +516,7 @@ fn sop_deferral() {
             let done = ok(Executor::force_into(&Executor::ForceOptions { strict: true, ..Default::default() }, None, column_source, 8000, outputs.clone(), &production, &live));
             assert_eq!(done, Some(()));
             let planes = outputs.lock().unwrap();
-            let interleaved = Value::Vec3_array(Arc::new((0..24000).map(|i| planes[0][i % 3].as_ref().unwrap()[i / 3]).collect()));
+            let interleaved = Value::Floats(3, Arc::new((0..24000).map(|i| planes[0][i % 3].as_ref().unwrap()[i / 3]).collect()));
             assert!(same(&recorded(&eager, "points"), &interleaved));
         });
     }

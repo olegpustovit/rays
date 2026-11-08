@@ -5,7 +5,7 @@ use flow_syntax::value::Value;
 use rdk_core::{geometry as geo, packed::Float3, topology};
 use std::sync::Arc;
 
-fn floats(xs: Vec<f64>) -> Value { Value::Float_array(Arc::new(xs)) }
+fn floats(xs: Vec<f64>) -> Value { Value::Floats(1, Arc::new(xs)) }
 fn ints(xs: Vec<i64>) -> Value { Value::Int_array(Arc::new(xs)) }
 fn fields(n: usize) -> Vec<(String, Value)> {
     vec![("x".into(), floats((0..n).map(|i| i as f64).collect())),
@@ -17,7 +17,7 @@ fn replace(mut xs: Vec<(String, Value)>, key: &str, value: Value) -> Vec<(String
     xs
 }
 fn bad(value: &Value, number: f64) -> Value {
-    let Value::Float_array(xs) = value else { panic!("float array expected") };
+    let Value::Floats(1, xs) = value else { panic!("float array expected") };
     let mut xs = xs.as_ref().clone(); xs[0] = number; floats(xs)
 }
 fn args(points: Value) -> Vec<(String, Value)> {
@@ -28,14 +28,14 @@ fn ownership(n: usize) {
     for domains in [1, 4, 8] {
         parallel::run_unit(Some(domains), &|| {
             let mut input = fields(n);
-            let plane = |i: usize| { let Value::Float_array(xs) = &input[i].1 else { unreachable!() }; xs.as_ref().clone() };
+            let plane = |i: usize| { let Value::Floats(1, xs) = &input[i].1 else { unreachable!() }; xs.as_ref().clone() };
             let expected = geo::create(Float3::of_owned(plane(0), plane(1), plane(2)).unwrap(), topology::empty(n as i64).unwrap(), None, None, None).unwrap();
             let before = geometry_bytes(&expected);
             let actual = topology_kernel::mesh(&args(Value::Record(input.clone()))).unwrap();
             assert_eq!(geometry_bytes(&actual), before);
             let output = Float3::View::view(geo::positions(&actual)).unwrap();
             for ((_, value), output) in input.iter_mut().zip([&output.x, &output.y, &output.z]) {
-                let Value::Float_array(xs) = value else { unreachable!() };
+                let Value::Floats(1, xs) = value else { unreachable!() };
                 assert!(n == 0 || xs.as_ptr() != output.as_ptr(), "mesh must own coordinate planes");
                 if n > 0 { Arc::make_mut(xs)[0] = 99.0; }
             }

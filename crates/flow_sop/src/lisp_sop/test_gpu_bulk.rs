@@ -26,14 +26,14 @@ impl Gpu::Kernel for MockKernel{
         let count=inputs.count;let resolve=Arc::new(move|_:&Value|Ok(Value::Int(count)));
         let options=packed::ForceOptions{resolve:Some(resolve),..Default::default()};
         let values=packed::force_all(&self.program,&input::at_time(*self.calls.time.lock().unwrap()),&options)?;
-        let width=match &values[0]{Value::Float_array(_)=>1,Value::Vec2_array(_)=>2,Value::Vec3_array(_)=>3,Value::Vec4_array(_)=>4,_=>panic!("float output expected")};
+        let width=match &values[0]{Value::Floats(1, _)=>1,Value::Floats(2, _)=>2,Value::Floats(3, _)=>3,Value::Floats(4, _)=>4,_=>panic!("float output expected")};
         *self.result.lock().unwrap()=Some(values);
         Ok(Gpu::Value{identity:1,count,width,output:0,stamp:stamp as i64,gpu_seconds:None})
     }
     fn readback(&self,v:&Gpu::Value)->Result<Value,rays_diagnostic::Diagnostic>{
         let values=self.result.lock().unwrap();let value=&values.as_ref().unwrap()[v.output as usize];
         let round=|xs:&Arc<Vec<f64>>|Arc::new(xs.iter().map(|x|(*x as f32)as f64).collect());
-        Ok(match value{Value::Float_array(xs)=>Value::Float_array(round(xs)),Value::Vec2_array(xs)=>Value::Vec2_array(round(xs)),Value::Vec3_array(xs)=>Value::Vec3_array(round(xs)),Value::Vec4_array(xs)=>Value::Vec4_array(round(xs)),_=>panic!("float output expected")})
+        Ok(match value{Value::Floats(1, xs)=>Value::Floats(1, round(xs)),Value::Floats(2, xs)=>Value::Floats(2, round(xs)),Value::Floats(3, xs)=>Value::Floats(3, round(xs)),Value::Floats(4, xs)=>Value::Floats(4, round(xs)),_=>panic!("float output expected")})
     }
     fn planes(&self,v:&Gpu::Value)->Result<Gpu::Planes,rays_diagnostic::Diagnostic>{self.calls.planes.fetch_add(1,Ordering::SeqCst);Gpu::planes_of(&|v|self.readback(v),v)}
 }

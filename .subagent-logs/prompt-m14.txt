@@ -1,0 +1,5 @@
+Rays AGENTS.md ponytail. M14: GeoPayload + boxed Struct/Source in flow_syntax (done). Helpers: flow_syntax::value::{struct_value,source_value,GeoPayload}.
+
+Fix ALL remaining rustc errors from M14 across crates/: pattern Value::Struct(a,b,c)→Value::Struct(g) use g.name,g.ty,g.fields; Value::Source same; constructions→struct_value/source_value/Box::new(GeoPayload{...}).
+
+cargo check -p flow_eval -p flow_ir -p flow_check -p renderer -p flow_graph; cargo t -p flow_eval test_workspace_eval. Commit "M14:". PROGRESS M14 only. No artifact.

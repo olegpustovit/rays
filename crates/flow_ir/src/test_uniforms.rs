@@ -118,7 +118,7 @@ fn fixture(ty: &Ty, reducer: &str, over: Option<Op>, seed: Option<&str>) -> Fixt
     let (_, records) = ev.records.iter().find(|(p, _)| p == &vec!["g".to_string(), "tested".to_string()]).unwrap();
     let f = function_of(&records[0].1);
     let sum = e::Residual::function_bindings(f).into_iter().find(|(n, _)| n == "s").expect("binding s").1;
-    let uv = Value::Vec2_array(Arc::new((0..2049 * 2).map(|i| (i % 17) as f64 / 16.).collect()));
+    let uv = Value::Floats(2, Arc::new((0..2049 * 2).map(|i| (i % 17) as f64 / 16.).collect()));
     let value = ok(e::Host::map_function(None, None, &FnSignature { params: vec![Ty::Vec2], result: Ty::Vec4 }, f, &[uv]));
     let r = residual(&value);
     let packed = compile_region(r, true, None).unwrap_or_else(|ds| panic!("uniform compile {} reducer={reducer} seed={seed}: {}", flow_syntax::ty::to_string(ty), show_ds(&ds)));
@@ -167,10 +167,10 @@ fn data(ty: &Ty, count: usize, time: f64) -> Value {
         .collect();
     let a = Arc::new(values);
     match w_ {
-        1 => Value::Float_array(a),
-        2 => Value::Vec2_array(a),
-        3 => Value::Vec3_array(a),
-        _ => Value::Vec4_array(a),
+        1 => Value::Floats(1, a),
+        2 => Value::Floats(2, a),
+        3 => Value::Floats(3, a),
+        _ => Value::Floats(4, a),
     }
 }
 fn resolve_source(current: Arc<Mutex<Value>>) -> ResolveArc {
@@ -188,7 +188,7 @@ fn tiny_maps_in_recorded_call_records() {
     let ev = ok(e::r#static(&ws, true, None));
     let (_, records) = ev.records.iter().find(|(p, _)| p == &vec!["g".to_string(), "tested".to_string()]).unwrap();
     let f = function_of(&records[0].1);
-    let call = ok(e::Host::map_function(None, None, &FnSignature { params: vec![Ty::Float], result: Ty::Vec3 }, f, &[Value::Float_array(Arc::new((0..13).map(|i| i as f64).collect()))]));
+    let call = ok(e::Host::map_function(None, None, &FnSignature { params: vec![Ty::Float], result: Ty::Vec3 }, f, &[Value::Floats(1, Arc::new((0..13).map(|i| i as f64).collect()))]));
     let value = Value::Record(vec![("offset".into(), Value::Int(0)), ("call".into(), call)]);
     for strict in [false, true] {
         let program = ok(Executor::compile(&value, &Executor::CompileOptions { strict, ..Default::default() }));
@@ -211,7 +211,7 @@ fn one_force_lowers_129_residuals_once() {
     let ev = ok(e::r#static(&ws, true, None));
     let (_, records) = ev.records.iter().find(|(p, _)| p == &vec!["g".to_string(), "tested".to_string()]).unwrap();
     let f = function_of(&records[0].1);
-    let residuals: Vec<Value> = (0..129).map(|i| ok(e::Host::map_function(None, None, &FnSignature { params: vec![Ty::Float], result: Ty::Vec3 }, f, &[Value::Float_array(Arc::new(vec![i as f64]))]))).collect();
+    let residuals: Vec<Value> = (0..129).map(|i| ok(e::Host::map_function(None, None, &FnSignature { params: vec![Ty::Float], result: Ty::Vec3 }, f, &[Value::Floats(1, Arc::new(vec![i as f64]))]))).collect();
     let mut items = residuals.clone();
     items.push(residuals[0].clone());
     let value = Value::List(Arc::new(items));
@@ -239,11 +239,11 @@ fn strict_uniform_reductions() {
                     None,
                     &FnSignature { params: vec![Ty::Float], result: if integer { Ty::Int } else { Ty::Float } },
                     f,
-                    &[Value::Float_array(Arc::new((0..2049).map(|i| (i % 11) as f64).collect()))],
+                    &[Value::Floats(1, Arc::new((0..2049).map(|i| (i % 11) as f64).collect()))],
                 ));
                 let r = residual(&value);
                 let p = packed::compile(&Default::default(), r, &e::Residual::residual_view(r).unwrap().term).expect("packed region");
-                let current = Arc::new(Mutex::new(Value::Float_array(Arc::new(vec![1., 2., 3., 4.]))));
+                let current = Arc::new(Mutex::new(Value::Floats(1, Arc::new(vec![1., 2., 3., 4.]))));
                 let resolve = resolve_source(current);
                 let live = live_at(0.25);
                 let reference = reference_with(&value, &live, None, Some(resolve.clone()));
@@ -434,7 +434,7 @@ fn rollback_case_on(ty: Ty, failed_component: usize, check_state: bool, domain_l
                     let state = e::create_state();
                     let before = e::state_stamp(&state);
                     let values: Vec<f64> = (0..count * w_).map(|i| if i % w_ == failed_component && i / w_ >= count - 2 { 1e308 } else { 0. }).collect();
-                    let make = |vals: Vec<f64>| if w_ == 1 { Value::Float_array(Arc::new(vals)) } else { Value::Vec3_array(Arc::new(vals)) };
+                    let make = |vals: Vec<f64>| if w_ == 1 { Value::Floats(1, Arc::new(vals)) } else { Value::Floats(3, Arc::new(vals)) };
                     let current = Arc::new(Mutex::new(make(values)));
                     let original = bits(&current.lock().unwrap());
                     let resolve: ResolveArc = {
@@ -465,7 +465,7 @@ fn rollback_case_on(ty: Ty, failed_component: usize, check_state: bool, domain_l
                         assert_eq!(e::state_stamp(&state), before, "state not rolled back: gpu={gpu} count={count}");
                     }
                     assert_eq!(bits(&current.lock().unwrap()), original);
-                    *current.lock().unwrap() = if w_ == 1 { Value::Float_array(Arc::new(vec![1., 2., 3.])) } else { Value::Vec3_array(Arc::new(vec![1., 2., 3., 4., 5., 6.])) };
+                    *current.lock().unwrap() = if w_ == 1 { Value::Floats(1, Arc::new(vec![1., 2., 3.])) } else { Value::Floats(3, Arc::new(vec![1., 2., 3., 4., 5., 6.])) };
                     let expected = reference_with(&fx.value, &live, None, Some(resolve_source(current.clone())));
                     if gpu {
                         let prepared = ok(host::prepare(&fx.packed, &host::PrepareOptions { state: Some(state.clone()), resolve: Some(resolve.clone()), ..Default::default() }, &live));

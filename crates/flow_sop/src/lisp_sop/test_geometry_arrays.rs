@@ -8,7 +8,7 @@ use sop::{context as ctx, edit_graph as edit, node, session};
 use std::sync::Arc;
 
 fn ints(xs: Vec<i64>) -> Value { Value::Int_array(Arc::new(xs)) }
-fn floats(xs: Vec<f64>) -> Value { Value::Float_array(Arc::new(xs)) }
+fn floats(xs: Vec<f64>) -> Value { Value::Floats(1, Arc::new(xs)) }
 fn fixture(which: usize) -> geo::T {
     use topology::PrimitiveKind::{Polygon as P, OpenPolyline as O, ClosedPolyline as C};
     let (n, vp, po, kinds) = match which {
@@ -25,7 +25,7 @@ fn fields(g: &geo::T, planes: bool) -> Vec<(String, Value)> {
     let t = topology::View::view(geo::topology(g)).unwrap();
     let p = Float3::View::view(geo::positions(g)).unwrap();
     let points = if planes { Value::Record(vec![("x".into(),floats(p.x.to_vec())),("y".into(),floats(p.y.to_vec())),("z".into(),floats(p.z.to_vec()))]) }
-        else { Value::Vec3_array(Arc::new((0..p.x.len()).flat_map(|i|[p.x[i],p.y[i],p.z[i]]).collect())) };
+        else { Value::Floats(3, Arc::new((0..p.x.len()).flat_map(|i|[p.x[i],p.y[i],p.z[i]]).collect())) };
     vec![("points".into(),points),("vertex_points".into(),ints(t.vertex_points.to_vec())),("primitive_offsets".into(),ints(t.primitive_offsets.to_vec())),("kinds".into(),ints(t.primitive_kinds.iter().map(|i|*i as i64).collect()))]
 }
 fn source_arrays(planes: bool) -> String {
@@ -63,7 +63,7 @@ fn round_trip(which: usize, planes:bool) {
             session::close(&mut s);
         }}
         let actual=cook_once(1,&n);
-        fn mutate(v:&mut Value) { match v {Value::Record(fs)=>for (_,v) in fs {mutate(v)},Value::Int_array(xs)=>if !xs.is_empty(){Arc::make_mut(xs)[0]=99},Value::Float_array(xs)|Value::Vec3_array(xs)=>if !xs.is_empty(){Arc::make_mut(xs)[0]=99.0},_=>()}}
+        fn mutate(v:&mut Value) { match v {Value::Record(fs)=>for (_,v) in fs {mutate(v)},Value::Int_array(xs)=>if !xs.is_empty(){Arc::make_mut(xs)[0]=99},Value::Floats(1, xs)|Value::Floats(3, xs)=>if !xs.is_empty(){Arc::make_mut(xs)[0]=99.0},_=>()}}
         for (_,v) in &mut input {mutate(v)}
         assert_eq!(geometry_bytes(&actual),before,"mesh borrowed mutable Flow input");
     }
@@ -202,7 +202,7 @@ fn plane_input_finite_count_and_scalar_capacity_boundaries(){
     for reference in [false,true] {
         for domains in [1,4,8] {let values=replace(base.clone(),"points",Value::Record(vec![("x".into(),floats(vec![])),("y".into(),floats(vec![0.])),("z".into(),floats(vec![]))]));let n=arrays(reference,true,values);let mut s=new_session(64,64_000_000);assert_eq!(try_cook(&mut s,&context(domains,97),&n).err().unwrap().code,"E_ARRAY_COUNT");session::close(&mut s);}
         for axis in ["x","y","z"] {for bad in [f64::NAN,f64::INFINITY,f64::NEG_INFINITY] {
-            let mut values=base.clone();let Value::Record(p)=&mut values[0].1 else{unreachable!()};let Value::Float_array(xs)=&mut p.iter_mut().find(|(n,_)|n==axis).unwrap().1 else{unreachable!()};Arc::make_mut(xs)[0]=bad;
+            let mut values=base.clone();let Value::Record(p)=&mut values[0].1 else{unreachable!()};let Value::Floats(1, xs)=&mut p.iter_mut().find(|(n,_)|n==axis).unwrap().1 else{unreachable!()};Arc::make_mut(xs)[0]=bad;
             let result=lower::workspace(None,vec![],lower::Options{reference,inputs:Some(vec![("g".into(),values)]),..Default::default()},&parse(&source_arrays(true)));
             assert_eq!(result.err().expect("nonfinite plane input accepted").code,"E_NONFINITE");
         }}

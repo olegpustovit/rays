@@ -67,7 +67,7 @@ fn run_case(test:&str,empty_offset:bool){
     let bad=!matches!(case,"valid"|"dynamic"|"cpu"|"cancel"|"twice"|"points"|"overflow");
     if empty_offset{
         let backend=h::backend(&host);let scope=backend.residency(true).expect("native residency");let offset=scope.executor().fill(&Ty::Array(Box::new(Ty::Int)),1,&Value::Int(1)).unwrap().unwrap();
-        let args=vec![("points".into(),Value::Vec3_array(Arc::new(vec![]))),("vertex_points".into(),Value::Int_array(Arc::new(vec![]))),("primitive_offsets".into(),offset),("kinds".into(),Value::Int_array(Arc::new(vec![])))];
+        let args=vec![("points".into(),Value::Floats(3, Arc::new(vec![]))),("vertex_points".into(),Value::Int_array(Arc::new(vec![]))),("primitive_offsets".into(),offset),("kinds".into(),Value::Int_array(Arc::new(vec![])))];
         let d=topology_kernel_impl::mesh_resident(None,&*scope,&args).expect("resident path").err().expect("malformed empty offset accepted");assert_eq!((d.code.as_str(),d.message.as_str()),("E_TOPOLOGY","Topology: first primitive offset must be zero"));scope.executor().close();assert_eq!((h::stats(&host).payload_readback_bytes,h::stats(&host).validation_readback_bytes),(0,36));
     }
     let cancel=Arc::new(cancel::create());let closes=Arc::new(AtomicUsize::new(0));

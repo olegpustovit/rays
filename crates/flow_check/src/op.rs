@@ -234,7 +234,7 @@ fn joined<T:Copy>(a:&[T],b:&[T])->Result<Vec<T>,Diagnostic>{
 fn segment_buffer<T>(count:usize)->Result<Mutex<Vec<Option<T>>>,Diagnostic>{
     let mut result=value::array_buffer(count)?;result.resize_with(count,||None);Ok(Mutex::new(result))
 }
-fn value_width(v:&Value)->Result<usize,Diagnostic>{match v{Value::Int_array(_)|Value::Float_array(_)=>Ok(1),Value::Vec2_array(_)=>Ok(2),Value::Vec3_array(_)=>Ok(3),Value::Vec4_array(_)=>Ok(4),_=>Err(array_type_error())}}
+fn value_width(v:&Value)->Result<usize,Diagnostic>{match v{Value::Int_array(_)=>Ok(1),Value::Floats(width @ 1..=4, _)=>Ok(*width),_=>Err(array_type_error())}}
 fn offsets(values:Option<&Value>,count:usize)->Result<Option<Vec<i64>>,Diagnostic>{
     let Some(values)=values else{return Ok(None)};
     let Value::Int_array(xs)=values else{return Err(fail("E_ARRAY_TYPE","Segment offsets must be an integer array."))};
@@ -253,7 +253,7 @@ fn dispatch_rows(rows:Option<&(dyn Fn(i64,i64,&(dyn Fn(i64)+Send+Sync))+Send+Syn
 pub fn reduce_array(rows:Option<&(dyn Fn(i64,i64,&(dyn Fn(i64)+Send+Sync))+Send+Sync)>,operation:Reduction,offsets_value:Option<&Value>,values:&Value)->Result<Value,Diagnostic>{
     let count=value::array_length(values)?;let offsets=offsets(offsets_value,count)?;
     let segments=offsets.as_ref().map_or(1,|o|o.len()-1);
-    let (width,int)=match values{Value::Int_array(_)=>(1,true),Value::Float_array(_)=>(1,false),Value::Vec2_array(_)=>(2,false),Value::Vec3_array(_)=>(3,false),Value::Vec4_array(_)=>(4,false),_=>return Err(array_type_error())};
+    let (width,int)=match values{Value::Int_array(_)=>(1,true),Value::Floats(width @ 1..=4, _)=>(*width,false),_=>return Err(array_type_error())};
     if offsets.is_some()&&segments>MAX_WOSIZE/width{return Err(fail("E_ARRAY_RANGE","Array length is outside native storage bounds."))}
     if width==1&&int {
         let Value::Int_array(data)=values else{return Err(array_type_error())};
@@ -274,7 +274,7 @@ pub fn reduce_array(rows:Option<&(dyn Fn(i64,i64,&(dyn Fn(i64)+Send+Sync))+Send+
         }
         return Ok(Value::Int(reduce(0,count)?))
     }
-    let data=match values{Value::Float_array(x)|Value::Vec2_array(x)|Value::Vec3_array(x)|Value::Vec4_array(x)=>x,_=>return Err(array_type_error())};
+    let data=match values{Value::Floats(1..=4, x)=>x,_=>return Err(array_type_error())};
     let op_name=match (operation,offsets_value.is_some()){(Reduction::Sum,false)=>"array/sum",(Reduction::Minimum,false)=>"array/min",(Reduction::Maximum,false)=>"array/max",(Reduction::Sum,true)=>"array/segment_sum",(Reduction::Minimum,true)=>"array/segment_min",(Reduction::Maximum,true)=>"array/segment_max"};
     let reduce=|first:usize,finish:usize,component:usize|->Result<f64,Diagnostic>{
         if operation!=Reduction::Sum&&first==finish{return Err(fail("E_ARRAY_EMPTY","An extremum needs at least one array value."))}
@@ -289,7 +289,7 @@ pub fn reduce_array(rows:Option<&(dyn Fn(i64,i64,&(dyn Fn(i64)+Send+Sync))+Send+
         dispatch_rows(rows,segments,work)?;
         let mut output=output.into_inner().unwrap_or_else(|e|e.into_inner());let mut result=value::array_buffer(segments.checked_mul(width).ok_or_else(array_memory_error)?)?;
         for item in output.iter_mut(){match item.take(){Some(Ok(values))=>result.extend(values.into_iter().take(width)),Some(Err(error))=>return Err(error),None=>return Err(fail("E_ARRAY_OFFSETS","Segment row dispatcher did not visit every row."))}}
-        return Ok(match width{1=>Value::Float_array(Arc::new(result)),2=>Value::Vec2_array(Arc::new(result)),3=>Value::Vec3_array(Arc::new(result)),_=>Value::Vec4_array(Arc::new(result))})
+        return Ok(Value::Floats(width, Arc::new(result)))
     }
     let mut components=[0.;4];for c in 0..width{components[c]=reduce(0,count,c)?;}
     Ok(match width{1=>Value::Float(components[0]),2=>Value::Vec2(components[0],components[1]),3=>Value::Vec3(components[0],components[1],components[2]),_=>Value::Vec4(components[0],components[1],components[2],components[3])})
@@ -299,7 +299,7 @@ pub fn segment_argmax(rows:Option<&(dyn Fn(i64,i64,&(dyn Fn(i64)+Send+Sync))+Sen
     let segments=offsets.len()-1;let output=segment_buffer::<Result<i64,Diagnostic>>(segments)?;
     match values{
         Value::Int_array(data)=>{let work: &(dyn Fn(i64)+Send+Sync)=&|row|{if row>=0&&(row as u128)<segments as u128{let row=row as usize;let first=offsets[row] as usize;let finish=offsets[row+1] as usize;let value=if first==finish{-1}else{let mut best=first;for i in first+1..finish{if data[i]>data[best]{best=i}}best as i64};output.lock().unwrap_or_else(|e|e.into_inner())[row]=Some(Ok(value))}};dispatch_rows(rows,segments,work)?},
-        Value::Float_array(data)=>{let work: &(dyn Fn(i64)+Send+Sync)=&|row|{if row>=0&&(row as u128)<segments as u128{let row=row as usize;let first=offsets[row] as usize;let finish=offsets[row+1] as usize;let value=if first==finish{Ok(-1)}else{(||{fin("array/segment_argmax",data[first])?;let mut best=first;for i in first+1..finish{let x=fin("array/segment_argmax",data[i])?;if x>data[best]{best=i}}Ok(best as i64)})()};output.lock().unwrap_or_else(|e|e.into_inner())[row]=Some(value)}};dispatch_rows(rows,segments,work)?},
+        Value::Floats(1, data)=>{let work: &(dyn Fn(i64)+Send+Sync)=&|row|{if row>=0&&(row as u128)<segments as u128{let row=row as usize;let first=offsets[row] as usize;let finish=offsets[row+1] as usize;let value=if first==finish{Ok(-1)}else{(||{fin("array/segment_argmax",data[first])?;let mut best=first;for i in first+1..finish{let x=fin("array/segment_argmax",data[i])?;if x>data[best]{best=i}}Ok(best as i64)})()};output.lock().unwrap_or_else(|e|e.into_inner())[row]=Some(value)}};dispatch_rows(rows,segments,work)?},
         _=>return Err(fail("E_ARRAY_TYPE","array/segment_argmax needs an int or float array.")),
     }
     let mut output=output.into_inner().unwrap_or_else(|e|e.into_inner());let mut result=value::array_buffer(segments)?;
@@ -315,17 +315,17 @@ fn scatter_add(indices:&Value,values:&Value,size_value:&Value)->Result<Value,Dia
         for row in 0..n{let ix=indices[row];if ix<0||ix as u128>=size as u128{return Err(fail("E_ARRAY_RANGE","Scatter index is outside its output length."))}let i=ix as usize;result[i]=packed_ops::integer_apply(packed_ops::Integer::Iadd,result[i],source[row])?}
         return Ok(Value::Int_array(Arc::new(result)))
     }
-    let data=match values{Value::Float_array(x)|Value::Vec2_array(x)|Value::Vec3_array(x)|Value::Vec4_array(x)=>x,_=>return Err(fail("E_ARRAY_TYPE","Scatter values must be int, float or vector arrays."))};
+    let data=match values{Value::Floats(1..=4, x)=>x,_=>return Err(fail("E_ARRAY_TYPE","Scatter values must be int, float or vector arrays."))};
     let slots=size.checked_mul(width).ok_or_else(array_memory_error)?;let mut result=value::array_buffer(slots)?;result.resize(slots,0.);
     for row in 0..n{let ix=indices[row];if ix<0||ix as u128>=size as u128{return Err(fail("E_ARRAY_RANGE","Scatter index is outside its output length."))}for c in 0..width{let at=ix as usize*width+c;result[at]=fin("array/scatter_add",result[at]+fin("array/scatter_add",data[row*width+c])?)?}}
-    Ok(match width{1=>Value::Float_array(Arc::new(result)),2=>Value::Vec2_array(Arc::new(result)),3=>Value::Vec3_array(Arc::new(result)),_=>Value::Vec4_array(Arc::new(result))})
+    Ok(Value::Floats(width, Arc::new(result)))
 }
 fn grade(values:&Value,descending:bool)->Result<Value,Diagnostic>{
-    let n=match values{Value::Int_array(x)=>x.len(),Value::Float_array(x)=>{for v in x.iter(){fin("array/grade",*v)?;}x.len()},Value::Text_array(x)=>x.len(),_=>return Err(fail("E_ARRAY_TYPE","Grade keys must be int, float or text arrays."))};
+    let n=match values{Value::Int_array(x)=>x.len(),Value::Floats(1, x)=>{for v in x.iter(){fin("array/grade",*v)?;}x.len()},Value::Text_array(x)=>x.len(),_=>return Err(fail("E_ARRAY_TYPE","Grade keys must be int, float or text arrays."))};
     let mut order=value::array_buffer(n)?;order.extend((0..n).map(|i|i as i64));
     let cmp=|a:i64,b:i64|match values{
         Value::Int_array(x)=>x[a as usize].cmp(&x[b as usize]),
-        Value::Float_array(x)=>if x[a as usize]<x[b as usize]{std::cmp::Ordering::Less}else if x[a as usize]>x[b as usize]{std::cmp::Ordering::Greater}else{std::cmp::Ordering::Equal},
+        Value::Floats(1, x)=>if x[a as usize]<x[b as usize]{std::cmp::Ordering::Less}else if x[a as usize]>x[b as usize]{std::cmp::Ordering::Greater}else{std::cmp::Ordering::Equal},
         Value::Text_array(x)=>x[a as usize].cmp(&x[b as usize]),
         _=>unreachable!(),
     };
@@ -506,7 +506,7 @@ fn array_ops()->Vec<Op>{
     let range_body:Body=Arc::new(|_,_,args|{
         let ty=match args.opt_arg("type"){None=>Ty::Float,Some(v) if text_string(v)?=="int"=>Ty::Int,Some(v) if text_string(v)?=="float"=>Ty::Float,_=>return Err(fail("E_ARRAY_TYPE","array/range type is float or int."))};
         let count=checked_count("array/range",args.get_arg("count")?,MAX_WOSIZE)?;
-        if ty==Ty::Int{let mut values=value::array_buffer(count)?;values.extend((0..count).map(|i|i as i64));Ok(Value::Int_array(Arc::new(values)))}else{let mut values=value::array_buffer(count)?;values.extend((0..count).map(|i|i as f64));Ok(Value::Float_array(Arc::new(values)))}
+        if ty==Ty::Int{let mut values=value::array_buffer(count)?;values.extend((0..count).map(|i|i as i64));Ok(Value::Int_array(Arc::new(values)))}else{let mut values=value::array_buffer(count)?;values.extend((0..count).map(|i|i as f64));Ok(Value::Floats(1, Arc::new(values)))}
     });
     let mut range=op_with("array/range",context::value(),vec![("count",Ty::Int)],vec![],None,vec![("type",Ty::Text)],arr(Ty::Float),"Array",range_body);
     range.choices=vec![("type".into(),vec!["float".into(),"int".into()])];
@@ -523,12 +523,12 @@ fn array_ops()->Vec<Op>{
     let slice_out:Out=Arc::new(|ts|Ok(ts.first().filter(|t|matches!(t,Ty::Array(_))).cloned().unwrap_or(arr(Ty::Any))));
     ops.push(with_defaults(mk("array/slice",context::value(),signature(vec![("array",arr(Ty::Any)),("first",Ty::Int),("count",Ty::Int)],vec![],None,vec![]),slice_out,Arc::new(|_,_,a|{
         let source=a.get_arg("array")?;let first=checked_count("array/slice",a.get_arg("first")?,MAX_WOSIZE)?;let count=checked_count("array/slice",a.get_arg("count")?,MAX_WOSIZE)?;let n=value::array_length(source)?;if first>n||count>n-first{return Err(fail("E_ARRAY_RANGE","An array slice must be within its source."))}
-        match source{Value::Int_array(x)=>Ok(Value::Int_array(Arc::new(copied(&x[first..first+count])?))),Value::Text_array(x)=>Ok(Value::Text_array(Arc::new(copied_text(x,first,count)?))),Value::Float_array(x)=>Ok(Value::Float_array(Arc::new(copied(&x[first..first+count])?))),Value::Vec2_array(x)=>Ok(Value::Vec2_array(Arc::new(copied(&x[first*2..(first+count)*2])?))),Value::Vec3_array(x)=>Ok(Value::Vec3_array(Arc::new(copied(&x[first*3..(first+count)*3])?))),Value::Vec4_array(x)=>Ok(Value::Vec4_array(Arc::new(copied(&x[first*4..(first+count)*4])?))),_=>Err(fail("E_TYPE","Expected a packed array."))}
+        match source{Value::Int_array(x)=>Ok(Value::Int_array(Arc::new(copied(&x[first..first+count])?))),Value::Text_array(x)=>Ok(Value::Text_array(Arc::new(copied_text(x,first,count)?))),Value::Floats(width, x)=>Ok(Value::Floats(*width, Arc::new(copied(&x[first*width..(first+count)*width])?))),_=>Err(fail("E_TYPE","Expected a packed array."))}
     })),"Array"));
     let concat_out:Out=Arc::new(|ts|Ok(ts.first().filter(|t|matches!(t,Ty::Array(_))).cloned().unwrap_or(arr(Ty::Any))));
     ops.push(with_defaults(mk("array/concat",context::value(),signature(vec![("first",arr(Ty::Any)),("second",arr(Ty::Any))],vec![],None,vec![]),concat_out,Arc::new(|_,_,a|{let x=a.get_arg("first")?;let y=a.get_arg("second")?;concat_arrays(x,y)})),"Array"));
     let sum_out:Out=Arc::new(|ts|match ts.first(){Some(Ty::Array(t))=>Ok(t.as_ref().clone()),Some(Ty::Any)=>Ok(Ty::Any),_=>Ok(Ty::Any)});
-    ops.push(with_defaults(mk("array/sum",context::value(),signature(vec![("array",arr(Ty::Any))],vec![],None,vec![]),sum_out,Arc::new(|_,_,a|{let xs=a.get_arg("array")?;if matches!(xs,Value::Text_array(_)){return Err(fail("E_TYPE","array/sum adds numbers or matching-width vectors."))}if let Value::Int_array(values)=xs{let mut sum=0i64;for v in values.iter(){sum=packed_ops::integer_apply(packed_ops::Integer::Iadd,sum,*v)?}return Ok(Value::Int(sum))}let n=value::array_length(xs)?;let mut sum=match xs{Value::Int_array(_)=>Value::Int(0),Value::Vec2_array(_)=>Value::Vec2(0.,0.),Value::Vec3_array(_)=>Value::Vec3(0.,0.,0.),Value::Vec4_array(_)=>Value::Vec4(0.,0.,0.,0.),_=>Value::Float(0.)};for i in 0..n{sum=value::arith("array/sum",&|x,y|x+y,&sum,&value::array_get(xs,i as i64)?)?}Ok(sum)})),"Array"));
+    ops.push(with_defaults(mk("array/sum",context::value(),signature(vec![("array",arr(Ty::Any))],vec![],None,vec![]),sum_out,Arc::new(|_,_,a|{let xs=a.get_arg("array")?;if matches!(xs,Value::Text_array(_)){return Err(fail("E_TYPE","array/sum adds numbers or matching-width vectors."))}if let Value::Int_array(values)=xs{let mut sum=0i64;for v in values.iter(){sum=packed_ops::integer_apply(packed_ops::Integer::Iadd,sum,*v)?}return Ok(Value::Int(sum))}let n=value::array_length(xs)?;let mut sum=match xs{Value::Int_array(_)=>Value::Int(0),Value::Floats(2, _)=>Value::Vec2(0.,0.),Value::Floats(3, _)=>Value::Vec3(0.,0.,0.),Value::Floats(4, _)=>Value::Vec4(0.,0.,0.,0.),_=>Value::Float(0.)};for i in 0..n{sum=value::arith("array/sum",&|x,y|x+y,&sum,&value::array_get(xs,i as i64)?)?}Ok(sum)})),"Array"));
     for (name,op) in [("array/min",Reduction::Minimum),("array/max",Reduction::Maximum)]{
         let out:Out=Arc::new(|ts|match ts.first(){Some(Ty::Array(t)) if matches!(t.as_ref(),Ty::Int|Ty::Float|Ty::Vec2|Ty::Vec3|Ty::Vec4|Ty::Any)=>Ok(t.as_ref().clone()),_=>Err(fail("E_ARRAY_TYPE","Array reductions need int, float or vector arrays."))});
         ops.push(with_defaults(mk(name,context::value(),signature(vec![("array",arr(Ty::Any))],vec![],None,vec![]),out,Arc::new(move |_,_,a|reduce_array(None,op,None,a.get_arg("array")?))),"Array"));
@@ -914,7 +914,7 @@ mod tests{
         let range=find(&[],"array/range",&value_context).expect("range operator");
         assert_eq!(range.signature.pos,vec![("count".into(),Ty::Int)]);
         let args=vec![("count".into(),Value::Int(3))];
-        assert_eq!((range.body)(&input::at_time(0.),&|_,_|Err(fail("E_NODE","unexpected node")), &args).unwrap(),Value::Float_array(Arc::new(vec![0.,1.,2.])));
+        assert_eq!((range.body)(&input::at_time(0.),&|_,_|Err(fail("E_NODE","unexpected node")), &args).unwrap(),Value::Floats(1, Arc::new(vec![0.,1.,2.])));
         let typed=vec![("type".into(),arr(Ty::Int),Some(param::Value::Text(b"int".to_vec())))];
         assert_eq!(result_type(&range,&typed).unwrap(),arr(Ty::Int));
         let sum=find(&[],"array/segment_sum",&value_context).expect("segment sum operator");
@@ -953,16 +953,13 @@ mod ocaml_table {
 }
 
 fn concat_arrays(x:&Value,y:&Value)->Result<Value,Diagnostic>{
-    let width=match x{Value::Vec2_array(_)=>2,Value::Vec3_array(_)=>3,Value::Vec4_array(_)=>4,_=>1};
+    let width=match x{Value::Floats(width, _)=>*width,_=>1};
     let count=value::array_length(x)?.checked_add(value::array_length(y)?).ok_or_else(array_memory_error)?;
     if count>MAX_WOSIZE/width{return Err(fail("E_ARRAY_RANGE","Array length is outside native storage bounds."))}
     match (x,y){
         (Value::Int_array(a),Value::Int_array(b))=>Ok(Value::Int_array(Arc::new(joined(a,b)?))),
         (Value::Text_array(a),Value::Text_array(b))=>{let mut result=text_buffer(a.len().checked_add(b.len()).ok_or_else(array_memory_error)?)?;for text in a.iter().chain(b.iter()){result.push(text);}Ok(Value::Text_array(Arc::new(result)))},
-        (Value::Float_array(a),Value::Float_array(b))=>Ok(Value::Float_array(Arc::new(joined(a,b)?))),
-        (Value::Vec2_array(a),Value::Vec2_array(b))=>Ok(Value::Vec2_array(Arc::new(joined(a,b)?))),
-        (Value::Vec3_array(a),Value::Vec3_array(b))=>Ok(Value::Vec3_array(Arc::new(joined(a,b)?))),
-        (Value::Vec4_array(a),Value::Vec4_array(b))=>Ok(Value::Vec4_array(Arc::new(joined(a,b)?))),
+        (Value::Floats(aw, a),Value::Floats(bw, b)) if aw==bw=>Ok(Value::Floats(*aw, Arc::new(joined(a,b)?))),
         _=>Err(fail("E_ARRAY_TYPE","Concatenated arrays must have the same element type.")),
     }
 }

@@ -165,7 +165,7 @@ fn settled(r: &run::T, v: &phost::Inputs) -> Gpu::Planes { let p = kept(r, v); t
 fn len(p: Vec<Vec<f64>>) -> i64 { p.iter().map(|a| a.len() as i64).sum() }
 fn pinned(r: &run::T, v: &phost::Inputs) -> (Arc<Vec<f64>>, run::Pin) {
     let p = settled(r, v);
-    let stand_in = match p.resident.clone().unwrap() { Value::Float_array(a) | Value::Vec2_array(a) | Value::Vec3_array(a) | Value::Vec4_array(a) => a, _ => panic!("no stand-in") };
+    let stand_in = match p.resident.clone().unwrap() { Value::Floats(1..=4, a) => a, _ => panic!("no stand-in") };
     let pin = run::pin(&stand_in).expect("pin");
     p.release(true);
     (stand_in, pin)

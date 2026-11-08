@@ -1,0 +1,34 @@
+Working...
+Merging gpu_suite qualification bins per B3. Reading port-simplification docs, `rays_editor/Cargo.toml`, and existing gpu_suite tests.
+
+Consolidating into `gpu_editor` and shared `tests/support`; creating suite modules and updating paths.
+
+Unblocking the build: `store_buffer_mut` has a local borrow-check regression unrelated to B3.
+
+## B3 complete
+
+**Commit:** `5fdb5fb3`
+
+### `[[test]]` targets
+
+| Before (8) | After (2) |
+|---|---|
+| `window_editor_smoke` | `window_editor_smoke` |
+| `gpu_suite_t1` | **`gpu_editor`** (t1–t6 + native qualification) |
+| `gpu_suite_t2` | |
+| `gpu_suite_t3` | |
+| `gpu_suite_t4` | |
+| `gpu_suite_t5` | |
+| `gpu_suite_t6` | |
+| `gpu_native_qualification` | |
+
+Shared layout: `tests/support/{mod,shell,consistency,t3,t6}.rs`, suite wiring in `tests/suites/*.rs`, runner `tests/gpu_editor.rs`. Native scrub child via `current_exe` unchanged; qualification cases still subject to `RAYS_SLOW=1` / `tools/t` slow timeout like before.
+
+### Verification
+
+```text
+cargo t -p rays_editor --features test-hooks --test gpu_editor run_lowering
+# run_lowering … ok (2.77s)
+```
+
+`PROGRESS.md` B3 row now cites `5fdb5fb3` (local edit; not committed separately).

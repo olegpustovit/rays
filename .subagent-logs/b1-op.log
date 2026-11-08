@@ -1,0 +1,26 @@
+Working...
+Scoping B1 in `flow_check`: reading the ponytail in `op.rs`, locating `Arc::new` repetition, and finding the PROGRESS row.
+
+Implementing the smallest B1 slice: static `EMPTY_CHECK`, delegate bodies as fn items with a static lookup table for draw/host/image ops (main repeated-closure pattern).
+
+Adding static delegate fn table and shared `EMPTY_CHECK`; refactoring draw, host, image, and GPU-stage ops to use fn pointers.
+
+## B1 op slice
+
+**Commit:** `e16247cd` (`B1: static builtin delegate fn tables for draw/host/image/gpu stage ops.`)
+
+**Change:** Shared `EMPTY_CHECK` in `mk()`; static `BUILTIN_DELEGATE` / `GPU_STAGE_ONLY` fn-pointer tables (macros) for draw/host/image passthrough and GPU stage-only errors; `delegate_body()` wraps fn items instead of per-op `move` closures. Ponytail now only flags workspace `PathId` scope stack.
+
+**Lines removed (estimate):** ~50 source closure sites replaced → **~10 lines net** removed in `op.rs` (table adds lines); **`Arc::new` 141 → 138** (−3 call sites).
+
+**Tests** (`cargo t -p flow_check …`):
+
+```
+test op::tests::builtins_preserve_callbacks_and_typed_results ... ok
+rays-t: total wall 8.549s; slowest 0.030s
+
+test op::ocaml_table::declarations_match_the_ocaml_table ... ok
+rays-t: total wall 8.263s; slowest 0.030s
+```
+
+**PROGRESS:** B1 row updated in `e05116ba` (docs only).

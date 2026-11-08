@@ -56,7 +56,7 @@ fn points(prepared: &c::Prepared, root: Option<ResidualId>, resident: Option<Arc
 }
 fn array(v: &Value) -> &[f64] {
     match v {
-        Value::Float_array(a) | Value::Vec2_array(a) | Value::Vec3_array(a) | Value::Vec4_array(a) => a,
+        Value::Floats(1..=4, a) => a,
         _ => panic!("float array expected"),
     }
 }
@@ -75,7 +75,7 @@ fn fold_case(gpu: &renderer::renderer::Gpu, n: i64, levels: i64, keep: &str, slo
         calls.fetch_add(1, Ordering::Relaxed);
         let block = match v {
             Value::Int_array(a) => a.len(),
-            Value::Float_array(a) | Value::Vec2_array(a) | Value::Vec3_array(a) | Value::Vec4_array(a) => a.len(),
+            Value::Floats(1..=4, a) => a.len(),
             _ => usize::MAX,
         };
         assert!(block <= 4, "resident fold: a placeholder's block has its capacity");
@@ -207,8 +207,7 @@ fn resident_state() {
 fn same_identity(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Int_array(a), Value::Int_array(b)) => Arc::ptr_eq(a, b),
-        (Value::Float_array(a), Value::Float_array(b)) | (Value::Vec2_array(a), Value::Vec2_array(b)) |
-        (Value::Vec3_array(a), Value::Vec3_array(b)) | (Value::Vec4_array(a), Value::Vec4_array(b)) => Arc::ptr_eq(a, b),
+        (Value::Floats(aw @ 1..=4, a), Value::Floats(bw, b)) if aw == bw => Arc::ptr_eq(a, b),
         _ => a == b,
     }
 }

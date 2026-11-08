@@ -1,0 +1,23 @@
+Working...
+Implementing M1 in `flow_eval` `eval.rs`: exploring the current structure.
+
+
+
+Fixing borrow errors from inline `sub` calls and making `owned` mutable in `eval_at`.
+
+**M1 is done** — commit `511813ae` (`M1: cache evaluator site paths in ExecCtx and route table`). Working tree clean; verification re-run this session.
+
+### What changed (`eval.rs` only)
+- **`ExecCtx.site`**: `Arc<Path>` via `base_of`; `sync_site` after manual `prefix`/`base`/`route` edits.
+- **`root_ctx(&mut Arena)`**: empty root site interned.
+- **`sub(a, c, seg)`**: extends cached `c.site` through `base_of`; route cache is `(parent, seg, route, site)`.
+- **`site(c)`**: `(*c.site).clone()` — no per-call prefix/base/route merge.
+- **No `eval_at(..., &sub(...))`**: `eval_at_sub` / `eval_concrete_sub` / `arm_error_sub` do `let cx = sub(...);` then eval.
+- **Compiled walker**: `sub(a, &context, …)` + `sync_site` on `Step::Base`.
+
+### Verification
+- `cargo check -p flow_eval` — ok  
+- `cargo t -p flow_eval test_workspace_eval` — **29 passed** (~11s wall)
+
+### PROGRESS
+Wave **M 12/21**; M1 row updated; M1 removed from pending (`M3,M5,M13–M17,M19,M21`).

@@ -1,0 +1,40 @@
+Working...
+Unifying closest-point-on-triangle in rdk_geom and fixing blank-name trim in rdk_ops/sop. Exploring the codebase and PROGRESS.
+
+Fixing remaining `.trim().is_empty()` blank-name checks in rdk_ops and sop. Verifying rdk_geom triangle unification is complete.
+
+Adding `ocaml_trim` to `rdk_core` and replacing manual blank-name trims.
+
+Changes were lost during stash; re-applying edits.
+
+Accidental `sop/support.rs` deletions in the commit — restoring the file and keeping only the trim fixes.
+
+## A7 summary
+
+**Triangle dedupe** was already in `992093ce`: `point_grid::point_triangle_barycentric_into` is the single implementation; `surface_index::closest_triangle_into` delegates to it; `proximity_index` uses `point_triangle_squared` (wrapper). No extra geom math in this pass.
+
+**Blank-name trim** (`da178e93`):
+- `rdk_core::support::ocaml_trim` + `ocaml_trim_is_empty` via trim; `attribute_ops::is_blank` forwards to the helper.
+- All remaining `std::trim().is_empty()` blank-name checks in **rdk_ops** (10 modules) and **sop** (attributes, custom, decl, edit_graph, node, support decode paths) now use OCaml semantics.
+- `cargo check -p rdk_geom -p rdk_ops` clean; no `trim().is_empty()` left in those trees.
+
+**Checks:** `git pull --rebase` (already up to date after stash). `PROGRESS.md` updated (A7 → done, A 7/8).
+
+**Commit:** `da178e93` — `A7: shared OCaml trim for blank names; triangle dedupe closed.`
+
+**Note:** `da178e93` also dropped dead `sop::support` enums that were in the working tree (matches later A2 `688f4200` intent; `cargo t -p sop` 52 pass).
+
+**Test tail** (`cargo t -p rdk_geom surface`):
+
+```
+test surface_index::tests::vertex_selection_and_degenerate_surfaces ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 54 filtered out; finished in 0.00s
+
+rays-t: total wall 1.976s; 0.246s across 9 tests
+rays-t: slowest rdk_geom::surface_index::attribute_suite_tests::cancelled_construction_reports_cancelled 0.030s
+rays-t: slowest rdk_geom::surface_index::ported_tests::disjoint_topology_candidates_match_raw_filtering_across_grains 0.030s
+rays-t: slowest rdk_geom::surface_index::ported_tests::median_split_bounds_keep_tied_centroid_order 0.030s
+rays-t: slowest rdk_geom::surface_index::tests::vertex_selection_and_degenerate_surfaces 0.029s
+rays-t: slowest rdk_geom::surface_index::attribute_suite_tests::degenerate_tiny_concave_and_self_intersecting_polygons 0.028s
+```

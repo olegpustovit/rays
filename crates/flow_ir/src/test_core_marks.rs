@@ -201,9 +201,9 @@ fn device_marks(body: &str) -> (i64, Vec<Entry>) {
                 .iter()
                 .map(|value| {
                     let (count, width) = match value {
-                        Value::Float_array(xs) => (xs.len() as i64, 1),
-                        Value::Vec2_array(xs) => (xs.len() as i64 / 2, 2),
-                        Value::Vec3_array(xs) => (xs.len() as i64 / 3, 3),
+                        Value::Floats(1, xs) => (xs.len() as i64, 1),
+                        Value::Floats(2, xs) => (xs.len() as i64 / 2, 2),
+                        Value::Floats(3, xs) => (xs.len() as i64 / 3, 3),
                         _ => panic!("a region is a packed array"),
                     };
                     (counter.get(), count, width)
@@ -265,7 +265,7 @@ fn a_device_colour_of_the_wrong_length_is_refused() {
     let live = input::at_time(0.25);
     let live_for_device = live.clone();
     let device: DeviceFn = Arc::new(move |packed: &packed::T| match packed::force(packed, &live_for_device, &Default::default())? {
-        Value::Vec3_array(xs) => Ok(Some(vec![(1, xs.len() as i64 / 3, 3)])),
+        Value::Floats(3, xs) => Ok(Some(vec![(1, xs.len() as i64 / 3, 3)])),
         _ => Ok(None),
     });
     match core_exec::draw(&prepare(&program), &live, (200, 100), &Buffers::create(), &draw_options(root, Some(device))) {
@@ -407,7 +407,7 @@ fn compatible_regions_group_into_one_fused_dispatch() {
     }
     let live_for_device = live.clone();
     let device: DeviceFn = Arc::new(move |packed: &packed::T| match packed::force_all(packed, &live_for_device, &Default::default())?.as_slice() {
-        [Value::Vec3_array(positions), Value::Float_array(radii)] => {
+        [Value::Floats(3, positions), Value::Floats(1, radii)] => {
             assert!(**positions == vec![2.25, 0., 0., 3.25, 1., 0., 4.25, 2., 0., 5.25, 3., 0.]);
             assert!(**radii == vec![4.25, 5.25, 6.25, 7.25]);
             Ok(Some(vec![(0, 4, 3), (1, 4, 1)]))

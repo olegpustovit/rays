@@ -37,7 +37,7 @@ fn component(target: &str, ty: &Ty, k: i64) -> String {
 fn slot(program: &packed::T, u: usize) -> i64 {
     match &program.uniforms[u] {
         Value::Int_array(a) => a.len() as i64 - 1,
-        Value::Float_array(a) => a.len() as i64 - 1,
+        Value::Floats(1, a) => a.len() as i64 - 1,
         _ => panic!("Raster.buffer"),
     }
 }
@@ -249,7 +249,7 @@ fn buffers_of(s: &LStage) -> Vec<(i64, i64, bool)> {
         .enumerate()
         .filter_map(|(u, value)| match value {
             Value::Int_array(a) => Some((u as i64, a.len() as i64 - 1, true)),
-            Value::Float_array(a) => Some((u as i64, a.len() as i64 - 1, false)),
+            Value::Floats(1, a) => Some((u as i64, a.len() as i64 - 1, false)),
             _ => None,
         })
         .collect()

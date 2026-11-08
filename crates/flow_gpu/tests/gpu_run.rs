@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 fn array(v: &Value) -> Vec<f64> {
     match v {
-        Value::Float_array(a) | Value::Vec2_array(a) | Value::Vec3_array(a) | Value::Vec4_array(a) => (**a).clone(),
+        Value::Floats(1..=4, a) => (**a).clone(),
         _ => panic!("float array expected"),
     }
 }

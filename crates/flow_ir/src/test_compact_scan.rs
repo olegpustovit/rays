@@ -100,9 +100,9 @@ fn bad_masks_and_types() {
     }
     for name in ["array/compact", "array/scan_sum"] {
         for bad in [
-            Value::Float_array(Arc::new(vec![])),
-            Value::Float_array(Arc::new(vec![0., 1.])),
-            Value::Vec3_array(Arc::new(vec![0., 1.])),
+            Value::Floats(1, Arc::new(vec![])),
+            Value::Floats(1, Arc::new(vec![0., 1.])),
+            Value::Floats(3, Arc::new(vec![0., 1.])),
             Value::Text_array(Arc::new(vec![b"0".to_vec()].into())),
             Value::Int(1),
             Value::Bool(true),
@@ -235,7 +235,7 @@ fn source_errors_and_untaken_sources() {
             Err(d)
         });
         same(&exec_force(&executor, &live, None, Some(missing.clone())), &reference_with(&value, &live, None, Some(missing)));
-        let wrong: ResolveArc = Arc::new(|_| Ok(Value::Float_array(Arc::new(vec![1.]))));
+        let wrong: ResolveArc = Arc::new(|_| Ok(Value::Floats(1, Arc::new(vec![1.]))));
         same(&exec_force(&executor, &live, None, Some(wrong.clone())), &reference_with(&value, &live, None, Some(wrong)));
         let skipped = dynamic(&format!("(if (> t 0.) (array/int 0) ({operation} data))"));
         let no_source: ResolveArc = Arc::new(|_| panic!("Untaken scan resolved Source"));

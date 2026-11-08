@@ -1,0 +1,26 @@
+Working...
+Gathering PROGRESS.md, port-simplification index, and git history since 6802a325 to tally all 63 IDs.
+
+Building a script to classify all 63 IDs from PROGRESS.md, index.html seed, and git since 6802a325.
+
+| Scope | Done | Partial | Pending | Σ |
+|-------|------|---------|---------|---|
+| **All 63 IDs — PROGRESS.md** | 16 | 2 | 45 | 63 |
+| **All 63 IDs — index.html plan-seed** | 1 | 0 | 62 | 63 |
+| **All 63 IDs — git code since `6802a325`** | 16 | 2 | 45 | 63 |
+
+| Wave | IDs | PROGRESS done / partial / pending | HTML done / partial / pending | Git done / partial / pending |
+|------|-----|-----------------------------------|--------------------------------|------------------------------|
+| A | 8 | 8 / 0 / 0 | 1 / 0 / 7 | 8 / 0 / 0 |
+| B | 6 | 4 / 2 / 0 | 0 / 0 / 6 | 4 / 2 / 0 |
+| M | 21 | 4 / 0 / 17 | 0 / 0 / 21 | 4 / 0 / 17 |
+| I | 1 | 0 / 0 / 1 | 0 / 0 / 1 | 0 / 0 / 1 |
+| C | 21 | 0 / 0 / 21 | 0 / 0 / 21 | 0 / 0 / 21 |
+| D | 6 | 0 / 0 / 6 | 0 / 0 / 6 | 0 / 0 / 6 |
+
+| Check | |
+|-------|---|
+| PROGRESS ≠ git (status) | 0 — aligned on all 63 IDs |
+| PROGRESS ≠ HTML `plan-seed` | 17 — only `A1` seeded; A2–A8, B0–B5, M2/M4/M10/M20 undocumented in HTML |
+| Partial IDs (both sources) | **B1** (active), **B5** (done partial; rdk delete deferred) |
+| `6802a325..HEAD` | 47 commits; 31 non-docs code subjects |

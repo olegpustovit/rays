@@ -332,7 +332,7 @@ mod tests {
 
     fn triangle() -> Geometry {
         mesh(&[
-            ("points".into(), Value::Vec3_array(Arc::new(vec![0., 0., 0., 1., 0., 0., 0., 1., 0.]))),
+            ("points".into(), Value::Floats(3, Arc::new(vec![0., 0., 0., 1., 0., 0., 0., 1., 0.]))),
             ("vertex_points".into(), Value::Int_array(Arc::new(vec![0, 1, 2]))),
             ("primitive_offsets".into(), Value::Int_array(Arc::new(vec![0, 3]))),
             ("kinds".into(), Value::Int_array(Arc::new(vec![0]))),

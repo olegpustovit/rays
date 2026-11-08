@@ -101,7 +101,7 @@ or a buffer. Attribute lists are fixed per kind:
 | point | `position` | x, y | 2 or 3 | none, required |
 | | `fill` (the ink) | colour | 3 constant only | white `0xffffffff` |
 
-A width-3 buffer is the packed vec3 layout of `Vec3_array`: the third float of
+A width-3 buffer is the packed vec3 layout of `Value::Floats(3, ..)`: the third float of
 each element (z) is ignored. A constant has width 2 for a position; there is no
 constant z. `draw/points` ignores a per-instance `color` (today it falls back to
 white), so a point's `fill` is constant only.

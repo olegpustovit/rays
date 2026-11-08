@@ -57,7 +57,7 @@ fn values(program: &packed::T, time: f64) -> phost::Inputs {
 
 fn cpu(program: &packed::T, time: f64) -> Vec<f64> {
     match tp::ok(packed::force(program, &input::at_time(time), &Default::default())) {
-        Value::Vec4_array(v) => (*v).clone(),
+        Value::Floats(4, v) => (*v).clone(),
         _ => panic!("vec4 array expected"),
     }
 }
@@ -86,7 +86,7 @@ fn compare_runs(r: Run, name: &str, id: i64, description: &run::Description, tim
             &values(&program, time),
         ));
         let actual = match tp::ok(run::readback(&out, None)) {
-            Value::Vec4_array(v) => (*v).clone(),
+            Value::Floats(4, v) => (*v).clone(),
             _ => panic!("vec4 array expected"),
         };
         let (mut worst, mut hits) = (0.0f64, 0);

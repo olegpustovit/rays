@@ -1,0 +1,7 @@
+Rays /Users/snowbear/WORK/GIT/rays dev. AGENTS.md ponytail. Finish B1 slice in flow_check ONLY.
+
+533489ee did term_arena derives. Your job: smallest static builtin op table in op.rs replacing repeated Arc::new(Spec{...}) where safe OR one scope-stack win in workspace.rs (interned PathId) — ONE of these, not both.
+
+Read op.rs ponytail comment. Grep Arc::new in op.rs. Keep behavior identical; cargo t -p flow_check with narrowest filter. Commit "B1:". Update PROGRESS B1 row. No artifact.
+
+Return: commit hash, lines removed estimate, test command output.

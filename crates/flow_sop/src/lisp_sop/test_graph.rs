@@ -21,7 +21,7 @@ fn ints(a: &[i64]) -> Value {
     Value::Int_array(Arc::new(a.to_vec()))
 }
 fn floats(a: Vec<f64>) -> Value {
-    Value::Float_array(Arc::new(a))
+    Value::Floats(1, Arc::new(a))
 }
 fn rec(fields: Vec<(&str, Value)>) -> Value {
     Value::Record(fields.into_iter().map(|(n, v)| (n.to_owned(), v)).collect())

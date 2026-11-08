@@ -1,0 +1,14 @@
+Working...
+Picking the smallest M6–M8 item from the port-simplification plan and checking renderer/GPU editor scratch reuse.
+
+M7 is smallest (~30–80 LOC): dedup texture/sampler retains like `keep_buffer`.
+
+**Choice:** **M7** (plan estimate ~30–80 loc) over M6 (hundreds of lines in `plan_entry` / `prepared_scratch`) and M8 (multi-site key allocation in `scene_execution` + `side_lru`).
+
+**Commit:** `dca77b6f` — `M7: dedup texture and sampler retains per command buffer.`
+
+**Change:** `Texture` and `Sampler` get `retain_for(commands)` like `Buffer`. `keep_texture` and new `keep_sampler` only push a cleanup `Box` on first retain per command buffer; `DriverRenderEncoder::set_stage_sampler` uses `keep_sampler` instead of `keep(retain_submission(), Box::new(...))` every bind.
+
+**Check:** `cargo check -p ogpu_metal` (0.32s, ok).
+
+**PROGRESS:** M7 row added; wave **M 7/21**; pending list now `M1,M3,M5–M6,M8,…`.

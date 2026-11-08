@@ -3114,7 +3114,7 @@ impl HostRun {
             && name == "sop/with_attr"
             && if selected {
                 match get(&args, "values") {
-                    Some(Value::Float_array(_) | Value::Vec2_array(_) | Value::Vec3_array(_) | Value::Vec4_array(_)) => true,
+                    Some(Value::Floats(1..=4, _)) => true,
                     Some(v) => Self::constant(v),
                     None => false,
                 }
@@ -3149,12 +3149,12 @@ impl HostRun {
                     let attr = txt(attr);
                     let target = self.geometry_r(*id)?;
                     let materialized = match values {
-                        Value::Float_array(_) | Value::Int_array(_) | Value::Text_array(_) | Value::Vec2_array(_) | Value::Vec3_array(_) | Value::Vec4_array(_) => true,
+                        Value::Floats(1..=4, _) | Value::Int_array(_) | Value::Text_array(_) => true,
                         Value::Record(fields) => {
                             if !selected && ["vec2", "vec3", "vec4"].contains(&kind.as_str()) {
                                 !E::is_live(values)
                             } else {
-                                matches!((get(fields, "offsets"), get(fields, "values")), (Some(Value::Int_array(_)), Some(Value::Float_array(_) | Value::Int_array(_))))
+                                matches!((get(fields, "offsets"), get(fields, "values")), (Some(Value::Int_array(_)), Some(Value::Floats(1, _) | Value::Int_array(_))))
                             }
                         }
                         _ => false,
@@ -5068,7 +5068,7 @@ pub fn field_calls(state: Option<&State>, live: &Frame, resolve: flow_ir::core_e
                 rays_math::fma::fma((k / (nx * ny)) as f64, (hz - lz) / rz, lz),
             ];
             let signature = FnSignature { params: vec![Ty::Vec3], result: Ty::Float };
-            match E::Host::map_function(None, None, &signature, f, &[Value::Vec3_array(Arc::new(p))])? {
+            match E::Host::map_function(None, None, &signature, f, &[Value::Floats(3, Arc::new(p))])? {
                 Value::Residual(residual) => {
                     let (_, at) = E::Host::map_probe(residual, &live, state.as_ref(), Some(resolve.clone()), None, (start + k) as usize)?;
                     at(0)

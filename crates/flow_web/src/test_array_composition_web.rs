@@ -37,7 +37,7 @@ fn data(v: &Value) -> String {
             }
             format!("(()=>{{const p=[{}];return [{}].map(i=>p[i])}})()", palette.join(","), indices.join(","))
         }
-        Value::Float_array(a) | Value::Vec2_array(a) | Value::Vec3_array(a) | Value::Vec4_array(a) =>
+        Value::Floats(1..=4, a) =>
             format!("Float64Array.from([{}])", a.iter().map(|n| param::float_text(*n)).collect::<Vec<_>>().join(",")),
         _ => panic!("composition array expected: {v:?}"),
     }

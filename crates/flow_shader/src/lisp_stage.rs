@@ -68,7 +68,7 @@ pub fn parameters(forms: &[Syntax], entry: &str) -> Result<Vec<(String, Ty)>, Di
 fn dummy(index: i64, ty: &Ty) -> Result<Value, Diagnostic> {
     match ty {
         Ty::Array(t) if **t == Ty::Int => Ok(Value::Int_array(Arc::new(vec![0; index as usize + 1]))),
-        Ty::Array(t) if **t == Ty::Float => Ok(Value::Float_array(Arc::new(vec![0.0; index as usize + 1]))),
+        Ty::Array(t) if **t == Ty::Float => Ok(Value::Floats(1, Arc::new(vec![0.0; index as usize + 1]))),
         ty => fail(&format!("a stage buffer is (array int) or (array float), not {}", ty::to_string(ty))),
     }
 }
@@ -76,10 +76,10 @@ fn dummy(index: i64, ty: &Ty) -> Result<Value, Diagnostic> {
 fn column(ty: &Ty) -> Value {
     match ty {
         Ty::Int => Value::Int_array(Arc::new(vec![0])),
-        Ty::Float => Value::Float_array(Arc::new(vec![0.0])),
-        Ty::Vec2 => Value::Vec2_array(Arc::new(vec![0.0; 2])),
-        Ty::Vec3 => Value::Vec3_array(Arc::new(vec![0.0; 3])),
-        Ty::Vec4 => Value::Vec4_array(Arc::new(vec![0.0; 4])),
+        Ty::Float => Value::Floats(1, Arc::new(vec![0.0])),
+        Ty::Vec2 => Value::Floats(2, Arc::new(vec![0.0; 2])),
+        Ty::Vec3 => Value::Floats(3, Arc::new(vec![0.0; 3])),
+        Ty::Vec4 => Value::Floats(4, Arc::new(vec![0.0; 4])),
         _ => panic!("Raster.column"),
     }
 }

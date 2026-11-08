@@ -82,7 +82,7 @@ fn data(v: &Value) -> String {
         Value::Int_array(a) => format!("BigInt64Array.from([{}])", a.iter().map(|n| format!("{n}n")).collect::<Vec<_>>().join(",")),
         Value::Text_array(a) if !a.is_empty() && a.iter().all(|s| s == &a[0]) => format!("Array({}).fill({})", a.len(), crate::text_literal::quote(&a[0])),
         Value::Text_array(a) => format!("[{}]", a.iter().map(|s| crate::text_literal::quote(s)).collect::<Vec<_>>().join(",")),
-        Value::Float_array(a) | Value::Vec2_array(a) | Value::Vec3_array(a) | Value::Vec4_array(a) => format!("Float64Array.from([{}])", a.iter().map(|n| param::float_text(*n)).collect::<Vec<_>>().join(",")),
+        Value::Floats(1..=4, a) => format!("Float64Array.from([{}])", a.iter().map(|n| param::float_text(*n)).collect::<Vec<_>>().join(",")),
         _ => panic!("expected array result: {v:?}"),
     }
 }
@@ -326,7 +326,7 @@ fn capture_preparation_refusals() {
     let (_, table) = compiled(TABLE, true);
     refused(&replace_table(&table, value::source_value("$host/unavailable", Ty::Array(Box::new(Ty::Float)), vec![])), None);
     let ws = checked("(workspace capture (graph g :context host [(source : (array float) (array/float 0))] (map (fn [x] (+ x t)) source)))");
-    let inputs = vec![("g".into(), vec![("source".into(), Value::Float_array(Arc::new((0..32769).map(|i| i as f64).collect())))])];
+    let inputs = vec![("g".into(), vec![("source".into(), Value::Floats(1, Arc::new((0..32769).map(|i| i as f64).collect())))])];
     let evaluation = E::static_with(&ws, false, Some(&inputs), None).unwrap_or_else(|d| die(d));
     let value = evaluation.results.iter().find(|(n, _)| n == "g").expect("g").1.clone();
     let Value::Residual(r) = &value else { panic!("async capture needs a residual") };

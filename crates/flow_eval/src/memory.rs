@@ -34,7 +34,7 @@ impl Storage {
             match value {
                 Value::Text(bytes) => { self.buffer(bytes); }
                 Value::Int_array(values) => { if self.shared(values) { self.buffer(values); } }
-                Value::Float_array(values) | Value::Vec2_array(values) | Value::Vec3_array(values) | Value::Vec4_array(values) => {
+                Value::Floats(1..=4, values) => {
                     if self.shared(values) { self.buffer(values); }
                 }
                 Value::Text_array(values) => {
@@ -149,8 +149,8 @@ mod tests {
         let expected = data.capacity() * std::mem::size_of::<f64>();
         {
             let mut arena = checkout(&evaluated.owner);
-            arena.states.push(Value::Float_array(data.clone()));
-            arena.states.push(Value::Float_array(data.clone()));
+            arena.states.push(Value::Floats(1, data.clone()));
+            arena.states.push(Value::Floats(1, data.clone()));
             let replay = arena.clone();
             let mut storage = Storage::default();
             storage.arena(&arena);

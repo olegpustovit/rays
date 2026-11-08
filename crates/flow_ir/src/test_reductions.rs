@@ -24,7 +24,7 @@ fn ints(v: &[i64]) -> Value {
     Value::Int_array(Arc::new(v.to_vec()))
 }
 fn floats(v: &[f64]) -> Value {
-    Value::Float_array(Arc::new(v.to_vec()))
+    Value::Floats(1, Arc::new(v.to_vec()))
 }
 fn reject(code: &str, r: Result<Value, Diagnostic>) {
     match r {
@@ -54,12 +54,12 @@ fn reduce_array_direct() {
     assert_eq!(reduce_array(None, Reduction::Sum, Some(&ints(&[0, 2, 4])), &integers).unwrap(), ints(&[-1, 0]));
     let zeros = floats(&[-0., 0.]);
     assert!(same(&reduce_array(None, Reduction::Minimum, None, &zeros).unwrap(), &Value::Float(-0.)));
-    let v2 = Value::Vec2_array(Arc::new(vec![3., -0., 1., 0.]));
+    let v2 = Value::Floats(2, Arc::new(vec![3., -0., 1., 0.]));
     assert!(same(&reduce_array(None, Reduction::Minimum, None, &v2).unwrap(), &Value::Vec2(1., -0.)));
     assert_eq!(reduce_array(None, Reduction::Sum, Some(&ints(&[0, 0, 0])), &ints(&[])).unwrap(), ints(&[0, 0]));
     assert!(same(
-        &reduce_array(None, Reduction::Sum, Some(&ints(&[0, 0, 0])), &Value::Vec4_array(Arc::new(vec![]))).unwrap(),
-        &Value::Vec4_array(Arc::new(vec![0.; 8]))
+        &reduce_array(None, Reduction::Sum, Some(&ints(&[0, 0, 0])), &Value::Floats(4, Arc::new(vec![]))).unwrap(),
+        &Value::Floats(4, Arc::new(vec![0.; 8]))
     ));
     for operation in [Reduction::Minimum, Reduction::Maximum] {
         reject("E_ARRAY_EMPTY", reduce_array(None, operation, None, &floats(&[])));
@@ -81,7 +81,7 @@ fn reduce_array_rows_parallel_matches_sequential() {
     let offsets = ints(&(0..=count as i64).map(|i| i * 3).collect::<Vec<_>>());
     for operation in [Reduction::Sum, Reduction::Minimum, Reduction::Maximum] {
         let pattern = [1e16, 1., -1e16, -0., 0., 1e-100];
-        let data = Value::Vec3_array(Arc::new((0..count * 9).map(|i| pattern[i % 6]).collect()));
+        let data = Value::Floats(3, Arc::new((0..count * 9).map(|i| pattern[i % 6]).collect()));
         let before = (bits(&data), bits(&offsets));
         let reference = reduce_array(None, operation, Some(&offsets), &data).unwrap();
         for domains in [1, 8] {
@@ -181,7 +181,7 @@ fn bound_arguments_release_arrays_with_the_last_region_clone() {
     for frame in 0..32 {
         let data = Arc::new(vec![frame as f64; 32]);
         let weak = Arc::downgrade(&data);
-        let bound = ok(packed::host::bind_arguments(p, &[Value::Float_array(data)], None));
+        let bound = ok(packed::host::bind_arguments(p, &[Value::Floats(1, data)], None));
         let clone = bound.clone();
         drop(bound);
         assert!(weak.upgrade().is_some(), "a region clone still owns the argument");
@@ -225,11 +225,11 @@ fn source_column_and_unsupported_producer() {
     }
 }
 
-// Product defect: Maximum over a Float_array [-0., 0.] returns -0. (flow_check op.rs reduce_array, the
+// Product defect: Maximum over a float array [-0., 0.] returns -0. (flow_check op.rs reduce_array, the
 // width-1 path uses f64::max, whose zero sign is unspecified); OCaml returns +0.
 #[test]
 fn maximum_of_signed_zeros_is_positive_zero() {
-    let v2 = Value::Vec2_array(Arc::new(vec![3., -0., 1., 0.]));
+    let v2 = Value::Floats(2, Arc::new(vec![3., -0., 1., 0.]));
     assert!(same(&reduce_array(None, Reduction::Maximum, None, &v2).unwrap(), &Value::Vec2(3., 0.)));
     let zeros = floats(&[-0., 0.]);
     assert!(same(&reduce_array(None, Reduction::Maximum, None, &zeros).unwrap(), &Value::Float(0.)));

@@ -152,7 +152,7 @@ fn strict_validation_distinguishes_equal_residual_numbers_in_different_homes() {
     let bound = ok(crate::packed::host::bind_arguments(&packed, &[Value::Float(2.0), Value::Float(5.0)], None));
     for time in [0.5, 2.0] {
         let actual = ok(crate::packed::force(&bound, &input::at_time(time), &Default::default()));
-        let expected = Value::Float_array(Arc::new((0..16).map(|x| x as f64 + 7.0 + 2.0 * time).collect()));
+        let expected = Value::Floats(1, Arc::new((0..16).map(|x| x as f64 + 7.0 + 2.0 * time).collect()));
         assert_eq!(actual, expected, "binding both homes' arguments changed their values");
     }
 }

@@ -1,0 +1,30 @@
+Working...
+Fixing remaining M14 `Value::Struct`/`Value::Source` patterns across crates. Searching the codebase and running `cargo check`.
+
+Mechanical M14 migration across ~25 files — running a codemod script for common patterns, then fixing remaining errors.
+
+Skipping the risky script; fixing files manually with targeted replacements.
+
+Migrating remaining patterns in `eval.rs` and other crates, using `geo_fields()` for field iteration and `struct_value`/`source_value` for construction.
+
+Applying targeted fixes to `eval.rs` and remaining crates.
+
+Implementing M14 in `flow_syntax`, then migrating call sites with a codemod and rustc-driven fixes.
+
+**M14 complete** — commit `a0e5d08e` (`M14: box Struct/Source in GeoPayload for 40-byte Value.`).
+
+### `flow_syntax::value`
+- `GeoPayload { name, ty, fields }` on the heap; `Value::Struct` / `Value::Source` each hold `Box<GeoPayload>`.
+- `struct_value` / `source_value`, plus `Value::geo_fields()` and `Value::geo_payload()`.
+
+### Call sites (36 files)
+- Match arms: `Value::Struct(g)` / `Value::Source(g)` → `g.name`, `g.ty`, `g.fields`.
+- Builds: helpers above instead of 3-tuple variants.
+- `unresolved_data_source()` in `flow_eval` for `Source` vs `Struct` array markers.
+
+### Verification
+- `cargo check -p flow_eval -p flow_ir -p flow_check -p renderer -p flow_graph` — **ok**
+- `cargo t -p flow_eval test_workspace_eval` — **29 tests**, ~9.6s wall (slowest `l3_driven_bounds` 0.50s)
+- `PROGRESS.md`: M14 → **done**
+
+Scoped-constraint crates also updated (`flow_native`, `flow_sop`, `flow_web`, `web_export`) so the graph still compiles. Some `flow_ir` **test-only** files may still use legacy `Value::Source(name, ty, …)` patterns; they are not in the check set above.

@@ -9,7 +9,7 @@ use std::cell::RefCell;
 
 fn t(s: &str) -> Value { Value::Text(s.as_bytes().to_vec()) }
 fn ia(v: &[i64]) -> Value { Value::Int_array(Arc::new(v.to_vec())) }
-fn fa(v: &[f64]) -> Value { Value::Float_array(Arc::new(v.to_vec())) }
+fn fa(v: &[f64]) -> Value { Value::Floats(1, Arc::new(v.to_vec())) }
 fn na(n: &str, v: Value) -> (String, Value) { (n.to_owned(), v) }
 const MAX_INT: i64 = i64::MAX;
 const MIN_INT: i64 = i64::MIN;
@@ -209,10 +209,10 @@ fn exact_integer_arithmetic_and_arrays() {
     assert_eq!(apply("int/mul", &[na("a", Value::Int(131071 * 131071)), na("b", Value::Int(19349663))]), Value::Int(product));
     assert_eq!(apply("int/mod", &[na("a", Value::Int(product)), na("b", Value::Int(97))]), Value::Int(product % 97));
     assert_eq!(apply("int/and", &[na("a", Value::Int(product)), na("b", Value::Int(MAX_INT))]), Value::Int(product));
-    let values = Value::Vec3_array(Arc::new(vec![1., 2., 3., 4., 5., 6.]));
+    let values = Value::Floats(3, Arc::new(vec![1., 2., 3., 4., 5., 6.]));
     let tail = apply("array/slice", &[na("array", values), na("first", Value::Int(1)), na("count", Value::Int(1))]);
-    assert_eq!(tail, Value::Vec3_array(Arc::new(vec![4., 5., 6.])));
-    assert_eq!(apply("array/concat", &[na("first", tail.clone()), na("second", tail)]), Value::Vec3_array(Arc::new(vec![4., 5., 6., 4., 5., 6.])));
+    assert_eq!(tail, Value::Floats(3, Arc::new(vec![4., 5., 6.])));
+    assert_eq!(apply("array/concat", &[na("first", tail.clone()), na("second", tail)]), Value::Floats(3, Arc::new(vec![4., 5., 6., 4., 5., 6.])));
     assert_eq!(apply("equal?", &[na("a", t("key-pressed")), na("b", t("key-pressed"))]), Value::Bool(true));
 }
 
@@ -293,8 +293,8 @@ fn typed_op() -> Op {
         _ => Err(value::fail("E_TEST_TYPE", "The type must be literal.")),
     }));
     o.body = Arc::new(|_, _, args| match args.iter().find(|(n, _)| n == "type") {
-        Some((_, Value::Text(s))) if s == b"vec3" => Ok(Value::Vec3_array(Arc::new(vec![1., 2., 3.]))),
-        _ => Ok(Value::Float_array(Arc::new(vec![1.]))),
+        Some((_, Value::Text(s))) if s == b"vec3" => Ok(Value::Floats(3, Arc::new(vec![1., 2., 3.]))),
+        _ => Ok(Value::Floats(1, Arc::new(vec![1.]))),
     });
     o
 }
@@ -304,7 +304,7 @@ fn typed_and_source_operators() {
     let operator = typed_op();
     for (body, expected, ty) in [
         ("(test/typed)", fa(&[1.]), Ty::Array(Box::new(Ty::Float))),
-        ("(test/typed :type \"vec3\")", Value::Vec3_array(Arc::new(vec![1., 2., 3.])), Ty::Array(Box::new(Ty::Vec3))),
+        ("(test/typed :type \"vec3\")", Value::Floats(3, Arc::new(vec![1., 2., 3.])), Ty::Array(Box::new(Ty::Vec3))),
     ] {
         let workspace = checked(std::slice::from_ref(&operator), body);
         assert_eq!(workspace.graphs[0].body.ty(), &ty);
@@ -426,7 +426,7 @@ fn constant_vector_constructors_match_element_builder_bits() {
         for count in [0i64, 1, 2, 3, 5, 17, 4097, 32769] {
             let actual = (o.body)(&input::at_time(0.), &no_node, &[na("count", Value::Int(count)), na("value", fill.clone())]).unwrap();
             let expected = value::array_init(&ty, count, &|_| fill.clone()).unwrap();
-            let data = |v: &Value| match v { Value::Vec3_array(d) | Value::Vec4_array(d) => d.clone(), _ => panic!() };
+            let data = |v: &Value| match v { Value::Floats(3, d) | Value::Floats(4, d) => d.clone(), _ => panic!() };
             let (a, b) = (data(&actual), data(&expected));
             assert_eq!(a.len(), b.len());
             assert!(a.iter().zip(b.iter()).all(|(x, y)| x.to_bits() == y.to_bits()), "{name} {count}");
@@ -505,7 +505,7 @@ fn whole_array_primitives() {
     assert_eq!(apply("array/scan_sum", &[na("array", ia(&[MAX_INT, 1, -1]))]), ia(&[0, MAX_INT, MIN_INT, MAX_INT]));
     assert_eq!(apply("array/scatter_add", &[na("indices", ia(&[0, 0, 1])), na("values", fa(&[1., 2., 3.])), na("size", Value::Int(3))]), fa(&[3., 3., 0.]));
     assert_eq!(apply("array/scatter_add", &[na("indices", ia(&[0, 0, 1])), na("values", ia(&[MAX_INT, 1, 2])), na("size", Value::Int(3))]), ia(&[MIN_INT, 2, 0]));
-    assert_eq!(apply("array/scatter_add", &[na("indices", ia(&[0, 0, 1])), na("values", Value::Vec3_array(Arc::new(vec![1., 2., 3., 4., 5., 6., 1., 1., 1.]))), na("size", Value::Int(2))]), Value::Vec3_array(Arc::new(vec![5., 7., 9., 1., 1., 1.])));
+    assert_eq!(apply("array/scatter_add", &[na("indices", ia(&[0, 0, 1])), na("values", Value::Floats(3, Arc::new(vec![1., 2., 3., 4., 5., 6., 1., 1., 1.]))), na("size", Value::Int(2))]), Value::Floats(3, Arc::new(vec![5., 7., 9., 1., 1., 1.])));
     for (name, args, expected) in [
         ("array/grade", vec![na("keys", fa(&[]))], ia(&[])),
         ("array/index_of", vec![na("keys", ia(&[])), na("queries", ia(&[1, 2]))], ia(&[-1, -1])),
@@ -526,7 +526,7 @@ fn whole_array_primitives() {
         let result = apply(name, &args);
         match result {
             Value::Int_array(mut a) => { if !a.is_empty() { Arc::make_mut(&mut a)[0] = 999; } }
-            Value::Float_array(mut a) => { if !a.is_empty() { Arc::make_mut(&mut a)[0] = 999.; } }
+            Value::Floats(1, mut a) => { if !a.is_empty() { Arc::make_mut(&mut a)[0] = 999.; } }
             _ => panic!(),
         }
         assert_eq!(format!("{args:?}"), before);
@@ -534,7 +534,7 @@ fn whole_array_primitives() {
     for (code, name, args) in [
         ("E_ARRAY_MASK", "array/compact", vec![na("mask", ia(&[2]))]),
         ("E_ARRAY_OFFSETS", "array/segment_argmax", vec![na("values", ia(&[1])), na("offsets", ia(&[0, 2]))]),
-        ("E_ARRAY_TYPE", "array/segment_argmax", vec![na("values", Value::Vec3_array(Arc::new(vec![0., 0., 0.]))), na("offsets", ia(&[0, 1]))]),
+        ("E_ARRAY_TYPE", "array/segment_argmax", vec![na("values", Value::Floats(3, Arc::new(vec![0., 0., 0.]))), na("offsets", ia(&[0, 1]))]),
         ("E_NONFINITE", "array/segment_argmax", vec![na("values", fa(&[f64::NAN])), na("offsets", ia(&[0, 1]))]),
         ("E_NONFINITE", "float/next_after", vec![na("x", Value::Float(f64::NAN)), na("y", Value::Float(1.))]),
         ("E_ARRAY_TYPE", "array/scan_sum", vec![na("array", fa(&[1.]))]),

@@ -1,0 +1,1 @@
+Rays dev read-only. Re-run review2 tally after latest commits. Output markdown table wave totals only. No file edits.

@@ -1,0 +1,33 @@
+Working...
+Investigating `flow_sop` / `editor_document` deps and the B5 PROGRESS plan.
+
+Creating `flow_sop_catalog` and moving port, network, manifest, catalog, and `encoded_parameters`; evaluating `rdk` removal.
+
+Adding `mem`, moving operator-dependent tests into `flow_sop`, and fixing the `generate` wrapper.
+
+## B5 (partial)
+
+### Deps
+
+**Before** — `editor_document` depth-1:
+`cfmt`, `editor_core`, `flow_check`, `flow_eval`, `flow_graph`, `flow_ir`, **`flow_sop`** (→ `rdk`, `parallel`, `mem`, `lru`, …), `flow_syntax`, `input`, `param`, `rays`, `rays_diagnostic`, `rays_math`, `sop`
+
+**After** — adds **`flow_sop_catalog`** (→ `flow_check`, `flow_eval`, `flow_ir`, `sop`→`rdk`, `mem`; no `parallel`/`lru`/`rdk` on this edge). **`flow_sop` kept** for `lower`, `operators`, `attribute_kernel`.
+
+`editor_document` now uses `flow_sop_catalog::` for `catalog` / `manifest` / `port` / `network`; `flow_sop` still re-exports those modules plus `manifest::generate()` (needs `operators::all()`).
+
+### `rdk`
+
+Not removed. Still used from `sop`, `flow_sop`, `flow_gpu`, `flow_native`, `rays_editor` (~hundreds of `rdk::` sites). Facade delete = mechanical import churn across those crates — noted in PROGRESS.
+
+### Commit
+
+`94aa4546` — **B5: partial — extract flow_sop_catalog for editor_document**
+
+### Checks
+
+`cargo check -p flow_sop_catalog -p flow_sop -p editor_document -p rays_bin` — **Finished** (warm ~0.03s; cold ~17s after shim restore).
+
+### PROGRESS
+
+B5 marked done (partial); remainder: drop `editor_document`’s `flow_sop` dep when `lower`/`operators` are split; delete `rdk` facade.

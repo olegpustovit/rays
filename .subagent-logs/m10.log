@@ -1,0 +1,14 @@
+Working...
+Fixing O(n²) array stores: reading the M10 plan and locating `make_mut` on slot stores in `core_exec.rs`.
+
+Implementing alias detachment before in-place store; adding a `store_buffer_mut` helper in `store_value`.
+
+Re-applying changes after a revert.
+
+**Commit:** `c425eefa` — `M10: detach shared builder aliases before core store`
+
+**Test:** `cargo t -p flow_ir store` (3 pass, ~0.22s; also `cargo t -p flow_ir core_list` — 8 pass, ~0.69s)
+
+**Mechanism:** Before each core `Store`, alias locals that share the same builder flag are set to `No_geo`, so the sequence buffer’s `Arc` is uniquely owned and `Arc::make_mut` in `store_value` mutates in place instead of copying the whole array on every aliased write.
+
+`PROGRESS.md`: Wave **M 1/21**; M10 row marked done (in `5ac0471c`).

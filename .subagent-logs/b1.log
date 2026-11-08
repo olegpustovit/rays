@@ -1,0 +1,35 @@
+Working...
+Wave B1: read plan row and `flow_check` targets, then implement one high-impact slice from the ponytail list.
+
+Choosing term_arena: drop derived `Debug`/`PartialEq` on internal table rows; `Term` already has manual `Debug`/`PartialEq`.
+
+Restoring `Debug` on public ID newtypes only — downstream `#[derive(Debug)]` still needs them.
+
+Files reverted on disk; re-applying the B1 `term_arena` trim and ponytail.
+
+Fixing the commit: it included accidental `flow_sop_catalog` renames from parallel work.
+
+## B1 slice (one item)
+
+Per plan B1, took the **`term_arena` derive trim** only (not static op table or workspace scope stack). `cargo-llvm-lines` is absent; heuristic from the plan doc: `op.rs` 935 LOC, **141× `Arc::new`** — main codegen target left for a follow-up.
+
+### What changed
+
+1. **`crates/flow_check/src/term_arena.rs`** — Removed derived `Debug` / `PartialEq` from 31 packed table payloads (`Node`, `Literal`, `PatternNode`, `TermRow`, `Field`, … `Expanded`, private `Range`). **Kept** derives on id newtypes (`TermId`, `TypeId`, `PathId`, `PatternId`, `RangeId`) for downstream `#[derive(Debug)]`. Manual `Term` `Debug` / `PartialEq` unchanged.
+
+2. **`crates/flow_check/src/op.rs`** — Ponytail for remaining B1 work: static builtin `&[Spec]` fn pointers and workspace scope stack.
+
+3. **`PROGRESS.md`** — B1 row only: `active`, evidence, llvm-lines note.
+
+### Commit
+
+`533489ee1b33bf277fa526a50405ae6d5e3c141b`
+
+### Verification
+
+```
+cargo check -p flow_check -p flow_ir  →  Finished dev (warm 0.02s)
+cargo t -p flow_check term_arena      →  4 passed; rays-t wall 0.172s (cold run earlier ~9.4s after compile)
+```
+
+B1 stays **active**: static op table + scope stack still ponytailed.

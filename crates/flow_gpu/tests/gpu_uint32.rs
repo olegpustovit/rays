@@ -231,7 +231,7 @@ fn kinds_of_values() {
                         let holder = scope.retain_uint32(v).expect("uint32 holder");
                         Box::new(move || Value::Int_array(Arc::new(holder.materialise().unwrap())))
                     }
-                    Value::Float_array(_) | Value::Vec2_array(_) | Value::Vec3_array(_) | Value::Vec4_array(_) => {
+                    Value::Floats(1..=4, _) => {
                         let holder = scope.retain_float(v).expect("float holder");
                         let v = v.clone();
                         Box::new(move || {
@@ -239,10 +239,10 @@ fn kinds_of_values() {
                             let (c, w) = (holder.count as usize, holder.width as usize);
                             let values = Arc::new((0..c * w).map(|i| planes[i % w][i / w]).collect::<Vec<_>>());
                             match v {
-                                Value::Float_array(_) => Value::Float_array(values),
-                                Value::Vec2_array(_) => Value::Vec2_array(values),
-                                Value::Vec3_array(_) => Value::Vec3_array(values),
-                                _ => Value::Vec4_array(values),
+                                Value::Floats(1, _) => Value::Floats(1, values),
+                                Value::Floats(2, _) => Value::Floats(2, values),
+                                Value::Floats(3, _) => Value::Floats(3, values),
+                                _ => Value::Floats(4, values),
                             }
                         })
                     }
@@ -576,7 +576,7 @@ fn resident_inputs() {
         let kernel = tp::ok(backend.prepare(true, &consumer));
         let out = tp::ok(kernel.run(&inputs));
         let result = tp::ok(kernel.readback(&out));
-        assert_eq!(result, Value::Float_array(Arc::new(vec![1.; 1025])), "resident gather={gather}");
+        assert_eq!(result, Value::Floats(1, Arc::new(vec![1.; 1025])), "resident gather={gather}");
         assert_eq!(run::Private::readback_bytes(&r), 0, "consumer read its integer producer back");
     }
     (holder.release)(false);

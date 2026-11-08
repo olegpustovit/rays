@@ -102,7 +102,7 @@ fn rgba(r: i64, g: i64, b: i64, a: i64) -> i32 {
 const WHITE: i32 = -1;
 fn ink(value: &Value) -> Result<i32, Diagnostic> {
     match value {
-        Value::Vec3_array(_) => Ok(WHITE),
+        Value::Floats(3, _) => Ok(WHITE),
         other => color(other),
     }
 }
@@ -184,7 +184,7 @@ fn colour_attr(sink: &Sink, count: i64, value: &Value) -> Result<ColorAttr, Diag
         return Ok(ColorAttr::Device(Buffer { id, count, width }));
     }
     match value {
-        Value::Vec3_array(xs) => {
+        Value::Floats(3, xs) => {
             if xs.len() as i64 != 3 * count {
                 return Err(colors_length());
             }
@@ -200,7 +200,7 @@ fn assoc<'a>(args: &'a [(String, &'a Value)], key: &str) -> Option<&'a Value> {
 
 fn check_colors(count: i64, args: &[(String, &Value)]) -> Result<(), Diagnostic> {
     for key in ["fill", "stroke", "color"] {
-        if let Some(Value::Vec3_array(xs)) = assoc(args, key) {
+        if let Some(Value::Floats(3, xs)) = assoc(args, key) {
             if xs.len() as i64 != 3 * count {
                 return Err(colors_length());
             }
@@ -218,11 +218,11 @@ fn points_attr(sink: &mut Sink, value: &Value) -> Result<(i64, PairAttr), Diagno
         return Ok((count, PairAttr::Device(Buffer { id, count, width })));
     }
     match value {
-        Value::Vec3_array(xs) => {
+        Value::Floats(3, xs) => {
             let n = xs.len() as i64 / 3;
             Ok((n, PairAttr::Buffer(Buffer { id: sink.buffers.add(xs.clone()), count: n, width: 3 })))
         }
-        Value::Vec2_array(xs) => {
+        Value::Floats(2, xs) => {
             let n = xs.len() as i64 / 2;
             Ok((n, PairAttr::Buffer(Buffer { id: sink.buffers.add(xs.clone()), count: n, width: 2 })))
         }
@@ -285,7 +285,7 @@ fn mark(sink: &mut Sink, batch: bool, kind: Mark, raw: &[(String, i64)], values:
                     ScalarAttr::Device(Buffer { id, count, width })
                 } else {
                     match value {
-                        Value::Float_array(xs) => {
+                        Value::Floats(1, xs) => {
                             if xs.len() as i64 != n {
                                 return Err(length_error("Radii and positions have different lengths."));
                             }
@@ -323,7 +323,7 @@ fn mark(sink: &mut Sink, batch: bool, kind: Mark, raw: &[(String, i64)], values:
                     PairAttr::Device(Buffer { id, count, width })
                 } else {
                     match value {
-                        Value::Vec3_array(xs) => {
+                        Value::Floats(3, xs) => {
                             if xs.len() as i64 != 3 * n {
                                 return Err(length_error("Sizes and positions have different lengths."));
                             }
@@ -523,8 +523,8 @@ mod tests {
 
     #[test]
     fn a_batch_keeps_packed_storage_and_checks_lengths() {
-        let positions = Value::Vec3_array(Arc::new(vec![0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 20.0, 0.0, 0.0]));
-        let radii = Value::Float_array(Arc::new(vec![1.0, 2.0, 3.0]));
+        let positions = Value::Floats(3, Arc::new(vec![0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 20.0, 0.0, 0.0]));
+        let radii = Value::Floats(1, Arc::new(vec![1.0, 2.0, 3.0]));
         let buffers = Buffers::create();
         let mut s = sink(None, (200, 100), &buffers);
         let draw = Draw::Batch { mark: Mark::Circle, args: args(&["positions", "radius"]) };
@@ -533,7 +533,7 @@ mod tests {
         assert!(matches!(&entries[0], Entry::MarkSet { count: 3, kind: Kind::Circle { position: PairAttr::Buffer(Buffer { id: 1, count: 3, width: 3 }), radius: ScalarAttr::Buffer(Buffer { id: 2, .. }), .. } }));
         assert_eq!(buffers.find(1).unwrap().len(), 9);
         // picture error: radii of a different length
-        let short = Value::Float_array(Arc::new(vec![1.0, 1.0]));
+        let short = Value::Floats(1, Arc::new(vec![1.0, 1.0]));
         let e = run(draw.clone(), vec![positions, short], (200, 100)).unwrap_err();
         assert_eq!(e.code, "E_DRAW_LENGTH");
     }

@@ -1,0 +1,10 @@
+Working...
+Comparing M4 vs M9 at the cited sites to pick the smaller ponytail fix.
+
+M4 wins: defer `Profile::executions` clone until after the early `!moved && !fresh` exit; compare lengths via a cheap count only.
+
+**Commit:** `0f3804c3` (`M4: defer probe profile clone in sync_scope early exit.`)
+
+**Mechanism:** `sync_scope` uses `probe_run::report_count` (mutex length only) for the `fresh` check and calls `probe_run::reports` only after the `!moved && !fresh` early return—so the quiet path skips cloning up to 512 profile executions per call.
+
+**Checks:** `cargo check -p rays_editor`; `cargo t -p flow_native probe_run` (3 pass).
