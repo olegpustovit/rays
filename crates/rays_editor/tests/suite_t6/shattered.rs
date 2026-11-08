@@ -31,17 +31,35 @@ fn edge_counts(g: &rdk_core::geometry::T) -> (i64, i64) {
     (boundary, non_manifold)
 }
 
+/// The studio with a few cutting sheets: fracture and shading at 1 and 4 domains, in budget.
 pub fn shattered_studio() {
     let text = read_repo("sketches/shattered_studio.rays");
-    let workspace = load(&text);
+    let small = text.replacen("(sop/points :points 50)", "(sop/points :points 10)", 1);
+    assert!(small != text, "the studio's cutter count moved");
+    studio(&small, 40);
+}
+
+/// The studio sketch itself (50 sheets, over a thousand shards: ~20 s debug), RAYS_SLOW=1.
+pub fn shattered_studio_full() {
+    studio(&read_repo("sketches/shattered_studio.rays"), 1000);
+}
+
+fn studio(text: &str, min_pieces: i64) {
+    let workspace = load(text);
     let graphs = rays_editor::workspace::sop_graphs(None, &workspace).unwrap();
     let graph = graphs.iter().find(|(n, _)| n == "shards").expect("shards").1.clone();
     let fracture_id = sop::node::inspect(&graph).into_iter().find(|i| i.operation == "boolean_fracture").expect("fracture").id;
     let fracture = sop::node::find(&graph, fracture_id).unwrap();
     // the fracture is the cost: once per domain count, and the source and the shaded graph are cooked
     // in the four-domain session that already holds it
-    let one = with_cook(1, &|cook| cook(&fracture));
+    let (one, shaded_one) = with_cook(1, &|cook| (cook(&fracture), cook(&graph)));
     let (four, source, colored) = with_cook(4, &|cook| (cook(&fracture), cook(&sop::node::inputs(&fracture).remove(0)), cook(&graph)));
+    // the shading is exact across domains too
+    let (s1, s4) = (sop::payload::geometry(&shaded_one.payload).unwrap(), sop::payload::geometry(&colored.payload).unwrap());
+    assert!(rdk_core::geometry::point_count(&s1) == rdk_core::geometry::point_count(&s4));
+    for i in 0..rdk_core::geometry::point_count(&s1) {
+        assert!(float3::get(rdk_core::geometry::positions(&s1), i) == float3::get(rdk_core::geometry::positions(&s4), i));
+    }
     let g = sop::payload::geometry(&one.payload).unwrap();
     let h = sop::payload::geometry(&four.payload).unwrap();
     assert!(rdk_core::geometry::point_count(&g) == rdk_core::geometry::point_count(&h));
@@ -67,7 +85,7 @@ pub fn shattered_studio() {
         })
         .collect();
     let count = dense.len() as i64;
-    assert!(count >= 1000, "{count} pieces");
+    assert!(count >= min_pieces, "{count} pieces");
     let parts = rdk_ops::deletion::primitive_partitions(count, &membership, &g).unwrap();
     for part in &parts {
         assert!(edge_counts(part) == (0, 0));

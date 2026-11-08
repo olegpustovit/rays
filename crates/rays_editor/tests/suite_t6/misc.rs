@@ -18,7 +18,7 @@ mod image_sop;
 
 
 pub fn cases() -> Vec<(&'static str, fn())> {
-    vec![
+    let mut cases: Vec<(&'static str, fn())> = vec![
         ("terminal_boolean_normals", small::terminal_normals),
         ("custom_sop", small::custom_sop),
         ("gallery_shapes", gallery::gallery_shapes),
@@ -42,5 +42,10 @@ pub fn cases() -> Vec<(&'static str, fn())> {
         ("flow_shader", flow_shader::flow_shader),
         ("isogrid_deferred", isogrid::isogrid_deferred),
         ("shattered_studio", shattered::shattered_studio),
-    ]
+    ];
+    // the full studio sketch fractures into over a thousand shards: a qualification case
+    if std::env::var("RAYS_SLOW").as_deref() == Ok("1") {
+        cases.push(("shattered_studio_full", shattered::shattered_studio_full));
+    }
+    cases
 }
