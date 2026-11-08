@@ -350,13 +350,12 @@ fn manifest_checks(exhaustive: bool) {
             _ => panic!("Malformed Flow manifest kind"),
         })
         .collect();
-    // the manifest above covers the native factories only: the library's lowered ones are not in it
-    check(names.len() == native.len(), "Flow manifest omitted kinds");
-    for f in &native {
-        let want = format!("sop/{}", edit::factory_key(f));
-        check(names.iter().any(|n| n.as_slice() == want.as_bytes()), &format!("Flow manifest omitted SOP {}", edit::factory_key(f)));
+    // the manifest lists the native factories and the library's Lisp nodes: every registered kind
+    check(names.len() == keys.len(), "Flow manifest omitted kinds");
+    for key in &keys {
+        let want = format!("sop/{key}");
+        check(names.iter().any(|n| n.as_slice() == want.as_bytes()), &format!("Flow manifest omitted SOP {key}"));
     }
-    let _ = keys;
     // The schema sweep reads the factory's fields; building all default nodes is the exhaustive run's.
     let mut vector_groups = 0;
     for factory in &factories {
