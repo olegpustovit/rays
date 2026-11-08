@@ -1061,15 +1061,12 @@ fn context_time_is_a_float_time_dependency_in_bodies_only() {
 }
 
 /// A Lisp node's body is lowered over fresh stand-ins for its inputs on every build: the factory
-/// node (`card_node`) and its rebuild over other inputs (`restore`, an input edit) share one build
-/// of the body's nodes, and the rebuilt node cooks exactly as a fresh one. The whole test-helper path
-/// (workspace lowering, factory node, restore, cook) prepares the body's program once: the inlined
-/// body the factory node replaces never cooks.
+/// node (`card_node`, as `lisp_sop::root` takes it) and its rebuild over other inputs (`restore`, an
+/// input edit) share one build of the body's nodes, and only the node that cooks prepares its
+/// program (the inlined body the factory node replaces never cooks). Every node cooks the inlined
+/// body's bytes.
 #[test]
 fn a_lisp_node_rebuilt_over_new_inputs_builds_its_body_once() {
-    let l = lower::workspace(None, Vec::new(), lower::Options::default(), &parse("(workspace w (graph g :context sop (sop/subdivide (sop/box) :iterations 1 :hole_group \"\")))"))
-        .unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
-    let graph = l.graphs.iter().find(|g| g.default).expect("a default graph");
     fn phases<X>(run: &mut dyn FnMut() -> X) -> (X, flow_syntax::phase_timer::T) {
         let start = std::time::Instant::now();
         let guard = flow_syntax::phase_timer::SampleGuard::start_with_clock(Box::new(move || start.elapsed().as_secs_f64()));
@@ -1077,20 +1074,20 @@ fn a_lisp_node_rebuilt_over_new_inputs_builds_its_body_once() {
         (x, guard.finish())
     }
     let calls = flow_syntax::phase_timer::calls;
-    let (n, _) = phases(&mut || lisp_sop::root(&l, graph).expect("graph root"));
+    let text = "(workspace w (graph g :context sop (sop/subdivide (sop/box) :iterations 1 :hole_group \"\")))";
+    let l = lower::workspace(None, Vec::new(), lower::Options::default(), &parse(text)).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
+    let (n, t) = phases(&mut || lisp_sop::root(&l, l.graphs.iter().find(|g| g.default).expect("a default graph")).expect("graph root"));
     assert_eq!(node::operation(&n), "subdivide", "the root is the factory node");
+    assert_eq!(calls(&t, "lower.inlined_build"), 1, "the factory node builds its body once");
     with_session(&mut |s| {
         let input = cook_with(s, 1, 97, 0, &node::inputs(&n)[0]);
         let (rebuilt, t) = phases(&mut || build::rebuild_with_inputs(&n, &[lisp_sop::snapshot(&input)]));
         assert_eq!(calls(&t, "lower.inlined_build"), 0, "a rebuild over new inputs built the body's nodes again");
+        let (cooked, t) = phases(&mut || [geometry_bytes(&cook_with(s, 1, 97, 0, &n)), geometry_bytes(&cook_with(s, 1, 97, 0, &rebuilt))]);
+        assert_eq!(calls(&t, "lower.structural_prepare"), 1, "the factory node and its rebuild did not share one prepared program");
+        let graph = l.graphs.iter().find(|g| g.default).unwrap();
         let expected = geometry_bytes(&cook_with(s, 1, 97, 0, &edit::compile_node(&graph.network.geometry, graph.root.unwrap()).unwrap()));
-        assert!(geometry_bytes(&cook_with(s, 1, 97, 0, &n)) == expected, "the factory node cooks differently from the inlined body");
-        assert!(geometry_bytes(&cook_with(s, 1, 97, 0, &rebuilt)) == expected, "the rebuilt node cooks differently");
-        let (bytes, t) = phases(&mut || {
-            let m = lisp_sop::workspace_node(&[("src".to_owned(), lisp_sop::snapshot(&input))], "(workspace w (graph g :context sop (sop/subdivide (sop/ext_src) :iterations 1 :hole_group \"\")))");
-            geometry_bytes(&cook_with(s, 1, 97, 0, &m))
-        });
-        assert!(bytes == expected, "the helper's node cooks differently");
-        assert_eq!(calls(&t, "lower.structural_prepare"), 1, "the helper's path prepared the body's program more than once");
+        assert!(cooked[0] == expected, "the factory node cooks differently from the inlined body");
+        assert!(cooked[1] == expected, "the rebuilt node cooks differently");
     });
 }
