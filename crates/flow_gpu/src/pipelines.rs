@@ -26,6 +26,7 @@ struct Data {
     cache: RefCell<List<String, Owned>>,
     domain: ThreadId,
     closed: Cell<bool>,
+    /// compiles a dispatch waited for; a background specialization (`specialized`) is not one
     compilations: Cell<i64>,
     releases: Rc<Cell<i64>>,
     /// by kernel entry
@@ -88,7 +89,9 @@ pub fn get(t: &T, kernel: &Kernel) -> Result<Compiled, Diagnostic> {
         return Ok(owned.compiled.clone());
     }
     let (bytes, entry, interface) = body(kernel)?;
-    compile(t, kernel.entry.clone(), &shader_of(kernel, bytes, &entry, &interface)?, &entry, &interface)
+    let compiled = compile(t, kernel.entry.clone(), &shader_of(kernel, bytes, &entry, &interface)?, &entry, &interface)?;
+    d.compilations.set(d.compilations.get() + 1);
+    Ok(compiled)
 }
 
 fn shader_of(kernel: &Kernel, bytes: Vec<u8>, entry: &str, interface: &[shader::Binding]) -> Result<shader::Shader, Diagnostic> {
@@ -159,7 +162,6 @@ fn compile(t: &T, key: String, shader: &shader::Shader, entry: &str, interface: 
             Err(diagnostic(&error))
         }
         Ok(pipeline) => {
-            d.compilations.set(d.compilations.get() + 1);
             let compiled = Compiled { pipeline };
             d.cache.borrow_mut().add(key, Owned { compiled: compiled.clone(), library });
             Ok(compiled)
