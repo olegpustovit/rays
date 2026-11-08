@@ -78,21 +78,12 @@ pub fn invalid_arg(message: String) -> error::T {
     error::new("Rdk_mesh.Subdivide.subdivide", Code::InvalidArgument, message)
 }
 
-/// OCaml `max_int` is 2^62 - 1.
-pub const OCAML_MAX_INT: i64 = (1_i64 << 62) - 1;
-
 pub fn checked_add(name: &str, a: i64, b: i64) -> Result<i64, error::T> {
-    if b < 0 || a > OCAML_MAX_INT - b {
-        return Err(fail(format!("{name} exceeds integer limits")));
-    }
-    Ok(a + b)
+    a.checked_add(b).filter(|_| a >= 0 && b >= 0).ok_or_else(|| fail(format!("{name} exceeds integer limits")))
 }
 
 pub fn checked_mul(name: &str, a: i64, b: i64) -> Result<i64, error::T> {
-    if a < 0 || b < 0 || (a != 0 && b > OCAML_MAX_INT / a) {
-        return Err(fail(format!("{name} exceeds integer limits")));
-    }
-    Ok(a * b)
+    a.checked_mul(b).filter(|_| a >= 0 && b >= 0).ok_or_else(|| fail(format!("{name} exceeds integer limits")))
 }
 
 pub fn gi(values: &[i64], index: i64) -> i64 {

@@ -39,10 +39,8 @@ fn fail(message: &str) -> error::T {
 }
 
 fn checked_add(name: &str, left: i64, right: i64) -> Result<i64, error::T> {
-    if right < 0 || left > (1_i64 << 62) - 1 - right {
-        return Err(fail(&format!("{name} exceeds integer limits")));
-    }
-    Ok(left + right)
+    left.checked_add(right).filter(|_| left >= 0 && right >= 0)
+        .ok_or_else(|| fail(&format!("{name} exceeds integer limits")))
 }
 
 fn grain_size(grain: Option<i64>) -> Result<i64, error::T> {
@@ -723,6 +721,15 @@ mod tests {
 
     fn xs(value: &geometry::T) -> Vec<f64> {
         packed::Float3::View::view(geometry::positions(value)).unwrap().x.to_vec()
+    }
+
+    #[test]
+    fn cardinality_guards_are_native_i64() {
+        assert_eq!(checked_add("count", 1 << 62, 1).unwrap(), (1 << 62) + 1);
+        assert_eq!(checked_add("count", i64::MAX, 0).unwrap(), i64::MAX);
+        for (a, b) in [(i64::MAX, 1), (i64::MIN, -1), (-1, 1), (1, -1)] {
+            assert!(checked_add("count", a, b).is_err());
+        }
     }
 
     #[test]

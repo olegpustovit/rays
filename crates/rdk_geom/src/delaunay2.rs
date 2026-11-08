@@ -10,7 +10,6 @@ use rdk_core::error::Code;
 use crate::exact_dyadic;
 use crate::predicates::{self, Sign};
 
-const MAX_INT: i64 = (1 << 62) - 1;
 
 pub struct T {
     source_count: i64,
@@ -474,7 +473,7 @@ fn run(
             return Err("Delaunay point-location walk did not converge".to_owned());
         }
         generation += 1;
-        if generation == MAX_INT {
+        if generation == i64::MAX {
             marks.iter_mut().for_each(|m| *m = 0);
             generation = 1;
         }
@@ -502,7 +501,7 @@ fn run(
             return Err("Delaunay cavity is empty for a located point".to_owned());
         }
         generation += 1;
-        if generation == MAX_INT {
+        if generation == i64::MAX {
             marks.iter_mut().for_each(|m| *m = 0);
             generation = 1;
         }
@@ -528,7 +527,7 @@ fn run(
             return Err("Delaunay cavity has an invalid boundary".to_owned());
         }
         boundary_generation += 1;
-        if boundary_generation == MAX_INT {
+        if boundary_generation == i64::MAX {
             boundary_stamp.iter_mut().for_each(|m| *m = 0);
             boundary_generation = 1;
         }

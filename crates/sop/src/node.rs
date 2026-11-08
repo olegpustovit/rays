@@ -128,10 +128,9 @@ struct Data {
 pub struct T(Arc<Data>);
 
 static NEXT_ID: AtomicI64 = AtomicI64::new(1);
-const MAX_INT: i64 = (1_i64 << 62) - 1;
 
 fn fresh_id() -> i64 {
-    NEXT_ID.fetch_add(1, Ordering::SeqCst)
+    NEXT_ID.try_update(Ordering::SeqCst, Ordering::SeqCst, |id| id.checked_add(1)).expect("node id space exhausted")
 }
 
 /// OCaml `==` on nodes.
@@ -318,10 +317,8 @@ pub mod build {
     }
 
     pub fn reserve_id(id: i64) -> Result<(), String> {
-        if id < 1 || id == MAX_INT {
-            return Err("node id is out of range".to_owned());
-        }
-        NEXT_ID.fetch_max(id + 1, Ordering::SeqCst);
+        let next = id.checked_add(1).filter(|_| id > 0).ok_or_else(|| "node id is out of range".to_owned())?;
+        NEXT_ID.fetch_max(next, Ordering::SeqCst);
         Ok(())
     }
 

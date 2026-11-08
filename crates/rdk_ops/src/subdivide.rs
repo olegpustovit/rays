@@ -1421,6 +1421,18 @@ mod tests {
     }
 
     #[test]
+    fn cardinality_guards_are_native_i64() {
+        for (a, b, expected) in [
+            (1 << 62, 1, Some((1 << 62) + 1)), (i64::MAX, 0, Some(i64::MAX)),
+            (i64::MAX, 1, None), (i64::MIN, -1, None), (-1, 1, None), (1, -1, None),
+        ] { assert_eq!(checked_add("count", a, b).ok(), expected); }
+        for (a, b, expected) in [
+            (1 << 61, 2, Some(1 << 62)), (i64::MAX, 0, Some(0)),
+            (i64::MAX, 2, None), (-1, 0, None), (0, -1, None),
+        ] { assert_eq!(checked_mul("count", a, b).ok(), expected); }
+    }
+
+    #[test]
     fn checked_loop_quad_error() {
         match sub(&quad(None, None, None), &|p| p.scheme = Scheme::Loop) {
             Err(failure) if error::code(&failure) == Code::InvalidTopology => {}

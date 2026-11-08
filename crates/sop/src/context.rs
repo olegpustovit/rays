@@ -129,9 +129,6 @@ pub struct Options {
     pub cancel: Option<Arc<cancel::T>>,
 }
 
-/// OCaml `max_int`, the logical frame index bound.
-const MAX_INT: i64 = (1_i64 << 62) - 1;
-
 /// `Context.create`: the arguments are `Options` fields; `Options::default()` is `create ()`.
 pub fn create(options: Options) -> Result<T, String> {
     let frame = options.frame.unwrap_or(0);
@@ -149,9 +146,6 @@ pub fn create(options: Options) -> Result<T, String> {
     }
     if grain <= 0 {
         return Err("Context.create: grain must be positive".to_owned());
-    }
-    if frame > MAX_INT {
-        return Err("Context.create: frame exceeds the logical frame index range".to_owned());
     }
     let mut input = options.input.unwrap_or_else(|| input::at_time(time));
     input.t = time;

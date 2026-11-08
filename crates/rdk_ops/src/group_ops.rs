@@ -595,11 +595,10 @@ fn copied_selection(
 }
 
 fn unique_suffix(store: &GroupStore, owner: Owner, base: &str) -> Result<String, error::T> {
-    const MAX_INT: i64 = (1_i64 << 62) - 1;
     let mut suffix: i64 = 2;
     let mut candidate = format!("{base}2");
     while store_find(store, owner, &candidate).is_some() {
-        if suffix == MAX_INT {
+        if suffix == i64::MAX {
             return Err(make_error("group_transfer", Code::InvalidGroup, "Group Copy: suffix space exhausted"));
         }
         suffix += 1;

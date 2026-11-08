@@ -911,11 +911,7 @@ fn consumer_context(session: &mut T, context: &context::T, root: &node::T, exter
             let entry = &scan.entries[versions[0]];
             if entry.known_consumer && !entry.unknown_consumer {
                 let local = entry.readers.len() as i64;
-                if entry.external_readers > ((1_i64 << 62) - 1) - local {
-                    None
-                } else {
-                    Some(entry.external_readers + local)
-                }
+                entry.external_readers.checked_add(local)
             } else {
                 None
             }

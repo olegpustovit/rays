@@ -20,8 +20,6 @@ use crate::deletion;
 
 const OPERATION: &str = "Rdk_mesh.Triangulate2d.triangulate_2d";
 const GUARD_OPERATION: &str = "triangulate_2d";
-/// OCaml `max_int`.
-const MAX_INT: i64 = (1 << 62) - 1;
 
 
 pub enum Projection {
@@ -1088,10 +1086,8 @@ fn interpolate_point_attribute(
 }
 
 fn checked_add(label: &str, first: i64, second: i64) -> Result<i64, error::T> {
-    if first < 0 || second < 0 || first > MAX_INT - second {
-        return Err(invalid(&format!("{label} exceeds integer range")));
-    }
-    Ok(first + second)
+    first.checked_add(second).filter(|_| first >= 0 && second >= 0)
+        .ok_or_else(|| invalid(&format!("{label} exceeds integer range")))
 }
 
 fn defaulted_attribute(
@@ -1863,6 +1859,15 @@ mod tests {
 
     fn expect_error(value: Result<geometry::T, error::T>) {
         assert!(value.is_err(), "invalid input succeeded");
+    }
+
+    #[test]
+    fn cardinality_guards_are_native_i64() {
+        assert_eq!(checked_add("count", 1 << 62, 1).unwrap(), (1 << 62) + 1);
+        assert_eq!(checked_add("count", i64::MAX, 0).unwrap(), i64::MAX);
+        for (a, b) in [(i64::MAX, 1), (i64::MIN, -1), (-1, 1), (1, -1)] {
+            assert!(checked_add("count", a, b).is_err());
+        }
     }
 
     #[test]

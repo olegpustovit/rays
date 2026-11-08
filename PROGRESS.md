@@ -14,9 +14,9 @@ Repo mirror: `docs/history/port-simplification/index.html`
 |------|------|---------|----------|
 | A | A1-A8 | - | - |
 | B | B0-B5 | - | - |
-| M | M1-M2, M4-M20 (M3 via C6), M21 | M3 | - |
-| I | I1-I3, I5-I6 | I4 (remaining non-hash count guards) | - |
-| C | C1-C5, C7-C9, C12-C21 | C6, C10, C11 | - |
+| M | M1-M2, M4-M16, M18-M21 | M3, M17 | - |
+| I | I3-I5 | I1-I2 (builtin abs/token parser), I6 (exported loop count limit) | - |
+| C | C1-C2, C4-C5, C7-C9, C12-C21 | C3, C6, C10, C11 | - |
 | D | D2-D3 | D1, D4 (benchmark evidence missing) | D5-D6 |
 
 ## Items (commits)
@@ -32,19 +32,21 @@ A1-A8, B0-B4: see earlier rows below in git history (`6802a325` ... `96fab43d`);
 | M13 | done | `6f88bce2` Arc<Vec<T>> attributes; COLUMNS ring + FLOW_COPIES deleted; guard `attribute_round_trip_bytes` |
 | M14 | done | `a0e5d08e` + repair `19868fbe` etc. (boxed `GeoPayload`) |
 | M15, M16 | done | `38bfb307`, `00c4d596` |
-| M17 | done | via C3 commits (`25726291` ... `141a4afe`), `bd2a526f`, `8afb4996` |
+| M17 | partial | C3 commits (`25726291` ... `141a4afe`), `bd2a526f`, `8afb4996` cover the main kernels; resumed source census found remaining production chunk-result slots (see C3). |
 | M18 | done | `ed08c91b` `21da1965` i32 scratch; `INT_FLOATS` charged to ledger in `8bf0c0d0` |
 | M19 | done | `13abe74c` `rays_math::text_array::TextArray` (offsets+bytes); 1M rows = 8 allocs; text literals as `Arc<[u8]>` skipped (hundreds of sites) |
 | M21 | done, deviates | `1ccd60fc` `Rc<[u8]>` with `unique()` copy-on-write; plan premise "nothing mutates" was false (set_pixel, Image::replace, readback) |
 | M3 | partial | via C6 |
-| I1-I3 | done | `a06df67a` spec; `c9c2b12a` i64 core; `74942f50` `ocaml_int` deleted |
-| I4 | partial | `edc27be2` migrated ~12 negate/abs/square guards. Resumed audit found non-hash cardinality helpers still capped at 2^62−1 in `subdivide_refine`, `curve_subdivide`, `triangulate2d`, plus other count/ID guards. Audit and migrate to checked native i64 arithmetic; preserve frozen hash masks and key-packing validation. |
+| I1 | partial | `a06df67a` main spec changed; core.md token-reader and scatter rows still say 63-bit. Correct them with the remaining builtin fixes. |
+| I2 | partial | `c9c2b12a` i64 core; resumed audit found `flow_check::op::parse_int_token` still rejects native i64 tokens outside the old 63-bit range, and builtin `abs` still treats −2^62 as the minimum. Fix shared builtin bodies and add boundary parity coverage. |
+| I3 | done | `74942f50` `ocaml_int` deleted; frozen hashes remain in `rays_math::hash`. |
+| I4 | done | `edc27be2` plus resumed native-boundary closure: RDK count helpers/key packing use checked i64 arithmetic, count/generation limits use native constants, SOP context accepts the full nonnegative frame range, reader accounting is checked, and node reservations reject native overflow. Node allocation checks exhaustion before wrapping. Frozen geometry/hash masks unchanged. Six focused boundary tests and 530 RDK/SOP cases pass. |
 | I5 | done | `b946570e` `859aff62` MSL/SPIR-V + 42 fixtures |
-| I6 | done | `4bcb5ba4` WGSL/JS/web, 185 web fixtures; `flow_image`/`flow_particles_gpu` web_export fixtures not regenerated (tests `#[ignore]`) |
+| I6 | partial | `4bcb5ba4` WGSL/JS/web, 185 web fixtures; `flow_image`/`flow_particles_gpu` web_export fixtures not regenerated (tests `#[ignore]`); resumed audit found the JS region descriptor still emits a 63-bit `countLimit` even though runtime Int/token parsing is 64-bit. |
 | I fallout | done | `49737e72` scatter `sc_rf`; `2c7ebd25` sort/prelude/operators; `e2e2ed18` gpu_run carried fixture |
 | C1 | done | `dc2ee86b` `ef645352` `e6ae19d5` `2612f106` `b4b90916`; Vulkan only type-checked on macOS; source lines grew, gain is allocations/closure types |
 | C2 | done | `33e163b0` `faa8090e` |
-| C3 | done | ~30 commits `25726291`..`141a4afe`; only 2 test-only mutex slots remain |
+| C3 | partial | ~30 commits `25726291`..`141a4afe`; resumed production-source census contradicts the earlier two-test-slots claim: chunk-result slots remain in `rdk_geom::proximity_index` (3), `curve_join` (3), `attribute_ops`, `ordering`, `intersection_analysis`. Convert fixed-size outputs to disjoint windows and inspect variable-size results separately. |
 | C4 | done | `a08c927c`, `fee04de1` plus resumed closure: triangulation/defaulted gathers use the central selector; instance repetition, fuse reductions, target mapping, Boolean consolidation, mesh merge and tuple mirroring use shared float-plane operations. `of_float_planes` consumes output buffers instead of copying them; all callers migrated. Normals keep their joint normalisation paths. Regression proves buffer identity for widths 1–4, missing/mismatched-plane errors, and tuple instance repetition. |
 | C5 | done | `a12b1efb` |
 | C6 | partial | `4cfcff4a` `7d7241ae`: panel_map plain struct, Cow panes, Rc core; reducers do NOT take `&mut t`, `reduce` still clones once; basic 2509 -> 2089 allocs/frame, empty 5732 -> 4549 |
@@ -69,7 +71,7 @@ A1-A8, B0-B4: see earlier rows below in git history (`6802a325` ... `96fab43d`);
 
 ## Known failures / open risks
 
-- Resumed audit next work: complete C6/M3 ownership and borrowed panes; migrate remaining I4 non-hash count guards; then C10/C11/D1/D4 audit, D5/D6 and full qualification. `fee04de1` and `23d4bb15` are completed stages, not completion of the full artifact plan.
+- Resumed audit next work: finish I1/I2 builtin boundary fixes and I6 loop count metadata; finish C3/M17 remaining chunk slots and C6/M3 ownership/borrowed panes; then C10/C11/D1/D4 audit, D5/D6 and full qualification. `fee04de1` and `23d4bb15` are completed stages, not completion of the full artifact plan.
 
 - `cargo t -p flow_sop` on the D2 tree: 700 tests, 696 pass; the 4 failures are the baseline ones below (`lend_session_tests` confirmed pre-existing by LowerClean at `11988707`). `cargo t -p rdk_core/rdk_geom/rdk_boolean/rdk_ops/sop`: 523 pass; `rdk_rays` 10 pass. Other full suites were **not** run on final HEAD under load (load avg 50-450). Focused runs per item passed (see worker reports in item rows).
 - Pre-existing at baseline `11988707` (bisected by LowerClean): `test_node_facts::declared_preserved_topology`, `test_keyword_ports::keyword_manifest_defaults_projection_checked_gestures` (E_SHADOW), `test_settle::in_flight_device_writes_settle_at_a_cooks_end`, `test_projection::snapshots_of_the_scene_fixtures`, `lend_session_tests::escaped_zone_nodes_own_only_their_cook_context`.
@@ -129,6 +131,8 @@ Policy (`AGENTS.md`, `docs/history/build-speed.md`, plan B0): one warm workspace
 Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s under load; this run is healthy (not stale).
 
 ## Session log
+
+- 2026-11-08: I4 closure: native helper/ID/frame boundary checks: `cargo t -p rdk_geom -p rdk_ops -p sop native_i64`, 6 pass / 19.367 s including rebuild, slowest 0.029 s. `cargo t -p rdk_core -p rdk_geom -p rdk_ops -p rdk_boolean -p sop`: 530 pass / 6.632 s, slowest `attribute_interpolate::tests::parallel_exactness_at_scale` 1.127 s. `cargo t -p flow_sop test_alloc_budget -- --nocapture`: 5 pass / 3.565 s, slowest 0.115 s, limits unchanged. Rebuilt HEAD `3b847b50` temporarily in the shared target and restored all working changes in `finally`, then rebuilt the native-boundary stage: `cargo build -p rays_bin` wall 21.467 / 9.782 s (incremental cache states differ; no compile-speed claim). Seven measured runs after one warmup of `rays check` on basic, gpu_sea and million_marks: median 0.620483 / 0.589764 s; no observed debug runtime regression. Evidence `/tmp/rays-i4-perf.json`; `git diff --check` clean. Further audit reopened C3/M17 and I1/I2/I6 with concrete source evidence rather than leaving false completion labels.
 
 - 2026-11-08: C4 closure: `cargo check -p rdk_ops -p rdk_boolean` 1.77 s; focused ownership check 3.946 s and instance payload check 12.531 s including rebuilds. `cargo t -p rdk_core -p rdk_ops -p rdk_boolean -p sop`: 469 pass / 10.741 s, slowest `attribute_interpolate::tests::parallel_exactness_at_scale` 1.111 s. `cargo t -p flow_sop test_alloc_budget -- --nocapture`: 5 pass / 13.315 s, slowest 0.135 s, existing limits unchanged. `git diff --check`: clean. Remaining production `Storage::Float2` matches classify kinds/lengths, decode specialised numerical kernels/constraints/UV inputs, or distinguish normal vectors; the duplicate gather/rebuild algorithms use the shared helpers. No boundaries or goldens changed.
 

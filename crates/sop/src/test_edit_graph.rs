@@ -26,6 +26,16 @@ fn nodes(list: &[Option<node::T>]) -> Vec<node::T> {
 }
 
 #[test]
+fn node_ids_and_context_frames_use_native_i64() {
+    let frame = crate::context::create(crate::context::Options { frame: Some(i64::MAX), ..Default::default() }).unwrap();
+    assert_eq!(crate::context::frame(&frame), i64::MAX);
+    for invalid in [i64::MIN, -1, 0, i64::MAX] { assert!(build::reserve_id(invalid).is_err()); }
+    let boundary = (1_i64 << 62) - 1;
+    build::reserve_id(boundary).unwrap();
+    assert!(build::fresh_id() > boundary);
+}
+
+#[test]
 fn editable_graph() {
     let source = snapshot(&fixture());
     let null = shapes::null::factory();

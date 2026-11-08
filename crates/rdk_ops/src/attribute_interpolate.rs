@@ -86,7 +86,6 @@ pub struct WeightedParams {
 }
 
 const OPERATION: &str = "attribute_interpolate";
-const MAX_INT: i64 = (1_i64 << 62) - 1;
 
 /// An `Error msg` of the OCaml API (the caller codes it `invalid_interpolate`).
 fn fail(message: &str) -> error::T {
@@ -683,7 +682,7 @@ fn array_offsets(
         } else {
             return Err(invalid(&format!("{operation}: invalid internal row choice")));
         };
-        if length > MAX_INT - offsets[destination] {
+        if length > i64::MAX - offsets[destination] {
             return Err(invalid(&format!("{operation}: packed value count overflow")));
         }
         offsets[destination + 1] = offsets[destination] + length;
@@ -1076,7 +1075,7 @@ fn compute_primitive_weights(
     let mut offsets = vec![0_i64; target_count as usize + 1];
     for destination in 0..target_count as usize {
         cancel::poll(cancel_token, destination as i64, 4095)?;
-        if lengths[destination] > MAX_INT - offsets[destination] {
+        if lengths[destination] > i64::MAX - offsets[destination] {
             return Err(invalid("Attribute Interpolate: computed weight cardinality overflow"));
         }
         offsets[destination + 1] = offsets[destination] + lengths[destination];

@@ -10,7 +10,8 @@ use rdk_core::cancel;
 
 use crate::predicates::Sign;
 
-const MAX_INT: i64 = (1 << 62) - 1;
+// Frozen table-hash domain; cardinalities use native i64 below.
+const HASH_MASK: i64 = (1 << 62) - 1;
 
 pub struct T {
     triangle_points: Arc<[i64]>,
@@ -58,10 +59,9 @@ fn edge_key(point_count: i64, key_stride: i64, first: i64, second: i64) -> Resul
     if first < 0 || second < 0 || second >= point_count {
         return Err(err_message("Planar CDT edge endpoint is out of range"));
     }
-    if first > (MAX_INT - second) / key_stride {
-        return Err(err_message("Planar CDT edge key exceeds integer range"));
-    }
-    Ok(first * key_stride + second)
+    if key_stride <= 0 { return Err(err_message("Planar CDT edge key exceeds integer range")); }
+    first.checked_mul(key_stride).and_then(|key| key.checked_add(second))
+        .ok_or_else(|| err_message("Planar CDT edge key exceeds integer range"))
 }
 
 const EMPTY: i64 = -1;
@@ -121,7 +121,7 @@ fn table_clear_constraints(table: &mut Table) {
 
 fn hash(key: i64) -> i64 {
     let value = key ^ ((key as u64) >> 16) as i64;
-    value.wrapping_mul(0x45d9f3b) & MAX_INT
+    value.wrapping_mul(0x45d9f3b) & HASH_MASK
 }
 
 fn find_slot(table: &Table, key: i64) -> usize {
@@ -306,21 +306,24 @@ pub struct Workspace {
 }
 
 fn checked_edge_capacity(triangle_capacity: i64) -> Result<i64, String> {
-    if triangle_capacity < 0 || triangle_capacity > (MAX_INT - 3) / 2 {
-        return Err(err_message("Planar CDT triangle cardinality exceeds edge-table limits"));
-    }
-    Ok(std::cmp::max(1, triangle_capacity * 2 + 3))
+    triangle_capacity.checked_mul(2).and_then(|count| count.checked_add(3))
+        .filter(|_| triangle_capacity >= 0)
+        .ok_or_else(|| err_message("Planar CDT triangle cardinality exceeds edge-table limits"))
 }
 
 pub fn create_workspace(point_capacity: Option<i64>, triangle_capacity: i64) -> Result<Workspace, String> {
     if triangle_capacity < 0 {
         return Err(err_message("Planar CDT workspace triangle capacity exceeds array limits"));
     }
-    let point_capacity = point_capacity.unwrap_or(std::cmp::max(1, triangle_capacity + 2));
+    let capacity = triangle_capacity.max(1);
+    let edge_capacity = checked_edge_capacity(capacity)?;
+    let point_capacity = match point_capacity {
+        Some(count) => count,
+        None => triangle_capacity.checked_add(2).ok_or_else(|| err_message("Planar CDT workspace point capacity exceeds array limits"))?,
+    };
     if point_capacity <= 0 {
         return Err(err_message("Planar CDT workspace point capacity exceeds array limits"));
     }
-    let capacity = std::cmp::max(1, triangle_capacity);
     Ok(Workspace {
         triangle_a: vec![0; u(capacity)],
         triangle_b: vec![0; u(capacity)],
@@ -334,7 +337,7 @@ pub fn create_workspace(point_capacity: Option<i64>, triangle_capacity: i64) -> 
         valid: false,
         full_build_count: 0,
         incremental_build_count: 0,
-        edge_table: table_create(checked_edge_capacity(capacity)?)?,
+        edge_table: table_create(edge_capacity)?,
     })
 }
 
@@ -400,13 +403,7 @@ fn opposite_sign(left: Sign, right: Sign) -> bool {
 }
 
 fn squared_limit(count: i64) -> i64 {
-    if count <= 0 {
-        0
-    } else if count > MAX_INT / count {
-        MAX_INT
-    } else {
-        count * count
-    }
+    if count <= 0 { 0 } else { count.checked_mul(count).unwrap_or(i64::MAX) }
 }
 
 fn canonicalize(count: usize, triangle_a: &[i64], triangle_b: &[i64], triangle_c: &[i64]) -> Vec<i64> {
@@ -970,7 +967,7 @@ fn ear_clip(
         while active > 3 {
             check(cancel_value)?;
             let mut best_slot: i64 = -1;
-            let mut best_point = MAX_INT;
+            let mut best_point = i64::MAX;
             for slot in 0..active {
                 let previous = remaining[(slot + active - 1) % active];
                 let current = remaining[slot];
@@ -1293,7 +1290,7 @@ fn recover_constraint(
     }
     let boundary_count = boundary_u.len();
     st.boundary_generation += 1;
-    if st.boundary_generation == MAX_INT {
+    if st.boundary_generation == i64::MAX {
         st.boundary_stamps.iter_mut().for_each(|s| *s = 0);
         st.boundary_generation = 1;
     }
@@ -2178,6 +2175,18 @@ pub fn build(
 mod tests {
     use super::*;
     use crate::{delaunay2, predicates};
+
+    #[test]
+    fn cardinality_guards_are_native_i64() {
+        assert_eq!(checked_edge_capacity(1 << 61), Ok((1 << 62) + 3));
+        assert!(checked_edge_capacity(-1).is_err() && checked_edge_capacity(i64::MAX).is_err());
+        assert_eq!(edge_key(i64::MAX, 2, 1, 1 << 62), Ok((1 << 62) + 2));
+        assert!(edge_key(4, 0, 1, 2).is_err() && edge_key(4, i64::MAX, 1, 2).is_err());
+        assert_eq!(squared_limit(-1), 0);
+        assert_eq!(squared_limit(3_000_000_000), 9_000_000_000_000_000_000);
+        assert_eq!(squared_limit(i64::MAX), i64::MAX);
+        assert!(create_workspace(None, i64::MAX).is_err());
+    }
 
     #[test]
     fn winding_guards_are_native_i64_overflow() {

@@ -13,7 +13,6 @@ use rdk_core::{
 use rdk_core::error::Code;
 
 const OPEN_POLYLINE: u8 = 1;
-const MAX_INT: i64 = (1_i64 << 62) - 1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CurveJoinEnd {
@@ -606,7 +605,7 @@ pub fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, error::
             }
         }
     } else if connect_closest_ends {
-        if selected_count > MAX_INT / 2 {
+        if selected_count > i64::MAX / 2 {
             return Err(fail("Curve Join endpoint count exceeds OCaml array limits".to_owned()));
         }
         let input_primitives = selected_primitives.clone();
@@ -797,7 +796,7 @@ pub fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, error::
     } else {
         primitive_count - selected_count
     };
-    if retained_primitive_count > MAX_INT - chain_count {
+    if retained_primitive_count > i64::MAX - chain_count {
         return Err(fail("Curve Join primitive cardinality exceeds OCaml array limits".to_owned()));
     }
     let output_primitive_count = retained_primitive_count + chain_count;
@@ -853,7 +852,7 @@ pub fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, error::
     }
     let mut primitive_offsets = vec![0_i64; opc + 1];
     for primitive in 0..opc {
-        if primitive_offsets[primitive] > MAX_INT - output_sizes[primitive] {
+        if primitive_offsets[primitive] > i64::MAX - output_sizes[primitive] {
             return Err(fail("Curve Join output cardinality exceeds OCaml array limits".to_owned()));
         }
         primitive_offsets[primitive + 1] = primitive_offsets[primitive] + output_sizes[primitive];

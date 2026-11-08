@@ -2,7 +2,6 @@ use rdk_core::support::{self, Windows};
 use rdk_core::{attribute, cancel, edge_group, error, geometry, group, packed, topology, topology_index, topology_remap};
 use rdk_core::error::Code;
 
-const OCAML_MAX_INT: i64 = (1i64 << 62) - 1;
 
 fn fail(message: &str) -> error::T {
     error::new("Rdk_mesh.Fuse_cleanup", Code::InvalidParameter, format!("Rdk_mesh.Fuse_cleanup.fuse: {message}"))
@@ -153,7 +152,7 @@ pub fn apply_with_mapping(
         vertex_first[primitive] = output_vertices;
         let count = retained_counts[primitive];
         if count > 0 {
-            if output_vertices > OCAML_MAX_INT - count {
+            if output_vertices > i64::MAX - count {
                 return Err(fail("cleanup vertex cardinality exceeds integer limits"));
             }
             output_primitives += 1;

@@ -16,8 +16,6 @@ use crate::deform;
 use crate::fuse_grid;
 
 const GUARD_OPERATION: &str = "facet";
-/// OCaml `max_int`.
-const MAX_INT: i64 = (1 << 62) - 1;
 
 
 #[derive(Default)]
@@ -545,7 +543,7 @@ fn unique_points_all(cancel_value: Option<&cancel::T>, grain: i64, geometry_valu
             isolated.push(point);
         }
     }
-    if isolated.len() as i64 > MAX_INT - source_vertices {
+    if isolated.len() as i64 > i64::MAX - source_vertices {
         return Err(fail("Facet Unique Points output exceeds integer cardinality limits"));
     }
     let output_points = source_vertices + isolated.len() as i64;
@@ -643,7 +641,7 @@ fn unique_points_selected(
         }
     }
     let selected_vertices = selected_offsets[primitive_count as usize];
-    if retained_count > MAX_INT - selected_vertices {
+    if retained_count > i64::MAX - selected_vertices {
         return Err(fail("Facet Unique Points output exceeds integer cardinality limits"));
     }
     let output_points = retained_count + selected_vertices;
@@ -974,7 +972,7 @@ fn split_points_on_edge_ends(
             if root_output[representative as usize] < 0 {
                 if component == 0 {
                     root_output[representative as usize] = point;
-                } else if extra_count >= MAX_INT - source_points {
+                } else if extra_count >= i64::MAX - source_points {
                     overflow = true;
                 } else {
                     root_output[representative as usize] = source_points + extra_count;
@@ -1320,7 +1318,7 @@ fn make_planar(
             for vertex in view.primitive_offsets[primitive]..view.primitive_offsets[primitive + 1] {
                 let point = view.vertex_points[vertex as usize] as usize;
                 if unchanged_reference[point] || claimed[point] {
-                    if extras >= MAX_INT - point_count {
+                    if extras >= i64::MAX - point_count {
                         overflow = true;
                     } else {
                         extras += 1;

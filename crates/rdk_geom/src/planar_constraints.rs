@@ -10,7 +10,6 @@ use crate::bounds2_index;
 use crate::implicit_point::{self, Projection};
 use crate::predicates::{self, Sign};
 
-const MAX_INT: i64 = (1 << 62) - 1;
 
 pub struct T {
     source_count: i64,
@@ -389,7 +388,7 @@ fn run(
         support::par_fill(cancel_value, grain, &mut counts, &|index| {
             let mut value: i64 = 0;
             query(embedded_points[index as usize], &mut |_| {
-                if value == MAX_INT {
+                if value == i64::MAX {
                     return Err(invalid(
                         "Planar embedded incidence cardinality exceeds integer range",
                     ));
