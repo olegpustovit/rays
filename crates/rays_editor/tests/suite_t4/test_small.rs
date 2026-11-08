@@ -83,7 +83,7 @@ fn files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
 
 /// Printing a workspace threads chains with [->]; reading the print gives back the same forms.
 pub fn threading() {
-    let root = format!("{}/../../../", env!("CARGO_MANIFEST_DIR"));
+    let root = format!("{}/../../", env!("CARGO_MANIFEST_DIR"));
     let mut paths = Vec::new();
     files(std::path::Path::new(&format!("{root}sketches")), &mut paths);
     files(std::path::Path::new(&format!("{root}specification/workspace/cases")), &mut paths);
