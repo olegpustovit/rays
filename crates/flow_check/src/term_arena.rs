@@ -1,5 +1,5 @@
 use crate::workspace::{Context, DiagnosticPolicy, HofKind, LoopKind, Pattern};
-use flow_syntax::{arena::{self, NamesBuilder, Syntax, SyntaxArena, SyntaxBuilder}, ty::Ty};
+use flow_syntax::{arena::{self, FastMap, NamesBuilder, Syntax, SyntaxArena, SyntaxBuilder}, ty::Ty};
 pub use flow_syntax::arena::{NameId, SyntaxId};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -219,16 +219,16 @@ pub struct TermBuilder {
     tables: Tables,
     names: NamesBuilder,
     syntax: SyntaxBuilder,
-    paths: HashMap<Vec<NameId>, PathId>,
-    imports: HashMap<(u64, u32), TermId>,
-    source_forms: HashMap<SyntaxId, Syntax>,
+    paths: FastMap<Vec<NameId>, PathId>,
+    imports: FastMap<(u64, u32), TermId>,
+    source_forms: FastMap<SyntaxId, Syntax>,
     scratch: Vec<TermId>,
 }
 impl Default for TermBuilder {
     fn default() -> Self {
         Self { tables: Tables { ranges: vec![Range { start: 0, len: 0 }], ..Tables::default() },
-            names: NamesBuilder::default(), syntax: SyntaxBuilder::new(), paths: HashMap::new(),
-            imports: HashMap::new(), source_forms: HashMap::new(), scratch: Vec::new() }
+            names: NamesBuilder::default(), syntax: SyntaxBuilder::new(), paths: FastMap::default(),
+            imports: FastMap::default(), source_forms: FastMap::default(), scratch: Vec::new() }
     }
 }
 impl TermBuilder {
@@ -549,7 +549,7 @@ impl TermBuilder {
     }
 
     // This allocating reconstruction is construction-only, never a read projection.
-    fn import_node(&mut self, source: &TermArena, node: Node, mapped: Option<&HashMap<(u64, u32), TermId>>) -> Draft {
+    fn import_node(&mut self, source: &TermArena, node: Node, mapped: Option<&FastMap<(u64, u32), TermId>>) -> Draft {
         let imports = mapped.unwrap_or(&self.imports);
         let child = |id: TermId| imports[&(source.owner, id.0)];
         let terms = |range| source.term_ids(range).iter().copied().map(child).collect();
@@ -618,7 +618,7 @@ impl TermBuilder {
         self.push(path.as_deref(), source.ty(), form, draft)
     }
     pub fn rewrite_roots_with(&mut self, roots: &[Term], rewrite: &mut dyn FnMut(&mut TermBuilder, &Term, Draft) -> TermId) -> Vec<TermId> {
-        let mut mapped = HashMap::new();
+        let mut mapped = FastMap::default();
         for root in roots {
             let source = &root.arena;
             let mut pending = vec![(root.row, false)];

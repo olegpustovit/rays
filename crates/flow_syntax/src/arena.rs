@@ -10,6 +10,26 @@ pub fn fresh_owner_id() -> u64 {
         .expect("arena identity space exhausted")
 }
 
+/// FxHash-style hasher for internal name/id maps: keys come from our own arenas, so HashDoS
+/// resistance buys nothing and SipHash showed up in the checker profile.
+#[derive(Default, Clone, Copy)]
+pub struct FastHasher(u64);
+impl std::hash::Hasher for FastHasher {
+    fn finish(&self) -> u64 { self.0 }
+    fn write(&mut self, bytes: &[u8]) {
+        let mut chunks = bytes.chunks_exact(8);
+        for chunk in &mut chunks { self.write_u64(u64::from_le_bytes(chunk.try_into().unwrap())); }
+        let mut tail = [0u8; 8];
+        tail[..chunks.remainder().len()].copy_from_slice(chunks.remainder());
+        self.write_u64(u64::from_le_bytes(tail) ^ bytes.len() as u64);
+    }
+    fn write_u8(&mut self, n: u8) { self.write_u64(n.into()) }
+    fn write_u32(&mut self, n: u32) { self.write_u64(n.into()) }
+    fn write_usize(&mut self, n: usize) { self.write_u64(n as u64) }
+    fn write_u64(&mut self, n: u64) { self.0 = (self.0.rotate_left(5) ^ n).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95); }
+}
+pub type FastMap<K, V> = HashMap<K, V, std::hash::BuildHasherDefault<FastHasher>>;
+
 fn index(value: usize) -> u32 { u32::try_from(value).expect("arena exceeds u32 storage") }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -25,7 +45,7 @@ pub struct BytesId(pub u32);
 #[derive(Default)]
 pub struct NamesBuilder {
     names: Vec<String>,
-    lookup: HashMap<String, NameId>,
+    lookup: FastMap<String, NameId>,
 }
 impl NamesBuilder {
     pub fn intern(&mut self, name: &str) -> NameId {
@@ -154,7 +174,7 @@ pub struct SyntaxBuilder {
     names: NamesBuilder,
     bytes: Vec<Vec<u8>>,
     trivia: Vec<Trivia>,
-    imports: HashMap<(u64, u32), SyntaxId>,
+    imports: FastMap<(u64, u32), SyntaxId>,
 }
 impl SyntaxBuilder {
     pub fn new() -> Self { Self::default() }
