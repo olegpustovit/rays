@@ -522,7 +522,12 @@ fn sop_deferral() {
     }
     assert!(same(&recorded(&eager, "small"), &recorded(&deferred, "small")));
     let maps = Profile::static_maps(&profile);
-    assert!(maps.iter().any(|m| m.deferred && m.head_elements == 0 && m.tail_elements == 0));
+    // The large constant arrays (`array/range 4101`, ...) defer at their constructor, so every large SOP map
+    // over them becomes a residual before `eval_map` runs and records no static-map entry (the OCaml
+    // reference deferred at the map, where `Profile::deferred` marked its entry). What the entry proved
+    // still holds: nothing large in the SOP graph is walked eagerly, only the 3-element `small` map.
+    assert!(maps.iter().filter(|m| m.site.first().is_some_and(|s| s == "sculpture")).all(|m| m.count <= 4096 && !m.deferred && m.tail_elements == 0));
+    assert!(maps.iter().any(|m| m.site.first().is_some_and(|s| s == "sculpture") && m.count == 3 && m.head_elements == 3));
     assert!(maps.iter().any(|m| m.count == 4101 && m.site.first().map(|s| s == "volume").unwrap_or(false) && !m.deferred));
 }
 
