@@ -7,6 +7,7 @@
 #![allow(non_camel_case_types)]
 
 use std::borrow::Cow;
+use std::rc::Rc;
 
 use editor_core::panels::{self as panels, Panel};
 use editor_document::document::{self as doc_mod, Level};
@@ -249,7 +250,7 @@ pub fn start_of(doc: &doc_mod::T) -> started {
 pub fn follow_start(value: t) -> t {
     let now = start_of(&value.doc);
     let was = value.started.clone();
-    if now == was {
+    if now == *was {
         return value;
     }
     let leaves = panels::leaves(&shell_tree(&value, &value.workspace));
@@ -294,7 +295,7 @@ pub fn follow_start(value: t) -> t {
             value.locals = put_local(&key, &|l| local { code: text_pane::State { tab, ..l.code.clone() }, ..l }, &value.locals);
         }
     }
-    value.started = now;
+    value.started = Rc::new(now);
     value
 }
 

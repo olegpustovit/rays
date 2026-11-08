@@ -10,7 +10,7 @@ fn bytes(geo:&g::T)->Vec<u8> {
     for at in g::View::attributes(geo) {
         out.extend_from_slice(format!("{:?}:{}:{};",a::owner(at),a::name(at),a::kind_name(at)).as_bytes());
         match a::storage(at).unwrap() {
-            a::Storage::Float(v)=>for x in v {out.extend_from_slice(&x.to_bits().to_le_bytes());},
+            a::Storage::Float(v)=>for x in v.iter() {out.extend_from_slice(&x.to_bits().to_le_bytes());},
             a::Storage::Float3(v)=>for i in 0..p::length(&v) {let (x,y,z)=p::get(&v,i).unwrap();for x in [x,y,z] {out.extend_from_slice(&x.to_bits().to_le_bytes());}},
             _=>panic!("unexpected sea attribute {}",a::name(at)),
         }

@@ -21,7 +21,7 @@ fn geometry() -> rdk_core::geometry::T {
     let geometry = ok(rdk_core::geometry::create(positions, topology, None, None, None));
     let normals = ok(rdk_core::attribute::create_owned("N", rdk_core::attribute::Owner::Vertex, rdk_core::attribute::Storage::Float3(ok(rdk_core::packed::Float3::of_owned(vec![0.; 6], vec![1.; 6], vec![0.; 6])))));
     let geometry = ok(rdk_core::geometry::with_attribute(normals, &geometry));
-    let pieces = ok(rdk_core::attribute::create_owned("class", rdk_core::attribute::Owner::Primitive, rdk_core::attribute::Storage::Int(vec![0, 1])));
+    let pieces = ok(rdk_core::attribute::create_owned("class", rdk_core::attribute::Owner::Primitive, rdk_core::attribute::Storage::Int(std::sync::Arc::new(vec![0, 1]))));
     ok(rdk_core::geometry::with_attribute(pieces, &geometry))
 }
 
@@ -110,7 +110,7 @@ pub fn boolean_fracture() {
                 fail("one cutting plane did not produce exactly two Boolean cells");
             }
             let mut counts = [0usize; 2];
-            for p in &values {
+            for p in values.iter() {
                 counts[*p as usize] += 1;
             }
             if counts[0] <= 1 || counts[1] <= 1 {

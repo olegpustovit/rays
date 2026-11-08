@@ -331,7 +331,7 @@ pub fn run_spreadsheet() {
     check(rdk_core::geometry::point_count(&geometry) == 8 && Reduce::spreadsheet(&r.e, &[1, 0]).0 == 3, "spreadsheet recook kept stale geometry or reset owner");
     let columns = sheet::columns(0, &geometry);
     check(columns.len() >= 4 && (0..4).map(|i| columns[i].0.clone()).collect::<Vec<_>>() == ["index", "P.x", "P.y", "P.z"], "canonical position tuple columns");
-    let attr = rdk_core::attribute::create_owned("label", rdk_core::attribute::Owner::Point, rdk_core::attribute::Storage::Text(vec![b"sample".to_vec(); 8])).expect("attribute");
+    let attr = rdk_core::attribute::create_owned("label", rdk_core::attribute::Owner::Point, rdk_core::attribute::Storage::Text(std::sync::Arc::new(vec![b"sample".to_vec(); 8].into()))).expect("attribute");
     let geometry = rdk_core::geometry::with_attribute(attr, &geometry).expect("with_attribute");
     let group = rdk_core::group::init(None, rdk_core::group::Owner::Point, "odd", 8, &|i| i % 2 == 1).expect("group");
     let geometry = rdk_core::geometry::with_group(group, &geometry).expect("with_group");

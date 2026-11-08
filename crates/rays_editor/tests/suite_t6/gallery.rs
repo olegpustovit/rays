@@ -132,10 +132,10 @@ fn geometry_check(name: &str, actual: &rdk_core::geometry::T, expected: &rdk_cor
         assert!(
             a.draw.mesh.vertex_count == e.draw.mesh.vertex_count
                 && a.draw.mesh.index_count == e.draw.mesh.index_count
-                && *a.draw.mesh.vertices.borrow() == *e.draw.mesh.vertices.borrow()
-                && *a.draw.mesh.indices.borrow() == *e.draw.mesh.indices.borrow()
-                && a.vertex_attributes.as_ref().map(|v| v.1.borrow().clone()) == e.vertex_attributes.as_ref().map(|v| v.1.borrow().clone())
-                && a.draw.state.transform_uniforms.as_ref().map(|v| v.borrow().clone()) == e.draw.state.transform_uniforms.as_ref().map(|v| v.borrow().clone()),
+                && a.draw.mesh.vertices == e.draw.mesh.vertices
+                && a.draw.mesh.indices == e.draw.mesh.indices
+                && a.vertex_attributes.as_ref().map(|v| v.1.to_vec()) == e.vertex_attributes.as_ref().map(|v| v.1.to_vec())
+                && a.draw.state.transform_uniforms.as_ref().map(|v| v.to_vec()) == e.draw.state.transform_uniforms.as_ref().map(|v| v.to_vec()),
             "{name} gallery packed GPU inputs differ"
         );
     } else {

@@ -125,8 +125,8 @@ pub fn material_refs() {
     check(rdk_core::geometry::primitive_count(&geometry_of(&one)) == 6, "six primitives");
     match (attr("shop_materialpath", &geometry_of(&one)), attr("material_roughness", &geometry_of(&one))) {
         (rdk_core::attribute::Storage::Text(names), rdk_core::attribute::Storage::Float(rough)) => {
-            check(names[0] == b"white" && rough[0] == 0.8, "the accent face");
-            check(names[1..6].iter().all(|n| n == b"blue") && rough[1..6].iter().all(|r| *r == 0.3), "the other faces");
+            check(&names[0] == b"white" && rough[0] == 0.8, "the accent face");
+            check((1..6).all(|n| &names[n] == b"blue") && rough[1..6].iter().all(|r| *r == 0.3), "the other faces");
         }
         _ => fail("material attribute types"),
     }

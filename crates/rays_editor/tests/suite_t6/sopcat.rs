@@ -638,8 +638,8 @@ fn node_inputs() {
     };
     let near = |l: &[f64], r: &[f64]| l.len() == r.len() && l.iter().zip(r).all(|(a, b)| (a - b).abs() < 1e-12);
     // Blend Shapes masks: the first input's mask, then the shape's own
-    let source = add(point, "mask", Storage::Float(vec![0., 0.5, 1.]), line(&[0., 1., 2.]));
-    let target = add(point, "mask", Storage::Float(vec![1., 0.5, 0.]), line(&[10., 11., 12.]));
+    let source = add(point, "mask", Storage::Float(std::sync::Arc::new(vec![0., 0.5, 1.])), line(&[0., 1., 2.]));
+    let target = add(point, "mask", Storage::Float(std::sync::Arc::new(vec![1., 0.5, 0.])), line(&[10., 11., 12.]));
     let default_inputs = vec![Some(lisp_sop::snapshot(&source)), Some(lisp_sop::snapshot(&target)), None, None, None];
     let blend = |inputs: &[Option<node::T>], changes: &[(String, Value)]| catalog_node("blend_shapes", inputs, changes);
     let scaled = |source_name: &str| {
@@ -650,16 +650,16 @@ fn node_inputs() {
     let set = both("set-mask Blend Shapes", &blend(&default_inputs, &[pv("weight1", Value::Float(0.125)), pv("masking", choice("Set from attribute"))]));
     check(near(&xs(&set), &[0., 6., 12.]), "Blend Shapes did not take its weight from the mask");
     // Blend Shapes point IDs: the shape lists the same points in another order
-    let ordered = add(point, "id", Storage::Int(vec![10, 20, 30]), line(&[0., 1., 2.]));
-    let shuffled = add(point, "id", Storage::Int(vec![30, 10, 20]), line(&[12., 10., 11.]));
+    let ordered = add(point, "id", Storage::Int(std::sync::Arc::new(vec![10, 20, 30])), line(&[0., 1., 2.]));
+    let shuffled = add(point, "id", Storage::Int(std::sync::Arc::new(vec![30, 10, 20])), line(&[12., 10., 11.]));
     let inputs = vec![Some(lisp_sop::snapshot(&ordered)), Some(lisp_sop::snapshot(&shuffled)), None, None, None];
     let by_id = both("ID-matched Blend Shapes", &blend(&inputs, &[pv("point_id_attribute", text("id")), pv("attributes", text("P"))]));
     let by_index = both("index-matched Blend Shapes", &blend(&inputs, &[pv("attributes", text("P"))]));
     check(near(&xs(&by_id), &[10., 11., 12.]) && near(&xs(&by_index), &[12., 10., 11.]), "Blend Shapes point ID attribute did not match points by ID");
     // Attribute Composite alpha: each input's alpha weighs its values
     let layer = |ps: &[f64], values: &[f64], alpha: &[f64]| {
-        let g = add(point, "value", Storage::Float(values.to_vec()), line(ps));
-        add(point, "alpha", Storage::Float(alpha.to_vec()), g)
+        let g = add(point, "value", Storage::Float(std::sync::Arc::new(values.to_vec())), line(ps));
+        add(point, "alpha", Storage::Float(std::sync::Arc::new(alpha.to_vec())), g)
     };
     let composite = both(
         "alpha Attribute Composite",

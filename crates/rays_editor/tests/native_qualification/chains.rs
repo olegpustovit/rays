@@ -113,7 +113,7 @@ fn chain() {
             } else { same(&vec3(&cpu,"q"),&vec3(&device,"q"),1e-5); }
             if text == &single {
                 let noise=|g:&g::T| match a::storage(&g::find_attribute(a::Owner::Point,"noise",g).unwrap()).unwrap() { a::Storage::Float(v)=>v,_=>panic!("noise") };
-                for (a,b) in noise(&cpu).iter().zip(noise(&device)) { assert!((a-b).abs()<=1e-5); }
+                for (a,b) in noise(&cpu).iter().zip(noise(&device).iter()) { assert!((a-b).abs()<=1e-5); }
                 same(&vec3(&cpu,"N"),&vec3(&device,"N"),0.);
             }
             if text == &consecutive {

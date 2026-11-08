@@ -97,7 +97,7 @@ pub(super) fn run() {
                 if let (Some(w),Some(lit))=(&world,sunlit) {let (host,_)=picture(&host_canvas,&camera,&d,None,Some(w));for (a,b) in lit.iter().zip(host) {assert!((*a as i32-b as i32).abs()<=tolerance);}}
                 let mut lo=[f64::INFINITY;3];let mut hi=[f64::NEG_INFINITY;3];for i in 0..n*n {let (x,y,z)=p::get(g::positions(&d),i).unwrap();for (c,v) in [x,y,z].into_iter().enumerate(){lo[c]=lo[c].min(v);hi[c]=hi[c].max(v);}}
                 assert_eq!(bounds,Some((vec3::create(lo[0],lo[1],lo[2]),vec3::create(hi[0],hi[1],hi[2]))));
-                let start=std::time::Instant::now();let c=cpu.cook(frame);if frame>0 {cpu_times.push(start.elapsed());}same(g::positions(&c),g::positions(&d),1e-5);let noise=|g:&g::T|match a::storage(&g::find_attribute(a::Owner::Point,"noise",g).unwrap()).unwrap(){a::Storage::Float(v)=>v,_=>panic!("noise")};for (a,b) in noise(&c).iter().zip(noise(&d)){assert!((a-b).abs()<=1e-5);}
+                let start=std::time::Instant::now();let c=cpu.cook(frame);if frame>0 {cpu_times.push(start.elapsed());}same(g::positions(&c),g::positions(&d),1e-5);let noise=|g:&g::T|match a::storage(&g::find_attribute(a::Owner::Point,"noise",g).unwrap()).unwrap(){a::Storage::Float(v)=>v,_=>panic!("noise")};for (a,b) in noise(&c).iter().zip(noise(&d).iter()){assert!((a-b).abs()<=1e-5);}
                 if recompute {normal_check(&c,&d);}
                 wg::frame(&gpu,None);
             }

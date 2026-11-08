@@ -263,7 +263,7 @@ fn sea_frames() {
         println!("sea frame {tick} {:?}: uploaded {} B, payload read {} B, bounds read {} B",started.elapsed(),stats.input_uploaded_bytes,stats.payload_readback_bytes,stats.bounds_readback_bytes);
         editor=Editor::after_present(editor,&frame);
     }
-    Rc::make_mut(&mut editor.core.cook).await_=false;
+    Rc::make_mut(&mut Rc::make_mut(&mut editor.core).cook).await_=false;
     let frame=rays::frame::t {input:input::Frame {dt:1./60.,frame:7,tick:7,size:(320,240),pointer:(-100.,-100.),..input::at_time(7./60.)},pixel_scale:(1.,1.),fps:60.,mouse_delta:(0.,0.)};
     editor=Editor::update(editor,&frame);
     println!("sea closing {:?}",rays_editor::cook::status(&editor.core.cook));
@@ -428,7 +428,7 @@ fn orrery_frames() {
         rays::canvas::render(Some(1),&canvas,&Editor::scene(&editor,&f)).unwrap();
         editor=Editor::after_present(editor,&f);
     }
-    editor.core.timeline=Timeline::toggle_pause(&editor.core.timeline).0;
+    Rc::make_mut(&mut editor.core).timeline=Timeline::toggle_pause(&editor.core.timeline).0;
     let mut f=frame(31); f.input.dt=0.;
     editor=Editor::update(editor,&f);
     rays::canvas::render(Some(1),&canvas,&Editor::scene(&editor,&f)).unwrap();

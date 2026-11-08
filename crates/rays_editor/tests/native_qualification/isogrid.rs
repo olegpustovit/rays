@@ -83,8 +83,8 @@ fn run(owner: &gpu::t, config: &Gpu::Config, workspace: &editor_document::worksp
     let original = frame(&camera, picture.clone());
     let staged = scene::Layer::stage_native(256, 256, &original).unwrap();
     let entry = &staged.scene3[0].entries[0];
-    assert!(entry.draw.mesh.vertices.borrow().is_empty() && entry.draw.mesh.indices.borrow().is_empty());
-    assert!(entry.vertex_attributes.as_ref().is_some_and(|(_, bytes)| bytes.borrow().is_empty()));
+    assert!(entry.draw.mesh.vertices.is_empty() && entry.draw.mesh.indices.is_empty());
+    assert!(entry.vertex_attributes.as_ref().is_some_and(|(_, bytes)| bytes.is_empty()));
     let canvas = canvas::create(256, 256).unwrap();
     let host_canvas = canvas::create(256, 256).unwrap();
     canvas::render(None, &canvas, &original).unwrap();

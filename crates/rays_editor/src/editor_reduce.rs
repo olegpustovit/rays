@@ -1291,7 +1291,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::Gpu::Config>, pump: Option<&dyn Fn(
         result.locals.clone()
     };
     value2.text = text;
-    value2.rows = row_sets;
+    value2.rows = Rc::new(row_sets);
     value2.live_cook = result.live_cook;
     value2 = with_pane(value2, &|pane| graph_pane { views: projections.clone(), ..pane.clone() });
     value2.locals = locals;
@@ -1399,7 +1399,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::Gpu::Config>, pump: Option<&dyn Fn(
     core.hud = hud;
     core.focus = result.focus.clone();
     core.focus_path = result.focus_path.clone();
-    core.pane_keys = result.pane_keys.clone();
+    core.pane_keys = Rc::new(result.pane_keys.clone());
     panel_map::with_others(&mut core.panes, result.graph_panes.clone());
     core.leader = leader;
     core.held_keys = held_keys;
@@ -1469,7 +1469,7 @@ pub fn idle_result(value: &t, selection: selection::t) -> frame_result {
         workspace: value.workspace.clone(),
         focus: value.focus.clone(),
         focus_path: value.focus_path.clone(),
-        pane_keys: value.pane_keys.clone(),
+        pane_keys: (*value.pane_keys).clone(),
         scope_view: pane_view(&value).clone(),
         scope_changes: Vec::new(),
         selection,

@@ -469,7 +469,7 @@ pub struct t {
     /// cook while a drag holds the pointer
     pub live_cook: bool,
     /// the rows of the lists drawn last frame, cached by network, display node and active camera
-    pub rows: Vec<(row_source, (Option<i64>, Option<i64>), (Vec<tree::Row>, Vec<String>))>,
+    pub rows: Rc<Vec<(row_source, (Option<i64>, Option<i64>), (Vec<tree::Row>, Vec<String>))>>,
     /// the SOP catalog
     pub factories: Vec<Factory>,
     /// the node menu, while it is open
@@ -514,7 +514,7 @@ pub struct t {
     /// which leaf of that kind: every leaf is an instance, and / o and / l act on the one clicked,
     /// not the first
     pub focus_path: Option<layout::Path>,
-    pub pane_keys: Vec<(i64, (Panel, Option<layout::Path>))>,
+    pub pane_keys: Rc<Vec<(i64, (Panel, Option<layout::Path>))>>,
     pub leader: router::State,
     pub held_keys: Vec<Key>,
     /// keys held while the sketch had no keyboard: unseen by it until released
@@ -532,7 +532,7 @@ pub struct t {
     pub outline_at: Option<Vec<String>>,
     /// the other panels' own, by panel key
     pub locals: Vec<(Vec<String>, local)>,
-    pub started: started,
+    pub started: Rc<started>,
     /// the object a framing cook is running for: its bounds come back in its own space
     pub framing: Option<i64>,
     pub carry: Option<carry>,

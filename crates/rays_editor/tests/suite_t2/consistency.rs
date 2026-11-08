@@ -163,7 +163,7 @@ pub fn layers(e: &Ed) -> Staged {
             rays::scene::Layer::native_layer::Scene3_layer(p) => Some(
                 p.entries
                     .iter()
-                    .map(|entry| (entry.draw.state.transform_uniforms.as_ref().map(|b| b.borrow().clone()), entry.draw.mesh.vertices.borrow().clone()))
+                    .map(|entry| (entry.draw.state.transform_uniforms.as_ref().map(|b| b.to_vec()), entry.draw.mesh.vertices.to_vec()))
                     .collect(),
             ),
             _ => None,
