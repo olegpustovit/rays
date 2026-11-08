@@ -66,7 +66,7 @@ nav.track a:hover{border-bottom-color:var(--accent)}
 
 <main>
 <header style="display:flex;flex-direction:column;gap:10px">
-  <div class="eyebrow">Proposal · dev @ 11988707 · 2026-11-08 · <code>docs/history/port-simplification</code></div>
+  <div class="eyebrow">Proposal · dev @ 6802a325 · 2026-11-08 · <code>docs/history/port-simplification</code></div>
   <h1>Rays port simplification</h1>
   <p class="lede">Audit and execution ledger for the 67-crate Rust workspace after the OCaml port. Same capabilities, Lisp semantics, determinism and sequential/parallel equality; smaller surface and faster compile/debug loops. Line counts and build numbers are spot measurements on a shared machine unless a row cites a closing commit.</p>
   <nav class="track" aria-label="Sections">
@@ -360,6 +360,7 @@ nav.track a:hover{border-bottom-color:var(--accent)}
   </ul>
 </section>
 </main>
+<script type="application/json" id="plan-seed">{"A1":{"status":"done","note":"6802a325 — delete rays_collections/rays_hash; gate bans generics"}}</script>
 <script>
 (async function(){
   const IDS=[];
@@ -396,33 +397,37 @@ nav.track a:hover{border-bottom-color:var(--accent)}
     });
     wrap.hidden=false;
   }
-  function emptyRows(){
-    return IDS.map(id=>({id,status:'pending',note:''}));
+  function seedRows(){
+    let seed={};
+    try{seed=JSON.parse(document.getElementById('plan-seed').textContent||'{}');}catch(_){}
+    return IDS.map(id=>{
+      const s=seed[id];
+      return s?{id,...s}:{id,status:'pending',note:''};
+    });
   }
   const db=await (window.claude&&claude.use)?claude.use('db'):null;
-  if(!db){
-    render({},emptyRows());
-    note.textContent+=' Shared tracker unavailable in this view; counts are pending.';
-    return;
-  }
+  let rows=seedRows();
+  if(db){
   try{
-    let rows=[];
+    rows=[];
     for(const id of IDS){
       const snap=await db.doc('plan/items/'+id).get();
-      rows.push(snap.exists()?{id,...snap.data()}:{id,status:'pending',note:''});
+      const base=seedRows().find(r=>r.id===id)||{id,status:'pending',note:''};
+      rows.push(snap.exists()?{...base,...snap.data(),id}:{...base});
     }
-    const counts={};
-    rows.forEach(r=>{
-      const w=WAVE(r.id);
-      counts[w]=counts[w]||{done:0,active:0,pending:0,skip:0,total:0};
-      counts[w].total++;
-      const s=r.status||'pending';
-      if(counts[w][s]!==undefined)counts[w][s]++; else counts[w].pending++;
-    });
-    render(counts,rows);
   }catch(e){
-    render({},emptyRows());
-    note.textContent='Tracker read failed; showing pending rows.';
+    rows=seedRows();
   }
+  }
+  const counts={};
+  rows.forEach(r=>{
+    const w=WAVE(r.id);
+    counts[w]=counts[w]||{done:0,active:0,pending:0,skip:0,total:0};
+    counts[w].total++;
+    const s=r.status||'pending';
+    if(counts[w][s]!==undefined)counts[w][s]++; else counts[w].pending++;
+  });
+  render(counts,rows);
+  if(!db)note.textContent+=' Live db overrides seed when this page runs in the artifact viewer.';
 })();
 </script>
