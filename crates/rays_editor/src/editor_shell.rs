@@ -279,11 +279,11 @@ pub fn as_pane<'a>(value: impl Into<ModelView<'a>>, (key, _path): (&Vec<String>,
 }
 
 /// `as_pane` of a model owned: no copy.
-pub fn with_pane_in_use(mut value: t, (key, path): (&Vec<String>, &layout::Path)) -> t {
+pub fn with_pane_in_use(value: &mut t, (key, path): (&Vec<String>, &layout::Path)) {
     if panel_map::key(&value.panes).as_ref() == Some(key) {
-        return value;
+        return;
     }
-    let level = pane_level(&value);
+    let level = pane_level(&*value);
     let doc = value.doc.clone();
     panel_map::activate(&mut value.panes, key, &|| new_pane(&doc, level, path));
     panel_map::set_leaf(&mut value.panes, Some(path.clone()));
@@ -293,7 +293,6 @@ pub fn with_pane_in_use(mut value: t, (key, path): (&Vec<String>, &layout::Path)
         pane.picked = selection::empty();
         pane.at = at;
     }
-    value
 }
 
 /// The graph leaf an inspector, list or lisp leaf is tied to by `:of`.
@@ -307,14 +306,14 @@ pub fn tied<'a>(value: impl Into<ModelView<'a>>, path: &[usize]) -> Option<(Vec<
 
 /// The pane in use follows the focus: the focused graph leaf, else the one it was, else the first
 /// one open.  The pane left keeps its canvas, selection, graph and route.
-pub fn follow_graph(mut value: t, focus: &Panel, focus_path: Option<&[usize]>) -> t {
-    let all = graph_leaves(&value);
+pub fn follow_graph(value: &mut t, focus: &Panel, focus_path: Option<&[usize]>) {
+    let all = graph_leaves(&*value);
     let at = panel_map::key(&value.panes).and_then(|key| all.iter().find(|(k, _)| *k == key).map(|(_, p)| p.clone()));
     panel_map::set_leaf(&mut value.panes, at);
-    let leaves: Vec<(Vec<String>, layout::Path)> = all.iter().filter(|(_, path)| !panel_state(&value, path).collapsed).cloned().collect();
+    let leaves: Vec<(Vec<String>, layout::Path)> = all.iter().filter(|(_, path)| !panel_state(&*value, path).collapsed).cloned().collect();
     // the focused graph leaf, or the one the focused leaf is tied to: its edits land there
     let focused = focus_path.and_then(|path| {
-        let path = if *focus == Panel::Graph { Some(path.to_vec()) } else { tied(&value, path).map(|(_, p)| p) };
+        let path = if *focus == Panel::Graph { Some(path.to_vec()) } else { tied(&*value, path).map(|(_, p)| p) };
         path.and_then(|path| leaves.iter().find(|(_, p)| *p == path).cloned())
     });
     let current = panel_map::key(&value.panes);
@@ -324,20 +323,18 @@ pub fn follow_graph(mut value: t, focus: &Panel, focus_path: Option<&[usize]>) -
         (None, _) => leaves.first().cloned(),
     };
     match (target, current) {
-        (None, _) => value,
-        (Some((key, _)), Some(current)) if key == current => value,
+        (None, _) => {},
+        (Some((key, _)), Some(current)) if key == current => {},
         (Some((key, path)), None) => {
             // the first pane: the state so far is its
             panel_map::adopt(&mut value.panes, &key);
             panel_map::set_leaf(&mut value.panes, Some(path));
-            value
         }
         (Some((key, path)), Some(_)) => {
             // the pane left keeps its canvas, selection, graph and route in the map
-            let mut value = with_pane_in_use(value, (&key, &path));
+            with_pane_in_use(value, (&key, &path));
             let keys: Vec<Vec<String>> = all.iter().map(|(k, _)| k.clone()).collect();
             panel_map::retain(&mut value.panes, &|key| keys.contains(key));
-            value
         }
     }
 }

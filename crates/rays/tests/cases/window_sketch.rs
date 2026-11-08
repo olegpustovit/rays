@@ -81,7 +81,7 @@ fn window_sketch_retained_view() {
     let on_stop_flag = stopped.clone();
     let program = sketch::program {
         init: Box::new(|_| Box::new(0_i64) as sketch::model),
-        update: Box::new(|m: &dyn Any, _| Box::new(m.downcast_ref::<i64>().copied().unwrap_or(0) + 1) as sketch::model),
+        update: Box::new(|m: &mut dyn Any, _| Some(Box::new(m.downcast_ref::<i64>().copied().unwrap_or(0) + 1) as sketch::model)),
         view: Box::new(move |_, f: &frame::t| -> Vec<node> {
             let camera = if f.input.frame > 8 { &near_camera } else { &far_camera };
             // the corner square changes every frame: only the UI layer differs between frames

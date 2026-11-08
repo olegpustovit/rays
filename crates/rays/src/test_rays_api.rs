@@ -29,7 +29,7 @@ fn sketch_startup_result() {
     let config = sketch::config { width: 0, ..sketch::default_config() };
     let program = sketch::program {
         init: Box::new(|_| Box::new(()) as sketch::model),
-        update: Box::new(|_, _| Box::new(()) as sketch::model),
+        update: Box::new(|_, _| None),
         view: Box::new(move |_, _| {
             seen.set(true);
             Vec::new()

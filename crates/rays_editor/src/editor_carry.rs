@@ -287,9 +287,8 @@ pub fn carry_step(value: &mut t, text_focus: bool, frame_: &frame::t) -> (frame:
     let entered: Option<String> = match &resting {
         Some((Place::Node(path), since)) if frame_.input.t - *since >= carry_rest => {
             // what the original document references, not the preview
-            let mut original = (*value).clone();
-            original.doc = c.original.clone();
-            follow_target(&original, Some(path.as_slice()))
+            let original = ModelView { doc: &c.original, ..ModelView::from(&*value) };
+            follow_target(original, Some(path.as_slice()))
         }
         _ => None,
     };

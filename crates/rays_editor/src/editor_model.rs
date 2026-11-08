@@ -558,6 +558,7 @@ pub struct t {
 #[derive(Clone, Copy)]
 pub struct ModelView<'a> {
     pub model: &'a t,
+    pub doc: &'a Arc<Document>,
     pub pane: &'a graph_pane,
     pub key: Option<&'a panel_map::Key>,
     pub workspace: &'a shell,
@@ -571,7 +572,7 @@ pub struct ModelView<'a> {
 impl<'a> From<&'a t> for ModelView<'a> {
     fn from(model: &'a t) -> Self {
         let pane = panel_map::active(&model.panes);
-        Self { model, pane, key: panel_map::key_ref(&model.panes), workspace: &model.workspace,
+        Self { model, doc: &model.doc, pane, key: panel_map::key_ref(&model.panes), workspace: &model.workspace,
             focus: &model.focus, selection: &pane.picked, status_fps: model.status_fps,
             guide: model.guide, leader: &model.leader }
     }
@@ -643,8 +644,7 @@ pub fn with_selection(mut value: t, picked: selection::t) -> t {
 
 /// What `reduce` hands back for a frame.
 #[derive(Clone)]
-pub struct update<Core = t> {
-    pub core: Core,
+pub struct update {
     pub effects: Effects,
     pub prepared_changed: bool,
     /// objects, lights, or the World changed: recompose

@@ -263,18 +263,19 @@ fn whole_frame_update() {
         let handles = |_: &mut pxui::ui::Ui, _: Option<&picked>, _: rays_math::mat4::T, _: pxui_shell::layout::Bounds| (Vec::new(), false, None);
         let view_state: Rc<dyn Fn(Option<&Panel_result>) -> syntax::Syntax> = Rc::new(|_| syntax::make(syntax::Draft::Map(Vec::new())));
         // the panes hidden: only the keys and the reducer run
-        let out = editor_frame::update(value.clone(), false, false, &camera, &handles, None, None, view_state.clone(), &frame0, None, None, Vec::new(), None);
-        assert!(Arc::ptr_eq(&out.core.doc, &value.doc));
+        let mut updated = value.clone();
+        let out = editor_frame::update(&mut updated, false, false, &camera, &handles, None, None, view_state.clone(), &frame0, None, None, Vec::new(), None);
+        assert!(Arc::ptr_eq(&updated.doc, &value.doc));
         assert!(out.actions.is_empty());
-        assert!(out.core.pane_keys.is_empty());
+        assert!(updated.pane_keys.is_empty());
         // every pane drawn headless: the shell's panels get roots, the focus stays, nothing edits
         let frame1 = frame_at(1.0 / 60.0, vec![], vec![]);
-        let out = editor_frame::update(out.core, true, false, &camera, &handles, None, None, view_state, &frame1, None, None, Vec::new(), None);
-        assert!(Arc::ptr_eq(&out.core.doc, &value.doc));
-        assert!(!out.core.pane_keys.is_empty());
-        assert_eq!(out.core.focus, value.focus);
-        assert_eq!(history::depth(&out.core.history), 0);
-        assert!(out.core.prompt.is_none());
+        let out = editor_frame::update(&mut updated, true, false, &camera, &handles, None, None, view_state, &frame1, None, None, Vec::new(), None);
+        assert!(Arc::ptr_eq(&updated.doc, &value.doc));
+        assert!(!updated.pane_keys.is_empty());
+        assert_eq!(updated.focus, value.focus);
+        assert_eq!(history::depth(&updated.history), 0);
+        assert!(updated.prompt.is_none());
         editor_host_close(&value);
     });
 }
@@ -394,8 +395,7 @@ fn route_labels_borrow_model_state() {
     big_stack(|| {
         let mut value = model();
         value.preferences = "x".repeat(100_000);
-        let active = crate::editor_shell::with_pane_in_use(value, (&vec!["active".into()], &vec![0]));
-        let mut value = active;
+        crate::editor_shell::with_pane_in_use(&mut value, (&vec!["active".into()], &vec![0]));
         let active = crate::panel_map::active_mut(&mut value.panes);
         active.shown = Some("g".into());
         active.route = vec![(Level::Scene, Some("g".into())); 2];
@@ -421,6 +421,29 @@ fn route_labels_borrow_model_state() {
         eprintln!("route labels: {peak} peak bytes");
         assert_eq!(route, "g > g > g");
         assert!(peak <= 512, "route labels copied model state: {peak} peak bytes");
+        editor_host_close(&value);
+    });
+}
+
+#[test]
+fn carry_view_reads_the_original_document() {
+    big_stack(|| {
+        use crate::{editor_panes, editor_text, text_pane::Intent};
+        let mut value = model();
+        let source = "(workspace w (graph cobalt :context material (material/standard :color \"#2670f5\")) (graph shards :context sop (let* [m (sop/material (sop/box) :material (ref cobalt))] m)))";
+        editor_text::apply_text(&mut value, &[Intent::DocApply(source.into())]);
+        assert!(value.text.doc_errors.found.is_empty(), "{:?}", value.text.doc_errors.found);
+        let original = value.doc.clone();
+        editor_text::apply_text(&mut value, &[Intent::DocApply(TEXT.into())]);
+        assert!(value.text.doc_errors.found.is_empty());
+        crate::panel_map::active_mut(&mut value.panes).shown = Some("shards".into());
+        let path = vec!["shards".into(), "m".into()];
+        assert!(editor_panes::follow_target(&value, Some(&path)).is_none());
+        let view = ModelView { doc: &original, ..ModelView::from(&value) };
+        assert!(std::ptr::eq(view.model, &value));
+        assert_eq!(editor_panes::graph_name(view).as_deref(), Some("shards"));
+        assert_eq!(editor_panes::follow_target(view, Some(&path)).as_deref(), Some("cobalt"));
+        assert!(Arc::ptr_eq(&value.doc, &ModelView::from(&value).doc));
         editor_host_close(&value);
     });
 }
@@ -458,14 +481,14 @@ fn frame_views_borrow_the_owned_model() {
         let view_state = Rc::new(|_: Option<&Panel_result>| syntax::make(syntax::Draft::Map(Vec::new())));
         let identity = value.preferences.as_ptr();
         // Warm the UI's font/layout caches before measuring a steady frame.
-        let warm = editor_frame::update(value, true, false, &camera, &handles, None, None, view_state.clone(), &frame, None, None, Vec::new(), None);
-        assert_eq!(warm.core.preferences.as_ptr(), identity, "frame copied its owned model");
+        editor_frame::update(&mut value, true, false, &camera, &handles, None, None, view_state.clone(), &frame, None, None, Vec::new(), None);
+        assert_eq!(value.preferences.as_ptr(), identity, "frame copied its owned model");
         mem_sys::local_reset();
-        let out = editor_frame::update(warm.core, true, false, &camera, &handles, None, None, view_state, &frame, None, None, Vec::new(), None);
+        editor_frame::update(&mut value, true, false, &camera, &handles, None, None, view_state, &frame, None, None, Vec::new(), None);
         let peak = mem_sys::local_peak_bytes();
         eprintln!("borrowed frame views: {peak} peak bytes");
-        assert_eq!(out.core.preferences.as_ptr(), identity, "frame copied its owned model");
+        assert_eq!(value.preferences.as_ptr(), identity, "frame copied its owned model");
         assert!(peak <= 100_000, "frame copied model payloads: {peak} peak bytes");
-        editor_host_close(&out.core);
+        editor_host_close(&value);
     });
 }

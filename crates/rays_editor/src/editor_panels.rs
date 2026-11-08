@@ -37,7 +37,7 @@ pub fn panel_title<'a>(value: impl Into<ModelView<'a>>, leaf: &Leaf) -> String {
     let value = &value.into();
     // a graph panel's title is its own pane's
     let (pane, path) = shown_pane(value, (&panel_key(&value.doc, &leaf.path), &leaf.path, &leaf.panel));
-    let graph = graph_name_at(value, pane.at, pane.shown.as_deref(), path.as_deref()).unwrap_or_default();
+    let graph = graph_name_at(&value.doc, pane.at, pane.shown.as_deref(), path.as_deref()).unwrap_or_default();
     let (name, sub): (&str, String) = match &leaf.panel {
         Panel::Canvas(_) => ("Canvas", String::new()),
         Panel::View(_) => {

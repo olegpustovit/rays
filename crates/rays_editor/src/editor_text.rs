@@ -536,12 +536,12 @@ pub fn filed(mut value: t) -> t {
 
 /// Command-S with a draft: every draft is applied first (each one its "Edit text" entry); a draft
 /// that does not check stays with its errors, and `Err` says the save must wait.
-pub fn apply_drafts(except: Option<&str>, mut value: t) -> Result<t, t> {
+pub fn apply_drafts(except: Option<&str>, value: &mut t) -> bool {
     let applies = draft_applies(except, &value.text);
-    apply_text(&mut value, &applies);
+    apply_text(value, &applies);
     let locals = value.locals.clone();
     for (key, l) in locals {
-        apply_text_at(&mut value, &key, &draft_applies(except, &l.code));
+        apply_text_at(value, &key, &draft_applies(except, &l.code));
     }
-    if has_draft(except, &value) { Err(value) } else { Ok(value) }
+    !has_draft(except, value)
 }

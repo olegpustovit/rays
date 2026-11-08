@@ -1,9 +1,8 @@
-//! Ergonomic functional sketch lifecycle: an immutable model threaded through `update`, a pure
-//! `view` returning a `Scene`, and the native window loop.
+//! Native sketch lifecycle: update a model in place or return a replacement, then render its view.
 //!
-//! The model is a `Box<dyn Any>` (OCaml's `'model`); `update` and `after_present` borrow the
-//! current model and return the next, so the previous one is still there for `crash_dump` when a
-//! callback panics. Callback panics are fatal: a crash report folder is written before the panic
+//! The model stays in the loop's storage while callbacks run, including during panic unwinding.
+//! A callback that returns a replacement leaves the previous model intact until it succeeds;
+//! mutations made in place are available to `crash_dump` if the callback panics. Callback panics are fatal: a crash report folder is written before the panic
 //! propagates (the report is written by a drop guard from the panic hook's capture; nothing here
 //! catches the unwind).
 use crate::canvas_runtime;
@@ -67,14 +66,14 @@ pub enum cursor {
 
 pub type model = Box<dyn Any>;
 
-/// The sketch's callbacks. `update`, `after_present`, `crash_dump`, `idle` and `on_stop` see the
-/// current model by reference.
+/// The sketch's callbacks. Updates borrow the stored model mutably; readers borrow it immutably.
 pub struct program {
     pub init: Box<dyn Fn(&frame::t) -> model>,
-    pub update: Box<dyn Fn(&dyn Any, &frame::t) -> model>,
+    /// `None` keeps the model, including any mutations made by the callback.
+    pub update: Box<dyn Fn(&mut dyn Any, &frame::t) -> Option<model>>,
     pub view: Box<dyn Fn(&dyn Any, &frame::t) -> scene::t>,
     /// `None` keeps the model.
-    pub after_present: Option<Box<dyn Fn(&dyn Any, &frame::t) -> Option<model>>>,
+    pub after_present: Option<Box<dyn Fn(&mut dyn Any, &frame::t) -> Option<model>>>,
     /// `crash_dump model directory` adds the sketch's own files to a crash report.
     pub crash_dump: Option<Box<dyn Fn(&dyn Any, &str)>>,
     /// Runs about every millisecond while an unchanged picture waits for the next frame (input,
@@ -382,6 +381,16 @@ struct crash_state {
     recent: RefCell<VecDeque<frame::t>>,
     model: RefCell<Option<model>>,
     program: Rc<program>,
+}
+
+fn update_model(stored: &RefCell<Option<model>>, update: &dyn Fn(&mut dyn Any, &frame::t) -> Option<model>, facts: &frame::t, op: &str) -> Result<(), error> {
+    let next = {
+        let mut guard = stored.borrow_mut();
+        let model = guard.as_mut().ok_or_else(|| startup_error(op, ErrorKind::InvalidState, "model is gone"))?;
+        update(model.as_mut(), facts)
+    };
+    if let Some(next) = next { *stored.borrow_mut() = Some(next); }
+    Ok(())
 }
 
 fn report_crash(state: &crash_state) {
@@ -858,13 +867,8 @@ fn one_frame(
         }
         recent.push_back(facts.clone());
     }
-    // update, view and after_present borrow the model; a panic leaves the previous one in place
-    let next = {
-        let guard = crash.model.borrow();
-        let m = guard.as_ref().ok_or_else(|| startup_error(op, ErrorKind::InvalidState, "model is gone"))?;
-        (program_.update)(m.as_ref(), &facts)
-    };
-    *crash.model.borrow_mut() = Some(next);
+    // Keep the model stored while callbacks run, so unwinding can still dump it.
+    update_model(&crash.model, &*program_.update, &facts, op)?;
     let scene_ = {
         let guard = crash.model.borrow();
         let m = guard.as_ref().ok_or_else(|| startup_error(op, ErrorKind::InvalidState, "model is gone"))?;
@@ -891,14 +895,7 @@ fn one_frame(
         return Err(e);
     }
     if let Some(after) = &program_.after_present {
-        let next = {
-            let guard = crash.model.borrow();
-            let m = guard.as_ref().ok_or_else(|| startup_error(op, ErrorKind::InvalidState, "model is gone"))?;
-            after(m.as_ref(), &facts)
-        };
-        if let Some(next) = next {
-            *crash.model.borrow_mut() = Some(next);
-        }
+        update_model(&crash.model, &**after, &facts, op)?;
     }
     if let Some(e) = PENDING_FAILURE.with(|p| p.borrow_mut().take()) {
         return Err(e);
@@ -964,7 +961,7 @@ pub fn export_state(config_: Option<config>, fps: Option<i64>, prefix: Option<St
     let after_export = program_.after_present.take();
     let directory = directory.to_string();
     // the exported frame is saved first; the sketch's own after_present then runs
-    program_.after_present = Some(Box::new(move |m: &dyn Any, f: &frame::t| {
+    program_.after_present = Some(Box::new(move |m: &mut dyn Any, f: &frame::t| {
         let filename = std::path::Path::new(&directory).join(format!("{prefix}-{:06}.png", index.get()));
         match canvas_runtime::save(&filename.to_string_lossy()) {
             Ok(()) => index.set(index.get() + 1),
@@ -995,7 +992,7 @@ pub fn export_state(config_: Option<config>, fps: Option<i64>, prefix: Option<St
 pub fn export(config_: Option<config>, prefix: Option<String>, directory: &str, frames: i64, view: Box<dyn Fn(&frame::t) -> scene::t>) -> Result<(), error> {
     let program_ = program {
         init: Box::new(|_| Box::new(()) as model),
-        update: Box::new(|_, _| Box::new(()) as model),
+        update: Box::new(|_, _| None),
         view: Box::new(move |_, f| view(f)),
         after_present: None,
         crash_dump: None,
@@ -1003,4 +1000,50 @@ pub fn export(config_: Option<config>, prefix: Option<String>, directory: &str, 
         on_stop: None,
     };
     export_state(config_, None, prefix, directory, frames, program_).map(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn model_updates_retain_state_for_crash_dump() {
+        let mut bytes = Vec::<u8>::with_capacity(8);
+        bytes.push(1);
+        let identity = bytes.as_ptr();
+        let stored = RefCell::new(Some(Box::new(bytes) as model));
+        let facts = frame::t { input: input::at_time(0.), pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.) };
+        update_model(&stored, &|model, _| { model.downcast_mut::<Vec<u8>>().unwrap().push(2); None }, &facts, "test").unwrap();
+        assert_eq!(stored.borrow().as_ref().unwrap().downcast_ref::<Vec<u8>>().unwrap().as_ptr(), identity);
+        update_model(&stored, &|_, _| Some(Box::new(vec![3_u8])), &facts, "test").unwrap();
+        let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            update_model(&stored, &|_, _| panic!("replacement failed"), &facts, "test").unwrap();
+        }));
+        assert!(failed.is_err());
+        assert_eq!(stored.borrow().as_ref().unwrap().downcast_ref::<Vec<u8>>().unwrap(), &[3]);
+        let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            update_model(&stored, &|model, _| {
+                    model.downcast_mut::<Vec<u8>>().unwrap().push(4);
+                    panic!("mutation failed");
+            }, &facts, "test").unwrap();
+        }));
+        assert!(failed.is_err());
+        let directory = std::env::temp_dir().join(format!("rays-crash-model-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let state = crash_state {
+            crash_dir: Some(directory.to_string_lossy().into_owned()), title: "retained model".into(), recent: RefCell::new(VecDeque::new()), model: stored,
+            program: Rc::new(program {
+                init: Box::new(|_| Box::new(())), update: Box::new(|_, _| None), view: Box::new(|_, _| Vec::new()), after_present: None,
+                crash_dump: Some(Box::new(|model, directory| {
+                    let bytes = model.downcast_ref::<Vec<u8>>().unwrap();
+                    std::fs::write(std::path::Path::new(directory).join("model.txt"), format!("{bytes:?}")).unwrap();
+                })), idle: None, on_stop: None,
+            }),
+        };
+        LAST_PANIC.with(|panic| *panic.borrow_mut() = Some(("mutation failed".into(), String::new())));
+        report_crash(&state);
+        let report = std::fs::read_dir(&directory).unwrap().next().unwrap().unwrap().path();
+        assert_eq!(std::fs::read_to_string(report.join("model.txt")).unwrap(), "[3, 4]");
+        assert!(std::fs::read_to_string(report.join("crash.txt")).unwrap().contains("mutation failed"));
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 }

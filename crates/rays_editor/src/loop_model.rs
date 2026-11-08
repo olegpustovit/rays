@@ -87,7 +87,7 @@ pub type Drawn = BTreeMap<i64, drawn_entry>;
 
 #[derive(Clone)]
 pub struct t {
-    /// shared with the model the sketch keeps while the next is made: a frame copies it once
+    /// Shared only by explicit Editor snapshots; the native loop mutates its unique core.
     pub core: Rc<m::t>,
     pub rest: Option<rest>,
     /// the orbit of the focused viewport
@@ -365,12 +365,16 @@ pub fn node_box(value: &t, path: &[String]) -> Option<(i64, i64, i64, i64)> {
     pxui_graph::scope_frame::Inspect::box_of(m::pane_view(&value.core), path).map(|(x, y, w, h)| (x as i64, y as i64, w as i64, h as i64))
 }
 
-pub fn edit(value: t, op: &fe::Op) -> Result<t, String> {
-    editor_host::syntax_edit(&value.core, op).map(|core| with_core(value, core))
+pub fn edit(mut value: t, op: &fe::Op) -> Result<t, String> {
+    editor_host::syntax_edit(Rc::make_mut(&mut value.core), op)?;
+    value.rest = None;
+    Ok(value)
 }
 
-pub fn edit_layout(value: t, op: &layout_edit::Op) -> Result<t, String> {
-    editor_host::layout_edit_op(&value.core, op).map(|core| with_core(value, core))
+pub fn edit_layout(mut value: t, op: &layout_edit::Op) -> Result<t, String> {
+    editor_host::layout_edit_op(Rc::make_mut(&mut value.core), op)?;
+    value.rest = None;
+    Ok(value)
 }
 
 pub fn edit_phases(value: &t) -> PhaseTimer {
@@ -423,9 +427,10 @@ pub fn settings(value: &t) -> editor_document::settings::T {
     editor_list::settings(&value.core)
 }
 
-pub fn set_settings(value: t, settings: &editor_document::settings::T) -> t {
-    let core = editor_host::set_settings((*value.core).clone(), settings);
-    with_core(value, core)
+pub fn set_settings(mut value: t, settings: &editor_document::settings::T) -> t {
+    editor_host::set_settings(Rc::make_mut(&mut value.core), settings);
+    value.rest = None;
+    value
 }
 
 /// the viewport the focus is in; the default layout's one before any focus
@@ -550,7 +555,7 @@ pub fn film(value: &t, frame_: &frame::t) -> (i64, i64, i64, i64) {
 }
 
 /// The hidden-scene cache is model state: refreshed here, read by `scene`.
-pub fn refresh_hidden(mut value: t, frame_: &frame::t) -> t {
+pub fn refresh_hidden(value: &mut t, frame_: &frame::t) {
     let cache = if hidden_only(V::ui_visible(&value.control), &value.core) {
         let pv = |key: &str, vp, view_: &rays::camera::t, r: &d3::t| paint_view(&value, key, vp, view_, r);
         Some(hidden_entry(value.background, focused_image(&value).as_ref(), &view_camera(&value), &pv, value.hidden_scene_cache.as_ref(), &value.core, frame_))
@@ -558,7 +563,6 @@ pub fn refresh_hidden(mut value: t, frame_: &frame::t) -> t {
         None
     };
     value.hidden_scene_cache = cache;
-    value
 }
 
 /// the device display keys the drawn scenes draw: a display left out is released
@@ -745,7 +749,7 @@ pub fn compose(value: &t, core: &m::t, changed: bool, baked: &Option<Rc<world::b
 }
 
 /// The frame that first drew a mesh has been presented: its time is the display sink's first draw.
-pub fn observe_presented(mut value: t) -> t {
+pub fn observe_presented(value: &mut t) {
     if let Some((began, geometries)) = &value.presenting {
         let seconds = (value.core.clock)() - began;
         let gpu = workspace_gpu::config(&value.host.borrow().gpu, editor_document::lowering::fast(&value.core.doc));
@@ -754,7 +758,6 @@ pub fn observe_presented(mut value: t) -> t {
         }
     }
     value.presenting = None;
-    value
 }
 
 #[allow(dead_code)]

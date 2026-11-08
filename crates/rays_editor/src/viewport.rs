@@ -345,28 +345,23 @@ pub fn seed_scene(easy: &easy_camera::t, scene: kg::T) -> kg::T {
 /// One ACTIVE camera whenever any exists; a nonempty scene of a workspace with no scene graph
 /// losing the last camera re-adds the default within the same undo entry. An intentionally
 /// empty scene stays empty.
-pub fn sync_cameras(mode: editor_host::scene_mode, core: Model, easy: &easy_camera::t) -> Model {
-    let scene = editor_inspect::scene(&core);
-    // a scene graph is authoritative: no camera object is a camera it does not declare
-    let core = if !camera_ids(&scene).is_empty() || scene.is_empty() || lowering::graph_of(&core.doc.workspace.ws, context::scene()).is_some() {
-        core
-    } else {
-        match add_default_camera(&scene, easy) {
-            Some(scene) => editor_host::scene_edit(core, mode, None, scene),
-            None => core,
+pub fn sync_cameras(mode: editor_host::scene_mode, core: &mut Model, easy: &easy_camera::t) {
+    let scene = editor_inspect::scene(core);
+    // A scene graph is authoritative: the host only supplies a camera for host-owned scenes.
+    if camera_ids(&scene).is_empty() && !scene.is_empty() && lowering::graph_of(&core.doc.workspace.ws, context::scene()).is_none() {
+        if let Some(scene) = add_default_camera(&scene, easy) {
+            editor_host::scene_edit(core, mode, None, scene);
         }
-    };
+    }
     let view = editor_inspect::View::Primary;
-    let ids: Vec<i64> = camera_ids(&editor_inspect::scene(&core)).into_iter().filter(|id| editor_inspect::view_wants(&core, &view, *id)).collect();
+    let ids: Vec<i64> = camera_ids(&editor_inspect::scene(core)).into_iter().filter(|id| editor_inspect::view_wants(core, &view, *id)).collect();
     let active = match core.doc.active_camera {
         Some(id) if ids.contains(&id) => Some(id),
         _ => ids.first().copied(),
     };
-    if active == core.doc.active_camera {
-        core
-    } else {
-        let scene = editor_inspect::scene(&core);
-        editor_host::scene_edit(core, editor_host::scene_mode::Amend, Some(active), scene)
+    if active != core.doc.active_camera {
+        let scene = editor_inspect::scene(core);
+        editor_host::scene_edit(core, editor_host::scene_mode::Amend, Some(active), scene);
     }
 }
 
@@ -444,8 +439,8 @@ pub fn set_look(extra_: &extra, on: bool) -> extra {
     extra { looking, ..extra_.clone() }
 }
 
-pub fn init(core: Model, camera_: &easy_camera::t) -> (Model, extra) {
-    let core = sync_cameras(editor_host::scene_mode::Reset, core, camera_);
+pub fn init(mut core: Model, camera_: &easy_camera::t) -> (Model, extra) {
+    sync_cameras(editor_host::scene_mode::Reset, &mut core, camera_);
     let render_camera = render_camera_of(&core, camera_);
     // the viewports whose `:look_through true` says so; the focus starts in the first viewport
     let looking = core.doc.shell.as_ref().map(|s| s.start.looking.clone()).unwrap_or_default();
@@ -607,11 +602,9 @@ pub fn apply_action(camera_: &camera, extra_: &extra, a: &action) -> (extra, Opt
     }
 }
 
-pub fn on_doc(previous: &Model, core: Model, camera_: &camera) -> Model {
-    if kg::same(&editor_inspect::scene(&core), &editor_inspect::scene(previous)) && core.doc.active_camera == previous.doc.active_camera {
-        core
-    } else {
-        sync_cameras(editor_host::scene_mode::Amend, core, camera_)
+pub fn on_doc(previous: &document::T, core: &mut Model, camera_: &camera) {
+    if !kg::same(&editor_inspect::scene(core), &document::scene_graph(previous)) || core.doc.active_camera != previous.active_camera {
+        sync_cameras(editor_host::scene_mode::Amend, core, camera_);
     }
 }
 
@@ -655,54 +648,47 @@ pub fn frame_bounds(min: vec3::T, max: vec3::T, camera_: &camera) -> camera {
 /// Follow-viewport motion writes the camera node as view state (no undo entry); node edits and
 /// undo pull the viewport back to the document. On a frame that stepped the history (`stepped`)
 /// nothing is written: the document just restored is the one to show.
-pub fn on_view(core: Model, previous: &camera, key: &str, camera_: camera, extra_: extra, stepped: bool, held: bool) -> (Model, camera, extra) {
+pub fn on_view(core: &mut Model, previous: &camera, key: &str, camera_: camera, extra_: extra, stepped: bool, held: bool) -> (camera, extra) {
     // a change in the Render section: an authored root takes it; without one only the renderer is
     // the viewport's own choice, and any other setting writes the root
-    let (core, mut extra_) = match extra_.root_request.clone() {
-        None => (core, extra_),
-        Some(root_) if root_renderer(&core).is_none() && root::Parameters { renderer: core.doc.root.renderer, ..root_.clone() } == core.doc.root => {
+    let mut extra_ = match extra_.root_request.clone() {
+        None => extra_,
+        Some(root_) if root_renderer(&*core).is_none() && root::Parameters { renderer: core.doc.root.renderer, ..root_.clone() } == core.doc.root => {
             let mode = of_root(root_.renderer);
-            (core, extra { root_request: None, renderer_request: Some(mode), ..extra_ })
+            extra { root_request: None, renderer_request: Some(mode), ..extra_ }
         }
-        Some(root_) => (editor_host::set_root(core, &root_), extra { root_request: None, ..extra_ }),
-    };
-    let (core, mode) = match (extra_.renderer_request, renderer_setting(&core)) {
-        _ if root_renderer(&core).is_some() => {
-            let m = root_renderer(&core).unwrap();
-            (core, m)
-        }
-        (Some(mode), Some(current)) if mode == current => (core, mode),
-        (Some(mode), Some(_)) => match settings::apply(&editor_list::settings(&core), &[("renderer".to_string(), Value::Choice(renderer::label(mode).to_string()))]) {
-            Ok((s, _)) => (editor_host::set_settings(core, &s), mode),
-            Err(_) => {
-                let m = extra_.renderer.mode;
-                (core, m)
-            }
+        Some(root_) => {
+            editor_host::set_root(core, &root_);
+            extra { root_request: None, ..extra_ }
         },
-        (Some(mode), None) => (core, mode),
-        (None, Some(mode)) => (core, mode),
-        (None, None) => {
-            let m = extra_.renderer.mode;
-            (core, m)
-        }
     };
-    let custom = root_renderer(&core).is_none() && renderer_setting(&core).is_some();
+    let mode = match (extra_.renderer_request, renderer_setting(&*core)) {
+        _ if root_renderer(&*core).is_some() => root_renderer(&*core).unwrap(),
+        (Some(mode), Some(current)) if mode == current => mode,
+        (Some(mode), Some(_)) => match settings::apply(&editor_list::settings(&*core), &[("renderer".to_string(), Value::Choice(renderer::label(mode).to_string()))]) {
+            Ok((s, _)) => { editor_host::set_settings(core, &s); mode },
+            Err(_) => extra_.renderer.mode,
+        },
+        (Some(mode), None) => mode,
+        (None, Some(mode)) => mode,
+        (None, None) => extra_.renderer.mode,
+    };
+    let custom = root_renderer(&*core).is_none() && renderer_setting(&*core).is_some();
     extra_ = extra {
         renderer: renderer::State { mode, custom, ..extra_.renderer.clone() },
         renderer_request: None,
         root: root::Parameters { renderer: to_root(mode), ..core.doc.root.clone() },
         ..extra_
     };
-    let core = match (extra_.follow_request, active_node(&core)) {
-        (Some(value), Some(node)) => editor_host::edit_node(core, document::Level::Scene, node.id, &[("follow_viewport".to_string(), Value::Bool(value))], "Follow viewport"),
-        _ => core,
-    };
+    if let (Some(value), Some(node)) = (extra_.follow_request, active_node(core)) {
+        editor_host::edit_node(core, document::Level::Scene, node.id, &[("follow_viewport".to_string(), Value::Bool(value))], "Follow viewport");
+    }
     let mut written = extra_.written.clone();
     let mut pending = extra_.follow_pending && !stepped;
     let mut deferred = None;
-    let active = active_node(&core);
+    let active = active_node(&*core);
     let decoded = active.as_ref().and_then(ocamera::of_node);
-    let (core, camera_) = match (&active, &decoded) {
+    let camera_ = match (&active, &decoded) {
         (Some(node), Some((node_view, true))) => {
             let moved = !stepped && !same_view(&easy_camera::camera(previous).expect("camera"), &easy_camera::camera(&camera_).expect("camera"));
             if moved || pending || !same_view(node_view, &easy_camera::camera(&camera_).expect("camera")) {
@@ -711,37 +697,38 @@ pub fn on_view(core: Model, previous: &camera, key: &str, camera_: camera, extra
                     // of an orbit frame. Meanwhile renders look through what the write will say.
                     pending = true;
                     deferred = following_view(node_view, &camera_);
-                    (core, camera_)
+                    camera_
                 } else if moved || pending {
                     pending = false;
-                    match kg::set_fields(&editor_inspect::scene(&core), node.id, &view_parameters(&camera_)) {
+                    match kg::set_fields(&editor_inspect::scene(&*core), node.id, &view_parameters(&camera_)) {
                         Ok((scene, _)) => {
                             written = Some(easy_camera::camera(&camera_).expect("camera"));
-                            (editor_host::scene_edit(core, editor_host::scene_mode::Amend, None, scene), camera_)
+                            editor_host::scene_edit(core, editor_host::scene_mode::Amend, None, scene);
+                            camera_
                         }
-                        Err(_) => (core, camera_),
+                        Err(_) => camera_,
                     }
                 } else if written.as_ref().is_some_and(|w| same_view(w, node_view)) {
                     // the node shows what a viewport last wrote: another viewport took over, and
                     // keeps its own orbit
-                    (core, camera_)
+                    camera_
                 } else {
                     written = Some(node_view.clone());
                     let lensed = match rcam::projection(node_view) {
                         rcam::projection::Perspective { fov_y, .. } => easy_camera::with_fov_y(fov_y, &camera_).unwrap_or_else(|_| camera_.clone()),
                         _ => camera_.clone(),
                     };
-                    (core, easy_camera::of_view(rcam::position(node_view), rcam::target(node_view), &lensed))
+                    easy_camera::of_view(rcam::position(node_view), rcam::target(node_view), &lensed)
                 }
             } else {
-                (core, camera_)
+                camera_
             }
         }
-        _ => (core, camera_),
+        _ => camera_,
     };
     // Reuse this frame's decode. A following viewport can write a new immutable node above; only
     // that replacement needs another schema/camera conversion.
-    let current = active_node(&core);
+    let current = active_node(&*core);
     let decoded = match (&current, &active) {
         (Some(c), Some(a)) if std::ptr::eq(c, a) => decoded,
         _ => current.as_ref().and_then(ocamera::of_node),
@@ -772,7 +759,7 @@ pub fn on_view(core: Model, previous: &camera, key: &str, camera_: camera, extra
         follow_pending: pending,
         ..extra_
     };
-    (core, camera_, extra_)
+    (camera_, extra_)
 }
 
 /// The view shows the render camera while looking through it and on the frame whose framebuffer a

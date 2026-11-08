@@ -87,20 +87,23 @@ pub mod Editor {
         loop_model::create(options, workspace, source, prepare, draw)
     }
 
-    pub fn update(value: t, frame_: &frame::t) -> t {
-        editor_loop::update(value, frame_)
+    pub fn update(mut value: t, frame_: &frame::t) -> t {
+        editor_loop::update(&mut value, frame_);
+        value
     }
 
     /// `update`, also building sketch-owned kit widgets below the camera and render sections shown
     /// while no node is selected. The result is `None` on frames where that panel is not built.
-    pub fn update_with(value: t, frame_: &frame::t, inspector: &dyn Fn(&mut pxui::ui::Ui) -> Rc<dyn Any>) -> (t, Option<Rc<dyn Any>>) {
-        editor_loop::update_with(value, frame_, inspector)
+    pub fn update_with(mut value: t, frame_: &frame::t, inspector: &dyn Fn(&mut pxui::ui::Ui) -> Rc<dyn Any>) -> (t, Option<Rc<dyn Any>>) {
+        let inspected = editor_loop::update_with(&mut value, frame_, inspector);
+        (value, inspected)
     }
 
     /// Call from the sketch's `after_present` when driving the environment manually so PNG requests
     /// save the completed frame.
-    pub fn after_present(value: t, frame_: &frame::t) -> t {
-        editor_loop::after_present(value, frame_)
+    pub fn after_present(mut value: t, frame_: &frame::t) -> t {
+        editor_loop::after_present(&mut value, frame_);
+        value
     }
 
     pub fn scene(value: &t, frame_: &frame::t) -> Vec<rays::scene::node> {
@@ -601,7 +604,7 @@ pub mod Workspace {
         let stop_host = host.clone();
         let program = rays::sketch::program {
             init: Box::new(|_| Box::new(())),
-            update: Box::new(|_, _| Box::new(())),
+            update: Box::new(|_, _| None),
             view: Box::new(view),
             after_present: Some(Box::new(move |_, _| {
                 if let Err(d) = workspace_host::save_pending(&mut after_host.borrow_mut(), &mut |p| rays::canvas::save_screen_png(p)) {

@@ -82,13 +82,13 @@ pub fn world_operation(core: &t, area: Bounds, point: (f64, f64), shift: bool) -
     }
 }
 
-pub fn move_world(core: t, drag: &world_drag, point: (f64, f64)) -> t {
+pub fn move_world(core: &mut t, drag: &world_drag, point: (f64, f64)) {
     if point == drag.point {
-        return core;
+        return;
     }
     match &drag.operation {
         world_operation::Rotate_world(world) => {
-            let rotation = kg::find(&editor_inspect::scene(&core), *world).and_then(|node| match kg::field(&node, "rotation") {
+            let rotation = kg::find(&editor_inspect::scene(&*core), *world).and_then(|node| match kg::field(&node, "rotation") {
                 Some(Value::Float(v)) => Some(v),
                 _ => None,
             });
@@ -97,7 +97,7 @@ pub fn move_world(core: t, drag: &world_drag, point: (f64, f64)) -> t {
                     let rotation = wrap_degrees(rotation + 0.5 * (point.0 - drag.point.0));
                     editor_host::edit_node(core, Level::Scene, *world, &[("rotation".to_string(), Value::Float(rotation))], "Rotate World")
                 }
-                None => core,
+                None => {},
             }
         }
         op @ (world_operation::Move_layer(world, _) | world_operation::Move_sun(world)) => {
@@ -105,7 +105,7 @@ pub fn move_world(core: t, drag: &world_drag, point: (f64, f64)) -> t {
             let u = ((point.0 - x as f64) / w.max(1) as f64).min(1.).max(0.);
             let v = ((point.1 - y as f64) / h.max(1) as f64).min(1.).max(0.);
             let direction = world::direction_of_uv(u, v);
-            let rotation = editor_host::world(None, &core, Some(0.)).map(|w| w.rotation).unwrap_or(0.);
+            let rotation = editor_host::world(None, &*core, Some(0.)).map(|w| w.rotation).unwrap_or(0.);
             let degrees = |radians: f64| radians * 180. / std::f64::consts::PI;
             let azimuth = wrap_degrees(degrees(direction.x.atan2(-direction.z) - rotation));
             let elevation = degrees(direction.y.asin());

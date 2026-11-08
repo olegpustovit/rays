@@ -33,7 +33,7 @@ use rays::frame;
 use crate::bars;
 use crate::cook;
 use crate::editor_commands::action;
-use crate::editor_inspect::{compiled_at, compiled_node, kind, probes_of, scene, spreadsheet_source};
+use crate::editor_inspect::{compiled_at, compiled_node, kind, probes_of, spreadsheet_source};
 use crate::editor_model::*;
 use crate::editor_shell::*;
 use crate::lisp_text;
@@ -183,80 +183,44 @@ pub fn shown_as<'a>(value: impl Into<ModelView<'a>>, (key, path, panel): (&Key, 
 /// `tree`, `text` and `outline` follow the focus like the graph pane does: each belongs to the
 /// focused panel of its kind, else to the one it was, else to the first one open; the panel left
 /// keeps its own in `locals`.
-pub fn follow_hosts(value: t, focus_path: Option<&layout::Path>, hosts: &[Host]) -> t {
+pub fn follow_hosts(value: &mut t, focus_path: Option<&layout::Path>, hosts: &[Host]) {
     let focused = focus_path.map(|p| panel_key(&value.doc, p));
-    let pick = |kind: Host_kind, current: &Option<Key>| -> Option<Key> {
+    for kind in [Host_kind::List, Host_kind::Text, Host_kind::Outline] {
+        let current = match kind {
+            Host_kind::List => value.list_at.clone(),
+            Host_kind::Text => value.text_at.clone(),
+            Host_kind::Outline => value.outline_at.clone(),
+        };
         let keys: Vec<&Key> = hosts.iter().filter(|(_, _, _, k)| *k == kind).map(|(key, ..)| key).collect();
-        match (&focused, current) {
+        let target = match (&focused, &current) {
             (Some(key), _) if keys.contains(&key) => Some(key.clone()),
             (_, Some(key)) if keys.contains(&key) => current.clone(),
             _ => keys.first().map(|k| (*k).clone()),
+        };
+        let Some(key) = target else { continue };
+        if current.as_ref() == Some(&key) { continue; }
+        if let Some(old) = &current {
+            value.locals = put_local(old, &|l| match kind {
+                    Host_kind::List => local { rows: value.tree.clone(), ..l },
+                    Host_kind::Text => local { code: value.text.clone(), ..l },
+                    Host_kind::Outline => local { nav: value.outline.clone(), ..l },
+            }, &value.locals);
         }
-    };
-    // `set` records the new owner, `save` puts the live state into the old owner's local, `load` the new owner's
-    let value = {
-        let target = pick(Host_kind::List, &value.list_at);
-        let current = value.list_at.clone();
-        match (target, current) {
-            (None, _) => value,
-            (Some(t), Some(c)) if t == c => value,
-            (Some(t), None) => t_set_list(value, Some(t)),
-            (Some(key), Some(old)) => {
-                let mut v = value;
-                let saved = v.tree.clone();
-                v.locals = put_local(&old, &|l| local { rows: saved.clone(), ..l }, &v.locals);
-                let v = t_set_list(v, Some(key.clone()));
-                let mut v = v;
-                v.tree = local_of(&v.locals, &key).rows;
-                v
+        match kind {
+            Host_kind::List => {
+                value.list_at = Some(key.clone());
+                if current.is_some() { value.tree = local_of(&value.locals, &key).rows; }
             }
-        }
-    };
-    let value = {
-        let target = pick(Host_kind::Text, &value.text_at);
-        let current = value.text_at.clone();
-        match (target, current) {
-            (None, _) => value,
-            (Some(t), Some(c)) if t == c => value,
-            (Some(t), None) => {
-                let mut v = value;
-                v.text_at = Some(t);
-                v
+            Host_kind::Text => {
+                value.text_at = Some(key.clone());
+                if current.is_some() { value.text = local_of(&value.locals, &key).code; }
             }
-            (Some(key), Some(old)) => {
-                let mut v = value;
-                let saved = v.text.clone();
-                v.locals = put_local(&old, &|l| local { code: saved.clone(), ..l }, &v.locals);
-                v.text_at = Some(key.clone());
-                v.text = local_of(&v.locals, &key).code;
-                v
+            Host_kind::Outline => {
+                value.outline_at = Some(key.clone());
+                if current.is_some() { value.outline = local_of(&value.locals, &key).nav; }
             }
-        }
-    };
-    let target = pick(Host_kind::Outline, &value.outline_at);
-    let current = value.outline_at.clone();
-    match (target, current) {
-        (None, _) => value,
-        (Some(t), Some(c)) if t == c => value,
-        (Some(t), None) => {
-            let mut v = value;
-            v.outline_at = Some(t);
-            v
-        }
-        (Some(key), Some(old)) => {
-            let mut v = value;
-            let saved = v.outline.clone();
-            v.locals = put_local(&old, &|l| local { nav: saved.clone(), ..l }, &v.locals);
-            v.outline_at = Some(key.clone());
-            v.outline = local_of(&v.locals, &key).nav;
-            v
         }
     }
-}
-
-fn t_set_list(mut v: t, at: Option<Key>) -> t {
-    v.list_at = at;
-    v
 }
 
 /// The start keywords of the document, by panel key.
@@ -272,23 +236,22 @@ pub fn start_of(doc: &doc_mod::T) -> started {
 
 /// The editor follows a start keyword when its value in the text changed (flow.md 11.11): on
 /// opening, a reload, a preset, an edit, undo. What did not change is left as the user has it.
-pub fn follow_start(value: t) -> t {
+pub fn follow_start(value: &mut t) {
     let now = start_of(&value.doc);
     let was = value.started.clone();
     if now == *was {
-        return value;
+        return;
     }
-    let leaves = panels::leaves(&shell_tree(&value, &value.workspace));
+    let leaves = panels::leaves(&shell_tree(&*value, &value.workspace));
     let path_of = |value: &t, key: &Key| -> Option<(layout::Path, Panel)> {
         leaves.iter().find(|(path, _)| panel_key(&value.doc, path) == *key).cloned()
     };
     let changed = |now: &[(Key, String)], was: &[(Key, String)]| -> Vec<(Key, String)> {
         now.iter().filter(|(key, v)| was.iter().find(|(k, _)| k == key).map(|(_, w)| w) != Some(v)).cloned().collect()
     };
-    let mut value = value;
     if let Some(key) = &now.on {
         if now.on != was.on {
-            if let Some((path, panel)) = path_of(&value, key) {
+            if let Some((path, panel)) = path_of(&*value, key) {
                 value.focus = panel;
                 value.focus_path = Some(path);
             }
@@ -301,9 +264,9 @@ pub fn follow_start(value: t) -> t {
             _ => Graph_view,
         };
         if panel_map::key(&value.panes).as_ref() == Some(&key) {
-            with_pane(&mut value, &|pane| graph_pane { views: level_map_add(pane.views.clone(), pane.at, view), ..pane.clone() });
-        } else if let Some((path, _)) = path_of(&value, &key) {
-            let pane = pane_at(&value, (&key, &path)).into_owned();
+            with_pane(value, &|pane| graph_pane { views: level_map_add(pane.views.clone(), pane.at, view), ..pane.clone() });
+        } else if let Some((path, _)) = path_of(&*value, &key) {
+            let pane = pane_at(&*value, (&key, &path)).into_owned();
             let pane = graph_pane { views: level_map_add(pane.views.clone(), pane.at, view), ..pane };
             panel_map::set(&mut value.panes, &key, pane);
         }
@@ -321,7 +284,6 @@ pub fn follow_start(value: t) -> t {
         }
     }
     value.started = Rc::new(now);
-    value
 }
 
 /// The workspace graph the pane shows with zones and selectors: the one a `(ui/graph "name")` panel
@@ -336,25 +298,26 @@ pub fn graph_of_object(value: &t, id: i64) -> Option<String> {
 pub fn graph_name<'a>(value: impl Into<ModelView<'a>>) -> Option<String> {
     let value = &value.into();
     let path = value.doc.shell.as_ref().and_then(|_| graph_path(value));
-    graph_name_at(value, pane_level(value), pane_shown(value).map(String::as_str), path.as_deref())
+    graph_name_at(&value.doc, pane_level(value), pane_shown(value).map(String::as_str), path.as_deref())
 }
 
-pub fn graph_name_at(value: &t, level: Level, shown: Option<&str>, path: Option<&[usize]>) -> Option<String> {
-    let ws = &value.doc.workspace.ws;
+pub fn graph_name_at(doc: &doc_mod::T, level: Level, shown: Option<&str>, path: Option<&[usize]>) -> Option<String> {
+    let ws = &doc.workspace.ws;
     let exists = |name: &str| -> bool {
         ws.checked.graphs.iter().any(|g| g.name == name)
             || (name.len() > 4 && &name[..4] == "def:" && ws.checked.defs.iter().any(|g| format!("def:{}", g.name) == name))
     };
     // the graph the pane's own leaf pins
-    let named = || value.doc.shell.as_ref().and_then(|s| path.and_then(|path| s.named.iter().find(|(p, _)| p.as_slice() == path).map(|(_, n)| n.clone())));
+    let named = || doc.shell.as_ref().and_then(|s| path.and_then(|path| s.named.iter().find(|(p, _)| p.as_slice() == path).map(|(_, n)| n.clone())));
     let chosen = shown.map(str::to_owned).or_else(named);
+    let kind = |id| doc_mod::scene_graph(doc).into_iter().find(|node| node.id == id).map(|node| node.kind);
     match (chosen, level) {
         (Some(name), _) if exists(&name) => Some(name),
-        (_, Level::Inside(id)) if kind(value, id).as_deref() == Some("geometry") => match graph_of_object(value, id) {
+        (_, Level::Inside(id)) if kind(id).as_deref() == Some("geometry") => match doc_mod::object_graph(doc, id) {
             Some(name) => Some(name),
-            None => kind_graph::find(&scene(value), id).and_then(|node| if exists(&node.label) { Some(node.label.clone()) } else { None }),
+            None => kind_graph::find(&doc_mod::scene_graph(doc), id).and_then(|node| if exists(&node.label) { Some(node.label.clone()) } else { None }),
         },
-        (_, Level::Inside(id)) if kind(value, id).as_deref() == Some("world") => {
+        (_, Level::Inside(id)) if kind(id).as_deref() == Some("world") => {
             ws.checked.graphs.iter().find_map(|g| if g.context == context::world() { Some(g.name.clone()) } else { None })
         }
         (_, Level::Scene) => ws.checked.graphs.iter().find_map(|g| if g.context == context::scene() { Some(g.name.clone()) } else { None }),
@@ -370,7 +333,7 @@ pub fn graph_panels<'a>(value: impl Into<ModelView<'a>>) -> String {
         .map(|(key, path)| {
             let pane = pane_at(value, (key, path));
             let path = if value.key == Some(key) { graph_path(value) } else { Some(path.clone()) };
-            graph_name_at(value, pane.at, pane.shown.as_deref(), path.as_deref()).unwrap_or_else(|| "-".to_owned())
+            graph_name_at(&value.doc, pane.at, pane.shown.as_deref(), path.as_deref()).unwrap_or_else(|| "-".to_owned())
         })
         .collect::<Vec<_>>()
         .join(", ")
@@ -525,9 +488,9 @@ pub fn route_in(value: &t, pane: &graph_pane, path: Option<&[usize]>) -> String 
     let mut names: Vec<String> = pane.route
         .iter()
         .rev()
-        .filter_map(|(at, shown)| graph_name_at(value, *at, shown.as_deref(), path))
+        .filter_map(|(at, shown)| graph_name_at(&value.doc, *at, shown.as_deref(), path))
         .collect();
-    names.extend(graph_name_at(value, pane.at, pane.shown.as_deref(), path));
+    names.extend(graph_name_at(&value.doc, pane.at, pane.shown.as_deref(), path));
     let skip = names.len().saturating_sub(3);
     names.into_iter().skip(skip).collect::<Vec<_>>().join(" > ")
 }

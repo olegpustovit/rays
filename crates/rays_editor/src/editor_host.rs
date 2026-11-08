@@ -45,9 +45,9 @@ pub enum scene_mode {
 /// Editor_loop-owned scene edits (camera bookkeeping, a camera following the viewport): view
 /// state, never an undo entry. `active_camera`: `None` is OCaml's omitted argument (the document's
 /// own).
-pub fn scene_edit(value: t, mode: scene_mode, active_camera: Option<Option<i64>>, scene_graph: kg::T) -> t {
+pub fn scene_edit(value: &mut t, mode: scene_mode, active_camera: Option<Option<i64>>, scene_graph: kg::T) {
     if value.carry.is_some() {
-        return value;
+        return;
     }
     let active_camera = active_camera.unwrap_or(value.doc.active_camera);
     let mut edited = (*value.doc).clone();
@@ -65,9 +65,7 @@ pub fn scene_edit(value: t, mode: scene_mode, active_camera: Option<Option<i64>>
     });
     match result {
         Err(message) => {
-            let mut next = value;
-            next.edit_error = Some(message);
-            next
+            value.edit_error = Some(message);
         }
         Ok(doc) => {
             let doc = adopt(&value.history, doc);
@@ -77,11 +75,9 @@ pub fn scene_edit(value: t, mode: scene_mode, active_camera: Option<Option<i64>>
             };
             // camera bookkeeping is not unsaved work: a document that was the file's still is
             let filed = if same_text(&value.doc, &value.filed) { document::text(&doc) } else { value.filed.clone() };
-            let mut next = value;
-            next.doc = doc;
-            next.history = history;
-            next.filed = filed;
-            next
+            value.doc = doc;
+            value.history = history;
+            value.filed = filed;
         }
     }
 }
@@ -99,49 +95,41 @@ pub fn close(value: &t) {
 
 /// A sketch-driven settings change: one undo step and a fresh cook, since `prepare` reads the
 /// settings.
-pub fn set_settings(value: t, new_settings: &settings::T) -> t {
+pub fn set_settings(value: &mut t, new_settings: &settings::T) {
     if settings::same_values(new_settings, &value.doc.settings) || value.carry.is_some() {
-        return value;
+        return;
     }
     match scene_sync::write(Some(&value.factories), &value.doc, Level::Scene, &Edit::Settings(new_settings.clone())) {
         Err(message) => {
-            let mut next = value;
-            next.edit_error = Some(message);
-            next
+            value.edit_error = Some(message);
         }
-        Ok(None) => value,
+        Ok(None) => {},
         Ok(Some((doc, _))) => {
             let doc = adopt(&value.history, doc);
             let history = commit(&doc, Some("Settings"), None, value.history.clone());
-            let mut next = value;
-            next.cook = std::rc::Rc::new(cook::force(&next.cook));
-            next.doc = doc;
-            next.history = history;
-            next
+            value.cook = std::rc::Rc::new(cook::force(&value.cook));
+            value.doc = doc;
+            value.history = history;
         }
     }
 }
 
 /// An edit of the render settings (the root): written to the root's call, or the first edit writes
 /// a root over the scene's result; one undo step, merged while scrubbed.
-pub fn set_root(value: t, root: &objects::root::Parameters) -> t {
+pub fn set_root(value: &mut t, root: &objects::root::Parameters) {
     if *root == value.doc.root || value.carry.is_some() {
-        return value;
+        return;
     }
     match scene_sync::write(Some(&value.factories), &value.doc, Level::Scene, &Edit::Root(root.clone())) {
         Err(message) => {
-            let mut next = value;
-            next.edit_error = Some(message);
-            next
+            value.edit_error = Some(message);
         }
-        Ok(None) => value,
+        Ok(None) => {},
         Ok(Some((doc, _))) => {
             let doc = adopt(&value.history, doc);
             let history = commit(&doc, Some("Render settings"), Some(Merge::Gesture("render settings".to_string())), value.history.clone());
-            let mut next = value;
-            next.doc = doc;
-            next.history = history;
-            next
+            value.doc = doc;
+            value.history = history;
         }
     }
 }
@@ -149,28 +137,24 @@ pub fn set_root(value: t, root: &objects::root::Parameters) -> t {
 /// A host-driven gesture on a workspace document (`Editor.edit`, W11's entry): the same reduction
 /// as a `Syntax_edit` intent, committed as one history entry named by the op (`Gesture` merge for a
 /// scrub).
-pub fn host_edit(value: &t, label: &str, gesture: Option<String>, edited: &dyn Fn(Option<&[sop::edit_graph::Factory]>, &Document) -> Result<Document, Diagnostic>) -> Result<t, String> {
+pub fn host_edit(value: &mut t, label: &str, gesture: Option<String>, edited: &dyn Fn(Option<&[sop::edit_graph::Factory]>, &Document) -> Result<Document, Diagnostic>) -> Result<(), String> {
     let clock = value.clock.clone();
     let guard = SampleGuard::start_with_clock(Box::new(move || clock()));
     let result = edited(Some(&value.factories), &value.doc)
         .map(|doc| {
-            let mut next = value.clone();
-            install(&mut next, doc, label, gesture.map(Merge::Gesture).unwrap_or(Merge::Step));
-            next
+            install(value, doc, label, gesture.map(Merge::Gesture).unwrap_or(Merge::Step));
         })
         .map_err(|d| rays_diagnostic::to_string(&d));
     let phases = guard.finish();
-    result.map(|mut v| {
-        v.edit_phases = phases;
-        v
-    })
+    if result.is_ok() { value.edit_phases = phases; }
+    result
 }
 
-pub fn syntax_edit(value: &t, op: &fe::Op) -> Result<t, String> {
+pub fn syntax_edit(value: &mut t, op: &fe::Op) -> Result<(), String> {
     host_edit(value, fe::label(op), fe::gesture(op), &|factories, doc| document_edit::syntax_edit_result(factories, doc, op))
 }
 
-pub fn layout_edit_op(value: &t, op: &layout_edit::Op) -> Result<t, String> {
+pub fn layout_edit_op(value: &mut t, op: &layout_edit::Op) -> Result<(), String> {
     host_edit(value, layout_edit::label(op), layout_edit::gesture(op).map(|s| s.to_string()), &|factories, doc| document_edit::layout_op_result(factories, doc, op))
 }
 
@@ -206,9 +190,13 @@ pub fn scene_for_view(override_: Option<kg::T>, view: Option<&View>, value: &t) 
 }
 
 pub fn placed_pieces(render: bool, view: Option<&View>, value: &t) -> Vec<(mat4::T, cook::piece)> {
+    placed_pieces_of(render, view, value, pieces(value))
+}
+
+fn placed_pieces_of(render: bool, view: Option<&View>, value: &t, pieces: &[cook::piece]) -> Vec<(mat4::T, cook::piece)> {
     let view = view.cloned().unwrap_or(View::Primary);
     let scene_graph = scene(value);
-    pieces(value)
+    pieces
         .iter()
         .filter_map(|piece| match kg::find(&scene_graph, piece.id) {
             Some(node) if view_wants(value, &view, piece.id) && objects::visible(&node) && (!render || objects::flag("render", &node)) => Some((objects::world(&scene_graph, piece.id), piece.clone())),
@@ -223,38 +211,34 @@ pub fn world_id(value: &t) -> Option<i64> {
 
 /// A parameter edit made in the view (a map drag, a World rotation): one undo entry per pointer
 /// gesture.
-pub fn edit_node(value: t, level: Level, node_id: i64, values: &[(String, Value)], label: &str) -> t {
+pub fn edit_node(value: &mut t, level: Level, node_id: i64, values: &[(String, Value)], label: &str) {
     if value.carry.is_some() {
-        return value;
+        return;
     }
-    let written = |value: &t, doc: Document| -> t {
+    let written = |value: &mut t, doc: Document| {
         let doc = adopt(&value.history, doc);
         cook::set_volatile(&value.cook, flow_sop::lower::is_volatile(&doc.workspace.lowered));
         let history = commit(&doc, Some(label), Some(Merge::Gesture(parameter_gesture(label, level, node_id, values))), value.history.clone());
-        let mut next = value.clone();
-        next.doc = doc;
-        next.history = history;
-        next
+        value.doc = doc;
+        value.history = history;
     };
-    let failed = |value: t, message: String| {
-        let mut next = value;
-        next.edit_error = Some(message);
-        next
+    let failed = |value: &mut t, message: String| {
+        value.edit_error = Some(message);
     };
     // an object the text declares takes the values in its text; one only the host made is edited
     // as a derived node, which the reconciliation adopts
     match scene_sync::set_fields(Some(&value.factories), &value.doc, level, node_id, values) {
-        Ok(Some((doc, _, _))) => written(&value, doc),
+        Ok(Some((doc, _, _))) => written(value, doc),
         Err(message) => failed(value, message),
         Ok(None) => match document::kinds(&value.doc, level) {
-            None => value,
+            None => {},
             Some(graph) => match kg::set_fields(&graph, node_id, values) {
-                Err(_) => value,
+                Err(_) => {},
                 Ok((graph, _)) => {
                     let edited = document::with_kinds(&value.doc, level, graph);
                     match document_edit::reconcile(Some(&value.factories), None, &value.doc, &edited) {
                         Err(message) => failed(value, message),
-                        Ok(doc) => written(&value, doc),
+                        Ok(doc) => written(value, doc),
                     }
                 }
             },
@@ -313,30 +297,27 @@ fn nearest_by(placed: &[(mat4::T, cook::piece)], origin: vec3::T, direction: vec
 /// on nothing deselects.  A merge of merges keeps the innermost tag, so the origin is exact
 /// through nested collecting merges.  Geometry drawn as instances is picked per instance
 /// (`Cook::pick`), and hits compare by the ray parameter, so any scale is exact.
-pub fn pick(view: Option<&str>, alt: bool, mut value: t, origin: vec3::T, direction: vec3::T) -> t {
+pub fn pick(view: Option<&str>, alt: bool, value: &mut t, origin: vec3::T, direction: vec3::T) {
     // the focused viewport's own scene instance, when it has objects of its own
-    let view = view_of(view, &value);
-    let placed = placed_pieces(false, Some(&view), &value);
+    let view = view_of(view, &*value);
+    let placed = placed_pieces(false, Some(&view), &*value);
     if alt {
         // Alt-click: the material on that primitive
         return match nearest_by(&placed, origin, direction, &|p, o, d| cook::pick_material(p, o, d).map(|(t, m)| (t, Hit::Material(m)))) {
-            Some((_, Hit::Material(Some(path)), _)) => match material_graph(&value, &path) {
+            Some((_, Hit::Material(Some(path)), _)) => match material_graph(&*value, &path) {
                 Some(graph) => {
-                    go(&mut value, &graph);
-                    value
+                    go(value, &graph);
                 },
                 None => {
-                    let mut next = value;
-                    next.notice = Some((notice_kind::Refusal, format!("No material graph for {path}")));
-                    next
+                    value.notice = Some((notice_kind::Refusal, format!("No material graph for {path}")));
                 }
             },
-            _ => value,
+            _ => {},
         };
     }
-    let Some(laid) = pane_laid(&value) else { return value };
-    if scope_name(&value).is_none() {
-        return value;
+    let Some(laid) = pane_laid(&*value) else { return };
+    if scope_name(&*value).is_none() {
+        return;
     }
     let scope = laid.scope.clone();
     let workspace = value.doc.workspace.clone();
@@ -368,16 +349,16 @@ pub fn pick(view: Option<&str>, alt: bool, mut value: t, origin: vec3::T, direct
             // objects): the pane shows that graph, the node is selected there once it does
             let root = o.site[0].clone();
             let laid_graph = |v: &t| pane_laid(v).map(|k| k.graph.clone()).unwrap_or_else(|| root.clone());
-            let (value, scope) = if root == laid_graph(&value) {
-                (value, scope)
+            let scope = if root == laid_graph(value) {
+                scope
             } else {
-                match flow_catalog(&value).map(|catalog| fproj::of_graph(&catalog, &workspace.ws.checked, &root)) {
+                match flow_catalog(&*value).map(|catalog| fproj::of_graph(&catalog, &workspace.ws.checked, &root)) {
                     Some(Ok(found)) => {
                         let shown = root.clone();
-                        with_pane(&mut value, &|pane| graph_pane { shown: Some(shown.clone()), ..pane.clone() });
-                        (value, Rc::new(found))
+                        with_pane(value, &|pane| graph_pane { shown: Some(shown.clone()), ..pane.clone() });
+                        Rc::new(found)
                     }
-                    _ => (value, scope),
+                    _ => scope,
                 }
             };
             match probe::chains(&scope).get(&o.site) {
@@ -390,19 +371,16 @@ pub fn pick(view: Option<&str>, alt: bool, mut value: t, origin: vec3::T, direct
                     for (zone, index) in chain.iter().zip(indices) {
                         probes.insert(zone.clone(), index);
                     }
-                    let in_pane = root == laid_graph(&value);
-                    let mut next = value;
-                    next.probes = probes;
-                    next.select_later = if in_pane { Vec::new() } else { vec![shown.clone()] };
-                    with_pane(&mut next, &|pane| if in_pane { graph_pane { view: pxui_graph::scope_state::select(vec![shown.clone()], pane.view.clone()), ..pane.clone() } } else { pane.clone() });
-                    next
+                    let in_pane = root == laid_graph(&*value);
+                    value.probes = probes;
+                    value.select_later = if in_pane { Vec::new() } else { vec![shown.clone()] };
+                    with_pane(value, &|pane| if in_pane { graph_pane { view: pxui_graph::scope_state::select(vec![shown.clone()], pane.view.clone()), ..pane.clone() } } else { pane.clone() });
                 }
-                None => value,
+                None => {},
             }
         }
         None => {
-            with_pane(&mut value, &|pane| graph_pane { view: pxui_graph::scope_state::clear_selection(pane.view.clone()), ..pane.clone() });
-            value
+            with_pane(value, &|pane| graph_pane { view: pxui_graph::scope_state::clear_selection(pane.view.clone()), ..pane.clone() });
         },
     }
 }
@@ -411,11 +389,10 @@ pub fn pick(view: Option<&str>, alt: bool, mut value: t, origin: vec3::T, direct
 /// settings, probes and the selection (all keyed by path) stay.  A refused text changes nothing but
 /// the pane: it shows the file's text with the diagnostics, and the status says the last good
 /// document is kept.
-pub fn reload(imports: Option<&[(String, String)]>, value: &t, name: &str, text: &str) -> Result<t, Vec<Diagnostic>> {
+pub fn reload(imports: Option<&[(String, String)]>, value: &mut t, name: &str, text: &str) -> Result<(), Vec<Diagnostic>> {
     let doc = document_edit::text_edit(imports, Some(&value.factories), &value.doc, text)?;
-    let mut next = value.clone();
-    install(&mut next, doc, &format!("Reload {name}"), Merge::Step);
-    cook::reset_state(true, &next.cook);
+    install(value, doc, &format!("Reload {name}"), Merge::Step);
+    cook::reset_state(true, &value.cook);
     let clean = |text: &text_pane::State| text_pane::State {
         draft: None,
         doc_base: None,
@@ -426,14 +403,14 @@ pub fn reload(imports: Option<&[(String, String)]>, value: &t, name: &str, text:
         graphs: Vec::new(),
         ..text.clone()
     };
-    next.notice = Some((notice_kind::Info, format!("Reloaded {name}")));
-    next.text = clean(&next.text);
-    next.filed = document::text(&next.doc);
-    next.locals = next.locals.iter().map(|(key, l)| (key.clone(), local { code: clean(&l.code), ..l.clone() })).collect();
-    Ok(next)
+    value.notice = Some((notice_kind::Info, format!("Reloaded {name}")));
+    value.text = clean(&value.text);
+    value.filed = document::text(&value.doc);
+    value.locals = value.locals.iter().map(|(key, l)| (key.clone(), local { code: clean(&l.code), ..l.clone() })).collect();
+    Ok(())
 }
 
-pub fn reload_failed(value: &t, name: &str, text: &str, diagnostics: &[Diagnostic]) -> t {
+pub fn reload_failed(value: &mut t, name: &str, text: &str, diagnostics: &[Diagnostic]) {
     let first = match diagnostics.first() {
         None => String::new(),
         Some(d) => match text_pane::line_of(text, d) {
@@ -441,34 +418,30 @@ pub fn reload_failed(value: &t, name: &str, text: &str, diagnostics: &[Diagnosti
             None => format!(": {}", d.message),
         },
     };
-    let mut next = value.clone();
-    next.notice = Some((notice_kind::Refusal, format!("{name} not reloaded{first}")));
-    next.text = text_pane::State {
+    value.notice = Some((notice_kind::Refusal, format!("{name} not reloaded{first}")));
+    value.text = text_pane::State {
         tab: text_pane::Tab::Document,
         draft: Some(text.to_string()),
         doc_base: Some(value.doc.workspace.ws.clone()),
         doc_errors: text_pane::Checked { at: text.to_string(), found: diagnostics.to_vec() },
         ..value.text.clone()
     };
-    next
 }
 
 /// The carry's hovered viewport has been looked at by the host: the surface under the pointer (the
 /// object it belongs to and the material graph its primitive reads) is where a material goes, and
 /// the scene where a SOP graph does.  `view` is the viewport's own scene instance.
-pub fn carry_over_surface(view: Option<&str>, value: t, origin: vec3::T, direction: vec3::T) -> t {
-    let Some(c) = value.carry.clone() else { return value };
-    let Some(report) = c.report.clone() else { return value };
+pub fn carry_over_surface(view: Option<&str>, value: &mut t, origin: vec3::T, direction: vec3::T) {
+    let Some(c) = value.carry.clone() else { return };
+    let Some(report) = c.report.clone() else { return };
     if !matches!(report.over, Place::Viewport(_)) || !(c.payload.kind == "material" || c.payload.kind == "sop") {
-        return value;
+        return;
     }
-    let view = view_of(view, &value);
-    let mut settled = value.clone();
-    std::rc::Rc::make_mut(&mut settled.cook).pieces = c.settled.clone();
-    let placed = placed_pieces(false, Some(&view), &settled);
+    let view = view_of(view, &*value);
+    let placed = placed_pieces_of(false, Some(&view), value, &c.settled);
     let nearest = nearest_by(&placed, origin, direction, &|p, o, d| cook::pick_material(p, o, d).map(|(t, m)| (t, Hit::Material(m))));
     let place = match nearest {
-        Some((_, Hit::Material(path), object_)) => Place::Surface { object_, material: path.and_then(|p| material_graph(&value, &p)) },
+        Some((_, Hit::Material(path), object_)) => Place::Surface { object_, material: path.and_then(|p| material_graph(&*value, &p)) },
         _ => {
             // nothing under the pointer: a SOP graph goes to the scene, a material has no place
             let scene_graph = value.doc.workspace.ws.checked.graphs.iter().find(|g| g.context == context::scene()).map(|g| g.name.clone());
@@ -478,9 +451,7 @@ pub fn carry_over_surface(view: Option<&str>, value: t, origin: vec3::T, directi
             }
         }
     };
-    let mut next = value;
-    next.carry = Some(carry { report: Some(carry_report { over: place, dropped: report.dropped }), ..c });
-    next
+    value.carry = Some(carry { report: Some(carry_report { over: place, dropped: report.dropped }), ..c });
 }
 
 /// A pointer carry is over a viewport: the host should look through the viewport's camera.

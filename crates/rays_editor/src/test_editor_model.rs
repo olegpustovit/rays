@@ -71,7 +71,8 @@ fn creation_shell_list_status() {
     let graphs = editor_shell::graph_leaves(&value);
     assert_eq!(graphs.len(), 1);
     assert_eq!(editor_shell::graph_path(&value), Some(graphs[0].1.clone()));
-    let followed = editor_shell::follow_graph(value.clone(), &Panel::Graph, Some(&graphs[0].1));
+    let mut followed = value.clone();
+    editor_shell::follow_graph(&mut followed, &Panel::Graph, Some(&graphs[0].1));
     assert_eq!(panel_map_key(&followed), Some(graphs[0].0.clone()));
 
     // the list: the scene level lists objects with the visible and render columns
@@ -138,18 +139,20 @@ fn text_applies_body() {
     assert_eq!(value.text.draft.as_deref(), Some("(workspace"));
     assert!(editor_text::has_draft(None, &value));
     // `apply_drafts` refuses to go on while it stands
-    assert!(editor_text::apply_drafts(None, value.clone()).is_err());
+    assert!(!editor_text::apply_drafts(None, &mut value.clone()));
     editor_text::apply_text(&mut value, &[TextIntent::DocDiscard]);
     assert!(!editor_text::has_draft(None, &value));
-    assert!(editor_text::apply_drafts(None, value.clone()).is_ok());
+    assert!(editor_text::apply_drafts(None, &mut value.clone()));
 
     // reload: the whole text replaces the document; a refused one is said and kept as a draft
-    let reloaded = editor_host::reload(None, &value, "w.rays", TEXT).expect("reload");
+    let mut reloaded = value.clone();
+    editor_host::reload(None, &mut reloaded, "w.rays", TEXT).expect("reload");
     assert_eq!(reloaded.notice.as_ref().map(|(_, s)| s.as_str()), Some("Reloaded w.rays"));
     assert!(!editor_text::unsaved(None, &reloaded));
     assert_eq!(history::label(&reloaded.history), "Reload w.rays");
     let diagnostics = text_pane_errors("(workspace");
-    let failed = editor_host::reload_failed(&value, "w.rays", "(workspace", &diagnostics);
+    let mut failed = value.clone();
+    editor_host::reload_failed(&mut failed, "w.rays", "(workspace", &diagnostics);
     assert!(failed.notice.as_ref().is_some_and(|(k, s)| *k == notice_kind::Refusal && s.starts_with("w.rays not reloaded")));
     assert_eq!(failed.text.tab, text_pane::Tab::Document);
     assert_eq!(failed.text.draft.as_deref(), Some("(workspace"));
@@ -180,10 +183,12 @@ fn host_entry_points_and_carry_letters() {
     assert!(error.starts_with("Nothing to pick up"), "{error}");
     // the scene edit of the host leaves no undo entry (`Amend` folds into the present)
     let scene = document::scene_graph(&value.doc);
-    let amended = editor_host::scene_edit(value.clone(), editor_host::scene_mode::Amend, None, scene.clone());
+    let mut amended = value.clone();
+    editor_host::scene_edit(&mut amended, editor_host::scene_mode::Amend, None, scene.clone());
     assert_eq!(history::depth(&amended.history), history::depth(&value.history));
     // a settings write of the same values is a no-op
-    let same = editor_host::set_settings(value.clone(), &value.doc.settings);
+    let mut same = value.clone();
+    editor_host::set_settings(&mut same, &value.doc.settings);
     assert!(Arc::ptr_eq(&same.doc, &value.doc));
     // the placed pieces and the World of an uncooked document
     assert!(editor_host::placed_pieces(false, None, &value).is_empty());
