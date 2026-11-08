@@ -9,7 +9,7 @@ use crate::context::{self, dependencies};
 use crate::decl::{self, Decl, Meta, Spec};
 use crate::edit_graph::Factory;
 use crate::node::{self, build, CookMode, InputPolicy};
-use crate::support;
+use crate::support::{self, Choice};
 
 pub mod null {
     use super::*;
@@ -173,8 +173,8 @@ impl Reader {
             _ => unreachable!("parameter record has the wrong shape"),
         }
     }
-    fn choice(&mut self, table: &[&str]) -> usize {
-        support::choice_index(table, &self.next())
+    fn choice<T: Clone>(&mut self, table: &support::Choice<T>) -> T {
+        table.of(&self.next())
     }
 }
 
@@ -209,8 +209,8 @@ fn owner_spec(folder: &'static str) -> Spec {
         "group_owner",
         "Group type",
         folder,
-        support::element_owner_kind(),
-        support::element_owner_value(rdk::group_ops::Owner::GroupPoints),
+        support::ELEMENT_OWNER.kind(),
+        support::ELEMENT_OWNER.value(&rdk::group_ops::Owner::GroupPoints),
     )
 }
 fn all_finite(values: &[f64]) -> bool {
@@ -238,8 +238,11 @@ pub mod clip {
     use super::*;
     use rdk::plane_clip::{self, Keep};
 
-    pub const KEEP_LABELS: [&str; 3] = ["Above", "Below", "All"];
-    pub const KEEP: [Keep; 3] = [Keep::Above, Keep::Below, Keep::All];
+    pub const KEEP: Choice<Keep> = Choice(&[
+        ("Above", Keep::Above),
+        ("Below", Keep::Below),
+        ("All", Keep::All),
+    ]);
 
     #[derive(Clone, Debug)]
     pub struct Parameters {
@@ -264,9 +267,9 @@ pub mod clip {
     pub fn from_values(values: &[Value]) -> Parameters {
         let mut r = Reader::new(values);
         Parameters {
-            group_owner: support::element_owner_of_value(&r.next()),
+            group_owner: support::ELEMENT_OWNER.of(&r.next()),
             group: r.text(),
-            keep: KEEP[r.choice(&KEEP_LABELS)],
+            keep: r.choice(&KEEP),
             snapping_tolerance: r.float(),
             fill: r.bool(),
             split_connectivity: r.bool(),
@@ -290,7 +293,7 @@ pub mod clip {
         let mut specs = vec![
             owner_spec("Selection"),
             txt("group", "Group", "Selection", ""),
-            pick("keep", "Keep", "", support::choice_kind(&KEEP_LABELS), support::choice_value(&KEEP_LABELS, 0)),
+            pick("keep", "Keep", "", KEEP.kind(), KEEP.at(0)),
             fl_hard("snapping_tolerance", "Snapping tolerance", "Robustness", 0.0, 0.001, 0.0, 1e-9),
             tog("fill", "Fill cut", "Topology", false),
             tog("split_connectivity", "Split connectivity", "Topology", false),
@@ -558,27 +561,27 @@ pub mod soft_transform {
     };
     use support::SoftTransformMetric;
 
-    pub const ORDER_LABELS: [&str; 6] = ["SRT", "STR", "RST", "RTS", "TSR", "TRS"];
-    pub const ORDER: [Order; 6] = [
-        Order::TransformSrt,
-        Order::TransformStr,
-        Order::TransformRst,
-        Order::TransformRts,
-        Order::TransformTsr,
-        Order::TransformTrs,
-    ];
-    pub const ROTATION_ORDER_LABELS: [&str; 6] = ["XYZ", "XZY", "YXZ", "YZX", "ZXY", "ZYX"];
-    pub const ROTATION_ORDER: [Rot; 6] = [
-        Rot::TransformXyz,
-        Rot::TransformXzy,
-        Rot::TransformYxz,
-        Rot::TransformYzx,
-        Rot::TransformZxy,
-        Rot::TransformZyx,
-    ];
-    pub const METRIC_LABELS: [&str; 3] = ["Radius", "Edge distance", "Attribute"];
-    pub const METRIC: [SoftTransformMetric; 3] =
-        [SoftTransformMetric::Radius, SoftTransformMetric::Edge, SoftTransformMetric::Attribute];
+    pub const ORDER: Choice<Order> = Choice(&[
+        ("SRT", Order::TransformSrt),
+        ("STR", Order::TransformStr),
+        ("RST", Order::TransformRst),
+        ("RTS", Order::TransformRts),
+        ("TSR", Order::TransformTsr),
+        ("TRS", Order::TransformTrs),
+    ]);
+    pub const ROTATION_ORDER: Choice<Rot> = Choice(&[
+        ("XYZ", Rot::TransformXyz),
+        ("XZY", Rot::TransformXzy),
+        ("YXZ", Rot::TransformYxz),
+        ("YZX", Rot::TransformYzx),
+        ("ZXY", Rot::TransformZxy),
+        ("ZYX", Rot::TransformZyx),
+    ]);
+    pub const METRIC: Choice<SoftTransformMetric> = Choice(&[
+        ("Radius", SoftTransformMetric::Radius),
+        ("Edge distance", SoftTransformMetric::Edge),
+        ("Attribute", SoftTransformMetric::Attribute),
+    ]);
 
     #[derive(Clone, Debug)]
     pub struct Parameters {
@@ -607,10 +610,10 @@ pub mod soft_transform {
         let mut r = Reader::new(values);
         let triple = |r: &mut Reader| [r.float(), r.float(), r.float()];
         Parameters {
-            group_owner: support::element_owner_of_value(&r.next()),
+            group_owner: support::ELEMENT_OWNER.of(&r.next()),
             group: r.text(),
-            order: ORDER[r.choice(&ORDER_LABELS)],
-            rotation_order: ROTATION_ORDER[r.choice(&ROTATION_ORDER_LABELS)],
+            order: r.choice(&ORDER),
+            rotation_order: r.choice(&ROTATION_ORDER),
             translate: triple(&mut r),
             rotate: triple(&mut r),
             scale: triple(&mut r),
@@ -619,10 +622,10 @@ pub mod soft_transform {
             pivot: triple(&mut r),
             pivot_rotation: triple(&mut r),
             invert: r.bool(),
-            metric: METRIC[r.choice(&METRIC_LABELS)],
+            metric: r.choice(&METRIC),
             metric_attribute: r.text(),
             apply_rolloff: r.bool(),
-            falloff: support::soft_falloff_of_value(&r.next()),
+            falloff: support::SOFT_FALLOFF.of(&r.next()),
             radius: r.float(),
             falloff_attribute: r.text(),
             recompute_normals: r.bool(),
@@ -643,13 +646,13 @@ pub mod soft_transform {
         let mut specs = vec![
             owner_spec("Selection"),
             txt("group", "Group", "Selection", ""),
-            pick("order", "Transform order", "Transform", support::choice_kind(&ORDER_LABELS), support::choice_value(&ORDER_LABELS, 0)),
+            pick("order", "Transform order", "Transform", ORDER.kind(), ORDER.at(0)),
             pick(
                 "rotation_order",
                 "Rotation order",
                 "Transform/Rotate",
-                support::choice_kind(&ROTATION_ORDER_LABELS),
-                support::choice_value(&ROTATION_ORDER_LABELS, 0),
+                ROTATION_ORDER.kind(),
+                ROTATION_ORDER.at(0),
             ),
         ];
         specs.extend(xyz_specs(
@@ -704,8 +707,8 @@ pub mod soft_transform {
                 "metric",
                 "Distance metric",
                 "Soft selection",
-                support::choice_kind(&METRIC_LABELS),
-                support::choice_value(&METRIC_LABELS, 0),
+                METRIC.kind(),
+                METRIC.at(0),
             ),
             txt("metric_attribute", "Metric attribute", "Soft selection", "mask"),
             tog("apply_rolloff", "Apply rolloff", "Soft selection", true),
@@ -713,8 +716,8 @@ pub mod soft_transform {
                 "falloff",
                 "Falloff",
                 "Soft selection",
-                support::soft_falloff_kind(),
-                support::choice_value(&support::SOFT_FALLOFF_LABELS, 2),
+                support::SOFT_FALLOFF.kind(),
+                support::SOFT_FALLOFF.at(2),
             ),
             fl_hard("radius", "Radius", "Soft selection", 0.0, 100.0, 0.0, 1.0),
             txt("falloff_attribute", "Falloff output attribute", "Output", ""),
@@ -836,23 +839,31 @@ pub mod ray {
     use rdk::surface_index::{RayDirectionMode, RaySurfaceHit};
     use support::RayDirection;
 
-    pub const METHOD_LABELS: [&str; 2] = ["Minimum distance", "Project rays"];
-    pub const METHOD: [Method; 2] = [Method::RayMinimumDistance, Method::RayProject];
-    pub const DIRECTION_LABELS: [&str; 3] = ["Vector", "Normal", "Attribute"];
-    pub const DIRECTION: [RayDirection; 3] = [RayDirection::Vector, RayDirection::Normal, RayDirection::Attribute];
-    pub const DIRECTION_MODE_LABELS: [&str; 4] =
-        ["Forward", "Reverse", "Bidirectional closest", "Bidirectional farthest"];
-    pub const DIRECTION_MODE: [RayDirectionMode; 4] = [
-        RayDirectionMode::RayForward,
-        RayDirectionMode::RayReverse,
-        RayDirectionMode::RayBidirectionalClosest,
-        RayDirectionMode::RayBidirectionalFarthest,
-    ];
-    pub const SURFACE_LABELS: [&str; 2] = ["First surface", "Last surface"];
-    pub const SURFACE: [RaySurfaceHit; 2] = [RaySurfaceHit::RayFirstSurface, RaySurfaceHit::RayLastSurface];
-    pub const COMBINE_LABELS: [&str; 4] = ["Average", "Median", "Shortest", "Longest"];
-    pub const COMBINE: [Combine; 4] =
-        [Combine::RayAverage, Combine::RayMedian, Combine::RayShortest, Combine::RayLongest];
+    pub const METHOD: Choice<Method> = Choice(&[
+        ("Minimum distance", Method::RayMinimumDistance),
+        ("Project rays", Method::RayProject),
+    ]);
+    pub const DIRECTION: Choice<RayDirection> = Choice(&[
+        ("Vector", RayDirection::Vector),
+        ("Normal", RayDirection::Normal),
+        ("Attribute", RayDirection::Attribute),
+    ]);
+    pub const DIRECTION_MODE: Choice<RayDirectionMode> = Choice(&[
+        ("Forward", RayDirectionMode::RayForward),
+        ("Reverse", RayDirectionMode::RayReverse),
+        ("Bidirectional closest", RayDirectionMode::RayBidirectionalClosest),
+        ("Bidirectional farthest", RayDirectionMode::RayBidirectionalFarthest),
+    ]);
+    pub const SURFACE: Choice<RaySurfaceHit> = Choice(&[
+        ("First surface", RaySurfaceHit::RayFirstSurface),
+        ("Last surface", RaySurfaceHit::RayLastSurface),
+    ]);
+    pub const COMBINE: Choice<Combine> = Choice(&[
+        ("Average", Combine::RayAverage),
+        ("Median", Combine::RayMedian),
+        ("Shortest", Combine::RayShortest),
+        ("Longest", Combine::RayLongest),
+    ]);
 
     #[derive(Clone, Debug)]
     pub struct Parameters {
@@ -891,19 +902,19 @@ pub mod ray {
     pub fn from_values(values: &[Value]) -> Parameters {
         let mut r = Reader::new(values);
         Parameters {
-            group_owner: support::element_owner_of_value(&r.next()),
+            group_owner: support::ELEMENT_OWNER.of(&r.next()),
             group: r.text(),
             collision_group: r.text(),
-            method: METHOD[r.choice(&METHOD_LABELS)],
-            direction: DIRECTION[r.choice(&DIRECTION_LABELS)],
+            method: r.choice(&METHOD),
+            direction: r.choice(&DIRECTION),
             direction_vector: [r.float(), r.float(), r.float()],
             direction_attribute: r.text(),
-            direction_mode: DIRECTION_MODE[r.choice(&DIRECTION_MODE_LABELS)],
-            surface_hit: SURFACE[r.choice(&SURFACE_LABELS)],
+            direction_mode: r.choice(&DIRECTION_MODE),
+            surface_hit: r.choice(&SURFACE),
             samples: r.int(),
             jitter_scale: r.float(),
             seed: r.int(),
-            combine: COMBINE[r.choice(&COMBINE_LABELS)],
+            combine: r.choice(&COMBINE),
             min_distance: r.float(),
             limit_max_distance: r.bool(),
             max_distance: r.float(),
@@ -944,8 +955,8 @@ pub mod ray {
             owner_spec(""),
             txt("group", "Group", "", ""),
             txt("collision_group", "Collision primitive group", "", ""),
-            pick("method_", "Method", "", support::choice_kind(&METHOD_LABELS), support::choice_value(&METHOD_LABELS, 1)),
-            pick("direction", "Direction", "Ray", support::choice_kind(&DIRECTION_LABELS), support::choice_value(&DIRECTION_LABELS, 1)),
+            pick("method_", "Method", "", METHOD.kind(), METHOD.at(1)),
+            pick("direction", "Direction", "Ray", DIRECTION.kind(), DIRECTION.at(1)),
         ];
         specs.extend(xyz_specs(
             ["direction_x", "direction_y", "direction_z"],
@@ -961,14 +972,14 @@ pub mod ray {
                 "direction_mode",
                 "Direction mode",
                 "Ray",
-                support::choice_kind(&DIRECTION_MODE_LABELS),
-                support::choice_value(&DIRECTION_MODE_LABELS, 0),
+                DIRECTION_MODE.kind(),
+                DIRECTION_MODE.at(0),
             ),
-            pick("surface_hit", "Surface hit", "Ray", support::choice_kind(&SURFACE_LABELS), support::choice_value(&SURFACE_LABELS, 0)),
+            pick("surface_hit", "Surface hit", "Ray", SURFACE.kind(), SURFACE.at(0)),
             int("samples", "Samples", "Jitter", 1, 1024, Some(1), 1),
             fl_hard("jitter_scale", "Jitter scale", "Jitter", 0.0, 10.0, 0.0, 1.0),
             int("seed", "Seed", "Jitter", 0, 999999, None, 0),
-            pick("combine", "Combine", "Jitter", support::choice_kind(&COMBINE_LABELS), support::choice_value(&COMBINE_LABELS, 0)),
+            pick("combine", "Combine", "Jitter", COMBINE.kind(), COMBINE.at(0)),
             fl_hard("min_distance", "Minimum distance", "Distance", 0.0, 1000.0, 0.0, 0.0),
             tog("limit_max_distance", "Limit maximum distance", "Distance", false),
             fl_hard("max_distance", "Maximum distance", "Distance", 0.0, 1000.0, 0.0, 10.0),

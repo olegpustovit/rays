@@ -1,8 +1,7 @@
 //! Port of lib/sop/support.ml: helpers shared by the node declarations and the hand-written SOPs.
 //!
-//! Choice parameters: every OCaml `Param.choice ~equal [ (label, v); ... ]` becomes a label table
-//! `FOO_LABELS`, a value table `FOO` in the same order, `foo_kind()` and the pair `foo_of_value` /
-//! `foo_value`. Enums with a table are `Copy` with discriminants equal to table positions.
+//! Choice parameters: every OCaml `Param.choice ~equal [ (label, v); ... ]` is one `Choice` table of
+//! `(label, value)` rows. The row order is the user-visible choice order.
 use param::{Kind, Value};
 use rays_diagnostic::Diagnostic;
 use rdk::{attribute, geometry, group, group_ops};
@@ -16,24 +15,33 @@ pub fn ocaml_trim(text: &str) -> &str {
     text.trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\r' | '\x0c'))
 }
 
-fn labels(table: &[&str]) -> Vec<String> {
-    table.iter().map(|label| (*label).to_owned()).collect()
-}
+/// A choice parameter: the labels the user sees, each with the value it selects, in declaration order.
+pub struct Choice<T: 'static>(pub &'static [(&'static str, T)]);
 
-pub fn choice_kind(table: &[&str]) -> Kind {
-    param::choice(labels(table)).expect("choice table labels are distinct")
-}
-
-/// Position of a `Value::Choice` label in its table. The schema validated the value already.
-pub fn choice_index(table: &[&str], value: &Value) -> usize {
-    match value {
-        Value::Choice(label) => table.iter().position(|item| item == label).expect("choice label in table"),
-        _ => unreachable!("choice parameter received a non-choice value"),
+impl<T: Clone> Choice<T> {
+    pub fn kind(&self) -> Kind {
+        param::choice(self.0.iter().map(|(label, _)| (*label).to_owned()).collect()).expect("choice table labels are distinct")
     }
-}
 
-pub fn choice_value(table: &[&str], index: usize) -> Value {
-    Value::Choice(table[index].to_owned())
+    /// The selected row's value. The schema validated the choice already.
+    pub fn of(&self, value: &Value) -> T {
+        match value {
+            Value::Choice(label) => self.0.iter().find(|(item, _)| item == label).expect("choice label in table").1.clone(),
+            _ => unreachable!("choice parameter received a non-choice value"),
+        }
+    }
+
+    /// The choice value at table position `index` (the declared defaults).
+    pub fn at(&self, index: usize) -> Value {
+        Value::Choice(self.0[index].0.to_owned())
+    }
+
+    pub fn value(&self, item: &T) -> Value
+    where
+        T: PartialEq,
+    {
+        Value::Choice(self.0.iter().find(|(_, value)| value == item).expect("value in choice table").0.to_owned())
+    }
 }
 
 // ---------------------------------------------------------------- diagnostics and results
@@ -137,12 +145,11 @@ pub enum CleanOverlap {
     DeletePairs,
     Auto,
 }
+/// A named group of one element kind, as picked by a node's `group_owner` / `group` parameters.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ElementGroup {
-    Point(String),
-    Vertex(String),
-    Primitive(String),
-    Edge(String),
+pub struct ElementGroup {
+    pub owner: GroupOpsOwner,
+    pub name: String,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MirrorMethod {
@@ -222,101 +229,55 @@ pub enum KernelMode {
     Explicit,
     Auto,
 }
-pub const KERNEL_MODE_LABELS: [&str; 2] = ["Explicit", "Auto"];
-pub const KERNEL_MODE: [KernelMode; 2] = [KernelMode::Explicit, KernelMode::Auto];
-pub fn kernel_mode_kind() -> Kind {
-    choice_kind(&KERNEL_MODE_LABELS)
-}
-pub fn kernel_mode_of_value(value: &Value) -> KernelMode {
-    KERNEL_MODE[choice_index(&KERNEL_MODE_LABELS, value)]
-}
-pub fn kernel_mode_value(mode: KernelMode) -> Value {
-    choice_value(&KERNEL_MODE_LABELS, mode as usize)
-}
+pub const KERNEL_MODE: Choice<KernelMode> = Choice(&[("Explicit", KernelMode::Explicit), ("Auto", KernelMode::Auto)]);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DistanceRadiusMode {
     Fixed,
     Maximum,
 }
-pub const DISTANCE_RADIUS_LABELS: [&str; 2] = ["Fixed", "Maximum distance"];
-pub const DISTANCE_RADIUS: [DistanceRadiusMode; 2] = [DistanceRadiusMode::Fixed, DistanceRadiusMode::Maximum];
-pub fn distance_radius_kind() -> Kind {
-    choice_kind(&DISTANCE_RADIUS_LABELS)
-}
-pub fn distance_radius_of_value(value: &Value) -> DistanceRadiusMode {
-    DISTANCE_RADIUS[choice_index(&DISTANCE_RADIUS_LABELS, value)]
-}
-pub fn distance_radius_value(mode: DistanceRadiusMode) -> Value {
-    choice_value(&DISTANCE_RADIUS_LABELS, mode as usize)
-}
+pub const DISTANCE_RADIUS: Choice<DistanceRadiusMode> =
+    Choice(&[("Fixed", DistanceRadiusMode::Fixed), ("Maximum distance", DistanceRadiusMode::Maximum)]);
 
 use group_ops::{CopyConflict, Owner as GroupOpsOwner};
 
-pub const ELEMENT_OWNER_LABELS: [&str; 4] = ["Point", "Vertex", "Primitive", "Edge"];
-pub const GROUP_OWNER_LABELS: [&str; 4] = ["Points", "Vertices", "Primitives", "Edges"];
-pub const GROUP_OWNERS: [GroupOpsOwner; 4] =
-    [GroupOpsOwner::GroupPoints, GroupOpsOwner::GroupVertices, GroupOpsOwner::GroupPrimitives, GroupOpsOwner::GroupEdges];
-pub fn element_owner_kind() -> Kind {
-    choice_kind(&ELEMENT_OWNER_LABELS)
-}
-pub fn element_owner_of_value(value: &Value) -> GroupOpsOwner {
-    GROUP_OWNERS[choice_index(&ELEMENT_OWNER_LABELS, value)]
-}
-pub fn element_owner_value(owner: GroupOpsOwner) -> Value {
-    choice_value(&ELEMENT_OWNER_LABELS, group_owner_position(owner))
-}
-pub fn group_owner_of_value(value: &Value) -> GroupOpsOwner {
-    GROUP_OWNERS[choice_index(&GROUP_OWNER_LABELS, value)]
-}
-pub fn group_owner_value(owner: GroupOpsOwner) -> Value {
-    choice_value(&GROUP_OWNER_LABELS, group_owner_position(owner))
-}
-fn group_owner_position(owner: GroupOpsOwner) -> usize {
-    GROUP_OWNERS.iter().position(|item| *item == owner).unwrap()
-}
+/// Element selections name their owner singular (`ELEMENT_OWNER`), group-transfer rules plural.
+pub const ELEMENT_OWNER: Choice<GroupOpsOwner> = Choice(&[
+    ("Point", GroupOpsOwner::GroupPoints),
+    ("Vertex", GroupOpsOwner::GroupVertices),
+    ("Primitive", GroupOpsOwner::GroupPrimitives),
+    ("Edge", GroupOpsOwner::GroupEdges),
+]);
+pub const GROUP_OWNER: Choice<GroupOpsOwner> = Choice(&[
+    ("Points", GroupOpsOwner::GroupPoints),
+    ("Vertices", GroupOpsOwner::GroupVertices),
+    ("Primitives", GroupOpsOwner::GroupPrimitives),
+    ("Edges", GroupOpsOwner::GroupEdges),
+]);
 
-pub const GROUP_COPY_CONFLICT_LABELS: [&str; 3] = ["Skip", "Overwrite", "Add suffix"];
-pub const GROUP_COPY_CONFLICT: [CopyConflict; 3] =
-    [CopyConflict::CopySkip, CopyConflict::CopyOverwrite, CopyConflict::CopyAddSuffix];
-pub fn group_copy_conflict_kind() -> Kind {
-    choice_kind(&GROUP_COPY_CONFLICT_LABELS)
-}
-pub fn group_copy_conflict_of_value(value: &Value) -> CopyConflict {
-    GROUP_COPY_CONFLICT[choice_index(&GROUP_COPY_CONFLICT_LABELS, value)]
-}
-pub fn group_copy_conflict_value(conflict: CopyConflict) -> Value {
-    choice_value(&GROUP_COPY_CONFLICT_LABELS, GROUP_COPY_CONFLICT.iter().position(|item| *item == conflict).unwrap())
-}
+pub const GROUP_COPY_CONFLICT: Choice<CopyConflict> = Choice(&[
+    ("Skip", CopyConflict::CopySkip),
+    ("Overwrite", CopyConflict::CopyOverwrite),
+    ("Add suffix", CopyConflict::CopyAddSuffix),
+]);
 
-pub const ATTRIBUTE_OWNER_LABELS: [&str; 4] = ["Point", "Vertex", "Primitive", "Detail"];
-pub const ATTRIBUTE_OWNERS: [attribute::Owner; 4] =
-    [attribute::Owner::Point, attribute::Owner::Vertex, attribute::Owner::Primitive, attribute::Owner::Detail];
-pub fn attribute_owner_kind() -> Kind {
-    choice_kind(&ATTRIBUTE_OWNER_LABELS)
-}
-pub fn attribute_owner_of_value(value: &Value) -> attribute::Owner {
-    ATTRIBUTE_OWNERS[choice_index(&ATTRIBUTE_OWNER_LABELS, value)]
-}
-pub fn attribute_owner_value(owner: attribute::Owner) -> Value {
-    choice_value(&ATTRIBUTE_OWNER_LABELS, owner as usize)
-}
-/// Point, Vertex, Primitive only (the first three of `ATTRIBUTE_OWNER_LABELS`).
-pub const ELEMENT_ATTRIBUTE_OWNER_LABELS: [&str; 3] = ["Point", "Vertex", "Primitive"];
-pub fn element_attribute_owner_kind() -> Kind {
-    choice_kind(&ELEMENT_ATTRIBUTE_OWNER_LABELS)
-}
-pub fn element_attribute_owner_of_value(value: &Value) -> attribute::Owner {
-    ATTRIBUTE_OWNERS[choice_index(&ELEMENT_ATTRIBUTE_OWNER_LABELS, value)]
-}
-pub const SOFT_FALLOFF_LABELS: [&str; 3] = ["Linear", "Quadratic", "Cubic"];
-pub fn soft_falloff_kind() -> Kind {
-    choice_kind(&SOFT_FALLOFF_LABELS)
-}
-pub fn soft_falloff_of_value(value: &Value) -> rdk::transform_ops::SoftTransformFalloff {
-    use rdk::transform_ops::SoftTransformFalloff::*;
-    [SoftLinear, SoftQuadratic, SoftCubic][choice_index(&SOFT_FALLOFF_LABELS, value)]
-}
+pub const ATTRIBUTE_OWNER: Choice<attribute::Owner> = Choice(&[
+    ("Point", attribute::Owner::Point),
+    ("Vertex", attribute::Owner::Vertex),
+    ("Primitive", attribute::Owner::Primitive),
+    ("Detail", attribute::Owner::Detail),
+]);
+/// Point, Vertex, Primitive only (the first three of `ATTRIBUTE_OWNER`).
+pub const ELEMENT_ATTRIBUTE_OWNER: Choice<attribute::Owner> = Choice(&[
+    ("Point", attribute::Owner::Point),
+    ("Vertex", attribute::Owner::Vertex),
+    ("Primitive", attribute::Owner::Primitive),
+]);
+pub const SOFT_FALLOFF: Choice<rdk::transform_ops::SoftTransformFalloff> = Choice(&[
+    ("Linear", rdk::transform_ops::SoftTransformFalloff::SoftLinear),
+    ("Quadratic", rdk::transform_ops::SoftTransformFalloff::SoftQuadratic),
+    ("Cubic", rdk::transform_ops::SoftTransformFalloff::SoftCubic),
+]);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FacetConsolidation {
@@ -324,15 +285,11 @@ pub enum FacetConsolidation {
     Points,
     Normals,
 }
-pub const FACET_CONSOLIDATION_LABELS: [&str; 3] = ["None", "Points", "Normals"];
-pub const FACET_CONSOLIDATION: [FacetConsolidation; 3] =
-    [FacetConsolidation::None, FacetConsolidation::Points, FacetConsolidation::Normals];
-pub fn facet_consolidation_kind() -> Kind {
-    choice_kind(&FACET_CONSOLIDATION_LABELS)
-}
-pub fn facet_consolidation_of_value(value: &Value) -> FacetConsolidation {
-    FACET_CONSOLIDATION[choice_index(&FACET_CONSOLIDATION_LABELS, value)]
-}
+pub const FACET_CONSOLIDATION: Choice<FacetConsolidation> = Choice(&[
+    ("None", FacetConsolidation::None),
+    ("Points", FacetConsolidation::Points),
+    ("Normals", FacetConsolidation::Normals),
+]);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TransferMode {
@@ -342,16 +299,13 @@ pub enum TransferMode {
     Renderman,
     Hart,
 }
-pub const TRANSFER_MODE_LABELS: [&str; 5] =
-    ["Nearest", "Inverse distance", "Links kernel", "RenderMan kernel", "Hart kernel"];
-pub const TRANSFER_MODE: [TransferMode; 5] =
-    [TransferMode::Nearest, TransferMode::Inverse, TransferMode::Links, TransferMode::Renderman, TransferMode::Hart];
-pub fn transfer_mode_kind() -> Kind {
-    choice_kind(&TRANSFER_MODE_LABELS)
-}
-pub fn transfer_mode_of_value(value: &Value) -> TransferMode {
-    TRANSFER_MODE[choice_index(&TRANSFER_MODE_LABELS, value)]
-}
+pub const TRANSFER_MODE: Choice<TransferMode> = Choice(&[
+    ("Nearest", TransferMode::Nearest),
+    ("Inverse distance", TransferMode::Inverse),
+    ("Links kernel", TransferMode::Links),
+    ("RenderMan kernel", TransferMode::Renderman),
+    ("Hart kernel", TransferMode::Hart),
+]);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TransferFalloff {
@@ -359,26 +313,16 @@ pub enum TransferFalloff {
     Smoothstep,
     Uniform,
 }
-pub const TRANSFER_FALLOFF_LABELS: [&str; 3] = ["Linear", "Smoothstep", "Uniform"];
-pub const TRANSFER_FALLOFF: [TransferFalloff; 3] =
-    [TransferFalloff::Linear, TransferFalloff::Smoothstep, TransferFalloff::Uniform];
-pub fn transfer_falloff_kind() -> Kind {
-    choice_kind(&TRANSFER_FALLOFF_LABELS)
-}
-pub fn transfer_falloff_of_value(value: &Value) -> TransferFalloff {
-    TRANSFER_FALLOFF[choice_index(&TRANSFER_FALLOFF_LABELS, value)]
-}
+pub const TRANSFER_FALLOFF: Choice<TransferFalloff> = Choice(&[
+    ("Linear", TransferFalloff::Linear),
+    ("Smoothstep", TransferFalloff::Smoothstep),
+    ("Uniform", TransferFalloff::Uniform),
+]);
 
-pub const TRANSFER_UNMATCHED_LABELS: [&str; 2] = ["Keep target", "Default value"];
-pub fn transfer_unmatched_kind() -> Kind {
-    choice_kind(&TRANSFER_UNMATCHED_LABELS)
-}
-pub fn transfer_unmatched_of_value(value: &Value) -> rdk::attribute_transfer::Unmatched {
-    match choice_index(&TRANSFER_UNMATCHED_LABELS, value) {
-        0 => rdk::attribute_transfer::Unmatched::KeepTarget,
-        _ => rdk::attribute_transfer::Unmatched::DefaultValue,
-    }
-}
+pub const TRANSFER_UNMATCHED: Choice<rdk::attribute_transfer::Unmatched> = Choice(&[
+    ("Keep target", rdk::attribute_transfer::Unmatched::KeepTarget),
+    ("Default value", rdk::attribute_transfer::Unmatched::DefaultValue),
+]);
 
 /// `Support.transfer_mode mode neighbors power radius` (the function, not the type).
 pub fn transfer_mode_of(mode: TransferMode, neighbors: i64, power: f64, radius: f64) -> rdk::attribute_transfer::Mode {
@@ -403,33 +347,38 @@ pub fn transfer_falloff_of(falloff: TransferFalloff, bias: f64) -> rdk::attribut
 
 // ---------------------------------------------------------------- tokens
 
+/// `(singular, plural, owner)`: the spellings an encoded table accepts; the singular is what it writes.
+pub(crate) const GROUP_OWNER_TOKENS: [(&str, &str, GroupOpsOwner); 4] = [
+    ("point", "points", GroupOpsOwner::GroupPoints),
+    ("vertex", "vertices", GroupOpsOwner::GroupVertices),
+    ("primitive", "primitives", GroupOpsOwner::GroupPrimitives),
+    ("edge", "edges", GroupOpsOwner::GroupEdges),
+];
+const ATTRIBUTE_OWNER_TOKENS: [(&str, &str, attribute::Owner); 4] = [
+    ("point", "points", attribute::Owner::Point),
+    ("vertex", "vertices", attribute::Owner::Vertex),
+    ("primitive", "primitives", attribute::Owner::Primitive),
+    ("detail", "detail", attribute::Owner::Detail),
+];
+
+fn owner_of_token<T: Copy>(table: &[(&str, &str, T)], what: &str, token: &str) -> Result<T, String> {
+    table
+        .iter()
+        .find(|(one, many, _)| token == *one || token == *many)
+        .map(|row| row.2)
+        .ok_or_else(|| format!("unknown {what} owner {}", crate::node::ocaml_quote(token)))
+}
+
 fn attribute_owner_of_token(token: &str) -> Result<attribute::Owner, String> {
-    match token {
-        "point" | "points" => Ok(attribute::Owner::Point),
-        "vertex" | "vertices" => Ok(attribute::Owner::Vertex),
-        "primitive" | "primitives" => Ok(attribute::Owner::Primitive),
-        "detail" => Ok(attribute::Owner::Detail),
-        token => Err(format!("unknown attribute owner {}", crate::node::ocaml_quote(token))),
-    }
+    owner_of_token(&ATTRIBUTE_OWNER_TOKENS, "attribute", token)
 }
 
 pub fn group_owner_token(owner: GroupOpsOwner) -> &'static str {
-    match owner {
-        GroupOpsOwner::GroupPoints => "point",
-        GroupOpsOwner::GroupVertices => "vertex",
-        GroupOpsOwner::GroupPrimitives => "primitive",
-        GroupOpsOwner::GroupEdges => "edge",
-    }
+    GROUP_OWNER_TOKENS.iter().find(|row| row.2 == owner).expect("every group owner has a token").0
 }
 
 pub fn group_owner_of_token(token: &str) -> Result<GroupOpsOwner, String> {
-    match token {
-        "point" | "points" => Ok(GroupOpsOwner::GroupPoints),
-        "vertex" | "vertices" => Ok(GroupOpsOwner::GroupVertices),
-        "primitive" | "primitives" => Ok(GroupOpsOwner::GroupPrimitives),
-        "edge" | "edges" => Ok(GroupOpsOwner::GroupEdges),
-        token => Err(format!("unknown group owner {}", crate::node::ocaml_quote(token))),
-    }
+    owner_of_token(&GROUP_OWNER_TOKENS, "group", token)
 }
 
 // ---------------------------------------------------------------- encoded table parameters
@@ -574,12 +523,7 @@ pub fn decode_surface_attributes(text: &[u8]) -> Result<Vec<rdk::attribute_trans
 // ---------------------------------------------------------------- groups and attributes
 
 pub fn optional_element_group(owner: GroupOpsOwner, name: &str) -> Option<ElementGroup> {
-    optional_text(name).map(|name| match owner {
-        GroupOpsOwner::GroupPoints => ElementGroup::Point(name),
-        GroupOpsOwner::GroupVertices => ElementGroup::Vertex(name),
-        GroupOpsOwner::GroupPrimitives => ElementGroup::Primitive(name),
-        GroupOpsOwner::GroupEdges => ElementGroup::Edge(name),
-    })
+    optional_text(name).map(|name| ElementGroup { owner, name })
 }
 
 fn group_missing(operation: &str, what: &str, name: &str) -> Diagnostic {
@@ -592,22 +536,14 @@ pub fn resolve_element_group(
     geometry_value: &geometry::T,
 ) -> Result<Option<rdk::element_selection::T>, Diagnostic> {
     use rdk::element_selection::T as Selected;
-    let Some(selection) = selection else { return Ok(None) };
-    let found = match selection {
-        ElementGroup::Point(name) => geometry::find_group(group::Owner::Point, name, geometry_value)
-            .map(Selected::SelectedPoints)
-            .ok_or_else(|| group_missing(operation, "point", name)),
-        ElementGroup::Vertex(name) => geometry::find_group(group::Owner::Vertex, name, geometry_value)
-            .map(Selected::SelectedVertices)
-            .ok_or_else(|| group_missing(operation, "vertex", name)),
-        ElementGroup::Primitive(name) => geometry::find_group(group::Owner::Primitive, name, geometry_value)
-            .map(Selected::SelectedPrimitives)
-            .ok_or_else(|| group_missing(operation, "primitive", name)),
-        ElementGroup::Edge(name) => geometry::find_edge_group(name, geometry_value)
-            .map(Selected::SelectedEdges)
-            .ok_or_else(|| group_missing(operation, "edge", name)),
+    let Some(ElementGroup { owner, name }) = selection else { return Ok(None) };
+    let (what, found) = match owner {
+        GroupOpsOwner::GroupPoints => ("point", geometry::find_group(group::Owner::Point, name, geometry_value).map(Selected::SelectedPoints)),
+        GroupOpsOwner::GroupVertices => ("vertex", geometry::find_group(group::Owner::Vertex, name, geometry_value).map(Selected::SelectedVertices)),
+        GroupOpsOwner::GroupPrimitives => ("primitive", geometry::find_group(group::Owner::Primitive, name, geometry_value).map(Selected::SelectedPrimitives)),
+        GroupOpsOwner::GroupEdges => ("edge", geometry::find_edge_group(name, geometry_value).map(Selected::SelectedEdges)),
     };
-    found.map(Some)
+    found.map(Some).ok_or_else(|| group_missing(operation, what, name))
 }
 
 pub fn resolve_optional_primitive_group(

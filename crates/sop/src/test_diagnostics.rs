@@ -8,12 +8,8 @@ use crate::test_support::fixture;
 #[test]
 fn missing_groups_have_the_missing_group_code() {
     let g = fixture();
-    for selection in [
-        ElementGroup::Point("missing".into()),
-        ElementGroup::Vertex("missing".into()),
-        ElementGroup::Primitive("missing".into()),
-        ElementGroup::Edge("missing".into()),
-    ] {
+    for (_, _, owner) in support::GROUP_OWNER_TOKENS {
+        let selection = ElementGroup { owner, name: "missing".into() };
         match support::resolve_element_group("op", &Some(selection), &g) {
             Err(d) => assert_eq!(d.code, "missing_group"),
             Ok(_) => panic!("a missing group resolved"),

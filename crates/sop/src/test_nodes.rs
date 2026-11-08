@@ -68,7 +68,7 @@ fn group_transfer_declares_its_schema_and_cooks() {
     let values = groups::group_transfer::to_values(&groups::group_transfer::from_values(&[
         Value::Bool(true),
         Value::Text(groups::group_transfer::encode(&groups::default_transfer_rules())),
-        crate::support::group_copy_conflict_value(rdk::group_ops::CopyConflict::CopySkip),
+        crate::support::GROUP_COPY_CONFLICT.value(&rdk::group_ops::CopyConflict::CopySkip),
         Value::Bool(false),
         Value::Float(0.5),
     ]));
@@ -98,16 +98,17 @@ fn registry_lists_the_ported_factories_in_order() {
 }
 
 #[test]
-fn choice_tables_follow_their_enum_discriminants() {
+fn choice_tables_round_trip_their_values() {
     use crate::support::*;
-    for (i, mode) in KERNEL_MODE.iter().enumerate() {
-        assert_eq!(*mode as usize, i);
+    for (_, mode) in KERNEL_MODE.0 {
+        assert_eq!(KERNEL_MODE.of(&KERNEL_MODE.value(mode)), *mode);
     }
-    for owner in GROUP_OWNERS {
-        assert_eq!(group_owner_of_value(&group_owner_value(owner)), owner);
+    for (_, owner) in GROUP_OWNER.0 {
+        assert_eq!(GROUP_OWNER.of(&GROUP_OWNER.value(owner)), *owner);
+        assert_eq!(group_owner_of_token(group_owner_token(*owner)), Ok(*owner));
     }
-    for (i, owner) in ATTRIBUTE_OWNERS.iter().enumerate() {
-        assert_eq!(*owner as usize, i);
+    for (_, owner) in ATTRIBUTE_OWNER.0 {
+        assert_eq!(ATTRIBUTE_OWNER.of(&ATTRIBUTE_OWNER.value(owner)), *owner);
     }
     assert_eq!(int_of_string_opt("0x1F"), Some(31));
     assert_eq!(int_of_string_opt("1_000"), Some(1000));

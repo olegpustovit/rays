@@ -10,7 +10,7 @@ use crate::context;
 use crate::decl::{self, Decl, Meta, Spec};
 use crate::edit_graph::Factory;
 use crate::node::{self, build, CookMode, GeometryCooked};
-use crate::support;
+use crate::support::{self, Choice};
 
 // ---------------------------------------------------------------- shared helpers
 
@@ -165,49 +165,23 @@ fn choice(name: &'static str, label: &'static str, folder: &'static str, kind: K
 
 use rdk::fuse_reduce::Position;
 
-const POSITION_LABELS: [&str; 15] = [
-    "First",
-    "Least point",
-    "Greatest point",
-    "Average",
-    "Minimum",
-    "Maximum",
-    "Mode",
-    "Median",
-    "Sum",
-    "Sum squares",
-    "Root mean square",
-    "Weighted average",
-    "Weighted sum",
-    "Minimum weight",
-    "Maximum weight",
-];
-const POSITION: [Position; 15] = [
-    Position::First,
-    Position::LeastPoint,
-    Position::GreatestPoint,
-    Position::Average,
-    Position::Minimum,
-    Position::Maximum,
-    Position::Mode,
-    Position::Median,
-    Position::Sum,
-    Position::SumSquares,
-    Position::RootMeanSquare,
-    Position::WeightedAverage,
-    Position::WeightedSum,
-    Position::MinimumWeight,
-    Position::MaximumWeight,
-];
-const POSITION_AVERAGE: usize = 3;
-
-fn position_kind() -> Kind {
-    support::choice_kind(&POSITION_LABELS)
-}
-
-fn position_of_value(value: &Value) -> Position {
-    POSITION[support::choice_index(&POSITION_LABELS, value)].clone()
-}
+const POSITION: Choice<Position> = Choice(&[
+    ("First", Position::First),
+    ("Least point", Position::LeastPoint),
+    ("Greatest point", Position::GreatestPoint),
+    ("Average", Position::Average),
+    ("Minimum", Position::Minimum),
+    ("Maximum", Position::Maximum),
+    ("Mode", Position::Mode),
+    ("Median", Position::Median),
+    ("Sum", Position::Sum),
+    ("Sum squares", Position::SumSquares),
+    ("Root mean square", Position::RootMeanSquare),
+    ("Weighted average", Position::WeightedAverage),
+    ("Weighted sum", Position::WeightedSum),
+    ("Minimum weight", Position::MinimumWeight),
+    ("Maximum weight", Position::MaximumWeight),
+]);
 
 // ---------------------------------------------------------------- Edge_collapse
 
@@ -227,7 +201,7 @@ pub mod edge_collapse {
         Parameters {
             group: vs(values, 0),
             connectivity_attribute: vs(values, 1),
-            position: position_of_value(&values[2]),
+            position: POSITION.of(&values[2]),
             remove_degenerate_primitives: vb(values, 3),
             recompute_point_normals: vb(values, 4),
         }
@@ -245,7 +219,7 @@ pub mod edge_collapse {
         vec![
             text("group", "Edge group", "", ""),
             text("connectivity_attribute", "Connectivity attribute", "", ""),
-            choice("position", "Position", "", position_kind(), support::choice_value(&POSITION_LABELS, POSITION_AVERAGE)),
+            choice("position", "Position", "", POSITION.kind(), POSITION.value(&Position::Average)),
             toggle("remove_degenerate_primitives", "Remove degenerate primitives", "Cleanup", true),
             toggle("recompute_point_normals", "Recompute point normals", "Cleanup", true),
         ]
@@ -295,11 +269,15 @@ pub mod dissolve {
     use super::*;
     use rdk::dissolve::{BridgePolicy, Operation};
 
-    const OPERATION_LABELS: [&str; 2] = ["Selected", "Non-selected"];
-    const OPERATION: [Operation; 2] = [Operation::DissolveSelected, Operation::DissolveNonSelected];
-    const BRIDGE_LABELS: [&str; 3] = ["Create bridged polygons", "Create disjoint polygons", "Delete bridge polygons"];
-    const BRIDGE: [BridgePolicy; 3] =
-        [BridgePolicy::CreateBridgedPolygons, BridgePolicy::CreateDisjointPolygons, BridgePolicy::DeleteBridgePolygons];
+    const OPERATION: Choice<Operation> = Choice(&[
+        ("Selected", Operation::DissolveSelected),
+        ("Non-selected", Operation::DissolveNonSelected),
+    ]);
+    const BRIDGE: Choice<BridgePolicy> = Choice(&[
+        ("Create bridged polygons", BridgePolicy::CreateBridgedPolygons),
+        ("Create disjoint polygons", BridgePolicy::CreateDisjointPolygons),
+        ("Delete bridge polygons", BridgePolicy::DeleteBridgePolygons),
+    ]);
 
     #[derive(Clone, Debug)]
     pub struct Parameters {
@@ -316,8 +294,8 @@ pub mod dissolve {
     pub fn from_values(values: &[Value]) -> Parameters {
         Parameters {
             group: vs(values, 0),
-            operation: OPERATION[support::choice_index(&OPERATION_LABELS, &values[1])].clone(),
-            bridge_policy: BRIDGE[support::choice_index(&BRIDGE_LABELS, &values[2])].clone(),
+            operation: OPERATION.of(&values[1]),
+            bridge_policy: BRIDGE.of(&values[2]),
             remove_inline_points: vb(values, 3),
             collinearity_tolerance: vf(values, 4),
             remove_unused_points: vb(values, 5),
@@ -331,8 +309,8 @@ pub mod dissolve {
     pub fn specs() -> Vec<Spec> {
         vec![
             text("group", "Edge group", "", ""),
-            choice("operation", "Operation", "", support::choice_kind(&OPERATION_LABELS), support::choice_value(&OPERATION_LABELS, 0)),
-            choice("bridge_policy", "Bridge loops", "", support::choice_kind(&BRIDGE_LABELS), support::choice_value(&BRIDGE_LABELS, 0)),
+            choice("operation", "Operation", "", OPERATION.kind(), OPERATION.at(0)),
+            choice("bridge_policy", "Bridge loops", "", BRIDGE.kind(), BRIDGE.at(0)),
             toggle("remove_inline_points", "Remove inline points", "Cleanup", true),
             float("collinearity_tolerance", "Collinearity tolerance", "Cleanup", 1e-6, (0., 0.1), (Some(0.), None)),
             toggle("remove_unused_points", "Remove unused points", "Cleanup", true),
@@ -425,8 +403,10 @@ pub mod poly_extrude {
     use super::*;
     use rdk::poly_extrude::Divide;
 
-    const DIVIDE_LABELS: [&str; 2] = ["Individual elements", "Connected components"];
-    const DIVIDE: [Divide; 2] = [Divide::ExtrudeIndividual, Divide::ExtrudeConnectedComponents];
+    const DIVIDE: Choice<Divide> = Choice(&[
+        ("Individual elements", Divide::ExtrudeIndividual),
+        ("Connected components", Divide::ExtrudeConnectedComponents),
+    ]);
 
     #[derive(Clone, Debug)]
     pub struct Parameters {
@@ -450,7 +430,7 @@ pub mod poly_extrude {
             group: vs(values, 0),
             split_edges: vs(values, 1),
             distance: vf(values, 2),
-            divide: DIVIDE[support::choice_index(&DIVIDE_LABELS, &values[3])].clone(),
+            divide: DIVIDE.of(&values[3]),
             divisions: vi(values, 4),
             output_front: vb(values, 5),
             output_back: vb(values, 6),
@@ -476,7 +456,7 @@ pub mod poly_extrude {
             text("group", "Primitive group", "", ""),
             text("split_edges", "Split edge group", "", ""),
             float("distance", "Distance", "", 0.1, (-10., 10.), (None, None)),
-            choice("divide", "Divide into", "", support::choice_kind(&DIVIDE_LABELS), support::choice_value(&DIVIDE_LABELS, 0)),
+            choice("divide", "Divide into", "", DIVIDE.kind(), DIVIDE.at(0)),
             int("divisions", "Divisions", "", 1, (1, 64), Some(1)),
             toggle("output_front", "Output front", "Output", true),
             toggle("output_back", "Output back", "Output", true),
@@ -550,8 +530,11 @@ pub mod poly_fill {
     use super::*;
     use rdk::poly_fill::Mode;
 
-    const MODE_LABELS: [&str; 3] = ["Single polygon", "Triangles", "Triangle fan"];
-    const MODE: [Mode; 3] = [Mode::FillSinglePolygon, Mode::FillTriangles, Mode::FillTriangleFan];
+    const MODE: Choice<Mode> = Choice(&[
+        ("Single polygon", Mode::FillSinglePolygon),
+        ("Triangles", Mode::FillTriangles),
+        ("Triangle fan", Mode::FillTriangleFan),
+    ]);
 
     #[derive(Clone, Debug)]
     pub struct Parameters {
@@ -566,7 +549,7 @@ pub mod poly_fill {
     pub fn from_values(values: &[Value]) -> Parameters {
         Parameters {
             boundary_group: vs(values, 0),
-            mode: MODE[support::choice_index(&MODE_LABELS, &values[1])].clone(),
+            mode: MODE.of(&values[1]),
             reverse_patches: vb(values, 2),
             unique_points: vb(values, 3),
             update_point_normals: vb(values, 4),
@@ -585,7 +568,7 @@ pub mod poly_fill {
     pub fn specs() -> Vec<Spec> {
         vec![
             text("boundary_group", "Boundary group", "", ""),
-            choice("mode", "Fill mode", "", support::choice_kind(&MODE_LABELS), support::choice_value(&MODE_LABELS, 1)),
+            choice("mode", "Fill mode", "", MODE.kind(), MODE.at(1)),
             toggle("reverse_patches", "Reverse patches", "", false),
             toggle("unique_points", "Unique points", "", false),
             toggle("update_point_normals", "Update point normals", "", false),
@@ -785,7 +768,7 @@ pub mod convex_hull {
 
     pub fn from_values(values: &[Value]) -> Parameters {
         Parameters {
-            group_owner: support::element_owner_of_value(&values[0]),
+            group_owner: support::ELEMENT_OWNER.of(&values[0]),
             group: vs(values, 1),
             preserve_point_payload: vb(values, 2),
             source_point_attribute: vs(values, 3),
@@ -811,7 +794,7 @@ pub mod convex_hull {
 
     pub fn specs() -> Vec<Spec> {
         vec![
-            choice("group_owner", "Group type", "", support::element_owner_kind(), support::element_owner_value(Owner::GroupPoints)),
+            choice("group_owner", "Group type", "", support::ELEMENT_OWNER.kind(), support::ELEMENT_OWNER.value(&Owner::GroupPoints)),
             text("group", "Group", "", ""),
             toggle("preserve_point_payload", "Preserve point payload", "", true),
             text("source_point_attribute", "Source point attribute", "Output", "sourcepoint"),
@@ -862,8 +845,11 @@ pub mod clean {
     use super::*;
     use support::{CleanOverlap, KernelMode};
 
-    const OVERLAPS_LABELS: [&str; 3] = ["Keep first", "Delete pairs", "Auto"];
-    const OVERLAPS: [CleanOverlap; 3] = [CleanOverlap::KeepFirst, CleanOverlap::DeletePairs, CleanOverlap::Auto];
+    const OVERLAPS: Choice<CleanOverlap> = Choice(&[
+        ("Keep first", CleanOverlap::KeepFirst),
+        ("Delete pairs", CleanOverlap::DeletePairs),
+        ("Auto", CleanOverlap::Auto),
+    ]);
 
     #[derive(Clone, Debug)]
     pub struct Parameters {
@@ -889,12 +875,12 @@ pub mod clean {
 
     pub fn from_values(values: &[Value]) -> Parameters {
         Parameters {
-            epsilon_mode: support::kernel_mode_of_value(&values[0]),
+            epsilon_mode: support::KERNEL_MODE.of(&values[0]),
             epsilon: vf(values, 1),
             remove_degenerate: vb(values, 2),
-            consolidate_mode: support::kernel_mode_of_value(&values[3]),
+            consolidate_mode: support::KERNEL_MODE.of(&values[3]),
             consolidate_distance: vf(values, 4),
-            overlaps: OVERLAPS[support::choice_index(&OVERLAPS_LABELS, &values[5])].clone(),
+            overlaps: OVERLAPS.of(&values[5]),
             reverse_winding: vb(values, 6),
             remove_nan_points: vb(values, 7),
             remove_unused_points: vb(values, 8),
@@ -942,14 +928,14 @@ pub mod clean {
     };
 
     pub fn specs() -> Vec<Spec> {
-        let explicit = || support::kernel_mode_value(KernelMode::Explicit);
+        let explicit = || support::KERNEL_MODE.value(&KernelMode::Explicit);
         vec![
-            choice("epsilon_mode", "Epsilon mode", "Robustness", support::kernel_mode_kind(), explicit()),
+            choice("epsilon_mode", "Epsilon mode", "Robustness", support::KERNEL_MODE.kind(), explicit()),
             float("epsilon", "Epsilon", "Robustness", 1e-9, (0., 0.001), (Some(0.), None)),
             toggle("remove_degenerate", "Remove degenerate primitives", "", true),
-            choice("consolidate_mode", "Consolidate mode", "", support::kernel_mode_kind(), explicit()),
+            choice("consolidate_mode", "Consolidate mode", "", support::KERNEL_MODE.kind(), explicit()),
             float("consolidate_distance", "Consolidate distance", "", 0., (0., 0.1), (Some(0.), None)),
-            choice("overlaps", "Overlaps", "", support::choice_kind(&OVERLAPS_LABELS), support::choice_value(&OVERLAPS_LABELS, 0)),
+            choice("overlaps", "Overlaps", "", OVERLAPS.kind(), OVERLAPS.at(0)),
             toggle("reverse_winding", "Reverse winding", "", false),
             toggle("remove_nan_points", "Remove non-finite points", "", true),
             toggle("remove_unused_points", "Remove unused points", "", true),
@@ -1190,8 +1176,8 @@ pub mod facet {
     pub fn from_values(values: &[Value]) -> Parameters {
         Parameters {
             group: vs(values, 0),
-            group_owner: support::element_owner_of_value(&values[1]),
-            consolidation: support::facet_consolidation_of_value(&values[2]),
+            group_owner: support::ELEMENT_OWNER.of(&values[1]),
+            consolidation: support::FACET_CONSOLIDATION.of(&values[2]),
             pre_compute_normals: vb(values, 3),
             make_normals_unit_length: vb(values, 4),
             unique_points: vb(values, 5),
@@ -1200,7 +1186,7 @@ pub mod facet {
             remove_inline_points: vb(values, 8),
             inline_distance: vf(values, 9),
             orient_polygons: vb(values, 10),
-            cusp_mode: support::kernel_mode_of_value(&values[11]),
+            cusp_mode: support::KERNEL_MODE.of(&values[11]),
             cusp_angle: vf(values, 12),
             remove_degenerate: vb(values, 13),
             make_planar: vb(values, 14),
@@ -1236,13 +1222,13 @@ pub mod facet {
         let pi = std::f64::consts::PI;
         vec![
             text("group", "Primitive group", "", ""),
-            choice("group_owner", "Group owner", "", support::element_owner_kind(), support::element_owner_value(Owner::GroupPrimitives)),
+            choice("group_owner", "Group owner", "", support::ELEMENT_OWNER.kind(), support::ELEMENT_OWNER.value(&Owner::GroupPrimitives)),
             choice(
                 "consolidation",
                 "Consolidation",
                 "Consolidate",
-                support::facet_consolidation_kind(),
-                support::choice_value(&support::FACET_CONSOLIDATION_LABELS, 0),
+                support::FACET_CONSOLIDATION.kind(),
+                support::FACET_CONSOLIDATION.at(0),
             ),
             toggle("pre_compute_normals", "Pre-compute normals", "Normals", false),
             toggle("make_normals_unit_length", "Make normals unit length", "Normals", false),
@@ -1252,7 +1238,7 @@ pub mod facet {
             toggle("remove_inline_points", "Remove inline points", "", false),
             float("inline_distance", "Inline distance", "", 1e-6, (0., 0.1), (Some(0.), None)),
             toggle("orient_polygons", "Orient polygons", "", false),
-            choice("cusp_mode", "Cusp mode", "Normals", support::kernel_mode_kind(), support::kernel_mode_value(KernelMode::Explicit)),
+            choice("cusp_mode", "Cusp mode", "Normals", support::KERNEL_MODE.kind(), support::KERNEL_MODE.value(&KernelMode::Explicit)),
             float("cusp_angle", "Cusp angle", "Normals", pi, (0., pi), (Some(0.), Some(pi))),
             toggle("remove_degenerate", "Remove degenerate primitives", "", false),
             toggle("make_planar", "Make planar", "", false),
@@ -1321,12 +1307,19 @@ pub mod poly_cut {
     use rdk::poly_cut::{Detection, Element, Strategy};
     use support::PolyCutDetection;
 
-    const ELEMENT_LABELS: [&str; 2] = ["Points", "Edges"];
-    const ELEMENT: [Element; 2] = [Element::PolyCutPoints, Element::PolyCutEdges];
-    const STRATEGY_LABELS: [&str; 2] = ["Remove", "Cut"];
-    const STRATEGY: [Strategy; 2] = [Strategy::PolyCutRemove, Strategy::PolyCutCut];
-    const DETECTION_LABELS: [&str; 3] = ["All selected", "Attribute crossing", "Attribute change"];
-    const DETECTION: [PolyCutDetection; 3] = [PolyCutDetection::All, PolyCutDetection::Crossing, PolyCutDetection::Change];
+    const ELEMENT: Choice<Element> = Choice(&[
+        ("Points", Element::PolyCutPoints),
+        ("Edges", Element::PolyCutEdges),
+    ]);
+    const STRATEGY: Choice<Strategy> = Choice(&[
+        ("Remove", Strategy::PolyCutRemove),
+        ("Cut", Strategy::PolyCutCut),
+    ]);
+    const DETECTION: Choice<PolyCutDetection> = Choice(&[
+        ("All selected", PolyCutDetection::All),
+        ("Attribute crossing", PolyCutDetection::Crossing),
+        ("Attribute change", PolyCutDetection::Change),
+    ]);
 
     #[derive(Clone, Debug)]
     pub struct Parameters {
@@ -1345,9 +1338,9 @@ pub mod poly_cut {
         Parameters {
             group: vs(values, 0),
             cut_group: vs(values, 1),
-            element: ELEMENT[support::choice_index(&ELEMENT_LABELS, &values[2])].clone(),
-            strategy: STRATEGY[support::choice_index(&STRATEGY_LABELS, &values[3])].clone(),
-            detection: DETECTION[support::choice_index(&DETECTION_LABELS, &values[4])].clone(),
+            element: ELEMENT.of(&values[2]),
+            strategy: STRATEGY.of(&values[3]),
+            detection: DETECTION.of(&values[4]),
             attribute: vs(values, 5),
             value: vf(values, 6),
             threshold: vf(values, 7),
@@ -1388,9 +1381,9 @@ pub mod poly_cut {
         vec![
             text("group", "Primitive group", "", ""),
             text("cut_group", "Cut group", "", ""),
-            choice("element", "Cut elements", "", support::choice_kind(&ELEMENT_LABELS), support::choice_value(&ELEMENT_LABELS, 0)),
-            choice("strategy", "Strategy", "", support::choice_kind(&STRATEGY_LABELS), support::choice_value(&STRATEGY_LABELS, 0)),
-            choice("detection", "Detection", "Detection", support::choice_kind(&DETECTION_LABELS), support::choice_value(&DETECTION_LABELS, 0)),
+            choice("element", "Cut elements", "", ELEMENT.kind(), ELEMENT.at(0)),
+            choice("strategy", "Strategy", "", STRATEGY.kind(), STRATEGY.at(0)),
+            choice("detection", "Detection", "Detection", DETECTION.kind(), DETECTION.at(0)),
             text("attribute", "Attribute", "Detection", "cut"),
             float("value", "Crossing value", "Detection", 0.5, (-10., 10.), (None, None)),
             float("threshold", "Change threshold", "Detection", 0., (0., 10.), (Some(0.), None)),
@@ -1458,8 +1451,10 @@ pub mod poly_reduce {
     use rdk::poly_reduce::Target;
     use support::PolyReduceTarget;
 
-    const TARGET_LABELS: [&str; 2] = ["Percentage", "Primitive count"];
-    const TARGET: [PolyReduceTarget; 2] = [PolyReduceTarget::Ratio, PolyReduceTarget::PrimitiveCount];
+    const TARGET: Choice<PolyReduceTarget> = Choice(&[
+        ("Percentage", PolyReduceTarget::Ratio),
+        ("Primitive count", PolyReduceTarget::PrimitiveCount),
+    ]);
 
     #[derive(Clone, Debug)]
     pub struct Parameters {
@@ -1483,7 +1478,7 @@ pub mod poly_reduce {
             group: vs(values, 0),
             hard_point_group: vs(values, 1),
             hard_edge_group: vs(values, 2),
-            target_mode: TARGET[support::choice_index(&TARGET_LABELS, &values[3])].clone(),
+            target_mode: TARGET.of(&values[3]),
             ratio: vf(values, 4),
             primitive_count: vi(values, 5),
             preserve_boundary: vb(values, 6),
@@ -1530,7 +1525,7 @@ pub mod poly_reduce {
             text("group", "Primitive group", "", ""),
             text("hard_point_group", "Hard point group", "Constraints", ""),
             text("hard_edge_group", "Hard edge group", "Constraints", ""),
-            choice("target_mode", "Target", "", support::choice_kind(&TARGET_LABELS), support::choice_value(&TARGET_LABELS, 0)),
+            choice("target_mode", "Target", "", TARGET.kind(), TARGET.at(0)),
             float("ratio", "Percentage", "", 0.5, (0., 1.), (Some(0.), Some(1.))),
             int("primitive_count", "Primitive count", "", 100, (0, 1_000_000), Some(0)),
             toggle("preserve_boundary", "Preserve boundary", "", true),
@@ -1608,25 +1603,19 @@ use rdk::boolean_materialization::Detriangulation;
 use rdk::boolean_payload::PointConflict;
 use rdk::boolean_solid::Treatment;
 
-const TREATMENT_LABELS: [&str; 2] = ["Solid", "Surface"];
-const TREATMENT: [Treatment; 2] = [Treatment::Solid, Treatment::Surface];
-const CONFLICT_LABELS: [&str; 2] = ["Reject conflict", "Promote to vertex"];
-const CONFLICT: [PointConflict; 2] = [PointConflict::Reject, PointConflict::PromoteToVertex];
-const DETRIANGULATION_LABELS: [&str; 3] = ["Triangles", "Unchanged polygons", "All polygons"];
-const DETRIANGULATION: [Detriangulation; 3] =
-    [Detriangulation::Triangles, Detriangulation::UnchangedPolygons, Detriangulation::AllPolygons];
-
-fn treatment_kind() -> Kind {
-    support::choice_kind(&TREATMENT_LABELS)
-}
-
-fn conflict_kind() -> Kind {
-    support::choice_kind(&CONFLICT_LABELS)
-}
-
-fn detriangulation_kind() -> Kind {
-    support::choice_kind(&DETRIANGULATION_LABELS)
-}
+const TREATMENT: Choice<Treatment> = Choice(&[
+    ("Solid", Treatment::Solid),
+    ("Surface", Treatment::Surface),
+]);
+const CONFLICT: Choice<PointConflict> = Choice(&[
+    ("Reject conflict", PointConflict::Reject),
+    ("Promote to vertex", PointConflict::PromoteToVertex),
+]);
+const DETRIANGULATION: Choice<Detriangulation> = Choice(&[
+    ("Triangles", Detriangulation::Triangles),
+    ("Unchanged polygons", Detriangulation::UnchangedPolygons),
+    ("All polygons", Detriangulation::AllPolygons),
+]);
 
 // ---------------------------------------------------------------- Boolean_seam
 
@@ -1634,8 +1623,10 @@ pub mod boolean_seam {
     use super::*;
     use rdk::boolean::SeamOutput;
 
-    const OUTPUT_LABELS: [&str; 2] = ["Seam curves", "Coincident patches"];
-    const OUTPUT: [SeamOutput; 2] = [SeamOutput::SeamCurves, SeamOutput::CoincidentPatches];
+    const OUTPUT: Choice<SeamOutput> = Choice(&[
+        ("Seam curves", SeamOutput::SeamCurves),
+        ("Coincident patches", SeamOutput::CoincidentPatches),
+    ]);
 
     #[derive(Clone, Debug)]
     pub struct Parameters {
@@ -1652,9 +1643,9 @@ pub mod boolean_seam {
 
     pub fn from_values(values: &[Value]) -> Parameters {
         Parameters {
-            output: OUTPUT[support::choice_index(&OUTPUT_LABELS, &values[0])].clone(),
-            left_treatment: TREATMENT[support::choice_index(&TREATMENT_LABELS, &values[1])].clone(),
-            right_treatment: TREATMENT[support::choice_index(&TREATMENT_LABELS, &values[2])].clone(),
+            output: OUTPUT.of(&values[0]),
+            left_treatment: TREATMENT.of(&values[1]),
+            right_treatment: TREATMENT.of(&values[2]),
             resolve_left_self_intersections: vb(values, 3),
             resolve_right_self_intersections: vb(values, 4),
             left_self_group: vs(values, 5),
@@ -1689,9 +1680,9 @@ pub mod boolean_seam {
 
     pub fn specs() -> Vec<Spec> {
         vec![
-            choice("output", "Output", "", support::choice_kind(&OUTPUT_LABELS), support::choice_value(&OUTPUT_LABELS, 0)),
-            choice("left_treatment", "A treatment", "Operands", treatment_kind(), support::choice_value(&TREATMENT_LABELS, 0)),
-            choice("right_treatment", "B treatment", "Operands", treatment_kind(), support::choice_value(&TREATMENT_LABELS, 0)),
+            choice("output", "Output", "", OUTPUT.kind(), OUTPUT.at(0)),
+            choice("left_treatment", "A treatment", "Operands", TREATMENT.kind(), TREATMENT.at(0)),
+            choice("right_treatment", "B treatment", "Operands", TREATMENT.kind(), TREATMENT.at(0)),
             toggle("resolve_left_self_intersections", "Resolve A self-intersections", "Operands", false),
             toggle("resolve_right_self_intersections", "Resolve B self-intersections", "Operands", false),
             text("left_self_group", "A self group", "Groups", "boolean_left_self_seam"),
@@ -1753,8 +1744,10 @@ pub mod poly_bevel {
     use rdk::poly_bevel::Shape;
     use support::PolyBevelShape;
 
-    const SHAPE_LABELS: [&str; 2] = ["Chamfer", "Round"];
-    const SHAPE: [PolyBevelShape; 2] = [PolyBevelShape::Chamfer, PolyBevelShape::Round];
+    const SHAPE: Choice<PolyBevelShape> = Choice(&[
+        ("Chamfer", PolyBevelShape::Chamfer),
+        ("Round", PolyBevelShape::Round),
+    ]);
 
     #[derive(Clone, Debug)]
     pub struct Parameters {
@@ -1775,7 +1768,7 @@ pub mod poly_bevel {
     pub fn from_values(values: &[Value]) -> Parameters {
         Parameters {
             group: vs(values, 0),
-            shape: SHAPE[support::choice_index(&SHAPE_LABELS, &values[1])].clone(),
+            shape: SHAPE.of(&values[1]),
             convexity: vf(values, 2),
             distance: vf(values, 3),
             divisions: vi(values, 4),
@@ -1821,7 +1814,7 @@ pub mod poly_bevel {
     pub fn specs() -> Vec<Spec> {
         vec![
             text("group", "Edge group", "", ""),
-            choice("shape", "Shape", "", support::choice_kind(&SHAPE_LABELS), support::choice_value(&SHAPE_LABELS, 0)),
+            choice("shape", "Shape", "", SHAPE.kind(), SHAPE.at(0)),
             float("convexity", "Convexity", "Round", 0.5, (0., 1.), (None, None)),
             float("distance", "Distance", "", 0.1, (0., 2.), (Some(0.), None)),
             int("divisions", "Divisions", "", 1, (1, 32), Some(1)),
@@ -1911,10 +1904,10 @@ pub mod boolean_fracture {
 
     pub fn from_values(values: &[Value]) -> Parameters {
         Parameters {
-            point_conflict: CONFLICT[support::choice_index(&CONFLICT_LABELS, &values[0])].clone(),
+            point_conflict: CONFLICT.of(&values[0]),
             assume_flat: vb(values, 1),
             resolve_cutter_self_intersections: vb(values, 2),
-            detriangulation: DETRIANGULATION[support::choice_index(&DETRIANGULATION_LABELS, &values[3])].clone(),
+            detriangulation: DETRIANGULATION.of(&values[3]),
             require_closed: vb(values, 4),
             piece_attribute: vs(values, 5),
             point_tolerance: vf(values, 6),
@@ -1953,10 +1946,10 @@ pub mod boolean_fracture {
 
     pub fn specs() -> Vec<Spec> {
         vec![
-            choice("point_conflict", "Point attribute conflicts", "Attributes", conflict_kind(), support::choice_value(&CONFLICT_LABELS, 1)),
+            choice("point_conflict", "Point attribute conflicts", "Attributes", CONFLICT.kind(), CONFLICT.at(1)),
             toggle("assume_flat", "Assume flat", "Output", false),
             toggle("resolve_cutter_self_intersections", "Resolve cutter self-intersections", "", false),
-            choice("detriangulation", "Polygons", "", detriangulation_kind(), support::choice_value(&DETRIANGULATION_LABELS, 0)),
+            choice("detriangulation", "Polygons", "", DETRIANGULATION.kind(), DETRIANGULATION.at(0)),
             toggle("require_closed", "Require closed", "", true),
             text("piece_attribute", "Piece attribute", "", "piece"),
             float("point_tolerance", "Point tolerance", "Robustness", 0., (0., 0.001), (Some(0.), None)),
@@ -2153,16 +2146,26 @@ pub mod fuse {
     use rdk::point_snap::{MatchCondition, Targeting, Using};
     use support::FuseTargeting;
 
-    const TARGETING_LABELS: [&str; 2] = ["Near points", "Specified points"];
-    const TARGETING: [FuseTargeting; 2] = [FuseTargeting::NearPoints, FuseTargeting::SpecifiedPoints];
-    const USING_LABELS: [&str; 2] = ["Least target point", "Closest target point"];
-    const USING: [Using; 2] = [Using::LeastTargetPoint, Using::ClosestTargetPoint];
-    const ATTRIBUTES_LABELS: [&str; 2] = ["Keep first", "Average numeric"];
-    const ATTRIBUTES: [DefaultAttributes; 2] = [DefaultAttributes::KeepFirst, DefaultAttributes::AverageNumeric];
-    const METRIC_LABELS: [&str; 2] = ["Euclidean", "Componentwise"];
-    const METRIC: [FuseMetric; 2] = [FuseMetric::Euclidean, FuseMetric::Componentwise];
-    const CONDITION_LABELS: [&str; 2] = ["Equal", "Unequal"];
-    const CONDITION: [MatchCondition; 2] = [MatchCondition::EqualAttributeValues, MatchCondition::UnequalAttributeValues];
+    const TARGETING: Choice<FuseTargeting> = Choice(&[
+        ("Near points", FuseTargeting::NearPoints),
+        ("Specified points", FuseTargeting::SpecifiedPoints),
+    ]);
+    const USING: Choice<Using> = Choice(&[
+        ("Least target point", Using::LeastTargetPoint),
+        ("Closest target point", Using::ClosestTargetPoint),
+    ]);
+    const ATTRIBUTES: Choice<DefaultAttributes> = Choice(&[
+        ("Keep first", DefaultAttributes::KeepFirst),
+        ("Average numeric", DefaultAttributes::AverageNumeric),
+    ]);
+    const METRIC: Choice<FuseMetric> = Choice(&[
+        ("Euclidean", FuseMetric::Euclidean),
+        ("Componentwise", FuseMetric::Componentwise),
+    ]);
+    const CONDITION: Choice<MatchCondition> = Choice(&[
+        ("Equal", MatchCondition::EqualAttributeValues),
+        ("Unequal", MatchCondition::UnequalAttributeValues),
+    ]);
 
     #[derive(Clone, Debug)]
     pub struct Parameters {
@@ -2205,21 +2208,21 @@ pub mod fuse {
         Parameters {
             group: vs(values, 0),
             target_group: vs(values, 1),
-            targeting: TARGETING[support::choice_index(&TARGETING_LABELS, &values[2])].clone(),
+            targeting: TARGETING.of(&values[2]),
             target_attribute: vs(values, 3),
-            using: USING[support::choice_index(&USING_LABELS, &values[4])].clone(),
+            using: USING.of(&values[4]),
             tolerance: vf(values, 5),
-            position: position_of_value(&values[6]),
+            position: POSITION.of(&values[6]),
             weight_attribute: vs(values, 7),
-            attributes: ATTRIBUTES[support::choice_index(&ATTRIBUTES_LABELS, &values[8])].clone(),
+            attributes: ATTRIBUTES.of(&values[8]),
             attribute_rules: bytes(values, 9),
             group_rules: bytes(values, 10),
-            metric: METRIC[support::choice_index(&METRIC_LABELS, &values[11])].clone(),
+            metric: METRIC.of(&values[11]),
             inclusive: vb(values, 12),
             match_attributes: vb(values, 13),
             radius_attribute: vs(values, 14),
             match_attribute: vs(values, 15),
-            match_condition: CONDITION[support::choice_index(&CONDITION_LABELS, &values[16])].clone(),
+            match_condition: CONDITION.of(&values[16]),
             match_tolerance: vf(values, 17),
             modify_target: vb(values, 18),
             fuse_points: vb(values, 19),
@@ -2277,13 +2280,13 @@ pub mod fuse {
         vec![
             text("group", "Point group", "", ""),
             text("target_group", "Target group", "", ""),
-            choice("targeting", "Targeting", "", support::choice_kind(&TARGETING_LABELS), support::choice_value(&TARGETING_LABELS, 0)),
+            choice("targeting", "Targeting", "", TARGETING.kind(), TARGETING.at(0)),
             text("target_attribute", "Target point attribute", "", "targetpoint"),
-            choice("using", "Use target", "", support::choice_kind(&USING_LABELS), support::choice_value(&USING_LABELS, 0)),
+            choice("using", "Use target", "", USING.kind(), USING.at(0)),
             float("tolerance", "Snap distance", "", 0.001, (0., 10.), (Some(0.), None)),
-            choice("position", "Position", "Fuse", position_kind(), support::choice_value(&POSITION_LABELS, POSITION_AVERAGE)),
+            choice("position", "Position", "Fuse", POSITION.kind(), POSITION.value(&Position::Average)),
             text("weight_attribute", "Weight attribute", "Fuse", ""),
-            choice("attributes", "Attributes", "Fuse", support::choice_kind(&ATTRIBUTES_LABELS), support::choice_value(&ATTRIBUTES_LABELS, 0)),
+            choice("attributes", "Attributes", "Fuse", ATTRIBUTES.kind(), ATTRIBUTES.at(0)),
             Spec {
                 description: Some(
                     "Escaped tab-separated rows: pattern, reduction method, weight attribute. Weighted methods require a weight name.",
@@ -2294,12 +2297,12 @@ pub mod fuse {
                 description: Some("Escaped tab-separated rows: group pattern, reduction method."),
                 ..text("group_rules", "Group rules", "Fuse", "")
             },
-            choice("metric", "Metric", "Matching", support::choice_kind(&METRIC_LABELS), support::choice_value(&METRIC_LABELS, 0)),
+            choice("metric", "Metric", "Matching", METRIC.kind(), METRIC.at(0)),
             toggle("inclusive", "Inclusive distance", "Matching", true),
             toggle("match_attributes", "Match attributes", "Matching", false),
             text("radius_attribute", "Radius attribute", "Matching", ""),
             text("match_attribute", "Match attribute", "Matching", ""),
-            choice("match_condition", "Match condition", "Matching", support::choice_kind(&CONDITION_LABELS), support::choice_value(&CONDITION_LABELS, 0)),
+            choice("match_condition", "Match condition", "Matching", CONDITION.kind(), CONDITION.at(0)),
             float("match_tolerance", "Match tolerance", "Matching", 0., (0., 1.), (Some(0.), None)),
             toggle("modify_target", "Modify target", "", false),
             toggle("fuse_points", "Fuse points", "", true),
@@ -2398,46 +2401,41 @@ pub mod subdivide_cracks {
     };
     use support::{KernelMode, SubdivisionCracks};
 
-    const SCHEME_LABELS: [&str; 3] = ["Catmull-Clark", "Loop", "Bilinear"];
-    const SCHEME: [Scheme; 3] = [Scheme::CatmullClark, Scheme::Loop, Scheme::Bilinear];
-    const CRACKS_LABELS: [&str; 7] = [
-        "Do not close",
-        "Pull, no edge division",
-        "Pull, divide edges",
-        "Pull, triangulate",
-        "Stitch, no edge division",
-        "Stitch, divide edges",
-        "Stitch, triangulate",
-    ];
-    const CRACKS: [SubdivisionCracks; 7] = [
-        SubdivisionCracks::DoNotClose,
-        SubdivisionCracks::PullNoDivision,
-        SubdivisionCracks::PullDivide,
-        SubdivisionCracks::PullTriangulate,
-        SubdivisionCracks::StitchNoDivision,
-        SubdivisionCracks::StitchDivide,
-        SubdivisionCracks::StitchTriangulate,
-    ];
-    const BOUNDARY_LABELS: [&str; 3] = ["None", "Edge only", "Edge and corner"];
-    const BOUNDARY: [BoundaryInterpolation; 3] = [
-        BoundaryInterpolation::SubdivideBoundaryNone,
-        BoundaryInterpolation::SubdivideBoundaryEdgeOnly,
-        BoundaryInterpolation::SubdivideBoundaryEdgeAndCorner,
-    ];
-    const FVAR_LABELS: [&str; 6] = ["None", "Corners only", "Corners plus 1", "Corners plus 2", "Boundaries", "All"];
-    const FVAR: [FaceVaryingInterpolation; 6] = [
-        FaceVaryingInterpolation::SubdivideFvarNone,
-        FaceVaryingInterpolation::SubdivideFvarCornersOnly,
-        FaceVaryingInterpolation::SubdivideFvarCornersPlus1,
-        FaceVaryingInterpolation::SubdivideFvarCornersPlus2,
-        FaceVaryingInterpolation::SubdivideFvarBoundaries,
-        FaceVaryingInterpolation::SubdivideFvarAll,
-    ];
-    const TRIANGLE_LABELS: [&str; 2] = ["Catmull-Clark", "Smooth"];
-    const TRIANGLE: [TrianglePolicy; 2] =
-        [TrianglePolicy::SubdivideTrianglesCatmullClark, TrianglePolicy::SubdivideTrianglesSmooth];
-    const CREASING_LABELS: [&str; 2] = ["Uniform", "Chaikin"];
-    const CREASING: [CreasingMethod; 2] = [CreasingMethod::SubdivideCreasingUniform, CreasingMethod::SubdivideCreasingChaikin];
+    const SCHEME: Choice<Scheme> = Choice(&[
+        ("Catmull-Clark", Scheme::CatmullClark),
+        ("Loop", Scheme::Loop),
+        ("Bilinear", Scheme::Bilinear),
+    ]);
+    const CRACKS: Choice<SubdivisionCracks> = Choice(&[
+        ("Do not close", SubdivisionCracks::DoNotClose),
+        ("Pull, no edge division", SubdivisionCracks::PullNoDivision),
+        ("Pull, divide edges", SubdivisionCracks::PullDivide),
+        ("Pull, triangulate", SubdivisionCracks::PullTriangulate),
+        ("Stitch, no edge division", SubdivisionCracks::StitchNoDivision),
+        ("Stitch, divide edges", SubdivisionCracks::StitchDivide),
+        ("Stitch, triangulate", SubdivisionCracks::StitchTriangulate),
+    ]);
+    const BOUNDARY: Choice<BoundaryInterpolation> = Choice(&[
+        ("None", BoundaryInterpolation::SubdivideBoundaryNone),
+        ("Edge only", BoundaryInterpolation::SubdivideBoundaryEdgeOnly),
+        ("Edge and corner", BoundaryInterpolation::SubdivideBoundaryEdgeAndCorner),
+    ]);
+    const FVAR: Choice<FaceVaryingInterpolation> = Choice(&[
+        ("None", FaceVaryingInterpolation::SubdivideFvarNone),
+        ("Corners only", FaceVaryingInterpolation::SubdivideFvarCornersOnly),
+        ("Corners plus 1", FaceVaryingInterpolation::SubdivideFvarCornersPlus1),
+        ("Corners plus 2", FaceVaryingInterpolation::SubdivideFvarCornersPlus2),
+        ("Boundaries", FaceVaryingInterpolation::SubdivideFvarBoundaries),
+        ("All", FaceVaryingInterpolation::SubdivideFvarAll),
+    ]);
+    const TRIANGLE: Choice<TrianglePolicy> = Choice(&[
+        ("Catmull-Clark", TrianglePolicy::SubdivideTrianglesCatmullClark),
+        ("Smooth", TrianglePolicy::SubdivideTrianglesSmooth),
+    ]);
+    const CREASING: Choice<CreasingMethod> = Choice(&[
+        ("Uniform", CreasingMethod::SubdivideCreasingUniform),
+        ("Chaikin", CreasingMethod::SubdivideCreasingChaikin),
+    ]);
 
     #[derive(Clone, Debug)]
     pub struct Parameters {
@@ -2465,22 +2463,22 @@ pub mod subdivide_cracks {
     pub fn from_values(values: &[Value]) -> Parameters {
         Parameters {
             group: vs(values, 0),
-            scheme: SCHEME[support::choice_index(&SCHEME_LABELS, &values[1])].clone(),
+            scheme: SCHEME.of(&values[1]),
             iterations: vi(values, 2),
-            cracks: CRACKS[support::choice_index(&CRACKS_LABELS, &values[3])].clone(),
+            cracks: CRACKS.of(&values[3]),
             crack_bias: vf(values, 4),
             consistent_topology: vb(values, 5),
             crease_group: vs(values, 6),
-            crease_weight_mode: support::kernel_mode_of_value(&values[7]),
+            crease_weight_mode: support::KERNEL_MODE.of(&values[7]),
             crease_weight: vf(values, 8),
             generate_resulting_creases: vb(values, 9),
             resulting_crease_group: vs(values, 10),
             hole_group: vs(values, 11),
             remove_holes: vb(values, 12),
-            boundary_interpolation: BOUNDARY[support::choice_index(&BOUNDARY_LABELS, &values[13])].clone(),
-            face_varying_interpolation: FVAR[support::choice_index(&FVAR_LABELS, &values[14])].clone(),
-            triangle_policy: TRIANGLE[support::choice_index(&TRIANGLE_LABELS, &values[15])].clone(),
-            creasing_method: CREASING[support::choice_index(&CREASING_LABELS, &values[16])].clone(),
+            boundary_interpolation: BOUNDARY.of(&values[13]),
+            face_varying_interpolation: FVAR.of(&values[14]),
+            triangle_policy: TRIANGLE.of(&values[15]),
+            creasing_method: CREASING.of(&values[16]),
             treat_curves_as_independent: vb(values, 17),
             recompute_point_normals: vb(values, 18),
         }
@@ -2517,22 +2515,22 @@ pub mod subdivide_cracks {
     pub fn specs() -> Vec<Spec> {
         vec![
             text("group", "Primitive group", "", ""),
-            choice("scheme", "Scheme", "", support::choice_kind(&SCHEME_LABELS), support::choice_value(&SCHEME_LABELS, 0)),
+            choice("scheme", "Scheme", "", SCHEME.kind(), SCHEME.at(0)),
             int("iterations", "Depth", "", 1, (1, 6), Some(1)),
-            choice("cracks", "Close cracks", "", support::choice_kind(&CRACKS_LABELS), support::choice_value(&CRACKS_LABELS, 0)),
+            choice("cracks", "Close cracks", "", CRACKS.kind(), CRACKS.at(0)),
             float("crack_bias", "Pull bias", "Cracks", 0.5, (0., 1.), (None, None)),
             toggle("consistent_topology", "Consistent topology", "Cracks", false),
             text("crease_group", "Crease group", "Creases", ""),
-            choice("crease_weight_mode", "Crease weight mode", "Creases", support::kernel_mode_kind(), support::kernel_mode_value(KernelMode::Explicit)),
+            choice("crease_weight_mode", "Crease weight mode", "Creases", support::KERNEL_MODE.kind(), support::KERNEL_MODE.value(&KernelMode::Explicit)),
             float("crease_weight", "Crease weight", "Creases", 1., (0., 10.), (Some(0.), None)),
             toggle("generate_resulting_creases", "Generate resulting creases", "Creases", false),
             text("resulting_crease_group", "Resulting crease group", "Creases", ""),
             text("hole_group", "Hole group", "Holes", "subdivision_hole"),
             toggle("remove_holes", "Remove holes", "Holes", false),
-            choice("boundary_interpolation", "Point boundaries", "Interpolation", support::choice_kind(&BOUNDARY_LABELS), support::choice_value(&BOUNDARY_LABELS, 2)),
-            choice("face_varying_interpolation", "Vertex boundaries", "Interpolation", support::choice_kind(&FVAR_LABELS), support::choice_value(&FVAR_LABELS, 4)),
-            choice("triangle_policy", "Triangles", "Interpolation", support::choice_kind(&TRIANGLE_LABELS), support::choice_value(&TRIANGLE_LABELS, 0)),
-            choice("creasing_method", "Creasing method", "Creases", support::choice_kind(&CREASING_LABELS), support::choice_value(&CREASING_LABELS, 0)),
+            choice("boundary_interpolation", "Point boundaries", "Interpolation", BOUNDARY.kind(), BOUNDARY.at(2)),
+            choice("face_varying_interpolation", "Vertex boundaries", "Interpolation", FVAR.kind(), FVAR.at(4)),
+            choice("triangle_policy", "Triangles", "Interpolation", TRIANGLE.kind(), TRIANGLE.at(0)),
+            choice("creasing_method", "Creasing method", "Creases", CREASING.kind(), CREASING.at(0)),
             toggle("treat_curves_as_independent", "Treat curves independently", "", false),
             toggle("recompute_point_normals", "Recompute point normals", "", false),
         ]
@@ -2632,21 +2630,23 @@ pub mod boolean {
     use rdk::boolean_solid::Operation;
     use support::BooleanClosedPolicy;
 
-    const OPERATION_LABELS: [&str; 6] =
-        ["Union", "Intersection", "Subtract B from A", "Subtract A from B", "Exclusive or", "Shatter"];
-    const OPERATION: [Operation; 6] = [
-        Operation::Union,
-        Operation::Intersection,
-        Operation::Difference,
-        Operation::ReverseDifference,
-        Operation::Xor,
-        Operation::Shatter,
-    ];
-    const SEAM_POINTS_LABELS: [&str; 2] = ["Shared", "Split"];
-    const SEAM_POINTS: [SeamPoints; 2] = [SeamPoints::SharedSeamPoints, SeamPoints::SplitSeamPoints];
-    const CLOSED_LABELS: [&str; 3] = ["Operation default", "Require closed", "Allow open"];
-    const CLOSED: [BooleanClosedPolicy; 3] =
-        [BooleanClosedPolicy::Default, BooleanClosedPolicy::Required, BooleanClosedPolicy::NotRequired];
+    const OPERATION: Choice<Operation> = Choice(&[
+        ("Union", Operation::Union),
+        ("Intersection", Operation::Intersection),
+        ("Subtract B from A", Operation::Difference),
+        ("Subtract A from B", Operation::ReverseDifference),
+        ("Exclusive or", Operation::Xor),
+        ("Shatter", Operation::Shatter),
+    ]);
+    const SEAM_POINTS: Choice<SeamPoints> = Choice(&[
+        ("Shared", SeamPoints::SharedSeamPoints),
+        ("Split", SeamPoints::SplitSeamPoints),
+    ]);
+    const CLOSED: Choice<BooleanClosedPolicy> = Choice(&[
+        ("Operation default", BooleanClosedPolicy::Default),
+        ("Require closed", BooleanClosedPolicy::Required),
+        ("Allow open", BooleanClosedPolicy::NotRequired),
+    ]);
 
     #[derive(Clone, Debug)]
     pub struct Parameters {
@@ -2672,20 +2672,20 @@ pub mod boolean {
 
     pub fn from_values(values: &[Value]) -> Parameters {
         Parameters {
-            operation: OPERATION[support::choice_index(&OPERATION_LABELS, &values[0])].clone(),
-            left_treatment: TREATMENT[support::choice_index(&TREATMENT_LABELS, &values[1])].clone(),
-            right_treatment: TREATMENT[support::choice_index(&TREATMENT_LABELS, &values[2])].clone(),
+            operation: OPERATION.of(&values[0]),
+            left_treatment: TREATMENT.of(&values[1]),
+            right_treatment: TREATMENT.of(&values[2]),
             resolve_left_self_intersections: vb(values, 3),
             resolve_right_self_intersections: vb(values, 4),
-            point_conflict: CONFLICT[support::choice_index(&CONFLICT_LABELS, &values[5])].clone(),
+            point_conflict: CONFLICT.of(&values[5]),
             point_tolerance: vf(values, 6),
             tiny_seam_threshold: vf(values, 7),
             cleanup_max_batches: vi(values, 8),
             strict_cleanup: vb(values, 9),
-            seam_points: SEAM_POINTS[support::choice_index(&SEAM_POINTS_LABELS, &values[10])].clone(),
-            detriangulation: DETRIANGULATION[support::choice_index(&DETRIANGULATION_LABELS, &values[11])].clone(),
+            seam_points: SEAM_POINTS.of(&values[10]),
+            detriangulation: DETRIANGULATION.of(&values[11]),
             assume_flat: vb(values, 12),
-            require_closed: CLOSED[support::choice_index(&CLOSED_LABELS, &values[13])].clone(),
+            require_closed: CLOSED.of(&values[13]),
             piece_attribute: vs(values, 14),
             left_piece_group: vs(values, 15),
             overlap_piece_group: vs(values, 16),
@@ -2731,20 +2731,20 @@ pub mod boolean {
 
     pub fn specs() -> Vec<Spec> {
         vec![
-            choice("operation", "Operation", "", support::choice_kind(&OPERATION_LABELS), support::choice_value(&OPERATION_LABELS, 0)),
-            choice("left_treatment", "A treatment", "Operands", treatment_kind(), support::choice_value(&TREATMENT_LABELS, 0)),
-            choice("right_treatment", "B treatment", "Operands", treatment_kind(), support::choice_value(&TREATMENT_LABELS, 0)),
+            choice("operation", "Operation", "", OPERATION.kind(), OPERATION.at(0)),
+            choice("left_treatment", "A treatment", "Operands", TREATMENT.kind(), TREATMENT.at(0)),
+            choice("right_treatment", "B treatment", "Operands", TREATMENT.kind(), TREATMENT.at(0)),
             toggle("resolve_left_self_intersections", "Resolve A self-intersections", "Operands", false),
             toggle("resolve_right_self_intersections", "Resolve B self-intersections", "Operands", false),
-            choice("point_conflict", "Point attribute conflicts", "Attributes", conflict_kind(), support::choice_value(&CONFLICT_LABELS, 1)),
+            choice("point_conflict", "Point attribute conflicts", "Attributes", CONFLICT.kind(), CONFLICT.at(1)),
             float("point_tolerance", "Point tolerance", "Robustness", 0., (0., 0.001), (Some(0.), None)),
             float("tiny_seam_threshold", "Tiny seam threshold", "Robustness", 0., (0., 0.001), (Some(0.), None)),
             int("cleanup_max_batches", "Cleanup batches", "Robustness", 8, (1, 32), Some(1)),
             toggle("strict_cleanup", "Strict cleanup", "Robustness", true),
-            choice("seam_points", "Seam points", "Output", support::choice_kind(&SEAM_POINTS_LABELS), support::choice_value(&SEAM_POINTS_LABELS, 0)),
-            choice("detriangulation", "Polygons", "Output", detriangulation_kind(), support::choice_value(&DETRIANGULATION_LABELS, 0)),
+            choice("seam_points", "Seam points", "Output", SEAM_POINTS.kind(), SEAM_POINTS.at(0)),
+            choice("detriangulation", "Polygons", "Output", DETRIANGULATION.kind(), DETRIANGULATION.at(0)),
             toggle("assume_flat", "Assume flat", "Output", false),
-            choice("require_closed", "Closed output", "Output", support::choice_kind(&CLOSED_LABELS), support::choice_value(&CLOSED_LABELS, 0)),
+            choice("require_closed", "Closed output", "Output", CLOSED.kind(), CLOSED.at(0)),
             text("piece_attribute", "Piece attribute", "Output", ""),
             text("left_piece_group", "A-only group", "Shatter groups", "boolean_left"),
             text("overlap_piece_group", "Overlap group", "Shatter groups", "boolean_overlap"),
@@ -2965,15 +2965,14 @@ pub mod triangulate_2d {
     use rdk::triangulate2d::Projection;
     use support::Triangulate2dProjection;
 
-    const PROJECTION_LABELS: [&str; 6] = ["Best fit", "XY", "YZ", "ZX", "Custom plane", "Point attribute"];
-    const PROJECTION: [Triangulate2dProjection; 6] = [
-        Triangulate2dProjection::BestFit,
-        Triangulate2dProjection::Xy,
-        Triangulate2dProjection::Yz,
-        Triangulate2dProjection::Zx,
-        Triangulate2dProjection::Plane,
-        Triangulate2dProjection::Attribute,
-    ];
+    const PROJECTION: Choice<Triangulate2dProjection> = Choice(&[
+        ("Best fit", Triangulate2dProjection::BestFit),
+        ("XY", Triangulate2dProjection::Xy),
+        ("YZ", Triangulate2dProjection::Yz),
+        ("ZX", Triangulate2dProjection::Zx),
+        ("Custom plane", Triangulate2dProjection::Plane),
+        ("Point attribute", Triangulate2dProjection::Attribute),
+    ]);
     #[derive(Clone, Debug)]
     pub struct Parameters {
         pub point_group: String,
@@ -3022,7 +3021,7 @@ pub mod triangulate_2d {
             point_group: vs(values, 0),
             constraint_edge_group: vs(values, 1),
             constraint_primitive_group: vs(values, 2),
-            projection: PROJECTION[support::choice_index(&PROJECTION_LABELS, &values[3])].clone(),
+            projection: PROJECTION.of(&values[3]),
             plane_origin_x: vf(values, 4),
             plane_origin_y: vf(values, 5),
             plane_origin_z: vf(values, 6),
@@ -3131,7 +3130,7 @@ pub mod triangulate_2d {
             text("point_group", "Point group", "Input", ""),
             text("constraint_edge_group", "Constraint edge group", "Input", ""),
             text("constraint_primitive_group", "Constraint primitive group", "Input", ""),
-            choice("projection", "Projection", "Projection", support::choice_kind(&PROJECTION_LABELS), support::choice_value(&PROJECTION_LABELS, 0)),
+            choice("projection", "Projection", "Projection", PROJECTION.kind(), PROJECTION.at(0)),
             vec3("plane_origin_x", "Origin X", "plane_origin", 0, 0., 10.),
             vec3("plane_origin_y", "Origin Y", "plane_origin", 1, 0., 10.),
             vec3("plane_origin_z", "Origin Z", "plane_origin", 2, 0., 10.),

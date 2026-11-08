@@ -2,7 +2,7 @@
 //! Texels is the carrier that lets a Lisp body sample pixels). See PORTING.md.
 use std::sync::Arc;
 
-use param::{Kind, Value};
+use param::Value;
 use rdk::{attribute, attribute_ops, geometry, group, packed, surface_index, transform_ops, uv_ops};
 
 use crate::context::{self, dependencies};
@@ -10,7 +10,7 @@ use crate::decl::{self, Decl, Meta, Spec};
 use crate::edit_graph::Factory;
 use crate::node::{self, build, Cooked, CookMode};
 use crate::payload;
-use crate::support::{self, DistanceRadiusMode, KernelMode, MirrorMethod, MirrorTransform, TransferFalloff, TransferMode};
+use crate::support::{self, Choice, DistanceRadiusMode, KernelMode, MirrorMethod, MirrorTransform, TransferFalloff, TransferMode};
 
 // ---------------------------------------------------------------- shared helpers
 
@@ -50,74 +50,31 @@ fn boolean(value: &Value) -> bool {
     }
 }
 
-/// Index of `Rdk.Attribute_transfer.unmatched` in the `Unmatched` choice table.
-fn unmatched_index(unmatched: rdk::attribute_transfer::Unmatched) -> usize {
-    match unmatched {
-        rdk::attribute_transfer::Unmatched::KeepTarget => 0,
-        rdk::attribute_transfer::Unmatched::DefaultValue => 1,
-    }
-}
-
 /// `sqrt Float.max_float`: the largest distance whose square stays finite.
 fn safe_square_limit() -> f64 {
     f64::MAX.sqrt()
 }
 
-// Choice tables that have no support.rs twin: the label order is the OCaml `Param.choice` order.
-const REFERENCE_LABELS: [&str; 2] = ["Points", "Primitives"];
-const GROUP_USE_LABELS: [&str; 2] = ["Group is source", "Group is destination"];
-const MIRROR_METHOD_LABELS: [&str; 2] = ["Plane", "Mapping attribute"];
-const MIRROR_TRANSFORM_LABELS: [&str; 4] = ["Copy", "UV", "Vector", "Point"];
-const VERTEX_SELECTION_LABELS: [&str; 2] = ["All triangle vertices", "Any triangle vertex"];
-
-fn reference_kind() -> Kind {
-    support::choice_kind(&REFERENCE_LABELS)
-}
-
-fn reference_of_value(value: &Value) -> transform_ops::DistanceFromGeometryReference {
-    use transform_ops::DistanceFromGeometryReference::*;
-    [DistanceReferencePoints, DistanceReferencePrimitives][support::choice_index(&REFERENCE_LABELS, value)]
-}
-
-fn group_use_kind() -> Kind {
-    support::choice_kind(&GROUP_USE_LABELS)
-}
-
-fn group_use_of_value(value: &Value) -> rdk::attribute_mirror::GroupUse {
-    use rdk::attribute_mirror::GroupUse::*;
-    [MirrorGroupAsSource, MirrorGroupAsDestination][support::choice_index(&GROUP_USE_LABELS, value)]
-}
-
-fn mirror_method_kind() -> Kind {
-    support::choice_kind(&MIRROR_METHOD_LABELS)
-}
-
-fn mirror_method_of_value(value: &Value) -> MirrorMethod {
-    [MirrorMethod::Plane, MirrorMethod::Mapping][support::choice_index(&MIRROR_METHOD_LABELS, value)]
-}
-
-fn mirror_transform_kind() -> Kind {
-    support::choice_kind(&MIRROR_TRANSFORM_LABELS)
-}
-
-fn mirror_transform_of_value(value: &Value) -> MirrorTransform {
-    use MirrorTransform::*;
-    [Copy, Uv, Vector, Point][support::choice_index(&MIRROR_TRANSFORM_LABELS, value)]
-}
-
-fn vertex_selection_kind() -> Kind {
-    support::choice_kind(&VERTEX_SELECTION_LABELS)
-}
-
-fn vertex_selection_of_value(value: &Value) -> surface_index::VertexSelection {
-    use surface_index::VertexSelection::*;
-    [AllTriangleVertices, AnyTriangleVertex][support::choice_index(&VERTEX_SELECTION_LABELS, value)]
-}
-
-/// The point-only `Rdk.Attribute.owner` field of Attribute Mirror: Point, Vertex or Primitive.
-fn element_attribute_owner_default() -> Value {
-    support::choice_value(&support::ELEMENT_ATTRIBUTE_OWNER_LABELS, 0)
-}
+// Choice tables that have no support.rs twin: the row order is the OCaml `Param.choice` order.
+const REFERENCE: Choice<transform_ops::DistanceFromGeometryReference> = Choice(&[
+    ("Points", transform_ops::DistanceFromGeometryReference::DistanceReferencePoints),
+    ("Primitives", transform_ops::DistanceFromGeometryReference::DistanceReferencePrimitives),
+]);
+const GROUP_USE: Choice<rdk::attribute_mirror::GroupUse> = Choice(&[
+    ("Group is source", rdk::attribute_mirror::GroupUse::MirrorGroupAsSource),
+    ("Group is destination", rdk::attribute_mirror::GroupUse::MirrorGroupAsDestination),
+]);
+const MIRROR_METHOD: Choice<MirrorMethod> = Choice(&[("Plane", MirrorMethod::Plane), ("Mapping attribute", MirrorMethod::Mapping)]);
+const MIRROR_TRANSFORM: Choice<MirrorTransform> = Choice(&[
+    ("Copy", MirrorTransform::Copy),
+    ("UV", MirrorTransform::Uv),
+    ("Vector", MirrorTransform::Vector),
+    ("Point", MirrorTransform::Point),
+]);
+const VERTEX_SELECTION: Choice<surface_index::VertexSelection> = Choice(&[
+    ("All triangle vertices", surface_index::VertexSelection::AllTriangleVertices),
+    ("Any triangle vertex", surface_index::VertexSelection::AnyTriangleVertex),
+]);
 
 // ---------------------------------------------------------------- image texels
 
@@ -402,13 +359,13 @@ pub mod distance_from_geometry {
 
     pub fn from_values(values: &[Value]) -> Parameters {
         Parameters {
-            affected_owner: support::element_owner_of_value(&values[0]),
+            affected_owner: support::ELEMENT_OWNER.of(&values[0]),
             affected_group: text(&values[1]),
-            reference_owner: support::element_owner_of_value(&values[2]),
+            reference_owner: support::ELEMENT_OWNER.of(&values[2]),
             reference_group: text(&values[3]),
-            reference_kind: reference_of_value(&values[4]),
-            falloff: support::soft_falloff_of_value(&values[5]),
-            radius_mode: support::distance_radius_of_value(&values[6]),
+            reference_kind: REFERENCE.of(&values[4]),
+            falloff: support::SOFT_FALLOFF.of(&values[5]),
+            radius_mode: support::DISTANCE_RADIUS.of(&values[6]),
             radius: float(&values[7]),
             distance_attribute: text(&values[8]),
             mask_attribute: text(&values[9]),
@@ -417,13 +374,13 @@ pub mod distance_from_geometry {
 
     pub fn to_values(p: &Parameters) -> Vec<Value> {
         vec![
-            support::element_owner_value(p.affected_owner),
+            support::ELEMENT_OWNER.value(&p.affected_owner),
             text_value(&p.affected_group),
-            support::element_owner_value(p.reference_owner),
+            support::ELEMENT_OWNER.value(&p.reference_owner),
             text_value(&p.reference_group),
-            support::choice_value(&REFERENCE_LABELS, p.reference_kind as usize),
-            support::choice_value(&support::SOFT_FALLOFF_LABELS, p.falloff as usize),
-            support::distance_radius_value(p.radius_mode),
+            REFERENCE.value(&p.reference_kind),
+            support::SOFT_FALLOFF.value(&p.falloff),
+            support::DISTANCE_RADIUS.value(&p.radius_mode),
             Value::Float(p.radius),
             text_value(&p.distance_attribute),
             text_value(&p.mask_attribute),
@@ -447,8 +404,8 @@ pub mod distance_from_geometry {
                 folder: "Source",
                 ..decl::spec(
                     "affected_owner",
-                    support::element_owner_kind(),
-                    support::element_owner_value(rdk::group_ops::Owner::GroupPoints),
+                    support::ELEMENT_OWNER.kind(),
+                    support::ELEMENT_OWNER.value(&rdk::group_ops::Owner::GroupPoints),
                 )
             },
             Spec {
@@ -461,8 +418,8 @@ pub mod distance_from_geometry {
                 folder: "Reference",
                 ..decl::spec(
                     "reference_owner",
-                    support::element_owner_kind(),
-                    support::element_owner_value(rdk::group_ops::Owner::GroupPrimitives),
+                    support::ELEMENT_OWNER.kind(),
+                    support::ELEMENT_OWNER.value(&rdk::group_ops::Owner::GroupPrimitives),
                 )
             },
             Spec {
@@ -473,22 +430,22 @@ pub mod distance_from_geometry {
             Spec {
                 label: "Reference type",
                 folder: "Reference",
-                ..decl::spec("reference_kind", reference_kind(), support::choice_value(&REFERENCE_LABELS, 1))
+                ..decl::spec("reference_kind", REFERENCE.kind(), REFERENCE.at(1))
             },
             Spec {
                 label: "Falloff",
                 ..decl::spec(
                     "falloff",
-                    support::soft_falloff_kind(),
-                    support::choice_value(&support::SOFT_FALLOFF_LABELS, 0),
+                    support::SOFT_FALLOFF.kind(),
+                    support::SOFT_FALLOFF.at(0),
                 )
             },
             Spec {
                 label: "Radius",
                 ..decl::spec(
                     "radius_mode",
-                    support::distance_radius_kind(),
-                    support::distance_radius_value(DistanceRadiusMode::Maximum),
+                    support::DISTANCE_RADIUS.kind(),
+                    support::DISTANCE_RADIUS.value(&DistanceRadiusMode::Maximum),
                 )
             },
             Spec {
@@ -623,11 +580,11 @@ pub mod attribute_mirror {
 
     pub fn from_values(v: &[Value]) -> Parameters {
         Parameters {
-            owner: support::element_attribute_owner_of_value(&v[0]),
+            owner: support::ELEMENT_ATTRIBUTE_OWNER.of(&v[0]),
             attributes: text(&v[1]),
             group: text(&v[2]),
-            group_use: group_use_of_value(&v[3]),
-            method_: mirror_method_of_value(&v[4]),
+            group_use: GROUP_USE.of(&v[3]),
+            method_: MIRROR_METHOD.of(&v[4]),
             origin_x: float(&v[5]),
             origin_y: float(&v[6]),
             origin_z: float(&v[7]),
@@ -638,7 +595,7 @@ pub mod attribute_mirror {
             tolerance: float(&v[12]),
             mapping_attribute: text(&v[13]),
             mapping_destination_group: text(&v[14]),
-            transform: mirror_transform_of_value(&v[15]),
+            transform: MIRROR_TRANSFORM.of(&v[15]),
             uv_origin_u: float(&v[16]),
             uv_origin_v: float(&v[17]),
             uv_direction_u: float(&v[18]),
@@ -654,11 +611,11 @@ pub mod attribute_mirror {
 
     pub fn to_values(p: &Parameters) -> Vec<Value> {
         vec![
-            support::attribute_owner_value(p.owner),
+            support::ATTRIBUTE_OWNER.value(&p.owner),
             text_value(&p.attributes),
             text_value(&p.group),
-            support::choice_value(&GROUP_USE_LABELS, p.group_use as usize),
-            support::choice_value(&MIRROR_METHOD_LABELS, p.method_ as usize),
+            GROUP_USE.value(&p.group_use),
+            MIRROR_METHOD.value(&p.method_),
             Value::Float(p.origin_x),
             Value::Float(p.origin_y),
             Value::Float(p.origin_z),
@@ -669,7 +626,7 @@ pub mod attribute_mirror {
             Value::Float(p.tolerance),
             text_value(&p.mapping_attribute),
             text_value(&p.mapping_destination_group),
-            support::choice_value(&MIRROR_TRANSFORM_LABELS, p.transform as usize),
+            MIRROR_TRANSFORM.value(&p.transform),
             Value::Float(p.uv_origin_u),
             Value::Float(p.uv_origin_v),
             Value::Float(p.uv_direction_u),
@@ -696,17 +653,17 @@ pub mod attribute_mirror {
         vec![
             Spec {
                 label: "Attribute owner",
-                ..decl::spec("owner", support::element_attribute_owner_kind(), element_attribute_owner_default())
+                ..decl::spec("owner", support::ELEMENT_ATTRIBUTE_OWNER.kind(), support::ELEMENT_ATTRIBUTE_OWNER.at(0))
             },
             Spec { label: "Attributes", ..decl::spec("attributes", decl::text_kind(), text_value("Cd")) },
             Spec { label: "Selection group", ..decl::spec("group", decl::text_kind(), text_value("")) },
             Spec {
                 label: "Group use",
-                ..decl::spec("group_use", group_use_kind(), support::choice_value(&GROUP_USE_LABELS, 0))
+                ..decl::spec("group_use", GROUP_USE.kind(), GROUP_USE.at(0))
             },
             Spec {
                 label: "Mirror method",
-                ..decl::spec("method_", mirror_method_kind(), support::choice_value(&MIRROR_METHOD_LABELS, 0))
+                ..decl::spec("method_", MIRROR_METHOD.kind(), MIRROR_METHOD.at(0))
             },
             Spec {
                 label: "Origin X",
@@ -766,7 +723,7 @@ pub mod attribute_mirror {
             },
             Spec {
                 label: "Value transform",
-                ..decl::spec("transform", mirror_transform_kind(), support::choice_value(&MIRROR_TRANSFORM_LABELS, 0))
+                ..decl::spec("transform", MIRROR_TRANSFORM.kind(), MIRROR_TRANSFORM.at(0))
             },
             Spec {
                 label: "UV origin U",
@@ -1012,16 +969,16 @@ pub mod attribute_transfer_all {
             vertex_pattern: text(&v[1]),
             primitive_pattern: text(&v[2]),
             detail_pattern: text(&v[3]),
-            mode: support::transfer_mode_of_value(&v[4]),
+            mode: support::TRANSFER_MODE.of(&v[4]),
             neighbors: int(&v[5]),
             power: float(&v[6]),
             kernel_radius: float(&v[7]),
-            distance_mode: support::kernel_mode_of_value(&v[8]),
+            distance_mode: support::KERNEL_MODE.of(&v[8]),
             max_distance: float(&v[9]),
             blend_width: float(&v[10]),
-            falloff: support::transfer_falloff_of_value(&v[11]),
+            falloff: support::TRANSFER_FALLOFF.of(&v[11]),
             uniform_bias: float(&v[12]),
-            unmatched: support::transfer_unmatched_of_value(&v[13]),
+            unmatched: support::TRANSFER_UNMATCHED.of(&v[13]),
         }
     }
 
@@ -1031,16 +988,16 @@ pub mod attribute_transfer_all {
             text_value(&p.vertex_pattern),
             text_value(&p.primitive_pattern),
             text_value(&p.detail_pattern),
-            support::choice_value(&support::TRANSFER_MODE_LABELS, p.mode as usize),
+            support::TRANSFER_MODE.value(&p.mode),
             Value::Int(p.neighbors),
             Value::Float(p.power),
             Value::Float(p.kernel_radius),
-            support::kernel_mode_value(p.distance_mode),
+            support::KERNEL_MODE.value(&p.distance_mode),
             Value::Float(p.max_distance),
             Value::Float(p.blend_width),
-            support::choice_value(&support::TRANSFER_FALLOFF_LABELS, p.falloff as usize),
+            support::TRANSFER_FALLOFF.value(&p.falloff),
             Value::Float(p.uniform_bias),
-            support::choice_value(&support::TRANSFER_UNMATCHED_LABELS, unmatched_index(p.unmatched)),
+            support::TRANSFER_UNMATCHED.value(&p.unmatched),
         ]
     }
 
@@ -1062,7 +1019,7 @@ pub mod attribute_transfer_all {
             Spec { label: "Detail attributes", ..decl::spec("detail_pattern", decl::text_kind(), text_value("")) },
             Spec {
                 label: "Transfer mode",
-                ..decl::spec("mode", support::transfer_mode_kind(), support::choice_value(&support::TRANSFER_MODE_LABELS, 0))
+                ..decl::spec("mode", support::TRANSFER_MODE.kind(), support::TRANSFER_MODE.at(0))
             },
             Spec {
                 label: "Neighbors",
@@ -1082,7 +1039,7 @@ pub mod attribute_transfer_all {
             Spec {
                 label: "Distance mode",
                 folder: "Distance",
-                ..decl::spec("distance_mode", support::kernel_mode_kind(), support::kernel_mode_value(KernelMode::Explicit))
+                ..decl::spec("distance_mode", support::KERNEL_MODE.kind(), support::KERNEL_MODE.value(&KernelMode::Explicit))
             },
             Spec {
                 label: "Maximum distance",
@@ -1097,7 +1054,7 @@ pub mod attribute_transfer_all {
             Spec {
                 label: "Falloff",
                 folder: "Distance",
-                ..decl::spec("falloff", support::transfer_falloff_kind(), support::choice_value(&support::TRANSFER_FALLOFF_LABELS, 0))
+                ..decl::spec("falloff", support::TRANSFER_FALLOFF.kind(), support::TRANSFER_FALLOFF.at(0))
             },
             Spec {
                 label: "Uniform bias",
@@ -1106,7 +1063,7 @@ pub mod attribute_transfer_all {
             },
             Spec {
                 label: "Unmatched",
-                ..decl::spec("unmatched", support::transfer_unmatched_kind(), support::choice_value(&support::TRANSFER_UNMATCHED_LABELS, 0))
+                ..decl::spec("unmatched", support::TRANSFER_UNMATCHED.kind(), support::TRANSFER_UNMATCHED.at(0))
             },
         ]
     }
@@ -1236,20 +1193,20 @@ pub mod attribute_transfer_surface {
 
     pub fn from_values(v: &[Value]) -> Parameters {
         Parameters {
-            target_owner: support::attribute_owner_of_value(&v[0]),
+            target_owner: support::ATTRIBUTE_OWNER.of(&v[0]),
             attributes: bytes(&v[1]).to_vec(),
-            distance_mode: support::kernel_mode_of_value(&v[2]),
+            distance_mode: support::KERNEL_MODE.of(&v[2]),
             max_distance: float(&v[3]),
             blend_width: float(&v[4]),
-            falloff: support::transfer_falloff_of_value(&v[5]),
+            falloff: support::TRANSFER_FALLOFF.of(&v[5]),
             uniform_bias: float(&v[6]),
-            unmatched: support::transfer_unmatched_of_value(&v[7]),
+            unmatched: support::TRANSFER_UNMATCHED.of(&v[7]),
             distance_attribute: text(&v[8]),
             source_group: text(&v[9]),
             source_group_pattern: text(&v[10]),
             source_vertex_group: text(&v[11]),
             source_vertex_group_pattern: text(&v[12]),
-            source_vertex_selection: vertex_selection_of_value(&v[13]),
+            source_vertex_selection: VERTEX_SELECTION.of(&v[13]),
             target_group: text(&v[14]),
             target_group_pattern: text(&v[15]),
         }
@@ -1257,20 +1214,20 @@ pub mod attribute_transfer_surface {
 
     pub fn to_values(p: &Parameters) -> Vec<Value> {
         vec![
-            support::attribute_owner_value(p.target_owner),
+            support::ATTRIBUTE_OWNER.value(&p.target_owner),
             Value::Text(p.attributes.clone()),
-            support::kernel_mode_value(p.distance_mode),
+            support::KERNEL_MODE.value(&p.distance_mode),
             Value::Float(p.max_distance),
             Value::Float(p.blend_width),
-            support::choice_value(&support::TRANSFER_FALLOFF_LABELS, p.falloff as usize),
+            support::TRANSFER_FALLOFF.value(&p.falloff),
             Value::Float(p.uniform_bias),
-            support::choice_value(&support::TRANSFER_UNMATCHED_LABELS, unmatched_index(p.unmatched)),
+            support::TRANSFER_UNMATCHED.value(&p.unmatched),
             text_value(&p.distance_attribute),
             text_value(&p.source_group),
             text_value(&p.source_group_pattern),
             text_value(&p.source_vertex_group),
             text_value(&p.source_vertex_group_pattern),
-            support::choice_value(&VERTEX_SELECTION_LABELS, p.source_vertex_selection as usize),
+            VERTEX_SELECTION.value(&p.source_vertex_selection),
             text_value(&p.target_group),
             text_value(&p.target_group_pattern),
         ]
@@ -1292,8 +1249,8 @@ pub mod attribute_transfer_surface {
                 label: "Target owner",
                 ..decl::spec(
                     "target_owner",
-                    support::element_attribute_owner_kind(),
-                    support::choice_value(&support::ELEMENT_ATTRIBUTE_OWNER_LABELS, 0),
+                    support::ELEMENT_ATTRIBUTE_OWNER.kind(),
+                    support::ELEMENT_ATTRIBUTE_OWNER.at(0),
                 )
             },
             Spec {
@@ -1303,7 +1260,7 @@ pub mod attribute_transfer_surface {
             Spec {
                 label: "Distance mode",
                 folder: "Distance",
-                ..decl::spec("distance_mode", support::kernel_mode_kind(), support::kernel_mode_value(KernelMode::Explicit))
+                ..decl::spec("distance_mode", support::KERNEL_MODE.kind(), support::KERNEL_MODE.value(&KernelMode::Explicit))
             },
             Spec {
                 label: "Maximum distance",
@@ -1318,7 +1275,7 @@ pub mod attribute_transfer_surface {
             Spec {
                 label: "Falloff",
                 folder: "Distance",
-                ..decl::spec("falloff", support::transfer_falloff_kind(), support::choice_value(&support::TRANSFER_FALLOFF_LABELS, 0))
+                ..decl::spec("falloff", support::TRANSFER_FALLOFF.kind(), support::TRANSFER_FALLOFF.at(0))
             },
             Spec {
                 label: "Uniform bias",
@@ -1327,7 +1284,7 @@ pub mod attribute_transfer_surface {
             },
             Spec {
                 label: "Unmatched",
-                ..decl::spec("unmatched", support::transfer_unmatched_kind(), support::choice_value(&support::TRANSFER_UNMATCHED_LABELS, 0))
+                ..decl::spec("unmatched", support::TRANSFER_UNMATCHED.kind(), support::TRANSFER_UNMATCHED.at(0))
             },
             Spec {
                 label: "Distance attribute",
@@ -1355,8 +1312,8 @@ pub mod attribute_transfer_surface {
                 folder: "Groups/Source",
                 ..decl::spec(
                     "source_vertex_selection",
-                    vertex_selection_kind(),
-                    support::choice_value(&VERTEX_SELECTION_LABELS, 0),
+                    VERTEX_SELECTION.kind(),
+                    VERTEX_SELECTION.at(0),
                 )
             },
             Spec { label: "Target group", folder: "Groups/Target", ..decl::spec("target_group", decl::text_kind(), text_value("")) },
@@ -1576,25 +1533,25 @@ pub mod attribute_transfer {
 
     pub fn from_values(v: &[Value]) -> Parameters {
         Parameters {
-            owner: support::attribute_owner_of_value(&v[0]),
+            owner: support::ATTRIBUTE_OWNER.of(&v[0]),
             use_names: boolean(&v[1]),
             names: bytes(&v[2]).to_vec(),
             pattern: text(&v[3]),
-            mode: support::transfer_mode_of_value(&v[4]),
+            mode: support::TRANSFER_MODE.of(&v[4]),
             neighbors: int(&v[5]),
             power: float(&v[6]),
             kernel_radius: float(&v[7]),
-            distance_mode: support::kernel_mode_of_value(&v[8]),
+            distance_mode: support::KERNEL_MODE.of(&v[8]),
             max_distance: float(&v[9]),
             blend_width: float(&v[10]),
-            falloff: support::transfer_falloff_of_value(&v[11]),
+            falloff: support::TRANSFER_FALLOFF.of(&v[11]),
             uniform_bias: float(&v[12]),
-            unmatched: support::transfer_unmatched_of_value(&v[13]),
+            unmatched: support::TRANSFER_UNMATCHED.of(&v[13]),
             source_group: text(&v[14]),
             source_group_pattern: text(&v[15]),
             source_vertex_group: text(&v[16]),
             source_vertex_group_pattern: text(&v[17]),
-            source_vertex_selection: vertex_selection_of_value(&v[18]),
+            source_vertex_selection: VERTEX_SELECTION.of(&v[18]),
             target_group: text(&v[19]),
             target_group_pattern: text(&v[20]),
         }
@@ -1602,25 +1559,25 @@ pub mod attribute_transfer {
 
     pub fn to_values(p: &Parameters) -> Vec<Value> {
         vec![
-            support::attribute_owner_value(p.owner),
+            support::ATTRIBUTE_OWNER.value(&p.owner),
             Value::Bool(p.use_names),
             Value::Text(p.names.clone()),
             text_value(&p.pattern),
-            support::choice_value(&support::TRANSFER_MODE_LABELS, p.mode as usize),
+            support::TRANSFER_MODE.value(&p.mode),
             Value::Int(p.neighbors),
             Value::Float(p.power),
             Value::Float(p.kernel_radius),
-            support::kernel_mode_value(p.distance_mode),
+            support::KERNEL_MODE.value(&p.distance_mode),
             Value::Float(p.max_distance),
             Value::Float(p.blend_width),
-            support::choice_value(&support::TRANSFER_FALLOFF_LABELS, p.falloff as usize),
+            support::TRANSFER_FALLOFF.value(&p.falloff),
             Value::Float(p.uniform_bias),
-            support::choice_value(&support::TRANSFER_UNMATCHED_LABELS, unmatched_index(p.unmatched)),
+            support::TRANSFER_UNMATCHED.value(&p.unmatched),
             text_value(&p.source_group),
             text_value(&p.source_group_pattern),
             text_value(&p.source_vertex_group),
             text_value(&p.source_vertex_group_pattern),
-            support::choice_value(&VERTEX_SELECTION_LABELS, p.source_vertex_selection as usize),
+            VERTEX_SELECTION.value(&p.source_vertex_selection),
             text_value(&p.target_group),
             text_value(&p.target_group_pattern),
         ]
@@ -1642,8 +1599,8 @@ pub mod attribute_transfer {
                 label: "Owner",
                 ..decl::spec(
                     "owner",
-                    support::attribute_owner_kind(),
-                    support::choice_value(&support::ATTRIBUTE_OWNER_LABELS, 0),
+                    support::ATTRIBUTE_OWNER.kind(),
+                    support::ATTRIBUTE_OWNER.at(0),
                 )
             },
             Spec { label: "Use exact names", ..decl::spec("use_names", decl::toggle_kind(), Value::Bool(false)) },
@@ -1651,7 +1608,7 @@ pub mod attribute_transfer {
             Spec { label: "Attributes", ..decl::spec("pattern", decl::text_kind(), text_value("*")) },
             Spec {
                 label: "Transfer mode",
-                ..decl::spec("mode", support::transfer_mode_kind(), support::choice_value(&support::TRANSFER_MODE_LABELS, 0))
+                ..decl::spec("mode", support::TRANSFER_MODE.kind(), support::TRANSFER_MODE.at(0))
             },
             Spec {
                 label: "Neighbors",
@@ -1671,7 +1628,7 @@ pub mod attribute_transfer {
             Spec {
                 label: "Distance mode",
                 folder: "Distance",
-                ..decl::spec("distance_mode", support::kernel_mode_kind(), support::kernel_mode_value(KernelMode::Explicit))
+                ..decl::spec("distance_mode", support::KERNEL_MODE.kind(), support::KERNEL_MODE.value(&KernelMode::Explicit))
             },
             Spec {
                 label: "Maximum distance",
@@ -1686,7 +1643,7 @@ pub mod attribute_transfer {
             Spec {
                 label: "Falloff",
                 folder: "Distance",
-                ..decl::spec("falloff", support::transfer_falloff_kind(), support::choice_value(&support::TRANSFER_FALLOFF_LABELS, 0))
+                ..decl::spec("falloff", support::TRANSFER_FALLOFF.kind(), support::TRANSFER_FALLOFF.at(0))
             },
             Spec {
                 label: "Uniform bias",
@@ -1695,7 +1652,7 @@ pub mod attribute_transfer {
             },
             Spec {
                 label: "Unmatched",
-                ..decl::spec("unmatched", support::transfer_unmatched_kind(), support::choice_value(&support::TRANSFER_UNMATCHED_LABELS, 0))
+                ..decl::spec("unmatched", support::TRANSFER_UNMATCHED.kind(), support::TRANSFER_UNMATCHED.at(0))
             },
             Spec { label: "Source group", folder: "Groups/Source", ..decl::spec("source_group", decl::text_kind(), text_value("")) },
             Spec {
@@ -1718,8 +1675,8 @@ pub mod attribute_transfer {
                 folder: "Groups/Source",
                 ..decl::spec(
                     "source_vertex_selection",
-                    vertex_selection_kind(),
-                    support::choice_value(&VERTEX_SELECTION_LABELS, 0),
+                    VERTEX_SELECTION.kind(),
+                    VERTEX_SELECTION.at(0),
                 )
             },
             Spec { label: "Target group", folder: "Groups/Target", ..decl::spec("target_group", decl::text_kind(), text_value("")) },
@@ -2000,7 +1957,7 @@ mod tests {
             &[snapshot(&fixture()), snapshot(&fixture())],
         )
         .unwrap();
-        let fixed = node::apply_parameters(&n, &[("radius_mode".to_owned(), support::distance_radius_value(DistanceRadiusMode::Fixed))]).unwrap().0;
+        let fixed = node::apply_parameters(&n, &[("radius_mode".to_owned(), support::DISTANCE_RADIUS.value(&DistanceRadiusMode::Fixed))]).unwrap().0;
         let zero = node::apply_parameters(&fixed, &[("radius".to_owned(), Value::Float(0.0))]);
         let message = zero.err().expect("a zero fixed radius is refused");
         assert!(message.contains("fixed radius must be positive and finite"), "{message}");
@@ -2015,7 +1972,7 @@ mod tests {
         let message = node::apply_parameters(
             &n,
             &[
-                ("method_".to_owned(), support::choice_value(&MIRROR_METHOD_LABELS, 1)),
+                ("method_".to_owned(), MIRROR_METHOD.at(1)),
                 text_arg("mapping_attribute", "  "),
             ],
         )

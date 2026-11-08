@@ -81,7 +81,7 @@ pub mod group_transfer {
         Parameters {
             use_rules: *use_rules,
             rules: decode(rules).expect("rules were normalized by the schema"),
-            conflict: support::group_copy_conflict_of_value(&values[2]),
+            conflict: support::GROUP_COPY_CONFLICT.of(&values[2]),
             create_empty: *create_empty,
             distance: *distance,
         }
@@ -91,7 +91,7 @@ pub mod group_transfer {
         vec![
             Value::Bool(p.use_rules),
             Value::Text(encode(&p.rules)),
-            support::group_copy_conflict_value(p.conflict),
+            support::GROUP_COPY_CONFLICT.value(&p.conflict),
             Value::Bool(p.create_empty),
             Value::Float(p.distance),
         ]
@@ -117,8 +117,8 @@ pub mod group_transfer {
                 label: "Conflict",
                 ..decl::spec(
                     "conflict",
-                    support::group_copy_conflict_kind(),
-                    support::group_copy_conflict_value(CopyConflict::CopyOverwrite),
+                    support::GROUP_COPY_CONFLICT.kind(),
+                    support::GROUP_COPY_CONFLICT.value(&CopyConflict::CopyOverwrite),
                 )
             },
             Spec { label: "Create empty groups", ..decl::spec("create_empty", decl::toggle_kind(), Value::Bool(false)) },
