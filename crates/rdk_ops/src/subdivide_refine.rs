@@ -1,13 +1,11 @@
 //! Port of lib/rdk/ops/mesh/subdivide_refine.ml: stencil plans, creases, face-varying refinement,
 //! attribute/group remapping and local-part combination for polygon subdivision.
-use std::sync::atomic::{AtomicI32, AtomicI64, AtomicU64, AtomicU8, Ordering};
-
 use rdk_core::attribute::{self, Owner, Storage};
+use rdk_core::support::Windows;
 use rdk_core::{
     cancel, edge_group, error, geometry, group, packed, ragged_ops, support, topology,
     topology_index,
 };
-
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Scheme {
@@ -128,139 +126,25 @@ pub fn fmin(a: f64, b: f64) -> f64 {
     if a <= b { a } else { b }
 }
 
-/// Integer array written from disjoint parallel indices.
-pub struct AInts {
-    values: Vec<AtomicI64>,
-}
-
-impl AInts {
-    pub fn new(count: i64, fill: i64) -> AInts {
-        AInts { values: (0..count).map(|_| AtomicI64::new(fill)).collect() }
-    }
-    pub fn from_slice(values: &[i64]) -> AInts {
-        AInts { values: values.iter().map(|value| AtomicI64::new(*value)).collect() }
-    }
-    pub fn get(&self, index: i64) -> i64 {
-        self.values[index as usize].load(Ordering::Relaxed)
-    }
-    pub fn set(&self, index: i64, value: i64) {
-        self.values[index as usize].store(value, Ordering::Relaxed);
-    }
-    pub fn into_vec(self) -> Vec<i64> {
-        self.values.into_iter().map(AtomicI64::into_inner).collect()
-    }
-}
-
-/// Parallel `i32` scratch for per-vertex topology indices that fit the narrow range.
-struct AIntsI32 {
-    values: Vec<AtomicI32>,
-}
-
-impl AIntsI32 {
-    fn new(count: i64, fill: i64) -> Option<AIntsI32> {
-        if count > i32::MAX as i64 {
-            return None;
-        }
-        let fill = i32::try_from(fill).ok()?;
-        let count = count as usize;
-        Some(AIntsI32 {
-            values: (0..count).map(|_| AtomicI32::new(fill)).collect(),
-        })
-    }
-    fn set(&self, index: i64, value: i64) {
-        self.values[index as usize].store(i32::try_from(value).expect("narrow scratch value"), Ordering::Relaxed);
-    }
-    fn into_vec_i64(self) -> Vec<i64> {
-        self.values.into_iter().map(|value| i64::from(value.into_inner())).collect()
-    }
-}
-
-// ponytail: first of seven per-vertex `make_topology` scratch arrays; widen remaining `AInts` the same way.
-enum VertexPrimitiveScratch {
-    I32(AIntsI32),
-    I64(AInts),
-}
-
-impl VertexPrimitiveScratch {
-    fn new(count: i64, fill: i64) -> Self {
-        match AIntsI32::new(count, fill) {
-            Some(scratch) => Self::I32(scratch),
-            None => Self::I64(AInts::new(count, fill)),
-        }
-    }
-    fn set(&self, index: i64, value: i64) {
-        match self {
-            Self::I32(scratch) => scratch.set(index, value),
-            Self::I64(scratch) => scratch.set(index, value),
-        }
-    }
-    fn into_vec(self) -> Vec<i64> {
-        match self {
-            Self::I32(scratch) => scratch.into_vec_i64(),
-            Self::I64(scratch) => scratch.into_vec(),
-        }
-    }
-}
-
-pub struct AFloats {
-    values: Vec<AtomicU64>,
-}
-
-impl AFloats {
-    pub fn new(count: i64, fill: f64) -> AFloats {
-        AFloats { values: (0..count).map(|_| AtomicU64::new(fill.to_bits())).collect() }
-    }
-    pub fn from_slice(values: &[f64]) -> AFloats {
-        AFloats { values: values.iter().map(|value| AtomicU64::new(value.to_bits())).collect() }
-    }
-    pub fn get(&self, index: i64) -> f64 {
-        f64::from_bits(self.values[index as usize].load(Ordering::Relaxed))
-    }
-    pub fn set(&self, index: i64, value: f64) {
-        self.values[index as usize].store(value.to_bits(), Ordering::Relaxed);
-    }
-    pub fn into_vec(self) -> Vec<f64> {
-        self.values.into_iter().map(|value| f64::from_bits(value.into_inner())).collect()
-    }
-}
-
-pub struct ABytes {
-    values: Vec<AtomicU8>,
-}
-
-impl ABytes {
-    pub fn new(count: i64, fill: u8) -> ABytes {
-        ABytes { values: (0..count).map(|_| AtomicU8::new(fill)).collect() }
-    }
-    pub fn get(&self, index: i64) -> u8 {
-        self.values[index as usize].load(Ordering::Relaxed)
-    }
-    pub fn set(&self, index: i64, value: u8) {
-        self.values[index as usize].store(value, Ordering::Relaxed);
-    }
-    pub fn into_vec(self) -> Vec<u8> {
-        self.values.into_iter().map(AtomicU8::into_inner).collect()
-    }
-}
-
-/// `run ?grain ?cancel count operation`.
-pub fn run(
-    grain: Option<i64>,
-    cancel_token: Option<&cancel::T>,
-    count: i64,
-    operation: &(dyn Fn(i64) -> Result<(), error::T> + Sync),
-) -> Result<(), error::T> {
+/// The `?grain` argument: positive, default 16 384.
+fn grain_of(grain: Option<i64>) -> Result<i64, error::T> {
     let grain = grain.unwrap_or(16_384);
     if grain <= 0 {
-        return Err(invalid_arg(
-            "Rdk_mesh.Subdivide.subdivide: grain must be positive".to_owned(),
-        ));
+        return Err(invalid_arg("Rdk_mesh.Subdivide.subdivide: grain must be positive".to_owned()));
     }
-    if count > 0 {
-        support::parallel_for(cancel_token, grain, count, operation)
-    } else {
-        Ok(())
-    }
+    Ok(grain)
+}
+
+/// `Vec` of `count` elements with `out[i] = work(i)`, written through disjoint `grain`-sized windows.
+fn filled<T: Clone + Default + Send>(
+    cancel_token: Option<&cancel::T>,
+    grain: Option<i64>,
+    count: i64,
+    work: &(dyn Fn(i64) -> Result<T, error::T> + Sync),
+) -> Result<Vec<T>, error::T> {
+    let mut output = vec![T::default(); count.max(0) as usize];
+    support::par_fill(cancel_token, grain_of(grain)?, &mut output, work)?;
+    Ok(output)
 }
 
 #[derive(Clone)]
@@ -542,29 +426,37 @@ pub fn apply_crease_input(
                 return Err(failm("identical crease topology produced unstable edge numbering"));
             }
         }
-        let edge_assigned = ABytes::new(source_edge_count, 0);
-        let edge_weight = AFloats::new(source_edge_count, 0.0);
-        run(grain, cancel_token, source_edge_count, &|edge| {
-            let mut have = false;
-            let mut weight = 0.0;
-            for at in gi(&crease_index.edge_offsets, edge)..gi(&crease_index.edge_offsets, edge + 1)
-            {
-                let vertex = gi(&crease_index.edge_vertices, at);
-                let primitive = gi(&crease_index.primitive_of_vertex, vertex);
-                if selected(primitive) {
-                    let value = contribution(vertex, primitive);
-                    if !have || value > weight {
-                        have = true;
-                        weight = value;
+        let mut edge_assigned = vec![0u8; source_edge_count as usize];
+        let mut edge_weight = vec![0.0; source_edge_count as usize];
+        let grain = grain_of(grain)?;
+        let assigned_windows = Windows::even(&mut edge_assigned, grain);
+        let weight_windows = Windows::even(&mut edge_weight, grain);
+        support::run_indexed_ranges(grain, source_edge_count, &|range, first, last| {
+            let (assigned_out, weight_out) = (assigned_windows.take(range), weight_windows.take(range));
+            for edge in first..last {
+                support::poll(cancel_token, edge)?;
+                let mut have = false;
+                let mut weight = 0.0;
+                for at in
+                    gi(&crease_index.edge_offsets, edge)..gi(&crease_index.edge_offsets, edge + 1)
+                {
+                    let vertex = gi(&crease_index.edge_vertices, at);
+                    let primitive = gi(&crease_index.primitive_of_vertex, vertex);
+                    if selected(primitive) {
+                        let value = contribution(vertex, primitive);
+                        if !have || value > weight {
+                            have = true;
+                            weight = value;
+                        }
                     }
                 }
+                assigned_out[(edge - first) as usize] = have as u8;
+                weight_out[(edge - first) as usize] = weight;
             }
-            edge_assigned.set(edge, have as u8);
-            edge_weight.set(edge, weight);
             Ok(())
         })?;
-        assigned = edge_assigned.into_vec();
-        assigned_weights = edge_weight.into_vec();
+        assigned = edge_assigned;
+        assigned_weights = edge_weight;
     } else {
         let mut local_assigned = vec![0u8; source_edge_count as usize];
         let mut local_weights = vec![0.0f64; source_edge_count as usize];
@@ -640,14 +532,12 @@ pub fn build_child_edge_sharpness(
     point_count: i64,
     edge_sharpness: &[f64],
 ) -> Result<Vec<f64>, error::T> {
-    let child = AFloats::new(edge_sharpness.len() as i64 * 2, 0.0);
-    run(grain, cancel_token, point_count, &|point| {
-        let first = gi(&index.point_edge_offsets, point);
-        let last = gi(&index.point_edge_offsets, point + 1);
+    // Chaikin averages the positive sharpness of the edges around a point.
+    let sharp_totals = filled(cancel_token, grain, point_count, &|point| {
         let mut sharp_sum = 0.0;
         let mut sharp_count = 0_i64;
         if method_ == SubdivideCreasingChaikin {
-            for at in first..last {
+            for at in gi(&index.point_edge_offsets, point)..gi(&index.point_edge_offsets, point + 1) {
                 let weight = gf(edge_sharpness, gi(&index.point_edges, at));
                 if weight > 0.0 {
                     sharp_sum += weight;
@@ -655,28 +545,32 @@ pub fn build_child_edge_sharpness(
                 }
             }
         }
-        for at in first..last {
-            let edge = gi(&index.point_edges, at);
-            let parent = gf(edge_sharpness, edge);
-            let value = match method_ {
-                SubdivideCreasingUniform => fmax(0.0, parent - 1.0),
-                SubdivideCreasingChaikin => {
-                    if parent <= 0.0 {
-                        0.0
-                    } else if sharp_count <= 1 {
-                        fmax(0.0, parent - 1.0)
-                    } else {
-                        let others = (sharp_sum - parent) / ((sharp_count - 1) as f64);
-                        fmax(0.0, (0.75 * parent) + (0.25 * others) - 1.0)
-                    }
-                }
-            };
-            let side = if gi(&index.edge_a, edge) == point { 0 } else { 1 };
-            child.set(edge * 2 + side, value);
-        }
-        Ok(())
+        Ok((sharp_sum, sharp_count))
     })?;
-    Ok(child.into_vec())
+    // Slot `edge * 2 + side` belongs to the edge's endpoint on that side.
+    filled(cancel_token, grain, edge_sharpness.len() as i64 * 2, &|slot| {
+        let (edge, side) = (slot / 2, slot % 2);
+        let point = gi(if side == 0 { &index.edge_a } else { &index.edge_b }, edge);
+        // A loop edge lists its point once, so its second slot stays 0.
+        if side == 1 && point == gi(&index.edge_a, edge) {
+            return Ok(0.0);
+        }
+        let (sharp_sum, sharp_count) = sharp_totals[point as usize];
+        let parent = gf(edge_sharpness, edge);
+        Ok(match method_ {
+            SubdivideCreasingUniform => fmax(0.0, parent - 1.0),
+            SubdivideCreasingChaikin => {
+                if parent <= 0.0 {
+                    0.0
+                } else if sharp_count <= 1 {
+                    fmax(0.0, parent - 1.0)
+                } else {
+                    let others = (sharp_sum - parent) / ((sharp_count - 1) as f64);
+                    fmax(0.0, (0.75 * parent) + (0.25 * others) - 1.0)
+                }
+            }
+        })
+    })
 }
 
 pub fn build_vertex_sharp_plan(
@@ -689,104 +583,116 @@ pub fn build_vertex_sharp_plan(
     corner_sharpness: &[f64],
 ) -> Result<VertexMaskPlan, error::T> {
     let point_count = corner_sharpness.len() as i64;
-    let parent_kind = ABytes::new(point_count, 0);
-    let child_kind = ABytes::new(point_count, 0);
-    let transition_factor = AFloats::new(point_count, 1.0);
-    let parent_a = AInts::new(point_count, 0);
-    let parent_b = AInts::new(point_count, 0);
-    let child_a = AInts::new(point_count, 0);
-    let child_b = AInts::new(point_count, 0);
-    for point in 0..point_count {
-        parent_a.set(point, point);
-        parent_b.set(point, point);
-        child_a.set(point, point);
-        child_b.set(point, point);
-    }
+    let count = point_count as usize;
+    let mut parent_kind = vec![0u8; count];
+    let mut child_kind = vec![0u8; count];
+    let mut transition_factor = vec![1.0; count];
+    let mut parent_a = vec![0_i64; count];
+    let mut parent_b = vec![0_i64; count];
+    let mut child_a = vec![0_i64; count];
+    let mut child_b = vec![0_i64; count];
     let child_weight = |point: i64, edge: i64| {
         let side = if gi(&index.edge_a, edge) == point { 0 } else { 1 };
         gf(child_edge_sharpness, edge * 2 + side)
     };
-    run(grain, cancel_token, point_count, &|point| {
-        let first = gi(&index.point_edge_offsets, point);
-        let last = gi(&index.point_edge_offsets, point + 1);
-        let classify = |child: bool| -> (u8, i64, i64, f64) {
-            let mut count = 0_i64;
-            let mut a = point;
-            let mut b = point;
-            for at in first..last {
-                let edge = gi(&index.point_edges, at);
-                let weight =
-                    if child { child_weight(point, edge) } else { gf(edge_sharpness, edge) };
-                if weight > 0.0 {
-                    let neighbor = if gi(&index.edge_a, edge) == point {
-                        gi(&index.edge_b, edge)
-                    } else {
-                        gi(&index.edge_a, edge)
-                    };
-                    if count == 0 {
-                        a = neighbor;
+    let grain = grain_of(grain)?;
+    let parent_kind_windows = Windows::even(&mut parent_kind, grain);
+    let child_kind_windows = Windows::even(&mut child_kind, grain);
+    let transition_windows = Windows::even(&mut transition_factor, grain);
+    let parent_a_windows = Windows::even(&mut parent_a, grain);
+    let parent_b_windows = Windows::even(&mut parent_b, grain);
+    let child_a_windows = Windows::even(&mut child_a, grain);
+    let child_b_windows = Windows::even(&mut child_b, grain);
+    support::run_indexed_ranges(grain, point_count, &|range, first_point, last_point| {
+        let parent_kind_out = parent_kind_windows.take(range);
+        let child_kind_out = child_kind_windows.take(range);
+        let transition_out = transition_windows.take(range);
+        let parent_a_out = parent_a_windows.take(range);
+        let parent_b_out = parent_b_windows.take(range);
+        let child_a_out = child_a_windows.take(range);
+        let child_b_out = child_b_windows.take(range);
+        for point in first_point..last_point {
+            support::poll(cancel_token, point)?;
+            let slot = (point - first_point) as usize;
+            let first = gi(&index.point_edge_offsets, point);
+            let last = gi(&index.point_edge_offsets, point + 1);
+            let classify = |child: bool| -> (u8, i64, i64, f64) {
+                let mut count = 0_i64;
+                let mut a = point;
+                let mut b = point;
+                for at in first..last {
+                    let edge = gi(&index.point_edges, at);
+                    let weight =
+                        if child { child_weight(point, edge) } else { gf(edge_sharpness, edge) };
+                    if weight > 0.0 {
+                        let neighbor = if gi(&index.edge_a, edge) == point {
+                            gi(&index.edge_b, edge)
+                        } else {
+                            gi(&index.edge_a, edge)
+                        };
+                        if count == 0 {
+                            a = neighbor;
+                        }
+                        b = neighbor;
+                        count += 1;
                     }
-                    b = neighbor;
-                    count += 1;
                 }
-            }
-            let corner = if child {
-                fmax(0.0, gf(corner_sharpness, point) - 1.0)
-            } else {
-                gf(corner_sharpness, point)
-            };
-            let kind = if corner > 0.0 || count > 2 {
-                2
-            } else if count == 2 {
-                1
-            } else {
-                0
-            };
-            (kind, a, b, corner)
-        };
-        let (p_kind, p_a, p_b, parent_corner) = classify(false);
-        let (c_kind, c_a, c_b, child_corner) = classify(true);
-        parent_kind.set(point, p_kind);
-        child_kind.set(point, c_kind);
-        parent_a.set(point, p_a);
-        parent_b.set(point, p_b);
-        child_a.set(point, c_a);
-        child_b.set(point, c_b);
-        if p_kind != c_kind {
-            let mut sum = 0.0;
-            let mut count = 0_i64;
-            if parent_corner > 0.0 && child_corner <= 0.0 {
-                sum = parent_corner;
-                count = 1;
-            }
-            for at in first..last {
-                let edge = gi(&index.point_edges, at);
-                let parent = gf(edge_sharpness, edge);
-                let child = child_weight(point, edge);
-                let transitioned = match method_ {
-                    SubdivideCreasingUniform => parent > 0.0 && parent <= 1.0,
-                    SubdivideCreasingChaikin => parent > 0.0 && child <= 0.0,
+                let corner = if child {
+                    fmax(0.0, gf(corner_sharpness, point) - 1.0)
+                } else {
+                    gf(corner_sharpness, point)
                 };
-                if transitioned {
-                    sum += parent;
-                    count += 1;
+                let kind = if corner > 0.0 || count > 2 {
+                    2
+                } else if count == 2 {
+                    1
+                } else {
+                    0
+                };
+                (kind, a, b, corner)
+            };
+            let (p_kind, p_a, p_b, parent_corner) = classify(false);
+            let (c_kind, c_a, c_b, child_corner) = classify(true);
+            parent_kind_out[slot] = p_kind;
+            child_kind_out[slot] = c_kind;
+            parent_a_out[slot] = p_a;
+            parent_b_out[slot] = p_b;
+            child_a_out[slot] = c_a;
+            child_b_out[slot] = c_b;
+            if p_kind != c_kind {
+                let mut sum = 0.0;
+                let mut count = 0_i64;
+                if parent_corner > 0.0 && child_corner <= 0.0 {
+                    sum = parent_corner;
+                    count = 1;
                 }
+                for at in first..last {
+                    let edge = gi(&index.point_edges, at);
+                    let parent = gf(edge_sharpness, edge);
+                    let child = child_weight(point, edge);
+                    let transitioned = match method_ {
+                        SubdivideCreasingUniform => parent > 0.0 && parent <= 1.0,
+                        SubdivideCreasingChaikin => parent > 0.0 && child <= 0.0,
+                    };
+                    if transitioned {
+                        sum += parent;
+                        count += 1;
+                    }
+                }
+                transition_out[slot] =
+                    if count == 0 { 0.0 } else { clamp_sharpness(sum / (count as f64)) };
             }
-            transition_factor.set(
-                point,
-                if count == 0 { 0.0 } else { clamp_sharpness(sum / (count as f64)) },
-            );
         }
         Ok(())
     })?;
     Ok(VertexMaskPlan {
-        parent_kind: parent_kind.into_vec(),
-        child_kind: child_kind.into_vec(),
-        transition_factor: transition_factor.into_vec(),
-        parent_a: parent_a.into_vec(),
-        parent_b: parent_b.into_vec(),
-        child_a: child_a.into_vec(),
-        child_b: child_b.into_vec(),
+        parent_kind,
+        child_kind,
+        transition_factor,
+        parent_a,
+        parent_b,
+        child_a,
+        child_b,
     })
 }
 
@@ -1037,6 +943,7 @@ pub fn point_term_count(
     }
 }
 
+/// Writes `output`'s stencil terms into its exactly-sized `sources`/`weights` slots.
 #[allow(clippy::too_many_arguments)]
 pub fn fill_point_stencil(
     boundary_interpolation: BoundaryInterpolation,
@@ -1046,21 +953,20 @@ pub fn fill_point_stencil(
     index: &topology_index::View::View,
     source_points: i64,
     edge_count: i64,
-    offsets: &[i64],
-    sources: &AInts,
-    weights: &AFloats,
-    representatives: &AInts,
+    sources: &mut [i64],
+    weights: &mut [f64],
+    representative: &mut i64,
     output: i64,
 ) -> Result<(), error::T> {
-    let mut cursor = gi(offsets, output);
+    let mut cursor = 0;
     let mut add = |source: i64, weight: f64| {
-        sources.set(cursor, source);
-        weights.set(cursor, weight);
+        sources[cursor] = source;
+        weights[cursor] = weight;
         cursor += 1;
     };
     if output < source_points {
         let point = output;
-        representatives.set(output, point);
+        *representative = point;
         match scheme {
             Scheme::Bilinear => add(point, 1.0),
             Scheme::Loop => {
@@ -1145,7 +1051,7 @@ pub fn fill_point_stencil(
         let edge = output - source_points;
         let a = gi(&index.edge_a, edge);
         let b = gi(&index.edge_b, edge);
-        representatives.set(output, a.min(b));
+        *representative = a.min(b);
         let incidence = gi(&index.edge_offsets, edge + 1) - gi(&index.edge_offsets, edge);
         match scheme {
             Scheme::Bilinear => {
@@ -1205,15 +1111,70 @@ pub fn fill_point_stencil(
         let first = gi(&topology_view.primitive_offsets, primitive);
         let last = gi(&topology_view.primitive_offsets, primitive + 1);
         let weight = 1.0 / ((last - first) as f64);
-        representatives.set(output, gi(&topology_view.vertex_points, first));
+        *representative = gi(&topology_view.vertex_points, first);
         for vertex in first..last {
             add(gi(&topology_view.vertex_points, vertex), weight);
         }
     }
-    if cursor != gi(offsets, output + 1) {
+    if cursor != sources.len() {
         return Err(failm("internal stencil cardinality mismatch"));
     }
     Ok(())
+}
+
+/// Stencil terms and representatives of every output point; `point_offsets` fixes each point's term slots.
+#[allow(clippy::too_many_arguments)]
+fn build_stencils(
+    cancel_token: Option<&cancel::T>,
+    grain: Option<i64>,
+    boundary_interpolation: BoundaryInterpolation,
+    triangle_subdivision: TrianglePolicy,
+    scheme: Scheme,
+    topology_view: &topology::View::View,
+    index: &topology_index::View::View,
+    source_points: i64,
+    edge_count: i64,
+    point_offsets: &[i64],
+) -> Result<(Vec<i64>, Vec<f64>, Vec<i64>), error::T> {
+    let output_points = point_offsets.len() as i64 - 1;
+    let stencil_total = gi(point_offsets, output_points);
+    let mut sources = vec![0_i64; stencil_total as usize];
+    let mut weights = vec![0.0_f64; stencil_total as usize];
+    let mut representatives = vec![0_i64; output_points as usize];
+    let grain = grain_of(grain)?;
+    let ranges = support::range_count(output_points, grain);
+    let term_bound =
+        |range: i64| gi(point_offsets, range.saturating_mul(grain).min(output_points)) as usize;
+    let source_windows = Windows::new(&mut sources, ranges, term_bound);
+    let weight_windows = Windows::new(&mut weights, ranges, term_bound);
+    let representative_windows = Windows::even(&mut representatives, grain);
+    support::run_indexed_ranges(grain, output_points, &|range, first, last| {
+        let (mut source_rest, mut weight_rest) = (source_windows.take(range), weight_windows.take(range));
+        let representative_out = representative_windows.take(range);
+        for output in first..last {
+            support::poll(cancel_token, output)?;
+            let terms = (gi(point_offsets, output + 1) - gi(point_offsets, output)) as usize;
+            let (output_sources, rest) = std::mem::take(&mut source_rest).split_at_mut(terms);
+            source_rest = rest;
+            let (output_weights, rest) = std::mem::take(&mut weight_rest).split_at_mut(terms);
+            weight_rest = rest;
+            fill_point_stencil(
+                boundary_interpolation,
+                triangle_subdivision,
+                scheme,
+                topology_view,
+                index,
+                source_points,
+                edge_count,
+                output_sources,
+                output_weights,
+                &mut representative_out[(output - first) as usize],
+                output,
+            )?;
+        }
+        Ok(())
+    })?;
+    Ok((sources, weights, representatives))
 }
 
 pub struct Built {
@@ -1268,47 +1229,87 @@ pub fn make_topology(
                 Some(offsets) => offsets[source_primitive_count as usize],
             };
             let output_vertices = checked_mul("output vertex count", output_primitives, 4)?;
-            let vertex_points = AInts::new(output_vertices, 0);
+            let vertices = topology_view.vertex_points.len() as i64;
+            // Output primitives produced by the source corners before `vertex`.
+            let output_before = |vertex: i64| match &visible_offsets {
+                None => vertex,
+                Some(offsets) if vertex >= vertices => offsets[source_primitive_count as usize],
+                Some(offsets) => {
+                    let primitive = gi(&index.primitive_of_vertex, vertex);
+                    gi(offsets, primitive)
+                        + if visible(primitive) {
+                            vertex - gi(&topology_view.primitive_offsets, primitive)
+                        } else {
+                            0
+                        }
+                }
+            };
+            let mut vertex_points = vec![0_i64; output_vertices as usize];
             let primitive_offsets: Vec<i64> = (0..=output_primitives).map(|i| i * 4).collect();
             let primitive_kinds = vec![0u8; output_primitives as usize];
-            let vertex_kind = ABytes::new(output_vertices, 0);
-            let vertex_a = AInts::new(output_vertices, 0);
-            let vertex_b = AInts::new(output_vertices, -1);
-            let vertex_primitive = VertexPrimitiveScratch::new(output_vertices, -1);
-            let vertex_edge_source = AInts::new(output_vertices, -1);
-            let primitive_source = AInts::new(output_primitives, 0);
-            run(grain, cancel_token, topology_view.vertex_points.len() as i64, &|vertex| {
-                let primitive = gi(&index.primitive_of_vertex, vertex);
-                let previous = gi(&index.previous_vertex, vertex);
-                let next = gi(&index.next_vertex, vertex);
-                if visible(primitive) {
-                    let output_primitive = match &visible_offsets {
-                        None => vertex,
-                        Some(offsets) => {
-                            gi(offsets, primitive) + vertex
-                                - gi(&topology_view.primitive_offsets, primitive)
-                        }
-                    };
-                    let edge = gi(&index.edge_of_vertex, vertex);
-                    let previous_edge = gi(&index.edge_of_vertex, previous);
-                    let at = output_primitive * 4;
-                    vertex_points.set(at, gi(&topology_view.vertex_points, vertex));
-                    vertex_points.set(at + 1, source_points + edge);
-                    vertex_points.set(at + 2, face_offset + primitive);
-                    vertex_points.set(at + 3, source_points + previous_edge);
-                    vertex_kind.set(at, 0);
-                    vertex_a.set(at, vertex);
-                    vertex_edge_source.set(at, edge);
-                    vertex_kind.set(at + 1, 1);
-                    vertex_a.set(at + 1, vertex);
-                    vertex_b.set(at + 1, next);
-                    vertex_kind.set(at + 2, 2);
-                    vertex_primitive.set(at + 2, primitive);
-                    vertex_kind.set(at + 3, 1);
-                    vertex_a.set(at + 3, previous);
-                    vertex_b.set(at + 3, vertex);
-                    vertex_edge_source.set(at + 3, previous_edge);
-                    primitive_source.set(output_primitive, primitive);
+            let mut vertex_kind = vec![0u8; output_vertices as usize];
+            let mut vertex_a = vec![0_i64; output_vertices as usize];
+            let mut vertex_b = vec![-1_i64; output_vertices as usize];
+            let mut vertex_primitive = vec![-1_i64; output_vertices as usize];
+            let mut vertex_edge_source = vec![-1_i64; output_vertices as usize];
+            let mut primitive_source = vec![0_i64; output_primitives as usize];
+            let grain = grain_of(grain)?;
+            let ranges = support::range_count(vertices, grain);
+            let window = |range: i64, stride: i64| {
+                (output_before(range.saturating_mul(grain).min(vertices)) * stride) as usize
+            };
+            let points_windows = Windows::new(&mut vertex_points, ranges, |range| window(range, 4));
+            let kind_windows = Windows::new(&mut vertex_kind, ranges, |range| window(range, 4));
+            let a_windows = Windows::new(&mut vertex_a, ranges, |range| window(range, 4));
+            let b_windows = Windows::new(&mut vertex_b, ranges, |range| window(range, 4));
+            let primitive_windows = Windows::new(&mut vertex_primitive, ranges, |range| window(range, 4));
+            let edge_source_windows =
+                Windows::new(&mut vertex_edge_source, ranges, |range| window(range, 4));
+            let source_windows = Windows::new(&mut primitive_source, ranges, |range| window(range, 1));
+            support::run_indexed_ranges(grain, vertices, &|range, first, last| {
+                let points_out = points_windows.take(range);
+                let kind_out = kind_windows.take(range);
+                let a_out = a_windows.take(range);
+                let b_out = b_windows.take(range);
+                let primitive_out = primitive_windows.take(range);
+                let edge_source_out = edge_source_windows.take(range);
+                let source_out = source_windows.take(range);
+                let base = output_before(first);
+                for vertex in first..last {
+                    support::poll(cancel_token, vertex)?;
+                    let primitive = gi(&index.primitive_of_vertex, vertex);
+                    let previous = gi(&index.previous_vertex, vertex);
+                    let next = gi(&index.next_vertex, vertex);
+                    if visible(primitive) {
+                        let output_primitive = match &visible_offsets {
+                            None => vertex,
+                            Some(offsets) => {
+                                gi(offsets, primitive) + vertex
+                                    - gi(&topology_view.primitive_offsets, primitive)
+                            }
+                        };
+                        let edge = gi(&index.edge_of_vertex, vertex);
+                        let previous_edge = gi(&index.edge_of_vertex, previous);
+                        let local = (output_primitive - base) as usize;
+                        let at = local * 4;
+                        points_out[at] = gi(&topology_view.vertex_points, vertex);
+                        points_out[at + 1] = source_points + edge;
+                        points_out[at + 2] = face_offset + primitive;
+                        points_out[at + 3] = source_points + previous_edge;
+                        kind_out[at] = 0;
+                        a_out[at] = vertex;
+                        edge_source_out[at] = edge;
+                        kind_out[at + 1] = 1;
+                        a_out[at + 1] = vertex;
+                        b_out[at + 1] = next;
+                        kind_out[at + 2] = 2;
+                        primitive_out[at + 2] = primitive;
+                        kind_out[at + 3] = 1;
+                        a_out[at + 3] = previous;
+                        b_out[at + 3] = vertex;
+                        edge_source_out[at + 3] = previous_edge;
+                        source_out[local] = primitive;
+                    }
                 }
                 Ok(())
             })?;
@@ -1318,15 +1319,15 @@ pub fn make_topology(
                 topology_view.primitive_kinds.len() as i64,
             )?;
             Ok(Built {
-                vertex_kind: vertex_kind.into_vec(),
-                vertex_a: vertex_a.into_vec(),
-                vertex_b: vertex_b.into_vec(),
-                vertex_primitive: vertex_primitive.into_vec(),
-                vertex_edge_source: vertex_edge_source.into_vec(),
-                primitive_source: primitive_source.into_vec(),
+                vertex_kind,
+                vertex_a,
+                vertex_b,
+                vertex_primitive,
+                vertex_edge_source,
+                primitive_source,
                 topology: topology::View::create_validated_owned(
                     point_count,
-                    vertex_points.into_vec(),
+                    vertex_points,
                     primitive_offsets,
                     primitive_kinds,
                 ),
@@ -1351,76 +1352,101 @@ pub fn make_topology(
             };
             let output_primitives = checked_mul("output primitive count", visible_primitives, 4)?;
             let output_vertices = checked_mul("output vertex count", visible_primitives, 12)?;
-            let vertex_points = AInts::new(output_vertices, 0);
+            let mut vertex_points = vec![0_i64; output_vertices as usize];
             let primitive_offsets: Vec<i64> = (0..=output_primitives).map(|i| i * 3).collect();
             let primitive_kinds = vec![0u8; output_primitives as usize];
-            let vertex_kind = ABytes::new(output_vertices, 0);
-            let vertex_a = AInts::new(output_vertices, 0);
-            let vertex_b = AInts::new(output_vertices, -1);
-            let vertex_primitive = VertexPrimitiveScratch::new(output_vertices, -1);
-            let vertex_edge_source = AInts::new(output_vertices, -1);
-            let primitive_source = AInts::new(output_primitives, 0);
-            let set = |vertex: i64, point: i64, kind: u8, a: i64, b: i64, primitive: i64| {
-                vertex_points.set(vertex, point);
-                vertex_kind.set(vertex, kind);
-                vertex_a.set(vertex, a);
-                vertex_b.set(vertex, b);
-                vertex_primitive.set(vertex, primitive);
+            let mut vertex_kind = vec![0u8; output_vertices as usize];
+            let mut vertex_a = vec![0_i64; output_vertices as usize];
+            let mut vertex_b = vec![-1_i64; output_vertices as usize];
+            let mut vertex_primitive = vec![-1_i64; output_vertices as usize];
+            let mut vertex_edge_source = vec![-1_i64; output_vertices as usize];
+            let mut primitive_source = vec![0_i64; output_primitives as usize];
+            // Output primitives produced by the source primitives before `primitive`.
+            let output_before = |primitive: i64| match &visible_offsets {
+                None => primitive,
+                Some(offsets) => gi(offsets, primitive),
             };
-            run(grain, cancel_token, source_primitives, &|primitive| {
-                if visible(primitive) {
-                    let output_source = match &visible_offsets {
-                        None => primitive,
-                        Some(offsets) => gi(offsets, primitive),
-                    };
-                    let first = gi(&topology_view.primitive_offsets, primitive);
-                    let va = first;
-                    let vb = first + 1;
-                    let vc = first + 2;
-                    let a = gi(&topology_view.vertex_points, va);
-                    let b = gi(&topology_view.vertex_points, vb);
-                    let c = gi(&topology_view.vertex_points, vc);
-                    let ea = gi(&index.edge_of_vertex, va);
-                    let eb = gi(&index.edge_of_vertex, vb);
-                    let ec = gi(&index.edge_of_vertex, vc);
-                    let ab = source_points + ea;
-                    let bc = source_points + eb;
-                    let ca = source_points + ec;
-                    let at = output_source * 12;
-                    set(at, a, 0, va, -1, primitive);
-                    vertex_edge_source.set(at, ea);
-                    set(at + 1, ab, 1, va, vb, primitive);
-                    set(at + 2, ca, 1, vc, va, primitive);
-                    vertex_edge_source.set(at + 2, ec);
-                    set(at + 3, b, 0, vb, -1, primitive);
-                    vertex_edge_source.set(at + 3, eb);
-                    set(at + 4, bc, 1, vb, vc, primitive);
-                    set(at + 5, ab, 1, va, vb, primitive);
-                    vertex_edge_source.set(at + 5, ea);
-                    set(at + 6, c, 0, vc, -1, primitive);
-                    vertex_edge_source.set(at + 6, ec);
-                    set(at + 7, ca, 1, vc, va, primitive);
-                    set(at + 8, bc, 1, vb, vc, primitive);
-                    vertex_edge_source.set(at + 8, eb);
-                    set(at + 9, ab, 1, va, vb, primitive);
-                    set(at + 10, bc, 1, vb, vc, primitive);
-                    set(at + 11, ca, 1, vc, va, primitive);
-                    for child in 0..4 {
-                        primitive_source.set(output_source * 4 + child, primitive);
+            let grain = grain_of(grain)?;
+            let ranges = support::range_count(source_primitives, grain);
+            let window = |range: i64, stride: i64| {
+                (output_before(range.saturating_mul(grain).min(source_primitives)) * stride) as usize
+            };
+            let points_windows = Windows::new(&mut vertex_points, ranges, |range| window(range, 12));
+            let kind_windows = Windows::new(&mut vertex_kind, ranges, |range| window(range, 12));
+            let a_windows = Windows::new(&mut vertex_a, ranges, |range| window(range, 12));
+            let b_windows = Windows::new(&mut vertex_b, ranges, |range| window(range, 12));
+            let primitive_windows =
+                Windows::new(&mut vertex_primitive, ranges, |range| window(range, 12));
+            let edge_source_windows =
+                Windows::new(&mut vertex_edge_source, ranges, |range| window(range, 12));
+            let source_windows = Windows::new(&mut primitive_source, ranges, |range| window(range, 4));
+            support::run_indexed_ranges(grain, source_primitives, &|range, first, last| {
+                let points_out = points_windows.take(range);
+                let kind_out = kind_windows.take(range);
+                let a_out = a_windows.take(range);
+                let b_out = b_windows.take(range);
+                let primitive_out = primitive_windows.take(range);
+                let edge_source_out = edge_source_windows.take(range);
+                let source_out = source_windows.take(range);
+                let base = output_before(first);
+                for primitive in first..last {
+                    support::poll(cancel_token, primitive)?;
+                    if visible(primitive) {
+                        let local = output_before(primitive) - base;
+                        let first = gi(&topology_view.primitive_offsets, primitive);
+                        let va = first;
+                        let vb = first + 1;
+                        let vc = first + 2;
+                        let a = gi(&topology_view.vertex_points, va);
+                        let b = gi(&topology_view.vertex_points, vb);
+                        let c = gi(&topology_view.vertex_points, vc);
+                        let ea = gi(&index.edge_of_vertex, va);
+                        let eb = gi(&index.edge_of_vertex, vb);
+                        let ec = gi(&index.edge_of_vertex, vc);
+                        let ab = source_points + ea;
+                        let bc = source_points + eb;
+                        let ca = source_points + ec;
+                        let at = (local * 12) as usize;
+                        let mut set = |vertex: usize, point: i64, kind: u8, a: i64, b: i64| {
+                            points_out[vertex] = point;
+                            kind_out[vertex] = kind;
+                            a_out[vertex] = a;
+                            b_out[vertex] = b;
+                            primitive_out[vertex] = primitive;
+                        };
+                        set(at, a, 0, va, -1);
+                        edge_source_out[at] = ea;
+                        set(at + 1, ab, 1, va, vb);
+                        set(at + 2, ca, 1, vc, va);
+                        edge_source_out[at + 2] = ec;
+                        set(at + 3, b, 0, vb, -1);
+                        edge_source_out[at + 3] = eb;
+                        set(at + 4, bc, 1, vb, vc);
+                        set(at + 5, ab, 1, va, vb);
+                        edge_source_out[at + 5] = ea;
+                        set(at + 6, c, 0, vc, -1);
+                        edge_source_out[at + 6] = ec;
+                        set(at + 7, ca, 1, vc, va);
+                        set(at + 8, bc, 1, vb, vc);
+                        edge_source_out[at + 8] = eb;
+                        set(at + 9, ab, 1, va, vb);
+                        set(at + 10, bc, 1, vb, vc);
+                        set(at + 11, ca, 1, vc, va);
+                        source_out[local as usize * 4..][..4].fill(primitive);
                     }
                 }
                 Ok(())
             })?;
             Ok(Built {
-                vertex_kind: vertex_kind.into_vec(),
-                vertex_a: vertex_a.into_vec(),
-                vertex_b: vertex_b.into_vec(),
-                vertex_primitive: vertex_primitive.into_vec(),
-                vertex_edge_source: vertex_edge_source.into_vec(),
-                primitive_source: primitive_source.into_vec(),
+                vertex_kind,
+                vertex_a,
+                vertex_b,
+                vertex_primitive,
+                vertex_edge_source,
+                primitive_source,
                 topology: topology::View::create_validated_owned(
                     source_points + edge_count,
-                    vertex_points.into_vec(),
+                    vertex_points,
                     primitive_offsets,
                     primitive_kinds,
                 ),
@@ -1473,26 +1499,18 @@ pub fn make_plan(
             )?,
         )?;
     }
-    let stencil_total = point_offsets[output_points as usize];
-    let point_sources = AInts::new(stencil_total, 0);
-    let point_weights = AFloats::new(stencil_total, 0.0);
-    let point_representative = AInts::new(output_points, 0);
-    run(grain, cancel_token, output_points, &|output| {
-        fill_point_stencil(
-            boundary_interpolation,
-            triangle_subdivision,
-            scheme,
-            &topology_view,
-            &index,
-            source_points,
-            edge_count,
-            &point_offsets,
-            &point_sources,
-            &point_weights,
-            &point_representative,
-            output,
-        )
-    })?;
+    let (point_sources, point_weights, point_representative) = build_stencils(
+        cancel_token,
+        grain,
+        boundary_interpolation,
+        triangle_subdivision,
+        scheme,
+        &topology_view,
+        &index,
+        source_points,
+        edge_count,
+        &point_offsets,
+    )?;
     let creases = match crease_data(edge_crease_override, source, &topology_view, &index)? {
         None => None,
         Some((edge_sharpness, corner_sharpness, has_edge_creases, _has_corner_creases)) => {
@@ -1545,9 +1563,9 @@ pub fn make_plan(
         face_offset,
         output_points,
         point_offsets,
-        point_sources: point_sources.into_vec(),
-        point_weights: point_weights.into_vec(),
-        point_representative: point_representative.into_vec(),
+        point_sources,
+        point_weights,
+        point_representative,
         edge_ancestry_attribute,
         boundary_interpolation,
         triangle_subdivision,
@@ -1602,46 +1620,40 @@ pub fn point_float(
     plan: &Plan,
     source: &[f64],
 ) -> Result<Vec<f64>, error::T> {
-    let output = AFloats::new(plan.output_points, 0.0);
-    run(grain, cancel_token, plan.output_points, &|point| {
+    filled(cancel_token, grain, plan.output_points, &|point| {
         let mut sum = 0.0;
         for at in gi(&plan.point_offsets, point)..gi(&plan.point_offsets, point + 1) {
             sum += gf(source, gi(&plan.point_sources, at)) * gf(&plan.point_weights, at);
         }
         let value = sum;
-        output.set(
-            point,
-            if plan.scheme == Scheme::Bilinear {
-                value
-            } else if point < plan.source_points {
-                match &plan.creases {
-                    None => value,
-                    Some(creases) => creased_vertex_value(creases, source, point, value),
-                }
-            } else if point < plan.source_points + plan.edge_count {
-                match &plan.creases {
-                    None => value,
-                    Some(creases) if !creases.has_edge_creases => value,
-                    Some(creases) => {
-                        let edge = point - plan.source_points;
-                        let factor = creased_edge_factor(creases, edge);
-                        if factor == 0.0 {
-                            value
-                        } else {
-                            let midpoint = (gf(source, gi(&plan.index.edge_a, edge))
-                                + gf(source, gi(&plan.index.edge_b, edge)))
-                                * 0.5;
-                            value + ((midpoint - value) * factor)
-                        }
+        Ok(if plan.scheme == Scheme::Bilinear {
+            value
+        } else if point < plan.source_points {
+            match &plan.creases {
+                None => value,
+                Some(creases) => creased_vertex_value(creases, source, point, value),
+            }
+        } else if point < plan.source_points + plan.edge_count {
+            match &plan.creases {
+                None => value,
+                Some(creases) if !creases.has_edge_creases => value,
+                Some(creases) => {
+                    let edge = point - plan.source_points;
+                    let factor = creased_edge_factor(creases, edge);
+                    if factor == 0.0 {
+                        value
+                    } else {
+                        let midpoint = (gf(source, gi(&plan.index.edge_a, edge))
+                            + gf(source, gi(&plan.index.edge_b, edge)))
+                            * 0.5;
+                        value + ((midpoint - value) * factor)
                     }
                 }
-            } else {
-                value
-            },
-        );
-        Ok(())
-    })?;
-    Ok(output.into_vec())
+            }
+        } else {
+            value
+        })
+    })
 }
 
 #[derive(Clone)]
@@ -2069,26 +2081,18 @@ pub fn fvar_refinement(
             )?,
         )?;
     }
-    let stencil_total = point_offsets[output_points as usize];
-    let point_sources = AInts::new(stencil_total, 0);
-    let point_weights = AFloats::new(stencil_total, 0.0);
-    let point_representatives = AInts::new(output_points, 0);
-    run(grain, cancel_token, output_points, &|output| {
-        fill_point_stencil(
-            SubdivideBoundaryEdgeOnly,
-            plan.triangle_subdivision,
-            plan.scheme,
-            &fvar_topology_view,
-            &fvar_index,
-            fvar_point_count,
-            edge_count,
-            &point_offsets,
-            &point_sources,
-            &point_weights,
-            &point_representatives,
-            output,
-        )
-    })?;
+    let (point_sources, point_weights, _point_representatives) = build_stencils(
+        cancel_token,
+        grain,
+        SubdivideBoundaryEdgeOnly,
+        plan.triangle_subdivision,
+        plan.scheme,
+        &fvar_topology_view,
+        &fvar_index,
+        fvar_point_count,
+        edge_count,
+        &point_offsets,
+    )?;
     let creases = match crease_data(None, &fvar_geometry, &fvar_topology_view, &fvar_index)? {
         None => None,
         Some((edge_sharpness, corner_sharpness, has_edge_creases, _has_corner_creases)) => {
@@ -2140,8 +2144,8 @@ pub fn fvar_refinement(
         fvar_edge_count: edge_count,
         fvar_output_points: output_points,
         fvar_point_offsets: point_offsets.clone(),
-        fvar_point_sources: point_sources.into_vec(),
-        fvar_point_weights: point_weights.into_vec(),
+        fvar_point_sources: point_sources,
+        fvar_point_weights: point_weights,
         fvar_index,
         fvar_creases: creases,
     };
@@ -2154,46 +2158,40 @@ pub fn fvar_point_float(
     plan: &FvarPointPlan,
     source: &[f64],
 ) -> Result<Vec<f64>, error::T> {
-    let output = AFloats::new(plan.fvar_output_points, 0.0);
-    run(grain, cancel_token, plan.fvar_output_points, &|point| {
+    filled(cancel_token, grain, plan.fvar_output_points, &|point| {
         let mut sum = 0.0;
         for at in gi(&plan.fvar_point_offsets, point)..gi(&plan.fvar_point_offsets, point + 1) {
             sum += gf(source, gi(&plan.fvar_point_sources, at)) * gf(&plan.fvar_point_weights, at);
         }
         let value = sum;
-        output.set(
-            point,
-            if plan.fvar_scheme == Scheme::Bilinear {
-                value
-            } else if point < plan.fvar_source_points {
-                match &plan.fvar_creases {
-                    None => value,
-                    Some(creases) => creased_vertex_value(creases, source, point, value),
-                }
-            } else if point < plan.fvar_source_points + plan.fvar_edge_count {
-                match &plan.fvar_creases {
-                    None => value,
-                    Some(creases) if !creases.has_edge_creases => value,
-                    Some(creases) => {
-                        let edge = point - plan.fvar_source_points;
-                        let factor = creased_edge_factor(creases, edge);
-                        if factor == 0.0 {
-                            value
-                        } else {
-                            let midpoint = (gf(source, gi(&plan.fvar_index.edge_a, edge))
-                                + gf(source, gi(&plan.fvar_index.edge_b, edge)))
-                                * 0.5;
-                            value + ((midpoint - value) * factor)
-                        }
+        Ok(if plan.fvar_scheme == Scheme::Bilinear {
+            value
+        } else if point < plan.fvar_source_points {
+            match &plan.fvar_creases {
+                None => value,
+                Some(creases) => creased_vertex_value(creases, source, point, value),
+            }
+        } else if point < plan.fvar_source_points + plan.fvar_edge_count {
+            match &plan.fvar_creases {
+                None => value,
+                Some(creases) if !creases.has_edge_creases => value,
+                Some(creases) => {
+                    let edge = point - plan.fvar_source_points;
+                    let factor = creased_edge_factor(creases, edge);
+                    if factor == 0.0 {
+                        value
+                    } else {
+                        let midpoint = (gf(source, gi(&plan.fvar_index.edge_a, edge))
+                            + gf(source, gi(&plan.fvar_index.edge_b, edge)))
+                            * 0.5;
+                        value + ((midpoint - value) * factor)
                     }
                 }
-            } else {
-                value
-            },
-        );
-        Ok(())
-    })?;
-    Ok(output.into_vec())
+            }
+        } else {
+            value
+        })
+    })
 }
 
 pub fn linear_vertex_float(
@@ -2203,15 +2201,13 @@ pub fn linear_vertex_float(
     source: &[f64],
 ) -> Result<Vec<f64>, error::T> {
     let count = plan.vertex_kind.len() as i64;
-    let output = AFloats::new(count, 0.0);
-    run(grain, cancel_token, count, &|vertex| {
-        match gu(&plan.vertex_kind, vertex) {
-            0 => output.set(vertex, gf(source, gi(&plan.vertex_a, vertex))),
-            1 => output.set(
-                vertex,
+    filled(cancel_token, grain, count, &|vertex| {
+        Ok(match gu(&plan.vertex_kind, vertex) {
+            0 => gf(source, gi(&plan.vertex_a, vertex)),
+            1 => {
                 (gf(source, gi(&plan.vertex_a, vertex)) + gf(source, gi(&plan.vertex_b, vertex)))
-                    * 0.5,
-            ),
+                    * 0.5
+            }
             _ => {
                 let primitive = gi(&plan.vertex_primitive, vertex);
                 let first = gi(&plan.source_topology.primitive_offsets, primitive);
@@ -2220,12 +2216,10 @@ pub fn linear_vertex_float(
                 for corner in first..last {
                     sum += gf(source, corner);
                 }
-                output.set(vertex, sum / ((last - first) as f64));
+                sum / ((last - first) as f64)
             }
-        }
-        Ok(())
-    })?;
-    Ok(output.into_vec())
+        })
+    })
 }
 
 pub fn isolated_vertex_float(
@@ -2236,9 +2230,8 @@ pub fn isolated_vertex_float(
     source: &[f64],
 ) -> Result<Vec<f64>, error::T> {
     let count = plan.vertex_kind.len() as i64;
-    let output = AFloats::new(count, 0.0);
-    run(grain, cancel_token, count, &|output_vertex| {
-        match gu(&plan.vertex_kind, output_vertex) {
+    filled(cancel_token, grain, count, &|output_vertex| {
+        Ok(match gu(&plan.vertex_kind, output_vertex) {
             0 => {
                 let vertex = gi(&plan.vertex_a, output_vertex);
                 let previous = gi(&plan.index.previous_vertex, vertex);
@@ -2247,14 +2240,13 @@ pub fn isolated_vertex_float(
                     + (0.125 * gf(source, previous))
                     + (0.125 * gf(source, next));
                 let factor = clamp_sharpness(gf(corner_sharpness, vertex));
-                output.set(output_vertex, smooth + ((gf(source, vertex) - smooth) * factor));
+                smooth + ((gf(source, vertex) - smooth) * factor)
             }
-            1 => output.set(
-                output_vertex,
+            1 => {
                 (gf(source, gi(&plan.vertex_a, output_vertex))
                     + gf(source, gi(&plan.vertex_b, output_vertex)))
-                    * 0.5,
-            ),
+                    * 0.5
+            }
             _ => {
                 let primitive = gi(&plan.vertex_primitive, output_vertex);
                 let first = gi(&plan.source_topology.primitive_offsets, primitive);
@@ -2263,12 +2255,10 @@ pub fn isolated_vertex_float(
                 for corner in first..last {
                     sum += gf(source, corner);
                 }
-                output.set(output_vertex, sum / ((last - first) as f64));
+                sum / ((last - first) as f64)
             }
-        }
-        Ok(())
-    })?;
-    Ok(output.into_vec())
+        })
+    })
 }
 
 pub fn fvar_float(
@@ -2325,12 +2315,9 @@ pub fn primitive_float(
     source: &[f64],
 ) -> Result<Vec<f64>, error::T> {
     let count = plan.primitive_source.len() as i64;
-    let output = AFloats::new(count, 0.0);
-    run(grain, cancel_token, count, &|primitive| {
-        output.set(primitive, gf(source, gi(&plan.primitive_source, primitive)));
-        Ok(())
-    })?;
-    Ok(output.into_vec())
+    filled(cancel_token, grain, count, &|primitive| {
+        Ok(gf(source, gi(&plan.primitive_source, primitive)))
+    })
 }
 
 /// For each output element of `owner`, the source element a discrete attribute copies.
@@ -2346,27 +2333,18 @@ pub fn discrete_mapping(
         Owner::Primitive => plan.primitive_source.len() as i64,
         Owner::Detail => 1,
     };
-    let output = AInts::new(count, 0);
-    run(grain, cancel_token, count, &|index| {
-        output.set(
-            index,
-            match owner {
-                Owner::Point => gi(&plan.point_representative, index),
-                Owner::Vertex => match gu(&plan.vertex_kind, index) {
-                    0 => gi(&plan.vertex_a, index),
-                    1 => gi(&plan.vertex_a, index).min(gi(&plan.vertex_b, index)),
-                    _ => gi(
-                        &plan.source_topology.primitive_offsets,
-                        gi(&plan.vertex_primitive, index),
-                    ),
-                },
-                Owner::Primitive => gi(&plan.primitive_source, index),
-                Owner::Detail => 0,
+    filled(cancel_token, grain, count, &|index| {
+        Ok(match owner {
+            Owner::Point => gi(&plan.point_representative, index),
+            Owner::Vertex => match gu(&plan.vertex_kind, index) {
+                0 => gi(&plan.vertex_a, index),
+                1 => gi(&plan.vertex_a, index).min(gi(&plan.vertex_b, index)),
+                _ => gi(&plan.source_topology.primitive_offsets, gi(&plan.vertex_primitive, index)),
             },
-        );
-        Ok(())
-    })?;
-    Ok(output.into_vec())
+            Owner::Primitive => gi(&plan.primitive_source, index),
+            Owner::Detail => 0,
+        })
+    })
 }
 
 fn discrete_map_ints(mapping: &[i64], source: &[i64]) -> Result<Vec<i64>, error::T> {
@@ -2391,16 +2369,15 @@ pub fn vertex_edge_discrete_map(
     default: i64,
 ) -> Result<Vec<i64>, error::T> {
     let count = plan.vertex_kind.len() as i64;
-    let output = AInts::new(count, default);
-    run(grain, cancel_token, count, &|vertex| {
+    filled(cancel_token, grain, count, &|vertex| {
         let edge = gi(&plan.vertex_edge_source, vertex);
-        if edge >= 0 {
+        Ok(if edge >= 0 {
             let directed = gi(&plan.index.edge_vertices, gi(&plan.index.edge_offsets, edge));
-            output.set(vertex, gi(source, directed));
-        }
-        Ok(())
-    })?;
-    Ok(output.into_vec())
+            gi(source, directed)
+        } else {
+            default
+        })
+    })
 }
 
 pub fn numeric_map(
@@ -2479,15 +2456,17 @@ pub fn remap_attribute(
         if !generate_resulting_creases || !values.iter().any(|&value| value > 1.0) {
             return Ok(None);
         }
-        let output = AFloats::new(plan.output_points, 0.0);
-        run(grain, cancel_token, plan.source_points, &|point| {
-            output.set(point, fmax(0.0, gf(values, point) - 1.0));
-            Ok(())
-        })?;
+        let mut output = vec![0.0; plan.output_points as usize];
+        support::par_fill(
+            cancel_token,
+            grain_of(grain)?,
+            &mut output[..plan.source_points as usize],
+            &|point| Ok(fmax(0.0, gf(values, point) - 1.0)),
+        )?;
         return Ok(Some(attribute::create_owned(
             "cornerweight",
             Owner::Point,
-            Storage::Float(output.into_vec()),
+            Storage::Float(output),
         )?));
     }
     let use_fvar = fvar_enabled(owner, face_varying_interpolation, plan);
@@ -2633,21 +2612,22 @@ pub fn resulting_crease_attribute(
         return Ok(None);
     };
     let count = plan.vertex_edge_source.len() as i64;
-    let values = AFloats::new(count, 0.0);
+    let mut values = vec![0.0; count as usize];
     // The output topology is read once, not per vertex.
     let topology_view = topology::View::view(&plan.topology)?;
-    run(grain, cancel_token, count, &|vertex| {
+    support::par_fill(cancel_token, grain_of(grain)?, &mut values, &|vertex| {
         let edge = gi(&plan.vertex_edge_source, vertex);
-        if edge >= 0 {
+        Ok(if edge >= 0 {
             let slot = output_child_slot_in(plan, &topology_view, vertex, edge)?;
-            values.set(vertex, gf(child_sharpness, slot));
-        }
-        Ok(())
+            gf(child_sharpness, slot)
+        } else {
+            0.0
+        })
     })?;
     Ok(Some(attribute::create_owned(
         "creaseweight",
         Owner::Vertex,
-        Storage::Float(values.into_vec()),
+        Storage::Float(values),
     )?))
 }
 
@@ -3234,24 +3214,21 @@ pub fn welded_float_plane(
             Some(values) => gf(values, local),
         })
     };
-    let output = AFloats::new(count, 0.0);
-    run(grain, cancel_token, count, &|point| {
+    filled(cancel_token, grain, count, &|point| {
         let first = gi(&weld.merge_offsets, point);
         let last = gi(&weld.merge_offsets, point + 1);
         let coarse = value(gi(&weld.output_source, point))?;
         if first == last {
-            output.set(point, coarse);
+            Ok(coarse)
         } else {
             let mut sum = 0.0;
             for at in first..last {
                 sum += value(gi(&weld.merge_members, at))?;
             }
             let refined = sum / ((last - first) as f64);
-            output.set(point, ((1.0 - weld.bias) * coarse) + (weld.bias * refined));
+            Ok(((1.0 - weld.bias) * coarse) + (weld.bias * refined))
         }
-        Ok(())
-    })?;
-    Ok(output.into_vec())
+    })
 }
 
 pub fn welded_representatives(weld: &PointWeld) -> Vec<i64> {
@@ -3504,9 +3481,10 @@ pub fn combine_parts(
     let mut px = vec![0.0_f64; point_count as usize];
     let mut py = vec![0.0_f64; point_count as usize];
     let mut pz = vec![0.0_f64; point_count as usize];
-    let vertex_points = AInts::new(vertex_count, 0);
-    let primitive_offsets = AInts::new(checked_add("combined primitive offsets", primitive_count, 1)?, 0);
-    let primitive_kinds = ABytes::new(primitive_count, 0);
+    let mut vertex_points = vec![0_i64; vertex_count as usize];
+    let mut primitive_offsets =
+        vec![0_i64; checked_add("combined primitive offsets", primitive_count, 1)? as usize];
+    let mut primitive_kinds = vec![0u8; primitive_count as usize];
     let mut point_at = 0_i64;
     let mut vertex_at = 0_i64;
     let mut primitive_at = 0_i64;
@@ -3526,26 +3504,31 @@ pub fn combine_parts(
         let base_point = point_at;
         let base_vertex = vertex_at;
         let base_primitive = primitive_at;
-        run(grain, cancel_token, vertices, &|vertex| {
-            let source_point = gi(&topology_view.vertex_points, vertex) + base_point;
-            vertex_points.set(
-                base_vertex + vertex,
-                match weld {
+        let grain = grain_of(grain)?;
+        support::par_fill(
+            cancel_token,
+            grain,
+            &mut vertex_points[base_vertex as usize..(base_vertex + vertices) as usize],
+            &|vertex| {
+                let source_point = gi(&topology_view.vertex_points, vertex) + base_point;
+                Ok(match weld {
                     None => source_point,
                     Some(weld) => gi(&weld.old_to_output, source_point),
-                },
-            );
-            Ok(())
-        })?;
-        run(grain, cancel_token, primitives, &|primitive| {
-            primitive_offsets.set(
-                base_primitive + primitive + 1,
-                gi(&topology_view.primitive_offsets, primitive + 1) + base_vertex,
-            );
-            primitive_kinds
-                .set(base_primitive + primitive, gu(&topology_view.primitive_kinds, primitive));
-            Ok(())
-        })?;
+                })
+            },
+        )?;
+        support::par_fill(
+            cancel_token,
+            grain,
+            &mut primitive_offsets[base_primitive as usize + 1..(base_primitive + primitives) as usize + 1],
+            &|primitive| Ok(gi(&topology_view.primitive_offsets, primitive + 1) + base_vertex),
+        )?;
+        support::par_fill(
+            cancel_token,
+            grain,
+            &mut primitive_kinds[base_primitive as usize..(base_primitive + primitives) as usize],
+            &|primitive| Ok(gu(&topology_view.primitive_kinds, primitive)),
+        )?;
         point_at += points;
         vertex_at += vertices;
         primitive_at += primitives;
@@ -3554,24 +3537,24 @@ pub fn combine_parts(
         match weld {
             None => {
                 for added in 0..added_vertices {
-                    vertex_points.set(base_vertex_count + added, gi(&append.triangle_points, added));
+                    vertex_points[(base_vertex_count + added) as usize] = gi(&append.triangle_points, added);
                 }
             }
             Some(weld) => {
-                run(grain, cancel_token, added_vertices, &|added| {
-                    vertex_points.set(
-                        base_vertex_count + added,
-                        gi(&weld.old_to_output, gi(&append.triangle_points, added)),
-                    );
-                    Ok(())
-                })?;
+                support::par_fill(
+                    cancel_token,
+                    grain_of(grain)?,
+                    &mut vertex_points[base_vertex_count as usize..],
+                    &|added| Ok(gi(&weld.old_to_output, gi(&append.triangle_points, added))),
+                )?;
             }
         }
-        run(grain, cancel_token, added_primitives, &|added| {
-            primitive_offsets
-                .set(base_primitive_count + added + 1, base_vertex_count + ((added + 1) * 3));
-            Ok(())
-        })?;
+        support::par_fill(
+            cancel_token,
+            grain_of(grain)?,
+            &mut primitive_offsets[base_primitive_count as usize + 1..],
+            &|added| Ok(base_vertex_count + ((added + 1) * 3)),
+        )?;
     }
     if let Some(weld) = weld {
         let mut views = Vec::with_capacity(parts.len());
@@ -3587,9 +3570,9 @@ pub fn combine_parts(
     }
     let topology_value = topology::View::create_validated_owned(
         point_count,
-        vertex_points.into_vec(),
-        primitive_offsets.into_vec(),
-        primitive_kinds.into_vec(),
+        vertex_points,
+        primitive_offsets,
+        primitive_kinds,
     );
     let source_templates = geometry::attributes(source);
     let mut extra_templates: Vec<attribute::T> = Vec::new();
@@ -3780,12 +3763,7 @@ pub fn select_floats(
     if count == 0 {
         return Ok(Vec::new());
     }
-    let output = AFloats::new(count, 0.0);
-    run(grain, cancel_token, count, &|point| {
-        output.set(point, gf(source, gi(mapping, point)));
-        Ok(())
-    })?;
-    Ok(output.into_vec())
+    filled(cancel_token, grain, count, &|point| Ok(gf(source, gi(mapping, point))))
 }
 
 pub fn select_ints(
@@ -3798,12 +3776,7 @@ pub fn select_ints(
     if count == 0 {
         return Ok(Vec::new());
     }
-    let output = AInts::new(count, 0);
-    run(grain, cancel_token, count, &|point| {
-        output.set(point, gi(source, gi(mapping, point)));
-        Ok(())
-    })?;
-    Ok(output.into_vec())
+    filled(cancel_token, grain, count, &|point| Ok(gi(source, gi(mapping, point))))
 }
 
 pub fn select_texts(
@@ -3956,17 +3929,14 @@ pub fn split_disconnected_point_fans(
             point_source[target as usize] = root_source[root];
         }
     }
-    let vertex_points = AInts::new(vertex_count, 0);
-    run(grain, cancel_token, vertex_count, &|vertex| {
+    let vertex_points = filled(cancel_token, grain, vertex_count, &|vertex| {
         let root = gi(&roots, vertex);
         let target = gi(&root_target, root);
         if target < 0 {
             return Err(failm("split-fan corner has no component"));
         }
-        vertex_points.set(vertex, target);
-        Ok(())
+        Ok(target)
     })?;
-    let vertex_points = vertex_points.into_vec();
     let output_topology = topology::View::create_validated_owned(
         output_points,
         vertex_points.clone(),
@@ -4310,19 +4280,16 @@ pub fn interpolate_array(
     source: &[f64],
 ) -> Result<Vec<f64>, error::T> {
     let count = left.len() as i64;
-    let output = AFloats::new(count, 0.0);
-    run(grain, cancel_token, count, &|target| {
+    filled(cancel_token, grain, count, &|target| {
         let a = gi(left, target);
         let b = gi(right, target);
         if a == b {
-            output.set(target, gf(source, a));
+            Ok(gf(source, a))
         } else {
             let t = gf(weight, target);
-            output.set(target, ((1.0 - t) * gf(source, a)) + (t * gf(source, b)));
+            Ok(((1.0 - t) * gf(source, a)) + (t * gf(source, b)))
         }
-        Ok(())
-    })?;
-    Ok(output.into_vec())
+    })
 }
 
 pub fn representative_map(left: &[i64], right: &[i64], weight: &[f64]) -> Vec<i64> {
@@ -5116,24 +5083,4 @@ pub fn once(
         Some(groups),
         Some(edge_groups),
     )
-}
-
-#[cfg(test)]
-mod m18_vertex_primitive_scratch {
-    use super::{AIntsI32, VertexPrimitiveScratch};
-
-    #[test]
-    fn vertex_primitive_i32_scratch_round_trip() {
-        let scratch = VertexPrimitiveScratch::new(8, -1);
-        scratch.set(2, 5);
-        scratch.set(6, 0);
-        assert_eq!(scratch.into_vec(), vec![-1, -1, 5, -1, -1, -1, 0, -1]);
-    }
-
-    #[test]
-    fn vertex_primitive_i32_direct() {
-        let narrow = AIntsI32::new(4, 0).expect("narrow length");
-        narrow.set(1, 7);
-        assert_eq!(narrow.into_vec_i64(), vec![0, 7, 0, 0]);
-    }
 }
