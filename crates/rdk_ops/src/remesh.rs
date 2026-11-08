@@ -4,11 +4,12 @@ use std::sync::Arc;
 
 use rdk_core::attribute::{self, Owner, Storage};
 use rdk_core::{
-    cancel, edge_group, error, geometry, group, packed, topology, topology_index,
+    cancel, edge_group, error, geometry, group, packed, support, topology, topology_index,
 };
+use rdk_core::support::Windows;
 
 use crate::subdivide_refine::{
-    collect_edge_members, fmin, gf, gi, run as run_parallel, AFloats,
+    collect_edge_members, fmin, gf, gi,
 };
 
 
@@ -2161,42 +2162,39 @@ pub fn project_to_reference(
     let source_positions = packed::Float3::View::view(geometry::positions(reference))?;
     let source_topology = topology::View::view(geometry::topology(reference))?;
     let current = packed::Float3::View::view(geometry::positions(geometry_value))?;
-    let x = AFloats::from_slice(&current.x);
-    let y = AFloats::from_slice(&current.y);
-    let z = AFloats::from_slice(&current.z);
-    run_parallel(Some(grain), cancel_token, count, &|point| {
-        if group::mem(point, &used) {
-            let triangle = triangles[point as usize];
-            let vertex0 = rdk_geom::surface_index::View::triangle_vertex(surface, triangle, 0);
-            let vertex1 = rdk_geom::surface_index::View::triangle_vertex(surface, triangle, 1);
-            let vertex2 = rdk_geom::surface_index::View::triangle_vertex(surface, triangle, 2);
-            let p0 = gi(&source_topology.vertex_points, vertex0);
-            let p1 = gi(&source_topology.vertex_points, vertex1);
-            let p2 = gi(&source_topology.vertex_points, vertex2);
-            let (pa, pb, pc) = (a[point as usize], b[point as usize], c[point as usize]);
-            x.set(
-                point,
-                (pa * gf(&source_positions.x, p0))
-                    + (pb * gf(&source_positions.x, p1))
-                    + (pc * gf(&source_positions.x, p2)),
-            );
-            y.set(
-                point,
-                (pa * gf(&source_positions.y, p0))
-                    + (pb * gf(&source_positions.y, p1))
-                    + (pc * gf(&source_positions.y, p2)),
-            );
-            z.set(
-                point,
-                (pa * gf(&source_positions.z, p0))
-                    + (pb * gf(&source_positions.z, p1))
-                    + (pc * gf(&source_positions.z, p2)),
-            );
-        }
-        Ok(())
-    })?;
+    let (mut x, mut y, mut z) = (current.x.to_vec(), current.y.to_vec(), current.z.to_vec());
+    {
+        let (wx, wy, wz) = (Windows::even(&mut x, grain), Windows::even(&mut y, grain), Windows::even(&mut z, grain));
+        support::run_indexed_ranges(grain, count, &|range, first, last| {
+            let (x, y, z) = (wx.take(range), wy.take(range), wz.take(range));
+            for point in first..last {
+                support::poll(cancel_token, point)?;
+                if group::mem(point, &used) {
+                    let at = (point - first) as usize;
+                    let triangle = triangles[point as usize];
+                    let vertex0 = rdk_geom::surface_index::View::triangle_vertex(surface, triangle, 0);
+                    let vertex1 = rdk_geom::surface_index::View::triangle_vertex(surface, triangle, 1);
+                    let vertex2 = rdk_geom::surface_index::View::triangle_vertex(surface, triangle, 2);
+                    let p0 = gi(&source_topology.vertex_points, vertex0);
+                    let p1 = gi(&source_topology.vertex_points, vertex1);
+                    let p2 = gi(&source_topology.vertex_points, vertex2);
+                    let (pa, pb, pc) = (a[point as usize], b[point as usize], c[point as usize]);
+                    x[at] = (pa * gf(&source_positions.x, p0))
+                        + (pb * gf(&source_positions.x, p1))
+                        + (pc * gf(&source_positions.x, p2));
+                    y[at] = (pa * gf(&source_positions.y, p0))
+                        + (pb * gf(&source_positions.y, p1))
+                        + (pc * gf(&source_positions.y, p2));
+                    z[at] = (pa * gf(&source_positions.z, p0))
+                        + (pb * gf(&source_positions.z, p1))
+                        + (pc * gf(&source_positions.z, p2));
+                }
+            }
+            Ok(())
+        })?;
+    }
     geometry::with_positions(
-        packed::Float3::View::of_owned_exn(x.into_vec(), y.into_vec(), z.into_vec())?,
+        packed::Float3::View::of_owned_exn(x, y, z)?,
         geometry_value,
     )
 }
@@ -2263,11 +2261,10 @@ pub fn install_outputs(
         Some(name) => {
             let positions = packed::Float3::View::view(geometry::positions(&with_size))?;
             let primitive_count = geometry::primitive_count(&with_size);
-            let quality = AFloats::new(primitive_count, 0.0);
-            run_parallel(Some(grain), cancel_token, primitive_count, &|primitive| {
+            let mut quality = vec![0.0; primitive_count as usize];
+            support::par_fill(cancel_token, grain, &mut quality, &|primitive| {
                 if !primitive_is_triangle(&topology_view, primitive) {
-                    quality.set(primitive, 0.0);
-                    return Ok(());
+                    return Ok(0.0);
                 }
                 let first = gi(&topology_view.primitive_offsets, primitive);
                 let p0 = gi(&topology_view.vertex_points, first);
@@ -2299,8 +2296,7 @@ pub fn install_outputs(
                     ),
                 );
                 if scale == 0.0 {
-                    quality.set(primitive, 0.0);
-                    return Ok(());
+                    return Ok(0.0);
                 }
                 let ax = dx01 / scale;
                 let ay = dy01 / scale;
@@ -2321,20 +2317,16 @@ pub fn install_outputs(
                     + (dx20 / scale).powf(2.0)
                     + (dy20 / scale).powf(2.0)
                     + (dz20 / scale).powf(2.0);
-                quality.set(
-                    primitive,
-                    if lengths2 == 0.0 {
-                        0.0
-                    } else {
-                        fmin(1.0, 2.0 * 3.0_f64.sqrt() * area2 / lengths2)
-                    },
-                );
-                Ok(())
+                Ok(if lengths2 == 0.0 {
+                    0.0
+                } else {
+                    fmin(1.0, 2.0 * 3.0_f64.sqrt() * area2 / lengths2)
+                })
             })?;
             let created = attribute::create_owned(
                 name,
                 Owner::Primitive,
-                Storage::Float(quality.into_vec()),
+                Storage::Float(quality),
             )?;
             geometry::with_attribute(created, &with_size)
         }

@@ -4,12 +4,12 @@ use rdk_core::{
     attribute, attribute_pattern, cancel, element_selection, error, geometry, group, packed, support, topology,
     topology_index,
 };
+use rdk_core::support::Windows;
 use rdk_geom::point_grid::float_max;
 use rdk_geom::surface_index::View::RayDirections;
 use rdk_geom::surface_index::{self, RayDirectionMode, RaySurfaceHit};
 
 use crate::attribute_ops;
-use crate::subdivide_refine::{ABytes, AFloats, AInts};
 use crate::attribute_transfer::Unmatched;
 use crate::deform;
 
@@ -604,9 +604,13 @@ fn raycast_average_drivers_into(
         return Err(fail("invalid_parameter", "Surface_index: average ray driver arrays do not match queries"));
     }
     let queries = packed::Float3::View::view(queries)?;
-    let numbers = AInts::from_slice(vertex_numbers);
-    let weights = AFloats::from_slice(vertex_weights);
-    support::run_indexed_ranges(grain, query_count as i64, &|_, first, last| {
+    // Range `r` writes the driver slots of its queries: `offsets[first..last + 1]`.
+    let ranges = support::range_count(query_count as i64, grain);
+    let bound = |range: i64| offsets[((range * grain.max(1)) as usize).min(query_count)] as usize;
+    let (numbers, weights) = (Windows::new(vertex_numbers, ranges, bound), Windows::new(vertex_weights, ranges, bound));
+    support::run_indexed_ranges(grain, query_count as i64, &|range, first, last| {
+        let (numbers, weights) = (numbers.take(range), weights.take(range));
+        let base = bound(range);
         let (first, last) = (first as usize, last as usize);
         let mut scratch = [0.0f64; 8];
         let mut node_stack = [0i64; 65];
@@ -649,12 +653,11 @@ fn raycast_average_drivers_into(
                     )?;
                     if integer_results[0] >= 0 {
                         let triangle = integer_results[1];
-                        numbers.set(at as i64, surface_index::View::triangle_vertex(value, triangle, 0));
-                        numbers.set((at + 1) as i64, surface_index::View::triangle_vertex(value, triangle, 1));
-                        numbers.set((at + 2) as i64, surface_index::View::triangle_vertex(value, triangle, 2));
-                        weights.set(at as i64, float_results[1] * scale);
-                        weights.set((at + 1) as i64, float_results[2] * scale);
-                        weights.set((at + 2) as i64, float_results[3] * scale);
+                        let slot = at - base;
+                        for corner in 0..3 {
+                            numbers[slot + corner] = surface_index::View::triangle_vertex(value, triangle, corner as i64);
+                            weights[slot + corner] = float_results[1 + corner] * scale;
+                        }
                         at += 3;
                     }
                 }
@@ -664,10 +667,7 @@ fn raycast_average_drivers_into(
             }
         }
         Ok(())
-    })?;
-    vertex_numbers.copy_from_slice(&numbers.into_vec());
-    vertex_weights.copy_from_slice(&weights.into_vec());
-    Ok(())
+    })
 }
 
 fn existing_point_float(name: &str, count: usize, source: &geometry::T, default: f64) -> Result<Vec<f64>, error::T> {
@@ -921,113 +921,118 @@ fn run_inner(
     let source_positions = packed::Float3::View::view(geometry::positions(source))?;
     let collision_positions = packed::Float3::View::view(geometry::positions(collision))?;
     let collision_topology = topology::View::view(geometry::topology(collision))?;
-    let px = AFloats::from_slice(&source_positions.x);
-    let py = AFloats::from_slice(&source_positions.y);
-    let pz = AFloats::from_slice(&source_positions.z);
-    let range_count = if point_count == 0 { 0 } else { point_count.div_ceil(grain as usize) };
-    let errors = AInts::new(range_count as i64, -1);
-    let changed = ABytes::new(range_count as i64, 0);
-    let normal_cells = normal_planes
-        .take()
-        .map(|(x, y, z)| (AFloats::from_slice(&x), AFloats::from_slice(&y), AFloats::from_slice(&z)));
-    support::run_indexed_ranges(grain, point_count as i64, &|range, first, last| {
-        let (first, last) = (first as usize, last as usize);
-        let mut normal = [0.0f64; 3];
-        for point in first..last {
-            cancel::poll(cancel_ref, point as i64, 4095)?;
-            let triangle = triangles[point];
-            if triangle < 0 {
-                continue;
-            }
-            let va = surface_index::View::triangle_vertex(&surface, triangle, 0) as usize;
-            let vb = surface_index::View::triangle_vertex(&surface, triangle, 1) as usize;
-            let vc = surface_index::View::triangle_vertex(&surface, triangle, 2) as usize;
-            let a = collision_topology.vertex_points[va] as usize;
-            let b = collision_topology.vertex_points[vb] as usize;
-            let c = collision_topology.vertex_points[vc] as usize;
-            let (wa, wb, wc) = (barycentric_a[point], barycentric_b[point], barycentric_c[point]);
-            let m = |p: usize| {
-                float_max(
-                    collision_positions.x[p].abs(),
-                    float_max(collision_positions.y[p].abs(), collision_positions.z[p].abs()),
-                )
-            };
-            let coordinate_scale = float_max(m(a), float_max(m(b), m(c)));
-            let coordinate_scale = if coordinate_scale == 0.0 { 1.0 } else { coordinate_scale };
-            let cx_ = |p: usize| collision_positions.x[p] / coordinate_scale;
-            let cy_ = |p: usize| collision_positions.y[p] / coordinate_scale;
-            let cz_ = |p: usize| collision_positions.z[p] / coordinate_scale;
-            let (hx, hy, hz) = if samples == 1 {
-                (
-                    coordinate_scale * (wa * cx_(a) + wb * cx_(b) + wc * cx_(c)),
-                    coordinate_scale * (wa * cy_(a) + wb * cy_(b) + wc * cy_(c)),
-                    coordinate_scale * (wa * cz_(a) + wb * cz_(b) + wc * cz_(c)),
-                )
-            } else {
-                let directions = directions.as_ref().ok_or_else(|| fail("invalid_direction", "missing ray directions"))?;
-                let (vx, vy, vz) = match directions {
-                    RayDirections::ConstantDirection { x, y, z } => (*x, *y, *z),
-                    RayDirections::PerQueryDirections(values) => (values.x[point], values.y[point], values.z[point]),
+    let (mut px, mut py, mut pz) = (source_positions.x.to_vec(), source_positions.y.to_vec(), source_positions.z.to_vec());
+    let range_count = support::range_count(point_count as i64, grain);
+    let mut errors = vec![-1i64; range_count as usize];
+    let mut changed = vec![0u8; range_count as usize];
+    {
+        let (wx, wy, wz) = (Windows::even(&mut px, grain), Windows::even(&mut py, grain), Windows::even(&mut pz, grain));
+        let (werrors, wchanged) = (
+            Windows::new(&mut errors, range_count, |range| range as usize),
+            Windows::new(&mut changed, range_count, |range| range as usize),
+        );
+        let normal_windows = normal_planes
+            .as_mut()
+            .map(|(x, y, z)| (Windows::even(x, grain), Windows::even(y, grain), Windows::even(z, grain)));
+        support::run_indexed_ranges(grain, point_count as i64, &|range, first, last| {
+            let (px, py, pz) = (wx.take(range), wy.take(range), wz.take(range));
+            let (error, changed) = (&mut werrors.take(range)[0], &mut wchanged.take(range)[0]);
+            let mut normal_cells = normal_windows.as_ref().map(|(x, y, z)| (x.take(range), y.take(range), z.take(range)));
+            let mut normal = [0.0f64; 3];
+            for point in first..last {
+                support::poll(cancel_ref, point)?;
+                let at = (point - first) as usize;
+                let point = point as usize;
+                let triangle = triangles[point];
+                if triangle < 0 {
+                    continue;
+                }
+                let va = surface_index::View::triangle_vertex(&surface, triangle, 0) as usize;
+                let vb = surface_index::View::triangle_vertex(&surface, triangle, 1) as usize;
+                let vc = surface_index::View::triangle_vertex(&surface, triangle, 2) as usize;
+                let a = collision_topology.vertex_points[va] as usize;
+                let b = collision_topology.vertex_points[vb] as usize;
+                let c = collision_topology.vertex_points[vc] as usize;
+                let (wa, wb, wc) = (barycentric_a[point], barycentric_b[point], barycentric_c[point]);
+                let m = |p: usize| {
+                    float_max(
+                        collision_positions.x[p].abs(),
+                        float_max(collision_positions.y[p].abs(), collision_positions.z[p].abs()),
+                    )
                 };
-                let direction_scale = float_max(vx.abs(), float_max(vy.abs(), vz.abs()));
-                let (dx, dy, dz) = (vx / direction_scale, vy / direction_scale, vz / direction_scale);
-                let inverse = 1.0 / (dx * dx + dy * dy + dz * dz).sqrt();
-                let signed_distance = direction_signs[point] as f64 * distances[point] * inverse;
-                (
-                    source_positions.x[point] + signed_distance * dx,
-                    source_positions.y[point] + signed_distance * dy,
-                    source_positions.z[point] + signed_distance * dz,
-                )
-            };
-            normal = [0.0; 3];
-            if let Some((output_x, output_y, output_z)) = normal_cells.as_ref() {
-                if samples > 1 {
-                    normal = [output_x.get(point as i64), output_y.get(point as i64), output_z.get(point as i64)];
-                    let length = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
-                    if length > 0.0 {
-                        normal[0] /= length;
-                        normal[1] /= length;
-                        normal[2] /= length;
-                    }
+                let coordinate_scale = float_max(m(a), float_max(m(b), m(c)));
+                let coordinate_scale = if coordinate_scale == 0.0 { 1.0 } else { coordinate_scale };
+                let cx_ = |p: usize| collision_positions.x[p] / coordinate_scale;
+                let cy_ = |p: usize| collision_positions.y[p] / coordinate_scale;
+                let cz_ = |p: usize| collision_positions.z[p] / coordinate_scale;
+                let (hx, hy, hz) = if samples == 1 {
+                    (
+                        coordinate_scale * (wa * cx_(a) + wb * cx_(b) + wc * cx_(c)),
+                        coordinate_scale * (wa * cy_(a) + wb * cy_(b) + wc * cy_(c)),
+                        coordinate_scale * (wa * cz_(a) + wb * cz_(b) + wc * cz_(c)),
+                    )
                 } else {
-                    let (ax, ay, az) = (cx_(a), cy_(a), cz_(a));
-                    let (bx, by, bz) = (cx_(b), cy_(b), cz_(b));
-                    let (qx, qy, qz) = (cx_(c), cy_(c), cz_(c));
-                    let (abx, aby, abz) = (bx - ax, by - ay, bz - az);
-                    let (acx, acy, acz) = (qx - ax, qy - ay, qz - az);
-                    normal[0] = aby * acz - abz * acy;
-                    normal[1] = abz * acx - abx * acz;
-                    normal[2] = abx * acy - aby * acx;
-                    let inverse = 1.0 / (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
-                    normal[0] *= inverse;
-                    normal[1] *= inverse;
-                    normal[2] *= inverse;
-                    output_x.set(point as i64, normal[0]);
-                    output_y.set(point as i64, normal[1]);
-                    output_z.set(point as i64, normal[2]);
+                    let directions = directions.as_ref().ok_or_else(|| fail("invalid_direction", "missing ray directions"))?;
+                    let (vx, vy, vz) = match directions {
+                        RayDirections::ConstantDirection { x, y, z } => (*x, *y, *z),
+                        RayDirections::PerQueryDirections(values) => (values.x[point], values.y[point], values.z[point]),
+                    };
+                    let direction_scale = float_max(vx.abs(), float_max(vy.abs(), vz.abs()));
+                    let (dx, dy, dz) = (vx / direction_scale, vy / direction_scale, vz / direction_scale);
+                    let inverse = 1.0 / (dx * dx + dy * dy + dz * dz).sqrt();
+                    let signed_distance = direction_signs[point] as f64 * distances[point] * inverse;
+                    (
+                        source_positions.x[point] + signed_distance * dx,
+                        source_positions.y[point] + signed_distance * dy,
+                        source_positions.z[point] + signed_distance * dz,
+                    )
+                };
+                normal = [0.0; 3];
+                if let Some((output_x, output_y, output_z)) = normal_cells.as_mut() {
+                    if samples > 1 {
+                        normal = [output_x[at], output_y[at], output_z[at]];
+                        let length = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
+                        if length > 0.0 {
+                            normal[0] /= length;
+                            normal[1] /= length;
+                            normal[2] /= length;
+                        }
+                    } else {
+                        let (ax, ay, az) = (cx_(a), cy_(a), cz_(a));
+                        let (bx, by, bz) = (cx_(b), cy_(b), cz_(b));
+                        let (qx, qy, qz) = (cx_(c), cy_(c), cz_(c));
+                        let (abx, aby, abz) = (bx - ax, by - ay, bz - az);
+                        let (acx, acy, acz) = (qx - ax, qy - ay, qz - az);
+                        normal[0] = aby * acz - abz * acy;
+                        normal[1] = abz * acx - abx * acz;
+                        normal[2] = abx * acy - aby * acx;
+                        let inverse = 1.0 / (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
+                        normal[0] *= inverse;
+                        normal[1] *= inverse;
+                        normal[2] *= inverse;
+                        output_x[at] = normal[0];
+                        output_y[at] = normal[1];
+                        output_z[at] = normal[2];
+                    }
+                }
+                let x = source_positions.x[point] + scale * (hx - source_positions.x[point]) + lift * normal[0];
+                let y = source_positions.y[point] + scale * (hy - source_positions.y[point]) + lift * normal[1];
+                let z = source_positions.z[point] + scale * (hz - source_positions.z[point]) + lift * normal[2];
+                if !(x.is_finite() && y.is_finite() && z.is_finite()) {
+                    *error = point as i64;
+                } else {
+                    px[at] = x;
+                    py[at] = y;
+                    pz[at] = z;
+                    if x != source_positions.x[point] || y != source_positions.y[point] || z != source_positions.z[point] {
+                        *changed = 1;
+                    }
                 }
             }
-            let x = source_positions.x[point] + scale * (hx - source_positions.x[point]) + lift * normal[0];
-            let y = source_positions.y[point] + scale * (hy - source_positions.y[point]) + lift * normal[1];
-            let z = source_positions.z[point] + scale * (hz - source_positions.z[point]) + lift * normal[2];
-            if !(x.is_finite() && y.is_finite() && z.is_finite()) {
-                errors.set(range, point as i64);
-            } else {
-                px.set(point as i64, x);
-                py.set(point as i64, y);
-                pz.set(point as i64, z);
-                if x != source_positions.x[point] || y != source_positions.y[point] || z != source_positions.z[point] {
-                    changed.set(range, 1);
-                }
-            }
-        }
-        let _ = normal;
-        Ok(())
-    })?;
-    normal_planes = normal_cells.map(|(x, y, z)| (x.into_vec(), y.into_vec(), z.into_vec()));
-    let errors = errors.into_vec();
-    let changed = changed.into_vec();
-    let (px, py, pz) = (px.into_vec(), py.into_vec(), pz.into_vec());
+            let _ = normal;
+            Ok(())
+        })?;
+    }
     if let Some(point) = errors.iter().find(|&&point| point >= 0) {
         return Err(fail(
             "non_finite_output",
