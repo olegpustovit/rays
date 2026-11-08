@@ -108,6 +108,16 @@ pub fn gi(values: &[i64], index: i64) -> i64 {
     values[index as usize]
 }
 
+/// An index stored in the i32 per-vertex scratch arrays; `make_topology` rejects sizes beyond i32.
+fn narrow(value: i64) -> i32 {
+    i32::try_from(value).expect("scratch index fits i32")
+}
+
+/// `gi` for the i32 scratch arrays.
+pub fn gn(values: &[i32], index: i64) -> i64 {
+    i64::from(values[index as usize])
+}
+
 pub fn gf(values: &[f64], index: i64) -> f64 {
     values[index as usize]
 }
@@ -169,11 +179,11 @@ pub struct Plan {
     pub creasing_method: CreasingMethod,
     pub creases: Option<CreasePlan>,
     pub vertex_kind: Vec<u8>,
-    pub vertex_a: Vec<i64>,
-    pub vertex_b: Vec<i64>,
-    pub vertex_primitive: Vec<i64>,
-    pub vertex_edge_source: Vec<i64>,
-    pub primitive_source: Vec<i64>,
+    pub vertex_a: Vec<i32>,
+    pub vertex_b: Vec<i32>,
+    pub vertex_primitive: Vec<i32>,
+    pub vertex_edge_source: Vec<i32>,
+    pub primitive_source: Vec<i32>,
     pub topology: topology::T,
 }
 
@@ -1179,11 +1189,11 @@ fn build_stencils(
 
 pub struct Built {
     pub vertex_kind: Vec<u8>,
-    pub vertex_a: Vec<i64>,
-    pub vertex_b: Vec<i64>,
-    pub vertex_primitive: Vec<i64>,
-    pub vertex_edge_source: Vec<i64>,
-    pub primitive_source: Vec<i64>,
+    pub vertex_a: Vec<i32>,
+    pub vertex_b: Vec<i32>,
+    pub vertex_primitive: Vec<i32>,
+    pub vertex_edge_source: Vec<i32>,
+    pub primitive_source: Vec<i32>,
     pub topology: topology::T,
 }
 
@@ -1199,6 +1209,16 @@ pub fn make_topology(
     edge_count: i64,
     face_offset: i64,
 ) -> Result<Built, error::T> {
+    // The per-vertex scratch arrays hold source indices as i32 (half the bytes of i64).
+    for (name, count) in [
+        ("source vertex count", topology_view.vertex_points.len() as i64),
+        ("source primitive count", topology_view.primitive_kinds.len() as i64),
+        ("source edge count", edge_count),
+    ] {
+        if count > i64::from(i32::MAX) {
+            return Err(fail(format!("{name} exceeds integer limits")));
+        }
+    }
     let visible = |primitive: i64| match holes {
         None => true,
         Some(holes) => !group::mem(primitive, holes),
@@ -1248,11 +1268,11 @@ pub fn make_topology(
             let primitive_offsets: Vec<i64> = (0..=output_primitives).map(|i| i * 4).collect();
             let primitive_kinds = vec![0u8; output_primitives as usize];
             let mut vertex_kind = vec![0u8; output_vertices as usize];
-            let mut vertex_a = vec![0_i64; output_vertices as usize];
-            let mut vertex_b = vec![-1_i64; output_vertices as usize];
-            let mut vertex_primitive = vec![-1_i64; output_vertices as usize];
-            let mut vertex_edge_source = vec![-1_i64; output_vertices as usize];
-            let mut primitive_source = vec![0_i64; output_primitives as usize];
+            let mut vertex_a = vec![0_i32; output_vertices as usize];
+            let mut vertex_b = vec![-1_i32; output_vertices as usize];
+            let mut vertex_primitive = vec![-1_i32; output_vertices as usize];
+            let mut vertex_edge_source = vec![-1_i32; output_vertices as usize];
+            let mut primitive_source = vec![0_i32; output_primitives as usize];
             let grain = grain_of(grain)?;
             let ranges = support::range_count(vertices, grain);
             let window = |range: i64, stride: i64| {
@@ -1297,18 +1317,18 @@ pub fn make_topology(
                         points_out[at + 2] = face_offset + primitive;
                         points_out[at + 3] = source_points + previous_edge;
                         kind_out[at] = 0;
-                        a_out[at] = vertex;
-                        edge_source_out[at] = edge;
+                        a_out[at] = narrow(vertex);
+                        edge_source_out[at] = narrow(edge);
                         kind_out[at + 1] = 1;
-                        a_out[at + 1] = vertex;
-                        b_out[at + 1] = next;
+                        a_out[at + 1] = narrow(vertex);
+                        b_out[at + 1] = narrow(next);
                         kind_out[at + 2] = 2;
-                        primitive_out[at + 2] = primitive;
+                        primitive_out[at + 2] = narrow(primitive);
                         kind_out[at + 3] = 1;
-                        a_out[at + 3] = previous;
-                        b_out[at + 3] = vertex;
-                        edge_source_out[at + 3] = previous_edge;
-                        source_out[local] = primitive;
+                        a_out[at + 3] = narrow(previous);
+                        b_out[at + 3] = narrow(vertex);
+                        edge_source_out[at + 3] = narrow(previous_edge);
+                        source_out[local] = narrow(primitive);
                     }
                 }
                 Ok(())
@@ -1356,11 +1376,11 @@ pub fn make_topology(
             let primitive_offsets: Vec<i64> = (0..=output_primitives).map(|i| i * 3).collect();
             let primitive_kinds = vec![0u8; output_primitives as usize];
             let mut vertex_kind = vec![0u8; output_vertices as usize];
-            let mut vertex_a = vec![0_i64; output_vertices as usize];
-            let mut vertex_b = vec![-1_i64; output_vertices as usize];
-            let mut vertex_primitive = vec![-1_i64; output_vertices as usize];
-            let mut vertex_edge_source = vec![-1_i64; output_vertices as usize];
-            let mut primitive_source = vec![0_i64; output_primitives as usize];
+            let mut vertex_a = vec![0_i32; output_vertices as usize];
+            let mut vertex_b = vec![-1_i32; output_vertices as usize];
+            let mut vertex_primitive = vec![-1_i32; output_vertices as usize];
+            let mut vertex_edge_source = vec![-1_i32; output_vertices as usize];
+            let mut primitive_source = vec![0_i32; output_primitives as usize];
             // Output primitives produced by the source primitives before `primitive`.
             let output_before = |primitive: i64| match &visible_offsets {
                 None => primitive,
@@ -1410,29 +1430,29 @@ pub fn make_topology(
                         let mut set = |vertex: usize, point: i64, kind: u8, a: i64, b: i64| {
                             points_out[vertex] = point;
                             kind_out[vertex] = kind;
-                            a_out[vertex] = a;
-                            b_out[vertex] = b;
-                            primitive_out[vertex] = primitive;
+                            a_out[vertex] = narrow(a);
+                            b_out[vertex] = narrow(b);
+                            primitive_out[vertex] = narrow(primitive);
                         };
                         set(at, a, 0, va, -1);
-                        edge_source_out[at] = ea;
+                        edge_source_out[at] = narrow(ea);
                         set(at + 1, ab, 1, va, vb);
                         set(at + 2, ca, 1, vc, va);
-                        edge_source_out[at + 2] = ec;
+                        edge_source_out[at + 2] = narrow(ec);
                         set(at + 3, b, 0, vb, -1);
-                        edge_source_out[at + 3] = eb;
+                        edge_source_out[at + 3] = narrow(eb);
                         set(at + 4, bc, 1, vb, vc);
                         set(at + 5, ab, 1, va, vb);
-                        edge_source_out[at + 5] = ea;
+                        edge_source_out[at + 5] = narrow(ea);
                         set(at + 6, c, 0, vc, -1);
-                        edge_source_out[at + 6] = ec;
+                        edge_source_out[at + 6] = narrow(ec);
                         set(at + 7, ca, 1, vc, va);
                         set(at + 8, bc, 1, vb, vc);
-                        edge_source_out[at + 8] = eb;
+                        edge_source_out[at + 8] = narrow(eb);
                         set(at + 9, ab, 1, va, vb);
                         set(at + 10, bc, 1, vb, vc);
                         set(at + 11, ca, 1, vc, va);
-                        source_out[local as usize * 4..][..4].fill(primitive);
+                        source_out[local as usize * 4..][..4].fill(narrow(primitive));
                     }
                 }
                 Ok(())
@@ -2127,15 +2147,15 @@ pub fn fvar_refinement(
     for output in 0..output_count {
         cancel::poll(cancel_token, output, 4095)?;
         output_point_of_vertex[output as usize] = match gu(&plan.vertex_kind, output) {
-            0 => gi(&fvar_vertex_points, gi(&plan.vertex_a, output)),
+            0 => gi(&fvar_vertex_points, gn(&plan.vertex_a, output)),
             1 => {
-                let edge = gi(&fvar_index.edge_of_vertex, gi(&plan.vertex_a, output));
+                let edge = gi(&fvar_index.edge_of_vertex, gn(&plan.vertex_a, output));
                 if edge < 0 {
                     return Err(failm("face-varying output edge has no source edge"));
                 }
                 fvar_point_count + edge
             }
-            _ => face_offset + gi(&plan.vertex_primitive, output),
+            _ => face_offset + gn(&plan.vertex_primitive, output),
         };
     }
     let refinement = FvarPointPlan {
@@ -2203,13 +2223,13 @@ pub fn linear_vertex_float(
     let count = plan.vertex_kind.len() as i64;
     filled(cancel_token, grain, count, &|vertex| {
         Ok(match gu(&plan.vertex_kind, vertex) {
-            0 => gf(source, gi(&plan.vertex_a, vertex)),
+            0 => gf(source, gn(&plan.vertex_a, vertex)),
             1 => {
-                (gf(source, gi(&plan.vertex_a, vertex)) + gf(source, gi(&plan.vertex_b, vertex)))
+                (gf(source, gn(&plan.vertex_a, vertex)) + gf(source, gn(&plan.vertex_b, vertex)))
                     * 0.5
             }
             _ => {
-                let primitive = gi(&plan.vertex_primitive, vertex);
+                let primitive = gn(&plan.vertex_primitive, vertex);
                 let first = gi(&plan.source_topology.primitive_offsets, primitive);
                 let last = gi(&plan.source_topology.primitive_offsets, primitive + 1);
                 let mut sum = 0.0;
@@ -2233,7 +2253,7 @@ pub fn isolated_vertex_float(
     filled(cancel_token, grain, count, &|output_vertex| {
         Ok(match gu(&plan.vertex_kind, output_vertex) {
             0 => {
-                let vertex = gi(&plan.vertex_a, output_vertex);
+                let vertex = gn(&plan.vertex_a, output_vertex);
                 let previous = gi(&plan.index.previous_vertex, vertex);
                 let next = gi(&plan.index.next_vertex, vertex);
                 let smooth = (0.75 * gf(source, vertex))
@@ -2243,12 +2263,12 @@ pub fn isolated_vertex_float(
                 smooth + ((gf(source, vertex) - smooth) * factor)
             }
             1 => {
-                (gf(source, gi(&plan.vertex_a, output_vertex))
-                    + gf(source, gi(&plan.vertex_b, output_vertex)))
+                (gf(source, gn(&plan.vertex_a, output_vertex))
+                    + gf(source, gn(&plan.vertex_b, output_vertex)))
                     * 0.5
             }
             _ => {
-                let primitive = gi(&plan.vertex_primitive, output_vertex);
+                let primitive = gn(&plan.vertex_primitive, output_vertex);
                 let first = gi(&plan.source_topology.primitive_offsets, primitive);
                 let last = gi(&plan.source_topology.primitive_offsets, primitive + 1);
                 let mut sum = 0.0;
@@ -2316,7 +2336,7 @@ pub fn primitive_float(
 ) -> Result<Vec<f64>, error::T> {
     let count = plan.primitive_source.len() as i64;
     filled(cancel_token, grain, count, &|primitive| {
-        Ok(gf(source, gi(&plan.primitive_source, primitive)))
+        Ok(gf(source, gn(&plan.primitive_source, primitive)))
     })
 }
 
@@ -2337,11 +2357,11 @@ pub fn discrete_mapping(
         Ok(match owner {
             Owner::Point => gi(&plan.point_representative, index),
             Owner::Vertex => match gu(&plan.vertex_kind, index) {
-                0 => gi(&plan.vertex_a, index),
-                1 => gi(&plan.vertex_a, index).min(gi(&plan.vertex_b, index)),
-                _ => gi(&plan.source_topology.primitive_offsets, gi(&plan.vertex_primitive, index)),
+                0 => gn(&plan.vertex_a, index),
+                1 => gn(&plan.vertex_a, index).min(gn(&plan.vertex_b, index)),
+                _ => gi(&plan.source_topology.primitive_offsets, gn(&plan.vertex_primitive, index)),
             },
-            Owner::Primitive => gi(&plan.primitive_source, index),
+            Owner::Primitive => gn(&plan.primitive_source, index),
             Owner::Detail => 0,
         })
     })
@@ -2370,7 +2390,7 @@ pub fn vertex_edge_discrete_map(
 ) -> Result<Vec<i64>, error::T> {
     let count = plan.vertex_kind.len() as i64;
     filled(cancel_token, grain, count, &|vertex| {
-        let edge = gi(&plan.vertex_edge_source, vertex);
+        let edge = gn(&plan.vertex_edge_source, vertex);
         Ok(if edge >= 0 {
             let directed = gi(&plan.index.edge_vertices, gi(&plan.index.edge_offsets, edge));
             gi(source, directed)
@@ -2616,7 +2636,7 @@ pub fn resulting_crease_attribute(
     // The output topology is read once, not per vertex.
     let topology_view = topology::View::view(&plan.topology)?;
     support::par_fill(cancel_token, grain_of(grain)?, &mut values, &|vertex| {
-        let edge = gi(&plan.vertex_edge_source, vertex);
+        let edge = gn(&plan.vertex_edge_source, vertex);
         Ok(if edge >= 0 {
             let slot = output_child_slot_in(plan, &topology_view, vertex, edge)?;
             gf(child_sharpness, slot)
@@ -2682,14 +2702,14 @@ pub fn output_edge_plan(cancel_token: Option<&cancel::T>, plan: &Plan) -> Result
     let topology_view = topology::View::view(&plan.topology)?;
     for vertex in 0..topology_view.vertex_points.len() as i64 {
         cancel::poll(cancel_token, vertex, 16_383)?;
-        let source_edge = gi(&plan.vertex_edge_source, vertex);
+        let source_edge = gn(&plan.vertex_edge_source, vertex);
         let key = if source_edge >= 0 {
             output_child_slot_in(plan, &topology_view, vertex, source_edge)?
         } else {
             match plan.scheme {
                 Scheme::CatmullClark | Scheme::Bilinear => {
                     let output_primitive = vertex / 4;
-                    let source_vertex = gi(&plan.vertex_a, output_primitive * 4);
+                    let source_vertex = gn(&plan.vertex_a, output_primitive * 4);
                     let slot = vertex & 3;
                     let source_vertex = if slot == 1 {
                         source_vertex
@@ -2703,7 +2723,7 @@ pub fn output_edge_plan(cancel_token: Option<&cancel::T>, plan: &Plan) -> Result
                 Scheme::Loop => {
                     let output_source = vertex / 12;
                     let slot = vertex % 12;
-                    let source_primitive = gi(&plan.primitive_source, output_source * 4);
+                    let source_primitive = gn(&plan.primitive_source, output_source * 4);
                     let local = match slot {
                         1 | 11 => 0,
                         4 | 9 => 1,
@@ -2808,13 +2828,13 @@ pub fn remap_group(
             }
         }
         group::Owner::Vertex => match gu(&plan.vertex_kind, output) {
-            0 => group::mem(gi(&plan.vertex_a, output), group_value),
+            0 => group::mem(gn(&plan.vertex_a, output), group_value),
             1 => {
-                group::mem(gi(&plan.vertex_a, output), group_value)
-                    && group::mem(gi(&plan.vertex_b, output), group_value)
+                group::mem(gn(&plan.vertex_a, output), group_value)
+                    && group::mem(gn(&plan.vertex_b, output), group_value)
             }
             _ => {
-                let primitive = gi(&plan.vertex_primitive, output);
+                let primitive = gn(&plan.vertex_primitive, output);
                 let first = gi(&plan.source_topology.primitive_offsets, primitive);
                 let last = gi(&plan.source_topology.primitive_offsets, primitive + 1);
                 let mut all = true;
@@ -2826,19 +2846,19 @@ pub fn remap_group(
                 all
             }
         },
-        group::Owner::Primitive => group::mem(gi(&plan.primitive_source, output), group_value),
+        group::Owner::Primitive => group::mem(gn(&plan.primitive_source, output), group_value),
     })?;
     if !group::is_ordered(group_value) {
         return Ok(target);
     }
     let source_of_target: Vec<i64> = match owner {
-        group::Owner::Primitive => plan.primitive_source.clone(),
+        group::Owner::Primitive => plan.primitive_source.iter().map(|&source| i64::from(source)).collect(),
         group::Owner::Point => {
             (0..count).map(|output| if output < plan.source_points { output } else { -1 }).collect()
         }
         group::Owner::Vertex => (0..count)
             .map(|output| {
-                if gu(&plan.vertex_kind, output) == 0 { gi(&plan.vertex_a, output) } else { -1 }
+                if gu(&plan.vertex_kind, output) == 0 { gn(&plan.vertex_a, output) } else { -1 }
             })
             .collect(),
     };
