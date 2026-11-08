@@ -440,12 +440,18 @@ fn kit_fixture_lowers_and_cooks_the_same_at_1_and_3_domains() {
 
 #[test]
 
-fn the_other_sop_fixtures_lower_and_cook() {
-    let mut cooked = 0;
-    for name in ["tree", "tunnel", "wave"] {
-        cooked += check_fixture(name, false);
-    }
-    assert!(cooked >= 3, "only {cooked} graphs cooked");
+fn tree_fixture_lowers_and_cooks() {
+    assert!(check_fixture("tree", false) >= 1, "tree cooked no graph");
+}
+
+#[test]
+fn tunnel_fixture_lowers_and_cooks() {
+    assert!(check_fixture("tunnel", false) >= 1, "tunnel cooked no graph");
+}
+
+#[test]
+fn wave_fixture_lowers_and_cooks() {
+    assert!(check_fixture("wave", false) >= 1, "wave cooked no graph");
 }
 
 #[test]
