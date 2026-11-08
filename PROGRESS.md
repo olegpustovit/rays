@@ -136,6 +136,11 @@ Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s
 
 ## Session log
 
+- 2026-11-08: editor round 3 closed.
+  - `1d40581a`: shattered_studio default case is 10 sheets, >=40 shards, exact 1/4-domain fracture and shading (0.92 s). The full sketch is `shattered_studio_full`, RAYS_SLOW only (33.6 s).
+  - `4ec9daa0`: window_runtime_render 600 -> 300 frames (2.97 s). window_scene2_argument runs window sweeps 60/30/20 while the offscreen twin keeps 300/100/100 (3.1 s).
+  - All editor-owned cases are now under 4 s. Open with the caching agent: orrery 16.4 s, workspace_packed 6.7 s, sopcat_* 4.8-6.5 s. GPU residency (chain/holder) and the release `map` regression are with a fresh agent.
+
 - 2026-11-08: editor round 3, budget overruns.
   - Commits:
     - `2ac97b4d` perf: flow_sop inlined-node build cache 64 -> 1,024 entries. It thrashed (4,360 builds, 0 hits in run_ops), so every editor edit paid for it.
