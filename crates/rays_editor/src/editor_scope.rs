@@ -176,7 +176,10 @@ pub fn sync_scope(value: &mut t) {
     sync_views(value);
     if let Some(key) = pane_laid(&*value).cloned() {
         let display = viewed_path(&*value, &key.scope);
-        with_pane(value, &|pane| graph_pane { view: scope::with_display(display.clone(), pane.view.clone()), ..pane.clone() });
+        let view = &mut crate::panel_map::active_mut(&mut value.panes).view;
+        if view.display != display {
+            view.display = display;
+        }
     }
     let Some(name) = graph_name(&*value) else { return };
     let Some(catalog) = flow_catalog(&*value) else { return };
@@ -234,10 +237,14 @@ pub fn sync_scope(value: &mut t) {
     };
     if !moved && !fresh {
         // the first call after a forced frame learns what that frame cost
-        with_pane(value, &|pane| graph_pane {
-            laid: pane.laid.as_ref().map(|k| Rc::new(scope_key { fresh_last: false, gap: if k.fresh_last { quiet(k) } else { k.gap }, ..(**k).clone() })),
-            ..pane.clone()
-        });
+        if let Some(k) = crate::panel_map::active_mut(&mut value.panes).laid.as_mut() {
+            let gap = if k.fresh_last { quiet(k) } else { k.gap };
+            if k.fresh_last || k.gap != gap {
+                let k = Rc::make_mut(k);
+                k.fresh_last = false;
+                k.gap = gap;
+            }
+        }
         return;
     }
     let executions = probe_run::reports(&lowered.profile);

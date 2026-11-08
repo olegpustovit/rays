@@ -9,10 +9,12 @@ const FRAMES: i64 = 30;
 // C11 shared cache: basic 1,980 / 182,989; bare 4,335 / 184,728; empty 4,079 / 174,502.
 // M: borrowed panel keys and shell tree: basic 1,645 / 177,146; empty 2,571 / 138,828; bare 2,371 / 143,259.
 // M: one path buffer per layout walk, shared document shell: basic 1,521 / 166,466; empty 2,001 / 117,568;
-// bare 2,106 / 129,499. Never raise.
+// bare 2,106 / 129,499.
+// M: inspector folders by borrow, scope sync mutates the pane: empty 1,698 / 105,039; bare 1,918 / 121,357.
+// Never raise.
 const BASIC: (u64, u64) = (1_525, 167_000);
-const EMPTY: (u64, u64) = (2_010, 118_000);
-const BARE: (u64, u64) = (2_110, 130_000);
+const EMPTY: (u64, u64) = (1_705, 106_000);
+const BARE: (u64, u64) = (1_925, 122_000);
 
 fn per_frame(source: &str, max: (u64, u64)) -> (u64, u64, String) {
     assert!(crate::common::gpu(), "native GPU required");

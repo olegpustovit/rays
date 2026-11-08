@@ -239,7 +239,7 @@ pub fn graph_path<'a>(value: impl Into<ModelView<'a>>) -> Option<layout::Path> {
     if value.key == panel_map::key_ref(&value.model.panes) {
         if let (Some(key), Some(path)) = (value.key, panel_map::leaf(&value.model.panes)) {
             let tree = shell_tree(&value, &value.workspace);
-            if matches!(panels::at_ref(&path, &tree), Some(panels::t::Leaf(Panel::Graph))) && panel_key(&value.doc, &path) == *key {
+            if matches!(panels::at_ref(&path, &tree), Some(panels::t::Leaf(Panel::Graph))) && key_is(key, &panel_key_ref(&value.doc, &path)) {
                 return Some(path);
             }
         }

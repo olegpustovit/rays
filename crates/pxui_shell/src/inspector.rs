@@ -47,47 +47,38 @@ impl Default for FlowOpts {
     }
 }
 
-#[derive(Clone, Debug)]
-enum Item {
-    Field(FlowRow),
-    Folder(String, Vec<Item>),
+enum Item<'a> {
+    Field(&'a FlowRow),
+    Folder(String, Vec<Item<'a>>),
 }
 
-fn insert(path: &[String], field: &FlowRow, items: Vec<Item>) -> Vec<Item> {
+fn insert<'a>(path: &[String], field: &'a FlowRow, items: &mut Vec<Item<'a>>) {
     match path.split_first() {
-        None => {
-            let mut items = items;
-            items.push(Item::Field(field.clone()));
-            items
-        }
-        Some((name, rest)) => {
-            let mut items = items;
-            for i in 0..items.len() {
-                if let Item::Folder(candidate, children) = &items[i] {
-                    if candidate == name {
-                        let candidate = candidate.clone();
-                        let children = children.clone();
-                        items[i] = Item::Folder(candidate, insert(rest, field, children));
-                        return items;
-                    }
-                }
+        None => items.push(Item::Field(field)),
+        Some((name, rest)) => match items.iter_mut().find_map(|i| match i {
+            Item::Folder(candidate, children) if candidate == name => Some(children),
+            _ => None,
+        }) {
+            Some(children) => insert(rest, field, children),
+            None => {
+                let mut children = Vec::new();
+                insert(rest, field, &mut children);
+                items.push(Item::Folder(name.clone(), children));
             }
-            items.push(Item::Folder(name.clone(), insert(rest, field, Vec::new())));
-            items
-        }
+        },
     }
 }
 
 /// Sections are one level deep: the top folder of a parameter, never the vector's own folder (its
 /// row is one row, in the section it belongs to).
-fn top_folder(row: &FlowRow) -> Vec<String> {
-    let folder: Vec<String> = row.fields.first().map(|f| f.folder.clone()).unwrap_or_default();
-    let squash = |name: &str| -> String { name.split(' ').collect::<Vec<_>>().concat().to_ascii_lowercase() };
+fn top_folder(row: &FlowRow) -> Option<&str> {
+    let folder: &[String] = row.fields.first().map_or(&[], |f| &f.folder);
+    fn squash(name: &str) -> impl Iterator<Item = char> + '_ { name.chars().filter(|c| *c != ' ').map(|c| c.to_ascii_lowercase()) }
     let folder = match folder.split_last() {
-        Some((last, rest)) if squash(last) == squash(&row.path) => rest.to_vec(),
+        Some((last, rest)) if squash(last).eq(squash(&row.path)) => rest,
         _ => folder,
     };
-    folder.into_iter().take(1).collect()
+    folder.first().map(String::as_str)
 }
 
 fn expression(text: &str) -> bool {
@@ -582,17 +573,16 @@ pub fn flow_fields(ui: &mut Ui, o: &FlowOpts, on_choice: Option<&dyn Fn(&str, &U
     }
     // a kind's own section first, for the arguments that have no folder
     let folder_of = |row: &FlowRow| -> Vec<String> {
-        let top = top_folder(row);
-        match (top.is_empty(), &o.kind_label) {
-            (true, Some(label)) => vec![label.clone()],
-            _ => top,
+        match (top_folder(row), &o.kind_label) {
+            (None, Some(label)) => vec![label.clone()],
+            (top, _) => top.map(str::to_string).into_iter().collect(),
         }
     };
-    let own: Vec<&FlowRow> = rows.iter().filter(|r| top_folder(r).is_empty()).collect();
-    let others: Vec<&FlowRow> = rows.iter().filter(|r| !top_folder(r).is_empty()).collect();
+    let own: Vec<&FlowRow> = rows.iter().filter(|r| top_folder(r).is_none()).collect();
+    let others: Vec<&FlowRow> = rows.iter().filter(|r| top_folder(r).is_some()).collect();
     let mut items: Vec<Item> = Vec::new();
     for row in own.into_iter().chain(others) {
-        items = insert(&folder_of(row), row, items);
+        insert(&folder_of(row), row, &mut items);
     }
     let mut out = Vec::new();
     build(ui, &cx, on_choice, &o.expanded, o.kind_label.as_deref(), &[], &items, &mut out);
