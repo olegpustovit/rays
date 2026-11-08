@@ -901,7 +901,7 @@ fn builtins()->Vec<Op>{
     ops.append(&mut available);
     ops
 }
-// ponytail: B1 — workspace scope stack keyed by `PathId` (interned); more builtin delegate tables in draw/host/image/gpu.
+// ponytail: B1 — more builtin delegate tables in draw/host/image/gpu.
 static ALL:LazyLock<Vec<Op>>=LazyLock::new(builtins);
 pub fn all()->&'static [Op]{ALL.as_slice()}
 fn builtin_index()->&'static std::collections::HashMap<&'static str,usize>{

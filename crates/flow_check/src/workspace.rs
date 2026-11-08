@@ -1,5 +1,5 @@
 use crate::{catalog, defnode, op, port_type};
-use crate::term_arena::{self as packed, Draft, Node as PackedNode, SyntaxId, TermBuilder};
+use crate::term_arena::{self as packed, Draft, Node as PackedNode, PathId, SyntaxId, TermBuilder};
 use flow_syntax::{context, lisp, macros, syntax::{self, Node as SNode, Syntax}, ty::{self, FnSignature, Ty}, value::Value};
 use param::{self, FieldView, KindView};
 use rays_diagnostic::{self as diagnostic, Diagnostic, Severity, Span};
@@ -510,14 +510,62 @@ impl Info {
     }
 }
 
+/// Lexical bindings in stack order; each layer is keyed by an interned graph path.
+#[derive(Clone, Default)]
+struct ScopeStack {
+    layers: Rc<Vec<(PathId, Rc<BTreeMap<String, Info>>)>>,
+}
+impl ScopeStack {
+    fn push(&self, path: PathId) -> Self {
+        let mut layers = self.layers.as_ref().clone();
+        layers.push((path, Rc::new(BTreeMap::new())));
+        Self { layers: Rc::new(layers) }
+    }
+    fn from_map(path: PathId, bindings: BTreeMap<String, Info>) -> Self {
+        Self { layers: Rc::new(vec![(path, Rc::new(bindings))]) }
+    }
+    fn snapshot(&self) -> Self {
+        self.clone()
+    }
+    fn get(&self, name: &str) -> Option<&Info> {
+        for (_, map) in self.layers.iter().rev() {
+            if let Some(value) = map.get(name) {
+                return Some(value);
+            }
+        }
+        None
+    }
+    fn contains_key(&self, name: &str) -> bool {
+        self.get(name).is_some()
+    }
+    fn is_empty(&self) -> bool {
+        self.layers.is_empty() || self.layers.iter().all(|(_, map)| map.is_empty())
+    }
+    fn binding_names(&self) -> Vec<String> {
+        let mut names = BTreeSet::new();
+        for (_, map) in &*self.layers {
+            names.extend(map.keys().cloned());
+        }
+        names.into_iter().collect()
+    }
+    fn top_mut(&mut self, path: PathId) -> &mut BTreeMap<String, Info> {
+        let layers = Rc::make_mut(&mut self.layers);
+        if layers.is_empty() {
+            layers.push((path, Rc::new(BTreeMap::new())));
+        }
+        let (_, map) = layers.last_mut().expect("scope stack layer");
+        Rc::make_mut(map)
+    }
+}
+
 #[derive(Clone)]
 enum Callable{Local(Rc<Closure>),Def(String),Op(String),Kind(catalog::Kind)}
 #[derive(Clone)]
-struct Closure{params:Vec<(Syntax,Option<Ty>)>,body:Syntax,env:Rc<BTreeMap<String,Info>>,ctx:Context,path:Path,name:String}
+struct Closure{params:Vec<(Syntax,Option<Ty>)>,body:Syntax,env:ScopeStack,ctx:Context,path:Path,name:String}
 #[derive(Clone)]
 struct Sig{name:String,ctx:Context,params:Vec<(String,Ty,Option<Syntax>)>,body:Syntax,form:Syntax}
 #[derive(Clone)]
-struct Cx{env:Rc<BTreeMap<String,Info>>,ctx:Context,path:Path,scope:String,in_def:bool,stack:Vec<String>,depth:usize,zone:Option<usize>,zbody:bool}
+struct Cx{env:ScopeStack,ctx:Context,path:Path,scope:String,in_def:bool,stack:Vec<String>,depth:usize,zone:Option<usize>,zbody:bool}
 #[derive(Clone)]
 struct Arg{key:Option<String>,form:Syntax,term:TermId,info:Info}
 
@@ -757,7 +805,7 @@ impl Checker {
  }
  fn symbol(&mut self,cx:&Cx,f:&Syntax,s:&str)->(TermId,Info){match s{"t"=>{let mut v=Info::leaf(Ty::Float);v.live=true;(self.make_term(f,Ty::Float,Draft::Time),v)},"pi"=>(self.make_term(f,Ty::Float,Draft::Lit(param::Value::Float(std::f64::consts::PI))),Info::leaf(Ty::Float)),"true"|"false"=>(self.make_term(f,Ty::Bool,Draft::Lit(param::Value::Bool(s=="true"))),Info::leaf(Ty::Bool)),"nil"=>(self.make_term(f,ty::geometry(),Draft::Nil),Info::leaf(ty::geometry())),_=>{
      let mut parts=s.split('.');let name=parts.next().unwrap_or(s);let fs=parts.map(str::to_owned).collect::<Vec<_>>();
-     if let Some(mut v)=cx.env.get(name).cloned(){let mut t=self.make_term(f,v.ty.clone(),Draft::RefBinding(name.into(),fs.clone()));for field in &fs{v=self.field(f,&v,field,name);}t=self.terms.with_type(t,&v.ty);(t,v)}else if !fs.is_empty()&&["t","pi","true","false","nil"].contains(&name){self.fail_term(f,"E_FIELD",&format!("{name} is a constant; it has no .{}.",fs.join(".")))}else{self.error(f,"E_UNBOUND",&format!("{name} is not bound in {}.{}",cx.scope,if cx.env.is_empty(){String::new()}else{format!(" Bound here: {}.",cx.env.keys().cloned().collect::<Vec<_>>().join(", "))}));self.fail_term_no_diag(f)}
+     if let Some(mut v)=cx.env.get(name).cloned(){let mut t=self.make_term(f,v.ty.clone(),Draft::RefBinding(name.into(),fs.clone()));for field in &fs{v=self.field(f,&v,field,name);}t=self.terms.with_type(t,&v.ty);(t,v)}else if !fs.is_empty()&&["t","pi","true","false","nil"].contains(&name){self.fail_term(f,"E_FIELD",&format!("{name} is a constant; it has no .{}.",fs.join(".")))}else{self.error(f,"E_UNBOUND",&format!("{name} is not bound in {}.{}",cx.scope,if cx.env.is_empty(){String::new()}else{format!(" Bound here: {}.",cx.env.binding_names().join(", "))}));self.fail_term_no_diag(f)}
    }}}
  fn fail_term_no_diag(&mut self,f:&Syntax)->(TermId,Info){(self.make_term(f,Ty::Any,Draft::Nil),Info::leaf(Ty::Any))}
  fn field(&mut self, form: &Syntax, value: &Info, name: &str, base: &str) -> Info {
@@ -964,7 +1012,7 @@ impl Checker {
      }
  }
 
- fn check_pattern(&mut self, cx: &Cx, pattern: &Syntax, seen: &mut BTreeSet<String>, _env: &BTreeMap<String, Info>, what: &str) -> bool {
+ fn check_pattern(&mut self, cx: &Cx, pattern: &Syntax, seen: &mut BTreeSet<String>, _env: &ScopeStack, what: &str) -> bool {
      let zone = matches!(what, "for" | "fold" | "scan" | "sum" | "state");
      let shape = |p: &Syntax| if zone {
          format!("{what} binds names; {} is not a name or pattern.", Self::pattern_key(p))
@@ -1098,22 +1146,24 @@ impl Checker {
      let SNode::Vec(bs)=bindings.node else{return self.fail_term(f,"E_LET","let* needs [name expression …] and one result.")};
      let bs=bindings.range(bs);
      if bs.len()%2!=0{return self.fail_term(f,"E_LET","let* needs [name expression …] and one result.")}
-     let mut env=(*cx.env).clone();let mut out=Vec::new();let mut seen=BTreeSet::new();
+     let base_id = self.terms.path(&base);
+     let mut env = cx.env.push(base_id);
+     let mut out=Vec::new();let mut seen=BTreeSet::new();
      for pair in bs.chunks_exact(2){
          let p=&f.child(pair[0]);let expr=&f.child(pair[1]);
          if !self.check_pattern(cx,p,&mut seen,&env,"let*"){continue}
          let mut path=base.clone();path.push(Self::pattern_key(p));
-         let mut inner=cx.clone();inner.env=Rc::new(env.clone());inner.path=path.clone();inner.zbody=false;
+         let mut inner=cx.clone();inner.env=env.snapshot();inner.path=path.clone();inner.zbody=false;
          let(t,v)=if expr.meta().is_empty()&&matches!(p.node,SNode::Sym(_))&&syntax::head(expr)==Some("fn"){
              let args=expr.children();
              self.make_fn(&inner,expr,&args[1..],Self::pattern_key(p).as_str(),Some(path.clone()))
          }else{self.binding(&inner,expr,path.clone())};
          let t=self.set_path(t,path.clone());self.mark(path.clone(),&v);
          if cx.zbody&&!cx.zone.is_some_and(|z|v.vary.contains(&z)){self.invariant.insert(path.clone());}
-         {let mut bcx=cx.clone();bcx.path=base.clone();self.bind(&bcx,p,v.clone(),"",&mut env);}
+         {let mut bcx=cx.clone();bcx.path=base.clone();self.bind(&bcx,p,v.clone(),"",env.top_mut(base_id));}
          out.push((Self::pattern(p),t));
      }
-     let mut inner=cx.clone();inner.env=Rc::new(env);inner.zbody=false;
+     let mut inner=cx.clone();inner.env=env.snapshot();inner.zbody=false;
      let(t,v)=self.result_in(&inner,&f.child(args[1]),&base);
      (self.make_term(f,v.ty.clone(),Draft::Let(out,t)),v)
  }
@@ -1351,10 +1401,11 @@ impl Checker {
      init_value.state_dep = true;
      init_value.list_fields = seed_list_fields.clone();
      init_value.live_len = seed_list_fields.iter().any(Vec::is_empty);
-     let mut env = (*cx.env).clone();
-     self.bind(cx, pattern, init_value.clone(), ":", &mut env);
+     let zone_id = self.terms.path(&zone);
+     let mut env = cx.env.push(zone_id);
+     self.bind(cx, pattern, init_value.clone(), ":", env.top_mut(zone_id));
      let mut inner = cx.clone();
-     inner.env = Rc::new(env);
+     inner.env = env.snapshot();
      inner.path = zone.clone();
      let (step, step_value) = self.body(&inner, &form.child(args[1]));
      self.no_fn(form, &step_value.ty, "A state step");
@@ -1441,14 +1492,15 @@ impl Checker {
      zcx.path = id.clone();
      let acc_live0 = init.as_ref().is_some_and(|(_, _, v)| v.live);
      let mut run_live = acc_live0;
+     let zone_path_id = self.terms.path(&id);
      let (clauses, lens, outer, bt, bv) = loop {
-         let mut env = (*cx.env).clone();
+         let mut env = cx.env.push(zone_path_id);
          if let Some((p, _, iv)) = &init {
              let mut seed = iv.clone();
              seed.live = run_live;
              seed.vary.insert(zid);
              seed.live_len = false;
-             self.bind(&zcx, p, seed, ":", &mut env);
+             self.bind(&zcx, p, seed, ":", env.top_mut(zone_path_id));
          }
          let mut clauses = Vec::new();
          let mut lens = Vec::new();
@@ -1456,7 +1508,7 @@ impl Checker {
          for pair in iters.chunks_exact(2) {
              let (p, e) = (&form.child(pair[0]), &form.child(pair[1]));
              let mut ecx = cx.clone();
-             ecx.env = Rc::new(env.clone());
+             ecx.env = env.snapshot();
              let (ct, cv) = self.infer(&ecx, e);
              let et = match ty::elem(&cv.ty) {
                  Some(t) => t,
@@ -1477,13 +1529,13 @@ impl Checker {
              part.len = None;
              part.callable = None;
              part.vary.insert(zid);
-             self.bind(&zcx, p, part, ":", &mut env);
+             self.bind(&zcx, p, part, ":", env.top_mut(zone_path_id));
              clauses.push((Self::pattern(p), ct));
              lens.push(cv.len);
              outer.push(cv);
          }
          let mut inner = cx.clone();
-         inner.env = Rc::new(env);
+         inner.env = env.snapshot();
          inner.path = id.clone();
          inner.scope = format!("{} › {}", cx.scope, last);
          inner.zone = Some(zid);
@@ -1590,7 +1642,8 @@ impl Checker {
      let mut bcx = cx.clone();
      bcx.path = path.clone();
      let mut params = Vec::new();
-     let mut env = (*cx.env).clone();
+     let fn_scope = self.terms.path(&path);
+     let mut env = cx.env.push(fn_scope);
      let mut seen = BTreeSet::new();
      for &id in f.range(ps) {
          let p = f.child(id);
@@ -1605,10 +1658,10 @@ impl Checker {
          }
          if !self.check_pattern(cx, &pat, &mut seen, &env, "fn") { continue; }
          params.push((pat.clone(), annot.clone()));
-         self.bind(&bcx, &pat, Info::leaf(annot.unwrap_or(Ty::Any)), ":", &mut env);
+         self.bind(&bcx, &pat, Info::leaf(annot.unwrap_or(Ty::Any)), ":", env.top_mut(fn_scope));
      }
      let mut inner = cx.clone();
-     inner.env = Rc::new(env);
+     inner.env = env.snapshot();
      inner.path = path.clone();
      inner.scope = format!("{} › {name}", cx.scope);
      let body = f.child(args[1]);
@@ -1661,7 +1714,8 @@ impl Checker {
  fn call_closure(&mut self,cx:&Cx,f:&Syntax,c:&Closure,args:&[Arg])->(TermId,Info){
      if args.len()!=c.params.len(){return self.fail_term(f,"E_ARITY",&format!("{} takes {} argument{}; got {}.",c.name,c.params.len(),if c.params.len()==1{""}else{"s"},args.len()))}
      if cx.depth>64{return self.fail_term(f,"E_DEPTH","Call depth exceeds 64.")}
-     let mut env=(*c.env).clone();
+     let call_scope = self.terms.path(&c.path);
+     let mut env = c.env.push(call_scope);
      let mut pcx=cx.clone();pcx.path=c.path.clone();
      for ((pattern,annotation),arg) in c.params.iter().zip(args){
          let mut value=arg.info.clone();
@@ -1669,10 +1723,10 @@ impl Checker {
              if !ty::fits(&value.ty,want){self.error(&arg.form,"E_TYPE",&format!("{} {}: expected {}, got {}.",c.name,Self::pattern_key(pattern),show(want),show(&value.ty)))}
              value.ty=ty::coerce(&value.ty,want);
          }
-         self.bind(&pcx,pattern,value,":",&mut env);
+         self.bind(&pcx,pattern,value,":",env.top_mut(call_scope));
      }
      let mut inner=cx.clone();
-     inner.env=Rc::new(env);
+     inner.env=env.snapshot();
      inner.ctx=c.ctx.clone();
      inner.path=c.path.clone();
      inner.scope=format!("{} › {}",cx.scope,c.name);
@@ -1906,7 +1960,7 @@ impl Checker {
              (a.term, value)
          } else if let Some(default) = default {
              let dcx = Cx {
-                 env: Rc::new(BTreeMap::new()), ctx: d.ctx.clone(), path: vec![format!("def:{}", d.name), format!(":{n}")],
+                 env: ScopeStack::default(), ctx: d.ctx.clone(), path: vec![format!("def:{}", d.name), format!(":{n}")],
                  scope: format!("ƒ {}", d.name), in_def: true, stack: vec![d.name.clone()], depth: 0, zone: None, zbody: false,
              };
              let (term, value) = self.infer(&dcx, default);
@@ -1924,8 +1978,9 @@ impl Checker {
              if !d.params.iter().any(|(name, _, _)| name == key) { self.error(&a.form, "E_UNKNOWN_PARAM", &format!("{} has no input :{key}.", d.name)); }
          }
      }
+     let def_scope = self.terms.path(&vec![format!("def:{}", d.name)]);
      let mut inner = Cx {
-         env: Rc::new(env), ctx: d.ctx.clone(), path: vec![format!("def:{}", d.name)], scope: format!("ƒ {}", d.name),
+         env: ScopeStack::from_map(def_scope, env), ctx: d.ctx.clone(), path: vec![format!("def:{}", d.name)], scope: format!("ƒ {}", d.name),
          in_def: true, stack: cx.stack.clone(), depth: cx.depth + 1, zone: None, zbody: false,
      };
      inner.stack.push(d.name.clone());
@@ -2260,7 +2315,7 @@ impl Checker {
                 (syntax::make(syntax::Draft::Sym(name.clone())), Some(ty.clone()))
              }).collect(),
              body: definition.body.clone(),
-             env: Rc::new(BTreeMap::new()),
+             env: ScopeStack::default(),
              ctx: definition.ctx.clone(),
              path: vec![format!("def:{name}")],
              name: name.clone(),
@@ -2804,12 +2859,13 @@ fn error_rows(&mut self,cx:&Cx,f:&Syntax,forms:&[packed::SyntaxId])->(TermId,Inf
      let outer_terms = std::mem::take(&mut self.terms);
      let graph_form = self.terms.import_form(&sg.form);
      self.graph_stack.push(name.to_owned());
-     let cx0 = Cx { env: Rc::new(BTreeMap::new()), ctx: sg.ctx, path: vec![name.to_owned()], scope: name.to_owned(), in_def: false, stack: Vec::new(), depth: 0, zone: None, zbody: false };
-     let mut env: BTreeMap<String, Info> = BTreeMap::new();
+     let cx0 = Cx { env: ScopeStack::default(), ctx: sg.ctx, path: vec![name.to_owned()], scope: name.to_owned(), in_def: false, stack: Vec::new(), depth: 0, zone: None, zbody: false };
+     let graph_scope = self.terms.path(&[name.to_owned()]);
+     let mut env = ScopeStack::default().push(graph_scope);
      let mut inputs = Vec::new();
      for (n, t, df) in &sg.params {
          let mut cx = cx0.clone();
-         cx.env = Rc::new(env.clone());
+         cx.env = env.snapshot();
          let (dt, dv) = match df {
              Some(d) => {
                  let (term, v) = self.infer(&cx, d);
@@ -2826,11 +2882,11 @@ fn error_rows(&mut self,cx:&Cx,f:&Syntax,forms:&[packed::SyntaxId])->(TermId,Inf
          v.packed = dv.packed.clone();
          v.approx_sources = dv.approx_sources.clone();
          self.mark(vec![name.to_owned(), format!(":{n}")], &v);
-         env.insert(n.clone(), v);
+         env.top_mut(graph_scope).insert(n.clone(), v);
          inputs.push((n.clone(), t.clone(), dt));
      }
      let mut cx = cx0.clone();
-     cx.env = Rc::new(env);
+     cx.env = env.snapshot();
      let (bt, bv) = self.body(&cx, &sg.body);
      let want = context::result(sg.ctx);
      if !ty::fits(&bv.ty, &want) {
@@ -2969,12 +3025,13 @@ impl Checker {
         let Some(definition) = self.defs.get(name).cloned() else { return };
         let outer_terms = std::mem::take(&mut self.terms);
         let graph_form = self.terms.import_form(&definition.form);
-        let mut env = BTreeMap::new();
+        let def_scope = self.terms.path(&vec![format!("def:{name}")]);
+        let mut env = ScopeStack::default().push(def_scope);
         let mut inputs = Vec::new();
         for (input, want, default) in &definition.params {
             let value = if let Some(default) = default {
                 let cx = Cx {
-                    env: Rc::new(BTreeMap::new()),
+                    env: ScopeStack::default(),
                     ctx: definition.ctx.clone(),
                     path: vec![format!("def:{name}"), format!(":{input}")],
                     scope: format!("ƒ {name}"),
@@ -2992,11 +3049,11 @@ impl Checker {
             } else {
                 None
             };
-            env.insert(input.clone(), Info::leaf(want.clone()));
+            env.top_mut(def_scope).insert(input.clone(), Info::leaf(want.clone()));
             inputs.push((input.clone(), want.clone(), value));
         }
         let cx = Cx {
-            env: Rc::new(env),
+            env: env.snapshot(),
             ctx: definition.ctx.clone(),
             path: vec![format!("def:{name}")],
             scope: format!("ƒ {name}"),
@@ -3243,9 +3300,10 @@ impl Checker {
             let Some(definition) = self.node_defs.get(&name).cloned() else { continue };
             let outer_terms = std::mem::take(&mut self.terms);
             let graph_form = self.terms.import_form(&definition.form);
-            let env = definition.inputs.iter().map(|(input, ty, _)| (input.clone(), Info::leaf(ty.clone()))).collect::<BTreeMap<_, _>>().into();
+            let node_scope = self.terms.path(&vec![format!("node:{name}")]);
+            let bindings = definition.inputs.iter().map(|(input, ty, _)| (input.clone(), Info::leaf(ty.clone()))).collect::<BTreeMap<_, _>>();
             let base = Cx {
-                env,
+                env: ScopeStack::from_map(node_scope, bindings),
                 ctx: context::sop(),
                 path: vec![format!("node:{name}")],
                 scope: name.clone(),
@@ -3259,7 +3317,7 @@ impl Checker {
             for (input, input_ty, default) in &definition.inputs {
                 let term = default.as_ref().map(|form| {
                     let mut cx = base.clone();
-                    Rc::make_mut(&mut cx.env).clear();
+                    cx.env = ScopeStack::default();
                     cx.path.push(format!(":{input}"));
                     let (term, value) = self.infer(&cx, form);
                     if !ty::fits(&value.ty, input_ty) {
@@ -3288,7 +3346,7 @@ impl Checker {
             for (input, form) in &definition.normalizers {
                 let mut cx = base.clone();
                 cx.ctx = context::value();
-                Rc::make_mut(&mut cx.env).clear();
+                cx.env = ScopeStack::default();
                 let (term, value) = self.fn_value(&cx, form, "normalizer");
                 let signature = FnSignature { params: vec![Ty::Text], result: Ty::Text };
                 let argument = Arg { key: None, form: form.clone(), term, info: value };

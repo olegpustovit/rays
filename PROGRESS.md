@@ -11,7 +11,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | Wave | Done | Active | Pending |
 |------|------|--------|---------|
 | A | 8/8 | — | — |
-| B | 5/6 | B1 (partial) | 0 |
+| B | 5/6 | B5 (rdk) | 0 |
 | M | 11/21 | — | 10 |
 | I | 0/1 | — | 1 |
 | C | 0/21 | — | 21 |
@@ -32,7 +32,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | B0 | done | §B0 checklist + warm pair `flow_check` 0.15s/0.07s; `catalog.rs` marker |
 | B3 | done | `5fdb5fb3` — `gpu_editor` + `tests/support`; 7× `gpu_suite_t*` + qual → 2 test links; `cargo t -p rays_editor run_lowering` ~2.9s |
 | B4 | done | W1 `flow_ir` touch → `rays_bin` check in `tools/buildtime` (env overrides) |
-| B1 | done (partial) | `533489ee` term_arena; `e16247cd` delegate tables + `EMPTY_CHECK`; **deferred** workspace `PathId` scope stack (`op.rs` ponytail); ~138× `Arc::new` |
+| B1 | done | `533489ee` term_arena; `e16247cd` delegates; `21bf87ff` `ScopeStack` keyed by `PathId` in `workspace.rs`; `cargo t -p flow_check workspace_and_prelude` + `retained_memory` |
 | B2 | done | `96fab43d` — dev `opt-level=0` for rays_editor, pxui_graph, editor_document, flow_graph, flow_native |
 | B5 | done (partial) | `94aa4546` catalog split; `35df934e` `flow_native`; `7b374363` `flow_gpu`; **this session** `rays_editor` → `rdk_core` + `rdk_ops` (tests); **rdk delete deferred** (`sop`, `flow_sop`) |
 | M2 | done | `bbe7f6ae` — `editor_graph_ref`; `panel_key` / layouts borrow graph name |
