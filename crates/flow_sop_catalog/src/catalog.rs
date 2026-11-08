@@ -597,13 +597,8 @@ pub mod private {
         PRELUDE_CHECKS.with(|n| n.get())
     }
 
-    /// Library singleton (tests in `flow_sop` that need pre-check `forms` state).
-    pub fn library() -> Result<&'static Library, Diagnostic> {
-        super::library()
-    }
-
-    pub fn library_forms_materialized(lib: &Library) -> bool {
-        lib.forms.get().is_some()
+    pub fn library_syntax_cached() -> bool {
+        library().ok().and_then(|lib| lib.forms.get().map(|_| ())).is_some()
     }
 }
 

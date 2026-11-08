@@ -11,13 +11,12 @@ use std::sync::Arc;
 #[test]
 fn normal_checks_do_not_retain_the_complete_library_syntax() {
     let catalog = catalog::of_factories(1, &[], None, &sop::nodes::factories()).expect("catalog");
-    let library = catalog::private::library().expect("library");
-    assert!(!catalog::private::library_forms_materialized(library));
+    assert!(!catalog::private::library_syntax_cached());
     let forms = syntax::parse("(workspace w (graph g :context sop (sop/box)))").expect("parses");
     let (checked, diagnostics) = catalog::check_workspace(operators::all(), false, None, &catalog, &forms);
     assert!(checked.is_some(), "{diagnostics:?}");
     assert!(!checked.unwrap().nodes.is_empty(), "the reached implementation is present");
-    assert!(library.forms.get().is_none(), "unused implementations remain unmaterialized");
+    assert!(!catalog::private::library_syntax_cached(), "unused implementations remain unmaterialized");
 }
 
 fn field_factory() -> edit_graph::Factory {

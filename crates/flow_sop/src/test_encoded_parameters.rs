@@ -68,7 +68,7 @@ fn literal_arguments_are_canonicalized_and_bad_ones_refused() {
                 if term.name(call.kind) == "sop/test_encoded" {
                     return term.arena().fields(call.args).iter().find(|field| term.name(field.name) == "rules").and_then(|field| {
                         match term.child(field.term).node {
-                            syntax::Node::Text(id) => Some(term.arena().bytes(id).to_vec()),
+                            Node::Text(id) => Some(term.arena().bytes(id).to_vec()),
                             _ => None,
                         }
                     });

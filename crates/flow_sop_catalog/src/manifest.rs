@@ -10,7 +10,7 @@ use flow_syntax::syntax;
 use flow_syntax::ty;
 use param::{FieldView, Impact, KindView, Value};
 use rays_diagnostic::Diagnostic;
-use rays_math::hash::md5_hex;
+pub use rays_math::hash::md5_hex;
 use sop::edit_graph::{self, Factory, InputRequirement};
 use sop::node::{CookMode, Elementwise, Facts, Topology};
 
@@ -34,11 +34,11 @@ fn quote_bytes(value: &[u8]) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-fn quote(value: &str) -> String {
+pub fn quote(value: &str) -> String {
     quote_bytes(value.as_bytes())
 }
 
-fn group(name: &str, values: &[String]) -> String {
+pub fn group(name: &str, values: &[String]) -> String {
     if values.is_empty() {
         format!("({name})")
     } else {
@@ -218,7 +218,7 @@ fn type_word(ty: &str) -> String {
     if symbol::valid_name(ty) { ty.to_owned() } else { quote(ty) }
 }
 
-fn descriptor_entry(declaration: Option<Facts>, d: &Descriptor) -> String {
+pub fn descriptor_entry(declaration: Option<Facts>, d: &Descriptor) -> String {
     let types: Vec<String> = if d.slot_types.is_empty() {
         d.slots.iter().map(|_| "geometry".to_owned()).collect()
     } else {
@@ -258,7 +258,7 @@ fn descriptor_entry(declaration: Option<Facts>, d: &Descriptor) -> String {
     })
 }
 
-fn lisp_node(calls: &[String], node: &Defnode) -> String {
+pub fn lisp_node(calls: &[String], node: &Defnode) -> String {
     let key = flow_catalog::short(&node.kind.qualified);
     let slots: Vec<String> = node
         .slots
