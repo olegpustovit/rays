@@ -179,10 +179,9 @@ fn one_intent(value: t, intent: &Intent) -> t {
     };
     let doc = value.doc.clone();
     let workspace: &WorkspaceDoc = &doc.workspace.ws;
-    let with_text = |text: text_pane::State| -> t {
-        let mut v = value.clone();
-        v.text = text;
-        v
+    let with_text = |mut value: t, text: text_pane::State| -> t {
+        value.text = text;
+        value
     };
     let base = |old: Option<WorkspaceDoc>| -> Option<WorkspaceDoc> { Some(old.unwrap_or_else(|| workspace.clone())) };
     let slot_of = |text: &text_pane::State, graph: &str| -> Option<Slot> { text_pane::graph_slot(text, graph).cloned() };
@@ -251,64 +250,64 @@ fn one_intent(value: t, intent: &Intent) -> t {
         }
         Intent::Tab(tab) => {
             text.tab = *tab;
-            with_text(text)
+            with_text(value, text)
         }
         Intent::Menu(menu) => {
             text.menu = *menu;
-            with_text(text)
+            with_text(value, text)
         }
         Intent::ToggleWrap => {
             text.wrap = !text.wrap;
-            with_text(text)
+            with_text(value, text)
         }
         Intent::ToggleParinfer => {
             text.parinfer = !text.parinfer;
-            with_text(text)
+            with_text(value, text)
         }
         Intent::Picker(picker) => {
             text.picker = *picker;
-            with_text(text)
+            with_text(value, text)
         }
-        Intent::OpenGraph(graph) => go(value.clone(), graph),
+        Intent::OpenGraph(graph) => go(value, graph),
         Intent::SelectBinding(path) => {
-            let mut v = value.clone();
+            let mut v = value;
             v.text = text_pane::State { target: None, ..text };
             select_source(v, path)
         }
         Intent::JumpDefinition(path) => {
-            let next = select_source(value.clone(), path);
+            let next = select_source(value, path);
             let mut next = next;
             next.text = text_pane::State { target: Some(path.clone()), nonce: text.nonce + 1, ..text };
             next
         }
         // opens the references prompt, see `Editor_reduce`
-        Intent::ReferencesOf(_) => value.clone(),
+        Intent::ReferencesOf(_) => value,
         // read by the carry's report, not an edit
-        Intent::CarryOver(..) => value.clone(),
+        Intent::CarryOver(..) => value,
         Intent::FindSet(find, reveal) => {
             text.find = find.clone();
             text.nonce += if *reveal { 1 } else { 0 };
-            with_text(text)
+            with_text(value, text)
         }
         Intent::RequestSet(request) => {
             text.request = request.clone();
-            with_text(text)
+            with_text(value, text)
         }
         Intent::Resolved => {
             text.pending = Vec::new();
-            with_text(text)
+            with_text(value, text)
         }
         Intent::DocDraft(draft) => {
             text.draft = Some(draft.clone());
             text.doc_base = base(text.doc_base.clone());
             text.scrubbing = false;
-            with_text(text)
+            with_text(value, text)
         }
         Intent::DocDiscard => {
             text.draft = None;
             text.doc_base = None;
             text.doc_errors = text_pane::no_errors();
-            with_text(text)
+            with_text(value, text)
         }
         Intent::DocApply(draft) => match checked(true, &whole, draft, text.doc_base.as_ref(), &|d| text_edit(&value, d, None, None, None)) {
             Ok(mut v) => {
@@ -319,7 +318,7 @@ fn one_intent(value: t, intent: &Intent) -> t {
                 text.draft = Some(draft.clone());
                 text.doc_base = base(text.doc_base.clone());
                 text.doc_errors = Checked { at: draft.clone(), found };
-                with_text(text)
+                with_text(value, text)
             }
         },
         Intent::BindingDraft(path, draft) => {
@@ -329,13 +328,13 @@ fn one_intent(value: t, intent: &Intent) -> t {
             };
             text.binding_base = base(kept);
             text.binding_draft = Some((path.clone(), draft.clone()));
-            with_text(text)
+            with_text(value, text)
         }
         Intent::BindingDiscard => {
             text.binding_draft = None;
             text.binding_base = None;
             text.binding_errors = text_pane::no_errors();
-            with_text(text)
+            with_text(value, text)
         }
         Intent::GraphDraft(graph, draft) => {
             let old = slot_of(&text, graph);
@@ -344,12 +343,12 @@ fn one_intent(value: t, intent: &Intent) -> t {
                 gbase: base(old.as_ref().and_then(|s| s.gbase.clone())),
                 gerrors: old.as_ref().map(|s| s.gerrors.clone()).unwrap_or_else(text_pane::no_errors),
             };
-            with_text(put(text, graph, Some(slot)))
+            with_text(value, put(text, graph, Some(slot)))
         }
-        Intent::GraphDiscard(graph) => with_text(put(text, graph, None)),
+        Intent::GraphDiscard(graph) => with_text(value, put(text, graph, None)),
         Intent::Live(live) => {
             text.live = Some(live.clone());
-            with_text(text)
+            with_text(value, text)
         }
         Intent::GraphApply(graph, draft) => {
             let gbase = slot_of(&text, graph).and_then(|s| s.gbase);
@@ -360,7 +359,7 @@ fn one_intent(value: t, intent: &Intent) -> t {
                 }
                 Err(found) => {
                     let slot = failed(&text, graph, draft, found);
-                    with_text(put(text, graph, slot))
+                    with_text(value, put(text, graph, slot))
                 }
             }
         }
@@ -373,7 +372,7 @@ fn one_intent(value: t, intent: &Intent) -> t {
                 text.binding_draft = Some((path.clone(), draft.clone()));
                 text.binding_base = base(text.binding_base.clone());
                 text.binding_errors = Checked { at: draft.clone(), found };
-                with_text(text)
+                with_text(value, text)
             }
         },
         // a dragged number: the text applies on every frame of the drag as one "Edit text" entry
@@ -403,7 +402,7 @@ fn one_intent(value: t, intent: &Intent) -> t {
                     text.doc_base = base(text.doc_base.clone());
                     text.doc_errors = Checked { at: draft.clone(), found };
                     text.scrubbing = false;
-                    with_text(text)
+                    with_text(value, text)
                 }
             }
         }
@@ -432,7 +431,7 @@ fn one_intent(value: t, intent: &Intent) -> t {
                     let slot = failed(&text, graph, draft, found);
                     let mut next = put(text, graph, slot);
                     next.scrubbing = false;
-                    with_text(next)
+                    with_text(value, next)
                 }
             }
         }
@@ -464,11 +463,11 @@ fn one_intent(value: t, intent: &Intent) -> t {
                     text.binding_base = base(text.binding_base.clone());
                     text.binding_errors = Checked { at: draft.clone(), found };
                     text.scrubbing = false;
-                    with_text(text)
+                    with_text(value, text)
                 }
             }
         }
-        Intent::LiteralScrub { .. } => value.clone(),
+        Intent::LiteralScrub { .. } => value,
     }
 }
 
@@ -477,19 +476,19 @@ pub fn apply_text(value: t, intents: &[Intent]) -> t {
 }
 
 /// The intents of a text pane that is not the one in use fold into its own state.
-pub fn apply_text_at(value: t, key: &Vec<String>, intents: &[Intent]) -> t {
+pub fn apply_text_at(mut value: t, key: &Vec<String>, intents: &[Intent]) -> t {
     if intents.is_empty() {
         return value;
     }
-    let mine = value.text.clone();
-    let mut inner = value.clone();
-    inner.text = local_of(&value.locals, key).code;
-    let v = apply_text(inner, intents);
-    let mine = if intents.iter().any(|i| matches!(i, Intent::SelectBinding(_) | Intent::JumpDefinition(_))) { text_pane::State { target: None, ..mine } } else { mine };
-    let mut out = v.clone();
-    out.text = mine;
-    out.locals = put_local(key, &|l| local { code: v.text.clone(), ..l }, &v.locals);
-    out
+    let code = local_of(&value.locals, key).code;
+    let mut mine = std::mem::replace(&mut value.text, code);
+    let mut value = apply_text(value, intents);
+    if intents.iter().any(|i| matches!(i, Intent::SelectBinding(_) | Intent::JumpDefinition(_))) {
+        mine.target = None;
+    }
+    let code = std::mem::replace(&mut value.text, mine);
+    value.locals = put_local(key, &|l| local { code: code.clone(), ..l }, &value.locals);
+    value
 }
 
 /// The unapplied drafts of a text pane, as the applies its Check & apply would make.

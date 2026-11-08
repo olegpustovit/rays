@@ -274,3 +274,36 @@ fn whole_frame_update() {
         editor_host_close(&value);
     });
 }
+
+#[test]
+fn inactive_text_intents_reuse_the_owned_model() {
+    big_stack(|| {
+        use crate::{editor_panes, editor_text, text_pane};
+        let mut value = model();
+        value.preferences = "owned model identity".repeat(100);
+        let identity = value.preferences.as_ptr();
+        value.text.draft = Some("active draft".into());
+        value.text.target = Some(vec!["g".into()]);
+        let key = vec!["other-text".into()];
+        let doc = value.doc.clone();
+        let value = editor_text::apply_text_at(value, &key, &[text_pane::Intent::DocDraft("other draft".into())]);
+        assert_eq!(value.preferences.as_ptr(), identity, "text intents copied the whole owned model");
+        assert!(Arc::ptr_eq(&value.doc, &doc));
+        assert_eq!(value.text.draft.as_deref(), Some("active draft"));
+        assert_eq!(value.text.target, Some(vec!["g".into()]));
+        let local = editor_panes::local_of(&value.locals, &key);
+        assert_eq!(local.code.draft.as_deref(), Some("other draft"));
+        assert!(local.code.doc_base.is_some());
+        let value = editor_text::apply_text_at(value, &key, &[text_pane::Intent::DocApply("(workspace broken".into())]);
+        assert!(Arc::ptr_eq(&value.doc, &doc));
+        assert_eq!(value.text.draft.as_deref(), Some("active draft"));
+        let local = editor_panes::local_of(&value.locals, &key);
+        assert_eq!(local.code.draft.as_deref(), Some("(workspace broken"));
+        assert!(!local.code.doc_errors.found.is_empty());
+        let value = editor_text::apply_text_at(value, &key, &[text_pane::Intent::DocDiscard]);
+        assert_eq!(value.preferences.as_ptr(), identity);
+        assert!(editor_panes::local_of(&value.locals, &key).code.draft.is_none());
+        assert_eq!(value.text.draft.as_deref(), Some("active draft"));
+        editor_host_close(&value);
+    });
+}
