@@ -2867,8 +2867,14 @@ fn plan_entry(value: &mut t, index: usize, keep: bool) -> Result<plan_entry_resu
             all.extend(extra);
             all.extend(buffers);
             buffers = all;
-            textures.insert(0, (fragment_stage, 4, texture.borrow().texture.clone()));
-            samplers.insert(0, (fragment_stage, 5, sampler));
+            let mut tex = Vec::with_capacity(1 + textures.len());
+            tex.push((fragment_stage, 4, texture.borrow().texture.clone()));
+            tex.extend(textures);
+            textures = tex;
+            let mut sam = Vec::with_capacity(1 + samplers.len());
+            sam.push((fragment_stage, 5, sampler));
+            sam.extend(samplers);
+            samplers = sam;
         }
     }
     // World draws bind the sun map at 8 (the camera map stands in when there is none; the block
@@ -2880,16 +2886,25 @@ fn plan_entry(value: &mut t, index: usize, keep: bool) -> Result<plan_entry_resu
             (Some(sun), true) => sun.sun_color.clone(),
             _ => camera.clone(),
         };
-        textures.insert(0, (fragment_stage, 9, camera));
-        textures.insert(0, (fragment_stage, 8, sun));
-        samplers.insert(0, (fragment_stage, 10, sampler));
+        let mut tex = Vec::with_capacity(2 + textures.len());
+        tex.push((fragment_stage, 8, sun));
+        tex.push((fragment_stage, 9, camera));
+        tex.extend(textures);
+        textures = tex;
+        let mut sam = Vec::with_capacity(1 + samplers.len());
+        sam.push((fragment_stage, 10, sampler));
+        sam.extend(samplers);
+        samplers = sam;
     }
     if !direct {
         let attributes = match &slot_vertex_attributes {
             Some(attributes) => attributes.borrow().auxiliary_buffer.clone(),
             None => vertices.clone(),
         };
-        buffers.insert(0, (vertex_stage, 11, attributes, 0));
+        let mut buf = Vec::with_capacity(1 + buffers.len());
+        buf.push((vertex_stage, 11, attributes, 0));
+        buf.extend(buffers);
+        buffers = buf;
     }
     match (&slot_uniform, item.uniform_offset) {
         (Some(uniform), _) => {
