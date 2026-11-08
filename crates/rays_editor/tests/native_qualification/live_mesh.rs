@@ -395,10 +395,12 @@ fn holder_frames() {
                 let g=&piece.prepared.geometry;
                 flow_sop::attribute_kernel::resident_vec3(g,"P").map(|p|(p,flow_sop::topology_kernel::resident(g).map(|(a,b,c)|[Arc::downgrade(&a),Arc::downgrade(&b),Arc::downgrade(&c)])))
             });
-            if let (Some((old,streams)),Some((current,_)))=(&previous,&now) {
+            if let (Some((old,streams)),Some((current,current_streams)))=(&previous,&now) {
                 if !Arc::ptr_eq(old,current) {
                     assert!(flow_gpu::run::pin(old).is_none(),"{name} frame {tick}: old P retained"); gone+=1;
-                    if let Some(streams)=streams { meshes+=1; assert!(streams.iter().all(|s|s.upgrade().is_none()),"{name} frame {tick}: old topology retained"); }
+                    // a static topology is the shown frame's own too: only one the old frame alone held must go
+                    let shared=matches!((streams,current_streams),(Some(a),Some(b)) if a[0].ptr_eq(&b[0]));
+                    if let Some(streams)=streams.as_ref().filter(|_|!shared) { meshes+=1; assert!(streams.iter().all(|s|s.upgrade().is_none()),"{name} frame {tick}: old topology retained"); }
                 }
             }
             if now.is_some() {previous=now;}

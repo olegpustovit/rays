@@ -129,6 +129,13 @@ pub struct Token {
 }
 impl Drop for Token {
     fn drop(&mut self) {
+        // its last holder gone unread and never released: freed as `release(false)` frees
+        if self.fate.planes().is_none() {
+            let _g = self.fate.lock.lock().unwrap();
+            if !self.fate.destroyed() && !self.fate.retired.load(Ordering::SeqCst) {
+                self.shared.freed.fetch_add(1, Ordering::SeqCst);
+            }
+        }
         self.shared.released.lock().unwrap().push(self.id);
     }
 }

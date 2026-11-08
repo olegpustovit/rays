@@ -552,9 +552,10 @@ fn keep_static(key: &Value, point_count: i64, topology: &topology::T) {
 fn positions_of(planes: Arc<Planes>, count: i64) -> Result<(float3::T, Option<Arc<ResidentPoints>>), Diagnostic> {
     let holder = planes.resident.clone().map(|value| Arc::new(ResidentPoints { value, count }));
     let dyn_holder: Option<Arc<dyn deferred::Holder>> = holder.clone().map(|h| h as Arc<dyn deferred::Holder>);
+    // the session keeps the release, not the planes: a dropped frame frees its buffer at once
     let release: deferred::Release = {
-        let planes = planes.clone();
-        Arc::new(move |held| planes.release(held))
+        let planes = Arc::downgrade(&planes);
+        Arc::new(move |held| if let Some(planes) = planes.upgrade() { planes.release(held) })
     };
     let bounds: float3::Bounds = {
         let planes = planes.clone();
@@ -713,8 +714,9 @@ pub fn mesh_resident(static_key: Option<&Value>, scope: &dyn Residency, args: &A
         let holder = Arc::new(ResidentTopology { vertices: iv.clone(), offsets: io.clone(), kinds: ik.clone(),
             point_count, incidence: OnceLock::new(), build_incidence: scope.incidence() });
         let release: deferred::Release = {
-            let holder = holder.clone();
+            let holder = Arc::downgrade(&holder);
             Arc::new(move |held| {
+                let Some(holder) = holder.upgrade() else { return };
                 holder.vertices.release(held);
                 holder.offsets.release(held);
                 holder.kinds.release(held);

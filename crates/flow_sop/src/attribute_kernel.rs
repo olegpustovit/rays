@@ -989,9 +989,10 @@ fn new_holder(value: Value, count: i64) -> Arc<dyn rdk_core::packed::deferred::H
 /// needs it (any domain); until then the geometry holds the device's buffer.
 pub fn install_deferred(owner: Owner, kind: &str, name: &str, planes: &Arc<gpu::Planes>, g: &geometry::T) -> Result<geometry::T, Diagnostic> {
     let holder = planes.resident.clone().map(|v| new_holder(v, planes.count));
+    // the session keeps the release, not the planes
     let release: rdk_core::packed::deferred::Release = {
-        let p = planes.clone();
-        Arc::new(move |held| p.release(held))
+        let p = Arc::downgrade(planes);
+        Arc::new(move |held| if let Some(p) = p.upgrade() { p.release(held) })
     };
     let materialise = {
         let p = planes.clone();
