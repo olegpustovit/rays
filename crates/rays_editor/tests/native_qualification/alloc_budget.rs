@@ -5,8 +5,8 @@ use std::sync::atomic::Ordering::Relaxed;
 
 const FRAMES: i64 = 30;
 // (allocations per frame, bytes per frame)
-// C6 mutable loop: basic 2,002 / 184,943; empty 4,335 / 184,728. Never raise.
-const BASIC: (u64, u64) = (2_010, 186_000);
+// C11 shared cache: basic 1,980 / 182,989; empty 4,335 / 184,728. Never raise.
+const BASIC: (u64, u64) = (1_988, 184_000);
 const EMPTY: (u64, u64) = (4_350, 186_000);
 
 fn per_frame(source: &str, max: (u64, u64)) -> (u64, u64, String) {

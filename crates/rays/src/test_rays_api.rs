@@ -199,3 +199,111 @@ fn scene_staging_order_and_layer_breaks() {
         check(c.len() == 2 && c.iter().all(|x| matches!(x, render_ir::Command::Geometry(_))), "polygon fill/stroke did not stage two meshes");
     });
 }
+
+#[test]
+fn local_identity_cache_recency_release_and_accounting() {
+    use crate::idlist::{self, Item};
+    use std::cell::RefCell;
+    let item = |n: i64| Rc::new(Cell::new(n)) as Item;
+    let number = |v: &Item| v.downcast_ref::<Cell<i64>>().unwrap().get();
+    let owner = lru::cache("rays.test.local_identity");
+    let released = Rc::new(RefCell::new(Vec::new()));
+    let log = released.clone();
+    let mut list = idlist::create(owner.clone(), 2, Box::new(move |a, b| number(a) == number(b)), Some(Box::new(move |key, value| log.borrow_mut().push((number(key), number(value))))));
+    let keys = |list: &mut idlist::IdList| {
+        let mut keys = Vec::new();
+        idlist::iter(list, &mut |key, _| keys.push(number(key)));
+        keys
+    };
+    idlist::add(&mut list, 10, item(1), item(11));
+    idlist::add(&mut list, 20, item(2), item(22));
+    assert_eq!(mem::bytes(&owner), 30);
+    assert_eq!(number(&idlist::peek(&mut list, &item(1)).unwrap()), 11);
+    assert_eq!(keys(&mut list), [2, 1], "peek changed recency");
+    assert_eq!(number(&idlist::find(&mut list, &item(1)).unwrap()), 11);
+    assert_eq!(keys(&mut list), [1, 2], "find did not promote the hit");
+    assert_eq!(number(&idlist::head(&mut list).unwrap().0), 1);
+    assert_eq!(idlist::length(&mut list), 2);
+    idlist::add(&mut list, 30, item(3), item(33));
+    assert_eq!(keys(&mut list), [3, 1]);
+    assert_eq!(*released.borrow(), [(2, 22)]);
+    assert_eq!(mem::bytes(&owner), 40);
+    idlist::filter(&mut list, &mut |_, _| true);
+    assert_eq!(keys(&mut list), [3, 1], "retention changed recency");
+    let key = item(1);
+    let value = item(44);
+    idlist::add(&mut list, 40, key.clone(), value.clone());
+    assert!(Rc::ptr_eq(&idlist::find(&mut list, &item(1)).unwrap(), &value));
+    assert_eq!(*released.borrow(), [(2, 22), (1, 11)]);
+    assert_eq!(mem::bytes(&owner), 70);
+    // Equality is caller-defined over local, non-Send state; it need not be a pointer hash.
+    key.downcast_ref::<Cell<i64>>().unwrap().set(4);
+    assert!(idlist::peek(&mut list, &item(1)).is_none());
+    assert_eq!(number(&idlist::peek(&mut list, &item(4)).unwrap()), 44);
+    let mut visited = Vec::new();
+    idlist::filter(&mut list, &mut |key, _| { visited.push(number(key)); number(key) == 4 });
+    assert_eq!(visited, [4, 3]);
+    assert_eq!(mem::bytes(&owner), 40);
+    assert_eq!(*released.borrow(), [(2, 22), (1, 11), (3, 33)]);
+    idlist::remove(&mut list, &item(4));
+    assert_eq!(mem::bytes(&owner), 0);
+    idlist::add(&mut list, -10, item(5), item(55));
+    assert_eq!(mem::bytes(&owner), 0);
+    idlist::add(&mut list, 7, item(6), item(66));
+    idlist::clear(&mut list);
+    assert_eq!(mem::bytes(&owner), 0);
+    assert_eq!(&released.borrow()[4..], [(6, 66), (5, 55)], "clear must release newest first");
+    idlist::add(&mut list, 9, item(7), item(77));
+    drop(list);
+    assert_eq!(mem::bytes(&owner), 0, "dropping the local cache leaked its ledger charge");
+    assert_eq!(released.borrow().last(), Some(&(7, 77)));
+    let mut empty = idlist::create(owner.clone(), 0, Box::new(move |a, b| number(a) == number(b)), None);
+    idlist::add(&mut empty, 123, item(1), item(1));
+    assert!(idlist::find(&mut empty, &item(1)).is_none());
+    assert_eq!(mem::bytes(&owner), 0);
+
+    let mut collision = idlist::create(owner.clone(), 2, Box::new(move |a, b| number(a) == number(b)), None);
+    let first = item(1);
+    idlist::add(&mut collision, 0, first.clone(), item(11));
+    idlist::add(&mut collision, 0, item(2), item(22));
+    first.downcast_ref::<Cell<i64>>().unwrap().set(2);
+    assert_eq!(number(&idlist::peek(&mut collision, &item(2)).unwrap()), 22, "equivalent keys must match newest first");
+    first.downcast_ref::<Cell<i64>>().unwrap().set(3);
+    idlist::find(&mut collision, &item(3)).unwrap();
+    first.downcast_ref::<Cell<i64>>().unwrap().set(2);
+    assert_eq!(number(&idlist::peek(&mut collision, &item(2)).unwrap()), 11, "promotion must change which equivalent key wins");
+    idlist::remove(&mut collision, &item(2));
+    assert_eq!(number(&idlist::find(&mut collision, &item(2)).unwrap()), 22);
+
+    // Value-keyed tables retain their second-chance policy and release/take/pinning contracts.
+    use renderer::side_lru::{self as table, TableKey};
+    let owner = lru::cache("rays.test.local_value_keys");
+    let released = Rc::new(RefCell::new(Vec::new()));
+    let log = released.clone();
+    let mut cache = table::create(owner.clone(), true, table::UNBOUNDED_BYTES, Box::new(move |_, value| log.borrow_mut().push(number(&value))), 2);
+    table::add(&mut cache, 10, TableKey::Int(1), item(11));
+    table::add(&mut cache, 20, TableKey::Int(2), item(22));
+    table::find(&mut cache, &TableKey::Int(1)).unwrap();
+    table::add(&mut cache, 30, TableKey::Int(3), item(33));
+    let mut order = Vec::new();
+    table::iter(&mut cache, &mut |key, _| order.push(key.clone()));
+    assert_eq!(order, [TableKey::Int(3), TableKey::Int(1)], "value keys lost their second chance");
+    assert_eq!(*released.borrow(), [22]);
+    let escaped = table::take(&mut cache, &TableKey::Int(3)).unwrap();
+    assert_eq!(*released.borrow(), [22], "take released caller-owned data");
+    drop(cache);
+    assert_eq!(number(&escaped), 33);
+    assert_eq!(*released.borrow(), [22, 11]);
+    assert_eq!(mem::bytes(&owner), 0);
+    let mut cache = table::create(owner.clone(), true, table::UNBOUNDED_BYTES, Box::new(|_, _| {}), 1);
+    table::add_pinned(&mut cache, 10, TableKey::Int(1), item(11), true);
+    table::add(&mut cache, 20, TableKey::Int(2), item(22));
+    assert!(table::peek(&mut cache, &TableKey::Int(1)).is_some());
+    assert!(table::peek(&mut cache, &TableKey::Int(2)).is_none());
+    table::set_pinned(&mut cache, &TableKey::Int(1), false);
+    table::add(&mut cache, 20, TableKey::Int(2), item(22));
+    assert!(table::peek(&mut cache, &TableKey::Int(1)).is_none());
+    assert_eq!(table::length(&mut cache), 1);
+    table::clear(&mut cache);
+    assert_eq!(mem::bytes(&owner), 0);
+}

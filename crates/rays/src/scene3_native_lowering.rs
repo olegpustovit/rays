@@ -341,7 +341,7 @@ fn maps_of(baked: &world::baked) -> Rc<world_maps> {
     let cache_key: Item = Rc::new((specular as *const Vec<world::map> as usize, Arc::as_ptr(&baked.camera.pixels) as usize));
     let cache = current();
     if let Some(context) = &cache {
-        if let Some(found) = idlist::peek(&context.0.world_maps.borrow(), &cache_key) {
+        if let Some(found) = idlist::peek(&mut context.0.world_maps.borrow_mut(), &cache_key) {
             if let Ok(maps) = found.downcast::<world_maps>() {
                 return maps;
             }
@@ -406,7 +406,7 @@ fn sun_fit(scene: &scene3::t, sun: &world::sun) -> Result<Option<(mat4::T, Strin
     let cache = current();
     let key: Item = Rc::new((caster_list_key(list), sun.direction));
     if let Some(context) = &cache {
-        if let Some(found) = idlist::peek(&context.0.sun_fits.borrow(), &key) {
+        if let Some(found) = idlist::peek(&mut context.0.sun_fits.borrow_mut(), &key) {
             if let Ok(fit) = found.downcast::<Option<(mat4::T, String)>>() {
                 return Ok((*fit).clone());
             }
@@ -482,7 +482,7 @@ fn world_of(baked: &world::baked, sun: Option<(mat4::T, String)>) -> Rc<world_> 
     let key: Item = Rc::new((world_identity(baked), sun.as_ref().map(|s| s.1.clone())));
     let cache = current();
     if let Some(context) = &cache {
-        if let Some(found) = idlist::peek(&context.0.worlds.borrow(), &key) {
+        if let Some(found) = idlist::peek(&mut context.0.worlds.borrow_mut(), &key) {
             if let Ok(world) = found.downcast::<world_>() {
                 return world;
             }
@@ -726,7 +726,7 @@ fn instance_frames(parent: &mat4::T, transforms: &Rc<Vec<mat4::T>>) -> Rc<(Vec<m
     let cache = current();
     let key: Item = Rc::new((parent.clone(), transforms.clone()));
     if let Some(context) = &cache {
-        if let Some(found) = idlist::peek(&context.0.instance_frames.borrow(), &key) {
+        if let Some(found) = idlist::peek(&mut context.0.instance_frames.borrow_mut(), &key) {
             if let Ok(frames) = found.downcast::<(Vec<mat4::T>, Vec<mat4::T>)>() {
                 return frames;
             }
@@ -994,7 +994,7 @@ fn same_uvs(a: &Option<Arc<Vec<rays_math::vec2::T>>>, b: &Option<Arc<Vec<rays_ma
 fn find_packed(predicate: &dyn Fn(&packed_mesh) -> bool) -> Option<Rc<packed_mesh>> {
     let context = current()?;
     let mut found = None;
-    idlist::iter(&context.0.packed_meshes.borrow(), &mut |_, value| {
+    idlist::iter(&mut context.0.packed_meshes.borrow_mut(), &mut |_, value| {
         if let Ok(packed) = value.clone().downcast::<packed_mesh>() {
             if predicate(&packed) {
                 found = Some(packed);
@@ -1103,7 +1103,7 @@ fn packed_of_host(mode: scene3::render_mode, m: &mesh::t) -> Result<Rc<packed_me
         .as_ref()
         .and_then(|context| {
             let key: Item = Rc::new((m.clone(), mode));
-            idlist::peek(&context.0.packed_meshes.borrow(), &key)
+            idlist::peek(&mut context.0.packed_meshes.borrow_mut(), &key)
         })
         .and_then(|found| found.downcast::<packed_mesh>().ok())
         .filter(|packed| {
@@ -1198,7 +1198,7 @@ pub fn prepare(resources: &resources, cam: &camera::t, viewport: viewport_t, sce
     let cache = current();
     let cache_key: Item = Rc::new((scene.clone(), cam.clone(), viewport));
     if let Some(context) = &cache {
-        if let Some(found) = idlist::peek(&context.0.prepared_cache.borrow(), &cache_key) {
+        if let Some(found) = idlist::peek(&mut context.0.prepared_cache.borrow_mut(), &cache_key) {
             if let Ok(entry) = found.downcast::<prepared_cache_entry>() {
                 return Ok(entry.prepared.clone());
             }

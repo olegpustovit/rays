@@ -97,7 +97,7 @@ fn current() -> Option<cache_context> {
 fn sweep_retained(owner: &se::GpuVerticesOwner) {
     if let Some(context) = current() {
         let mut stale: Vec<Item> = Vec::new();
-        idlist::iter(&context.0.borrow(), &mut |layer, _| {
+        idlist::iter(&mut context.0.borrow_mut(), &mut |layer, _| {
             if let Some(prepared) = layer.downcast_ref::<se::PreparedScene3>() {
                 if se::borrows_unregistered(owner, prepared) {
                     stale.push(layer.clone());

@@ -131,9 +131,21 @@ struct CacheState {
 
 impl CacheState {
     fn lookup(&self, hash: u64, key: &(dyn Any + Send + Sync)) -> Option<usize> {
+        self.lookup_with(hash, &|stored| (self.lookup_equal)(stored, key), false)
+    }
+
+    fn lookup_with(&self, hash: u64, matches: &dyn Fn(&Key) -> bool, recent_first: bool) -> Option<usize> {
+        if recent_first {
+            let mut index = self.entries[self.oldest?].as_ref().expect("oldest cache entry").older;
+            for _ in 0..self.length {
+                let entry = self.entries[index].as_ref().expect("present cache entry");
+                if entry.key.hash == hash && matches(&entry.key) { return Some(index); }
+                index = entry.older;
+            }
+            return None;
+        }
         self.buckets.get(&hash)?.iter().copied().find(|index| {
-            let entry = self.entries[*index].as_ref().expect("present cache entry");
-            (self.lookup_equal)(&entry.key, key)
+            matches(&self.entries[*index].as_ref().expect("present cache entry").key)
         })
     }
 
@@ -571,6 +583,27 @@ impl Cache {
         Some(Arc::clone(&entry.value))
     }
 
+    /// The predicate is borrowed for this lookup; local keys need not be Send. `promote` moves
+    /// the hit to newest and resolves equivalent keys newest first; otherwise the hit receives
+    /// the normal second chance at eviction.
+    pub fn find_with(&self, hash: u64, matches: &dyn Fn(&Key) -> bool, promote: bool) -> Option<Value> {
+        let mut state = lock_state(&self.state.state);
+        let TableState::Cache(cache) = &mut *state else { unreachable!("cache state") };
+        let index = cache.lookup_with(hash, matches, promote)?;
+        if promote { cache.move_newest(index); }
+        cache.entries[index].as_mut().expect("present cache entry").touched = !promote;
+        cache.last_use = mem::epoch();
+        Some(Arc::clone(&cache.entries[index].as_ref().expect("present cache entry").value))
+    }
+
+    /// A borrowed-key lookup without changing recency.
+    pub fn peek_with(&self, hash: u64, matches: &dyn Fn(&Key) -> bool, recent_first: bool) -> Option<Value> {
+        let state = lock_state(&self.state.state);
+        let TableState::Cache(cache) = &*state else { unreachable!("cache state") };
+        let index = cache.lookup_with(hash, matches, recent_first)?;
+        Some(Arc::clone(&cache.entries[index].as_ref().expect("present cache entry").value))
+    }
+
     pub fn peek_by(
         &self,
         hash: u64,
@@ -666,24 +699,53 @@ impl Cache {
         })
     }
 
-    pub fn iter(&self, f: &mut dyn FnMut(&Key, &Value)) {
-        let entries = {
-            let table = lock_state(&self.state.state);
-            let TableState::Cache(cache) = &*table else {
-                unreachable!("cache state")
-            };
-            cache
-                .order()
-                .into_iter()
-                .map(|index| {
-                    let entry = cache.entries[index].as_ref().expect("present cache entry");
-                    (entry.key.clone(), Arc::clone(&entry.value))
-                })
-                .collect::<Vec<_>>()
-        };
-        for (key, value) in entries {
-            f(&key, &value);
+    fn snapshot(&self, recent_first: bool) -> Vec<(Key, Value)> {
+        let state = lock_state(&self.state.state);
+        let TableState::Cache(cache) = &*state else { unreachable!("cache state") };
+        let mut entries = Vec::with_capacity(cache.length);
+        let mut cursor = cache.oldest;
+        if recent_first { cursor = cursor.map(|i| cache.entries[i].as_ref().expect("oldest cache entry").older); }
+        for _ in 0..cache.length {
+            let entry = cache.entries[cursor.expect("linked cache entry")].as_ref().expect("present cache entry");
+            entries.push((entry.key.clone(), Arc::clone(&entry.value)));
+            cursor = Some(if recent_first { entry.older } else { entry.newer });
         }
+        entries
+    }
+
+    pub fn iter(&self, f: &mut dyn FnMut(&Key, &Value)) {
+        for (key, value) in self.snapshot(false) { f(&key, &value); }
+    }
+
+    pub fn iter_recent(&self, f: &mut dyn FnMut(&Key, &Value)) {
+        for (key, value) in self.snapshot(true) { f(&key, &value); }
+    }
+
+    pub fn head_recent(&self) -> Option<(Key, Value)> {
+        let state = lock_state(&self.state.state);
+        let TableState::Cache(cache) = &*state else { unreachable!("cache state") };
+        let newest = cache.entries[cache.oldest?].as_ref()?.older;
+        let entry = cache.entries[newest].as_ref()?;
+        Some((entry.key.clone(), Arc::clone(&entry.value)))
+    }
+
+    /// Visit newest first; release rejected entries after unlocking. `keep` must not reenter
+    /// this cache. Keeping every entry allocates nothing.
+    pub fn retain_recent(&self, keep: &mut dyn FnMut(&Key, &Value) -> bool) {
+        let (removed, release) = {
+            let mut state = lock_state(&self.state.state);
+            let TableState::Cache(cache) = &mut *state else { unreachable!("cache state") };
+            let mut removed = Vec::new();
+            let mut cursor = cache.oldest.map(|i| cache.entries[i].as_ref().expect("oldest cache entry").older);
+            for _ in 0..cache.length {
+                let index = cursor.expect("linked cache entry");
+                let entry = cache.entries[index].as_ref().expect("present cache entry");
+                cursor = Some(entry.older);
+                if !keep(&entry.key, &entry.value) { removed.push(cache.remove_index(index)); }
+            }
+            (removed, Arc::clone(&cache.release))
+        };
+        release_entries(&release, removed);
     }
 
     pub fn copy(&self, release: Release) -> Self {
