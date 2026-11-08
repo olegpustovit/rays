@@ -76,7 +76,9 @@ fn pictures() {
         "53eee607276c67a0280cb9fcbb59e5ebc81e0f6502a82077c0c2bdc7d7323c8b",
         "4622e6a3ff25f8cc3c389f231513adc2a69e0bf11f4db96d6b072e8db860beb8",
         "6b3831072362e57f0f8b90919a3f922911b46d54d87b1eaed1d45b82d3033a33",
-        "27bae8d4612c790aac0527df20a81bc4f0f3d21d22f51e0e03834b948f5f89a9",
+        // the rounded rect's stroke arcs read libm sin/cos: macOS 27 now rounds them as Windows ucrtbase
+        // does (3260ca08 recorded the one-ulp difference); the old macOS value was 27bae8d4…
+        "b1ebcb4115521cc169ab2565362ae9e6c7e3be89ed47ad0d297a2ef855880e59",
         "447a8178eb85cb3be6245c4d0ba5e559ef876fb7495596970eaa09f8b9b5fadb",
         "5de2d001b43fb50d2243d6b231c156f71c35b3bfe2f673e6dc357293d6c1748a",
         "db2db290db2f7d80a744b3625af71f1706e44b1d4d565f3d6373693427a6dbb8",
@@ -87,8 +89,7 @@ fn pictures() {
     assert_eq!(pictures.len(), digests.len());
     assert_eq!(sha256(b"abc"), editor_document::lowering::sha256("abc"));
     for (i, body) in pictures.iter().enumerate() {
-        let expected = if cfg!(windows) && i == 19 { "b1ebcb4115521cc169ab2565362ae9e6c7e3be89ed47ad0d297a2ef855880e59" } else { digests[i] };
-        assert_eq!(sha256(&serialize(&ok(new_scene(body)))), expected, "picture {i}: {body}");
+        assert_eq!(sha256(&serialize(&ok(new_scene(body)))), digests[i], "picture {i}: {body}");
     }
 }
 
