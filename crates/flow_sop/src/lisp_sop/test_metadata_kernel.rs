@@ -10,10 +10,10 @@ use flow_syntax::syntax::{self, Node};
 use flow_syntax::ty::{self, Ty};
 use flow_syntax::value::Value;
 use rays_diagnostic::Diagnostic;
-use rdk::attribute::{self, Owner, Storage};
-use rdk::geometry as geo;
-use rdk::packed::{Float2, Float3, Float4, FloatArray, IntArray};
-use rdk::{group, topology};
+use rdk_core::attribute::{self, Owner, Storage};
+use rdk_core::geometry as geo;
+use rdk_core::packed::{Float2, Float3, Float4, FloatArray, IntArray};
+use rdk_core::{group, topology};
 use sop::context::Options as ContextOptions;
 use sop::{context as sctx, payload, session};
 

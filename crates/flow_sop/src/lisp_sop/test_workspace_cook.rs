@@ -9,7 +9,7 @@ use flow_graph::flow_edit::{self as e, ArgKey, Op};
 use flow_graph::projection as p;
 use flow_syntax::syntax::Syntax;
 use flow_syntax::{lisp, phase_timer};
-use rdk::geometry as geo;
+use rdk_core::geometry as geo;
 use sop::context::{self as sctx, Options as ContextOptions};
 use sop::edit_graph::{self as edit, Factory, InputRequirement};
 use sop::node;
@@ -469,9 +469,9 @@ fn a_merge_loop_tags_its_primitives_with_the_input_index() {
     let graph = &small.graphs[0];
     assert!(operations(graph, "flow.card") == 7, "merge loop card count");
     let geometry = cook_graph(1, graph).unwrap();
-    match geo::find_attribute(rdk::attribute::Owner::Primitive, lower::source_attribute(), &geometry) {
-        Some(attribute) => match rdk::attribute::storage(&attribute) {
-            Ok(rdk::attribute::Storage::Int(values)) => assert!(
+    match geo::find_attribute(rdk_core::attribute::Owner::Primitive, lower::source_attribute(), &geometry) {
+        Some(attribute) => match rdk_core::attribute::storage(&attribute) {
+            Ok(rdk_core::attribute::Storage::Int(values)) => assert!(
                 values.len() as i64 == geo::primitive_count(&geometry) && values[0] == 0 && values[values.len() - 1] == 5,
                 "merge loop source attribute"
             ),

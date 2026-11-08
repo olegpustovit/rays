@@ -7,8 +7,8 @@
 use flow_ir::core_ir::hex_float;
 use param::{Kind, Value};
 use rays_diagnostic::Diagnostic;
-use rdk::line_geometry;
-use rdk::{error as rdk_error, geometry, topology};
+use rdk_ops::line_geometry;
+use rdk_core::{error as rdk_error, geometry, topology};
 use sop::context::dependencies;
 use sop::edit_graph::{self, Factory};
 use sop::node::{self, build, CookMode, GeometryCooked};

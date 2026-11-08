@@ -2,9 +2,9 @@
 //! optional procedural spheres, strands, vertex motion) or instances of prototypes with the
 //! `Ray_host` registry that the Flow evaluator and Packed kernels query.
 use flow_check::ray_host::{self as host, Hit};
-use rdk::packed::Float3;
-use rdk::surface_index::{self as surface, RayDirectionMode, RaySurfaceHit, View as SurfaceView};
-use rdk::{error as rdk_error, geometry};
+use rdk_core::packed::Float3;
+use rdk_geom::surface_index::{self as surface, RayDirectionMode, RaySurfaceHit, View as SurfaceView};
+use rdk_core::{error as rdk_error, geometry};
 use std::sync::Arc;
 
 /// A strand segment (ax, ay, az, bx, by, bz, radius): a linear round curve with sphere caps. A hit
@@ -389,7 +389,7 @@ mod tests {
     //! through `Flow_ir.Packed` at 1 and 8 domains, one host query per ray, the flow_web refusal)
     //! need `Test_program` and the flow_web crate.
     use super::*;
-    use rdk::topology;
+    use rdk_core::topology;
     use rays_math::vec3;
 
     const ID: i64 = 7;

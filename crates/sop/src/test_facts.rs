@@ -5,7 +5,7 @@
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
-use rdk::{attribute, edge_group, geometry, group, packed, topology_index};
+use rdk_core::{attribute, edge_group, geometry, group, packed, topology_index};
 
 use crate::context;
 use crate::node::{self, build, CookMode, InputUse};
@@ -220,7 +220,7 @@ fn seen_list() -> Arc<Mutex<Vec<Option<i64>>>> {
 }
 
 fn consumer_source(seen: &Arc<Mutex<Vec<Option<i64>>>>) -> node::T {
-    let geometry_value = rdk::line_geometry::points(&[]).unwrap();
+    let geometry_value = rdk_ops::line_geometry::points(&[]).unwrap();
     let seen = Arc::clone(seen);
     build::make_geometry(
         build::Args { cook_mode: CookMode::Generator, ..build::args("consumer_source") },
@@ -320,7 +320,7 @@ fn consumer_facts() {
 fn shared_plane_charge() {
     let owner = lru::cache("sop.volatile");
     let before = mem::bytes(&owner);
-    let shared = rdk::line_geometry::points(&vec![(1.0, 2.0, 3.0); 1000]).unwrap();
+    let shared = rdk_ops::line_geometry::points(&vec![(1.0, 2.0, 3.0); 1000]).unwrap();
     let holder = |name: &str| {
         let g = shared.clone();
         build::make_geometry(

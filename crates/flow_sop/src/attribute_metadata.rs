@@ -8,13 +8,14 @@ use flow_syntax::lisp;
 use flow_syntax::arena::{Node, SyntaxBuilder};
 use flow_syntax::ty;
 use rays_diagnostic::Diagnostic;
-use rdk::attribute::{self, Owner};
-use rdk::attribute_lifecycle::{self, RenameConflict, RenameRule, SwapMethod, SwapRule};
-use rdk::attribute_ops;
-use rdk::attribute_pattern;
-use rdk::geometry;
-use rdk::group_ops::{self, DeleteParams, DeleteRule};
-use rdk::{error as rdk_error, group_ops::Owner as GroupOwner};
+use rdk_core::attribute::{self, Owner};
+use rdk_ops::attribute_lifecycle::{self, RenameConflict, RenameRule, SwapMethod, SwapRule};
+use rdk_ops::attribute_ops;
+use rdk_core::attribute_pattern;
+use rdk_core::geometry;
+use rdk_ops::group_ops::{self, DeleteParams, DeleteRule};
+use rdk_core::error as rdk_error;
+use rdk_ops::group_ops::Owner as GroupOwner;
 use sop::context::{self, dependencies};
 use sop::node::{self, build, CookMode, Elementwise, Facts, GeometryCooked, InputUse, Topology};
 use std::sync::Arc;
@@ -539,7 +540,7 @@ pub fn resolve(geometry: &dyn Fn(i64) -> Option<geometry::T>, value: &Value) -> 
 mod tests {
     use super::*;
     use flow_syntax::ty::Ty;
-    use rdk::line_geometry;
+    use rdk_ops::line_geometry;
 
     fn snapshot(g: &geometry::T) -> node::T {
         let held = g.clone();

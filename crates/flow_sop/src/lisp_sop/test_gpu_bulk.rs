@@ -3,7 +3,7 @@ use super::support::*;
 use crate::{attribute_kernel,lower,value_lane};
 use flow_ir::{flow_ir::{Gpu,PlacementReason,Profile},packed};
 use flow_syntax::value::Value;
-use rdk::{geometry as geo,packed::Float3};
+use rdk_core::{geometry as geo, packed::Float3};
 use sop::{context as ctx,edit_graph as edit,payload,session};
 use std::sync::{Arc,Mutex,atomic::{AtomicUsize,Ordering}};
 #[derive(Default)]
@@ -64,7 +64,7 @@ fn captured(points:bool,capture:bool,time:f64){
     let mut s=new_session(0,0);let context=ctx::create(ctx::Options{domains:Some(1),time:Some(time),..Default::default()}).unwrap();
     if capture{cook(&mut s,&context,&root);cook(&mut s,&context,&root);}
     calls.planes.store(0,Ordering::SeqCst);let geometry=cook(&mut s,&context,&root);
-    if points{for(name,indexed)in[("sourcepoint",false),("sourceindex",true)]{let rdk::attribute::Storage::Int(xs)=rdk::attribute::storage(&geo::find_attribute(rdk::attribute::Owner::Point,name,&geometry).unwrap()).unwrap()else{panic!("source integer attribute")};assert_eq!(xs,(0..32).map(|i|if indexed{i}else{-1}).collect::<Vec<_>>());}}
+    if points{for(name,indexed)in[("sourcepoint",false),("sourceindex",true)]{let rdk_core::attribute::Storage::Int(xs)=rdk_core::attribute::storage(&geo::find_attribute(rdk_core::attribute::Owner::Point,name,&geometry).unwrap()).unwrap()else{panic!("source integer attribute")};assert_eq!(xs,(0..32).map(|i|if indexed{i}else{-1}).collect::<Vec<_>>());}}
     assert_eq!(calls.planes.load(Ordering::SeqCst),usize::from(capture));
     if capture{assert!(Profile::placements(&l.profile).iter().any(|p|p.cpu_consumers==Some(1)&&p.reason==PlacementReason::Device_measured_cheaper));}
     assert_eq!(Float3::get(geo::positions(&geometry),31).unwrap(),(31.+time,0.,0.));session::close(&mut s);

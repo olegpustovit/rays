@@ -77,8 +77,8 @@ fn image_is_immutable_and_converts_exactly() {
     }
     assert!(image::of_owned_rgba8((1_i64 << 62) - 1, 2, Vec::new()).is_err());
     assert!(image::of_owned_rgba8(1, 1, Vec::new()).is_err());
-    let token = Arc::new(rdk::cancel::create());
-    rdk::cancel::cancel(&token);
+    let token = Arc::new(rdk_core::cancel::create());
+    rdk_core::cancel::cancel(&token);
     let cancelled = context::create(context::Options { cancel: Some(token), ..Default::default() }).unwrap();
     match image::of_vec4(&cancelled, 1, 1, &[0.0, 0.0, 0.0, 1.0]) {
         Err(d) => assert_eq!(d.code, "E_CANCELLED"),

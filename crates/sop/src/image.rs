@@ -88,7 +88,7 @@ pub fn of_owned_rgba8(width: i64, height: i64, bytes: Vec<u8>) -> Result<T, Diag
     if bytes.len() as i64 != width * height * 4 {
         return Err(error("Image RGBA8 storage must contain four bytes per pixel."));
     }
-    Ok(T(Arc::new(Data { width, height, storage: Storage::Rgba8(bytes), data_id: rdk::geometry::fresh_data_id() })))
+    Ok(T(Arc::new(Data { width, height, storage: Storage::Rgba8(bytes), data_id: rdk_core::geometry::fresh_data_id() })))
 }
 
 /// Transfers sole ownership after validating dimensions and samples.
@@ -100,7 +100,7 @@ pub fn of_owned_rgba(width: i64, height: i64, rgba: Vec<f64>) -> Result<T, Diagn
     if !rgba.iter().all(|sample| sample.is_finite() && *sample >= 0.0 && *sample <= 1.0) {
         return Err(error("Image RGBA samples must be finite and within [0,1]."));
     }
-    Ok(T(Arc::new(Data { width, height, storage: Storage::Floats(rgba), data_id: rdk::geometry::fresh_data_id() })))
+    Ok(T(Arc::new(Data { width, height, storage: Storage::Floats(rgba), data_id: rdk_core::geometry::fresh_data_id() })))
 }
 
 pub fn create(width: i64, height: i64, rgba: &[f64]) -> Result<T, Diagnostic> {
@@ -123,7 +123,7 @@ pub fn of_vec4(context: &context::T, width: i64, height: i64, rgba: &[f64]) -> R
     let invalid = AtomicBool::new(false);
     let last = (count - 1) / grain;
     let mut bytes = vec![0u8; rgba.len()];
-    let windows = rdk::support::Windows::even(&mut bytes, grain * 4);
+    let windows = rdk_core::support::Windows::even(&mut bytes, grain * 4);
     let chunk = |k: i64| -> Result<(), String> {
         if context::cancelled(context) {
             return Ok(());

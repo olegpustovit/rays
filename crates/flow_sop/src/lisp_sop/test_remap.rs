@@ -10,10 +10,10 @@ use flow_graph::projection as proj;
 use flow_syntax::syntax;
 use flow_syntax::value::Value;
 use rays_diagnostic::Diagnostic;
-use rdk::attribute::{self, Owner, Storage};
-use rdk::geometry as geo;
-use rdk::packed::{Float2, Float3, Float4, FloatArray, IntArray};
-use rdk::{cancel, edge_group, group, topology, topology_index};
+use rdk_core::attribute::{self, Owner, Storage};
+use rdk_core::geometry as geo;
+use rdk_core::packed::{Float2, Float3, Float4, FloatArray, IntArray};
+use rdk_core::{cancel, edge_group, group, topology, topology_index};
 use rdk_core::topology_remap as remap;
 use sop::context::Options as ContextOptions;
 use sop::edit_graph as edit;
@@ -758,7 +758,7 @@ fn edge_ancestry_helper_trust_boundary_diagnostics() {
         (invoke(97, geo::topology(&dst), &theirs), "source group affinity mismatch"),
     ] {
         match result {
-            Err(actual) => assert!(rdk::error::message(&actual) == format!("Topology_remap.edge_groups_from_ancestry: {message}"), "edge ancestry helper trust-boundary diagnostic changed: {}", rdk::error::message(&actual)),
+            Err(actual) => assert!(rdk_core::error::message(&actual) == format!("Topology_remap.edge_groups_from_ancestry: {message}"), "edge ancestry helper trust-boundary diagnostic changed: {}", rdk_core::error::message(&actual)),
             Ok(_) => panic!("edge ancestry helper accepted an invalid native boundary"),
         }
     }
@@ -963,7 +963,7 @@ fn weighted_remap_every_owner_and_storage() {
             if points && vertices {
                 for a in geo::attributes(&src) {
                     if matches!(attribute::owner(&a), Owner::Point | Owner::Vertex) {
-                        let curve = ok(rdk::curve_join::interpolate_attribute(None, None, &pc.0, &pc.1, &pc.2, &vc.0, &vc.1, &vc.2, &a));
+                        let curve = ok(rdk_ops::curve_join::interpolate_attribute(None, None, &pc.0, &pc.1, &pc.2, &vc.0, &vc.1, &vc.2, &a));
                         let got = geo::find_attribute(attribute::owner(&a), attribute::name(&a), &expected).unwrap();
                         let attach = |x: attribute::T| nan_free(&ok(geo::create(geo::positions(&base).clone(), geo::topology(&base).clone(), Some(vec![x]), None, None)));
                         assert!(attach(curve) == attach(got), "weighted remap differs from Curve_join.interpolate_attribute ({} copies {copies})", attribute::name(&a));

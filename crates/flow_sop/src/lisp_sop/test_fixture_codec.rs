@@ -1,6 +1,6 @@
 //! lib/flow_sop/goldens/test_fixture_codec.ml: complete storage/owner/group fixture and malformed inputs.
 use super::{fixture_codec as codec,support::geometry_bytes};
-use rdk::{attribute::{self,Owner,Storage},geometry as geo,packed,topology,topology_index,group,edge_group};
+use rdk_core::{attribute::{self,Owner,Storage},geometry as geo,packed,topology,topology_index,group,edge_group};
 fn geometry()->geo::T{
     let t=topology::create_owned(3,vec![0,1,2,2,1],vec![0,3,5],vec![topology::PrimitiveKind::Polygon,topology::PrimitiveKind::OpenPolyline]).unwrap();
     let positions=packed::Float3::of_owned(vec![0.,-0.,f64::INFINITY],vec![1.,2.,3.],vec![4.,5.,6.]).unwrap();

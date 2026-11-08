@@ -3,7 +3,7 @@ use super::support::*;
 use crate::{attribute_kernel as ak, catalog, lisp_sop, lower, operators, value_lane};
 use flow_ir::flow_ir::Executor;
 use flow_syntax::{ty::{self, Ty}, value::{Value, source_value}};
-use rdk::{attribute::{self, Owner, Storage}, geometry as geo, packed::Float3, topology};
+use rdk_core::{attribute::{self, Owner, Storage}, geometry as geo, packed::Float3, topology};
 use sop::{context as ctx, edit_graph as edit, node, session};
 use std::sync::Arc;
 
@@ -75,7 +75,7 @@ fixture_test!(planes_empty,0,true); fixture_test!(planes_shared_polygons,1,true)
 fixture_test!(planes_open_repeated,2,true); fixture_test!(planes_closed,3,true); fixture_test!(planes_mixed,4,true);
 fn large(planes:bool) {
     let n=if planes {65537}else{32769};
-    let original=rdk::line_geometry::points(&(0..n).map(|i|(i as f64,if i%2==0{-0.0}else{f64::from_bits(1)},-2.0)).collect::<Vec<_>>()).unwrap();
+    let original=rdk_ops::line_geometry::points(&(0..n).map(|i|(i as f64,if i%2==0{-0.0}else{f64::from_bits(1)},-2.0)).collect::<Vec<_>>()).unwrap();
     let before=geometry_bytes(&original);
     let body=if planes {rebuild(true).to_owned()} else {rebuild(false).replace("(sop/attr geo :P)","(exact (map (fn [(position : vec3)] position) (sop/attr geo :P)))")};
     for reference in [false,true] {let root=authored(reference,&original,&wrapped(&body));
@@ -165,7 +165,7 @@ fn errors(planes:bool) {
         for kind in [-1,3,9007199254740993] {let n=arrays(reference,planes,replace(base.clone(),"kinds",ints(vec![kind,0])));let mut s=new_session(64,64_000_000);assert_eq!(try_cook(&mut s,&context(1,97),&n).err().unwrap().code,"E_TOPOLOGY_KIND");session::close(&mut s);}
     }
     for domains in [1,8] {
-        let n=arrays(false,planes,base.clone());let cancel=Arc::new(rdk::cancel::create());rdk::cancel::cancel(&cancel);
+        let n=arrays(false,planes,base.clone());let cancel=Arc::new(rdk_core::cancel::create());rdk_core::cancel::cancel(&cancel);
         let c=ctx::create(ctx::Options{domains:Some(domains),cancel:Some(cancel),..Default::default()}).unwrap();let mut s=new_session(64,64_000_000);
         let d=try_cook(&mut s,&c,&n).err().expect("cancelled mesh succeeded");assert!(d.code=="cancelled"||d.code=="E_CANCELLED");session::close(&mut s);
     }
@@ -228,7 +228,7 @@ fn live_arrays(planes:bool,stateful:bool){
 fn zone(planes:bool){
     let body=if planes{"(sop/mesh_planes :points {:x (array/float 1 p.x) :y (array/float 1 p.y) :z (array/float 1 p.z)} :vertex_points (array/int 0) :primitive_offsets (array/int 1) :kinds (array/int 0))"}else{"(sop/mesh :points (array/vec3 1 p) :vertex_points (array/int 0) :primitive_offsets (array/int 1) :kinds (array/int 0))"};
     let source=format!("(workspace zone (graph g :context sop (sop/merge (for [p (sop/point_list (sop/ext_src))] {body}))))");
-    let expected=rdk::line_geometry::points(&[(0.,0.,0.),(2.,0.,0.),(4.,0.,0.)]).unwrap();
+    let expected=rdk_ops::line_geometry::points(&[(0.,0.,0.),(2.,0.,0.),(4.,0.,0.)]).unwrap();
     for reference in [false,true]{let n=authored(reference,&expected,&source);for domains in [1,8]{assert_eq!(fields(&cook_once(domains,&n),false),fields(&expected,false));}}
 }
 #[test]fn arrays_zone_element_capture(){zone(false)}

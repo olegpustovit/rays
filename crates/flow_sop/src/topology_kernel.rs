@@ -3,7 +3,7 @@ use crate::topology_kernel_impl as imp;
 use flow_ir::flow_ir::Gpu::Integers;
 use flow_syntax::value::Value;
 use rays_diagnostic::Diagnostic;
-use rdk::geometry::T as Geometry;
+use rdk_core::geometry::T as Geometry;
 use std::sync::Arc;
 
 pub fn mesh_points(points: &Value) -> Result<(i64, imp::Positions), Diagnostic> {

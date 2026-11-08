@@ -1,7 +1,7 @@
 //! Ports of lib/flow_sop/test_noise_displace_contract.ml and test_merge_source.ml.
 use super::support::*;
 use crate::{catalog, lisp_sop, lower, manifest, operators};
-use rdk::geometry as geo;
+use rdk_core::geometry as geo;
 use sop::context::{self as sctx, Options as ContextOptions};
 use sop::edit_graph as edit;
 use sop::node;
@@ -9,7 +9,7 @@ use sop::session;
 use std::sync::Arc;
 
 fn line_points(points: &[(f64, f64, f64)]) -> geo::T {
-    rdk::line_geometry::points(points).unwrap_or_else(|e| panic!("{}", rdk::error::to_string(&e)))
+    rdk_ops::line_geometry::points(points).unwrap_or_else(|e| panic!("{}", rdk_core::error::to_string(&e)))
 }
 
 fn contract_geometry() -> geo::T {
@@ -80,7 +80,8 @@ fn noise_displace_sop_cache_context_seed_dependency_and_relabel_identity() {
 /// The original two-merge implementation remains the independent oracle for fused provenance.
 #[test]
 fn lisp_source_merge_domains_inputs_and_cancellation() {
-    use rdk::{attribute::{self,Owner,Storage},mesh_merge};
+    use rdk_core::attribute::{self,Owner,Storage};
+    use rdk_ops::mesh_merge;
     let geometry=cook_once(1,&lisp_sop::node(&[],"(sop/box :size [1.0 2.0 3.0] :x_divisions 2 :y_divisions 2 :z_divisions 2 :face_groups \"face\")"));
     let count=geo::primitive_count(&geometry)as usize;let tag=lower::source_attribute();
     let add=|name:&str,storage:Storage|geo::with_attribute(attribute::create_owned(name,Owner::Primitive,storage).unwrap(),&geometry).unwrap();
@@ -91,7 +92,7 @@ fn lisp_source_merge_domains_inputs_and_cancellation() {
         ("src",vec![geometry.clone(),tagged]),("src",vec![named.clone(),named.clone()]),
         ("src",vec![named.clone(),float_named.clone()]),("src",vec![float_named.clone(),float_named]),
         ("src",vec![named,geometry.clone()]),(tag,vec![geometry.clone(),geometry.clone()]),
-        ("src",vec![rdk::line_geometry::points(&[]).unwrap()]),
+        ("src",vec![rdk_ops::line_geometry::points(&[]).unwrap()]),
     ];
     for(attribute,geometries)in cases{
         let originals=geometries.iter().map(geometry_bytes).collect::<Vec<_>>();
@@ -110,7 +111,7 @@ fn lisp_source_merge_domains_inputs_and_cancellation() {
         }
         assert_eq!(geometries.iter().map(geometry_bytes).collect::<Vec<_>>(),originals);
     }
-    let cancel=Arc::new(rdk::cancel::create());rdk::cancel::cancel(&cancel);
+    let cancel=Arc::new(rdk_core::cancel::create());rdk_core::cancel::cancel(&cancel);
     let c=sctx::create(ContextOptions{domains:Some(1),cancel:Some(cancel),..Default::default()}).unwrap();
     let with_=vec![("i0".into(),lisp_sop::snapshot(&geometry)),("i1".into(),lisp_sop::snapshot(&geometry))];
     let merged=lisp_sop::node(&with_,"(sop/merge (sop/ext_i0) (sop/ext_i1) :source_attribute \"src\" :source_base 10)");

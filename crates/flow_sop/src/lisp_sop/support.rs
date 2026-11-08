@@ -1,7 +1,7 @@
 //! Shared helpers of the ported lib/flow_sop tests (Test_support, Rdk_test_support).
 use crate::lower;
 use flow_syntax::syntax;
-use rdk::geometry as geo;
+use rdk_core::geometry as geo;
 use sop::context::{self as sctx, Options as ContextOptions};
 use sop::edit_graph as edit;
 use sop::node;
@@ -49,40 +49,40 @@ pub fn cook_once(domains: i64, n: &node::T) -> geo::T {
 pub fn geometry_bytes(g: &geo::T) -> Vec<u8> {
     let mut out = String::new();
     let positions = geo::positions(g);
-    for i in 0..rdk::packed::Float3::length(positions) {
-        let (x, y, z) = rdk::packed::Float3::get(positions, i).expect("position");
+    for i in 0..rdk_core::packed::Float3::length(positions) {
+        let (x, y, z) = rdk_core::packed::Float3::get(positions, i).expect("position");
         out.push_str(&format!("{:016x}{:016x}{:016x};", x.to_bits(), y.to_bits(), z.to_bits()));
     }
-    if let Ok(view) = rdk::topology::View::view(geo::topology(g)) {
+    if let Ok(view) = rdk_core::topology::View::view(geo::topology(g)) {
         out.push_str(&format!("T{}|{:?}|{:?}|{:?};", view.point_count, view.vertex_points, view.primitive_offsets, view.primitive_kinds));
     }
     for a in geo::attributes(g) {
-        out.push_str(&format!("A{:?}:{}:{};", rdk::attribute::owner(&a), rdk::attribute::name(&a), rdk::attribute::kind_name(&a)));
-        match rdk::attribute::storage(&a) {
-            Ok(rdk::attribute::Storage::Float(v)) => out.push_str(&v.iter().map(|x| format!("{:016x}", x.to_bits())).collect::<String>()),
-            Ok(rdk::attribute::Storage::Int(v)) => out.push_str(&format!("{v:?}")),
-            Ok(rdk::attribute::Storage::Text(v)) => out.push_str(&format!("{v:?}")),
-            Ok(rdk::attribute::Storage::Float2(v)) => {
-                for i in 0..rdk::packed::Float2::length(&v) {
-                    out.push_str(&format!("{:?}", rdk::packed::Float2::get(&v, i).map(|(x, y)| (x.to_bits(), y.to_bits()))));
+        out.push_str(&format!("A{:?}:{}:{};", rdk_core::attribute::owner(&a), rdk_core::attribute::name(&a), rdk_core::attribute::kind_name(&a)));
+        match rdk_core::attribute::storage(&a) {
+            Ok(rdk_core::attribute::Storage::Float(v)) => out.push_str(&v.iter().map(|x| format!("{:016x}", x.to_bits())).collect::<String>()),
+            Ok(rdk_core::attribute::Storage::Int(v)) => out.push_str(&format!("{v:?}")),
+            Ok(rdk_core::attribute::Storage::Text(v)) => out.push_str(&format!("{v:?}")),
+            Ok(rdk_core::attribute::Storage::Float2(v)) => {
+                for i in 0..rdk_core::packed::Float2::length(&v) {
+                    out.push_str(&format!("{:?}", rdk_core::packed::Float2::get(&v, i).map(|(x, y)| (x.to_bits(), y.to_bits()))));
                 }
             }
-            Ok(rdk::attribute::Storage::Float3(v)) => {
-                for i in 0..rdk::packed::Float3::length(&v) {
-                    out.push_str(&format!("{:?}", rdk::packed::Float3::get(&v, i).map(|(x, y, z)| (x.to_bits(), y.to_bits(), z.to_bits()))));
+            Ok(rdk_core::attribute::Storage::Float3(v)) => {
+                for i in 0..rdk_core::packed::Float3::length(&v) {
+                    out.push_str(&format!("{:?}", rdk_core::packed::Float3::get(&v, i).map(|(x, y, z)| (x.to_bits(), y.to_bits(), z.to_bits()))));
                 }
             }
-            Ok(rdk::attribute::Storage::Float4(v)) => {
-                for i in 0..rdk::packed::Float4::length(&v) {
-                    out.push_str(&format!("{:?}", rdk::packed::Float4::get(&v, i).map(|(a, b, c, d)| (a.to_bits(), b.to_bits(), c.to_bits(), d.to_bits()))));
+            Ok(rdk_core::attribute::Storage::Float4(v)) => {
+                for i in 0..rdk_core::packed::Float4::length(&v) {
+                    out.push_str(&format!("{:?}", rdk_core::packed::Float4::get(&v, i).map(|(a, b, c, d)| (a.to_bits(), b.to_bits(), c.to_bits(), d.to_bits()))));
                 }
             }
-            Ok(rdk::attribute::Storage::IntArray(v)) => {
-                let v = rdk::packed::IntArray::View::view(&v);
+            Ok(rdk_core::attribute::Storage::IntArray(v)) => {
+                let v = rdk_core::packed::IntArray::View::view(&v);
                 out.push_str(&format!("{:?}:{:?}", v.offsets, v.values));
             }
-            Ok(rdk::attribute::Storage::FloatArray(v)) => {
-                let v = rdk::packed::FloatArray::View::view(&v);
+            Ok(rdk_core::attribute::Storage::FloatArray(v)) => {
+                let v = rdk_core::packed::FloatArray::View::view(&v);
                 out.push_str(&format!("{:?}:", v.offsets));
                 for x in v.values.iter() { out.push_str(&format!("{:016x}", x.to_bits())); }
             }
@@ -91,17 +91,17 @@ pub fn geometry_bytes(g: &geo::T) -> Vec<u8> {
         out.push(';');
     }
     for group in geo::groups(g) {
-        out.push_str(&format!("G{:?}:{}:", rdk::group::owner(&group), rdk::group::name(&group)));
-        for i in 0..rdk::group::length(&group) {
-            out.push(if rdk::group::mem(i, &group) { '1' } else { '0' });
+        out.push_str(&format!("G{:?}:{}:", rdk_core::group::owner(&group), rdk_core::group::name(&group)));
+        for i in 0..rdk_core::group::length(&group) {
+            out.push(if rdk_core::group::mem(i, &group) { '1' } else { '0' });
         }
-        out.push_str(&format!("{:?}", rdk::group::ordered_elements(&group)));
+        out.push_str(&format!("{:?}", rdk_core::group::ordered_elements(&group)));
         out.push(';');
     }
     for group in geo::edge_groups(g) {
-        out.push_str(&format!("E{}:", rdk::edge_group::name(&group)));
-        for i in 0..rdk::edge_group::length(&group) {
-            out.push(if rdk::edge_group::mem(i, &group) { '1' } else { '0' });
+        out.push_str(&format!("E{}:", rdk_core::edge_group::name(&group)));
+        for i in 0..rdk_core::edge_group::length(&group) {
+            out.push(if rdk_core::edge_group::mem(i, &group) { '1' } else { '0' });
         }
         out.push(';');
     }
@@ -144,8 +144,8 @@ pub fn fixture_grid(columns: i64, rows: i64, size: f64) -> geo::T {
             offsets.push(vp.len() as i64);
         }
     }
-    let positions = fixture_ok(rdk::packed::Float3::of_owned(x, y, z).map_err(|e| rdk::error::to_string(&e)));
-    let topology = fixture_ok(rdk::topology::polygons_owned(stride * (rows + 1), vp, offsets).map_err(|e| rdk::error::to_string(&e)));
-    fixture_ok(geo::create(positions, topology, None, None, None).map_err(|e| rdk::error::to_string(&e)))
+    let positions = fixture_ok(rdk_core::packed::Float3::of_owned(x, y, z).map_err(|e| rdk_core::error::to_string(&e)));
+    let topology = fixture_ok(rdk_core::topology::polygons_owned(stride * (rows + 1), vp, offsets).map_err(|e| rdk_core::error::to_string(&e)));
+    fixture_ok(geo::create(positions, topology, None, None, None).map_err(|e| rdk_core::error::to_string(&e)))
 }
 

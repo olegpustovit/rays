@@ -2,7 +2,7 @@
 use super::support::geometry_bytes;
 use crate::topology_kernel;
 use flow_syntax::value::Value;
-use rdk::{geometry as geo, packed::Float3, topology};
+use rdk_core::{geometry as geo, packed::Float3, topology};
 use std::sync::Arc;
 
 fn floats(xs: Vec<f64>) -> Value { Value::Float_array(Arc::new(xs)) }

@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::ThreadId;
 
 use rays_diagnostic::Diagnostic;
-use rdk::cancel;
+use rdk_core::cancel;
 
 pub mod dependencies {
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]

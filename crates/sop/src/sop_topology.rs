@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use param::{Kind, Value};
 use rays_diagnostic::Diagnostic;
-use rdk::{edge_group, geometry, group};
+use rdk_core::{edge_group, geometry, group};
 
 use crate::context;
 use crate::decl::{self, Decl, Meta, Spec};
@@ -30,12 +30,12 @@ fn grain(context: &context::T) -> i64 {
     context::grain(context)
 }
 
-fn cancel(context: &context::T) -> Option<Arc<rdk::cancel::T>> {
+fn cancel(context: &context::T) -> Option<Arc<rdk_core::cancel::T>> {
     Some(Arc::clone(context::cancel_token(context)))
 }
 
 /// Result of an rdk call as a cooked geometry.
-fn done(result: Result<geometry::T, rdk::error::T>) -> Result<GeometryCooked, Diagnostic> {
+fn done(result: Result<geometry::T, rdk_core::error::T>) -> Result<GeometryCooked, Diagnostic> {
     match result {
         Ok(geometry) => support::cooked(geometry),
         Err(error) => Err(support::structured_rdk_error(&error)),
@@ -163,7 +163,7 @@ fn choice(name: &'static str, label: &'static str, folder: &'static str, kind: K
 
 // ---------------------------------------------------------------- choice tables
 
-use rdk::fuse_reduce::Position;
+use rdk_ops::fuse_reduce::Position;
 
 const POSITION: Choice<Position> = Choice(&[
     ("First", Position::First),
@@ -238,8 +238,8 @@ pub mod edge_collapse {
             Arc::new(move |context, inputs| {
                 let geometry = &inputs[0];
                 let edges = find_edges(&group, geometry, "missing_group", "edge_collapse could not find native edge group")?;
-                done(rdk::edge_collapse::run(
-                    &rdk::edge_collapse::Params {
+                done(rdk_ops::edge_collapse::run(
+                    &rdk_ops::edge_collapse::Params {
                         cancel: cancel(context),
                         grain: Some(grain(context)),
                         edges,
@@ -267,7 +267,7 @@ pub mod edge_collapse {
 
 pub mod dissolve {
     use super::*;
-    use rdk::dissolve::{BridgePolicy, Operation};
+    use rdk_ops::dissolve::{BridgePolicy, Operation};
 
     const OPERATION: Choice<Operation> = Choice(&[
         ("Selected", Operation::DissolveSelected),
@@ -330,8 +330,8 @@ pub mod dissolve {
             vec![first_input(inputs)],
             Arc::new(move |context, inputs| {
                 let edges = find_edges(&group, &inputs[0], "missing_edge_group", "dissolve could not find edge group")?;
-                done(rdk::dissolve::run(
-                    &rdk::dissolve::Params {
+                done(rdk_ops::dissolve::run(
+                    &rdk_ops::dissolve::Params {
                         cancel: cancel(context),
                         grain: Some(grain(context)),
                         edges,
@@ -380,8 +380,8 @@ pub mod triangulate {
             Arc::new(move |context, inputs| {
                 let geometry = &inputs[0];
                 let primitives = find_primitives(&group, geometry, "missing_group", "triangulate could not find primitive group")?;
-                done(rdk::triangulate::run(
-                    &rdk::triangulate::Params { cancel: cancel(context), grain: Some(grain(context)), primitives },
+                done(rdk_ops::triangulate::run(
+                    &rdk_ops::triangulate::Params { cancel: cancel(context), grain: Some(grain(context)), primitives },
                     geometry,
                 ))
             }),
@@ -401,7 +401,7 @@ pub mod triangulate {
 
 pub mod poly_extrude {
     use super::*;
-    use rdk::poly_extrude::Divide;
+    use rdk_ops::poly_extrude::Divide;
 
     const DIVIDE: Choice<Divide> = Choice(&[
         ("Individual elements", Divide::ExtrudeIndividual),
@@ -491,8 +491,8 @@ pub mod poly_extrude {
                 let primitives = find_primitives(&group, geometry, "missing_group", "poly_extrude could not find primitive group");
                 let split = find_edges(&split_edges, geometry, "missing_group", "poly_extrude could not find edge split group");
                 let (primitives, split_edges) = (primitives?, split?);
-                done(rdk::poly_extrude::run(
-                    &rdk::poly_extrude::Params {
+                done(rdk_ops::poly_extrude::run(
+                    &rdk_ops::poly_extrude::Params {
                         cancel: cancel(context),
                         grain: Some(grain(context)),
                         primitives,
@@ -528,7 +528,7 @@ pub mod poly_extrude {
 
 pub mod poly_fill {
     use super::*;
-    use rdk::poly_fill::Mode;
+    use rdk_ops::poly_fill::Mode;
 
     const MODE: Choice<Mode> = Choice(&[
         ("Single polygon", Mode::FillSinglePolygon),
@@ -589,8 +589,8 @@ pub mod poly_fill {
             Arc::new(move |context, inputs| {
                 let geometry = &inputs[0];
                 let boundary = find_edges(&boundary_group, geometry, "missing_group", "poly_fill could not find boundary edge group")?;
-                done(rdk::poly_fill::run(
-                    &rdk::poly_fill::Params {
+                done(rdk_ops::poly_fill::run(
+                    &rdk_ops::poly_fill::Params {
                         cancel: cancel(context),
                         grain: Some(grain(context)),
                         boundary,
@@ -717,8 +717,8 @@ pub mod remesh {
                 let geometry = &inputs[0];
                 let hard_points = support::resolve_optional_point_group("remesh", &hard_point_group, geometry)?;
                 let hard_edges = support::resolve_optional_edge_group("remesh", &hard_edge_group, geometry)?;
-                done(rdk::remesh::run(
-                    &rdk::remesh::Params {
+                done(rdk_ops::remesh::run(
+                    &rdk_ops::remesh::Params {
                         cancel: cancel(context),
                         grain: grain(context),
                         iterations: p.iterations,
@@ -755,7 +755,7 @@ pub mod remesh {
 
 pub mod convex_hull {
     use super::*;
-    use rdk::group_ops::Owner;
+    use rdk_ops::group_ops::Owner;
 
     #[derive(Clone, Debug)]
     pub struct Parameters {
@@ -815,8 +815,8 @@ pub mod convex_hull {
             vec![first_input(inputs)],
             Arc::new(move |context, inputs| {
                 let selection = support::resolve_element_group("convex_hull", &selection, &inputs[0])?;
-                done(rdk::convex_hull::run(
-                    &rdk::convex_hull::Params {
+                done(rdk_ops::convex_hull::run(
+                    &rdk_ops::convex_hull::Params {
                         cancel: cancel(context),
                         grain: Some(grain(context)),
                         selection,
@@ -957,8 +957,8 @@ pub mod clean {
         let consolidate_distance = if p.consolidate_mode == KernelMode::Auto { None } else { Some(p.consolidate_distance) };
         let overlaps = match p.overlaps {
             CleanOverlap::Auto => None,
-            CleanOverlap::KeepFirst => Some(rdk::clean::OverlapPolicy::KeepFirstOverlap),
-            CleanOverlap::DeletePairs => Some(rdk::clean::OverlapPolicy::DeleteOverlapPairs),
+            CleanOverlap::KeepFirst => Some(rdk_ops::clean::OverlapPolicy::KeepFirstOverlap),
+            CleanOverlap::DeletePairs => Some(rdk_ops::clean::OverlapPolicy::DeleteOverlapPairs),
         };
         let (point_attributes, vertex_attributes, primitive_attributes, detail_attributes) = (
             support::optional_text(&p.point_attributes),
@@ -979,8 +979,8 @@ pub mod clean {
             CookMode::DuplicateInput(0),
             vec![first_input(inputs)],
             Arc::new(move |context, inputs| {
-                done(rdk::clean::run(
-                    &rdk::clean::Params {
+                done(rdk_ops::clean::run(
+                    &rdk_ops::clean::Params {
                         cancel: cancel(context),
                         grain: grain(context),
                         epsilon,
@@ -1104,7 +1104,7 @@ pub mod join_curves {
             Arc::new(move |context, inputs| {
                 let primitives = match &group {
                     None => None,
-                    Some(name) => match geometry::find_group(rdk::group::Owner::Primitive, name, &inputs[0]) {
+                    Some(name) => match geometry::find_group(rdk_core::group::Owner::Primitive, name, &inputs[0]) {
                         Some(found) => Some(found),
                         None => {
                             return Err(support::diagnostic_with(
@@ -1116,8 +1116,8 @@ pub mod join_curves {
                         }
                     },
                 };
-                done(rdk::curve_topology::join_curves(
-                    &rdk::curve_topology::Params {
+                done(rdk_ops::curve_topology::join_curves(
+                    &rdk_ops::curve_topology::Params {
                         cancel: cancel(context),
                         grain: Some(grain(context)),
                         primitives,
@@ -1149,7 +1149,7 @@ pub mod join_curves {
 
 pub mod facet {
     use super::*;
-    use rdk::group_ops::Owner;
+    use rdk_ops::group_ops::Owner;
     use support::{FacetConsolidation, KernelMode};
 
     #[derive(Clone, Debug)]
@@ -1266,8 +1266,8 @@ pub mod facet {
             Arc::new(move |context, inputs| {
                 let geometry = &inputs[0];
                 let selection = support::resolve_element_group("facet", &selection, geometry)?;
-                done(rdk::facet::run(
-                    &rdk::facet::Params {
+                done(rdk_ops::facet::run(
+                    &rdk_ops::facet::Params {
                         cancel: cancel(context),
                         grain: Some(grain(context)),
                         selection,
@@ -1304,7 +1304,7 @@ pub mod facet {
 
 pub mod poly_cut {
     use super::*;
-    use rdk::poly_cut::{Detection, Element, Strategy};
+    use rdk_ops::poly_cut::{Detection, Element, Strategy};
     use support::PolyCutDetection;
 
     const ELEMENT: Choice<Element> = Choice(&[
@@ -1417,8 +1417,8 @@ pub mod poly_cut {
                         (None, support::resolve_optional_edge_group("poly_cut", &cut_group, geometry)?)
                     }
                 };
-                done(rdk::poly_cut::cut(
-                    &rdk::poly_cut::Params {
+                done(rdk_ops::poly_cut::cut(
+                    &rdk_ops::poly_cut::Params {
                         cancel: cancel(context),
                         grain: Some(grain(context)),
                         primitives,
@@ -1448,7 +1448,7 @@ pub mod poly_cut {
 
 pub mod poly_reduce {
     use super::*;
-    use rdk::poly_reduce::Target;
+    use rdk_ops::poly_reduce::Target;
     use support::PolyReduceTarget;
 
     const TARGET: Choice<PolyReduceTarget> = Choice(&[
@@ -1559,7 +1559,7 @@ pub mod poly_reduce {
                 let geometry = &inputs[0];
                 let primitives = find_primitives(&group, geometry, "missing_group", "poly_reduce could not find primitive group");
                 let hard_points = find_group(
-                    rdk::group::Owner::Point,
+                    rdk_core::group::Owner::Point,
                     &hard_point_group,
                     geometry,
                     "missing_group",
@@ -1567,8 +1567,8 @@ pub mod poly_reduce {
                 );
                 let hard_edges = find_edges(&hard_edge_group, geometry, "missing_group", "poly_reduce could not find hard edge group");
                 let (primitives, hard_points, hard_edges) = (primitives?, hard_points?, hard_edges?);
-                done(rdk::poly_reduce::run(
-                    &rdk::poly_reduce::Params {
+                done(rdk_ops::poly_reduce::run(
+                    &rdk_ops::poly_reduce::Params {
                         cancel: cancel(context),
                         grain: Some(grain(context)),
                         target,
@@ -1599,9 +1599,9 @@ pub mod poly_reduce {
 
 // ---------------------------------------------------------------- shared Boolean tables
 
-use rdk::boolean_materialization::Detriangulation;
-use rdk::boolean_payload::PointConflict;
-use rdk::boolean_solid::Treatment;
+use rdk_boolean::boolean_materialization::Detriangulation;
+use rdk_boolean::boolean_payload::PointConflict;
+use rdk_boolean::boolean_solid::Treatment;
 
 const TREATMENT: Choice<Treatment> = Choice(&[
     ("Solid", Treatment::Solid),
@@ -1621,7 +1621,7 @@ const DETRIANGULATION: Choice<Detriangulation> = Choice(&[
 
 pub mod boolean_seam {
     use super::*;
-    use rdk::boolean::SeamOutput;
+    use rdk_boolean::boolean::SeamOutput;
 
     const OUTPUT: Choice<SeamOutput> = Choice(&[
         ("Seam curves", SeamOutput::SeamCurves),
@@ -1707,8 +1707,8 @@ pub mod boolean_seam {
             CookMode::Generic,
             vec![first_input(inputs), inputs[1].clone().expect("required input")],
             Arc::new(move |context, inputs| {
-                done(rdk::boolean::seam(
-                    &rdk::boolean::SeamParams {
+                done(rdk_boolean::boolean::seam(
+                    &rdk_boolean::boolean::SeamParams {
                         cancel: cancel(context),
                         grain: grain(context),
                         output: p.output,
@@ -1741,7 +1741,7 @@ pub mod boolean_seam {
 
 pub mod poly_bevel {
     use super::*;
-    use rdk::poly_bevel::Shape;
+    use rdk_ops::poly_bevel::Shape;
     use support::PolyBevelShape;
 
     const SHAPE: Choice<PolyBevelShape> = Choice(&[
@@ -1851,8 +1851,8 @@ pub mod poly_bevel {
             Arc::new(move |context, inputs| {
                 let geometry = &inputs[0];
                 let edges = find_edges(&group, geometry, "missing_edge_group", "poly_bevel could not find edge group")?;
-                done(rdk::poly_bevel::run(
-                    &rdk::poly_bevel::Params {
+                done(rdk_ops::poly_bevel::run(
+                    &rdk_ops::poly_bevel::Params {
                         cancel: cancel(context),
                         grain: Some(grain(context)),
                         edges,
@@ -1886,7 +1886,7 @@ pub mod poly_bevel {
 
 pub mod boolean_fracture {
     use super::*;
-    use rdk::boolean_solid::Operation;
+    use rdk_boolean::boolean_solid::Operation;
 
     #[derive(Clone, Debug)]
     pub struct Parameters {
@@ -1968,8 +1968,8 @@ pub mod boolean_fracture {
             CookMode::Generic,
             vec![first_input(inputs), inputs[1].clone().expect("required input")],
             Arc::new(move |context, inputs| {
-                done(rdk::boolean::run(
-                    &rdk::boolean::Params {
+                done(rdk_boolean::boolean::run(
+                    &rdk_boolean::boolean::Params {
                         cancel: cancel(context),
                         grain: grain(context),
                         operation: Operation::Difference,
@@ -1982,7 +1982,7 @@ pub mod boolean_fracture {
                         tiny_seam_threshold: p.tiny_seam_threshold,
                         cleanup_max_batches: p.cleanup_max_batches,
                         strict_cleanup: p.strict_cleanup,
-                        seam_points: rdk::boolean::SeamPoints::SharedSeamPoints,
+                        seam_points: rdk_boolean::boolean::SeamPoints::SharedSeamPoints,
                         detriangulation: p.detriangulation,
                         assume_flat: p.assume_flat,
                         require_closed: Some(p.require_closed),
@@ -2108,8 +2108,8 @@ pub mod intersection_analysis {
                     &collision_group,
                     group_geometry,
                 )?;
-                done(rdk::intersection_analysis::run(
-                    &rdk::intersection_analysis::Params {
+                done(rdk_ops::intersection_analysis::run(
+                    &rdk_ops::intersection_analysis::Params {
                         cancel: cancel(context),
                         grain: Some(grain(context)),
                         source_primitives,
@@ -2141,9 +2141,9 @@ pub mod intersection_analysis {
 
 pub mod fuse {
     use super::*;
-    use rdk::fuse_grid::FuseMetric;
-    use rdk::fuse_rules::DefaultAttributes;
-    use rdk::point_snap::{MatchCondition, Targeting, Using};
+    use rdk_ops::fuse_grid::FuseMetric;
+    use rdk_ops::fuse_rules::DefaultAttributes;
+    use rdk_geom::point_snap::{MatchCondition, Targeting, Using};
     use support::FuseTargeting;
 
     const TARGETING: Choice<FuseTargeting> = Choice(&[
@@ -2346,8 +2346,8 @@ pub mod fuse {
                 let selection = support::resolve_optional_point_group("fuse", &group, &inputs[0])?;
                 let target_geometry = if inputs.len() == 2 { &inputs[1] } else { &inputs[0] };
                 let target_selection = support::resolve_optional_point_group("fuse target", &target_group, target_geometry)?;
-                done(rdk::fuse_grid::fuse(
-                    &rdk::fuse_grid::Params {
+                done(rdk_ops::fuse_grid::fuse(
+                    &rdk_ops::fuse_grid::Params {
                         cancel: cancel(context),
                         grain: grain(context),
                         selection,
@@ -2396,7 +2396,7 @@ pub mod fuse {
 
 pub mod subdivide_cracks {
     use super::*;
-    use rdk::subdivide::{
+    use rdk_ops::subdivide::{
         BoundaryInterpolation, CrackPolicy, CreasingMethod, FaceVaryingInterpolation, Scheme, TrianglePolicy,
     };
     use support::{KernelMode, SubdivisionCracks};
@@ -2584,8 +2584,8 @@ pub mod subdivide_cracks {
                 let hole_selection =
                     find_primitives(&hole_group, geometry, "missing_group", "subdivide could not find hole primitive group");
                 let (primitives, crease_primitives, hole_primitives) = (selection?, crease_selection?, hole_selection?);
-                done(rdk::subdivide::subdivide(
-                    &rdk::subdivide::Params {
+                done(rdk_ops::subdivide::subdivide(
+                    &rdk_ops::subdivide::Params {
                         cancel: cancel(context),
                         grain: Some(grain(context)),
                         scheme: p.scheme,
@@ -2626,8 +2626,8 @@ pub mod subdivide_cracks {
 
 pub mod boolean {
     use super::*;
-    use rdk::boolean::SeamPoints;
-    use rdk::boolean_solid::Operation;
+    use rdk_boolean::boolean::SeamPoints;
+    use rdk_boolean::boolean_solid::Operation;
     use support::BooleanClosedPolicy;
 
     const OPERATION: Choice<Operation> = Choice(&[
@@ -2770,8 +2770,8 @@ pub mod boolean {
             CookMode::Generic,
             vec![first_input(inputs), inputs[1].clone().expect("required input")],
             Arc::new(move |context, inputs| {
-                done(rdk::boolean::run(
-                    &rdk::boolean::Params {
+                done(rdk_boolean::boolean::run(
+                    &rdk_boolean::boolean::Params {
                         cancel: cancel(context),
                         grain: grain(context),
                         operation: p.operation,
@@ -2927,8 +2927,8 @@ pub mod boolean_detect {
                     &collision_group,
                     collision_geometry,
                 )?;
-                done(rdk::boolean_detect::run_checked(
-                    &rdk::boolean_detect::Params {
+                done(rdk_ops::boolean_detect::run_checked(
+                    &rdk_ops::boolean_detect::Params {
                         cancel: cancel(context),
                         grain: grain(context),
                         source_primitives,
@@ -2962,7 +2962,7 @@ pub mod boolean_detect {
 
 pub mod triangulate_2d {
     use super::*;
-    use rdk::triangulate2d::Projection;
+    use rdk_ops::triangulate2d::Projection;
     use support::Triangulate2dProjection;
 
     const PROJECTION: Choice<Triangulate2dProjection> = Choice(&[
@@ -3202,13 +3202,13 @@ pub mod triangulate_2d {
             Arc::new(move |context, inputs| {
                 let geometry = &inputs[0];
                 let selection = find_group(
-                    rdk::group::Owner::Point,
+                    rdk_core::group::Owner::Point,
                     &point_group,
                     geometry,
                     "missing_group",
                     "triangulate_2d could not find point group",
                 )
-                .map(|found| found.map(rdk::element_selection::T::SelectedPoints));
+                .map(|found| found.map(rdk_core::element_selection::T::SelectedPoints));
                 let constraint_edges = find_edges(
                     &constraint_edge_group,
                     geometry,
@@ -3223,9 +3223,9 @@ pub mod triangulate_2d {
                 );
                 let (selection, constraint_edges, constraint_primitives) =
                     (selection?, constraint_edges?, constraint_primitives?);
-                done(rdk::triangulate2d::run(
+                done(rdk_ops::triangulate2d::run(
                     Some(context::cancel_token(context).as_ref()),
-                    &rdk::triangulate2d::Params {
+                    &rdk_ops::triangulate2d::Params {
                         grain: grain(context),
                         selection,
                         constraint_edges,
@@ -3283,8 +3283,8 @@ mod tests {
     use crate::test_support::*;
 
     fn ring() -> geometry::T {
-        rdk::line_geometry::polyline(
-            &rdk::line_geometry::Params { closed: true },
+        rdk_ops::line_geometry::polyline(
+            &rdk_ops::line_geometry::Params { closed: true },
             &[(0., 0., 0.), (1., 0., 0.), (3., 2., 0.), (0., 2., 0.)],
         )
         .unwrap()
@@ -3353,7 +3353,7 @@ mod tests {
         let out = geometry_of(&cook(&mut s, 4, &n));
         // the grid's single 8-edge boundary loop becomes one fan of eight triangles
         let patch = geometry::find_group(group::Owner::Primitive, "patch", &out).expect("patch group");
-        assert_eq!(rdk::group::cardinality(&patch), 8);
+        assert_eq!(rdk_core::group::cardinality(&patch), 8);
         assert_eq!(geometry::primitive_count(&out), 12);
         session::close(&mut s);
         let (missing, _) = node::apply_parameters(&n, &[("boundary_group".to_owned(), Value::Text(b"missing".to_vec()))]).unwrap();
@@ -3376,7 +3376,7 @@ mod tests {
             assert_eq!(counts(&one), expected, "{key}");
             assert!(same_geometry(&one, &many) || counts(&one) == counts(&many), "{key}: domains differ");
             let (a, b) = (geometry::positions(&one), geometry::positions(&many));
-            assert!(rdk::packed::Float3::View::view(a).unwrap().x == rdk::packed::Float3::View::view(b).unwrap().x, "{key}");
+            assert!(rdk_core::packed::Float3::View::view(a).unwrap().x == rdk_core::packed::Float3::View::view(b).unwrap().x, "{key}");
             session::close(&mut s);
         }
     }

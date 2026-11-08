@@ -5,16 +5,16 @@
 //! case so each lowers once.
 use super::support::*;
 use crate::{lisp_sop, lower};
-use rdk::attribute::{self, Owner, Storage};
-use rdk::geometry as geo;
-use rdk::group;
-use rdk::packed::Float3;
+use rdk_core::attribute::{self, Owner, Storage};
+use rdk_core::geometry as geo;
+use rdk_core::group;
+use rdk_core::packed::Float3;
 use sop::edit_graph as edit;
 use sop::{context as sctx, payload, session};
 use std::sync::Arc;
 
-fn rk<A>(r: Result<A, rdk::error::T>) -> A {
-    r.unwrap_or_else(|e| panic!("{}", rdk::error::to_string(&e)))
+fn rk<A>(r: Result<A, rdk_core::error::T>) -> A {
+    r.unwrap_or_else(|e| panic!("{}", rdk_core::error::to_string(&e)))
 }
 
 fn grid(c: i64, r: i64) -> geo::T {
@@ -71,11 +71,11 @@ fn c() -> geo::T {
     with_text("t", &with_vec3("v", 1, &with_float("h", Owner::Point, 2, &grid(1, 4))))
 }
 
-type Native = Result<geo::T, rdk::error::T>;
+type Native = Result<geo::T, rdk_core::error::T>;
 
 fn native(source_attribute: Option<&str>, source_base: Option<i64>, gs: &[geo::T]) -> Native {
-    let params = rdk::mesh_merge::RunParams { cancel: None, grain: None, source_attribute: source_attribute.map(str::to_owned), source_base };
-    rdk::mesh_merge::run(&params, gs)
+    let params = rdk_ops::mesh_merge::RunParams { cancel: None, grain: None, source_attribute: source_attribute.map(str::to_owned), source_base };
+    rdk_ops::mesh_merge::run(&params, gs)
 }
 
 /// One lowering of `(sop/concat (list ...) extra)` over the named sources.
@@ -107,7 +107,7 @@ fn cooked(node: &sop::node::T, domains: i64, grain: i64) -> Result<geo::T, rays_
 fn same(what: &str, expected: &Native, actual: &Result<geo::T, rays_diagnostic::Diagnostic>) {
     match (expected, actual) {
         (Ok(e), Ok(a)) => assert!(geometry_bytes(e) == geometry_bytes(a), "{what}: bytes differ from native merge"),
-        (Err(e), Err(a)) => assert_eq!(rdk::error::code(e), a.code, "{what}: error code differs"),
+        (Err(e), Err(a)) => assert_eq!(rdk_core::error::code(e), a.code, "{what}: error code differs"),
         _ => panic!("{what}: result kind differs"),
     }
 }

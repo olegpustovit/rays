@@ -3,7 +3,7 @@
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 
-use rdk::{attribute, geometry, packed, topology};
+use rdk_core::{attribute, geometry, packed, topology};
 
 use crate::context::{self, dependencies};
 use crate::node::{self, build, CookMode, Elementwise, Facts, Topology};

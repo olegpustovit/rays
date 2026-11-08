@@ -314,7 +314,7 @@ fn delete_attr() -> Op {
         check: Arc::new(|args| {
             match text_arg(args, "attribute") {
                 Some(pattern) if !blank(&pattern) => {
-                    rdk::attribute_pattern::compile(&pattern).map_err(|e| value::fail("E_ATTR_PATTERN", rdk::error::message(&e)))?;
+                    rdk_core::attribute_pattern::compile(&pattern).map_err(|e| value::fail("E_ATTR_PATTERN", rdk_core::error::message(&e)))?;
                 }
                 _ => return fail("E_ATTR_NAME", "An attribute pattern must be nonblank."),
             }
@@ -633,9 +633,9 @@ fn group_names() -> Op {
                 }
             }
             match arg(args, "pattern") {
-                Some(Value::Text(pattern)) => rdk::attribute_pattern::compile(&String::from_utf8_lossy(pattern))
+                Some(Value::Text(pattern)) => rdk_core::attribute_pattern::compile(&String::from_utf8_lossy(pattern))
                     .map(|_| ())
-                    .map_err(|e| value::fail("E_GROUP_PATTERN", rdk::error::message(&e))),
+                    .map_err(|e| value::fail("E_GROUP_PATTERN", rdk_core::error::message(&e))),
                 _ => fail("E_GROUP_PATTERN", "Group pattern must be text."),
             }
         }),
@@ -784,9 +784,9 @@ fn rewrite_check(args: &Args, parse: &dyn Fn(&str) -> Result<(), Diagnostic>, co
         Some(Value::Text(policy)) => conflict(&String::from_utf8_lossy(policy))?,
         Some(_) => return fail("E_METADATA_CONFLICT", "Conflict policy must be text."),
     }
-    rdk::attribute_pattern::compile_rewrite(&metadata_text(args, "pattern")?, &metadata_text(args, "replacement")?)
+    rdk_core::attribute_pattern::compile_rewrite(&metadata_text(args, "pattern")?, &metadata_text(args, "replacement")?)
         .map(|_| ())
-        .map_err(|e| value::fail("E_METADATA_PATTERN", rdk::error::message(&e)))
+        .map_err(|e| value::fail("E_METADATA_PATTERN", rdk_core::error::message(&e)))
 }
 
 fn rename_attr() -> Op {
@@ -884,7 +884,7 @@ fn delete_attrs() -> Op {
                     Some(Value::Text(pattern)) => {
                         let pattern = String::from_utf8_lossy(pattern);
                         if !blank(&pattern) {
-                            rdk::attribute_pattern::compile(&pattern).map_err(|e| value::fail("E_METADATA_PATTERN", rdk::error::message(&e)))?;
+                            rdk_core::attribute_pattern::compile(&pattern).map_err(|e| value::fail("E_METADATA_PATTERN", rdk_core::error::message(&e)))?;
                         }
                     }
                     Some(_) => return fail("E_METADATA_PATTERN", "Delete patterns must be text."),
@@ -947,9 +947,9 @@ fn attr_names() -> Op {
         out: constant(ar(Ty::Text)),
         check: Arc::new(|args| {
             metadata_owner(args, &attribute_owner_ok)?;
-            rdk::attribute_pattern::compile(&metadata_text(args, "pattern")?)
+            rdk_core::attribute_pattern::compile(&metadata_text(args, "pattern")?)
                 .map(|_| ())
-                .map_err(|e| value::fail("E_ATTR_PATTERN", rdk::error::message(&e)))
+                .map_err(|e| value::fail("E_ATTR_PATTERN", rdk_core::error::message(&e)))
         }),
         body: source_body("sop/attr_names", ar(Ty::Text)),
         ..base
@@ -980,9 +980,9 @@ fn glob_error() -> Op {
         choices: Vec::new(),
         check: noop(),
         body: Arc::new(|_, _, args| {
-            let message = match rdk::attribute_pattern::compile(&metadata_text(args, "pattern")?) {
+            let message = match rdk_core::attribute_pattern::compile(&metadata_text(args, "pattern")?) {
                 Ok(_) => String::new(),
-                Err(e) => rdk::error::message(&e).to_owned(),
+                Err(e) => rdk_core::error::message(&e).to_owned(),
             };
             Ok(text(&message))
         }),
@@ -1002,9 +1002,9 @@ fn glob_rewrite_error() -> Op {
         name: "text/glob_rewrite_error".into(),
         signature: pattern_replacement(),
         body: Arc::new(|_, _, args| {
-            let message = match rdk::attribute_pattern::compile_rewrite(&metadata_text(args, "pattern")?, &metadata_text(args, "replacement")?) {
+            let message = match rdk_core::attribute_pattern::compile_rewrite(&metadata_text(args, "pattern")?, &metadata_text(args, "replacement")?) {
                 Ok(_) => String::new(),
-                Err(e) => rdk::error::message(&e).to_owned(),
+                Err(e) => rdk_core::error::message(&e).to_owned(),
             };
             Ok(text(&message))
         }),
@@ -1017,9 +1017,9 @@ fn glob_rewrite_set_error() -> Op {
         name: "text/glob_rewrite_set_error".into(),
         signature: pattern_replacement(),
         body: Arc::new(|_, _, args| {
-            let message = match rdk::attribute_pattern::compile_rewrite_set(&metadata_text(args, "pattern")?, &metadata_text(args, "replacement")?) {
+            let message = match rdk_core::attribute_pattern::compile_rewrite_set(&metadata_text(args, "pattern")?, &metadata_text(args, "replacement")?) {
                 Ok(_) => String::new(),
-                Err(e) => rdk::error::message(&e).to_owned(),
+                Err(e) => rdk_core::error::message(&e).to_owned(),
             };
             Ok(text(&message))
         }),
@@ -1091,7 +1091,7 @@ fn group_name_valid() -> Op {
         out: constant(Ty::Bool),
         body: Arc::new(|_, _, args| {
             pure_source(Ty::Bool, "text/group_name_valid", args, &|| {
-                Ok(Value::Bool(rdk::group_ops::valid_group_name(&metadata_text(args, "text")?)))
+                Ok(Value::Bool(rdk_ops::group_ops::valid_group_name(&metadata_text(args, "text")?)))
             })
         }),
         ..glob_error()
@@ -1104,7 +1104,7 @@ fn group_name_forced() -> Op {
         signature: sig(&[("text", Ty::Text)], &[]),
         body: Arc::new(|_, _, args| {
             pure_source(Ty::Text, "text/group_name_forced", args, &|| {
-                Ok(text(&rdk::group_ops::force_valid_group_name(&metadata_text(args, "text")?)))
+                Ok(text(&rdk_ops::group_ops::force_valid_group_name(&metadata_text(args, "text")?)))
             })
         }),
         ..glob_error()

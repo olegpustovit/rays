@@ -213,13 +213,13 @@ fn empty_geometry() -> node::T {
     static EMPTY: OnceLock<node::T> = OnceLock::new();
     EMPTY
         .get_or_init(|| {
-            let positions = rdk::packed::Float3::of_owned(Vec::new(), Vec::new(), Vec::new()).expect("empty positions");
-            let geometry = rdk::geometry::create(positions, rdk::topology::empty(0).expect("empty topology"), None, None, None)
+            let positions = rdk_core::packed::Float3::of_owned(Vec::new(), Vec::new(), Vec::new()).expect("empty positions");
+            let geometry = rdk_core::geometry::create(positions, rdk_core::topology::empty(0).expect("empty topology"), None, None, None)
                 .expect("empty geometry");
             let parameters = format!(
                 "data_id={};bytes={}",
-                rdk::geometry::data_id(&geometry),
-                rdk::geometry::payload_bytes(&geometry)
+                rdk_core::geometry::data_id(&geometry),
+                rdk_core::geometry::payload_bytes(&geometry)
             );
             build::make_geometry(
                 build::Args {

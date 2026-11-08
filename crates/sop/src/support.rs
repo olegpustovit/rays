@@ -4,7 +4,8 @@
 //! `(label, value)` rows. The row order is the user-visible choice order.
 use param::{Kind, Value};
 use rays_diagnostic::Diagnostic;
-use rdk::{attribute, geometry, group, group_ops};
+use rdk_core::{attribute, geometry, group};
+use rdk_ops::group_ops;
 
 use crate::node::GeometryCooked;
 
@@ -68,12 +69,12 @@ pub fn rdk_error(hints: Vec<String>, operation: &str, message: &str) -> Diagnost
     )
 }
 
-pub fn structured_rdk_error(error: &rdk::error::T) -> Diagnostic {
+pub fn structured_rdk_error(error: &rdk_core::error::T) -> Diagnostic {
     diagnostic_with(
-        rdk::error::code(error),
-        &format!("{} could not produce valid geometry", rdk::error::operation(error)),
-        Some(rdk::error::to_string(error)),
-        rdk::error::hints(error).to_vec(),
+        rdk_core::error::code(error),
+        &format!("{} could not produce valid geometry", rdk_core::error::operation(error)),
+        Some(rdk_core::error::to_string(error)),
+        rdk_core::error::hints(error).to_vec(),
     )
 }
 
@@ -273,10 +274,10 @@ pub const ELEMENT_ATTRIBUTE_OWNER: Choice<attribute::Owner> = Choice(&[
     ("Vertex", attribute::Owner::Vertex),
     ("Primitive", attribute::Owner::Primitive),
 ]);
-pub const SOFT_FALLOFF: Choice<rdk::transform_ops::SoftTransformFalloff> = Choice(&[
-    ("Linear", rdk::transform_ops::SoftTransformFalloff::SoftLinear),
-    ("Quadratic", rdk::transform_ops::SoftTransformFalloff::SoftQuadratic),
-    ("Cubic", rdk::transform_ops::SoftTransformFalloff::SoftCubic),
+pub const SOFT_FALLOFF: Choice<rdk_ops::transform_ops::SoftTransformFalloff> = Choice(&[
+    ("Linear", rdk_ops::transform_ops::SoftTransformFalloff::SoftLinear),
+    ("Quadratic", rdk_ops::transform_ops::SoftTransformFalloff::SoftQuadratic),
+    ("Cubic", rdk_ops::transform_ops::SoftTransformFalloff::SoftCubic),
 ]);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -319,14 +320,14 @@ pub const TRANSFER_FALLOFF: Choice<TransferFalloff> = Choice(&[
     ("Uniform", TransferFalloff::Uniform),
 ]);
 
-pub const TRANSFER_UNMATCHED: Choice<rdk::attribute_transfer::Unmatched> = Choice(&[
-    ("Keep target", rdk::attribute_transfer::Unmatched::KeepTarget),
-    ("Default value", rdk::attribute_transfer::Unmatched::DefaultValue),
+pub const TRANSFER_UNMATCHED: Choice<rdk_ops::attribute_transfer::Unmatched> = Choice(&[
+    ("Keep target", rdk_ops::attribute_transfer::Unmatched::KeepTarget),
+    ("Default value", rdk_ops::attribute_transfer::Unmatched::DefaultValue),
 ]);
 
 /// `Support.transfer_mode mode neighbors power radius` (the function, not the type).
-pub fn transfer_mode_of(mode: TransferMode, neighbors: i64, power: f64, radius: f64) -> rdk::attribute_transfer::Mode {
-    use rdk::attribute_transfer::{Kernel, Mode};
+pub fn transfer_mode_of(mode: TransferMode, neighbors: i64, power: f64, radius: f64) -> rdk_ops::attribute_transfer::Mode {
+    use rdk_ops::attribute_transfer::{Kernel, Mode};
     match mode {
         TransferMode::Nearest => Mode::Nearest,
         TransferMode::Inverse => Mode::InverseDistance { neighbors, power },
@@ -336,8 +337,8 @@ pub fn transfer_mode_of(mode: TransferMode, neighbors: i64, power: f64, radius: 
     }
 }
 
-pub fn transfer_falloff_of(falloff: TransferFalloff, bias: f64) -> rdk::attribute_transfer::Falloff {
-    use rdk::attribute_transfer::Falloff;
+pub fn transfer_falloff_of(falloff: TransferFalloff, bias: f64) -> rdk_ops::attribute_transfer::Falloff {
+    use rdk_ops::attribute_transfer::Falloff;
     match falloff {
         TransferFalloff::Linear => Falloff::Linear,
         TransferFalloff::Smoothstep => Falloff::Smoothstep,
@@ -383,8 +384,8 @@ pub fn group_owner_of_token(token: &str) -> Result<GroupOpsOwner, String> {
 
 // ---------------------------------------------------------------- encoded table parameters
 
-pub const FUSE_ATTRIBUTE_METHODS: [(&str, rdk::fuse_rules::AttributeMethod); 16] = {
-    use rdk::fuse_rules::AttributeMethod::*;
+pub const FUSE_ATTRIBUTE_METHODS: [(&str, rdk_ops::fuse_rules::AttributeMethod); 16] = {
+    use rdk_ops::fuse_rules::AttributeMethod::*;
     [
         ("average", Average),
         ("least", LeastPoint),
@@ -405,19 +406,19 @@ pub const FUSE_ATTRIBUTE_METHODS: [(&str, rdk::fuse_rules::AttributeMethod); 16]
     ]
 };
 
-pub const FUSE_GROUP_METHODS: [(&str, rdk::fuse_rules::GroupMethod); 5] = {
-    use rdk::fuse_rules::GroupMethod::*;
+pub const FUSE_GROUP_METHODS: [(&str, rdk_ops::fuse_rules::GroupMethod); 5] = {
+    use rdk_ops::fuse_rules::GroupMethod::*;
     [("least", LeastPoint), ("greatest", GreatestPoint), ("union", Union), ("intersection", Intersection), ("most_common", MostCommon)]
 };
 
 pub fn validate_parameter_pattern(name: &str, pattern: &str) -> Result<(), String> {
-    rdk::attribute_pattern::compile(pattern)
+    rdk_core::attribute_pattern::compile(pattern)
         .map(|_| ())
-        .map_err(|e| format!("{name}: {}", rdk::error::message(&e)))
+        .map_err(|e| format!("{name}: {}", rdk_core::error::message(&e)))
 }
 
-pub fn decode_fuse_attribute_rules(name: &str, text: &[u8]) -> Result<Vec<rdk::fuse_rules::AttributeRule>, String> {
-    use rdk::fuse_rules::AttributeMethod::*;
+pub fn decode_fuse_attribute_rules(name: &str, text: &[u8]) -> Result<Vec<rdk_ops::fuse_rules::AttributeRule>, String> {
+    use rdk_ops::fuse_rules::AttributeMethod::*;
     parameter_table_rows(name, text)?
         .into_iter()
         .map(|row| match row.as_slice() {
@@ -436,7 +437,7 @@ pub fn decode_fuse_attribute_rules(name: &str, text: &[u8]) -> Result<Vec<rdk::f
                 if needs_weight && weight_attribute.is_none() {
                     Err(format!("{name}: weighted reduction requires a weight attribute"))
                 } else {
-                    Ok(rdk::fuse_rules::AttributeRule { pattern: pattern.clone(), method, weight_attribute })
+                    Ok(rdk_ops::fuse_rules::AttributeRule { pattern: pattern.clone(), method, weight_attribute })
                 }
             }
             _ => Err(format!("{name}: attribute rule needs pattern, method and weight columns")),
@@ -444,7 +445,7 @@ pub fn decode_fuse_attribute_rules(name: &str, text: &[u8]) -> Result<Vec<rdk::f
         .collect()
 }
 
-pub fn decode_fuse_group_rules(name: &str, text: &[u8]) -> Result<Vec<rdk::fuse_rules::GroupRule>, String> {
+pub fn decode_fuse_group_rules(name: &str, text: &[u8]) -> Result<Vec<rdk_ops::fuse_rules::GroupRule>, String> {
     parameter_table_rows(name, text)?
         .into_iter()
         .map(|row| match row.as_slice() {
@@ -455,15 +456,15 @@ pub fn decode_fuse_group_rules(name: &str, text: &[u8]) -> Result<Vec<rdk::fuse_
                     .find(|(token, _)| token == method)
                     .map(|(_, m)| *m)
                     .ok_or_else(|| format!("{name}: unknown reduction method {method}"))?;
-                Ok(rdk::fuse_rules::GroupRule { group_pattern: group_pattern.clone(), group_method })
+                Ok(rdk_ops::fuse_rules::GroupRule { group_pattern: group_pattern.clone(), group_method })
             }
             _ => Err(format!("{name}: group rule needs pattern and method columns")),
         })
         .collect()
 }
 
-pub fn decode_curve_join_picks(text: &str) -> Result<Option<Vec<rdk::curve_join::CurveJoinPick>>, String> {
-    use rdk::curve_join::{CurveJoinEnd, CurveJoinPick};
+pub fn decode_curve_join_picks(text: &str) -> Result<Option<Vec<rdk_ops::curve_join::CurveJoinPick>>, String> {
+    use rdk_ops::curve_join::{CurveJoinEnd, CurveJoinPick};
     if ocaml_trim(text).is_empty() {
         return Ok(None);
     }
@@ -494,7 +495,7 @@ pub fn decode_curve_join_picks(text: &str) -> Result<Option<Vec<rdk::curve_join:
     Ok(Some(picks))
 }
 
-pub fn decode_surface_attributes(text: &[u8]) -> Result<Vec<rdk::attribute_transfer::SurfaceAttribute>, String> {
+pub fn decode_surface_attributes(text: &[u8]) -> Result<Vec<rdk_ops::attribute_transfer::SurfaceAttribute>, String> {
     parameter_table_rows("sop/attribute_transfer_surface", text)?
         .into_iter()
         .map(|row| match row.as_slice() {
@@ -508,7 +509,7 @@ pub fn decode_surface_attributes(text: &[u8]) -> Result<Vec<rdk::attribute_trans
                 } else if source_owner == attribute::Owner::Point && source_name == "P" {
                     Err("sop/attribute_transfer_surface: source P is not an ordinary attribute".to_owned())
                 } else {
-                    Ok(rdk::attribute_transfer::SurfaceAttribute {
+                    Ok(rdk_ops::attribute_transfer::SurfaceAttribute {
                         source_owner,
                         source_name: source_name.clone(),
                         target_name: target_name.clone(),
@@ -534,8 +535,8 @@ pub fn resolve_element_group(
     operation: &str,
     selection: &Option<ElementGroup>,
     geometry_value: &geometry::T,
-) -> Result<Option<rdk::element_selection::T>, Diagnostic> {
-    use rdk::element_selection::T as Selected;
+) -> Result<Option<rdk_core::element_selection::T>, Diagnostic> {
+    use rdk_core::element_selection::T as Selected;
     let Some(ElementGroup { owner, name }) = selection else { return Ok(None) };
     let (what, found) = match owner {
         GroupOpsOwner::GroupPoints => ("point", geometry::find_group(group::Owner::Point, name, geometry_value).map(Selected::SelectedPoints)),
@@ -576,7 +577,7 @@ pub fn resolve_optional_edge_group(
     operation: &str,
     name: &Option<String>,
     geometry_value: &geometry::T,
-) -> Result<Option<rdk::edge_group::T>, Diagnostic> {
+) -> Result<Option<rdk_core::edge_group::T>, Diagnostic> {
     match name {
         None => Ok(None),
         Some(name) => geometry::find_edge_group(name, geometry_value)
@@ -590,7 +591,7 @@ pub fn uv_parameterize_seams(
     operation: &str,
     input: &geometry::T,
     group_name: &Option<String>,
-) -> Result<(Option<rdk::edge_group::T>, Option<group::T>), Diagnostic> {
+) -> Result<(Option<rdk_core::edge_group::T>, Option<group::T>), Diagnostic> {
     let Some(group_name) = group_name else { return Ok((None, None)) };
     if let Some(value) = geometry::find_edge_group(group_name, input) {
         return Ok((Some(value), None));
@@ -631,12 +632,12 @@ pub fn compile_transfer_group_pattern(
     operation: &str,
     label: &str,
     pattern: &Option<String>,
-) -> Result<Option<rdk::attribute_pattern::T>, String> {
+) -> Result<Option<rdk_core::attribute_pattern::T>, String> {
     match pattern {
         None => Ok(None),
-        Some(pattern) => rdk::attribute_pattern::compile(pattern)
+        Some(pattern) => rdk_core::attribute_pattern::compile(pattern)
             .map(Some)
-            .map_err(|e| format!("sop/{operation}: invalid {label} group pattern: {}", rdk::error::message(&e))),
+            .map_err(|e| format!("sop/{operation}: invalid {label} group pattern: {}", rdk_core::error::message(&e))),
     }
 }
 
@@ -647,8 +648,8 @@ pub fn resolve_transfer_group(
     owner: group::Owner,
     owner_name: &str,
     exact: &Option<String>,
-    pattern: &Option<rdk::attribute_pattern::T>,
-    cancel_token: &rdk::cancel::T,
+    pattern: &Option<rdk_core::attribute_pattern::T>,
+    cancel_token: &rdk_core::cancel::T,
     grain: i64,
     geometry_value: &geometry::T,
 ) -> Result<Option<group::T>, Diagnostic> {
@@ -660,10 +661,10 @@ pub fn resolve_transfer_group(
         (None, None) => Ok(None),
         (None, Some(pattern)) => {
             // Rdk.Cancel.check raises; here a cancellation is a diagnostic.
-            rdk::cancel::check(cancel_token).map_err(|e| structured_rdk_error(&e))?;
+            rdk_core::cancel::check(cancel_token).map_err(|e| structured_rdk_error(&e))?;
             let matches: Vec<group::T> = geometry::groups(geometry_value)
                 .into_iter()
-                .filter(|g| group::owner(g) == owner && rdk::attribute_pattern::matches(pattern, group::name(g)))
+                .filter(|g| group::owner(g) == owner && rdk_core::attribute_pattern::matches(pattern, group::name(g)))
                 .collect();
             let selection = match matches.len() {
                 0 => group::init(
@@ -678,7 +679,7 @@ pub fn resolve_transfer_group(
             };
             selection
                 .map(Some)
-                .map_err(|e| diagnostic("invalid_group", &format!("{operation}: {}", rdk::error::to_string(&e))))
+                .map_err(|e| diagnostic("invalid_group", &format!("{operation}: {}", rdk_core::error::to_string(&e))))
         }
     }
 }

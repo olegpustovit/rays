@@ -6,15 +6,15 @@
 //! matrix runs: reference and CPU tiers, (domains, grain) (1, 97), (4, 1), (4, 4096).
 use super::support::*;
 use crate::{lisp_sop, lower};
-use rdk::attribute::{self, Owner, Storage};
-use rdk::geometry as geo;
-use rdk::packed::{Float2, Float3, Float4};
+use rdk_core::attribute::{self, Owner, Storage};
+use rdk_core::geometry as geo;
+use rdk_core::packed::{Float2, Float3, Float4};
 use sop::edit_graph as edit;
 use sop::{context as sctx, payload, session};
 use std::sync::Arc;
 
-fn rk<A>(r: Result<A, rdk::error::T>) -> A {
-    r.unwrap_or_else(|e| panic!("{}", rdk::error::to_string(&e)))
+fn rk<A>(r: Result<A, rdk_core::error::T>) -> A {
+    r.unwrap_or_else(|e| panic!("{}", rdk_core::error::to_string(&e)))
 }
 
 fn raw() -> [f64; 6] {

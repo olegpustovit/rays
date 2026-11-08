@@ -68,8 +68,8 @@ pub fn same_output(a: &Output, b: &Output) -> bool {
 #[derive(Clone)]
 struct Delta {
     source: i64,
-    positions: Option<rdk::packed::Float3::T>,
-    attributes: Vec<(rdk::attribute::Owner, String, Option<rdk::attribute::T>)>,
+    positions: Option<rdk_core::packed::Float3::T>,
+    attributes: Vec<(rdk_core::attribute::Owner, String, Option<rdk_core::attribute::T>)>,
 }
 
 #[derive(Clone)]
@@ -108,7 +108,7 @@ fn drop_id(pool: &mut Pool, id: i64) {
 
 fn releasers(output: &Output) -> Vec<(i64, Release)> {
     match &output.payload {
-        payload::T::Geometry(g) => rdk::geometry::releasers(g),
+        payload::T::Geometry(g) => rdk_core::geometry::releasers(g),
         _ => Vec::new(),
     }
 }
@@ -193,8 +193,8 @@ enum Written {
 enum CacheEvent {
     Read(Option<i64>, Vec<u8>, Option<Arc<Entry>>),
     Write(Option<i64>, Vec<u8>, Entry),
-    MaterializedRead(Output, Option<rdk::geometry::T>),
-    MaterializedWrite(Output, rdk::geometry::T),
+    MaterializedRead(Output, Option<rdk_core::geometry::T>),
+    MaterializedWrite(Output, rdk_core::geometry::T),
     Time(NodeTiming),
 }
 
@@ -222,7 +222,7 @@ pub struct T {
     last_node: Option<NodeTiming>,
     times: Arc<Mutex<HashMap<i64, NodeTiming>>>,
     closed: bool,
-    materialized: Vec<(Output, rdk::geometry::T)>,
+    materialized: Vec<(Output, rdk_core::geometry::T)>,
     /// Some in a worker snapshot while it records its cache traffic
     journal: Option<Vec<CacheEvent>>,
     parallel_override: Option<bool>,
@@ -523,40 +523,40 @@ fn cache_key(n: &node::T, context: &context::T, inputs: &[payload::T]) -> Vec<u8
     } else {
         add_int(&mut buffer, 1);
         let geometry = payload::geometry(&inputs[0]).expect("selective input is geometry");
-        add_int(&mut buffer, rdk::topology::data_id(rdk::geometry::topology(&geometry)));
+        add_int(&mut buffer, rdk_core::topology::data_id(rdk_core::geometry::topology(&geometry)));
         add_int(
             &mut buffer,
             if facts.reads.iter().any(|r| r == "P") {
-                rdk::packed::Float3::data_id(rdk::geometry::positions(&geometry))
+                rdk_core::packed::Float3::data_id(rdk_core::geometry::positions(&geometry))
             } else {
                 0
             },
         );
-        let attributes: Vec<rdk::attribute::T> = rdk::geometry::attributes(&geometry)
+        let attributes: Vec<rdk_core::attribute::T> = rdk_core::geometry::attributes(&geometry)
             .into_iter()
-            .filter(|a| facts.reads.iter().any(|r| r == rdk::attribute::name(a)))
+            .filter(|a| facts.reads.iter().any(|r| r == rdk_core::attribute::name(a)))
             .collect();
         add_int(&mut buffer, attributes.len() as i64);
         for a in &attributes {
-            add_int(&mut buffer, rdk::attribute::data_id(a));
+            add_int(&mut buffer, rdk_core::attribute::data_id(a));
         }
         // Presence and order affect set-initial, normal removal and output order. Unread payload
         // IDs remain absent from the key.
-        let layout = rdk::geometry::attributes(&geometry);
+        let layout = rdk_core::geometry::attributes(&geometry);
         add_int(&mut buffer, layout.len() as i64);
         for a in &layout {
-            add_int(&mut buffer, rdk::attribute::owner(a) as i64);
-            add_sized(&mut buffer, rdk::attribute::name(a).as_bytes());
+            add_int(&mut buffer, rdk_core::attribute::owner(a) as i64);
+            add_sized(&mut buffer, rdk_core::attribute::name(a).as_bytes());
         }
-        let groups = rdk::geometry::groups(&geometry);
-        let edges = rdk::geometry::edge_groups(&geometry);
+        let groups = rdk_core::geometry::groups(&geometry);
+        let edges = rdk_core::geometry::edge_groups(&geometry);
         add_int(&mut buffer, groups.len() as i64);
         for g in &groups {
-            add_int(&mut buffer, rdk::group::data_id(g));
+            add_int(&mut buffer, rdk_core::group::data_id(g));
         }
         add_int(&mut buffer, edges.len() as i64);
         for g in &edges {
-            add_int(&mut buffer, rdk::edge_group::data_id(g));
+            add_int(&mut buffer, rdk_core::edge_group::data_id(g));
         }
     }
     buffer.extend_from_slice(&context::cache_projection(node::dependencies(n), context));
@@ -584,7 +584,7 @@ fn node_result<X>(f: impl FnOnce() -> Result<X, Diagnostic>) -> Result<X, Diagno
 }
 
 fn delta(n: &node::T, inputs: &[payload::T], cooked: &node::Cooked) -> Result<Option<Delta>, Diagnostic> {
-    use rdk::{attribute as A, geometry as G};
+    use rdk_core::{attribute as A, geometry as G};
     if !selective(n, inputs) {
         return Ok(None);
     }
@@ -596,13 +596,13 @@ fn delta(n: &node::T, inputs: &[payload::T], cooked: &node::Cooked) -> Result<Op
     if cooked.instances.is_some() {
         return Err(facts_error("component-cached nodes must return unpacked geometry"));
     }
-    if rdk::topology::data_id(G::topology(&source)) != rdk::topology::data_id(G::topology(&geometry)) {
+    if rdk_core::topology::data_id(G::topology(&source)) != rdk_core::topology::data_id(G::topology(&geometry)) {
         return Err(facts_error("Preserved topology was replaced"));
     }
     let ids = |g: &G::T| -> (Vec<i64>, Vec<i64>) {
         (
-            G::groups(g).iter().map(rdk::group::data_id).collect(),
-            G::edge_groups(g).iter().map(rdk::edge_group::data_id).collect(),
+            G::groups(g).iter().map(rdk_core::group::data_id).collect(),
+            G::edge_groups(g).iter().map(rdk_core::edge_group::data_id).collect(),
         )
     };
     if ids(&source) != ids(&geometry) {
@@ -638,7 +638,7 @@ fn delta(n: &node::T, inputs: &[payload::T], cooked: &node::Cooked) -> Result<Op
             attributes.push((A::owner(&a), key.1, None));
         }
     }
-    let positions = if rdk::packed::Float3::data_id(G::positions(&source)) == rdk::packed::Float3::data_id(G::positions(&geometry)) {
+    let positions = if rdk_core::packed::Float3::data_id(G::positions(&source)) == rdk_core::packed::Float3::data_id(G::positions(&geometry)) {
         None
     } else {
         if !declared("P") {
@@ -651,7 +651,7 @@ fn delta(n: &node::T, inputs: &[payload::T], cooked: &node::Cooked) -> Result<Op
 
 /// `Some(new entry)` when the cached components must be re-based on the current input.
 fn refresh(inputs: &[payload::T], entry: &Entry) -> Result<Option<Entry>, Diagnostic> {
-    use rdk::{attribute as A, geometry as G};
+    use rdk_core::{attribute as A, geometry as G};
     let Some(delta) = &entry.delta else { return Ok(None) };
     if delta.source == payload::data_id(&inputs[0]) {
         return Ok(None);
@@ -681,7 +681,7 @@ fn refresh(inputs: &[payload::T], entry: &Entry) -> Result<Option<Entry>, Diagno
         Some(G::groups(&source)),
         Some(G::edge_groups(&source)),
     )
-    .map_err(|e| facts_error(&format!("cannot refresh cached components: {}", rdk::error::to_string(&e))))?;
+    .map_err(|e| facts_error(&format!("cannot refresh cached components: {}", rdk_core::error::to_string(&e))))?;
     Ok(Some(Entry {
         output: Output { payload: payload::T::Geometry(geometry), instances: entry.output.instances.clone() },
         components: entry.components.clone(),
@@ -748,11 +748,11 @@ fn input_geometry(session: &mut T, output: &Output) -> Result<payload::T, Diagno
     if let Some(geometry) = existing {
         return Ok(payload::T::Geometry(geometry));
     }
-    match rdk::instance_copy::materialize_instances(transforms, source) {
+    match rdk_ops::instance_copy::materialize_instances(transforms, source) {
         Err(error) => Err(crate::support::diagnostic_with(
-            rdk::error::code(&error),
+            rdk_core::error::code(&error),
             "packed instances could not be materialized",
-            Some(rdk::error::to_string(&error)),
+            Some(rdk_core::error::to_string(&error)),
             Vec::new(),
         )),
         Ok(geometry) => {
@@ -1149,7 +1149,7 @@ fn replay_event(session: &mut T, event: &CacheEvent) -> bool {
             let found = session.materialized.iter().find(|(o, _)| same_output(o, output)).map(|(_, g)| g);
             match (found, expected) {
                 (None, None) => true,
-                (Some(a), Some(b)) => rdk::geometry::data_id(a) == rdk::geometry::data_id(b),
+                (Some(a), Some(b)) => rdk_core::geometry::data_id(a) == rdk_core::geometry::data_id(b),
                 _ => false,
             }
         }

@@ -10,8 +10,8 @@ use crate::port::Port;
 use crate::value_lane;
 use flow_eval::Value;
 use flow_graph::probe;
-use rdk::geometry as geo;
-use rdk::packed::Float3;
+use rdk_core::geometry as geo;
+use rdk_core::packed::Float3;
 use sop::context::{self as sctx, Options as ContextOptions};
 use sop::edit_graph as edit;
 use sop::node;
@@ -366,9 +366,9 @@ fn a_garden_zone_cooks_deterministically_with_provenance() {
     let ops: Vec<String> = edit::inspect(&graph.network.geometry).into_iter().map(|n| n.operation).collect();
     assert!(ops.iter().filter(|o| *o == "zone").count() == 1 && !ops.iter().any(|o| o == "uv_sphere"), "the template body stays out of the network");
     // provenance: every tag names an element of the zone, at its index
-    let attribute = geo::find_attribute(rdk::attribute::Owner::Primitive, lower::source_attribute(), &one).expect("the source attribute");
-    let tags = match rdk::attribute::storage(&attribute) {
-        Ok(rdk::attribute::Storage::Int(values)) => values,
+    let attribute = geo::find_attribute(rdk_core::attribute::Owner::Primitive, lower::source_attribute(), &one).expect("the source attribute");
+    let tags = match rdk_core::attribute::storage(&attribute) {
+        Ok(rdk_core::attribute::Storage::Int(values)) => values,
         _ => panic!("tag storage"),
     };
     let mut sorted = tags.clone();
@@ -481,7 +481,7 @@ fn pieces_are_primitives_and_keys_order_the_elements() {
         1,
     );
     let n = geo::point_count(&base);
-    let ids = rdk::attribute::create_owned("id", rdk::attribute::Owner::Point, rdk::attribute::Storage::Int((0..n).map(|i| n - 1 - i).collect())).unwrap();
+    let ids = rdk_core::attribute::create_owned("id", rdk_core::attribute::Owner::Point, rdk_core::attribute::Storage::Int((0..n).map(|i| n - 1 - i).collect())).unwrap();
     let keyed = geo::with_attribute(ids, &base).unwrap();
     let ordered = sop::zone::elements(sop::zone::Kind::Points, Some("id"), &keyed).unwrap();
     assert!(ordered[0].key == 0 && Ok(ordered[0].position) == Float3::get(geo::positions(&base), n - 1), "elements follow the key attribute");

@@ -14,11 +14,11 @@ use flow_syntax::context as fctx;
 use flow_syntax::ty::{self, Ty};
 use flow_syntax::value::{self as V, Value, struct_value, source_value};
 use rays_diagnostic::Diagnostic;
-use rdk::attribute::{self, Owner, Storage};
-use rdk::cancel;
-use rdk::error as rerror;
-use rdk::geometry;
-use rdk::packed::{Float2, Float3, Float4, FloatArray, IntArray};
+use rdk_core::attribute::{self, Owner, Storage};
+use rdk_core::cancel;
+use rdk_core::error as rerror;
+use rdk_core::geometry;
+use rdk_core::packed::{Float2, Float3, Float4, FloatArray, IntArray};
 use rdk_core::support;
 use sop::context::{self, dependencies as D};
 use sop::node::{self, build, CookMode, Elementwise, Facts, InputUse, Topology};
@@ -996,11 +996,11 @@ fn install(owner: Owner, kind: &str, name: &str, planes: Vec<Vec<f64>>, g: &geom
 }
 
 /// OCaml `Resident (v, count)` read back from a holder.
-fn resident_of(holder: &Arc<dyn rdk::packed::Deferred::Holder>) -> Option<(Value, i64)> {
+fn resident_of(holder: &Arc<dyn rdk_core::packed::Deferred::Holder>) -> Option<(Value, i64)> {
     topology_kernel_impl::resident_points_of(holder).map(|r| (r.value.clone(), r.count))
 }
 
-fn new_holder(value: Value, count: i64) -> Arc<dyn rdk::packed::Deferred::Holder> {
+fn new_holder(value: Value, count: i64) -> Arc<dyn rdk_core::packed::Deferred::Holder> {
     Arc::new(topology_kernel_impl::ResidentPoints { value, count })
 }
 
@@ -1008,7 +1008,7 @@ fn new_holder(value: Value, count: i64) -> Arc<dyn rdk::packed::Deferred::Holder
 /// needs it (any domain); until then the geometry holds the device's buffer.
 pub fn install_deferred(owner: Owner, kind: &str, name: &str, planes: &Arc<Gpu::Planes>, g: &geometry::T) -> Result<geometry::T, Diagnostic> {
     let holder = planes.resident.clone().map(|v| new_holder(v, planes.count));
-    let release: rdk::packed::Deferred::Release = {
+    let release: rdk_core::packed::Deferred::Release = {
         let p = planes.clone();
         Arc::new(move |held| p.release(held))
     };
@@ -1966,7 +1966,7 @@ pub fn delete_after(deletes: &[(String, String)], cancel_token: &Arc<cancel::T>,
     let mut g = g.clone();
     for (owner, pattern) in deletes {
         let pattern_for = |selected: &str| Some(if owner == selected { pattern.clone() } else { String::new() });
-        let params = rdk::attribute_lifecycle::DeleteParams {
+        let params = rdk_ops::attribute_lifecycle::DeleteParams {
             cancel: Some(cancel_token.clone()),
             reference: None,
             delete_non_selected: false,
@@ -1975,7 +1975,7 @@ pub fn delete_after(deletes: &[(String, String)], cancel_token: &Arc<cancel::T>,
             primitive_pattern: pattern_for("primitive"),
             detail_pattern: pattern_for("detail"),
         };
-        g = rdk::attribute_ops::delete(&params, &g).map_err(|e| fail("E_ATTR_DELETE", &rerror::to_string(&e)))?;
+        g = rdk_ops::attribute_ops::delete(&params, &g).map_err(|e| fail("E_ATTR_DELETE", &rerror::to_string(&e)))?;
     }
     Ok(g)
 }
@@ -2579,7 +2579,8 @@ fn cancelled_err<X>() -> Result<X, Diagnostic> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rdk::{line_geometry, topology};
+    use rdk_core::topology;
+use rdk_ops::line_geometry;
 
     /// Bit-exact description of positions and attributes (OCaml `geometry_bytes`, minus groups).
     fn bits(g: &geometry::T) -> Vec<u64> {

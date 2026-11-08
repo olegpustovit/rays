@@ -9,7 +9,10 @@ param = { path = "../param" }
 input = { path = "../input" }
 rays_diagnostic = { path = "../rays_diagnostic" }
 rays_math = { path = "../rays_math" }
-rdk = { path = "../rdk" }
+rdk_core = { path = "../rdk_core" }
+rdk_geom = { path = "../rdk_geom" }
+rdk_ops = { path = "../rdk_ops" }
+rdk_boolean = { path = "../rdk_boolean" }
 mem = { path = "../mem" }
 lru = { path = "../lru" }
 parallel = { path = "../parallel" }

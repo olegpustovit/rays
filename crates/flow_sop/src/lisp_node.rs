@@ -300,7 +300,7 @@ pub fn node(options: &NodeOptions, build_body: BuildFn, inputs: &[node::T]) -> R
 mod tests {
     use super::*;
     use param::{IntRange, Impact};
-    use rdk::line_geometry;
+    use rdk_ops::line_geometry;
     use sop::node::{conservative, CookMode, GeometryCooked};
 
     fn count_field() -> FieldView {
@@ -351,7 +351,7 @@ mod tests {
                             return Ok(GeometryCooked { geometry, instances: None });
                         }
                         let points: Vec<(f64, f64, f64)> = (0..count).map(|i| (i as f64, 0.0, 0.0)).collect();
-                        let geometry = line_geometry::points(&points).map_err(|e| port::error("E_TEST", &rdk::error::to_string(&e)))?;
+                        let geometry = line_geometry::points(&points).map_err(|e| port::error("E_TEST", &rdk_core::error::to_string(&e)))?;
                         Ok(GeometryCooked { geometry, instances: None })
                     }),
                 ))
@@ -370,7 +370,7 @@ mod tests {
         )
     }
 
-    fn cook(n: &node::T) -> Result<rdk::geometry::T, Diagnostic> {
+    fn cook(n: &node::T) -> Result<rdk_core::geometry::T, Diagnostic> {
         let mut evaluator = session::create(8, 1_000_000).expect("session");
         let context = context::create(context::Options { domains: Some(1), ..Default::default() }).expect("context");
         let output = session::cook(&mut evaluator, None, &context, n);
@@ -392,10 +392,10 @@ mod tests {
     fn a_lisp_node_builds_cooks_edits_and_keeps_identity() {
         let made = node(&options(false, Vec::new()), build_points(), &[]).expect("node");
         assert_eq!((node::operation(&made), node::version(&made), node::label(&made)), ("test_lisp", 2, "Test Lisp"));
-        assert_eq!(rdk::geometry::point_count(&cook(&made).expect("cooks")), 3);
+        assert_eq!(rdk_core::geometry::point_count(&cook(&made).expect("cooks")), 3);
         let (edited, effects) = node::apply_parameters(&made, &[("count".to_owned(), ParamValue::Int(5))]).expect("edit");
         assert!(effects.cook && node::id(&edited) == node::id(&made));
-        assert_eq!(rdk::geometry::point_count(&cook(&edited).expect("cooks")), 5);
+        assert_eq!(rdk_core::geometry::point_count(&cook(&edited).expect("cooks")), 5);
         assert!(node::apply_parameters(&made, &[("count".to_owned(), ParamValue::Text(b"x".to_vec()))]).is_err());
     }
 
@@ -414,7 +414,7 @@ mod tests {
     fn cooked_inputs_are_readable_only_while_the_node_cooks() {
         assert_eq!(input(0).err().expect("no inputs outside a cook").code, "E_DATA_SOURCE");
         let reading = node(&options(false, vec![true]), build_points(), &[snapshot_points(4)]).expect("node");
-        assert_eq!(rdk::geometry::point_count(&cook(&reading).expect("cooks")), 4);
+        assert_eq!(rdk_core::geometry::point_count(&cook(&reading).expect("cooks")), 4);
         assert_eq!(input(0).err().expect("no inputs outside a cook").code, "E_DATA_SOURCE");
     }
 

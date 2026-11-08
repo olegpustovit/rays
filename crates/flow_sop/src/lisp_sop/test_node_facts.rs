@@ -2,9 +2,9 @@
 //! node (this module lowers calls as that node).
 use super::support::*;
 use crate::{lisp_sop, lower};
-use rdk::attribute;
-use rdk::geometry as geo;
-use rdk::normal_ops;
+use rdk_core::attribute;
+use rdk_core::geometry as geo;
+use rdk_core::normal_ops;
 use sop::context::{self as sctx, Options as ContextOptions};
 use sop::edit_graph as edit;
 use sop::node::{self, CookMode, Topology};
@@ -22,8 +22,8 @@ fn cook_out(s: &mut session::T, domains: i64, n: &node::T) -> geo::T {
     cook(s, &ctx(domains), n)
 }
 
-fn rdk_ok<A>(r: Result<A, rdk::error::T>) -> A {
-    r.unwrap_or_else(|e| panic!("{}", rdk::error::to_string(&e)))
+fn rdk_ok<A>(r: Result<A, rdk_core::error::T>) -> A {
+    r.unwrap_or_else(|e| panic!("{}", rdk_core::error::to_string(&e)))
 }
 
 /// Plane_generators.grid's default triangles in the XZ plane, retaining the OCaml fixture bounds.
@@ -45,8 +45,8 @@ fn plane_grid(columns: i64, rows: i64, size: f64) -> geo::T {
             offsets.extend([vp.len() as i64 - 3, vp.len() as i64]);
         }
     }
-    let positions = rdk_ok(rdk::packed::Float3::of_owned(x, z, y));
-    let topology = rdk_ok(rdk::topology::polygons_owned(stride * (rows + 1), vp, offsets));
+    let positions = rdk_ok(rdk_core::packed::Float3::of_owned(x, z, y));
+    let topology = rdk_ok(rdk_core::topology::polygons_owned(stride * (rows + 1), vp, offsets));
     rdk_ok(geo::create(positions, topology, None, None, None))
 }
 
@@ -81,11 +81,11 @@ fn declared_preserved_topology_holds_at_one_and_eight_domains() {
     factories.extend(lowered.factories.iter().cloned());
     let g = fixture();
     let topology = geo::topology(&g);
-    let index = rdk_ok(rdk::topology_index::create(None, topology));
-    let edges = rdk_ok(rdk::edge_group::init(None, topology, &index, "edges", &|_| true));
+    let index = rdk_ok(rdk_core::topology_index::create(None, topology));
+    let edges = rdk_ok(rdk_core::edge_group::init(None, topology, &index, "edges", &|_| true));
     let g = rdk_ok(geo::with_edge_group(edges, &g));
     let count = geo::point_count(&g) as usize;
-    let uv = rdk_ok(rdk::packed::Float2::of_owned(vec![0.0; count], vec![0.0; count]));
+    let uv = rdk_ok(rdk_core::packed::Float2::of_owned(vec![0.0; count], vec![0.0; count]));
     let uv = rdk_ok(attribute::create_owned("uv", attribute::Owner::Point, attribute::Storage::Float2(uv)));
     let source = lisp_sop::snapshot(&rdk_ok(geo::with_attribute(uv, &g)));
     let image = edit::instantiate(&sop::image_nodes::noise_factory(), &[]).unwrap();
@@ -100,7 +100,7 @@ fn declared_preserved_topology_holds_at_one_and_eight_domains() {
             let mut cold = new_eval_session();
             let eight = cook_out(&mut cold, 8, n);
             session::close(&mut cold);
-            assert!(rdk::topology::data_id(geo::topology(&one)) == rdk::topology::data_id(geo::topology(&input)), "{} replaced Preserved topology", node::operation(n));
+            assert!(rdk_core::topology::data_id(geo::topology(&one)) == rdk_core::topology::data_id(geo::topology(&input)), "{} replaced Preserved topology", node::operation(n));
             assert!(geometry_bytes(&one) == geometry_bytes(&eight), "{} differs at eight domains", node::operation(n));
             preserved.push(key);
         }

@@ -216,8 +216,9 @@ dependencies = [
  "param",
  "rays_diagnostic",
  "rays_math",
- "rdk",
  "rdk_core",
+ "rdk_geom",
+ "rdk_ops",
  "sop",
 ]
 
@@ -545,16 +546,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rdk"
-version = "0.1.0"
-dependencies = [
- "rdk_boolean",
- "rdk_core",
- "rdk_geom",
- "rdk_ops",
-]
-
-[[package]]
 name = "rdk_boolean"
 version = "0.1.0"
 dependencies = [
@@ -681,7 +672,10 @@ dependencies = [
  "param",
  "rays_diagnostic",
  "rays_math",
- "rdk",
+ "rdk_boolean",
+ "rdk_core",
+ "rdk_geom",
+ "rdk_ops",
 ]
 
 [[package]]

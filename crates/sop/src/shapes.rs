@@ -210,7 +210,7 @@ fn owner_spec(folder: &'static str) -> Spec {
         "Group type",
         folder,
         support::ELEMENT_OWNER.kind(),
-        support::ELEMENT_OWNER.value(&rdk::group_ops::Owner::GroupPoints),
+        support::ELEMENT_OWNER.value(&rdk_ops::group_ops::Owner::GroupPoints),
     )
 }
 fn all_finite(values: &[f64]) -> bool {
@@ -236,7 +236,7 @@ fn xyz_specs(
 
 pub mod clip {
     use super::*;
-    use rdk::plane_clip::{self, Keep};
+    use rdk_ops::plane_clip::{self, Keep};
 
     pub const KEEP: Choice<Keep> = Choice(&[
         ("Above", Keep::Above),
@@ -246,7 +246,7 @@ pub mod clip {
 
     #[derive(Clone, Debug)]
     pub struct Parameters {
-        pub group_owner: rdk::group_ops::Owner,
+        pub group_owner: rdk_ops::group_ops::Owner,
         pub group: String,
         pub keep: Keep,
         pub snapping_tolerance: f64,
@@ -490,8 +490,8 @@ pub mod exploded_view {
 /// r0, r1, r2 (Point Float4 attributes of the second input, one point per instance).
 pub mod pack_instances {
     use super::*;
-    use rdk::attribute::{self, Storage};
-    use rdk::{geometry, packed};
+    use rdk_core::attribute::{self, Storage};
+    use rdk_core::{geometry, packed};
 
     pub const META: Meta = Meta {
         key: "pack_instances",
@@ -556,7 +556,7 @@ pub mod pack_instances {
 pub mod soft_transform {
     use super::*;
     use crate::node::{Elementwise, Topology};
-    use rdk::transform_ops::{
+    use rdk_ops::transform_ops::{
         self, SoftTransformFalloff, SoftTransformMetric as Metric, TransformOrder as Order, TransformRotationOrder as Rot,
     };
     use support::SoftTransformMetric;
@@ -585,7 +585,7 @@ pub mod soft_transform {
 
     #[derive(Clone, Debug)]
     pub struct Parameters {
-        pub group_owner: rdk::group_ops::Owner,
+        pub group_owner: rdk_ops::group_ops::Owner,
         pub group: String,
         pub order: Order,
         pub rotation_order: Rot,
@@ -761,7 +761,7 @@ pub mod soft_transform {
             return refuse("falloff output must not replace P");
         }
         match transform_ops::compose_transform(&compose_params(&p)) {
-            Err(error) => refuse(&rdk::error::to_string(&error)),
+            Err(error) => refuse(&rdk_core::error::to_string(&error)),
             Ok(matrix) => {
                 let finite = (0..16).all(|i| rays_math::mat4::get(&matrix, i / 4, i % 4).is_ok_and(f64::is_finite));
                 if finite { Ok(()) } else { refuse("composed transform must be finite") }
@@ -835,8 +835,8 @@ pub mod soft_transform {
 
 pub mod ray {
     use super::*;
-    use rdk::ray::{Combine, Direction, Method};
-    use rdk::surface_index::{RayDirectionMode, RaySurfaceHit};
+    use rdk_ops::ray::{Combine, Direction, Method};
+    use rdk_geom::surface_index::{RayDirectionMode, RaySurfaceHit};
     use support::RayDirection;
 
     pub const METHOD: Choice<Method> = Choice(&[
@@ -867,7 +867,7 @@ pub mod ray {
 
     #[derive(Clone, Debug)]
     pub struct Parameters {
-        pub group_owner: rdk::group_ops::Owner,
+        pub group_owner: rdk_ops::group_ops::Owner,
         pub group: String,
         pub collision_group: String,
         pub method: Method,
@@ -1103,7 +1103,7 @@ pub mod ray {
                 let collision_primitives = match &collision_group {
                     None => None,
                     Some(name) => Some(
-                        rdk::geometry::find_group(rdk::group::Owner::Primitive, name, &inputs[1]).ok_or_else(|| {
+                        rdk_core::geometry::find_group(rdk_core::group::Owner::Primitive, name, &inputs[1]).ok_or_else(|| {
                             support::diagnostic(
                                 "missing_collision_group",
                                 &format!("ray could not find collision primitive group {}", node::ocaml_quote(name)),
@@ -1111,7 +1111,7 @@ pub mod ray {
                         })?,
                     ),
                 };
-                let params = rdk::ray::Params {
+                let params = rdk_ops::ray::Params {
                     grain: context::grain(context),
                     selection,
                     collision_primitives,
@@ -1140,7 +1140,7 @@ pub mod ray {
                     detail_pattern: text(&p.detail_pattern),
                     match_groups: p.match_groups,
                 };
-                match rdk::ray::run(Some(context::cancel_token(context).as_ref()), &params, &inputs[0], &inputs[1]) {
+                match rdk_ops::ray::run(Some(context::cancel_token(context).as_ref()), &params, &inputs[0], &inputs[1]) {
                     Ok(geometry) => support::cooked(geometry),
                     Err(error) => Err(support::structured_rdk_error(&error)),
                 }

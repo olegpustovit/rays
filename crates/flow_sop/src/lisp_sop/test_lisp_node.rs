@@ -2,7 +2,7 @@
 //! inspector and node menu build it: parameters, rebuilds, cook identity).
 use super::support::*;
 use crate::{lisp_sop, lower, operators};
-use rdk::geometry as geo;
+use rdk_core::geometry as geo;
 use sop::context::{self as sctx, Options as ContextOptions};
 use sop::edit_graph as edit;
 use sop::node::{self, build, CookMode};
@@ -29,7 +29,7 @@ fn cook_with(s: &mut session::T, domains: i64, grain: i64, seed: i64, n: &node::
 }
 
 fn line_points(points: &[(f64, f64, f64)]) -> geo::T {
-    rdk::line_geometry::points(points).unwrap_or_else(|e| panic!("{}", rdk::error::to_string(&e)))
+    rdk_ops::line_geometry::points(points).unwrap_or_else(|e| panic!("{}", rdk_core::error::to_string(&e)))
 }
 
 fn external(name: &str, geometry: geo::T) -> Vec<(String, node::T)> {
@@ -62,10 +62,10 @@ fn lazy_cooked_selection_keeps_a_chained_write() {
             with_session(&mut |s| {
                 let actual = cook_with(s, domains, 97, 0, &compile(reference));
                 assert!(geometry_bytes(&actual) == expected, "lazy cooked selection disconnected a chained write or changed domain bytes");
-                for (owner, name, value) in [(rdk::attribute::Owner::Point, "stage", 7i64), (rdk::attribute::Owner::Detail, "seen", 1)] {
+                for (owner, name, value) in [(rdk_core::attribute::Owner::Point, "stage", 7i64), (rdk_core::attribute::Owner::Detail, "seen", 1)] {
                     let a = geo::find_attribute(owner, name, &actual).expect("chained cooked write lost an attribute");
-                    match rdk::attribute::storage(&a) {
-                        Ok(rdk::attribute::Storage::Int(values)) => assert!(values == vec![value], "chained cooked write has wrong values"),
+                    match rdk_core::attribute::storage(&a) {
+                        Ok(rdk_core::attribute::Storage::Int(values)) => assert!(values == vec![value], "chained cooked write has wrong values"),
                         _ => panic!("chained cooked write has wrong type"),
                     }
                 }
@@ -215,12 +215,12 @@ fn same(a: &geo::T, b: &geo::T) -> bool {
     geo::data_id(a) == geo::data_id(b)
 }
 
-fn rdk_ok<A>(r: Result<A, rdk::error::T>) -> A {
-    r.unwrap_or_else(|e| panic!("{}", rdk::error::to_string(&e)))
+fn rdk_ok<A>(r: Result<A, rdk_core::error::T>) -> A {
+    r.unwrap_or_else(|e| panic!("{}", rdk_core::error::to_string(&e)))
 }
 
 fn position(g: &geo::T, i: i64) -> (f64, f64, f64) {
-    rdk::packed::Float3::get(geo::positions(g), i).unwrap()
+    rdk_core::packed::Float3::get(geo::positions(g), i).unwrap()
 }
 
 fn field_names(n: &node::T) -> Vec<String> {
@@ -260,7 +260,7 @@ fn materialized_writes_own_storage_expand_instances_and_report_errors() {
         )
     };
     let actual = node_of(body);
-    let expected = rdk_ok(rdk::instance_copy::materialize_instances(&transforms, &original));
+    let expected = rdk_ok(rdk_ops::instance_copy::materialize_instances(&transforms, &original));
     with_session(&mut |s| {
         for domains in [1i64, 8] {
             session::clear(s);
@@ -269,22 +269,22 @@ fn materialized_writes_own_storage_expand_instances_and_report_errors() {
             let geometry = sop::payload::geometry(&output.payload).unwrap();
             assert!(output.instances.is_none(), "Materialized write retained already-expanded instances");
             assert!(geo::point_count(&geometry) == geo::point_count(&expected), "Materialized write lost source instance cardinality");
-            let storage = |name: &str| rdk::attribute::storage(&geo::find_attribute(rdk::attribute::Owner::Point, name, &geometry).unwrap()).unwrap();
+            let storage = |name: &str| rdk_core::attribute::storage(&geo::find_attribute(rdk_core::attribute::Owner::Point, name, &geometry).unwrap()).unwrap();
             match storage("copied") {
-                rdk::attribute::Storage::Float3(data) => {
-                    let data_x = rdk_ok(rdk::packed::Float3::View::view(&data)).x;
-                    let position_x = rdk_ok(rdk::packed::Float3::View::view(geo::positions(&geometry))).x;
+                rdk_core::attribute::Storage::Float3(data) => {
+                    let data_x = rdk_ok(rdk_core::packed::Float3::View::view(&data)).x;
+                    let position_x = rdk_ok(rdk_core::packed::Float3::View::view(geo::positions(&geometry))).x;
                     assert!(!Arc::ptr_eq(&data_x, &position_x), "Computed write borrowed its input storage");
                     for i in 0..geo::point_count(&geometry) {
                         let (x, y, z) = position(&expected, i);
-                        assert!(rdk::packed::Float3::get(&data, i).unwrap() == (x + 0.5, y + -0.0, z + 0.0), "Computed write changed numeric values");
+                        assert!(rdk_core::packed::Float3::get(&data, i).unwrap() == (x + 0.5, y + -0.0, z + 0.0), "Computed write changed numeric values");
                     }
                 }
                 _ => panic!("Materialized write lost tuple storage"),
             }
             match storage("rows") {
-                rdk::attribute::Storage::FloatArray(data) => {
-                    let v = rdk::packed::FloatArray::View::view(&data);
+                rdk_core::attribute::Storage::FloatArray(data) => {
+                    let v = rdk_core::packed::FloatArray::View::view(&data);
                     assert!(*v.offsets == [0i64, 1, 2, 3, 4] && *v.values == [0.25f64; 4], "Materialized CSR write changed row layout");
                 }
                 _ => panic!("Materialized write lost CSR storage"),
@@ -298,8 +298,8 @@ fn materialized_writes_own_storage_expand_instances_and_report_errors() {
                     Ok(_) => panic!("Malformed materialized write succeeded"),
                 }
             }
-            let token = Arc::new(rdk::cancel::create());
-            rdk::cancel::cancel(&token);
+            let token = Arc::new(rdk_core::cancel::create());
+            rdk_core::cancel::cancel(&token);
             let cancelled = sctx::create(ContextOptions { domains: Some(domains), cancel: Some(token), ..Default::default() }).unwrap();
             match session::cook(s, None, &cancelled, &actual) {
                 Err(error) => assert!(error.code == "cancelled" || error.code == "E_CANCELLED", "Materialized write lost cancellation"),
@@ -403,27 +403,27 @@ fn parameter_validation_rejects_without_changing_the_node() {
 
 #[test]
 fn a_lisp_body_keeps_topology_attributes_and_ordered_groups() {
-    use rdk::attribute::{Owner, Storage};
-    let positions = rdk_ok(rdk::packed::Float3::of_owned(vec![-1.0, 0.0, 1.0], vec![-0.0, 0.0, 0.0], vec![2.0, 3.0, 4.0]));
-    let topology = rdk_ok(rdk::topology::polygons_owned(3, vec![0, 1, 2], vec![0, 3]));
-    let attributes: Vec<rdk::attribute::T> = vec![
+    use rdk_core::attribute::{Owner, Storage};
+    let positions = rdk_ok(rdk_core::packed::Float3::of_owned(vec![-1.0, 0.0, 1.0], vec![-0.0, 0.0, 0.0], vec![2.0, 3.0, 4.0]));
+    let topology = rdk_ok(rdk_core::topology::polygons_owned(3, vec![0, 1, 2], vec![0, 3]));
+    let attributes: Vec<rdk_core::attribute::T> = vec![
         (Owner::Point, "weight", Storage::Float(vec![0.25, 0.5, 0.75])),
         (Owner::Point, "id", Storage::Int(vec![2, 1, 0])),
         (Owner::Point, "tag", Storage::Text(vec![b"one".to_vec(), b"two".to_vec(), b"three".to_vec()])),
-        (Owner::Point, "weights", Storage::FloatArray(rdk_ok(rdk::packed::FloatArray::create_owned(vec![0, 0, 2, 3], vec![0.25, 0.5, 0.75])))),
+        (Owner::Point, "weights", Storage::FloatArray(rdk_ok(rdk_core::packed::FloatArray::create_owned(vec![0, 0, 2, 3], vec![0.25, 0.5, 0.75])))),
         (Owner::Vertex, "uv", Storage::Float3(positions.clone())),
         (Owner::Primitive, "material", Storage::Int(vec![7])),
     ]
     .into_iter()
-    .map(|(owner, name, storage)| rdk_ok(rdk::attribute::create_owned(name, owner, storage)))
+    .map(|(owner, name, storage)| rdk_ok(rdk_core::attribute::create_owned(name, owner, storage)))
     .collect();
-    let groups = vec![rdk_ok(rdk::group::ordered(rdk::group::Owner::Point, "ordered", 3, &[2, 0]))];
-    let index = rdk_ok(rdk::topology_index::create(None, &topology));
-    let edge_groups = vec![rdk_ok(rdk::edge_group::init(None, &topology, &index, "selected_edges", &|i| i == 0))];
+    let groups = vec![rdk_ok(rdk_core::group::ordered(rdk_core::group::Owner::Point, "ordered", 3, &[2, 0]))];
+    let index = rdk_ok(rdk_core::topology_index::create(None, &topology));
+    let edge_groups = vec![rdk_ok(rdk_core::edge_group::init(None, &topology, &index, "selected_edges", &|i| i == 0))];
     let original = rdk_ok(geo::create(positions, topology, Some(attributes), Some(groups), Some(edge_groups)));
     let before = geometry_bytes(&original);
-    let p = rdk_ok(rdk::packed::Float3::View::view(geo::positions(&original)));
-    let shifted = rdk_ok(rdk::packed::Float3::View::of_owned_exn(p.x.iter().map(|x| x + 2.0).collect(), p.y.iter().map(|y| y + 0.0).collect(), p.z.iter().map(|z| z + 0.0).collect()));
+    let p = rdk_ok(rdk_core::packed::Float3::View::view(geo::positions(&original)));
+    let shifted = rdk_ok(rdk_core::packed::Float3::View::of_owned_exn(p.x.iter().map(|x| x + 2.0).collect(), p.y.iter().map(|y| y + 0.0).collect(), p.z.iter().map(|z| z + 0.0).collect()));
     let expected = geometry_bytes(&rdk_ok(geo::with_positions(shifted, &original)));
     let n = lisp_sop::workspace_node(&[("src".to_owned(), lisp_sop::snapshot(&original))], SHIFT);
     for domains in [1i64, 4] {

@@ -4,9 +4,9 @@ use crate::attribute_metadata;
 use flow_syntax::ty;
 use flow_syntax::value::Value;
 use rays_diagnostic::Diagnostic;
-use rdk::geometry::{self, T as Geometry};
-use rdk::group_ops;
-use rdk::{attribute_pattern, edge_group, element_selection, group, topology_index};
+use rdk_core::geometry::{self, T as Geometry};
+use rdk_ops::group_ops;
+use rdk_core::{attribute_pattern, edge_group, element_selection, group, topology_index};
 use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -47,7 +47,7 @@ fn count(geometry: &Geometry, owner: Owner) -> Result<i64, Diagnostic> {
         Owner::Ordinary(group::Owner::Vertex) => geometry::vertex_count(geometry),
         Owner::Ordinary(group::Owner::Primitive) => geometry::primitive_count(geometry),
         Owner::Edge => {
-            let index = topology_index::create(None, geometry::topology(geometry)).map_err(|e| diag("E_TOPOLOGY", rdk::error::message(&e)))?;
+            let index = topology_index::create(None, geometry::topology(geometry)).map_err(|e| diag("E_TOPOLOGY", rdk_core::error::message(&e)))?;
             topology_index::edge_count(&index)
         }
     })
@@ -117,7 +117,7 @@ fn read_points(owner: Owner, name: &str, geometry: &Geometry) -> Result<Value, D
     };
     element_selection::promote(None, 4096, None, group::Owner::Point, &selection, geometry::topology(geometry))
         .map(|promoted| mask(&promoted))
-        .map_err(|e| diag("E_GROUP_SOURCE", rdk::error::message(&e)))
+        .map_err(|e| diag("E_GROUP_SOURCE", rdk_core::error::message(&e)))
 }
 
 fn order(owner: Owner, name: &str, geometry: &Geometry) -> Result<Value, Diagnostic> {
@@ -140,7 +140,7 @@ fn order(owner: Owner, name: &str, geometry: &Geometry) -> Result<Value, Diagnos
 }
 
 fn names(owner: Owner, pattern: &str, geometry: &Geometry) -> Result<Value, Diagnostic> {
-    let pattern = attribute_pattern::compile(pattern).map_err(|e| diag("E_GROUP_PATTERN", rdk::error::message(&e)))?;
+    let pattern = attribute_pattern::compile(pattern).map_err(|e| diag("E_GROUP_PATTERN", rdk_core::error::message(&e)))?;
     let found: Vec<String> = match owner {
         Owner::Ordinary(owner) => geometry::groups(geometry).iter().filter(|g| group::owner(g) == owner).map(|g| group::name(g).to_owned()).collect(),
         Owner::Edge => geometry::edge_groups(geometry).iter().map(|g| edge_group::name(g).to_owned()).collect(),
@@ -152,7 +152,7 @@ fn names(owner: Owner, pattern: &str, geometry: &Geometry) -> Result<Value, Diag
 
 fn entries(selected_owner: &str, pattern: &str, component: &str, geometry: &Geometry) -> Result<Value, Diagnostic> {
     let selected = attribute_metadata::group_owner(selected_owner)?;
-    let pattern = attribute_pattern::compile(pattern).map_err(|e| diag("E_GROUP_PATTERN", rdk::error::message(&e)))?;
+    let pattern = attribute_pattern::compile(pattern).map_err(|e| diag("E_GROUP_PATTERN", rdk_core::error::message(&e)))?;
     let mut all: Vec<(group_ops::Owner, String)> = Vec::new();
     for item in geometry::groups(geometry) {
         let owner = match group::owner(&item) {
@@ -192,7 +192,7 @@ pub fn write(order: Option<&[i64]>, owner: Owner, name: &str, mask: &[i64], geom
     if mask.iter().any(|value| *value != 0 && *value != 1) {
         return fail("E_GROUP_MASK", "Group mask values must be 0 or 1.");
     }
-    let order_error = |e: rdk::error::T| diag("E_GROUP_ORDER", rdk::error::message(&e));
+    let order_error = |e: rdk_core::error::T| diag("E_GROUP_ORDER", rdk_core::error::message(&e));
     match (owner, order) {
         (Owner::Edge, Some(_)) => fail("E_GROUP_OWNER", "Edge groups do not have an explicit traversal order."),
         (Owner::Edge, None) => {

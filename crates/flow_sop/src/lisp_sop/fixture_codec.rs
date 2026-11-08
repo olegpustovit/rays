@@ -1,7 +1,7 @@
 //! Test fixture interchange from lib/flow_sop/goldens/fixture_codec.ml.
 use flow_syntax::{syntax::{self,Node,Syntax},lisp};
 use flow_syntax::arena::{SyntaxArena, SyntaxId};
-use rdk::{attribute::{self,Owner,Storage},geometry as geo,packed,topology,group,edge_group,topology_index};
+use rdk_core::{attribute::{self,Owner,Storage},geometry as geo,packed,topology,group,edge_group,topology_index};
 use sop::image;
 type R<T>=Result<T,String>;
 fn list(xs:impl IntoIterator<Item=String>)->String{format!("({})",xs.into_iter().collect::<Vec<_>>().join(" "))}
@@ -11,7 +11,7 @@ fn floats(xs:&[f64])->String{list(xs.iter().map(|x|quote(format!("{:016x}",x.to_
 fn ints(xs:&[i64])->String{list(xs.iter().map(ToString::to_string))}
 fn owner(o:Owner)->&'static str{match o{Owner::Point=>"point",Owner::Vertex=>"vertex",Owner::Primitive=>"primitive",Owner::Detail=>"detail"}}
 fn group_owner(o:group::Owner)->Owner{match o{group::Owner::Point=>Owner::Point,group::Owner::Vertex=>Owner::Vertex,group::Owner::Primitive=>Owner::Primitive}}
-fn rk<T>(r:Result<T,rdk::error::T>)->R<T>{r.map_err(|e|rdk::error::to_string(&e))}
+fn rk<T>(r:Result<T,rdk_core::error::T>)->R<T>{r.map_err(|e|rdk_core::error::to_string(&e))}
 pub fn encode(g:&geo::T)->String{
     let p=packed::Float3::View::view(geo::positions(g)).unwrap();let t=topology::View::view(geo::topology(g)).unwrap();
     let attrs=geo::attributes(g).iter().map(|a|{let(kind,planes)=match attribute::storage(a).unwrap(){

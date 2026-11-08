@@ -9,7 +9,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 use rays_diagnostic::Diagnostic;
-use rdk::{attribute, geometry};
+use rdk_core::{attribute, geometry};
 
 use crate::context::{self, dependencies};
 use crate::node::{self, build, CookMode, GeometryCooked};
@@ -95,12 +95,12 @@ impl Digest {
 
 fn digest(geometry_value: &geometry::T) -> String {
     let mut d = Digest::new();
-    if let Ok(view) = rdk::topology::View::view(geometry::topology(geometry_value)) {
+    if let Ok(view) = rdk_core::topology::View::view(geometry::topology(geometry_value)) {
         view.vertex_points.iter().for_each(|v| d.int(*v));
         view.primitive_offsets.iter().for_each(|v| d.int(*v));
         view.primitive_kinds.iter().for_each(|v| d.byte(*v));
     }
-    if let Ok(view) = rdk::packed::Float3::View::view(geometry::positions(geometry_value)) {
+    if let Ok(view) = rdk_core::packed::Float3::View::view(geometry::positions(geometry_value)) {
         for plane in [&view.x, &view.y, &view.z] {
             plane.iter().for_each(|v| d.int(v.to_bits() as i64));
         }
@@ -127,7 +127,7 @@ pub fn elements(kind: Kind, key: Option<&str>, geometry_value: &geometry::T) -> 
             let keys = keys(attribute::Owner::Point, count, key, geometry_value);
             let mut out = Vec::with_capacity(count as usize);
             for (index, source) in order(&keys).into_iter().enumerate() {
-                let position = rdk::packed::Float3::get(positions, source as i64)
+                let position = rdk_core::packed::Float3::get(positions, source as i64)
                     .map_err(|e| support::structured_rdk_error(&e))?;
                 out.push(Element { index: index as i64, key: keys[source], position, piece: None, digest: String::new() });
             }
@@ -143,14 +143,14 @@ pub fn elements(kind: Kind, key: Option<&str>, geometry_value: &geometry::T) -> 
             }
             let rank: HashMap<i64, i64> = distinct.iter().enumerate().map(|(i, k)| (*k, i as i64)).collect();
             let assignment: Vec<i64> = keys.iter().map(|k| rank[k]).collect();
-            let parts = rdk::deletion::primitive_partitions(pieces, &assignment, geometry_value)
+            let parts = rdk_ops::deletion::primitive_partitions(pieces, &assignment, geometry_value)
                 .map_err(|e| support::structured_rdk_error(&e))?;
             let mut out = Vec::with_capacity(parts.len());
             for (index, part) in parts.into_iter().enumerate() {
                 let position = if geometry::point_count(&part) == 0 {
                     (0.0, 0.0, 0.0)
                 } else {
-                    rdk::packed::Float3::get(geometry::positions(&part), 0).map_err(|e| support::structured_rdk_error(&e))?
+                    rdk_core::packed::Float3::get(geometry::positions(&part), 0).map_err(|e| support::structured_rdk_error(&e))?
                 };
                 let digest = digest(&part);
                 out.push(Element { index: index as i64, key: distinct[index], position, piece: Some(part), digest });
@@ -256,18 +256,18 @@ pub fn node(args: Args, body: Body, inputs: Vec<node::T>) -> node::T {
         },
         Some(expand),
         Arc::new(move |_, context, parts| {
-            let params = rdk::mesh_merge::RunParams {
+            let params = rdk_ops::mesh_merge::RunParams {
                 cancel: Some(Arc::clone(context::cancel_token(context))),
                 grain: Some(context::grain(context)),
                 source_attribute: Some(source_attribute.clone()),
                 source_base: Some(source_base + select.unwrap_or(0)),
             };
-            match rdk::mesh_merge::run(&params, parts) {
+            match rdk_ops::mesh_merge::run(&params, parts) {
                 Ok(geometry) => Ok(GeometryCooked { geometry, instances: None }),
                 Err(e) => Err(support::diagnostic_with(
-                    rdk::error::code(&e),
+                    rdk_core::error::code(&e),
                     "zone could not merge its elements",
-                    Some(rdk::error::to_string(&e)),
+                    Some(rdk_core::error::to_string(&e)),
                     Vec::new(),
                 )),
             }

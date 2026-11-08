@@ -4,9 +4,9 @@ use flow_ir::flow_ir::Gpu::{self, Integers, Planes, Residency};
 use flow_syntax::ty::{self, Ty};
 use flow_syntax::value::{self, Value};
 use rays_diagnostic::Diagnostic;
-use rdk::geometry::{self, T as Geometry};
-use rdk::packed::{Deferred, Float3};
-use rdk::{analysis, attribute, cancel, edge_group, error, group, point_index, topology, topology_index};
+use rdk_core::geometry::{self, T as Geometry};
+use rdk_core::packed::{Deferred, Float3};
+use rdk_core::{analysis, attribute, cancel, edge_group, error, group, point_index, topology, topology_index};
 use rdk_core::{polygon_triangulation, topology_remap as remap_core};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
@@ -1048,14 +1048,14 @@ pub fn concat(cancel: Option<Arc<cancel::T>>, grain: i64, sources: &[Geometry], 
     if grain <= 0 {
         return fail("E_CONCAT", "Concat grain must be positive.");
     }
-    let params = rdk::mesh_merge::RunTaggedParams {
+    let params = rdk_ops::mesh_merge::RunTaggedParams {
         cancel,
         grain: Some(grain),
         tag_base,
         source_attribute: if attribute.is_empty() { None } else { Some(attribute) },
         source_base,
     };
-    rdk::mesh_merge::run_tagged(&params, sources).map_err(|e| {
+    rdk_ops::mesh_merge::run_tagged(&params, sources).map_err(|e| {
         let mut d = diag(error::code(&e), &format!("{} could not produce valid geometry", error::operation(&e)));
         d.cause = Some(error::to_string(&e).into_bytes());
         d.hints = error::hints(&e).to_vec();
@@ -1161,7 +1161,7 @@ mod integration {
     use crate::{attribute_kernel, operators};
     use flow_check::catalog::Catalog;
     use flow_ir::flow_ir::Executor;
-    use rdk::analysis;
+    use rdk_core::analysis;
 
     fn ok<R>(r: Result<R, error::T>) -> R {
         match r {

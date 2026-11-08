@@ -1,6 +1,6 @@
 //! Per-cook allocation budgets (thread-local `mem_sys` counters). Limits may only go down.
-use rdk::subdivide::{self, BoundaryInterpolation, CrackPolicy, CreasingMethod, FaceVaryingInterpolation, Params, Scheme, TrianglePolicy};
-use rdk::{geometry, packed, topology};
+use rdk_ops::subdivide::{self, BoundaryInterpolation, CrackPolicy, CreasingMethod, FaceVaryingInterpolation, Params, Scheme, TrianglePolicy};
+use rdk_core::{geometry, packed, topology};
 
 fn grid(cells: i64) -> geometry::T {
     let stride = cells + 1;

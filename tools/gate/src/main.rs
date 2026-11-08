@@ -820,7 +820,6 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("rdk_geom", &["rdk_core", "rays_math", "parallel"][..]),
         ("rdk_ops", &["rdk_core", "rdk_geom", "rays_math", "parallel"][..]),
         ("rdk_boolean", &["rdk_core", "rdk_geom", "rdk_ops", "rays_math", "parallel"][..]),
-        ("rdk", &["rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean", "parallel"][..]),
         ("rdk_rays", &["rdk_core", "rdk_geom", "rdk_ops", "rays", "rays_math", "param"][..]),
         ("rays", &[
             "input", "rays_math", "lru", "runtime_resources", "runtime", "scene_command", "renderer",
@@ -844,13 +843,13 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("flow_web", &[
             "flow_syntax", "flow_check", "flow_eval", "flow_ir", "param", "rays_math", "scene_command", "parallel",
         ][..]),
-        ("sop", &["param", "input", "rays_diagnostic", "rays_math", "rdk", "lru", "mem", "parallel"][..]),
+        ("sop", &["param", "input", "rays_diagnostic", "rays_math", "rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean", "lru", "mem", "parallel"][..]),
         ("flow_sop", &[
             "flow_syntax", "flow_check", "flow_eval", "flow_ir", "lru", "param", "sop", "rays_diagnostic", "rays_math",
-            "parallel",
+            "parallel", "rdk_core", "rdk_geom", "rdk_ops",
         ][..]),
         ("flow_native", &[
-            "editor_document", "rays", "rays_math", "input", "rdk", "flow_syntax", "flow_check", "flow_eval",
+            "editor_document", "rays", "rays_math", "input", "flow_syntax", "flow_check", "flow_eval",
             "flow_graph", "flow_ir", "flow_gpu", "flow_sop", "scene_command", "renderer", "lru", "runtime_resources",
             "parallel", "sop",
         ][..]),
@@ -876,7 +875,7 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
             "rays", "ogpu", "renderer", "flow_syntax", "flow_check", "flow_eval", "flow_ir", "flow_gpu", "input",
             "runtime_resources", "rays_math",
         ][..]),
-        ("lisp_sop", &["flow_syntax", "flow_check", "flow_eval", "flow_sop", "sop", "rdk", "rays_math"][..]),
+        ("lisp_sop", &["flow_syntax", "flow_check", "flow_eval", "flow_sop", "sop", "rays_math"][..]),
     ])
 }
 
@@ -911,7 +910,7 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
     let upper = [
         "param", "flow", "flow_ir", "flow_web", "flow_shader", "flow_gpu", "flow_graph", "flow_sop",
         "flow_native", "rays", "editor_core", "editor_document", "pxui", "pxui_shell", "pxui_graph",
-        "sop", "rdk", "rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean", "rdk_rays", "rays_pathtracer",
+        "sop", "rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean", "rdk_rays", "rays_pathtracer",
         "web_export", "rays_editor",
     ];
     let gpu = [
@@ -943,68 +942,66 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
     forbid("runtime", &upper);
     forbid("flow_native", &["pxui", "pxui_shell", "pxui_graph", "rays_editor"]);
     forbid("flow_ir", &[
-        "rays", "pxui", "pxui_shell", "pxui_graph", "sop", "rdk", "rdk_core", "rdk_geom", "rdk_ops",
+        "rays", "pxui", "pxui_shell", "pxui_graph", "sop", "rdk_core", "rdk_geom", "rdk_ops",
         "rdk_boolean", "rdk_rays", "rays_pathtracer", "rays_editor",
     ]);
     forbid("flow_shader", &[
         "runtime", "renderer", "ogpu_mock", "ogpu_metal_native", "ogpu_metal", "ogpu_vulkan", "ogpu_native",
-        "rays", "rdk", "rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean", "rdk_rays", "rays_pathtracer", "flow_sop",
+        "rays", "rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean", "rdk_rays", "rays_pathtracer", "flow_sop",
         "sop", "editor_core", "pxui", "pxui_shell", "pxui_graph", "rays_editor",
     ]);
     forbid("flow_gpu", &[
-        "sop", "rdk", "rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean", "rdk_rays", "rays_pathtracer", "flow_sop",
+        "sop", "rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean", "rdk_rays", "rays_pathtracer", "flow_sop",
         "editor_core", "pxui", "pxui_shell", "pxui_graph", "rays_editor",
     ]);
     forbid("flow_web", &[
-        "rays", "sop", "rdk", "rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean", "rdk_rays", "rays_pathtracer",
+        "rays", "sop", "rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean", "rdk_rays", "rays_pathtracer",
         "flow_sop", "flow_gpu", "editor_core", "pxui", "pxui_shell", "pxui_graph", "rays_editor",
     ]);
     forbid("flow_web", &gpu);
     forbid("web_export", &["pxui", "pxui_shell", "pxui_graph", "rays_editor"]);
     forbid("lisp_sop", &["editor_document", "rays", "runtime", "pxui", "rays_editor"]);
     forbid("rays", &[
-        "pxui", "pxui_shell", "pxui_graph", "sop", "rdk", "rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean",
+        "pxui", "pxui_shell", "pxui_graph", "sop", "rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean",
         "rdk_rays", "rays_pathtracer", "rays_editor",
     ]);
-    forbid("rays_math", &["rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean", "rdk", "rdk_rays", "sop"]);
+    forbid("rays_math", &["rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean", "rdk_rays", "sop"]);
     forbid("rays_math", &gpu);
-    forbid("rdk_core", &["rdk_geom", "rdk_ops", "rdk_boolean", "rays", "rdk", "rdk_rays", "sop"]);
+    forbid("rdk_core", &["rdk_geom", "rdk_ops", "rdk_boolean", "rays", "rdk_rays", "sop"]);
     forbid("rdk_core", &gpu);
-    forbid("rdk_geom", &["rdk_ops", "rdk_boolean", "rays", "rdk", "rdk_rays", "sop"]);
+    forbid("rdk_geom", &["rdk_ops", "rdk_boolean", "rays", "rdk_rays", "sop"]);
     forbid("rdk_geom", &gpu);
-    forbid("rdk_ops", &["rdk_boolean", "rays", "rdk", "rdk_rays", "sop"]);
+    forbid("rdk_ops", &["rdk_boolean", "rays", "rdk_rays", "sop"]);
     forbid("rdk_ops", &gpu);
-    forbid("rdk_boolean", &["rays", "rdk", "rdk_rays", "sop"]);
+    forbid("rdk_boolean", &["rays", "rdk_rays", "sop"]);
     forbid("rdk_boolean", &gpu);
-    forbid("rdk", &["rays", "rdk_rays", "sop", "pxui", "pxui_shell"]);
-    forbid("rdk", &gpu);
     forbid("sop", &["rays", "rdk_rays", "pxui", "pxui_shell", "pxui_graph", "rays_editor"]);
     forbid("sop", &gpu);
-    forbid("editor_core", &["pxui", "pxui_shell", "pxui_graph", "rays_editor", "sop", "rdk"]);
+    forbid("editor_core", &["pxui", "pxui_shell", "pxui_graph", "rays_editor", "sop"]);
     forbid("editor_document", &["pxui", "pxui_shell", "pxui_graph", "rays_editor"]);
-    forbid("pxui", &["editor_core", "pxui_shell", "sop", "rdk", "pxui_graph", "rays_editor"]);
-    forbid("pxui_shell", &["sop", "rdk", "pxui_graph", "rays_editor"]);
-    forbid("pxui_graph", &["sop", "rdk", "pxui_shell", "rays_editor"]);
+    forbid("pxui", &["editor_core", "pxui_shell", "sop", "pxui_graph", "rays_editor"]);
+    forbid("pxui_shell", &["sop", "pxui_graph", "rays_editor"]);
+    forbid("pxui_graph", &["sop", "pxui_shell", "rays_editor"]);
     forbid("rays_pathtracer", &[
         "metal", "ogpu_metal_native", "ogpu_metal", "ogpu_mock", "rdk_core", "sop", "flow_sop", "editor_core",
         "editor_document", "pxui", "pxui_shell", "pxui_graph", "rays_editor",
     ]);
     forbid("rdk_rays", &[
-        "metal", "ogpu_metal_native", "ogpu_metal", "rdk_boolean", "rdk", "sop", "flow", "editor_core",
+        "metal", "ogpu_metal_native", "ogpu_metal", "rdk_boolean", "sop", "flow", "editor_core",
         "editor_document", "pxui", "pxui_shell", "pxui_graph", "rays_pathtracer", "rays_editor",
     ]);
     // Flow is UI-free and GPU-free, but its three crates may reach the OCaml flow's leaves (param, input, diagnostic).
     for library in ["flow_syntax", "flow_check", "flow_eval"] {
         forbid(library, &[
             "flow_ir", "flow_web", "flow_shader", "flow_gpu", "flow_graph", "flow_sop", "flow_native", "rays",
-            "editor_core", "pxui", "pxui_shell", "pxui_graph", "sop", "rdk", "rays_editor",
+            "editor_core", "pxui", "pxui_shell", "pxui_graph", "sop", "rays_editor",
         ]);
         forbid(library, &gpu);
     }
     forbid("scene_execution_fixtures", &[
         "metal", "ogpu_metal_native", "ogpu_metal", "param", "flow", "flow_ir", "flow_web", "flow_shader",
         "flow_gpu", "flow_graph", "flow_sop", "flow_native", "rays", "editor_core", "editor_document", "pxui",
-        "pxui_shell", "pxui_graph", "sop", "rdk", "rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean", "rdk_rays",
+        "pxui_shell", "pxui_graph", "sop", "rdk_core", "rdk_geom", "rdk_ops", "rdk_boolean", "rdk_rays",
         "rays_pathtracer", "web_export", "rays_editor",
     ]);
     rules

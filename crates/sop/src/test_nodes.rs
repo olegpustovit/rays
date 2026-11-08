@@ -68,7 +68,7 @@ fn group_transfer_declares_its_schema_and_cooks() {
     let values = groups::group_transfer::to_values(&groups::group_transfer::from_values(&[
         Value::Bool(true),
         Value::Text(groups::group_transfer::encode(&groups::default_transfer_rules())),
-        crate::support::GROUP_COPY_CONFLICT.value(&rdk::group_ops::CopyConflict::CopySkip),
+        crate::support::GROUP_COPY_CONFLICT.value(&rdk_ops::group_ops::CopyConflict::CopySkip),
         Value::Bool(false),
         Value::Float(0.5),
     ]));

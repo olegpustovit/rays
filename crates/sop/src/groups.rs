@@ -2,7 +2,7 @@
 use std::sync::Arc;
 
 use param::Value;
-use rdk::group_ops::{self, CopyConflict, Owner, TransferRule};
+use rdk_ops::group_ops::{self, CopyConflict, Owner, TransferRule};
 
 use crate::context::{self, dependencies};
 use crate::decl::{self, Decl, Meta, Spec};

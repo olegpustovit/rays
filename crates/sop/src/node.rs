@@ -82,16 +82,16 @@ pub struct Cooked {
 
 #[derive(Clone)]
 pub struct GeometryCooked {
-    pub geometry: rdk::geometry::T,
+    pub geometry: rdk_core::geometry::T,
     pub instances: Option<Arc<Vec<mat4::T>>>,
 }
 
 pub type CookFn = Arc<dyn Fn(i64, &context::T, &[payload::T]) -> Result<Cooked, Diagnostic> + Send + Sync>;
 pub type ExpandFn = Arc<dyn Fn(&context::T, &[T], &[payload::T]) -> Result<Vec<T>, Diagnostic> + Send + Sync>;
 pub type GeometryCookFn =
-    Arc<dyn Fn(i64, &context::T, &[rdk::geometry::T]) -> Result<GeometryCooked, Diagnostic> + Send + Sync>;
+    Arc<dyn Fn(i64, &context::T, &[rdk_core::geometry::T]) -> Result<GeometryCooked, Diagnostic> + Send + Sync>;
 pub type GeometryExpandFn =
-    Arc<dyn Fn(&context::T, &[T], &[rdk::geometry::T]) -> Result<Vec<T>, Diagnostic> + Send + Sync>;
+    Arc<dyn Fn(&context::T, &[T], &[rdk_core::geometry::T]) -> Result<Vec<T>, Diagnostic> + Send + Sync>;
 /// `(label, current inputs, values) -> rebuilt node`.
 pub type RebuildFn = Arc<dyn Fn(&str, &[T], &[Value]) -> Result<T, String> + Send + Sync>;
 
@@ -391,7 +391,7 @@ pub mod build {
         }))
     }
 
-    fn geometries(inputs: &[payload::T]) -> Result<Vec<rdk::geometry::T>, Diagnostic> {
+    fn geometries(inputs: &[payload::T]) -> Result<Vec<rdk_core::geometry::T>, Diagnostic> {
         inputs.iter().map(payload::geometry).collect()
     }
 

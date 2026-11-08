@@ -134,7 +134,7 @@ fn edit_r<A>(r: Result<A, String>) -> R<A> {
     r.map_err(|message| LAST_BUILD_FAILURE.with(|slot| slot.borrow_mut().take()).filter(|d| d.message == message).unwrap_or_else(|| fail("E_LOWER", &message)))
 }
 /// A geometry lookup by plan id over the cooked inputs of a node.
-fn lookup(geometries: Vec<rdk::geometry::T>, sources: Vec<i64>) -> ak::GeometryLookup {
+fn lookup(geometries: Vec<rdk_core::geometry::T>, sources: Vec<i64>) -> ak::GeometryLookup {
     Arc::new(move |id: i64| sources.iter().position(|s| *s == id).map(|i| geometries[i].clone()))
 }
 fn key_text(v: &Value) -> String {
@@ -704,8 +704,8 @@ pub mod chain {
         registry.len()
     }
 
-    pub fn floats_of(geometry: &rdk::geometry::T) -> i64 {
-        rdk::geometry::point_count(geometry) * 9 + rdk::geometry::primitive_count(geometry) * 6
+    pub fn floats_of(geometry: &rdk_core::geometry::T) -> i64 {
+        rdk_core::geometry::point_count(geometry) * 9 + rdk_core::geometry::primitive_count(geometry) * 6
     }
 
     pub fn site_of(value: &Value) -> Option<(W::Path, Vec<i64>)> {
@@ -719,15 +719,15 @@ pub mod chain {
         }
     }
 
-    pub fn observe_display(gpu: &Gpu::Config, geometry: &rdk::geometry::T, seconds: f64) {
+    pub fn observe_display(gpu: &Gpu::Config, geometry: &rdk_core::geometry::T, seconds: f64) {
         if let (Some(backend), Gpu::Policy::Measured) = (&gpu.backend, gpu.policy) {
-            ak::Display_sink::observe(backend, rdk::packed::Float3::resident(rdk::geometry::positions(geometry)), floats_of(geometry), seconds);
+            ak::Display_sink::observe(backend, rdk_core::packed::Float3::resident(rdk_core::geometry::positions(geometry)), floats_of(geometry), seconds);
         }
     }
 
-    pub fn observe_draw(gpu: &Gpu::Config, geometry: &rdk::geometry::T, seconds: f64) {
+    pub fn observe_draw(gpu: &Gpu::Config, geometry: &rdk_core::geometry::T, seconds: f64) {
         if let (Some(backend), Gpu::Policy::Measured) = (&gpu.backend, gpu.policy) {
-            if !rdk::packed::Float3::resident(rdk::geometry::positions(geometry)) {
+            if !rdk_core::packed::Float3::resident(rdk_core::geometry::positions(geometry)) {
                 ak::Display_sink::observe_draw(backend, floats_of(geometry), seconds);
             }
         }
@@ -742,7 +742,7 @@ pub mod chain {
 
     pub struct Placed {
         pub route: Route,
-        pub record: Box<dyn Fn(&rdk::geometry::T, bool, f64) + Send + Sync>,
+        pub record: Box<dyn Fn(&rdk_core::geometry::T, bool, f64) + Send + Sync>,
         /// A `Probe` ran past its budget.
         pub abandoned: Box<dyn Fn() + Send + Sync>,
     }
@@ -808,11 +808,11 @@ pub mod chain {
             }
         };
         let evidence = Arc::new(evidence);
-        let record: Box<dyn Fn(&rdk::geometry::T, bool, f64) + Send + Sync> = {
+        let record: Box<dyn Fn(&rdk_core::geometry::T, bool, f64) + Send + Sync> = {
             let (state, site, evidence, decide) = (state.clone(), site.clone(), evidence.clone(), decide.clone());
-            Box::new(move |geometry: &rdk::geometry::T, device: bool, seconds: f64| {
+            Box::new(move |geometry: &rdk_core::geometry::T, device: bool, seconds: f64| {
                 let Some(state) = &state else { return };
-                let points = rdk::geometry::point_count(geometry);
+                let points = rdk_core::geometry::point_count(geometry);
                 let floats = floats_of(geometry);
                 if floats <= 0 {
                     return;
@@ -840,7 +840,7 @@ pub mod chain {
             report(None, reason, None, None);
             Placed { route, record: Box::new(|_, _, _| {}), abandoned: Box::new(|| {}) }
         };
-        let rebuild_record = |route: Route, abandoned: Box<dyn Fn() + Send + Sync>, record: Box<dyn Fn(&rdk::geometry::T, bool, f64) + Send + Sync>| Placed { route, record, abandoned };
+        let rebuild_record = |route: Route, abandoned: Box<dyn Fn() + Send + Sync>, record: Box<dyn Fn(&rdk_core::geometry::T, bool, f64) + Send + Sync>| Placed { route, record, abandoned };
         match (&state, readers) {
             (None, _) => {
                 report(None, PlacementReason::No_cost_evidence, None, None);
@@ -919,25 +919,25 @@ fn mesh_attributes(fields: &[(String, Value)]) -> Vec<(String, String, Value)> {
         .collect()
 }
 
-fn mesh_host_attributes(grain: i64, fields: &[(String, Value)], geometry: rdk::geometry::T) -> R<rdk::geometry::T> {
+fn mesh_host_attributes(grain: i64, fields: &[(String, Value)], geometry: rdk_core::geometry::T) -> R<rdk_core::geometry::T> {
     let mut geometry = geometry;
     for (name, kind, values) in mesh_attributes(fields) {
-        geometry = ak::write(grain, rdk::attribute::Owner::Point, &kind, &name, &values, &geometry)?;
+        geometry = ak::write(grain, rdk_core::attribute::Owner::Point, &kind, &name, &values, &geometry)?;
     }
     Ok(geometry)
 }
 
 /// On the device each attribute keeps its buffer. A stream that is not resident, or whose count is
 /// not the mesh's, takes the host writer, which reports the count error as a CPU cook does.
-fn mesh_resident_attributes(grain: i64, scope: &dyn Gpu::Residency, fields: &[(String, Value)], geometry: rdk::geometry::T) -> R<rdk::geometry::T> {
-    let points = rdk::geometry::point_count(&geometry);
+fn mesh_resident_attributes(grain: i64, scope: &dyn Gpu::Residency, fields: &[(String, Value)], geometry: rdk_core::geometry::T) -> R<rdk_core::geometry::T> {
+    let points = rdk_core::geometry::point_count(&geometry);
     let mut current = geometry.clone();
     let mut result: R<()> = Ok(());
     for (name, kind, values) in mesh_attributes(fields) {
         let retained = if scope.executor().count(&values)? == Some(points) { scope.retain_float(&values) } else { None };
         let next = match retained {
-            Some(planes) => ak::install_deferred(rdk::attribute::Owner::Point, &kind, &name, &Arc::new(planes), &current),
-            None => flow_ir::core_exec::host_value(scope.executor().as_ref(), &values).and_then(|v| ak::write(grain, rdk::attribute::Owner::Point, &kind, &name, &v, &current)),
+            Some(planes) => ak::install_deferred(rdk_core::attribute::Owner::Point, &kind, &name, &Arc::new(planes), &current),
+            None => flow_ir::core_exec::host_value(scope.executor().as_ref(), &values).and_then(|v| ak::write(grain, rdk_core::attribute::Owner::Point, &kind, &name, &v, &current)),
         };
         match next {
             Ok(g) => current = g,
@@ -950,7 +950,7 @@ fn mesh_resident_attributes(grain: i64, scope: &dyn Gpu::Residency, fields: &[(S
     match result {
         Ok(()) => Ok(current),
         Err(e) => {
-            for (_, release) in rdk::geometry::releasers(&geometry) {
+            for (_, release) in rdk_core::geometry::releasers(&geometry) {
                 release(false);
             }
             Err(e)
@@ -1128,7 +1128,7 @@ fn mesh_cook(
     points_program: &Arc<OnceLock<R<Executor::Program>>>,
     node_id: i64,
     context: &sctx::T,
-    geometries: &[rdk::geometry::T],
+    geometries: &[rdk_core::geometry::T],
 ) -> R<node::GeometryCooked> {
     let cancelled = || sctx::cancelled(context);
     let error = || Err(fail("E_CANCELLED", "Mesh kernel cancelled."));
@@ -1145,8 +1145,8 @@ fn mesh_cook(
     };
     let began = std::cell::Cell::new((env.clock)());
     let on_device = std::cell::Cell::new(false);
-    let geometry = |id: i64| -> Option<rdk::geometry::T> { sources.iter().position(|s| *s == id).map(|i| geometries[i].clone()) };
-    let cooked = |device: bool| -> R<rdk::geometry::T> {
+    let geometry = |id: i64| -> Option<rdk_core::geometry::T> { sources.iter().position(|s| *s == id).map(|i| geometries[i].clone()) };
+    let cooked = |device: bool| -> R<rdk_core::geometry::T> {
         if cancelled() {
             return error();
         }
@@ -1166,14 +1166,14 @@ fn mesh_cook(
             // Core and evaluator loops must observe the cook's cancellation, including a first cook.
             let cancel = sctx::cancel_token(context).clone();
             let mut result = Err(fail("E_CANCELLED", "Mesh kernel cancelled."));
-            E::with_interrupt(Arc::new(move || rdk::cancel::is_cancelled(&cancel)), &mut || result = Executor::force(&program, &options, sctx::input(context)));
+            E::with_interrupt(Arc::new(move || rdk_core::cancel::is_cancelled(&cancel)), &mut || result = Executor::force(&program, &options, sctx::input(context)));
             result
         };
         let scope = if device { env.gpu.backend.as_ref().and_then(|b| b.residency(true)) } else { None };
         match scope {
             Some(scope) => {
                 on_device.set(true);
-                let out = (|| -> R<rdk::geometry::T> {
+                let out = (|| -> R<rdk_core::geometry::T> {
                     match force(Some(scope.executor().clone()))? {
                         Value::Record(fields) => {
                             if cancelled() {
@@ -1191,7 +1191,7 @@ fn mesh_cook(
                             let result = result.and_then(|g| mesh_resident_attributes(sctx::grain(context), &*scope, &fields, g));
                             result.and_then(|geometry| {
                                 if cancelled() {
-                                    for (_, release) in rdk::geometry::releasers(&geometry) {
+                                    for (_, release) in rdk_core::geometry::releasers(&geometry) {
                                         release(false);
                                     }
                                     error()
@@ -1219,7 +1219,7 @@ fn mesh_cook(
                             _ => Err(fail("E_DATA_SOURCE", "With planes needs a cooked geometry.")),
                         }
                     } else if operation == "sop/concat" {
-                        let collect = |values: &[Value]| -> R<Vec<rdk::geometry::T>> {
+                        let collect = |values: &[Value]| -> R<Vec<rdk_core::geometry::T>> {
                             let mut out = Vec::new();
                             for v in values {
                                 match v {
@@ -1241,7 +1241,7 @@ fn mesh_cook(
                     } else if operation != "sop/remap" {
                         tk::mesh(&fields).and_then(|g| mesh_host_attributes(sctx::grain(context), &fields, g))
                     } else {
-                        let cooked_of = |name: &str| -> R<rdk::geometry::T> {
+                        let cooked_of = |name: &str| -> R<rdk_core::geometry::T> {
                             match get(args, name) {
                                 Some(Value::Deferred(t, id)) if is_geometry_ty(t) => {
                                     geometry(*id).ok_or_else(|| fail("E_DATA_SOURCE", "Remap needs two cooked geometries."))
@@ -1265,7 +1265,7 @@ fn mesh_cook(
         chain::Route::Probe(budget) => {
             let stop = began.get() + budget;
             let clock = env.clock.clone();
-            let mut out: Option<R<rdk::geometry::T>> = None;
+            let mut out: Option<R<rdk_core::geometry::T>> = None;
             let finished = E::with_interrupt(Arc::new(move || clock() > stop), &mut || out = Some(cooked(false)));
             if finished {
                 out.unwrap()
@@ -1284,7 +1284,7 @@ fn mesh_cook(
     result.map(|geometry| node::GeometryCooked { geometry, instances: None })
 }
 
-fn attribute_options(args: &[(String, Value)]) -> R<(rdk::attribute::Owner, String)> {
+fn attribute_options(args: &[(String, Value)]) -> R<(rdk_core::attribute::Owner, String)> {
     let text = |key: &str, default: &str, code: &str| -> R<String> {
         match get(args, key) {
             None => Ok(default.to_owned()),
@@ -1405,7 +1405,7 @@ pub struct AttrOpts {
     pub default: Option<Value>,
     pub guard: Option<Value>,
     pub prior: Vec<(String, String, Value)>,
-    pub owner: Option<rdk::attribute::Owner>,
+    pub owner: Option<rdk_core::attribute::Owner>,
     pub kind: Option<String>,
     pub deletes: Option<Vec<(String, String)>>,
 }
@@ -1457,7 +1457,7 @@ pub fn attribute_node(env: &KernelEnv, o: &AttrOpts, name: &str, values: &Value,
                         default: o.default.clone(),
                         guard: o.guard.clone(),
                         prior: o.prior.clone(),
-                        owner: o.owner.unwrap_or(rdk::attribute::Owner::Point),
+                        owner: o.owner.unwrap_or(rdk_core::attribute::Owner::Point),
                         kind: o.kind.clone().unwrap_or_else(|| "vec3".into()),
                         deletes: o.deletes.clone().unwrap_or_default(),
                     },
@@ -1998,12 +1998,12 @@ pub fn chain_states() -> usize {
 }
 
 /// The seconds from a host mesh's frame to its first presentation, added to its display sink.
-pub fn observe_draw(gpu: &Gpu::Config, geometry: &rdk::geometry::T, seconds: f64) {
+pub fn observe_draw(gpu: &Gpu::Config, geometry: &rdk_core::geometry::T, seconds: f64) {
     chain::observe_draw(gpu, geometry, seconds)
 }
 
 /// The seconds the editor spent preparing a mesh for display.
-pub fn observe_display(gpu: &Gpu::Config, geometry: &rdk::geometry::T, seconds: f64) {
+pub fn observe_display(gpu: &Gpu::Config, geometry: &rdk_core::geometry::T, seconds: f64) {
     chain::observe_display(gpu, geometry, seconds)
 }
 
@@ -2611,7 +2611,7 @@ impl CookServices {
         }
         let data = Value::Record(fields);
         let guards = node.map(|n| guards_of(FUSED_GUARDS, &n.args)).unwrap_or_default();
-        let owner = o.owner.unwrap_or(rdk::attribute::Owner::Point);
+        let owner = o.owner.unwrap_or(rdk_core::attribute::Owner::Point);
         let kind = o.kind.clone().unwrap_or_else(|| "vec3".into());
         let deletes = o.deletes.clone().unwrap_or_default();
         let what = format!(
@@ -2896,7 +2896,7 @@ struct HostRun {
     env: StructEnv,
     context: sctx::T,
     handles: Mutex<HashMap<i64, HostHandle>>,
-    geometries: Mutex<HashMap<i64, rdk::geometry::T>>,
+    geometries: Mutex<HashMap<i64, rdk_core::geometry::T>>,
     next: AtomicI64,
     session: Mutex<Option<sop::session::T>>,
     /// a failure raised inside a `geometry` lookup, reported once the resolver returns
@@ -2941,7 +2941,7 @@ impl HostRun {
         }
     }
 
-    fn geometry_r(&self, id: i64) -> R<rdk::geometry::T> {
+    fn geometry_r(&self, id: i64) -> R<rdk_core::geometry::T> {
         if let Some(g) = self.geometries.lock().unwrap().get(&id) {
             return Ok(g.clone());
         }
@@ -2949,7 +2949,7 @@ impl HostRun {
         let geometry = match (output.payload, output.instances) {
             (payload::T::Geometry(g), None) => g,
             (payload::T::Geometry(source), Some(transforms)) => {
-                rdk::instance_copy::materialize_instances(&transforms, &source).map_err(|e| data_source(&rdk::error::to_string(&e)))?
+                rdk_ops::instance_copy::materialize_instances(&transforms, &source).map_err(|e| data_source(&rdk_core::error::to_string(&e)))?
             }
             _ => return Err(data_source("A geometry source has an image payload.")),
         };
@@ -2958,7 +2958,7 @@ impl HostRun {
     }
 
     /// `geometry id` of the OCaml: a failure is stashed and reported when the resolver returns.
-    fn geometry(&self, id: i64) -> Option<rdk::geometry::T> {
+    fn geometry(&self, id: i64) -> Option<rdk_core::geometry::T> {
         match self.geometry_r(id) {
             Ok(g) => Some(g),
             Err(e) => {
@@ -3206,7 +3206,7 @@ impl HostRun {
                         _ => false,
                     };
                     let grain = sctx::grain(&self.context);
-                    let result: Option<rdk::geometry::T> = match first {
+                    let result: Option<rdk_core::geometry::T> = match first {
                         Some(g) => Some(g),
                         None if Self::constant(values) && selected_materialized => ak::write_constant_source(grain, owner, &kind, &attr, selection, default, values, &target)?,
                         None if materialized && selected_materialized => {
@@ -3427,7 +3427,7 @@ fn structural_cook(env: &StructEnv, node_id: i64, context: &sctx::T, payloads: &
                                 Some(result) => {
                                     let geometry = result?;
                                     if sctx::cancelled(&run.context) {
-                                        for (_, release) in rdk::geometry::releasers(&geometry) {
+                                        for (_, release) in rdk_core::geometry::releasers(&geometry) {
                                             release(false);
                                         }
                                         Err(fail("E_CANCELLED", "Mesh kernel cancelled."))
@@ -3456,7 +3456,7 @@ fn structural_cook(env: &StructEnv, node_id: i64, context: &sctx::T, payloads: &
         };
         let cancel = sctx::cancel_token(context).clone();
         let mut result = Err(fail("E_CANCELLED", "Geometry kernel cancelled."));
-        E::with_interrupt(Arc::new(move || rdk::cancel::is_cancelled(&cancel)), &mut || result = flow_ir::core_exec::execute(&env.prepared, sctx::input(context), &options));
+        E::with_interrupt(Arc::new(move || rdk_core::cancel::is_cancelled(&cancel)), &mut || result = flow_ir::core_exec::execute(&env.prepared, sctx::input(context), &options));
         result
     };
     let on_device = || -> R<Value> {
@@ -4083,7 +4083,7 @@ impl Lowerer {
                         let guarded = guard.as_ref().map(|guard| {
                             let (g, sources) = (guard.clone(), sources_c.clone());
                             let roots = guard_roots.clone();
-                            let decide: Arc<dyn Fn(&sctx::T, &[rdk::geometry::T]) -> R<bool> + Send + Sync> = Arc::new(move |context, geometries| {
+                            let decide: Arc<dyn Fn(&sctx::T, &[rdk_core::geometry::T]) -> R<bool> + Send + Sync> = Arc::new(move |context, geometries| {
                                 let _roots = &roots;
                                 let geoms = geometries.to_vec();
                                 let sources = sources.clone();
@@ -5184,7 +5184,7 @@ mod lend_session_tests {
         let context = sctx::create(sctx::Options::default()).unwrap();
         let mut session = sop::session::create(32, 1_000_000).unwrap();
         let cooked = sop::session::cook(&mut session, None, &context, &root).unwrap();
-        assert_eq!(rdk::geometry::point_count(&payload::geometry(&cooked.payload).unwrap()), 3);
+        assert_eq!(rdk_core::geometry::point_count(&payload::geometry(&cooked.payload).unwrap()), 3);
         let inputs = node::inputs(&zone);
         let rebuilt = build::rebuild_with_inputs(&zone, &inputs);
         drop((root, zone));
@@ -5204,9 +5204,9 @@ mod lend_session_tests {
         for (index, child) in children.iter().enumerate() {
             let output = sop::session::cook(&mut session, None, &context, child).unwrap();
             let geometry = payload::geometry(&output.payload).unwrap();
-            assert_eq!(rdk::geometry::point_count(&geometry), 1);
-            assert_eq!(rdk::packed::Float3::get(rdk::geometry::positions(&geometry), 0).unwrap(),
-                rdk::packed::Float3::get(rdk::geometry::positions(&source), index as i64).unwrap());
+            assert_eq!(rdk_core::geometry::point_count(&geometry), 1);
+            assert_eq!(rdk_core::packed::Float3::get(rdk_core::geometry::positions(&geometry), 0).unwrap(),
+                rdk_core::packed::Float3::get(rdk_core::geometry::positions(&source), index as i64).unwrap());
         }
         drop(children);
         sop::session::close(&mut session);

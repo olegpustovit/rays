@@ -15,7 +15,7 @@ use std::sync::{Arc, Condvar, Mutex, Weak};
 use std::thread::JoinHandle;
 
 use rays_diagnostic::Diagnostic;
-use rdk::cancel;
+use rdk_core::cancel;
 
 use crate::context;
 use crate::node;

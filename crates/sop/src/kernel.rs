@@ -13,7 +13,7 @@ pub enum Column {
 
 pub type Runner = Box<dyn Fn(&context::T) -> Result<Column, Diagnostic> + Send + Sync>;
 pub type Prepare = Arc<dyn Fn(&[Column]) -> Result<Runner, Diagnostic> + Send + Sync>;
-pub type GeometryCapture = Arc<dyn Fn(i64) -> Option<rdk::geometry::T> + Send + Sync>;
+pub type GeometryCapture = Arc<dyn Fn(i64) -> Option<rdk_core::geometry::T> + Send + Sync>;
 
 #[derive(Clone)]
 pub struct T {
@@ -27,7 +27,7 @@ pub struct T {
 pub fn create(geometry_capture: Option<GeometryCapture>, payload_bytes: i64, prepare: Prepare) -> T {
     assert!(payload_bytes >= 0, "Kernel.create: negative payload size");
     T {
-        id: rdk::geometry::fresh_data_id(),
+        id: rdk_core::geometry::fresh_data_id(),
         bytes: payload_bytes,
         prepare,
         geometry_capture: geometry_capture.unwrap_or_else(|| Arc::new(|_| None)),

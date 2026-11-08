@@ -16,8 +16,8 @@ pub fn factories() -> Vec<Factory> {
 
 /// A generator node holding an already built geometry: the one OCaml-only source, used through
 /// `with_`.
-pub fn snapshot(geometry: &rdk::geometry::T) -> node::T {
-    let parameters = format!("data_id={};bytes={}", rdk::geometry::data_id(geometry), rdk::geometry::payload_bytes(geometry));
+pub fn snapshot(geometry: &rdk_core::geometry::T) -> node::T {
+    let parameters = format!("data_id={};bytes={}", rdk_core::geometry::data_id(geometry), rdk_core::geometry::payload_bytes(geometry));
     let geometry = geometry.clone();
     build::make_geometry(
         build::Args { parameters: parameters.into_bytes(), cook_mode: CookMode::Generator, ..build::args("snapshot") },
@@ -230,7 +230,7 @@ mod test_keyword_ports;
 mod tests {
     use super::*;
 
-    fn cook(n: &node::T) -> rdk::geometry::T {
+    fn cook(n: &node::T) -> rdk_core::geometry::T {
         let context = sop::context::create(sop::context::Options::default()).unwrap();
         let mut session = sop::session::create(8, 1_000_000).unwrap();
         let out = sop::session::cook(&mut session, None, &context, n).unwrap_or_else(|e| panic!("{}", rays_diagnostic::error_to_string(&e)));
@@ -243,21 +243,21 @@ mod tests {
     
     fn workspace_node_helpers() {
         let workspace = "(workspace shared\n    (defn size :context value [] 3)\n    (graph g :context sop (sop/grid :columns (size) :rows 2)))";
-        assert_eq!(rdk::geometry::point_count(&cook(&workspace_node(&[], workspace))), 12, "workspace definitions were not available while lowering");
+        assert_eq!(rdk_core::geometry::point_count(&cook(&workspace_node(&[], workspace))), 12, "workspace definitions were not available while lowering");
         let w = "(workspace shared\n    (graph g :context sop (sop/ext_src)))";
         let source = node(&[], "(sop/grid :columns 3 :rows 2)");
         assert!(node::ptr_eq(&workspace_node(&[("src".to_owned(), source.clone())], w), &source), "workspace external marker was not restored");
-        assert_eq!(rdk::geometry::point_count(&cook(&node(&[], "(sop/grid :columns 3 :rows 2)"))), 12, "expression helper changed");
+        assert_eq!(rdk_core::geometry::point_count(&cook(&node(&[], "(sop/grid :columns 3 :rows 2)"))), 12, "expression helper changed");
     }
 
     #[test]
     fn external_marker_is_restored_and_a_line_cooks() {
-        let line = rdk::line_geometry::points(&[(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)]).unwrap();
+        let line = rdk_ops::line_geometry::points(&[(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)]).unwrap();
         let source = snapshot(&line);
         let w = "(workspace shared
     (graph g :context sop (sop/ext_src)))";
         assert!(node::ptr_eq(&workspace_node(&[("src".to_owned(), source.clone())], w), &source), "workspace external marker was not restored");
-        assert_eq!(rdk::geometry::point_count(&cook(&node(&[], "(sop/line :points 4)"))), 4, "expression helper changed");
+        assert_eq!(rdk_core::geometry::point_count(&cook(&node(&[], "(sop/line :points 4)"))), 4, "expression helper changed");
     }
 
     #[test]

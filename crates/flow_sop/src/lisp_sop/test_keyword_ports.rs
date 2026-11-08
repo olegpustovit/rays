@@ -11,7 +11,7 @@ fn factory()->edit::Factory{
     edit::factory(args,2,Arc::new(|inputs|Ok(build::make(build::Args{inputs:inputs.to_vec(),cook_mode:CookMode::Generic,..build::args("test_field")},None,Arc::new(|_,context,inputs|{
         payload::image(&inputs[1])?;let kernel=payload::kernel(&inputs[0])?;let run=(kernel::prepare(&kernel))(&[Column::Vec3s(vec![2.,0.,0.]),Column::Floats(vec![0.])])?;
         let Column::Floats(xs)=run(context)? else{panic!("field returns floats")};
-        let geometry=rdk::line_geometry::points(&xs.into_iter().map(|x|(x,0.,0.)).collect::<Vec<_>>()).unwrap();
+        let geometry=rdk_ops::line_geometry::points(&xs.into_iter().map(|x|(x,0.,0.)).collect::<Vec<_>>()).unwrap();
         Ok(node::Cooked{payload:payload::T::Geometry(geometry),instances:None})
     })))))
 }
@@ -20,7 +20,7 @@ fn lowered(reference:bool,previous:Option<&lower::T>,text:&str)->lower::T{
     lower::workspace(Some(factories()),vec![],lower::Options{reference,compiled_ids:previous.map(|l|l.compiled_ids.clone()).unwrap_or_default(),sites:previous.map(|l|l.sites.clone()).unwrap_or_default(),..Default::default()},&parse(text)).unwrap_or_else(|d|panic!("{}",rays_diagnostic::to_string(&d)))
 }
 fn root(l:&lower::T)->node::T{let g=&l.graphs[0];edit::compile_node(&g.network.geometry,g.root.unwrap()).unwrap()}
-fn points(s:&mut session::T,domains:i64,time:f64,n:&node::T)->Vec<(f64,f64,f64)>{let c=ctx::create(ctx::Options{domains:Some(domains),time:Some(time),..Default::default()}).unwrap();let g=cook(s,&c,n);(0..rdk::geometry::point_count(&g)).map(|i|rdk::packed::Float3::get(rdk::geometry::positions(&g),i).unwrap()).collect()}
+fn points(s:&mut session::T,domains:i64,time:f64,n:&node::T)->Vec<(f64,f64,f64)>{let c=ctx::create(ctx::Options{domains:Some(domains),time:Some(time),..Default::default()}).unwrap();let g=cook(s,&c,n);(0..rdk_core::geometry::point_count(&g)).map(|i|rdk_core::packed::Float3::get(rdk_core::geometry::positions(&g),i).unwrap()).collect()}
 #[test]
 fn keyword_manifest_defaults_projection_checked_gestures(){
     let fs=factories();let cat=catalog::of_factories(manifest::VERSION,&[],None,&fs).unwrap();let(text,_)=manifest::generate(&[],None,&fs).unwrap();let(loaded,_)=flow_check::catalog::catalog_of_manifest(&text).unwrap();assert_eq!(cat,loaded);

@@ -3,7 +3,9 @@
 use std::sync::Arc;
 
 use param::Value;
-use rdk::{attribute, attribute_ops, geometry, group, packed, surface_index, transform_ops, uv_ops};
+use rdk_core::{attribute, geometry, group, packed};
+use rdk_geom::surface_index;
+use rdk_ops::{attribute_ops, transform_ops, uv_ops};
 
 use crate::context::{self, dependencies};
 use crate::decl::{self, Decl, Meta, Spec};
@@ -60,9 +62,9 @@ const REFERENCE: Choice<transform_ops::DistanceFromGeometryReference> = Choice(&
     ("Points", transform_ops::DistanceFromGeometryReference::DistanceReferencePoints),
     ("Primitives", transform_ops::DistanceFromGeometryReference::DistanceReferencePrimitives),
 ]);
-const GROUP_USE: Choice<rdk::attribute_mirror::GroupUse> = Choice(&[
-    ("Group is source", rdk::attribute_mirror::GroupUse::MirrorGroupAsSource),
-    ("Group is destination", rdk::attribute_mirror::GroupUse::MirrorGroupAsDestination),
+const GROUP_USE: Choice<rdk_ops::attribute_mirror::GroupUse> = Choice(&[
+    ("Group is source", rdk_ops::attribute_mirror::GroupUse::MirrorGroupAsSource),
+    ("Group is destination", rdk_ops::attribute_mirror::GroupUse::MirrorGroupAsDestination),
 ]);
 const MIRROR_METHOD: Choice<MirrorMethod> = Choice(&[("Plane", MirrorMethod::Plane), ("Mapping attribute", MirrorMethod::Mapping)]);
 const MIRROR_TRANSFORM: Choice<MirrorTransform> = Choice(&[
@@ -122,14 +124,14 @@ pub mod image_texels {
                         z[index] = width as f64;
                     }
                 })
-                .map_err(|e| fail(rdk::error::to_string(&e)))?;
+                .map_err(|e| fail(rdk_core::error::to_string(&e)))?;
                 let plane = |k: usize| (0..count as usize).map(|i| rgba[4 * i + k]).collect::<Vec<f64>>();
                 let values = packed::Float4::of_owned(plane(0), plane(1), plane(2), plane(3))
-                    .map_err(|e| fail(rdk::error::to_string(&e)))?;
+                    .map_err(|e| fail(rdk_core::error::to_string(&e)))?;
                 let attribute_value = attribute::create_owned("rgba", attribute::Owner::Point, attribute::Storage::Float4(values))
-                    .map_err(|e| fail(rdk::error::to_string(&e)))?;
+                    .map_err(|e| fail(rdk_core::error::to_string(&e)))?;
                 geometry_value = geometry::with_attribute(attribute_value, &geometry_value)
-                    .map_err(|e| fail(rdk::error::to_string(&e)))?;
+                    .map_err(|e| fail(rdk_core::error::to_string(&e)))?;
                 Ok(Cooked { payload: payload::T::Geometry(geometry_value), instances: None })
             }),
         ))
@@ -345,9 +347,9 @@ pub mod distance_from_geometry {
 
     #[derive(Clone, Debug)]
     pub struct Parameters {
-        pub affected_owner: rdk::group_ops::Owner,
+        pub affected_owner: rdk_ops::group_ops::Owner,
         pub affected_group: String,
-        pub reference_owner: rdk::group_ops::Owner,
+        pub reference_owner: rdk_ops::group_ops::Owner,
         pub reference_group: String,
         pub reference_kind: transform_ops::DistanceFromGeometryReference,
         pub falloff: transform_ops::SoftTransformFalloff,
@@ -405,7 +407,7 @@ pub mod distance_from_geometry {
                 ..decl::spec(
                     "affected_owner",
                     support::ELEMENT_OWNER.kind(),
-                    support::ELEMENT_OWNER.value(&rdk::group_ops::Owner::GroupPoints),
+                    support::ELEMENT_OWNER.value(&rdk_ops::group_ops::Owner::GroupPoints),
                 )
             },
             Spec {
@@ -419,7 +421,7 @@ pub mod distance_from_geometry {
                 ..decl::spec(
                     "reference_owner",
                     support::ELEMENT_OWNER.kind(),
-                    support::ELEMENT_OWNER.value(&rdk::group_ops::Owner::GroupPrimitives),
+                    support::ELEMENT_OWNER.value(&rdk_ops::group_ops::Owner::GroupPrimitives),
                 )
             },
             Spec {
@@ -553,7 +555,7 @@ pub mod attribute_mirror {
         pub owner: attribute::Owner,
         pub attributes: String,
         pub group: String,
-        pub group_use: rdk::attribute_mirror::GroupUse,
+        pub group_use: rdk_ops::attribute_mirror::GroupUse,
         pub method_: MirrorMethod,
         pub origin_x: f64,
         pub origin_y: f64,
@@ -849,15 +851,15 @@ pub mod attribute_mirror {
         let origin = rays_math::vec3::create(p.origin_x, p.origin_y, p.origin_z);
         let normal = rays_math::vec3::create(p.normal_x, p.normal_y, p.normal_z);
         let transform = match p.transform {
-            MirrorTransform::Copy => rdk::attribute_mirror::Transform::MirrorCopy,
-            MirrorTransform::Uv => rdk::attribute_mirror::Transform::MirrorUv {
+            MirrorTransform::Copy => rdk_ops::attribute_mirror::Transform::MirrorCopy,
+            MirrorTransform::Uv => rdk_ops::attribute_mirror::Transform::MirrorUv {
                 origin_u: p.uv_origin_u,
                 origin_v: p.uv_origin_v,
                 direction_u: p.uv_direction_u,
                 direction_v: p.uv_direction_v,
             },
-            MirrorTransform::Vector => rdk::attribute_mirror::Transform::MirrorVector,
-            MirrorTransform::Point => rdk::attribute_mirror::Transform::MirrorPoint,
+            MirrorTransform::Vector => rdk_ops::attribute_mirror::Transform::MirrorVector,
+            MirrorTransform::Point => rdk_ops::attribute_mirror::Transform::MirrorPoint,
         };
         let group_name = support::optional_text(&p.group);
         let output_mapping = support::optional_text(&p.output_mapping);
@@ -891,7 +893,7 @@ pub mod attribute_mirror {
                     })?),
                 };
                 let method = match method_kind {
-                    MirrorMethod::Plane => rdk::attribute_mirror::Method::MirrorByPlane { origin, normal, distance, tolerance },
+                    MirrorMethod::Plane => rdk_ops::attribute_mirror::Method::MirrorByPlane { origin, normal, distance, tolerance },
                     MirrorMethod::Mapping => {
                         let destination_group = geometry::find_group(group_owner, &mapping_destination, geometry)
                             .ok_or_else(|| {
@@ -903,13 +905,13 @@ pub mod attribute_mirror {
                                     ),
                                 )
                             })?;
-                        rdk::attribute_mirror::Method::MirrorByMapping {
+                        rdk_ops::attribute_mirror::Method::MirrorByMapping {
                             mapping_attribute: mapping_attribute.clone(),
                             destination_group,
                         }
                     }
                 };
-                let params = rdk::attribute_mirror::Params {
+                let params = rdk_ops::attribute_mirror::Params {
                     cancel: Some(Arc::clone(context::cancel_token(context))),
                     grain: Some(context::grain(context)),
                     group: resolved_group,
@@ -923,7 +925,7 @@ pub mod attribute_mirror {
                     owner,
                     method_: method,
                 };
-                match rdk::attribute_mirror::run(&params, geometry) {
+                match rdk_ops::attribute_mirror::run(&params, geometry) {
                     Ok(result) => support::cooked(result),
                     Err(error) => Err(support::structured_rdk_error(&error)),
                 }
@@ -960,7 +962,7 @@ pub mod attribute_transfer_all {
         pub blend_width: f64,
         pub falloff: TransferFalloff,
         pub uniform_bias: f64,
-        pub unmatched: rdk::attribute_transfer::Unmatched,
+        pub unmatched: rdk_ops::attribute_transfer::Unmatched,
     }
 
     pub fn from_values(v: &[Value]) -> Parameters {
@@ -1133,7 +1135,7 @@ pub mod attribute_transfer_all {
             },
             None,
             Arc::new(move |_, context, inputs| {
-                let params = rdk::attribute_transfer::AllParams {
+                let params = rdk_ops::attribute_transfer::AllParams {
                     cancel: Some(Arc::clone(context::cancel_token(context))),
                     grain: Some(context::grain(context)),
                     point_pattern: point_pattern.clone(),
@@ -1180,7 +1182,7 @@ pub mod attribute_transfer_surface {
         pub blend_width: f64,
         pub falloff: TransferFalloff,
         pub uniform_bias: f64,
-        pub unmatched: rdk::attribute_transfer::Unmatched,
+        pub unmatched: rdk_ops::attribute_transfer::Unmatched,
         pub distance_attribute: String,
         pub source_group: String,
         pub source_group_pattern: String,
@@ -1455,7 +1457,7 @@ pub mod attribute_transfer_surface {
                     grain,
                     &inputs[1],
                 )?;
-                let params = rdk::attribute_transfer::SurfaceParams {
+                let params = rdk_ops::attribute_transfer::SurfaceParams {
                     cancel: Some(Arc::clone(cancel)),
                     grain: Some(grain),
                     max_distance,
@@ -1521,7 +1523,7 @@ pub mod attribute_transfer {
         pub blend_width: f64,
         pub falloff: TransferFalloff,
         pub uniform_bias: f64,
-        pub unmatched: rdk::attribute_transfer::Unmatched,
+        pub unmatched: rdk_ops::attribute_transfer::Unmatched,
         pub source_group: String,
         pub source_group_pattern: String,
         pub source_vertex_group: String,
@@ -1836,7 +1838,7 @@ pub mod attribute_transfer {
                 )?;
                 let (source, target) = (inputs[0].clone(), inputs[1].clone());
                 let result = match owner {
-                    attribute::Owner::Point => attribute_ops::transfer_points(&rdk::attribute_transfer::SpatialParams {
+                    attribute::Owner::Point => attribute_ops::transfer_points(&rdk_ops::attribute_transfer::SpatialParams {
                         cancel: Some(Arc::clone(cancel)),
                         grain: Some(grain),
                         names: names.clone(),
@@ -1851,7 +1853,7 @@ pub mod attribute_transfer {
                         source,
                         target,
                     }),
-                    attribute::Owner::Vertex => attribute_ops::transfer_vertices(&rdk::attribute_transfer::VerticesParams {
+                    attribute::Owner::Vertex => attribute_ops::transfer_vertices(&rdk_ops::attribute_transfer::VerticesParams {
                         cancel: Some(Arc::clone(cancel)),
                         grain: Some(grain),
                         names: names.clone(),
@@ -1868,7 +1870,7 @@ pub mod attribute_transfer {
                         target,
                     }),
                     attribute::Owner::Primitive => {
-                        attribute_ops::transfer_primitives(&rdk::attribute_transfer::SpatialParams {
+                        attribute_ops::transfer_primitives(&rdk_ops::attribute_transfer::SpatialParams {
                             cancel: Some(Arc::clone(cancel)),
                             grain: Some(grain),
                             names: names.clone(),
@@ -1884,7 +1886,7 @@ pub mod attribute_transfer {
                             target,
                         })
                     }
-                    attribute::Owner::Detail => attribute_ops::transfer_detail(&rdk::attribute_transfer::DetailParams {
+                    attribute::Owner::Detail => attribute_ops::transfer_detail(&rdk_ops::attribute_transfer::DetailParams {
                         names: names.clone(),
                         pattern: pattern.clone(),
                         source,
@@ -1944,9 +1946,9 @@ mod tests {
         let texels = edit_graph::instantiate(&image_texels::factory(), &[small]).unwrap();
         let mut s = session(8);
         let g = geometry_of(&cook(&mut s, 1, &texels));
-        assert_eq!(rdk::geometry::point_count(&g), 12);
-        let rgba = rdk::geometry::find_attribute(rdk::attribute::Owner::Point, "rgba", &g).expect("rgba");
-        assert!(matches!(rdk::attribute::View::storage(&rgba), Ok(rdk::attribute::Storage::Float4(_))));
+        assert_eq!(rdk_core::geometry::point_count(&g), 12);
+        let rgba = rdk_core::geometry::find_attribute(rdk_core::attribute::Owner::Point, "rgba", &g).expect("rgba");
+        assert!(matches!(rdk_core::attribute::View::storage(&rgba), Ok(rdk_core::attribute::Storage::Float4(_))));
         crate::session::close(&mut s);
     }
 
@@ -2006,7 +2008,7 @@ mod tests {
         .unwrap();
         let mut s = session(8);
         let g = geometry_of(&cook(&mut s, 1, &n));
-        assert_eq!(rdk::geometry::point_count(&g), 9);
+        assert_eq!(rdk_core::geometry::point_count(&g), 9);
         crate::session::close(&mut s);
     }
 }

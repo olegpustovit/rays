@@ -16,7 +16,7 @@ fn resolved_label(operation: &str, label: Option<&str>) -> String {
 }
 
 /// `cook ~context geometries`; a failure message becomes an `<operation>_failed` diagnostic.
-pub type PlainCook = Arc<dyn Fn(&context::T, &[rdk::geometry::T]) -> Result<rdk::geometry::T, String> + Send + Sync>;
+pub type PlainCook = Arc<dyn Fn(&context::T, &[rdk_core::geometry::T]) -> Result<rdk_core::geometry::T, String> + Send + Sync>;
 
 pub struct PlainArgs {
     pub label: Option<String>,
@@ -87,7 +87,7 @@ pub fn node(label: Option<&str>, operation: &str, schema: Arc<Schema>, values: V
 }
 
 /// `cook ~parameters ~context geometries`.
-pub type Cook = Arc<dyn Fn(&[Value], &context::T, &[rdk::geometry::T]) -> Result<rdk::geometry::T, String> + Send + Sync>;
+pub type Cook = Arc<dyn Fn(&[Value], &context::T, &[rdk_core::geometry::T]) -> Result<rdk_core::geometry::T, String> + Send + Sync>;
 
 pub struct CreateArgs {
     pub label: Option<String>,

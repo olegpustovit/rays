@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use rdk::{attribute, cancel, geometry, packed};
+use rdk_core::{attribute, cancel, geometry, packed};
 
 use crate::context::{self, dependencies};
 use crate::node::{self, build, CookMode};
@@ -111,7 +111,7 @@ fn exact(entries: i64, prepare: &dyn Fn(&mut session::T), graph: &node::T) -> (s
 fn no_prepare(_: &mut session::T) {}
 
 fn geometry_fixture() -> geometry::T {
-    rdk::line_geometry::points(&[(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)]).unwrap()
+    rdk_ops::line_geometry::points(&[(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)]).unwrap()
 }
 
 /// A positions-changing transform that allocates a new plane (a stand-in for noise_displace).
@@ -471,7 +471,7 @@ fn shared_packed_materialization_replays_exactly() {
 
 #[test]
 fn zone_roots_fork_and_stay_exact() {
-    let points = rdk::line_geometry::points(&[(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (2.0, 0.0, 0.0), (3.0, 0.0, 0.0)]).unwrap();
+    let points = rdk_ops::line_geometry::points(&[(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (2.0, 0.0, 0.0), (3.0, 0.0, 0.0)]).unwrap();
     let common = snapshot(&fixture());
     let tally = calls();
     let body: zone::Body = Arc::new(move |inputs, _| {

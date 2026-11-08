@@ -1,8 +1,9 @@
 //! lib/sop/test_parallel_exact.ml's 84 registered sections map to 97 enabled tests: the first 14
 //! use generated_* names, attributes expands into 14 attributes_* checks, all others keep source names.
 //! Original fixture scales, one/four domains, grain 97 and seed 42 are retained.
-use rdk::{attribute, edge_group, geometry as geo, group, line_geometry, packed, topology, topology_index};
-use rdk::attribute::{Owner, Storage};
+use rdk_core::{attribute, edge_group, geometry as geo, group, packed, topology, topology_index};
+use rdk_ops::line_geometry;
+use rdk_core::attribute::{Owner, Storage};
 use sop::{context, node, payload, session};
 
 fn cook(domains: i64, graph: &node::T) -> geo::T {

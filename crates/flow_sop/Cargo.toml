@@ -18,7 +18,8 @@ rays_math = { path = "../rays_math" }
 parallel = { path = "../parallel" }
 mem = { path = "../mem" }
 cfmt = { path = "../cfmt" }
-rdk = { path = "../rdk" }
+rdk_geom = { path = "../rdk_geom" }
+rdk_ops = { path = "../rdk_ops" }
 input = { path = "../input" }
 rdk_core = { path = "../rdk_core" }
 

@@ -73,8 +73,8 @@ fn a_lowered_graph_compiles_and_cooks() {
     assert_eq!(lower::objects(&l).len(), 1);
     assert!(edit::find(&l.graphs[0].network.geometry, l.graphs[0].root.unwrap()).is_some());
     let g = cook_once(1, &node);
-    assert_eq!(rdk::geometry::point_count(&g), 5);
-    assert!(rdk::geometry::find_attribute(rdk::attribute::Owner::Primitive, lower::source_attribute(), &g).is_some() || rdk::geometry::primitive_count(&g) == 0);
+    assert_eq!(rdk_core::geometry::point_count(&g), 5);
+    assert!(rdk_core::geometry::find_attribute(rdk_core::attribute::Owner::Primitive, lower::source_attribute(), &g).is_some() || rdk_core::geometry::primitive_count(&g) == 0);
 }
 
 #[test]

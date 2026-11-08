@@ -10,10 +10,10 @@ use flow_syntax::syntax::{self, Node};
 use flow_syntax::ty::{self, Ty};
 use flow_syntax::value::{Value, source_value};
 use rays_diagnostic::Diagnostic;
-use rdk::attribute::{self, Owner, Storage};
-use rdk::geometry as geo;
-use rdk::packed::Float3;
-use rdk::{edge_group, group, topology, topology_index};
+use rdk_core::attribute::{self, Owner, Storage};
+use rdk_core::geometry as geo;
+use rdk_core::packed::Float3;
+use rdk_core::{edge_group, group, topology, topology_index};
 use rdk_core::element_selection as selection;
 use sop::context::Options as ContextOptions;
 use sop::edit_graph as edit;
@@ -21,8 +21,8 @@ use sop::node::{self, build, CookMode};
 use sop::{context as sctx, payload, session};
 use std::sync::Arc;
 
-pub(super) fn ok<R>(r: Result<R, rdk::error::T>) -> R {
-    r.unwrap_or_else(|e| panic!("{}", rdk::error::to_string(&e)))
+pub(super) fn ok<R>(r: Result<R, rdk_core::error::T>) -> R {
+    r.unwrap_or_else(|e| panic!("{}", rdk_core::error::to_string(&e)))
 }
 
 pub(super) fn flow_ok<R>(r: Result<R, Diagnostic>) -> R {
@@ -249,9 +249,9 @@ fn wildcard_names_and_refusals() {
             g = native_write(None, native_owner, name, &vec![1; count(&geometry, native_owner) as usize], &g);
         }
         for pattern in ["", "*", "wall*", "wall?", "wall_[a-b]", "wall_[!0-9]", "* ^wall*", "^wall* wall_b", "literal\\*", "\u{17e}*"] {
-            let compiled = ok(rdk::attribute_pattern::compile(pattern));
+            let compiled = ok(rdk_core::attribute_pattern::compile(pattern));
             let printed = flow_syntax::lisp::quote_string(pattern.as_bytes());
-            let expected: Vec<Vec<u8>> = names.iter().filter(|n| rdk::attribute_pattern::matches(&compiled, n)).map(|n| n.as_bytes().to_vec()).collect();
+            let expected: Vec<Vec<u8>> = names.iter().filter(|n| rdk_core::attribute_pattern::matches(&compiled, n)).map(|n| n.as_bytes().to_vec()).collect();
             exact(&g, &format!("(sop/group_names geo {printed} :owner {owner})"), &Value::Text_array(Arc::new(expected)));
         }
     }

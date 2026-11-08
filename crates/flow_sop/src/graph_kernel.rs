@@ -4,11 +4,11 @@
 //! the record `sop/adjacency` returns (or a CSR row record for colouring).
 use flow_eval::Value;
 use rays_diagnostic::Diagnostic;
-use rdk::error as rdk_error;
-use rdk::forest;
-use rdk::graph_color;
-use rdk::poly_path;
-use rdk::shortest_paths;
+use rdk_core::error as rdk_error;
+use rdk_ops::forest;
+use rdk_ops::graph_color;
+use rdk_ops::poly_path;
+use rdk_ops::shortest_paths;
 use std::sync::Arc;
 
 use crate::port::error as refuse;
