@@ -1606,21 +1606,12 @@ fn function_elements(value: &Value) -> Vec<FnId> {
 }
 
 
-pub struct CallEnv {
-    pub gpu: Gpu::Config,
-    pub lower_call: Arc<dyn Fn(&Gpu::Config, Vec<(FnId, i64)>, Vec<Factory>, Vec<(String, Vec<(String, Value)>)>, Workspace) -> R<T> + Send + Sync>,
-    pub record_profile: Arc<dyn Fn(&Arc<Profile::T>) + Send + Sync>,
-    pub checked: Arc<Workspace>,
-    pub provenance: Option<i64>,
-    pub factories: Vec<Factory>,
-    pub def_context_use: Arc<dyn Fn() -> Arc<Vec<bool>> + Send + Sync>,
-}
-
 /// Builds the body of one Lisp-node call: validation, then one lowering of the body over the
 /// node's parameters, slots and forwarded captures.
 #[allow(clippy::too_many_arguments)]
 pub fn build_call(
-    env: &CallEnv,
+    env: &CallEnvShared,
+    provenance: Option<i64>,
     definition: &NodeDefinition,
     functions: &[(String, Value)],
     bindings: &[(String, Vec<usize>)],
@@ -1667,7 +1658,7 @@ pub fn build_call(
             .collect()
     };
     let capture_factories = make_capture_factories(&[]);
-    let mut body = ck::specialize(env.provenance, context, label, &definition.body)?;
+    let mut body = ck::specialize(provenance, context, label, &definition.body)?;
     let mut builder = TermBuilder::new();
     let blank = builder.import_form(&empty_form());
     let body_id = builder.import(&body.body);
@@ -1763,7 +1754,7 @@ pub fn build_call(
     graphs.extend(validations.iter().cloned());
     let library = Workspace {
         graphs: graphs.into(),
-        defs: checked.defs.iter().zip((env.def_context_use)().iter())
+        defs: checked.defs.iter().zip(env.def_context_use().iter())
             .filter_map(|(def, uses)| if !reached_has(def) { None } else { Some(if *uses { ck::specialize(None, context, label, def).unwrap_or_else(|_| def.clone()) } else { def.clone() }) })
             .collect::<Vec<_>>().into(),
         nodes: checked.nodes.iter().filter(|d| d.kind.qualified != definition.kind.qualified).cloned().collect::<Vec<_>>().into(),
@@ -1868,8 +1859,8 @@ pub fn build_call(
         let mut call_factories: Vec<Factory> = capture_factories.iter().map(|(_, f)| f.clone()).collect();
         call_factories.extend(geometry_captures.iter().map(|(_, _, _, f)| f.clone()));
         call_factories.extend(env.factories.iter().cloned());
-        let lowered = (env.lower_call)(
-            &env.gpu,
+        let lowered = env.lower_call(
+            provenance,
             kernel_bindings,
             call_factories,
             vec![body_overrides],
@@ -1880,7 +1871,9 @@ pub fn build_call(
                 ..library.clone()
             },
         )?;
-        (env.record_profile)(&lowered.profile);
+        if let Some(record) = &env.o.on_profile {
+            record(&lowered.profile);
+        }
         let [graph] = lowered.graphs.as_slice() else {
             return Err(fail("E_LOWER", "A Lisp node body needs one SOP graph"));
         };
@@ -1960,7 +1953,7 @@ pub fn build_call(
             topology: if preserved { Topology::Preserved } else { Topology::Changed },
             exact: definition.kind.facts.as_ref().is_none_or(|f| f.exact) && owned.iter().all(|n| n.facts.exact),
         };
-        let gpu = env.gpu.clone();
+        let gpu = env.o.gpu.clone();
         let network = graph.network.clone();
         let body_fn: Arc<dyn Fn(&sctx::T) -> R<node::T> + Send + Sync> = Arc::new(move |context: &sctx::T| {
             if !driven {
@@ -4201,32 +4194,7 @@ fn lisp_factory(shared: &Arc<CallEnvShared>, kernel_source: &Lazy, error: Option
             if let (Some(diagnostic), true) = (&error2, failed) {
                 return Ok(lisp_body_failed(&shared.checked, definition2, inputs, parameters, diagnostic.clone()));
             }
-            let o = shared.o.clone();
-            let lower_call: Arc<dyn Fn(&Gpu::Config, Vec<(FnId, i64)>, Vec<Factory>, Vec<(String, Vec<(String, Value)>)>, Workspace) -> R<T> + Send + Sync> = {
-                Arc::new(move |gpu: &Gpu::Config, kernel_bindings, factories, inputs, checked| {
-                    lower_checked(
-                        factories,
-                        Options { reference: o.reference, gpu: gpu.clone(), strict_body: true, defer_body_errors: true, kernel_bindings, provenance_tags: o.provenance_tags, tag_base: provenance.unwrap_or(0), on_profile: o.on_profile.clone(), inputs: Some(inputs), ..Options::default() },
-                        checked,
-                    )
-                })
-            };
-            let on_profile = shared.o.on_profile.clone();
-            let shared2 = shared.clone();
-            let env = CallEnv {
-                gpu: shared.o.gpu.clone(),
-                lower_call,
-                record_profile: Arc::new(move |p| {
-                    if let Some(record) = &on_profile {
-                        record(p)
-                    }
-                }),
-                checked: shared.checked.clone(),
-                provenance,
-                factories: shared.factories.clone(),
-                def_context_use: Arc::new(move || shared2.def_context_use()),
-            };
-            build_call(&env, definition2, &functions2, &bindings2, label, context, inputs, parameters)
+            build_call(&shared, provenance, definition2, &functions2, &bindings2, label, context, inputs, parameters)
         });
         ln::node(
             &ln::NodeOptions {
@@ -4272,6 +4240,16 @@ fn lisp_factory(shared: &Arc<CallEnvShared>, kernel_source: &Lazy, error: Option
 }
 
 impl CallEnvShared {
+    /// One lowering of a Lisp-node body over its parameters, slots and forwarded captures.
+    fn lower_call(&self, provenance: Option<i64>, kernel_bindings: Vec<(FnId, i64)>, factories: Vec<Factory>, inputs: Vec<(String, Vec<(String, Value)>)>, checked: Workspace) -> R<T> {
+        let o = &self.o;
+        lower_checked(
+            factories,
+            Options { reference: o.reference, gpu: o.gpu.clone(), strict_body: true, defer_body_errors: true, kernel_bindings, provenance_tags: o.provenance_tags, tag_base: provenance.unwrap_or(0), on_profile: o.on_profile.clone(), inputs: Some(inputs), ..Options::default() },
+            checked,
+        )
+    }
+
     /// A helper that names no context operator is its own specialization: shared across instances.
     fn def_context_use(&self) -> Arc<Vec<bool>> {
         self.def_context_use.get_or_init(|| Arc::new(self.checked.defs.iter().map(ck::uses_context).collect())).clone()
