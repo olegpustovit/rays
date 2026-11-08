@@ -136,6 +136,13 @@ Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s
 
 ## Session log
 
+- 2026-11-08: final default qualification, `RAYS_T_TIMEOUT=7200 cargo t --workspace` at `1553dc64`: 2,823 of 2,839 pass, 305 s wall.
+  - Three assertion failures, all pre-existing:
+    - `e2e::lib_flow_gpu_shaders_indices`: fmt golden stale since `4ed6baf8` (pre-plan); refreshed in `9598a3d2`.
+    - `scene_command::test_shape2::path_fills_and_strokes_match_ocaml`: five round-stroke values are now correctly rounded on macOS 27 libm (sin(pi) = 1.2246467991473532e-16); code unchanged since the port, updated in `9b48aa1e`.
+    - `sdl3::cocoa_layer_ownership_and_trackpad_phases`: this SSH/tmux session's launchctl manager is "Background", so there is no window server ("cocoa not available"). It now skips with a printed reason (`8137a024`) and still runs in a GUI session.
+  - Six `test_parallel_exact` cases sit at 5.00-5.03 s (combining_general_backbone, combining_named_count, modeling_curve_samples, subdivision_all_edge_source/detail_source/hole_indices). This is the interpreter-bound debug work recorded in the caching pass.
+
 - 2026-11-08: caching/perf pass (pre-existing slow cases). Per-call region recompile was only 1-8% of profiles; the real costs were O(n²) node work, failed compiles inside an iterate loop and whole-catalog qualification on every lowering. All changes are bit-identical; no goldens or assertions changed.
   - Commits:
     - `0e452885`: group_edges incident rounds only when angle-filtered.
