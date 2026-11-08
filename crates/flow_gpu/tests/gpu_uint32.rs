@@ -284,19 +284,19 @@ fn holders() {
     tp::ok((first.settle)());
     let live = run::integers(&first);
     assert!(live.resident().is_some());
-    assert_eq!(run::Private::readback_bytes(&r), 0);
+    assert_eq!(run::private::readback_bytes(&r), 0);
     let (_, count, valid, unpin) = run::pin_integers(&neutral).expect("pin");
     assert!(count == 1025 && valid());
     let foreign = std::thread::spawn(move || run::pin_integers(&neutral).is_none());
     assert!(foreign.join().unwrap());
     let second = dispatch();
     tp::ok((second.settle)());
-    assert_eq!(run::Private::readback_bytes(&r), 0);
+    assert_eq!(run::private::readback_bytes(&r), 0);
     for _ in 0..2 {
         assert_eq!((first.materialise)().unwrap(), expected);
     }
-    assert_eq!(run::Private::readback_bytes(&r), 1025 * 4);
-    assert_eq!(run::Private::materialisations(&r), 1);
+    assert_eq!(run::private::readback_bytes(&r), 1025 * 4);
+    assert_eq!(run::private::materialisations(&r), 1);
     assert!(live.resident().is_none(), "a materialised stream retained an opaque device input");
     assert!(valid());
     unpin();
@@ -317,7 +317,7 @@ fn holders() {
         assert_eq!(w.join().unwrap(), expected);
     }
     assert_eq!((second.materialise)().unwrap(), expected);
-    assert_eq!(run::Private::readback_bytes(&r), 2 * 1025 * 4);
+    assert_eq!(run::private::readback_bytes(&r), 2 * 1025 * 4);
     // an invalid word is never published
     let bad = program("(int/add -1 (int/mod (frame/index) 1))");
     let r = run::create(None, &lease, &pipes, &u32_kernel(&bad));
@@ -325,7 +325,7 @@ fn holders() {
     let holder = tp::ok(run::keep_uint32(&o, None));
     let read = (holder.materialise)();
     assert!(read.is_err(), "invalid uint32 holder published");
-    assert_eq!(run::Private::readback_bytes(&r), 0);
+    assert_eq!(run::private::readback_bytes(&r), 0);
     run::close(&r, true);
     pipelines::close(&pipes);
 }
@@ -409,7 +409,7 @@ fn topology() {
         let offsets = buffer(&[0, 1025]);
         let vb = run::buffer(&output, None).expect("buffer");
         let result = host::validate_topology(&h, (&vb, run::count(&output)), (&offsets, 2), (&small, 1), 1025, max);
-        assert_eq!(run::Private::readback_bytes(&r), 0);
+        assert_eq!(run::private::readback_bytes(&r), 0);
         match (result, valid) {
             (Ok(()), true) => {}
             (Err(d), false) => {
@@ -445,12 +445,12 @@ fn outputs() {
         let r = run::create(None, &lease, &pipes, &msl);
         let inputs = prepare(&packed, 0.0);
         let output = tp::ok(run::dispatch(&r, &run::Options::default(), None, None, &inputs));
-        let before = run::Private::readback_bytes(&r);
+        let before = run::private::readback_bytes(&r);
         match run::keep(&output, None) {
             Err(d) => assert_eq!(d.code, "E_GPU_UINT32_KEEP"),
             Ok(_) => panic!("uint32 buffer escaped as float32 storage"),
         }
-        assert_eq!(run::Private::readback_bytes(&r), before);
+        assert_eq!(run::private::readback_bytes(&r), before);
         let expected = force_strict(&packed, 0.0);
         let source = run::buffer(&output, None).expect("source");
         let consume = |packed: &packed::T, msl: &emit::Kernel, bound: &dyn Fn(i64) -> Option<b::Buffer>, bound_table: &dyn Fn(i64) -> Option<(b::Buffer, i64)>| {
@@ -490,12 +490,12 @@ fn outputs() {
         let gk = tp::ok(emit::kernel(&emit::Options { fast: true, uint32_tables: vec![u], uint32_outputs: vec![0], ..Default::default() }, &gather));
         let (s3, n) = (source.clone(), inputs.count);
         consume(&gather, &gk, &|_| None, &move |index| if index == u { Some((s3.clone(), n)) } else { None });
-        assert_eq!(run::Private::readback_bytes(&r), before);
+        assert_eq!(run::private::readback_bytes(&r), before);
         assert_eq!(format!("{:?}", tp::ok(run::readback(&output, None))), format!("{expected:?}"));
-        assert_eq!(run::Private::readback_bytes(&r), before + inputs.count * 4);
+        assert_eq!(run::private::readback_bytes(&r), before + inputs.count * 4);
         let planes = tp::ok(run::planes(&output, None));
         assert_eq!(planes, vec![ints(&expected).iter().map(|v| *v as f64).collect::<Vec<_>>()]);
-        assert_eq!(run::Private::status_reads(&r), 1);
+        assert_eq!(run::private::status_reads(&r), 1);
         let empty = tp::ok(run::dispatch(&r, &run::Options::default(), None, None, &phost::Inputs { count: 0, ..inputs.clone() }));
         assert_eq!(ints(&tp::ok(run::readback(&empty, None))), Vec::<i64>::new());
         assert_eq!(tp::ok(run::planes(&empty, None)), vec![Vec::<f64>::new()]);
@@ -577,7 +577,7 @@ fn resident_inputs() {
         let out = tp::ok(kernel.run(&inputs));
         let result = tp::ok(kernel.readback(&out));
         assert_eq!(result, Value::Floats(1, Arc::new(vec![1.; 1025])), "resident gather={gather}");
-        assert_eq!(run::Private::readback_bytes(&r), 0, "consumer read its integer producer back");
+        assert_eq!(run::private::readback_bytes(&r), 0, "consumer read its integer producer back");
     }
     (holder.release)(false);
     host::close(&h);

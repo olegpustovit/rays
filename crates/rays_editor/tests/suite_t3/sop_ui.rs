@@ -65,7 +65,7 @@ pub fn reset_context_symbol() {
 }
 
 pub fn wire_color() {
-    let wire = rays_editor::Renderer::wire_color;
+    let wire = rays_editor::editor_renderer::wire_color;
     assert!(wire(&rays_math::color::rgb(250, 250, 250)) == rays_math::color::hex_exn("#285f77").unwrap());
     assert!(wire(&rays_math::color::rgb(8, 8, 10)) == rays_math::color::hex_exn("#bed7e1").unwrap());
 }

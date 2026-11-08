@@ -408,7 +408,7 @@ fn holder_frames() {
 }
 
 fn orrery_frames() {
-    use rays_editor::{editor,workspace,Timeline};
+    use rays_editor::{editor,workspace,timeline};
     assert!(crate::common::gpu(),"native GPU required");
     let source=std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"),"/../../sketches/ws_orrery.rays")).unwrap();
     let doc=workspace::load(None,Vec::new(),None,&source).unwrap_or_else(|d|panic!("{d:?}"));
@@ -428,7 +428,7 @@ fn orrery_frames() {
         rays::canvas::render(Some(1),&canvas,&editor::scene(&editor,&f)).unwrap();
         editor=editor::after_present(editor,&f);
     }
-    Rc::make_mut(&mut editor.core).timeline=Timeline::toggle_pause(&editor.core.timeline).0;
+    Rc::make_mut(&mut editor.core).timeline=timeline::toggle_pause(&editor.core.timeline).0;
     let mut f=frame(31); f.input.dt=0.;
     editor=editor::update(editor,&f);
     rays::canvas::render(Some(1),&canvas,&editor::scene(&editor,&f)).unwrap();

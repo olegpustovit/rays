@@ -293,12 +293,12 @@ pub fn run_panel_states() {
         (None, None) => true,
         _ => false,
     };
-    r.e = editor::set_renderer(r.e.clone(), rays_editor::Renderer::Mode::Wireframe);
+    r.e = editor::set_renderer(r.e.clone(), rays_editor::editor_renderer::Mode::Wireframe);
     r.step(target, vec![]);
-    check(editor::renderer(&r.e) == rays_editor::Renderer::Mode::Wireframe && same(&r), "the shared wireframe choice recooked the geometry");
-    r.e = editor::set_renderer(r.e.clone(), rays_editor::Renderer::Mode::Raster);
+    check(editor::renderer(&r.e) == rays_editor::editor_renderer::Mode::Wireframe && same(&r), "the shared wireframe choice recooked the geometry");
+    r.e = editor::set_renderer(r.e.clone(), rays_editor::editor_renderer::Mode::Raster);
     r.step(target, vec![]);
-    check(editor::renderer(&r.e) == rays_editor::Renderer::Mode::Raster && same(&r), "the shared raster choice recooked the geometry");
+    check(editor::renderer(&r.e) == rays_editor::editor_renderer::Mode::Raster && same(&r), "the shared raster choice recooked the geometry");
     r.close();
     let _ = std::fs::remove_dir_all(&directory);
 }

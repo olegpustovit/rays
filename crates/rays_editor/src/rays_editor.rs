@@ -10,16 +10,11 @@
 use editor_document::lowering;
 
 pub use editor_document::kinds::Window as window;
-pub use editor_document::workspace_doc as Workspace_doc;
-pub use crate::editor_renderer as Renderer;
-pub use crate::source_file as Source;
-pub use crate::timeline as Timeline;
-pub use editor_document::settings as Settings;
 
 use editor_document::kinds;
 use sop::edit_graph::Factory;
 
-/// The catalog a workspace text is checked against (`Workspace_doc::of_text`): the SOP factories
+/// The catalog a workspace text is checked against (`workspace_doc::of_text`): the SOP factories
 /// (default `sop::nodes::factories`) plus the scene, world and settings kinds generated from the
 /// editor's schemas.
 pub fn workspace_catalog(factories: Option<&[Factory]>) -> Result<std::sync::Arc<flow_check::catalog::Catalog>, rays_diagnostic::Diagnostic> {

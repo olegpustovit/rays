@@ -51,7 +51,7 @@ pub fn check(root_relative: &str) {
     flow_sop::lower::install_hooks();
     let path = repo_root().join(root_relative);
     let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{root_relative}: {e}"));
-    let imports = rays_editor::Source::read_imports(path.to_str().unwrap(), &text).unwrap_or_else(|ds| panic!("{root_relative}: {}", diag_text(&ds)));
+    let imports = rays_editor::source_file::read_imports(path.to_str().unwrap(), &text).unwrap_or_else(|ds| panic!("{root_relative}: {}", diag_text(&ds)));
     let workspace = rays_editor::workspace::load(None, imports, None, &text).unwrap_or_else(|ds| panic!("{root_relative}: {}", diag_text(&ds)));
     let inputs = (*workspace.inputs).clone();
     let evaluated = E::static_with(&workspace.checked, true, Some(&inputs), None).unwrap_or_else(|d| panic!("{root_relative}: {}", rays_diagnostic::to_string(&d)));

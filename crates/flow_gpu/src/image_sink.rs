@@ -257,6 +257,6 @@ pub fn texture_creations(t: &T) -> i64 {
     t.0.textures.get()
 }
 
-pub mod Private {
+pub mod private {
     pub use super::create_owned;
 }

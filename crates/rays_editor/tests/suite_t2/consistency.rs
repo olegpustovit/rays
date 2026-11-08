@@ -382,14 +382,14 @@ fn live_lights() {
         let prepared = editor::prepared(e);
         let before_layers = layers(e);
         let lights = editor::lights(e);
-        let before_time = rays_editor::Timeline::time(&editor::timeline(e));
+        let before_time = rays_editor::timeline::time(&editor::timeline(e));
         let mut live = frame(2);
         live.input.dt = 2.;
         upd(e, |e| editor::update(e, &live));
         assert!(same_ws(&editor::workspace(e), &source) && editor::undo_label(e).is_none(), "timeline lighting changed authored state or history");
         assert!(prepared.is_some() && editor::prepared(e).is_some(), "timeline lighting re-prepared geometry");
         assert!(format!("{:?}", editor::lights(e)) != format!("{:?}", lights) && layers(e) != before_layers, "timeline lighting did not reach staged rendering");
-        assert_eq!(rays_editor::Timeline::time(&editor::timeline(e)), before_time + 2., "live lighting used runtime time instead of the editor timeline");
+        assert_eq!(rays_editor::timeline::time(&editor::timeline(e)), before_time + 2., "live lighting used runtime time instead of the editor timeline");
         let frozen = |n: i64| {
             let mut f = frame(n);
             f.input.dt = 0.;

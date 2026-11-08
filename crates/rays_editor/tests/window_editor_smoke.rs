@@ -43,7 +43,7 @@ fn open_text(text: &str, imports: Vec<(String, String)>) -> editor::Editor {
 fn open_sketch(name: &str) -> editor::Editor {
     let path = format!("{}/../../sketches/{name}", env!("CARGO_MANIFEST_DIR"));
     let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
-    let imports = rays_editor::Source::read_imports(&path, &text).unwrap_or_else(|d| panic!("{d:?}"));
+    let imports = rays_editor::source_file::read_imports(&path, &text).unwrap_or_else(|d| panic!("{d:?}"));
     open_text(&text, imports)
 }
 

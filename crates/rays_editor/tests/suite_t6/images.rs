@@ -862,7 +862,7 @@ fn native_workspace_gpu_images() {
     let initial = text(65, 17, "[uv.x uv.y bias 1]");
     std::fs::write(&source, &initial).unwrap();
     let doc = load(&initial);
-    let owner = RefCell::new(editor::create(options_d1(), &doc, Some(rays_editor::Source::at(source.to_str().unwrap(), &editor_document::lowering::sha256(&initial))), editor::prepare_fn(), editor::draw_fn()).unwrap());
+    let owner = RefCell::new(editor::create(options_d1(), &doc, Some(rays_editor::source_file::at(source.to_str().unwrap(), &editor_document::lowering::sha256(&initial))), editor::prepare_fn(), editor::draw_fn()).unwrap());
     editor::private::gpu_qualification(&owner.borrow());
     let value = || {
         let plan = editor::private::image_plan(&owner.borrow());
@@ -979,7 +979,7 @@ fn native_retained_canvas() {
     };
     let initial = text(None, 65, 17, "(* t 16)");
     std::fs::write(&source, &initial).unwrap();
-    let owner = RefCell::new(editor::create(options_d1(), &load(&initial), Some(rays_editor::Source::at(source.to_str().unwrap(), &editor_document::lowering::sha256(&initial))), editor::prepare_fn(), editor::draw_fn()).unwrap());
+    let owner = RefCell::new(editor::create(options_d1(), &load(&initial), Some(rays_editor::source_file::at(source.to_str().unwrap(), &editor_document::lowering::sha256(&initial))), editor::prepare_fn(), editor::draw_fn()).unwrap());
     let destination = rays::canvas::create(65, 17).unwrap();
     let value = || editor::private::image_plan(&owner.borrow()).instances.iter().find(|i| i.graph == "rendered").expect("instance").result.clone();
     let exact = |time: f64| ok(payload_of(&owner.borrow(), &value(), Some(&live(time))));

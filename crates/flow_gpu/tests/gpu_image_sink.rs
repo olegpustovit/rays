@@ -246,8 +246,8 @@ fn image_sink_transactions() {
     assert!(s::texture(&recovered).is_none() && b::texture_destroyed(&first_texture));
     assert!(s::texture(&resized).is_some());
     assert_eq!((st.reads.get(), st.texture_reads.get()), (1, 0));
-    assert_eq!(run::Private::status_reads(&runner), st.reads.get());
-    assert_eq!(run::Private::readback_bytes(&runner), 0);
+    assert_eq!(run::private::status_reads(&runner), st.reads.get());
+    assert_eq!(run::private::readback_bytes(&runner), 0);
     let scalar = tp::fixtures(None, 195).into_iter().find(|(n, _)| n == "arithmetic").unwrap().1;
     let scalar_run = run::create_owned(None, &device, &queue, &cache, &tp::ok(emit::kernel(&Default::default(), &scalar)));
     let values = tp::ok(phost::prepare(&scalar, &Default::default(), &input::at_time(0.5)));

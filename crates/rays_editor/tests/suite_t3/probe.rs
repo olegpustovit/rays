@@ -285,7 +285,7 @@ pub fn off_display() {
     let object_id = objects[0].0;
     let mut frame = super::t3c::frame_at((0., 0.), vec![], 0);
     frame.input.dt = 0.;
-    let updated = cook::update(None, None, false, &[(object_id, shown), (object_id, orphan)], &rays_editor::pick::Set::default(), None, &cook, &super::cook_t::none_settings(), &objects.iter().map(|(i, n, d)| (*i, n, *d)).collect::<Vec<_>>(), None, param::Effects::default(), &[], &rays_editor::Timeline::create(), &frame, None);
+    let updated = cook::update(None, None, false, &[(object_id, shown), (object_id, orphan)], &rays_editor::pick::Set::default(), None, &cook, &super::cook_t::none_settings(), &objects.iter().map(|(i, n, d)| (*i, n, *d)).collect::<Vec<_>>(), None, param::Effects::default(), &[], &rays_editor::timeline::create(), &frame, None);
     check(updated.edit_error.is_none(), "the probed nodes failed the display");
     let counted = |node: i64| cook::geometry(&updated.cook, object_id, node).cloned();
     check(counted(orphan).is_some_and(|g: Geometry| g.prims > 0), "a node off the display has no count");

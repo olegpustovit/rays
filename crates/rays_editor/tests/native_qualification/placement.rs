@@ -213,10 +213,10 @@ fn chain_counterexamples() {
             sop::session::close(&mut session);
         }
         let evidence = &config.evidence;
-        flow_sop::attribute_kernel::Display_sink::observe(evidence,false,1_000_000,1.);
-        let base = flow_sop::attribute_kernel::Display_sink::rates(evidence).0;
-        for seconds in [2.,1.,3.] {flow_sop::attribute_kernel::Display_sink::observe_draw(evidence,1_000_000,seconds);}
-        assert!((flow_sop::attribute_kernel::Display_sink::rates(evidence).0-base-1e-6).abs()<=1e-12);
+        flow_sop::attribute_kernel::display_sink::observe(evidence,false,1_000_000,1.);
+        let base = flow_sop::attribute_kernel::display_sink::rates(evidence).0;
+        for seconds in [2.,1.,3.] {flow_sop::attribute_kernel::display_sink::observe_draw(evidence,1_000_000,seconds);}
+        assert!((flow_sop::attribute_kernel::display_sink::rates(evidence).0-base-1e-6).abs()<=1e-12);
     });
 }
 fn retained_generations() {

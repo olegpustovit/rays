@@ -8,7 +8,7 @@ use editor_document::workspace_doc as wd;
 use flow_graph::flow_edit::Op;
 use input::{Event, Key, MouseButton};
 use pxui_shell::layout;
-use rays_editor::{editor, Renderer};
+use rays_editor::{editor, editor_renderer};
 
 pub const CASES: &[(&str, fn())] = &[
     ("consistency_root_viewport", root_viewport),
@@ -69,15 +69,15 @@ fn root_viewport() {
     );
     with_editor(&ws, None, |e| {
         upd(e, |e| step(e, 2));
-        assert!(editor::renderer(e) == Renderer::Mode::Wireframe, "the viewport did not take the root's renderer");
+        assert!(editor::renderer(e) == editor_renderer::Mode::Wireframe, "the viewport did not take the root's renderer");
         let settings = editor::render_settings(e);
         assert!(settings.width == 800 && settings.height == 600 && settings.max_spp == 32, "the render settings are not the root's");
-        upd(e, |e| step(editor::set_renderer(e, Renderer::Mode::Raster), 3));
-        assert!(editor::renderer(e) == Renderer::Mode::Wireframe, "a viewport request overrode the root's renderer");
+        upd(e, |e| step(editor::set_renderer(e, editor_renderer::Mode::Raster), 3));
+        assert!(editor::renderer(e) == editor_renderer::Mode::Wireframe, "a viewport request overrode the root's renderer");
     });
     with_editor(&workspace(PLAIN), None, |e| {
-        upd(e, |e| step(editor::set_renderer(e, Renderer::Mode::Wireframe), 2));
-        assert!(editor::renderer(e) == Renderer::Mode::Wireframe, "without a root the viewport request stands");
+        upd(e, |e| step(editor::set_renderer(e, editor_renderer::Mode::Wireframe), 2));
+        assert!(editor::renderer(e) == editor_renderer::Mode::Wireframe, "without a root the viewport request stands");
     });
 }
 
@@ -95,7 +95,7 @@ fn overlapping_renderers() {
             (panel ["editor" "two"] :window [150 120 320 280]))"#,
     );
     with_editor(&ws, None, |e| {
-        upd(e, |e| step(editor::set_renderer(e, Renderer::Mode::Wireframe), 2));
+        upd(e, |e| step(editor::set_renderer(e, editor_renderer::Mode::Wireframe), 2));
         let pictures = layers(e);
         assert_eq!(pictures.len(), 3, "an overlapping viewport did not render");
         assert!(pictures[1] != pictures[2], "coincident floating bounds made two renderers paint the same slot");

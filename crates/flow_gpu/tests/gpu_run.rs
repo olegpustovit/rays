@@ -72,17 +72,17 @@ fn fixtures() {
         for (name, program) in cases {
             let msl = tp::ok(emit::kernel(&emit::Options::default(), &program));
             let compiled = tp::ok(pipelines::get(&pipes, &msl));
-            let compiled_before = pipelines::Private::compilations(&pipes);
+            let compiled_before = pipelines::private::compilations(&pipes);
             tp::ok(pipelines::get(&pipes, &msl));
-            assert!(pipelines::Private::compilations(&pipes) == compiled_before && compiled_before >= 1);
+            assert!(pipelines::private::compilations(&pipes) == compiled_before && compiled_before >= 1);
             let _ = &compiled;
             let r = run::create(None, &lease, &pipes, &msl);
             let values = prepare(&program, false, 1.0);
             let output = tp::ok(dispatch(&r, &values));
             let actual_value = tp::ok(run::readback(&output, None));
             let expected_value = force(&program, 1.0, false);
-            assert_eq!(run::Private::status_reads(&r), 1, "{name}");
-            assert_eq!(run::Private::readback_bytes(&r), count * run::width(&output) * 4, "{name}");
+            assert_eq!(run::private::status_reads(&r), 1, "{name}");
+            assert_eq!(run::private::readback_bytes(&r), count * run::width(&output) * 4, "{name}");
             assert!(same_kind(&actual_value, &expected_value), "{name}");
             let (actual, expected) = (array(&actual_value), array(&expected_value));
             let maximum = actual.iter().zip(&expected).fold(0.0f64, |m, (a, e)| m.max((a - e).abs()));
@@ -94,10 +94,10 @@ fn fixtures() {
             } else {
                 assert!(maximum <= 2e-4, "{name}: {maximum}");
             }
-            let created = run::Private::buffer_creations(&r);
+            let created = run::private::buffer_creations(&r);
             tp::ok(dispatch(&r, &values));
-            assert_eq!(run::Private::buffer_creations(&r), created, "{name}");
-            assert_eq!(run::Private::input_uploads(&r), values.arrays.len() as i64, "{name}");
+            assert_eq!(run::private::buffer_creations(&r), created, "{name}");
+            assert_eq!(run::private::input_uploads(&r), values.arrays.len() as i64, "{name}");
             if name == "vec2" {
                 let mut replacement = values.clone();
                 replacement.arrays = values.arrays.iter().map(|a| Arc::new((**a).clone())).collect();
@@ -112,7 +112,7 @@ fn fixtures() {
                 moved.uniforms = later.uniforms.clone();
                 let animated = array(&tp::ok(run::readback(&tp::ok(dispatch(&r, &moved)), None)));
                 assert!(animated[0] == 0.0 && animated[1] == 2.0);
-                assert_eq!(run::Private::input_uploads(&r), 3);
+                assert_eq!(run::private::input_uploads(&r), 3);
             }
             run::close(&r, false);
         }
@@ -169,9 +169,9 @@ fn statuses() {
         match run::readback(&output, None) {
             Err(d) => {
                 assert!(selected && d.code == "E_RANGE" && d.message == message, "{name}: {}", d.message);
-                assert_eq!(run::Private::status_reads(&r), 1, "{name}");
+                assert_eq!(run::private::status_reads(&r), 1, "{name}");
                 let empty = tp::ok(dispatch_nowait(&r, &phost::Inputs { count: 0, ..inputs.clone() }));
-                assert!(array(&tp::ok(run::readback(&empty, None))).is_empty() && run::Private::status_reads(&r) == 1);
+                assert!(array(&tp::ok(run::readback(&empty, None))).is_empty() && run::private::status_reads(&r) == 1);
                 if name == "divide-selected" {
                     let queue = renderer::renderer::gpu_queue(&lease);
                     let commands = ogpu_core::backend::begin_commands(&queue).expect("commands");
@@ -179,7 +179,7 @@ fn statuses() {
                     let empty = tp::ok(dispatch_nowait(&r, &phost::Inputs { count: 0, ..inputs.clone() }));
                     assert!(array(&tp::ok(run::readback(&empty, None))).is_empty());
                     let receipt = ogpu_core::backend::commit(&commands).expect("commit");
-                    match run::Private::check_status(&r, receipt.epoch) {
+                    match run::private::check_status(&r, receipt.epoch) {
                         Err(d) => assert!(d.code == "E_RANGE" && d.message == message),
                         Ok(()) => panic!("empty dispatch cleared an earlier resident GPU error"),
                     }
@@ -207,7 +207,7 @@ fn empty_and_outputs() {
     let r = runner(&lease, &pipes, &fresh, true);
     let values = prepare(&fresh, true, 1.0);
     let empty = tp::ok(dispatch_nowait(&r, &phost::Inputs { count: 0, ..values }));
-    assert!(array(&tp::ok(run::readback(&empty, None))).is_empty() && run::Private::status_reads(&r) == 0);
+    assert!(array(&tp::ok(run::readback(&empty, None))).is_empty() && run::private::status_reads(&r) == 0);
     run::close(&r, false);
     // a two-output kernel on a host: an empty run borrows nothing and reads no status
     let program = tp::two_outputs();
@@ -319,12 +319,12 @@ fn specialized_captures() {
     let expected = array(&force(&program, 1.0, false));
     assert_eq!(array(&tp::ok(run::readback(&tp::ok(dispatch(&r, &values)), None))), expected);
     let start = std::time::Instant::now();
-    let generic = pipelines::Private::count(&pipes);
-    while pipelines::Private::count(&pipes) == generic && start.elapsed().as_secs_f64() < 3.0 {
+    let generic = pipelines::private::count(&pipes);
+    while pipelines::private::count(&pipes) == generic && start.elapsed().as_secs_f64() < 3.0 {
         assert_eq!(array(&tp::ok(run::readback(&tp::ok(dispatch(&r, &values)), None))), expected);
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
-    assert!(pipelines::Private::count(&pipes) > generic, "a specialized kernel compiled");
+    assert!(pipelines::private::count(&pipes) > generic, "a specialized kernel compiled");
     assert_eq!(array(&tp::ok(run::readback(&tp::ok(dispatch(&r, &values)), None))), expected);
     let mut changed = values.clone();
     changed.uniforms[0] = vec![5.0];

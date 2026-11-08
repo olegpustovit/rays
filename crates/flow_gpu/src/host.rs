@@ -73,15 +73,15 @@ pub fn zero() -> Stats {
 
 fn add_run(stats: &Stats, r: &run::T) -> Stats {
     Stats {
-        buffer_creations: stats.buffer_creations + run::Private::buffer_creations(r),
-        input_uploads: stats.input_uploads + run::Private::input_uploads(r),
-        input_uploaded_bytes: stats.input_uploaded_bytes + run::Private::input_uploaded_bytes(r),
-        status_reads: stats.status_reads + run::Private::status_reads(r),
-        readback_bytes: stats.readback_bytes + run::Private::readback_bytes(r),
-        payload_readback_bytes: stats.payload_readback_bytes + run::Private::readback_bytes(r) - run::Private::bounds_readback_bytes(r),
-        status_readback_bytes: stats.status_readback_bytes + 4 * run::Private::status_reads(r),
-        bounds_readback_bytes: stats.bounds_readback_bytes + run::Private::bounds_readback_bytes(r),
-        materialisations: stats.materialisations + run::Private::materialisations(r),
+        buffer_creations: stats.buffer_creations + run::private::buffer_creations(r),
+        input_uploads: stats.input_uploads + run::private::input_uploads(r),
+        input_uploaded_bytes: stats.input_uploaded_bytes + run::private::input_uploaded_bytes(r),
+        status_reads: stats.status_reads + run::private::status_reads(r),
+        readback_bytes: stats.readback_bytes + run::private::readback_bytes(r),
+        payload_readback_bytes: stats.payload_readback_bytes + run::private::readback_bytes(r) - run::private::bounds_readback_bytes(r),
+        status_readback_bytes: stats.status_readback_bytes + 4 * run::private::status_reads(r),
+        bounds_readback_bytes: stats.bounds_readback_bytes + run::private::bounds_readback_bytes(r),
+        materialisations: stats.materialisations + run::private::materialisations(r),
         held_buffers: stats.held_buffers,
         ..stats.clone()
     }
@@ -428,7 +428,7 @@ pub fn output(t: &T, value: &G::Value) -> Result<Option<run::Output>, Diagnostic
     if run::count(&output) == 0 {
         return Ok(Some(output));
     }
-    run::Private::check_status(&runner.run, run::epoch(&output))?;
+    run::private::check_status(&runner.run, run::epoch(&output))?;
     Ok(Some(output))
 }
 
@@ -1729,7 +1729,7 @@ impl Scope {
             (std::mem::take(&mut s.status_runs), s.epoch)
         };
         for r in runners.into_iter().rev() {
-            run::Private::check_status(&r, epoch)?;
+            run::private::check_status(&r, epoch)?;
         }
         self.s.borrow_mut().settled = true;
         Ok(())
@@ -2718,10 +2718,10 @@ pub fn stats(t: &T) -> Stats {
         count_readback_bytes: totals.count_readback_bytes + d.count_bytes.get(),
         validation_readback_bytes: totals.validation_readback_bytes + d.validation_bytes.get(),
         runners_created: d.created.get(),
-        pipeline_compilations: pipelines::Private::compilations(&d.pipelines),
-        pipeline_releases: pipelines::Private::releases(&d.pipelines),
-        held_buffers: if d.closed.get() { 0 } else { run::Private::pool_held(&d.shared) },
-        freed: run::Private::pool_freed(&d.shared),
+        pipeline_compilations: pipelines::private::compilations(&d.pipelines),
+        pipeline_releases: pipelines::private::releases(&d.pipelines),
+        held_buffers: if d.closed.get() { 0 } else { run::private::pool_held(&d.shared) },
+        freed: run::private::pool_freed(&d.shared),
         ..totals
     }
 }

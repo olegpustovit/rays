@@ -6,7 +6,7 @@ use editor_document::workspace_doc as Doc;
 use flow_graph::flow_edit as fe;
 use flow_syntax::syntax as S;
 use input::{Event, Key};
-use rays_editor::{editor, Source};
+use rays_editor::{editor, source_file};
 use std::cell::Cell;
 use std::fs;
 use std::sync::Arc;
@@ -60,10 +60,10 @@ pub fn files() {
     let (text0, text1) = (sketch("0.5"), sketch("0.7"));
     write(&file, &text0);
     // Save: digest match writes the canonical text, comments intact, and re-reading it is the text
-    let source = Source::at(&file, &sha(&text0));
+    let source = source_file::at(&file, &sha(&text0));
     let doc = doc_of(&text0, vec![]).unwrap();
     let saved = printed(&doc);
-    let source = Source::save(&source, &saved).unwrap_or_else(|_| panic!("save refused"));
+    let source = source_file::save(&source, &saved).unwrap_or_else(|_| panic!("save refused"));
     assert!(read(&file) == saved, "the file is the written text");
     assert!(has(&read(&file), "; the header") && has(&read(&file), "; one sphere") && has(&read(&file), "; the tail"), "comments survive: {}", read(&file));
     assert!(printed(&doc_of(&read(&file), vec![]).unwrap()) == saved, "the re-read prints the same");
@@ -71,37 +71,37 @@ pub fn files() {
     assert!(names == vec!["sketch.rays".to_string()], "no temporary file is left: {names:?}");
     // Save does not reload: the write moved the mtime, the digest is the remembered one
     write(&file, &read(&file));
-    assert!(Source::poll(100., &source).1.is_none(), "own write reloaded");
+    assert!(source_file::poll(100., &source).1.is_none(), "own write reloaded");
     // digest mismatch: another writer changed the file, so Save refuses
     write(&file, &text1);
-    assert!(Source::save(&source, "x").err() == Some(Source::Save_error::Changed), "saved over another writer's text");
+    assert!(source_file::save(&source, "x").err() == Some(source_file::Save_error::Changed), "saved over another writer's text");
     assert!(read(&file) == text1, "the refused save left the file alone");
     // the poll: one content read per half second
-    let source = Source::at(&file, &sha(&text0));
-    let (source, changed) = Source::poll(0., &source);
+    let source = source_file::at(&file, &sha(&text0));
+    let (source, changed) = source_file::poll(0., &source);
     assert!(changed == Some(text1.clone()), "a file that already differed at startup did not reload on the first poll");
-    assert!(Source::poll(1., &source).1.is_none(), "the startup difference was reported twice");
-    let (_, same) = Source::poll(0., &Source::at(&file, &sha(&text1)));
+    assert!(source_file::poll(1., &source).1.is_none(), "the startup difference was reported twice");
+    let (_, same) = source_file::poll(0., &source_file::at(&file, &sha(&text1)));
     assert!(same.is_none(), "a file that matches the built text reloaded");
-    let source = Source::at(&file, &sha(&text1));
-    let (source, _) = Source::poll(0., &source);
+    let source = source_file::at(&file, &sha(&text1));
+    let (source, _) = source_file::poll(0., &source);
     write(&file, &text0);
-    let (source, early) = Source::poll(0.3, &source);
+    let (source, early) = source_file::poll(0.3, &source);
     assert!(early.is_none(), "polled again within half a second");
-    let (source, late) = Source::poll(0.6, &source);
+    let (source, late) = source_file::poll(0.6, &source);
     assert!(late == Some(text0.clone()), "the change was not seen after half a second");
-    let (source, again) = Source::poll(1.2, &source);
+    let (source, again) = source_file::poll(1.2, &source);
     assert!(again.is_none(), "the same change reported twice");
     let stamp = fs::metadata(&file).unwrap().modified().unwrap();
     fs::write(&file, &text1).unwrap();
     fs::OpenOptions::new().write(true).open(&file).unwrap().set_modified(stamp).unwrap();
-    let (source, changed) = Source::poll(1.8, &source);
+    let (source, changed) = source_file::poll(1.8, &source);
     assert!(changed == Some(text1.clone()), "a preserved-mtime content edit was missed");
     let replacement = format!("{dir}/replacement.rays");
     write(&replacement, &text0);
     fs::OpenOptions::new().write(true).open(&replacement).unwrap().set_modified(stamp).unwrap();
     fs::rename(&replacement, &file).unwrap(); // (the inode check is POSIX-only; the content differs)
-    let (_, changed) = Source::poll(2.4, &source);
+    let (_, changed) = source_file::poll(2.4, &source);
     assert!(changed == Some(text0.clone()), "a same-mtime replacement was missed");
     let _ = fs::remove_dir_all(&dir);
 }
@@ -117,19 +117,19 @@ pub fn find() {
     write(&format!("{dir}/sk/x.rays"), &sketch("0.5"));
     let expect = |from: &str| {
         std::env::set_current_dir(from).unwrap();
-        let s = Source::find("sk/x.rays", "").unwrap_or_else(|| panic!("no source from {from}"));
-        assert!(fs::canonicalize(Source::file(&s)).unwrap() == fs::canonicalize(format!("{dir}/sk/x.rays")).unwrap(), "the source file is joined to the project root");
+        let s = source_file::find("sk/x.rays", "").unwrap_or_else(|| panic!("no source from {from}"));
+        assert!(fs::canonicalize(source_file::file(&s)).unwrap() == fs::canonicalize(format!("{dir}/sk/x.rays")).unwrap(), "the source file is joined to the project root");
     };
     expect(&format!("{dir}/sk"));
     expect(&format!("{dir}/target"));
     std::env::set_current_dir(&start).unwrap();
-    assert!(Source::find("sk/nowhere.rays", "").is_none(), "a missing file is no source");
+    assert!(source_file::find("sk/nowhere.rays", "").is_none(), "a missing file is no source");
     let _ = fs::remove_dir_all(&dir);
 }
 
 // ---- through the editor ----
 
-fn editor(presets: Option<&str>, imports: Vec<(String, String)>, source: Source::SourceFile, text: &str) -> editor::Editor {
+fn editor(presets: Option<&str>, imports: Vec<(String, String)>, source: source_file::SourceFile, text: &str) -> editor::Editor {
     let o = editor::Create { ui_text_size: Some(11), platform: Some(input::Platform::Apple), await_: Some(true), domains: Some(1), presets: presets.map(|p| p.to_string()), ..Default::default() };
     editor::create(o, &doc_of(text, imports).unwrap(), Some(source), editor::prepare_fn(), editor::draw_fn()).unwrap_or_else(|m| panic!("{m}"))
 }
@@ -203,7 +203,7 @@ pub fn editor_flow() {
     let presets = format!("{dir}/presets");
     let (text0, text1) = (sketch("0.5"), sketch("0.7"));
     write(&file, &text0);
-    let mut r = Run::new(editor(Some(&presets), vec![], Source::at(&file, &sha(&text0)), &text0), (450., 300.));
+    let mut r = Run::new(editor(Some(&presets), vec![], source_file::at(&file, &sha(&text0)), &text0), (450., 300.));
     r.step(vec![]);
     r.step(vec![]);
     r.step(vec![]);
@@ -267,7 +267,7 @@ pub fn editor_flow() {
     r.d.close();
     // a file edited since the build reloads on the first poll, as one history entry
     write(&file, &text1);
-    r = Run::new(editor(Some(&presets), vec![], Source::at(&file, &sha(&text0)), &text0), (450., 300.));
+    r = Run::new(editor(Some(&presets), vec![], source_file::at(&file, &sha(&text0)), &text0), (450., 300.));
     r.step(vec![]);
     r.step(vec![]);
     r.run_for(1.);
@@ -277,7 +277,7 @@ pub fn editor_flow() {
     r.d.close();
     // a file that differs and does not check keeps the built text; Save then falls back to a preset
     write(&file, TYPO);
-    r = Run::new(editor(Some(&presets), vec![], Source::at(&file, &sha(&text0)), &text0), (450., 300.));
+    r = Run::new(editor(Some(&presets), vec![], source_file::at(&file, &sha(&text0)), &text0), (450., 300.));
     r.step(vec![]);
     r.step(vec![]);
     r.run_for(1.);
@@ -301,7 +301,7 @@ pub fn external_over_dirty() {
     let file = format!("{dir}/sketch.rays");
     let (text0, text1) = (sketch("0.5"), sketch("0.7"));
     write(&file, &text0);
-    let mut r = Run::new(editor(Some(&format!("{dir}/presets")), vec![], Source::at(&file, &sha(&text0)), &text0), (450., 300.));
+    let mut r = Run::new(editor(Some(&format!("{dir}/presets")), vec![], source_file::at(&file, &sha(&text0)), &text0), (450., 300.));
     r.step(vec![]);
     r.step(vec![]);
     r.edit(set_arg(&["g", "@result"], "segments", S::Draft::Num("12".into())));
@@ -326,7 +326,7 @@ pub fn autosave() {
     let presets = format!("{dir}/presets");
     let (text0, _) = (sketch("0.5"), 0);
     write(&file, &text0);
-    let create = || editor(Some(&presets), vec![], Source::at(&file, &sha(&text0)), &text0);
+    let create = || editor(Some(&presets), vec![], source_file::at(&file, &sha(&text0)), &text0);
     let mut r = Run::new(create(), (200., 300.));
     r.step(vec![]);
     r.step(vec![]);
@@ -336,7 +336,7 @@ pub fn autosave() {
     assert!(!std::path::Path::new(&state).exists(), "opening a sketch wrote over its recovery state");
     r.edit(set_arg(&["g", "@result"], "radius", S::Draft::Num("1.25".into())));
     let e = r.d.ed.take().unwrap();
-    r.replace(editor::set_renderer(e, rays_editor::Renderer::Mode::Wireframe));
+    r.replace(editor::set_renderer(e, rays_editor::editor_renderer::Mode::Wireframe));
     r.step(vec![Event::Pointer_moved((200., 300.)), Event::Scrolled((0., -2.))]);
     let eye = |e: &editor::Editor| rays::camera::position(&rays::easy_camera::camera(&editor::camera(e)).unwrap());
     let saved_eye = eye(r.e());
@@ -357,7 +357,7 @@ pub fn autosave() {
     r.step(vec![Event::Key_pressed(Key::Enter)]);
     assert!(has(&source_text(r.e()), ":radius 1.25") && editor::undo_label(r.e()) == Some("Restore last edited state".to_string()), "/ b did not restore the last edited state as one undo entry: {:?}; {}; {}", editor::undo_label(r.e()), cook_line(r.e()), source_text(r.e()));
     assert!(rays_math::vec3::nearly_equal(saved_eye, eye(r.e()), 1e-9), "recovery did not restore the viewport");
-    assert!(editor::renderer(r.e()) == rays_editor::Renderer::Mode::Wireframe, "recovery did not restore the shared renderer choice");
+    assert!(editor::renderer(r.e()) == rays_editor::editor_renderer::Mode::Wireframe, "recovery did not restore the shared renderer choice");
     r.keys(&[Key::Meta], vec![meta('z')]);
     assert!(has(&source_text(r.e()), ":radius 0.5"), "undo did not revert recovery");
     r.d.close();
@@ -406,7 +406,7 @@ pub fn start_keywords() {
     };
     let first = text("0.5", "list", "graph");
     write(&file, &first);
-    let mut r = Run::new(editor(Some(&presets), vec![], Source::at(&file, &sha(&first)), &first), (100., 300.));
+    let mut r = Run::new(editor(Some(&presets), vec![], source_file::at(&file, &sha(&first)), &first), (100., 300.));
     let line = |r: &Run, k: &str| dump_line(r.e(), k);
     fn show_graph(r: &mut Run) {
         r.step(vec![meta_k('/'), meta_k('l')]);
@@ -467,7 +467,7 @@ pub fn imports() {
     let text = "(workspace main (graph local :context sop (ref shared)))\n(import \"lib.rays\")\n";
     write(&file, text);
     write(&lib, &library("0.5"));
-    let mut r = Run::new(editor(None, vec![("lib.rays".into(), library("0.5"))], Source::at(&file, &sha(text)), text), (450., 300.));
+    let mut r = Run::new(editor(None, vec![("lib.rays".into(), library("0.5"))], source_file::at(&file, &sha(text)), text), (450., 300.));
     let poll = |r: &mut Run| {
         r.advance(65);
     };
@@ -509,7 +509,7 @@ pub fn library() {
     let text = "(workspace main (graph local :context value (twice 3)))\n(import \"lib.rays\")\n";
     write(&file, text);
     write(&lib, &library("2"));
-    let e = editor(None, vec![("lib.rays".into(), library("2"))], Source::at(&file, &sha(text)), text);
+    let e = editor(None, vec![("lib.rays".into(), library("2"))], source_file::at(&file, &sha(text)), text);
     let mut e = editor::update(rays_editor::reduce::open_import(e, "lib.rays"), &frame(&Opts::default(), (450., 300.), vec![], 0));
     assert!(editor::workspace(&e).fragment && editor::workspace(&e).imports.is_empty(), "open library did not switch to editable definitions");
     e = editor::edit(e, &fe::Op::SetArg { node: vec!["def:twice".into(), "@result".into()], key: fe::ArgKey::Pos(1), sub: vec![], value: S::make(S::Draft::Num("4".into())) }).unwrap();
@@ -542,7 +542,7 @@ pub fn embedded_nodes() {
     let dir = temp_dir("src-embedded");
     let file = format!("{dir}/sketch.rays");
     write(&file, text);
-    Source::save(&Source::at(&file, &sha(text)), &saved).unwrap_or_else(|_| panic!("save"));
+    source_file::save(&source_file::at(&file, &sha(text)), &saved).unwrap_or_else(|_| panic!("save"));
     let reopened = doc_of(&read(&file), vec![]).unwrap();
     assert!(contains_node(&reopened) && printed(&reopened) == saved, "saved embedded call did not reopen with identical authored source");
     let _ = fs::remove_dir_all(&dir);
@@ -578,7 +578,7 @@ pub fn vocabulary_refresh() {
     let dir = temp_dir("src-vocab");
     let file = format!("{dir}/sketch.rays");
     write(&file, &text(None));
-    let mut r = Run::new(editor(None, vec![], Source::at(&file, &sha(&text(None))), &text(None)), (450., 300.));
+    let mut r = Run::new(editor(None, vec![], source_file::at(&file, &sha(&text(None))), &text(None)), (450., 300.));
     let poll = |r: &mut Run| {
         r.advance(65);
     };

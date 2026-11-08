@@ -84,17 +84,17 @@ fn pipeline_ownership_on_mock() {
     let first_msl = tp::ok(emit::kernel(&emit::Options::default(), &first));
     tp::ok(pipelines::get(&cache, &first_msl));
     tp::ok(pipelines::get(&cache, &tp::ok(emit::kernel(&emit::Options::default(), &same))));
-    assert_eq!(pipelines::Private::compilations(&cache), 1);
+    assert_eq!(pipelines::private::compilations(&cache), 1);
     for number in 1..=65 {
         let program = tp::compile(&format!("(map (fn [x] (+ x (+ t {number}))) (array/range 1024))"));
         tp::ok(pipelines::get(&cache, &tp::ok(emit::kernel(&emit::Options::default(), &program))));
     }
-    assert_eq!(pipelines::Private::count(&cache), 64);
-    assert_eq!(pipelines::Private::releases(&cache), 2);
+    assert_eq!(pipelines::private::count(&cache), 64);
+    assert_eq!(pipelines::private::releases(&cache), 2);
     pipelines::close(&cache);
-    assert_eq!(pipelines::Private::releases(&cache), 66);
+    assert_eq!(pipelines::private::releases(&cache), 66);
     pipelines::close(&cache);
-    assert_eq!(pipelines::Private::releases(&cache), 66);
+    assert_eq!(pipelines::private::releases(&cache), 66);
     assert!(pipelines::get(&cache, &first_msl).is_err());
     b::destroy_device(&device).expect("destroy");
     assert_eq!(ogpu_core::impl_::live_handles().unwrap_or(0), 0);

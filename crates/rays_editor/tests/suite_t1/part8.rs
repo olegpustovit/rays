@@ -96,7 +96,7 @@ pub fn run_context_menus() {
         click(r, LB, choice);
         r.step(choice, vec![]);
         check(r.undo_label() == Some("Split panel".into()) && has(&r.source(), "time_a (ui/timeline)") && has(&r.source(), "time_b (ui/lisp)"), &format!("the timeline context menu did not open at the pointer: {}", r.source()));
-        check(rays_editor::Timeline::mode(&editor::timeline(&r.e)) == rays_editor::Timeline::Mode::Playing, "a timeline right-click sought the playhead");
+        check(rays_editor::timeline::mode(&editor::timeline(&r.e)) == rays_editor::timeline::Mode::Playing, "a timeline right-click sought the playhead");
     });
     exercise("(ui/workspace (ui/graph \"g\"))", &|r| {
         // / t reveals the implicit strip when there is no authored timeline leaf.
@@ -108,7 +108,7 @@ pub fn run_context_menus() {
         r.step(origin, vec![]);
         click(r, LB, (520., origin.1.min(640. - 86.) + 19.));
         r.step(origin, vec![]);
-        check(rays_editor::Timeline::mode(&editor::timeline(&r.e)) == rays_editor::Timeline::Mode::Paused, "the implicit timeline had no context menu at the pointer");
+        check(rays_editor::timeline::mode(&editor::timeline(&r.e)) == rays_editor::timeline::Mode::Paused, "the implicit timeline had no context menu at the pointer");
     });
 }
 
@@ -280,7 +280,7 @@ pub fn run_idle_rest() {
         }
     }
     let mut t = T::new(r##"(workspace idle (graph picture :context draw (draw/background "#14161c")))"##, 30);
-    let before = rays_editor::Timeline::time(&editor::timeline(&t.e));
+    let before = rays_editor::timeline::time(&editor::timeline(&t.e));
     let rested = t.tick0();
     check(rays::scene::same(&t.tick0(), &rested), "an idle frame was built again");
     // the unread clock keeps running; measured just after the once-a-second frame
@@ -288,7 +288,7 @@ pub fn run_idle_rest() {
     for _ in 0..10 {
         t.tick0();
     }
-    check(rays_editor::Timeline::time(&editor::timeline(&t.e)) > before, "the clock stopped at rest");
+    check(rays_editor::timeline::time(&editor::timeline(&t.e)) > before, "the clock stopped at rest");
     let a = t.tick0();
     check(rays::scene::same(&t.tick0(), &a), "still at rest");
     // what wakes it: a moved pointer, an event, the second that what polls runs on
@@ -323,7 +323,7 @@ pub fn run_idle_rest() {
     for _ in 0..12 {
         t.tick0();
     }
-    check(rays_editor::Timeline::mode(&editor::timeline(&t.e)) != rays_editor::Timeline::Mode::Playing, "the space key did not pause");
+    check(rays_editor::timeline::mode(&editor::timeline(&t.e)) != rays_editor::timeline::Mode::Playing, "the space key did not pause");
     let p = t.tick0();
     check(rays::scene::same(&t.tick0(), &p), "a stopped clock did not rest");
     editor::close(&t.e);

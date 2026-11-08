@@ -47,7 +47,7 @@ fn cooked(lit: &pick::Set, existing: Option<cook::Cook>, lowered: &lower::T, pre
     let objects: Vec<_> = lower::objects(lowered).into_iter().map(|(id, n, d)| (id as i64, n, d)).collect();
     let mut f = frame_at((0., 0.), vec![], 0);
     f.input.dt = 0.;
-    let update = cook::update(None, None, false, &[], lit, None, &cook, &super::cook_t::none_settings(), &objects.iter().map(|(i, n, d)| (*i, n, *d)).collect::<Vec<_>>(), None, param::Effects::default(), &[], &rays_editor::Timeline::create(), &f, None);
+    let update = cook::update(None, None, false, &[], lit, None, &cook, &super::cook_t::none_settings(), &objects.iter().map(|(i, n, d)| (*i, n, *d)).collect::<Vec<_>>(), None, param::Effects::default(), &[], &rays_editor::timeline::create(), &f, None);
     check(update.edit_error.is_none(), "cook error");
     update.cook
 }

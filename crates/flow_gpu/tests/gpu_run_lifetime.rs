@@ -201,25 +201,25 @@ fn failed_commands_and_uploads() {
         let first = tp::ok(dispatch(r, values));
         assert!(run::buffer(&first, None).is_some());
         tp::ok(dispatch(r, values));
-        assert_eq!((f.inputs.get(), run::Private::input_uploads(r)), (1, 1));
+        assert_eq!((f.inputs.get(), run::private::input_uploads(r)), (1, 1));
         let mut replacement = values.clone();
         replacement.arrays = values.arrays.iter().map(|a| Arc::new((**a).clone())).collect();
         Arc::make_mut(&mut replacement.arrays[0])[0] = 17.0;
         f.input.set(true);
         assert!(dispatch(r, &replacement).is_err());
-        assert_eq!((f.inputs.get(), run::Private::input_uploads(r)), (2, 1));
+        assert_eq!((f.inputs.get(), run::private::input_uploads(r)), (2, 1));
         f.input.set(false);
         tp::ok(dispatch(r, values)); assert_eq!(f.inputs.get(), 3);
         tp::ok(dispatch(r, &replacement)); tp::ok(dispatch(r, &replacement)); assert_eq!(f.inputs.get(), 4);
         let mut half = replacement.clone(); half.count = 512;
         tp::ok(dispatch(r, &half)); tp::ok(dispatch(r, &replacement));
-        assert_eq!((f.inputs.get(), run::Private::input_uploads(r)), (6, 5));
-        assert_eq!(run::Private::input_uploaded_bytes(r), 4 * 4096 + 2048);
+        assert_eq!((f.inputs.get(), run::private::input_uploads(r)), (6, 5));
+        assert_eq!(run::private::input_uploaded_bytes(r), 4 * 4096 + 2048);
         f.completion.set(true);
         let large = prepare(&fixture("arithmetic", 65536));
         assert!(dispatch(r, &large).is_err());
         assert!(run::buffer(&first, None).is_none() && run::readback(&first, None).is_err());
-        assert_eq!((run::Private::buffer_creations(r), f.submitted.get(), f.inputs.get()), (5, 8, 7));
+        assert_eq!((run::private::buffer_creations(r), f.submitted.get(), f.inputs.get()), (5, 8, 7));
         f.completion.set(false);
         let fresh = tp::ok(dispatch(r, &large)); assert!(run::buffer(&fresh, None).is_some());
         f.invalid.set(true);
@@ -237,8 +237,8 @@ fn failed_commands_and_uploads() {
 fn retired_holders_and_discard() {
     with_fixture(|Fixture { f, r, values, .. }| {
         tp::ok(dispatch(r, values));
-        let creations = run::Private::buffer_creations(r);
-        let thaws = run::Private::materialisations(r);
+        let creations = run::private::buffer_creations(r);
+        let thaws = run::private::materialisations(r);
         let releases = f.releases.get();
         let mut views = 0;
         for i in 0..24 {
@@ -246,22 +246,22 @@ fn retired_holders_and_discard() {
             if i == 0 { views = f.views.get(); }
             p.release(true); drop(p);
         }
-        assert_eq!(run::Private::materialisations(r), thaws);
-        assert!(run::Private::held_buffers(r) <= 2);
-        assert!(run::Private::buffer_creations(r) - creations <= 4);
+        assert_eq!(run::private::materialisations(r), thaws);
+        assert!(run::private::held_buffers(r) <= 2);
+        assert!(run::private::buffer_creations(r) - creations <= 4);
         assert!(f.views.get() == views && f.releases.get() > releases);
         f.working_set.set(Some(4));
         let oldest = settled(r, values); let expected = oldest.count * oldest.width;
         oldest.release(true);
-        let before = run::Private::materialisations(r);
+        let before = run::private::materialisations(r);
         let later: Vec<_> = (0..8).map(|_| settled(r, values)).collect();
-        assert!(run::Private::materialisations(r) > before);
+        assert!(run::private::materialisations(r) > before);
         assert_eq!(len(oldest.materialise().unwrap()), expected);
         for p in later { p.release(false); }
         f.working_set.set(None);
-        let thaws = run::Private::materialisations(r);
+        let thaws = run::private::materialisations(r);
         let live = settled(r, values); run::close(r, true);
-        assert_eq!(run::Private::materialisations(r), thaws);
+        assert_eq!(run::private::materialisations(r), thaws);
         assert!(live.materialise().is_err());
         run::close(r, false);
     });
@@ -274,12 +274,12 @@ fn clobber_and_idle_ageing() {
         let pool = run::pool();
         let pooled = run::create_owned(Some(&pool), device, queue, cache, kernel);
         let dead = settled(&pooled, values); dead.release(false); drop(dead);
-        run::Private::pool_drain(&pool);
-        let floats = run::Private::pool_free_floats(&pool); assert!(!floats.is_empty());
+        run::private::pool_drain(&pool);
+        let floats = run::private::pool_free_floats(&pool); assert!(!floats.is_empty());
         for a in floats { assert!(a.borrow().iter().all(|x| x.is_nan())); }
         assert!(mem::bytes(&free_owner) > free_before);
-        for _ in 0..1100 { run::Private::pool_drain(&pool); }
-        assert_eq!(run::Private::pool_free_buffers(&pool), 0);
+        for _ in 0..1100 { run::private::pool_drain(&pool); }
+        assert_eq!(run::private::pool_free_buffers(&pool), 0);
         assert_eq!(mem::bytes(&free_owner), free_before);
         mem::configure(&|_| None).unwrap();
         run::close(&pooled, true); run::close_pool(&pool);
@@ -290,12 +290,12 @@ fn native_free_budget_size_classes() {
         f.working_set.set(Some(2048 << 20));
         let pool = run::pool();
         let pooled = run::create_owned(Some(&pool), device, queue, cache, kernel);
-        for _ in 0..5 { run::Private::pool_give(&pool, device, 64 << 20); }
+        for _ in 0..5 { run::private::pool_give(&pool, device, 64 << 20); }
         let small = settled(&pooled, values); small.release(false); drop(small);
-        run::Private::pool_drain(&pool); assert_eq!(run::Private::pool_free_buffers(&pool), 6);
-        for _ in 0..2 { run::Private::pool_give(&pool, device, 128 << 20); }
+        run::private::pool_drain(&pool); assert_eq!(run::private::pool_free_buffers(&pool), 6);
+        for _ in 0..2 { run::private::pool_give(&pool, device, 128 << 20); }
         let over = settled(&pooled, values); over.release(false); drop(over);
-        run::Private::pool_drain(&pool); assert_eq!(run::Private::pool_free_buffers(&pool), 7);
+        run::private::pool_drain(&pool); assert_eq!(run::private::pool_free_buffers(&pool), 7);
         f.working_set.set(None); run::close(&pooled, true); run::close_pool(&pool);
     });
 }
@@ -305,7 +305,7 @@ fn evicted_and_pinned_holders() {
         let evicted = run::create_owned(Some(&pool), device, queue, cache, kernel);
         let retained = kept(&evicted, values); let unread = kept(&evicted, values);
         retained.release(true); run::close(&evicted, false);
-        assert_eq!(run::Private::materialisations(&evicted), 0);
+        assert_eq!(run::private::materialisations(&evicted), 0);
         assert_eq!(len(retained.materialise().unwrap()), retained.count * retained.width);
         run::close_pool(&pool);
         assert!(unread.materialise().is_err());
@@ -313,8 +313,8 @@ fn evicted_and_pinned_holders() {
         let pooled = run::create_owned(Some(&pool), device, queue, cache, kernel);
         let (stand_in, (_, _, valid, unpin)) = pinned(&pooled, values);
         assert!(run::pin(&stand_in).is_none());
-        assert!(valid() && run::Private::pool_held(&pool) == 1);
-        unpin(); assert!(!valid() && run::Private::pool_held(&pool) == 0);
+        assert!(valid() && run::private::pool_held(&pool) == 1);
+        unpin(); assert!(!valid() && run::private::pool_held(&pool) == 0);
         let (_, (_, _, valid, _)) = pinned(&pooled, values);
         assert!(valid()); run::close(&pooled, true); run::close_pool(&pool); assert!(!valid());
     });
@@ -323,12 +323,12 @@ fn slot_shrink_hysteresis() {
     with_fixture(|Fixture { device, queue, cache, kernel, values, .. }| {
         let big = prepare(&fixture("arithmetic", 400_000));
         let shrinking = run::create_owned(None, device, queue, cache, kernel);
-        tp::ok(dispatch(&shrinking, &big)); let grown = run::Private::buffer_creations(&shrinking);
-        for _ in 0..run::Private::slot_shrink_after { tp::ok(dispatch(&shrinking, values)); }
-        assert!(run::Private::buffer_creations(&shrinking) > grown);
-        let stable = run::Private::buffer_creations(&shrinking);
+        tp::ok(dispatch(&shrinking, &big)); let grown = run::private::buffer_creations(&shrinking);
+        for _ in 0..run::private::slot_shrink_after { tp::ok(dispatch(&shrinking, values)); }
+        assert!(run::private::buffer_creations(&shrinking) > grown);
+        let stable = run::private::buffer_creations(&shrinking);
         for _ in 0..16 { tp::ok(dispatch(&shrinking, values)); }
-        assert_eq!(run::Private::buffer_creations(&shrinking), stable); run::close(&shrinking, true);
+        assert_eq!(run::private::buffer_creations(&shrinking), stable); run::close(&shrinking, true);
     });
 }
 fn failed_table_upload_retries() {
@@ -348,18 +348,18 @@ fn bounds_and_foreign_owned_readback() {
         let values = prepare(&packed);
         let first = settled(&sea, &values); let c0 = f.creates.get();
         assert_eq!(first.bounds(), Some(vec![0., 1., 0., 1023., 1., 0.]));
-        let read = run::Private::readback_bytes(&sea);
+        let read = run::private::readback_bytes(&sea);
         assert_eq!((f.creates.get() - c0, read), (2, 24));
-        first.bounds(); assert_eq!(run::Private::readback_bytes(&sea), read);
+        first.bounds(); assert_eq!(run::private::readback_bytes(&sea), read);
         let second = settled(&sea, &values); let c1 = f.creates.get();
         second.bounds(); assert_eq!(f.creates.get(), c1);
-        assert_eq!(run::Private::readback_bytes(&sea), 2 * read);
-        assert_eq!(run::Private::bounds_readback_bytes(&sea), 2 * read);
+        assert_eq!(run::private::readback_bytes(&sea), 2 * read);
+        assert_eq!(run::private::bounds_readback_bytes(&sea), 2 * read);
         // The owner blocks in join: no Run::service/pumping may be necessary.
         let first = std::thread::spawn(move || { let data = first.materialise().unwrap(); assert_eq!(len(data), 1024 * 3); first }).join().unwrap();
-        assert_eq!(run::Private::readback_bytes(&sea), 2 * read + 1024 * 3 * 4);
-        first.materialise().unwrap(); assert_eq!(run::Private::readback_bytes(&sea), 2 * read + 1024 * 3 * 4);
-        assert_eq!(run::Private::bounds_readback_bytes(&sea), 2 * read);
+        assert_eq!(run::private::readback_bytes(&sea), 2 * read + 1024 * 3 * 4);
+        first.materialise().unwrap(); assert_eq!(run::private::readback_bytes(&sea), 2 * read + 1024 * 3 * 4);
+        assert_eq!(run::private::bounds_readback_bytes(&sea), 2 * read);
         first.release(false); second.release(false); run::close(&sea, false);
     });
 }
@@ -372,7 +372,7 @@ fn reduced_bounds_cover_every_point() {
             let output = settled(&sea, &prepare(&packed));
             let last = (count - 1) as f64;
             assert_eq!(output.bounds(), Some(vec![17. - last, 0., 1. - last, 17., last, 1.]), "count {count}");
-            assert_eq!(run::Private::bounds_readback_bytes(&sea), 24);
+            assert_eq!(run::private::bounds_readback_bytes(&sea), 24);
             output.release(false);
             run::close(&sea, false);
         }

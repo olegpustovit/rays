@@ -2006,7 +2006,7 @@ pub fn close(t: &T, discard: bool) {
     st.closed = true;
 }
 
-pub mod Private {
+pub mod private {
     use super::*;
 
     pub fn diagnostic(error: &ogpu_core::error::Error) -> Diagnostic {

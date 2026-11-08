@@ -690,14 +690,14 @@ pub mod chain {
 
     pub fn observe_display(gpu: &gpu::Config, geometry: &rdk_core::geometry::T, seconds: f64) {
         if let (Some(_), gpu::Policy::Measured) = (&gpu.backend, gpu.policy) {
-            ak::Display_sink::observe(&gpu.evidence, rdk_core::packed::float3::resident(rdk_core::geometry::positions(geometry)), floats_of(geometry), seconds);
+            ak::display_sink::observe(&gpu.evidence, rdk_core::packed::float3::resident(rdk_core::geometry::positions(geometry)), floats_of(geometry), seconds);
         }
     }
 
     pub fn observe_draw(gpu: &gpu::Config, geometry: &rdk_core::geometry::T, seconds: f64) {
         if let (Some(_), gpu::Policy::Measured) = (&gpu.backend, gpu.policy) {
             if !rdk_core::packed::float3::resident(rdk_core::geometry::positions(geometry)) {
-                ak::Display_sink::observe_draw(&gpu.evidence, floats_of(geometry), seconds);
+                ak::display_sink::observe_draw(&gpu.evidence, floats_of(geometry), seconds);
             }
         }
     }
@@ -738,8 +738,8 @@ pub mod chain {
             move |samples: &gpu::Samples, floats: i64| -> Option<f64> {
                 let moved = cost::readback(Some(&gpu), floats, 1);
                 let rate = |r: f64, fallback: f64| if r < f64::INFINITY { r * floats as f64 } else { fallback };
-                let (_, resident_sink) = ak::Display_sink::rates(&gpu.evidence);
-                ak::Display_sink::priced(&samples.device, floats).map(|s| {
+                let (_, resident_sink) = ak::display_sink::rates(&gpu.evidence);
+                ak::display_sink::priced(&samples.device, floats).map(|s| {
                     s + rate(resident_sink, 0.0) + if readers.unwrap_or(0) == 0 { 0.0 } else { moved }
                 })
             }
@@ -754,8 +754,8 @@ pub mod chain {
                 let samples = st.sites.get(&site).expect("site evidence");
                 let moved = cost::readback(Some(&gpu), floats, 1);
                 let rate = |r: f64, fallback: f64| if r < f64::INFINITY { r * floats as f64 } else { fallback };
-                let (host_sink, _) = ak::Display_sink::rates(&gpu.evidence);
-                let cpu_seconds = ak::Display_sink::priced(&samples.cpu, floats).map(|s| s + rate(host_sink, moved));
+                let (host_sink, _) = ak::display_sink::rates(&gpu.evidence);
+                let cpu_seconds = ak::display_sink::priced(&samples.cpu, floats).map(|s| s + rate(host_sink, moved));
                 let device_seconds = device_cost(samples, floats);
                 let reason = cost::choose(cpu_seconds, device_seconds, false, cpu_consumers);
                 report(Some(points), reason, cpu_seconds, device_seconds);

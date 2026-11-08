@@ -84,7 +84,7 @@ mod test_editor_model;
 mod test_editor_reduce;
 
 // api: F (the public surface of rays_editor.rs, as `Rays_editor.Editor` etc.)
-pub use rays_editor::{window, workspace_catalog, workspace_window, editor, measure, Renderer, Settings, Source, Timeline, workspace, Workspace_doc};
+pub use rays_editor::{window, workspace_catalog, workspace_window, editor, measure, workspace};
 #[cfg(feature = "test-hooks")]
 pub use rays_editor::reduce;
 

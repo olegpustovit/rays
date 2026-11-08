@@ -4,7 +4,7 @@
 use super::t4::*;
 use editor_document::workspace_doc as Doc;
 use input::{Event, Key, MouseButton::LeftButton};
-use rays_editor::{editor, Source, workspace};
+use rays_editor::{editor, source_file, workspace};
 use std::cell::RefCell;
 
 const NAMES: [&str; 8] = ["basic", "generative", "noise", "recursive_rectangles", "drawing", "audio", "file_dialog", "pxui"];
@@ -66,7 +66,7 @@ fn save_roundtrip(name: &str) {
     let file = format!("{dir}/sketch.rays");
     std::fs::write(&file, &source).unwrap();
     let o = editor::Create { ui_text_size: Some(11), platform: Some(input::Platform::Apple), await_: Some(true), domains: Some(1), presets: Some(format!("{dir}/presets")), ..Default::default() };
-    let ed = editor::create(o, &workspace, Some(Source::at(&file, &editor_document::lowering::sha256(&source))), editor::prepare_fn(), editor::draw_fn()).unwrap();
+    let ed = editor::create(o, &workspace, Some(source_file::at(&file, &editor_document::lowering::sha256(&source))), editor::prepare_fn(), editor::draw_fn()).unwrap();
     let mut ed = editor::update(ed, &frame_of(false, name, 0));
     let mut save = frame_of(false, name, 1);
     save.input.keys = vec![Key::Meta];

@@ -177,7 +177,7 @@ pub fn close(t: &T) {
     }
 }
 
-pub mod Private {
+pub mod private {
     use super::*;
     pub fn count(t: &T) -> i64 {
         t.0.cache.borrow().length() as i64

@@ -328,7 +328,7 @@ pub fn sketch_settings() {
         editor::prepare(settings, output)
     });
     let mut o = options(None);
-    o.settings = Some(rays_editor::Settings::make(&schema, vec![Value::Int(0)]));
+    o.settings = Some(editor_document::settings::make(&schema, vec![Value::Int(0)]));
     let mut ed = editor::create(o, &fixture(), None, prepare, editor::draw_fn()).expect("opens");
     let wait_mode = |expected: i64, start: i64, mut ed: editor::Editor| -> editor::Editor {
         for i in 0..2000 {
@@ -340,7 +340,7 @@ pub fn sketch_settings() {
         panic!("a settings change did not re-run prepare");
     };
     ed = wait_mode(0, 0, ed);
-    let set = editor::set_settings(ed, &rays_editor::Settings::make(&schema, vec![Value::Int(1)]));
+    let set = editor::set_settings(ed, &editor_document::settings::make(&schema, vec![Value::Int(1)]));
     ed = wait_mode(1, 100, set);
     let undo = with_keys(fre(199, vec![k('z')]), vec![Key::Meta]);
     let after = up(ed, undo);
@@ -350,8 +350,8 @@ pub fn sketch_settings() {
 }
 
 #[allow(non_snake_case)]
-fn Editor_settings_get(schema: &param::Schema, settings: &rays_editor::Settings::T) -> Result<Value, String> {
-    rays_editor::Settings::get(schema, settings).map(|v| v[0].clone())
+fn Editor_settings_get(schema: &param::Schema, settings: &editor_document::settings::T) -> Result<Value, String> {
+    editor_document::settings::get(schema, settings).map(|v| v[0].clone())
 }
 
 pub fn preset_and_look_through() {
@@ -586,7 +586,7 @@ pub fn workspace_walk() {
     ed = up(ed, fre(242, vec![press(LeftButton, (scrub_x, scrub_y))]));
     ed = up(ed, fre(243, vec![mv((tx + tw - 10, scrub_y)), release(LeftButton, (tx + tw - 10, scrub_y))]));
     let clock = editor::timeline(&ed);
-    assert!(rays_editor::Timeline::mode(&clock) == rays_editor::Timeline::Mode::Paused && rays_editor::Timeline::frame(&clock) >= 200, "dragging the timeline scrub did not seek and pause");
+    assert!(rays_editor::timeline::mode(&clock) == rays_editor::timeline::Mode::Paused && rays_editor::timeline::frame(&clock) >= 200, "dragging the timeline scrub did not seek and pause");
     ed = up(ed, fre(244, vec![k('/')]));
     ed = up(ed, fre(245, vec![key(Key::Escape)]));
     editor::close(&ed);
