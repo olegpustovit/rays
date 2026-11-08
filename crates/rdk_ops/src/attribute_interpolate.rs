@@ -4,7 +4,7 @@
 //! per-destination `Cell`s gathered from the job outputs and the cells are scattered back in range
 //! order, which is byte-identical to the sequential path for any domain count.
 use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use rdk_core::{
     attribute, cancel, error, geometry, group, packed, support, topology,
@@ -607,10 +607,8 @@ fn default_job(job: &Job, cell: &mut Cell) {
     }
 }
 
-type CellSlots = Vec<Mutex<Option<Vec<Vec<Cell>>>>>;
-
 /// Runs `work(rank, cells)` for every selected rank in disjoint ranges of `grain`, where `cells[j]`
-/// is job `j`'s state at that destination. Outputs are written back in range order.
+/// is job `j`'s state at that destination. Outputs are computed per rank, then stored in rank order.
 fn run_cells(
     cancel_token: Option<&cancel::T>,
     grain: i64,
@@ -622,12 +620,14 @@ fn run_cells(
     if count <= 0 {
         return Ok(());
     }
-    let ranges = ((count - 1) / grain + 1) as usize;
-    let slots: CellSlots = (0..ranges).map(|_| Mutex::new(None)).collect();
+    // ponytail: destinations come from a group order (arbitrary scatter), so results land per rank first and are stored sequentially.
+    let mut per_job: Vec<Vec<Cell>> = jobs.iter().map(|_| vec![Cell::default(); count as usize]).collect();
     {
         let shared: &Vec<Job> = jobs;
+        let windows: Vec<support::Windows<Cell>> =
+            per_job.iter_mut().map(|cells| support::Windows::even(cells, grain)).collect();
         support::run_indexed_ranges(grain, count, &|range, first, last| {
-            let mut per_job: Vec<Vec<Cell>> = shared.iter().map(|_| Vec::with_capacity((last - first) as usize)).collect();
+            let mut out: Vec<&mut [Cell]> = windows.iter().map(|window| window.take(range)).collect();
             let mut cells: Vec<Cell> = Vec::with_capacity(shared.len());
             for rank in first..last {
                 cancel::poll(cancel_token, rank, 4095)?;
@@ -638,23 +638,15 @@ fn run_cells(
                 }
                 work(rank, destination as i64, shared, &mut cells)?;
                 for (job_index, cell) in cells.drain(..).enumerate() {
-                    per_job[job_index].push(cell);
+                    out[job_index][(rank - first) as usize] = cell;
                 }
             }
-            *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(per_job);
             Ok(())
         })?;
     }
-    for (range, slot) in slots.into_iter().enumerate() {
-        let Some(per_job) = slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner) else {
-            continue;
-        };
-        let first = range as i64 * grain;
-        for (job_index, cells) in per_job.into_iter().enumerate() {
-            for (offset, cell) in cells.into_iter().enumerate() {
-                let destination = selected.element(first + offset as i64) as usize;
-                store_cell(&mut jobs[job_index], destination, cell);
-            }
+    for (job_index, cells) in per_job.into_iter().enumerate() {
+        for (rank, cell) in cells.into_iter().enumerate() {
+            store_cell(&mut jobs[job_index], selected.element(rank as i64) as usize, cell);
         }
     }
     Ok(())
@@ -711,33 +703,31 @@ fn materialize_int_array(
         choices,
     )?;
     let count = choices.len() as i64;
-    let ranges = if count <= 0 { 0 } else { ((count - 1) / grain + 1) as usize };
-    let slots: Vec<Mutex<Option<Vec<i64>>>> = (0..ranges).map(|_| Mutex::new(None)).collect();
-    support::run_indexed_ranges(grain, count, &|range, first, last| {
-        let base = offsets[first as usize];
-        let mut local = vec![0_i64; (offsets[last as usize] - base) as usize];
-        for destination in first..last {
-            cancel::poll(cancel_token, destination, 4095)?;
-            let d = destination as usize;
-            let choice = choices[d];
-            let at = (offsets[d] - base) as usize;
-            let length = (offsets[d + 1] - offsets[d]) as usize;
-            if choice >= 0 {
-                let from = source.offsets[choice as usize] as usize;
-                local[at..at + length].copy_from_slice(&source.values[from..from + length]);
-            } else if choice == -1 {
-                if let Some(old) = existing {
-                    let from = old.offsets[d] as usize;
-                    local[at..at + length].copy_from_slice(&old.values[from..from + length]);
+    let ranges = support::range_count(count, grain);
+    let mut values = vec![0_i64; offsets[count as usize] as usize];
+    {
+        let windows = support::Windows::new(&mut values, ranges, |range| offsets[(range * grain).min(count) as usize] as usize);
+        support::run_indexed_ranges(grain, count, &|range, first, last| {
+            let base = offsets[first as usize];
+            let local = windows.take(range);
+            for destination in first..last {
+                cancel::poll(cancel_token, destination, 4095)?;
+                let d = destination as usize;
+                let choice = choices[d];
+                let at = (offsets[d] - base) as usize;
+                let length = (offsets[d + 1] - offsets[d]) as usize;
+                if choice >= 0 {
+                    let from = source.offsets[choice as usize] as usize;
+                    local[at..at + length].copy_from_slice(&source.values[from..from + length]);
+                } else if choice == -1 {
+                    if let Some(old) = existing {
+                        let from = old.offsets[d] as usize;
+                        local[at..at + length].copy_from_slice(&old.values[from..from + length]);
+                    }
                 }
             }
-        }
-        *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(local);
-        Ok(())
-    })?;
-    let mut values: Vec<i64> = Vec::with_capacity(offsets[count as usize] as usize);
-    for slot in slots {
-        values.extend(slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner).unwrap_or_default());
+            Ok(())
+        })?;
     }
     Ok(packed::IntArray::View::create_validated_owned(offsets, values))
 }
@@ -757,33 +747,31 @@ fn materialize_float_array(
         choices,
     )?;
     let count = choices.len() as i64;
-    let ranges = if count <= 0 { 0 } else { ((count - 1) / grain + 1) as usize };
-    let slots: Vec<Mutex<Option<Vec<f64>>>> = (0..ranges).map(|_| Mutex::new(None)).collect();
-    support::run_indexed_ranges(grain, count, &|range, first, last| {
-        let base = offsets[first as usize];
-        let mut local = vec![0.0_f64; (offsets[last as usize] - base) as usize];
-        for destination in first..last {
-            cancel::poll(cancel_token, destination, 4095)?;
-            let d = destination as usize;
-            let choice = choices[d];
-            let at = (offsets[d] - base) as usize;
-            let length = (offsets[d + 1] - offsets[d]) as usize;
-            if choice >= 0 {
-                let from = source.offsets[choice as usize] as usize;
-                local[at..at + length].copy_from_slice(&source.values[from..from + length]);
-            } else if choice == -1 {
-                if let Some(old) = existing {
-                    let from = old.offsets[d] as usize;
-                    local[at..at + length].copy_from_slice(&old.values[from..from + length]);
+    let ranges = support::range_count(count, grain);
+    let mut values = vec![0.0_f64; offsets[count as usize] as usize];
+    {
+        let windows = support::Windows::new(&mut values, ranges, |range| offsets[(range * grain).min(count) as usize] as usize);
+        support::run_indexed_ranges(grain, count, &|range, first, last| {
+            let base = offsets[first as usize];
+            let local = windows.take(range);
+            for destination in first..last {
+                cancel::poll(cancel_token, destination, 4095)?;
+                let d = destination as usize;
+                let choice = choices[d];
+                let at = (offsets[d] - base) as usize;
+                let length = (offsets[d + 1] - offsets[d]) as usize;
+                if choice >= 0 {
+                    let from = source.offsets[choice as usize] as usize;
+                    local[at..at + length].copy_from_slice(&source.values[from..from + length]);
+                } else if choice == -1 {
+                    if let Some(old) = existing {
+                        let from = old.offsets[d] as usize;
+                        local[at..at + length].copy_from_slice(&old.values[from..from + length]);
+                    }
                 }
             }
-        }
-        *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(local);
-        Ok(())
-    })?;
-    let mut values: Vec<f64> = Vec::with_capacity(offsets[count as usize] as usize);
-    for slot in slots {
-        values.extend(slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner).unwrap_or_default());
+            Ok(())
+        })?;
     }
     Ok(packed::FloatArray::View::create_validated_owned(offsets, values))
 }
@@ -886,7 +874,7 @@ fn run_group_bytes(
     grain: i64,
     selection: Option<&group::T>,
     jobs: &mut Vec<GroupJob>,
-    work: &(dyn Fn(i64, &[GroupJob], &mut [Vec<u8>], usize) -> Result<(), error::T> + Sync),
+    work: &(dyn Fn(i64, &[GroupJob], &mut [&mut [u8]], usize) -> Result<(), error::T> + Sync),
 ) -> Result<(), error::T> {
     if jobs.is_empty() {
         return Ok(());
@@ -897,15 +885,14 @@ fn run_group_bytes(
         return Ok(());
     }
     let chunk = (grain / 8).max(1);
-    let ranges = ((byte_count - 1) / chunk + 1) as usize;
-    let slots: Vec<Mutex<Option<Vec<Vec<u8>>>>> = (0..ranges).map(|_| Mutex::new(None)).collect();
-    {
+    // Detach the output bits so the shared job view and the disjoint output windows never alias.
+    let mut outputs: Vec<Vec<u8>> = jobs.iter_mut().map(|job| std::mem::take(&mut job.group_output_bits)).collect();
+    let result = {
         let shared: &Vec<GroupJob> = jobs;
+        let windows: Vec<support::Windows<u8>> =
+            outputs.iter_mut().map(|bits| support::Windows::even(&mut bits[..byte_count as usize], chunk)).collect();
         support::run_indexed_ranges(chunk, byte_count, &|range, first_byte, last_byte| {
-            let mut locals: Vec<Vec<u8>> = shared
-                .iter()
-                .map(|job| job.group_output_bits[first_byte as usize..last_byte as usize].to_vec())
-                .collect();
+            let mut locals: Vec<&mut [u8]> = windows.iter().map(|window| window.take(range)).collect();
             for byte in first_byte..last_byte {
                 cancel::poll(cancel_token, byte, 511)?;
                 let first_destination = byte << 3;
@@ -920,23 +907,16 @@ fn run_group_bytes(
                     }
                 }
             }
-            *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(locals);
             Ok(())
-        })?;
+        })
+    };
+    for (job, bits) in jobs.iter_mut().zip(outputs) {
+        job.group_output_bits = bits;
     }
-    for (range, slot) in slots.into_iter().enumerate() {
-        let Some(locals) = slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner) else {
-            continue;
-        };
-        let first = range * chunk as usize;
-        for (job_index, bytes) in locals.into_iter().enumerate() {
-            jobs[job_index].group_output_bits[first..first + bytes.len()].copy_from_slice(&bytes);
-        }
-    }
-    Ok(())
+    result
 }
 
-fn clear_group_bits(locals: &mut [Vec<u8>], base_byte: usize, destination: i64) {
+fn clear_group_bits(locals: &mut [&mut [u8]], base_byte: usize, destination: i64) {
     let index = destination as usize;
     for local in locals.iter_mut() {
         bit_set(local, index - (base_byte << 3), false);
@@ -1098,55 +1078,50 @@ fn compute_primitive_weights(
         }
         offsets[destination + 1] = offsets[destination] + lengths[destination];
     }
-    let ranges = if target_count <= 0 { 0 } else { ((target_count - 1) / grain + 1) as usize };
-    let slots: Vec<Mutex<Option<(Vec<i64>, Vec<f64>)>>> = (0..ranges).map(|_| Mutex::new(None)).collect();
-    support::run_indexed_ranges(grain, target_count, &|range, first_destination, last_destination| {
-        let base = offsets[first_destination as usize];
-        let total = (offsets[last_destination as usize] - base) as usize;
-        let mut numbers = vec![0_i64; total];
-        let mut weights = vec![0.0_f64; total];
-        for destination in first_destination..last_destination {
-            cancel::poll(cancel_token, destination, 4095)?;
-            let d = destination as usize;
-            let primitive = primitive_numbers[d];
-            let output_first = (offsets[d] - base) as usize;
-            if preserve(destination, primitive) {
-                if let Some((old_numbers, old_weights)) = &existing {
-                    let old_first = old_numbers.offsets[d] as usize;
-                    let length = lengths[d] as usize;
-                    numbers[output_first..output_first + length]
-                        .copy_from_slice(&old_numbers.values[old_first..old_first + length]);
-                    weights[output_first..output_first + length]
-                        .copy_from_slice(&old_weights.values[old_first..old_first + length]);
-                }
-            } else if primitive >= 0 && primitive < primitive_count {
-                let first = topology_view.primitive_offsets[primitive as usize];
-                let last = topology_view.primitive_offsets[primitive as usize + 1];
-                let size = last - first;
-                let u = uvw.x[d] * pre_scale;
-                let v = uvw.y[d] * pre_scale;
-                let kind = topology_view.primitive_kinds[primitive as usize];
-                for local in 0..size {
-                    let vertex = first + local;
-                    numbers[output_first + local as usize] = if computed.computed_owner == WeightedSource::Points {
-                        topology_view.vertex_points[vertex as usize]
-                    } else {
-                        vertex
-                    };
-                    weights[output_first + local as usize] = kind_weight(kind, size, u, v, local);
+    let ranges = support::range_count(target_count, grain);
+    let bound = |range: i64| offsets[(range * grain).min(target_count) as usize] as usize;
+    let total_values = offsets[target_count as usize] as usize;
+    let (mut numbers, mut weights) = (vec![0_i64; total_values], vec![0.0_f64; total_values]);
+    {
+        let (number_windows, weight_windows) =
+            (support::Windows::new(&mut numbers, ranges, bound), support::Windows::new(&mut weights, ranges, bound));
+        support::run_indexed_ranges(grain, target_count, &|range, first_destination, last_destination| {
+            let base = offsets[first_destination as usize];
+            let (numbers, weights) = (number_windows.take(range), weight_windows.take(range));
+            for destination in first_destination..last_destination {
+                cancel::poll(cancel_token, destination, 4095)?;
+                let d = destination as usize;
+                let primitive = primitive_numbers[d];
+                let output_first = (offsets[d] - base) as usize;
+                if preserve(destination, primitive) {
+                    if let Some((old_numbers, old_weights)) = &existing {
+                        let old_first = old_numbers.offsets[d] as usize;
+                        let length = lengths[d] as usize;
+                        numbers[output_first..output_first + length]
+                            .copy_from_slice(&old_numbers.values[old_first..old_first + length]);
+                        weights[output_first..output_first + length]
+                            .copy_from_slice(&old_weights.values[old_first..old_first + length]);
+                    }
+                } else if primitive >= 0 && primitive < primitive_count {
+                    let first = topology_view.primitive_offsets[primitive as usize];
+                    let last = topology_view.primitive_offsets[primitive as usize + 1];
+                    let size = last - first;
+                    let u = uvw.x[d] * pre_scale;
+                    let v = uvw.y[d] * pre_scale;
+                    let kind = topology_view.primitive_kinds[primitive as usize];
+                    for local in 0..size {
+                        let vertex = first + local;
+                        numbers[output_first + local as usize] = if computed.computed_owner == WeightedSource::Points {
+                            topology_view.vertex_points[vertex as usize]
+                        } else {
+                            vertex
+                        };
+                        weights[output_first + local as usize] = kind_weight(kind, size, u, v, local);
+                    }
                 }
             }
-        }
-        *slots[range as usize].lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((numbers, weights));
-        Ok(())
-    })?;
-    let mut numbers: Vec<i64> = Vec::with_capacity(offsets[target_count as usize] as usize);
-    let mut weights: Vec<f64> = Vec::with_capacity(offsets[target_count as usize] as usize);
-    for slot in slots {
-        if let Some((range_numbers, range_weights)) = slot.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner) {
-            numbers.extend(range_numbers);
-            weights.extend(range_weights);
-        }
+            Ok(())
+        })?;
     }
     let numbers = packed::IntArray::View::create_validated_owned(offsets.clone(), numbers);
     let weights = packed::FloatArray::View::create_validated_owned(offsets, weights);

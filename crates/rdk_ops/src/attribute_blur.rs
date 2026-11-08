@@ -1,5 +1,4 @@
 //! Blur canonical `P` and matching point-owned float attributes over topology connectivity.
-use std::sync::Mutex;
 
 use rdk_core::{
     attribute, attribute_pattern, cancel, error, geometry, group, packed, support, topology_index,
@@ -160,26 +159,25 @@ fn run_inner(params: &Params, geometry_value: &geometry::T) -> Result<geometry::
                 }
             }
         };
-        let ranges = ((point_count - 1) / grain + 1) as usize;
-        let slots: Vec<Mutex<Option<Vec<Vec<f64>>>>> = (0..ranges).map(|_| Mutex::new(None)).collect();
         {
             let source_planes = &current;
             let selection = params.selection.as_ref();
             let topology = &topology;
-            let slots_ref = &slots;
+            let windows: Vec<support::Windows<f64>> =
+                next.iter_mut().map(|plane| support::Windows::even(plane, grain)).collect();
             support::run_indexed_ranges(grain, point_count, &|range, first_point, last_point| {
-                let length = (last_point - first_point) as usize;
-                let mut out: Vec<Vec<f64>> = vec![Vec::with_capacity(length); source_planes.len()];
+                let mut out: Vec<&mut [f64]> = windows.iter().map(|window| window.take(range)).collect();
                 for point in first_point..last_point {
                     cancel::poll(cancel_token, point, 4095)?;
                     let update = match selection {
                         None => true,
                         Some(selection) => group::mem(point, selection),
                     };
+                    let at = (point - first_point) as usize;
                     for (plane, source) in source_planes.iter().enumerate() {
                         let here = source[point as usize];
                         if !update {
-                            out[plane].push(here);
+                            out[plane][at] = here;
                             continue;
                         }
                         let first = topology.point_edge_offsets[point as usize] as usize;
@@ -197,28 +195,15 @@ fn run_inner(params: &Params, geometry_value: &geometry::T) -> Result<geometry::
                             }
                         }
                         if total == 0.0 {
-                            out[plane].push(here);
+                            out[plane][at] = here;
                         } else {
                             let average = sum / total;
-                            out[plane].push(here + step * (average - here));
+                            out[plane][at] = here + step * (average - here);
                         }
                     }
                 }
-                *slots_ref[range as usize]
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(out);
                 Ok(())
             })?;
-        }
-        for (range, slot) in slots.into_iter().enumerate() {
-            let out = slot
-                .into_inner()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .unwrap_or_default();
-            let first = range * grain as usize;
-            for (plane, values) in out.iter().enumerate() {
-                next[plane][first..first + values.len()].copy_from_slice(values);
-            }
         }
         std::mem::swap(&mut current, &mut next);
     }
