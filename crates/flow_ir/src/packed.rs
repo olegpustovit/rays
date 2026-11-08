@@ -15,7 +15,7 @@ use flow_check::{op, ray_host};
 use flow_eval as E;
 use flow_eval::{Live, State};
 use flow_syntax::context;
-use flow_syntax::packed_ops::{self, Binary, Comparison, Conversion, Integer, Unary};
+use flow_syntax::packed_ops::{self, Binary, Conversion, Integer, Unary};
 use flow_syntax::ty::Ty;
 use flow_syntax::value::{self, ResidualId, Value, struct_value};
 use rays_diagnostic::Diagnostic;
@@ -95,8 +95,10 @@ fn stage_refused() -> KErr {
     fail("E_GPU_STAGE", "A raster-stage intrinsic runs only in a fragment stage.")
 }
 
+#[cold]
+#[inline(never)]
 fn nonfinite<X>() -> K<X> {
-    Err(fail("E_NONFINITE", "Packed kernel produced a nonfinite result."))
+    Err(fail("E_NONFINITE", "packed produced a nonfinite value."))
 }
 
 /// Instructions that are typed (integer, text, table, loop): the general runner takes them.
@@ -256,10 +258,6 @@ fn convert_int(op: &Conversion, x: f64) -> K<i64> {
         Conversion::IntegerResult(name) => value::to_int(name, (x + 0.5).floor())?,
         Conversion::ToFloat => unreachable!("To_float is not an integer conversion"),
     })
-}
-
-fn width_of(ty: &Ty) -> K<usize> {
-    packed_ops::scalar_width(ty).ok_or(KErr::Unsupported)
 }
 
 fn unguarded(i: &Instruction) -> &Instruction {
@@ -597,7 +595,10 @@ fn noise_error(message: String) -> KErr {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Fast float path
+// Whole-kernel fast paths
+//
+// A launch whose region has one of these exact shapes skips the register machine. They perform the
+// same binary64 operations in the same order, so the results equal the general path's bit for bit.
 
 struct Streaming {
     noise: usize,
@@ -621,50 +622,41 @@ struct ScalarStreaming {
     outputs: Vec<Vec<((i64, i64, i64), Option<usize>)>>,
 }
 
-struct R {
-    t: T,
-    inputs: Vec<Arc<Vec<f64>>>,
-    borrowed: Vec<bool>,
-    lengths: Vec<usize>,
-    strides: Vec<usize>,
-    columns: Vec<Vec<Column>>,
-    uniforms: Vec<Vec<f64>>,
-    frame: Vec<f64>,
-    widths: Vec<usize>,
-    width: usize,
-    count: usize,
-    collecting: bool,
-    planes: bool,
-    accumulator: Mutex<Vec<f64>>,
-    initialized: AtomicBool,
-    ordered_add: bool,
-    streaming: Option<Streaming>,
-    scalar_streaming: Option<ScalarStreaming>,
-    block_size: usize,
-    blocks: usize,
-    blocks_per_chunk: usize,
-    dependent_flags: Vec<bool>,
-    omitted: Vec<bool>,
-    skip: Vec<usize>,
-    noise_scale: Vec<Option<(usize, usize, usize, usize)>>,
-    collect_product: Vec<Vec<Option<(usize, usize, usize)>>>,
+enum Plan {
+    Noise(Streaming),
+    Scalar(ScalarStreaming),
 }
 
-impl R {
-    fn skipped_before(&self, n: usize) -> usize {
-        self.skip.partition_point(|s| *s < n)
-    }
+/// A matched plan with what its loops read: float columns, the noise table and the scalar register
+/// values (`Const`, `Uniform` and `Frame` results by register).
+struct Fast {
+    plan: Plan,
+    columns: Vec<Vec<Column>>,
+    inputs: Vec<Arc<Vec<f64>>>,
+    scalars: Vec<f64>,
+    table: Arc<rays_math::noise::T>,
+    block_size: usize,
+    planes: bool,
+}
+
+struct Blk {
+    start: usize,
+    length: usize,
 }
 
 // A summed or accumulated chunk whose additions stay in reference order.
-fn chunk_ordered(r: &R, chunk: usize) -> K<()> {
-    let source = &r.inputs[0];
-    let first = chunk * r.blocks_per_chunk * r.block_size;
-    let last = r.count.min((chunk + 1) * r.blocks_per_chunk * r.block_size);
-    let mut acc = r.accumulator.lock().unwrap();
-    let width = r.width;
+fn chunk_ordered(sh: &TS, chunk: usize) -> K<()> {
+    let source = match &sh.inputs[0] {
+        Value::Float_array(d) | Value::Vec2_array(d) | Value::Vec3_array(d) | Value::Vec4_array(d) => d,
+        _ => unreachable!("ordered add over a float array"),
+    };
+    let first = chunk * sh.blocks_per_chunk * sh.block_size;
+    let last = sh.count.min((chunk + 1) * sh.blocks_per_chunk * sh.block_size);
+    let mut acc = sh.accumulator.lock().unwrap();
+    let width = sh.t.outputs[0].len();
+    let mut total = components_k(&acc)?;
     if width == 3 {
-        let (mut x, mut y, mut z) = (acc[0], acc[1], acc[2]);
+        let (mut x, mut y, mut z) = (total[0], total[1], total[2]);
         for i in first..last {
             let offset = i * 3;
             let next = x + source[offset];
@@ -683,325 +675,20 @@ fn chunk_ordered(r: &R, chunk: usize) -> K<()> {
             }
             z = next;
         }
-        acc[0] = x;
-        acc[1] = y;
-        acc[2] = z;
+        total.copy_from_slice(&[x, y, z]);
     } else {
         for i in first..last {
             for component in 0..width {
-                let x = acc[component] + source[i * width + component];
+                let x = total[component] + source[i * width + component];
                 if !x.is_finite() {
                     return nonfinite();
                 }
-                acc[component] = x;
+                total[component] = x;
             }
         }
     }
+    *acc = scalar_value_of(width, &total);
     Ok(())
-}
-
-struct CS {
-    scratch: Vec<f64>,
-    noise_scratch: rays_math::noise::Fbm3Scratch,
-    tables: Vec<Option<Arc<rays_math::noise::T>>>,
-    indices: Vec<usize>,
-}
-
-struct Blk {
-    contiguous: bool,
-    start: usize,
-    length: usize,
-    output_start: usize,
-}
-
-// One instruction over lanes first..last of a block.
-fn block_instruction(
-    r: &R,
-    regs: &Region::Registers,
-    cs: &mut CS,
-    b: &Blk,
-    slot: usize,
-    instruction: &Instruction,
-    first: usize,
-    last: usize,
-) -> K<()> {
-    let bs = r.block_size;
-    let at = regs.defs[slot] as usize * bs;
-    let t = &r.t;
-    match instruction {
-        Instruction::Guarded(conditions, body) => {
-            let selected = |scratch: &[f64], j: usize| {
-                conditions.iter().all(|(register, yes)| (scratch[*register as usize * bs + j] != 0.0) == *yes)
-            };
-            let mut next = first;
-            while next < last {
-                while next < last && !selected(&cs.scratch, next) {
-                    next += 1;
-                }
-                let begin = next;
-                while next < last && selected(&cs.scratch, next) {
-                    next += 1;
-                }
-                if begin < next {
-                    block_instruction(r, regs, cs, b, slot, body, begin, next)?;
-                }
-            }
-        }
-        Instruction::Int_const(n) => cs.scratch[at + first..at + last].fill(*n as f64),
-        Instruction::Const(x) => cs.scratch[at + first..at + last].fill(*x),
-        Instruction::Array_prepare(..) | Instruction::Gather(..) | Instruction::Int_gather(..) | Instruction::Loop_begin(_)
-        | Instruction::Loop_carry(..) | Instruction::Loop_end(..) | Instruction::Loop_result(..) => return Err(KErr::Unsupported),
-        Instruction::Text_const(_) | Instruction::Text_input(_) | Instruction::Text_uniform(_) | Instruction::Text_gather(..)
-        | Instruction::Text_select(..) => return Err(KErr::Unsupported),
-        Instruction::Input(input, width, component) => {
-            let (input, width, component) = (*input as usize, *width as usize, *component as usize);
-            if r.borrowed[input] {
-                let column = &r.columns[input][component];
-                for j in first..last {
-                    let i = if b.contiguous {
-                        b.start + j
-                    } else if t.iteration == Iteration::Zip {
-                        cs.indices[j]
-                    } else {
-                        cs.indices[j] / r.strides[input] % r.lengths[input]
-                    };
-                    cs.scratch[at + j] = column.data[(column.offset + i as i64 * column.stride) as usize];
-                }
-            } else {
-                let source = &r.inputs[input];
-                if t.iteration == Iteration::Zip && r.skip.is_empty() {
-                    // Layouts were checked by `Region::make`, and Zip's count is the shortest
-                    // complete input: these spans are within both arrays.
-                    for j in first..last {
-                        cs.scratch[at + j] = source[(b.start + j) * width + component];
-                    }
-                } else {
-                    for j in first..last {
-                        let i = if t.iteration == Iteration::Zip { cs.indices[j] } else { cs.indices[j] / r.strides[input] % r.lengths[input] };
-                        cs.scratch[at + j] = source[i * width + component];
-                    }
-                }
-            }
-        }
-        Instruction::Uniform(uniform, component) => {
-            let v = r.uniforms[*uniform as usize][*component as usize];
-            cs.scratch[at + first..at + last].fill(v);
-        }
-        Instruction::Frame(_) => cs.scratch[at + first..at + last].fill(r.frame[slot]),
-        Instruction::Accumulator(component) => {
-            let v = r.accumulator.lock().unwrap()[*component as usize];
-            cs.scratch[at + first..at + last].fill(v);
-        }
-        Instruction::Select(condition, yes, no) => {
-            let (condition, yes, no) = (*condition as usize * bs, *yes as usize * bs, *no as usize * bs);
-            for j in first..last {
-                cs.scratch[at + j] = cs.scratch[(if cs.scratch[condition + j] != 0.0 { yes } else { no }) + j];
-            }
-        }
-        Instruction::Noise3(x, y, z, _, octaves, lacunarity, gain) => {
-            let noise = cs.tables[slot].clone().ok_or(KErr::Unsupported)?;
-            let (x, y, z, frequency) = match r.noise_scale[slot] {
-                Some((x, y, z, f)) => (x, y, z, cs.scratch[f * bs + first]),
-                None => (*x as usize, *y as usize, *z as usize, 1.0),
-            };
-            let live = live_fractal(*lacunarity, *gain);
-            let octaves = match octaves {
-                LiveInt::Fixed(n) => *n,
-                LiveInt::Live(_) => return Err(KErr::Unsupported),
-            };
-            if octaves == 1 {
-                if live {
-                    let value = |reg: i64, j: usize| cs.scratch[reg as usize * bs + j];
-                    for j in first..last {
-                        op::check_noise_fractal(fractal_at(&value, *lacunarity, j), fractal_at(&value, *gain, j))?;
-                    }
-                }
-                rays_math::noise::sample3_in_place(
-                    &noise,
-                    first as i64,
-                    last as i64,
-                    Some((x * bs) as i64),
-                    Some((y * bs) as i64),
-                    Some((z * bs) as i64),
-                    Some(at as i64),
-                    None,
-                    None,
-                    None,
-                    Some(frequency),
-                    &mut cs.scratch,
-                )
-                .map_err(noise_error)?;
-            } else {
-                for j in first..last {
-                    let (lac, gn) = {
-                        let value = |reg: i64, j: usize| cs.scratch[reg as usize * bs + j];
-                        (fractal_at(&value, *lacunarity, j), fractal_at(&value, *gain, j))
-                    };
-                    if live {
-                        op::check_noise_fractal(lac, gn)?;
-                    }
-                    let v = rays_math::noise::fbm3_with_scratch(
-                        &mut cs.noise_scratch,
-                        &noise,
-                        octaves,
-                        lac,
-                        gn,
-                        cs.scratch[x * bs + j] * frequency,
-                        cs.scratch[y * bs + j] * frequency,
-                        cs.scratch[z * bs + j] * frequency,
-                    );
-                    cs.scratch[at + j] = v;
-                }
-            }
-            if r.noise_scale[slot].is_some() {
-                for j in first..last {
-                    if !cs.scratch[at + j].is_finite() {
-                        return nonfinite();
-                    }
-                }
-            }
-        }
-        Instruction::Binary(operation, a, bb) => {
-            let (a, bb) = (*a as usize * bs, *bb as usize * bs);
-            let s = &mut cs.scratch;
-            match operation {
-                Binary::Add => {
-                    for j in first..last {
-                        let x = s[a + j] + s[bb + j];
-                        if !x.is_finite() {
-                            return nonfinite();
-                        }
-                        s[at + j] = x;
-                    }
-                }
-                Binary::Sub => {
-                    for j in first..last {
-                        let x = s[a + j] - s[bb + j];
-                        if !x.is_finite() {
-                            return nonfinite();
-                        }
-                        s[at + j] = x;
-                    }
-                }
-                Binary::Mul => {
-                    for j in first..last {
-                        let x = s[a + j] * s[bb + j];
-                        if !x.is_finite() {
-                            return nonfinite();
-                        }
-                        s[at + j] = x;
-                    }
-                }
-                Binary::Div => {
-                    for j in first..last {
-                        let y = s[bb + j];
-                        let x = if y == 0.0 { 0.0 } else { s[a + j] / y };
-                        if !x.is_finite() {
-                            return nonfinite();
-                        }
-                        s[at + j] = x;
-                    }
-                }
-                Binary::Mod | Binary::Pow | Binary::Min | Binary::Max | Binary::Atan2 | Binary::Hypot | Binary::Ldexp => {
-                    for j in first..last {
-                        let x = binary_apply(*operation, s[a + j], s[bb + j]);
-                        if !x.is_finite() {
-                            return nonfinite();
-                        }
-                        s[at + j] = x;
-                    }
-                }
-                Binary::Lt | Binary::Le | Binary::Gt | Binary::Ge | Binary::Eq | Binary::And | Binary::Or => {
-                    for j in first..last {
-                        s[at + j] = binary_apply(*operation, s[a + j], s[bb + j]);
-                    }
-                }
-            }
-        }
-        Instruction::Fma(a, bb, c) => {
-            let (a, bb, c) = (*a as usize * bs, *bb as usize * bs, *c as usize * bs);
-            for j in first..last {
-                let value = rays_math::fma::fma(cs.scratch[a + j], cs.scratch[bb + j], cs.scratch[c + j]);
-                if !value.is_finite() {
-                    return nonfinite();
-                }
-                cs.scratch[at + j] = value;
-            }
-        }
-        Instruction::Checked_mul(p, a, bb) => {
-            let (a, bb) = (*a as usize * bs, *bb as usize * bs);
-            for j in first..last {
-                let (x, y) = (cs.scratch[a + j], cs.scratch[bb + j]);
-                if !(x.is_finite() && y.is_finite()) {
-                    return nonfinite();
-                }
-                cs.scratch[at + j] = checked_projection(*p, std::hint::black_box(x * y));
-            }
-        }
-        Instruction::Checked_fma(p, a, bb, c) => {
-            let (a, bb, c) = (*a as usize * bs, *bb as usize * bs, *c as usize * bs);
-            for j in first..last {
-                let (x, y, z) = (cs.scratch[a + j], cs.scratch[bb + j], cs.scratch[c + j]);
-                if !(x.is_finite() && y.is_finite() && z.is_finite()) {
-                    return nonfinite();
-                }
-                cs.scratch[at + j] = checked_projection(*p, rays_math::fma::fma(x, y, z));
-            }
-        }
-        Instruction::Unary(operation, a) => {
-            let a = *a as usize * bs;
-            let s = &mut cs.scratch;
-            match operation {
-                Unary::Sqrt => {
-                    for j in first..last {
-                        s[at + j] = s[a + j].abs().sqrt();
-                    }
-                }
-                Unary::Abs => {
-                    for j in first..last {
-                        s[at + j] = s[a + j].abs();
-                    }
-                }
-                Unary::Not => {
-                    for j in first..last {
-                        s[at + j] = if s[a + j] == 0.0 { 1.0 } else { 0.0 };
-                    }
-                }
-                _ => {
-                    for j in first..last {
-                        let x = unary_apply(*operation, s[a + j]);
-                        if !x.is_finite() {
-                            return nonfinite();
-                        }
-                        s[at + j] = x;
-                    }
-                }
-            }
-        }
-        Instruction::Int_input(_) | Instruction::Int_uniform(_) | Instruction::Int_frame(_) | Instruction::Int_accumulator
-        | Instruction::Int_binary(..) | Instruction::Int_compare(..) | Instruction::Int_abs(_) | Instruction::Convert(..)
-        | Instruction::Int_select(..) | Instruction::Raise(..) | Instruction::Rand_at(..) | Instruction::Trace(..)
-        | Instruction::Stage(..) => return Err(KErr::Unsupported),
-    }
-    Ok(())
-}
-
-fn block_execute(r: &R, regs: &Region::Registers, cs: &mut CS, b: &Blk, dependent: bool, first: usize, last: usize) -> K<()> {
-    for (slot, instruction) in regs.run_code.iter().enumerate() {
-        if r.dependent_flags[slot] == dependent && !r.omitted[slot] {
-            block_instruction(r, regs, cs, b, slot, instruction, first, last)?;
-        }
-    }
-    Ok(())
-}
-
-fn scalar_of(r: &R, id: usize) -> f64 {
-    match &r.t.code[id] {
-        Instruction::Const(x) => *x,
-        Instruction::Uniform(i, c) => r.uniforms[*i as usize][*c as usize],
-        Instruction::Frame(_) => r.frame[id],
-        _ => unreachable!("streaming scalar"),
-    }
 }
 
 fn column_at(c: &Column, i: usize) -> f64 {
@@ -1010,12 +697,12 @@ fn column_at(c: &Column, i: usize) -> f64 {
 
 // Noise3 scaled by one amplitude and added to a base: sampled straight into the outputs.
 fn block_streaming(
-    r: &R,
-    cs: &mut CS,
+    r: &Fast,
+    scratch: &mut [f64],
     b: &Blk,
     plan: &Streaming,
     base: usize,
-    outs: &mut [&mut [f64]],
+    outs: &mut [Option<&mut [f64]>],
     planes: &mut [Vec<Option<&mut [f64]>>],
 ) -> K<()> {
     let bs = r.block_size;
@@ -1024,11 +711,11 @@ fn block_streaming(
         &r.columns[plan.y.0 as usize][plan.y.2 as usize],
         &r.columns[plan.z.0 as usize][plan.z.2 as usize],
     );
-    let noise = cs.tables[plan.noise].clone().ok_or(KErr::Unsupported)?;
+    let noise = &r.table;
     let length = b.length;
-    let frequency = plan.frequency.map(|f| scalar_of(r, f)).unwrap_or(1.0);
+    let frequency = plan.frequency.map(|f| r.scalars[f]).unwrap_or(1.0);
     rays_math::noise::sample3_into(
-        &noise,
+        noise,
         0,
         length as i64,
         Some(x.offset + b.start as i64 * x.stride),
@@ -1042,20 +729,20 @@ fn block_streaming(
         &x.data,
         &y.data,
         &z.data,
-        &mut cs.scratch,
+        scratch,
     )
     .map_err(noise_error)?;
-    let amplitude = scalar_of(r, plan.amplitude);
+    let amplitude = r.scalars[plan.amplitude];
     for j in 0..length {
-        let noise = cs.scratch[j];
-        cs.scratch[j] = noise * amplitude;
+        let noise = scratch[j];
+        scratch[j] = noise * amplitude;
         // Multiplication cannot make NaN/infinity finite, so this check also rejects every
         // nonfinite noise sample.
-        if !cs.scratch[j].is_finite() {
+        if !scratch[j].is_finite() {
             return nonfinite();
         }
     }
-    let output_start = b.output_start - base;
+    let output_start = b.start - base;
     for (k, components) in plan.products.iter().enumerate() {
         let width = components.len();
         if r.planes {
@@ -1063,11 +750,11 @@ fn block_streaming(
                 let bcol = &r.columns[bse.0 as usize][bse.2 as usize];
                 let dcol = &r.columns[dir.0 as usize][dir.2 as usize];
                 for j in 0..length {
-                    cs.scratch[bs + j] = column_at(dcol, b.start + j) * cs.scratch[j];
-                    if !cs.scratch[bs + j].is_finite() {
+                    scratch[bs + j] = column_at(dcol, b.start + j) * scratch[j];
+                    if !scratch[bs + j].is_finite() {
                         return nonfinite();
                     }
-                    let v = column_at(bcol, b.start + j) + cs.scratch[bs + j];
+                    let v = column_at(bcol, b.start + j) + scratch[bs + j];
                     if !v.is_finite() {
                         return nonfinite();
                     }
@@ -1077,7 +764,7 @@ fn block_streaming(
                 }
             }
         } else {
-            let output = &mut *outs[k];
+            let output = outs[k].as_deref_mut().expect("collected output");
             let vector = if width == 3 {
                 let ((bi, bw, bx), (di, dw, dx)) = components[0];
                 let ((bj, bv, by), (dj, dv, dy)) = components[1];
@@ -1095,7 +782,7 @@ fn block_streaming(
                     let (base_in, dir_in) = (&r.inputs[bi], &r.inputs[di]);
                     for j in 0..length {
                         let at = (output_start + j) * 3;
-                        let (bj, dj, scale) = ((b.start + j) * bw, (b.start + j) * dw, cs.scratch[j]);
+                        let (bj, dj, scale) = ((b.start + j) * bw, (b.start + j) * dw, scratch[j]);
                         output[at] = dir_in[dj + dx] * scale;
                         output[at + 1] = dir_in[dj + dy] * scale;
                         output[at + 2] = dir_in[dj + dz] * scale;
@@ -1114,7 +801,7 @@ fn block_streaming(
                         let (bw, bc, dw, dc) = (*bw as usize, *bc as usize, *dw as usize, *dc as usize);
                         for j in 0..length {
                             let at = (output_start + j) * width + component;
-                            output[at] = dir_in[(b.start + j) * dw + dc] * cs.scratch[j];
+                            output[at] = dir_in[(b.start + j) * dw + dc] * scratch[j];
                             if !output[at].is_finite() {
                                 return nonfinite();
                             }
@@ -1133,24 +820,24 @@ fn block_streaming(
 
 // Noise3 under gain, bias and amplitude, in the same direct form.
 fn block_scalar_streaming(
-    r: &R,
-    cs: &mut CS,
+    r: &Fast,
+    scratch: &mut [f64],
     b: &Blk,
     plan: &ScalarStreaming,
     base: usize,
-    outs: &mut [&mut [f64]],
+    outs: &mut [Option<&mut [f64]>],
     planes: &mut [Vec<Option<&mut [f64]>>],
 ) -> K<()> {
     let bs = r.block_size;
     let (x, y) = (&r.columns[plan.x.0 as usize][plan.x.2 as usize], &r.columns[plan.y.0 as usize][plan.y.2 as usize]);
-    let noise = cs.tables[plan.noise].clone().ok_or(KErr::Unsupported)?;
+    let noise = &r.table;
     let length = b.length;
-    let frequency = plan.frequency.map(|f| scalar_of(r, f)).unwrap_or(1.0);
+    let frequency = plan.frequency.map(|f| r.scalars[f]).unwrap_or(1.0);
     match &plan.z {
         Some((i, _, c)) => {
             let z = &r.columns[*i as usize][*c as usize];
             rays_math::noise::sample3_into(
-                &noise,
+                noise,
                 0,
                 length as i64,
                 Some(x.offset + b.start as i64 * x.stride),
@@ -1164,7 +851,7 @@ fn block_scalar_streaming(
                 &x.data,
                 &y.data,
                 &z.data,
-                &mut cs.scratch,
+                scratch,
             )
             .map_err(noise_error)?;
         }
@@ -1172,7 +859,7 @@ fn block_scalar_streaming(
             // z is the constant zero: a zero buffer stands for it.
             let zeros = vec![0.0f64; length.max(1)];
             rays_math::noise::sample3_into(
-                &noise,
+                noise,
                 0,
                 length as i64,
                 Some(x.offset + b.start as i64 * x.stride),
@@ -1186,23 +873,23 @@ fn block_scalar_streaming(
                 &x.data,
                 &y.data,
                 &zeros,
-                &mut cs.scratch,
+                scratch,
             )
             .map_err(noise_error)?;
         }
     }
     let _ = bs;
-    let (gain, bias, amplitude) = (scalar_of(r, plan.gain), scalar_of(r, plan.bias), scalar_of(r, plan.amplitude));
+    let (gain, bias, amplitude) = (r.scalars[plan.gain], r.scalars[plan.bias], r.scalars[plan.amplitude]);
     for j in 0..length {
-        cs.scratch[j] *= gain;
-        cs.scratch[j] -= bias;
-        cs.scratch[j] *= amplitude;
+        scratch[j] *= gain;
+        scratch[j] -= bias;
+        scratch[j] *= amplitude;
         // Mul/Sub/Mul propagate every invalid intermediate to the final scale.
-        if !cs.scratch[j].is_finite() {
+        if !scratch[j].is_finite() {
             return nonfinite();
         }
     }
-    let output_start = b.output_start - base;
+    let output_start = b.start - base;
     for (k, components) in plan.outputs.iter().enumerate() {
         let width = components.len();
         for (component, ((bi, bw, bc), expression)) in components.iter().enumerate() {
@@ -1210,7 +897,7 @@ fn block_scalar_streaming(
                 let col = &r.columns[*bi as usize][*bc as usize];
                 for j in 0..length {
                     let v0 = column_at(col, b.start + j);
-                    let v = if expression.is_some() { v0 + cs.scratch[j] } else { v0 };
+                    let v = if expression.is_some() { v0 + scratch[j] } else { v0 };
                     if !v.is_finite() {
                         return nonfinite();
                     }
@@ -1221,10 +908,10 @@ fn block_scalar_streaming(
             } else {
                 let base_in = &r.inputs[*bi as usize];
                 let (bw, bc) = (*bw as usize, *bc as usize);
-                let output = &mut *outs[k];
+                let output = outs[k].as_deref_mut().expect("collected output");
                 for j in 0..length {
                     let v0 = base_in[(b.start + j) * bw + bc];
-                    let v = if expression.is_some() { v0 + cs.scratch[j] } else { v0 };
+                    let v = if expression.is_some() { v0 + scratch[j] } else { v0 };
                     if !v.is_finite() {
                         return nonfinite();
                     }
@@ -1236,229 +923,10 @@ fn block_scalar_streaming(
     Ok(())
 }
 
-// Every other block: the instructions in order, then their results stored or accumulated.
-fn block_store(
-    r: &R,
-    regs: &Region::Registers,
-    cs: &mut CS,
-    b: &Blk,
-    base: usize,
-    outs: &mut [&mut [f64]],
-    planes: &mut [Vec<Option<&mut [f64]>>],
-) -> K<()> {
-    let t = &r.t;
-    let bs = r.block_size;
-    let length = b.length;
-    let output_start = b.output_start - base;
-    block_execute(r, regs, cs, b, false, 0, length)?;
-    if t.result == RegionResult::Collect && r.planes {
-        for (k, registers) in regs.run_outputs.iter().enumerate() {
-            for (component, register) in registers.iter().enumerate() {
-                let source = *register as usize * bs;
-                if let Some((bse, a, bb)) = r.collect_product[k][component] {
-                    let (bse, a, bb) = (bse * bs, a * bs, bb * bs);
-                    for j in 0..length {
-                        cs.scratch[source + j] = cs.scratch[a + j] * cs.scratch[bb + j];
-                        if !cs.scratch[source + j].is_finite() {
-                            return nonfinite();
-                        }
-                        cs.scratch[source + j] = cs.scratch[bse + j] + cs.scratch[source + j];
-                    }
-                }
-                for j in 0..length {
-                    let x = cs.scratch[source + j];
-                    if !x.is_finite() {
-                        return nonfinite();
-                    }
-                    if let Some(data) = &mut planes[k][component] {
-                        data[output_start + j] = x;
-                    }
-                }
-            }
-        }
-    } else if t.result == RegionResult::Collect {
-        for (k, registers) in regs.run_outputs.iter().enumerate() {
-            let output = &mut *outs[k];
-            let width = registers.len();
-            if r.collect_product[k].iter().any(Option::is_some) {
-                for (component, product) in r.collect_product[k].iter().enumerate() {
-                    match product {
-                        Some((bse, a, bb)) => {
-                            let (bse, a, bb) = (bse * bs, a * bs, bb * bs);
-                            for j in 0..length {
-                                let at = (output_start + j) * width + component;
-                                // Store the product before adding: the array boundary preserves its
-                                // binary64 rounding, including cancellation and signed zero.
-                                output[at] = cs.scratch[a + j] * cs.scratch[bb + j];
-                                if !output[at].is_finite() {
-                                    return nonfinite();
-                                }
-                                output[at] = cs.scratch[bse + j] + output[at];
-                                if !output[at].is_finite() {
-                                    return nonfinite();
-                                }
-                            }
-                        }
-                        None => {
-                            let source = registers[component] as usize * bs;
-                            for j in 0..length {
-                                let x = cs.scratch[source + j];
-                                if !x.is_finite() {
-                                    return nonfinite();
-                                }
-                                output[(output_start + j) * width + component] = x;
-                            }
-                        }
-                    }
-                }
-            } else if width == 3 {
-                let (x, y, z) = (registers[0] as usize * bs, registers[1] as usize * bs, registers[2] as usize * bs);
-                for j in 0..length {
-                    let (px, py, pz) = (cs.scratch[x + j], cs.scratch[y + j], cs.scratch[z + j]);
-                    if !(px.is_finite() && py.is_finite() && pz.is_finite()) {
-                        return nonfinite();
-                    }
-                    let at = (output_start + j) * 3;
-                    output[at] = px;
-                    output[at + 1] = py;
-                    output[at + 2] = pz;
-                }
-            } else {
-                for component in 0..width {
-                    let source = registers[component] as usize * bs;
-                    for j in 0..length {
-                        let x = cs.scratch[source + j];
-                        if !x.is_finite() {
-                            return nonfinite();
-                        }
-                        output[(output_start + j) * width + component] = x;
-                    }
-                }
-            }
-        }
-    } else {
-        for j in 0..length {
-            if matches!(t.result, RegionResult::Accumulate(..)) {
-                block_execute(r, regs, cs, b, true, j, j + 1)?;
-            }
-            let initialized = r.initialized.load(Ordering::Relaxed);
-            for k in 0..t.outputs.len() {
-                let registers = &regs.run_outputs[k];
-                let width = r.widths[k];
-                for component in 0..width {
-                    let x = cs.scratch[registers[component] as usize * bs + j];
-                    if !x.is_finite() {
-                        return nonfinite();
-                    }
-                    match &t.result {
-                        RegionResult::Collect => {}
-                        RegionResult::Accumulate(..) => r.accumulator.lock().unwrap()[component] = x,
-                        RegionResult::Sum(_) => {
-                            let mut acc = r.accumulator.lock().unwrap();
-                            let total = if initialized { acc[component] + x } else { x };
-                            if !total.is_finite() {
-                                return nonfinite();
-                            }
-                            acc[component] = total;
-                        }
-                    }
-                    if r.collecting {
-                        outs[k][(output_start + j) * width + component] = x;
-                    }
-                }
-            }
-            if matches!(t.result, RegionResult::Sum(_)) {
-                r.initialized.store(true, Ordering::Relaxed);
-            }
-        }
-    }
-    Ok(())
-}
-
-fn run_chunk(
-    r: &R,
-    regs: &Region::Registers,
-    chunk: usize,
-    base: usize,
-    outs: &mut [&mut [f64]],
-    planes: &mut [Vec<Option<&mut [f64]>>],
-) -> K<()> {
-    if r.ordered_add {
-        return chunk_ordered(r, chunk);
-    }
-    let t = &r.t;
-    let bs = r.block_size;
-    let scratch_blocks = if r.streaming.is_some() {
-        if r.planes { 2 } else { 1 }
-    } else if r.scalar_streaming.is_some() {
-        2
-    } else {
-        regs.slots as usize
-    };
-    let mut scratch = vec![0.0f64; scratch_blocks * bs];
-    if Region::clobbered(t) && r.streaming.is_none() && r.scalar_streaming.is_none() {
-        for (slot, dedicated) in regs.dedicated.iter().enumerate() {
-            if !dedicated {
-                scratch[slot * bs..(slot + 1) * bs].fill(f64::NAN);
-            }
-        }
-    }
-    let tables: Vec<Option<Arc<rays_math::noise::T>>> = t
-        .code
-        .iter()
-        .map(|instruction| match unguarded(instruction) {
-            Instruction::Noise3(_, _, _, seed, _, _, _) => Some(op::noise_table(*seed)),
-            _ => None,
-        })
-        .collect();
-    let contiguous = t.iteration == Iteration::Zip && r.skip.is_empty();
-    let mut cs = CS {
-        scratch,
-        noise_scratch: rays_math::noise::create_fbm3_scratch(),
-        tables,
-        indices: if contiguous { Vec::new() } else { vec![0; bs] },
-    };
-    let last_block = r.blocks.min((chunk + 1) * r.blocks_per_chunk);
-    for block in chunk * r.blocks_per_chunk..last_block {
-        E::interruptible(&mut || {})?;
-        let start = block * bs;
-        let limit = r.count.min((block + 1) * bs);
-        let (length, output_start) = if contiguous {
-            (limit - start, start)
-        } else {
-            let mut skipped = r.skipped_before(start);
-            let mut length = 0;
-            for i in start..limit {
-                if skipped < r.skip.len() && r.skip[skipped] == i {
-                    skipped += 1;
-                } else {
-                    cs.indices[length] = i;
-                    length += 1;
-                }
-            }
-            (length, start - r.skipped_before(start))
-        };
-        let b = Blk { contiguous, start, length, output_start };
-        if let Some(plan) = &r.streaming {
-            block_streaming(r, &mut cs, &b, plan, base, outs, planes)?;
-        } else if let Some(plan) = &r.scalar_streaming {
-            block_scalar_streaming(r, &mut cs, &b, plan, base, outs, planes)?;
-        } else {
-            block_store(r, regs, &mut cs, &b, base, outs, planes)?;
-        }
-    }
-    Ok(())
-}
-
 // Select the narrower streaming loops only when every register belongs to the supported
 // noise/scale/output shape. Other programs stay on the general block executor.
-fn streaming_plan(
-    t: &T,
-    skip_empty: bool,
-    noise_scale: &[Option<(usize, usize, usize, usize)>],
-    collect_product: &[Vec<Option<(usize, usize, usize)>>],
-) -> Option<Streaming> {
-    if t.result != RegionResult::Collect || t.iteration != Iteration::Zip || !skip_empty {
+fn streaming_plan(t: &T) -> Option<Streaming> {
+    if t.result != RegionResult::Collect || t.iteration != Iteration::Zip || !t.skip.is_empty() {
         return None;
     }
     let code = &t.code;
@@ -1473,15 +941,21 @@ fn streaming_plan(
     let scalar = |id: usize| -> Option<usize> {
         matches!(&code[id], Instruction::Const(_) | Instruction::Uniform(..) | Instruction::Frame(_)).then_some(id)
     };
+    // an output `base + direction * scale`; the product is the later operand when both are products
     let mut shared: Option<usize> = None;
     let mut products = Vec::new();
-    for (k, output) in t.outputs.iter().enumerate() {
+    for output in t.outputs.iter() {
         let mut row = Vec::new();
-        for (component, register) in output.iter().enumerate() {
-            let (base, a, b) = collect_product[k][component]?;
-            let (direction, scale) = match (&code[a], &code[b]) {
-                (Instruction::Input(..), _) => (input(a)?, b),
-                (_, Instruction::Input(..)) => (input(b)?, a),
+        for register in output {
+            let register = *register as usize;
+            let Instruction::Binary(Binary::Add, a, b) = &code[register] else { return None };
+            let (a, b) = (*a as usize, *b as usize);
+            let (base, product) = if matches!(code[b], Instruction::Binary(Binary::Mul, ..)) { (a, b) } else { (b, a) };
+            let Instruction::Binary(Binary::Mul, x, y) = &code[product] else { return None };
+            let (x, y) = (*x as usize, *y as usize);
+            let (direction, scale) = match (&code[x], &code[y]) {
+                (Instruction::Input(..), _) => (input(x)?, y),
+                (_, Instruction::Input(..)) => (input(y)?, x),
                 _ => return None,
             };
             match shared {
@@ -1489,15 +963,8 @@ fn streaming_plan(
                 Some(old) if old == scale => {}
                 _ => return None,
             }
-            let register = *register as usize;
             allowed[register] = true;
-            match &code[register] {
-                Instruction::Binary(Binary::Add, x, y) => {
-                    let other = if *x as usize == base { *y } else { *x };
-                    allowed[other as usize] = true;
-                }
-                _ => return None,
-            }
+            allowed[product] = true;
             row.push((input(base)?, direction));
         }
         products.push(row);
@@ -1516,16 +983,29 @@ fn streaming_plan(
     };
     allowed[scale] = true;
     allowed[noise] = true;
+    // the three coordinates: inputs, or inputs under one shared scalar factor
     let (x, y, z, frequency) = match &code[noise] {
-        Instruction::Noise3(x, y, z, _, LiveInt::Fixed(1), LiveFloat::Fixed(_), LiveFloat::Fixed(_)) => match noise_scale[noise] {
-            Some((a, b, c, f)) => {
-                allowed[*x as usize] = true;
-                allowed[*y as usize] = true;
-                allowed[*z as usize] = true;
-                (input(a)?, input(b)?, input(c)?, Some(scalar(f)?))
+        Instruction::Noise3(x, y, z, _, LiveInt::Fixed(1), LiveFloat::Fixed(_), LiveFloat::Fixed(_)) => {
+            let scaled = |id: i64| -> Option<((i64, i64, i64), usize)> {
+                match &code[id as usize] {
+                    Instruction::Binary(Binary::Mul, a, b) => match (&code[*a as usize], &code[*b as usize]) {
+                        (Instruction::Input(..), _) => Some((input(*a as usize)?, scalar(*b as usize)?)),
+                        (_, Instruction::Input(..)) => Some((input(*b as usize)?, scalar(*a as usize)?)),
+                        _ => None,
+                    },
+                    _ => None,
+                }
+            };
+            match (scaled(*x), scaled(*y), scaled(*z)) {
+                (Some((a, f)), Some((b, g)), Some((c, h))) if f == g && g == h => {
+                    for id in [*x, *y, *z] {
+                        allowed[id as usize] = true;
+                    }
+                    (a, b, c, Some(f))
+                }
+                _ => (input(*x as usize)?, input(*y as usize)?, input(*z as usize)?, None),
             }
-            None => (input(*x as usize)?, input(*y as usize)?, input(*z as usize)?, None),
-        },
+        }
         _ => return None,
     };
     if !allowed.iter().all(|a| *a) {
@@ -1534,14 +1014,8 @@ fn streaming_plan(
     Some(Streaming { noise, amplitude, x, y, z, frequency, products })
 }
 
-fn scalar_streaming_plan(
-    t: &T,
-    skip_empty: bool,
-    streaming: bool,
-    noise_scale: &[Option<(usize, usize, usize, usize)>],
-) -> Option<ScalarStreaming> {
-    let _ = noise_scale;
-    if t.result != RegionResult::Collect || t.iteration != Iteration::Zip || !skip_empty || streaming {
+fn scalar_streaming_plan(t: &T) -> Option<ScalarStreaming> {
+    if t.result != RegionResult::Collect || t.iteration != Iteration::Zip || !t.skip.is_empty() {
         return None;
     }
     let code = &t.code;
@@ -1663,7 +1137,9 @@ fn scalar_streaming_plan(
     Some(ScalarStreaming { noise, x, y, z, frequency, gain, bias, amplitude, outputs })
 }
 
-fn ordered_add_t(t: &T) -> bool {
+/// `reduce +` over one array of floats or vectors: the additions run in reference order, straight
+/// from the source, with no registers.
+pub fn ordered_add(t: &T) -> bool {
     let output = &t.outputs[0];
     let width = output.len();
     match &t.result {
@@ -1693,8 +1169,66 @@ fn ordered_add_t(t: &T) -> bool {
     }
 }
 
-pub fn ordered_add(t: &T) -> bool {
-    ordered_add_t(t)
+/// The streaming plan of a Collect launch, with the columns and scalars its loops read; `None` when
+/// the region or its inputs do not have a plan's exact shape.
+fn fast_path(sh: &TS, fo: &Forcer<'_>) -> K<Option<Fast>> {
+    let t = &sh.t;
+    if sh.count == 0 {
+        return Ok(None);
+    }
+    let plan = match streaming_plan(t) {
+        Some(plan) => Plan::Noise(plan),
+        None => match scalar_streaming_plan(t) {
+            Some(plan) => Plan::Scalar(plan),
+            None => return Ok(None),
+        },
+    };
+    let mut columns = Vec::with_capacity(sh.inputs.len());
+    let mut inputs = Vec::with_capacity(sh.inputs.len());
+    for (i, value) in sh.inputs.iter().enumerate() {
+        let width = t.widths[i] as usize;
+        match (&sh.borrowed[i], value, width) {
+            (Some(borrowed), _, _) => {
+                columns.push(borrowed.clone());
+                inputs.push(Arc::new(Vec::new()));
+            }
+            (None, Value::Float_array(d), 1) | (None, Value::Vec2_array(d), 2) | (None, Value::Vec3_array(d), 3) | (None, Value::Vec4_array(d), 4) => {
+                columns.push((0..width).map(|c| Column { data: d.clone(), offset: c as i64, stride: width as i64 }).collect());
+                inputs.push(d.clone());
+            }
+            _ => return Ok(None),
+        }
+    }
+    let mut scalars = vec![0.0; t.code.len()];
+    for (slot, instruction) in t.code.iter().enumerate() {
+        scalars[slot] = match instruction {
+            Instruction::Const(x) => *x,
+            Instruction::Uniform(i, c) => *sh.ucomps(*i as usize, Some(fo))?.get(*c as usize).ok_or(KErr::Unsupported)?,
+            Instruction::Frame(_) => num_k(&sh.frame(slot)?)?,
+            _ => 0.0,
+        };
+    }
+    let noise = match &plan {
+        Plan::Noise(plan) => plan.noise,
+        Plan::Scalar(plan) => plan.noise,
+    };
+    let Instruction::Noise3(_, _, _, seed, ..) = &t.code[noise] else { unreachable!("a plan's noise register") };
+    Ok(Some(Fast { plan, columns, inputs, scalars, table: op::noise_table(*seed), block_size: sh.block_size, planes: sh.planes }))
+}
+
+fn fast_chunk(sh: &TS, f: &Fast, chunk: usize, base: usize, outs: &mut [Option<&mut [f64]>], planes: &mut [Vec<Option<&mut [f64]>>]) -> K<()> {
+    let bs = sh.block_size;
+    let mut scratch = vec![0.0f64; if f.planes { 2 * bs } else { bs }];
+    for block in chunk * sh.blocks_per_chunk..sh.blocks.min((chunk + 1) * sh.blocks_per_chunk) {
+        E::interruptible(&mut || {})?;
+        let start = block * bs;
+        let b = Blk { start, length: sh.count.min(start + bs) - start };
+        match &f.plan {
+            Plan::Noise(plan) => block_streaming(f, &mut scratch, &b, plan, base, outs, planes)?,
+            Plan::Scalar(plan) => block_scalar_streaming(f, &mut scratch, &b, plan, base, outs, planes)?,
+        }
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1744,389 +1278,6 @@ fn scalar_value_of(width: usize, a: &[f64]) -> Value {
 }
 
 type PlaneOutputs<'a, 'b> = Option<&'a mut [Vec<Option<&'b mut [f64]>>]>;
-
-fn float_launch(
-    run: &Run,
-    seed: &Option<Value>,
-    evaluate: &dyn Fn(ResidualId, &Arc<Term>) -> Result<Value, Diagnostic>,
-    uniform: &dyn Fn(&Value) -> Result<Value, Diagnostic>,
-    plane_outputs: PlaneOutputs<'_, '_>,
-) -> K<Vec<Value>> {
-    let t = &run.t;
-    let live = &run.live;
-    let nsrc = t.sources.len();
-    let mut borrowed: Vec<Option<Vec<Column>>> = vec![None; nsrc];
-    let mut lengths = vec![0usize; nsrc];
-    let mut empty_product = false;
-    let mut inputs: Vec<Arc<Vec<f64>>> = Vec::with_capacity(nsrc);
-    for (i, (residual, term)) in t.sources.iter().enumerate() {
-        if empty_product {
-            inputs.push(Arc::new(Vec::new()));
-            continue;
-        }
-        borrowed[i] = match &run.column_source {
-            None => None,
-            Some(source) => source(*residual, term)?,
-        };
-        let width = t.widths[i] as usize;
-        let data = match &borrowed[i] {
-            Some(columns) => {
-                lengths[i] = borrowed_count(width, columns)?;
-                Arc::new(Vec::new())
-            }
-            None => {
-                let value = evaluate(*residual, term)?;
-                let xs = match (&value, width) {
-                    (Value::Float_array(xs), 1) | (Value::Vec2_array(xs), 2) | (Value::Vec3_array(xs), 3) | (Value::Vec4_array(xs), 4) => xs.clone(),
-                    _ => return Err(fail("E_ARRAY_TYPE", "Kernel input changed its packed element type.")),
-                };
-                lengths[i] = xs.len() / width;
-                xs
-            }
-        };
-        if t.iteration == Iteration::Product && lengths[i] == 0 {
-            empty_product = true;
-        }
-        inputs.push(data);
-    }
-    let columns: Vec<Vec<Column>> = inputs
-        .iter()
-        .enumerate()
-        .map(|(i, array)| -> K<Vec<Column>> {
-            match &borrowed[i] {
-                None => Ok((0..t.widths[i]).map(|component| Column { data: array.clone(), offset: component, stride: t.widths[i] }).collect()),
-                Some(columns) => {
-                    if columns.len() as i64 != t.widths[i] {
-                        return Err(fail("E_ARRAY_TYPE", "Borrowed columns changed the packed element width."));
-                    }
-                    Ok(columns.clone())
-                }
-            }
-        })
-        .collect::<K<Vec<_>>>()?;
-    let mut count: i64 = if t.iteration == Iteration::Product && lengths.contains(&0) {
-        0
-    } else {
-        let mut n: i64 = if t.iteration == Iteration::Zip { i64::MAX } else { 1 };
-        for length in &lengths {
-            let length = *length as i64;
-            n = match t.iteration {
-                Iteration::Zip => n.min(length),
-                Iteration::Product => {
-                    if length != 0 && n > i64::MAX / length {
-                        return Err(fail("E_ARRAY_RANGE", "Kernel iteration count exceeds native bounds."));
-                    }
-                    n * length
-                }
-            };
-        }
-        n
-    };
-    if inputs.is_empty() {
-        count = 0;
-    }
-    let count = count as usize;
-    let mut strides = vec![1usize; inputs.len()];
-    if t.iteration == Iteration::Product && count > 0 {
-        for i in (0..inputs.len().saturating_sub(1)).rev() {
-            strides[i] = strides[i + 1] * lengths[i + 1];
-        }
-    }
-    let uniforms: Vec<Vec<f64>> = if count == 0 {
-        Vec::new()
-    } else {
-        let mut out = Vec::with_capacity(t.uniforms.len());
-        for value in &t.uniforms {
-            out.push(components(&uniform(value)?)?);
-        }
-        out
-    };
-    let mut frame = Vec::with_capacity(t.code.len());
-    for instruction in t.code.iter() {
-        frame.push(match unguarded(instruction) {
-            Instruction::Frame(name) => num_k(&frame_fact(name, live)?)?,
-            _ => 0.0,
-        });
-    }
-    let started = run.measure.as_ref().map(|m| (m.clock)());
-    let widths: Vec<usize> = t.outputs.iter().map(Vec::len).collect();
-    let width = widths[0];
-    for (_, term) in t.stages.iter() {
-        if let Ty::Array(ty) = term.ty() {
-            let w = width_of(ty)?;
-            if count > MAX_ARRAY / w {
-                return Err(fail("E_ARRAY_RANGE", "Kernel intermediate exceeds native storage bounds."));
-            }
-        }
-    }
-    let skip: Vec<usize> = t.skip.iter().filter(|i| **i >= 0 && (**i as usize) < count).map(|i| *i as usize).collect();
-    let kept = count - skip.len();
-    if let Some(expected) = run.expected_count {
-        if kept != expected {
-            return Err(fail("E_ARRAY_COUNT", "Column sink count differs from the kernel count."));
-        }
-    }
-    let collecting = matches!(t.result, RegionResult::Collect | RegionResult::Accumulate(_, true));
-    if collecting && widths.iter().any(|w| kept > MAX_ARRAY / w) {
-        return Err(fail("E_ARRAY_RANGE", "Kernel output exceeds native storage bounds."));
-    }
-    if let Some(planes) = &plane_outputs {
-        if !collecting || t.result != RegionResult::Collect || planes.len() != widths.len() {
-            return Err(fail("E_ARRAY_TYPE", "Column sinks require matching Collect outputs."));
-        }
-        for (k, components) in planes.iter().enumerate() {
-            if components.len() != widths[k] {
-                return Err(fail("E_ARRAY_TYPE", "Column sink width differs from the output."));
-            }
-            for data in components.iter().flatten() {
-                if data.len() != kept {
-                    return Err(fail("E_ARRAY_COUNT", "Column sink count differs from the kernel count."));
-                }
-            }
-        }
-    }
-    let has_planes = plane_outputs.is_some();
-    let mut outputs: Vec<Vec<f64>> =
-        widths.iter().map(|w| Region::floats_for(t, if collecting && !has_planes { kept * w } else { 0 })).collect();
-    let accumulator: Vec<f64> = match seed {
-        Some(v @ (Value::Vec2(..) | Value::Vec3(..) | Value::Vec4(..))) => components(v)?,
-        Some(v) => vec![num_k(v)?; width],
-        None => vec![0.0; width],
-    };
-    let initialized = match t.result {
-        RegionResult::Sum(zero) => zero,
-        _ => true,
-    };
-    let ordered_add = ordered_add_t(t);
-    let mut uses = vec![0usize; t.code.len()];
-    for instruction in t.code.iter() {
-        for r in Region::operands(instruction) {
-            uses[r as usize] += 1;
-        }
-    }
-    for output in t.outputs.iter() {
-        for r in output {
-            uses[*r as usize] += 1;
-        }
-    }
-    let mut omitted = vec![false; t.code.len()];
-    fn guards_of(i: &Instruction) -> Vec<(i64, bool)> {
-        match i {
-            Instruction::Guarded(conditions, body) => {
-                let mut v = conditions.clone();
-                v.extend(guards_of(body));
-                v
-            }
-            _ => Vec::new(),
-        }
-    }
-    let guards: Vec<Vec<(i64, bool)>> = t.code.iter().map(guards_of).collect();
-    // Scaling and sampling must have the same scope: moving an unconditional multiplication into
-    // an inactive noise branch would hide its overflow.
-    let scale = |conditions: &Vec<(i64, bool)>, register: i64| -> Option<(i64, i64)> {
-        let register = register as usize;
-        match unguarded(&t.code[register]) {
-            Instruction::Binary(Binary::Mul, a, b) if uses[register] == 1 && &guards[register] == conditions => {
-                let constant = |id: i64| matches!(unguarded(&t.code[id as usize]), Instruction::Const(_) | Instruction::Uniform(..) | Instruction::Frame(_));
-                if constant(*b) {
-                    Some((*a, *b))
-                } else if constant(*a) {
-                    Some((*b, *a))
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        }
-    };
-    let mut noise_scale: Vec<Option<(usize, usize, usize, usize)>> = vec![None; t.code.len()];
-    for (slot, instruction) in t.code.iter().enumerate() {
-        if let Instruction::Noise3(x, y, z, ..) = unguarded(instruction) {
-            if let (Some((a, f)), Some((b, g)), Some((c, h))) = (scale(&guards[slot], *x), scale(&guards[slot], *y), scale(&guards[slot], *z)) {
-                if f == g && g == h {
-                    omitted[*x as usize] = true;
-                    omitted[*y as usize] = true;
-                    omitted[*z as usize] = true;
-                    noise_scale[slot] = Some((a as usize, b as usize, c as usize, f as usize));
-                }
-            }
-        }
-    }
-    let mut collect_product: Vec<Vec<Option<(usize, usize, usize)>>> = Vec::new();
-    for output in t.outputs.iter() {
-        let mut row = Vec::new();
-        for register in output {
-            let register = *register as usize;
-            let mut found = None;
-            if t.result == RegionResult::Collect && uses[register] == 1 {
-                if let Instruction::Binary(Binary::Add, a, b) = &t.code[register] {
-                    let (a, b) = (*a as usize, *b as usize);
-                    let mut product = |base: usize, id: usize| -> Option<(usize, usize, usize)> {
-                        match &t.code[id] {
-                            Instruction::Binary(Binary::Mul, x, y) if uses[id] == 1 => {
-                                omitted[id] = true;
-                                omitted[register] = true;
-                                Some((base, *x as usize, *y as usize))
-                            }
-                            _ => None,
-                        }
-                    };
-                    found = product(a, b).or_else(|| product(b, a));
-                }
-            }
-            row.push(found);
-        }
-        collect_product.push(row);
-    }
-    let streaming = streaming_plan(t, skip.is_empty(), &noise_scale, &collect_product);
-    let scalar_streaming = scalar_streaming_plan(t, skip.is_empty(), streaming.is_some(), &noise_scale);
-    let (block_size, blocks, blocks_per_chunk, chunks) = block_layout(count, 1024);
-    // what `omitted` moved: a noise reads its scaled operands, a product its factors at the end
-    let extra = || -> Vec<(i64, i64)> {
-        let end = t.code.len() as i64;
-        let mut v = Vec::new();
-        for (slot, scale) in noise_scale.iter().enumerate() {
-            if let Some((a, b, c, f)) = scale {
-                v.extend([(*a as i64, slot as i64), (*b as i64, slot as i64), (*c as i64, slot as i64), (*f as i64, slot as i64)]);
-            }
-        }
-        for products in &collect_product {
-            for p in products.iter().flatten() {
-                v.extend([(p.0 as i64, end), (p.1 as i64, end), (p.2 as i64, end)]);
-            }
-        }
-        v
-    };
-    let regs = Region::registers(t, Some(&extra));
-    let at = |r: usize| regs.defs[r] as usize;
-    let noise_scale: Vec<Option<(usize, usize, usize, usize)>> =
-        noise_scale.iter().map(|o| o.map(|(a, b, c, f)| (at(a), at(b), at(c), at(f)))).collect();
-    let collect_product: Vec<Vec<Option<(usize, usize, usize)>>> =
-        collect_product.iter().map(|row| row.iter().map(|o| o.map(|(b, x, y)| (at(b), at(x), at(y)))).collect()).collect();
-    let dependent_flags = if count == 0 { Vec::new() } else { Region::dependent_flags(t).clone() };
-    let r = R {
-        t: t.clone(),
-        inputs,
-        borrowed: borrowed.iter().map(Option::is_some).collect(),
-        lengths,
-        strides,
-        columns,
-        uniforms,
-        frame,
-        widths: widths.clone(),
-        width,
-        count,
-        collecting,
-        planes: has_planes,
-        accumulator: Mutex::new(accumulator),
-        initialized: AtomicBool::new(initialized),
-        ordered_add,
-        streaming,
-        scalar_streaming,
-        block_size,
-        blocks,
-        blocks_per_chunk,
-        dependent_flags,
-        omitted,
-        skip,
-        noise_scale,
-        collect_product,
-    };
-    let mut plane_outputs = plane_outputs;
-    let errors: Vec<Mutex<Option<KErr>>> = (0..chunks).map(|_| Mutex::new(None)).collect();
-    let interrupt = E::current_interrupt();
-    match &t.result {
-        RegionResult::Collect => {
-            // chunk c writes output elements [bound c, bound c + 1)
-            let bounds: Vec<usize> = (0..=chunks)
-                .map(|c| {
-                    let s = count.min(c * blocks_per_chunk * block_size);
-                    s - r.skipped_before(s)
-                })
-                .collect();
-            let out_parts: Vec<Vec<Mutex<Option<&mut [f64]>>>> = if has_planes {
-                Vec::new()
-            } else {
-                outputs.iter_mut().zip(widths.iter()).map(|(o, w)| split_parts(o.as_mut_slice(), &bounds, *w)).collect()
-            };
-            let plane_parts: Vec<Vec<Option<Vec<Mutex<Option<&mut [f64]>>>>>> = match plane_outputs.as_mut() {
-                None => Vec::new(),
-                Some(planes) => planes
-                    .iter_mut()
-                    .map(|row| row.iter_mut().map(|p| p.as_mut().map(|d| split_parts(&mut **d, &bounds, 1))).collect())
-                    .collect(),
-            };
-            let work = |i: i64| -> Result<(), String> {
-                let c = i as usize;
-                let mut outs: Vec<&mut [f64]> = out_parts.iter().map(|p| p[c].lock().unwrap().take().unwrap()).collect();
-                let mut planes: Vec<Vec<Option<&mut [f64]>>> = plane_parts
-                    .iter()
-                    .map(|row| row.iter().map(|p| p.as_ref().map(|v| v[c].lock().unwrap().take().unwrap())).collect())
-                    .collect();
-                let result = interrupted(&interrupt, &mut || run_chunk(&r, regs, c, bounds[c], &mut outs, &mut planes));
-                if let Err(e) = result {
-                    *errors[c].lock().unwrap() = Some(e);
-                }
-                Ok(())
-            };
-            parallel::for_(1, 0, chunks as i64 - 1, &work).map_err(|m| noise_error(m))?;
-        }
-        RegionResult::Sum(_) | RegionResult::Accumulate(..) => {
-            // The fixed tree composes ordered chunk spans, retaining reference additions instead
-            // of reassociating partial sums (which changes cancellation and signed zero).
-            let mut outs: Vec<&mut [f64]> = outputs.iter_mut().map(|o| o.as_mut_slice()).collect();
-            let mut planes: Vec<Vec<Option<&mut [f64]>>> = Vec::new();
-            fn ordered(
-                r: &R,
-                regs: &Region::Registers,
-                first: usize,
-                last: usize,
-                outs: &mut [&mut [f64]],
-                planes: &mut [Vec<Option<&mut [f64]>>],
-                errors: &[Mutex<Option<KErr>>],
-            ) {
-                if last - first == 1 {
-                    let result = interrupted(&E::current_interrupt(), &mut || run_chunk(r, regs, first, 0, outs, planes));
-                    if let Err(e) = result {
-                        let mut slot = errors[first].lock().unwrap();
-                        if slot.is_none() {
-                            *slot = Some(e);
-                        }
-                    }
-                } else if first < last {
-                    let middle = first + (last - first) / 2;
-                    ordered(r, regs, first, middle, outs, planes, errors);
-                    ordered(r, regs, middle, last, outs, planes, errors);
-                }
-            }
-            ordered(&r, regs, 0, chunks, &mut outs, &mut planes, &errors);
-        }
-    }
-    for e in errors.iter() {
-        if let Some(e) = e.lock().unwrap().take() {
-            return Err(e);
-        }
-    }
-    let value: Vec<Value> = if has_planes {
-        Vec::new()
-    } else if collecting {
-        outputs.into_iter().enumerate().map(|(k, o)| float_value_of(widths[k], o)).collect()
-    } else {
-        let acc = r.accumulator.lock().unwrap();
-        vec![match (&t.result, seed) {
-            (RegionResult::Accumulate(..), Some(seed)) if kept == 0 => seed.clone(),
-            (RegionResult::Sum(false), _) if kept == 0 => Value::Int(0),
-            _ => scalar_value_of(width, &acc),
-        }]
-    };
-    if let (Some(m), Some(started)) = (&run.measure, started) {
-        (m.report)(t, seconds_since(m, started), false);
-    }
-    if value.len() == 1 {
-        Region::finished(t, value[0].clone());
-    }
-    Ok(value)
-}
 
 // ---------------------------------------------------------------------------------------------
 // General (typed) path: integers, text, tables, loops, random streams, ray queries.
@@ -2207,6 +1358,8 @@ struct TS {
     dependent_flags: Vec<bool>,
     text_count: usize,
     contiguous: bool,
+    ordered: bool,
+    fast: Option<Fast>,
 }
 
 impl TS {
@@ -2270,8 +1423,20 @@ fn row(array: &Value, index: i64) -> K<usize> {
     Ok(index as usize)
 }
 
+/// `finite(x)?` without building a `Result` inside a hot loop.
+macro_rules! finite {
+    ($x:expr) => {{
+        let x = $x;
+        if !x.is_finite() {
+            return nonfinite();
+        }
+        x
+    }};
+}
+
+#[inline(always)]
 fn finite(x: f64) -> K<f64> {
-    if x.is_finite() { Ok(x) } else { Err(fail("E_NONFINITE", "packed produced a nonfinite value.")) }
+    if x.is_finite() { Ok(x) } else { nonfinite() }
 }
 
 // whether a leading instruction is total: it cannot fail or read lazily
@@ -2301,6 +1466,8 @@ struct TC {
     indices: Vec<usize>,
     start: usize,
     guard_spans: Option<HashMap<(Vec<(i64, bool)>, usize, usize), Vec<usize>>>,
+    /// A float fold's running value, chunk-local: the chunk's last lane hands it back to the launch.
+    acc: [f64; 4],
 }
 
 impl TC {
@@ -2499,7 +1666,7 @@ fn texec(
             };
             let o = toff(place);
             for j in first..last {
-                tc.texts[o + j] = data[source_index(tc, j, i)].clone();
+                tc.texts[o + j] = data[source_index(tc, j, i)].to_vec();
             }
         }
         Instruction::Text_gather(array, index) => {
@@ -2511,7 +1678,7 @@ fn texec(
             let o = toff(place);
             for j in first..last {
                 let k = row(array, tc.integer[*index as usize * bs + j])?;
-                tc.texts[o + j] = data[k].clone();
+                tc.texts[o + j] = data[k].to_vec();
             }
         }
         Instruction::Text_select(condition, yes, no) => {
@@ -2596,7 +1763,7 @@ fn texec(
             };
             for j in first..last {
                 let k = row(array, tc.integer[*index as usize * bs + j])?;
-                tc.floats[at + j] = finite(data[k * *width as usize + *component as usize])?;
+                tc.floats[at + j] = finite!(data[k * *width as usize + *component as usize]);
             }
         }
         Instruction::Int_const(n) => tc.integer[at + first..at + last].fill(*n),
@@ -2647,7 +1814,7 @@ fn texec(
                 for j in first..last {
                     let x = column_at(column, source_index(tc, j, i));
                     if !x.is_finite() {
-                        return Err(fail("E_NONFINITE", "packed produced a nonfinite value."));
+                        return nonfinite();
                     }
                     tc.floats[at + j] = x;
                 }
@@ -2657,11 +1824,23 @@ fn texec(
                     _ => None,
                 };
                 match direct {
+                    Some(data) if sh.contiguous && width == 1 => {
+                        let lanes = &mut tc.floats[at + first..at + last];
+                        lanes.copy_from_slice(&data[tc.start + first..tc.start + last]);
+                        if !lanes.iter().all(|x| x.is_finite()) {
+                            return nonfinite();
+                        }
+                    }
+                    Some(data) if sh.contiguous => {
+                        for j in first..last {
+                            tc.floats[at + j] = finite!(data[(tc.start + j) * width + component]);
+                        }
+                    }
                     Some(data) => {
                         for j in first..last {
                             let x = data[source_index(tc, j, i) * width + component];
                             if !x.is_finite() {
-                                return Err(fail("E_NONFINITE", "packed produced a nonfinite value."));
+                                return nonfinite();
                             }
                             tc.floats[at + j] = x;
                         }
@@ -2669,7 +1848,7 @@ fn texec(
                     None => {
                         for j in first..last {
                             let element = value::array_get(&sh.inputs[i], source_index(tc, j, i) as i64)?;
-                            tc.floats[at + j] = finite(components_k(&element)?[component])?;
+                            tc.floats[at + j] = finite!(components_k(&element)?[component]);
                         }
                     }
                 }
@@ -2694,13 +1873,13 @@ fn texec(
         Instruction::Uniform(i, c) => {
             if first < last {
                 let comps = sh.ucomps(*i as usize, fo)?;
-                let x = finite(*comps.get(*c as usize).ok_or(KErr::Unsupported)?)?;
+                let x = finite!(*comps.get(*c as usize).ok_or(KErr::Unsupported)?);
                 tc.floats[at + first..at + last].fill(x);
             }
         }
         Instruction::Frame(_) => {
             if first < last {
-                let x = finite(num_k(&sh.frame(slot)?)?)?;
+                let x = finite!(num_k(&sh.frame(slot)?)?);
                 tc.floats[at + first..at + last].fill(x);
             }
         }
@@ -2709,7 +1888,7 @@ fn texec(
             _ => unreachable!("integer accumulator"),
         },
         Instruction::Accumulator(c) => {
-            let x = finite(components_k(&sh.accumulator.lock().unwrap())?[*c as usize])?;
+            let x = finite!(tc.acc[*c as usize]);
             tc.floats[at + first..at + last].fill(x);
         }
         Instruction::Int_binary(operation, a, b) => {
@@ -2732,7 +1911,7 @@ fn texec(
         }
         Instruction::Convert(Conversion::ToFloat, a) => {
             for j in first..last {
-                tc.floats[at + j] = finite(tc.numeric(regs, bs, *a as usize, j))?;
+                tc.floats[at + j] = finite!(tc.numeric(regs, bs, *a as usize, j));
             }
         }
         Instruction::Convert(operation, a) => {
@@ -2747,10 +1926,17 @@ fn texec(
                 tc.integer[at + j] = tc.integer[chosen + j];
             }
         }
+        // Registers hold finite values: a selected one needs no second check.
+        Instruction::Select(c, a, b) if !banks[*c as usize] && !banks[*a as usize] && !banks[*b as usize] => {
+            let (c, a, b) = (*c as usize * bs, *a as usize * bs, *b as usize * bs);
+            for j in first..last {
+                tc.floats[at + j] = tc.floats[(if tc.floats[c + j] != 0.0 { a } else { b }) + j];
+            }
+        }
         Instruction::Select(c, a, b) => {
             for j in first..last {
                 let chosen = if tc.numeric(regs, bs, *c as usize, j) != 0.0 { *a } else { *b };
-                tc.floats[at + j] = finite(tc.numeric(regs, bs, chosen as usize, j))?;
+                tc.floats[at + j] = finite!(tc.numeric(regs, bs, chosen as usize, j));
             }
         }
         Instruction::Binary(operation, a, b) if !banks[*a as usize] && !banks[*b as usize] => {
@@ -2763,17 +1949,23 @@ fn texec(
             match operation {
                 Binary::Add => {
                     for j in first..last {
-                        f[at + j] = finite(f[a + j] + f[b + j])?;
+                        f[at + j] = finite!(f[a + j] + f[b + j]);
                     }
                 }
                 Binary::Sub => {
                     for j in first..last {
-                        f[at + j] = finite(f[a + j] - f[b + j])?;
+                        f[at + j] = finite!(f[a + j] - f[b + j]);
                     }
                 }
                 Binary::Mul => {
                     for j in first..last {
-                        f[at + j] = finite(f[a + j] * f[b + j])?;
+                        f[at + j] = finite!(f[a + j] * f[b + j]);
+                    }
+                }
+                Binary::Div => {
+                    for j in first..last {
+                        let y = f[b + j];
+                        f[at + j] = finite!(if y == 0.0 { 0.0 } else { f[a + j] / y });
                     }
                 }
                 _ if compare => {
@@ -2783,9 +1975,29 @@ fn texec(
                 }
                 _ => {
                     for j in first..last {
-                        f[at + j] = finite(binary_apply(*operation, f[a + j], f[b + j]))?;
+                        f[at + j] = finite!(binary_apply(*operation, f[a + j], f[b + j]));
                     }
                 }
+            }
+        }
+        Instruction::Fma(a, b, c) if !banks[*a as usize] && !banks[*b as usize] && !banks[*c as usize] => {
+            let (a, b, c) = (*a as usize * bs, *b as usize * bs, *c as usize * bs);
+            for j in first..last {
+                tc.floats[at + j] = finite!(rays_math::fma::fma(tc.floats[a + j], tc.floats[b + j], tc.floats[c + j]));
+            }
+        }
+        Instruction::Checked_mul(p, a, b) if !banks[*a as usize] && !banks[*b as usize] => {
+            let (a, b) = (*a as usize * bs, *b as usize * bs);
+            for j in first..last {
+                let (x, y) = (finite(tc.floats[a + j])?, finite(tc.floats[b + j])?);
+                tc.floats[at + j] = checked_projection(*p, std::hint::black_box(x * y));
+            }
+        }
+        Instruction::Checked_fma(p, a, b, c) if !banks[*a as usize] && !banks[*b as usize] && !banks[*c as usize] => {
+            let (a, b, c) = (*a as usize * bs, *b as usize * bs, *c as usize * bs);
+            for j in first..last {
+                let (x, y, z) = (finite(tc.floats[a + j])?, finite(tc.floats[b + j])?, finite(tc.floats[c + j])?);
+                tc.floats[at + j] = checked_projection(*p, rays_math::fma::fma(x, y, z));
             }
         }
         Instruction::Fma(a, b, c) => {
@@ -2795,28 +2007,28 @@ fn texec(
                     tc.numeric(regs, bs, *b as usize, j),
                     tc.numeric(regs, bs, *c as usize, j),
                 );
-                tc.floats[at + j] = finite(v)?;
+                tc.floats[at + j] = finite!(v);
             }
         }
         Instruction::Checked_mul(p, a, b) => {
             for j in first..last {
-                let x = finite(tc.numeric(regs, bs, *a as usize, j))?;
-                let y = finite(tc.numeric(regs, bs, *b as usize, j))?;
+                let x = finite!(tc.numeric(regs, bs, *a as usize, j));
+                let y = finite!(tc.numeric(regs, bs, *b as usize, j));
                 tc.floats[at + j] = checked_projection(*p, std::hint::black_box(x * y));
             }
         }
         Instruction::Checked_fma(p, a, b, c) => {
             for j in first..last {
-                let x = finite(tc.numeric(regs, bs, *a as usize, j))?;
-                let y = finite(tc.numeric(regs, bs, *b as usize, j))?;
-                let z = finite(tc.numeric(regs, bs, *c as usize, j))?;
+                let x = finite!(tc.numeric(regs, bs, *a as usize, j));
+                let y = finite!(tc.numeric(regs, bs, *b as usize, j));
+                let z = finite!(tc.numeric(regs, bs, *c as usize, j));
                 tc.floats[at + j] = checked_projection(*p, rays_math::fma::fma(x, y, z));
             }
         }
         Instruction::Binary(operation, a, b) => {
             for j in first..last {
                 let v = binary_apply(*operation, tc.numeric(regs, bs, *a as usize, j), tc.numeric(regs, bs, *b as usize, j));
-                tc.floats[at + j] = finite(v)?;
+                tc.floats[at + j] = finite!(v);
             }
         }
         Instruction::Trace(field, r) => {
@@ -2831,7 +2043,7 @@ fn texec(
                         h
                     }
                 };
-                tc.floats[at + j] = finite(trace_field(*field, &hit))?;
+                tc.floats[at + j] = finite!(trace_field(*field, &hit));
             }
         }
         Instruction::Stage(..) => return Err(stage_refused()),
@@ -2841,15 +2053,44 @@ fn texec(
                 tc.floats[at + j] = packed_ops::rand_at(tc.integer[seed + j], tc.integer[index + j]);
             }
         }
+        Instruction::Unary(operation, a) if !banks[*a as usize] => {
+            let a = *a as usize * bs;
+            let f = &mut tc.floats;
+            match operation {
+                // total over finite values
+                Unary::Sqrt | Unary::Abs | Unary::Not => {
+                    for j in first..last {
+                        f[at + j] = unary_apply(*operation, f[a + j]);
+                    }
+                }
+                _ => {
+                    for j in first..last {
+                        f[at + j] = finite!(unary_apply(*operation, f[a + j]));
+                    }
+                }
+            }
+        }
         Instruction::Unary(operation, a) => {
             for j in first..last {
                 let v = unary_apply(*operation, tc.numeric(regs, bs, *a as usize, j));
-                tc.floats[at + j] = finite(v)?;
+                tc.floats[at + j] = finite!(v);
             }
         }
         Instruction::Noise3(x, y, z, seed, octaves, lacunarity, gain) => {
             let noise = tc.tables.entry(*seed).or_insert_with(|| op::noise_table(*seed)).clone();
             let live = live_fractal(*lacunarity, *gain);
+            if matches!(octaves, LiveInt::Fixed(1)) && !banks[*x as usize] && !banks[*y as usize] && !banks[*z as usize] {
+                if live {
+                    let value = |reg: i64, j: usize| tc.floats[reg as usize * bs + j];
+                    for j in first..last {
+                        op::check_noise_fractal(fractal_at(&value, *lacunarity, j), fractal_at(&value, *gain, j))?;
+                    }
+                }
+                let offset = |register: &i64| Some((*register as usize * bs) as i64);
+                rays_math::noise::sample3_in_place(&noise, first as i64, last as i64, offset(x), offset(y), offset(z), Some(at as i64), None, None, None, None, &mut tc.floats)
+                    .map_err(noise_error)?;
+                return Ok(());
+            }
             for j in first..last {
                 let (lac, gn) = {
                     let value = |reg: i64, j: usize| tc.numeric(regs, bs, reg as usize, j);
@@ -2869,7 +2110,7 @@ fn texec(
                 let (px, py, pz) =
                     (tc.numeric(regs, bs, *x as usize, j), tc.numeric(regs, bs, *y as usize, j), tc.numeric(regs, bs, *z as usize, j));
                 let v = rays_math::noise::fbm3_with_scratch(&mut tc.scratch, &noise, octaves, lac, gn, px, py, pz);
-                tc.floats[at + j] = finite(v)?;
+                tc.floats[at + j] = finite!(v);
             }
         }
     }
@@ -2973,15 +2214,24 @@ fn typed_chunk(
     touts: &mut [Option<&mut [Vec<u8>]>],
     planes: &mut [Vec<Option<&mut [f64]>>],
 ) -> K<()> {
+    if sh.ordered {
+        return chunk_ordered(sh, chunk);
+    }
+    if let Some(fast) = &sh.fast {
+        return fast_chunk(sh, fast, chunk, base, fouts, planes);
+    }
     let t = &sh.t;
     let bs = sh.block_size;
     let banks = &regs.integer_slots;
     let slots = regs.slots as usize;
+    // a bank nothing writes stays empty
+    let integers = banks.contains(&true);
+    let traces = t.code.iter().any(|i| matches!(unguarded(i), Instruction::Trace(..)));
     let mut tc = TC {
-        integer: vec![0; slots * bs],
+        integer: vec![0; if integers { slots * bs } else { 0 }],
         floats: vec![0.0; slots * bs],
         texts: vec![Vec::new(); sh.text_count * bs],
-        traced: vec![None; bs],
+        traced: vec![None; if traces { bs } else { 0 }],
         next_float: vec![0.0; sh.carried],
         next_int: vec![0; sh.carried],
         next_text: vec![Vec::new(); sh.carried],
@@ -2990,15 +2240,27 @@ fn typed_chunk(
         indices: if sh.contiguous { Vec::new() } else { vec![0; bs] },
         start: 0,
         guard_spans: None,
+        acc: [0.0; 4],
     };
     if Region::clobbered(t) {
         for (slot, dedicated) in regs.dedicated.iter().enumerate() {
             if !dedicated {
-                tc.integer[slot * bs..(slot + 1) * bs].fill(i64::MIN);
+                if integers {
+                    tc.integer[slot * bs..(slot + 1) * bs].fill(i64::MIN);
+                }
                 tc.floats[slot * bs..(slot + 1) * bs].fill(f64::NAN);
             }
         }
     }
+    // A float Sum or Accumulate runs on a chunk-local accumulator: chunks run in order, each
+    // taking the running value from the launch and handing it back.
+    let fold = (t.result != RegionResult::Collect && !sh.integer_outputs[0]).then(|| t.outputs[0].len());
+    let mut initialized = sh.initialized.load(Ordering::Relaxed);
+    if fold.is_some() {
+        let running = components_k(&sh.accumulator.lock().unwrap())?;
+        tc.acc[..running.len()].copy_from_slice(&running);
+    }
+    let dependent = sh.dependent_flags.contains(&true);
     let has_planes = sh.planes;
     let ncode = t.code.len();
     let last_block = sh.blocks.min((chunk + 1) * sh.blocks_per_chunk);
@@ -3110,63 +2372,51 @@ fn typed_chunk(
             for j in 0..length {
                 if sh.gather {
                     texec_range(sh, regs, &mut tc, fo, None, 0, ncode, j, j + 1)?;
-                } else {
+                } else if dependent {
                     texec_range(sh, regs, &mut tc, fo, Some(true), 0, ncode, j, j + 1)?;
                 }
                 let output_index = start - before + j - base;
-                for k in 0..t.outputs.len() {
-                    let registers = &t.outputs[k];
-                    let value = if sh.integer_outputs[k] {
-                        Value::Int(tc.integer[registers[0] as usize * bs + j])
-                    } else {
-                        let mut xs = Vec::with_capacity(registers.len());
-                        for r in registers.iter() {
-                            xs.push(finite(tc.numeric(regs, bs, *r as usize, j))?);
+                let registers = &t.outputs[0];
+                match fold {
+                    Some(width) => {
+                        for (c, r) in registers.iter().enumerate() {
+                            let x = finite(tc.numeric(regs, bs, *r as usize, j))?;
+                            tc.acc[c] = match &t.result {
+                                RegionResult::Sum(_) if initialized => finite(tc.acc[c] + x)?,
+                                _ => x,
+                            };
+                            if let (true, Some(data)) = (sh.collecting, &mut fouts[0]) {
+                                data[output_index * width + c] = x;
+                            }
                         }
-                        scalar_value_of(xs.len(), &xs)
-                    };
-                    {
+                    }
+                    None => {
+                        let value = Value::Int(tc.integer[registers[0] as usize * bs + j]);
                         let mut acc = sh.accumulator.lock().unwrap();
                         let next = match &t.result {
                             RegionResult::Collect => unreachable!("collect stores whole blocks"),
                             RegionResult::Accumulate(..) => value.clone(),
-                            RegionResult::Sum(zero) => {
-                                if !sh.initialized.load(Ordering::Relaxed) {
-                                    value.clone()
-                                } else {
-                                    match (&*acc, &value) {
-                                        (Value::Int(a), Value::Int(b)) if *zero => Value::Int(packed_ops::integer_apply(Integer::Iadd, *a, *b)?),
-                                        (a, b) => value::arith("array/sum", &|x, y| x + y, a, b)?,
-                                    }
-                                }
-                            }
+                            RegionResult::Sum(_) if !initialized => value.clone(),
+                            RegionResult::Sum(zero) => match (&*acc, &value) {
+                                (Value::Int(a), Value::Int(b)) if *zero => Value::Int(packed_ops::integer_apply(Integer::Iadd, *a, *b)?),
+                                (a, b) => value::arith("array/sum", &|x, y| x + y, a, b)?,
+                            },
                         };
                         *acc = next;
-                    }
-                    if sh.collecting {
-                        if has_planes {
-                            for (c, r) in registers.iter().enumerate() {
-                                if let Some(data) = &mut planes[k][c] {
-                                    data[output_index] = finite(tc.numeric(regs, bs, *r as usize, j))?;
-                                }
-                            }
-                        } else if sh.integer_outputs[k] {
-                            if let Some(data) = &mut iouts[k] {
-                                data[output_index] = tc.integer[registers[0] as usize * bs + j];
-                            }
-                        } else if let Some(data) = &mut fouts[k] {
-                            let width = registers.len();
-                            for (c, r) in registers.iter().enumerate() {
-                                data[output_index * width + c] = finite(tc.numeric(regs, bs, *r as usize, j))?;
-                            }
+                        if let (true, Some(data)) = (sh.collecting, &mut iouts[0]) {
+                            data[output_index] = tc.integer[registers[0] as usize * bs + j];
                         }
                     }
                 }
-                if t.result != RegionResult::Collect {
-                    sh.initialized.store(true, Ordering::Relaxed);
-                }
+                initialized = true;
             }
         }
+    }
+    if t.result != RegionResult::Collect {
+        if let Some(width) = fold {
+            *sh.accumulator.lock().unwrap() = scalar_value_of(width, &tc.acc[..width]);
+        }
+        sh.initialized.store(initialized, Ordering::Relaxed);
     }
     Ok(())
 }
@@ -3310,6 +2560,8 @@ fn run_typed(
         dependent_flags: Vec::new(),
         text_count: regs.text_slots.iter().filter(|o| **o >= 0).count(),
         contiguous: false,
+        ordered: false,
+        fast: None,
     };
     // A leading total prefix only writes private banks. Keep every potentially failing instruction
     // and lazy capture in the existing reference lane order.
@@ -3343,6 +2595,13 @@ fn run_typed(
         n
     };
     let count = count as usize;
+    for (_, term) in t.stages.iter() {
+        if let Ty::Array(ty) = term.ty() {
+            if packed_ops::scalar_width(ty).is_some_and(|w| count > MAX_ARRAY / w) {
+                return Err(fail("E_ARRAY_RANGE", "Kernel intermediate exceeds native storage bounds."));
+            }
+        }
+    }
     let mut strides = vec![1usize; nsrc];
     for i in (0..nsrc.saturating_sub(1)).rev() {
         strides[i] = strides[i + 1] * lengths[i + 1];
@@ -3403,7 +2662,22 @@ fn run_typed(
             }
         }
     }
-    let accumulator = seed.clone().unwrap_or(if integer_outputs[0] { Value::Int(0) } else { Value::Float(0.0) });
+    // a float accumulator: a vector seed's components, a scalar seed repeated, zeros without one
+    let accumulator = if integer_outputs[0] {
+        seed.clone().unwrap_or(Value::Int(0))
+    } else {
+        let width = t.outputs[0].len();
+        let mut running = [0.0; 4];
+        match seed {
+            Some(v @ (Value::Vec2(..) | Value::Vec3(..) | Value::Vec4(..))) => {
+                let components = components(v)?;
+                running[..components.len()].copy_from_slice(&components);
+            }
+            Some(v) => running[..width].fill(num_k(v)?),
+            None => {}
+        }
+        scalar_value_of(width, &running)
+    };
     let initialized = match t.result {
         RegionResult::Sum(zero) => zero,
         _ => true,
@@ -3426,6 +2700,10 @@ fn run_typed(
     sh.blocks_per_chunk = blocks_per_chunk;
     sh.dependent_flags = dependent_flags;
     sh.contiguous = t.iteration == Iteration::Zip && sh.skip.is_empty();
+    sh.ordered = ordered_add(t)
+        && sh.borrowed[0].is_none()
+        && matches!((&sh.inputs[0], t.widths[0]), (Value::Float_array(_), 1) | (Value::Vec2_array(_), 2) | (Value::Vec3_array(_), 3) | (Value::Vec4_array(_), 4));
+    sh.fast = if sh.ordered { None } else { fast_path(&sh, &measured_uniform)? };
     let sh = sh;
     // A Cartesian projection repeats one checked row. Its unused outer input is concrete integers
     // or a checked range; removing those loads cannot hide a type or finite-value error.
@@ -3461,7 +2739,7 @@ fn run_typed(
         if count > 0 {
             for x in row.iter() {
                 if !x.is_finite() {
-                    return Err(fail("E_NONFINITE", "packed produced a nonfinite value."));
+                    return nonfinite();
                 }
             }
             let len = row.len();
@@ -3583,7 +2861,7 @@ fn run_typed(
             run_one(0, Some(&measured_uniform))?;
             1
         };
-        if t.result == RegionResult::Collect && count >= 4096 && (first_chunk == 0 || settled()) {
+        if t.result == RegionResult::Collect && (count >= 4096 || !integer_program(t)) && (first_chunk == 0 || settled()) {
             let errors: Vec<Mutex<Option<KErr>>> = (0..chunks).map(|_| Mutex::new(None)).collect();
             let work = |i: i64| -> Result<(), String> {
                 if let Err(e) = run_one(i as usize, None) {
@@ -3610,7 +2888,7 @@ fn run_typed(
         (0..n_out)
             .map(|k| {
                 if sh.text_outputs[k] {
-                    Value::Text_array(Arc::new(std::mem::take(&mut tvec[k])))
+                    Value::Text_array(Arc::new(rays_math::text_array::TextArray::from(std::mem::take(&mut tvec[k]))))
                 } else if sh.integer_outputs[k] {
                     Value::Int_array(Arc::new(std::mem::take(&mut ivec[k])))
                 } else {
@@ -4019,24 +3297,8 @@ fn run_all(run: &Run, dispatch: Option<Dispatch>, plane_outputs: PlaneOutputs) -
                     RegionResult::Accumulate(seed_term, _) => Some(eval(t.residual, seed_term)?),
                     _ => None,
                 };
-                // ponytail: guarded live captures keep sequential blocks; preparing only selected
-                // captures on the main thread is needed before parallel execution.
-                let guarded_capture = t.code.iter().any(|i| match i {
-                    Instruction::Guarded(_, body) => match unguarded(body) {
-                        Instruction::Uniform(index, _) => !matches!(
-                            t.uniforms[*index as usize],
-                            Value::Float(_) | Value::Bool(_) | Value::Vec2(..) | Value::Vec3(..) | Value::Vec4(..)
-                        ),
-                        _ => false,
-                    },
-                    _ => false,
-                });
                 let planes = plane_outputs.take();
-                if integer_program(t) || guarded_capture {
-                    run_typed(&run, &seed, &eval, &uni, planes)
-                } else {
-                    float_launch(&run, &seed, &eval, &uni, planes)
-                }
+                run_typed(&run, &seed, &eval, &uni, planes)
             })();
             let flat = match &outcome {
                 Ok(_) => Ok(()),
@@ -4637,11 +3899,16 @@ pub mod host {
 
     type KErrOrDiag = KErr;
 
-    // An integer array's float copy, kept by the array's identity (8 arrays): a source or table made
-    // once per topology (a CSR, a selection) is converted once, and stays the array a device's
-    // identity check finds uploaded, instead of a fresh copy uploaded with every prepare.
-    static INT_FLOATS: LazyLock<Mutex<Vec<(Arc<Vec<i64>>, Arc<Vec<f64>>)>>> = LazyLock::new(|| Mutex::new(Vec::new()));
-    const INT_FLOATS_CAPACITY: usize = 8;
+    // An integer array's float copy, kept by the array's identity (8 arrays, charged to the ledger):
+    // a source or table made once per topology (a CSR, a selection) is converted once, and stays the
+    // array a device's identity check finds uploaded, instead of a fresh copy uploaded with every
+    // prepare.
+    static INT_FLOATS: LazyLock<lru::IdentityList> = LazyLock::new(|| {
+        let same = |stored: &lru::Key, probe: &(dyn std::any::Any + Send + Sync)| {
+            matches!((stored.as_any().downcast_ref::<Arc<Vec<i64>>>(), probe.downcast_ref::<Arc<Vec<i64>>>()), (Some(a), Some(b)) if Arc::ptr_eq(a, b))
+        };
+        lru::IdentityList::new(lru::cache("flow_ir.int_floats"), 8, Arc::new(same))
+    });
 
     // Backend-owned integer arrays travel through the numeric input carrier by identity. Both
     // sides are weak: this table neither owns device storage nor retains an expired placeholder.
@@ -4657,11 +3924,7 @@ pub mod host {
         if let Some(input) = INTEGER_INPUTS.lock().unwrap().iter().find_map(|(v, p)| {
             v.upgrade().filter(|v| Arc::ptr_eq(v, values)).and_then(|_| p.upgrade())
         }) { return Ok(input); }
-        let mut cache = INT_FLOATS.lock().unwrap();
-        if let Some(pos) = cache.iter().position(|(k, _)| Arc::ptr_eq(k, values)) {
-            let entry = cache.remove(pos);
-            let floats = entry.1.clone();
-            cache.insert(0, entry);
+        if let Some(floats) = INT_FLOATS.find_by(values).and_then(|found| found.downcast::<Vec<f64>>().ok()) {
             return Ok(floats);
         }
         let bytes = values.len() * 8;
@@ -4669,8 +3932,7 @@ pub mod host {
             mem::admit_bytes(mem::Pool::Host, bytes as i64).map_err(|r| value::fail("E_ARRAY_MEMORY", &r.to_string()))?;
         }
         let floats = Arc::new(values.iter().map(|n| *n as f64).collect::<Vec<f64>>());
-        cache.insert(0, (values.clone(), floats.clone()));
-        cache.truncate(INT_FLOATS_CAPACITY);
+        INT_FLOATS.add(lru::Key::from_value(Arc::new(values.clone())), floats.clone(), bytes as i64);
         Ok(floats)
     }
 
@@ -4790,7 +4052,7 @@ pub mod host {
                 match term.ty() {
                     Ty::Array(inner) => match **inner {
                         Ty::Int => Value::Int_array(Arc::new(Vec::new())),
-                        Ty::Text => Value::Text_array(Arc::new(Vec::new())),
+                        Ty::Text => Value::Text_array(Arc::new(rays_math::text_array::TextArray::new())),
                         Ty::Float => Value::Float_array(Arc::new(Vec::new())),
                         Ty::Vec2 => Value::Vec2_array(Arc::new(Vec::new())),
                         Ty::Vec3 => Value::Vec3_array(Arc::new(Vec::new())),
@@ -5403,6 +4665,42 @@ mod tests {
         at_domains(8, &|| *eight.lock().unwrap() = Some(force_all(&packed, &live, &strict())));
         let (one, eight) = (one.into_inner().unwrap().unwrap().unwrap(), eight.into_inner().unwrap().unwrap().unwrap());
         assert!(one.iter().zip(eight.iter()).all(|(a, b)| value_same(a, b)));
+    }
+
+    // The streaming plans are chosen for exactly these shapes (noise under one amplitude, and under
+    // gain and bias) and equal the reference at one and eight domains over several blocks.
+    #[test]
+    fn streaming_plans_match_the_reference() {
+        let points = "(map (fn [i] [(* i 0.37) (* i 0.11) 0.5]) (array/range 2051))";
+        let cases = [
+            (format!("(map (fn [p n] (+ p (* n (* (noise3 (* p 0.5) :seed 7) t)))) {points} {points})"), true),
+            (
+                format!("(map (fn [h p] (+ h (* (- (* (noise3 [(* p.x 0.1) (* p.y 0.1) 0.0] :seed 7) 2.0) 0.5) t))) (map (fn [i] (* i 0.25)) (array/range 2051)) {points})"),
+                false,
+            ),
+        ];
+        for (body, noise_plan) in cases {
+            let (_, program) = compile_body(&body, false);
+            assert_eq!(streaming_plan(&program).is_some(), noise_plan, "{body}");
+            assert_eq!(scalar_streaming_plan(&program).is_some(), !noise_plan, "{body}");
+            for domains in [1, 8] {
+                at_domains(domains, &|| {
+                    let live = input::at_time(0.37);
+                    assert!(same(&force(&program, &live, &strict()), &reference_of(&program, &live)), "{body} at {domains} domains");
+                });
+            }
+        }
+    }
+
+    // An integer array's float copy is charged to a ledger owner while it is kept, and found again
+    // by the array's identity.
+    #[test]
+    fn integer_float_copies_are_charged_and_found_by_identity() {
+        let values = Arc::new((0..3001i64).collect::<Vec<_>>());
+        let first = host::floats(&Value::Int_array(values.clone())).unwrap().unwrap();
+        assert_eq!(first.len(), 3001);
+        assert!(mem::peak(&lru::cache("flow_ir.int_floats")) >= 3001 * 8);
+        assert!(Arc::ptr_eq(&first, &host::floats(&Value::Int_array(values)).unwrap().unwrap()));
     }
 
     #[test]
