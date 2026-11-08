@@ -117,6 +117,28 @@ fn metal_compare(value: Comparison) -> CompareFunction {
     }
 }
 
+/// The encoder a recording command buffer has open; `abandon` ends it.
+pub enum OpenEncoder {
+    Compute(metal::ComputeEncoder),
+    Accel(metal::AccelerationEncoder),
+    Blit(metal::BlitEncoder),
+    Render(metal::RenderEncoder, metal::RenderPassDescriptor),
+}
+
+impl OpenEncoder {
+    pub fn end(&self) {
+        match self {
+            OpenEncoder::Compute(e) => drop(e.end_encoding()),
+            OpenEncoder::Accel(e) => drop(e.end_encoding()),
+            OpenEncoder::Blit(e) => drop(e.end_encoding()),
+            OpenEncoder::Render(e, pass) => {
+                let _ = e.end_encoding();
+                let _ = pass.destroy();
+            }
+        }
+    }
+}
+
 /// One recording command buffer: its native handle, the objects its commands retain and the open
 /// encoder, if any.
 pub struct CommandContext {
@@ -125,7 +147,7 @@ pub struct CommandContext {
     pub native: metal::CommandBuffer,
     pub tables: Rc<Tables>,
     pub commands_token: i64,
-    pub open_encoder: RefCell<Option<Box<dyn Fn()>>>,
+    pub open_encoder: RefCell<Option<OpenEncoder>>,
     pub finished: Cell<bool>,
     pub retained: RefCell<Vec<Cleanup>>,
 }

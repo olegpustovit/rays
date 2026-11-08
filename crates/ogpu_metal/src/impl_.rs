@@ -4,7 +4,7 @@ use ogpu_core::backend::{Driver, Implementation as Impl};
 
 pub const BACKEND: &str = "metal";
 
-pub fn create_driver() -> Driver {
+pub fn create_driver() -> Box<dyn Driver> {
     backend::create()
 }
 

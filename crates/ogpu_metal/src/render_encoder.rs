@@ -1,7 +1,7 @@
 //! Ogpu_metal.Render_encoder: the driver's render encoder record over a Metal render encoder.
 use ogpu_core::error::Error;
 use crate::{
-    command_control::{CommandContext, Resource},
+    command_control::{CommandContext, OpenEncoder, Resource},
     device::{fail, of_metal_error},
     pipeline::Native,
 };
@@ -10,7 +10,7 @@ use metal::{
     LoadAction, RenderEncoder, RenderPassDescriptor, StoreAction,
 };
 use ogpu_core::{
-    backend::{DriverBatchDraw, DriverRenderEncoder, DriverRenderTarget, ShaderStage, Winding as OgpuWinding},
+    backend::{DepthState, DriverBatchDraw, DriverRenderEncoder, DriverRenderTarget, ShaderStage, Token, Winding as OgpuWinding},
     error::ErrorKind,
     render_pass::{Cull, IndexType as OgpuIndex, Load, Primitive as OgpuPrimitive, Rect, Store},
 };
@@ -157,7 +157,14 @@ fn use_resources(context: &CommandContext, encoder: &RenderEncoder, tokens: &[i6
     Ok(())
 }
 
-pub fn create(context: &Rc<CommandContext>, target: &DriverRenderTarget) -> Result<DriverRenderEncoder, Error> {
+/// One render pass: the context it records into and the native encoder and pass descriptor.
+struct Render {
+    context: Rc<CommandContext>,
+    encoder: RenderEncoder,
+    pass: RenderPassDescriptor,
+}
+
+pub fn create(context: &Rc<CommandContext>, target: &DriverRenderTarget) -> Result<Box<dyn DriverRenderEncoder>, Error> {
     let operation = context.operation;
     context.recording()?;
     let color = &target.target_colors[0];
@@ -197,133 +204,132 @@ pub fn create(context: &Rc<CommandContext>, target: &DriverRenderTarget) -> Resu
     };
     pass.set_actions(load_action(color.color_load), color_store, depth_load, depth_store_action, depth_clear, LoadAction::Clear, StoreAction::Store, 0).map_err(&fail_pass)?;
     let encoder = RenderEncoder::create(&context.native, &pass).map_err(&fail_pass)?;
-    let finish: Rc<dyn Fn() -> Result<(), Error>> = {
-        let (context, encoder, pass) = (context.clone(), encoder.clone(), pass);
-        Rc::new(move || {
-            *context.open_encoder.borrow_mut() = None;
-            let ended = encoder.end_encoding();
-            let _ = pass.destroy();
-            ended.map_err(|value| of_metal_error(context.operation, &value))
-        })
-    };
-    {
-        let finish = finish.clone();
-        *context.open_encoder.borrow_mut() = Some(Box::new(move || {
-            let _ = finish();
-        }));
+    *context.open_encoder.borrow_mut() = Some(OpenEncoder::Render(encoder.clone(), pass.clone()));
+    Ok(Box::new(Render { context: context.clone(), encoder, pass }))
+}
+
+impl DriverRenderEncoder for Render {
+    fn render_set_pipeline(&self, token: Token) -> Result<(), Error> {
+        let native = render_pipeline(&self.context, token)?;
+        self.encoder.set_pipeline(&native).map_err(|value| of_metal_error(self.context.operation, &value))
     }
-    let (c1, e1) = (context.clone(), encoder.clone());
-    let (c2, e2) = (context.clone(), encoder.clone());
-    let (c3, e3) = (context.clone(), encoder.clone());
-    let (c4, e4) = (context.clone(), encoder.clone());
-    let e5 = encoder.clone();
-    let c5 = context.clone();
-    let e6 = encoder.clone();
-    let c6 = context.clone();
-    let e7 = encoder.clone();
-    let c7 = context.clone();
-    let e8 = encoder.clone();
-    let c8 = context.clone();
-    let e9 = encoder.clone();
-    let c9 = context.clone();
-    let e10 = encoder.clone();
-    let c10 = context.clone();
-    let e11 = encoder.clone();
-    let c11 = context.clone();
-    let e12 = encoder.clone();
-    let c12 = context.clone();
-    let e13 = encoder.clone();
-    let c13 = context.clone();
-    let e14 = encoder.clone();
-    let c14 = context.clone();
-    let e15 = encoder;
-    let c15 = context.clone();
-    Ok(DriverRenderEncoder {
-        render_set_pipeline: Box::new(move |token| {
-            let native = render_pipeline(&c1, token)?;
-            e1.set_pipeline(&native).map_err(|value| of_metal_error(c1.operation, &value))
-        }),
-        set_stage_buffer: Box::new(move |stage, index, offset, token| {
-            let buffer = c2.find_buffer(token)?;
-            c2.keep_buffer(&buffer)?;
-            match stage {
-                ShaderStage::Vertex => e2.set_vertex_buffer(index as usize, offset as u64, buffer.metal()),
-                ShaderStage::Fragment => e2.set_fragment_buffer(index as usize, offset as u64, buffer.metal()),
-            }.map_err(|value| of_metal_error(c2.operation, &value))
-        }),
-        set_stage_texture: Box::new(move |stage, index, token| {
-            let texture = c3.find_texture(token)?;
-            c3.keep_texture(&texture)?;
-            match stage {
-                ShaderStage::Vertex => e3.set_vertex_texture(index as usize, texture.metal()),
-                ShaderStage::Fragment => e3.set_fragment_texture(index as usize, texture.metal()),
-            }.map_err(|value| of_metal_error(c3.operation, &value))
-        }),
-        set_stage_sampler: Box::new(move |stage, index, token| {
-            let Some(sampler) = c4.sampler(token) else {
-                return Err(fail(operation, ErrorKind::InvalidArgument, "sampler graph is incomplete"));
-            };
-            c4.keep_sampler(&sampler)?;
-            match stage {
-                ShaderStage::Vertex => e4.set_vertex_sampler(index as usize, sampler.metal()),
-                ShaderStage::Fragment => e4.set_fragment_sampler(index as usize, sampler.metal()),
-            }.map_err(|value| of_metal_error(c4.operation, &value))
-        }),
-        set_viewport: Box::new(move |rect: Rect| {
-            e5.set_viewport(Viewport { x: rect.x as f64, y: rect.y as f64, width: rect.width as f64, height: rect.height as f64, znear: 0., zfar: 1. }).map_err(|value| of_metal_error(c5.operation, &value))
-        }),
-        set_scissor: Box::new(move |rect: Rect| {
-            e6.set_scissor(Scissor { x: rect.x as usize, y: rect.y as usize, width: rect.width as usize, height: rect.height as usize }).map_err(|value| of_metal_error(c6.operation, &value))
-        }),
-        set_cull: Box::new(move |cull| e7.set_cull_mode(metal_cull(cull)).map_err(|value| of_metal_error(c7.operation, &value))),
-        set_winding: Box::new(move |winding| {
-            e8.set_winding(match winding {
-                OgpuWinding::Clockwise => Winding::Clockwise,
-                OgpuWinding::CounterClockwise => Winding::CounterClockwise,
-            }).map_err(|value| of_metal_error(c8.operation, &value))
-        }),
-        set_depth_state: Box::new(move |state| match state {
-            None => e9.set_depth_stencil_state(None).map_err(|value| of_metal_error(c9.operation, &value)),
+
+    fn set_stage_buffer(&self, stage: ShaderStage, index: i64, offset: i64, token: Token) -> Result<(), Error> {
+        let c = &self.context;
+        let buffer = c.find_buffer(token)?;
+        c.keep_buffer(&buffer)?;
+        match stage {
+            ShaderStage::Vertex => self.encoder.set_vertex_buffer(index as usize, offset as u64, buffer.metal()),
+            ShaderStage::Fragment => self.encoder.set_fragment_buffer(index as usize, offset as u64, buffer.metal()),
+        }.map_err(|value| of_metal_error(c.operation, &value))
+    }
+
+    fn set_stage_texture(&self, stage: ShaderStage, index: i64, token: Token) -> Result<(), Error> {
+        let c = &self.context;
+        let texture = c.find_texture(token)?;
+        c.keep_texture(&texture)?;
+        match stage {
+            ShaderStage::Vertex => self.encoder.set_vertex_texture(index as usize, texture.metal()),
+            ShaderStage::Fragment => self.encoder.set_fragment_texture(index as usize, texture.metal()),
+        }.map_err(|value| of_metal_error(c.operation, &value))
+    }
+
+    fn set_stage_sampler(&self, stage: ShaderStage, index: i64, token: Token) -> Result<(), Error> {
+        let c = &self.context;
+        let Some(sampler) = c.sampler(token) else {
+            return Err(fail(c.operation, ErrorKind::InvalidArgument, "sampler graph is incomplete"));
+        };
+        c.keep_sampler(&sampler)?;
+        match stage {
+            ShaderStage::Vertex => self.encoder.set_vertex_sampler(index as usize, sampler.metal()),
+            ShaderStage::Fragment => self.encoder.set_fragment_sampler(index as usize, sampler.metal()),
+        }.map_err(|value| of_metal_error(c.operation, &value))
+    }
+
+    fn set_viewport(&self, rect: Rect) -> Result<(), Error> {
+        self.encoder.set_viewport(Viewport { x: rect.x as f64, y: rect.y as f64, width: rect.width as f64, height: rect.height as f64, znear: 0., zfar: 1. }).map_err(|value| of_metal_error(self.context.operation, &value))
+    }
+
+    fn set_scissor(&self, rect: Rect) -> Result<(), Error> {
+        self.encoder.set_scissor(Scissor { x: rect.x as usize, y: rect.y as usize, width: rect.width as usize, height: rect.height as usize }).map_err(|value| of_metal_error(self.context.operation, &value))
+    }
+
+    fn set_cull(&self, cull: Cull) -> Result<(), Error> {
+        self.encoder.set_cull_mode(metal_cull(cull)).map_err(|value| of_metal_error(self.context.operation, &value))
+    }
+
+    fn set_winding(&self, winding: OgpuWinding) -> Result<(), Error> {
+        self.encoder.set_winding(match winding {
+            OgpuWinding::Clockwise => Winding::Clockwise,
+            OgpuWinding::CounterClockwise => Winding::CounterClockwise,
+        }).map_err(|value| of_metal_error(self.context.operation, &value))
+    }
+
+    fn set_depth_state(&self, state: Option<DepthState>) -> Result<(), Error> {
+        let c = &self.context;
+        match state {
+            None => self.encoder.set_depth_stencil_state(None).map_err(|value| of_metal_error(c.operation, &value)),
             Some(state) => {
-                let native = c9.depth_state(state)?;
-                e9.set_depth_stencil_state(Some(&native)).map_err(|value| of_metal_error(c9.operation, &value))
+                let native = c.depth_state(state)?;
+                self.encoder.set_depth_stencil_state(Some(&native)).map_err(|value| of_metal_error(c.operation, &value))
             }
-        }),
-        draw: Box::new(move |primitive, first, count, instances| {
-            e10.draw_primitives(metal_primitive(primitive), first as usize, count as usize, instances as usize).map_err(|value| of_metal_error(c10.operation, &value))
-        }),
-        draw_indexed: Box::new(move |primitive, index_type, token, offset, count, instances| {
-            let buffer = c11.find_buffer(token)?;
-            c11.keep_buffer(&buffer)?;
-            e11.draw_indexed(
-                metal_primitive(primitive),
-                metal_index(index_type),
-                buffer.metal(),
-                offset as u64,
-                count as u64,
-                if instances == 1 { None } else { Some(instances as u64) },
-            ).map_err(|value| of_metal_error(c11.operation, &value))
-        }),
-        draw_indexed_indirect: Box::new(move |primitive, index_type, token, offset, arguments_token, arguments_offset| {
-            let buffer = c12.find_buffer(token)?;
-            let arguments = c12.find_buffer(arguments_token)?;
-            c12.keep_buffer(&buffer)?;
-            c12.keep_buffer(&arguments)?;
-            e12.draw_indexed_indirect(
-                metal_primitive(primitive),
-                metal_index(index_type),
-                buffer.metal(),
-                offset as u64,
-                arguments.metal(),
-                arguments_offset as u64,
-            ).map_err(|value| of_metal_error(c12.operation, &value))
-        }),
-        draw_batch: Box::new(move |draws| draw_batch(&c13, &e13, draws)),
-        use_resources: Box::new(move |tokens| use_resources(&c14, &e14, tokens)),
-        execute_icb: Box::new(move |token, location, length| match c15.icb(token) {
-            None => Err(fail(operation, ErrorKind::InvalidArgument, "indirect command buffer graph is incomplete")),
-            Some(entry) => e15.execute_indirect_commands(&entry, location as usize, length as usize).map_err(|value| of_metal_error(c15.operation, &value)),
-        }),
-        end_render: Box::new(move || finish()),
-    })
+        }
+    }
+
+    fn draw(&self, primitive: OgpuPrimitive, first: i64, count: i64, instances: i64) -> Result<(), Error> {
+        self.encoder.draw_primitives(metal_primitive(primitive), first as usize, count as usize, instances as usize).map_err(|value| of_metal_error(self.context.operation, &value))
+    }
+
+    fn draw_indexed(&self, primitive: OgpuPrimitive, index_type: OgpuIndex, token: Token, offset: i64, count: i64, instances: i64) -> Result<(), Error> {
+        let c = &self.context;
+        let buffer = c.find_buffer(token)?;
+        c.keep_buffer(&buffer)?;
+        self.encoder.draw_indexed(
+            metal_primitive(primitive),
+            metal_index(index_type),
+            buffer.metal(),
+            offset as u64,
+            count as u64,
+            if instances == 1 { None } else { Some(instances as u64) },
+        ).map_err(|value| of_metal_error(c.operation, &value))
+    }
+
+    fn draw_indexed_indirect(&self, primitive: OgpuPrimitive, index_type: OgpuIndex, token: Token, offset: i64, arguments_token: Token, arguments_offset: i64) -> Result<(), Error> {
+        let c = &self.context;
+        let buffer = c.find_buffer(token)?;
+        let arguments = c.find_buffer(arguments_token)?;
+        c.keep_buffer(&buffer)?;
+        c.keep_buffer(&arguments)?;
+        self.encoder.draw_indexed_indirect(
+            metal_primitive(primitive),
+            metal_index(index_type),
+            buffer.metal(),
+            offset as u64,
+            arguments.metal(),
+            arguments_offset as u64,
+        ).map_err(|value| of_metal_error(c.operation, &value))
+    }
+
+    fn draw_batch(&self, draws: &[DriverBatchDraw]) -> Result<(), Error> {
+        draw_batch(&self.context, &self.encoder, draws)
+    }
+
+    fn use_resources(&self, tokens: &[Token]) -> Result<(), Error> {
+        use_resources(&self.context, &self.encoder, tokens)
+    }
+
+    fn execute_icb(&self, token: Token, location: i64, length: i64) -> Result<(), Error> {
+        let c = &self.context;
+        match c.icb(token) {
+            None => Err(fail(c.operation, ErrorKind::InvalidArgument, "indirect command buffer graph is incomplete")),
+            Some(entry) => self.encoder.execute_indirect_commands(&entry, location as usize, length as usize).map_err(|value| of_metal_error(c.operation, &value)),
+        }
+    }
+
+    fn end_render(&self) -> Result<(), Error> {
+        *self.context.open_encoder.borrow_mut() = None;
+        let ended = self.encoder.end_encoding();
+        let _ = self.pass.destroy();
+        ended.map_err(|value| of_metal_error(self.context.operation, &value))
+    }
 }
