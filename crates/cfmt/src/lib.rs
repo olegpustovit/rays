@@ -1,3 +1,5 @@
+mod sys;
+
 fn normalize_exponent(mut text: String) -> String {
     let Some(at) = text.find(|character| character == 'e' || character == 'E') else {
         return text;
@@ -101,7 +103,7 @@ pub fn e(value: f64, precision: usize) -> String {
 
 /// Parses an OCaml float literal, including underscores and hexadecimal floats.
 pub fn parse_ocaml_float(text: &str) -> Option<f64> {
-    cfmt_sys::parse(text)
+    sys::parse(text)
 }
 
 fn same_float(text: &str, bits: u64) -> bool {

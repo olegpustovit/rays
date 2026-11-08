@@ -20,13 +20,6 @@ dependencies = [
 name = "cfmt"
 version = "0.1.0"
 dependencies = [
- "cfmt_sys",
-]
-
-[[package]]
-name = "cfmt_sys"
-version = "0.1.0"
-dependencies = [
  "cc",
 ]
 

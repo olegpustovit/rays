@@ -799,8 +799,7 @@ const OCAML_LEAVES: [&str; 4] = ["rays_diagnostic", "input", "mem", "param"];
 /// Sys crates are the Rust port's FFI bridges, which OCaml keeps inside its library.
 fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
     HashMap::from([
-        ("cfmt_sys", &[][..]),
-        ("cfmt", &["cfmt_sys"][..]),
+        ("cfmt", &[][..]),
         ("rays_diagnostic", &[][..]),
         ("native_layer_token_sys", &[][..]),
         ("mem_sys", &[][..]),
@@ -928,7 +927,7 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
     let mut upper_no_gpu = upper.to_vec();
     upper_no_gpu.extend(["runtime", "runtime_resources", "renderer"]);
     let foundational = [
-        "cfmt", "cfmt_sys",
+        "cfmt",
         "diagnostic", "rays_diagnostic", "native_layer_token_sys", "mem", "mem_sys",
         "lru", "ocaml_int", "param", "input", "rays_math", "rays_math_sys", "parallel", "scene_command", "sdl3", "sdl3_image",
         "sdl3_ttf", "sdl3_mixer", "metal", "vulkan_sys", "ogpu",
