@@ -1966,14 +1966,14 @@ pub fn materialize(l: &Local) -> Result<(geometry::T, Vec<i64>), error::T> {
                 next_point += 1;
                 let bytes = &l.p_groups[index];
                 let mut builder =
-                    group::Builder::create(group::Owner::Point, group::name(&source_group), point_count)?;
+                    group::builder::create(group::Owner::Point, group::name(&source_group), point_count)?;
                 for point in 0..l.points {
                     let target = p_map[point as usize];
                     if target >= 0 && bytes[point as usize] != 0 {
-                        group::Builder::set(&mut builder, target, true)?;
+                        group::builder::set(&mut builder, target, true)?;
                     }
                 }
-                let target = group::Builder::freeze(&mut builder)?;
+                let target = group::builder::freeze(&mut builder)?;
                 match &l.p_orders[index] {
                     None => groups.push(target),
                     Some(order) => {
@@ -2049,7 +2049,7 @@ pub fn materialize(l: &Local) -> Result<(geometry::T, Vec<i64>), error::T> {
                 bits[(position >> 3) as usize] |= 1 << (position & 7);
             }
         }
-        edge_groups.push(edge_group::View::of_owned_bits(
+        edge_groups.push(edge_group::view::of_owned_bits(
             &topology_value,
             ranking.edge_count,
             name,
@@ -3130,11 +3130,11 @@ mod tests {
             remesh(&bad_size, 1.0, &|p| p.target_size_attribute = Some("size".to_owned())),
             "invalid_remesh",
         );
-        let mut builder = topology::Builder::create(3, Some(3), Some(1)).unwrap();
-        topology::Builder::add_open_polyline(&mut builder, &[0, 1, 2]).unwrap();
+        let mut builder = topology::builder::create(3, Some(3), Some(1)).unwrap();
+        topology::builder::add_open_polyline(&mut builder, &[0, 1, 2]).unwrap();
         let curve = geometry::create(
             packed::Float3::View::of_owned_exn(vec![0.0, 1.0, 2.0], vec![0.0; 3], vec![0.0; 3]).unwrap(),
-            topology::Builder::freeze(&mut builder).unwrap(),
+            topology::builder::freeze(&mut builder).unwrap(),
             None,
             None,
             None,

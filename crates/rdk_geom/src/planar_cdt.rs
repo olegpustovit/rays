@@ -368,7 +368,7 @@ fn prepare_workspace_points(workspace: &mut Workspace, required: i64) {
 }
 
 #[allow(non_snake_case)]
-pub mod View {
+pub mod view {
     use super::T;
     use std::sync::Arc;
 
@@ -2196,7 +2196,7 @@ mod tests {
 
     fn cdt(x: &[f64], y: &[f64], constraints: &[i64]) -> Result<T, String> {
         let seed = delaunay2::build(None, Some(17), x, y).unwrap();
-        let view = delaunay2::View::view(&seed);
+        let view = delaunay2::view::view(&seed);
         let o = |a: i64, b: i64, c: i64| predicates::orient2d_packed(x, y, a, b, c);
         let ic = |a: i64, b: i64, c: i64, d: i64| predicates::incircle_packed(x, y, a, b, c, d);
         let bo = |a: i64, b: i64, u: i64, v: i64| {

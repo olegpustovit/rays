@@ -1013,7 +1013,7 @@ pub fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, error::
                         }
                     }
                 }
-                edge_groups.push(edge_group::View::of_owned_bits(
+                edge_groups.push(edge_group::view::of_owned_bits(
                     &output_topology,
                     target_edge_count,
                     edge_group::name(source_group),
@@ -1026,7 +1026,7 @@ pub fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, error::
             let target_view = topology_index::View::view(&target_index);
             for source_group in &source_groups {
                 let mut builder =
-                    edge_group::Builder::create(&output_topology, &target_index, edge_group::name(source_group))?;
+                    edge_group::builder::create(&output_topology, &target_index, edge_group::name(source_group))?;
                 for vertex in 0..output_vertex_count {
                     cancel::poll(cancel_value, vertex, 16_383)?;
                     let source_corner = edge_source_corner[vertex as usize];
@@ -1034,11 +1034,11 @@ pub fn join(params: &Params, value: &geometry::T) -> Result<geometry::T, error::
                         let source_edge = topology_index::edge_of_vertex(&source_index, source_corner)?;
                         let target_edge = target_view.edge_of_vertex[vertex as usize];
                         if source_edge >= 0 && target_edge >= 0 && edge_group::mem(source_edge, source_group) {
-                            edge_group::Builder::set(&mut builder, target_edge, true)?;
+                            edge_group::builder::set(&mut builder, target_edge, true)?;
                         }
                     }
                 }
-                edge_groups.push(edge_group::Builder::freeze(&mut builder)?);
+                edge_groups.push(edge_group::builder::freeze(&mut builder)?);
             }
         }
     }
@@ -1102,11 +1102,11 @@ mod tests {
             points.iter().map(|p| p.2).collect(),
         )
         .unwrap();
-        let mut builder = topology::Builder::create(points.len() as i64, None, None).unwrap();
+        let mut builder = topology::builder::create(points.len() as i64, None, None).unwrap();
         for row in rows {
-            topology::Builder::add_open_polyline(&mut builder, row).unwrap();
+            topology::builder::add_open_polyline(&mut builder, row).unwrap();
         }
-        let topo = topology::Builder::freeze(&mut builder).unwrap();
+        let topo = topology::builder::freeze(&mut builder).unwrap();
         geometry::create(positions, topo, None, None, None).unwrap()
     }
 

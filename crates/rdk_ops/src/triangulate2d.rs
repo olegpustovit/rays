@@ -933,10 +933,10 @@ fn materialization(
         z[..source_point_count as usize].copy_from_slice(&source.z);
         let (local_x, local_y): (&[f64], &[f64]) = match (refinement, arrangement) {
             (Some(refinement), _) => {
-                (planar_refinement::View::approximate_x(refinement), planar_refinement::View::approximate_y(refinement))
+                (planar_refinement::view::approximate_x(refinement), planar_refinement::view::approximate_y(refinement))
             }
             (None, Some(arrangement)) => {
-                let view = planar_constraints::View::view(arrangement);
+                let view = planar_constraints::view::view(arrangement);
                 // The arrangement coordinates are shared planes; keep them alive for the loop.
                 return finish_unrestored(
                     cancel_value,
@@ -1320,7 +1320,7 @@ fn constraint_only_seed(
 fn exact_points(x: &[f64], y: &[f64], arrangement: Option<&planar_constraints::T>) -> Result<Vec<implicit_point::T>, error::T> {
     match arrangement {
         Some(arrangement) => (0..planar_constraints::point_count(arrangement))
-            .map(|point| planar_constraints::View::point(arrangement, point).map_err(pass))
+            .map(|point| planar_constraints::view::point(arrangement, point).map_err(pass))
             .collect(),
         None => {
             let source = implicit_point::source(x.to_vec(), y.to_vec(), vec![0.0; x.len()])
@@ -1441,7 +1441,7 @@ fn triangulate(cancel_value: Option<&cancel::T>, params: &Params, geometry_value
         constraints = next_constraints;
         constraint_winding = next_winding;
     }
-    let seed_view = delaunay2::View::view(&triangulation);
+    let seed_view = delaunay2::view::view(&triangulation);
     let arrangement = if constraints.is_empty() {
         None
     } else {
@@ -1482,11 +1482,11 @@ fn triangulate(cancel_value: Option<&cancel::T>, params: &Params, geometry_value
                 params.remove_outside_constraint_polygons || params.remove_outside_silhouette,
             )
             .map_err(fail)?;
-            let view = planar_cdt::View::view(&value);
+            let view = planar_cdt::view::view(&value);
             (view.triangle_points.to_vec(), view.constraint_points.to_vec())
         }
         Some(arrangement) => {
-            let arrangement_view = planar_constraints::View::view(arrangement);
+            let arrangement_view = planar_constraints::view::view(arrangement);
             let ax = &arrangement_view.x;
             let ay = &arrangement_view.y;
             let overlap = |a: i64, b: i64, u: i64, v: i64| -> bool {
@@ -1498,8 +1498,8 @@ fn triangulate(cancel_value: Option<&cancel::T>, params: &Params, geometry_value
                 cancel_value,
                 None,
                 planar_constraints::point_count(arrangement),
-                &|a, b, c| planar_constraints::View::orient2d(arrangement, a, b, c),
-                &|a, b, c, d| planar_constraints::View::incircle(arrangement, a, b, c, d),
+                &|a, b, c| planar_constraints::view::orient2d(arrangement, a, b, c),
+                &|a, b, c, d| planar_constraints::view::incircle(arrangement, a, b, c, d),
                 Some(&overlap),
                 &seed_view.triangle_points,
                 Some(&arrangement_view.insert_points),
@@ -1509,7 +1509,7 @@ fn triangulate(cancel_value: Option<&cancel::T>, params: &Params, geometry_value
                 params.remove_outside_constraint_polygons || params.remove_outside_silhouette,
             )
             .map_err(fail)?;
-            let view = planar_cdt::View::view(&value);
+            let view = planar_cdt::view::view(&value);
             (view.triangle_points.to_vec(), view.constraint_points.to_vec())
         }
     };
@@ -1525,7 +1525,7 @@ fn triangulate(cancel_value: Option<&cancel::T>, params: &Params, geometry_value
             let (refinement_constraints, refinement_winding): (Vec<i64>, Vec<i64>) = match &arrangement {
                 None => (initial_constraints.clone(), Vec::new()),
                 Some(arrangement) => {
-                    let view = planar_constraints::View::view(arrangement);
+                    let view = planar_constraints::view::view(arrangement);
                     (view.constraint_points.to_vec(), view.constraint_winding.to_vec())
                 }
             };
@@ -1678,7 +1678,7 @@ fn triangulate(cancel_value: Option<&cancel::T>, params: &Params, geometry_value
                 Some(index) => index,
                 None => topology_index::create(cancel_value, &topology_value).map_err(pass)?,
             };
-            let mut builder = edge_group::Builder::create(&topology_value, &index, name).map_err(pass)?;
+            let mut builder = edge_group::builder::create(&topology_value, &index, name).map_err(pass)?;
             for constraint_index in 0..constraint_points.len() / 2 {
                 let a = plan.local_to_output(constraint_points[constraint_index * 2]);
                 let b = plan.local_to_output(constraint_points[constraint_index * 2 + 1]);
@@ -1686,9 +1686,9 @@ fn triangulate(cancel_value: Option<&cancel::T>, params: &Params, geometry_value
                 if edge < 0 {
                     return Err(invalid("recovered constraint is absent from output topology"));
                 }
-                edge_group::Builder::set(&mut builder, edge, true).map_err(pass)?;
+                edge_group::builder::set(&mut builder, edge, true).map_err(pass)?;
             }
-            let constraints = edge_group::Builder::freeze(&mut builder).map_err(pass)?;
+            let constraints = edge_group::builder::freeze(&mut builder).map_err(pass)?;
             let mut output = vec![constraints];
             output.extend(source_edge_groups.into_iter().filter(|item| edge_group::name(item) != name.as_str()));
             output

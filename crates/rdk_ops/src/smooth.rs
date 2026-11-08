@@ -225,9 +225,9 @@ mod tests {
     }
 
     fn two_curves() -> geometry::T {
-        let mut builder = rdk_core::topology::Builder::create(6, Some(6), Some(2)).unwrap();
-        rdk_core::topology::Builder::add_open_polyline(&mut builder, &[0, 1, 2]).unwrap();
-        rdk_core::topology::Builder::add_open_polyline(&mut builder, &[3, 4, 5]).unwrap();
+        let mut builder = rdk_core::topology::builder::create(6, Some(6), Some(2)).unwrap();
+        rdk_core::topology::builder::add_open_polyline(&mut builder, &[0, 1, 2]).unwrap();
+        rdk_core::topology::builder::add_open_polyline(&mut builder, &[3, 4, 5]).unwrap();
         geometry::create(
             packed::Float3::View::of_owned_exn(
                 vec![0.0, 1.0, 2.0, 10.0, 11.0, 12.0],
@@ -235,7 +235,7 @@ mod tests {
                 vec![0.0; 6],
             )
             .unwrap(),
-            rdk_core::topology::Builder::freeze(&mut builder).unwrap(),
+            rdk_core::topology::builder::freeze(&mut builder).unwrap(),
             None,
             None,
             None,

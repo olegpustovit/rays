@@ -2423,8 +2423,8 @@ mod tests {
         let vertex_group = group::ordered(group::Owner::Vertex, "picked_vertices", 4, &[1, 0]).unwrap();
         let primitive_group = group::ordered(group::Owner::Primitive, "picked_primitives", 2, &[1]).unwrap();
         let edge_index = topology_index::create(None, &topology_value).unwrap();
-        let mut builder = edge_group::Builder::create(&topology_value, &edge_index, "first_edge").unwrap();
-        edge_group::Builder::set(
+        let mut builder = edge_group::builder::create(&topology_value, &edge_index, "first_edge").unwrap();
+        edge_group::builder::set(
             &mut builder,
             topology_index::find_edge(&edge_index, 0, 1).unwrap(),
             true,
@@ -2435,7 +2435,7 @@ mod tests {
             topology_value,
             Some(attributes),
             Some(vec![point_group, vertex_group, primitive_group]),
-            Some(vec![edge_group::Builder::freeze(&mut builder).unwrap()]),
+            Some(vec![edge_group::builder::freeze(&mut builder).unwrap()]),
         )
         .unwrap()
     }

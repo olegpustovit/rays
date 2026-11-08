@@ -12,7 +12,7 @@ use rdk_core::{cancel, edge_group, error, geometry, group, packed, topology, top
 use rdk_core::error::Code;
 
 use crate::boolean_constraints::Side;
-use crate::boolean_extract::{self as extract, View as extract_view};
+use crate::boolean_extract::{self as extract, view as extract_view};
 
 const OPERATION: &str = "boolean_payload";
 

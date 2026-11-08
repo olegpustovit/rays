@@ -15,7 +15,7 @@ use rdk_geom::surface_index;
 
 use crate::boolean_complex as complex;
 use crate::boolean_constraints::{self as constraints, Side};
-use crate::boolean_extract::View as extract_view;
+use crate::boolean_extract::view as extract_view;
 
 const OPERATION: &str = "boolean_seam";
 
@@ -109,15 +109,15 @@ fn native_edge(view: &topology_index::View::View, primitive: i64, first: i64, se
 
 fn side_surface(c: &constraints::T, side: Side) -> &surface_index::T {
     match side {
-        Side::Left => constraints::View::left_surface(c),
-        Side::Right => constraints::View::right_surface(c),
+        Side::Left => constraints::view::left_surface(c),
+        Side::Right => constraints::view::right_surface(c),
     }
 }
 
 fn side_triangle_point(c: &constraints::T, side: Side, triangle: i64, local: i64) -> i64 {
     match side {
-        Side::Left => constraints::View::left_triangle_point(c, triangle, local),
-        Side::Right => constraints::View::right_triangle_point(c, triangle, local),
+        Side::Left => constraints::view::left_triangle_point(c, triangle, local),
+        Side::Right => constraints::view::right_triangle_point(c, triangle, local),
     }
 }
 
@@ -130,7 +130,7 @@ fn source_native_edge(
     second: &implicit_point::T,
 ) -> i64 {
     let surface = side_surface(c, side);
-    let source = constraints::View::source(c);
+    let source = constraints::view::source(c);
     let first_id = side_triangle_point(c, side, triangle, 0);
     let second_id = side_triangle_point(c, side, triangle, 1);
     let third_id = side_triangle_point(c, side, triangle, 2);
@@ -161,8 +161,8 @@ fn is_self_edge(
     side: Side,
     edge: i64,
 ) -> bool {
-    let first_point = complex::View::vertex(c, complex::edge_first(c, edge));
-    let second_point = complex::View::vertex(c, complex::edge_second(c, edge));
+    let first_point = complex::view::vertex(c, complex::edge_first(c, edge));
+    let second_point = complex::view::vertex(c, complex::edge_second(c, edge));
     let (first_incident, last_incident) = complex::edge_incident_range(c, edge);
     let mut common = -2_i64;
     let mut self_edge = false;
@@ -287,10 +287,10 @@ pub fn verify_curves(
             ));
         }
     };
-    let positions = linear_piece_index::View::positions(&index);
+    let positions = linear_piece_index::view::positions(&index);
     let invalid_pair = |left: i64, right: i64| -> bool {
         let point = |piece: i64, corner: i64| -> i64 {
-            linear_piece_index::View::point(&index, piece, corner).expect("segment corner")
+            linear_piece_index::view::point(&index, piece, corner).expect("segment corner")
         };
         let (left_a, left_b) = (point(left, 0), point(left, 1));
         let (right_a, right_b) = (point(right, 0), point(right, 1));
@@ -309,7 +309,7 @@ pub fn verify_curves(
             SegmentSegment::Overlap | SegmentSegment::Degenerate => true,
         }
     };
-    let found = linear_piece_index::View::find_overlapping_self_pair(
+    let found = linear_piece_index::view::find_overlapping_self_pair(
         cancel_value,
         grain,
         0.0,
@@ -322,10 +322,10 @@ pub fn verify_curves(
     match found {
         None => Ok(()),
         Some((left, right)) => {
-            let left_primitive = linear_piece_index::View::primitive(&index, left);
-            let right_primitive = linear_piece_index::View::primitive(&index, right);
-            let left_local = linear_piece_index::View::local(&index, left);
-            let right_local = linear_piece_index::View::local(&index, right);
+            let left_primitive = linear_piece_index::view::primitive(&index, left);
+            let right_primitive = linear_piece_index::view::primitive(&index, right);
+            let left_local = linear_piece_index::view::local(&index, left);
+            let right_local = linear_piece_index::view::local(&index, right);
             Err(make(
                 Code::SeamSelfIntersection,
                 format!(
@@ -656,18 +656,18 @@ fn build_inner(
         support::par_fill(cancel_value, options.grain, &mut masks, &|facet| Ok(facet_mask(c, facet)))?;
         masks
     };
-    let constraints_value = complex::View::constraints(c);
+    let constraints_value = complex::view::constraints(c);
     let index_of = |geometry_value: &geometry::T| -> Result<topology_index::View::View, Fail> {
         let index = topology_index::create(cancel_value, geometry::topology(geometry_value))?;
         Ok(topology_index::View::view(&index))
     };
-    let left_index = if constraints::View::resolve_left_self_intersections(constraints_value) {
-        Some(index_of(constraints::View::left_geometry(constraints_value))?)
+    let left_index = if constraints::view::resolve_left_self_intersections(constraints_value) {
+        Some(index_of(constraints::view::left_geometry(constraints_value))?)
     } else {
         None
     };
-    let right_index = if constraints::View::resolve_right_self_intersections(constraints_value) {
-        Some(index_of(constraints::View::right_geometry(constraints_value))?)
+    let right_index = if constraints::view::resolve_right_self_intersections(constraints_value) {
+        Some(index_of(constraints::view::right_geometry(constraints_value))?)
     } else {
         None
     };
@@ -736,7 +736,7 @@ fn build_inner(
 }
 
 #[allow(non_snake_case)]
-pub mod View {
+pub mod view {
     use super::*;
 
     pub fn complex(value: &T) -> &Arc<complex::T> {
@@ -943,7 +943,7 @@ mod tests {
         let value = build(None, &params(), &complex_value).unwrap();
         for edge in 0..complex::edge_count(&complex_value) {
             assert!(
-                !View::is_seam_edge(&value, edge),
+                !view::is_seam_edge(&value, edge),
                 "disjoint source boundary was retained as a Boolean seam edge"
             );
         }
@@ -954,7 +954,7 @@ mod tests {
     fn edge_classification_rejects_negative() {
         let complex_value = disjoint_complex();
         let value = build(None, &params(), &complex_value).unwrap();
-        View::is_seam_edge(&value, -1);
+        view::is_seam_edge(&value, -1);
     }
 
     #[test]
@@ -962,7 +962,7 @@ mod tests {
     fn edge_classification_rejects_past_end() {
         let complex_value = disjoint_complex();
         let value = build(None, &params(), &complex_value).unwrap();
-        View::is_seam_edge(&value, complex::edge_count(&complex_value));
+        view::is_seam_edge(&value, complex::edge_count(&complex_value));
     }
 
     #[test]

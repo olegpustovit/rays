@@ -98,7 +98,7 @@ pub fn boundary_second(value: &T, pair: i64, boundary: i64) -> i64 {
     }
 }
 
-pub mod View {
+pub mod view {
     use super::*;
 
     pub fn constraints(value: &T) -> &Arc<constraints_mod::T> {
@@ -210,15 +210,15 @@ fn convex_hull(projection: Projection, candidates: &[implicit_point::T], count: 
 
 /// None: Construction_failed or Invalid_argument in OCaml.
 fn build_pair(constraints: &constraints_mod::T, pair: i64) -> Option<Overlap> {
-    let source = constraints_mod::View::source(constraints);
+    let source = constraints_mod::view::source(constraints);
     let first_side = constraints_mod::coplanar_first_side(constraints, pair);
     let second_side = constraints_mod::coplanar_second_side(constraints, pair);
     let first_face = constraints_mod::coplanar_first_triangle(constraints, pair);
     let second_face = constraints_mod::coplanar_second_triangle(constraints, pair);
     let first_ids: Vec<i64> =
-        (0..3).map(|local| constraints_mod::View::triangle_point(constraints, first_side, first_face, local)).collect();
+        (0..3).map(|local| constraints_mod::view::triangle_point(constraints, first_side, first_face, local)).collect();
     let second_ids: Vec<i64> =
-        (0..3).map(|local| constraints_mod::View::triangle_point(constraints, second_side, second_face, local)).collect();
+        (0..3).map(|local| constraints_mod::view::triangle_point(constraints, second_side, second_face, local)).collect();
     let first_triangle: Vec<implicit_point::T> =
         first_ids.iter().map(|&p| implicit_point::explicit(source, p).unwrap()).collect();
     let second_triangle: Vec<implicit_point::T> =
@@ -442,7 +442,7 @@ mod tests {
     }
 
     fn approx(value: &T, pair: i64, point: i64) -> P {
-        implicit_point::approximate(View::point(value, pair, point))
+        implicit_point::approximate(view::point(value, pair, point))
     }
 
     fn expect_points(expected: &[P], actual: &T) {

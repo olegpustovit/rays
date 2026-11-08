@@ -82,7 +82,7 @@ pub fn right_winding(value: &T, shell: i64) -> i64 {
 }
 
 #[allow(non_snake_case)]
-pub mod View {
+pub mod view {
     use super::*;
 
     pub fn weiler(value: &T) -> &Arc<weiler::T> {
@@ -248,8 +248,8 @@ fn build_component_tree(
 
 fn triangle_point(c: &constraints::T, side: Side, triangle: i64, local: i64) -> i64 {
     match side {
-        Side::Left => constraints::View::left_triangle_point(c, triangle, local),
-        Side::Right => constraints::View::right_triangle_point(c, triangle, local),
+        Side::Left => constraints::view::left_triangle_point(c, triangle, local),
+        Side::Right => constraints::view::right_triangle_point(c, triangle, local),
     }
 }
 
@@ -289,7 +289,7 @@ fn build_components(
         Side::Right => constraints::right_triangle_count(c),
     };
     let mut parent: Vec<i64> = (0..triangle_count).collect();
-    let source_points = constraints::View::source_point_count(c);
+    let source_points = constraints::view::source_point_count(c);
     let mut first_triangle = vec![-1_i64; source_points as usize];
     for triangle in 0..triangle_count {
         cancel::poll(cancel_value, triangle, 4095)?;
@@ -348,7 +348,7 @@ fn build_components(
     let mut max_x = vec![f64::NEG_INFINITY; n];
     let mut max_y = vec![f64::NEG_INFINITY; n];
     let mut max_z = vec![f64::NEG_INFINITY; n];
-    let source = constraints::View::source(c);
+    let source = constraints::view::source(c);
     for triangle in 0..triangle_count {
         cancel::poll(cancel_value, triangle, 4095)?;
         let component = component_of_triangle[triangle as usize] as usize;
@@ -438,7 +438,7 @@ fn classify_operand(
     positive: bool,
     skip: &dyn Fn(i64) -> bool,
 ) -> Result<Option<i64>, Fail> {
-    let source = constraints::View::source(c);
+    let source = constraints::view::source(c);
     let axis = axis_index(axis);
     let mut winding = 0_i64;
     let mut ambiguous = false;
@@ -484,7 +484,7 @@ fn classify_operand_symbolic(
     query: &implicit_point::T,
     skip: &dyn Fn(i64) -> bool,
 ) -> Result<Symbolic, Fail> {
-    let source = constraints::View::source(c);
+    let source = constraints::view::source(c);
     let mut winding = 0_i64;
     let mut boundary = -1_i64;
     let mut degenerate = -1_i64;
@@ -633,12 +633,12 @@ fn propagate(weiler: &weiler::T, context: &Context, state: &mut State) -> Result
 
 fn seed_component(cancel_value: Option<&cancel::T>, complex: &complex::T, weiler: &weiler::T, context: &Context, state: &mut State, shell: i64) -> Result<(), Fail> {
     let c = complex;
-    let constraints_value = complex::View::constraints(c);
+    let constraints_value = complex::view::constraints(c);
     let incidence = context.incidences[context.offsets[shell as usize] as usize];
     let facet = incidence >> 1;
-    let a = complex::View::vertex(c, complex::facet_vertex(c, facet, 0));
-    let b = complex::View::vertex(c, complex::facet_vertex(c, facet, 1));
-    let cc = complex::View::vertex(c, complex::facet_vertex(c, facet, 2));
+    let a = complex::view::vertex(c, complex::facet_vertex(c, facet, 0));
+    let b = complex::view::vertex(c, complex::facet_vertex(c, facet, 1));
+    let cc = complex::view::vertex(c, complex::facet_vertex(c, facet, 2));
     let query = match implicit_point::centroid3(&a, &b, &cc) {
         Ok(point) => point,
         Err(_) => return Err(invalid_fail("could not construct exact facet centroid")),
@@ -774,10 +774,10 @@ fn build_inner(
     weiler_value: &Arc<weiler::T>,
 ) -> Result<T, Fail> {
     cancel::check_opt(cancel_value)?;
-    if !Arc::ptr_eq(weiler::View::complex(weiler_value), c) {
+    if !Arc::ptr_eq(weiler::view::complex(weiler_value), c) {
         return Err(invalid_fail("Weiler graph belongs to a different Boolean complex"));
     }
-    let constraints_value = complex::View::constraints(c);
+    let constraints_value = complex::view::constraints(c);
     let shells = weiler::shell_count(weiler_value);
     let facets = complex::facet_count(c);
     let left_slot: Mutex<Option<Result<Option<Components>, Fail>>> = Mutex::new(None);

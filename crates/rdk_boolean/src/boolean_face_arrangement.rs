@@ -46,7 +46,7 @@ pub fn segment_second(value: &T, segment: i64) -> i64 {
     value.segment_second[segment as usize]
 }
 
-pub mod View {
+pub mod view {
     use super::*;
 
     pub fn point(value: &T, point: i64) -> &implicit_point::T {
@@ -73,20 +73,20 @@ fn face_constraint(constraints: &constraints_mod::T, side: Side, slot: i64) -> i
 
 fn face_coplanar_range(coplanar: &coplanar_mod::T, side: Side, triangle: i64) -> (i64, i64) {
     match side {
-        Side::Left => coplanar_mod::View::left_pair_range(coplanar, triangle),
-        Side::Right => coplanar_mod::View::right_pair_range(coplanar, triangle),
+        Side::Left => coplanar_mod::view::left_pair_range(coplanar, triangle),
+        Side::Right => coplanar_mod::view::right_pair_range(coplanar, triangle),
     }
 }
 
 fn face_coplanar_pair(coplanar: &coplanar_mod::T, side: Side, slot: i64) -> i64 {
     match side {
-        Side::Left => coplanar_mod::View::left_pair(coplanar, slot),
-        Side::Right => coplanar_mod::View::right_pair(coplanar, slot),
+        Side::Left => coplanar_mod::view::left_pair(coplanar, slot),
+        Side::Right => coplanar_mod::view::right_pair(coplanar, slot),
     }
 }
 
 fn face_triangle_point(constraints: &constraints_mod::T, side: Side, triangle: i64, local: i64) -> i64 {
-    constraints_mod::View::triangle_point(constraints, side, triangle, local)
+    constraints_mod::view::triangle_point(constraints, side, triangle, local)
 }
 
 fn opponent(constraints: &constraints_mod::T, side: Side, triangle: i64, constraint_index: i64) -> (Side, i64) {
@@ -792,7 +792,7 @@ pub fn build(
 ) -> Result<T, error::T> {
     poll(cancel_value, 0, 0)?;
     if let Some(value) = coplanar {
-        if !Arc::ptr_eq(coplanar_mod::View::constraints(value), constraints) {
+        if !Arc::ptr_eq(coplanar_mod::view::constraints(value), constraints) {
             return Err(invalid("coplanar plan belongs to a different constraint plan"));
         }
     }
@@ -826,7 +826,7 @@ pub fn build(
             raw_segment_capacity += coplanar_mod::boundary_count(coplanar, pair) as usize;
         }
     }
-    let source = constraints_mod::View::source(constraints_ref).clone();
+    let source = constraints_mod::view::source(constraints_ref).clone();
     let mut points: Vec<implicit_point::T> = Vec::with_capacity(point_capacity.max(4));
     let mut point_handles: Vec<i64> = Vec::with_capacity(point_capacity.max(4));
     let mut segment_first: Vec<i64> = Vec::with_capacity(raw_segment_capacity);
@@ -839,11 +839,11 @@ pub fn build(
         let constraint_index = face_constraint(constraints_ref, side, slot);
         let first_handle = constraints_mod::constraint_first(constraints_ref, constraint_index);
         let second_handle = constraints_mod::constraint_second(constraints_ref, constraint_index);
-        points.push(constraints_mod::View::point(constraints_ref, first_handle).clone());
+        points.push(constraints_mod::view::point(constraints_ref, first_handle).clone());
         point_handles.push(first_handle);
         let first = points.len() as i64 - 1;
         if first_handle != second_handle {
-            points.push(constraints_mod::View::point(constraints_ref, second_handle).clone());
+            points.push(constraints_mod::view::point(constraints_ref, second_handle).clone());
             point_handles.push(second_handle);
             let second = points.len() as i64 - 1;
             segment_first.push(first);
@@ -860,7 +860,7 @@ pub fn build(
             let count = coplanar_mod::point_count(coplanar, pair);
             let mut point_map: Vec<i64> = Vec::with_capacity(count as usize);
             for point in 0..count {
-                points.push(coplanar_mod::View::point(coplanar, pair, point).clone());
+                points.push(coplanar_mod::view::point(coplanar, pair, point).clone());
                 point_handles.push(-1);
                 point_map.push(points.len() as i64 - 1);
             }
@@ -869,8 +869,8 @@ pub fn build(
                 segment_second.push(point_map[coplanar_mod::boundary_second(coplanar, pair, boundary) as usize]);
                 segment_constraint.push(-1);
                 segment_coplanar.push(true);
-                segment_support_first.push(coplanar_mod::View::boundary_support_first(coplanar, pair, boundary));
-                segment_support_second.push(coplanar_mod::View::boundary_support_second(coplanar, pair, boundary));
+                segment_support_first.push(coplanar_mod::view::boundary_support_first(coplanar, pair, boundary));
+                segment_support_second.push(coplanar_mod::view::boundary_support_second(coplanar, pair, boundary));
             }
         }
     }
@@ -1140,7 +1140,7 @@ mod tests {
     }
 
     fn approx(value: &T, point: i64) -> P {
-        implicit_point::approximate(View::point(value, point))
+        implicit_point::approximate(view::point(value, point))
     }
 
     fn close(l: f64, r: f64) -> bool {

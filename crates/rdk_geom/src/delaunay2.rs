@@ -46,7 +46,7 @@ pub fn source_unique(value: &T, source: i64) -> Result<i64, error::T> {
 }
 
 #[allow(non_snake_case)]
-pub mod View {
+pub mod view {
     use super::T;
 
     #[derive(Clone, Debug)]

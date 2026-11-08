@@ -536,15 +536,15 @@ struct Internal {
 
 fn side_triangle_point(c: &constraints::T, side: Side, triangle: i64, local: i64) -> i64 {
     match side {
-        Side::Left => constraints::View::left_triangle_point(c, triangle, local),
-        Side::Right => constraints::View::right_triangle_point(c, triangle, local),
+        Side::Left => constraints::view::left_triangle_point(c, triangle, local),
+        Side::Right => constraints::view::right_triangle_point(c, triangle, local),
     }
 }
 
 fn side_surface(c: &constraints::T, side: Side) -> &surface_index::T {
     match side {
-        Side::Left => constraints::View::left_surface(c),
-        Side::Right => constraints::View::right_surface(c),
+        Side::Left => constraints::view::left_surface(c),
+        Side::Right => constraints::view::right_surface(c),
     }
 }
 
@@ -559,10 +559,10 @@ fn build_internal(
     shared_barycentrics: Option<&mut BarycentricCache>,
 ) -> Result<Ancestry, Fail> {
     cancel::check_opt(cancel_value)?;
-    if !Arc::ptr_eq(weiler::View::complex(weiler_value), c) {
+    if !Arc::ptr_eq(weiler::view::complex(weiler_value), c) {
         return Err(invalid_fail("Weiler graph belongs to a different Boolean complex"));
     }
-    if !Arc::ptr_eq(cells::View::weiler(cells_value), weiler_value) {
+    if !Arc::ptr_eq(cells::view::weiler(cells_value), weiler_value) {
         return Err(invalid_fail("cell labels belong to a different Weiler graph"));
     }
     if cells::shell_count(cells_value) != weiler::shell_count(weiler_value) {
@@ -673,9 +673,9 @@ fn build_internal(
     }
     let point_count = x.len() as i64;
     let complex_output_points = point_map.clone();
-    let constraints_value = complex::View::constraints(c);
-    let left_geometry = constraints::View::left_geometry(constraints_value).clone();
-    let right_geometry = constraints::View::right_geometry(constraints_value).clone();
+    let constraints_value = complex::view::constraints(c);
+    let left_geometry = constraints::view::left_geometry(constraints_value).clone();
+    let right_geometry = constraints::view::right_geometry(constraints_value).clone();
     let edge_index = |geometry_value: &geometry::T| -> Result<Option<topology_index::View::View>, Fail> {
         if internal.with_corner_payload && !geometry::edge_groups(geometry_value).is_empty() {
             let index = topology_index::create(cancel_value, geometry::topology(geometry_value))?;
@@ -733,7 +733,7 @@ fn build_internal(
             &mut local_barycentrics
         }
     };
-    let source = constraints::View::source(constraints_value);
+    let source = constraints::view::source(constraints_value);
     for facet in 0..facets {
         cancel::poll(cancel_value, facet, 4095)?;
         if selected[facet as usize] == 0 {
@@ -818,7 +818,7 @@ fn build_internal(
             for local in 0..3_i64 {
                 let facet_local = if local == 0 || desired > 0 { local } else { 3 - local };
                 let complex_vertex = complex::facet_vertex(c, facet, facet_local);
-                let point = complex::View::vertex(c, complex_vertex);
+                let point = complex::view::vertex(c, complex_vertex);
                 let (wa, wb, wc) = cached_barycentric(
                     barycentrics,
                     source,
@@ -838,7 +838,7 @@ fn build_internal(
         if edge_source_capacity > 0 {
             let facet_local = |value: i64| -> i64 { if value == 0 || desired > 0 { value } else { 3 - value } };
             let output_point =
-                |local: i64| complex::View::vertex(c, complex::facet_vertex(c, facet, facet_local(local)));
+                |local: i64| complex::view::vertex(c, complex::facet_vertex(c, facet, facet_local(local)));
             let output0 = output_point(0);
             let output1 = output_point(1);
             let output2 = output_point(2);
@@ -1041,7 +1041,7 @@ pub fn build_selected_with_ancestry(
 }
 
 #[allow(non_snake_case)]
-pub mod View {
+pub mod view {
     use super::*;
 
     pub use super::BarycentricCache;

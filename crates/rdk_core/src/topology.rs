@@ -459,7 +459,7 @@ pub(crate) fn identity_token(value: &T) -> Arc<support::IdentityToken> {
 }
 
 #[allow(non_snake_case)]
-pub mod Builder {
+pub mod builder {
     use super::*;
 
     pub struct T {
@@ -765,9 +765,9 @@ mod tests {
 
     #[test]
     fn builder_freezes_polylines() {
-        let mut builder = Builder::create(3, None, None).unwrap();
-        Builder::add_open_polyline(&mut builder, &[0, 1, 2]).unwrap();
-        let topology = Builder::freeze(&mut builder).unwrap();
+        let mut builder = builder::create(3, None, None).unwrap();
+        builder::add_open_polyline(&mut builder, &[0, 1, 2]).unwrap();
+        let topology = builder::freeze(&mut builder).unwrap();
         assert_eq!(primitive_kind(&topology, 0).unwrap(), PrimitiveKind::OpenPolyline);
         assert_eq!(primitive_size(&topology, 0).unwrap(), 3);
     }

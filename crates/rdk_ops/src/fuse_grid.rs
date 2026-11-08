@@ -976,9 +976,9 @@ mod tests {
         let topology_value = geometry::topology(&g).clone();
         let index = topology_index::create(None, &topology_value).unwrap();
         let edge = topology_index::find_edge(&index, 1, 2).unwrap();
-        let mut builder = edge_group::Builder::create(&topology_value, &index, "edge").unwrap();
-        edge_group::Builder::set(&mut builder, edge, true).unwrap();
-        geometry::with_edge_group(edge_group::Builder::freeze(&mut builder).unwrap(), &g).unwrap()
+        let mut builder = edge_group::builder::create(&topology_value, &index, "edge").unwrap();
+        edge_group::builder::set(&mut builder, edge, true).unwrap();
+        geometry::with_edge_group(edge_group::builder::freeze(&mut builder).unwrap(), &g).unwrap()
     }
 
     #[test]

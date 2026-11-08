@@ -641,7 +641,7 @@ fn spatial_transfer(
     let mut neighbors = vec![-1_i64; slots];
     let mut distances = vec![f64::INFINITY; slots];
     let mut neighbor_counts = vec![0_i64; target_count as usize];
-    spatial_index::View::nearest_k_many_into(
+    spatial_index::view::nearest_k_many_into(
         cancel_token,
         target_points.as_ref(),
         grain,

@@ -313,7 +313,7 @@ fn run_default(
         let source_index = topology_index::create(cancel_ref, source_topology)?;
         let target_index = topology_index::create(cancel_ref, &output_topology)?;
         for source_group in &source_groups {
-            let mut builder = edge_group::Builder::create(&output_topology, &target_index, edge_group::name(source_group))?;
+            let mut builder = edge_group::builder::create(&output_topology, &target_index, edge_group::name(source_group))?;
             for edge in 0..edge_group::length(source_group) {
                 if !edge_group::mem(edge, source_group) {
                     continue;
@@ -325,13 +325,13 @@ fn run_default(
                     if next >= 0 {
                         for (a, b) in [(current * 2, next * 2), (current * 2 + 1, next * 2 + 1)] {
                             if let Some(target) = topology_index::find_edge(&target_index, a, b) {
-                                edge_group::Builder::set(&mut builder, target, true)?;
+                                edge_group::builder::set(&mut builder, target, true)?;
                             }
                         }
                     }
                 }
             }
-            edge_groups.push(edge_group::Builder::freeze(&mut builder)?);
+            edge_groups.push(edge_group::builder::freeze(&mut builder)?);
         }
     }
     geometry::create(output_positions, output_topology, Some(attributes), Some(groups), Some(edge_groups))
@@ -853,7 +853,7 @@ fn run_general(
             }
         };
         let freeze = |name: &str, bits: Vec<u8>| -> Result<edge_group::T, error::T> {
-            edge_group::View::of_owned_bits(&output_topology, edge_count as i64, name, bits)
+            edge_group::view::of_owned_bits(&output_topology, edge_count as i64, name, bits)
         };
         for source_group in &source_edge_groups {
             let mut bits = make_bits();

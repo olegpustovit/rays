@@ -271,7 +271,7 @@ fn soft_radius_weights(
     let mut indices = vec![-1_i64; count];
     let mut distances = vec![f64::INFINITY; count];
     let mut counts = vec![0_i64; count];
-    spatial_index::View::nearest_k_many_into(
+    spatial_index::view::nearest_k_many_into(
         cancel_value,
         None,
         grain,
@@ -493,7 +493,7 @@ fn run_distance_from_geometry(
                 geometry::positions(&params.reference),
             )
             .map_err(|failure| fail(error::to_string(&failure)))?;
-            spatial_index::View::nearest_distances_many_into(
+            spatial_index::view::nearest_distances_many_into(
                 cancel_value,
                 affected_points.as_ref(),
                 grain,
@@ -959,9 +959,9 @@ mod tests {
             vec![0.0; 5],
         )
         .unwrap();
-        let mut builder = topology::Builder::create(5, Some(4), Some(1)).unwrap();
-        topology::Builder::add_open_polyline(&mut builder, &[0, 1, 3, 4]).unwrap();
-        let topo = topology::Builder::freeze(&mut builder).unwrap();
+        let mut builder = topology::builder::create(5, Some(4), Some(1)).unwrap();
+        topology::builder::add_open_polyline(&mut builder, &[0, 1, 3, 4]).unwrap();
+        let topo = topology::builder::freeze(&mut builder).unwrap();
         geometry::create(positions, topo, None, None, None).unwrap()
     }
 

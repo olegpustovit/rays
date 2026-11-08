@@ -234,7 +234,7 @@ fn merge_plain(
     for template in &groups {
         let owner = group::owner(template);
         let total: i64 = geometries.iter().map(|item| owner_count(item, owner)).sum();
-        let mut builder = group::Builder::create(owner, group::name(template), total).map_err(lift)?;
+        let mut builder = group::builder::create(owner, group::name(template), total).map_err(lift)?;
         let mut offset = 0_i64;
         let mut sources: Vec<(i64, Option<group::T>)> = Vec::new();
         for item in geometries {
@@ -245,12 +245,12 @@ fn merge_plain(
             if let Some(member) = member {
                 for index in 0..group::length(member) {
                     if group::mem(index, member) {
-                        group::Builder::set(&mut builder, source_offset + index, true).map_err(lift)?;
+                        group::builder::set(&mut builder, source_offset + index, true).map_err(lift)?;
                     }
                 }
             }
         }
-        let target = group::Builder::freeze(&mut builder).map_err(lift)?;
+        let target = group::builder::freeze(&mut builder).map_err(lift)?;
         if !sources.iter().any(|(_, member)| member.as_ref().is_some_and(group::is_ordered)) {
             merged_groups.push(target);
         } else {
@@ -268,7 +268,7 @@ fn merge_plain(
         let target_index = topology_index::create(cancel_value, &topology_value).map_err(lift)?;
         for template in &edge_groups {
             let mut builder =
-                edge_group::Builder::create(&topology_value, &target_index, edge_group::name(template)).map_err(lift)?;
+                edge_group::builder::create(&topology_value, &target_index, edge_group::name(template)).map_err(lift)?;
             let mut point_offset = 0_i64;
             for item in geometries {
                 let source_index = topology_index::create(cancel_value, geometry::topology(item)).map_err(lift)?;
@@ -277,14 +277,14 @@ fn merge_plain(
                         if edge_group::mem(edge, &member) {
                             let (a, b) = topology_index::edge_points(&source_index, edge).map_err(lift)?;
                             if let Some(target) = topology_index::find_edge(&target_index, a + point_offset, b + point_offset) {
-                                edge_group::Builder::set(&mut builder, target, true).map_err(lift)?;
+                                edge_group::builder::set(&mut builder, target, true).map_err(lift)?;
                             }
                         }
                     }
                 }
                 point_offset += geometry::point_count(item);
             }
-            merged_edge_groups.push(edge_group::Builder::freeze(&mut builder).map_err(lift)?);
+            merged_edge_groups.push(edge_group::builder::freeze(&mut builder).map_err(lift)?);
         }
     }
     geometry::create(positions, topology_value, Some(attributes), Some(merged_groups), Some(merged_edge_groups))

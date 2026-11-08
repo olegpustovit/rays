@@ -10,11 +10,11 @@ pub struct Params {
 
 pub fn points(values: &[(f64, f64, f64)]) -> Result<geometry::T, error::T> {
     let count = values.len();
-    let mut builder = packed::Float3::Builder::create(count as i64)?;
+    let mut builder = packed::Float3::builder::create(count as i64)?;
     for (index, &(x, y, z)) in values.iter().enumerate() {
-        packed::Float3::Builder::set(&mut builder, index as i64, x, y, z)?;
+        packed::Float3::builder::set(&mut builder, index as i64, x, y, z)?;
     }
-    let positions = packed::Float3::Builder::freeze(&mut builder)?;
+    let positions = packed::Float3::builder::freeze(&mut builder)?;
     geometry::create(positions, topology::empty(count as i64)?, None, None, None)
 }
 
@@ -40,16 +40,16 @@ fn polyline_inner(params: &Params, values: &[(f64, f64, f64)]) -> Result<geometr
         return Err(make_error("polyline", Code::InvalidParameter, "Rdk.Line_geometry.polyline: positions must be finite"));
     }
     let cloud = points(values)?;
-    let mut builder = topology::Builder::create(count as i64, Some(count as i64), Some(1))?;
+    let mut builder = topology::builder::create(count as i64, Some(count as i64), Some(1))?;
     let indices: Vec<i64> = (0..count as i64).collect();
     if params.closed {
-        topology::Builder::add_closed_polyline(&mut builder, &indices)?;
+        topology::builder::add_closed_polyline(&mut builder, &indices)?;
     } else {
-        topology::Builder::add_open_polyline(&mut builder, &indices)?;
+        topology::builder::add_open_polyline(&mut builder, &indices)?;
     }
     geometry::create(
         geometry::positions(&cloud).clone(),
-        topology::Builder::freeze(&mut builder)?,
+        topology::builder::freeze(&mut builder)?,
         None,
         None,
         None,

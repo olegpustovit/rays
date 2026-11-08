@@ -37,7 +37,7 @@ pub fn incident_local(value: &T, incident: i64) -> i64 {
 }
 
 #[allow(non_snake_case)]
-pub mod View {
+pub mod view {
     use super::*;
 
     pub fn complex(value: &T) -> &Arc<complex::T> {
@@ -91,16 +91,16 @@ pub fn build(cancel_value: Option<&cancel::T>, c: &Arc<complex::T>) -> Result<T,
 }
 
 fn radial_order(c: &complex::T, edge: i64, first: i64, count: i64) -> Result<Vec<i64>, error::T> {
-    let edge_start = complex::View::vertex(c, complex::edge_first(c, edge));
-    let edge_end = complex::View::vertex(c, complex::edge_second(c, edge));
+    let edge_start = complex::view::vertex(c, complex::edge_first(c, edge));
+    let edge_end = complex::view::vertex(c, complex::edge_second(c, edge));
     let reference_facet = complex::edge_incident_facet(c, first);
     let reference_local = complex::edge_incident_local(c, first);
-    let reference = complex::View::vertex(c, opposite_vertex(c, reference_facet, reference_local));
+    let reference = complex::view::vertex(c, opposite_vertex(c, reference_facet, reference_local));
     let points: Vec<_> = (0..count)
         .map(|index| {
             let facet = complex::edge_incident_facet(c, first + index);
             let local = complex::edge_incident_local(c, first + index);
-            complex::View::vertex(c, opposite_vertex(c, facet, local))
+            complex::view::vertex(c, opposite_vertex(c, facet, local))
         })
         .collect();
     let same_source_face = |left: i64, right: i64| -> bool {

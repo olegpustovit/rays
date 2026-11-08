@@ -228,7 +228,7 @@ fn sorted_candidates(candidates: &edge_group::T, lengths: &mut [f64], positions:
 
 fn reserve_primitives(index: &IndexView, used_primitives: &mut [u8], point: i64) {
     for local in index.point_offsets[u(point)]..index.point_offsets[u(point + 1)] {
-        support::Bits::set(used_primitives, index.primitive_of_vertex[u(index.point_vertices[u(local)])]);
+        support::bits::set(used_primitives, index.primitive_of_vertex[u(index.point_vertices[u(local)])]);
     }
 }
 
@@ -282,10 +282,10 @@ pub fn safe_independent_edges(
                 if primitive_a != primitive_b
                     && primitive_is_triangle(&topology, primitive_a)
                     && primitive_is_triangle(&topology, primitive_b)
-                    && !(support::Bits::mem(&used_points, a)
-                        || support::Bits::mem(&used_points, b)
-                        || support::Bits::mem(&used_primitives, primitive_a)
-                        || support::Bits::mem(&used_primitives, primitive_b))
+                    && !(support::bits::mem(&used_points, a)
+                        || support::bits::mem(&used_points, b)
+                        || support::bits::mem(&used_primitives, primitive_a)
+                        || support::bits::mem(&used_primitives, primitive_b))
                     && link_condition(&index, &topology, &mut neighbor_stamps, stamp, edge, a, b)
                 {
                     let mut valid = true;
@@ -296,7 +296,7 @@ pub fn safe_independent_edges(
                         let primitive = index.primitive_of_vertex[u(index.point_vertices[u(local)])];
                         if primitive != primitive_a
                             && primitive != primitive_b
-                            && (support::Bits::mem(&used_primitives, primitive)
+                            && (support::bits::mem(&used_primitives, primitive)
                                 || !primitive_is_triangle(&topology, primitive)
                                 || !contraction_preserves_orientation(&positions, &topology, primitive, keep, remove))
                         {
@@ -305,15 +305,15 @@ pub fn safe_independent_edges(
                         local += 1;
                     }
                     if valid {
-                        support::Bits::set(&mut chosen, edge);
-                        support::Bits::set(&mut used_points, a);
-                        support::Bits::set(&mut used_points, b);
+                        support::bits::set(&mut chosen, edge);
+                        support::bits::set(&mut used_points, a);
+                        support::bits::set(&mut used_points, b);
                         reserve_primitives(&index, &mut used_primitives, a);
                         reserve_primitives(&index, &mut used_primitives, b);
                     }
                 }
             }
-            edge_group::View::of_owned_bits(topology_value, edge_count, "__rdk_boolean_safe_tiny_seam", chosen)
+            edge_group::view::of_owned_bits(topology_value, edge_count, "__rdk_boolean_safe_tiny_seam", chosen)
                 .map_err(raised)
         })().map_err(|f| guard_fail(Code::InvalidInput, f))
 }
@@ -350,18 +350,18 @@ pub fn speculative_independent_edges(
                 for point in [a, b] {
                     for slot in index.point_offsets[u(point)]..index.point_offsets[u(point + 1)] {
                         let primitive = index.primitive_of_vertex[u(index.point_vertices[u(slot)])];
-                        if support::Bits::mem(&used_primitives, primitive) {
+                        if support::bits::mem(&used_primitives, primitive) {
                             available = false;
                         }
                     }
                 }
                 if available {
-                    support::Bits::set(&mut chosen, edge);
+                    support::bits::set(&mut chosen, edge);
                     reserve_primitives(&index, &mut used_primitives, a);
                     reserve_primitives(&index, &mut used_primitives, b);
                 }
             }
-            edge_group::View::of_owned_bits(
+            edge_group::view::of_owned_bits(
                 topology_value,
                 edge_count,
                 "__rdk_boolean_speculative_independent",
@@ -382,35 +382,35 @@ pub fn surface_seam_edges(
     }
     (|| {
             cancel::check_opt(cx(cancel))?;
-            let complex = boolean_extract::View::complex(ancestry);
-            if !Arc::ptr_eq(boolean_seam::View::complex(seam), complex) {
+            let complex = boolean_extract::view::complex(ancestry);
+            if !Arc::ptr_eq(boolean_seam::view::complex(seam), complex) {
                 return Err(inv("Boolean seam and extraction belong to different exact complexes"));
             }
             let extracted = boolean_extract::geometry(ancestry);
             let topology_value = geometry::topology(&extracted);
             let index = topology_index::create(cx(cancel), topology_value)?;
-            let mut builder = edge_group::Builder::create(topology_value, &index, "__rdk_boolean_exact_seam")
+            let mut builder = edge_group::builder::create(topology_value, &index, "__rdk_boolean_exact_seam")
                 .map_err(raised)?;
             for complex_edge in 0..crate::boolean_complex::edge_count(&complex) {
                 cancel::poll(cx(cancel), complex_edge, 4095)?;
-                if boolean_seam::View::is_seam_edge(seam, complex_edge) {
-                    let a = boolean_extract::View::complex_output_point(
+                if boolean_seam::view::is_seam_edge(seam, complex_edge) {
+                    let a = boolean_extract::view::complex_output_point(
                         ancestry,
                         crate::boolean_complex::edge_first(&complex, complex_edge),
                     );
-                    let b = boolean_extract::View::complex_output_point(
+                    let b = boolean_extract::view::complex_output_point(
                         ancestry,
                         crate::boolean_complex::edge_second(&complex, complex_edge),
                     );
                     if a >= 0 && b >= 0 {
                         let edge = topology_index::find_edge_index(&index, a, b);
                         if edge >= 0 {
-                            edge_group::Builder::set(&mut builder, edge, true).map_err(raised)?;
+                            edge_group::builder::set(&mut builder, edge, true).map_err(raised)?;
                         }
                     }
                 }
             }
-            edge_group::Builder::freeze(&mut builder).map_err(raised)
+            edge_group::builder::freeze(&mut builder).map_err(raised)
         })().map_err(|f| guard_fail(Code::InvalidInput, f))
 }
 
@@ -668,8 +668,8 @@ fn verify_extracted_orientations(
 ) -> Result<(), error::T> {
     let positions = positions_view(geometry_value)?;
     let topology = topology_view(geometry::topology(geometry_value))?;
-    let view = boolean_extract::View::ancestry_view(ancestry);
-    let complex = boolean_extract::View::complex(ancestry);
+    let view = boolean_extract::view::ancestry_view(ancestry);
+    let complex = boolean_extract::view::complex(ancestry);
     let primitives = geometry::primitive_count(geometry_value);
     if view.corner_complex_vertices.len() as i64 != primitives * 3
         || view.primitive_sides.len() as i64 != primitives
@@ -677,8 +677,8 @@ fn verify_extracted_orientations(
     {
         return Err(fail_with(Code::GeometryMismatch, "Boolean extraction corner ancestry has the wrong cardinality"));
     }
-    let constraints = crate::boolean_complex::View::constraints(&complex);
-    let source = boolean_constraints::View::source(&constraints);
+    let constraints = crate::boolean_complex::view::constraints(&complex);
+    let source = boolean_constraints::view::source(&constraints);
     let ranges = (primitives + grain - 1) / grain;
     let failures: Vec<AtomicI64> = (0..ranges).map(|_| AtomicI64::new(-1)).collect();
     support::run_indexed_ranges(grain, primitives, &|range, first, last| {
@@ -689,14 +689,14 @@ fn verify_extracted_orientations(
             let a = topology.vertex_points[u(offset)];
             let b = topology.vertex_points[u(offset + 1)];
             let c = topology.vertex_points[u(offset + 2)];
-            let ea = crate::boolean_complex::View::vertex(&complex, view.corner_complex_vertices[u(offset)]);
-            let eb = crate::boolean_complex::View::vertex(&complex, view.corner_complex_vertices[u(offset + 1)]);
-            let ec = crate::boolean_complex::View::vertex(&complex, view.corner_complex_vertices[u(offset + 2)]);
+            let ea = crate::boolean_complex::view::vertex(&complex, view.corner_complex_vertices[u(offset)]);
+            let eb = crate::boolean_complex::view::vertex(&complex, view.corner_complex_vertices[u(offset + 1)]);
+            let ec = crate::boolean_complex::view::vertex(&complex, view.corner_complex_vertices[u(offset + 2)]);
             let triangle = view.primitive_triangles[u(primitive)];
             let side = if view.primitive_sides[u(primitive)] == 0 { Side::Left } else { Side::Right };
             let triangle_point = |local: i64| match side {
-                Side::Left => boolean_constraints::View::left_triangle_point(&constraints, triangle, local),
-                Side::Right => boolean_constraints::View::right_triangle_point(&constraints, triangle, local),
+                Side::Left => boolean_constraints::view::left_triangle_point(&constraints, triangle, local),
+                Side::Right => boolean_constraints::view::right_triangle_point(&constraints, triangle, local),
             };
             let (sa, sb, sc) = (triangle_point(0), triangle_point(1), triangle_point(2));
             let (exact, rounded) = match implicit_point::source_triangle_projection(&source, sa, sb, sc) {
@@ -735,7 +735,7 @@ fn verify_extracted_orientations(
 }
 
 fn validate_materialized(positions: &Positions, topology: &TopologyView) -> Result<(), error::T> {
-    boolean_extract::View::validate_materialized(
+    boolean_extract::view::validate_materialized(
         false,
         &positions.x,
         &positions.y,
@@ -772,7 +772,7 @@ fn verify_extracted_surface(
             let topology = topology_view(topology_value)?;
             validate_materialized(&positions, &topology)?;
             if require_closed {
-                boolean_extract::View::validate_closed_topology(topology_value)?;
+                boolean_extract::view::validate_closed_topology(topology_value)?;
             }
             verify_extracted_orientations(cancel, grain, ancestry, geometry_value)?;
             verify_duplicate_triangles(allow_opposite_duplicates, &topology)?;
@@ -797,7 +797,7 @@ fn verify_surface(
             let view = topology_view(topology_value)?;
             validate_materialized(&positions, &view)?;
             if require_closed {
-                boolean_extract::View::validate_closed_topology(topology_value)?;
+                boolean_extract::view::validate_closed_topology(topology_value)?;
             }
             let mut constraint_params = boolean_constraints::params(grain);
             constraint_params.cancel = cancel.cloned();
@@ -832,8 +832,8 @@ pub fn cleanup_primitive_source(value: &Cleanup, primitive: i64) -> i64 {
 }
 
 fn verify_materialized_seam_curves(cancel: Option<&Arc<cancel::T>>, grain: i64, seam: &boolean_seam::T) -> Result<(), error::T> {
-    if boolean_seam::View::curves_materialized(seam) {
-        boolean_seam::View::verify_curves(cx(cancel), grain, &boolean_seam::curves(seam))
+    if boolean_seam::view::curves_materialized(seam) {
+        boolean_seam::view::verify_curves(cx(cancel), grain, &boolean_seam::curves(seam))
     } else {
         Ok(())
     }
@@ -994,12 +994,12 @@ fn rounded_sliver_edges(
                     for local in 0..3 {
                         let edge = index.edge_of_vertex[u(first + local)];
                         if edge >= 0 {
-                            support::Bits::set(&mut bits, edge);
+                            support::bits::set(&mut bits, edge);
                         }
                     }
                 }
             }
-            let group = edge_group::View::of_owned_bits(topology_value, edge_count, "__rdk_boolean_rounded_sliver", bits)
+            let group = edge_group::view::of_owned_bits(topology_value, edge_count, "__rdk_boolean_rounded_sliver", bits)
                 .map_err(raised)?;
             Ok((degenerate_count, group))
         })().map_err(|f| guard_fail(Code::InvalidOutput, f))
@@ -1069,7 +1069,7 @@ fn rounded_self_contact_edges(
             let positions = positions_view(geometry_value)?;
             let index_value = topology_index::create(cx(cancel), topology_value)?;
             let index = topology_index::View::view(&index_value);
-            let surface = boolean_constraints::View::left_surface(&constraints);
+            let surface = boolean_constraints::view::left_surface(&constraints);
             let edge_count = topology_index::edge_count(&index_value);
             let mut bits = vec![0u8; bits_len(edge_count)];
             let mut repairable = 0;
@@ -1085,7 +1085,7 @@ fn rounded_self_contact_edges(
                         if edge >= 0 {
                             let length = edge_length(&positions, index.edge_a[u(edge)], index.edge_b[u(edge)]);
                             if length <= minimum {
-                                support::Bits::set(&mut bits, edge);
+                                support::bits::set(&mut bits, edge);
                             }
                         }
                     }
@@ -1096,7 +1096,7 @@ fn rounded_self_contact_edges(
                 mark(boolean_constraints::constraint_first_triangle(&constraints, contact));
                 mark(boolean_constraints::constraint_second_triangle(&constraints, contact));
             }
-            let group = edge_group::View::of_owned_bits(
+            let group = edge_group::view::of_owned_bits(
                 topology_value,
                 edge_count,
                 "__rdk_boolean_rounded_self_contact",
@@ -1230,7 +1230,7 @@ fn paired_rounded_slivers(
                 }
                 let paired_last = first + (last - first) / 2 * 2;
                 for slot in first..paired_last {
-                    support::Bits::set(&mut bits, keyed[slot].1);
+                    support::bits::set(&mut bits, keyed[slot].1);
                     removed += 1;
                 }
                 first = last;
@@ -1267,7 +1267,7 @@ fn closed_rounded_slivers(
             for primitive in 0..primitive_count {
                 cancel::poll(cx(cancel), primitive, 4095)?;
                 if rounded_triangle_degenerate(&positions, &topology, primitive) {
-                    support::Bits::set(&mut selected, primitive);
+                    support::bits::set(&mut selected, primitive);
                     selected_count += 1;
                 }
             }
@@ -1279,7 +1279,7 @@ fn closed_rounded_slivers(
                 let mut removed = 0;
                 for slot in first..last {
                     let primitive = index.primitive_of_vertex[u(index.edge_vertices[u(slot)])];
-                    if support::Bits::mem(&selected, primitive) {
+                    if support::bits::mem(&selected, primitive) {
                         removed += 1;
                     }
                 }
@@ -1446,8 +1446,8 @@ fn attempt_contacts(
         }
         let edge = ordered[u(slot)];
         let mut bits = vec![0u8; bits_len(edge_count)];
-        support::Bits::set(&mut bits, edge);
-        let selected = edge_group::View::of_owned_bits(
+        support::bits::set(&mut bits, edge);
+        let selected = edge_group::view::of_owned_bits(
             topology,
             edge_count,
             "__rdk_boolean_speculative_rounding_contact",
@@ -1649,8 +1649,8 @@ fn tiny_cleanup_edges(
     }
     (|| {
             cancel::check_opt(cx(cancel))?;
-            let complex = boolean_extract::View::complex(ancestry);
-            if !Arc::ptr_eq(boolean_seam::View::complex(seam), complex) {
+            let complex = boolean_extract::view::complex(ancestry);
+            if !Arc::ptr_eq(boolean_seam::view::complex(seam), complex) {
                 return Err(inv("Boolean seam and extraction belong to different exact complexes"));
             }
             let extraction_primitives = geometry::primitive_count(&boolean_extract::geometry(ancestry));
@@ -1658,7 +1658,7 @@ fn tiny_cleanup_edges(
             let mut seam_facets = vec![0u8; u(crate::boolean_complex::facet_count(&complex))];
             for complex_edge in 0..crate::boolean_complex::edge_count(&complex) {
                 cancel::poll(cx(cancel), complex_edge, 4095)?;
-                if boolean_seam::View::is_seam_edge(seam, complex_edge) {
+                if boolean_seam::view::is_seam_edge(seam, complex_edge) {
                     let (first, last) = crate::boolean_complex::edge_incident_range(&complex, complex_edge);
                     for incident in first..last {
                         seam_facets[u(crate::boolean_complex::edge_incident_facet(&complex, incident))] = 1;
@@ -1688,7 +1688,7 @@ fn tiny_cleanup_edges(
                             if extraction < 0 || extraction >= extraction_primitives {
                                 return Err(inv("Boolean cleanup primitive ancestry is out of range"));
                             }
-                            let facet = boolean_extract::View::primitive_complex_facet(ancestry, extraction);
+                            let facet = boolean_extract::view::primitive_complex_facet(ancestry, extraction);
                             adjacent = seam_facets[u(facet)] != 0;
                             incident += 1;
                         }
@@ -2060,8 +2060,8 @@ pub fn detriangulate(
                 return Err(inv("Boolean detriangulation primitive ancestry is inconsistent"));
             }
             let extraction_primitives = geometry::primitive_count(&boolean_extract::geometry(ancestry));
-            let left_count = u(geometry::primitive_count(&boolean_extract::View::left_geometry(ancestry)));
-            let right_count = u(geometry::primitive_count(&boolean_extract::View::right_geometry(ancestry)));
+            let left_count = u(geometry::primitive_count(&boolean_extract::view::left_geometry(ancestry)));
+            let right_count = u(geometry::primitive_count(&boolean_extract::view::right_geometry(ancestry)));
             let mut left_cut = vec![0u8; left_count];
             let mut right_cut = vec![0u8; right_count];
             for primitive in 0..extraction_primitives {

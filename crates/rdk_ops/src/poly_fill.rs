@@ -726,7 +726,7 @@ fn remap_edge_groups(
                 bits[(edge >> 3) as usize] |= 1 << (edge & 7);
             }
         }
-        result.push(edge_group::View::of_owned_bits(
+        result.push(edge_group::view::of_owned_bits(
             target_topology,
             edge_count as i64,
             edge_group::name(source),

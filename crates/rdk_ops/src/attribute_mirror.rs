@@ -323,7 +323,7 @@ fn plane_mapping(
     let mut nearest = vec![-1_i64; n];
     let mut distances = vec![f64::INFINITY; n];
     let mut counts = vec![0_i64; n];
-    spatial_index::View::nearest_k_many_into(
+    spatial_index::view::nearest_k_many_into(
         cancel_token,
         None,
         grain,

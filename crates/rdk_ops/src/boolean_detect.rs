@@ -221,7 +221,7 @@ fn detect_pairs(
     let mut exact = 0_usize;
     for candidate in 0..candidates {
         cancel::poll(cancel_value, candidate, 4095)?;
-        if support::Bits::mem(&keep, candidate) {
+        if support::bits::mem(&keep, candidate) {
             let source_primitive =
                 surface_index::View::triangle_primitive(source_surface, source_triangles[candidate as usize]);
             raw_counts[source_primitive as usize] += 1;
@@ -244,7 +244,7 @@ fn detect_pairs(
     let mut raw_values = vec![0_i64; exact * multiplicity];
     for candidate in 0..candidates {
         cancel::poll(cancel_value, candidate, 4095)?;
-        if support::Bits::mem(&keep, candidate) {
+        if support::bits::mem(&keep, candidate) {
             let source_primitive =
                 surface_index::View::triangle_primitive(source_surface, source_triangles[candidate as usize]) as usize;
             let collision_primitive = surface_index::View::triangle_primitive(

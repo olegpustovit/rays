@@ -1181,7 +1181,7 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
                 bits[edge >> 3] |= 1 << (edge & 7);
             }
         }
-        edge_groups.push(edge_group::View::of_owned_bits(
+        edge_groups.push(edge_group::view::of_owned_bits(
             &output_topology,
             target_edge_count as i64,
             edge_group::name(&source_group),
@@ -1203,7 +1203,7 @@ fn run_inner(params: &Params, grain: i64, geometry_value: &geometry::T) -> Resul
             }
         }
         edge_groups = merge_edge_group(
-            edge_group::View::of_owned_bits(&output_topology, target_edge_count as i64, name, bits)?,
+            edge_group::view::of_owned_bits(&output_topology, target_edge_count as i64, name, bits)?,
             edge_groups,
         )?;
     }

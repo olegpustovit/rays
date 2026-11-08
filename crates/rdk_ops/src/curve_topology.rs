@@ -53,10 +53,10 @@ mod tests {
             vec![0.0; 4],
         )
         .unwrap();
-        let mut builder = topology::Builder::create(4, None, None).unwrap();
-        topology::Builder::add_open_polyline(&mut builder, &[0, 1]).unwrap();
-        topology::Builder::add_open_polyline(&mut builder, &[2, 3]).unwrap();
-        let topo = topology::Builder::freeze(&mut builder).unwrap();
+        let mut builder = topology::builder::create(4, None, None).unwrap();
+        topology::builder::add_open_polyline(&mut builder, &[0, 1]).unwrap();
+        topology::builder::add_open_polyline(&mut builder, &[2, 3]).unwrap();
+        let topo = topology::builder::freeze(&mut builder).unwrap();
         geometry::create(positions, topo, None, None, None).unwrap()
     }
 

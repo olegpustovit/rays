@@ -152,7 +152,7 @@ pub fn run(params: &Params, left: &geometry::T) -> Result<geometry::T, error::T>
             Some(corner_payload),
             &prepared,
         )?;
-        let concatenated = boolean_extract::View::concatenate_ancestries(cancel_ref, &pieces)?;
+        let concatenated = boolean_extract::view::concatenate_ancestries(cancel_ref, &pieces)?;
         let counts: Vec<i64> = pieces
             .iter()
             .map(|piece| geometry::primitive_count(&boolean_extract::geometry(piece)))
@@ -187,7 +187,7 @@ pub fn run(params: &Params, left: &geometry::T) -> Result<geometry::T, error::T>
             None => geometry_value,
             Some(name) => {
                 let values = boolean_extract::piece_ids(
-                    boolean_solid::View::weiler(&prepared),
+                    boolean_solid::view::weiler(&prepared),
                     &ancestry,
                     source,
                     geometry::primitive_count(&geometry_value),

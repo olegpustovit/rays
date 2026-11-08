@@ -2195,7 +2195,7 @@ impl Kernel {
                         device_first,
                         gpu: self.gpu.clone(),
                     };
-                    Executor::record_on_device(program, &options, &live)?
+                    let r = Executor::record_on_device(program, &options, &live)?; eprintln!("PROBE P={} consumers={:?} penalty={} whole={} device={} {}", name, options.cpu_consumers, options.cpu_penalty, whole, r.is_some(), 0); r
                 };
                 let Some(fields) = device else {
                     *cpu_began.lock().unwrap() = Some((self.clock)());

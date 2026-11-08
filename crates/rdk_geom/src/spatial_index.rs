@@ -191,7 +191,7 @@ fn check_selection(
 
 /// Query entry points. Each fills disjoint per-query output slices in parallel.
 #[allow(non_snake_case)]
-pub mod View {
+pub mod view {
     use std::sync::Mutex;
 
     use rdk_core::{cancel, error, group, packed, support};
@@ -523,18 +523,18 @@ mod tests {
         let mut generic = [f64::INFINITY; 3];
         let mut counts = [0_i64; 3];
         let mut specialized = [f64::INFINITY; 3];
-        View::nearest_k_many_into(
+        view::nearest_k_many_into(
             None, None, 1, &index, &queries, f64::INFINITY, 1, &mut indices, &mut generic,
             &mut counts,
         )
         .unwrap();
-        View::nearest_distances_many_into(
+        view::nearest_distances_many_into(
             None, None, 1, &index, &queries, f64::INFINITY, &mut specialized,
         )
         .unwrap();
         assert_eq!(generic, specialized);
         let mut bounded = [0.0_f64; 3];
-        View::nearest_distances_many_into(None, None, 1, &index, &queries, 0.01, &mut bounded)
+        view::nearest_distances_many_into(None, None, 1, &index, &queries, 0.01, &mut bounded)
             .unwrap();
         assert!(bounded.iter().all(|&value| value == f64::INFINITY));
     }
@@ -571,12 +571,12 @@ mod tests {
         let mut indices_four = indices.clone();
         let mut distances_four = distances.clone();
         let mut counts_four = counts.clone();
-        View::nearest_k_many_into(
+        view::nearest_k_many_into(
             None, None, 3, &one, &queries, f64::INFINITY, 1, &mut indices, &mut distances,
             &mut counts,
         )
         .unwrap();
-        View::nearest_k_many_into(
+        view::nearest_k_many_into(
             None, None, 3, &four, &queries, f64::INFINITY, 1, &mut indices_four,
             &mut distances_four, &mut counts_four,
         )
@@ -608,15 +608,15 @@ mod tests {
     #[test]
     fn source_selection_restricts_members() {
         let source = points(&[0.0, 5.0, 1.0], &[0.0, 0.0, 0.0], &[0.0, 0.0, 0.0]);
-        let mut builder = group::Builder::create(group::Owner::Point, "sel", 3).unwrap();
-        group::Builder::set(&mut builder, 0, true).unwrap();
-        group::Builder::set(&mut builder, 2, true).unwrap();
-        let selection = group::Builder::freeze(&mut builder).unwrap();
+        let mut builder = group::builder::create(group::Owner::Point, "sel", 3).unwrap();
+        group::builder::set(&mut builder, 0, true).unwrap();
+        group::builder::set(&mut builder, 2, true).unwrap();
+        let selection = group::builder::freeze(&mut builder).unwrap();
         let index = create(None, None, Some(&selection), &source).unwrap();
         assert_eq!(index.order, vec![0, 2]);
         let queries = points(&[0.0, 5.0, 0.0], &[0.0; 3], &[0.0; 3]);
         let mut out = [-7.0_f64; 3];
-        View::nearest_distances_many_into(None, None, 2, &index, &queries, f64::INFINITY, &mut out)
+        view::nearest_distances_many_into(None, None, 2, &index, &queries, f64::INFINITY, &mut out)
             .unwrap();
         assert_eq!(out[0], 0.0);
         // Member points are x = 0 and x = 1, so the query at x = 5 is 16 away from x = 1.

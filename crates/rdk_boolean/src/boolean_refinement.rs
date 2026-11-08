@@ -31,7 +31,7 @@ pub fn right_face(value: &T, face: i64) -> Option<&cdt_mod::T> {
     value.right[face as usize].as_ref()
 }
 
-pub mod View {
+pub mod view {
     use super::*;
 
     pub fn constraints(value: &T) -> &Arc<constraints_mod::T> {
@@ -68,8 +68,8 @@ fn build_side(
             let (coplanar_first, coplanar_last) = match coplanar {
                 None => (0, 0),
                 Some(value) => match side {
-                    Side::Left => coplanar_mod::View::left_pair_range(value, face),
-                    Side::Right => coplanar_mod::View::right_pair_range(value, face),
+                    Side::Left => coplanar_mod::view::left_pair_range(value, face),
+                    Side::Right => coplanar_mod::view::right_pair_range(value, face),
                 },
             };
             if first < last || coplanar_first < coplanar_last {

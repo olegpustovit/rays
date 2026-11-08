@@ -96,7 +96,7 @@ fn exact_point(value: &T, point: i64) -> Result<implicit_point::T, error::T> {
 }
 
 #[allow(non_snake_case)]
-pub mod View {
+pub mod view {
     use super::{T, exact_point};
     use crate::implicit_point;
     use crate::predicates::Sign;
@@ -770,7 +770,7 @@ mod tests {
     }
 
     fn cp(value: &T) -> Vec<i64> {
-        View::view(value).constraint_points.to_vec()
+        view::view(value).constraint_points.to_vec()
     }
 
     #[test]
@@ -781,8 +781,8 @@ mod tests {
         assert_eq!(point_count(&value) - split_point_count(&value), 4);
         assert_eq!(point_count(&value), 5);
         assert_eq!(split_point_count(&value), 1);
-        assert_eq!(&View::view(&value).insert_points[..], &[4]);
-        let view = View::view(&value);
+        assert_eq!(&view::view(&value).insert_points[..], &[4]);
+        let view = view::view(&value);
         assert!(view.x[4] == 1. && view.y[4] == 1.);
         assert_eq!(cp(&value), vec![0, 4, 1, 4, 2, 4, 3, 4]);
         let weighted = get(build(
@@ -795,7 +795,7 @@ mod tests {
             None,
             Some(&[2, 3]),
         ));
-        assert_eq!(&View::view(&weighted).constraint_winding[..], &[2, 3, -2, -3]);
+        assert_eq!(&view::view(&weighted).constraint_winding[..], &[2, 3, -2, -3]);
         assert!(split_source_first(&value, 0).unwrap() == 0 && split_source_second(&value, 0).unwrap() == 2);
         assert!(split_source_parameter(&value, 0).unwrap() == 0.5);
     }
@@ -913,7 +913,7 @@ mod tests {
         let one = run(1);
         let four = run(4);
         assert_eq!(split_point_count(&one), 1);
-        let (a, b) = (View::view(&one), View::view(&four));
+        let (a, b) = (view::view(&one), view::view(&four));
         assert!(a.x == b.x && a.y == b.y && a.constraint_points == b.constraint_points);
     }
 
@@ -930,7 +930,7 @@ mod tests {
             None,
             None,
         ));
-        let v = View::view(&large);
+        let v = view::view(&large);
         assert!(split_point_count(&large) == 1 && v.x[4] == 0. && v.y[4] == 0.);
         assert!(split_source_parameter(&large, 0).unwrap() == 0.5);
         let tiny = f64::from_bits(1);
@@ -945,7 +945,7 @@ mod tests {
             None,
             None,
         ));
-        let v = View::view(&small);
+        let v = view::view(&small);
         assert!(split_point_count(&small) == 1 && v.x[4] == tiny && v.y[4] == tiny);
     }
 

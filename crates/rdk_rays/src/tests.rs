@@ -109,11 +109,11 @@ fn surface_failure() {
 }
 
 fn quad() -> geometry::T {
-    let mut builder = packed::Float3::Builder::create(4).unwrap();
+    let mut builder = packed::Float3::builder::create(4).unwrap();
     for (i, (x, y)) in [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)].iter().enumerate() {
-        packed::Float3::Builder::set(&mut builder, i as i64, *x, *y, 0.0).unwrap();
+        packed::Float3::builder::set(&mut builder, i as i64, *x, *y, 0.0).unwrap();
     }
-    let positions = packed::Float3::Builder::freeze(&mut builder).unwrap();
+    let positions = packed::Float3::builder::freeze(&mut builder).unwrap();
     let topo = topology::polygons_owned(4, vec![0, 1, 2, 3], vec![0, 4]).unwrap();
     geometry::create(positions, topo, None, None, None).unwrap()
 }

@@ -671,7 +671,7 @@ fn point_proximity_map(
     let mut indices = vec![-1_i64; count];
     let mut distances = vec![f64::INFINITY; count];
     let mut counts = vec![0_i64; count];
-    spatial_index::View::nearest_k_many_into(
+    spatial_index::view::nearest_k_many_into(
         cancel_token,
         None,
         grain,

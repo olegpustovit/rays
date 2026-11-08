@@ -33,7 +33,7 @@ fn recode(failure: error::T) -> error::T {
 }
 
 #[allow(non_snake_case)]
-pub mod Int_buffer {
+pub mod int_buffer {
     #[derive(Clone, Debug, Default)]
     pub struct T {
         pub values: Vec<i64>,
@@ -51,26 +51,26 @@ pub mod Int_buffer {
 }
 
 #[allow(non_snake_case)]
-pub mod Output {
-    use super::Int_buffer;
+pub mod output {
+    use super::int_buffer;
     use rdk_core::topology::PrimitiveKind;
 
     pub struct T {
-        pub points: Int_buffer::T,
-        pub vertices: Int_buffer::T,
-        pub offsets: Int_buffer::T,
-        pub primitives: Int_buffer::T,
+        pub points: int_buffer::T,
+        pub vertices: int_buffer::T,
+        pub offsets: int_buffer::T,
+        pub primitives: int_buffer::T,
         pub kinds: Vec<PrimitiveKind>,
     }
 
     pub fn create(source_vertices: usize, source_primitives: usize) -> T {
-        let mut offsets = Int_buffer::create(source_primitives + 1);
-        Int_buffer::add(&mut offsets, 0);
+        let mut offsets = int_buffer::create(source_primitives + 1);
+        int_buffer::add(&mut offsets, 0);
         T {
-            points: Int_buffer::create(source_vertices),
-            vertices: Int_buffer::create(source_vertices),
+            points: int_buffer::create(source_vertices),
+            vertices: int_buffer::create(source_vertices),
             offsets,
-            primitives: Int_buffer::create(source_primitives),
+            primitives: int_buffer::create(source_primitives),
             kinds: Vec::new(),
         }
     }
@@ -79,13 +79,13 @@ pub mod Output {
         let minimum = if kind == PrimitiveKind::OpenPolyline { 2 } else { 3 };
         if corners.len() >= minimum {
             for &vertex in corners {
-                Int_buffer::add(&mut value.points, source_points[vertex as usize]);
-                Int_buffer::add(&mut value.vertices, vertex);
+                int_buffer::add(&mut value.points, source_points[vertex as usize]);
+                int_buffer::add(&mut value.vertices, vertex);
             }
             value.kinds.push(kind);
-            Int_buffer::add(&mut value.primitives, source);
+            int_buffer::add(&mut value.primitives, source);
             let length = value.points.length;
-            Int_buffer::add(&mut value.offsets, length);
+            int_buffer::add(&mut value.offsets, length);
         }
     }
 }
@@ -470,7 +470,7 @@ fn dissolve(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T
     let initial_vertices = if dense_selection { vertex_count.min(4_096) } else { vertex_count };
     let initial_primitives = if dense_selection { primitive_count.min(4_096) } else { primitive_count };
     let mut visited = vec![false; vertex_count];
-    let mut output = Output::create(initial_vertices, initial_primitives);
+    let mut output = output::create(initial_vertices, initial_primitives);
     let mut processed = vec![false; primitive_count];
     let positions = packed::Float3::View::view(geometry::positions(geometry_value))?;
     let trace = |start: i64, visited: &mut Vec<bool>| -> Result<(Vec<i64>, bool), error::T> {
@@ -501,7 +501,7 @@ fn dissolve(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T
             let last = view.primitive_offsets[primitive + 1];
             let corners: Vec<i64> = (first..last).collect();
             let kind = topology::primitive_kind(topology_value, primitive as i64)?;
-            Output::add(&mut output, primitive as i64, kind, &corners, &view.vertex_points);
+            output::add(&mut output, primitive as i64, kind, &corners, &view.vertex_points);
         } else if !processed[root] {
             processed[root] = true;
             let mut vertices = component_vertices[root].clone();
@@ -533,7 +533,7 @@ fn dissolve(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T
                             )?;
                         }
                         let kind = if *closed { PrimitiveKind::ClosedPolyline } else { PrimitiveKind::OpenPolyline };
-                        Output::add(&mut output, root as i64, kind, &corners, &view.vertex_points);
+                        output::add(&mut output, root as i64, kind, &corners, &view.vertex_points);
                     }
                 }
             } else {
@@ -544,13 +544,13 @@ fn dissolve(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T
                     }
                     loops.push(corners.clone());
                 }
-                let emit = |corners: &[i64], output: &mut Output::T| -> Result<(), error::T> {
+                let emit = |corners: &[i64], output: &mut output::T| -> Result<(), error::T> {
                     let corners = if params.remove_inline_points {
                         simplify(cancel_value, tolerance, &affected_points, true, &positions, &view, corners)?
                     } else {
                         corners.to_vec()
                     };
-                    Output::add(output, root as i64, PrimitiveKind::Polygon, &corners, &view.vertex_points);
+                    output::add(output, root as i64, PrimitiveKind::Polygon, &corners, &view.vertex_points);
                     Ok(())
                 };
                 if loops.is_empty() {

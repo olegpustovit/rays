@@ -519,7 +519,7 @@ fn plan_round(
         ordinal += 1;
     }
     let edges =
-        edge_group::View::of_owned_bits(topology_value, edge_count as i64, "__rdk_poly_reduce_round", selected)?;
+        edge_group::view::of_owned_bits(topology_value, edge_count as i64, "__rdk_poly_reduce_round", selected)?;
     Ok(Plan { edges, removed_primitives: removed })
 }
 

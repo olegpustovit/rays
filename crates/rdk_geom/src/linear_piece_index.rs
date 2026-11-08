@@ -523,7 +523,7 @@ fn self_pair_of(
 }
 
 #[allow(non_snake_case)]
-pub mod View {
+pub mod view {
     use super::*;
 
     pub fn kind(value: &T, piece: i64) -> Kind {
@@ -620,20 +620,20 @@ mod tests {
         let geom = square_and_polyline();
         let index = create(None, Some(1), None, &geom).unwrap();
         assert_eq!(piece_count(&index), 3);
-        assert_eq!(View::kind(&index, 0), Kind::Triangle);
-        assert_eq!(View::kind(&index, 1), Kind::Segment);
-        assert_eq!(View::primitive(&index, 2), 1);
-        assert_eq!(View::local(&index, 2), 1);
-        assert_eq!(View::curve_u(&index, 2, 0).unwrap(), 0.5);
-        assert_eq!(View::point(&index, 2, 1).unwrap(), 5);
-        assert!(View::vertex(&index, 1, 2).is_err());
-        let (left, right) = View::overlapping_self_pairs(None, 1, 0.0, &index).unwrap();
+        assert_eq!(view::kind(&index, 0), Kind::Triangle);
+        assert_eq!(view::kind(&index, 1), Kind::Segment);
+        assert_eq!(view::primitive(&index, 2), 1);
+        assert_eq!(view::local(&index, 2), 1);
+        assert_eq!(view::curve_u(&index, 2, 0).unwrap(), 0.5);
+        assert_eq!(view::point(&index, 2, 1).unwrap(), 5);
+        assert!(view::vertex(&index, 1, 2).is_err());
+        let (left, right) = view::overlapping_self_pairs(None, 1, 0.0, &index).unwrap();
         assert_eq!((left.clone(), right.clone()), (vec![0, 1], vec![1, 2]));
-        let (sequential, _) = View::overlapping_self_pairs(None, 100, 0.0, &index).unwrap();
+        let (sequential, _) = view::overlapping_self_pairs(None, 100, 0.0, &index).unwrap();
         assert_eq!(sequential, left);
-        let found = View::find_overlapping_self_pair(None, 1, 0.0, &index, &|a, b| a == 1 && b == 2).unwrap();
+        let found = view::find_overlapping_self_pair(None, 1, 0.0, &index, &|a, b| a == 1 && b == 2).unwrap();
         assert_eq!(found, Some((1, 2)));
-        let none = View::find_overlapping_self_pair(None, 1, 0.0, &index, &|_, _| false).unwrap();
+        let none = view::find_overlapping_self_pair(None, 1, 0.0, &index, &|_, _| false).unwrap();
         assert_eq!(none, None);
     }
 

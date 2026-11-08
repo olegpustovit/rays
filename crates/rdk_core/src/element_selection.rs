@@ -233,7 +233,7 @@ pub fn promote(
         group::Owner::Vertex => topology.vertex_points.len() as i64,
         group::Owner::Primitive => topology.primitive_offsets.len() as i64 - 1,
     };
-    let mut builder = group::Builder::create(destination, name, count)?;
+    let mut builder = group::builder::create(destination, name, count)?;
     for index in 0..count {
         if cancel::poll(cancel_value, index, 4095).is_err() {
             return Err(cancelled_error());
@@ -249,9 +249,9 @@ pub fn promote(
                 primitive_selected(index, selection, &topology, edge_index.as_ref())
             }
         };
-        group::Builder::set(&mut builder, index, member)?;
+        group::builder::set(&mut builder, index, member)?;
     }
-    group::Builder::freeze(&mut builder)
+    group::builder::freeze(&mut builder)
 }
 #[cfg(test)]
 mod tests {

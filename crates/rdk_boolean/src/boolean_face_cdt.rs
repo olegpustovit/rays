@@ -26,10 +26,10 @@ pub struct T {
 }
 
 /// Exclusively owned scratch reused across sequential face refinements.
-pub type Workspace = planar_cdt::View::Workspace;
+pub type Workspace = planar_cdt::view::Workspace;
 
 pub fn create_workspace() -> Workspace {
-    planar_cdt::View::create_workspace(Some(16), 16).expect("Planar CDT workspace of 16 points and triangles")
+    planar_cdt::view::create_workspace(Some(16), 16).expect("Planar CDT workspace of 16 points and triangles")
 }
 
 fn fail(code: Code, message: &str) -> error::T {
@@ -53,7 +53,7 @@ pub fn triangle_point(value: &T, triangle: i64, local: i64) -> i64 {
     }
 }
 
-pub mod View {
+pub mod view {
     use super::*;
 
     pub fn point(value: &T, point: i64) -> &implicit_point::T {
@@ -68,11 +68,11 @@ pub mod View {
 }
 
 fn face_triangle_point(constraints: &constraints_mod::T, side: Side, triangle: i64, local: i64) -> i64 {
-    constraints_mod::View::triangle_point(constraints, side, triangle, local)
+    constraints_mod::view::triangle_point(constraints, side, triangle, local)
 }
 
 fn face_triangle_implicit(constraints: &constraints_mod::T, side: Side, triangle: i64, local: i64) -> implicit_point::T {
-    constraints_mod::View::source_point(constraints, face_triangle_point(constraints, side, triangle, local)).clone()
+    constraints_mod::view::source_point(constraints, face_triangle_point(constraints, side, triangle, local)).clone()
 }
 
 fn projection(points: &[implicit_point::T]) -> i64 {
@@ -165,9 +165,9 @@ fn global_point_tokens(
     for local in 0..3 {
         tokens[local as usize] = face_triangle_point(constraints, side, triangle, local);
     }
-    let source_count = constraints_mod::View::source_point_count(constraints);
+    let source_count = constraints_mod::view::source_point_count(constraints);
     for arrangement_point in 0..arrangement_to_point.len() {
-        let handle = arrangement_mod::View::point_handle(arrangement, arrangement_point as i64);
+        let handle = arrangement_mod::view::point_handle(arrangement, arrangement_point as i64);
         if handle >= 0 {
             let point = arrangement_to_point[arrangement_point] as usize;
             if tokens[point] < 0 {
@@ -204,7 +204,7 @@ pub fn build(
     }
     let mut arrangement_to_point = vec![0i64; arrangement_count];
     for arrangement_point in 0..arrangement_count {
-        let point = arrangement_mod::View::point(arrangement, arrangement_point as i64);
+        let point = arrangement_mod::view::point(arrangement, arrangement_point as i64);
         let found = (0..3).find(|&candidate| implicit_point::equal(&points[candidate], point));
         match found {
             Some(candidate) => arrangement_to_point[arrangement_point] = candidate as i64,
@@ -296,7 +296,7 @@ pub fn build(
             ),
         )),
         Ok(triangulation) => {
-            let view = planar_cdt::View::view(&triangulation);
+            let view = planar_cdt::view::view(&triangulation);
             let count = view.triangle_points.len() / 3;
             let pick = |corner: usize| -> Vec<i64> { (0..count).map(|t| view.triangle_points[t * 3 + corner]).collect() };
             let tokens = global_point_tokens(constraints, arrangement, &arrangement_to_point, side, triangle, n);
@@ -391,7 +391,7 @@ mod tests {
         let triangulation = build(None, None, constraints, arrangement, Side::Left, 0).unwrap();
         assert_eq!(point_count(&triangulation), 3 + arrangement_mod::point_count(arrangement));
         assert!(triangle_count(&triangulation) > 0);
-        assert_eq!(View::source_winding(&triangulation), 1);
+        assert_eq!(view::source_winding(&triangulation), 1);
         for segment in 0..arrangement_mod::segment_count(arrangement) {
             let first = 3 + arrangement_mod::segment_first(arrangement, segment);
             let second = 3 + arrangement_mod::segment_second(arrangement, segment);

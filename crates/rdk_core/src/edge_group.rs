@@ -226,7 +226,7 @@ pub fn iter(operation: &dyn Fn(i64), value: &T) {
 }
 
 #[allow(non_snake_case)]
-pub mod Builder {
+pub mod builder {
     use super::{
         byte_count, invalid_edge_group, new, require_index, require_name, topology, topology_index,
     };
@@ -295,7 +295,7 @@ pub mod Builder {
 }
 
 #[allow(non_snake_case)]
-pub mod View {
+pub mod view {
     use super::{byte_count, invalid_edge_group, new, require_name, topology, T};
     use crate::error;
 
@@ -362,7 +362,7 @@ pub fn remap(
             "Edge_group.remap: point map length does not match source topology",
         ));
     }
-    let mut builder = Builder::create(target_topology, target_index, &value.name)?;
+    let mut builder = builder::create(target_topology, target_index, &value.name)?;
     for edge in 0..value.length {
         cancel::poll(cancel_value, edge, 16_383)
             .map_err(|_| cancelled_error("Edge_group.remap"))?;
@@ -372,12 +372,12 @@ pub fn remap(
             let b = point_map[b as usize];
             if a >= 0 && b >= 0 {
                 if let Some(target_edge) = topology_index::find_edge(target_index, a, b) {
-                    Builder::set(&mut builder, target_edge, true)?;
+                    builder::set(&mut builder, target_edge, true)?;
                 }
             }
         }
     }
-    Builder::freeze(&mut builder)
+    builder::freeze(&mut builder)
 }
 
 pub fn replicate_exact_copies(

@@ -446,7 +446,7 @@ pub fn split_point_edge_groups(
             }
             Ok(packed)
         })?;
-        output.push(edge_group::View::of_owned_bits(target_topology, edge_count, edge_group::name(value), bits)?);
+        output.push(edge_group::view::of_owned_bits(target_topology, edge_count, edge_group::name(value), bits)?);
     }
     Ok(output)
 }
@@ -517,7 +517,7 @@ pub fn edge_groups_from_ancestry(
             }
             Ok(packed)
         })?;
-        output.push(edge_group::View::of_owned_bits(target_topology, target_edges, edge_group::name(value), bits)?);
+        output.push(edge_group::view::of_owned_bits(target_topology, target_edges, edge_group::name(value), bits)?);
     }
     Ok(output)
 }

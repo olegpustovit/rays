@@ -96,7 +96,7 @@ pub fn edge_incident_local(value: &T, incident: i64) -> i64 {
     value.edge_locals[incident as usize] as i64
 }
 
-pub mod View {
+pub mod view {
     use super::*;
 
     pub fn constraints(value: &T) -> &Arc<constraints_mod::T> {
@@ -402,14 +402,14 @@ pub fn build(
     refinement: &refinement_mod::T,
 ) -> Result<T, error::T> {
     poll(cancel_value, 0, 0)?;
-    if !Arc::ptr_eq(refinement_mod::View::constraints(refinement), constraints) {
+    if !Arc::ptr_eq(refinement_mod::view::constraints(refinement), constraints) {
         return Err(invalid("refinement belongs to a different constraint plan"));
     }
     let constraints_ref: &constraints_mod::T = constraints;
     let left_faces = constraints_mod::left_triangle_count(constraints_ref);
     let right_faces = constraints_mod::right_triangle_count(constraints_ref);
-    let source_point_count = (geometry::point_count(constraints_mod::View::left_geometry(constraints_ref))
-        + geometry::point_count(constraints_mod::View::right_geometry(constraints_ref))) as usize;
+    let source_point_count = (geometry::point_count(constraints_mod::view::left_geometry(constraints_ref))
+        + geometry::point_count(constraints_mod::view::right_geometry(constraints_ref))) as usize;
     let global_point_count = source_point_count + constraints_mod::point_count(constraints_ref) as usize;
     let mut raw_count = 0usize;
     let mut token_count = global_point_count;
@@ -420,7 +420,7 @@ pub fn build(
                 Some(value) => {
                     let mut extra_points = 0usize;
                     for point in 3..cdt_mod::point_count(value) {
-                        if cdt_mod::View::global_point_token(value, point) < 0 {
+                        if cdt_mod::view::global_point_token(value, point) < 0 {
                             extra_points += 1;
                         }
                     }
@@ -434,15 +434,15 @@ pub fn build(
     add_faces(left_faces, Side::Left);
     add_faces(right_faces, Side::Right);
     let fallback = if left_faces > 0 {
-        constraints_mod::View::source_point(
+        constraints_mod::view::source_point(
             constraints_ref,
-            constraints_mod::View::left_triangle_point(constraints_ref, 0, 0),
+            constraints_mod::view::left_triangle_point(constraints_ref, 0, 0),
         )
         .clone()
     } else if right_faces > 0 {
-        constraints_mod::View::source_point(
+        constraints_mod::view::source_point(
             constraints_ref,
-            constraints_mod::View::right_triangle_point(constraints_ref, 0, 0),
+            constraints_mod::view::right_triangle_point(constraints_ref, 0, 0),
         )
         .clone()
     } else {
@@ -450,10 +450,10 @@ pub fn build(
     };
     let mut token_points = vec![fallback; token_count];
     for point in 0..source_point_count {
-        token_points[point] = constraints_mod::View::source_point(constraints_ref, point as i64).clone();
+        token_points[point] = constraints_mod::view::source_point(constraints_ref, point as i64).clone();
     }
     for point in 0..constraints_mod::point_count(constraints_ref) as usize {
-        token_points[source_point_count + point] = constraints_mod::View::point(constraints_ref, point as i64).clone();
+        token_points[source_point_count + point] = constraints_mod::view::point(constraints_ref, point as i64).clone();
     }
     let mut assembly = Assembly {
         token_points,
@@ -466,7 +466,7 @@ pub fn build(
         raw_orientations: Vec::with_capacity(raw_count),
     };
     let mut append_side = |side: Side, face_count: i64| -> Result<(), error::T> {
-        let triangle_point = |face: i64, local: i64| constraints_mod::View::triangle_point(constraints_ref, side, face, local);
+        let triangle_point = |face: i64, local: i64| constraints_mod::view::triangle_point(constraints_ref, side, face, local);
         for face in 0..face_count {
             poll(cancel_value, face, 255)?;
             match face_of(refinement, side, face) {
@@ -475,18 +475,18 @@ pub fn build(
                     assembly.append(side, face, -1, tokens, 1);
                 }
                 Some(value) => {
-                    let orientation = cdt_mod::View::source_winding(value);
+                    let orientation = cdt_mod::view::source_winding(value);
                     let point_count = cdt_mod::point_count(value);
                     let mut point_tokens = vec![0i64; point_count as usize];
                     for local in 0..std::cmp::min(2, point_count - 1) + 1 {
                         point_tokens[local as usize] = triangle_point(face, local);
                     }
                     for point in 3..point_count {
-                        let global = cdt_mod::View::global_point_token(value, point);
+                        let global = cdt_mod::view::global_point_token(value, point);
                         point_tokens[point as usize] = if global >= 0 {
                             global
                         } else {
-                            assembly.intern_local_point(cdt_mod::View::point(value, point))
+                            assembly.intern_local_point(cdt_mod::view::point(value, point))
                         };
                     }
                     for triangle in 0..cdt_mod::triangle_count(value) {

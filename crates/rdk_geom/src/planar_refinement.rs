@@ -97,7 +97,7 @@ pub fn provenance_parent_weights(value: &T, node: i64) -> Result<(f64, f64, f64)
 }
 
 #[allow(non_snake_case)]
-pub mod View {
+pub mod view {
     use super::T;
 
     pub fn approximate_x(value: &T) -> &[f64] {
@@ -759,7 +759,7 @@ fn run_cdt(
         false,
     ) {
         Err(message) => Err(format!("{}{}", prefix, message)),
-        Ok(rebuilt) => Ok(planar_cdt::View::view(&rebuilt).triangle_points),
+        Ok(rebuilt) => Ok(planar_cdt::view::view(&rebuilt).triangle_points),
     }
 }
 
@@ -852,7 +852,7 @@ fn run(
         constraint_winding.to_vec()
     };
     let mut triangles: Arc<[i64]> = Arc::from(initial_triangle_points.to_vec());
-    let mut cdt_workspace = planar_cdt::View::create_workspace(
+    let mut cdt_workspace = planar_cdt::view::create_workspace(
         Some(capacity),
         std::cmp::max(1, initial_triangle_points.len() as i64 / 3),
     )?;

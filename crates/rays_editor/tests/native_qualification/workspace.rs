@@ -277,9 +277,9 @@ fn frozen_capacity_small() { frozen_capacity(7, 3); }
 fn frozen_capacity_large() { frozen_capacity(65, 17); }
 
 fn capture_geometry(count: i64) -> rdk_core::geometry::T {
-    let mut b = rdk_core::packed::Float3::Builder::create(count).unwrap();
-    rdk_core::packed::Float3::Builder::set(&mut b, 0, 0.03125, 0., 0.).unwrap();
-    rdk_core::geometry::create(rdk_core::packed::Float3::Builder::freeze(&mut b).unwrap(), rdk_core::topology::empty(count).unwrap(), None, None, None).unwrap()
+    let mut b = rdk_core::packed::Float3::builder::create(count).unwrap();
+    rdk_core::packed::Float3::builder::set(&mut b, 0, 0.03125, 0., 0.).unwrap();
+    rdk_core::geometry::create(rdk_core::packed::Float3::builder::freeze(&mut b).unwrap(), rdk_core::topology::empty(count).unwrap(), None, None, None).unwrap()
 }
 fn lower_budget(geometry: rdk_core::geometry::T) -> l::T {
     let factory = edit_graph::factory(edit_graph::factory_args("capture_budget", "Capture budget", &["Test"]), 0, Arc::new(move |args| {

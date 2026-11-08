@@ -2627,7 +2627,7 @@ pub fn edge_group_from_source(
             }
         }
     }
-    edge_group::View::of_owned_bits(&plan.topology, edge_plan.output_edge_count, name, bits)
+    edge_group::view::of_owned_bits(&plan.topology, edge_plan.output_edge_count, name, bits)
 }
 
 pub fn resulting_crease_group(
@@ -2649,7 +2649,7 @@ pub fn resulting_crease_group(
             }
         }
     }
-    edge_group::View::of_owned_bits(&plan.topology, edge_plan.output_edge_count, name, bits)
+    edge_group::view::of_owned_bits(&plan.topology, edge_plan.output_edge_count, name, bits)
 }
 
 pub fn remap_group(
@@ -3510,7 +3510,7 @@ pub fn combine_parts(
             (Some(weld), group::Owner::Point) => weld.output_source.len() as i64,
             _ => checked_add("combined group cardinality", base_total, extra_sources.len() as i64)?,
         };
-        let mut builder = group::Builder::create(owner, &name, base_total)?;
+        let mut builder = group::builder::create(owner, &name, base_total)?;
         let mut offset = 0_i64;
         let mut ordered = false;
         let mut sources: Vec<(i64, group::T)> = Vec::new();
@@ -3520,7 +3520,7 @@ pub fn combine_parts(
                 None => return Err(failm("local subdivision dropped a group")),
             };
             for element in collect_group_members(&found) {
-                group::Builder::set(&mut builder, offset + element, true)?;
+                group::builder::set(&mut builder, offset + element, true)?;
             }
             if group::is_ordered(&found) {
                 ordered = true;
@@ -3528,7 +3528,7 @@ pub fn combine_parts(
             sources.push((offset, found));
             offset += count_of(geometry_value);
         }
-        let base_target = group::Builder::freeze(&mut builder)?;
+        let base_target = group::builder::freeze(&mut builder)?;
         let target = match (weld, owner) {
             (Some(weld), group::Owner::Point) => {
                 cancel::check_opt(cancel_token)?;
@@ -3602,7 +3602,7 @@ pub fn combine_parts(
         let target_index = topology_index::create(cancel_token, &topology_value)?;
         for template in &source_edge_groups {
             let name = edge_group::name(template).to_owned();
-            let mut builder = edge_group::Builder::create(&topology_value, &target_index, &name)?;
+            let mut builder = edge_group::builder::create(&topology_value, &target_index, &name)?;
             let mut point_offset = 0_i64;
             for geometry_value in parts {
                 let source_topology = geometry::topology(geometry_value);
@@ -3621,12 +3621,12 @@ pub fn combine_parts(
                     };
                     match topology_index::find_edge(&target_index, a, b) {
                         None => return Err(failm("local subdivision edge ancestry is inconsistent")),
-                        Some(target) => edge_group::Builder::set(&mut builder, target, true)?,
+                        Some(target) => edge_group::builder::set(&mut builder, target, true)?,
                     }
                 }
                 point_offset += geometry::point_count(geometry_value);
             }
-            edge_groups.push(edge_group::Builder::freeze(&mut builder)?);
+            edge_groups.push(edge_group::builder::freeze(&mut builder)?);
         }
     }
     let positions = packed::Float3::View::of_owned_exn(px, py, pz)?;
@@ -3800,7 +3800,7 @@ pub fn split_disconnected_point_fans(
                 return Err(failm("edge group belongs to a different topology"));
             }
             let mut builder =
-                edge_group::Builder::create(&output_topology, &target_index, edge_group::name(found))?;
+                edge_group::builder::create(&output_topology, &target_index, edge_group::name(found))?;
             for edge in collect_edge_members(found) {
                 for at in gi(&index.edge_offsets, edge)..gi(&index.edge_offsets, edge + 1) {
                     let vertex = gi(&index.edge_vertices, at);
@@ -3814,11 +3814,11 @@ pub fn split_disconnected_point_fans(
                         gi(&vertex_points, next),
                     ) {
                         None => return Err(failm("split-fan edge ancestry is inconsistent")),
-                        Some(target) => edge_group::Builder::set(&mut builder, target, true)?,
+                        Some(target) => edge_group::builder::set(&mut builder, target, true)?,
                     }
                 }
             }
-            edge_groups.push(edge_group::Builder::freeze(&mut builder)?);
+            edge_groups.push(edge_group::builder::freeze(&mut builder)?);
         }
     }
     geometry::create(positions, output_topology, Some(attributes), Some(groups), Some(edge_groups))
@@ -4392,7 +4392,7 @@ pub fn divide_unselected_edges(
     let mut edge_groups = Vec::new();
     for found in geometry::edge_groups(source) {
         let mut builder =
-            edge_group::Builder::create(&output_topology, &target_index, edge_group::name(&found))?;
+            edge_group::builder::create(&output_topology, &target_index, edge_group::name(&found))?;
         for edge in collect_edge_members(&found) {
             if edge_segments(edge) > 0 {
                 let first = gi(&chains.edge_offsets, edge);
@@ -4404,7 +4404,7 @@ pub fn divide_unselected_edges(
                         gi(&chain_points, at + 1),
                     ) {
                         None => return Err(failm("divided boundary dropped a child native edge")),
-                        Some(child) => edge_group::Builder::set(&mut builder, child, true)?,
+                        Some(child) => edge_group::builder::set(&mut builder, child, true)?,
                     }
                 }
             } else {
@@ -4412,12 +4412,12 @@ pub fn divide_unselected_edges(
                 let b = gi(&plan.unselected_point_of_source, gi(&source_index.edge_b, edge));
                 if a >= 0 && b >= 0 {
                     if let Some(child) = topology_index::find_edge(&target_index, a, b) {
-                        edge_group::Builder::set(&mut builder, child, true)?;
+                        edge_group::builder::set(&mut builder, child, true)?;
                     }
                 }
             }
         }
-        edge_groups.push(edge_group::Builder::freeze(&mut builder)?);
+        edge_groups.push(edge_group::builder::freeze(&mut builder)?);
     }
     let divided_geometry = geometry::create(
         positions,

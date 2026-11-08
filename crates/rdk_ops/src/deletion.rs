@@ -483,7 +483,7 @@ pub fn primitive_partitions(
     for source_group in &source_groups {
         let mut builders = Vec::with_capacity(pieces);
         for piece in 0..pieces {
-            builders.push(edge_group::Builder::create(
+            builders.push(edge_group::builder::create(
                 geometry::topology(&geometries[piece]),
                 &target_indexes[piece],
                 edge_group::name(source_group),
@@ -509,7 +509,7 @@ pub fn primitive_partitions(
                         point_local_ids[a_at],
                         point_local_ids[b_at],
                     ) {
-                        edge_group::Builder::set(&mut builders[a_piece], target, true)?;
+                        edge_group::builder::set(&mut builders[a_piece], target, true)?;
                     }
                     a_at += 1;
                     b_at += 1;
@@ -517,7 +517,7 @@ pub fn primitive_partitions(
             }
         }
         for (piece, builder) in builders.iter_mut().enumerate() {
-            let frozen = edge_group::Builder::freeze(builder)?;
+            let frozen = edge_group::builder::freeze(builder)?;
             outputs[piece] = geometry::with_edge_group(frozen, &outputs[piece])?;
         }
     }

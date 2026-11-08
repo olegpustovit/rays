@@ -24,7 +24,7 @@ pub fn ocaml_trim_is_empty(value: &str) -> bool {
 }
 
 #[allow(non_snake_case)]
-pub mod Bits {
+pub mod bits {
     pub fn mem(bits: &[u8], index: i64) -> bool {
         let index = usize::try_from(index).expect("bit index must be nonnegative");
         bits[index >> 3] & (1 << (index & 7)) != 0
@@ -569,9 +569,9 @@ mod tests {
     #[test]
     fn bit_access_selection_and_ranges_preserve_order_contracts() {
         let mut bits = [0_u8; 2];
-        Bits::set(&mut bits, 9);
-        assert!(Bits::mem(&bits, 9));
-        assert!(!Bits::mem(&bits, 8));
+        bits::set(&mut bits, 9);
+        assert!(bits::mem(&bits, 9));
+        assert!(!bits::mem(&bits, 8));
 
         let keys = [3.0, 1.0, 2.0, 1.0];
         let mut order = [0, 1, 2, 3];

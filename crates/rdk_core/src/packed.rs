@@ -638,7 +638,7 @@ pub mod Float3 {
     }
 
     #[allow(non_snake_case)]
-    pub mod Builder {
+    pub mod builder {
         use super::{make, View};
         use crate::error::{self, Code};
         use std::sync::Arc;

@@ -53,7 +53,7 @@ pub fn facet_right_winding(value: &T, facet: i64) -> i64 {
 }
 
 #[allow(non_snake_case)]
-pub mod View {
+pub mod view {
     use super::*;
 
     pub fn complex(value: &T) -> &Arc<complex::T> {
@@ -105,7 +105,7 @@ pub fn build(
     radial_value: &radial::T,
 ) -> Result<T, error::T> {
     cancel::check_opt(cancel_value).map_err(cancelled)?;
-    if !Arc::ptr_eq(radial::View::complex(radial_value), c) {
+    if !Arc::ptr_eq(radial::view::complex(radial_value), c) {
         return Err(invalid("radial order belongs to a different Boolean complex"));
     }
     let facets = complex::facet_count(c);

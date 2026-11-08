@@ -626,7 +626,7 @@ fn remap_edge_group(
         return Err(fail("curve edge-group remap is missing its output topology index"));
     };
     let output_view = topology_index::View::view(output_index);
-    let mut builder = edge_group::Builder::create(&plan.output_topology, output_index, edge_group::name(value))?;
+    let mut builder = edge_group::builder::create(&plan.output_topology, output_index, edge_group::name(value))?;
     for vertex in 0..plan.source_edge_of_output_vertex.len() {
         cancel::poll(cancel_value, vertex as i64, 16_383)?;
         let source_edge = plan.source_edge_of_output_vertex[vertex];
@@ -635,10 +635,10 @@ fn remap_edge_group(
             if output_edge < 0 {
                 return Err(fail("curve child edge ancestry is incomplete"));
             }
-            edge_group::Builder::set(&mut builder, output_edge, true)?;
+            edge_group::builder::set(&mut builder, output_edge, true)?;
         }
     }
-    edge_group::Builder::freeze(&mut builder)
+    edge_group::builder::freeze(&mut builder)
 }
 
 fn once(
@@ -708,13 +708,13 @@ mod tests {
             vec![0.0; 4],
         )
         .unwrap();
-        let mut builder = topology::Builder::create(4, None, None).unwrap();
+        let mut builder = topology::builder::create(4, None, None).unwrap();
         if closed {
-            topology::Builder::add_closed_polyline(&mut builder, &[0, 1, 2, 3]).unwrap();
+            topology::builder::add_closed_polyline(&mut builder, &[0, 1, 2, 3]).unwrap();
         } else {
-            topology::Builder::add_open_polyline(&mut builder, &[0, 1, 2, 3]).unwrap();
+            topology::builder::add_open_polyline(&mut builder, &[0, 1, 2, 3]).unwrap();
         }
-        let topo = topology::Builder::freeze(&mut builder).unwrap();
+        let topo = topology::builder::freeze(&mut builder).unwrap();
         let weights = attribute::create_owned("w", attribute::Owner::Point, attribute::Storage::Float(Arc::new(vec![0.0, 4.0, 8.0, 12.0]))).unwrap();
         geometry::create(positions, topo, Some(vec![weights]), None, None).unwrap()
     }

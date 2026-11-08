@@ -46,7 +46,7 @@ pub struct T {
 }
 
 #[allow(non_snake_case)]
-pub mod View {
+pub mod view {
     use std::sync::Arc;
 
     use super::{boolean_weiler, T};
@@ -255,7 +255,7 @@ fn extract_mixed_with_ancestry(
     }
     let surface_selection = source_oriented_selection(&value.complex, surface_side, &keep_surface);
     let double_selection = source_oriented_selection(&value.complex, surface_side, &double_surface);
-    let mut cache = boolean_extract::View::barycentric_cache(if corner_payload {
+    let mut cache = boolean_extract::view::barycentric_cache(if corner_payload {
         3 * (selected_count(&volume_selection) + selected_count(&surface_selection) + selected_count(&double_selection))
     } else {
         0
@@ -269,8 +269,8 @@ fn extract_mixed_with_ancestry(
     let wall = extract_selection(
         cancel, defer_rounded_slivers, Some(&mut cache), corner_payload, value, surface_side, &double_selection,
     )?;
-    let reverse_wall = boolean_extract::View::reverse_ancestry(cx(cancel), &wall)?;
-    boolean_extract::View::concatenate_ancestries(cx(cancel), &[volume, surface, wall, reverse_wall])
+    let reverse_wall = boolean_extract::view::reverse_ancestry(cx(cancel), &wall)?;
+    boolean_extract::view::concatenate_ancestries(cx(cancel), &[volume, surface, wall, reverse_wall])
 }
 
 fn extract_surface_pair_with_ancestry(
@@ -298,7 +298,7 @@ fn extract_surface_pair_with_ancestry(
     };
     let left = source_oriented_selection(&value.complex, Side::Left, &choose_left);
     let right = source_oriented_selection(&value.complex, Side::Right, &choose_right);
-    let mut cache = boolean_extract::View::barycentric_cache(if corner_payload {
+    let mut cache = boolean_extract::view::barycentric_cache(if corner_payload {
         3 * (selected_count(&left) + selected_count(&right))
     } else {
         0
@@ -307,7 +307,7 @@ fn extract_surface_pair_with_ancestry(
         extract_selection(cancel, defer_rounded_slivers, Some(&mut cache), corner_payload, value, Side::Left, &left)?;
     let right =
         extract_selection(cancel, defer_rounded_slivers, Some(&mut cache), corner_payload, value, Side::Right, &right)?;
-    boolean_extract::View::concatenate_ancestries(cx(cancel), &[left, right])
+    boolean_extract::view::concatenate_ancestries(cx(cancel), &[left, right])
 }
 
 /// Treatment-aware solid/surface product extraction. Sheet facets remain zero-volume arrangement
@@ -350,7 +350,7 @@ pub fn extract_product_with_ancestry(
     if require_closed == Some(true)
         && (value.left_treatment == Treatment::Surface || value.right_treatment == Treatment::Surface)
     {
-        boolean_extract::View::validate_closed_topology(geometry::topology(boolean_extract::geometry(&ancestry)))?;
+        boolean_extract::view::validate_closed_topology(geometry::topology(boolean_extract::geometry(&ancestry)))?;
     }
     Ok(ancestry)
 }

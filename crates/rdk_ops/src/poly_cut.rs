@@ -306,7 +306,7 @@ fn remap_edge_groups(
                 Ok(())
             })?;
         }
-        output.push(edge_group::View::of_owned_bits(
+        output.push(edge_group::view::of_owned_bits(
             target_topology,
             edge_count,
             edge_group::name(item),
@@ -1421,13 +1421,13 @@ mod tests {
         )
         .unwrap();
         let ids: Vec<i64> = (0..points.len() as i64).collect();
-        let mut builder = topology::Builder::create(points.len() as i64, None, None).unwrap();
+        let mut builder = topology::builder::create(points.len() as i64, None, None).unwrap();
         if closed {
-            topology::Builder::add_closed_polyline(&mut builder, &ids).unwrap();
+            topology::builder::add_closed_polyline(&mut builder, &ids).unwrap();
         } else {
-            topology::Builder::add_open_polyline(&mut builder, &ids).unwrap();
+            topology::builder::add_open_polyline(&mut builder, &ids).unwrap();
         }
-        let topo = topology::Builder::freeze(&mut builder).unwrap();
+        let topo = topology::builder::freeze(&mut builder).unwrap();
         geometry::create(positions, topo, None, None, None).unwrap()
     }
 

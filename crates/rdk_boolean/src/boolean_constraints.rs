@@ -138,7 +138,7 @@ pub fn degenerate_pair_count(value: &T) -> i64 {
     value.degenerate_pairs
 }
 
-pub mod View {
+pub mod view {
     use super::*;
 
     pub fn left_geometry(value: &T) -> &geometry::T {

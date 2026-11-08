@@ -418,7 +418,7 @@ pub fn symmetric_difference(left: &T, right: &T) -> Result<T, error::T> {
 }
 
 #[allow(non_snake_case)]
-pub mod Builder {
+pub mod builder {
     use super::{byte_count, error, new, require_name, Owner};
     use crate::error::Code;
 
@@ -656,7 +656,7 @@ pub mod View {
 mod tests {
     use crate::{cancel, error};
 
-    use super::{Builder, Owner, View};
+    use super::{builder, Owner, View};
     use crate::error::Code;
 
     // The only behavioral assertion in lib/rdk/test_point_jitter.ml; its runner never jitters.
@@ -688,10 +688,10 @@ mod tests {
 
     #[test]
     fn builder_and_owned_order_keep_packed_membership() {
-        let mut builder = Builder::create(Owner::Vertex, "corners", 10).unwrap();
-        Builder::set(&mut builder, 2, true).unwrap();
-        Builder::set(&mut builder, 9, true).unwrap();
-        let group = Builder::freeze(&mut builder).unwrap();
+        let mut builder = builder::create(Owner::Vertex, "corners", 10).unwrap();
+        builder::set(&mut builder, 2, true).unwrap();
+        builder::set(&mut builder, 9, true).unwrap();
+        let group = builder::freeze(&mut builder).unwrap();
         let group = View::with_owned_order(vec![9, 2], &group).unwrap();
         assert_eq!(View::bits_view(&group), &[4, 2]);
         assert_eq!(super::ordered_elements(&group), Some(vec![9, 2]));

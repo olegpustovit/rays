@@ -97,7 +97,7 @@ fn narrow(
     source_piece: i64,
     collision_piece: i64,
 ) -> Result<usize, error::T> {
-    use linear_piece_index::View as V;
+    use linear_piece_index::view as V;
     let source_positions = V::positions(source_index);
     let collision_positions = V::positions(collision_index);
     match (V::kind(source_index, source_piece), V::kind(collision_index, collision_piece)) {
@@ -188,9 +188,9 @@ fn event_pass(
     collision_index: &linear_piece_index::T,
 ) -> Result<Raw, error::T> {
     let (source_pieces, collision_pieces) = if is_self {
-        linear_piece_index::View::overlapping_self_pairs(cancel_value, grain, tolerance, source_index)?
+        linear_piece_index::view::overlapping_self_pairs(cancel_value, grain, tolerance, source_index)?
     } else {
-        linear_piece_index::View::overlapping_pairs(cancel_value, grain, tolerance, source_index, collision_index)?
+        linear_piece_index::view::overlapping_pairs(cancel_value, grain, tolerance, source_index, collision_index)?
     };
     let candidate_count = source_pieces.len() as i64;
     let chunk = grain.max(1);
@@ -314,7 +314,7 @@ fn representative_data(clusters: &point_clusters::T, raw: &Raw) -> (i64, Vec<i64
 }
 
 fn point_of_piece_vertex(index: &linear_piece_index::T, piece: i64, u: f64, v: f64, w: f64) -> Result<i64, error::T> {
-    use linear_piece_index::View as V;
+    use linear_piece_index::view as V;
     let epsilon = 512.0 * f64::EPSILON;
     match V::kind(index, piece) {
         Kind::Triangle => {
@@ -344,7 +344,7 @@ fn point_of_piece_vertex(index: &linear_piece_index::T, piece: i64, u: f64, v: f
 }
 
 fn provenance_piece(index: &linear_piece_index::T, piece: i64, u: f64) -> Result<i64, error::T> {
-    use linear_piece_index::View as V;
+    use linear_piece_index::view as V;
     match V::kind(index, piece) {
         Kind::Triangle => Ok(piece),
         Kind::Segment => {
@@ -374,7 +374,7 @@ fn build_provenance(
     clusters: &point_clusters::T,
     raw: &Raw,
 ) -> Result<Provenance, error::T> {
-    use linear_piece_index::View as V;
+    use linear_piece_index::view as V;
     let (point_count, of_event, representatives) = representative_data(clusters, raw);
     let source_count = linear_piece_index::piece_count(source_index);
     let collision_count = if is_self { 0 } else { linear_piece_index::piece_count(collision_index) };
