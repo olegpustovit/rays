@@ -1,13 +1,17 @@
-//! Per-frame allocation guard for the editor (Wave M): the `isogrid_orbit` harness on `basic.rays`
-//! and on an empty workspace. Limits may only go down; on failure the walker profile names the sites.
+//! Per-frame allocation guard for the editor (Wave M): the `isogrid_orbit` harness on `basic.rays`,
+//! on the workspace `rays` opens with no file (the plan's "empty editor") and on one without an
+//! editor graph. Limits may only go down; on failure the walker profile names the sites.
 use rays_editor::{Editor, Workspace};
 use std::sync::atomic::Ordering::Relaxed;
 
 const FRAMES: i64 = 30;
 // (allocations per frame, bytes per frame)
-// C11 shared cache: basic 1,980 / 182,989; empty 4,335 / 184,728. Never raise.
-const BASIC: (u64, u64) = (1_988, 184_000);
-const EMPTY: (u64, u64) = (4_350, 186_000);
+// C11 shared cache: basic 1,980 / 182,989; bare 4,335 / 184,728; empty 4,079 / 174,502.
+// M: borrowed panel keys and shell tree: basic 1,645 / 177,146; empty 2,571 / 138,828; bare 2,371 / 143,259.
+// Never raise.
+const BASIC: (u64, u64) = (1_650, 178_000);
+const EMPTY: (u64, u64) = (2_580, 140_000);
+const BARE: (u64, u64) = (2_380, 144_000);
 
 fn per_frame(source: &str, max: (u64, u64)) -> (u64, u64, String) {
     assert!(crate::common::gpu(), "native GPU required");
@@ -57,6 +61,9 @@ fn check(name: &str, source: &str, (max_allocs, max_bytes): (u64, u64)) {
 }
 
 fn basic() { check("basic", &std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../sketches/basic.rays")).unwrap(), BASIC) }
-fn empty() { check("empty", "(workspace empty (graph g :context value 0))", EMPTY) }
+// the workspace `rays` opens with no file: the plan's "empty editor"
+fn empty() { check("empty", include_str!("../../../rays_bin/src/empty.rays"), EMPTY) }
+// no editor graph: the host's default shell
+fn bare() { check("bare", "(workspace empty (graph g :context value 0))", BARE) }
 
-pub fn cases() -> Vec<(&'static str, fn())> { vec![("alloc_budget_basic", basic), ("alloc_budget_empty", empty)] }
+pub fn cases() -> Vec<(&'static str, fn())> { vec![("alloc_budget_basic", basic), ("alloc_budget_empty", empty), ("alloc_budget_bare", bare)] }

@@ -57,7 +57,7 @@ fn creation_shell_list_status() {
 
     // the shell: no editor graph, so the host's tree; keys are by place, the host bar is `-1`
     assert!(editor_shell::layouts(&value).is_empty());
-    assert_eq!(editor_shell::shell_tree(&value, &value.workspace), panels::default());
+    assert_eq!(*editor_shell::shell_tree(&value, &value.workspace), panels::default());
     assert_eq!(editor_shell::panel_key(&value.doc, &[0]), vec!["@default".to_string(), "@panel".to_string(), "0".to_string()]);
     assert_eq!(editor_shell::panel_key(&value.doc, &[HOST_BAR]).last().map(String::as_str), Some("-1"));
     assert!(editor_shell::panel_state(&value, &[HOST_BAR]).collapsed);

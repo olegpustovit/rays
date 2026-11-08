@@ -59,18 +59,14 @@ pub fn completion_names(value: &t) -> lisp_text::Names {
 
 /// The tree drawn now: the editor graph's (the host's when the document has none, or after
 /// "Restore layout"), with the split being dragged at its live ratio.
-pub fn shell_tree(value: &t, shell: &shell) -> panels::t {
-    let base = if shell.restored {
-        shell.tree.clone()
-    } else {
-        match &value.doc.shell {
-            Some(s) => s.tree.clone(),
-            None => shell.tree.clone(),
-        }
+pub fn shell_tree<'a>(value: &'a t, shell: &'a shell) -> Cow<'a, panels::t> {
+    let base = match &value.doc.shell {
+        Some(s) if !shell.restored => &s.tree,
+        _ => &shell.tree,
     };
     match &shell.live {
-        Some((node, size)) => panels::set_size(node, *size, base),
-        None => base,
+        Some((node, size)) => Cow::Owned(panels::set_size(node, *size, base.clone())),
+        None => Cow::Borrowed(base),
     }
 }
 
@@ -78,16 +74,17 @@ pub fn visible(shell: &shell, panel: &Panel) -> bool {
     !shell.hidden.contains(panel)
 }
 
-pub fn panel_key(doc: &Document, path: &[usize]) -> Vec<String> {
-    let graph = workspace_doc::editor_graph_ref(&doc.workspace.ws)
-        .map(|g| g.name.clone())
-        .unwrap_or_else(|| "@default".to_string());
-    let origin = |path: &[usize]| -> Option<&Origin> { doc.shell.as_ref().and_then(|s| s.origins.iter().find(|(p, _)| p == path).map(|(_, o)| o)) };
+/// A panel key, borrowed: the editor graph, then a binding name or the leaf's place.
+enum KeyTail<'a> { Name(&'a str), Place(&'a [usize]) }
+
+fn panel_key_ref<'a>(doc: &'a Document, path: &'a [usize]) -> (&'a str, KeyTail<'a>) {
+    let graph = workspace_doc::editor_graph_ref(&doc.workspace.ws).map_or("@default", |g| g.name.as_str());
+    let origin = |path: &[usize]| -> Option<&'a Origin> { doc.shell.as_ref().and_then(|s| s.origins.iter().find(|(p, _)| p == path).map(|(_, o)| o)) };
     // a binding several leaves are made from names none of them: each is keyed by its place
     let once = |name: &str| !doc.shell.as_ref().is_some_and(|s| s.repeated.iter().any(|r| r == name));
     if let Some(Origin::Bound(name)) = origin(path) {
         if once(name) {
-            return vec![graph, name.clone()];
+            return (graph, KeyTail::Name(name));
         }
     }
     // [name (ui/floating (ui/inspector))]: the window is the float's binding
@@ -95,29 +92,51 @@ pub fn panel_key(doc: &Document, path: &[usize]) -> Vec<String> {
         let is_float = doc.shell.as_ref().and_then(|s| panels::at_ref(up, &s.tree)).is_some_and(|t| matches!(t, panels::t::Float(_)));
         if is_float {
             if let Some(Origin::Bound(name)) = origin(up) {
-                return vec![graph, name.clone()];
+                return (graph, KeyTail::Name(name));
             }
         }
     }
-    let mut key = vec![graph, "@panel".to_string()];
-    key.extend(path.iter().map(|i| path_index_text(*i)));
-    key
+    (graph, KeyTail::Place(path))
+}
+
+pub fn panel_key(doc: &Document, path: &[usize]) -> Vec<String> {
+    match panel_key_ref(doc, path) {
+        (graph, KeyTail::Name(name)) => vec![graph.to_string(), name.to_string()],
+        (graph, KeyTail::Place(path)) => [graph.to_string(), "@panel".to_string()].into_iter().chain(path.iter().map(|i| path_index_text(*i))).collect(),
+    }
+}
+
+/// `key == panel_key(doc, path)` without building the key (layout reads it many times a frame).
+fn key_is(key: &[String], (graph, tail): &(&str, KeyTail)) -> bool {
+    let index_is = |text: &str, i: usize| {
+        let mut buf = [0u8; 20];
+        let mut w = &mut buf[..];
+        let _ = std::io::Write::write_fmt(&mut w, format_args!("{i}"));
+        let n = 20 - w.len();
+        if i == HOST_BAR { text == "-1" } else { text.as_bytes() == &buf[..n] }
+    };
+    match (key, tail) {
+        ([g, name], KeyTail::Name(n)) => g == graph && name == n,
+        ([g, panel, rest @ ..], KeyTail::Place(path)) => g == graph && panel == "@panel" && rest.len() == path.len() && rest.iter().zip(path.iter()).all(|(t, i)| index_is(t, *i)),
+        _ => false,
+    }
 }
 
 pub fn panel_state<'a>(value: impl Into<ModelView<'a>>, path: &[usize]) -> panels::State {
     let value = &value.into();
-    let saved = |key: &Vec<String>| value.doc.workspace.ws.layout.panels.get(key).copied();
+    // ponytail: linear scan of the saved panel states (a handful); key the map by borrowed parts if it grows
+    let saved = |key: &(&str, KeyTail)| value.doc.workspace.ws.layout.panels.iter().find(|(k, _)| key_is(k, key)).map(|(_, s)| *s);
     let state = if value.workspace.restored {
         panels::default_state()
     } else {
-        let key = panel_key(&value.doc, path);
+        let key = panel_key_ref(&value.doc, path);
         match saved(&key) {
             Some(state) => state,
             None => {
                 // a leaf of a binding used twice starts from the binding's entry (flow.md 11.11)
                 let origin = value.doc.shell.as_ref().and_then(|s| s.origins.iter().find(|(p, _)| p == path).map(|(_, o)| o));
-                let by_name = match (origin, key.as_slice()) {
-                    (Some(Origin::Bound(name)), [graph, second, ..]) if second == "@panel" => saved(&vec![graph.clone(), name.clone()]),
+                let by_name = match (origin, &key) {
+                    (Some(Origin::Bound(name)), (graph, KeyTail::Place(_))) => saved(&(graph, KeyTail::Name(name))),
                     _ => None,
                 };
                 by_name.unwrap_or(panels::State { collapsed: path == [HOST_BAR], ..panels::default_state() })

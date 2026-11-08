@@ -433,7 +433,7 @@ type Maker = Rc<dyn Fn(&Vec<String>) -> le::Op>;
 
 pub fn layout_intents<'a>(value: impl Into<ModelView<'a>>, workspace: &shell, intents: &[chrome::Intent]) -> (shell, Vec<change>) {
     let value = &value.into();
-    let base = shell_tree(value, &shell { live: None, ..workspace.clone() });
+    let base = shell_tree(value, &shell { live: None, ..workspace.clone() }).into_owned();
     let editor = workspace_doc::editor_graph(&value.doc.workspace.ws).map(|g| g.name);
     let shell_doc = if workspace.restored { None } else { value.doc.shell.as_ref() };
     let edit = |path: &layout::Path, make: Maker| -> Vec<change> {

@@ -113,16 +113,8 @@ pub fn check(path: &str) -> (String, i32) {
     }
 }
 
-pub const EMPTY: &str = r##"(workspace untitled
-  (graph picture :context draw
-    (draw/background "#11151c"))
-  (graph editor :context editor
-    (let* [canvas (ui/canvas (ref picture) :focus true)
-           network (ui/graph "picture")
-           inspector (ui/inspector :of network)
-           edit (ui/split "horizontal" network inspector :second_size 260)]
-      (ui/workspace (ui/split "vertical" canvas edit :second_size 280)))))
-"##;
+/// The workspace `rays` opens with no file (also the editor's per-frame allocation guard).
+pub const EMPTY: &str = include_str!("empty.rays");
 
 /// `rays web FILE -o DIR`.
 pub fn web(path: &str, dir: &str) -> Result<(), Fail> {
