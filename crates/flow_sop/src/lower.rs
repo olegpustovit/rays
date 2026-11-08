@@ -2834,9 +2834,14 @@ impl CookServices {
                     };
                     let program = flow_ir::core_lower::lower(Some(Value::Residual(residual)), None, true, Some(32768), None, residual)
                         .map_err(|name| fail("E_PACKED_FORM", &format!("Cooked selection cannot compile {name}.")))?;
-                    let prepared = Arc::new(flow_ir::core_exec::prepare(&program, false, false, &W::Paths::new(), false));
                     let inputs: Vec<node::T> = captures.iter().map(|(_, _, n)| n.clone()).collect();
                     let state_slots = program.state_slots.len();
+                    // Preparing cannot fail: a node replaced before it cooks (a Lisp call's inlined body
+                    // under its factory node, `lisp_sop::root`) never pays for it.
+                    let prepared: Arc<LazyPrepared> = Arc::new(LazyLock::new(Box::new(move || {
+                        let _phase = flow_syntax::phase_timer::measure("lower.structural_prepare");
+                        flow_ir::core_exec::prepare(&program, false, false, &W::Paths::new(), false)
+                    })));
                     let n = build::make(
                         build::Args {
                             parameters: kernel_source().into_bytes(),
@@ -2875,6 +2880,8 @@ impl CookServices {
 // A cooked selection (a geometry decided by cooked data) executes its core program on the host,
 // resolving cooked handles and host calls through a one-cook session.
 
+type LazyPrepared = LazyLock<flow_ir::core_exec::Prepared, Box<dyn FnOnce() -> flow_ir::core_exec::Prepared + Send>>;
+
 #[derive(Clone)]
 struct StructEnv {
     profile: Arc<profile::T>,
@@ -2882,7 +2889,7 @@ struct StructEnv {
     reference: bool,
     checked: Arc<Workspace>,
     captures: Vec<(i64, Ty, node::T)>,
-    prepared: Arc<flow_ir::core_exec::Prepared>,
+    prepared: Arc<LazyPrepared>,
     clock: Clock,
     residual: ResidualId,
     state_slots: usize,
@@ -3402,6 +3409,8 @@ struct HostLowering {
 }
 
 fn structural_cook(env: &StructEnv, node_id: i64, context: &sctx::T, payloads: &[payload::T]) -> R<node::Cooked> {
+    // prepared before the placement clock starts, as it was at lowering
+    LazyLock::force(&env.prepared);
     let eligible = !env.reference && env.gpu.fast && env.state_slots == 0;
     let placed = if eligible {
         chain::place(&env.gpu, &env.profile, chain::site_of(&Value::Residual(env.residual)).expect("a residual has a site"), sctx::cpu_consumers(context, node_id))
