@@ -2256,8 +2256,8 @@ impl Ui {
                     let found = (l.complete)(&edit.text, edit.caret as i64);
                     match found.first() {
                         Some(c) if st.typed => self.set_state(&suggest, (c.replace.0 + 1) * 512),
-                        Some(c) if c.replace.0 == (ocaml_int::lsr(open, 9)) - 1 => {
-                            self.set_state(&suggest, (ocaml_int::lsr(open, 9)) * 512 + if st.chosen { 256 } else { 0 } + st.selected as i64)
+                        Some(c) if c.replace.0 == (rays_math::hash::lsr(open, 9)) - 1 => {
+                            self.set_state(&suggest, (rays_math::hash::lsr(open, 9)) * 512 + if st.chosen { 256 } else { 0 } + st.selected as i64)
                         }
                         _ => self.set_state(&suggest, 0),
                     }

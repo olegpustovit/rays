@@ -241,7 +241,6 @@ name = "flow_syntax"
 version = "0.1.0"
 dependencies = [
  "cfmt",
- "ocaml_int",
  "param",
  "rays_diagnostic",
  "rays_math",
@@ -313,10 +312,6 @@ name = "native_layer_token_sys"
 version = "0.1.0"
 
 [[package]]
-name = "ocaml_int"
-version = "0.1.0"
-
-[[package]]
 name = "ogpu"
 version = "0.1.0"
 dependencies = [
@@ -365,7 +360,6 @@ dependencies = [
  "cfmt",
  "input",
  "mem",
- "ocaml_int",
  "ogpu",
  "ogpu_metal",
  "ogpu_vulkan",
@@ -519,7 +513,6 @@ dependencies = [
 name = "rays_math"
 version = "0.1.0"
 dependencies = [
- "ocaml_int",
  "rays_math_sys",
 ]
 

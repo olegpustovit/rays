@@ -1,4 +1,17 @@
-use ocaml_int::wrap_int63;
+/// Wraps an `i64` to the former signed 63-bit range. The named hash functions (`rand/at`, `Rand.float_at`,
+/// the geometry hashes) keep this wrap so their bits never change; Lisp `Int` itself is a plain `i64`.
+#[inline]
+pub fn wrap_int63(value: i64) -> i64 {
+    let low = (value as u64) & ((1_u64 << 63) - 1);
+    ((low << 1) as i64) >> 1
+}
+
+/// Logical right shift of a signed 63-bit integer; the shift count is masked to its low six bits.
+#[inline]
+pub fn lsr(value: i64, amount: i64) -> i64 {
+    let bits = (wrap_int63(value) as u64) & ((1_u64 << 63) - 1);
+    wrap_int63((bits >> ((amount as u64 & 63) as u32)) as i64)
+}
 
 pub fn mix_with(multiplier: i64, hash: i64, value: i64) -> i64 {
     wrap_int63(wrap_int63(hash).wrapping_mul(wrap_int63(multiplier)) ^ wrap_int63(value))
@@ -107,7 +120,26 @@ pub fn md5_hex(input: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{fnv_int_mix, fnv_int_range, md5_hex};
+    use super::{fnv_int_mix, fnv_int_range, lsr, md5_hex, wrap_int63};
+
+    #[test]
+    fn wraps_to_signed_63_bit_range() {
+        assert_eq!(wrap_int63(i64::MAX), -1);
+        assert_eq!(wrap_int63(i64::MIN), 0);
+        assert_eq!(wrap_int63(1_i64 << 62), -(1_i64 << 62));
+        assert_eq!(wrap_int63((1_i64 << 62) - 1), (1_i64 << 62) - 1);
+        assert_eq!(wrap_int63(-(1_i64 << 62) - 1), (1_i64 << 62) - 1);
+    }
+
+    #[test]
+    fn logical_shift_matches_ocaml_for_negative_values_and_edge_counts() {
+        let cases = [(0, -1), (1, (1_i64 << 62) - 1), (2, (1_i64 << 61) - 1), (62, 1), (63, 0), (64, -1), (65, (1_i64 << 62) - 1), (-1, 0), (-2, 1)];
+        for (amount, expected) in cases {
+            assert_eq!(lsr(-1, amount), expected, "-1 lsr {amount}");
+        }
+        assert_eq!(lsr(-(1_i64 << 62), 1), 1_i64 << 61);
+        assert_eq!(lsr(i64::MAX, 0), -1);
+    }
 
     // Expected values are OCaml 5.3 `lib/rays_math/hash.ml` run as a toplevel script.
     // OCaml max_int/min_int are 63-bit: 2^62-1 and -2^62 (not i64::MAX/MIN, which wrap to -1/0).

@@ -14,7 +14,6 @@ rays_math = { path = "../rays_math" }
 param = { path = "../param" }
 mem = { path = "../mem" }
 cfmt = { path = "../cfmt" }
-ocaml_int = { path = "../ocaml_int" }
 input = { path = "../input" }
 scene_command = { path = "../scene_command" }
 

@@ -9,7 +9,7 @@
 //! that owns the glyph atlas and the instance builder for the duration of the paint.
 use crate::theme::{self, Theme};
 use input::{Event, Key, MouseButton, Platform, ScrollPhase};
-use ocaml_int::{lsr, wrap_int63};
+use rays_math::hash::{lsr, wrap_int63};
 use rays_math::hash::{fnv_int_mix, fnv_int_range};
 use rays::{font, frame as rframe, image, scene, sketch};
 use rays_math::color::{self, T as Color};

@@ -1,4 +1,4 @@
-use ocaml_int::{lsr, wrap_int63};
+use crate::hash::{lsr, wrap_int63};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct T(i64);

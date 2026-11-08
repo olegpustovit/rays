@@ -788,7 +788,7 @@ fn crate_name(package_name: &str, lib_name: Option<&str>) -> String {
 }
 
 /// Rust-only helper leaves that stand in for OCaml stdlib, printf and int semantics: any product crate may name them.
-const HELPER_LEAVES: [&str; 2] = ["cfmt", "ocaml_int"];
+const HELPER_LEAVES: [&str; 1] = ["cfmt"];
 /// OCaml leaves a crate may name directly when its allowed dependencies reach them (flow reaches
 /// rays_diagnostic and input; lru reaches mem).
 // param: OCaml flow depends on it, so anything reaching flow reaches param.
@@ -807,9 +807,8 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("lru", &["mem"][..]),
         ("param", &["cfmt"][..]),
         ("input", &[][..]),
-        ("ocaml_int", &[][..]),
         ("rays_math_sys", &[][..]),
-        ("rays_math", &["rays_math_sys", "ocaml_int"][..]),
+        ("rays_math", &["rays_math_sys"][..]),
         ("scene_command", &[][..]),
         ("parallel", &[][..]),
         ("sdl3_sys", &["native_layer_token_sys"][..]),
@@ -925,7 +924,7 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
     let foundational = [
         "cfmt",
         "diagnostic", "rays_diagnostic", "native_layer_token_sys", "mem", "mem_sys",
-        "lru", "ocaml_int", "param", "input", "rays_math", "rays_math_sys", "parallel", "scene_command", "sdl3",
+        "lru", "param", "input", "rays_math", "rays_math_sys", "parallel", "scene_command", "sdl3",
         "metal", "vulkan_sys", "ogpu",
         "rdk_core",
     ];
