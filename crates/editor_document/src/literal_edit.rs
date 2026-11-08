@@ -16,7 +16,7 @@ use flow_sop_catalog::port::Port;
 use flow_syntax::lisp;
 use flow_syntax::syntax::{self as s, Node, Syntax};
 use flow_syntax::ty::Ty;
-use flow_syntax::value::Value as E;
+use flow_syntax::value::{Value as E, struct_value, source_value};
 use rays_diagnostic::{Diagnostic, Severity, Span};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -435,8 +435,8 @@ fn lower_value(lowered: &l::T, change: &Change) -> Option<R<l::T>> {
     fn is_target(targets: &[E], change: &Change, v: &E) -> bool {
         targets.iter().any(|t| t == v)
             && match v {
-                E::Source(kind, _, fields) | E::Struct(kind, _, fields) => {
-                    *kind == change.kind && fields.iter().find(|(f, _)| *f == change.field).map(|(_, old)| old == &change.before).unwrap_or(false)
+                E::Source(g) | E::Struct(g) => {
+                    g.name == change.kind && g.fields.iter().find(|(f, _)| *f == change.field).map(|(_, old)| old == &change.before).unwrap_or(false)
                 }
                 _ => false,
             }
@@ -445,8 +445,8 @@ fn lower_value(lowered: &l::T, change: &Change) -> Option<R<l::T>> {
         if is_target(targets, change, v) {
             *hit = true;
             return match v {
-                E::Source(k, ty, fs) => E::Source(k.clone(), ty.clone(), set(fs)),
-                E::Struct(k, ty, fs) => E::Struct(k.clone(), ty.clone(), set(fs)),
+                E::Source(g) => source_value(g.name.clone(), g.ty.clone(), set(&g.fields)),
+                E::Struct(g) => struct_value(g.name.clone(), g.ty.clone(), set(&g.fields)),
                 v => v.clone(),
             };
         }
@@ -454,8 +454,8 @@ fn lower_value(lowered: &l::T, change: &Change) -> Option<R<l::T>> {
         match v {
             E::List(a) => E::List(Arc::new(a.iter().map(|x| rw(x, targets, change, hit, set)).collect())),
             E::Record(fs) => E::Record(fields(fs, hit)),
-            E::Struct(k, ty, fs) => E::Struct(k.clone(), ty.clone(), fields(fs, hit)),
-            E::Source(k, ty, fs) => E::Source(k.clone(), ty.clone(), fields(fs, hit)),
+            E::Struct(g) => struct_value(g.name.clone(), g.ty.clone(), fields(&g.fields, hit)),
+            E::Source(g) => source_value(g.name.clone(), g.ty.clone(), fields(&g.fields, hit)),
             v => v.clone(),
         }
     }
@@ -517,7 +517,7 @@ mod compact_span_tests {
             term.arena().literal(literal).clone()
         }).collect();
         use flow_check::term_arena::Literal;
-        assert_eq!(values, vec![Literal::Int(9), Literal::Float(2.5), Literal::Int(-3)]);
+        assert!(matches!(values.as_slice(), [Literal::Int(9), Literal::Float(f), Literal::Int(-3)] if *f == 2.5), "numeric components");
         let (full, diagnostics) = flow_sop_catalog::catalog::check_workspace(&doc.checked.ops, false, None, &catalog, &checked.source);
         let full = full.unwrap_or_else(|| panic!("{diagnostics:?}"));
         assert_eq!(checked.graphs[0].body, full.graphs[0].body);

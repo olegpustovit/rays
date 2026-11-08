@@ -1384,7 +1384,7 @@ fn instances_each_viewport_has_its_root_and_world() {
         ),
         _ => panic!("each viewport over a root has an entry in the document"),
     }
-    check(lowering::instance_root(&E::Struct("scene/merge".to_owned(), flow_syntax::ty::scene(), vec![])).is_none(), "a part has no root of its own");
+    check(lowering::instance_root(&flow_syntax::value::struct_value("scene/merge", flow_syntax::ty::scene(), vec![])).is_none(), "a part has no root of its own");
     // each viewport draws its own World: the document's scene (a part) has none, the two roots do
     check(objects::ids("world", &scene(&doc)).is_empty(), "the part holds no World");
     match doc.view_worlds.as_slice() {

@@ -84,13 +84,15 @@ fn child(path: &[usize], i: usize) -> Vec<usize> {
 
 fn go(acc: &mut Acc, path: &[usize], v: &E) -> R<panels::t> {
     match v {
-        E::Struct(k, _, args) if k == "ui/canvas" => {
+        E::Struct(g) if g.name == "ui/canvas" => {
+            let args = &g.fields;
             let key = format!("c{}", join(path));
             let drawing = arg("drawing", args)?;
             acc.canvases.push((key.clone(), drawing));
             leaf(acc, path, args, Panel::Canvas(key))
         }
-        E::Struct(k, _, args) if k == "ui/viewport" => {
+        E::Struct(g) if g.name == "ui/viewport" => {
+            let args = &g.fields;
             let key = viewport_key(path);
             let scene = arg("scene", args)?;
             acc.viewports.push((key.clone(), scene));
@@ -99,7 +101,8 @@ fn go(acc: &mut Acc, path: &[usize], v: &E) -> R<panels::t> {
             }
             leaf(acc, path, args, Panel::View(key))
         }
-        E::Struct(k, _, args) if k == "ui/graph" => {
+        E::Struct(g) if g.name == "ui/graph" => {
+            let args = &g.fields;
             let here = path.to_vec();
             if let Some(name) = text("graph", args) {
                 acc.named.push((here.clone(), name));
@@ -109,18 +112,20 @@ fn go(acc: &mut Acc, path: &[usize], v: &E) -> R<panels::t> {
             }
             leaf(acc, path, args, Panel::Graph)
         }
-        E::Struct(k, _, args) if k == "ui/inspector" => leaf(acc, path, args, Panel::Inspector),
-        E::Struct(k, _, args) if k == "ui/spreadsheet" => leaf(acc, path, args, Panel::Spreadsheet),
-        E::Struct(k, _, args) if k == "ui/outline" => leaf(acc, path, args, Panel::Outline),
-        E::Struct(k, _, args) if k == "ui/list" => leaf(acc, path, args, Panel::List),
-        E::Struct(k, _, args) if k == "ui/lisp" => {
+        E::Struct(g) if g.name == "ui/inspector" => leaf(acc, path, &g.fields, Panel::Inspector),
+        E::Struct(g) if g.name == "ui/spreadsheet" => leaf(acc, path, &g.fields, Panel::Spreadsheet),
+        E::Struct(g) if g.name == "ui/outline" => leaf(acc, path, &g.fields, Panel::Outline),
+        E::Struct(g) if g.name == "ui/list" => leaf(acc, path, &g.fields, Panel::List),
+        E::Struct(g) if g.name == "ui/lisp" => {
+            let args = &g.fields;
             if let Some(tab) = text("tab", args) {
                 acc.start.tabs.insert(0, (path.to_vec(), tab));
             }
             leaf(acc, path, args, Panel::Lisp)
         }
-        E::Struct(k, _, args) if k == "ui/timeline" => leaf(acc, path, args, Panel::Timeline),
-        E::Struct(k, _, args) if k == "ui/split" || k == "ui/split-at" => {
+        E::Struct(g) if g.name == "ui/timeline" => leaf(acc, path, &g.fields, Panel::Timeline),
+        E::Struct(g) if g.name == "ui/split" || g.name == "ui/split-at" => {
+            let args = &g.fields;
             let first = arg("first", args)?;
             let second = arg("second", args)?;
             let a = go(acc, &child(path, 0), &first)?;
@@ -146,21 +151,24 @@ fn go(acc: &mut Acc, path: &[usize], v: &E) -> R<panels::t> {
             };
             Ok(panels::t::Split { axis, size, a: Box::new(a), b: Box::new(b) })
         }
-        E::Struct(k, _, args) if k == "ui/tile" => {
+        E::Struct(g) if g.name == "ui/tile" => {
+            let args = &g.fields;
             let mut cells = Vec::new();
             for (i, (_, v)) in args.iter().enumerate() {
                 cells.push(go(acc, &child(path, i), v)?);
             }
             Ok(panels::t::Tile(cells))
         }
-        E::Struct(k, _, args) if k == "ui/floating" => {
+        E::Struct(g) if g.name == "ui/floating" => {
+            let args = &g.fields;
             let p = arg("panel", args)?;
             let t = go(acc, &child(path, 0), &p)?;
             Ok(panels::t::Float(Box::new(t)))
         }
         // a switch is transparent: its active layout sits at the switch's own place in the tree, and
         // a layout that is not showing registers nothing but its shape
-        E::Struct(k, _, args) if k == "ui/switch" => {
+        E::Struct(g) if g.name == "ui/switch" => {
+            let args = &g.fields;
             let active = match args.iter().find(|(n, _)| n == "active") {
                 Some((_, E::Int(n))) => *n,
                 _ => 0,
@@ -246,7 +254,8 @@ fn walk(f: &mut Found, env: &[(&str, TermId)], place: Option<(Home, ArgKey)>, pa
                 f.ofs.push((path.to_vec(), t.child(field.term)));
             }
         }
-        (w::Node::Op(id), E::Struct(_, _, vargs)) => {
+        (w::Node::Op(id), E::Struct(vg)) => {
+            let vargs = &vg.fields;
             let op = arena.op(id);
             let args = arena.fields(op.args);
             match t.name(op.op) {
@@ -356,8 +365,8 @@ pub fn editor(workspace: &workspace_doc::T, plan: &Plan) -> R<Option<Editor>> {
     let value = workspace_doc::context_value(false, workspace, plan, context::editor())?;
     match value {
         None => Ok(None),
-        Some(whole @ E::Struct(..)) if matches!(&whole, E::Struct(k, _, args) if k == "ui/workspace" && args.first().map_or(false, |(n, _)| n == "root")) => {
-            let E::Struct(_, _, wargs) = &whole else { unreachable!() };
+        Some(whole @ E::Struct(..)) if matches!(&whole, E::Struct(g) if g.name == "ui/workspace" && g.fields.first().map_or(false, |(n, _)| n == "root")) => {
+            let wargs = whole.geo_fields().unwrap();
             let root = &wargs[0].1;
             let (tree, named, start, viewports, canvases, switch) = panel_tree(root)?;
             let g = workspace_doc::editor_graph(workspace).expect("an editor value has an editor graph");
