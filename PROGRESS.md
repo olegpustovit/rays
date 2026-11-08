@@ -136,6 +136,11 @@ Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s
 
 ## Session log
 
+- 2026-11-08: closing the remaining gaps.
+  - `the_other_sop_fixtures_lower_and_cook` (5.007 s) is split into tree, tunnel and wave cases (0.9, 0.5, 3.5 s) with the same per-fixture checks.
+  - Full `cargo t -p flow_sop` with the cap lifted: 707 pass, 75.2 s wall, 299.8 s summed (4 workers). It exceeds the 60 s whole-run cap. test_parallel_exact takes 138 s, of which 27 heavy cases take 89.6 s; their fixtures are being shrunk under the `8f3cedb6` coverage rules.
+  - Windows Vulkan cannot be verified from this session. THEVM does not resolve and THEVM2 is Linux aarch64 with no NVIDIA GPU. ogpu_vulkan type-checks on macOS. The shared remesh/marks/round-stroke goldens rest on the evidence in `d265c57f`, `882e12e1` and `9b48aa1e`.
+
 - 2026-11-08: `8f3cedb6`: six test_parallel_exact fixtures shrunk with multi-chunk coverage kept (>=8 grain-97 chunks per domain on the dominant owner; the 6,145-point curve keeps the >4096 topology path).
 
   | Case | Before (s) | After (s) |
