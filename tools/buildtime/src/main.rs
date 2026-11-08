@@ -63,7 +63,8 @@ fn main() -> ExitCode {
         Some("measure") => false,
         Some("-h" | "--help") => {
             println!("usage: cargo run -p buildtime -- check|measure\n\
-                      Override canaries with BUILDTIME_LEAF, BUILDTIME_MIDDLE, and BUILDTIME_TOP.");
+                      Override canaries with BUILDTIME_LEAF, BUILDTIME_MIDDLE, and BUILDTIME_TOP.\n\
+                      Editor cascade: BUILDTIME_EDITOR_TOUCH (default flow_ir), BUILDTIME_EDITOR (default rays_bin).");
             return ExitCode::SUCCESS;
         }
         _ => {
@@ -172,6 +173,7 @@ fn run(enforce_budgets: bool) -> Result<bool, String> {
     }
 
     passed &= run_w0_pair(&root, enforce_budgets, &mut timings);
+    passed &= run_w1_editor_chain(&root, enforce_budgets, &mut timings);
     print_slowest(&timings);
     Ok(passed)
 }
@@ -249,6 +251,47 @@ fn run_w0_pair(root: &Path, enforce_budgets: bool, timings: &mut Vec<Timing>) ->
     );
     passed &= !enforce_budgets || result;
     passed
+}
+
+/// Touch `flow_ir` (default) and measure `cargo check -p rays_bin` (default).
+fn run_w1_editor_chain(root: &Path, enforce_budgets: bool, timings: &mut Vec<Timing>) -> bool {
+    let touch = match env::var("BUILDTIME_EDITOR_TOUCH") {
+        Ok(value) if !value.is_empty() => value,
+        _ => "flow_ir".into(),
+    };
+    let consumer = match env::var("BUILDTIME_EDITOR") {
+        Ok(value) if !value.is_empty() => value,
+        _ => "rays_bin".into(),
+    };
+    let source = root.join("crates").join(&touch).join("src/lib.rs");
+    if !root.join("crates").join(&touch).join("Cargo.toml").is_file() || !source.is_file() {
+        println!("W1 {touch}->{consumer}: not ready (missing crate or lib.rs)");
+        return false;
+    }
+    if !root.join("crates").join(&consumer).join("Cargo.toml").is_file() {
+        println!("W1 {touch}->{consumer}: not ready (missing {consumer})");
+        return false;
+    }
+
+    let label = |action: &str| format!("W1 {touch}->{consumer} {action}");
+    if let Err(error) = timed(&label("warm-check"), None, timings, || cargo_check(root, &consumer)) {
+        eprintln!("buildtime: {error}");
+        return false;
+    }
+
+    let rebuild = timed(
+        &label("touch-rebuild"),
+        Some(TOP_BUDGET),
+        timings,
+        || with_touched_sources(std::slice::from_ref(&source), || cargo_check(root, &consumer)),
+    );
+    match rebuild {
+        Ok(within_budget) => !enforce_budgets || within_budget,
+        Err(error) => {
+            eprintln!("buildtime: {error}");
+            false
+        }
+    }
 }
 
 fn canaries() -> Result<[Canary; 3], String> {
