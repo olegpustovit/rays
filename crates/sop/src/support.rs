@@ -7,7 +7,7 @@ use param::{Kind, Value};
 use rays_diagnostic::Diagnostic;
 use rdk::{attribute, geometry, group, group_ops};
 
-use crate::node::{Cooked, GeometryCooked};
+use crate::node::GeometryCooked;
 
 // ---------------------------------------------------------------- choice helpers
 
@@ -44,10 +44,6 @@ pub fn diagnostic_with(code: &str, message: &str, cause: Option<String>, hints: 
 
 pub fn cooked(geometry: geometry::T) -> Result<GeometryCooked, Diagnostic> {
     Ok(GeometryCooked { geometry, instances: None })
-}
-
-pub fn payload_cooked(geometry: geometry::T) -> Result<Cooked, Diagnostic> {
-    Ok(Cooked { payload: crate::payload::T::Geometry(geometry), instances: None })
 }
 
 pub fn rdk_error(hints: Vec<String>, operation: &str, message: &str) -> Diagnostic {
@@ -88,10 +84,6 @@ pub fn exact_or_pattern(exact: &str, pattern: &str) -> (Option<String>, Option<S
 
 pub fn vec3_copy(value: &rays_math::vec3::T) -> rays_math::vec3::T {
     *value
-}
-
-pub fn stable_string_hash(text: &str) -> i64 {
-    rays_math::hash::string(text)
 }
 
 /// OCaml `mixed_seed`: Int64 arithmetic wraps; the result is an OCaml int (63-bit).
@@ -147,29 +139,6 @@ pub fn int_of_string_opt(text: &str) -> Option<i64> {
         Some(((value as i64) << 1) >> 1)
     } else {
         None
-    }
-}
-
-pub fn bool_token(value: bool) -> &'static str {
-    if value { "true" } else { "false" }
-}
-
-pub fn bool_of_token(value: &str) -> Result<bool, String> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "true" | "1" | "yes" => Ok(true),
-        "false" | "0" | "no" => Ok(false),
-        token => Err(format!("expected boolean, got {}", crate::node::ocaml_quote(token))),
-    }
-}
-
-pub fn int_of_token(value: &str) -> Result<i64, String> {
-    int_of_string_opt(value.trim()).ok_or_else(|| format!("expected integer, got {}", crate::node::ocaml_quote(value)))
-}
-
-pub fn float_of_token(value: &str) -> Result<f64, String> {
-    match cfmt::parse_ocaml_float(value.trim()) {
-        Some(v) if v.is_finite() => Ok(v),
-        _ => Err(format!("expected finite float, got {}", crate::node::ocaml_quote(value))),
     }
 }
 
@@ -530,7 +499,7 @@ pub fn distance_radius_value(mode: DistanceRadiusMode) -> Value {
     choice_value(&DISTANCE_RADIUS_LABELS, mode as usize)
 }
 
-use group_ops::{BooleanOperation, CopyConflict, Owner as GroupOpsOwner, RenameConflict};
+use group_ops::{CopyConflict, Owner as GroupOpsOwner};
 
 pub const ELEMENT_OWNER_LABELS: [&str; 4] = ["Point", "Vertex", "Primitive", "Edge"];
 pub const GROUP_OWNER_LABELS: [&str; 4] = ["Points", "Vertices", "Primitives", "Edges"];
@@ -545,9 +514,6 @@ pub fn element_owner_of_value(value: &Value) -> GroupOpsOwner {
 pub fn element_owner_value(owner: GroupOpsOwner) -> Value {
     choice_value(&ELEMENT_OWNER_LABELS, group_owner_position(owner))
 }
-pub fn group_owner_kind() -> Kind {
-    choice_kind(&GROUP_OWNER_LABELS)
-}
 pub fn group_owner_of_value(value: &Value) -> GroupOpsOwner {
     GROUP_OWNERS[choice_index(&GROUP_OWNER_LABELS, value)]
 }
@@ -556,24 +522,6 @@ pub fn group_owner_value(owner: GroupOpsOwner) -> Value {
 }
 pub fn group_owner_position(owner: GroupOpsOwner) -> usize {
     GROUP_OWNERS.iter().position(|item| *item == owner).unwrap()
-}
-
-pub const GROUP_MERGE_LABELS: [&str; 5] = ["Replace", "Union", "Intersection", "Subtract", "Exclusive or"];
-pub const GROUP_MERGE: [BooleanOperation; 5] = [
-    BooleanOperation::GroupReplace,
-    BooleanOperation::GroupUnion,
-    BooleanOperation::GroupIntersection,
-    BooleanOperation::GroupSubtract,
-    BooleanOperation::GroupXor,
-];
-pub fn group_merge_kind() -> Kind {
-    choice_kind(&GROUP_MERGE_LABELS)
-}
-pub fn group_merge_of_value(value: &Value) -> BooleanOperation {
-    GROUP_MERGE[choice_index(&GROUP_MERGE_LABELS, value)]
-}
-pub fn group_merge_value(operation: BooleanOperation) -> Value {
-    choice_value(&GROUP_MERGE_LABELS, GROUP_MERGE.iter().position(|item| *item == operation).unwrap())
 }
 
 pub const GROUP_COPY_CONFLICT_LABELS: [&str; 3] = ["Skip", "Overwrite", "Add suffix"];
@@ -587,49 +535,6 @@ pub fn group_copy_conflict_of_value(value: &Value) -> CopyConflict {
 }
 pub fn group_copy_conflict_value(conflict: CopyConflict) -> Value {
     choice_value(&GROUP_COPY_CONFLICT_LABELS, GROUP_COPY_CONFLICT.iter().position(|item| *item == conflict).unwrap())
-}
-
-pub const GROUP_RENAME_CONFLICT_LABELS: [&str; 4] = ["Skip", "Error", "Overwrite", "Union"];
-pub fn group_rename_conflict_kind() -> Kind {
-    choice_kind(&GROUP_RENAME_CONFLICT_LABELS)
-}
-pub fn group_rename_conflict_of_value(value: &Value) -> RenameConflict {
-    match choice_index(&GROUP_RENAME_CONFLICT_LABELS, value) {
-        0 => RenameConflict::RenameSkip,
-        1 => RenameConflict::RenameError,
-        2 => RenameConflict::RenameOverwrite,
-        _ => RenameConflict::RenameUnion,
-    }
-}
-pub fn group_rename_conflict_value(conflict: &RenameConflict) -> Value {
-    choice_value(
-        &GROUP_RENAME_CONFLICT_LABELS,
-        match conflict {
-            RenameConflict::RenameSkip => 0,
-            RenameConflict::RenameError => 1,
-            RenameConflict::RenameOverwrite => 2,
-            RenameConflict::RenameUnion => 3,
-        },
-    )
-}
-
-pub const GROUP_NORMAL_OWNER_LABELS: [&str; 3] = ["Points", "Primitives", "Edges"];
-pub const GROUP_NORMAL_OWNERS: [GroupOpsOwner; 3] =
-    [GroupOpsOwner::GroupPoints, GroupOpsOwner::GroupPrimitives, GroupOpsOwner::GroupEdges];
-pub fn group_normal_owner_kind() -> Kind {
-    choice_kind(&GROUP_NORMAL_OWNER_LABELS)
-}
-pub fn group_normal_owner_of_value(value: &Value) -> GroupOpsOwner {
-    GROUP_NORMAL_OWNERS[choice_index(&GROUP_NORMAL_OWNER_LABELS, value)]
-}
-
-pub const ORDINARY_GROUP_OWNER_LABELS: [&str; 3] = ["Points", "Vertices", "Primitives"];
-pub const ORDINARY_GROUP_OWNERS: [group::Owner; 3] = [group::Owner::Point, group::Owner::Vertex, group::Owner::Primitive];
-pub fn ordinary_group_owner_kind() -> Kind {
-    choice_kind(&ORDINARY_GROUP_OWNER_LABELS)
-}
-pub fn ordinary_group_owner_of_value(value: &Value) -> group::Owner {
-    ORDINARY_GROUP_OWNERS[choice_index(&ORDINARY_GROUP_OWNER_LABELS, value)]
 }
 
 pub const ATTRIBUTE_OWNER_LABELS: [&str; 4] = ["Point", "Vertex", "Primitive", "Detail"];
@@ -652,26 +557,6 @@ pub fn element_attribute_owner_kind() -> Kind {
 pub fn element_attribute_owner_of_value(value: &Value) -> attribute::Owner {
     ATTRIBUTE_OWNERS[choice_index(&ELEMENT_ATTRIBUTE_OWNER_LABELS, value)]
 }
-/// Point, Vertex only.
-pub const UV_OWNER_LABELS: [&str; 2] = ["Point", "Vertex"];
-pub fn uv_owner_kind() -> Kind {
-    choice_kind(&UV_OWNER_LABELS)
-}
-pub fn uv_owner_of_value(value: &Value) -> attribute::Owner {
-    ATTRIBUTE_OWNERS[choice_index(&UV_OWNER_LABELS, value)]
-}
-
-pub const DELETE_TOPOLOGY_POLICY_LABELS: [&str; 2] = ["Destroy touched primitives", "Heal primitives"];
-pub fn delete_topology_policy_kind() -> Kind {
-    choice_kind(&DELETE_TOPOLOGY_POLICY_LABELS)
-}
-pub fn delete_topology_policy_of_value(value: &Value) -> rdk::deletion::TopologyPolicy {
-    match choice_index(&DELETE_TOPOLOGY_POLICY_LABELS, value) {
-        0 => rdk::deletion::TopologyPolicy::DestroyTouchedPrimitives,
-        _ => rdk::deletion::TopologyPolicy::HealPrimitives,
-    }
-}
-
 pub const SOFT_FALLOFF_LABELS: [&str; 3] = ["Linear", "Quadratic", "Cubic"];
 pub fn soft_falloff_kind() -> Kind {
     choice_kind(&SOFT_FALLOFF_LABELS)
@@ -766,19 +651,6 @@ pub fn transfer_falloff_of(falloff: TransferFalloff, bias: f64) -> rdk::attribut
 
 // ---------------------------------------------------------------- tokens
 
-pub fn attribute_owner_token(owner: attribute::Owner) -> &'static str {
-    match owner {
-        attribute::Owner::Point => "point",
-        attribute::Owner::Vertex => "vertex",
-        attribute::Owner::Primitive => "primitive",
-        attribute::Owner::Detail => "detail",
-    }
-}
-
-pub fn attribute_owner_key(owner: attribute::Owner) -> &'static str {
-    attribute_owner_token(owner)
-}
-
 pub fn attribute_owner_of_token(token: &str) -> Result<attribute::Owner, String> {
     match token {
         "point" | "points" => Ok(attribute::Owner::Point),
@@ -808,62 +680,7 @@ pub fn group_owner_of_token(token: &str) -> Result<GroupOpsOwner, String> {
     }
 }
 
-pub fn group_owner_key(owner: group::Owner) -> &'static str {
-    match owner {
-        group::Owner::Point => "point",
-        group::Owner::Vertex => "vertex",
-        group::Owner::Primitive => "primitive",
-    }
-}
-
-pub fn group_boolean_token(operation: BooleanOperation) -> &'static str {
-    match operation {
-        BooleanOperation::GroupReplace => "replace",
-        BooleanOperation::GroupUnion => "union",
-        BooleanOperation::GroupIntersection => "intersection",
-        BooleanOperation::GroupSubtract => "subtract",
-        BooleanOperation::GroupXor => "xor",
-    }
-}
-
-pub fn group_boolean_of_token(token: &str) -> Result<BooleanOperation, String> {
-    match token {
-        "replace" => Ok(BooleanOperation::GroupReplace),
-        "union" => Ok(BooleanOperation::GroupUnion),
-        "intersection" => Ok(BooleanOperation::GroupIntersection),
-        "subtract" => Ok(BooleanOperation::GroupSubtract),
-        "xor" => Ok(BooleanOperation::GroupXor),
-        token => Err(format!("unknown group operation {}", crate::node::ocaml_quote(token))),
-    }
-}
-
 // ---------------------------------------------------------------- encoded table parameters
-
-pub fn encode_boundary_attributes(attributes: &[group_ops::BoundaryAttribute]) -> Vec<u8> {
-    let rows: Vec<Vec<Vec<u8>>> = attributes
-        .iter()
-        .map(|a| {
-            vec![
-                attribute_owner_token(a.boundary_attribute_owner).as_bytes().to_vec(),
-                a.boundary_attribute_pattern.as_bytes().to_vec(),
-            ]
-        })
-        .collect();
-    encode_table(&rows)
-}
-
-pub fn decode_boundary_attributes(text: &[u8]) -> Result<Vec<group_ops::BoundaryAttribute>, String> {
-    decode_table(text)?
-        .into_iter()
-        .map(|row| match row.as_slice() {
-            [owner, pattern] => Ok(group_ops::BoundaryAttribute {
-                boundary_attribute_owner: attribute_owner_of_token(&owner.trim().to_ascii_lowercase())?,
-                boundary_attribute_pattern: pattern.clone(),
-            }),
-            row => Err(format!("boundary attribute needs owner and pattern, got {} columns", row.len())),
-        })
-        .collect()
-}
 
 pub const FUSE_ATTRIBUTE_METHODS: [(&str, rdk::fuse_rules::AttributeMethod); 16] = {
     use rdk::fuse_rules::AttributeMethod::*;
@@ -1101,30 +918,6 @@ pub fn uv_parameterize_seams(
     ))
 }
 
-pub fn attribute_count(geometry_value: &geometry::T, owner: attribute::Owner) -> i64 {
-    match owner {
-        attribute::Owner::Point => geometry::point_count(geometry_value),
-        attribute::Owner::Vertex => geometry::vertex_count(geometry_value),
-        attribute::Owner::Primitive => geometry::primitive_count(geometry_value),
-        attribute::Owner::Detail => 1,
-    }
-}
-
-/// `make count` builds the attribute storage for `owner`'s element count.
-pub fn set_attribute_cook(
-    operation: &str,
-    owner: attribute::Owner,
-    name: &str,
-    make: &dyn Fn(i64) -> Result<attribute::Storage, String>,
-    geometry_value: &geometry::T,
-) -> Result<GeometryCooked, Diagnostic> {
-    let fail = |message: &str| rdk_error(Vec::new(), operation, message);
-    let storage = make(attribute_count(geometry_value, owner)).map_err(|m| fail(&m))?;
-    let created = attribute::create_owned(name, owner, storage).map_err(|e| fail(&rdk::error::to_string(&e)))?;
-    let geometry_value = geometry::with_attribute(created, geometry_value).map_err(|e| fail(&rdk::error::to_string(&e)))?;
-    cooked(geometry_value)
-}
-
 pub fn attribute_group_owner(owner: attribute::Owner) -> Option<group::Owner> {
     match owner {
         attribute::Owner::Point => Some(group::Owner::Point),
@@ -1132,24 +925,6 @@ pub fn attribute_group_owner(owner: attribute::Owner) -> Option<group::Owner> {
         attribute::Owner::Primitive => Some(group::Owner::Primitive),
         attribute::Owner::Detail => None,
     }
-}
-
-pub fn resolve_attribute_group(
-    operation: &str,
-    owner: attribute::Owner,
-    name: &Option<String>,
-    geometry_value: &geometry::T,
-) -> Result<Option<group::T>, Diagnostic> {
-    let Some(name) = name else { return Ok(None) };
-    let Some(group_owner) = attribute_group_owner(owner) else {
-        return Err(diagnostic(
-            "invalid_group",
-            &format!("{operation} does not accept a group for detail attributes"),
-        ));
-    };
-    geometry::find_group(group_owner, name, geometry_value)
-        .map(Some)
-        .ok_or_else(|| group_missing(operation, attribute_owner_key(owner), name))
 }
 
 pub fn attribute_mirror_group_owner(owner: attribute::Owner) -> group::Owner {
@@ -1216,76 +991,6 @@ pub fn resolve_transfer_group(
             selection
                 .map(Some)
                 .map_err(|e| diagnostic("invalid_group", &format!("{operation}: {}", rdk::error::to_string(&e))))
-        }
-    }
-}
-
-// ---------------------------------------------------------------- quaternion noise encoding
-
-pub mod quaternion_noise_encoding {
-    use rdk::attribute_generate::{NoiseLocation, NoiseRange, NumericValue};
-
-    pub fn encode_location(location: &NoiseLocation) -> String {
-        match location {
-            NoiseLocation::NoisePosition => "position".to_owned(),
-            NoiseLocation::NoiseElementNumber => "element-number".to_owned(),
-            NoiseLocation::NoiseAttribute(name) => format!("attribute:{name}"),
-        }
-    }
-
-    pub fn decode_location(value: &str) -> Result<NoiseLocation, String> {
-        match value {
-            "position" => Ok(NoiseLocation::NoisePosition),
-            "element-number" => Ok(NoiseLocation::NoiseElementNumber),
-            _ => match value.strip_prefix("attribute:") {
-                Some(name) => Ok(NoiseLocation::NoiseAttribute(name.to_owned())),
-                None => Err("location must be position, element-number, or attribute:name".to_owned()),
-            },
-        }
-    }
-
-    pub fn encode_numeric(value: &NumericValue) -> String {
-        let f = param::float_text;
-        match value {
-            NumericValue::Scalar(x) => format!("scalar,{}", f(*x)),
-            NumericValue::Vec2(v) => format!("vec2,{},{}", f(v.x), f(v.y)),
-            NumericValue::Vec3(v) => format!("vec3,{},{},{}", f(v.x), f(v.y), f(v.z)),
-            NumericValue::Vec4(x, y, z, w) => format!("vec4,{},{},{},{}", f(*x), f(*y), f(*z), f(*w)),
-        }
-    }
-
-    pub fn decode_numeric(value: &str) -> Option<NumericValue> {
-        let parts: Vec<&str> = value.split(',').collect();
-        let p = |s: &str| cfmt::parse_ocaml_float(s);
-        match parts.as_slice() {
-            ["scalar", x] => Some(NumericValue::Scalar(p(x)?)),
-            ["vec2", x, y] => Some(NumericValue::Vec2(rays_math::vec2::create(p(x)?, p(y)?))),
-            ["vec3", x, y, z] => Some(NumericValue::Vec3(rays_math::vec3::create(p(x)?, p(y)?, p(z)?))),
-            ["vec4", x, y, z, w] => Some(NumericValue::Vec4(p(x)?, p(y)?, p(z)?, p(w)?)),
-            _ => None,
-        }
-    }
-
-    pub fn encode_range(range: &NoiseRange) -> String {
-        match range {
-            NoiseRange::NoisePositive => "positive".to_owned(),
-            NoiseRange::NoiseZeroCentered => "zero-centered".to_owned(),
-            NoiseRange::NoiseMinMax(minimum, maximum) => {
-                ["min-max".to_owned(), encode_numeric(minimum), encode_numeric(maximum)].join(";")
-            }
-        }
-    }
-
-    pub fn decode_range(value: &str) -> Result<NoiseRange, String> {
-        let parts: Vec<&str> = value.split(';').collect();
-        match parts.as_slice() {
-            ["positive"] => Ok(NoiseRange::NoisePositive),
-            ["zero-centered"] => Ok(NoiseRange::NoiseZeroCentered),
-            ["min-max", minimum, maximum] => match (decode_numeric(minimum), decode_numeric(maximum)) {
-                (Some(minimum), Some(maximum)) => Ok(NoiseRange::NoiseMinMax(minimum, maximum)),
-                _ => Err("invalid noise range bounds".to_owned()),
-            },
-            _ => Err("range must be positive, zero-centered, or min-max bounds".to_owned()),
         }
     }
 }
