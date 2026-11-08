@@ -33,10 +33,6 @@ pub struct IcbEntry {
     pub commands: RefCell<Vec<Option<metal::RenderCommand>>>,
 }
 
-/// Encoders reuse depth-stencil states by value; the least recently used is released once more than
-/// `DEPTH_STATE_CAPACITY` distinct states exist.
-pub const DEPTH_STATE_CAPACITY: usize = 64;
-
 /// The token tables of one device.
 pub struct Tables {
     pub resources: RefCell<HashMap<i64, Resource>>,
@@ -44,7 +40,8 @@ pub struct Tables {
     pub samplers: RefCell<HashMap<i64, Sampler>>,
     pub accels: RefCell<HashMap<i64, Acceleration>>,
     pub icbs: RefCell<HashMap<i64, Rc<IcbEntry>>>,
-    /// Most recently used first.
+    /// Every depth-stencil state, made with the device (`create_depth_states`): eight comparisons
+    /// by write or not. Made lazily they would outlive the first owner that drew with them.
     pub depth_states: RefCell<Vec<(DepthState, DepthStencil)>>,
     pub next: Cell<i64>,
 }
@@ -72,29 +69,30 @@ impl Tables {
         self.resources.borrow().get(&token).cloned()
     }
 
-    pub fn depth_state_for(&self, device: &Device, state: DepthState) -> Result<DepthStencil, Error> {
-        let operation = "Ogpu_metal.Backend.depth_state";
+    /// Fill `depth_states` once, when the device is made.
+    pub fn create_depth_states(&self, device: &Device) -> Result<(), Error> {
+        use Comparison::*;
         let mut states = self.depth_states.borrow_mut();
-        if let Some(index) = states.iter().position(|(s, _)| *s == state) {
-            let entry = states.remove(index);
-            let native = entry.1.clone();
-            states.insert(0, entry);
-            return Ok(native);
-        }
-        let descriptor = DepthStencilDescriptor {
-            depth_compare: metal_compare(state.depth_compare),
-            depth_write: state.depth_write,
-            label: Some("ogpu-metal-depth-state".to_owned()),
-            ..DepthStencilDescriptor::default()
-        };
-        let native = DepthStencil::create(device.metal(), descriptor).map_err(|e| of_metal_error(operation, &e))?;
-        states.insert(0, (state, native.clone()));
-        if states.len() > DEPTH_STATE_CAPACITY {
-            if let Some((_, evicted)) = states.pop() {
-                let _ = evicted.destroy();
+        for depth_compare in [Never, Less, Equal, LessEqual, Greater, NotEqual, GreaterEqual, Always] {
+            for depth_write in [false, true] {
+                let descriptor = DepthStencilDescriptor {
+                    depth_compare: metal_compare(depth_compare),
+                    depth_write,
+                    label: Some("ogpu-metal-depth-state".to_owned()),
+                    ..DepthStencilDescriptor::default()
+                };
+                let native = DepthStencil::create(device.metal(), descriptor).map_err(|e| of_metal_error("Ogpu_metal.Backend.create_device", &e))?;
+                states.push((DepthState { depth_compare, depth_write }, native));
             }
         }
-        Ok(native)
+        Ok(())
+    }
+
+    pub fn depth_state_for(&self, state: DepthState) -> Result<DepthStencil, Error> {
+        match self.depth_states.borrow().iter().find(|(s, _)| *s == state) {
+            Some((_, native)) => Ok(native.clone()),
+            None => Err(fail("Ogpu_metal.Backend.depth_state", ErrorKind::InvalidState, "device has no depth states")),
+        }
     }
 }
 
@@ -239,6 +237,6 @@ impl CommandContext {
     }
 
     pub fn depth_state(&self, state: DepthState) -> Result<DepthStencil, Error> {
-        self.tables.depth_state_for(&self.device, state)
+        self.tables.depth_state_for(state)
     }
 }

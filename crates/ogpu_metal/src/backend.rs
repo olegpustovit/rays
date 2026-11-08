@@ -994,6 +994,10 @@ impl Driver for MetalDriver {
             cleanup_error: RefCell::new(None),
             device_live: device_live.clone(),
         });
+        if let Err(e) = dev.t.create_depth_states(&dev.device) {
+            let _ = destroy_device(&dev);
+            return Err(e);
+        }
         Ok(Box::new(MetalDevice { dev, handle, caps }))
     }
 }
