@@ -62,7 +62,7 @@ A1-A8, B0-B4: see earlier rows below in git history (`6802a325` ... `96fab43d`);
 | C18, C20 | done | `b5aead5f`; `01b90841` `fold.rs` + `lru::Memo` (+163 net lines, not -140) |
 | C19 | done | `dd441536` PartialEq derived (Hash impossible: f64 in ogpu types) |
 | C21 | done | `7e9376dc` clippy::all allow removed; ~30 test-target lints remain |
-| D1 | done | `959d5dae` `b72ab30d` `b4f74ecf` goldens `9a17f5d7` `1a5de4fe` `8fc3feb4`; 56 prepends removed; some incidental-order spots in spirv.rs left ; `a9213d00` last prepend -> VecDeque, six SPIR-V operand-order sites fixed after audit against spirv.ml (34 .spv fixtures, byte lengths unchanged, all pass spirv-val vulkan1.2) |
+| D1 | done | `959d5dae` `b72ab30d` `b4f74ecf` goldens `9a17f5d7` `1a5de4fe` `8fc3feb4`; 56 prepends removed; `a9213d00` last prepend -> VecDeque, six SPIR-V operand-order sites fixed after audit against spirv.ml (34 .spv fixtures, byte lengths unchanged, all pass spirv-val vulkan1.2) |
 | D2 | done | `37691759` .. `2e224106` + `a0809e01` (5 stages): rdk errors `{operation, code: Code, message}`, typed cancellation |
 | D3 | done | `4e8e7193` one WGSL printer, goldens byte-identical |
 | D4 | done (release `map` open) | `8bf0c0d0` `18180e84` packed.rs one CPU engine (historical implementation size 4,714 lines); `1455271c` bench_core example |
