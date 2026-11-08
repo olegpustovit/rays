@@ -26,7 +26,7 @@ fn functions(v: &Value) -> Value {
         },
         Value::List(xs) => Value::List(std::sync::Arc::new(xs.iter().map(functions).collect())),
         Value::Record(fs) => Value::Record(fs.iter().map(|(n, v)| (n.clone(), functions(v))).collect()),
-        Value::Struct(n, t, fs) => Value::Struct(n.clone(), t.clone(), fs.iter().map(|(n, v)| (n.clone(), functions(v))).collect()),
+        Value::Struct(g) => flow_syntax::value::struct_value(g.name.clone(), g.ty.clone(), g.fields.iter().map(|(n, v)| (n.clone(), functions(v))).collect()),
         other => other.clone(),
     }
 }
