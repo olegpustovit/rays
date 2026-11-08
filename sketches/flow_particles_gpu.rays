@@ -1,6 +1,7 @@
 ; The display producer is eligible for the measured GPU tier. Without a native
-; cost model it uses the CPU kernel. The exact SOP variant reads back a selected
-; GPU producer on the initial domain before CPU geometry cooking.
+; cost model it uses the CPU kernel. Enable the hidden exact_surface object to
+; compare CPU geometry cooking; leaving it visible reads back a million points
+; every frame even when only the particle canvas is on screen.
 (workspace flow_particles_gpu
   (graph picture :context draw
     (let* [indices (array/range 1000000)
@@ -23,6 +24,9 @@
                                     wave (noise3 [(* column 0.03) (* row 0.03) t])]
                                [(* column 0.8) (+ (* row 0.6) (* wave 2)) 0])) indices))]
       (sop/with_attr grid :P positions)))
+
+  (graph scene :context scene
+    (scene/geometry (ref exact_surface) :name "Exact surface" :visible false))
 
   (graph settings :context settings
     (settings/config :title "One million circles: approximate display and exact SOP" :width 800 :height 600))

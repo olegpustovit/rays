@@ -81,7 +81,7 @@ fn run(require_state_kernel: bool, checked: &W::Workspace) {
 fn workspace(path: &str) {
     let _guard = SNAPSHOT.lock().unwrap_or_else(|e| e.into_inner());
     region_snapshot::start();
-    let file = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../");
+    let file = concat!(env!("CARGO_MANIFEST_DIR"), "/../../");
     let source = std::fs::read_to_string(format!("{file}{path}.rays")).expect("sketch");
     // The file's layout form is editor chrome, not part of the checked workspace.
     let forms = ok(syntax::parse(&source));

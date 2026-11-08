@@ -77,7 +77,7 @@ const TRAIL: &str = r###"(workspace trail
                 :kinds (exact (array/int triangles 0))))))"###;
 
 pub fn cases()->Vec<(&'static str,fn())> {
-    vec![("native_voxel_neighbors",voxel_neighbors),("native_swarm_frames",swarm_frames),("native_live_mesh",live_mesh),("native_holder_frames",holder_frames),("native_sea_frames",sea_frames),("native_sea_initial_close",sea_initial_close),("native_orrery_frames",orrery_frames)]
+    vec![("native_voxel_neighbors",voxel_neighbors),("native_swarm_frames",swarm_frames),("native_live_mesh",live_mesh),("native_holder_frames",holder_frames),("native_sea_frames",sea_frames),("native_particles_frames",particles_frames),("native_sea_initial_close",sea_initial_close),("native_orrery_frames",orrery_frames)]
 }
 
 fn voxel_neighbors() {
@@ -162,6 +162,50 @@ fn swarm_frames() {
         }
     }));
     rays::canvas::destroy(&canvas).unwrap(); wg::close(&gpu);
+}
+
+fn particles_frames() {
+    use rays_editor::{Editor, Workspace};
+    assert!(super::common::gpu(), "native GPU required");
+    let doc = Workspace::load(None, Vec::new(), None, include_str!("../../../../sketches/flow_particles_gpu.rays")).unwrap_or_else(|d| panic!("{d:?}"));
+    let canvas = rays::canvas::create(800, 600).unwrap();
+    let gpu = wg::create(None);
+    let mut editor = Editor::create(Editor::Create { gpu_owner: Some(gpu.clone()), await_: Some(true), domains: Some(1), ..Default::default() }, &doc, None, Editor::prepare_fn(), Editor::draw_fn()).unwrap();
+    let mut warm = None;
+    let mut pixels = None;
+    for tick in 1..=8 {
+        let frame = rays::frame::t { input: input::Frame { dt: 1./60., frame: tick, tick, size: (800,600), pointer: (-100.,-100.), ..input::at_time(tick as f64/6.) }, pixel_scale: (1.,1.), fps: 60., mouse_delta: (0.,0.) };
+        let allocated = mem_sys::alloc_bytes_total();
+        let started = std::time::Instant::now();
+        editor = Editor::update(editor, &frame);
+        let updated = started.elapsed();
+        assert!(editor.context_error.is_none(), "{:?}", editor.context_error);
+        assert!(editor.core.cook.error.is_none(), "{:?}", editor.core.cook.error);
+        assert!(editor.core.cook.pieces.is_empty(), "hidden exact SOP surface cooked behind the particle canvas");
+        assert_eq!(editor.canvases.len(), 1);
+        assert!(flow_native::drawing::borrows_gpu(editor.canvases[0].1.prepared.as_ref().unwrap()), "particle positions left the device");
+        rays::canvas::render(None, &canvas, &Editor::scene(&editor, &frame)).unwrap();
+        let stats = wg::image_stats(&gpu).0;
+        assert_eq!(stats.payload_readback_bytes, 0, "display-only positions were read back");
+        let frame_bytes = mem_sys::alloc_bytes_total() - allocated;
+        if let Some((uploads, buffers, pipelines)) = warm {
+            assert_eq!(stats.input_uploads, uploads, "immutable particle indices uploaded again");
+            assert_eq!(stats.buffer_creations, buffers, "animation allocated more GPU buffers");
+            assert_eq!(stats.pipeline_compilations, pipelines, "animation compiled another shader");
+            assert!(frame_bytes <= 1_100_000, "particle frame allocated {frame_bytes} B");
+        }
+        if tick == 3 { warm = Some((stats.input_uploads, stats.buffer_creations, stats.pipeline_compilations)); }
+        println!("particles frame {tick}: update {updated:?}, total {:?}, allocated {frame_bytes} B", started.elapsed());
+        if tick == 1 { pixels = Some(rays::canvas::pixels(&canvas).unwrap()); }
+        editor = Editor::after_present(editor, &frame);
+    }
+    let first = pixels.unwrap();
+    let last = rays::canvas::pixels(&canvas).unwrap();
+    assert!(last.iter().filter(|p| p.g > 80).count() > 1000, "particle canvas is blank");
+    assert!(first.iter().zip(&last).filter(|(a,b)| a != b).count() > 1000, "particle animation is frozen");
+    Editor::close(&editor);
+    wg::close(&gpu);
+    rays::canvas::destroy(&canvas).unwrap();
 }
 
 fn sea_initial_close() {

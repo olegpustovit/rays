@@ -1044,7 +1044,8 @@ fn same_bytes(mesh: &mesh, source: &Option<mesh>) -> bool {
         Some(source) => {
             (match (&source.shared_vertices, &mesh.shared_vertices) {
                 (Some(a), Some(b)) => Arc::ptr_eq(a,b),
-                (None, None) => Rc::ptr_eq(&source.vertices,&mesh.vertices),
+                (None, None) => Rc::ptr_eq(&source.vertices,&mesh.vertices)
+                    || (source.vertices.borrow().is_empty() && mesh.vertices.borrow().is_empty()),
                 _ => false,
             })
                 && Rc::ptr_eq(&source.indices, &mesh.indices)

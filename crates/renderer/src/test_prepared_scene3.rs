@@ -76,6 +76,21 @@ fn prepared_scene3_validation_and_ownership() {
 }
 
 #[test]
+fn borrowed_vertices_reuse_indices_with_fresh_empty_host_planes() {
+    let mut source = entry().draw.mesh;
+    source.key = mesh_key::Gpu_vertices("particles".into());
+    source.vertices = empty_bytes();
+    let mut next = source.clone();
+    next.vertices = empty_bytes();
+    assert!(same_bytes(&next, &Some(source.clone())), "empty host planes must not force an index scan");
+    next.vertices = new_bytes(vec![1]);
+    assert!(!same_bytes(&next, &Some(source.clone())));
+    next.vertices = empty_bytes();
+    next.indices = new_bytes(source.indices.borrow().clone());
+    assert!(!same_bytes(&next, &Some(source)), "new index storage still needs content validation");
+}
+
+#[test]
 fn published_shapes_retain_immutable_vertices_without_copying() {
     use crate::renderer_lowering as lowering;
     use scene_command::{render_ir::Command,ui_batch::Builder};
