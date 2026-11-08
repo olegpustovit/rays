@@ -177,7 +177,7 @@ let mut os: Vec<Arc<dyn Fn() + Send + Sync>> = (0..16).map(|_| owner.clone()).co
                 }),
                 retain_uint32: Box::new(move |_| {
                     o14();
-                    Some(G::Integers { count: 1, resident: Box::new(|| None), storage: None, materialise: Box::new(|| vec![16777217]), release: Box::new(|_| {}) })
+                    Some(G::Integers { count: 1, resident: Box::new(|| None), storage: None, materialise: Box::new(|| Ok(vec![16777217])), release: Box::new(|_| {}) })
                 }),
                 retain_float: Box::new(move |_| {
                     o15();
@@ -213,7 +213,7 @@ let mut os: Vec<Arc<dyn Fn() + Send + Sync>> = (0..16).map(|_| owner.clone()).co
             assert!((r.finish)(&value).unwrap() == value && (r.count)(&value).unwrap() == Some(1));
             assert_eq!((r.range)(&array_int, &Value::Int(1), 1, 1).unwrap(), Some(value.clone()));
             assert_eq!((r.fill)(&array_int, 1, &Value::Int(0)).unwrap(), Some(value.clone()));
-            assert_eq!(((scope.retain_uint32)(&value).unwrap().materialise)(), vec![16777217]);
+            assert_eq!(((scope.retain_uint32)(&value).unwrap().materialise)().unwrap(), vec![16777217]);
             assert!((scope.retain_float)(&value).is_none());
             ok((scope.validate_topology)(1, &value, &value, &value, 3).expect("validated"));
             (r.close)();

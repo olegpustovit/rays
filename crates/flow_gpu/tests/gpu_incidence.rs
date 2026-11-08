@@ -103,7 +103,7 @@ fn constant_arrays() {
             assert_eq!(after.input_uploaded_bytes, before.input_uploaded_bytes);
             assert_eq!(after.payload_readback_bytes, before.payload_readback_bytes);
             assert_eq!((kept.count, kept.width), (count, row.len() as i64));
-            let planes = (kept.materialise)();
+            let planes = (kept.materialise)().unwrap();
             for (column, expected) in planes.iter().zip(row) {
                 let expected = if kind == "range" { (0..count).map(|i| (i as f64).to_bits()).collect() } else { vec![f64::to_bits(expected); count as usize] };
                 assert_eq!(column.iter().map(|x| x.to_bits()).collect::<Vec<_>>(), expected);

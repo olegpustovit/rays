@@ -43,7 +43,8 @@ pub mod Gpu {
 
     /// An output kept where it was computed, possibly still in flight. `settle` (on the initial
     /// domain, once per dispatch) waits for the dispatch and checks its status: an `Err` means the
-    /// values are not to be used. `materialise` (once, from any domain once settled, never failing)
+    /// values are not to be used. `materialise` (once, from any domain once settled; an `Err` when
+    /// the output was read after its free or after its owner closed)
     /// reads it as `width` owned planes of `count` floats. Until then the device owns it, and
     /// `resident` is a placeholder array (of one element) the same backend binds to that buffer
     /// when a later kernel's source is it. `release(held)` says its owner dropped the result.
@@ -52,7 +53,7 @@ pub mod Gpu {
     pub struct Planes {
         pub count: i64,
         pub width: i64,
-        pub materialise: Box<dyn Fn() -> Vec<Vec<f64>> + Send + Sync>,
+        pub materialise: Box<dyn Fn() -> Result<Vec<Vec<f64>>, Diagnostic> + Send + Sync>,
         pub resident: Option<super::Value>,
         pub settle: Box<dyn Fn() -> Result<(), Diagnostic> + Send + Sync>,
         pub release: Box<dyn Fn(bool) + Send + Sync>,
@@ -79,7 +80,7 @@ pub mod Gpu {
                 Ok(Planes {
                     count,
                     width,
-                    materialise: Box::new(move || (*planes).clone()),
+                    materialise: Box::new(move || Ok((*planes).clone())),
                     resident: None,
                     settle: Box::new(|| Ok(())),
                     release: Box::new(|_| {}),
@@ -98,7 +99,7 @@ pub mod Gpu {
         /// Unread, live device storage; a materialised or released stream declines.
         pub resident: Box<dyn Fn() -> Option<super::Value> + Send + Sync>,
         pub storage: Option<IntegerStorage>,
-        pub materialise: Box<dyn Fn() -> Vec<i64> + Send + Sync>,
+        pub materialise: Box<dyn Fn() -> Result<Vec<i64>, Diagnostic> + Send + Sync>,
         pub release: Box<dyn Fn(bool) + Send + Sync>,
     }
 
@@ -528,14 +529,24 @@ fn same_bits(a: &Value, b: &Value) -> bool {
     }
 }
 
-/// `f`, with a panic turned into the refusal OCaml's `Invalid_argument | Not_found | Failure` arm makes:
-/// `E_PACKED_EXECUTION` carrying the panic text, so the map falls back to the walker.
+/// The panics a kernel that cannot run raises, OCaml's `Invalid_argument | Not_found` (an index, slice
+/// or `None` lookup out of range) and arithmetic failures; anything else is a bug and keeps unwinding.
+fn is_kernel_refusal(text: &str) -> bool {
+    ["index out of bounds", "out of range for slice", "out of range", "called `Option::unwrap()` on a `None`", "attempt to", "capacity overflow"]
+        .iter().any(|marker| text.contains(marker))
+}
+
+/// `f`, with a refusal panic (`is_kernel_refusal`) turned into `E_PACKED_EXECUTION` carrying the panic
+/// text, so the map falls back to the walker. Any other panic is resumed.
 fn guarded_force(f: &mut dyn FnMut() -> Result<Value, Diagnostic>) -> Result<Value, Diagnostic> {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
         Ok(result) => result,
         Err(payload) => {
-            let text = payload.downcast_ref::<String>().cloned().or_else(|| payload.downcast_ref::<&str>().map(|s| (*s).to_owned())).unwrap_or_else(|| "panic".to_owned());
-            Err(v::fail("E_PACKED_EXECUTION", &text))
+            let text = payload.downcast_ref::<String>().cloned().or_else(|| payload.downcast_ref::<&str>().map(|s| (*s).to_owned()));
+            match text {
+                Some(text) if is_kernel_refusal(&text) => Err(v::fail("E_PACKED_EXECUTION", &text)),
+                _ => std::panic::resume_unwind(payload),
+            }
         }
     }
 }
@@ -2536,6 +2547,9 @@ mod tests {
         assert_eq!(guarded_force(&mut || Ok(Value::Int(7))).unwrap(), Value::Int(7));
         let kept = guarded_force(&mut || Err(v::fail("E_X", "kept"))).expect_err("an Err passes through");
         assert_eq!(kept.code, "E_X");
+        // a panic that is not a refusal is a bug: it keeps unwinding
+        let bug = std::panic::catch_unwind(|| guarded_force(&mut || panic!("invariant broken")));
+        assert!(bug.is_err());
     }
 
     fn empty() -> Catalog { Catalog { version: 1, kinds: vec![] } }

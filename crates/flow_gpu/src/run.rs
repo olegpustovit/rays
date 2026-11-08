@@ -1384,7 +1384,7 @@ fn thaw(kept: &Kept) {
     if !kept.settled.load(Ordering::SeqCst) && kept.owner.0.state.try_borrow_mut().is_err() {
         return;
     }
-    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| materialise(kept)));
+    let _ = materialise(kept);
 }
 
 /// Only immutable native allocation access crosses threads. Fate serializes conversion against
@@ -1417,19 +1417,17 @@ fn materialise_owned(fate: &Fate, shared: &Shared, id: i64) -> Result<Arc<Vec<Ve
 }
 /// The planes, on the creating thread (from any thread once read). Once read, the holder no longer
 /// needs the buffer: it goes back to the pool at once, not at drop.
-fn materialise(kept: &Kept) -> Arc<Vec<Vec<f64>>> {
+fn materialise(kept: &Kept) -> Result<Arc<Vec<Vec<f64>>>, String> {
     let t = &kept.owner;
     let d = &*t.0;
     if let Some(planes) = kept.fate.planes() {
-        return planes;
+        return Ok(planes);
     }
     // a reader on the creating thread waits for the kernel itself
     if !kept.settled.load(Ordering::SeqCst) {
-        if let Err(diagnostic) = settle(t, kept.epoch, &kept.settled, &kept.fate) {
-            panic!("{}", rays_diagnostic::to_string(&diagnostic));
-        }
+        settle(t, kept.epoch, &kept.settled, &kept.fate).map_err(|diagnostic| rays_diagnostic::to_string(&diagnostic))?;
     }
-    materialise_owned(&kept.fate, &d.pool.0.shared, kept.id).unwrap_or_else(|message| panic!("{message}"))
+    materialise_owned(&kept.fate, &d.pool.0.shared, kept.id)
 }
 
 // ponytail: fixed lane count (groups of 1,024 to fill an 8-core M1); tune per device if one underfills.
@@ -1574,26 +1572,24 @@ pub fn service() {
     };
     for request in mine {
         let result = match kept_of(request.id) {
-            Some(kept) => std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| materialise(&kept))).map_err(|e| {
-                e.downcast_ref::<String>().cloned().or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_else(|| "Run.materialise failed".to_owned())
-            }),
+            Some(kept) => materialise(&kept),
             None => Err("Run.materialise: a device output was read after its owner closed".to_owned()),
         };
         answer(&request, result);
     }
 }
 
-fn token_planes(token: &Token) -> Arc<Vec<Vec<f64>>> {
+fn token_planes(token: &Token) -> Result<Arc<Vec<Vec<f64>>>, String> {
     if let Some(p) = token.fate.planes() {
-        return p;
+        return Ok(p);
     }
     if token.settled.load(Ordering::SeqCst) {
-        return materialise_owned(&token.fate, &token.shared, token.id).unwrap_or_else(|message| panic!("{message}"));
+        return materialise_owned(&token.fate, &token.shared, token.id);
     }
     if me() == token.owner {
         return match kept_of(token.id) {
             Some(kept) => materialise(&kept),
-            None => panic!("Run.materialise: a device output was read after its owner closed"),
+            None => Err("Run.materialise: a device output was read after its owner closed".to_owned()),
         };
     }
     let request = Arc::new(Request { owner: token.owner, id: token.id, result: Mutex::new(None), done: Condvar::new() });
@@ -1602,10 +1598,7 @@ fn token_planes(token: &Token) -> Arc<Vec<Vec<f64>>> {
     while slot.is_none() {
         slot = request.done.wait(slot).unwrap();
     }
-    match slot.take().unwrap() {
-        Ok(planes) => planes,
-        Err(message) => panic!("{message}"),
-    }
+    slot.take().unwrap()
 }
 
 fn hold(t: &T, uint32: bool, buffer: &Buffer, capacity: i64, count: i64, width: i64, epoch: i64, settled: bool) -> (Gpu::Planes, Rc<Kept>) {
@@ -1653,7 +1646,7 @@ fn hold(t: &T, uint32: bool, buffer: &Buffer, capacity: i64, count: i64, width: 
     let planes = Gpu::Planes {
         count,
         width,
-        materialise: Box::new(move || (*token_planes(&t1)).clone()),
+        materialise: Box::new(move || token_planes(&t1).map(|planes| (*planes).clone()).map_err(|message| e_gpu(&message))),
         resident: if uint32 { None } else { Some(resident) },
         settle: Box::new(move || {
             if t2.fate.planes().is_some() || t2.fate.destroyed() {
@@ -1730,7 +1723,7 @@ fn keep_storage(uint32: bool, index: Option<i64>, output: &Output) -> Result<(Gp
                 Gpu::Planes {
                     count: output.count,
                     width,
-                    materialise: Box::new(move || (*r).clone()),
+                    materialise: Box::new(move || Ok((*r).clone())),
                     resident: None,
                     settle: Box::new(|| Ok(())),
                     release: Box::new(|_| {}),
@@ -1783,7 +1776,7 @@ pub struct Uint32Holder {
     pub count: i64,
     pub resident: Option<Value>,
     input: Option<Arc<Vec<f64>>>,
-    pub materialise: Arc<dyn Fn() -> Vec<i64> + Send + Sync>,
+    pub materialise: Arc<dyn Fn() -> Result<Vec<i64>, Diagnostic> + Send + Sync>,
     pub settle: Arc<dyn Fn() -> Result<(), Diagnostic> + Send + Sync>,
     pub release: Arc<dyn Fn(bool) + Send + Sync>,
     pub pin: Arc<dyn Fn() -> Option<Pin> + Send + Sync>,
@@ -1823,11 +1816,11 @@ fn integer_holder(domain: ThreadId, planes: Gpu::Planes, kept: Option<Rc<Kept>>)
         materialise: Arc::new(move || {
             // not under the lock: a foreign reader waits for the owner, who may be reading too
             if let Some(values) = &*cache.lock().unwrap() {
-                return (**values).clone();
+                return Ok((**values).clone());
             }
-            let values: Vec<i64> = materialise()[0].iter().map(|v| *v as i64).collect();
+            let values: Vec<i64> = materialise()?[0].iter().map(|v| *v as i64).collect();
             *cache.lock().unwrap() = Some(Arc::new(values.clone()));
-            values
+            Ok(values)
         }),
         settle: Arc::from(settle),
         release: Arc::from(release),
@@ -1861,10 +1854,10 @@ pub(crate) fn uint32_view(holder: &Uint32Holder, count: i64) -> Uint32Holder {
     Uint32Holder {
         count, resident, input,
         materialise: Arc::new(move || {
-            if let Some(values) = &*cache.lock().unwrap() { return values.clone(); }
-            let values = if count == 0 { Vec::new() } else { (h1.materialise)()[..count as usize].to_vec() };
+            if let Some(values) = &*cache.lock().unwrap() { return Ok(values.clone()); }
+            let values = if count == 0 { Vec::new() } else { (h1.materialise)()?[..count as usize].to_vec() };
             *cache.lock().unwrap() = Some(values.clone());
-            values
+            Ok(values)
         }),
         settle: holder.settle.clone(),
         // ponytail: shared views retire together; reference-count releases if memory pressure warrants it.
@@ -1989,7 +1982,7 @@ pub fn close(t: &T, discard: bool) {
                 (b_.clone(), *c)
             };
             if !discard {
-                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| materialise(&k)));
+                let _ = materialise(&k);
             }
             {
                 let _g = k.fate.lock.lock().unwrap();

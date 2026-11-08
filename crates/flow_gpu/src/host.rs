@@ -1741,17 +1741,17 @@ impl Scope {
         Ok(())
     }
 
-    fn host_of_planes(&self, holder: &SharedPlanes) -> Value {
-        let planes = (holder.materialise)();
+    fn host_of_planes(&self, holder: &SharedPlanes) -> Result<Value, Diagnostic> {
+        let planes = (holder.materialise)()?;
         let (count, width) = (holder.count as usize, holder.width as usize);
         let data: Vec<f64> = (0..count * width).map(|i| planes[i % width][i / width]).collect();
         let a = Arc::new(data);
-        match width {
+        Ok(match width {
             1 => Value::Float_array(a),
             2 => Value::Vec2_array(a),
             3 => Value::Vec3_array(a),
             _ => Value::Vec4_array(a),
-        }
+        })
     }
 
     fn finish(&self, v: &Value) -> Result<Value, Diagnostic> {
@@ -1766,10 +1766,10 @@ impl Scope {
         let integer = self.s.borrow().integers.iter().find(|(k, _)| *k == p.key).map(|(_, h)| h.clone());
         let float = self.s.borrow().floats.iter().find(|(k, _)| *k == p.key).map(|(_, h)| h.clone());
         if let Some(holder) = integer {
-            return Ok(Value::Int_array(Arc::new((holder.materialise)())));
+            return Ok(Value::Int_array(Arc::new((holder.materialise)()?)));
         }
         if let Some(holder) = float {
-            return Ok(self.host_of_planes(&holder));
+            return self.host_of_planes(&holder);
         }
         let length = self.count_of(&p)?;
         let width = match v {
@@ -2247,7 +2247,8 @@ impl Scope {
                 // the holder's planes carry the values; the buffer view is only valid on the
                 // creating thread (a CPU frame on a worker reads the planes the holder kept)
                 let _ = (id, slot_key);
-                let planes = (h.materialise)();
+                // ponytail: `Device::add`'s reader cannot fail; the holder lives as long as the placeholder, so an Err is a broken invariant. Upgrade: a fallible reader in flow_eval.
+                let planes = (h.materialise)().expect("a state's device array is read while its holder lives");
                 let (c, w) = (count as usize, width as usize);
                 let xs: Vec<f64> = (0..c * w).map(|i| planes[i % w][i / w]).collect();
                 let a = Arc::new(xs);
@@ -2277,7 +2278,7 @@ struct SharedPlanes {
     count: i64,
     width: i64,
     resident: Option<Value>,
-    materialise: Arc<dyn Fn() -> Vec<Vec<f64>> + Send + Sync>,
+    materialise: Arc<dyn Fn() -> Result<Vec<Vec<f64>>, Diagnostic> + Send + Sync>,
     settle: Arc<dyn Fn() -> Result<(), Diagnostic> + Send + Sync>,
     release: Arc<dyn Fn(bool) + Send + Sync>,
     bounds: Arc<dyn Fn() -> Option<Vec<f64>> + Send + Sync>,
@@ -2303,7 +2304,7 @@ fn shared_release_does_not_retain_a_reader() {
     let weak = Arc::downgrade(&reader);
     let holder = Arc::new(SharedPlanes {
         count: 0, width: 1, resident: None,
-        materialise: Arc::new(move || { let _keep = &reader; Vec::new() }),
+        materialise: Arc::new(move || { let _keep = &reader; Ok(Vec::new()) }),
         settle: Arc::new(|| Ok(())), release: Arc::new(|_| {}), bounds: Arc::new(|| None),
     });
     let G::Planes { release, .. } = share_planes(&holder);

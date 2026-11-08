@@ -256,13 +256,13 @@ fn retired_holders_and_discard() {
         let before = run::Private::materialisations(r);
         let later: Vec<_> = (0..8).map(|_| settled(r, values)).collect();
         assert!(run::Private::materialisations(r) > before);
-        assert_eq!(len((oldest.materialise)()), expected);
+        assert_eq!(len((oldest.materialise)().unwrap()), expected);
         for p in later { (p.release)(false); }
         f.working_set.set(None);
         let thaws = run::Private::materialisations(r);
         let live = settled(r, values); run::close(r, true);
         assert_eq!(run::Private::materialisations(r), thaws);
-        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (live.materialise)())).is_err());
+        assert!((live.materialise)().is_err());
         run::close(r, false);
     });
 }
@@ -306,9 +306,9 @@ fn evicted_and_pinned_holders() {
         let retained = kept(&evicted, values); let unread = kept(&evicted, values);
         (retained.release)(true); run::close(&evicted, false);
         assert_eq!(run::Private::materialisations(&evicted), 0);
-        assert_eq!(len((retained.materialise)()), retained.count * retained.width);
+        assert_eq!(len((retained.materialise)().unwrap()), retained.count * retained.width);
         run::close_pool(&pool);
-        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (unread.materialise)())).is_err());
+        assert!((unread.materialise)().is_err());
         let pool = run::pool();
         let pooled = run::create_owned(Some(&pool), device, queue, cache, kernel);
         let (stand_in, (_, _, valid, unpin), release) = pinned(&pooled, values);
@@ -357,9 +357,9 @@ fn bounds_and_foreign_owned_readback() {
         assert_eq!(run::Private::bounds_readback_bytes(&sea), 2 * read);
         // The owner blocks in join: no Run::service/pumping may be necessary.
         let materialise = first.materialise;
-        let materialise = std::thread::spawn(move || { let data = materialise(); assert_eq!(len(data), 1024 * 3); materialise }).join().unwrap();
+        let materialise = std::thread::spawn(move || { let data = materialise().unwrap(); assert_eq!(len(data), 1024 * 3); materialise }).join().unwrap();
         assert_eq!(run::Private::readback_bytes(&sea), 2 * read + 1024 * 3 * 4);
-        materialise(); assert_eq!(run::Private::readback_bytes(&sea), 2 * read + 1024 * 3 * 4);
+        materialise().unwrap(); assert_eq!(run::Private::readback_bytes(&sea), 2 * read + 1024 * 3 * 4);
         assert_eq!(run::Private::bounds_readback_bytes(&sea), 2 * read);
         (first.release)(false); (second.release)(false); run::close(&sea, false);
     });

@@ -129,9 +129,9 @@ fn resident_values() {
         assert!(!Arc::ptr_eq(&kept.materialise, &range.materialise) && !Arc::ptr_eq(&range.materialise, &filled.materialise));
         (resident.close)();
         assert_eq!(host::stats(&h).payload_readback_bytes, before);
-        assert_eq!((kept.materialise)(), (1..=(length - 1).max(0)).collect::<Vec<_>>());
-        assert_eq!((filled.materialise)(), vec![4294967295; length as usize]);
-        assert_eq!((range.materialise)(), (0..length).collect::<Vec<_>>());
+        assert_eq!((kept.materialise)().unwrap(), (1..=(length - 1).max(0)).collect::<Vec<_>>());
+        assert_eq!((filled.materialise)().unwrap(), vec![4294967295; length as usize]);
+        assert_eq!((range.materialise)().unwrap(), (0..length).collect::<Vec<_>>());
     }
     for small_first in [false, true] {
         let before = host::stats(&h).payload_readback_bytes;
@@ -157,16 +157,16 @@ fn resident_values() {
         assert!(b::buffer_id(&sb) == b::buffer_id(&lb) && sn == 17 && ln == 1025);
         su();
         lu();
-        let prefix = (small.materialise)();
+        let prefix = (small.materialise)().unwrap();
         assert_eq!(prefix, (0..17).collect::<Vec<_>>());
         (small.release)(false);
         let copied = (resident.compact)(&large_value).unwrap().expect("compact");
         assert_eq!((resident.count)(&copied).unwrap(), Some(1024));
         let copied = (scope.retain_uint32)(&copied).unwrap();
         (resident.close)();
-        assert_eq!((large.materialise)(), (0..1025).collect::<Vec<_>>());
+        assert_eq!((large.materialise)().unwrap(), (0..1025).collect::<Vec<_>>());
         assert_eq!(host::stats(&h).payload_readback_bytes - before, 1025 * 4);
-        assert_eq!((copied.materialise)(), (1..=1024).collect::<Vec<_>>());
+        assert_eq!((copied.materialise)().unwrap(), (1..=1024).collect::<Vec<_>>());
     }
     host::close(&h);
 }
@@ -224,13 +224,13 @@ fn kinds_of_values() {
                     }
                     Value::Int_array(_) => {
                         let holder = (scope.retain_uint32)(v).expect("uint32 holder");
-                        Box::new(move || Value::Int_array(Arc::new((holder.materialise)())))
+                        Box::new(move || Value::Int_array(Arc::new((holder.materialise)().unwrap())))
                     }
                     Value::Float_array(_) | Value::Vec2_array(_) | Value::Vec3_array(_) | Value::Vec4_array(_) => {
                         let holder = (scope.retain_float)(v).expect("float holder");
                         let v = v.clone();
                         Box::new(move || {
-                            let planes = (holder.materialise)();
+                            let planes = (holder.materialise)().unwrap();
                             let (c, w) = (holder.count as usize, holder.width as usize);
                             let values = Arc::new((0..c * w).map(|i| planes[i % w][i / w]).collect::<Vec<_>>());
                             match v {
@@ -288,7 +288,7 @@ fn holders() {
     tp::ok((second.settle)());
     assert_eq!(run::Private::readback_bytes(&r), 0);
     for _ in 0..2 {
-        assert_eq!((first.materialise)(), expected);
+        assert_eq!((first.materialise)().unwrap(), expected);
     }
     assert_eq!(run::Private::readback_bytes(&r), 1025 * 4);
     assert_eq!(run::Private::materialisations(&r), 1);
@@ -302,23 +302,23 @@ fn holders() {
     tp::ok((freed.settle)());
     (freed.release)(false);
     assert!((freed.pin)().is_none());
-    let read = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (freed.materialise)()));
+    let read = (freed.materialise)();
     assert!(read.is_err(), "freed uint32 holder read");
     (second.release)(true);
     run::close(&r, false);
     // First read from four worker threads while the owner blocks in join.
-    let workers: Vec<_> = (0..4).map(|_| { let s = second.clone(); std::thread::spawn(move || (s.materialise)()) }).collect();
+    let workers: Vec<_> = (0..4).map(|_| { let s = second.clone(); std::thread::spawn(move || (s.materialise)().unwrap()) }).collect();
     for w in workers {
         assert_eq!(w.join().unwrap(), expected);
     }
-    assert_eq!((second.materialise)(), expected);
+    assert_eq!((second.materialise)().unwrap(), expected);
     assert_eq!(run::Private::readback_bytes(&r), 2 * 1025 * 4);
     // an invalid word is never published
     let bad = program("(int/add -1 (int/mod (frame/index) 1))");
     let r = run::create(None, &lease, &pipes, &u32_kernel(&bad));
     let o = tp::ok(run::dispatch(&r, &run::Options { wait: Some(false), ..Default::default() }, None, None, &prepare(&bad, 0.0)));
     let holder = tp::ok(run::keep_uint32(&o, None));
-    let read = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (holder.materialise)()));
+    let read = (holder.materialise)();
     assert!(read.is_err(), "invalid uint32 holder published");
     assert_eq!(run::Private::readback_bytes(&r), 0);
     run::close(&r, true);

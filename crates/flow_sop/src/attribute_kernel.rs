@@ -1046,7 +1046,7 @@ pub fn install_deferred(owner: Owner, kind: &str, name: &str, planes: &Arc<Gpu::
                     let p = planes.clone();
                     Arc::new(move || (p.bounds)())
                 };
-                let positions = Float3::deferred(holder, Some(release), Some(bounds), planes.count, Arc::new(move || Ok(materialise())))
+                let positions = Float3::deferred(holder, Some(release), Some(bounds), planes.count, Arc::new(move || materialise().map_err(crate::topology_kernel_impl::rdk_error)))
                     .map_err(|e| attr_err(rerr(&e)))?;
                 geometry::with_positions(positions, g).map_err(|e| attr_err(rerr(&e)))
             }
@@ -1061,7 +1061,8 @@ pub fn install_deferred(owner: Owner, kind: &str, name: &str, planes: &Arc<Gpu::
             owner,
             &like,
             planes.count,
-            Arc::new(move || make_storage(&kind, Planes::Owned(materialise())).expect("deferred storage")),
+            // ponytail: `create_deferred`'s reader cannot fail and the holder outlives the attribute, so an Err is a broken invariant. Upgrade: a fallible reader in rdk_core.
+            Arc::new(move || make_storage(&kind, Planes::Owned(materialise().expect("deferred planes"))).expect("deferred storage")),
         )
         .map_err(|e| attr_err(rerr(&e)))?;
         geometry::with_attribute(attr, g).map_err(|e| attr_err(rerr(&e)))
@@ -2333,7 +2334,7 @@ impl Kernel {
                         install_deferred(owner, k, n, planes, g)
                     } else {
                         let _ = (planes.settle)();
-                        let data = (planes.materialise)();
+                        let data = (planes.materialise)()?;
                         let values = match (k, data.len()) {
                             ("int", 1) => Value::Int_array(Arc::new(data[0].iter().map(|x| *x as i64).collect())),
                             (_, 1) => float_array(data.into_iter().next().unwrap()),

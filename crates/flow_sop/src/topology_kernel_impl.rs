@@ -20,6 +20,10 @@ fn diag(code: &str, message: &str) -> Diagnostic {
 fn fail<R>(code: &str, message: &str) -> Result<R, Diagnostic> {
     Err(diag(code, message))
 }
+/// A device-read failure as the error a deferred rdk holder reports.
+pub(crate) fn rdk_error(d: Diagnostic) -> error::T {
+    error::make("gpu.materialise".to_owned(), d.code, d.message, None).unwrap_or_else(|e| e)
+}
 fn rdk_message(e: &error::T) -> String {
     error::message(e).to_owned()
 }
@@ -589,7 +593,7 @@ fn positions_of(planes: Arc<Planes>, count: i64) -> Result<(Float3::T, Option<Ar
     };
     let materialise: Float3::Materialise = {
         let planes = planes.clone();
-        Arc::new(move || Ok((planes.materialise)()))
+        Arc::new(move || (planes.materialise)().map_err(rdk_error))
     };
     let positions = Float3::deferred(dyn_holder, Some(release), Some(bounds), count, materialise)
         .map_err(|e| diag("E_TOPOLOGY", &rdk_message(&e)))?;
@@ -754,8 +758,8 @@ pub fn mesh_resident(static_key: Option<&Value>, scope: &Residency, args: &Args)
         let materialise = {
             let holder = holder.clone();
             Arc::new(move || {
-                let kinds: Vec<topology::PrimitiveKind> = (holder.kinds.materialise)().iter().map(|k| kind_of(*k)).collect();
-                topology::create_owned(point_count, (holder.vertices.materialise)(), (holder.offsets.materialise)(), kinds)
+                let kinds: Vec<topology::PrimitiveKind> = (holder.kinds.materialise)().map_err(rdk_error)?.iter().map(|k| kind_of(*k)).collect();
+                topology::create_owned(point_count, (holder.vertices.materialise)().map_err(rdk_error)?, (holder.offsets.materialise)().map_err(rdk_error)?, kinds)
             })
         };
         let topology = topology::deferred(None, Some(holder.clone() as Arc<dyn Deferred::Holder>), Some(release), point_count, vertex_count, primitive_count, materialise)

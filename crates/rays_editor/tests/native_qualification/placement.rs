@@ -105,7 +105,7 @@ fn calibration() {
         assert_eq!(held_done.payload_readback_bytes,before_held.payload_readback_bytes);
         assert_eq!(cost(&mixed,Some(&held_inputs)),held_cost);
         assert_eq!(stats(),held_done);
-        assert_eq!((kept.materialise)()[0][32767],32767.);
+        assert_eq!((kept.materialise)().unwrap()[0][32767],32767.);
         (kept.release)(false);
         let recovered_kernel = compile("(if (> t 0.) (* (* (+ i 1.) 1e20) 1e20) 0.)");
         assert_eq!(cost(&recovered_kernel,Some(&inputs(&recovered_kernel,true,1.))),None);

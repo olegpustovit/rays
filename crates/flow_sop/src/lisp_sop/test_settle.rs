@@ -41,7 +41,7 @@ fn backend(c: &Arc<Counters>) -> Arc<Gpu::Backend> {
                     Ok(Gpu::Planes {
                         count,
                         width,
-                        materialise: Box::new(move || (0..width).map(|_| vec![42.0; count as usize]).collect()),
+                        materialise: Box::new(move || Ok((0..width).map(|_| vec![42.0; count as usize]).collect())),
                         resident: None,
                         settle: Box::new(move || {
                             c1.settles.fetch_add(1, Ordering::SeqCst);
