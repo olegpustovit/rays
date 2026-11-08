@@ -762,12 +762,12 @@ fn run_inner(params: &Params, geometry_value: &geometry::T) -> Result<geometry::
         return Err(fail(format!("{OPERATION}: grain must be positive")));
     }
     if let Some(name) = &params.source_point_attribute {
-        if name.trim().is_empty() || name == "P" {
+        if support::ocaml_trim_is_empty(name) || name == "P" {
             return Err(fail(format!("{OPERATION}: source point attribute name must be non-empty and not P")));
         }
     }
     if let Some(name) = &params.hull_group {
-        if name.trim().is_empty() {
+        if support::ocaml_trim_is_empty(name) {
             return Err(fail(format!("{OPERATION}: hull group name must be non-empty")));
         }
     }

@@ -10,6 +10,7 @@ use param::{Effects, FieldView, Value};
 
 use crate::context::dependencies;
 use crate::node::{self, build, ocaml_quote, Facts};
+use crate::support;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InputRequirement {
@@ -574,7 +575,9 @@ fn slot_names(arity: usize, names: Option<&[String]>) -> Vec<String> {
         Some(names) => {
             let distinct: BTreeSet<&String> = names.iter().collect();
             assert!(
-                names.len() == arity && names.iter().all(|n| !n.trim().is_empty()) && distinct.len() == arity,
+                names.len() == arity
+                    && names.iter().all(|n| !support::ocaml_trim(n).is_empty())
+                    && distinct.len() == arity,
                 "Edit_graph factory slots must have one distinct name per input"
             );
             names.to_vec()
@@ -641,11 +644,11 @@ pub fn factory_args(key: &str, label: &str, category: &[&str]) -> FactoryArgs {
 fn make_factory(what: &str, args: FactoryArgs, requirements: Vec<InputRequirement>, build: BuildFn) -> Factory {
     let operation = args.operation.unwrap_or_else(|| args.key.clone());
     assert!(
-        !args.key.trim().is_empty()
-            && !operation.trim().is_empty()
-            && !args.label.trim().is_empty()
+        !support::ocaml_trim(&args.key).is_empty()
+            && !support::ocaml_trim(&operation).is_empty()
+            && !support::ocaml_trim(&args.label).is_empty()
             && !args.category.is_empty()
-            && !args.category.iter().any(|item| item.trim().is_empty()),
+            && !args.category.iter().any(|item| support::ocaml_trim(item).is_empty()),
         "Edit_graph.{what} names must not be blank"
     );
     let arity = requirements.len();

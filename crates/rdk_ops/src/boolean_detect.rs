@@ -292,7 +292,9 @@ fn run(params: &Params, collision: &geometry::T, geometry_value: &geometry::T) -
     let names: Vec<&str> =
         [intersections_attribute, count_attribute, self_intersections, self_count].into_iter().flatten().collect();
     let groups: Vec<&str> = [intersecting_group, self_group].into_iter().flatten().collect();
-    if names.iter().any(|name| name.trim().is_empty()) || groups.iter().any(|name| name.trim().is_empty()) {
+    if names.iter().any(|name| support::ocaml_trim_is_empty(name))
+        || groups.iter().any(|name| support::ocaml_trim_is_empty(name))
+    {
         return Err(invalid("output names must not be empty"));
     }
     if duplicate_name(&names) {

@@ -713,7 +713,7 @@ fn project(
             })
         }
         Projection::PointAttribute(name) => {
-            if name.trim().is_empty() {
+            if support::ocaml_trim_is_empty(name) {
                 return Err(invalid("point position attribute name is empty"));
             }
             let Some(item) = geometry::find_attribute(attribute::Owner::Point, name, geometry_value) else {
@@ -1434,7 +1434,7 @@ fn exact_points(x: &[f64], y: &[f64], arrangement: Option<&planar_constraints::T
 
 fn blank(name: &Option<String>, message: &str) -> Result<(), error::T> {
     match name {
-        Some(name) if name.trim().is_empty() => Err(invalid(message)),
+        Some(name) if support::ocaml_trim_is_empty(name) => Err(invalid(message)),
         _ => Ok(()),
     }
 }

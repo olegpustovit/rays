@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use rdk_core::{
-    attribute, cancel, edge_group, error, geometry, packed, topology, topology_index,
+    attribute, cancel, edge_group, error, geometry, packed, support, topology, topology_index,
 };
 use rdk_geom::point_clusters::Clusters;
 
@@ -131,7 +131,7 @@ pub fn raw(
     }
     let connectivity = match connectivity_attribute {
         None => Connectivity::Always,
-        Some(name) if name.trim().is_empty() => {
+        Some(name) if support::ocaml_trim_is_empty(name) => {
             return Err(fail(
                 "Rdk.Edge_collapse.edge_collapse: connectivity attribute name must not be empty",
             ));

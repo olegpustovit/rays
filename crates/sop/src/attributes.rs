@@ -853,10 +853,10 @@ pub mod attribute_mirror {
         support::validate_parameter_pattern("sop/attribute_mirror: attributes", &p.attributes)?;
         match p.method_ {
             MirrorMethod::Mapping => {
-                if p.mapping_attribute.trim().is_empty() {
+                if support::ocaml_trim(&p.mapping_attribute).is_empty() {
                     return Err("sop/attribute_mirror: empty mapping attribute".to_owned());
                 }
-                if p.mapping_destination_group.trim().is_empty() {
+                if support::ocaml_trim(&p.mapping_destination_group).is_empty() {
                     return Err("sop/attribute_mirror: empty mapping destination group".to_owned());
                 }
                 if matches!(p.transform, MirrorTransform::Vector | MirrorTransform::Point) {
@@ -1115,11 +1115,11 @@ pub mod attribute_transfer_all {
         let p = from_values(values);
         let refuse = |message: &str| Err(format!("sop/attribute_transfer_all: {message}"));
         let patterns = [&p.point_pattern, &p.vertex_pattern, &p.primitive_pattern, &p.detail_pattern];
-        if patterns.iter().all(|text| text.trim().is_empty()) {
+        if patterns.iter().all(|text| support::ocaml_trim(text).is_empty()) {
             return refuse("at least one owner pattern is required");
         }
         for text in patterns {
-            if !text.trim().is_empty() {
+            if !support::ocaml_trim(text).is_empty() {
                 support::validate_parameter_pattern("sop/attribute_transfer_all", text)?;
             }
         }
@@ -1408,7 +1408,7 @@ pub mod attribute_transfer_surface {
             return refuse("distance window exceeds the squared-distance range");
         }
         for pattern in [&p.source_group_pattern, &p.source_vertex_group_pattern, &p.target_group_pattern] {
-            if !pattern.trim().is_empty() {
+            if !support::ocaml_trim(pattern).is_empty() {
                 support::validate_parameter_pattern("attribute_transfer_surface", pattern)?;
             }
         }
@@ -1737,7 +1737,7 @@ pub mod attribute_transfer {
         if p.use_names {
             let names = decode_names(&p.names)?;
             for name in &names {
-                if name.trim().is_empty() {
+                if support::ocaml_trim(name).is_empty() {
                     return refuse("empty attribute name");
                 }
                 if p.owner == attribute::Owner::Point && name == "P" {

@@ -116,7 +116,7 @@ fn compile_attribute_rules(rules: &[AttributeRule]) -> Result<Vec<CompiledAttrib
         }
         if weighted {
             if let Some(name) = &rule.weight_attribute {
-                if name.trim().is_empty() {
+                if support::ocaml_trim_is_empty(name) {
                     return Err(fail(format!(
                         "attribute rule {:?} has an empty weight attribute",
                         rule.pattern

@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use rdk_core::{
-    attribute, cancel, edge_group, error, geometry, group, packed, ragged_ops, topology, topology_index,
+    attribute, cancel, edge_group, error, geometry, group, packed, ragged_ops, support, topology, topology_index,
 };
 
 const OPERATION: &str = "merge";
@@ -377,7 +377,7 @@ fn merge(
         None => merge_plain(cancel_value, grain, geometries),
         Some(name)
             if !geometries.is_empty()
-                && !name.trim().is_empty()
+                && !support::ocaml_trim_is_empty(name)
                 && geometries.iter().all(|item| geometry::find_attribute(owner, name, item).is_none()) =>
         {
             let merged = merge_plain(cancel_value, grain, geometries)?;
@@ -409,7 +409,7 @@ pub fn run(params: &RunParams, geometries: &[geometry::T]) -> Result<geometry::T
 /// `run` with the provenance attribute and `source_base = tag_base`.
 pub fn run_tagged(params: &RunTaggedParams, geometries: &[geometry::T]) -> Result<geometry::T, error::T> {
     let authored = match &params.source_attribute {
-        Some(name) if !name.trim().is_empty() => Some(name.trim().to_owned()),
+        Some(name) if !support::ocaml_trim_is_empty(name) => Some(support::ocaml_trim(name).to_owned()),
         _ => None,
     };
     let call = |source_attribute: Option<String>, source_base: i64| {

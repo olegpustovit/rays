@@ -10,7 +10,7 @@ use crate::support;
 
 fn resolved_label(operation: &str, label: Option<&str>) -> String {
     match label {
-        Some(label) if !label.trim().is_empty() => label.to_owned(),
+        Some(label) if !support::ocaml_trim(label).is_empty() => label.to_owned(),
         _ => operation.to_owned(),
     }
 }
@@ -82,7 +82,7 @@ fn build_node(operation: &str, schema: &Arc<Schema>, operator: &Operator, label:
 
 /// A parameterized custom node built by `operator`; edits rebuild it through the same operator.
 pub fn node(label: Option<&str>, operation: &str, schema: Arc<Schema>, values: Vec<Value>, inputs: Vec<node::T>, operator: Operator) -> Result<node::T, String> {
-    assert!(!operation.trim().is_empty(), "Custom.node: operation must not be blank");
+    assert!(!support::ocaml_trim(operation).is_empty(), "Custom.node: operation must not be blank");
     build_node(operation, &schema, &operator, &resolved_label(operation, label), &inputs, &values)
 }
 

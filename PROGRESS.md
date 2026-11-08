@@ -10,7 +10,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 
 | Wave | Done | Active | Pending |
 |------|------|--------|---------|
-| A | 6/8 | A2, A6, A7 | — |
+| A | 7/8 | A2, A6 | — |
 | B | 0/6 | B0 | 4 |
 | M | 0/21 | — | 21 |
 | I | 0/1 | — | 1 |
@@ -27,7 +27,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | A4 | done | `a60fcced` — `md5_hex` in `rays_math::hash`; 5 duplicate modules removed |
 | A5 | active | `ec5c1b1b` — `region_snapshot` test-only; **this session** — dead `window_to_values`, `live_delay()`; `Editor::Private` behind `test-hooks` feature (+ `required-features` on GPU/window tests); pxui_graph accessors still open |
 | A6 | active | `09ce8574` — unused deps on rays_bin / UI (pxui still has `ocaml_int` until I) |
-| A7 | active | triangle/filename/sop trim + `rdk_core::support::ocaml_trim_is_empty`; `kit::ocaml_trim` unchanged (UI boundary) |
+| A7 | done | `992093ce` triangle → `point_grid`; `626a1f70` Filename.concat; `f980cbf9`/`8093ff64` ocaml trim; **this session** `rdk_core::ocaml_trim`, rdk_ops/sop blank-name sweep |
 | A8 | done | op/term_arena/param/renderer trims; `Native::runtime_of` kept (in use) |
 | B0 | active | Warm incremental OK; staleness = clean / non-dev profile / RUSTFLAGS (AGENTS.md) |
 | B4 | done | W1 `flow_ir` touch → `rays_bin` check in `tools/buildtime` (env overrides) |
@@ -65,3 +65,4 @@ Cursor `Task` subagents unavailable in this harness; workers are `omp launch -p`
 - 2026-11-08: A5 `test-hooks` gates `Editor::Private`; B0 warm incremental smoke on `flow_check`.
 - 2026-11-08: `f980cbf9` A7 ocaml_trim; `cargo t -p sop` 52 pass (~20s).
 - 2026-11-08: A7 `rdk_core` trim helper; B4 buildtime W1 editor chain; `cargo check -p buildtime`.
+- 2026-11-08: A7 surface_index → `point_triangle_barycentric_into`; `rdk_core::ocaml_trim`; rdk_ops + sop OCaml blank-name checks; `cargo t -p rdk_geom surface` 9 pass (~7s).

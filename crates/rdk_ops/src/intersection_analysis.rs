@@ -472,7 +472,7 @@ fn create_output(params: &Params, data: Provenance) -> Result<geometry::T, error
 fn validate_name(name: &Option<String>) -> bool {
     match name {
         None => true,
-        Some(name) => !name.trim().is_empty(),
+        Some(name) => !support::ocaml_trim_is_empty(name),
     }
 }
 

@@ -16,7 +16,7 @@ pub fn ocaml_trim(text: &str) -> &str {
     text.trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\r' | '\x0c'))
 }
 
-pub fn labels(table: &[&str]) -> Vec<String> {
+fn labels(table: &[&str]) -> Vec<String> {
     table.iter().map(|label| (*label).to_owned()).collect()
 }
 
@@ -69,7 +69,7 @@ pub fn structured_rdk_error(error: &rdk::error::T) -> Diagnostic {
     )
 }
 
-pub fn missing_group(message: String) -> Diagnostic {
+fn missing_group(message: String) -> Diagnostic {
     diagnostic("missing_group", &message)
 }
 
@@ -142,103 +142,10 @@ pub fn int_of_string_opt(text: &str) -> Option<i64> {
 // ---------------------------------------------------------------- plain enums
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum GroupInvertOwner {
-    Any,
-    Owner(group_ops::Owner),
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ReverseOperation {
-    Reverse,
-    Shift,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SortKey {
-    X,
-    Y,
-    Z,
-    Distance,
-    Vector,
-    Attribute,
-    VertexOrder,
-    PrimitiveIndex,
-    Spatial,
-    Random,
-    IndexAttribute,
-    Reverse,
-    Shift,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum GroupBoundsShape {
-    Box,
-    Sphere,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum UvProjection {
-    Planar,
-    Cylindrical,
-    Spherical,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AxisOrientation {
-    X,
-    Y,
-    Z,
-    Custom,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CleanOverlap {
     KeepFirst,
     DeletePairs,
     Auto,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RemapRange {
-    Automatic,
-    Explicit,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ConnectivityOutput {
-    Integer,
-    Text,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum EnumerateStorage {
-    Integer,
-    Text,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SmoothingMode {
-    Laplacian,
-    Custom,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PolyframeStyle {
-    FirstEdge,
-    TwoEdges,
-    Centroid,
-    TextureUv,
-    TextureUvGradient,
-    AttributeGradient,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum GroupRangeMode {
-    StartEnd,
-    FromEnds,
-    StartLength,
-    Partition,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum GroupRangeConnectivity {
-    NoConnectivity,
-    Disconnected,
-    Connected,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CentroidRunMode {
-    Detail,
-    Primitives,
-    PointPieces,
-    PrimitivePieces,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ElementGroup {
@@ -246,11 +153,6 @@ pub enum ElementGroup {
     Vertex(String),
     Primitive(String),
     Edge(String),
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TargetJustifyMode {
-    Explicit,
-    Auto,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MirrorMethod {
@@ -263,67 +165,6 @@ pub enum MirrorTransform {
     Uv,
     Vector,
     Point,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum VelocityInitialization {
-    Compute,
-    Keep,
-    Set,
-    FromAttribute,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SpiralExtentMode {
-    TurnsHeight,
-    HeightPitch,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SpiralRadiusMode {
-    ArchimedeanChange,
-    ArchimedeanEnd,
-    LogarithmicChange,
-    LogarithmicEnd,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SpiralDivisionsMode {
-    PerCurve,
-    PerTurn,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CircleArc {
-    Closed,
-    Open,
-    Chord,
-    Sliced,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PlaneOrientation {
-    Xy,
-    Xz,
-    Yz,
-    Axes,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BlastAttributeMode {
-    Below,
-    Range,
-    Width,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BlastAttributeOutput {
-    Delete,
-    Group,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ExtractPointCut {
-    Constant,
-    PrimitiveAttribute,
-    CurrentTime,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PointGenerationMode {
-    Total,
-    PerPoint,
-    Probability,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PolyCutDetection {
@@ -341,12 +182,6 @@ pub enum SoftTransformMetric {
     Radius,
     Edge,
     Attribute,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CopyMatch {
-    Cyclic,
-    ByValues,
-    ToElement,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RayDirection {
@@ -389,47 +224,6 @@ pub enum Triangulate2dProjection {
     Plane,
     Attribute,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TransformMode {
-    Trs,
-    Matrix,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum NoiseLocation {
-    Position,
-    ElementNumber,
-    Attribute,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum NoiseRange {
-    Positive,
-    ZeroCentered,
-    MinMax,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RandomDistribution {
-    Constant,
-    TwoValues,
-    Uniform,
-    UniformDiscrete,
-    Normal,
-    Exponential,
-    LogNormal,
-    Cauchy,
-    Direction,
-    InsideSphere,
-    InsideSphereCone,
-    CustomRamp,
-    CustomDiscrete,
-    CustomDiscreteText,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum InterpolateDriver {
-    PrimitiveUvw,
-    PointWeights,
-    VertexWeights,
-    PrimitiveWeights,
-}
 
 // ---------------------------------------------------------------- choice tables
 
@@ -448,32 +242,6 @@ pub fn kernel_mode_of_value(value: &Value) -> KernelMode {
 }
 pub fn kernel_mode_value(mode: KernelMode) -> Value {
     choice_value(&KERNEL_MODE_LABELS, mode as usize)
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum NumericKind {
-    Scalar,
-    Vec2,
-    Vec3,
-    Vec4,
-}
-pub const NUMERIC_KIND_LABELS: [&str; 4] = ["Scalar", "Vector 2", "Vector 3", "Vector 4"];
-pub const NUMERIC_KIND: [NumericKind; 4] = [NumericKind::Scalar, NumericKind::Vec2, NumericKind::Vec3, NumericKind::Vec4];
-pub fn numeric_kind_of_value(value: &Value) -> NumericKind {
-    NUMERIC_KIND[choice_index(&NUMERIC_KIND_LABELS, value)]
-}
-pub fn numeric_kind_value(kind: NumericKind) -> Value {
-    choice_value(&NUMERIC_KIND_LABELS, kind as usize)
-}
-
-pub fn numeric_value(kind: NumericKind, x: f64, y: f64, z: f64, w: f64) -> rdk::attribute_generate::NumericValue {
-    use rdk::attribute_generate::NumericValue;
-    match kind {
-        NumericKind::Scalar => NumericValue::Scalar(x),
-        NumericKind::Vec2 => NumericValue::Vec2(rays_math::vec2::create(x, y)),
-        NumericKind::Vec3 => NumericValue::Vec3(rays_math::vec3::create(x, y, z)),
-        NumericKind::Vec4 => NumericValue::Vec4(x, y, z, w),
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -757,10 +525,10 @@ pub fn decode_fuse_group_rules(name: &str, text: &[u8]) -> Result<Vec<rdk::fuse_
 
 pub fn decode_curve_join_picks(text: &str) -> Result<Option<Vec<rdk::curve_join::CurveJoinPick>>, String> {
     use rdk::curve_join::{CurveJoinEnd, CurveJoinPick};
-    if text.trim().is_empty() {
+    if ocaml_trim(text).is_empty() {
         return Ok(None);
     }
-    if text.trim() == "[]" {
+    if ocaml_trim(text) == "[]" {
         return Ok(Some(Vec::new()));
     }
     let mut seen = std::collections::HashSet::new();
@@ -796,7 +564,7 @@ pub fn decode_surface_attributes(text: &[u8]) -> Result<Vec<rdk::attribute_trans
                     .map_err(|m| format!("sop/attribute_transfer_surface: {m}"))?;
                 if source_owner == attribute::Owner::Detail {
                     Err("sop/attribute_transfer_surface: detail source is not spatial".to_owned())
-                } else if source_name.trim().is_empty() || target_name.trim().is_empty() {
+                } else if ocaml_trim(source_name).is_empty() || ocaml_trim(target_name).is_empty() {
                     Err("sop/attribute_transfer_surface: attribute names must be nonblank".to_owned())
                 } else if source_owner == attribute::Owner::Point && source_name == "P" {
                     Err("sop/attribute_transfer_surface: source P is not an ordinary attribute".to_owned())

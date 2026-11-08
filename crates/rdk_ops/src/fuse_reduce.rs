@@ -271,7 +271,7 @@ fn reduce(
                     "Rdk.Fuse_reduce.fuse: weighted position reduction requires a weight attribute".to_owned(),
                 ));
             }
-            Some(name) if name.trim().is_empty() => {
+            Some(name) if support::ocaml_trim_is_empty(name) => {
                 return Err(fail(
                     "Rdk.Fuse_reduce.fuse: position weight attribute name must not be empty".to_owned(),
                 ));

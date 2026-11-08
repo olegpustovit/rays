@@ -19,9 +19,9 @@ pub fn recode(failure: &error::T, operation: &str, code: &str, cancelled: &str) 
     }
 }
 
-/// OCaml `String.trim s = ""`: only space, tab, newline, carriage return and form feed are blank.
+/// OCaml `String.trim s = ""`.
 pub fn is_blank(text: &str) -> bool {
-    text.as_bytes().iter().all(|byte| matches!(*byte, b' ' | b'\t' | b'\n' | b'\r' | 0x0c))
+    support::ocaml_trim_is_empty(text)
 }
 
 /// OCaml `Printf "%S"`: a double-quoted string with `String.escaped` escapes.
