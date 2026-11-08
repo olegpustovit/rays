@@ -1,0 +1,3 @@
+Rays dev AGENTS.md ponytail. M6 OR M7 OR M8 — pick smallest in renderer/GPU editor scratch reuse per plan (docs/history/port-simplification index.html memory table).
+
+One commit "M6:"/"M7:"/"M8:". cargo check affected crate. PROGRESS row only. No artifact.

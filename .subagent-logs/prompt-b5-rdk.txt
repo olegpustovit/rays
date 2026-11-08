@@ -1,0 +1,5 @@
+Rays /Users/snowbear/WORK/GIT/rays dev. AGENTS.md ponytail. B5 finish ONE rdk re-export delete.
+
+Grep `pub use rdk` or `rdk::` re-exports in flow_sop, flow_gpu, flow_native, rays_editor, sop. Remove one crate's obsolete rdk re-export layer if callers already use rdk_* directly. One commit "B5:". cargo check touched crates. Update PROGRESS B5. No artifact.
+
+Return: commit or blocker.

@@ -1,0 +1,7 @@
+Rays /Users/snowbear/WORK/GIT/rays dev. AGENTS.md ponytail. Wave M9 ONE slice.
+
+Plan: editor_core panels.rs at/leaves/walk — avoid clone in hot path OR dedupe walk if trivial.
+
+Smallest correct diff. cargo check -p editor_core; cargo t -p editor_core with narrow filter if exists. Commit "M9:". Update PROGRESS M9 only. No artifact.
+
+Return: commit, what changed in one line.
