@@ -136,6 +136,9 @@ Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s
 
 ## Session log
 
+- 2026-11-08: `0413a083`: native_orrery_frames plays 12 animated frames instead of 30, with every assertion kept (animation, no re-lowering during playback, 30 idle frames with no recompiles/re-prepares/new kernels/pipelines); 3.18 s. All five former native timeouts now pass.
+  - **Follow-up (design, outside the plan):** value-dependent Lisp lowering costs ~210 ms per animated frame in debug for time-driven nodes (orrery ~5 fps in a debug editor). The same cost drives sopcat_perturbation (47 s, RAYS_SLOW) and the thin sopcat margins (~4.5 s). The fix is to lower driven bodies once and bind parameter values at cook time, or to cache `qualify_workspace` on everything except values (`flow_sop/src/lower.rs` `build_call`, `make_lowerer` -> `qualify_workspace`).
+
 - 2026-11-08: native qualification at `3ca50482`, `RAYS_T_TIMEOUT=3600 cargo t -p rays_editor --features test-hooks --test gpu_editor`: 321 of 325 ok, 221.7 s, no assertion failures. Pass start: 285 of 322 with 37 failures.
   - Five timeouts remained. A prelude pass fixed four:
     - `d15bfd6a`: std-only Fx-style hasher on internal arena maps.
