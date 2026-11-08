@@ -17,6 +17,6 @@ mod scene2_argument_body;
 
 fn main() {
     let groups: &[&[(&str, fn())]] = &[gpu_scene3_instances::CASES, gpu_scene2_argument::CASES, gpu_scene2_coordinates::CASES, gpu_shapes_lowering::CASES, gpu_ui_pipeline::CASES, ];
-    let cases: Vec<(&str, fn())> = groups.concat().into_iter().filter(|c| true).collect();
+    let cases: Vec<(&str, fn())> = groups.concat().into_iter().filter(|_c| true).collect();
     common::window::run(&cases);
 }

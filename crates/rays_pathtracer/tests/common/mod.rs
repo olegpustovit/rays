@@ -7,7 +7,7 @@ pub mod window;
 use ogpu::error::{self, ErrorKind};
 
 thread_local! {
-    static KEEP: std::cell::RefCell<Option<::renderer::renderer::gpu>> = const { std::cell::RefCell::new(None) };
+    static KEEP: std::cell::RefCell<Option<::renderer::renderer::Gpu>> = const { std::cell::RefCell::new(None) };
 }
 
 pub fn release_keepalive() {
@@ -18,7 +18,7 @@ pub fn release_keepalive() {
 }
 
 /// The shared lease `gpu()` took.
-pub fn lease() -> ::renderer::renderer::gpu {
+pub fn lease() -> ::renderer::renderer::Gpu {
     KEEP.with(|k| k.borrow().clone()).expect("gpu() first")
 }
 

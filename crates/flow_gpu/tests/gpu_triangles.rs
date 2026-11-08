@@ -31,7 +31,7 @@ fn words(values: &[i64]) -> Vec<u8> {
     values.iter().flat_map(|v| (*v as i32).to_le_bytes()).collect()
 }
 
-fn run_case(lease: &renderer::renderer::gpu, pipes: &pipelines::T, host_: Option<&host::T>, c: Case, shape: &Shape) {
+fn run_case(lease: &renderer::renderer::Gpu, pipes: &pipelines::T, host_: Option<&host::T>, c: Case, shape: &Shape) {
     let copies = c.copies;
     let corners = shape.len();
     let mut offsets = vec![0usize; copies + 1];

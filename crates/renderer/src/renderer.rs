@@ -1,12 +1,13 @@
 //! Isolated native frame coordinator. The public values deliberately contain no SDL or native handles.
-use crate::renderer_leases::{self, policy as lease_policy};
+use crate::renderer_leases::{self, Policy as lease_policy};
 use crate::renderer_lowering::{self, ui_sampler, ui_white_texture};
 use crate::renderer_pipeline;
-use crate::renderer_retained_plans::{self, plan, resource as retained_resource, segment};
-use crate::scene_execution::{self, bytes, geometry_draw, new_bytes, prepared_scene3, sampled_draw, sampled_texture, texture_level};
+use crate::renderer_retained_plans::{self, Plan, Resource as retained_resource, Segment};
+use crate::scene_execution::{self, bytes, GeometryDraw, new_bytes, PreparedScene3, SampledDraw, SampledTexture, TextureLevel};
 use crate::side_lru::{self, Item, TableKey};
 use ogpu::backend::{self, Buffer, Device, Queue, Texture};
 use ogpu::error::{self as oerror, Error, ErrorKind};
+use ogpu::pipeline::Blend;
 use ogpu::types::{AddressMode, BufferDescriptor, BufferUsage, MipFilter, SamplerDescriptor, SamplerFilter};
 use runtime::{frame_facts, presentation_facts};
 use runtime_resources::{Assets, Canvas, Image, Text};
@@ -18,13 +19,10 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
-pub use crate::renderer_retained_plans::resource;
-pub use crate::scene_execution as Scene_execution;
-pub use crate::scene_execution::pipeline_family as family;
-pub use crate::scene_execution::draw;
+pub use crate::renderer_retained_plans::Resource;
+pub use crate::scene_execution::PipelineFamily;
+pub use crate::scene_execution::Draw;
 
-
-pub type error = Error;
 
 pub fn pp_error(formatter: &mut dyn std::fmt::Write, value: &Error) {
     let _ = formatter.write_str(&oerror::to_string(value));
@@ -39,7 +37,7 @@ fn resource_error_value(operation: &str, value: &Error) -> Error {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct configuration {
+pub struct Configuration {
     pub logical_width: i64,
     pub logical_height: i64,
     pub drawable_width: i64,
@@ -50,8 +48,8 @@ pub struct configuration {
     pub high_density: bool,
 }
 
-pub fn default_configuration() -> configuration {
-    configuration {
+pub fn default_configuration() -> Configuration {
+    Configuration {
         logical_width: 640,
         logical_height: 480,
         drawable_width: 640,
@@ -62,68 +60,64 @@ pub fn default_configuration() -> configuration {
     }
 }
 
-pub type blend = ogpu::pipeline::Blend;
-/// A draw handed around by identity.
-pub type draw_ = draw;
-
-pub struct gpu_data {
-    gpu_device: Device,
-    gpu_queue: Queue,
-    gpu_owner: gpu_owner,
-    gpu_shared: bool,
-    gpu_released: Cell<bool>,
+pub struct GpuData {
+    device: Device,
+    queue: Queue,
+    owner: GpuOwner,
+    shared: bool,
+    released: Cell<bool>,
 }
 
 /// A borrowed GPU: the active window's OGPU device (so Scene samples GPU film textures directly) or,
 /// without a window, a lazily created headless device shared by all leases. Every lease owns its own
 /// queue. Release it while SDL is alive; the headless device goes away with the last lease.
 #[derive(Clone)]
-pub struct gpu(Rc<gpu_data>);
+pub struct Gpu(Rc<GpuData>);
 
-pub struct gpu_owner_data {
-    scene_vertices: scene_execution::gpu_vertices_owner,
-    marks_registry: RefCell<HashMap<i64, gpu_marks>>,
+pub struct GpuOwnerData {
+    scene_vertices: scene_execution::GpuVerticesOwner,
+    marks_registry: RefCell<HashMap<i64, GpuMarks>>,
     shared_leases: Cell<i64>,
 }
 
-pub type gpu_owner = Rc<gpu_owner_data>;
+pub type GpuOwner = Rc<GpuOwnerData>;
 
 /// A `Marks`-family source: the attribute buffers of one mark set. A host attribute is uploaded into
 /// a buffer the source owns; a device attribute is another producer's output, bound directly and
 /// valid only while that producer's output is current.
 #[derive(Clone)]
-pub enum marks_source {
+pub enum MarksSource {
     Host(bytes, i64),
     Device(Rc<dyn Fn() -> Option<Buffer>>, i64),
 }
 
-pub struct gpu_marks_data {
-    marks_id: i64,
-    marks_gpu: gpu,
-    marks_domain: std::thread::ThreadId,
-    marks_closed: Cell<bool>,
-    marks_stamp: Cell<i64>,
-    marks_count: Cell<i64>,
-    marks_owned: RefCell<Vec<Option<Buffer>>>,
-    marks_last: RefCell<Vec<bytes>>,
-    marks_device: RefCell<Vec<(Rc<dyn Fn() -> Option<Buffer>>, Buffer)>>,
-    marks_registration: RefCell<Option<scene_execution::gpu_vertices>>,
+pub struct GpuMarksData {
+    id: i64,
+    gpu: Gpu,
+    domain: std::thread::ThreadId,
+    closed: Cell<bool>,
+    stamp: Cell<i64>,
+    count: Cell<i64>,
+    owned: RefCell<Vec<Option<Buffer>>>,
+    last: RefCell<Vec<bytes>>,
+    device: RefCell<Vec<(Rc<dyn Fn() -> Option<Buffer>>, Buffer)>>,
+    registration: RefCell<Option<scene_execution::GpuVertices>>,
 }
 
 #[derive(Clone)]
-pub struct gpu_marks(Rc<gpu_marks_data>);
+pub struct GpuMarks(Rc<GpuMarksData>);
 
-const gpu_marks_capacity: usize = 64;
-static next_gpu_marks: AtomicI64 = AtomicI64::new(1);
+const GPU_MARKS_CAPACITY: usize = 64;
+static NEXT_GPU_MARKS: AtomicI64 = AtomicI64::new(1);
 
 fn fresh_gpu_marks_id() -> Option<i64> {
-    let current = next_gpu_marks.fetch_add(1, Ordering::SeqCst);
+    let current = NEXT_GPU_MARKS.fetch_add(1, Ordering::SeqCst);
     if current >= (1i64 << 62) - 1 { None } else { Some(current) }
 }
 
-fn create_gpu_owner() -> gpu_owner {
-    Rc::new(gpu_owner_data {
-        scene_vertices: scene_execution::Private::create_gpu_vertices_owner(),
+fn create_gpu_owner() -> GpuOwner {
+    Rc::new(GpuOwnerData {
+        scene_vertices: scene_execution::private::create_gpu_vertices_owner(),
         marks_registry: RefCell::new(HashMap::new()),
         shared_leases: Cell::new(0),
     })
@@ -133,39 +127,39 @@ fn same_buffer(a: &Buffer, b: &Buffer) -> bool {
     backend::buffer_id(a) == backend::buffer_id(b)
 }
 
-fn valid_gpu_marks(value: &gpu_marks) -> bool {
+fn valid_gpu_marks(value: &GpuMarks) -> bool {
     let v = &value.0;
-    !v.marks_closed.get()
-        && !v.marks_gpu.0.gpu_released.get()
-        && v.marks_domain == std::thread::current().id()
-        && v.marks_device.borrow().iter().all(|(source, input)| match source() {
+    !v.closed.get()
+        && !v.gpu.0.released.get()
+        && v.domain == std::thread::current().id()
+        && v.device.borrow().iter().all(|(source, input)| match source() {
             Some(current) => same_buffer(&current, input),
             None => false,
         })
 }
 
-fn gpu_marks_key(value: &gpu_marks) -> String {
-    format!("marks:{}:{}", value.0.marks_id, value.0.marks_stamp.get())
+fn gpu_marks_key(value: &GpuMarks) -> String {
+    format!("marks:{}:{}", value.0.id, value.0.stamp.get())
 }
 
-fn unregister_marks(value: &gpu_marks) {
-    let registration = value.0.marks_registration.borrow_mut().take();
+fn unregister_marks(value: &GpuMarks) {
+    let registration = value.0.registration.borrow_mut().take();
     if let Some(registration) = registration {
-        scene_execution::Private::unregister_gpu_vertices(&registration);
+        scene_execution::private::unregister_gpu_vertices(&registration);
     }
 }
 
-pub fn close_gpu_marks(value: &gpu_marks) {
+pub fn close_gpu_marks(value: &GpuMarks) {
     let v = &value.0;
-    if v.marks_domain != std::thread::current().id() {
+    if v.domain != std::thread::current().id() {
         unreachable!("GPU marks closed on another domain");
     }
-    if !v.marks_closed.get() {
-        v.marks_closed.set(true);
+    if !v.closed.get() {
+        v.closed.set(true);
         unregister_marks(value);
-        v.marks_device.borrow_mut().clear();
-        v.marks_gpu.0.gpu_owner.marks_registry.borrow_mut().remove(&v.marks_id);
-        for owned in v.marks_owned.borrow_mut().iter_mut() {
+        v.device.borrow_mut().clear();
+        v.gpu.0.owner.marks_registry.borrow_mut().remove(&v.id);
+        for owned in v.owned.borrow_mut().iter_mut() {
             if let Some(b) = owned.take() {
                 let _ = backend::destroy_buffer(&b);
             }
@@ -175,46 +169,46 @@ pub fn close_gpu_marks(value: &gpu_marks) {
 
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum submission_state {
+enum SubmissionState {
     Open,
     Closed,
 }
 
-pub use crate::renderer_leases::policy;
+pub use crate::renderer_leases::Policy;
 
-struct snapshot_cache_entry {
-    snapshot_generation: i64,
-    snapshot_width: i64,
-    snapshot_height: i64,
-    snapshot_texture: Rc<sampled_texture>,
+struct SnapshotCacheEntry {
+    generation: i64,
+    width: i64,
+    height: i64,
+    texture: Rc<SampledTexture>,
 }
 
-const snapshot_cache_capacity: i64 = 256;
-const snapshot_cache_byte_capacity: i64 = 64 * 1024 * 1024;
+const SNAPSHOT_CACHE_CAPACITY: i64 = 256;
+const SNAPSHOT_CACHE_BYTE_CAPACITY: i64 = 64 * 1024 * 1024;
 
 // Full-window snapshots change frequently and already have bounded double buffers in [Image].
 // Keeping entries below 1 MiB admits UI/text assets but deliberately leaves a 640x480 RGBA frame
 // (1,228,800 bytes) transient.
-const snapshot_cache_entry_byte_capacity: i64 = renderer_lowering::snapshot_cache_entry_byte_capacity;
+const SNAPSHOT_CACHE_ENTRY_BYTE_CAPACITY: i64 = renderer_lowering::SNAPSHOT_CACHE_ENTRY_BYTE_CAPACITY;
 
-struct stats_counters {
+struct StatsCounters {
     logical_draws: i64,
     logical_passes: i64,
 }
 
-fn count_draws(counters: &mut stats_counters, count: i64) {
+fn count_draws(counters: &mut StatsCounters, count: i64) {
     counters.logical_draws += count;
     counters.logical_passes += 1;
 }
 
-pub struct scaled_cache {
-    scaled_input: Vec<draw>,
-    scaled_facts: Option<frame_facts>,
-    scaled_output: Vec<draw>,
+pub struct ScaledCache {
+    input: Vec<Draw>,
+    facts: Option<frame_facts>,
+    output: Vec<Draw>,
 }
 
-pub fn new_scaled_cache() -> scaled_cache {
-    scaled_cache { scaled_input: Vec::new(), scaled_facts: None, scaled_output: Vec::new() }
+pub fn new_scaled_cache() -> ScaledCache {
+    ScaledCache { input: Vec::new(), facts: None, output: Vec::new() }
 }
 
 fn scale_required(facts: &frame_facts) -> bool {
@@ -222,7 +216,7 @@ fn scale_required(facts: &frame_facts) -> bool {
 }
 
 /// `None` when the draw is unchanged.
-fn scale_draw(facts: &frame_facts, draw_: &geometry_draw) -> Option<geometry_draw> {
+fn scale_draw(facts: &frame_facts, draw_: &GeometryDraw) -> Option<GeometryDraw> {
     let viewport = runtime::map_logical_rect(facts, draw_.state.viewport);
     let scissor = runtime::map_logical_rect(facts, draw_.state.scissor);
     if viewport == draw_.state.viewport && scissor == draw_.state.scissor {
@@ -235,7 +229,7 @@ fn scale_draw(facts: &frame_facts, draw_: &geometry_draw) -> Option<geometry_dra
     }
 }
 
-pub fn scale_draws(facts: &frame_facts, draws: &[geometry_draw]) -> Vec<geometry_draw> {
+pub fn scale_draws(facts: &frame_facts, draws: &[GeometryDraw]) -> Vec<GeometryDraw> {
     if !scale_required(facts) {
         draws.to_vec()
     } else {
@@ -243,7 +237,7 @@ pub fn scale_draws(facts: &frame_facts, draws: &[geometry_draw]) -> Vec<geometry
     }
 }
 
-pub fn scale_sampled_resources(facts: &frame_facts, draws: &[draw]) -> Vec<draw> {
+pub fn scale_sampled_resources(facts: &frame_facts, draws: &[Draw]) -> Vec<Draw> {
     if !scale_required(facts) {
         return draws.to_vec();
     }
@@ -260,26 +254,26 @@ pub fn scale_sampled_resources(facts: &frame_facts, draws: &[draw]) -> Vec<draw>
         .collect()
 }
 
-fn same_draw_list(left: &[draw], right: &[draw]) -> bool {
+fn same_draw_list(left: &[Draw], right: &[Draw]) -> bool {
     left.len() == right.len() && left.iter().zip(right.iter()).all(|(a, b)| Rc::ptr_eq(a, b))
 }
 
-pub fn scale_sampled_cached(cache: &mut scaled_cache, facts: &frame_facts, draws: &[draw]) -> Vec<draw> {
+pub fn scale_sampled_cached(cache: &mut ScaledCache, facts: &frame_facts, draws: &[Draw]) -> Vec<Draw> {
     if !scale_required(facts) {
         draws.to_vec()
-    } else if same_draw_list(draws, &cache.scaled_input) && cache.scaled_facts.as_ref() == Some(facts) {
-        cache.scaled_output.clone()
+    } else if same_draw_list(draws, &cache.input) && cache.facts.as_ref() == Some(facts) {
+        cache.output.clone()
     } else {
         let scaled = scale_sampled_resources(facts, draws);
-        cache.scaled_input = draws.to_vec();
-        cache.scaled_facts = Some(*facts);
-        cache.scaled_output = scaled.clone();
+        cache.input = draws.to_vec();
+        cache.facts = Some(*facts);
+        cache.output = scaled.clone();
         scaled
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct stats {
+pub struct Stats {
     pub logical_draws: i64,
     pub logical_passes: i64,
     pub pipeline_cache_entries: i64,
@@ -290,7 +284,7 @@ pub struct stats {
     pub sun_shadow_passes: i64,
 }
 
-pub const zero_stats: stats = stats {
+pub const ZERO_STATS: Stats = Stats {
     logical_draws: 0,
     logical_passes: 0,
     pipeline_cache_entries: 0,
@@ -301,26 +295,26 @@ pub const zero_stats: stats = stats {
     sun_shadow_passes: 0,
 };
 
-pub struct t_data {
+pub struct RendererData {
     runtime: RefCell<runtime::t>,
     shared_device_lease: bool,
     owns_device_lease: bool,
-    gpu_owner: gpu_owner,
-    renderer: RefCell<scene_execution::t>,
+    gpu_owner: GpuOwner,
+    renderer: RefCell<scene_execution::SceneExecution>,
     renderer_facts: Cell<frame_facts>,
-    counters: RefCell<stats_counters>,
-    scaled: RefCell<scaled_cache>,
+    counters: RefCell<StatsCounters>,
+    scaled: RefCell<ScaledCache>,
     assets: RefCell<Assets::t>,
     dead: Cell<bool>,
     snapshots: RefCell<side_lru::Table>,
-    lowering: RefCell<renderer_lowering::t>,
-    retained_plans: RefCell<renderer_retained_plans::t>,
+    lowering: RefCell<renderer_lowering::Lowering>,
+    retained_plans: RefCell<renderer_retained_plans::RetainedPlans>,
     retained_scene2_segment_hits: Cell<i64>,
     retained_scene2_segment_misses: Cell<i64>,
-    submissions: RefCell<Vec<submission>>,
-    last_step_draws: RefCell<Vec<draw>>,
-    last_step_prepared: RefCell<Vec<draw>>,
-    retained_views: RefCell<Vec<Rc<retained_view>>>,
+    submissions: RefCell<Vec<Submission>>,
+    last_step_draws: RefCell<Vec<Draw>>,
+    last_step_prepared: RefCell<Vec<Draw>>,
+    retained_views: RefCell<Vec<Rc<RetainedView>>>,
     /// the sights of a layer before it gets a target: `retain_soon`, or `retain_live` after a target
     /// was dropped before it paid for itself (a layer that changes every few frames)
     retain_after: Rc<Cell<i64>>,
@@ -328,77 +322,77 @@ pub struct t_data {
 
 /// The renderer: a shared handle (its parts are interior-mutable, as the OCaml record's fields were).
 #[derive(Clone)]
-pub struct t(Rc<t_data>);
+pub struct Renderer(Rc<RendererData>);
 
 /// A 3D layer that kept the same prepared identity on consecutive frames: its draws render once into
 /// an offscreen target the size of the window and later frames composite that texture, so a frame
 /// that only changes the UI never shades the view again. The identity is the key (prepared layers are
 /// immutable), the window's drawable size is checked on every use, and the list is capped, so
 /// nothing here can outlive or disagree with the scene it stands for.
-pub struct retained_view {
-    view_layer: Rc<prepared_scene3>,
-    view_drawable: (i64, i64),
-    view_target: RefCell<Option<retained_target>>,
-    view_failed: Cell<bool>,
+pub struct RetainedView {
+    layer: Rc<PreparedScene3>,
+    drawable: (i64, i64),
+    target: RefCell<Option<RetainedTarget>>,
+    failed: Cell<bool>,
     /// sights before its target, then the frames the target served
-    view_seen: Cell<i64>,
+    seen: Cell<i64>,
     /// its owner's `retain_after`
-    view_retain_after: Rc<Cell<i64>>,
+    retain_after: Rc<Cell<i64>>,
 }
 
-pub struct retained_target {
-    target_exec: t,
-    target_canvas: Canvas::t,
-    target_ir: Rc<RenderIr>,
+pub struct RetainedTarget {
+    exec: Renderer,
+    canvas: Canvas::t,
+    ir: Rc<RenderIr>,
 }
 
-pub struct submission_data {
-    owner: t,
-    submission_state: Cell<submission_state>,
-    image_leases: renderer_leases::t,
+pub struct SubmissionData {
+    owner: Renderer,
+    submission_state: Cell<SubmissionState>,
+    image_leases: renderer_leases::Leases,
     ui_layers: Cell<i64>,
 }
 
 #[derive(Clone)]
-pub struct submission(Rc<submission_data>);
+pub struct Submission(Rc<SubmissionData>);
 
 #[derive(Clone)]
-pub struct batch {
-    batch_owner: submission,
-    batch_draws: Vec<draw>,
+pub struct Batch {
+    owner: Submission,
+    draws: Vec<Draw>,
 }
 
-const retained_view_capacity: usize = 4;
+const RETAINED_VIEW_CAPACITY: usize = 4;
 
 // A target costs an offscreen execution (its pipelines, its uploads) and pays back by later frames
 // compositing it. A live layer, a new one every few frames (a time-driven SOP), never pays: once a
 // target is dropped having served fewer than [retain_live] frames, layers wait [retain_live] sights
 // for one, until a target serves that many. ponytail: two fixed thresholds, a measured break-even
 // if they misjudge.
-const retain_soon: i64 = 2;
-const retain_live: i64 = 8;
+const RETAIN_SOON: i64 = 2;
+const RETAIN_LIVE: i64 = 8;
 
 // ponytail: one active native window; pass an explicit renderer token if sketches start owning
 // multiple windows concurrently.
 thread_local! {
-    static ACTIVE_WINDOW: RefCell<Option<t>> = const { RefCell::new(None) };
-    static HEADLESS_GPU: RefCell<Option<(Device, gpu_owner, i64)>> = const { RefCell::new(None) };
+    static ACTIVE_WINDOW: RefCell<Option<Renderer>> = const { RefCell::new(None) };
+    static HEADLESS_GPU: RefCell<Option<(Device, GpuOwner, i64)>> = const { RefCell::new(None) };
 }
 
 /// Adopt an already prepared draw without exposing it again. Scene3 values are retained as a
 /// distinct family and never misrouted through a Scene2 pipeline.
 pub fn prepared_draw(
-    family_: family,
-    blend_: Option<blend>,
-    texture: Option<Rc<sampled_texture>>,
-    auxiliary: Option<Rc<scene_execution::auxiliary_resource>>,
+    family_: PipelineFamily,
+    blend_: Option<Blend>,
+    texture: Option<Rc<SampledTexture>>,
+    auxiliary: Option<Rc<scene_execution::AuxiliaryResource>>,
     vertex_attributes: Option<(String, bytes)>,
     samples: Option<i64>,
-    value: geometry_draw,
-) -> draw {
-    Rc::new(sampled_draw {
+    value: GeometryDraw,
+) -> Draw {
+    Rc::new(SampledDraw {
         family: family_,
-        blend: blend_.unwrap_or(blend::Replace),
+        blend: blend_.unwrap_or(Blend::Replace),
         texture,
         auxiliary,
         vertex_attributes,
@@ -433,7 +427,7 @@ fn release_headless() {
     }
 }
 
-fn acquire_device(_operation: &str) -> Result<(Device, bool, gpu_owner), Error> {
+fn acquire_device(_operation: &str) -> Result<(Device, bool, GpuOwner), Error> {
     let shared = ACTIVE_WINDOW.with(|cell| {
         cell.borrow().as_ref().and_then(|value| {
             if !value.0.dead.get() && runtime::is_window(&value.0.runtime.borrow()) {
@@ -463,7 +457,7 @@ fn acquire_device(_operation: &str) -> Result<(Device, bool, gpu_owner), Error> 
     Ok((device, false, owner))
 }
 
-fn release_device(shared: bool, owner: &gpu_owner) {
+fn release_device(shared: bool, owner: &GpuOwner) {
     if shared {
         owner.shared_leases.set(owner.shared_leases.get() - 1);
     } else {
@@ -471,7 +465,7 @@ fn release_device(shared: bool, owner: &gpu_owner) {
     }
 }
 
-fn valid_configuration(operation: &str, configuration_: &configuration) -> Result<(), Error> {
+fn valid_configuration(operation: &str, configuration_: &Configuration) -> Result<(), Error> {
     let positive = |x: i64| x > 0;
     if ![
         configuration_.logical_width,
@@ -488,14 +482,14 @@ fn valid_configuration(operation: &str, configuration_: &configuration) -> Resul
     }
 }
 
-fn finish_create(shared_device_lease: bool, owns_device_lease: bool, gpu_owner_: gpu_owner, runtime_: runtime::t, renderer: scene_execution::t) -> t {
+fn finish_create(shared_device_lease: bool, owns_device_lease: bool, gpu_owner_: GpuOwner, runtime_: runtime::t, renderer: scene_execution::SceneExecution) -> Renderer {
     let facts = runtime::frame_facts(&runtime_);
-    t(Rc::new(t_data {
+    Renderer(Rc::new(RendererData {
         runtime: RefCell::new(runtime_),
         renderer: RefCell::new(renderer),
         gpu_owner: gpu_owner_,
         renderer_facts: Cell::new(facts),
-        counters: RefCell::new(stats_counters { logical_draws: 0, logical_passes: 0 }),
+        counters: RefCell::new(StatsCounters { logical_draws: 0, logical_passes: 0 }),
         scaled: RefCell::new(new_scaled_cache()),
         shared_device_lease,
         owns_device_lease,
@@ -504,9 +498,9 @@ fn finish_create(shared_device_lease: bool, owns_device_lease: bool, gpu_owner_:
         snapshots: RefCell::new(side_lru::create(
             lru::cache("renderer.snapshot"),
             true,
-            snapshot_cache_byte_capacity,
+            SNAPSHOT_CACHE_BYTE_CAPACITY,
             Box::new(|_, _| {}),
-            snapshot_cache_capacity,
+            SNAPSHOT_CACHE_CAPACITY,
         )),
         lowering: RefCell::new(renderer_lowering::create()),
         retained_plans: RefCell::new(renderer_retained_plans::create()),
@@ -517,7 +511,7 @@ fn finish_create(shared_device_lease: bool, owns_device_lease: bool, gpu_owner_:
         last_step_prepared: RefCell::new(Vec::new()),
         // count only: views of layers the scene's cache charges
         retained_views: RefCell::new(Vec::new()),
-        retain_after: Rc::new(Cell::new(retain_soon)),
+        retain_after: Rc::new(Cell::new(RETAIN_SOON)),
     }))
 }
 
@@ -525,7 +519,7 @@ fn backend_name() -> Result<String, Error> {
     ogpu::impl_::backend()
 }
 
-pub fn create(configuration_: &configuration) -> Result<t, Error> {
+pub fn create(configuration_: &Configuration) -> Result<Renderer, Error> {
     let operation = "Renderer.create";
     valid_configuration(operation, configuration_)?;
     let mut runtime_ = runtime::create(
@@ -548,7 +542,7 @@ pub fn create(configuration_: &configuration) -> Result<t, Error> {
         }
     };
     let gpu_owner_ = create_gpu_owner();
-    let renderer = (|| -> Result<scene_execution::t, Error> {
+    let renderer = (|| -> Result<scene_execution::SceneExecution, Error> {
         let driver = ogpu::impl_::create_driver()?;
         renderer_pipeline::create_renderer(&backend_name()?, None, Some(gpu_owner_.scene_vertices.clone()), false, driver, &surface)
     })();
@@ -567,7 +561,7 @@ pub fn create(configuration_: &configuration) -> Result<t, Error> {
 
 /// A true layerless native target. It owns one long-lived device and pipeline coordinator until
 /// `destroy`, without acquiring/presenting a window.
-pub fn create_offscreen(configuration_: &configuration) -> Result<t, Error> {
+pub fn create_offscreen(configuration_: &Configuration) -> Result<Renderer, Error> {
     let operation = "Renderer.create_offscreen";
     valid_configuration(operation, configuration_)?;
     let (device, lease_shared, gpu_owner_) = acquire_device(operation)?;
@@ -591,7 +585,7 @@ pub fn create_offscreen(configuration_: &configuration) -> Result<t, Error> {
             return Err(e);
         }
     };
-    let renderer = (|| -> Result<scene_execution::t, Error> {
+    let renderer = (|| -> Result<scene_execution::SceneExecution, Error> {
         let driver = ogpu::impl_::create_driver()?;
         renderer_pipeline::create_renderer(&backend_name()?, Some(device), Some(gpu_owner_.scene_vertices.clone()), true, driver, &surface)
     })();
@@ -605,11 +599,11 @@ pub fn create_offscreen(configuration_: &configuration) -> Result<t, Error> {
     }
 }
 
-fn ensure(operation: &str, value: &t) -> Result<(), Error> {
+fn ensure(operation: &str, value: &Renderer) -> Result<(), Error> {
     if value.0.dead.get() { Err(fail_error(operation, ErrorKind::StaleHandle, "renderer is destroyed")) } else { Ok(()) }
 }
 
-fn sync_runtime_facts(_operation: &str, value: &t) -> Result<(), Error> {
+fn sync_runtime_facts(_operation: &str, value: &Renderer) -> Result<(), Error> {
     let mut rt = value.0.runtime.borrow_mut();
     runtime::sync_facts(&mut rt)?;
     let facts = runtime::frame_facts(&rt);
@@ -622,19 +616,19 @@ fn sync_runtime_facts(_operation: &str, value: &t) -> Result<(), Error> {
     Ok(())
 }
 
-fn close_submission(submission_: &submission) {
-    if submission_.0.submission_state.get() == submission_state::Open {
-        submission_.0.submission_state.set(submission_state::Closed);
+fn close_submission(submission_: &Submission) {
+    if submission_.0.submission_state.get() == SubmissionState::Open {
+        submission_.0.submission_state.set(SubmissionState::Closed);
         renderer_leases::release(&submission_.0.image_leases);
         submission_.0.owner.0.submissions.borrow_mut().retain(|s| !Rc::ptr_eq(&s.0, &submission_.0));
     }
 }
 
-pub fn begin_submission(value: &t) -> Result<submission, Error> {
+pub fn begin_submission(value: &Renderer) -> Result<Submission, Error> {
     ensure("Renderer.Native.begin_submission", value)?;
-    let submission_ = submission(Rc::new(submission_data {
+    let submission_ = Submission(Rc::new(SubmissionData {
         owner: value.clone(),
-        submission_state: Cell::new(submission_state::Open),
+        submission_state: Cell::new(SubmissionState::Open),
         image_leases: renderer_leases::create(),
         ui_layers: Cell::new(0),
     }));
@@ -642,8 +636,8 @@ pub fn begin_submission(value: &t) -> Result<submission, Error> {
     Ok(submission_)
 }
 
-fn ensure_submission(operation: &str, submission_: &submission) -> Result<(), Error> {
-    if submission_.0.submission_state.get() == submission_state::Closed {
+fn ensure_submission(operation: &str, submission_: &Submission) -> Result<(), Error> {
+    if submission_.0.submission_state.get() == SubmissionState::Closed {
         Err(fail_error(operation, ErrorKind::StaleHandle, "submission is already closed"))
     } else {
         ensure(operation, &submission_.0.owner)
@@ -653,31 +647,31 @@ fn ensure_submission(operation: &str, submission_: &submission) -> Result<(), Er
 /// Releases what only a further frame would reuse: the texture staging that frames which each
 /// uploaded a texture keep for the next. For an owner going idle, or a reading that must not depend
 /// on whether the last two frames uploaded.
-pub fn release_staging(value: &t) -> Result<(), Error> {
+pub fn release_staging(value: &Renderer) -> Result<(), Error> {
     ensure("Renderer.release_staging", value)?;
     scene_execution::release_staging(&mut value.0.renderer.borrow_mut());
     Ok(())
 }
 
-pub fn stats(value: &t) -> Result<stats, Error> {
+pub fn stats(value: &Renderer) -> Result<Stats, Error> {
     ensure("Renderer.stats", value)?;
     let renderer = value.0.renderer.borrow();
     let timing = backend::gpu_timing(&scene_execution::queue(&renderer));
     let retained = scene_execution::retained_stats(&renderer);
     let counters = value.0.counters.borrow();
-    Ok(stats {
+    Ok(Stats {
         logical_draws: counters.logical_draws,
         logical_passes: counters.logical_passes,
         pipeline_cache_entries: scene_execution::pipeline_count(&renderer),
         uploaded_bytes: scene_execution::upload_bytes(&renderer),
         gpu_duration_seconds: timing.gpu_seconds,
-        retained_plan_hits: retained.plan_hits,
-        retained_plan_misses: retained.plan_misses,
+        retained_plan_hits: retained.hits,
+        retained_plan_misses: retained.misses,
         sun_shadow_passes: scene_execution::sun_shadow_passes(&renderer),
     })
 }
 
-pub fn presentation_facts_of(value: &t) -> Result<presentation_facts, Error> {
+pub fn presentation_facts_of(value: &Renderer) -> Result<presentation_facts, Error> {
     runtime::presentation_facts(&mut value.0.runtime.borrow_mut())
 }
 
@@ -699,81 +693,81 @@ fn snapshot_key(key: &str, density: i64) -> TableKey {
     TableKey::Str(format!("{}|{}", key, density))
 }
 
-fn snapshot_entry(value: &t, key: &str, density: i64) -> Option<Rc<RefCell<snapshot_cache_entry>>> {
+fn snapshot_entry(value: &Renderer, key: &str, density: i64) -> Option<Rc<RefCell<SnapshotCacheEntry>>> {
     side_lru::find(&mut value.0.snapshots.borrow_mut(), &snapshot_key(key, density))
-        .map(|item| item.downcast::<RefCell<snapshot_cache_entry>>().unwrap_or_else(|_| unreachable!("snapshot table item")))
+        .map(|item| item.downcast::<RefCell<SnapshotCacheEntry>>().unwrap_or_else(|_| unreachable!("snapshot table item")))
 }
 
 fn texture_key(key: &str, density: i64, generation: i64) -> String {
     format!("{}:{}:{}", key, density, generation)
 }
 
-fn gpu_texture(key: String, width: i64, height: i64, gpu_: Texture) -> Rc<sampled_texture> {
-    Rc::new(sampled_texture {
+fn gpu_texture(key: String, width: i64, height: i64, gpu_: Texture) -> Rc<SampledTexture> {
+    Rc::new(SampledTexture {
         key,
-        levels: Rc::new(vec![texture_level { width, height, bytes: scene_execution::empty_bytes() }]),
+        levels: Rc::new(vec![TextureLevel { width, height, bytes: scene_execution::empty_bytes() }]),
         sampler: scene_image_sampler(),
         gpu: Some(gpu_),
     })
 }
 
-fn snapshot(value: &t, policy_: &lease_policy, density: i64, source: retained_resource) -> Result<(i64, i64, Rc<sampled_texture>), Error> {
+fn snapshot(value: &Renderer, policy_: &lease_policy, density: i64, source: retained_resource) -> Result<(i64, i64, Rc<SampledTexture>), Error> {
     let operation = "Renderer.lower_scene2";
     if density <= 0 {
         return Err(fail_error(operation, ErrorKind::InvalidArgument, "density must be positive"));
     }
-    let find = |key: &str, generation: i64| -> Option<(i64, i64, Rc<sampled_texture>)> {
+    let find = |key: &str, generation: i64| -> Option<(i64, i64, Rc<SampledTexture>)> {
         let entry = snapshot_entry(value, key, density)?;
         let e = entry.borrow();
-        if e.snapshot_generation == generation {
-            Some((e.snapshot_width, e.snapshot_height, e.snapshot_texture.clone()))
+        if e.generation == generation {
+            Some((e.width, e.height, e.texture.clone()))
         } else {
             None
         }
     };
-    let store = |key: &str, generation: i64, width: i64, height: i64, texture: Rc<sampled_texture>, bytes_: i64| {
+    let store = |key: &str, generation: i64, width: i64, height: i64, texture: Rc<SampledTexture>, bytes_: i64| {
         let mut table = value.0.snapshots.borrow_mut();
-        if bytes_ <= snapshot_cache_entry_byte_capacity {
-            let item: Item = Rc::new(RefCell::new(snapshot_cache_entry {
-                snapshot_generation: generation,
-                snapshot_width: width,
-                snapshot_height: height,
-                snapshot_texture: texture,
+        if bytes_ <= SNAPSHOT_CACHE_ENTRY_BYTE_CAPACITY {
+            let item: Item = Rc::new(RefCell::new(SnapshotCacheEntry {
+                generation,
+                width,
+                height,
+                texture,
             }));
             side_lru::add(&mut table, bytes_, snapshot_key(key, density), item);
         } else {
             side_lru::remove(&mut table, &snapshot_key(key, density));
         }
     };
-    let finish = |copy: bool, key: &str, generation: i64, width: i64, height: i64, pixels: &bytes| -> Result<(i64, i64, Rc<sampled_texture>), Error> {
+    let finish = |copy: bool, key: &str, generation: i64, width: i64, height: i64, pixels: &bytes| -> Result<(i64, i64, Rc<SampledTexture>), Error> {
         if let Some(cached) = find(key, generation) {
             return Ok(cached);
         }
         let same_shape = snapshot_entry(value, key, density).filter(|entry| {
             let e = entry.borrow();
-            e.snapshot_width == width && e.snapshot_height == height
+            e.width == width && e.height == height
         });
         let bytes_ = if copy { new_bytes(pixels.borrow().clone()) } else { pixels.clone() };
         match same_shape {
             Some(entry) => {
                 let mut e = entry.borrow_mut();
-                e.snapshot_generation = generation;
+                e.generation = generation;
                 // The execution key carries the generation: same-key bytes are never re-hashed
                 // below, and a new generation recycles the same-shape texture with one upload.
-                let mut level = e.snapshot_texture.levels[0].clone();
+                let mut level = e.texture.levels[0].clone();
                 level.bytes = bytes_;
-                let texture = Rc::new(sampled_texture {
+                let texture = Rc::new(SampledTexture {
                     key: texture_key(key, density, generation),
                     levels: Rc::new(vec![level]),
-                    ..(*e.snapshot_texture).clone()
+                    ..(*e.texture).clone()
                 });
-                e.snapshot_texture = texture.clone();
+                e.texture = texture.clone();
                 Ok((width, height, texture))
             }
             None => {
-                let texture = Rc::new(sampled_texture {
+                let texture = Rc::new(SampledTexture {
                     key: texture_key(key, density, generation),
-                    levels: Rc::new(vec![texture_level { width, height, bytes: bytes_.clone() }]),
+                    levels: Rc::new(vec![TextureLevel { width, height, bytes: bytes_.clone() }]),
                     sampler: scene_image_sampler(),
                     gpu: None,
                 });
@@ -803,18 +797,18 @@ fn snapshot(value: &t, policy_: &lease_policy, density: i64, source: retained_re
                         Err(e) => Err(resource_error_value(operation, &e)),
                         Ok((width, height, borrowed_generation, pixels, mut lease)) => {
                             let size = pixels.borrow().len() as i64;
-                            let cacheable = size <= snapshot_cache_entry_byte_capacity;
+                            let cacheable = size <= SNAPSHOT_CACHE_ENTRY_BYTE_CAPACITY;
                             let bytes_ = if cacheable {
                                 let copy = new_bytes(pixels.borrow().clone());
                                 Image::release_snapshot(&mut lease);
                                 copy
                             } else {
                                 match policy_ {
-                                    lease_policy::Retain_image_snapshots(leases) => {
+                                    lease_policy::RetainImageSnapshots(leases) => {
                                         renderer_leases::retain(leases, lease);
                                         pixels
                                     }
-                                    lease_policy::Copy_image_snapshots => {
+                                    lease_policy::CopyImageSnapshots => {
                                         let copy = new_bytes(pixels.borrow().clone());
                                         Image::release_snapshot(&mut lease);
                                         copy
@@ -824,9 +818,9 @@ fn snapshot(value: &t, policy_: &lease_policy, density: i64, source: retained_re
                             // The generation is part of the GPU texture key: a replaced image (same
                             // identity, new pixels) then misses the executor's static image fast path
                             // and re-uploads into its same-shape texture.
-                            let texture = Rc::new(sampled_texture {
+                            let texture = Rc::new(SampledTexture {
                                 key: texture_key(&key, density, borrowed_generation),
-                                levels: Rc::new(vec![texture_level { width, height, bytes: bytes_.clone() }]),
+                                levels: Rc::new(vec![TextureLevel { width, height, bytes: bytes_.clone() }]),
                                 sampler: scene_image_sampler(),
                                 gpu: None,
                             });
@@ -844,11 +838,10 @@ fn snapshot(value: &t, policy_: &lease_policy, density: i64, source: retained_re
             // pixels, a miss copies them once.
             let key = format!("text:{}", Text::identity(&text));
             let generation = Text::generation(&text);
-            if !Text::destroyed(&text) {
-                if let Some(cached) = find(&key, generation) {
+            if !Text::destroyed(&text)
+                && let Some(cached) = find(&key, generation) {
                     return Ok(cached);
                 }
-            }
             match (Text::size(&text), Text::borrow_pixels(&text)) {
                 (Ok((width, height)), Ok(pixels)) => finish(true, &key, generation, width, height, &pixels),
                 (Err(e), _) | (_, Err(e)) => Err(resource_error_value(operation, &e)),
@@ -883,12 +876,12 @@ fn snapshot(value: &t, policy_: &lease_policy, density: i64, source: retained_re
 }
 
 fn lower_scene2_uncached(
-    value: &t,
+    value: &Renderer,
     policy_: &lease_policy,
     density: i64,
     resolve: &dyn Fn(i64) -> Option<retained_resource>,
     ir_: &Rc<RenderIr>,
-) -> Result<Vec<draw>, Error> {
+) -> Result<Vec<Draw>, Error> {
     ensure("Renderer.lower_scene2", value)?;
     let checkpoint = renderer_leases::checkpoint(policy_);
     let rollback = || renderer_leases::rollback(policy_, checkpoint);
@@ -899,11 +892,11 @@ fn lower_scene2_uncached(
         match source {
             Some(source)
                 if valid_gpu_marks(&source)
-                    && source.0.marks_stamp.get() == marks::gpu_stamp(token)
-                    && source.0.marks_count.get() == marks::gpu_count(token) =>
+                    && source.0.stamp.get() == marks::gpu_stamp(token)
+                    && source.0.count.get() == marks::gpu_count(token) =>
             {
                 let device = scene_execution::device(&value.0.renderer.borrow());
-                if ogpu::handle::device_id(backend::device_handle(&source.0.marks_gpu.0.gpu_device)) == ogpu::handle::device_id(backend::device_handle(&device)) {
+                if ogpu::handle::device_id(backend::device_handle(&source.0.gpu.0.device)) == ogpu::handle::device_id(backend::device_handle(&device)) {
                     Ok(Some(gpu_marks_key(&source)))
                 } else {
                     Err("GPU shapes belong to another device".to_owned())
@@ -961,12 +954,12 @@ fn sample_hash(values: &[f64]) -> i64 {
 }
 
 fn lower_scene2_with_policy(
-    value: &t,
+    value: &Renderer,
     policy_: &lease_policy,
     density: i64,
     resolve: &dyn Fn(i64) -> Option<retained_resource>,
     ir_: &Rc<RenderIr>,
-) -> Result<Vec<draw>, Error> {
+) -> Result<Vec<Draw>, Error> {
     if value.0.dead.get() {
         return lower_scene2_uncached(value, policy_, density, resolve, ir_);
     }
@@ -974,8 +967,8 @@ fn lower_scene2_with_policy(
     let ir_id = ir::identity(ir_);
     let facts = presentation_facts_of(value).expect("presentation facts");
     let extent = (facts.logical_width, facts.logical_height, facts.drawable_width, facts.drawable_height);
-    let same_context = |p: &plan| p.plan_density == density && p.plan_extent == extent;
-    let slow = || -> Result<Vec<draw>, Error> {
+    let same_context = |p: &Plan| p.density == density && p.extent == extent;
+    let slow = || -> Result<Vec<Draw>, Error> {
         let command_count = commands.len();
         let mut fingerprint = command_count as i64;
         let mut mix = |v: i64| fingerprint = rays_math::hash::mix(fingerprint, v);
@@ -999,10 +992,10 @@ fn lower_scene2_with_policy(
             let found = renderer_retained_plans::find(&mut value.0.retained_plans.borrow_mut(), fingerprint);
             found.filter(|p| {
                 let p = p.borrow();
-                p.plan_command_count == command_count as i64
+                p.command_count == command_count as i64
                     && same_context(&p)
-                    && renderer_retained_plans::same_resources(&p.plan_resources, &resources)
-                    && commands_equal(ir::commands_readonly(&p.plan_ir), commands)
+                    && renderer_retained_plans::same_resources(&p.resources, &resources)
+                    && commands_equal(ir::commands_readonly(&p.ir), commands)
             })
         };
         if !cacheable {
@@ -1011,25 +1004,25 @@ fn lower_scene2_with_policy(
         match hit {
             Some(p) => {
                 renderer_retained_plans::rebind(&value.0.retained_plans.borrow(), &p, ir_id, ir_);
-                let draws = p.borrow().plan_draws.clone();
+                let draws = p.borrow().draws.clone();
                 Ok(draws)
             }
             None => {
                 let draws = lower_scene2_uncached(value, policy_, density, resolve, ir_)?;
-                if draws.iter().any(|d| d.texture.as_ref().is_some_and(|tx| renderer_lowering::sampled_texture_bytes(tx) > snapshot_cache_entry_byte_capacity))
+                if draws.iter().any(|d| d.texture.as_ref().is_some_and(|tx| renderer_lowering::sampled_texture_bytes(tx) > SNAPSHOT_CACHE_ENTRY_BYTE_CAPACITY))
                     || has_gpu_shapes(commands)
                 {
                     Ok(draws)
                 } else {
-                    let p = Rc::new(RefCell::new(plan {
-                        plan_ir_id: ir_id,
-                        plan_command_count: command_count as i64,
-                        plan_source_bytes: renderer_retained_plans::plan_source_bytes(commands),
-                        plan_density: density,
-                        plan_extent: extent,
-                        plan_resources: resources,
-                        plan_ir: ir_.clone(),
-                        plan_draws: draws.clone(),
+                    let p = Rc::new(RefCell::new(Plan {
+                        ir_id,
+                        command_count: command_count as i64,
+                        source_bytes: renderer_retained_plans::plan_source_bytes(commands),
+                        density,
+                        extent,
+                        resources,
+                        ir: ir_.clone(),
+                        draws: draws.clone(),
                     }));
                     renderer_retained_plans::add(&mut value.0.retained_plans.borrow_mut(), fingerprint, p);
                     Ok(draws)
@@ -1039,11 +1032,11 @@ fn lower_scene2_with_policy(
     };
     let by_ir = renderer_retained_plans::find_ir(&value.0.retained_plans.borrow(), ir_id);
     match by_ir {
-        Some(p) if same_context(&p.borrow()) && p.borrow().plan_resources.is_empty() => Ok(p.borrow().plan_draws.clone()),
+        Some(p) if same_context(&p.borrow()) && p.borrow().resources.is_empty() => Ok(p.borrow().draws.clone()),
         Some(p) if same_context(&p.borrow()) => {
             let (cacheable, resources) = renderer_retained_plans::resource_stamps(resolve, commands);
-            if cacheable && renderer_retained_plans::same_resources(&p.borrow().plan_resources, &resources) {
-                Ok(p.borrow().plan_draws.clone())
+            if cacheable && renderer_retained_plans::same_resources(&p.borrow().resources, &resources) {
+                Ok(p.borrow().draws.clone())
             } else {
                 slow()
             }
@@ -1052,11 +1045,11 @@ fn lower_scene2_with_policy(
     }
 }
 
-pub fn lower_scene2(value: &t, density: i64, resource_: &dyn Fn(i64) -> Option<retained_resource>, ir_: &Rc<RenderIr>) -> Result<Vec<draw>, Error> {
-    lower_scene2_with_policy(value, &lease_policy::Copy_image_snapshots, density, resource_, ir_)
+pub fn lower_scene2(value: &Renderer, density: i64, resource_: &dyn Fn(i64) -> Option<retained_resource>, ir_: &Rc<RenderIr>) -> Result<Vec<Draw>, Error> {
+    lower_scene2_with_policy(value, &lease_policy::CopyImageSnapshots, density, resource_, ir_)
 }
 
-pub fn replay_step(clear: Option<(f64, f64, f64, f64)>, identity: &str, version: i64, value: &t) -> Result<Option<()>, Error> {
+pub fn replay_step(clear: Option<(f64, f64, f64, f64)>, identity: &str, version: i64, value: &Renderer) -> Result<Option<()>, Error> {
     ensure("Renderer.Native.replay", value)?;
     sync_runtime_facts("Renderer.Native.replay", value)?;
     let replayed = scene_execution::replay_prepared_sampled_resources(clear, identity, version, &mut value.0.renderer.borrow_mut())?;
@@ -1074,8 +1067,8 @@ fn step_core(
     clear: Option<(f64, f64, f64, f64)>,
     identity: Option<&str>,
     version: Option<i64>,
-    value: &t,
-    draws: &[draw],
+    value: &Renderer,
+    draws: &[Draw],
 ) -> Result<bool, Error> {
     ensure("Renderer.step", value)?;
     if let Err(e) = sync_runtime_facts("Renderer.step", value) {
@@ -1106,10 +1099,10 @@ fn step_core(
             Ok(presented)
         }
         Ok(None) => {
-            let draws: Vec<draw> = if same_draw_list(draws, &value.0.last_step_draws.borrow()) {
+            let draws: Vec<Draw> = if same_draw_list(draws, &value.0.last_step_draws.borrow()) {
                 value.0.last_step_prepared.borrow().clone()
             } else {
-                let prepared: Vec<draw> = draws
+                let prepared: Vec<Draw> = draws
                     .iter()
                     .map(|x| {
                         let d = &x.draw;
@@ -1130,7 +1123,7 @@ fn step_core(
                             copy.state.scissor = scissor;
                             copy
                         };
-                        Rc::new(sampled_draw {
+                        Rc::new(SampledDraw {
                             family: x.family,
                             blend: x.blend,
                             texture: x.texture.clone(),
@@ -1156,23 +1149,22 @@ fn step_core(
                     Err(fail_error("Renderer.step", ErrorKind::InvalidArgument, "prepared identity and version must be supplied together"))
                 }
             };
-            result.map(|presented| {
+            result.inspect(|_presented| {
                 count_draws(&mut value.0.counters.borrow_mut(), scaled.len() as i64);
-                presented
             })
         }
     }
 }
 
-pub fn step(clear: Option<(f64, f64, f64, f64)>, value: &t, draws: &[draw]) -> Result<(), Error> {
+pub fn step(clear: Option<(f64, f64, f64, f64)>, value: &Renderer, draws: &[Draw]) -> Result<(), Error> {
     step_core(&mut || {}, clear, None, None, value, draws).map(|_| ())
 }
 
-pub fn draw(clear: Option<(f64, f64, f64, f64)>, value: &t, draws: &[draw]) -> Result<bool, Error> {
+pub fn draw(clear: Option<(f64, f64, f64, f64)>, value: &Renderer, draws: &[Draw]) -> Result<bool, Error> {
     step_core(&mut || {}, clear, None, None, value, draws)
 }
 
-fn lower_scene2_submission(submission_: &submission, density: i64, resource_: &dyn Fn(i64) -> Option<retained_resource>, ir_: &Rc<RenderIr>) -> Result<batch, Error> {
+fn lower_scene2_submission(submission_: &Submission, density: i64, resource_: &dyn Fn(i64) -> Option<retained_resource>, ir_: &Rc<RenderIr>) -> Result<Batch, Error> {
     if let Err(e) = ensure_submission("Renderer.Native.lower_scene2", submission_) {
         close_submission(submission_);
         return Err(e);
@@ -1181,12 +1173,12 @@ fn lower_scene2_submission(submission_: &submission, density: i64, resource_: &d
     // resolver that panics unwinds through here.
     match lower_scene2_with_policy(
         &submission_.0.owner,
-        &lease_policy::Retain_image_snapshots(submission_.0.image_leases.clone()),
+        &lease_policy::RetainImageSnapshots(submission_.0.image_leases.clone()),
         density,
         resource_,
         ir_,
     ) {
-        Ok(draws) => Ok(batch { batch_owner: submission_.clone(), batch_draws: draws }),
+        Ok(draws) => Ok(Batch { owner: submission_.clone(), draws }),
         Err(e) => {
             close_submission(submission_);
             Err(e)
@@ -1194,7 +1186,7 @@ fn lower_scene2_submission(submission_: &submission, density: i64, resource_: &d
     }
 }
 
-fn retained_scene2_segment_bytes(draws: &[draw]) -> i64 {
+fn retained_scene2_segment_bytes(draws: &[Draw]) -> i64 {
     draws
         .iter()
         .map(|d| {
@@ -1208,14 +1200,14 @@ fn retained_scene2_segment_bytes(draws: &[draw]) -> i64 {
 }
 
 fn lower_scene2_segment(
-    submission_: &submission,
+    submission_: &Submission,
     identity: i64,
     version: i64,
     cacheable: bool,
     density: i64,
     resource_: &dyn Fn(i64) -> Option<retained_resource>,
     ir_: &Rc<RenderIr>,
-) -> Result<batch, Error> {
+) -> Result<Batch, Error> {
     let operation = "Renderer.Native.lower_scene2_segment";
     if identity <= 0 || version < 0 {
         close_submission(submission_);
@@ -1235,32 +1227,32 @@ fn lower_scene2_segment(
     };
     let found = if cacheable {
         renderer_retained_plans::find_segment(&mut owner.0.retained_plans.borrow_mut(), identity).filter(|entry| {
-            entry.segment_version == version
-                && entry.segment_density == density
-                && entry.segment_width == facts.logical_width
-                && entry.segment_height == facts.logical_height
+            entry.version == version
+                && entry.density == density
+                && entry.width == facts.logical_width
+                && entry.height == facts.logical_height
         })
     } else {
         None
     };
     if let Some(entry) = found {
         owner.0.retained_scene2_segment_hits.set(owner.0.retained_scene2_segment_hits.get() + 1);
-        return Ok(batch { batch_owner: submission_.clone(), batch_draws: entry.segment_draws.clone() });
+        return Ok(Batch { owner: submission_.clone(), draws: entry.draws.clone() });
     }
     let lowered = lower_scene2_submission(submission_, density, resource_, ir_)?;
     if cacheable {
         owner.0.retained_scene2_segment_misses.set(owner.0.retained_scene2_segment_misses.get() + 1);
-        let bytes_ = retained_scene2_segment_bytes(&lowered.batch_draws);
+        let bytes_ = retained_scene2_segment_bytes(&lowered.draws);
         renderer_retained_plans::add_segment(
             &mut owner.0.retained_plans.borrow_mut(),
             identity,
             bytes_,
-            segment {
-                segment_version: version,
-                segment_density: density,
-                segment_width: facts.logical_width,
-                segment_height: facts.logical_height,
-                segment_draws: lowered.batch_draws.clone(),
+            Segment {
+                version,
+                density,
+                width: facts.logical_width,
+                height: facts.logical_height,
+                draws: lowered.draws.clone(),
             },
         );
     }
@@ -1269,7 +1261,7 @@ fn lower_scene2_segment(
 
 /// Lowers PXUI instances into one `Ui` draw per batch. Texture ids resolve through `resource`; id 0
 /// samples a white texel.
-fn lower_ui(submission_: &submission, density: i64, resource_: &dyn Fn(i64) -> Option<retained_resource>, ui: &Shapes) -> Result<batch, Error> {
+fn lower_ui(submission_: &Submission, density: i64, resource_: &dyn Fn(i64) -> Option<retained_resource>, ui: &Shapes) -> Result<Batch, Error> {
     let operation = "Renderer.Native.lower_ui";
     if let Err(e) = ensure_submission(operation, submission_) {
         close_submission(submission_);
@@ -1287,14 +1279,14 @@ fn lower_ui(submission_: &submission, density: i64, resource_: &dyn Fn(i64) -> O
     let height = facts.logical_height as f64;
     let framebuffer = (0, 0, facts.logical_width, facts.logical_height);
     let instances = ui.instances();
-    let texture = |id: i64| -> Result<Rc<sampled_texture>, Error> {
+    let texture = |id: i64| -> Result<Rc<SampledTexture>, Error> {
         if id <= 0 {
             return Ok(ui_white_texture());
         }
         match resource_(id) {
             None => Err(fail_error(operation, ErrorKind::InvalidState, "UI texture resource id is unbound")),
             Some(source) => {
-                let policy_ = lease_policy::Retain_image_snapshots(submission_.0.image_leases.clone());
+                let policy_ = lease_policy::RetainImageSnapshots(submission_.0.image_leases.clone());
                 let (_, _, texture) = snapshot(owner, &policy_, density, source)?;
                 let mut copy = (*texture).clone();
                 copy.sampler = ui_sampler();
@@ -1304,7 +1296,7 @@ fn lower_ui(submission_: &submission, density: i64, resource_: &dyn Fn(i64) -> O
     };
     let layer = submission_.0.ui_layers.get();
     submission_.0.ui_layers.set(layer + 1);
-    let mut draws: Vec<draw> = Vec::new();
+    let mut draws: Vec<Draw> = Vec::new();
     let batches = ui.batches();
     let mut failure_: Option<Error> = None;
     for (index, batch_) in batches.iter().enumerate() {
@@ -1315,7 +1307,7 @@ fn lower_ui(submission_: &submission, density: i64, resource_: &dyn Fn(i64) -> O
         if batch_.count == 0 || scissor_width <= 0 || scissor_height <= 0 {
             continue;
         }
-        let built = (|| -> Result<draw, Error> {
+        let built = (|| -> Result<Draw, Error> {
             let texture = texture(batch_.texture)?;
             let mut lowering = owner.0.lowering.borrow_mut();
             let affine = renderer_lowering::write_ui_affine(
@@ -1327,14 +1319,14 @@ fn lower_ui(submission_: &submission, density: i64, resource_: &dyn Fn(i64) -> O
             let slot_key = layer * 65536 + index as i64;
             let slot = renderer_lowering::find_ui_slot(&mut lowering, slot_key);
             let mut s = slot.borrow_mut();
-            if s.ui_vertices.borrow().len() != length || !renderer_lowering::same_bytes_range(instances, first, &s.ui_vertices.borrow()) {
-                s.ui_vertices = new_bytes(instances[first..first + length].to_vec());
+            if s.vertices.borrow().len() != length || !renderer_lowering::same_bytes_range(instances, first, &s.vertices.borrow()) {
+                s.vertices = new_bytes(instances[first..first + length].to_vec());
             }
-            if s.ui_indices.borrow().len() as i64 != batch_.count * 24 {
-                s.ui_indices = renderer_lowering::ui_index_bytes(&mut lowering, batch_.count);
+            if s.indices.borrow().len() as i64 != batch_.count * 24 {
+                s.indices = renderer_lowering::ui_index_bytes(&mut lowering, batch_.count);
             }
-            if s.ui_affine.borrow()[..] != affine.borrow()[..] {
-                s.ui_affine = new_bytes(affine.borrow().clone());
+            if s.affine.borrow()[..] != affine.borrow()[..] {
+                s.affine = new_bytes(affine.borrow().clone());
             }
             let scissor = match &batch_.clip {
                 None => framebuffer,
@@ -1346,25 +1338,25 @@ fn lower_ui(submission_: &submission, density: i64, resource_: &dyn Fn(i64) -> O
                     (x, y, 0.max(right - x), 0.max(bottom - y))
                 }
             };
-            Ok(Rc::new(sampled_draw {
-                family: family::Ui,
-                blend: blend::Alpha,
+            Ok(Rc::new(SampledDraw {
+                family: PipelineFamily::Ui,
+                blend: Blend::Alpha,
                 texture: Some(texture),
                 auxiliary: None,
                 vertex_attributes: None,
                 samples: 1,
-                draw: geometry_draw {
-                    mesh: scene_execution::mesh {
-                        key: scene_execution::mesh_key::Host(format!("ui:{}", slot_key)),
-                        vertices: s.ui_vertices.clone(),
+                draw: GeometryDraw {
+                    mesh: scene_execution::Mesh {
+                        key: scene_execution::MeshKey::Host(format!("ui:{}", slot_key)),
+                        vertices: s.vertices.clone(),
                         shared_vertices: None,
                         vertex_count: 4 * batch_.count,
-                        indices: s.ui_indices.clone(),
+                        indices: s.indices.clone(),
                         index_count: 6 * batch_.count,
                         primitive: ogpu::render_pass::Primitive::TriangleList,
                     },
-                    state: scene_execution::state {
-                        transform_uniforms: Some(s.ui_affine.clone()),
+                    state: scene_execution::State {
+                        transform_uniforms: Some(s.affine.clone()),
                         ..renderer_lowering::default_state(framebuffer, scissor)
                     },
                 },
@@ -1383,17 +1375,17 @@ fn lower_ui(submission_: &submission, density: i64, resource_: &dyn Fn(i64) -> O
             close_submission(submission_);
             Err(e)
         }
-        None => Ok(batch { batch_owner: submission_.clone(), batch_draws: draws }),
+        None => Ok(Batch { owner: submission_.clone(), draws }),
     }
 }
 
 /// Adopts already prepared non-Scene2 draws into this submission.
-pub fn adopt_draws(submission_: &submission, draws: Vec<draw>) -> Result<batch, Error> {
+pub fn adopt_draws(submission_: &Submission, draws: Vec<Draw>) -> Result<Batch, Error> {
     if let Err(e) = ensure_submission("Renderer.Native.adopt_draws", submission_) {
         close_submission(submission_);
         return Err(e);
     }
-    Ok(batch { batch_owner: submission_.clone(), batch_draws: draws })
+    Ok(Batch { owner: submission_.clone(), draws })
 }
 
 /// Consumes the submission on either success or failure.
@@ -1401,17 +1393,17 @@ fn step_submission(
     clear: Option<(f64, f64, f64, f64)>,
     identity: Option<&str>,
     version: Option<i64>,
-    submission_: &submission,
-    batches: &[batch],
+    submission_: &Submission,
+    batches: &[Batch],
 ) -> Result<(), Error> {
     if let Err(e) = ensure_submission("Renderer.Native.step", submission_) {
         close_submission(submission_);
         return Err(e);
     }
-    let result = if batches.iter().any(|b| !Rc::ptr_eq(&b.batch_owner.0, &submission_.0)) {
+    let result = if batches.iter().any(|b| !Rc::ptr_eq(&b.owner.0, &submission_.0)) {
         Err(fail_error("Renderer.Native.step", ErrorKind::InvalidArgument, "draw batch belongs to another submission"))
     } else {
-        let draws: Vec<draw> = batches.iter().flat_map(|b| b.batch_draws.iter().cloned()).collect();
+        let draws: Vec<Draw> = batches.iter().flat_map(|b| b.draws.iter().cloned()).collect();
         step_core(&mut || close_submission(submission_), clear, identity, version, &submission_.0.owner, &draws).map(|_| ())
     };
     close_submission(submission_);
@@ -1419,13 +1411,13 @@ fn step_submission(
 }
 
 /// The completed frame as drawable-sized RGBA bytes.
-pub fn capture(value: &t) -> Result<Vec<u8>, Error> {
+pub fn capture(value: &Renderer) -> Result<Vec<u8>, Error> {
     ensure("Renderer.capture", value)?;
     let facts = presentation_facts_of(value)?;
     scene_execution::read_pixels(&mut value.0.renderer.borrow_mut(), facts.drawable_width * 4)
 }
 
-pub fn read_pixels(value: &t, bytes_per_row: i64) -> Result<Vec<u8>, Error> {
+pub fn read_pixels(value: &Renderer, bytes_per_row: i64) -> Result<Vec<u8>, Error> {
     ensure("Renderer.read_pixels", value)?;
     scene_execution::read_pixels(&mut value.0.renderer.borrow_mut(), bytes_per_row)
 }
@@ -1433,7 +1425,7 @@ pub fn read_pixels(value: &t, bytes_per_row: i64) -> Result<Vec<u8>, Error> {
 /// An offscreen execution's completed frame texture, on the device it leased (the presenting
 /// window's when one exists). A window execution samples a Canvas published from it directly;
 /// readback happens only for CPU access.
-pub fn offscreen_target(value: &t) -> Result<Texture, Error> {
+pub fn offscreen_target(value: &Renderer) -> Result<Texture, Error> {
     let operation = "Renderer.offscreen_target";
     ensure(operation, value)?;
     if runtime::is_window(&value.0.runtime.borrow()) {
@@ -1443,16 +1435,16 @@ pub fn offscreen_target(value: &t) -> Result<Texture, Error> {
     }
 }
 
-fn release_view(view: &Rc<retained_view>) {
-    let target = view.view_target.borrow_mut().take();
+fn release_view(view: &Rc<RetainedView>) {
+    let target = view.target.borrow_mut().take();
     if let Some(target) = target {
-        view.view_retain_after.set(if view.view_seen.get() < retain_live { retain_live } else { retain_soon });
-        let _ = Canvas::destroy(&target.target_canvas);
-        let _ = destroy(&target.target_exec);
+        view.retain_after.set(if view.seen.get() < RETAIN_LIVE { RETAIN_LIVE } else { RETAIN_SOON });
+        let _ = Canvas::destroy(&target.canvas);
+        let _ = destroy(&target.exec);
     }
 }
 
-fn release_views(value: &t) {
+fn release_views(value: &Renderer) {
     let views = std::mem::take(&mut *value.0.retained_views.borrow_mut());
     for view in views {
         release_view(&view);
@@ -1461,7 +1453,7 @@ fn release_views(value: &t) {
 
 /// A window execution fails with `InvalidArgument`, destroying nothing, while GPU leases or
 /// offscreen executions still share its device.
-pub fn destroy(value: &t) -> Result<(), Error> {
+pub fn destroy(value: &Renderer) -> Result<(), Error> {
     if value.0.dead.get() {
         return Ok(());
     }
@@ -1469,7 +1461,7 @@ pub fn destroy(value: &t) -> Result<(), Error> {
     if runtime::is_window(&value.0.runtime.borrow()) && value.0.gpu_owner.shared_leases.get() > 0 {
         return Err(fail_error("Renderer.destroy", ErrorKind::InvalidArgument, &format!("{} GPU lease(s) still share this window's device; release them first", value.0.gpu_owner.shared_leases.get())));
     }
-    let open: Vec<submission> = value.0.submissions.borrow().clone();
+    let open: Vec<Submission> = value.0.submissions.borrow().clone();
     for submission_ in &open {
         close_submission(submission_);
     }
@@ -1482,11 +1474,10 @@ pub fn destroy(value: &t) -> Result<(), Error> {
     value.0.dead.set(true);
     ACTIVE_WINDOW.with(|cell| {
         let current = cell.borrow().clone();
-        if let Some(current) = current {
-            if Rc::ptr_eq(&current.0, &value.0) {
+        if let Some(current) = current
+            && Rc::ptr_eq(&current.0, &value.0) {
                 *cell.borrow_mut() = None;
             }
-        }
     });
     let core = scene_execution::destroy(&mut value.0.renderer.borrow_mut());
     let shell = runtime::destroy(&mut value.0.runtime.borrow_mut());
@@ -1503,10 +1494,10 @@ pub fn destroy(value: &t) -> Result<(), Error> {
 
 /// The first sight of a layer draws it directly; the second renders it offscreen. `None` when the
 /// target cannot be made: the view then stays direct for as long as the layer does.
-fn make_retained_target(f: &presentation_facts, draws: &[draw]) -> Option<retained_target> {
+fn make_retained_target(f: &presentation_facts, draws: &[Draw]) -> Option<RetainedTarget> {
     let dw = f.drawable_width;
     let dh = f.drawable_height;
-    let exec = create_offscreen(&configuration {
+    let exec = create_offscreen(&Configuration {
         logical_width: f.logical_width,
         logical_height: f.logical_height,
         drawable_width: dw,
@@ -1520,7 +1511,7 @@ fn make_retained_target(f: &presentation_facts, draws: &[draw]) -> Option<retain
     let canvas = Canvas::create(dw, dh);
     let target = offscreen_target(&exec);
     let stepped = step(Some((0.0, 0.0, 0.0, 0.0)), &exec, draws);
-    let fail_with = |canvas: Option<&Canvas::t>| -> Option<retained_target> {
+    let fail_with = |canvas: Option<&Canvas::t>| -> Option<RetainedTarget> {
         if let Some(c) = canvas {
             let _ = Canvas::destroy(c);
         }
@@ -1536,7 +1527,7 @@ fn make_retained_target(f: &presentation_facts, draws: &[draw]) -> Option<retain
                 destination: ir::Rect { x: 0.0, y: 0.0, width: f.logical_width as f64, height: f.logical_height as f64 },
             })]);
             match (published, command) {
-                (Ok(()), Ok(ir_)) => Some(retained_target { target_exec: exec.clone(), target_canvas: canvas, target_ir: Rc::new(ir_) }),
+                (Ok(()), Ok(ir_)) => Some(RetainedTarget { exec: exec.clone(), canvas, ir: Rc::new(ir_) }),
                 _ => fail_with(Some(&canvas)),
             }
         }
@@ -1547,9 +1538,9 @@ fn make_retained_target(f: &presentation_facts, draws: &[draw]) -> Option<retain
 
 /// Adopts a 3D layer's draws, retaining the layer's render once it keeps the same `layer` identity
 /// on consecutive frames. A window execution only; offscreen ones adopt the draws directly.
-pub fn adopt_retained_view(submission_: &submission, density: i64, layer: &Rc<prepared_scene3>, draws: Vec<draw>) -> Result<batch, Error> {
+pub fn adopt_retained_view(submission_: &Submission, density: i64, layer: &Rc<PreparedScene3>, draws: Vec<Draw>) -> Result<Batch, Error> {
     let value = &submission_.0.owner;
-    let direct = |draws: Vec<draw>| adopt_draws(submission_, draws);
+    let direct = |draws: Vec<Draw>| adopt_draws(submission_, draws);
     if !runtime::is_window(&value.0.runtime.borrow()) {
         return direct(draws);
     }
@@ -1558,11 +1549,11 @@ pub fn adopt_retained_view(submission_: &submission, density: i64, layer: &Rc<pr
         Err(_) => return direct(draws),
     };
     let drawable = (f.drawable_width, f.drawable_height);
-    let position = value.0.retained_views.borrow().iter().position(|view| Rc::ptr_eq(&view.view_layer, layer));
-    let current: Option<Rc<retained_view>> = match position {
+    let position = value.0.retained_views.borrow().iter().position(|view| Rc::ptr_eq(&view.layer, layer));
+    let current: Option<Rc<RetainedView>> = match position {
         Some(i) => {
             let view = value.0.retained_views.borrow()[i].clone();
-            if view.view_drawable == drawable {
+            if view.drawable == drawable {
                 Some(view)
             } else {
                 value.0.retained_views.borrow_mut().remove(i);
@@ -1574,18 +1565,18 @@ pub fn adopt_retained_view(submission_: &submission, density: i64, layer: &Rc<pr
     };
     match current {
         None => {
-            let view = Rc::new(retained_view {
-                view_layer: layer.clone(),
-                view_drawable: drawable,
-                view_target: RefCell::new(None),
-                view_failed: Cell::new(false),
-                view_seen: Cell::new(1),
-                view_retain_after: value.0.retain_after.clone(),
+            let view = Rc::new(RetainedView {
+                layer: layer.clone(),
+                drawable,
+                target: RefCell::new(None),
+                failed: Cell::new(false),
+                seen: Cell::new(1),
+                retain_after: value.0.retain_after.clone(),
             });
             let evicted = {
                 let mut views = value.0.retained_views.borrow_mut();
                 views.insert(0, view);
-                if views.len() > retained_view_capacity { views.pop() } else { None }
+                if views.len() > RETAINED_VIEW_CAPACITY { views.pop() } else { None }
             };
             if let Some(evicted) = evicted {
                 release_view(&evicted);
@@ -1593,18 +1584,18 @@ pub fn adopt_retained_view(submission_: &submission, density: i64, layer: &Rc<pr
             direct(draws)
         }
         Some(view) => {
-            view.view_seen.set(view.view_seen.get() + 1);
-            if view.view_target.borrow().is_none() && !view.view_failed.get() && view.view_seen.get() >= value.0.retain_after.get() {
+            view.seen.set(view.seen.get() + 1);
+            if view.target.borrow().is_none() && !view.failed.get() && view.seen.get() >= value.0.retain_after.get() {
                 match make_retained_target(&f, &draws) {
                     Some(target) => {
-                        *view.view_target.borrow_mut() = Some(target);
+                        *view.target.borrow_mut() = Some(target);
                         // from here [view_seen] counts the frames the target serves
-                        view.view_seen.set(0);
+                        view.seen.set(0);
                     }
-                    None => view.view_failed.set(true),
+                    None => view.failed.set(true),
                 }
             }
-            let target = view.view_target.borrow().as_ref().map(|target| (target.target_canvas.clone(), target.target_ir.clone()));
+            let target = view.target.borrow().as_ref().map(|target| (target.canvas.clone(), target.ir.clone()));
             match target {
                 None => direct(draws),
                 Some((canvas, ir_)) => lower_scene2_submission(
@@ -1619,7 +1610,7 @@ pub fn adopt_retained_view(submission_: &submission, density: i64, layer: &Rc<pr
 }
 
 // GPU film leases own their own queue, so their frame pacing never couples with presentation.
-pub fn acquire_gpu() -> Result<gpu, Error> {
+pub fn acquire_gpu() -> Result<Gpu, Error> {
     let operation = "Renderer.acquire_gpu";
     let (device, gpu_shared, gpu_owner_) = acquire_device(operation)?;
     match backend::create_queue(&device) {
@@ -1627,73 +1618,73 @@ pub fn acquire_gpu() -> Result<gpu, Error> {
             release_device(gpu_shared, &gpu_owner_);
             Err(e)
         }
-        Ok(queue) => Ok(gpu(Rc::new(gpu_data {
-            gpu_device: device,
-            gpu_queue: queue,
-            gpu_owner: gpu_owner_,
-            gpu_shared,
-            gpu_released: Cell::new(false),
+        Ok(queue) => Ok(Gpu(Rc::new(GpuData {
+            device,
+            queue,
+            owner: gpu_owner_,
+            shared: gpu_shared,
+            released: Cell::new(false),
         }))),
     }
 }
 
-pub fn gpu_device(value: &gpu) -> Device {
-    value.0.gpu_device.clone()
+pub fn gpu_device(value: &Gpu) -> Device {
+    value.0.device.clone()
 }
 
-pub fn gpu_queue(value: &gpu) -> Queue {
-    value.0.gpu_queue.clone()
+pub fn gpu_queue(value: &Gpu) -> Queue {
+    value.0.queue.clone()
 }
 
 /// True when the device is the presenting window's.
-pub fn gpu_shared(value: &gpu) -> bool {
-    value.0.gpu_shared
+pub fn gpu_shared(value: &Gpu) -> bool {
+    value.0.shared
 }
 
-pub fn release_gpu(value: &gpu) {
-    if !value.0.gpu_released.get() {
-        let owned: Vec<gpu_marks> = value
+pub fn release_gpu(value: &Gpu) {
+    if !value.0.released.get() {
+        let owned: Vec<GpuMarks> = value
             .0
-            .gpu_owner
+            .owner
             .marks_registry
             .borrow()
             .values()
-            .filter(|marks_| Rc::ptr_eq(&marks_.0.marks_gpu.0, &value.0))
+            .filter(|marks_| Rc::ptr_eq(&marks_.0.gpu.0, &value.0))
             .cloned()
             .collect();
         for marks_ in &owned {
             close_gpu_marks(marks_);
         }
-        value.0.gpu_released.set(true);
-        let _ = backend::destroy_queue(&value.0.gpu_queue);
-        release_device(value.0.gpu_shared, &value.0.gpu_owner);
+        value.0.released.set(true);
+        let _ = backend::destroy_queue(&value.0.queue);
+        release_device(value.0.shared, &value.0.owner);
     }
 }
 
 #[allow(non_snake_case)]
-pub mod Native {
+pub mod native {
     use super::*;
 
-    pub use super::{batch, new_scaled_cache, scale_draws, scale_sampled_cached, scale_sampled_resources, scaled_cache, submission};
+    pub use super::{Batch, new_scaled_cache, scale_draws, scale_sampled_cached, scale_sampled_resources, ScaledCache, Submission};
     pub use super::{adopt_draws, adopt_retained_view, begin_submission};
 
     /// The borrowed SDL/runtime shell; its lifetime remains owned by `t`.
-    pub fn runtime_of(value: &t, f: &mut dyn FnMut(&runtime::t)) {
+    pub fn runtime_of(value: &Renderer, f: &mut dyn FnMut(&runtime::t)) {
         f(&value.0.runtime.borrow())
     }
 
     /// The same shell, mutably (an offscreen shell refuses an IME area and a cursor).
-    pub fn runtime_of_mut(value: &t, f: &mut dyn FnMut(&mut runtime::t)) {
+    pub fn runtime_of_mut(value: &Renderer, f: &mut dyn FnMut(&mut runtime::t)) {
         f(&mut value.0.runtime.borrow_mut())
     }
 
-    pub fn gpu_vertices_owner(value: &t) -> scene_execution::gpu_vertices_owner {
+    pub fn gpu_vertices_owner(value: &Renderer) -> scene_execution::GpuVerticesOwner {
         value.0.gpu_owner.scene_vertices.clone()
     }
 
-    pub fn create_offscreen_with_gpu(gpu_: &gpu, configuration_: &configuration) -> Result<t, Error> {
+    pub fn create_offscreen_with_gpu(gpu_: &Gpu, configuration_: &Configuration) -> Result<Renderer, Error> {
         let operation = "Renderer.Native.create_offscreen_with_gpu";
-        if gpu_.0.gpu_released.get() {
+        if gpu_.0.released.get() {
             return Err(fail_error(operation, ErrorKind::StaleHandle, "GPU lease is released"));
         }
         valid_configuration(operation, configuration_)?;
@@ -1710,12 +1701,12 @@ pub mod Native {
                 return Err(e);
             }
         };
-        let renderer = (|| -> Result<scene_execution::t, Error> {
+        let renderer = (|| -> Result<scene_execution::SceneExecution, Error> {
             let driver = ogpu::impl_::create_driver()?;
             renderer_pipeline::create_renderer(
                 &backend_name()?,
-                Some(gpu_.0.gpu_device.clone()),
-                Some(gpu_.0.gpu_owner.scene_vertices.clone()),
+                Some(gpu_.0.device.clone()),
+                Some(gpu_.0.owner.scene_vertices.clone()),
                 true,
                 driver,
                 &surface,
@@ -1726,35 +1717,35 @@ pub mod Native {
                 let _ = runtime::destroy(&mut runtime_);
                 Err(e)
             }
-            Ok(renderer) => Ok(finish_create(false, false, gpu_.0.gpu_owner.clone(), runtime_, renderer)),
+            Ok(renderer) => Ok(finish_create(false, false, gpu_.0.owner.clone(), runtime_, renderer)),
         }
     }
 
     /// A `Marks`-family source for one mark set (specification/marks.md).
-    pub fn create_gpu_marks(gpu_: &gpu) -> Result<gpu_marks, Error> {
+    pub fn create_gpu_marks(gpu_: &Gpu) -> Result<GpuMarks, Error> {
         let operation = "Renderer.create_gpu_marks";
-        if gpu_.0.gpu_released.get() {
+        if gpu_.0.released.get() {
             return Err(fail_error(operation, ErrorKind::StaleHandle, "GPU lease is released"));
         }
-        if gpu_.0.gpu_owner.marks_registry.borrow().len() >= gpu_marks_capacity {
+        if gpu_.0.owner.marks_registry.borrow().len() >= GPU_MARKS_CAPACITY {
             return Err(fail_error(operation, ErrorKind::Capacity, "GPU marks capacity reached"));
         }
         let Some(identity) = fresh_gpu_marks_id() else {
             return Err(fail_error(operation, ErrorKind::Capacity, "GPU marks identity capacity reached"));
         };
-        let value = gpu_marks(Rc::new(gpu_marks_data {
-            marks_id: identity,
-            marks_gpu: gpu_.clone(),
-            marks_domain: std::thread::current().id(),
-            marks_closed: Cell::new(false),
-            marks_stamp: Cell::new(0),
-            marks_count: Cell::new(0),
-            marks_owned: RefCell::new(vec![None; 6]),
-            marks_last: RefCell::new((0..6).map(|_| scene_execution::empty_bytes()).collect()),
-            marks_device: RefCell::new(Vec::new()),
-            marks_registration: RefCell::new(None),
+        let value = GpuMarks(Rc::new(GpuMarksData {
+            id: identity,
+            gpu: gpu_.clone(),
+            domain: std::thread::current().id(),
+            closed: Cell::new(false),
+            stamp: Cell::new(0),
+            count: Cell::new(0),
+            owned: RefCell::new(vec![None; 6]),
+            last: RefCell::new((0..6).map(|_| scene_execution::empty_bytes()).collect()),
+            device: RefCell::new(Vec::new()),
+            registration: RefCell::new(None),
         }));
-        gpu_.0.gpu_owner.marks_registry.borrow_mut().insert(identity, value.clone());
+        gpu_.0.owner.marks_registry.borrow_mut().insert(identity, value.clone());
         Ok(value)
     }
 
@@ -1766,26 +1757,26 @@ pub mod Native {
     /// indirect draw from five uints at `offset`.
     pub fn gpu_marks_token(
         indirect: Option<(Rc<dyn Fn() -> Option<Buffer>>, i64)>,
-        value: &gpu_marks,
+        value: &GpuMarks,
         kind: i64,
         count: i64,
-        attributes: &[marks_source],
+        attributes: &[MarksSource],
     ) -> Result<marks::GpuToken, Error> {
         let operation = "Renderer.gpu_marks";
         let v = &value.0;
-        if v.marks_closed.get() || v.marks_gpu.0.gpu_released.get() {
+        if v.closed.get() || v.gpu.0.released.get() {
             return Err(fail_error(operation, ErrorKind::StaleHandle, "GPU marks or lease is closed"));
         }
-        if v.marks_domain != std::thread::current().id() {
+        if v.domain != std::thread::current().id() {
             return Err(fail_error(operation, ErrorKind::InvalidArgument, "GPU marks used on another domain"));
         }
         if count <= 0 || count > 1_000_000 || attributes.len() != 5 {
             return Err(fail_error(operation, ErrorKind::InvalidArgument, "a mark set has one to 1,000,000 instances and five attributes"));
         }
-        let mut changed = v.marks_registration.borrow().is_none() || v.marks_count.get() != count;
+        let mut changed = v.registration.borrow().is_none() || v.count.get() != count;
         let mut device: Vec<(Rc<dyn Fn() -> Option<Buffer>>, Buffer)> = Vec::new();
         let upload = |index: usize, data: &bytes, changed: &mut bool| -> Result<Buffer, Error> {
-            let owned = v.marks_owned.borrow()[index].clone();
+            let owned = v.owned.borrow()[index].clone();
             let length = data.borrow().len() as i64;
             let size = 16.max(length);
             let buffer = match owned {
@@ -1793,7 +1784,7 @@ pub mod Native {
                 _ => {
                     let capacity = 16.max(2 * length);
                     let b = backend::create_buffer(
-                        &v.marks_gpu.0.gpu_device,
+                        &v.gpu.0.device,
                         BufferDescriptor {
                             label: Some("Marks attribute".to_owned()),
                             size: capacity,
@@ -1804,18 +1795,18 @@ pub mod Native {
                     if let Some(old) = &owned {
                         let _ = backend::destroy_buffer(old);
                     }
-                    v.marks_owned.borrow_mut()[index] = Some(b.clone());
-                    v.marks_last.borrow_mut()[index] = scene_execution::empty_bytes();
+                    v.owned.borrow_mut()[index] = Some(b.clone());
+                    v.last.borrow_mut()[index] = scene_execution::empty_bytes();
                     *changed = true;
                     b
                 }
             };
-            let last = v.marks_last.borrow()[index].clone();
+            let last = v.last.borrow()[index].clone();
             if Rc::ptr_eq(&last, data) || *last.borrow() == *data.borrow() {
                 Ok(buffer)
             } else {
                 backend::write_buffer(&buffer, 0, &data.borrow())?;
-                v.marks_last.borrow_mut()[index] = data.clone();
+                v.last.borrow_mut()[index] = data.clone();
                 *changed = true;
                 Ok(buffer)
             }
@@ -1835,11 +1826,11 @@ pub mod Native {
         let mut buffers: Vec<Buffer> = Vec::new();
         for index in 0..5 {
             let buffer = match &attributes[index] {
-                marks_source::Host(data, stride) => {
+                MarksSource::Host(data, stride) => {
                     strides[index] = *stride;
                     upload(index, data, &mut changed)?
                 }
-                marks_source::Device(source, stride) => {
+                MarksSource::Device(source, stride) => {
                     strides[index] = *stride;
                     match source() {
                         Some(b) => {
@@ -1854,46 +1845,46 @@ pub mod Native {
         }
         // A device colour is a region's float r, g, b (mode 1); a host one is packed words.
         let mode = |index: usize| match attributes[index] {
-            marks_source::Device(..) => 1i64,
-            marks_source::Host(..) => 0,
+            MarksSource::Device(..) => 1i64,
+            MarksSource::Host(..) => 0,
         };
         let mut params = vec![0u8; 32];
         for (i, word) in [kind, strides[0], strides[1], strides[2], strides[3], strides[4], mode(2), mode(3)].into_iter().enumerate() {
             params[i * 4..i * 4 + 4].copy_from_slice(&(word as i32).to_le_bytes());
         }
         let params_buffer = upload(5, &new_bytes(params), &mut changed)?;
-        let token = || marks::gpu_token(v.marks_id, count, v.marks_stamp.get()).map_err(|m| oerror::make(operation, ErrorKind::InvalidArgument, &m));
-        let same_device = device.len() == v.marks_device.borrow().len()
-            && device.iter().zip(v.marks_device.borrow().iter()).all(|((_, a), (_, b))| same_buffer(a, b));
+        let token = || marks::gpu_token(v.id, count, v.stamp.get()).map_err(|m| oerror::make(operation, ErrorKind::InvalidArgument, &m));
+        let same_device = device.len() == v.device.borrow().len()
+            && device.iter().zip(v.device.borrow().iter()).all(|((_, a), (_, b))| same_buffer(a, b));
         if !changed && valid_gpu_marks(value) && same_device {
             return token();
         }
         unregister_marks(value);
-        v.marks_stamp.set(v.marks_stamp.get() + 1);
-        v.marks_count.set(count);
-        *v.marks_device.borrow_mut() = device;
+        v.stamp.set(v.stamp.get() + 1);
+        v.count.set(count);
+        *v.device.borrow_mut() = device;
         let mut extra: Vec<Buffer> = buffers[1..].to_vec();
         extra.push(params_buffer);
         let owner_value = value.clone();
         match scene_execution::register_gpu_vertices(
-            &v.marks_gpu.0.gpu_owner.scene_vertices,
+            &v.gpu.0.owner.scene_vertices,
             Some(extra),
             None,
             indirect,
             None,
             None,
             &gpu_marks_key(value),
-            &v.marks_gpu.0.gpu_device,
+            &v.gpu.0.device,
             &buffers[0],
             4 * count,
             Box::new(move || valid_gpu_marks(&owner_value)),
         ) {
             Err(e) => {
-                v.marks_device.borrow_mut().clear();
+                v.device.borrow_mut().clear();
                 Err(e)
             }
             Ok(registration) => {
-                *v.marks_registration.borrow_mut() = Some(registration);
+                *v.registration.borrow_mut() = Some(registration);
                 token()
             }
         }
@@ -1902,31 +1893,31 @@ pub mod Native {
     pub use super::close_gpu_marks;
 
     /// Draws the renderer encodes for the batch after neighbours merge (-1 on error).
-    pub fn encoded_draws_for_test(batch_: &batch) -> i64 {
-        scene_execution::Private::coalesced_draws_for_test(&batch_.batch_draws)
+    pub fn encoded_draws_for_test(batch_: &Batch) -> i64 {
+        scene_execution::private::coalesced_draws_for_test(&batch_.draws)
     }
 
-    pub fn snapshot_count_for_test(value: &t) -> i64 {
+    pub fn snapshot_count_for_test(value: &Renderer) -> i64 {
         side_lru::length(&mut value.0.snapshots.borrow_mut())
     }
 
-    pub fn lower_scene2(submission_: &submission, density: i64, resource_: &dyn Fn(i64) -> Option<retained_resource>, ir_: &Rc<RenderIr>) -> Result<batch, Error> {
+    pub fn lower_scene2(submission_: &Submission, density: i64, resource_: &dyn Fn(i64) -> Option<retained_resource>, ir_: &Rc<RenderIr>) -> Result<Batch, Error> {
         lower_scene2_submission(submission_, density, resource_, ir_)
     }
 
     pub fn lower_scene2_segment(
-        submission_: &submission,
+        submission_: &Submission,
         identity: i64,
         version: i64,
         cacheable: bool,
         density: i64,
         resource_: &dyn Fn(i64) -> Option<retained_resource>,
         ir_: &Rc<RenderIr>,
-    ) -> Result<batch, Error> {
+    ) -> Result<Batch, Error> {
         super::lower_scene2_segment(submission_, identity, version, cacheable, density, resource_, ir_)
     }
 
-    pub fn lower_ui(submission_: &submission, density: i64, resource_: &dyn Fn(i64) -> Option<retained_resource>, ui: &Shapes) -> Result<batch, Error> {
+    pub fn lower_ui(submission_: &Submission, density: i64, resource_: &dyn Fn(i64) -> Option<retained_resource>, ui: &Shapes) -> Result<Batch, Error> {
         super::lower_ui(submission_, density, resource_, ui)
     }
 
@@ -1934,32 +1925,32 @@ pub mod Native {
         clear: Option<(f64, f64, f64, f64)>,
         identity: Option<&str>,
         version: Option<i64>,
-        submission_: &submission,
-        batches: &[batch],
+        submission_: &Submission,
+        batches: &[Batch],
     ) -> Result<(), Error> {
         step_submission(clear, identity, version, submission_, batches)
     }
 
-    pub fn replay(clear: Option<(f64, f64, f64, f64)>, identity: &str, version: i64, value: &t) -> Result<Option<()>, Error> {
+    pub fn replay(clear: Option<(f64, f64, f64, f64)>, identity: &str, version: i64, value: &Renderer) -> Result<Option<()>, Error> {
         replay_step(clear, identity, version, value)
     }
 
     /// Idempotently releases an unsubmitted transaction.
-    pub fn cancel(submission_: &submission) {
+    pub fn cancel(submission_: &Submission) {
         close_submission(submission_)
     }
 
     /// What this renderer holds to stage texture uploads through.
-    pub fn staging_bytes(value: &t) -> i64 {
-        scene_execution::Private::staging_bytes(&value.0.renderer.borrow())
+    pub fn staging_bytes(value: &Renderer) -> i64 {
+        scene_execution::private::staging_bytes(&value.0.renderer.borrow())
     }
 
     /// Whether the device has memoryless attachments, and how many this renderer's pool holds.
-    pub fn memoryless_attachments(value: &t) -> (bool, i64) {
-        scene_execution::Private::memoryless_attachments(&value.0.renderer.borrow())
+    pub fn memoryless_attachments(value: &Renderer) -> (bool, i64) {
+        scene_execution::private::memoryless_attachments(&value.0.renderer.borrow())
     }
 
-    pub fn retained_scene2_segment_stats(value: &t) -> (i64, i64, i64) {
+    pub fn retained_scene2_segment_stats(value: &Renderer) -> (i64, i64, i64) {
         (
             renderer_retained_plans::segment_count(&mut value.0.retained_plans.borrow_mut()),
             value.0.retained_scene2_segment_hits.get(),
@@ -1968,41 +1959,41 @@ pub mod Native {
     }
 }
 
-pub fn create_gpu_marks(gpu_: &gpu) -> Result<gpu_marks, Error> {
-    Native::create_gpu_marks(gpu_)
+pub fn create_gpu_marks(gpu_: &Gpu) -> Result<GpuMarks, Error> {
+    native::create_gpu_marks(gpu_)
 }
 
 pub fn gpu_marks_token(
     indirect: Option<(Rc<dyn Fn() -> Option<Buffer>>, i64)>,
-    value: &gpu_marks,
+    value: &GpuMarks,
     kind: i64,
     count: i64,
-    attributes: &[marks_source],
+    attributes: &[MarksSource],
 ) -> Result<marks::GpuToken, Error> {
-    Native::gpu_marks_token(indirect, value, kind, count, attributes)
+    native::gpu_marks_token(indirect, value, kind, count, attributes)
 }
 
-static next_gpu_positions: AtomicI64 = AtomicI64::new(0);
+static NEXT_GPU_POSITIONS: AtomicI64 = AtomicI64::new(0);
 
 /// The packed float3 positions, normals (if registered) and count that the valid registration under
 /// `key` borrows, for another consumer of the same device (the path tracer); the producer keeps them
 /// while the device mesh naming `key` lives. Initial domain.
-pub fn gpu_positions(gpu_: &gpu, key: &str) -> Option<(Buffer, Option<Buffer>, i64)> {
-    if gpu_.0.gpu_released.get() {
+pub fn gpu_positions(gpu_: &Gpu, key: &str) -> Option<(Buffer, Option<Buffer>, i64)> {
+    if gpu_.0.released.get() {
         return None;
     }
-    match scene_execution::Private::find_gpu_vertices(&gpu_.0.gpu_owner.scene_vertices, key) {
+    match scene_execution::private::find_gpu_vertices(&gpu_.0.owner.scene_vertices, key) {
         Some((positions, extra, count)) if extra.len() <= 1 => Some((positions, extra.into_iter().next(), count)),
         _ => None,
     }
 }
 
 /// The indices (count) and colours (width) borrowed under `key`.
-pub fn gpu_streams(gpu_: &gpu, key: &str) -> Option<(Option<(Buffer, i64)>, Option<(Buffer, i64)>)> {
-    if gpu_.0.gpu_released.get() {
+pub fn gpu_streams(gpu_: &Gpu, key: &str) -> Option<(Option<(Buffer, i64)>, Option<(Buffer, i64)>)> {
+    if gpu_.0.released.get() {
         return None;
     }
-    scene_execution::Private::find_gpu_streams(&gpu_.0.gpu_owner.scene_vertices, key)
+    scene_execution::private::find_gpu_streams(&gpu_.0.owner.scene_vertices, key)
 }
 
 /// Borrows another producer's `count` packed float3 positions (and normals) for a Scene3 mesh drawn
@@ -2012,7 +2003,7 @@ pub fn gpu_streams(gpu_: &gpu, key: &str) -> Option<(Option<(Buffer, i64)>, Opti
 /// borrows packed float3/float4 colours with their component width. At most 128 borrowed sources are
 /// live.
 pub fn register_gpu_positions(
-    gpu_: &gpu,
+    gpu_: &Gpu,
     positions: &Buffer,
     normals: Option<Buffer>,
     indices: Option<(Buffer, i64)>,
@@ -2021,23 +2012,23 @@ pub fn register_gpu_positions(
     valid: Rc<dyn Fn() -> bool>,
 ) -> Result<(String, Box<dyn Fn()>), Error> {
     let operation = "Renderer.register_gpu_positions";
-    if gpu_.0.gpu_released.get() {
+    if gpu_.0.released.get() {
         return Err(fail_error(operation, ErrorKind::StaleHandle, "GPU lease is released"));
     }
-    let key = format!("positions:{}", next_gpu_positions.fetch_add(1, Ordering::SeqCst));
+    let key = format!("positions:{}", NEXT_GPU_POSITIONS.fetch_add(1, Ordering::SeqCst));
     let lease = gpu_.clone();
     let registration = scene_execution::register_gpu_vertices(
-        &gpu_.0.gpu_owner.scene_vertices,
+        &gpu_.0.owner.scene_vertices,
         Some(normals.into_iter().collect()),
         Some(12),
         None,
         indices,
         colors,
         &key,
-        &gpu_.0.gpu_device,
+        &gpu_.0.device,
         positions,
         count,
-        Box::new(move || !lease.0.gpu_released.get() && valid()),
+        Box::new(move || !lease.0.released.get() && valid()),
     )?;
-    Ok((key, Box::new(move || scene_execution::Private::unregister_gpu_vertices(&registration))))
+    Ok((key, Box::new(move || scene_execution::private::unregister_gpu_vertices(&registration))))
 }

@@ -10,7 +10,7 @@ fn window_scene2_argument() {
     }
     let before = ogpu::impl_::live_handles().unwrap();
     // The retained-argument frame sweep measures rendering, not display pacing.
-    let runtime = match renderer::create(&renderer::configuration { logical_width: 4, logical_height: 4, drawable_width: 4, drawable_height: 4, vsync: false, ..renderer::default_configuration() }) {
+    let runtime = match renderer::create(&renderer::Configuration { logical_width: 4, logical_height: 4, drawable_width: 4, drawable_height: 4, vsync: false, ..renderer::default_configuration() }) {
         Ok(runtime) => runtime,
         Err(e) => {
             println!("runtime-next scene2 retained argument: skipped ({})", ogpu::error::to_string(&e));

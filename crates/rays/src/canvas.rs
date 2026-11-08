@@ -13,7 +13,7 @@ use std::rc::Rc;
 
 pub struct canvas_data {
     resource: RCanvas::t,
-    execution: RefCell<Option<rr::t>>,
+    execution: RefCell<Option<rr::Renderer>>,
     destroyed: Cell<bool>,
     caches: Layer::cache_context,
     world_caches: world::Private::cache_context,
@@ -30,7 +30,7 @@ fn message(operation: &str, error: &runtime_resources::error) -> String {
     format!("{operation}: {}", ogpu::error::to_string(error))
 }
 
-fn renderer_message(operation: &str, error: &rr::error) -> String {
+fn renderer_message(operation: &str, error: &ogpu::error::Error) -> String {
     format!("{operation}: {}", ogpu::error::to_string(error))
 }
 
@@ -70,7 +70,7 @@ fn execution(density: i64, value: &t) -> Result<(), String> {
         return Ok(());
     }
     let (width, height) = size(value)?;
-    let configuration = rr::configuration {
+    let configuration = rr::Configuration {
         logical_width: width / density,
         logical_height: height / density,
         drawable_width: width,
@@ -189,11 +189,11 @@ pub fn gpu_source(value: &t) -> Result<(i64, i64, Box<dyn Fn() -> Option<Texture
 pub mod Private {
     use super::*;
 
-    pub type native_stats = rr::stats;
+    pub type native_stats = rr::Stats;
 
-    pub fn native_stats(value: &t) -> Result<rr::stats, String> {
+    pub fn native_stats(value: &t) -> Result<rr::Stats, String> {
         match value.0.execution.borrow().as_ref() {
-            None => Ok(rr::zero_stats),
+            None => Ok(rr::ZERO_STATS),
             Some(execution) => rr::stats(execution).map_err(|e| renderer_message("Canvas.Private.native_stats", &e)),
         }
     }

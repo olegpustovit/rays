@@ -5,7 +5,7 @@
 use ogpu::error;
 
 thread_local! {
-    static KEEP: std::cell::RefCell<Option<::renderer::renderer::gpu>> = const { std::cell::RefCell::new(None) };
+    static KEEP: std::cell::RefCell<Option<::renderer::renderer::Gpu>> = const { std::cell::RefCell::new(None) };
 }
 
 pub fn release_keepalive() {

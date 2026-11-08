@@ -25,24 +25,24 @@ fn mesh() -> rays::mesh::t {
     rays::mesh::recalculate_normals(&rays::mesh::plane(4., 4.).unwrap())
 }
 
-fn material() -> p::material {
+fn material() -> p::Material {
     p::material(Some(0.5), Some(0.2), None, Some(0.3), rgb(0.7, 0.5, 0.3))
 }
 
-fn light() -> p::light {
-    p::light { at: vec3::create(0.5, 0.8, 2.), target: vec3::create(0.5, 0.8, 0.), size: (1.5, 1.), color: rgb(1., 1., 1.), intensity: 6. }
+fn light() -> p::Light {
+    p::Light { at: vec3::create(0.5, 0.8, 2.), target: vec3::create(0.5, 0.8, 0.), size: (1.5, 1.), color: rgb(1., 1., 1.), intensity: 6. }
 }
 
-fn environment() -> p::environment {
-    p::environment {
+fn environment() -> p::Environment {
+    p::Environment {
         sky: rgb(0.5, 0.6, 0.8),
         ground: rgb(0.2, 0.2, 0.2),
-        panels: vec![p::panel { direction: vec3::create(0.3, 0.6, 0.74), width: 0.5, height: 0.35, softness: 0.2, color: rgb(1., 0.9, 0.8), intensity: 3. }],
+        panels: vec![p::Panel { direction: vec3::create(0.3, 0.6, 0.74), width: 0.5, height: 0.35, softness: 0.2, color: rgb(1., 0.9, 0.8), intensity: 3. }],
     }
 }
 
-fn dome() -> p::scene {
-    p::scene { objects: vec![(mesh(), material())], spheres: vec![], strands: vec![], environment: environment(), lights: vec![light()] }
+fn dome() -> p::Scene {
+    p::Scene { objects: vec![(mesh(), material())], spheres: vec![], strands: vec![], environment: environment(), lights: vec![light()] }
 }
 
 fn camera() -> rays::camera::t {
@@ -111,7 +111,7 @@ fn has(fragment: &str, line: &str) -> bool {
 
 fn scenario(label: &str, instanced: bool, world: Option<&w::baked>) {
     let (width, height, frames) = (env("PT_W", 16), env("PT_H", 12), env("PT_FRAMES", 2));
-    let mut t = get(p::create(&p::create_options { spp: Some(2), bounces: Some(4), ..Default::default() }, width, height, &dome()));
+    let mut t = get(p::create(&p::CreateOptions { spp: Some(2), bounces: Some(4), ..Default::default() }, width, height, &dome()));
     get(p::set_world(&mut t, world));
     if instanced {
         get(p::replace_mesh(&mut t, &get(p::scene_mesh(&[(mat4::identity(), get(p::mesh(None, None, &[(mesh(), material())])))]))));
@@ -121,7 +121,7 @@ fn scenario(label: &str, instanced: bool, world: Option<&w::baked>) {
     // the CPU walker accumulates the same frames, each before the device renders it
     let mut accum = vec![0.; (4 * width * height) as usize];
     for _ in 0..frames {
-        accum = get(p::Private::cpu_trace(&mut t, &camera, &accum));
+        accum = get(p::private::cpu_trace(&mut t, &camera, &accum));
         get(p::render(&mut t, &camera));
         get(p::flush(&mut t));
     }
@@ -151,7 +151,7 @@ fn scenario(label: &str, instanced: bool, world: Option<&w::baked>) {
     // static shape gates (specification/gpu-codegen.md): one atomic, no 64-bit arithmetic in the loops but
     // their bound checks, within twice the handwritten kernel's lines; register pressure: Metal lowers a
     // pipeline's thread limit when a kernel needs more registers
-    let (threads, source) = get(p::Private::lisp_kernel(&mut t, "trace"));
+    let (threads, source) = get(p::private::lisp_kernel(&mut t, "trace"));
     let lines: Vec<&str> = source.split('\n').collect();
     assert_eq!(lines.iter().filter(|l| has("atomic_fetch_or_explicit(", l)).count(), 1);
     let from = lines.iter().position(|l| has("for(r", l)).map(|i| &lines[i..]).unwrap_or(&[]);
@@ -168,8 +168,8 @@ fn scenario(label: &str, instanced: bool, world: Option<&w::baked>) {
 
 /// the tracer types its declarations only at their call sites: here they are checked whole
 fn library() {
-    get(p::Private::check_library());
-    get(p::Private::check_sketch());
+    get(p::private::check_library());
+    get(p::private::check_sketch());
 }
 
 /// the kernel cache: a first tracer stores the dome's three kernels, the dome scenario then renders from
@@ -180,12 +180,12 @@ fn cache() {
     }
     let directory = std::env::temp_dir().join(format!("rays-kernels-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&directory);
-    *p::Private::kernel_cache.lock().unwrap() = Some(directory.to_string_lossy().to_string());
+    *p::private::kernel_cache.lock().unwrap() = Some(directory.to_string_lossy().to_string());
     let trace = || {
-        p::Private::forget_memory_cache();
-        let mut t = get(p::create(&p::create_options { spp: Some(2), bounces: Some(4), ..Default::default() }, 16, 12, &dome()));
+        p::private::forget_memory_cache();
+        let mut t = get(p::create(&p::CreateOptions { spp: Some(2), bounces: Some(4), ..Default::default() }, 16, 12, &dome()));
         pt::frame(&mut t, &camera());
-        let (_, source) = get(p::Private::lisp_kernel(&mut t, "trace"));
+        let (_, source) = get(p::private::lisp_kernel(&mut t, "trace"));
         p::destroy(&mut t);
         source
     };

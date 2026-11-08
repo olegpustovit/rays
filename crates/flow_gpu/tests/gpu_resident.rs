@@ -23,7 +23,7 @@ const _: fn() = || {
     let _ = <host::T as AmbiguousIfSend<_>>::check;
 };
 
-fn start() -> Option<renderer::renderer::gpu> {
+fn start() -> Option<renderer::renderer::Gpu> {
     if !common::gpu() { return None; }
     let gpu = common::lease();
     if !b::capabilities(&renderer::renderer::gpu_device(&gpu)).compute_pipeline {
@@ -64,7 +64,7 @@ fn array(v: &Value) -> &[f64] {
     }
 }
 
-fn fold_case(gpu: &renderer::renderer::gpu, n: i64, levels: i64, keep: &str, slot: &str, range: &str) {
+fn fold_case(gpu: &renderer::renderer::Gpu, n: i64, levels: i64, keep: &str, slot: &str, range: &str) {
     let body = format!("(let* [p (fold [b (map (fn [i] [(+ i (floor t)) (* i 2) 0]) (array/range {n}))] [d (range {levels})] (let* [kept (filter (fn [i] {keep}) (array/range (array/count b)))] (map (fn [i] (let* [q (array/nth b (int (array/nth kept {slot}))) ] [(+ q.x (+ 1 (floor t))) q.y 0])) (array/range {range}))))] (draw/points p))");
     let (program, root) = draw_program(&body);
     let expected = points(&prepare(&program), root, None, 0.0);

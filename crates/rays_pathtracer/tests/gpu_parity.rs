@@ -91,14 +91,14 @@ fn parity() {
     let shininess = [1., 2000.];
     let geometry: Vec<_> = probes().iter().map(|center| meshes::uv_sphere(*center, 64, 32, 0.9)).collect();
     let objects: Vec<_> = geometry.iter().enumerate().map(|(i, g)| (g.clone(), p::material(Some(roughness(shininess[i])), None, None, None, rgb(albedo, albedo, albedo)))).collect();
-    let tracing = p::scene {
+    let tracing = p::Scene {
         objects,
         spheres: vec![],
         strands: vec![],
-        environment: p::environment { sky: rgb(0., 0., 0.), ground: rgb(0., 0., 0.), panels: vec![] },
+        environment: p::Environment { sky: rgb(0., 0., 0.), ground: rgb(0., 0., 0.), panels: vec![] },
         lights: vec![],
     };
-    let mut tracer = get(p::create(&p::create_options { spp: Some(4), ..Default::default() }, WIDTH as i64, HEIGHT as i64, &tracing));
+    let mut tracer = get(p::create(&p::CreateOptions { spp: Some(4), ..Default::default() }, WIDTH as i64, HEIGHT as i64, &tracing));
     let surface = get(canvas::create(WIDTH as i64, HEIGHT as i64));
     let nodes: Vec<_> = geometry
         .iter()

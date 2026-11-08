@@ -1,6 +1,6 @@
 //! lib/renderer/test_shapes_lowering.ml: published batch pixels and exact allocation ceilings.
 use crate::common;
-use ::renderer::renderer::{self, Native};
+use ::renderer::renderer::{self, native};
 use scene_command::render_ir::{self as ir, Blend, Command};
 use scene_command::ui_batch::Builder;
 use std::rc::Rc;
@@ -17,7 +17,7 @@ fn gpu_shapes_lowering() {
     if !common::gpu() {
         return;
     }
-    let execution = renderer::create_offscreen(&renderer::configuration {
+    let execution = renderer::create_offscreen(&renderer::Configuration {
         logical_width: WIDTH,
         logical_height: HEIGHT,
         drawable_width: WIDTH,
@@ -34,9 +34,9 @@ fn gpu_shapes_lowering() {
     let ir_ = Rc::new(ir::create_owned(vec![Command::SetBlend(Blend::Alpha), Command::Shapes(builder.publish().expect("publish"))]).expect("the batch is not a scene"));
     let frame = || -> Vec<u8> {
         let submission = renderer::begin_submission(&execution).unwrap();
-        let batch = Native::lower_scene2(&submission, 1, &|_| None, &ir_).unwrap();
-        let stepped = Native::step(Some((0.0, 0.0, 0.0, 1.0)), None, None, &submission, &[batch]);
-        Native::cancel(&submission);
+        let batch = native::lower_scene2(&submission, 1, &|_| None, &ir_).unwrap();
+        let stepped = native::step(Some((0.0, 0.0, 0.0, 1.0)), None, None, &submission, &[batch]);
+        native::cancel(&submission);
         stepped.unwrap();
         renderer::capture(&execution).unwrap()
     };

@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 /// A resolved resource id. `Text` is shared by `Rc`: a stamp compares its `Text::identity`.
 #[derive(Clone)]
-pub enum resource {
+pub enum Resource {
     Image(Image::t),
     Text(Rc<Text::t>),
     Canvas(Canvas::t),
@@ -15,45 +15,45 @@ pub enum resource {
 
 /// The id a command names, the resource's identity (the OCaml physical equality) and its generation.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum resource_stamp {
-    Image_stamp(i64, i64, i64),
-    Text_stamp(i64, i64, i64),
-    Canvas_stamp(i64, i64, i64),
+pub enum ResourceStamp {
+    ImageStamp(i64, i64, i64),
+    TextStamp(i64, i64, i64),
+    CanvasStamp(i64, i64, i64),
 }
 
-pub struct plan {
-    pub plan_ir_id: i64,
-    pub plan_command_count: i64,
-    pub plan_source_bytes: i64,
-    pub plan_density: i64,
-    pub plan_extent: (i64, i64, i64, i64),
-    pub plan_resources: Vec<resource_stamp>,
-    pub plan_ir: Rc<RenderIr>,
-    pub plan_draws: Vec<crate::scene_execution::draw>,
+pub struct Plan {
+    pub ir_id: i64,
+    pub command_count: i64,
+    pub source_bytes: i64,
+    pub density: i64,
+    pub extent: (i64, i64, i64, i64),
+    pub resources: Vec<ResourceStamp>,
+    pub ir: Rc<RenderIr>,
+    pub draws: Vec<crate::scene_execution::Draw>,
 }
 
-pub type plan_ref = Rc<RefCell<plan>>;
+pub type PlanRef = Rc<RefCell<Plan>>;
 
-pub struct segment {
-    pub segment_version: i64,
-    pub segment_density: i64,
-    pub segment_width: i64,
-    pub segment_height: i64,
-    pub segment_draws: Vec<crate::scene_execution::draw>,
+pub struct Segment {
+    pub version: i64,
+    pub density: i64,
+    pub width: i64,
+    pub height: i64,
+    pub draws: Vec<crate::scene_execution::Draw>,
 }
 
-pub struct t {
+pub struct RetainedPlans {
     by_fingerprint: side_lru::Table,
-    by_ir: Rc<RefCell<HashMap<i64, plan_ref>>>,
+    by_ir: Rc<RefCell<HashMap<i64, PlanRef>>>,
     segments: side_lru::Table,
 }
 
-fn plan_of(item: &Item) -> plan_ref {
-    item.clone().downcast::<RefCell<plan>>().unwrap_or_else(|_| unreachable!("plan table item"))
+fn plan_of(item: &Item) -> PlanRef {
+    item.clone().downcast::<RefCell<Plan>>().unwrap_or_else(|_| unreachable!("plan table item"))
 }
 
-pub fn create() -> t {
-    let by_ir: Rc<RefCell<HashMap<i64, plan_ref>>> = Rc::new(RefCell::new(HashMap::new()));
+pub fn create() -> RetainedPlans {
+    let by_ir: Rc<RefCell<HashMap<i64, PlanRef>>> = Rc::new(RefCell::new(HashMap::new()));
     let released = by_ir.clone();
     let by_fingerprint = side_lru::create(
         lru::cache("renderer.plans"),
@@ -61,72 +61,70 @@ pub fn create() -> t {
         64 * 1024 * 1024,
         Box::new(move |_, item| {
             let released_plan = plan_of(&item);
-            let id = released_plan.borrow().plan_ir_id;
+            let id = released_plan.borrow().ir_id;
             let current = released.borrow().get(&id).cloned();
-            if let Some(current) = current {
-                if Rc::ptr_eq(&current, &released_plan) {
+            if let Some(current) = current
+                && Rc::ptr_eq(&current, &released_plan) {
                     released.borrow_mut().remove(&id);
                 }
-            }
         }),
         16,
     );
-    t {
+    RetainedPlans {
         by_fingerprint,
         by_ir,
         segments: side_lru::create(lru::cache("renderer.segments"), true, 64 * 1024 * 1024, Box::new(|_, _| {}), 256),
     }
 }
 
-pub fn find(value: &mut t, fingerprint: i64) -> Option<plan_ref> {
+pub fn find(value: &mut RetainedPlans, fingerprint: i64) -> Option<PlanRef> {
     side_lru::find(&mut value.by_fingerprint, &TableKey::Int(fingerprint)).map(|item| plan_of(&item))
 }
 
-pub fn find_ir(value: &t, ir_id: i64) -> Option<plan_ref> {
+pub fn find_ir(value: &RetainedPlans, ir_id: i64) -> Option<PlanRef> {
     value.by_ir.borrow().get(&ir_id).cloned()
 }
 
-pub fn add(value: &mut t, fingerprint: i64, plan_: plan_ref) {
+pub fn add(value: &mut RetainedPlans, fingerprint: i64, plan_: PlanRef) {
     let (bytes, ir_id) = {
         let p = plan_.borrow();
-        (p.plan_source_bytes, p.plan_ir_id)
+        (p.source_bytes, p.ir_id)
     };
     let item: Item = plan_.clone();
     side_lru::add(&mut value.by_fingerprint, bytes, TableKey::Int(fingerprint), item);
     value.by_ir.borrow_mut().insert(ir_id, plan_);
 }
 
-pub fn rebind(value: &t, plan_: &plan_ref, ir_id: i64, ir: &Rc<RenderIr>) {
-    let old_id = plan_.borrow().plan_ir_id;
+pub fn rebind(value: &RetainedPlans, plan_: &PlanRef, ir_id: i64, ir: &Rc<RenderIr>) {
+    let old_id = plan_.borrow().ir_id;
     if old_id != ir_id {
         let current = value.by_ir.borrow().get(&old_id).cloned();
-        if let Some(current) = current {
-            if Rc::ptr_eq(&current, plan_) {
+        if let Some(current) = current
+            && Rc::ptr_eq(&current, plan_) {
                 value.by_ir.borrow_mut().remove(&old_id);
             }
-        }
         let mut p = plan_.borrow_mut();
-        p.plan_ir_id = ir_id;
-        p.plan_ir = ir.clone();
+        p.ir_id = ir_id;
+        p.ir = ir.clone();
         drop(p);
         value.by_ir.borrow_mut().insert(ir_id, plan_.clone());
     }
 }
 
-pub fn find_segment(value: &mut t, identity: i64) -> Option<Rc<segment>> {
-    side_lru::find(&mut value.segments, &TableKey::Int(identity)).map(|item| item.downcast::<segment>().unwrap_or_else(|_| unreachable!("segment table item")))
+pub fn find_segment(value: &mut RetainedPlans, identity: i64) -> Option<Rc<Segment>> {
+    side_lru::find(&mut value.segments, &TableKey::Int(identity)).map(|item| item.downcast::<Segment>().unwrap_or_else(|_| unreachable!("segment table item")))
 }
 
-pub fn add_segment(value: &mut t, identity: i64, bytes: i64, segment_: segment) {
+pub fn add_segment(value: &mut RetainedPlans, identity: i64, bytes: i64, segment_: Segment) {
     let item: Item = Rc::new(segment_);
     side_lru::add(&mut value.segments, bytes, TableKey::Int(identity), item);
 }
 
-pub fn segment_count(value: &mut t) -> i64 {
+pub fn segment_count(value: &mut RetainedPlans) -> i64 {
     side_lru::length(&mut value.segments)
 }
 
-pub fn clear(value: &mut t) {
+pub fn clear(value: &mut RetainedPlans) {
     side_lru::clear(&mut value.by_fingerprint);
     value.by_ir.borrow_mut().clear();
     side_lru::clear(&mut value.segments);
@@ -144,12 +142,12 @@ pub fn plan_source_bytes(commands: &[Command]) -> i64 {
         .sum()
 }
 
-pub fn same_resources(left: &[resource_stamp], right: &[resource_stamp]) -> bool {
+pub fn same_resources(left: &[ResourceStamp], right: &[ResourceStamp]) -> bool {
     left == right
 }
 
 /// Whether every resource the commands name is live, and the stamps of those that are.
-pub fn resource_stamps(resolve: &dyn Fn(i64) -> Option<resource>, commands: &[Command]) -> (bool, Vec<resource_stamp>) {
+pub fn resource_stamps(resolve: &dyn Fn(i64) -> Option<Resource>, commands: &[Command]) -> (bool, Vec<ResourceStamp>) {
     let mut ids: Vec<i64> = Vec::new();
     let mut missing = false;
     for command in commands {
@@ -165,25 +163,25 @@ pub fn resource_stamps(resolve: &dyn Fn(i64) -> Option<resource>, commands: &[Co
     for id in ids {
         match resolve(id) {
             None => missing = true,
-            Some(resource::Image(image)) => {
+            Some(Resource::Image(image)) => {
                 if Image::gpu_snapshot(&image).is_err() {
                     missing = true;
                 } else {
-                    stamps.push(resource_stamp::Image_stamp(id, Image::identity(&image), Image::generation(&image)));
+                    stamps.push(ResourceStamp::ImageStamp(id, Image::identity(&image), Image::generation(&image)));
                 }
             }
-            Some(resource::Text(text)) => {
+            Some(Resource::Text(text)) => {
                 if Text::destroyed(&text) {
                     missing = true;
                 } else {
-                    stamps.push(resource_stamp::Text_stamp(id, Text::identity(&text), Text::generation(&text)));
+                    stamps.push(ResourceStamp::TextStamp(id, Text::identity(&text), Text::generation(&text)));
                 }
             }
-            Some(resource::Canvas(canvas)) => {
+            Some(Resource::Canvas(canvas)) => {
                 if Canvas::destroyed(&canvas) {
                     missing = true;
                 } else {
-                    stamps.push(resource_stamp::Canvas_stamp(id, Canvas::identity(&canvas), Canvas::generation(&canvas)));
+                    stamps.push(ResourceStamp::CanvasStamp(id, Canvas::identity(&canvas), Canvas::generation(&canvas)));
                 }
             }
         }

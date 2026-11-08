@@ -4,7 +4,7 @@
 //! digest of the executable's identity, the kernel's text and the scene facts, holding a digest of its
 //! payload. A torn or unreadable entry is recompiled and rewritten; past `CACHE_FILES` the oldest are
 //! removed. OCaml marshals the value; this writes the fields by hand.
-use crate::lisp_kernel::{self, front_result, previews, T};
+use crate::lisp_kernel::{self, FrontResult, PREVIEWS, T};
 use flow_ir::packed::host as phost;
 use flow_shader::emit;
 use flow_syntax::ty::Ty;
@@ -17,7 +17,7 @@ const CACHE_FILES: usize = 1024;
 
 /// The directory a later process reads the kernels' front-end results from (default the user's cache
 /// directory; None compiles every kernel).
-pub static cache_dir: LazyLock<Mutex<Option<String>>> = LazyLock::new(|| Mutex::new(default_cache_dir()));
+pub static CACHE_DIR: LazyLock<Mutex<Option<String>>> = LazyLock::new(|| Mutex::new(default_cache_dir()));
 
 fn default_cache_dir() -> Option<String> {
     if cfg!(windows) {
@@ -42,9 +42,9 @@ fn executable() -> Option<&'static String> {
         .as_ref()
 }
 
-struct writer(Vec<u8>);
+struct Writer(Vec<u8>);
 
-impl writer {
+impl Writer {
     fn int(&mut self, v: i64) {
         self.0.extend_from_slice(&v.to_le_bytes());
     }
@@ -88,12 +88,12 @@ impl writer {
     }
 }
 
-struct reader<'a> {
+struct Reader<'a> {
     data: &'a [u8],
     at: usize,
 }
 
-impl<'a> reader<'a> {
+impl<'a> Reader<'a> {
     fn take(&mut self, n: usize) -> Option<&'a [u8]> {
         let s = self.data.get(self.at..self.at.checked_add(n)?)?;
         self.at += n;
@@ -155,10 +155,10 @@ fn is_vulkan() -> bool {
     ogpu::impl_::backend().map(|b| b == "vulkan").unwrap_or(false)
 }
 
-fn encode(value: &front_result) -> Vec<u8> {
+fn encode(value: &FrontResult) -> Vec<u8> {
     let (msl, inputs, slots) = value;
     let k = emit::settled(is_vulkan(), msl);
-    let mut w = writer(Vec::new());
+    let mut w = Writer(Vec::new());
     w.text(&k.source);
     w.text(&k.entry);
     match k.spirv.force() {
@@ -213,8 +213,8 @@ fn encode(value: &front_result) -> Vec<u8> {
     w.0
 }
 
-fn decode(data: &[u8]) -> Option<front_result> {
-    let mut r = reader { data, at: 0 };
+fn decode(data: &[u8]) -> Option<FrontResult> {
+    let mut r = Reader { data, at: 0 };
     let source = r.text()?;
     let entry = r.text()?;
     let spirv = if r.int()? == 1 {
@@ -288,26 +288,24 @@ fn decode(data: &[u8]) -> Option<front_result> {
 static SERIAL: AtomicI64 = AtomicI64::new(0);
 
 /// `make` unless the disk holds this kernel's front end.
-pub fn disk_cached(t: &T, name: &str, make: &dyn Fn() -> Result<front_result, String>) -> Result<front_result, String> {
-    let dir = cache_dir.lock().unwrap().clone();
+pub fn disk_cached(t: &T, name: &str, make: &dyn Fn() -> Result<FrontResult, String>) -> Result<FrontResult, String> {
+    let dir = CACHE_DIR.lock().unwrap().clone();
     let (Some(dir), Some(executable)) = (dir, executable()) else { return make() };
-    let text = lisp_kernel::text(&t.facts, previews.contains(&name));
+    let text = lisp_kernel::text(&t.facts, PREVIEWS.contains(&name));
     let backend = ogpu::impl_::backend().unwrap_or_default();
     let key = [executable.as_str(), name, text.as_str(), format!("{:?}", t.facts).as_str(), backend.as_str()].join("\0");
     let file = Path::new(&dir).join(rays_math::hash::md5_hex(key.as_bytes()));
-    if let Ok(data) = std::fs::read(&file) {
-        if data.len() > 32 && rays_math::hash::md5_hex(&data[32..]).as_bytes() == &data[..32] {
-            if let Some(found) = decode(&data[32..]) {
+    if let Ok(data) = std::fs::read(&file)
+        && data.len() > 32 && rays_math::hash::md5_hex(&data[32..]).as_bytes() == &data[..32]
+            && let Some(found) = decode(&data[32..]) {
                 return Ok(found);
             }
-        }
-    }
     let value = make()?;
     let _ = store(&dir, &file, &value);
     Ok(value)
 }
 
-fn store(dir: &str, file: &Path, value: &front_result) -> std::io::Result<()> {
+fn store(dir: &str, file: &Path, value: &FrontResult) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     let payload = encode(value);
     let mut data = rays_math::hash::md5_hex(&payload).into_bytes();

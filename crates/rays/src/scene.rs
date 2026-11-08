@@ -11,7 +11,7 @@ use renderer::side_lru::{self, Table, TableKey};
 use crate::texture;
 use ogpu::types::{AddressMode, MipFilter, SamplerDescriptor, SamplerFilter};
 use rays_math::color;
-use renderer::renderer::resource as retained_resource;
+use renderer::renderer::Resource as retained_resource;
 use renderer::scene_execution as se;
 use runtime_resources::{Canvas as RCanvas, Image as RImage, Text as RText};
 use scene_command::display_list::{self, Segment};
@@ -1072,9 +1072,9 @@ pub mod Layer {
         }
     }
 
-    fn texture_levels(tex: &texture::t) -> Result<Rc<Vec<se::texture_level>>, String> {
+    fn texture_levels(tex: &texture::t) -> Result<Rc<Vec<se::TextureLevel>>, String> {
         let id = texture::Private::identity(tex);
-        let create = || -> Result<Vec<se::texture_level>, String> {
+        let create = || -> Result<Vec<se::TextureLevel>, String> {
             Ok(texture::Private::levels(tex)?
                 .into_iter()
                 .map(|(w, h, pixels)| {
@@ -1083,7 +1083,7 @@ pub mod Layer {
                         bytes.extend_from_slice(&[c.r as u8, c.g as u8, c.b as u8, c.a as u8]);
                     }
                     let _ = (w, h);
-                    se::texture_level { width: w, height: h, bytes: se::new_bytes(bytes) }
+                    se::TextureLevel { width: w, height: h, bytes: se::new_bytes(bytes) }
                 })
                 .collect())
         };
@@ -1093,7 +1093,7 @@ pub mod Layer {
         };
         let key = TableKey::Int(id);
         if let Some(item) = side_lru::find(&mut context.texture_levels.borrow_mut(), &key) {
-            if let Ok(levels) = item.downcast::<Vec<se::texture_level>>() {
+            if let Ok(levels) = item.downcast::<Vec<se::TextureLevel>>() {
                 return Ok(levels);
             }
         }
@@ -1164,7 +1164,7 @@ pub mod Layer {
         lowering::resources {
             texture: Box::new(move |value: &scene3::texture_| {
                 let key = format!("texture:{}", texture::Private::identity(&value.value));
-                let source: Result<(String, Rc<Vec<se::texture_level>>, Option<ogpu::backend::Texture>), lowering::error> =
+                let source: Result<(String, Rc<Vec<se::TextureLevel>>, Option<ogpu::backend::Texture>), lowering::error> =
                     match texture::Private::image(&value.value) {
                         None => texture_levels(&value.value).map(|levels| (key.clone(), levels, None)).map_err(|_| lowering::error::Unsupported_texture),
                         Some(image) => match RImage::gpu_snapshot(&image) {
@@ -1174,7 +1174,7 @@ pub mod Layer {
                                 mesh_images.borrow_mut().push(image);
                                 Ok((
                                     format!("{key}:{generation}"),
-                                    Rc::new(vec![se::texture_level { width, height, bytes: se::new_bytes(Vec::new()) }]),
+                                    Rc::new(vec![se::TextureLevel { width, height, bytes: se::new_bytes(Vec::new()) }]),
                                     Some(gpu),
                                 ))
                             }
@@ -1202,7 +1202,7 @@ pub mod Layer {
                     lod_max: (levels.len() as i64 - 1) as f64,
                     max_anisotropy: 1,
                 };
-                Ok(se::sampled_texture { key, levels, sampler, gpu })
+                Ok(se::SampledTexture { key, levels, sampler, gpu })
             }),
         }
     }

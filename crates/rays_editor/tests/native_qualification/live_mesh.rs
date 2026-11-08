@@ -321,7 +321,7 @@ fn traced(gpu:&wg::t,config:&Gpu::Config) {
     use rays_pathtracer::rays_pathtracer as pt;
     let camera=rays::camera::perspective(None,None,None,rays_math::vec3::create(20.,18.,22.),rays_math::vec3::create(4.,4.,4.)).unwrap();
     let picture=|mesh:rays::mesh::t| {
-        let scene=pt::scene { objects:vec![(mesh,pt::material(None,None,None,None,pt::Linear_color::rgb(1.,1.,1.)))],spheres:Vec::new(),strands:Vec::new(),environment:pt::environment {sky:pt::Linear_color::rgb(0.5,0.5,0.5),ground:pt::Linear_color::rgb(0.5,0.5,0.5),panels:Vec::new()},lights:Vec::new() };
+        let scene=pt::Scene { objects:vec![(mesh,pt::material(None,None,None,None,pt::Linear_color::rgb(1.,1.,1.)))],spheres:Vec::new(),strands:Vec::new(),environment:pt::Environment {sky:pt::Linear_color::rgb(0.5,0.5,0.5),ground:pt::Linear_color::rgb(0.5,0.5,0.5),panels:Vec::new()},lights:Vec::new() };
         let mut tracer=pt::create(&Default::default(),64,64,&scene).unwrap();
         pt::reset(&mut tracer);
         for _ in 0..16 { pt::render(&mut tracer,&camera).unwrap(); pt::flush(&mut tracer).unwrap(); }

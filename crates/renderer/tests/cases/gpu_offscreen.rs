@@ -3,16 +3,16 @@
 //! Gc allocated/promoted-word ceilings (no OCaml GC), the `ps` RSS tool (Mem.phys_footprint only).
 use crate::common;
 use renderer::renderer;
-use ::renderer::renderer::Native;
-use ::renderer::renderer_retained_plans::resource as res;
-use ::renderer::scene_execution::{draw, geometry_draw, mesh, mesh_key, new_bytes, state};
+use ::renderer::renderer::native;
+use ::renderer::renderer_retained_plans::Resource as res;
+use ::renderer::scene_execution::{Draw, GeometryDraw, Mesh, MeshKey, new_bytes, State};
 use runtime_resources::Image;
 use scene_command::render_ir::{self, Command, Rect, RenderIr};
 use std::cell::Cell;
 use std::rc::Rc;
 
-fn config(w: i64, h: i64) -> renderer::configuration {
-    renderer::configuration { logical_width: w, logical_height: h, drawable_width: w, drawable_height: h, title: "offscreen-test".into(), vsync: false, high_density: true }
+fn config(w: i64, h: i64) -> renderer::Configuration {
+    renderer::Configuration { logical_width: w, logical_height: h, drawable_width: w, drawable_height: h, title: "offscreen-test".into(), vsync: false, high_density: true }
 }
 
 fn ir(commands: Vec<Command>) -> Rc<RenderIr> {
@@ -23,7 +23,7 @@ fn live_handles() -> i64 {
     ogpu::impl_::live_handles().expect("live handles")
 }
 
-fn scene3_draw(key: &str, red: f64) -> draw {
+fn scene3_draw(key: &str, red: f64) -> Draw {
     let mut vertices = vec![0u8; 3 * 24];
     let mut attributes = vec![0u8; 3 * 12];
     for (index, (x, y)) in [(-1f32, 1f32), (1., 1.), (-1., -1.)].iter().enumerate() {
@@ -35,8 +35,8 @@ fn scene3_draw(key: &str, red: f64) -> draw {
         attributes[index * 12..index * 12 + 4].copy_from_slice(&c.to_le_bytes());
     }
     let indices: Vec<u8> = [0u32, 1, 2].iter().flat_map(|v| v.to_le_bytes()).collect();
-    let m = mesh { key: mesh_key::Host(key.to_owned()), vertices: new_bytes(vertices), shared_vertices: None, vertex_count: 3, indices: new_bytes(indices), index_count: 3, primitive: ogpu::render_pass::Primitive::TriangleList };
-    let s = state {
+    let m = Mesh { key: MeshKey::Host(key.to_owned()), vertices: new_bytes(vertices), shared_vertices: None, vertex_count: 3, indices: new_bytes(indices), index_count: 3, primitive: ogpu::render_pass::Primitive::TriangleList };
+    let s = State {
         viewport: (0, 0, 5, 4),
         scissor: (0, 0, 5, 4),
         cull: ogpu::render_pass::Cull::CullNone,
@@ -46,9 +46,9 @@ fn scene3_draw(key: &str, red: f64) -> draw {
         depth_clear: 1.0,
         transform_uniforms: None,
     };
-    renderer::prepared_draw(renderer::family::Scene3, None, None, None, Some((format!("{key}:attributes"), new_bytes(attributes))), None, geometry_draw { mesh: m, state: s })
+    renderer::prepared_draw(renderer::PipelineFamily::Scene3, None, None, None, Some((format!("{key}:attributes"), new_bytes(attributes))), None, GeometryDraw { mesh: m, state: s })
 }
-fn execution_scene3_draw(key: &str, color: u32, uv: (f32,f32)) -> draw {
+fn execution_scene3_draw(key: &str, color: u32, uv: (f32,f32)) -> Draw {
     let mut e=(*scene3_draw(key,1.)).clone();
     let mut vertices=Vec::new(); let mut attributes=Vec::new();
     for (x,y) in [(-1f32,-1f32),(3.,-1.),(-1.,3.)] {
@@ -68,9 +68,9 @@ fn execution_scene3_draw(key: &str, color: u32, uv: (f32,f32)) -> draw {
     Rc::new(e)
 }
 
-fn clear_to(e: &renderer::t, c: (f64, f64, f64, f64)) {
-    let s = Native::begin_submission(e).unwrap();
-    Native::step(Some(c), None, None, &s, &[]).unwrap();
+fn clear_to(e: &renderer::Renderer, c: (f64, f64, f64, f64)) {
+    let s = native::begin_submission(e).unwrap();
+    native::step(Some(c), None, None, &s, &[]).unwrap();
 }
 
 fn rect() -> Rect {
@@ -81,8 +81,8 @@ fn image_cmd(id: i64) -> Command {
     Command::Image(render_ir::Image { resource_id: id, source: rect(), destination: rect() })
 }
 
-fn lower(s: &renderer::submission, resolve: &dyn Fn(i64) -> Option<res>, i: &Rc<RenderIr>) -> Result<renderer::Native::batch, ogpu::error::Error> {
-    Native::lower_scene2(s, 1, resolve, i)
+fn lower(s: &renderer::Submission, resolve: &dyn Fn(i64) -> Option<res>, i: &Rc<RenderIr>) -> Result<renderer::native::Batch, ogpu::error::Error> {
+    native::lower_scene2(s, 1, resolve, i)
 }
 
 fn gpu_offscreen_clear_resize() {
@@ -92,10 +92,10 @@ fn gpu_offscreen_clear_resize() {
     let baseline = live_handles();
     let e = renderer::create_offscreen(&config(3, 2)).unwrap();
     let mut ime = None;
-    Native::runtime_of_mut(&e, &mut |rt| ime = Some(runtime::set_text_input(rt, Some(((1, 1, 2, 1), 1)))));
+    native::runtime_of_mut(&e, &mut |rt| ime = Some(runtime::set_text_input(rt, Some(((1, 1, 2, 1), 1)))));
     assert!(ime.unwrap().is_err(), "offscreen execution accepted a native IME area");
     let mut cur = None;
-    Native::runtime_of_mut(&e, &mut |rt| cur = Some(runtime::set_cursor(rt, runtime::cursor_shape::Horizontal_resize)));
+    native::runtime_of_mut(&e, &mut |rt| cur = Some(runtime::set_cursor(rt, runtime::cursor_shape::Horizontal_resize)));
     assert!(cur.unwrap().is_err(), "offscreen execution accepted a native cursor");
     clear_to(&e, (1., 0., 0., 1.));
     let first = renderer::capture(&e).unwrap();
@@ -121,10 +121,10 @@ fn gpu_offscreen_retained() {
     }
     let e = renderer::create_offscreen(&config(3, 2)).unwrap();
     let red = scene3_draw("retained-red", 1.);
-    let render_retained = |version: i64, draw: &draw| {
-        let s = Native::begin_submission(&e).unwrap();
-        let b = Native::adopt_draws(&s, vec![draw.clone()]).unwrap();
-        Native::step(None, Some("offscreen-retained"), Some(version), &s, &[b]).unwrap();
+    let render_retained = |version: i64, draw: &Draw| {
+        let s = native::begin_submission(&e).unwrap();
+        let b = native::adopt_draws(&s, vec![draw.clone()]).unwrap();
+        native::step(None, Some("offscreen-retained"), Some(version), &s, &[b]).unwrap();
     };
     render_retained(1, &red);
     let uploaded = renderer::stats(&e).unwrap().uploaded_bytes;
@@ -134,22 +134,22 @@ fn gpu_offscreen_retained() {
     assert!(renderer::stats(&e).unwrap().uploaded_bytes > uploaded, "retained version invalidation did not prepare the replacement payload");
     let segment_ir = ir(vec![Command::Geometry(render_ir::Geometry { vertices: vec![0., 0., 1., 0., 0., 1.], indices: vec![0, 1, 2], color: -1 })]);
     let lower_segment = |version: i64| {
-        let s = Native::begin_submission(&e).unwrap();
-        Native::lower_scene2_segment(&s, 77, version, true, 1, &|_| None, &segment_ir).unwrap();
-        Native::cancel(&s);
+        let s = native::begin_submission(&e).unwrap();
+        native::lower_scene2_segment(&s, 77, version, true, 1, &|_| None, &segment_ir).unwrap();
+        native::cancel(&s);
     };
     lower_segment(1);
     lower_segment(1);
-    assert_eq!(Native::retained_scene2_segment_stats(&e), (1, 1, 1), "same retained Scene2 segment did not bypass lowering");
+    assert_eq!(native::retained_scene2_segment_stats(&e), (1, 1, 1), "same retained Scene2 segment did not bypass lowering");
     lower_segment(2);
-    assert_eq!(Native::retained_scene2_segment_stats(&e), (1, 1, 2), "retained Scene2 generation did not replace only its prior entry");
-    let invalid = Native::begin_submission(&e).unwrap();
-    assert!(Native::lower_scene2_segment(&invalid, 0, 1, true, 1, &|_| None, &segment_ir).is_err(), "invalid retained Scene2 identity was accepted");
-    let incomplete = Native::begin_submission(&e).unwrap();
-    let ib = Native::adopt_draws(&incomplete, vec![red.clone()]).unwrap();
-    assert!(Native::step(None, Some("incomplete"), None, &incomplete, &[ib]).is_err(), "retained identity without version was accepted");
+    assert_eq!(native::retained_scene2_segment_stats(&e), (1, 1, 2), "retained Scene2 generation did not replace only its prior entry");
+    let invalid = native::begin_submission(&e).unwrap();
+    assert!(native::lower_scene2_segment(&invalid, 0, 1, true, 1, &|_| None, &segment_ir).is_err(), "invalid retained Scene2 identity was accepted");
+    let incomplete = native::begin_submission(&e).unwrap();
+    let ib = native::adopt_draws(&incomplete, vec![red.clone()]).unwrap();
+    assert!(native::step(None, Some("incomplete"), None, &incomplete, &[ib]).is_err(), "retained identity without version was accepted");
     // one batch: its depth lives and dies in the pass
-    let (tiled, passing) = Native::memoryless_attachments(&e);
+    let (tiled, passing) = native::memoryless_attachments(&e);
     assert!(!tiled || passing > 0, "a single batch's depth took memory");
     renderer::destroy(&e).unwrap();
 }
@@ -170,84 +170,84 @@ fn gpu_offscreen_transactions() {
     let resolve = |id: i64| if id == 1 { Some(res::Image(image.clone())) } else { None };
     renderer::lower_scene2(&e, 1, &resolve, &image_ir).unwrap();
     replace();
-    let first = Native::begin_submission(&e).unwrap();
+    let first = native::begin_submission(&e).unwrap();
     lower(&first, &resolve, &image_ir).unwrap();
     replace();
-    let failed = Native::begin_submission(&e).unwrap();
+    let failed = native::begin_submission(&e).unwrap();
     lower(&failed, &resolve, &image_ir).unwrap();
     replace();
     assert!(lower(&failed, &resolve, &missing_ir).is_err(), "later lowering failure was accepted");
-    let overlap = Native::begin_submission(&e).unwrap();
+    let overlap = native::begin_submission(&e).unwrap();
     lower(&overlap, &resolve, &image_ir).unwrap();
     replace();
-    Native::cancel(&first);
+    native::cancel(&first);
     replace();
-    Native::cancel(&first);
-    Native::cancel(&overlap);
-    let step_failed = Native::begin_submission(&e).unwrap();
+    native::cancel(&first);
+    native::cancel(&overlap);
+    let step_failed = native::begin_submission(&e).unwrap();
     let step_draws = lower(&step_failed, &resolve, &image_ir).unwrap();
     replace();
-    let step_overlap = Native::begin_submission(&e).unwrap();
+    let step_overlap = native::begin_submission(&e).unwrap();
     lower(&step_overlap, &resolve, &image_ir).unwrap();
     replace();
-    assert!(Native::step(Some((f64::NAN, 0., 0., 1.)), None, None, &step_failed, &[step_draws]).is_err(), "non-finite clear unexpectedly submitted");
+    assert!(native::step(Some((f64::NAN, 0., 0., 1.)), None, None, &step_failed, &[step_draws]).is_err(), "non-finite clear unexpectedly submitted");
     replace();
-    assert!(Native::step(None, None, None, &step_failed, &[]).is_err(), "consumed failed submission was reusable");
-    Native::cancel(&step_failed);
-    Native::cancel(&step_overlap);
-    let cross_first = Native::begin_submission(&e).unwrap();
+    assert!(native::step(None, None, None, &step_failed, &[]).is_err(), "consumed failed submission was reusable");
+    native::cancel(&step_failed);
+    native::cancel(&step_overlap);
+    let cross_first = native::begin_submission(&e).unwrap();
     let cross_batch = lower(&cross_first, &resolve, &image_ir).unwrap();
-    let cross_second = Native::begin_submission(&e).unwrap();
-    assert!(Native::step(None, None, None, &cross_second, &[cross_batch]).is_err(), "cross-submission draw batch was accepted");
-    Native::cancel(&cross_first);
+    let cross_second = native::begin_submission(&e).unwrap();
+    assert!(native::step(None, None, None, &cross_second, &[cross_batch]).is_err(), "cross-submission draw batch was accepted");
+    native::cancel(&cross_first);
     // (the raising-resolver check is not portable)
-    let exception_probe = Native::begin_submission(&e).unwrap();
+    let exception_probe = native::begin_submission(&e).unwrap();
     lower(&exception_probe, &resolve, &image_ir).unwrap();
     replace();
-    Native::cancel(&exception_probe);
-    let calm = Native::begin_submission(&e).unwrap();
-    Native::step(None, None, None, &calm, &[]).unwrap();
-    let succeeded = Native::begin_submission(&e).unwrap();
+    native::cancel(&exception_probe);
+    let calm = native::begin_submission(&e).unwrap();
+    native::step(None, None, None, &calm, &[]).unwrap();
+    let succeeded = native::begin_submission(&e).unwrap();
     let succeeded_batch = lower(&succeeded, &resolve, &image_ir).unwrap();
     let expected = Image::pixels(&image).unwrap();
-    Native::step(None, None, None, &succeeded, &[succeeded_batch]).unwrap();
+    native::step(None, None, None, &succeeded, &[succeeded_batch]).unwrap();
     let submitted = renderer::capture(&e).unwrap();
     assert_eq!(&submitted[0..4], &expected[0..4], "successful transaction changed snapshot pixels");
-    assert_eq!(Native::staging_bytes(&e), 0, "a single upload kept its staging past the frame");
+    assert_eq!(native::staging_bytes(&e), 0, "a single upload kept its staging past the frame");
     // Replacing pixels behind a stable identity must reach the GPU texture.
     replace();
-    let replaced = Native::begin_submission(&e).unwrap();
+    let replaced = native::begin_submission(&e).unwrap();
     let replaced_batch = lower(&replaced, &resolve, &image_ir).unwrap();
     let expected = Image::pixels(&image).unwrap();
-    Native::step(None, None, None, &replaced, &[replaced_batch]).unwrap();
+    native::step(None, None, None, &replaced, &[replaced_batch]).unwrap();
     assert_eq!(&renderer::capture(&e).unwrap()[0..4], &expected[0..4], "replaced image pixels did not reach the presented frame");
-    assert!(Native::staging_bytes(&e) > 0, "uploads frame after frame lost their staging");
-    let quiet = Native::begin_submission(&e).unwrap();
-    Native::step(None, None, None, &quiet, &[]).unwrap();
-    assert_eq!(Native::staging_bytes(&e), 0, "a frame without uploads kept the staging");
+    assert!(native::staging_bytes(&e) > 0, "uploads frame after frame lost their staging");
+    let quiet = native::begin_submission(&e).unwrap();
+    native::step(None, None, None, &quiet, &[]).unwrap();
+    assert_eq!(native::staging_bytes(&e), 0, "a frame without uploads kept the staging");
     let upload = || {
         replace();
-        let frame = Native::begin_submission(&e).unwrap();
+        let frame = native::begin_submission(&e).unwrap();
         let batch = lower(&frame, &resolve, &image_ir).unwrap();
-        Native::step(None, None, None, &frame, &[batch]).unwrap();
+        native::step(None, None, None, &frame, &[batch]).unwrap();
     };
     upload();
     upload();
-    assert!(Native::staging_bytes(&e) > 0, "a second upload in a row lost its staging");
+    assert!(native::staging_bytes(&e) > 0, "a second upload in a row lost its staging");
     renderer::release_staging(&e).unwrap();
-    assert_eq!(Native::staging_bytes(&e), 0, "release_staging kept the staging");
+    assert_eq!(native::staging_bytes(&e), 0, "release_staging kept the staging");
     replace();
-    let destroy_first = Native::begin_submission(&e).unwrap();
+    let destroy_first = native::begin_submission(&e).unwrap();
     lower(&destroy_first, &resolve, &image_ir).unwrap();
     replace();
-    let destroy_second = Native::begin_submission(&e).unwrap();
+    let destroy_second = native::begin_submission(&e).unwrap();
     lower(&destroy_second, &resolve, &image_ir).unwrap();
     replace();
     renderer::destroy(&e).unwrap();
     replace();
-    assert!(Native::begin_submission(&e).is_err(), "destroyed coordinator began a submission");
-    Native::cancel(&destroy_first);
-    Native::cancel(&destroy_second);
+    assert!(native::begin_submission(&e).is_err(), "destroyed coordinator began a submission");
+    native::cancel(&destroy_first);
+    native::cancel(&destroy_second);
     Image::destroy(&image).unwrap();
 }
 
@@ -264,8 +264,8 @@ fn gpu_offscreen_labels() {
     let labels_ir = ir((0..45).map(|i| image_cmd(100 + i)).collect());
     let resolve = |id: i64| if (100..145).contains(&id) { Some(res::Image(labels[(id - 100) as usize].clone())) } else { None };
     let open_submission = || {
-        let s = Native::begin_submission(&e).unwrap();
-        Native::lower_scene2(&s, 1, &resolve, &labels_ir).unwrap();
+        let s = native::begin_submission(&e).unwrap();
+        native::lower_scene2(&s, 1, &resolve, &labels_ir).unwrap();
         s
     };
     let no_lease = open_submission();
@@ -273,18 +273,18 @@ fn gpu_offscreen_labels() {
         Image::replace(label, 1, 1, &label_rgba(i as i64 + 1)).unwrap();
         Image::replace(label, 1, 1, &label_rgba(i as i64 + 2)).unwrap();
     }
-    Native::cancel(&no_lease);
+    native::cancel(&no_lease);
     let warm = open_submission();
-    Native::cancel(&warm);
+    native::cancel(&warm);
     for _ in 0..600 {
-        Native::cancel(&open_submission());
+        native::cancel(&open_submission());
     }
-    assert!(Native::snapshot_count_for_test(&e) <= 256, "image snapshot cache exceeded entry capacity");
+    assert!(native::snapshot_count_for_test(&e) <= 256, "image snapshot cache exceeded entry capacity");
     let blue = [0u8, 0, 255, 255];
     Image::replace(&labels[44], 1, 1, &blue).unwrap();
-    let mutation = Native::begin_submission(&e).unwrap();
-    let batch = Native::lower_scene2(&mutation, 1, &resolve, &labels_ir).unwrap();
-    Native::step(None, None, None, &mutation, &[batch]).unwrap();
+    let mutation = native::begin_submission(&e).unwrap();
+    let batch = native::lower_scene2(&mutation, 1, &resolve, &labels_ir).unwrap();
+    native::step(None, None, None, &mutation, &[batch]).unwrap();
     assert_eq!(&renderer::capture(&e).unwrap()[0..4], &blue, "image snapshot cache did not invalidate mutated pixels");
     for l in &labels {
         Image::destroy(l).unwrap();
@@ -309,14 +309,14 @@ fn gpu_offscreen_large_image() {
     let large = Image::create(640, 480, &large_a).unwrap();
     let image_ir = ir(vec![image_cmd(1)]);
     let resolve = |id: i64| if id == 1 { Some(res::Image(large.clone())) } else { None };
-    let cache_before = Native::snapshot_count_for_test(&e);
+    let cache_before = native::snapshot_count_for_test(&e);
     let rss_before = rss_kib();
     let mut rss_middle = rss_before;
     for frame in 1..=600 {
         Image::replace(&large, 640, 480, if frame & 1 == 0 { &large_a } else { &large_b }).unwrap();
-        let s = Native::begin_submission(&e).unwrap();
-        Native::lower_scene2(&s, 1, &resolve, &image_ir).unwrap();
-        Native::cancel(&s);
+        let s = native::begin_submission(&e).unwrap();
+        native::lower_scene2(&s, 1, &resolve, &image_ir).unwrap();
+        native::cancel(&s);
         // Two immediate mutations need both resource buffers unleased.
         Image::replace(&large, 640, 480, &large_b).unwrap();
         Image::replace(&large, 640, 480, &large_a).unwrap();
@@ -327,11 +327,11 @@ fn gpu_offscreen_large_image() {
     let rss_after = rss_kib();
     assert!(rss_middle <= rss_before + 32768 && rss_after <= rss_middle + 16384, "changing large-image lowering RSS did not plateau: {rss_before}/{rss_middle}/{rss_after} KiB");
     println!("large transient image: RSS {rss_before}/{rss_middle}/{rss_after} KiB");
-    assert_eq!(Native::snapshot_count_for_test(&e), cache_before, "large transient image entered the immutable snapshot cache");
+    assert_eq!(native::snapshot_count_for_test(&e), cache_before, "large transient image entered the immutable snapshot cache");
     Image::replace(&large, 640, 480, &large_b).unwrap();
-    let s = Native::begin_submission(&e).unwrap();
-    let batch = Native::lower_scene2(&s, 1, &resolve, &image_ir).unwrap();
-    Native::step(None, None, None, &s, &[batch]).unwrap();
+    let s = native::begin_submission(&e).unwrap();
+    let batch = native::lower_scene2(&s, 1, &resolve, &image_ir).unwrap();
+    native::step(None, None, None, &s, &[batch]).unwrap();
     assert_eq!(&renderer::capture(&e).unwrap()[0..4], &[0, 0, 255, 255], "large transient image changed submitted snapshot pixels");
     // A completed step released both snapshot leases, so two immediate mutations stay legal.
     Image::replace(&large, 640, 480, &large_a).unwrap();
@@ -350,7 +350,7 @@ fn gpu_offscreen_eviction() {
     for cached in &images {
         renderer::lower_scene2(&e, 1, &|id| if id == 1 { Some(res::Image(cached.clone())) } else { None }, &image_ir).unwrap();
     }
-    assert_eq!(Native::snapshot_count_for_test(&e), 256, "image snapshot cache did not evict to its exact entry capacity");
+    assert_eq!(native::snapshot_count_for_test(&e), 256, "image snapshot cache did not evict to its exact entry capacity");
     for l in &images {
         Image::destroy(l).unwrap();
     }
@@ -360,14 +360,14 @@ fn gpu_offscreen_eviction() {
 // lib/scene_execution/test_retained_eviction.ml, using production pipelines and ABI.
 fn execution_retained_eviction(textured: bool, frames: i32) {
     if !common::gpu() { return; }
-    use ::renderer::scene_execution::{sampled_texture, texture_level};
+    use ::renderer::scene_execution::{SampledTexture, TextureLevel};
     use ogpu::types::{AddressMode, MipFilter, SamplerDescriptor, SamplerFilter};
     use ::renderer::{renderer_pipeline,scene_execution as se};
     use ogpu::surface::{Configuration,Format,PresentMode};
         let baseline = live_handles();
         let cfg=Configuration { logical_width:64,logical_height:64,physical_width:64,physical_height:64,format:Format::Rgba8Unorm,present_mode:PresentMode::Immediate,max_acquired:2,layer:None };
         let mut e=renderer_pipeline::create_renderer(&ogpu::impl_::backend().unwrap(),None,None,true,ogpu::impl_::create_driver().unwrap(),&cfg).unwrap();
-        let draws: Vec<draw> = (0..300).map(|i| {
+        let draws: Vec<Draw> = (0..300).map(|i| {
             let (vertices, indices, count) = if textured {
                 (common::floats(&[1.,0.,0.,0.,1.,0.,0.,0.,1.,1.,1.,1.,-1.,-1.,2.,2.,0.,0.,1.,1.]), common::words(&[0,1,2,0,2,3]), 4)
             } else {
@@ -377,15 +377,15 @@ fn execution_retained_eviction(textured: bool, frames: i32) {
                 }
                 (v, common::words(&[0,1,2]), 3)
             };
-            let texture = textured.then(|| Rc::new(sampled_texture {
+            let texture = textured.then(|| Rc::new(SampledTexture {
                 key: format!("eviction-texture-{i}"),
-                levels: Rc::new(vec![texture_level { width: 1, height: 1, bytes: new_bytes(vec![255;4]) }]),
+                levels: Rc::new(vec![TextureLevel { width: 1, height: 1, bytes: new_bytes(vec![255;4]) }]),
                 gpu: None,
                 sampler: SamplerDescriptor { label: None, min_filter: SamplerFilter::Nearest, mag_filter: SamplerFilter::Nearest, mip_filter: MipFilter::NoMip, address_u: AddressMode::ClampToEdge, address_v: AddressMode::ClampToEdge, lod_min: 0., lod_max: 0., max_anisotropy: 1 },
             }));
-            renderer::prepared_draw(if textured { renderer::family::Scene2_textured } else { renderer::family::Scene2 }, Some(ogpu::pipeline::Blend::Replace), texture, None, None, None, geometry_draw {
-                mesh: mesh { key: mesh_key::Host(format!("eviction-{i}")), vertices: new_bytes(vertices), shared_vertices: None, vertex_count: count, indices: new_bytes(indices), index_count: if textured { 6 } else { 3 }, primitive: ogpu::render_pass::Primitive::TriangleList },
-                state: state { viewport: (0,0,64,64), scissor: if textured { (0,0,64,64) } else { (i % 2,0,63,64) }, cull: ogpu::render_pass::Cull::CullNone, depth_compare: ogpu::render_pass::Comparison::Always, depth_write: false, depth_load: ogpu::render_pass::Load::Load, depth_clear: 1., transform_uniforms: None },
+            renderer::prepared_draw(if textured { renderer::PipelineFamily::Scene2Textured } else { renderer::PipelineFamily::Scene2 }, Some(ogpu::pipeline::Blend::Replace), texture, None, None, None, GeometryDraw {
+                mesh: Mesh { key: MeshKey::Host(format!("eviction-{i}")), vertices: new_bytes(vertices), shared_vertices: None, vertex_count: count, indices: new_bytes(indices), index_count: if textured { 6 } else { 3 }, primitive: ogpu::render_pass::Primitive::TriangleList },
+                state: State { viewport: (0,0,64,64), scissor: if textured { (0,0,64,64) } else { (i % 2,0,63,64) }, cull: ogpu::render_pass::Cull::CullNone, depth_compare: ogpu::render_pass::Comparison::Always, depth_write: false, depth_load: ogpu::render_pass::Load::Load, depth_clear: 1., transform_uniforms: None },
             })
         }).collect();
         let clear = Some((0.,0.,0.,1.));
@@ -394,7 +394,7 @@ fn execution_retained_eviction(textured: bool, frames: i32) {
             assert!(se::submit(Some(("eviction".into(),1)),&mut || {},clear,&mut e,&draws).unwrap());
             if [1,2,frames].contains(&frame) { assert_eq!(se::read_pixels(&mut e,256).unwrap(), expected, "prepared eviction pixels"); }
             assert!(se::replay_prepared_sampled_resources(clear,"eviction",1,&mut e).unwrap().is_none(), "evicted resources remained replayable");
-            assert!(se::Private::cache_count_for_report(&mut e)<=256);
+            assert!(se::private::cache_count_for_report(&mut e)<=256);
         }
         for _ in 0..4 {
             assert!(se::submit(None,&mut || {},clear,&mut e,&draws).unwrap());
@@ -417,9 +417,9 @@ fn gpu_execution_scratch_boundaries() {
         for (x,y) in [(-1f32,-1f32),(3.,-1.),(-1.,3.)] {
             vertices.extend(x.to_le_bytes()); vertices.extend(y.to_le_bytes()); vertices.extend(u32::MAX.to_le_bytes());
         }
-        renderer::prepared_draw(renderer::family::Scene2, Some(ogpu::pipeline::Blend::Replace), None, None, None, None, geometry_draw {
-            mesh: mesh { key: mesh_key::Host(key.into()), vertices: new_bytes(vertices), shared_vertices: None, vertex_count: 3, indices: new_bytes(common::words(&[0,1,2])), index_count: 3, primitive: ogpu::render_pass::Primitive::TriangleList },
-            state: state { viewport, scissor, cull: ogpu::render_pass::Cull::CullNone, depth_compare: ogpu::render_pass::Comparison::Always, depth_write: false, depth_load: ogpu::render_pass::Load::Load, depth_clear: 1., transform_uniforms: uniforms },
+        renderer::prepared_draw(renderer::PipelineFamily::Scene2, Some(ogpu::pipeline::Blend::Replace), None, None, None, None, GeometryDraw {
+            mesh: Mesh { key: MeshKey::Host(key.into()), vertices: new_bytes(vertices), shared_vertices: None, vertex_count: 3, indices: new_bytes(common::words(&[0,1,2])), index_count: 3, primitive: ogpu::render_pass::Primitive::TriangleList },
+            state: State { viewport, scissor, cull: ogpu::render_pass::Cull::CullNone, depth_compare: ogpu::render_pass::Comparison::Always, depth_write: false, depth_load: ogpu::render_pass::Load::Load, depth_clear: 1., transform_uniforms: uniforms },
         })
     };
     let clear = Some((0.,0.,0.,1.));
@@ -432,12 +432,12 @@ fn gpu_execution_scratch_boundaries() {
     renderer::draw(clear, &e, &[plain("scratch-off", (100,100,8,8), (100,100,8,8), None)]).unwrap();
     assert!(renderer::capture(&e).unwrap().chunks_exact(4).all(|p| p == [0,0,0,255]));
     {
-        use ::renderer::scene_execution::{sampled_texture,texture_level};
+        use ::renderer::scene_execution::{SampledTexture,TextureLevel};
         use ogpu::types::{SamplerDescriptor,SamplerFilter,MipFilter,AddressMode};
-        let texture=Rc::new(sampled_texture { key:"viewport-halves".into(),levels:Rc::new(vec![texture_level { width:2,height:1,bytes:new_bytes(vec![255,0,0,255,0,255,0,255]) }]),gpu:None,sampler:SamplerDescriptor { label:None,min_filter:SamplerFilter::Nearest,mag_filter:SamplerFilter::Nearest,mip_filter:MipFilter::NoMip,address_u:AddressMode::ClampToEdge,address_v:AddressMode::ClampToEdge,lod_min:0.,lod_max:0.,max_anisotropy:1 } });
+        let texture=Rc::new(SampledTexture { key:"viewport-halves".into(),levels:Rc::new(vec![TextureLevel { width:2,height:1,bytes:new_bytes(vec![255,0,0,255,0,255,0,255]) }]),gpu:None,sampler:SamplerDescriptor { label:None,min_filter:SamplerFilter::Nearest,mag_filter:SamplerFilter::Nearest,mip_filter:MipFilter::NoMip,address_u:AddressMode::ClampToEdge,address_v:AddressMode::ClampToEdge,lod_min:0.,lod_max:0.,max_anisotropy:1 } });
         for (x,expected) in [(0,[255,0,0,255]),(-64,[0,255,0,255])] {
             let mut d=(*plain(&format!("viewport-half-{x}"),(x,0,128,64),(0,0,64,64),None)).clone();
-            d.family=renderer::family::Scene2_textured; d.texture=Some(texture.clone());
+            d.family=renderer::PipelineFamily::Scene2Textured; d.texture=Some(texture.clone());
             d.draw.mesh.vertices=new_bytes(common::floats(&[1.,0.,0.,0.,1.,0.,0.,0.,1.,1.,1.,1.,-1.,-1.,2.,2.,0.,0.,1.,0.]));
             d.draw.mesh.vertex_count=4; d.draw.mesh.indices=new_bytes(common::words(&[0,1,2,0,2,3])); d.draw.mesh.index_count=6;
             renderer::draw(clear,&e,&[Rc::new(d)]).unwrap();
@@ -503,30 +503,30 @@ fn gpu_execution_vertex_registration() {
         }
     }
     let indexed=se::register_gpu_vertices(&owner,None,Some(12),None,Some((index_buffer.clone(),12)),None,"indexed-scene3",&device,&buffer,8,Box::new(|| true)).unwrap();
-    let streams=se::Private::find_gpu_streams(&owner,"indexed-scene3").unwrap();
+    let streams=se::private::find_gpu_streams(&owner,"indexed-scene3").unwrap();
     assert_eq!(streams.0.as_ref().map(|(b,n)|(b::buffer_id(b),*n)),Some((b::buffer_id(&index_buffer),12)));
     se::unregister_gpu_vertices(&indexed);
     let colored=se::register_gpu_vertices(&owner,None,Some(12),None,Some((index_buffer.clone(),12)),Some((buffer.clone(),3)),"colored-scene3",&device,&buffer,8,Box::new(|| true)).unwrap();
-    let streams=se::Private::find_gpu_streams(&owner,"colored-scene3").unwrap();
+    let streams=se::private::find_gpu_streams(&owner,"colored-scene3").unwrap();
     assert_eq!(streams.1.as_ref().map(|(b,n)|(b::buffer_id(b),*n)),Some((b::buffer_id(&buffer),3)));
     se::unregister_gpu_vertices(&colored);
     assert!(se::gpu_vertices_valid(&source));
     alive.set(false);
     assert!(!se::gpu_vertices_valid(&source));
-    assert!(se::Private::find_gpu_vertices(&owner,"ownership-test").is_none());
+    assert!(se::private::find_gpu_vertices(&owner,"ownership-test").is_none());
     alive.set(true);
-    assert!(se::Private::find_gpu_vertices(&owner,"ownership-test").is_some());
+    assert!(se::private::find_gpu_vertices(&owner,"ownership-test").is_some());
     let mut held = Vec::new();
     for i in 1..128 { held.push(register(&format!("capacity:{i}"),4).unwrap()); }
-    assert_eq!(se::Private::gpu_vertex_count_for_test(&owner),128);
+    assert_eq!(se::private::gpu_vertex_count_for_test(&owner),128);
     match register("overflow",4) { Err(e) => assert_eq!(e.kind, ogpu::error::ErrorKind::Capacity), Ok(_) => panic!("registration capacity exceeded") }
     let independent = se::register_gpu_vertices(&other,None,None,None,None,None,"independent",&device,&buffer,4,Box::new(|| true)).unwrap();
-    assert_eq!(se::Private::gpu_vertex_count_for_test(&other),1);
+    assert_eq!(se::private::gpu_vertex_count_for_test(&other),1);
     se::unregister_gpu_vertices(&independent);
     for value in held { se::unregister_gpu_vertices(&value); }
     se::unregister_gpu_vertices(&source);
     se::unregister_gpu_vertices(&source);
-    assert_eq!(se::Private::gpu_vertex_count_for_test(&owner),0);
+    assert_eq!(se::private::gpu_vertex_count_for_test(&owner),0);
     assert!(!se::gpu_vertices_valid(&source));
     let rebound = register("ownership-test",8).unwrap();
     assert!(se::gpu_vertices_valid(&rebound));
@@ -563,9 +563,9 @@ fn gpu_execution_release_and_uniform_pages() {
     assert_eq!(releases.get(),2,"failed preparation releases once");
     {
         use ogpu::types::{SamplerDescriptor,SamplerFilter,MipFilter,AddressMode};
-        let texture=se::sampled_texture { key:"lease-release".into(),levels:Rc::new(vec![se::texture_level { width:1,height:1,bytes:new_bytes(vec![255;4]) }]),gpu:None,sampler:SamplerDescriptor { label:None,min_filter:SamplerFilter::Nearest,mag_filter:SamplerFilter::Nearest,mip_filter:MipFilter::NoMip,address_u:AddressMode::ClampToEdge,address_v:AddressMode::ClampToEdge,lod_min:0.,lod_max:0.,max_anisotropy:1 } };
-        let mut d=base.clone(); d.family=renderer::family::Scene2_textured; d.vertex_attributes=None; d.draw.state.transform_uniforms=None;
-        d.draw.mesh.key=mesh_key::Host("scratch-textured".into());
+        let texture=se::SampledTexture { key:"lease-release".into(),levels:Rc::new(vec![se::TextureLevel { width:1,height:1,bytes:new_bytes(vec![255;4]) }]),gpu:None,sampler:SamplerDescriptor { label:None,min_filter:SamplerFilter::Nearest,mag_filter:SamplerFilter::Nearest,mip_filter:MipFilter::NoMip,address_u:AddressMode::ClampToEdge,address_v:AddressMode::ClampToEdge,lod_min:0.,lod_max:0.,max_anisotropy:1 } };
+        let mut d=base.clone(); d.family=renderer::PipelineFamily::Scene2Textured; d.vertex_attributes=None; d.draw.state.transform_uniforms=None;
+        d.draw.mesh.key=MeshKey::Host("scratch-textured".into());
         d.draw.mesh.vertices=new_bytes(common::floats(&[1.,0.,0.,0.,1.,0.,0.,0.,1.,1.,1.,1.,-1.,-1.,2.,2.,0.,0.,1.,1.]));
         d.draw.mesh.vertex_count=4; d.draw.mesh.indices=new_bytes(common::words(&[0,1,2,0,2,3])); d.draw.mesh.index_count=6;
         d.texture=Some(Rc::new(texture.clone()));
@@ -575,11 +575,11 @@ fn gpu_execution_release_and_uniform_pages() {
         assert!(se::submit(None,&mut release,None,&mut execution,&[Rc::new(d)]).is_err());
         assert_eq!(releases.get(),4,"failed upload releases once");
     }
-    let mut plain=base.clone(); plain.family=renderer::family::Scene2; plain.vertex_attributes=None; plain.draw.state.transform_uniforms=None;
+    let mut plain=base.clone(); plain.family=renderer::PipelineFamily::Scene2; plain.vertex_attributes=None; plain.draw.state.transform_uniforms=None;
     let mut vertices=Vec::new();
     for (x,y) in [(-1f32,-1f32),(3.,-1.),(-1.,3.)] { vertices.extend(common::floats(&[x,y])); vertices.extend(u32::MAX.to_le_bytes()); }
     plain.draw.mesh.vertices=new_bytes(vertices);
-    let retained:Vec<_>=(0..10).map(|i| { let mut d=plain.clone(); d.blend=if i%2==0 { ogpu::pipeline::Blend::Replace } else { ogpu::pipeline::Blend::Alpha }; d.draw.mesh.key=mesh_key::Host(format!("scratch-retained-{i}")); Rc::new(d) }).collect();
+    let retained:Vec<_>=(0..10).map(|i| { let mut d=plain.clone(); d.blend=if i%2==0 { ogpu::pipeline::Blend::Replace } else { ogpu::pipeline::Blend::Alpha }; d.draw.mesh.key=MeshKey::Host(format!("scratch-retained-{i}")); Rc::new(d) }).collect();
     se::submit(Some(("scratch-retained".into(),7)),&mut || {},None,&mut execution,&retained).unwrap();
     assert_eq!(se::replay_prepared_sampled_resources(None,"scratch-retained",7,&mut execution).unwrap(),Some((true,10)));
     assert_eq!(se::replay_prepared_sampled_resources(None,"scratch-retained",8,&mut execution).unwrap(),None);
@@ -589,13 +589,13 @@ fn gpu_execution_release_and_uniform_pages() {
         e.draw.state.transform_uniforms = Some(new_bytes(own)); Rc::new(e)
     }).collect();
     se::submit(None,&mut || {},None,&mut execution,&large).unwrap();
-    let large_capacity = se::Private::uniform_capacity(&execution);
+    let large_capacity = se::private::uniform_capacity(&execution);
     assert!(large_capacity > 65_536);
     let small = Rc::new(base);
-    for _ in 0..se::Private::uniform_shrink_after {
+    for _ in 0..se::private::UNIFORM_SHRINK_AFTER {
         se::submit(None,&mut || {},None,&mut execution,&[small.clone()]).unwrap();
     }
-    assert!(se::Private::uniform_capacity(&execution)*4 < large_capacity,"uniform page did not shrink");
+    assert!(se::private::uniform_capacity(&execution)*4 < large_capacity,"uniform page did not shrink");
     let bytes = se::read_pixels(&mut execution,256).unwrap();
     assert_eq!(&bytes[0..4], &[255,0,0,255]);
     se::destroy(&mut execution).unwrap();
@@ -606,14 +606,14 @@ fn gpu_execution_texture_sampling() {
     if !common::gpu() { return; }
     // The source fixture owns its device; do not leave the probe's shared-device cache alive.
     common::release_keepalive();
-    use ::renderer::scene_execution::{sampled_texture, texture_level};
+    use ::renderer::scene_execution::{SampledTexture, TextureLevel};
     use ogpu::types::{AddressMode, MipFilter, SamplerDescriptor, SamplerFilter};
     let baseline = live_handles();
     let e = renderer::create_offscreen(&config(4,4)).unwrap();
     let nearest = SamplerDescriptor { label: None, min_filter: SamplerFilter::Nearest, mag_filter: SamplerFilter::Nearest, mip_filter: MipFilter::NoMip, address_u: AddressMode::ClampToEdge, address_v: AddressMode::ClampToEdge, lod_min: 0., lod_max: 1., max_anisotropy: 1 };
     let levels = Rc::new(vec![
-        texture_level { width: 2, height: 2, bytes: new_bytes(vec![255,0,0,255,0,255,0,255,0,0,255,255,255,255,255,255]) },
-        texture_level { width: 1, height: 1, bytes: new_bytes(vec![255,255,0,255]) },
+        TextureLevel { width: 2, height: 2, bytes: new_bytes(vec![255,0,0,255,0,255,0,255,0,0,255,255,255,255,255,255]) },
+        TextureLevel { width: 1, height: 1, bytes: new_bytes(vec![255,255,0,255]) },
     ]);
     let mut linear = nearest.clone(); linear.min_filter = SamplerFilter::Linear; linear.mag_filter = SamplerFilter::Linear;
     let mut repeat = nearest.clone(); repeat.address_u = AddressMode::Repeat;
@@ -628,8 +628,8 @@ fn gpu_execution_texture_sampling() {
         (0.1,0.1,mip,[255,255,0,255],0),
     ].into_iter().enumerate() {
         let mut base = (*execution_scene3_draw(&format!("sample-{i}"),u32::MAX,(u,v))).clone();
-        base.family = renderer::family::Scene3_textured;
-        base.texture = Some(Rc::new(sampled_texture { key: "native-mip-chain".into(), levels: levels.clone(), sampler, gpu: None }));
+        base.family = renderer::PipelineFamily::Scene3Textured;
+        base.texture = Some(Rc::new(SampledTexture { key: "native-mip-chain".into(), levels: levels.clone(), sampler, gpu: None }));
         base.draw.state.viewport = (0,0,4,4); base.draw.state.scissor = (0,0,4,4);
         let draw = Rc::new(base);
         let mut uploaded = None;
@@ -642,7 +642,7 @@ fn gpu_execution_texture_sampling() {
             if let Some(previous) = uploaded { assert_eq!(bytes,previous,"stable sampler reuploaded"); }
             uploaded = Some(bytes);
         }
-        for malformed in [Vec::new(), vec![texture_level { width: 2, height: 2, bytes: new_bytes(vec![0;15]) }]] {
+        for malformed in [Vec::new(), vec![TextureLevel { width: 2, height: 2, bytes: new_bytes(vec![0;15]) }]] {
             let mut bad = (*draw).clone(); let mut texture = (**bad.texture.as_ref().unwrap()).clone();
             texture.key = format!("malformed-{i}"); texture.levels = Rc::new(malformed); bad.texture = Some(Rc::new(texture));
             let uploaded=renderer::stats(&e).unwrap().uploaded_bytes;
@@ -653,16 +653,16 @@ fn gpu_execution_texture_sampling() {
             assert_eq!(renderer::stats(&e).unwrap().uploaded_bytes,uploaded,"malformed texture rejection was not atomic");
         }
     }
-    let quad=|texture:sampled_texture,uv:f32| {
+    let quad=|texture:SampledTexture,uv:f32| {
         let mut d=(*execution_scene3_draw("sampler-quad",u32::MAX,(0.,0.))).clone();
-        d.family=renderer::family::Scene2_textured; d.vertex_attributes=None; d.draw.state.transform_uniforms=None;
+        d.family=renderer::PipelineFamily::Scene2Textured; d.vertex_attributes=None; d.draw.state.transform_uniforms=None;
         d.draw.mesh.vertices=new_bytes(common::floats(&[1.,0.,0.,0.,1.,0.,0.,0.,1.,1.,1.,1.,-1.,-1.,2.,2.,uv,uv,uv,uv]));
         d.draw.mesh.vertex_count=4; d.draw.mesh.indices=new_bytes(common::words(&[0,1,2,0,2,3])); d.draw.mesh.index_count=6;
         d.texture=Some(Rc::new(texture)); Rc::new(d)
     };
-    let textured=quad(sampled_texture { key:"native-mixed-scene2".into(),levels:levels.clone(),sampler:nearest.clone(),gpu:None },0.1);
+    let textured=quad(SampledTexture { key:"native-mixed-scene2".into(),levels:levels.clone(),sampler:nearest.clone(),gpu:None },0.1);
     let mut plain=(*execution_scene3_draw("mixed-plain",0xff0080ff,(0.,0.))).clone();
-    plain.family=renderer::family::Scene2; plain.vertex_attributes=None; plain.draw.state.transform_uniforms=None;
+    plain.family=renderer::PipelineFamily::Scene2; plain.vertex_attributes=None; plain.draw.state.transform_uniforms=None;
     let mut vertices=Vec::new();
     for (x,y) in [(-1f32,-1f32),(3.,-1.),(-1.,3.)] { vertices.extend(common::floats(&[x,y])); vertices.extend(0xff0080ffu32.to_le_bytes()); }
     plain.draw.mesh.vertices=new_bytes(vertices); let plain=Rc::new(plain);
@@ -672,11 +672,11 @@ fn gpu_execution_texture_sampling() {
     }
     for i in 0..=64 {
         let mut sampler=nearest.clone(); sampler.label=Some(format!("sampler-eviction-{i}"));
-        let texture=sampled_texture { key:"native-sampler-eviction".into(),levels:levels.clone(),sampler,gpu:None };
+        let texture=SampledTexture { key:"native-sampler-eviction".into(),levels:levels.clone(),sampler,gpu:None };
         renderer::draw(None,&e,&[quad(texture,0.1)]).unwrap();
     }
     let mut sampler=nearest.clone(); sampler.min_filter=SamplerFilter::Linear; sampler.mag_filter=SamplerFilter::Linear;
-    let compacted=quad(sampled_texture { key:"native-sampler-eviction".into(),levels:levels.clone(),sampler,gpu:None },0.5);
+    let compacted=quad(SampledTexture { key:"native-sampler-eviction".into(),levels:levels.clone(),sampler,gpu:None },0.5);
     for _ in 0..600 {
         renderer::draw(None,&e,&[compacted.clone()]).unwrap();
         for pixel in renderer::capture(&e).unwrap().chunks_exact(4) {
@@ -684,12 +684,12 @@ fn gpu_execution_texture_sampling() {
         }
     }
     let replacement=Rc::new(vec![
-        texture_level { width:2,height:2,bytes:new_bytes(vec![255;16]) },
-        texture_level { width:1,height:1,bytes:new_bytes(vec![0,0,255,255]) },
+        TextureLevel { width:2,height:2,bytes:new_bytes(vec![255;16]) },
+        TextureLevel { width:1,height:1,bytes:new_bytes(vec![0,0,255,255]) },
     ]);
     let mut replaced=(*execution_scene3_draw("sample-replacement",u32::MAX,(0.1,0.1))).clone();
-    replaced.family=renderer::family::Scene3_textured;
-    replaced.texture=Some(Rc::new(sampled_texture { key:"native-mip-chain".into(),levels:replacement,sampler:nearest,gpu:None }));
+    replaced.family=renderer::PipelineFamily::Scene3Textured;
+    replaced.texture=Some(Rc::new(SampledTexture { key:"native-mip-chain".into(),levels:replacement,sampler:nearest,gpu:None }));
     let before=renderer::stats(&e).unwrap().uploaded_bytes;
     renderer::draw(None,&e,&[Rc::new(replaced)]).unwrap();
     assert!(renderer::stats(&e).unwrap().uploaded_bytes>before,"replacement levels were not uploaded");
@@ -711,9 +711,9 @@ fn gpu_execution_offscreen_lifecycle() {
     for (x,y) in [(-1f32,-1f32),(3.,-1.),(-1.,3.)] {
         vertices.extend(x.to_le_bytes()); vertices.extend(y.to_le_bytes()); vertices.extend(u32::MAX.to_le_bytes());
     }
-    let d = renderer::prepared_draw(renderer::family::Scene2,Some(ogpu::pipeline::Blend::Replace),None,None,None,None,geometry_draw {
-        mesh: mesh { key: mesh_key::Host("offscreen-fullscreen".into()), vertices: new_bytes(vertices), shared_vertices: None, vertex_count: 3, indices: new_bytes(common::words(&[0,1,2])), index_count: 3, primitive: ogpu::render_pass::Primitive::TriangleList },
-        state: state { viewport: (0,0,4,4), scissor: (0,0,4,4), cull: ogpu::render_pass::Cull::CullNone, depth_compare: ogpu::render_pass::Comparison::Always, depth_write: false, depth_load: ogpu::render_pass::Load::Load, depth_clear: 1., transform_uniforms: None },
+    let d = renderer::prepared_draw(renderer::PipelineFamily::Scene2,Some(ogpu::pipeline::Blend::Replace),None,None,None,None,GeometryDraw {
+        mesh: Mesh { key: MeshKey::Host("offscreen-fullscreen".into()), vertices: new_bytes(vertices), shared_vertices: None, vertex_count: 3, indices: new_bytes(common::words(&[0,1,2])), index_count: 3, primitive: ogpu::render_pass::Primitive::TriangleList },
+        state: State { viewport: (0,0,4,4), scissor: (0,0,4,4), cull: ogpu::render_pass::Cull::CullNone, depth_compare: ogpu::render_pass::Comparison::Always, depth_write: false, depth_load: ogpu::render_pass::Load::Load, depth_clear: 1., transform_uniforms: None },
     });
     let clear = Some((0.,0.,0.,1.));
     for frame in 1..=600 {
@@ -721,7 +721,7 @@ fn gpu_execution_offscreen_lifecycle() {
         if [1,2,60,600].contains(&frame) { assert_eq!(se::read_pixels(&mut e,16).unwrap(),vec![255;64]); }
     }
     assert!(se::upload_bytes(&e)>0);
-    assert!(se::Private::cache_count_for_report(&mut e)<=2);
+    assert!(se::private::cache_count_for_report(&mut e)<=2);
     se::submit(Some(("offscreen-retained".into(),1)),&mut || {},clear,&mut e,&[d.clone()]).unwrap();
     let mut steady = None;
     for frame in 1..=60 {
@@ -732,13 +732,13 @@ fn gpu_execution_offscreen_lifecycle() {
     }
     assert_eq!(se::replay_prepared_sampled_resources(clear,"offscreen-retained",2,&mut e).unwrap(),None);
     let dense: Vec<_> = (0..257).map(|i| {
-        let mut e = (*d).clone(); e.draw.mesh.key=mesh_key::Host(format!("dense-{i}")); e.draw.state.scissor=(i%2,0,3,4); Rc::new(e)
+        let mut e = (*d).clone(); e.draw.mesh.key=MeshKey::Host(format!("dense-{i}")); e.draw.state.scissor=(i%2,0,3,4); Rc::new(e)
     }).collect();
     for frame in 1..=60 {
         assert!(se::submit(Some(("dense-eviction".into(),1)),&mut || {},clear,&mut e,&dense).unwrap());
         assert_eq!(se::replay_prepared_sampled_resources(clear,"dense-eviction",1,&mut e).unwrap(),None);
         if [1,2,60].contains(&frame) { assert_eq!(se::read_pixels(&mut e,16).unwrap(),vec![255;64]); }
-        assert!(se::Private::cache_count_for_report(&mut e)<=256);
+        assert!(se::private::cache_count_for_report(&mut e)<=256);
     }
     se::destroy(&mut e).unwrap();
     // test_automatic_scratch.ml: mixed families admit only after two identical frames.
@@ -754,7 +754,7 @@ fn gpu_execution_offscreen_lifecycle() {
         se::submit(None,&mut || {},clear,&mut mixed,&stable).unwrap();
         assert_eq!(se::read_pixels(&mut mixed,256).unwrap(),[64,128,191,255].repeat(64*64));
         let stats=se::retained_stats(&mixed);
-        assert_eq!((stats.plan_hits,stats.plan_misses),if frame==3 {(1,2)} else {(0,frame)});
+        assert_eq!((stats.hits,stats.misses),if frame==3 {(1,2)} else {(0,frame)});
     }
     scene3.draw.state.scissor=(1,1,62,62);
     let changed=vec![first,Rc::new(scene3)];
@@ -765,7 +765,7 @@ fn gpu_execution_offscreen_lifecycle() {
             let at=(y*64+x)*4; assert_eq!(&pixels[at..at+4],if x==0 || x==63 || y==0 || y==63 { &[255;4] } else { &[64,128,191,255] });
         }}
         let stats=se::retained_stats(&mixed);
-        assert_eq!((stats.plan_hits,stats.plan_misses),if frame==3 {(2,4)} else {(1,2+frame)});
+        assert_eq!((stats.hits,stats.misses),if frame==3 {(2,4)} else {(1,2+frame)});
     }
     se::destroy(&mut mixed).unwrap();
     assert_eq!(live_handles(),baseline);
@@ -790,17 +790,17 @@ fn gpu_execution_gpu_film() {
     let receipt=b::commit(&commands).unwrap();
     b::complete_through(&se::queue(&e),receipt.epoch).unwrap();
     b::destroy_buffer(&staging).unwrap();
-    let texture=se::sampled_texture { key:"gpu-film".into(),levels:Rc::new(vec![se::texture_level { width:1,height:1,bytes:se::empty_bytes() }]),gpu:Some(film.clone()),sampler:SamplerDescriptor { label:None,min_filter:SamplerFilter::Nearest,mag_filter:SamplerFilter::Nearest,mip_filter:MipFilter::NoMip,address_u:AddressMode::ClampToEdge,address_v:AddressMode::ClampToEdge,lod_min:0.,lod_max:0.,max_anisotropy:1 } };
-    let draw=renderer::prepared_draw(renderer::family::Scene2_textured,Some(ogpu::pipeline::Blend::Replace),Some(Rc::new(texture.clone())),None,None,None,geometry_draw {
-        mesh:mesh { key:mesh_key::Host("film-quad".into()),vertices:new_bytes(common::floats(&[1.,0.,0.,0.,1.,0.,0.,0.,1.,1.,1.,1.,-1.,-1.,2.,2.,0.1,0.1,0.1,0.1])),shared_vertices:None,vertex_count:4,indices:new_bytes(common::words(&[0,1,2,0,2,3])),index_count:6,primitive:ogpu::render_pass::Primitive::TriangleList },
-        state:state { viewport:(0,0,4,4),scissor:(0,0,4,4),cull:ogpu::render_pass::Cull::CullNone,depth_compare:ogpu::render_pass::Comparison::Always,depth_write:false,depth_load:ogpu::render_pass::Load::Load,depth_clear:1.,transform_uniforms:None },
+    let texture=se::SampledTexture { key:"gpu-film".into(),levels:Rc::new(vec![se::TextureLevel { width:1,height:1,bytes:se::empty_bytes() }]),gpu:Some(film.clone()),sampler:SamplerDescriptor { label:None,min_filter:SamplerFilter::Nearest,mag_filter:SamplerFilter::Nearest,mip_filter:MipFilter::NoMip,address_u:AddressMode::ClampToEdge,address_v:AddressMode::ClampToEdge,lod_min:0.,lod_max:0.,max_anisotropy:1 } };
+    let draw=renderer::prepared_draw(renderer::PipelineFamily::Scene2Textured,Some(ogpu::pipeline::Blend::Replace),Some(Rc::new(texture.clone())),None,None,None,GeometryDraw {
+        mesh:Mesh { key:MeshKey::Host("film-quad".into()),vertices:new_bytes(common::floats(&[1.,0.,0.,0.,1.,0.,0.,0.,1.,1.,1.,1.,-1.,-1.,2.,2.,0.1,0.1,0.1,0.1])),shared_vertices:None,vertex_count:4,indices:new_bytes(common::words(&[0,1,2,0,2,3])),index_count:6,primitive:ogpu::render_pass::Primitive::TriangleList },
+        state:State { viewport:(0,0,4,4),scissor:(0,0,4,4),cull:ogpu::render_pass::Cull::CullNone,depth_compare:ogpu::render_pass::Comparison::Always,depth_write:false,depth_load:ogpu::render_pass::Load::Load,depth_clear:1.,transform_uniforms:None },
     });
     se::submit(None,&mut || {},None,&mut e,&[draw.clone()]).unwrap();
     let uploaded=se::upload_bytes(&e);
     se::submit(None,&mut || {},None,&mut e,&[draw.clone()]).unwrap();
     assert_eq!(se::read_pixels(&mut e,16).unwrap(),[0x31,0x82,0xdd,255].repeat(16));
     assert_eq!(se::upload_bytes(&e),uploaded,"GPU film crossed CPU staging");
-    let mut malformed=texture.clone(); malformed.levels=Rc::new(vec![se::texture_level { width:2,height:1,bytes:se::empty_bytes() }]);
+    let mut malformed=texture.clone(); malformed.levels=Rc::new(vec![se::TextureLevel { width:2,height:1,bytes:se::empty_bytes() }]);
     let mut bad=(*draw).clone(); bad.texture=Some(Rc::new(malformed));
     assert!(matches!(se::submit(None,&mut || {},None,&mut e,&[Rc::new(bad)]),Err(error) if error.kind==ogpu::error::ErrorKind::InvalidArgument));
     let foreign_device=b::create_device(ogpu::impl_::create_driver().unwrap()).unwrap();
@@ -822,7 +822,7 @@ fn gpu_execution_blends_samples_resize() {
     let mut cfg=Configuration { logical_width:4,logical_height:4,physical_width:4,physical_height:4,format:Format::Bgra8Unorm,present_mode:PresentMode::Fifo,max_acquired:2,layer:None };
     let mut e=renderer_pipeline::create_renderer(&ogpu::impl_::backend().unwrap(),None,None,true,ogpu::impl_::create_driver().unwrap(),&cfg).unwrap();
     let mut plain=(*execution_scene3_draw("blend-plain",0xff0080ff,(0.,0.))).clone();
-    plain.family=renderer::family::Scene2; plain.vertex_attributes=None; plain.draw.state.transform_uniforms=None;
+    plain.family=renderer::PipelineFamily::Scene2; plain.vertex_attributes=None; plain.draw.state.transform_uniforms=None;
     let mut vertices=Vec::new();
     for (x,y) in [(-1f32,-1f32),(3.,-1.),(-1.,3.)] {
         vertices.extend(common::floats(&[x,y])); vertices.extend(0xff0080ffu32.to_le_bytes());
@@ -874,7 +874,7 @@ fn gpu_execution_lease_rollback() {
     use ::renderer::renderer_leases as leases;
     let image=Image::create(1,1,&[255,0,0,255]).unwrap();
     let held=leases::create();
-    let policy=leases::policy::Retain_image_snapshots(held.clone());
+    let policy=leases::Policy::RetainImageSnapshots(held.clone());
     let (_,_,_,first,lease)=Image::borrow_snapshot(&image).unwrap();
     leases::retain(&held,lease);
     let checkpoint=leases::checkpoint(&policy);
@@ -891,8 +891,8 @@ fn gpu_execution_lease_rollback() {
     Image::replace(&image,1,1,&[255,255,255,255]).unwrap();
     Image::replace(&image,1,1,&[0,0,0,255]).unwrap();
     assert_eq!(leases::checkpoint(&policy),Some(0));
-    assert_eq!(leases::checkpoint(&leases::policy::Copy_image_snapshots),None);
-    leases::rollback(&leases::policy::Copy_image_snapshots,None);
+    assert_eq!(leases::checkpoint(&leases::Policy::CopyImageSnapshots),None);
+    leases::rollback(&leases::Policy::CopyImageSnapshots,None);
     Image::destroy(&image).unwrap();
 }
 

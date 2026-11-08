@@ -6,7 +6,7 @@ use ogpu::backend::{self as b, Accel, AccelDescriptor, Buffer, Commands, Device,
 use ogpu::types::{BufferUsage, Memory};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct shape {
+pub struct Shape {
     pub instanced: bool,
     pub colored: bool,
     pub lone: bool,
@@ -23,7 +23,7 @@ pub struct shape {
 /// rows), the analytic spheres as (centre, radius) and the strand segments as (end a, radius), (end b,
 /// radius).
 #[derive(Clone)]
-pub struct tables {
+pub struct Tables {
     pub ids: Buffer,
     pub inst: Buffer,
     pub trace_instances: Option<Buffer>,
@@ -44,7 +44,7 @@ pub struct tables {
 /// vertex indices as floats, the refittable structure's scratch, and the device mesh whose buffers the
 /// last gather read, kept until the gather's `receipt` completes.
 #[derive(Clone)]
-pub struct device_gpu {
+pub struct DeviceGpu {
     pub corners: std::sync::Arc<Vec<i64>>,
     pub vertex_count: i64,
     pub material_key: Vec<u8>,
@@ -56,11 +56,11 @@ pub struct device_gpu {
     pub receipt: Receipt,
 }
 
-pub type prototype_key = (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>);
+pub type PrototypeKey = (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>);
 
 #[derive(Clone)]
-pub struct gpu_mesh {
-    pub device: Option<device_gpu>,
+pub struct GpuMesh {
+    pub device: Option<DeviceGpu>,
     pub positions: Buffer,
     pub normals: Buffer,
     pub colors: Buffer,
@@ -75,34 +75,34 @@ pub struct gpu_mesh {
     pub primitive: Option<Accel>,
     pub instance_buffer: Option<Buffer>,
     pub motion_buffer: Option<Buffer>,
-    pub prototype_key: Option<prototype_key>,
+    pub prototype_key: Option<PrototypeKey>,
     pub scene_blas: Vec<Accel>,
     /// what they took before compaction
     pub scene_unpacked: i64,
     /// owned even when the prototype is borrowed
-    pub tables: tables,
+    pub tables: Tables,
     pub owns_prototype: bool,
-    pub shape: shape,
+    pub shape: Shape,
 }
 
 /// A replacement build runs in stages: the primitive structure builds and writes its compacted size; then
 /// it is compacted into a right-sized structure and the instance structure (if any) builds over the
 /// compacted one; then the uncompacted structure is released.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum stage {
+pub enum Stage {
     Building(Receipt),
     Compacting(Receipt),
     Ready,
 }
 
-pub struct mesh_build {
-    pub gpu: gpu_mesh,
+pub struct MeshBuild {
+    pub gpu: GpuMesh,
     pub scratch: Buffer,
     pub extra_scratch: Option<Buffer>,
     pub size_buffer: Option<Buffer>,
     pub uncompacted: Option<Accel>,
     pub uncompacted_scene: Vec<Accel>,
-    pub stage: stage,
+    pub stage: Stage,
     pub instance_count: i64,
     /// `encode_instances` made a structure of its own (OCaml compares `build.gpu.structure` physically)
     pub instances_built: bool,
@@ -121,13 +121,13 @@ pub fn shared(device: &Device, label: &str, bytes: &[u8]) -> Result<Buffer, Stri
     }
 }
 
-pub fn table_buffers(t: &tables) -> Vec<Buffer> {
+pub fn table_buffers(t: &Tables) -> Vec<Buffer> {
     let mut v = vec![t.ids.clone(), t.inst.clone(), t.spheres.clone(), t.strands.clone()];
     v.extend(t.trace_instances.iter().cloned());
     v
 }
 
-pub fn destroy_gpu(gpu: &gpu_mesh) {
+pub fn destroy_gpu(gpu: &GpuMesh) {
     let _ = b::destroy_accel(&gpu.structure);
     for value in table_buffers(&gpu.tables) {
         let _ = b::destroy_buffer(&value);
@@ -168,7 +168,7 @@ pub fn destroy_gpu(gpu: &gpu_mesh) {
 }
 
 /// Encodes the instance structure build over `build.gpu.primitive`.
-pub fn encode_instances(device: &Device, build: &mut mesh_build, command: &Commands) -> Result<(), String> {
+pub fn encode_instances(device: &Device, build: &mut MeshBuild, command: &Commands) -> Result<(), String> {
     let structures: Vec<Accel> = match &build.gpu.primitive {
         Some(primitive) => vec![primitive.clone()],
         None => build.gpu.scene_blas.clone(),
@@ -258,7 +258,7 @@ pub fn encode_instances(device: &Device, build: &mut mesh_build, command: &Comma
     }
 }
 
-pub fn submit_instances(device: &Device, queue: &Queue, build: &mut mesh_build) -> Result<(), String> {
+pub fn submit_instances(device: &Device, queue: &Queue, build: &mut MeshBuild) -> Result<(), String> {
     let command = b::begin_commands(queue).map_err(gpu_err)?;
     let result = (|| -> Result<Receipt, String> {
         encode_instances(device, build, &command)?;
@@ -266,7 +266,7 @@ pub fn submit_instances(device: &Device, queue: &Queue, build: &mut mesh_build) 
     })();
     match result {
         Ok(receipt) => {
-            build.stage = stage::Compacting(receipt);
+            build.stage = Stage::Compacting(receipt);
             Ok(())
         }
         Err(e) => {
@@ -276,14 +276,14 @@ pub fn submit_instances(device: &Device, queue: &Queue, build: &mut mesh_build) 
     }
 }
 
-pub fn mesh_shape(mesh: &mesh_data::t) -> shape {
-    shape {
+pub fn mesh_shape(mesh: &mesh_data::MeshData) -> Shape {
+    Shape {
         instanced: mesh.instances.is_some(),
-        colored: !mesh.mesh_colors.is_empty() || mesh.device.as_ref().map(|d| d.colored).unwrap_or(false),
+        colored: !mesh.colors.is_empty() || mesh.device.as_ref().map(|d| d.colored).unwrap_or(false),
         lone: mesh.device.is_some(),
         motion: matches!(&mesh.instances, Some(i) if i.motion_transforms.is_some()),
         spheres: mesh.extras.sphere_count > 0,
-        curves: mesh.extras.strand_segments > 0,
+        curves: mesh.extras.segments > 0,
         scene: mesh.scene.is_some(),
     }
 }
@@ -304,7 +304,7 @@ fn i32_at(bytes: &[u8], offset: usize) -> i64 {
     i32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap()) as i64
 }
 
-pub fn upload_tables(material_data: &[u8], device: &Device, mesh: &mesh_data::t) -> Result<tables, String> {
+pub fn upload_tables(material_data: &[u8], device: &Device, mesh: &mesh_data::MeshData) -> Result<Tables, String> {
     let some = |k: &[usize]| {
         for m in 0..material_data.len() / 48 {
             for c in k {
@@ -369,18 +369,18 @@ pub fn upload_tables(material_data: &[u8], device: &Device, mesh: &mesh_data::t)
     }
     let e = &mesh.extras;
     let spheres: Vec<f64> = (0..4 * e.sphere_count as usize).map(|j| f32_at(&e.sphere_bytes, 4 * j)).collect();
-    let strands: Vec<f64> = (0..8 * e.strand_segments as usize)
+    let strands: Vec<f64> = (0..8 * e.segments as usize)
         .map(|j| {
-            let first = i32_at(&e.strand_indices, 4 * (j / 8)) as usize + (j % 8) / 4;
-            if j % 4 == 3 { f32_at(&e.strand_radii, 4 * first) } else { f32_at(&e.strand_points, 12 * first + 4 * (j % 4)) }
+            let first = i32_at(&e.indices, 4 * (j / 8)) as usize + (j % 8) / 4;
+            if j % 4 == 3 { f32_at(&e.radii, 4 * first) } else { f32_at(&e.points, 12 * first + 4 * (j % 4)) }
         })
         .collect();
     let id = |bytes: &[u8]| -> Vec<f64> { (0..bytes.len() / 4).map(|i| i32_at(bytes, 4 * i) as f64).collect() };
-    let triangle_ids = (mesh.mesh_ids.len() / 4) as i64;
-    let mut ids = id(&mesh.mesh_ids);
-    ids.extend(id(&e.strand_ids));
+    let triangle_ids = (mesh.ids.len() / 4) as i64;
+    let mut ids = id(&mesh.ids);
+    ids.extend(id(&e.ids));
     let mut owned: Vec<Buffer> = Vec::new();
-    let made = (|| -> Result<tables, String> {
+    let made = (|| -> Result<Tables, String> {
         let mut upload = |label: &str, values: &[f64]| -> Result<Buffer, String> {
             let buf = shared(device, label, &floats(values))?;
             owned.push(buf.clone());
@@ -391,7 +391,7 @@ pub fn upload_tables(material_data: &[u8], device: &Device, mesh: &mesh_data::t)
         let spheres_buffer = upload("pathtracer-lisp-spheres", &if spheres.is_empty() { vec![0.; 4] } else { spheres })?;
         let strands_buffer = upload("pathtracer-lisp-strands", &if strands.is_empty() { vec![0.; 8] } else { strands })?;
         let trace_instances = if n == 0 { None } else { Some(upload("pathtracer-lisp-trace", &trace)?) };
-        Ok(tables {
+        Ok(Tables {
             ids: ids_buffer,
             inst: inst_buffer,
             trace_instances,
@@ -401,7 +401,7 @@ pub fn upload_tables(material_data: &[u8], device: &Device, mesh: &mesh_data::t)
             instance_count: (n as i64).max(1),
             sphere_count: e.sphere_count,
             sphere_base: e.sphere_material,
-            strand_count: e.strand_segments,
+            strand_count: e.segments,
             triangle_ids,
             classes: (some(&[7]), some(&[4, 5, 6]), some(&[8])),
         })
@@ -415,20 +415,20 @@ pub fn upload_tables(material_data: &[u8], device: &Device, mesh: &mesh_data::t)
 }
 
 /// What a failed `upload_mesh_async` releases.
-struct owned_resources {
+struct OwnedResources {
     buffers: Vec<Buffer>,
     structures: Vec<Accel>,
     scratch: Option<Buffer>,
     commands: Option<Commands>,
 }
 
-fn owned(device: &Device, o: &mut owned_resources, bytes: &[u8], label: &str) -> Result<Buffer, String> {
+fn owned(device: &Device, o: &mut OwnedResources, bytes: &[u8], label: &str) -> Result<Buffer, String> {
     let value = shared(device, label, bytes)?;
     o.buffers.push(value.clone());
     Ok(value)
 }
 
-fn accel(device: &Device, o: &mut owned_resources, descriptor: AccelDescriptor) -> Result<Accel, String> {
+fn accel(device: &Device, o: &mut OwnedResources, descriptor: AccelDescriptor) -> Result<Accel, String> {
     let value = b::create_accel(device, descriptor, false).map_err(gpu_err)?;
     o.structures.push(value.clone());
     Ok(value)
@@ -436,8 +436,8 @@ fn accel(device: &Device, o: &mut owned_resources, descriptor: AccelDescriptor) 
 
 /// Stage one of a replacement build: upload the geometry, build the primitive structure, and write its
 /// compacted size, all without waiting. A reused prototype skips straight to the instance build.
-pub fn upload_mesh_async(reuse: Option<&gpu_mesh>, material_data: &[u8], device: &Device, queue: &Queue, mesh: &mesh_data::t) -> Result<mesh_build, String> {
-    let mut o = owned_resources { buffers: vec![], structures: vec![], scratch: None, commands: None };
+pub fn upload_mesh_async(reuse: Option<&GpuMesh>, material_data: &[u8], device: &Device, queue: &Queue, mesh: &mesh_data::MeshData) -> Result<MeshBuild, String> {
+    let mut o = OwnedResources { buffers: vec![], structures: vec![], scratch: None, commands: None };
     let result = upload_inner(&mut o, reuse, material_data, device, queue, mesh);
     match result {
         Ok(build) => Ok(build),
@@ -459,7 +459,7 @@ pub fn upload_mesh_async(reuse: Option<&gpu_mesh>, material_data: &[u8], device:
     }
 }
 
-fn upload_inner(o: &mut owned_resources, reuse: Option<&gpu_mesh>, material_data: &[u8], device: &Device, queue: &Queue, mesh: &mesh_data::t) -> Result<mesh_build, String> {
+fn upload_inner(o: &mut OwnedResources, reuse: Option<&GpuMesh>, material_data: &[u8], device: &Device, queue: &Queue, mesh: &mesh_data::MeshData) -> Result<MeshBuild, String> {
     let mesh = if mesh_shape(mesh).motion && !b::capabilities(device).ray_tracing_motion { mesh_data::shutter_midpoint(mesh)? } else { mesh.clone() };
     let mesh = &mesh;
     let shape = mesh_shape(mesh);
@@ -467,11 +467,11 @@ fn upload_inner(o: &mut owned_resources, reuse: Option<&gpu_mesh>, material_data
     let capabilities = b::capabilities(device);
     // without native curves scene/trace tests each strand segment as a capsule
     let native_curves = shape.curves && capabilities.ray_tracing_curves;
-    let extra_key = || [extras.sphere_bytes.as_slice(), extras.strand_points.as_slice(), mesh.mesh_colors.as_slice()].concat();
-    let reused: Option<(&gpu_mesh, Accel)> = match (reuse, &mesh.instances) {
+    let extra_key = || [extras.sphere_bytes.as_slice(), extras.points.as_slice(), mesh.colors.as_slice()].concat();
+    let reused: Option<(&GpuMesh, Accel)> = match (reuse, &mesh.instances) {
         (Some(gpu), Some(_)) if mesh.scene.is_none() => match (&gpu.prototype_key, &gpu.primitive) {
             (Some((positions, normals, ids, materials, key)), Some(primitive))
-                if *positions == mesh.mesh_positions && *normals == mesh.mesh_normals && *ids == mesh.mesh_ids && materials.as_slice() == material_data && *key == extra_key() =>
+                if *positions == mesh.positions && *normals == mesh.normals && *ids == mesh.ids && materials.as_slice() == material_data && *key == extra_key() =>
             {
                 Some((gpu, primitive.clone()))
             }
@@ -482,23 +482,23 @@ fn upload_inner(o: &mut owned_resources, reuse: Option<&gpu_mesh>, material_data
     let (positions, normals, colors, materials, curves, primitive, scene_blas, build_primitive) = match &reused {
         Some((gpu, primitive)) => (gpu.positions.clone(), gpu.normals.clone(), gpu.colors.clone(), gpu.materials.clone(), gpu.curves.clone(), primitive.clone(), vec![], false),
         None => {
-            let positions = owned(device, o, &mesh.mesh_positions, "pathtracer-positions")?;
-            let normals = owned(device, o, &mesh.mesh_normals, "pathtracer-normals")?;
-            let colors = owned(device, o, if mesh.mesh_colors.is_empty() { &[0u8; 12] } else { mesh.mesh_colors.as_slice() }, "pathtracer-colors")?;
+            let positions = owned(device, o, &mesh.positions, "pathtracer-positions")?;
+            let normals = owned(device, o, &mesh.normals, "pathtracer-normals")?;
+            let colors = owned(device, o, if mesh.colors.is_empty() { &[0u8; 12] } else { mesh.colors.as_slice() }, "pathtracer-colors")?;
             let materials = owned(device, o, material_data, "pathtracer-materials")?;
             let curves = if !shape.curves {
                 None
             } else if !native_curves {
                 // capsule candidates: one box per segment, the kernel resolves each against the strand records
                 let value = |bytes: &[u8], at: usize| f32::from_le_bytes(bytes[at..at + 4].try_into().unwrap()) as f64;
-                let segments = extras.strand_segments as usize;
+                let segments = extras.segments as usize;
                 let mut boxes = vec![0u8; segments * 24];
                 for segment in 0..segments {
-                    let first = i32::from_le_bytes(extras.strand_indices[4 * segment..4 * segment + 4].try_into().unwrap()) as usize;
-                    let radius = value(&extras.strand_radii, 4 * first).abs().max(value(&extras.strand_radii, 4 * (first + 1)).abs());
+                    let first = i32::from_le_bytes(extras.indices[4 * segment..4 * segment + 4].try_into().unwrap()) as usize;
+                    let radius = value(&extras.radii, 4 * first).abs().max(value(&extras.radii, 4 * (first + 1)).abs());
                     for axis in 0..3 {
-                        let a = value(&extras.strand_points, 12 * first + 4 * axis);
-                        let b2 = value(&extras.strand_points, 12 * (first + 1) + 4 * axis);
+                        let a = value(&extras.points, 12 * first + 4 * axis);
+                        let b2 = value(&extras.points, 12 * (first + 1) + 4 * axis);
                         let low = a.min(b2) - radius;
                         let high = a.max(b2) + radius;
                         let epsilon = 1e-5 * 1.0f64.max(low.abs().max(high.abs()));
@@ -510,13 +510,13 @@ fn upload_inner(o: &mut owned_resources, reuse: Option<&gpu_mesh>, material_data
                 let curves = accel(
                     device,
                     o,
-                    AccelDescriptor::Blas { geometries: vec![Geometry::BoundingBoxes { boxes: vec![b::Keyframe { buffer: boxes.clone(), offset: 0 }], stride: 24, count: extras.strand_segments, options: b::DEFAULT_GEOMETRY_OPTIONS }] },
+                    AccelDescriptor::Blas { geometries: vec![Geometry::BoundingBoxes { boxes: vec![b::Keyframe { buffer: boxes.clone(), offset: 0 }], stride: 24, count: extras.segments, options: b::DEFAULT_GEOMETRY_OPTIONS }] },
                 )?;
                 Some((curves, vec![boxes]))
             } else {
-                let points = owned(device, o, &extras.strand_points, "pathtracer-strand-points")?;
-                let radii = owned(device, o, &extras.strand_radii, "pathtracer-strand-radii")?;
-                let indices = owned(device, o, &extras.strand_indices, "pathtracer-strand-indices")?;
+                let points = owned(device, o, &extras.points, "pathtracer-strand-points")?;
+                let radii = owned(device, o, &extras.radii, "pathtracer-strand-radii")?;
+                let indices = owned(device, o, &extras.indices, "pathtracer-strand-indices")?;
                 let curves = accel(
                     device,
                     o,
@@ -524,12 +524,12 @@ fn upload_inner(o: &mut owned_resources, reuse: Option<&gpu_mesh>, material_data
                         geometries: vec![Geometry::Curves {
                             control_points: vec![b::Keyframe { buffer: points.clone(), offset: 0 }],
                             control_stride: 12,
-                            control_point_count: extras.strand_point_count,
+                            control_point_count: extras.point_count,
                             radii: vec![b::Keyframe { buffer: radii.clone(), offset: 0 }],
                             radius_stride: 4,
                             indices: indices.clone(),
                             index_offset: 0,
-                            segment_count: extras.strand_segments,
+                            segment_count: extras.segments,
                             control_points_per_segment: 2,
                             curve_type: b::CurveType::RoundCurve,
                             basis: b::CurveBasis::LinearBasis,
@@ -539,16 +539,16 @@ fn upload_inner(o: &mut owned_resources, reuse: Option<&gpu_mesh>, material_data
                 )?;
                 Some((curves, vec![points, radii, indices]))
             };
-            let triangles = |mesh_data::part::Triangle_part(first, vertex_count): mesh_data::part| Geometry::Triangles {
+            let triangles = |mesh_data::Part::TrianglePart(first, vertex_count): mesh_data::Part| Geometry::Triangles {
                 vertices: positions.clone(),
                 offset: first * 12,
                 length: vertex_count * 12,
                 vertex_stride: 12,
                 vertex_count,
             };
-            let parts: Vec<mesh_data::part> = match &mesh.scene {
+            let parts: Vec<mesh_data::Part> = match &mesh.scene {
                 Some(layout) => layout.parts.clone(),
-                None => vec![mesh_data::part::Triangle_part(0, mesh.mesh_positions.len() as i64 / 12)],
+                None => vec![mesh_data::Part::TrianglePart(0, mesh.positions.len() as i64 / 12)],
             };
             let mut blas = Vec::new();
             for part in parts {
@@ -614,7 +614,7 @@ fn upload_inner(o: &mut owned_resources, reuse: Option<&gpu_mesh>, material_data
         },
     )?;
     o.scratch = Some(work.clone());
-    let gpu_mesh_ = gpu_mesh {
+    let gpu_mesh_ = GpuMesh {
         device: None,
         positions,
         normals,
@@ -631,7 +631,7 @@ fn upload_inner(o: &mut owned_resources, reuse: Option<&gpu_mesh>, material_data
         instance_buffer,
         motion_buffer,
         prototype_key: match &mesh.instances {
-            Some(_) if mesh.scene.is_none() => Some((mesh.mesh_positions.clone(), mesh.mesh_normals.clone(), mesh.mesh_ids.clone(), material_data.to_vec(), extra_key())),
+            Some(_) if mesh.scene.is_none() => Some((mesh.positions.clone(), mesh.normals.clone(), mesh.ids.clone(), material_data.to_vec(), extra_key())),
             _ => None,
         },
         scene_blas: scene_blas.clone(),
@@ -641,14 +641,14 @@ fn upload_inner(o: &mut owned_resources, reuse: Option<&gpu_mesh>, material_data
         shape,
     };
     let instance_count = mesh.instances.as_ref().map(|i| i.records.len() as i64).unwrap_or(0);
-    let building = |gpu: gpu_mesh, extra_scratch: Option<Buffer>, size_buffer: Option<Buffer>, receipt: Receipt| mesh_build {
+    let building = |gpu: GpuMesh, extra_scratch: Option<Buffer>, size_buffer: Option<Buffer>, receipt: Receipt| MeshBuild {
         gpu,
         scratch: work.clone(),
         extra_scratch,
         size_buffer,
         uncompacted: None,
         uncompacted_scene: vec![],
-        stage: stage::Building(receipt),
+        stage: Stage::Building(receipt),
         instance_count,
         instances_built: false,
         proto_scratch: None,
@@ -692,14 +692,14 @@ fn upload_inner(o: &mut owned_resources, reuse: Option<&gpu_mesh>, material_data
         Ok(building(gpu_mesh_, curve_scratch, Some(size_buffer), receipt))
     } else {
         // A reused compacted prototype only needs its instance structure.
-        let mut build = mesh_build {
-            gpu: gpu_mesh { primitive: Some(primitive.clone()), ..gpu_mesh_ },
+        let mut build = MeshBuild {
+            gpu: GpuMesh { primitive: Some(primitive.clone()), ..gpu_mesh_ },
             scratch: work.clone(),
             extra_scratch: None,
             size_buffer: None,
             uncompacted: None,
             uncompacted_scene: vec![],
-            stage: stage::Ready,
+            stage: Stage::Ready,
             instance_count,
             instances_built: false,
             proto_scratch: None,
@@ -716,7 +716,7 @@ pub fn wait(queue: &Queue, receipt: Receipt) -> Result<(), String> {
 }
 
 /// The scene's structures are built: compact them, then build the instances over the compacted ones.
-pub fn compact_scene(device: &Device, queue: &Queue, build: &mut mesh_build) -> Result<(), String> {
+pub fn compact_scene(device: &Device, queue: &Queue, build: &mut MeshBuild) -> Result<(), String> {
     let size_bytes = match &build.size_buffer {
         Some(size_buffer) => b::read_buffer(size_buffer, 0, 8 * build.gpu.scene_blas.len() as i64).map_err(gpu_err)?,
         None => return Err("path tracer build lost its compacted sizes".to_string()),
@@ -752,7 +752,7 @@ pub fn compact_scene(device: &Device, queue: &Queue, build: &mut mesh_build) -> 
     })();
     match encoded {
         Ok(receipt) => {
-            build.stage = stage::Compacting(receipt);
+            build.stage = Stage::Compacting(receipt);
             Ok(())
         }
         Err(e) => {
@@ -762,11 +762,11 @@ pub fn compact_scene(device: &Device, queue: &Queue, build: &mut mesh_build) -> 
     }
 }
 
-pub fn advance_build(device: &Device, queue: &Queue, build: &mut mesh_build) -> Result<(), String> {
+pub fn advance_build(device: &Device, queue: &Queue, build: &mut MeshBuild) -> Result<(), String> {
     match build.stage {
-        stage::Ready => Ok(()),
-        stage::Building(_) if !build.gpu.scene_blas.is_empty() => compact_scene(device, queue, build),
-        stage::Building(_) => {
+        Stage::Ready => Ok(()),
+        Stage::Building(_) if !build.gpu.scene_blas.is_empty() => compact_scene(device, queue, build),
+        Stage::Building(_) => {
             let uncompacted = build.gpu.structure.clone();
             let size_bytes = match &build.size_buffer {
                 Some(size_buffer) => b::read_buffer(size_buffer, 0, 8).map_err(gpu_err)?,
@@ -789,7 +789,7 @@ pub fn advance_build(device: &Device, queue: &Queue, build: &mut mesh_build) -> 
             })();
             match encoded {
                 Ok(receipt) => {
-                    build.stage = stage::Compacting(receipt);
+                    build.stage = Stage::Compacting(receipt);
                     Ok(())
                 }
                 Err(e) => {
@@ -798,7 +798,7 @@ pub fn advance_build(device: &Device, queue: &Queue, build: &mut mesh_build) -> 
                 }
             }
         }
-        stage::Compacting(_) => {
+        Stage::Compacting(_) => {
             if let Some(structure) = build.uncompacted.take() {
                 let _ = b::destroy_accel(&structure);
             }
@@ -808,18 +808,18 @@ pub fn advance_build(device: &Device, queue: &Queue, build: &mut mesh_build) -> 
             if let Some(size_buffer) = build.size_buffer.take() {
                 let _ = b::destroy_buffer(&size_buffer);
             }
-            build.stage = stage::Ready;
+            build.stage = Stage::Ready;
             Ok(())
         }
     }
 }
 
-pub fn finish_build(device: &Device, queue: &Queue, mut build: mesh_build) -> Result<gpu_mesh, String> {
+pub fn finish_build(device: &Device, queue: &Queue, mut build: MeshBuild) -> Result<GpuMesh, String> {
     let finished = (|| -> Result<(), String> {
         loop {
             match build.stage {
-                stage::Ready => return Ok(()),
-                stage::Building(receipt) | stage::Compacting(receipt) => {
+                Stage::Ready => return Ok(()),
+                Stage::Building(receipt) | Stage::Compacting(receipt) => {
                     wait(queue, receipt)?;
                     advance_build(device, queue, &mut build)?;
                 }
@@ -851,10 +851,10 @@ pub fn finish_build(device: &Device, queue: &Queue, mut build: mesh_build) -> Re
     }
 }
 
-pub fn discard_build(queue: &Queue, build: &mesh_build) {
+pub fn discard_build(queue: &Queue, build: &MeshBuild) {
     match build.stage {
-        stage::Ready => {}
-        stage::Building(receipt) | stage::Compacting(receipt) => {
+        Stage::Ready => {}
+        Stage::Building(receipt) | Stage::Compacting(receipt) => {
             let _ = wait(queue, receipt);
         }
     }

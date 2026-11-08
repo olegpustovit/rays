@@ -116,7 +116,7 @@ fn scene_of(g: &rdk_core::geometry::T) -> scene3::t {
     scene3::create(None, None, None, None, vec![scene3::mesh(Some(rays::material::unlit(rays_math::color::white())), None, None, Some(scene3::cull::Cull_none), None, m)]).unwrap()
 }
 
-fn packed(g: &rdk_core::geometry::T) -> std::rc::Rc<renderer::scene_execution::sampled_draw> {
+fn packed(g: &rdk_core::geometry::T) -> std::rc::Rc<renderer::scene_execution::SampledDraw> {
     let camera = rays::camera::orthographic(4., vec3::create(0., 0., 4.), vec3::zero()).unwrap();
     let staged = Layer::stage_native(128, 128, &[scene::view3d(None, &camera, scene_of(g))]).unwrap();
     staged.scene3[0].entries[0].clone()

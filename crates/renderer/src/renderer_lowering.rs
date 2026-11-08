@@ -1,5 +1,5 @@
-use crate::renderer_retained_plans::resource;
-use crate::scene_execution::{self, bytes, draw, empty_bytes, mesh, mesh_key, new_bytes, pipeline_family, sampled_draw, sampled_texture, state, texture_level};
+use crate::renderer_retained_plans::Resource;
+use crate::scene_execution::{self, bytes, Draw, empty_bytes, Mesh, MeshKey, new_bytes, PipelineFamily, SampledDraw, SampledTexture, State, TextureLevel};
 use crate::side_lru::{self, Item, TableKey};
 use ogpu::error::{self, Error, ErrorKind};
 use ogpu::pipeline::Blend;
@@ -12,8 +12,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 
-pub fn default_state(viewport: (i64, i64, i64, i64), scissor: (i64, i64, i64, i64)) -> state {
-    state {
+pub fn default_state(viewport: (i64, i64, i64, i64), scissor: (i64, i64, i64, i64)) -> State {
+    State {
         viewport,
         scissor,
         cull: Cull::CullNone,
@@ -64,17 +64,17 @@ fn put_vertex(vertices: &mut [u8], index: usize, x: f64, y: f64, color: i32) {
     put_word(vertices, index * 3 + 2, color);
 }
 
-fn scene2_draw(key: String, vertices: Vec<u8>, vertex_count: i64, indices: Vec<u8>, index_count: i64, viewport: (i64, i64, i64, i64), clip: (i64, i64, i64, i64), transform: &Transform) -> sampled_draw {
-    scene_execution::sampled_draw {
-        family: pipeline_family::Scene2,
+fn scene2_draw(key: String, vertices: Vec<u8>, vertex_count: i64, indices: Vec<u8>, index_count: i64, viewport: (i64, i64, i64, i64), clip: (i64, i64, i64, i64), transform: &Transform) -> SampledDraw {
+    scene_execution::SampledDraw {
+        family: PipelineFamily::Scene2,
         blend: Blend::Alpha,
         texture: None,
         auxiliary: None,
         vertex_attributes: None,
         samples: 1,
-        draw: scene_execution::geometry_draw {
-            mesh: mesh {
-                key: mesh_key::Host(key),
+        draw: scene_execution::GeometryDraw {
+            mesh: Mesh {
+                key: MeshKey::Host(key),
                 vertices: new_bytes(vertices),
                 shared_vertices: None,
                 vertex_count,
@@ -82,7 +82,7 @@ fn scene2_draw(key: String, vertices: Vec<u8>, vertex_count: i64, indices: Vec<u
                 index_count,
                 primitive: Primitive::TriangleList,
             },
-            state: state {
+            state: State {
                 transform_uniforms: if identity_transform(transform) { None } else { Some(affine_uniforms(transform)) },
                 ..default_state(viewport, clip)
             },
@@ -90,7 +90,7 @@ fn scene2_draw(key: String, vertices: Vec<u8>, vertex_count: i64, indices: Vec<u
     }
 }
 
-pub fn mesh_of_geometry(number: i64, transform: &Transform, viewport: (i64, i64, i64, i64), clip: (i64, i64, i64, i64), geometry: &Geometry) -> sampled_draw {
+pub fn mesh_of_geometry(number: i64, transform: &Transform, viewport: (i64, i64, i64, i64), clip: (i64, i64, i64, i64), geometry: &Geometry) -> SampledDraw {
     let count = geometry.vertices.len() / 2;
     let mut vertices = vec![0u8; count * 12];
     for index in 0..count {
@@ -103,7 +103,7 @@ pub fn mesh_of_geometry(number: i64, transform: &Transform, viewport: (i64, i64,
     scene2_draw(format!("ir-0-{}", number), vertices, count as i64, indices, geometry.indices.len() as i64, viewport, clip, transform)
 }
 
-pub fn mesh_of_geometry_run(number: i64, transform: &Transform, viewport: (i64, i64, i64, i64), clip: (i64, i64, i64, i64), commands: &[Command], first: usize, stop: usize) -> sampled_draw {
+pub fn mesh_of_geometry_run(number: i64, transform: &Transform, viewport: (i64, i64, i64, i64), clip: (i64, i64, i64, i64), commands: &[Command], first: usize, stop: usize) -> SampledDraw {
     let geometries: Vec<&Geometry> = commands[first..stop]
         .iter()
         .map(|command| match command {
@@ -163,51 +163,51 @@ pub fn ui_sampler() -> SamplerDescriptor {
 }
 
 thread_local! {
-    static UI_WHITE: Rc<sampled_texture> = Rc::new(sampled_texture {
+    static UI_WHITE: Rc<SampledTexture> = Rc::new(SampledTexture {
         key: "ui-white".to_owned(),
-        levels: Rc::new(vec![texture_level { width: 1, height: 1, bytes: new_bytes(vec![255; 4]) }]),
+        levels: Rc::new(vec![TextureLevel { width: 1, height: 1, bytes: new_bytes(vec![255; 4]) }]),
         sampler: ui_sampler(),
         gpu: None,
     });
 }
 
 /// The one shared white texel texture: draws that share it may merge.
-pub fn ui_white_texture() -> Rc<sampled_texture> {
+pub fn ui_white_texture() -> Rc<SampledTexture> {
     UI_WHITE.with(|texture| texture.clone())
 }
 
 /// Whether `target` equals the bytes of `source` from `offset` (a multiple of 8 long).
 pub fn same_bytes_range(source: &[u8], offset: usize, target: &[u8]) -> bool {
-    target.len() % 8 == 0 && source[offset..offset + target.len()] == *target
+    target.len().is_multiple_of(8) && source[offset..offset + target.len()] == *target
 }
 
-struct cached_quad_payload {
-    payload_mesh_key: String,
-    payload_vertices: bytes,
-    payload_indices: bytes,
+struct CachedQuadPayload {
+    mesh_key: String,
+    vertices: bytes,
+    indices: bytes,
 }
 
-pub struct ui_slot {
-    pub ui_vertices: bytes,
-    pub ui_indices: bytes,
-    pub ui_affine: bytes,
-    pub ui_source: bytes,
+pub struct UiSlot {
+    pub vertices: bytes,
+    pub indices: bytes,
+    pub affine: bytes,
+    pub source: bytes,
 }
 
-pub type ui_slot_ref = Rc<RefCell<ui_slot>>;
+pub type UiSlotRef = Rc<RefCell<UiSlot>>;
 
-const ui_slot_capacity: i64 = 256;
-pub const snapshot_cache_entry_byte_capacity: i64 = 1024 * 1024;
+const UI_SLOT_CAPACITY: i64 = 256;
+pub const SNAPSHOT_CACHE_ENTRY_BYTE_CAPACITY: i64 = 1024 * 1024;
 
-pub fn sampled_texture_bytes(texture: &sampled_texture) -> i64 {
+pub fn sampled_texture_bytes(texture: &SampledTexture) -> i64 {
     if texture.gpu.is_some() {
         return 0;
     }
     let mut total: i64 = 0;
     for level in texture.levels.iter() {
         let bytes_ = level.bytes.borrow().len() as i64;
-        if total > snapshot_cache_entry_byte_capacity - bytes_ {
-            total = snapshot_cache_entry_byte_capacity + 1;
+        if total > SNAPSHOT_CACHE_ENTRY_BYTE_CAPACITY - bytes_ {
+            total = SNAPSHOT_CACHE_ENTRY_BYTE_CAPACITY + 1;
         } else {
             total += bytes_;
         }
@@ -215,35 +215,35 @@ pub fn sampled_texture_bytes(texture: &sampled_texture) -> i64 {
     total
 }
 
-pub struct t {
+pub struct Lowering {
     quad_cache: side_lru::Table,
     quad_payload_cache: side_lru::Table,
-    out_slots: Vec<draw>,
-    out_list: Vec<draw>,
+    out_slots: Vec<Draw>,
+    out_list: Vec<Draw>,
     ui_slots: side_lru::Table,
     ui_indices_scratch: bytes,
     ui_affine_scratch: bytes,
 }
 
-pub fn create() -> t {
-    t {
+pub fn create() -> Lowering {
+    Lowering {
         quad_cache: side_lru::create(lru::cache("renderer.quad"), true, 64 * 1024 * 1024, Box::new(|_, _| {}), 1024),
         quad_payload_cache: side_lru::create(lru::cache("renderer.quad_payload"), true, (1i64 << 62) - 1, Box::new(|_, _| {}), 256),
         out_slots: Vec::new(),
         out_list: Vec::new(),
-        ui_slots: side_lru::create(lru::cache("renderer.ui_slots"), true, (1i64 << 62) - 1, Box::new(|_, _| {}), ui_slot_capacity),
+        ui_slots: side_lru::create(lru::cache("renderer.ui_slots"), true, (1i64 << 62) - 1, Box::new(|_, _| {}), UI_SLOT_CAPACITY),
         ui_indices_scratch: empty_bytes(),
         ui_affine_scratch: new_bytes(vec![0; 24]),
     }
 }
 
 /// Writes the affine into the shared scratch and returns it: copy it to keep it.
-pub fn write_ui_affine(value: &t, transform: &Transform) -> bytes {
+pub fn write_ui_affine(value: &Lowering, transform: &Transform) -> bytes {
     write_affine(&mut value.ui_affine_scratch.borrow_mut(), transform);
     value.ui_affine_scratch.clone()
 }
 
-pub fn ui_index_bytes(value: &mut t, count: i64) -> bytes {
+pub fn ui_index_bytes(value: &mut Lowering, count: i64) -> bytes {
     let needed = (count * 24) as usize;
     let length = value.ui_indices_scratch.borrow().len();
     if length < needed {
@@ -265,7 +265,7 @@ pub fn ui_index_bytes(value: &mut t, count: i64) -> bytes {
     }
 }
 
-pub fn clear(value: &mut t) {
+pub fn clear(value: &mut Lowering) {
     side_lru::clear(&mut value.quad_cache);
     side_lru::clear(&mut value.quad_payload_cache);
     value.out_slots = Vec::new();
@@ -273,15 +273,15 @@ pub fn clear(value: &mut t) {
     side_lru::clear(&mut value.ui_slots);
 }
 
-pub fn find_ui_slot(value: &mut t, key: i64) -> ui_slot_ref {
+pub fn find_ui_slot(value: &mut Lowering, key: i64) -> UiSlotRef {
     if let Some(item) = side_lru::find(&mut value.ui_slots, &TableKey::Int(key)) {
-        return item.downcast::<RefCell<ui_slot>>().unwrap_or_else(|_| unreachable!("ui slot table item"));
+        return item.downcast::<RefCell<UiSlot>>().unwrap_or_else(|_| unreachable!("ui slot table item"));
     }
-    let slot: ui_slot_ref = Rc::new(RefCell::new(ui_slot {
-        ui_vertices: empty_bytes(),
-        ui_indices: empty_bytes(),
-        ui_affine: empty_bytes(),
-        ui_source: empty_bytes(),
+    let slot: UiSlotRef = Rc::new(RefCell::new(UiSlot {
+        vertices: empty_bytes(),
+        indices: empty_bytes(),
+        affine: empty_bytes(),
+        source: empty_bytes(),
     }));
     let item: Item = slot.clone();
     side_lru::add(&mut value.ui_slots, 0, TableKey::Int(key), item);
@@ -303,14 +303,14 @@ fn transform_bits(t_: &Transform) -> [f64; 6] {
 /// The lowered scene's quads: the texture is identified by pointer (the OCaml key compares it
 /// physically; a cached draw keeps the texture alive, so a pointer cannot be reused while cached).
 fn quad(
-    state_: &mut t,
-    texture: &Rc<sampled_texture>,
+    state_: &mut Lowering,
+    texture: &Rc<SampledTexture>,
     destination: &Rect,
     uv: (f64, f64, f64, f64),
     transform: &Transform,
     clip: (i64, i64, i64, i64),
     framebuffer: (i64, i64, i64, i64),
-) -> draw {
+) -> Draw {
     let (u0, v0, u1, v1) = uv;
     let quad_key = format!(
         "{:p}|{}|{}|{:?}|{}|{:?}",
@@ -322,7 +322,7 @@ fn quad(
         framebuffer
     );
     if let Some(item) = side_lru::find(&mut state_.quad_cache, &TableKey::Str(quad_key.clone())) {
-        return item.downcast::<sampled_draw>().unwrap_or_else(|_| unreachable!("quad table item"));
+        return item.downcast::<SampledDraw>().unwrap_or_else(|_| unreachable!("quad table item"));
     }
     let payload_key = format!(
         "{}|{}|{:?}|{}",
@@ -333,8 +333,8 @@ fn quad(
     );
     let (vertices, indices, key) = match side_lru::find(&mut state_.quad_payload_cache, &TableKey::Str(payload_key.clone())) {
         Some(item) => {
-            let cached = item.downcast::<cached_quad_payload>().unwrap_or_else(|_| unreachable!("quad payload table item"));
-            (cached.payload_vertices.clone(), cached.payload_indices.clone(), cached.payload_mesh_key.clone())
+            let cached = item.downcast::<CachedQuadPayload>().unwrap_or_else(|_| unreachable!("quad payload table item"));
+            (cached.vertices.clone(), cached.indices.clone(), cached.mesh_key.clone())
         }
         None => {
             // the quad's constants (marks.rays, quad-vertex): the affine, a white ink, the
@@ -374,30 +374,30 @@ fn quad(
                 g(u1),
                 g(v1)
             );
-            let payload = Rc::new(cached_quad_payload {
-                payload_mesh_key: key.clone(),
-                payload_vertices: new_bytes(vertices),
-                payload_indices: new_bytes(indices),
+            let payload = Rc::new(CachedQuadPayload {
+                mesh_key: key.clone(),
+                vertices: new_bytes(vertices),
+                indices: new_bytes(indices),
             });
-            let result = (payload.payload_vertices.clone(), payload.payload_indices.clone(), key);
+            let result = (payload.vertices.clone(), payload.indices.clone(), key);
             side_lru::add(&mut state_.quad_payload_cache, 0, TableKey::Str(payload_key), payload);
             result
         }
     };
-    let result: draw = Rc::new(sampled_draw {
-        family: pipeline_family::Scene2_textured,
+    let result: Draw = Rc::new(SampledDraw {
+        family: PipelineFamily::Scene2Textured,
         blend: Blend::Alpha,
         texture: Some(texture.clone()),
         auxiliary: None,
         vertex_attributes: None,
         samples: 1,
-        draw: scene_execution::geometry_draw {
-            mesh: mesh { key: mesh_key::Host(key), vertices, shared_vertices: None, vertex_count: 4, indices, index_count: 6, primitive: Primitive::TriangleList },
+        draw: scene_execution::GeometryDraw {
+            mesh: Mesh { key: MeshKey::Host(key), vertices, shared_vertices: None, vertex_count: 4, indices, index_count: 6, primitive: Primitive::TriangleList },
             state: default_state(framebuffer, clip),
         },
     });
     let bytes = sampled_texture_bytes(texture);
-    if bytes <= snapshot_cache_entry_byte_capacity {
+    if bytes <= SNAPSHOT_CACHE_ENTRY_BYTE_CAPACITY {
         let item: Item = result.clone();
         // Cached draws own their snapshots, including pixels from older image generations.
         side_lru::add(&mut state_.quad_cache, bytes, TableKey::Str(quad_key), item);
@@ -405,7 +405,7 @@ fn quad(
     result
 }
 
-fn emit(state_: &mut t, number: &mut usize, blend: Blend, draw_: draw) {
+fn emit(state_: &mut Lowering, number: &mut usize, blend: Blend, draw_: Draw) {
     let draw_ = if draw_.blend == blend {
         draw_
     } else {
@@ -433,15 +433,15 @@ fn to_blend(mode: ir::Blend) -> Blend {
 }
 
 pub fn lower_scene2(
-    state_: &mut t,
+    state_: &mut Lowering,
     facts: &presentation_facts,
     density: i64,
-    snapshot: &mut dyn FnMut(i64, resource) -> Result<(i64, i64, Rc<sampled_texture>), Error>,
+    snapshot: &mut dyn FnMut(i64, Resource) -> Result<(i64, i64, Rc<SampledTexture>), Error>,
     resolve_gpu: &dyn Fn(&Shapes) -> Result<Option<String>, String>,
     rollback: &dyn Fn(),
-    resolve: &dyn Fn(i64) -> Option<resource>,
+    resolve: &dyn Fn(i64) -> Option<Resource>,
     commands: &[Command],
-) -> Result<Vec<draw>, Error> {
+) -> Result<Vec<Draw>, Error> {
     let identity = Transform { xx: 1.0, xy: 0.0, yx: 0.0, yy: 1.0, tx: 0.0, ty: 0.0 };
     let native_projection = Transform {
         xx: 2.0 / facts.logical_width as f64,
@@ -512,40 +512,40 @@ pub fn lower_scene2(
                     {
                         // Published UI bytes remain immutable; the draw retains their Arc directly.
                         let mut s = slot.borrow_mut();
-                        if !s.ui_vertices.borrow().is_empty() { s.ui_vertices=empty_bytes(); }
-                        s.ui_source=s.ui_vertices.clone();
-                        if s.ui_indices.borrow().len() as i64 != count * 24 {
-                            s.ui_indices = ui_index_bytes(state_, count);
+                        if !s.vertices.borrow().is_empty() { s.vertices=empty_bytes(); }
+                        s.source=s.vertices.clone();
+                        if s.indices.borrow().len() as i64 != count * 24 {
+                            s.indices = ui_index_bytes(state_, count);
                         }
                         let affine = write_ui_affine(state_, &render_transform(transforms.last().expect("transform")));
-                        if s.ui_affine.borrow()[..] != affine.borrow()[..] {
-                            s.ui_affine = new_bytes(affine.borrow().clone());
+                        if s.affine.borrow()[..] != affine.borrow()[..] {
+                            s.affine = new_bytes(affine.borrow().clone());
                         }
                     }
                     let s = slot.borrow();
-                    let family = if gpu_key.is_none() { pipeline_family::Ui } else { pipeline_family::Marks };
-                    let draw_: draw = Rc::new(sampled_draw {
+                    let family = if gpu_key.is_none() { PipelineFamily::Ui } else { PipelineFamily::Marks };
+                    let draw_: Draw = Rc::new(SampledDraw {
                         family,
                         blend,
-                        texture: if family == pipeline_family::Marks { None } else { Some(ui_white_texture()) },
+                        texture: if family == PipelineFamily::Marks { None } else { Some(ui_white_texture()) },
                         auxiliary: None,
                         vertex_attributes: None,
                         samples: 1,
-                        draw: scene_execution::geometry_draw {
-                            mesh: mesh {
+                        draw: scene_execution::GeometryDraw {
+                            mesh: Mesh {
                                 key: match &gpu_key {
-                                    Some(key) => mesh_key::Gpu_vertices(key.clone()),
-                                    None => mesh_key::Host(format!("shapes:{}", slot_key)),
+                                    Some(key) => MeshKey::GpuVertices(key.clone()),
+                                    None => MeshKey::Host(format!("shapes:{}", slot_key)),
                                 },
-                                vertices: if gpu_key.is_none() { s.ui_vertices.clone() } else { empty_bytes() },
+                                vertices: if gpu_key.is_none() { s.vertices.clone() } else { empty_bytes() },
                                 shared_vertices: if gpu_key.is_none() { Some(instances.clone()) } else { None },
                                 vertex_count: 4 * count,
-                                indices: s.ui_indices.clone(),
+                                indices: s.indices.clone(),
                                 index_count: 6 * count,
                                 primitive: Primitive::TriangleList,
                             },
-                            state: state {
-                                transform_uniforms: Some(s.ui_affine.clone()),
+                            state: State {
+                                transform_uniforms: Some(s.affine.clone()),
                                 ..default_state(framebuffer, *clips.last().expect("clip"))
                             },
                         },
@@ -626,7 +626,7 @@ pub fn lower_scene2(
     if same {
         return Ok(state_.out_list.clone());
     }
-    let list: Vec<draw> = state_.out_slots[..number].to_vec();
+    let list: Vec<Draw> = state_.out_slots[..number].to_vec();
     state_.out_list = list.clone();
     Ok(list)
 }
@@ -645,9 +645,9 @@ mod tests {
         for generation in 0..70 {
             let pixels = new_bytes(vec![generation; 512 * 512 * 4]);
             snapshots.push(Rc::downgrade(&pixels));
-            let texture = Rc::new(sampled_texture {
+            let texture = Rc::new(SampledTexture {
                 key: format!("image:frame:{generation}"),
-                levels: Rc::new(vec![texture_level { width: 512, height: 512, bytes: pixels }]),
+                levels: Rc::new(vec![TextureLevel { width: 512, height: 512, bytes: pixels }]),
                 sampler: ui_sampler(), gpu: None,
             });
             let draw = quad(&mut state, &texture, &destination, (0., 0., 1., 1.), &transform, viewport, viewport);

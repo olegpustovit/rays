@@ -205,8 +205,8 @@ pub struct Data {
     id: i64,
     shared: Arc<Shared>,
     clock: Arc<dyn Fn() -> f64 + Send + Sync>,
-    owner: RefCell<Option<(x::gpu, h::T)>>,
-    mark_sets: RefCell<List<i64, x::gpu_marks>>,
+    owner: RefCell<Option<(x::Gpu, h::T)>>,
+    mark_sets: RefCell<List<i64, x::GpuMarks>>,
     images: RefCell<List<String, image_sink::T>>,
     image_stats: Rc<RefCell<ImageStats>>,
     closed_host: RefCell<h::Stats>,
@@ -254,7 +254,7 @@ pub fn create(clock: Option<Arc<dyn Fn() -> f64 + Send + Sync>>) -> t {
         clock: clock.unwrap_or_else(|| Arc::new(rays_math::clock::now)),
         owner: RefCell::new(None),
         // plans, not caches: what the frame draws
-        mark_sets: RefCell::new(List::new(64, Box::new(|_, sink: x::gpu_marks| x::close_gpu_marks(&sink)))),
+        mark_sets: RefCell::new(List::new(64, Box::new(|_, sink: x::GpuMarks| x::close_gpu_marks(&sink)))),
         images: RefCell::new(List::new(64, Box::new(move |_, sink: image_sink::T| close_image(&stats, sink)))),
         image_stats,
         closed_host: RefCell::new(h::zero()),
@@ -292,7 +292,7 @@ pub fn qualification(t_: &t) {
     d.policy.set(G::Policy::Qualification);
 }
 
-fn owner(d: &Data) -> Result<(x::gpu, h::T), Diagnostic> {
+fn owner(d: &Data) -> Result<(x::Gpu, h::T), Diagnostic> {
     if d.closed.get() || !on_owner(d) {
         return Err(error("Workspace GPU resources require their open initial-domain owner."));
     }
@@ -968,13 +968,13 @@ pub fn marks(t_: &t) -> Rc<marks_scene::gpu> {
         let output_of = |value: &G::Value| -> Option<run::Output> {
             outputs.iter().find(|(c, _)| c.identity == value.identity && c.stamp == value.stamp && c.output == value.output).map(|(_, o)| o.clone())
         };
-        let sources: Vec<x::marks_source> = attributes
+        let sources: Vec<x::MarksSource> = attributes
             .iter()
             .map(|a| match &a.source {
-                marks_scene::source::Bytes(bytes) => x::marks_source::Host(renderer::scene_execution::new_bytes(bytes.clone()), a.stride),
+                marks_scene::source::Bytes(bytes) => x::MarksSource::Host(renderer::scene_execution::new_bytes(bytes.clone()), a.stride),
                 marks_scene::source::Device(value) => {
                     let output = output_of(value);
-                    x::marks_source::Device(Rc::new(move || output.as_ref().and_then(|o| run::buffer(o, None))), a.stride)
+                    x::MarksSource::Device(Rc::new(move || output.as_ref().and_then(|o| run::buffer(o, None))), a.stride)
                 }
             })
             .collect();
@@ -1045,7 +1045,7 @@ pub fn frame(t_: &t, keep: Option<&[String]>) {
 /// through OGPU; `None` with no device.
 pub fn device_limits(t_: &t) -> Option<(i64, i64, bool)> {
     let d = &*t_.0;
-    let read = |gpu: &x::gpu| {
+    let read = |gpu: &x::Gpu| {
         let device = x::gpu_device(gpu);
         (ob::allocated_size(&device), ob::recommended_working_set(&device), ob::capabilities(&device).unified_memory)
     };

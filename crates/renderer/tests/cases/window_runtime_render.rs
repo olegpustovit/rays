@@ -1,8 +1,8 @@
 // A real window: native frames 1/2/60/600 and a resize, zero handle delta. A missing window or
 // device is a skip, as in the OCaml test.
 use crate::common;
-use ::renderer::renderer::{self, family, Native};
-use ::renderer::scene_execution::{self, new_bytes, geometry_draw, mesh, mesh_key, state};
+use ::renderer::renderer::{self, PipelineFamily, native};
+use ::renderer::scene_execution::{self, new_bytes, GeometryDraw, Mesh, MeshKey, State};
 use ogpu::render_pass::{Comparison, Cull, Load, Primitive};
 
 fn window_runtime_render() {
@@ -11,7 +11,7 @@ fn window_runtime_render() {
     }
     let before = ogpu::impl_::live_handles().unwrap();
     // Exercise all 600 frames without waiting for the display's refresh clock.
-    let cfg = renderer::configuration { logical_width: 4, logical_height: 4, drawable_width: 4, drawable_height: 4, vsync: false, ..renderer::default_configuration() };
+    let cfg = renderer::Configuration { logical_width: 4, logical_height: 4, drawable_width: 4, drawable_height: 4, vsync: false, ..renderer::default_configuration() };
     let value = match renderer::create(&cfg) {
         Ok(value) => value,
         Err(e) => {
@@ -29,8 +29,8 @@ fn window_runtime_render() {
         vertices[offset + 4..offset + 8].copy_from_slice(&y.to_le_bytes());
         vertices[offset + 8..offset + 12].copy_from_slice(&0x4080BFFFi32.to_le_bytes());
     }
-    let mesh_ = mesh {
-        key: mesh_key::Host("runtime-next-fullscreen".into()),
+    let mesh_ = Mesh {
+        key: MeshKey::Host("runtime-next-fullscreen".into()),
         vertices: new_bytes(vertices),
         shared_vertices: None,
         vertex_count: 3,
@@ -38,7 +38,7 @@ fn window_runtime_render() {
         index_count: 3,
         primitive: Primitive::TriangleList,
     };
-    let state_ = state {
+    let state_ = State {
         viewport: (0, 0, 4, 4),
         scissor: (0, 0, 4, 4),
         cull: Cull::CullNone,
@@ -48,7 +48,7 @@ fn window_runtime_render() {
         depth_clear: 1.0,
         transform_uniforms: None,
     };
-    let prepared = |state: state| renderer::prepared_draw(family::Scene2, None, None, None, None, None, geometry_draw { mesh: mesh_.clone(), state });
+    let prepared = |state: State| renderer::prepared_draw(PipelineFamily::Scene2, None, None, None, None, None, GeometryDraw { mesh: mesh_.clone(), state });
     let draw = prepared(state_.clone());
     // Service the host event loop between presents, as Sketch::run does.
     let mut input = runtime::runtime_input::create(4096, 4, 4).unwrap();
@@ -68,9 +68,9 @@ fn window_runtime_render() {
         }
     }
     let mut resized = None;
-    Native::runtime_of_mut(&value, &mut |rt| resized = Some(runtime::resize(rt, 8, 8)));
+    native::runtime_of_mut(&value, &mut |rt| resized = Some(runtime::resize(rt, 8, 8)));
     resized.unwrap().unwrap();
-    let resized_state = state { viewport: (0, 0, 8, 8), scissor: (0, 0, 8, 8), ..state_ };
+    let resized_state = State { viewport: (0, 0, 8, 8), scissor: (0, 0, 8, 8), ..state_ };
     pump();
     assert!(renderer::draw(None, &value, &[prepared(resized_state)]).unwrap(), "resized runtime frame was not presented");
     renderer::destroy(&value).unwrap();

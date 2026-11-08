@@ -1,4 +1,4 @@
-#![allow(non_camel_case_types, non_snake_case, non_upper_case_globals, clippy::all)]
+#![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
 pub mod renderer_shaders;
 pub mod side_lru;

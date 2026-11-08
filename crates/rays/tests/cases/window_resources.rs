@@ -10,7 +10,7 @@ use rays::image;
 use rays::scene::{self, Layer};
 use rays::scene3 as d3;
 use rays_math::{color, vec3};
-use renderer::renderer::resource as res;
+use renderer::renderer::Resource as res;
 use runtime_resources::Image as RImage;
 use scene_command::display_list;
 use scene_command::render_ir::{self, Command};

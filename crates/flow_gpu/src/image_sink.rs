@@ -110,7 +110,7 @@ pub fn create_owned(device: &Device, queue: &Queue) -> Result<T, Diagnostic> {
     }
 }
 
-pub fn create(gpu_: &renderer::renderer::gpu) -> Result<T, Diagnostic> {
+pub fn create(gpu_: &renderer::renderer::Gpu) -> Result<T, Diagnostic> {
     create_owned(&renderer::renderer::gpu_device(gpu_), &renderer::renderer::gpu_queue(gpu_))
 }
 

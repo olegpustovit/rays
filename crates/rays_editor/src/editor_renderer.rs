@@ -62,7 +62,7 @@ pub fn of_label(label: &str) -> Option<Mode> {
 #[derive(Clone)]
 pub struct Cached_mesh {
     pub trace_source: mesh::t,
-    pub traced: p::mesh,
+    pub traced: p::Mesh,
 }
 
 const MESH_ENTRIES: usize = 64;
@@ -121,7 +121,7 @@ pub struct View {
     pub cap: i64,
 }
 
-pub type Tracer = Rc<RefCell<p::t>>;
+pub type Tracer = Rc<RefCell<p::PathTracer>>;
 
 /// One tracer, shared by every viewport that asks for the same picture. `scene`, `camera` and `film`
 /// are what the tracer was last given: a slot differing from the frame's request is stale.
@@ -187,11 +187,11 @@ pub fn film(through: bool, resolution: (i64, i64), gate: (i64, i64)) -> ((i64, i
     (((width / step).max(1), (height / step).max(1)), step)
 }
 
-fn linear(c: &color::T) -> p::linear_color {
+fn linear(c: &color::T) -> p::LinearColor {
     p::Linear_color::rgb(c.r as f64 / 255.0, c.g as f64 / 255.0, c.b as f64 / 255.0)
 }
 
-pub fn traced_material(m: &material::t) -> p::material {
+pub fn traced_material(m: &material::t) -> p::Material {
     p::material(Some((2.0 / (m.shininess.max(0.0) + 2.0)).sqrt()), None, Some(linear(&m.emissive)), Some(m.round), linear(&m.diffuse))
 }
 
@@ -239,7 +239,7 @@ pub fn device_drawing(scene: &d3::t) -> Option<Walk::drawing> {
 }
 
 
-type Traced = (Mesh_cache, p::mesh, (mesh::t, p::material));
+type Traced = (Mesh_cache, p::Mesh, (mesh::t, p::Material));
 
 /// The cache keeps at most 64 converted source meshes. Placement remains in the tracer's instance
 /// structure, so an orbit does not convert or upload geometry. The scene's mesh and material a new
@@ -251,11 +251,11 @@ pub fn traced_scene(meshes: &Mesh_cache, scene: &d3::t) -> Result<Traced, String
         return Ok((meshes.clone(), traced, first));
     }
     let mut cache = meshes.clone();
-    let mut result: Result<Vec<(mat4::T, p::mesh)>, String> = Ok(Vec::new());
+    let mut result: Result<Vec<(mat4::T, p::Mesh)>, String> = Ok(Vec::new());
     Walk::iter_batches(
         &mut |drawing, transforms| {
             let Ok(placed) = &mut result else { return };
-            let step = (|| -> Result<(mat4::T, p::mesh), String> {
+            let step = (|| -> Result<(mat4::T, p::Mesh), String> {
                 if drawing.texture.is_some() {
                     return Err("Path tracing textured meshes is not supported.".to_string());
                 }
@@ -488,12 +488,12 @@ fn settle(state: &State, plan: &Plan, is_chosen: bool, meshes: &mut Mesh_cache) 
                     Some(tracer) => tracer.clone(),
                     None => {
                         let first = mesh_.as_ref().map(|(_, first)| first.clone()).ok_or_else(|| "Path tracing needs a scene mesh.".to_string())?;
-                        let options = p::create_options { bounces: Some(setting.bounces), round_samples: Some(setting.round_samples), ..p::create_options::default() };
-                        let scene_ = p::scene {
+                        let options = p::CreateOptions { bounces: Some(setting.bounces), round_samples: Some(setting.round_samples), ..p::CreateOptions::default() };
+                        let scene_ = p::Scene {
                             objects: vec![first],
                             spheres: Vec::new(),
                             strands: Vec::new(),
-                            environment: p::environment {
+                            environment: p::Environment {
                                 sky: linear(&color::rgb(130, 145, 170)),
                                 ground: linear(&color::rgb(80, 80, 80)),
                                 panels: Vec::new(),
@@ -510,7 +510,7 @@ fn settle(state: &State, plan: &Plan, is_chosen: bool, meshes: &mut Mesh_cache) 
                 }
                 p::resize(&mut tracer.borrow_mut(), width, height)?;
                 if prior.tracer.is_none() || Walk::lights(&prior.scene) != Walk::lights(scene) {
-                    let lights: Vec<p::light> = Walk::lights(scene).iter().map(p::light_of).collect();
+                    let lights: Vec<p::Light> = Walk::lights(scene).iter().map(p::light_of).collect();
                     p::set_lights(&mut tracer.borrow_mut(), &lights)?;
                 }
                 p::set_world(&mut tracer.borrow_mut(), Walk::world(scene).as_ref())?;

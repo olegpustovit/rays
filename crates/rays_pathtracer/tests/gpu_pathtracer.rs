@@ -13,28 +13,28 @@ use rays_math::{mat4, vec3};
 use rays_pathtracer::rays_pathtracer as p;
 use std::collections::HashSet;
 
-fn metal() -> p::material {
+fn metal() -> p::Material {
     p::material(Some(0.2), Some(1.), None, None, rgb(0.9, 0.7, 0.4))
 }
 
-fn matte() -> p::material {
+fn matte() -> p::Material {
     p::material(Some(0.8), None, None, None, rgb(0.6, 0.6, 0.6))
 }
 
 struct Lit {
     sphere: rays::mesh::t,
     floor: rays::mesh::t,
-    scene: p::scene,
+    scene: p::Scene,
 }
 
 fn lit_scene() -> Lit {
     let sphere = meshes::uv_sphere(vec3::create(0., 1., 0.), 24, 12, 1.);
     let floor = meshes::box_mesh(vec3::create(0., -0.05, 0.), vec3::create(20., 0.1, 20.));
-    let scene = p::scene {
+    let scene = p::Scene {
         objects: vec![(sphere.clone(), metal()), (floor.clone(), matte())],
         spheres: vec![],
         strands: vec![],
-        environment: p::environment { sky: rgb(0.5, 0.6, 0.8), ground: rgb(0.2, 0.2, 0.2), panels: vec![p::panel(None, 6., 0.5, 0.4, vec3::create(1., 2., 1.))] },
+        environment: p::Environment { sky: rgb(0.5, 0.6, 0.8), ground: rgb(0.2, 0.2, 0.2), panels: vec![p::panel(None, 6., 0.5, 0.4, vec3::create(1., 2., 1.))] },
         lights: vec![p::rect_light(20., (2., 2.), vec3::zero(), vec3::create(-2., 5., 2.))],
     };
     Lit { sphere, floor, scene }
@@ -44,13 +44,13 @@ fn lit_camera() -> rays::camera::t {
     rays::camera::perspective(Some(0.9), None, None, vec3::create(0., 2., 6.), vec3::create(0., 0.8, 0.)).unwrap()
 }
 
-fn prepared(mesh: &rays::mesh::t, material: p::material) -> p::mesh {
+fn prepared(mesh: &rays::mesh::t, material: p::Material) -> p::Mesh {
     get(p::mesh(None, None, &[(mesh.clone(), material)]))
 }
 
 /// `capture`: settle a camera change before resetting, so its preview cannot change the counted sample
 /// total in a deterministic comparison.
-fn capture(tracer: &mut p::t, camera: &rays::camera::t, count: i64) -> Vec<u8> {
+fn capture(tracer: &mut p::PathTracer, camera: &rays::camera::t, count: i64) -> Vec<u8> {
     frames(tracer, camera, 2);
     p::reset(tracer);
     frames(tracer, camera, count);
@@ -77,7 +77,7 @@ fn lit() {
     frames(&mut tracer, &camera, 2);
     let cold = pixels(&tracer);
     assert_eq!(p::samples(&tracer), 4);
-    let run = |tracer: &mut p::t| capture(tracer, &camera, 2);
+    let run = |tracer: &mut p::PathTracer| capture(tracer, &camera, 2);
     let first = run(&mut tracer);
     let second = run(&mut tracer);
     assert!(first == second && first.len() == 48 * 32 * 4);
@@ -110,7 +110,7 @@ fn lit() {
     frame(&mut tracer, &moved);
     assert!(pixels(&tracer) != preview);
     // A camera move in the middle of an accumulation is deterministic too.
-    let motion_run = |tracer: &mut p::t| {
+    let motion_run = |tracer: &mut p::PathTracer| {
         p::reset(tracer);
         frame(tracer, &camera);
         frame(tracer, &camera);
@@ -210,17 +210,17 @@ fn residency() {
     let grid: Vec<mat4::T> = (0..64).map(|i| mat4::translation(vec3::create((i % 8) as f64 - 3.5, (i / 8) as f64 - 3.5, 0.))).collect();
     let lattice_material = p::material(Some(0.6), None, None, None, rgb(0.8, 0.8, 0.8));
     let lattice = get(p::mesh_instanced(&prepared(&big, lattice_material), None, None, &grid));
-    let scene = p::scene {
+    let scene = p::Scene {
         objects: vec![(floor, pt::material(rgb(0.5, 0.5, 0.5)))],
         spheres: vec![],
         strands: vec![],
-        environment: p::environment { sky: rgb(0.02, 0.02, 0.02), ground: rgb(0.02, 0.02, 0.02), panels: vec![] },
+        environment: p::Environment { sky: rgb(0.02, 0.02, 0.02), ground: rgb(0.02, 0.02, 0.02), panels: vec![] },
         lights: vec![p::rect_light(12., (8., 8.), vec3::zero(), vec3::create(-6., 8., 8.))],
     };
-    let mut tracer = get(p::create(&p::create_options { spp: Some(1), bounces: Some(2), ..Default::default() }, 160, 160, &scene));
+    let mut tracer = get(p::create(&p::CreateOptions { spp: Some(1), bounces: Some(2), ..Default::default() }, 160, 160, &scene));
     get(p::replace_mesh(&mut tracer, &get(p::scene_mesh(&[(mat4::identity(), lattice)]))));
     let camera = rays::camera::perspective(Some(0.7), None, None, vec3::create(0., 0., 12.), vec3::zero()).unwrap();
-    let fresh = |tracer: &mut p::t| {
+    let fresh = |tracer: &mut p::PathTracer| {
         p::reset(tracer);
         frame(tracer, &camera);
         let sum: i64 = pixels(tracer).iter().enumerate().filter(|(i, _)| i % 4 != 3).map(|(_, v)| *v as i64).sum();
@@ -266,7 +266,7 @@ fn cap() {
 /// ACES/2.2 resolve maps to 224. A zero-intensity panel exercises the MIS path (panel sampling plus the
 /// weighted BSDF escape) and must not change the mean. The analytic sphere in the furnace conserves energy
 /// like the floor, which checks sphere hits, normals, and the table binding.
-fn furnace_mean(scene: &p::scene, camera: &rays::camera::t) -> f64 {
+fn furnace_mean(scene: &p::Scene, camera: &rays::camera::t) -> f64 {
     let mut tracer = get(p::create(&pt::options(4), 32, 32, scene));
     frames(&mut tracer, camera, 16);
     get(p::flush(&mut tracer));
@@ -281,11 +281,11 @@ fn furnace() {
     }
     let floor = meshes::box_mesh(vec3::create(0., -0.05, 0.), vec3::create(20., 0.1, 20.));
     let white = rgb(1., 1., 1.);
-    let furnace_scene = |panels: Vec<p::panel>| p::scene {
+    let furnace_scene = |panels: Vec<p::Panel>| p::Scene {
         objects: vec![(floor.clone(), p::material(Some(0.8), None, None, None, rgb(0.8, 0.8, 0.8)))],
         spheres: vec![],
         strands: vec![],
-        environment: p::environment { sky: white, ground: white, panels },
+        environment: p::Environment { sky: white, ground: white, panels },
         lights: vec![],
     };
     let camera = rays::camera::perspective(Some(0.5), None, None, vec3::create(0., 4., 0.001), vec3::zero()).unwrap();
@@ -301,11 +301,11 @@ fn sphere_furnace() {
         return;
     }
     let white = rgb(1., 1., 1.);
-    let scene = p::scene {
+    let scene = p::Scene {
         objects: vec![],
         strands: vec![],
-        spheres: vec![p::sphere { center: vec3::zero(), radius: 1., sphere_material: p::material(Some(0.8), None, None, None, rgb(0.8, 0.8, 0.8)) }],
-        environment: p::environment { sky: white, ground: white, panels: vec![] },
+        spheres: vec![p::Sphere { center: vec3::zero(), radius: 1., sphere_material: p::material(Some(0.8), None, None, None, rgb(0.8, 0.8, 0.8)) }],
+        environment: p::Environment { sky: white, ground: white, panels: vec![] },
         lights: vec![],
     };
     // Every corner ray must hit the sphere, rather than the white sky.
@@ -324,8 +324,8 @@ fn materials_motion() {
         return;
     }
     let sphere = meshes::uv_sphere(vec3::create(0., 1., 0.), 24, 12, 1.);
-    let black = p::environment { sky: rgb(0., 0., 0.), ground: rgb(0., 0., 0.), panels: vec![] };
-    let scene = p::scene { objects: vec![(sphere.clone(), pt::material(rgb(0.5, 0.5, 0.5)))], spheres: vec![], strands: vec![], environment: black, lights: vec![] };
+    let black = p::Environment { sky: rgb(0., 0., 0.), ground: rgb(0., 0., 0.), panels: vec![] };
+    let scene = p::Scene { objects: vec![(sphere.clone(), pt::material(rgb(0.5, 0.5, 0.5)))], spheres: vec![], strands: vec![], environment: black, lights: vec![] };
     let mut tracer = get(p::create(&pt::options(4), 64, 32, &scene));
     let place = |x: f64| mat4::translation(vec3::create(x, 0., 0.));
     let red = p::material(None, None, Some(rgb(4., 0., 0.)), None, rgb(0., 0., 0.));
@@ -333,7 +333,7 @@ fn materials_motion() {
     let instance_prototype = prepared(&sphere, pt::material(rgb(0.5, 0.5, 0.5)));
     let static_mesh = get(p::mesh_instanced(&instance_prototype, Some(&[red.clone(), green.clone()]), None, &[place(-2.), place(2.)]));
     let camera = rays::camera::perspective(Some(0.9), None, None, vec3::create(0., 1., 10.), vec3::create(0., 1., 0.)).unwrap();
-    let render_mesh = |tracer: &mut p::t, mesh: &p::mesh| {
+    let render_mesh = |tracer: &mut p::PathTracer, mesh: &p::Mesh| {
         get(p::replace_mesh(tracer, mesh));
         p::reset(tracer);
         frames(tracer, &camera, 16);
@@ -354,7 +354,7 @@ fn materials_motion() {
     let moving_pixels = render_mesh(&mut tracer, &moving);
     assert!(render_mesh(&mut tracer, &moving) == moving_pixels);
     assert_eq!(channel_at(&static_pixels, end_point, 1), 0);
-    if p::Private::motion_blurs(&tracer) {
+    if p::private::motion_blurs(&tracer) {
         assert!(channel_at(&moving_pixels, end_point, 1) > 0);
         assert!(channel_at(&moving_pixels, right, 1) > 0 && channel_at(&moving_pixels, right, 1) < channel_at(&static_pixels, right, 1));
     } else {
@@ -373,11 +373,11 @@ fn strands() {
     if !common::gpu() {
         return;
     }
-    let black = p::environment { sky: rgb(0., 0., 0.), ground: rgb(0., 0., 0.), panels: vec![] };
-    let strand_scene = p::scene {
+    let black = p::Environment { sky: rgb(0., 0., 0.), ground: rgb(0., 0., 0.), panels: vec![] };
+    let strand_scene = p::Scene {
         objects: vec![],
         spheres: vec![],
-        strands: vec![p::strand {
+        strands: vec![p::Strand {
             points: vec![vec3::create(-0.6, 0., 0.), vec3::zero(), vec3::create(0.6, 0., 0.)],
             thickness: 0.2,
             strand_material: p::material(None, None, Some(rgb(4., 0., 0.)), None, rgb(0., 0., 0.)),

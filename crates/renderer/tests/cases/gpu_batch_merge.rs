@@ -3,7 +3,7 @@
 //! changing member must not re-upload its neighbours), and a set drawn by the Marks family never
 //! merges with a Ui_batch set but keeps its place in the order. Pixels equal one big batch.
 use crate::common;
-use ::renderer::renderer::{self, marks_source, Native};
+use ::renderer::renderer::{self, MarksSource, native};
 use ::renderer::scene_execution::{self, new_bytes};
 use scene_command::render_ir::{self, Command};
 use scene_command::ui_batch::{self, Builder, Table};
@@ -54,7 +54,7 @@ fn words(a: &[i32]) -> scene_execution::bytes {
     new_bytes(a.iter().flat_map(|v| v.to_le_bytes()).collect())
 }
 
-fn marks_token(gpu: &renderer::gpu, s: i64) -> (renderer::gpu_marks, scene_command::marks::GpuToken) {
+fn marks_token(gpu: &renderer::Gpu, s: i64) -> (renderer::GpuMarks, scene_command::marks::GpuToken) {
     let sink = renderer::create_gpu_marks(gpu).unwrap();
     let position: Vec<f64> = (0..3 * PER_SET)
         .map(|k| {
@@ -72,11 +72,11 @@ fn marks_token(gpu: &renderer::gpu, s: i64) -> (renderer::gpu_marks, scene_comma
         4,
         PER_SET,
         &[
-            marks_source::Host(floats(&position), 3),
-            marks_source::Host(floats(&[RADIUS]), 0),
-            marks_source::Host(words(&[word(s)]), 0),
-            marks_source::Host(words(&[0]), 0),
-            marks_source::Host(floats(&[1.0]), 0),
+            MarksSource::Host(floats(&position), 3),
+            MarksSource::Host(floats(&[RADIUS]), 0),
+            MarksSource::Host(words(&[word(s)]), 0),
+            MarksSource::Host(words(&[0]), 0),
+            MarksSource::Host(floats(&[1.0]), 0),
         ],
     ).unwrap();
     (sink, token)
@@ -85,23 +85,23 @@ fn marks_token(gpu: &renderer::gpu, s: i64) -> (renderer::gpu_marks, scene_comma
 const CLEAR: (f64, f64, f64, f64) = (0.125, 0.25, 0.375, 1.0);
 
 /// The pixels of `commands` after a SetBlend Alpha, and the draws the renderer encodes for them.
-fn capture(execution: &renderer::t, commands: Vec<Command>) -> (Vec<u8>, i64) {
+fn capture(execution: &renderer::Renderer, commands: Vec<Command>) -> (Vec<u8>, i64) {
     let mut all = vec![Command::SetBlend(render_ir::Blend::Alpha)];
     all.extend(commands);
     let ir = Rc::new(render_ir::create(all).unwrap());
     let submission = renderer::begin_submission(execution).unwrap();
-    let lowered = Native::lower_scene2(&submission, 1, &|_| None, &ir);
+    let lowered = native::lower_scene2(&submission, 1, &|_| None, &ir);
     let mut encoded = 0;
     let result = lowered.and_then(|b| {
-        encoded = Native::encoded_draws_for_test(&b);
-        Native::step(Some(CLEAR), None, None, &submission, &[b])
+        encoded = native::encoded_draws_for_test(&b);
+        native::step(Some(CLEAR), None, None, &submission, &[b])
     });
-    Native::cancel(&submission);
+    native::cancel(&submission);
     result.unwrap();
     (renderer::capture(execution).unwrap(), encoded)
 }
 
-fn check(execution: &renderer::t, label: &str, sets: &[i64], shapes: Vec<Command>, expected_draws: i64) {
+fn check(execution: &renderer::Renderer, label: &str, sets: &[i64], shapes: Vec<Command>, expected_draws: i64) {
     let (reference, one) = capture(execution, vec![Command::Shapes(all_sets(sets))]);
     let (pixels, count) = capture(execution, shapes);
     let painted = reference.iter().enumerate().filter(|(i, v)| i % 4 != 3 && **v != 0).count();
@@ -115,7 +115,7 @@ fn gpu_batch_merge() {
         return;
     }
     let baseline = ogpu::impl_::live_handles().unwrap();
-    let execution = renderer::create_offscreen(&renderer::configuration {
+    let execution = renderer::create_offscreen(&renderer::Configuration {
         logical_width: WIDTH,
         logical_height: HEIGHT,
         drawable_width: WIDTH,
@@ -125,12 +125,12 @@ fn gpu_batch_merge() {
         high_density: true,
     }).unwrap();
     let gpu = renderer::acquire_gpu().unwrap();
-    let owner = Native::gpu_vertices_owner(&execution);
+    let owner = native::gpu_vertices_owner(&execution);
     let range = |n: i64| (0..n).collect::<Vec<i64>>();
     check(&execution, "3 CPU sets", &range(3), range(3).iter().map(|s| Command::Shapes(cpu_set(*s))).collect(), 3);
     check(&execution, "100 CPU sets", &range(100), range(100).iter().map(|s| Command::Shapes(cpu_set(*s))).collect(), 1);
     // Alternate Ui_batch and Marks sets: three families runs never merge, order is kept.
-    let sources: Vec<Option<(renderer::gpu_marks, scene_command::marks::GpuToken)>> =
+    let sources: Vec<Option<(renderer::GpuMarks, scene_command::marks::GpuToken)>> =
         range(6).iter().map(|s| if s % 2 == 0 { None } else { Some(marks_token(&gpu, *s)) }).collect();
     let shapes: Vec<Command> = sources
         .iter()
@@ -152,7 +152,7 @@ fn gpu_batch_merge() {
     assert!(pixels == reference && count == 3);
     renderer::release_gpu(&gpu);
     renderer::destroy(&execution).unwrap();
-    assert_eq!(scene_execution::Private::gpu_vertex_count_for_test(&owner), 0);
+    assert_eq!(scene_execution::private::gpu_vertex_count_for_test(&owner), 0);
     assert_eq!(ogpu::impl_::live_handles().unwrap(), baseline, "batch merge handle delta");
 }
 

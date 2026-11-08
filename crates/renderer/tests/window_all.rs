@@ -13,6 +13,6 @@ mod scene2_argument_body;
 
 fn main() {
     let groups: &[&[(&str, fn())]] = &[window_runtime_render::CASES, window_scene2_argument::CASES, window_scene3_lighting::CASES, ];
-    let cases: Vec<(&str, fn())> = groups.concat().into_iter().filter(|c| true).collect();
+    let cases: Vec<(&str, fn())> = groups.concat().into_iter().filter(|_c| true).collect();
     common::window::run(&cases);
 }

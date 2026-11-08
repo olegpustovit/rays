@@ -15,7 +15,7 @@ use rays_math::color;
 use rays_math::mat4;
 use rays_math::vec3;
 use renderer::scene_execution as se;
-use se::{auxiliary_resource, bytes, draw, geometry_draw, new_bytes, pipeline_family, sampled_draw, sampled_texture, texture_level};
+use se::{AuxiliaryResource, bytes, Draw, GeometryDraw, new_bytes, PipelineFamily, SampledDraw, SampledTexture, TextureLevel};
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -33,10 +33,10 @@ pub enum error {
 }
 
 pub struct resources {
-    pub texture: Box<dyn Fn(&scene3::texture_) -> Result<sampled_texture, error>>,
+    pub texture: Box<dyn Fn(&scene3::texture_) -> Result<SampledTexture, error>>,
 }
 
-pub type prepared = Rc<se::prepared_scene3>;
+pub type prepared = Rc<se::PreparedScene3>;
 
 type viewport_t = (i64, i64, i64, i64);
 
@@ -124,16 +124,16 @@ fn pbr_of_material(m: &material::t) -> (bool, f64, f64) {
 
 struct world_ {
     baked: world::baked,
-    auxiliary: Rc<auxiliary_resource>,
-    camera_map: Rc<sampled_texture>,
+    auxiliary: Rc<AuxiliaryResource>,
+    camera_map: Rc<SampledTexture>,
     lights: Vec<world::light>,
 }
 
 struct world_maps {
     // keeps the bake (and so the identity its key names) alive
     _baked: world::baked,
-    specular: sampled_texture,
-    camera: sampled_texture,
+    specular: SampledTexture,
+    camera: SampledTexture,
 }
 
 const WORLD_CAPACITY: i64 = 2;
@@ -181,8 +181,8 @@ pub struct cache_context(context_data);
 
 thread_local! {
     static CURRENT: RefCell<Option<cache_context>> = const { RefCell::new(None) };
-    static BACKGROUND: (se::mesh, (String, bytes)) = (make_background_mesh(), make_background_attributes());
-    static WHITE: Rc<sampled_texture> = Rc::new(make_world_white());
+    static BACKGROUND: (se::Mesh, (String, bytes)) = (make_background_mesh(), make_background_attributes());
+    static WHITE: Rc<SampledTexture> = Rc::new(make_world_white());
     static DEVICE_INDICES: RefCell<Vec<device_indices_entry>> = const { RefCell::new(Vec::new()) };
 }
 
@@ -290,7 +290,7 @@ fn world_identity(baked: &world::baked) -> world_id {
 
 struct caster_list_key(Vec<caster>);
 
-fn half_level(m: &world::map) -> texture_level {
+fn half_level(m: &world::map) -> TextureLevel {
     let mut out = vec![0u8; (m.width * m.height * 8) as usize];
     let one = ogpu::types::half_of_float(1.) as u16;
     for i in 0..(m.width * m.height) as usize {
@@ -300,7 +300,7 @@ fn half_level(m: &world::map) -> texture_level {
         }
         out[i * 8 + 6..i * 8 + 8].copy_from_slice(&one.to_le_bytes());
     }
-    texture_level { width: m.width, height: m.height, bytes: new_bytes(out) }
+    TextureLevel { width: m.width, height: m.height, bytes: new_bytes(out) }
 }
 
 fn world_sampler(mips: i64) -> SamplerDescriptor {
@@ -317,10 +317,10 @@ fn world_sampler(mips: i64) -> SamplerDescriptor {
     }
 }
 
-fn make_world_white() -> sampled_texture {
-    sampled_texture {
+fn make_world_white() -> SampledTexture {
+    SampledTexture {
         key: "world:white".to_string(),
-        levels: Rc::new(vec![texture_level { width: 1, height: 1, bytes: new_bytes(vec![255, 255, 255, 255]) }]),
+        levels: Rc::new(vec![TextureLevel { width: 1, height: 1, bytes: new_bytes(vec![255, 255, 255, 255]) }]),
         sampler: SamplerDescriptor {
             label: Some("scene3-world-white".to_string()),
             min_filter: SamplerFilter::Nearest,
@@ -350,13 +350,13 @@ fn maps_of(baked: &world::baked) -> Rc<world_maps> {
     let key = format!("world:{}:", fresh_resource_id());
     let maps = Rc::new(world_maps {
         _baked: baked.clone(),
-        specular: sampled_texture {
+        specular: SampledTexture {
             key: format!("{key}specular"),
             levels: Rc::new(specular.iter().map(half_level).collect()),
             sampler: world_sampler(specular.len() as i64),
             gpu: None,
         },
-        camera: sampled_texture {
+        camera: SampledTexture {
             key: format!("{key}camera"),
             levels: Rc::new(vec![half_level(&baked.camera)]),
             sampler: world_sampler(1),
@@ -519,8 +519,8 @@ fn world_of(baked: &world::baked, sun: Option<(mat4::T, String)>) -> Rc<world_> 
         put32(&mut b, 57, 0.005);
         put32(&mut b, 58, 1.);
         put32(&mut b, 59, 1.);
-        put32(&mut b, 60, se::sun_map_size as f64);
-        put32(&mut b, 61, se::sun_map_size as f64);
+        put32(&mut b, 60, se::SUN_MAP_SIZE as f64);
+        put32(&mut b, 61, se::SUN_MAP_SIZE as f64);
     }
     let power = |l: &world::light| {
         ((0.2126 * l.radiance.r) + (0.7152 * l.radiance.g) + (0.0722 * l.radiance.b)) * vec3::length(l.u) * vec3::length(l.v)
@@ -531,7 +531,7 @@ fn world_of(baked: &world::baked, sun: Option<(mat4::T, String)>) -> Rc<world_> 
     let camera_map = Rc::new(maps.camera.clone());
     let w = Rc::new(world_ {
         baked: baked.clone(),
-        auxiliary: Rc::new(auxiliary_resource {
+        auxiliary: Rc::new(AuxiliaryResource {
             key: format!("world:{id}"),
             buffer: new_bytes(b),
             texture: maps.specular.clone(),
@@ -586,7 +586,7 @@ fn world_uniforms(b: &mut Vec<u8>, w: &world_, material: &material::t) {
 
 /// A clip-space triangle covering the viewport; the shader turns each fragment into a view ray
 /// through the inverse view-projection at 84.
-fn make_background_mesh() -> se::mesh {
+fn make_background_mesh() -> se::Mesh {
     let mut vertices = vec![0u8; 3 * 24];
     for (index, (x, y)) in [(-1., -1.), (3., -1.), (-1., 3.)].iter().enumerate() {
         let put = |v: &mut Vec<u8>, at: usize, value: f64| {
@@ -600,8 +600,8 @@ fn make_background_mesh() -> se::mesh {
     let mut indices = vec![0u8; 12];
     indices[4..8].copy_from_slice(&1i32.to_le_bytes());
     indices[8..12].copy_from_slice(&2i32.to_le_bytes());
-    se::mesh {
-        key: se::mesh_key::Host("world:background".to_string()),
+    se::Mesh {
+        key: se::MeshKey::Host("world:background".to_string()),
         vertices: new_bytes(vertices),
         shared_vertices: None,
         vertex_count: 3,
@@ -782,7 +782,7 @@ fn instance_uniforms(
     Ok(b)
 }
 
-fn prepared_bytes(p: &se::prepared_scene3) -> i64 {
+fn prepared_bytes(p: &se::PreparedScene3) -> i64 {
     p.entries
         .iter()
         .map(|entry| {
@@ -800,8 +800,8 @@ fn prepared_bytes(p: &se::prepared_scene3) -> i64 {
 /// scene, the geometry and the device outputs under it. A cache keeps only the newest scene's
 /// layers (one per viewport); the frame in flight is its pins', not the cache's. Layers of host
 /// meshes are bounded only by the cache.
-pub fn borrows_device(p: &se::prepared_scene3) -> bool {
-    p.entries.iter().any(|e| matches!(e.draw.mesh.key, se::mesh_key::Gpu_vertices(_)))
+pub fn borrows_device(p: &se::PreparedScene3) -> bool {
+    p.entries.iter().any(|e| matches!(e.draw.mesh.key, se::MeshKey::GpuVertices(_)))
 }
 
 fn trim_prepared_cache(list: &mut IdList) {
@@ -1219,11 +1219,11 @@ pub fn prepare(resources: &resources, cam: &camera::t, viewport: viewport_t, sce
     };
     let mut cacheable = true;
     let mut failure: Option<error> = None;
-    let mut entries: Vec<draw> = Vec::new();
+    let mut entries: Vec<Draw> = Vec::new();
     if let Some(w) = &world {
         if w.baked.background != world::background::Transparent {
             if let Some(uniforms) = background_uniforms(cam, viewport)? {
-                let state = se::state {
+                let state = se::State {
                     viewport,
                     scissor: viewport,
                     cull: Cull::CullNone,
@@ -1234,14 +1234,14 @@ pub fn prepare(resources: &resources, cam: &camera::t, viewport: viewport_t, sce
                     transform_uniforms: Some(new_bytes(uniforms)),
                 };
                 let (mesh_, attributes) = BACKGROUND.with(|b| (b.0.clone(), b.1.clone()));
-                entries = vec![Rc::new(sampled_draw {
-                    family: pipeline_family::Scene3_world,
+                entries = vec![Rc::new(SampledDraw {
+                    family: PipelineFamily::Scene3World,
                     blend: Blend::Replace,
                     texture: Some(w.camera_map.clone()),
                     auxiliary: Some(w.auxiliary.clone()),
                     vertex_attributes: Some(attributes),
                     samples: scene3::Walk::samples(scene),
-                    draw: geometry_draw { mesh: mesh_, state },
+                    draw: GeometryDraw { mesh: mesh_, state },
                 })];
             }
         }
@@ -1276,8 +1276,8 @@ pub fn prepare(resources: &resources, cam: &camera::t, viewport: viewport_t, sce
                         }
                         Ok(t) => t,
                     };
-                    let mesh_ = se::mesh {
-                        key: if packed.gpu.is_none() { se::mesh_key::Host(packed.key.clone()) } else { se::mesh_key::Gpu_vertices(packed.key.clone()) },
+                    let mesh_ = se::Mesh {
+                        key: if packed.gpu.is_none() { se::MeshKey::Host(packed.key.clone()) } else { se::MeshKey::GpuVertices(packed.key.clone()) },
                         vertices: packed.vertices.clone(),
                         shared_vertices: None,
                         vertex_count: packed.vertex_count,
@@ -1286,9 +1286,9 @@ pub fn prepare(resources: &resources, cam: &camera::t, viewport: viewport_t, sce
                         primitive: packed.primitive,
                     };
                     let family = match (packed.primitive, &texture) {
-                        (Primitive::PointList, None) => pipeline_family::Scene3_points,
-                        (_, Some(_)) => pipeline_family::Scene3_textured,
-                        (_, None) => pipeline_family::Scene3,
+                        (Primitive::PointList, None) => PipelineFamily::Scene3Points,
+                        (_, Some(_)) => PipelineFamily::Scene3Textured,
+                        (_, None) => PipelineFamily::Scene3,
                     };
                     // ponytail: point clouds keep the Blinn-Phong points pipeline under a World
                     // (no IBL, no tone map).
@@ -1298,13 +1298,13 @@ pub fn prepare(resources: &resources, cam: &camera::t, viewport: viewport_t, sce
                     };
                     let (family, texture, auxiliary) = match &world_here {
                         Some(w) => (
-                            pipeline_family::Scene3_world,
+                            PipelineFamily::Scene3World,
                             Some(texture.unwrap_or_else(|| WHITE.with(|t| t.clone()))),
                             Some(w.auxiliary.clone()),
                         ),
                         None => (family, texture, None),
                     };
-                    let add = |mut transform_uniforms: Vec<u8>, entries: &mut Vec<draw>| {
+                    let add = |mut transform_uniforms: Vec<u8>, entries: &mut Vec<Draw>| {
                         // a device mesh's packed positions (word 79) and normals (word 80)
                         if let Some((_, normals)) = &packed.gpu {
                             put32(&mut transform_uniforms, 79, 1.);
@@ -1316,7 +1316,7 @@ pub fn prepare(resources: &resources, cam: &camera::t, viewport: viewport_t, sce
                                 if width_ == 0 && packed.vertex_attributes.1.borrow().is_empty() { -1. } else { width_ as f64 },
                             );
                         }
-                        let state = se::state {
+                        let state = se::State {
                             viewport: (x, y, width, height),
                             scissor: (x, y, width, height),
                             cull: cull(d.cull),
@@ -1335,14 +1335,14 @@ pub fn prepare(resources: &resources, cam: &camera::t, viewport: viewport_t, sce
                             scene3::blend::Alpha if d.texture.is_none() && d.material.diffuse.a == 255 && packed.opaque => Blend::Replace,
                             other => blend(other),
                         };
-                        entries.push(Rc::new(sampled_draw {
+                        entries.push(Rc::new(SampledDraw {
                             family,
                             blend: blend_,
                             texture: texture.clone(),
                             auxiliary: auxiliary.clone(),
                             vertex_attributes: Some(packed.vertex_attributes.clone()),
                             samples: scene3::Walk::samples(scene),
-                            draw: geometry_draw { mesh: mesh_.clone(), state },
+                            draw: GeometryDraw { mesh: mesh_.clone(), state },
                         }));
                     };
                     let w_ref = world_here.as_deref();

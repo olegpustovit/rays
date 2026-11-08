@@ -15,7 +15,7 @@ use crate::time;
 use crate::world;
 use input::{Event, Key, MouseButton};
 use ogpu::error::{self as oerror, ErrorKind};
-use renderer::renderer::{self as rr, Native};
+use renderer::renderer::{self as rr, native};
 use rays_math::color;
 use std::any::Any;
 use std::cell::{Cell, RefCell};
@@ -400,22 +400,22 @@ fn report_crash(state: &crash_state) {
 
 // ---- runtime access ----
 
-fn with_runtime_facts(coordinator: &rr::t) -> Result<runtime::presentation_facts, error> {
+fn with_runtime_facts(coordinator: &rr::Renderer) -> Result<runtime::presentation_facts, error> {
     let mut out = None;
-    Native::runtime_of_mut(coordinator, &mut |r| out = Some(runtime::presentation_facts(r)));
+    native::runtime_of_mut(coordinator, &mut |r| out = Some(runtime::presentation_facts(r)));
     out.unwrap_or_else(|| Err(startup_error("Sketch.run_state", ErrorKind::InvalidState, "no runtime")))
 }
 
-fn run_runtime(coordinator: &rr::t, f: &dyn Fn(&mut runtime::t) -> Result<(), error>) -> Result<(), error> {
+fn run_runtime(coordinator: &rr::Renderer, f: &dyn Fn(&mut runtime::t) -> Result<(), error>) -> Result<(), error> {
     let mut out = None;
-    Native::runtime_of_mut(coordinator, &mut |r| out = Some(f(r)));
+    native::runtime_of_mut(coordinator, &mut |r| out = Some(f(r)));
     out.unwrap_or_else(|| Err(startup_error("Sketch.run_state", ErrorKind::InvalidState, "no runtime")))
 }
 
 struct Finish {
     state: Rc<run_context>,
     previous: Option<Rc<run_context>>,
-    coordinator: rr::t,
+    coordinator: rr::Renderer,
     caches: Layer::cache_context,
     model: Rc<crash_state>,
     last_scene: Rc<RefCell<Option<scene::t>>>,
@@ -513,7 +513,7 @@ fn run_state_internal(
         Layer::with_cache_context(&caches, &mut || world::Private::with_cache_context(&world_caches, &mut *f));
     };
     let first = make_frame(config_, &state.input.borrow(), 0, 0., 0., Vec::new());
-    let configuration = rr::configuration {
+    let configuration = rr::Configuration {
         logical_width: config_.width,
         logical_height: config_.height,
         drawable_width: config_.width,
@@ -596,7 +596,7 @@ fn run_state_internal(
                 dialog::Open_folder => runtime::dialog_kind::Open_folder,
             };
             let mut id = None;
-            Native::runtime_of_mut(&coordinator, &mut |r| id = Some(runtime::show_dialog(r, Some(&filters), default_location, kind)));
+            native::runtime_of_mut(&coordinator, &mut |r| id = Some(runtime::show_dialog(r, Some(&filters), default_location, kind)));
             match id {
                 Some(Ok(id)) => Ok(id),
                 Some(Err(e)) => Err(error_to_string(&e)),
@@ -640,14 +640,14 @@ fn run_state_internal(
         model: RefCell::new(None),
         program: program_.clone(),
     });
-    let release_after_failed_init = |caches: &Layer::cache_context, coordinator: &rr::t| {
+    let release_after_failed_init = |caches: &Layer::cache_context, coordinator: &rr::Renderer| {
         Layer::clear_cache_context(caches);
         let _ = rr::destroy(coordinator);
     };
     // init: a panic here writes a crash report (no frames yet) and leaves nothing running
     struct InitGuard {
         caches: Layer::cache_context,
-        coordinator: rr::t,
+        coordinator: rr::Renderer,
         crash: Rc<crash_state>,
         armed: bool,
     }
@@ -729,7 +729,7 @@ fn run_loop(
     state: &Rc<run_context>,
     crash: &Rc<crash_state>,
     program_: &Rc<program>,
-    coordinator: &rr::t,
+    coordinator: &rr::Renderer,
     caches: &Layer::cache_context,
     world_caches: &world::Private::cache_context,
     last_scene: &Rc<RefCell<Option<scene::t>>>,
@@ -788,7 +788,7 @@ fn one_frame(
     state: &Rc<run_context>,
     crash: &Rc<crash_state>,
     program_: &Rc<program>,
-    coordinator: &rr::t,
+    coordinator: &rr::Renderer,
     last_scene: &Rc<RefCell<Option<scene::t>>>,
     render_failure: &Rc<RefCell<Option<error>>>,
     logical_width: &mut i64,
@@ -801,7 +801,7 @@ fn one_frame(
     time::update(&mut state.time.borrow_mut());
     let unit = {
         let mut u = 1.;
-        Native::runtime_of_mut(coordinator, &mut |r| u = runtime::window_unit_of(r));
+        native::runtime_of_mut(coordinator, &mut |r| u = runtime::window_unit_of(r));
         u
     };
     input_state::set_unit(&mut state.input.borrow_mut(), unit);
@@ -809,12 +809,12 @@ fn one_frame(
     let events = polled.events.clone();
     // SDL announces a size or density change; the window is not polled.
     if polled.window_changed {
-        Native::runtime_of_mut(coordinator, &mut |r| runtime::window_changed(r));
+        native::runtime_of_mut(coordinator, &mut |r| runtime::window_changed(r));
     }
     // A covered window has no end event: while it is hidden, ask once a frame whether it is back.
     let visible = polled.visible || {
         let mut seen = false;
-        Native::runtime_of_mut(coordinator, &mut |r| seen = matches!(runtime::visible(r), Ok(true)));
+        native::runtime_of_mut(coordinator, &mut |r| seen = matches!(runtime::visible(r), Ok(true)));
         if seen {
             input_state::set_visible(&mut state.input.borrow_mut(), true);
         }

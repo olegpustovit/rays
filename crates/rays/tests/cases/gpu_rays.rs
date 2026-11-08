@@ -29,7 +29,7 @@ fn render(canvas_: &canvas::t, density: Option<i64>, scene_: &[scene::node]) {
     canvas::render(density, canvas_, scene_).unwrap_or_else(|e| fail(&format!("Canvas.render: {e}")));
 }
 
-fn stats(canvas_: &canvas::t) -> rr::stats {
+fn stats(canvas_: &canvas::t) -> rr::Stats {
     canvas::Private::native_stats(canvas_).expect("native stats")
 }
 
@@ -328,7 +328,7 @@ fn gpu_rays_float32_attribute_stream() {
             Layer::stage_native(128, 128, &[scene::view3d(None, &cam, s)]).expect("stage").scene3[0].entries[0].clone()
         };
         let (first, second) = (stage(&make(colors)), stage(&make(vec![color::rgb(255, 255, 0); 3])));
-        let configuration = rr::configuration {
+        let configuration = rr::Configuration {
             logical_width: 128,
             logical_height: 128,
             drawable_width: 128,
@@ -336,10 +336,10 @@ fn gpu_rays_float32_attribute_stream() {
             ..rr::default_configuration()
         };
         let runtime = rr::create_offscreen(&configuration).unwrap();
-        let draw = |entry: &se::sampled_draw| {
+        let draw = |entry: &se::SampledDraw| {
             rr::prepared_draw(entry.family, Some(entry.blend), entry.texture.clone(), entry.auxiliary.clone(), entry.vertex_attributes.clone(), Some(entry.samples), entry.draw.clone())
         };
-        let render_entry = |entry: &se::sampled_draw| {
+        let render_entry = |entry: &se::SampledDraw| {
             rr::draw(Some((0., 0., 0., 1.)), &runtime, &[draw(entry)]).unwrap();
             rr::read_pixels(&runtime, 512).unwrap()
         };

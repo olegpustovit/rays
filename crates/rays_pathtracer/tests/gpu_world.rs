@@ -37,28 +37,28 @@ fn environment_world(layers: Vec<w::layer>) -> w::baked {
     world(w::background::Environment, (0., 1.), layers)
 }
 
-fn black_dome() -> p::environment {
-    p::environment { sky: rgb(0., 0., 0.), ground: rgb(0., 0., 0.), panels: vec![] }
+fn black_dome() -> p::Environment {
+    p::Environment { sky: rgb(0., 0., 0.), ground: rgb(0., 0., 0.), panels: vec![] }
 }
 
 /// A lone analytic sphere: convex, so every path is direct light and the indirect firefly clamp never
 /// applies.
-fn scene(material: p::material, lights: Vec<p::light>) -> p::scene {
-    p::scene {
+fn scene(material: p::Material, lights: Vec<p::Light>) -> p::Scene {
+    p::Scene {
         objects: vec![],
         strands: vec![],
-        spheres: vec![p::sphere { center: v3(0., 0., 0.), radius: 1., sphere_material: material }],
+        spheres: vec![p::Sphere { center: v3(0., 0., 0.), radius: 1., sphere_material: material }],
         environment: black_dome(),
         lights,
     }
 }
 
-fn matte() -> p::scene {
+fn matte() -> p::Scene {
     scene(p::material(Some(1.), None, None, None, rgb(0.8, 0.8, 0.8)), vec![])
 }
 
-fn create(bsdf_only: bool, scene: &p::scene) -> p::t {
-    get(p::create(&p::create_options { spp: Some(SPP), bsdf_only: Some(bsdf_only), ..Default::default() }, 32, 32, scene))
+fn create(bsdf_only: bool, scene: &p::Scene) -> p::PathTracer {
+    get(p::create(&p::CreateOptions { spp: Some(SPP), bsdf_only: Some(bsdf_only), ..Default::default() }, 32, 32, scene))
 }
 
 /// Keep all corner rays inside the sphere's projected disc for the furnace.
@@ -67,7 +67,7 @@ fn camera(fov: f64) -> rays::camera::t {
 }
 
 /// `samples` samples per pixel of `baked` (after two settling frames).
-fn capture(tracer: &mut p::t, camera: &rays::camera::t, baked: &w::baked, samples: i64) -> Vec<u8> {
+fn capture(tracer: &mut p::PathTracer, camera: &rays::camera::t, baked: &w::baked, samples: i64) -> Vec<u8> {
     let started = std::time::Instant::now();
     get(p::set_world(tracer, Some(baked)));
     pt::frames(tracer, camera, 2);

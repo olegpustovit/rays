@@ -10,15 +10,15 @@ use common::pt::{self, frames, get, pixels, rgb};
 use rays_math::{mat4, vec3};
 use rays_pathtracer::rays_pathtracer as p;
 
-fn black() -> p::environment {
-    p::environment { sky: rgb(0., 0., 0.), ground: rgb(0., 0., 0.), panels: vec![] }
+fn black() -> p::Environment {
+    p::Environment { sky: rgb(0., 0., 0.), ground: rgb(0., 0., 0.), panels: vec![] }
 }
 
 fn v3(x: f64, y: f64, z: f64) -> vec3::T {
     vec3::create(x, y, z)
 }
 
-fn prepared(geometry: &rays::mesh::t, material: &p::material) -> p::mesh {
+fn prepared(geometry: &rays::mesh::t, material: &p::Material) -> p::Mesh {
     get(p::mesh(None, None, &[(geometry.clone(), material.clone())]))
 }
 
@@ -50,12 +50,12 @@ fn objects() -> Objects {
     }
 }
 
-fn base_scene(o: &Objects) -> p::scene {
-    p::scene {
+fn base_scene(o: &Objects) -> p::Scene {
+    p::Scene {
         objects: vec![(o.floor.clone(), pt::material(rgb(0.5, 0.5, 0.5)))],
         spheres: vec![],
         strands: vec![],
-        environment: p::environment { sky: rgb(0.5, 0.6, 0.8), ground: rgb(0.2, 0.2, 0.2), panels: vec![] },
+        environment: p::Environment { sky: rgb(0.5, 0.6, 0.8), ground: rgb(0.2, 0.2, 0.2), panels: vec![] },
         lights: vec![p::rect_light(20., (2., 2.), vec3::zero(), v3(-2., 5., 2.))],
     }
 }
@@ -71,18 +71,18 @@ fn live_updates() {
     }
     let o = objects();
     let material = pt::material(rgb(0.8, 0.2, 0.2));
-    let scene = p::scene { objects: vec![(o.ball.clone(), material.clone())], spheres: vec![], strands: vec![], environment: black(), lights: vec![] };
+    let scene = p::Scene { objects: vec![(o.ball.clone(), material.clone())], spheres: vec![], strands: vec![], environment: black(), lights: vec![] };
     let mut tracer = get(p::create(&Default::default(), 16, 16, &scene));
     let camera = rays::camera::perspective(None, None, None, v3(0., 0., 5.), vec3::zero()).unwrap();
     let meshes_ = [prepared(&o.boxm, &material), prepared(&o.ball, &material)];
-    let start = p::Private::edits(&tracer);
+    let start = p::private::edits(&tracer);
     let mut frame = 0usize;
-    while p::Private::edits(&tracer) < start + 2 && frame < 200_000 {
+    while p::private::edits(&tracer) < start + 2 && frame < 200_000 {
         get(p::queue_mesh(&mut tracer, &meshes_[frame & 1]));
         get(p::render(&mut tracer, &camera));
         frame += 1;
     }
-    assert!(p::Private::edits(&tracer) >= start + 2, "a live mesh never installed");
+    assert!(p::private::edits(&tracer) >= start + 2, "a live mesh never installed");
     p::destroy(&mut tracer);
 }
 
@@ -135,18 +135,18 @@ fn scene_mesh() {
         ],
     ));
     let placed = scene_of(&t1);
-    let render = |tracer: &mut p::t, frames_: i64| {
+    let render = |tracer: &mut p::PathTracer, frames_: i64| {
         p::reset(tracer);
         frames(tracer, &camera, frames_);
         pixels(tracer)
     };
     get(p::replace_mesh(&mut tracer, &placed));
-    let (unpacked, packed) = p::Private::scene_compaction(&tracer);
+    let (unpacked, packed) = p::private::scene_compaction(&tracer);
     println!("scene BLASes: {unpacked} -> {packed} bytes compacted");
     assert!(packed > 0 && packed < unpacked);
     let scene_pixels = render(&mut tracer, 4);
     assert!(scene_pixels == render(&mut tracer, 4));
-    let capture = |tracer: &mut p::t, mesh: &p::mesh| {
+    let capture = |tracer: &mut p::PathTracer, mesh: &p::Mesh| {
         get(p::replace_mesh(tracer, mesh));
         render(tracer, 2)
     };
@@ -173,7 +173,7 @@ fn scene_mesh() {
     println!("pathtracer scene: red centroid {before:.1} -> {after:.1}");
     assert!(after > before + 3.);
     assert!(p::scene_mesh(&[]).is_err(), "empty scene accepted");
-    let with_sphere = get(p::mesh(Some(&[p::sphere { center: vec3::zero(), radius: 1., sphere_material: red.clone() }]), None, &[]));
+    let with_sphere = get(p::mesh(Some(&[p::Sphere { center: vec3::zero(), radius: 1., sphere_material: red.clone() }]), None, &[]));
     assert!(p::scene_mesh(&[(mat4::identity(), with_sphere)]).is_err(), "scene object with spheres accepted");
     // Nested: a scene is itself an object.
     get(p::replace_mesh(&mut tracer, &get(p::scene_mesh(&[(mat4::identity(), placed.clone())]))));
@@ -275,8 +275,8 @@ fn mixed_spheres() {
     let mut tracer = get(p::create(&pt::options(2), 64, 48, &base_scene(&o)));
     let camera = camera();
     let gray = pt::material(rgb(0.5, 0.5, 0.5));
-    let spheres = [p::sphere { center: v3(0., 1., 0.), radius: 0.5, sphere_material: p::material(None, None, Some(rgb(4., 0., 0.)), None, rgb(0., 0., 0.)) }];
-    let capture = |tracer: &mut p::t, mesh: &p::mesh| {
+    let spheres = [p::Sphere { center: v3(0., 1., 0.), radius: 0.5, sphere_material: p::material(None, None, Some(rgb(4., 0., 0.)), None, rgb(0., 0., 0.)) }];
+    let capture = |tracer: &mut p::PathTracer, mesh: &p::Mesh| {
         get(p::replace_mesh(tracer, mesh));
         p::reset(tracer);
         frames(tracer, &camera, 2);
@@ -317,7 +317,7 @@ fn light_of() {
         return;
     }
     let o = objects();
-    let plane = p::scene { objects: vec![(o.floor.clone(), p::material(Some(1.), None, None, None, rgb(0.8, 0.8, 0.8)))], spheres: vec![], strands: vec![], environment: black(), lights: vec![] };
+    let plane = p::Scene { objects: vec![(o.floor.clone(), p::material(Some(1.), None, None, None, rgb(0.8, 0.8, 0.8)))], spheres: vec![], strands: vec![], environment: black(), lights: vec![] };
     let mut tracer = get(p::create(&pt::options(4), 32, 32, &plane));
     let camera = rays::camera::perspective(Some(0.1), None, None, v3(0., 4., 0.001), vec3::zero()).unwrap();
     let mut check = |name: &str, light: rays::light::t, expected: f64| {

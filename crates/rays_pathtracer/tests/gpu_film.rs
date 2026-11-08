@@ -12,11 +12,11 @@ fn film() {
     }
     let baseline = pt::live_handles();
     let cube = meshes::box_mesh(vec3::zero(), vec3::create(1., 1., 1.));
-    let scene = p::scene {
+    let scene = p::Scene {
         objects: vec![(cube, pt::material(rgb(0.8, 0.6, 0.4)))],
         spheres: vec![],
         strands: vec![],
-        environment: p::environment { sky: rgb(0.6, 0.7, 0.8), ground: rgb(0.1, 0.1, 0.1), panels: vec![] },
+        environment: p::Environment { sky: rgb(0.6, 0.7, 0.8), ground: rgb(0.1, 0.1, 0.1), panels: vec![] },
         lights: vec![],
     };
     let camera = rays::camera::perspective(Some(0.9), None, None, vec3::create(0., 0., 4.), vec3::zero()).unwrap();
@@ -29,7 +29,7 @@ fn film() {
     drop(standalone);
     assert_eq!(expected.len(), 48 * 32 * 4);
     assert_eq!(pt::live_handles(), baseline);
-    let config = renderer::renderer::configuration { logical_width: 48, logical_height: 32, drawable_width: 48, drawable_height: 32, title: "GPU film test".to_string(), ..renderer::renderer::default_configuration() };
+    let config = renderer::renderer::Configuration { logical_width: 48, logical_height: 32, drawable_width: 48, drawable_height: 32, title: "GPU film test".to_string(), ..renderer::renderer::default_configuration() };
     let coordinator = renderer::renderer::create(&config).unwrap_or_else(|e| panic!("{}", ogpu::error::to_string(&e)));
     // A live shared lease keeps the window's device alive.
     let lease = renderer::renderer::acquire_gpu().unwrap();
@@ -67,9 +67,9 @@ fn film() {
     assert_eq!(textures.len(), 3);
     // a tracer at rest: the film goes, the picture stays, and the next frame is a first one
     let shown = pt::pixels(&tracer);
-    let before = p::Private::device_bytes(&tracer);
+    let before = p::private::device_bytes(&tracer);
     get(p::release_film(&mut tracer));
-    let released = before - p::Private::device_bytes(&tracer);
+    let released = before - p::private::device_bytes(&tracer);
     // Metal frees a buffer when its last Rust clone drops (ogpu_metal), not at destroy: the bytes are checked
     // where destroy frees them, and only printed on Metal
     println!("released {released} bytes (expected at least {})", 116 * 48 * 32);
@@ -90,9 +90,9 @@ fn film() {
     // what a rest gives back at a real size: 116 of the film's 120 bytes a pixel (shrunk from 960x540)
     get(p::resize(&mut tracer, 320, 180));
     pt::frame(&mut tracer, &camera);
-    let before = p::Private::device_bytes(&tracer);
+    let before = p::private::device_bytes(&tracer);
     get(p::release_film(&mut tracer));
-    let after = p::Private::device_bytes(&tracer);
+    let after = p::private::device_bytes(&tracer);
     println!("GPU film at rest: device {before} -> {after} bytes at 320x180");
     assert!(before - after >= 116 * 320 * 180);
     p::destroy(&mut tracer);

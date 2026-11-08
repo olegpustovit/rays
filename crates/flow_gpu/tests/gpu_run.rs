@@ -31,7 +31,7 @@ fn force(program: &packed::T, t: f64, strict: bool) -> Value {
     tp::ok(packed::force(program, &live(t), &packed::ForceOptions { strict, ..Default::default() }))
 }
 
-fn start() -> Option<(renderer::renderer::gpu, pipelines::T)> {
+fn start() -> Option<(renderer::renderer::Gpu, pipelines::T)> {
     if !common::gpu() {
         return None;
     }
@@ -45,7 +45,7 @@ fn start() -> Option<(renderer::renderer::gpu, pipelines::T)> {
     Some((lease, pipes))
 }
 
-fn runner(lease: &renderer::renderer::gpu, pipes: &pipelines::T, program: &packed::T, fast: bool) -> run::T {
+fn runner(lease: &renderer::renderer::Gpu, pipes: &pipelines::T, program: &packed::T, fast: bool) -> run::T {
     let msl = tp::ok(emit::kernel(&emit::Options { fast, ..Default::default() }, program));
     run::create(None, lease, pipes, &msl)
 }

@@ -13,13 +13,13 @@ pub fn camera_() -> camera::t {
     camera::orthographic(2., vec3::create(0., 0., 2.), vec3::zero()).expect("camera")
 }
 
-pub fn stage(m: &mesh::t) -> Rc<se::sampled_draw> {
+pub fn stage(m: &mesh::t) -> Rc<se::SampledDraw> {
     let scene3 = d3::create(None, None, None, None, vec![d3::mesh(Some(material::unlit(color::white())), None, None, None, None, m.clone())]).expect("scene3");
     let staged = Layer::stage_native(128, 128, &[scene::view3d(None, &camera_(), scene3)]).expect("stage");
     staged.scene3[0].entries[0].clone()
 }
 
-pub fn attributes(entry: &se::sampled_draw) -> Vec<u8> {
+pub fn attributes(entry: &se::SampledDraw) -> Vec<u8> {
     entry.vertex_attributes.as_ref().expect("attributes").1.borrow().clone()
 }
 
@@ -39,7 +39,7 @@ pub fn mesh_of(m: made) -> mesh::t {
     mesh::View::create_packed_shared(None, Some(m.2), Some(m.1), Some(Arc::new(m.3)), None, m.0).expect("mesh")
 }
 
-pub fn pair() -> (mesh::t, mesh::t, Rc<se::sampled_draw>, Rc<se::sampled_draw>) {
+pub fn pair() -> (mesh::t, mesh::t, Rc<se::SampledDraw>, Rc<se::SampledDraw>) {
     let colors = vec![color::rgb(255, 0, 0), color::rgb(0, 255, 0), color::rgb(0, 0, 255)];
     let (vertices, normals, indices, _) = make(colors.clone());
     let source = mesh_of((vertices.clone(), normals.clone(), indices.clone(), colors));

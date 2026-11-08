@@ -1,7 +1,7 @@
 //! Port of lib/renderer/test_scene2_coordinates.ml: 1x and 2x density as separate test fns.
 use crate::common;
 use renderer::renderer;
-use ::renderer::renderer::Native;
+use ::renderer::renderer::native;
 use scene_command::render_ir::{self, Command, Geometry, Rect};
 use std::rc::Rc;
 
@@ -68,15 +68,15 @@ fn run(lw: i64, lh: i64, dw: i64, dh: i64, scale: i64) {
     if !common::gpu() {
         return;
     }
-    let cfg = renderer::configuration { logical_width: lw, logical_height: lh, drawable_width: dw, drawable_height: dh, title: "scene2-coordinates".into(), vsync: false, high_density: true };
+    let cfg = renderer::Configuration { logical_width: lw, logical_height: lh, drawable_width: dw, drawable_height: dh, title: "scene2-coordinates".into(), vsync: false, high_density: true };
     let e = renderer::create_offscreen(&cfg).unwrap();
     let facts = renderer::presentation_facts_of(&e).unwrap();
     assert!(facts.logical_width == lw && facts.logical_height == lh && facts.drawable_width == dw && facts.drawable_height == dh, "offscreen logical/drawable facts");
     let render = |commands: Vec<Command>| {
         let ir = Rc::new(render_ir::create(commands).expect("scene2 coordinate IR"));
-        let s = Native::begin_submission(&e).unwrap();
-        let batch = Native::lower_scene2(&s, scale, &|_| None, &ir).unwrap();
-        Native::step(Some((0., 0., 0., 1.)), None, None, &s, &[batch]).unwrap();
+        let s = native::begin_submission(&e).unwrap();
+        let batch = native::lower_scene2(&s, scale, &|_| None, &ir).unwrap();
+        native::step(Some((0., 0., 0., 1.)), None, None, &s, &[batch]).unwrap();
         let pixels = renderer::capture(&e).unwrap();
         assert_eq!(pixels.len() as i64, dw * dh * 4, "coordinate readback length");
         pixels

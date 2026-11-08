@@ -8,8 +8,8 @@ use ogpu::backend::{self, Buffer, Device};
 use ogpu::pipeline::Blend;
 use ogpu::render_pass::{Comparison, Cull, Load, Primitive};
 use ogpu::types::{BufferDescriptor, BufferUsage};
-use ::renderer::renderer::{self, Native};
-use ::renderer::scene_execution::{self, geometry_draw, mesh, mesh_key, new_bytes, pipeline_family, state};
+use ::renderer::renderer::{self, native};
+use ::renderer::scene_execution::{self, GeometryDraw, Mesh, MeshKey, new_bytes, PipelineFamily, State};
 use scene_command::render_ir::{self, Command};
 use scene_command::ui_batch::{Builder, Table};
 use std::rc::Rc;
@@ -209,12 +209,12 @@ fn upload(device: &Device, label: &str, bytes: &[u8]) -> Buffer {
 /// A Marks draw over `a`'s buffers and a closure releasing them. `drawn`: a count record as a fast
 /// kernel writes it, {n, 6n, 1, 0, 0, 0}, the draw's from byte 4.
 fn marks_draw(
-    owner: &scene_execution::gpu_vertices_owner,
+    owner: &scene_execution::GpuVerticesOwner,
     device: &Device,
     a: &Attributes,
     n: i64,
     drawn: Option<i32>,
-) -> (scene_execution::draw, Box<dyn FnOnce()>) {
+) -> (scene_execution::Draw, Box<dyn FnOnce()>) {
     let mut buffers: Vec<Buffer> = Vec::new();
     let contents = [
         ("position", floats(&a.position)),
@@ -232,7 +232,7 @@ fn marks_draw(
     if let Some(r) = &record {
         buffers.push(r.clone());
     }
-    let source = scene_execution::Private::register_gpu_vertices(
+    let source = scene_execution::private::register_gpu_vertices(
         owner,
         Some(buffers[1..6].to_vec()),
         None,
@@ -246,7 +246,7 @@ fn marks_draw(
         Box::new(|| true),
     ).unwrap();
     let affine = floats(&[2.0 / WIDTH as f64, 0.0, -1.0, 0.0, -2.0 / HEIGHT as f64, 1.0]);
-    let st = state {
+    let st = State {
         viewport: (0, 0, WIDTH, HEIGHT),
         scissor: (0, 0, WIDTH, HEIGHT),
         cull: Cull::CullNone,
@@ -256,8 +256,8 @@ fn marks_draw(
         depth_clear: 1.0,
         transform_uniforms: Some(new_bytes(affine)),
     };
-    let m = mesh {
-        key: mesh_key::Gpu_vertices(key),
+    let m = Mesh {
+        key: MeshKey::GpuVertices(key),
         vertices: scene_execution::empty_bytes(),
         shared_vertices: None,
         vertex_count: 4 * n,
@@ -265,11 +265,11 @@ fn marks_draw(
         index_count: 6 * n,
         primitive: Primitive::TriangleList,
     };
-    let draw = renderer::prepared_draw(pipeline_family::Marks, Some(Blend::Alpha), None, None, None, None, geometry_draw { mesh: m, state: st });
+    let draw = renderer::prepared_draw(PipelineFamily::Marks, Some(Blend::Alpha), None, None, None, None, GeometryDraw { mesh: m, state: st });
     (
         draw,
         Box::new(move || {
-            scene_execution::Private::unregister_gpu_vertices(&source);
+            scene_execution::private::unregister_gpu_vertices(&source);
             for b in buffers.iter() {
                 let _ = backend::destroy_buffer(b);
             }
@@ -279,20 +279,20 @@ fn marks_draw(
 
 const CLEAR: (f64, f64, f64, f64) = (0.125, 0.25, 0.375, 1.0);
 
-fn capture_ui(execution: &renderer::t, density: i64, table: Table) -> Vec<u8> {
+fn capture_ui(execution: &renderer::Renderer, density: i64, table: Table) -> Vec<u8> {
     let ir = Rc::new(render_ir::create(vec![Command::SetBlend(render_ir::Blend::Alpha), Command::Shapes(table)]).unwrap());
     let submission = renderer::begin_submission(execution).unwrap();
-    let lowered = Native::lower_scene2(&submission, density, &|_| None, &ir);
-    let result = lowered.and_then(|b| Native::step(Some(CLEAR), None, None, &submission, &[b]));
-    Native::cancel(&submission);
+    let lowered = native::lower_scene2(&submission, density, &|_| None, &ir);
+    let result = lowered.and_then(|b| native::step(Some(CLEAR), None, None, &submission, &[b]));
+    native::cancel(&submission);
     result.unwrap();
     renderer::capture(execution).unwrap()
 }
 
-fn capture_marks(execution: &renderer::t, draw: scene_execution::draw) -> Vec<u8> {
+fn capture_marks(execution: &renderer::Renderer, draw: scene_execution::Draw) -> Vec<u8> {
     let submission = renderer::begin_submission(execution).unwrap();
-    let result = Native::adopt_draws(&submission, vec![draw]).and_then(|b| Native::step(Some(CLEAR), None, None, &submission, &[b]));
-    Native::cancel(&submission);
+    let result = native::adopt_draws(&submission, vec![draw]).and_then(|b| native::step(Some(CLEAR), None, None, &submission, &[b]));
+    native::cancel(&submission);
     result.unwrap();
     renderer::capture(execution).unwrap()
 }
@@ -301,9 +301,9 @@ fn painted(pixels: &[u8]) -> usize {
     pixels.iter().enumerate().filter(|(i, v)| i % 4 != 3 && **v != 0).count()
 }
 
-fn with_renderer(density: i64, body: &dyn Fn(&renderer::t, &renderer::gpu)) {
+fn with_renderer(density: i64, body: &dyn Fn(&renderer::Renderer, &renderer::Gpu)) {
     let baseline = ogpu::impl_::live_handles().unwrap();
-    let execution = renderer::create_offscreen(&renderer::configuration {
+    let execution = renderer::create_offscreen(&renderer::Configuration {
         logical_width: WIDTH,
         logical_height: HEIGHT,
         drawable_width: WIDTH * density,
@@ -326,7 +326,7 @@ fn parity(density: i64, kind: Kind) {
                 for n in [63i64, 64, 65, 100_000] {
                     let a = attributes(kind, styled, rgb, n);
                     let reference = capture_ui(execution, density, batch(kind, &a, n));
-                    let (draw, release) = marks_draw(&Native::gpu_vertices_owner(execution), &renderer::gpu_device(gpu), &a, n, None);
+                    let (draw, release) = marks_draw(&native::gpu_vertices_owner(execution), &renderer::gpu_device(gpu), &a, n, None);
                     let marks = capture_marks(execution, draw);
                     release();
                     if painted(&reference) < 50 && n >= 63 {
@@ -350,7 +350,7 @@ fn parity(density: i64, kind: Kind) {
                 }
             }
         }
-        assert_eq!(scene_execution::Private::gpu_vertex_count_for_test(&Native::gpu_vertices_owner(execution)), 0);
+        assert_eq!(scene_execution::private::gpu_vertex_count_for_test(&native::gpu_vertices_owner(execution)), 0);
     });
 }
 
@@ -360,11 +360,11 @@ fn indirect(density: i64) {
     with_renderer(density, &|execution, gpu| {
         let a = attributes(Kind::Rect, true, false, 100);
         let reference = capture_ui(execution, density, batch(Kind::Rect, &a, 63));
-        let (draw, release) = marks_draw(&Native::gpu_vertices_owner(execution), &renderer::gpu_device(gpu), &a, 100, Some(63));
+        let (draw, release) = marks_draw(&native::gpu_vertices_owner(execution), &renderer::gpu_device(gpu), &a, 100, Some(63));
         let marks = capture_marks(execution, draw);
         release();
         assert!(reference == marks, "indirect marks differ from the 63-rect batch at density {density}");
-        assert_eq!(scene_execution::Private::gpu_vertex_count_for_test(&Native::gpu_vertices_owner(execution)), 0);
+        assert_eq!(scene_execution::private::gpu_vertex_count_for_test(&native::gpu_vertices_owner(execution)), 0);
     });
 }
 

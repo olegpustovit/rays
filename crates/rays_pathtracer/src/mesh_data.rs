@@ -2,7 +2,7 @@
 //! several placed meshes), pure data that a cook worker may build off the initial domain.
 //! The OCaml `'material t` is concrete here: the only instantiation is `material`.
 use crate::frame_data::{put_f32, put_u32};
-use crate::rays_pathtracer::material;
+use crate::rays_pathtracer::Material;
 use ogpu::backend as b;
 use rays_math::mat4;
 use std::sync::Arc;
@@ -20,7 +20,7 @@ pub fn add_vec3(builder: &mut Vec<u8>, (x, y, z): (f64, f64, f64)) {
 }
 
 #[derive(Clone)]
-pub struct instances {
+pub struct Instances {
     pub records: Vec<b::InstanceRecord>,
     pub shader_bytes: Vec<u8>,
     pub motion_transforms: Option<Vec<Vec<f64>>>,
@@ -35,14 +35,14 @@ pub struct instances {
 /// placement range (`objects[o]` to `objects[o + 1]`; empty for `mesh`) and each placement's matrix
 /// relative to its object.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum part {
+pub enum Part {
     /// first vertex, vertex count
-    Triangle_part(i64, i64),
+    TrianglePart(i64, i64),
 }
 
 #[derive(Clone)]
-pub struct layout {
-    pub parts: Vec<part>,
+pub struct Layout {
+    pub parts: Vec<Part>,
     pub placements: Vec<(mat4::T, i64, i64)>,
     pub table: Vec<u8>,
     pub objects: Vec<i64>,
@@ -55,29 +55,29 @@ pub struct layout {
 /// `sphere_material`, strands as linear round curves (control points, radii, each segment's first point
 /// and material).
 #[derive(Clone)]
-pub struct extras {
+pub struct Extras {
     pub sphere_bytes: Vec<u8>,
     pub sphere_material: i64,
     pub sphere_count: i64,
-    pub strand_points: Vec<u8>,
-    pub strand_radii: Vec<u8>,
-    pub strand_indices: Vec<u8>,
-    pub strand_ids: Vec<u8>,
-    pub strand_point_count: i64,
-    pub strand_segments: i64,
+    pub points: Vec<u8>,
+    pub radii: Vec<u8>,
+    pub indices: Vec<u8>,
+    pub ids: Vec<u8>,
+    pub point_count: i64,
+    pub segments: i64,
 }
 
-pub fn no_extras() -> extras {
-    extras {
+pub fn no_extras() -> Extras {
+    Extras {
         sphere_bytes: vec![],
         sphere_material: 0,
         sphere_count: 0,
-        strand_points: vec![],
-        strand_radii: vec![],
-        strand_indices: vec![],
-        strand_ids: vec![],
-        strand_point_count: 0,
-        strand_segments: 0,
+        points: vec![],
+        radii: vec![],
+        indices: vec![],
+        ids: vec![],
+        point_count: 0,
+        segments: 0,
     }
 }
 
@@ -87,7 +87,7 @@ pub fn no_extras() -> extras {
 /// mesh that keeps them alive. The host arrays of the mesh it is part of stay empty: the tracer gathers
 /// the corners on the device.
 #[derive(Clone)]
-pub struct device {
+pub struct Device {
     pub key: String,
     pub vertex_count: i64,
     pub index_count: i64,
@@ -97,23 +97,23 @@ pub struct device {
 }
 
 #[derive(Clone)]
-pub struct t {
-    pub device: Option<device>,
-    pub mesh_positions: Vec<u8>,
-    pub mesh_normals: Vec<u8>,
+pub struct MeshData {
+    pub device: Option<Device>,
+    pub positions: Vec<u8>,
+    pub normals: Vec<u8>,
     /// a float3 per corner like the normals; empty: no mesh has colours
-    pub mesh_colors: Vec<u8>,
-    pub mesh_ids: Vec<u8>,
+    pub colors: Vec<u8>,
+    pub ids: Vec<u8>,
     pub triangles: i64,
-    pub mesh_materials: Vec<material>,
-    pub instances: Option<instances>,
-    pub extras: extras,
-    pub scene: Option<layout>,
+    pub materials: Vec<Material>,
+    pub instances: Option<Instances>,
+    pub extras: Extras,
+    pub scene: Option<Layout>,
 }
 
-type flat_parts = (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, i64);
+type FlatParts = (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, i64);
 
-fn flatten(extras: &extras, objects: &[(rays::mesh::t, i64)]) -> Result<flat_parts, String> {
+fn flatten(extras: &Extras, objects: &[(rays::mesh::t, i64)]) -> Result<FlatParts, String> {
     let mut positions = Vec::with_capacity(4096);
     let mut normals = Vec::with_capacity(4096);
     let mut colors = Vec::with_capacity(4096);
@@ -163,17 +163,17 @@ fn flatten(extras: &extras, objects: &[(rays::mesh::t, i64)]) -> Result<flat_par
             count += 1;
         }
     }
-    if count == 0 && extras.sphere_count == 0 && extras.strand_segments == 0 {
+    if count == 0 && extras.sphere_count == 0 && extras.segments == 0 {
         Err("path tracer scene has no triangles".to_string())
     } else {
         Ok((positions, normals, colors, ids, count))
     }
 }
 
-pub fn flat_mesh(extras: extras, materials: Vec<material>, source_meshes: &[rays::mesh::t]) -> Result<t, String> {
+pub fn flat_mesh(extras: Extras, materials: Vec<Material>, source_meshes: &[rays::mesh::t]) -> Result<MeshData, String> {
     let objects: Vec<(rays::mesh::t, i64)> = source_meshes.iter().cloned().enumerate().map(|(i, m)| (m, i as i64)).collect();
     let (mesh_positions, mesh_normals, mesh_colors, mesh_ids, triangles) = flatten(&extras, &objects)?;
-    Ok(t { device: None, mesh_positions, mesh_normals, mesh_colors, mesh_ids, triangles, mesh_materials: materials, instances: None, extras, scene: None })
+    Ok(MeshData { device: None, positions: mesh_positions, normals: mesh_normals, colors: mesh_colors, ids: mesh_ids, triangles, materials, instances: None, extras, scene: None })
 }
 
 /// Column-major 3x4 transform plus its 3x3 normal matrix (cofactors / det): seven packed float3
@@ -222,7 +222,7 @@ fn blank_record() -> b::InstanceRecord {
 
 /// Packs placements into TLAS records (structure index = part), shader transform records, and the
 /// per-instance (first triangle, material) table.
-pub fn layout_mesh(objects: Vec<i64>, placed: Vec<mat4::T>, locals: Vec<mat4::T>, base: t, parts: Vec<part>, placements: Vec<(mat4::T, i64, i64)>) -> Result<t, String> {
+pub fn layout_mesh(objects: Vec<i64>, placed: Vec<mat4::T>, locals: Vec<mat4::T>, base: MeshData, parts: Vec<Part>, placements: Vec<(mat4::T, i64, i64)>) -> Result<MeshData, String> {
     let count = placements.len();
     let mut records = vec![blank_record(); count];
     let mut shader_bytes = vec![0u8; count * 84];
@@ -232,30 +232,30 @@ pub fn layout_mesh(objects: Vec<i64>, placed: Vec<mat4::T>, locals: Vec<mat4::T>
         let columns = transform_columns(matrix)?;
         records[index] = b::InstanceRecord { instance: b::Instance { transform: columns.0.clone(), mask: 0xFFFF_FFFF, structure_index: *part_index }, user_id: 0 };
         put_transform_record(&mut shader_bytes, index * 84, &columns.0, &columns.1);
-        let part::Triangle_part(first, _) = parts[*part_index as usize];
+        let Part::TrianglePart(first, _) = parts[*part_index as usize];
         put_u32(&mut table, index * 8, first / 3);
         put_u32(&mut table, index * 8 + 4, *material);
     }
     let matrices = placements.iter().map(|(m, _, _)| m.clone()).collect();
-    Ok(t {
-        instances: Some(instances { records, shader_bytes, motion_transforms: None, motion_end: None, matrices }),
-        scene: Some(layout { parts, placements, table, objects, placed, locals }),
+    Ok(MeshData {
+        instances: Some(Instances { records, shader_bytes, motion_transforms: None, motion_end: None, matrices }),
+        scene: Some(Layout { parts, placements, table, objects, placed, locals }),
         ..base
     })
 }
 
 /// Spheres and strands are traced beside the triangle structure (scene/trace), which then needs a
 /// triangle: a degenerate one, never hit, stands in when there is none.
-pub fn mesh(extras: extras, materials: Vec<material>, source_meshes: &[rays::mesh::t]) -> Result<t, String> {
+pub fn mesh(extras: Extras, materials: Vec<Material>, source_meshes: &[rays::mesh::t]) -> Result<MeshData, String> {
     let flat = flat_mesh(extras, materials, source_meshes)?;
     if flat.triangles == 0 {
-        Ok(t { mesh_positions: vec![0; 36], mesh_normals: vec![0; 36], mesh_colors: vec![], mesh_ids: vec![0; 4], ..flat })
+        Ok(MeshData { positions: vec![0; 36], normals: vec![0; 36], colors: vec![], ids: vec![0; 4], ..flat })
     } else {
         Ok(flat)
     }
 }
 
-pub fn pack_instances(materials: usize, motion: Option<&[mat4::T]>, transforms: &[mat4::T]) -> Result<instances, String> {
+pub fn pack_instances(materials: usize, motion: Option<&[mat4::T]>, transforms: &[mat4::T]) -> Result<Instances, String> {
     let count = transforms.len();
     let stride = if motion.is_none() { 84 } else { 168 };
     let mut records = vec![blank_record(); count];
@@ -278,7 +278,7 @@ pub fn pack_instances(materials: usize, motion: Option<&[mat4::T]>, transforms: 
         motion_transforms[2 * instance] = start.0;
         motion_transforms[2 * instance + 1] = finish.0;
     }
-    Ok(instances {
+    Ok(Instances {
         records,
         shader_bytes,
         matrices: transforms.to_vec(),
@@ -287,9 +287,9 @@ pub fn pack_instances(materials: usize, motion: Option<&[mat4::T]>, transforms: 
     })
 }
 
-pub fn mesh_instanced(prototype: &t, materials: Option<&[material]>, motion: Option<&[mat4::T]>, transforms: &[mat4::T]) -> Result<t, String> {
+pub fn mesh_instanced(prototype: &MeshData, materials: Option<&[Material]>, motion: Option<&[mat4::T]>, transforms: &[mat4::T]) -> Result<MeshData, String> {
     let materials = materials.unwrap_or(&[]);
-    if prototype.scene.is_some() || prototype.instances.is_some() || prototype.device.is_some() || prototype.extras.sphere_count != 0 || prototype.extras.strand_segments != 0 {
+    if prototype.scene.is_some() || prototype.instances.is_some() || prototype.device.is_some() || prototype.extras.sphere_count != 0 || prototype.extras.segments != 0 {
         return Err("path tracer instancing needs one prepared triangle mesh".to_string());
     }
     let count = transforms.len() as i64;
@@ -305,15 +305,15 @@ pub fn mesh_instanced(prototype: &t, materials: Option<&[material]>, motion: Opt
         Err("path tracer motion transforms must match the transform count".to_string())
     } else {
         let packed = pack_instances(materials.len(), motion, transforms)?;
-        let mut mesh_materials = prototype.mesh_materials.clone();
+        let mut mesh_materials = prototype.materials.clone();
         mesh_materials.extend(materials.iter().cloned());
-        Ok(t { triangles: prototype.triangles * count, mesh_materials, instances: Some(packed), ..prototype.clone() })
+        Ok(MeshData { triangles: prototype.triangles * count, materials: mesh_materials, instances: Some(packed), ..prototype.clone() })
     }
 }
 
 /// Without `Ray_tracing_motion` a motion mesh is built at the shutter midpoint: the mean of its start
 /// and end transforms, as an ordinary instanced mesh.
-pub fn shutter_midpoint(m: &t) -> Result<t, String> {
+pub fn shutter_midpoint(m: &MeshData) -> Result<MeshData, String> {
     match &m.instances {
         Some(instances) if instances.motion_end.is_some() => {
             let ends = instances.motion_end.as_ref().unwrap();
@@ -325,23 +325,23 @@ pub fn shutter_midpoint(m: &t) -> Result<t, String> {
             let used = instances.records.iter().any(|r| r.user_id != 0);
             let mids: Vec<mat4::T> = instances.matrices.iter().enumerate().map(|(i, a)| mid(a, &ends[i])).collect();
             let packed = pack_instances(if used { 1 } else { 0 }, None, &mids)?;
-            Ok(t { instances: Some(packed), ..m.clone() })
+            Ok(MeshData { instances: Some(packed), ..m.clone() })
         }
         _ => Ok(m.clone()),
     }
 }
 
-type input_entry = (mat4::T, t, Vec<part>, Vec<(mat4::T, i64, i64)>);
+type InputEntry = (mat4::T, MeshData, Vec<Part>, Vec<(mat4::T, i64, i64)>);
 
-pub fn scene_mesh(objects: &[(mat4::T, t)]) -> Result<t, String> {
+pub fn scene_mesh(objects: &[(mat4::T, MeshData)]) -> Result<MeshData, String> {
     // Each input as its parts and placements in its own index spaces.
-    let mut inputs: Vec<input_entry> = Vec::new();
+    let mut inputs: Vec<InputEntry> = Vec::new();
     for (matrix, m) in objects {
-        let whole = vec![part::Triangle_part(0, m.mesh_positions.len() as i64 / 12)];
+        let whole = vec![Part::TrianglePart(0, m.positions.len() as i64 / 12)];
         if m.device.is_some() {
             return Err("path tracer scene_mesh objects are host meshes".to_string());
         }
-        if m.extras.sphere_count > 0 || m.extras.strand_segments > 0 {
+        if m.extras.sphere_count > 0 || m.extras.segments > 0 {
             // ponytail: spheres and strands would need per-instance bases in the intersection function;
             // scene objects are triangle meshes.
             return Err("path tracer scene_mesh objects cannot carry spheres or strands".to_string());
@@ -367,53 +367,53 @@ pub fn scene_mesh(objects: &[(mat4::T, t)]) -> Result<t, String> {
     let mut positions = Vec::with_capacity(4096);
     let mut normals = Vec::with_capacity(4096);
     let mut colors = Vec::with_capacity(4096);
-    let colored = inputs.iter().any(|(_, m, _, _)| !m.mesh_colors.is_empty());
+    let colored = inputs.iter().any(|(_, m, _, _)| !m.colors.is_empty());
     let mut ids = Vec::with_capacity(1024);
-    let mut parts: Vec<part> = Vec::new();
+    let mut parts: Vec<Part> = Vec::new();
     let mut placements: Vec<(mat4::T, i64, i64)> = Vec::new();
-    let mut materials: Vec<material> = Vec::new();
+    let mut materials: Vec<Material> = Vec::new();
     let mut locals: Vec<mat4::T> = Vec::new();
     let mut object_ranges: Vec<i64> = vec![0];
     let placed: Vec<mat4::T> = inputs.iter().map(|(matrix, _, _, _)| matrix.clone()).collect();
     let (mut vertex_base, mut part_base, mut material_base, mut triangles) = (0i64, 0i64, 0i64, 0i64);
     for (matrix, m, input_parts, input_placements) in &inputs {
-        positions.extend_from_slice(&m.mesh_positions);
-        normals.extend_from_slice(&m.mesh_normals);
+        positions.extend_from_slice(&m.positions);
+        normals.extend_from_slice(&m.normals);
         if colored {
-            if !m.mesh_colors.is_empty() {
-                colors.extend_from_slice(&m.mesh_colors);
+            if !m.colors.is_empty() {
+                colors.extend_from_slice(&m.colors);
             } else {
-                for _ in 0..m.mesh_normals.len() / 12 {
+                for _ in 0..m.normals.len() / 12 {
                     add_vec3(&mut colors, (1., 1., 1.));
                 }
             }
         }
-        for i in 0..m.mesh_ids.len() / 4 {
-            let id = i32::from_le_bytes(m.mesh_ids[4 * i..4 * i + 4].try_into().unwrap()).wrapping_add(material_base as i32);
+        for i in 0..m.ids.len() / 4 {
+            let id = i32::from_le_bytes(m.ids[4 * i..4 * i + 4].try_into().unwrap()).wrapping_add(material_base as i32);
             ids.extend_from_slice(&id.to_le_bytes());
         }
-        for part::Triangle_part(first, count) in input_parts {
-            parts.push(part::Triangle_part(first + vertex_base, *count));
+        for Part::TrianglePart(first, count) in input_parts {
+            parts.push(Part::TrianglePart(first + vertex_base, *count));
         }
         for (instance, part_index, material) in input_placements {
             locals.push(instance.clone());
             placements.push((mat4::mul(matrix, instance), part_index + part_base, if *material < 0 { -1 } else { material + material_base }));
         }
         object_ranges.push(object_ranges[object_ranges.len() - 1] + input_placements.len() as i64);
-        materials.extend(m.mesh_materials.iter().cloned());
-        vertex_base += m.mesh_positions.len() as i64 / 12;
+        materials.extend(m.materials.iter().cloned());
+        vertex_base += m.positions.len() as i64 / 12;
         part_base += input_parts.len() as i64;
-        material_base += m.mesh_materials.len() as i64;
+        material_base += m.materials.len() as i64;
         triangles += m.triangles;
     }
-    let base = t {
+    let base = MeshData {
         device: None,
-        mesh_positions: positions,
-        mesh_normals: normals,
-        mesh_colors: colors,
-        mesh_ids: ids,
+        positions,
+        normals,
+        colors,
+        ids,
         triangles,
-        mesh_materials: materials,
+        materials,
         instances: None,
         extras: no_extras(),
         scene: None,
@@ -422,7 +422,7 @@ pub fn scene_mesh(objects: &[(mat4::T, t)]) -> Result<t, String> {
 }
 
 /// The same scene with object `o`'s placements at `matrices[o] * local`.
-pub fn moved_mesh(m: &t, matrices: &[mat4::T]) -> Result<t, String> {
+pub fn moved_mesh(m: &MeshData, matrices: &[mat4::T]) -> Result<MeshData, String> {
     match (&m.scene, &m.instances) {
         (Some(layout), Some(instances)) if layout.objects.len() > 1 => {
             let objects = &layout.objects;
@@ -455,7 +455,7 @@ pub fn moved_mesh(m: &t, matrices: &[mat4::T]) -> Result<t, String> {
             let mut layout2 = layout.clone();
             layout2.placements = placements;
             layout2.placed = matrices.to_vec();
-            Ok(t { instances: Some(instances { records, shader_bytes, matrices: world, ..instances.clone() }), scene: Some(layout2), ..m.clone() })
+            Ok(MeshData { instances: Some(Instances { records, shader_bytes, matrices: world, ..instances.clone() }), scene: Some(layout2), ..m.clone() })
         }
         _ => Err("path tracer move needs a scene_mesh scene".to_string()),
     }

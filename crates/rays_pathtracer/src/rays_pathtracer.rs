@@ -8,9 +8,9 @@
 //!
 //! Rust notes: the tracer is a plain struct mutated through `&mut t`; OCaml optional arguments are an options
 //! struct (`create_options`) or `Option` parameters; `move` is `r#move`.
-use crate::frame_data::{self, allocate_film, camera_fov, color_tuple, destroy_film, film, gpu_err, put_u32};
+use crate::frame_data::{self, allocate_film, camera_fov, color_tuple, destroy_film, Film, gpu_err, put_u32};
 use crate::lisp_kernel;
-use crate::mesh_build::{advance_build, destroy_gpu, discard_build, finish_build, gpu_mesh, mesh_build, mesh_shape, shared, stage, submit_instances, table_buffers, upload_tables, wait, device_gpu};
+use crate::mesh_build::{advance_build, destroy_gpu, discard_build, finish_build, GpuMesh, MeshBuild, mesh_shape, shared, Stage, submit_instances, table_buffers, upload_tables, wait, DeviceGpu};
 use crate::mesh_data;
 use ogpu::backend::{self as b, Accel, AccelDescriptor, Buffer, Commands, Device, Geometry, Queue, Receipt, Status, Texture};
 use ogpu::types::{BufferUsage, Memory};
@@ -22,22 +22,22 @@ pub use rays_math::color::Linear as Linear_color;
 
 /// Linear floating-point RGB for materials and light. Channels are not quantized or clamped, so dim and HDR
 /// values survive GPU upload.
-pub type linear_color = Linear::T;
+pub type LinearColor = Linear::T;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct material {
-    pub albedo: linear_color,
+pub struct Material {
+    pub albedo: LinearColor,
     /// 0 = mirror, 1 = fully rough
     pub roughness: f64,
     pub metallic: f64,
-    pub emission: linear_color,
+    pub emission: LinearColor,
     /// Round-corners radius in scene units (0 = off). A render-time shading bevel: the normal rolls over
     /// onto adjacent faces within this distance of an edge, without changing geometry.
     pub round: f64,
 }
 
-pub fn material(roughness: Option<f64>, metallic: Option<f64>, emission: Option<linear_color>, round: Option<f64>, albedo: linear_color) -> material {
-    material {
+pub fn material(roughness: Option<f64>, metallic: Option<f64>, emission: Option<LinearColor>, round: Option<f64>, albedo: LinearColor) -> Material {
+    Material {
         albedo,
         roughness: roughness.unwrap_or(0.5),
         metallic: metallic.unwrap_or(0.),
@@ -49,52 +49,52 @@ pub fn material(roughness: Option<f64>, metallic: Option<f64>, emission: Option<
 /// A soft rectangle of light painted on the dome around `direction`. Extents are angular half-sizes in
 /// radians; `softness` is the edge falloff.
 #[derive(Clone, Debug, PartialEq)]
-pub struct panel {
+pub struct Panel {
     pub direction: vec3::T,
     pub width: f64,
     pub height: f64,
     pub softness: f64,
-    pub color: linear_color,
+    pub color: LinearColor,
     pub intensity: f64,
 }
 
-pub fn panel(softness: Option<f64>, intensity: f64, width: f64, height: f64, direction: vec3::T) -> panel {
-    panel { direction, width, height, softness: softness.unwrap_or(0.05), color: Linear::rgb(1., 1., 1.), intensity }
+pub fn panel(softness: Option<f64>, intensity: f64, width: f64, height: f64, direction: vec3::T) -> Panel {
+    Panel { direction, width, height, softness: softness.unwrap_or(0.05), color: Linear::rgb(1., 1., 1.), intensity }
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct environment {
-    pub sky: linear_color,
-    pub ground: linear_color,
-    pub panels: Vec<panel>,
+pub struct Environment {
+    pub sky: LinearColor,
+    pub ground: LinearColor,
+    pub panels: Vec<Panel>,
 }
 
-pub type camera = rays::camera::t;
+pub type Camera = rays::camera::t;
 
 /// Rectangle area light of `size` (width, height) centred at `at`, facing `target`, two-sided. Sampled with
 /// shadow rays (next-event estimation); lights are analytic and, without a World (`set_world`), never appear
 /// as visible geometry.
 #[derive(Clone, Debug, PartialEq)]
-pub struct light {
+pub struct Light {
     pub at: vec3::T,
     pub target: vec3::T,
     pub size: (f64, f64),
-    pub color: linear_color,
+    pub color: LinearColor,
     pub intensity: f64,
 }
 
-pub fn rect_light(intensity: f64, size: (f64, f64), target: vec3::T, at: vec3::T) -> light {
-    light { at, target, size, color: Linear::rgb(1., 1., 1.), intensity }
+pub fn rect_light(intensity: f64, size: (f64, f64), target: vec3::T, at: vec3::T) -> Light {
+    Light { at, target, size, color: Linear::rgb(1., 1., 1.), intensity }
 }
 
 /// The rect that lights like a raster `Light.t` with physical 1/d^2 attenuation: a white matte face at
 /// distance `d` receives irradiance `pi * intensity * color / d^2` (the raster World path's inverse: a rect
 /// of radiance `L` and area `A` is a `Light.t` of color `L * A / pi`). `color` is `diffuse / 255` as linear
 /// RGB; the rect's radiance is `pi * intensity / (width * height)`.
-pub fn light_of(l: &rays::light::t) -> light {
+pub fn light_of(l: &rays::light::t) -> Light {
     let c = l.diffuse;
     let color = Linear::rgb(c.r as f64 / 255., c.g as f64 / 255., c.b as f64 / 255.);
-    let rect = |at: vec3::T, target: vec3::T, distance2: f64, (w, h): (f64, f64)| light { at, target, size: (w, h), color, intensity: std::f64::consts::PI * l.intensity * distance2 / (w * h) };
+    let rect = |at: vec3::T, target: vec3::T, distance2: f64, (w, h): (f64, f64)| Light { at, target, size: (w, h), color, intensity: std::f64::consts::PI * l.intensity * distance2 / (w * h) };
     match &l.kind {
         rays::light::kind::Area { position, direction, width, height, .. } => rect(*position, vec3::add(*position, *direction), 1., (*width, *height)),
         rays::light::kind::Point { position, .. } => rect(*position, vec3::sub(*position, vec3::unit_y()), 1., (0.1, 0.1)),
@@ -105,57 +105,57 @@ pub fn light_of(l: &rays::light::t) -> light {
 
 /// An analytic sphere, intersected beside the triangle structure rather than tessellated.
 #[derive(Clone, Debug, PartialEq)]
-pub struct sphere {
+pub struct Sphere {
     pub center: vec3::T,
     pub radius: f64,
-    pub sphere_material: material,
+    pub sphere_material: Material,
 }
 
 /// A round polyline of constant `thickness` (diameter), traced as linear curve segments: native curves where
 /// `Ray_tracing_curves` is present, else one capsule test per segment.
 #[derive(Clone, Debug, PartialEq)]
-pub struct strand {
+pub struct Strand {
     pub points: Vec<vec3::T>,
     pub thickness: f64,
-    pub strand_material: material,
+    pub strand_material: Material,
 }
 
 /// Scene mesh inputs are already triangle-ready `Rays.Mesh.t` values with per-vertex normals. Geometry
 /// triangulation and normal generation happen before entering the path tracer.
 #[derive(Clone)]
-pub struct scene {
-    pub objects: Vec<(rays::mesh::t, material)>,
-    pub spheres: Vec<sphere>,
-    pub strands: Vec<strand>,
-    pub environment: environment,
-    pub lights: Vec<light>,
+pub struct Scene {
+    pub objects: Vec<(rays::mesh::t, Material)>,
+    pub spheres: Vec<Sphere>,
+    pub strands: Vec<Strand>,
+    pub environment: Environment,
+    pub lights: Vec<Light>,
 }
 
 /// One in-flight frame: its receipt, which output texture it writes, and whether a camera change made its
 /// result obsolete.
 #[derive(Clone)]
-pub struct pending {
+pub struct Pending {
     pub receipt: Receipt,
     pub slot: usize,
     pub stale: bool,
     pub preview: bool,
-    pub camera: camera,
+    pub camera: Camera,
     pub history_epoch: i64,
     /// the last band of its frame: publishes the film
     pub last: bool,
 }
 
 /// Pure prepared geometry: a flat triangle mesh or a prototype plus compact instance transforms.
-pub type mesh = mesh_data::t;
+pub type Mesh = mesh_data::MeshData;
 
 /// The shape of the pipeline a mesh needs.
-pub enum queued {
-    Full(mesh),
-    Move(mesh),
+pub enum Queued {
+    Full(Mesh),
+    Move(Mesh),
 }
 
-pub struct t {
-    pub lease: renderer::renderer::gpu,
+pub struct PathTracer {
+    pub lease: renderer::renderer::Gpu,
     pub device: Device,
     pub queue: Queue,
     pub flow_pipelines: flow_gpu::pipelines::T,
@@ -164,29 +164,29 @@ pub struct t {
     /// the Lisp kernels' count word, never read
     pub cell: Buffer,
     /// newest first, at most four
-    pub kernels: Vec<(lisp_kernel::facts, Rc<lisp_kernel::T>)>,
+    pub kernels: Vec<(lisp_kernel::Facts, Rc<lisp_kernel::T>)>,
     /// a device mesh's corner gather, made on first use
-    pub gather: Option<lisp_kernel::gather>,
+    pub gather: Option<lisp_kernel::Gather>,
     /// device mesh updates refit in place
     pub refits: i64,
     /// the last frame accumulated, so the film is a preview's history
     pub from_accum: bool,
-    pub gpu: gpu_mesh,
-    pub building: Option<mesh_build>,
-    pub queued_mesh: Option<queued>,
+    pub gpu: GpuMesh,
+    pub building: Option<MeshBuild>,
+    pub queued_mesh: Option<Queued>,
     /// the newest mesh given, for `move`
-    pub latest: mesh,
+    pub latest: Mesh,
     pub panels: Buffer,
     pub lights: Buffer,
     pub light_count: i64,
-    pub scene_lights: Vec<light>,
+    pub scene_lights: Vec<Light>,
     pub world: Option<rays::world::baked>,
     pub world_buffer: Buffer,
     /// the World's CDF alone, for the Lisp kernel
     pub cdf_buffer: Buffer,
     pub bsdf_only: bool,
     /// the working film; None once released, `render` makes it again
-    pub film: Option<film>,
+    pub film: Option<Film>,
     /// the output the image samples
     pub published: Option<usize>,
     /// that output, kept from a released film
@@ -194,10 +194,10 @@ pub struct t {
     pub shared_film: bool,
     pub next_output_slot: usize,
     pub history_slot: usize,
-    pub history_camera: Option<camera>,
+    pub history_camera: Option<Camera>,
     pub history_epoch: i64,
     /// oldest first, at most two in flight
-    pub pending: Vec<pending>,
+    pub pending: Vec<Pending>,
     /// freed once no frame is in flight
     pub retired: Vec<Box<dyn FnOnce()>>,
     /// row bands per accumulation frame
@@ -215,10 +215,10 @@ pub struct t {
     pub round_samples: i64,
     pub profile: bool,
     pub panel_count: i64,
-    pub sky: linear_color,
-    pub ground: linear_color,
+    pub sky: LinearColor,
+    pub ground: LinearColor,
     pub frame: i64,
-    pub camera: Option<camera>,
+    pub camera: Option<Camera>,
     pub moving: bool,
     pub scene_edited: bool,
 }
@@ -242,7 +242,7 @@ fn vec3_tuple(v: &vec3::T) -> (f64, f64, f64) {
     (v.x, v.y, v.z)
 }
 
-fn renderer_err(e: &renderer::renderer::error) -> String {
+fn renderer_err(e: &ogpu::error::Error) -> String {
     let mut s = String::new();
     renderer::renderer::pp_error(&mut s, e);
     s
@@ -254,7 +254,7 @@ fn resources_err(e: &runtime_resources::error) -> String {
 
 /// Analytic primitives share the material index space with the objects: sphere k's is `first_material + k`,
 /// and the sphere records are (centre, radius).
-pub fn prepare_extras(first_material: i64, spheres: &[sphere], strands: &[strand]) -> Result<mesh_data::extras, String> {
+pub fn prepare_extras(first_material: i64, spheres: &[Sphere], strands: &[Strand]) -> Result<mesh_data::Extras, String> {
     let mut sphere_bytes = Vec::new();
     let mut strand_points = Vec::new();
     let mut strand_radii = Vec::new();
@@ -293,29 +293,29 @@ pub fn prepare_extras(first_material: i64, spheres: &[sphere], strands: &[strand
             segments += 1;
         }
     }
-    Ok(mesh_data::extras {
+    Ok(mesh_data::Extras {
         sphere_bytes,
         sphere_material: first_material,
         sphere_count: spheres.len() as i64,
-        strand_points,
-        strand_radii,
-        strand_indices,
-        strand_ids,
-        strand_point_count: point_count,
-        strand_segments: segments,
+        points: strand_points,
+        radii: strand_radii,
+        indices: strand_indices,
+        ids: strand_ids,
+        point_count,
+        segments,
     })
 }
 
 /// A lone triangle device mesh with normals (`Rays.Mesh.View.create_device`) is traced from the device: its
 /// corners are gathered there, never read back.
 /// ponytail: float4 colours take the host route; a vec4 gather is the upgrade if a sketch needs them.
-pub fn device_of(m: &rays::mesh::t) -> Option<mesh_data::device> {
+pub fn device_of(m: &rays::mesh::t) -> Option<mesh_data::Device> {
     match rays::mesh::View::device(m) {
         Some((key, true)) if rays::mesh::mode(m) == rays::mesh::mode::Triangles => {
             let index_count = rays::mesh::index_count(m);
             let width = rays::mesh::View::device_color_width(m);
             if index_count > 0 && index_count % 3 == 0 && width != 4 {
-                Some(mesh_data::device { key, vertex_count: rays::mesh::vertex_count(m), index_count, corners: rays::mesh::View::unread(m).indices, colored: width == 3, holder: m.clone() })
+                Some(mesh_data::Device { key, vertex_count: rays::mesh::vertex_count(m), index_count, corners: rays::mesh::View::unread(m).indices, colored: width == 3, holder: m.clone() })
             } else {
                 None
             }
@@ -329,24 +329,24 @@ pub fn device_of(m: &rays::mesh::t) -> Option<mesh_data::device> {
 /// it: the tracer gathers its corners from the registered positions and normals on the device into a
 /// refittable structure, and a later mesh of the same topology refits that structure in place instead of
 /// rebuilding it. Such a mesh cannot join `mesh_instanced` or `scene_mesh`.
-pub fn mesh(spheres: Option<&[sphere]>, strands: Option<&[strand]>, objects: &[(rays::mesh::t, material)]) -> Result<mesh, String> {
+pub fn mesh(spheres: Option<&[Sphere]>, strands: Option<&[Strand]>, objects: &[(rays::mesh::t, Material)]) -> Result<Mesh, String> {
     let spheres = spheres.unwrap_or(&[]);
     let strands = strands.unwrap_or(&[]);
     let extras = prepare_extras(objects.len() as i64, spheres, strands)?;
-    let mut materials: Vec<material> = objects.iter().map(|(_, m)| m.clone()).collect();
+    let mut materials: Vec<Material> = objects.iter().map(|(_, m)| m.clone()).collect();
     materials.extend(spheres.iter().map(|s| s.sphere_material.clone()));
     materials.extend(strands.iter().map(|s| s.strand_material.clone()));
-    let devices: Vec<Option<mesh_data::device>> = objects.iter().map(|(m, _)| device_of(m)).collect();
+    let devices: Vec<Option<mesh_data::Device>> = objects.iter().map(|(m, _)| device_of(m)).collect();
     if spheres.is_empty() && strands.is_empty() && devices.len() == 1 && devices[0].is_some() {
         let device = devices[0].clone().unwrap();
-        Ok(mesh_data::t {
+        Ok(mesh_data::MeshData {
             triangles: device.index_count / 3,
             device: Some(device),
-            mesh_positions: vec![],
-            mesh_normals: vec![],
-            mesh_colors: vec![],
-            mesh_ids: vec![],
-            mesh_materials: materials,
+            positions: vec![],
+            normals: vec![],
+            colors: vec![],
+            ids: vec![],
+            materials,
             instances: None,
             extras,
             scene: None,
@@ -360,21 +360,21 @@ pub fn mesh(spheres: Option<&[sphere]>, strands: Option<&[strand]>, objects: &[(
 /// overrides the prototype material per instance through the instance user id. `motion` gives each instance
 /// a second transform at the end of the shutter; every sample picks a shutter time, so instances blur along
 /// their motion.
-pub fn mesh_instanced(prototype: &mesh, materials: Option<&[material]>, motion: Option<&[rays_math::mat4::T]>, transforms: &[rays_math::mat4::T]) -> Result<mesh, String> {
+pub fn mesh_instanced(prototype: &Mesh, materials: Option<&[Material]>, motion: Option<&[rays_math::mat4::T]>, transforms: &[rays_math::mat4::T]) -> Result<Mesh, String> {
     mesh_data::mesh_instanced(prototype, materials, motion, transforms)
 }
 
 /// Several prepared meshes placed at their world transforms in one traceable scene: an instance structure
 /// over one primitive structure per input.
-pub fn scene_mesh(objects: &[(rays_math::mat4::T, mesh)]) -> Result<mesh, String> {
+pub fn scene_mesh(objects: &[(rays_math::mat4::T, Mesh)]) -> Result<Mesh, String> {
     mesh_data::scene_mesh(objects)
 }
 
-pub fn moved_mesh(m: &mesh, matrices: &[rays_math::mat4::T]) -> Result<mesh, String> {
+pub fn moved_mesh(m: &Mesh, matrices: &[rays_math::mat4::T]) -> Result<Mesh, String> {
     mesh_data::moved_mesh(m, matrices)
 }
 
-pub fn material_bytes(materials: &[material]) -> Vec<u8> {
+pub fn material_bytes(materials: &[Material]) -> Vec<u8> {
     let mut builder = Vec::with_capacity(256);
     for m in materials {
         add_float4(&mut builder, color_tuple(&m.albedo), m.roughness);
@@ -384,16 +384,16 @@ pub fn material_bytes(materials: &[material]) -> Vec<u8> {
     builder
 }
 
-fn upload_mesh_async(reuse: Option<&gpu_mesh>, device: &Device, queue: &Queue, m: &mesh) -> Result<mesh_build, String> {
-    crate::mesh_build::upload_mesh_async(reuse, &material_bytes(&m.mesh_materials), device, queue, m)
+fn upload_mesh_async(reuse: Option<&GpuMesh>, device: &Device, queue: &Queue, m: &Mesh) -> Result<MeshBuild, String> {
+    crate::mesh_build::upload_mesh_async(reuse, &material_bytes(&m.materials), device, queue, m)
 }
 
-fn upload_mesh(device: &Device, queue: &Queue, m: &mesh) -> Result<gpu_mesh, String> {
+fn upload_mesh(device: &Device, queue: &Queue, m: &Mesh) -> Result<GpuMesh, String> {
     let build = upload_mesh_async(None, device, queue, m)?;
     finish_build(device, queue, build)
 }
 
-pub fn panel_bytes(panels: &[panel]) -> Vec<u8> {
+pub fn panel_bytes(panels: &[Panel]) -> Vec<u8> {
     let mut builder = Vec::with_capacity(256);
     let normalize = |v: &vec3::T| {
         let l = (v.x * v.x + v.y * v.y + v.z * v.z).sqrt();
@@ -412,7 +412,7 @@ pub fn panel_bytes(panels: &[panel]) -> Vec<u8> {
     builder
 }
 
-pub fn light_bytes(world_lights: &[rays::world::light], lights: &[light]) -> Vec<u8> {
+pub fn light_bytes(world_lights: &[rays::world::light], lights: &[Light]) -> Vec<u8> {
     let mut builder = Vec::with_capacity(256);
     let normalize = |v: vec3::T| {
         let l = (v.x * v.x + v.y * v.y + v.z * v.z).sqrt();
@@ -500,7 +500,7 @@ pub fn available() -> Option<String> {
 
 /// The optional arguments of `create`.
 #[derive(Clone, Debug, Default)]
-pub struct create_options {
+pub struct CreateOptions {
     pub spp: Option<i64>,
     pub bounces: Option<i64>,
     pub exposure: Option<f64>,
@@ -513,7 +513,7 @@ pub struct create_options {
     pub profile: Option<bool>,
 }
 
-fn create_tracer(o: &create_options, width: i64, height: i64, scene_: &scene) -> Result<t, String> {
+fn create_tracer(o: &CreateOptions, width: i64, height: i64, scene_: &Scene) -> Result<PathTracer, String> {
     if width <= 0 || height <= 0 {
         return Err("path tracer size must be positive".to_string());
     }
@@ -524,7 +524,7 @@ fn create_tracer(o: &create_options, width: i64, height: i64, scene_: &scene) ->
     let lease = renderer::renderer::acquire_gpu().map_err(|e| renderer_err(&e))?;
     let device = renderer::renderer::gpu_device(&lease);
     let queue = renderer::renderer::gpu_queue(&lease);
-    let created = (|| -> Result<t, String> {
+    let created = (|| -> Result<PathTracer, String> {
         ogpu::caps::require(Some("Rays_pathtracer.create"), &b::capabilities(&device), &ogpu::caps::Feature::RayTracing).map_err(gpu_err)?;
         let m = mesh(Some(&scene_.spheres), Some(&scene_.strands), &scene_.objects)?;
         // a device mesh is installed by [replace_mesh] once the tracer exists, over a stand-in
@@ -534,7 +534,7 @@ fn create_tracer(o: &create_options, width: i64, height: i64, scene_: &scene) ->
             &if m.device.is_none() {
                 m.clone()
             } else {
-                mesh_data::t { device: None, mesh_positions: vec![0; 36], mesh_normals: vec![0; 36], mesh_colors: vec![], mesh_ids: vec![0; 4], triangles: 1, ..m.clone() }
+                mesh_data::MeshData { device: None, positions: vec![0; 36], normals: vec![0; 36], colors: vec![], ids: vec![0; 4], triangles: 1, ..m.clone() }
             },
         )?;
         let panels = shared(&device, "pathtracer-panels", &panel_bytes(&scene_.environment.panels))?;
@@ -547,7 +547,7 @@ fn create_tracer(o: &create_options, width: i64, height: i64, scene_: &scene) ->
         let pixels = vec![0u8; (width * height * 4) as usize];
         let resource = runtime_resources::Image::create(width, height, &pixels).map_err(|e| resources_err(&e))?;
         let image = rays::image::of_resource(resource.clone())?;
-        Ok(t {
+        Ok(PathTracer {
             lease: lease.clone(),
             device: device.clone(),
             queue: queue.clone(),
@@ -609,7 +609,7 @@ fn create_tracer(o: &create_options, width: i64, height: i64, scene_: &scene) ->
     created
 }
 
-fn drain(t: &mut t) {
+fn drain(t: &mut PathTracer) {
     if t.pending.is_empty() {
         let retired = std::mem::take(&mut t.retired);
         for free in retired.into_iter().rev() {
@@ -618,7 +618,7 @@ fn drain(t: &mut t) {
     }
 }
 
-fn retire(t: &mut t, free: Box<dyn FnOnce()>) {
+fn retire(t: &mut PathTracer, free: Box<dyn FnOnce()>) {
     if t.pending.is_empty() {
         free()
     } else {
@@ -626,12 +626,12 @@ fn retire(t: &mut t, free: Box<dyn FnOnce()>) {
     }
 }
 
-fn reset_samples(t: &mut t) {
+fn reset_samples(t: &mut PathTracer) {
     t.frame = 0;
     t.completed = 0;
 }
 
-fn restart(t: &mut t) {
+fn restart(t: &mut PathTracer) {
     reset_samples(t);
     for p in t.pending.iter_mut() {
         p.stale = true;
@@ -640,25 +640,25 @@ fn restart(t: &mut t) {
     t.history_epoch += 1;
 }
 
-fn live_film(t: &t) -> &film {
+fn live_film(t: &PathTracer) -> &Film {
     t.film.as_ref().expect("film")
 }
 
 /// Restarts accumulation; the next frame renders at full quality even right after a scene edit.
-pub fn reset(t: &mut t) {
+pub fn reset(t: &mut PathTracer) {
     restart(t);
     t.scene_edited = false;
 }
 
 /// Geometry, lights, or World just became current: the next `render` is a preview frame, like a camera
 /// move, so continuous edits stay interactive.
-fn edited(t: &mut t) {
+fn edited(t: &mut PathTracer) {
     restart(t);
     t.scene_edited = true;
 }
 
 /// A reused prototype or a `move` shares the installed geometry and BLASes; ownership passes to the new mesh.
-fn install_gpu(t: &mut t, mut gpu: gpu_mesh) {
+fn install_gpu(t: &mut PathTracer, mut gpu: GpuMesh) {
     if b::buffer_id(&t.gpu.positions) == b::buffer_id(&gpu.positions) {
         t.gpu.owns_prototype = false;
         gpu.owns_prototype = true;
@@ -669,34 +669,33 @@ fn install_gpu(t: &mut t, mut gpu: gpu_mesh) {
 }
 
 /// Accumulated samples per pixel.
-pub fn samples(t: &t) -> i64 {
+pub fn samples(t: &PathTracer) -> i64 {
     t.completed * t.spp
 }
 
-pub fn size(t: &t) -> (i64, i64) {
+pub fn size(t: &PathTracer) -> (i64, i64) {
     (t.width, t.height)
 }
 
 /// Borrowed; destroyed by `destroy`. In a native Sketch, Scene samples its completed GPU film directly.
-pub fn image(t: &t) -> rays::image::t {
+pub fn image(t: &PathTracer) -> rays::image::t {
     t.image.clone()
 }
 
-const band_ms: f64 = 6.;
+const BAND_MS: f64 = 6.;
 
 /// Publishes a completed frame's pixels unless a reset made them obsolete.
-fn publish(t: &mut t, p: &pending) -> Result<(), String> {
+fn publish(t: &mut PathTracer, p: &Pending) -> Result<(), String> {
     let seconds = b::gpu_duration(&t.queue, p.receipt);
-    if t.profile {
-        if let Some(seconds) = seconds {
+    if t.profile
+        && let Some(seconds) = seconds {
             eprintln!("pathtracer gpu_ms {:.4}", seconds * 1000.);
         }
-    }
     if !p.preview {
         t.frame_gpu += seconds.unwrap_or(0.);
         if p.last {
             if seconds.is_some() {
-                t.bands = 1.max(3.min((t.frame_gpu * 1000. / band_ms).ceil() as i64));
+                t.bands = 1.max(3.min((t.frame_gpu * 1000. / BAND_MS).ceil() as i64));
             }
             t.frame_gpu = 0.;
         }
@@ -725,36 +724,36 @@ fn publish(t: &mut t, p: &pending) -> Result<(), String> {
     Ok(())
 }
 
-fn status(t: &t, receipt: Receipt) -> Result<Status, String> {
+fn status(t: &PathTracer, receipt: Receipt) -> Result<Status, String> {
     b::status(&t.queue, receipt).map_err(gpu_err)
 }
 
 /// A transform-only build: fresh instance records and shader transforms, and a new TLAS over the installed
 /// scene's BLASes; geometry, materials, and the table are borrowed (owns_prototype = false) until
 /// `install_gpu`.
-fn move_async(t: &t, moved: &mesh) -> Result<mesh_build, String> {
+fn move_async(t: &PathTracer, moved: &Mesh) -> Result<MeshBuild, String> {
     match (&moved.instances, &moved.scene) {
         // ponytail: installed-scene identity is checked only as far as memory safety needs (BLAS and
         // instance counts); `move` after a failed rebuild may place the old geometry.
         (Some(instances), Some(layout)) if t.gpu.scene_blas.len() == layout.parts.len() && t.gpu.tables.instance_count == instances.records.len() as i64 => {
             let mut owned: Vec<Buffer> = Vec::new();
-            let mut build_slot: Option<mesh_build> = None;
+            let mut build_slot: Option<MeshBuild> = None;
             let started = (|| -> Result<(), String> {
                 let packed = b::pack_instance_records(&t.device, &instances.records).map_err(gpu_err)?;
                 let instance_buffer = shared(&t.device, "pathtracer-instances", &packed)?;
                 owned.push(instance_buffer.clone());
                 let scratch = frame_data::buffer(Memory::DeviceLocal, vec![BufferUsage::Storage], &t.device, "pathtracer-scratch", 1024)?;
                 owned.push(scratch.clone());
-                let tables = upload_tables(&material_bytes(&moved.mesh_materials), &t.device, moved)?;
+                let tables = upload_tables(&material_bytes(&moved.materials), &t.device, moved)?;
                 owned.extend(table_buffers(&tables));
-                let mut build = mesh_build {
-                    gpu: gpu_mesh { instance_buffer: Some(instance_buffer), owns_prototype: false, tables, ..t.gpu.clone() },
+                let mut build = MeshBuild {
+                    gpu: GpuMesh { instance_buffer: Some(instance_buffer), owns_prototype: false, tables, ..t.gpu.clone() },
                     scratch,
                     extra_scratch: None,
                     size_buffer: None,
                     uncompacted: None,
                     uncompacted_scene: vec![],
-                    stage: stage::Ready,
+                    stage: Stage::Ready,
                     instance_count: instances.records.len() as i64,
                     instances_built: false,
                     proto_scratch: None,
@@ -789,7 +788,7 @@ fn move_async(t: &t, moved: &mesh) -> Result<mesh_build, String> {
     }
 }
 
-fn ensure_gather(t: &mut t) -> Result<(), String> {
+fn ensure_gather(t: &mut PathTracer) -> Result<(), String> {
     if t.gather.is_none() {
         t.gather = Some(lisp_kernel::gather_kernel(&t.lease, &t.flow_pipelines)?);
     }
@@ -797,20 +796,20 @@ fn ensure_gather(t: &mut t) -> Result<(), String> {
 }
 
 /// What a failed device build releases.
-struct device_owned {
+struct DeviceOwned {
     owned: Vec<Buffer>,
     structure: Option<Accel>,
     commands: Option<Commands>,
 }
 
-fn local(t: &t, o: &mut device_owned, label: &str, size: i64) -> Result<Buffer, String> {
+fn local(t: &PathTracer, o: &mut DeviceOwned, label: &str, size: i64) -> Result<Buffer, String> {
     let value = frame_data::buffer(Memory::DeviceLocal, vec![BufferUsage::Storage], &t.device, label, size)?;
     o.owned.push(value.clone());
     Ok(value)
 }
 
 /// One geometry's gather passes into the tracer's per-corner buffers.
-struct gather_inputs {
+struct GatherInputs {
     positions: Buffer,
     normals: Buffer,
     colors: Option<Buffer>,
@@ -818,7 +817,7 @@ struct gather_inputs {
     vertices: i64,
 }
 
-fn encode_gather(t: &t, commands: &Commands, g: &gather_inputs, vix: &Buffer, into_positions: &Buffer, into_normals: &Buffer, into_colors: &Buffer) -> Result<(), String> {
+fn encode_gather(t: &PathTracer, commands: &Commands, g: &GatherInputs, vix: &Buffer, into_positions: &Buffer, into_normals: &Buffer, into_colors: &Buffer) -> Result<(), String> {
     let gather = t.gather.as_ref().expect("gather kernel");
     let one = |src: &Buffer, into: &Buffer| lisp_kernel::gather_dispatch(gather, commands, &t.cell, vix, g.corners, src, g.vertices, into);
     one(&g.positions, into_positions)?;
@@ -839,7 +838,7 @@ fn corner_triangles(soup: &Buffer, corners: i64) -> AccelDescriptor {
 /// ordered on the queue before every later frame: `None`, nothing to install. Anything else builds a
 /// refittable structure over fresh buffers, installed when done.
 /// ponytail: the structure is not compacted (a refit needs the uncompacted one).
-fn device_async(t: &mut t, m: &mesh, d: &mesh_data::device) -> Result<Option<mesh_build>, String> {
+fn device_async(t: &mut PathTracer, m: &Mesh, d: &mesh_data::Device) -> Result<Option<MeshBuild>, String> {
     let (positions, normals) = match renderer::renderer::gpu_positions(&t.lease, &d.key) {
         Some((positions, Some(normals), count)) if count == d.vertex_count => (positions, normals),
         _ => return Err("path tracer device mesh is stale or carries no normals".to_string()),
@@ -852,8 +851,8 @@ fn device_async(t: &mut t, m: &mesh, d: &mesh_data::device) -> Result<Option<mes
         (true, _) => return Err("path tracer device mesh's colours are stale".to_string()),
     };
     let corners = d.index_count;
-    let material_key = material_bytes(&m.mesh_materials);
-    let g = gather_inputs { positions, normals, colors, corners, vertices: d.vertex_count };
+    let material_key = material_bytes(&m.materials);
+    let g = GatherInputs { positions, normals, colors, corners, vertices: d.vertex_count };
     let reusable = match &t.gpu.device {
         Some(installed) => {
             !d.corners.is_empty()
@@ -894,7 +893,7 @@ fn device_async(t: &mut t, m: &mesh, d: &mesh_data::device) -> Result<Option<mes
             }
         };
     }
-    let mut o = device_owned { owned: vec![], structure: None, commands: None };
+    let mut o = DeviceOwned { owned: vec![], structure: None, commands: None };
     let built = device_build(t, &mut o, m, d, &g, indices, &material_key);
     match built {
         Ok(build) => Ok(Some(build)),
@@ -913,7 +912,7 @@ fn device_async(t: &mut t, m: &mesh, d: &mesh_data::device) -> Result<Option<mes
     }
 }
 
-fn device_build(t: &t, o: &mut device_owned, m: &mesh, d: &mesh_data::device, g: &gather_inputs, indices: Option<(Buffer, i64)>, material_key: &[u8]) -> Result<mesh_build, String> {
+fn device_build(t: &PathTracer, o: &mut DeviceOwned, m: &Mesh, d: &mesh_data::Device, g: &GatherInputs, indices: Option<(Buffer, i64)>, material_key: &[u8]) -> Result<MeshBuild, String> {
     let corners = g.corners;
     let held = indices.and_then(|(buffer, n)| if n == corners { Some(buffer) } else { None });
     let vix = match &held {
@@ -936,7 +935,7 @@ fn device_build(t: &t, o: &mut device_owned, m: &mesh, d: &mesh_data::device, g:
     let soup_colors = local(t, o, "pathtracer-colors", if d.colored { 12 * corners } else { 12 })?;
     let materials = shared(&t.device, "pathtracer-materials", material_key)?;
     o.owned.push(materials.clone());
-    let tables = upload_tables(material_key, &t.device, &mesh_data::t { mesh_ids: vec![0; 4], ..m.clone() })?;
+    let tables = upload_tables(material_key, &t.device, &mesh_data::MeshData { ids: vec![0; 4], ..m.clone() })?;
     o.owned.extend(table_buffers(&tables));
     let blas = b::create_accel(&t.device, corner_triangles(&soup_positions, corners), true).map_err(gpu_err)?;
     o.structure = Some(blas.clone());
@@ -951,9 +950,9 @@ fn device_build(t: &t, o: &mut device_owned, m: &mesh, d: &mesh_data::device, g:
     b::end_accel(&encoder).map_err(gpu_err)?;
     let receipt = b::commit(&c).map_err(gpu_err)?;
     o.commands = None;
-    Ok(mesh_build {
-        gpu: gpu_mesh {
-            device: Some(device_gpu {
+    Ok(MeshBuild {
+        gpu: GpuMesh {
+            device: Some(DeviceGpu {
                 corners: d.corners.clone(),
                 vertex_count: d.vertex_count,
                 material_key: material_key.to_vec(),
@@ -986,7 +985,7 @@ fn device_build(t: &t, o: &mut device_owned, m: &mesh, d: &mesh_data::device, g:
         size_buffer: None,
         uncompacted: None,
         uncompacted_scene: vec![],
-        stage: stage::Compacting(receipt),
+        stage: Stage::Compacting(receipt),
         instance_count: 0,
         instances_built: false,
         proto_scratch: None,
@@ -994,7 +993,7 @@ fn device_build(t: &t, o: &mut device_owned, m: &mesh, d: &mesh_data::device, g:
 }
 
 /// The build a queued mesh starts: `None` for a device refit, already in place.
-fn build_async(t: &mut t, m: &mesh) -> Result<Option<mesh_build>, String> {
+fn build_async(t: &mut PathTracer, m: &Mesh) -> Result<Option<MeshBuild>, String> {
     match &m.device {
         Some(d) => device_async(t, m, d),
         None => upload_mesh_async(Some(&t.gpu), &t.device, &t.queue, m).map(Some),
@@ -1002,14 +1001,14 @@ fn build_async(t: &mut t, m: &mesh) -> Result<Option<mesh_build>, String> {
 }
 
 /// A build or move can start only while no frame band holds a queue slot.
-fn start_queued(t: &mut t) -> Result<(), String> {
+fn start_queued(t: &mut PathTracer) -> Result<(), String> {
     match t.queued_mesh.take() {
-        Some(queued::Full(m)) => {
+        Some(Queued::Full(m)) => {
             let next = build_async(t, &m)?;
             t.building = next;
             Ok(())
         }
-        Some(queued::Move(moved)) => {
+        Some(Queued::Move(moved)) => {
             let next = move_async(t, &moved)?;
             t.building = Some(next);
             Ok(())
@@ -1018,15 +1017,15 @@ fn start_queued(t: &mut t) -> Result<(), String> {
     }
 }
 
-fn poll_build(t: &mut t) -> Result<(), String> {
+fn poll_build(t: &mut PathTracer) -> Result<(), String> {
     let Some(mut build) = t.building.take() else {
         return if t.pending.is_empty() { start_queued(t) } else { Ok(()) };
     };
     let step = match build.stage {
-        stage::Ready => Ok(true),
-        stage::Building(receipt) | stage::Compacting(receipt) => match status(t, receipt) {
+        Stage::Ready => Ok(true),
+        Stage::Building(receipt) | Stage::Compacting(receipt) => match status(t, receipt) {
             Ok(Status::Pending) => Ok(false),
-            Ok(Status::Completed) => advance_build(&t.device, &t.queue, &mut build).map(|()| build.stage == stage::Ready),
+            Ok(Status::Completed) => advance_build(&t.device, &t.queue, &mut build).map(|()| build.stage == Stage::Ready),
             Err(e) => Err(e),
         },
     };
@@ -1042,7 +1041,7 @@ fn poll_build(t: &mut t) -> Result<(), String> {
         Ok(true) => {
             let built = finish_build(&t.device, &t.queue, build);
             match t.queued_mesh.take() {
-                Some(queued::Full(latest)) => {
+                Some(Queued::Full(latest)) => {
                     // Installed, not dropped: a mesh that changes every frame always has a newer one queued.
                     let gpu = built?;
                     install_gpu(t, gpu);
@@ -1050,7 +1049,7 @@ fn poll_build(t: &mut t) -> Result<(), String> {
                     t.building = next;
                     Ok(())
                 }
-                Some(queued::Move(moved)) => {
+                Some(Queued::Move(moved)) => {
                     // The move places the BLASes just built, so they install first.
                     let gpu = built?;
                     install_gpu(t, gpu);
@@ -1071,7 +1070,7 @@ fn poll_build(t: &mut t) -> Result<(), String> {
 /// Publishes the in-flight frame and waits for queued geometry; `render` then `flush` is a synchronous
 /// render. `render` itself never blocks: while the GPU is still busy with the previous frame it returns
 /// without submitting, so the caller's loop keeps its own frame rate.
-pub fn flush(t: &mut t) -> Result<(), String> {
+pub fn flush(t: &mut PathTracer) -> Result<(), String> {
     loop {
         if t.pending.is_empty() {
             drain(t);
@@ -1085,8 +1084,8 @@ pub fn flush(t: &mut t) -> Result<(), String> {
     loop {
         let Some(build) = &t.building else { return Ok(()) };
         let waited = match build.stage {
-            stage::Ready => Ok(()),
-            stage::Building(receipt) | stage::Compacting(receipt) => wait(&t.queue, receipt),
+            Stage::Ready => Ok(()),
+            Stage::Building(receipt) | Stage::Compacting(receipt) => wait(&t.queue, receipt),
         };
         match waited {
             Ok(()) => poll_build(t)?,
@@ -1102,7 +1101,7 @@ pub fn flush(t: &mut t) -> Result<(), String> {
 
 /// Match a new viewport: waits for the in-flight frame, reallocates the film, and restarts accumulation.
 /// Scene geometry is kept. No-op at the same size.
-pub fn resize(t: &mut t, width: i64, height: i64) -> Result<(), String> {
+pub fn resize(t: &mut PathTracer, width: i64, height: i64) -> Result<(), String> {
     if width <= 0 || height <= 0 {
         Err("path tracer size must be positive".to_string())
     } else if width == t.width && height == t.height {
@@ -1127,7 +1126,7 @@ pub fn resize(t: &mut t, width: i64, height: i64) -> Result<(), String> {
     }
 }
 
-fn poll(t: &mut t) -> Result<bool, String> {
+fn poll(t: &mut PathTracer) -> Result<bool, String> {
     loop {
         if t.pending.is_empty() {
             drain(t);
@@ -1151,7 +1150,7 @@ fn poll(t: &mut t) -> Result<bool, String> {
 /// The tracer is done sampling for now: frees the working film, keeping what `image` shows. The next
 /// `render` allocates it again and accumulates from no samples, its preview without history for one frame. A
 /// frame still in flight leaves the film in place; call again later.
-pub fn release_film(t: &mut t) -> Result<(), String> {
+pub fn release_film(t: &mut PathTracer) -> Result<(), String> {
     let Some(film_) = t.film.clone() else { return Ok(()) };
     let free = poll(t)?;
     if !free {
@@ -1165,7 +1164,7 @@ pub fn release_film(t: &mut t) -> Result<(), String> {
     Ok(())
 }
 
-fn restore_film(t: &mut t) -> Result<(), String> {
+fn restore_film(t: &mut PathTracer) -> Result<(), String> {
     if t.film.is_some() {
         return Ok(());
     }
@@ -1179,12 +1178,12 @@ fn restore_film(t: &mut t) -> Result<(), String> {
 }
 
 /// The kernels' scene facts: what the static stage folds.
-fn lisp_facts(t: &t) -> lisp_kernel::facts {
+fn lisp_facts(t: &PathTracer) -> lisp_kernel::Facts {
     let map = |w: &dyn Fn(&rays::world::map) -> i64| match &t.world {
         Some(baked) => w(&baked.camera),
         None => 1,
     };
-    lisp_kernel::facts {
+    lisp_kernel::Facts {
         spp: t.spp,
         bounces: t.bounces,
         round_samples: t.round_samples,
@@ -1218,12 +1217,12 @@ fn lisp_facts(t: &t) -> lisp_kernel::facts {
 
 /// ponytail: four specializations kept, the oldest closed once no frame reads it; an LRU would keep the
 /// shapes an editor toggles between.
-fn lisp_kernels(t: &mut t, facts: &lisp_kernel::facts) -> Result<Rc<lisp_kernel::T>, String> {
+fn lisp_kernels(t: &mut PathTracer, facts: &lisp_kernel::Facts) -> Result<Rc<lisp_kernel::T>, String> {
     if let Some((_, k)) = t.kernels.iter().find(|(f, _)| f == facts) {
         return Ok(k.clone());
     }
     let kernels = lisp_kernel::compile(facts)?;
-    let keep: Vec<(lisp_kernel::facts, Rc<lisp_kernel::T>)> = t.kernels.iter().take(3).cloned().collect();
+    let keep: Vec<(lisp_kernel::Facts, Rc<lisp_kernel::T>)> = t.kernels.iter().take(3).cloned().collect();
     let old: Vec<Rc<lisp_kernel::T>> = t.kernels.iter().map(|(_, k)| k.clone()).collect();
     for k in old {
         if !keep.iter().any(|(_, kept)| Rc::ptr_eq(kept, &k)) {
@@ -1237,13 +1236,13 @@ fn lisp_kernels(t: &mut t, facts: &lisp_kernel::facts) -> Result<Rc<lisp_kernel:
 }
 
 /// The Lisp kernels' uniforms for a frame whose band covers pixels `[lo, hi)`.
-fn lisp_words(t: &t, camera: &camera, fov: f64, lo: i64, hi: i64) -> Vec<(&'static str, Vec<f64>)> {
+fn lisp_words(t: &PathTracer, camera: &Camera, fov: f64, lo: i64, hi: i64) -> Vec<(&'static str, Vec<f64>)> {
     let v3 = |v: vec3::T| vec![v.x, v.y, v.z];
-    let rgb = |c: &linear_color| vec![c.r, c.g, c.b];
+    let rgb = |c: &LinearColor| vec![c.r, c.g, c.b];
     let zero = vec![0., 0., 0.];
     let aspect = t.width as f64 / t.height as f64;
     let (forward, right, up) = frame_data::axes(camera);
-    let previous: Option<(camera, f64)> = t.history_camera.as_ref().and_then(|p| camera_fov(p).ok().map(|f| (p.clone(), f)));
+    let previous: Option<(Camera, f64)> = t.history_camera.as_ref().and_then(|p| camera_fov(p).ok().map(|f| (p.clone(), f)));
     let axis = |k: &dyn Fn((vec3::T, vec3::T, vec3::T)) -> vec3::T| match &previous {
         Some((p, _)) => v3(k(frame_data::axes(p))),
         None => zero.clone(),
@@ -1319,7 +1318,7 @@ fn word_lookup(values: &[(&'static str, Vec<f64>)], name: &str) -> Vec<f64> {
 }
 
 /// The buffer and element count behind each of the Lisp kernels' tables.
-fn lisp_table(t: &t, tables: &crate::mesh_build::tables, geo: &Buffer, pgeo: &Buffer, pcol: &Buffer, name: &str) -> (Buffer, i64) {
+fn lisp_table(t: &PathTracer, tables: &crate::mesh_build::Tables, geo: &Buffer, pgeo: &Buffer, pcol: &Buffer, name: &str) -> (Buffer, i64) {
     let n = t.width * t.height;
     let (maps, cdf) = match &t.world {
         Some(baked) => {
@@ -1348,7 +1347,7 @@ fn lisp_table(t: &t, tables: &crate::mesh_build::tables, geo: &Buffer, pgeo: &Bu
 }
 
 /// Flow's RGBA8 conversion of the resolved film into output `slot`.
-fn encode_rgba(t: &t, commands: &Commands, slot: usize) -> Result<(), String> {
+fn encode_rgba(t: &PathTracer, commands: &Commands, slot: usize) -> Result<(), String> {
     let f = live_film(t);
     flow_gpu::image_sink::encode(&t.convert, commands, &f.resolved, t.width, t.height, &f.outputs[slot]).map_err(|d| rays_diagnostic::to_string(&d))
 }
@@ -1356,7 +1355,7 @@ fn encode_rgba(t: &t, commands: &Commands, slot: usize) -> Result<(), String> {
 /// The Lisp kernels' frame (pathtrace.rays): a preview traces its primary hits, then one centre sample
 /// reprojected onto the history, then the 3x3 resolve; an accumulation band adds its pixels' samples to the
 /// film (the first band of frame zero also records the primary hits), and the last band resolves it.
-fn encode_lisp(t: &t, kernels: &lisp_kernel::T, commands: &Commands, camera: &camera, fov: f64, row_offset: i64, rows: i64, last: bool, slot: usize, previous: usize, next: usize) -> Result<(), String> {
+fn encode_lisp(t: &PathTracer, kernels: &lisp_kernel::T, commands: &Commands, camera: &Camera, fov: f64, row_offset: i64, rows: i64, last: bool, slot: usize, previous: usize, next: usize) -> Result<(), String> {
     let tables = &t.gpu.tables;
     let scene_ = flow_gpu::run::Scene {
         accel: t.gpu.structure.clone(),
@@ -1427,7 +1426,7 @@ fn encode_lisp(t: &t, kernels: &lisp_kernel::T, commands: &Commands, camera: &ca
 /// Accepts a perspective camera with no lens offset, forced aspect, or vertical flip. Other projections
 /// return an error. A frame whose camera differs from the previous call, or the first frame over newly
 /// installed geometry, lights, or World, is an interactive preview.
-pub fn render(t: &mut t, camera: &camera) -> Result<(), String> {
+pub fn render(t: &mut PathTracer, camera: &Camera) -> Result<(), String> {
     let fov = camera_fov(camera)?;
     restore_film(t)?;
     let was_moving = t.moving;
@@ -1474,7 +1473,7 @@ pub fn render(t: &mut t, camera: &camera) -> Result<(), String> {
                 return Err(e);
             }
             Ok(receipt) => {
-                let p = pending { receipt, slot, stale: false, preview: t.moving, camera: camera.clone(), history_epoch: t.history_epoch, last };
+                let p = Pending { receipt, slot, stale: false, preview: t.moving, camera: camera.clone(), history_epoch: t.history_epoch, last };
                 t.pending.push(p);
             }
         }
@@ -1494,7 +1493,7 @@ pub fn render(t: &mut t, camera: &camera) -> Result<(), String> {
 }
 
 /// Synchronously builds and swaps scene geometry, then restarts accumulation.
-pub fn replace_mesh(t: &mut t, m: &mesh) -> Result<(), String> {
+pub fn replace_mesh(t: &mut PathTracer, m: &Mesh) -> Result<(), String> {
     for p in t.pending.iter_mut() {
         p.stale = true;
     }
@@ -1509,7 +1508,7 @@ pub fn replace_mesh(t: &mut t, m: &mesh) -> Result<(), String> {
 }
 
 #[derive(Clone, Copy)]
-enum slot_of {
+enum SlotOf {
     Lights,
     World,
     Cdf,
@@ -1517,15 +1516,15 @@ enum slot_of {
 
 /// Waits for the in-flight frame (it may read the buffer being replaced), swaps the buffer for one of
 /// `bytes`, and restarts accumulation.
-fn swap_buffer(t: &mut t, label: &str, bytes: &[u8], which: slot_of) -> Result<(), String> {
+fn swap_buffer(t: &mut PathTracer, label: &str, bytes: &[u8], which: SlotOf) -> Result<(), String> {
     for p in t.pending.iter_mut() {
         p.stale = true;
     }
     let next = shared(&t.device, label, bytes)?;
     let current = match which {
-        slot_of::Lights => std::mem::replace(&mut t.lights, next),
-        slot_of::World => std::mem::replace(&mut t.world_buffer, next),
-        slot_of::Cdf => std::mem::replace(&mut t.cdf_buffer, next),
+        SlotOf::Lights => std::mem::replace(&mut t.lights, next),
+        SlotOf::World => std::mem::replace(&mut t.world_buffer, next),
+        SlotOf::Cdf => std::mem::replace(&mut t.cdf_buffer, next),
     };
     retire(t, Box::new(move || {
         let _ = b::destroy_buffer(&current);
@@ -1534,20 +1533,20 @@ fn swap_buffer(t: &mut t, label: &str, bytes: &[u8], which: slot_of) -> Result<(
     Ok(())
 }
 
-fn rebuild_lights(t: &mut t) -> Result<(), String> {
+fn rebuild_lights(t: &mut PathTracer) -> Result<(), String> {
     let world_lights: Vec<rays::world::light> = match &t.world {
         Some(baked) => baked.lights.clone(),
         None => vec![],
     };
     let bytes = light_bytes(&world_lights, &t.scene_lights);
-    swap_buffer(t, "pathtracer-lights", &bytes, slot_of::Lights)?;
+    swap_buffer(t, "pathtracer-lights", &bytes, SlotOf::Lights)?;
     t.light_count = (t.scene_lights.len() + world_lights.len()) as i64;
     Ok(())
 }
 
 /// Replaces the scene's rect lights and restarts accumulation. Rect only: approximate a point or spot light
 /// with a small rect facing its target.
-pub fn set_lights(t: &mut t, lights: &[light]) -> Result<(), String> {
+pub fn set_lights(t: &mut PathTracer, lights: &[Light]) -> Result<(), String> {
     t.scene_lights = lights.to_vec();
     rebuild_lights(t)
 }
@@ -1567,7 +1566,7 @@ fn same_world(a: &rays::world::baked, b_: &rays::world::baked) -> bool {
 /// Light and frame the scene with a baked World instead of the procedural `environment` (whose sky, ground
 /// and panels are then ignored); `None` restores it. Uploads the maps and CDF only when the value changes,
 /// then restarts accumulation. The effective exposure is `2 ** baked.exposure` times `create`'s `exposure`.
-pub fn set_world(t: &mut t, baked: Option<&rays::world::baked>) -> Result<(), String> {
+pub fn set_world(t: &mut PathTracer, baked: Option<&rays::world::baked>) -> Result<(), String> {
     match (&t.world, baked) {
         (Some(current), Some(next)) if same_world(current, next) => Ok(()),
         (None, None) => Ok(()),
@@ -1576,8 +1575,8 @@ pub fn set_world(t: &mut t, baked: Option<&rays::world::baked>) -> Result<(), St
                 None => (vec![0u8; 16], vec![0u8; 16]),
                 Some(baked) => world_bytes(baked)?,
             };
-            swap_buffer(t, "pathtracer-world", &maps, slot_of::World)?;
-            swap_buffer(t, "pathtracer-cdf", &cdf, slot_of::Cdf)?;
+            swap_buffer(t, "pathtracer-world", &maps, SlotOf::World)?;
+            swap_buffer(t, "pathtracer-cdf", &cdf, SlotOf::Cdf)?;
             t.world = baked.cloned();
             rebuild_lights(t)
         }
@@ -1589,8 +1588,8 @@ pub fn set_world(t: &mut t, baked: Option<&rays::world::baked>) -> Result<(), St
 /// one queued mesh are retained. `flush` waits for the latest replacement. The queue holds three command
 /// buffers: a frame in flight may use all of them, so a build or move arriving then waits for the next
 /// `render`.
-pub fn queue_mesh(t: &mut t, m: &mesh) -> Result<(), String> {
-    t.queued_mesh = Some(queued::Full(m.clone()));
+pub fn queue_mesh(t: &mut PathTracer, m: &Mesh) -> Result<(), String> {
+    t.queued_mesh = Some(Queued::Full(m.clone()));
     t.latest = m.clone();
     if t.building.is_none() && t.pending.is_empty() { start_queued(t) } else { Ok(()) }
 }
@@ -1600,12 +1599,12 @@ pub fn queue_mesh(t: &mut t, m: &mesh) -> Result<(), String> {
 /// geometry: only the instance records and the instance structure are rebuilt, over the existing primitive
 /// structures. Like `queue_mesh` it does not wait: the moved scene shows once its build completes, then
 /// accumulation restarts; a newer `move` supersedes a pending one.
-pub fn r#move(t: &mut t, matrices: &[rays_math::mat4::T]) -> Result<(), String> {
+pub fn r#move(t: &mut PathTracer, matrices: &[rays_math::mat4::T]) -> Result<(), String> {
     let moved = moved_mesh(&t.latest, matrices)?;
     if t.building.is_some() || !t.pending.is_empty() {
         t.queued_mesh = Some(match &t.queued_mesh {
-            Some(queued::Full(_)) => queued::Full(moved.clone()),
-            _ => queued::Move(moved.clone()),
+            Some(Queued::Full(_)) => Queued::Full(moved.clone()),
+            _ => Queued::Move(moved.clone()),
         });
     } else {
         let build = move_async(t, &moved)?;
@@ -1615,7 +1614,7 @@ pub fn r#move(t: &mut t, matrices: &[rays_math::mat4::T]) -> Result<(), String> 
     Ok(())
 }
 
-pub fn destroy(t: &mut t) {
+pub fn destroy(t: &mut PathTracer) {
     let trace = |step: &str| {
         if std::env::var_os("RAYS_PT_HANDLES").is_some() {
             eprintln!("pt destroy {step}: {} live handles", ogpu::impl_::live_handles().unwrap_or(-1));
@@ -1643,11 +1642,10 @@ pub fn destroy(t: &mut t) {
     destroy_gpu(&t.gpu);
     trace("geometry");
     for value in [&t.panels, &t.lights, &t.world_buffer, &t.cdf_buffer, &t.cell] {
-        if let Err(e) = b::destroy_buffer(value) {
-            if std::env::var_os("RAYS_PT_HANDLES").is_some() {
+        if let Err(e) = b::destroy_buffer(value)
+            && std::env::var_os("RAYS_PT_HANDLES").is_some() {
                 eprintln!("pt destroy buffer: {}", ogpu::error::to_string(&e));
             }
-        }
     }
     if let Some(f) = &t.film {
         destroy_film(None, f);
@@ -1662,7 +1660,7 @@ pub fn destroy(t: &mut t) {
 
 /// Builds the primitive acceleration structure, compiles the kernels, and allocates accumulation and output
 /// storage. Fails with a typed message when no ray-tracing device is available.
-pub fn create(o: &create_options, width: i64, height: i64, scene_: &scene) -> Result<t, String> {
+pub fn create(o: &CreateOptions, width: i64, height: i64, scene_: &Scene) -> Result<PathTracer, String> {
     let mut tracer = create_tracer(o, width, height, scene_)?;
     if tracer.latest.device.is_none() {
         Ok(tracer)
@@ -1678,31 +1676,31 @@ pub fn create(o: &create_options, width: i64, height: i64, scene_: &scene) -> Re
     }
 }
 
-pub mod Private {
+pub mod private {
     use super::*;
     use flow_syntax::value::Value;
 
-    pub use crate::lisp_kernel::cache_dir as kernel_cache;
+    pub use crate::lisp_kernel::CACHE_DIR as kernel_cache;
     pub use crate::lisp_kernel::forget_memory_cache;
 
     /// What the tracer's device has allocated, for its tests.
-    pub fn device_bytes(t: &t) -> i64 {
+    pub fn device_bytes(t: &PathTracer) -> i64 {
         b::allocated_size(&t.device)
     }
 
     /// A moving instance blurs over the shutter; otherwise it is built at the shutter midpoint.
-    pub fn motion_blurs(t: &t) -> bool {
+    pub fn motion_blurs(t: &PathTracer) -> bool {
         b::capabilities(&t.device).ray_tracing_motion
     }
 
     /// The scene's bottom-level structures, built and then compacted, in bytes.
-    pub fn scene_compaction(t: &t) -> (i64, i64) {
+    pub fn scene_compaction(t: &PathTracer) -> (i64, i64) {
         (t.gpu.scene_unpacked, t.gpu.scene_blas.iter().fold(0, |total, blas| total + b::accel_sizes(blas).structure_size))
     }
 
     /// The CPU walker's accumulation frame of the current scene (the device kernel's oracle): `accum` plus
     /// this frame's samples, a vec4 per pixel in row order. Scene traces go to the `Flow.Ray_host` of scene 1.
-    pub fn cpu_trace(t: &mut t, camera: &camera, accum: &[f64]) -> Result<Vec<f64>, String> {
+    pub fn cpu_trace(t: &mut PathTracer, camera: &Camera, accum: &[f64]) -> Result<Vec<f64>, String> {
         let fov = camera_fov(camera)?;
         restore_film(t)?;
         let facts = lisp_facts(t);
@@ -1746,7 +1744,7 @@ pub mod Private {
 
     /// A Lisp kernel of the current scene shape ("trace", "preview", ...): its pipeline's thread limit and
     /// its MSL.
-    pub fn lisp_kernel(t: &mut t, name: &str) -> Result<(i64, String), String> {
+    pub fn lisp_kernel(t: &mut PathTracer, name: &str) -> Result<(i64, String), String> {
         let facts = lisp_facts(t);
         let kernels = lisp_kernels(t, &facts)?;
         let threads = lisp_kernel::max_total_threads(&kernels, &t.lease, &t.flow_pipelines, name)?;
@@ -1755,12 +1753,12 @@ pub mod Private {
     }
 
     /// Times the film restarted: each mesh installed is one.
-    pub fn edits(t: &t) -> i64 {
+    pub fn edits(t: &PathTracer) -> i64 {
         t.history_epoch
     }
 
     /// Device mesh updates that refit the installed structure in place (same topology).
-    pub fn refits(t: &t) -> i64 {
+    pub fn refits(t: &PathTracer) -> i64 {
         t.refits
     }
 

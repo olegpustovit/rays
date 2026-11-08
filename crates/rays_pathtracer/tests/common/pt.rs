@@ -11,26 +11,26 @@ pub fn get<T>(result: Result<T, String>) -> T {
     result.unwrap_or_else(|e| panic!("{e}"))
 }
 
-pub fn pixels(tracer: &p::t) -> Vec<u8> {
+pub fn pixels(tracer: &p::PathTracer) -> Vec<u8> {
     get(rays::image::pixels(&p::image(tracer)))
 }
 
-pub fn frame(tracer: &mut p::t, camera: &rays::camera::t) {
+pub fn frame(tracer: &mut p::PathTracer, camera: &rays::camera::t) {
     get(p::render(tracer, camera));
     get(p::flush(tracer));
 }
 
-pub fn frames(tracer: &mut p::t, camera: &rays::camera::t, n: i64) {
+pub fn frames(tracer: &mut p::PathTracer, camera: &rays::camera::t, n: i64) {
     for _ in 0..n {
         frame(tracer, camera);
     }
 }
 
-pub fn options(spp: i64) -> p::create_options {
-    p::create_options { spp: Some(spp), ..Default::default() }
+pub fn options(spp: i64) -> p::CreateOptions {
+    p::CreateOptions { spp: Some(spp), ..Default::default() }
 }
 
-pub fn material(albedo: Linear::T) -> p::material {
+pub fn material(albedo: Linear::T) -> p::Material {
     p::material(None, None, None, None, albedo)
 }
 

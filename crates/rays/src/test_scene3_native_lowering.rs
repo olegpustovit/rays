@@ -45,7 +45,7 @@ fn scene3_lowering_geometry_uniforms_texture_mips_world_depth_stable_pack() {
     let context = Layer::create_cache_context();
     Layer::with_cache_context(&context, &mut || {
         let cam = ortho(vec3::create(0., 0., 2.));
-        let prepare = |width: i64, height: i64, scene3: d3::t| -> Rc<se::prepared_scene3> {
+        let prepare = |width: i64, height: i64, scene3: d3::t| -> Rc<se::PreparedScene3> {
             let staged = Layer::stage_native(width, height, &[scene::view3d(None, &cam, scene3)]).expect("native Scene3 staging");
             assert_eq!(staged.scene3.len(), 1, "native Scene3 staging cardinality");
             staged.scene3[0].clone()
@@ -137,7 +137,7 @@ fn scene3_lowering_geometry_uniforms_texture_mips_world_depth_stable_pack() {
         let textured_stage = Layer::stage_native(16, 16, &[scene::view3d(None, &cam, textured)]).expect("stage");
         let textured_entry = &textured_stage.scene3[0].entries[0];
         match (&textured_entry.family, &textured_entry.texture) {
-            (se::pipeline_family::Scene3_textured, Some(value)) if value.levels.len() == 2 && value.levels[0].bytes.borrow().len() == 16 => {}
+            (se::PipelineFamily::Scene3Textured, Some(value)) if value.levels.len() == 2 && value.levels[0].bytes.borrow().len() == 16 => {}
             _ => panic!("native texture mip/sampler staging"),
         }
         let light_ = light::directional(None, None, vec3::create(0., 0., -1.)).expect("light");
@@ -283,7 +283,7 @@ fn resident_streams() {
             let node = d3::mesh(None, Some(d3::textured(None, tex.clone())), None, None, None, source);
             let staged = Layer::stage_native(16, 16, &[scene::view3d(None, &cam, scene_of(vec![node]))]).expect("stage");
             let entry = &staged.scene3[0].entries[0];
-            assert!(matches!(entry.draw.mesh.key, se::mesh_key::Host(_)));
+            assert!(matches!(entry.draw.mesh.key, se::MeshKey::Host(_)));
             assert!(!entry.draw.mesh.vertices.borrow().is_empty());
         }
         assert_eq!(made.get(), 2);

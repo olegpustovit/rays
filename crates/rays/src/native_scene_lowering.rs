@@ -2,7 +2,7 @@
 //! lowering each layer into a submission and stepping it.
 use crate::idlist::{self, IdList, Item};
 use crate::scene::{self, Layer};
-use renderer::renderer::{self as rr, Native};
+use renderer::renderer::{self as rr, native};
 use renderer::scene_execution as se;
 use scene_command::display_list;
 use std::cell::RefCell;
@@ -12,9 +12,9 @@ use std::rc::Rc;
 pub enum error {
     Stage(String),
     Resource(ogpu::error::Error),
-    Begin(rr::error),
-    Lower(rr::error),
-    Step(rr::error),
+    Begin(ogpu::error::Error),
+    Lower(ogpu::error::Error),
+    Step(ogpu::error::Error),
 }
 
 pub fn pp_error(formatter: &mut dyn std::fmt::Write, e: &error) {
@@ -34,7 +34,7 @@ pub fn error_to_string(e: &error) -> String {
     s
 }
 
-fn draw_of_scene3_entry(entry: &se::scene3_entry) -> rr::draw {
+fn draw_of_scene3_entry(entry: &se::Scene3Entry) -> rr::Draw {
     rr::prepared_draw(
         entry.family,
         Some(entry.blend),
@@ -48,8 +48,8 @@ fn draw_of_scene3_entry(entry: &se::scene3_entry) -> rr::draw {
 
 struct retained_draws {
     /// a frame with several 3D layers caches each (held so the cached draws keep their layer alive)
-    _layer: Rc<se::prepared_scene3>,
-    draws: Vec<rr::draw>,
+    _layer: Rc<se::PreparedScene3>,
+    draws: Vec<rr::Draw>,
 }
 
 const RETAINED_DRAW_CAPACITY: i64 = 16;
@@ -66,7 +66,7 @@ pub fn create_cache_context() -> cache_context {
     cache_context(Rc::new(RefCell::new(idlist::create(
         lru::cache("rays.retained_draws"),
         RETAINED_DRAW_CAPACITY,
-        Box::new(|a, b| match (a.downcast_ref::<se::prepared_scene3>(), b.downcast_ref::<se::prepared_scene3>()) {
+        Box::new(|a, b| match (a.downcast_ref::<se::PreparedScene3>(), b.downcast_ref::<se::PreparedScene3>()) {
             (Some(x), Some(y)) => std::ptr::eq(x, y),
             _ => false,
         }),
@@ -94,11 +94,11 @@ fn current() -> Option<cache_context> {
 }
 
 /// A layer whose borrowed stream went is never drawn again; it does not wait for eviction.
-fn sweep_retained(owner: &se::gpu_vertices_owner) {
+fn sweep_retained(owner: &se::GpuVerticesOwner) {
     if let Some(context) = current() {
         let mut stale: Vec<Item> = Vec::new();
         idlist::iter(&context.0.borrow(), &mut |layer, _| {
-            if let Some(prepared) = layer.downcast_ref::<se::prepared_scene3>() {
+            if let Some(prepared) = layer.downcast_ref::<se::PreparedScene3>() {
                 if se::borrows_unregistered(owner, prepared) {
                     stale.push(layer.clone());
                 }
@@ -110,7 +110,7 @@ fn sweep_retained(owner: &se::gpu_vertices_owner) {
     }
 }
 
-pub fn draws_of_prepared(staged: &Layer::staged_native, prepared: &Rc<se::prepared_scene3>) -> Vec<rr::draw> {
+pub fn draws_of_prepared(staged: &Layer::staged_native, prepared: &Rc<se::PreparedScene3>) -> Vec<rr::Draw> {
     let direct = || prepared.entries.iter().map(draw_of_scene3_entry).collect::<Vec<_>>();
     if staged.retained.is_none() {
         return direct();
@@ -129,9 +129,9 @@ pub fn draws_of_prepared(staged: &Layer::staged_native, prepared: &Rc<se::prepar
     draws
 }
 
-fn validate_images(resources: &[(i64, rr::resource)]) -> Result<(), ogpu::error::Error> {
+fn validate_images(resources: &[(i64, rr::Resource)]) -> Result<(), ogpu::error::Error> {
     for (_, r) in resources {
-        if let rr::resource::Image(image) = r {
+        if let rr::Resource::Image(image) = r {
             runtime_resources::Image::gpu_snapshot(image)?;
         }
     }
@@ -163,38 +163,38 @@ impl Drop for Release {
     }
 }
 
-struct Cancel(Option<rr::submission>);
+struct Cancel(Option<rr::Submission>);
 
 impl Drop for Cancel {
     fn drop(&mut self) {
         if let Some(submission) = self.0.take() {
-            Native::cancel(&submission);
+            native::cancel(&submission);
         }
     }
 }
 
 enum outcome {
     Replayed,
-    Prepared(rr::submission, Option<(String, i64)>, (f64, f64, f64, f64), Vec<rr::batch>),
+    Prepared(rr::Submission, Option<(String, i64)>, (f64, f64, f64, f64), Vec<rr::Batch>),
 }
 
 fn lower_all(
-    execution: &rr::t,
+    execution: &rr::Renderer,
     density: i64,
     staged: &Layer::staged_native,
-    submission: &rr::submission,
-) -> Result<Vec<rr::batch>, error> {
+    submission: &rr::Submission,
+) -> Result<Vec<rr::Batch>, error> {
     let mut batches = Vec::new();
     for layer in &staged.layers {
         let batch = match layer {
             Layer::native_layer::Scene2_layer(ir, resources) => {
-                Native::lower_scene2(submission, density, &|id| resources.iter().find(|(i, _)| *i == id).map(|(_, r)| r.clone()), ir)
+                native::lower_scene2(submission, density, &|id| resources.iter().find(|(i, _)| *i == id).map(|(_, r)| r.clone()), ir)
             }
             Layer::native_layer::Scene2_segment(segment, resources) => {
-                let cacheable = resources.iter().all(|(_, r)| matches!(r, rr::resource::Text(_)));
+                let cacheable = resources.iter().all(|(_, r)| matches!(r, rr::Resource::Text(_)));
                 let version = Layer::native_segment_version(segment, resources);
                 let ir = scene::segment_ir(segment).map_err(error::Stage)?;
-                Native::lower_scene2_segment(
+                native::lower_scene2_segment(
                     submission,
                     display_list::id(segment),
                     version,
@@ -205,10 +205,10 @@ fn lower_all(
                 )
             }
             Layer::native_layer::Ui_layer(ui, resources) => {
-                Native::lower_ui(submission, density, &|id| resources.iter().find(|(i, _)| *i == id).map(|(_, r)| r.clone()), ui)
+                native::lower_ui(submission, density, &|id| resources.iter().find(|(i, _)| *i == id).map(|(_, r)| r.clone()), ui)
             }
             Layer::native_layer::Scene3_layer(prepared) => {
-                sweep_retained(&Native::gpu_vertices_owner(execution));
+                sweep_retained(&native::gpu_vertices_owner(execution));
                 let draws = draws_of_prepared(staged, prepared);
                 rr::adopt_retained_view(submission, density, prepared, draws)
             }
@@ -218,7 +218,7 @@ fn lower_all(
     Ok(batches)
 }
 
-pub fn render(execution: &rr::t, density: i64, width: i64, height: i64, scene: &[scene::node]) -> Result<(), error> {
+pub fn render(execution: &rr::Renderer, density: i64, width: i64, height: i64, scene: &[scene::node]) -> Result<(), error> {
     let mut cancel = Cancel(None);
     let prepared: Result<outcome, error> = {
         let _release = Release(scene.to_vec());
@@ -230,7 +230,7 @@ pub fn render(execution: &rr::t, density: i64, width: i64, height: i64, scene: &
                     Err(e) => Err(error::Resource(e)),
                     Ok(()) => match &staged.retained {
                         None => Ok(None),
-                        Some((identity, version)) => Native::replay(Some(staged.clear), identity, *version, execution).map_err(error::Step),
+                        Some((identity, version)) => native::replay(Some(staged.clear), identity, *version, execution).map_err(error::Step),
                     },
                 };
                 match replayed {
@@ -257,8 +257,8 @@ pub fn render(execution: &rr::t, density: i64, width: i64, height: i64, scene: &
         outcome::Replayed => Ok(()),
         outcome::Prepared(submission, retained, clear, batches) => {
             let stepped = match &retained {
-                None => Native::step(Some(clear), None, None, &submission, &batches),
-                Some((identity, version)) => Native::step(Some(clear), Some(identity), Some(*version), &submission, &batches),
+                None => native::step(Some(clear), None, None, &submission, &batches),
+                Some((identity, version)) => native::step(Some(clear), Some(identity), Some(*version), &submission, &batches),
             };
             stepped.map_err(error::Step)
         }

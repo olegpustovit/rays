@@ -2,7 +2,7 @@
 //! and on an offscreen one (gpu_scene2_argument). Omitted from the OCaml test: the `Gc` allocation and
 //! promotion bounds of the animated-affine loop (no OCaml GC here); the 100 frames still run.
 use ::renderer::renderer::{self, prepared_draw};
-use ::renderer::scene_execution::{self, geometry_draw, mesh, mesh_key, new_bytes, pipeline_family, sampled_texture, state, texture_level};
+use ::renderer::scene_execution::{self, GeometryDraw, Mesh, MeshKey, new_bytes, PipelineFamily, SampledTexture, State, TextureLevel};
 use ogpu::pipeline::Blend;
 use ogpu::render_pass::{Comparison, Cull, Load, Primitive};
 use ogpu::types::{AddressMode, MipFilter, SamplerDescriptor, SamplerFilter};
@@ -18,29 +18,29 @@ fn floats(values: &[f32]) -> scene_execution::bytes {
 
 const SAMPLE: [u8; 4] = [0x11, 0x22, 0x33, 0xff];
 
-fn first_pixel(runtime: &renderer::t) -> Vec<u8> {
+fn first_pixel(runtime: &renderer::Renderer) -> Vec<u8> {
     let facts = renderer::presentation_facts_of(runtime).unwrap();
     renderer::read_pixels(runtime, facts.drawable_width * 4).unwrap()[..4].to_vec()
 }
 
-fn counters(s: &renderer::stats) -> (i64, i64) {
+fn counters(s: &renderer::Stats) -> (i64, i64) {
     (s.retained_plan_misses, s.retained_plan_hits)
 }
 
-fn describe(s: &renderer::stats) -> String {
+fn describe(s: &renderer::Stats) -> String {
     format!("misses {} hits {}", s.retained_plan_misses, s.retained_plan_hits)
 }
 
-pub fn run(runtime: &renderer::t, mut before_draw: impl FnMut()) {
-    let mut render = |draws: &[renderer::draw]| {
+pub fn run(runtime: &renderer::Renderer, mut before_draw: impl FnMut()) {
+    let mut render = |draws: &[renderer::Draw]| {
         before_draw();
         renderer::draw(None, runtime, draws)
     };
     let live_handles = || ogpu::impl_::live_handles().unwrap();
     // a quad's constants (marks.rays): the identity affine, a white ink, the clip square and the
     // whole texture
-    let quad = mesh {
-        key: mesh_key::Host("scene2-retained-argument".into()),
+    let quad = Mesh {
+        key: MeshKey::Host("scene2-retained-argument".into()),
         vertices: floats(&[1., 0., 0., 0., 1., 0., 0., 0., 1., 1., 1., 1., -1., -1., 2., 2., 0., 0., 1., 1.]),
         shared_vertices: None,
         vertex_count: 4,
@@ -49,7 +49,7 @@ pub fn run(runtime: &renderer::t, mut before_draw: impl FnMut()) {
         primitive: Primitive::TriangleList,
     };
     // a full-screen triangle in the texture's colour: a float2 position and colour word each
-    let triangle = mesh {
+    let triangle = Mesh {
         vertices: new_bytes(
             [(-1f32, -1f32), (3., -1.), (-1., 3.)]
                 .iter()
@@ -61,7 +61,7 @@ pub fn run(runtime: &renderer::t, mut before_draw: impl FnMut()) {
         index_count: 3,
         ..quad.clone()
     };
-    let st = state {
+    let st = State {
         viewport: (0, 0, 4, 4),
         scissor: (0, 0, 4, 4),
         cull: Cull::CullNone,
@@ -83,21 +83,21 @@ pub fn run(runtime: &renderer::t, mut before_draw: impl FnMut()) {
         max_anisotropy: 1,
     };
     let one_pixel = |key: &str, rgba: [u8; 4]| {
-        Rc::new(sampled_texture {
+        Rc::new(SampledTexture {
             key: key.into(),
-            levels: Rc::new(vec![texture_level { width: 1, height: 1, bytes: new_bytes(rgba.to_vec()) }]),
+            levels: Rc::new(vec![TextureLevel { width: 1, height: 1, bytes: new_bytes(rgba.to_vec()) }]),
             sampler: sampler.clone(),
             gpu: None,
         })
     };
     let texture = one_pixel("scene2-retained-pixel", SAMPLE);
-    let textured = |blend: Blend, texture: Rc<sampled_texture>| {
-        prepared_draw(pipeline_family::Scene2_textured, Some(blend), Some(texture), None, None, None, geometry_draw { mesh: quad.clone(), state: st.clone() })
+    let textured = |blend: Blend, texture: Rc<SampledTexture>| {
+        prepared_draw(PipelineFamily::Scene2Textured, Some(blend), Some(texture), None, None, None, GeometryDraw { mesh: quad.clone(), state: st.clone() })
     };
     let draw = textured(Blend::Replace, texture.clone());
     let mut first_uploaded = None;
     for frame in 1..=20 {
-        assert!(render(&[draw.clone()]).unwrap(), "scene2 retained argument frame was not presented");
+        assert!(render(std::slice::from_ref(&draw)).unwrap(), "scene2 retained argument frame was not presented");
         assert_eq!(first_pixel(runtime), SAMPLE, "scene2 retained argument exact pixel mismatch");
         if frame == 1 {
             first_uploaded = Some(renderer::stats(runtime).unwrap().uploaded_bytes);
@@ -138,8 +138,8 @@ pub fn run(runtime: &renderer::t, mut before_draw: impl FnMut()) {
     assert!(counters(&churn) == (4, 316), "managed-image churn rebuilt its retained render plan: {}", describe(&churn));
     assert_eq!(churn.uploaded_bytes - uploaded, 76800, "managed-image churn upload cardinality is not exact");
     assert_eq!(Some(peak_live), settled_release, "managed-image churn grew native live-handle state");
-    let plain_mesh = mesh { key: mesh_key::Host("scene2-retained-plain".into()), ..triangle.clone() };
-    let plain_draw = prepared_draw(pipeline_family::Scene2, Some(Blend::Replace), None, None, None, None, geometry_draw { mesh: plain_mesh.clone(), state: st.clone() });
+    let plain_mesh = Mesh { key: MeshKey::Host("scene2-retained-plain".into()), ..triangle.clone() };
+    let plain_draw = prepared_draw(PipelineFamily::Scene2, Some(Blend::Replace), None, None, None, None, GeometryDraw { mesh: plain_mesh.clone(), state: st.clone() });
     let textured_draw = textured(Blend::Alpha, texture.clone());
     for _ in 1..=100 {
         assert!(render(&[plain_draw.clone(), textured_draw.clone()]).unwrap(), "mixed canonical Scene2 frame was not presented");
@@ -149,8 +149,8 @@ pub fn run(runtime: &renderer::t, mut before_draw: impl FnMut()) {
     assert!(counters(&mixed) == (6, 414), "mixed plain/textured Scene2 did not retain one stable plan: {}", describe(&mixed));
     for frame in 0..160 {
         let identity = frame % 80;
-        let m = mesh { key: mesh_key::Host(format!("scene2-plan-churn-{identity:02}")), ..triangle.clone() };
-        let d = prepared_draw(pipeline_family::Scene2, None, None, None, None, None, geometry_draw { mesh: m, state: st.clone() });
+        let m = Mesh { key: MeshKey::Host(format!("scene2-plan-churn-{identity:02}")), ..triangle.clone() };
+        let d = prepared_draw(PipelineFamily::Scene2, None, None, None, None, None, GeometryDraw { mesh: m, state: st.clone() });
         assert!(render(&[d]).unwrap(), "80-identity retained-plan frame was not presented");
     }
     let cycled = renderer::stats(runtime).unwrap();
@@ -169,8 +169,8 @@ pub fn run(runtime: &renderer::t, mut before_draw: impl FnMut()) {
         new_bytes(bytes)
     };
     let animated = |tx: f64| {
-        let s = state { transform_uniforms: Some(affine(tx)), ..st.clone() };
-        prepared_draw(pipeline_family::Scene2, Some(Blend::Replace), None, None, None, None, geometry_draw { mesh: plain_mesh.clone(), state: s })
+        let s = State { transform_uniforms: Some(affine(tx)), ..st.clone() };
+        prepared_draw(PipelineFamily::Scene2, Some(Blend::Replace), None, None, None, None, GeometryDraw { mesh: plain_mesh.clone(), state: s })
     };
     for frame in 0..20 {
         assert!(render(&[animated(if frame & 1 == 0 { 0. } else { 2. })]).unwrap(), "animated affine warm-up frame was not presented");

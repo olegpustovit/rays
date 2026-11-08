@@ -3,8 +3,8 @@ use crate::common;
 use ogpu::error::ErrorKind;
 use ogpu::pipeline::Blend;
 use ogpu::render_pass::{Comparison, Cull, Load, Primitive};
-use ::renderer::renderer::{self, family, t};
-use ::renderer::scene_execution::{geometry_draw, mesh, mesh_key, new_bytes, sampled_draw, state};
+use ::renderer::renderer::{self, PipelineFamily, Renderer};
+use ::renderer::scene_execution::{GeometryDraw, Mesh, MeshKey, new_bytes, SampledDraw, State};
 use std::rc::Rc;
 
 fn set(bytes: &mut [u8], index: usize, value: f32) {
@@ -52,7 +52,7 @@ fn window_scene3_lighting() {
     if !common::gpu() {
         return;
     }
-    let runtime: t = match renderer::create(&renderer::configuration {
+    let runtime: Renderer = match renderer::create(&renderer::Configuration {
         logical_width: 4,
         logical_height: 4,
         drawable_width: 4,
@@ -77,8 +77,8 @@ fn window_scene3_lighting() {
         vertices[offset + 20..offset + 24].copy_from_slice(&1.0f32.to_le_bytes());
         attributes[index * 12..index * 12 + 4].copy_from_slice(&0xffffffffu32.to_le_bytes());
     }
-    let mesh_ = mesh {
-        key: mesh_key::Host("runtime-scene3-light".to_owned()),
+    let mesh_ = Mesh {
+        key: MeshKey::Host("runtime-scene3-light".to_owned()),
         vertices: new_bytes(vertices),
         shared_vertices: None,
         vertex_count: 3,
@@ -86,17 +86,17 @@ fn window_scene3_lighting() {
         index_count: 3,
         primitive: Primitive::TriangleList,
     };
-    let entry = |uniforms: Vec<u8>| -> Rc<sampled_draw> {
-        Rc::new(sampled_draw {
-            family: family::Scene3,
+    let entry = |uniforms: Vec<u8>| -> Rc<SampledDraw> {
+        Rc::new(SampledDraw {
+            family: PipelineFamily::Scene3,
             blend: Blend::Replace,
             texture: None,
             auxiliary: None,
             vertex_attributes: Some(("test-attributes".to_owned(), new_bytes(attributes.clone()))),
             samples: 1,
-            draw: geometry_draw {
+            draw: GeometryDraw {
                 mesh: mesh_.clone(),
-                state: state {
+                state: State {
                     viewport: (0, 0, 4, 4),
                     scissor: (0, 0, 4, 4),
                     cull: Cull::CullNone,

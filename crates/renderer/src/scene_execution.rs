@@ -49,54 +49,54 @@ fn thread_id() -> std::thread::ThreadId {
 // GPU vertices are borrowed, never uploaded or destroyed by the renderer.
 // Registration owns only a bounded name and the producer's lifetime check.
 
-pub struct gpu_vertices_data {
-    pub gpu_owner: gpu_vertices_owner,
-    pub gpu_key: String,
-    pub gpu_device: Device,
-    pub gpu_buffer: Buffer,
-    pub gpu_extra: Vec<Buffer>,
-    pub gpu_vertex_count: i64,
-    pub gpu_domain: std::thread::ThreadId,
+pub struct GpuVerticesData {
+    pub owner: GpuVerticesOwner,
+    pub key: String,
+    pub device: Device,
+    pub buffer: Buffer,
+    pub extra: Vec<Buffer>,
+    pub vertex_count: i64,
+    pub domain: std::thread::ThreadId,
     /// device-written index count: an indirect draw
-    pub gpu_indirect: Option<(Buffer, i64)>,
-    pub gpu_indices: Option<(Buffer, i64)>,
-    pub gpu_colors: Option<(Buffer, i64)>,
-    pub gpu_valid: Box<dyn Fn() -> bool>,
-    pub gpu_active: Cell<bool>,
+    pub indirect: Option<(Buffer, i64)>,
+    pub indices: Option<(Buffer, i64)>,
+    pub colors: Option<(Buffer, i64)>,
+    pub valid: Box<dyn Fn() -> bool>,
+    pub active: Cell<bool>,
 }
 
-pub type gpu_vertices = Rc<gpu_vertices_data>;
+pub type GpuVertices = Rc<GpuVerticesData>;
 
-pub struct gpu_vertices_owner_data {
-    pub gpu_vertex_registry: HashMap<String, gpu_vertices>,
+pub struct GpuVerticesOwnerData {
+    pub gpu_vertex_registry: HashMap<String, GpuVertices>,
     pub unregistered: i64,
 }
 
-pub type gpu_vertices_owner = Rc<RefCell<gpu_vertices_owner_data>>;
+pub type GpuVerticesOwner = Rc<RefCell<GpuVerticesOwnerData>>;
 
-pub fn create_gpu_vertices_owner() -> gpu_vertices_owner {
-    Rc::new(RefCell::new(gpu_vertices_owner_data { gpu_vertex_registry: HashMap::new(), unregistered: 0 }))
+pub fn create_gpu_vertices_owner() -> GpuVerticesOwner {
+    Rc::new(RefCell::new(GpuVerticesOwnerData { gpu_vertex_registry: HashMap::new(), unregistered: 0 }))
 }
 
-const gpu_vertex_capacity: usize = 128;
+const GPU_VERTEX_CAPACITY: usize = 128;
 
 /// The ids that identify a source's buffers in signatures and fingerprints.
-pub fn gpu_identity(source: &gpu_vertices) -> (String, i64, Vec<i64>) {
-    let mut ids: Vec<i64> = source.gpu_extra.iter().map(backend::buffer_id).collect();
-    ids.extend(source.gpu_indirect.iter().map(|(buffer, _)| backend::buffer_id(buffer)));
-    ids.extend(source.gpu_indices.iter().map(|(buffer, _)| backend::buffer_id(buffer)));
-    ids.extend(source.gpu_colors.iter().map(|(buffer, _)| backend::buffer_id(buffer)));
-    (source.gpu_key.clone(), backend::buffer_id(&source.gpu_buffer), ids)
+pub fn gpu_identity(source: &GpuVertices) -> (String, i64, Vec<i64>) {
+    let mut ids: Vec<i64> = source.extra.iter().map(backend::buffer_id).collect();
+    ids.extend(source.indirect.iter().map(|(buffer, _)| backend::buffer_id(buffer)));
+    ids.extend(source.indices.iter().map(|(buffer, _)| backend::buffer_id(buffer)));
+    ids.extend(source.colors.iter().map(|(buffer, _)| backend::buffer_id(buffer)));
+    (source.key.clone(), backend::buffer_id(&source.buffer), ids)
 }
 
-pub fn gpu_vertices_valid(value: &gpu_vertices) -> bool {
-    value.gpu_active.get() && value.gpu_domain == thread_id() && (value.gpu_valid)()
+pub fn gpu_vertices_valid(value: &GpuVertices) -> bool {
+    value.active.get() && value.domain == thread_id() && (value.valid)()
 }
 
 /// `register_gpu_vertices owner ?extra ?stride ?indirect ?indices ?colors ~key ~device ~buffer
 /// ~vertex_count ~valid ()`; `stride` defaults to 16, `extra` to none.
 pub fn register_gpu_vertices(
-    owner: &gpu_vertices_owner,
+    owner: &GpuVerticesOwner,
     extra: Option<Vec<Buffer>>,
     stride: Option<i64>,
     indirect: Option<(Buffer, i64)>,
@@ -107,7 +107,7 @@ pub fn register_gpu_vertices(
     buffer: &Buffer,
     vertex_count: i64,
     valid: Box<dyn Fn() -> bool>,
-) -> Result<gpu_vertices, Error> {
+) -> Result<GpuVertices, Error> {
     let operation = "Scene_execution.register_gpu_vertices";
     let extra = extra.unwrap_or_default();
     let stride = stride.unwrap_or(16);
@@ -138,36 +138,36 @@ pub fn register_gpu_vertices(
     if invalid {
         return Err(failure_error(operation, ErrorKind::InvalidArgument, "invalid or duplicate borrowed vertex registration"));
     }
-    if owner.borrow().gpu_vertex_registry.len() >= gpu_vertex_capacity {
+    if owner.borrow().gpu_vertex_registry.len() >= GPU_VERTEX_CAPACITY {
         return Err(failure_error(operation, ErrorKind::Capacity, "borrowed vertex registration capacity reached"));
     }
-    let value: gpu_vertices = Rc::new(gpu_vertices_data {
-        gpu_owner: owner.clone(),
-        gpu_key: key.to_owned(),
-        gpu_device: device.clone(),
-        gpu_buffer: buffer.clone(),
-        gpu_extra: extra,
-        gpu_vertex_count: vertex_count,
-        gpu_indirect: indirect,
-        gpu_indices: indices,
-        gpu_colors: colors,
-        gpu_domain: thread_id(),
-        gpu_valid: valid,
-        gpu_active: Cell::new(true),
+    let value: GpuVertices = Rc::new(GpuVerticesData {
+        owner: owner.clone(),
+        key: key.to_owned(),
+        device: device.clone(),
+        buffer: buffer.clone(),
+        extra,
+        vertex_count,
+        indirect,
+        indices,
+        colors,
+        domain: thread_id(),
+        valid,
+        active: Cell::new(true),
     });
     owner.borrow_mut().gpu_vertex_registry.insert(key.to_owned(), value.clone());
     Ok(value)
 }
 
-pub fn unregister_gpu_vertices(value: &gpu_vertices) {
-    if value.gpu_domain != thread_id() {
+pub fn unregister_gpu_vertices(value: &GpuVertices) {
+    if value.domain != thread_id() {
         unreachable!("GPU vertices closed on another domain");
     }
-    if value.gpu_active.get() {
-        value.gpu_active.set(false);
-        let mut owner = value.gpu_owner.borrow_mut();
+    if value.active.get() {
+        value.active.set(false);
+        let mut owner = value.owner.borrow_mut();
         owner.unregistered += 1;
-        owner.gpu_vertex_registry.remove(&value.gpu_key);
+        owner.gpu_vertex_registry.remove(&value.key);
     }
 }
 
@@ -175,10 +175,10 @@ pub fn unregister_gpu_vertices(value: &gpu_vertices) {
 /// ["borrow\nindices"] keeps its host payload (the indices) under [indices], the same while its
 /// topology is, whatever buffer each frame borrows.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum mesh_key {
+pub enum MeshKey {
     Host(String),
     /// `Gpu_vertices name`: a stream borrowed through `register_gpu_vertices ~key:name`.
-    Gpu_vertices(String),
+    GpuVertices(String),
 }
 
 fn borrowed(name: &str) -> &str {
@@ -188,10 +188,10 @@ fn borrowed(name: &str) -> &str {
     }
 }
 
-pub fn mesh_key_string(key: &mesh_key) -> String {
+pub fn mesh_key_string(key: &MeshKey) -> String {
     match key {
-        mesh_key::Host(k) => k.clone(),
-        mesh_key::Gpu_vertices(k) => match k.find('\n') {
+        MeshKey::Host(k) => k.clone(),
+        MeshKey::GpuVertices(k) => match k.find('\n') {
             Some(i) => format!("gpu:indices:{}", &k[i + 1..]),
             None => format!("gpu:vertices:{}", k),
         },
@@ -199,8 +199,8 @@ pub fn mesh_key_string(key: &mesh_key) -> String {
 }
 
 #[derive(Clone)]
-pub struct mesh {
-    pub key: mesh_key,
+pub struct Mesh {
+    pub key: MeshKey,
     pub vertices: bytes,
     /// Immutable published UI vertices; when present, `vertices` must be empty.
     pub shared_vertices: Option<Arc<Vec<u8>>>,
@@ -210,7 +210,7 @@ pub struct mesh {
     pub primitive: Primitive,
 }
 
-impl mesh {
+impl Mesh {
     pub fn vertex_bytes_len(&self) -> usize {
         self.shared_vertices.as_ref().map_or_else(|| blen(&self.vertices), |bytes| bytes.len())
     }
@@ -218,7 +218,7 @@ impl mesh {
 
 /// Equality is structural, as OCaml's `=` on the record (bytes by content, floats by value).
 #[derive(Clone, PartialEq)]
-pub struct state {
+pub struct State {
     pub viewport: (i64, i64, i64, i64),
     pub scissor: (i64, i64, i64, i64),
     pub cull: Cull,
@@ -230,29 +230,29 @@ pub struct state {
 }
 
 #[derive(Clone)]
-pub struct geometry_draw {
-    pub mesh: mesh,
-    pub state: state,
+pub struct GeometryDraw {
+    pub mesh: Mesh,
+    pub state: State,
 }
 
 /// Exact number of family/blend variants required for each supported sample count.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum pipeline_family {
+pub enum PipelineFamily {
     Scene2,
-    Scene2_textured,
+    Scene2Textured,
     Scene3,
-    Scene3_points,
-    Scene3_textured,
-    Scene3_world,
+    Scene3Points,
+    Scene3Textured,
+    Scene3World,
     Ui,
     Marks,
 }
-use pipeline_family::*;
+use PipelineFamily::*;
 
 /// Every level holds `width * height` texels of 4, 8 or 16 bytes (the size level 0 implies):
 /// `Rgba8_unorm`, `Rgba16_float` or `Rgba32_float`.
 #[derive(Clone)]
-pub struct texture_level {
+pub struct TextureLevel {
     pub width: i64,
     pub height: i64,
     pub bytes: bytes,
@@ -261,20 +261,20 @@ pub struct texture_level {
 /// `levels` is an `Rc` so that "the immutable levels this slot was uploaded from" stays a
 /// physical-identity test.
 #[derive(Clone)]
-pub struct sampled_texture {
+pub struct SampledTexture {
     pub key: String,
-    pub levels: Rc<Vec<texture_level>>,
+    pub levels: Rc<Vec<TextureLevel>>,
     pub sampler: SamplerDescriptor,
     pub gpu: Option<Texture>,
 }
 
 #[derive(Clone)]
-pub struct auxiliary_resource {
+pub struct AuxiliaryResource {
     pub key: String,
     pub buffer: bytes,
-    pub texture: sampled_texture,
+    pub texture: SampledTexture,
     /// A `Scene3_world` draw's camera map (texture 9, sampler 10).
-    pub environment: Option<sampled_texture>,
+    pub environment: Option<SampledTexture>,
     /// `Some key`: this World block (sun view-projection at words 40..55) samples the renderer's
     /// sun map at texture 8, rendered from the frame's depth-writing `Replace`/`Alpha` World
     /// triangle draws with the same key whenever the key differs from the last rendered one.
@@ -283,39 +283,39 @@ pub struct auxiliary_resource {
 
 /// `texture` and `auxiliary` are `Rc`s: draws are merged only when they share the same ones.
 #[derive(Clone)]
-pub struct sampled_draw {
-    pub family: pipeline_family,
+pub struct SampledDraw {
+    pub family: PipelineFamily,
     pub blend: Blend,
-    pub texture: Option<Rc<sampled_texture>>,
-    pub auxiliary: Option<Rc<auxiliary_resource>>,
+    pub texture: Option<Rc<SampledTexture>>,
+    pub auxiliary: Option<Rc<AuxiliaryResource>>,
     /// Independently retained Scene3 color/UV stream (12 bytes per vertex), bound at vertex buffer
     /// 11. Required (and only valid) for the Scene3 families; 2D, UI and Marks draws carry `None`.
     pub vertex_attributes: Option<(String, bytes)>,
     pub samples: i64,
-    pub draw: geometry_draw,
+    pub draw: GeometryDraw,
 }
 
 /// A draw handed around by identity (OCaml's physical equality on the record).
-pub type draw = Rc<sampled_draw>;
+pub type Draw = Rc<SampledDraw>;
 
-pub type scene3_entry = draw;
+pub type Scene3Entry = Draw;
 
-pub struct prepared_scene3 {
-    pub entries: Vec<draw>,
+pub struct PreparedScene3 {
+    pub entries: Vec<Draw>,
 }
 
 /// A draw names a borrowed stream that was unregistered: it can never be drawn again.
-pub fn borrows_unregistered(owner: &gpu_vertices_owner, prepared: &prepared_scene3) -> bool {
+pub fn borrows_unregistered(owner: &GpuVerticesOwner, prepared: &PreparedScene3) -> bool {
     prepared.entries.iter().any(|entry| match &entry.draw.mesh.key {
-        mesh_key::Gpu_vertices(name) => !owner.borrow().gpu_vertex_registry.contains_key(borrowed(name)),
-        mesh_key::Host(_) => false,
+        MeshKey::GpuVertices(name) => !owner.borrow().gpu_vertex_registry.contains_key(borrowed(name)),
+        MeshKey::Host(_) => false,
     })
 }
 
-struct cached {
+struct Cached {
     key: String,
     payload_hash: String,
-    trusted_source: Option<mesh>,
+    trusted_source: Option<Mesh>,
     buffer: Buffer,
     index_offset: i64,
     uniform_offset: Option<i64>,
@@ -325,236 +325,236 @@ struct cached {
     primitive: Primitive,
     bytes: i64,
 }
-type cached_ref = Rc<RefCell<cached>>;
+type CachedRef = Rc<RefCell<Cached>>;
 
 #[derive(Clone)]
-struct uniform_slice {
-    uniform_buffer: Buffer,
-    uniform_offset: i64,
+struct UniformSlice {
+    buffer: Buffer,
+    offset: i64,
     /// The frame's staging bytes and this slice's window into them, kept for next frame's
     /// unchanged-set comparison without a per-draw copy.
-    uniform_staging: Rc<Vec<u8>>,
-    uniform_staging_offset: usize,
-    uniform_length: usize,
+    staging: Rc<Vec<u8>>,
+    staging_offset: usize,
+    length: usize,
 }
 
-struct uniform_page {
-    page_buffer: Buffer,
-    page_capacity: i64,
+struct UniformPage {
+    buffer: Buffer,
+    capacity: i64,
 }
 
-struct cached_auxiliary {
-    auxiliary_copy: Vec<u8>,
-    auxiliary_buffer: Buffer,
+struct CachedAuxiliary {
+    copy: Vec<u8>,
+    buffer: Buffer,
     /// The bytes this entry was uploaded from: a physically equal source is a hit without comparing
     /// (World blocks can carry a whole shadow map).
-    auxiliary_source: bytes,
+    source: bytes,
 }
-type cached_auxiliary_ref = Rc<RefCell<cached_auxiliary>>;
+type CachedAuxiliaryRef = Rc<RefCell<CachedAuxiliary>>;
 
-struct cached_texture {
-    texture_key: String,
-    texture_hash: String,
-    texture_shape: String,
+struct CachedTexture {
+    key: String,
+    hash: String,
+    shape: String,
     texture: Texture,
-    texture_bytes: i64,
-    texture_used: i64,
-    texture_levels: Rc<Vec<texture_level>>,
+    bytes: i64,
+    used: i64,
+    levels: Rc<Vec<TextureLevel>>,
 }
-type cached_texture_ref = Rc<RefCell<cached_texture>>;
+type CachedTextureRef = Rc<RefCell<CachedTexture>>;
 
-struct texture_upload_scratch {
-    scratch_buffer: Buffer,
-    scratch_bytes: Vec<u8>,
-    scratch_size: i64,
+struct TextureUploadScratch {
+    buffer: Buffer,
+    bytes: Vec<u8>,
+    size: i64,
 }
 
-struct prepared_run {
-    prepared_version: i64,
-    prepared_draws: Vec<draw>,
-    prepared_bytes: i64,
+struct PreparedRun {
+    version: i64,
+    draws: Vec<Draw>,
+    bytes: i64,
 }
 
 #[derive(Clone, PartialEq)]
-struct automatic_signature {
-    signature_family: pipeline_family,
-    signature_blend: Blend,
-    signature_samples: i64,
-    signature_state: state,
-    signature_texture: Option<(i64, SamplerDescriptor)>,
-    signature_auxiliary: Option<(i64, i64, SamplerDescriptor)>,
-    signature_environment: Option<(i64, SamplerDescriptor)>,
-    signature_buffer: i64,
-    signature_index_offset: i64,
-    signature_gpu_vertices: Option<(String, i64, Vec<i64>)>,
-    signature_vertex_attributes: Option<i64>,
-    signature_uniform_buffer: Option<i64>,
-    signature_uniform_offset: Option<i64>,
-    signature_vertex_count: i64,
-    signature_index_count: i64,
+struct AutomaticSignature {
+    family: PipelineFamily,
+    blend: Blend,
+    samples: i64,
+    state: State,
+    texture: Option<(i64, SamplerDescriptor)>,
+    auxiliary: Option<(i64, i64, SamplerDescriptor)>,
+    environment: Option<(i64, SamplerDescriptor)>,
+    buffer: i64,
+    index_offset: i64,
+    gpu_vertices: Option<(String, i64, Vec<i64>)>,
+    vertex_attributes: Option<i64>,
+    uniform_buffer: Option<i64>,
+    uniform_offset: Option<i64>,
+    vertex_count: i64,
+    index_count: i64,
 }
 
 #[derive(Clone)]
-struct plan_draw {
-    plan_draw: BatchDraw,
-    plan_textures: Vec<(ShaderStage, i64, Texture)>,
-    plan_samplers: Vec<(ShaderStage, i64, Sampler)>,
+struct PlanDraw {
+    draw: BatchDraw,
+    textures: Vec<(ShaderStage, i64, Texture)>,
+    samplers: Vec<(ShaderStage, i64, Sampler)>,
     /// Textures reached only through an argument buffer: Metal needs them made resident with
     /// `use_resources` before any draw of the pass.
-    plan_resident: Vec<Texture>,
+    resident: Vec<Texture>,
     /// A borrowed shape whose index count the device wrote: drawn indirect, never batched or recorded
-    plan_indirect: Option<(Buffer, i64)>,
+    indirect: Option<(Buffer, i64)>,
 }
 
 /// One render pass of a frame: its attachment state and draws. A retained batch replays an
 /// indirect command buffer instead of re-encoding.
-struct batch_plan {
-    batch_family: pipeline_family,
-    batch_samples: i64,
-    batch_state: state,
-    batch_first: bool,
-    batch_draws: Vec<plan_draw>,
+struct BatchPlan {
+    family: PipelineFamily,
+    samples: i64,
+    state: State,
+    first: bool,
+    draws: Vec<PlanDraw>,
     /// `batch_draws` as the backend batch, built once with the plan.
-    batch_driver_draws: Vec<BatchDraw>,
-    batch_resources: Vec<ResourceUse>,
-    batch_icb: RefCell<Option<Icb>>,
+    driver_draws: Vec<BatchDraw>,
+    resources: Vec<ResourceUse>,
+    icb: RefCell<Option<Icb>>,
 }
 
-struct replay_plan {
-    replay_clear: (f64, f64, f64, f64),
-    replay_payloads: Vec<automatic_signature>,
-    replay_batches: Vec<Rc<batch_plan>>,
-    replay_gpu_vertices: Vec<gpu_vertices>,
+struct ReplayPlan {
+    clear: (f64, f64, f64, f64),
+    payloads: Vec<AutomaticSignature>,
+    batches: Vec<Rc<BatchPlan>>,
+    gpu_vertices: Vec<GpuVertices>,
 }
 
-struct prepared_submission {
-    submission_identity: String,
-    submission_version: i64,
-    submission_draw_count: i64,
-    submission_plan: Rc<replay_plan>,
+struct PreparedSubmission {
+    identity: String,
+    version: i64,
+    draw_count: i64,
+    plan: Rc<ReplayPlan>,
 }
 
-struct automatic_candidate {
-    candidate_clear: (f64, f64, f64, f64),
-    candidate_payloads: Vec<automatic_signature>,
+struct AutomaticCandidate {
+    clear: (f64, f64, f64, f64),
+    payloads: Vec<AutomaticSignature>,
 }
 
-struct prepared_slot {
-    slot_family: pipeline_family,
-    slot_blend: Blend,
-    slot_samples: i64,
-    slot_state: Option<state>,
-    slot_texture: Option<(Rc<sampled_texture>, cached_texture_ref)>,
-    slot_auxiliary: Option<(Rc<auxiliary_resource>, cached_auxiliary_ref, cached_texture_ref)>,
-    slot_environment: Option<(sampled_texture, cached_texture_ref)>,
-    slot_mesh: Option<cached_ref>,
-    slot_uniform: Option<uniform_slice>,
-    slot_gpu_vertices: Option<gpu_vertices>,
-    slot_vertex_attributes: Option<cached_auxiliary_ref>,
+struct PreparedSlot {
+    family: PipelineFamily,
+    blend: Blend,
+    samples: i64,
+    state: Option<State>,
+    texture: Option<(Rc<SampledTexture>, CachedTextureRef)>,
+    auxiliary: Option<(Rc<AuxiliaryResource>, CachedAuxiliaryRef, CachedTextureRef)>,
+    environment: Option<(SampledTexture, CachedTextureRef)>,
+    mesh: Option<CachedRef>,
+    uniform: Option<UniformSlice>,
+    gpu_vertices: Option<GpuVertices>,
+    vertex_attributes: Option<CachedAuxiliaryRef>,
 }
 
-struct prepared_scratch {
-    scratch_slots: Vec<prepared_slot>,
-    scratch_length: usize,
+struct PreparedScratch {
+    slots: Vec<PreparedSlot>,
+    length: usize,
 }
 
-struct pipeline_variant {
-    family: pipeline_family,
+struct PipelineVariant {
+    family: PipelineFamily,
     blend: Blend,
     samples: i64,
     pipeline: Pipeline,
     argument: Option<Argument>,
 }
 
-struct icb_stats {
-    icb_builds: i64,
-    icb_hits: i64,
-    icb_misses: i64,
-    icb_evictions: i64,
-    icb_executions: i64,
-    icb_failures: i64,
-    icb_last_failure: Option<String>,
+struct IcbStats {
+    builds: i64,
+    hits: i64,
+    misses: i64,
+    evictions: i64,
+    executions: i64,
+    failures: i64,
+    last_failure: Option<String>,
 }
 
-struct argument_pool {
-    argument_buffer: Buffer,
-    argument_stride: i64,
-    argument_capacity: i64,
+struct ArgumentPool {
+    buffer: Buffer,
+    stride: i64,
+    capacity: i64,
     slices: HashMap<(i64, u64), i64>,
-    argument_next: i64,
+    next: i64,
 }
 
 #[derive(Default)]
-struct retired {
-    retired_buffers: Vec<Buffer>,
-    retired_textures: Vec<Texture>,
+struct Retired {
+    buffers: Vec<Buffer>,
+    textures: Vec<Texture>,
 }
 
-const cache_byte_capacity: i64 = 256 * 1024 * 1024;
-const mesh_cache_entry_capacity: i64 = 256;
-const texture_cache_entry_capacity: i64 = 256;
-const texture_cache_byte_capacity: i64 = 256 * 1024 * 1024;
+const CACHE_BYTE_CAPACITY: i64 = 256 * 1024 * 1024;
+const MESH_CACHE_ENTRY_CAPACITY: i64 = 256;
+const TEXTURE_CACHE_ENTRY_CAPACITY: i64 = 256;
+const TEXTURE_CACHE_BYTE_CAPACITY: i64 = 256 * 1024 * 1024;
 
 fn device_cache(name: &str) -> lru::Owner {
     lru::cache_in(lru::Pool::Device, name)
 }
 
-fn mesh_table(retired: &Rc<RefCell<retired>>) -> side_lru::Table {
+fn mesh_table(retired: &Rc<RefCell<Retired>>) -> side_lru::Table {
     let retired = retired.clone();
     side_lru::create(
         device_cache("renderer.mesh"),
         true,
-        cache_byte_capacity,
+        CACHE_BYTE_CAPACITY,
         Box::new(move |_, item| {
             let item = cached_of(&item);
-            retired.borrow_mut().retired_buffers.push(item.borrow().buffer.clone());
+            retired.borrow_mut().buffers.push(item.borrow().buffer.clone());
         }),
-        mesh_cache_entry_capacity,
+        MESH_CACHE_ENTRY_CAPACITY,
     )
 }
 
-fn texture_table(retired: &Rc<RefCell<retired>>) -> side_lru::Table {
+fn texture_table(retired: &Rc<RefCell<Retired>>) -> side_lru::Table {
     let retired = retired.clone();
     side_lru::create(
         device_cache("renderer.texture"),
         true,
-        texture_cache_byte_capacity,
+        TEXTURE_CACHE_BYTE_CAPACITY,
         Box::new(move |_, item| {
             let item = cached_texture_of(&item);
-            retired.borrow_mut().retired_textures.push(item.borrow().texture.clone());
+            retired.borrow_mut().textures.push(item.borrow().texture.clone());
         }),
-        texture_cache_entry_capacity,
+        TEXTURE_CACHE_ENTRY_CAPACITY,
     )
 }
 
-fn auxiliary_table(retired: &Rc<RefCell<retired>>) -> side_lru::Table {
+fn auxiliary_table(retired: &Rc<RefCell<Retired>>) -> side_lru::Table {
     let retired = retired.clone();
     side_lru::create(
         device_cache("renderer.gpu_item"),
         true,
-        cache_byte_capacity,
+        CACHE_BYTE_CAPACITY,
         Box::new(move |_, item| {
             let item = cached_auxiliary_of(&item);
-            retired.borrow_mut().retired_buffers.push(item.borrow().auxiliary_buffer.clone());
+            retired.borrow_mut().buffers.push(item.borrow().buffer.clone());
         }),
         64,
     )
 }
 
-fn cached_of(item: &Item) -> cached_ref {
-    item.clone().downcast::<RefCell<cached>>().unwrap_or_else(|_| unreachable!("mesh table item"))
+fn cached_of(item: &Item) -> CachedRef {
+    item.clone().downcast::<RefCell<Cached>>().unwrap_or_else(|_| unreachable!("mesh table item"))
 }
 
-fn cached_texture_of(item: &Item) -> cached_texture_ref {
-    item.clone().downcast::<RefCell<cached_texture>>().unwrap_or_else(|_| unreachable!("texture table item"))
+fn cached_texture_of(item: &Item) -> CachedTextureRef {
+    item.clone().downcast::<RefCell<CachedTexture>>().unwrap_or_else(|_| unreachable!("texture table item"))
 }
 
-fn cached_auxiliary_of(item: &Item) -> cached_auxiliary_ref {
-    item.clone().downcast::<RefCell<cached_auxiliary>>().unwrap_or_else(|_| unreachable!("auxiliary table item"))
+fn cached_auxiliary_of(item: &Item) -> CachedAuxiliaryRef {
+    item.clone().downcast::<RefCell<CachedAuxiliary>>().unwrap_or_else(|_| unreachable!("auxiliary table item"))
 }
 
-fn prepared_run_of(item: &Item) -> Rc<prepared_run> {
-    item.clone().downcast::<prepared_run>().unwrap_or_else(|_| unreachable!("prepared table item"))
+fn prepared_run_of(item: &Item) -> Rc<PreparedRun> {
+    item.clone().downcast::<PreparedRun>().unwrap_or_else(|_| unreachable!("prepared table item"))
 }
 
 fn skey(key: &str) -> TableKey {
@@ -562,10 +562,10 @@ fn skey(key: &str) -> TableKey {
 }
 
 /// Evicted GPU resources are destroyed once the frame that evicted them has been submitted.
-fn drain_retired(retired: &Rc<RefCell<retired>>, destroy_buffer: &mut dyn FnMut(&Buffer), destroy_texture: &mut dyn FnMut(&Texture)) {
+fn drain_retired(retired: &Rc<RefCell<Retired>>, destroy_buffer: &mut dyn FnMut(&Buffer), destroy_texture: &mut dyn FnMut(&Texture)) {
     let (buffers, textures) = {
         let mut r = retired.borrow_mut();
-        (std::mem::take(&mut r.retired_buffers), std::mem::take(&mut r.retired_textures))
+        (std::mem::take(&mut r.buffers), std::mem::take(&mut r.textures))
     };
     for b in &buffers {
         destroy_buffer(b);
@@ -577,53 +577,53 @@ fn drain_retired(retired: &Rc<RefCell<retired>>, destroy_buffer: &mut dyn FnMut(
 
 /// The World sun shadow map: packed 24-bit depth in RGBA8 plus the depth attachment its pass
 /// tests against, reused across frames (capacity 1).
-struct sun_map {
-    sun_pipeline: Pipeline,
-    sun_color: Texture,
-    sun_depth: Texture,
-    sun_key: String,
+struct SunMap {
+    pipeline: Pipeline,
+    color: Texture,
+    depth: Texture,
+    key: String,
 }
 
-pub type sun_factory = Rc<dyn Fn(&Device) -> Result<Pipeline, Error>>;
+pub type SunFactory = Rc<dyn Fn(&Device) -> Result<Pipeline, Error>>;
 
-pub struct t {
+pub struct SceneExecution {
     device: Device,
-    gpu_vertices: gpu_vertices_owner,
+    gpu_vertices: GpuVerticesOwner,
     queue: Queue,
     surface: Option<Surface>,
     target: Texture,
     configuration: Configuration,
-    attachments: scene_attachment_pool::t,
-    pipelines: Vec<pipeline_variant>,
+    attachments: scene_attachment_pool::AttachmentPool,
+    pipelines: Vec<PipelineVariant>,
     pipeline_lookup: Vec<Option<usize>>,
     cache: side_lru::Table,
-    uniform_pages: Vec<Option<uniform_page>>,
+    uniform_pages: Vec<Option<UniformPage>>,
     next_uniform_page: usize,
     /// frames in a row needing under a quarter of the page
     uniform_low: i64,
-    previous_uniforms: Vec<Option<uniform_slice>>,
+    previous_uniforms: Vec<Option<UniformSlice>>,
     prepared_cache: side_lru::Table,
-    prepared_submission: Option<prepared_submission>,
-    automatic_submission: Option<Rc<replay_plan>>,
-    automatic_candidate: Option<automatic_candidate>,
-    prepared_scratch: prepared_scratch,
+    prepared_submission: Option<PreparedSubmission>,
+    automatic_submission: Option<Rc<ReplayPlan>>,
+    automatic_candidate: Option<AutomaticCandidate>,
+    prepared_scratch: PreparedScratch,
     auxiliary_cache: side_lru::Table,
     texture_cache: side_lru::Table,
     /// Evicted GPU resources wait here until the frame that evicted them has been submitted.
-    retired: Rc<RefCell<retired>>,
+    retired: Rc<RefCell<Retired>>,
     frame: i64,
-    texture_upload_scratch: Option<texture_upload_scratch>,
+    texture_upload_scratch: Option<TextureUploadScratch>,
     /// the last frame that uploaded a texture
     staged_frame: i64,
     /// and the frame before it did too
     staged_stream: bool,
     samplers: HashMap<u64, Sampler>,
-    arguments: Option<argument_pool>,
-    icb_stats: icb_stats,
+    arguments: Option<ArgumentPool>,
+    icb_stats: IcbStats,
     uploaded: i64,
     swept_unregistered: i64,
-    sun_factory: Option<sun_factory>,
-    sun: Option<sun_map>,
+    sun_factory: Option<SunFactory>,
+    sun: Option<SunMap>,
     sun_passes: i64,
     in_flight: Option<i64>,
     dead: bool,
@@ -631,37 +631,37 @@ pub struct t {
     owns_device: bool,
 }
 
-fn drop_plan(value: &mut t, plan: Option<Rc<replay_plan>>) {
+fn drop_plan(value: &mut SceneExecution, plan: Option<Rc<ReplayPlan>>) {
     let Some(plan) = plan else { return };
-    for batch in &plan.replay_batches {
-        let icb = batch.batch_icb.borrow_mut().take();
+    for batch in &plan.batches {
+        let icb = batch.icb.borrow_mut().take();
         if let Some(icb) = icb {
-            value.icb_stats.icb_evictions += 1;
+            value.icb_stats.evictions += 1;
             if let Err(failure) = backend::destroy_icb(&icb) {
-                value.icb_stats.icb_failures += 1;
-                value.icb_stats.icb_last_failure = Some(format!("destroy: {}", error::to_string(&failure)));
+                value.icb_stats.failures += 1;
+                value.icb_stats.last_failure = Some(format!("destroy: {}", error::to_string(&failure)));
             }
         }
     }
 }
 
-fn drop_plans(value: &mut t) {
+fn drop_plans(value: &mut SceneExecution) {
     let automatic = value.automatic_submission.take();
     drop_plan(value, automatic);
-    let prepared = value.prepared_submission.take().map(|s| s.submission_plan);
+    let prepared = value.prepared_submission.take().map(|s| s.plan);
     drop_plan(value, prepared);
     value.automatic_candidate = None;
 }
 
-pub fn device(value: &t) -> Device {
+pub fn device(value: &SceneExecution) -> Device {
     value.device.clone()
 }
-pub fn queue(value: &t) -> Queue {
+pub fn queue(value: &SceneExecution) -> Queue {
     value.queue.clone()
 }
 /// The owned RGBA8 texture every submission renders into; a shared-device renderer's callers may
 /// sample it directly between completed submissions.
-pub fn target(value: &t) -> Texture {
+pub fn target(value: &SceneExecution) -> Texture {
     value.target.clone()
 }
 
@@ -669,15 +669,15 @@ fn same_device(a: &Device, b: &Device) -> bool {
     ogpu::handle::device_id(backend::device_handle(a)) == ogpu::handle::device_id(backend::device_handle(b))
 }
 
-fn is_scene3_family(family: pipeline_family) -> bool {
-    matches!(family, Scene3 | Scene3_points | Scene3_world)
+fn is_scene3_family(family: PipelineFamily) -> bool {
+    matches!(family, Scene3 | Scene3Points | Scene3World)
 }
 
-fn resolve_gpu_vertices(value: &t, entry: &sampled_draw) -> Result<Option<gpu_vertices>, Error> {
+fn resolve_gpu_vertices(value: &SceneExecution, entry: &SampledDraw) -> Result<Option<GpuVertices>, Error> {
     let mesh = &entry.draw.mesh;
     let name = match &mesh.key {
-        mesh_key::Host(_) => return Ok(None),
-        mesh_key::Gpu_vertices(name) => name,
+        MeshKey::Host(_) => return Ok(None),
+        MeshKey::GpuVertices(name) => name,
     };
     let found = value.gpu_vertices.borrow().gpu_vertex_registry.get(borrowed(name)).cloned();
     match found {
@@ -692,29 +692,29 @@ fn resolve_gpu_vertices(value: &t, entry: &sampled_draw) -> Result<Option<gpu_ve
             let family = entry.family;
             let indices_len = blen(&mesh.indices) as i64;
             let vertices_len = mesh.vertex_bytes_len() as i64;
-            if !same_device(&source.gpu_device, &value.device) {
+            if !same_device(&source.device, &value.device) {
                 return Err(failure_error("Renderer.submit", ErrorKind::CrossDevice, "GPU vertices belong to another device"));
             }
-            let colors_bad = (source.gpu_colors.is_some() && !is_scene3_family(family))
+            let colors_bad = (source.colors.is_some() && !is_scene3_family(family))
                 || (is_scene3_family(family)
                     && color_width
-                        != match (&source.gpu_colors, &entry.vertex_attributes) {
+                        != match (&source.colors, &entry.vertex_attributes) {
                             (Some((_, width)), _) => *width as f64,
                             (None, Some((_, b))) if blen(b) == 0 => -1.0,
                             (None, _) => 0.0,
                         });
-            let indices_bad = match &source.gpu_indices {
+            let indices_bad = match &source.indices {
                 Some((_, count)) => !is_scene3_family(family) || indices_len != 0 || mesh.index_count != *count,
                 None => indices_len != mesh.index_count * 4,
             };
-            let layout_bad = match (family, source.gpu_extra.len()) {
-                (Scene3 | Scene3_points | Scene3_world, 0 | 1) => {
+            let layout_bad = match (family, source.extra.len()) {
+                (Scene3 | Scene3Points | Scene3World, 0 | 1) => {
                     // a device's packed float3 positions (and normals)
-                    vertices_len != 0 || mesh.vertex_count != source.gpu_vertex_count
+                    vertices_len != 0 || mesh.vertex_count != source.vertex_count
                 }
                 (Ui, 0) | (Marks, 5) => {
                     vertices_len != 0
-                        || mesh.vertex_count != source.gpu_vertex_count
+                        || mesh.vertex_count != source.vertex_count
                         || mesh.vertex_count % 4 != 0
                         || mesh.index_count != mesh.vertex_count / 4 * 6
                 }
@@ -731,50 +731,50 @@ fn resolve_gpu_vertices(value: &t, entry: &sampled_draw) -> Result<Option<gpu_ve
 }
 
 /// Scene3 draws carry the 12-byte attribute record a vertex; 2D, UI and Marks draws carry none.
-fn valid_vertex_attributes(entry: &sampled_draw) -> bool {
+fn valid_vertex_attributes(entry: &SampledDraw) -> bool {
     match (entry.family, &entry.vertex_attributes) {
-        (Scene2 | Scene2_textured | Ui | Marks, None) => true,
-        (Scene2 | Scene2_textured | Ui | Marks, Some(_)) | (Scene3 | Scene3_points | Scene3_textured | Scene3_world, None) => false,
+        (Scene2 | Scene2Textured | Ui | Marks, None) => true,
+        (Scene2 | Scene2Textured | Ui | Marks, Some(_)) | (Scene3 | Scene3Points | Scene3Textured | Scene3World, None) => false,
         (_, Some((key, attributes))) => {
             let mesh = &entry.draw.mesh;
             !key.is_empty()
                 && mesh.vertex_count >= 0
                 && mesh.vertex_count <= MAX_STRING_LENGTH / 24
                 && match &mesh.key {
-                    mesh_key::Gpu_vertices(_) => mesh.vertex_bytes_len() == 0,
-                    mesh_key::Host(_) => mesh.vertex_bytes_len() as i64 == mesh.vertex_count * 24,
+                    MeshKey::GpuVertices(_) => mesh.vertex_bytes_len() == 0,
+                    MeshKey::Host(_) => mesh.vertex_bytes_len() as i64 == mesh.vertex_count * 24,
                 }
                 && (blen(attributes) as i64 == mesh.vertex_count * 12
                     || match &mesh.key {
-                        mesh_key::Gpu_vertices(_) => blen(attributes) == 0,
-                        mesh_key::Host(_) => false,
+                        MeshKey::GpuVertices(_) => blen(attributes) == 0,
+                        MeshKey::Host(_) => false,
                     })
         }
     }
 }
 
-fn valid_index_length(mesh: &mesh) -> bool {
+fn valid_index_length(mesh: &Mesh) -> bool {
     mesh.index_count >= 0
         && mesh.index_count <= MAX_STRING_LENGTH / 4
         && (blen(&mesh.indices) as i64 == mesh.index_count * 4
             || match &mesh.key {
-                mesh_key::Gpu_vertices(_) => blen(&mesh.indices) == 0,
-                mesh_key::Host(_) => false,
+                MeshKey::GpuVertices(_) => blen(&mesh.indices) == 0,
+                MeshKey::Host(_) => false,
             })
 }
 
 /// Validates and copies a native Scene3 submission description. Nested byte resources remain
 /// borrowed and must be retained by the staging owner.
-pub fn prepare_scene3(clear: (f64, f64, f64, f64), clear_depth: f64, entries: &[draw]) -> Result<prepared_scene3, Error> {
+pub fn prepare_scene3(clear: (f64, f64, f64, f64), clear_depth: f64, entries: &[Draw]) -> Result<PreparedScene3, Error> {
     let (r, g, b, a) = clear;
     let valid_extent = |(_, _, width, height): (i64, i64, i64, i64)| width > 0 && height > 0;
-    let valid_family = |entry: &sampled_draw| match (entry.family, &entry.texture, &entry.auxiliary) {
-        (Scene3, None, None) | (Scene3_points, None, None) => true,
-        (Scene3_textured, Some(_), None) => true,
-        (Scene3_world, Some(_), Some(auxiliary)) => auxiliary.environment.is_some(),
+    let valid_family = |entry: &SampledDraw| match (entry.family, &entry.texture, &entry.auxiliary) {
+        (Scene3, None, None) | (Scene3Points, None, None) => true,
+        (Scene3Textured, Some(_), None) => true,
+        (Scene3World, Some(_), Some(auxiliary)) => auxiliary.environment.is_some(),
         _ => false,
     };
-    let valid_entry = |entry: &sampled_draw| {
+    let valid_entry = |entry: &SampledDraw| {
         let mesh = &entry.draw.mesh;
         entry.samples > 0
             && [1, 4, 9, 16].contains(&entry.samples)
@@ -783,7 +783,7 @@ pub fn prepare_scene3(clear: (f64, f64, f64, f64), clear_depth: f64, entries: &[
             && mesh.vertex_count >= 0
             && mesh.index_count >= 0
             && (mesh.shared_vertices.is_none() || blen(&mesh.vertices)==0)
-            && ((mesh.primitive == Primitive::PointList) == (entry.family == Scene3_points))
+            && ((mesh.primitive == Primitive::PointList) == (entry.family == Scene3Points))
             && match mesh.primitive {
                 Primitive::LineList => mesh.index_count % 2 == 0,
                 Primitive::TriangleList => mesh.index_count % 3 == 0,
@@ -801,7 +801,7 @@ pub fn prepare_scene3(clear: (f64, f64, f64, f64), clear_depth: f64, entries: &[
     } else if !entries.iter().all(|entry| valid_entry(entry)) {
         Err(failure_error(operation, ErrorKind::InvalidArgument, "draw family, resources, samples, mesh, or extent is malformed"))
     } else {
-        Ok(prepared_scene3 { entries: entries.to_vec() })
+        Ok(PreparedScene3 { entries: entries.to_vec() })
     }
 }
 
@@ -822,22 +822,22 @@ fn texture_descriptor(configuration: &Configuration) -> TextureDescriptor {
     }
 }
 
-const blends: [Blend; 6] = [Blend::Replace, Blend::Alpha, Blend::Add, Blend::Multiply, Blend::Screen, Blend::Subtract];
+const BLENDS: [Blend; 6] = [Blend::Replace, Blend::Alpha, Blend::Add, Blend::Multiply, Blend::Screen, Blend::Subtract];
 
-const families: [pipeline_family; 8] = [Scene2, Scene2_textured, Scene3, Scene3_points, Scene3_textured, Scene3_world, Ui, Marks];
+const FAMILIES: [PipelineFamily; 8] = [Scene2, Scene2Textured, Scene3, Scene3Points, Scene3Textured, Scene3World, Ui, Marks];
 
-const blend_count: i64 = 6;
-const pipeline_variants_per_sample: i64 = 8 * blend_count;
+const BLEND_COUNT: i64 = 6;
+const PIPELINE_VARIANTS_PER_SAMPLE: i64 = 8 * BLEND_COUNT;
 
-fn pipeline_slot(family: pipeline_family, blend: Blend, samples: i64) -> i64 {
+fn pipeline_slot(family: PipelineFamily, blend: Blend, samples: i64) -> i64 {
     let family = match family {
         Scene2 => 0,
-        Scene2_textured => 1,
+        Scene2Textured => 1,
         Scene3 => 2,
-        Scene3_points => 3,
-        Scene3_textured => 4,
+        Scene3Points => 3,
+        Scene3Textured => 4,
         Ui => 5,
-        Scene3_world => 6,
+        Scene3World => 6,
         Marks => 7,
     };
     let blend = match blend {
@@ -855,10 +855,10 @@ fn pipeline_slot(family: pipeline_family, blend: Blend, samples: i64) -> i64 {
         16 => 3,
         _ => -1,
     };
-    if samples < 0 { -1 } else { ((family * blend_count + blend) * 4) + samples }
+    if samples < 0 { -1 } else { ((family * BLEND_COUNT + blend) * 4) + samples }
 }
 
-fn find_pipeline(value: &t, family: pipeline_family, blend: Blend, samples: i64) -> Option<usize> {
+fn find_pipeline(value: &SceneExecution, family: PipelineFamily, blend: Blend, samples: i64) -> Option<usize> {
     let slot = pipeline_slot(family, blend, samples);
     if slot < 0 { None } else { value.pipeline_lookup[slot as usize] }
 }
@@ -883,13 +883,13 @@ fn allocate_target(device: &Device, configuration: &Configuration) -> Result<Tex
 /// use; without it a sun-shadowed World draw is `Unsupported`.
 pub fn create(
     device: Option<Device>,
-    gpu_vertices: Option<gpu_vertices_owner>,
-    sun_depth: Option<sun_factory>,
+    gpu_vertices: Option<GpuVerticesOwner>,
+    sun_depth: Option<SunFactory>,
     offscreen: bool,
     driver: Box<dyn backend::Driver>,
     configuration: &Configuration,
-    make: &dyn Fn(&Device, pipeline_family, Blend, i64) -> Result<Pipeline, Error>,
-) -> Result<t, Error> {
+    make: &dyn Fn(&Device, PipelineFamily, Blend, i64) -> Result<Pipeline, Error>,
+) -> Result<SceneExecution, Error> {
     let owns_device = device.is_none();
     let device = match device {
         Some(device) => device,
@@ -925,12 +925,12 @@ pub fn create(
         }
     };
     let samples = sample_counts(&device);
-    let mut pipelines: Vec<pipeline_variant> = Vec::new();
-    for family in families {
-        for blend in blends {
+    let mut pipelines: Vec<PipelineVariant> = Vec::new();
+    for family in FAMILIES {
+        for blend in BLENDS {
             for sample in &samples {
                 match make(&device, family, blend, *sample) {
-                    Ok(pipeline) => pipelines.push(pipeline_variant { family, blend, samples: *sample, pipeline, argument: None }),
+                    Ok(pipeline) => pipelines.push(PipelineVariant { family, blend, samples: *sample, pipeline, argument: None }),
                     Err(e) => {
                         for variant in &pipelines {
                             let _ = backend::destroy_pipeline(&variant.pipeline);
@@ -947,15 +947,15 @@ pub fn create(
     match allocate_target(&device, configuration) {
         Ok(target) => {
             let attachments = scene_attachment_pool::create(&device, configuration, &samples);
-            let mut pipeline_lookup: Vec<Option<usize>> = vec![None; (pipeline_variants_per_sample * 4) as usize];
+            let mut pipeline_lookup: Vec<Option<usize>> = vec![None; (PIPELINE_VARIANTS_PER_SAMPLE * 4) as usize];
             for (index, variant) in pipelines.iter().enumerate() {
                 let slot = pipeline_slot(variant.family, variant.blend, variant.samples);
                 if slot >= 0 {
                     pipeline_lookup[slot as usize] = Some(index);
                 }
             }
-            let retired = Rc::new(RefCell::new(retired::default()));
-            Ok(t {
+            let retired = Rc::new(RefCell::new(Retired::default()));
+            Ok(SceneExecution {
                 device,
                 gpu_vertices: gpu_vertices.unwrap_or_else(create_gpu_vertices_owner),
                 owns_device,
@@ -975,11 +975,11 @@ pub fn create(
                 uniform_low: 0,
                 previous_uniforms: Vec::new(),
                 // the meshes' bytes: rays.native_stage holds them
-                prepared_cache: side_lru::create(lru::cache("renderer.prepared"), false, cache_byte_capacity, Box::new(|_, _| {}), 64),
+                prepared_cache: side_lru::create(lru::cache("renderer.prepared"), false, CACHE_BYTE_CAPACITY, Box::new(|_, _| {}), 64),
                 prepared_submission: None,
                 automatic_submission: None,
                 automatic_candidate: None,
-                prepared_scratch: prepared_scratch { scratch_slots: Vec::new(), scratch_length: 0 },
+                prepared_scratch: PreparedScratch { slots: Vec::new(), length: 0 },
                 auxiliary_cache: auxiliary_table(&retired),
                 texture_cache: texture_table(&retired),
                 retired,
@@ -988,14 +988,14 @@ pub fn create(
                 staged_stream: false,
                 samplers: HashMap::new(),
                 arguments: None,
-                icb_stats: icb_stats {
-                    icb_builds: 0,
-                    icb_hits: 0,
-                    icb_misses: 0,
-                    icb_evictions: 0,
-                    icb_executions: 0,
-                    icb_failures: 0,
-                    icb_last_failure: None,
+                icb_stats: IcbStats {
+                    builds: 0,
+                    hits: 0,
+                    misses: 0,
+                    evictions: 0,
+                    executions: 0,
+                    failures: 0,
+                    last_failure: None,
                 },
                 uploaded: 0,
                 swept_unregistered: 0,
@@ -1031,14 +1031,14 @@ fn digest_hex(data: &[u8]) -> String {
     format!("{:016x}{:016x}", a, b)
 }
 
-fn source_for_trust(mesh: &mesh, bytes: i64) -> Option<mesh> {
+fn source_for_trust(mesh: &Mesh, bytes: i64) -> Option<Mesh> {
     // Keep extra CPU retention within the already bounded GPU payload budget, even when an indexed
     // mesh contains a large unused vertex plane.
     let (v, i) = (mesh.vertex_bytes_len() as i64, blen(&mesh.indices) as i64);
     if i <= bytes && v <= bytes - i { Some(mesh.clone()) } else { None }
 }
 
-fn same_bytes(mesh: &mesh, source: &Option<mesh>) -> bool {
+fn same_bytes(mesh: &Mesh, source: &Option<Mesh>) -> bool {
     match source {
         Some(source) => {
             (match (&source.shared_vertices, &mesh.shared_vertices) {
@@ -1055,13 +1055,13 @@ fn same_bytes(mesh: &mesh, source: &Option<mesh>) -> bool {
     }
 }
 
-fn vertex_hash(mesh: &mesh) -> String {
+fn vertex_hash(mesh: &Mesh) -> String {
     let owned=mesh.vertices.borrow();
     let vertices=mesh.shared_vertices.as_ref().map_or(owned.as_slice(), |bytes| bytes.as_slice());
     digest_hex(vertices)
 }
 
-fn content_hash(mesh: &mesh, uniform_bytes: &[u8]) -> String {
+fn content_hash(mesh: &Mesh, uniform_bytes: &[u8]) -> String {
     format!("{}:{}:{}", vertex_hash(mesh), digest_hex(&mesh.indices.borrow()), digest_hex(uniform_bytes))
 }
 
@@ -1086,16 +1086,16 @@ fn valid_uniform_bytes(bytes_: &[u8]) -> bool {
     }
 }
 
-fn scratch_mem_mesh(scratch: &prepared_scratch, item: &cached_ref) -> bool {
-    scratch.scratch_slots[..scratch.scratch_length]
+fn scratch_mem_mesh(scratch: &PreparedScratch, item: &CachedRef) -> bool {
+    scratch.slots[..scratch.length]
         .iter()
-        .any(|slot| slot.slot_mesh.as_ref().is_some_and(|candidate| Rc::ptr_eq(candidate, item)))
+        .any(|slot| slot.mesh.as_ref().is_some_and(|candidate| Rc::ptr_eq(candidate, item)))
 }
 
 /// One entry per key. A hit needs no hashing: vertex-stable keys carry their identity, other draws
 /// keep the exact source bytes they were uploaded from and compare them physically. Content hashing
 /// happens once per upload and only decides a same-key miss for fresh but equal bytes.
-fn prepare(value: &mut t, uniforms: Option<&bytes>, vertex_stable: bool, mesh: &mesh) -> Result<cached_ref, Error> {
+fn prepare(value: &mut SceneExecution, uniforms: Option<&bytes>, vertex_stable: bool, mesh: &Mesh) -> Result<CachedRef, Error> {
     let uniform_bytes: Vec<u8> = uniforms.map(|b| b.borrow().clone()).unwrap_or_default();
     let valid_uniforms = uniforms.is_none_or(|bytes_| valid_uniform_bytes(&bytes_.borrow()));
     let key = mesh_key_string(&mesh.key);
@@ -1109,13 +1109,11 @@ fn prepare(value: &mut t, uniforms: Option<&bytes>, vertex_stable: bool, mesh: &
         {
             let owner = value.gpu_vertices.borrow();
             side_lru::iter(&mut value.cache, &mut |cached_key, _| {
-                if let TableKey::Str(cached_key) = cached_key {
-                    if let Some(name) = cached_key.strip_prefix(prefix) {
-                        if !owner.gpu_vertex_registry.contains_key(name) {
+                if let TableKey::Str(cached_key) = cached_key
+                    && let Some(name) = cached_key.strip_prefix(prefix)
+                        && !owner.gpu_vertex_registry.contains_key(name) {
                             stale.push(cached_key.clone());
                         }
-                    }
-                }
             });
         }
         for key in stale {
@@ -1161,15 +1159,15 @@ fn prepare(value: &mut t, uniforms: Option<&bytes>, vertex_stable: bool, mesh: &
 }
 
 fn prepare_upload(
-    value: &mut t,
+    value: &mut SceneExecution,
     uniforms: Option<&bytes>,
     uniform_bytes: &[u8],
     valid_uniforms: bool,
     vertex_stable: bool,
-    mesh: &mesh,
+    mesh: &Mesh,
     key: &str,
-    existing: Option<cached_ref>,
-) -> Result<cached_ref, Error> {
+    existing: Option<CachedRef>,
+) -> Result<CachedRef, Error> {
     let owned_vertices = mesh.vertices.borrow();
     let vertices = mesh.shared_vertices.as_ref().map_or(owned_vertices.as_slice(), |bytes| bytes.as_slice());
     let indices = mesh.indices.borrow();
@@ -1178,7 +1176,7 @@ fn prepare_upload(
     if mesh_key_string(&mesh.key).is_empty()
         || vertex_count <= 0
         || index_count <= 0
-        || (total == 0 && matches!(mesh.key, mesh_key::Host(_)))
+        || (total == 0 && matches!(mesh.key, MeshKey::Host(_)))
         || !valid_uniforms
     {
         return Err(failure_error("Scene_execution.prepare", ErrorKind::InvalidArgument, "mesh payload or transform uniforms are malformed"));
@@ -1186,10 +1184,10 @@ fn prepare_upload(
     let payload_hash = if vertex_stable { String::new() } else { content_hash(mesh, uniform_bytes) };
     let uniform_offset = uniforms.map(|_| (vertices.len() + indices.len()) as i64);
     let uniform_copy: Vec<u8> = uniform_bytes.to_vec();
-    let reserved = |item: &cached_ref| scratch_mem_mesh(&value.prepared_scratch, item);
-    let reusable: Option<cached_ref> = match &existing {
+    let reserved = |item: &CachedRef| scratch_mem_mesh(&value.prepared_scratch, item);
+    let reusable: Option<CachedRef> = match &existing {
         Some(item) if item.borrow().bytes == total && !reserved(item) => Some(item.clone()),
-        _ if side_lru::length(&mut value.cache) >= mesh_cache_entry_capacity => {
+        _ if side_lru::length(&mut value.cache) >= MESH_CACHE_ENTRY_CAPACITY => {
             let scratch = &value.prepared_scratch;
             side_lru::find_first(&mut value.cache, &|_, x| {
                 let x = cached_of(x);
@@ -1203,7 +1201,7 @@ fn prepare_upload(
     match reusable {
         Some(item) => {
             let mut packed = Vec::with_capacity(total as usize);
-            packed.extend_from_slice(&vertices);
+            packed.extend_from_slice(vertices);
             packed.extend_from_slice(&indices);
             packed.extend_from_slice(uniform_bytes);
             backend::write_buffer(&item.borrow().buffer, 0, &packed)?;
@@ -1248,12 +1246,12 @@ fn prepare_upload(
                     let _ = backend::destroy_buffer(&buffer);
                 })
             };
-            write(0, &vertices)?;
+            write(0, vertices)?;
             write(offset, &indices)?;
             if !uniform_bytes.is_empty() {
                 write(offset + indices.len() as i64, uniform_bytes)?;
             }
-            let item: cached_ref = Rc::new(RefCell::new(cached {
+            let item: CachedRef = Rc::new(RefCell::new(Cached {
                 key: key.to_owned(),
                 payload_hash,
                 trusted_source: source_for_trust(mesh, total),
@@ -1274,7 +1272,7 @@ fn prepare_upload(
     }
 }
 
-const uniform_page_byte_capacity: i64 = 256 * 1024 * 1024;
+const UNIFORM_PAGE_BYTE_CAPACITY: i64 = 256 * 1024 * 1024;
 
 fn align256(value: i64) -> i64 {
     (value + 255) & !255
@@ -1314,22 +1312,22 @@ fn uniform_owner() -> &'static mem::Owner {
     OWNER.get_or_init(|| mem::plan_in(mem::Pool::Device, "renderer.uniform_page"))
 }
 
-const uniform_shrink_after_frames: i64 = 240;
+const UNIFORM_SHRINK_AFTER_FRAMES: i64 = 240;
 
 /// Deferred destruction: valid through the synchronous submission that evicted it.
-enum deferred {
+enum Deferred {
     Buffer(Buffer),
     Texture(Texture),
 }
 
-fn prepare_uniforms(value: &mut t, defer: &mut Vec<deferred>, sources: &[Option<bytes>]) -> Result<Vec<Option<uniform_slice>>, Error> {
+fn prepare_uniforms(value: &mut SceneExecution, defer: &mut Vec<Deferred>, sources: &[Option<bytes>]) -> Result<Vec<Option<UniformSlice>>, Error> {
     let operation = "Scene_execution.prepare_uniforms";
     // one page per plan S6: a frame's needs far under it for long enough bring it back down, also
     // when the uniforms stop changing
-    let capacity = value.uniform_pages[value.next_uniform_page].as_ref().map_or(0, |page| page.page_capacity);
+    let capacity = value.uniform_pages[value.next_uniform_page].as_ref().map_or(0, |page| page.capacity);
     let wanted: i64 = sources.iter().map(|s| s.as_ref().map_or(0, |b| align256(blen(b) as i64))).sum();
     value.uniform_low = if capacity > 65536 && wanted * 4 < capacity { value.uniform_low + 1 } else { 0 };
-    let shrink = value.uniform_low >= uniform_shrink_after_frames;
+    let shrink = value.uniform_low >= UNIFORM_SHRINK_AFTER_FRAMES;
     if shrink {
         value.uniform_low = 0;
     }
@@ -1339,8 +1337,8 @@ fn prepare_uniforms(value: &mut t, defer: &mut Vec<deferred>, sources: &[Option<
             (None, None) => true,
             (Some(bytes_), Some(slice)) => {
                 let b = bytes_.borrow();
-                b.len() == slice.uniform_length
-                    && b[..] == slice.uniform_staging[slice.uniform_staging_offset..slice.uniform_staging_offset + slice.uniform_length]
+                b.len() == slice.length
+                    && b[..] == slice.staging[slice.staging_offset..slice.staging_offset + slice.length]
             }
             _ => false,
         });
@@ -1370,11 +1368,11 @@ fn prepare_uniforms(value: &mut t, defer: &mut Vec<deferred>, sources: &[Option<
     let mut valid = true;
     for source in sources.iter().flatten() {
         let length = blen(source) as i64;
-        if length > uniform_page_byte_capacity {
+        if length > UNIFORM_PAGE_BYTE_CAPACITY {
             valid = false;
         } else {
             let aligned = align256(length);
-            if needed > uniform_page_byte_capacity - aligned {
+            if needed > UNIFORM_PAGE_BYTE_CAPACITY - aligned {
                 valid = false;
             } else {
                 needed += aligned;
@@ -1388,11 +1386,11 @@ fn prepare_uniforms(value: &mut t, defer: &mut Vec<deferred>, sources: &[Option<
         return Ok(vec![None; sources.len()]);
     }
     let page_index = value.next_uniform_page;
-    let reuse = matches!(&value.uniform_pages[page_index], Some(page) if page.page_capacity >= needed && !shrink);
+    let reuse = matches!(&value.uniform_pages[page_index], Some(page) if page.capacity >= needed && !shrink);
     if !reuse {
         let mut capacity: i64 = 4096;
         while capacity < needed {
-            capacity = uniform_page_byte_capacity.min(capacity * 2);
+            capacity = UNIFORM_PAGE_BYTE_CAPACITY.min(capacity * 2);
         }
         let descriptor = BufferDescriptor {
             label: Some("scene-transform-ring".to_owned()),
@@ -1401,13 +1399,13 @@ fn prepare_uniforms(value: &mut t, defer: &mut Vec<deferred>, sources: &[Option<
         };
         let buffer = backend::create_buffer(&value.device, descriptor, None)?;
         if let Some(old) = value.uniform_pages[page_index].take() {
-            mem::release(uniform_owner(), old.page_capacity);
-            defer.push(deferred::Buffer(old.page_buffer));
+            mem::release(uniform_owner(), old.capacity);
+            defer.push(Deferred::Buffer(old.buffer));
         }
         mem::charge(uniform_owner(), capacity);
-        value.uniform_pages[page_index] = Some(uniform_page { page_buffer: buffer, page_capacity: capacity });
+        value.uniform_pages[page_index] = Some(UniformPage { buffer, capacity });
     }
-    let page_buffer = value.uniform_pages[page_index].as_ref().expect("uniform page").page_buffer.clone();
+    let page_buffer = value.uniform_pages[page_index].as_ref().expect("uniform page").buffer.clone();
     value.next_uniform_page = (page_index + 1) % value.uniform_pages.len();
     // Pack every slice into one staging block and upload it once; the page is a bump allocator, not
     // a list of per-draw buffers.
@@ -1430,12 +1428,12 @@ fn prepare_uniforms(value: &mut t, defer: &mut Vec<deferred>, sources: &[Option<
     Ok(offsets
         .into_iter()
         .map(|entry| {
-            entry.map(|(offset, length)| uniform_slice {
-                uniform_buffer: page_buffer.clone(),
-                uniform_offset: offset,
-                uniform_staging: staging.clone(),
-                uniform_staging_offset: offset as usize,
-                uniform_length: length,
+            entry.map(|(offset, length)| UniformSlice {
+                buffer: page_buffer.clone(),
+                offset,
+                staging: staging.clone(),
+                staging_offset: offset as usize,
+                length,
             })
         })
         .collect())
@@ -1443,7 +1441,7 @@ fn prepare_uniforms(value: &mut t, defer: &mut Vec<deferred>, sources: &[Option<
 
 /// The texel format follows from level 0's byte count: 4, 8 or 16 bytes per texel are
 /// `Rgba8_unorm`, `Rgba16_float` and `Rgba32_float`.
-fn texel_bytes(source: &sampled_texture) -> i64 {
+fn texel_bytes(source: &SampledTexture) -> i64 {
     let level = &source.levels[0];
     if level.width <= 0 || level.height <= 0 { 0 } else { blen(&level.bytes) as i64 / (level.width * level.height) }
 }
@@ -1456,7 +1454,7 @@ fn texel_format(texel: i64) -> TextureFormat {
     }
 }
 
-fn valid_texture(source: &sampled_texture) -> bool {
+fn valid_texture(source: &SampledTexture) -> bool {
     !source.key.is_empty()
         && !source.levels.is_empty()
         && ogpu::validation::validate_sampler(&source.sampler).is_ok()
@@ -1482,23 +1480,23 @@ fn valid_texture(source: &sampled_texture) -> bool {
         }
 }
 
-fn texture_upload_scratch_for(value: &mut t, total: i64) -> Result<(), Error> {
+fn texture_upload_scratch_for(value: &mut SceneExecution, total: i64) -> Result<(), Error> {
     if value.staged_frame != value.frame {
         value.staged_stream = value.staged_frame == value.frame - 1;
         value.staged_frame = value.frame;
     }
-    if matches!(&value.texture_upload_scratch, Some(scratch) if scratch.scratch_size == total) {
+    if matches!(&value.texture_upload_scratch, Some(scratch) if scratch.size == total) {
         return Ok(());
     }
     let descriptor = BufferDescriptor { label: Some("scene-texture-staging".to_owned()), size: total, usage: vec![BufferUsage::CopySrc] };
     let scratch_buffer = backend::create_buffer(&value.device, descriptor, None)?;
-    let previous = value.texture_upload_scratch.replace(texture_upload_scratch {
-        scratch_buffer,
-        scratch_bytes: vec![0u8; total as usize],
-        scratch_size: total,
+    let previous = value.texture_upload_scratch.replace(TextureUploadScratch {
+        buffer: scratch_buffer,
+        bytes: vec![0u8; total as usize],
+        size: total,
     });
     if let Some(old) = previous {
-        let _ = backend::destroy_buffer(&old.scratch_buffer);
+        let _ = backend::destroy_buffer(&old.buffer);
     }
     Ok(())
 }
@@ -1506,17 +1504,16 @@ fn texture_upload_scratch_for(value: &mut t, total: i64) -> Result<(), Error> {
 /// Uploads complete inside their frame, so what they staged through goes at its end: an image
 /// uploads once, and two copies of it should not outlive that. A canvas that uploads frame after
 /// frame keeps them, or each frame would pay for a new pair.
-fn release_texture_staging(value: &mut t) {
-    if value.texture_upload_scratch.is_some() && !(value.staged_stream && value.staged_frame == value.frame) {
-        if let Some(scratch) = value.texture_upload_scratch.take() {
-            let _ = backend::destroy_buffer(&scratch.scratch_buffer);
+fn release_texture_staging(value: &mut SceneExecution) {
+    if value.texture_upload_scratch.is_some() && !(value.staged_stream && value.staged_frame == value.frame)
+        && let Some(scratch) = value.texture_upload_scratch.take() {
+            let _ = backend::destroy_buffer(&scratch.buffer);
         }
-    }
 }
 
 /// Destroys the texture staging a run of uploading frames keeps for the next one; the next upload
 /// makes it again.
-pub fn release_staging(value: &mut t) {
+pub fn release_staging(value: &mut SceneExecution) {
     value.staged_stream = false;
     release_texture_staging(value);
 }
@@ -1525,7 +1522,7 @@ fn image_or_canvas_key(key: &str) -> bool {
     ["canvas:", "image:", "texture:", "text:", "world:"].iter().any(|prefix| key.starts_with(prefix))
 }
 
-fn levels_hash(source: &sampled_texture) -> String {
+fn levels_hash(source: &SampledTexture) -> String {
     let parts: Vec<String> = source
         .levels
         .iter()
@@ -1534,7 +1531,7 @@ fn levels_hash(source: &sampled_texture) -> String {
     digest_hex(parts.join("|").as_bytes())
 }
 
-fn prepare_texture(value: &mut t, defer: &mut Vec<deferred>, source: &sampled_texture) -> Result<cached_texture_ref, Error> {
+fn prepare_texture(value: &mut SceneExecution, defer: &mut Vec<Deferred>, source: &SampledTexture) -> Result<CachedTextureRef, Error> {
     if let Some(texture) = &source.gpu {
         let (device_id, _) = backend::texture_driver_token(texture);
         if !valid_texture(source) {
@@ -1543,14 +1540,14 @@ fn prepare_texture(value: &mut t, defer: &mut Vec<deferred>, source: &sampled_te
         if device_id != ogpu::handle::device_id(backend::device_handle(&value.device)) {
             return Err(failure_error("Scene_execution.prepare_texture", ErrorKind::CrossDevice, "GPU image belongs to another renderer"));
         }
-        return Ok(Rc::new(RefCell::new(cached_texture {
-            texture_key: source.key.clone(),
-            texture_hash: String::new(),
-            texture_shape: String::new(),
+        return Ok(Rc::new(RefCell::new(CachedTexture {
+            key: source.key.clone(),
+            hash: String::new(),
+            shape: String::new(),
             texture: texture.clone(),
-            texture_bytes: 0,
-            texture_used: value.frame,
-            texture_levels: Rc::new(Vec::new()),
+            bytes: 0,
+            used: value.frame,
+            levels: Rc::new(Vec::new()),
         })));
     }
     let found = side_lru::find(&mut value.texture_cache, &skey(&source.key)).map(|item| cached_texture_of(&item));
@@ -1559,21 +1556,21 @@ fn prepare_texture(value: &mut t, defer: &mut Vec<deferred>, source: &sampled_te
         Some(item)
             if ["image:", "texture:", "shadow:", "text:", "world:"].iter().any(|prefix| key.starts_with(prefix)) =>
         {
-            item.borrow_mut().texture_used = value.frame;
+            item.borrow_mut().used = value.frame;
             Ok(item)
         }
         Some(item) if key.starts_with("canvas:") => upload_texture(value, defer, source, String::new(), Some(item)),
         // The immutable levels this slot was uploaded from: no hashing.
-        Some(item) if Rc::ptr_eq(&item.borrow().texture_levels, &source.levels) => {
-            item.borrow_mut().texture_used = value.frame;
+        Some(item) if Rc::ptr_eq(&item.borrow().levels, &source.levels) => {
+            item.borrow_mut().used = value.frame;
             Ok(item)
         }
         Some(item) => {
             let hash = levels_hash(source);
-            if item.borrow().texture_hash == hash {
+            if item.borrow().hash == hash {
                 let mut b = item.borrow_mut();
-                b.texture_levels = source.levels.clone();
-                b.texture_used = value.frame;
+                b.levels = source.levels.clone();
+                b.used = value.frame;
                 drop(b);
                 Ok(item)
             } else {
@@ -1590,12 +1587,12 @@ fn prepare_texture(value: &mut t, defer: &mut Vec<deferred>, source: &sampled_te
 }
 
 fn upload_texture(
-    value: &mut t,
-    defer: &mut Vec<deferred>,
-    source: &sampled_texture,
+    value: &mut SceneExecution,
+    defer: &mut Vec<Deferred>,
+    source: &SampledTexture,
     hash: String,
-    reusable: Option<cached_texture_ref>,
-) -> Result<cached_texture_ref, Error> {
+    reusable: Option<CachedTextureRef>,
+) -> Result<CachedTextureRef, Error> {
     if !valid_texture(source) {
         return Err(failure_error("Scene_execution.prepare_texture", ErrorKind::InvalidArgument, "texture or sampler is malformed"));
     }
@@ -1618,7 +1615,7 @@ fn upload_texture(
             side_lru::find_first(&mut value.texture_cache, &|_, item| {
                 let item = cached_texture_of(item);
                 let b = item.borrow();
-                b.texture_shape == shape && image_or_canvas_key(&b.texture_key) && b.texture_used != frame
+                b.shape == shape && image_or_canvas_key(&b.key) && b.used != frame
             })
             .map(|item| cached_texture_of(&item))
         }
@@ -1640,7 +1637,7 @@ fn upload_texture(
     }
     let last = offsets.len() - 1;
     let total = offsets[last] + rows[last] * source.levels[last].height;
-    let cacheable = total <= texture_cache_byte_capacity;
+    let cacheable = total <= TEXTURE_CACHE_BYTE_CAPACITY;
     let (texture, created) = match &reusable {
         Some(item) if cacheable => (item.borrow().texture.clone(), false),
         _ => (backend::create_texture(&value.device, descriptor)?, true),
@@ -1657,8 +1654,8 @@ fn upload_texture(
     let staging;
     {
         let scratch = value.texture_upload_scratch.as_mut().expect("texture staging");
-        staging = scratch.scratch_buffer.clone();
-        let packed = &mut scratch.scratch_bytes;
+        staging = scratch.buffer.clone();
+        let packed = &mut scratch.bytes;
         for (level_index, level) in source.levels.iter().enumerate() {
             let pixels = level.bytes.borrow();
             let row_bytes = (level.width * texel) as usize;
@@ -1670,7 +1667,7 @@ fn upload_texture(
     }
     let written = {
         let scratch = value.texture_upload_scratch.as_ref().expect("texture staging");
-        backend::write_buffer(&staging, 0, &scratch.scratch_bytes)
+        backend::write_buffer(&staging, 0, &scratch.bytes)
     };
     if let Err(e) = written {
         destroy_created(&texture);
@@ -1711,33 +1708,33 @@ fn upload_texture(
     value.uploaded += total;
     match reusable {
         Some(item) if backend::texture_id(&item.borrow().texture) == backend::texture_id(&texture) => {
-            let old_key = item.borrow().texture_key.clone();
+            let old_key = item.borrow().key.clone();
             if old_key != source.key {
                 side_lru::take(&mut value.texture_cache, &skey(&old_key));
-                let bytes_ = item.borrow().texture_bytes;
-                item.borrow_mut().texture_key = source.key.clone();
+                let bytes_ = item.borrow().bytes;
+                item.borrow_mut().key = source.key.clone();
                 let item_any: Item = item.clone();
                 side_lru::add(&mut value.texture_cache, bytes_, skey(&source.key), item_any);
             }
             let mut b = item.borrow_mut();
-            b.texture_hash = hash;
-            b.texture_levels = source.levels.clone();
-            b.texture_used = value.frame;
+            b.hash = hash;
+            b.levels = source.levels.clone();
+            b.used = value.frame;
             drop(b);
             Ok(item)
         }
         _ => {
-            let item: cached_texture_ref = Rc::new(RefCell::new(cached_texture {
-                texture_key: source.key.clone(),
-                texture_hash: hash,
-                texture_shape: shape,
+            let item: CachedTextureRef = Rc::new(RefCell::new(CachedTexture {
+                key: source.key.clone(),
+                hash,
+                shape,
                 texture: texture.clone(),
-                texture_bytes: total,
-                texture_used: value.frame,
-                texture_levels: source.levels.clone(),
+                bytes: total,
+                used: value.frame,
+                levels: source.levels.clone(),
             }));
             if !cacheable {
-                defer.push(deferred::Texture(texture));
+                defer.push(Deferred::Texture(texture));
             } else {
                 let item_any: Item = item.clone();
                 side_lru::add(&mut value.texture_cache, total, skey(&source.key), item_any);
@@ -1747,14 +1744,14 @@ fn upload_texture(
     }
 }
 
-fn prepare_storage(value: &mut t, key: &str, bytes_: &bytes) -> Result<cached_auxiliary_ref, Error> {
+fn prepare_storage(value: &mut SceneExecution, key: &str, bytes_: &bytes) -> Result<CachedAuxiliaryRef, Error> {
     let found = side_lru::find(&mut value.auxiliary_cache, &skey(key)).map(|item| cached_auxiliary_of(&item));
     if let Some(item) = found {
-        if Rc::ptr_eq(&item.borrow().auxiliary_source, bytes_) {
+        if Rc::ptr_eq(&item.borrow().source, bytes_) {
             return Ok(item);
         }
-        if item.borrow().auxiliary_copy == *bytes_.borrow() {
-            item.borrow_mut().auxiliary_source = bytes_.clone();
+        if item.borrow().copy == *bytes_.borrow() {
+            item.borrow_mut().source = bytes_.clone();
             return Ok(item);
         }
     }
@@ -1769,10 +1766,10 @@ fn prepare_storage(value: &mut t, key: &str, bytes_: &bytes) -> Result<cached_au
         let _ = backend::destroy_buffer(&buffer);
         return Err(e);
     }
-    let item: cached_auxiliary_ref = Rc::new(RefCell::new(cached_auxiliary {
-        auxiliary_copy: data.clone(),
-        auxiliary_buffer: buffer,
-        auxiliary_source: bytes_.clone(),
+    let item: CachedAuxiliaryRef = Rc::new(RefCell::new(CachedAuxiliary {
+        copy: data.clone(),
+        buffer,
+        source: bytes_.clone(),
     }));
     let item_any: Item = item.clone();
     side_lru::add(&mut value.auxiliary_cache, data.len() as i64, skey(key), item_any);
@@ -1780,7 +1777,7 @@ fn prepare_storage(value: &mut t, key: &str, bytes_: &bytes) -> Result<cached_au
     Ok(item)
 }
 
-fn prepare_auxiliary(value: &mut t, source: &auxiliary_resource) -> Result<cached_auxiliary_ref, Error> {
+fn prepare_auxiliary(value: &mut SceneExecution, source: &AuxiliaryResource) -> Result<CachedAuxiliaryRef, Error> {
     prepare_storage(value, &source.key, &source.buffer)
 }
 
@@ -1797,7 +1794,7 @@ fn primitive_code(primitive: Primitive) -> &'static str {
     }
 }
 
-fn mesh_identity(mesh: &mesh) -> String {
+fn mesh_identity(mesh: &Mesh) -> String {
     format!(
         "{}:{}:{}:{}",
         mesh_key_string(&mesh.key),
@@ -1807,9 +1804,9 @@ fn mesh_identity(mesh: &mesh) -> String {
     )
 }
 
-fn combine_meshes(meshes: &[&mesh]) -> Result<mesh, Error> {
+fn combine_meshes(meshes: &[&Mesh]) -> Result<Mesh, Error> {
     let operation = "Scene_execution.combine_meshes";
-    let valid_indices = |mesh: &mesh| {
+    let valid_indices = |mesh: &Mesh| {
         let indices = mesh.indices.borrow();
         (0..mesh.index_count as usize).all(|index| {
             let value = u32_le(&indices, index * 4) as i32 as i64;
@@ -1856,8 +1853,8 @@ fn combine_meshes(meshes: &[&mesh]) -> Result<mesh, Error> {
         index_offset += mesh.index_count as usize * 4;
     }
     let identity = digest_hex(identities.join("|").as_bytes());
-    Ok(mesh {
-        key: mesh_key::Host(format!("batch:{}", identity)),
+    Ok(Mesh {
+        key: MeshKey::Host(format!("batch:{}", identity)),
         vertices: new_bytes(vertices),
         shared_vertices: None,
         vertex_count,
@@ -1867,7 +1864,7 @@ fn combine_meshes(meshes: &[&mesh]) -> Result<mesh, Error> {
     })
 }
 
-fn same_optional_texture(a: &Option<Rc<sampled_texture>>, b: &Option<Rc<sampled_texture>>) -> bool {
+fn same_optional_texture(a: &Option<Rc<SampledTexture>>, b: &Option<Rc<SampledTexture>>) -> bool {
     match (a, b) {
         (None, None) => true,
         (Some(a), Some(b)) => Rc::ptr_eq(a, b),
@@ -1875,7 +1872,7 @@ fn same_optional_texture(a: &Option<Rc<sampled_texture>>, b: &Option<Rc<sampled_
     }
 }
 
-fn same_optional_auxiliary(a: &Option<Rc<auxiliary_resource>>, b: &Option<Rc<auxiliary_resource>>) -> bool {
+fn same_optional_auxiliary(a: &Option<Rc<AuxiliaryResource>>, b: &Option<Rc<AuxiliaryResource>>) -> bool {
     match (a, b) {
         (None, None) => true,
         (Some(a), Some(b)) => Rc::ptr_eq(a, b),
@@ -1883,18 +1880,18 @@ fn same_optional_auxiliary(a: &Option<Rc<auxiliary_resource>>, b: &Option<Rc<aux
     }
 }
 
-fn attribute_bytes(entry: &sampled_draw) -> i64 {
+fn attribute_bytes(entry: &SampledDraw) -> i64 {
     entry.vertex_attributes.as_ref().map_or(0, |(_, b)| blen(b) as i64)
 }
 
-fn draw_bytes(entry: &sampled_draw) -> i64 {
+fn draw_bytes(entry: &SampledDraw) -> i64 {
     (entry.draw.mesh.vertex_bytes_len() + blen(&entry.draw.mesh.indices)) as i64 + attribute_bytes(entry)
 }
 
-fn coalesce_draws(draws: &[draw]) -> Result<Vec<draw>, Error> {
-    let stride = |mesh: &mesh| if mesh.vertex_count == 0 { 0 } else { mesh.vertex_bytes_len() as i64 / mesh.vertex_count };
-    let compatible = |first: &sampled_draw, next: &sampled_draw| {
-        matches!((&first.draw.mesh.key, &next.draw.mesh.key), (mesh_key::Host(_), mesh_key::Host(_)))
+fn coalesce_draws(draws: &[Draw]) -> Result<Vec<Draw>, Error> {
+    let stride = |mesh: &Mesh| if mesh.vertex_count == 0 { 0 } else { mesh.vertex_bytes_len() as i64 / mesh.vertex_count };
+    let compatible = |first: &SampledDraw, next: &SampledDraw| {
+        matches!((&first.draw.mesh.key, &next.draw.mesh.key), (MeshKey::Host(_), MeshKey::Host(_)))
             && first.family == next.family
             && first.blend == next.blend
             && first.samples == next.samples
@@ -1905,19 +1902,19 @@ fn coalesce_draws(draws: &[draw]) -> Result<Vec<draw>, Error> {
             && same_optional_auxiliary(&first.auxiliary, &next.auxiliary)
             && first.vertex_attributes.is_some() == next.vertex_attributes.is_some()
     };
-    let mut result: Vec<draw> = Vec::new();
+    let mut result: Vec<Draw> = Vec::new();
     let mut position = 0;
     while position < draws.len() {
         let first = &draws[position];
         let first_bytes = draw_bytes(first);
-        if first_bytes > cache_byte_capacity {
+        if first_bytes > CACHE_BYTE_CAPACITY {
             return Err(failure_error("Scene_execution.coalesce", ErrorKind::Capacity, "one mesh exceeds the batch byte capacity"));
         }
         let mut packed_bytes = first_bytes;
         let mut end = position + 1;
         while end < draws.len() && compatible(first, &draws[end]) {
             let bytes_ = draw_bytes(&draws[end]);
-            if packed_bytes <= cache_byte_capacity - bytes_ {
+            if packed_bytes <= CACHE_BYTE_CAPACITY - bytes_ {
                 packed_bytes += bytes_;
                 end += 1;
             } else {
@@ -1932,7 +1929,7 @@ fn coalesce_draws(draws: &[draw]) -> Result<Vec<draw>, Error> {
         if entries.len() <= 64 {
             result.extend(entries.iter().cloned());
         } else {
-            let meshes: Vec<&mesh> = entries.iter().map(|entry| &entry.draw.mesh).collect();
+            let meshes: Vec<&Mesh> = entries.iter().map(|entry| &entry.draw.mesh).collect();
             let mesh = combine_meshes(&meshes)?;
             let vertex_attributes = first.vertex_attributes.as_ref().map(|_| {
                 let attributes: Vec<&(String, bytes)> = entries.iter().map(|e| e.vertex_attributes.as_ref().expect("attributes")).collect();
@@ -1955,11 +1952,11 @@ fn coalesce_draws(draws: &[draw]) -> Result<Vec<draw>, Error> {
     Ok(result)
 }
 
-fn prepared_bytes_of(draws: &[draw]) -> i64 {
+fn prepared_bytes_of(draws: &[Draw]) -> i64 {
     draws.iter().map(|entry| draw_bytes(entry)).sum()
 }
 
-fn resolve_prepared(value: &mut t, prepared: &Option<(String, i64)>, draws: &[draw]) -> Result<Vec<draw>, Error> {
+fn resolve_prepared(value: &mut SceneExecution, prepared: &Option<(String, i64)>, draws: &[Draw]) -> Result<Vec<Draw>, Error> {
     match prepared {
         Some((identity, _)) if identity.is_empty() => {
             Err(failure_error("Scene_execution.prepare_run", ErrorKind::InvalidArgument, "prepared identity is empty"))
@@ -1967,17 +1964,17 @@ fn resolve_prepared(value: &mut t, prepared: &Option<(String, i64)>, draws: &[dr
         Some((identity, version)) => {
             if let Some(item) = side_lru::find(&mut value.prepared_cache, &skey(identity)) {
                 let item = prepared_run_of(&item);
-                if item.prepared_version == *version {
-                    return Ok(item.prepared_draws.clone());
+                if item.version == *version {
+                    return Ok(item.draws.clone());
                 }
             }
             let prepared_draws = coalesce_draws(draws)?;
-            let item = Rc::new(prepared_run {
-                prepared_version: *version,
-                prepared_bytes: prepared_bytes_of(&prepared_draws),
-                prepared_draws: prepared_draws.clone(),
+            let item = Rc::new(PreparedRun {
+                version: *version,
+                bytes: prepared_bytes_of(&prepared_draws),
+                draws: prepared_draws.clone(),
             });
-            let bytes_ = item.prepared_bytes;
+            let bytes_ = item.bytes;
             side_lru::add(&mut value.prepared_cache, bytes_, skey(identity), item);
             Ok(prepared_draws)
         }
@@ -1991,13 +1988,13 @@ fn intersect_extent(bound_w: i64, bound_h: i64, (x, y, w, h): (i64, i64, i64, i6
     if x1 <= x0 || y1 <= y0 { None } else { Some((x0, y0, x1 - x0, y1 - y0)) }
 }
 
-fn texture_signature(source: &sampled_texture, cached: &cached_texture_ref) -> (i64, SamplerDescriptor) {
+fn texture_signature(source: &SampledTexture, cached: &CachedTextureRef) -> (i64, SamplerDescriptor) {
     (backend::texture_id(&cached.borrow().texture), source.sampler.clone())
 }
 
-fn auxiliary_signature(entry: &(Rc<auxiliary_resource>, cached_auxiliary_ref, cached_texture_ref)) -> (i64, i64, SamplerDescriptor) {
+fn auxiliary_signature(entry: &(Rc<AuxiliaryResource>, CachedAuxiliaryRef, CachedTextureRef)) -> (i64, i64, SamplerDescriptor) {
     (
-        backend::buffer_id(&entry.1.borrow().auxiliary_buffer),
+        backend::buffer_id(&entry.1.borrow().buffer),
         backend::texture_id(&entry.2.borrow().texture),
         entry.0.texture.sampler.clone(),
     )
@@ -2007,91 +2004,91 @@ fn auxiliary_signature(entry: &(Rc<auxiliary_resource>, cached_auxiliary_ref, ca
 /// reuse their input buffer after `render` returns; retaining it here would turn later mutation
 /// into a false cache hit. Completed ring slices may be replayed when the whole uniform set is
 /// unchanged. A changed set gets a different page and offsets.
-fn automatic_signature(slot: &prepared_slot) -> automatic_signature {
-    let item = slot.slot_mesh.as_ref().expect("slot mesh").borrow();
-    let mut signature_state = slot.slot_state.clone().expect("slot state");
-    signature_state.transform_uniforms = match &slot.slot_uniform {
+fn automatic_signature(slot: &PreparedSlot) -> AutomaticSignature {
+    let item = slot.mesh.as_ref().expect("slot mesh").borrow();
+    let mut signature_state = slot.state.clone().expect("slot state");
+    signature_state.transform_uniforms = match &slot.uniform {
         Some(_) => None,
         None => signature_state.transform_uniforms.as_ref().map(|b| new_bytes(b.borrow().clone())),
     };
-    automatic_signature {
-        signature_family: slot.slot_family,
-        signature_blend: slot.slot_blend,
-        signature_samples: slot.slot_samples,
-        signature_state,
-        signature_texture: slot.slot_texture.as_ref().map(|(source, cached)| texture_signature(source, cached)),
-        signature_auxiliary: slot.slot_auxiliary.as_ref().map(auxiliary_signature),
-        signature_environment: slot.slot_environment.as_ref().map(|(source, cached)| texture_signature(source, cached)),
-        signature_buffer: backend::buffer_id(&item.buffer),
-        signature_gpu_vertices: slot.slot_gpu_vertices.as_ref().map(gpu_identity),
-        signature_vertex_attributes: slot.slot_vertex_attributes.as_ref().map(|a| backend::buffer_id(&a.borrow().auxiliary_buffer)),
-        signature_index_offset: item.index_offset,
-        signature_uniform_buffer: slot.slot_uniform.as_ref().map(|u| backend::buffer_id(&u.uniform_buffer)),
-        signature_uniform_offset: slot.slot_uniform.as_ref().map(|u| u.uniform_offset),
-        signature_vertex_count: item.vertex_count,
-        signature_index_count: item.index_count,
+    AutomaticSignature {
+        family: slot.family,
+        blend: slot.blend,
+        samples: slot.samples,
+        state: signature_state,
+        texture: slot.texture.as_ref().map(|(source, cached)| texture_signature(source, cached)),
+        auxiliary: slot.auxiliary.as_ref().map(auxiliary_signature),
+        environment: slot.environment.as_ref().map(|(source, cached)| texture_signature(source, cached)),
+        buffer: backend::buffer_id(&item.buffer),
+        gpu_vertices: slot.gpu_vertices.as_ref().map(gpu_identity),
+        vertex_attributes: slot.vertex_attributes.as_ref().map(|a| backend::buffer_id(&a.borrow().buffer)),
+        index_offset: item.index_offset,
+        uniform_buffer: slot.uniform.as_ref().map(|u| backend::buffer_id(&u.buffer)),
+        uniform_offset: slot.uniform.as_ref().map(|u| u.offset),
+        vertex_count: item.vertex_count,
+        index_count: item.index_count,
     }
 }
 
-const prepared_scratch_capacity: usize = 65_536;
+const PREPARED_SCRATCH_CAPACITY: usize = 65_536;
 
-fn make_prepared_slot() -> prepared_slot {
-    prepared_slot {
-        slot_family: Scene2,
-        slot_blend: Blend::Replace,
-        slot_samples: 1,
-        slot_state: None,
-        slot_texture: None,
-        slot_auxiliary: None,
-        slot_environment: None,
-        slot_mesh: None,
-        slot_uniform: None,
-        slot_vertex_attributes: None,
-        slot_gpu_vertices: None,
+fn make_prepared_slot() -> PreparedSlot {
+    PreparedSlot {
+        family: Scene2,
+        blend: Blend::Replace,
+        samples: 1,
+        state: None,
+        texture: None,
+        auxiliary: None,
+        environment: None,
+        mesh: None,
+        uniform: None,
+        vertex_attributes: None,
+        gpu_vertices: None,
     }
 }
 
-fn ensure_prepared_scratch(scratch: &mut prepared_scratch, needed: usize) -> Result<(), Error> {
-    if needed > prepared_scratch_capacity {
+fn ensure_prepared_scratch(scratch: &mut PreparedScratch, needed: usize) -> Result<(), Error> {
+    if needed > PREPARED_SCRATCH_CAPACITY {
         return Err(failure_error("Renderer.submit", ErrorKind::Capacity, "one submission exceeds the bounded prepared-draw capacity"));
     }
-    if needed <= scratch.scratch_slots.len() {
+    if needed <= scratch.slots.len() {
         return Ok(());
     }
-    let mut capacity = scratch.scratch_slots.len();
+    let mut capacity = scratch.slots.len();
     while capacity < needed {
-        capacity = prepared_scratch_capacity.min(16.max(capacity * 2));
+        capacity = PREPARED_SCRATCH_CAPACITY.min(16.max(capacity * 2));
     }
-    while scratch.scratch_slots.len() < capacity {
-        scratch.scratch_slots.push(make_prepared_slot());
+    while scratch.slots.len() < capacity {
+        scratch.slots.push(make_prepared_slot());
     }
     Ok(())
 }
 
-fn clear_prepared_scratch(scratch: &mut prepared_scratch) {
-    for slot in &mut scratch.scratch_slots[..scratch.scratch_length] {
-        slot.slot_state = None;
-        slot.slot_texture = None;
-        slot.slot_auxiliary = None;
-        slot.slot_environment = None;
-        slot.slot_gpu_vertices = None;
-        slot.slot_mesh = None;
-        slot.slot_uniform = None;
-        slot.slot_vertex_attributes = None;
+fn clear_prepared_scratch(scratch: &mut PreparedScratch) {
+    for slot in &mut scratch.slots[..scratch.length] {
+        slot.state = None;
+        slot.texture = None;
+        slot.auxiliary = None;
+        slot.environment = None;
+        slot.gpu_vertices = None;
+        slot.mesh = None;
+        slot.uniform = None;
+        slot.vertex_attributes = None;
     }
-    scratch.scratch_length = 0;
+    scratch.length = 0;
 }
 
-fn has_depth(family: pipeline_family) -> bool {
-    !matches!(family, Scene2 | Scene2_textured | Ui | Marks)
+fn has_depth(family: PipelineFamily) -> bool {
+    !matches!(family, Scene2 | Scene2Textured | Ui | Marks)
 }
 
 /// Attachments and encoder state for one render pass over `target`.
 fn render_target(
-    value: &mut t,
-    family: pipeline_family,
+    value: &mut SceneExecution,
+    family: PipelineFamily,
     samples: i64,
-    state: &state,
+    state: &State,
     load: Load,
     clear: (f64, f64, f64, f64),
     later_color: bool,
@@ -2100,12 +2097,12 @@ fn render_target(
     // an attachment no other pass reads needs no memory: it clears here and only its resolve stays
     let color_passes = load == Load::Clear && !later_color;
     let depth_passes = state.depth_load == Load::Clear && !later_depth;
-    let mut keys: Vec<(scene_attachment_pool::kind, i64, bool)> = Vec::new();
+    let mut keys: Vec<(scene_attachment_pool::Kind, i64, bool)> = Vec::new();
     if samples != 1 {
-        keys.push((scene_attachment_pool::kind::Color, samples, color_passes));
+        keys.push((scene_attachment_pool::Kind::Color, samples, color_passes));
     }
     if has_depth(family) {
-        keys.push((scene_attachment_pool::kind::Depth, samples, depth_passes));
+        keys.push((scene_attachment_pool::Kind::Depth, samples, depth_passes));
     }
     let pooled = scene_attachment_pool::acquire_many(&mut value.attachments, &keys)?;
     let mut attachments = pooled.into_iter();
@@ -2133,9 +2130,9 @@ fn render_target(
     })
 }
 
-struct mix(u64);
+struct Mix(u64);
 
-impl mix {
+impl Mix {
     fn word(&mut self, value: u64) {
         self.0 = (self.0 ^ value).wrapping_mul(0x9E3779B97F4A7C15).rotate_left(29);
     }
@@ -2158,12 +2155,12 @@ impl mix {
 }
 
 fn sampler_key(descriptor: &SamplerDescriptor) -> u64 {
-    let mut h = mix(0x9E3779B97F4A7C15);
+    let mut h = Mix(0x9E3779B97F4A7C15);
     h.sampler(descriptor);
     h.0
 }
 
-fn sampler_for(value: &mut t, descriptor: &SamplerDescriptor) -> Result<Sampler, Error> {
+fn sampler_for(value: &mut SceneExecution, descriptor: &SamplerDescriptor) -> Result<Sampler, Error> {
     let key = sampler_key(descriptor);
     if let Some(sampler) = value.samplers.get(&key) {
         return Ok(sampler.clone());
@@ -2182,9 +2179,9 @@ fn sampler_for(value: &mut t, descriptor: &SamplerDescriptor) -> Result<Sampler,
     Ok(sampler)
 }
 
-const argument_page_bytes: i64 = 256 * 1024;
+const ARGUMENT_PAGE_BYTES: i64 = 256 * 1024;
 
-fn argument_encoder(value: &mut t, variant: usize) -> Result<Argument, Error> {
+fn argument_encoder(value: &mut SceneExecution, variant: usize) -> Result<Argument, Error> {
     if let Some(argument) = &value.pipelines[variant].argument {
         return Ok(argument.clone());
     }
@@ -2195,7 +2192,7 @@ fn argument_encoder(value: &mut t, variant: usize) -> Result<Argument, Error> {
 
 /// Canonical Scene2 binds its texture and sampler through one argument slice per (texture, sampler)
 /// pair inside a shared page, so indirect commands can reference textures.
-fn argument_slice(value: &mut t, variant: usize, texture: &Texture, sampler_descriptor: &SamplerDescriptor) -> Result<(Buffer, i64), Error> {
+fn argument_slice(value: &mut SceneExecution, variant: usize, texture: &Texture, sampler_descriptor: &SamplerDescriptor) -> Result<(Buffer, i64), Error> {
     let argument = argument_encoder(value, variant)?;
     if value.arguments.is_none() {
         let length = backend::argument_length(&argument);
@@ -2203,21 +2200,21 @@ fn argument_slice(value: &mut t, variant: usize, texture: &Texture, sampler_desc
         let stride = 16.max((length + alignment - 1) / alignment * alignment);
         let descriptor = BufferDescriptor {
             label: Some("scene-argument-page".to_owned()),
-            size: argument_page_bytes,
+            size: ARGUMENT_PAGE_BYTES,
             usage: vec![BufferUsage::Storage],
         };
         let argument_buffer = backend::create_buffer(&value.device, descriptor, None)?;
-        value.arguments = Some(argument_pool {
-            argument_buffer,
-            argument_stride: stride,
-            argument_capacity: argument_page_bytes / stride,
+        value.arguments = Some(ArgumentPool {
+            buffer: argument_buffer,
+            stride,
+            capacity: ARGUMENT_PAGE_BYTES / stride,
             slices: HashMap::new(),
-            argument_next: 0,
+            next: 0,
         });
     }
     let (stride, buffer) = {
         let pool = value.arguments.as_ref().expect("argument pool");
-        (pool.argument_stride, pool.argument_buffer.clone())
+        (pool.stride, pool.buffer.clone())
     };
     if backend::argument_length(&argument) > stride {
         return Err(failure_error("Scene_execution.argument_slice", ErrorKind::Capacity, "argument layout exceeds the shared slice stride"));
@@ -2228,29 +2225,29 @@ fn argument_slice(value: &mut t, variant: usize, texture: &Texture, sampler_desc
     }
     {
         let pool = value.arguments.as_mut().expect("argument pool");
-        if pool.argument_next >= pool.argument_capacity {
+        if pool.next >= pool.capacity {
             pool.slices.clear();
-            pool.argument_next = 0;
+            pool.next = 0;
             drop_plans(value);
         }
     }
-    let offset = value.arguments.as_ref().expect("argument pool").argument_next * stride;
+    let offset = value.arguments.as_ref().expect("argument pool").next * stride;
     let sampler = sampler_for(value, sampler_descriptor)?;
     backend::argument_texture(&argument, &buffer, offset, 0, texture)?;
     backend::argument_sampler(&argument, &buffer, offset, 1, &sampler)?;
     let pool = value.arguments.as_mut().expect("argument pool");
-    pool.argument_next += 1;
+    pool.next += 1;
     pool.slices.insert(key, offset);
     Ok((buffer, offset))
 }
 
-enum acquired {
+enum Acquired {
     Offscreen,
     Presented(backend::Frame),
 }
 
-fn discard(frame: &acquired) {
-    if let acquired::Presented(frame) = frame {
+fn discard(frame: &Acquired) {
+    if let Acquired::Presented(frame) = frame {
         let _ = backend::discard(frame);
     }
 }
@@ -2258,51 +2255,51 @@ fn discard(frame: &acquired) {
 /// One presented frame stays in flight: the CPU builds the next frame while the GPU draws this one.
 /// Waiting here, before any preparation, keeps every resource the previous frame used alive until it
 /// completes, so retiring and destroying after the next submission stays safe.
-fn settle(value: &mut t) -> Result<(), Error> {
+fn settle(value: &mut SceneExecution) -> Result<(), Error> {
     match value.in_flight.take() {
         None => Ok(()),
         Some(epoch) => backend::complete_through(&value.queue, epoch),
     }
 }
 
-enum acquisition {
-    Acquired(acquired),
+enum Acquisition {
+    Acquired(Acquired),
     Skipped,
 }
 
-fn acquire(value: &mut t) -> Result<acquisition, Error> {
+fn acquire(value: &mut SceneExecution) -> Result<Acquisition, Error> {
     settle(value)?;
     match &value.surface {
-        None => Ok(acquisition::Acquired(acquired::Offscreen)),
+        None => Ok(Acquisition::Acquired(Acquired::Offscreen)),
         Some(surface) => match backend::acquire_sync(surface)? {
-            backend::AcquireResult::Timeout | backend::AcquireResult::Occluded => Ok(acquisition::Skipped),
+            backend::AcquireResult::Timeout | backend::AcquireResult::Occluded => Ok(Acquisition::Skipped),
             backend::AcquireResult::DeviceLost => Err(failure_error("Renderer.submit", ErrorKind::DeviceLost, "device lost")),
-            backend::AcquireResult::Acquired(frame) => Ok(acquisition::Acquired(acquired::Presented(frame))),
+            backend::AcquireResult::Acquired(frame) => Ok(Acquisition::Acquired(Acquired::Presented(frame))),
         },
     }
 }
 
-fn plain_draws(draws: &[plan_draw]) -> bool {
-    draws.iter().all(|draw| draw.plan_textures.is_empty() && draw.plan_samplers.is_empty() && draw.plan_indirect.is_none())
+fn plain_draws(draws: &[PlanDraw]) -> bool {
+    draws.iter().all(|draw| draw.textures.is_empty() && draw.samplers.is_empty() && draw.indirect.is_none())
 }
 
 fn encode_batch(
-    value: &mut t,
+    value: &mut SceneExecution,
     commands: &backend::Commands,
     clear: (f64, f64, f64, f64),
-    later: &[Rc<batch_plan>],
-    batch: &batch_plan,
+    later: &[Rc<BatchPlan>],
+    batch: &BatchPlan,
 ) -> Result<(), Error> {
-    let same_samples = |next: &Rc<batch_plan>| next.batch_samples == batch.batch_samples;
+    let same_samples = |next: &Rc<BatchPlan>| next.samples == batch.samples;
     let target = render_target(
         value,
-        batch.batch_family,
-        batch.batch_samples,
-        &batch.batch_state,
-        if batch.batch_first { Load::Clear } else { Load::Load },
+        batch.family,
+        batch.samples,
+        &batch.state,
+        if batch.first { Load::Clear } else { Load::Load },
         clear,
         later.iter().any(same_samples),
-        later.iter().any(|next| same_samples(next) && has_depth(next.batch_family) && next.batch_state.depth_load == Load::Load),
+        later.iter().any(|next| same_samples(next) && has_depth(next.family) && next.state.depth_load == Load::Load),
     )?;
     let encoder = backend::render_encoder(commands, &target)?;
     let bound_w = value.configuration.physical_width;
@@ -2311,51 +2308,51 @@ fn encode_batch(
     // whole: it maps clip space, so a view that hangs over the target edge keeps its proportions
     // and only the scissor is clipped.
     let (visible, (x, y, width, height), (sx, sy, sw, sh)) = match (
-        intersect_extent(bound_w, bound_h, batch.batch_state.viewport),
-        intersect_extent(bound_w, bound_h, batch.batch_state.scissor),
+        intersect_extent(bound_w, bound_h, batch.state.viewport),
+        intersect_extent(bound_w, bound_h, batch.state.scissor),
     ) {
-        (Some(_), Some(scissor)) => (true, batch.batch_state.viewport, scissor),
+        (Some(_), Some(scissor)) => (true, batch.state.viewport, scissor),
         _ => (false, (0, 0, bound_w.max(1), bound_h.max(1)), (0, 0, bound_w.max(1), bound_h.max(1))),
     };
     backend::set_viewport(&encoder, Rect { x, y, width, height })?;
     backend::set_scissor(&encoder, Rect { x: sx, y: sy, width: sw, height: sh })?;
-    backend::set_cull(&encoder, batch.batch_state.cull)?;
+    backend::set_cull(&encoder, batch.state.cull)?;
     // 3D meshes wind counter-clockwise: a fact of the family, never of a bound slot
-    if has_depth(batch.batch_family) {
+    if has_depth(batch.family) {
         backend::set_winding(&encoder, backend::Winding::CounterClockwise)?;
         backend::set_depth_state(
             &encoder,
-            Some(DepthState { depth_compare: batch.batch_state.depth_compare, depth_write: batch.batch_state.depth_write }),
+            Some(DepthState { depth_compare: batch.state.depth_compare, depth_write: batch.state.depth_write }),
         )?;
     }
-    if !batch.batch_draws.is_empty() && visible {
-        if !batch.batch_resources.is_empty() {
-            backend::use_resources(&encoder, &batch.batch_resources)?;
+    if !batch.draws.is_empty() && visible {
+        if !batch.resources.is_empty() {
+            backend::use_resources(&encoder, &batch.resources)?;
         }
-        let icb = batch.batch_icb.borrow().clone();
+        let icb = batch.icb.borrow().clone();
         match icb {
             Some(icb) => {
-                backend::set_render_pipeline(&encoder, &batch.batch_draws[0].plan_draw.pipeline)?;
-                value.icb_stats.icb_executions += 1;
-                backend::execute_icb(&encoder, &icb, 0, batch.batch_draws.len() as i64)?;
+                backend::set_render_pipeline(&encoder, &batch.draws[0].draw.pipeline)?;
+                value.icb_stats.executions += 1;
+                backend::execute_icb(&encoder, &icb, 0, batch.draws.len() as i64)?;
             }
             None => {
-                if plain_draws(&batch.batch_draws) {
-                    backend::draw_batch(&encoder, &batch.batch_driver_draws)?;
+                if plain_draws(&batch.draws) {
+                    backend::draw_batch(&encoder, &batch.driver_draws)?;
                 } else {
-                    for draw in &batch.batch_draws {
-                        let bd = &draw.plan_draw;
+                    for draw in &batch.draws {
+                        let bd = &draw.draw;
                         backend::set_render_pipeline(&encoder, &bd.pipeline)?;
                         for (stage, index, buffer, offset) in &bd.buffers {
                             backend::set_stage_buffer(&encoder, *stage, *index, Some(*offset), buffer)?;
                         }
-                        for (stage, index, texture) in &draw.plan_textures {
+                        for (stage, index, texture) in &draw.textures {
                             backend::set_stage_texture(&encoder, *stage, *index, texture)?;
                         }
-                        for (stage, index, sampler) in &draw.plan_samplers {
+                        for (stage, index, sampler) in &draw.samplers {
                             backend::set_stage_sampler(&encoder, *stage, *index, sampler)?;
                         }
-                        match (&bd.index, &draw.plan_indirect) {
+                        match (&bd.index, &draw.indirect) {
                             (Some((index_type, buffer, offset, _)), Some((arguments, arguments_offset))) => {
                                 backend::draw_indexed_indirect(&encoder, bd.primitive, *index_type, buffer, *offset, arguments, *arguments_offset)?
                             }
@@ -2380,12 +2377,12 @@ fn encode_batch(
     backend::end_render(&encoder)
 }
 
-fn build_icb(value: &mut t, batch: &batch_plan) -> Result<(), Error> {
-    let draws = &batch.batch_draws;
+fn build_icb(value: &mut SceneExecution, batch: &BatchPlan) -> Result<(), Error> {
+    let draws = &batch.draws;
     if draws.is_empty()
         || !plain_draws(draws)
-        || batch.batch_icb.borrow().is_some()
-        || !draws.iter().all(|draw| backend::pipeline_indirect(&draw.plan_draw.pipeline))
+        || batch.icb.borrow().is_some()
+        || !draws.iter().all(|draw| backend::pipeline_indirect(&draw.draw.pipeline))
     {
         return Ok(());
     }
@@ -2393,7 +2390,7 @@ fn build_icb(value: &mut t, batch: &batch_plan) -> Result<(), Error> {
     let encoded = (|| -> Result<(), Error> {
         for (index, draw) in draws.iter().enumerate() {
             let index = index as i64;
-            let bd = &draw.plan_draw;
+            let bd = &draw.draw;
             backend::icb_set_pipeline(&icb, index, &bd.pipeline)?;
             for (stage, slot, buffer, offset) in &bd.buffers {
                 backend::icb_set_buffer(&icb, index, *stage, *slot, Some(*offset), buffer)?;
@@ -2413,17 +2410,17 @@ fn build_icb(value: &mut t, batch: &batch_plan) -> Result<(), Error> {
             Err(e)
         }
         Ok(()) => {
-            value.icb_stats.icb_builds += 1;
-            *batch.batch_icb.borrow_mut() = Some(icb);
+            value.icb_stats.builds += 1;
+            *batch.icb.borrow_mut() = Some(icb);
             Ok(())
         }
     }
 }
 
-fn submit_frame(value: &mut t, frame: &acquired, commands: &backend::Commands) -> Result<(), Error> {
+fn submit_frame(value: &mut SceneExecution, frame: &Acquired, commands: &backend::Commands) -> Result<(), Error> {
     let committed = match frame {
-        acquired::Offscreen => backend::commit(commands),
-        acquired::Presented(surface_frame) => backend::commit_present(commands, &value.target, surface_frame),
+        Acquired::Offscreen => backend::commit(commands),
+        Acquired::Presented(surface_frame) => backend::commit_present(commands, &value.target, surface_frame),
     };
     match committed {
         Err(e) => {
@@ -2432,17 +2429,17 @@ fn submit_frame(value: &mut t, frame: &acquired, commands: &backend::Commands) -
             Err(e)
         }
         Ok(receipt) => match frame {
-            acquired::Presented(_) => {
+            Acquired::Presented(_) => {
                 value.in_flight = Some(receipt.epoch);
                 Ok(())
             }
-            acquired::Offscreen => backend::complete_through(&value.queue, receipt.epoch),
+            Acquired::Offscreen => backend::complete_through(&value.queue, receipt.epoch),
         },
     }
 }
 
 /// Encodes `batches` into one command buffer and completes it.
-fn encode_frame(value: &mut t, frame: &acquired, clear: (f64, f64, f64, f64), batches: &[Rc<batch_plan>]) -> Result<(), Error> {
+fn encode_frame(value: &mut SceneExecution, frame: &Acquired, clear: (f64, f64, f64, f64), batches: &[Rc<BatchPlan>]) -> Result<(), Error> {
     let commands = match backend::begin_commands(&value.queue) {
         Ok(commands) => commands,
         Err(e) => {
@@ -2475,17 +2472,17 @@ fn encode_frame(value: &mut t, frame: &acquired, clear: (f64, f64, f64, f64), ba
 // opaque shadow. Cascades, per-view maps and alpha-tested casters lift these ceilings.
 
 /// Width and height of the sun map.
-pub const sun_map_size: i64 = 2048;
+pub const SUN_MAP_SIZE: i64 = 2048;
 
-fn sun_key_of(slot: &prepared_slot) -> Option<String> {
-    slot.slot_auxiliary.as_ref().and_then(|(source, _, _)| source.sun_shadow.clone())
+fn sun_key_of(slot: &PreparedSlot) -> Option<String> {
+    slot.auxiliary.as_ref().and_then(|(source, _, _)| source.sun_shadow.clone())
 }
 
 fn sun_descriptor(label: &str, usage: Vec<TextureUsage>) -> TextureDescriptor {
     TextureDescriptor {
         label: Some(label.to_owned()),
-        width: sun_map_size,
-        height: sun_map_size,
+        width: SUN_MAP_SIZE,
+        height: SUN_MAP_SIZE,
         depth: 1,
         mip_levels: 1,
         sample_count: 1,
@@ -2494,15 +2491,15 @@ fn sun_descriptor(label: &str, usage: Vec<TextureUsage>) -> TextureDescriptor {
     }
 }
 
-fn render_sun(value: &mut t) -> Result<(), Error> {
+fn render_sun(value: &mut SceneExecution) -> Result<(), Error> {
     let mut request: Option<String> = None;
-    for index in (0..value.prepared_scratch.scratch_length).rev() {
-        if let Some(key) = sun_key_of(&value.prepared_scratch.scratch_slots[index]) {
+    for index in (0..value.prepared_scratch.length).rev() {
+        if let Some(key) = sun_key_of(&value.prepared_scratch.slots[index]) {
             request = Some(key);
         }
     }
     let Some(key) = request else { return Ok(()) };
-    if matches!(&value.sun, Some(sun) if sun.sun_key == key) {
+    if matches!(&value.sun, Some(sun) if sun.key == key) {
         return Ok(());
     }
     if value.sun.is_none() {
@@ -2528,14 +2525,14 @@ fn render_sun(value: &mut t) -> Result<(), Error> {
                 return Err(e);
             }
         };
-        value.sun = Some(sun_map { sun_pipeline: pipeline, sun_color: color, sun_depth: depth, sun_key: String::new() });
+        value.sun = Some(SunMap { pipeline, color, depth, key: String::new() });
     }
     // Retained plans may have sampled the previous map.
     drop_plans(value);
-    value.sun.as_mut().expect("sun map").sun_key = String::new();
+    value.sun.as_mut().expect("sun map").key = String::new();
     let (sun_pipeline, sun_color, sun_depth) = {
         let sun = value.sun.as_ref().expect("sun map");
-        (sun.sun_pipeline.clone(), sun.sun_color.clone(), sun.sun_depth.clone())
+        (sun.pipeline.clone(), sun.color.clone(), sun.depth.clone())
     };
     let commands = backend::begin_commands(&value.queue)?;
     let encoded = (|| -> Result<(), Error> {
@@ -2558,29 +2555,29 @@ fn render_sun(value: &mut t) -> Result<(), Error> {
             },
         )?;
         backend::set_render_pipeline(&encoder, &sun_pipeline)?;
-        backend::set_viewport(&encoder, Rect { x: 0, y: 0, width: sun_map_size, height: sun_map_size })?;
+        backend::set_viewport(&encoder, Rect { x: 0, y: 0, width: SUN_MAP_SIZE, height: SUN_MAP_SIZE })?;
         backend::set_cull(&encoder, Cull::CullNone)?;
         backend::set_depth_state(&encoder, Some(DepthState { depth_compare: Comparison::Less, depth_write: true }))?;
-        for index in 0..value.prepared_scratch.scratch_length {
-            let slot = &value.prepared_scratch.scratch_slots[index];
-            let (Some((_, world, _)), Some(item), Some(state)) = (&slot.slot_auxiliary, &slot.slot_mesh, &slot.slot_state) else {
+        for index in 0..value.prepared_scratch.length {
+            let slot = &value.prepared_scratch.slots[index];
+            let (Some((_, world, _)), Some(item), Some(state)) = (&slot.auxiliary, &slot.mesh, &slot.state) else {
                 continue;
             };
             let item = item.borrow();
             if !(sun_key_of(slot).as_deref() == Some(key.as_str())
-                && slot.slot_family == Scene3_world
-                && (slot.slot_blend == Blend::Replace || slot.slot_blend == Blend::Alpha)
+                && slot.family == Scene3World
+                && (slot.blend == Blend::Replace || slot.blend == Blend::Alpha)
                 && state.depth_write
                 && item.primitive == Primitive::TriangleList)
             {
                 continue;
             }
             let bytes_ = state.transform_uniforms.as_ref().map_or(0, |b| blen(b) as i64);
-            let uniforms: Option<(Buffer, i64, i64)> = match (&slot.slot_uniform, item.uniform_offset) {
+            let uniforms: Option<(Buffer, i64, i64)> = match (&slot.uniform, item.uniform_offset) {
                 (Some(uniform), _) => Some((
-                    uniform.uniform_buffer.clone(),
-                    uniform.uniform_offset,
-                    if bytes_ > 5456 { uniform.uniform_offset + 5456 } else { uniform.uniform_offset },
+                    uniform.buffer.clone(),
+                    uniform.offset,
+                    if bytes_ > 5456 { uniform.offset + 5456 } else { uniform.offset },
                 )),
                 (None, Some(offset)) => Some((item.buffer.clone(), offset, offset)),
                 (None, None) => None,
@@ -2593,15 +2590,15 @@ fn render_sun(value: &mut t) -> Result<(), Error> {
                 ShaderStage::Vertex,
                 0,
                 None,
-                match &slot.slot_gpu_vertices {
-                    Some(source) => &source.gpu_buffer,
+                match &slot.gpu_vertices {
+                    Some(source) => &source.buffer,
                     None => &item.buffer,
                 },
             )?;
-            backend::set_stage_buffer(&encoder, ShaderStage::Vertex, 2, None, &world.borrow().auxiliary_buffer)?;
+            backend::set_stage_buffer(&encoder, ShaderStage::Vertex, 2, None, &world.borrow().buffer)?;
             backend::set_stage_buffer(&encoder, ShaderStage::Vertex, 3, Some(offset), &buffer)?;
             backend::set_stage_buffer(&encoder, ShaderStage::Vertex, 4, Some(instances_offset), &buffer)?;
-            let (indices, index_offset, index_count) = match slot.slot_gpu_vertices.as_ref().and_then(|source| source.gpu_indices.clone()) {
+            let (indices, index_offset, index_count) = match slot.gpu_vertices.as_ref().and_then(|source| source.indices.clone()) {
                 Some((buffer, count)) => (buffer, 0, count),
                 None => (item.buffer.clone(), item.index_offset, item.index_count),
             };
@@ -2625,7 +2622,7 @@ fn render_sun(value: &mut t) -> Result<(), Error> {
         Ok(()) => {
             let receipt = backend::commit(&commands)?;
             backend::complete_through(&value.queue, receipt.epoch)?;
-            value.sun.as_mut().expect("sun map").sun_key = key;
+            value.sun.as_mut().expect("sun map").key = key;
             value.sun_passes += 1;
             Ok(())
         }
@@ -2633,31 +2630,31 @@ fn render_sun(value: &mut t) -> Result<(), Error> {
 }
 
 /// Sun map passes rendered so far (see `auxiliary_resource.sun_shadow`).
-pub fn sun_shadow_passes(value: &t) -> i64 {
+pub fn sun_shadow_passes(value: &SceneExecution) -> i64 {
     value.sun_passes
 }
 
-fn replay_plan(value: &mut t, plan: &Rc<replay_plan>) -> Result<bool, Error> {
-    if !plan.replay_gpu_vertices.iter().all(gpu_vertices_valid) {
+fn replay_plan(value: &mut SceneExecution, plan: &Rc<ReplayPlan>) -> Result<bool, Error> {
+    if !plan.gpu_vertices.iter().all(gpu_vertices_valid) {
         return Err(failure_error("Scene_execution.replay", ErrorKind::StaleHandle, "GPU vertices are stale or closed"));
     }
     match acquire(value)? {
-        acquisition::Skipped => Ok(false),
-        acquisition::Acquired(frame) => encode_frame(value, &frame, plan.replay_clear, &plan.replay_batches).map(|()| true),
+        Acquisition::Skipped => Ok(false),
+        Acquisition::Acquired(frame) => encode_frame(value, &frame, plan.clear, &plan.batches).map(|()| true),
     }
 }
 
 /// 0: Scene2, 1: Scene3-like, 3: Ui and Marks draws bind directly; argument-buffer passes cannot
 /// mix them.
-fn attachment_class(family: pipeline_family) -> i64 {
+fn attachment_class(family: PipelineFamily) -> i64 {
     match family {
-        Scene2 | Scene2_textured => 0,
+        Scene2 | Scene2Textured => 0,
         Ui | Marks => 3,
-        Scene3 | Scene3_points | Scene3_textured | Scene3_world => 1,
+        Scene3 | Scene3Points | Scene3Textured | Scene3World => 1,
     }
 }
 
-fn same_pass_state(class_: i64, a: &state, b: &state) -> bool {
+fn same_pass_state(class_: i64, a: &State, b: &State) -> bool {
     a.viewport == b.viewport
         && a.scissor == b.scissor
         && a.cull == b.cull
@@ -2678,27 +2675,26 @@ fn assoc(table: &[(i64, i64)], slot: i64) -> i64 {
 }
 
 /// One draw's plan: the bindings its pipeline's Lisp declaration order expects.
-fn plan_entry(value: &mut t, index: usize) -> Result<plan_draw, Error> {
-    let slot = &value.prepared_scratch.scratch_slots[index];
-    let family = slot.slot_family;
-    let blend = slot.slot_blend;
-    let samples = slot.slot_samples;
-    let item_ref = slot.slot_mesh.clone().expect("slot mesh");
-    let slot_texture = slot.slot_texture.clone();
-    let slot_auxiliary = slot.slot_auxiliary.clone();
-    let slot_environment = slot.slot_environment.clone();
-    let slot_uniform = slot.slot_uniform.clone();
-    let slot_gpu_vertices = slot.slot_gpu_vertices.clone();
-    let slot_vertex_attributes = slot.slot_vertex_attributes.clone();
-    let transform_uniforms = slot.slot_state.as_ref().expect("slot state").transform_uniforms.clone();
+fn plan_entry(value: &mut SceneExecution, index: usize) -> Result<PlanDraw, Error> {
+    let slot = &value.prepared_scratch.slots[index];
+    let family = slot.family;
+    let blend = slot.blend;
+    let samples = slot.samples;
+    let item_ref = slot.mesh.clone().expect("slot mesh");
+    let slot_texture = slot.texture.clone();
+    let slot_auxiliary = slot.auxiliary.clone();
+    let slot_environment = slot.environment.clone();
+    let slot_uniform = slot.uniform.clone();
+    let slot_gpu_vertices = slot.gpu_vertices.clone();
+    let slot_vertex_attributes = slot.vertex_attributes.clone();
+    let transform_uniforms = slot.state.as_ref().expect("slot state").transform_uniforms.clone();
     let sun_requested = sun_key_of(slot).is_some();
     let item = item_ref.borrow();
-    if let Some(source) = &slot_gpu_vertices {
-        if !gpu_vertices_valid(source) {
+    if let Some(source) = &slot_gpu_vertices
+        && !gpu_vertices_valid(source) {
             return Err(failure_error("Renderer.submit", ErrorKind::StaleHandle, "GPU vertices are stale or closed"));
         }
-    }
-    let scene2 = family == Scene2 || family == Scene2_textured;
+    let scene2 = family == Scene2 || family == Scene2Textured;
     let direct = scene2 || family == Ui || family == Marks;
     let variant = find_pipeline(value, family, blend, samples).expect("pipeline variant");
     let vertex_stage = ShaderStage::Vertex;
@@ -2712,7 +2708,7 @@ fn plan_entry(value: &mut t, index: usize) -> Result<plan_draw, Error> {
         None => (vec![], vec![], vec![], vec![]),
         Some((source, cached)) => {
             let texture = cached.borrow().texture.clone();
-            if family == Scene2_textured {
+            if family == Scene2Textured {
                 let (page, offset) = argument_slice(value, variant, &texture, &source.sampler)?;
                 (vec![(fragment_stage, 7, page, offset)], vec![], vec![], vec![texture])
             } else {
@@ -2723,15 +2719,15 @@ fn plan_entry(value: &mut t, index: usize) -> Result<plan_draw, Error> {
     };
     let vertices: Buffer = match &slot_gpu_vertices {
         None => item.buffer.clone(),
-        Some(source) => source.gpu_buffer.clone(),
+        Some(source) => source.buffer.clone(),
     };
     let mut extra: Vec<(ShaderStage, i64, Buffer, i64)> = Vec::new();
     if let Some(source) = &slot_gpu_vertices {
-        for (i, b) in source.gpu_extra.iter().enumerate() {
+        for (i, b) in source.extra.iter().enumerate() {
             extra.push((vertex_stage, i as i64 + 1, b.clone(), 0));
         }
-        if is_scene3_family(family) && source.gpu_extra.is_empty() {
-            extra.push((vertex_stage, 1, source.gpu_buffer.clone(), 0));
+        if is_scene3_family(family) && source.extra.is_empty() {
+            extra.push((vertex_stage, 1, source.buffer.clone(), 0));
         }
     }
     match &slot_auxiliary {
@@ -2743,7 +2739,7 @@ fn plan_entry(value: &mut t, index: usize) -> Result<plan_draw, Error> {
         }
         Some((source, buffer, texture)) => {
             let sampler = sampler_for(value, &source.texture.sampler)?;
-            let mut all = vec![(vertex_stage, 0, vertices.clone(), 0), (fragment_stage, 3, buffer.borrow().auxiliary_buffer.clone(), 0)];
+            let mut all = vec![(vertex_stage, 0, vertices.clone(), 0), (fragment_stage, 3, buffer.borrow().buffer.clone(), 0)];
             all.extend(extra);
             all.extend(buffers);
             buffers = all;
@@ -2759,11 +2755,11 @@ fn plan_entry(value: &mut t, index: usize) -> Result<plan_draw, Error> {
     }
     // World draws bind the sun map at 8 (the camera map stands in when there is none; the block
     // says whether to read it) and the camera map at 9/10.
-    if let (Scene3_world, Some((source, cached))) = (family, &slot_environment) {
+    if let (Scene3World, Some((source, cached))) = (family, &slot_environment) {
         let sampler = sampler_for(value, &source.sampler)?;
         let camera = cached.borrow().texture.clone();
         let sun = match (&value.sun, sun_requested) {
-            (Some(sun), true) => sun.sun_color.clone(),
+            (Some(sun), true) => sun.color.clone(),
             _ => camera.clone(),
         };
         let mut tex = Vec::with_capacity(2 + textures.len());
@@ -2778,7 +2774,7 @@ fn plan_entry(value: &mut t, index: usize) -> Result<plan_draw, Error> {
     }
     if !direct {
         let attributes = match &slot_vertex_attributes {
-            Some(attributes) => attributes.borrow().auxiliary_buffer.clone(),
+            Some(attributes) => attributes.borrow().buffer.clone(),
             None => vertices.clone(),
         };
         let mut buf = Vec::with_capacity(1 + buffers.len());
@@ -2788,14 +2784,14 @@ fn plan_entry(value: &mut t, index: usize) -> Result<plan_draw, Error> {
     }
     match (&slot_uniform, item.uniform_offset) {
         (Some(uniform), _) => {
-            let binding = |stage: ShaderStage| (stage, 6, uniform.uniform_buffer.clone(), uniform.uniform_offset);
+            let binding = |stage: ShaderStage| (stage, 6, uniform.buffer.clone(), uniform.offset);
             let mut all = vec![binding(vertex_stage)];
             if !direct {
                 let offset = match &transform_uniforms {
-                    Some(b) if blen(b) > 5456 => uniform.uniform_offset + 5456,
-                    _ => uniform.uniform_offset,
+                    Some(b) if blen(b) > 5456 => uniform.offset + 5456,
+                    _ => uniform.offset,
                 };
-                all.push((vertex_stage, 7, uniform.uniform_buffer.clone(), offset));
+                all.push((vertex_stage, 7, uniform.buffer.clone(), offset));
                 all.push(binding(fragment_stage));
             }
             all.extend(buffers);
@@ -2848,12 +2844,12 @@ fn plan_entry(value: &mut t, index: usize) -> Result<plan_draw, Error> {
     };
     let (buffers, textures, samplers) = match family {
         Ui => regenerated(buffers, textures, samplers, &[((v, 0), vec![0, 1]), ((v, 6), vec![2])], &[(1, 3)], &[(2, 4)]),
-        Scene2 | Scene2_textured => regenerated(buffers, textures, samplers, &[((v, 6), vec![1])], &[], &[]),
-        Scene3 | Scene3_points if slot_gpu_vertices.is_some() => {
+        Scene2 | Scene2Textured => regenerated(buffers, textures, samplers, &[((v, 6), vec![1])], &[], &[]),
+        Scene3 | Scene3Points if slot_gpu_vertices.is_some() => {
             regenerated(buffers, textures, samplers, &device_scene3(&scene3), &[(1, 6)], &[(2, 7)])
         }
-        Scene3 | Scene3_points | Scene3_textured => regenerated(buffers, textures, samplers, &scene3, &[(1, 6)], &[(2, 7)]),
-        Scene3_world => {
+        Scene3 | Scene3Points | Scene3Textured => regenerated(buffers, textures, samplers, &scene3, &[(1, 6)], &[(2, 7)]),
+        Scene3World => {
             let base = if slot_gpu_vertices.is_some() { device_scene3(&scene3) } else { scene3.clone() };
             let mut table = vec![((f, 3), vec![6])];
             table.extend(base);
@@ -2861,7 +2857,7 @@ fn plan_entry(value: &mut t, index: usize) -> Result<plan_draw, Error> {
         }
         Marks => (buffers, textures, samplers),
     };
-    let gpu_indices = slot_gpu_vertices.as_ref().and_then(|source| source.gpu_indices.clone());
+    let gpu_indices = slot_gpu_vertices.as_ref().and_then(|source| source.indices.clone());
     let index = {
         let (buffer, offset, count) = match gpu_indices {
             Some((buffer, count)) => (buffer, 0, count),
@@ -2869,7 +2865,7 @@ fn plan_entry(value: &mut t, index: usize) -> Result<plan_draw, Error> {
         };
         Some((IndexType::Uint32, buffer, offset, count))
     };
-    let buffers = match slot_gpu_vertices.as_ref().and_then(|source| source.gpu_colors.clone()) {
+    let buffers = match slot_gpu_vertices.as_ref().and_then(|source| source.colors.clone()) {
         None => buffers,
         Some((colors, _)) => {
             let has_attributes = slot_vertex_attributes.is_some();
@@ -2884,14 +2880,14 @@ fn plan_entry(value: &mut t, index: usize) -> Result<plan_draw, Error> {
         }
     };
     let instances = match (family, &transform_uniforms) {
-        (Scene3 | Scene3_points | Scene3_textured | Scene3_world, Some(b)) if blen(b) > 5456 && (blen(b) - 5456) % 192 == 0 => {
+        (Scene3 | Scene3Points | Scene3Textured | Scene3World, Some(b)) if blen(b) > 5456 && (blen(b) - 5456).is_multiple_of(192) => {
             (blen(b) as i64 - 5456) / 192
         }
         _ => 1,
     };
     let driver_pipeline = value.pipelines[variant].pipeline.clone();
-    Ok(plan_draw {
-        plan_draw: BatchDraw {
+    Ok(PlanDraw {
+        draw: BatchDraw {
             pipeline: driver_pipeline,
             buffers,
             primitive: item.primitive,
@@ -2900,14 +2896,14 @@ fn plan_entry(value: &mut t, index: usize) -> Result<plan_draw, Error> {
             vertex_count: item.vertex_count,
             instances,
         },
-        plan_textures: textures,
-        plan_samplers: samplers,
-        plan_resident: resident,
-        plan_indirect: slot_gpu_vertices.as_ref().and_then(|source| source.gpu_indirect.clone()),
+        textures,
+        samplers,
+        resident,
+        indirect: slot_gpu_vertices.as_ref().and_then(|source| source.indirect.clone()),
     })
 }
 
-fn batch_resources_of(value: &t, draws: &[plan_draw]) -> Vec<ResourceUse> {
+fn batch_resources_of(value: &SceneExecution, draws: &[PlanDraw]) -> Vec<ResourceUse> {
     let mut seen_buffers: std::collections::HashSet<i64> = std::collections::HashSet::new();
     let mut seen_textures: std::collections::HashSet<i64> = std::collections::HashSet::new();
     let mut resources: Vec<ResourceUse> = Vec::new();
@@ -2922,64 +2918,64 @@ fn batch_resources_of(value: &t, draws: &[plan_draw]) -> Vec<ResourceUse> {
         }
     };
     for draw in draws {
-        for (_, _, b, _) in &draw.plan_draw.buffers {
+        for (_, _, b, _) in &draw.draw.buffers {
             buffer(b, &mut resources);
         }
-        if let Some((_, b, _, _)) = &draw.plan_draw.index {
+        if let Some((_, b, _, _)) = &draw.draw.index {
             buffer(b, &mut resources);
         }
-        if let Some((b, _)) = &draw.plan_indirect {
+        if let Some((b, _)) = &draw.indirect {
             buffer(b, &mut resources);
         }
-        for (_, _, tx) in &draw.plan_textures {
+        for (_, _, tx) in &draw.textures {
             texture_seen(tx, &mut resources);
         }
-        for tx in &draw.plan_resident {
+        for tx in &draw.resident {
             texture_seen(tx, &mut resources);
         }
     }
     if let Some(pool) = &value.arguments {
-        buffer(&pool.argument_buffer, &mut resources);
+        buffer(&pool.buffer, &mut resources);
     }
     resources
 }
 
-fn plan_batches(value: &mut t) -> Result<Vec<Rc<batch_plan>>, Error> {
-    let length = value.prepared_scratch.scratch_length;
-    let mut planned: Vec<Rc<batch_plan>> = Vec::new();
+fn plan_batches(value: &mut SceneExecution) -> Result<Vec<Rc<BatchPlan>>, Error> {
+    let length = value.prepared_scratch.length;
+    let mut planned: Vec<Rc<BatchPlan>> = Vec::new();
     let mut first = true;
     let mut index = 0;
     while index < length {
         let (family, samples, state) = {
-            let slot = &value.prepared_scratch.scratch_slots[index];
-            (slot.slot_family, slot.slot_samples, slot.slot_state.clone().expect("slot state"))
+            let slot = &value.prepared_scratch.slots[index];
+            (slot.family, slot.samples, slot.state.clone().expect("slot state"))
         };
         let class_ = attachment_class(family);
         let mut next = index + 1;
         while next < length && next - (index + 1) < 65_535 {
-            let slot = &value.prepared_scratch.scratch_slots[next];
-            if attachment_class(slot.slot_family) == class_
-                && slot.slot_samples == samples
-                && same_pass_state(class_, &state, slot.slot_state.as_ref().expect("slot state"))
+            let slot = &value.prepared_scratch.slots[next];
+            if attachment_class(slot.family) == class_
+                && slot.samples == samples
+                && same_pass_state(class_, &state, slot.state.as_ref().expect("slot state"))
             {
                 next += 1;
             } else {
                 break;
             }
         }
-        let mut draws: Vec<plan_draw> = Vec::with_capacity(next - index);
+        let mut draws: Vec<PlanDraw> = Vec::with_capacity(next - index);
         for slot_index in index..next {
             draws.push(plan_entry(value, slot_index)?);
         }
-        let batch = batch_plan {
-            batch_family: family,
-            batch_samples: samples,
-            batch_state: state,
-            batch_first: first,
-            batch_driver_draws: draws.iter().map(|d| d.plan_draw.clone()).collect(),
-            batch_resources: batch_resources_of(value, &draws),
-            batch_draws: draws,
-            batch_icb: RefCell::new(None),
+        let batch = BatchPlan {
+            family,
+            samples,
+            state,
+            first,
+            driver_draws: draws.iter().map(|d| d.draw.clone()).collect(),
+            resources: batch_resources_of(value, &draws),
+            draws,
+            icb: RefCell::new(None),
         };
         planned.push(Rc::new(batch));
         first = false;
@@ -2988,7 +2984,7 @@ fn plan_batches(value: &mut t) -> Result<Vec<Rc<batch_plan>>, Error> {
     if first {
         let width = value.configuration.physical_width;
         let height = value.configuration.physical_height;
-        let state = state {
+        let state = State {
             viewport: (0, 0, width, height),
             scissor: (0, 0, width, height),
             cull: Cull::CullNone,
@@ -2998,37 +2994,37 @@ fn plan_batches(value: &mut t) -> Result<Vec<Rc<batch_plan>>, Error> {
             depth_clear: 1.0,
             transform_uniforms: None,
         };
-        planned.push(Rc::new(batch_plan {
-            batch_family: Scene2,
-            batch_samples: 1,
-            batch_state: state,
-            batch_first: true,
-            batch_draws: vec![],
-            batch_driver_draws: vec![],
-            batch_resources: vec![],
-            batch_icb: RefCell::new(None),
+        planned.push(Rc::new(BatchPlan {
+            family: Scene2,
+            samples: 1,
+            state,
+            first: true,
+            draws: vec![],
+            driver_draws: vec![],
+            resources: vec![],
+            icb: RefCell::new(None),
         }));
     }
     Ok(planned)
 }
 
 fn finish_prepared_frame(
-    value: &mut t,
-    frame: acquired,
+    value: &mut SceneExecution,
+    frame: Acquired,
     clear: (f64, f64, f64, f64),
     prepared_key: &Option<(String, i64)>,
     draw_count: i64,
-    uniform_slices: Vec<Option<uniform_slice>>,
+    uniform_slices: Vec<Option<UniformSlice>>,
     after_prepare: &mut dyn FnMut(),
 ) -> Result<bool, Error> {
     after_prepare();
-    let mut signatures: Vec<automatic_signature> =
-        value.prepared_scratch.scratch_slots[..value.prepared_scratch.scratch_length].iter().map(automatic_signature).collect();
+    let mut signatures: Vec<AutomaticSignature> =
+        value.prepared_scratch.slots[..value.prepared_scratch.length].iter().map(automatic_signature).collect();
     let hit = match &value.automatic_submission {
         Some(plan)
-            if plan.replay_clear == clear
-                && plan.replay_gpu_vertices.iter().all(gpu_vertices_valid)
-                && plan.replay_payloads == signatures =>
+            if plan.clear == clear
+                && plan.gpu_vertices.iter().all(gpu_vertices_valid)
+                && plan.payloads == signatures =>
         {
             Some(plan.clone())
         }
@@ -3036,22 +3032,22 @@ fn finish_prepared_frame(
     };
     if let Some(plan) = hit {
         value.automatic_candidate = None;
-        value.icb_stats.icb_hits += 1;
+        value.icb_stats.hits += 1;
         clear_prepared_scratch(&mut value.prepared_scratch);
         // A prepared key claims the identical automatic plan, so its replay works.
         if let Some((identity, version)) = prepared_key {
             value.automatic_submission = None;
-            value.prepared_submission = Some(prepared_submission {
-                submission_identity: identity.clone(),
-                submission_version: *version,
-                submission_draw_count: draw_count,
-                submission_plan: plan.clone(),
+            value.prepared_submission = Some(PreparedSubmission {
+                identity: identity.clone(),
+                version: *version,
+                draw_count,
+                plan: plan.clone(),
             });
         }
-        return encode_frame(value, &frame, clear, &plan.replay_batches).map(|()| true);
+        return encode_frame(value, &frame, clear, &plan.batches).map(|()| true);
     }
-    value.icb_stats.icb_misses += 1;
-    let admit = value.automatic_candidate.as_ref().is_some_and(|c| c.candidate_clear == clear && c.candidate_payloads == signatures);
+    value.icb_stats.misses += 1;
+    let admit = value.automatic_candidate.as_ref().is_some_and(|c| c.clear == clear && c.payloads == signatures);
     // a plan nothing keeps (a frame unlike the last, without a prepared key) is encoded only
     let retained = prepared_key.is_some() || admit;
     let plan_batches_ = match plan_batches(value) {
@@ -3069,8 +3065,8 @@ fn finish_prepared_frame(
     } else {
         signatures.clone()
     };
-    let gpu_vertices: Vec<gpu_vertices> = if retained {
-        value.prepared_scratch.scratch_slots[..value.prepared_scratch.scratch_length].iter().rev().filter_map(|slot| slot.slot_gpu_vertices.clone()).collect()
+    let gpu_vertices: Vec<GpuVertices> = if retained {
+        value.prepared_scratch.slots[..value.prepared_scratch.length].iter().rev().filter_map(|slot| slot.gpu_vertices.clone()).collect()
     } else {
         Vec::new()
     };
@@ -3078,22 +3074,22 @@ fn finish_prepared_frame(
     encode_frame(value, &frame, clear, &plan_batches_)?;
     value.previous_uniforms = uniform_slices;
     let plan = retained.then(|| {
-        Rc::new(replay_plan { replay_clear: clear, replay_payloads: payloads, replay_batches: plan_batches_, replay_gpu_vertices: gpu_vertices })
+        Rc::new(ReplayPlan { clear, payloads, batches: plan_batches_, gpu_vertices })
     });
     if let Some(plan) = &plan {
-        for batch in &plan.replay_batches {
+        for batch in &plan.batches {
             if let Err(e) = build_icb(value, batch) {
-                value.icb_stats.icb_failures += 1;
-                value.icb_stats.icb_last_failure = Some(error::to_string(&e));
+                value.icb_stats.failures += 1;
+                value.icb_stats.last_failure = Some(error::to_string(&e));
             }
         }
     }
     if let Some((identity, version)) = prepared_key {
-        value.prepared_submission = Some(prepared_submission {
-            submission_identity: identity.clone(),
-            submission_version: *version,
-            submission_draw_count: draw_count,
-            submission_plan: plan.clone().expect("a prepared key retains its plan"),
+        value.prepared_submission = Some(PreparedSubmission {
+            identity: identity.clone(),
+            version: *version,
+            draw_count,
+            plan: plan.clone().expect("a prepared key retains its plan"),
         });
     }
     let old = value.automatic_submission.take();
@@ -3103,7 +3099,7 @@ fn finish_prepared_frame(
         value.automatic_candidate = None;
     } else {
         value.automatic_submission = None;
-        value.automatic_candidate = Some(automatic_candidate { candidate_clear: clear, candidate_payloads: signatures });
+        value.automatic_candidate = Some(AutomaticCandidate { clear, payloads: signatures });
     }
     Ok(true)
 }
@@ -3111,20 +3107,20 @@ fn finish_prepared_frame(
 /// Evicted and oversize resources are valid through this synchronous submission, but not through
 /// another replay. Retained plans borrow cache resources; drop both replay paths before releasing
 /// any of them, including on preparation/submission failure.
-fn finish_submit(value: &mut t, deferred_items: Vec<deferred>, result: Result<bool, Error>) -> Result<bool, Error> {
+fn finish_submit(value: &mut SceneExecution, deferred_items: Vec<Deferred>, result: Result<bool, Error>) -> Result<bool, Error> {
     let retired_pending = {
         let r = value.retired.borrow();
-        !r.retired_buffers.is_empty() || !r.retired_textures.is_empty()
+        !r.buffers.is_empty() || !r.textures.is_empty()
     };
     if !deferred_items.is_empty() || retired_pending {
         drop_plans(value);
     }
     for item in deferred_items.iter().rev() {
         match item {
-            deferred::Buffer(b) => {
+            Deferred::Buffer(b) => {
                 let _ = backend::destroy_buffer(b);
             }
-            deferred::Texture(tx) => {
+            Deferred::Texture(tx) => {
                 let _ = backend::destroy_texture(tx);
             }
         }
@@ -3140,26 +3136,25 @@ pub fn submit(
     prepared: Option<(String, i64)>,
     after_prepare: &mut dyn FnMut(),
     clear: Option<(f64, f64, f64, f64)>,
-    value: &mut t,
-    draws: &[draw],
+    value: &mut SceneExecution,
+    draws: &[Draw],
 ) -> Result<bool, Error> {
     let clear = clear.unwrap_or((0.0, 0.0, 0.0, 0.0));
     if value.dead {
         after_prepare();
         return Err(failure_error("Renderer.submit", ErrorKind::StaleHandle, "renderer is destroyed"));
     }
-    if draws.len() > prepared_scratch_capacity {
+    if draws.len() > PREPARED_SCRATCH_CAPACITY {
         after_prepare();
         return Err(failure_error("Renderer.submit", ErrorKind::Capacity, "one submission exceeds the bounded prepared-draw capacity"));
     }
-    if let (Some((identity, version)), Some(cached)) = (&prepared, &value.prepared_submission) {
-        if cached.submission_identity == *identity && cached.submission_version == *version && cached.submission_plan.replay_clear == clear {
-            let plan = cached.submission_plan.clone();
+    if let (Some((identity, version)), Some(cached)) = (&prepared, &value.prepared_submission)
+        && cached.identity == *identity && cached.version == *version && cached.plan.clear == clear {
+            let plan = cached.plan.clone();
             after_prepare();
             return replay_plan(value, &plan);
         }
-    }
-    let old = value.prepared_submission.take().map(|s| s.submission_plan);
+    let old = value.prepared_submission.take().map(|s| s.plan);
     drop_plan(value, old);
     let prepared_key = prepared.clone();
     let draws = match resolve_prepared(value, &prepared, draws) {
@@ -3171,14 +3166,14 @@ pub fn submit(
     };
     // An empty mesh (a zero-length line, a zero-radius circle) draws nothing: skip it instead of
     // failing the whole frame.
-    let draws: Vec<draw> = draws.into_iter().filter(|entry| entry.draw.mesh.vertex_count > 0 && entry.draw.mesh.index_count > 0).collect();
-    let valid_mesh = |mesh: &mesh| {
+    let draws: Vec<Draw> = draws.into_iter().filter(|entry| entry.draw.mesh.vertex_count > 0 && entry.draw.mesh.index_count > 0).collect();
+    let valid_mesh = |mesh: &Mesh| {
         !mesh_key_string(&mesh.key).is_empty()
             && mesh.vertex_count > 0
             && mesh.index_count > 0
             && valid_index_length(mesh)
             && (mesh.shared_vertices.is_none() || blen(&mesh.vertices)==0)
-            && (mesh.vertex_bytes_len() + blen(&mesh.indices) > 0 || matches!(mesh.key, mesh_key::Gpu_vertices(_)))
+            && (mesh.vertex_bytes_len() + blen(&mesh.indices) > 0 || matches!(mesh.key, MeshKey::GpuVertices(_)))
     };
     let supported = draws.iter().all(|entry| find_pipeline(value, entry.family, entry.blend, entry.samples).is_some());
     let valid = draws.iter().all(|entry| {
@@ -3188,7 +3183,7 @@ pub fn submit(
             // a Scene2 mesh is untextured, a Scene2 quad samples its texture
             && match entry.family {
                 Scene2 => entry.texture.is_none(),
-                Scene2_textured => entry.texture.is_some(),
+                Scene2Textured => entry.texture.is_some(),
                 _ => true,
             }
             && valid_vertex_attributes(entry)
@@ -3205,7 +3200,7 @@ pub fn submit(
         after_prepare();
         return Err(failure_error("Renderer.submit", ErrorKind::InvalidArgument, "draw resource preflight failed"));
     }
-    let mut deferred_items: Vec<deferred> = Vec::new();
+    let mut deferred_items: Vec<Deferred> = Vec::new();
     clear_prepared_scratch(&mut value.prepared_scratch);
     value.frame += 1;
     if let Err(e) = ensure_prepared_scratch(&mut value.prepared_scratch, draws.len()) {
@@ -3217,7 +3212,7 @@ pub fn submit(
     finish_submit(value, deferred_items, result)
 }
 
-struct draw_mode {
+struct DrawMode {
     scene2: bool,
     affine: bool,
     scene3_transform: bool,
@@ -3225,23 +3220,23 @@ struct draw_mode {
 }
 
 fn submit_prepared(
-    value: &mut t,
-    defer: &mut Vec<deferred>,
+    value: &mut SceneExecution,
+    defer: &mut Vec<Deferred>,
     prepared_key: &Option<(String, i64)>,
     clear: (f64, f64, f64, f64),
-    draws: &[draw],
+    draws: &[Draw],
     after_prepare: &mut dyn FnMut(),
 ) -> Result<bool, Error> {
-    let modes: Vec<draw_mode> = draws
+    let modes: Vec<DrawMode> = draws
         .iter()
         .map(|entry| {
             let family = entry.family;
             let draw = &entry.draw;
-            let scene2 = family == Scene2 || family == Scene2_textured;
+            let scene2 = family == Scene2 || family == Scene2Textured;
             let affine = (family == Ui || family == Marks)
                 && draw.state.transform_uniforms.as_ref().is_some_and(|b| blen(b) == 24 || blen(b) == 48);
             let scene3_transform = !scene2
-                && draw.state.transform_uniforms.as_ref().is_some_and(|b| blen(b) >= 5456 && (blen(b) - 5456) % 192 == 0);
+                && draw.state.transform_uniforms.as_ref().is_some_and(|b| blen(b) >= 5456 && (blen(b) - 5456).is_multiple_of(192));
             // a Scene2 mesh binds constants; a quad's are its vertices
             let source = if family == Scene2 {
                 Some(geometry_constants(draw.state.transform_uniforms.as_ref()))
@@ -3252,7 +3247,7 @@ fn submit_prepared(
             } else {
                 None
             };
-            draw_mode { scene2, affine, scene3_transform, source }
+            DrawMode { scene2, affine, scene3_transform, source }
         })
         .collect();
     let sources: Vec<Option<bytes>> = modes.iter().map(|m| m.source.clone()).collect();
@@ -3261,11 +3256,11 @@ fn submit_prepared(
             after_prepare();
             return Err(e);
         }
-        Ok(acquisition::Skipped) => {
+        Ok(Acquisition::Skipped) => {
             after_prepare();
             return Ok(false);
         }
-        Ok(acquisition::Acquired(frame)) => frame,
+        Ok(Acquisition::Acquired(frame)) => frame,
     };
     let uniform_slices = match prepare_uniforms(value, defer, &sources) {
         Ok(uniforms) => uniforms,
@@ -3289,26 +3284,26 @@ fn submit_prepared(
 }
 
 fn prepare_all(
-    value: &mut t,
-    defer: &mut Vec<deferred>,
-    draws: &[draw],
-    modes: &[draw_mode],
-    uniform_slices: &[Option<uniform_slice>],
+    value: &mut SceneExecution,
+    defer: &mut Vec<Deferred>,
+    draws: &[Draw],
+    modes: &[DrawMode],
+    uniform_slices: &[Option<UniformSlice>],
 ) -> Result<(), Error> {
     for entry in draws {
-        let position = value.prepared_scratch.scratch_length;
+        let position = value.prepared_scratch.length;
         let mode = &modes[position];
         let (family, draw) = (entry.family, &entry.draw);
         let gpu_vertices = resolve_gpu_vertices(value, entry)?;
         let cpu_mesh = match &gpu_vertices {
             None => draw.mesh.clone(),
-            Some(source) if source.gpu_indices.is_some() => draw.mesh.clone(),
-            Some(_) => mesh {
-                key: mesh_key::Host(format!(
+            Some(source) if source.indices.is_some() => draw.mesh.clone(),
+            Some(_) => Mesh {
+                key: MeshKey::Host(format!(
                     "gpu:indices:{}{}",
                     draw.mesh.vertex_count,
                     match family {
-                        Scene3 | Scene3_points => ":scene3",
+                        Scene3 | Scene3Points => ":scene3",
                         _ => "",
                     }
                 )),
@@ -3342,19 +3337,19 @@ fn prepare_all(
                 (Some((source.clone(), buffer, texture2)), environment)
             }
         };
-        let slot = &mut value.prepared_scratch.scratch_slots[position];
-        slot.slot_family = family;
-        slot.slot_blend = entry.blend;
-        slot.slot_samples = entry.samples;
-        slot.slot_state = Some(draw.state.clone());
-        slot.slot_texture = texture;
-        slot.slot_auxiliary = auxiliary;
-        slot.slot_environment = environment;
-        slot.slot_mesh = Some(mesh_);
-        slot.slot_uniform = uniform;
-        slot.slot_vertex_attributes = attributes;
-        slot.slot_gpu_vertices = gpu_vertices;
-        value.prepared_scratch.scratch_length += 1;
+        let slot = &mut value.prepared_scratch.slots[position];
+        slot.family = family;
+        slot.blend = entry.blend;
+        slot.samples = entry.samples;
+        slot.state = Some(draw.state.clone());
+        slot.texture = texture;
+        slot.auxiliary = auxiliary;
+        slot.environment = environment;
+        slot.mesh = Some(mesh_);
+        slot.uniform = uniform;
+        slot.vertex_attributes = attributes;
+        slot.gpu_vertices = gpu_vertices;
+        value.prepared_scratch.length += 1;
     }
     Ok(())
 }
@@ -3363,15 +3358,15 @@ pub fn replay_prepared_sampled_resources(
     clear: Option<(f64, f64, f64, f64)>,
     identity: &str,
     version: i64,
-    value: &mut t,
+    value: &mut SceneExecution,
 ) -> Result<Option<(bool, i64)>, Error> {
     let clear = clear.unwrap_or((0.0, 0.0, 0.0, 0.0));
     if value.dead {
         return Err(failure_error("Scene_execution.replay_prepared_sampled_resources", ErrorKind::StaleHandle, "renderer is destroyed"));
     }
     let cached = match &value.prepared_submission {
-        Some(cached) if cached.submission_identity == identity && cached.submission_version == version && cached.submission_plan.replay_clear == clear => {
-            Some((cached.submission_plan.clone(), cached.submission_draw_count))
+        Some(cached) if cached.identity == identity && cached.version == version && cached.plan.clear == clear => {
+            Some((cached.plan.clone(), cached.draw_count))
         }
         _ => None,
     };
@@ -3381,7 +3376,7 @@ pub fn replay_prepared_sampled_resources(
     }
 }
 
-pub fn resize(value: &mut t, configuration: &Configuration) -> Result<(), Error> {
+pub fn resize(value: &mut SceneExecution, configuration: &Configuration) -> Result<(), Error> {
     let _ = settle(value);
     drop_plans(value);
     let mut samples: Vec<i64> = value.pipelines.iter().map(|variant| variant.samples).collect();
@@ -3396,13 +3391,12 @@ pub fn resize(value: &mut t, configuration: &Configuration) -> Result<(), Error>
             return Err(e);
         }
     }
-    if let Some(surface) = &value.surface {
-        if let Err(e) = backend::configure(surface, configuration.clone()) {
+    if let Some(surface) = &value.surface
+        && let Err(e) = backend::configure(surface, configuration.clone()) {
             let _ = backend::destroy_texture(&target);
             scene_attachment_pool::destroy(&mut attachments);
             return Err(e);
         }
-    }
     let old = std::mem::replace(&mut value.target, target);
     let mut old_attachments = std::mem::replace(&mut value.attachments, attachments);
     value.configuration = configuration.clone();
@@ -3410,66 +3404,66 @@ pub fn resize(value: &mut t, configuration: &Configuration) -> Result<(), Error>
     backend::destroy_texture(&old)
 }
 
-pub fn upload_bytes(value: &t) -> i64 {
+pub fn upload_bytes(value: &SceneExecution) -> i64 {
     value.uploaded
 }
 
-pub mod Private {
+pub mod private {
     use super::*;
 
-    pub use super::{create_gpu_vertices_owner, gpu_vertices, gpu_vertices_owner, register_gpu_vertices, unregister_gpu_vertices};
+    pub use super::{create_gpu_vertices_owner, GpuVertices, GpuVerticesOwner, register_gpu_vertices, unregister_gpu_vertices};
 
-    pub fn uniform_capacity(value: &t) -> i64 {
-        value.uniform_pages[0].as_ref().map_or(0, |page| page.page_capacity)
+    pub fn uniform_capacity(value: &SceneExecution) -> i64 {
+        value.uniform_pages[0].as_ref().map_or(0, |page| page.capacity)
     }
 
-    pub const uniform_shrink_after: i64 = uniform_shrink_after_frames;
+    pub const UNIFORM_SHRINK_AFTER: i64 = UNIFORM_SHRINK_AFTER_FRAMES;
 
     /// What the texture upload scratch holds, on the device and on the host each.
-    pub fn staging_bytes(value: &t) -> i64 {
-        value.texture_upload_scratch.as_ref().map_or(0, |scratch| scratch.scratch_size)
+    pub fn staging_bytes(value: &SceneExecution) -> i64 {
+        value.texture_upload_scratch.as_ref().map_or(0, |scratch| scratch.size)
     }
 
     /// Whether the device has memoryless attachments, and how many the pool holds that ask for them.
-    pub fn memoryless_attachments(value: &t) -> (bool, i64) {
+    pub fn memoryless_attachments(value: &SceneExecution) -> (bool, i64) {
         (
             caps::has(&backend::capabilities(&value.device), &Feature::MemorylessAttachments),
             scene_attachment_pool::allocated(&value.attachments).iter().filter(|(_, _, passing, _)| *passing).count() as i64,
         )
     }
 
-    pub fn gpu_vertices_owner(value: &t) -> super::gpu_vertices_owner {
+    pub fn gpu_vertices_owner(value: &SceneExecution) -> super::GpuVerticesOwner {
         value.gpu_vertices.clone()
     }
 
     /// A live, valid registration's buffer, extra buffers and vertex count (initial domain).
-    pub fn find_gpu_vertices(owner: &super::gpu_vertices_owner, key: &str) -> Option<(Buffer, Vec<Buffer>, i64)> {
+    pub fn find_gpu_vertices(owner: &super::GpuVerticesOwner, key: &str) -> Option<(Buffer, Vec<Buffer>, i64)> {
         let found = owner.borrow().gpu_vertex_registry.get(key).cloned();
         match found {
-            Some(source) if gpu_vertices_valid(&source) => Some((source.gpu_buffer.clone(), source.gpu_extra.clone(), source.gpu_vertex_count)),
+            Some(source) if gpu_vertices_valid(&source) => Some((source.buffer.clone(), source.extra.clone(), source.vertex_count)),
             _ => None,
         }
     }
 
     /// A live, valid registration's borrowed indices (count) and colours (width).
-    pub fn find_gpu_streams(owner: &super::gpu_vertices_owner, key: &str) -> Option<(Option<(Buffer, i64)>, Option<(Buffer, i64)>)> {
+    pub fn find_gpu_streams(owner: &super::GpuVerticesOwner, key: &str) -> Option<(Option<(Buffer, i64)>, Option<(Buffer, i64)>)> {
         let found = owner.borrow().gpu_vertex_registry.get(key).cloned();
         match found {
-            Some(source) if gpu_vertices_valid(&source) => Some((source.gpu_indices.clone(), source.gpu_colors.clone())),
+            Some(source) if gpu_vertices_valid(&source) => Some((source.indices.clone(), source.colors.clone())),
             _ => None,
         }
     }
 
-    pub fn gpu_vertex_count_for_test(owner: &super::gpu_vertices_owner) -> i64 {
+    pub fn gpu_vertex_count_for_test(owner: &super::GpuVerticesOwner) -> i64 {
         owner.borrow().gpu_vertex_registry.len() as i64
     }
 
-    pub fn cache_count_for_report(value: &mut t) -> i64 {
+    pub fn cache_count_for_report(value: &mut SceneExecution) -> i64 {
         side_lru::length(&mut value.cache)
     }
 
     /// The number of draws the renderer encodes for these, after merging neighbours; -1 on error.
-    pub fn coalesced_draws_for_test(draws: &[draw]) -> i64 {
+    pub fn coalesced_draws_for_test(draws: &[Draw]) -> i64 {
         coalesce_draws(draws).map_or(-1, |draws| draws.len() as i64)
     }
 }
@@ -3477,20 +3471,20 @@ pub mod Private {
 /// Indirect-command replay plans: one automatic plan admitted after two identical frames and one
 /// identity-keyed prepared plan.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct retained_stats {
-    pub plan_hits: i64,
-    pub plan_misses: i64,
+pub struct RetainedStats {
+    pub hits: i64,
+    pub misses: i64,
 }
 
-pub fn retained_stats(value: &t) -> retained_stats {
-    retained_stats { plan_hits: value.icb_stats.icb_hits, plan_misses: value.icb_stats.icb_misses }
+pub fn retained_stats(value: &SceneExecution) -> RetainedStats {
+    RetainedStats { hits: value.icb_stats.hits, misses: value.icb_stats.misses }
 }
 
-pub fn pipeline_count(value: &t) -> i64 {
+pub fn pipeline_count(value: &SceneExecution) -> i64 {
     value.pipelines.len() as i64
 }
 
-pub fn read_pixels(value: &mut t, bytes_per_row: i64) -> Result<Vec<u8>, Error> {
+pub fn read_pixels(value: &mut SceneExecution, bytes_per_row: i64) -> Result<Vec<u8>, Error> {
     settle(value)?;
     backend::read_texture(&value.target, bytes_per_row)
 }
@@ -3503,7 +3497,7 @@ fn sorted_samplers(samplers: HashMap<u64, Sampler>) -> Vec<(u64, Sampler)> {
 
 /// Every owned handle is released; the first failure is reported after the remaining releases and
 /// device teardown have run.
-pub fn destroy(value: &mut t) -> Result<(), Error> {
+pub fn destroy(value: &mut SceneExecution) -> Result<(), Error> {
     if value.dead {
         return Ok(());
     }
@@ -3511,11 +3505,10 @@ pub fn destroy(value: &mut t) -> Result<(), Error> {
     value.dead = true;
     let mut first: Option<Error> = None;
     let record = |result: Result<(), Error>, first: &mut Option<Error>| {
-        if let Err(e) = result {
-            if first.is_none() {
+        if let Err(e) = result
+            && first.is_none() {
                 *first = Some(e);
             }
-        }
     };
     let named = |name: &str, result: Result<(), Error>, first: &mut Option<Error>| {
         if let Err(mut e) = result {
@@ -3528,7 +3521,7 @@ pub fn destroy(value: &mut t) -> Result<(), Error> {
     side_lru::clear(&mut value.prepared_cache);
     drop_plans(value);
     clear_prepared_scratch(&mut value.prepared_scratch);
-    value.prepared_scratch.scratch_slots = Vec::new();
+    value.prepared_scratch.slots = Vec::new();
     for variant in &mut value.pipelines {
         if let Some(argument) = variant.argument.take() {
             record(backend::destroy_argument(&argument), &mut first);
@@ -3538,8 +3531,8 @@ pub fn destroy(value: &mut t) -> Result<(), Error> {
     value.previous_uniforms = Vec::new();
     for page in value.uniform_pages.iter_mut() {
         if let Some(page) = page.take() {
-            mem::release(uniform_owner(), page.page_capacity);
-            named("uniform page", backend::destroy_buffer(&page.page_buffer), &mut first);
+            mem::release(uniform_owner(), page.capacity);
+            named("uniform page", backend::destroy_buffer(&page.buffer), &mut first);
         }
     }
     side_lru::clear(&mut value.auxiliary_cache);
@@ -3560,18 +3553,18 @@ pub fn destroy(value: &mut t) -> Result<(), Error> {
         }
     }
     if let Some(scratch) = value.texture_upload_scratch.take() {
-        record(backend::destroy_buffer(&scratch.scratch_buffer), &mut first);
+        record(backend::destroy_buffer(&scratch.buffer), &mut first);
     }
     if let Some(pool) = value.arguments.take() {
-        named("argument page", backend::destroy_buffer(&pool.argument_buffer), &mut first);
+        named("argument page", backend::destroy_buffer(&pool.buffer), &mut first);
     }
     for (_, sampler) in sorted_samplers(std::mem::take(&mut value.samplers)) {
         record(backend::destroy_sampler(&sampler), &mut first);
     }
     if let Some(sun) = value.sun.take() {
-        record(backend::destroy_texture(&sun.sun_color), &mut first);
-        record(backend::destroy_texture(&sun.sun_depth), &mut first);
-        record(backend::destroy_pipeline(&sun.sun_pipeline), &mut first);
+        record(backend::destroy_texture(&sun.color), &mut first);
+        record(backend::destroy_texture(&sun.depth), &mut first);
+        record(backend::destroy_pipeline(&sun.pipeline), &mut first);
     }
     scene_attachment_pool::destroy(&mut value.attachments);
     record(backend::destroy_texture(&value.target), &mut first);
@@ -3590,7 +3583,7 @@ pub fn destroy(value: &mut t) -> Result<(), Error> {
             e.message = format!(
                 "{}{}",
                 e.message,
-                match &value.icb_stats.icb_last_failure {
+                match &value.icb_stats.last_failure {
                     Some(text) => format!(" [plans: {}]", text),
                     None => String::new(),
                 }

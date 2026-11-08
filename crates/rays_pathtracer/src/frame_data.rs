@@ -32,7 +32,7 @@ pub fn storage(device: &b::Device, label: &str, size: i64) -> Result<Buffer, Str
 /// whose films hold pixel p at `order[p]`) or over `linear` ones (the resolves, writing `resolved`, their
 /// RGBA in [0, 1]), drawn into an output texture by Flow's image sink pass.
 #[derive(Clone)]
-pub struct film {
+pub struct Film {
     pub accum: Buffer,
     pub history_color: Vec<Buffer>,
     pub history_geometry: Vec<Buffer>,
@@ -51,7 +51,7 @@ fn destroy_buffers(list: &[Buffer]) {
 
 /// ponytail: a failure midway leaks the earlier allocations to the device's leak report, like
 /// `create`; allocation failures are out-of-memory only.
-pub fn allocate_film(device: &b::Device, width: i64, height: i64) -> Result<film, String> {
+pub fn allocate_film(device: &b::Device, width: i64, height: i64) -> Result<Film, String> {
     let history = |label: &str| buffer(Memory::DeviceLocal, vec![BufferUsage::Storage], device, label, width * height * 16);
     let texture = |index: i64| {
         b::create_texture(
@@ -122,11 +122,11 @@ pub fn allocate_film(device: &b::Device, width: i64, height: i64) -> Result<film
     }
     let linear = upload("pathtracer-linear", &bytes)?;
     let resolved = history("pathtracer-resolved")?;
-    Ok(film { accum, history_color: vec![color0, color1], history_geometry: vec![geometry0, geometry1], outputs: vec![output0, output1, output2], pixels, linear, order, resolved })
+    Ok(Film { accum, history_color: vec![color0, color1], history_geometry: vec![geometry0, geometry1], outputs: vec![output0, output1, output2], pixels, linear, order, resolved })
 }
 
 /// `keep`: an output the image still samples, left alive
-pub fn destroy_film(keep: Option<usize>, film: &film) {
+pub fn destroy_film(keep: Option<usize>, film: &Film) {
     let mut all = vec![film.accum.clone(), film.pixels.clone(), film.linear.clone(), film.order.clone(), film.resolved.clone()];
     all.extend(film.history_color.iter().cloned());
     all.extend(film.history_geometry.iter().cloned());

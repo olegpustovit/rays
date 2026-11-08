@@ -40,7 +40,7 @@ fn packed(width: i64, height: i64, body: &str) -> (packed::T, ex::Program) {
 fn prepare(p: &packed::T, time: f64) -> phost::Inputs {
     tp::ok(phost::prepare(p, &Default::default(), &input::at_time(time)))
 }
-fn runner(gpu: &rr::gpu, cache: &pipelines::T, p: &packed::T) -> run::T {
+fn runner(gpu: &rr::Gpu, cache: &pipelines::T, p: &packed::T) -> run::T {
     run::create(None, gpu, cache, &tp::ok(emit::kernel(&Default::default(), p)))
 }
 fn dispatch(r: &run::T, p: &packed::T, time: f64) -> run::Output {
@@ -217,7 +217,7 @@ fn qualified_publication() {
     for (index, nodes) in [vec![node.clone()], vec![scene::display_list(Some(vec![(1, image.clone())]), segment).unwrap()], vec![node.clone(), scene::Layer::layer_break(), node.clone()]].into_iter().enumerate() {
         let rendering = scene::Layer::stage_native_render(65, 17, &nodes).unwrap();
         if nodes.len() > 1 || matches!(rendering.layers.as_slice(), [scene::Layer::native_layer::Scene2_segment(..)]) { assert!(rendering.resources.is_empty()); }
-        let coordinator = rr::create_offscreen(&rr::configuration { logical_width: 65, logical_height: 17, drawable_width: 65, drawable_height: 17, ..rr::default_configuration() }).unwrap();
+        let coordinator = rr::create_offscreen(&rr::Configuration { logical_width: 65, logical_height: 17, drawable_width: 65, drawable_height: 17, ..rr::default_configuration() }).unwrap();
         let staged = scene::Layer::stage_native(65, 17, &nodes).unwrap();
         let lower = || rr::lower_scene2(&coordinator, 1, &|id| staged.resources.iter().find(|(key, _)| *key == id).map(|(_, resource)| resource.clone()), &staged.scene2);
         lower().unwrap();

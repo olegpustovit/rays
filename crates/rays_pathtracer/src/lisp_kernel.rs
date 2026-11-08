@@ -36,7 +36,7 @@ pub const SOURCE: &str = concat!(
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../crates/rays_pathtracer/resolve_preview.rays")),
 );
 
-pub use crate::lisp_kernel_cache::cache_dir;
+pub use crate::lisp_kernel_cache::CACHE_DIR;
 
 pub fn uniforms() -> Vec<(&'static str, Ty)> {
     vec![
@@ -151,7 +151,7 @@ pub fn width(ty: &Ty) -> i64 {
 
 /// The scene facts a kernel set is specialized on; equal facts share one compiled set.
 #[derive(Clone, Debug, PartialEq)]
-pub struct facts {
+pub struct Facts {
     pub spp: i64,
     pub bounces: i64,
     pub round_samples: i64,
@@ -174,9 +174,9 @@ pub struct facts {
 }
 
 /// The kernels, in two sets checked apart: an accumulation frame's, and a preview's (when the camera moves).
-pub const previews: [&str; 3] = ["preview", "preview-geometry", "preview-resolve"];
+pub const PREVIEWS: [&str; 3] = ["preview", "preview-geometry", "preview-resolve"];
 
-pub fn text(f: &facts, preview_set: bool) -> String {
+pub fn text(f: &Facts, preview_set: bool) -> String {
     let (metallic, emissive, round) = f.classes;
     let u = |preview: bool| {
         format!(
@@ -232,7 +232,7 @@ pub fn text(f: &facts, preview_set: bool) -> String {
     format!("(workspace pt {SOURCE} (graph g :context value (let* [{} {}] 0.0)))", declarations.join(" "), kernels.join(" "))
 }
 
-pub struct kernel {
+pub struct Kernel {
     pub runner: run::T,
     pub msl: emit::Kernel,
     pub base: phost::Inputs,
@@ -241,13 +241,13 @@ pub struct kernel {
 }
 
 pub struct T {
-    pub facts: facts,
+    pub facts: Facts,
     fns: RefCell<Vec<(String, FnId)>>,
     /// the evaluations whose functions `fns` holds
     evals: RefCell<Vec<e::Eval>>,
     values: Vec<(String, (Ty, Value))>,
     pixels: Value,
-    kernels: RefCell<Vec<(String, Rc<kernel>)>>,
+    kernels: RefCell<Vec<(String, Rc<Kernel>)>>,
     /// the checked workspace of the CPU oracle's set
     oracle: RefCell<Option<w::Workspace>>,
 }
@@ -264,7 +264,7 @@ fn catalog() -> Catalog {
 /// types them only at its kernels' call sites, which is all it reaches.
 /// `checked` keeps the set's checked workspace for another evaluation of the same facts (the CPU oracle
 /// evaluates a fresh function per frame).
-fn functions(f: &facts, preview_set: bool, checked: &mut Option<w::Workspace>) -> Result<(Vec<(String, FnId)>, e::Eval), String> {
+fn functions(f: &Facts, preview_set: bool, checked: &mut Option<w::Workspace>) -> Result<(Vec<(String, FnId)>, e::Eval), String> {
     let started = std::time::Instant::now();
     let workspace = match checked.clone() {
         Some(ws) => ws,
@@ -286,7 +286,7 @@ fn functions(f: &facts, preview_set: bool, checked: &mut Option<w::Workspace>) -
     if std::env::var_os("RAYS_PT_TIME").is_some() {
         eprintln!("pt functions: parse {:.2}s check {:.2}s static {:.2}s", parsed.as_secs_f64(), (check_time - parsed).as_secs_f64(), (started.elapsed() - check_time).as_secs_f64());
     }
-    let names: &[&str] = if preview_set { &previews } else { &["trace", "geometry", "resolve"] };
+    let names: &[&str] = if preview_set { &PREVIEWS } else { &["trace", "geometry", "resolve"] };
     let mut found = Vec::new();
     for name in names {
         let path = vec!["g".to_string(), name.to_string()];
@@ -303,7 +303,7 @@ fn functions(f: &facts, preview_set: bool, checked: &mut Option<w::Workspace>) -
 }
 
 /// A set's functions on the first use of one of its kernels.
-pub fn compile(f: &facts) -> Result<Rc<T>, String> {
+pub fn compile(f: &Facts) -> Result<Rc<T>, String> {
     Ok(Rc::new(T {
         facts: f.clone(),
         fns: RefCell::new(vec![]),
@@ -318,8 +318,8 @@ pub fn compile(f: &facts) -> Result<Rc<T>, String> {
 /// What one front-end run owns: the front end recurses deeply (check, evaluation, template compile), so
 /// it runs on its own large-stack thread with copies of the set's state and hands the functions it
 /// evaluated back.
-struct front_job {
-    facts: facts,
+struct FrontJob {
+    facts: Facts,
     values: Vec<(String, (Ty, Value))>,
     pixels: Value,
     fns: Vec<(String, FnId)>,
@@ -331,9 +331,9 @@ struct front_job {
 /// The front end's stack (the main thread keeps the SDL and GPU calls).
 const BIG_STACK: usize = 256 << 20;
 
-fn fn_in(job: &mut front_job, name: &str) -> Result<FnId, String> {
+fn fn_in(job: &mut FrontJob, name: &str) -> Result<FnId, String> {
     if !job.fns.iter().any(|(n, _)| n == name) {
-        let (fns, evaluated) = functions(&job.facts, previews.contains(&name), &mut None)?;
+        let (fns, evaluated) = functions(&job.facts, PREVIEWS.contains(&name), &mut None)?;
         job.fns.extend(fns);
         job.evals.push(evaluated);
     }
@@ -365,7 +365,7 @@ pub fn check_sketch() -> Result<(), String> {
 }
 
 fn check_sketch_here() -> Result<(), String> {
-    let f = facts {
+    let f = Facts {
         spp: 1,
         bounces: 5,
         round_samples: 4,
@@ -393,7 +393,7 @@ fn check_sketch_here() -> Result<(), String> {
 }
 
 /// The front end's result for one kernel: its MSL, its inputs, and the placeholder each uniform reads.
-pub type front_result = (emit::Kernel, phost::Inputs, Vec<Option<(String, Ty)>>);
+pub type FrontResult = (emit::Kernel, phost::Inputs, Vec<Option<(String, Ty)>>);
 
 fn replace_sources(values: Vec<(String, (Ty, Value))>) -> Box<dyn Fn(&Value) -> Value> {
     Box::new(move |value| match value {
@@ -411,7 +411,7 @@ fn deferred(name: &str, bound: FnId, inputs: &[Value], result: Ty) -> Result<flo
     }
 }
 
-fn front(job: &mut front_job, name: &str) -> Result<front_result, String> {
+fn front(job: &mut FrontJob, name: &str) -> Result<FrontResult, String> {
     let started = std::time::Instant::now();
     let f = fn_in(job, name)?;
     let check_done = started.elapsed();
@@ -447,13 +447,13 @@ fn front(job: &mut front_job, name: &str) -> Result<front_result, String> {
 thread_local! {
     /// The front end's results of this process, newest first (the in-memory twin of OCaml's on-disk kernel
     /// cache): a later tracer of the same scene shape skips the check, the evaluation and the emit.
-    static FRONTS: RefCell<Vec<(String, front_result)>> = const { RefCell::new(Vec::new()) };
+    static FRONTS: RefCell<Vec<(String, FrontResult)>> = const { RefCell::new(Vec::new()) };
 }
 
 const FRONT_ENTRIES: usize = 24;
 
-fn front_big(t: &T, name: &str) -> Result<front_result, String> {
-    let mut job = front_job { facts: t.facts.clone(), values: t.values.clone(), pixels: t.pixels.clone(), fns: t.fns.borrow().clone(), evals: std::mem::take(&mut *t.evals.borrow_mut()), vulkan: ogpu::impl_::backend().map(|b| b == "vulkan").unwrap_or(false) };
+fn front_big(t: &T, name: &str) -> Result<FrontResult, String> {
+    let mut job = FrontJob { facts: t.facts.clone(), values: t.values.clone(), pixels: t.pixels.clone(), fns: t.fns.borrow().clone(), evals: std::mem::take(&mut *t.evals.borrow_mut()), vulkan: ogpu::impl_::backend().map(|b| b == "vulkan").unwrap_or(false) };
     let name = name.to_string();
     let handle = std::thread::Builder::new()
         .stack_size(BIG_STACK)
@@ -471,7 +471,7 @@ fn front_big(t: &T, name: &str) -> Result<front_result, String> {
     result
 }
 
-fn cached_front(t: &T, name: &str) -> Result<front_result, String> {
+fn cached_front(t: &T, name: &str) -> Result<FrontResult, String> {
     let key = format!("{:?}|{name}|{}", t.facts, ogpu::impl_::backend().unwrap_or_default());
     if let Some(found) = FRONTS.with(|f| f.borrow().iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone())) {
         return Ok(found);
@@ -485,12 +485,12 @@ fn cached_front(t: &T, name: &str) -> Result<front_result, String> {
     Ok(made)
 }
 
-fn kernel_of(t: &T, lease: &renderer::renderer::gpu, pipes: &pipelines::T, name: &str) -> Result<Rc<kernel>, String> {
+fn kernel_of(t: &T, lease: &renderer::renderer::Gpu, pipes: &pipelines::T, name: &str) -> Result<Rc<Kernel>, String> {
     if let Some((_, k)) = t.kernels.borrow().iter().find(|(n, _)| n == name) {
         return Ok(k.clone());
     }
     let (msl, base, slots) = cached_front(t, name)?;
-    let k = Rc::new(kernel { runner: run::create(None, lease, pipes, &msl), msl, base, slots });
+    let k = Rc::new(Kernel { runner: run::create(None, lease, pipes, &msl), msl, base, slots });
     t.kernels.borrow_mut().push((name.to_string(), k.clone()));
     Ok(k)
 }
@@ -499,7 +499,7 @@ fn kernel_of(t: &T, lease: &renderer::renderer::gpu, pipes: &pipelines::T, name:
 /// uniform `n`'s current value and `table(n)` the buffer and element count bound for table `n`.
 pub fn dispatch(
     t: &T,
-    lease: &renderer::renderer::gpu,
+    lease: &renderer::renderer::Gpu,
     pipes: &pipelines::T,
     commands: &Commands,
     count: i64,
@@ -549,12 +549,12 @@ pub fn dispatch(
     run::dispatch(&k.runner, &options, Some(&bound), Some(&bound_table), &inputs).map(|_| ()).map_err(|d| rays_diagnostic::to_string(&d))
 }
 
-pub fn max_total_threads(t: &T, lease: &renderer::renderer::gpu, pipes: &pipelines::T, name: &str) -> Result<i64, String> {
+pub fn max_total_threads(t: &T, lease: &renderer::renderer::Gpu, pipes: &pipelines::T, name: &str) -> Result<i64, String> {
     let k = kernel_of(t, lease, pipes, name)?;
     run::max_total_threads(&k.runner).map_err(|d| rays_diagnostic::to_string(&d))
 }
 
-pub fn source(t: &T, lease: &renderer::renderer::gpu, pipes: &pipelines::T, name: &str) -> Result<String, String> {
+pub fn source(t: &T, lease: &renderer::renderer::Gpu, pipes: &pipelines::T, name: &str) -> Result<String, String> {
     let k = kernel_of(t, lease, pipes, name)?;
     Ok(k.msl.source.clone())
 }
@@ -569,13 +569,13 @@ pub fn close(t: &T) {
 /// A device mesh's triangle corners: each corner's vec3 from a device's packed float3 `src` (positions or
 /// normals) at its vertex index, the input (a float per corner, uploaded once per topology), written packed
 /// into the tracer's per-corner buffer that the structure and the `nrm` table read.
-pub struct gather {
-    pub gather_runner: run::T,
-    pub gather_base: phost::Inputs,
+pub struct Gather {
+    pub runner: run::T,
+    pub base: phost::Inputs,
     pub src_slot: usize,
 }
 
-pub fn gather_kernel(lease: &renderer::renderer::gpu, pipes: &pipelines::T) -> Result<gather, String> {
+pub fn gather_kernel(lease: &renderer::renderer::Gpu, pipes: &pipelines::T) -> Result<Gather, String> {
     let src = Value::Vec3_array(Arc::new(vec![0.; 3]));
     let text = "(workspace pt (graph g :context value (let* [src (pt/src) gather (fn [(v : int)] (array/nth src v))] 0.0)))";
     let src_op = {
@@ -617,24 +617,24 @@ pub fn gather_kernel(lease: &renderer::renderer::gpu, pipes: &pipelines::T) -> R
         .ok_or("path tracer gather reads no source table")?;
     let mut gather_base = base;
     gather_base.arrays = gather_base.arrays.iter().map(|_| Arc::new(vec![])).collect();
-    Ok(gather { gather_runner: run::create(None, lease, pipes, &msl), gather_base, src_slot })
+    Ok(Gather { runner: run::create(None, lease, pipes, &msl), base: gather_base, src_slot })
 }
 
 /// Encodes the gather of `count` corners whose vertex indices `indices` holds, from `src` (`vertices`
 /// packed float3) into `into`.
-pub fn gather_dispatch(g: &gather, commands: &Commands, cell: &Buffer, indices: &Buffer, count: i64, src: &Buffer, vertices: i64, into: &Buffer) -> Result<(), String> {
+pub fn gather_dispatch(g: &Gather, commands: &Commands, cell: &Buffer, indices: &Buffer, count: i64, src: &Buffer, vertices: i64, into: &Buffer) -> Result<(), String> {
     let options = run::Options { commands: Some(commands.clone()), reset_status: Some(false), into: Some((into.clone(), cell.clone())), ..Default::default() };
     let indices = indices.clone();
     let bound = move |i: i64| if i == 0 { Some(indices.clone()) } else { None };
     let src = src.clone();
     let slot = g.src_slot as i64;
     let bound_table = move |u: i64| if u == slot { Some((src.clone(), 3 * vertices)) } else { None };
-    let inputs = phost::Inputs { count, arrays: g.gather_base.arrays.clone(), uniforms: g.gather_base.uniforms.clone(), tables: g.gather_base.tables.clone(), frame: g.gather_base.frame.clone() };
-    run::dispatch(&g.gather_runner, &options, Some(&bound), Some(&bound_table), &inputs).map(|_| ()).map_err(|d| rays_diagnostic::to_string(&d))
+    let inputs = phost::Inputs { count, arrays: g.base.arrays.clone(), uniforms: g.base.uniforms.clone(), tables: g.base.tables.clone(), frame: g.base.frame.clone() };
+    run::dispatch(&g.runner, &options, Some(&bound), Some(&bound_table), &inputs).map(|_| ()).map_err(|d| rays_diagnostic::to_string(&d))
 }
 
-pub fn close_gather(g: &gather) {
-    run::close(&g.gather_runner, false);
+pub fn close_gather(g: &Gather) {
+    run::close(&g.runner, false);
 }
 
 /// The CPU walker's run of kernel `name` over `pixels` (the oracle a device film is checked against):
@@ -653,15 +653,15 @@ pub fn cpu(t: &T, words: Vec<(String, Vec<f64>)>, values: Vec<(String, Value)>, 
     result
 }
 
-fn cpu_here(facts: facts, mut checked: Option<w::Workspace>, words: Vec<(String, Vec<f64>)>, values: Vec<(String, Value)>, pixels: Value, name: String) -> (Result<Value, String>, Option<w::Workspace>) {
+fn cpu_here(facts: Facts, mut checked: Option<w::Workspace>, words: Vec<(String, Vec<f64>)>, values: Vec<(String, Value)>, pixels: Value, name: String) -> (Result<Value, String>, Option<w::Workspace>) {
     let result = cpu_run(&facts, &mut checked, words, values, pixels, &name);
     (result, checked)
 }
 
-fn cpu_run(facts: &facts, checked: &mut Option<w::Workspace>, words: Vec<(String, Vec<f64>)>, values: Vec<(String, Value)>, pixels: Value, name: &str) -> Result<Value, String> {
+fn cpu_run(facts: &Facts, checked: &mut Option<w::Workspace>, words: Vec<(String, Vec<f64>)>, values: Vec<(String, Value)>, pixels: Value, name: &str) -> Result<Value, String> {
     let words = |n: &str| words.iter().find(|(k, _)| k == n).expect("uniform").1.clone();
     let value = |n: &str| values.iter().find(|(k, _)| k == n).expect("table").1.clone();
-    let (fns, _keep) = functions(facts, previews.contains(&name), checked)?;
+    let (fns, _keep) = functions(facts, PREVIEWS.contains(&name), checked)?;
     let f = fns.iter().find(|(n, _)| n == name).map(|(_, f)| *f).ok_or_else(|| format!("no path tracer kernel {name}"))?;
     let types: Vec<(String, Ty)> = uniforms().into_iter().chain(tables()).map(|(n, ty)| (n.to_string(), ty)).collect();
     let bound = e::bind_captures(f, &|v| match v {

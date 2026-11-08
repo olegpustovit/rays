@@ -1,5 +1,5 @@
 use crate::renderer_shaders as shaders;
-use crate::scene_execution::{self, pipeline_family, pipeline_family::*};
+use crate::scene_execution::{self, PipelineFamily, PipelineFamily::*};
 use ogpu::backend::{self, Device, Pipeline};
 use ogpu::binding::{self, Kind as LayoutKind, LayoutEntry, Stage as LayoutStage};
 use ogpu::error::{self, Error, ErrorKind};
@@ -11,42 +11,42 @@ use std::rc::Rc;
 
 
 #[derive(Clone, Copy, PartialEq)]
-enum kind {
+enum Kind {
     Buffer,
     Texture,
     Sampler,
 }
 
 #[derive(Clone, Copy, PartialEq)]
-enum visibility {
+enum Visibility {
     Vertex,
     Both,
     Fragment,
 }
 
-fn stages(visibility_: visibility) -> Vec<Stage> {
+fn stages(visibility_: Visibility) -> Vec<Stage> {
     match visibility_ {
-        visibility::Vertex => vec![Stage::Vertex],
-        visibility::Both => vec![Stage::Vertex, Stage::Fragment],
-        visibility::Fragment => vec![Stage::Fragment],
+        Visibility::Vertex => vec![Stage::Vertex],
+        Visibility::Both => vec![Stage::Vertex, Stage::Fragment],
+        Visibility::Fragment => vec![Stage::Fragment],
     }
 }
 
-fn layout_stages(visibility_: visibility) -> Vec<LayoutStage> {
+fn layout_stages(visibility_: Visibility) -> Vec<LayoutStage> {
     match visibility_ {
-        visibility::Vertex => vec![LayoutStage::Vertex],
-        visibility::Both => vec![LayoutStage::Vertex, LayoutStage::Fragment],
-        visibility::Fragment => vec![LayoutStage::Fragment],
+        Visibility::Vertex => vec![LayoutStage::Vertex],
+        Visibility::Both => vec![LayoutStage::Vertex, LayoutStage::Fragment],
+        Visibility::Fragment => vec![LayoutStage::Fragment],
     }
 }
 
 fn sun_artifact(backend_name: &str, stage: Stage, bindings: Vec<shader::Binding>) -> Result<shader::Shader, Error> {
     let bytes: &[u8] = if backend_name != "vulkan" {
-        shaders::scene3_sun_depth.as_bytes()
+        shaders::SCENE3_SUN_DEPTH.as_bytes()
     } else if stage == Stage::Vertex {
-        shaders::spirv::scene3_sun_depth_vert
+        shaders::spirv::SCENE3_SUN_DEPTH_VERT
     } else {
-        shaders::spirv::scene3_sun_depth_frag
+        shaders::spirv::SCENE3_SUN_DEPTH_FRAG
     };
     shader::create(shader::Descriptor {
         backend: backend_name.to_owned(),
@@ -89,84 +89,84 @@ fn make_sun_depth_pipeline(backend_name: &str, backend_device: &Device) -> Resul
     )
 }
 
-struct family_shape {
+struct FamilyShape {
     source: &'static str,
     entries: (&'static str, &'static str),
     vertex_buffers: Vec<i64>,
     shared: Vec<i64>,
-    fragment_resources: Vec<(i64, kind)>,
+    fragment_resources: Vec<(i64, Kind)>,
 }
 
-fn texture(t: i64) -> Vec<(i64, kind)> {
-    vec![(t, kind::Texture), (t + 1, kind::Sampler)]
+fn texture(t: i64) -> Vec<(i64, Kind)> {
+    vec![(t, Kind::Texture), (t + 1, Kind::Sampler)]
 }
 
-fn shape_of(family: pipeline_family) -> family_shape {
+fn shape_of(family: PipelineFamily) -> FamilyShape {
     let scene3 = (vec![1, 3, 4, 5], vec![2]);
     match family {
         // the vertex words 0, the constants 1
-        Scene2 => family_shape {
-            source: shaders::geometry,
+        Scene2 => FamilyShape {
+            source: shaders::GEOMETRY,
             entries: ("geometry_vertex", "geometry_fragment"),
             vertex_buffers: vec![1],
             shared: vec![],
             fragment_resources: vec![],
         },
         // the constants 0, the texture's argument buffer 7
-        Scene2_textured => family_shape {
-            source: shaders::quad,
+        Scene2Textured => FamilyShape {
+            source: shaders::QUAD,
             entries: ("quad_vertex", "quad_fragment"),
             vertex_buffers: vec![],
             shared: vec![],
-            fragment_resources: vec![(7, kind::Buffer)],
+            fragment_resources: vec![(7, Kind::Buffer)],
         },
         // records as floats 0 (and normals 1: the records again, or a device's normals), surface 2,
         // instances 3, attributes 4 and 5
-        Scene3 => family_shape {
-            source: shaders::scene3,
+        Scene3 => FamilyShape {
+            source: shaders::SCENE3,
             entries: ("scene3_vertex", "scene3_fragment"),
             vertex_buffers: scene3.0,
             shared: scene3.1,
             fragment_resources: vec![],
         },
-        Scene3_points => family_shape {
-            source: shaders::scene3_points,
+        Scene3Points => FamilyShape {
+            source: shaders::SCENE3_POINTS,
             entries: ("scene3_points_vertex", "scene3_fragment"),
             vertex_buffers: scene3.0,
             shared: scene3.1,
             fragment_resources: vec![],
         },
-        Scene3_textured => family_shape {
-            source: shaders::scene3_textured,
+        Scene3Textured => FamilyShape {
+            source: shaders::SCENE3_TEXTURED,
             entries: ("scene3_vertex", "scene3_textured_fragment"),
             vertex_buffers: scene3.0,
             shared: scene3.1,
             fragment_resources: texture(6),
         },
         // the World block 6, image 7 (8), specular 9 (10), camera map 11 (12), sun map 13
-        Scene3_world => {
-            let mut resources = vec![(6, kind::Buffer)];
+        Scene3World => {
+            let mut resources = vec![(6, Kind::Buffer)];
             resources.extend(texture(7));
             resources.extend(texture(9));
             resources.extend(texture(11));
-            resources.push((13, kind::Texture));
-            family_shape {
-                source: shaders::scene3_world,
+            resources.push((13, Kind::Texture));
+            FamilyShape {
+                source: shaders::SCENE3_WORLD,
                 entries: ("scene3_vertex", "world_fragment"),
                 vertex_buffers: scene3.0,
                 shared: scene3.1,
                 fragment_resources: resources,
             }
         }
-        Ui => family_shape {
-            source: shaders::ui,
+        Ui => FamilyShape {
+            source: shaders::UI,
             entries: ("ui_vertex", "ui_fragment"),
             vertex_buffers: vec![1, 2],
             shared: vec![],
             fragment_resources: texture(3),
         },
-        Marks => family_shape {
-            source: shaders::marks,
+        Marks => FamilyShape {
+            source: shaders::MARKS,
             entries: ("marks_vertex", "marks_fragment"),
             vertex_buffers: vec![1, 2, 3, 4, 5, 6],
             shared: vec![],
@@ -175,33 +175,33 @@ fn shape_of(family: pipeline_family) -> family_shape {
     }
 }
 
-fn spirv_of(family: pipeline_family) -> (&'static [u8], &'static [u8]) {
+fn spirv_of(family: PipelineFamily) -> (&'static [u8], &'static [u8]) {
     use shaders::spirv::*;
     match family {
-        Scene2 => (geometry_vert, geometry_frag),
-        Scene2_textured => (quad_vert, quad_frag),
-        Scene3 => (scene3_vert, scene3_frag),
-        Scene3_points => (scene3_points_vert, scene3_points_frag),
-        Scene3_textured => (scene3_textured_vert, scene3_textured_frag),
-        Scene3_world => (scene3_world_vert, scene3_world_frag),
-        Ui => (ui_vert, ui_frag),
-        Marks => (marks_vert, marks_frag),
+        Scene2 => (GEOMETRY_VERT, GEOMETRY_FRAG),
+        Scene2Textured => (QUAD_VERT, QUAD_FRAG),
+        Scene3 => (SCENE3_VERT, SCENE3_FRAG),
+        Scene3Points => (SCENE3_POINTS_VERT, SCENE3_POINTS_FRAG),
+        Scene3Textured => (SCENE3_TEXTURED_VERT, SCENE3_TEXTURED_FRAG),
+        Scene3World => (SCENE3_WORLD_VERT, SCENE3_WORLD_FRAG),
+        Ui => (UI_VERT, UI_FRAG),
+        Marks => (MARKS_VERT, MARKS_FRAG),
     }
 }
 
-fn make_pipeline(backend_name: &str, backend_device: &Device, family: pipeline_family, blend: Blend, samples: i64) -> Result<Pipeline, Error> {
+fn make_pipeline(backend_name: &str, backend_device: &Device, family: PipelineFamily, blend: Blend, samples: i64) -> Result<Pipeline, Error> {
     // Every pipeline is generated (shaders/*.rays) and binds in its Lisp declaration order: buffer 0
     // and the vertex buffers, the one buffer both stages read, then the fragment's resources.
     let shape = shape_of(family);
-    let mut resources: Vec<(i64, kind, visibility)> = Vec::new();
+    let mut resources: Vec<(i64, Kind, Visibility)> = Vec::new();
     for binding in std::iter::once(0).chain(shape.vertex_buffers.iter().copied()) {
-        resources.push((binding, kind::Buffer, visibility::Vertex));
+        resources.push((binding, Kind::Buffer, Visibility::Vertex));
     }
     for binding in &shape.shared {
-        resources.push((*binding, kind::Buffer, visibility::Both));
+        resources.push((*binding, Kind::Buffer, Visibility::Both));
     }
     for (binding, kind_) in &shape.fragment_resources {
-        resources.push((*binding, *kind_, visibility::Fragment));
+        resources.push((*binding, *kind_, Visibility::Fragment));
     }
     let artifact = |stage: Stage| -> Result<shader::Shader, Error> {
         let bytes: Vec<u8> = if backend_name != "vulkan" {
@@ -220,14 +220,14 @@ fn make_pipeline(backend_name: &str, backend_device: &Device, family: pipeline_f
             ],
             bindings: resources
                 .iter()
-                .filter(|(_, _, v)| (*v == visibility::Fragment) == (stage == Stage::Fragment))
+                .filter(|(_, _, v)| (*v == Visibility::Fragment) == (stage == Stage::Fragment))
                 .map(|(binding, kind_, v)| shader::Binding {
                     group: 0,
                     binding: *binding,
                     kind: match kind_ {
-                        kind::Buffer => BindingKind::StorageBuffer,
-                        kind::Texture => BindingKind::SampledTexture,
-                        kind::Sampler => BindingKind::Sampler,
+                        Kind::Buffer => BindingKind::StorageBuffer,
+                        Kind::Texture => BindingKind::SampledTexture,
+                        Kind::Sampler => BindingKind::Sampler,
                     },
                     visibility: stages(*v),
                 })
@@ -242,9 +242,9 @@ fn make_pipeline(backend_name: &str, backend_device: &Device, family: pipeline_f
             .map(|(binding, kind_, v)| LayoutEntry {
                 binding: *binding,
                 kind: match kind_ {
-                    kind::Buffer => LayoutKind::Buffer,
-                    kind::Texture => LayoutKind::Texture,
-                    kind::Sampler => LayoutKind::Sampler,
+                    Kind::Buffer => LayoutKind::Buffer,
+                    Kind::Texture => LayoutKind::Texture,
+                    Kind::Sampler => LayoutKind::Sampler,
                 },
                 visibility: layout_stages(*v),
             })
@@ -263,31 +263,31 @@ fn make_pipeline(backend_name: &str, backend_device: &Device, family: pipeline_f
             fragment_entry: Some(shape.entries.1.to_owned()),
             color_format: ColorFormat::Rgba8Unorm,
             depth_format: match family {
-                Scene2 | Scene2_textured | Ui | Marks => DepthFormat::NoDepth,
-                Scene3 | Scene3_points | Scene3_textured | Scene3_world => DepthFormat::Depth32Float,
+                Scene2 | Scene2Textured | Ui | Marks => DepthFormat::NoDepth,
+                Scene3 | Scene3Points | Scene3Textured | Scene3World => DepthFormat::Depth32Float,
             },
             sample_count: samples,
         },
         Some(blend),
-        Some(if family == Scene3_points { Primitive::PointList } else { Primitive::TriangleList }),
-        Some(matches!(family, Scene2 | Scene2_textured | Scene3 | Scene3_points)),
+        Some(if family == Scene3Points { Primitive::PointList } else { Primitive::TriangleList }),
+        Some(matches!(family, Scene2 | Scene2Textured | Scene3 | Scene3Points)),
     )
 }
 
 pub fn create_renderer(
     backend_name: &str,
     device: Option<Device>,
-    gpu_vertices: Option<scene_execution::gpu_vertices_owner>,
+    gpu_vertices: Option<scene_execution::GpuVerticesOwner>,
     offscreen: bool,
     driver: Box<dyn backend::Driver>,
     configuration: &Configuration,
-) -> Result<scene_execution::t, Error> {
+) -> Result<scene_execution::SceneExecution, Error> {
     if backend_name != "metal" && backend_name != "vulkan" {
         return Err(error::make("Renderer.create", ErrorKind::Unsupported, &format!("no renderer shaders for backend {}", backend_name)));
     }
     let name = backend_name.to_owned();
     let sun_name = name.clone();
-    let sun: scene_execution::sun_factory = Rc::new(move |device: &Device| make_sun_depth_pipeline(&sun_name, device));
+    let sun: scene_execution::SunFactory = Rc::new(move |device: &Device| make_sun_depth_pipeline(&sun_name, device));
     scene_execution::create(
         device,
         gpu_vertices,

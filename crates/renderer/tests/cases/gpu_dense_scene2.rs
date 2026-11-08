@@ -1,5 +1,5 @@
 use crate::common;
-use ::renderer::renderer::{self, Native};
+use ::renderer::renderer::{self, native};
 use scene_command::render_ir::{self, Blend, Command, Geometry, Rect, RenderIr, Transform};
 use std::rc::Rc;
 
@@ -33,14 +33,14 @@ fn scene(reference: bool, count: i64, phase: f64) -> Rc<RenderIr> {
     Rc::new(render_ir::create(commands).unwrap())
 }
 
-fn capture(execution: &renderer::t, lower: &dyn Fn(&renderer::submission) -> Result<renderer::batch, ogpu::error::Error>) -> Vec<u8> {
-    let submission = Native::begin_submission(execution).unwrap();
+fn capture(execution: &renderer::Renderer, lower: &dyn Fn(&renderer::Submission) -> Result<renderer::Batch, ogpu::error::Error>) -> Vec<u8> {
+    let submission = native::begin_submission(execution).unwrap();
     let result = (|| {
         let batch = lower(&submission)?;
-        Native::step(Some((0.0, 0.0, 0.0, 1.0)), None, None, &submission, &[batch])?;
+        native::step(Some((0.0, 0.0, 0.0, 1.0)), None, None, &submission, &[batch])?;
         renderer::capture(execution)
     })();
-    Native::cancel(&submission);
+    native::cancel(&submission);
     result.unwrap()
 }
 
@@ -49,10 +49,10 @@ fn run(scale: i64) {
         return;
     }
     let baseline = ogpu::impl_::live_handles().unwrap();
-    let cfg = renderer::configuration { logical_width: 64, logical_height: 48, drawable_width: 64 * scale, drawable_height: 48 * scale, title: "dense-scene2".into(), vsync: false, high_density: true };
+    let cfg = renderer::Configuration { logical_width: 64, logical_height: 48, drawable_width: 64 * scale, drawable_height: 48 * scale, title: "dense-scene2".into(), vsync: false, high_density: true };
     let execution = renderer::create_offscreen(&cfg).unwrap();
     let render = |ir: &Rc<RenderIr>| -> Vec<u8> {
-        let pixels = capture(&execution, &|s| Native::lower_scene2(s, scale, &|_| None, ir));
+        let pixels = capture(&execution, &|s| native::lower_scene2(s, scale, &|_| None, ir));
         assert_eq!(pixels.len() as i64, 64 * 48 * scale * scale * 4, "dense scene2 readback length");
         let painted = pixels.iter().enumerate().filter(|(i, v)| i % 4 != 3 && **v != 0).count();
         assert!(painted >= 100, "dense scene2 submitted no visible geometry");
@@ -84,14 +84,14 @@ fn run(scale: i64) {
     };
     let white = colored(false, 0xffffffffu32 as i32);
     let dark = colored(false, 0x101010ffu32 as i32);
-    let retained = |identity: &str, draws: &Vec<renderer::draw_>| -> Vec<u8> {
-        let submission = Native::begin_submission(&execution).unwrap();
+    let retained = |identity: &str, draws: &Vec<renderer::Draw>| -> Vec<u8> {
+        let submission = native::begin_submission(&execution).unwrap();
         let result = (|| {
-            let batch = Native::adopt_draws(&submission, draws.clone())?;
-            Native::step(Some((0.0, 0.0, 0.0, 1.0)), Some(identity), Some(1), &submission, &[batch])?;
+            let batch = native::adopt_draws(&submission, draws.clone())?;
+            native::step(Some((0.0, 0.0, 0.0, 1.0)), Some(identity), Some(1), &submission, &[batch])?;
             renderer::capture(&execution)
         })();
-        Native::cancel(&submission);
+        native::cancel(&submission);
         result.unwrap()
     };
     let expected = retained("retained-white", &white);
@@ -117,7 +117,7 @@ fn run(scale: i64) {
             .unwrap(),
         ))
     };
-    let render_draws = |draws: &Vec<renderer::draw_>| capture(&execution, &|s| Native::adopt_draws(s, draws.clone()));
+    let render_draws = |draws: &Vec<renderer::Draw>| capture(&execution, &|s| native::adopt_draws(s, draws.clone()));
     shifted(1.0);
     let first = shifted(2.0);
     let expected = render_draws(&first);

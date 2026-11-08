@@ -1,7 +1,7 @@
 // GPU marks: exact native parity under transform, clip, six blends, Retina and stale
 // output/update/lease guards. One test fn per density.
 use crate::common;
-use ::renderer::renderer::{self, marks_source, Native};
+use ::renderer::renderer::{self, MarksSource, native};
 use ::renderer::scene_execution::{self, new_bytes};
 use ogpu::backend as b;
 use ogpu::error::ErrorKind;
@@ -18,7 +18,7 @@ fn run(density: i64) {
     }
     let live = || ogpu::impl_::live_handles().unwrap();
     let baseline = live();
-    let cfg = renderer::configuration { logical_width: 32, logical_height: 24, drawable_width: 32 * density, drawable_height: 24 * density, title: "GPU drawing parity".into(), vsync: false, high_density: true };
+    let cfg = renderer::Configuration { logical_width: 32, logical_height: 24, drawable_width: 32 * density, drawable_height: 24 * density, title: "GPU drawing parity".into(), vsync: false, high_density: true };
     let execution = renderer::create_offscreen(&cfg).unwrap();
     let gpu = renderer::acquire_gpu().unwrap();
     let sink = renderer::create_gpu_marks(&gpu).unwrap();
@@ -32,17 +32,17 @@ fn run(density: i64) {
     b::write_buffer(&positions, 0, &common::floats(&point32)).unwrap();
     let generation = Rc::new(Cell::new(1));
     // A device source is current only while its producer's output is.
-    let source = |stamp: i32| -> marks_source {
+    let source = |stamp: i32| -> MarksSource {
         let (g, p) = (generation.clone(), positions.clone());
-        marks_source::Device(Rc::new(move || if g.get() == stamp { Some(p.clone()) } else { None }), 3)
+        MarksSource::Device(Rc::new(move || if g.get() == stamp { Some(p.clone()) } else { None }), 3)
     };
-    let attrs = |stamp: i32, fill: u32| -> Vec<marks_source> {
+    let attrs = |stamp: i32, fill: u32| -> Vec<MarksSource> {
         vec![
             source(stamp),
-            marks_source::Host(new_bytes(common::floats(&[2.5])), 0),
-            marks_source::Host(new_bytes(common::words(&[fill as i32])), 0),
-            marks_source::Host(new_bytes(common::words(&[0xff00ff80u32 as i32])), 0),
-            marks_source::Host(new_bytes(common::floats(&[3.0])), 0),
+            MarksSource::Host(new_bytes(common::floats(&[2.5])), 0),
+            MarksSource::Host(new_bytes(common::words(&[fill as i32])), 0),
+            MarksSource::Host(new_bytes(common::words(&[0xff00ff80u32 as i32])), 0),
+            MarksSource::Host(new_bytes(common::floats(&[3.0])), 0),
         ]
     };
     let marks_ = |stamp: i32, fill: u32| renderer::gpu_marks_token(None, &sink, 4, 2, &attrs(stamp, fill));
@@ -72,13 +72,13 @@ fn run(density: i64) {
     };
     let clear = (0.125, 0.25, 0.375, 1.0);
     let capture = |identity: Option<&str>, version: Option<i64>, ir: &Rc<RenderIr>| -> Vec<u8> {
-        let submission = Native::begin_submission(&execution).unwrap();
+        let submission = native::begin_submission(&execution).unwrap();
         let result = (|| {
-            let batch = Native::lower_scene2(&submission, density, &|_| None, ir)?;
-            Native::step(Some(clear), identity, version, &submission, &[batch])?;
+            let batch = native::lower_scene2(&submission, density, &|_| None, ir)?;
+            native::step(Some(clear), identity, version, &submission, &[batch])?;
             renderer::capture(&execution)
         })();
-        Native::cancel(&submission);
+        native::cancel(&submission);
         let pixels = result.unwrap();
         assert_eq!(pixels.len() as i64, 32 * 24 * density * density * 4);
         pixels
@@ -96,15 +96,15 @@ fn run(density: i64) {
     }
     let retained = |token: marks::GpuToken| capture(Some("gpu-marks"), Some(marks::gpu_stamp(token)), &ir(Blend::Replace, &ui_batch::of_marks(token)));
     retained(first);
-    assert!(Native::replay(Some(clear), "gpu-marks", marks::gpu_stamp(first), &execution).unwrap() == Some(()));
-    let refuse_replay = |token: marks::GpuToken| match Native::replay(Some(clear), "gpu-marks", marks::gpu_stamp(token), &execution) {
+    assert!(native::replay(Some(clear), "gpu-marks", marks::gpu_stamp(first), &execution).unwrap() == Some(()));
+    let refuse_replay = |token: marks::GpuToken| match native::replay(Some(clear), "gpu-marks", marks::gpu_stamp(token), &execution) {
         Err(e) if e.kind == ErrorKind::StaleHandle && e.operation == "Scene_execution.replay" && e.message == "GPU vertices are stale or closed" => {}
         _ => panic!("retained GPU mark replay accepted a stale source"),
     };
     let refuse_lower = |token: marks::GpuToken| {
-        let submission = Native::begin_submission(&execution).unwrap();
-        let result = Native::lower_scene2(&submission, density, &|_| None, &ir(Blend::Replace, &ui_batch::of_marks(token)));
-        Native::cancel(&submission);
+        let submission = native::begin_submission(&execution).unwrap();
+        let result = native::lower_scene2(&submission, density, &|_| None, &ir(Blend::Replace, &ui_batch::of_marks(token)));
+        native::cancel(&submission);
         match result {
             Err(e) if e.kind == ErrorKind::InvalidState && e.operation == "Renderer.lower_scene2" && e.message == "GPU shapes are stale or closed" => {}
             _ => panic!("GPU mark lowering accepted a stale token"),
@@ -132,11 +132,11 @@ fn run(density: i64) {
     assert!(retained(third) != reference);
     // A mark set that is not a valid description is refused before it registers.
     let empty = vec![
-        marks_source::Host(new_bytes(common::floats(&[0.0])), 0),
-        marks_source::Host(new_bytes(common::floats(&[0.0])), 0),
-        marks_source::Host(new_bytes(common::words(&[0])), 0),
-        marks_source::Host(new_bytes(common::words(&[0])), 0),
-        marks_source::Host(new_bytes(common::floats(&[0.0])), 0),
+        MarksSource::Host(new_bytes(common::floats(&[0.0])), 0),
+        MarksSource::Host(new_bytes(common::floats(&[0.0])), 0),
+        MarksSource::Host(new_bytes(common::words(&[0])), 0),
+        MarksSource::Host(new_bytes(common::words(&[0])), 0),
+        MarksSource::Host(new_bytes(common::floats(&[0.0])), 0),
     ];
     match renderer::gpu_marks_token(None, &sink, 4, 0, &empty) {
         Err(e) if e.kind == ErrorKind::InvalidArgument => {}
@@ -145,7 +145,7 @@ fn run(density: i64) {
     renderer::release_gpu(&gpu);
     refuse_replay(third);
     refuse_lower(third);
-    assert_eq!(scene_execution::Private::gpu_vertex_count_for_test(&Native::gpu_vertices_owner(&execution)), 0);
+    assert_eq!(scene_execution::private::gpu_vertex_count_for_test(&native::gpu_vertices_owner(&execution)), 0);
     renderer::close_gpu_marks(&sink);
     let _ = b::destroy_buffer(&positions);
     renderer::release_gpu(&gpu);
