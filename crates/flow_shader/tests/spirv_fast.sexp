@@ -16,7 +16,7 @@
 (fast_int_gather 3776 700deb28957bf6f3315cbc0ae314e1aa)
 (fast_whole 4036 e56b919a5dd88f1ca87c81169764e639)
 (fast_guarded_whole 4116 537bb4c90fafc652f4ecaceda8c348e3)
-(fast_invalid_shift 3676 591437910b559b98dadca5af7b03ba9e)
+(fast_invalid_shift 3676 47437424ec23c7fde97ecbac508dbb8d)
 (fast_negative_shift 3228 8a676723b70fcc2284e237e97ddabcd2)
 (fast_divide_by_zero 3400 5dc01b0b3dbc2ad7d8e448798e3cf303)
 (fast_noise_octaves 54788 fa76c600c52e5b4dccefb2ea552cdf09)

@@ -57,7 +57,7 @@ fn fast_sources() -> Vec<(String, String)> {
         ("fast_int_gather", r#"(let* [table (array/int 7 12345)] (map (fn [i] (+ t (float (array/nth table (int/mod i 7))))) (array/range 16 :type "int")))"#.into()),
         ("fast_whole", r#"(map (fn [x] (let* [n (int/add x 4294967297) floating (float n)] [(float (int (- floating 4294967296.))) (+ floating 1.) (float (int (mod floating 7.))) t])) (array/range 16 :type "int"))"#.into()),
         ("fast_guarded_whole", r#"(map (fn [x] (let* [n (float (int/add x 4294967297)) v (if (int/lt x 7) (+ n 1.) (- n 1.))] [(float (int v)) v t])) (array/range 16 :type "int"))"#.into()),
-        ("fast_invalid_shift", "(map (fn [(x : int)] (float (int/shr x (int/add 63 (int/mod (frame/index) 1))))) (array/range 16 :type int))".into()),
+        ("fast_invalid_shift", "(map (fn [(x : int)] (float (int/shr x (int/add 64 (int/mod (frame/index) 1))))) (array/range 16 :type int))".into()),
         ("fast_negative_shift", "(map (fn [(x : int)] (float (int/shr x (int/sub (frame/index) (int/add (frame/index) 1))))) (array/range 16 :type int))".into()),
         ("fast_divide_by_zero", "(map (fn [(x : int)] (float (int/div x (int/sub (frame/index) (frame/index))))) (array/range 16 :type int))".into()),
         ("fast_noise_octaves", "(map (fn [x] (noise3 [x t 0.25] :seed 31 :octaves (int/add 2 (frame/index)))) (array/range 16))".into()),
