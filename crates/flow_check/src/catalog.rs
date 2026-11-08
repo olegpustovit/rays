@@ -6,6 +6,8 @@ use param::{self, FieldView, KindView, Value};
 use rays_diagnostic::{self, Diagnostic, Severity};
 use rays_math::hash::md5_hex;
 
+// b0: warm incremental smoke (shared target/, dev profile)
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Parameter {
     pub name: String,
