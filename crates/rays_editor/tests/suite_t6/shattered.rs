@@ -38,8 +38,10 @@ pub fn shattered_studio() {
     let graph = graphs.iter().find(|(n, _)| n == "shards").expect("shards").1.clone();
     let fracture_id = sop::node::inspect(&graph).into_iter().find(|i| i.operation == "boolean_fracture").expect("fracture").id;
     let fracture = sop::node::find(&graph, fracture_id).unwrap();
+    // the fracture is the cost: once per domain count, and the source and the shaded graph are cooked
+    // in the four-domain session that already holds it
     let one = with_cook(1, &|cook| cook(&fracture));
-    let four = with_cook(4, &|cook| cook(&fracture));
+    let (four, source, colored) = with_cook(4, &|cook| (cook(&fracture), cook(&sop::node::inputs(&fracture).remove(0)), cook(&graph)));
     let g = sop::payload::geometry(&one.payload).unwrap();
     let h = sop::payload::geometry(&four.payload).unwrap();
     assert!(rdk_core::geometry::point_count(&g) == rdk_core::geometry::point_count(&h));
@@ -70,12 +72,9 @@ pub fn shattered_studio() {
     for part in &parts {
         assert!(edge_counts(part) == (0, 0));
     }
-    let source = sop::node::inputs(&fracture).remove(0);
-    let source = with_cook(1, &|cook| cook(&source));
     let original_volume = rdk_core::analysis::signed_volume(&sop::payload::geometry(&source.payload).unwrap()).unwrap();
     let fractured_volume = rdk_core::analysis::signed_volume(&g).unwrap();
     assert!((original_volume - fractured_volume).abs() < 1e-7 * original_volume.abs());
-    let colored = with_cook(1, &|cook| cook(&graph));
     let geometry = sop::payload::geometry(&colored.payload).unwrap();
     let prepared = rdk_rays::surface::of_geometry(colored.instances.as_ref().map(|i| (**i).clone()), &geometry).unwrap();
     let explosion = rdk_rays::packed_pieces::explosion(sop::node::operation(&graph), &sop::node::parameter_fields(&graph));
