@@ -187,6 +187,8 @@ pub struct Data {
     proxy: RefCell<Option<Arc<dyn G::Backend>>>,
     closed: Rc<Cell<bool>>,
     policy: Cell<G::Policy>,
+    /// what the cooks on this owner's backend have measured; dropped with the owner
+    evidence: Arc<G::Evidence>,
     measurement_ready: Cell<bool>,
     /// the device's measured readback, once taken
     readback: RefCell<Option<Option<f64>>>,
@@ -235,6 +237,7 @@ pub fn create(clock: Option<Arc<dyn Fn() -> f64 + Send + Sync>>) -> t {
         proxy: RefCell::new(None),
         closed: Rc::new(Cell::new(false)),
         policy: Cell::new(G::Policy::Measured),
+        evidence: Arc::default(),
         measurement_ready: Cell::new(false),
         readback: RefCell::new(None),
         // count only: a float per kernel, and a measurement is not free to take again
@@ -836,7 +839,7 @@ fn readback_rate(d: &Data) -> Option<f64> {
 /// The frame is the pump: cook workers queue device requests, served here between frames' work.
 pub fn config(t_: &t, fast: bool) -> G::Config {
     let d = &*t_.0;
-    G::Config { backend: Some(proxy(t_)), fast, policy: d.policy.get(), readback_per_float: readback_rate(d) }
+    G::Config { backend: Some(proxy(t_)), fast, policy: d.policy.get(), readback_per_float: readback_rate(d), evidence: d.evidence.clone() }
 }
 
 struct PumpOnDrop<'a>(&'a t);

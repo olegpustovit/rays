@@ -74,7 +74,7 @@ fn document_boundary_validation_dump_preset_gpu() {
     let workspace = ws_of_text(DOCUMENT_TEXT);
     let doc = lower(None, &workspace);
     let backend = test_backend();
-    let gpu = Gpu::Config { backend: Some(backend.clone()), fast: true, policy: Gpu::Policy::Qualification, readback_per_float: None };
+    let gpu = Gpu::Config { backend: Some(backend.clone()), fast: true, policy: Gpu::Policy::Qualification, readback_per_float: None, ..Gpu::default() };
     let carries_gpu = |doc: &document::T| {
         let l = &doc.workspace.lowered.gpu;
         l.fast && l.policy == Gpu::Policy::Qualification && l.backend.as_ref().map_or(false, |b| Arc::ptr_eq(b, &backend))

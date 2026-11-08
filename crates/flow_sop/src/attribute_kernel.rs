@@ -1923,45 +1923,21 @@ pub fn delete_after(deletes: &[(String, String)], cancel_token: &Arc<cancel::T>,
     Ok(g)
 }
 
-/// The measured display sinks of a backend: seconds per float the editor spent preparing a host
-/// mesh for display, and a resident one. Weakly keyed, so a closed owner's rates go with it.
+/// The measured display sinks of a backend (`Gpu::Display` in its evidence): seconds per float the
+/// editor spent preparing a host mesh for display, and a resident one.
 #[allow(non_snake_case)]
 pub mod Display_sink {
     use super::*;
-    use std::collections::HashMap;
 
-    struct Rates {
-        host: f64,
-        draw: f64,
-        resident: f64,
-        /// per write site, its recent CPU cooks (elements, seconds per element), at most 256 sites
-        writes: HashMap<String, Vec<(i64, f64)>>,
-        /// per write site, its priced device cooks
-        devices: HashMap<String, i64>,
-    }
-
-    static REGISTRY: Mutex<Vec<(Weak<dyn Gpu::Backend>, Rates)>> = Mutex::new(Vec::new());
-
-    fn with_rates<R>(backend: &Arc<dyn Gpu::Backend>, f: impl FnOnce(&mut Rates) -> R) -> R {
-        let mut registry = REGISTRY.lock().unwrap();
-        registry.retain(|(weak, _)| weak.strong_count() > 0);
-        let at = Arc::as_ptr(backend);
-        let index = match registry.iter().position(|(weak, _)| std::ptr::eq(weak.as_ptr(), at)) {
-            Some(i) => i,
-            None => {
-                let rates = Rates { host: f64::INFINITY, draw: f64::INFINITY, resident: f64::INFINITY, writes: HashMap::new(), devices: HashMap::new() };
-                registry.push((Arc::downgrade(backend), rates));
-                registry.len() - 1
-            }
-        };
-        f(&mut registry[index].1)
+    fn with_rates<R>(evidence: &Gpu::Evidence, f: impl FnOnce(&mut Gpu::Display) -> R) -> R {
+        f(&mut evidence.display.lock().unwrap())
     }
 
     /// Seconds the editor spent preparing a mesh of `floats` floats for display.
-    pub fn observe(backend: &Arc<dyn Gpu::Backend>, resident: bool, floats: i64, seconds: f64) {
+    pub fn observe(evidence: &Gpu::Evidence, resident: bool, floats: i64, seconds: f64) {
         if floats > 0 {
             let rate = seconds / floats as f64;
-            with_rates(backend, |r| {
+            with_rates(evidence, |r| {
                 if resident {
                     r.resident = r.resident.min(rate)
                 } else {
@@ -1973,17 +1949,17 @@ pub mod Display_sink {
 
     /// Seconds from a host mesh's frame to its presentation: the renderer's conversion and upload,
     /// which preparation does not see. The smallest rate is kept.
-    pub fn observe_draw(backend: &Arc<dyn Gpu::Backend>, floats: i64, seconds: f64) {
+    pub fn observe_draw(evidence: &Gpu::Evidence, floats: i64, seconds: f64) {
         if floats > 0 {
             let rate = seconds / floats as f64;
-            with_rates(backend, |r| r.draw = r.draw.min(rate));
+            with_rates(evidence, |r| r.draw = r.draw.min(rate));
         }
     }
 
     /// Seconds per float (host mesh, resident mesh); infinity while unmeasured. A host mesh's
     /// includes its first draw once seen.
-    pub fn rates(backend: &Arc<dyn Gpu::Backend>) -> (f64, f64) {
-        with_rates(backend, |r| (r.host + if r.draw < f64::INFINITY { r.draw } else { 0.0 }, r.resident))
+    pub fn rates(evidence: &Gpu::Evidence) -> (f64, f64) {
+        with_rates(evidence, |r| (r.host + if r.draw < f64::INFINITY { r.draw } else { 0.0 }, r.resident))
     }
 
     /// The cheaper rate of the two `(size, seconds per unit)` samples nearest `size`, priced at
@@ -2001,11 +1977,11 @@ pub mod Display_sink {
 
     /// Whether a write site with no CPU measurement stays on the device: for its first two priced
     /// cooks, or while the device cannot price it. False: sample the CPU under a budget.
-    pub fn device_first(backend: &Arc<dyn Gpu::Backend>, site: &str, device_seconds: Option<f64>) -> bool {
+    pub fn device_first(evidence: &Gpu::Evidence, site: &str, device_seconds: Option<f64>) -> bool {
         if device_seconds.is_none() {
             return true;
         }
-        with_rates(backend, |r| {
+        with_rates(evidence, |r| {
             let seen = r.devices.get(site).copied().unwrap_or(0);
             if seen >= 2 {
                 false
@@ -2020,14 +1996,14 @@ pub mod Display_sink {
     }
 
     /// The measured seconds of an attribute write site's CPU route at `count` elements.
-    pub fn cpu_write(backend: &Arc<dyn Gpu::Backend>, site: &str, count: i64) -> Option<f64> {
-        with_rates(backend, |r| priced(r.writes.get(site).map_or(&[][..], |v| v.as_slice()), count))
+    pub fn cpu_write(evidence: &Gpu::Evidence, site: &str, count: i64) -> Option<f64> {
+        with_rates(evidence, |r| priced(r.writes.get(site).map_or(&[][..], |v| v.as_slice()), count))
     }
 
     /// One CPU cook of a write site.
-    pub fn observe_cpu_write(backend: &Arc<dyn Gpu::Backend>, site: &str, count: i64, seconds: f64) {
+    pub fn observe_cpu_write(evidence: &Gpu::Evidence, site: &str, count: i64, seconds: f64) {
         if count > 0 {
-            with_rates(backend, |r| {
+            with_rates(evidence, |r| {
                 let mut old = r.writes.get(site).cloned().unwrap_or_default();
                 if old.is_empty() && r.writes.len() >= 256 {
                     r.writes.clear();
@@ -2037,13 +2013,6 @@ pub mod Display_sink {
                 r.writes.insert(site.to_owned(), old);
             });
         }
-    }
-
-    /// Backends still owning rates, for the close checks.
-    pub fn live() -> usize {
-        let mut registry = REGISTRY.lock().unwrap();
-        registry.retain(|(weak, _)| weak.strong_count() > 0);
-        registry.len()
     }
 }
 
@@ -2133,7 +2102,7 @@ impl Kernel {
         };
         let live = context::input(context).clone();
         // the site and count a measured decision asked about, and when it left this cook to the CPU
-        let asked: Arc<Mutex<Option<(Arc<dyn Gpu::Backend>, String, i64)>>> = Arc::new(Mutex::new(None));
+        let asked: Arc<Mutex<Option<(Arc<Gpu::Evidence>, String, i64)>>> = Arc::new(Mutex::new(None));
         let cpu_began: Mutex<Option<f64>> = Mutex::new(None);
         // set when this cook samples the CPU: when that sample has lost, and its cost
         let probe: Arc<Mutex<Option<(f64, f64)>>> = Arc::new(Mutex::new(None));
@@ -2184,31 +2153,31 @@ impl Kernel {
                         (Some(0), Some(gpu)) if gpu.backend.is_some() && whole => {
                             let g = &geometries[0];
                             let floats = geometry::point_count(g) * 9 + geometry::primitive_count(g) * 6;
-                            let (host, _) = Display_sink::rates(gpu.backend.as_ref().unwrap());
+                            let (host, _) = Display_sink::rates(&gpu.evidence);
                             if host < f64::INFINITY { host * floats as f64 } else { Cost::readback(Some(gpu), floats, 1) }
                         }
                         _ => 0.0,
                     };
-                    let cpu_cost: Option<Arc<dyn Fn(&FId, i64) -> Option<f64> + Send + Sync>> = self.gpu.as_ref().and_then(|gpu| gpu.backend.clone()).map(|backend| {
+                    let cpu_cost: Option<Arc<dyn Fn(&FId, i64) -> Option<f64> + Send + Sync>> = self.gpu.as_ref().filter(|gpu| gpu.backend.is_some()).map(|gpu| gpu.evidence.clone()).map(|evidence| {
                         let asked = asked.clone();
                         Arc::new(move |owner: &FId, count: i64| {
                             let site = site_of(owner);
-                            *asked.lock().unwrap() = Some((backend.clone(), site.clone(), count));
-                            Display_sink::cpu_write(&backend, &site, count)
+                            *asked.lock().unwrap() = Some((evidence.clone(), site.clone(), count));
+                            Display_sink::cpu_write(&evidence, &site, count)
                         }) as Arc<dyn Fn(&FId, i64) -> Option<f64> + Send + Sync>
                     });
-                    let device_first: Option<Arc<dyn Fn(&FId, i64, Option<f64>) -> bool + Send + Sync>> = self.gpu.as_ref().and_then(|gpu| gpu.backend.clone()).map(|backend| {
+                    let device_first: Option<Arc<dyn Fn(&FId, i64, Option<f64>) -> bool + Send + Sync>> = self.gpu.as_ref().filter(|gpu| gpu.backend.is_some()).map(|gpu| gpu.evidence.clone()).map(|evidence| {
                         let asked = asked.clone();
                         let probe = probe.clone();
                         let clock = self.clock.clone();
                         let consumers = context::cpu_consumers(context, node_id).unwrap_or(0);
                         Arc::new(move |owner: &FId, count: i64, device_seconds: Option<f64>| {
                             let site = site_of(owner);
-                            *asked.lock().unwrap() = Some((backend.clone(), site.clone(), count));
+                            *asked.lock().unwrap() = Some((evidence.clone(), site.clone(), count));
                             // with a declared CPU reader the device route reads back: a write the CPU
                             // is expected to cook faster than the device dispatches measures the CPU first
                             let cpu_first = consumers > 0 && device_seconds.is_some_and(|device| Cost::estimate(Cost::packed(count), count) < device);
-                            if !cpu_first && Display_sink::device_first(&backend, &site, device_seconds) {
+                            if !cpu_first && Display_sink::device_first(&evidence, &site, device_seconds) {
                                 return true;
                             }
                             let budget = Cost::probe_budget(device_seconds.unwrap_or(0.0));
@@ -2364,9 +2333,9 @@ impl Kernel {
             _ => {
                 // the CPU has lost: this is its measurement, and the cook runs on the device
                 let (asked_now, probe_now) = (asked.lock().unwrap().clone(), *probe.lock().unwrap());
-                if let (Some((backend, site, count)), Some((_, budget))) = (asked_now, probe_now) {
-                    Display_sink::observe_cpu_write(&backend, &site, count, budget);
-                    Display_sink::observe_cpu_write(&backend, &site, count, budget);
+                if let (Some((evidence, site, count)), Some((_, budget))) = (asked_now, probe_now) {
+                    Display_sink::observe_cpu_write(&evidence, &site, count, budget);
+                    Display_sink::observe_cpu_write(&evidence, &site, count, budget);
                 }
                 *probe.lock().unwrap() = None;
                 *cpu_began.lock().unwrap() = None;
@@ -2374,8 +2343,8 @@ impl Kernel {
             }
         };
         let (asked_now, began) = (asked.lock().unwrap().clone(), *cpu_began.lock().unwrap());
-        if let (Some((backend, site, count)), Some(began), Ok(_)) = (asked_now, began, &result) {
-            Display_sink::observe_cpu_write(&backend, &site, count, (self.clock)() - began);
+        if let (Some((evidence, site, count)), Some(began), Ok(_)) = (asked_now, began, &result) {
+            Display_sink::observe_cpu_write(&evidence, &site, count, (self.clock)() - began);
         }
         let result = if self.deletes.is_empty() { result } else { result.and_then(|g| delete_after(&self.deletes, context::cancel_token(context), &g)) };
         result.map(|geometry| node::GeometryCooked { geometry, instances: None })
@@ -3265,19 +3234,14 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
         assert!(seed_for(0, 1, "x", "y") != seed_for(0, 2, "x", "y"));
     }
 
-    /// The measured display sinks: keyed by backend, dropped with it, priced from the two nearest
-    /// samples, with a bounded count of device-first cooks per site.
+    /// The measured display sinks: priced from the two nearest samples, with a bounded count of
+    /// device-first cooks per site.
     #[test]
-    fn display_sink_prices_and_forgets() {
+    fn display_sink_prices() {
         assert_eq!(Display_sink::priced(&[(100, 2.0)], 10), None);
         // the two samples nearest 400 are 100 and 1000; the cheaper per-unit rate wins
         assert_eq!(Display_sink::priced(&[(100, 3.0), (1000, 2.0), (1_000_000, 0.5)], 400), Some(2.0 * 400.0));
-        struct NoKernel;
-        impl Gpu::Backend for NoKernel {
-            fn prepare(&self, _: bool, _: &flow_ir::packed::T) -> Result<Arc<dyn Gpu::Kernel>, Diagnostic> { Err(fail("E_TEST", "no kernel")) }
-        }
-        let backend: Arc<dyn Gpu::Backend> = Arc::new(NoKernel);
-        let live = Display_sink::live();
+        let backend = Gpu::Evidence::default();
         assert_eq!(Display_sink::rates(&backend), (f64::INFINITY, f64::INFINITY));
         Display_sink::observe(&backend, false, 100, 1.0);
         Display_sink::observe(&backend, false, 100, 2.0);
@@ -3293,8 +3257,5 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
         Display_sink::observe_cpu_write(&backend, "site", 10, 1.0);
         Display_sink::observe_cpu_write(&backend, "site", 20, 4.0);
         assert_eq!(Display_sink::cpu_write(&backend, "site", 10), Some(1.0));
-        assert_eq!(Display_sink::live(), live + 1);
-        drop(backend);
-        assert_eq!(Display_sink::live(), live);
     }
 }

@@ -171,10 +171,52 @@ pub mod Gpu {
         /// Seconds to move one float between device and host, measured on this device. `None`
         /// keeps the M1-fitted `Cost::table`, which unified memory matches.
         pub readback_per_float: Option<f64>,
+        /// What the cooks on `backend` have measured. Clones share it, so it lives and dies with the
+        /// owner that built the config.
+        pub evidence: Arc<Evidence>,
     }
 
     /// Exact CPU execution with no device backend.
-    pub fn default() -> Config { Config { backend: None, fast: false, policy: Policy::Measured, readback_per_float: None } }
+    pub fn default() -> Config { Config { backend: None, fast: false, policy: Policy::Measured, readback_per_float: None, evidence: Arc::default() } }
+
+    /// The recent cooks of one whole-chain write site: seconds per output float with the output size
+    /// they had, per route.
+    #[derive(Default)]
+    pub struct Samples {
+        pub cpu: Vec<(i64, f64)>,
+        pub device: Vec<(i64, f64)>,
+        /// the CPU cooks that finished: an abandoned probe is only a lower bound
+        pub measured: i64,
+    }
+
+    #[derive(Default)]
+    pub struct Chain {
+        pub sites: HashMap<String, Samples>,
+        pub last: HashMap<String, (i64, i64)>,
+    }
+
+    /// The measured display sinks: seconds per float the editor spent preparing a host mesh for
+    /// display, a resident one, and the renderer's draw of a host one.
+    pub struct Display {
+        pub host: f64,
+        pub draw: f64,
+        pub resident: f64,
+        /// per write site, its recent CPU cooks (elements, seconds per element), at most 256 sites
+        pub writes: HashMap<String, Vec<(i64, f64)>>,
+        /// per write site, its priced device cooks
+        pub devices: HashMap<String, i64>,
+    }
+
+    impl Default for Display {
+        fn default() -> Self { Display { host: f64::INFINITY, draw: f64::INFINITY, resident: f64::INFINITY, writes: HashMap::new(), devices: HashMap::new() } }
+    }
+
+    /// The evidence behind measured placement of one backend's cooks.
+    #[derive(Default)]
+    pub struct Evidence {
+        pub chain: Arc<Mutex<Chain>>,
+        pub display: Mutex<Display>,
+    }
 }
 
 /// A profile owner: authored path and iteration.
@@ -3267,7 +3309,7 @@ mod tests {
             let calls = Arc::new(AtomicUsize::new(0));
             let profile = Profile::create(Arc::new(|| 0.0));
             let backend = StaticBackend { width, shape, actual, calls: calls.clone() };
-            let gpu = Gpu::Config { backend: Some(Arc::new(backend)), fast: true, policy: Gpu::Policy::Measured, readback_per_float };
+            let gpu = Gpu::Config { backend: Some(Arc::new(backend)), fast: true, policy: Gpu::Policy::Measured, readback_per_float, ..Gpu::default() };
             let result = Profile::sample(&profile, &mut || ok(qualify_workspace(&QualifyOptions { record: true, gpu: Some(gpu.clone()), ..Default::default() }, &ws)));
             let expected_value = if width == 1 {
                 Value::Float_array(Arc::new((0..4097).map(|i| i as f64 + 0.25).collect()))

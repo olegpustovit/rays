@@ -80,7 +80,7 @@ fn positions(g: &geo::T) -> Vec<(f64, f64, f64)> {
 
 fn in_flight_device_writes_settle_at_a_cooks_end() {
     let c = Arc::new(Counters { settles: AtomicI64::new(0), releases: AtomicI64::new(0), bounded: AtomicI64::new(0), fail: AtomicBool::new(false) });
-    let gpu = Gpu::Config { backend: Some(backend(&c)), fast: true, policy: Gpu::Policy::Qualification, readback_per_float: None };
+    let gpu = Gpu::Config { backend: Some(backend(&c)), fast: true, policy: Gpu::Policy::Qualification, readback_per_float: None, ..Gpu::default() };
     let ctx = sop::context::create(sop::context::Options { time: Some(0.0), ..Default::default() }).unwrap();
     let session = || new_session(2, 1 << 24);
     let cpu = positions(&cook(&mut session(), &ctx, &node(None, 1.0)));

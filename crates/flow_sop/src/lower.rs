@@ -666,43 +666,12 @@ fn per_context(value: &Value, build_with: Arc<Build>) -> node::T {
 // ---------------------------------------------------------------------------------------------
 // Whole-chain placement of a resident mesh scope, measured rather than assumed. Per backend and
 // authored site, each route keeps the seconds-per-output-float of its recent cooks, with the output
-// size they had. The state is keyed by the backend, held weakly, so a closed owner's evidence goes
-// with it.
+// size they had. The evidence is `Gpu::Evidence`, owned with the config's backend, so a closed
+// owner's evidence goes with it.
 pub mod chain {
     use super::*;
 
-    #[derive(Default)]
-    pub struct Samples {
-        pub cpu: Vec<(i64, f64)>,
-        pub device: Vec<(i64, f64)>,
-        /// the CPU cooks that finished: an abandoned probe is only a lower bound
-        pub measured: i64,
-    }
-
-    pub struct State {
-        pub sites: HashMap<String, Samples>,
-        pub last: HashMap<String, (i64, i64)>,
-    }
-
-    static REGISTRY: Mutex<Vec<(Weak<dyn Gpu::Backend>, Arc<Mutex<State>>)>> = Mutex::new(Vec::new());
     const SITES_CAP: usize = 256;
-
-    pub fn state_of(backend: &Arc<dyn Gpu::Backend>) -> Arc<Mutex<State>> {
-        let mut registry = REGISTRY.lock().unwrap();
-        registry.retain(|(weak, _)| weak.strong_count() > 0);
-        if let Some((_, state)) = registry.iter().find(|(weak, _)| weak.upgrade().is_some_and(|b| Arc::ptr_eq(&b, backend))) {
-            return state.clone();
-        }
-        let state = Arc::new(Mutex::new(State { sites: HashMap::new(), last: HashMap::new() }));
-        registry.push((Arc::downgrade(backend), state.clone()));
-        state
-    }
-
-    pub fn states() -> usize {
-        let mut registry = REGISTRY.lock().unwrap();
-        registry.retain(|(weak, _)| weak.strong_count() > 0);
-        registry.len()
-    }
 
     pub fn floats_of(geometry: &rdk_core::geometry::T) -> i64 {
         rdk_core::geometry::point_count(geometry) * 9 + rdk_core::geometry::primitive_count(geometry) * 6
@@ -720,15 +689,15 @@ pub mod chain {
     }
 
     pub fn observe_display(gpu: &Gpu::Config, geometry: &rdk_core::geometry::T, seconds: f64) {
-        if let (Some(backend), Gpu::Policy::Measured) = (&gpu.backend, gpu.policy) {
-            ak::Display_sink::observe(backend, rdk_core::packed::Float3::resident(rdk_core::geometry::positions(geometry)), floats_of(geometry), seconds);
+        if let (Some(_), Gpu::Policy::Measured) = (&gpu.backend, gpu.policy) {
+            ak::Display_sink::observe(&gpu.evidence, rdk_core::packed::Float3::resident(rdk_core::geometry::positions(geometry)), floats_of(geometry), seconds);
         }
     }
 
     pub fn observe_draw(gpu: &Gpu::Config, geometry: &rdk_core::geometry::T, seconds: f64) {
-        if let (Some(backend), Gpu::Policy::Measured) = (&gpu.backend, gpu.policy) {
+        if let (Some(_), Gpu::Policy::Measured) = (&gpu.backend, gpu.policy) {
             if !rdk_core::packed::Float3::resident(rdk_core::geometry::positions(geometry)) {
-                ak::Display_sink::observe_draw(backend, floats_of(geometry), seconds);
+                ak::Display_sink::observe_draw(&gpu.evidence, floats_of(geometry), seconds);
             }
         }
     }
@@ -762,14 +731,14 @@ pub mod chain {
                 Profile::place(Some(&profile), &Placement { owner: owner.clone(), count: points, reason, cpu_seconds, device_seconds, cpu_consumers: readers });
             }
         };
-        let state = gpu.backend.as_ref().map(state_of);
+        let state = gpu.backend.as_ref().map(|_| gpu.evidence.chain.clone());
         let gpu_c = gpu.clone();
         let device_cost = {
             let gpu = gpu.clone();
-            move |samples: &Samples, floats: i64| -> Option<f64> {
+            move |samples: &Gpu::Samples, floats: i64| -> Option<f64> {
                 let moved = Cost::readback(Some(&gpu), floats, 1);
                 let rate = |r: f64, fallback: f64| if r < f64::INFINITY { r * floats as f64 } else { fallback };
-                let (_, resident_sink) = gpu.backend.as_ref().map_or((f64::INFINITY, f64::INFINITY), ak::Display_sink::rates);
+                let (_, resident_sink) = ak::Display_sink::rates(&gpu.evidence);
                 ak::Display_sink::priced(&samples.device, floats).map(|s| {
                     s + rate(resident_sink, 0.0) + if readers.unwrap_or(0) == 0 { 0.0 } else { moved }
                 })
@@ -778,14 +747,14 @@ pub mod chain {
         let device_cost = Arc::new(device_cost);
         let decide = {
             let (gpu, device_cost, report, site) = (gpu_c.clone(), device_cost.clone(), report.clone(), site.clone());
-            move |state: &Arc<Mutex<State>>, floats: i64, points: i64| -> PlacementReason {
+            move |state: &Arc<Mutex<Gpu::Chain>>, floats: i64, points: i64| -> PlacementReason {
                 let cpu_consumers = readers.unwrap_or(0);
                 let mut guard = state.lock().unwrap();
                 let st = &mut *guard;
                 let samples = st.sites.get(&site).expect("site evidence");
                 let moved = Cost::readback(Some(&gpu), floats, 1);
                 let rate = |r: f64, fallback: f64| if r < f64::INFINITY { r * floats as f64 } else { fallback };
-                let (host_sink, _) = gpu.backend.as_ref().map_or((f64::INFINITY, f64::INFINITY), ak::Display_sink::rates);
+                let (host_sink, _) = ak::Display_sink::rates(&gpu.evidence);
                 let cpu_seconds = ak::Display_sink::priced(&samples.cpu, floats).map(|s| s + rate(host_sink, moved));
                 let device_seconds = device_cost(samples, floats);
                 let reason = Cost::choose(cpu_seconds, device_seconds, false, cpu_consumers);
@@ -796,14 +765,14 @@ pub mod chain {
         let decide = Arc::new(decide);
         let evidence = {
             let site = site.clone();
-            move |state: &Arc<Mutex<State>>| {
+            move |state: &Arc<Mutex<Gpu::Chain>>| {
                 let mut st = state.lock().unwrap();
                 if !st.sites.contains_key(&site) {
                     if st.sites.len() >= SITES_CAP {
                         st.sites.clear();
                         st.last.clear();
                     }
-                    st.sites.insert(site.clone(), Samples::default());
+                    st.sites.insert(site.clone(), Gpu::Samples::default());
                 }
             }
         };
@@ -1990,11 +1959,6 @@ static BUILT: LazyLock<lru::Memo<String, BuiltEntry>> = LazyLock::new(|| lru::Me
 /// Drops the inlined-body nodes built for a closed owner's backend.
 pub fn forget_backend(backend: &Arc<dyn Gpu::Backend>) {
     BUILT.remove_where(|(held, _)| held.as_ref().is_some_and(|b| Arc::ptr_eq(b, backend)));
-}
-
-/// Placement states still owned by a live backend, for the close checks.
-pub fn chain_states() -> usize {
-    chain::states()
 }
 
 /// The seconds from a host mesh's frame to its first presentation, added to its display sink.

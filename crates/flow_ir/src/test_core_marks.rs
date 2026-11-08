@@ -455,7 +455,7 @@ fn fused_device_dispatches_share_their_inputs_and_follow_the_frame_count() {
         let serial = serial.clone();
         FusedBackend { seen, serial }
     };
-    let gpu = Gpu::Config { backend: Some(Arc::new(backend)), fast: true, policy: Gpu::Policy::Qualification, readback_per_float: None };
+    let gpu = Gpu::Config { backend: Some(Arc::new(backend)), fast: true, policy: Gpu::Policy::Qualification, readback_per_float: None, ..Gpu::default() };
     let display = Rc::new(Executor::region_display(Some(gpu), None, None));
     let prepared = |count: &str| {
         let body = format!("(draw/circles (map (fn [i] [(+ i t) i 0]) (array/range {count})) :radius (map (fn [i] (+ i t)) (array/range {count})))");

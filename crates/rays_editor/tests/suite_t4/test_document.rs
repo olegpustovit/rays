@@ -28,7 +28,7 @@ pub fn run() {
         }
     }
     let backend: Arc<dyn Gpu::Backend> = Arc::new(Unused);
-    let gpu = Gpu::Config { backend: Some(backend.clone()), fast: true, policy: Gpu::Policy::Qualification, readback_per_float: None };
+    let gpu = Gpu::Config { backend: Some(backend.clone()), fast: true, policy: Gpu::Policy::Qualification, readback_per_float: None, ..Gpu::default() };
     let carries_gpu = |d: &document::T| {
         let g = &d.workspace.lowered.gpu;
         g.fast && g.policy == Gpu::Policy::Qualification && g.backend.as_ref().is_some_and(|b| Arc::ptr_eq(b, &backend))

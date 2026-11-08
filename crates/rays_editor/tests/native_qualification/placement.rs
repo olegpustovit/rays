@@ -36,7 +36,7 @@ fn calibration() {
     let program = compile("(+ (sin (+ i t)) 0.25)");
     with_owner(|owner,config| {
         assert_eq!(config.policy,Gpu::Policy::Measured);
-        let backend = config.backend.as_ref().unwrap();
+        let backend = &*config.evidence;
         let stats = || gpu::image_stats(owner).0;
         let cost = |p: &packed::T, i: Option<&packed::Inputs>| backend.cost(i,true,p,32768);
         let before = stats();
@@ -218,7 +218,6 @@ fn chain_counterexamples() {
         for seconds in [2.,1.,3.] {flow_sop::attribute_kernel::Display_sink::observe_draw(backend,1_000_000,seconds);}
         assert!((flow_sop::attribute_kernel::Display_sink::rates(backend).0-base-1e-6).abs()<=1e-12);
     });
-    assert_eq!(lower::chain_states(),0,"placement state outlived its closed owner");
 }
 fn retained_generations() {
     with_owner(|owner,config| {

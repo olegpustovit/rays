@@ -72,7 +72,7 @@ fn run_case(test:&str,empty_offset:bool){
     }
     let cancel=Arc::new(cancel::create());let closes=Arc::new(AtomicUsize::new(0));
     let backend=Watched{base:h::backend(&host),cancel:cancel.clone(),closes:closes.clone(),cancel_case:case=="cancel"};
-    let config=Gpu::Config{backend:Some(Arc::new(backend)),fast:true,policy:Gpu::Policy::Qualification,readback_per_float:None};
+    let config=Gpu::Config{backend:Some(Arc::new(backend)),fast:true,policy:Gpu::Policy::Qualification,readback_per_float:None,..Gpu::default()};
     let lowered=lower::workspace(None,vec![],lower::Options{defer:true,gpu:config.clone(),..Default::default()},&syntax::parse(&source(host_call,case)).unwrap()).unwrap_or_else(|d|panic!("{}",rays_diagnostic::to_string(&d)));
     let graph=&lowered.graphs[0];let resolved=value_lane::resolve(Some(&config),None,&value_lane::create(None),0.,&graph.network).unwrap();let root=edit::compile_node(&resolved.geometry,graph.root.unwrap()).unwrap();if host_call{assert_eq!(node::operation(&root),"flow.geometry_select");}
     let mut session=session::create(4,1<<24).unwrap();let mut held=vec![];let mut replays=0;
