@@ -200,9 +200,9 @@ pub fn compose_view(
         out.extend(editor_host::machinery(core, None, false));
         return out;
     }
-    let viewport = editor_shell::panes(core, frame_).view;
-    let guides = if view_visible { guides(viewport) } else { Vec::new() };
     let geometry = editor_shell::geometry(core, &core.workspace, frame_);
+    let viewport = editor_shell::panes_in(core, &geometry).view;
+    let guides = if view_visible { guides(viewport) } else { Vec::new() };
     // every viewport shows its own scene instance's image; the map replaces the focused one
     let floating: Vec<(String, Vec<usize>, Bounds)> = geometry
         .leaves
@@ -218,7 +218,7 @@ pub fn compose_view(
     // newest first, as OCaml's prepended lists are
     let mut painted: Vec<Nodes> = Vec::new();
     let mut windows: Vec<(Option<i64>, Nodes)> = Vec::new();
-    for (key, bounds) in editor_shell::view_bodies(core, frame_) {
+    for (key, bounds) in editor_shell::view_bodies_in(core, &geometry) {
         let image = if bounds == viewport && core.map_view { paint_world(viewport) } else { worlds(paint_view, camera_of, rendered, views, view_visible, &[(key.clone(), bounds)]) };
         match floating.iter().find(|(k, _, _)| *k == key) {
             None => painted.insert(0, image),

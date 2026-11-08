@@ -195,9 +195,14 @@ pub fn active_view<'a>(value: impl Into<ModelView<'a>>, g: &layout::Geometry) ->
 
 pub fn panes<'a>(value: impl Into<ModelView<'a>>, frame: &frame::Frame) -> layout::Panes {
     let value = &value.into();
-    let g = geometry(value, &value.workspace, frame);
-    let panes = layout::panes(&g);
-    match active_view(value, &g) {
+    panes_in(value, &geometry(value, &value.workspace, frame))
+}
+
+/// `panes` of a geometry already laid out.
+pub fn panes_in<'a>(value: impl Into<ModelView<'a>>, g: &layout::Geometry) -> layout::Panes {
+    let value = &value.into();
+    let panes = layout::panes(g);
+    match active_view(value, g) {
         Some(leaf) => layout::Panes { view: leaf.body, ..panes },
         None => panes,
     }
@@ -206,8 +211,13 @@ pub fn panes<'a>(value: impl Into<ModelView<'a>>, frame: &frame::Frame) -> layou
 /// The viewports on screen and the bodies they are drawn in.
 pub fn view_bodies<'a>(value: impl Into<ModelView<'a>>, frame: &frame::Frame) -> Vec<(String, layout::Bounds)> {
     let value = &value.into();
-    geometry(value, &value.workspace, frame)
-        .leaves
+    view_bodies_in(value, &geometry(value, &value.workspace, frame))
+}
+
+/// `view_bodies` of a geometry already laid out.
+pub fn view_bodies_in<'a>(value: impl Into<ModelView<'a>>, g: &layout::Geometry) -> Vec<(String, layout::Bounds)> {
+    let value = &value.into();
+    g.leaves
         .iter()
         .filter_map(|leaf| match &leaf.panel {
             Panel::View(key) if !panel_state(value, &leaf.path).collapsed => Some((key.clone(), leaf.body)),

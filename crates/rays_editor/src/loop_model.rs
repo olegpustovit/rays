@@ -482,7 +482,11 @@ pub struct Focus {
 /// orbit it last had, else from a copy of the one in use. `core` is the model whose panels say
 /// which viewport has the focus.
 pub fn follow_focus(value: &LoopModel, core: &m::EditorModel, frame_: &frame::Frame) -> Focus {
-    let g = editor_shell::geometry(core, &core.workspace, frame_);
+    follow_focus_in(value, core, &editor_shell::geometry(core, &core.workspace, frame_))
+}
+
+/// `follow_focus` over a geometry already laid out.
+pub fn follow_focus_in(value: &LoopModel, core: &m::EditorModel, g: &pxui_shell::layout::Geometry) -> Focus {
     let keys: Vec<String> = g
         .leaves
         .iter()

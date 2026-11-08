@@ -477,8 +477,9 @@ pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn
     open_dialog(value, &mut update_, &frame.input.events);
     open_import(value, &mut update_);
     reload_source(value, &mut update_, frame.input.t);
-    let focused = follow_focus(&value, &value.core, &frame);
-    let panes = editor_shell::panes(&value.core, &frame);
+    let geometry = editor_shell::geometry(&value.core, &value.core.workspace, &frame);
+    let focused = follow_focus_in(&value, &value.core, &geometry);
+    let panes = editor_shell::panes_in(&value.core, &geometry);
     let panel_out: Option<Rc<V::panel_out>> = update_.panel.take().and_then(|p| Rc::downcast::<V::panel_out>(p).ok());
     let (control, camera, requests, extra, inspected) = match panel_out {
         Some(p) => {
