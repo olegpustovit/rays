@@ -18,6 +18,8 @@ struct TextureInner {
     format: TextureFormat,
     submission_uses: Cell<i64>,
     destroy_requested: Cell<bool>,
+    /// Last command buffer that retained it.
+    retained_by: Cell<i64>,
 }
 
 #[derive(Clone)]
@@ -138,6 +140,7 @@ pub fn create(device: &Device, memory: Memory, format: TextureFormat, descriptor
         format,
         submission_uses: Cell::new(0),
         destroy_requested: Cell::new(false),
+        retained_by: Cell::new(0),
     })))
 }
 
@@ -230,6 +233,17 @@ impl Texture {
         }
         self.0.submission_uses.set(self.0.submission_uses.get() + 1);
         Ok(())
+    }
+
+    /// Retains once per command buffer; `Ok(false)` when `commands` already holds it.
+    pub fn retain_for(&self, commands: i64) -> Result<bool, Error> {
+        if self.0.retained_by.get() == commands && !self.destroyed() {
+            Ok(false)
+        } else {
+            self.retain_submission()?;
+            self.0.retained_by.set(commands);
+            Ok(true)
+        }
     }
 
     pub fn release_submission(&self) {

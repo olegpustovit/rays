@@ -13,6 +13,8 @@ struct SamplerInner {
     handle: ResourceHandle,
     device: Device,
     submissions: Cell<i64>,
+    /// Last command buffer that retained it.
+    retained_by: Cell<i64>,
 }
 
 #[derive(Clone)]
@@ -76,6 +78,7 @@ pub fn create(device: &Device, descriptor: &SamplerDescriptor) -> Result<Sampler
         handle: handle::create(device.handle()),
         device: device.clone(),
         submissions: Cell::new(0),
+        retained_by: Cell::new(0),
     })))
 }
 
@@ -108,6 +111,17 @@ impl Sampler {
         }
         self.0.submissions.set(self.0.submissions.get() + 1);
         Ok(())
+    }
+
+    /// Retains once per command buffer; `Ok(false)` when `commands` already holds it.
+    pub fn retain_for(&self, commands: i64) -> Result<bool, Error> {
+        if self.0.retained_by.get() == commands && !self.destroyed() {
+            Ok(false)
+        } else {
+            self.retain_submission()?;
+            self.0.retained_by.set(commands);
+            Ok(true)
+        }
     }
 
     pub fn release_submission(&self) {

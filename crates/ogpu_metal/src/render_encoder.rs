@@ -263,8 +263,7 @@ pub fn create(context: &Rc<CommandContext>, target: &DriverRenderTarget) -> Resu
             let Some(sampler) = c4.sampler(token) else {
                 return Err(fail(operation, ErrorKind::InvalidArgument, "sampler graph is incomplete"));
             };
-            let s = sampler.clone();
-            c4.keep(sampler.retain_submission(), Box::new(move || s.release_submission()))?;
+            c4.keep_sampler(&sampler)?;
             match stage {
                 ShaderStage::Vertex => e4.set_vertex_sampler(index as usize, sampler.metal()),
                 ShaderStage::Fragment => e4.set_fragment_sampler(index as usize, sampler.metal()),

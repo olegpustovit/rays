@@ -12,7 +12,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 |------|------|--------|---------|
 | A | 8/8 | — | — |
 | B | 5/6 | B1 | 1 |
-| M | 6/21 | — | 15 |
+| M | 7/21 | — | 14 |
 | I | 0/1 | — | 1 |
 | C | 0/21 | — | 21 |
 | D | 0/6 | — | 6 |
@@ -41,7 +41,8 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | M4 | done | `0f3804c3` — `Profile::execution_count` / `probe_run::report_count`; `sync_scope` defers profile clone until after `!moved && !fresh`; `cargo check -p rays_editor`; `cargo t -p flow_native probe_run` 3 pass |
 | M9 | done | `20c1dfb3` — `panels::at_ref`; shell `graph_path` / `panel_key` + `beside` borrow; `cargo check -p editor_core -p rays_editor` |
 | M11 | done | `49ec71f3` — lazy `field()` error `form`; `Keys` pattern name once; `cargo t -p flow_eval test_workspace_eval` 2 pass |
-| M1,M3,M5–M8,M12–M19,M21 | pending | |
+| M7 | done | (this session) `retain_for` on texture/sampler; `keep_texture` / `keep_sampler` dedup like `keep_buffer`; `cargo check -p ogpu_metal` |
+| M1,M3,M5–M6,M8,M12–M19,M21 | pending | |
 | I | pending | |
 | C1–C21 | pending | |
 | D1–D6 | pending | |

@@ -182,9 +182,22 @@ impl CommandContext {
         }
     }
 
+    /// One retain per texture per command buffer, however many bindings reference it.
     pub fn keep_texture(&self, texture: &Texture) -> Result<(), Error> {
-        let t = texture.clone();
-        self.keep(texture.retain_submission(), Box::new(move || t.release_submission()))
+        if texture.retain_for(self.commands_token)? {
+            let t = texture.clone();
+            self.retained.borrow_mut().push(Box::new(move || t.release_submission()));
+        }
+        Ok(())
+    }
+
+    /// One retain per sampler per command buffer, however many bindings reference it.
+    pub fn keep_sampler(&self, sampler: &Sampler) -> Result<(), Error> {
+        if sampler.retain_for(self.commands_token)? {
+            let s = sampler.clone();
+            self.retained.borrow_mut().push(Box::new(move || s.release_submission()));
+        }
+        Ok(())
     }
 
     pub fn resource(&self, token: i64) -> Option<Resource> {
