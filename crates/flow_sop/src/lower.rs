@@ -1955,7 +1955,11 @@ pub fn build_call(
 }
 
 type BuiltEntry = (Option<Arc<dyn gpu::Backend>>, node::T);
-static BUILT: LazyLock<lru::Memo<String, BuiltEntry>> = LazyLock::new(|| lru::Memo::new("flow_sop.built", 64));
+// One lowering of the variations workspace builds ~70 inlined nodes; at 64 entries every re-lowering
+// after an edit evicted what it was about to reuse (run_ops: 4,360 builds, 0 hits). A node without
+// its inputs is small; the owner's close still drops its backend's entries.
+// ponytail: fixed count, a byte budget if workspaces outgrow it
+static BUILT: LazyLock<lru::Memo<String, BuiltEntry>> = LazyLock::new(|| lru::Memo::new("flow_sop.built", 1024));
 
 /// Drops the inlined-body nodes built for a closed owner's backend.
 pub fn forget_backend(backend: &Arc<dyn gpu::Backend>) {
