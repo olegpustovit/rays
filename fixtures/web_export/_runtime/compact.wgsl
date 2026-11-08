@@ -91,8 +91,8 @@ fn compact_mask(@builtin(local_invocation_index) lid: u32, @builtin(global_invoc
   var r49: f32 = 0.0;
   let r50: f32 = bitcast<f32>(0x0u);
   var r51: f32 = 0.0;
-  let r52: u32 = 1u;
-  let r53: u32 = 0u;
+  let r52: u32 = 0u;
+  let r53: u32 = 1u;
   var r54: u32 = 0u;
   let r57: u32 = 0u;
   var r58: vec2<u32> = vec2<u32>(0u, 0u);
@@ -169,7 +169,7 @@ fn compact_mask(@builtin(local_invocation_index) lid: u32, @builtin(global_invoc
   if (r48 != 0.0) {
     r49 = buffer0[(r0).x * 1u + 0u];
     r51 = select(0.0, 1.0, (r49 == r50));
-    r54 = select(r52, r53, r51 != 0.0);
+    r54 = select(r53, r52, r51 != 0.0);
   }
   let r55: u32 = select(r18, r54, r48 != 0.0);
   let r56: f32 = select(0.0, 1.0, all(vec2<u32>(r14, 0u) == vec2<u32>(r15, 0u)));
@@ -194,13 +194,13 @@ fn compact_mask(@builtin(local_invocation_index) lid: u32, @builtin(global_invoc
   }
   let r66: u32 = select(r55, r65, r56 != 0.0);
   { var v: u32 = r66; scan66[lid] = v; for (var d = 1u; d < 256u; d = d << 1u) { workgroupBarrier(); var w = 0u; if (lid >= d) { w = scan66[lid - d]; } workgroupBarrier(); v = v + w; scan66[lid] = v; } workgroupBarrier(); scan66_before = v - r66; scan66_total = scan66[255u]; }
-  let r67: u32 = scan66_total;
-  let r68: u32 = scan66_before;
+  let r67: u32 = scan66_before;
+  let r68: u32 = scan66_total;
   let r69: f32 = select(0.0, 1.0, all(r10 == vec2<u32>(r18, 0u)));
   let r70: f32 = select(0.0, 1.0, all(vec2<u32>(r14, 0u) == vec2<u32>(r18, 0u)));
   if (r70 != 0.0) {
     if (r69 != 0.0) {
-      buffer5[(r8).x] = r67;
+      buffer5[(r8).x] = r68;
       r71 = 1u;
     }
     r73 = select(r72, r71, r69 != 0.0);
@@ -210,7 +210,7 @@ fn compact_mask(@builtin(local_invocation_index) lid: u32, @builtin(global_invoc
     if (r75 != 0.0) {
       let over76 = i64_lt(r44, r47) && i64_lt(vec2<u32>(4096u, 0u), i64_sub(r47, r44));
       if (over76) { sb |= 1u; }
-      r77 = r68;
+      r77 = r67;
       for (r76 = r44; i64_lt(r76, select(r47, r44, over76)); r76 = i64_add(r76, vec2<u32>(1u, 0u))) {
   var r78: vec2<u32> = vec2<u32>(0u, 0u);
   let r79: u32 = 1073741823u;
@@ -235,7 +235,7 @@ fn compact_mask(@builtin(local_invocation_index) lid: u32, @builtin(global_invoc
       }
       r86 = r77;
       if (r69 != 0.0) {
-        buffer2[r87] = r67;
+        buffer2[r87] = r68;
         r88 = 1u;
       }
       r90 = select(r89, r88, r69 != 0.0);
@@ -247,7 +247,7 @@ fn compact_mask(@builtin(local_invocation_index) lid: u32, @builtin(global_invoc
         r94 = (r37 + (r8).x);
                 r95 = vec2<u32>(buffer5[r94 * 1u + 0u], 0u);
         r97 = ((r95).x & r96);
-                r98 = (r97 + r68);
+                r98 = (r97 + r67);
                 r99 = i64_to_f(r0);
         buffer1[r98] = r99;
         r100 = 1u;
