@@ -233,6 +233,9 @@ fn children(term: &Term) -> impl Iterator<Item = Term> + '_ {
 }
 // Reject before recursive free-name analysis or compilation without consuming the native stack.
 fn check_term_nesting(term: &Term) -> Result<(), Diagnostic> {
+    term.arena().checked_once(term.row_id(), || nesting_within_bound(term))
+}
+fn nesting_within_bound(term: &Term) -> Result<(), Diagnostic> {
     let arena = term.arena();
     let mut pending = vec![(term.row_id(), 0)];
     while let Some((term, depth)) = pending.pop() {

@@ -123,6 +123,9 @@ pub struct TermArena {
     tables: Tables,
     names: Vec<String>,
     syntax: Arc<SyntaxArena>,
+    /// Rows whose subtree passed a caller's structural check (flow_eval's authored-nesting bound,
+    /// run per static evaluation over every catalog body): the arena is immutable, so the answer is.
+    checked: std::sync::Mutex<std::collections::HashSet<u32>>,
 }
 #[derive(Clone)]
 pub struct Term { arena: Arc<TermArena>, row: TermId }
@@ -151,6 +154,13 @@ macro_rules! payload_accessors {
 impl TermArena {
     pub fn handle(self: &Arc<Self>, id: TermId) -> Term { self.row(id); Term { arena: self.clone(), row: id } }
     pub fn row(&self, id: TermId) -> &TermRow { &self.tables.rows[id.0 as usize] }
+    /// `check` once per row: a passing row is remembered, a failing one is checked again.
+    pub fn checked_once<E>(&self, id: TermId, check: impl FnOnce() -> Result<(), E>) -> Result<(), E> {
+        if self.checked.lock().unwrap().contains(&id.0) { return Ok(()); }
+        check()?;
+        self.checked.lock().unwrap().insert(id.0);
+        Ok(())
+    }
     pub fn rows(&self) -> &[TermRow] { &self.tables.rows }
     pub fn ty(&self, id: TypeId) -> &Ty { &self.tables.types[id.0 as usize] }
     pub fn name(&self, id: NameId) -> &str { &self.names[id.0 as usize] }
@@ -644,7 +654,7 @@ impl TermBuilder {
         self.tables.rows.shrink_to_fit();
         self.tables.ranges.shrink_to_fit();
         self.tables.terms.shrink_to_fit();
-        Arc::new(TermArena { owner: arena::fresh_owner_id(), tables: self.tables, names: self.names.freeze(), syntax: self.syntax.freeze() })
+        Arc::new(TermArena { owner: arena::fresh_owner_id(), tables: self.tables, names: self.names.freeze(), syntax: self.syntax.freeze(), checked: Default::default() })
     }
 }
 
@@ -942,6 +952,20 @@ mod tests {
         let name = syntax.intern("authored");
         let atom = syntax.push(1_i64 << 40, arena::Node::Sym(name), Span { start: 0, finish: 8 }, None);
         syntax.push(-100, arena::Node::Quote(QuoteKind::Plain, atom), Span { start: 0, finish: 8 }, None)
+    }
+
+    #[test]
+    fn a_passing_check_runs_once_per_row_and_a_failing_one_again() {
+        let mut builder = TermBuilder::new();
+        let form = form(&mut builder);
+        let atom = builder.push(None, &Ty::Float, form, Draft::Lit(param::Value::Float(2.0)));
+        let other = builder.push(None, &Ty::Float, form, Draft::Lit(param::Value::Float(3.0)));
+        let arena = builder.freeze();
+        let mut runs = 0;
+        for _ in 0..3 { arena.checked_once(atom, || { runs += 1; Ok::<(), ()>(()) }).unwrap(); }
+        assert_eq!(runs, 1);
+        for _ in 0..2 { assert!(arena.checked_once(other, || { runs += 1; Err(()) }).is_err()); }
+        assert_eq!(runs, 3);
     }
 
     #[test]
