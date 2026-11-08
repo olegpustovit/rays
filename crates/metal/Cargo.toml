@@ -6,7 +6,7 @@ license.workspace = true
 
 [dependencies]
 metal_sys = { path = "../metal_sys" }
-native_layer_token = { path = "../native_layer_token" }
+native_layer_token_sys = { path = "../native_layer_token_sys" }
 
 # Metal handles are main-thread only and the tests count process-wide handles: their own main runs them.
 [[test]]

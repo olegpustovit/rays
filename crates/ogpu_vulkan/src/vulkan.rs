@@ -1,4 +1,7 @@
-use native_layer_token::Token;
+//! Safe Vulkan device API over `vulkan_sys` (Windows only).
+#![forbid(unsafe_code)]
+
+use native_layer_token_sys::portable::Token;
 use std::error::Error as StdError;
 use std::fmt;
 use vulkan_sys as sys;

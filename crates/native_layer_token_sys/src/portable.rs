@@ -4,18 +4,18 @@ use std::ptr::NonNull;
 /// Safe, portable identity and liveness view of a native layer token.
 ///
 /// Construct live tokens at the platform boundary with
-/// `native_layer_token_sys::Token::from_raw`, then move them into this facade.
+/// `Token::from_raw`, then move them into this facade.
 #[derive(Clone)]
-pub struct Token(native_layer_token_sys::Token);
+pub struct Token(crate::Token);
 
 impl Token {
-    pub fn from_sys(token: native_layer_token_sys::Token) -> Self {
+    pub fn from_sys(token: crate::Token) -> Self {
         Self(token)
     }
 
     /// Creates a dead token for a missing native layer.
     pub fn empty(owner_id: i64, generation: i64) -> Self {
-        Self(native_layer_token_sys::Token::empty(owner_id, generation))
+        Self(crate::Token::empty(owner_id, generation))
     }
 
     pub fn owner_id(&self) -> i64 {

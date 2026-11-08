@@ -6,7 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-native_layer_token = { path = "../native_layer_token" }
+native_layer_token_sys = { path = "../native_layer_token_sys" }
 sdl3_sys = { path = "../sdl3_sys" }
 
 [dev-dependencies]

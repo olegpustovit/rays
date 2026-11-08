@@ -306,7 +306,7 @@ name = "metal"
 version = "0.1.0"
 dependencies = [
  "metal_sys",
- "native_layer_token",
+ "native_layer_token_sys",
 ]
 
 [[package]]
@@ -314,13 +314,6 @@ name = "metal_sys"
 version = "0.1.0"
 dependencies = [
  "cc",
-]
-
-[[package]]
-name = "native_layer_token"
-version = "0.1.0"
-dependencies = [
- "native_layer_token_sys",
 ]
 
 [[package]]
@@ -342,7 +335,7 @@ dependencies = [
 name = "ogpu_core"
 version = "0.1.0"
 dependencies = [
- "native_layer_token",
+ "native_layer_token_sys",
 ]
 
 [[package]]
@@ -366,10 +359,10 @@ dependencies = [
 name = "ogpu_vulkan"
 version = "0.1.0"
 dependencies = [
- "native_layer_token",
+ "native_layer_token_sys",
  "ogpu",
  "ogpu_core",
- "vulkan",
+ "vulkan_sys",
 ]
 
 [[package]]
@@ -696,7 +689,7 @@ version = "0.1.0"
 name = "sdl3"
 version = "0.1.0"
 dependencies = [
- "native_layer_token",
+ "native_layer_token_sys",
  "sdl3_sys",
 ]
 
@@ -772,14 +765,6 @@ dependencies = [
  "rays_diagnostic",
  "rays_math",
  "rdk",
-]
-
-[[package]]
-name = "vulkan"
-version = "0.1.0"
-dependencies = [
- "native_layer_token",
- "vulkan_sys",
 ]
 
 [[package]]

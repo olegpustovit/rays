@@ -1,6 +1,6 @@
 use crate::error::{self, Error, ErrorKind};
 use crate::handle::{self, Device};
-use native_layer_token::Token;
+use native_layer_token_sys::portable::Token;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 

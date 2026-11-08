@@ -1,6 +1,6 @@
 use crate::metal::{error, sys_error, CommandBuffer, Device, Error, ErrorKind, Lifetime, PresentTime, Texture};
 use crate::metal_format::Format;
-use native_layer_token::Token;
+use native_layer_token_sys::portable::Token;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 

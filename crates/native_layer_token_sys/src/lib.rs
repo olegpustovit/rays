@@ -1,3 +1,5 @@
+pub mod portable;
+
 use std::ffi::c_void;
 use std::fmt;
 use std::ptr::{self, NonNull};

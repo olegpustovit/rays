@@ -3,7 +3,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::fmt;
 
-use native_layer_token::Token as NativeLayerToken;
+use native_layer_token_sys::portable::Token as NativeLayerToken;
 use sdl3_sys as sys;
 
 pub use sdl3_sys::{

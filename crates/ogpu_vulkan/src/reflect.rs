@@ -1,3 +1,6 @@
+//! SPIR-V entry-point reflection (portable).
+#![forbid(unsafe_code)]
+
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]

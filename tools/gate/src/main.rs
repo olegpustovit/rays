@@ -803,7 +803,6 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("cfmt", &["cfmt_sys"][..]),
         ("rays_diagnostic", &[][..]),
         ("native_layer_token_sys", &[][..]),
-        ("native_layer_token", &["native_layer_token_sys"][..]),
         ("mem_sys", &[][..]),
         ("mem", &["mem_sys"][..]),
         ("lru", &["mem"][..]),
@@ -820,10 +819,8 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("sdl3_mixer_sys", &[][..]),
         ("metal_sys", &[][..]),
         ("vulkan_sys", &[][..]),
-        // OCaml metal: threads, native_layer_token.
-        ("metal", &["metal_sys", "native_layer_token"][..]),
-        // OCaml vulkan: threads, native_layer_token.
-        ("vulkan", &["vulkan_sys", "native_layer_token"][..]),
+        // OCaml metal: threads, native_layer_token (merged into native_layer_token_sys::portable).
+        ("metal", &["metal_sys", "native_layer_token_sys"][..]),
         ("rdk_core", &["mem", "parallel", "rays_math"][..]),
         ("rdk_geom", &["rdk_core", "rays_math", "parallel"][..]),
         ("rdk_ops", &["rdk_core", "rdk_geom", "rays_math", "parallel"][..]),
@@ -863,13 +860,13 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
             "flow_graph", "flow_ir", "flow_gpu", "flow_sop", "scene_command", "renderer", "lru", "runtime_resources",
             "parallel", "sop",
         ][..]),
-        ("ogpu_core", &["native_layer_token"][..]),
+        ("ogpu_core", &["native_layer_token_sys"][..]),
         ("ogpu", &["ogpu_core"][..]),
         ("ogpu_mock", &["ogpu_core"][..]),
         // Rust merges OCaml's ogpu_metal_native into ogpu_metal.
         ("ogpu_metal", &["ogpu_metal_native", "ogpu_core", "metal", "lru"][..]),
         ("ogpu_metal_native", &["ogpu_core", "metal", "lru"][..]),
-        ("ogpu_vulkan", &["ogpu_core", "vulkan", "native_layer_token"][..]),
+        ("ogpu_vulkan", &["ogpu_core", "vulkan_sys", "native_layer_token_sys"][..]),
         ("ogpu_native", &["ogpu_metal", "ogpu_vulkan"][..]),
         ("scene_execution_fixtures", &["renderer", "ogpu"][..]),
         ("pxui", &["rays", "rays_math", "param", "mem"][..]),
@@ -925,7 +922,7 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
         "web_export", "rays_editor",
     ];
     let gpu = [
-        "sdl3", "sdl3_image", "sdl3_ttf", "sdl3_mixer", "metal", "vulkan", "ogpu_core", "ogpu",
+        "sdl3", "sdl3_image", "sdl3_ttf", "sdl3_mixer", "metal", "vulkan_sys", "ogpu_core", "ogpu",
         "ogpu_mock", "ogpu_metal", "ogpu_metal_native", "ogpu_vulkan", "ogpu_native", "runtime",
         "runtime_input", "runtime_resources", "renderer",
     ];
@@ -933,9 +930,9 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
     upper_no_gpu.extend(["runtime", "runtime_resources", "renderer"]);
     let foundational = [
         "cfmt", "cfmt_sys",
-        "diagnostic", "rays_diagnostic", "native_layer_token", "native_layer_token_sys", "mem", "mem_sys",
+        "diagnostic", "rays_diagnostic", "native_layer_token_sys", "mem", "mem_sys",
         "lru", "ocaml_int", "param", "input", "rays_math", "rays_math_sys", "parallel", "scene_command", "sdl3", "sdl3_image",
-        "sdl3_ttf", "sdl3_mixer", "metal", "vulkan", "ogpu_core", "ogpu",
+        "sdl3_ttf", "sdl3_mixer", "metal", "vulkan_sys", "ogpu_core", "ogpu",
         "rdk_core",
     ];
     for library in foundational {
@@ -945,9 +942,9 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
         rules.entry(library.to_owned()).or_default().extend(names.iter().map(|name| (*name).to_owned()));
     };
     for library in ["runtime", "renderer", "rays"] {
-        forbid(library, &["metal", "ogpu_metal_native", "ogpu_metal", "vulkan", "ogpu_vulkan", "ogpu_native"]);
+        forbid(library, &["metal", "ogpu_metal_native", "ogpu_metal", "vulkan_sys", "ogpu_vulkan", "ogpu_native"]);
     }
-    for library in ["ogpu_metal_native", "ogpu_metal", "vulkan", "ogpu_vulkan"] {
+    for library in ["ogpu_metal_native", "ogpu_metal", "vulkan_sys", "ogpu_vulkan"] {
         forbid(library, &["sdl3", "runtime", "rays", "renderer"]);
     }
     forbid("runtime", &upper);
