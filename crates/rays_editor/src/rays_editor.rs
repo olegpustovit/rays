@@ -4,7 +4,7 @@
 //!
 //! OCaml optional arguments: `Editor::create` takes a `Create` record (`loop_model::create_options`),
 //! `Editor::update_with` an `inspector` callback answering `Rc<dyn Any>`, and `Measure::run` a
-//! `MeasureOptions` record. `Editor::t` is a plain `Clone` value: a test keeps the one it is given
+//! `MeasureOptions` record. `editor::Editor` is a plain `Clone` value: a test keeps the one it is given
 //! and passes it by value to the functions that return the next.
 #![allow(non_camel_case_types, non_snake_case)]
 use editor_document::lowering;
@@ -30,7 +30,7 @@ pub fn workspace_window(doc: &editor_document::workspace_doc::T) -> Result<windo
     lowering::window(doc)
 }
 
-pub mod Editor {
+pub mod editor {
     use std::any::Any;
     use std::rc::Rc;
 
@@ -61,7 +61,7 @@ pub mod Editor {
         undo_label, workspace, world,
     };
     pub type prepared_t = cook::prepared;
-    pub type t = loop_model::t;
+    pub type Editor = loop_model::LoopModel;
     pub type Prepared = cook::prepared;
 
     /// What the app prepares of a cooked object: its geometry and its surface.
@@ -83,90 +83,90 @@ pub mod Editor {
     }
 
     /// `[await_]` (default false) makes each `update` block on the cook it submits.
-    pub fn create(options: Create, workspace: &workspace_doc::T, source: Option<source_file::t>, prepare: cook::Prepare_fn, draw: Draw_fn) -> Result<t, String> {
+    pub fn create(options: Create, workspace: &workspace_doc::T, source: Option<source_file::SourceFile>, prepare: cook::Prepare_fn, draw: Draw_fn) -> Result<Editor, String> {
         loop_model::create(options, workspace, source, prepare, draw)
     }
 
-    pub fn update(mut value: t, frame_: &frame::Frame) -> t {
+    pub fn update(mut value: Editor, frame_: &frame::Frame) -> Editor {
         editor_loop::update(&mut value, frame_);
         value
     }
 
     /// `update`, also building sketch-owned kit widgets below the camera and render sections shown
     /// while no node is selected. The result is `None` on frames where that panel is not built.
-    pub fn update_with(mut value: t, frame_: &frame::Frame, inspector: &dyn Fn(&mut pxui::ui::Ui) -> Rc<dyn Any>) -> (t, Option<Rc<dyn Any>>) {
+    pub fn update_with(mut value: Editor, frame_: &frame::Frame, inspector: &dyn Fn(&mut pxui::ui::Ui) -> Rc<dyn Any>) -> (Editor, Option<Rc<dyn Any>>) {
         let inspected = editor_loop::update_with(&mut value, frame_, inspector);
         (value, inspected)
     }
 
     /// Call from the sketch's `after_present` when driving the environment manually so PNG requests
     /// save the completed frame.
-    pub fn after_present(mut value: t, frame_: &frame::Frame) -> t {
+    pub fn after_present(mut value: Editor, frame_: &frame::Frame) -> Editor {
         editor_loop::after_present(&mut value, frame_);
         value
     }
 
-    pub fn scene(value: &t, frame_: &frame::Frame) -> Vec<rays::scene::node> {
+    pub fn scene(value: &Editor, frame_: &frame::Frame) -> Vec<rays::scene::node> {
         editor_loop::scene_of(value, frame_)
     }
 
-    pub fn close(value: &t) {
+    pub fn close(value: &Editor) {
         editor_loop::close(value)
     }
 
-    pub fn crash_dump(value: &t, directory: &str) -> Result<(), String> {
+    pub fn crash_dump(value: &Editor, directory: &str) -> Result<(), String> {
         editor_loop::crash_dump(value, directory)
     }
 
-    pub fn viewport_camera(value: &t, key: &str) -> rays::camera::Camera {
+    pub fn viewport_camera(value: &Editor, key: &str) -> rays::camera::Camera {
         loop_model::viewport_camera(value, key)
     }
 
-    pub fn lights(value: &t) -> Vec<rays::light::Light> {
+    pub fn lights(value: &Editor) -> Vec<rays::light::Light> {
         loop_model::lights(value)
     }
 
     /// Visible, renderable geometry objects' latest cooks at their world transforms.
-    pub fn objects(value: &t) -> Vec<(rays_math::mat4::T, cook::Prepared_ref)> {
+    pub fn objects(value: &Editor) -> Vec<(rays_math::mat4::T, cook::Prepared_ref)> {
         loop_model::objects_placed(value)
     }
 
     /// Replace the model's core outside a frame (a test's `{ editor with core }`).
     #[cfg(feature = "test-hooks")]
-    pub fn with_core(value: t, core: editor_model::t) -> t {
+    pub fn with_core(value: Editor, core: editor_model::EditorModel) -> Editor {
         loop_model::with_core(value, core)
     }
 
     #[cfg(feature = "test-hooks")]
-    pub mod Private {
+    pub mod private {
         use super::*;
 
         /// Explicit native benchmark selection.
-        pub fn gpu_qualification(value: &t) {
+        pub fn gpu_qualification(value: &Editor) {
             workspace_gpu::qualification(&value.host.borrow().gpu)
         }
 
-        pub fn resolved_scene(value: &t) -> kg::T {
+        pub fn resolved_scene(value: &Editor) -> kg::T {
             loop_model::resolved_scene(value)
         }
 
         /// The status strip's text: a cook or edit error reads "Cook rejected: ..." in it.
-        pub fn status_text(value: &t) -> String {
+        pub fn status_text(value: &Editor) -> String {
             editor_status::status_text(&value.core, false)
         }
 
         /// The frame facts the sketch read last frame: the pointer only while it is the picture's.
-        pub fn live_frame(value: &t) -> input::Frame {
+        pub fn live_frame(value: &Editor) -> input::Frame {
             value.core.live_frame.clone()
         }
 
         /// The node the inspector shows for the selection, when it is exactly one.
-        pub fn inspector_subject(value: &t) -> Option<Vec<String>> {
+        pub fn inspector_subject(value: &Editor) -> Option<Vec<String>> {
             editor_panels::inspector_subject(&value.core)
         }
 
         /// The `Set_graph` a "New graph" of this context name (`sop`, `scene`, ...) writes.
-        pub fn new_graph(value: &t, context: &str) -> fe::Op {
+        pub fn new_graph(value: &Editor, context: &str) -> fe::Op {
             editor_inspect::new_graph(&value.core, context).1
         }
 
@@ -176,17 +176,17 @@ pub mod Editor {
         }
 
         /// Completions from the vocabulary currently used by the workspace text panes.
-        pub fn lisp_completions(value: &t, text: &str) -> Vec<pxui::ui::Completion> {
+        pub fn lisp_completions(value: &Editor, text: &str) -> Vec<pxui::ui::Completion> {
             let core = &value.core;
             crate::lisp_text::complete(&crate::editor_shell::completion_names(core), &core.doc.workspace.ws.import_sources, core.lisp_vocab.force(), text, text.len())
         }
 
-        pub fn image_plan(value: &t) -> flow_eval::Plan {
+        pub fn image_plan(value: &Editor) -> flow_eval::Plan {
             value.core.doc.workspace.lowered.plan.clone()
         }
 
         /// Inspect the owned plan and request an independent immutable CPU image cook.
-        pub fn image_payload(value: &t, image: &flow_syntax::value::Value, state: Option<&flow_eval::State>, live: Option<&input::Frame>) -> Result<sop::image::T, rays_diagnostic::Diagnostic> {
+        pub fn image_payload(value: &Editor, image: &flow_syntax::value::Value, state: Option<&flow_eval::State>, live: Option<&input::Frame>) -> Result<sop::image::T, rays_diagnostic::Diagnostic> {
             let core = &value.core;
             let host = value.host.borrow();
             workspace_images::bind(&host.images, &core.doc.workspace.lowered);
@@ -196,28 +196,28 @@ pub mod Editor {
             resolver(None, None, &image_plan(value), &state, &live, image)
         }
 
-        pub fn image_stats(value: &t) -> (i64, i64) {
+        pub fn image_stats(value: &Editor) -> (i64, i64) {
             let host = value.host.borrow();
             let resources = host.resources.0.borrow();
             (resources.images_created, resources.images_destroyed)
         }
 
         /// Canvases created/destroyed, successful captures and actual GPU pixel readbacks.
-        pub fn image_render_stats(value: &t) -> (i64, i64, i64, i64) {
+        pub fn image_render_stats(value: &Editor) -> (i64, i64, i64, i64) {
             workspace_images::render_stats(&value.host.borrow().images)
         }
 
         /// The picture each canvas pane drew last frame, in layout order.
-        pub fn canvas_scenes(value: &t) -> Vec<Vec<rays::scene::node>> {
+        pub fn canvas_scenes(value: &Editor) -> Vec<Vec<rays::scene::node>> {
             value.canvases.iter().map(|(_, p)| p.scene.clone()).collect()
         }
 
         /// Cumulative Host totals, sinks created/closed and sink buffer/texture creations.
-        pub fn image_gpu_stats(value: &t) -> (flow_gpu::host::Stats, i64, i64, i64, i64) {
+        pub fn image_gpu_stats(value: &Editor) -> (flow_gpu::host::Stats, i64, i64, i64, i64) {
             workspace_gpu::image_stats(&value.host.borrow().gpu)
         }
 
-        pub fn image(value: &t, image: &flow_syntax::value::Value) -> Result<rays::image::t, rays_diagnostic::Diagnostic> {
+        pub fn image(value: &Editor, image: &flow_syntax::value::Value) -> Result<rays::image::t, rays_diagnostic::Diagnostic> {
             let core = &value.core;
             let host = value.host.borrow();
             workspace_images::bind(&host.images, &core.doc.workspace.lowered);
@@ -228,7 +228,7 @@ pub mod Editor {
         /// Scoped production image ownership and initial-domain SOP snapshots for qualification:
         /// `run` receives the image and texture resolvers.
         pub fn with_images(
-            value: &t,
+            value: &Editor,
             state: Option<&flow_eval::State>,
             live: Option<&input::Frame>,
             plan: Option<&flow_eval::Plan>,
@@ -259,7 +259,7 @@ pub mod Editor {
         }
 
         /// Quit requested, effects fired, samples created and samples destroyed.
-        pub fn host_stats(value: &t) -> (bool, i64, i64, i64) {
+        pub fn host_stats(value: &Editor) -> (bool, i64, i64, i64) {
             let host = value.host.borrow();
             let resources = host.resources.0.borrow();
             (host.quit_requested, host.fired, resources.samples_created, resources.samples_destroyed)
@@ -271,21 +271,21 @@ pub mod Editor {
     pub type render_settings = objects::root::Render;
 
     /// The ACTIVE camera object's view and lens (the viewport camera when the document has none).
-    pub fn render_camera(value: &t) -> rays::camera::Camera {
+    pub fn render_camera(value: &Editor) -> rays::camera::Camera {
         value.extra.document_camera.clone()
     }
 
     /// What the view pane shows this frame, for a sketch's own renderer.
-    pub fn view_camera(value: &t) -> rays::camera::Camera {
+    pub fn view_camera(value: &Editor) -> rays::camera::Camera {
         loop_model::view_camera(value)
     }
 
-    pub fn render_settings(value: &t) -> render_settings {
+    pub fn render_settings(value: &Editor) -> render_settings {
         objects::root::render(&value.extra.root)
     }
 
     /// The rect inside the view pane (pane-relative) that the render fills.
-    pub fn film(value: &t, frame_: &frame::Frame) -> (i64, i64, i64, i64) {
+    pub fn film(value: &Editor, frame_: &frame::Frame) -> (i64, i64, i64, i64) {
         loop_model::film(value, frame_)
     }
 
@@ -299,23 +299,23 @@ pub mod Editor {
     }
 
     /// The path tracer slot serving the viewport with this key, when it has one.
-    pub fn slot_of(value: &t, key: &str) -> Option<slot> {
+    pub fn slot_of(value: &Editor, key: &str) -> Option<slot> {
         renderer_mod::info(&value.extra.renderer, key).map(|i| slot { film: i.size, step: i.step, samples: i.samples, max_spp: i.cap, viewports: i.viewports })
     }
 
-    pub fn flying(value: &t) -> bool {
+    pub fn flying(value: &Editor) -> bool {
         value.extra.fly.is_some()
     }
 
-    pub fn look_through(value: &t) -> bool {
+    pub fn look_through(value: &Editor) -> bool {
         V::look_through(&value.extra)
     }
 
-    pub fn renderer(value: &t) -> renderer_mod::Mode {
+    pub fn renderer(value: &Editor) -> renderer_mod::Mode {
         value.extra.renderer.mode
     }
 
-    pub fn set_renderer(value: t, mode: renderer_mod::Mode) -> t {
+    pub fn set_renderer(value: Editor, mode: renderer_mod::Mode) -> Editor {
         let mut value = value;
         value.extra.renderer_request = Some(mode);
         value.rest = None;
@@ -323,7 +323,7 @@ pub mod Editor {
     }
 
     /// Replace the camera orbit from code (the OCaml `{ editor with camera }`).
-    pub fn set_camera(value: t, camera: easy_camera::EasyCamera) -> t {
+    pub fn set_camera(value: Editor, camera: easy_camera::EasyCamera) -> Editor {
         let mut value = value;
         value.camera = camera;
         value.rest = None;
@@ -339,7 +339,7 @@ pub mod Editor {
         profile: Option<bool>,
         config: rays::sketch::config,
         workspace: workspace_doc::T,
-        source: Option<source_file::t>,
+        source: Option<source_file::SourceFile>,
         prepare: cook::Prepare_fn,
         draw: Draw_fn,
     ) -> Result<(), rays::sketch::error> {
@@ -352,12 +352,12 @@ pub mod Editor {
 
 /// The frame reducer without a UI frame: an unstable hook for tests, like `Editor::Private`.
 #[cfg(feature = "test-hooks")]
-pub mod Reduce {
+pub mod reduce {
     use editor_core::panels::Panel;
     use flow_graph::flow_edit as fe;
     use rays::frame;
 
-    use super::Editor;
+    use super::editor;
     use crate::editor_commands::action;
     use crate::editor_inspect;
     use crate::editor_panes;
@@ -365,44 +365,44 @@ pub mod Reduce {
     use crate::editor_scope;
     use crate::editor_shell;
 
-    pub fn open_import(editor: Editor::t, file: &str) -> Editor::t {
+    pub fn open_import(editor: editor::Editor, file: &str) -> editor::Editor {
         let mut core = (*editor.core).clone();
         core.open_import = Some(file.to_string());
-        Editor::with_core(editor, core)
+        editor::with_core(editor, core)
     }
 
-    pub fn spreadsheet(editor: &Editor::t, path: &[usize]) -> (i64, Option<rdk_rays::geometry_view::T>) {
+    pub fn spreadsheet(editor: &editor::Editor, path: &[usize]) -> (i64, Option<rdk_rays::geometry_view::T>) {
         let key = editor_shell::panel_key(&editor.core.doc, path);
         let pane = editor_panes::shown_as(&editor.core, (&key, &path.to_vec(), &Panel::Spreadsheet));
         (editor_panes::local_of(&editor.core.locals, &key).sheet_owner, editor_inspect::spreadsheet_source(&pane).cloned())
     }
 
     /// Select the checked lexical path; unstable test/diagnostic hook.
-    pub fn select_path(editor: Editor::t, path: &[String]) -> Editor::t {
+    pub fn select_path(editor: editor::Editor, path: &[String]) -> editor::Editor {
         match path.first() {
             Some(graph) => {
                 let mut core = (*editor.core).clone();
                 editor_panes::go(&mut core, graph);
                 core.select_later = vec![path.to_vec()];
-                Editor::with_core(editor, core)
+                editor::with_core(editor, core)
             }
             None => editor,
         }
     }
 
     /// `v` on the checked lexical path, as the graph pane requests it; unstable test hook.
-    pub fn view(editor: Editor::t, path: &[String]) -> Editor::t {
+    pub fn view(editor: editor::Editor, path: &[String]) -> editor::Editor {
         let mut core = (*editor.core).clone();
         editor_scope::view_node(&mut core, path);
-        Editor::with_core(editor, core)
+        editor::with_core(editor, core)
     }
 
     /// Reduces one frame in which no pane was built: the keys are `actions`, the list's selection
     /// is `select` (scene object ids), and `preview` puts a payload in flight whose hot target shows
     /// that edit on a scratch document, as a carry does.
-    pub fn step(editor: Editor::t, select: Option<&[i64]>, preview: Option<&fe::Op>, actions: &[action], frame_: &frame::Frame) -> Result<Editor::t, String> {
+    pub fn step(editor: editor::Editor, select: Option<&[i64]>, preview: Option<&fe::Op>, actions: &[action], frame_: &frame::Frame) -> Result<editor::Editor, String> {
         let core = editor_reduce::reduce_idle(select, preview, &editor.core, actions, frame_)?;
-        Ok(Editor::with_core(editor, core))
+        Ok(editor::with_core(editor, core))
     }
 }
 
@@ -410,7 +410,7 @@ pub mod Reduce {
 /// document came from (comments intact), else saves a preset; an edit of the file from any editor
 /// reloads the running document as one history entry, "Reload <file>", and a file that does not
 /// check leaves the last good document with the diagnostics in the status bar and the text pane.
-pub mod Workspace {
+pub mod workspace {
     use std::rc::Rc;
 
     use editor_document::document::T as Document;
@@ -641,8 +641,8 @@ pub mod Workspace {
 
 /// One workspace's real frames without a window: update, render into an offscreen canvas, and the
 /// frame boundary (`after_present`), on one domain. The one runner behind `rays mem`.
-pub mod Measure {
-    use super::Editor;
+pub mod measure {
+    use super::editor;
     use flow_native::workspace_gpu;
     use rays::frame;
 
@@ -696,7 +696,7 @@ pub mod Measure {
     }
 
     /// `step` runs before each frame's update, for scripted edits.
-    pub fn run(options: MeasureOptions, step: &dyn Fn(i64, Editor::t) -> Editor::t, early: i64, frames: i64, workspace: &editor_document::workspace_doc::T) -> Result<outcome, String> {
+    pub fn run(options: MeasureOptions, step: &dyn Fn(i64, editor::Editor) -> editor::Editor, early: i64, frames: i64, workspace: &editor_document::workspace_doc::T) -> Result<outcome, String> {
         let MeasureOptions { width, height, device } = options;
         let canvas = rays::canvas::create(width, height)?;
         let result = (|| {
@@ -713,16 +713,16 @@ pub mod Measure {
             let canvas_bytes = width * height * 4;
             mem::charge(&canvas_owner, canvas_bytes);
             let result = (|| {
-                let editor = Editor::create(
-                    Editor::Create { gpu_owner: Some(gpu_owner.clone()), ui_text_size: Some(11), await_: Some(true), domains: Some(1), ..Default::default() },
+                let editor = editor::create(
+                    editor::Create { gpu_owner: Some(gpu_owner.clone()), ui_text_size: Some(11), await_: Some(true), domains: Some(1), ..Default::default() },
                     workspace,
                     None,
-                    Editor::prepare_fn(),
-                    Editor::draw_fn(),
+                    editor::prepare_fn(),
+                    editor::draw_fn(),
                 )?;
                 let mut editor = editor;
                 let allocated0 = mem::allocated_bytes() as f64;
-                let measure = |editor: &Editor::t, walk: bool, tick: i64| -> sample {
+                let measure = |editor: &editor::Editor, walk: bool, tick: i64| -> sample {
                     let device = workspace_gpu::device_limits(&editor.host.borrow().gpu).map(|(b, _, _)| b).unwrap_or(0);
                     // one walk, the last: a walk's hash set stays in the footprint of the next sample
                     let report = mem::report_with(mem::ReportOptions { walk, device, budget: None });
@@ -735,11 +735,11 @@ pub mod Measure {
                     tick += 1;
                     let at = frame_at(width, height, tick);
                     editor = step(tick, editor);
-                    editor = Editor::update(editor, &at);
-                    if let Err(message) = rays::canvas::render(Some(1), &canvas, &Editor::scene(&editor, &at)) {
+                    editor = editor::update(editor, &at);
+                    if let Err(message) = rays::canvas::render(Some(1), &canvas, &editor::scene(&editor, &at)) {
                         failure = Some(message);
                     }
-                    editor = Editor::after_present(editor, &at);
+                    editor = editor::after_present(editor, &at);
                     if tick == early {
                         first = Some(measure(&editor, false, tick));
                     }
@@ -763,7 +763,7 @@ pub mod Measure {
                         })
                     }
                 };
-                Editor::close(&editor);
+                editor::close(&editor);
                 outcome
             })();
             mem::release(&canvas_owner, canvas_bytes);

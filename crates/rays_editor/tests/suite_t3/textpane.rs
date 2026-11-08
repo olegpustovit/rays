@@ -5,7 +5,7 @@
 //! pixel-exact clicks; see the report.
 use super::t3c::*;
 use input::{Event, Key, MouseButton};
-use rays_editor::Editor;
+use rays_editor::editor;
 
 fn check(condition: bool, message: &str) {
     if !condition {
@@ -23,7 +23,7 @@ pub fn tab_at(narrow: bool, right: i64, top: i64, index: usize) -> (f64, f64) {
 fn start_env(text: &str) -> Driver {
     let presets = scratch_dir("rays-text-presets");
     let ui_font = std::env::var("RAYS_UI_FONT").ok();
-    Driver::new(create(Editor::Create { domains: Some(1), presets: Some(presets), ui_font, ..options() }, &load(text)))
+    Driver::new(create(editor::Create { domains: Some(1), presets: Some(presets), ui_font, ..options() }, &load(text)))
 }
 
 pub fn graph_drafts() {
@@ -51,7 +51,7 @@ pub fn graph_drafts() {
     for _ in 0..4 {
         step(&mut d, &[], vec![]);
     }
-    let (gx, gy, gw, gh) = Editor::panes(d.e(), &frame_at((450., 320.), vec![], 0)).graph;
+    let (gx, gy, gw, gh) = editor::panes(d.e(), &frame_at((450., 320.), vec![], 0)).graph;
     let top = gy + gh + 1 + 28;
     let click = |d: &mut Driver, point: (f64, f64)| {
         at(d, point, vec![Event::Pointer_moved(point)]);
@@ -95,7 +95,7 @@ pub fn fn_frames() {
         for _ in 0..4 {
             d.step_at((450., 320.), vec![]);
         }
-        let box_ = Editor::node_box(d.e(), &["g".to_string(), "a".to_string()]);
+        let box_ = editor::node_box(d.e(), &["g".to_string(), "a".to_string()]);
         d.close();
         box_.map(|(_, _, _, h)| h).unwrap_or_else(|| panic!("the fn frame has no box"))
     };

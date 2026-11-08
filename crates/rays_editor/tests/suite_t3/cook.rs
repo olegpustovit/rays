@@ -56,18 +56,18 @@ pub fn none_settings() -> settings::T {
     NONE.with(|n| n.clone())
 }
 
-pub fn stopped() -> tl::t {
+pub fn stopped() -> tl::Timeline {
     tl::stop(&tl::create()).0
 }
 
 /// The `with_cook` rig: a cook and the `step` / `finish` helpers over it.
 pub struct Rig {
-    pub cook: cook::t,
+    pub cook: cook::Cook,
 }
 
 pub struct StepOptions {
     pub settings: settings::T,
-    pub timeline: tl::t,
+    pub timeline: tl::Timeline,
     pub changes: Vec<tl::Change>,
     pub buttons: Vec<input::MouseButton>,
     pub probes: Vec<Key2>,

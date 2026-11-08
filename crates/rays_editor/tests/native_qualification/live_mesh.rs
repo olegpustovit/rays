@@ -165,26 +165,26 @@ fn swarm_frames() {
 }
 
 fn particles_frames() {
-    use rays_editor::{Editor, Workspace};
+    use rays_editor::{editor, workspace};
     assert!(crate::common::gpu(), "native GPU required");
-    let doc = Workspace::load(None, Vec::new(), None, include_str!("../../../../sketches/flow_particles_gpu.rays")).unwrap_or_else(|d| panic!("{d:?}"));
+    let doc = workspace::load(None, Vec::new(), None, include_str!("../../../../sketches/flow_particles_gpu.rays")).unwrap_or_else(|d| panic!("{d:?}"));
     let canvas = rays::canvas::create(800, 600).unwrap();
     let gpu = wg::create(None);
-    let mut editor = Editor::create(Editor::Create { gpu_owner: Some(gpu.clone()), await_: Some(true), domains: Some(1), ..Default::default() }, &doc, None, Editor::prepare_fn(), Editor::draw_fn()).unwrap();
+    let mut editor = editor::create(editor::Create { gpu_owner: Some(gpu.clone()), await_: Some(true), domains: Some(1), ..Default::default() }, &doc, None, editor::prepare_fn(), editor::draw_fn()).unwrap();
     let mut warm = None;
     let mut pixels = None;
     for tick in 1..=8 {
         let frame = rays::frame::Frame { input: input::Frame { dt: 1./60., frame: tick, tick, size: (800,600), pointer: (-100.,-100.), ..input::at_time(tick as f64/6.) }, pixel_scale: (1.,1.), fps: 60., mouse_delta: (0.,0.) };
         let allocated = mem_sys::alloc_bytes_total();
         let started = std::time::Instant::now();
-        editor = Editor::update(editor, &frame);
+        editor = editor::update(editor, &frame);
         let updated = started.elapsed();
         assert!(editor.context_error.is_none(), "{:?}", editor.context_error);
         assert!(editor.core.cook.error.is_none(), "{:?}", editor.core.cook.error);
         assert!(editor.core.cook.pieces.is_empty(), "hidden exact SOP surface cooked behind the particle canvas");
         assert_eq!(editor.canvases.len(), 1);
         assert!(flow_native::drawing::borrows_gpu(editor.canvases[0].1.prepared.as_ref().unwrap()), "particle positions left the device");
-        rays::canvas::render(None, &canvas, &Editor::scene(&editor, &frame)).unwrap();
+        rays::canvas::render(None, &canvas, &editor::scene(&editor, &frame)).unwrap();
         let stats = wg::image_stats(&gpu).0;
         assert_eq!(stats.payload_readback_bytes, 0, "display-only positions were read back");
         let frame_bytes = mem_sys::alloc_bytes_total() - allocated;
@@ -197,51 +197,51 @@ fn particles_frames() {
         if tick == 3 { warm = Some((stats.input_uploads, stats.buffer_creations, stats.pipeline_compilations)); }
         println!("particles frame {tick}: update {updated:?}, total {:?}, allocated {frame_bytes} B", started.elapsed());
         if tick == 1 { pixels = Some(rays::canvas::pixels(&canvas).unwrap()); }
-        editor = Editor::after_present(editor, &frame);
+        editor = editor::after_present(editor, &frame);
     }
     let first = pixels.unwrap();
     let last = rays::canvas::pixels(&canvas).unwrap();
     assert!(last.iter().filter(|p| p.g > 80).count() > 1000, "particle canvas is blank");
     assert!(first.iter().zip(&last).filter(|(a,b)| a != b).count() > 1000, "particle animation is frozen");
-    Editor::close(&editor);
+    editor::close(&editor);
     wg::close(&gpu);
     rays::canvas::destroy(&canvas).unwrap();
 }
 
 fn sea_initial_close() {
-    use rays_editor::{Editor,Workspace};
+    use rays_editor::{editor,workspace};
     assert!(crate::common::gpu(),"native GPU required");
-    let doc=Workspace::load(None,Vec::new(),None,include_str!("../../../../sketches/gpu_sea.rays")).unwrap_or_else(|d|panic!("{d:?}"));
+    let doc=workspace::load(None,Vec::new(),None,include_str!("../../../../sketches/gpu_sea.rays")).unwrap_or_else(|d|panic!("{d:?}"));
     let gpu=wg::create(None);
-    let editor=Editor::create(Editor::Create {gpu_owner:Some(gpu.clone()),await_:Some(false),domains:Some(1),..Default::default()},&doc,None,Editor::prepare_fn(),Editor::draw_fn()).unwrap();
+    let editor=editor::create(editor::Create {gpu_owner:Some(gpu.clone()),await_:Some(false),domains:Some(1),..Default::default()},&doc,None,editor::prepare_fn(),editor::draw_fn()).unwrap();
     let frame=rays::frame::Frame {input:input::Frame {dt:1./60.,frame:1,tick:1,size:(320,240),pointer:(-100.,-100.),..input::at_time(1./60.)},pixel_scale:(1.,1.),fps:60.,mouse_delta:(0.,0.)};
-    let editor=Editor::update(editor,&frame);
+    let editor=editor::update(editor,&frame);
     let started=std::time::Instant::now();
     while matches!(rays_editor::cook::status(&editor.core.cook),sop::async_cook::Status::Cooking {queued:true,..}) && started.elapsed()<std::time::Duration::from_millis(100) {
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
     assert!(matches!(rays_editor::cook::status(&editor.core.cook),sop::async_cook::Status::Cooking {queued:false,..}),"initial sea cook did not start");
     let started=std::time::Instant::now();
-    Editor::close(&editor); wg::close(&gpu);
+    editor::close(&editor); wg::close(&gpu);
     println!("sea initial close {:?}",started.elapsed());
     assert!(started.elapsed()<std::time::Duration::from_millis(250),"closing waited for the initial sea cook");
 }
 
 fn sea_frames() {
-    use rays_editor::{Editor,Workspace};
+    use rays_editor::{editor,workspace};
     assert!(crate::common::gpu(),"native GPU required");
     let started=std::time::Instant::now();
     let source=include_str!("../../../../sketches/gpu_sea.rays");
-    let doc=Workspace::load(None,Vec::new(),None,source).unwrap_or_else(|d|panic!("{d:?}"));
+    let doc=workspace::load(None,Vec::new(),None,source).unwrap_or_else(|d|panic!("{d:?}"));
     let canvas=rays::canvas::create(320,240).unwrap();
     let gpu=wg::create(None);
-    let mut editor=Editor::create(Editor::Create {gpu_owner:Some(gpu.clone()),await_:Some(true),domains:Some(1),..Default::default()},&doc,None,Editor::prepare_fn(),Editor::draw_fn()).unwrap();
+    let mut editor=editor::create(editor::Create {gpu_owner:Some(gpu.clone()),await_:Some(true),domains:Some(1),..Default::default()},&doc,None,editor::prepare_fn(),editor::draw_fn()).unwrap();
     println!("sea open {:?}",started.elapsed());
     let mut previous=None;
     for tick in 1..=6 {
         let started=std::time::Instant::now();
         let frame=rays::frame::Frame {input:input::Frame {dt:1./60.,frame:tick,tick,size:(320,240),pointer:(-100.,-100.),..input::at_time(tick as f64/60.)},pixel_scale:(1.,1.),fps:60.,mouse_delta:(0.,0.)};
-        editor=Editor::update(editor,&frame);
+        editor=editor::update(editor,&frame);
         assert!(editor.core.cook.error.is_none(),"{:?}",editor.core.cook.error);
         let geometry=&editor.core.cook.pieces[0].prepared.geometry;
         assert_eq!(g::point_count(geometry),1_000_000);
@@ -249,7 +249,7 @@ fn sea_frames() {
         assert!(p::resident(g::positions(geometry)),"sea positions left the GPU");
         assert!(a::holder(&attribute(geometry,"N")).is_some(),"sea normals left the GPU");
         assert!(flow_sop::topology_kernel::resident(geometry).is_some(),"sea topology left the GPU");
-        rays::canvas::render(Some(1),&canvas,&Editor::scene(&editor,&frame)).unwrap();
+        rays::canvas::render(Some(1),&canvas,&editor::scene(&editor,&frame)).unwrap();
         assert!(wg::displays(&gpu)>0,"sea mesh did not bind the resident display");
         let stats=wg::image_stats(&gpu).0;
         assert_eq!(stats.payload_readback_bytes,0);
@@ -261,14 +261,14 @@ fn sea_frames() {
         }
         previous=Some((stats.input_uploads,stats.buffer_creations));
         println!("sea frame {tick} {:?}: uploaded {} B, payload read {} B, bounds read {} B",started.elapsed(),stats.input_uploaded_bytes,stats.payload_readback_bytes,stats.bounds_readback_bytes);
-        editor=Editor::after_present(editor,&frame);
+        editor=editor::after_present(editor,&frame);
     }
     Rc::make_mut(&mut Rc::make_mut(&mut editor.core).cook).await_=false;
     let frame=rays::frame::Frame {input:input::Frame {dt:1./60.,frame:7,tick:7,size:(320,240),pointer:(-100.,-100.),..input::at_time(7./60.)},pixel_scale:(1.,1.),fps:60.,mouse_delta:(0.,0.)};
-    editor=Editor::update(editor,&frame);
+    editor=editor::update(editor,&frame);
     println!("sea closing {:?}",rays_editor::cook::status(&editor.core.cook));
     let started=std::time::Instant::now();
-    Editor::close(&editor); wg::close(&gpu); rays::canvas::destroy(&canvas).unwrap();
+    editor::close(&editor); wg::close(&gpu); rays::canvas::destroy(&canvas).unwrap();
     println!("sea close {:?}",started.elapsed());
     assert!(started.elapsed()<std::time::Duration::from_millis(250),"closing waited for an obsolete sea cook");
 }
@@ -377,20 +377,20 @@ fn live_mesh() {
     wg::close(&gpu);
 }
 fn holder_frames() {
-    use rays_editor::{Editor,Workspace};
+    use rays_editor::{editor,workspace};
     assert!(crate::common::gpu(),"native GPU required");
     for (name,side,topology) in [("gpu_sea",128,false),("isogrid_city",8,true)] {
         let source=std::fs::read_to_string(format!("{}/../../sketches/{name}.rays",env!("CARGO_MANIFEST_DIR"))).unwrap();
         // Replace the numeric side default only; keep the sketch itself and all six frames.
         let start=source.find("(side : int ").unwrap()+12; let end=start+source[start..].find(')').unwrap();
         let source=format!("{}{}{}",&source[..start],side,&source[end..]);
-        let doc=Workspace::load(None,Vec::new(),None,&source).unwrap_or_else(|d|panic!("{d:?}"));
+        let doc=workspace::load(None,Vec::new(),None,&source).unwrap_or_else(|d|panic!("{d:?}"));
         let canvas=rays::canvas::create(320,240).unwrap(); let gpu=wg::create(None); wg::qualification(&gpu);
-        let mut editor=Editor::create(Editor::Create {gpu_owner:Some(gpu.clone()),ui_text_size:Some(11),await_:Some(true),domains:Some(1),..Default::default()},&doc,None,Editor::prepare_fn(),Editor::draw_fn()).unwrap();
+        let mut editor=editor::create(editor::Create {gpu_owner:Some(gpu.clone()),ui_text_size:Some(11),await_:Some(true),domains:Some(1),..Default::default()},&doc,None,editor::prepare_fn(),editor::draw_fn()).unwrap();
         let mut previous:Option<(Arc<Vec<f64>>,Option<[Weak<Gpu::Integers>;3]>)>=None; let mut gone=0; let mut meshes=0;
         for tick in 1..=6 {
             let frame=rays::frame::Frame {input:input::Frame {dt:1./60.,frame:tick,tick,size:(320,240),pointer:(-100.,-100.),..input::at_time(tick as f64/60.)},pixel_scale:(1.,1.),fps:60.,mouse_delta:(0.,0.)};
-            editor=Editor::update(editor,&frame); rays::canvas::render(Some(1),&canvas,&Editor::scene(&editor,&frame)).unwrap(); editor=Editor::after_present(editor,&frame);
+            editor=editor::update(editor,&frame); rays::canvas::render(Some(1),&canvas,&editor::scene(&editor,&frame)).unwrap(); editor=editor::after_present(editor,&frame);
             let now=editor.core.cook.pieces.iter().find_map(|piece|{
                 let g=&piece.prepared.geometry;
                 flow_sop::attribute_kernel::resident_vec3(g,"P").map(|p|(p,flow_sop::topology_kernel::resident(g).map(|(a,b,c)|[Arc::downgrade(&a),Arc::downgrade(&b),Arc::downgrade(&c)])))
@@ -403,21 +403,21 @@ fn holder_frames() {
             }
             if now.is_some() {previous=now;}
         }
-        Editor::close(&editor); wg::close(&gpu); rays::canvas::destroy(&canvas).unwrap(); assert!(gone>=3,"{name}: only {gone} resident frames"); if topology {assert!(meshes>=3);}
+        editor::close(&editor); wg::close(&gpu); rays::canvas::destroy(&canvas).unwrap(); assert!(gone>=3,"{name}: only {gone} resident frames"); if topology {assert!(meshes>=3);}
     }
 }
 
 fn orrery_frames() {
-    use rays_editor::{Editor,Workspace,Timeline};
+    use rays_editor::{editor,workspace,Timeline};
     assert!(crate::common::gpu(),"native GPU required");
     let source=std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"),"/../../sketches/ws_orrery.rays")).unwrap();
-    let doc=Workspace::load(None,Vec::new(),None,&source).unwrap_or_else(|d|panic!("{d:?}"));
+    let doc=workspace::load(None,Vec::new(),None,&source).unwrap_or_else(|d|panic!("{d:?}"));
     let canvas=rays::canvas::create(320,240).unwrap(); let gpu=wg::create(None);
-    let mut editor=Editor::create(Editor::Create {gpu_owner:Some(gpu.clone()),ui_text_size:Some(11),await_:Some(true),domains:Some(1),..Default::default()},&doc,None,Editor::prepare_fn(),Editor::draw_fn()).unwrap();
+    let mut editor=editor::create(editor::Create {gpu_owner:Some(gpu.clone()),ui_text_size:Some(11),await_:Some(true),domains:Some(1),..Default::default()},&doc,None,editor::prepare_fn(),editor::draw_fn()).unwrap();
     let frame=|tick|rays::frame::Frame {input:input::Frame {dt:1./60.,frame:tick,tick,size:(320,240),pointer:(-100.,-100.),..input::at_time(tick as f64/60.)},pixel_scale:(1.,1.),fps:60.,mouse_delta:(0.,0.)};
     let document=editor.core.doc.clone(); let mut first=None;
     for tick in 1..=30 {
-        let f=frame(tick); editor=Editor::update(editor,&f);
+        let f=frame(tick); editor=editor::update(editor,&f);
         assert!(editor.core.cook.error.is_none(),"{:?}",editor.core.cook.error);
         assert!(Arc::ptr_eq(&document,&editor.core.doc),"playback re-lowered the document");
         let geometry=&editor.core.cook.pieces[0].prepared.geometry;
@@ -425,14 +425,14 @@ fn orrery_frames() {
         if tick==1 {first=Some(positions);} else if tick==30 {
             assert!((0..p::length(&positions)).any(|i|p::get(&positions,i).unwrap()!=p::get(first.as_ref().unwrap(),i).unwrap()),"orrery did not animate");
         }
-        rays::canvas::render(Some(1),&canvas,&Editor::scene(&editor,&f)).unwrap();
-        editor=Editor::after_present(editor,&f);
+        rays::canvas::render(Some(1),&canvas,&editor::scene(&editor,&f)).unwrap();
+        editor=editor::after_present(editor,&f);
     }
     Rc::make_mut(&mut editor.core).timeline=Timeline::toggle_pause(&editor.core.timeline).0;
     let mut f=frame(31); f.input.dt=0.;
-    editor=Editor::update(editor,&f);
-    rays::canvas::render(Some(1),&canvas,&Editor::scene(&editor,&f)).unwrap();
-    editor=Editor::after_present(editor,&f);
+    editor=editor::update(editor,&f);
+    rays::canvas::render(Some(1),&canvas,&editor::scene(&editor,&f)).unwrap();
+    editor=editor::after_present(editor,&f);
     let compiled=editor.core.cook.compiled.clone();
     let prepared=editor.core.cook.pieces[0].prepared.clone();
     let misses=rays_editor::cook::stats(&editor.core.cook).misses;
@@ -441,7 +441,7 @@ fn orrery_frames() {
     assert!(renderer.pipeline_cache_entries>0,"native renderer did not use GPU pipelines");
     for tick in 32..=61 {
         f.input.frame=tick; f.input.tick=tick; f.input.t=tick as f64/60.;
-        editor=Editor::update(editor,&f);
+        editor=editor::update(editor,&f);
         assert!(Arc::ptr_eq(&document,&editor.core.doc),"idle frame re-lowered the document");
         assert_eq!(editor.core.cook.compiled.len(),compiled.len());
         for (id,(_,old)) in &compiled {
@@ -449,12 +449,12 @@ fn orrery_frames() {
         }
         assert!(Rc::ptr_eq(&prepared,&editor.core.cook.pieces[0].prepared),"idle frame re-prepared geometry");
         assert_eq!(rays_editor::cook::stats(&editor.core.cook).misses,misses,"idle frame recooked geometry");
-        rays::canvas::render(Some(1),&canvas,&Editor::scene(&editor,&f)).unwrap();
-        editor=Editor::after_present(editor,&f);
+        rays::canvas::render(Some(1),&canvas,&editor::scene(&editor,&f)).unwrap();
+        editor=editor::after_present(editor,&f);
     }
     let after=wg::image_stats(&gpu).0;
     assert_eq!(after.pipeline_compilations,warm.pipeline_compilations,"idle frame compiled a GPU kernel");
     assert_eq!(after.runners_created,warm.runners_created,"idle frame created a GPU runner");
     assert_eq!(rays::canvas::Private::native_stats(&canvas).unwrap().pipeline_cache_entries,renderer.pipeline_cache_entries,"idle frame compiled a render pipeline");
-    Editor::close(&editor); wg::close(&gpu); rays::canvas::destroy(&canvas).unwrap();
+    editor::close(&editor); wg::close(&gpu); rays::canvas::destroy(&canvas).unwrap();
 }

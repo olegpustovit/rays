@@ -23,12 +23,12 @@ use crate::editor_shell::{layouts, shell_tree};
 use crate::selection;
 use crate::timeline;
 
-pub type Applied = (shell, selection::t, tree::Tree, timeline::t, Vec<timeline::Change>);
+pub type Applied = (shell, selection::Selection, tree::Tree, timeline::Timeline, Vec<timeline::Change>);
 
 /// Leader actions owned by the workspace; the environment handles the rest from `update.actions`.
-pub fn apply_action(value: &t, state: Applied, action: &action) -> Applied {
+pub fn apply_action(value: &EditorModel, state: Applied, action: &action) -> Applied {
     let (workspace, selection, tree, timeline, changes) = state;
-    let timeline_step = |workspace: shell, selection, tree, timeline: timeline::t, mut changes: Vec<timeline::Change>, step: fn(&timeline::t) -> (timeline::t, Vec<timeline::Change>)| {
+    let timeline_step = |workspace: shell, selection, tree, timeline: timeline::Timeline, mut changes: Vec<timeline::Change>, step: fn(&timeline::Timeline) -> (timeline::Timeline, Vec<timeline::Change>)| {
         let (timeline, more) = step(&timeline);
         changes.extend(more);
         (workspace, selection, tree, timeline, changes)
@@ -87,7 +87,7 @@ pub fn in_world<'a>(value: impl Into<ModelView<'a>>) -> bool {
 
 /// World keys: edit the selected layer, or the World node in the scene. Returns the derived
 /// document, the last label and the edits the text can write.
-pub fn world_keys<'a>(value: impl Into<ModelView<'a>>, doc: &Document, selection: &selection::t, actions: &[action]) -> (Document, Option<String>, Vec<(Level, Edit)>) {
+pub fn world_keys<'a>(value: impl Into<ModelView<'a>>, doc: &Document, selection: &selection::Selection, actions: &[action]) -> (Document, Option<String>, Vec<(Level, Edit)>) {
     let value = &value.into();
     let world_id = match pane_level(value) {
         Level::Inside(id) => Some(id),
@@ -192,7 +192,7 @@ pub fn world_keys<'a>(value: impl Into<ModelView<'a>>, doc: &Document, selection
 }
 
 /// The ten digit commands take their labels from the layouts when which-key or the palette draws.
-pub fn layout_labels(value: &t, keymap: Vec<editor_commands::Command>) -> Vec<editor_commands::Command> {
+pub fn layout_labels(value: &EditorModel, keymap: Vec<editor_commands::Command>) -> Vec<editor_commands::Command> {
     let names = layouts(value);
     keymap
         .into_iter()

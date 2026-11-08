@@ -336,7 +336,7 @@ pub fn panel_kind(panel: &Panel) -> &'static str {
     }
 }
 
-fn scene_name(value: &t) -> String {
+fn scene_name(value: &EditorModel) -> String {
     value.doc.workspace.ws.checked.graphs.iter().find(|g| g.context == context::scene()).map(|g| g.name.clone()).unwrap_or_else(|| "scene".to_string())
 }
 
@@ -609,7 +609,7 @@ pub fn apply_change(state: (kg::T, Option<String>, param::Effects), c: &change) 
 
 /// Command-C / X: the selected bindings as Lisp pairs ("name expr" per line) on the clipboard, the
 /// text a let* vector or the Lisp pane takes.
-pub fn copy_bindings(value: &t, paths: &[Vec<String>]) -> change {
+pub fn copy_bindings(value: &EditorModel, paths: &[Vec<String>]) -> change {
     let ws = &value.doc.workspace.ws;
     let mut lines = Vec::new();
     for path in paths {
@@ -635,7 +635,7 @@ pub fn copy_bindings(value: &t, paths: &[Vec<String>]) -> change {
 }
 
 /// The palette's "Copy workspace as Lisp": the text Command-S writes, on the clipboard.
-pub fn copy_workspace(value: &t) -> (notice_kind, String) {
+pub fn copy_workspace(value: &EditorModel) -> (notice_kind, String) {
     match preset::text(&value.doc).and_then(|text| rays::clipboard::set_text(&text)) {
         Ok(()) => (notice_kind::Info, "Copied the workspace as Lisp".to_string()),
         Err(message) => (notice_kind::Refusal, format!("Clipboard: {message}")),

@@ -142,7 +142,7 @@ pub struct graph_pane {
     pub views: Level_map,
     pub at: Level,
     /// its navigation level and that level's selection
-    pub picked: selection::t,
+    pub picked: selection::Selection,
 }
 
 /// What a panel keeps of its own besides its PXUI state while another panel of its kind is the one
@@ -315,7 +315,7 @@ pub struct frame_result {
     pub pane_keys: Vec<(i64, (Panel, Option<layout::Path>))>,
     pub scope_view: scope::Pane,
     pub scope_changes: Vec<scope::Change>,
-    pub selection: selection::t,
+    pub selection: selection::Selection,
     pub menu: Option<node_menu::Menu>,
     /// the node menu's entry picked this frame
     pub menu_pick: Option<String>,
@@ -415,7 +415,7 @@ pub struct carry {
 }
 
 /// The catalog of the editor's factories, shared with every other asker (`kinds::shared`).
-pub fn flow_catalog(value: &t) -> Option<Arc<Catalog>> {
+pub fn flow_catalog(value: &EditorModel) -> Option<Arc<Catalog>> {
     editor_document::kinds::shared(Some(&value.factories)).ok()
 }
 
@@ -436,7 +436,7 @@ impl Lazy_vocab {
 }
 
 #[derive(Clone)]
-pub struct t {
+pub struct EditorModel {
     pub preferences: String,
     /// the panels' default text size, Command-0 returns to it
     pub text_size: i64,
@@ -461,7 +461,7 @@ pub struct t {
     pub filed: document::Text,
     /// the graph panels' own canvas, level, selection, graph and route, by panel key; the one in
     /// use is what the pane-in-use accessors below read
-    pub panes: panel_map::t,
+    pub panes: panel_map::PanelMap,
     /// the workspace text pane: tab, drafts, errors (view state)
     pub text: text_pane::State,
     /// in the World, the view pane shows the lat-long map
@@ -498,10 +498,10 @@ pub struct t {
     pub outline: navigator::State,
     pub ui: Rc<RefCell<Ui>>,
     pub workspace: shell,
-    pub timeline: timeline::t,
+    pub timeline: timeline::Timeline,
     pub live_frame: Input,
     /// shared with retained sketch snapshots and edit rollback states
-    pub cook: std::rc::Rc<cook::t>,
+    pub cook: std::rc::Rc<cook::Cook>,
     pub edit_error: Option<String>,
     pub status_fps: Option<i64>,
     pub status_fps_at: f64,
@@ -509,7 +509,7 @@ pub struct t {
     pub last_dt: f64,
     /// three or more is a fixed step, the timeline header says so
     pub steady: i64,
-    pub history: history::t,
+    pub history: history::EditorHistory,
     pub focus: Panel,
     /// which leaf of that kind: every leaf is an instance, and / o and / l act on the one clicked,
     /// not the first
@@ -557,20 +557,20 @@ pub struct t {
 /// A frame reads the shared model with the pane and transient UI state it is showing.
 #[derive(Clone, Copy)]
 pub struct ModelView<'a> {
-    pub model: &'a t,
+    pub model: &'a EditorModel,
     pub doc: &'a Arc<Document>,
     pub pane: &'a graph_pane,
     pub key: Option<&'a panel_map::Key>,
     pub workspace: &'a shell,
     pub focus: &'a Panel,
-    pub selection: &'a selection::t,
+    pub selection: &'a selection::Selection,
     pub status_fps: Option<i64>,
     pub guide: bool,
     pub leader: &'a router::State,
 }
 
-impl<'a> From<&'a t> for ModelView<'a> {
-    fn from(model: &'a t) -> Self {
+impl<'a> From<&'a EditorModel> for ModelView<'a> {
+    fn from(model: &'a EditorModel) -> Self {
         let pane = panel_map::active(&model.panes);
         Self { model, doc: &model.doc, pane, key: panel_map::key_ref(&model.panes), workspace: &model.workspace,
             focus: &model.focus, selection: &pane.picked, status_fps: model.status_fps,
@@ -578,8 +578,8 @@ impl<'a> From<&'a t> for ModelView<'a> {
     }
 }
 
-impl<'a> From<&'a Rc<t>> for ModelView<'a> {
-    fn from(model: &'a Rc<t>) -> Self { Self::from(model.as_ref()) }
+impl<'a> From<&'a Rc<EditorModel>> for ModelView<'a> {
+    fn from(model: &'a Rc<EditorModel>) -> Self { Self::from(model.as_ref()) }
 }
 
 impl<'a> From<&ModelView<'a>> for ModelView<'a> {
@@ -587,7 +587,7 @@ impl<'a> From<&ModelView<'a>> for ModelView<'a> {
 }
 
 impl std::ops::Deref for ModelView<'_> {
-    type Target = t;
+    type Target = EditorModel;
     fn deref(&self) -> &Self::Target { self.model }
 }
 
@@ -626,18 +626,18 @@ pub fn pane_level<'a>(value: impl Into<ModelView<'a>>) -> Level {
     let value = &value.into();
     pane(value).at
 }
-pub fn pane_selection<'a>(value: impl Into<ModelView<'a>>) -> &'a selection::t {
+pub fn pane_selection<'a>(value: impl Into<ModelView<'a>>) -> &'a selection::Selection {
     let value = &value.into();
     value.selection
 }
-pub fn with_pane(value: &mut t, f: &dyn Fn(&graph_pane) -> graph_pane) {
+pub fn with_pane(value: &mut EditorModel, f: &dyn Fn(&graph_pane) -> graph_pane) {
     let pane = panel_map::active_mut(&mut value.panes);
     *pane = f(pane);
 }
-pub fn set_selection(value: &mut t, picked: selection::t) {
+pub fn set_selection(value: &mut EditorModel, picked: selection::Selection) {
     panel_map::active_mut(&mut value.panes).picked = picked;
 }
-pub fn with_selection(mut value: t, picked: selection::t) -> t {
+pub fn with_selection(mut value: EditorModel, picked: selection::Selection) -> EditorModel {
     set_selection(&mut value, picked);
     value
 }
@@ -702,7 +702,7 @@ pub fn vocabulary(factories: &[Factory], doc: &Document) -> Lazy_vocab {
     }))
 }
 
-pub fn vocabulary_for(value: &t, doc: &Document) -> Lazy_vocab {
+pub fn vocabulary_for(value: &EditorModel, doc: &Document) -> Lazy_vocab {
     let previous = &value.doc.workspace.ws.checked;
     let next = &doc.workspace.ws.checked;
     let same_nodes = previous.nodes.len() == next.nodes.len()

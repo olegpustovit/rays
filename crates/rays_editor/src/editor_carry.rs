@@ -55,7 +55,7 @@ pub fn carry_shown(c: &carry) -> Arc<Document> {
 /// The put at `place`, run on the original: the checker's answer is the preview, the refusal's
 /// reason and the write.  A put that takes longer than the budget (or onto a cook that does) is
 /// said and not shown.
-pub fn carry_try(value: &t, c: &carry, place: &Place) -> carry_preview {
+pub fn carry_try(value: &EditorModel, c: &carry, place: &Place) -> carry_preview {
     let Some(catalog) = flow_catalog(value) else {
         return carry_preview::Refused { place: place.clone(), reason: "The catalog is unavailable".to_string() };
     };
@@ -156,7 +156,7 @@ pub fn carry_payload<'a>(value: impl Into<ModelView<'a>>) -> Result<carry_mod::P
     scene.ok_or_else(|| "Nothing to pick up \u{b7} open a material, SOP or scene graph, or select a geometry or camera object".to_string())
 }
 
-pub fn carry_cancel(value: &mut t, c: &carry, notice: (notice_kind, String)) {
+pub fn carry_cancel(value: &mut EditorModel, c: &carry, notice: (notice_kind, String)) {
     value.ui.borrow_mut().cancel_carry();
     let doc = c.original.clone();
     let level = document::resolve_level(&doc, pane_level(&*value));
@@ -170,7 +170,7 @@ pub fn carry_cancel(value: &mut t, c: &carry, notice: (notice_kind, String)) {
     with_pane(value, &|pane| graph_pane { at: level, ..pane.clone() });
 }
 
-pub fn carry_commit(value: &mut t, c: &carry, doc: &Arc<Document>, what: &str) {
+pub fn carry_commit(value: &mut EditorModel, c: &carry, doc: &Arc<Document>, what: &str) {
     value.ui.borrow_mut().cancel_carry();
     value.carry = None;
     install(value, (**doc).clone(), "Put", Merge::Step);
@@ -184,7 +184,7 @@ fn first_char(letter: &str) -> char {
 /// The carry's turn of a frame, before the panes build: the keys of the route and the ends of the
 /// gesture, then the preview (the scratch document the panels read), or the put or the restore.
 /// Returns the frame without the keys the carry took, and whether the document shown changed.
-pub fn carry_step(value: &mut t, text_focus: bool, frame_: &frame::Frame) -> (frame::Frame, bool) {
+pub fn carry_step(value: &mut EditorModel, text_focus: bool, frame_: &frame::Frame) -> (frame::Frame, bool) {
     let c = match &value.carry {
         None => {
             let carrying = value.ui.borrow().carrying();

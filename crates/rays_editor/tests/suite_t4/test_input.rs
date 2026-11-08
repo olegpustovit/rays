@@ -2,7 +2,7 @@
 use super::t4::*;
 use editor_document::workspace_doc;
 use input::{Event, Key, MouseButton::*};
-use rays_editor::Editor;
+use rays_editor::editor;
 
 const M0: (f64, f64) = (100., 300.);
 
@@ -22,13 +22,13 @@ pub const WORLD: &str = r#"(workspace world
 type Cam = (rays_math::vec3::T, rays_math::vec3::T, f64);
 
 fn camera(d: &Driver) -> Cam {
-    let c = Editor::camera(d.e());
+    let c = editor::camera(d.e());
     let cam = rays::easy_camera::camera(&c).unwrap();
     (rays::camera::position(&cam), rays::camera::target(&cam), rays::easy_camera::distance(&c))
 }
 
 fn snapshot(d: &Driver, dir: &str) -> String {
-    Editor::crash_dump(d.e(), dir).unwrap();
+    editor::crash_dump(d.e(), dir).unwrap();
     std::fs::read_to_string(format!("{dir}/document.txt")).unwrap()
 }
 
@@ -46,10 +46,10 @@ pub fn run() {
     let workspace: workspace_doc::T = of_text(None, WORLD);
     let dir = temp_dir("input");
     let camera_opt = rays::easy_camera::create(None, None, None, None, None, Some(false)).unwrap();
-    let ed = Editor::create(Editor::Create { ui_text_size: Some(11), platform: Some(input::Platform::Apple), camera: Some(camera_opt), ..Default::default() }, &workspace, None, Editor::prepare_fn(), Editor::draw_fn()).expect("opens");
+    let ed = editor::create(editor::Create { ui_text_size: Some(11), platform: Some(input::Platform::Apple), camera: Some(camera_opt), ..Default::default() }, &workspace, None, editor::prepare_fn(), editor::draw_fn()).expect("opens");
     let mut d = Driver::new(ed);
-    let graph_rect = |d: &Driver| Editor::panes(d.e(), &frame0()).graph;
-    let view_rect = |d: &Driver| Editor::panes(d.e(), &frame0()).view;
+    let graph_rect = |d: &Driver| editor::panes(d.e(), &frame0()).graph;
+    let view_rect = |d: &Driver| editor::panes(d.e(), &frame0()).view;
 
     d.step(vec![]);
     let before_wheel = camera(&d);

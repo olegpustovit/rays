@@ -7,7 +7,7 @@ use super::t3c::*;
 use flow_graph::flow_edit as fe;
 use input::{Event, Key, MouseButton};
 use rays_editor::navigator as n;
-use rays_editor::Editor;
+use rays_editor::editor;
 use sop::context::{self as sctx, Options as ContextOptions};
 use sop::session;
 use std::rc::Rc;
@@ -118,7 +118,7 @@ pub fn face_materials_preserve_explosion() {
 /// The main body: material refs, group preservation, render batches and domain exactness.
 pub fn material_refs() {
     let ws = load(SOURCE);
-    let graphs = ok(rays_editor::Workspace::sop_graphs(None, &ws));
+    let graphs = ok(rays_editor::workspace::sop_graphs(None, &ws));
     let node = graphs.iter().find(|(n, _)| n == "geo").expect("geo").1.clone();
     let (one, four) = (cook(1, &node), cook(4, &node));
     check(signature(&geometry_of(&one)) == signature(&geometry_of(&four)), "domain exactness");
@@ -141,7 +141,7 @@ pub fn material_refs() {
         "(workspace x (graph m :context material (material/standard :color \"invalid\")))",
         "(workspace x (graph m :context sop (material/standard)))",
     ] {
-        check(rays_editor::Workspace::load(None, Vec::new(), None, text).is_err(), &format!("{text} loaded"));
+        check(rays_editor::workspace::load(None, Vec::new(), None, text).is_err(), &format!("{text} loaded"));
     }
 }
 
@@ -155,7 +155,7 @@ const FOLLOW: &str = r##"(workspace follow
     (let* [obj (scene/geometry (ref shards) :name "shards")] (scene/merge obj))))"##;
 
 pub fn follow_tests() {
-    let mut d = Driver::new(create(Editor::Create { domains: Some(1), ..options() }, &load(FOLLOW)));
+    let mut d = Driver::new(create(editor::Create { domains: Some(1), ..options() }, &load(FOLLOW)));
     let pane = |d: &Driver| dump_line(d.e(), "pane graph");
     let route = |d: &Driver| dump_line(d.e(), "route");
     let click = |d: &mut Driver, keys: &[Key], (x, y): (f64, f64)| {
@@ -175,7 +175,7 @@ pub fn follow_tests() {
     check(pane(&d) == "scene" && route(&d) == "scene", &format!("opens on the scene: {}", pane(&d)));
 
     // the outline: groups, chip, use count, unused
-    let ws = Editor::workspace(d.e()).checked;
+    let ws = editor::workspace(d.e()).checked;
     let chips = n::chips(&flow_eval::static_eval(&ws).unwrap_or_else(|e| fail(&rays_diagnostic::to_string(&e))));
     let params = n::Params {
         workspace: ws.clone(),
@@ -204,7 +204,7 @@ pub fn follow_tests() {
     check(pane(&d) == "shards" && route(&d) == "scene > shards", &format!("/ j jumps: {}", route(&d)));
     let tile = |d: &Driver, path: &[&str]| -> (f64, f64) {
         let p: Vec<String> = path.iter().map(|s| s.to_string()).collect();
-        let (bx, by, bw, bh) = Editor::node_box(d.e(), &p).expect("node box");
+        let (bx, by, bw, bh) = editor::node_box(d.e(), &p).expect("node box");
         (bx as f64 + bw as f64 / 2., by as f64 + bh as f64 - 6.)
     };
     let at = tile(&d, &["shards", "m"]);
@@ -232,7 +232,7 @@ pub fn follow_tests() {
     jump(&mut d, "scene");
 
     // a pick in the viewport lands in the right graph: the surface says "cobalt blue", the graph is cobalt
-    let (vx, vy, vw, vh) = Editor::panes(d.e(), &frame_at((0., 0.), vec![], d.count)).view;
+    let (vx, vy, vw, vh) = editor::panes(d.e(), &frame_at((0., 0.), vec![], d.count)).view;
     click(&mut d, &[Key::Alt], ((vx + vw / 2) as f64, (vy + vh / 2) as f64));
     d.step(vec![]);
     d.step(vec![]);
@@ -247,21 +247,21 @@ pub fn follow_tests() {
     check(pane(&d) == "scene", &format!("i in a viewport follows to its scene: {} / {}", pane(&d), route(&d)));
 
     // rename: the graph and every (ref) to it, one undo entry
-    let renamed = Editor::edit(d.e().clone(), &fe::Op::RenameGraph { name: "cobalt".into(), to_: "navy".into() }).unwrap_or_else(|m| fail(&m));
+    let renamed = editor::edit(d.e().clone(), &fe::Op::RenameGraph { name: "cobalt".into(), to_: "navy".into() }).unwrap_or_else(|m| fail(&m));
     let text = text_of(&renamed);
     check(has(&text, "(graph navy") && has(&text, "(ref navy)") && !has(&text, "(ref cobalt)"), &format!("rename rewrote the graph and its reader: {text}"));
-    check(Editor::undo_label(&renamed) == Some("Rename graph".to_string()), "one history entry");
-    check(Editor::edit(d.e().clone(), &fe::Op::RenameGraph { name: "cobalt".into(), to_: "spare".into() }).is_err(), "a taken name is refused");
+    check(editor::undo_label(&renamed) == Some("Rename graph".to_string()), "one history entry");
+    check(editor::edit(d.e().clone(), &fe::Op::RenameGraph { name: "cobalt".into(), to_: "spare".into() }).is_err(), "a taken name is refused");
     d.set(renamed);
     d.step_keys(&[Key::Meta], vec![ch('z')]);
     check(has(&d.text(), "(graph cobalt") && has(&d.text(), "(ref cobalt)"), "one undo restores both");
 
     // a read material is not deleted, and the refusal names who reads it; an unread one goes
-    match Editor::edit(d.e().clone(), &fe::Op::RemoveGraph { name: "cobalt".into() }) {
+    match editor::edit(d.e().clone(), &fe::Op::RemoveGraph { name: "cobalt".into() }) {
         Ok(_) => fail("a read material was removed"),
         Err(m) => check(has(&m, "shards"), &format!("the refusal names its reader: {m}")),
     }
-    check(Editor::edit(d.e().clone(), &fe::Op::RemoveGraph { name: "spare".into() }).is_ok(), "an unread material can go");
+    check(editor::edit(d.e().clone(), &fe::Op::RemoveGraph { name: "spare".into() }).is_ok(), "an unread material can go");
 
     // I peeks in a floating window
     jump(&mut d, "shards");
@@ -277,7 +277,7 @@ pub fn follow_tests() {
     d.step(vec![key(Key::Enter)]);
     d.step(vec![]);
     check(has(&d.text(), "(graph material :context material"), &format!("/ a made a material graph: {}", d.text()));
-    check(pane(&d) == "material" && Editor::undo_label(d.e()) == Some("New material".to_string()), "and opened it");
+    check(pane(&d) == "material" && editor::undo_label(d.e()) == Some("New material".to_string()), "and opened it");
     d.step(vec![ch('u')]);
     d.step(vec![]);
     check(pane(&d) == "scene", "u returns from it");

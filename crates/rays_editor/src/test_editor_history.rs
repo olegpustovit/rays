@@ -32,13 +32,13 @@ struct Fixture {
 }
 
 impl Fixture {
-    fn new_h(&self, capacity: Option<i64>, present: i64) -> hist::t {
+    fn new_h(&self, capacity: Option<i64>, present: i64) -> hist::EditorHistory {
         hist::create(capacity, None, None, Arc::new(document::snapshot), doc(&self.base, present)).unwrap()
     }
-    fn record(&self, merge: Merge, label: &str, value: i64, h: hist::t) -> hist::t {
+    fn record(&self, merge: Merge, label: &str, value: i64, h: hist::EditorHistory) -> hist::EditorHistory {
         hist::record(merge, label, doc(&self.base, value), h)
     }
-    fn step(&self, value: i64, h: hist::t) -> hist::t {
+    fn step(&self, value: i64, h: hist::EditorHistory) -> hist::EditorHistory {
         self.record(Merge::Step, "Edit", value, h)
     }
     fn restore(&self, entry: &Snapshot) -> Result<Document, Diagnostic> {
@@ -46,19 +46,19 @@ impl Fixture {
         d.active_camera = entry.saved_camera;
         Ok(d)
     }
-    fn undo(&self, h: &hist::t) -> Option<hist::t> {
+    fn undo(&self, h: &hist::EditorHistory) -> Option<hist::EditorHistory> {
         hist::undo(&|e| self.restore(e), h).map(|r| r.unwrap())
     }
-    fn redo(&self, h: &hist::t) -> Option<hist::t> {
+    fn redo(&self, h: &hist::EditorHistory) -> Option<hist::EditorHistory> {
         hist::redo(&|e| self.restore(e), h).map(|r| r.unwrap())
     }
 }
 
-fn present(h: &hist::t) -> i64 {
+fn present(h: &hist::EditorHistory) -> i64 {
     hist::present(h).active_camera.unwrap_or(0)
 }
 
-fn depth(h: &hist::t) -> i64 {
+fn depth(h: &hist::EditorHistory) -> i64 {
     hist::depth(h)
 }
 
@@ -89,7 +89,7 @@ fn history_merge_seal_undo_redo_capacity_labels() {
     let h = hist::seal(false, h);
     let h = f.record(Merge::Gesture("move/7".into()), "Edit", 9, h);
     assert!(present(&f.undo(&h).unwrap()) == 8);
-    let burst = |at: f64, value: i64, h: hist::t| f.record(Merge::Burst { key: "view".into(), at, window: 0.25 }, "Edit", value, h);
+    let burst = |at: f64, value: i64, h: hist::EditorHistory| f.record(Merge::Burst { key: "view".into(), at, window: 0.25 }, "Edit", value, h);
     let h = burst(1.2, 2, burst(1.0, 1, f.new_h(None, 0)));
     assert!(depth(&h) == 1 && present(&f.undo(&h).unwrap()) == 0);
     let h = burst(1.5, 3, h);
@@ -106,7 +106,7 @@ fn history_merge_seal_undo_redo_capacity_labels() {
     // The cap counts exactly the entries to undo and to redo, at every step of any sequence.
     let bytes_fn: Arc<dyn Fn(&Snapshot) -> i64> = Arc::new(|e: &Snapshot| 10 + n_of(e));
     let keep: Arc<dyn Fn(&Document) -> Snapshot> = Arc::new(document::snapshot);
-    let check = |h: &hist::t| {
+    let check = |h: &hist::EditorHistory| {
         let (entries, _) = hist::retained(h);
         assert!(entries.iter().map(|e| 10 + n_of(e)).sum::<i64>() == hist::byte_depth(h));
         assert!(hist::byte_depth(h) >= 0);
@@ -178,8 +178,8 @@ fn history_entries_are_snapshots_the_last_present_stays_live() {
     let h = f.new_h(None, 1);
     let h = f.step(2, h);
     let h = f.step(3, h);
-    let back = |h: &hist::t| hist::undo(&restore, h).unwrap().unwrap();
-    let forth = |h: &hist::t| hist::redo(&restore, h).unwrap().unwrap();
+    let back = |h: &hist::EditorHistory| hist::undo(&restore, h).unwrap().unwrap();
+    let forth = |h: &hist::EditorHistory| hist::redo(&restore, h).unwrap().unwrap();
     let h = back(&h);
     assert!(present(&h) == 2 && restored.borrow().is_empty());
     let h = forth(&h);

@@ -10,7 +10,7 @@ use editor_document::workspace_doc as wd;
 use input::{Event, Key, MouseButton};
 use pxui_shell::layout;
 use rays_editor::navigator as n;
-use rays_editor::Editor;
+use rays_editor::editor;
 
 pub const CASES: &[(&str, fn())] = &[("bloom_studio_run", run)];
 pub const SKIPPED: &[(&str, &str)] = &[];
@@ -31,7 +31,7 @@ fn bframe(buttons: &[MouseButton], keys: &[Key], mouse: (f64, f64), events: Vec<
 
 fn dump_line(e: &Ed, key: &str) -> String {
     with_dir(|dir| {
-        Editor::crash_dump(e, dir).unwrap();
+        editor::crash_dump(e, dir).unwrap();
         let text = std::fs::read_to_string(format!("{dir}/editor.txt")).unwrap();
         let prefix = format!("{key}: ");
         text.lines().find(|l| l.starts_with(&prefix)).map(|l| l[prefix.len()..].to_owned()).unwrap_or_else(|| panic!("no {key} in the dump"))
@@ -39,7 +39,7 @@ fn dump_line(e: &Ed, key: &str) -> String {
 }
 
 fn source(e: &Ed) -> String {
-    flow_syntax::lisp::print(&Editor::workspace(e).source).unwrap().0
+    flow_syntax::lisp::print(&editor::workspace(e).source).unwrap().0
 }
 
 fn run() {
@@ -50,7 +50,7 @@ fn run() {
     let e = create(&ws, None, None, false);
     let mut r = Bloom { e, count: 0 };
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| body(&mut r)));
-    Editor::close(&r.e);
+    editor::close(&r.e);
     if let Err(p) = result {
         std::panic::resume_unwind(p);
     }
@@ -64,7 +64,7 @@ struct Bloom {
 impl Bloom {
     fn step(&mut self, buttons: &[MouseButton], keys: &[Key], mouse: (f64, f64), events: Vec<Event>) {
         self.count += 1;
-        self.e = Editor::update(self.e.clone(), &bframe(buttons, keys, mouse, events, self.count));
+        self.e = editor::update(self.e.clone(), &bframe(buttons, keys, mouse, events, self.count));
     }
     fn plain(&mut self, events: Vec<Event>) {
         self.step(&[], &[], (450., 300.), events);
@@ -83,7 +83,7 @@ fn body(r: &mut Bloom) {
         r.plain(vec![]);
     }
     assert!(dump_line(&r.e, "projection") == "graph" && dump_line(&r.e, "pane graph") == "flower", "the sketch opens on the network of flower: {} / {}", dump_line(&r.e, "projection"), dump_line(&r.e, "pane graph"));
-    let ws = Editor::workspace(&r.e);
+    let ws = editor::workspace(&r.e);
     let doc: document::T = build(&ws);
     let shell = doc.shell.clone().expect("shell");
     let geometry = |r: &Bloom| layout::geometry(None, Some(&[Panel::Timeline]), &shell.tree, &bframe(&[], &[], (0., 0.), vec![], 0));
@@ -99,7 +99,7 @@ fn body(r: &mut Bloom) {
         probes: Rc::new(|_| 0),
         selected: vec![],
         chips: vec![],
-        objects: Editor::scene_document(&r.e)
+        objects: editor::scene_document(&r.e)
             .iter()
             .map(|_| n::Obj { depth: 0, letter: String::new(), name: String::new(), detail: String::new(), visible: None, render: None, lead: false, inert: false, chosen: false, home: None })
             .collect(),
@@ -154,13 +154,13 @@ fn body(r: &mut Bloom) {
     r.step(&[], &[Key::Shift], p, vec![Event::Pointer_released(MouseButton::LeftButton, p)]);
     r.step(&[], &[], p, vec![]);
     assert_eq!(dump_line(&r.e, "scope selected"), "flower/heart", "heart stays selected");
-    let before = Editor::workspace(&r.e);
-    let label = Editor::undo_label(&r.e);
+    let before = editor::workspace(&r.e);
+    let label = editor::undo_label(&r.e);
     r.step(&[], &[], p, vec![Event::Key_pressed(Key::KeyChar('v'))]);
     r.step(&[], &[], p, vec![]);
     r.plain(vec![]);
-    assert!(same_ws(&Editor::workspace(&r.e), &before) && Editor::undo_label(&r.e) == label, "v changed the source or history");
-    assert_eq!(sop::node::label(&Editor::displayed_node(&r.e)), "uv_sphere", "the viewport shows the viewed node at the scene level");
+    assert!(same_ws(&editor::workspace(&r.e), &before) && editor::undo_label(&r.e) == label, "v changed the source or history");
+    assert_eq!(sop::node::label(&editor::displayed_node(&r.e)), "uv_sphere", "the viewport shows the viewed node at the scene level");
     // an input's slider writes the graph input's default
     let rects = n::row_rects(&state, &params(r, "flower", scope.clone()), outline(r));
     let (_, (x, y, w, h)) = rects.into_iter().find(|(row, _)| n::describe(row).contains("input petals")).expect("no petals slider");
@@ -173,7 +173,7 @@ fn body(r: &mut Bloom) {
     r.step(&[], &[], to, vec![Event::Pointer_released(MouseButton::LeftButton, to)]);
     r.plain(vec![]);
     assert!(!source(&r.e).contains("(petals : int 3)") && source(&r.e).contains("(petals : int "), "the slider changed the input's default: {}", source(&r.e));
-    assert_eq!(Editor::undo_label(&r.e).as_deref(), Some("Input default"), "named in history");
+    assert_eq!(editor::undo_label(&r.e).as_deref(), Some("Input default"), "named in history");
     assert_eq!(dump_line(&r.e, "edit error"), "-", "and checks");
     let name_at = (slider_x - 60., slider_y);
     r.click(name_at);
@@ -182,7 +182,7 @@ fn body(r: &mut Bloom) {
     r.plain(vec![Event::Key_pressed(Key::Enter)]);
     r.plain(vec![]);
     assert!(source(&r.e).contains("(petals : int 7)"), "a typed default is written as an int: {}", source(&r.e));
-    assert_eq!(Editor::undo_label(&r.e).as_deref(), Some("Input default"), "the typed default is a history entry");
+    assert_eq!(editor::undo_label(&r.e).as_deref(), Some("Input default"), "the typed default is a history entry");
     let matches: Vec<String> = n::rows(true, &n::with_query("wob", &n::initial()), &params(r, "flower", scope.clone())).iter().map(n::describe).collect();
     assert!(matches.iter().any(|l| l.contains("wobble")) && !matches.iter().any(|l| l.contains("scene · scene")), "a search shows the matching bindings");
     // the toolbar: Defn makes a reusable function from the selection
@@ -196,7 +196,7 @@ fn body(r: &mut Bloom) {
     r.click(p);
     assert_eq!(dump_line(&r.e, "scope selected"), "flower/heart", "the heart is selected");
     r.click((tool.0 + tool.2 / 2., tool.1 + tool.3 / 2.));
-    assert_eq!(Editor::undo_label(&r.e).as_deref(), Some("Make reusable function"), "the defn tool made a function: {:?} / {}", Editor::undo_label(&r.e), dump_line(&r.e, "edit error"));
+    assert_eq!(editor::undo_label(&r.e).as_deref(), Some("Make reusable function"), "the defn tool made a function: {:?} / {}", editor::undo_label(&r.e), dump_line(&r.e, "edit error"));
     assert!(source(&r.e).contains("(defn heart_2 :context sop []"), "a defn with its own name: {}", source(&r.e));
     assert!(source(&r.e) != before, "the text changed");
     ui.destroy();

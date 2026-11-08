@@ -10,7 +10,7 @@ use sop::context::{self, dependencies as deps};
 use sop::node;
 
 #[derive(Clone)]
-pub struct t {
+pub struct Schedule {
     pub initialized: bool,
     pub dirty: bool,
     pub graphs: Vec<node::T>,
@@ -19,21 +19,21 @@ pub struct t {
     pub input: Option<input::Frame>,
 }
 
-pub fn initial() -> t {
-    t { initialized: false, dirty: false, graphs: Vec::new(), dependencies: deps::STATIC, input: None }
+pub fn initial() -> Schedule {
+    Schedule { initialized: false, dirty: false, graphs: Vec::new(), dependencies: deps::STATIC, input: None }
 }
 
 pub fn step(
     live: bool,
     input: Option<&input::Frame>,
-    value: &t,
+    value: &Schedule,
     graphs: &[node::T],
     effects: Effects,
     context_changed: bool,
     force: bool,
     busy: bool,
     frame: &frame::Frame,
-) -> (t, bool) {
+) -> (Schedule, bool) {
     let dirty = value.dirty || effects.cook || force;
     let same = graphs.len() == value.graphs.len() && graphs.iter().zip(value.graphs.iter()).all(|(a, b)| node::ptr_eq(a, b));
     let dependencies = if same {
@@ -56,7 +56,7 @@ pub fn step(
     // shows and the next picks up the latest value.
     let fire = if held { live && desired && !busy } else { desired && (!busy || urgent) };
     (
-        t { initialized: value.initialized || fire, dirty: desired && !fire, graphs: graphs.to_vec(), dependencies, input: input.cloned() },
+        Schedule { initialized: value.initialized || fire, dirty: desired && !fire, graphs: graphs.to_vec(), dependencies, input: input.cloned() },
         fire,
     )
 }

@@ -43,13 +43,13 @@ pub fn probe_force() -> probe::Force {
     probe_run::force()
 }
 
-fn probes_for(value: &t, chain: &[Path]) -> Vec<i64> {
+fn probes_for(value: &EditorModel, chain: &[Path]) -> Vec<i64> {
     chain.iter().map(|path| value.probes.get(path).copied().unwrap_or(0)).collect()
 }
 
 /// Resolve the previews (viewport requests and the canvas's picture) of the model against its
 /// lowering, once per change of the lowering, the probes or the previews.
-pub fn sync_views(value: &mut t) {
+pub fn sync_views(value: &mut EditorModel) {
     let lowered = &value.doc.workspace.lowered;
     if let Some((previous, probes, previews, canvas)) = &value.view_key {
         if Arc::ptr_eq(previous, &lowered.evaluated) && *probes == value.probes && *previews == value.previews && *canvas == value.canvas_preview {
@@ -101,7 +101,7 @@ pub fn sync_views(value: &mut t) {
 }
 
 /// A node asked to be viewed: the preview of the object that owns it, else the canvas's.
-pub fn view_node(value: &mut t, path: &[String]) {
+pub fn view_node(value: &mut EditorModel, path: &[String]) {
     let Some(key) = pane_laid(&*value).cloned() else { return };
     let chain = probe::chains(&key.scope).get(path).cloned().unwrap_or_default();
     let probes = probes_for(&*value, &chain);
@@ -172,7 +172,7 @@ impl scope::Saved for DocSaved {
 /// footers are rebuilt when the recording evaluation, the cook's geometry counts or (a live
 /// document) the time changed. The evaluation is retained by lowering, never repeated by a pane
 /// or a frame.
-pub fn sync_scope(value: &mut t) {
+pub fn sync_scope(value: &mut EditorModel) {
     sync_views(value);
     if let Some(key) = pane_laid(&*value).cloned() {
         let display = viewed_path(&*value, &key.scope);

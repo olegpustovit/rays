@@ -22,7 +22,7 @@ pub enum Merge {
 /// from it. Arc identity stands in for OCaml's physical equality(`==`).
 ///
 /// [`keep`]: t::keep
-pub struct t {
+pub struct EditorHistory {
     /// Oldest first; the newest entry is at the back.
     past: VecDeque<(Arc<E>, String, i64)>,
     present: Arc<A>,
@@ -42,9 +42,9 @@ pub struct t {
 
 // ponytail: every field is an Arc or a plain value, so a clone is cheap and undo/redo can
 // return the old history unchanged on Error without OCaml's immutable sharing.
-impl Clone for t {
+impl Clone for EditorHistory {
     fn clone(&self) -> Self {
-        t {
+        EditorHistory {
             past: self.past.clone(),
             present: self.present.clone(),
             label: self.label.clone(),
@@ -68,7 +68,7 @@ pub fn create(
     bytes: Option<Arc<dyn Fn(&E) -> i64>>,
     keep: Arc<dyn Fn(&A) -> E>,
     present: Arc<A>,
-) -> Result<t, String> {
+) -> Result<EditorHistory, String> {
     let capacity = capacity.unwrap_or(128);
     let byte_capacity = byte_capacity.unwrap_or(i64::MAX);
     if capacity < 1 {
@@ -77,7 +77,7 @@ pub fn create(
     if byte_capacity < 0 {
         return Err("Editor_core.History.create: byte_capacity must be non-negative".into());
     }
-    Ok(t {
+    Ok(EditorHistory {
         past: VecDeque::new(),
         present,
         label: String::new(),
@@ -93,38 +93,38 @@ pub fn create(
     })
 }
 
-pub fn present(h: &t) -> &A {
+pub fn present(h: &EditorHistory) -> &A {
     &h.present
 }
 
-pub fn label(h: &t) -> &str {
+pub fn label(h: &EditorHistory) -> &str {
     &h.label
 }
 
 /// The label of the next redo, if any.
-pub fn redo_label(h: &t) -> Option<&str> {
+pub fn redo_label(h: &EditorHistory) -> Option<&str> {
     h.future.last().map(|(_, label, _)| label.as_str())
 }
 
-pub fn can_undo(h: &t) -> bool {
+pub fn can_undo(h: &EditorHistory) -> bool {
     !h.past.is_empty()
 }
 
-pub fn can_redo(h: &t) -> bool {
+pub fn can_redo(h: &EditorHistory) -> bool {
     !h.future.is_empty()
 }
 
-pub fn depth(h: &t) -> i64 {
+pub fn depth(h: &EditorHistory) -> i64 {
     h.depth
 }
 
 /// What the byte cap counts: the entries to undo and to redo.
-pub fn byte_depth(h: &t) -> i64 {
+pub fn byte_depth(h: &EditorHistory) -> i64 {
     h.byte_depth
 }
 
 /// The entries(newest undo first, then redo), and the one live value kept beside them.
-pub fn retained(h: &t) -> (Vec<&E>, Option<&A>) {
+pub fn retained(h: &EditorHistory) -> (Vec<&E>, Option<&A>) {
     let entries = h
         .past
         .iter()
@@ -135,7 +135,7 @@ pub fn retained(h: &t) -> (Vec<&E>, Option<&A>) {
    (entries, h.recent.as_ref().map(|(_, live)| live.as_ref()))
 }
 
-fn entry_of(h: &t) -> (Arc<E>, String, i64) {
+fn entry_of(h: &EditorHistory) -> (Arc<E>, String, i64) {
     let entry = Arc::new((h.keep)(&h.present));
     let n =(h.size)(&entry).max(0);
    (entry, h.label.clone(), n)
@@ -143,7 +143,7 @@ fn entry_of(h: &t) -> (Arc<E>, String, i64) {
 
 /// Oldest first, down to [limit] entries and the byte cap. The newest entry stays whatever it
 /// weighs: one edit of a document over the cap can still be undone.
-fn trim_to(limit: i64, mut h: t) -> t {
+fn trim_to(limit: i64, mut h: EditorHistory) -> EditorHistory {
     let excess = h.depth - limit;
     if excess <= 0 &&(h.byte_depth <= h.byte_capacity || h.depth <= 1) {
         return h;
@@ -170,12 +170,12 @@ fn trim_to(limit: i64, mut h: t) -> t {
     h
 }
 
-fn trim(h: t) -> t {
+fn trim(h: EditorHistory) -> EditorHistory {
     let limit = h.capacity;
     trim_to(limit, h)
 }
 
-fn commit(value: Arc<A>, label: &str, mut h: t) -> t {
+fn commit(value: Arc<A>, label: &str, mut h: EditorHistory) -> EditorHistory {
     if Arc::ptr_eq(&value, &h.present) {
         return h;
     }
@@ -194,7 +194,7 @@ fn commit(value: Arc<A>, label: &str, mut h: t) -> t {
 
 /// The present replaced in place: a continued gesture, or a repair that is no edit of the
 /// user's(camera bookkeeping), which leaves what redo would restore.
-fn amend(value: Arc<A>, mut h: t) -> t {
+fn amend(value: Arc<A>, mut h: EditorHistory) -> EditorHistory {
     if Arc::ptr_eq(&value, &h.present) {
         return h;
     }
@@ -205,7 +205,7 @@ fn amend(value: Arc<A>, mut h: t) -> t {
 /// `Step` adds an undo entry; matching `Gesture` keys merge until [`seal`]; matching `Burst`
 /// keys merge while edits stay within the window; `Repair` changes the current entry without
 /// adding a step. `label` names the entry(OCaml's default is "Edit").
-pub fn record(merge: Merge, label: &str, value: Arc<A>, h: t) -> t {
+pub fn record(merge: Merge, label: &str, value: Arc<A>, h: EditorHistory) -> EditorHistory {
     let continuation = match(&merge, &h.merge) {
        (Merge::Repair, _) => true,
        (Merge::Gesture(id), Some(Merge::Gesture(previous))) => id == previous,
@@ -223,7 +223,7 @@ pub fn record(merge: Merge, label: &str, value: Arc<A>, h: t) -> t {
     h
 }
 
-pub fn seal(gesture_only: bool, mut h: t) -> t {
+pub fn seal(gesture_only: bool, mut h: EditorHistory) -> EditorHistory {
     match &h.merge {
         None => h,
         Some(Merge::Gesture(_)) => {
@@ -240,7 +240,7 @@ pub fn seal(gesture_only: bool, mut h: t) -> t {
 
 fn revive(
     restore: &dyn Fn(&E) -> Result<A, Diagnostic>,
-    h: &t,
+    h: &EditorHistory,
     entry: &Arc<E>,
 ) -> Result<Arc<A>, Diagnostic> {
     match &h.recent {
@@ -252,8 +252,8 @@ fn revive(
 /// `None` with nothing to undo. `Some(Err)`: nothing changed; `h` stays as it was.
 pub fn undo(
     restore: &dyn Fn(&E) -> Result<A, Diagnostic>,
-    h: &t,
-) -> Option<Result<t, Diagnostic>> {
+    h: &EditorHistory,
+) -> Option<Result<EditorHistory, Diagnostic>> {
     let(previous, _, _) = h.past.back()?;
     let live = match revive(restore, h, previous) {
         Ok(live) => live,
@@ -275,8 +275,8 @@ pub fn undo(
 /// `None` with nothing to redo. `Some(Err)`: nothing changed; `h` stays as it was.
 pub fn redo(
     restore: &dyn Fn(&E) -> Result<A, Diagnostic>,
-    h: &t,
-) -> Option<Result<t, Diagnostic>> {
+    h: &EditorHistory,
+) -> Option<Result<EditorHistory, Diagnostic>> {
     let(next_entry, _, _) = h.future.last()?;
     let live = match revive(restore, h, next_entry) {
         Ok(live) => live,
@@ -296,12 +296,12 @@ pub fn redo(
 }
 
 /// The oldest undo entries gone, down to [keep](at least one).
-pub fn shed(keep: i64, h: t) -> t {
+pub fn shed(keep: i64, h: EditorHistory) -> EditorHistory {
     trim_to(keep.max(1), h)
 }
 
 /// No entries left, and none charged: the editor is closing.
-pub fn release(mut h: t) -> t {
+pub fn release(mut h: EditorHistory) -> EditorHistory {
     h.past.clear();
     h.future.clear();
     h.recent = None;
@@ -312,7 +312,7 @@ pub fn release(mut h: t) -> t {
 }
 
 /// A new document: [`release`], with this present.
-pub fn restart(value: Arc<A>, h: t) -> t {
+pub fn restart(value: Arc<A>, h: EditorHistory) -> EditorHistory {
     let mut h = release(h);
     h.present = value;
     h.label = String::new();
@@ -320,6 +320,6 @@ pub fn restart(value: Arc<A>, h: t) -> t {
 }
 
 /// The present itself (OCaml hands out the value; its identity is the `Arc`).
-pub fn present_arc(h: &t) -> Arc<A> {
+pub fn present_arc(h: &EditorHistory) -> Arc<A> {
     h.present.clone()
 }

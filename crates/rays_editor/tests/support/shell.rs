@@ -7,7 +7,7 @@ use editor_document::workspace_doc::{self, TextOptions};
 use flow_check::catalog::Catalog;
 use input::{Event, Key, MouseButton};
 use rays::frame;
-use rays_editor::Editor;
+use rays_editor::editor;
 
 pub fn fail(message: &str) -> ! {
     panic!("test_workspace_shell: {message}")
@@ -116,23 +116,23 @@ pub fn idle_frame(count: i64) -> frame::Frame {
 // ---- editors ----
 
 /// Every editor here awaits the cook its frame submits: what a frame shows is settled.
-pub fn editor(text: &str) -> Editor::t {
-    editor_with(text, Editor::Create::default())
+pub fn editor(text: &str) -> editor::Editor {
+    editor_with(text, editor::Create::default())
 }
-pub fn editor_with(text: &str, options: Editor::Create) -> Editor::t {
-    let options = Editor::Create { await_: Some(true), ui_text_size: Some(11), platform: Some(input::Platform::Apple), domains: options.domains.or(Some(1)), ..options };
-    match Editor::create(options, &of_text(text), None, Editor::prepare_fn(), Editor::draw_fn()) {
+pub fn editor_with(text: &str, options: editor::Create) -> editor::Editor {
+    let options = editor::Create { await_: Some(true), ui_text_size: Some(11), platform: Some(input::Platform::Apple), domains: options.domains.or(Some(1)), ..options };
+    match editor::create(options, &of_text(text), None, editor::prepare_fn(), editor::draw_fn()) {
         Ok(e) => e,
         Err(m) => fail(&m),
     }
 }
-pub fn source(e: &Editor::t) -> String {
-    workspace_doc::print(&Editor::workspace(e)).unwrap().0
+pub fn source(e: &editor::Editor) -> String {
+    workspace_doc::print(&editor::workspace(e)).unwrap().0
 }
-pub fn dump_line(e: &Editor::t, key: &str) -> String {
+pub fn dump_line(e: &editor::Editor, key: &str) -> String {
     let dir = std::env::temp_dir().join(format!("rays-shell-dump-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
     std::fs::create_dir_all(&dir).unwrap();
-    Editor::crash_dump(e, dir.to_str().unwrap()).expect("crash dump");
+    editor::crash_dump(e, dir.to_str().unwrap()).expect("crash dump");
     let text = std::fs::read_to_string(dir.join("editor.txt")).expect("editor.txt");
     let _ = std::fs::remove_dir_all(&dir);
     let prefix = format!("{key}: ");
@@ -144,17 +144,17 @@ pub fn dump_line(e: &Editor::t, key: &str) -> String {
 
 /// The stepping closure every section builds: a counter, an editor, `step`.
 pub struct Run {
-    pub e: Editor::t,
+    pub e: editor::Editor,
     pub count: i64,
 }
 impl Run {
-    pub fn new(e: Editor::t) -> Run {
+    pub fn new(e: editor::Editor) -> Run {
         Run { e, count: 0 }
     }
     pub fn step_full(&mut self, buttons: &[MouseButton], keys: &[Key], mouse: (f64, f64), events: Vec<Event>) {
         self.count += 1;
         let f = frame_full(buttons, keys, (0., 0.), mouse, events, self.count);
-        self.e = Editor::update(self.e.clone(), &f);
+        self.e = editor::update(self.e.clone(), &f);
     }
     pub fn step(&mut self, mouse: (f64, f64), events: Vec<Event>) {
         self.step_full(&[], &[], mouse, events)
@@ -171,10 +171,10 @@ impl Run {
         self.click_button(MouseButton::LeftButton, p)
     }
     pub fn panes(&self) -> pxui_shell::layout::Panes {
-        Editor::panes(&self.e, &idle_frame(0))
+        editor::panes(&self.e, &idle_frame(0))
     }
     pub fn undo_label(&self) -> Option<String> {
-        Editor::undo_label(&self.e)
+        editor::undo_label(&self.e)
     }
     pub fn source(&self) -> String {
         source(&self.e)
@@ -183,7 +183,7 @@ impl Run {
         dump_line(&self.e, key)
     }
     pub fn close(&self) {
-        Editor::close(&self.e)
+        editor::close(&self.e)
     }
 }
 pub fn key(k: Key) -> Event {

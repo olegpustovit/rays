@@ -6,7 +6,7 @@ use editor_document::workspace_doc as Doc;
 use flow_graph::flow_edit as fe;
 use flow_syntax::syntax as S;
 use input::{Event, Key};
-use rays_editor::{Editor, Source};
+use rays_editor::{editor, Source};
 use std::cell::Cell;
 use std::fs;
 use std::sync::Arc;
@@ -129,21 +129,21 @@ pub fn find() {
 
 // ---- through the editor ----
 
-fn editor(presets: Option<&str>, imports: Vec<(String, String)>, source: Source::t, text: &str) -> Editor::t {
-    let o = Editor::Create { ui_text_size: Some(11), platform: Some(input::Platform::Apple), await_: Some(true), domains: Some(1), presets: presets.map(|p| p.to_string()), ..Default::default() };
-    Editor::create(o, &doc_of(text, imports).unwrap(), Some(source), Editor::prepare_fn(), Editor::draw_fn()).unwrap_or_else(|m| panic!("{m}"))
+fn editor(presets: Option<&str>, imports: Vec<(String, String)>, source: Source::SourceFile, text: &str) -> editor::Editor {
+    let o = editor::Create { ui_text_size: Some(11), platform: Some(input::Platform::Apple), await_: Some(true), domains: Some(1), presets: presets.map(|p| p.to_string()), ..Default::default() };
+    editor::create(o, &doc_of(text, imports).unwrap(), Some(source), editor::prepare_fn(), editor::draw_fn()).unwrap_or_else(|m| panic!("{m}"))
 }
-fn source_text(e: &Editor::t) -> String {
-    flow_syntax::lisp::print(&Editor::workspace(e).source).unwrap().0
+fn source_text(e: &editor::Editor) -> String {
+    flow_syntax::lisp::print(&editor::workspace(e).source).unwrap().0
 }
-fn dump_line(e: &Editor::t, key: &str) -> String {
+fn dump_line(e: &editor::Editor, key: &str) -> String {
     let dir = temp_dir("dump");
-    Editor::crash_dump(e, &dir).unwrap();
+    editor::crash_dump(e, &dir).unwrap();
     let text = read(&format!("{dir}/editor.txt"));
     let _ = fs::remove_dir_all(&dir);
     text.lines().find_map(|l| l.strip_prefix(&format!("{key}: ")).map(|s| s.to_string())).unwrap_or_else(|| panic!("no {key} in the dump"))
 }
-fn cook_line(e: &Editor::t) -> String {
+fn cook_line(e: &editor::Editor) -> String {
     dump_line(e, "cook")
 }
 
@@ -153,10 +153,10 @@ struct Run {
     mouse: (f64, f64),
 }
 impl Run {
-    fn new(e: Editor::t, mouse: (f64, f64)) -> Run {
+    fn new(e: editor::Editor, mouse: (f64, f64)) -> Run {
         Run { d: Driver::new(e), mouse }
     }
-    fn e(&self) -> &Editor::t {
+    fn e(&self) -> &editor::Editor {
         self.d.e()
     }
     fn step(&mut self, events: Vec<Event>) {
@@ -179,12 +179,12 @@ impl Run {
     fn run_for(&mut self, seconds: f64) {
         self.advance((seconds * 60.) as i64)
     }
-    fn replace(&mut self, e: Editor::t) {
+    fn replace(&mut self, e: editor::Editor) {
         self.d.ed = Some(e);
     }
     fn edit(&mut self, op: fe::Op) {
         let e = self.d.ed.take().unwrap();
-        self.d.ed = Some(Editor::edit(e, &op).unwrap_or_else(|m| panic!("{m}")));
+        self.d.ed = Some(editor::edit(e, &op).unwrap_or_else(|m| panic!("{m}")));
     }
 }
 fn set_arg(path: &[&str], kw: &str, value: S::Draft) -> fe::Op {
@@ -207,34 +207,34 @@ pub fn editor_flow() {
     r.step(vec![]);
     r.step(vec![]);
     r.step(vec![]);
-    let history = Editor::undo_label(r.e());
+    let history = editor::undo_label(r.e());
     // Command-S over the matching source
     r.keys(&[Key::Meta], vec![meta('s')]);
     r.step(vec![]);
     assert!(has(&cook_line(r.e()), "Saved sketch.rays"), "the status says it saved: {}", cook_line(r.e()));
     let written = read(&file);
-    assert!(written == printed(&Editor::workspace(r.e())), "Save wrote the document's text");
+    assert!(written == printed(&editor::workspace(r.e())), "Save wrote the document's text");
     assert!(has(&written, "; the header") && has(&written, "; the tail"), "the saved file keeps its comments");
     assert!(!std::path::Path::new(&presets).exists(), "no preset was written");
     r.run_for(1.5);
-    assert!(Editor::undo_label(r.e()) == history, "Save reloaded its own write");
+    assert!(editor::undo_label(r.e()) == history, "Save reloaded its own write");
     // an edit from another editor reloads as one history entry; probes stay by path
     let zone = vec!["g".to_string(), "zone".to_string()];
     let e = r.d.ed.take().unwrap();
-    r.replace(Editor::set_probe(e, &zone, 3));
+    r.replace(editor::set_probe(e, &zone, 3));
     write(&file, &text1);
     r.run_for(1.);
     r.step(vec![]);
     assert!(has(&source_text(r.e()), "0.7"), "the file's text is the document: {}", source_text(r.e()));
-    assert!(Editor::undo_label(r.e()) == Some("Reload sketch.rays".to_string()), "one history entry named Reload sketch.rays");
-    assert!(Editor::probe(r.e(), &zone) == Some(3), "the probe survived by path");
+    assert!(editor::undo_label(r.e()) == Some("Reload sketch.rays".to_string()), "one history entry named Reload sketch.rays");
+    assert!(editor::probe(r.e(), &zone) == Some(3), "the probe survived by path");
     assert!(has(&cook_line(r.e()), "Reloaded sketch.rays") || has(&cook_line(r.e()), "checked"), "{}", cook_line(r.e()));
     // text that does not check keeps the last good document and says why
     write(&file, TYPO);
     r.run_for(1.);
     r.step(vec![]);
     assert!(has(&source_text(r.e()), "0.7"), "the refused text replaced the document");
-    assert!(Editor::undo_label(r.e()) == Some("Reload sketch.rays".to_string()), "the refused text made a history entry");
+    assert!(editor::undo_label(r.e()) == Some("Reload sketch.rays".to_string()), "the refused text made a history entry");
     assert!(has(&cook_line(r.e()), "not reloaded") && has(&cook_line(r.e()), "line 1"), "the status names the failure: {}", cook_line(r.e()));
     write(&file, &text1);
     r.run_for(1.);
@@ -245,17 +245,17 @@ pub fn editor_flow() {
     r.run_for(1.);
     r.step(vec![]);
     let key = vec!["g".to_string(), "@result".to_string()];
-    let layout = |r: &Run| Editor::workspace(r.e()).layout;
+    let layout = |r: &Run| editor::workspace(r.e()).layout;
     assert!(layout(&r).at.contains_key(&key) && !layout(&r).frames.is_empty(), "the layout form of the file was ignored");
     write(&file, &text1);
     r.run_for(1.);
     r.step(vec![]);
     assert!(layout(&r).at.contains_key(&key), "a reload without a layout form dropped the layout");
-    let before = Editor::workspace(r.e());
-    let label = Editor::undo_label(r.e());
+    let before = editor::workspace(r.e());
+    let label = editor::undo_label(r.e());
     fs::remove_file(&file).unwrap();
     r.run_for(1.);
-    assert!(Arc::ptr_eq(&Editor::workspace(r.e()).checked, &before.checked) && Editor::undo_label(r.e()) == label, "unreadable source changed the document/history");
+    assert!(Arc::ptr_eq(&editor::workspace(r.e()).checked, &before.checked) && editor::undo_label(r.e()) == label, "unreadable source changed the document/history");
     assert!(has(&cook_line(r.e()), "Source unreadable"), "source read failure was silent: {}", cook_line(r.e()));
     r.keys(&[Key::Meta], vec![meta('s')]);
     assert!(has(&cook_line(r.e()), "Not saved:"), "unreadable source was reported as an external edit");
@@ -263,7 +263,7 @@ pub fn editor_flow() {
     write(&file, &text1);
     r.run_for(1.);
     assert!(has(&cook_line(r.e()), "Source readable again"), "source recovery was not reported: {}", cook_line(r.e()));
-    assert!(Arc::ptr_eq(&Editor::workspace(r.e()).checked, &before.checked) && Editor::undo_label(r.e()) == label, "same-content source recovery made a document change");
+    assert!(Arc::ptr_eq(&editor::workspace(r.e()).checked, &before.checked) && editor::undo_label(r.e()) == label, "same-content source recovery made a document change");
     r.d.close();
     // a file edited since the build reloads on the first poll, as one history entry
     write(&file, &text1);
@@ -273,7 +273,7 @@ pub fn editor_flow() {
     r.run_for(1.);
     r.step(vec![]);
     assert!(has(&source_text(r.e()), "0.7"), "the edited file was not loaded at startup: {}", source_text(r.e()));
-    assert!(Editor::undo_label(r.e()) == Some("Reload sketch.rays".to_string()), "the startup reload is one history entry");
+    assert!(editor::undo_label(r.e()) == Some("Reload sketch.rays".to_string()), "the startup reload is one history entry");
     r.d.close();
     // a file that differs and does not check keeps the built text; Save then falls back to a preset
     write(&file, TYPO);
@@ -305,14 +305,14 @@ pub fn external_over_dirty() {
     r.step(vec![]);
     r.step(vec![]);
     r.edit(set_arg(&["g", "@result"], "segments", S::Draft::Num("12".into())));
-    let label = Editor::undo_label(r.e());
+    let label = editor::undo_label(r.e());
     write(&file, &text1);
     r.run_for(1.5);
-    assert!(has(&source_text(r.e()), ":segments 12") && has(&source_text(r.e()), "0.5") && Editor::undo_label(r.e()) == label, "an external change replaced a document with unsaved edits: {}", source_text(r.e()));
+    assert!(has(&source_text(r.e()), ":segments 12") && has(&source_text(r.e()), "0.5") && editor::undo_label(r.e()) == label, "an external change replaced a document with unsaved edits: {}", source_text(r.e()));
     assert!(has(&cook_line(r.e()), "changed on disk"), "the kept edits were not announced: {}", cook_line(r.e()));
     r.keys(&[Key::Meta], vec![meta('z')]);
     r.run_for(1.);
-    assert!(has(&source_text(r.e()), "0.7") && Editor::undo_label(r.e()) == Some("Reload sketch.rays".to_string()), "the file's text did not load once the edits were undone: {}", source_text(r.e()));
+    assert!(has(&source_text(r.e()), "0.7") && editor::undo_label(r.e()) == Some("Reload sketch.rays".to_string()), "the file's text did not load once the edits were undone: {}", source_text(r.e()));
     r.d.close();
     let _ = fs::remove_dir_all(&dir);
 }
@@ -336,9 +336,9 @@ pub fn autosave() {
     assert!(!std::path::Path::new(&state).exists(), "opening a sketch wrote over its recovery state");
     r.edit(set_arg(&["g", "@result"], "radius", S::Draft::Num("1.25".into())));
     let e = r.d.ed.take().unwrap();
-    r.replace(Editor::set_renderer(e, rays_editor::Renderer::Mode::Wireframe));
+    r.replace(editor::set_renderer(e, rays_editor::Renderer::Mode::Wireframe));
     r.step(vec![Event::Pointer_moved((200., 300.)), Event::Scrolled((0., -2.))]);
-    let eye = |e: &Editor::t| rays::camera::position(&rays::easy_camera::camera(&Editor::camera(e)).unwrap());
+    let eye = |e: &editor::Editor| rays::camera::position(&rays::easy_camera::camera(&editor::camera(e)).unwrap());
     let saved_eye = eye(r.e());
     r.d.close();
     assert!(has(&read(&state), ":radius 1.25") && has(&read(&state), "; the header") && has(&read(&state), "(view"), "close did not flush the edited document and viewport");
@@ -355,9 +355,9 @@ pub fn autosave() {
     assert!(read(&state) == snapshot, "orbiting after a restart overwrote the last edited state");
     r.step(vec![meta_k('/'), meta_k('b')]);
     r.step(vec![Event::Key_pressed(Key::Enter)]);
-    assert!(has(&source_text(r.e()), ":radius 1.25") && Editor::undo_label(r.e()) == Some("Restore last edited state".to_string()), "/ b did not restore the last edited state as one undo entry: {:?}; {}; {}", Editor::undo_label(r.e()), cook_line(r.e()), source_text(r.e()));
+    assert!(has(&source_text(r.e()), ":radius 1.25") && editor::undo_label(r.e()) == Some("Restore last edited state".to_string()), "/ b did not restore the last edited state as one undo entry: {:?}; {}; {}", editor::undo_label(r.e()), cook_line(r.e()), source_text(r.e()));
     assert!(rays_math::vec3::nearly_equal(saved_eye, eye(r.e()), 1e-9), "recovery did not restore the viewport");
-    assert!(Editor::renderer(r.e()) == rays_editor::Renderer::Mode::Wireframe, "recovery did not restore the shared renderer choice");
+    assert!(editor::renderer(r.e()) == rays_editor::Renderer::Mode::Wireframe, "recovery did not restore the shared renderer choice");
     r.keys(&[Key::Meta], vec![meta('z')]);
     assert!(has(&source_text(r.e()), ":radius 0.5"), "undo did not revert recovery");
     r.d.close();
@@ -422,7 +422,7 @@ pub fn start_keywords() {
     write(&file, &text("0.7", "list", "graph"));
     r.run_for(1.);
     r.step(vec![]);
-    assert!(Editor::undo_label(r.e()) == Some("Reload sketch.rays".to_string()) && has(&source_text(r.e()), "0.7"), "the file did not reload");
+    assert!(editor::undo_label(r.e()) == Some("Reload sketch.rays".to_string()) && has(&source_text(r.e()), "0.7"), "the file did not reload");
     assert!(line(&r, "projection") == "graph", "a reload that left :view alone reset the view the user chose");
     // a reload that changes them is followed
     write(&file, &text("0.7", "text", "document"));
@@ -448,11 +448,11 @@ pub fn start_keywords() {
         r.step(vec![]);
     };
     load(&mut r);
-    assert!(Editor::undo_label(r.e()) == Some("Load preset".to_string()) && line(&r, "projection") == "text", "a preset load did not follow its :view: {}", line(&r, "projection"));
+    assert!(editor::undo_label(r.e()) == Some("Load preset".to_string()) && line(&r, "projection") == "text", "a preset load did not follow its :view: {}", line(&r, "projection"));
     // the same preset again changes no keyword: the user's view stays
     show_graph(&mut r);
     load(&mut r);
-    assert!(Editor::undo_label(r.e()) == Some("Load preset".to_string()) && line(&r, "projection") == "graph", "a preset load that left :view alone reset the view the user chose");
+    assert!(editor::undo_label(r.e()) == Some("Load preset".to_string()) && line(&r, "projection") == "graph", "a preset load that left :view alone reset the view the user chose");
     r.d.close();
     let _ = fs::remove_dir_all(&dir);
 }
@@ -472,13 +472,13 @@ pub fn imports() {
         r.advance(65);
     };
     poll(&mut r);
-    assert!(Editor::undo_label(r.e()).is_none(), "unchanged imported text reloaded at startup");
+    assert!(editor::undo_label(r.e()).is_none(), "unchanged imported text reloaded at startup");
     write(&lib, &library("0.7"));
     poll(&mut r);
-    assert!(has(&source_text(r.e()), "0.7") && Editor::undo_label(r.e()) == Some("Reload sketch.rays".to_string()), "changed import did not reload");
-    let document = Editor::workspace(r.e());
+    assert!(has(&source_text(r.e()), "0.7") && editor::undo_label(r.e()) == Some("Reload sketch.rays".to_string()), "changed import did not reload");
+    let document = editor::workspace(r.e());
     poll(&mut r);
-    assert!(Arc::ptr_eq(&Editor::workspace(r.e()).checked, &document.checked), "import reloaded repeatedly (normalized digest)");
+    assert!(Arc::ptr_eq(&editor::workspace(r.e()).checked, &document.checked), "import reloaded repeatedly (normalized digest)");
     let unchanged = read(&lib);
     r.keys(&[Key::Meta], vec![meta('s')]);
     assert!(read(&lib) == unchanged && !has(&read(&file), "(graph shared"), "save wrote imported forms or file");
@@ -494,7 +494,7 @@ pub fn imports() {
     assert!(has(&cook_line(r.e()), "E_IMPORT") || has(&cook_line(r.e()), "not reloaded"), "missing import was silent");
     write(&lib, &library("0.9"));
     poll(&mut r);
-    assert!(!Arc::ptr_eq(&Editor::workspace(r.e()).checked, &document.checked), "recreated import did not recover");
+    assert!(!Arc::ptr_eq(&editor::workspace(r.e()).checked, &document.checked), "recreated import did not recover");
     r.d.close();
     let _ = fs::remove_dir_all(&dir);
 }
@@ -510,18 +510,18 @@ pub fn library() {
     write(&file, text);
     write(&lib, &library("2"));
     let e = editor(None, vec![("lib.rays".into(), library("2"))], Source::at(&file, &sha(text)), text);
-    let mut e = Editor::update(rays_editor::Reduce::open_import(e, "lib.rays"), &frame(&Opts::default(), (450., 300.), vec![], 0));
-    assert!(Editor::workspace(&e).fragment && Editor::workspace(&e).imports.is_empty(), "open library did not switch to editable definitions");
-    e = Editor::edit(e, &fe::Op::SetArg { node: vec!["def:twice".into(), "@result".into()], key: fe::ArgKey::Pos(1), sub: vec![], value: S::make(S::Draft::Num("4".into())) }).unwrap();
-    e = Editor::update(e, &frame(&Opts { keys: vec![Key::Meta], ..Default::default() }, (450., 300.), vec![meta('s')], 1));
+    let mut e = editor::update(rays_editor::reduce::open_import(e, "lib.rays"), &frame(&Opts::default(), (450., 300.), vec![], 0));
+    assert!(editor::workspace(&e).fragment && editor::workspace(&e).imports.is_empty(), "open library did not switch to editable definitions");
+    e = editor::edit(e, &fe::Op::SetArg { node: vec!["def:twice".into(), "@result".into()], key: fe::ArgKey::Pos(1), sub: vec![], value: S::make(S::Draft::Num("4".into())) }).unwrap();
+    e = editor::update(e, &frame(&Opts { keys: vec![Key::Meta], ..Default::default() }, (450., 300.), vec![meta('s')], 1));
     assert!(has(&read(&lib), "(* x 4)") && has(&read(&lib), "editable library") && !has(&read(&lib), "workspace"), "library save added a wrapper or lost edit/comment");
     assert!(read(&file) == text, "open library saved over importer");
     write(&lib, &library("5"));
     for count in 2..=70 {
-        e = Editor::update(e, &frame(&Opts::default(), (450., 300.), vec![], count));
+        e = editor::update(e, &frame(&Opts::default(), (450., 300.), vec![], count));
     }
-    assert!(has(&Doc::to_text(&Editor::workspace(&e)).unwrap(), "(* x 5)"), "bare definition library did not reload");
-    Editor::close(&e);
+    assert!(has(&Doc::to_text(&editor::workspace(&e)).unwrap(), "(* x 5)"), "bare definition library did not reload");
+    editor::close(&e);
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -582,7 +582,7 @@ pub fn vocabulary_refresh() {
     let poll = |r: &mut Run| {
         r.advance(65);
     };
-    let labels = |r: &Run, suffix: &str| -> Vec<String> { Editor::Private::lisp_completions(r.e(), &format!("(workspace w (graph g :context sop ({suffix}")).into_iter().map(|c| c.label).collect() };
+    let labels = |r: &Run, suffix: &str| -> Vec<String> { editor::private::lisp_completions(r.e(), &format!("(workspace w (graph g :context sop ({suffix}")).into_iter().map(|c| c.label).collect() };
     let head = |r: &Run| labels(r, "sop/vocab_").iter().any(|l| l == "sop/vocab_card");
     assert!(!head(&r), "new vocabulary kind existed before declaration");
     write(&file, &text(Some("distance")));
@@ -592,7 +592,7 @@ pub fn vocabulary_refresh() {
         r.d.count += 1;
         let f = frame(&Opts::default(), (450., 300.), vec![], r.d.count);
         let e = r.d.ed.take().unwrap();
-        r.d.ed = Some(rays_editor::Reduce::step(e, None, None, &[a], &f).unwrap());
+        r.d.ed = Some(rays_editor::reduce::step(e, None, None, &[a], &f).unwrap());
     };
     step(&mut r, rays_editor::editor_commands::action::Undo);
     assert!(!head(&r), "undo retained removed declaration completion");

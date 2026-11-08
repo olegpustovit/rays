@@ -45,7 +45,7 @@ pub enum scene_mode {
 /// Editor_loop-owned scene edits (camera bookkeeping, a camera following the viewport): view
 /// state, never an undo entry. `active_camera`: `None` is OCaml's omitted argument (the document's
 /// own).
-pub fn scene_edit(value: &mut t, mode: scene_mode, active_camera: Option<Option<i64>>, scene_graph: kg::T) {
+pub fn scene_edit(value: &mut EditorModel, mode: scene_mode, active_camera: Option<Option<i64>>, scene_graph: kg::T) {
     if value.carry.is_some() {
         return;
     }
@@ -87,7 +87,7 @@ pub fn machinery<'a>(value: impl Into<ModelView<'a>>, under: Option<&dyn Fn(i64)
     if all_ui_visible || *value.leader != editor_core::router::State::Idle { value.ui.borrow().scene(under) } else { Vec::new() }
 }
 
-pub fn close(value: &t) {
+pub fn close(value: &EditorModel) {
     let _ = history::release(value.history.clone());
     value.ui.borrow_mut().destroy();
     cook::close(&value.cook);
@@ -95,7 +95,7 @@ pub fn close(value: &t) {
 
 /// A sketch-driven settings change: one undo step and a fresh cook, since `prepare` reads the
 /// settings.
-pub fn set_settings(value: &mut t, new_settings: &settings::T) {
+pub fn set_settings(value: &mut EditorModel, new_settings: &settings::T) {
     if settings::same_values(new_settings, &value.doc.settings) || value.carry.is_some() {
         return;
     }
@@ -116,7 +116,7 @@ pub fn set_settings(value: &mut t, new_settings: &settings::T) {
 
 /// An edit of the render settings (the root): written to the root's call, or the first edit writes
 /// a root over the scene's result; one undo step, merged while scrubbed.
-pub fn set_root(value: &mut t, root: &objects::root::Parameters) {
+pub fn set_root(value: &mut EditorModel, root: &objects::root::Parameters) {
     if *root == value.doc.root || value.carry.is_some() {
         return;
     }
@@ -137,7 +137,7 @@ pub fn set_root(value: &mut t, root: &objects::root::Parameters) {
 /// A host-driven gesture on a workspace document (`Editor.edit`, W11's entry): the same reduction
 /// as a `Syntax_edit` intent, committed as one history entry named by the op (`Gesture` merge for a
 /// scrub).
-pub fn host_edit(value: &mut t, label: &str, gesture: Option<String>, edited: &dyn Fn(Option<&[sop::edit_graph::Factory]>, &Document) -> Result<Document, Diagnostic>) -> Result<(), String> {
+pub fn host_edit(value: &mut EditorModel, label: &str, gesture: Option<String>, edited: &dyn Fn(Option<&[sop::edit_graph::Factory]>, &Document) -> Result<Document, Diagnostic>) -> Result<(), String> {
     let clock = value.clock.clone();
     let guard = SampleGuard::start_with_clock(Box::new(move || clock()));
     let result = edited(Some(&value.factories), &value.doc)
@@ -150,16 +150,16 @@ pub fn host_edit(value: &mut t, label: &str, gesture: Option<String>, edited: &d
     result
 }
 
-pub fn syntax_edit(value: &mut t, op: &fe::Op) -> Result<(), String> {
+pub fn syntax_edit(value: &mut EditorModel, op: &fe::Op) -> Result<(), String> {
     host_edit(value, fe::label(op), fe::gesture(op), &|factories, doc| document_edit::syntax_edit_result(factories, doc, op))
 }
 
-pub fn layout_edit_op(value: &mut t, op: &layout_edit::Op) -> Result<(), String> {
+pub fn layout_edit_op(value: &mut EditorModel, op: &layout_edit::Op) -> Result<(), String> {
     host_edit(value, layout_edit::label(op), layout_edit::gesture(op).map(|s| s.to_string()), &|factories, doc| document_edit::layout_op_result(factories, doc, op))
 }
 
 /// The scene's World at timeline `time` (the day cycle advances with it).
-pub fn world(view: Option<&View>, value: &t, time: Option<f64>) -> Option<world::World> {
+pub fn world(view: Option<&View>, value: &EditorModel, time: Option<f64>) -> Option<world::World> {
     let view = view.cloned().unwrap_or(View::Primary);
     let own = match &view {
         View::Only(key) => value.doc.view_worlds.iter().find(|(k, _)| k == key).map(|(_, w)| w.clone()),
@@ -182,18 +182,18 @@ pub fn world(view: Option<&View>, value: &t, time: Option<f64>) -> Option<world:
 /// another scene instance draws (`Document.shell`'s views) are left out unless asked for: `All`, or
 /// `Only key` for that viewport. Lights and cameras follow the same instance membership as the
 /// geometry.
-pub fn scene_for_view(override_: Option<kg::T>, view: Option<&View>, value: &t) -> kg::T {
+pub fn scene_for_view(override_: Option<kg::T>, view: Option<&View>, value: &EditorModel) -> kg::T {
     let view = view.cloned().unwrap_or(View::Primary);
     let scene_graph = override_.unwrap_or_else(|| scene(value));
     let unwanted: Vec<i64> = scene_graph.iter().filter(|n| !view_wants(value, &view, n.id)).map(|n| n.id).collect();
     if unwanted.is_empty() { scene_graph } else { kg::remove(&unwanted, &scene_graph) }
 }
 
-pub fn placed_pieces(render: bool, view: Option<&View>, value: &t) -> Vec<(mat4::T, cook::piece)> {
+pub fn placed_pieces(render: bool, view: Option<&View>, value: &EditorModel) -> Vec<(mat4::T, cook::piece)> {
     placed_pieces_of(render, view, value, pieces(value))
 }
 
-fn placed_pieces_of(render: bool, view: Option<&View>, value: &t, pieces: &[cook::piece]) -> Vec<(mat4::T, cook::piece)> {
+fn placed_pieces_of(render: bool, view: Option<&View>, value: &EditorModel, pieces: &[cook::piece]) -> Vec<(mat4::T, cook::piece)> {
     let view = view.cloned().unwrap_or(View::Primary);
     let scene_graph = scene(value);
     pieces
@@ -205,24 +205,24 @@ fn placed_pieces_of(render: bool, view: Option<&View>, value: &t, pieces: &[cook
         .collect()
 }
 
-pub fn world_id(value: &t) -> Option<i64> {
+pub fn world_id(value: &EditorModel) -> Option<i64> {
     objects::ids("world", &scene(value)).first().copied()
 }
 
 /// A parameter edit made in the view (a map drag, a World rotation): one undo entry per pointer
 /// gesture.
-pub fn edit_node(value: &mut t, level: Level, node_id: i64, values: &[(String, Value)], label: &str) {
+pub fn edit_node(value: &mut EditorModel, level: Level, node_id: i64, values: &[(String, Value)], label: &str) {
     if value.carry.is_some() {
         return;
     }
-    let written = |value: &mut t, doc: Document| {
+    let written = |value: &mut EditorModel, doc: Document| {
         let doc = adopt(&value.history, doc);
         cook::set_volatile(&value.cook, flow_sop::lower::is_volatile(&doc.workspace.lowered));
         let history = commit(&doc, Some(label), Some(Merge::Gesture(parameter_gesture(label, level, node_id, values))), value.history.clone());
         value.doc = doc;
         value.history = history;
     };
-    let failed = |value: &mut t, message: String| {
+    let failed = |value: &mut EditorModel, message: String| {
         value.edit_error = Some(message);
     };
     // an object the text declares takes the values in its text; one only the host made is edited
@@ -262,7 +262,7 @@ pub fn material_graph<'a>(value: impl Into<ModelView<'a>>, path: &str) -> Option
     })
 }
 
-fn view_of(view: Option<&str>, value: &t) -> View {
+fn view_of(view: Option<&str>, value: &EditorModel) -> View {
     match (view, &value.doc.shell) {
         (Some(key), Some(shell)) if shell.views.iter().any(|(k, _)| k == key) => View::Only(key.to_string()),
         _ => View::Primary,
@@ -297,7 +297,7 @@ fn nearest_by(placed: &[(mat4::T, cook::piece)], origin: vec3::T, direction: vec
 /// on nothing deselects.  A merge of merges keeps the innermost tag, so the origin is exact
 /// through nested collecting merges.  Geometry drawn as instances is picked per instance
 /// (`Cook::pick`), and hits compare by the ray parameter, so any scale is exact.
-pub fn pick(view: Option<&str>, alt: bool, value: &mut t, origin: vec3::T, direction: vec3::T) {
+pub fn pick(view: Option<&str>, alt: bool, value: &mut EditorModel, origin: vec3::T, direction: vec3::T) {
     // the focused viewport's own scene instance, when it has objects of its own
     let view = view_of(view, &*value);
     let placed = placed_pieces(false, Some(&view), &*value);
@@ -348,7 +348,7 @@ pub fn pick(view: Option<&str>, alt: bool, value: &mut t, origin: vec3::T, direc
             // geometry of another graph (a viewport over another scene instance draws its own
             // objects): the pane shows that graph, the node is selected there once it does
             let root = o.site[0].clone();
-            let laid_graph = |v: &t| pane_laid(v).map(|k| k.graph.clone()).unwrap_or_else(|| root.clone());
+            let laid_graph = |v: &EditorModel| pane_laid(v).map(|k| k.graph.clone()).unwrap_or_else(|| root.clone());
             let scope = if root == laid_graph(value) {
                 scope
             } else {
@@ -389,7 +389,7 @@ pub fn pick(view: Option<&str>, alt: bool, value: &mut t, origin: vec3::T, direc
 /// settings, probes and the selection (all keyed by path) stay.  A refused text changes nothing but
 /// the pane: it shows the file's text with the diagnostics, and the status says the last good
 /// document is kept.
-pub fn reload(imports: Option<&[(String, String)]>, value: &mut t, name: &str, text: &str) -> Result<(), Vec<Diagnostic>> {
+pub fn reload(imports: Option<&[(String, String)]>, value: &mut EditorModel, name: &str, text: &str) -> Result<(), Vec<Diagnostic>> {
     let doc = document_edit::text_edit(imports, Some(&value.factories), &value.doc, text)?;
     install(value, doc, &format!("Reload {name}"), Merge::Step);
     cook::reset_state(true, &value.cook);
@@ -410,7 +410,7 @@ pub fn reload(imports: Option<&[(String, String)]>, value: &mut t, name: &str, t
     Ok(())
 }
 
-pub fn reload_failed(value: &mut t, name: &str, text: &str, diagnostics: &[Diagnostic]) {
+pub fn reload_failed(value: &mut EditorModel, name: &str, text: &str, diagnostics: &[Diagnostic]) {
     let first = match diagnostics.first() {
         None => String::new(),
         Some(d) => match text_pane::line_of(text, d) {
@@ -431,7 +431,7 @@ pub fn reload_failed(value: &mut t, name: &str, text: &str, diagnostics: &[Diagn
 /// The carry's hovered viewport has been looked at by the host: the surface under the pointer (the
 /// object it belongs to and the material graph its primitive reads) is where a material goes, and
 /// the scene where a SOP graph does.  `view` is the viewport's own scene instance.
-pub fn carry_over_surface(view: Option<&str>, value: &mut t, origin: vec3::T, direction: vec3::T) {
+pub fn carry_over_surface(view: Option<&str>, value: &mut EditorModel, origin: vec3::T, direction: vec3::T) {
     let Some(c) = value.carry.clone() else { return };
     let Some(report) = c.report.clone() else { return };
     if !matches!(report.over, Place::Viewport(_)) || !(c.payload.kind == "material" || c.payload.kind == "sop") {
@@ -455,13 +455,13 @@ pub fn carry_over_surface(view: Option<&str>, value: &mut t, origin: vec3::T, di
 }
 
 /// A pointer carry is over a viewport: the host should look through the viewport's camera.
-pub fn carry_viewport(value: &t) -> Option<String> {
+pub fn carry_viewport(value: &EditorModel) -> Option<String> {
     match &value.carry {
         Some(carry { report: Some(carry_report { over: Place::Viewport(key), .. }), payload, .. }) if payload.kind == "material" || payload.kind == "sop" => Some(key.clone()),
         _ => None,
     }
 }
 
-pub fn carrying(value: &t) -> bool {
+pub fn carrying(value: &EditorModel) -> bool {
     value.carry.is_some()
 }

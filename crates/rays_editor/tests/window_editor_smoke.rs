@@ -6,8 +6,8 @@
 mod common;
 
 use rays::frame;
-use rays_editor::Editor;
-use rays_editor::Workspace;
+use rays_editor::editor;
+use rays_editor::workspace;
 
 /// A scene workspace: a sop graph (a tube), a material, a scene with camera and light, the default
 /// editor layout. sketches/ws_layout.rays without the scatter that hangs the lowering (see the plan).
@@ -35,12 +35,12 @@ fn frame_at(tick: i64) -> frame::Frame {
     }
 }
 
-fn open_text(text: &str, imports: Vec<(String, String)>) -> Editor::t {
-    let workspace = Workspace::load(None, imports, None, text).unwrap_or_else(|d| panic!("workspace did not check: {d:?}"));
-    Editor::create(Editor::Create { await_: Some(true), ui_text_size: Some(11), domains: Some(1), ..Default::default() }, &workspace, None, Editor::prepare_fn(), Editor::draw_fn()).expect("the editor opens")
+fn open_text(text: &str, imports: Vec<(String, String)>) -> editor::Editor {
+    let workspace = workspace::load(None, imports, None, text).unwrap_or_else(|d| panic!("workspace did not check: {d:?}"));
+    editor::create(editor::Create { await_: Some(true), ui_text_size: Some(11), domains: Some(1), ..Default::default() }, &workspace, None, editor::prepare_fn(), editor::draw_fn()).expect("the editor opens")
 }
 
-fn open_sketch(name: &str) -> Editor::t {
+fn open_sketch(name: &str) -> editor::Editor {
     let path = format!("{}/../../sketches/{name}", env!("CARGO_MANIFEST_DIR"));
     let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
     let imports = rays_editor::Source::read_imports(&path, &text).unwrap_or_else(|d| panic!("{d:?}"));
@@ -48,26 +48,26 @@ fn open_sketch(name: &str) -> Editor::t {
 }
 
 /// Frames, the scene of each, the frame boundary; returns the last scene's length.
-fn run_frames(mut editor: Editor::t, frames: i64) -> (Editor::t, usize) {
+fn run_frames(mut editor: editor::Editor, frames: i64) -> (editor::Editor, usize) {
     let mut last = 0;
     for tick in 1..=frames {
         let at = frame_at(tick);
-        editor = Editor::update(editor, &at);
-        last = Editor::scene(&editor, &at).len();
-        editor = Editor::after_present(editor, &at);
+        editor = editor::update(editor, &at);
+        last = editor::scene(&editor, &at).len();
+        editor = editor::after_present(editor, &at);
     }
     (editor, last)
 }
 
-fn check(name: &str, editor: Editor::t, scene_len: usize) {
+fn check(name: &str, editor: editor::Editor, scene_len: usize) {
     assert!(scene_len > 0, "{name}: the frame is empty");
     assert!(editor.core.edit_error.is_none(), "{name}: edit error {:?}", editor.core.edit_error);
     assert!(editor.core.cook.error.is_none(), "{name}: cook error {:?}", editor.core.cook.error);
     assert!(editor.memory_error.is_none(), "{name}: memory error {:?}", editor.memory_error);
     assert!(editor.context_error.is_none(), "{name}: context error {:?}", editor.context_error);
-    let status = Editor::Private::status_text(&editor);
+    let status = editor::private::status_text(&editor);
     assert!(!status.contains("rejected"), "{name}: status says {status}");
-    Editor::close(&editor);
+    editor::close(&editor);
 }
 
 fn smoke_basic() {
@@ -84,8 +84,8 @@ fn smoke_studio() {
     }
     let (editor, len) = run_frames(open_text(STUDIO, Vec::new()), 6);
     // the cook ran (await): the tube is a piece, and the scene document has the three objects
-    assert!(Editor::prepared(&editor).is_some(), "studio: nothing cooked");
-    assert!(!Editor::objects(&editor).is_empty(), "studio: no placed object");
+    assert!(editor::prepared(&editor).is_some(), "studio: nothing cooked");
+    assert!(!editor::objects(&editor).is_empty(), "studio: no placed object");
     check("studio", editor, len);
 }
 
@@ -105,15 +105,15 @@ fn api_accessors() {
         return;
     }
     let (editor, _) = run_frames(open_sketch("basic.rays"), 2);
-    assert!(!Editor::can_undo(&editor) && !Editor::can_redo(&editor));
-    assert_eq!(Editor::undo_label(&editor), None);
-    assert_eq!(Editor::workspace(&editor).checked.name, "basic");
-    assert!(Editor::carrying(&editor).is_none());
-    assert!(!Editor::flying(&editor) && !Editor::look_through(&editor));
-    let panes = Editor::panes(&editor, &frame_at(3));
+    assert!(!editor::can_undo(&editor) && !editor::can_redo(&editor));
+    assert_eq!(editor::undo_label(&editor), None);
+    assert_eq!(editor::workspace(&editor).checked.name, "basic");
+    assert!(editor::carrying(&editor).is_none());
+    assert!(!editor::flying(&editor) && !editor::look_through(&editor));
+    let panes = editor::panes(&editor, &frame_at(3));
     // basic.rays has a canvas and no viewport: its view pane is empty, the status strip is not
     assert!(panes.status.2 > 0 && panes.status.3 > 0, "the status strip has a size: {:?}", panes.status);
-    Editor::close(&editor);
+    editor::close(&editor);
 }
 
 fn main() {

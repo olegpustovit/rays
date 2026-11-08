@@ -28,7 +28,7 @@ use crate::timeline;
 
 const TEXT: &str = "(workspace w (graph g :context sop (sop/box)))";
 
-fn model() -> t {
+fn model() -> EditorModel {
     let catalog = editor_document::kinds::catalog(flow_sop::manifest::VERSION, &sop::nodes::factories()).expect("catalog");
     let ws = workspace_doc::of_text(&TextOptions::default(), &catalog, TEXT).expect("workspace");
     let opts = create_opts {
@@ -95,7 +95,7 @@ fn actions_routing_and_labels() {
     });
 }
 
-fn editor_host_close(value: &t) {
+fn editor_host_close(value: &EditorModel) {
     crate::editor_host::close(value);
 }
 
@@ -250,7 +250,7 @@ fn frame_helpers() {
 }
 
 /// `Ui.input` needs a completed PXUI frame: an empty one stands for the panes.
-fn prime(value: &t, frame: &frame::Frame) {
+fn prime(value: &EditorModel, frame: &frame::Frame) {
     value.ui.borrow_mut().frame(frame, &mut |_| {});
 }
 

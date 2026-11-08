@@ -6,7 +6,7 @@ use editor_document::workspace_doc as Doc;
 use flow_graph::flow_edit as F;
 use flow_syntax::syntax as S;
 use input::{Event, Key};
-use rays_editor::{Editor, Measure};
+use rays_editor::{editor, measure};
 
 const TEXT: &str = "\n(workspace memory\n  (graph picture :context draw\n    (let* [a 1.0]\n      (draw/background \"#14161c\"))))\n";
 
@@ -16,20 +16,20 @@ pub fn history() {
     }
     let workspace = of_text(None, TEXT);
     let presets = temp_dir("history-memory");
-    let o = Editor::Create { ui_text_size: Some(11), platform: Some(input::Platform::Apple), presets: Some(presets.clone()), await_: Some(true), domains: Some(1), ..Default::default() };
-    let ed = Editor::create(o, &workspace, None, Editor::prepare_fn(), Editor::draw_fn()).unwrap();
+    let o = editor::Create { ui_text_size: Some(11), platform: Some(input::Platform::Apple), presets: Some(presets.clone()), await_: Some(true), domains: Some(1), ..Default::default() };
+    let ed = editor::create(o, &workspace, None, editor::prepare_fn(), editor::draw_fn()).unwrap();
     let mut d = Driver::new(ed);
     let off = (-100., -100.);
     type Dump = (String, Vec<(i64, String, String)>, Vec<(i64, String)>);
     let dump = |d: &Driver| -> Dump {
-        let plan = Editor::Private::image_plan(d.e());
-        (Doc::to_text(&Editor::workspace(d.e())).unwrap(), Editor::document(d.e()).iter().map(|n| (n.id, n.label.clone(), n.kind.clone())).collect(), plan.nodes.iter().map(|n| (n.id, n.kind.clone())).collect())
+        let plan = editor::private::image_plan(d.e());
+        (Doc::to_text(&editor::workspace(d.e())).unwrap(), editor::document(d.e()).iter().map(|n| (n.id, n.label.clone(), n.kind.clone())).collect(), plan.nodes.iter().map(|n| (n.id, n.kind.clone())).collect())
     };
     let undo = |d: &mut Driver| d.bk(&[], &[Key::Meta], off, vec![Event::Key_pressed(Key::KeyChar('z'))]);
     let edit = |d: &mut Driver, n: i64| {
         let op = F::Op::AddNode { scope: vec!["picture".into()], name: format!("added_{n}"), expr: S::make(S::Draft::Num(format!("{:?}", n as f64))) };
         let e = d.ed.take().unwrap();
-        d.ed = Some(Editor::edit(e, &op).unwrap_or_else(|m| panic!("{m}")));
+        d.ed = Some(editor::edit(e, &op).unwrap_or_else(|m| panic!("{m}")));
         d.step_at(off, vec![]);
     };
     d.step_at(off, vec![]);
@@ -44,7 +44,7 @@ pub fn history() {
     assert!(dump(&d) == after_one, "undo past the kept one lowers to the same document");
     undo(&mut d);
     assert!(dump(&d) == start, "undo all the way back gives the first document");
-    assert!(!Editor::can_undo(d.e()), "nothing left to undo");
+    assert!(!editor::can_undo(d.e()), "nothing left to undo");
     d.bk(&[], &[Key::Meta, Key::Shift], off, vec![Event::Key_pressed(Key::KeyChar('z'))]);
     assert!(dump(&d) == after_one, "redo lowers the entry again");
     d.close();
@@ -59,16 +59,16 @@ pub fn budget() {
         return;
     }
     let workspace = of_text(None, BUDGET);
-    let measure = |frames: i64, step: &dyn Fn(i64, Editor::t) -> Editor::t| Measure::run(Measure::MeasureOptions { width: 64, height: 64, device: false }, step, 1, frames, &workspace).unwrap_or_else(|m| panic!("test_budget: {m}"));
+    let measure = |frames: i64, step: &dyn Fn(i64, editor::Editor) -> editor::Editor| measure::run(measure::MeasureOptions { width: 64, height: 64, device: false }, step, 1, frames, &workspace).unwrap_or_else(|m| panic!("test_budget: {m}"));
     let had_frame = std::cell::Cell::new(false);
     let over = measure(50, &|tick, editor| {
         if std::env::var("T4_TRACE").is_ok() { eprintln!("[budget tick {tick}]"); }
         if tick == 5 {
-            assert!(Editor::prepared(&editor).is_some(), "a first good frame");
+            assert!(editor::prepared(&editor).is_some(), "a first good frame");
             mem::set_budget(1);
         }
         if tick == 50 {
-            had_frame.set(Editor::prepared(&editor).is_some());
+            had_frame.set(editor::prepared(&editor).is_some());
         }
         editor
     });

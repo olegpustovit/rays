@@ -60,7 +60,7 @@ fn basename(path: &str) -> String {
     path.rsplit(['/', '\\']).next().unwrap_or(path).to_string()
 }
 /// A row of the Navigator opens its graph in the graph panel, selecting a node there.
-pub fn outline_step(created: &Option<String>, result: &frame_result, v: &mut t) -> Option<(String, Option<Path>)> {
+pub fn outline_step(created: &Option<String>, result: &frame_result, v: &mut EditorModel) -> Option<(String, Option<Path>)> {
     let mut outlined: Option<(String, Option<Path>)> = result.outline_intents.iter().find_map(|i| match i {
         crate::navigator::Intent::Open { graph, node } => Some((graph.clone(), node.clone())),
         _ => None,
@@ -99,7 +99,7 @@ pub fn outline_step(created: &Option<String>, result: &frame_result, v: &mut t) 
 
 /// Entering and leaving levels: the graph a reference follows, the level i / u / list activation
 /// open.
-pub fn level_target(followed: Option<String>, has_route: bool, value2: &t, level: Level, doc: &Document, selection: &selection::t, actions: &[action], result: &frame_result) -> (Option<String>, Option<Level>) {
+pub fn level_target(followed: Option<String>, has_route: bool, value2: &EditorModel, level: Level, doc: &Document, selection: &selection::Selection, actions: &[action], result: &frame_result) -> (Option<String>, Option<Level>) {
     let top = actions.iter().find(|a| matches!(a, action::Enter | action::Up | action::Go_world));
     let target = if followed.is_some() {
         None
@@ -164,7 +164,7 @@ pub fn gesture_key<'a>(value: impl Into<ModelView<'a>>, frame_: &frame::Frame, l
 }
 
 /// The graph pane's layout gestures: moving, collapsing, levels, frames, probes.
-pub fn layout_gestures(value: &t, loaded: bool, added: &[Path], next: Document, result: frame_result, scope_changes: &[scope::Change]) -> (Document, frame_result, PathMap<i64>) {
+pub fn layout_gestures(value: &EditorModel, loaded: bool, added: &[Path], next: Document, result: frame_result, scope_changes: &[scope::Change]) -> (Document, frame_result, PathMap<i64>) {
     let mut next = next;
     let mut result = result;
     let mut probes = value.probes.clone();
@@ -248,7 +248,7 @@ pub fn layout_gestures(value: &t, loaded: bool, added: &[Path], next: Document, 
 
 /// The scene and World edits act on derived objects: each difference is written to the text (a
 /// refused one changes nothing).
-pub fn reconciled(value: &t, before: &Document, next: Document, result: frame_result) -> (Document, frame_result) {
+pub fn reconciled(value: &EditorModel, before: &Document, next: Document, result: frame_result) -> (Document, frame_result) {
     let mut result = result;
     match document_edit::reconcile(Some(&value.factories), None, before, &next) {
         Ok(doc) => (doc, result),
@@ -277,7 +277,7 @@ fn first_note(g: &mut gesture_log, note: Option<String>) {
 
 /// Bind what is written in place (the call holding it, then the expression), then the gesture on
 /// its name. `apply` gives the document and the label.
-fn inline_gesture(value: &t, next: &Document, home: &Home, key: &ArgKey, apply: &dyn Fn(&Document, &Path) -> Result<(Document, String), String>) -> Result<(Document, String), String> {
+fn inline_gesture(value: &EditorModel, next: &Document, home: &Home, key: &ArgKey, apply: &dyn Fn(&Document, &Path) -> Result<(Document, String), String>) -> Result<(Document, String), String> {
     let (doc, node) = sync::bind_home(Some(&value.factories), next, home)?;
     let doc = document_edit::syntax_edit(Some(&value.factories), &doc, &Op::Unfold { node: node.clone(), key: key.clone(), sub: Vec::new() })?;
     match fe::arg_text(&doc.workspace.ws.source, &node, key) {
@@ -553,7 +553,7 @@ pub fn write_gestures<'a>(value: impl Into<ModelView<'a>>, loaded: bool, present
 }
 
 /// The prompt a frame leaves open, the notice, and a preset it loaded.
-pub fn prompt_step(value: &t, view_state: &dyn Fn(Option<&Panel_result>) -> Syntax, result: &frame_result) -> (Option<prompt>, Option<(notice_kind, String)>, Option<preset::Loaded>) {
+pub fn prompt_step(value: &EditorModel, view_state: &dyn Fn(Option<&Panel_result>) -> Syntax, result: &frame_result) -> (Option<prompt>, Option<(notice_kind, String)>, Option<preset::Loaded>) {
     let load = |intent: &prompt_intent| -> (Option<prompt>, Option<(notice_kind, String)>, Option<preset::Loaded>) {
         let last = matches!(intent, prompt_intent::Load_last_state);
         let (path, restored) = match intent {
@@ -628,7 +628,7 @@ pub fn prompt_step(value: &t, view_state: &dyn Fn(Option<&Panel_result>) -> Synt
 
 /// A payload in flight: what the panes saw under the pointer becomes the carry's report, and
 /// nothing else edits the document until the put (navigation and selection only).
-pub fn carry_report_of(value: &t, carrying: bool, text: &text_pane::State, text_shown: Option<&text_pane::Shown>, result: &frame_result) -> Option<carry_report> {
+pub fn carry_report_of(value: &EditorModel, carrying: bool, text: &text_pane::State, text_shown: Option<&text_pane::Shown>, result: &frame_result) -> Option<carry_report> {
     if !carrying {
         return None;
     }
@@ -681,7 +681,7 @@ pub fn carry_report_of(value: &t, carrying: bool, text: &text_pane::State, text_
 }
 
 /// `[y]`: the payload is held by the handle (no pointer capture); a press or Enter puts it.
-pub fn pick_up(value2: &t, actions: &[action], frame_: &frame::Frame, report: Option<carry_report>) -> (Option<carry>, Option<String>) {
+pub fn pick_up(value2: &EditorModel, actions: &[action], frame_: &frame::Frame, report: Option<carry_report>) -> (Option<carry>, Option<String>) {
     match &value2.carry {
         Some(c) => (Some(carry { report, ..c.clone() }), None),
         None if actions.contains(&action::Pick_up) => match carry_payload(value2) {
@@ -711,7 +711,7 @@ pub fn pick_up(value2: &t, actions: &[action], frame_: &frame::Frame, report: Op
 }
 
 /// What the camera is asked to frame: the object a `F` in a graph names, or every cooked object.
-pub fn framing_step(value2: &t, doc: &Document, cooked: &cook::update_result, frame_request: Option<(i64, i64)>, actions: &[action], frame_: &frame::Frame, result: &frame_result) -> (Option<i64>, Option<Option<bounds>>) {
+pub fn framing_step(value2: &EditorModel, doc: &Document, cooked: &cook::update_result, frame_request: Option<(i64, i64)>, actions: &[action], frame_: &frame::Frame, result: &frame_result) -> (Option<i64>, Option<Option<bounds>>) {
     // Framing: local bounds move into the world with their object; at the scene level [F] frames
     // every cooked object.
     let world_bounds = |id: i64, b: &bounds| cook::transformed(&objects::world(&doc.scene, id), b);
@@ -753,7 +753,7 @@ pub fn framing_step(value2: &t, doc: &Document, cooked: &cook::update_result, fr
 
 /// The graph panel's own projection: list and text views are panels of their own now (`/ l`
 /// retypes), so opening a graph is the only thing that changes it.
-pub fn projections_of(outlined: &Option<(String, Option<Path>)>, actions: &[action], result: &frame_result, value2: &t) -> Level_map {
+pub fn projections_of(outlined: &Option<(String, Option<Path>)>, actions: &[action], result: &frame_result, value2: &EditorModel) -> Level_map {
     let level = pane_level(value2);
     let views = pane_views(value2).clone();
     if result.open_graph.is_some() || outlined.is_some() {
@@ -778,7 +778,7 @@ pub fn projections_of(outlined: &Option<(String, Option<Path>)>, actions: &[acti
 }
 
 /// Command-Z / Shift-Command-Z: the history step, its notice and the document it leaves.
-pub fn undo_step(value: &t, carrying: bool, actions: &[action], notice: Option<(notice_kind, String)>, h: history::t) -> (history::t, Arc<Document>, bool, Option<(notice_kind, String)>) {
+pub fn undo_step(value: &EditorModel, carrying: bool, actions: &[action], notice: Option<(notice_kind, String)>, h: history::EditorHistory) -> (history::EditorHistory, Arc<Document>, bool, Option<(notice_kind, String)>) {
     // an entry holds no lowering: stepping there lowers its text again, unless it is the last present
     let current = history::present_arc(&h);
     let factories = value.factories.clone();
@@ -822,7 +822,7 @@ pub fn undo_step(value: &t, carrying: bool, actions: &[action], notice: Option<(
 }
 
 /// The pointer and keys of the sketch go to the pane in focus, else the first viewer.
-pub fn view_input(value: &t, result: &frame_result) -> frame::Frame {
+pub fn view_input(value: &EditorModel, result: &frame_result) -> frame::Frame {
     let is_view = |p: &Panel| matches!(p, Panel::View(_));
     let owner = match result.pane_keys.iter().find(|(_, (panel, _))| *panel == result.focus && is_view(panel)) {
         Some((key, _)) => Some(*key),
@@ -831,7 +831,7 @@ pub fn view_input(value: &t, result: &frame_result) -> frame::Frame {
     value.ui.borrow().input(owner)
 }
 
-pub fn timeline_step(value: &t, timeline: timeline::t, timeline_changes: Vec<timeline::Change>, result: &frame_result) -> (timeline::t, Vec<timeline::Change>, i64) {
+pub fn timeline_step(value: &EditorModel, timeline: timeline::Timeline, timeline_changes: Vec<timeline::Change>, result: &frame_result) -> (timeline::Timeline, Vec<timeline::Change>, i64) {
     let mut timeline = timeline;
     let mut changes = timeline_changes;
     for intent in &result.timeline_intents {
@@ -872,7 +872,7 @@ pub struct Frame_input {
     pub steady: i64,
     pub status_fps: Option<i64>,
     pub status_fps_at: f64,
-    pub timeline: timeline::t,
+    pub timeline: timeline::Timeline,
     pub timeline_changes: Vec<timeline::Change>,
     pub graph_shown: bool,
     pub text: text_pane::State,
@@ -889,7 +889,7 @@ fn same_pieces(a: &[cook::piece], b: &[cook::piece]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(x, y)| Rc::ptr_eq(&x.bounds, &y.bounds))
 }
 
-pub fn reduce(gpu: Option<&flow_ir::flow_ir::Gpu::Config>, pump: Option<&dyn Fn()>, input: Frame_input, owned: &mut t, result: frame_result) -> update {
+pub fn reduce(gpu: Option<&flow_ir::flow_ir::Gpu::Config>, pump: Option<&dyn Fn()>, input: Frame_input, owned: &mut EditorModel, result: frame_result) -> update {
     let value = &*owned;
     let _timer = flow_syntax::phase_timer::measure("reduce");
     let Frame_input {
@@ -1436,7 +1436,7 @@ fn network_present<'a>(value: impl Into<ModelView<'a>>) -> bool {
 /// One reduction with no panes built, for tests of the reducer: the keys are `actions`, the list's
 /// selection is `select`, and `preview` puts a payload in flight whose hot target shows that edit
 /// on a scratch document (as `carry_step` leaves the model while a target is hot).
-pub fn reduce_idle(select: Option<&[i64]>, preview: Option<&Op>, value: &t, actions: &[action], frame_: &frame::Frame) -> Result<t, String> {
+pub fn reduce_idle(select: Option<&[i64]>, preview: Option<&Op>, value: &EditorModel, actions: &[action], frame_: &frame::Frame) -> Result<EditorModel, String> {
     let mut value = value.clone();
     value.live_frame = flow_native::live_frame::of_frame(frame_);
     if let Some(op) = preview {
@@ -1469,7 +1469,7 @@ pub fn reduce_idle(select: Option<&[i64]>, preview: Option<&Op>, value: &t, acti
 }
 
 /// The frame result of a frame in which no pane asked for anything.
-pub fn idle_result<'a>(value: impl Into<ModelView<'a>>, selection: selection::t) -> frame_result {
+pub fn idle_result<'a>(value: impl Into<ModelView<'a>>, selection: selection::Selection) -> frame_result {
     let value = &value.into();
     frame_result {
         workspace: value.workspace.clone(),

@@ -346,7 +346,7 @@ pub fn catalog() -> Catalog {
 }
 
 pub fn checked(text: &str) -> Workspace {
-    match rays_editor::Workspace::load(None, Vec::new(), None, text) {
+    match rays_editor::workspace::load(None, Vec::new(), None, text) {
         Ok(doc) => (*doc.checked).clone(),
         Err(ds) => panic!("{}", ds.iter().map(rays_diagnostic::to_string).collect::<Vec<_>>().join("; ")),
     }

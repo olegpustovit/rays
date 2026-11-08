@@ -86,9 +86,9 @@ pub struct drawn_entry {
 pub type Drawn = BTreeMap<i64, drawn_entry>;
 
 #[derive(Clone)]
-pub struct t {
+pub struct LoopModel {
     /// Shared only by explicit Editor snapshots; the native loop mutates its unique core.
-    pub core: Rc<m::t>,
+    pub core: Rc<m::EditorModel>,
     pub rest: Option<rest>,
     /// the orbit of the focused viewport
     pub camera: V::camera,
@@ -125,7 +125,7 @@ pub struct t {
     /// a left press in the view that may become a click
     pub pick_press: Option<(f64, f64)>,
     /// the .rays the document came from: polled, saved over
-    pub source: Option<source_file::t>,
+    pub source: Option<source_file::SourceFile>,
     /// the file's changed text, waiting while the document has unsaved work
     pub held: Option<String>,
     /// Command-O's system dialog, until it answers
@@ -201,7 +201,7 @@ fn real_path(file: &str) -> String {
     }
 }
 
-pub fn create(o: create_options, workspace: &workspace_doc::T, source: Option<source_file::t>, prepare: cook::Prepare_fn, draw: Draw_fn) -> Result<t, String> {
+pub fn create(o: create_options, workspace: &workspace_doc::T, source: Option<source_file::SourceFile>, prepare: cook::Prepare_fn, draw: Draw_fn) -> Result<LoopModel, String> {
     let mut workspace = workspace.clone();
     if let Some(inputs) = o.inputs {
         workspace.inputs = std::sync::Arc::new((*inputs).clone());
@@ -254,7 +254,7 @@ pub fn create(o: create_options, workspace: &workspace_doc::T, source: Option<so
             let saved_view = V::section(&camera, &extra);
             let opened = document::text(&core.doc);
             let saved_doc = std::sync::Arc::downgrade(&core.doc);
-            Ok(t {
+            Ok(LoopModel {
                 core: Rc::new(core),
                 rest: None,
                 camera,
@@ -301,102 +301,102 @@ pub fn create(o: create_options, workspace: &workspace_doc::T, source: Option<so
 
 // ---- accessors ----
 
-pub fn document(value: &t) -> kg::T {
+pub fn document(value: &LoopModel) -> kg::T {
     editor_inspect::objects(&value.core)
 }
 
-pub fn network(value: &t) -> Option<sop::edit_graph::T> {
+pub fn network(value: &LoopModel) -> Option<sop::edit_graph::T> {
     editor_inspect::network(&value.core).map(|n| n.graph.geometry.clone())
 }
 
-pub fn prepared(value: &t) -> Option<rdk_core::geometry::T> {
+pub fn prepared(value: &LoopModel) -> Option<rdk_core::geometry::T> {
     editor_list::prepared(&value.core).map(|p| p.geometry.clone())
 }
 
-pub fn camera(value: &t) -> V::camera {
+pub fn camera(value: &LoopModel) -> V::camera {
     value.camera.clone()
 }
-pub fn extra(value: &t) -> V::extra {
+pub fn extra(value: &LoopModel) -> V::extra {
     value.extra.clone()
 }
-pub fn timeline(value: &t) -> timeline::t {
+pub fn timeline(value: &LoopModel) -> timeline::Timeline {
     editor_list::timeline(&value.core)
 }
-pub fn selected_node(value: &t) -> Option<picked> {
+pub fn selected_node(value: &LoopModel) -> Option<picked> {
     editor_list::selected_node(&value.core)
 }
-pub fn displayed_node(value: &t) -> node::T {
+pub fn displayed_node(value: &LoopModel) -> node::T {
     editor_list::displayed_node(&value.core)
 }
-pub fn panes(value: &t, frame_: &frame::Frame) -> pxui_shell::layout::Panes {
+pub fn panes(value: &LoopModel, frame_: &frame::Frame) -> pxui_shell::layout::Panes {
     editor_shell::panes(&value.core, frame_)
 }
-pub fn can_undo(value: &t) -> bool {
+pub fn can_undo(value: &LoopModel) -> bool {
     crate::editor_history::can_undo(&value.core.history)
 }
-pub fn can_redo(value: &t) -> bool {
+pub fn can_redo(value: &LoopModel) -> bool {
     crate::editor_history::can_redo(&value.core.history)
 }
-pub fn undo_label(value: &t) -> Option<String> {
+pub fn undo_label(value: &LoopModel) -> Option<String> {
     if can_undo(value) { Some(crate::editor_history::label(&value.core.history).to_string()) } else { None }
 }
-pub fn redo_label(value: &t) -> Option<String> {
+pub fn redo_label(value: &LoopModel) -> Option<String> {
     crate::editor_history::redo_label(&value.core.history).map(|s| s.to_string())
 }
-pub fn workspace(value: &t) -> workspace_doc::T {
+pub fn workspace(value: &LoopModel) -> workspace_doc::T {
     value.core.doc.workspace.ws.clone()
 }
-pub fn probe(value: &t, zone: &[String]) -> Option<i64> {
+pub fn probe(value: &LoopModel, zone: &[String]) -> Option<i64> {
     value.core.probes.get(zone).copied()
 }
 
 /// The model with a replaced core: what a test or tool does outside a frame. Drops `rest`.
-pub fn with_core(value: t, core: m::t) -> t {
-    t { core: Rc::new(core), rest: None, ..value }
+pub fn with_core(value: LoopModel, core: m::EditorModel) -> LoopModel {
+    LoopModel { core: Rc::new(core), rest: None, ..value }
 }
 
-pub fn set_probe(value: t, zone: &[String], index: i64) -> t {
+pub fn set_probe(value: LoopModel, zone: &[String], index: i64) -> LoopModel {
     let mut core = (*value.core).clone();
     core.probes.insert(zone.to_vec(), index);
     with_core(value, core)
 }
 
-pub fn node_box(value: &t, path: &[String]) -> Option<(i64, i64, i64, i64)> {
+pub fn node_box(value: &LoopModel, path: &[String]) -> Option<(i64, i64, i64, i64)> {
     pxui_graph::scope_frame::inspect::box_of(m::pane_view(&value.core), path).map(|(x, y, w, h)| (x as i64, y as i64, w as i64, h as i64))
 }
 
-pub fn edit(mut value: t, op: &fe::Op) -> Result<t, String> {
+pub fn edit(mut value: LoopModel, op: &fe::Op) -> Result<LoopModel, String> {
     editor_host::syntax_edit(Rc::make_mut(&mut value.core), op)?;
     value.rest = None;
     Ok(value)
 }
 
-pub fn edit_layout(mut value: t, op: &layout_edit::Op) -> Result<t, String> {
+pub fn edit_layout(mut value: LoopModel, op: &layout_edit::Op) -> Result<LoopModel, String> {
     editor_host::layout_edit_op(Rc::make_mut(&mut value.core), op)?;
     value.rest = None;
     Ok(value)
 }
 
-pub fn edit_phases(value: &t) -> PhaseTimer {
+pub fn edit_phases(value: &LoopModel) -> PhaseTimer {
     value.core.edit_phases.clone()
 }
 
-pub fn carrying(value: &t) -> Option<(String, String)> {
+pub fn carrying(value: &LoopModel) -> Option<(String, String)> {
     value.core.carry.as_ref().map(|c| (c.payload.kind.clone(), c.payload.value.clone()))
 }
 
-pub fn carry_line(value: &t) -> Option<String> {
+pub fn carry_line(value: &LoopModel) -> Option<String> {
     value.core.carry.as_ref().map(editor_status::carry_line)
 }
 
-pub fn level(value: &t) -> Option<String> {
+pub fn level(value: &LoopModel) -> Option<String> {
     match m::pane_level(&value.core) {
         Level::Scene => None,
         Level::Inside(id) => Some(kg::find(&editor_inspect::scene(&value.core), id).map(|n| n.label).unwrap_or_default()),
     }
 }
 
-pub fn scene_document(value: &t) -> kg::T {
+pub fn scene_document(value: &LoopModel) -> kg::T {
     editor_inspect::scene(&value.core)
 }
 
@@ -404,30 +404,30 @@ pub fn same_context(a: &Document, b: &Document) -> bool {
     std::ptr::eq(a, b) || (kg::same(&a.scene, &b.scene) && a.scene_drives == b.scene_drives && a.scene_textures == b.scene_textures)
 }
 
-pub fn resolved_scene(value: &t) -> kg::T {
+pub fn resolved_scene(value: &LoopModel) -> kg::T {
     match &value.resolved {
         Some((doc, _, scene, _)) if same_context(doc, &value.core.doc) => scene.clone(),
         _ => editor_inspect::scene(&value.core),
     }
 }
 
-pub fn lights(value: &t) -> Vec<light::Light> {
+pub fn lights(value: &LoopModel) -> Vec<light::Light> {
     objects::lights(true, &resolved_scene(value))
 }
 
-pub fn world(value: &t) -> Option<world::baked> {
+pub fn world(value: &LoopModel) -> Option<world::baked> {
     value.baked.as_ref().map(|b| (**b).clone())
 }
 
-pub fn objects_placed(value: &t) -> Vec<(mat4::T, cook::Prepared_ref)> {
+pub fn objects_placed(value: &LoopModel) -> Vec<(mat4::T, cook::Prepared_ref)> {
     editor_host::placed_pieces(true, None, &value.core).into_iter().map(|(matrix, piece)| (matrix, piece.prepared)).collect()
 }
 
-pub fn settings(value: &t) -> editor_document::settings::T {
+pub fn settings(value: &LoopModel) -> editor_document::settings::T {
     editor_list::settings(&value.core)
 }
 
-pub fn set_settings(mut value: t, settings: &editor_document::settings::T) -> t {
+pub fn set_settings(mut value: LoopModel, settings: &editor_document::settings::T) -> LoopModel {
     editor_host::set_settings(Rc::make_mut(&mut value.core), settings);
     value.rest = None;
     value
@@ -438,7 +438,7 @@ pub fn focus_key_of(viewing: &Option<String>) -> String {
     viewing.clone().unwrap_or_else(|| "main".to_string())
 }
 
-pub fn focus_key(value: &t) -> String {
+pub fn focus_key(value: &LoopModel) -> String {
     focus_key_of(&value.viewing)
 }
 
@@ -447,7 +447,7 @@ pub fn look_key_of(viewing: &Option<String>, key: &str) -> String {
     if key == "@hidden" { focus_key_of(viewing) } else { key.to_string() }
 }
 
-pub fn look_key(value: &t, key: &str) -> String {
+pub fn look_key(value: &LoopModel, key: &str) -> String {
     look_key_of(&value.viewing, key)
 }
 
@@ -463,11 +463,11 @@ pub fn camera_for(viewing: &Option<String>, camera: &V::camera, cameras: &[(Stri
     V::view_camera(&orbit, extra, &key, pending)
 }
 
-pub fn camera_of(value: &t, key: &str) -> rays::camera::Camera {
+pub fn camera_of(value: &LoopModel, key: &str) -> rays::camera::Camera {
     camera_for(&value.viewing, &value.camera, &value.cameras, &value.extra, value.pending_render.is_some(), key)
 }
 
-pub fn view_camera(value: &t) -> rays::camera::Camera {
+pub fn view_camera(value: &LoopModel) -> rays::camera::Camera {
     camera_of(value, &focus_key(value))
 }
 
@@ -481,7 +481,7 @@ pub struct Focus {
 /// Focus moves to another viewport: the orbit of the one left is kept, the new one starts from the
 /// orbit it last had, else from a copy of the one in use. `core` is the model whose panels say
 /// which viewport has the focus.
-pub fn follow_focus(value: &t, core: &m::t, frame_: &frame::Frame) -> Focus {
+pub fn follow_focus(value: &LoopModel, core: &m::EditorModel, frame_: &frame::Frame) -> Focus {
     let g = editor_shell::geometry(core, &core.workspace, frame_);
     let keys: Vec<String> = g
         .leaves
@@ -528,11 +528,11 @@ pub fn follow_focus(value: &t, core: &m::t, frame_: &frame::Frame) -> Focus {
     }
 }
 
-pub fn paint_view(value: &t, key: &str, viewport: pxui_shell::layout::Bounds, view_: &rays::camera::Camera, rendered: &d3::Scene3) -> Vec<rays::scene::node> {
+pub fn paint_view(value: &LoopModel, key: &str, viewport: pxui_shell::layout::Bounds, view_: &rays::camera::Camera, rendered: &d3::Scene3) -> Vec<rays::scene::node> {
     V::paint(&value.extra, key, V::film(&value.extra, &look_key(value, key), viewport), view_, rendered)
 }
 
-pub fn viewport_camera(value: &t, key: &str) -> rays::camera::Camera {
+pub fn viewport_camera(value: &LoopModel, key: &str) -> rays::camera::Camera {
     camera_of(value, key)
 }
 
@@ -543,11 +543,11 @@ pub fn focused_image_of(viewing: &Option<String>, views: &[(String, d3::Scene3)]
     }
 }
 
-pub fn focused_image(value: &t) -> Option<d3::Scene3> {
+pub fn focused_image(value: &LoopModel) -> Option<d3::Scene3> {
     focused_image_of(&value.viewing, &value.views, &value.rendered)
 }
 
-pub fn film(value: &t, frame_: &frame::Frame) -> (i64, i64, i64, i64) {
+pub fn film(value: &LoopModel, frame_: &frame::Frame) -> (i64, i64, i64, i64) {
     let pane = editor_shell::panes(&value.core, frame_).view;
     let (x, y, _, _) = pane;
     let (fx, fy, w, h) = V::film(&value.extra, &focus_key(value), pane);
@@ -555,7 +555,7 @@ pub fn film(value: &t, frame_: &frame::Frame) -> (i64, i64, i64, i64) {
 }
 
 /// The hidden-scene cache is model state: refreshed here, read by `scene`.
-pub fn refresh_hidden(value: &mut t, frame_: &frame::Frame) {
+pub fn refresh_hidden(value: &mut LoopModel, frame_: &frame::Frame) {
     let cache = if hidden_only(V::ui_visible(&value.control), &value.core) {
         let pv = |key: &str, vp, view_: &rays::camera::Camera, r: &d3::Scene3| paint_view(&value, key, vp, view_, r);
         Some(hidden_entry(value.background, focused_image(&value).as_ref(), &view_camera(&value), &pv, value.hidden_scene_cache.as_ref(), &value.core, frame_))
@@ -583,7 +583,7 @@ pub fn display_keys(drawn: &Drawn) -> Vec<String> {
 
 /// Recompose when a cook, the scene, or the World changed. Each object's drawing is reused while
 /// its graph and prepared value are physically the same, so moving an object only re-places it.
-pub fn composition_key(core: &m::t, scene: &kg::T) -> (kg::T, Level, Vec<(String, Vec<i64>)>) {
+pub fn composition_key(core: &m::EditorModel, scene: &kg::T) -> (kg::T, Level, Vec<(String, Vec<i64>)>) {
     (scene.clone(), m::pane_level(core), core.doc.shell.as_ref().map(|s| s.views.clone()).unwrap_or_default())
 }
 
@@ -608,7 +608,7 @@ fn same_baked_views(a: &[(String, baked_pair)], b: &[(String, baked_pair)]) -> b
     a.len() == b.len() && a.iter().zip(b).all(|((k, (_, x)), (k2, (_, y)))| k == k2 && Rc::ptr_eq(x, y))
 }
 
-pub fn compose(value: &t, core: &m::t, changed: bool, baked: &Option<Rc<world::baked>>, baked_views: &[(String, baked_pair)], scene: &kg::T) -> composed_out {
+pub fn compose(value: &LoopModel, core: &m::EditorModel, changed: bool, baked: &Option<Rc<world::baked>>, baked_views: &[(String, baked_pair)], scene: &kg::T) -> composed_out {
     let draw_errors = |drawn: &Drawn, errors: &[String]| -> Vec<String> {
         let mut out: Vec<String> = errors.to_vec();
         for e in drawn.values() {
@@ -749,7 +749,7 @@ pub fn compose(value: &t, core: &m::t, changed: bool, baked: &Option<Rc<world::b
 }
 
 /// The frame that first drew a mesh has been presented: its time is the display sink's first draw.
-pub fn observe_presented(value: &mut t) {
+pub fn observe_presented(value: &mut LoopModel) {
     if let Some((began, geometries)) = &value.presenting {
         let seconds = (value.core.clock)() - began;
         let gpu = workspace_gpu::config(&value.host.borrow().gpu, editor_document::lowering::fast(&value.core.doc));

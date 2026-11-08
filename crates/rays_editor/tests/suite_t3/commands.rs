@@ -8,7 +8,7 @@ use editor_core::router;
 use flow_graph::flow_edit as fe;
 use input::{Event, Key, MouseButton, Platform};
 use rays_editor::editor_commands as l;
-use rays_editor::{Editor, Reduce};
+use rays_editor::{editor, reduce};
 
 /// The widths and heights of the images a scene draws (render_ir `Image` destinations), read from
 /// the command's Debug text: this crate does not depend on scene_command.
@@ -56,26 +56,26 @@ pub fn canvas_preview() {
     for _ in 0..3 {
         d.step(vec![]);
     }
-    let shown = |d: &Driver| -> Vec<Vec<f64>> { Editor::Private::canvas_scenes(d.e()).iter().map(|s| widths(s)).collect() };
+    let shown = |d: &Driver| -> Vec<Vec<f64>> { editor::private::canvas_scenes(d.e()).iter().map(|s| widths(s)).collect() };
     let default = shown(&d);
     assert!(!default.is_empty() && default.iter().all(|w| w == &vec![64.]), "the default picture is not the 64 point image: {default:?}");
-    d.map(|e| Reduce::select_path(e, &path(&["image", "@result"])));
+    d.map(|e| reduce::select_path(e, &path(&["image", "@result"])));
     d.step(vec![]);
-    d.map(|e| Reduce::view(e, &path(&["image", "@result"])));
+    d.map(|e| reduce::view(e, &path(&["image", "@result"])));
     d.step(vec![]);
     d.step(vec![]);
     let now = shown(&d);
     assert!(now.len() == default.len() && now.iter().all(|w| w.len() == 1 && w[0] > 64.), "v on an image node did not show exactly its fitted image in the canvas pane: {now:?}");
-    d.map(|e| Reduce::view(e, &path(&["image", "@result"])));
+    d.map(|e| reduce::view(e, &path(&["image", "@result"])));
     d.step(vec![]);
     d.step(vec![]);
     assert!(shown(&d) == default, "v again did not restore the canvas pane's own picture");
-    d.map(|e| Reduce::select_path(e, &path(&["picture", "@result#0"])));
+    d.map(|e| reduce::select_path(e, &path(&["picture", "@result#0"])));
     d.step(vec![]);
-    d.map(|e| Reduce::view(e, &path(&["picture", "@result#0"])));
+    d.map(|e| reduce::view(e, &path(&["picture", "@result#0"])));
     d.step(vec![]);
     assert!(shown(&d).iter().all(|w| w.is_empty()), "View on an inline background did not replace the canvas picture");
-    d.map(|e| Reduce::view(e, &path(&["picture", "@result#0"])));
+    d.map(|e| reduce::view(e, &path(&["picture", "@result#0"])));
     d.step(vec![]);
     assert!(shown(&d) == default, "View on the inline background again did not restore the picture");
     d.close();
@@ -96,20 +96,20 @@ pub fn canvas_frame_size() {
     for _ in 0..3 {
         d.step(vec![]);
     }
-    let sizes: Vec<(f64, f64)> = Editor::Private::canvas_scenes(d.e()).iter().flat_map(|s| image_sizes(s)).collect();
+    let sizes: Vec<(f64, f64)> = editor::private::canvas_scenes(d.e()).iter().flat_map(|s| image_sizes(s)).collect();
     assert!(matches!(sizes.as_slice(), [(w, h)] if *w > 0. && *w < 500. && *h > 0. && *h < 640.), "frame/width and frame/height in a canvas pane are not the pane's size: {sizes:?}");
     d.close();
 }
 
 /// every language form of the add menu starts as an expression that checks
 pub fn menu_forms() {
-    let forms = Editor::Private::menu_forms();
+    let forms = editor::private::menu_forms();
     for form in ["if", "cond", "case", "for", "fold", "scan", "sum", "fn", "map", "filter", "reduce", "sort-by", "list", "record", "let*", "state"] {
         assert!(forms.iter().any(|(f, _)| f == form), "the add menu has no {form}");
     }
     for (form, text) in &forms {
         let source = format!("(workspace m (graph g :context value (let* [added {text}] 0)))");
-        if let Err(ds) = rays_editor::Workspace::load(None, Vec::new(), None, &source) {
+        if let Err(ds) = rays_editor::workspace::load(None, Vec::new(), None, &source) {
             panic!("{form}: {}", ds.iter().map(rays_diagnostic::to_string).collect::<Vec<_>>().join("; "));
         }
     }
@@ -121,19 +121,19 @@ pub fn world_command() {
     (graph g :context sop (sop/box))
     (graph scene :context scene (scene/root (scene/merge (scene/geometry (ref g))))))"#,
         |editor| {
-            let editor = Editor::update(editor, &frame_at((450., 300.), vec![], 0));
-            let before = Editor::workspace(&editor);
-            let step = |editor: Editor::t, actions: &[l::action], count: i64| Reduce::step(editor, None, None, actions, &frame_at((450., 300.), vec![], count)).expect("step");
+            let editor = editor::update(editor, &frame_at((450., 300.), vec![], 0));
+            let before = editor::workspace(&editor);
+            let step = |editor: editor::Editor, actions: &[l::action], count: i64| reduce::step(editor, None, None, actions, &frame_at((450., 300.), vec![], count)).expect("step");
             let created = step(editor, &[l::action::Go_world], 1);
             let source = text_of(&created);
             assert!(
-                has(&source, "(scene/world (ref sky))") && has(&source, "(graph sky :context world") && has(&source, "(world/sun (world/sky))") && Editor::undo_label(&created) == Some("Add World".to_string()),
+                has(&source, "(scene/world (ref sky))") && has(&source, "(graph sky :context world") && has(&source, "(world/sun (world/sky))") && editor::undo_label(&created) == Some("Add World".to_string()),
                 "/ e did not write the World and its graph as one Add World entry: {source}"
             );
             let repeated = step(created.clone(), &[l::action::Go_world], 2);
-            assert!(same_ws(&Editor::workspace(&repeated), &Editor::workspace(&created)), "opening an existing World rewrote the document");
+            assert!(same_ws(&editor::workspace(&repeated), &editor::workspace(&created)), "opening an existing World rewrote the document");
             let undone = step(repeated, &[l::action::Undo], 3);
-            assert!(same_ws(&Editor::workspace(&undone), &before), "one undo did not restore the World-free document");
+            assert!(same_ws(&editor::workspace(&undone), &before), "one undo did not restore the World-free document");
         },
     );
 }
@@ -150,7 +150,7 @@ pub fn world_drag() {
     d.step_at((450., 300.), vec![]);
     d.count = 0;
     let before = d.text();
-    let (x, y, w, h) = Editor::panes(d.e(), &frame_at((450., 300.), vec![], 0)).view;
+    let (x, y, w, h) = editor::panes(d.e(), &frame_at((450., 300.), vec![], 0)).view;
     let p = ((x + w / 2) as f64, (y + h / 2) as f64);
     let at = |dx: f64| (p.0 + dx, p.1);
     let shift = [Key::Shift];
@@ -161,8 +161,8 @@ pub fn world_drag() {
     d.step_full(&left, &shift, at(40.), vec![Event::Pointer_moved(at(40.))], 1);
     d.step_full(&[], &shift, at(40.), vec![Event::Pointer_released(MouseButton::LeftButton, at(40.))], 1);
     assert!(d.text() != before, "a Shift-drag in the view did not rotate the World");
-    assert!(Editor::undo_label(d.e()) == Some("Rotate World".to_string()), "the drag's undo entry is not Rotate World: {:?}", Editor::undo_label(d.e()));
-    let undone = Reduce::step(d.e().clone(), None, None, &[l::action::Undo], &frame_at((450., 300.), vec![], d.count + 1)).expect("undo");
+    assert!(editor::undo_label(d.e()) == Some("Rotate World".to_string()), "the drag's undo entry is not Rotate World: {:?}", editor::undo_label(d.e()));
+    let undone = reduce::step(d.e().clone(), None, None, &[l::action::Undo], &frame_at((450., 300.), vec![], d.count + 1)).expect("undo");
     assert!(text_of(&undone) == before, "one undo did not undo the whole World drag");
     d.close();
 }
@@ -178,9 +178,9 @@ pub fn image_cook() {
     (graph settings :context settings (settings/config :title "k" :width 900 :height 600)))"#;
     with_editor(text, |mut e| {
         for count in 1..=2 {
-            e = Editor::update(e, &frame_at((450., 300.), vec![], count));
+            e = editor::update(e, &frame_at((450., 300.), vec![], count));
         }
-        let status = Editor::Private::status_text(&e);
+        let status = editor::private::status_text(&e);
         assert!(!has(&status, "Cook rejected") && !has(&status, "E_PAYLOAD"), "an image graph made the cook reject: {status}");
     });
 }
@@ -192,10 +192,10 @@ pub fn new_graphs() {
     (graph settings :context settings (settings/config :title "n" :width 900 :height 600)))"#;
     let contexts = ["sop", "scene", "draw", "image", "value", "material"];
     with_editor(text, |editor| {
-        let names = |e: &Editor::t| -> Vec<String> { Editor::workspace(e).checked.graphs.iter().map(|g| g.name.clone()).collect() };
-        let add = |e: Editor::t, context: &str| -> Editor::t {
-            let op = Editor::Private::new_graph(&e, context);
-            Editor::edit(e, &op).unwrap_or_else(|m| panic!("New graph {context} refused: {m}"))
+        let names = |e: &editor::Editor| -> Vec<String> { editor::workspace(e).checked.graphs.iter().map(|g| g.name.clone()).collect() };
+        let add = |e: editor::Editor, context: &str| -> editor::Editor {
+            let op = editor::private::new_graph(&e, context);
+            editor::edit(e, &op).unwrap_or_else(|m| panic!("New graph {context} refused: {m}"))
         };
         let mut e = editor;
         for c in contexts {
@@ -205,17 +205,17 @@ pub fn new_graphs() {
             assert!(names(&e).iter().any(|x| x == n), "New graph did not make {n}");
         }
         assert!(names(&add(e.clone(), "sop")).iter().any(|x| x == "sop_2"), "a second New graph sop is not named afresh");
-        let source = flow_syntax::lisp::print(&Editor::workspace(&e).source).unwrap().0;
+        let source = flow_syntax::lisp::print(&editor::workspace(&e).source).unwrap().0;
         assert!(has(&source, "(ref sop)"), "the new scene does not read the SOP graph");
         for count in 1..=3 {
-            e = Editor::update(e, &frame_at((450., 300.), vec![], count));
+            e = editor::update(e, &frame_at((450., 300.), vec![], count));
         }
-        assert!(!has(&Editor::Private::status_text(&e), "rejected"), "the new graphs do not cook: {}", Editor::Private::status_text(&e));
-        match Editor::edit(e.clone(), &fe::Op::RemoveGraph { name: "sop".into() }) {
+        assert!(!has(&editor::private::status_text(&e), "rejected"), "the new graphs do not cook: {}", editor::private::status_text(&e));
+        match editor::edit(e.clone(), &fe::Op::RemoveGraph { name: "sop".into() }) {
             Ok(_) => panic!("a read SOP graph was deleted"),
             Err(m) => assert!(has(&m, "scene"), "the refusal does not name the scene: {m}"),
         }
-        match Editor::edit(e.clone(), &fe::Op::RemoveGraph { name: "draw".into() }) {
+        match editor::edit(e.clone(), &fe::Op::RemoveGraph { name: "draw".into() }) {
             Ok(removed) => assert!(!names(&removed).iter().any(|x| x == "draw"), "an unread graph stayed"),
             Err(m) => panic!("an unread graph was refused: {m}"),
         }
@@ -416,7 +416,7 @@ pub fn guide_preference() {
     let dir = scratch_dir("rays-guide");
     let filename = format!("{dir}/preferences.rays");
     let ws = box_workspace();
-    let create = || create(Editor::Create { preferences: Some(filename.clone()), ..options() }, &ws);
+    let create = || create(editor::Create { preferences: Some(filename.clone()), ..options() }, &ws);
     let mut d = Driver::new(create());
     let enabled = || -> Option<bool> { store::bool(&store::load("rays-editor", &filename).expect("preferences"), "guide") };
     let step = |d: &mut Driver, events: Vec<Event>, count: i64| {
@@ -426,7 +426,7 @@ pub fn guide_preference() {
     step(&mut d, vec![], 0);
     step(&mut d, vec![ch('?')], 1);
     assert!(enabled() == Some(false), "guide did not default on and persist off");
-    assert!(!Editor::can_undo(d.e()), "guide preference entered document history");
+    assert!(!editor::can_undo(d.e()), "guide preference entered document history");
     d.close();
     d = Driver::new(create());
     step(&mut d, vec![], 2);
@@ -450,7 +450,7 @@ pub fn guide_preference() {
     step(&mut d, vec![ch('?')], 10);
     assert!(std::fs::read_to_string(&filename).expect("read") == contents, "guide toggle overwrote an unreadable preference file");
     let dump = |d: &Driver| -> String {
-        Editor::crash_dump(d.e(), &dir).expect("crash dump");
+        editor::crash_dump(d.e(), &dir).expect("crash dump");
         std::fs::read_to_string(format!("{dir}/editor.txt")).expect("editor.txt")
     };
     assert!(has(&dump(&d), "key hud: ? · toggle guide\n"), "key HUD did not use the routed command label");

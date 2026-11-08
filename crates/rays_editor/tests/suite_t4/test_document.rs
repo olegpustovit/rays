@@ -3,7 +3,7 @@ use super::t4::*;
 use editor_document::{document, document_edit, kind_graph, lowering, objects, preset, workspace_doc};
 use flow_ir::flow_ir::Gpu;
 use input::Key;
-use rays_editor::Editor;
+use rays_editor::editor;
 use std::sync::Arc;
 
 const TEXT: &str = r#"(workspace document
@@ -63,22 +63,22 @@ pub fn run() {
 
     // Deleting every scene object through real UI events empties the scene and the preview, and
     // the document still saves.
-    let options = Editor::Create { await_: Some(true), ui_text_size: Some(11), domains: Some(1), presets: Some(directory.clone()), platform: Some(input::Platform::Apple), ..Default::default() };
+    let options = editor::Create { await_: Some(true), ui_text_size: Some(11), domains: Some(1), presets: Some(directory.clone()), platform: Some(input::Platform::Apple), ..Default::default() };
     lap("preset");
-    let ed = Editor::create(options, &workspace, None, Editor::prepare_fn(), Editor::draw_fn()).expect("the editor opens");
+    let ed = editor::create(options, &workspace, None, editor::prepare_fn(), editor::draw_fn()).expect("the editor opens");
     lap("created");
     let mut d = Driver::new(ed);
     let mut frames = 0;
-    while Editor::prepared(d.e()).is_none() && frames < 200 {
+    while editor::prepared(d.e()).is_none() && frames < 200 {
         d.step_at((450., 320.), vec![]);
         frames += 1;
     }
-    assert!(Editor::prepared(d.e()).is_some(), "cook did not settle");
+    assert!(editor::prepared(d.e()).is_some(), "cook did not settle");
     d.step_at((450., 320.), vec![]);
     // the scene opens as a list: delete its first row, twice (geo1, then the camera)
     lap("settled");
     let gframe = frame(&Opts::default(), (450., 320.), vec![], 0);
-    let (gx, gy, _, _) = Editor::panes(d.e(), &gframe).graph;
+    let (gx, gy, _, _) = editor::panes(d.e(), &gframe).graph;
     let mouse = ((gx + 60) as f64, (gy + 24 + 12) as f64);
     for _ in 0..2 {
         d.count += 30; // past the double-click interval
@@ -88,8 +88,8 @@ pub fn run() {
         d.step_at(mouse, vec![]);
     }
     lap("deleted");
-    let labels: Vec<String> = Editor::document(d.e()).iter().map(|n: &kind_graph::Node| n.label.clone()).collect();
-    assert!(labels.is_empty() && Editor::prepared(d.e()).is_none(), "delete-all did not clear the scene and preview: {labels:?}, prepared {}", Editor::prepared(d.e()).is_some());
+    let labels: Vec<String> = editor::document(d.e()).iter().map(|n: &kind_graph::Node| n.label.clone()).collect();
+    assert!(labels.is_empty() && editor::prepared(d.e()).is_none(), "delete-all did not clear the scene and preview: {labels:?}, prepared {}", editor::prepared(d.e()).is_some());
     d.step_at((450., 320.), vec![key(Key::KeyChar('/')), chr('s')]);
     d.step_at((450., 320.), vec![key(Key::Enter)]);
     d.step_at((450., 320.), vec![]);

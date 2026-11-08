@@ -7,7 +7,7 @@ use flow_graph::flow_edit as fe;
 use flow_syntax::syntax as S;
 use input::{Event, Key, MouseButton::*};
 use param::Value;
-use rays_editor::Editor;
+use rays_editor::editor;
 use sop::edit_graph::{self as edit, Factory};
 use sop::node::{self, build, CookMode, RebuildFn};
 use std::cell::Cell;
@@ -67,15 +67,15 @@ pub fn run() {
     let workspace: workspace_doc::T = of_text(Some(&factories), TEXT);
     let draws = Rc::new(Cell::new(0i64));
     let counter = draws.clone();
-    let draw: Editor::Draw_fn = Rc::new(move |n, p| {
+    let draw: editor::Draw_fn = Rc::new(move |n, p| {
         counter.set(counter.get() + 1);
-        Editor::draw(n, p)
+        editor::draw(n, p)
     });
-    let ed = Editor::create(
-        Editor::Create { ui_text_size: Some(11), platform: Some(input::Platform::Apple), factories: Some(factories.clone()), ..Default::default() },
+    let ed = editor::create(
+        editor::Create { ui_text_size: Some(11), platform: Some(input::Platform::Apple), factories: Some(factories.clone()), ..Default::default() },
         &workspace,
         None,
-        Editor::prepare_fn(),
+        editor::prepare_fn(),
         draw,
     )
     .expect("opens");
@@ -91,7 +91,7 @@ pub fn run() {
     };
     wait_draw(&mut d, 0);
     // the scene opens as a list: a click on the object's row selects it and [i] enters its graph
-    let (gx, gy, _, _) = Editor::panes(d.e(), &frame0()).graph;
+    let (gx, gy, _, _) = editor::panes(d.e(), &frame0()).graph;
     let row = ((gx + 60) as f64, (gy + 24 + 12) as f64);
     d.step_at(row, vec![]);
     d.step_at(row, click(row));
@@ -99,7 +99,7 @@ pub fn run() {
     d.count += 30; // past the double-click interval
     // the lowered node whose value is n, by stable id
     let node_id = |d: &Driver, n: i64| -> i64 {
-        let network = Editor::network(d.e()).unwrap();
+        let network = editor::network(d.e()).unwrap();
         sop::edit_graph::inspect(&network)
             .into_iter()
             .find(|info| node::parameter_fields(&info.node).iter().any(|f| f.name == "value" && f.current == Value::Int(n)))
@@ -109,21 +109,21 @@ pub fn run() {
     let first = node_id(&d, 0);
     let second = node_id(&d, 1);
     let value = |d: &Driver, id: i64| -> Value {
-        let network = Editor::network(d.e()).unwrap();
+        let network = editor::network(d.e()).unwrap();
         let n = sop::edit_graph::find(&network, id).unwrap();
         node::parameter_fields(&n).into_iter().find(|f| f.name == "value").unwrap().current
     };
-    let text = |d: &Driver| workspace_doc::to_text(&Editor::workspace(d.e())).unwrap();
+    let text = |d: &Driver| workspace_doc::to_text(&editor::workspace(d.e())).unwrap();
     let header = |d: &Driver, path: &[&str]| -> (f64, f64) {
         let path: Vec<String> = path.iter().map(|s| s.to_string()).collect();
-        let (x, y, w, _) = Editor::node_box(d.e(), &path).expect("the node has no box in the graph pane");
+        let (x, y, w, _) = editor::node_box(d.e(), &path).expect("the node has no box in the graph pane");
         ((x + w / 2) as f64, (y + 10) as f64)
     };
     let undo = |d: &mut Driver| d.bk(&[], &[Key::Meta], (0., 0.), vec![chr('z')]);
     let set = |d: &mut Driver, path: &[&str], n: i64| {
         let op = fe::Op::SetArg { node: path.iter().map(|s| s.to_string()).collect(), key: fe::ArgKey::Kw("value".into()), sub: vec![], value: S::make(S::Draft::Num(n.to_string())) };
         let ed = d.ed.take().unwrap();
-        d.ed = Some(Editor::edit(ed, &op).unwrap_or_else(|m| panic!("{m}")));
+        d.ed = Some(editor::edit(ed, &op).unwrap_or_else(|m| panic!("{m}")));
     };
     // select the second source with a click, then edit it: the selection follows the stable node
     d.step_at((0., 0.), vec![]);
@@ -135,11 +135,11 @@ pub fn run() {
     let before_draws = draws.get();
     set(&mut d, &["g", "second"], 7);
     assert!(value(&d, first) == Value::Int(0) && value(&d, second) == Value::Int(7), "selecting and editing in one frame changed the wrong stable node");
-    assert!(Editor::can_undo(d.e()), "the edit did not enter document history");
+    assert!(editor::can_undo(d.e()), "the edit did not enter document history");
     wait_draw(&mut d, before_draws);
     let before_draws = draws.get();
     undo(&mut d);
-    assert!(value(&d, first) == Value::Int(0) && value(&d, second) == Value::Int(1) && Editor::can_redo(d.e()) && text(&d) == before, "undo did not restore the history present");
+    assert!(value(&d, first) == Value::Int(0) && value(&d, second) == Value::Int(1) && editor::can_redo(d.e()) && text(&d) == before, "undo did not restore the history present");
     wait_draw(&mut d, before_draws);
     assert!(draws.get() >= 3, "a changed graph with the same prepared value retained a stale drawing");
     // one drag is one undo entry, and two drags are two

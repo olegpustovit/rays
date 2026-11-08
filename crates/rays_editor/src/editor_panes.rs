@@ -53,7 +53,7 @@ pub fn stored_projection<'a>(value: impl Into<ModelView<'a>>) -> projection {
     projection_in(value, pane(value))
 }
 
-fn projection_in(value: &t, pane: &graph_pane) -> projection {
+fn projection_in(value: &EditorModel, pane: &graph_pane) -> projection {
     match level_map_find(&pane.views, pane.at) {
         Some(p) => p,
         None => match pane.at {
@@ -183,7 +183,7 @@ pub fn shown_as<'a>(value: impl Into<ModelView<'a>>, (key, path, panel): (&Key, 
 /// `tree`, `text` and `outline` follow the focus like the graph pane does: each belongs to the
 /// focused panel of its kind, else to the one it was, else to the first one open; the panel left
 /// keeps its own in `locals`.
-pub fn follow_hosts(value: &mut t, focus_path: Option<&layout::Path>, hosts: &[Host]) {
+pub fn follow_hosts(value: &mut EditorModel, focus_path: Option<&layout::Path>, hosts: &[Host]) {
     let focused = focus_path.map(|p| panel_key(&value.doc, p));
     for kind in [Host_kind::List, Host_kind::Text, Host_kind::Outline] {
         let current = match kind {
@@ -236,14 +236,14 @@ pub fn start_of(doc: &doc_mod::T) -> started {
 
 /// The editor follows a start keyword when its value in the text changed (flow.md 11.11): on
 /// opening, a reload, a preset, an edit, undo. What did not change is left as the user has it.
-pub fn follow_start(value: &mut t) {
+pub fn follow_start(value: &mut EditorModel) {
     let now = start_of(&value.doc);
     let was = value.started.clone();
     if now == *was {
         return;
     }
     let leaves = panels::leaves(&shell_tree(&*value, &value.workspace));
-    let path_of = |value: &t, key: &Key| -> Option<(layout::Path, Panel)> {
+    let path_of = |value: &EditorModel, key: &Key| -> Option<(layout::Path, Panel)> {
         leaves.iter().find(|(path, _)| panel_key(&value.doc, path) == *key).cloned()
     };
     let changed = |now: &[(Key, String)], was: &[(Key, String)]| -> Vec<(Key, String)> {
@@ -291,7 +291,7 @@ pub fn follow_start(value: &mut t) {
 /// its network was lowered from, else the `sop` graph its label names), of the World opened, or the
 /// scene graph at the scene level. A level without such a graph shows its list only.
 /// The lowered sop graph a geometry object instantiates, by its network.
-pub fn graph_of_object(value: &t, id: i64) -> Option<String> {
+pub fn graph_of_object(value: &EditorModel, id: i64) -> Option<String> {
     doc_mod::object_graph(&value.doc, id)
 }
 
@@ -380,7 +380,7 @@ pub fn panels_line<'a>(value: impl Into<ModelView<'a>>) -> String {
 }
 
 /// Follow a reference: the pane shows `graph`, and `u` comes back to what it showed.
-pub fn remember(value: &mut t) {
+pub fn remember(value: &mut EditorModel) {
     with_pane(value, &|pane| {
         let mut route = vec![(pane.at, pane.shown.clone())];
         route.extend(pane.route.iter().take(31).cloned());
@@ -388,7 +388,7 @@ pub fn remember(value: &mut t) {
     });
 }
 
-pub fn go(value: &mut t, graph: &str) {
+pub fn go(value: &mut EditorModel, graph: &str) {
     if graph_name(&*value).as_deref() != Some(graph) {
         remember(value);
         panel_map::active_mut(&mut value.panes).shown = Some(graph.to_owned());
@@ -484,7 +484,7 @@ pub fn route<'a>(value: impl Into<ModelView<'a>>) -> String {
     route_in(value, pane(value), path.as_deref())
 }
 
-pub fn route_in(value: &t, pane: &graph_pane, path: Option<&[usize]>) -> String {
+pub fn route_in(value: &EditorModel, pane: &graph_pane, path: Option<&[usize]>) -> String {
     let mut names: Vec<String> = pane.route
         .iter()
         .rev()
@@ -626,7 +626,7 @@ pub fn draw_list_panes<'a>(
 pub fn draw_text_panes(
     ui: &mut Ui,
     frame_: &frame::Frame,
-    value: &t,
+    value: &EditorModel,
     root_at: Root_at,
     header_slots: &dyn Fn(&Leaf) -> Vec<Option<f64>>,
     text_host: &Option<Host>,
@@ -668,10 +668,10 @@ pub fn draw_text_panes(
 /// The outline panels.
 pub fn draw_outline_panes(
     ui: &mut Ui,
-    value: &t,
+    value: &EditorModel,
     hosted: &[Host],
     root_at: Root_at,
-    params_of: &dyn Fn(&t) -> navigator::Params,
+    params_of: &dyn Fn(&EditorModel) -> navigator::Params,
     outline: navigator::State,
     locals: Vec<(Key, local)>,
 ) -> (navigator::State, Vec<navigator::Intent>, Vec<(Key, local)>) {
@@ -721,7 +721,7 @@ pub fn draw_spreadsheet_panes<'a>(ui: &mut Ui, value: impl Into<ModelView<'a>>, 
 }
 
 /// The keys down this frame that were not down in the last: the edges panes act on.
-pub fn pressed_keys(value: &t, frame_: &frame::Frame) -> Vec<input::Key> {
+pub fn pressed_keys(value: &EditorModel, frame_: &frame::Frame) -> Vec<input::Key> {
     frame_.input.keys.iter().filter(|k| !value.held_keys.contains(k)).cloned().collect()
 }
 
@@ -923,7 +923,7 @@ pub fn draw_graph_pane<'a>(
 /// The timeline panes' bars and the strip's context menu: the playback intents and the layout ones.
 pub fn draw_timeline_pane(
     ui: &mut Ui,
-    timeline_: &timeline::t,
+    timeline_: &timeline::Timeline,
     max_frame: i64,
     slots: &[(layout::Bounds, UiBox, bool)],
     timeline_root: &Option<(Panel, UiBox)>,

@@ -9,7 +9,7 @@ use flow_graph::flow_edit::{ArgKey, Op};
 use flow_syntax::syntax::{self as s, Draft as Node};
 use input::{Event, Key, MouseButton};
 use pxui_shell::layout;
-use rays_editor::Editor;
+use rays_editor::editor;
 
 const LB: MouseButton = MouseButton::LeftButton;
 
@@ -20,8 +20,8 @@ pub fn cheap_variations() -> String {
     replace(&text, "(range 4)", "(range 1)")
 }
 
-fn panes_graph(e: &Editor::t) -> i64 {
-    Editor::panes(e, &idle_frame(0)).graph.2
+fn panes_graph(e: &editor::Editor) -> i64 {
+    editor::panes(e, &idle_frame(0)).graph.2
 }
 
 fn p(a: &[&str]) -> Vec<String> {
@@ -33,16 +33,16 @@ pub fn run_ops() {
         return;
     }
     let e = editor(&cheap_variations());
-    let ok = |label: &str, op: L| -> Editor::t {
-        match Editor::edit_layout(e.clone(), &op) {
+    let ok = |label: &str, op: L| -> editor::Editor {
+        match editor::edit_layout(e.clone(), &op) {
             Ok(e2) => {
-                check(Editor::undo_label(&e2) == Some(label.into()), &format!("label {label}: {:?}", Editor::undo_label(&e2)));
+                check(editor::undo_label(&e2) == Some(label.into()), &format!("label {label}: {:?}", editor::undo_label(&e2)));
                 e2
             }
             Err(m) => fail(&format!("{label}: {m}")),
         }
     };
-    let tree = |e: &Editor::t| shell_of(&build_ok(&Editor::workspace(e))).tree;
+    let tree = |e: &editor::Editor| shell_of(&build_ok(&editor::workspace(e))).tree;
     let sh = tree(&e);
     // resize
     let r = ok("Resize panel", L::SetLayoutSize { node: p(&["editor", "left"]), size: LSize::Ratio(0.3) });
@@ -60,12 +60,12 @@ pub fn run_ops() {
     );
     // a ui/split (no ratio) becomes ui/split-at
     let plain = editor(&with_editor("    (let* [a (ui/graph) b (ui/lisp) s (ui/split \"horizontal\" a b)] (ui/workspace s))"));
-    match Editor::edit_layout(plain.clone(), &L::SetLayoutSize { node: p(&["editor", "s"]), size: LSize::Ratio(0.25) }) {
+    match editor::edit_layout(plain.clone(), &L::SetLayoutSize { node: p(&["editor", "s"]), size: LSize::Ratio(0.25) }) {
         Ok(q) => check(has(&source(&q), "(ui/split-at \"horizontal\" 0.25 a b)"), "ui/split gets a ratio"),
         Err(m) => fail(&m),
     }
     // split, close, retype: the editor's panel table writes the panel forms
-    let panel = |kind: &str| panel_kinds::expr(&Editor::workspace(&e).source, kind).expect("panel kind");
+    let panel = |kind: &str| panel_kinds::expr(&editor::workspace(&e).source, kind).expect("panel kind");
     let sp = ok("Split panel", L::SplitPanel { node: p(&["editor", "network"]), axis: Axis::V, ratio: 0.5, panel: panel("lisp") });
     check(panels::to_string(&tree(&sp)) == "(h outline (h (v (v graph lisp) lisp) (tile view)))", &format!("split: {}", panels::to_string(&tree(&sp))));
     check(has(&source(&sp), "(ui/split-at \"vertical\" 0.5 network_a network_b)"), "the new split");
@@ -75,7 +75,7 @@ pub fn run_ops() {
     check(panels::to_string(&tree(&t)) == "(h outline (h (v list lisp) (tile view)))", &format!("retype: {}", panels::to_string(&tree(&t))));
     let sheet = ok("Retype panel", L::SetPanelKind { node: p(&["editor", "network"]), panel: panel("spreadsheet") });
     check(panels::to_string(&tree(&sheet)) == "(h outline (h (v spreadsheet lisp) (tile view)))", "retype spreadsheet");
-    let saved = workspace_doc::to_text(&Editor::workspace(&sheet)).unwrap();
+    let saved = workspace_doc::to_text(&editor::workspace(&sheet)).unwrap();
     check(workspace_doc::to_text(&of_text(&saved)).unwrap() == saved, "retyped spreadsheet did not round trip");
     let v = ok("Retype panel", L::SetPanelKind { node: p(&["editor", "outline"]), panel: panel("viewport") });
     check(has(&source(&v), "outline (ui/viewport (ref scene))"), "a viewport is over the first scene graph");
@@ -85,20 +85,20 @@ pub fn run_ops() {
     // undo restores the tree with the source
     check(panels::to_string(&tree(&e)) == panels::to_string(&sh), "undo target");
     // refusals leave everything alone
-    let refuse = |name: &str, op: L, needle: &str| match Editor::edit_layout(e.clone(), &op) {
+    let refuse = |name: &str, op: L, needle: &str| match editor::edit_layout(e.clone(), &op) {
         Err(m) => check(has(&m, needle), &format!("{name}: {m}")),
         Ok(_) => fail(&format!("{name} was accepted")),
     };
     refuse("close the workspace", L::ClosePanel { node: p(&["editor", "shell"]) }, "Keep at least one");
-    check(panel_kinds::expr(&Editor::workspace(&e).source, "dashboard").err() == Some("Unknown panel type dashboard.".to_string()), "an unknown panel type");
+    check(panel_kinds::expr(&editor::workspace(&e).source, "dashboard").err() == Some("Unknown panel type dashboard.".to_string()), "an unknown panel type");
     refuse("resize a panel", L::SetLayoutSize { node: p(&["editor", "network"]), size: LSize::Ratio(0.4) }, "not a split");
     refuse("no such binding", L::SplitPanel { node: p(&["editor", "nothing"]), axis: Axis::H, ratio: 0.5, panel: panel("lisp") }, "no longer exists");
     let floating = editor(&with_editor("(let* [main (ui/graph) outline (ui/outline) window (ui/floating outline) tiles (ui/tile main window)] (ui/workspace tiles))"));
-    match Editor::edit_layout(floating.clone(), &L::ClosePanel { node: p(&["editor", "outline"]) }) {
+    match editor::edit_layout(floating.clone(), &L::ClosePanel { node: p(&["editor", "outline"]) }) {
         Ok(closed) => {
             check(panels::to_string(&tree(&closed)) == "(tile graph)", "closing a floating panel left its wrapper");
             check(!has(&source(&closed), "ui/floating"), "empty floating wrapper remained in Lisp");
-            match Editor::edit_layout(closed, &L::ClosePanel { node: p(&["editor", "main"]) }) {
+            match editor::edit_layout(closed, &L::ClosePanel { node: p(&["editor", "main"]) }) {
                 Err(message) => check(has(&message, "Keep at least one"), "last panel refusal"),
                 Ok(_) => fail("closing the last panel was accepted"),
             }
@@ -106,10 +106,10 @@ pub fn run_ops() {
         Err(message) => fail(&message),
     }
     let switched = editor(&with_editor("(let* [main (ui/graph) outline (ui/outline) window (ui/floating outline)] (ui/workspace (ui/switch (ui/split-at \"horizontal\" 0.5 main window) (ui/lisp) :active 0)))"));
-    match Editor::edit_layout(switched.clone(), &L::ClosePanel { node: p(&["editor", "outline"]) }) {
+    match editor::edit_layout(switched.clone(), &L::ClosePanel { node: p(&["editor", "outline"]) }) {
         Ok(closed) => {
             check(!has(&source(&closed), "ui/floating") && has(&source(&closed), "(ui/switch main (ui/lisp)"), "closing a floating panel did not clean its switch branch");
-            match Editor::edit_layout(closed, &L::ClosePanel { node: p(&["editor", "main"]) }) {
+            match editor::edit_layout(closed, &L::ClosePanel { node: p(&["editor", "main"]) }) {
                 Err(message) => check(has(&message, "every layout"), "empty switch branch refusal"),
                 Ok(_) => fail("closing the last panel in a switch branch was accepted"),
             }
@@ -118,18 +118,18 @@ pub fn run_ops() {
     }
     // a panel that follows a graph panel keeps following it when a window docks on that panel or is closed
     let followed = editor(&with_editor("(let* [network (ui/graph) inspector (ui/inspector :of network)] (ui/workspace (ui/split-at \"horizontal\" 0.5 network inspector)))"));
-    match Editor::edit_layout(followed.clone(), &L::LayoutWindow { graph: "editor".into(), panel: panel_kinds::expr(&[], "outline").expect("outline") }) {
+    match editor::edit_layout(followed.clone(), &L::LayoutWindow { graph: "editor".into(), panel: panel_kinds::expr(&[], "outline").expect("outline") }) {
         Err(message) => fail(&format!("new window: {message}")),
-        Ok(windowed) => match Editor::edit_layout(windowed, &L::DockPanel { node: p(&["editor", "inspector"]), target: p(&["editor", "network"]), side: Side::Left }) {
+        Ok(windowed) => match editor::edit_layout(windowed, &L::DockPanel { node: p(&["editor", "inspector"]), target: p(&["editor", "network"]), side: Side::Left }) {
             Ok(docked) => check(has(&source(&docked), ":of network)"), &format!("docking on a followed panel renamed :of: {}", source(&docked))),
             Err(message) => fail(&format!("dock on a followed panel: {message}")),
         },
     }
-    Editor::close(&followed);
-    Editor::close(&switched);
-    Editor::close(&floating);
-    Editor::close(&plain);
-    Editor::close(&e);
+    editor::close(&followed);
+    editor::close(&switched);
+    editor::close(&floating);
+    editor::close(&plain);
+    editor::close(&e);
 }
 
 pub fn run_restore() {
@@ -143,7 +143,7 @@ pub fn run_restore() {
     check(panes_graph(&r.e) > 0, "the shell starts with a graph panel");
     // an invalid editor graph is refused whole: the layout and the document stay
     let before = r.source();
-    match Editor::edit(r.e.clone(), &Op::SetArg { node: p(&["editor", "panels"]), key: ArgKey::Pos(1), sub: vec![], value: s::make(Node::Num("0.95".into())) }) {
+    match editor::edit(r.e.clone(), &Op::SetArg { node: p(&["editor", "panels"]), key: ArgKey::Pos(1), sub: vec![], value: s::make(Node::Num("0.95".into())) }) {
         Err(_) => {}
         Ok(_) => fail("a ratio of 0.95 was accepted"),
     }
@@ -152,7 +152,7 @@ pub fn run_restore() {
     let mut builder = s::SyntaxBuilder::new();
     let head = builder.push_draft(0, Node::Sym("ui/outline".into()), Default::default(), None);
     let id = builder.push_draft(0, Node::List(vec![head]), Default::default(), None);
-    let bricked = Editor::edit(r.e.clone(), &Op::SetArg { node: p(&["editor", "shell"]), key: ArgKey::Pos(0), sub: vec![], value: builder.freeze().handle(id) }).expect("bricked");
+    let bricked = editor::edit(r.e.clone(), &Op::SetArg { node: p(&["editor", "shell"]), key: ArgKey::Pos(0), sub: vec![], value: builder.freeze().handle(id) }).expect("bricked");
     r.e = bricked.clone();
     r.step(m, vec![]);
     check(panes_graph(&r.e) == 0, "the bricked shell has no graph panel");
@@ -162,7 +162,7 @@ pub fn run_restore() {
     check(has(&r.dump("cook"), "Default layout"), &format!("the status says so: {}", r.dump("cook")));
     check(r.source() == source(&bricked), "the document is untouched by Restore");
     // the editor graph is repaired from the restored shell: the layout edit ends the restore
-    let repaired = Editor::edit(r.e.clone(), &Op::SetArg { node: p(&["editor", "shell"]), key: ArgKey::Pos(0), sub: vec![], value: s::make(Node::Sym("panels".into())) }).expect("repaired");
+    let repaired = editor::edit(r.e.clone(), &Op::SetArg { node: p(&["editor", "shell"]), key: ArgKey::Pos(0), sub: vec![], value: s::make(Node::Sym("panels".into())) }).expect("repaired");
     r.e = repaired;
     r.step(m, vec![]);
     check(panes_graph(&r.e) > 0 && !has(&r.dump("cook"), "Default layout"), "editing the editor graph ends the restore");
@@ -184,38 +184,38 @@ pub fn run_camera_zoom() {
     let camera = rays::easy_camera::create(None, None, None, None, None, Some(false)).expect("camera");
     let mut e = editor_with(
         "(workspace zoom (graph g :context sop (sop/box)) (graph scene :context scene (scene/merge (scene/geometry (ref g)) (scene/camera :eye [0 0 12345.123456789] :follow_viewport true :active true))))",
-        Editor::Create { camera: Some(camera), ..Default::default() },
+        editor::Create { camera: Some(camera), ..Default::default() },
     );
-    let mut step = |e: &mut Editor::t, events: Vec<Event>, count: i64| *e = Editor::update(e.clone(), &frame(&[], (200., 200.), events, count));
+    let mut step = |e: &mut editor::Editor, events: Vec<Event>, count: i64| *e = editor::update(e.clone(), &frame(&[], (200., 200.), events, count));
     step(&mut e, vec![], 0);
     step(&mut e, vec![], 1);
     step(&mut e, vec![Event::Pointer_moved((200., 200.)), Event::Pointer_pressed(LB, (200., 200.)), Event::Pointer_released(LB, (200., 200.))], 2);
     for count in 3..=15 {
         step(&mut e, vec![Event::Scrolled((0., -1.))], 2 * count);
-        let viewport = rays::easy_camera::camera(&Editor::camera(&e)).expect("camera");
-        let saved = Editor::render_camera(&e);
+        let viewport = rays::easy_camera::camera(&editor::camera(&e)).expect("camera");
+        let saved = editor::render_camera(&e);
         check(rays_math::vec3::nearly_equal(rays::camera::position(&viewport), rays::camera::position(&saved), 1e-6), "zooming out made the following camera lag behind the viewport");
         let eye = rays::camera::position(&viewport);
         step(&mut e, vec![], 2 * count + 1);
-        check(rays_math::vec3::nearly_equal(eye, rays::camera::position(&rays::easy_camera::camera(&Editor::camera(&e)).expect("camera")), 1e-6), "an idle frame snapped the viewport to rounded camera coordinates");
+        check(rays_math::vec3::nearly_equal(eye, rays::camera::position(&rays::easy_camera::camera(&editor::camera(&e)).expect("camera")), 1e-6), "an idle frame snapped the viewport to rounded camera coordinates");
     }
     // an orbit held on the button writes the camera node once, on release; meanwhile renders look
     // through the viewport, never the node's last write
-    let eye_of = |e: &Editor::t| rays::camera::position(&rays::easy_camera::camera(&Editor::camera(e)).expect("camera"));
+    let eye_of = |e: &editor::Editor| rays::camera::position(&rays::easy_camera::camera(&editor::camera(e)).expect("camera"));
     let (before, start) = (source(&e), eye_of(&e));
     let at = (200., 200.);
-    e = Editor::update(e.clone(), &frame_full(&[LB], &[Key::Alt], (0., 0.), at, vec![Event::Key_pressed(Key::Alt), Event::Pointer_pressed(LB, at)], 40));
+    e = editor::update(e.clone(), &frame_full(&[LB], &[Key::Alt], (0., 0.), at, vec![Event::Key_pressed(Key::Alt), Event::Pointer_pressed(LB, at)], 40));
     for i in 1..=4 {
         let p = (200. + 8. * i as f64, 200.);
-        e = Editor::update(e.clone(), &frame_full(&[LB], &[Key::Alt], (8., 0.), p, vec![Event::Pointer_moved(p)], 40 + i));
-        check(rays_math::vec3::nearly_equal(eye_of(&e), rays::camera::position(&Editor::render_camera(&e)), 1e-6), "a held orbit left the render camera behind the viewport");
+        e = editor::update(e.clone(), &frame_full(&[LB], &[Key::Alt], (8., 0.), p, vec![Event::Pointer_moved(p)], 40 + i));
+        check(rays_math::vec3::nearly_equal(eye_of(&e), rays::camera::position(&editor::render_camera(&e)), 1e-6), "a held orbit left the render camera behind the viewport");
     }
     check(!rays_math::vec3::nearly_equal(start, eye_of(&e), 1e-6), "the Alt-drag did not orbit");
     check(source(&e) == before, "a held orbit wrote the document on every frame");
     let p = (232., 200.);
-    e = Editor::update(e.clone(), &frame_full(&[], &[], (0., 0.), p, vec![Event::Pointer_released(LB, p), Event::Key_released(Key::Alt)], 45));
-    check(source(&e) != before && rays_math::vec3::nearly_equal(eye_of(&e), rays::camera::position(&Editor::render_camera(&e)), 1e-6), "releasing the orbit did not write the camera node");
-    Editor::close(&e);
+    e = editor::update(e.clone(), &frame_full(&[], &[], (0., 0.), p, vec![Event::Pointer_released(LB, p), Event::Key_released(Key::Alt)], 45));
+    check(source(&e) != before && rays_math::vec3::nearly_equal(eye_of(&e), rays::camera::position(&editor::render_camera(&e)), 1e-6), "releasing the orbit did not write the camera node");
+    editor::close(&e);
 }
 
 pub fn run_cameras() {
@@ -223,10 +223,10 @@ pub fn run_cameras() {
         return;
     }
     let camera = rays::easy_camera::with_inertia(false, &rays::easy_camera::create(Some(rays_math::vec3::zero()), Some(7.), None, None, None, None).expect("camera"));
-    let mut r = Run::new(editor_with(&case("variations"), Editor::Create { camera: Some(camera), ..Default::default() }));
+    let mut r = Run::new(editor_with(&case("variations"), editor::Create { camera: Some(camera), ..Default::default() }));
     let stepd = |r: &mut Run, buttons: &[MouseButton], delta: (f64, f64), at: (f64, f64), events: Vec<Event>| {
         r.count += 1;
-        r.e = Editor::update(r.e.clone(), &frame_full(buttons, &[], delta, at, events, r.count));
+        r.e = editor::update(r.e.clone(), &frame_full(buttons, &[], delta, at, events, r.count));
     };
     for _ in 0..8 {
         r.step((450., 300.), vec![]);
@@ -237,7 +237,7 @@ pub fn run_cameras() {
         let (x, y, w, h) = leaf.body;
         ((x + w / 2) as f64, (y + h / 2) as f64)
     };
-    let position = |r: &Run, key: &str| rays::camera::position(&Editor::viewport_camera(&r.e, key));
+    let position = |r: &Run, key: &str| rays::camera::position(&editor::viewport_camera(&r.e, key));
     let keys = ["v1.1.0", "v1.1.1", "v1.1.2", "v1.1.3"];
     let click = |r: &mut Run, key: &str| {
         let pt = center(r, key);
@@ -316,11 +316,11 @@ pub fn run_instances() {
     (ui/workspace (ui/split-at "horizontal" 0.5 (ui/viewport (ref day)) (ui/viewport (ref night))))))"#;
     let mut e = editor(text);
     for c in 1..=12 {
-        e = Editor::update(e, &frame(&[], (450., 300.), vec![], c));
+        e = editor::update(e, &frame(&[], (450., 300.), vec![], c));
     }
-    check(!Editor::objects(&e).is_empty() && Editor::prepared(&e).is_some(), &format!("the editor did not cook (cook {})", dump_line(&e, "cook")));
+    check(!editor::objects(&e).is_empty() && editor::prepared(&e).is_some(), &format!("the editor did not cook (cook {})", dump_line(&e, "cook")));
     check(!has(&dump_line(&e, "edit error"), "Failure"), &format!("an error composing the views: {}", dump_line(&e, "edit error")));
-    Editor::close(&e);
+    editor::close(&e);
 }
 
 pub fn run_views() {
@@ -329,15 +329,15 @@ pub fn run_views() {
     }
     let mut e = editor(&case("variations"));
     for c in 1..=12 {
-        e = Editor::update(e, &frame(&[], (450., 300.), vec![], c));
+        e = editor::update(e, &frame(&[], (450., 300.), vec![], c));
     }
-    check(!Editor::objects(&e).is_empty() && Editor::prepared(&e).is_some(), &format!("the editor did not cook ({} objects, prepared {}, cook {})", Editor::objects(&e).len(), Editor::prepared(&e).is_some(), dump_line(&e, "cook")));
+    check(!editor::objects(&e).is_empty() && editor::prepared(&e).is_some(), &format!("the editor did not cook ({} objects, prepared {}, cook {})", editor::objects(&e).len(), editor::prepared(&e).is_some(), dump_line(&e, "cook")));
     for c in 200..=230 {
-        e = Editor::update(e, &frame(&[], (450., 300.), vec![], c));
+        e = editor::update(e, &frame(&[], (450., 300.), vec![], c));
     }
-    let scene = Editor::scene(&e, &frame(&[], (450., 300.), vec![], 231));
+    let scene = editor::scene(&e, &frame(&[], (450., 300.), vec![], 231));
     let staged = rays::scene::Layer::stage_native(900, 640, &scene);
-    Editor::close(&e);
+    editor::close(&e);
     match staged {
         Err(m) => fail(&m),
         Ok(staged) => {

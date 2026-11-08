@@ -44,7 +44,7 @@ pub fn inspect_panel<'a>(
     resized: Resized,
     g: &layout::Geometry,
     ui: &mut Ui,
-    input: (ModelView<'a>, &scope::Pane, &selection::t, bool),
+    input: (ModelView<'a>, &scope::Pane, &selection::Selection, bool),
     inspector_root: &UiBox,
     bounds: layout::Bounds,
 ) -> Inspector_result {

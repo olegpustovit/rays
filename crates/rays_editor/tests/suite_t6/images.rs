@@ -11,18 +11,18 @@ use super::support::{load, options, repo_root};
 use flow_eval::{Plan, State};
 use flow_syntax::{ty, value::Value};
 use rays_diagnostic::Diagnostic;
-use rays_editor::{Editor, Workspace};
+use rays_editor::{editor, workspace};
 use sop::context::dependencies as deps;
 use sop::{image as simage, node, payload};
 
-type Ed = Editor::t;
+type Ed = editor::Editor;
 
 fn ok<T>(r: Result<T, Diagnostic>) -> T {
     r.unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)))
 }
 
-fn editor_with(doc: &editor_document::workspace_doc::T, o: Editor::Create) -> Ed {
-    Editor::create(o, doc, None, Editor::prepare_fn(), Editor::draw_fn()).unwrap_or_else(|m| panic!("editor did not open: {m}"))
+fn editor_with(doc: &editor_document::workspace_doc::T, o: editor::Create) -> Ed {
+    editor::create(o, doc, None, editor::prepare_fn(), editor::draw_fn()).unwrap_or_else(|m| panic!("editor did not open: {m}"))
 }
 
 fn editor(doc: &editor_document::workspace_doc::T) -> Ed {
@@ -31,7 +31,7 @@ fn editor(doc: &editor_document::workspace_doc::T) -> Ed {
 
 /// ~domains
 fn editor_d(doc: &editor_document::workspace_doc::T, domains: i64) -> Ed {
-    editor_with(doc, Editor::Create { domains: Some(domains), ..options() })
+    editor_with(doc, editor::Create { domains: Some(domains), ..options() })
 }
 
 fn workspace(producer: &str) -> editor_document::workspace_doc::T {
@@ -59,14 +59,14 @@ fn with_images<R>(
     mut f: impl FnMut(&dyn Fn(&Value) -> Result<rays::image::t, Diagnostic>, &dyn Fn(&Value) -> Result<rays::texture::t, Diagnostic>) -> R,
 ) -> R {
     let out: RefCell<Option<R>> = RefCell::new(None);
-    Editor::Private::with_images(ed, state, live, plan, &mut |image, texture| {
+    editor::private::with_images(ed, state, live, plan, &mut |image, texture| {
         *out.borrow_mut() = Some(f(image, texture));
     });
     out.into_inner().expect("with_images ran")
 }
 
 fn payload_of(ed: &Ed, v: &Value, live_: Option<&input::Frame>) -> Result<simage::T, Diagnostic> {
-    Editor::Private::image_payload(ed, v, None, live_)
+    editor::private::image_payload(ed, v, None, live_)
 }
 
 fn bytes_of(i: &simage::T) -> Vec<u8> {
@@ -112,7 +112,7 @@ fn capture_context() {
     };
     let mut factories = vec![factory];
     factories.extend(sop::nodes::factories());
-    let doc = Workspace::load(
+    let doc = workspace::load(
         None,
         Vec::new(),
         Some(&factories),
@@ -121,8 +121,8 @@ fn capture_context() {
     .unwrap_or_else(|ds| panic!("{}", super::support::diag_text(&ds)));
     let run = |seed: i64, domains: i64| -> Vec<u8> {
         let grain = 257;
-        let owner = editor_with(&doc, Editor::Create { factories: Some(factories.clone()), seed: Some(seed), grain: Some(grain), domains: Some(domains), ..options() });
-        let plan = Editor::Private::image_plan(&owner);
+        let owner = editor_with(&doc, editor::Create { factories: Some(factories.clone()), seed: Some(seed), grain: Some(grain), domains: Some(domains), ..options() });
+        let plan = editor::private::image_plan(&owner);
         let n = node_of(&plan, "image/map");
         observed.store(0, Ordering::SeqCst);
         let payload = ok(payload_of(&owner, &image_value(n.id), None));
@@ -140,7 +140,7 @@ fn capture_context() {
         sop::session::close(&mut session);
         let bytes = bytes_of(&payload);
         assert!(simage::rgba8(&expected) == Some(&bytes[..]) && bytes[1] == 64);
-        Editor::close(&owner);
+        editor::close(&owner);
         bytes
     };
     assert!(run(17, 1) == run(17, 8) && run(49, 1) == run(49, 8) && run(17, 1) != run(49, 1));
@@ -162,7 +162,7 @@ fn capture_nondefault() {
     let doc = load("(workspace captures\n    (graph mesh :context sop [(offset : float 0.015625)]\n      (let* [geo (sop/box :consolidate_points true :center [(+ offset (* t 0.015625)) 0 0])\n             p (reduce + [0 0 0] (sop/attr geo :P))\n             img (image/map (fn [uv] [(+ uv.x p.x) uv.y 0.5 1]) :width 7 :height 3)] geo))\n    (graph other :context sop (ref mesh :offset 0.03125)))");
     let run = |domains: i64| -> (Vec<u8>, Vec<u8>) {
         let owner = editor_d(&doc, domains);
-        let plan = Editor::Private::image_plan(&owner);
+        let plan = editor::private::image_plan(&owner);
         let instance = plan.instances.iter().position(|i| i.graph == "mesh" && !i.default).expect("instance") as i64;
         let producer = plan.nodes.iter().find(|n| n.kind == "image/map" && n.inst == instance).expect("producer").clone();
         let image = image_value(producer.id);
@@ -175,8 +175,8 @@ fn capture_nondefault() {
         let later = at(1.);
         let changed = bytes_of(&later);
         assert!(changed != bytes && simage::rgba8(&first) == Some(&bytes[..]));
-        assert!(simage::ptr_eq(&at(1.), &later) && Editor::Private::image_stats(&owner) == (0, 0));
-        Editor::close(&owner);
+        assert!(simage::ptr_eq(&at(1.), &later) && editor::private::image_stats(&owner) == (0, 0));
+        editor::close(&owner);
         (bytes, changed)
     };
     assert!(run(1) == run(8));
@@ -189,27 +189,27 @@ fn capture_nested_stateful() {
     }
     let nested = load("(workspace nested\n    (graph mesh :context sop\n      (let* [base (sop/box :consolidate_points true :center [0.015625 0 0])\n             noise (image/map (fn [uv] [uv.x uv.y 0.5 1]) :width 3 :height 2)\n             textured (sop/with_attr base :uv (exact (map (fn [p] [0.25 0.5 0]) (sop/attr base :P))))\n             geo (sop/attr_from_image textured noise :attribute \"sample\")\n             p (reduce + [0 0 0] (sop/attr geo :P))\n             img (image/map (fn [uv] [(+ uv.x p.x) uv.y 0.5 1]) :width 7 :height 3)]\n        geo)))");
     let owner = editor(&nested);
-    let plan = Editor::Private::image_plan(&owner);
+    let plan = editor::private::image_plan(&owner);
     let node = plan.nodes.iter().find(|n| n.kind == "image/map" && n.site == vec!["mesh".to_owned(), "img".to_owned()]).expect("img node").clone();
     let image = ok(payload_of(&owner, &image_value(node.id), None));
     assert!(simage::width(&image) == 7 && simage::height(&image) == 3);
-    Editor::close(&owner);
+    editor::close(&owner);
 
     let doc = load("(workspace stateful\n    (graph mesh :context sop\n      (let* [bias (state [n 0.015625] (+ n 0.015625))\n             geo (sop/box :consolidate_points true :center [bias 0 0])\n             p (reduce + [0 0 0] (sop/attr geo :P))\n             img (image/map (fn [uv] [(+ uv.x p.x) uv.y 0.5 1]) :width 7 :height 3)]\n        geo)))");
     let state = flow_eval::create_state();
     let stamp = flow_eval::state_stamp(&state);
     let snapshot = |first: bool, domains: i64| -> Vec<u8> {
         let owner = editor_d(&doc, domains);
-        let node = node_of(&Editor::Private::image_plan(&owner), "image/map");
+        let node = node_of(&editor::private::image_plan(&owner), "image/map");
         let image = image_value(node.id);
-        let at = |frame: i64| ok(Editor::Private::image_payload(&owner, &image, Some(&state), Some(&input::Frame { frame, ..live(frame as f64) })));
+        let at = |frame: i64| ok(editor::private::image_payload(&owner, &image, Some(&state), Some(&input::Frame { frame, ..live(frame as f64) })));
         if first {
             at(0);
         }
         let result = at(1);
         assert_eq!(flow_eval::state_stamp(&state), stamp);
         let bytes = bytes_of(&result);
-        Editor::close(&owner);
+        editor::close(&owner);
         bytes
     };
     let sequential = snapshot(true, 1);
@@ -254,9 +254,9 @@ fn image_map_drawing() {
         let image: Rc<dyn Fn(&Value) -> Result<rays::image::t, Diagnostic>> = Rc::new(move |v| with_images(&o2, None, Some(&live(1.)), Some(&plan2), |image, _| image(v)));
         let commands = render_picture(&evaluated.plan, &picture, &live(1.), (65, 3), image);
         assert!(commands.iter().any(is_image_command));
-        assert_eq!(Editor::Private::image_stats(&owner), (1, 0));
-        Editor::close(&owner);
-        assert_eq!(Editor::Private::image_stats(&owner), (1, 1));
+        assert_eq!(editor::private::image_stats(&owner), (1, 0));
+        editor::close(&owner);
+        assert_eq!(editor::private::image_stats(&owner), (1, 1));
     }
 }
 
@@ -279,9 +279,9 @@ fn image_map_replan() {
     let edited = workspace("(image/map (fn [uv] [uv.y uv.x 0.5 1]) :width 17 :height 5)");
     assert!(rays::image::same(&resolve(&edited), &image));
     assert!(pixels(&image) != previous);
-    assert_eq!(Editor::Private::image_stats(&owner), (1, 0));
-    Editor::close(&owner);
-    assert_eq!(Editor::Private::image_stats(&owner), (1, 1));
+    assert_eq!(editor::private::image_stats(&owner), (1, 0));
+    editor::close(&owner);
+    assert_eq!(editor::private::image_stats(&owner), (1, 1));
 }
 
 fn sample_png() -> String {
@@ -297,9 +297,9 @@ fn images_noise_and_load() {
     let evaluated = ok(flow_eval::static_eval(&doc.checked));
     let value = result_of(&evaluated, "img");
     let owner = editor(&doc);
-    let image = ok(Editor::Private::image(&owner, &value));
+    let image = ok(editor::private::image(&owner, &value));
     assert_eq!(rays::image::get_size(&image).unwrap(), (2, 2));
-    assert!(rays::image::same(&ok(Editor::Private::image(&owner, &value)), &image));
+    assert!(rays::image::same(&ok(editor::private::image(&owner, &value)), &image));
     let oracle = pixels(&image);
     // ponytail: the Pxui.Ui.Paint.image frame of the OCaml case is not ported (UI paint is covered by the pxui suites)
     assert_eq!(pixels(&image), oracle);
@@ -308,7 +308,7 @@ fn images_noise_and_load() {
     for domains in [1, 1, 1, 8] {
         parallel::run_unit(Some(domains), &|| {
             let o3 = owner.clone();
-            let actual = render_picture(&evaluated.plan, &picture, &live(0.), (32, 32), Rc::new(move |v| Editor::Private::image(&o3, v)));
+            let actual = render_picture(&evaluated.plan, &picture, &live(0.), (32, 32), Rc::new(move |v| editor::private::image(&o3, v)));
             assert!(actual.iter().any(is_image_command));
             match &*commands.borrow() {
                 None => {}
@@ -323,37 +323,37 @@ fn images_noise_and_load() {
             Ok(())
         }).unwrap();
     }
-    assert_eq!(Editor::Private::image_stats(&owner), (1, 0));
-    Editor::close(&owner);
-    assert_eq!(Editor::Private::image_stats(&owner), (1, 1));
+    assert_eq!(editor::private::image_stats(&owner), (1, 0));
+    editor::close(&owner);
+    assert_eq!(editor::private::image_stats(&owner), (1, 1));
 
     let png = sample_png();
     let doc = load(&format!("(workspace images (graph a :context image (image/load \"{png}\")) (graph b :context image (image/load \"{png}\")) (graph picture :context draw (draw/merge (draw/image (ref a)) (draw/image (ref b)))))"));
     let owner = editor(&doc);
     let evaluated = ok(flow_eval::static_eval(&doc.checked));
-    let a = ok(Editor::Private::image(&owner, &result_of(&evaluated, "a")));
-    let b = ok(Editor::Private::image(&owner, &result_of(&evaluated, "b")));
-    assert!(rays::image::same(&a, &b) && Editor::Private::image_stats(&owner) == (1, 0));
-    Editor::close(&owner);
-    assert_eq!(Editor::Private::image_stats(&owner), (1, 1));
+    let a = ok(editor::private::image(&owner, &result_of(&evaluated, "a")));
+    let b = ok(editor::private::image(&owner, &result_of(&evaluated, "b")));
+    assert!(rays::image::same(&a, &b) && editor::private::image_stats(&owner) == (1, 0));
+    editor::close(&owner);
+    assert_eq!(editor::private::image_stats(&owner), (1, 1));
 
     let doc = workspace(&format!("(image/load \"{png}\")"));
     let owner = editor(&doc);
     let evaluated = ok(flow_eval::static_eval(&doc.checked));
     let img = result_of(&evaluated, "img");
-    let first = ok(Editor::Private::image(&owner, &img));
-    assert!(rays::image::same(&ok(Editor::Private::image(&owner, &img)), &first));
-    assert_eq!(Editor::Private::image_stats(&owner), (1, 0));
-    Editor::close(&owner);
-    assert_eq!(Editor::Private::image_stats(&owner), (1, 1));
+    let first = ok(editor::private::image(&owner, &img));
+    assert!(rays::image::same(&ok(editor::private::image(&owner, &img)), &first));
+    assert_eq!(editor::private::image_stats(&owner), (1, 0));
+    editor::close(&owner);
+    assert_eq!(editor::private::image_stats(&owner), (1, 1));
 
     let doc = workspace("(image/load \"missing-rgbaa-image-file.png\")");
     let owner = editor(&doc);
     let evaluated = ok(flow_eval::static_eval(&doc.checked));
     let img = result_of(&evaluated, "img");
-    assert!(matches!(Editor::Private::image(&owner, &img), Err(d) if d.code == "E_IMAGE"));
-    assert_eq!(Editor::Private::image_stats(&owner), (0, 0));
-    Editor::close(&owner);
+    assert!(matches!(editor::private::image(&owner, &img), Err(d) if d.code == "E_IMAGE"));
+    assert_eq!(editor::private::image_stats(&owner), (0, 0));
+    editor::close(&owner);
 }
 
 /// Resources snapshot before worker submission, exact one/eight-domain payload identity.
@@ -421,8 +421,8 @@ fn image_oracle_noise_owner() {
     let img = result_of(&evaluated, "image");
     let px = |time: f64| with_images(&owner, None, Some(&live(time)), Some(&evaluated.plan), |image, _| pixels(&ok(image(&img))));
     assert!(px(0.) != px(10.));
-    Editor::close(&owner);
-    let (created, destroyed) = Editor::Private::image_stats(&owner);
+    editor::close(&owner);
+    let (created, destroyed) = editor::private::image_stats(&owner);
     assert!(created > 0 && created == destroyed);
 }
 
@@ -434,22 +434,22 @@ fn capacity() {
     let maps: String = (0..64).map(|i| format!("(graph m{i} :context image (image/map (fn [uv] [uv.x uv.y 0.5 1]) :width 1 :height 1))")).collect::<Vec<_>>().join(" ");
     let doc = load(&format!("(workspace capacity {maps} (graph drawing :context draw (draw/image (ref m63))) (graph rendered :context image (image/render (ref drawing) :width 1 :height 1)))"));
     let owner = editor(&doc);
-    let plan = Editor::Private::image_plan(&owner);
+    let plan = editor::private::image_plan(&owner);
     let nodes: Vec<&flow_eval::Node> = plan.nodes.iter().filter(|n| n.kind == "image/map").collect();
     let exact = |n: &flow_eval::Node| payload_of(&owner, &image_value(n.id), None);
     let retained = ok(exact(nodes[0]));
     for n in &nodes[1..63] {
         ok(exact(n));
     }
-    assert_eq!(Editor::Private::image_stats(&owner), (0, 0));
+    assert_eq!(editor::private::image_stats(&owner), (0, 0));
     let render = node_of(&plan, "image/render");
     let refused = || assert!(matches!(exact(&render), Err(d) if d.code == "E_IMAGE"));
     refused();
     ok(exact(nodes[63]));
     refused();
     assert!(simage::ptr_eq(&ok(exact(nodes[0])), &retained));
-    assert_eq!(Editor::Private::image_stats(&owner), (0, 0));
-    Editor::close(&owner);
+    assert_eq!(editor::private::image_stats(&owner), (0, 0));
+    editor::close(&owner);
 }
 
 // ---- test_workspace_images_native.ml ----
@@ -484,13 +484,13 @@ fn canvas_playback() {
     let canvas = rays::canvas::create(900, 640).unwrap();
     let mut sample = |count: i64| {
         let frame = frame_at(count as f64, (900, 640), count, (-100., -100.));
-        owner = Editor::update(owner.clone(), &frame);
-        rays::canvas::render(None, &canvas, &Editor::scene(&owner, &frame)).unwrap();
+        owner = editor::update(owner.clone(), &frame);
+        rays::canvas::render(None, &canvas, &editor::scene(&owner, &frame)).unwrap();
         rays::canvas::pixel(&canvas, 10, 40).unwrap()
     };
     let first = sample(0);
     assert!(first != sample(1));
-    Editor::close(&owner);
+    editor::close(&owner);
     let _ = rays::canvas::destroy(&canvas);
 }
 
@@ -508,10 +508,10 @@ fn native_geometry_captures() {
     let display = editor_d(&doc, 8);
     let cpu1 = editor_d(&doc, 1);
     let cpu8 = editor_d(&doc, 8);
-    Editor::Private::gpu_qualification(&display);
-    let initial = Editor::Private::image_gpu_stats(&display).0;
+    editor::private::gpu_qualification(&display);
+    let initial = editor::private::image_gpu_stats(&display).0;
     let value = |owner: &Ed, override_: bool, kind: &str, graph: &str| -> Value {
-        let plan = Editor::Private::image_plan(owner);
+        let plan = editor::private::image_plan(owner);
         let n = plan.nodes.iter().find(|n| n.kind == kind && plan.instances[n.inst as usize].graph == graph && plan.instances[n.inst as usize].default != override_).expect("node");
         image_value(n.id)
     };
@@ -526,7 +526,7 @@ fn native_geometry_captures() {
     let parent = resolve(0., false, "image/render", "mesh");
     let parent_generation = generation(&parent);
     for time in [0., 1., 2.] {
-        let before_stats = Editor::Private::image_gpu_stats(&display).0;
+        let before_stats = editor::private::image_gpu_stats(&display).0;
         for (i, image) in images.iter().enumerate() {
             let override_ = i == 1;
             assert!(rays::image::same(&resolve(time, override_, "image/map", "mesh"), image));
@@ -544,7 +544,7 @@ fn native_geometry_captures() {
         assert!(expected == rgba(&exact(&cpu8, time, false, "image/render", "mesh")));
         assert!(rgba_diff_max(&actual, &expected) <= 1);
         assert!(rays::image::same(&resolve(time, false, "image/render", "fixed"), &fixed) && generation(&fixed) == fixed_generation);
-        let after = Editor::Private::image_gpu_stats(&display).0;
+        let after = editor::private::image_gpu_stats(&display).0;
         println!("workspace_geometry_capture,time={time:.2},status_reads={}", after.status_reads - before_stats.status_reads);
         // SOP factories retain their creation-time Measured policy: these small captures stay on CPU. Each warmed
         // frame runs two GPU image kernels; the first cooks measure the CPU, and the frame that first decides
@@ -554,11 +554,11 @@ fn native_geometry_captures() {
         }
     }
     assert!(generation(&parent) > parent_generation && rgba(&saved) == saved_bytes);
-    let stats = Editor::Private::image_gpu_stats(&display).0;
+    let stats = editor::private::image_gpu_stats(&display).0;
     println!("workspace_geometry_capture,startup_status_reads={},status_reads={},readback_bytes={}", initial.status_reads, stats.status_reads - initial.status_reads, stats.readback_bytes - initial.readback_bytes);
     assert_eq!(stats.readback_bytes - initial.readback_bytes, 0);
     for o in [&display, &cpu1, &cpu8] {
-        Editor::close(o);
+        editor::close(o);
     }
     assert_eq!(handles(), before);
 }
@@ -603,9 +603,9 @@ fn native_nested_map() {
             let (_, restored) = snapshot(&state, &live1);
             assert!(restored == one);
         }
-        assert_eq!(Editor::Private::image_stats(&owner), (2, 0));
-        Editor::close(&owner);
-        assert_eq!(Editor::Private::image_stats(&owner), (2, 2));
+        assert_eq!(editor::private::image_stats(&owner), (2, 0));
+        editor::close(&owner);
+        assert_eq!(editor::private::image_stats(&owner), (2, 2));
     }
 }
 
@@ -618,19 +618,19 @@ fn native_rendered_snapshots() {
     let owner = editor_d(&doc, 1);
     let evaluated = ok(flow_eval::static_eval(&doc.checked));
     let rendered = result_of(&evaluated, "rendered");
-    let image = ok(Editor::Private::image(&owner, &rendered));
+    let image = ok(editor::private::image(&owner, &rendered));
     let expected = pixels(&image);
     assert_eq!(rays::image::get_size(&image).unwrap(), (8, 8));
-    assert!(rays::image::same(&ok(Editor::Private::image(&owner, &rendered)), &image));
-    assert_eq!(Editor::Private::image_stats(&owner), (1, 0));
+    assert!(rays::image::same(&ok(editor::private::image(&owner, &rendered)), &image));
+    assert_eq!(editor::private::image_stats(&owner), (1, 0));
     for domains in [1, 8] {
         let fresh = editor_d(&doc, domains);
-        let actual = ok(Editor::Private::image(&fresh, &rendered));
+        let actual = ok(editor::private::image(&fresh, &rendered));
         assert!(pixels(&actual) == expected);
-        Editor::close(&fresh);
+        editor::close(&fresh);
     }
-    Editor::close(&owner);
-    assert_eq!(Editor::Private::image_stats(&owner), (1, 1));
+    editor::close(&owner);
+    assert_eq!(editor::private::image_stats(&owner), (1, 1));
     let (first, second) = (temp_dir("rendered-image"), temp_dir("rendered-image"));
     for d in [&first, &second] {
         if !export_or_skip(d, &doc) { let _ = std::fs::remove_dir_all(&first); let _ = std::fs::remove_dir_all(&second); return; }
@@ -652,13 +652,13 @@ fn legacy_stamps() {
     }
     let doc = load("(workspace stamp (graph img :context image\n    (image/noise :width 4 :height 4 :frequency (+ 0.1 (* t 0.01)) :seed 31)))");
     let owner = editor_d(&doc, 1);
-    let node = Editor::Private::image_plan(&owner).nodes[0].clone();
+    let node = editor::private::image_plan(&owner).nodes[0].clone();
     let value = image_value(node.id);
     let display = |time: f64| with_images(&owner, None, Some(&live(time)), None, |image, _| pixels(&ok(image(&value))));
     let first = display(0.);
     ok(payload_of(&owner, &value, Some(&live(10.))));
     assert!(display(0.) == first);
-    Editor::close(&owner);
+    editor::close(&owner);
 }
 
 /// Resident Canvas dimensions: omitted axes, nested resize, fixed cache, independent CPU stamps, zero handles.
@@ -669,7 +669,7 @@ fn resident_dimensions() {
     let baseline = handles();
     let doc = load("(workspace dimensions\n    (graph drawing :context draw (draw/background \"#102030\"))\n    (graph child :context image (image/render (ref drawing)))\n    (graph parent_drawing :context draw (draw/image (ref child)))\n    (graph parent :context image (image/render (ref parent_drawing) :width 80 :height 40))\n    (graph fixed :context image (image/render (ref drawing) :width 7 :height 5))\n    (graph width_only :context image (image/render (ref drawing) :width 9))\n    (graph height_only :context image (image/render (ref drawing) :height 11)))");
     let owner = editor_d(&doc, 1);
-    let plan = Editor::Private::image_plan(&owner);
+    let plan = editor::private::image_plan(&owner);
     let value = |name: &str| plan.instances.iter().find(|i| i.graph == name && i.default).expect("instance").result.clone();
     let size = |w: i64, h: i64| input::Frame { size: (w, h), ..live(0.) };
     let display = |s: &input::Frame, name: &str| with_images(&owner, None, Some(s), None, |image, _| ok(image(&value(name))));
@@ -681,13 +681,13 @@ fn resident_dimensions() {
     let height = display(&a, "height_only");
     let generation = |i: &rays::image::t| I::generation(&res(i));
     let (parent_before, fixed_before) = (generation(&parent), generation(&fixed));
-    assert_eq!(Editor::Private::image_render_stats(&owner), (5, 0, 0, 0));
+    assert_eq!(editor::private::image_render_stats(&owner), (5, 0, 0, 0));
     assert!(rays::image::same(&display(&b, "child"), &child) && rays::image::get_size(&child).unwrap() == (35, 33));
     assert!(rays::image::same(&display(&b, "parent"), &parent) && generation(&parent) > parent_before);
     assert!(rays::image::same(&display(&b, "fixed"), &fixed) && generation(&fixed) == fixed_before);
     assert!(rays::image::same(&display(&b, "width_only"), &width) && rays::image::get_size(&width).unwrap() == (9, 33));
     assert!(rays::image::same(&display(&b, "height_only"), &height) && rays::image::get_size(&height).unwrap() == (35, 11));
-    assert_eq!(Editor::Private::image_render_stats(&owner), (8, 3, 0, 0));
+    assert_eq!(editor::private::image_render_stats(&owner), (8, 3, 0, 0));
     let parent_bytes = pixels(&parent);
     let offset = ((20 * 80) + 50) * 4;
     assert!(parent_bytes[offset..offset + 4] == [0, 0, 0, 0]);
@@ -701,9 +701,9 @@ fn resident_dimensions() {
     assert!(simage::ptr_eq(&exact(&b, "fixed"), &fixed_a));
     assert!(generation(&child) == child_generation && generation(&fixed) == fixed_generation);
     assert_eq!((simage::width(&child_a), simage::height(&child_a)), (65, 17));
-    assert_eq!(Editor::Private::image_render_stats(&owner), (11, 6, 3, 3));
-    Editor::close(&owner);
-    assert_eq!(Editor::Private::image_render_stats(&owner), (11, 11, 3, 3));
+    assert_eq!(editor::private::image_render_stats(&owner), (11, 6, 3, 3));
+    editor::close(&owner);
+    assert_eq!(editor::private::image_render_stats(&owner), (11, 11, 3, 3));
     assert_eq!(handles(), baseline);
 }
 
@@ -722,15 +722,15 @@ fn failed_publication() {
         with_images(&owner, None, None, Some(&evaluated.plan), |image, _| image(&v))
     };
     let image = ok(request(8));
-    assert_eq!(Editor::Private::image_render_stats(&owner), (1, 0, 0, 0));
+    assert_eq!(editor::private::image_render_stats(&owner), (1, 0, 0, 0));
     // Force replacement publication to fail after a resized candidate renders.
     let _ = rays::image::destroy(&image);
     assert!(matches!(request(9), Err(d) if d.code == "E_IMAGE"));
-    assert_eq!(Editor::Private::image_render_stats(&owner), (2, 1, 0, 0));
+    assert_eq!(editor::private::image_render_stats(&owner), (2, 1, 0, 0));
     assert!(matches!(request(9), Err(d) if d.code == "E_IMAGE"));
-    assert_eq!(Editor::Private::image_render_stats(&owner), (3, 2, 0, 0));
-    Editor::close(&owner);
-    assert_eq!(Editor::Private::image_render_stats(&owner), (3, 3, 0, 0));
+    assert_eq!(editor::private::image_render_stats(&owner), (3, 2, 0, 0));
+    editor::close(&owner);
+    assert_eq!(editor::private::image_render_stats(&owner), (3, 3, 0, 0));
     assert_eq!(handles(), baseline);
 }
 
@@ -741,8 +741,8 @@ fn nested_exact() {
     }
     let doc = load("(workspace nested_exact\n    (graph img :context image (image/map (fn [uv] [uv.x uv.y 0.499999999 1]) :width 320 :height 240))\n    (graph drawing :context draw (draw/image (ref img)))\n    (graph rendered :context image (image/render (ref drawing) :width 320 :height 240))\n    (graph picture :context draw (draw/image (ref rendered)))\n    (graph settings :context settings (settings/config :width 320 :height 240)))");
     let display = editor_d(&doc, 1);
-    Editor::Private::gpu_qualification(&display);
-    let value = |owner: &Ed, kind: &str| image_value(node_of(&Editor::Private::image_plan(owner), kind).id);
+    editor::private::gpu_qualification(&display);
+    let value = |owner: &Ed, kind: &str| image_value(node_of(&editor::private::image_plan(owner), kind).id);
     let image = with_images(&display, None, None, None, |image, _| ok(image(&value(&display, "image/map"))));
     let resource = res(&image);
     assert_eq!(I::cpu_storage_bytes(&resource), 0);
@@ -756,10 +756,10 @@ fn nested_exact() {
         let oracle = editor_d(&doc, domains);
         let expected = ok(payload_of(&oracle, &value(&oracle, "image/render"), None));
         assert!(rgba(&expected) == bytes);
-        Editor::close(&oracle);
+        editor::close(&oracle);
     }
     assert!(I::generation(&resource) == generation && I::readbacks(&resource) == 0 && I::cpu_storage_bytes(&resource) == 0);
-    Editor::close(&display);
+    editor::close(&display);
     let dir = temp_dir("export-exact-image");
     if !export_or_skip(&dir, &doc) {
         let _ = std::fs::remove_dir_all(&dir);
@@ -804,7 +804,7 @@ pub fn cases() -> Vec<(&'static str, fn())> {
 
 /// Exports need a real window (`Runtime.create` restores one); under SDL's dummy driver that is "not supported".
 fn export_or_skip(dir: &std::path::Path, doc: &editor_document::workspace_doc::T) -> bool {
-    match Workspace::export(Some("picture"), Some(60), dir.to_str().unwrap(), 2, doc) {
+    match workspace::export(Some("picture"), Some(60), dir.to_str().unwrap(), 2, doc) {
         Ok(()) => true,
         Err(d) if d.message.contains("not supported") => {
             println!("SKIPPED export half: {} (dummy video driver has no window)", d.message);
@@ -860,10 +860,10 @@ fn native_workspace_gpu_images() {
     let initial = text(65, 17, "[uv.x uv.y bias 1]");
     std::fs::write(&source, &initial).unwrap();
     let doc = load(&initial);
-    let owner = RefCell::new(Editor::create(options_d1(), &doc, Some(rays_editor::Source::at(source.to_str().unwrap(), &editor_document::lowering::sha256(&initial))), Editor::prepare_fn(), Editor::draw_fn()).unwrap());
-    Editor::Private::gpu_qualification(&owner.borrow());
+    let owner = RefCell::new(editor::create(options_d1(), &doc, Some(rays_editor::Source::at(source.to_str().unwrap(), &editor_document::lowering::sha256(&initial))), editor::prepare_fn(), editor::draw_fn()).unwrap());
+    editor::private::gpu_qualification(&owner.borrow());
     let value = || {
-        let plan = Editor::Private::image_plan(&owner.borrow());
+        let plan = editor::private::image_plan(&owner.borrow());
         let n = node_of(&plan, "image/map");
         (n.clone(), image_value(n.id))
     };
@@ -871,7 +871,7 @@ fn native_workspace_gpu_images() {
     let resolve = |time: f64| with_images(&owner.borrow(), None, Some(&live(time)), None, |image, texture| (ok(image(&value().1)), ok(texture(&value().1))));
     let saved = exact(0.);
     let saved_bytes = rgba(&saved);
-    assert_eq!(Editor::Private::image_stats(&owner.borrow()), (0, 0));
+    assert_eq!(editor::private::image_stats(&owner.borrow()), (0, 0));
     let (image, texture) = resolve(0.);
     let identity = rays::texture::Private::identity(&texture);
     let resource = res(&image);
@@ -926,13 +926,13 @@ fn native_workspace_gpu_images() {
     verify(1.);
     let reload = |time: f64, contents: &str| {
         std::fs::write(&source, contents).unwrap();
-        let next = Editor::update(owner.borrow().clone(), &frame_for(time, (65, 17)));
+        let next = editor::update(owner.borrow().clone(), &frame_for(time, (65, 17)));
         *owner.borrow_mut() = next;
     };
     reload(10., &text(35, 33, "[uv.y uv.x (* t 0.5) 1]"));
     verify(0.5);
     assert_eq!(rays::image::get_size(&image).unwrap(), (35, 33));
-    assert_eq!(Editor::Private::image_stats(&owner.borrow()), (1, 0));
+    assert_eq!(editor::private::image_stats(&owner.borrow()), (1, 0));
     // Hypot is deliberately CPU-only; fallback must not depend on an arbitrary size threshold in the placement policy.
     reload(20., &text(65, 3, "[(hypot uv.x 0) uv.y 0.5 1]"));
     let (cpu_image, cpu_texture) = resolve(0.);
@@ -953,14 +953,14 @@ fn native_workspace_gpu_images() {
     verify(0.5);
     assert!(rgba(&saved) == saved_bytes);
     let _ = rays::canvas::destroy(&canvas);
-    Editor::close(&owner.borrow());
+    editor::close(&owner.borrow());
     let _ = std::fs::remove_dir_all(source.parent().unwrap());
-    assert_eq!(Editor::Private::image_stats(&owner.borrow()), (1, 1));
+    assert_eq!(editor::private::image_stats(&owner.borrow()), (1, 1));
     assert_eq!(handles(), before);
 }
 
-fn options_d1() -> Editor::Create {
-    Editor::Create { domains: Some(1), ..options() }
+fn options_d1() -> editor::Create {
+    editor::Create { domains: Some(1), ..options() }
 }
 
 /// Resident Canvas live route: mixed mesh/image roundtrip parity, stable identity, isolation, replan/resize,
@@ -977,24 +977,24 @@ fn native_retained_canvas() {
     };
     let initial = text(None, 65, 17, "(* t 16)");
     std::fs::write(&source, &initial).unwrap();
-    let owner = RefCell::new(Editor::create(options_d1(), &load(&initial), Some(rays_editor::Source::at(source.to_str().unwrap(), &editor_document::lowering::sha256(&initial))), Editor::prepare_fn(), Editor::draw_fn()).unwrap());
+    let owner = RefCell::new(editor::create(options_d1(), &load(&initial), Some(rays_editor::Source::at(source.to_str().unwrap(), &editor_document::lowering::sha256(&initial))), editor::prepare_fn(), editor::draw_fn()).unwrap());
     let destination = rays::canvas::create(65, 17).unwrap();
-    let value = || Editor::Private::image_plan(&owner.borrow()).instances.iter().find(|i| i.graph == "rendered").expect("instance").result.clone();
+    let value = || editor::private::image_plan(&owner.borrow()).instances.iter().find(|i| i.graph == "rendered").expect("instance").result.clone();
     let exact = |time: f64| ok(payload_of(&owner.borrow(), &value(), Some(&live(time))));
     let saved = exact(0.);
     let saved_bytes = rgba(&saved);
-    assert_eq!(Editor::Private::image_stats(&owner.borrow()), (0, 0));
+    assert_eq!(editor::private::image_stats(&owner.borrow()), (0, 0));
     let resolve = |time: f64| with_images(&owner.borrow(), None, Some(&live(time)), None, |image, texture| (ok(image(&value())), ok(texture(&value()))));
     let (image, texture) = resolve(0.);
     let identity = rays::texture::Private::identity(&texture);
     let resource = res(&image);
     let initial_generation = I::generation(&resource);
-    assert_eq!(Editor::Private::image_render_stats(&owner.borrow()), (2, 1, 1, 1));
+    assert_eq!(editor::private::image_render_stats(&owner.borrow()), (2, 1, 1, 1));
     for frame in 0..20 {
         let (actual, view) = resolve(frame as f64 / 20.);
         assert!(rays::image::same(&actual, &image) && rays::texture::Private::identity(&view) == identity);
     }
-    assert_eq!(Editor::Private::image_render_stats(&owner.borrow()), (2, 1, 1, 1));
+    assert_eq!(editor::private::image_render_stats(&owner.borrow()), (2, 1, 1, 1));
     assert!(I::generation(&resource) > initial_generation);
     assert!(I::cpu_storage_bytes(&resource) == 0 && I::readbacks(&resource) == 0);
     let verify = |time: f64| {
@@ -1023,7 +1023,7 @@ fn native_retained_canvas() {
     verify(0.5);
     let reload = |time: f64, contents: &str| {
         std::fs::write(&source, contents).unwrap();
-        let next = Editor::update(owner.borrow().clone(), &frame_for(time, (65, 17)));
+        let next = editor::update(owner.borrow().clone(), &frame_for(time, (65, 17)));
         *owner.borrow_mut() = next;
     };
     reload(10., &text(None, 35, 33, "(* t 16)"));
@@ -1036,19 +1036,19 @@ fn native_retained_canvas() {
             let _ = resolve(0.);
         }
         let generation = I::generation(&resource);
-        let stats = Editor::Private::image_render_stats(&owner.borrow());
+        let stats = editor::private::image_render_stats(&owner.borrow());
         for _ in 0..2 {
             let r = with_images(&owner.borrow(), None, Some(&live(2.)), None, |image, _| image(&value()));
             assert!(r.is_err());
         }
-        assert!(I::generation(&resource) == generation && Editor::Private::image_render_stats(&owner.borrow()) == stats);
+        assert!(I::generation(&resource) == generation && editor::private::image_render_stats(&owner.borrow()) == stats);
         assert!(is_destroyed(I::gpu_snapshot(&resource)));
         verify(0.);
     }
     assert!(I::cpu_storage_bytes(&resource) == 0 && I::readbacks(&resource) == 0);
-    let (_, _, captures, readbacks) = Editor::Private::image_render_stats(&owner.borrow());
-    Editor::close(&owner.borrow());
-    let (created, destroyed, captures_after, readbacks_after) = Editor::Private::image_render_stats(&owner.borrow());
+    let (_, _, captures, readbacks) = editor::private::image_render_stats(&owner.borrow());
+    editor::close(&owner.borrow());
+    let (created, destroyed, captures_after, readbacks_after) = editor::private::image_render_stats(&owner.borrow());
     assert!(created == destroyed && captures == captures_after && readbacks == readbacks_after);
     assert!(rgba(&saved) == saved_bytes);
     let _ = rays::canvas::destroy(&destination);

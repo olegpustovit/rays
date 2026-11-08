@@ -30,7 +30,7 @@ type Candidate = Result<Document, Vec<Diagnostic>>;
 
 /// Every editor path records the same immutable document. No-op/rejected edits leave both the
 /// present and the merge state untouched.
-pub fn commit(doc: &Arc<Document>, label: Option<&str>, merge: Option<Merge>, history: history::t) -> history::t {
+pub fn commit(doc: &Arc<Document>, label: Option<&str>, merge: Option<Merge>, history: history::EditorHistory) -> history::EditorHistory {
     if Arc::ptr_eq(doc, &history::present_arc(&history)) {
         return history;
     }
@@ -38,7 +38,7 @@ pub fn commit(doc: &Arc<Document>, label: Option<&str>, merge: Option<Merge>, hi
 }
 
 /// The document as the history's present, keeping the present's identity when nothing changed.
-pub fn adopt(history: &history::t, doc: Document) -> Arc<Document> {
+pub fn adopt(history: &history::EditorHistory, doc: Document) -> Arc<Document> {
     let present = history::present_arc(history);
     if same_document(&present, &doc) { present } else { Arc::new(doc) }
 }
@@ -52,7 +52,7 @@ pub fn parameter_gesture(operation: &str, level: Level, id: i64, values: &[(Stri
 
 /// A workspace edit installed as the present: the source and its lowering are one history entry,
 /// the open level is re-resolved and the cook told about the new volatile nodes.
-pub fn install(value: &mut t, doc: Document, label: &str, merge: Merge) {
+pub fn install(value: &mut EditorModel, doc: Document, label: &str, merge: Merge) {
     let doc = adopt(&value.history, doc);
     let level = document::resolve_level(&doc, pane_level(&*value));
     value.lisp_vocab = vocabulary_for(value, &doc);
@@ -77,7 +77,7 @@ fn at_line_1(mut d: Diagnostic) -> Diagnostic {
 /// Selection patches root bindings into one candidate graph, checked and installed once. Omitted
 /// bindings stay and the shown result cannot change. Without a closure the tab shows the graph
 /// form, replaced whole.
-fn binding_document(value: &t, path: &[String], text: &str) -> Candidate {
+fn binding_document(value: &EditorModel, path: &[String], text: &str) -> Candidate {
     let ws = &value.doc.workspace.ws;
     match text_pane::graph_op(&ws.source, &path[0], Some(path), text) {
         Err(d) => Err(vec![if d.position.is_none() { at_line_1(d) } else { d }]),
@@ -90,7 +90,7 @@ fn binding_document(value: &t, path: &[String], text: &str) -> Candidate {
 
 /// The Graph tab's apply: the draft must be the one graph (or function) form, which replaces the
 /// graph's; atomic like every apply.
-fn graph_document(value: &t, name: &str, text: &str) -> Candidate {
+fn graph_document(value: &EditorModel, name: &str, text: &str) -> Candidate {
     let ws = &value.doc.workspace.ws;
     match text_pane::graph_op(&ws.source, name, None, text) {
         Err(d) => Err(vec![if d.position.is_none() { Diagnostic { position: Some(Position { line: 1, col: 0 }), ..d } } else { d }]),
@@ -107,7 +107,7 @@ pub fn scrub_merge() -> Merge {
     Merge::Gesture("text-scrub".to_string())
 }
 
-pub fn select_source(value: &mut t, path: &[String]) {
+pub fn select_source(value: &mut EditorModel, path: &[String]) {
     let Some(graph) = path.first() else { return };
     if graph.starts_with("macro:") {
         return;
@@ -172,7 +172,7 @@ fn of_graph(graph: &str, ws: &WorkspaceDoc) -> Result<String, Diagnostic> {
     text_pane::make_shown(&ws.source, graph, None, Tab::Graph).map(|shown| shown.text)
 }
 
-fn one_intent(value: &mut t, intent: &Intent) {
+fn one_intent(value: &mut EditorModel, intent: &Intent) {
     let (intent, literal): (&Intent, Option<(Arc<Vec<flow_syntax::syntax::Syntax>>, Op, Position)>) = match intent {
         Intent::LiteralScrub { source, op, position, fallback } => (fallback.as_ref(), Some((source.clone(), op.clone(), position.clone()))),
         other => (other, None),
@@ -476,14 +476,14 @@ fn one_intent(value: &mut t, intent: &Intent) {
     }
 }
 
-pub fn apply_text(value: &mut t, intents: &[Intent]) {
+pub fn apply_text(value: &mut EditorModel, intents: &[Intent]) {
     for intent in intents {
         one_intent(value, intent);
     }
 }
 
 /// The intents of a text pane that is not the one in use fold into its own state.
-pub fn apply_text_at(value: &mut t, key: &Vec<String>, intents: &[Intent]) {
+pub fn apply_text_at(value: &mut EditorModel, key: &Vec<String>, intents: &[Intent]) {
     if intents.is_empty() {
         return;
     }
@@ -514,7 +514,7 @@ pub fn draft_applies(except: Option<&str>, text: &text_pane::State) -> Vec<Inten
 
 /// Some text pane holds text that is not in the document (`except`: the text of a refused reload,
 /// which is the file's and not the user's).
-pub fn has_draft(except: Option<&str>, value: &t) -> bool {
+pub fn has_draft(except: Option<&str>, value: &EditorModel) -> bool {
     !draft_applies(except, &value.text).is_empty() || value.locals.iter().any(|(_, l)| !draft_applies(except, &l.code).is_empty())
 }
 
@@ -524,19 +524,19 @@ pub fn same_text(a: &Document, b: &document::Text) -> bool {
 }
 
 /// Work a reload of the source file would lose: edits since the file's text, or a draft.
-pub fn unsaved(except: Option<&str>, value: &t) -> bool {
+pub fn unsaved(except: Option<&str>, value: &EditorModel) -> bool {
     !same_text(&value.doc, &value.filed) || has_draft(except, value)
 }
 
 /// The document is the file's text now (saved over it).
-pub fn filed(mut value: t) -> t {
+pub fn filed(mut value: EditorModel) -> EditorModel {
     value.filed = document::text(&value.doc);
     value
 }
 
 /// Command-S with a draft: every draft is applied first (each one its "Edit text" entry); a draft
 /// that does not check stays with its errors, and `Err` says the save must wait.
-pub fn apply_drafts(except: Option<&str>, value: &mut t) -> bool {
+pub fn apply_drafts(except: Option<&str>, value: &mut EditorModel) -> bool {
     let applies = draft_applies(except, &value.text);
     apply_text(value, &applies);
     let locals = value.locals.clone();

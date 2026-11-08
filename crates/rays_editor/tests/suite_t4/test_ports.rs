@@ -4,7 +4,7 @@
 use super::t4::*;
 use editor_document::workspace_doc as Doc;
 use input::{Event, Key, MouseButton::LeftButton};
-use rays_editor::{Editor, Source, Workspace};
+use rays_editor::{editor, Source, workspace};
 use std::cell::RefCell;
 
 const NAMES: [&str; 8] = ["basic", "generative", "noise", "recursive_rectangles", "drawing", "audio", "file_dialog", "pxui"];
@@ -54,7 +54,7 @@ fn sketch_text(name: &str) -> String {
 
 fn load(name: &str) -> Doc::T {
     let source = sketch_text(name);
-    let ws = Workspace::load(None, vec![], None, &source).unwrap_or_else(|ds| panic!("{name}: {ds:?}"));
+    let ws = workspace::load(None, vec![], None, &source).unwrap_or_else(|ds| panic!("{name}: {ds:?}"));
     assert!(Doc::to_text(&ws).unwrap() == source, "{name}: load does not print back to its source");
     ws
 }
@@ -65,18 +65,18 @@ fn save_roundtrip(name: &str) {
     let dir = temp_dir(&format!("port-save-{name}"));
     let file = format!("{dir}/sketch.rays");
     std::fs::write(&file, &source).unwrap();
-    let o = Editor::Create { ui_text_size: Some(11), platform: Some(input::Platform::Apple), await_: Some(true), domains: Some(1), presets: Some(format!("{dir}/presets")), ..Default::default() };
-    let ed = Editor::create(o, &workspace, Some(Source::at(&file, &editor_document::lowering::sha256(&source))), Editor::prepare_fn(), Editor::draw_fn()).unwrap();
-    let mut ed = Editor::update(ed, &frame_of(false, name, 0));
+    let o = editor::Create { ui_text_size: Some(11), platform: Some(input::Platform::Apple), await_: Some(true), domains: Some(1), presets: Some(format!("{dir}/presets")), ..Default::default() };
+    let ed = editor::create(o, &workspace, Some(Source::at(&file, &editor_document::lowering::sha256(&source))), editor::prepare_fn(), editor::draw_fn()).unwrap();
+    let mut ed = editor::update(ed, &frame_of(false, name, 0));
     let mut save = frame_of(false, name, 1);
     save.input.keys = vec![Key::Meta];
     save.input.events = vec![Event::Key_pressed(Key::KeyChar('s'))];
-    ed = Editor::update(ed, &save);
-    ed = Editor::update(ed, &frame_of(false, name, 2));
+    ed = editor::update(ed, &save);
+    ed = editor::update(ed, &frame_of(false, name, 2));
     // (the OCaml inode check is POSIX-only: an atomic replace keeps the text and comments)
     assert!(std::fs::read_to_string(&file).unwrap() == source, "{name}: Command-S changed the source file");
-    assert!(Doc::to_text(&Editor::workspace(&ed)).unwrap() == source, "{name}: the document changed on save");
-    Editor::close(&ed);
+    assert!(Doc::to_text(&editor::workspace(&ed)).unwrap() == source, "{name}: the document changed on save");
+    editor::close(&ed);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -132,7 +132,7 @@ pub fn moving_circles() {
   positions (map (fn [i] [(+ (mod i 640) (* 5 (sin phase))) (mod (int/div i 640) 360) 0]) (array/range 10000))]
   (draw/merge (draw/background "#111827") (draw/circles positions :radius 2.0 :fill "#22d3ee"))))
  (graph window :context settings (settings/config :width 640 :height 360)))"##;
-    let workspace = Workspace::load(None, vec![], None, text).unwrap_or_else(|ds| panic!("{ds:?}"));
+    let workspace = workspace::load(None, vec![], None, text).unwrap_or_else(|ds| panic!("{ds:?}"));
     let expected = parity("moving_circles", &workspace);
     assert!(expected[0] != expected[3], "the circles do not move");
 }

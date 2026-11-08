@@ -6,7 +6,7 @@ use editor_document::document::{Home, Origin};
 use flow_graph::flow_edit::ArgKey;
 use input::{Event, Key, MouseButton};
 use pxui_shell::layout;
-use rays_editor::{Editor, Reduce};
+use rays_editor::{editor, reduce};
 
 pub fn run_lowering() {
     if !gpu() {
@@ -92,11 +92,11 @@ pub fn run_frame_key() {
         };
         let mut at = frame_full(&[], if n == 18 { &[Key::Shift] } else { &[] }, (0., 0.), (640., 360.), events, n);
         at.input.size = (1400, 800);
-        e = Editor::update(e, &at);
+        e = editor::update(e, &at);
     }
-    check(Editor::undo_label(&e).as_deref() == Some("Frame"), "Shift-G makes one Frame history entry");
-    check(!Editor::workspace(&e).layout.frames.is_empty(), "the frame is in the layout");
-    Editor::close(&e);
+    check(editor::undo_label(&e).as_deref() == Some("Frame"), "Shift-G makes one Frame history entry");
+    check(!editor::workspace(&e).layout.frames.is_empty(), "the frame is in the layout");
+    editor::close(&e);
 }
 
 pub fn run_editor() {
@@ -132,7 +132,7 @@ pub fn run_editor() {
     check(r.undo_label() == Some("Split panel".into()), &format!("the menu split the graph panel: {:?}", r.undo_label()));
     check(has(&r.source(), "network_a") && has(&r.source(), "network_b"), "the split bound two new panels");
     // a panel made by a loop cannot be split: the status says where it comes from
-    let geometry = layout::geometry(None, Some(&[Panel::Timeline]), &shell_of(&build_ok(&Editor::workspace(&r.e))).tree, &frame(&[], (0., 0.), vec![], 0));
+    let geometry = layout::geometry(None, Some(&[Panel::Timeline]), &shell_of(&build_ok(&editor::workspace(&r.e))).tree, &frame(&[], (0., 0.), vec![], 0));
     let leaf = layout::find(&geometry, &Panel::View("v1.1.2".into())).expect("leaf");
     let (hx, hy, hw, _) = leaf.header;
     let depth = r.undo_label();
@@ -203,7 +203,7 @@ pub fn run_panel_keys() {
     let mut r = Run::new(editor(&two));
     let held = [MouseButton::LeftButton];
     let (panel, picture) = ((200., 300.), (700., 300.));
-    let live = |r: &Run| Editor::Private::live_frame(&r.e);
+    let live = |r: &Run| editor::private::live_frame(&r.e);
     r.step(picture, vec![]);
     r.step(picture, vec![Event::Pointer_moved(picture)]);
     check(live(&r).pointer == picture, "the picture has the pointer");
@@ -231,7 +231,7 @@ pub fn run_panel_keys() {
         r.step_full(&[], keys, at, vec![Event::Pointer_released(MouseButton::LeftButton, at)]);
         r.step_full(&[], keys, at, vec![]);
     };
-    let seen = |r: &Run| Editor::Private::live_frame(&r.e).keys;
+    let seen = |r: &Run| editor::private::live_frame(&r.e).keys;
     click(&mut r, &[], picture);
     r.step_full(&[], &esc, picture, vec![]);
     check(seen(&r) == [Key::Escape], "the focused picture did not get a held Esc");
@@ -307,7 +307,7 @@ pub fn run_wire_gestures() {
     };
     let nested = "(workspace w (graph g :context sop (let* [m (sop/transform (sop/box))] m)))";
     let mut r = started(nested);
-    r.e = Reduce::select_path(r.e.clone(), &["g".to_string(), "m#0".to_string()]);
+    r.e = reduce::select_path(r.e.clone(), &["g".to_string(), "m#0".to_string()]);
     pick(&mut r, "transform");
     check(
         r.undo_label() == Some("Add node".into()) && !has(&r.source(), "(sop/transform (sop/box))") && has(&r.source(), "(sop/box)") && has(&r.source(), "(sop/transform box)"),
@@ -315,7 +315,7 @@ pub fn run_wire_gestures() {
     );
     r.count += 1;
     let undo_frame = frame_full(&[], &[Key::Meta], (0., 0.), (450., 300.), vec![ch('z')], r.count);
-    r.e = Editor::update(r.e.clone(), &undo_frame);
+    r.e = editor::update(r.e.clone(), &undo_frame);
     check(has(&r.source(), "(sop/transform (sop/box))") && r.undo_label().is_none(), &format!("one undo took the name and the node back: {}", r.source()));
     r.close();
     let mut r = started("(workspace w (graph g :context sop (let* [a (sop/box) m (sop/transform a)] m)))");
@@ -327,8 +327,8 @@ pub fn run_wire_gestures() {
     r.step(p, vec![key(Key::Home)]);
     r.step(p, vec![ch('i')]);
     r.step(p, vec![]);
-    check(Editor::level(&r.e) == Some("g".into()), "the graph is open");
-    let bx = |r: &Run, path: &[&str]| Editor::node_box(&r.e, &path.iter().map(|s| s.to_string()).collect::<Vec<_>>()).expect("node box");
+    check(editor::level(&r.e) == Some("g".into()), "the graph is open");
+    let bx = |r: &Run, path: &[&str]| editor::node_box(&r.e, &path.iter().map(|s| s.to_string()).collect::<Vec<_>>()).expect("node box");
     let (ax, ay, aw, _) = bx(&r, &["g", "a"]);
     let (mx, my, _, _) = bx(&r, &["g", "m"]);
     // the wire runs from a's out-port to m's header in-port

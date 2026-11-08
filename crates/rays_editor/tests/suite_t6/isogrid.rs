@@ -8,7 +8,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use editor_document::workspace_doc as wd;
 use flow_graph::flow_edit::Op;
 use flow_syntax::syntax as S;
-use rays_editor::{cook, Editor};
+use rays_editor::{cook, editor};
 use sop::async_cook;
 
 use super::super::support::*;
@@ -25,7 +25,7 @@ pub fn isogrid_deferred() {
     let catalog = rays_editor::workspace_catalog(None).unwrap();
     let workspace = wd::edit(&catalog, &workspace, &Op::SetInputDefault { form: "volume".into(), input: "resolution".into(), value: S::parse("64").unwrap().remove(0) }).unwrap_or_else(|d| panic!("{}", rays_diagnostic::to_string(&d)));
     let gate = Arc::new((Mutex::new(Gate::default()), Condvar::new()));
-    let mut ed = Editor::create(Editor::Create { await_: Some(false), domains: Some(8), ..options() }, &workspace, None, Editor::prepare_fn(), Editor::draw_fn()).unwrap();
+    let mut ed = editor::create(editor::Create { await_: Some(false), domains: Some(8), ..options() }, &workspace, None, editor::prepare_fn(), editor::draw_fn()).unwrap();
     assert!(ed.core.doc.workspace.lowered.defer);
     // worker calls: started (request taken), started (cook), and the one after the cook, which waits
     let main = std::thread::current().id();
@@ -56,7 +56,7 @@ pub fn isogrid_deferred() {
         lock.lock().unwrap().released = true;
         cv.notify_all();
     };
-    ed = Editor::update(ed, &frame_n(0));
+    ed = editor::update(ed, &frame_n(0));
     {
         let (lock, cv) = &*gate;
         let mut g = lock.lock().unwrap();
@@ -65,7 +65,7 @@ pub fn isogrid_deferred() {
         }
     }
     for count in 1..=3 {
-        ed = Editor::update(ed, &frame_n(count));
+        ed = editor::update(ed, &frame_n(count));
         assert!(cook::pieces(&ed.core.cook).is_empty());
         match cook::status(&ed.core.cook) {
             async_cook::Status::Cooking { .. } => {}
@@ -78,7 +78,7 @@ pub fn isogrid_deferred() {
     release(&gate);
     let completion = async_cook::await_completion(&ed.core.cook.worker);
     assert!(completion.result.is_ok(), "the released cook failed");
-    Editor::close(&ed);
+    editor::close(&ed);
 }
 
 fn frame_n(count: i64) -> rays::frame::Frame {

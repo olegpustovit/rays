@@ -23,7 +23,7 @@ use crate::text_pane;
 use crate::timeline;
 
 /// the open dialog, for the crash report
-pub fn prompt_name(value: &t) -> &'static str {
+pub fn prompt_name(value: &EditorModel) -> &'static str {
     match &value.prompt {
         None => "-",
         Some(prompt::Keys) => "keys",
@@ -45,7 +45,7 @@ pub fn level_name<'a>(value: impl Into<ModelView<'a>>) -> String {
     level_name_at(value, pane_level(value))
 }
 
-pub fn level_name_at(value: &t, level: editor_document::document::Level) -> String {
+pub fn level_name_at(value: &EditorModel, level: editor_document::document::Level) -> String {
     match level {
         editor_document::document::Level::Scene => "scene".to_string(),
         editor_document::document::Level::Inside(id) => {

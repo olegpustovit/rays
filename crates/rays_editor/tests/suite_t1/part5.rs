@@ -8,7 +8,7 @@ use flow_graph::flow_edit::{ArgKey, Op};
 use flow_syntax::syntax::{self as s, Draft as Node};
 use input::{Event, Key, MouseButton};
 use pxui_shell::layout;
-use rays_editor::Editor;
+use rays_editor::editor;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -31,7 +31,7 @@ pub fn run_root_section() {
     }
     let before = r.source();
     check(r.undo_label().is_none() && has(&r.source(), ":width 800"), "the root is in the text, nothing to undo");
-    let (ix, iy, iw, ih) = Editor::panes(&r.e, &idle_frame(r.count)).inspector;
+    let (ix, iy, iw, ih) = editor::panes(&r.e, &idle_frame(r.count)).inspector;
     check(iw > 0 && ih > 0, "the inspector panel is showing");
     // the Renderer row of the Scene root section: a press opens its menu under the field; the second row is Wireframe.
     let row = iy + 90 + 24 + 4 + 24 + 40 + 96 + 40 + 24 + 40;
@@ -75,18 +75,18 @@ pub fn run_idle_follow() {
         r.step(m, vec![]);
     }
     let doc = r.source();
-    let prepared = Editor::prepared(&r.e).map(|g| rdk_core::geometry::point_count(&g));
-    let status = Editor::Private::status_text(&r.e);
-    let scene = Editor::Private::resolved_scene(&r.e);
+    let prepared = editor::prepared(&r.e).map(|g| rdk_core::geometry::point_count(&g));
+    let status = editor::private::status_text(&r.e);
+    let scene = editor::private::resolved_scene(&r.e);
     let sig = |k: &editor_document::kind_graph::T| k.iter().map(|n| (n.id, n.kind.clone(), n.label.clone(), editor_document::kind_graph::field(n, "translate_x"))).collect::<Vec<_>>();
     // the graph reads only [t]: a roaming pointer over the picture is no reason to cook
     for i in 1..=20 {
         r.step((450. + i as f64, 300. - i as f64), vec![]);
     }
-    check(sig(&Editor::Private::resolved_scene(&r.e)) == sig(&scene), "a roaming pointer re-resolved the scene");
+    check(sig(&editor::private::resolved_scene(&r.e)) == sig(&scene), "a roaming pointer re-resolved the scene");
     check(r.source() == doc, "an idle frame wrote the document");
-    check(Editor::prepared(&r.e).map(|g| rdk_core::geometry::point_count(&g)) == prepared, "an idle frame cooked a new displayed mesh");
-    check(Editor::Private::status_text(&r.e) == status, &format!("the status moved while idle: {status} -> {}", Editor::Private::status_text(&r.e)));
+    check(editor::prepared(&r.e).map(|g| rdk_core::geometry::point_count(&g)) == prepared, "an idle frame cooked a new displayed mesh");
+    check(editor::private::status_text(&r.e) == status, &format!("the status moved while idle: {status} -> {}", editor::private::status_text(&r.e)));
     r.close();
 }
 
@@ -107,7 +107,7 @@ pub fn run_hide_and_order() {
     r.step(m, vec![]);
     r.step(m, vec![]);
     let click = |r: &mut Run, path: &[&str]| {
-        let (bx, by, bw, bh) = Editor::node_box(&r.e, &path.iter().map(|s| s.to_string()).collect::<Vec<_>>()).expect("node box");
+        let (bx, by, bw, bh) = editor::node_box(&r.e, &path.iter().map(|s| s.to_string()).collect::<Vec<_>>()).expect("node box");
         let at = (bx as f64 + bw as f64 / 2., by as f64 + bh as f64 - 6.);
         r.step(at, vec![Event::Pointer_moved(at)]);
         r.step(at, vec![Event::Pointer_pressed(LB, at)]);
@@ -127,7 +127,7 @@ pub fn run_hide_and_order() {
     r.step(m, vec![]);
     check(!has(&r.source(), ":visible"), "two undos give the text back");
     // Alt-Down on a hovered merge input swaps it with the next
-    let (bx, by, bw, bh) = Editor::node_box(&r.e, &["scene".into(), "all".into()]).expect("all");
+    let (bx, by, bw, bh) = editor::node_box(&r.e, &["scene".into(), "all".into()]).expect("all");
     click(&mut r, &["scene", "all"]);
     let mut moved = false;
     let mut y = by + 4;
@@ -267,7 +267,7 @@ pub fn run_studio() {
     r.step((450., 100.), vec![]);
     check(r.dump("focus") == "Graph" && r.dump("pane graph") == "garden", "the focus did not start in the graph panel");
     check(r.dump("text").starts_with("graph tab"), &format!("the lisp panel's tab: {}", r.dump("text")));
-    check(Editor::look_through(&r.e), "the viewport did not start looking through the render camera");
+    check(editor::look_through(&r.e), "the viewport did not start looking through the render camera");
     let g0 = (216.5, 100.);
     r.step(g0, vec![Event::Pointer_moved(g0)]);
     r.stepb(&[LB], g0, vec![Event::Pointer_pressed(LB, g0)]);
@@ -276,7 +276,7 @@ pub fn run_studio() {
     r.step((180.2, 100.), vec![]);
     check(has(&r.source(), "(ui/split \"horizontal\" outline work :first_size 180)") && r.undo_label() == Some("Resize panel".into()), &format!("the gutter of a fixed split did not write points: {}", r.source()));
     // the second layout: a floating graph on the material beside the docked graph, each its own pane
-    r.e = match Editor::edit_layout(r.e.clone(), &L::SetLayout { graph: "editor".into(), index: 1 }) {
+    r.e = match editor::edit_layout(r.e.clone(), &L::SetLayout { graph: "editor".into(), index: 1 }) {
         Ok(e) => e,
         Err(m) => fail(&m),
     };
@@ -294,14 +294,14 @@ pub fn run_studio() {
     let mut e = editor(&replace(&text, ":active 0", ":active 1"));
     let mut count = 0i64;
     let probes: Rc<RefCell<Vec<f64>>> = Rc::new(RefCell::new(vec![]));
-    let mut step = |e: &mut Editor::t, buttons: &[MouseButton], mouse: (f64, f64), events: Vec<Event>| {
+    let mut step = |e: &mut editor::Editor, buttons: &[MouseButton], mouse: (f64, f64), events: Vec<Event>| {
         count += 1;
         probes.borrow_mut().clear();
         let mut f = frame(buttons, mouse, events, count);
         f.input.size = (1440, 900);
         let sink = probes.clone();
         // the sketch's own rows end every inspector: a tall filler whose place says where that inspector has scrolled to
-        let (next, _) = Editor::update_with(e.clone(), &f, &move |ui| {
+        let (next, _) = editor::update_with(e.clone(), &f, &move |ui| {
             let filler = ui.box_("filler", pxui::ui::BoxOpts::default().h(pxui::ui::Size::Px(1500.)));
             let (_, y, _, _) = ui.rect(&filler);
             sink.borrow_mut().push(y);
@@ -309,13 +309,13 @@ pub fn run_studio() {
         });
         *e = next;
     };
-    let click = |step: &mut dyn FnMut(&mut Editor::t, &[MouseButton], (f64, f64), Vec<Event>), e: &mut Editor::t, p: (f64, f64)| {
+    let click = |step: &mut dyn FnMut(&mut editor::Editor, &[MouseButton], (f64, f64), Vec<Event>), e: &mut editor::Editor, p: (f64, f64)| {
         step(e, &[], p, vec![Event::Pointer_moved(p)]);
         step(e, &[LB], p, vec![Event::Pointer_pressed(LB, p)]);
         step(e, &[], p, vec![Event::Pointer_released(LB, p)]);
         step(e, &[], p, vec![]);
     };
-    let rest = |step: &mut dyn FnMut(&mut Editor::t, &[MouseButton], (f64, f64), Vec<Event>), e: &mut Editor::t, p: (f64, f64)| {
+    let rest = |step: &mut dyn FnMut(&mut editor::Editor, &[MouseButton], (f64, f64), Vec<Event>), e: &mut editor::Editor, p: (f64, f64)| {
         for _ in 0..3 {
             step(e, &[], p, vec![]);
         }
@@ -327,7 +327,7 @@ pub fn run_studio() {
         [a, b] => (*a, *b),
         l => fail(&format!("{} inspectors drew their rows, not 2", l.len())),
     };
-    let scroll = |step: &mut dyn FnMut(&mut Editor::t, &[MouseButton], (f64, f64), Vec<Event>), e: &mut Editor::t, p: (f64, f64)| {
+    let scroll = |step: &mut dyn FnMut(&mut editor::Editor, &[MouseButton], (f64, f64), Vec<Event>), e: &mut editor::Editor, p: (f64, f64)| {
         step(e, &[], p, vec![Event::Pointer_moved(p)]);
         for _ in 0..6 {
             step(e, &[], p, vec![Event::Scrolled((0., -8.))]);
@@ -349,7 +349,7 @@ pub fn run_studio() {
     click(&mut step, &mut e, floating);
     check(has(&dump_line(&e, "panels"), "inspector details*"), &format!("a click did not focus the floating inspector: {}", dump_line(&e, "panels")));
     // typing in the floating text pane drafts there, not in the docked one
-    let pane = |e: &Editor::t, name: &str| -> String {
+    let pane = |e: &editor::Editor, name: &str| -> String {
         let prefix = format!("lisp {name}");
         dump_line(e, "panels").split(';').map(|l| l.trim().to_string()).find(|l| l.starts_with(&prefix)).unwrap_or_else(|| fail(&format!("no pane {name}")))
     };
@@ -362,5 +362,5 @@ pub fn run_studio() {
     step(&mut e, &[], (1280., 720.), vec![text_input(" ")]);
     rest(&mut step, &mut e, (1280., 720.));
     check(has(&pane(&e, "code"), "lisp code*: graph tab, draft yes") && has(&pane(&e, "notes"), "document tab, draft yes"), &format!("the docked text pane does not draft on its own: {}", dump_line(&e, "panels")));
-    Editor::close(&e);
+    editor::close(&e);
 }

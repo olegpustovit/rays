@@ -34,7 +34,7 @@ fn edge_counts(g: &rdk_core::geometry::T) -> (i64, i64) {
 pub fn shattered_studio() {
     let text = read_repo("sketches/shattered_studio.rays");
     let workspace = load(&text);
-    let graphs = rays_editor::Workspace::sop_graphs(None, &workspace).unwrap();
+    let graphs = rays_editor::workspace::sop_graphs(None, &workspace).unwrap();
     let graph = graphs.iter().find(|(n, _)| n == "shards").expect("shards").1.clone();
     let fracture_id = sop::node::inspect(&graph).into_iter().find(|i| i.operation == "boolean_fracture").expect("fracture").id;
     let fracture = sop::node::find(&graph, fracture_id).unwrap();

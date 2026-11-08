@@ -79,15 +79,15 @@ fn document_memory(value: &Arc<editor_document::document::T>) {
     });
 }
 
-fn host_gpu(value: &t) -> workspace_gpu::WorkspaceGpu {
+fn host_gpu(value: &LoopModel) -> workspace_gpu::WorkspaceGpu {
     value.host.borrow().gpu.clone()
 }
-fn host_images(value: &t) -> workspace_images::WorkspaceImages {
+fn host_images(value: &LoopModel) -> workspace_images::WorkspaceImages {
     value.host.borrow().images.clone()
 }
 
 /// each canvas panel's picture: reused while its plan, size and preview stand, else rendered
-pub fn canvas_pictures(context_error: Option<String>, value: &t, input: &input::Frame, raw_frame: &frame::Frame, core: &m::t, control: &V::control) -> (Vec<(String, canvas_picture)>, Option<String>) {
+pub fn canvas_pictures(context_error: Option<String>, value: &LoopModel, input: &input::Frame, raw_frame: &frame::Frame, core: &m::EditorModel, control: &V::control) -> (Vec<(String, canvas_picture)>, Option<String>) {
     let mut pictures: Vec<(String, canvas_picture)> = Vec::new();
     let mut error = context_error;
     let geometry = editor_shell::geometry(core, &core.workspace, raw_frame);
@@ -200,7 +200,7 @@ pub fn canvas_pictures(context_error: Option<String>, value: &t, input: &input::
 }
 
 /// the images the selected nodes show are prepared before the frame; what failed is reported
-pub fn preview_images(value: &t, frame_: &frame::Frame) -> Vec<String> {
+pub fn preview_images(value: &LoopModel, frame_: &frame::Frame) -> Vec<String> {
     let lowered = &value.core.doc.workspace.lowered;
     let images = host_images(value);
     workspace_images::bind(&images, lowered);
@@ -235,9 +235,9 @@ pub fn preview_images(value: &t, frame_: &frame::Frame) -> Vec<String> {
 /// are reduced before sealing its history. Updates the drag and returns the input
 /// with the drag's pointer events taken out, the held modifiers at the end of the frame, and the
 /// pane's press and release for the camera's pointer grab.
-pub fn world_drag_frame(value: &mut t, before: (Level, bool, &[Key], &[(i64, (Panel, Option<pxui_shell::layout::Path>))]), loaded: bool, actions: &[action], sent: &frame::Frame, area: Bounds) -> (frame::Frame, Vec<Key>, (bool, bool)) {
+pub fn world_drag_frame(value: &mut LoopModel, before: (Level, bool, &[Key], &[(i64, (Panel, Option<pxui_shell::layout::Path>))]), loaded: bool, actions: &[action], sent: &frame::Frame, area: Bounds) -> (frame::Frame, Vec<Key>, (bool, bool)) {
     let (previous_level, previous_map, held_keys, pane_keys) = before;
-    let seal = |core: &mut m::t| { core.history = history::seal(false, core.history.clone()); };
+    let seal = |core: &mut m::EditorModel| { core.history = history::seal(false, core.history.clone()); };
     let world_drag = if loaded
         || m::pane_level(&value.core) != previous_level
         || value.core.map_view != previous_map
@@ -295,7 +295,7 @@ pub fn world_drag_frame(value: &mut t, before: (Level, bool, &[Key], &[(i64, (Pa
 /// what the panes draw over the views: header tools, the gate where a film is not the whole pane,
 /// the selected object box in the focused view, and the render clock
 #[allow(clippy::too_many_arguments)]
-pub fn with_view_overlays(value: &mut t, now: f64, extra: &V::extra, viewing: &Option<String>, camera: &V::camera, cameras: &[(String, V::camera)], pending: bool, bodies: &[(String, Bounds)]) {
+pub fn with_view_overlays(value: &mut LoopModel, now: f64, extra: &V::extra, viewing: &Option<String>, camera: &V::camera, cameras: &[(String, V::camera)], pending: bool, bodies: &[(String, Bounds)]) {
     let core = Rc::make_mut(&mut value.core);
     core.view_tools = V::header_tools(extra);
     // what the panes draw over a view: the gate where it is not the whole pane, and the selected
@@ -332,7 +332,7 @@ pub fn with_view_overlays(value: &mut t, now: f64, extra: &V::extra, viewing: &O
 /// The frame's clicks pick in the view, and a payload carried over a viewport finds its surface.
 /// Updates the core and the press still waiting for its release.
 #[allow(clippy::too_many_arguments)]
-pub fn pick_in_views(value: &mut t, focused: &Focus, camera: &V::camera, extra: &V::extra, area: Bounds, modifiers: &[Key], input: &frame::Frame, raw_frame: &frame::Frame) {
+pub fn pick_in_views(value: &mut LoopModel, focused: &Focus, camera: &V::camera, extra: &V::extra, area: Bounds, modifiers: &[Key], input: &frame::Frame, raw_frame: &frame::Frame) {
     // A press and release within the drag threshold is a click: the view picks.
     let mut press = value.pick_press;
     let mut clicks: Vec<(f64, f64)> = Vec::new();
@@ -389,7 +389,7 @@ thread_local! {
     static FRAME_IMAGES: RefCell<Option<workspace_images::WorkspaceImages>> = const { RefCell::new(None) };
 }
 
-fn error_status_of(value: &t, image_errors: &[String]) -> Option<String> {
+fn error_status_of(value: &LoopModel, image_errors: &[String]) -> Option<String> {
     if !image_errors.is_empty() {
         Some(image_errors.join("; "))
     } else if value.memory_error.is_some() {
@@ -406,7 +406,7 @@ fn error_status_of(value: &t, image_errors: &[String]) -> Option<String> {
     }
 }
 
-pub fn update_with(value: &mut t, frame_: &frame::Frame, inspector: &dyn Fn(&mut Ui) -> Rc<dyn Any>) -> Option<Rc<dyn Any>> {
+pub fn update_with(value: &mut LoopModel, frame_: &frame::Frame, inspector: &dyn Fn(&mut Ui) -> Rc<dyn Any>) -> Option<Rc<dyn Any>> {
     let drawn_before = value.drawn.clone();
     let followed = follow_focus(&value, &value.core, frame_);
     (value.viewing, value.camera, value.cameras) = (followed.viewing, followed.camera, followed.cameras);
@@ -648,7 +648,7 @@ pub fn update_with(value: &mut t, frame_: &frame::Frame, inspector: &dyn Fn(&mut
     inspected
 }
 
-pub fn compose_scene(value: &t, frame_: &frame::Frame) -> Nodes {
+pub fn compose_scene(value: &LoopModel, frame_: &frame::Frame) -> Nodes {
     let pv = |key: &str, vp: Bounds, view_: &rays::camera::Camera, r: &rays::scene3::Scene3| paint_view(value, key, vp, view_, r);
     let guides = |bounds: Bounds| -> Nodes {
         if value.core.map_view {
@@ -699,7 +699,7 @@ pub fn same_input(a: &frame::Frame, b: &frame::Frame) -> bool {
 }
 
 /// a playing clock moves nothing unless a graph, the scene, the plan or a World reads it
-pub fn reads_clock(value: &t) -> bool {
+pub fn reads_clock(value: &LoopModel) -> bool {
     let moves = |dependencies: deps::T| [Fact::Time, Fact::Frame, Fact::Step, Fact::Input].iter().any(|fact| deps::mem(*fact, dependencies));
     let core = &value.core;
     let lowered = &core.doc.workspace.lowered;
@@ -711,7 +711,7 @@ pub fn reads_clock(value: &t) -> bool {
         || lowered.plan.nodes.iter().any(|n| n.args.iter().any(|(_, v)| flow_eval::frame_dependent(v)))
 }
 
-pub fn may_rest(value: &t, frame_: &frame::Frame) -> bool {
+pub fn may_rest(value: &LoopModel, frame_: &frame::Frame) -> bool {
     let core = &value.core;
     frame_.input.events.is_empty()
         && value.world_drag.is_none()
@@ -726,7 +726,7 @@ pub fn may_rest(value: &t, frame_: &frame::Frame) -> bool {
         && (timeline::mode(&editor_list::timeline(core)) != timeline::Mode::Playing || !reads_clock(value))
 }
 
-pub fn settle(before_rest: &Option<rest>, value: &mut t, frame_: &frame::Frame) {
+pub fn settle(before_rest: &Option<rest>, value: &mut LoopModel, frame_: &frame::Frame) {
     if !may_rest(&value, frame_) {
         value.rest = None;
         return;
@@ -739,7 +739,7 @@ pub fn settle(before_rest: &Option<rest>, value: &mut t, frame_: &frame::Frame) 
     value.rest = Some(rest { picture, still, shown: frame_.clone() });
 }
 
-pub fn rests(value: &t, frame_: &frame::Frame) -> Option<rest> {
+pub fn rests(value: &LoopModel, frame_: &frame::Frame) -> Option<rest> {
     match &value.rest {
         Some(rest_) if rest_.still >= rest_frames && frame_.input.events.is_empty() && same_input(&rest_.shown, frame_) && frame_.input.t >= rest_.shown.input.t && frame_.input.t - rest_.shown.input.t < rest_seconds => Some(rest_.clone()),
         _ => None,
@@ -747,7 +747,7 @@ pub fn rests(value: &t, frame_: &frame::Frame) -> Option<rest> {
 }
 
 /// the poll a full frame would make; a change leaves it unmade, for that frame to make and act on
-pub fn source_at_rest(value: &mut t, now: f64) -> bool {
+pub fn source_at_rest(value: &mut LoopModel, now: f64) -> bool {
     match value.source.clone() {
         None => true,
         Some(previous) => match source_file::poll(now, &previous) {
@@ -760,7 +760,7 @@ pub fn source_at_rest(value: &mut t, now: f64) -> bool {
     }
 }
 
-pub fn update(value: &mut t, frame_: &frame::Frame) {
+pub fn update(value: &mut LoopModel, frame_: &frame::Frame) {
     if rests(value, frame_).is_none() || !source_at_rest(value, frame_.input.t) {
         let before = value.rest.clone();
         update_with(value, frame_, &|_ui| Rc::new(()));
@@ -780,7 +780,7 @@ pub fn update(value: &mut t, frame_: &frame::Frame) {
 /// renderer keeps counts as a plan nothing shows: a tracer no drawn view wants is destroyed when the
 /// frame is rendered, so past the caches only undo beyond 16 entries is left. The document on screen
 /// and the last good frame stay; the error says so until usage is back.
-pub fn memory_boundary(value: &mut t) {
+pub fn memory_boundary(value: &mut LoopModel) {
     // once per crossing: a window with no eyes on its status strip still says it
     fn said(current: &Option<String>, message: String) -> Option<String> {
         match current {
@@ -840,7 +840,7 @@ pub fn memory_boundary(value: &mut t) {
     }
 }
 
-pub fn after_present(value: &mut t, frame_: &frame::Frame) {
+pub fn after_present(value: &mut LoopModel, frame_: &frame::Frame) {
     observe_presented(value);
     let saved = workspace_host::save_pending(&mut value.host.borrow_mut(), &mut |path| rays::canvas::save_screen_png(path));
     if let Err(diagnostic) = saved {
@@ -857,7 +857,7 @@ pub fn after_present(value: &mut t, frame_: &frame::Frame) {
     }
 }
 
-pub fn scene_of(value: &t, frame_: &frame::Frame) -> Nodes {
+pub fn scene_of(value: &LoopModel, frame_: &frame::Frame) -> Nodes {
     match &value.rest {
         Some(rest) if same_input(&rest.shown, frame_) => rest.picture.clone(),
         _ => compose_scene(value, frame_),
@@ -866,7 +866,7 @@ pub fn scene_of(value: &t, frame_: &frame::Frame) -> Nodes {
 
 /// A crash report's editor part: the document as a loadable preset and a summary of the view state
 /// and undo history.
-pub fn crash_dump(value: &t, directory: &str) -> Result<(), String> {
+pub fn crash_dump(value: &LoopModel, directory: &str) -> Result<(), String> {
     let core = &value.core;
     let write = |name: &str, text: &str| -> Result<(), String> { editor_core::store::write_text(&format!("{directory}/{name}"), text) };
     // document.txt is the text of any document; document.rays is the loadable preset, written for
@@ -924,7 +924,7 @@ pub fn crash_dump(value: &t, directory: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub fn close(value: &t) {
+pub fn close(value: &LoopModel) {
     for name in ["editor.document.syntax", "editor.document.terms"] {
         mem::root(&mem::document(name), Arc::new(|_| {}));
     }
@@ -952,7 +952,7 @@ pub fn run(
     profile: Option<bool>,
     config: sketch::config,
     workspace: workspace_doc::T,
-    source: Option<source_file::t>,
+    source: Option<source_file::SourceFile>,
     prepare: cook::Prepare_fn,
     draw: Draw_fn,
 ) -> Result<(), sketch::error> {
@@ -1006,7 +1006,7 @@ pub fn run(
     let program = sketch::program {
         init,
         update: Box::new(move |model, frame_| {
-            let value = model.downcast_mut::<t>().expect("editor model");
+            let value = model.downcast_mut::<LoopModel>().expect("editor model");
             update(value, frame_);
             // A cursor the platform refuses is said in the strip; the editor runs on.
             if let Err(message) = set_ui_cursor(&value.core.ui.borrow(), V::ui_visible(&value.control)) {
@@ -1014,22 +1014,22 @@ pub fn run(
             }
             None
         }),
-        view: Box::new(move |model, frame_| scene_of(model.downcast_ref::<t>().expect("editor model"), frame_)),
+        view: Box::new(move |model, frame_| scene_of(model.downcast_ref::<LoopModel>().expect("editor model"), frame_)),
         after_present: Some(Box::new(move |model, frame_| {
-            after_present(model.downcast_mut::<t>().expect("editor model"), frame_);
+            after_present(model.downcast_mut::<LoopModel>().expect("editor model"), frame_);
             None
         })),
         crash_dump: Some(Box::new(|model, directory| {
-            if let Err(message) = crash_dump(model.downcast_ref::<t>().expect("editor model"), directory) {
+            if let Err(message) = crash_dump(model.downcast_ref::<LoopModel>().expect("editor model"), directory) {
                 panic!("{message}");
             }
         })),
         idle: Some(Box::new(|model| {
-            let value = model.downcast_ref::<t>().expect("editor model");
+            let value = model.downcast_ref::<LoopModel>().expect("editor model");
             workspace_gpu::pump(&host_gpu(value), true);
             cook::busy(&value.core.cook)
         })),
-        on_stop: Some(Box::new(|model| close(model.downcast_ref::<t>().expect("editor model")))),
+        on_stop: Some(Box::new(|model| close(model.downcast_ref::<LoopModel>().expect("editor model")))),
     };
     sketch::run_state(Some(config), max_frames, crash_dir, profile, program).map(|_| ())
 }

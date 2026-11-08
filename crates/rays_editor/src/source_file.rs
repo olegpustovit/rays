@@ -9,13 +9,13 @@ use editor_core::store;
 use editor_document::{lowering, workspace_doc};
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct t {
+pub struct SourceFile {
     pub file: String,
     pub digest: String,
     pub observed: Option<String>,
     pub polled: f64,
     pub error: Option<String>,
-    pub imports: Vec<(String, t)>,
+    pub imports: Vec<(String, SourceFile)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -46,14 +46,14 @@ fn dirname(file: &str) -> String {
 }
 
 /// the file as it is now, whose text has `digest`
-pub fn synced(file: &str, digest: &str) -> t {
-    t { file: file.to_string(), digest: digest.to_string(), observed: Some(digest.to_string()), polled: f64::NEG_INFINITY, error: None, imports: Vec::new() }
+pub fn synced(file: &str, digest: &str) -> SourceFile {
+    SourceFile { file: file.to_string(), digest: digest.to_string(), observed: Some(digest.to_string()), polled: f64::NEG_INFINITY, error: None, imports: Vec::new() }
 }
 
 /// The first poll reads the file, so a file that already differs from the text the sketch was built
 /// from (edited since the build) reloads at once.
-pub fn at(file: &str, digest: &str) -> t {
-    t { observed: None, ..synced(file, digest) }
+pub fn at(file: &str, digest: &str) -> SourceFile {
+    SourceFile { observed: None, ..synced(file, digest) }
 }
 
 /// the Cargo workspace at or above `dir`, excluding build output
@@ -73,7 +73,7 @@ pub fn root(dir: &str) -> Option<String> {
 }
 
 /// ponytail: a sketch launched from outside its project has no source and only presets
-pub fn find(path: &str, digest: &str) -> Option<t> {
+pub fn find(path: &str, digest: &str) -> Option<SourceFile> {
     let cwd = std::env::current_dir().ok()?;
     let absolute = |p: PathBuf| if p.is_relative() { cwd.join(p) } else { p };
     let exe = std::env::current_exe().ok().map(|p| absolute(p).parent().map(|d| d.to_path_buf()).unwrap_or_default());
@@ -86,7 +86,7 @@ pub fn find(path: &str, digest: &str) -> Option<t> {
     })
 }
 
-pub fn file(t: &t) -> &str {
+pub fn file(t: &SourceFile) -> &str {
     &t.file
 }
 
@@ -104,14 +104,14 @@ pub fn read_imports(file: &str, text: &str) -> Result<Vec<(String, String)>, Vec
     Ok(imports)
 }
 
-pub fn with_imports(t: &t, imports: &[(String, String)]) -> t {
+pub fn with_imports(t: &SourceFile, imports: &[(String, String)]) -> SourceFile {
     let imports = imports.iter().map(|(path, text)| (path.clone(), at(&join(&dirname(&t.file), path), &sha(text)))).collect();
-    t { imports, ..t.clone() }
+    SourceFile { imports, ..t.clone() }
 }
 
 /// One content read per interval, independent of mtime/inode. `observed` suppresses repeated attempts
 /// to reload the same refused text.
-pub fn poll(now: f64, value: &t) -> (t, Option<String>) {
+pub fn poll(now: f64, value: &SourceFile) -> (SourceFile, Option<String>) {
     if now - value.polled < INTERVAL {
         return (value.clone(), None);
     }
@@ -141,14 +141,14 @@ pub fn poll(now: f64, value: &t) -> (t, Option<String>) {
     }
 }
 
-pub fn accepted(t: &t, text: &str) -> t {
-    t { digest: sha(text), ..t.clone() }
+pub fn accepted(t: &SourceFile, text: &str) -> SourceFile {
+    SourceFile { digest: sha(text), ..t.clone() }
 }
 
 /// Only over the text the document came from; the file keeps its permissions (a temporary file is
 /// created 0600). The digest check and rename cannot exclude another editor writing between them;
 /// that requires a cooperative writer protocol, not an atomic rename alone.
-pub fn save(value: &t, text: &str) -> Result<t, Save_error> {
+pub fn save(value: &SourceFile, text: &str) -> Result<SourceFile, Save_error> {
     let text = if text.ends_with('\n') { text.to_string() } else { format!("{text}\n") };
     match read(&value.file) {
         Ok(disk) if sha(&disk) == value.digest => {
@@ -157,7 +157,7 @@ pub fn save(value: &t, text: &str) -> Result<t, Save_error> {
             if let Some(perm) = perm {
                 let _ = std::fs::set_permissions(&value.file, perm);
             }
-            Ok(t { polled: value.polled, imports: value.imports.clone(), ..synced(&value.file, &sha(&text)) })
+            Ok(SourceFile { polled: value.polled, imports: value.imports.clone(), ..synced(&value.file, &sha(&text)) })
         }
         Ok(_) => Err(Save_error::Changed),
         Err(message) => Err(Save_error::Failed(message)),

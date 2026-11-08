@@ -3,7 +3,7 @@
 #![allow(dead_code)]
 use input::{Event, Key, MouseButton};
 use rays::frame;
-use rays_editor::Editor;
+use rays_editor::editor;
 
 pub fn key(k: Key) -> Event {
     Event::Key_pressed(k)
@@ -45,22 +45,22 @@ pub fn of_text(factories: Option<&[sop::edit_graph::Factory]>, text: &str) -> ed
 
 /// An editor stepped frame by frame, as the OCaml `current`/`count` refs.
 pub struct Driver {
-    pub ed: Option<Editor::t>,
+    pub ed: Option<editor::Editor>,
     pub count: i64,
 }
 
 impl Driver {
-    pub fn new(ed: Editor::t) -> Driver {
+    pub fn new(ed: editor::Editor) -> Driver {
         Driver { ed: Some(ed), count: 0 }
     }
-    pub fn e(&self) -> &Editor::t {
+    pub fn e(&self) -> &editor::Editor {
         self.ed.as_ref().unwrap()
     }
     pub fn step_with(&mut self, o: &Opts, mouse: (f64, f64), events: Vec<Event>) {
         self.count += 1;
         let f = frame(o, mouse, events, self.count);
         let ed = self.ed.take().unwrap();
-        self.ed = Some(Editor::update(ed, &f));
+        self.ed = Some(editor::update(ed, &f));
     }
     pub fn step(&mut self, events: Vec<Event>) {
         self.step_with(&Opts::default(), (100., 300.), events)
@@ -69,7 +69,7 @@ impl Driver {
         self.step_with(&Opts::default(), mouse, events)
     }
     pub fn close(&self) {
-        Editor::close(self.e())
+        editor::close(self.e())
     }
 }
 

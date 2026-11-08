@@ -8,7 +8,7 @@ use input::{Event, Key, MouseButton};
 use rays::camera;
 use rays_editor::cook;
 use rays_editor::pick;
-use rays_editor::Editor;
+use rays_editor::editor;
 use rays_math::{mat4, vec3};
 use std::cell::Cell;
 use std::rc::Rc;
@@ -30,7 +30,7 @@ fn lower_case(name: &str) -> lower::T {
 }
 
 /// The cooked piece of a lowered fixture; `prepared` counts the prepares.
-fn cooked(lit: &pick::Set, existing: Option<cook::t>, lowered: &lower::T, prepared: &Rc<Cell<i64>>) -> cook::t {
+fn cooked(lit: &pick::Set, existing: Option<cook::Cook>, lowered: &lower::T, prepared: &Rc<Cell<i64>>) -> cook::Cook {
     let cook = match existing {
         Some(c) => c,
         None => {
@@ -190,12 +190,12 @@ pub fn pick_bloom() {
 fn flat(text: &str, clicks: &[((f64, f64), &str, &str)]) {
     let workspace = load(text);
     let camera = rays::easy_camera::create(None, None, None, None, None, Some(false)).expect("camera");
-    let mut d = Driver::new(create(Editor::Create { domains: Some(1), camera: Some(camera), ..options() }, &workspace));
+    let mut d = Driver::new(create(editor::Create { domains: Some(1), camera: Some(camera), ..options() }, &workspace));
     let selected = |d: &Driver| dump_line(d.e(), "scope selected");
     for _ in 0..6 {
         d.step(vec![]);
     }
-    let panes = Editor::panes(d.e(), &frame_at((0., 0.), vec![], 0));
+    let panes = editor::panes(d.e(), &frame_at((0., 0.), vec![], 0));
     // the scene opens as a list: a click on the object's row selects it and [i] enters its graph
     let (gx, gy, _, _) = panes.graph;
     let row = ((gx + 60) as f64, (gy + 24 + 12) as f64);
@@ -207,7 +207,7 @@ fn flat(text: &str, clicks: &[((f64, f64), &str, &str)]) {
         d.step(vec![]);
     }
     let at = |d: &Driver, (x, y): (f64, f64)| -> (f64, f64) {
-        match camera::world_to_screen(panes.view, &Editor::view_camera(d.e()), vec3::create(x, y, 0.)).expect("projection") {
+        match camera::world_to_screen(panes.view, &editor::view_camera(d.e()), vec3::create(x, y, 0.)).expect("projection") {
             Some(p) => (p.x, p.y),
             None => panic!("the point is behind the camera"),
         }

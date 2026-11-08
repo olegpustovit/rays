@@ -19,11 +19,11 @@ use crate::editor_host;
 use crate::editor_model::{self as m, notice_kind, update};
 use crate::editor_setup;
 use crate::editor_text;
-use crate::loop_model::t;
+use crate::loop_model::LoopModel;
 use crate::source_file;
 use crate::viewport as V;
 
-fn notice(value: &mut t, kind: notice_kind, text: String) {
+fn notice(value: &mut LoopModel, kind: notice_kind, text: String) {
     Rc::make_mut(&mut value.core).notice = Some((kind, text));
 }
 
@@ -36,7 +36,7 @@ fn basename(file: &str) -> String {
 /// draft, the file's new text waits (`held`) and the strip says how to choose. It loads once the
 /// edits are undone, or at once by "Reload sketch from its file" (the palette). Nothing is polled
 /// while a payload is carried: the document shown is a preview then.
-pub fn open_import(value: &mut t, update_: &mut update) {
+pub fn open_import(value: &mut LoopModel, update_: &mut update) {
     let (path, source) = match (&value.core.open_import, &value.source) {
         (Some(path), Some(source)) => (path.clone(), source.clone()),
         _ => return,
@@ -72,7 +72,7 @@ pub fn open_import(value: &mut t, update_: &mut update) {
 
 /// Command-O: the system dialog over the sketch's folder; its answer, a frame later, is opened the
 /// way an import is (unsaved work refuses it).
-pub fn open_dialog(value: &mut t, update_: &mut update, events: &[Event]) {
+pub fn open_dialog(value: &mut LoopModel, update_: &mut update, events: &[Event]) {
     if update_.actions.contains(&action::Open_source) {
         match &value.source {
             None => notice(value, notice_kind::Refusal, "This editor was not opened from a .rays file.".to_string()),
@@ -102,7 +102,7 @@ pub fn open_dialog(value: &mut t, update_: &mut update, events: &[Event]) {
     }
 }
 
-pub fn reload_source(value: &mut t, update_: &mut update, now: f64) {
+pub fn reload_source(value: &mut LoopModel, update_: &mut update, now: f64) {
     let previous = match &value.source {
         Some(previous) if !editor_host::carrying(&value.core) => previous.clone(),
         _ => return,
@@ -153,9 +153,9 @@ pub fn reload_source(value: &mut t, update_: &mut update, now: f64) {
 }
 
 /// Command-S: over the source file while it is what the document came from, else a preset.
-pub fn save_source(core: &mut m::t, source: Option<source_file::t>, view: &flow_syntax::syntax::Syntax) -> Option<source_file::t> {
-    let notice = |core: &mut m::t, kind, text| { core.notice = Some((kind, text)); };
-    let preset = |core: &mut m::t, why: &str| {
+pub fn save_source(core: &mut m::EditorModel, source: Option<source_file::SourceFile>, view: &flow_syntax::syntax::Syntax) -> Option<source_file::SourceFile> {
+    let notice = |core: &mut m::EditorModel, kind, text| { core.notice = Some((kind, text)); };
+    let preset = |core: &mut m::EditorModel, why: &str| {
         let name = preset::default_name((core.clock)());
         match preset::save(&core.presets, &name, &core.doc, view) {
             Ok(path) => notice(core, notice_kind::Info, format!("{why}; saved as preset {}", basename(&path))),
@@ -185,7 +185,7 @@ pub fn save_source(core: &mut m::t, source: Option<source_file::t>, view: &flow_
 
 /// One recovery file per sketch. Polling at 2 Hz keeps printing and filesystem work out of idle
 /// frames; a live drag is saved after its release (the caller skips held frames); close flushes.
-pub fn autosave(value: &mut t, force: bool, now: f64) {
+pub fn autosave(value: &mut LoopModel, force: bool, now: f64) {
     if !force && now >= value.state_checked && now - value.state_checked < 0.5 {
         return;
     }

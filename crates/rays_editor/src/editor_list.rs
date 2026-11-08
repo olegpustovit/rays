@@ -24,7 +24,7 @@ use crate::editor_model::*;
 use crate::editor_panes::scope_node;
 use crate::selection;
 
-pub fn enterable(value: &t, id: i64) -> bool {
+pub fn enterable(value: &EditorModel, id: i64) -> bool {
     match kind(value, id).as_deref() {
         Some("geometry") => value.doc.networks.contains_key(&id),
         Some("world") => value.doc.layers.contains_key(&id),
@@ -33,7 +33,7 @@ pub fn enterable(value: &t, id: i64) -> bool {
 }
 
 /// Switch the open level: nothing is selected there, and the list starts again.
-pub fn open_level(value: &mut t, level: Level) {
+pub fn open_level(value: &mut EditorModel, level: Level) {
     if level == pane_level(&*value) {
         return;
     }
@@ -48,7 +48,7 @@ pub fn open_level(value: &mut t, level: Level) {
 }
 
 /// The geometry objects to cook: visible ones, each with its network.
-pub fn geometry_objects(value: &t) -> Vec<(i64, &net::Network, i64)> {
+pub fn geometry_objects(value: &EditorModel) -> Vec<(i64, &net::Network, i64)> {
     // a workspace without a scene graph shows each graph the lowering made a network of; an image
     // graph is one (the canvas previews its nodes) but its payload is not geometry, so the geometry
     // cook never takes it (Flow_native.Workspace_images cooks images)
@@ -83,7 +83,7 @@ pub fn focus_object<'a>(value: impl Into<ModelView<'a>>) -> Option<i64> {
     }
 }
 
-pub fn pieces(value: &t) -> &[cook::piece] {
+pub fn pieces(value: &EditorModel) -> &[cook::piece] {
     &value.cook.pieces
 }
 
@@ -131,11 +131,11 @@ pub fn displayed_node<'a>(value: impl Into<ModelView<'a>>) -> node::T {
     graph(value)
 }
 
-pub fn settings(value: &t) -> editor_document::settings::T {
+pub fn settings(value: &EditorModel) -> editor_document::settings::T {
     value.doc.settings.clone()
 }
 
-pub fn timeline(value: &t) -> crate::timeline::t {
+pub fn timeline(value: &EditorModel) -> crate::timeline::Timeline {
     value.timeline
 }
 
@@ -472,7 +472,7 @@ pub fn reparented(document: &[kg::Node], rows: &[Row], intent: &Intent) -> Optio
 #[derive(Clone)]
 pub struct tree_state {
     pub document: kg::T,
-    pub selection: selection::t,
+    pub selection: selection::Selection,
     pub tree: tree::Tree,
     pub opened: Option<i64>,
     pub label: Option<String>,

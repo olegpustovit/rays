@@ -16,7 +16,7 @@ use flow_syntax::syntax::{self as S, Node};
 use flow_syntax::ty::{self as T, Ty};
 use flow_syntax::value::Value;
 use input::{Event, Key, MouseButton};
-use rays_editor::Editor;
+use rays_editor::editor;
 
 use super::super::support::*;
 
@@ -138,26 +138,26 @@ pub fn open_domain() {
     let mut host_ops = flow_sop::operators::all().to_vec();
     host_ops.extend(ops.clone());
     host_ops.push(host_op);
-    let workspace = rays_editor::Workspace::load(Some(host_ops.clone()), Vec::new(), None, host_text).unwrap_or_else(|ds| panic!("{}", diag_text(&ds)));
+    let workspace = rays_editor::workspace::load(Some(host_ops.clone()), Vec::new(), None, host_text).unwrap_or_else(|ds| panic!("{}", diag_text(&ds)));
     let presets = std::env::temp_dir().join(format!("rays-domain-test-{}", std::process::id()));
     std::fs::create_dir_all(&presets).unwrap();
-    let mut host = Editor::create(Editor::Create { presets: Some(presets.to_string_lossy().into_owned()), ..options() }, &workspace, None, Editor::prepare_fn(), Editor::draw_fn()).unwrap_or_else(|m| panic!("{m}"));
-    let step = |host: Editor::t, events: Vec<Event>| Editor::update(host, &frame(events));
+    let mut host = editor::create(editor::Create { presets: Some(presets.to_string_lossy().into_owned()), ..options() }, &workspace, None, editor::prepare_fn(), editor::draw_fn()).unwrap_or_else(|m| panic!("{m}"));
+    let step = |host: editor::Editor, events: Vec<Event>| editor::update(host, &frame(events));
     host = step(host, vec![]);
-    assert!(Editor::node_box(&host, &["g".to_owned(), "@result".to_owned()]).is_some(), "host omitted custom operator's card");
-    let (x, y, width, height) = Editor::panes(&host, &frame(vec![])).graph;
+    assert!(editor::node_box(&host, &["g".to_owned(), "@result".to_owned()]).is_some(), "host omitted custom operator's card");
+    let (x, y, width, height) = editor::panes(&host, &frame(vec![])).graph;
     let point = ((x + width / 2) as f64, (y + height / 2) as f64);
     host = step(host, vec![Event::Pointer_moved(point), Event::Pointer_pressed(MouseButton::LeftButton, point), Event::Pointer_released(MouseButton::LeftButton, point)]);
     host = step(host, vec![Event::Key_pressed(Key::KeyChar('/'))]);
     host = step(host, vec![Event::Key_pressed(Key::KeyChar('a'))]);
     host = step(host, vec![Event::Text_input("sop/toy_box".into())]);
     host = step(host, vec![Event::Key_pressed(Key::Enter)]);
-    let after = Editor::workspace(&host);
+    let after = editor::workspace(&host);
     let count = authored(&static_eval(&after.checked, false).plan);
     assert!(contains(&wd::to_text(&after).unwrap(), "sop/toy_box") && count == 3, "host menu did not insert custom operator ({count} nodes): {}", wd::to_text(&after).unwrap());
     let path = presets.join("saved.rays");
-    std::fs::write(&path, wd::to_text(&Editor::workspace(&host)).unwrap()).unwrap();
+    std::fs::write(&path, wd::to_text(&editor::workspace(&host)).unwrap()).unwrap();
     let loaded = editor_document::preset::load_with_ops(None, host_ops, path.to_str().unwrap(), None, &editor_document::settings::none()).unwrap_or_else(|m| panic!("{m}"));
     assert!(authored(&loaded.doc.workspace.lowered.evaluated.plan) == 3, "preset reload discarded custom operators");
-    Editor::close(&host);
+    editor::close(&host);
 }

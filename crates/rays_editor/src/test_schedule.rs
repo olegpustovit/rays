@@ -22,7 +22,7 @@ fn held() -> frame::Frame {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn step(live: bool, input: Option<&input::Frame>, schedule: &s::t, graphs: &[node::T], context_changed: bool, busy: bool, frame: &frame::Frame) -> (s::t, bool) {
+fn step(live: bool, input: Option<&input::Frame>, schedule: &s::Schedule, graphs: &[node::T], context_changed: bool, busy: bool, frame: &frame::Frame) -> (s::Schedule, bool) {
     s::step(live, input, schedule, graphs, NO_EFFECTS, context_changed, false, busy, frame)
 }
 

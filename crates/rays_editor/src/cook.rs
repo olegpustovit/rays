@@ -137,14 +137,14 @@ pub struct Preparer {
 }
 
 #[derive(Clone)]
-pub struct t {
+pub struct Cook {
     pub worker: async_cook::T,
     pub seed: i64,
     pub grain: i64,
     pub domains: i64,
     /// block on each cook: fixed-step runs, see `create`
     pub await_: bool,
-    pub schedule: schedule::t,
+    pub schedule: schedule::Schedule,
     pub preparer: Preparer,
     pub pieces: Vec<piece>,
     /// the latest desired submission settings
@@ -180,7 +180,7 @@ pub struct t {
 }
 
 pub struct update_result {
-    pub cook: t,
+    pub cook: Cook,
     pub edit_error: Option<String>,
     pub prepared_changed: bool,
     pub framed: Option<Option<bounds>>,
@@ -259,7 +259,7 @@ pub fn create(
     clock: Option<Clock>,
     max_entries: i64,
     max_payload_bytes: i64,
-) -> Result<t, String> {
+) -> Result<Cook, String> {
     let await_ = await_.unwrap_or(false);
     if grain <= 0 {
         return Err("Rays_editor: grain must be positive".to_string());
@@ -273,7 +273,7 @@ pub fn create(
         async_cook::set_clock(&worker, clock.clone());
     }
     let clock: Clock = clock.unwrap_or_else(|| Arc::new(unix_now));
-    Ok(t {
+    Ok(Cook {
         worker,
         seed,
         grain,
@@ -311,37 +311,37 @@ fn failure_of(error: &async_cook::Error) -> Option<(String, i64)> {
     }
 }
 
-fn set_failure(value: &t, failure: Option<(String, i64)>) {
+fn set_failure(value: &Cook, failure: Option<(String, i64)>) {
     *value.failure.borrow_mut() = failure;
 }
 
-fn failure(value: &t) -> Option<(String, i64)> {
+fn failure(value: &Cook) -> Option<(String, i64)> {
     value.failure.borrow().clone()
 }
 
 /// The last cook was refused for memory: worth another try once the process is under its limit.
-pub fn out_of_memory(value: &t) -> bool {
+pub fn out_of_memory(value: &Cook) -> bool {
     value.error.is_some() && matches!(failure(value), Some((code, _)) if code == "E_MEMORY")
 }
 
-pub fn failed_node(value: &t) -> Option<(String, i64)> {
+pub fn failed_node(value: &Cook) -> Option<(String, i64)> {
     if value.error.is_none() { None } else { failure(value) }
 }
 
-pub fn status(value: &t) -> async_cook::Status {
+pub fn status(value: &Cook) -> async_cook::Status {
     async_cook::status(&value.worker)
 }
 
 /// `Lower.is_volatile` of the current lowering: the nodes that recook per frame.
-pub fn set_volatile(value: &t, predicate: Arc<dyn Fn(i64) -> bool + Send + Sync>) {
+pub fn set_volatile(value: &Cook, predicate: Arc<dyn Fn(i64) -> bool + Send + Sync>) {
     async_cook::set_volatile(&value.worker, predicate)
 }
 
-pub fn stats(value: &t) -> sop::session::Stats {
+pub fn stats(value: &Cook) -> sop::session::Stats {
     async_cook::stats(&value.worker)
 }
 
-pub fn pieces(value: &t) -> &[piece] {
+pub fn pieces(value: &Cook) -> &[piece] {
     &value.pieces
 }
 
@@ -415,26 +415,26 @@ pub fn prepare_cached(
 }
 
 /// The counts of a compiled node of an object, once a cook has reported them.
-pub fn geometry(value: &t, object_id: i64, node_id: i64) -> Option<&probe::Geometry> {
+pub fn geometry(value: &Cook, object_id: i64, node_id: i64) -> Option<&probe::Geometry> {
     value.summaries.iter().find(|(k, _)| *k == (object_id, node_id)).map(|(_, g)| g)
 }
 
-pub fn source(value: &t, object_id: i64, node_id: i64) -> Option<&gv::T> {
+pub fn source(value: &Cook, object_id: i64, node_id: i64) -> Option<&gv::T> {
     value.sources.iter().find(|(k, _)| *k == (object_id, node_id)).map(|(_, g)| g)
 }
 
-pub fn applied(value: &t, id: i64) -> Option<&value_lane::Resolved> {
+pub fn applied(value: &Cook, id: i64) -> Option<&value_lane::Resolved> {
     value.applied.get(&id)
 }
 
-pub fn reset_state(host_state: bool, value: &t) {
+pub fn reset_state(host_state: bool, value: &Cook) {
     flow_eval::reset_state(&value.state, host_state);
     for lane in value.value_lanes.values() {
         value_lane::reset(host_state, lane);
     }
 }
 
-pub fn context(value: &t, timeline: &timeline::t, frame: &frame::Frame) -> Result<context::T, String> {
+pub fn context(value: &Cook, timeline: &timeline::Timeline, frame: &frame::Frame) -> Result<context::T, String> {
     context::create(context::Options {
         seed: Some(value.seed),
         grain: Some(value.grain),
@@ -446,20 +446,20 @@ pub fn context(value: &t, timeline: &timeline::t, frame: &frame::Frame) -> Resul
     })
 }
 
-pub fn busy(value: &t) -> bool {
+pub fn busy(value: &Cook) -> bool {
     !matches!(status(value), async_cook::Status::Idle)
 }
 
-pub fn force(value: &t) -> t {
-    t { force: true, ..value.clone() }
+pub fn force(value: &Cook) -> Cook {
+    Cook { force: true, ..value.clone() }
 }
 
 /// no cook running or owed, and no footers waiting for their quiet updates (`update`'s `settled`)
-pub fn at_rest(value: &t) -> bool {
+pub fn at_rest(value: &Cook) -> bool {
     !busy(value) && !value.schedule.dirty && !value.probes_owed
 }
 
-pub fn dependencies(value: &t) -> deps::T {
+pub fn dependencies(value: &Cook) -> deps::T {
     value.schedule.dependencies
 }
 
@@ -483,13 +483,13 @@ pub fn update(
     probes: &[Key2],
     lit: &pick::Set,
     pump: Option<&dyn Fn()>,
-    value: &t,
+    value: &Cook,
     settings: &settings::T,
     objects: &[(i64, &Network, i64)],
     edit_error: Option<String>,
     effects: Effects,
     timeline_changes: &[timeline::Change],
-    timeline: &timeline::t,
+    timeline: &timeline::Timeline,
     frame: &frame::Frame,
     frame_request: Option<Key2>,
 ) -> update_result {
@@ -816,7 +816,7 @@ pub fn update(
             }
         }
     };
-    let cook = t {
+    let cook = Cook {
         schedule,
         pieces,
         settings: Some(settings.clone()),
@@ -956,7 +956,7 @@ fn complete(gpu: Option<&Gpu::Config>, preparer: &Preparer, previous: &[piece], 
     }
 }
 
-pub fn close(value: &t) {
+pub fn close(value: &Cook) {
     async_cook::close(&value.worker);
     let mut cache = value.preparer.cache.borrow_mut();
     cache.entries.clear();

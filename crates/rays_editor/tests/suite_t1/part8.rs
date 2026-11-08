@@ -6,7 +6,7 @@ use editor_document::lowering;
 use flow_graph::flow_edit::ArgKey;
 use input::{Event, Key, MouseButton};
 use pxui_shell::layout;
-use rays_editor::{Editor, Reduce};
+use rays_editor::{editor, reduce};
 
 const LB: MouseButton = MouseButton::LeftButton;
 
@@ -29,7 +29,7 @@ pub fn run_expression_chip() {
         r.step(p, vec![Event::Pointer_moved(p)]);
         r.step(p, vec![Event::Pointer_pressed(LB, p), Event::Pointer_released(LB, p)]);
     };
-    let (bx, by, bw, _) = Editor::node_box(&r.e, &["g".into(), "b".into()]).expect("b");
+    let (bx, by, bw, _) = editor::node_box(&r.e, &["g".into(), "b".into()]).expect("b");
     let nw = flow_graph::projection::node_width();
     let z = bw as f64 / nw;
     // the second line of the card (2.0, then the call), at the right where its text is
@@ -61,7 +61,7 @@ pub fn run_context_menus() {
     let exercise = |body: &str, check_menu: &dyn Fn(&mut Run)| {
         let presets = std::env::temp_dir().join(format!("rays-context-presets-{}-{}", std::process::id(), body.len()));
         std::fs::create_dir_all(&presets).unwrap();
-        let mut r = Run::new(editor_with(&format!("(workspace menus (graph g :context value 0) (graph editor :context editor {body}))"), Editor::Create { presets: Some(presets.to_str().unwrap().into()), ..Default::default() }));
+        let mut r = Run::new(editor_with(&format!("(workspace menus (graph g :context value 0) (graph editor :context editor {body}))"), editor::Create { presets: Some(presets.to_str().unwrap().into()), ..Default::default() }));
         r.step((450., 300.), vec![]);
         r.step((450., 300.), vec![]);
         check_menu(&mut r);
@@ -87,7 +87,7 @@ pub fn run_context_menus() {
         check(r.undo_label() == Some("New graph".into()) && has(&r.source(), "(graph value :context value"), &format!("Outline's New graph submenu did not create its selected context: {}", r.source()));
     });
     exercise("(let* [main (ui/graph \"g\") time (ui/timeline)] (ui/workspace (ui/split \"vertical\" main time :second_size 24)))", &|r| {
-        let geometry = layout::geometry(None, Some(&[]), &shell_of(&build_ok(&Editor::workspace(&r.e))).tree, &idle_frame(0));
+        let geometry = layout::geometry(None, Some(&[]), &shell_of(&build_ok(&editor::workspace(&r.e))).tree, &idle_frame(0));
         let (x, y, _, _) = layout::find(&geometry, &Panel::Timeline).expect("timeline").body;
         let origin = ((x + 500) as f64, (y + 12) as f64);
         click(r, MouseButton::RightButton, origin);
@@ -96,7 +96,7 @@ pub fn run_context_menus() {
         click(r, LB, choice);
         r.step(choice, vec![]);
         check(r.undo_label() == Some("Split panel".into()) && has(&r.source(), "time_a (ui/timeline)") && has(&r.source(), "time_b (ui/lisp)"), &format!("the timeline context menu did not open at the pointer: {}", r.source()));
-        check(rays_editor::Timeline::mode(&Editor::timeline(&r.e)) == rays_editor::Timeline::Mode::Playing, "a timeline right-click sought the playhead");
+        check(rays_editor::Timeline::mode(&editor::timeline(&r.e)) == rays_editor::Timeline::Mode::Playing, "a timeline right-click sought the playhead");
     });
     exercise("(ui/workspace (ui/graph \"g\"))", &|r| {
         // / t reveals the implicit strip when there is no authored timeline leaf.
@@ -108,7 +108,7 @@ pub fn run_context_menus() {
         r.step(origin, vec![]);
         click(r, LB, (520., origin.1.min(640. - 86.) + 19.));
         r.step(origin, vec![]);
-        check(rays_editor::Timeline::mode(&Editor::timeline(&r.e)) == rays_editor::Timeline::Mode::Paused, "the implicit timeline had no context menu at the pointer");
+        check(rays_editor::Timeline::mode(&editor::timeline(&r.e)) == rays_editor::Timeline::Mode::Paused, "the implicit timeline had no context menu at the pointer");
     });
 }
 
@@ -124,11 +124,11 @@ pub fn run_lisp_inspector() {
     (graph editor :context editor
       (ui/workspace (ui/split "horizontal" (ui/graph "g") (ui/inspector)))))"#;
     let mut r = Run::new(editor(text));
-    r.e = Reduce::select_path(r.e.clone(), &["g".into(), "card".into()]);
+    r.e = reduce::select_path(r.e.clone(), &["g".into(), "card".into()]);
     let m = (450., 300.);
     r.step(m, vec![]);
     r.step(m, vec![]);
-    check(Editor::Private::inspector_subject(&r.e) == Some(vec!["g".to_string(), "card".to_string()]), "Lisp card did not reach the inspector");
+    check(editor::private::inspector_subject(&r.e) == Some(vec!["g".to_string(), "card".to_string()]), "Lisp card did not reach the inspector");
     let (ix, iy, _, _) = r.panes().inspector;
     let at = |x: i64| ((ix + 200 + x) as f64, (iy + 186) as f64);
     r.stepb(&[LB], at(0), vec![Event::Pointer_pressed(LB, at(0))]);
@@ -165,7 +165,7 @@ pub fn run_array_capacity_menu() {
     r.step(p, vec![key(Key::Enter)]);
     r.step(p, vec![]);
     check(r.undo_label() == Some("Add node".into()) && has(&r.source(), "(array/max_length)"), &format!("Array capacity add menu default invalid: {}", r.source()));
-    let ws = Editor::workspace(&r.e);
+    let ws = editor::workspace(&r.e);
     let _ = build_ok(&ws);
     let pane = flow_graph::projection::of_graph(&catalog(), &ws.checked, "g").expect("scope");
     let card = pane.nodes.iter().find(|n| n.head == "array/max_length").expect("card");
@@ -191,7 +191,7 @@ pub fn run_open_defn() {
     for _ in 0..4 {
         r.step(p, vec![]);
     }
-    r.e = Reduce::select_path(r.e.clone(), &["g".into(), "b".into()]);
+    r.e = reduce::select_path(r.e.clone(), &["g".into(), "b".into()]);
     r.step(p, vec![]);
     r.step(p, vec![key(Key::KeyChar('i'))]);
     r.step(p, vec![]);
@@ -207,11 +207,11 @@ pub fn run_open_defn() {
     for _ in 0..4 {
         r.step(p, vec![]);
     }
-    r.e = Reduce::select_path(r.e.clone(), &["g".into(), "a#0".into()]);
+    r.e = reduce::select_path(r.e.clone(), &["g".into(), "a#0".into()]);
     r.step(p, vec![]);
     r.step(p, vec![key(Key::KeyChar('i'))]);
     r.step(p, vec![]);
-    check(Editor::workspace(&r.e).layout.collapsed.get(&vec!["g".to_string(), "a#0".to_string()]) == Some(&false), "i on a collapsed function did not open it");
+    check(editor::workspace(&r.e).layout.collapsed.get(&vec!["g".to_string(), "a#0".to_string()]) == Some(&false), "i on a collapsed function did not open it");
     r.close();
 }
 
@@ -228,7 +228,7 @@ pub fn run_outline_button() {
     for _ in 0..4 {
         r.step(p, vec![]);
     }
-    let d = match lowering::of_workspace(&lowering::Options { factories: Some(factories()), ..Default::default() }, &Editor::workspace(&r.e)) {
+    let d = match lowering::of_workspace(&lowering::Options { factories: Some(factories()), ..Default::default() }, &editor::workspace(&r.e)) {
         Ok(d) => d,
         Err(d) => fail(&rays_diagnostic::to_string(&d)),
     };
@@ -256,7 +256,7 @@ pub fn run_idle_rest() {
     // An idle frame is the last one again: no input, no cook, a clock nothing reads.
     // (The allocation bounds of the OCaml test have no Gc counterpart; the scenes compare by Scene::same.)
     struct T {
-        e: Editor::t,
+        e: editor::Editor,
         count: i64,
     }
     impl T {
@@ -270,9 +270,9 @@ pub fn run_idle_rest() {
         fn tick(&mut self, mouse: (f64, f64), step: i64, events: Vec<Event>) -> Vec<rays::scene::node> {
             self.count += step;
             let f = frame(&[], mouse, events, self.count);
-            self.e = Editor::update(self.e.clone(), &f);
-            let scene = Editor::scene(&self.e, &f);
-            self.e = Editor::after_present(self.e.clone(), &f);
+            self.e = editor::update(self.e.clone(), &f);
+            let scene = editor::scene(&self.e, &f);
+            self.e = editor::after_present(self.e.clone(), &f);
             scene
         }
         fn tick0(&mut self) -> Vec<rays::scene::node> {
@@ -280,7 +280,7 @@ pub fn run_idle_rest() {
         }
     }
     let mut t = T::new(r##"(workspace idle (graph picture :context draw (draw/background "#14161c")))"##, 30);
-    let before = rays_editor::Timeline::time(&Editor::timeline(&t.e));
+    let before = rays_editor::Timeline::time(&editor::timeline(&t.e));
     let rested = t.tick0();
     check(rays::scene::same(&t.tick0(), &rested), "an idle frame was built again");
     // the unread clock keeps running; measured just after the once-a-second frame
@@ -288,7 +288,7 @@ pub fn run_idle_rest() {
     for _ in 0..10 {
         t.tick0();
     }
-    check(rays_editor::Timeline::time(&Editor::timeline(&t.e)) > before, "the clock stopped at rest");
+    check(rays_editor::Timeline::time(&editor::timeline(&t.e)) > before, "the clock stopped at rest");
     let a = t.tick0();
     check(rays::scene::same(&t.tick0(), &a), "still at rest");
     // what wakes it: a moved pointer, an event, the second that what polls runs on
@@ -306,7 +306,7 @@ pub fn run_idle_rest() {
     after_rest(&mut t, &|t| t.tick((451., 300.), 1, vec![]), "a moved pointer");
     after_rest(&mut t, &|t| t.tick((451., 300.), 1, vec![Event::Focus_lost]), "an event");
     after_rest(&mut t, &|t| t.tick((451., 300.), 61, vec![]), "a second");
-    Editor::close(&t.e);
+    editor::close(&t.e);
     // a graph that reads the clock never rests while it plays, even while its picture holds still
     let mut t = T::new(
         r##"(workspace clock (graph picture :context draw
@@ -323,8 +323,8 @@ pub fn run_idle_rest() {
     for _ in 0..12 {
         t.tick0();
     }
-    check(rays_editor::Timeline::mode(&Editor::timeline(&t.e)) != rays_editor::Timeline::Mode::Playing, "the space key did not pause");
+    check(rays_editor::Timeline::mode(&editor::timeline(&t.e)) != rays_editor::Timeline::Mode::Playing, "the space key did not pause");
     let p = t.tick0();
     check(rays::scene::same(&t.tick0(), &p), "a stopped clock did not rest");
-    Editor::close(&t.e);
+    editor::close(&t.e);
 }

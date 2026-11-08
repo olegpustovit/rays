@@ -28,7 +28,7 @@ use sop::edit_graph;
 use sop::node;
 
 use crate::cook;
-use crate::editor_model::{change, flow_catalog, preview, scope_key, t as Model, ModelView};
+use crate::editor_model::{change, flow_catalog, preview, scope_key, EditorModel as Model, ModelView};
 use crate::navigator;
 use crate::text_pane;
 

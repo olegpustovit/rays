@@ -31,7 +31,7 @@ fn workspace(text: &str) -> workspace_doc::T {
     workspace_doc::of_text(&TextOptions::default(), &catalog, text).expect("workspace")
 }
 
-fn model() -> t {
+fn model() -> EditorModel {
     let opts = create_opts {
         // no preferences file and no state folder of the user's: a unique temp name
         preferences: Some(std::env::temp_dir().join("rays-editor-test-no-preferences.rays").to_string_lossy().to_string()),
@@ -105,7 +105,7 @@ fn creation_shell_list_status() {
     editor_host::close(&value);
 }
 
-fn panel_map_key(value: &t) -> Option<Vec<String>> {
+fn panel_map_key(value: &EditorModel) -> Option<Vec<String>> {
     crate::panel_map::key(&value.panes)
 }
 
@@ -159,7 +159,7 @@ fn text_applies_body() {
     editor_host::close(&value);
 }
 
-fn editor_completion(value: &t) -> Vec<String> {
+fn editor_completion(value: &EditorModel) -> Vec<String> {
     editor_shell::completion_names(value).graphs
 }
 

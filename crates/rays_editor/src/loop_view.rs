@@ -24,7 +24,7 @@ use rays_math::color;
 use crate::editor_host;
 use crate::editor_inspect::View;
 use crate::editor_list;
-use crate::editor_model::t as Model;
+use crate::editor_model::EditorModel as Model;
 use crate::editor_shell;
 use crate::timeline;
 use crate::world_map::map_rect;

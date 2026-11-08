@@ -26,7 +26,7 @@ use crate::text_pane;
 
 /// The layouts / [ switches among: a switch's, named from their panels; else the editor graphs of
 /// an older file (several named layouts), the current one marked.
-pub fn layouts(value: &t) -> Vec<(String, bool)> {
+pub fn layouts(value: &EditorModel) -> Vec<(String, bool)> {
     if let Some(sw) = value.doc.shell.as_ref().and_then(|s| s.switch.as_ref()) {
         return panels::labels(&sw.layouts).into_iter().enumerate().map(|(i, name)| (name, i as i64 == sw.active)).collect();
     }
@@ -41,7 +41,7 @@ pub fn layouts(value: &t) -> Vec<(String, bool)> {
 
 /// What the text pane completes beyond its own text: the graphs, the materials, the cameras of the
 /// first scene graph and the layouts.
-pub fn completion_names(value: &t) -> lisp_text::Names {
+pub fn completion_names(value: &EditorModel) -> lisp_text::Names {
     let ws = &value.doc.workspace.ws;
     let graphs = &ws.checked.graphs;
     let named = |ctx: context::Context| -> Vec<String> { graphs.iter().filter(|g| g.context == ctx).map(|g| g.name.clone()).collect() };
@@ -59,7 +59,7 @@ pub fn completion_names(value: &t) -> lisp_text::Names {
 
 /// The tree drawn now: the editor graph's (the host's when the document has none, or after
 /// "Restore layout"), with the split being dragged at its live ratio.
-pub fn shell_tree<'a>(value: &'a t, shell: &'a shell) -> Cow<'a, panels::Panels> {
+pub fn shell_tree<'a>(value: &'a EditorModel, shell: &'a shell) -> Cow<'a, panels::Panels> {
     let base = match &value.doc.shell {
         Some(s) if !shell.restored => &s.tree,
         _ => &shell.tree,
@@ -298,7 +298,7 @@ pub fn as_pane<'a>(value: impl Into<ModelView<'a>>, (key, _path): (&Vec<String>,
 }
 
 /// `as_pane` of a model owned: no copy.
-pub fn with_pane_in_use(value: &mut t, (key, path): (&Vec<String>, &layout::Path)) {
+pub fn with_pane_in_use(value: &mut EditorModel, (key, path): (&Vec<String>, &layout::Path)) {
     if panel_map::key(&value.panes).as_ref() == Some(key) {
         return;
     }
@@ -325,7 +325,7 @@ pub fn tied<'a>(value: impl Into<ModelView<'a>>, path: &[usize]) -> Option<(Vec<
 
 /// The pane in use follows the focus: the focused graph leaf, else the one it was, else the first
 /// one open.  The pane left keeps its canvas, selection, graph and route.
-pub fn follow_graph(value: &mut t, focus: &Panel, focus_path: Option<&[usize]>) {
+pub fn follow_graph(value: &mut EditorModel, focus: &Panel, focus_path: Option<&[usize]>) {
     let all = graph_leaves(&*value);
     let at = panel_map::key(&value.panes).and_then(|key| all.iter().find(|(k, _)| *k == key).map(|(_, p)| p.clone()));
     panel_map::set_leaf(&mut value.panes, at);

@@ -3,7 +3,7 @@
 use editor_document::workspace_doc as wd;
 use input::{Event, Platform};
 use rays::frame;
-use rays_editor::{Editor, Workspace};
+use rays_editor::{editor, workspace};
 
 pub fn diag_text(ds: &[rays_diagnostic::Diagnostic]) -> String {
     ds.iter().map(rays_diagnostic::to_string).collect::<Vec<_>>().join("\n")
@@ -11,7 +11,7 @@ pub fn diag_text(ds: &[rays_diagnostic::Diagnostic]) -> String {
 
 /// `Rays_editor.Workspace.load text |> get_ok`.
 pub fn load(text: &str) -> wd::T {
-    Workspace::load(None, Vec::new(), None, text).unwrap_or_else(|ds| panic!("{}", diag_text(&ds)))
+    workspace::load(None, Vec::new(), None, text).unwrap_or_else(|ds| panic!("{}", diag_text(&ds)))
 }
 
 /// A 1000 x 700 frame at time 0 with the given events (the frame the OCaml tests use).
@@ -19,8 +19,8 @@ pub fn frame(events: Vec<Event>) -> frame::Frame {
     frame::Frame { input: input::Frame { dt: 1. / 60., size: (1000, 700), events, ..input::at_time(0.) }, pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.) }
 }
 
-pub fn options() -> Editor::Create {
-    Editor::Create { platform: Some(Platform::Apple), ui_text_size: Some(11), await_: Some(true), domains: Some(1), ..Default::default() }
+pub fn options() -> editor::Create {
+    editor::Create { platform: Some(Platform::Apple), ui_text_size: Some(11), await_: Some(true), domains: Some(1), ..Default::default() }
 }
 
 /// The repository root (`sketches/`, `specification/`).

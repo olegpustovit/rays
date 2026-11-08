@@ -6,7 +6,7 @@ use flow_graph::flow_edit::{self as fe, ArgKey};
 use flow_syntax::syntax::{self as syn, Node};
 use input::{Event, Key, MouseButton};
 use rays_editor::text_pane as T;
-use rays_editor::Editor;
+use rays_editor::editor;
 
 const LB: MouseButton = MouseButton::LeftButton;
 
@@ -109,7 +109,7 @@ pub fn editor_text() {
     check(env.undo().as_deref() == Some("Edit text"), "the history label is not Edit text");
     env.step_k(&[Key::Meta], vec![ch('z')]);
     check(env.src() == applied, "undo did not restore the text");
-    check(Editor::redo_label(env.e()).as_deref() == Some("Edit text"), "redo label");
+    check(editor::redo_label(env.e()).as_deref() == Some("Edit text"), "redo label");
     // the Graph tab
     let original = env.ws();
     let tab_graph = tab_at(gw < 400, gx + gw - 159, gy, 1);
@@ -157,7 +157,7 @@ pub fn editor_text() {
     env.click(tab_document);
     let t = replace(&wd::to_text(&env.ws()).unwrap(), "(seeds : int 8)", "(seeds : int 2)");
     type_text(&mut env, &t);
-    env.d.map(|e| Editor::edit(e, &fe::Op::SetInputDefault { form: "sunflower".into(), input: "seeds".into(), value: num("4") }).expect("edit"));
+    env.d.map(|e| editor::edit(e, &fe::Op::SetInputDefault { form: "sunflower".into(), input: "seeds".into(), value: num("4") }).expect("edit"));
     let host_edited = env.ws();
     let host_label = env.undo();
     env.click(apply);
@@ -166,13 +166,13 @@ pub fn editor_text() {
     env.click(discard);
     let t = replace(&wd::to_text(&env.ws()).unwrap(), "(spread : float 0.062)", "(spread : float 0.07)");
     type_text(&mut env, &t);
-    env.d.map(|e| Editor::edit(e, &fe::Op::SetInputDefault { form: "sunflower".into(), input: "seeds".into(), value: num("9") }).expect("edit"));
+    env.d.map(|e| editor::edit(e, &fe::Op::SetInputDefault { form: "sunflower".into(), input: "seeds".into(), value: num("9") }).expect("edit"));
     env.click(apply);
     let merged = wd::to_text(&env.ws()).unwrap();
     check(has(&merged, "(seeds : int 9)") && has(&merged, "(spread : float 0.07)") && has(&env.dump(), "draft no"), &format!("a draft and a host edit of different values did not merge: {}{merged}", env.dump()));
     type_text(&mut env, &replace(&merged, ":segments 6", ":segments 8"));
     env.d.map(|e| {
-        Editor::edit(e, &fe::Op::SetArg { node: vec!["sunflower".into(), "seeds_each".into(), "@result".into()], key: ArgKey::Kw("uniform_scale".into()), sub: vec![], value: num("0.5") }).unwrap_or_else(|m| panic!("{m}"))
+        editor::edit(e, &fe::Op::SetArg { node: vec!["sunflower".into(), "seeds_each".into(), "@result".into()], key: ArgKey::Kw("uniform_scale".into()), sub: vec![], value: num("0.5") }).unwrap_or_else(|m| panic!("{m}"))
     });
     env.click(apply);
     let merged = wd::to_text(&env.ws()).unwrap();
@@ -249,7 +249,7 @@ pub fn editor_binding() {
     check(same_ws(&env.ws(), &before), "Selection's related edits were not one undo entry");
     type_closure(&mut env, "(let* [head (sop/merge seeds_each)] seeds_each)");
     let form = flow_syntax::syntax::parse("(sop/merge seeds_each seeds_each seeds_each)").unwrap_or_else(|_| panic!("test expression")).remove(0);
-    env.d.map(|e| Editor::edit(e, &fe::Op::SetArg { node: vec!["sunflower".into(), "head".into()], key: ArgKey::Whole, sub: vec![], value: form }).expect("edit"));
+    env.d.map(|e| editor::edit(e, &fe::Op::SetArg { node: vec!["sunflower".into(), "head".into()], key: ArgKey::Whole, sub: vec![], value: form }).expect("edit"));
     let host_edited = env.ws();
     let host_label = env.undo();
     env.click(apply);
@@ -261,22 +261,22 @@ pub fn editor_binding() {
 
 // ---- editor_w9 ----------------------------------------------------------------------------------
 
-type Script = Vec<(i64, Box<dyn Fn(&Editor::t) -> Vec<Event>>)>;
+type Script = Vec<(i64, Box<dyn Fn(&editor::Editor) -> Vec<Event>>)>;
 
 fn click_events(p: (f64, f64)) -> Vec<Event> {
     vec![Event::Pointer_moved(p), Event::Pointer_pressed(LB, p), Event::Pointer_released(LB, p)]
 }
 
 /// A card's header, where the graph pane put it.
-fn head(e: &Editor::t, path: &[&str], (dx, dy): (f64, f64)) -> (f64, f64) {
+fn head(e: &editor::Editor, path: &[&str], (dx, dy): (f64, f64)) -> (f64, f64) {
     let path: Vec<String> = path.iter().map(|s| s.to_string()).collect();
-    match Editor::node_box(e, &path) {
+    match editor::node_box(e, &path) {
         Some((x, y, w, _)) => (x as f64 + if dx < 0. { w as f64 + dx } else { dx }, y as f64 + dy),
         None => panic!("the card has no box"),
     }
 }
 
-fn w9_frames(env0: Editor::t, first: i64, last: i64, script: &Script) -> Editor::t {
+fn w9_frames(env0: editor::Editor, first: i64, last: i64, script: &Script) -> editor::Editor {
     let mut env = env0;
     for n in first..=last {
         let events = match script.iter().find(|(k, _)| *k == n) {
@@ -292,7 +292,7 @@ fn w9_frames(env0: Editor::t, first: i64, last: i64, script: &Script) -> Editor:
         };
         let mut f = frame_at((640., 360.), events, n);
         f.input.size = (1400, 800);
-        env = Editor::update(env, &f);
+        env = editor::update(env, &f);
     }
     env
 }
@@ -300,18 +300,18 @@ fn w9_frames(env0: Editor::t, first: i64, last: i64, script: &Script) -> Editor:
 pub fn editor_w9() {
     let presets = scratch_dir("rays-text-presets");
     let ui_font = ui_font();
-    let start = || create(Editor::Create { domains: Some(1), presets: Some(presets.clone()), ui_font: ui_font.clone(), ..options() }, &load(&small_rosette()));
+    let start = || create(editor::Create { domains: Some(1), presets: Some(presets.clone()), ui_font: ui_font.clone(), ..options() }, &load(&small_rosette()));
     let prefix = w9_frames(start(), 1, 21, &vec![]);
-    let scenario = |prefix: &Editor::t, script: Script| -> (String, Option<String>) {
+    let scenario = |prefix: &editor::Editor, script: Script| -> (String, Option<String>) {
         let env = w9_frames(prefix.clone(), 22, 40, &script);
-        (printed(&Editor::workspace(&env).source), Editor::undo_label(&env))
+        (printed(&editor::workspace(&env).source), editor::undo_label(&env))
     };
-    let untouched = printed(&Editor::workspace(&prefix).source);
+    let untouched = printed(&editor::workspace(&prefix).source);
     check(has(&untouched, "^:bypass (sop/subdivide inner"), "soft starts bypassed");
     
     let petals = ["rosette", ":petals"];
     let lab = |l: &Option<String>| l.clone().unwrap_or_else(|| "-".into());
-    let soft_click = |e: &Editor::t| click_events(head(e, &["rosette", "soft"], (60., 12.)));
+    let soft_click = |e: &editor::Editor| click_events(head(e, &["rosette", "soft"], (60., 12.)));
     let (text, label) = scenario(&prefix, vec![(22, Box::new(soft_click)), (24, Box::new(|_| vec![ch('b')]))]);
     check(!has(&text, "^:bypass") && label.as_deref() == Some("Bypass"), &format!("the b key: {}, bypass {}", lab(&label), has(&text, "^:bypass")));
     let (text, label) = scenario(&prefix, vec![(22, Box::new(soft_click)), (26, Box::new(|_| click_events((1216., 162.))))]);
@@ -354,7 +354,7 @@ pub fn editor_w9() {
         vec![(22, Box::new(soft_click)), (26, Box::new(|_| vec![ch('m')])), (30, Box::new(|_| click_events((700., 437.)))), (34, Box::new(|_| vec![key(Key::Enter)]))],
     );
     check(has(&text, "(defmacro soft_tpl [p1 inner]") && label.as_deref() == Some("Make macro"), &format!("Enter in the make-macro dialog: {}", lab(&label)));
-    let wheel = || -> Box<dyn Fn(&Editor::t) -> Vec<Event>> { Box::new(|_| vec![Event::Pointer_moved((1260., 405.)), Event::Scrolled((0., -2.))]) };
+    let wheel = || -> Box<dyn Fn(&editor::Editor) -> Vec<Event>> { Box::new(|_| vec![Event::Pointer_moved((1260., 405.)), Event::Scrolled((0., -2.))]) };
     let (text, label) = scenario(
         &prefix,
         vec![
@@ -371,7 +371,7 @@ pub fn editor_w9() {
         ],
     );
     check(has(&text, "; a fresh note") && label.as_deref() == Some("Note"), &format!("the note edit: {}", lab(&label)));
-    Editor::close(&prefix);
+    editor::close(&prefix);
     let _ = std::fs::remove_dir_all(&presets);
 }
 
@@ -431,10 +431,10 @@ pub fn editor_literal_scrub() {
         let presets = scratch_dir("rays-token-presets");
         let ui_font = ui_font();
         // Editor_prepare.empty
-        let e = Editor::create(Editor::Create { domains: Some(1), presets: Some(presets.clone()), ui_font, ..options() }, &load(text), None, prepare_empty(), Editor::draw_fn()).unwrap_or_else(|m| panic!("{m}"));
+        let e = editor::create(editor::Create { domains: Some(1), presets: Some(presets.clone()), ui_font, ..options() }, &load(text), None, prepare_empty(), editor::draw_fn()).unwrap_or_else(|m| panic!("{m}"));
         let mut env = Env::new(e);
         env.settle();
-        let (x, y, w, h) = Editor::node_box(env.e(), &["g".to_string(), "a".to_string()]).expect("box");
+        let (x, y, w, h) = editor::node_box(env.e(), &["g".to_string(), "a".to_string()]).expect("box");
         let point = ((x + w / 2) as f64, (y + 12.min(h / 2)) as f64);
         env.at(point, vec![Event::Pointer_moved(point)]);
         env.at(point, vec![Event::Pointer_pressed(LB, point), Event::Pointer_released(LB, point)]);
@@ -505,7 +505,7 @@ pub fn editor_literal_scrub() {
         env.at(focus_graph, vec![Event::Pointer_pressed(LB, focus_graph), Event::Pointer_released(LB, focus_graph)]);
         env.step(vec![]);
         env.step_k(&[Key::Meta], vec![ch('z')]);
-        check(same_ws(&env.ws(), &before) && env.undo() == label, &format!("text token scrub in tab {tab_index} was not one undo entry: label {:?} (was {:?}), redo {}", env.undo(), label, Editor::can_redo(env.e())));
+        check(same_ws(&env.ws(), &before) && env.undo() == label, &format!("text token scrub in tab {tab_index} was not one undo entry: label {:?} (was {:?}), redo {}", env.undo(), label, editor::can_redo(env.e())));
         env.close();
         let _ = std::fs::remove_dir_all(&presets);
     }
@@ -523,14 +523,14 @@ const DROP: &str = r#"(workspace drop
 pub fn editor_text_drop() {
     let presets = scratch_dir("rays-text-presets");
     let ui_font = ui_font();
-    let mut env = Env::new(create(Editor::Create { domains: Some(1), presets: Some(presets.clone()), ui_font, carry_budget: Some(f64::INFINITY), ..options() }, &load(DROP)));
+    let mut env = Env::new(create(editor::Create { domains: Some(1), presets: Some(presets.clone()), ui_font, carry_budget: Some(f64::INFINITY), ..options() }, &load(DROP)));
     let jump = |env: &mut Env, name: &str| {
         env.step(vec![key(Key::KeyChar('/')), ch('j')]);
         env.step(vec![Event::Text_input(name.into())]);
         env.step(vec![key(Key::Enter)]);
         env.step(vec![]);
     };
-    let line = |env: &Env| Editor::carry_line(env.e()).unwrap_or_else(|| "-".into());
+    let line = |env: &Env| editor::carry_line(env.e()).unwrap_or_else(|| "-".into());
     env.settle();
     let (gx, gy, gw, gh) = env.graph_pane();
     let top = gy + gh + 1 + 28;
@@ -539,9 +539,9 @@ pub fn editor_text_drop() {
     jump(&mut env, "a");
     env.step(vec![ch('y')]);
     env.step(vec![]);
-    check(Editor::carrying(env.e()) == Some(("sop".into(), "(ref a)".into())), "y holds graph a");
+    check(editor::carrying(env.e()) == Some(("sop".into(), "(ref a)".into())), "y holds graph a");
     jump(&mut env, "b");
-    check(Editor::carrying(env.e()).is_some(), "the carry survives the jump");
+    check(editor::carrying(env.e()).is_some(), "the carry survives the jump");
     let original = env.ws();
     let history = env.undo();
     let point = |env: &Env, tab: T::Tab, needle: &str, after: usize| -> (f64, f64) {
@@ -560,7 +560,7 @@ pub fn editor_text_drop() {
     env.at(over, vec![Event::Pointer_pressed(LB, over), Event::Pointer_released(LB, over)]);
     env.step(vec![]);
     env.step(vec![]);
-    check(Editor::carrying(env.e()).is_none() && env.undo().as_deref() == Some("Put") && has(&env.src(), "(sop/merge (ref a) (sop/box)"), &format!("a release writes it as one Put entry: {}", env.src()));
+    check(editor::carrying(env.e()).is_none() && env.undo().as_deref() == Some("Put") && has(&env.src(), "(sop/merge (ref a) (sop/box)"), &format!("a release writes it as one Put entry: {}", env.src()));
     env.step_k(&[Key::Meta], vec![ch('z')]);
     check(same_ws(&env.ws(), &original), "one undo gives it back");
     jump(&mut env, "a");
@@ -574,7 +574,7 @@ pub fn editor_text_drop() {
     check(same_ws(&env.ws(), &original), "and the picture is the original");
     env.step(vec![key(Key::Escape)]);
     env.step(vec![]);
-    check(Editor::carrying(env.e()).is_none() && same_ws(&env.ws(), &original), "Escape drops it");
+    check(editor::carrying(env.e()).is_none() && same_ws(&env.ws(), &original), "Escape drops it");
     let a = ((gx + 200) as f64, (top + 24 + 60) as f64);
     env.at(a, vec![]);
     env.click_s(a);
@@ -634,12 +634,12 @@ pub fn editor_command_click() {
     env.at(name, vec![Event::Pointer_moved(name)]);
     env.at(name, vec![Event::Pointer_pressed(LB, name), Event::Pointer_released(LB, name)]);
     env.step(vec![]);
-    check(Editor::Private::inspector_subject(env.e()) == Some(vec!["g".to_string(), "@result".to_string()]), "an ordinary click in Document did not select its containing node");
+    check(editor::private::inspector_subject(env.e()) == Some(vec!["g".to_string(), "@result".to_string()]), "an ordinary click in Document did not select its containing node");
     env.at_k(&[Key::Meta], name, vec![Event::Pointer_pressed(LB, name), Event::Pointer_released(LB, name)]);
     env.step(vec![]);
     env.step(vec![]);
     check(env.line("scope selected") == "g/a", &format!("a Command-click on a name did not select its binding: {}", env.line("scope selected")));
-    check(Editor::Private::inspector_subject(env.e()) == Some(vec!["g".to_string(), "a".to_string()]), "the inspector does not show the Command-clicked binding");
+    check(editor::private::inspector_subject(env.e()) == Some(vec!["g".to_string(), "a".to_string()]), "the inspector does not show the Command-clicked binding");
     let graph_tab = tab_at(gw < 400, gx + gw - 36, gy, 1);
     env.at(graph_tab, vec![Event::Pointer_moved(graph_tab)]);
     env.at(graph_tab, vec![Event::Pointer_pressed(LB, graph_tab), Event::Pointer_released(LB, graph_tab)]);

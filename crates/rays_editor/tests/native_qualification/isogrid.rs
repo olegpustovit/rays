@@ -17,7 +17,7 @@ pub(super) fn text() -> String {
     text
 }
 pub(super) fn workspace() -> editor_document::workspace_doc::T {
-    rays_editor::Workspace::load(None, Vec::new(), None, &text()).unwrap_or_else(|ds| panic!("{}", ds.iter().map(rays_diagnostic::to_string).collect::<Vec<_>>().join("\n")))
+    rays_editor::workspace::load(None, Vec::new(), None, &text()).unwrap_or_else(|ds| panic!("{}", ds.iter().map(rays_diagnostic::to_string).collect::<Vec<_>>().join("\n")))
 }
 pub(super) fn recipe_node(workspace: &editor_document::workspace_doc::T, config: &Gpu::Config, recipe: i64) -> (lower::T, sop::node::T) {
     let catalog = ok(rays_editor::workspace_catalog(None));

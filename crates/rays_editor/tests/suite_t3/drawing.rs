@@ -8,7 +8,7 @@ use super::t3c::*;
 use flow_eval::Value;
 use flow_graph::flow_edit as fe;
 use flow_native::drawing;
-use rays_editor::Editor;
+use rays_editor::editor;
 use std::rc::Rc;
 
 fn ok<T>(r: Result<T, rays_diagnostic::Diagnostic>) -> T {
@@ -173,5 +173,5 @@ pub fn host_inputs() {
         b
     };
     assert!(editor_document::lowering::of_workspace(&options, &bad).is_err());
-    let _ = (Rc::new(()), Editor::Private::menu_forms);
+    let _ = (Rc::new(()), editor::private::menu_forms);
 }

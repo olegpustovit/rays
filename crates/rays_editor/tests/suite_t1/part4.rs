@@ -9,15 +9,15 @@ use editor_document::workspace_doc;
 use input::{Event, Key, MouseButton};
 use param::Value;
 use pxui_shell::layout;
-use rays_editor::Editor;
+use rays_editor::editor;
 
 const LB: MouseButton = MouseButton::LeftButton;
 
 fn count_of(text: &str, piece: &str) -> usize {
     text.matches(piece).count()
 }
-fn objects(e: &Editor::t) -> kg::T {
-    Editor::scene_document(e)
+fn objects(e: &editor::Editor) -> kg::T {
+    editor::scene_document(e)
 }
 fn field_of(i: &kg::Node, name: &str) -> Option<Value> {
     kg::field(i, name)
@@ -58,10 +58,10 @@ fn drag_slider(r: &mut Run, row: i64) {
 fn undo(r: &mut Run) {
     r.count += 1;
     let f = frame_full(&[], &[Key::Meta], (0., 0.), (450., 300.), vec![ch('z')], r.count);
-    r.e = Editor::update(r.e.clone(), &f);
+    r.e = editor::update(r.e.clone(), &f);
 }
 
-fn lights(e: &Editor::t) -> Vec<kg::Node> {
+fn lights(e: &editor::Editor) -> Vec<kg::Node> {
     objects(e).into_iter().filter(|i| i.kind == "light").collect()
 }
 
@@ -183,7 +183,7 @@ pub fn run_panel_states() {
     }
     let directory = std::env::temp_dir().join(format!("rays-panel-state-{}", std::process::id()));
     std::fs::create_dir_all(&directory).unwrap();
-    let mut r = Run::new(editor_with("(workspace panels (graph g :context sop (sop/box)))", Editor::Create { presets: Some(directory.to_str().unwrap().into()), ..Default::default() }));
+    let mut r = Run::new(editor_with("(workspace panels (graph g :context sop (sop/box)))", editor::Create { presets: Some(directory.to_str().unwrap().into()), ..Default::default() }));
     let m = (450., 300.);
     let click = |r: &mut Run, p: (f64, f64)| {
         r.step(p, vec![Event::Pointer_moved(p)]);
@@ -197,7 +197,7 @@ pub fn run_panel_states() {
     let (sx, sy, sw, sh) = splitter.bounds;
     let grip = ((sx + sw / 2) as f64, (sy + sh / 2) as f64);
     let moved = (grip.0 + 30., grip.1);
-    let ws_text = |r: &Run| workspace_doc::to_text(&Editor::workspace(&r.e)).unwrap();
+    let ws_text = |r: &Run| workspace_doc::to_text(&editor::workspace(&r.e)).unwrap();
     let before_split = ws_text(&r);
     r.step(grip, vec![Event::Pointer_moved(grip)]);
     r.stepb(&[LB], grip, vec![Event::Pointer_pressed(LB, grip)]);
@@ -205,16 +205,16 @@ pub fn run_panel_states() {
     check(ws_text(&r) == before_split && r.undo_label().is_none(), "a held splitter drag committed authored state before release");
     r.step(moved, vec![Event::Pointer_released(LB, moved)]);
     r.step(moved, vec![]);
-    check(Editor::workspace(&r.e).layout.editor.is_none() && has(&r.source(), "ui/split-at") && r.undo_label() == Some("Resize panel".into()), "resizing the default shell did not write its editor graph");
-    let saved_shell = build_ok(&Editor::workspace(&r.e)).shell.map(|s| panels::to_string(&s.tree));
+    check(editor::workspace(&r.e).layout.editor.is_none() && has(&r.source(), "ui/split-at") && r.undo_label() == Some("Resize panel".into()), "resizing the default shell did not write its editor graph");
+    let saved_shell = build_ok(&editor::workspace(&r.e)).shell.map(|s| panels::to_string(&s.tree));
     check(build_ok(&of_text(&ws_text(&r))).shell.map(|s| panels::to_string(&s.tree)) == saved_shell, "the first splitter edit did not round-trip through Lisp");
     r.step_full(&[], &[Key::Meta], moved, vec![ch('z')]);
-    check(build_ok(&Editor::workspace(&r.e)).shell.is_none(), "undoing the first splitter edit did not restore the default shell");
+    check(build_ok(&editor::workspace(&r.e)).shell.is_none(), "undoing the first splitter edit did not restore the default shell");
     click(&mut r, (889., 11.));
-    let state = |r: &Run, key: &str| Editor::workspace(&r.e).layout.panels.get(&vec!["editor".to_string(), key.to_string()]).copied().unwrap_or_else(panels::default_state);
+    let state = |r: &Run, key: &str| editor::workspace(&r.e).layout.panels.get(&vec!["editor".to_string(), key.to_string()]).copied().unwrap_or_else(panels::default_state);
     check(state(&r, "inspector").collapsed && r.undo_label() == Some("Collapse panel".into()) && r.panes().inspector.2 == 0, "collapsing a panel did not persist or remove its body");
     let saved = ws_text(&r);
-    check(of_text(&saved).layout.panels == Editor::workspace(&r.e).layout.panels, "panel state did not round-trip through Lisp");
+    check(of_text(&saved).layout.panels == editor::workspace(&r.e).layout.panels, "panel state did not round-trip through Lisp");
     click(&mut r, (889., 11.));
     check(!state(&r, "inspector").collapsed, "the collapsed header could not expand the panel");
     let (gx, gy, _, _) = r.panes().graph;
@@ -285,20 +285,20 @@ pub fn run_panel_states() {
     r.step(target, vec![]);
     r.step(target, vec![key(Key::KeyChar('/')), key(Key::KeyChar('t'))]);
     r.step(target, vec![]);
-    check(Editor::workspace(&r.e).layout.panels.get(&vec!["editor".to_string(), "@panel".to_string(), "-1".to_string()]).is_some_and(|s| !s.collapsed), "the leader timeline toggle was not saved");
-    let prepared = Editor::prepared(&r.e);
-    let same = |r: &Run| match (&Editor::prepared(&r.e), &prepared) {
+    check(editor::workspace(&r.e).layout.panels.get(&vec!["editor".to_string(), "@panel".to_string(), "-1".to_string()]).is_some_and(|s| !s.collapsed), "the leader timeline toggle was not saved");
+    let prepared = editor::prepared(&r.e);
+    let same = |r: &Run| match (&editor::prepared(&r.e), &prepared) {
         // physical equality has no Rust identity (Editor::prepared clones): compare the geometry by size
         (Some(a), Some(b)) => rdk_core::geometry::point_count(a) == rdk_core::geometry::point_count(b),
         (None, None) => true,
         _ => false,
     };
-    r.e = Editor::set_renderer(r.e.clone(), rays_editor::Renderer::Mode::Wireframe);
+    r.e = editor::set_renderer(r.e.clone(), rays_editor::Renderer::Mode::Wireframe);
     r.step(target, vec![]);
-    check(Editor::renderer(&r.e) == rays_editor::Renderer::Mode::Wireframe && same(&r), "the shared wireframe choice recooked the geometry");
-    r.e = Editor::set_renderer(r.e.clone(), rays_editor::Renderer::Mode::Raster);
+    check(editor::renderer(&r.e) == rays_editor::Renderer::Mode::Wireframe && same(&r), "the shared wireframe choice recooked the geometry");
+    r.e = editor::set_renderer(r.e.clone(), rays_editor::Renderer::Mode::Raster);
     r.step(target, vec![]);
-    check(Editor::renderer(&r.e) == rays_editor::Renderer::Mode::Raster && same(&r), "the shared raster choice recooked the geometry");
+    check(editor::renderer(&r.e) == rays_editor::Renderer::Mode::Raster && same(&r), "the shared raster choice recooked the geometry");
     r.close();
     let _ = std::fs::remove_dir_all(&directory);
 }
@@ -324,7 +324,7 @@ pub fn run_ref_picker() {
         r.step(p, vec![Event::Pointer_moved(p)]);
         r.step(p, vec![Event::Pointer_pressed(LB, p), Event::Pointer_released(LB, p)]);
     };
-    let (bx, by, _, _) = Editor::node_box(&r.e, &["scene".into(), "geom".into()]).expect("geom box");
+    let (bx, by, _, _) = editor::node_box(&r.e, &["scene".into(), "geom".into()]).expect("geom box");
     click(&mut r, ((bx + 60) as f64, (by + 12) as f64));
     r.step(m, vec![]);
     check(r.dump("scope selected") == "scene/geom", &format!("the scene geometry node was not selected, got: {}", r.dump("scope selected")));
@@ -387,7 +387,7 @@ pub fn run_compose() {
     r.step(m, vec![]);
     r.step(m, vec![key(Key::KeyChar('/')), ch('e')]);
     r.step(m, vec![]);
-    check(Editor::level(&r.e) == Some("Dome".into()) && !has(&r.source(), "graph world"), "/ e did not enter the World of a scene/world member");
+    check(editor::level(&r.e) == Some("Dome".into()) && !has(&r.source(), "graph world"), "/ e did not enter the World of a scene/world member");
     r.close();
     // / e on a scene with a root and no World makes one
     let mut r = Run::new(editor(
@@ -520,7 +520,7 @@ pub fn run_layouts() {
     // in a layout of several panels the focused one floats, as one entry named Float panel
     r.step(m, vec![key(Key::KeyChar('/')), ch('['), ch('0')]);
     r.step(m, vec![]);
-    let (gx, gy, gw, gh) = Editor::panes(&r.e, &frame(&[], (0., 0.), vec![], r.count)).graph;
+    let (gx, gy, gw, gh) = editor::panes(&r.e, &frame(&[], (0., 0.), vec![], r.count)).graph;
     let at = (gx as f64 + gw as f64 / 2., gy as f64 + gh as f64 / 2.);
     r.step(at, vec![Event::Pointer_moved(at)]);
     r.step(at, vec![Event::Pointer_pressed(LB, at)]);

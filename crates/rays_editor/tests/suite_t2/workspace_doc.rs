@@ -11,7 +11,7 @@ use flow_graph::flow_edit::{ArgKey, Loop, Op};
 use flow_graph::projection;
 use flow_syntax::syntax::{self as syn, Draft as Node};
 use input::{Event, Key};
-use rays_editor::Editor;
+use rays_editor::editor;
 
 pub const CASES: &[(&str, fn())] = &[
     ("workspace_doc_part_editor", part_editor),
@@ -57,7 +57,7 @@ fn editor(text: &str, presets: Option<&str>) -> Ed {
 fn settle(mut e: Ed, from: i64, ok: &dyn Fn(&Ed) -> bool) -> (Ed, i64) {
     let mut count = from;
     loop {
-        e = Editor::update(e, &fr(&[], vec![], count));
+        e = editor::update(e, &fr(&[], vec![], count));
         if ok(&e) {
             return (e, count);
         }
@@ -67,7 +67,7 @@ fn settle(mut e: Ed, from: i64, ok: &dyn Fn(&Ed) -> bool) -> (Ed, i64) {
 }
 
 fn undo(e: Ed, c: i64) -> Ed {
-    Editor::update(e, &fr(&[Key::Meta], vec![ch('z')], c))
+    editor::update(e, &fr(&[Key::Meta], vec![ch('z')], c))
 }
 
 fn first_x(g: &rdk_core::geometry::T) -> f64 {
@@ -75,7 +75,7 @@ fn first_x(g: &rdk_core::geometry::T) -> f64 {
 }
 
 fn objects(e: &Ed) -> Vec<(String, String)> {
-    Editor::document(e).iter().map(|i| (i.label.clone(), i.kind.clone())).collect()
+    editor::document(e).iter().map(|i| (i.label.clone(), i.kind.clone())).collect()
 }
 
 fn part_editor() {
@@ -84,39 +84,39 @@ fn part_editor() {
     }
     let e = editor(STILL, None);
     assert!(objects(&e).contains(&("g".to_owned(), "geometry".to_owned())), "one geometry object per sop graph");
-    let (mut e, mut count) = settle(e, 0, &|e| Editor::prepared(e).is_some());
-    let before = Editor::prepared(&e).unwrap();
+    let (mut e, mut count) = settle(e, 0, &|e| editor::prepared(e).is_some());
+    let before = editor::prepared(&e).unwrap();
     let (e2, c2) = settle(e, count, &|_| true);
     e = e2;
     count = c2;
     for _ in 0..20 {
-        e = Editor::update(e, &fr(&[], vec![], count));
+        e = editor::update(e, &fr(&[], vec![], count));
         count += 1;
     }
-    assert!(rdk_core::geometry::data_id(&Editor::prepared(&e).unwrap()) == rdk_core::geometry::data_id(&before), "static nodes stay cached");
-    assert!(Editor::undo_label(&e).is_none(), "no edit yet");
+    assert!(rdk_core::geometry::data_id(&editor::prepared(&e).unwrap()) == rdk_core::geometry::data_id(&before), "static nodes stay cached");
+    assert!(editor::undo_label(&e).is_none(), "no edit yet");
     let scrub = |v: &str| Op::SetArg { node: s(&["g", "a"]), key: ArgKey::Kw("radius".into()), sub: vec![], value: syn::make(Node::Num(v.into())) };
-    e = Editor::edit(e, &scrub("0.6")).unwrap_or_else(|m| panic!("{m}"));
-    e = Editor::edit(e, &scrub("0.7")).unwrap();
-    assert_eq!(Editor::undo_label(&e).as_deref(), Some("Edit value"), "scrub label");
-    assert!(doc::to_text(&Editor::workspace(&e)).unwrap().contains(":radius 0.7"), "scrub rewrote the source");
-    e = Editor::edit(e, &Op::Rename { node: s(&["g", "b"]), to_: "moved".into() }).unwrap();
-    assert_eq!(Editor::undo_label(&e).as_deref(), Some("Rename"), "rename label");
-    e = Editor::edit(e, &Op::Wrap { nodes: vec![s(&["g", "a"])], loop_: Loop::For }).unwrap();
-    assert_eq!(Editor::undo_label(&e).as_deref(), Some("Repeat"), "repeat label");
-    assert!(Editor::edit(e.clone(), &Op::Rename { node: s(&["g", "a"]), to_: "moved".into() }).is_err(), "a refused edit is an error");
-    assert_eq!(Editor::undo_label(&e).as_deref(), Some("Repeat"), "a refused edit records nothing");
-    let (mut e, count) = settle(e, count + 1, &|e| Editor::prepared(e).map(|g| rdk_core::geometry::point_count(&g) > rdk_core::geometry::point_count(&before)).unwrap_or(false));
+    e = editor::edit(e, &scrub("0.6")).unwrap_or_else(|m| panic!("{m}"));
+    e = editor::edit(e, &scrub("0.7")).unwrap();
+    assert_eq!(editor::undo_label(&e).as_deref(), Some("Edit value"), "scrub label");
+    assert!(doc::to_text(&editor::workspace(&e)).unwrap().contains(":radius 0.7"), "scrub rewrote the source");
+    e = editor::edit(e, &Op::Rename { node: s(&["g", "b"]), to_: "moved".into() }).unwrap();
+    assert_eq!(editor::undo_label(&e).as_deref(), Some("Rename"), "rename label");
+    e = editor::edit(e, &Op::Wrap { nodes: vec![s(&["g", "a"])], loop_: Loop::For }).unwrap();
+    assert_eq!(editor::undo_label(&e).as_deref(), Some("Repeat"), "repeat label");
+    assert!(editor::edit(e.clone(), &Op::Rename { node: s(&["g", "a"]), to_: "moved".into() }).is_err(), "a refused edit is an error");
+    assert_eq!(editor::undo_label(&e).as_deref(), Some("Repeat"), "a refused edit records nothing");
+    let (mut e, count) = settle(e, count + 1, &|e| editor::prepared(e).map(|g| rdk_core::geometry::point_count(&g) > rdk_core::geometry::point_count(&before)).unwrap_or(false));
     e = undo(e, count);
-    assert!(Editor::undo_label(&e).as_deref() == Some("Rename") && Editor::redo_label(&e).as_deref() == Some("Repeat"), "undo Repeat: undo={:?} redo={:?}", Editor::undo_label(&e), Editor::redo_label(&e));
+    assert!(editor::undo_label(&e).as_deref() == Some("Rename") && editor::redo_label(&e).as_deref() == Some("Repeat"), "undo Repeat: undo={:?} redo={:?}", editor::undo_label(&e), editor::redo_label(&e));
     e = undo(e, count + 1);
-    assert!(Editor::undo_label(&e).as_deref() == Some("Edit value") && Editor::redo_label(&e).as_deref() == Some("Rename"), "undo Rename");
+    assert!(editor::undo_label(&e).as_deref() == Some("Edit value") && editor::redo_label(&e).as_deref() == Some("Rename"), "undo Rename");
     e = undo(e, count + 2);
-    assert!(Editor::undo_label(&e).is_none() && Editor::redo_label(&e).as_deref() == Some("Edit value"), "one undo reverts the merged scrub");
-    assert_eq!(doc::to_text(&Editor::workspace(&e)).unwrap(), doc::to_text(&workspace(STILL)).unwrap(), "undo restored the source");
-    e = Editor::update(e, &fr(&[Key::Meta, Key::Shift], vec![ch('z')], count + 3));
-    assert_eq!(Editor::undo_label(&e).as_deref(), Some("Edit value"), "redo");
-    Editor::close(&e);
+    assert!(editor::undo_label(&e).is_none() && editor::redo_label(&e).as_deref() == Some("Edit value"), "one undo reverts the merged scrub");
+    assert_eq!(doc::to_text(&editor::workspace(&e)).unwrap(), doc::to_text(&workspace(STILL)).unwrap(), "undo restored the source");
+    e = editor::update(e, &fr(&[Key::Meta, Key::Shift], vec![ch('z')], count + 3));
+    assert_eq!(editor::undo_label(&e).as_deref(), Some("Edit value"), "redo");
+    editor::close(&e);
 }
 
 fn part_conditional_history() {
@@ -132,7 +132,7 @@ fn part_conditional_history() {
         (+ b c))))",
         None,
     );
-    let before = doc::to_text(&Editor::workspace(&e)).unwrap();
+    let before = doc::to_text(&editor::workspace(&e)).unwrap();
     let ops = vec![
         Op::Wrap { nodes: vec![s(&["g", "a"])], loop_: Loop::If },
         Op::SetArg { node: s(&["g", "c"]), key: ArgKey::Pos(0), sub: vec![], value: syn::make(Node::Sym("false".into())) },
@@ -144,17 +144,17 @@ fn part_conditional_history() {
     ];
     let mut e = e;
     for (i, op) in ops.iter().enumerate() {
-        let changed = Editor::edit(e.clone(), op).unwrap_or_else(|m| panic!("{}: {m}", label(op)));
-        assert_eq!(Editor::undo_label(&changed).as_deref(), Some(label(op)), "conditional gesture history label");
+        let changed = editor::edit(e.clone(), op).unwrap_or_else(|m| panic!("{}: {m}", label(op)));
+        assert_eq!(editor::undo_label(&changed).as_deref(), Some(label(op)), "conditional gesture history label");
         let undone = undo(changed, i as i64 + 1);
         assert!(
-            doc::to_text(&Editor::workspace(&undone)).unwrap() == before && Editor::undo_label(&undone).is_none() && Editor::redo_label(&undone).as_deref() == Some(label(op)),
+            doc::to_text(&editor::workspace(&undone)).unwrap() == before && editor::undo_label(&undone).is_none() && editor::redo_label(&undone).as_deref() == Some(label(op)),
             "conditional gesture was not one undo step: {}",
             label(op)
         );
         e = undone;
     }
-    Editor::close(&e);
+    editor::close(&e);
 }
 
 fn part_live() {
@@ -162,7 +162,7 @@ fn part_live() {
         return;
     }
     let e = editor(MOVING, None);
-    let (mut e, mut count) = settle(e, 0, &|e| Editor::prepared(e).is_some());
+    let (mut e, mut count) = settle(e, 0, &|e| editor::prepared(e).is_some());
     let mut xs: Vec<f64> = Vec::new();
     let unique = |xs: &[f64]| {
         let mut v: Vec<u64> = xs.iter().map(|x| x.to_bits()).collect();
@@ -171,14 +171,14 @@ fn part_live() {
         v.len()
     };
     while unique(&xs) < 4 && count < 400 {
-        e = Editor::update(e, &fr(&[], vec![], count));
+        e = editor::update(e, &fr(&[], vec![], count));
         count += 1;
-        if let Some(g) = Editor::prepared(&e) {
+        if let Some(g) = editor::prepared(&e) {
             xs.push(first_x(&g));
         }
     }
     assert!(unique(&xs) >= 4, "a time-driven workspace animates in the editor");
-    Editor::close(&e);
+    editor::close(&e);
 }
 
 fn part_preset() {
@@ -187,10 +187,10 @@ fn part_preset() {
     }
     with_dir(|directory| {
         let e = editor(STILL, Some(directory));
-        let (e, count) = settle(e, 0, &|e| Editor::prepared(e).is_some());
-        let mut e = Editor::edit(e, &Op::SetNote { node: s(&["g", "a"]), text: "kept".into() }).unwrap();
-        e = Editor::update(e, &fr(&[], vec![ch('/'), ch('s')], count + 1));
-        e = Editor::update(e, &fr(&[], vec![Event::Key_pressed(Key::Enter)], count + 2));
+        let (e, count) = settle(e, 0, &|e| editor::prepared(e).is_some());
+        let mut e = editor::edit(e, &Op::SetNote { node: s(&["g", "a"]), text: "kept".into() }).unwrap();
+        e = editor::update(e, &fr(&[], vec![ch('/'), ch('s')], count + 1));
+        e = editor::update(e, &fr(&[], vec![Event::Key_pressed(Key::Enter)], count + 2));
         let listed = preset::list(directory);
         assert!(listed.len() == 1, "/ s did not save one preset");
         let name = listed[0].0.clone();
@@ -200,15 +200,15 @@ fn part_preset() {
         assert!(text.contains("(workspace study") && text.contains("; kept") && text.contains("(view"), "the preset is s-expressions with its comments");
         assert!(!text.contains("{\"") && !text.contains("\"version\""), "no JSON");
         let loaded = preset::load(None, &path, None, &settings::none()).unwrap();
-        assert_eq!(doc::to_text(&loaded.doc.workspace.ws).unwrap(), doc::to_text(&Editor::workspace(&e)).unwrap(), "save then load round trip");
+        assert_eq!(doc::to_text(&loaded.doc.workspace.ws).unwrap(), doc::to_text(&editor::workspace(&e)).unwrap(), "save then load round trip");
         assert_eq!(preset::list(directory).into_iter().map(|(n, _)| n).collect::<Vec<_>>(), vec![name.clone()], "listed");
         // load through / b: one undo entry
-        e = Editor::edit(e, &Op::Rename { node: s(&["g", "a"]), to_: "ball".into() }).unwrap();
-        e = Editor::update(e, &fr(&[], vec![ch('/'), ch('b')], count + 3));
-        e = Editor::update(e, &fr(&[], vec![Event::Text_input(name.clone()), Event::Key_pressed(Key::Enter)], count + 4));
-        e = Editor::update(e, &fr(&[], vec![], count + 5));
-        assert!(doc::to_text(&Editor::workspace(&e)).unwrap().contains("(sop/transform a "), "/ b restored the saved source");
-        assert_eq!(Editor::undo_label(&e).as_deref(), Some("Load preset"), "load is one undo entry");
+        e = editor::edit(e, &Op::Rename { node: s(&["g", "a"]), to_: "ball".into() }).unwrap();
+        e = editor::update(e, &fr(&[], vec![ch('/'), ch('b')], count + 3));
+        e = editor::update(e, &fr(&[], vec![Event::Text_input(name.clone()), Event::Key_pressed(Key::Enter)], count + 4));
+        e = editor::update(e, &fr(&[], vec![], count + 5));
+        assert!(doc::to_text(&editor::workspace(&e)).unwrap().contains("(sop/transform a "), "/ b restored the saved source");
+        assert_eq!(editor::undo_label(&e).as_deref(), Some("Load preset"), "load is one undo entry");
         // errors never touch the document
         let corrupt = preset::path(directory, "corrupt");
         std::fs::write(&corrupt, "(workspace").unwrap();
@@ -220,7 +220,7 @@ fn part_preset() {
         let nonfinite = builder.freeze().handle(id);
         assert!(preset::save(directory, "x", &loaded.doc, &nonfinite).is_err(), "a nonfinite view is refused");
         assert!(preset::save(directory, "", &loaded.doc, &syn::make(Node::Map(vec![].into()))).is_err(), "an empty name is refused");
-        Editor::close(&e);
+        editor::close(&e);
     });
 }
 
@@ -265,11 +265,11 @@ fn part_editor_contexts() {
     let mut count = 0;
     for _ in 0..3 {
         count += 1;
-        e = Editor::update(e, &fr(&[], vec![], count));
+        e = editor::update(e, &fr(&[], vec![], count));
     }
     let dump = |e: &Ed| {
         with_dir(|dir| {
-            Editor::crash_dump(e, dir).unwrap();
+            editor::crash_dump(e, dir).unwrap();
             std::fs::read_to_string(format!("{dir}/editor.txt")).unwrap()
         })
     };
@@ -281,13 +281,13 @@ fn part_editor_contexts() {
     let fields = ["1", "1", "1"].into_iter().map(|n| builder.push_draft(0, Node::Num(n.into()), Default::default(), None)).collect();
     let id = builder.push_draft(0, Node::Vec(fields), Default::default(), None);
     let vec3 = builder.freeze().handle(id);
-    let e2 = Editor::edit(e.clone(), &Op::SetArg { node: s(&["scene", "accent"]), key: ArgKey::Kw("scale".into()), sub: vec![], value: vec3 }).unwrap();
-    assert_eq!(Editor::undo_label(&e2).as_deref(), Some("Edit value"), "one history entry");
+    let e2 = editor::edit(e.clone(), &Op::SetArg { node: s(&["scene", "accent"]), key: ArgKey::Kw("scale".into()), sub: vec![], value: vec3 }).unwrap();
+    assert_eq!(editor::undo_label(&e2).as_deref(), Some("Edit value"), "one history entry");
     assert!(
-        Editor::document(&e2).iter().any(|i| i.label == "accent" && editor_document::objects::geometry(i).map(|g| g.scale_x == 1.).unwrap_or(false)),
+        editor::document(&e2).iter().any(|i| i.label == "accent" && editor_document::objects::geometry(i).map(|g| g.scale_x == 1.).unwrap_or(false)),
         "the scene edit reached the object"
     );
-    Editor::close(&e);
+    editor::close(&e);
 }
 
 fn part_projection_reuse() {
@@ -325,15 +325,15 @@ fn part_projection_reuse() {
         return;
     }
     let e = editor(text, None);
-    let e = Editor::update(e, &fr(&[], vec![], 0));
+    let e = editor::update(e, &fr(&[], vec![], 0));
     let mut after = None;
     let phases = sample(&mut || {
-        let e2 = Editor::edit(e.clone(), &Op::Rename { node: s(&["other", "b"]), to_: "moved".into() }).unwrap();
-        after = Some(Editor::update(e2, &fr(&[], vec![], 1)));
+        let e2 = editor::edit(e.clone(), &Op::Rename { node: s(&["other", "b"]), to_: "moved".into() }).unwrap();
+        after = Some(editor::update(e2, &fr(&[], vec![], 1)));
     });
     assert_eq!(flow_syntax::phase_timer::calls(&phases, "project"), 0, "editing another graph re-projected the pane");
-    Editor::close(&e);
+    editor::close(&e);
     if let Some(a) = after {
-        Editor::close(&a);
+        editor::close(&a);
     }
 }

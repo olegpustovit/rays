@@ -38,7 +38,7 @@ use crate::editor_commands::action;
 use crate::editor_host;
 use crate::editor_inspect;
 use crate::editor_list;
-use crate::editor_model::{self as model, picked, t as Model, Panel_result};
+use crate::editor_model::{self as model, picked, EditorModel as Model, Panel_result};
 use crate::editor_renderer as renderer;
 
 type Nodes = Vec<scene_node>;
@@ -48,7 +48,7 @@ fn one(r: Result<scene_node, String>) -> Nodes {
 }
 
 /// The camera control: the Camera and Render sections of the inspector.
-pub mod CC {
+pub mod cc {
     use super::*;
 
     #[derive(Clone, Debug, PartialEq)]
@@ -59,7 +59,7 @@ pub mod CC {
         pub open_camera: Option<bool>,
     }
 
-    pub type t = visibility;
+    pub type Control = visibility;
 
     #[derive(Clone, Debug, PartialEq)]
     pub struct render_request {
@@ -71,17 +71,17 @@ pub mod CC {
         visibility { prefix: prefix.to_string(), ui_visible: true, filename: "_out/rays-render.png".to_string(), open_camera: None }
     }
 
-    pub fn create() -> t {
+    pub fn create() -> Control {
         make("camera")
     }
 
-    pub fn toggle_ui(control: &t) -> t {
-        t { ui_visible: !control.ui_visible, ..control.clone() }
+    pub fn toggle_ui(control: &Control) -> Control {
+        Control { ui_visible: !control.ui_visible, ..control.clone() }
     }
 
     /// Show the UI and toggle the Camera section, or open it if the UI was hidden.
-    pub fn open_camera(control: &t) -> t {
-        t { ui_visible: true, open_camera: Some(!control.ui_visible), ..control.clone() }
+    pub fn open_camera(control: &Control) -> Control {
+        Control { ui_visible: true, open_camera: Some(!control.ui_visible), ..control.clone() }
     }
 
     pub fn number(ui: &mut Ui, key: &str, label: &str, low: f64, high: f64, value: f64) -> f64 {
@@ -123,18 +123,18 @@ pub mod CC {
         result
     }
 
-    pub fn render_section(control: &t, ui: &mut Ui) -> (t, Vec<String>) {
+    pub fn render_section(control: &Control, ui: &mut Ui) -> (Control, Vec<String>) {
         let mut out = (control.filename.clone(), false);
         ui.inspector_section("Render", false, None, "Render", &mut |ui| {
             let filename = text(ui, "Output", "Output", &control.filename);
             out = (filename, ui.inspector_button("Save", "Render / save PNG"));
         });
         let (filename, save) = out;
-        (t { filename: filename.clone(), ..control.clone() }, if save { vec![filename] } else { Vec::new() })
+        (Control { filename: filename.clone(), ..control.clone() }, if save { vec![filename] } else { Vec::new() })
     }
 
     /// `open_camera` opens the section explicitly while hidden, otherwise it toggles.
-    pub fn camera_section(control: &t, ui: &mut Ui, build: &mut dyn FnMut(&mut Ui)) -> bool {
+    pub fn camera_section(control: &Control, ui: &mut Ui, build: &mut dyn FnMut(&mut Ui)) -> bool {
         let set_expanded = match control.open_camera {
             None => None,
             Some(true) => Some(true),
@@ -143,7 +143,7 @@ pub mod CC {
         ui.inspector_section("Camera", false, set_expanded, "Camera", build)
     }
 
-    pub fn widgets(control: &t, ui: &mut Ui, camera: &easy_camera::EasyCamera) -> (t, easy_camera::EasyCamera, Vec<render_request>) {
+    pub fn widgets(control: &Control, ui: &mut Ui, camera: &easy_camera::EasyCamera) -> (Control, easy_camera::EasyCamera, Vec<render_request>) {
         let mut out_camera = camera.clone();
         let mut control_out = control.clone();
         let mut saves: Vec<String> = Vec::new();
@@ -171,7 +171,7 @@ pub mod CC {
                 result = Some(if reset { easy_camera::reset(&built) } else { built });
             });
             out_camera = result.unwrap_or_else(|| camera.clone());
-            let (c, s) = render_section(&t { open_camera: None, ..control.clone() }, ui);
+            let (c, s) = render_section(&Control { open_camera: None, ..control.clone() }, ui);
             control_out = c;
             saves = s;
         });
@@ -183,7 +183,7 @@ pub mod CC {
         easy_camera::with_control_area(Some(area), camera).and_then(|c| easy_camera::update(&c, frame_)).unwrap_or_else(|_| camera.clone())
     }
 
-    pub fn ui_visible(control: &t) -> bool {
+    pub fn ui_visible(control: &Control) -> bool {
         control.ui_visible
     }
 
@@ -193,9 +193,9 @@ pub mod CC {
 }
 
 pub type camera = easy_camera::EasyCamera;
-pub type control = CC::t;
+pub type control = cc::Control;
 pub type rendered = d3::Scene3;
-pub type request = CC::render_request;
+pub type request = cc::render_request;
 pub type view = rcam::Camera;
 
 /// The view's handle tool: W translate, E rotate, R scale, Escape none.
@@ -258,16 +258,16 @@ pub fn default_camera() -> camera {
     easy_camera::create(Some(vec3::zero()), Some(7.), None, None, None, None).expect("default camera")
 }
 pub fn create_control() -> control {
-    CC::create()
+    cc::create()
 }
 pub fn ui_visible(c: &control) -> bool {
-    CC::ui_visible(c)
+    cc::ui_visible(c)
 }
 pub fn toggle_ui(c: &control) -> control {
-    CC::toggle_ui(c)
+    cc::toggle_ui(c)
 }
 pub fn open_camera(c: &control) -> control {
-    CC::open_camera(c)
+    cc::open_camera(c)
 }
 pub fn set_relative(enabled: bool) {
     let _ = sketch::set_relative_mouse(enabled);
@@ -533,7 +533,7 @@ pub fn panel(ui: &mut Ui, control_: &control, camera_: &camera, extra_: &extra, 
         let handles = ui.inspector_toggle("Selected node handles", &short("Selected node handles"), extra_.show.handles);
         next = extra { follow_request, show: show { cameras, axes, handles }, ..set_look(extra_, through) };
     });
-    let (control_out, camera_out, requests) = CC::widgets(control_, ui, camera_);
+    let (control_out, camera_out, requests) = cc::widgets(control_, ui, camera_);
     // the scene's root: renderer, size and samples
     let mut root_ = extra_.root.clone();
     ui.inspector_section("renderer-section", true, None, "Scene root", &mut |ui| {
@@ -635,7 +635,7 @@ pub fn navigate(area: Bounds, grab: (bool, bool), _control: &control, camera_: &
             if grabbing != extra_.relative_grab {
                 set_relative(grabbing);
             }
-            let camera_ = CC::navigate(Some(area), camera_, input);
+            let camera_ = cc::navigate(Some(area), camera_, input);
             (camera_, extra { relative_grab: grabbing, ..extra_.clone() })
         }
     }
@@ -1272,7 +1272,7 @@ pub fn guides(scene_: &kg::T, selected: Option<&picked>, space: &mat4::T, view_:
 }
 
 pub fn save(request: &request) -> Result<(), String> {
-    CC::save(request)
+    cc::save(request)
 }
 pub fn filename(request: &request) -> String {
     request.filename.clone()

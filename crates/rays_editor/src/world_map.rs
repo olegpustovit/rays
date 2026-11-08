@@ -10,7 +10,7 @@ use rays::world;
 use crate::editor_host;
 use crate::editor_inspect;
 use crate::editor_list;
-use crate::editor_model::t;
+use crate::editor_model::EditorModel;
 
 /// The World's camera map as an sRGB image (width, height, RGBA bytes): the path tracer's
 /// exposure, ACES fit, and gamma, so the map reads like the renders.
@@ -70,7 +70,7 @@ pub fn wrap_degrees(value: f64) -> f64 {
     (((value + 180.) % 360.) + 360.) % 360. - 180.
 }
 
-pub fn world_operation(core: &t, area: Bounds, point: (f64, f64), shift: bool) -> Option<world_operation> {
+pub fn world_operation(core: &EditorModel, area: Bounds, point: (f64, f64), shift: bool) -> Option<world_operation> {
     match editor_host::world_id(core) {
         Some(world) if core.map_view && map_uv(area, point).is_some() => match editor_list::selected_node(core) {
             Some(node) if node.fields.iter().any(|f| f.name == "azimuth") => Some(world_operation::Move_layer(world, node.id)),
@@ -82,7 +82,7 @@ pub fn world_operation(core: &t, area: Bounds, point: (f64, f64), shift: bool) -
     }
 }
 
-pub fn move_world(core: &mut t, drag: &world_drag, point: (f64, f64)) {
+pub fn move_world(core: &mut EditorModel, drag: &world_drag, point: (f64, f64)) {
     if point == drag.point {
         return;
     }

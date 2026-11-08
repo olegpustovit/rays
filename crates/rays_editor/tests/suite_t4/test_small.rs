@@ -3,11 +3,11 @@
 use super::t4::*;
 use flow_syntax::{lisp, syntax};
 use input::{Event, Key};
-use rays_editor::{Editor, Workspace};
+use rays_editor::{editor, workspace};
 
 fn effects_workspace(effects: &str) -> editor_document::workspace_doc::T {
     let text = format!("(workspace host (graph picture :context draw (draw/background \"#111827\")) (graph actions :context host {effects}) (graph editor :context editor (ui/workspace (ui/canvas (ref picture)) :effects (ref actions))))");
-    Workspace::load(None, vec![], None, &text).unwrap_or_else(|d| panic!("{d:?}"))
+    workspace::load(None, vec![], None, &text).unwrap_or_else(|d| panic!("{d:?}"))
 }
 
 fn eframe(keys: Vec<Key>, events: Vec<Event>, count: i64) -> rays::frame::Frame {
@@ -16,11 +16,11 @@ fn eframe(keys: Vec<Key>, events: Vec<Event>, count: i64) -> rays::frame::Frame 
     f
 }
 
-fn with_editor<R>(ws: &editor_document::workspace_doc::T, run: impl FnOnce(&mut Editor::t) -> R) -> (R, Editor::t) {
-    let o = Editor::Create { ui_text_size: Some(11), platform: Some(input::Platform::Apple), await_: Some(true), domains: Some(1), ..Default::default() };
-    let mut ed = Editor::create(o, ws, None, Editor::prepare_fn(), Editor::draw_fn()).unwrap();
+fn with_editor<R>(ws: &editor_document::workspace_doc::T, run: impl FnOnce(&mut editor::Editor) -> R) -> (R, editor::Editor) {
+    let o = editor::Create { ui_text_size: Some(11), platform: Some(input::Platform::Apple), await_: Some(true), domains: Some(1), ..Default::default() };
+    let mut ed = editor::create(o, ws, None, editor::prepare_fn(), editor::draw_fn()).unwrap();
     let r = run(&mut ed);
-    Editor::close(&ed);
+    editor::close(&ed);
     (r, ed)
 }
 
@@ -30,16 +30,16 @@ pub fn host_effects_edge() {
     }
     let doc = effects_workspace("(list (host/quit (key/down \"q\")))");
     with_editor(&doc, |editor| {
-        let up = |ed: &mut Editor::t, f: rays::frame::Frame| *ed = Editor::update(ed.clone(), &f);
+        let up = |ed: &mut editor::Editor, f: rays::frame::Frame| *ed = editor::update(ed.clone(), &f);
         up(editor, eframe(vec![], vec![], 0));
-        assert_eq!(Editor::Private::host_stats(editor), (false, 0, 0, 0));
+        assert_eq!(editor::private::host_stats(editor), (false, 0, 0, 0));
         for count in 1..=2 {
             up(editor, eframe(vec![Key::KeyChar('q')], vec![Event::Key_pressed(Key::KeyChar('q'))], count));
         }
-        assert_eq!(Editor::Private::host_stats(editor), (true, 1, 0, 0));
+        assert_eq!(editor::private::host_stats(editor), (true, 1, 0, 0));
         up(editor, eframe(vec![], vec![], 3));
         up(editor, eframe(vec![Key::KeyChar('q')], vec![], 4));
-        assert_eq!(Editor::Private::host_stats(editor), (true, 2, 0, 0));
+        assert_eq!(editor::private::host_stats(editor), (true, 2, 0, 0));
     });
     host_effects_samples();
 }
@@ -50,7 +50,7 @@ pub fn host_effects_export() {
     }
     for effects in ["(list (host/quit true))", "(list (host/dialog \"open_file\" true))"] {
         let dir = temp_dir("effects-refused");
-        match Workspace::export(None, None, &dir, 1, &effects_workspace(effects)) {
+        match workspace::export(None, None, &dir, 1, &effects_workspace(effects)) {
             Err(d) => assert_eq!(d.code, "E_EFFECT_EXPORT"),
             Ok(()) => panic!("export accepted {effects}"),
         }
@@ -61,12 +61,12 @@ pub fn host_effects_export() {
 fn host_effects_samples() {
     let doc = effects_workspace("(list (host/play (audio/synth :frequency 440.0 :duration 0.01) (key/down \"a\")) (host/play (audio/synth :frequency 440.0 :duration 0.01) (key/down \"a\")))");
     let (_, closed) = with_editor(&doc, |editor| {
-        *editor = Editor::update(editor.clone(), &eframe(vec![Key::KeyChar('a')], vec![], 1));
-        assert_eq!(Editor::Private::host_stats(editor), (false, 2, 1, 0));
-        *editor = Editor::update(editor.clone(), &eframe(vec![Key::KeyChar('a')], vec![], 2));
-        assert_eq!(Editor::Private::host_stats(editor), (false, 2, 1, 0));
+        *editor = editor::update(editor.clone(), &eframe(vec![Key::KeyChar('a')], vec![], 1));
+        assert_eq!(editor::private::host_stats(editor), (false, 2, 1, 0));
+        *editor = editor::update(editor.clone(), &eframe(vec![Key::KeyChar('a')], vec![], 2));
+        assert_eq!(editor::private::host_stats(editor), (false, 2, 1, 0));
     });
-    assert_eq!(Editor::Private::host_stats(&closed), (false, 2, 1, 1));
+    assert_eq!(editor::private::host_stats(&closed), (false, 2, 1, 1));
 }
 
 fn files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
@@ -107,6 +107,6 @@ pub fn workspace_start_errors() {
         Err(ds) => assert!(ds.iter().any(|d| d.code == code), "workspace start did not return {code}"),
         Ok(()) => panic!("workspace start accepted invalid input"),
     };
-    refuses("E_IO", Workspace::main(None, None, &path));
-    refuses("E_UNCLOSED", Workspace::main(Some("(workspace".into()), None, &path));
+    refuses("E_IO", workspace::main(None, None, &path));
+    refuses("E_UNCLOSED", workspace::main(Some("(workspace".into()), None, &path));
 }

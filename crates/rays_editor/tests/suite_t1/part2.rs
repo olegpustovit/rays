@@ -3,13 +3,13 @@
 use super::support::*;
 use flow_graph::flow_edit::{ArgKey, Op};
 use input::{Event, Key, MouseButton};
-use rays_editor::Editor;
+use rays_editor::editor;
 
 const L: MouseButton = MouseButton::LeftButton;
 
 /// Editor_prepare.centroid of the prepared geometry: the x of its mesh centre.
-fn centre_x(e: &Editor::t) -> Option<f64> {
-    let geometry = Editor::prepared(e)?;
+fn centre_x(e: &editor::Editor) -> Option<f64> {
+    let geometry = editor::prepared(e)?;
     let mesh = rdk_rays::rays_mesh::to_mesh(&geometry).ok()?;
     rays::mesh::centroid(&mesh).ok().flatten().map(|p| p.x)
 }
@@ -41,10 +41,10 @@ pub fn run_values() {
         r.step(p, vec![]);
         (r, p)
     };
-    let add = |workspace: Option<&str>, pick: &dyn Fn(&Editor::t) -> usize, text: &str| -> Editor::t {
+    let add = |workspace: Option<&str>, pick: &dyn Fn(&editor::Editor) -> usize, text: &str| -> editor::Editor {
         let (mut r, p) = started(workspace);
         if workspace.is_none() {
-            check(Editor::level(&r.e) == Some("g".into()), "the box graph is open");
+            check(editor::level(&r.e) == Some("g".into()), "the box graph is open");
         }
         r.step(p, vec![key(Key::KeyChar('/')), ch('a')]);
         r.step(p, vec![text_input(text)]);
@@ -57,29 +57,29 @@ pub fn run_values() {
     };
     let add0 = |text: &str| add(None, &|_| 0, text);
     let e = add0("number");
-    check(Editor::undo_label(&e) == Some("Add node".into()) && has(&source(&e), "value 1.0"), &format!("a number binding: {}", source(&e)));
-    Editor::close(&e);
+    check(editor::undo_label(&e) == Some("Add node".into()) && has(&source(&e), "value 1.0"), &format!("a number binding: {}", source(&e)));
+    editor::close(&e);
     let e = add0("time");
     check(has(&source(&e), "time t"), &format!("a time binding: {}", source(&e)));
-    Editor::close(&e);
+    editor::close(&e);
     let e = add0("sin");
     check(has(&source(&e), "(sin 0.5)"), &format!("an operator binding with typed defaults: {}", source(&e)));
-    Editor::close(&e);
+    editor::close(&e);
     let e = add0("str");
     check(has(&source(&e), "(str \"text\")"), &format!("a str binding: {}", source(&e)));
-    Editor::close(&e);
+    editor::close(&e);
     let facs = factories();
     check(!facs.iter().any(|f| sop::edit_graph::factory_key(f) == "line"), "Line production menu still uses an OCaml registration");
     let e = add0("line");
-    check(Editor::undo_label(&e) == Some("Add node".into()) && has(&source(&e), "(sop/line)"), &format!("Line actual zero-input menu insertion: {}", source(&e)));
-    let ws = Editor::workspace(&e);
+    check(editor::undo_label(&e) == Some("Add node".into()) && has(&source(&e), "(sop/line)"), &format!("Line actual zero-input menu insertion: {}", source(&e)));
+    let ws = editor::workspace(&e);
     let _ = build_ok(&ws);
     let pane = flow_graph::projection::of_graph(&catalog(), &ws.checked, "g").expect("scope");
     check(pane.nodes.iter().any(|c| c.head == "sop/line"), "Line menu insertion has no geometry card");
-    Editor::close(&e);
+    editor::close(&e);
     check(!facs.iter().any(|f| sop::edit_graph::factory_key(f) == "points"), "Points production menu still uses an OCaml registration");
-    let pick_points = |editor: &Editor::t| -> usize {
-        let doc = build_ok(&Editor::workspace(editor));
+    let pick_points = |editor: &editor::Editor| -> usize {
+        let doc = build_ok(&editor::workspace(editor));
         let lowered = &doc.workspace.lowered;
         let mut all = factories();
         all.extend(lowered.factories.iter().cloned());
@@ -99,43 +99,43 @@ pub fn run_values() {
         pxui_graph::node_menu::keys(&menu, "points").iter().position(|k| k == "points").expect("points in the menu")
     };
     let e = add(None, &pick_points, "points");
-    check(Editor::undo_label(&e) == Some("Add node".into()) && has(&source(&e), "(sop/points)"), &format!("Points actual zero-input menu insertion: {}", source(&e)));
-    let ws = Editor::workspace(&e);
+    check(editor::undo_label(&e) == Some("Add node".into()) && has(&source(&e), "(sop/points)"), &format!("Points actual zero-input menu insertion: {}", source(&e)));
+    let ws = editor::workspace(&e);
     let _ = build_ok(&ws);
     let pane = flow_graph::projection::of_graph(&catalog(), &ws.checked, "g").expect("scope");
     check(pane.nodes.iter().any(|c| c.head == "sop/points"), "Points menu insertion has no geometry card");
-    Editor::close(&e);
+    editor::close(&e);
     for (name, expression) in [("array/compact", "(array/compact (array/int 0))"), ("array/scan_sum", "(array/scan_sum (array/int 0))")] {
         let e = add0(name);
-        check(Editor::undo_label(&e) == Some("Add node".into()) && has(&source(&e), expression), &format!("ordered integer array menu insertion: {}", source(&e)));
-        Editor::close(&e);
+        check(editor::undo_label(&e) == Some("Add node".into()) && has(&source(&e), expression), &format!("ordered integer array menu insertion: {}", source(&e)));
+        editor::close(&e);
     }
     for (name, expression) in [("array/grade", "(array/grade (array/float 4))"), ("array/index_of", "(array/index_of (array/int 0) (array/int 0))")] {
         let e = add0(name);
-        check(Editor::undo_label(&e) == Some("Add node".into()) && has(&source(&e), expression), &format!("grade/index menu insertion: {}", source(&e)));
-        Editor::close(&e);
+        check(editor::undo_label(&e) == Some("Add node".into()) && has(&source(&e), expression), &format!("grade/index menu insertion: {}", source(&e)));
+        editor::close(&e);
     }
     let e = add0("array/scatter_add");
-    check(Editor::undo_label(&e) == Some("Add node".into()) && has(&source(&e), "(array/scatter_add (array/int 0) (array/float 0) 0)"), &format!("empty ordered scatter menu insertion: {}", source(&e)));
-    Editor::close(&e);
+    check(editor::undo_label(&e) == Some("Add node".into()) && has(&source(&e), "(array/scatter_add (array/int 0) (array/float 0) 0)"), &format!("empty ordered scatter menu insertion: {}", source(&e)));
+    editor::close(&e);
     let e = add0("sop/mesh");
     let s = source(&e);
     check(
-        Editor::undo_label(&e) == Some("Add node".into()) && has(&s, "(sop/mesh") && has(&s, ":points (array/vec3 0)") && has(&s, ":vertex_points (array/int 0)") && has(&s, ":primitive_offsets (array/int 1)") && has(&s, ":kinds (array/int 0)"),
+        editor::undo_label(&e) == Some("Add node".into()) && has(&s, "(sop/mesh") && has(&s, ":points (array/vec3 0)") && has(&s, ":vertex_points (array/int 0)") && has(&s, ":primitive_offsets (array/int 1)") && has(&s, ":kinds (array/int 0)"),
         &format!("required mesh keyword arrays were absent from production menu insertion: {s}"),
     );
-    Editor::close(&e);
+    editor::close(&e);
     let e = add0("sop/mesh_planes");
     let s = source(&e);
     check(
-        Editor::undo_label(&e) == Some("Add node".into()) && has(&s, "(sop/mesh_planes") && has(&s, ":points {:x (array/float 0)") && has(&s, ":y (array/float 0)") && has(&s, ":z (array/float 0)}") && has(&s, ":primitive_offsets (array/int 1)"),
+        editor::undo_label(&e) == Some("Add node".into()) && has(&s, "(sop/mesh_planes") && has(&s, ":points {:x (array/float 0)") && has(&s, ":y (array/float 0)") && has(&s, ":z (array/float 0)}") && has(&s, ":primitive_offsets (array/int 1)"),
         &format!("required typed mesh planes were absent from production menu insertion: {s}"),
     );
-    Editor::close(&e);
+    editor::close(&e);
     let e = add0("sop/with_attr");
     let s = source(&e);
     check(
-        Editor::undo_label(&e) == Some("Add node".into()) && has(&s, "(sop/with_attr (sop/mesh") && has(&s, "\"attribute\"") && has(&s, "(array/vec3 0)"),
+        editor::undo_label(&e) == Some("Add node".into()) && has(&s, "(sop/with_attr (sop/mesh") && has(&s, "\"attribute\"") && has(&s, "(array/vec3 0)"),
         &format!("ordinary full attribute menu starter lost typed legacy array/geometry defaults: {s}"),
     );
     {
@@ -152,29 +152,29 @@ pub fn run_values() {
         check(matches!(rdk_core::attribute::View::storage(&attr), Ok(rdk_core::attribute::Storage::Float3(data)) if rdk_core::packed::Float3::length(data) == 0), "ordinary attribute menu starter lost vec3 storage");
         sop::session::close(&mut session);
     }
-    Editor::close(&e);
+    editor::close(&e);
     let e = add0("sop/remap");
     let s = source(&e);
     check(
-        Editor::undo_label(&e) == Some("Add node".into()) && has(&s, "(sop/remap (sop/mesh") && has(&s, ":points (array/int 0)") && has(&s, ":vertices (array/int 0)") && has(&s, ":primitives (array/int 0)"),
+        editor::undo_label(&e) == Some("Add node".into()) && has(&s, "(sop/remap (sop/mesh") && has(&s, ":points (array/int 0)") && has(&s, ":vertices (array/int 0)") && has(&s, ":primitives (array/int 0)"),
         &format!("required remap maps and cooked empty geometry defaults were absent from production menu insertion: {s}"),
     );
-    Editor::close(&e);
+    editor::close(&e);
     let e = add0("attr_from_image");
     let s = source(&e);
-    check(Editor::undo_label(&e) == Some("Add node".into()) && has(&s, "sop/attr_from_image") && has(&s, ":image (image/noise :width 1 :height 1)"), &format!("a mixed SOP has a real image default through the add menu: {s}"));
-    Editor::close(&e);
+    check(editor::undo_label(&e) == Some("Add node".into()) && has(&s, "sop/attr_from_image") && has(&s, ":image (image/noise :width 1 :height 1)"), &format!("a mixed SOP has a real image default through the add menu: {s}"));
+    editor::close(&e);
     for op in ["frame/dt", "array/count", "array/nth", "array/sum"] {
         let e = add0(op);
-        check(Editor::undo_label(&e) == Some("Add node".into()) && has(&source(&e), &format!("({op}")), &format!("a frame/array operator has checked menu defaults: {}", source(&e)));
-        Editor::close(&e);
+        check(editor::undo_label(&e) == Some("Add node".into()) && has(&source(&e), &format!("({op}")), &format!("a frame/array operator has checked menu defaults: {}", source(&e)));
+        editor::close(&e);
     }
     let workspace = "(workspace w (graph g :context draw (draw/merge)) (graph editor :context editor (ui/workspace (ui/graph \"g\" :focus true))))";
     for op in flow_check::op::all() {
         if op.ctx == flow_syntax::context::draw() {
             let e = add(Some(workspace), &|_| 0, &op.name);
-            check(Editor::undo_label(&e) == Some("Add node".into()) && has(&source(&e), &format!("({}", op.name)), &format!("a drawing operator is added through the menu: {}", source(&e)));
-            Editor::close(&e);
+            check(editor::undo_label(&e) == Some("Add node".into()) && has(&source(&e), &format!("({}", op.name)), &format!("a drawing operator is added through the menu: {}", source(&e)));
+            editor::close(&e);
         }
     }
 }
@@ -210,11 +210,11 @@ pub fn run_duplicate_and_view() {
         let label = r.undo_label();
         r.step(p, vec![key(Key::KeyChar('v'))]);
         check(r.source() == before && r.undo_label() == label, "v changed the workspace or history");
-        let layout_text = editor_document::layout_by_path::to_syntax(&Editor::workspace(&r.e).layout);
+        let layout_text = editor_document::layout_by_path::to_syntax(&editor::workspace(&r.e).layout);
         check(!has(&flow_syntax::lisp::print(&[layout_text]).unwrap().0, "(display"), "the viewed node is not saved in the layout");
         r.step(p, vec![]);
-        check(sop::node::label(&Editor::displayed_node(&r.e)) == "box" && centre_x(&r.e) == Some(0.), &format!("v marked the node but did not show it in the viewport: {node}"));
-        let (x, y, w, _) = Editor::node_box(&r.e, &["g".into(), "b".into()]).expect("box b");
+        check(sop::node::label(&editor::displayed_node(&r.e)) == "box" && centre_x(&r.e) == Some(0.), &format!("v marked the node but did not show it in the viewport: {node}"));
+        let (x, y, w, _) = editor::node_box(&r.e, &["g".into(), "b".into()]).expect("box b");
         let target = ((x + w / 2) as f64, (y + 3) as f64);
         r.step(target, vec![Event::Pointer_moved(target)]);
         r.step(target, vec![Event::Pointer_pressed(L, target), Event::Pointer_released(L, target)]);
@@ -256,7 +256,7 @@ pub fn run_loop_view() {
     r.step(m, vec![key(Key::KeyChar('i'))]);
     r.step(m, vec![]);
     let inner: Vec<String> = ["g", "rows", "@result"].iter().map(|s| s.to_string()).collect();
-    let (x, y, w, _) = Editor::node_box(&r.e, &inner).expect("loop body box");
+    let (x, y, w, _) = editor::node_box(&r.e, &inner).expect("loop body box");
     click_at(&mut r, ((x + w / 2) as f64, (y + 3) as f64));
     check(r.dump("scope selected") == "g/rows/@result", "the node inside the loop could not be selected");
     let before = r.source();
@@ -265,10 +265,10 @@ pub fn run_loop_view() {
     r.step(m, vec![]);
     check(r.source() == before && r.undo_label() == label, "viewing a loop body changed the document or history");
     centre(&r, "iteration zero", 5.);
-    r.e = Editor::set_probe(r.e.clone(), &["g".into(), "rows".into()], 1);
+    r.e = editor::set_probe(r.e.clone(), &["g".into(), "rows".into()], 1);
     r.step(m, vec![]);
     centre(&r, "iteration one", 15.);
-    r.e = Editor::set_probe(r.e.clone(), &["g".into(), "rows".into()], 2);
+    r.e = editor::set_probe(r.e.clone(), &["g".into(), "rows".into()], 2);
     r.step(m, vec![]);
     centre(&r, "iteration two", 25.);
     r.close();
@@ -294,13 +294,13 @@ pub fn run_result_view() {
         check(actual == Some(expected), &format!("VIEW kept stale geometry: expected {expected:.1}, got {actual:?}; cook error: {:?}", r.e.core.cook.error));
     };
     let select = |r: &mut Run, name: &str| {
-        let (x, y, w, _) = Editor::node_box(&r.e, &["g".into(), name.into()]).expect("box");
+        let (x, y, w, _) = editor::node_box(&r.e, &["g".into(), name.into()]).expect("box");
         // a different point each time: two presses on one are a double-click, which renames
         click_at(r, ((x + w * (20 + 35 * (r.count % 4)) / 196) as f64, (y + 3) as f64));
         check(r.dump("scope selected") == format!("g/{name}"), "the result node could not be selected");
     };
     let edit = |r: &mut Run, op: Op| {
-        r.e = match Editor::edit(r.e.clone(), &op) {
+        r.e = match editor::edit(r.e.clone(), &op) {
             Ok(e) => e,
             Err(m) => fail(&m),
         };
@@ -340,7 +340,7 @@ pub fn run_result_view() {
     click_at(&mut r, ((vx + 10) as f64, (vy + 10) as f64));
     r.step(m, vec![key(Key::KeyChar('f'))]);
     r.step(m, vec![]);
-    check((rays::easy_camera::target(&Editor::camera(&r.e)).x - 11.).abs() < 1e-6, "viewport F framed the graph result instead of the viewed node");
+    check((rays::easy_camera::target(&editor::camera(&r.e)).x - 11.).abs() < 1e-6, "viewport F framed the graph result instead of the viewed node");
     let (gx, gy, _, _) = r.panes().graph;
     click_at(&mut r, ((gx + 10) as f64, (gy + 10) as f64));
     r.step(m, vec![key(Key::KeyChar('u'))]);
@@ -383,14 +383,14 @@ pub fn run_geometry_view() {
     r.step(m, vec![key(Key::Home)]);
     r.step(m, vec![key(Key::KeyChar('i'))]);
     r.step(m, vec![]);
-    let (x, y, w, _) = Editor::node_box(&r.e, &["g".into(), "dots".into(), "moved".into()]).expect("moved");
+    let (x, y, w, _) = editor::node_box(&r.e, &["g".into(), "dots".into(), "moved".into()]).expect("moved");
     click_at(&mut r, ((x + w / 2) as f64, (y + 3) as f64));
     let before = r.source();
     let label = r.undo_label();
     r.step(m, vec![key(Key::KeyChar('v'))]);
     r.step(m, vec![]);
     centre(&r, 0.);
-    r.e = Editor::set_probe(r.e.clone(), &["g".into(), "dots".into()], 2);
+    r.e = editor::set_probe(r.e.clone(), &["g".into(), "dots".into()], 2);
     r.step(m, vec![]);
     centre(&r, 20.);
     check(r.source() == before && r.undo_label() == label, "geometry preview and its selector changed the source or history");
@@ -398,12 +398,12 @@ pub fn run_geometry_view() {
     click_at(&mut r, ((vx + 10) as f64, (vy + 10) as f64));
     r.step(m, vec![key(Key::KeyChar('f'))]);
     r.step(m, vec![]);
-    check((rays::easy_camera::target(&Editor::camera(&r.e)).x - 20.).abs() < 1e-6, "viewport F did not frame the geometry preview");
+    check((rays::easy_camera::target(&editor::camera(&r.e)).x - 20.).abs() < 1e-6, "viewport F did not frame the geometry preview");
     let panes = r.panes();
-    let point = rays::camera::world_to_screen(panes.view, &Editor::view_camera(&r.e), rays_math::vec3::create(20., 0., 0.)).expect("projection").expect("on screen");
+    let point = rays::camera::world_to_screen(panes.view, &editor::view_camera(&r.e), rays_math::vec3::create(20., 0., 0.)).expect("projection").expect("on screen");
     click_at(&mut r, (point.x, point.y));
     r.step(m, vec![]);
-    check(r.dump("scope selected") == "g/dots/moved" && Editor::probe(&r.e, &["g".into(), "dots".into()]) == Some(2), "picking a preview selected the authored result or changed its iteration");
+    check(r.dump("scope selected") == "g/dots/moved" && editor::probe(&r.e, &["g".into(), "dots".into()]) == Some(2), "picking a preview selected the authored result or changed its iteration");
     r.close();
 }
 
@@ -424,7 +424,7 @@ pub fn run_movers() {
     r.step(p, vec![key(Key::Home)]);
     r.step(p, vec![key(Key::KeyChar('i'))]);
     r.step(p, vec![]);
-    let (bx, by, bw, _) = Editor::node_box(&r.e, &["g".into(), "widths".into()]).expect("widths");
+    let (bx, by, bw, _) = editor::node_box(&r.e, &["g".into(), "widths".into()]).expect("widths");
     let c = ((bx + bw / 2) as f64, (by + 8) as f64);
     r.step(c, vec![Event::Pointer_moved(c)]);
     r.step(c, vec![Event::Pointer_pressed(L, c)]);

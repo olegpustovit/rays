@@ -1,6 +1,6 @@
 //! `rays` (port of bin/rays.ml): an empty editor, a .rays workspace opened natively, check, fmt, mem, web.
 use rays_bin::{check, fmt, web, EMPTY};
-use rays_editor::rays_editor::{Measure, Workspace};
+use rays_editor::rays_editor::{measure, workspace};
 
 fn die(m: &str) -> ! {
     eprintln!("{m}");
@@ -11,9 +11,9 @@ fn var(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|v| !v.is_empty())
 }
 
-fn process() -> Workspace::process {
+fn process() -> workspace::process {
     let max_frames = var("RAYS_MAX_FRAMES").map(|t| t.trim().parse::<i64>().unwrap_or_else(|_| die("rays: RAYS_MAX_FRAMES must be an integer")));
-    Workspace::process { max_frames, crash_dir: var("RAYS_CRASH_DIR"), profile: std::env::var("RAYS_PROFILE").is_ok(), preferences: var("RAYS_EDITOR_PREFERENCES"), ui_font: var("RAYS_UI_FONT") }
+    workspace::process { max_frames, crash_dir: var("RAYS_CRASH_DIR"), profile: std::env::var("RAYS_PROFILE").is_ok(), preferences: var("RAYS_EDITOR_PREFERENCES"), ui_font: var("RAYS_UI_FONT") }
 }
 
 fn native(text: Option<String>, path: &str) {
@@ -21,7 +21,7 @@ fn native(text: Option<String>, path: &str) {
         Some(t) => t,
         None => std::fs::read(path).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_else(|e| die(&format!("rays: {e}"))),
     };
-    if let Err(ds) = Workspace::main(Some(text.clone()), Some(process()), path) {
+    if let Err(ds) = workspace::main(Some(text.clone()), Some(process()), path) {
         for d in ds {
             eprintln!("{}", rays_diagnostic::report(path, &text, &d));
         }
@@ -31,14 +31,14 @@ fn native(text: Option<String>, path: &str) {
 
 fn mem_command(path: &str, frames: i64) {
     let text = std::fs::read(path).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_else(|e| die(&format!("rays: {e}")));
-    let loaded = rays_editor::source_file::read_imports(path, &text).and_then(|imports| Workspace::load(None, imports, None, &text));
+    let loaded = rays_editor::source_file::read_imports(path, &text).and_then(|imports| workspace::load(None, imports, None, &text));
     let workspace = loaded.unwrap_or_else(|ds| {
         for d in ds {
             eprintln!("{}", rays_diagnostic::report(path, &text, &d));
         }
         std::process::exit(1)
     });
-    let outcome = Measure::run(Default::default(), &|_, e| e, frames.min(30), frames, &workspace).unwrap_or_else(|m| die(&format!("rays: {m}")));
+    let outcome = measure::run(Default::default(), &|_, e| e, frames.min(30), frames, &workspace).unwrap_or_else(|m| die(&format!("rays: {m}")));
     let fb = |n: i64| mem::Report::format_bytes(n);
     print!("{}", outcome.fin.report.to_string());
     println!(

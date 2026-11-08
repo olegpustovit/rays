@@ -17,7 +17,7 @@ use editor_document::workspace_doc as wd;
 use flow_graph::flow_edit::{ArgKey, Op};
 use input::{Event, Key};
 use param::Value;
-use rays_editor::Editor;
+use rays_editor::editor;
 
 pub const CASES: &[(&str, fn())] = &[
     ("consistency_frozen_driven", frozen_driven),
@@ -75,7 +75,7 @@ pub fn with_editor(ws: &wd::T, camera: Option<rays::easy_camera::EasyCamera>, f:
     with_dir(|presets| {
         let mut e = step(create(ws, Some(presets), camera, false), 1);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(&mut e)));
-        Editor::close(&e);
+        editor::close(&e);
         if let Err(p) = result {
             std::panic::resume_unwind(p);
         }
@@ -89,11 +89,11 @@ pub fn upd(e: &mut Ed, f: impl FnOnce(Ed) -> Ed) {
 fn settings_authority() {
     let ws = workspace_with(Some(settings_of(0., "default")), &format!("{PLAIN}\n(settings :amount 3.0)"));
     with_editor(&ws, None, |e| {
-        assert_eq!(got(&Editor::settings(e)), vals(3., "default"), "opening a checked workspace discarded its saved settings");
-        upd(e, |e| Editor::set_settings(e, &settings_of(7., "changed")));
-        assert_eq!(got(&Editor::workspace(e).settings), vals(7., "changed"), "set_settings left Workspace_doc.settings behind");
+        assert_eq!(got(&editor::settings(e)), vals(3., "default"), "opening a checked workspace discarded its saved settings");
+        upd(e, |e| editor::set_settings(e, &settings_of(7., "changed")));
+        assert_eq!(got(&editor::workspace(e).settings), vals(7., "changed"), "set_settings left Workspace_doc.settings behind");
         upd(e, |e| edit(e, &Op::SetGraph { name: "g".into(), form: parse("(graph g :context sop (sop/box :size [2 2 2]))") }));
-        assert_eq!(got(&Editor::workspace(e).settings), vals(7., "changed"), "a graph edit rolled settings back");
+        assert_eq!(got(&editor::workspace(e).settings), vals(7., "changed"), "a graph edit rolled settings back");
     });
 }
 
@@ -126,8 +126,8 @@ fn settings_graph_writeback() {
             )
             .unwrap(),
         );
-        upd(e, |e| Editor::set_settings(e, &settings::make(&schema, vec![Value::Int(90)])));
-        let loaded = build(&workspace(&wd::to_text(&Editor::workspace(e)).unwrap()));
+        upd(e, |e| editor::set_settings(e, &settings::make(&schema, vec![Value::Int(90)])));
+        let loaded = build(&workspace(&wd::to_text(&editor::workspace(e)).unwrap()));
         assert!(settings::fields(&loaded.settings).iter().any(|f| f.name == "fps" && f.current == Value::Int(90)), "set_settings changed a graph-owned value without writing the settings graph");
     });
 }
@@ -135,18 +135,18 @@ fn settings_graph_writeback() {
 fn startup_settings() {
     let ws = workspace("(workspace startup (graph config :context settings (settings/config)))");
     with_editor(&ws, None, |e| {
-        let fields = settings::fields(&build(&Editor::workspace(e)).settings);
+        let fields = settings::fields(&build(&editor::workspace(e)).settings);
         assert!(fields.len() == 6 && fields.iter().all(|f| f.label.ends_with("(on restart)") || f.label.ends_with("(live)")), "workspace startup fields do not explain when edits apply");
         for (i, (name, literal)) in [("title", "\"Changed title\""), ("width", "900"), ("height", "640"), ("fps", "90"), ("seed", "42")].iter().enumerate() {
-            let before = Editor::workspace(e);
+            let before = editor::workspace(e);
             upd(e, |e| edit(e, &Op::SetArg { node: s(&["config", "@result"]), key: ArgKey::Kw((*name).to_owned()), sub: vec![], value: parse(literal) }));
-            let after = Editor::workspace(e);
+            let after = editor::workspace(e);
             let reloaded = workspace(&wd::to_text(&after).unwrap());
             let w = |x: &wd::T| lowering::window(x).map(|w| format!("{w:?}")).map_err(|d| rays_diagnostic::to_string(&d));
             assert_eq!(w(&reloaded), w(&after), "startup setting did not survive reload: {name}");
             assert_ne!(w(&after), w(&before), "startup setting did not update saved configuration: {name}");
-            upd(e, |e| Editor::update(e, &undo_frame((450., 300.), i as i64 + 2)));
-            assert!(same_ws(&Editor::workspace(e), &before), "startup setting undo did not restore its source: {name}");
+            upd(e, |e| editor::update(e, &undo_frame((450., 300.), i as i64 + 2)));
+            assert!(same_ws(&editor::workspace(e), &before), "startup setting undo did not restore its source: {name}");
         }
     });
 }
@@ -155,7 +155,7 @@ pub type Staged = Vec<Vec<(Option<Vec<u8>>, Vec<u8>)>>;
 
 /// The 3D layers of the staged picture: per entry its transform uniforms and vertices.
 pub fn layers(e: &Ed) -> Staged {
-    let staged = rays::scene::Layer::stage_native(900, 640, &Editor::scene(e, &frame(1))).unwrap_or_else(|m| panic!("{m}"));
+    let staged = rays::scene::Layer::stage_native(900, 640, &editor::scene(e, &frame(1))).unwrap_or_else(|m| panic!("{m}"));
     staged
         .layers
         .iter()
@@ -172,7 +172,7 @@ pub fn layers(e: &Ed) -> Staged {
 }
 
 fn geometry_len(e: &Ed) -> Option<(i64, i64)> {
-    Editor::prepared(e).map(|g| (rdk_core::geometry::point_count(&g), rdk_core::geometry::primitive_count(&g)))
+    editor::prepared(e).map(|g| (rdk_core::geometry::point_count(&g), rdk_core::geometry::primitive_count(&g)))
 }
 
 pub const SCENE_TEXT: &str = r#"(workspace picture
@@ -218,18 +218,18 @@ fn frozen_row4() { frozen_row(4) }
 
 fn frozen_editor() {
     with_editor(&workspace(SCENE_TEXT), None, |e| {
-        let before = Editor::workspace(e);
-        let label = Editor::undo_label(e);
+        let before = editor::workspace(e);
+        let label = editor::undo_label(e);
         for (node, key, expr) in [(vec!["scene", "object"], "translate", "[t 0 0]"), (vec!["scene", "lamp"], "width", "(+ 1 t)")] {
-            match Editor::edit(e.clone(), &set_arg(&node, key, expr)) {
+            match editor::edit(e.clone(), &set_arg(&node, key, expr)) {
                 Ok(_) => panic!("host installed a frozen time field"),
-                Err(message) => assert!(message.contains("E_CONTEXT_TIME") && same_ws(&Editor::workspace(e), &before) && Editor::undo_label(e) == label, "frozen-time refusal changed source/history"),
+                Err(message) => assert!(message.contains("E_CONTEXT_TIME") && same_ws(&editor::workspace(e), &before) && editor::undo_label(e) == label, "frozen-time refusal changed source/history"),
             }
         }
         upd(e, |e| edit(e, &set_arg(&["scene", "object"], "translate", "[2 0 0]")));
-        assert!(lowering::of_workspace(&Default::default(), &workspace(&wd::to_text(&Editor::workspace(e)).unwrap())).is_ok(), "literal replacement did not survive reload");
-        upd(e, |e| Editor::update(e, &undo_frame((450., 300.), 2)));
-        assert!(same_ws(&Editor::workspace(e), &before), "literal replacement did not undo in one entry");
+        assert!(lowering::of_workspace(&Default::default(), &workspace(&wd::to_text(&editor::workspace(e)).unwrap())).is_ok(), "literal replacement did not survive reload");
+        upd(e, |e| editor::update(e, &undo_frame((450., 300.), 2)));
+        assert!(same_ws(&editor::workspace(e), &before), "literal replacement did not undo in one entry");
     });
 }
 
@@ -378,18 +378,18 @@ fn live_lights() {
     let reloaded = build(&workspace(&wd::to_text(&ws).unwrap()));
     assert!(intensities(&resolve(&reloaded, 2.)) == intensities(&two), "live light source did not survive serialization");
     with_editor(&ws, None, |e| {
-        let source = Editor::workspace(e);
-        let prepared = Editor::prepared(e);
+        let source = editor::workspace(e);
+        let prepared = editor::prepared(e);
         let before_layers = layers(e);
-        let lights = Editor::lights(e);
-        let before_time = rays_editor::Timeline::time(&Editor::timeline(e));
+        let lights = editor::lights(e);
+        let before_time = rays_editor::Timeline::time(&editor::timeline(e));
         let mut live = frame(2);
         live.input.dt = 2.;
-        upd(e, |e| Editor::update(e, &live));
-        assert!(same_ws(&Editor::workspace(e), &source) && Editor::undo_label(e).is_none(), "timeline lighting changed authored state or history");
-        assert!(prepared.is_some() && Editor::prepared(e).is_some(), "timeline lighting re-prepared geometry");
-        assert!(format!("{:?}", Editor::lights(e)) != format!("{:?}", lights) && layers(e) != before_layers, "timeline lighting did not reach staged rendering");
-        assert_eq!(rays_editor::Timeline::time(&Editor::timeline(e)), before_time + 2., "live lighting used runtime time instead of the editor timeline");
+        upd(e, |e| editor::update(e, &live));
+        assert!(same_ws(&editor::workspace(e), &source) && editor::undo_label(e).is_none(), "timeline lighting changed authored state or history");
+        assert!(prepared.is_some() && editor::prepared(e).is_some(), "timeline lighting re-prepared geometry");
+        assert!(format!("{:?}", editor::lights(e)) != format!("{:?}", lights) && layers(e) != before_layers, "timeline lighting did not reach staged rendering");
+        assert_eq!(rays_editor::Timeline::time(&editor::timeline(e)), before_time + 2., "live lighting used runtime time instead of the editor timeline");
         let frozen = |n: i64| {
             let mut f = frame(n);
             f.input.dt = 0.;
@@ -397,13 +397,13 @@ fn live_lights() {
         };
         let before = layers(e);
         upd(e, |e| edit(e, &set_pos(&["editor", "comparison"], "(ref scene :lamp 5)")));
-        upd(e, |e| Editor::update(e, &frozen(3)));
+        upd(e, |e| editor::update(e, &frozen(3)));
         let after = layers(e);
         assert!(after[0] == before[0] && after[1] != before[1], "a live comparison override changed primary lighting");
         let mut f = frozen(4);
         f.input.keys = vec![Key::Meta];
         f.input.events = vec![Event::Key_pressed(Key::KeyChar('z'))];
-        upd(e, |e| Editor::update(e, &f));
+        upd(e, |e| editor::update(e, &f));
         assert!(layers(e) == before, "one undo did not restore live comparison lighting");
     });
 }

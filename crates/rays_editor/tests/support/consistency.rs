@@ -10,9 +10,9 @@ use flow_graph::flow_edit::{self as fe, ArgKey, Op};
 use flow_syntax::syntax::{self as syn, Syntax};
 use input::{Event, Key, MouseButton};
 use rays::frame;
-use rays_editor::Editor;
+use rays_editor::editor;
 
-pub type Ed = Editor::t;
+pub type Ed = editor::Editor;
 
 pub fn s(parts: &[&str]) -> Vec<String> {
     parts.iter().map(|x| (*x).to_owned()).collect()
@@ -129,7 +129,7 @@ pub fn with_dir<R>(f: impl FnOnce(&str) -> R) -> R {
 /// `create` with the OCaml tests' defaults: platform Apple, await, the surface prepare and a
 /// scene3 draw of the prepared surface (`native`: the app's own prepare and draw).
 pub fn create(ws: &workspace_doc::T, presets: Option<&str>, camera: Option<rays::easy_camera::EasyCamera>, native: bool) -> Ed {
-    let options = Editor::Create {
+    let options = editor::Create {
         platform: Some(input::Platform::Apple),
         ui_text_size: Some(if native { 13 } else { 11 }),
         presets: presets.map(str::to_owned),
@@ -137,15 +137,15 @@ pub fn create(ws: &workspace_doc::T, presets: Option<&str>, camera: Option<rays:
         await_: Some(true), domains: Some(1),
         ..Default::default()
     };
-    Editor::create(options, ws, None, Editor::prepare_fn(), Editor::draw_fn()).expect("the editor opens")
+    editor::create(options, ws, None, editor::prepare_fn(), editor::draw_fn()).expect("the editor opens")
 }
 
 pub fn step(e: Ed, n: i64) -> Ed {
-    Editor::update(e, &frame(n))
+    editor::update(e, &frame(n))
 }
 
 pub fn edit(e: Ed, op: &Op) -> Ed {
-    Editor::edit(e, op).unwrap_or_else(|m| panic!("edit refused: {m}"))
+    editor::edit(e, op).unwrap_or_else(|m| panic!("edit refused: {m}"))
 }
 
 pub fn flat(x: &Syntax) -> String {

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use editor_document::workspace_doc as wd;
 use input::{Event, Key, MouseButton, Platform};
 use rays::frame;
-use rays_editor::{Editor, Workspace};
+use rays_editor::{editor, workspace};
 
 pub fn key(k: Key) -> Event {
     Event::Key_pressed(k)
@@ -45,7 +45,7 @@ pub fn frame_with(buttons: &[MouseButton], keys: &[Key], mouse: (f64, f64), even
 
 /// `Rays_editor.Workspace.load text |> get_ok`.
 pub fn load(text: &str) -> wd::T {
-    Workspace::load(None, Vec::new(), None, text).unwrap_or_else(|ds| panic!("{}", ds.iter().map(rays_diagnostic::to_string).collect::<Vec<_>>().join("; ")))
+    workspace::load(None, Vec::new(), None, text).unwrap_or_else(|ds| panic!("{}", ds.iter().map(rays_diagnostic::to_string).collect::<Vec<_>>().join("; ")))
 }
 
 /// Ws_fixture.box: one unit box.
@@ -54,17 +54,17 @@ pub fn box_workspace() -> wd::T {
 }
 
 /// The options every OCaml test passes: Apple platform, 11-point text, awaited cook.
-pub fn options() -> Editor::Create {
-    Editor::Create { platform: Some(Platform::Apple), ui_text_size: Some(11), await_: Some(true), domains: Some(1), ..Default::default() }
+pub fn options() -> editor::Create {
+    editor::Create { platform: Some(Platform::Apple), ui_text_size: Some(11), await_: Some(true), domains: Some(1), ..Default::default() }
 }
 
-pub fn create(o: Editor::Create, ws: &wd::T) -> Editor::t {
-    Editor::create(o, ws, None, Editor::prepare_fn(), Editor::draw_fn()).unwrap_or_else(|m| panic!("editor did not open: {m}"))
+pub fn create(o: editor::Create, ws: &wd::T) -> editor::Editor {
+    editor::create(o, ws, None, editor::prepare_fn(), editor::draw_fn()).unwrap_or_else(|m| panic!("editor did not open: {m}"))
 }
 
 /// `E3.create ~platform:Apple ~ui_text_size:11 ~await:true ~domains:1 ~workspace` over the text.
-pub fn open(text: &str) -> Editor::t {
-    create(Editor::Create { domains: Some(1), ..options() }, &load(text))
+pub fn open(text: &str) -> editor::Editor {
+    create(editor::Create { domains: Some(1), ..options() }, &load(text))
 }
 
 /// `Workspace.edit`'s physical equality: the same checked document.
@@ -72,8 +72,8 @@ pub fn same_ws(a: &wd::T, b: &wd::T) -> bool {
     Arc::ptr_eq(&a.checked, &b.checked)
 }
 
-pub fn text_of(e: &Editor::t) -> String {
-    wd::to_text(&Editor::workspace(e)).unwrap()
+pub fn text_of(e: &editor::Editor) -> String {
+    wd::to_text(&editor::workspace(e)).unwrap()
 }
 
 pub fn has(text: &str, piece: &str) -> bool {
@@ -81,17 +81,17 @@ pub fn has(text: &str, piece: &str) -> bool {
 }
 
 /// Runs `f`, closing the editor after it (`Fun.protect ~finally:close`).
-pub fn with_editor(text: &str, f: impl FnOnce(Editor::t)) {
+pub fn with_editor(text: &str, f: impl FnOnce(editor::Editor)) {
     let e = open(text);
     let guard = e.clone();
     f(e);
-    Editor::close(&guard);
+    editor::close(&guard);
 }
 
 /// A line of the crash dump's editor.txt after `key: `.
-pub fn dump_line(e: &Editor::t, key: &str) -> String {
+pub fn dump_line(e: &editor::Editor, key: &str) -> String {
     let dir = scratch_dir("rays-t3-dump");
-    Editor::crash_dump(e, &dir).unwrap_or_else(|m| panic!("crash_dump: {m}"));
+    editor::crash_dump(e, &dir).unwrap_or_else(|m| panic!("crash_dump: {m}"));
     let text = std::fs::read_to_string(format!("{dir}/editor.txt")).expect("editor.txt");
     let _ = std::fs::remove_dir_all(&dir);
     let prefix = format!("{key}: ");
@@ -108,21 +108,21 @@ pub fn scratch_dir(prefix: &str) -> String {
 
 /// A mutable editor with the frame counter, `let step ... = incr count; e := E3.update !e (frame ..)`.
 pub struct Driver {
-    cur: Option<Editor::t>,
+    cur: Option<editor::Editor>,
     pub count: i64,
 }
 
 impl Driver {
-    pub fn new(e: Editor::t) -> Driver {
+    pub fn new(e: editor::Editor) -> Driver {
         Driver { cur: Some(e), count: 0 }
     }
-    pub fn e(&self) -> &Editor::t {
+    pub fn e(&self) -> &editor::Editor {
         self.cur.as_ref().expect("editor")
     }
-    pub fn set(&mut self, e: Editor::t) {
+    pub fn set(&mut self, e: editor::Editor) {
         self.cur = Some(e);
     }
-    pub fn take(&mut self) -> Editor::t {
+    pub fn take(&mut self) -> editor::Editor {
         self.cur.take().expect("editor")
     }
     pub fn step(&mut self, events: Vec<Event>) {
@@ -138,10 +138,10 @@ impl Driver {
         self.count += advance;
         let f = frame_with(buttons, keys, mouse, events, self.count);
         let e = self.take();
-        self.cur = Some(Editor::update(e, &f));
+        self.cur = Some(editor::update(e, &f));
     }
     pub fn close(&self) {
-        Editor::close(self.e());
+        editor::close(self.e());
     }
     pub fn text(&self) -> String {
         text_of(self.e())
@@ -150,7 +150,7 @@ impl Driver {
 
 impl Driver {
     /// `e := f !e` outside a frame (a `Reduce`, a selection).
-    pub fn map(&mut self, f: impl FnOnce(Editor::t) -> Editor::t) {
+    pub fn map(&mut self, f: impl FnOnce(editor::Editor) -> editor::Editor) {
         let e = self.take();
         self.cur = Some(f(e));
     }

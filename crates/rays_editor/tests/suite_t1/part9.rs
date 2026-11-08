@@ -4,7 +4,7 @@
 use super::support::*;
 use input::{Event, Key};
 use rays_editor::editor_renderer as b;
-use rays_editor::Editor;
+use rays_editor::editor;
 
 fn roots_text(renderer: &str) -> String {
     format!(
@@ -59,7 +59,7 @@ pub fn run_roots() {
     check(b::next_turn(&order, Some("c"), &w(&["b"])) == Some("b".into()), "a lone one repeats");
     check(b::next_turn(&order, Some("a"), &[]).is_none(), "no one wants, no turn");
     let mut r = Run::new(editor(&roots_text("Raster")));
-    let keys: Vec<String> = shell_of(&build_ok(&Editor::workspace(&r.e))).preview_sources.iter().map(|(k, _)| k.clone()).collect();
+    let keys: Vec<String> = shell_of(&build_ok(&editor::workspace(&r.e))).preview_sources.iter().map(|(k, _)| k.clone()).collect();
     let (day, night) = match keys.as_slice() {
         [d, n] => (d.clone(), n.clone()),
         _ => fail("two viewports, two roots"),
@@ -68,23 +68,23 @@ pub fn run_roots() {
     r.step(p, vec![]);
     r.step(p, vec![]);
     // the free view is drawn in its whole pane; only looking through the camera gates it
-    let film = |r: &Run| Editor::film(&r.e, &frame(&[], p, vec![], r.count));
+    let film = |r: &Run| editor::film(&r.e, &frame(&[], p, vec![], r.count));
     let (fx, fy, pane_w, pane_h) = film(&r);
     check((fx, fy) == (0, 0) && pane_w > 0 && pane_h > 0, "a free view does not fill its pane");
     r.step(p, vec![Event::Key_pressed(Key::KeyChar('/')), Event::Key_pressed(Key::KeyChar('v'))]);
     r.step(p, vec![]);
     r.step(p, vec![]);
-    check(Editor::look_through(&r.e), "/ v did not look through the camera");
+    check(editor::look_through(&r.e), "/ v did not look through the camera");
     let (gx, gy, gate_w, gate_h) = film(&r);
     check(gx > 0 && gy > 0 && gate_w < pane_w && gate_h < pane_h && (gate_w * 450 - gate_h * 800).abs() <= 800, "looking through the camera does not show the root's 800 x 450 gate inside the pane");
     let near = |a, b| rays_math::vec3::nearly_equal(a, b, 1e-4);
-    check(near(rays::camera::position(&Editor::viewport_camera(&r.e, &day)), eye_of("day")), "the first viewport does not look through its own root's camera");
+    check(near(rays::camera::position(&editor::viewport_camera(&r.e, &day)), eye_of("day")), "the first viewport does not look through its own root's camera");
     // look-through is the focused viewport's own: the other keeps its orbit until its panel says so
-    check(!near(rays::camera::position(&Editor::viewport_camera(&r.e, &night)), eye_of("night")), "/ v looked through a viewport that does not have the focus");
+    check(!near(rays::camera::position(&editor::viewport_camera(&r.e, &night)), eye_of("night")), "/ v looked through a viewport that does not have the focus");
     let through = editor(&replace(&roots_text("Raster"), "(ui/viewport (ref night))", "(ui/viewport (ref night) :look_through true)"));
-    let through = Editor::update(Editor::update(through, &frame(&[], p, vec![], 1)), &frame(&[], p, vec![], 2));
-    check(near(rays::camera::position(&Editor::viewport_camera(&through, &night)), eye_of("night")) && !Editor::look_through(&through), "the second viewport does not look through its own root's camera as its :look_through says");
-    Editor::close(&through);
-    check(Editor::slot_of(&r.e, &day).is_none() && Editor::slot_of(&r.e, &night).is_none(), "a raster viewport has no tracer slot");
+    let through = editor::update(editor::update(through, &frame(&[], p, vec![], 1)), &frame(&[], p, vec![], 2));
+    check(near(rays::camera::position(&editor::viewport_camera(&through, &night)), eye_of("night")) && !editor::look_through(&through), "the second viewport does not look through its own root's camera as its :look_through says");
+    editor::close(&through);
+    check(editor::slot_of(&r.e, &day).is_none() && editor::slot_of(&r.e, &night).is_none(), "a raster viewport has no tracer slot");
     r.close();
 }

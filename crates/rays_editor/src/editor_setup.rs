@@ -88,15 +88,15 @@ pub fn save_guide(filename: &str, guide: bool) -> Result<(), String> {
     store::settings::save("rays-editor", filename, &values)
 }
 
-pub fn state_directory(value: &t) -> String {
+pub fn state_directory(value: &EditorModel) -> String {
     editor_core::store::filename_concat(&value.presets, "state")
 }
 
-pub fn state_file(value: &t) -> String {
+pub fn state_file(value: &EditorModel) -> String {
     preset::path(&state_directory(value), &value.state_name)
 }
 
-pub fn browse(value: &t, query: &str) -> Option<prompt> {
+pub fn browse(value: &EditorModel, query: &str) -> Option<prompt> {
     let last_state = std::fs::metadata(state_file(value)).ok().filter(|m| m.is_file()).and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs_f64());
     Some(prompt::Browsing { query: query.to_string(), presets: preset::list(&value.presets), last_state })
 }
@@ -156,7 +156,7 @@ fn wall_clock() -> f64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0)
 }
 
-pub fn create(opts: create_opts, workspace: &workspace_doc::T, prepare: cook::Prepare_fn) -> Result<t, String> {
+pub fn create(opts: create_opts, workspace: &workspace_doc::T, prepare: cook::Prepare_fn) -> Result<EditorModel, String> {
     let create_opts {
         gpu, settings: given_settings, seed_scene, name, presets, state_key, factories, seed, grain, domains, max_entries, max_payload_bytes, await_, carry_budget, clock, preferences, ui_text_size, platform, ui_font, opened,
     } = opts;
@@ -199,7 +199,7 @@ pub fn create(opts: create_opts, workspace: &workspace_doc::T, prepare: cook::Pr
     let history = history::create(None, Some(64 * 1024 * 1024), Some(bytes), keep, doc.clone())?;
     let vocab = vocabulary(&factories, &doc);
     let file = format!("{}.rays", doc.workspace.ws.checked.name);
-    let value = t {
+    let value = EditorModel {
         preferences,
         text_size: ui_text_size,
         guide,

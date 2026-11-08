@@ -460,7 +460,7 @@ pub fn draw_notice<'a>(value: impl Into<ModelView<'a>>, frame_: &frame::Frame, r
 
 /// The viewport handles: their edits, a pick, and the changes they write.
 #[allow(clippy::too_many_arguments)]
-pub fn draw_handles<'a>(value: impl Into<ModelView<'a>>, workspace: &shell, selection: selection::t, selected: &Option<picked>, lowered_level: bool, scope_active: bool, active: &Option<Leaf>, view_root: &UiBox, view_handles: &ViewHandles, ui: &mut Ui) -> (selection::t, bool, Vec<change>, Option<(i64, Vec<(String, Value)>)>) {
+pub fn draw_handles<'a>(value: impl Into<ModelView<'a>>, workspace: &shell, selection: selection::Selection, selected: &Option<picked>, lowered_level: bool, scope_active: bool, active: &Option<Leaf>, view_root: &UiBox, view_handles: &ViewHandles, ui: &mut Ui) -> (selection::Selection, bool, Vec<change>, Option<(i64, Vec<(String, Value)>)>) {
     let value = &value.into();
     // a lowered node is edited through its text: the handles of the node selected in the graph pane
     // write its arguments, the list's rows of a geometry object have none
@@ -578,7 +578,7 @@ pub fn draw_inspectors<'a>(
     unchanged: &editor_document::settings::T,
     g: &layout::Geometry,
     scope_view: &scope::Pane,
-    selection: &selection::t,
+    selection: &selection::Selection,
     scope_active: bool,
     graph_shown: bool,
     focus: &Panel,
@@ -636,7 +636,7 @@ type Marks = (Vec<(Path, String)>, Option<(Path, bool)>);
 
 /// What the graph pane marks while a payload is carried: the places that take it (the key route's
 /// letters) and the one under the pointer.
-pub fn carry_marks(value: &t) -> Marks {
+pub fn carry_marks(value: &EditorModel) -> Marks {
     let Some(c) = &value.carry else { return (Vec::new(), None) };
     let path_of = |place: &carry_mod::Place| -> Option<Path> {
         match place {
@@ -760,7 +760,7 @@ pub fn text_state<'a>(value: impl Into<ModelView<'a>>, actions: &[action], pane_
 }
 
 /// Command +/-/0: the kit text of the panels (the graph pane zooms, viewports have no text).
-pub fn set_text_size(value: &t, actions: &[action]) {
+pub fn set_text_size(value: &EditorModel, actions: &[action]) {
     for a in actions {
         if let action::Ui_scale(delta) = a {
             let sizes = [8i64, 9, 10, 11, 12, 13, 14, 16, 18];
@@ -773,7 +773,7 @@ pub fn set_text_size(value: &t, actions: &[action]) {
 }
 
 /// What the hosted sketch sees of this frame, and the window focus it tracks.
-pub fn gated(value: &mut t, frame_: &frame::Frame, text_focus: bool, host_events: Vec<Event>) {
+pub fn gated(value: &mut EditorModel, frame_: &frame::Frame, text_focus: bool, host_events: Vec<Event>) {
     let mut window_focus = value.window_focus;
     for e in &frame_.input.events {
         match e {
@@ -874,7 +874,7 @@ pub fn fps_sample<'a>(value: impl Into<ModelView<'a>>, frame_: &frame::Frame) ->
 /// the document history, unless a prompt, menu or rename owns the keys, or a text pane holds an
 /// unapplied draft: an extra Command-Z after the draft is undone must not change the document
 /// under it.
-pub fn undo_passed(value: &t, text_focus: bool, modal: bool) -> Vec<action> {
+pub fn undo_passed(value: &EditorModel, text_focus: bool, modal: bool) -> Vec<action> {
     if text_focus && !modal && !has_draft(None, value) {
         match value.ui.borrow().passed_undo() {
             Some(pxui::ui::UndoKind::Undo) => vec![action::Undo],
@@ -910,13 +910,13 @@ pub fn live_keymap(all_ui_visible: bool, keymap: std::rc::Rc<Vec<Command>>) -> s
     }
 }
 
-fn ui_platform(value: &t) -> input::Platform {
+fn ui_platform(value: &EditorModel) -> input::Platform {
     value.ui.borrow().platform()
 }
 
 #[allow(clippy::too_many_arguments)]
 pub fn update_frame(
-    value: &mut t,
+    value: &mut EditorModel,
     carry_changed: bool,
     all_ui_visible: bool,
     text_focus: bool,
@@ -1466,7 +1466,7 @@ pub fn update_frame(
 /// took removed.
 #[allow(clippy::too_many_arguments)]
 pub fn update(
-    value: &mut t,
+    value: &mut EditorModel,
     all_ui_visible: bool,
     text_focus: bool,
     camera_panel: &dyn Fn(&mut Ui) -> Panel_result,

@@ -7,7 +7,7 @@ use flow_graph::flow_edit as fe;
 use input::{Event, Key, MouseButton::*};
 use param::Value;
 use rays::frame;
-use rays_editor::Editor;
+use rays_editor::editor;
 use rays_math::vec3;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
@@ -77,25 +77,25 @@ fn fixture() -> workspace_doc::T {
     of_text(None, TEXT)
 }
 
-fn report_line(ed: &Editor::t, name: &str) -> String {
+fn report_line(ed: &editor::Editor, name: &str) -> String {
     let dir = temp_dir("report");
-    Editor::crash_dump(ed, &dir).unwrap();
+    editor::crash_dump(ed, &dir).unwrap();
     let all = format!("{}{}", std::fs::read_to_string(format!("{dir}/editor.txt")).unwrap(), std::fs::read_to_string(format!("{dir}/document.txt")).unwrap());
     let _ = std::fs::remove_dir_all(&dir);
     all.split('\n').find(|l| l.starts_with(&format!("{name}: ")) || l.starts_with(&format!("{name} "))).unwrap_or_else(|| panic!("no {name} line in the report")).to_string()
 }
 
-fn text_of(ed: &Editor::t) -> String {
-    workspace_doc::to_text(&Editor::workspace(ed)).unwrap()
+fn text_of(ed: &editor::Editor) -> String {
+    workspace_doc::to_text(&editor::workspace(ed)).unwrap()
 }
 fn has(text: &str, piece: &str) -> bool {
     text.contains(piece)
 }
-fn cameras(ed: &Editor::t) -> Vec<editor_document::kind_graph::Node> {
-    Editor::scene_document(ed).into_iter().filter(|n| n.kind == "camera").collect()
+fn cameras(ed: &editor::Editor) -> Vec<editor_document::kind_graph::Node> {
+    editor::scene_document(ed).into_iter().filter(|n| n.kind == "camera").collect()
 }
 /// the id of the ACTIVE camera, from the crash report's "camera N" line
-fn active(ed: &Editor::t) -> Vec<i64> {
+fn active(ed: &editor::Editor) -> Vec<i64> {
     let line = report_line(ed, "camera");
     let parts: Vec<&str> = line.split(' ').collect();
     match parts.as_slice() {
@@ -107,22 +107,22 @@ fn active(ed: &Editor::t) -> Vec<i64> {
 fn near(a: vec3::T, b: vec3::T) -> bool {
     vec3::nearly_equal(a, b, 1e-6)
 }
-fn eye(ed: &Editor::t) -> vec3::T {
-    rays::camera::position(&Editor::render_camera(ed))
+fn eye(ed: &editor::Editor) -> vec3::T {
+    rays::camera::position(&editor::render_camera(ed))
 }
-fn viewport_eye(ed: &Editor::t) -> vec3::T {
-    rays::camera::position(&rays::easy_camera::camera(&Editor::camera(ed)).unwrap())
+fn viewport_eye(ed: &editor::Editor) -> vec3::T {
+    rays::camera::position(&rays::easy_camera::camera(&editor::camera(ed)).unwrap())
 }
-fn up(ed: Editor::t, f: frame::Frame) -> Editor::t {
+fn up(ed: editor::Editor, f: frame::Frame) -> editor::Editor {
     if std::env::var("T4_TRACE").is_ok() {
         eprintln!("[up {}]", f.input.frame);
     }
-    Editor::update(ed, &f)
+    editor::update(ed, &f)
 }
-fn wait(count: i64, mut ed: Editor::t) -> Editor::t {
+fn wait(count: i64, mut ed: editor::Editor) -> editor::Editor {
     for i in 0..2000 {
         ed = up(ed, fr(count + i));
-        if Editor::prepared(&ed).is_some() {
+        if editor::prepared(&ed).is_some() {
             return ed;
         }
     }
@@ -139,13 +139,13 @@ fn with_buttons(mut f: frame::Frame, buttons: Vec<input::MouseButton>) -> frame:
     f.input.buttons = buttons;
     f
 }
-fn node_box(ed: &Editor::t, path: &[&str]) -> Rect {
+fn node_box(ed: &editor::Editor, path: &[&str]) -> Rect {
     let p: Vec<String> = path.iter().map(|s| s.to_string()).collect();
-    Editor::node_box(ed, &p).expect("the node has no box in the graph pane")
+    editor::node_box(ed, &p).expect("the node has no box in the graph pane")
 }
 
-fn options(distance: Option<f64>) -> Editor::Create {
-    Editor::Create {
+fn options(distance: Option<f64>) -> editor::Create {
+    editor::Create {
         ui_text_size: Some(11),
         platform: Some(input::Platform::Apple),
         await_: Some(true),
@@ -157,8 +157,8 @@ fn options(distance: Option<f64>) -> Editor::Create {
 }
 
 /// The scene opens as a list: a click on the geo1 row selects it and [i] enters its graph.
-fn enter_geo1(ed: Editor::t, count: i64) -> Editor::t {
-    let (gx, gy, _, _) = Editor::panes(&ed, &fr(count)).graph;
+fn enter_geo1(ed: editor::Editor, count: i64) -> editor::Editor {
+    let (gx, gy, _, _) = editor::panes(&ed, &fr(count)).graph;
     let point = (gx + 60, gy + 24 + 12);
     let ed = up(ed, frm(count + 1, point, vec![]));
     let ed = up(ed, frm(count + 2, point, vec![press(LeftButton, point), release(LeftButton, point)]));
@@ -226,23 +226,23 @@ pub fn camera_nodes() {
     // Camera nodes: a default camera following the viewport joins a document without one, exactly
     // one is ACTIVE, deleting the last re-adds it inside the same undo entry, and a viewport drag is
     // one coalesced undo entry.
-    let ed = Editor::create(options(Some(6.)), &fixture(), None, Editor::prepare_fn(), Editor::draw_fn()).expect("opens");
+    let ed = editor::create(options(Some(6.)), &fixture(), None, editor::prepare_fn(), editor::draw_fn()).expect("opens");
     assert!(cameras(&ed).len() == 1 && active(&ed).len() == 1, "Editor did not add one ACTIVE default camera");
     // Cameras are scene objects: rows of the scene list.
     let mut ed = ed;
     for c in 0..3 {
         ed = up(ed, fr(c));
     }
-    assert!(!Editor::can_undo(&ed) && near(eye(&ed), viewport_eye(&ed)), "an idle following camera wrote undo entries or drifted from the viewport");
+    assert!(!editor::can_undo(&ed) && near(eye(&ed), viewport_eye(&ed)), "an idle following camera wrote undo entries or drifted from the viewport");
     // The default camera object is a pinhole; the view camera is the viewport with that lens while
     // nothing looks through.
     let pin = rays::camera::pinhole().aperture;
-    assert!(rays::camera::lens(&Editor::render_camera(&ed)).aperture == pin && rays::camera::lens(&Editor::view_camera(&ed)).aperture == pin && near(rays::camera::position(&Editor::view_camera(&ed)), viewport_eye(&ed)), "the default camera object did not carry its lens into the view camera");
-    let before_idle = Editor::view_camera(&ed);
+    assert!(rays::camera::lens(&editor::render_camera(&ed)).aperture == pin && rays::camera::lens(&editor::view_camera(&ed)).aperture == pin && near(rays::camera::position(&editor::view_camera(&ed)), viewport_eye(&ed)), "the default camera object did not carry its lens into the view camera");
+    let before_idle = editor::view_camera(&ed);
     let idle = up(ed.clone(), fr(3));
-    assert!(Editor::view_camera(&idle) == before_idle, "an idle frame rebuilt the view camera (a sketch tracer would restart each frame)");
+    assert!(editor::view_camera(&idle) == before_idle, "an idle frame rebuilt the view camera (a sketch tracer would restart each frame)");
     let start_eye = eye(&ed);
-    let (vx, vy, vw, vh) = Editor::panes(&ed, &fr(3)).view;
+    let (vx, vy, vw, vh) = editor::panes(&ed, &fr(3)).view;
     let (px, py) = (vx + vw / 2, vy + vh / 2);
     for (count, ev) in [(4, press(LeftButton, (px, py))), (5, mv((px + 30, py))), (6, mv((px + 60, py + 10))), (7, mv((px + 90, py + 20)))] {
         ed = up(ed, with_buttons(fre(count, vec![ev]), vec![LeftButton]));
@@ -252,16 +252,16 @@ pub fn camera_nodes() {
     let command = |c: char, count: i64| with_keys(fre(count, vec![k(c)]), vec![Key::Meta]);
     // navigation is view state (E12): the orbit leaves no undo entry, and an undo with nothing to
     // undo leaves the view where it is
-    assert!(!Editor::can_undo(&ed), "a viewport orbit made an undo entry");
+    assert!(!editor::can_undo(&ed), "a viewport orbit made an undo entry");
     let orbited = eye(&ed);
     ed = up(ed, command('z', 9));
     ed = up(ed, fr(10));
-    assert!(near(eye(&ed), orbited) && near(viewport_eye(&ed), orbited) && !Editor::can_undo(&ed), "an undo with nothing to undo moved the viewport");
+    assert!(near(eye(&ed), orbited) && near(viewport_eye(&ed), orbited) && !editor::can_undo(&ed), "an undo with nothing to undo moved the viewport");
     ed = up(ed, fre(10, vec![key(Key::Home)]));
     ed = up(ed, fr(10));
     let camera_id = active(&ed)[0];
     // the camera is the second row of the scene list (geo1 is the first)
-    let (gx, gy, _, _) = Editor::panes(&ed, &fr(10)).graph;
+    let (gx, gy, _, _) = editor::panes(&ed, &fr(10)).graph;
     let at = (gx + 60, gy + 24 + 24 + 12);
     ed = up(ed, frm(11, at, vec![]));
     ed = up(ed, frm(12, at, vec![press(LeftButton, at), release(LeftButton, at)]));
@@ -272,23 +272,23 @@ pub fn camera_nodes() {
     ed = up(ed, command('z', 17));
     assert!(cameras(&ed).iter().map(|n| n.id).collect::<Vec<_>>() == vec![camera_id], "undo after deleting the camera did not restore the original in one step");
     // Fly: / w (view focused) flies, held W moves forward, Escape exits; Space exits and arms the leader in the same frame.
-    let fly_view = |ed: &Editor::t| {
-        let (vx, vy, _, _) = Editor::panes(ed, &fr(18)).view;
+    let fly_view = |ed: &editor::Editor| {
+        let (vx, vy, _, _) = editor::panes(ed, &fr(18)).view;
         (vx + 20, vy + 20)
     };
     let p = fly_view(&ed);
     ed = up(ed, fre(18, vec![press(RightButton, p), release(RightButton, p)]));
     ed = up(ed, fre(18, vec![k('/'), k('w')]));
-    assert!(Editor::flying(&ed), "/ w did not enter fly mode");
+    assert!(editor::flying(&ed), "/ w did not enter fly mode");
     let before = viewport_eye(&ed);
     ed = up(ed, with_keys(fre(18, vec![k('w')]), vec![Key::KeyChar('w')]));
-    assert!(!near(viewport_eye(&ed), before) && Editor::selected_node(&ed).is_none(), "held W did not fly the viewport");
+    assert!(!near(viewport_eye(&ed), before) && editor::selected_node(&ed).is_none(), "held W did not fly the viewport");
     ed = up(ed, fre(18, vec![key(Key::Escape)]));
-    assert!(!Editor::flying(&ed), "Escape did not exit fly mode");
+    assert!(!editor::flying(&ed), "Escape did not exit fly mode");
     ed = up(ed, fre(18, vec![k('/'), k('w')]));
     ed = up(ed, fre(18, vec![k('/')]));
     ed = up(ed, fre(18, vec![k('g')]));
-    assert!(!Editor::flying(&ed) && width(Editor::panes(&ed, &fr(18)).graph) == 0, "Space did not exit fly mode into the leader");
+    assert!(!editor::flying(&ed) && width(editor::panes(&ed, &fr(18)).graph) == 0, "Space did not exit fly mode into the leader");
     ed = up(ed, fre(18, vec![k('/'), k('g')]));
     // F frames the displayed geometry in the viewport even when another node is selected.
     ed = enter_geo1(ed, 400);
@@ -296,7 +296,7 @@ pub fn camera_nodes() {
     let source_at = card_header(node_box(&ed, &["geo1", "source"]));
     ed = up(ed, frm(405, source_at, vec![]));
     ed = up(ed, frm(406, source_at, vec![press(LeftButton, source_at), release(LeftButton, source_at)]));
-    let target = |ed: &Editor::t| rays::easy_camera::target(&Editor::camera(ed));
+    let target = |ed: &editor::Editor| rays::easy_camera::target(&editor::camera(ed));
     let view_at = fly_view(&ed);
     ed = up(ed, fre(407, vec![press(LeftButton, view_at), release(LeftButton, view_at)]));
     ed = up(ed, fre(408, vec![k('f')]));
@@ -307,7 +307,7 @@ pub fn camera_nodes() {
         count += 1;
     }
     assert!(near(target(&ed), vec3::create(5., 0., 0.)), "viewport-focused F did not focus on the displayed node's cached bounds");
-    Editor::close(&ed);
+    editor::close(&ed);
 }
 
 pub fn sketch_settings() {
@@ -325,28 +325,28 @@ pub fn sketch_settings() {
         if let Ok(Value::Int(v)) = Editor_settings_get(&s2, settings) {
             seen2.store(v, Ordering::SeqCst);
         }
-        Editor::prepare(settings, output)
+        editor::prepare(settings, output)
     });
     let mut o = options(None);
     o.settings = Some(rays_editor::Settings::make(&schema, vec![Value::Int(0)]));
-    let mut ed = Editor::create(o, &fixture(), None, prepare, Editor::draw_fn()).expect("opens");
-    let wait_mode = |expected: i64, start: i64, mut ed: Editor::t| -> Editor::t {
+    let mut ed = editor::create(o, &fixture(), None, prepare, editor::draw_fn()).expect("opens");
+    let wait_mode = |expected: i64, start: i64, mut ed: editor::Editor| -> editor::Editor {
         for i in 0..2000 {
             ed = up(ed, fr(start + i));
-            if seen.load(Ordering::SeqCst) == expected && Editor::prepared(&ed).is_some() {
+            if seen.load(Ordering::SeqCst) == expected && editor::prepared(&ed).is_some() {
                 return ed;
             }
         }
         panic!("a settings change did not re-run prepare");
     };
     ed = wait_mode(0, 0, ed);
-    let set = Editor::set_settings(ed, &rays_editor::Settings::make(&schema, vec![Value::Int(1)]));
+    let set = editor::set_settings(ed, &rays_editor::Settings::make(&schema, vec![Value::Int(1)]));
     ed = wait_mode(1, 100, set);
     let undo = with_keys(fre(199, vec![k('z')]), vec![Key::Meta]);
     let after = up(ed, undo);
     ed = wait_mode(0, 200, after);
-    assert!(matches!(Editor_settings_get(&schema, &Editor::settings(&ed)), Ok(Value::Int(0))), "undo did not restore the sketch settings");
-    Editor::close(&ed);
+    assert!(matches!(Editor_settings_get(&schema, &editor::settings(&ed)), Ok(Value::Int(0))), "undo did not restore the sketch settings");
+    editor::close(&ed);
 }
 
 #[allow(non_snake_case)]
@@ -364,33 +364,33 @@ pub fn preset_and_look_through() {
     let presets = temp_dir("presets");
     let mut o = options(Some(6.));
     o.presets = Some(presets.clone());
-    let ed = Editor::create(o, &fixture(), None, Editor::prepare_fn(), Editor::draw_fn()).expect("opens");
+    let ed = editor::create(o, &fixture(), None, editor::prepare_fn(), editor::draw_fn()).expect("opens");
     let mut ed = wait(0, ed);
     ed = up(ed, fre(50, vec![k('/'), k('s')]));
-    let graph_width = width(Editor::panes(&ed, &fr(50)).graph);
+    let graph_width = width(editor::panes(&ed, &fr(50)).graph);
     ed = up(ed, fre(50, vec![k('/'), k('g')]));
-    assert!(width(Editor::panes(&ed, &fr(50)).graph) == graph_width, "open preset prompt let a workspace shortcut toggle the graph");
+    assert!(width(editor::panes(&ed, &fr(50)).graph) == graph_width, "open preset prompt let a workspace shortcut toggle the graph");
     ed = up(ed, fre(51, vec![key(Key::Enter)]));
     let saved = preset::list(&presets);
     assert!(saved.len() == 1, "/ s did not save a preset of the document");
     let original = text_of(&ed);
     assert!(has(&std::fs::read_to_string(preset::path(&presets, &saved[0].0)).unwrap(), &original), "the preset file is not the workspace text");
-    ed = Editor::edit(ed, &fe::Op::Rename { node: vec!["geo1".into(), "output".into()], to_: "moved".into() }).unwrap_or_else(|m| panic!("{m}"));
+    ed = editor::edit(ed, &fe::Op::Rename { node: vec!["geo1".into(), "output".into()], to_: "moved".into() }).unwrap_or_else(|m| panic!("{m}"));
     assert!(text_of(&ed) != original, "the rename did not change the document");
-    let phases = Editor::edit_phases(&ed);
+    let phases = editor::edit_phases(&ed);
     use flow_syntax::phase_timer as pt;
     assert!(pt::calls(&phases, "check") == 1 && pt::calls(&phases, "evaluate") == 1 && pt::calls(&phases, "lower") == 1 && phases.entries.iter().all(|e| e.seconds >= 0.), "the editor edit did not perform exactly one check/evaluation/lowering");
     assert!(has(&report_line(&ed, "phases"), "check"), "the crash report omitted the last edit's phases");
     ed = up(ed, fre(52, vec![k('/'), k('b')]));
     ed = up(ed, fre(53, vec![key(Key::Enter)]));
-    assert!(text_of(&ed) == original && Editor::undo_label(&ed) == Some("Load preset".to_string()), "/ b did not load the saved preset as one history entry");
+    assert!(text_of(&ed) == original && editor::undo_label(&ed) == Some("Load preset".to_string()), "/ b did not load the saved preset as one history entry");
     // Looking through the camera fits the film to its aspect (the render resolution); otherwise the whole pane.
     ed = up(ed, fre(52, vec![k('/'), k('v')]));
     ed = up(ed, fr(53));
-    assert!(Editor::look_through(&ed) && near(rays::camera::position(&Editor::view_camera(&ed)), eye(&ed)), "/ v did not look through the render camera");
-    let settings = Editor::render_settings(&ed);
-    let (_, _, pane_w, pane_h) = Editor::panes(&ed, &fr(54)).view;
-    let (fx, fy, fw, fh) = Editor::film(&ed, &fr(54));
+    assert!(editor::look_through(&ed) && near(rays::camera::position(&editor::view_camera(&ed)), eye(&ed)), "/ v did not look through the render camera");
+    let settings = editor::render_settings(&ed);
+    let (_, _, pane_w, pane_h) = editor::panes(&ed, &fr(54)).view;
+    let (fx, fy, fw, fh) = editor::film(&ed, &fr(54));
     assert!(settings.width == 1920 && settings.height == 1080 && settings.max_spp == 256, "the scene root did not carry default render settings");
     // the frame keeps clear of the label row above it (40), the readouts' row under it (36) and 12
     // at each side, the film's aspect inside what is left, centred there. A body under 1000 wide
@@ -402,11 +402,11 @@ pub fn preset_and_look_through() {
     assert!(fw <= area_w && fh <= area_h && (fw == area_w || fh == area_h) && (fw * 1080 - fh * 1920).abs() <= 1920 && fx == side + (area_w - fw) / 2 && fy == if narrow { top } else { top + (area_h - fh) / 2 }, "look-through did not letterbox the film to the camera's aspect");
     // / v toggles look-through off: the view camera is the free viewport
     ed = up(ed, fre(54, vec![k('/'), k('v')]));
-    assert!(!Editor::look_through(&ed) && near(rays::camera::position(&Editor::view_camera(&ed)), viewport_eye(&ed)), "with look-through off the view camera did not follow the free viewport");
-    assert!(Editor::film(&ed, &fr(54)) == (0, 0, pane_w, pane_h), "without look-through the film did not fill the view pane");
+    assert!(!editor::look_through(&ed) && near(rays::camera::position(&editor::view_camera(&ed)), viewport_eye(&ed)), "with look-through off the view camera did not follow the free viewport");
+    assert!(editor::film(&ed, &fr(54)) == (0, 0, pane_w, pane_h), "without look-through the film did not fill the view pane");
     ed = up(ed, fre(54, vec![k('/'), k('v')]));
-    assert!(Editor::look_through(&ed), "/ v did not restore look-through");
-    Editor::close(&ed);
+    assert!(editor::look_through(&ed), "/ v did not restore look-through");
+    editor::close(&ed);
     let _ = std::fs::remove_dir_all(&presets);
 }
 
@@ -416,13 +416,13 @@ pub fn workspace_walk() {
     }
     let mut o = options(None);
     o.await_ = Some(true);
-    let ed = Editor::create(o, &fixture(), None, Editor::prepare_fn(), Editor::draw_fn()).expect("opens");
+    let ed = editor::create(o, &fixture(), None, editor::prepare_fn(), editor::draw_fn()).expect("opens");
     let mut ed = wait(0, ed);
     ed = enter_geo1(ed, 0);
-    assert!(Editor::level(&ed) == Some("geo1".to_string()), "entering geo1 from the scene list did not open its SOP network");
+    assert!(editor::level(&ed) == Some("geo1".to_string()), "entering geo1 from the scene list did not open its SOP network");
     ed = up(ed, fre(1, vec![k('/'), k('h')]));
-    let hidden_scene = Editor::scene(&ed, &fr(1));
-    assert!(rays::scene::same(&Editor::scene(&ed, &fr(2)), &hidden_scene), "unchanged hidden 3D scene composition was rebuilt");
+    let hidden_scene = editor::scene(&ed, &fr(1));
+    assert!(rays::scene::same(&editor::scene(&ed, &fr(2)), &hidden_scene), "unchanged hidden 3D scene composition was rebuilt");
     ed = up(ed, fre(2, vec![k('/'), k('h')]));
     // Graph focus shows the Flow guide; the ordinary status/FPS strip remains under View focus.
     ed = up(ed, fr(3));
@@ -432,7 +432,7 @@ pub fn workspace_walk() {
         f.fps = fps;
         f
     };
-    let status = |ed: &Editor::t, f: &frame::Frame| ui_bytes(&Editor::scene(ed, f));
+    let status = |ed: &editor::Editor, f: &frame::Frame| ui_bytes(&editor::scene(ed, f));
     ed = up(ed, at(1_000, 60.));
     let fps_initial = status(&ed, &at(1_000, 60.));
     ed = up(ed, at(1_030, 120.));
@@ -440,20 +440,20 @@ pub fn workspace_walk() {
     ed = up(ed, at(1_061, 120.));
     let fps_after_deadline = status(&ed, &at(1_061, 120.));
     assert!(fps_before_deadline == fps_initial && fps_after_deadline != fps_initial, "FPS status text ignored its one-second sampling deadline");
-    assert!(Editor::selected_node(&ed).is_none(), "camera/render controls should own an unselected inspector");
+    assert!(editor::selected_node(&ed).is_none(), "camera/render controls should own an unselected inspector");
     let current_frame = fr(10);
-    let panes = Editor::panes(&ed, &current_frame);
-    assert!(rays::easy_camera::control_area(&Editor::camera(&ed)) == Some(panes.view), "3D camera gestures are not confined to the view column");
+    let panes = editor::panes(&ed, &current_frame);
+    assert!(rays::easy_camera::control_area(&editor::camera(&ed)) == Some(panes.view), "3D camera gestures are not confined to the view column");
     let (ix, iy, _, _) = panes.inspector;
     let camera_header = (ix + 32, iy + 15);
-    let collapsed_scene = ui_bytes(&Editor::scene(&ed, &current_frame));
+    let collapsed_scene = ui_bytes(&editor::scene(&ed, &current_frame));
     let blank_inspector = (ix + 4, iy + 200);
     ed = up(ed, fre(10, vec![press(LeftButton, blank_inspector), release(LeftButton, blank_inspector), k('/'), k('w')]));
-    assert!(!Editor::flying(&ed), "same-frame inspector click routed a view-only shortcut");
+    assert!(!editor::flying(&ed), "same-frame inspector click routed a view-only shortcut");
     ed = up(ed, fre(11, vec![press(LeftButton, camera_header)]));
     ed = up(ed, fre(12, vec![release(LeftButton, camera_header)]));
     ed = up(ed, fre(13, vec![mv((10, 100))]));
-    let expanded_scene = ui_bytes(&Editor::scene(&ed, &fr(13)));
+    let expanded_scene = ui_bytes(&editor::scene(&ed, &fr(13)));
     assert!(expanded_scene != collapsed_scene, "workspace camera accordion lost its armed press before the release frame");
     ed = up(ed, fre(14, vec![press(LeftButton, camera_header)]));
     ed = up(ed, fre(15, vec![release(LeftButton, camera_header)]));
@@ -462,9 +462,9 @@ pub fn workspace_walk() {
     ed = up(ed, fre(17, vec![press(LeftButton, render_header)]));
     ed = up(ed, fre(18, vec![release(LeftButton, render_header)]));
     ed = up(ed, fre(19, vec![mv((10, 100))]));
-    assert!(ui_bytes(&Editor::scene(&ed, &fr(19))) != collapsed_scene, "workspace render accordion lost its armed press before the release frame");
+    assert!(ui_bytes(&editor::scene(&ed, &fr(19))) != collapsed_scene, "workspace render accordion lost its armed press before the release frame");
     ed = up(ed, fre(19, vec![k('/'), k('w')]));
-    assert!(!Editor::flying(&ed), "inspector child press did not focus its pane");
+    assert!(!editor::flying(&ed), "inspector child press did not focus its pane");
     // the header: the middle of the card is a row (or the [+ N more] row, which opens it)
     let point = {
         let (x, y, w, _) = node_box(&ed, &["geo1", "source"]);
@@ -489,16 +489,16 @@ pub fn workspace_walk() {
     ed = up(ed, frm(24, source_point, vec![k('/'), k('a')]));
     ed = up(ed, frm(25, source_point, vec![Event::Text_input("null".into()), key(Key::Enter)]));
     assert!(has(&text_of(&ed), "(sop/null source)"), "the leader add-node menu did not add a node wired to the selection");
-    assert!(Editor::can_undo(&ed), "the added node did not enter the undo stack");
+    assert!(editor::can_undo(&ed), "the added node did not enter the undo stack");
     ed = up(ed, chord(false, 'z', 26));
     assert!(!has(&text_of(&ed), "sop/null"), "Command-Z did not undo the added node");
-    assert!(Editor::can_redo(&ed), "undo did not leave a redo entry");
+    assert!(editor::can_redo(&ed), "undo did not leave a redo entry");
     ed = up(ed, chord(true, 'z', 27));
     assert!(has(&text_of(&ed), "(sop/null source)"), "Shift-Command-Z did not redo the added node");
     ed = up(ed, chord(false, 'z', 28));
     assert!(!has(&text_of(&ed), "sop/null"), "second undo failed after redo");
     // Tile positions are document state: one drag is one undo entry.
-    let tile_x = |ed: &Editor::t, path: &[&str]| node_box(ed, path).0;
+    let tile_x = |ed: &editor::Editor, path: &[&str]| node_box(ed, path).0;
     let x0 = tile_x(&ed, &["geo1", "source"]);
     let (sx, sy) = source_point;
     for (count, mouse, events) in [(30, (sx, sy), vec![]), (31, (sx, sy), vec![press(LeftButton, (sx, sy))]), (32, (sx + 20, sy), vec![mv((sx + 20, sy))]), (33, (sx + 40, sy), vec![mv((sx + 40, sy))])] {
@@ -511,7 +511,7 @@ pub fn workspace_walk() {
     assert!(tile_x(&ed, &["geo1", "source"]) == x0, "undo did not restore the dragged node position");
     // A multi-node drag moves every selected node, and undo and redo restore every one.
     let paths: [&[&str]; 2] = [&["geo1", "source"], &["geo1", "output"]];
-    let xs = |ed: &Editor::t| paths.iter().map(|p| tile_x(ed, p)).collect::<Vec<_>>();
+    let xs = |ed: &editor::Editor| paths.iter().map(|p| tile_x(ed, p)).collect::<Vec<_>>();
     let xs0 = xs(&ed);
     let (ox, oy) = card_header(node_box(&ed, &["geo1", "output"]));
     let held = vec![LeftButton];
@@ -539,8 +539,8 @@ pub fn workspace_walk() {
     ed = up(ed, chord(false, 'z', 151));
     // / c clears the selection the drag made, as before this check.
     ed = up(ed, fre(152, vec![k('/'), k('c')]));
-    let centered = |ed: &Editor::t| -> bool {
-        Editor::prepared(ed)
+    let centered = |ed: &editor::Editor| -> bool {
+        editor::prepared(ed)
             .and_then(|g| rdk_rays::rays_mesh::to_mesh(&g).ok())
             .and_then(|m| rays::mesh::centroid(&m).ok().flatten())
             .is_some_and(|c| (c.x - 5.).abs() < 1.)
@@ -551,9 +551,9 @@ pub fn workspace_walk() {
         count += 1;
     }
     assert!(centered(&ed), "display-node cook did not publish the graph's result");
-    assert!(!Editor::scene(&ed, &current_frame).is_empty(), "sketch environment produced an empty composed scene");
+    assert!(!editor::scene(&ed, &current_frame).is_empty(), "sketch environment produced an empty composed scene");
     // The whole workspace paints in batch groups, not one draw per label.
-    let staged = rays::scene::Layer::stage_native_render(900, 640, &Editor::scene(&ed, &current_frame)).unwrap_or_else(|m| panic!("{m}"));
+    let staged = rays::scene::Layer::stage_native_render(900, 640, &editor::scene(&ed, &current_frame)).unwrap_or_else(|m| panic!("{m}"));
     let mut batches = 0;
     for layer in &staged.layers {
         if let rays::scene::Layer::native_layer::Ui_layer(batch, _) = layer {
@@ -561,14 +561,14 @@ pub fn workspace_walk() {
         }
     }
     assert!(batches > 0 && batches <= 32, "workspace UI draws were not batched: {batches}");
-    let (graph_x, graph_y, graph_width, graph_height) = Editor::panes(&ed, &fr(229)).graph;
+    let (graph_x, graph_y, graph_width, graph_height) = editor::panes(&ed, &fr(229)).graph;
     let menu_point = (graph_x + graph_width / 2, graph_y + graph_height / 2);
-    let add = |ed: Editor::t, count: i64| {
+    let add = |ed: editor::Editor, count: i64| {
         let ed = up(ed, frm(count, menu_point, vec![k('/'), k('a')]));
         up(ed, frm(count + 1, menu_point, vec![Event::Text_input("null".into()), key(Key::Enter)]))
     };
     ed = add(ed, 230);
-    assert!(has(&text_of(&ed), "(sop/null output)") && sop::node::label(&Editor::displayed_node(&ed)) == "transform", "workspace could not add a node reading the result without moving the display: {}\n{}", sop::node::operation(&Editor::displayed_node(&ed)), text_of(&ed));
+    assert!(has(&text_of(&ed), "(sop/null output)") && sop::node::label(&editor::displayed_node(&ed)) == "transform", "workspace could not add a node reading the result without moving the display: {}\n{}", sop::node::operation(&editor::displayed_node(&ed)), text_of(&ed));
     assert!(report_line(&ed, "scope selected") == "scope selected: geo1/null", "the added node was not selected");
     ed = up(ed, fre(232, vec![key(Key::Backspace)]));
     assert!(!has(&text_of(&ed), "sop/null"), "Backspace did not delete the added node");
@@ -579,15 +579,15 @@ pub fn workspace_walk() {
     ed = up(ed, fre(238, vec![k('/'), k('g')]));
     // / t shows the timeline bar; dragging its scrub slider seeks and pauses the shared clock.
     ed = up(ed, fre(240, vec![k('/'), k('t')]));
-    let (tx, ty, tw, th) = Editor::panes(&ed, &fr(241)).timeline;
+    let (tx, ty, tw, th) = editor::panes(&ed, &fr(241)).timeline;
     assert!(th > 0 && tw == 900, "/ t did not show the full-width timeline bar");
     ed = up(ed, fr(241));
     let (scrub_y, scrub_x) = (ty + th / 2, tx + tw - 60);
     ed = up(ed, fre(242, vec![press(LeftButton, (scrub_x, scrub_y))]));
     ed = up(ed, fre(243, vec![mv((tx + tw - 10, scrub_y)), release(LeftButton, (tx + tw - 10, scrub_y))]));
-    let clock = Editor::timeline(&ed);
+    let clock = editor::timeline(&ed);
     assert!(rays_editor::Timeline::mode(&clock) == rays_editor::Timeline::Mode::Paused && rays_editor::Timeline::frame(&clock) >= 200, "dragging the timeline scrub did not seek and pause");
     ed = up(ed, fre(244, vec![k('/')]));
     ed = up(ed, fre(245, vec![key(Key::Escape)]));
-    Editor::close(&ed);
+    editor::close(&ed);
 }

@@ -144,9 +144,9 @@ pub fn custom_sop() {
         (scene/merge cam geom)))
     (graph g :context sop
       (sop/my_custom_sop)))";
-    let doc = rays_editor::Workspace::load(None, Vec::new(), Some(&factories), text).unwrap_or_else(|ds| panic!("{}", diag_text(&ds)));
+    let doc = rays_editor::workspace::load(None, Vec::new(), Some(&factories), text).unwrap_or_else(|ds| panic!("{}", diag_text(&ds)));
     let base = rays::easy_camera::create(Some(rays_math::vec3::zero()), Some(5.), None, None, None, None).unwrap();
-    let dec = rays_editor::Workspace::declared_camera(Some(factories.clone()), &doc, &base);
+    let dec = rays_editor::workspace::declared_camera(Some(factories.clone()), &doc, &base);
     let eye = rays::camera::position(&rays::easy_camera::camera(&dec).unwrap());
     assert!(rays_math::vec3::nearly_equal(eye, rays_math::vec3::create(1., 2., 3.), 0.001), "declared_camera with custom factories did not read camera");
 }

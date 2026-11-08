@@ -6,7 +6,7 @@ use flow_graph::flow_edit::{ArgKey, Op};
 use flow_syntax::syntax::{self as s, Draft as Node};
 use input::{Event, Key, MouseButton};
 use pxui_shell::layout;
-use rays_editor::{Editor, Reduce};
+use rays_editor::{editor, reduce};
 
 const LB: MouseButton = MouseButton::LeftButton;
 const M: MouseButton = MouseButton::MiddleButton;
@@ -25,7 +25,7 @@ fn session(text: &str, at: (f64, f64)) -> Run {
     r
 }
 fn set_arg(r: &mut Run, node: &[&str], k: &str, value: Node) {
-    r.e = match Editor::edit(r.e.clone(), &Op::SetArg { node: node.iter().map(|s| s.to_string()).collect(), key: ArgKey::Kw(k.into()), sub: vec![], value: s::make(value) }) {
+    r.e = match editor::edit(r.e.clone(), &Op::SetArg { node: node.iter().map(|s| s.to_string()).collect(), key: ArgKey::Kw(k.into()), sub: vec![], value: s::make(value) }) {
         Ok(e) => e,
         Err(m) => fail(&m),
     };
@@ -45,20 +45,20 @@ pub fn run_undo_and_input() {
             r.step(at, vec![]);
         }
     };
-    let eye = |r: &Run| rays::camera::position(&rays::easy_camera::camera(&Editor::camera(&r.e)).expect("camera"));
+    let eye = |r: &Run| rays::camera::position(&rays::easy_camera::camera(&editor::camera(&r.e)).expect("camera"));
     let start = eye(&r);
     orbit(&mut r);
     check(eye(&r) != start, "the wheel did not move the viewport");
-    check(!Editor::can_undo(&r.e), &format!("navigating made an undo entry: {:?}", r.undo_label()));
+    check(!editor::can_undo(&r.e), &format!("navigating made an undo entry: {:?}", r.undo_label()));
     set_arg(&mut r, &["g", "a"], "uniform_scale", Node::Num("2.0".into()));
     r.step(at, vec![]);
     let label = r.undo_label();
     orbit(&mut r);
     check(r.undo_label() == label, "navigating after an edit made an undo entry");
     r.step_full(&[], &[Key::Meta], at, vec![press('z')]);
-    check(!has(&r.source(), "uniform_scale") && Editor::can_redo(&r.e), "the first undo after navigating was swallowed");
+    check(!has(&r.source(), "uniform_scale") && editor::can_redo(&r.e), "the first undo after navigating was swallowed");
     orbit(&mut r);
-    check(Editor::can_redo(&r.e), "navigating dropped what redo restores");
+    check(editor::can_redo(&r.e), "navigating dropped what redo restores");
     r.close();
     // E13: a stroke down the visibility column is one undo entry
     let lights = r#"(workspace lights (graph scene :context scene
@@ -122,11 +122,11 @@ pub fn run_undo_and_input() {
         r.step(at, vec![press(c)]);
         r.step(at, vec![]);
     }
-    check(Editor::flying(&r.e) && Editor::look_through(&r.e), "the view is not flying through its camera");
+    check(editor::flying(&r.e) && editor::look_through(&r.e), "the view is not flying through its camera");
     set_arg(&mut r, &["scene", "camera1"], "follow_viewport", Node::Sym("false".into()));
     r.step(at, vec![]);
     r.step(at, vec![]);
-    check(!Editor::flying(&r.e), "fly mode outlived the navigation it belongs to");
+    check(!editor::flying(&r.e), "fly mode outlived the navigation it belongs to");
     r.close();
     // E20: a name field left open in the graph pane does not hold the keyboard once the panel shows its list
     let mut r = session(plain, m);
@@ -141,13 +141,13 @@ pub fn run_undo_and_input() {
     r.step(m, vec![press('i')]);
     r.step(m, vec![]);
     r.count += 30;
-    let (x, y, w, h) = Editor::node_box(&r.e, &["g".into(), "a".into()]).expect("a box");
+    let (x, y, w, h) = editor::node_box(&r.e, &["g".into(), "a".into()]).expect("a box");
     click(&mut r, ((x + w / 2) as f64, (y + 10.min(h / 2)) as f64));
     r.step(m, vec![key(Key::F2)]);
     r.step(m, vec![]);
     r.step(m, vec![press('u')]);
     r.step(m, vec![]);
-    check(Editor::level(&r.e).is_some(), "F2 opened no name field: u left the object");
+    check(editor::level(&r.e).is_some(), "F2 opened no name field: u left the object");
     // the header's List tab: found by trying, the tabs end 36 points from the header's right edge
     let mut listed = false;
     for dx in [40i64, 46, 52, 58, 64, 70] {
@@ -207,18 +207,18 @@ pub fn run_carry_reaches_no_history() {
       (scene/root all :camera cam))))"#,
     );
     let m = (450., 300.);
-    let e = Editor::update(Editor::update(e, &frame(&[], m, vec![], 1)), &frame(&[], m, vec![], 2));
-    let side = Editor::scene_document(&e).iter().find(|i| i.label == "side").expect("side camera").id;
+    let e = editor::update(editor::update(e, &frame(&[], m, vec![], 1)), &frame(&[], m, vec![], 2));
+    let side = editor::scene_document(&e).iter().find(|i| i.label == "side").expect("side camera").id;
     let preview = Op::SetArg { node: vec!["scene".into(), "side".into()], key: ArgKey::Kw("fov".into()), sub: vec![], value: s::make(Node::Num("40.0".into())) };
     let before = source(&e);
     let enter = rays_editor::editor_commands::action::Enter;
-    let stepped = Reduce::step(e.clone(), Some(&[side]), Some(&preview), &[enter.clone()], &frame(&[], m, vec![], 3)).expect("step");
-    check(Editor::carrying(&stepped).is_some(), "the reducer dropped the carry");
-    check(!Editor::can_undo(&stepped), &format!("entering a camera during a carry reached the history: {:?}", Editor::undo_label(&stepped)));
+    let stepped = reduce::step(e.clone(), Some(&[side]), Some(&preview), &[enter.clone()], &frame(&[], m, vec![], 3)).expect("step");
+    check(editor::carrying(&stepped).is_some(), "the reducer dropped the carry");
+    check(!editor::can_undo(&stepped), &format!("entering a camera during a carry reached the history: {:?}", editor::undo_label(&stepped)));
     // without the carry the same keys do make the camera the render camera: the test reaches the path
-    let entered = Reduce::step(e.clone(), Some(&[side]), None, &[enter], &frame(&[], m, vec![], 3)).expect("step");
-    check(Editor::can_undo(&entered) && has(&source(&entered), ":camera side") && source(&e) == before, &format!("Enter on a camera did not make it the render camera: {}", source(&entered)));
-    Editor::close(&e);
+    let entered = reduce::step(e.clone(), Some(&[side]), None, &[enter], &frame(&[], m, vec![], 3)).expect("step");
+    check(editor::can_undo(&entered) && has(&source(&entered), ":camera side") && source(&e) == before, &format!("Enter on a camera did not make it the render camera: {}", source(&entered)));
+    editor::close(&e);
 }
 
 pub fn run_atomic_frame() {
@@ -267,7 +267,7 @@ pub fn run_undo_under_pane() {
         Ok(v) if v.len() == 1 => v[0].clone(),
         _ => fail("bad form"),
     };
-    r.e = match Editor::edit(r.e.clone(), &Op::AddNode { scope: vec!["scene".into()], name: "b".into(), expr }) {
+    r.e = match editor::edit(r.e.clone(), &Op::AddNode { scope: vec!["scene".into()], name: "b".into(), expr }) {
         Ok(e) => e,
         Err(m) => fail(&m),
     };
@@ -305,14 +305,14 @@ pub fn run_spreadsheet() {
     let shell = shell_of(&build_ok(&doc));
     check(shell.follows == vec![(vec![1usize, 1], vec![0usize, 1]), (vec![1, 0], vec![0, 0])], "spreadsheet :of did not follow its graph panel");
     let mut r = Run::new(editor(text));
-    r.e = Reduce::select_path(r.e.clone(), &["g".into(), "@result".into()]);
+    r.e = reduce::select_path(r.e.clone(), &["g".into(), "@result".into()]);
     r.step((0., 0.), vec![]);
     r.step((0., 0.), vec![]);
-    let (owner, geometry) = Reduce::spreadsheet(&r.e, &[1, 0]);
+    let (owner, geometry) = reduce::spreadsheet(&r.e, &[1, 0]);
     let geometry = geometry.unwrap_or_else(|| fail("selected cooked node absent from spreadsheet"));
     let counts: Vec<i64> = (0..4).map(|o| sheet::count(o, &geometry)).collect();
     check(owner == 0 && counts == [6, 12, 4, 1], &format!("spreadsheet owner row counts: {counts:?}; owner={owner}"));
-    check(Reduce::spreadsheet(&r.e, &[1, 1]).1.is_none(), "spreadsheet followed the other graph selection");
+    check(reduce::spreadsheet(&r.e, &[1, 1]).1.is_none(), "spreadsheet followed the other graph selection");
     let layouts = layout::geometry(None, None, &shell.tree, &idle_frame(r.count));
     let leaf = layouts.leaves.iter().find(|l| l.path == vec![1usize, 0]).expect("leaf");
     let (x, y, w, _) = leaf.body;
@@ -322,13 +322,13 @@ pub fn run_spreadsheet() {
     let point = ((x + w) as f64 - 8. - detail_width / 2., y as f64 + 12.);
     r.step(point, vec![]);
     r.step(point, vec![Event::Pointer_pressed(LB, point), Event::Pointer_released(LB, point)]);
-    check(Reduce::spreadsheet(&r.e, &[1, 0]).0 == 3, "spreadsheet Detail tab did not route shared input");
-    check(Reduce::spreadsheet(&r.e, &[1, 1]).0 == 0, "spreadsheet owner state leaked to another pane");
-    r.e = Editor::edit(r.e.clone(), &Op::SetArg { node: vec!["g".into(), "@result".into()], key: ArgKey::Kw("columns".into()), sub: vec![], value: s::make(Node::Num("4".into())) }).expect("edit");
+    check(reduce::spreadsheet(&r.e, &[1, 0]).0 == 3, "spreadsheet Detail tab did not route shared input");
+    check(reduce::spreadsheet(&r.e, &[1, 1]).0 == 0, "spreadsheet owner state leaked to another pane");
+    r.e = editor::edit(r.e.clone(), &Op::SetArg { node: vec!["g".into(), "@result".into()], key: ArgKey::Kw("columns".into()), sub: vec![], value: s::make(Node::Num("4".into())) }).expect("edit");
     r.step((0., 0.), vec![]);
     r.step((0., 0.), vec![]);
-    let geometry = Reduce::spreadsheet(&r.e, &[1, 0]).1.expect("geometry");
-    check(rdk_core::geometry::point_count(&geometry) == 8 && Reduce::spreadsheet(&r.e, &[1, 0]).0 == 3, "spreadsheet recook kept stale geometry or reset owner");
+    let geometry = reduce::spreadsheet(&r.e, &[1, 0]).1.expect("geometry");
+    check(rdk_core::geometry::point_count(&geometry) == 8 && reduce::spreadsheet(&r.e, &[1, 0]).0 == 3, "spreadsheet recook kept stale geometry or reset owner");
     let columns = sheet::columns(0, &geometry);
     check(columns.len() >= 4 && (0..4).map(|i| columns[i].0.clone()).collect::<Vec<_>>() == ["index", "P.x", "P.y", "P.z"], "canonical position tuple columns");
     let attr = rdk_core::attribute::create_owned("label", rdk_core::attribute::Owner::Point, rdk_core::attribute::Storage::Text(std::sync::Arc::new(vec![b"sample".to_vec(); 8].into()))).expect("attribute");
@@ -356,7 +356,7 @@ pub fn run_op_inspector() {
         r.step(p, vec![Event::Pointer_moved(p)]);
         r.step(p, vec![Event::Pointer_pressed(LB, p), Event::Pointer_released(LB, p)]);
     };
-    let (bx, by, _, _) = Editor::node_box(&r.e, &["g".into(), "b".into()]).expect("b");
+    let (bx, by, _, _) = editor::node_box(&r.e, &["g".into(), "b".into()]).expect("b");
     click(&mut r, ((bx + 60) as f64, (by + 12) as f64));
     r.step(m, vec![]);
     check(r.dump("scope selected") == "g/b", &format!("op node not selected: {}", r.dump("scope selected")));
@@ -375,7 +375,7 @@ pub fn run_op_inspector() {
     let authored = r.source();
     click(&mut r, ((ix + 210) as f64, (iy + 210) as f64));
     r.step(m, vec![]);
-    check(r.dump("scope selected") == "g/a" && Editor::Private::inspector_subject(&r.e) == Some(vec!["g".to_string(), "a".to_string()]), &format!("a wired inspector value did not select its source: {}", r.dump("scope selected")));
+    check(r.dump("scope selected") == "g/a" && editor::private::inspector_subject(&r.e) == Some(vec!["g".to_string(), "a".to_string()]), &format!("a wired inspector value did not select its source: {}", r.dump("scope selected")));
     check(r.source() == authored && r.undo_label() == label, "following a wire edited the document");
     r.close();
 }
@@ -395,7 +395,7 @@ pub fn run_nested_inspector() {
         r.step(p, vec![Event::Pointer_moved(p)]);
         r.step(p, vec![Event::Pointer_pressed(LB, p), Event::Pointer_released(LB, p)]);
     };
-    let (bx, by, _, _) = Editor::node_box(&r.e, &["g".into(), "b".into()]).expect("b");
+    let (bx, by, _, _) = editor::node_box(&r.e, &["g".into(), "b".into()]).expect("b");
     click(&mut r, ((bx + 60) as f64, (by + 12) as f64));
     r.step(m, vec![]);
     check(r.dump("scope selected") == "g/b", &format!("op node not selected: {}", r.dump("scope selected")));
