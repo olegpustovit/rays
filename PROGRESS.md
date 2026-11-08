@@ -6,17 +6,17 @@ Repo mirror: `docs/history/port-simplification/index.html`
 
 **Order:** A ∥ B ∥ M ∥ I, then C, then D. One commit per bullet in Wave A runbook where practical.
 
-**Checkpoint (2026-11-08):** ~**28/63** plan IDs with evidence; artifact **not** updated this session.
+**Checkpoint (2026-11-08, later):** see Items for per-ID commit evidence; artifact **not** updated this session.
 
 ## Summary
 
 | Wave | Done | Active | Pending |
 |------|------|--------|---------|
 | A | 8/8 | — | — |
-| B | 6/6 | B5 (partial) | 0 |
-| M | 12/21 | — | 9 |
-| I | 0/1 | — | 1 |
-| C | 0/21 | — | 21 |
+| B | 6/6 | B5 (rdk crate delete) | 0 |
+| M | 17/21 | M3, M13, M19, M21 | 4 |
+| I | 3/6 steps | I4–I6 | 3 steps |
+| C | 9/21 | C2, C4, C6–C8, C15, C17, C18, C20 | rest |
 | D | 0/6 | — | 6 |
 
 ## Items
@@ -47,12 +47,29 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | M12 | done | `b5be8904` — `record_slot_open` skips `record_packed` / `note` past per-path cap; `cargo t -p flow_eval test_workspace_eval` |
 | M8 | done | `66136b7f` — side_lru `find_*_by`; sampler keys `mix::sampler`; `cargo check -p renderer` |
 | M6 | done | `69d08a8a` — `plan_entry` prepends via `with_capacity`+extend (no `insert(0)`); `cargo check -p renderer` |
-| M18 | done (partial) | `ed08c91b` — `vertex_primitive` `AtomicI32` scratch in `make_topology`; `cargo t -p rdk_ops m18_vertex_primitive_scratch` 2 pass; **deferred** five other per-vertex scratch arrays |
+| M18 | done | `ed08c91b` vertex_primitive i32; `21da1965` five remaining per-vertex scratch arrays i32; `INT_FLOATS` i64→f64 copy in `packed.rs:4643` not yet charged (open) |
 | M1 | done | `9dae5ebd` — `ExecCtx.site` interned (`sub`/`sub_at`/`sync_site`); route cache; `eval_at_sub`/`eval_concrete_sub`/`arm_error_sub`; `cargo t -p flow_eval test_workspace_eval` 29 pass (~13s) |
 | M14 | done | `GeoPayload` + boxed `Struct`/`Source`; `struct_value`/`source_value`; `geo_fields`/`geo_payload`; call sites migrated; `cargo check` flow_eval/flow_ir/flow_check/renderer/flow_graph; `cargo t -p flow_eval test_workspace_eval` |
-| M3,M5,M13–M17,M19,M21 | pending | |
-| I | pending | |
-| C1–C21 | pending | |
+| M5 | done | `ef645352` — ogpu_metal render encoder is one struct (no per-encoder closures) |
+| M15 | done | `38bfb307` — `ExecCtx.iter` persistent `Iter` list; `cargo t -p flow_eval` 105 pass |
+| M16 | done | `00c4d596` — closure/residual env `Arc<[(Arc<str>, Value)]>` interned names; unit test `captured_bindings_are_sorted_unique_and_found_by_name` |
+| M17 | done | `25726291` `bd2a526f` `8afb4996` + C3 commits — `support::Windows`/`par_fill`; attribute_kernel ranges write column windows |
+| M3, M13, M19, M21 | pending | M21: worker finding that `runtime_resources` bytes are mutated in production (premise disputed) — under review |
+| I1–I3 | done | `a06df67a` spec; `c9c2b12a` native i64 core; `74942f50` `ocaml_int` deleted, `wrap_int63`/`lsr` in `rays_math::hash` |
+| I4–I6 | pending | RDK `checked_*` guards; MSL/SPIR-V + fixtures; WGSL/JS/web |
+| C1 | done | `dc2ee86b` traits, `ef645352` metal, `e6ae19d5` mock, `2612f106` vulkan (type-checked on macOS only), `b4b90916` consumers |
+| C3 | done | `25726291`…`141a4afe` (~30 commits) — atomics/mutex slots → disjoint windows; mem_sys thread-local alloc counters |
+| C5 | done | `a12b1efb` — `materialise` returns `Result`, `guarded_force` narrowed |
+| C9 | done | `e0afebff` — `Ui::draw` takes `impl Fn` |
+| C10 | partial | `d87c7c95` `625ffd0f` (ogpu_core kept as crate `ogpu`) `5b15cb29` `04b5ae16` `9bf5f9be` `74942f50` (ocaml_int→hash) — rename `ogpu`→`ogpu_core` and `ocaml_int→rays_math::int63` naming deviate from plan text |
+| C11 | partial | `51ebdf92` `rays::table` → `renderer::side_lru`; `rays::idlist` remains |
+| C12 | done | `34ea546d` |
+| C13 | done | `b9816d3a` — 7M floats identical to old search |
+| C14 | done | `f3b38af3` |
+| C16 | done | `8afb4996` |
+| C19 | done | `dd441536` (PartialEq derived; Hash not derivable with f64 ogpu types) |
+| C21 | done | `7e9376dc` |
+| C2, C4, C6–C8, C15, C17, C18, C20 | in progress | workers active |
 | D1–D6 | pending | |
 
 ## Subagents (omp)
