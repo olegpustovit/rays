@@ -136,6 +136,8 @@ Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s
 
 ## Session log
 
+- 2026-11-08: `228cd80f` perf: residual site lookup without copying the residual; subdivide node build 1.05 -> 0.80 s. `dfe28ee9` qual: 21 more test_parallel_exact fixtures shrunk under the `8f3cedb6` rules (98 cases); the module goes 137.8 -> 97.4 s summed. Full flow_sop: 708 pass, 69.2 s wall / 258.7 s summed with the cap lifted; it still exceeds the 60 s cap (58-60 s at load 8-9). Root cause: each Lisp node body is lowered three times (workspace lowering, `root`/`card_node`, `restore`), and the memo never hits because stand-in input nodes get fresh ids. Fixing that in the product now.
+
 - 2026-11-08: closing the remaining gaps.
   - `the_other_sop_fixtures_lower_and_cook` (5.007 s) is split into tree, tunnel and wave cases (0.9, 0.5, 3.5 s) with the same per-fixture checks.
   - Full `cargo t -p flow_sop` with the cap lifted: 707 pass, 75.2 s wall, 299.8 s summed (4 workers). It exceeds the 60 s whole-run cap. test_parallel_exact takes 138 s, of which 27 heavy cases take 89.6 s; their fixtures are being shrunk under the `8f3cedb6` coverage rules.
