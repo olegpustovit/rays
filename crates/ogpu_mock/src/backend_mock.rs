@@ -3,14 +3,19 @@
 //! recorded buffer-to-texture blits at commit, and counts what is alive.
 use ogpu_core::{
     backend::{
-        Driver, DriverAcquire, DriverBlitEncoder, DriverCommands, DriverDevice, DriverFrame,
-        DriverLibrary, DriverMapped, DriverQueue, DriverResource, DriverSampler, DriverSurface, Floats,
-        GpuTiming, InstanceKind, Receipt,
+        Driver, DriverAccel, DriverAccelDescriptor, DriverAccelEncoder, DriverAcquire, DriverArgument,
+        DriverBlitEncoder, DriverCommands, DriverComputeEncoder, DriverDevice, DriverFrame, DriverIcb,
+        DriverLibrary, DriverMapped, DriverMapping, DriverPipeline, DriverQueue, DriverRenderEncoder,
+        DriverRenderTarget, DriverResource, DriverSampler, DriverSurface, Floats, GpuTiming, InstanceKind,
+        OwnedReadback, Receipt, RenderPipelineOptions, ShaderStage, Warm,
     },
     caps,
     error::{self, Error, ErrorKind},
     handle,
-    types::{self, BufferDescriptor, Extent, Origin, TextureDescriptor},
+    pipeline::RenderDescriptor,
+    shader::{Binding, ConstantValue, Shader},
+    surface::Configuration,
+    types::{self, BufferDescriptor, Extent, Memory, Origin, SamplerDescriptor, TextureDescriptor},
 };
 use std::{
     cell::{Cell, RefCell},
@@ -203,8 +208,54 @@ fn advance(field: Option<i64>) -> Option<i64> {
     }
 }
 
+struct MockResource {
+    c: Shared,
+    id: i64,
+    kind: &'static str,
+    bytes: Bytes,
+}
+
+impl DriverResource for MockResource {
+    fn token(&self) -> i64 { self.id }
+    fn write(&self, offset: i64, source: &[u8]) -> Result<(), Error> {
+        let mut data = self.bytes.lock().unwrap();
+        if !in_range(data.len(), offset, source.len() as i64) {
+            return Err(fail("Backend_mock.write", ErrorKind::InvalidArgument, "range"));
+        }
+        data[offset as usize..offset as usize + source.len()].copy_from_slice(source);
+        Ok(())
+    }
+    fn read(&self, offset: i64, length: usize) -> Result<Vec<u8>, Error> {
+        let data = self.bytes.lock().unwrap();
+        if !in_range(data.len(), offset, length as i64) {
+            return Err(fail("Backend_mock.read", ErrorKind::InvalidArgument, "range"));
+        }
+        Ok(data[offset as usize..offset as usize + length].to_vec())
+    }
+    fn read_into(&self, offset: i64, destination: &mut [u8], destination_offset: usize, length: usize) -> Result<(), Error> {
+        let data = self.bytes.lock().unwrap();
+        if !in_range(data.len(), offset, length as i64)
+            || destination_offset > destination.len()
+            || length > destination.len() - destination_offset
+        {
+            return Err(fail("Backend_mock.read_into", ErrorKind::InvalidArgument, "range"));
+        }
+        destination[destination_offset..destination_offset + length]
+            .copy_from_slice(&data[offset as usize..offset as usize + length]);
+        Ok(())
+    }
+    fn destroy(&self) -> Result<(), Error> {
+        let mut state = self.c.borrow_mut();
+        state.memory.remove(&self.id);
+        state.texture_storage.remove(&self.id);
+        if self.kind == "buffer" { state.buffers -= 1 } else { state.textures -= 1 }
+        state.trace.push(format!("destroy-{}:{}", self.kind, self.id));
+        Ok(())
+    }
+}
+
 /// kind is "buffer" or "texture".
-fn resource(c: &Shared, kind: &'static str, size: i64) -> Result<DriverResource, Error> {
+fn resource(c: &Shared, kind: &'static str, size: i64) -> Result<MockResource, Error> {
     let over = {
         let state = c.borrow();
         matches!(state.max_allocations, Some(limit) if state.buffers + state.textures >= limit)
@@ -223,115 +274,76 @@ fn resource(c: &Shared, kind: &'static str, size: i64) -> Result<DriverResource,
         if kind == "buffer" { state.buffers += 1 } else { state.textures += 1 }
         state.trace.push(format!("create-{kind}:{id}"));
     }
-    let b_write = bytes.clone();
-    let b_read = bytes.clone();
-    let b_into = bytes;
-    let c_destroy = c.clone();
-    Ok(DriverResource {
-        token: id,
-        write: Box::new(move |offset, source| {
-            let mut data = b_write.lock().unwrap();
-            if !in_range(data.len(), offset, source.len() as i64) {
-                return Err(fail("Backend_mock.write", ErrorKind::InvalidArgument, "range"));
-            }
-            data[offset as usize..offset as usize + source.len()].copy_from_slice(source);
-            Ok(())
-        }),
-        read: Box::new(move |offset, length| {
-            let data = b_read.lock().unwrap();
-            if !in_range(data.len(), offset, length as i64) {
-                return Err(fail("Backend_mock.read", ErrorKind::InvalidArgument, "range"));
-            }
-            Ok(data[offset as usize..offset as usize + length].to_vec())
-        }),
-        read_into: Box::new(move |offset, destination, destination_offset, length| {
-            let data = b_into.lock().unwrap();
-            if !in_range(data.len(), offset, length as i64)
-                || destination_offset > destination.len()
-                || length > destination.len() - destination_offset
-            {
-                return Err(fail("Backend_mock.read_into", ErrorKind::InvalidArgument, "range"));
-            }
-            destination[destination_offset..destination_offset + length]
-                .copy_from_slice(&data[offset as usize..offset as usize + length]);
-            Ok(())
-        }),
-        destroy: Box::new(move || {
-            let mut state = c_destroy.borrow_mut();
-            state.memory.remove(&id);
-            state.texture_storage.remove(&id);
-            if kind == "buffer" { state.buffers -= 1 } else { state.textures -= 1 }
-            state.trace.push(format!("destroy-{kind}:{id}"));
-            Ok(())
-        }),
-    })
+    Ok(MockResource { c: c.clone(), id, kind, bytes })
 }
 
-fn create_mapped_buffer(c: &Shared, d: &BufferDescriptor) -> Result<DriverMapped, Error> {
-    // A discrete device: the view is a separate host copy, made when asked for and synchronised
-    // only by flush and invalidate, so a caller that skips one reads stale data; a released view
-    // turns NaN and its successor starts NaN, so a caller that keeps one, or reads a new one
-    // before an invalidate, reads NaN.
-    let size = d.size;
-    let raw = resource(c, "buffer", size)?;
-    let device = c.borrow().memory.get(&raw.token).cloned().expect("buffer was just registered");
-    let cell: Rc<RefCell<Option<Floats>>> = Rc::new(RefCell::new(None));
-    let released = Rc::new(Cell::new(false));
-    let view = {
-        let (cell, released) = (cell.clone(), released.clone());
-        move || -> Option<Floats> {
-            let mut slot = cell.borrow_mut();
-            if slot.is_none() {
-                let fill = if released.get() { f32::NAN } else { 0.0 };
-                *slot = Some(Rc::new(RefCell::new(vec![fill; (size / 4) as usize])));
-            }
-            slot.clone()
-        }
-    };
-    let invalidate_view = view.clone();
-    let invalidate_device = device.clone();
-    let readback_device = device.clone();
-    let flush_cell = cell.clone();
-    Ok(DriverMapped {
-        mapped_resource: raw,
-        readback: Arc::new(move |offset, length| {
-            let data = readback_device.lock().unwrap();
+/// A discrete device's host view: a separate copy, made when asked for and synchronised only by
+/// flush and invalidate, so a caller that skips one reads stale data; a released view turns NaN
+/// and its successor starts NaN, so a caller that keeps one, or reads a new one before an
+/// invalidate, reads NaN.
+struct MockMapping {
+    device: Bytes,
+    size: i64,
+    cell: RefCell<Option<Floats>>,
+    released: Cell<bool>,
+}
+
+impl DriverMapping for MockMapping {
+    fn readback(&self) -> OwnedReadback {
+        let device = self.device.clone();
+        Arc::new(move |offset, length| {
+            let data = device.lock().unwrap();
             let offset = usize::try_from(offset).map_err(|_| fail("Backend_mock.readback", ErrorKind::InvalidArgument, "range"))?;
             let end = offset.checked_add(length).filter(|end| *end <= data.len())
                 .ok_or_else(|| fail("Backend_mock.readback", ErrorKind::InvalidArgument, "range"))?;
             Ok(data[offset..end].to_vec())
-        }),
-        view: Box::new(view),
-        release_view: Box::new(move || {
-            released.set(true);
-            if let Some(floats) = cell.borrow_mut().take() {
-                floats.borrow_mut().fill(f32::NAN);
-            }
-        }),
-        flush: Box::new(move |n| match flush_cell.borrow().as_ref() {
+        })
+    }
+    fn view(&self) -> Option<Floats> {
+        let mut slot = self.cell.borrow_mut();
+        if slot.is_none() {
+            let fill = if self.released.get() { f32::NAN } else { 0.0 };
+            *slot = Some(Rc::new(RefCell::new(vec![fill; (self.size / 4) as usize])));
+        }
+        slot.clone()
+    }
+    fn release_view(&self) {
+        self.released.set(true);
+        if let Some(floats) = self.cell.borrow_mut().take() {
+            floats.borrow_mut().fill(f32::NAN);
+        }
+    }
+    fn flush(&self, n: usize) -> Result<(), Error> {
+        match self.cell.borrow().as_ref() {
             None => Err(fail("Backend_mock.flush", ErrorKind::InvalidArgument, "no host view was written")),
             Some(floats) => {
                 let floats = floats.borrow();
-                let mut device = device.lock().unwrap();
+                let mut device = self.device.lock().unwrap();
                 for i in 0..n / 4 {
                     device[4 * i..4 * i + 4].copy_from_slice(&floats[i].to_bits().to_le_bytes());
                 }
                 Ok(())
             }
-        }),
-        invalidate: Box::new(move |n| {
-            let floats = invalidate_view().expect("view");
-            let device = invalidate_device.lock().unwrap();
-            let mut floats = floats.borrow_mut();
-            for i in 0..n / 4 {
-                floats[i] = f32::from_bits(u32::from_le_bytes(device[4 * i..4 * i + 4].try_into().unwrap()));
-            }
-            Ok(())
-        }),
-    })
+        }
+    }
+    fn invalidate(&self, n: usize) -> Result<(), Error> {
+        let floats = self.view().expect("view");
+        let device = self.device.lock().unwrap();
+        let mut floats = floats.borrow_mut();
+        for i in 0..n / 4 {
+            floats[i] = f32::from_bits(u32::from_le_bytes(device[4 * i..4 * i + 4].try_into().unwrap()));
+        }
+        Ok(())
+    }
 }
 
-fn create_texture(c: &Shared, d: &TextureDescriptor) -> Result<DriverResource, Error> {
+fn create_mapped_buffer(c: &Shared, d: &BufferDescriptor) -> Result<DriverMapped, Error> {
+    let raw = resource(c, "buffer", d.size)?;
+    let mapping = MockMapping { device: raw.bytes.clone(), size: d.size, cell: RefCell::new(None), released: Cell::new(false) };
+    Ok(DriverMapped { mapped_resource: Box::new(raw), mapping: Box::new(mapping) })
+}
+
+fn create_texture(c: &Shared, d: &TextureDescriptor) -> Result<MockResource, Error> {
     let operation = "Backend_mock.create_texture";
     {
         let mut state = c.borrow_mut();
@@ -348,22 +360,43 @@ fn create_texture(c: &Shared, d: &TextureDescriptor) -> Result<DriverResource, E
     let mut levels: Vec<Bytes> = Vec::new();
     for mip in 0..d.mip_levels {
         if mip == 0 {
-            levels.push(c.borrow().memory.get(&raw.token).cloned().expect("texture was just registered"));
+            levels.push(raw.bytes.clone());
         } else {
             match texture_level_size(d, mip).and_then(zeroed) {
                 Some(bytes) => levels.push(Arc::new(Mutex::new(bytes))),
                 None => {
-                    let _ = (raw.destroy)();
+                    let _ = raw.destroy();
                     return Err(fail(operation, ErrorKind::Capacity, "texture exceeds mock byte capacity"));
                 }
             }
         }
     }
-    c.borrow_mut().texture_storage.insert(raw.token, TextureStorage { descriptor: d.clone(), levels });
+    c.borrow_mut().texture_storage.insert(raw.id, TextureStorage { descriptor: d.clone(), levels });
     Ok(raw)
 }
 
-fn create_depth_texture(c: &Shared) -> Result<DriverResource, Error> {
+struct MockDepthTexture { c: Shared, id: i64 }
+
+impl DriverResource for MockDepthTexture {
+    fn token(&self) -> i64 { self.id }
+    fn write(&self, _: i64, _: &[u8]) -> Result<(), Error> {
+        Err(fail("Backend_mock.depth.write", ErrorKind::Unsupported, "depth textures are not host writable"))
+    }
+    fn read(&self, _: i64, _: usize) -> Result<Vec<u8>, Error> {
+        Err(fail("Backend_mock.depth.read", ErrorKind::Unsupported, "depth textures are not host readable"))
+    }
+    fn read_into(&self, _: i64, _: &mut [u8], _: usize, _: usize) -> Result<(), Error> {
+        Err(fail("Backend_mock.depth.read_into", ErrorKind::Unsupported, "depth textures are not host readable"))
+    }
+    fn destroy(&self) -> Result<(), Error> {
+        let mut state = self.c.borrow_mut();
+        state.textures -= 1;
+        state.trace.push(format!("destroy-depth-texture:{}", self.id));
+        Ok(())
+    }
+}
+
+fn create_depth_texture(c: &Shared) -> Result<MockDepthTexture, Error> {
     {
         let mut state = c.borrow_mut();
         if should_fail(state.fail_depth_after) {
@@ -378,288 +411,271 @@ fn create_depth_texture(c: &Shared) -> Result<DriverResource, Error> {
         state.textures += 1;
         state.trace.push(format!("create-depth-texture:{id}"));
     }
-    let c = c.clone();
-    Ok(DriverResource {
-        token: id,
-        write: Box::new(|_, _| {
-            Err(fail("Backend_mock.depth.write", ErrorKind::Unsupported, "depth textures are not host writable"))
-        }),
-        read: Box::new(|_, _| {
-            Err(fail("Backend_mock.depth.read", ErrorKind::Unsupported, "depth textures are not host readable"))
-        }),
-        read_into: Box::new(|_, _, _, _| {
-            Err(fail("Backend_mock.depth.read_into", ErrorKind::Unsupported, "depth textures are not host readable"))
-        }),
-        destroy: Box::new(move || {
-            let mut state = c.borrow_mut();
-            state.textures -= 1;
-            state.trace.push(format!("destroy-depth-texture:{id}"));
-            Ok(())
-        }),
-    })
+    Ok(MockDepthTexture { c: c.clone(), id })
 }
 
-fn create_queue(c: &Shared) -> Result<DriverQueue, Error> {
-    token(c);
-    let epoch = Rc::new(Cell::new(0i64));
-    let completed = Rc::new(Cell::new(0i64));
-    c.borrow_mut().queues += 1;
-    let complete_through = {
-        let (c, epoch, completed) = (c.clone(), epoch.clone(), completed.clone());
-        Rc::new(move |e: i64| -> Result<(), Error> {
-            if e <= completed.get() || e > epoch.get() {
-                return Err(fail("Backend_mock.complete", ErrorKind::InvalidArgument, "epoch is invalid"));
-            }
-            completed.set(e);
-            add(&c, format!("complete:{e}"));
-            let injected = std::mem::replace(&mut c.borrow_mut().fail_completion, false);
-            if injected {
-                Err(fail("Backend_mock.complete", ErrorKind::DeviceLost, "injected terminal completion failure"))
-            } else {
-                Ok(())
-            }
-        })
-    };
-    let poll_through = {
-        let (completed, complete_through) = (completed.clone(), complete_through.clone());
-        move |e: i64| -> Result<bool, Error> {
-            if e <= 0 {
-                Err(fail("Backend_mock.poll", ErrorKind::InvalidArgument, "epoch is invalid"))
-            } else if e <= completed.get() {
-                Ok(true)
-            } else {
-                complete_through(e).map(|()| true)
-            }
-        }
-    };
-    let begin_commands = {
-        let (c, epoch) = (c.clone(), epoch.clone());
-        move || -> Result<DriverCommands, Error> { Ok(create_commands(&c, &epoch)) }
-    };
-    let (c_destroy, completed_read) = (c.clone(), completed);
-    Ok(DriverQueue {
-        complete_through: Box::new(move |e| complete_through(e)),
-        poll_through: Box::new(poll_through),
-        completed_epoch: Box::new(move || completed_read.get()),
-        begin_commands: Box::new(begin_commands),
-        gpu_duration: Box::new(|_| None),
-        gpu_timing: Box::new(|| GpuTiming { gpu_seconds: 0.0 }),
-        destroy_queue: Box::new(move || {
-            c_destroy.borrow_mut().queues -= 1;
-            Ok(())
-        }),
-    })
+struct MockQueue {
+    c: Shared,
+    epoch: Rc<Cell<i64>>,
+    completed: Cell<i64>,
 }
 
-fn create_commands(c: &Shared, epoch: &Rc<Cell<i64>>) -> DriverCommands {
-    let commands = token(c);
-    let ops: Rc<RefCell<Vec<BufferToTexture>>> = Rc::new(RefCell::new(Vec::new()));
-    let run = {
-        let (c, ops) = (c.clone(), ops.clone());
-        move || -> Result<(), Error> {
-            let recorded = ops.borrow().clone();
-            recorded.iter().try_for_each(|t| execute_transfer(&c, t))
+impl DriverQueue for MockQueue {
+    fn complete_through(&self, e: i64) -> Result<(), Error> {
+        if e <= self.completed.get() || e > self.epoch.get() {
+            return Err(fail("Backend_mock.complete", ErrorKind::InvalidArgument, "epoch is invalid"));
         }
-    };
-    // injected failures and loss are checked in the order of the OCaml mock
-    let submit = {
-        let c = c.clone();
-        move |operation: &str| -> Result<(), Error> {
-            let injected = std::mem::replace(&mut c.borrow_mut().fail_submission, false);
-            if injected {
-                Err(fail(operation, ErrorKind::InvalidState, "injected submission failure"))
-            } else if c.borrow().lost {
-                Err(fail(operation, ErrorKind::DeviceLost, "injected device loss"))
-            } else {
-                Ok(())
-            }
-        }
-    };
-    let blit_encoder = {
-        let ops = ops.clone();
-        move || -> Result<DriverBlitEncoder, Error> {
-            let ops = ops.clone();
-            Ok(DriverBlitEncoder {
-                buffer_to_texture: Box::new(move |src, offset, row, image, dst, mip, origin, extent| {
-                    ops.borrow_mut().push(BufferToTexture { src, offset, row, image, dst, mip, origin, extent });
-                    Ok(())
-                }),
-                end_blit: Box::new(|| Ok(())),
-            })
-        }
-    };
-    let commit_present = {
-        let (c, epoch, run, submit) = (c.clone(), epoch.clone(), run.clone(), submit.clone());
-        move |source: i64, frame: DriverFrame| -> Result<Receipt, Error> {
-            submit("Backend_mock.commit_present")?;
-            run()?;
-            epoch.set(epoch.get() + 1);
-            add(&c, format!("commit-present:{commands}:{source}:{}:{}", frame.frame_token, epoch.get()));
-            Ok(Receipt { epoch: epoch.get() })
-        }
-    };
-    let commit = {
-        let (c, epoch) = (c.clone(), epoch.clone());
-        move || -> Result<Receipt, Error> {
-            submit("Backend_mock.commit")?;
-            run()?;
-            epoch.set(epoch.get() + 1);
-            add(&c, format!("commit:{commands}:{}", epoch.get()));
-            Ok(Receipt { epoch: epoch.get() })
-        }
-    };
-    DriverCommands {
-        compute_encoder: Box::new(|| {
-            Err(fail("Backend_mock.compute_encoder", ErrorKind::Unsupported, "mock backend does not execute compute shaders"))
-        }),
-        accel_encoder: Box::new(|| {
-            Err(fail("Backend_mock.accel_encoder", ErrorKind::Unsupported, "mock backend has no ray tracing"))
-        }),
-        blit_encoder: Box::new(blit_encoder),
-        render_encoder: Box::new(|_| {
-            Err(fail("Backend_mock.render_encoder", ErrorKind::Unsupported, "mock backend does not rasterize"))
-        }),
-        commit: Box::new(commit),
-        commit_present: Box::new(commit_present),
-        abandon: Box::new(move || {
-            ops.borrow_mut().clear();
+        self.completed.set(e);
+        add(&self.c, format!("complete:{e}"));
+        let injected = std::mem::replace(&mut self.c.borrow_mut().fail_completion, false);
+        if injected {
+            Err(fail("Backend_mock.complete", ErrorKind::DeviceLost, "injected terminal completion failure"))
+        } else {
             Ok(())
-        }),
+        }
+    }
+    fn poll_through(&self, e: i64) -> Result<bool, Error> {
+        if e <= 0 {
+            Err(fail("Backend_mock.poll", ErrorKind::InvalidArgument, "epoch is invalid"))
+        } else if e <= self.completed.get() {
+            Ok(true)
+        } else {
+            self.complete_through(e).map(|()| true)
+        }
+    }
+    fn completed_epoch(&self) -> i64 { self.completed.get() }
+    fn begin_commands(&self) -> Result<Box<dyn DriverCommands>, Error> {
+        Ok(Box::new(MockCommands {
+            id: token(&self.c),
+            c: self.c.clone(),
+            epoch: self.epoch.clone(),
+            ops: Rc::new(RefCell::new(Vec::new())),
+        }))
+    }
+    fn gpu_duration(&self, _: i64) -> Option<f64> { None }
+    fn gpu_timing(&self) -> GpuTiming { GpuTiming { gpu_seconds: 0.0 } }
+    fn destroy_queue(&self) -> Result<(), Error> {
+        self.c.borrow_mut().queues -= 1;
+        Ok(())
     }
 }
 
-fn create_surface(c: &Shared) -> Result<DriverSurface, Error> {
+fn create_queue(c: &Shared) -> Result<Box<dyn DriverQueue>, Error> {
     token(c);
-    let frame = Rc::new(Cell::new(0i64));
+    c.borrow_mut().queues += 1;
+    Ok(Box::new(MockQueue { c: c.clone(), epoch: Rc::new(Cell::new(0)), completed: Cell::new(0) }))
+}
+
+struct MockCommands {
+    c: Shared,
+    id: i64,
+    epoch: Rc<Cell<i64>>,
+    ops: Rc<RefCell<Vec<BufferToTexture>>>,
+}
+
+impl MockCommands {
+    // injected failures and loss are checked in the order of the OCaml mock
+    fn submit(&self, operation: &str) -> Result<(), Error> {
+        let injected = std::mem::replace(&mut self.c.borrow_mut().fail_submission, false);
+        if injected {
+            Err(fail(operation, ErrorKind::InvalidState, "injected submission failure"))
+        } else if self.c.borrow().lost {
+            Err(fail(operation, ErrorKind::DeviceLost, "injected device loss"))
+        } else {
+            Ok(())
+        }
+    }
+    fn run(&self) -> Result<(), Error> {
+        let recorded = self.ops.borrow().clone();
+        recorded.iter().try_for_each(|t| execute_transfer(&self.c, t))
+    }
+}
+
+struct MockBlit(Rc<RefCell<Vec<BufferToTexture>>>);
+
+impl DriverBlitEncoder for MockBlit {
+    fn buffer_to_texture(&self, src: i64, offset: i64, row: i64, image: i64, dst: i64, mip: i64, origin: Origin, extent: Extent) -> Result<(), Error> {
+        self.0.borrow_mut().push(BufferToTexture { src, offset, row, image, dst, mip, origin, extent });
+        Ok(())
+    }
+    fn end_blit(&self) -> Result<(), Error> { Ok(()) }
+}
+
+impl DriverCommands for MockCommands {
+    fn compute_encoder(&self) -> Result<Box<dyn DriverComputeEncoder>, Error> {
+        Err(fail("Backend_mock.compute_encoder", ErrorKind::Unsupported, "mock backend does not execute compute shaders"))
+    }
+    fn accel_encoder(&self) -> Result<Box<dyn DriverAccelEncoder>, Error> {
+        Err(fail("Backend_mock.accel_encoder", ErrorKind::Unsupported, "mock backend has no ray tracing"))
+    }
+    fn blit_encoder(&self) -> Result<Box<dyn DriverBlitEncoder>, Error> {
+        Ok(Box::new(MockBlit(self.ops.clone())))
+    }
+    fn render_encoder(&self, _: &DriverRenderTarget) -> Result<Box<dyn DriverRenderEncoder>, Error> {
+        Err(fail("Backend_mock.render_encoder", ErrorKind::Unsupported, "mock backend does not rasterize"))
+    }
+    fn commit(&self) -> Result<Receipt, Error> {
+        self.submit("Backend_mock.commit")?;
+        self.run()?;
+        self.epoch.set(self.epoch.get() + 1);
+        add(&self.c, format!("commit:{}:{}", self.id, self.epoch.get()));
+        Ok(Receipt { epoch: self.epoch.get() })
+    }
+    fn commit_present(&self, source: i64, frame: DriverFrame) -> Result<Receipt, Error> {
+        self.submit("Backend_mock.commit_present")?;
+        self.run()?;
+        self.epoch.set(self.epoch.get() + 1);
+        add(&self.c, format!("commit-present:{}:{source}:{}:{}", self.id, frame.frame_token, self.epoch.get()));
+        Ok(Receipt { epoch: self.epoch.get() })
+    }
+    fn abandon(&self) -> Result<(), Error> {
+        self.ops.borrow_mut().clear();
+        Ok(())
+    }
+}
+
+struct MockSurface { c: Shared, frame: Cell<i64> }
+
+impl DriverSurface for MockSurface {
+    fn configure(&self, _: &Configuration) -> Result<(), Error> {
+        let injected = std::mem::replace(&mut self.c.borrow_mut().fail_configure, false);
+        if injected {
+            Err(fail("Backend_mock.configure", ErrorKind::InvalidState, "injected configure failure"))
+        } else {
+            Ok(())
+        }
+    }
+    fn acquire_sync(&self) -> Result<DriverAcquire, Error> {
+        if self.c.borrow().lost {
+            Ok(DriverAcquire::DeviceLost)
+        } else {
+            self.frame.set(self.frame.get() + 1);
+            Ok(DriverAcquire::Acquired(DriverFrame { frame_token: self.frame.get() }))
+        }
+    }
+    fn discard(&self, _: DriverFrame) -> Result<(), Error> {
+        add(&self.c, "discard".to_owned());
+        Ok(())
+    }
+    fn destroy_surface(&self) -> Result<(), Error> {
+        self.c.borrow_mut().surfaces -= 1;
+        Ok(())
+    }
+}
+
+fn create_surface(c: &Shared) -> Result<Box<dyn DriverSurface>, Error> {
+    token(c);
     c.borrow_mut().surfaces += 1;
-    let (c_configure, c_acquire, c_discard, c_destroy) = (c.clone(), c.clone(), c.clone(), c.clone());
-    Ok(DriverSurface {
-        configure: Box::new(move |_| {
-            let injected = std::mem::replace(&mut c_configure.borrow_mut().fail_configure, false);
-            if injected {
-                Err(fail("Backend_mock.configure", ErrorKind::InvalidState, "injected configure failure"))
-            } else {
-                Ok(())
-            }
-        }),
-        acquire_sync: Box::new(move || {
-            if c_acquire.borrow().lost {
-                Ok(DriverAcquire::DeviceLost)
-            } else {
-                frame.set(frame.get() + 1);
-                Ok(DriverAcquire::Acquired(DriverFrame { frame_token: frame.get() }))
-            }
-        }),
-        discard: Box::new(move |_| {
-            add(&c_discard, "discard".to_owned());
-            Ok(())
-        }),
-        destroy_surface: Box::new(move || {
-            c_destroy.borrow_mut().surfaces -= 1;
-            Ok(())
-        }),
-    })
+    Ok(Box::new(MockSurface { c: c.clone(), frame: Cell::new(0) }))
 }
 
-fn create_library(c: &Shared) -> Result<DriverLibrary, Error> {
-    let id = token(c);
-    c.borrow_mut().pipelines += 1;
-    add(c, format!("create-library:{id}"));
-    let c = c.clone();
-    Ok(DriverLibrary {
-        create_compute_pipeline_in: Box::new(|_, _, _| {
-            Err(fail(
-                "Backend_mock.create_compute_pipeline_in",
-                ErrorKind::Unsupported,
-                "mock backend does not execute compute shaders",
-            ))
-        }),
-        destroy_library: Box::new(move || {
-            c.borrow_mut().pipelines -= 1;
-            add(&c, format!("destroy-library:{id}"));
-            Ok(())
-        }),
-    })
+struct MockLibrary { c: Shared, id: i64 }
+
+impl DriverLibrary for MockLibrary {
+    fn create_compute_pipeline_in(&self, _: &str, _: &[(String, ConstantValue)], _: &[Binding]) -> Result<Box<dyn DriverPipeline>, Error> {
+        Err(fail(
+            "Backend_mock.create_compute_pipeline_in",
+            ErrorKind::Unsupported,
+            "mock backend does not execute compute shaders",
+        ))
+    }
+    fn destroy_library(&self) -> Result<(), Error> {
+        self.c.borrow_mut().pipelines -= 1;
+        add(&self.c, format!("destroy-library:{}", self.id));
+        Ok(())
+    }
 }
 
-fn create_sampler(c: &Shared) -> Result<DriverSampler, Error> {
-    let id = token(c);
-    c.borrow_mut().pipelines += 1;
-    add(c, format!("create-sampler:{id}"));
-    let c = c.clone();
-    Ok(DriverSampler {
-        sampler_token: id,
-        destroy_sampler: Box::new(move || {
-            c.borrow_mut().pipelines -= 1;
-            add(&c, format!("destroy-sampler:{id}"));
-            Ok(())
-        }),
-    })
+struct MockSampler { c: Shared, id: i64 }
+
+impl DriverSampler for MockSampler {
+    fn sampler_token(&self) -> i64 { self.id }
+    fn destroy_sampler(&self) -> Result<(), Error> {
+        self.c.borrow_mut().pipelines -= 1;
+        add(&self.c, format!("destroy-sampler:{}", self.id));
+        Ok(())
+    }
 }
 
-fn create_device(c: &Shared, capabilities: caps::Caps) -> Result<DriverDevice, Error> {
-    token(c);
-    let device_handle = handle::create_device();
-    let c_size = c.clone();
-    let c_buffer = c.clone();
-    let c_mapped = c.clone();
-    let c_texture = c.clone();
-    let c_depth = c.clone();
-    let c_library = c.clone();
-    let c_sampler = c.clone();
-    let c_queue = c.clone();
-    let c_surface = c.clone();
-    let c_destroy = c.clone();
-    let destroyed = device_handle.clone();
-    Ok(DriverDevice {
-        device_handle,
-        capabilities,
-        allocated_size: Box::new(move || {
-            c_size.borrow().memory.values().map(|bytes| bytes.lock().unwrap().len() as i64).sum()
-        }),
-        recommended_working_set: Box::new(|| 8 * 1024 * 1024 * 1024),
-        create_buffer: Box::new(move |_memory, d| resource(&c_buffer, "buffer", d.size)),
-        create_mapped_buffer: Box::new(move |d| create_mapped_buffer(&c_mapped, d)),
-        create_texture: Box::new(move |d| create_texture(&c_texture, d)),
-        create_depth_texture: Box::new(move |_| create_depth_texture(&c_depth)),
-        create_memoryless_texture: Box::new(|_, _| {
-            Err(fail(
-                "Backend_mock.create_memoryless_texture",
-                ErrorKind::Unsupported,
-                "the mock has no memoryless attachments",
-            ))
-        }),
-        create_library: Box::new(move |_| create_library(&c_library)),
-        warm_library: Box::new(|_| None),
-        create_accel: Box::new(|_| {
-            Err(fail("Backend_mock.create_accel", ErrorKind::Unsupported, "mock backend has no ray tracing"))
-        }),
-        // The mock mirrors Metal's documented instance record layouts.
-        instance_layout: Box::new(|kind| match kind {
+struct MockDevice { c: Shared, handle: handle::Device, capabilities: caps::Caps }
+
+impl DriverDevice for MockDevice {
+    fn device_handle(&self) -> handle::Device { self.handle.clone() }
+    fn capabilities(&self) -> caps::Caps { self.capabilities.clone() }
+    fn allocated_size(&self) -> i64 {
+        self.c.borrow().memory.values().map(|bytes| bytes.lock().unwrap().len() as i64).sum()
+    }
+    fn recommended_working_set(&self) -> i64 { 8 * 1024 * 1024 * 1024 }
+    fn create_buffer(&self, _memory: Memory, d: &BufferDescriptor) -> Result<Box<dyn DriverResource>, Error> {
+        Ok(Box::new(resource(&self.c, "buffer", d.size)?))
+    }
+    fn create_mapped_buffer(&self, d: &BufferDescriptor) -> Result<DriverMapped, Error> {
+        create_mapped_buffer(&self.c, d)
+    }
+    fn create_texture(&self, d: &TextureDescriptor) -> Result<Box<dyn DriverResource>, Error> {
+        Ok(Box::new(create_texture(&self.c, d)?))
+    }
+    fn create_depth_texture(&self, _: &TextureDescriptor) -> Result<Box<dyn DriverResource>, Error> {
+        Ok(Box::new(create_depth_texture(&self.c)?))
+    }
+    fn create_memoryless_texture(&self, _: bool, _: &TextureDescriptor) -> Result<Box<dyn DriverResource>, Error> {
+        Err(fail(
+            "Backend_mock.create_memoryless_texture",
+            ErrorKind::Unsupported,
+            "the mock has no memoryless attachments",
+        ))
+    }
+    fn create_library(&self, _: &Shader) -> Result<Box<dyn DriverLibrary>, Error> {
+        let id = token(&self.c);
+        self.c.borrow_mut().pipelines += 1;
+        add(&self.c, format!("create-library:{id}"));
+        Ok(Box::new(MockLibrary { c: self.c.clone(), id }))
+    }
+    fn warm_library(&self, _: &Shader) -> Option<Warm> { None }
+    fn create_accel(&self, _: &DriverAccelDescriptor) -> Result<Box<dyn DriverAccel>, Error> {
+        Err(fail("Backend_mock.create_accel", ErrorKind::Unsupported, "mock backend has no ray tracing"))
+    }
+    // The mock mirrors Metal's documented instance record layouts.
+    fn instance_layout(&self, kind: InstanceKind) -> Vec<i64> {
+        match kind {
             InstanceKind::UserIdInstances => vec![68, 0, 48, 52, 60, 64, -1, -1, -1, -1, -1, -1],
             InstanceKind::MotionInstances => vec![44, -1, 8, 12, 20, 24, 0, 4, 28, 32, 36, 40],
-        }),
-        create_sampler: Box::new(move |_| create_sampler(&c_sampler)),
-        create_render_pipeline: Box::new(|_, _| {
-            Err(fail("Backend_mock.create_render_pipeline", ErrorKind::Unsupported, "mock backend does not rasterize"))
-        }),
-        create_icb: Box::new(|_| {
-            Err(fail("Backend_mock.create_icb", ErrorKind::Unsupported, "mock backend does not rasterize"))
-        }),
-        create_argument: Box::new(|_, _, _| {
-            Err(fail("Backend_mock.create_argument", ErrorKind::Unsupported, "mock backend does not rasterize"))
-        }),
-        create_queue: Box::new(move || create_queue(&c_queue)),
-        create_surface: Box::new(move |_| create_surface(&c_surface)),
-        destroy_device: Box::new(move || {
-            handle::destroy_device(&destroyed);
-            add(&c_destroy, "destroy-device".to_owned());
-            Ok(())
-        }),
-    })
+        }
+    }
+    fn create_sampler(&self, _: &SamplerDescriptor) -> Result<Box<dyn DriverSampler>, Error> {
+        let id = token(&self.c);
+        self.c.borrow_mut().pipelines += 1;
+        add(&self.c, format!("create-sampler:{id}"));
+        Ok(Box::new(MockSampler { c: self.c.clone(), id }))
+    }
+    fn create_render_pipeline(&self, _: RenderPipelineOptions, _: &RenderDescriptor) -> Result<Box<dyn DriverPipeline>, Error> {
+        Err(fail("Backend_mock.create_render_pipeline", ErrorKind::Unsupported, "mock backend does not rasterize"))
+    }
+    fn create_icb(&self, _: i64) -> Result<Box<dyn DriverIcb>, Error> {
+        Err(fail("Backend_mock.create_icb", ErrorKind::Unsupported, "mock backend does not rasterize"))
+    }
+    fn create_argument(&self, _: i64, _: ShaderStage, _: i64) -> Result<Box<dyn DriverArgument>, Error> {
+        Err(fail("Backend_mock.create_argument", ErrorKind::Unsupported, "mock backend does not rasterize"))
+    }
+    fn create_queue(&self) -> Result<Box<dyn DriverQueue>, Error> { create_queue(&self.c) }
+    fn create_surface(&self, _: &Configuration) -> Result<Box<dyn DriverSurface>, Error> { create_surface(&self.c) }
+    fn destroy_device(&self) -> Result<(), Error> {
+        handle::destroy_device(&self.handle);
+        add(&self.c, "destroy-device".to_owned());
+        Ok(())
+    }
 }
 
-pub fn create() -> (Driver, Control) {
+struct MockDriver { c: Shared, capabilities: caps::Caps }
+
+impl Driver for MockDriver {
+    fn create_device(&self) -> Result<Box<dyn DriverDevice>, Error> {
+        token(&self.c);
+        Ok(Box::new(MockDevice { c: self.c.clone(), handle: handle::create_device(), capabilities: self.capabilities.clone() }))
+    }
+}
+
+pub fn create() -> (Box<dyn Driver>, Control) {
     let capabilities = caps::Caps {
         compute_pipeline: false,
         render_pipeline: false,
@@ -689,8 +705,7 @@ pub fn create() -> (Driver, Control) {
         // on common drivers); Metal has no such limit
         max_allocations: Some(4096),
     }));
-    let driver = Driver { create_device: Box::new({ let c = c.clone(); move || create_device(&c, capabilities) }) };
-    (driver, Control(c))
+    (Box::new(MockDriver { c: c.clone(), capabilities }), Control(c))
 }
 
 /// (buffers, textures, pipelines, queues, surfaces)

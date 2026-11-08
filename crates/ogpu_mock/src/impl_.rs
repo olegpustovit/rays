@@ -10,7 +10,7 @@ thread_local! {
 
 pub const BACKEND: &str = "mock";
 
-pub fn create_driver() -> Driver {
+pub fn create_driver() -> Box<dyn Driver> {
     let (driver, control) = backend_mock::create();
     CONTROLS.with(|controls| controls.borrow_mut().push(control));
     driver
