@@ -86,8 +86,9 @@ pub fn scene_edit(value: t, mode: scene_mode, active_camera: Option<Option<i64>>
     }
 }
 
-pub fn machinery(value: &t, under: Option<&dyn Fn(i64) -> Vec<ui_scene::node>>, all_ui_visible: bool) -> Vec<ui_scene::node> {
-    if all_ui_visible || value.leader != editor_core::router::State::Idle { value.ui.borrow().scene(under) } else { Vec::new() }
+pub fn machinery<'a>(value: impl Into<ModelView<'a>>, under: Option<&dyn Fn(i64) -> Vec<ui_scene::node>>, all_ui_visible: bool) -> Vec<ui_scene::node> {
+    let value = &value.into();
+    if all_ui_visible || *value.leader != editor_core::router::State::Idle { value.ui.borrow().scene(under) } else { Vec::new() }
 }
 
 pub fn close(value: &t) {
@@ -259,7 +260,8 @@ pub fn edit_node(value: t, level: Level, node_id: i64, values: &[(String, Value)
 
 /// The graph of a `shop_materialpath`: the material graph of that name, else the one whose `:name`
 /// it is.
-pub fn material_graph(value: &t, path: &str) -> Option<String> {
+pub fn material_graph<'a>(value: impl Into<ModelView<'a>>, path: &str) -> Option<String> {
+    let value = &value.into();
     let ws = &value.doc.workspace.ws;
     let materials: Vec<String> = ws.checked.graphs.iter().filter(|g| g.context == context::material()).map(|g| g.name.clone()).collect();
     if materials.iter().any(|m| m == path) {

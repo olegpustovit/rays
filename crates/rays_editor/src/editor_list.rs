@@ -75,7 +75,8 @@ pub fn geometry_objects(value: &t) -> Vec<(i64, &net::Network, i64)> {
 
 /// The object the sketch-facing single-object accessors describe: the open one, else the first
 /// visible geometry object.
-pub fn focus_object(value: &t) -> Option<i64> {
+pub fn focus_object<'a>(value: impl Into<ModelView<'a>>) -> Option<i64> {
+    let value = &value.into();
     match pane_level(value) {
         Level::Inside(id) if kind(value, id).as_deref() == Some("geometry") => Some(id),
         Level::Inside(_) | Level::Scene => geometry_objects(value).first().map(|(id, _, _)| *id),
@@ -86,18 +87,21 @@ pub fn pieces(value: &t) -> &[cook::piece] {
     &value.cook.pieces
 }
 
-pub fn piece(value: &t) -> Option<&cook::piece> {
+pub fn piece<'a>(value: impl Into<ModelView<'a>>) -> Option<&'a cook::piece> {
+    let value = &value.into();
     let id = focus_object(value)?;
-    pieces(value).iter().find(|piece| piece.id == id)
+    pieces(value.model).iter().find(|piece| piece.id == id)
 }
 
-pub fn prepared(value: &t) -> Option<&cook::Prepared_ref> {
+pub fn prepared<'a>(value: impl Into<ModelView<'a>>) -> Option<&'a cook::Prepared_ref> {
+    let value = &value.into();
     piece(value).map(|piece| &piece.prepared)
 }
 
 /// The object in focus (the selected scene object, or the one whose network is open): its world
 /// transform, its cooked bounds in its own space, and its name.
-pub fn selected_bounds(value: &t) -> Option<(mat4::T, cook::bounds, String)> {
+pub fn selected_bounds<'a>(value: impl Into<ModelView<'a>>) -> Option<(mat4::T, cook::bounds, String)> {
+    let value = &value.into();
     let piece = piece(value)?;
     let bounds = cook::piece_bounds(piece)?;
     let scene_graph = scene(value);
@@ -112,7 +116,8 @@ pub fn no_graph() -> node::T {
     custom::plain(args, Vec::new(), std::sync::Arc::new(|_, _| rdk_rays::geometry_view::points_of_nothing().map_err(|e| format!("{e:?}"))))
 }
 
-pub fn graph(value: &t) -> node::T {
+pub fn graph<'a>(value: impl Into<ModelView<'a>>) -> node::T {
+    let value = &value.into();
     let by_focus = focus_object(value).and_then(|id| value.cook.graphs.iter().find(|(i, _)| *i == id).map(|(_, g)| g.clone()));
     match (by_focus, piece(value)) {
         (Some(graph), _) => graph,
@@ -121,7 +126,8 @@ pub fn graph(value: &t) -> node::T {
     }
 }
 
-pub fn displayed_node(value: &t) -> node::T {
+pub fn displayed_node<'a>(value: impl Into<ModelView<'a>>) -> node::T {
+    let value = &value.into();
     graph(value)
 }
 
@@ -133,7 +139,8 @@ pub fn timeline(value: &t) -> crate::timeline::t {
     value.timeline
 }
 
-pub fn selected_node(value: &t) -> Option<picked> {
+pub fn selected_node<'a>(value: impl Into<ModelView<'a>>) -> Option<picked> {
+    let value = &value.into();
     match scope_node(value) {
         Some((_, node)) => Some(of_sop(&node)),
         None => {
@@ -145,7 +152,8 @@ pub fn selected_node(value: &t) -> Option<picked> {
 
 /// Scoped SOP handles use their owning object's transform. Navigation selection uses the open
 /// object or the scene object's parent chain.
-pub fn space(value: &t) -> mat4::T {
+pub fn space<'a>(value: impl Into<ModelView<'a>>) -> mat4::T {
+    let value = &value.into();
     let owner = scope_node(value).and_then(|(_, node)| node_owner(value, node::id(&node)));
     if let Some(owner) = owner {
         return objects::world(&scene(value), owner);
@@ -335,7 +343,8 @@ pub fn trunk_rows(network: &net::Network, viewed: Option<i64>, flags: &dyn Fn(i6
 pub type lazy_rows = Rc<dyn Fn() -> (Vec<Row>, Vec<String>)>;
 
 /// The open level's list: what it is made from, and its rows and flag columns when asked.
-pub fn rows(value: &t) -> (row_source, lazy_rows) {
+pub fn rows<'a>(value: impl Into<ModelView<'a>>) -> (row_source, lazy_rows) {
+    let value = &value.into();
     match (pane_level(value), network(value)) {
         (Level::Scene, _) => {
             let scene_graph = scene(value);
@@ -473,7 +482,8 @@ pub struct tree_state {
 /// Tree intents become selection, an entry request, and edits of the derived network for the
 /// objects only the host made (reconcile adopts them): what the text has is edited as text
 /// (`tree_edit`).
-pub fn apply_tree(value: &t, state: tree_state, intent: &Intent) -> tree_state {
+pub fn apply_tree<'a>(value: impl Into<ModelView<'a>>, state: tree_state, intent: &Intent) -> tree_state {
+    let value = &value.into();
     let level = pane_level(value);
     let in_text = |id: i64| scene_sync::in_text(&value.doc, level, id);
     let hosted = |ids: &[i64]| -> Vec<i64> { ids.iter().copied().filter(|id| !in_text(*id)).collect() };
@@ -540,7 +550,8 @@ pub fn apply_tree(value: &t, state: tree_state, intent: &Intent) -> tree_state {
 }
 
 /// A list intent as an edit of the text, for the objects the text has (`Scene_sync::write`).
-pub fn tree_edit(value: &t, rows: &[Row], intent: &Intent) -> Option<scene_sync::Edit> {
+pub fn tree_edit<'a>(value: impl Into<ModelView<'a>>, rows: &[Row], intent: &Intent) -> Option<scene_sync::Edit> {
+    let value = &value.into();
     let level = pane_level(value);
     let in_text = |id: i64| scene_sync::in_text(&value.doc, level, id);
     let some = |ids: Vec<i64>, make: &dyn Fn(Vec<i64>) -> scene_sync::Edit| -> Option<scene_sync::Edit> {

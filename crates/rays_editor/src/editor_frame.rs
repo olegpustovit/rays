@@ -6,7 +6,6 @@
 //! ?host_events`) are the trailing parameters of `update`; callbacks that need the `ui` while the
 //! chrome holds it (`groups`, `tools_from`) are answered from tables computed just before.
 #![allow(non_camel_case_types)]
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -112,7 +111,8 @@ fn search_prompt(ui: &mut Ui, key: &str, title: &str, label: &str, query: &str, 
 
 /// The open prompt of a frame: draws it and returns (next prompt, intent).
 #[allow(clippy::too_many_arguments)]
-pub fn prompt_panel(value: &t, focus: &Panel, keymap: &[Command], frame_: &frame::t, workspace: &shell, text: &text_pane::State, text_shown: Option<&text_pane::Shown>, ui: &mut Ui, prompt_: Option<prompt>) -> Result<Prompted, rays_diagnostic::Diagnostic> {
+pub fn prompt_panel<'a>(value: impl Into<ModelView<'a>>, focus: &Panel, keymap: &[Command], frame_: &frame::t, workspace: &shell, text: &text_pane::State, text_shown: Option<&text_pane::Shown>, ui: &mut Ui, prompt_: Option<prompt>) -> Result<Prompted, rays_diagnostic::Diagnostic> {
+    let value = &value.into();
     let next: Prompted = match prompt_.clone() {
         None => (None, None),
         Some(prompt::Keys) => {
@@ -348,7 +348,9 @@ pub fn prompt_panel(value: &t, focus: &Panel, keymap: &[Command], frame_: &frame
 
 /// The gutters, last over every pane's hit area, and the layout the frame asks for through them.
 #[allow(clippy::too_many_arguments)]
-pub fn settle_layout(value: &t, vw: &t, workspace: shell, frame_: &frame::t, keymap: &[Command], shortcut_frame: &frame::t, g: &layout::Geometry, intents: &[chrome::Intent], strip_layout: Vec<chrome::Intent>, timeline_leaves: &[(Leaf, UiBox)], platform: input::Platform, ui: &mut Ui) -> (shell, Vec<change>) {
+pub fn settle_layout<'a>(value: impl Into<ModelView<'a>>, vw: impl Into<ModelView<'a>>, workspace: shell, frame_: &frame::t, keymap: &[Command], shortcut_frame: &frame::t, g: &layout::Geometry, intents: &[chrome::Intent], strip_layout: Vec<chrome::Intent>, timeline_leaves: &[(Leaf, UiBox)], platform: input::Platform, ui: &mut Ui) -> (shell, Vec<change>) {
+    let value = &value.into();
+    let vw = &vw.into();
     // The gutters last, on top of every pane's hit area: a drag applies from the next frame.
     let state = |path: &[usize]| panel_state(value, path);
     let grips = chrome::splitters(Some(&state), Some(&workspace.hidden), &shell_tree(value, &workspace), ui, shortcut_frame);
@@ -395,7 +397,8 @@ pub fn settle_layout(value: &t, vw: &t, workspace: shell, frame_: &frame::t, key
 type Target = (Panel, Option<layout::Path>);
 
 /// The pane the last press landed in takes the focus; the panes' PXUI keys name them.
-pub fn follow_press(value: &t, workspace: &shell, frame_: &frame::t, roots: &[(Leaf, UiBox)], timeline_root: &Option<(Panel, UiBox)>, focus: Panel, focus_path: Option<layout::Path>, ui: &mut Ui) -> (Panel, Option<layout::Path>, Vec<(i64, Target)>) {
+pub fn follow_press<'a>(value: impl Into<ModelView<'a>>, workspace: &shell, frame_: &frame::t, roots: &[(Leaf, UiBox)], timeline_root: &Option<(Panel, UiBox)>, focus: Panel, focus_path: Option<layout::Path>, ui: &mut Ui) -> (Panel, Option<layout::Path>, Vec<(i64, Target)>) {
+    let value = &value.into();
     let mut pane_roots: Vec<(Target, UiBox)> = roots.iter().map(|(l, b)| ((l.panel.clone(), Some(l.path.clone())), b.clone())).collect();
     if let Some((panel, b)) = timeline_root {
         pane_roots.push(((panel.clone(), None), b.clone()));
@@ -423,7 +426,8 @@ pub fn follow_press(value: &t, workspace: &shell, frame_: &frame::t, roots: &[(L
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn draw_notice(value: &t, frame_: &frame::t, roots: &[(Leaf, UiBox)], header_focus: &Option<layout::Path>, graph_body: layout::Bounds, scope_view: &scope::t, scope_active: bool, ui: &mut Ui) {
+pub fn draw_notice<'a>(value: impl Into<ModelView<'a>>, frame_: &frame::t, roots: &[(Leaf, UiBox)], header_focus: &Option<layout::Path>, graph_body: layout::Bounds, scope_view: &scope::t, scope_active: bool, ui: &mut Ui) {
+    let value = &value.into();
     // echo, the sheet's [08]: messages only (saved, undo and redo results, refusals), never a key
     // press; the last one fades after 3 seconds.  It stands at the bottom-left of the focused pane,
     // above the strip.
@@ -456,7 +460,8 @@ pub fn draw_notice(value: &t, frame_: &frame::t, roots: &[(Leaf, UiBox)], header
 
 /// The viewport handles: their edits, a pick, and the changes they write.
 #[allow(clippy::too_many_arguments)]
-pub fn draw_handles(value: &t, workspace: &shell, selection: selection::t, selected: &Option<picked>, lowered_level: bool, scope_active: bool, active: &Option<Leaf>, view_root: &UiBox, view_handles: &ViewHandles, ui: &mut Ui) -> (selection::t, bool, Vec<change>, Option<(i64, Vec<(String, Value)>)>) {
+pub fn draw_handles<'a>(value: impl Into<ModelView<'a>>, workspace: &shell, selection: selection::t, selected: &Option<picked>, lowered_level: bool, scope_active: bool, active: &Option<Leaf>, view_root: &UiBox, view_handles: &ViewHandles, ui: &mut Ui) -> (selection::t, bool, Vec<change>, Option<(i64, Vec<(String, Value)>)>) {
+    let value = &value.into();
     // a lowered node is edited through its text: the handles of the node selected in the graph pane
     // write its arguments, the list's rows of a geometry object have none
     let scope_target = if scope_active { scope_node(value) } else { None };
@@ -512,7 +517,9 @@ pub fn draw_handles(value: &t, workspace: &shell, selection: selection::t, selec
 }
 
 /// What the graph pane and the outline asked for, as document changes.
-pub fn pane_changes(value: &t, vw: &t, command_changes: Vec<change>, scope_changes: &[scope::Change], menu_pick: &Option<String>, outline_intents: &[navigator::Intent]) -> Vec<change> {
+pub fn pane_changes<'a>(value: impl Into<ModelView<'a>>, vw: impl Into<ModelView<'a>>, command_changes: Vec<change>, scope_changes: &[scope::Change], menu_pick: &Option<String>, outline_intents: &[navigator::Intent]) -> Vec<change> {
+    let value = &value.into();
+    let vw = &vw.into();
     let mut changes = command_changes;
     for c in scope_changes {
         match c {
@@ -563,7 +570,7 @@ type Inspected = (Option<Panel_result>, Vec<change>, Vec<(String, Value)>, bool,
 /// Every inspector leaf: the one in use over the frame's state, the others over their own pane.
 #[allow(clippy::too_many_arguments)]
 pub fn draw_inspectors<'a>(
-    value: &'a t,
+    value: impl Into<ModelView<'a>>,
     workspace: &shell,
     image: &dyn Fn(i64) -> Option<rays::image::t>,
     camera_panel: &dyn Fn(&mut Ui) -> Panel_result,
@@ -576,11 +583,12 @@ pub fn draw_inspectors<'a>(
     graph_shown: bool,
     focus: &Panel,
     focus_path: &Option<layout::Path>,
-    pane_of: &dyn Fn(&Host) -> Cow<'a, t>,
-    in_use: &dyn Fn(&t) -> bool,
+    pane_of: &dyn Fn(&Host) -> ModelView<'a>,
+    in_use: &dyn Fn(&ModelView<'a>) -> bool,
     roots: &[(Leaf, UiBox)],
     ui: &mut Ui,
 ) -> (Option<Panel_result>, Vec<change>, Vec<(String, Value)>, Vec<scope::Change>, Vec<(carry_mod::Place, bool)>, bool) {
+    let value = &value.into();
     // the split a card of the editor graph is, sized another way from what it shows now
     let resized = |node: &[String], how: layout::Way| -> Option<layout_edit::Size> {
         match (node, &value.doc.shell) {
@@ -601,13 +609,13 @@ pub fn draw_inspectors<'a>(
         let host: Host = (panel_key(&value.doc, &leaf.path), leaf.path.clone(), leaf.panel.clone(), Host_kind::List);
         let pane = pane_of(&host);
         if in_use(&pane) {
-            let r = inspect_panel(image, camera_panel, inspector_visible, unchanged, &resized, g, ui, (value, scope_view, selection, scope_active), root, leaf.body);
+            let r = inspect_panel(image, camera_panel, inspector_visible, unchanged, &resized, g, ui, (*value, scope_view, selection, scope_active), root, leaf.body);
             inspectors.push((leaf.clone(), r));
         } else {
             let shown = graph_shown && stored_projection(&pane) == Graph_view && graph_name(&pane).is_some();
             let view = pane_view(&pane).clone();
             let picked_selection = pane_selection(&pane).clone();
-            let (panel, _, _, _, moves, drops) = inspect_panel(image, camera_panel, inspector_visible, unchanged, &resized, g, ui, (&pane, &view, &picked_selection, shown), root, leaf.body);
+            let (panel, _, _, _, moves, drops) = inspect_panel(image, camera_panel, inspector_visible, unchanged, &resized, g, ui, (pane, &view, &picked_selection, shown), root, leaf.body);
             inspectors.push((leaf.clone(), (panel, Vec::new(), Vec::new(), value.live_cook, moves, drops)));
         }
     }
@@ -652,9 +660,10 @@ pub fn carry_marks(value: &t) -> Marks {
 type RowSet = (row_source, (Option<i64>, Option<i64>), (Vec<tree::Row>, Vec<String>));
 
 /// The rows of a level's list and of every list that draws, by panel key.
-pub fn list_rows<'a>(value: &'a t, listing_: bool, list_drawn: bool, pane_of: &dyn Fn(&Host) -> Cow<'a, t>, list_hosts: &[Host]) -> (Vec<RowSet>, Vec<tree::Row>, Vec<String>, Vec<(Key_, (Vec<tree::Row>, Vec<String>))>) {
+pub fn list_rows<'a>(value: impl Into<ModelView<'a>>, listing_: bool, list_drawn: bool, pane_of: &dyn Fn(&Host) -> ModelView<'a>, list_hosts: &[Host]) -> (Vec<RowSet>, Vec<tree::Row>, Vec<String>, Vec<(Key_, (Vec<tree::Row>, Vec<String>))>) {
+    let value = &value.into();
     // the rows of a level's list, made once per network and kept while a list shows them
-    let rows_of = |sets: &mut Vec<RowSet>, pane: &t| -> (Vec<tree::Row>, Vec<String>) {
+    let rows_of = |sets: &mut Vec<RowSet>, pane: ModelView<'a>| -> (Vec<tree::Row>, Vec<String>) {
         let (source, made) = rows(pane);
         let key = (displayed(pane), pane.doc.active_camera);
         if let Some((_, _, r)) = sets.iter().find(|(s, k, _)| same_source(s, &source) && *k == key) {
@@ -669,19 +678,20 @@ pub fn list_rows<'a>(value: &'a t, listing_: bool, list_drawn: bool, pane_of: &d
         r
     };
     let mut sets: Vec<RowSet> = Vec::new();
-    let (rows_, columns) = if listing_ || list_drawn { rows_of(&mut sets, value) } else { (Vec::new(), Vec::new()) };
+    let (rows_, columns) = if listing_ || list_drawn { rows_of(&mut sets, *value) } else { (Vec::new(), Vec::new()) };
     // the rows of every list that draws, by panel key: made here, before the frame builds
     let mut host_rows = Vec::new();
     for host in list_hosts {
         let pane = pane_of(host);
-        let r = rows_of(&mut sets, &pane);
+        let r = rows_of(&mut sets, pane);
         host_rows.insert(0, (host.0.clone(), r));
     }
     (sets, rows_, columns, host_rows)
 }
 
 /// `/ a`: the node menu of the graph the pane shows.
-pub fn node_menu_step(value: &t, workspace: &shell, frame_: &frame::t, actions: &[action], graph_shown: bool) -> (Option<node_menu::t>, Vec<change>) {
+pub fn node_menu_step<'a>(value: impl Into<ModelView<'a>>, workspace: &shell, frame_: &frame::t, actions: &[action], graph_shown: bool) -> (Option<node_menu::t>, Vec<change>) {
+    let value = &value.into();
     if actions.contains(&action::Add_node) && graph_shown {
         let (gx, gy, gw, gh) = match graph_leaf(value, &geometry(value, workspace, frame_)) {
             Some(leaf) => leaf.body,
@@ -701,7 +711,8 @@ pub fn node_menu_step(value: &t, workspace: &shell, frame_: &frame::t, actions: 
 type TextState = (Option<Host>, text_pane::State, Option<text_pane::Shown>, Vec<(Key_, layout::Path, text_pane::State, text_pane::Shown)>);
 
 /// What each text pane shows: its state and what it is showing.
-pub fn text_state<'a>(value: &'a t, actions: &[action], pane_of: &dyn Fn(&Host) -> Cow<'a, t>, text_hosts: &[Host]) -> Result<TextState, rays_diagnostic::Diagnostic> {
+pub fn text_state<'a>(value: impl Into<ModelView<'a>>, actions: &[action], pane_of: &dyn Fn(&Host) -> ModelView<'a>, text_hosts: &[Host]) -> Result<TextState, rays_diagnostic::Diagnostic> {
+    let value = &value.into();
     let ws = &value.doc.workspace.ws;
     let text_of = |state: &text_pane::State, host: &Host| -> Result<Option<(text_pane::State, text_pane::Shown)>, rays_diagnostic::Diagnostic> {
         let pane = pane_of(host);
@@ -807,7 +818,8 @@ pub fn gated(value: t, frame_: &frame::t, text_focus: bool, host_events: Vec<Eve
 
 /// The header intents the frame's actions stand for: panel toggles, and the focused panel's split,
 /// close and retype.
-pub fn panel_intents(value: &t, leaves: &[(layout::Path, Panel)], workspace: &shell, frame_: &frame::t, focus: &Panel, focus_path: Option<&[usize]>, actions: &[action]) -> Vec<chrome::Intent> {
+pub fn panel_intents<'a>(value: impl Into<ModelView<'a>>, leaves: &[(layout::Path, Panel)], workspace: &shell, frame_: &frame::t, focus: &Panel, focus_path: Option<&[usize]>, actions: &[action]) -> Vec<chrome::Intent> {
+    let value = &value.into();
     let panel_paths = |panel: &Panel| -> Vec<layout::Path> { leaves.iter().filter(|(_, p)| p == panel).map(|(path, _)| path.clone()).collect() };
     let toggle = |panel: &Panel| -> Vec<chrome::Intent> { panel_paths(panel).into_iter().map(chrome::Intent::Toggle).collect() };
     let expand = |panel: &Panel| -> Vec<chrome::Intent> { panel_paths(panel).into_iter().filter(|path| panel_state(value, path).collapsed).map(chrome::Intent::Toggle).collect() };
@@ -850,7 +862,8 @@ pub fn panel_intents(value: &t, leaves: &[(layout::Path, Panel)], workspace: &sh
 }
 
 /// The status bar's fps, sampled once a second.
-pub fn fps_sample(value: &t, frame_: &frame::t) -> (Option<i64>, f64) {
+pub fn fps_sample<'a>(value: impl Into<ModelView<'a>>, frame_: &frame::t) -> (Option<i64>, f64) {
+    let value = &value.into();
     let sample = frame_.input.t < value.status_fps_at || frame_.input.t - value.status_fps_at >= 1.0;
     if !sample {
         (value.status_fps, value.status_fps_at)
@@ -876,14 +889,15 @@ pub fn undo_passed(value: &t, text_focus: bool, modal: bool) -> Vec<action> {
 }
 
 /// The last command's label, or the leader's pending prefix, for 1.5 seconds.
-pub fn hud_of(value: &t, leader: &router::State, frame_: &frame::t, commands: &[Command]) -> Option<(String, f64)> {
+pub fn hud_of<'a>(value: impl Into<ModelView<'a>>, leader: &router::State, frame_: &frame::t, commands: &[Command]) -> Option<(String, f64)> {
+    let value = &value.into();
     match commands.last() {
         Some(command) => {
             let platform = value.ui.borrow().platform();
             Some((format!("{} \u{b7} {}", keymap::label(platform, command.trigger.as_ref().expect("a routed command has a trigger")), command.label), frame_.input.t + 1.5))
         }
         None => match leader {
-            router::State::Pending(prefix) if leader != &value.leader => Some((format!("{} \u{b7} leader", if prefix.is_empty() { "Space".to_string() } else { format!("/ {prefix}") }), frame_.input.t + 1.5)),
+            router::State::Pending(prefix) if leader != value.leader => Some((format!("{} \u{b7} leader", if prefix.is_empty() { "Space".to_string() } else { format!("/ {prefix}") }), frame_.input.t + 1.5)),
             _ => value.hud.clone(),
         },
     }
@@ -996,25 +1010,30 @@ pub fn update_frame(
     let (workspace, selection, tree_value, timeline_now, timeline_changes) = actions.iter().fold((value.workspace.clone(), pane_selection(&value).clone(), value.tree.clone(), timeline_now, timeline_changes), |state, a| apply_action(&value, state, a));
     let mut value = value;
     value.timeline = timeline_now;
-    let value = sync_scope(value);
-    let other_panes: Vec<(Key_, layout::Path, t)> = if !all_ui_visible {
-        Vec::new()
-    } else {
+    let mut value = sync_scope(value);
+    let mut other_panes = Vec::new();
+    if all_ui_visible {
         let mut leaves = graph_leaves(&value);
         leaves.sort_by(|a, b| a.0.cmp(&b.0));
         leaves.dedup_by(|a, b| a.0 == b.0);
-        leaves
-            .into_iter()
-            .filter_map(|(key, path)| if panel_map::key(&value.panes).as_ref() == Some(&key) { None } else { Some((key.clone(), path.clone(), sync_scope(as_pane(&value, (&key, &path)).into_owned()))) })
-            .collect()
-    };
-    // the model as this frame's actions leave the panels; the build below keeps editing this one
-    let mut vw = {
-        let mut v = value.clone();
-        v.workspace = workspace.clone();
-        v.focus = focus.clone();
-        with_selection(v, selection.clone())
-    };
+        let active = panel_map::key(&value.panes);
+        let active_leaf = panel_map::leaf(&value.panes);
+        // An inactive projection may consume its own deferred selection, not the active model's.
+        let select_later = value.select_later.clone();
+        for (key, path) in leaves {
+            if active.as_ref() == Some(&key) { continue; }
+            value = with_pane_in_use(value, (&key, &path));
+            value = sync_scope(value);
+            value.select_later = select_later.clone();
+            other_panes.push((key, path));
+        }
+        panel_map::activate(&mut value.panes, &active.unwrap_or_default(), &|| unreachable!("the active pane exists"));
+        panel_map::set_leaf(&mut value.panes, active_leaf);
+    }
+    let mut vw = ModelView::from(&value);
+    vw.workspace = &workspace;
+    vw.focus = &focus;
+    vw.selection = &selection;
     let graph_shown = all_ui_visible && graph_family(&vw);
     let listing_ = listing(&vw);
     let hosted = |k: Host_kind| -> Vec<Host> { hosts.iter().filter(|h| h.3 == k).cloned().collect() };
@@ -1023,18 +1042,8 @@ pub fn update_frame(
     // What a text pane shows: a graph panel's own graph and selection, a lisp panel the ones of the
     // graph pane in use (the first graph of the workspace when none is open).
     // a panel's pane, laid out: the one in use, or one of the others
-    let pane_of = |host: &Host| -> Cow<'_, t> {
-        let pane = shown_as(&value, (&host.0, &host.1, &host.2));
-        if panel_map::key(&pane.panes) == panel_map::key(&value.panes) {
-            Cow::Borrowed(&value)
-        } else {
-            match other_panes.iter().find(|(k, _, _)| Some(k) == panel_map::key(&pane.panes).as_ref()) {
-                Some((_, _, synced)) => Cow::Borrowed(synced),
-                None => pane,
-            }
-        }
-    };
-    let in_use = |pane: &t| -> bool { panel_map::key(&pane.panes) == panel_map::key(&value.panes) };
+    let pane_of = |host: &Host| shown_as(&value, (&host.0, &host.1, &host.2));
+    let in_use = |pane: &ModelView<'_>| pane.key == panel_map::key_ref(&value.panes);
     let ((text_host, text, text_shown, other_texts), text_error) =
         match text_state(&value, &actions, &pane_of, &hosted(Host_kind::Text)) {
             Ok(state) => (state, None),
@@ -1129,6 +1138,7 @@ pub fn update_frame(
     let mut built: Option<frame_result> = None;
     {
         let mut build_and_prompt = |ui: &mut Ui| {
+            let mut vw = vw;
             if let Some(prefix) = &leader_panel {
                 let category = |c: &Command| editor_commands::group(c).to_string();
                 let describe = |p: &str| editor_commands::describe_prefix(p);
@@ -1190,7 +1200,7 @@ pub fn update_frame(
             let layout_leaf = focused_leaf(&geometry(&value, &workspace, frame_), &focus, focus_path.as_deref());
             let (workspace, mut layout_changes) = layout_intents(&vw, &workspace, &intents);
             layout_changes.extend(layout_actions(&value, &workspace, layout_leaf.as_ref(), &actions));
-            vw.workspace = workspace.clone();
+            vw.workspace = &workspace;
             let g = geometry(&value, &workspace, frame_);
             // the graph panel's toolbar; a click is one command or edit
             let graph_host = graph_leaf(&vw, &g);
@@ -1231,9 +1241,9 @@ pub fn update_frame(
             let view_root = draw_viewport_pane(ui, &value, probe_caption(&vw), &roots, active.as_ref(), &none_root);
             let (graph_body, scope_view2, scope_frame_changes, menu2, menu_pick) = draw_graph_pane(ui, frame_, &value, &shortcut_frame, scope_view.clone(), scope_active, guide, carry_lit.clone(), carry_hot.clone(), &graph_root, &graph_host, &workspace, menu.clone(), &open_menu);
             // Each pane builder returns only its frame intents and updated pane-local state.
-            let (tree2, list_intents2, locals) = draw_list_panes(ui, &shortcut_frame, &value, &list_hosts, &root_at, &pane_of, &in_use, &level_name, &rows_, &columns, &host_rows, &selected, tree_value.clone(), list_intents.clone(), value.locals.clone());
+            let (tree2, list_intents2, locals) = draw_list_panes(ui, &shortcut_frame, &value, &list_hosts, &root_at, &pane_of, &in_use, &|pane| level_name(pane), &rows_, &columns, &host_rows, &selected, tree_value.clone(), list_intents.clone(), value.locals.clone());
             let (text2, text_intents, locals, other_texts2) = draw_text_panes(ui, frame_, &value, &root_at, &header_slots, &text_host, &text_shown, text.clone(), other_texts.clone(), locals);
-            let (outline, outline_intents, locals) = draw_outline_panes(ui, &value, &hosted(Host_kind::Outline), &root_at, &navigator_params, value.outline.clone(), locals);
+            let (outline, outline_intents, locals) = draw_outline_panes(ui, &value, &hosted(Host_kind::Outline), &root_at, &|pane| navigator_params(pane), value.outline.clone(), locals);
             let locals = draw_spreadsheet_panes(ui, &value, &of_kind(&Panel::Spreadsheet), locals);
             let graph_panes = draw_other_graph_panes(ui, &shortcut_frame, &value, &other_panes, &roots);
             let _ = text2;
@@ -1325,8 +1335,8 @@ pub fn update_frame(
             {
                 vw.status_fps = status_fps;
                 vw.guide = guide;
-                vw.leader = leader.clone();
-                set_selection(&mut vw, selection.clone());
+                vw.leader = &leader;
+                vw.selection = &selection;
                 status_box(&vw, ui, frame_, render_status.as_deref(), text_error.as_deref().or(prompt_error.as_deref()).or(error_status.as_deref()), context);
             }
             draw_notice(&value, frame_, &roots, &header_focus, graph_body, &scope_view2, scope_active, ui);

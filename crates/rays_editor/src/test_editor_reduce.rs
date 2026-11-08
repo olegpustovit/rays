@@ -346,3 +346,48 @@ fn route_labels_borrow_model_state() {
         editor_host_close(&value);
     });
 }
+
+#[test]
+fn frame_views_borrow_the_owned_model() {
+    big_stack(|| {
+        use crate::{editor_panes, editor_shell, panel_map};
+        let mut value = model();
+        value.preferences = "x".repeat(1_000_000);
+        let mut other = pane(&value).clone();
+        other.shown = Some("g".into());
+        other.picked = selection::select(7);
+        let key = vec!["other".into()];
+        panel_map::set(&mut value.panes, &key, other);
+        {
+            let view = editor_shell::as_pane(&value, (&key, &vec![1]));
+            assert!(std::ptr::eq(view.model, &value));
+            assert!(std::ptr::eq(pane(view), panel_map::find(&value.panes, &key).unwrap()));
+            assert_eq!(editor_panes::graph_name(view).as_deref(), Some("g"));
+            assert_eq!(selection::selected(pane_selection(view)), Some(7));
+            assert!(selection::selected(pane_selection(&value)).is_none());
+            let mut workspace = value.workspace.clone();
+            workspace.hidden.push(Panel::Graph);
+            let focus = Panel::Lisp;
+            let viewed = ModelView { workspace: &workspace, focus: &focus, ..view };
+            assert!(editor_panes::texting(viewed));
+            assert!(!editor_panes::listing(viewed));
+            assert!(!editor_shell::has_panel(viewed, &Panel::Graph));
+            assert!(editor_shell::has_panel(&value, &Panel::Graph));
+        }
+        let frame = frame_at(0.0, vec![], vec![]);
+        let camera = |_: &mut pxui::ui::Ui| -> Panel_result { Rc::new(()) };
+        let handles = |_: &mut pxui::ui::Ui, _: Option<&picked>, _: rays_math::mat4::T, _: pxui_shell::layout::Bounds| (Vec::new(), false, None);
+        let view_state = Rc::new(|_: Option<&Panel_result>| syntax::make(syntax::Draft::Map(Vec::new())));
+        let identity = value.preferences.as_ptr();
+        // Warm the UI's font/layout caches before measuring a steady frame.
+        let warm = editor_frame::update(value, true, false, &camera, &handles, None, None, view_state.clone(), &frame, None, None, Vec::new(), None);
+        assert_eq!(warm.core.preferences.as_ptr(), identity, "frame copied its owned model");
+        mem_sys::local_reset();
+        let out = editor_frame::update(warm.core, true, false, &camera, &handles, None, None, view_state, &frame, None, None, Vec::new(), None);
+        let peak = mem_sys::local_peak_bytes();
+        eprintln!("borrowed frame views: {peak} peak bytes");
+        assert_eq!(out.core.preferences.as_ptr(), identity, "frame copied its owned model");
+        assert!(peak <= 100_000, "frame copied model payloads: {peak} peak bytes");
+        editor_host_close(&out.core);
+    });
+}

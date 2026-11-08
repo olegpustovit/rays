@@ -77,7 +77,8 @@ pub fn intent_label(c: &change) -> Option<String> {
     }
 }
 
-pub fn in_world(value: &t) -> bool {
+pub fn in_world<'a>(value: impl Into<ModelView<'a>>) -> bool {
+    let value = &value.into();
     match pane_level(value) {
         Level::Inside(id) => kind(value, id).as_deref() == Some("world"),
         Level::Scene => false,
@@ -86,7 +87,8 @@ pub fn in_world(value: &t) -> bool {
 
 /// World keys: edit the selected layer, or the World node in the scene. Returns the derived
 /// document, the last label and the edits the text can write.
-pub fn world_keys(value: &t, doc: &Document, selection: &selection::t, actions: &[action]) -> (Document, Option<String>, Vec<(Level, Edit)>) {
+pub fn world_keys<'a>(value: impl Into<ModelView<'a>>, doc: &Document, selection: &selection::t, actions: &[action]) -> (Document, Option<String>, Vec<(Level, Edit)>) {
+    let value = &value.into();
     let world_id = match pane_level(value) {
         Level::Inside(id) => Some(id),
         Level::Scene => None,
@@ -220,7 +222,8 @@ struct Routing {
 
 /// Commands that only mean something on this level and projection; the last frame's list while
 /// its facts hold.
-pub fn routed(value: &t) -> Rc<Vec<editor_commands::Command>> {
+pub fn routed<'a>(value: impl Into<ModelView<'a>>) -> Rc<Vec<editor_commands::Command>> {
+    let value = &value.into();
     let leaves = panels::leaves(&shell_tree(value, &value.workspace));
     let (listing, texting) = (listing(value), texting(value));
     let r = Routing {

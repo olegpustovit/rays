@@ -40,7 +40,8 @@ pub fn prompt_name(value: &t) -> &'static str {
     }
 }
 
-pub fn level_name(value: &t) -> String {
+pub fn level_name<'a>(value: impl Into<ModelView<'a>>) -> String {
+    let value = &value.into();
     level_name_at(value, pane_level(value))
 }
 
@@ -83,7 +84,8 @@ pub fn carry_line(c: &carry) -> String {
     }
 }
 
-pub fn status_text(value: &t, brief: bool) -> String {
+pub fn status_text<'a>(value: impl Into<ModelView<'a>>, brief: bool) -> String {
+    let value = &value.into();
     if let Some(c) = &value.carry {
         return carry_line(c);
     }
@@ -138,7 +140,8 @@ pub fn status_text(value: &t, brief: bool) -> String {
 
 /// "ring · iteration 1 of 12": which iteration the viewport's highlight and the inspector show for
 /// the node selected in the graph pane (the innermost loop around it, or itself when it is one).
-pub fn probe_caption(value: &t) -> Option<String> {
+pub fn probe_caption<'a>(value: impl Into<ModelView<'a>>) -> Option<String> {
+    let value = &value.into();
     let laid = pane_laid(value)?;
     let selected = scope::selected(pane_view(value));
     if selected.len() != 1 {
@@ -165,7 +168,8 @@ pub fn probe_caption(value: &t) -> Option<String> {
 }
 
 /// The status strip under the view: kit text on the ground, under a hairline.
-pub fn status_box(value: &t, ui: &mut Ui, frame: &frame::t, render_status: Option<&str>, error_status: Option<&str>, context: guide_context::t) {
+pub fn status_box<'a>(value: impl Into<ModelView<'a>>, ui: &mut Ui, frame: &frame::t, render_status: Option<&str>, error_status: Option<&str>, context: guide_context::t) {
+    let value = &value.into();
     let g = geometry(value, &value.workspace, frame);
     // the pane really in use: the focus when a leaf of its kind is open, else the first leaf
     let focus: Panel = {

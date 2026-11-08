@@ -10,7 +10,7 @@ use rays_math::color::T as Color;
 
 use crate::editor_inspect::{group_digits, scene};
 use crate::editor_list::{piece, pieces};
-use crate::editor_model::{t as Model, trace};
+use crate::editor_model::{trace, ModelView};
 
 pub type Rect = (i64, i64, i64, i64);
 
@@ -124,14 +124,15 @@ fn camera_readout(paint: &mut Paint, theme: &theme::Theme, rh: f64, (x, y, w, _h
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn draw_viewport_pane(
+pub fn draw_viewport_pane<'a>(
     ui: &mut Ui,
-    value: &Model,
+    value: impl Into<ModelView<'a>>,
     caption: Option<String>,
     roots: &[(Leaf, UiBox)],
     active: Option<&Leaf>,
     none_root: &dyn Fn(&mut Ui) -> UiBox,
 ) -> UiBox {
+    let value = &value.into();
     // the iteration the selected node shows, over the viewport's lower left corner
     if let (Some(text), Some(leaf)) = (&caption, active) {
         // a label on the ground, like every readout over the view

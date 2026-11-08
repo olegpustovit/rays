@@ -12,7 +12,8 @@ use crate::navigator;
 
 /// What the add menu of a scene adds beside the object kinds: the World, a merge, and the geometry
 /// of each SOP graph (a second object over a graph that already exists).
-pub fn scene_entries(value: &t) -> Vec<Entry> {
+pub fn scene_entries<'a>(value: impl Into<ModelView<'a>>) -> Vec<Entry> {
+    let value = &value.into();
     let entry = |key: &str, label: &str, category: &[&str]| Entry {
         key: key.to_owned(),
         label: label.to_owned(),
@@ -35,7 +36,8 @@ pub fn scene_entries(value: &t) -> Vec<Entry> {
 }
 
 /// In a SOP graph: a sop/material of each material graph, after the selection.
-pub fn material_entries(value: &t) -> Vec<Entry> {
+pub fn material_entries<'a>(value: impl Into<ModelView<'a>>) -> Vec<Entry> {
+    let value = &value.into();
     value
         .doc
         .workspace
@@ -64,7 +66,8 @@ pub fn context_name(c: &Context) -> String {
 /// The kinds the node menu offers where the pane shows `graph`, at a screen point; the kinds of the
 /// other graphs follow in the search, in ink-3, saying that they are not placed here. The title
 /// says which node the new one goes after.
-pub fn open_menu(scope_view: Option<&scope::t>, value: &t, (x, y): (i64, i64)) -> Option<menu::t> {
+pub fn open_menu<'a>(scope_view: Option<&scope::t>, value: impl Into<ModelView<'a>>, (x, y): (i64, i64)) -> Option<menu::t> {
+    let value = &value.into();
     let scope_view = scope_view.unwrap_or_else(|| pane_view(value));
     let (_, context) = add_target(value)?;
     let extra = &value.doc.workspace.ws.checked.ops;

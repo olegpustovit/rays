@@ -417,7 +417,8 @@ pub fn sync_scope(value: t) -> t {
     with_pane(value, &|pane| graph_pane { view: scope_view.clone(), laid: Some(Rc::new(key.clone())), ..pane.clone() })
 }
 
-fn node_owner(value: &t, node_id: i64) -> Option<i64> {
+fn node_owner<'a>(value: impl Into<ModelView<'a>>, node_id: i64) -> Option<i64> {
+    let value = &value.into();
     crate::editor_inspect::node_owner(value, node_id)
 }
 
@@ -426,7 +427,8 @@ fn node_owner(value: &t, node_id: i64) -> Option<i64> {
 /// else one made for the inspector alone (ponytail: laid out again each frame the inspector shows
 /// such an object; the scene graphs are small). `None` for what the text does not bind by name
 /// (a host object, a loop's copy, an inline call): those keep the derived-node sheet.
-pub fn scene_target(value: &t, id: i64) -> Option<(scope_key, Path)> {
+pub fn scene_target<'a>(value: impl Into<ModelView<'a>>, id: i64) -> Option<(scope_key, Path)> {
+    let value = &value.into();
     let homes = &value.doc.homes;
     let list = match pane_level(value) {
         Level::Scene => &homes.objects,

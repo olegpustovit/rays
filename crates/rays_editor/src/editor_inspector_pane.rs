@@ -1,4 +1,4 @@
-﻿//! Port of crates/rays_editor/editor_inspector_pane.ml: the Inspector panel of a frame. Which subject
+//! Port of crates/rays_editor/editor_inspector_pane.ml: the Inspector panel of a frame. Which subject
 //! it shows: the node selected in the graph pane, a scene object or World layer, the settings and
 //! camera panel when nothing is selected. Bundle C.
 #![allow(non_camel_case_types)]
@@ -34,12 +34,9 @@ use crate::text_pane;
 /// settings changes, the live-cook flag, the probe moves and the places a carried payload hovers.
 pub type Inspector_result = (Option<Panel_result>, Vec<change>, Vec<(String, Value)>, bool, Vec<scope::Change>, Vec<(carry::Place, bool)>);
 
-/// What the model's frame hands the inspector: `(value, scope_view, selection, scope_active)`.
-pub type Inspector_input<'a> = (&'a t, &'a scope::t, &'a selection::t, bool);
-
 /// The inspector panel inside `inspector_root` at `bounds`.
 #[allow(clippy::too_many_arguments)]
-pub fn inspect_panel(
+pub fn inspect_panel<'a>(
     image: &dyn Fn(i64) -> Option<rays::image::t>,
     camera_panel: &dyn Fn(&mut Ui) -> Panel_result,
     inspector_visible: bool,
@@ -47,11 +44,12 @@ pub fn inspect_panel(
     resized: Resized,
     g: &layout::Geometry,
     ui: &mut Ui,
-    input: Inspector_input,
+    input: (ModelView<'a>, &scope::t, &selection::t, bool),
     inspector_root: &UiBox,
     bounds: layout::Bounds,
 ) -> Inspector_result {
     let (value, scope_view, selection_, scope_active) = input;
+    let value = &value;
     let ws = &value.doc.workspace.ws;
     let document = objects(value);
     let selected_ids: Vec<i64> = selection::selected_nodes(selection_).to_vec();
@@ -205,7 +203,8 @@ pub fn inspect_panel(
 
 /// `workspace_inspector` for a node of the graph pane, gathering the places the choice controls
 /// offer a carried payload (the material one): the inspector reports each choice control it builds.
-fn workspace_inspector_with_drops(value: &t, ui: &mut Ui, width: f64, path: &[String], opts: &InspectorOpts, drops: &Rc<RefCell<Vec<(carry::Place, bool)>>>) -> Inspected {
+fn workspace_inspector_with_drops<'a>(value: impl Into<ModelView<'a>>, ui: &mut Ui, width: f64, path: &[String], opts: &InspectorOpts, drops: &Rc<RefCell<Vec<(carry::Place, bool)>>>) -> Inspected {
+    let value = &value.into();
     let place_path = path.to_vec();
     let drops_in = drops.clone();
     // the callback needs the Ui to read the drop target: collect the boxes, ask after
@@ -226,7 +225,8 @@ fn workspace_inspector_with_drops(value: &t, ui: &mut Ui, width: f64, path: &[St
 
 /// The sheet of a scene object or World layer the text does not bind by name: its fields, with
 /// the name edited in place.
-fn object_inspector(value: &t, ui: &mut Ui, document: &kind_graph::T, node_id: i64, bounds: layout::Bounds, window: bool, ws: &editor_document::workspace_doc::T) -> Vec<change> {
+fn object_inspector<'a>(value: impl Into<ModelView<'a>>, ui: &mut Ui, document: &kind_graph::T, node_id: i64, bounds: layout::Bounds, window: bool, ws: &editor_document::workspace_doc::T) -> Vec<change> {
+    let value = &value.into();
     let (fields, label, kind_) = match kind_graph::find(document, node_id) {
         Some(node) => (kind_graph::fields(&node), node.label.clone(), node.kind.clone()),
         None => (Vec::new(), format!("#{node_id}"), "unknown".to_owned()),

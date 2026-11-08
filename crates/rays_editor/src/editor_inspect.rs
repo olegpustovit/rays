@@ -28,7 +28,7 @@ use sop::edit_graph;
 use sop::node;
 
 use crate::cook;
-use crate::editor_model::{change, flow_catalog, preview, scope_key, t as Model};
+use crate::editor_model::{change, flow_catalog, preview, scope_key, t as Model, ModelView};
 use crate::navigator;
 use crate::text_pane;
 
@@ -123,7 +123,8 @@ pub fn kinds(value: &Model, ctx: &context::Context) -> Vec<scat::Descriptor> {
 
 /// The open level's objects or layers (the scene's if the level is gone: every path resolves the
 /// level first); none inside a geometry object.
-pub fn objects(value: &Model) -> kind_graph::T {
+pub fn objects<'a>(value: impl Into<ModelView<'a>>) -> kind_graph::T {
+    let value = &value.into();
     match crate::editor_model::pane_level(value) {
         Level::Scene => scene(value),
         Level::Inside(id) => doc_mod::layers(&value.doc, id).cloned().unwrap_or_else(kind_graph::empty),
@@ -131,15 +132,17 @@ pub fn objects(value: &Model) -> kind_graph::T {
 }
 
 /// The SOP network of the open geometry object.
-pub fn network(value: &Model) -> Option<&doc_mod::Network> {
+pub fn network<'a>(value: impl Into<ModelView<'a>>) -> Option<&'a doc_mod::Network> {
+    let value = &value.into();
     match crate::editor_model::pane_level(value) {
-        Level::Inside(id) => doc_mod::network(&value.doc, id),
+        Level::Inside(id) => doc_mod::network(&value.model.doc, id),
         Level::Scene => None,
     }
 }
 
 /// The open level lists a node of this id: an object, a layer, a node of a geometry network.
-pub fn lists(value: &Model, id: i64) -> bool {
+pub fn lists<'a>(value: impl Into<ModelView<'a>>, id: i64) -> bool {
+    let value = &value.into();
     match network(value) {
         Some(n) => edit_graph::find(&n.graph.geometry, id).is_some(),
         None => objects(value).iter().any(|n| n.id == id),
@@ -148,7 +151,8 @@ pub fn lists(value: &Model, id: i64) -> bool {
 
 /// The node the open level shows as its view: a geometry network's display node, the scene's first
 /// object, the World's top layer.
-pub fn displayed(value: &Model) -> Option<i64> {
+pub fn displayed<'a>(value: impl Into<ModelView<'a>>) -> Option<i64> {
+    let value = &value.into();
     match (crate::editor_model::pane_level(value), network(value)) {
         (Level::Inside(_), Some(n)) => n.displayed,
         (Level::Scene, _) => objects(value).first().map(|n| n.id),
@@ -156,7 +160,8 @@ pub fn displayed(value: &Model) -> Option<i64> {
     }
 }
 
-pub fn viewed_path(value: &Model, scope: &p::Scope) -> Option<Path> {
+pub fn viewed_path<'a>(value: impl Into<ModelView<'a>>, scope: &p::Scope) -> Option<Path> {
+    let value = &value.into();
     let valid = |pv: &preview| -> Option<Path> {
         match (pv.path.first(), scope.path.first()) {
             (Some(graph), Some(root)) if graph == root => Some(pv.path.clone()),
@@ -200,17 +205,20 @@ pub fn node_owner_in(level: Level, networks: &doc_mod::IntMap<doc_mod::Network>,
 
 /// What a closure kept past this frame asks: the owner from the level and networks alone, never
 /// the model.
-pub fn node_owner_of(value: &Model) -> std::sync::Arc<dyn Fn(i64) -> Option<i64> + Send + Sync> {
+pub fn node_owner_of<'a>(value: impl Into<ModelView<'a>>) -> std::sync::Arc<dyn Fn(i64) -> Option<i64> + Send + Sync> {
+    let value = &value.into();
     let level = crate::editor_model::pane_level(value);
     let networks = value.doc.networks.clone();
     std::sync::Arc::new(move |node_id| node_owner_in(level, &networks, node_id))
 }
 
-pub fn node_owner(value: &Model, node_id: i64) -> Option<i64> {
+pub fn node_owner<'a>(value: impl Into<ModelView<'a>>, node_id: i64) -> Option<i64> {
+    let value = &value.into();
     node_owner_in(crate::editor_model::pane_level(value), &value.doc.networks, node_id)
 }
 
-pub fn compiled_node(value: &Model, node_id: i64) -> Option<node::T> {
+pub fn compiled_node<'a>(value: impl Into<ModelView<'a>>, node_id: i64) -> Option<node::T> {
+    let value = &value.into();
     let owned = node_owner(value, node_id).and_then(|id| {
         let graph = match cook::applied(&value.cook, id) {
             Some(resolved) => resolved.geometry.clone(),
@@ -697,14 +705,15 @@ pub fn arg_request(source: &[S], n: &p::Node, arg_row: &dyn Fn(&str) -> Option<(
 }
 
 /// The geometry source of the node selected in the graph pane (the spreadsheet's subject).
-pub fn spreadsheet_source(value: &Model) -> Option<&rdk_rays::geometry_view::T> {
+pub fn spreadsheet_source<'a>(value: impl Into<ModelView<'a>>) -> Option<&'a rdk_rays::geometry_view::T> {
+    let value = &value.into();
     let laid = crate::editor_model::pane_laid(value)?;
     let records = laid.records.as_ref()?;
     let path = pxui_graph::scope_state::selected(&crate::editor_model::pane_view(value)).into_iter().next()?;
     let chains = probe::chains(&laid.scope);
     let node_id = compiled_at(value, &chains, records, &path)?;
     let object_id = node_owner(value, node_id)?;
-    cook::source(&value.cook, object_id, node_id)
+    cook::source(&value.model.cook, object_id, node_id)
 }
 
 /// The iterations of the loop the node sits in, one button each.
@@ -826,7 +835,7 @@ pub type Resized<'a> = &'a dyn Fn(&[String], pxui_shell::layout::Way) -> Option<
 
 /// The intents the rows' widgets returned, as document changes.
 #[allow(clippy::too_many_arguments)]
-pub fn field_edits(
+pub fn field_edits<'a>(
     ui: &mut Ui,
     on_choice: Option<&dyn Fn(&str, &UiBox)>,
     width: f64,
@@ -835,7 +844,7 @@ pub fn field_edits(
     ref_rows: &[(p::Row, insp::FlowRow)],
     row_of: &dyn Fn(&str) -> Option<p::Row>,
     arg_row: &dyn Fn(&str) -> Option<(p::Row, Vec<i64>)>,
-    value: &Model,
+    value: impl Into<ModelView<'a>>,
     size_names: &[&str],
     n: &p::Node,
     resized: Resized,
@@ -843,6 +852,7 @@ pub fn field_edits(
     layout_names: &Layout_names,
     rows: &[insp::FlowRow],
 ) -> Vec<change> {
+    let value = &value.into();
     if rows.is_empty() {
         return Vec::new();
     }
@@ -1118,7 +1128,8 @@ fn ref_target(e: &Option<S>) -> Option<String> {
 }
 
 /// The rows that name a graph: a choice among the graphs.
-pub fn reference_rows(value: &Model, n: &p::Node) -> Vec<(p::Row, insp::FlowRow)> {
+pub fn reference_rows<'a>(value: impl Into<ModelView<'a>>, n: &p::Node) -> Vec<(p::Row, insp::FlowRow)> {
+    let value = &value.into();
     let is_ref_slot = |r: &p::Row| -> bool {
         ref_target(&r.expr).is_some() || r.ty == Some(ty::material()) || (r.ty == Some(ty::geometry()) && n.head.starts_with("scene/"))
     };
@@ -1317,7 +1328,8 @@ fn zone_words(kind: p::ZoneKind) -> (&'static str, fn(&str) -> String) {
 /// catalog parameters of the lowered node at that iteration. An edit is a `SetArg` on the
 /// authored argument; an argument that is not a literal shows its expression and is locked.
 /// Returns the graph requests and the probe moves.
-pub fn workspace_inspector(value: &Model, ui: &mut Ui, width: f64, path: &[String], o: &InspectorOpts) -> Inspected {
+pub fn workspace_inspector<'a>(value: impl Into<ModelView<'a>>, ui: &mut Ui, width: f64, path: &[String], o: &InspectorOpts) -> Inspected {
+    let value = &value.into();
     let laid = match &o.laid {
         Some(k) => Some(k.clone()),
         None => crate::editor_model::pane_laid(value).cloned(),
@@ -1597,7 +1609,8 @@ pub fn workspace_inspector(value: &Model, ui: &mut Ui, width: f64, path: &[Strin
 
 /// The node of the graph pane that a lowered node of the open object was made by, at the
 /// iterations the selectors probe.
-pub fn node_path(value: &Model, node_id: i64) -> Option<Path> {
+pub fn node_path<'a>(value: impl Into<ModelView<'a>>, node_id: i64) -> Option<Path> {
+    let value = &value.into();
     let laid = crate::editor_model::pane_laid(value)?;
     let records = laid.records.as_ref()?;
     let chains = probe::chains(&laid.scope);

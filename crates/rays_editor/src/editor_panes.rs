@@ -48,7 +48,8 @@ use crate::timeline;
 type S = Syntax;
 pub type Key = Vec<String>;
 
-pub fn stored_projection(value: &t) -> projection {
+pub fn stored_projection<'a>(value: impl Into<ModelView<'a>>) -> projection {
+    let value = &value.into();
     projection_in(value, pane(value))
 }
 
@@ -64,22 +65,26 @@ fn projection_in(value: &t, pane: &graph_pane) -> projection {
 }
 
 /// Any of the panels that hold the graph pane's views is on screen.
-pub fn graph_family(value: &t) -> bool {
+pub fn graph_family<'a>(value: impl Into<ModelView<'a>>) -> bool {
+    let value = &value.into();
     has_panel(value, &Panel::Graph) || has_panel(value, &Panel::List) || has_panel(value, &Panel::Lisp)
 }
 
 /// What the graph panel shows: the view it says, whatever other panels the layout has.
-pub fn projection_of(value: &t) -> projection {
+pub fn projection_of<'a>(value: impl Into<ModelView<'a>>) -> projection {
+    let value = &value.into();
     stored_projection(value)
 }
 
 /// Which keys the focused panel takes: the list's and the text pane's own panels, else the graph
 /// panel's projection.
-pub fn listing(value: &t) -> bool {
-    value.focus == Panel::List || (value.focus != Panel::Lisp && projection_of(value) == List_view)
+pub fn listing<'a>(value: impl Into<ModelView<'a>>) -> bool {
+    let value = &value.into();
+    *value.focus == Panel::List || (*value.focus != Panel::Lisp && projection_of(value) == List_view)
 }
-pub fn texting(value: &t) -> bool {
-    value.focus == Panel::Lisp || (value.focus != Panel::List && projection_of(value) == Text_view)
+pub fn texting<'a>(value: impl Into<ModelView<'a>>) -> bool {
+    let value = &value.into();
+    *value.focus == Panel::Lisp || (*value.focus != Panel::List && projection_of(value) == Text_view)
 }
 
 // ---- panel instances: every leaf draws, with its own list, text pane or outline ----
@@ -121,7 +126,8 @@ pub type Host = (Key, layout::Path, Panel, Host_kind);
 
 /// The open panels that hold a list, a text pane or an outline: a graph panel holds the one its
 /// view shows.
-pub fn panel_hosts(value: &t) -> Vec<Host> {
+pub fn panel_hosts<'a>(value: impl Into<ModelView<'a>>) -> Vec<Host> {
+    let value = &value.into();
     let mut out = Vec::new();
     for (path, panel) in panels::leaves(&shell_tree(value, &value.workspace)) {
         if !visible(&value.workspace, &panel) || panel_state(value, &path).collapsed {
@@ -147,31 +153,29 @@ pub fn panel_hosts(value: &t) -> Vec<Host> {
 }
 
 /// The graph state a leaf reads, with its resolved graph path, without copying the editor model.
-pub fn shown_pane<'a>(value: &'a t, (key, path, panel): (&Key, &layout::Path, &Panel)) -> (Cow<'a, graph_pane>, Option<layout::Path>) {
+pub fn shown_pane<'a>(value: impl Into<ModelView<'a>>, (key, path, panel): (&Key, &layout::Path, &Panel)) -> (Cow<'a, graph_pane>, Option<layout::Path>) {
+    let value = value.into();
     let at = |key: &Key, path: &layout::Path| {
         let resolved = value.doc.shell.as_ref().and_then(|_| {
-            if panel_map::key(&value.panes).as_ref() == Some(key) { graph_path(value) } else { Some(path.clone()) }
+            if value.key == Some(key) { graph_path(value) } else { Some(path.clone()) }
         });
         (pane_at(value, (key, path)), resolved)
     };
-    if *panel == Panel::Graph {
-        at(key, path)
-    } else {
+    if *panel == Panel::Graph { at(key, path) } else {
         match tied(value, path) {
             Some((key, path)) => at(&key, &path),
-            None => (Cow::Borrowed(pane(value)), value.doc.shell.as_ref().and_then(|_| graph_path(value))),
+            None => (Cow::Borrowed(value.pane), value.doc.shell.as_ref().and_then(|_| graph_path(value))),
         }
     }
 }
 
-/// The model with the graph pane a leaf follows in use.
-pub fn shown_as<'a>(value: &'a t, (key, path, panel): (&Key, &layout::Path, &Panel)) -> Cow<'a, t> {
-    if *panel == Panel::Graph {
-        as_pane(value, (key, path))
-    } else {
+/// The synchronized graph pane a leaf follows, borrowed with its shared model.
+pub fn shown_as<'a>(value: impl Into<ModelView<'a>>, (key, path, panel): (&Key, &layout::Path, &Panel)) -> ModelView<'a> {
+    let value = value.into();
+    if *panel == Panel::Graph { as_pane(value, (key, path)) } else {
         match tied(value, path) {
-            Some(target) => as_pane(value, (&target.0, &target.1)),
-            None => Cow::Borrowed(value),
+            Some((key, path)) => as_pane(value, (&key, &path)),
+            None => value,
         }
     }
 }
@@ -329,7 +333,8 @@ pub fn graph_of_object(value: &t, id: i64) -> Option<String> {
     doc_mod::object_graph(&value.doc, id)
 }
 
-pub fn graph_name(value: &t) -> Option<String> {
+pub fn graph_name<'a>(value: impl Into<ModelView<'a>>) -> Option<String> {
+    let value = &value.into();
     let path = value.doc.shell.as_ref().and_then(|_| graph_path(value));
     graph_name_at(value, pane_level(value), pane_shown(value).map(String::as_str), path.as_deref())
 }
@@ -358,19 +363,21 @@ pub fn graph_name_at(value: &t, level: Level, shown: Option<&str>, path: Option<
 }
 
 /// For the crash report and tests: the graph of every graph panel, and the floating windows.
-pub fn graph_panels(value: &t) -> String {
+pub fn graph_panels<'a>(value: impl Into<ModelView<'a>>) -> String {
+    let value = &value.into();
     graph_leaves(value)
         .iter()
         .map(|(key, path)| {
             let pane = pane_at(value, (key, path));
-            let path = if panel_map::key(&value.panes).as_ref() == Some(key) { graph_path(value) } else { Some(path.clone()) };
+            let path = if value.key == Some(key) { graph_path(value) } else { Some(path.clone()) };
             graph_name_at(value, pane.at, pane.shown.as_deref(), path.as_deref()).unwrap_or_else(|| "-".to_owned())
         })
         .collect::<Vec<_>>()
         .join(", ")
 }
 
-pub fn windows(value: &t) -> String {
+pub fn windows<'a>(value: impl Into<ModelView<'a>>) -> String {
+    let value = &value.into();
     panels::leaves(&shell_tree(value, &value.workspace))
         .iter()
         .filter_map(|(path, panel)| panel_state(value, path).window.map(|(x, y, w, h)| format!("{} {} {} {} {}", panels::name(panel).to_lowercase(), x, y, w, h)))
@@ -380,7 +387,8 @@ pub fn windows(value: &t) -> String {
 
 /// Every panel by its key's last name, the focused one starred, with what is its own: a text
 /// pane's tab and draft, a list's focus, folds and filter, an outline's search.
-pub fn panels_line(value: &t) -> String {
+pub fn panels_line<'a>(value: impl Into<ModelView<'a>>) -> String {
+    let value = &value.into();
     let hosts = panel_hosts(value);
     panels::leaves(&shell_tree(value, &value.workspace))
         .iter()
@@ -390,7 +398,7 @@ pub fn panels_line(value: &t) -> String {
                 "{} {}{}",
                 panels::name(panel).to_lowercase(),
                 key.last().cloned().unwrap_or_default(),
-                if value.focus == *panel && value.focus_path.as_ref() == Some(path) { "*" } else { "" }
+                if *value.focus == *panel && value.focus_path.as_ref() == Some(path) { "*" } else { "" }
             );
             let own = hosts.iter().find_map(|(k, p_, _, kind)| if *k == key && p_ == path { Some(*kind) } else { None });
             match own {
@@ -441,7 +449,8 @@ fn reference(ws_graphs: &[flow_check::workspace::Graph], e: &S) -> Option<String
 
 /// What the selected node of the graph pane references: the graph its `(ref name)` names, the
 /// `:material` of a sop/material first (a material node follows to its surface).
-pub fn follow_target(value: &t, path: Option<&[String]>) -> Option<String> {
+pub fn follow_target<'a>(value: impl Into<ModelView<'a>>, path: Option<&[String]>) -> Option<String> {
+    let value = &value.into();
     let ws = &value.doc.workspace.ws;
     let graphs: &[flow_check::workspace::Graph] = &ws.checked.graphs;
     let selected: Vec<Vec<String>> = match path {
@@ -471,7 +480,8 @@ pub fn follow_target(value: &t, path: Option<&[String]>) -> Option<String> {
 }
 
 /// `follow_target`, else the graph of the object selected in the list.
-pub fn peek_target(value: &t) -> Option<String> {
+pub fn peek_target<'a>(value: impl Into<ModelView<'a>>) -> Option<String> {
+    let value = &value.into();
     if let Some(found) = follow_target(value, None) {
         return Some(found);
     }
@@ -480,7 +490,8 @@ pub fn peek_target(value: &t) -> Option<String> {
 
 /// `i` in a viewport with nothing selected follows to the scene it shows: the graph its
 /// `(ref scene)` names, else the first scene graph.
-pub fn viewport_target(value: &t) -> Option<String> {
+pub fn viewport_target<'a>(value: impl Into<ModelView<'a>>) -> Option<String> {
+    let value = &value.into();
     let ws = &value.doc.workspace.ws;
     match &value.focus {
         Panel::View(key) if selection::selected(pane_selection(value)).is_none() => {
@@ -505,7 +516,8 @@ pub fn viewport_target(value: &t) -> Option<String> {
 }
 
 /// The route taken, as the graph header shows it: scene > shards > cobalt (the last three).
-pub fn route(value: &t) -> String {
+pub fn route<'a>(value: impl Into<ModelView<'a>>) -> String {
+    let value = &value.into();
     let path = value.doc.shell.as_ref().and_then(|_| graph_path(value));
     route_in(value, pane(value), path.as_deref())
 }
@@ -521,12 +533,14 @@ pub fn route_in(value: &t, pane: &graph_pane, path: Option<&[usize]>) -> String 
     names.into_iter().skip(skip).collect::<Vec<_>>().join(" > ")
 }
 
-pub fn scope_name(value: &t) -> Option<String> {
+pub fn scope_name<'a>(value: impl Into<ModelView<'a>>) -> Option<String> {
+    let value = &value.into();
     if projection_of(value) == Graph_view { graph_name(value) } else { None }
 }
 
 /// The lowered node of the node selected in the graph pane, at the iteration its zones probe.
-pub fn scope_node(value: &t) -> Option<(Vec<String>, sop::node::T)> {
+pub fn scope_node<'a>(value: impl Into<ModelView<'a>>) -> Option<(Vec<String>, sop::node::T)> {
+    let value = &value.into();
     let laid = pane_laid(value)?;
     let records = laid.records.as_ref()?;
     let selected = scope::selected(pane_view(value));
@@ -538,7 +552,8 @@ pub fn scope_node(value: &t) -> Option<(Vec<String>, sop::node::T)> {
 }
 
 /// The tags the selected node highlights at the probes, with the cache to keep.
-pub fn lit_tags(value: &t) -> (pick::Set, Option<lit_cache>) {
+pub fn lit_tags<'a>(value: impl Into<ModelView<'a>>) -> (pick::Set, Option<lit_cache>) {
+    let value = &value.into();
     let lowered = &value.doc.workspace.lowered;
     let selected = scope::selected(pane_view(value));
     match (pane_laid(value), selected.as_slice()) {
@@ -558,7 +573,8 @@ pub fn lit_tags(value: &t) -> (pick::Set, Option<lit_cache>) {
 
 /// The nodes of the pane's graph that the last failed cook names, each with its diagnostic's code
 /// (the pane draws the sheet's failed state on them).
-pub fn failed_nodes(value: &t) -> Vec<(Vec<String>, String)> {
+pub fn failed_nodes<'a>(value: impl Into<ModelView<'a>>) -> Vec<(Vec<String>, String)> {
+    let value = &value.into();
     let failed = cook::failed_node(&value.cook);
     match (failed, pane_laid(value)) {
         (Some((code, node_id)), Some(laid)) if scope_name(value).is_some() && laid.records.is_some() => {
@@ -589,12 +605,12 @@ pub type Root_at<'a> = &'a dyn Fn(&layout::Path) -> Option<(Leaf, UiBox)>;
 pub fn draw_list_panes<'a>(
     ui: &mut Ui,
     shortcut_frame: &frame::t,
-    value: &'a t,
+    value: impl Into<ModelView<'a>>,
     hosted: &[Host],
     root_at: Root_at,
-    pane_of: &dyn Fn(&Host) -> Cow<'a, t>,
-    in_use: &dyn Fn(&t) -> bool,
-    title_of: &dyn Fn(&t) -> String,
+    pane_of: &dyn Fn(&Host) -> ModelView<'a>,
+    in_use: &dyn Fn(&ModelView<'a>) -> bool,
+    title_of: &dyn Fn(&ModelView<'a>) -> String,
     rows: &[tree::Row],
     columns: &[String],
     host_rows: &[(Key, (Vec<tree::Row>, Vec<String>))],
@@ -603,6 +619,7 @@ pub fn draw_list_panes<'a>(
     intents: Vec<tree::Intent>,
     locals: Vec<(Key, local)>,
 ) -> (tree::Tree, Vec<tree::Intent>, Vec<(Key, local)>) {
+    let value = &value.into();
     let (mut tree_state, mut intents, mut locals) = (tree_state, intents, locals);
     for host in hosted {
         let (key, path, _, _) = host;
@@ -723,7 +740,8 @@ pub fn draw_outline_panes(
 }
 
 /// The spreadsheet panels: each remembers which object's sheet it shows.
-pub fn draw_spreadsheet_panes(ui: &mut Ui, value: &t, panes: &[(Leaf, UiBox)], locals: Vec<(Key, local)>) -> Vec<(Key, local)> {
+pub fn draw_spreadsheet_panes<'a>(ui: &mut Ui, value: impl Into<ModelView<'a>>, panes: &[(Leaf, UiBox)], locals: Vec<(Key, local)>) -> Vec<(Key, local)> {
+    let value = &value.into();
     let mut locals = locals;
     for (leaf, root) in panes {
         let key = panel_key(&value.doc, &leaf.path);
@@ -746,16 +764,18 @@ pub fn pressed_keys(value: &t, frame_: &frame::t) -> Vec<input::Key> {
 }
 
 /// The graph panes that are not the one in use: those showing a graph update their canvas.
-pub fn draw_other_graph_panes(
+pub fn draw_other_graph_panes<'a>(
     ui: &mut Ui,
     shortcut_frame: &frame::t,
-    value: &t,
-    other_panes: &[(Key, layout::Path, t)],
+    value: impl Into<ModelView<'a>>,
+    other_panes: &[(Key, layout::Path)],
     roots: &[(Leaf, UiBox)],
 ) -> Vec<(Key, graph_pane)> {
+    let value = &value.into();
     let mut out = Vec::new();
-    for (key, path, pane) in other_panes {
-        let active = panel_map::active(&pane.panes).clone();
+    for (key, path) in other_panes {
+        let pane = as_pane(value, (key, path));
+        let active = pane.pane.clone();
         match roots.iter().find(|(leaf, _)| leaf.path == *path) {
             Some((leaf, hosted)) if leaf.body.3 > 0 => {
                 let (x, y, width, height) = leaf.body;
@@ -785,14 +805,15 @@ pub fn draw_other_graph_panes(
 pub type Header_asks = (Option<action>, Option<action>, Option<projection>);
 
 /// The graph header: its toolbar, the Graph / List / Text views, and a viewport's render tabs.
-pub fn draw_graph_header(
+pub fn draw_graph_header<'a>(
     ui: &mut Ui,
-    value: &t,
+    value: impl Into<ModelView<'a>>,
     g: &layout::Geometry,
     graph_host: &Option<Leaf>,
     header_slots: &dyn Fn(&Leaf) -> Vec<Option<f64>>,
     tools_from: &dyn Fn(&Leaf) -> f64,
 ) -> Header_asks {
+    let value = &value.into();
     let tool_action = match graph_host {
         Some(leaf) if projection_of(value) == Graph_view && has_panel(value, &Panel::Graph) => {
             let tools_scope = scope_name(value).is_some();
@@ -865,10 +886,10 @@ pub type Graph_pane_result = (layout::Bounds, scope::t, Vec<scope::Change>, Opti
 
 /// Draw the graph pane and its node menu. `open_menu` opens the menu at a point, for the pane's view.
 #[allow(clippy::too_many_arguments)]
-pub fn draw_graph_pane(
+pub fn draw_graph_pane<'a>(
     ui: &mut Ui,
     frame_: &frame::t,
-    value: &t,
+    value: impl Into<ModelView<'a>>,
     shortcut_frame: &frame::t,
     scope_view: scope::t,
     scope_active: bool,
@@ -879,8 +900,9 @@ pub fn draw_graph_pane(
     graph_host: &Option<Leaf>,
     workspace: &shell,
     menu: Option<node_menu::t>,
-    open_menu: &dyn Fn(Option<&scope::t>, &t, (i64, i64)) -> Option<node_menu::t>,
+    open_menu: &dyn Fn(Option<&scope::t>, ModelView<'a>, (i64, i64)) -> Option<node_menu::t>,
 ) -> Graph_pane_result {
+    let value = &value.into();
     let graph_body = match graph_host {
         Some(leaf) => leaf.body,
         None => (0, 0, 0, 0),
@@ -919,7 +941,7 @@ pub fn draw_graph_pane(
             _ => None,
         });
         if let Some(at) = at {
-            menu = open_menu(Some(&scope_view), value, at);
+            menu = open_menu(Some(&scope_view), *value, at);
         }
     }
     let mut menu_pick = None;

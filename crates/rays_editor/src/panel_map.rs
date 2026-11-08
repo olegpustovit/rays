@@ -33,6 +33,10 @@ pub fn find<'a>(t: &'a t, key: &Key) -> Option<&'a Pane> {
     t.panes.iter().find(|(k, _)| k == key).map(|(_, pane)| pane)
 }
 
+pub fn entry<'a>(t: &'a t, key: &Key) -> Option<(&'a Key, &'a Pane)> {
+    t.panes.iter().find(|(k, _)| k == key).map(|(key, pane)| (key, pane))
+}
+
 /// The pane in use, to change in place.
 pub fn active_mut(t: &mut t) -> &mut Pane {
     let in_use = &t.in_use;
@@ -40,9 +44,11 @@ pub fn active_mut(t: &mut t) -> &mut Pane {
 }
 
 /// The panel the pane in use belongs to; none before the first graph panel.
-pub fn key(t: &t) -> Option<Key> {
-    if t.in_use.is_empty() { None } else { Some(t.in_use.clone()) }
+pub fn key_ref(t: &t) -> Option<&Key> {
+    if t.in_use.is_empty() { None } else { Some(&t.in_use) }
 }
+
+pub fn key(t: &t) -> Option<Key> { key_ref(t).cloned() }
 
 /// Where that panel's leaf was at the last frame.
 pub fn leaf(t: &t) -> Option<Path> {

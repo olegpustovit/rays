@@ -33,7 +33,8 @@ use crate::selection;
 use crate::text_pane;
 
 /// A panel header's title: its type, and where a looped panel comes from (register E1).
-pub fn panel_title(value: &t, leaf: &Leaf) -> String {
+pub fn panel_title<'a>(value: impl Into<ModelView<'a>>, leaf: &Leaf) -> String {
+    let value = &value.into();
     // a graph panel's title is its own pane's
     let (pane, path) = shown_pane(value, (&panel_key(&value.doc, &leaf.path), &leaf.path, &leaf.panel));
     let graph = graph_name_at(value, pane.at, pane.shown.as_deref(), path.as_deref()).unwrap_or_default();
@@ -134,7 +135,8 @@ fn find_ty(name: &str, sc: &fproj::Scope) -> Option<Ty> {
 /// Make a reusable function from the selected nodes: the names they read from outside are typed
 /// from the graph pane's projection, the context is the result's (a geometry is `sop`, anything
 /// else `value`).
-pub fn defn_change(value: &t, paths: &[Vec<String>]) -> change {
+pub fn defn_change<'a>(value: impl Into<ModelView<'a>>, paths: &[Vec<String>]) -> change {
+    let value = &value.into();
     let ws = &value.doc.workspace.ws;
     let scope_opt = pane_laid(value).map(|k| k.scope.clone());
     match (fe::defn_draft(&ws.source, paths), scope_opt) {
@@ -164,7 +166,8 @@ pub fn defn_change(value: &t, paths: &[Vec<String>]) -> change {
 /// The Navigator: what it shows of the document (see `navigator`).
 /// The scene's objects as the Outline lists them: the list panel's rows, with what each is and the
 /// binding that places it.
-pub fn outline_objects(value: &t) -> Vec<navigator::Obj> {
+pub fn outline_objects<'a>(value: impl Into<ModelView<'a>>) -> Vec<navigator::Obj> {
+    let value = &value.into();
     let document = scene(value);
     let selected: Vec<i64> = if pane_level(value) == document::Level::Scene { selection::selected_nodes(pane_selection(value)).to_vec() } else { Vec::new() };
     let rows: Vec<(i64, navigator::Obj)> = scene_rows(None, &document)
@@ -247,7 +250,8 @@ pub fn outline_objects(value: &t) -> Vec<navigator::Obj> {
     }
 }
 
-pub fn navigator_params(value: &t) -> navigator::Params {
+pub fn navigator_params<'a>(value: impl Into<ModelView<'a>>) -> navigator::Params {
+    let value = &value.into();
     let ws = &value.doc.workspace.ws;
     let active = graph_name(value);
     let here = match (pane_laid(value), &active) {
@@ -272,7 +276,8 @@ pub fn navigator_params(value: &t) -> navigator::Params {
 }
 
 /// The leaf the graph pane in use draws in, when it is open.
-pub fn graph_leaf(value: &t, g: &layout::Geometry) -> Option<Leaf> {
+pub fn graph_leaf<'a>(value: impl Into<ModelView<'a>>, g: &layout::Geometry) -> Option<Leaf> {
+    let value = &value.into();
     let path = crate::editor_shell::graph_path(value)?;
     g.leaves.iter().find(|l| l.path == path && l.panel == Panel::Graph && l.body.3 > 0).cloned()
 }
@@ -365,7 +370,8 @@ fn to_le_side(side: Side) -> le::Side {
 
 /// / [ and / n: the layouts of the switch and the floating windows, each one edit of the editor
 /// graph (written from the layout shown first, when the document has none).
-pub fn layout_actions(value: &t, workspace: &shell, leaf: Option<&Leaf>, actions: &[action]) -> Vec<change> {
+pub fn layout_actions<'a>(value: impl Into<ModelView<'a>>, workspace: &shell, leaf: Option<&Leaf>, actions: &[action]) -> Vec<change> {
+    let value = &value.into();
     let graph = workspace_doc::editor_graph(&value.doc.workspace.ws).map(|g| g.name);
     let has_switch = value.doc.shell.as_ref().and_then(|s| s.switch.as_ref()).is_some();
     let edit = |make: &dyn Fn(String) -> le::Op| -> Vec<change> {
@@ -425,7 +431,8 @@ pub fn layout_actions(value: &t, workspace: &shell, leaf: Option<&Leaf>, actions
 
 type Maker = Rc<dyn Fn(&Vec<String>) -> le::Op>;
 
-pub fn layout_intents(value: &t, workspace: &shell, intents: &[chrome::Intent]) -> (shell, Vec<change>) {
+pub fn layout_intents<'a>(value: impl Into<ModelView<'a>>, workspace: &shell, intents: &[chrome::Intent]) -> (shell, Vec<change>) {
+    let value = &value.into();
     let base = shell_tree(value, &shell { live: None, ..workspace.clone() });
     let editor = workspace_doc::editor_graph(&value.doc.workspace.ws).map(|g| g.name);
     let shell_doc = if workspace.restored { None } else { value.doc.shell.as_ref() };
@@ -637,7 +644,8 @@ pub fn copy_workspace(value: &t) -> (notice_kind, String) {
 
 /// Command-V: the clipboard's "name expr" pairs (or bare expressions, named by their head) become
 /// `Add_node`s in the selected scope (`Text_pane::paste_ops`), one history entry.
-pub fn paste_bindings(value: &t) -> Vec<change> {
+pub fn paste_bindings<'a>(value: impl Into<ModelView<'a>>) -> Vec<change> {
+    let value = &value.into();
     let Some((graph, _)) = add_target(value) else { return vec![change::Declined("Open a graph to paste into".to_string())] };
     let text = match rays::clipboard::get_text() {
         Ok(text) => text,
@@ -658,7 +666,8 @@ pub fn paste_bindings(value: &t) -> Vec<change> {
 }
 
 /// The one node the inspector shows for the pane's selection, if exactly one (a test hook)
-pub fn inspector_subject(value: &t) -> Option<Vec<String>> {
+pub fn inspector_subject<'a>(value: impl Into<ModelView<'a>>) -> Option<Vec<String>> {
+    let value = &value.into();
     if pane_laid(value).is_none() {
         return None;
     }

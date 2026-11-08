@@ -53,7 +53,8 @@ pub fn reads(name: &str, e: &S) -> bool {
 
 /// Where a node is added from the list or the pane: the graph the level shows, else the scene or
 /// World graph that adding an object or a layer creates.
-pub fn add_target(value: &t) -> Option<(String, Context)> {
+pub fn add_target<'a>(value: impl Into<ModelView<'a>>) -> Option<(String, Context)> {
+    let value = &value.into();
     let ws = &value.doc.workspace.ws;
     match graph_name(value) {
         Some(name) => {
@@ -218,7 +219,8 @@ fn last_of(path: &[String]) -> &str {
 
 /// A kind picked in the node menu, as one `AddNode` at the selected zone (else the graph body),
 /// wired to the selected node when the kind takes a geometry input.
-pub fn scope_add(value: &t, key: &str) -> Vec<change> {
+pub fn scope_add<'a>(value: impl Into<ModelView<'a>>, key: &str) -> Vec<change> {
+    let value = &value.into();
     let target = add_target(value);
     if let Some(context) = key.strip_prefix("newgraph:") {
         // "New graph: <context>" of the add menu: a whole graph, opened once made

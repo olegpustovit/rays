@@ -1,7 +1,7 @@
 //! Every type of the editor: the model `t`, `frame_result`, `change`, `carry`. Port of
 //! lib/rays_editor/editor_model.ml.
 //!
-//! Conventions of this port (the model is `Clone`, as OCaml's `{ value with .. }` copies it):
+//! The sketch lifecycle retains model snapshots; frames read borrowed `ModelView`s.
 //! - `doc` is an `Arc<Document>`: it is `History`'s present, and OCaml's physical equality of
 //!   documents is `Arc::ptr_eq` (a no-op edit is detected with `same_document`).
 //! - `ui` is an `Rc<RefCell<Ui>>`: the one immediate-mode handle, shared by every copy of the model.
@@ -500,7 +500,7 @@ pub struct t {
     pub workspace: shell,
     pub timeline: timeline::t,
     pub live_frame: Input,
-    /// shared: the model is cloned several times a frame
+    /// shared with retained sketch snapshots and edit rollback states
     pub cook: std::rc::Rc<cook::t>,
     pub edit_error: Option<String>,
     pub status_fps: Option<i64>,
@@ -554,36 +554,80 @@ pub struct t {
     pub view_tools: Option<(bool, i64)>,
 }
 
+/// A frame reads the shared model with the pane and transient UI state it is showing.
+#[derive(Clone, Copy)]
+pub struct ModelView<'a> {
+    pub model: &'a t,
+    pub pane: &'a graph_pane,
+    pub key: Option<&'a panel_map::Key>,
+    pub workspace: &'a shell,
+    pub focus: &'a Panel,
+    pub selection: &'a selection::t,
+    pub status_fps: Option<i64>,
+    pub guide: bool,
+    pub leader: &'a router::State,
+}
+
+impl<'a> From<&'a t> for ModelView<'a> {
+    fn from(model: &'a t) -> Self {
+        let pane = panel_map::active(&model.panes);
+        Self { model, pane, key: panel_map::key_ref(&model.panes), workspace: &model.workspace,
+            focus: &model.focus, selection: &pane.picked, status_fps: model.status_fps,
+            guide: model.guide, leader: &model.leader }
+    }
+}
+
+impl<'a> From<&'a Rc<t>> for ModelView<'a> {
+    fn from(model: &'a Rc<t>) -> Self { Self::from(model.as_ref()) }
+}
+
+impl<'a> From<&ModelView<'a>> for ModelView<'a> {
+    fn from(view: &ModelView<'a>) -> Self { *view }
+}
+
+impl std::ops::Deref for ModelView<'_> {
+    type Target = t;
+    fn deref(&self) -> &Self::Target { self.model }
+}
+
 // ---- the pane in use ----
 
 /// The pane in use: the focused graph panel's own canvas, level and selection.
-pub fn pane(value: &t) -> &graph_pane {
-    panel_map::active(&value.panes)
+pub fn pane<'a>(value: impl Into<ModelView<'a>>) -> &'a graph_pane {
+    let value = &value.into();
+    value.pane
 }
 /// the workspace document's graph pane
-pub fn pane_view(value: &t) -> &scope::t {
+pub fn pane_view<'a>(value: impl Into<ModelView<'a>>) -> &'a scope::t {
+    let value = &value.into();
     &pane(value).view
 }
 /// what it was last laid out from
-pub fn pane_laid(value: &t) -> Option<&scope_key> {
+pub fn pane_laid<'a>(value: impl Into<ModelView<'a>>) -> Option<&'a scope_key> {
+    let value = &value.into();
     pane(value).laid.as_deref()
 }
 /// a scene, world or settings graph shown instead of the level's own
-pub fn pane_shown(value: &t) -> Option<&String> {
+pub fn pane_shown<'a>(value: impl Into<ModelView<'a>>) -> Option<&'a String> {
+    let value = &value.into();
     pane(value).shown.as_ref()
 }
 /// where `u` returns to: level and pane graph, latest first
-pub fn pane_route(value: &t) -> &[(Level, Option<String>)] {
+pub fn pane_route<'a>(value: impl Into<ModelView<'a>>) -> &'a [(Level, Option<String>)] {
+    let value = &value.into();
     &pane(value).route
 }
-pub fn pane_views(value: &t) -> &Level_map {
+pub fn pane_views<'a>(value: impl Into<ModelView<'a>>) -> &'a Level_map {
+    let value = &value.into();
     &pane(value).views
 }
-pub fn pane_level(value: &t) -> Level {
+pub fn pane_level<'a>(value: impl Into<ModelView<'a>>) -> Level {
+    let value = &value.into();
     pane(value).at
 }
-pub fn pane_selection(value: &t) -> &selection::t {
-    &pane(value).picked
+pub fn pane_selection<'a>(value: impl Into<ModelView<'a>>) -> &'a selection::t {
+    let value = &value.into();
+    value.selection
 }
 pub fn with_pane(mut value: t, f: &dyn Fn(&graph_pane) -> graph_pane) -> t {
     let pane = panel_map::active_mut(&mut value.panes);

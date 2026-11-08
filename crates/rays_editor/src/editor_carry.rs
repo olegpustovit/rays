@@ -80,7 +80,8 @@ pub fn carry_try(value: &t, c: &carry, place: &Place) -> carry_preview {
 }
 
 /// The key route's letters for the graph the pane shows now (they follow navigation).
-pub fn carry_targets(value: &t, c: carry) -> carry {
+pub fn carry_targets<'a>(value: impl Into<ModelView<'a>>, c: carry) -> carry {
+    let value = &value.into();
     let graph = graph_name(value);
     if let Some((for_graph, _)) = &c.targets {
         if *for_graph == graph {
@@ -111,7 +112,8 @@ fn referenced_payload(ws: &w::Workspace, name: &str) -> Option<Result<carry_mod:
 /// What `y` picks up: the open material or SOP graph; else the graph of the selected geometry
 /// object; else the selected camera object (by its binding name); else the graph the pane's
 /// selected node references; else the open scene graph (a viewport shows it).
-pub fn carry_payload(value: &t) -> Result<carry_mod::Payload, String> {
+pub fn carry_payload<'a>(value: impl Into<ModelView<'a>>) -> Result<carry_mod::Payload, String> {
+    let value = &value.into();
     let ws = &value.doc.workspace.ws.checked;
     let referenced = |name: &str| referenced_payload(ws, name);
     if let Some(result) = graph_name(value).and_then(|name| referenced(&name)) {

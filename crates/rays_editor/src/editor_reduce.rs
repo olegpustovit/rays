@@ -129,7 +129,8 @@ pub fn level_target(followed: Option<String>, has_route: bool, value2: &t, level
 }
 
 /// The history key of a gesture still in progress, if the frame's change belongs to one.
-pub fn gesture_key(value: &t, frame_: &frame::t, loaded: bool, world_added: bool, world_label: &Option<String>, result: &frame_result) -> Option<String> {
+pub fn gesture_key<'a>(value: impl Into<ModelView<'a>>, frame_: &frame::t, loaded: bool, world_added: bool, world_label: &Option<String>, result: &frame_result) -> Option<String> {
+    let value = &value.into();
     let dragging = frame::mouse_down(MouseButton::LeftButton, frame_) || frame::has_event(&|e| matches!(e, Event::Pointer_released(MouseButton::LeftButton, _)), frame_);
     if !dragging || loaded || world_added || world_label.is_some() {
         return None;
@@ -298,7 +299,8 @@ type Written = (Document, frame_result, Vec<Path>, Option<String>, Option<(Strin
 /// The frame's changes and gestures written to the document, text first: the first refusal leaves
 /// none applied. Returns the document, the result, the nodes added, a graph made, a graph renamed
 /// and the note the echo shows.
-pub fn write_gestures(value: &t, loaded: bool, present: &Document, tree_edits: &[Edit], in_text: &dyn Fn(i64) -> bool, node_effects: &dyn Fn(Effects) -> Effects, next: Document, result: frame_result) -> Written {
+pub fn write_gestures<'a>(value: impl Into<ModelView<'a>>, loaded: bool, present: &Document, tree_edits: &[Edit], in_text: &dyn Fn(i64) -> bool, node_effects: &dyn Fn(Effects) -> Effects, next: Document, result: frame_result) -> Written {
+    let value = &value.into();
     let (mut next, mut result) = if loaded { (next, result) } else { reconciled(value, present, next, result) };
     // Workspace gestures: one rewrite of the source per gesture, lowered into the document, one
     // history entry named by the op. A frame's gestures land together: the first one refused leaves
@@ -1431,7 +1433,8 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::Gpu::Config>, pump: Option<&dyn Fn(
     }
 }
 
-fn network_present(value: &t) -> bool {
+fn network_present<'a>(value: impl Into<ModelView<'a>>) -> bool {
+    let value = &value.into();
     crate::editor_inspect::network(value).is_some()
 }
 
@@ -1470,13 +1473,14 @@ pub fn reduce_idle(select: Option<&[i64]>, preview: Option<&Op>, value: &t, acti
 }
 
 /// The frame result of a frame in which no pane asked for anything.
-pub fn idle_result(value: &t, selection: selection::t) -> frame_result {
+pub fn idle_result<'a>(value: impl Into<ModelView<'a>>, selection: selection::t) -> frame_result {
+    let value = &value.into();
     frame_result {
         workspace: value.workspace.clone(),
         focus: value.focus.clone(),
         focus_path: value.focus_path.clone(),
         pane_keys: (*value.pane_keys).clone(),
-        scope_view: pane_view(&value).clone(),
+        scope_view: pane_view(value).clone(),
         scope_changes: Vec::new(),
         selection,
         menu: value.menu.clone(),
@@ -1484,7 +1488,7 @@ pub fn idle_result(value: &t, selection: selection::t) -> frame_result {
         tree: value.tree.clone(),
         outline: value.outline.clone(),
         outline_intents: Vec::new(),
-        document: level_objects(&value),
+        document: level_objects(value),
         edit_error: value.edit_error.clone(),
         effects: Effects::default(),
         timeline_intents: Vec::new(),
@@ -1513,7 +1517,8 @@ pub fn idle_result(value: &t, selection: selection::t) -> frame_result {
 }
 
 /// The reducer's input for a frame without panes.
-pub fn idle_input(value: &t, actions: &[action], frame_: &frame::t) -> Frame_input {
+pub fn idle_input<'a>(value: impl Into<ModelView<'a>>, actions: &[action], frame_: &frame::t) -> Frame_input {
+    let value = &value.into();
     Frame_input {
         carry_changed: false,
         all_ui_visible: false,
