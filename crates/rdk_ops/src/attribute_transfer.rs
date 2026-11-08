@@ -140,7 +140,7 @@ fn invalid(message: &str) -> error::T {
 /// `invalid_position`.
 fn finish(result: Result<geometry::T, error::T>, operation: &str) -> Result<geometry::T, error::T> {
     result.map_err(|failure| {
-        let code = error::kind(&failure);
+        let code = error::code(&failure);
         if code == Code::Cancelled {
             error::cancelled(operation)
         } else if code == Code::InvalidPosition {

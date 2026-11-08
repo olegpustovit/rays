@@ -61,7 +61,7 @@ fn lift(value: error::T) -> error::T {
 }
 
 fn index_result(role: &str, value: error::T) -> error::T {
-    make(error::kind(&value), format!("{role}: {}", error::message(&value)))
+    make(error::code(&value), format!("{role}: {}", error::message(&value)))
 }
 
 fn duplicate_name(names: &[Option<&str>]) -> bool {

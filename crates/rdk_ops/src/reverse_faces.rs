@@ -201,7 +201,7 @@ mod tests {
         let token = cancel::create();
         cancel::cancel(&token);
         let failure = err(run(Some(&token), &grid(1, 1, 1.0, true)));
-        assert_eq!(error::kind(&failure), Code::Cancelled);
+        assert_eq!(error::code(&failure), Code::Cancelled);
         assert_eq!(error::operation(&failure), "reverse");
     }
 

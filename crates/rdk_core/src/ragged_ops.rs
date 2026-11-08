@@ -261,14 +261,14 @@ mod tests {
     fn invalid_mapping_is_not_reported_as_cancellation() {
         let source = packed::IntArray::create_owned(vec![0, 1], vec![7]).unwrap();
         let error = remap_int(None, Some(1), &[-2], &source).err().unwrap();
-        assert_eq!(error::kind(&error), Code::InvalidRagged);
+        assert_eq!(error::code(&error), Code::InvalidRagged);
     }
     #[test]
     fn range_worker_errors_are_preserved() {
         let worker_error = error::new("worker", Code::WorkerFailure, "range failure".to_owned());
         let result = run_indexed_ranges(1, 1, &|_, _, _| Err(worker_error.clone()));
         let error = result.unwrap_err();
-        assert_eq!(error::kind(&error), Code::WorkerFailure);
+        assert_eq!(error::code(&error), Code::WorkerFailure);
         assert_eq!(error::message(&error), "range failure");
     }
 }

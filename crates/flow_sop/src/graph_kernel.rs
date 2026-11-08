@@ -45,7 +45,7 @@ fn record(value: Option<&Value>) -> Result<&[(String, Value)], Diagnostic> {
 
 fn rdk_failure(code: &str, failure: &rdk_error::T) -> Diagnostic {
     let _ = code;
-    refuse(rdk_error::code(failure), &rdk_error::to_string(failure))
+    refuse(rdk_error::code(failure).as_str(), &rdk_error::to_string(failure))
 }
 
 /// CSR rows: monotone offsets from zero to the value count, values in range.

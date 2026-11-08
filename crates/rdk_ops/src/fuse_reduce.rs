@@ -366,7 +366,7 @@ pub fn apply(
     geometry_value: &geometry::T,
 ) -> Result<geometry::T, error::T> {
     reduce(cancel_value, params, clusters, geometry_value).map_err(|failure| {
-        if error::is_cancelled(&failure) || error::kind(&failure) == Code::InvalidParameter {
+        if error::is_cancelled(&failure) || error::code(&failure) == Code::InvalidParameter {
             failure
         } else {
             fail(error::message(&failure).to_owned())
@@ -489,7 +489,7 @@ mod tests {
         let token = cancel::create();
         cancel::cancel(&token);
         let failure = apply(Some(&token), &params(Position::First, true, true), &clusters(), &line()).err().unwrap();
-        assert_eq!(error::kind(&failure), Code::Cancelled);
+        assert_eq!(error::code(&failure), Code::Cancelled);
     }
 
     #[test]

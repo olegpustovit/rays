@@ -2357,7 +2357,7 @@ fn guard(result: Result<geometry::T, error::T>) -> Result<geometry::T, error::T>
 
 /// A failure that stops the iteration loop but not the process: the message becomes the result.
 fn recoverable(failure: error::T) -> Result<String, error::T> {
-    if matches!(error::kind(&failure), Code::Cancelled | Code::InvalidArgument) {
+    if matches!(error::code(&failure), Code::Cancelled | Code::InvalidArgument) {
         Err(failure)
     } else {
         Ok(error::message(&failure).to_owned())
@@ -2590,7 +2590,7 @@ fn remesh_body(params: &Params, geometry_value: &geometry::T) -> Result<geometry
 pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     // `with Invalid_argument message -> fail message`: the message is prefixed once more.
     let result = remesh_body(params, geometry_value).map_err(|failure| {
-        if error::kind(&failure) == Code::InvalidArgument {
+        if error::code(&failure) == Code::InvalidArgument {
             fail(error::message(&failure))
         } else {
             failure
@@ -3107,7 +3107,7 @@ mod tests {
     fn errors_and_cancellation() {
         let source = grid(4, 4, 6.0, false);
         let expect = |result: Result<geometry::T, error::T>, code: &str| match result {
-            Err(failure) => assert_eq!(error::code(&failure), code, "unexpected error code"),
+            Err(failure) => assert_eq!(error::code(&failure).as_str(), code, "unexpected error code"),
             Ok(_) => panic!("Remesh accepted invalid input for {code}"),
         };
         expect(remesh(&source, 0.0, &|_| {}), "invalid_remesh");

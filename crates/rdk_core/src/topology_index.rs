@@ -500,11 +500,11 @@ mod tests {
         assert_eq!(find_edge(&first, 9, 1), None);
         assert!(matches!(
             edge_points(&first, 5),
-            Err(error) if error::kind(&error) == Code::InvalidTopologyIndex
+            Err(error) if error::code(&error) == Code::InvalidTopologyIndex
         ));
         assert!(matches!(
             edge_vertex(&first, 1, 2),
-            Err(error) if error::kind(&error) == Code::InvalidTopologyIndex
+            Err(error) if error::code(&error) == Code::InvalidTopologyIndex
         ));
 
         let view = View::view(&first);

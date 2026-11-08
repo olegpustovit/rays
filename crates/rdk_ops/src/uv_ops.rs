@@ -81,7 +81,7 @@ mod tests {
     fn message(result: Result<geometry::T, error::T>) -> String {
         match result {
             Ok(_) => "ok".to_owned(),
-            Err(failure) => format!("{}/{}", error::code(&failure), error::message(&failure)),
+            Err(failure) => format!("{}/{}", error::code(&failure).as_str(), error::message(&failure)),
         }
     }
 
@@ -121,7 +121,7 @@ mod tests {
         }
         let Err(missing) = relax(&params(), &mesh) else { panic!("expected failure") };
         assert_eq!(error::operation(&missing), "uv_relax");
-        assert_eq!(error::kind(&missing), Code::InvalidUv);
+        assert_eq!(error::code(&missing), Code::InvalidUv);
         assert_eq!(error::message(&missing), "UV Relax requires vertex float2 attribute \"uv\"");
     }
 
@@ -144,7 +144,7 @@ mod tests {
         let token = Arc::new(rdk_core::cancel::create());
         rdk_core::cancel::cancel(&token);
         let Err(stopped) = flatten(&Params { cancel: Some(token), ..params() }, &mesh) else { panic!("expected cancel") };
-        assert_eq!(error::kind(&stopped), Code::Cancelled);
+        assert_eq!(error::code(&stopped), Code::Cancelled);
         let wrong_seams = group::init(Some(1), group::Owner::Point, "s", 9, &|_| false).unwrap();
         assert_eq!(
             message(flatten(&Params { seams: Some(wrong_seams), ..params() }, &mesh)),

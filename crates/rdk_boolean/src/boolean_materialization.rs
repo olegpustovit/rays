@@ -53,7 +53,7 @@ fn raised(failure: error::T) -> error::T {
 
 /// The OCaml `try ... with Cancelled -> ... | Invalid_argument m -> error invalid_code m`.
 fn guard_fail(invalid_code: Code, failure: error::T) -> error::T {
-    match error::kind(&failure) {
+    match error::code(&failure) {
         Code::Cancelled => error::cancelled(OPERATION),
         Code::InvalidArgument => make(invalid_code, error::message(&failure).to_owned()),
         _ => failure,
@@ -744,7 +744,7 @@ fn validate_materialized(positions: &Positions, topology: &TopologyView) -> Resu
     )
     .map_err(|failure| {
         make(
-            error::kind(&failure),
+            error::code(&failure),
             format!("rounded surface verification failed: {}", error::to_string(&failure)),
         )
     })
@@ -1022,7 +1022,7 @@ pub fn verify_unchanged_extraction(
     match verify_extracted_surface(cancel, grain, require_closed, allow_opposite_duplicates, ancestry, geometry_value) {
         Ok(()) => Ok(true),
         Err(failure)
-            if matches!(error::kind(&failure), Code::Cancelled | Code::GeometryMismatch | Code::InvalidParameter) =>
+            if matches!(error::code(&failure), Code::Cancelled | Code::GeometryMismatch | Code::InvalidParameter) =>
         {
             Err(failure)
         }
@@ -1537,7 +1537,7 @@ fn repair_step(
                 verify_materialized_seam_curves(cancel, grain, seam)?;
                 Ok(Step::Done(cleanup.clone()))
             }
-            Err(initial) if error::kind(&initial) != Code::SurfaceSelfIntersection => Err(initial),
+            Err(initial) if error::code(&initial) != Code::SurfaceSelfIntersection => Err(initial),
             Err(initial) => {
                 let (contacts, repairable, candidates) =
                     rounded_self_contact_edges(cancel, grain, &cleanup.cleanup_geometry)?;

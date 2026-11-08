@@ -1231,7 +1231,7 @@ mod tests {
         let Err(failure) = join(&Params { cancel: Some(cancelled), ..params() }, &input) else {
             panic!("expected cancellation")
         };
-        assert_eq!(error::kind(&failure), Code::Cancelled);
+        assert_eq!(error::code(&failure), Code::Cancelled);
     }
 
     #[test]

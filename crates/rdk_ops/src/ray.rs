@@ -714,7 +714,7 @@ pub fn run(
     collision: &geometry::T,
 ) -> Result<geometry::T, error::T> {
     run_inner(cancel_token, params, source, collision).map_err(|value| {
-        let code = error::kind(&value);
+        let code = error::code(&value);
         let message = error::message(&value);
         if code == Code::Cancelled {
             error::cancelled("ray")

@@ -849,14 +849,14 @@ mod tests {
         let out = run(&base(), &valid).unwrap();
         assert_eq!(geometry::data_id(&out), geometry::data_id(&valid));
         let negative = err(run(&Params { consolidate_distance: Some(-1.0), ..base() }, &valid));
-        assert_eq!(error::kind(&negative), Code::InvalidGeometry);
+        assert_eq!(error::code(&negative), Code::InvalidGeometry);
         let pattern = err(run(&Params { point_attributes: Some("[".to_owned()), ..base() }, &valid));
-        assert_eq!(error::kind(&pattern), Code::InvalidGeometry);
+        assert_eq!(error::code(&pattern), Code::InvalidGeometry);
         let token = std::sync::Arc::new(cancel::create());
         cancel::cancel(&token);
         let cancelled = err(run(&Params { cancel: Some(token), ..base() }, &valid));
-        assert_eq!(error::kind(&cancelled), Code::Cancelled);
-        assert_eq!(error::code(&err(run(&Params { epsilon: -1.0, ..base() }, &valid))), "invalid_geometry");
+        assert_eq!(error::code(&cancelled), Code::Cancelled);
+        assert_eq!(error::code(&err(run(&Params { epsilon: -1.0, ..base() }, &valid))).as_str(), "invalid_geometry");
     }
 
     #[test]

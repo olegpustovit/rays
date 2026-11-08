@@ -797,7 +797,7 @@ mod tests {
     #[test]
     fn invalid_grain() {
         match build(&params(0), &left_triangle(), &crossing_triangle()) {
-            Err(e) => assert_eq!(error::kind(&e), Code::InvalidParameter),
+            Err(e) => assert_eq!(error::code(&e), Code::InvalidParameter),
             Ok(_) => panic!("zero grain was accepted"),
         }
     }
@@ -809,7 +809,7 @@ mod tests {
         let mut p = params(1);
         p.cancel = Some(Arc::new(token));
         match build(&p, &left_triangle(), &crossing_triangle()) {
-            Err(e) => assert_eq!(error::kind(&e), Code::Cancelled),
+            Err(e) => assert_eq!(error::code(&e), Code::Cancelled),
             Ok(_) => panic!("cancelled constraint planning completed"),
         }
     }

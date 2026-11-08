@@ -366,7 +366,7 @@ mod tests {
             classify_connectivity(None, None, Some(&seams), attribute::Owner::Point, &geometry_value).unwrap();
         assert!(classes.len() as i64 == geometry::point_count(&geometry_value) && count == 1, "point seam classification");
 
-        let code = |result: Result<(Vec<i64>, i64), error::T>| error::code(&result.unwrap_err()).to_owned();
+        let code = |result: Result<(Vec<i64>, i64), error::T>| error::code(&result.unwrap_err()).as_str().to_owned();
         let point_group = group::init(Some(1), group::Owner::Point, "points", 6, &|_| true).unwrap();
         let wrong_length = group::init(Some(1), group::Owner::Primitive, "bad", 1, &|_| true).unwrap();
         assert_eq!(

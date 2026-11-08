@@ -589,7 +589,7 @@ pub fn delete_primitives(
         geometry_value,
     )
     .map_err(|failure| {
-        make("delete_primitives", error::kind(&failure), error::message(&failure).to_owned())
+        make("delete_primitives", error::code(&failure), error::message(&failure).to_owned())
     })
 }
 
@@ -649,7 +649,7 @@ mod tests {
         let g = payload();
         let wrong_length = group::init(None, group::Owner::Primitive, "bad", 3, &|_| true).unwrap();
         let failure = err(delete(&delete_params(true, false), &wrong_length, &g));
-        assert_eq!(error::kind(&failure), Code::InvalidSelection);
+        assert_eq!(error::code(&failure), Code::InvalidSelection);
         assert_eq!(
             error::message(&failure),
             "Rdk.Deletion.delete: selection length 3 does not match its primitive owner count 2"
@@ -660,7 +660,7 @@ mod tests {
             &points,
             &g,
         ));
-        assert_eq!(error::kind(&failure), Code::InvalidSelection);
+        assert_eq!(error::code(&failure), Code::InvalidSelection);
         assert_eq!(error::operation(&failure), "delete_primitives");
         let token = std::sync::Arc::new(cancel::create());
         cancel::cancel(&token);
@@ -670,7 +670,7 @@ mod tests {
             &first,
             &g,
         ));
-        assert_eq!(error::kind(&failure), Code::Cancelled);
+        assert_eq!(error::code(&failure), Code::Cancelled);
     }
 
     #[test]

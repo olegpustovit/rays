@@ -879,7 +879,7 @@ pub struct Params {
 /// OCaml's `Invalid_argument` caught inside the curve path becomes a plain failure message.
 fn invalid_argument_to_failure(result: Result<geometry::T, error::T>) -> Result<geometry::T, error::T> {
     match result {
-        Err(failure) if error::kind(&failure) == Code::InvalidArgument => {
+        Err(failure) if error::code(&failure) == Code::InvalidArgument => {
             Err(fail(error::message(&failure).to_owned()))
         }
         other => other,
@@ -1077,7 +1077,7 @@ fn guard(result: Result<geometry::T, error::T>) -> Result<geometry::T, error::T>
     match result {
         Ok(value) => Ok(value),
         // OCaml lets Invalid_argument escape the guard as an exception.
-        Err(failure) if error::kind(&failure) == Code::InvalidArgument => {
+        Err(failure) if error::code(&failure) == Code::InvalidArgument => {
             Err(error::new("subdivide", Code::InvalidArgument, error::message(&failure).to_owned()))
         }
         Err(failure) => Err(error::guard(failure, "subdivide", Code::InvalidTopology)),
@@ -1423,7 +1423,7 @@ mod tests {
     #[test]
     fn checked_loop_quad_error() {
         match sub(&quad(None, None, None), &|p| p.scheme = Scheme::Loop) {
-            Err(failure) if error::kind(&failure) == Code::InvalidTopology => {}
+            Err(failure) if error::code(&failure) == Code::InvalidTopology => {}
             _ => panic!("Loop Subdivide accepted a quad"),
         }
     }
@@ -2627,7 +2627,7 @@ mod tests {
         cancel::cancel(&token);
         match sub(&curve_network(), &|p| p.cancel = Some(token.clone())) {
             Ok(_) => panic!("polygon-curve Subdivide ignored cancellation"),
-            Err(failure) => assert_eq!(error::kind(&failure), Code::Cancelled),
+            Err(failure) => assert_eq!(error::code(&failure), Code::Cancelled),
         }
         match sub(&curve_network(), &|p| p.scheme = Scheme::Loop) {
             Ok(_) => panic!("Subdivide accepted polygon curves under Loop"),

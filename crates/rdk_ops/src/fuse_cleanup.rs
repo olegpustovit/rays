@@ -388,7 +388,7 @@ mod tests {
         assert_eq!(geometry::data_id(&out), geometry::data_id(&clean));
         let token = cancel::create();
         cancel::cancel(&token);
-        assert_eq!(error::kind(&apply(Some(&token), 1, true, false, false, &source).err().unwrap()), Code::Cancelled);
+        assert_eq!(error::code(&apply(Some(&token), 1, true, false, false, &source).err().unwrap()), Code::Cancelled);
     }
 
     #[test]

@@ -92,12 +92,12 @@ pub struct Guard {
 
 fn structured_error(failure: &rdk_error::T) -> Diagnostic {
     rays_diagnostic::error(
-        rdk_error::code(failure).to_owned(),
+        rdk_error::code(failure).as_str().to_owned(),
         format!("{} could not produce valid geometry", rdk_error::operation(failure)),
         None,
         None,
         Some(rdk_error::to_string(failure).into_bytes()),
-        rdk_error::hints(failure).to_vec(),
+        Vec::new(),
         Vec::new(),
     )
 }

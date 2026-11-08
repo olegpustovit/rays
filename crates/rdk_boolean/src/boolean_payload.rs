@@ -1326,16 +1326,16 @@ mod tests {
             &prepared,
         )
         .unwrap();
-        assert_eq!(error::kind(&copy_primitives(None, 0, &ancestry).err().unwrap()), Code::InvalidParameter);
+        assert_eq!(error::code(&copy_primitives(None, 0, &ancestry).err().unwrap()), Code::InvalidParameter);
         assert_eq!(
-            error::kind(
+            error::code(
                 &copy_points_and_vertices(None, 1, PointConflict::Reject, -1.0, &ancestry, &left)
                     .err()
                     .unwrap()
             ), Code::InvalidParameter
         );
         assert_eq!(
-            error::kind(
+            error::code(
                 &copy_points_and_vertices(None, 1, PointConflict::Reject, 0.0, &ancestry, &left)
                     .err()
                     .unwrap()

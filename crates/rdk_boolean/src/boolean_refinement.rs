@@ -188,13 +188,13 @@ mod tests {
     fn validation() {
         let input = constraints(1);
         match build(None, None, 0, &input) {
-            Err(e) => assert_eq!(error::kind(&e), Code::InvalidParameter),
+            Err(e) => assert_eq!(error::code(&e), Code::InvalidParameter),
             Ok(_) => panic!("zero refinement grain was accepted"),
         }
         let token = cancel::create();
         cancel::cancel(&token);
         match build(Some(&token), None, 1, &input) {
-            Err(e) => assert_eq!(error::kind(&e), Code::Cancelled),
+            Err(e) => assert_eq!(error::code(&e), Code::Cancelled),
             Ok(_) => panic!("cancelled refinement completed"),
         }
     }

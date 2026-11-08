@@ -519,7 +519,7 @@ mod tests {
         let bad = mat4::of_rows((f64::NAN, 0., 0., 0.), (0., 1., 0., 0.), (0., 0., 1., 0.), (0., 0., 0., 1.));
         match materialize_instances(&[mat4::identity(), bad], &source) {
             Err(failure) => {
-                assert_eq!(error::kind(&failure), Code::InvalidParameter);
+                assert_eq!(error::code(&failure), Code::InvalidParameter);
                 assert_eq!(
                     error::message(&failure),
                     "Rdk.Instance_copy.materialize_instances: transform 1 must be finite"

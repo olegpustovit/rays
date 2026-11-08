@@ -690,7 +690,7 @@ mod tests {
     }
 
     fn code(result: Result<geometry::T, error::T>) -> String {
-        error::code(&err(result)).to_owned()
+        error::code(&err(result)).as_str().to_owned()
     }
 
     #[test]

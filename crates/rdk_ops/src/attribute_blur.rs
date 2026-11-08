@@ -41,7 +41,7 @@ fn invalid(message: &str) -> error::T {
 pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
     run_inner(params, geometry_value)
         .map_err(|failure| {
-            if error::kind(&failure) == Code::InvalidParameter {
+            if error::code(&failure) == Code::InvalidParameter {
                 failure
             } else {
                 error::guard(failure, OPERATION, Code::InvalidBlur)

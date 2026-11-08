@@ -1491,7 +1491,7 @@ mod tests {
     fn message(result: Result<geometry::T, error::T>) -> (String, String) {
         match result {
             Ok(_) => ("ok".to_owned(), String::new()),
-            Err(failure) => (error::code(&failure).to_owned(), error::message(&failure).to_owned()),
+            Err(failure) => (error::code(&failure).as_str().to_owned(), error::message(&failure).to_owned()),
         }
     }
 

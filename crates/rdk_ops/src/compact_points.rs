@@ -436,8 +436,8 @@ mod tests {
         let token = cancel::create();
         cancel::cancel(&token);
         let failure = err(run(Some(&token), None, &g));
-        assert_eq!(error::kind(&failure), Code::Cancelled);
-        assert_eq!(error::code(&err(run(None, Some(0), &g))), "invalid_geometry");
+        assert_eq!(error::code(&failure), Code::Cancelled);
+        assert_eq!(error::code(&err(run(None, Some(0), &g))).as_str(), "invalid_geometry");
     }
 
     #[test]

@@ -164,7 +164,7 @@ mod tests {
         }
         let Err(missing) = sort_primitives(None, None, "nope", &triangles()) else { panic!("expected failure") };
         assert_eq!(error::operation(&missing), "sort");
-        assert_eq!(error::kind(&missing), Code::InvalidSort);
+        assert_eq!(error::code(&missing), Code::InvalidSort);
         assert_eq!(error::message(&missing), "missing sort attribute nope");
     }
 

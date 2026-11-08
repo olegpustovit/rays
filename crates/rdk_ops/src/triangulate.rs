@@ -358,7 +358,7 @@ mod tests {
             None,
         );
         let failure = err(run(&params(), &degenerate));
-        assert_eq!(error::kind(&failure), Code::InvalidTopology);
+        assert_eq!(error::code(&failure), Code::InvalidTopology);
         assert_eq!(
             error::message(&failure),
             "Rdk_mesh.Triangulate.triangulate: primitive 0 has degenerate projected area"
@@ -395,7 +395,7 @@ mod tests {
         let (_, offsets, _) = topo(&out);
         assert_eq!(offsets, vec![0, 4, 7, 10]);
         let wrong = group::init(None, group::Owner::Point, "pick", 2, &|_| true).unwrap();
-        assert_eq!(error::code(&err(run(&Params { primitives: Some(wrong), ..params() }, &quads))), "invalid_topology");
+        assert_eq!(error::code(&err(run(&Params { primitives: Some(wrong), ..params() }, &quads))).as_str(), "invalid_topology");
     }
 
     #[test]
@@ -410,7 +410,7 @@ mod tests {
         cancel::cancel(&token);
         let quads = grid(1, 1, 1.0, true);
         let failure = err(run(&Params { cancel: Some(token), ..params() }, &quads));
-        assert_eq!(error::kind(&failure), Code::Cancelled);
+        assert_eq!(error::code(&failure), Code::Cancelled);
         let mixed = geom(
             &[0., 1., 1., 0., 2.],
             &[0., 0., 1., 1., 2.],

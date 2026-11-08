@@ -1420,7 +1420,7 @@ fn float_plane(
 }
 
 pub fn clip(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T, error::T> {
-    run(params, geometry_value).map_err(|value| match error::kind(&value) {
+    run(params, geometry_value).map_err(|value| match error::code(&value) {
         Code::Cancelled => error::cancelled("clip"),
         Code::InvalidArgument => value,
         _ => make("clip", Code::InvalidGeometry, error::message(&value)),
@@ -2356,7 +2356,7 @@ pub(crate) mod test_util {
 
     pub fn expect_code(result: Result<geometry::T, error::T>, code: Code) {
         match result {
-            Err(e) => assert_eq!(error::kind(&e), code, "{}", error::to_string(&e)),
+            Err(e) => assert_eq!(error::code(&e), code, "{}", error::to_string(&e)),
             Ok(_) => panic!("expected error {code:?}"),
         }
     }

@@ -618,7 +618,7 @@ mod tests {
 
     fn assert_code(result: Result<geometry::T, error::T>, code: &str, what: &str) {
         match result {
-            Err(failure) if error::code(&failure) == code => {}
+            Err(failure) if error::code(&failure).as_str() == code => {}
             Err(failure) => panic!("unexpected {what}: {}", error::to_string(&failure)),
             Ok(_) => panic!("{what}: expected {code}"),
         }
@@ -666,7 +666,7 @@ mod tests {
         );
         params.point_conflict = PointConflict::Reject;
         match run(&params, &left) {
-            Err(failure) if error::kind(&failure) == Code::PointPayloadConflict => {}
+            Err(failure) if error::code(&failure) == Code::PointPayloadConflict => {}
             Err(failure) => panic!("unexpected public point conflict: {}", error::to_string(&failure)),
             Ok(_) => panic!("public Boolean ignored its reject point-conflict policy"),
         }

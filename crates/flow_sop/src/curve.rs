@@ -110,8 +110,7 @@ fn polyline(closed: bool, filled: bool, points: &[(f64, f64, f64)]) -> Result<ge
     }
     let count = points.len() as i64;
     let failure = |message: String| {
-        rdk_error::make("polyline".into(), "invalid_parameter".into(), message, None)
-            .unwrap_or_else(|e| e)
+        rdk_error::new("polyline", rdk_error::Code::InvalidParameter, message)
     };
     let topology = topology::polygons_owned(count, (0..count).collect(), vec![0, count]).map_err(|e| failure(rdk_error::message(&e).to_owned()))?;
     geometry::create(geometry::positions(&line).clone(), topology, None, None, None)
@@ -150,8 +149,7 @@ fn build_node(label: &str, inputs: &[node::T], curve: &Curve) -> Result<node::T,
             Ok(geometry) => Ok(GeometryCooked { geometry, instances: None }),
             Err(failure) => Err(Diagnostic {
                 cause: Some(rdk_error::to_string(&failure).into_bytes()),
-                hints: rdk_error::hints(&failure).to_vec(),
-                ..crate::port::error(rdk_error::code(&failure), &format!("{} could not produce valid geometry", rdk_error::operation(&failure)))
+                ..crate::port::error(rdk_error::code(&failure).as_str(), &format!("{} could not produce valid geometry", rdk_error::operation(&failure)))
             }),
         }),
     );

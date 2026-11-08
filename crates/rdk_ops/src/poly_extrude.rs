@@ -950,7 +950,7 @@ pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T,
     } else {
         run_general(params, cancel_ref, grain, geometry_value)
     };
-    result.map_err(|value| match error::kind(&value) {
+    result.map_err(|value| match error::code(&value) {
         Code::Cancelled => error::cancelled("poly_extrude"),
         Code::InvalidArgument => value,
         _ => make(Code::InvalidGeometry, error::message(&value)),
@@ -1033,7 +1033,7 @@ mod tests {
         let mut p = Params::new(1.0);
         p.cancel = Some(token);
         match run(&p, &grid(2, 2)) {
-            Err(e) => assert_eq!(error::kind(&e), Code::Cancelled),
+            Err(e) => assert_eq!(error::code(&e), Code::Cancelled),
             Ok(_) => panic!("expected cancellation"),
         }
     }

@@ -22,7 +22,7 @@ fn fail<R>(code: &str, message: &str) -> Result<R, Diagnostic> {
 }
 /// A device-read failure as the error a deferred rdk holder reports.
 pub(crate) fn rdk_error(d: Diagnostic) -> error::T {
-    error::make("gpu.materialise".to_owned(), d.code, d.message, None).unwrap_or_else(|e| e)
+    error::new("gpu.materialise", error::Code::Gpu, d.message)
 }
 fn rdk_message(e: &error::T) -> String {
     error::message(e).to_owned()
@@ -1056,9 +1056,8 @@ pub fn concat(cancel: Option<Arc<cancel::T>>, grain: i64, sources: &[Geometry], 
         source_base,
     };
     rdk_ops::mesh_merge::run_tagged(&params, sources).map_err(|e| {
-        let mut d = diag(error::code(&e), &format!("{} could not produce valid geometry", error::operation(&e)));
+        let mut d = diag(error::code(&e).as_str(), &format!("{} could not produce valid geometry", error::operation(&e)));
         d.cause = Some(error::to_string(&e).into_bytes());
-        d.hints = error::hints(&e).to_vec();
         d
     })
 }

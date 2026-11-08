@@ -820,6 +820,6 @@ mod tests {
         let Err(stopped) = iterate(Some(&cancelled), None, false, Scheme::Bilinear, 1, &polyline(false)) else {
             panic!("expected cancellation")
         };
-        assert_eq!(error::kind(&stopped), Code::Cancelled);
+        assert_eq!(error::code(&stopped), Code::Cancelled);
     }
 }

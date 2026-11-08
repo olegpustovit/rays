@@ -422,7 +422,7 @@ mod tests {
         let degenerate = geometry_of(&[(0., 0., 0.), (0.5, 0., 0.), (1., 0., 0.)], vec![0, 1, 2]);
         let solid = tetra((0., 0., 0.), 1.);
         match prepare(None, None, None, None, None, 1, &degenerate, &solid) {
-            Err(failure) if matches!(error::kind(&failure), Code::DegenerateTriangle | Code::InvalidSurface) => {}
+            Err(failure) if matches!(error::code(&failure), Code::DegenerateTriangle | Code::InvalidSurface) => {}
             Err(failure) => panic!("unexpected degenerate error: {}", error::to_string(&failure)),
             Ok(_) => panic!("degenerate source triangle entered the solid Boolean pipeline"),
         }

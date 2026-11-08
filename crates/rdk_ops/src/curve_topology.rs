@@ -85,7 +85,7 @@ mod tests {
             panic!("expected failure")
         };
         assert_eq!(error::operation(&failure), "join_curves");
-        assert_eq!(error::kind(&failure), Code::InvalidGeometry);
+        assert_eq!(error::code(&failure), Code::InvalidGeometry);
         assert_eq!(error::message(&failure), "Curve Join tolerance must be finite and non-negative");
     }
 }

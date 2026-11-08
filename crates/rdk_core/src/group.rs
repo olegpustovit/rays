@@ -732,7 +732,7 @@ mod tests {
             &groups[..2],
         );
         match result {
-            Err(value) => assert_eq!(error::kind(&value), Code::Cancelled),
+            Err(value) => assert_eq!(error::code(&value), Code::Cancelled),
             Ok(_) => panic!("group union-many ignored cancellation"),
         }
     }

@@ -71,10 +71,10 @@ pub fn rdk_error(hints: Vec<String>, operation: &str, message: &str) -> Diagnost
 
 pub fn structured_rdk_error(error: &rdk_core::error::T) -> Diagnostic {
     diagnostic_with(
-        rdk_core::error::code(error),
+        rdk_core::error::code(error).as_str(),
         &format!("{} could not produce valid geometry", rdk_core::error::operation(error)),
         Some(rdk_core::error::to_string(error)),
-        rdk_core::error::hints(error).to_vec(),
+        Vec::new(),
     )
 }
 

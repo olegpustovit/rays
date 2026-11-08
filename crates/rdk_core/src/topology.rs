@@ -741,7 +741,7 @@ mod tests {
             &invalid,
             Err(failure)
                 if error::message(failure) == "Topology: vertex references an invalid point"
-                    && error::kind(failure) == Code::InvalidTopology
+                    && error::code(failure) == Code::InvalidTopology
         ));
 
         let topology = create_owned(
@@ -759,7 +759,7 @@ mod tests {
         assert!(!all_triangles(&topology).unwrap());
         assert!(matches!(
             point_of_vertex(&topology, 4),
-            Err(failure) if error::kind(&failure) == Code::InvalidTopology
+            Err(failure) if error::code(&failure) == Code::InvalidTopology
         ));
     }
 

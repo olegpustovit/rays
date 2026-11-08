@@ -935,7 +935,7 @@ mod tests {
         let back = mat4::transform_point(&inverse, mat4::transform_point(&forward, source));
         assert!(close(source.x, back.x) && close(source.y, back.y) && close(source.z, back.z));
         let singular = compose_transform(&ComposeTransformParams { scale: vec3::zero(), invert: true, ..compose_params() });
-        assert_eq!(error::kind(&singular.unwrap_err()), Code::InvalidTransform);
+        assert_eq!(error::code(&singular.unwrap_err()), Code::InvalidTransform);
         let bad = compose_transform(&ComposeTransformParams { shear: v3(f64::NAN, 0.0, 0.0), ..compose_params() })
             .unwrap_err();
         assert_eq!(error::message(&bad), "Rdk.Transform_ops.compose_transform: non-finite shear");
@@ -1043,7 +1043,7 @@ mod tests {
     fn failure_code(result: Result<geometry::T, error::T>) -> String {
         match result {
             Ok(_) => "ok".to_owned(),
-            Err(failure) => error::code(&failure).to_owned(),
+            Err(failure) => error::code(&failure).as_str().to_owned(),
         }
     }
 

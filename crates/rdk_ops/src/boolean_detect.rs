@@ -466,7 +466,7 @@ mod tests {
 
     fn expect(code: Code, value: Result<geometry::T, error::T>) {
         match value {
-            Err(failure) => assert_eq!(error::kind(&failure), code, "{}", error::to_string(&failure)),
+            Err(failure) => assert_eq!(error::code(&failure), code, "{}", error::to_string(&failure)),
             Ok(_) => panic!("expected {code:?}"),
         }
     }

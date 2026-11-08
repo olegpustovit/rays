@@ -102,7 +102,7 @@ fn make_update_selection(
 }
 
 fn remap_error(failure: error::T) -> error::T {
-    error::new("smooth", error::kind(&failure), error::message(&failure).to_owned())
+    error::new("smooth", error::code(&failure), error::message(&failure).to_owned())
 }
 
 fn cancelled() -> error::T {
@@ -288,7 +288,7 @@ mod tests {
 
     fn expect_code(result: Result<geometry::T, error::T>, code: Code) {
         match result {
-            Err(failure) if error::kind(&failure) == code => {}
+            Err(failure) if error::code(&failure) == code => {}
             Err(failure) => panic!("expected {code:?}, got {}", error::to_string(&failure)),
             Ok(_) => panic!("expected {code:?}, got success"),
         }

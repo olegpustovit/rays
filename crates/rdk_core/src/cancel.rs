@@ -57,7 +57,7 @@ mod tests {
         assert!(poll(Some(&token), 1, 3).is_ok());
         cancel(&token);
         assert!(is_cancelled(&token));
-        assert_eq!(error::kind(&check(&token).unwrap_err()), Code::Cancelled);
-        assert_eq!(error::kind(&poll(Some(&token), 4, 3).unwrap_err()), Code::Cancelled);
+        assert_eq!(error::code(&check(&token).unwrap_err()), Code::Cancelled);
+        assert_eq!(error::code(&poll(Some(&token), 4, 3).unwrap_err()), Code::Cancelled);
     }
 }

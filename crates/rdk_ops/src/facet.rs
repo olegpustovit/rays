@@ -2132,7 +2132,7 @@ mod tests {
 
     fn expect_code(value: Result<geometry::T, error::T>, code: Code, message: &str) {
         match value {
-            Err(failure) if error::kind(&failure) == code => {}
+            Err(failure) if error::code(&failure) == code => {}
             _ => panic!("{message}"),
         }
     }

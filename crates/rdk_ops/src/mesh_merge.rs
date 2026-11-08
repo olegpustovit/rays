@@ -529,7 +529,7 @@ mod tests {
         inputs[1] = polyline(&[(10., 0., 0.), (12., 0., 0.)]);
         match run(&params(None, None), &inputs) {
             Err(failure) => {
-                assert_eq!(error::kind(&failure), Code::SchemaMismatch);
+                assert_eq!(error::code(&failure), Code::SchemaMismatch);
                 assert_eq!(error::message(&failure), "Rdk.Mesh_merge.merge: attribute schemas must match exactly");
             }
             Ok(_) => panic!("expected schema mismatch"),

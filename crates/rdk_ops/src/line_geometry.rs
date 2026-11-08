@@ -80,7 +80,7 @@ mod tests {
         assert_eq!(topology::primitive_kind(geometry::topology(&closed), 0).unwrap(), PrimitiveKind::ClosedPolyline);
         let too_short = polyline(&Params { closed: true }, &values[..2]);
         let failure = too_short.err().unwrap();
-        assert_eq!(error::kind(&failure), Code::InvalidParameter);
+        assert_eq!(error::code(&failure), Code::InvalidParameter);
         assert_eq!(
             error::message(&failure),
             "Rdk.Line_geometry.polyline: closed polylines require at least 3 points"

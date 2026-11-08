@@ -689,14 +689,14 @@ mod tests {
     #[test]
     fn float_selection_preserves_mapping_and_cancellation_errors() {
         let invalid = select_float(None, 1, None, &[-1], &[1.0]).unwrap_err();
-        assert_eq!(error::kind(&invalid), Code::InvalidRemap);
+        assert_eq!(error::code(&invalid), Code::InvalidRemap);
 
         let token = cancel::create();
         cancel::cancel(&token);
         let invalid_grain = select_float(Some(&token), 0, None, &[0], &[1.0]).unwrap_err();
-        assert_eq!(error::kind(&invalid_grain), Code::InvalidRemap);
+        assert_eq!(error::code(&invalid_grain), Code::InvalidRemap);
         let cancelled = select_float(Some(&token), 1, None, &[-1], &[1.0]).unwrap_err();
-        assert_eq!(error::kind(&cancelled), Code::Cancelled);
+        assert_eq!(error::code(&cancelled), Code::Cancelled);
     }
 
     #[test]
@@ -704,16 +704,16 @@ mod tests {
         let token = cancel::create();
         cancel::cancel(&token);
         let integer = select_int(Some(&token), 1, None, &[-1], &[1]).unwrap_err();
-        assert_eq!(error::kind(&integer), Code::Cancelled);
+        assert_eq!(error::code(&integer), Code::Cancelled);
         let text = select_text(Some(&token), 1, None, &[-1], &vec![b"value"].into()).unwrap_err();
-        assert_eq!(error::kind(&text), Code::Cancelled);
+        assert_eq!(error::code(&text), Code::Cancelled);
     }
     #[test]
     fn range_worker_errors_are_not_reclassified_as_cancellation() {
         let worker_error = error::new("worker", Code::WorkerFailure, "range failure".to_owned());
         let result = run_indexed_ranges(1, 1, &|_, _, _| Err(worker_error.clone()));
         let error = result.unwrap_err();
-        assert_eq!(error::kind(&error), Code::WorkerFailure);
+        assert_eq!(error::code(&error), Code::WorkerFailure);
         assert_eq!(error::message(&error), "range failure");
     }
 }

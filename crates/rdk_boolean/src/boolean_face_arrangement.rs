@@ -1358,7 +1358,7 @@ mod tests {
         let token = cancel::create();
         cancel::cancel(&token);
         match build(Some(&token), None, &crossing_plan(), Side::Left, 0) {
-            Err(e) => assert_eq!(error::kind(&e), Code::Cancelled),
+            Err(e) => assert_eq!(error::code(&e), Code::Cancelled),
             Ok(_) => panic!("cancelled face arrangement completed"),
         }
     }

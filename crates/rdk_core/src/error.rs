@@ -14,13 +14,6 @@ macro_rules! codes {
                     $(Code::$name => $text),*
                 }
             }
-
-            fn parse(text: &str) -> Option<Code> {
-                match text {
-                    $($text => Some(Code::$name),)*
-                    _ => None,
-                }
-            }
         }
     };
 }
@@ -121,25 +114,6 @@ pub fn guard(failure: T, operation: &str, code: Code) -> T {
     if is_cancelled(&failure) { cancelled(operation) } else { new(operation, code, failure.message) }
 }
 
-pub fn make(
-    operation: String,
-    code: String,
-    message: String,
-    _hints: Option<Vec<String>>,
-) -> Result<T, T> {
-    if operation.trim().is_empty() {
-        return Err(new("Rdk.Error.make", Code::InvalidArgument, "Rdk.Error.make: empty operation".to_owned()));
-    }
-    if code.trim().is_empty() {
-        return Err(new("Rdk.Error.make", Code::InvalidArgument, "Rdk.Error.make: empty code".to_owned()));
-    }
-    Ok(T {
-        operation,
-        code: Code::parse(&code).unwrap_or_else(|| panic!("unknown rdk error code {code}")),
-        message,
-    })
-}
-
 pub fn is_cancelled(value: &T) -> bool {
     value.code == Code::Cancelled
 }
@@ -148,20 +122,12 @@ pub fn operation(value: &T) -> &str {
     &value.operation
 }
 
-pub fn kind(value: &T) -> Code {
+pub fn code(value: &T) -> Code {
     value.code
-}
-
-pub fn code(value: &T) -> &'static str {
-    value.code.as_str()
 }
 
 pub fn message(value: &T) -> &str {
     &value.message
-}
-
-pub fn hints(_value: &T) -> &[String] {
-    &[]
 }
 
 pub fn to_string(value: &T) -> String {
@@ -177,11 +143,8 @@ mod tests {
         let error = new("mesh", Code::InvalidTopology, "bad offsets".to_owned());
         assert_eq!(to_string(&error), "mesh [invalid_topology]: bad offsets");
         let guarded = guard(error, "outer", Code::InvalidParameter);
-        assert_eq!((operation(&guarded), code(&guarded), message(&guarded)), ("outer", "invalid_parameter", "bad offsets"));
+        assert_eq!((operation(&guarded), code(&guarded), message(&guarded)), ("outer", Code::InvalidParameter, "bad offsets"));
         let stopped = guard(cancelled("inner"), "outer", Code::InvalidParameter);
         assert_eq!((operation(&stopped), stopped.code), ("outer", Code::Cancelled));
-        let invalid = make(String::new(), "bad".to_owned(), String::new(), None).unwrap_err();
-        assert_eq!(code(&invalid), "invalid_argument");
-        assert_eq!(message(&invalid), "Rdk.Error.make: empty operation");
     }
 }

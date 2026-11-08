@@ -515,13 +515,13 @@ mod tests {
     fn invalid_grain_and_cancellation() {
         let constraints = plan(&left_triangle(), &downward_triangle());
         match build(None, 0, &constraints) {
-            Err(e) => assert_eq!(error::kind(&e), Code::InvalidParameter),
+            Err(e) => assert_eq!(error::code(&e), Code::InvalidParameter),
             Ok(_) => panic!("zero coplanar grain was accepted"),
         }
         let token = cancel::create();
         cancel::cancel(&token);
         match build(Some(&token), 1, &constraints) {
-            Err(e) => assert_eq!(error::kind(&e), Code::Cancelled),
+            Err(e) => assert_eq!(error::code(&e), Code::Cancelled),
             Ok(_) => panic!("cancelled coplanar arrangement completed"),
         }
     }

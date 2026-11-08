@@ -1815,7 +1815,7 @@ mod tests {
         assert_eq!(hit.distance, 1.0);
         assert_eq!(raycast(&index, origin, rays_math::vec3::create(0.0, 0.0, -1.0)).unwrap(), None);
         let error = raycast(&index, origin, rays_math::vec3::create(0.0, 0.0, 0.0)).unwrap_err();
-        assert_eq!(error::kind(&error), Code::InvalidRay);
+        assert_eq!(error::code(&error), Code::InvalidRay);
     }
 
     #[test]
@@ -1875,7 +1875,7 @@ mod tests {
         let degenerate = geometry::create(flat, topo, None, None, None).unwrap();
         let failure = create(None, None, None, None, None, &degenerate).err().unwrap();
         assert_eq!(error::message(&failure), "primitive 0 is degenerate");
-        assert_eq!(error::kind(&failure), Code::InvalidSurface);
+        assert_eq!(error::code(&failure), Code::InvalidSurface);
     }
 }
 
@@ -1994,7 +1994,7 @@ mod attribute_suite_tests {
     #[test]
     fn degenerate_tiny_concave_and_self_intersecting_polygons() {
         let collinear = single_polygon(vec![0.0, 1.0, 2.0], vec![0.0; 3]);
-        assert_eq!(error::kind(&create(None, None, None, None, None, &collinear).err().unwrap()), Code::InvalidSurface);
+        assert_eq!(error::code(&create(None, None, None, None, None, &collinear).err().unwrap()), Code::InvalidSurface);
         // exact non-collinear triangle whose area underflows to a subnormal
         let tiny = single_polygon(vec![0.0, 1e-100, 0.0], vec![0.0, 0.0, 1e-100]);
         assert_eq!(triangle_count(&create(None, None, None, None, None, &tiny).unwrap()), 1);
@@ -2006,7 +2006,7 @@ mod attribute_suite_tests {
             .expect("concave polygon interior was missed");
         assert!(hit.primitive == 0 && (hit.distance - 0.75).abs() <= 1e-14);
         let bow_tie = single_polygon(vec![0.0, 2.0, 0.0, 2.0], vec![0.0, 2.0, 2.0, 0.0]);
-        assert_eq!(error::kind(&create(None, None, None, None, None, &bow_tie).err().unwrap()), Code::InvalidSurface);
+        assert_eq!(error::code(&create(None, None, None, None, None, &bow_tie).err().unwrap()), Code::InvalidSurface);
     }
 
     #[test]
@@ -2014,6 +2014,6 @@ mod attribute_suite_tests {
         let token = cancel::create();
         cancel::cancel(&token);
         let square = single_polygon(vec![0.0, 1.0, 1.0, 0.0], vec![0.0, 0.0, 1.0, 1.0]);
-        assert_eq!(error::kind(&create(Some(&token), None, None, None, None, &square).err().unwrap()), Code::Cancelled);
+        assert_eq!(error::code(&create(Some(&token), None, None, None, None, &square).err().unwrap()), Code::Cancelled);
     }
 }

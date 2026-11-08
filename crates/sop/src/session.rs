@@ -750,7 +750,7 @@ fn input_geometry(session: &mut T, output: &Output) -> Result<payload::T, Diagno
     }
     match rdk_ops::instance_copy::materialize_instances(transforms, source) {
         Err(error) => Err(crate::support::diagnostic_with(
-            rdk_core::error::code(&error),
+            rdk_core::error::code(&error).as_str(),
             "packed instances could not be materialized",
             Some(rdk_core::error::to_string(&error)),
             Vec::new(),

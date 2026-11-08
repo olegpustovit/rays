@@ -265,7 +265,7 @@ pub fn node(args: Args, body: Body, inputs: Vec<node::T>) -> node::T {
             match rdk_ops::mesh_merge::run(&params, parts) {
                 Ok(geometry) => Ok(GeometryCooked { geometry, instances: None }),
                 Err(e) => Err(support::diagnostic_with(
-                    rdk_core::error::code(&e),
+                    rdk_core::error::code(&e).as_str(),
                     "zone could not merge its elements",
                     Some(rdk_core::error::to_string(&e)),
                     Vec::new(),

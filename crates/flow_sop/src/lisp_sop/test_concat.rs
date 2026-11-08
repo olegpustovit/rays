@@ -107,7 +107,7 @@ fn cooked(node: &sop::node::T, domains: i64, grain: i64) -> Result<geo::T, rays_
 fn same(what: &str, expected: &Native, actual: &Result<geo::T, rays_diagnostic::Diagnostic>) {
     match (expected, actual) {
         (Ok(e), Ok(a)) => assert!(geometry_bytes(e) == geometry_bytes(a), "{what}: bytes differ from native merge"),
-        (Err(e), Err(a)) => assert_eq!(rdk_core::error::code(e), a.code, "{what}: error code differs"),
+        (Err(e), Err(a)) => assert_eq!(rdk_core::error::code(e).as_str(), a.code, "{what}: error code differs"),
         _ => panic!("{what}: result kind differs"),
     }
 }

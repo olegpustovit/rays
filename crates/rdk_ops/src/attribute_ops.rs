@@ -333,7 +333,7 @@ pub struct Params {
 pub fn interpolate(params: &Params) -> Result<geometry::T, error::T> {
     const OP: &str = "attribute_interpolate";
     let invalid_interpolate = |failure: &error::T| {
-        let code = error::code(failure);
+        let code = error::code(failure).as_str();
         if code == "cancelled" {
             error::cancelled(OP)
         } else if code == "invalid_parameter" {
@@ -632,12 +632,12 @@ pub(crate) mod fixtures {
     pub fn err_code(result: Result<geometry::T, error::T>) -> String {
         match result {
             Ok(_) => "ok".to_owned(),
-            Err(failure) => error::code(&failure).to_owned(),
+            Err(failure) => error::code(&failure).as_str().to_owned(),
         }
     }
 
     pub fn code(failure: &error::T) -> String {
-        error::code(failure).to_owned()
+        error::code(failure).as_str().to_owned()
     }
 
     /// Runs `work` on a pool of `domains` domains and returns its geometry.

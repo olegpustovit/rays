@@ -233,6 +233,6 @@ mod tests {
         let token = cancel::create();
         cancel::cancel(&token);
         let error = compute(Some(&token), Some(1), None, "face_normals", &triangle()).unwrap_err();
-        assert_eq!(error::kind(&error), Code::Cancelled);
+        assert_eq!(error::code(&error), Code::Cancelled);
     }
 }
