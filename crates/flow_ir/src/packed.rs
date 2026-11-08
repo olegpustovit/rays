@@ -1436,8 +1436,7 @@ fn finite(x: f64) -> K<f64> {
 fn typed_total(sh: &TS, instruction: &Instruction) -> bool {
     use Instruction::*;
     match instruction {
-        Int_const(_) | Text_const(_) | Int_abs(_) | Int_compare(..) | Int_select(..) | Text_select(..) => true,
-        Const(x) => x.is_finite(),
+        Const(_) | Int_const(_) | Text_const(_) | Int_abs(_) | Int_compare(..) | Int_select(..) | Text_select(..) => true,
         Int_input(i) => sh.ranges[*i as usize].is_some() || matches!(sh.inputs[*i as usize], Value::Int_array(_)),
         Text_input(i) => matches!(sh.inputs[*i as usize], Value::Text_array(_)),
         Int_binary(Integer::Iadd | Integer::Isub | Integer::Imul | Integer::Iand | Integer::Ior | Integer::Ixor, _, _) => true,
@@ -1760,11 +1759,8 @@ fn texec(
             }
         }
         Instruction::Int_const(n) => tc.integer[at + first..at + last].fill(*n),
-        Instruction::Const(x) => {
-            if first < last {
-                tc.floats[at + first..at + last].fill(finite(*x)?);
-            }
-        }
+        // A constant produces no new value: like every other target (finite_checks), its consumers check it.
+        Instruction::Const(x) => tc.floats[at + first..at + last].fill(*x),
         Instruction::Int_input(i) => {
             let i = *i as usize;
             if sh.contiguous {
