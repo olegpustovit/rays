@@ -62,10 +62,10 @@ A1-A8, B0-B4: see earlier rows below in git history (`6802a325` ... `96fab43d`);
 | C18, C20 | done | `b5aead5f`; `01b90841` `fold.rs` + `lru::Memo` (+163 net lines, not -140) |
 | C19 | done | `dd441536` PartialEq derived (Hash impossible: f64 in ogpu types) |
 | C21 | done | `7e9376dc` clippy::all allow removed; ~30 test-target lints remain |
-| D1 | partial | `959d5dae` `b72ab30d` `b4f74ecf` goldens `9a17f5d7` `1a5de4fe` `8fc3feb4`; 56 prepends removed; some incidental-order spots in spirv.rs left |
+| D1 | done | `959d5dae` `b72ab30d` `b4f74ecf` goldens `9a17f5d7` `1a5de4fe` `8fc3feb4`; 56 prepends removed; some incidental-order spots in spirv.rs left ; `a9213d00` last prepend -> VecDeque, six SPIR-V operand-order sites fixed after audit against spirv.ml (34 .spv fixtures, byte lengths unchanged, all pass spirv-val vulkan1.2) |
 | D2 | done | `37691759` .. `2e224106` + `a0809e01` (5 stages): rdk errors `{operation, code: Code, message}`, typed cancellation |
 | D3 | done | `4e8e7193` one WGSL printer, goldens byte-identical |
-| D4 | implemented; qualification open | `8bf0c0d0` `18180e84` packed.rs one CPU engine (historical implementation size 4,714 lines); `1455271c` bench_core example |
+| D4 | done (release `map` open) | `8bf0c0d0` `18180e84` packed.rs one CPU engine (historical implementation size 4,714 lines); `1455271c` bench_core example |
 | D5 | done | Replaced the four float-array variants with `Value::Floats(width, Arc<Vec<f64>>)` throughout production and tests. Shared slicing, concatenation, reductions, literal conversion, cache/physical equality and GPU readback retain width. Validation rejects widths outside 1–4 and incomplete rows before indexing. `Value` remains 40 bytes; original type-specific keys, Lisp display and numerical data are preserved. 902 selected tests pass; one web FMA failure is reproduced on committed baseline `b52600c7`. |
 | D6 | partial | `f680001d` `d3b9fa62` `597110e1` `0bc18308` `cb8a0ade` (+ `da51a0c7` stale C8 test-hooks cases): rust-analyzer rename codemod; `pub mod [A-Z]` 87 -> 37, `pub type/struct t` 52 -> 4; 15 naming `allow`s removed. Remaining: 12 in Flow crates + 29 still referenced from Flow crates (rdk_core packed/View types, flow_eval Device/Residual/Host, rays image/canvas/texture) |
 
@@ -135,6 +135,18 @@ Policy (`AGENTS.md`, `docs/history/build-speed.md`, plan B0): one warm workspace
 Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s under load; this run is healthy (not stale).
 
 ## Session log
+
+- 2026-11-08: Flow finish pass:
+  - `bfb2a44a`: packed engine no longer finite-checks constants (fixes `test_fma`; introduced by `8bf0c0d0`).
+  - `537345e4`: `core_fuse::merge` handles mixed uniform/constant captures (fixes `test_settle`).
+  - `c15b1a31`: Lisp node cook mode was shadowed by a local, and the BUILT cache retained inputs (fixes node_facts and lend_session); two stale tests fixed.
+  - `a21a7746`: multi-output kernels mark every int output uint32 (fixes `run_studio`/`run_studio_keywords`; regression `resident_sibling_ints`).
+  - `ab43acc0`: `write_planes` no longer reads back held positions eagerly (regression `replacing_p_leaves_held_positions_unread`).
+  - `d265c57f`: remesh golden is one value on all platforms; the platform branch was OCaml-inherited, not a libm difference.
+  - `bf3d9fae`: D4 span cache made allocation-free.
+  - D4 bench, debug min ms: sum 14.55 -> 11.39, fold-add 32.09 -> 24.51, fused maps 7.65 -> 6.37, int->float 5.97 -> 4.15, select 42.34 -> 41.46, map 4.54 -> 4.67. Instructions 182.3G -> 158.6G (debug), 139.3G -> 123.9G (release). Open: release `map` +29% instructions; the removed float runner's fused `a + x*y` output path needs porting.
+  - Tests: flow_ir/web/shader/web_export 506 pass, flow_gpu 94 pass. flow_sop: every module passes when run on its own. Pre-existing >5 s cases: `test_parallel_exact` (x10, 4.7 s alone), `test_workspace_cook::the_other_sop_fixtures_lower_and_cook`, `optional_rest`.
+  - Open: `placement.rs:33` GPU handle leak (3 vs 2 after owner close; pre-existing, was masked by the earlier :270 failure).
 
 - 2026-11-08: D6 non-Flow pass landed (see D6 row). Tests: rays_math/input/metal* 45, rdk_* 480, runtime/editor_core/pxui* 52, rays/flow_native 58, rays_editor 64, pxui_graph test-hooks 31; all pass; gate deps 28. Found 12 test files under `crates/rays_editor/tests/` (suite_t1-3 support, suite_t6/*) that are never compiled. They need wiring or deleting.
 
