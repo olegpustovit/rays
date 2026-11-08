@@ -37,6 +37,7 @@ fn digest(v: &Result<Value, rays_diagnostic::Diagnostic>) -> u64 {
         Ok(Value::Floats(1..=4, a)) => a.iter().for_each(|x| eat(x.to_bits())),
         Ok(Value::Int_array(a)) => a.iter().for_each(|x| eat(*x as u64)),
         Ok(Value::Float(x)) => eat(x.to_bits()),
+        Ok(Value::Text_array(a)) => a.iter().for_each(|row| row.iter().chain(&[0xff]).for_each(|b| eat(*b as u64))),
         Ok(other) => format!("{other:?}").bytes().for_each(|b| eat(b as u64)),
         Err(d) => rays_diagnostic::to_string(d).bytes().for_each(|b| eat(b as u64)),
     }
@@ -98,7 +99,7 @@ fn main() {
             3,
             false,
         ),
-        ("text map 5,001".into(), r#"(map (fn [x] (if (> t 0.) x "😀")) (array/text 5001 "猫"))"#.into(), true, 20, false),
+        ("text map 5,001".into(), r#"(map (fn [x] (if (> t 0.) x "😀")) (array/text 5001 "猫"))"#.into(), true, 20, true),
         ("int map 1,000,000".into(), "(map (fn [x] (int/add (int/mul x 3) (int t))) (array/range 1000000 :type int))".into(), true, 2, false),
         ("int to float 1,000,000".into(), "(map (fn [x] (* (float x) t)) (array/range 1000000 :type int))".into(), true, 2, false),
     ];
