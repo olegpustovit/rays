@@ -34,121 +34,164 @@ struct State {
     reads: Cell<i64>,
     texture_reads: Cell<i64>,
     abandoned: Cell<i64>,
+    no_render: Cell<bool>,
     order: RefCell<Vec<&'static str>>,
 }
 fn injected<T>() -> Result<T, error::Error> {
     Err(error::make("test", ErrorKind::InvalidState, "injected image sink failure"))
 }
-fn driver(state: Rc<State>) -> Driver {
-    let base = ogpu::impl_::create_driver().unwrap();
-    Driver { create_device: Box::new(move || {
-        let mut raw = (base.create_device)()?;
-        let inner = raw.create_buffer;
-        let st = state.clone();
-        raw.create_buffer = Box::new(move |memory, descriptor| {
-            let mut resource = inner(memory, descriptor)?;
-            let read = resource.read;
-            let st = st.clone();
-            resource.read = Box::new(move |offset, length| {
-                assert_eq!(length, 4);
-                st.reads.set(st.reads.get() + 1);
-                read(offset, length)
-            });
-            Ok(resource)
-        });
-        let inner = raw.create_render_pipeline;
-        let st = state.clone();
-        raw.create_render_pipeline = Box::new(move |options, descriptor| {
-            if st.fail_pipeline.get() { return injected(); }
-            let mut pipeline = inner(options, descriptor)?;
-            st.pipelines.set(st.pipelines.get() + 1);
-            let destroy = pipeline.destroy_pipeline;
-            let st = st.clone();
-            pipeline.destroy_pipeline = Box::new(move || {
-                destroy()?;
-                st.pipelines.set(st.pipelines.get() - 1);
-                Ok(())
-            });
-            Ok(pipeline)
-        });
-        let inner = raw.create_texture;
-        let st = state.clone();
-        raw.create_texture = Box::new(move |descriptor| {
-            if st.fail_texture.get() { return injected(); }
-            let mut resource = inner(descriptor)?;
-            let read = resource.read;
-            let st = st.clone();
-            resource.read = Box::new(move |offset, length| {
-                st.texture_reads.set(st.texture_reads.get() + 1);
-                read(offset, length)
-            });
-            Ok(resource)
-        });
-        let inner = raw.create_queue;
-        let st = state.clone();
-        raw.create_queue = Box::new(move || {
-            let mut queue = inner()?;
-            let complete = queue.complete_through;
-            let st1 = st.clone();
-            queue.complete_through = Box::new(move |epoch| {
-                st1.order.borrow_mut().push("complete");
-                // Retire actual native work before injecting an error: cleanup may destroy its target.
-                complete(epoch)?;
-                if st1.fail_complete.get() { injected() } else { Ok(()) }
-            });
-            let begin = queue.begin_commands;
-            let st = st.clone();
-            queue.begin_commands = Box::new(move || {
-                let mut commands = begin()?;
-                let commit = commands.commit;
-                let st1 = st.clone();
-                commands.commit = Box::new(move || {
-                    st1.order.borrow_mut().push("commit");
-                    commit()
-                });
-                let abandon = commands.abandon;
-                let st1 = st.clone();
-                commands.abandon = Box::new(move || {
-                    st1.abandoned.set(st1.abandoned.get() + 1);
-                    abandon()
-                });
-                let render = commands.render_encoder;
-                let st = st.clone();
-                commands.render_encoder = Box::new(move |target| {
-                    st.order.borrow_mut().push("render");
-                    assert_eq!(target.target_colors.len(), 1);
-                    let mut encoder = render(target)?;
-                    let draw = encoder.draw;
-                    let st1 = st.clone();
-                    encoder.draw = Box::new(move |primitive, first, count, instances| {
-                        st1.order.borrow_mut().push("draw");
-                        assert_eq!((first, count), (0, 3));
-                        if st1.fail_draw.get() { injected() } else { draw(primitive, first, count, instances) }
-                    });
-                    let end = encoder.end_render;
-                    let st = st.clone();
-                    encoder.end_render = Box::new(move || {
-                        st.order.borrow_mut().push("end_render");
-                        end()
-                    });
-                    Ok(encoder)
-                });
-                Ok(commands)
-            });
-            Ok(queue)
-        });
-        Ok(raw)
-    }) }
+type E = error::Error;
+macro_rules! forward {
+    ($($name:ident($($arg:ident: $ty:ty),*) -> $ret:ty;)*) => {
+        $(fn $name(&self, $($arg: $ty),*) -> $ret { self.inner.$name($($arg),*) })*
+    };
+}
+// `texture` selects which read counter a wrapped resource bumps.
+struct Wrapped<T: ?Sized> { inner: Box<T>, st: Rc<State>, texture: bool }
+fn wrap<T: ?Sized>(inner: Box<T>, st: &Rc<State>) -> Box<Wrapped<T>> { Box::new(Wrapped { inner, st: st.clone(), texture: false }) }
+impl b::DriverResource for Wrapped<dyn b::DriverResource> {
+    forward! {
+        token() -> b::Token;
+        write(offset: i64, bytes: &[u8]) -> Result<(), E>;
+        read_into(offset: i64, destination: &mut [u8], destination_offset: usize, length: usize) -> Result<(), E>;
+        destroy() -> Result<(), E>;
+    }
+    fn read(&self, offset: i64, length: usize) -> Result<Vec<u8>, E> {
+        if self.texture {
+            self.st.texture_reads.set(self.st.texture_reads.get() + 1);
+        } else {
+            assert_eq!(length, 4);
+            self.st.reads.set(self.st.reads.get() + 1);
+        }
+        self.inner.read(offset, length)
+    }
+}
+impl b::DriverPipeline for Wrapped<dyn b::DriverPipeline> {
+    forward! { pipeline_token() -> b::Token; max_threads() -> i64; }
+    fn destroy_pipeline(&self) -> Result<(), E> {
+        self.inner.destroy_pipeline()?;
+        self.st.pipelines.set(self.st.pipelines.get() - 1);
+        Ok(())
+    }
+}
+impl b::DriverRenderEncoder for Wrapped<dyn b::DriverRenderEncoder> {
+    forward! {
+        render_set_pipeline(pipeline: b::Token) -> Result<(), E>;
+        set_stage_buffer(stage: b::ShaderStage, index: i64, offset: i64, buffer: b::Token) -> Result<(), E>;
+        set_stage_texture(stage: b::ShaderStage, index: i64, texture: b::Token) -> Result<(), E>;
+        set_stage_sampler(stage: b::ShaderStage, index: i64, sampler: b::Token) -> Result<(), E>;
+        set_viewport(rect: ogpu::render_pass::Rect) -> Result<(), E>;
+        set_scissor(rect: ogpu::render_pass::Rect) -> Result<(), E>;
+        set_cull(cull: ogpu::render_pass::Cull) -> Result<(), E>;
+        set_winding(winding: b::Winding) -> Result<(), E>;
+        set_depth_state(state: Option<b::DepthState>) -> Result<(), E>;
+        draw_indexed(primitive: ogpu::render_pass::Primitive, index_type: ogpu::render_pass::IndexType, buffer: b::Token, offset: i64, count: i64, instances: i64) -> Result<(), E>;
+        draw_indexed_indirect(primitive: ogpu::render_pass::Primitive, index_type: ogpu::render_pass::IndexType, buffer: b::Token, offset: i64, arguments: b::Token, arguments_offset: i64) -> Result<(), E>;
+        draw_batch(draws: &[b::DriverBatchDraw]) -> Result<(), E>;
+        use_resources(resources: &[b::Token]) -> Result<(), E>;
+        execute_icb(icb: b::Token, location: i64, length: i64) -> Result<(), E>;
+    }
+    fn draw(&self, primitive: ogpu::render_pass::Primitive, first: i64, count: i64, instances: i64) -> Result<(), E> {
+        self.st.order.borrow_mut().push("draw");
+        assert_eq!((first, count), (0, 3));
+        if self.st.fail_draw.get() { injected() } else { self.inner.draw(primitive, first, count, instances) }
+    }
+    fn end_render(&self) -> Result<(), E> {
+        self.st.order.borrow_mut().push("end_render");
+        self.inner.end_render()
+    }
+}
+impl b::DriverCommands for Wrapped<dyn b::DriverCommands> {
+    forward! {
+        compute_encoder() -> Result<Box<dyn b::DriverComputeEncoder>, E>;
+        accel_encoder() -> Result<Box<dyn b::DriverAccelEncoder>, E>;
+        blit_encoder() -> Result<Box<dyn b::DriverBlitEncoder>, E>;
+        commit_present(source: b::Token, frame: b::DriverFrame) -> Result<b::Receipt, E>;
+    }
+    fn commit(&self) -> Result<b::Receipt, E> {
+        self.st.order.borrow_mut().push("commit");
+        self.inner.commit()
+    }
+    fn abandon(&self) -> Result<(), E> {
+        self.st.abandoned.set(self.st.abandoned.get() + 1);
+        self.inner.abandon()
+    }
+    fn render_encoder(&self, target: &b::DriverRenderTarget) -> Result<Box<dyn b::DriverRenderEncoder>, E> {
+        self.st.order.borrow_mut().push("render");
+        assert_eq!(target.target_colors.len(), 1);
+        Ok(wrap(self.inner.render_encoder(target)?, &self.st))
+    }
+}
+impl b::DriverQueue for Wrapped<dyn b::DriverQueue> {
+    forward! {
+        poll_through(epoch: i64) -> Result<bool, E>;
+        completed_epoch() -> i64;
+        gpu_duration(epoch: i64) -> Option<f64>;
+        gpu_timing() -> b::GpuTiming;
+        destroy_queue() -> Result<(), E>;
+    }
+    fn complete_through(&self, epoch: i64) -> Result<(), E> {
+        self.st.order.borrow_mut().push("complete");
+        // Retire actual native work before injecting an error: cleanup may destroy its target.
+        self.inner.complete_through(epoch)?;
+        if self.st.fail_complete.get() { injected() } else { Ok(()) }
+    }
+    fn begin_commands(&self) -> Result<Box<dyn b::DriverCommands>, E> {
+        Ok(wrap(self.inner.begin_commands()?, &self.st))
+    }
+}
+impl b::DriverDevice for Wrapped<dyn b::DriverDevice> {
+    forward! {
+        device_handle() -> ogpu::handle::Device;
+        allocated_size() -> i64;
+        recommended_working_set() -> i64;
+        create_mapped_buffer(descriptor: &ogpu::types::BufferDescriptor) -> Result<b::DriverMapped, E>;
+        create_depth_texture(descriptor: &ogpu::types::TextureDescriptor) -> Result<Box<dyn b::DriverResource>, E>;
+        create_memoryless_texture(depth: bool, descriptor: &ogpu::types::TextureDescriptor) -> Result<Box<dyn b::DriverResource>, E>;
+        create_library(shader: &ogpu::shader::Shader) -> Result<Box<dyn b::DriverLibrary>, E>;
+        warm_library(shader: &ogpu::shader::Shader) -> Option<b::Warm>;
+        create_accel(descriptor: &b::DriverAccelDescriptor) -> Result<Box<dyn b::DriverAccel>, E>;
+        instance_layout(kind: b::InstanceKind) -> Vec<i64>;
+        create_sampler(descriptor: &ogpu::types::SamplerDescriptor) -> Result<Box<dyn b::DriverSampler>, E>;
+        create_icb(max_commands: i64) -> Result<Box<dyn b::DriverIcb>, E>;
+        create_argument(pipeline: b::Token, stage: b::ShaderStage, index: i64) -> Result<Box<dyn b::DriverArgument>, E>;
+        create_surface(configuration: &ogpu::surface::Configuration) -> Result<Box<dyn b::DriverSurface>, E>;
+        destroy_device() -> Result<(), E>;
+    }
+    fn capabilities(&self) -> ogpu::caps::Caps {
+        let mut caps = self.inner.capabilities();
+        if self.st.no_render.get() { caps.render_pipeline = false; }
+        caps
+    }
+    fn create_buffer(&self, memory: ogpu::types::Memory, descriptor: &ogpu::types::BufferDescriptor) -> Result<Box<dyn b::DriverResource>, E> {
+        Ok(wrap(self.inner.create_buffer(memory, descriptor)?, &self.st))
+    }
+    fn create_render_pipeline(&self, options: b::RenderPipelineOptions, descriptor: &ogpu::pipeline::RenderDescriptor) -> Result<Box<dyn b::DriverPipeline>, E> {
+        if self.st.fail_pipeline.get() { return injected(); }
+        let pipeline = self.inner.create_render_pipeline(options, descriptor)?;
+        self.st.pipelines.set(self.st.pipelines.get() + 1);
+        Ok(wrap(pipeline, &self.st))
+    }
+    fn create_texture(&self, descriptor: &ogpu::types::TextureDescriptor) -> Result<Box<dyn b::DriverResource>, E> {
+        if self.st.fail_texture.get() { return injected(); }
+        let inner = self.inner.create_texture(descriptor)?;
+        Ok(Box::new(Wrapped { inner, st: self.st.clone(), texture: true }))
+    }
+    fn create_queue(&self) -> Result<Box<dyn b::DriverQueue>, E> {
+        Ok(wrap(self.inner.create_queue()?, &self.st))
+    }
+}
+struct Wrap { base: Box<dyn Driver>, st: Rc<State> }
+impl Driver for Wrap {
+    fn create_device(&self) -> Result<Box<dyn b::DriverDevice>, E> { Ok(wrap(self.base.create_device()?, &self.st)) }
+}
+fn driver(state: Rc<State>) -> Box<dyn Driver> {
+    Box::new(Wrap { base: ogpu::impl_::create_driver().unwrap(), st: state })
 }
 fn image_sink_transactions() {
     if !common::gpu() { return; }
     let before = ogpu::impl_::live_handles().unwrap();
-    let base = ogpu::impl_::create_driver().unwrap();
-    let unsupported = Driver { create_device: Box::new(move || {
-        let mut raw = (base.create_device)()?;
-        raw.capabilities.render_pipeline = false;
-        Ok(raw)
-    }) };
+    let unsupported = driver(Rc::new(State { no_render: Cell::new(true), ..State::default() }));
     let device = b::create_device(unsupported).unwrap();
     let queue = b::create_queue(&device).unwrap();
     assert!(s::create_owned(&device, &queue).is_err());

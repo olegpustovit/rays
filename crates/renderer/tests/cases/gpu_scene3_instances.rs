@@ -394,79 +394,136 @@ struct native_vertex_observation {
     mesh_upload_bytes: usize,
 }
 
-// Observe the real native ABI: struct updates retain every unobserved operation, and each
+type Seen = Rc<std::cell::RefCell<native_vertex_observation>>;
+type E = ogpu::error::Error;
+macro_rules! forward {
+    ($($name:ident($($arg:ident: $ty:ty),*) -> $ret:ty;)*) => {
+        $(fn $name(&self, $($arg: $ty),*) -> $ret { self.inner.$name($($arg),*) })*
+    };
+}
+struct Observed<T: ?Sized> { inner: Box<T>, seen: Seen }
+impl backend::DriverResource for Observed<dyn backend::DriverResource> {
+    forward! {
+        token() -> backend::Token;
+        read(offset: i64, length: usize) -> Result<Vec<u8>, E>;
+        read_into(offset: i64, destination: &mut [u8], destination_offset: usize, length: usize) -> Result<(), E>;
+        destroy() -> Result<(), E>;
+    }
+    fn write(&self, offset: i64, bytes: &[u8]) -> Result<(), E> {
+        self.inner.write(offset, bytes)?;
+        self.seen.borrow_mut().mesh_upload_bytes += bytes.len();
+        Ok(())
+    }
+}
+impl backend::DriverRenderEncoder for Observed<dyn backend::DriverRenderEncoder> {
+    forward! {
+        render_set_pipeline(pipeline: backend::Token) -> Result<(), E>;
+        set_stage_texture(stage: backend::ShaderStage, index: i64, texture: backend::Token) -> Result<(), E>;
+        set_stage_sampler(stage: backend::ShaderStage, index: i64, sampler: backend::Token) -> Result<(), E>;
+        set_viewport(rect: ogpu::render_pass::Rect) -> Result<(), E>;
+        set_scissor(rect: ogpu::render_pass::Rect) -> Result<(), E>;
+        set_cull(cull: Cull) -> Result<(), E>;
+        set_winding(winding: backend::Winding) -> Result<(), E>;
+        set_depth_state(state: Option<backend::DepthState>) -> Result<(), E>;
+        draw(primitive: Primitive, first: i64, count: i64, instances: i64) -> Result<(), E>;
+        draw_indexed(primitive: Primitive, index_type: ogpu::render_pass::IndexType, buffer: backend::Token, offset: i64, count: i64, instances: i64) -> Result<(), E>;
+        draw_indexed_indirect(primitive: Primitive, index_type: ogpu::render_pass::IndexType, buffer: backend::Token, offset: i64, arguments: backend::Token, arguments_offset: i64) -> Result<(), E>;
+        use_resources(resources: &[backend::Token]) -> Result<(), E>;
+        execute_icb(icb: backend::Token, location: i64, length: i64) -> Result<(), E>;
+        end_render() -> Result<(), E>;
+    }
+    fn set_stage_buffer(&self, stage: backend::ShaderStage, slot: i64, offset: i64, token: backend::Token) -> Result<(), E> {
+        self.inner.set_stage_buffer(stage, slot, offset, token)?;
+        if stage == backend::ShaderStage::Vertex {
+            self.seen.borrow_mut().bindings.push((slot, token, offset));
+        }
+        Ok(())
+    }
+    fn draw_batch(&self, draws: &[backend::DriverBatchDraw]) -> Result<(), E> {
+        self.inner.draw_batch(draws)?;
+        for draw in draws {
+            for &(stage, slot, token, offset) in &draw.batch_buffers {
+                if stage == backend::ShaderStage::Vertex {
+                    self.seen.borrow_mut().bindings.push((slot, token, offset));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+impl backend::DriverCommands for Observed<dyn backend::DriverCommands> {
+    forward! {
+        compute_encoder() -> Result<Box<dyn backend::DriverComputeEncoder>, E>;
+        accel_encoder() -> Result<Box<dyn backend::DriverAccelEncoder>, E>;
+        blit_encoder() -> Result<Box<dyn backend::DriverBlitEncoder>, E>;
+        commit() -> Result<backend::Receipt, E>;
+        commit_present(source: backend::Token, frame: backend::DriverFrame) -> Result<backend::Receipt, E>;
+        abandon() -> Result<(), E>;
+    }
+    fn render_encoder(&self, target: &backend::DriverRenderTarget) -> Result<Box<dyn backend::DriverRenderEncoder>, E> {
+        Ok(Box::new(Observed { inner: self.inner.render_encoder(target)?, seen: self.seen.clone() }))
+    }
+}
+impl backend::DriverQueue for Observed<dyn backend::DriverQueue> {
+    forward! {
+        complete_through(epoch: i64) -> Result<(), E>;
+        poll_through(epoch: i64) -> Result<bool, E>;
+        completed_epoch() -> i64;
+        gpu_duration(epoch: i64) -> Option<f64>;
+        gpu_timing() -> backend::GpuTiming;
+        destroy_queue() -> Result<(), E>;
+    }
+    fn begin_commands(&self) -> Result<Box<dyn backend::DriverCommands>, E> {
+        Ok(Box::new(Observed { inner: self.inner.begin_commands()?, seen: self.seen.clone() }))
+    }
+}
+impl backend::DriverDevice for Observed<dyn backend::DriverDevice> {
+    forward! {
+        device_handle() -> ogpu::handle::Device;
+        capabilities() -> ogpu::caps::Caps;
+        allocated_size() -> i64;
+        recommended_working_set() -> i64;
+        create_mapped_buffer(descriptor: &BufferDescriptor) -> Result<backend::DriverMapped, E>;
+        create_texture(descriptor: &ogpu::types::TextureDescriptor) -> Result<Box<dyn backend::DriverResource>, E>;
+        create_depth_texture(descriptor: &ogpu::types::TextureDescriptor) -> Result<Box<dyn backend::DriverResource>, E>;
+        create_memoryless_texture(depth: bool, descriptor: &ogpu::types::TextureDescriptor) -> Result<Box<dyn backend::DriverResource>, E>;
+        create_library(shader: &ogpu::shader::Shader) -> Result<Box<dyn backend::DriverLibrary>, E>;
+        warm_library(shader: &ogpu::shader::Shader) -> Option<backend::Warm>;
+        create_accel(descriptor: &backend::DriverAccelDescriptor) -> Result<Box<dyn backend::DriverAccel>, E>;
+        instance_layout(kind: backend::InstanceKind) -> Vec<i64>;
+        create_sampler(descriptor: &ogpu::types::SamplerDescriptor) -> Result<Box<dyn backend::DriverSampler>, E>;
+        create_render_pipeline(options: backend::RenderPipelineOptions, descriptor: &ogpu::pipeline::RenderDescriptor) -> Result<Box<dyn backend::DriverPipeline>, E>;
+        create_icb(max_commands: i64) -> Result<Box<dyn backend::DriverIcb>, E>;
+        create_argument(pipeline: backend::Token, stage: backend::ShaderStage, index: i64) -> Result<Box<dyn backend::DriverArgument>, E>;
+        create_surface(configuration: &ogpu::surface::Configuration) -> Result<Box<dyn backend::DriverSurface>, E>;
+        destroy_device() -> Result<(), E>;
+    }
+    fn create_buffer(&self, memory: ogpu::types::Memory, descriptor: &BufferDescriptor) -> Result<Box<dyn backend::DriverResource>, E> {
+        let buffer = self.inner.create_buffer(memory, descriptor)?;
+        if let Some(label) = &descriptor.label {
+            self.seen.borrow_mut().buffers.insert(label.clone(), buffer.token());
+        }
+        if descriptor.label.as_ref().is_some_and(|label| label.starts_with("scene-mesh-")) {
+            Ok(Box::new(Observed { inner: buffer, seen: self.seen.clone() }))
+        } else {
+            Ok(buffer)
+        }
+    }
+    fn create_queue(&self) -> Result<Box<dyn backend::DriverQueue>, E> {
+        Ok(Box::new(Observed { inner: self.inner.create_queue()?, seen: self.seen.clone() }))
+    }
+}
+struct ObservedDriver { base: Box<dyn backend::Driver>, seen: Seen }
+impl backend::Driver for ObservedDriver {
+    fn create_device(&self) -> Result<Box<dyn backend::DriverDevice>, E> {
+        Ok(Box::new(Observed { inner: self.base.create_device()?, seen: self.seen.clone() }))
+    }
+}
+
+// Observe the real native ABI: wrappers forward every unobserved operation, and each
 // intercepted operation delegates to the original driver before recording its successful result.
-fn observe_native_vertices(
-    base: backend::Driver,
-    seen: Rc<std::cell::RefCell<native_vertex_observation>>,
-) -> backend::Driver {
-    backend::Driver { create_device: Box::new(move || {
-        let raw = (base.create_device)()?;
-        let uploads = seen.clone();
-        let queues = seen.clone();
-        Ok(backend::DriverDevice {
-            create_buffer: Box::new(move |memory, descriptor| {
-                let buffer = (raw.create_buffer)(memory, descriptor)?;
-                if let Some(label) = &descriptor.label {
-                    uploads.borrow_mut().buffers.insert(label.clone(), buffer.token);
-                }
-                if descriptor.label.as_ref().is_some_and(|label| label.starts_with("scene-mesh-")) {
-                    let uploads = uploads.clone();
-                    Ok(backend::DriverResource {
-                        write: Box::new(move |offset, bytes| {
-                            (buffer.write)(offset, bytes)?;
-                            uploads.borrow_mut().mesh_upload_bytes += bytes.len();
-                            Ok(())
-                        }),
-                        ..buffer
-                    })
-                } else {
-                    Ok(buffer)
-                }
-            }),
-            create_queue: Box::new(move || {
-                let queue = (raw.create_queue)()?;
-                let commands_seen = queues.clone();
-                Ok(backend::DriverQueue {
-                    begin_commands: Box::new(move || {
-                        let commands = (queue.begin_commands)()?;
-                        let encoders_seen = commands_seen.clone();
-                        Ok(backend::DriverCommands {
-                            render_encoder: Box::new(move |target| {
-                                let encoder = (commands.render_encoder)(target)?;
-                                let bindings = encoders_seen.clone();
-                                let batches = encoders_seen.clone();
-                                Ok(backend::DriverRenderEncoder {
-                                    set_stage_buffer: Box::new(move |stage, slot, offset, token| {
-                                        (encoder.set_stage_buffer)(stage, slot, offset, token)?;
-                                        if stage == backend::ShaderStage::Vertex {
-                                            bindings.borrow_mut().bindings.push((slot, token, offset));
-                                        }
-                                        Ok(())
-                                    }),
-                                    draw_batch: Box::new(move |draws| {
-                                        (encoder.draw_batch)(draws)?;
-                                        for draw in draws {
-                                            for &(stage, slot, token, offset) in &draw.batch_buffers {
-                                                if stage == backend::ShaderStage::Vertex {
-                                                    batches.borrow_mut().bindings.push((slot, token, offset));
-                                                }
-                                            }
-                                        }
-                                        Ok(())
-                                    }),
-                                    ..encoder
-                                })
-                            }),
-                            ..commands
-                        })
-                    }),
-                    ..queue
-                })
-            }),
-            ..raw
-        })
-    }) }
+fn observe_native_vertices(base: Box<dyn backend::Driver>, seen: Seen) -> Box<dyn backend::Driver> {
+    Box::new(ObservedDriver { base, seen })
 }
 
 // lib/scene_execution/test_gpu_vertices.ml:249-283,291-310,344-370.

@@ -17,106 +17,138 @@ struct Faults {
 }
 fn bump(c: &Cell<i64>) { c.set(c.get() + 1); }
 fn injected(message: &str) -> error::Error { error::make("test", ErrorKind::InvalidState, message) }
-fn resource(mut r: b::DriverResource, size: i64, f: Rc<Faults>) -> b::DriverResource {
-    let write = r.write;
-    let w = f.clone();
-    r.write = Box::new(move |offset, bytes| {
+type E = error::Error;
+macro_rules! forward {
+    ($($name:ident($($arg:ident: $ty:ty),*) -> $ret:ty;)*) => {
+        $(fn $name(&self, $($arg: $ty),*) -> $ret { self.inner.$name($($arg),*) })*
+    };
+}
+struct Faulty<T: ?Sized> { inner: Box<T>, f: Rc<Faults>, size: i64 }
+fn wrap<T: ?Sized>(inner: Box<T>, f: &Rc<Faults>, size: i64) -> Faulty<T> { Faulty { inner, f: f.clone(), size } }
+impl b::DriverResource for Faulty<dyn b::DriverResource> {
+    forward! { token() -> b::Token; destroy() -> Result<(), E>; }
+    fn write(&self, offset: i64, bytes: &[u8]) -> Result<(), E> {
+        let (size, w) = (self.size, &self.f);
         if size == 2048 {
             bump(&w.tables);
             if w.table.get() { return Err(injected("injected table upload")); }
         } else if size >= 4096 {
             bump(&w.inputs);
-            let result = write(offset, bytes);
+            let result = self.inner.write(offset, bytes);
             return if w.input.get() { Err(injected("injected partial input upload")) } else { result };
         }
-        write(offset, bytes)
-    });
-    let read = r.read;
-    let flags = f.clone();
-    r.read = Box::new(move |offset, length| {
-        if flags.invalid.get() && length == 4 { Ok(1u32.to_le_bytes().to_vec()) } else { read(offset, length) }
-    });
-    let read_into = r.read_into;
-    r.read_into = Box::new(move |offset, bytes, start, length| {
-        if f.invalid.get() && length == 4 {
+        self.inner.write(offset, bytes)
+    }
+    fn read(&self, offset: i64, length: usize) -> Result<Vec<u8>, E> {
+        if self.f.invalid.get() && length == 4 { Ok(1u32.to_le_bytes().to_vec()) } else { self.inner.read(offset, length) }
+    }
+    fn read_into(&self, offset: i64, bytes: &mut [u8], start: usize, length: usize) -> Result<(), E> {
+        if self.f.invalid.get() && length == 4 {
             bytes[start..start + 4].copy_from_slice(&1u32.to_le_bytes()); Ok(())
-        } else { read_into(offset, bytes, start, length) }
-    });
-    r
+        } else { self.inner.read_into(offset, bytes, start, length) }
+    }
 }
-fn driver(f: Rc<Faults>) -> b::Driver {
-    let base = ogpu::impl_::create_driver().expect("native driver");
-    b::Driver { create_device: Box::new(move || {
-        let mut raw = (base.create_device)()?;
-        let working = raw.recommended_working_set;
-        let w = f.clone();
-        raw.recommended_working_set = Box::new(move || w.working_set.get().unwrap_or_else(&working));
-        let create = raw.create_buffer;
-        let w = f.clone();
-        raw.create_buffer = Box::new(move |memory, descriptor| {
-            bump(&w.creates);
-            create(memory, descriptor).map(|r| resource(r, descriptor.size, w.clone()))
-        });
-        let create = raw.create_mapped_buffer;
-        let w = f.clone();
-        raw.create_mapped_buffer = Box::new(move |descriptor| {
-            let mut mapped = create(descriptor)?;
-            mapped.mapped_resource = resource(mapped.mapped_resource, descriptor.size, w.clone());
-            let view = mapped.view;
-            let v = w.clone();
-            mapped.view = Box::new(move || { bump(&v.views); view() });
-            let release = mapped.release_view;
-            let v = w.clone();
-            mapped.release_view = Box::new(move || { bump(&v.releases); release() });
-            let flush = mapped.flush;
-            let size = descriptor.size;
-            let v = w.clone();
-            mapped.flush = Box::new(move |length| {
-                if size >= 4096 {
-                    bump(&v.inputs);
-                    let result = flush(length);
-                    if v.input.get() { Err(injected("injected partial input upload")) } else { result }
-                } else { flush(length) }
-            });
-            Ok(mapped)
-        });
-        let create = raw.create_library;
-        let w = f.clone();
-        raw.create_library = Box::new(move |shader| {
-            let mut library = create(shader)?;
-            let create = library.create_compute_pipeline_in;
-            let w = w.clone();
-            library.create_compute_pipeline_in = Box::new(move |entry, constants, interface| {
-                let mut pipeline = create(entry, constants, interface)?;
-                bump(&w.pipelines);
-                let destroy = pipeline.destroy_pipeline;
-                let w = w.clone();
-                pipeline.destroy_pipeline = Box::new(move || { let result = destroy(); if result.is_ok() { w.pipelines.set(w.pipelines.get() - 1); } result });
-                Ok(pipeline)
-            });
-            Ok(library)
-        });
-        let create = raw.create_queue;
-        let w = f.clone();
-        raw.create_queue = Box::new(move || {
-            let mut queue = create()?;
-            let complete = queue.complete_through;
-            let v = w.clone();
-            queue.complete_through = Box::new(move |epoch| if v.completion.get() { Err(injected("injected completion")) } else { complete(epoch) });
-            let begin = queue.begin_commands;
-            let v = w.clone();
-            queue.begin_commands = Box::new(move || {
-                let mut commands = begin()?;
-                let commit = commands.commit;
-                let v = v.clone();
-                commands.commit = Box::new(move || { bump(&v.submitted); commit() });
-                // The native encoder and real pipeline limits are deliberately untouched.
-                Ok(commands)
-            });
-            Ok(queue)
-        });
-        Ok(raw)
-    }) }
+impl b::DriverMapping for Faulty<dyn b::DriverMapping> {
+    forward! { readback() -> b::OwnedReadback; invalidate(length: usize) -> Result<(), E>; }
+    fn view(&self) -> Option<b::Floats> { bump(&self.f.views); self.inner.view() }
+    fn release_view(&self) { bump(&self.f.releases); self.inner.release_view() }
+    fn flush(&self, length: usize) -> Result<(), E> {
+        if self.size >= 4096 {
+            bump(&self.f.inputs);
+            let result = self.inner.flush(length);
+            if self.f.input.get() { Err(injected("injected partial input upload")) } else { result }
+        } else { self.inner.flush(length) }
+    }
+}
+impl b::DriverPipeline for Faulty<dyn b::DriverPipeline> {
+    forward! { pipeline_token() -> b::Token; max_threads() -> i64; }
+    fn destroy_pipeline(&self) -> Result<(), E> {
+        let result = self.inner.destroy_pipeline();
+        if result.is_ok() { self.f.pipelines.set(self.f.pipelines.get() - 1); }
+        result
+    }
+}
+impl b::DriverLibrary for Faulty<dyn b::DriverLibrary> {
+    forward! { destroy_library() -> Result<(), E>; }
+    fn create_compute_pipeline_in(&self, entry: &str, constants: &[(String, ogpu::shader::ConstantValue)], interface: &[ogpu::shader::Binding]) -> Result<Box<dyn b::DriverPipeline>, E> {
+        let pipeline = self.inner.create_compute_pipeline_in(entry, constants, interface)?;
+        bump(&self.f.pipelines);
+        Ok(Box::new(wrap(pipeline, &self.f, 0)))
+    }
+}
+impl b::DriverCommands for Faulty<dyn b::DriverCommands> {
+    forward! {
+        compute_encoder() -> Result<Box<dyn b::DriverComputeEncoder>, E>;
+        accel_encoder() -> Result<Box<dyn b::DriverAccelEncoder>, E>;
+        blit_encoder() -> Result<Box<dyn b::DriverBlitEncoder>, E>;
+        render_encoder(target: &b::DriverRenderTarget) -> Result<Box<dyn b::DriverRenderEncoder>, E>;
+        commit_present(source: b::Token, frame: b::DriverFrame) -> Result<b::Receipt, E>;
+        abandon() -> Result<(), E>;
+    }
+    // The native encoder and real pipeline limits are deliberately untouched.
+    fn commit(&self) -> Result<b::Receipt, E> { bump(&self.f.submitted); self.inner.commit() }
+}
+impl b::DriverQueue for Faulty<dyn b::DriverQueue> {
+    forward! {
+        poll_through(epoch: i64) -> Result<bool, E>;
+        completed_epoch() -> i64;
+        gpu_duration(epoch: i64) -> Option<f64>;
+        gpu_timing() -> b::GpuTiming;
+        destroy_queue() -> Result<(), E>;
+    }
+    fn complete_through(&self, epoch: i64) -> Result<(), E> {
+        if self.f.completion.get() { Err(injected("injected completion")) } else { self.inner.complete_through(epoch) }
+    }
+    fn begin_commands(&self) -> Result<Box<dyn b::DriverCommands>, E> {
+        Ok(Box::new(wrap(self.inner.begin_commands()?, &self.f, 0)))
+    }
+}
+impl b::DriverDevice for Faulty<dyn b::DriverDevice> {
+    forward! {
+        device_handle() -> ogpu::handle::Device;
+        capabilities() -> ogpu::caps::Caps;
+        allocated_size() -> i64;
+        create_texture(descriptor: &ogpu::types::TextureDescriptor) -> Result<Box<dyn b::DriverResource>, E>;
+        create_depth_texture(descriptor: &ogpu::types::TextureDescriptor) -> Result<Box<dyn b::DriverResource>, E>;
+        create_memoryless_texture(depth: bool, descriptor: &ogpu::types::TextureDescriptor) -> Result<Box<dyn b::DriverResource>, E>;
+        warm_library(shader: &ogpu::shader::Shader) -> Option<b::Warm>;
+        create_accel(descriptor: &b::DriverAccelDescriptor) -> Result<Box<dyn b::DriverAccel>, E>;
+        instance_layout(kind: b::InstanceKind) -> Vec<i64>;
+        create_sampler(descriptor: &ogpu::types::SamplerDescriptor) -> Result<Box<dyn b::DriverSampler>, E>;
+        create_render_pipeline(options: b::RenderPipelineOptions, descriptor: &ogpu::pipeline::RenderDescriptor) -> Result<Box<dyn b::DriverPipeline>, E>;
+        create_icb(max_commands: i64) -> Result<Box<dyn b::DriverIcb>, E>;
+        create_argument(pipeline: b::Token, stage: b::ShaderStage, index: i64) -> Result<Box<dyn b::DriverArgument>, E>;
+        create_surface(configuration: &ogpu::surface::Configuration) -> Result<Box<dyn b::DriverSurface>, E>;
+        destroy_device() -> Result<(), E>;
+    }
+    fn recommended_working_set(&self) -> i64 { self.f.working_set.get().unwrap_or_else(|| self.inner.recommended_working_set()) }
+    fn create_buffer(&self, memory: ogpu::types::Memory, descriptor: &ogpu::types::BufferDescriptor) -> Result<Box<dyn b::DriverResource>, E> {
+        bump(&self.f.creates);
+        let r = self.inner.create_buffer(memory, descriptor)?;
+        Ok(Box::new(wrap(r, &self.f, descriptor.size)))
+    }
+    fn create_mapped_buffer(&self, descriptor: &ogpu::types::BufferDescriptor) -> Result<b::DriverMapped, E> {
+        let mapped = self.inner.create_mapped_buffer(descriptor)?;
+        Ok(b::DriverMapped {
+            mapped_resource: Box::new(wrap(mapped.mapped_resource, &self.f, descriptor.size)),
+            mapping: Box::new(wrap(mapped.mapping, &self.f, descriptor.size)),
+        })
+    }
+    fn create_library(&self, shader: &ogpu::shader::Shader) -> Result<Box<dyn b::DriverLibrary>, E> {
+        Ok(Box::new(wrap(self.inner.create_library(shader)?, &self.f, 0)))
+    }
+    fn create_queue(&self) -> Result<Box<dyn b::DriverQueue>, E> {
+        Ok(Box::new(wrap(self.inner.create_queue()?, &self.f, 0)))
+    }
+}
+struct FaultyDriver { base: Box<dyn b::Driver>, f: Rc<Faults> }
+impl b::Driver for FaultyDriver {
+    fn create_device(&self) -> Result<Box<dyn b::DriverDevice>, E> {
+        Ok(Box::new(wrap(self.base.create_device()?, &self.f, 0)))
+    }
+}
+fn driver(f: Rc<Faults>) -> Box<dyn b::Driver> {
+    Box::new(FaultyDriver { base: ogpu::impl_::create_driver().expect("native driver"), f })
 }
 fn fixture(name: &str, count: i64) -> packed::T {
     let body = match name {
