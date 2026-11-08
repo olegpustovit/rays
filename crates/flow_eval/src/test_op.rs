@@ -11,8 +11,8 @@ fn t(s: &str) -> Value { Value::Text(s.as_bytes().to_vec()) }
 fn ia(v: &[i64]) -> Value { Value::Int_array(Arc::new(v.to_vec())) }
 fn fa(v: &[f64]) -> Value { Value::Float_array(Arc::new(v.to_vec())) }
 fn na(n: &str, v: Value) -> (String, Value) { (n.to_owned(), v) }
-const MAX_INT: i64 = (1i64 << 62) - 1;
-const MIN_INT: i64 = -(1i64 << 62);
+const MAX_INT: i64 = i64::MAX;
+const MIN_INT: i64 = i64::MIN;
 
 fn nominal(ty: &Ty) -> Option<Value> {
     let n = match ty { Ty::Named(n) => n.as_str(), _ => return None };

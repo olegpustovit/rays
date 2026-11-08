@@ -7,8 +7,8 @@ use flow_syntax::ty;
 use flow_syntax::value::{self, Value};
 use param::KindView;
 
-const OCAML_MAX_INT: i64 = (1 << 62) - 1;
-const OCAML_MIN_INT: i64 = -(1 << 62);
+const OCAML_MAX_INT: i64 = i64::MAX;
+const OCAML_MIN_INT: i64 = i64::MIN;
 
 #[test]
 fn value_keys_contexts_and_symbols() {

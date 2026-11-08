@@ -7,12 +7,12 @@ use flow_syntax::value::{Value, source_value};
 use rays_diagnostic::Diagnostic;
 use std::sync::{Arc, Mutex};
 
-const MAX_INT: i64 = 4611686018427387903;
-const MIN_INT: i64 = -4611686018427387904;
+const MAX_INT: i64 = i64::MAX;
+const MIN_INT: i64 = i64::MIN;
 
 /// OCaml 63-bit wrapping addition.
 fn add63(a: i64, b: i64) -> i64 {
-    a.wrapping_add(b).wrapping_shl(1) >> 1
+    a.wrapping_add(b)
 }
 fn ints(v: &[i64]) -> Value {
     Value::Int_array(Arc::new(v.to_vec()))

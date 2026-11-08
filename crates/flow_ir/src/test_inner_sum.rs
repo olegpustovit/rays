@@ -10,7 +10,7 @@ use flow_syntax::value::Value;
 use rays_diagnostic::Diagnostic;
 use std::sync::Arc;
 
-const MAX_INT: i64 = 4611686018427387903;
+const MAX_INT: i64 = i64::MAX;
 
 fn checked(body: &str) -> w::Workspace {
     let forms = ok(syntax::parse(&format!("(workspace w (graph g :context host {body}))")));

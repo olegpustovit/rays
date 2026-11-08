@@ -55,31 +55,26 @@ pub fn comparison_name(operation: Comparison) -> &'static str { COMPARISONS.iter
 
 #[inline]
 pub fn integer_apply(operation: Integer, a: i64, b: i64) -> Result<i64, crate::Diagnostic> {
-    let a = ocaml_int::wrap_int63(a);
-    let b = ocaml_int::wrap_int63(b);
-    if matches!(operation, Integer::Ishl | Integer::Ishr) && !(0..=62).contains(&b) {
-        return Err(value::fail("E_RANGE", "Integer shift count must be within [0, 62]."));
+    if matches!(operation, Integer::Ishl | Integer::Ishr) && !(0..=63).contains(&b) {
+        return Err(value::fail("E_RANGE", "Integer shift count must be within [0, 63]."));
     }
-    let result = match operation {
-        Integer::Iadd => ocaml_int::wrap_int63(a.wrapping_add(b)),
-        Integer::Isub => ocaml_int::wrap_int63(a.wrapping_sub(b)),
-        Integer::Imul => ocaml_int::wrap_int63(a.wrapping_mul(b)),
+    Ok(match operation {
+        Integer::Iadd => a.wrapping_add(b),
+        Integer::Isub => a.wrapping_sub(b),
+        Integer::Imul => a.wrapping_mul(b),
         Integer::Idiv if b == 0 => return Err(value::fail("E_RANGE", "Integer division by zero.")),
-        Integer::Idiv => ocaml_int::wrap_int63(a / b),
+        Integer::Idiv => a.wrapping_div(b),
         Integer::Imod if b == 0 => return Err(value::fail("E_RANGE", "Integer division by zero.")),
-        Integer::Imod => ocaml_int::wrap_int63(a % b),
-        Integer::Iand => ocaml_int::wrap_int63(a & b),
-        Integer::Ior => ocaml_int::wrap_int63(a | b),
-        Integer::Ixor => ocaml_int::wrap_int63(a ^ b),
-        Integer::Ishl => ocaml_int::wrap_int63(a.wrapping_shl(b as u32)),
-        Integer::Ishr => ocaml_int::lsr(a, b),
-    };
-    Ok(result)
+        Integer::Imod => a.wrapping_rem(b),
+        Integer::Iand => a & b,
+        Integer::Ior => a | b,
+        Integer::Ixor => a ^ b,
+        Integer::Ishl => a.wrapping_shl(b as u32),
+        Integer::Ishr => ((a as u64) >> b) as i64,
+    })
 }
 #[inline]
 pub fn comparison_apply(operation: Comparison, a: i64, b: i64) -> bool {
-    let a = ocaml_int::wrap_int63(a);
-    let b = ocaml_int::wrap_int63(b);
     match operation { Comparison::Ilt => a < b, Comparison::Ile => a <= b, Comparison::Igt => a > b, Comparison::Ige => a >= b, Comparison::Ieq => a == b }
 }
 pub fn rand_at(seed: i64, index: i64) -> f64 { rays_math::rand::float_at_int(seed, index) }
@@ -113,13 +108,16 @@ mod tests {
         assert_eq!(error_status("E_ARRAY_RANGE", "An array slice must be within its source."), 16);
     }
     #[test]
-    fn integer_operations_keep_ocaml_int_semantics() {
-        assert_eq!(integer_apply(Integer::Iadd, (1_i64 << 62) - 1, 1).unwrap(), -(1_i64 << 62));
-        assert_eq!(integer_apply(Integer::Ishl, 1, 62).unwrap(), -(1_i64 << 62));
-        assert_eq!(integer_apply(Integer::Ishr, -1, 1).unwrap(), (1_i64 << 62) - 1);
-        assert_eq!(integer_apply(Integer::Idiv, -7, 3).unwrap(), -2);
+    fn integer_operations_are_native_i64() {
+        let apply = |op, a, b| integer_apply(op, a, b).unwrap();
+        assert_eq!(apply(Integer::Iadd, i64::MAX, 1), i64::MIN);
+        assert_eq!(apply(Integer::Idiv, i64::MIN, -1), i64::MIN);
+        assert_eq!(apply(Integer::Imod, i64::MIN, -1), 0);
+        assert_eq!(apply(Integer::Ishl, 1, 63), i64::MIN);
+        assert_eq!(apply(Integer::Ishr, -1, 1), i64::MAX);
+        assert_eq!(apply(Integer::Idiv, -7, 3), -2);
         assert_eq!(integer_apply(Integer::Idiv, 1, 0).unwrap_err().code, "E_RANGE");
-        assert_eq!(integer_apply(Integer::Ishl, 1, 63).unwrap_err().code, "E_RANGE");
+        assert_eq!(integer_apply(Integer::Ishl, 1, 64).unwrap_err().code, "E_RANGE");
         assert!(comparison_apply(Comparison::Ilt, -1, 0));
         assert_eq!(integer_name(Integer::Ixor), "int/xor");
     }

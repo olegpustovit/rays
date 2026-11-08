@@ -62,12 +62,12 @@ pub fn vector_fixtures(count: i64) -> Vec<(&'static str, packed::T)> {
     ]
 }
 
-pub const INT63_CHECKS: &str = "(let* [n (int/add (int x) (frame/index))
+pub const INT64_CHECKS: &str = "(let* [n (int/add (int x) (frame/index))
   d (int/add (int/mod n 4) 1) even (int/mul d 2)
-  low (int/shl 1 (int/add 62 (int/mod n 1)))]
-  [(if (int/lt (int/add 4611686018427387903 d) 0) 1. 0.)
-   (if (int/eq (int/mul 4611686018427387903 even) (int/sub 0 even)) 1. 0.)
-   (if (int/eq (int/shr (int/sub 0 d) 62) 1) 1. 0.)
+  low (int/shl 1 (int/add 63 (int/mod n 1)))]
+  [(if (int/lt (int/add 9223372036854775807 d) 0) 1. 0.)
+   (if (int/eq (int/mul 9223372036854775807 even) (int/sub 0 even)) 1. 0.)
+   (if (int/eq (int/shr (int/sub 0 d) 63) 1) 1. 0.)
    (if (and (int/lt (abs low) 0) (int/eq (int/div low -1) low)) 1. 0.)])";
 
 pub fn carried_fixtures(count: i64) -> Vec<(String, packed::T)> {
@@ -96,7 +96,7 @@ pub fn carried_fixtures(count: i64) -> Vec<(String, packed::T)> {
       (fn [a] {:flag false :n (+ a.n x)}) :until (fn [prev next] prev.flag))] s.n)"
                 .into(),
         ),
-        ("iterate-int63".into(), format!("(iterate 1 [t 0. 0. 0.] (fn [unused] {INT63_CHECKS}))")),
+        ("iterate-int63".into(), format!("(iterate 1 [t 0. 0. 0.] (fn [unused] {INT64_CHECKS}))")),
         (
             "loop-uint32".into(),
             "(let* [s (fold [s {:state (int/and (int x) 4294967295) :value 0}]

@@ -14,7 +14,7 @@ use rays_diagnostic::Diagnostic;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 
-const OCAML_MAX_INT: i64 = 4611686018427387903;
+const OCAML_MAX_INT: i64 = i64::MAX;
 
 fn catalog() -> Catalog { Catalog { version: 1, kinds: vec![] } }
 

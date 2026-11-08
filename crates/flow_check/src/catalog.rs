@@ -165,9 +165,7 @@ fn word(form: &Syntax) -> Result<String, Diagnostic> {
 
 fn integer(form: &Syntax) -> Result<i64, Diagnostic> {
     let value = word(form)?.parse::<i64>().map_err(|_| bad(form, "Invalid number in Flow manifest"))?;
-    const MIN: i64 = -(1i64 << 62);
-    const MAX: i64 = (1i64 << 62) - 1;
-    if value < MIN || value > MAX { Err(bad(form, "Invalid number in Flow manifest")) } else { Ok(value) }
+    Ok(value)
 }
 
 fn floating(form: &Syntax) -> Result<f64, Diagnostic> {
@@ -621,7 +619,7 @@ pub fn validate_parameter(report: &mut dyn FnMut(Severity, &str, &str), paramete
     }
     if let (Some(PortType::Int), TermNode::Literal(Value::Float(number))) = (&parameter.ty, &term.node) {
         if number.fract() != 0.0 { report(Severity::ErrorSeverity, "E_INT_LITERAL", &format!(":{} is an integer, not {}", parameter.name, format_g(*number))); }
-        else if *number >= 4_611_686_018_427_387_904.0 || *number < -4_611_686_018_427_387_904.0 { report(Severity::ErrorSeverity, "E_HARD_RANGE", &format!(":{} is outside the integer range", parameter.name)); }
+        else if *number >= 9_223_372_036_854_775_808.0 || *number < -9_223_372_036_854_775_808.0 { report(Severity::ErrorSeverity, "E_HARD_RANGE", &format!(":{} is outside the integer range", parameter.name)); }
     }
     if let ([(_, KindView::Choice(options), _)], TermNode::Literal(value)) =
         (parameter.fields.as_slice(), &term.node)

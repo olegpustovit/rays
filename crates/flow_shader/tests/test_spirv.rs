@@ -37,7 +37,7 @@ fn cases() -> Vec<(String, flow_ir::packed::T)> {
 }
 
 fn fast_sources() -> Vec<(String, String)> {
-    let int63 = format!("(map (fn [x] {}) (array/range 16))", tp::INT63_CHECKS);
+    let int63 = format!("(map (fn [x] {}) (array/range 16))", tp::INT64_CHECKS);
     let mut v: Vec<(&str, String)> = vec![
         ("fast_float", "(map (fn [x] (+ (sin x) t)) (array/range 16))".into()),
         ("fast_input", r#"(map (fn [x] (+ (float x) t)) (array/range 16 :type "int"))"#.into()),

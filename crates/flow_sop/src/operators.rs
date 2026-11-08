@@ -1337,8 +1337,8 @@ mod parity {
     use std::sync::LazyLock;
 
     // OCaml's 63-bit int bounds.
-    const MIN_INT: i64 = -(1 << 62);
-    const MAX_INT: i64 = (1 << 62) - 1;
+    const MIN_INT: i64 = i64::MIN;
+    const MAX_INT: i64 = i64::MAX;
 
     /// The prelude's helpers, less the ones in the sop context (they call Lisp-registered nodes,
     /// absent from this bare catalog).

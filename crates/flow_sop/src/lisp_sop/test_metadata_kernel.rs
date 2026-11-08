@@ -17,8 +17,8 @@ use rdk::{group, topology};
 use sop::context::Options as ContextOptions;
 use sop::{context as sctx, payload, session};
 
-const MAX_INT: i64 = (1 << 62) - 1;
-const MIN_INT: i64 = -(1 << 62);
+const MAX_INT: i64 = i64::MAX;
+const MIN_INT: i64 = i64::MIN;
 
 fn quoted(value: &str) -> String {
     flow_syntax::lisp::quote_string(value.as_bytes())

@@ -355,7 +355,7 @@ pub mod Region {
                 result.extend(stop.iter().copied());
                 result
             }
-            Loop_result(loop_, component, _) => vec![*loop_, loop_ + 1 + component],
+            Loop_result(loop_, component, _) => vec![*loop_, loop_.wrapping_add(1).wrapping_add(*component)],
             _ => Vec::new(),
         }
     }

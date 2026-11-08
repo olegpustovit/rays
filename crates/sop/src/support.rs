@@ -126,17 +126,7 @@ pub fn int_of_string_opt(text: &str) -> Option<i64> {
         return None;
     }
     let digits: String = digits.chars().filter(|c| *c != '_').collect();
-    let magnitude = i128::from_str_radix(&digits, radix).ok()?;
-    let value = if negative { -magnitude } else { magnitude };
-    // OCaml int is 63-bit; hex/octal/binary literals may wrap into the negative half
-    let (min, max) = (-(1_i128 << 62), (1_i128 << 62) - 1);
-    if (min..=max).contains(&value) {
-        Some(value as i64)
-    } else if radix != 10 && !negative && value < (1_i128 << 63) {
-        Some(((value as i64) << 1) >> 1)
-    } else {
-        None
-    }
+    i64::from_str_radix(&format!("{}{digits}", if negative { "-" } else { "" }), radix).ok()
 }
 
 // ---------------------------------------------------------------- plain enums

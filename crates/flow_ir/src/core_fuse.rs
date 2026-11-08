@@ -14,7 +14,6 @@ use flow_syntax::value::{self as V, ResidualId, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-const MAX_INT: i64 = 4_611_686_018_427_387_903;
 
 /// OCaml `Core_region.Unsupported`: the register limit declined, or a producer cannot be spliced.
 #[derive(Debug)]
@@ -204,7 +203,7 @@ pub fn fuse(through_exact: bool, t: RegionT) -> RegionT {
             }
         })
         .collect();
-    let count = if counts.iter().all(|c| c.is_some()) && !counts.is_empty() { Some(counts.iter().fold(MAX_INT, |n, c| n.min(c.unwrap()))) } else { t.count };
+    let count = if counts.iter().all(|c| c.is_some()) && !counts.is_empty() { Some(counts.iter().fold(i64::MAX, |n, c| n.min(c.unwrap()))) } else { t.count };
     let origin_for_t = if t.result == RegionResult::Collect { origin.clone() } else { None };
     let t = match R::rebuild(&t, R::Rebuild { count: Some(count), origin: Some(origin_for_t), ..Default::default() }) {
         Ok(rebuilt) => rebuilt,

@@ -87,16 +87,16 @@ fn number(form: &Syntax) -> Result<f64, Diagnostic> {
 
 fn integer(form: &Syntax) -> Result<i64, Diagnostic> {
     let n = number(form)?;
-    const OCAML_MIN: f64 = -4_611_686_018_427_387_904.0;
-    const OCAML_MAX_EXCLUSIVE: f64 = 4_611_686_018_427_387_904.0;
-    if n < OCAML_MIN || n >= OCAML_MAX_EXCLUSIVE || n.fract() != 0.0 { return Err(bad(form, "Expected an integer.")); }
+    const MIN: f64 = -9_223_372_036_854_775_808.0;
+    const MAX_EXCLUSIVE: f64 = 9_223_372_036_854_775_808.0;
+    if n < MIN || n >= MAX_EXCLUSIVE || n.fract() != 0.0 { return Err(bad(form, "Expected an integer.")); }
     Ok(n as i64)
 }
 
 fn version(form: &Syntax) -> Result<i64, Diagnostic> {
     match &form.node {
         Node::Num(value) => match form.name(*value).parse::<i64>() {
-            Ok(number) if (0..=4_611_686_018_427_387_903).contains(&number) => Ok(number),
+            Ok(number) if number >= 0 => Ok(number),
             _ => Err(bad(form, "Node version must be a nonnegative integer literal.")),
         },
         _ => Err(bad(form, "Node version must be a nonnegative integer literal.")),
@@ -585,7 +585,7 @@ mod test_defnode {
     fn version_metadata_is_an_exact_nonnegative_integer() {
         let c = catalog();
         let declaration = |metadata: &str| format!("(defnode sop/versioned {metadata} [(geo : geometry)] geo)");
-        for (metadata, expected) in [("".to_owned(), 1i64), (":version 0".into(), 0), (":version 2".into(), 2), (format!(":version {}", (1i64 << 62) - 1), (1i64 << 62) - 1)] {
+        for (metadata, expected) in [("".to_owned(), 1i64), (":version 0".into(), 0), (":version 2".into(), 2), (format!(":version {}", i64::MAX), i64::MAX)] {
             let form = parse(&declaration(&metadata)).remove(0);
             let parsed = crate::defnode::parse(&form).unwrap();
             let checked = good(&c, &source(&declaration(&metadata), "(sop/versioned nil)"));

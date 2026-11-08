@@ -25,7 +25,6 @@ use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-const MAX_INT: i64 = 4_611_686_018_427_387_903;
 
 #[derive(Clone, Debug)]
 pub enum Stop {
@@ -329,13 +328,13 @@ fn count_of_sources(iteration: Iteration, counts: &[Option<i64>]) -> Res<Option<
         return Ok(Some(0));
     }
     if counts.iter().all(|c| c.is_some()) {
-        let mut n = if iteration == Iteration::Zip { MAX_INT } else { 1 };
+        let mut n = if iteration == Iteration::Zip { i64::MAX } else { 1 };
         for c in counts {
             let b = c.unwrap();
             n = match iteration {
                 Iteration::Zip => n.min(b),
                 Iteration::Product => {
-                    if b != 0 && n > MAX_INT / b { return Err(Stop::Unsupported); }
+                    if b != 0 && n > i64::MAX / b { return Err(Stop::Unsupported); }
                     n * b
                 }
             };

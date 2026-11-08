@@ -66,7 +66,6 @@ fn diagnostic_text(v:&Value)->Result<String,Diagnostic>{
 }
 fn num(v: &Value) -> Result<f64, Diagnostic> { value::num(v) }
 fn fin(name: &str, n: f64) -> Result<f64, Diagnostic> { value::fin(name, n) }
-fn wrap63(n:i64)->i64{((n as u64&0x7fff_ffff_ffff_ffff)<<1) as i64>>1}
 fn truthy(v: &Value) -> Result<bool, Diagnostic> { value::truthy(v) }
 trait ArgLookup {
     fn get_arg(&self, name: &'static str) -> Result<&Value, Diagnostic>;
@@ -776,7 +775,7 @@ fn list_ops()->Vec<Op>{
     let mut ops=Vec::new();
     let range_body:Body=Arc::new(|_,_,a|{
         let (lo,hi)=if let Some(end)=a.opt_arg("end"){(int_of(a.get_arg("count")?)?,int_of(end)?)}else{(0,int_of(a.get_arg("count")?)?)};
-        let n=range_length(None,lo,hi)?;Ok(Value::List(Arc::new((0..n).map(|i|Value::Int(wrap63(lo.wrapping_add(i as i64)))).collect())))
+        let n=range_length(None,lo,hi)?;Ok(Value::List(Arc::new((0..n).map(|i|Value::Int(lo.wrapping_add(i as i64))).collect())))
     });
     ops.push(value_op("range",vec![("count",Ty::Int)],vec![("end",Ty::Int)],None,vec![],list(Ty::Int),"List",range_body));
     ops.push(value_op("linspace",vec![("from",Ty::Float),("to",Ty::Float),("count",Ty::Int)],vec![],None,vec![],list(Ty::Float),"List",Arc::new(|_,_,a|{

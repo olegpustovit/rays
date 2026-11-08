@@ -121,7 +121,7 @@ pub fn vector_fixtures(trace: Option<Trace>, count: i64) -> Vec<(String, packed:
     ]
 }
 
-pub const INT63_CHECKS: &str = "(let* [n (int/add (int x) (frame/index))\n  d (int/add (int/mod n 4) 1) even (int/mul d 2)\n  low (int/shl 1 (int/add 62 (int/mod n 1)))]\n  [(if (int/lt (int/add 4611686018427387903 d) 0) 1. 0.)\n   (if (int/eq (int/mul 4611686018427387903 even) (int/sub 0 even)) 1. 0.)\n   (if (int/eq (int/shr (int/sub 0 d) 62) 1) 1. 0.)\n   (if (and (int/lt (abs low) 0) (int/eq (int/div low -1) low)) 1. 0.)])";
+pub const INT64_CHECKS: &str = "(let* [n (int/add (int x) (frame/index))\n  d (int/add (int/mod n 4) 1) even (int/mul d 2)\n  low (int/shl 1 (int/add 63 (int/mod n 1)))]\n  [(if (int/lt (int/add 9223372036854775807 d) 0) 1. 0.)\n   (if (int/eq (int/mul 9223372036854775807 even) (int/sub 0 even)) 1. 0.)\n   (if (int/eq (int/shr (int/sub 0 d) 63) 1) 1. 0.)\n   (if (and (int/lt (abs low) 0) (int/eq (int/div low -1) low)) 1. 0.)])";
 
 pub fn carried_fixtures(count: i64) -> Vec<(String, packed::T)> {
     let mapped: Vec<(&str, String)> = vec![
@@ -142,7 +142,7 @@ pub fn carried_fixtures(count: i64) -> Vec<(String, packed::T)> {
             "iterate-old-state",
             "(let* [s (iterate 4611686018427387903 {:flag true :n t}\n      (fn [a] {:flag false :n (+ a.n x)}) :until (fn [prev next] prev.flag))] s.n)".into(),
         ),
-        ("iterate-int63", format!("(iterate 1 [t 0. 0. 0.] (fn [unused] {INT63_CHECKS}))")),
+        ("iterate-int63", format!("(iterate 1 [t 0. 0. 0.] (fn [unused] {INT64_CHECKS}))")),
         (
             "loop-uint32",
             "(let* [s (fold [s {:state (int/and (int x) 4294967295) :value 0}]\n      [i (range 3)] (let* [state (int/and (int/add (int/mul s.state 747796405) 2891336453) 4294967295)\n        word (int/and (int/mul (int/xor (int/shr state (int/add (int/shr state 28) 4)) state) 277803737) 4294967295)\n        value (int/and (int/xor (int/shr word 22) word) 65535)] {:state state :value value}))]\n      (+ (float s.value) t))".into(),

@@ -13,8 +13,8 @@ use flow_syntax::value::{Value, source_value};
 use rays_diagnostic::Diagnostic;
 use std::sync::{Arc, Mutex};
 
-const MAX_INT: i64 = 4611686018427387903;
-const MIN_INT: i64 = -4611686018427387904;
+const MAX_INT: i64 = i64::MAX;
+const MIN_INT: i64 = i64::MIN;
 
 fn call(name: &str, args: Vec<(&str, Value)>) -> Result<Value, Diagnostic> {
     call_op(name, args)

@@ -18,8 +18,8 @@ use std::sync::Arc;
 
 type RegionT = R::T;
 
-const OCAML_MAX_INT: i64 = 4611686018427387903;
-const OCAML_MIN_INT: i64 = -4611686018427387904;
+const OCAML_MAX_INT: i64 = i64::MAX;
+const OCAML_MIN_INT: i64 = i64::MIN;
 
 fn counting_measure(kernels: &Arc<AtomicI64>) -> packed::Measure {
     let kernels = kernels.clone();

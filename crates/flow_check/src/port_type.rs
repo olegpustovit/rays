@@ -93,12 +93,7 @@ pub fn coerce(target: &PortType, value: PortValue) -> Result<PortValue, Diagnost
                 return Err(error("A non-finite value cannot drive Int".into()));
             }
             let rounded = (number + 0.5).floor();
-            const OCAML_INT_MAX: i64 = (1_i64 << 62) - 1;
-            const OCAML_INT_MIN: i64 = -(1_i64 << 62);
-            let value = if rounded >= OCAML_INT_MAX as f64 { OCAML_INT_MAX }
-                else if rounded <= OCAML_INT_MIN as f64 { OCAML_INT_MIN }
-                else { rounded as i64 };
-            Ok(PortValue::Int(value))
+            Ok(PortValue::Int(rounded as i64)) // saturating
         }
         PortType::Geometry | PortType::Image | PortType::Fn(_) => {
             Err(error(format!("Cannot drive {} with {}", name(target), name(&source))))
@@ -115,7 +110,7 @@ mod tests {
         assert_eq!(coerce(&PortType::Int, PortValue::Float(1.5)), Ok(PortValue::Int(2)));
         assert_eq!(coerce(&PortType::Int, PortValue::Float(-1.5)), Ok(PortValue::Int(-1)));
         assert_eq!(coerce(&PortType::Int, PortValue::Float(f64::INFINITY)).unwrap_err().code, "E_TYPE");
-        assert_eq!(coerce(&PortType::Int, PortValue::Float(f64::MAX)), Ok(PortValue::Int((1_i64 << 62) - 1)));
+        assert_eq!(coerce(&PortType::Int, PortValue::Float(f64::MAX)), Ok(PortValue::Int(i64::MAX)));
     }
 
     #[test]

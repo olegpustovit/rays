@@ -1005,15 +1005,14 @@ pub mod number {
             magnitude = magnitude.checked_mul(base)?.checked_add(digit)?;
         }
         let limit = match (signed, negative) {
-            (true, true) => 1 << 62,
-            (true, false) => (1 << 62) - 1,
+            (true, true) => 1 << 63,
+            (true, false) => (1 << 63) - 1,
             (false, _) => (1 << 63) - 1,
         };
         if magnitude > limit {
             return None;
         }
-        let wrapped = if negative { magnitude.wrapping_neg() } else { magnitude };
-        Some(((wrapped << 1) as i64) >> 1)
+        Some(if negative { magnitude.wrapping_neg() } else { magnitude } as i64)
     }
 
     fn parse_float(text: &str) -> Option<f64> {
@@ -1548,13 +1547,11 @@ mod tests {
 
     #[test]
     fn number_field_behavior() {
-        assert!(number::valid(number::Kind::Int, "4611686018427387903"));
-        assert!(number::valid(number::Kind::Int, "-4611686018427387904"));
-        assert!(!number::valid(number::Kind::Int, "4611686018427387904"));
-        assert!(!number::valid(number::Kind::Int, "-4611686018427387905"));
-        assert!(number::valid(number::Kind::Int, "0x3fffffffffffffff"));
-        // OCaml int_of_string wraps a hex literal up to 2^63 - 1 into 63 bits
-        assert!(number::valid(number::Kind::Int, "0x4000000000000000"));
+        assert!(number::valid(number::Kind::Int, "9223372036854775807"));
+        assert!(number::valid(number::Kind::Int, "-9223372036854775808"));
+        assert!(!number::valid(number::Kind::Int, "9223372036854775808"));
+        assert!(!number::valid(number::Kind::Int, "-9223372036854775809"));
+        assert!(number::valid(number::Kind::Int, "0x7fffffffffffffff"));
         assert!(!number::valid(number::Kind::Int, "0x8000000000000000"));
         assert!(number::valid(number::Kind::Int, "0xff"));
         assert!(number::valid(number::Kind::Float, "0x1.8p1"));

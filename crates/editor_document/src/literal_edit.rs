@@ -39,7 +39,7 @@ pub struct Change {
     pub expr: S,
 }
 
-/// OCaml `int_of_string_opt` for the forms a literal can take (63-bit range).
+/// OCaml `int_of_string_opt` for the forms a literal can take (64-bit range).
 pub fn int_of_string_opt(text: &str) -> Option<i64> {
     let (neg, body) = match text.strip_prefix('-') {
         Some(rest) => (true, rest),
@@ -58,9 +58,7 @@ pub fn int_of_string_opt(text: &str) -> Option<i64> {
         return None;
     }
     let clean: String = digits.chars().filter(|c| *c != '_').collect();
-    let magnitude = i128::from_str_radix(&clean, radix).ok()?;
-    let value = if neg { -magnitude } else { magnitude };
-    if (-(1i128 << 62)..(1i128 << 62)).contains(&value) { Some(value as i64) } else { None }
+    i64::from_str_radix(&format!("{}{clean}", if neg { "-" } else { "" }), radix).ok()
 }
 
 fn float_of_string_opt(text: &str) -> Option<f64> {

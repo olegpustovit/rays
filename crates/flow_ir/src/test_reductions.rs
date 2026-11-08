@@ -14,8 +14,8 @@ use std::sync::Arc;
 
 // Sizes: OCaml used 5001-element arrays (5 blocks of 1024); 2049 keeps three block crossings and fits the 5 s budget in debug.
 // OCaml native ints are 63 bits.
-const MIN_INT: i64 = -4611686018427387904;
-const MAX_INT: i64 = 4611686018427387903;
+const MIN_INT: i64 = i64::MIN;
+const MAX_INT: i64 = i64::MAX;
 
 fn same(a: &Value, b: &Value) -> bool {
     bits(a) == bits(b)

@@ -22,7 +22,6 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 
 const MAX_ARRAY: i64 = (1i64 << 54) - 1;
-const MAX_INT: i64 = i64::MAX >> 1;
 
 /// OCaml's `Unsupported` and `Diagnostic.Error`.
 #[derive(Clone, Debug)]
@@ -2110,7 +2109,7 @@ impl Lowerer {
                     stop.push(self.as_callable(source, &g)?);
                 }
                 let finished = if stop.is_empty() { None } else { Some(self.hold(s, source, None, &boolean(false))?) };
-                self.counted(MAX_INT, finished.as_ref(), s, source, &int(0), &count, &mut |l, sc, _| {
+                self.counted(i64::MAX, finished.as_ref(), s, source, &int(0), &count, &mut |l, sc, _| {
                     let value = l.call(false, sc, source, ty, None, f, &[accumulator.clone()])?;
                     let value = l.widen_like(sc, source, &accumulator, &value)?;
                     match (stop.first(), &finished) {

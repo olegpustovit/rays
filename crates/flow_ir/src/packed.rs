@@ -37,7 +37,6 @@ pub type Clock = Arc<dyn Fn() -> f64 + Send + Sync>;
 pub type Report = Arc<dyn Fn(&T, f64, bool) + Send + Sync>;
 
 /// OCaml `max_int` (2^62 - 1): the iteration-count overflow bound of a product.
-const OCAML_MAX_INT: i64 = (1i64 << 62) - 1;
 /// OCaml `Sys.max_array_length` = `Sys.max_floatarray_length` on 64 bits.
 const MAX_ARRAY: usize = op::MAX_WOSIZE;
 
@@ -1808,13 +1807,13 @@ fn float_launch(
     let mut count: i64 = if t.iteration == Iteration::Product && lengths.contains(&0) {
         0
     } else {
-        let mut n: i64 = if t.iteration == Iteration::Zip { OCAML_MAX_INT } else { 1 };
+        let mut n: i64 = if t.iteration == Iteration::Zip { i64::MAX } else { 1 };
         for length in &lengths {
             let length = *length as i64;
             n = match t.iteration {
                 Iteration::Zip => n.min(length),
                 Iteration::Product => {
-                    if length != 0 && n > OCAML_MAX_INT / length {
+                    if length != 0 && n > i64::MAX / length {
                         return Err(fail("E_ARRAY_RANGE", "Kernel iteration count exceeds native bounds."));
                     }
                     n * length
@@ -3328,13 +3327,13 @@ fn run_typed(
     } else if t.iteration == Iteration::Product && lengths.contains(&0) {
         0
     } else {
-        let mut n: i64 = if t.iteration == Iteration::Zip { OCAML_MAX_INT } else { 1 };
+        let mut n: i64 = if t.iteration == Iteration::Zip { i64::MAX } else { 1 };
         for length in &lengths {
             let length = *length as i64;
             n = match t.iteration {
                 Iteration::Zip => n.min(length),
                 Iteration::Product => {
-                    if length != 0 && n > OCAML_MAX_INT / length {
+                    if length != 0 && n > i64::MAX / length {
                         return Err(fail("E_ARRAY_RANGE", "Kernel iteration count exceeds native bounds."));
                     }
                     n * length
@@ -4832,13 +4831,13 @@ pub mod host {
         let count = if arrays.is_empty() || empty_product {
             0
         } else {
-            let mut count: i64 = if t.iteration == Iteration::Zip { OCAML_MAX_INT } else { 1 };
+            let mut count: i64 = if t.iteration == Iteration::Zip { i64::MAX } else { 1 };
             for (i, value) in arrays.iter().enumerate() {
                 let length = length(i, value)? as i64;
                 count = match t.iteration {
                     Iteration::Zip => count.min(length),
                     Iteration::Product => {
-                        if length != 0 && count > OCAML_MAX_INT / length {
+                        if length != 0 && count > i64::MAX / length {
                             return Err(fail("E_ARRAY_RANGE", "Kernel iteration count exceeds native bounds."));
                         }
                         count * length

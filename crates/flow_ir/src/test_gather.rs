@@ -17,8 +17,8 @@ use rays_diagnostic::Diagnostic;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-const MAX_INT: i64 = 4611686018427387903;
-const MIN_INT: i64 = -4611686018427387904;
+const MAX_INT: i64 = i64::MAX;
+const MIN_INT: i64 = i64::MIN;
 const MAX_ARRAY: i64 = (1 << 54) - 1;
 
 fn source(ty: &Ty) -> Op {

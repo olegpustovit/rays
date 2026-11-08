@@ -296,11 +296,7 @@ fn num_param(source: &str) -> Option<param::Value> {
     let number = syntax::number_value(source)?;
     if !source.contains('.') && !source.contains('e') && !source.contains('E') {
         if let Ok(value) = source.parse::<i64>() {
-            const MIN: i64 = -(1_i64 << 62);
-            const MAX: i64 = (1_i64 << 62) - 1;
-            if (MIN..=MAX).contains(&value) {
-                return Some(param::Value::Int(value));
-            }
+            return Some(param::Value::Int(value));
         }
     }
     Some(param::Value::Float(number))
