@@ -5,10 +5,9 @@ use std::sync::atomic::Ordering::Relaxed;
 
 const FRAMES: i64 = 30;
 // (allocations per frame, bytes per frame)
-// per frame: 2,509 allocs / 197,803 bytes before C6/M3, 2,089 / 197,529 after; lower after each fix, never raise
-const BASIC: (u64, u64) = (2_150, 205_000);
-// the default panel layout with the pointer moving: 5,732 / 248,332 before C6/M3, 4,549 / 201,580 after
-const EMPTY: (u64, u64) = (4_650, 210_000);
+// C6 reducer ownership: basic 2,074 / 195,516; empty 4,518 / 199,236. Never raise.
+const BASIC: (u64, u64) = (2_085, 197_000);
+const EMPTY: (u64, u64) = (4_530, 200_000);
 
 fn per_frame(source: &str, max: (u64, u64)) -> (u64, u64, String) {
     assert!(crate::common::gpu(), "native GPU required");

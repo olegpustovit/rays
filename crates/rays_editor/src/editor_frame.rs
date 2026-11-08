@@ -1452,7 +1452,7 @@ pub fn update_frame(
             row_sets,
             rows: rows_,
         },
-        &value,
+        value,
         result,
     )
 }

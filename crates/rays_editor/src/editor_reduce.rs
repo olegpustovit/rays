@@ -3,7 +3,7 @@
 //! their boxes, and a test can run it on a frame result it made itself.
 //! Port of lib/rays_editor/editor_reduce.ml.
 //!
-//! Conventions: the model is taken by reference and copied where OCaml's `{ value with .. }` would;
+//! The reducer owns the model and keeps only the previous identities needed for comparisons;
 //! `Frame_input.view_state` is an `Rc<dyn Fn>`; optional arguments (`?gpu ?pump`) are trailing
 //! `Option`s of `reduce`.
 #![allow(non_camel_case_types)]
@@ -100,23 +100,13 @@ pub fn outline_step(created: &Option<String>, result: &frame_result, value2: t) 
 
 /// Entering and leaving levels: the graph a reference follows, the level i / u / list activation
 /// open.
-pub fn level_target(value: &t, value2: &t, level: Level, doc: &Document, selection: &selection::t, actions: &[action], result: &frame_result) -> (Option<String>, Option<Level>) {
-    // i also follows a reference of the node selected in the pane (a material, an object's graph)
-    let activated = result.scope_changes.iter().find_map(|c| match c {
-        scope::Change::Activated(path) => Some(path.clone()),
-        _ => None,
-    });
-    let followed = match activated {
-        Some(path) => follow_target(value, Some(&path)),
-        None if actions.contains(&action::Enter) => follow_target(value, None).or_else(|| viewport_target(value)),
-        None => None,
-    };
+pub fn level_target(followed: Option<String>, has_route: bool, value2: &t, level: Level, doc: &Document, selection: &selection::t, actions: &[action], result: &frame_result) -> (Option<String>, Option<Level>) {
     let top = actions.iter().find(|a| matches!(a, action::Enter | action::Up | action::Go_world));
     let target = if followed.is_some() {
         None
     } else {
         match (top, &result.opened) {
-            (Some(action::Up), _) if !pane_route(value).is_empty() => None,
+            (Some(action::Up), _) if has_route => None,
             (Some(action::Up), _) => match level {
                 Level::Inside(_) => Some(Level::Scene),
                 Level::Scene => None,
@@ -690,8 +680,8 @@ pub fn carry_report_of(value: &t, carrying: bool, text: &text_pane::State, text_
 }
 
 /// `[y]`: the payload is held by the handle (no pointer capture); a press or Enter puts it.
-pub fn pick_up(value: &t, value2: &t, actions: &[action], frame_: &frame::t, report: Option<carry_report>) -> (Option<carry>, Option<String>) {
-    match &value.carry {
+pub fn pick_up(value2: &t, actions: &[action], frame_: &frame::t, report: Option<carry_report>) -> (Option<carry>, Option<String>) {
+    match &value2.carry {
         Some(c) => (Some(carry { report, ..c.clone() }), None),
         None if actions.contains(&action::Pick_up) => match carry_payload(value2) {
             Ok(payload) => {
@@ -720,14 +710,14 @@ pub fn pick_up(value: &t, value2: &t, actions: &[action], frame_: &frame::t, rep
 }
 
 /// What the camera is asked to frame: the object a `F` in a graph names, or every cooked object.
-pub fn framing_step(value: &t, value2: &t, doc: &Document, cooked: &cook::update_result, frame_request: Option<(i64, i64)>, actions: &[action], frame_: &frame::t, result: &frame_result) -> (Option<i64>, Option<Option<bounds>>) {
+pub fn framing_step(value2: &t, doc: &Document, cooked: &cook::update_result, frame_request: Option<(i64, i64)>, actions: &[action], frame_: &frame::t, result: &frame_result) -> (Option<i64>, Option<Option<bounds>>) {
     // Framing: local bounds move into the world with their object; at the scene level [F] frames
     // every cooked object.
     let world_bounds = |id: i64, b: &bounds| cook::transformed(&objects::world(&doc.scene, id), b);
     // a framing cook may finish frames after its request: the object is remembered until it does
     let framing = match frame_request {
         Some((id, _)) => Some(id),
-        None => value.framing,
+        None => value2.framing,
     };
     let framed = match (&cooked.framed, framing) {
         (Some(Some(b)), Some(id)) => Some(Some(world_bounds(id, b))),
@@ -894,15 +884,12 @@ fn same_workspace_all(a: &document::Workspace, b: &document::Workspace) -> bool 
     same_workspace(&a.ws, &b.ws) && crate::editor_inspect::same_lowered(&a.lowered, &b.lowered)
 }
 
-fn same_viewed(a: &std::collections::BTreeMap<i64, (flow_sop::network::Network, i64)>, b: &std::collections::BTreeMap<i64, (flow_sop::network::Network, i64)>) -> bool {
-    a.len() == b.len() && a.iter().all(|(id, (na, da))| b.get(id).is_some_and(|(nb, db)| da == db && flow_sop::network::ptr_eq(na, nb)))
-}
-
 fn same_pieces(a: &[cook::piece], b: &[cook::piece]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(x, y)| Rc::ptr_eq(&x.bounds, &y.bounds))
 }
 
-pub fn reduce(gpu: Option<&flow_ir::flow_ir::Gpu::Config>, pump: Option<&dyn Fn()>, input: Frame_input, value: &t, result: frame_result) -> update {
+pub fn reduce(gpu: Option<&flow_ir::flow_ir::Gpu::Config>, pump: Option<&dyn Fn()>, input: Frame_input, owned: t, result: frame_result) -> update {
+    let value = &owned;
     let _timer = flow_syntax::phase_timer::measure("reduce");
     let Frame_input {
         carry_changed,
@@ -1168,21 +1155,55 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::Gpu::Config>, pump: Option<&dyn Fn(
     let effects = if undone || loaded_flag || carry_changed { param::union_effects(result.effects, document_edit::cook_effects()) } else { result.effects };
     // The open level must still exist after undo or a preset load.
     let level = document::resolve_level(&doc, if loaded_flag { Level::Scene } else { pane_level(value) });
-    let mut value2 = value.clone();
+    let previous_doc = value.doc.clone();
+    let previous_cook = value.cook.clone();
+    let previous_level = pane_level(value);
+    let had_route = !pane_route(value).is_empty();
+    let previous_viewed: Vec<_> = value.viewed.iter().map(|(id, (network, root))| (*id, flow_sop::network::identity(network), *root)).collect();
+    let scope_selection_changed = scope::selected(&result.scope_view) != scope::selected(pane_view(value));
+    let vocab = vocabulary_for(value, &doc);
+    let workspace = unrestore(&value.doc, &doc, result.workspace.clone());
+    // i also follows a reference of the node selected in the pane (a material, an object's graph)
+    let activated = result.scope_changes.iter().find_map(|c| match c {
+        scope::Change::Activated(path) => Some(path.clone()),
+        _ => None,
+    });
+    let followed = match activated {
+        Some(path) => follow_target(value, Some(&path)),
+        None if actions.contains(&action::Enter) => follow_target(value, None).or_else(|| viewport_target(value)),
+        None => None,
+    };
+    let picked_row = result.tree_intents.iter().find_map(|i| match i {
+        tree::Intent::Select(ids) if ids.len() == 1 => Some(ids[0]),
+        _ => None,
+    });
+    let picked_view = if added.is_empty() {
+        // A row of a geometry object's list selects its source node in the old pane.
+        match picked_row {
+            Some(id) if matches!(pane_level(value), Level::Inside(oid) if kind(value, oid).as_deref() == Some("geometry")) => match node_path(value, id) {
+                Some(path) => scope::select(vec![path], result.scope_view.clone()),
+                None => result.scope_view.clone(),
+            },
+            _ => result.scope_view.clone(),
+        }
+    } else {
+        scope::select(added.clone(), result.scope_view.clone())
+    };
+    let mut value2 = owned;
     value2.timeline_frames = timeline_frames;
     value2.doc = doc.clone();
-    value2.lisp_vocab = vocabulary_for(value, &doc);
-    value2.workspace = unrestore(&value.doc, &doc, result.workspace.clone());
+    value2.lisp_vocab = vocab;
+    value2.workspace = workspace;
     value2 = with_pane(value2, &|pane| graph_pane { at: level, ..pane.clone() });
     // the selection keeps the nodes that still exist in the open network
-    let mut selection = if level != pane_level(value) || loaded_flag {
+    let mut selection = if level != previous_level || loaded_flag {
         selection::empty()
     } else {
         let current = selection::selected_nodes(&result.selection).to_vec();
         let ids: Vec<i64> = current.iter().copied().filter(|id| lists(&value2, *id)).collect();
         if ids == current { result.selection.clone() } else { selection::select_nodes(&ids) }
     };
-    let (followed, target) = level_target(value, &value2, level, &doc, &selection, &actions, &result);
+    let (followed, target) = level_target(followed, had_route, &value2, level, &doc, &selection, &actions, &result);
     if let Some(id) = result.open_graph {
         if lists(&value2, id) {
             selection = selection::select(id);
@@ -1203,26 +1224,8 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::Gpu::Config>, pump: Option<&dyn Fn(
             scope::Change::Open_import(file) => Some(file.clone()),
             _ => None,
         })
-        .or_else(|| value.open_import.clone());
+        .or_else(|| value2.open_import.clone());
     {
-        let picked_row = result.tree_intents.iter().find_map(|i| match i {
-            tree::Intent::Select(ids) if ids.len() == 1 => Some(ids[0]),
-            _ => None,
-        });
-        let picked_view = if added.is_empty() {
-            // a row chosen in the list of a geometry object selects the node that made it in the
-            // graph pane, whose inspector edits the text
-            match picked_row {
-                Some(id) if matches!(pane_level(value), Level::Inside(oid) if kind(value, oid).as_deref() == Some("geometry")) => match node_path(value, id) {
-                    Some(path) => scope::select(vec![path], result.scope_view.clone()),
-                    None => result.scope_view.clone(),
-                },
-                _ => result.scope_view.clone(),
-            }
-        } else {
-            // a node added from the menu is the selection
-            scope::select(added.clone(), result.scope_view.clone())
-        };
         let sel = selection.clone();
         value2 = with_pane(value2, &|pane| graph_pane { picked: sel.clone(), view: picked_view.clone(), ..pane.clone() });
     }
@@ -1272,7 +1275,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::Gpu::Config>, pump: Option<&dyn Fn(
         value2 = select_source(value2, path);
     }
     let projections = projections_of(&outlined, &actions, &result, &value2);
-    let selection_changed = scope::selected(&result.scope_view) != scope::selected(pane_view(value)) || outlined.is_some();
+    let selection_changed = scope_selection_changed || outlined.is_some();
     let mut text = text;
     if selection_changed {
         text.target = None;
@@ -1319,10 +1322,11 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::Gpu::Config>, pump: Option<&dyn Fn(
         (Some(node), Level::Inside(id)) if kind(&value2, id).as_deref() == Some("geometry") => Some((id, node)),
         _ => None,
     };
-    if !same_workspace_all(&doc.workspace, &value.doc.workspace) || !same_viewed(&value2.viewed, &value.viewed) {
+    if !same_workspace_all(&doc.workspace, &previous_doc.workspace)
+        || !value2.viewed.iter().map(|(id, (network, root))| (*id, flow_sop::network::identity(network), *root)).eq(previous_viewed) {
         let roots: BTreeSet<i64> = value2.viewed.values().map(|(_, root)| *root).collect();
         let volatile = flow_sop::lower::is_volatile(&doc.workspace.lowered);
-        cook::set_volatile(&value.cook, Arc::new(move |id| volatile(id) || roots.contains(&id)));
+        cook::set_volatile(&previous_cook, Arc::new(move |id| volatile(id) || roots.contains(&id)));
     }
     let probes_wanted: Vec<(i64, i64)> = match pane_laid(&value2) {
         Some(k) if scope_name(&value2).is_some() => {
@@ -1340,7 +1344,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::Gpu::Config>, pump: Option<&dyn Fn(
         Some(p) => p,
         None => &default_pump,
     };
-    let gpu_config = gpu.cloned().unwrap_or_else(|| value.gpu.clone());
+    let gpu_config = gpu.cloned().unwrap_or_else(|| value2.gpu.clone());
     let cooked = cook::update(
         Some(&gpu_config),
         Some(value2.live_frame.clone()),
@@ -1348,7 +1352,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::Gpu::Config>, pump: Option<&dyn Fn(
         &probes_wanted,
         &lit,
         Some(pump_ref),
-        &value.cook,
+        &previous_cook,
         &doc.settings,
         &geometry_objects(&value2),
         result.edit_error.clone(),
@@ -1358,12 +1362,12 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::Gpu::Config>, pump: Option<&dyn Fn(
         &frame_,
         frame_request,
     );
-    let (framing, framed) = framing_step(value, &value2, &doc, &cooked, frame_request, &actions, &frame_, &result);
-    let document_changed = !Arc::ptr_eq(&doc, &value.doc);
-    let (carry_value, pick_error) = pick_up(value, &value2, &actions, &frame_, carry_report);
+    let (framing, framed) = framing_step(&value2, &doc, &cooked, frame_request, &actions, &frame_, &result);
+    let document_changed = !Arc::ptr_eq(&doc, &previous_doc);
+    let (carry_value, pick_error) = pick_up(&value2, &actions, &frame_, carry_report);
     // a cook that gave back every piece it had (the text changed, the objects did not) leaves
     // nothing to recompose, and no accumulating render to restart
-    let prepared_changed = cooked.prepared_changed && !same_pieces(cook::pieces(&cooked.cook), cook::pieces(&value.cook));
+    let prepared_changed = cooked.prepared_changed && !same_pieces(cook::pieces(&cooked.cook), cook::pieces(&previous_cook));
     let new_notice = if guide_error.is_some() {
         guide_error
     } else if let Some(m) = pick_error {
@@ -1409,7 +1413,7 @@ pub fn reduce(gpu: Option<&flow_ir::flow_ir::Gpu::Config>, pump: Option<&dyn Fn(
     core.framing = if cooked.framed.is_some() { None } else { framing };
     core.notice = new_notice;
     core.notice_at = if notice_changed { frame_.input.t } else { notice_at };
-    let scene_changed = carry_changed || !kg::same(&doc.scene, &value.doc.scene) || prepared_changed;
+    let scene_changed = carry_changed || !kg::same(&doc.scene, &previous_doc.scene) || prepared_changed;
     let mut out_actions = actions.clone();
     if entered_camera.is_some() && entered_camera == doc.active_camera {
         out_actions.push(action::Look_through_camera);
@@ -1460,7 +1464,9 @@ pub fn reduce_idle(select: Option<&[i64]>, preview: Option<&Op>, value: &t, acti
         Some(ids) => selection::select_nodes(ids),
         None => pane_selection(&value).clone(),
     };
-    Ok(reduce(None, None, idle_input(&value, actions, frame_), &value, idle_result(&value, selection)).core)
+    let input = idle_input(&value, actions, frame_);
+    let result = idle_result(&value, selection);
+    Ok(reduce(None, None, input, value, result).core)
 }
 
 /// The frame result of a frame in which no pane asked for anything.

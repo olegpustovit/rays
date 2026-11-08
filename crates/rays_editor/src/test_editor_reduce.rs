@@ -121,7 +121,10 @@ fn reducer_idle_undo_and_gestures() {
         let op = Op::AddNode { scope: vec!["g".to_string()], name: "second".to_string(), expr };
         let mut result = idle_result(&value, selection::empty());
         result.changes = vec![change::Syntax_edit(op)];
-        let out = reduce(None, None, idle_input(&value, &[], &frame0), &value, result);
+        let owned = value.clone();
+        let identity = owned.preferences.as_ptr();
+        let out = reduce(None, None, idle_input(&owned, &[], &frame0), owned, result);
+        assert_eq!(out.core.preferences.as_ptr(), identity, "reducer copied its owned model");
         assert!(!Arc::ptr_eq(&out.core.doc, &value.doc));
         assert_eq!(history::depth(&out.core.history), 1);
         assert_eq!(history::label(&out.core.history), "Add node");
@@ -145,7 +148,7 @@ fn reducer_idle_undo_and_gestures() {
         // a refused gesture leaves the document and says why
         let mut result = idle_result(&value, selection::empty());
         result.changes = vec![change::Syntax_edit(Op::RemoveGraph { name: "missing".to_string() })];
-        let refused = reduce(None, None, idle_input(&value, &[], &frame0), &value, result);
+        let refused = reduce(None, None, idle_input(&value, &[], &frame0), value.clone(), result);
         assert!(Arc::ptr_eq(&refused.core.doc, &value.doc));
         assert!(refused.core.edit_error.is_some());
         editor_host_close(&value);

@@ -45,6 +45,9 @@ fn fresh() -> u64 {
     NEXT_IDENTITY.fetch_add(1, Ordering::Relaxed)
 }
 
+/// Stable identity retained by clones and changed by edits.
+pub fn identity(network: &Network) -> u64 { network.identity }
+
 /// OCaml `==` on networks.
 pub fn ptr_eq(a: &Network, b: &Network) -> bool {
     a.identity == b.identity
