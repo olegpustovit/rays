@@ -3,13 +3,13 @@
 //!
 //! OCaml wraps `cut` in `Error.guard ~operation:"poly_cut" ~code:"invalid_poly_cut"`: a failure has
 //! those fields and the OCaml message, a cancellation has code `cancelled`.
-use std::sync::atomic::{AtomicI64, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 
 use rdk_core::{
     attribute, cancel, edge_group, error, geometry, group, packed, support, topology, topology_index,
     topology_remap,
 };
+use rdk_core::support::Windows;
 
 use crate::curve_join;
 use crate::transform_ops::ocaml_quote;
@@ -73,45 +73,9 @@ fn recode(operation: &str, code: &str, failure: &error::T) -> error::T {
     made.unwrap_or_else(|bad| bad)
 }
 
-/// Output arrays written by index from the pool; joined into plain vectors afterwards.
-struct AInts(Vec<AtomicI64>);
-struct AFloats(Vec<AtomicU64>);
-struct ABytes(Vec<AtomicU8>);
-
-impl AInts {
-    fn new(count: usize, fill: i64) -> AInts {
-        AInts((0..count).map(|_| AtomicI64::new(fill)).collect())
-    }
-    fn set(&self, index: i64, value: i64) {
-        self.0[index as usize].store(value, Ordering::Relaxed);
-    }
-    fn into_vec(self) -> Vec<i64> {
-        self.0.into_iter().map(AtomicI64::into_inner).collect()
-    }
-}
-
-impl AFloats {
-    fn new(count: usize, fill: f64) -> AFloats {
-        AFloats((0..count).map(|_| AtomicU64::new(fill.to_bits())).collect())
-    }
-    fn set(&self, index: i64, value: f64) {
-        self.0[index as usize].store(value.to_bits(), Ordering::Relaxed);
-    }
-    fn into_vec(self) -> Vec<f64> {
-        self.0.into_iter().map(|value| f64::from_bits(value.into_inner())).collect()
-    }
-}
-
-impl ABytes {
-    fn new(count: usize, fill: u8) -> ABytes {
-        ABytes((0..count).map(|_| AtomicU8::new(fill)).collect())
-    }
-    fn set(&self, index: i64, value: u8) {
-        self.0[index as usize].store(value, Ordering::Relaxed);
-    }
-    fn into_vec(self) -> Vec<u8> {
-        self.0.into_iter().map(AtomicU8::into_inner).collect()
-    }
+/// Start offset of the `grain`-sized range `range` over `count` items whose output begins at `offsets[item]`.
+fn range_start(offsets: &[i64], grain: i64, count: i64, range: i64) -> usize {
+    offsets[range.saturating_mul(grain).min(count) as usize] as usize
 }
 
 fn kind_of(code: u8) -> topology::PrimitiveKind {
@@ -443,42 +407,39 @@ fn edge_remove_fast(
     let index = &source.index;
     let primitive_count = geometry::primitive_count(value);
     let chunk = (grain / 256).max(1);
-    let fragment_counts = AInts::new(primitive_count as usize, 0);
-    support::parallel_for(cancel_value, chunk, primitive_count, &|primitive| {
+    let mut fragment_counts = vec![0_i64; primitive_count as usize];
+    support::par_fill(cancel_value, chunk, &mut fragment_counts, &|primitive| {
         let pu = primitive as usize;
         let first = topology.primitive_offsets[pu];
         let last = topology.primitive_offsets[pu + 1];
         if primitive_action[pu] == 0 {
-            fragment_counts.set(primitive, 1);
-        } else {
-            let mut fragments = 0;
-            if topology.primitive_kinds[pu] == OPEN_POLYLINE {
-                let mut in_run = false;
-                for vertex in first..last {
-                    if index.next_vertex[vertex as usize] >= 0 && edge_parts[vertex as usize] > 0 {
-                        if !in_run {
-                            fragments += 1;
-                            in_run = true;
-                        }
-                    } else {
-                        in_run = false;
+            return Ok(1);
+        }
+        let mut fragments = 0;
+        if topology.primitive_kinds[pu] == OPEN_POLYLINE {
+            let mut in_run = false;
+            for vertex in first..last {
+                if index.next_vertex[vertex as usize] >= 0 && edge_parts[vertex as usize] > 0 {
+                    if !in_run {
+                        fragments += 1;
+                        in_run = true;
                     }
+                } else {
+                    in_run = false;
                 }
-            } else {
-                for vertex in first..last {
-                    if edge_parts[vertex as usize] > 0 {
-                        let previous = index.previous_vertex[vertex as usize];
-                        if previous < 0 || edge_parts[previous as usize] == 0 {
-                            fragments += 1;
-                        }
+            }
+        } else {
+            for vertex in first..last {
+                if edge_parts[vertex as usize] > 0 {
+                    let previous = index.previous_vertex[vertex as usize];
+                    if previous < 0 || edge_parts[previous as usize] == 0 {
+                        fragments += 1;
                     }
                 }
             }
-            fragment_counts.set(primitive, fragments);
         }
-        Ok(())
+        Ok(fragments)
     })?;
-    let fragment_counts = fragment_counts.into_vec();
     let mut primitive_bases = vec![0_i64; primitive_count as usize + 1];
     for primitive in 0..primitive_count as usize {
         let count = fragment_counts[primitive];
@@ -489,75 +450,92 @@ fn edge_remove_fast(
     }
     let output_primitive_count = primitive_bases[primitive_count as usize];
     let opc = output_primitive_count as usize;
-    let fragment_start = AInts::new(opc, -1);
-    let fragment_edges = AInts::new(opc, -1);
-    let primitive_map = AInts::new(opc, 0);
-    let fragment_sizes = AInts::new(opc, 0);
-    support::parallel_for(cancel_value, chunk, primitive_count, &|primitive| {
-        let pu = primitive as usize;
-        let target_base = primitive_bases[pu];
-        let first = topology.primitive_offsets[pu];
-        let last = topology.primitive_offsets[pu + 1];
-        if primitive_action[pu] == 0 {
-            primitive_map.set(target_base, primitive);
-            fragment_sizes.set(target_base, last - first);
-            return Ok(());
-        }
-        let mut state = RunState { target: target_base, active: false, edge_count: 0 };
-        let begin = |state: &mut RunState, vertex: i64| {
-            state.active = true;
-            state.edge_count = 0;
-            fragment_start.set(state.target, vertex);
-            primitive_map.set(state.target, primitive);
-        };
-        let finish = |state: &mut RunState| {
-            if state.active {
-                fragment_edges.set(state.target, state.edge_count);
-                fragment_sizes.set(state.target, state.edge_count + 1);
-                state.target += 1;
-                state.active = false;
-            }
-        };
-        if topology.primitive_kinds[pu] == OPEN_POLYLINE {
-            for vertex in first..last {
-                if index.next_vertex[vertex as usize] >= 0 && edge_parts[vertex as usize] > 0 {
-                    if !state.active {
-                        begin(&mut state, vertex);
+    let (mut fragment_start, mut fragment_edges) = (vec![-1_i64; opc], vec![-1_i64; opc]);
+    let (mut primitive_map, mut fragment_sizes) = (vec![0_i64; opc], vec![0_i64; opc]);
+    {
+        let bound = |range: i64| range_start(&primitive_bases, chunk, primitive_count, range);
+        let ranges = support::range_count(primitive_count, chunk);
+        let (w_start, w_edges) = (
+            Windows::new(&mut fragment_start, ranges, bound),
+            Windows::new(&mut fragment_edges, ranges, bound),
+        );
+        let (w_map, w_sizes) = (
+            Windows::new(&mut primitive_map, ranges, bound),
+            Windows::new(&mut fragment_sizes, ranges, bound),
+        );
+        support::run_indexed_ranges(chunk, primitive_count, &|range, first_primitive, last_primitive| {
+            let (starts, edges) = (w_start.take(range), w_edges.take(range));
+            let (maps, sizes) = (w_map.take(range), w_sizes.take(range));
+            let base = bound(range) as i64;
+            for primitive in first_primitive..last_primitive {
+                support::poll(cancel_value, primitive)?;
+                let pu = primitive as usize;
+                let target_base = primitive_bases[pu];
+                let first = topology.primitive_offsets[pu];
+                let last = topology.primitive_offsets[pu + 1];
+                if primitive_action[pu] == 0 {
+                    maps[(target_base - base) as usize] = primitive;
+                    sizes[(target_base - base) as usize] = last - first;
+                    continue;
+                }
+                let mut state = RunState { target: target_base, active: false, edge_count: 0 };
+                let mut begin = |state: &mut RunState, vertex: i64| {
+                    state.active = true;
+                    state.edge_count = 0;
+                    starts[(state.target - base) as usize] = vertex;
+                    maps[(state.target - base) as usize] = primitive;
+                };
+                let mut finish = |state: &mut RunState| {
+                    if state.active {
+                        edges[(state.target - base) as usize] = state.edge_count;
+                        sizes[(state.target - base) as usize] = state.edge_count + 1;
+                        state.target += 1;
+                        state.active = false;
                     }
-                    state.edge_count += 1;
-                } else {
-                    finish(&mut state);
-                }
-            }
-            finish(&mut state);
-        } else {
-            let mut start = -1_i64;
-            for vertex in first..last {
-                let previous = index.previous_vertex[vertex as usize];
-                if start < 0 && edge_parts[vertex as usize] > 0 && (previous < 0 || edge_parts[previous as usize] == 0) {
-                    start = vertex;
-                }
-            }
-            if start >= 0 {
-                let size = last - first;
-                for offset in 0..size {
-                    let vertex = first + (start - first + offset) % size;
-                    if edge_parts[vertex as usize] > 0 {
-                        if !state.active {
-                            begin(&mut state, vertex);
+                };
+                if topology.primitive_kinds[pu] == OPEN_POLYLINE {
+                    for vertex in first..last {
+                        if index.next_vertex[vertex as usize] >= 0 && edge_parts[vertex as usize] > 0 {
+                            if !state.active {
+                                begin(&mut state, vertex);
+                            }
+                            state.edge_count += 1;
+                        } else {
+                            finish(&mut state);
                         }
-                        state.edge_count += 1;
-                    } else {
+                    }
+                    finish(&mut state);
+                } else {
+                    let mut start = -1_i64;
+                    for vertex in first..last {
+                        let previous = index.previous_vertex[vertex as usize];
+                        if start < 0
+                            && edge_parts[vertex as usize] > 0
+                            && (previous < 0 || edge_parts[previous as usize] == 0)
+                        {
+                            start = vertex;
+                        }
+                    }
+                    if start >= 0 {
+                        let size = last - first;
+                        for offset in 0..size {
+                            let vertex = first + (start - first + offset) % size;
+                            if edge_parts[vertex as usize] > 0 {
+                                if !state.active {
+                                    begin(&mut state, vertex);
+                                }
+                                state.edge_count += 1;
+                            } else {
+                                finish(&mut state);
+                            }
+                        }
                         finish(&mut state);
                     }
                 }
-                finish(&mut state);
             }
-        }
-        Ok(())
-    })?;
-    let (fragment_start, fragment_edges) = (fragment_start.into_vec(), fragment_edges.into_vec());
-    let (primitive_map, fragment_sizes) = (primitive_map.into_vec(), fragment_sizes.into_vec());
+            Ok(())
+        })?;
+    }
     let mut primitive_offsets = vec![0_i64; opc + 1];
     for primitive in 0..opc {
         let size = fragment_sizes[primitive];
@@ -568,55 +546,74 @@ fn edge_remove_fast(
     }
     let output_vertex_count = primitive_offsets[opc];
     let ovc = output_vertex_count as usize;
-    let vertex_points = AInts::new(ovc, 0);
-    let vertex_map = AInts::new(ovc, 0);
-    let primitive_kinds = ABytes::new(opc, OPEN_POLYLINE);
-    let source_edge_of_vertex = AInts::new(ovc, -1);
-    support::parallel_for(cancel_value, (grain / 8).max(1), output_primitive_count, &|target| {
-        let tu = target as usize;
-        let primitive = primitive_map[tu];
-        let pu = primitive as usize;
-        let output = primitive_offsets[tu];
-        let source_first = topology.primitive_offsets[pu];
-        let source_last = topology.primitive_offsets[pu + 1];
-        if fragment_start[tu] < 0 {
-            primitive_kinds.set(target, topology.primitive_kinds[pu]);
-            for vertex in source_first..source_last {
-                let target_vertex = output + vertex - source_first;
-                vertex_points.set(target_vertex, topology.vertex_points[vertex as usize]);
-                vertex_map.set(target_vertex, vertex);
-                source_edge_of_vertex.set(target_vertex, index.edge_of_vertex[vertex as usize]);
-            }
-        } else {
-            let start = fragment_start[tu];
-            let edges = fragment_edges[tu];
-            let source_size = source_last - source_first;
-            let source_kind = topology.primitive_kinds[pu];
-            for local in 0..=edges {
-                let source_vertex = if source_kind == OPEN_POLYLINE {
-                    start + local
+    let mut vertex_points = vec![0_i64; ovc];
+    let mut vertex_map = vec![0_i64; ovc];
+    let mut primitive_kinds = vec![OPEN_POLYLINE; opc];
+    let mut source_edge_of_vertex = vec![-1_i64; ovc];
+    {
+        let target_grain = (grain / 8).max(1);
+        let bound = |range: i64| range_start(&primitive_offsets, target_grain, output_primitive_count, range);
+        let ranges = support::range_count(output_primitive_count, target_grain);
+        let w_kinds = Windows::even(&mut primitive_kinds, target_grain);
+        let (w_points, w_map, w_edge) = (
+            Windows::new(&mut vertex_points, ranges, bound),
+            Windows::new(&mut vertex_map, ranges, bound),
+            Windows::new(&mut source_edge_of_vertex, ranges, bound),
+        );
+        support::run_indexed_ranges(target_grain, output_primitive_count, &|range, first_target, last_target| {
+            let (kinds, points) = (w_kinds.take(range), w_points.take(range));
+            let (maps, edge_of_vertex) = (w_map.take(range), w_edge.take(range));
+            let base = bound(range) as i64;
+            for target in first_target..last_target {
+                support::poll(cancel_value, target)?;
+                let tu = target as usize;
+                let primitive = primitive_map[tu];
+                let pu = primitive as usize;
+                let output = primitive_offsets[tu] - base;
+                let source_first = topology.primitive_offsets[pu];
+                let source_last = topology.primitive_offsets[pu + 1];
+                if fragment_start[tu] < 0 {
+                    kinds[(target - first_target) as usize] = topology.primitive_kinds[pu];
+                    for vertex in source_first..source_last {
+                        let target_vertex = (output + vertex - source_first) as usize;
+                        points[target_vertex] = topology.vertex_points[vertex as usize];
+                        maps[target_vertex] = vertex;
+                        edge_of_vertex[target_vertex] = index.edge_of_vertex[vertex as usize];
+                    }
                 } else {
-                    source_first + (start - source_first + local) % source_size
-                };
-                vertex_points.set(output + local, topology.vertex_points[source_vertex as usize]);
-                vertex_map.set(output + local, source_vertex);
-                if local < edges {
-                    source_edge_of_vertex.set(output + local, index.edge_of_vertex[source_vertex as usize]);
+                    let start = fragment_start[tu];
+                    let edges = fragment_edges[tu];
+                    let source_size = source_last - source_first;
+                    let source_kind = topology.primitive_kinds[pu];
+                    for local in 0..=edges {
+                        let source_vertex = if source_kind == OPEN_POLYLINE {
+                            start + local
+                        } else {
+                            source_first + (start - source_first + local) % source_size
+                        };
+                        let slot = (output + local) as usize;
+                        points[slot] = topology.vertex_points[source_vertex as usize];
+                        maps[slot] = source_vertex;
+                        if local < edges {
+                            edge_of_vertex[slot] = index.edge_of_vertex[source_vertex as usize];
+                        }
+                    }
+                    let size = edges + 1;
+                    kinds[(target - first_target) as usize] = if source_kind != OPEN_POLYLINE && keep_closed && size >= 3 {
+                        source_kind
+                    } else {
+                        OPEN_POLYLINE
+                    };
                 }
             }
-            let size = edges + 1;
-            primitive_kinds.set(
-                target,
-                if source_kind != OPEN_POLYLINE && keep_closed && size >= 3 { source_kind } else { OPEN_POLYLINE },
-            );
-        }
-        Ok(())
-    })?;
+            Ok(())
+        })?;
+    }
     let output_topology = topology::create_owned(
         geometry::point_count(value),
-        vertex_points.into_vec(),
+        vertex_points,
         primitive_offsets,
-        primitive_kinds.into_vec().into_iter().map(kind_of).collect(),
+        primitive_kinds.into_iter().map(kind_of).collect(),
     )?;
     remap_all(
         cancel_value,
@@ -624,9 +621,9 @@ fn edge_remove_fast(
         value,
         source_index,
         &output_topology,
-        &vertex_map.into_vec(),
+        &vertex_map,
         &primitive_map,
-        &source_edge_of_vertex.into_vec(),
+        &source_edge_of_vertex,
     )
 }
 
@@ -642,23 +639,24 @@ enum Compiled {
 }
 
 /// Writes one output sample (a corner) of a cut edge: which source points/vertices it blends.
-struct Samples {
-    point_left: AInts,
-    point_right: AInts,
-    vertex_left: AInts,
-    vertex_right: AInts,
-    weights: AFloats,
-    generated: ABytes,
+/// The slices are one range's windows; `output` indexes into them.
+struct Samples<'a> {
+    point_left: &'a mut [i64],
+    point_right: &'a mut [i64],
+    vertex_left: &'a mut [i64],
+    vertex_right: &'a mut [i64],
+    weights: &'a mut [f64],
+    generated: &'a mut [u8],
 }
 
-impl Samples {
+impl Samples<'_> {
     #[allow(clippy::too_many_arguments)]
     fn write_sample(
-        &self,
+        &mut self,
         source: &Source,
         edge_parts: &[i64],
         edge_cut_weight: &[f64],
-        output: i64,
+        output: usize,
         source_vertex: i64,
         part: i64,
         at_end: bool,
@@ -684,26 +682,26 @@ impl Samples {
         let left_point = source.view.vertex_points[sv];
         let right_point = source.view.vertex_points[next as usize];
         if weight <= 0.0 {
-            self.point_left.set(output, left_point);
-            self.point_right.set(output, left_point);
-            self.vertex_left.set(output, source_vertex);
-            self.vertex_right.set(output, source_vertex);
-            self.weights.set(output, 0.0);
+            self.point_left[output] = left_point;
+            self.point_right[output] = left_point;
+            self.vertex_left[output] = source_vertex;
+            self.vertex_right[output] = source_vertex;
+            self.weights[output] = 0.0;
         } else if weight >= 1.0 {
-            self.point_left.set(output, right_point);
-            self.point_right.set(output, right_point);
-            self.vertex_left.set(output, next);
-            self.vertex_right.set(output, next);
-            self.weights.set(output, 0.0);
+            self.point_left[output] = right_point;
+            self.point_right[output] = right_point;
+            self.vertex_left[output] = next;
+            self.vertex_right[output] = next;
+            self.weights[output] = 0.0;
         } else {
-            self.point_left.set(output, left_point);
-            self.point_right.set(output, right_point);
-            self.vertex_left.set(output, source_vertex);
-            self.vertex_right.set(output, next);
-            self.weights.set(output, weight);
+            self.point_left[output] = left_point;
+            self.point_right[output] = right_point;
+            self.vertex_left[output] = source_vertex;
+            self.vertex_right[output] = next;
+            self.weights[output] = weight;
         }
         if clone || (weight > 0.0 && weight < 1.0) {
-            self.generated.set(output, 1);
+            self.generated[output] = 1;
         }
     }
 }
@@ -772,20 +770,23 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
         }
     };
     let vc = vertex_count as usize;
-    let edge_parts = AInts::new(vc, 0);
-    let edge_cut_weight = AFloats::new(vc, -1.0);
-    let endpoint_bits = ABytes::new(vc, 0);
-    let invalid_edges = ABytes::new(vc, 0);
+    let (mut edge_parts, mut edge_cut_weight) = (vec![0_i64; vc], vec![-1.0_f64; vc]);
+    let (mut endpoint_bits, mut invalid_edges) = (vec![0_u8; vc], vec![0_u8; vc]);
     let blocks = if vertex_count == 0 { 0 } else { 1 + (vertex_count - 1) / grain };
-    let error_vertices = AInts::new(blocks as usize, -1);
-    let error_kinds = ABytes::new(blocks as usize, 0);
+    let (mut error_vertices, mut error_kinds) = (vec![-1_i64; blocks as usize], vec![0_u8; blocks as usize]);
     if blocks > 0 {
+        let (w_parts, w_weight) = (Windows::even(&mut edge_parts, grain), Windows::even(&mut edge_cut_weight, grain));
+        let (w_endpoint, w_invalid) = (Windows::even(&mut endpoint_bits, grain), Windows::even(&mut invalid_edges, grain));
+        let (w_error_vertex, w_error_kind) = (Windows::even(&mut error_vertices, 1), Windows::even(&mut error_kinds, 1));
         support::run_indexed_ranges(grain, vertex_count, &|block, first, last| {
+            let (parts_out, weight_out) = (w_parts.take(block), w_weight.take(block));
+            let (endpoint_out, invalid_out) = (w_endpoint.take(block), w_invalid.take(block));
             cancel::check_opt(cancel_value)?;
             let mut first_error = -1_i64;
             let mut first_kind = 0_u8;
             for vertex in first..last {
                 cancel::poll(cancel_value, vertex, 4095)?;
+                let slot = (vertex - first) as usize;
                 let vu = vertex as usize;
                 let next = index.next_vertex[vu];
                 if next < 0 {
@@ -799,7 +800,7 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
                         _ => false,
                     };
                 if excluded {
-                    edge_parts.set(vertex, 1);
+                    parts_out[slot] = 1;
                     continue;
                 }
                 let left = topology.vertex_points[vu];
@@ -811,7 +812,7 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
                     _ => true,
                 };
                 if !eligible {
-                    edge_parts.set(vertex, 1);
+                    parts_out[slot] = 1;
                     continue;
                 }
                 // (invalid, cut_weight, parts, endpoint)
@@ -879,7 +880,7 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
                     }
                 };
                 if invalid {
-                    invalid_edges.set(vertex, 1);
+                    invalid_out[slot] = 1;
                 }
                 if element == Element::PolyCutEdges {
                     let output_parts = match strategy {
@@ -890,20 +891,18 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
                             if invalid { parts } else { 1 }
                         }
                     };
-                    edge_parts.set(vertex, output_parts);
-                    edge_cut_weight.set(vertex, cut_weight);
-                    endpoint_bits.set(vertex, endpoint);
+                    parts_out[slot] = output_parts;
+                    weight_out[slot] = cut_weight;
+                    endpoint_out[slot] = endpoint;
                 }
             }
             if first_error >= 0 {
-                error_vertices.set(block, first_error);
-                error_kinds.set(block, first_kind);
+                w_error_vertex.take(block)[0] = first_error;
+                w_error_kind.take(block)[0] = first_kind;
             }
             Ok(())
         })?;
     }
-    let error_vertices = error_vertices.into_vec();
-    let error_kinds = error_kinds.into_vec();
     if let Some(block) = error_vertices.iter().position(|&vertex| vertex >= 0) {
         let vertex = error_vertices[block];
         let point = topology.vertex_points[vertex as usize];
@@ -914,15 +913,12 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
         };
         return Err(fail(message));
     }
-    let mut edge_parts = edge_parts.into_vec();
-    let edge_cut_weight = edge_cut_weight.into_vec();
-    let endpoint_bits = endpoint_bits.into_vec();
-    let invalid_edges = invalid_edges.into_vec();
-    let vertex_break = ABytes::new(vc, 0);
-    support::parallel_for(cancel_value, grain, vertex_count, &|vertex| {
+    let mut vertex_break = vec![0_u8; vc];
+    support::par_fill(cancel_value, grain, &mut vertex_break, &|vertex| {
         let vu = vertex as usize;
         let next = index.next_vertex[vu];
         let previous = index.previous_vertex[vu];
+        let mut breaks = false;
         if next >= 0 || previous >= 0 {
             match element {
                 Element::PolyCutPoints => {
@@ -930,52 +926,43 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
                     if selected(cut_points, point) {
                         let outgoing = next >= 0 && invalid_edges[vu] != 0;
                         let incoming = previous >= 0 && invalid_edges[previous as usize] != 0;
-                        if outgoing || incoming {
-                            vertex_break.set(vertex, 1);
-                        }
+                        breaks = outgoing || incoming;
                     }
                 }
                 Element::PolyCutEdges => {
                     let outgoing = next >= 0 && endpoint_bits[vu] & 1 != 0;
                     let incoming = previous >= 0 && endpoint_bits[previous as usize] & 2 != 0;
-                    if outgoing || incoming {
-                        vertex_break.set(vertex, 1);
-                    }
+                    breaks = outgoing || incoming;
                 }
             }
         }
-        Ok(())
+        Ok(u8::from(breaks))
     })?;
-    let vertex_break = vertex_break.into_vec();
     if element == Element::PolyCutPoints {
-        let updated = AInts::new(vc, 0);
-        support::parallel_for(cancel_value, grain, vertex_count, &|vertex| {
+        let mut updated = vec![0_i64; vc];
+        support::par_fill(cancel_value, grain, &mut updated, &|vertex| {
             let vu = vertex as usize;
             let next = index.next_vertex[vu];
-            updated.set(
-                vertex,
-                if next >= 0 {
-                    match strategy {
-                        Strategy::PolyCutCut => 1,
-                        Strategy::PolyCutRemove => {
-                            if vertex_break[vu] != 0 || vertex_break[next as usize] != 0 { 0 } else { 1 }
-                        }
+            Ok(if next >= 0 {
+                match strategy {
+                    Strategy::PolyCutCut => 1,
+                    Strategy::PolyCutRemove => {
+                        if vertex_break[vu] != 0 || vertex_break[next as usize] != 0 { 0 } else { 1 }
                     }
-                } else {
-                    edge_parts[vu]
-                },
-            );
-            Ok(())
+                }
+            } else {
+                edge_parts[vu]
+            })
         })?;
-        edge_parts = updated.into_vec();
+        edge_parts = updated;
     }
-    let primitive_action = ABytes::new(primitive_count as usize, 0);
+    let mut primitive_action = vec![0_u8; primitive_count as usize];
     let chunk = (grain / 256).max(1);
-    support::parallel_for(cancel_value, chunk, primitive_count, &|primitive| {
+    support::par_fill(cancel_value, chunk, &mut primitive_action, &|primitive| {
+        let mut changed = false;
         if selected(primitives, primitive) {
             let first = topology.primitive_offsets[primitive as usize];
             let last = topology.primitive_offsets[primitive as usize + 1];
-            let mut changed = false;
             for vertex in first..last {
                 if index.next_vertex[vertex as usize] >= 0 && edge_parts[vertex as usize] != 1 {
                     changed = true;
@@ -995,13 +982,9 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
                     }
                 }
             }
-            if changed {
-                primitive_action.set(primitive, 1);
-            }
         }
-        Ok(())
+        Ok(u8::from(changed))
     })?;
-    let primitive_action = primitive_action.into_vec();
     if !primitive_action.iter().any(|&byte| byte != 0) {
         return Ok(value.clone());
     }
@@ -1038,65 +1021,71 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
     }
     let segment_count = primitive_segment_offsets[pc];
     let sc = segment_count as usize;
-    let segment_vertex = AInts::new(sc, 0);
-    let segment_part = AInts::new(sc, 0);
-    let segment_boundary = ABytes::new(sc, 0);
-    support::parallel_for(cancel_value, chunk, primitive_count, &|primitive| {
-        let pu = primitive as usize;
-        let first = topology.primitive_offsets[pu];
-        let last = topology.primitive_offsets[pu + 1];
-        let mut output = primitive_segment_offsets[pu];
-        let closed = topology.primitive_kinds[pu] != OPEN_POLYLINE;
-        for vertex in first..last {
-            let parts = edge_parts[vertex as usize];
-            for part in 0..parts {
-                segment_vertex.set(output, vertex);
-                segment_part.set(output, part);
-                let boundary = if part > 0 {
-                    2
-                } else if !closed && vertex == first {
-                    1
-                } else {
-                    let previous = index.previous_vertex[vertex as usize];
-                    if previous < 0 || edge_parts[previous as usize] == 0 {
-                        1
-                    } else if vertex_break[vertex as usize] != 0 {
-                        2
-                    } else {
-                        0
-                    }
-                };
-                segment_boundary.set(output, boundary);
-                output += 1;
-            }
-        }
-        Ok(())
-    })?;
-    let (segment_vertex, segment_part) = (segment_vertex.into_vec(), segment_part.into_vec());
-    let segment_boundary = segment_boundary.into_vec();
-    let fragment_counts = AInts::new(pc, 0);
-    support::parallel_for(cancel_value, chunk, primitive_count, &|primitive| {
-        let pu = primitive as usize;
-        if primitive_action[pu] == 0 {
-            fragment_counts.set(primitive, 1);
-        } else {
-            let first = primitive_segment_offsets[pu];
-            let last = primitive_segment_offsets[pu + 1];
-            let segments = last - first;
-            if segments > 0 {
-                let mut boundaries = 0_i64;
-                for segment in first..last {
-                    if segment_boundary[segment as usize] != 0 {
-                        boundaries += 1;
+    let (mut segment_vertex, mut segment_part) = (vec![0_i64; sc], vec![0_i64; sc]);
+    let mut segment_boundary = vec![0_u8; sc];
+    {
+        let bound = |range: i64| range_start(&primitive_segment_offsets, chunk, primitive_count, range);
+        let ranges = support::range_count(primitive_count, chunk);
+        let (w_vertex, w_part) =
+            (Windows::new(&mut segment_vertex, ranges, bound), Windows::new(&mut segment_part, ranges, bound));
+        let w_boundary = Windows::new(&mut segment_boundary, ranges, bound);
+        support::run_indexed_ranges(chunk, primitive_count, &|range, first_primitive, last_primitive| {
+            let (vertices_out, parts_out) = (w_vertex.take(range), w_part.take(range));
+            let boundary_out = w_boundary.take(range);
+            let base = bound(range) as i64;
+            for primitive in first_primitive..last_primitive {
+                support::poll(cancel_value, primitive)?;
+                let pu = primitive as usize;
+                let first = topology.primitive_offsets[pu];
+                let last = topology.primitive_offsets[pu + 1];
+                let mut output = primitive_segment_offsets[pu] - base;
+                let closed = topology.primitive_kinds[pu] != OPEN_POLYLINE;
+                for vertex in first..last {
+                    let parts = edge_parts[vertex as usize];
+                    for part in 0..parts {
+                        vertices_out[output as usize] = vertex;
+                        parts_out[output as usize] = part;
+                        boundary_out[output as usize] = if part > 0 {
+                            2
+                        } else if !closed && vertex == first {
+                            1
+                        } else {
+                            let previous = index.previous_vertex[vertex as usize];
+                            if previous < 0 || edge_parts[previous as usize] == 0 {
+                                1
+                            } else if vertex_break[vertex as usize] != 0 {
+                                2
+                            } else {
+                                0
+                            }
+                        };
+                        output += 1;
                     }
                 }
-                let closed = topology.primitive_kinds[pu] != OPEN_POLYLINE;
-                fragment_counts.set(primitive, if closed && boundaries == 0 { 1 } else { boundaries });
+            }
+            Ok(())
+        })?;
+    }
+    let mut fragment_counts = vec![0_i64; pc];
+    support::par_fill(cancel_value, chunk, &mut fragment_counts, &|primitive| {
+        let pu = primitive as usize;
+        if primitive_action[pu] == 0 {
+            return Ok(1);
+        }
+        let first = primitive_segment_offsets[pu];
+        let last = primitive_segment_offsets[pu + 1];
+        if last - first == 0 {
+            return Ok(0);
+        }
+        let mut boundaries = 0_i64;
+        for segment in first..last {
+            if segment_boundary[segment as usize] != 0 {
+                boundaries += 1;
             }
         }
-        Ok(())
+        let closed = topology.primitive_kinds[pu] != OPEN_POLYLINE;
+        Ok(if closed && boundaries == 0 { 1 } else { boundaries })
     })?;
-    let fragment_counts = fragment_counts.into_vec();
     let mut primitive_bases = vec![0_i64; pc + 1];
     for primitive in 0..pc {
         let count = fragment_counts[primitive];
@@ -1107,61 +1096,75 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
     }
     let output_primitive_count = primitive_bases[pc];
     let opc = output_primitive_count as usize;
-    let fragment_first = AInts::new(opc, -1);
-    let fragment_segments = AInts::new(opc, -1);
-    let primitive_map = AInts::new(opc, 0);
-    let fragment_sizes = AInts::new(opc, 0);
-    support::parallel_for(cancel_value, chunk, primitive_count, &|primitive| {
-        let pu = primitive as usize;
-        let target_base = primitive_bases[pu];
-        let source_size = topology.primitive_offsets[pu + 1] - topology.primitive_offsets[pu];
-        if primitive_action[pu] == 0 {
-            primitive_map.set(target_base, primitive);
-            fragment_sizes.set(target_base, source_size);
-            return Ok(());
-        }
-        let segment_base = primitive_segment_offsets[pu];
-        let segment_last = primitive_segment_offsets[pu + 1];
-        let segments = segment_last - segment_base;
-        if segments > 0 {
-            let closed = topology.primitive_kinds[pu] != OPEN_POLYLINE;
-            let mut first_boundary = -1_i64;
-            for segment in segment_base..segment_last {
-                if first_boundary < 0 && segment_boundary[segment as usize] != 0 {
-                    first_boundary = segment;
+    let (mut fragment_first, mut fragment_segments) = (vec![-1_i64; opc], vec![-1_i64; opc]);
+    let (mut primitive_map, mut fragment_sizes) = (vec![0_i64; opc], vec![0_i64; opc]);
+    {
+        let bound = |range: i64| range_start(&primitive_bases, chunk, primitive_count, range);
+        let ranges = support::range_count(primitive_count, chunk);
+        let (w_first, w_segments) = (
+            Windows::new(&mut fragment_first, ranges, bound),
+            Windows::new(&mut fragment_segments, ranges, bound),
+        );
+        let (w_map, w_sizes) = (
+            Windows::new(&mut primitive_map, ranges, bound),
+            Windows::new(&mut fragment_sizes, ranges, bound),
+        );
+        support::run_indexed_ranges(chunk, primitive_count, &|range, first_primitive, last_primitive| {
+            let (firsts, segments_out) = (w_first.take(range), w_segments.take(range));
+            let (maps, sizes) = (w_map.take(range), w_sizes.take(range));
+            let base = bound(range) as i64;
+            for primitive in first_primitive..last_primitive {
+                support::poll(cancel_value, primitive)?;
+                let pu = primitive as usize;
+                let target_base = primitive_bases[pu];
+                let source_size = topology.primitive_offsets[pu + 1] - topology.primitive_offsets[pu];
+                if primitive_action[pu] == 0 {
+                    maps[(target_base - base) as usize] = primitive;
+                    sizes[(target_base - base) as usize] = source_size;
+                    continue;
                 }
-            }
-            if closed && first_boundary < 0 {
-                primitive_map.set(target_base, primitive);
-                fragment_sizes.set(target_base, source_size);
-            } else {
-                let start = if first_boundary >= 0 { first_boundary } else { segment_base };
-                let mut target = target_base - 1;
-                let mut current_count = 0_i64;
-                for offset in 0..segments {
-                    let segment = segment_base + (start - segment_base + offset) % segments;
-                    if segment_boundary[segment as usize] != 0 {
-                        if target >= target_base {
-                            fragment_segments.set(target, current_count);
-                            fragment_sizes.set(target, current_count + 1);
+                let segment_base = primitive_segment_offsets[pu];
+                let segment_last = primitive_segment_offsets[pu + 1];
+                let segments = segment_last - segment_base;
+                if segments > 0 {
+                    let closed = topology.primitive_kinds[pu] != OPEN_POLYLINE;
+                    let mut first_boundary = -1_i64;
+                    for segment in segment_base..segment_last {
+                        if first_boundary < 0 && segment_boundary[segment as usize] != 0 {
+                            first_boundary = segment;
                         }
-                        target += 1;
-                        current_count = 0;
-                        fragment_first.set(target, segment);
-                        primitive_map.set(target, primitive);
                     }
-                    current_count += 1;
-                }
-                if target >= target_base {
-                    fragment_segments.set(target, current_count);
-                    fragment_sizes.set(target, current_count + 1);
+                    if closed && first_boundary < 0 {
+                        maps[(target_base - base) as usize] = primitive;
+                        sizes[(target_base - base) as usize] = source_size;
+                    } else {
+                        let start = if first_boundary >= 0 { first_boundary } else { segment_base };
+                        let mut target = target_base - 1;
+                        let mut current_count = 0_i64;
+                        for offset in 0..segments {
+                            let segment = segment_base + (start - segment_base + offset) % segments;
+                            if segment_boundary[segment as usize] != 0 {
+                                if target >= target_base {
+                                    segments_out[(target - base) as usize] = current_count;
+                                    sizes[(target - base) as usize] = current_count + 1;
+                                }
+                                target += 1;
+                                current_count = 0;
+                                firsts[(target - base) as usize] = segment;
+                                maps[(target - base) as usize] = primitive;
+                            }
+                            current_count += 1;
+                        }
+                        if target >= target_base {
+                            segments_out[(target - base) as usize] = current_count;
+                            sizes[(target - base) as usize] = current_count + 1;
+                        }
+                    }
                 }
             }
-        }
-        Ok(())
-    })?;
-    let (fragment_first, fragment_segments) = (fragment_first.into_vec(), fragment_segments.into_vec());
-    let (primitive_map, fragment_sizes) = (primitive_map.into_vec(), fragment_sizes.into_vec());
+            Ok(())
+        })?;
+    }
     let mut primitive_offsets = vec![0_i64; opc + 1];
     for primitive in 0..opc {
         let size = fragment_sizes[primitive];
@@ -1172,68 +1175,88 @@ fn run_cut(params: &Params, value: &geometry::T) -> Result<geometry::T, error::T
     }
     let output_vertex_count = primitive_offsets[opc];
     let ovc = output_vertex_count as usize;
-    let primitive_kinds = ABytes::new(opc, OPEN_POLYLINE);
-    let samples = Samples {
-        point_left: AInts::new(ovc, 0),
-        point_right: AInts::new(ovc, 0),
-        vertex_left: AInts::new(ovc, 0),
-        vertex_right: AInts::new(ovc, 0),
-        weights: AFloats::new(ovc, 0.0),
-        generated: ABytes::new(ovc, 0),
-    };
-    let source_edge_of_vertex = AInts::new(ovc, -1);
-    support::parallel_for(cancel_value, (grain / 8).max(1), output_primitive_count, &|target| {
-        let tu = target as usize;
-        let primitive = primitive_map[tu];
-        let pu = primitive as usize;
-        let output_first = primitive_offsets[tu];
-        if fragment_first[tu] < 0 {
-            let source_first = topology.primitive_offsets[pu];
-            let source_last = topology.primitive_offsets[pu + 1];
-            primitive_kinds.set(target, topology.primitive_kinds[pu]);
-            for source_vertex in source_first..source_last {
-                let output = output_first + source_vertex - source_first;
-                let point = topology.vertex_points[source_vertex as usize];
-                samples.point_left.set(output, point);
-                samples.point_right.set(output, point);
-                samples.vertex_left.set(output, source_vertex);
-                samples.vertex_right.set(output, source_vertex);
-                source_edge_of_vertex.set(output, index.edge_of_vertex[source_vertex as usize]);
+    let mut primitive_kinds = vec![OPEN_POLYLINE; opc];
+    let (mut point_left, mut point_right) = (vec![0_i64; ovc], vec![0_i64; ovc]);
+    let (mut vertex_left, mut vertex_right) = (vec![0_i64; ovc], vec![0_i64; ovc]);
+    let (mut weights, mut generated) = (vec![0.0_f64; ovc], vec![0_u8; ovc]);
+    let mut source_edge_of_vertex = vec![-1_i64; ovc];
+    {
+        let target_grain = (grain / 8).max(1);
+        let bound = |range: i64| range_start(&primitive_offsets, target_grain, output_primitive_count, range);
+        let ranges = support::range_count(output_primitive_count, target_grain);
+        let w_kinds = Windows::even(&mut primitive_kinds, target_grain);
+        let (w_point_left, w_point_right) = (
+            Windows::new(&mut point_left, ranges, bound),
+            Windows::new(&mut point_right, ranges, bound),
+        );
+        let (w_vertex_left, w_vertex_right) = (
+            Windows::new(&mut vertex_left, ranges, bound),
+            Windows::new(&mut vertex_right, ranges, bound),
+        );
+        let (w_weights, w_generated) =
+            (Windows::new(&mut weights, ranges, bound), Windows::new(&mut generated, ranges, bound));
+        let w_edge = Windows::new(&mut source_edge_of_vertex, ranges, bound);
+        support::run_indexed_ranges(target_grain, output_primitive_count, &|range, first_target, last_target| {
+            let kinds = w_kinds.take(range);
+            let edge_of_vertex = w_edge.take(range);
+            let mut samples = Samples {
+                point_left: w_point_left.take(range),
+                point_right: w_point_right.take(range),
+                vertex_left: w_vertex_left.take(range),
+                vertex_right: w_vertex_right.take(range),
+                weights: w_weights.take(range),
+                generated: w_generated.take(range),
+            };
+            let base = bound(range) as i64;
+            for target in first_target..last_target {
+                support::poll(cancel_value, target)?;
+                let tu = target as usize;
+                let kind_slot = (target - first_target) as usize;
+                let primitive = primitive_map[tu];
+                let pu = primitive as usize;
+                let output_first = primitive_offsets[tu] - base;
+                if fragment_first[tu] < 0 {
+                    let source_first = topology.primitive_offsets[pu];
+                    let source_last = topology.primitive_offsets[pu + 1];
+                    kinds[kind_slot] = topology.primitive_kinds[pu];
+                    for source_vertex in source_first..source_last {
+                        let output = (output_first + source_vertex - source_first) as usize;
+                        let point = topology.vertex_points[source_vertex as usize];
+                        samples.point_left[output] = point;
+                        samples.point_right[output] = point;
+                        samples.vertex_left[output] = source_vertex;
+                        samples.vertex_right[output] = source_vertex;
+                        edge_of_vertex[output] = index.edge_of_vertex[source_vertex as usize];
+                    }
+                } else {
+                    let first_segment = fragment_first[tu];
+                    let count = fragment_segments[tu];
+                    let segment_base = primitive_segment_offsets[pu];
+                    let total_segments = primitive_segment_offsets[pu + 1] - segment_base;
+                    let first_source_vertex = segment_vertex[first_segment as usize];
+                    let first_part = segment_part[first_segment as usize];
+                    let clone = segment_boundary[first_segment as usize] == 2;
+                    samples.write_sample(&source, &edge_parts, &edge_cut_weight, output_first as usize, first_source_vertex, first_part, false, clone);
+                    for local in 0..count {
+                        let segment = segment_base + (first_segment - segment_base + local) % total_segments;
+                        let source_vertex = segment_vertex[segment as usize];
+                        let part = segment_part[segment as usize];
+                        let output = (output_first + local) as usize;
+                        edge_of_vertex[output] = index.edge_of_vertex[source_vertex as usize];
+                        samples.write_sample(&source, &edge_parts, &edge_cut_weight, output + 1, source_vertex, part, true, false);
+                    }
+                    let size = count + 1;
+                    let source_kind = topology.primitive_kinds[pu];
+                    kinds[kind_slot] = if source_kind != OPEN_POLYLINE && keep_closed && size >= 3 {
+                        source_kind
+                    } else {
+                        OPEN_POLYLINE
+                    };
+                }
             }
-        } else {
-            let first_segment = fragment_first[tu];
-            let count = fragment_segments[tu];
-            let segment_base = primitive_segment_offsets[pu];
-            let total_segments = primitive_segment_offsets[pu + 1] - segment_base;
-            let first_source_vertex = segment_vertex[first_segment as usize];
-            let first_part = segment_part[first_segment as usize];
-            let clone = segment_boundary[first_segment as usize] == 2;
-            samples.write_sample(&source, &edge_parts, &edge_cut_weight, output_first, first_source_vertex, first_part, false, clone);
-            for local in 0..count {
-                let segment = segment_base + (first_segment - segment_base + local) % total_segments;
-                let source_vertex = segment_vertex[segment as usize];
-                let part = segment_part[segment as usize];
-                let output = output_first + local;
-                source_edge_of_vertex.set(output, index.edge_of_vertex[source_vertex as usize]);
-                samples.write_sample(&source, &edge_parts, &edge_cut_weight, output + 1, source_vertex, part, true, false);
-            }
-            let size = count + 1;
-            let source_kind = topology.primitive_kinds[pu];
-            primitive_kinds.set(
-                target,
-                if source_kind != OPEN_POLYLINE && keep_closed && size >= 3 { source_kind } else { OPEN_POLYLINE },
-            );
-        }
-        Ok(())
-    })?;
-    let primitive_kinds = primitive_kinds.into_vec();
-    let point_left = samples.point_left.into_vec();
-    let point_right = samples.point_right.into_vec();
-    let vertex_left = samples.vertex_left.into_vec();
-    let vertex_right = samples.vertex_right.into_vec();
-    let weights = samples.weights.into_vec();
-    let generated = samples.generated.into_vec();
-    let source_edge_of_vertex = source_edge_of_vertex.into_vec();
+            Ok(())
+        })?;
+    }
 
     let pcount = point_count as usize;
     let mut source_point_used = vec![0_u8; pcount];
