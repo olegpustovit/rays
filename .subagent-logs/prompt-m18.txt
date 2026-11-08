@@ -1,0 +1,1 @@
+Rays dev AGENTS.md ponytail. M18 ONE safe slice in rdk_ops subdivide_refine: shrink one per-vertex i64 scratch buffer to i32 where values fit (plan ~1220). No topology u32. cargo t -p rdk_ops subdivide with narrow filter OR smoke test in-file. Commit "M18:". PROGRESS M18 only. No artifact.

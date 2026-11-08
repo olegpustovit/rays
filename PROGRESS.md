@@ -11,7 +11,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | Wave | Done | Active | Pending |
 |------|------|--------|---------|
 | A | 8/8 | — | — |
-| B | 5/6 | B1 (scope stack) | 0 |
+| B | 5/6 | B1 (partial) | 0 |
 | M | 10/21 | — | 11 |
 | I | 0/1 | — | 1 |
 | C | 0/21 | — | 21 |
@@ -32,7 +32,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | B0 | done | §B0 checklist + warm pair `flow_check` 0.15s/0.07s; `catalog.rs` marker |
 | B3 | done | `5fdb5fb3` — `gpu_editor` + `tests/support`; 7× `gpu_suite_t*` + qual → 2 test links; `cargo t -p rays_editor run_lowering` ~2.9s |
 | B4 | done | W1 `flow_ir` touch → `rays_bin` check in `tools/buildtime` (env overrides) |
-| B1 | active | `533489ee` term_arena; `e16247cd` `BUILTIN_DELEGATE`/`GPU_STAGE_ONLY` + `EMPTY_CHECK`; ponytail workspace `PathId` scope stack; op.rs ~138× `Arc::new` (was 141) |
+| B1 | done (partial) | `533489ee` term_arena; `e16247cd` delegate tables + `EMPTY_CHECK`; **deferred** workspace `PathId` scope stack (`op.rs` ponytail); ~138× `Arc::new` |
 | B2 | done | `96fab43d` — dev `opt-level=0` for rays_editor, pxui_graph, editor_document, flow_graph, flow_native |
 | B5 | done (partial) | `94aa4546` catalog split; `35df934e` `flow_native`; `7b374363` `flow_gpu`; **this session** `rays_editor` → `rdk_core` + `rdk_ops` (tests); **rdk delete deferred** (`sop`, `flow_sop`) |
 | M2 | done | `bbe7f6ae` — `editor_graph_ref`; `panel_key` / layouts borrow graph name |
@@ -70,7 +70,7 @@ Cursor `Task` subagents unavailable in this harness; workers are `omp launch -p`
 
 ## Plan audit (2026-11-08)
 
-Read-only review in `.subagent-logs/review.log`: Wave A runbook **5/6 bullets done**, bullet 3 partial (`pxui` `ocaml_int` → Wave **I**); A4 MD5 done, optional `guarded`/`ocaml_min` dedup still scattered. **~8/63** plan IDs closed (A1–A8 + B4); M/I/C/D not started. A6 closed at `3a293e9b` after review snapshot.
+Read-only reviews: `.subagent-logs/review.log` (Wave A snapshot); `.subagent-logs/review2.log` (63-ID tally); `.subagent-logs/review3.log` (2026-11-08) — **~25/63** with evidence, **2 partial** (B1, B5); next impact **I**, **M1**, **M14**, **C1**, **C3**; `rdk` facade remains for `sop`/`flow_sop` only.
 
 ## B0 — shared `target/` incremental invalidation
 
@@ -99,6 +99,7 @@ Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s
 
 ## Session log
 
+- 2026-11-08: `6f75543d` B5 `rays_editor`; B1 marked partial; review3 + m18 worker; `rdk` only `sop`/`flow_sop`; ~25/63 IDs.
 - 2026-11-08: `69d08a8a` M6; `66136b7f` M8; `7b374363` B5 `flow_gpu`; M wave 10/21; ~24/63 IDs.
 - 2026-11-08: B5 — `flow_gpu` dropped `rdk` dev-dep (`rdk_core`/`rdk_ops` in gpu_* tests); `cargo check -p flow_gpu -p flow_native`.
 - 2026-11-08: B5 — `flow_native` no longer depends on `rdk` facade (`rdk_core` direct); `cargo check -p flow_native -p rays_editor`.
