@@ -80,13 +80,15 @@ fn settle(table: &mut Table) {
 
 pub fn find(table: &mut Table, key: &TableKey) -> Option<Item> {
     settle(table);
-    let value = table.cache.find_opt(&lru_key(key))?;
+    let hash = hash_of(key);
+    let value = table.cache.find_opt_by(hash, key)?;
     table.items.get(&id_of(&value)).map(|(_, item)| item.clone())
 }
 
 pub fn peek(table: &mut Table, key: &TableKey) -> Option<Item> {
     settle(table);
-    let value = table.cache.peek(&lru_key(key))?;
+    let hash = hash_of(key);
+    let value = table.cache.peek_by(hash, key)?;
     table.items.get(&id_of(&value)).map(|(_, item)| item.clone())
 }
 
@@ -100,14 +102,16 @@ pub fn add(table: &mut Table, bytes: i64, key: TableKey, item: Item) {
 }
 
 pub fn remove(table: &mut Table, key: &TableKey) {
-    table.cache.remove(&lru_key(key));
+    let hash = hash_of(key);
+    table.cache.remove_by(hash, key);
     settle(table);
 }
 
 /// Removes without releasing: the caller now owns the value.
 pub fn take(table: &mut Table, key: &TableKey) -> Option<Item> {
     settle(table);
-    let value = table.cache.take(&lru_key(key))?;
+    let hash = hash_of(key);
+    let value = table.cache.take_by(hash, key)?;
     table.items.remove(&id_of(&value)).map(|(_, item)| item)
 }
 

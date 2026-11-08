@@ -12,7 +12,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 |------|------|--------|---------|
 | A | 8/8 | — | — |
 | B | 5/6 | B1 | 1 |
-| M | 8/21 | — | 13 |
+| M | 9/21 | — | 12 |
 | I | 0/1 | — | 1 |
 | C | 0/21 | — | 21 |
 | D | 0/6 | — | 6 |
@@ -43,7 +43,8 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | M11 | done | `49ec71f3` — lazy `field()` error `form`; `Keys` pattern name once; `cargo t -p flow_eval test_workspace_eval` 2 pass |
 | M7 | done | `dca77b6f` — texture/sampler `retain_for`; `keep_sampler` dedup; `cargo check -p ogpu_metal` |
 | M12 | done | `b5be8904` — `record_slot_open` skips `record_packed` / `note` past per-path cap; `cargo t -p flow_eval test_workspace_eval` |
-| M1,M3,M5–M6,M8,M13–M19,M21 | pending | |
+| M8 | done | side_lru `find_opt_by` probe lookups; `sampler_key` u64 via `mix`; `cargo check -p renderer` |
+| M1,M3,M5–M6,M13–M19,M21 | pending | |
 | I | pending | |
 | C1–C21 | pending | |
 | D1–D6 | pending | |

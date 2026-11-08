@@ -481,7 +481,7 @@ struct argument_pool {
     argument_buffer: Buffer,
     argument_stride: i64,
     argument_capacity: i64,
-    slices: HashMap<(i64, String), i64>,
+    slices: HashMap<(i64, u64), i64>,
     argument_next: i64,
 }
 
@@ -618,7 +618,7 @@ pub struct t {
     staged_frame: i64,
     /// and the frame before it did too
     staged_stream: bool,
-    samplers: HashMap<String, Sampler>,
+    samplers: HashMap<u64, Sampler>,
     arguments: Option<argument_pool>,
     icb_stats: icb_stats,
     uploaded: i64,
@@ -2273,8 +2273,10 @@ fn render_target(
     })
 }
 
-fn sampler_key(descriptor: &SamplerDescriptor) -> String {
-    format!("{:?}", descriptor)
+fn sampler_key(descriptor: &SamplerDescriptor) -> u64 {
+    let mut h = mix(0x9E3779B97F4A7C15);
+    h.sampler(descriptor);
+    h.0
 }
 
 fn sampler_for(value: &mut t, descriptor: &SamplerDescriptor) -> Result<Sampler, Error> {
@@ -3615,9 +3617,9 @@ pub fn read_pixels(value: &mut t, bytes_per_row: i64) -> Result<Vec<u8>, Error> 
     backend::read_texture(&value.target, bytes_per_row)
 }
 
-fn sorted_samplers(samplers: HashMap<String, Sampler>) -> Vec<(String, Sampler)> {
-    let mut entries: Vec<(String, Sampler)> = samplers.into_iter().collect();
-    entries.sort_by(|a, b| a.0.cmp(&b.0));
+fn sorted_samplers(samplers: HashMap<u64, Sampler>) -> Vec<(u64, Sampler)> {
+    let mut entries: Vec<(u64, Sampler)> = samplers.into_iter().collect();
+    entries.sort_by_key(|a| a.0);
     entries
 }
 
