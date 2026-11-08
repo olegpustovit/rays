@@ -17,12 +17,10 @@ test = false
 
 [dependencies]
 editor_document = { path = "../editor_document" }
-editor_core = { path = "../editor_core" }
 rays_editor = { path = "../rays_editor" }
 web_export = { path = "../web_export" }
 flow_syntax = { path = "../flow_syntax" }
 flow_check = { path = "../flow_check" }
-input = { path = "../input" }
 flow_eval = { path = "../flow_eval" }
 flow_sop = { path = "../flow_sop" }
 sop = { path = "../sop" }

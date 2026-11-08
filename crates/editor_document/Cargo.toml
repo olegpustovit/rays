@@ -19,5 +19,4 @@ flow_sop = { path = "../flow_sop" }
 flow_graph = { path = "../flow_graph" }
 editor_core = { path = "../editor_core" }
 cfmt = { path = "../cfmt" }
-ocaml_int = { path = "../ocaml_int" }
 

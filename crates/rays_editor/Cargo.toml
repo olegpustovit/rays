@@ -30,7 +30,6 @@ pxui_shell = { path = "../pxui_shell" }
 pxui_graph = { path = "../pxui_graph" }
 lru = { path = "../lru" }
 cfmt = { path = "../cfmt" }
-ocaml_int = { path = "../ocaml_int" }
 parallel = { path = "../parallel" }
 flow_ir = { path = "../flow_ir" }
 rdk = { path = "../rdk" }
