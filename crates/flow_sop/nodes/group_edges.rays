@@ -165,7 +165,8 @@
                slot_point (ge_rows point_degree)
                slot_degree (exact (map (fn [(s : int)] (array/nth point_degree (array/nth slot_point s)))
                  (array/range slot_count :type int)))
-               rounds (if (int/eq slot_count 0) 0 (array/max point_degree))
+               ; only the incident-edge angle filter reads the rounds
+               rounds (if (or (int/eq slot_count 0) (not (and angle_filter (not dihedral)))) 0 (array/max point_degree))
                slot_edge adjacency.point_edges
                ; round k pairs every slot with the k-th edge of its point; each stage is its own kernel
                slot_found
