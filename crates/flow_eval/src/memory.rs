@@ -57,9 +57,10 @@ impl Storage {
         if self.shared(&context.base) { self.path(&context.base); }
         if self.shared(&context.iter) { self.buffer(&context.iter); }
     }
-    fn env(&mut self, env: &Arc<BTreeMap<String, Value>>) {
-        if self.shared(env) { for (name, value) in env.iter() { self.text(name); self.value(value); } }
+    fn env(&mut self, env: &Captured) {
+        if self.heap.allocation(Arc::as_ptr(env) as *const u8, std::mem::size_of_val(&**env)) { for (name, value) in env.iter() { self.name(name); self.value(value); } }
     }
+    fn name(&mut self, name: &Arc<str>) { self.heap.allocation(Arc::as_ptr(name) as *const u8, name.len()); }
     fn arena(&mut self, arena: &Arena) {
         self.workspace.workspace(&arena.workspace.0);
         if self.shared(&arena.source_key) { if let Some(key) = arena.source_key.get() { self.text(key); } }
@@ -106,7 +107,7 @@ impl Storage {
         if self.shared(&arena.arg_pool.0) { for fields in arena.arg_pool.values() { self.fields(fields); } }
         if self.shared(&arena.terms.0) { for (_, term) in arena.terms.values() { if self.shared(term) { self.term(term); } } }
         if self.shared(&arena.frees.0) {
-            for (_, names) in arena.frees.values() { if self.shared(names) && self.buffer(names) { for name in names.iter() { self.text(name); } } }
+            for (_, names) in arena.frees.values() { if self.shared(names) && self.buffer(names) { for name in names.iter() { self.name(name); } } }
         }
     }
     fn allocations(self) -> Vec<(usize, usize)> {
