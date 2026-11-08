@@ -6,6 +6,8 @@ Repo mirror: `docs/history/port-simplification/index.html`
 
 **Order:** A ∥ B ∥ M ∥ I, then C, then D. One commit per bullet in Wave A runbook where practical.
 
+**Checkpoint (2026-11-08):** ~**28/63** plan IDs with evidence; artifact **not** updated this session.
+
 ## Summary
 
 | Wave | Done | Active | Pending |
