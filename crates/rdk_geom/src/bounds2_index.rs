@@ -1,8 +1,6 @@
 //! Packed immutable BVH over two-dimensional closed bounds.
 use rdk_core::{cancel, error, support};
 
-const MAX_ARRAY_LENGTH: i64 = (1 << 54) - 1;
-
 #[derive(Clone, Debug)]
 pub struct T {
     order: Vec<i64>,
@@ -132,12 +130,6 @@ pub fn create(
         return Err(invalid(
             "Bounds2_index.create",
             "Bounds2_index: bound plane sizes differ",
-        ));
-    }
-    if items as i64 > MAX_ARRAY_LENGTH / 2 {
-        return Err(invalid(
-            "Bounds2_index.create",
-            "Bounds2_index: item cardinality exceeds array limits",
         ));
     }
     for item in 0..items {

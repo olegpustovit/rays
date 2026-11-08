@@ -5,7 +5,7 @@
 //! `foo_value`. Enums with a table are `Copy` with discriminants equal to table positions.
 use param::{Kind, Value};
 use rays_diagnostic::Diagnostic;
-use rdk::{attribute, edge_transport, geometry, group, group_ops};
+use rdk::{attribute, geometry, group, group_ops};
 
 use crate::node::{Cooked, GeometryCooked};
 
@@ -218,12 +218,6 @@ pub enum AxisOrientation {
     Y,
     Z,
     Custom,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TransportRoots {
-    First,
-    Last,
-    Group,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CleanOverlap {
@@ -678,63 +672,6 @@ pub fn delete_topology_policy_of_value(value: &Value) -> rdk::deletion::Topology
     }
 }
 
-pub const EDGE_TRANSPORT_DIRECTION_LABELS: [&str; 2] = ["Forward", "Backward"];
-pub fn edge_transport_direction_kind() -> Kind {
-    choice_kind(&EDGE_TRANSPORT_DIRECTION_LABELS)
-}
-pub fn edge_transport_direction_of_value(value: &Value) -> edge_transport::Direction {
-    match choice_index(&EDGE_TRANSPORT_DIRECTION_LABELS, value) {
-        0 => edge_transport::Direction::TransportForward,
-        _ => edge_transport::Direction::TransportBackward,
-    }
-}
-pub const EDGE_TRANSPORT_OPERATION_LABELS: [&str; 5] = ["Transport", "From root", "Total", "Maximum", "Minimum"];
-pub fn edge_transport_operation_kind() -> Kind {
-    choice_kind(&EDGE_TRANSPORT_OPERATION_LABELS)
-}
-pub fn edge_transport_operation_of_value(value: &Value) -> edge_transport::Operation {
-    use edge_transport::Operation::*;
-    [Transport, TransportFromRoot, TransportTotal, TransportMaximum, TransportMinimum]
-        [choice_index(&EDGE_TRANSPORT_OPERATION_LABELS, value)]
-}
-pub const EDGE_TRANSPORT_ROOT_VALUE_LABELS: [&str; 2] = ["Zero", "Hold"];
-pub fn edge_transport_root_value_kind() -> Kind {
-    choice_kind(&EDGE_TRANSPORT_ROOT_VALUE_LABELS)
-}
-pub fn edge_transport_root_value_of_value(value: &Value) -> edge_transport::RootValue {
-    match choice_index(&EDGE_TRANSPORT_ROOT_VALUE_LABELS, value) {
-        0 => edge_transport::RootValue::TransportRootZero,
-        _ => edge_transport::RootValue::TransportRootHold,
-    }
-}
-pub const EDGE_TRANSPORT_NORMALIZATION_LABELS: [&str; 3] = ["None", "Per component", "Global"];
-pub fn edge_transport_normalization_kind() -> Kind {
-    choice_kind(&EDGE_TRANSPORT_NORMALIZATION_LABELS)
-}
-pub fn edge_transport_normalization_of_value(value: &Value) -> edge_transport::Normalization {
-    use edge_transport::Normalization::*;
-    [TransportNoNormalization, TransportNormalizeComponents, TransportNormalizeGlobal]
-        [choice_index(&EDGE_TRANSPORT_NORMALIZATION_LABELS, value)]
-}
-pub const EDGE_TRANSPORT_SPLIT_LABELS: [&str; 2] = ["Copy", "Split"];
-pub fn edge_transport_split_kind() -> Kind {
-    choice_kind(&EDGE_TRANSPORT_SPLIT_LABELS)
-}
-pub fn edge_transport_split_of_value(value: &Value) -> edge_transport::Split {
-    match choice_index(&EDGE_TRANSPORT_SPLIT_LABELS, value) {
-        0 => edge_transport::Split::TransportCopy,
-        _ => edge_transport::Split::TransportSplit,
-    }
-}
-pub const EDGE_TRANSPORT_MERGE_LABELS: [&str; 3] = ["Add", "Maximum", "Minimum"];
-pub fn edge_transport_merge_kind() -> Kind {
-    choice_kind(&EDGE_TRANSPORT_MERGE_LABELS)
-}
-pub fn edge_transport_merge_of_value(value: &Value) -> edge_transport::Merge {
-    use edge_transport::Merge::*;
-    [TransportMergeAdd, TransportMergeMaximum, TransportMergeMinimum][choice_index(&EDGE_TRANSPORT_MERGE_LABELS, value)]
-}
-
 pub const SOFT_FALLOFF_LABELS: [&str; 3] = ["Linear", "Quadratic", "Cubic"];
 pub fn soft_falloff_kind() -> Kind {
     choice_kind(&SOFT_FALLOFF_LABELS)
@@ -742,15 +679,6 @@ pub fn soft_falloff_kind() -> Kind {
 pub fn soft_falloff_of_value(value: &Value) -> rdk::transform_ops::SoftTransformFalloff {
     use rdk::transform_ops::SoftTransformFalloff::*;
     [SoftLinear, SoftQuadratic, SoftCubic][choice_index(&SOFT_FALLOFF_LABELS, value)]
-}
-
-pub const TRANSPORT_ROOTS_LABELS: [&str; 3] = ["First point", "Last point", "Root group"];
-pub const TRANSPORT_ROOTS: [TransportRoots; 3] = [TransportRoots::First, TransportRoots::Last, TransportRoots::Group];
-pub fn transport_roots_kind() -> Kind {
-    choice_kind(&TRANSPORT_ROOTS_LABELS)
-}
-pub fn transport_roots_of_value(value: &Value) -> TransportRoots {
-    TRANSPORT_ROOTS[choice_index(&TRANSPORT_ROOTS_LABELS, value)]
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -833,15 +761,6 @@ pub fn transfer_falloff_of(falloff: TransferFalloff, bias: f64) -> rdk::attribut
         TransferFalloff::Linear => Falloff::Linear,
         TransferFalloff::Smoothstep => Falloff::Smoothstep,
         TransferFalloff::Uniform => Falloff::Uniform(bias),
-    }
-}
-
-/// The root selection of an edge-transport node.
-pub fn transport_roots(mode: TransportRoots, group: &str) -> (Option<String>, edge_transport::Roots) {
-    match mode {
-        TransportRoots::First => (None, edge_transport::Roots::TransportFirstPoint),
-        TransportRoots::Last => (None, edge_transport::Roots::TransportLastPoint),
-        TransportRoots::Group => (optional_text(group), edge_transport::Roots::TransportFirstPoint),
     }
 }
 

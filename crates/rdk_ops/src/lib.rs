@@ -24,7 +24,6 @@ pub mod deform;
 pub mod deletion;
 pub mod dissolve;
 pub mod edge_collapse;
-pub mod edge_transport;
 pub mod facet;
 pub mod forest;
 pub mod fuse_cleanup;

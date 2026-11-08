@@ -2,7 +2,6 @@
 use rdk_core::{cancel, error, polygon_triangulation};
 
 const EPSILON: f64 = 1e-12;
-const MAX_ARRAY_LENGTH: i64 = (1 << 54) - 1;
 
 enum Stop {
     Fail(String),
@@ -185,9 +184,6 @@ fn run(
     }
     let original_count: i64 =
         outer.len() as i64 + holes.iter().map(|contour| contour.len() as i64).sum::<i64>();
-    if holes.len() as i64 > (MAX_ARRAY_LENGTH - original_count) / 2 {
-        return Err(fail("bridged contour exceeds OCaml array limits"));
-    }
     let original_count = original_count as usize;
     let mut token = vec![0i64; original_count];
     let mut raw_x = vec![0.; original_count];

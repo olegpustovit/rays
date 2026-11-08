@@ -9,7 +9,6 @@ use rdk_core::{cancel, error};
 use crate::exact_dyadic;
 use crate::predicates::{self, Sign};
 
-const MAX_ARRAY_LENGTH: i64 = (1 << 54) - 1;
 const MAX_INT: i64 = (1 << 62) - 1;
 
 pub struct T {
@@ -415,9 +414,6 @@ fn run(
             )
         }
     };
-    if point_count > (MAX_ARRAY_LENGTH - 8) / 2 {
-        return Err("Delaunay point cardinality exceeds array limits".to_owned());
-    }
     let mut triangles = make_triangles();
     let initial = allocate_triangle(&mut triangles);
     let (s0, s1, s2) = (point_count, point_count + 1, point_count + 2);

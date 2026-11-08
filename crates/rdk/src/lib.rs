@@ -42,7 +42,6 @@ pub use rdk_ops::poly_cut;
 pub use rdk_ops::clean;
 pub use rdk_ops::smooth;
 pub use rdk_ops::reverse_faces;
-pub use rdk_ops::edge_transport;
 pub use rdk_ops::convex_hull;
 pub use rdk_ops::curve_join;
 pub use rdk_ops::curve_topology;
