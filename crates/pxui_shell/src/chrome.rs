@@ -70,8 +70,23 @@ pub fn pane_root(ui: &mut Ui, frame: &frame::Frame, bounds: Bounds, label: &str)
 }
 
 /// a panel's path as text, to key its boxes
-pub fn key(path: &[usize]) -> String {
-    path.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(".")
+/// A leaf path as box-label text, "1.0.2": formatted in place into the label it ends.
+pub fn key(path: &[usize]) -> PathKey<'_> {
+    PathKey(path)
+}
+
+pub struct PathKey<'a>(&'a [usize]);
+
+impl std::fmt::Display for PathKey<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (n, i) in self.0.iter().enumerate() {
+            if n > 0 {
+                f.write_str(".")?;
+            }
+            write!(f, "{i}")?;
+        }
+        Ok(())
+    }
 }
 
 /// a title's path is its parts joined by " / "; a bare slash ("fixed dt 1/60") is part of a word
