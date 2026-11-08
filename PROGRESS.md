@@ -12,7 +12,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 |------|------|--------|---------|
 | A | 8/8 | — | — |
 | B | 5/6 | B1 | 1 |
-| M | 9/21 | — | 12 |
+| M | 10/21 | — | 11 |
 | I | 0/1 | — | 1 |
 | C | 0/21 | — | 21 |
 | D | 0/6 | — | 6 |
@@ -34,7 +34,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | B4 | done | W1 `flow_ir` touch → `rays_bin` check in `tools/buildtime` (env overrides) |
 | B1 | active | `533489ee` term_arena; `e16247cd` `BUILTIN_DELEGATE`/`GPU_STAGE_ONLY` + `EMPTY_CHECK`; ponytail workspace `PathId` scope stack; op.rs ~138× `Arc::new` (was 141) |
 | B2 | done | `96fab43d` — dev `opt-level=0` for rays_editor, pxui_graph, editor_document, flow_graph, flow_native |
-| B5 | done (partial) | `94aa4546` catalog split; `35df934e` `flow_native` → `rdk_core`; **this session** `flow_gpu` dev-deps → `rdk_core`/`rdk_ops`; **rdk delete deferred** (sop/flow_sop/rays_editor) |
+| B5 | done (partial) | `94aa4546` catalog split; `35df934e` `flow_native`; `7b374363` `flow_gpu` → `rdk_core`/`rdk_ops`; **rdk delete deferred** (sop/flow_sop/rays_editor) |
 | M2 | done | `bbe7f6ae` — `editor_graph_ref`; `panel_key` / layouts borrow graph name |
 | M10 | done | `c425eefa` — detach alias slots before store; `cargo t -p flow_ir store` 3 pass |
 | M20 | done | `f6ca915b` — remove `mem_sys` TEMP alloc sampler |
@@ -43,8 +43,9 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | M11 | done | `49ec71f3` — lazy `field()` error `form`; `Keys` pattern name once; `cargo t -p flow_eval test_workspace_eval` 2 pass |
 | M7 | done | `dca77b6f` — texture/sampler `retain_for`; `keep_sampler` dedup; `cargo check -p ogpu_metal` |
 | M12 | done | `b5be8904` — `record_slot_open` skips `record_packed` / `note` past per-path cap; `cargo t -p flow_eval test_workspace_eval` |
-| M8 | done | side_lru `find_opt_by` probe lookups; `sampler_key` u64 via `mix`; `cargo check -p renderer` |
-| M1,M3,M5–M6,M13–M19,M21 | pending | |
+| M8 | done | `66136b7f` — side_lru `find_*_by`; sampler keys `mix::sampler`; `cargo check -p renderer` |
+| M6 | done | `69d08a8a` — `plan_entry` prepends via `with_capacity`+extend (no `insert(0)`); `cargo check -p renderer` |
+| M1,M3,M5,M13–M19,M21 | pending | |
 | I | pending | |
 | C1–C21 | pending | |
 | D1–D6 | pending | |
