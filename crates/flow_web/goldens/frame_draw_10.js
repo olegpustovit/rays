@@ -112,14 +112,14 @@ const transform = (rt, kind, v) => {
   }
 };
 export async function frame(input, state, rt) {
-  K ??= [Float64Array.of(1, 1, 1), 1];
+  K ??= [1, Float64Array.of(1, 1, 1)];
   let l0, l1, l2;
   let at = 0;
   try {
     at = 0; l0 = await rt.invoke(0, []);
     at = 1; l1 = K[0];
     at = 2; l2 = K[1];
-    at = 3; markSet(rt, true, "circle", {positions: l0, radius: l2, fill: l1});
+    at = 3; markSet(rt, true, "circle", {positions: l0, radius: l1, fill: l2});
   } catch (e) {
     if (e !== null && typeof e === "object" && e.statement === undefined) e.statement = at;
     throw e;

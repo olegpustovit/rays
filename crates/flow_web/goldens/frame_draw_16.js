@@ -112,7 +112,7 @@ const transform = (rt, kind, v) => {
   }
 };
 export function frame(input, state, rt) {
-  K ??= [Float64Array.of(12, 12, 0), "frame ", 16n, Float64Array.of(1, 1, 1)];
+  K ??= [Float64Array.of(12, 12, 0), "frame ", Float64Array.of(1, 1, 1), 16n];
   let l0, l1, l2, l3, l4, l5, l6;
   let at = 0;
   try {
@@ -123,7 +123,7 @@ export function frame(input, state, rt) {
     at = 4; l4 = rt.text_concat(l3, l2);
     at = 5; l5 = K[2];
     at = 6; l6 = K[3];
-    at = 7; if (typeof l4 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l4 !== "") { const [x, y] = point(rt, l0); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l5)), color: ink(rt, l6), text: l4}); }
+    at = 7; if (typeof l4 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l4 !== "") { const [x, y] = point(rt, l0); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l6)), color: ink(rt, l5), text: l4}); }
   } catch (e) {
     if (e !== null && typeof e === "object" && e.statement === undefined) e.statement = at;
     throw e;

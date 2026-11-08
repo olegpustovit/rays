@@ -402,15 +402,15 @@ kernel void triangle_indices(
   }
   threadgroup uint scan626[256];
   {uint v=((r22!=0.0f?r612:r625));scan626[lid]=v;for(uint d=1u;d<256u;d<<=1u){threadgroup_barrier(mem_flags::mem_threadgroup);uint w=lid>=d?scan626[lid-d]:0u;threadgroup_barrier(mem_flags::mem_threadgroup);v+=w;scan626[lid]=v;}threadgroup_barrier(mem_flags::mem_threadgroup);scan626_before=v-((r22!=0.0f?r612:r625));scan626_total=scan626[256-1];}
-  uint r627=scan626_total;
+  uint r628=scan626_total;
   float r629=(r15==long(r21)?1.0f:0.0f);
   if(r629!=0.0f) {
     r631=(r13==long((0u))?1.0f:0.0f);
     if(r631!=0.0f) {
-      r632=(buffer5[uint(r14)]=r627,1u);
+      r632=(buffer5[uint(r14)]=r628,1u);
     }
     if(r631==0.0f) {
-      r634=(buffer6[(0u)]=r627,1u);
+      r634=(buffer6[(0u)]=r628,1u);
     }
     r635=(r631!=0.0f?r632:r634);
   }

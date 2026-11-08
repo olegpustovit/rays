@@ -112,7 +112,7 @@ const transform = (rt, kind, v) => {
   }
 };
 export function frame(input, state, rt) {
-  K ??= [Float64Array.of(0, 0, 0), Float64Array.of(5, 5, 0), 1, Float64Array.of(1, 1, 1)];
+  K ??= [Float64Array.of(0, 0, 0), Float64Array.of(5, 5, 0), Float64Array.of(1, 1, 1), 1];
   let l0, l1, l2, l3;
   let at = 0;
   try {
@@ -120,7 +120,7 @@ export function frame(input, state, rt) {
     at = 1; l1 = K[1];
     at = 2; l2 = K[2];
     at = 3; l3 = K[3];
-    at = 4; markSet(rt, false, "line", {from: l0, to: l1, color: l3, width: l2});
+    at = 4; markSet(rt, false, "line", {from: l0, to: l1, color: l2, width: l3});
   } catch (e) {
     if (e !== null && typeof e === "object" && e.statement === undefined) e.statement = at;
     throw e;

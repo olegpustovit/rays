@@ -122,7 +122,7 @@ const transform = (rt, kind, v) => {
   }
 };
 export function frame(input, state, rt) {
-  K ??= ["#14161c", 2n, 2n, 0n, 0, 2n, 10n, 42n, "#5aaaf0", Float64Array.of(12, 12, 0), " × ", "  frame ", 16n, Float64Array.of(1, 1, 1)];
+  K ??= ["#14161c", 2n, 2n, 0n, 0, 2n, 10n, 42n, "#5aaaf0", Float64Array.of(12, 12, 0), " × ", "  frame ", Float64Array.of(1, 1, 1), 16n];
   let l0, l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15;
   let l16, l17, l18, l19, l20, l21, l22, l23, l24, l25, l26, l27, l28, l29, l30, l31;
   let l32, l33, l34, l35;
@@ -173,7 +173,7 @@ export function frame(input, state, rt) {
     at = 37; l33 = rt.text_concat(l28, l31, l29, l32, l30);
     at = 38; l34 = K[12];
     at = 39; l35 = K[13];
-    at = 40; if (typeof l33 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l33 !== "") { const [x, y] = point(rt, l26); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l34)), color: ink(rt, l35), text: l33}); }
+    at = 40; if (typeof l33 !== "string") rt.fail("E_TYPE", "Drawing text is text."); else if (l33 !== "") { const [x, y] = point(rt, l26); emit(rt, {type: "text", x, y, size: Number(rt.coerce("int", l35)), color: ink(rt, l34), text: l33}); }
   } catch (e) {
     if (e !== null && typeof e === "object" && e.statement === undefined) e.statement = at;
     throw e;

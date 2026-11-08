@@ -112,14 +112,14 @@ const transform = (rt, kind, v) => {
   }
 };
 export async function frame(input, state, rt) {
-  K ??= [0, 1, Float64Array.of(0, 0, 0)];
+  K ??= [Float64Array.of(0, 0, 0), 1, 0];
   let l0, l1, l2;
   let at = 0;
   try {
     at = 0; l0 = K[0];
     at = 1; l1 = K[1];
     at = 2; l2 = K[2];
-    at = 3; { const resource = await rt.image(0); const [x, y] = point(rt, l2), scale = num(rt, l1), angle = num(rt, l0); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
+    at = 3; { const resource = await rt.image(0); const [x, y] = point(rt, l0), scale = num(rt, l1), angle = num(rt, l2); if (!Number.isFinite(scale) || !Number.isFinite(angle) || scale <= 0) rt.fail("E_DRAW_RANGE", "Scene.image: invalid transform"); emit(rt, {type: "image", resource, x, y, scale, angle}); }
   } catch (e) {
     if (e !== null && typeof e === "object" && e.statement === undefined) e.statement = at;
     throw e;

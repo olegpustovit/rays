@@ -10,7 +10,7 @@ vertex geometry_vertex_out geometry_vertex(
     device const float* buffer1 [[buffer(1)]]) {
   geometry_vertex_out o;
   uint sb=0u;
-  uint r6=1u,r8=2u,r9=3u;
+  uint r6=1u,r8=3u,r9=2u;
   float r34=as_type<float>(0x0u),r35=as_type<float>(0x3f800000u);
   uint r36=2u,r39=24u,r41=255u;
   float r44=as_type<float>(0x437f0000u),r45=0.0f;
@@ -19,12 +19,12 @@ vertex geometry_vertex_out geometry_vertex(
   uint r51=8u;
   float r55=0.0f,r58=0.0f,r60=0.0f,r62=0.0f,r64=0.0f,r66=0.0f;
   float r7=((long((buffer1[(6u)*1+0])))==long(r6)?1.0f:0.0f);
-  uint r10=(r7!=0.0f?r9:r8);
+  uint r10=(r7!=0.0f?r8:r9);
   uint r11=(uint((long(vid)))*r10);
   float r13=as_type<float>(uint((long(buffer0[r11*1+0]))));
   float r16=as_type<float>(uint((long(buffer0[((r11+r6))*1+0]))));
-  float r24=((((((buffer1[(0u)*1+0])*r13))+(((buffer1[r6*1+0])*r16))))+(buffer1[r8*1+0]));
-  float r33=((((((buffer1[r9*1+0])*r13))+(((buffer1[(4u)*1+0])*r16))))+(buffer1[(5u)*1+0]));
+  float r24=((((((buffer1[(0u)*1+0])*r13))+(((buffer1[r6*1+0])*r16))))+(buffer1[r9*1+0]));
+  float r33=((((((buffer1[r8*1+0])*r13))+(((buffer1[(4u)*1+0])*r16))))+(buffer1[(5u)*1+0]));
   if(r7!=0.0f) {
     long r38=long(buffer0[((r11+r36))*1+0]);
     long r40=as_type<long>(ulong(r38)>>(long(r39)&63));

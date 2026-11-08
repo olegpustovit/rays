@@ -19,7 +19,7 @@ vertex scene3_vertex_out scene3_vertex(
   scene3_vertex_out o;
   uint sb=0u;
   float r9=as_type<float>(0x3f000000u);
-  uint r12=3u,r16=1u,r19=2u;
+  uint r11=3u,r16=1u,r19=2u;
   float r22=as_type<float>(0x3f800000u),r26=0.0f,r27=0.0f;
   uint r28=1u;
   float r30=0.0f;
@@ -45,7 +45,7 @@ vertex scene3_vertex_out scene3_vertex(
   float r279=0.0f,r291=0.0f,r303=0.0f,r327=0.0f,r339=0.0f,r351=0.0f;
   uint r373=0u;
   float r375=as_type<float>(0x3f800000u),r377=0.0f,r379=as_type<float>(0x3f800000u),r380=as_type<float>(0x0u),r383=as_type<float>(0x437f0000u),r388=as_type<float>(0xbf800000u),r391=as_type<float>(0x3f000000u);
-  uint r397=0u,r398=1u,r401=24u,r420=16u,r422=2u,r440=8u;
+  uint r397=1u,r398=0u,r401=24u,r420=16u,r422=2u,r440=8u;
   float r443=0.0f;
   uint r444=3u;
   float r448=as_type<float>(0x0u),r451=as_type<float>(0x437f0000u),r459=as_type<float>(0x3f000000u);
@@ -64,7 +64,7 @@ vertex scene3_vertex_out scene3_vertex(
   float r526=0.0f;
   long r0=long(vid);
   float r10=((buffer2[(79u)*1+0])>r9);
-  uint r13=(r10!=0.0f?r12:(6u));
+  uint r13=(r10!=0.0f?r11:(6u));
   uint r14=(uint(r0)*r13);
   float r15=buffer0[r14*1+0];
   float r18=buffer0[((r14+r16))*1+0];
@@ -143,7 +143,7 @@ vertex scene3_vertex_out scene3_vertex(
   float r364=(r57!=0.0f?r279:r327);
   float r365=(r57!=0.0f?r291:r339);
   float r366=(r57!=0.0f?r303:r351);
-  uint r368=(uint(r0)*r12);
+  uint r368=(uint(r0)*r11);
   long r371=long((buffer2[(81u)*1+0]));
   uint r372=(uint(r0)*uint(r371));
   float r374=(r371<long(r373)?1.0f:0.0f);
@@ -154,21 +154,21 @@ vertex scene3_vertex_out scene3_vertex(
       float r384=(r382*r383);
       long r385=long(floor(r384));
       float r387=(r384-(floor(r384)));
-      uint r399=(((((r387>r391))!=0.0f||((((r387==r391))!=0.0f&&(((fma(r382,r383,((r384*r388))))>=r380))!=0.0f))!=0.0f))!=0.0f?r398:r397);
+      uint r399=(((((r387>r391))!=0.0f||((((r387==r391))!=0.0f&&(((fma(r382,r383,((r384*r388))))>=r380))!=0.0f))!=0.0f))!=0.0f?r397:r398);
       long r402=as_type<long>(ulong((as_type<long>(ulong(r385)+ulong(long(r399)))))<<(long(r401)&63));
       sb|=(r401>63u)?4u:0u;
-      float r406=min(r379,(max(r380,(buffer4[((r372+r398))*1+0]))));
+      float r406=min(r379,(max(r380,(buffer4[((r372+r397))*1+0]))));
       float r407=(r406*r383);
       long r408=long(floor(r407));
       float r410=(r407-(floor(r407)));
-      uint r418=(((((r410>r391))!=0.0f||((((r410==r391))!=0.0f&&(((fma(r406,r383,((r407*r388))))>=r380))!=0.0f))!=0.0f))!=0.0f?r398:r397);
+      uint r418=(((((r410>r391))!=0.0f||((((r410==r391))!=0.0f&&(((fma(r406,r383,((r407*r388))))>=r380))!=0.0f))!=0.0f))!=0.0f?r397:r398);
       long r421=as_type<long>(ulong((as_type<long>(ulong(r408)+ulong(long(r418)))))<<(long(r420)&63));
       sb|=(r420>63u)?4u:0u;
       float r426=min(r379,(max(r380,(buffer4[((r372+r422))*1+0]))));
       float r427=(r426*r383);
       long r428=long(floor(r427));
       float r430=(r427-(floor(r427)));
-      uint r438=(((((r430>r391))!=0.0f||((((r430==r391))!=0.0f&&(((fma(r426,r383,((r427*r388))))>=r380))!=0.0f))!=0.0f))!=0.0f?r398:r397);
+      uint r438=(((((r430>r391))!=0.0f||((((r430==r391))!=0.0f&&(((fma(r426,r383,((r427*r388))))>=r380))!=0.0f))!=0.0f))!=0.0f?r397:r398);
       long r441=as_type<long>(ulong((as_type<long>(ulong(r428)+ulong(long(r438)))))<<(long(r440)&63));
       sb|=(r440>63u)?4u:0u;
       r443=(r371==long((4u))?1.0f:0.0f);
@@ -523,7 +523,7 @@ fragment float4 world_fragment(
   uint r772=8u,r775=1u,r780=2u;
   float r784=0.0f,r785=as_type<float>(0xbf800000u),r793=0.0f,r794=0.0f,r795=0.0f,r797=0.0f,r805=as_type<float>(0x0u),r806=0.0f,r807=0.0f,r808=0.0f,r809=0.0f,r810=as_type<float>(0x0u);
   float r811=0.0f,r812=0.0f,r813=0.0f,r814=as_type<float>(0x3fc00000u);
-  uint r817=9u,r820=2u,r824=1u;
+  uint r816=9u,r820=2u,r824=1u;
   float r830=0.0f,r831=0.0f,r834=as_type<float>(0xbf800000u),r854=0.0f;
   uint r855=13u;
   float r858=0.0f;
@@ -582,7 +582,7 @@ fragment float4 world_fragment(
             r811=(r806!=0.0f?r807:r810);
             r812=(r806!=0.0f?r808:r810);
             r813=(r806!=0.0f?r809:r810);
-            uint r818=(((r771<r814))!=0.0f?r817:(15u));
+            uint r818=(((r771<r814))!=0.0f?r816:(15u));
             uint r819=(r767+r818);
             float r829=fma((((buffer2[((r819+r820))*1+0])*r804)),r804,(fma((buffer2[((r819+r824))*1+0]),r804,(buffer2[r819*1+0]))));
             r830=(r829>r805);
@@ -590,7 +590,7 @@ fragment float4 world_fragment(
               r831=(r829==0.0f?0.0f:r774/r829);
             }
             float r833=(r830!=0.0f?r831:(as_type<float>(0x0u)));
-            uint r838=(r767+r817);
+            uint r838=(r767+r816);
             float r839=buffer2[r838*1+0];
             float r841=buffer2[((r838+r824))*1+0];
             float r843=buffer2[((r838+r820))*1+0];

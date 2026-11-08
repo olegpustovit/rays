@@ -30,17 +30,17 @@ function region(inputs, uniforms, outputs, start, stop) {
     let r4;
     r4 = uniforms[1][0];
     let r5;
-    r5 = 18014398509481983n;
+    r5 = 0n;
     let r6;
-    r6 = (r3 <= r5 ? 1 : 0);
+    r6 = (r3 >= r5 ? 1 : 0);
     if (!Number.isFinite(r6)) fail('E_NONFINITE', 'packed produced a nonfinite value.');
     let r7;
-    r7 = 0n;
+    r7 = 18014398509481983n;
     let r8;
-    r8 = (r3 >= r7 ? 1 : 0);
+    r8 = (r3 <= r7 ? 1 : 0);
     if (!Number.isFinite(r8)) fail('E_NONFINITE', 'packed produced a nonfinite value.');
     let r9;
-    r9 = (r8 !== 0 && r6 !== 0 ? 1 : 0);
+    r9 = (r6 !== 0 && r8 !== 0 ? 1 : 0);
     let r10;
     if (r9 === 0) {
     r10 = fail("E_ARRAY_RANGE", "array/slice needs a non-negative whole length.");
@@ -64,9 +64,9 @@ function region(inputs, uniforms, outputs, start, stop) {
     r17 = fail("E_ARRAY_RANGE", "An array slice must be within its source.");
     }
     let r18;
-    r18 = r16 !== 0 ? r7 : r17;
+    r18 = r16 !== 0 ? r5 : r17;
     let r19;
-    r19 = wrap(r11 + r7);
+    r19 = wrap(r11 + r5);
     let r20;
     if (r16 !== 0) {
     r20 = r1[row(r1, r19, 1)];

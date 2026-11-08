@@ -39,7 +39,7 @@ kernel void topology_check(
   for(r28=long(r7);r28<r27;r28++){
   uint r36=0u,r37=0u,r45=0u,r47=1u,r51=1u;
   float r54=0.0f,r55=0.0f;
-  uint r64=0u;
+  uint r65=0u;
   float r67=0.0f,r68=0.0f;
   uint r73=0u,r75=0u,r77=0u;
   float r31=(r29<r10?1.0f:0.0f);
@@ -60,12 +60,12 @@ kernel void topology_check(
       if(r55!=0.0f) {
         long r56=long(buffer2[r29*1+0]);
         long r57=as_type<long>(ulong(r53)-ulong(r50));
-        r67=(r56==long(r64)?1.0f:0.0f);
+        r67=(r56==long(r65)?1.0f:0.0f);
         if(r67!=0.0f) {
           r68=(r57>r16?1.0f:0.0f);
         }
-        uint r72=(((r67!=0.0f?r68:(as_type<float>(0x0u))))!=0.0f?(256u):r64);
-        r73=(((((r57<long(((((r56==long((1u))?1.0f:0.0f))!=0.0f?(2u):(3u))))?1.0f:0.0f))!=0.0f?(128u):r64))|r72);
+        uint r72=(((r67!=0.0f?r68:(as_type<float>(0x0u))))!=0.0f?(256u):r65);
+        r73=(((((r57<long(((((r56==long((1u))?1.0f:0.0f))!=0.0f?(2u):(3u))))?1.0f:0.0f))!=0.0f?(128u):r65))|r72);
       }
       r75=(r55!=0.0f?r73:(0u));
     }
@@ -94,31 +94,31 @@ kernel void topology_check(
   uint r110=((r30)|r109);
   threadgroup uint scan113[256];
   {uint v=((((long(((r110&r9)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan113[lid]=v;for(uint d=1u;d<256u;d<<=1u){threadgroup_barrier(mem_flags::mem_threadgroup);uint w=lid>=d?scan113[lid-d]:0u;threadgroup_barrier(mem_flags::mem_threadgroup);v+=w;scan113[lid]=v;}threadgroup_barrier(mem_flags::mem_threadgroup);scan113_before=v-((((long(((r110&r9)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan113_total=scan113[256-1];}
-  uint r114=scan113_total;
+  uint r115=scan113_total;
   threadgroup uint scan118[256];
   {uint v=((((long(((r110&r11)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan118[lid]=v;for(uint d=1u;d<256u;d<<=1u){threadgroup_barrier(mem_flags::mem_threadgroup);uint w=lid>=d?scan118[lid-d]:0u;threadgroup_barrier(mem_flags::mem_threadgroup);v+=w;scan118[lid]=v;}threadgroup_barrier(mem_flags::mem_threadgroup);scan118_before=v-((((long(((r110&r11)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan118_total=scan118[256-1];}
-  uint r119=scan118_total;
+  uint r120=scan118_total;
   threadgroup uint scan123[256];
   {uint v=((((long(((r110&r15)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan123[lid]=v;for(uint d=1u;d<256u;d<<=1u){threadgroup_barrier(mem_flags::mem_threadgroup);uint w=lid>=d?scan123[lid-d]:0u;threadgroup_barrier(mem_flags::mem_threadgroup);v+=w;scan123[lid]=v;}threadgroup_barrier(mem_flags::mem_threadgroup);scan123_before=v-((((long(((r110&r15)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan123_total=scan123[256-1];}
-  uint r124=scan123_total;
+  uint r125=scan123_total;
   threadgroup uint scan129[256];
   {uint v=((((long(((r110&r126)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan129[lid]=v;for(uint d=1u;d<256u;d<<=1u){threadgroup_barrier(mem_flags::mem_threadgroup);uint w=lid>=d?scan129[lid-d]:0u;threadgroup_barrier(mem_flags::mem_threadgroup);v+=w;scan129[lid]=v;}threadgroup_barrier(mem_flags::mem_threadgroup);scan129_before=v-((((long(((r110&r126)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan129_total=scan129[256-1];}
-  uint r130=scan129_total;
+  uint r131=scan129_total;
   threadgroup uint scan135[256];
   {uint v=((((long(((r110&r132)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan135[lid]=v;for(uint d=1u;d<256u;d<<=1u){threadgroup_barrier(mem_flags::mem_threadgroup);uint w=lid>=d?scan135[lid-d]:0u;threadgroup_barrier(mem_flags::mem_threadgroup);v+=w;scan135[lid]=v;}threadgroup_barrier(mem_flags::mem_threadgroup);scan135_before=v-((((long(((r110&r132)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan135_total=scan135[256-1];}
-  uint r136=scan135_total;
+  uint r137=scan135_total;
   threadgroup uint scan141[256];
   {uint v=((((long(((r110&r138)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan141[lid]=v;for(uint d=1u;d<256u;d<<=1u){threadgroup_barrier(mem_flags::mem_threadgroup);uint w=lid>=d?scan141[lid-d]:0u;threadgroup_barrier(mem_flags::mem_threadgroup);v+=w;scan141[lid]=v;}threadgroup_barrier(mem_flags::mem_threadgroup);scan141_before=v-((((long(((r110&r138)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan141_total=scan141[256-1];}
-  uint r142=scan141_total;
+  uint r143=scan141_total;
   threadgroup uint scan147[256];
   {uint v=((((long(((r110&r144)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan147[lid]=v;for(uint d=1u;d<256u;d<<=1u){threadgroup_barrier(mem_flags::mem_threadgroup);uint w=lid>=d?scan147[lid-d]:0u;threadgroup_barrier(mem_flags::mem_threadgroup);v+=w;scan147[lid]=v;}threadgroup_barrier(mem_flags::mem_threadgroup);scan147_before=v-((((long(((r110&r144)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan147_total=scan147[256-1];}
-  uint r148=scan147_total;
+  uint r149=scan147_total;
   threadgroup uint scan153[256];
   {uint v=((((long(((r110&r150)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan153[lid]=v;for(uint d=1u;d<256u;d<<=1u){threadgroup_barrier(mem_flags::mem_threadgroup);uint w=lid>=d?scan153[lid-d]:0u;threadgroup_barrier(mem_flags::mem_threadgroup);v+=w;scan153[lid]=v;}threadgroup_barrier(mem_flags::mem_threadgroup);scan153_before=v-((((long(((r110&r150)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan153_total=scan153[256-1];}
-  uint r154=scan153_total;
+  uint r155=scan153_total;
   threadgroup uint scan158[256];
   {uint v=((((long(((r110&r6)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan158[lid]=v;for(uint d=1u;d<256u;d<<=1u){threadgroup_barrier(mem_flags::mem_threadgroup);uint w=lid>=d?scan158[lid-d]:0u;threadgroup_barrier(mem_flags::mem_threadgroup);v+=w;scan158[lid]=v;}threadgroup_barrier(mem_flags::mem_threadgroup);scan158_before=v-((((long(((r110&r6)))==long(r7)?1.0f:0.0f))!=0.0f?r7:r9));scan158_total=scan158[256-1];}
-  uint r159=scan158_total;
+  uint r160=scan158_total;
   long r161=(long(r6)==0?0:long(r6)==-1?as_type<long>(0ul-ulong(r0)):r0/long(r6));
   sb|=(r6==0)?2u:0u;
   uint r163=(uint(r161)*r162);
@@ -126,16 +126,16 @@ kernel void topology_check(
   sb|=(r6==0)?2u:0u;
   float r165=(r164==long(r7)?1.0f:0.0f);
   if(r165!=0.0f) {
-    uint r166=(buffer3[r163]=r114,1u);
-    uint r169=(buffer3[((r163+r167))]=r119,1u);
-    uint r173=(buffer3[((r163+r171))]=r124,1u);
-    uint r176=(buffer3[((r163+r174))]=r130,1u);
+    uint r166=(buffer3[r163]=r115,1u);
+    uint r169=(buffer3[((r163+r167))]=r120,1u);
+    uint r173=(buffer3[((r163+r171))]=r125,1u);
+    uint r176=(buffer3[((r163+r174))]=r131,1u);
     uint r177=(r173+r176);
-    uint r181=(buffer3[((r163+r179))]=r136,1u);
-    uint r184=(buffer3[((r163+r182))]=r142,1u);
-    uint r188=(buffer3[((r163+r186))]=r148,1u);
-    uint r191=(buffer3[((r163+r189))]=r154,1u);
-    uint r194=(buffer3[((r163+r192))]=r159,1u);
+    uint r181=(buffer3[((r163+r179))]=r137,1u);
+    uint r184=(buffer3[((r163+r182))]=r143,1u);
+    uint r188=(buffer3[((r163+r186))]=r149,1u);
+    uint r191=(buffer3[((r163+r189))]=r155,1u);
+    uint r194=(buffer3[((r163+r192))]=r160,1u);
     uint r195=(r191+r194);
     uint r196=(r188+r195);
     uint r197=(((r181+r184))+r196);

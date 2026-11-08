@@ -68,13 +68,13 @@ kernel void compact_mask_uint32(
   uint r65=(r55!=0.0f?r64:r54);
   threadgroup uint scan65[1024];
   {uint v=r65;scan65[lid]=v;for(uint d=1u;d<1024u;d<<=1u){threadgroup_barrier(mem_flags::mem_threadgroup);uint w=lid>=d?scan65[lid-d]:0u;threadgroup_barrier(mem_flags::mem_threadgroup);v+=w;scan65[lid]=v;}threadgroup_barrier(mem_flags::mem_threadgroup);scan65_before=v-r65;scan65_total=scan65[1024-1];}
-  uint r66=scan65_total;
-  uint r67=scan65_before;
+  uint r66=scan65_before;
+  uint r67=scan65_total;
   float r68=(r10==long(r18)?1.0f:0.0f);
   float r69=(long(r14)==long(r18)?1.0f:0.0f);
   if(r69!=0.0f) {
     if(r68!=0.0f) {
-      r70=(buffer5[uint(r8)]=r66,1u);
+      r70=(buffer5[uint(r8)]=r67,1u);
     }
     r72=(r68!=0.0f?r70:(0u));
   }
@@ -83,7 +83,7 @@ kernel void compact_mask_uint32(
     if(r74!=0.0f) {
       bool over75=r47>r44 && ulong(r47-r44)>4096uL;
       sb|=over75?1u:0u;
-      r76=r67;
+      r76=r66;
       for(r75=r44;r75<(over75?r44:r47);r75++){
   uint r78=1073741823u,r83=0u;
   if(r69==0.0f) {
@@ -97,7 +97,7 @@ kernel void compact_mask_uint32(
   r76=next75_0;
       }
       if(r68!=0.0f) {
-        r87=(buffer2[(0u)]=r66,1u);
+        r87=(buffer2[(0u)]=r67,1u);
       }
       uint r89=(r68!=0.0f?r87:(0u));
       r90=((r76)+r89);
@@ -105,7 +105,7 @@ kernel void compact_mask_uint32(
     if(r74==0.0f) {
       r92=(long(r54)==long((1u))?1.0f:0.0f);
       if(r92!=0.0f) {
-        r98=(buffer1[((((uint((long(buffer5[((r37+uint(r8)))*1+0])))&r95))+r67))]=uint(r0),1u);
+        r98=(buffer1[((((uint((long(buffer5[((r37+uint(r8)))*1+0])))&r95))+r66))]=uint(r0),1u);
       }
       r100=(r92!=0.0f?r98:(0u));
     }

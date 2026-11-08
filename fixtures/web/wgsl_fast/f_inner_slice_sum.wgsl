@@ -1,4 +1,4 @@
-kernel_c6f8f37f0f201b6506b40c7637d2da54
+kernel_2d113b82c3673d3a731373bf2eab1cea
 @group(0) @binding(0) var<storage, read> input0: array<f32>;
 @group(0) @binding(1) var<storage, read_write> outbuf: array<f32>;
 @group(0) @binding(2) var<uniform> uniforms: array<vec4<u32>, 2>;
@@ -70,7 +70,7 @@ fn i64_divmod(a: vec2<u32>, b: vec2<u32>, rem: bool) -> vec2<u32> {
   return select(q, i64_sub(vec2<u32>(0u, 0u), q), i64_neg(a) != i64_neg(b));
 }
 @compute @workgroup_size(64)
-fn kernel_c6f8f37f0f201b6506b40c7637d2da54(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn kernel_2d113b82c3673d3a731373bf2eab1cea(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   var n = uniforms[0].x;
   if (uniforms[1].z != 0u) { n = min(n, count_in[0] * uniforms[1].x / uniforms[1].y); }
@@ -78,8 +78,8 @@ fn kernel_c6f8f37f0f201b6506b40c7637d2da54(@builtin(global_invocation_id) gid: v
   if (i >= n) { return; }
   var sb: u32 = 0u;
   let r2: u32 = 61u;
-  let r5: vec2<u32> = vec2<u32>(4294967295u, 4194303u);
-  let r7: u32 = 0u;
+  let r5: u32 = 0u;
+  let r7: vec2<u32> = vec2<u32>(4294967295u, 4194303u);
   var r10: vec2<u32> = vec2<u32>(0u, 0u);
   let r13: u32 = 3u;
   var r17: vec2<u32> = vec2<u32>(0u, 0u);
@@ -92,9 +92,9 @@ fn kernel_c6f8f37f0f201b6506b40c7637d2da54(@builtin(global_invocation_id) gid: v
   let r3: vec2<u32> = i64_divmod(r0, vec2<u32>(r2, 0u), true);
   if (all(vec2<u32>(r2, 0u) == vec2<u32>(0u))) { sb |= 2u; }
   let r4: vec2<u32> = i64_from_f(bitcast<f32>(uniforms[0].y));
-  let r6: f32 = select(0.0, 1.0, !i64_lt(r5, r3));
-  let r8: f32 = select(0.0, 1.0, !i64_lt(r3, vec2<u32>(r7, 0u)));
-  let r9: f32 = select(0.0, 1.0, (r8 != 0.0 && r6 != 0.0));
+  let r6: f32 = select(0.0, 1.0, !i64_lt(r3, vec2<u32>(r5, 0u)));
+  let r8: f32 = select(0.0, 1.0, !i64_lt(r7, r3));
+  let r9: f32 = select(0.0, 1.0, (r6 != 0.0 && r8 != 0.0));
   if (r9 == 0.0) {
     r10 = vec2<u32>(0u, 0u);
     sb |= 32u;
@@ -108,8 +108,8 @@ fn kernel_c6f8f37f0f201b6506b40c7637d2da54(@builtin(global_invocation_id) gid: v
     r17 = vec2<u32>(0u, 0u);
     sb |= 16u;
   }
-  let r18: vec2<u32> = select(r17, vec2<u32>(r7, 0u), r16 != 0.0);
-  let r19: u32 = ((r11).x + r7);
+  let r18: vec2<u32> = select(r17, vec2<u32>(r5, 0u), r16 != 0.0);
+  let r19: u32 = ((r11).x + r5);
     if (r16 != 0.0) {
     r20 = i64_from_f(gather0[u32(clamp(i32(bitcast<i32>(r19)), 0, max(i32(uniforms[0].w) - 1, 0))) * 1u + 0u]);
   }

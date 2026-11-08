@@ -117,7 +117,7 @@ const transform = (rt, kind, v) => {
   }
 };
 export function frame(input, state, rt) {
-  K ??= [Float64Array.of(4, 5, 0), Float64Array.of(60, 40, 0), Float64Array.of(1, 1, 1), 0n];
+  K ??= [Float64Array.of(4, 5, 0), Float64Array.of(60, 40, 0), 0n, Float64Array.of(1, 1, 1)];
   let l0, l1, l2, l3;
   let at = 0;
   try {
@@ -125,7 +125,7 @@ export function frame(input, state, rt) {
     at = 1; l1 = K[1];
     at = 2; l2 = K[2];
     at = 3; l3 = K[3];
-    at = 4; pathOf(rt, "rounded_rect", {at: l0, size: l1, radius: l3, fill: l2});
+    at = 4; pathOf(rt, "rounded_rect", {at: l0, size: l1, radius: l2, fill: l3});
   } catch (e) {
     if (e !== null && typeof e === "object" && e.statement === undefined) e.statement = at;
     throw e;

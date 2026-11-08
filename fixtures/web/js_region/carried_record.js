@@ -67,11 +67,11 @@ function region(inputs, uniforms, outputs, start, stop, outputBase = 0) {
     r22 = "b";
     }
     let r23;
-    r23 = "b";
+    r23 = "a";
     let r24;
-    r24 = "a";
+    r24 = "b";
     let r25;
-    r25 = (r16 !== 0 ? r24 : r23);
+    r25 = (r16 !== 0 ? r23 : r24);
     let r26;
     r26 = (r20 === 0 ? 1 : 0);
     let r27;

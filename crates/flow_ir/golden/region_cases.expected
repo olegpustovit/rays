@@ -157,10 +157,10 @@ program
   r6 = Const 0x0p+0
   r7 = Binary Mul 5 6
   r8 = Binary Add 4 7
-  r9 = Const 0x1.ep+5
-  r10 = Const 0x1.68p+8
-  r11 = Binary Mod 2 10
-  r12 = Binary Div 11 9
+  r9 = Const 0x1.68p+8
+  r10 = Binary Mod 2 9
+  r11 = Const 0x1.ep+5
+  r12 = Binary Div 10 11
   r13 = Const 0x1p+0
   r14 = Binary Min 13 3
   r15 = Binary Max 6 14
@@ -179,57 +179,57 @@ program
   r28 = Binary Mul 23 27
   r29 = Binary Div 23 18
   r30 = Binary Sub 17 29
-  r31 = Const 0x1.4p+2
-  r32 = Binary Lt 12 31
-  r33 = Select 32 23 28
-  r34 = Const 0x1p+2
-  r35 = Binary Lt 12 34
-  r36 = Select 35 23 33
-  r37 = Const 0x1.8p+1
+  r31 = Binary Lt 12 13
+  r32 = Binary Lt 12 18
+  r33 = Const 0x1.8p+1
+  r34 = Binary Lt 12 33
+  r35 = Const 0x1p+2
+  r36 = Binary Lt 12 35
+  r37 = Const 0x1.4p+2
   r38 = Binary Lt 12 37
-  r39 = Select 38 28 36
-  r40 = Binary Lt 12 18
-  r41 = Select 40 6 39
-  r42 = Binary Lt 12 13
-  r43 = Select 42 6 41
-  r44 = Const 0x1.fep+7
-  r45 = Const 0x1p-1
-  r46 = Binary Add 43 30
-  r47 = Binary Min 13 46
-  r48 = Binary Max 6 47
-  r49 = Binary Mul 48 44
-  r50 = Binary Add 49 45
+  r39 = Select 38 28 23
+  r40 = Select 36 6 39
+  r41 = Select 34 6 40
+  r42 = Select 32 28 41
+  r43 = Select 31 23 42
+  r44 = Binary Add 43 30
+  r45 = Binary Min 13 44
+  r46 = Binary Max 6 45
+  r47 = Const 0x1.fep+7
+  r48 = Binary Mul 46 47
+  r49 = Const 0x1p-1
+  r50 = Binary Add 48 49
   r51 = Convert int 50
   r52 = Convert float 51
-  r53 = Binary Div 52 44
-  r54 = Select 32 6 6
-  r55 = Select 35 28 54
-  r56 = Select 38 23 55
-  r57 = Select 40 23 56
-  r58 = Select 42 28 57
+  r53 = Binary Div 52 47
+  r54 = Select 38 6 6
+  r55 = Select 36 28 54
+  r56 = Select 34 23 55
+  r57 = Select 32 23 56
+  r58 = Select 31 28 57
   r59 = Binary Add 58 30
   r60 = Binary Min 13 59
   r61 = Binary Max 6 60
-  r62 = Binary Mul 61 44
-  r63 = Binary Add 62 45
+  r62 = Binary Mul 61 47
+  r63 = Binary Add 62 49
   r64 = Convert int 63
   r65 = Convert float 64
-  r66 = Binary Div 65 44
-  r67 = Select 32 28 23
-  r68 = Select 35 6 67
-  r69 = Select 38 6 68
-  r70 = Select 40 28 69
-  r71 = Select 42 23 70
+  r66 = Binary Div 65 47
+  r67 = Select 38 23 28
+  r68 = Select 36 23 67
+  r69 = Select 34 28 68
+  r70 = Select 32 6 69
+  r71 = Select 31 6 70
   r72 = Binary Add 71 30
   r73 = Binary Min 13 72
   r74 = Binary Max 6 73
-  r75 = Binary Mul 74 44
-  r76 = Binary Add 75 45
+  r75 = Binary Mul 74 47
+  r76 = Binary Add 75 49
   r77 = Convert int 76
   r78 = Convert float 77
-  r79 = Binary Div 78 44
+  r79 = Binary Div 78 47
   widths [1]
-  output [79;66;53]
+  output [53;66;79]
   uniform_widths []
   collecting true
 ## case 6 fusion=false
@@ -243,10 +243,10 @@ program
   r6 = Const 0x0p+0
   r7 = Binary Mul 5 6
   r8 = Binary Add 4 7
-  r9 = Const 0x1.ep+5
-  r10 = Const 0x1.68p+8
-  r11 = Binary Mod 2 10
-  r12 = Binary Div 11 9
+  r9 = Const 0x1.68p+8
+  r10 = Binary Mod 2 9
+  r11 = Const 0x1.ep+5
+  r12 = Binary Div 10 11
   r13 = Const 0x1p+0
   r14 = Binary Min 13 3
   r15 = Binary Max 6 14
@@ -265,57 +265,57 @@ program
   r28 = Binary Mul 23 27
   r29 = Binary Div 23 18
   r30 = Binary Sub 17 29
-  r31 = Const 0x1.4p+2
-  r32 = Binary Lt 12 31
-  r33 = Select 32 23 28
-  r34 = Const 0x1p+2
-  r35 = Binary Lt 12 34
-  r36 = Select 35 23 33
-  r37 = Const 0x1.8p+1
+  r31 = Binary Lt 12 13
+  r32 = Binary Lt 12 18
+  r33 = Const 0x1.8p+1
+  r34 = Binary Lt 12 33
+  r35 = Const 0x1p+2
+  r36 = Binary Lt 12 35
+  r37 = Const 0x1.4p+2
   r38 = Binary Lt 12 37
-  r39 = Select 38 28 36
-  r40 = Binary Lt 12 18
-  r41 = Select 40 6 39
-  r42 = Binary Lt 12 13
-  r43 = Select 42 6 41
-  r44 = Const 0x1.fep+7
-  r45 = Const 0x1p-1
-  r46 = Binary Add 43 30
-  r47 = Binary Min 13 46
-  r48 = Binary Max 6 47
-  r49 = Binary Mul 48 44
-  r50 = Binary Add 49 45
+  r39 = Select 38 28 23
+  r40 = Select 36 6 39
+  r41 = Select 34 6 40
+  r42 = Select 32 28 41
+  r43 = Select 31 23 42
+  r44 = Binary Add 43 30
+  r45 = Binary Min 13 44
+  r46 = Binary Max 6 45
+  r47 = Const 0x1.fep+7
+  r48 = Binary Mul 46 47
+  r49 = Const 0x1p-1
+  r50 = Binary Add 48 49
   r51 = Convert int 50
   r52 = Convert float 51
-  r53 = Binary Div 52 44
-  r54 = Select 32 6 6
-  r55 = Select 35 28 54
-  r56 = Select 38 23 55
-  r57 = Select 40 23 56
-  r58 = Select 42 28 57
+  r53 = Binary Div 52 47
+  r54 = Select 38 6 6
+  r55 = Select 36 28 54
+  r56 = Select 34 23 55
+  r57 = Select 32 23 56
+  r58 = Select 31 28 57
   r59 = Binary Add 58 30
   r60 = Binary Min 13 59
   r61 = Binary Max 6 60
-  r62 = Binary Mul 61 44
-  r63 = Binary Add 62 45
+  r62 = Binary Mul 61 47
+  r63 = Binary Add 62 49
   r64 = Convert int 63
   r65 = Convert float 64
-  r66 = Binary Div 65 44
-  r67 = Select 32 28 23
-  r68 = Select 35 6 67
-  r69 = Select 38 6 68
-  r70 = Select 40 28 69
-  r71 = Select 42 23 70
+  r66 = Binary Div 65 47
+  r67 = Select 38 23 28
+  r68 = Select 36 23 67
+  r69 = Select 34 28 68
+  r70 = Select 32 6 69
+  r71 = Select 31 6 70
   r72 = Binary Add 71 30
   r73 = Binary Min 13 72
   r74 = Binary Max 6 73
-  r75 = Binary Mul 74 44
-  r76 = Binary Add 75 45
+  r75 = Binary Mul 74 47
+  r76 = Binary Add 75 49
   r77 = Convert int 76
   r78 = Convert float 77
-  r79 = Binary Div 78 44
+  r79 = Binary Div 78 47
   widths [1]
-  output [79;66;53]
+  output [53;66;79]
   uniform_widths []
   collecting true
 ## case 7 fusion=true
@@ -325,17 +325,17 @@ program
   r2 = Frame "t"
   r3 = Const 0x0p+0
   r4 = Const -0x1p+0
-  r5 = Binary Mul 0 1
-  r6 = Binary Mul 4 1
-  r7 = Fma 6 3 5
+  r5 = Binary Mul 1 0
+  r6 = Binary Mul 4 2
+  r7 = Fma 6 1 5
   r8 = Binary Mul 2 3
   r9 = Binary Mul 4 0
   r10 = Fma 9 0 8
-  r11 = Binary Mul 1 0
-  r12 = Binary Mul 4 2
-  r13 = Fma 12 1 11
+  r11 = Binary Mul 0 1
+  r12 = Binary Mul 4 1
+  r13 = Fma 12 3 11
   widths [1]
-  output [13;10;7]
+  output [7;10;13]
   uniform_widths []
   collecting true
 ## case 7 fusion=false
@@ -345,17 +345,17 @@ program
   r2 = Frame "t"
   r3 = Const 0x0p+0
   r4 = Const -0x1p+0
-  r5 = Binary Mul 0 1
-  r6 = Binary Mul 4 1
-  r7 = Fma 6 3 5
+  r5 = Binary Mul 1 0
+  r6 = Binary Mul 4 2
+  r7 = Fma 6 1 5
   r8 = Binary Mul 2 3
   r9 = Binary Mul 4 0
   r10 = Fma 9 0 8
-  r11 = Binary Mul 1 0
-  r12 = Binary Mul 4 2
-  r13 = Fma 12 1 11
+  r11 = Binary Mul 0 1
+  r12 = Binary Mul 4 1
+  r13 = Fma 12 3 11
   widths [1]
-  output [13;10;7]
+  output [7;10;13]
   uniform_widths []
   collecting true
 ## case 8 fusion=true
@@ -929,11 +929,11 @@ program
   r1 = Const 0x0p+0
   r2 = Array_prepare 0 array:float
   r3 = Int_uniform 1
-  r4 = Int_const 18014398509481983
-  r5 = Int_compare int/le 0 4
-  r6 = Int_const 0
-  r7 = Int_compare int/ge 0 6
-  r8 = Binary And 7 5
+  r4 = Int_const 0
+  r5 = Int_compare int/ge 0 4
+  r6 = Int_const 18014398509481983
+  r7 = Int_compare int/le 0 6
+  r8 = Binary And 5 7
   r9 = Guarded 8:false (Raise int "E_ARRAY_RANGE" "array/slice needs a non-negative whole length.")
   r10 = Int_select 8 0 9
   r11 = Int_binary int/sub 3 10
@@ -942,9 +942,9 @@ program
   r14 = Int_compare int/le 10 3
   r15 = Binary And 14 13
   r16 = Guarded 15:false (Raise int "E_ARRAY_RANGE" "An array slice must be within its source.")
-  r17 = Int_select 15 6 16
+  r17 = Int_select 15 4 16
   r18 = Convert float 17
-  r19 = Int_binary int/add 10 6
+  r19 = Int_binary int/add 10 4
   r20 = Guarded 15:true (Gather 2 19 1 0)
   r21 = Int_const 1
   r22 = Int_binary int/add 10 21
@@ -965,11 +965,11 @@ program
   r1 = Const 0x0p+0
   r2 = Array_prepare 0 array:float
   r3 = Int_uniform 1
-  r4 = Int_const 18014398509481983
-  r5 = Int_compare int/le 0 4
-  r6 = Int_const 0
-  r7 = Int_compare int/ge 0 6
-  r8 = Binary And 7 5
+  r4 = Int_const 0
+  r5 = Int_compare int/ge 0 4
+  r6 = Int_const 18014398509481983
+  r7 = Int_compare int/le 0 6
+  r8 = Binary And 5 7
   r9 = Guarded 8:false (Raise int "E_ARRAY_RANGE" "array/slice needs a non-negative whole length.")
   r10 = Int_select 8 0 9
   r11 = Int_binary int/sub 3 10
@@ -978,9 +978,9 @@ program
   r14 = Int_compare int/le 10 3
   r15 = Binary And 14 13
   r16 = Guarded 15:false (Raise int "E_ARRAY_RANGE" "An array slice must be within its source.")
-  r17 = Int_select 15 6 16
+  r17 = Int_select 15 4 16
   r18 = Convert float 17
-  r19 = Int_binary int/add 10 6
+  r19 = Int_binary int/add 10 4
   r20 = Guarded 15:true (Gather 2 19 1 0)
   r21 = Int_const 1
   r22 = Int_binary int/add 10 21
@@ -1634,9 +1634,9 @@ program
   uniform_widths []
   collecting true
 ## case 60 fusion=true
-check-error "E_PATTERN: Invalid binding name {a b}. Bind a name, [a b] or {:keys [a b]}.\nE_UNBOUND: a is not bound in g \226\128\186 fn. Bound here: x. Did you mean x?\nE_UNBOUND: b is not bound in g \226\128\186 fn. Bound here: x. Did you mean x?"
+check-error
 ## case 60 fusion=false
-check-error "E_PATTERN: Invalid binding name {a b}. Bind a name, [a b] or {:keys [a b]}.\nE_UNBOUND: a is not bound in g \226\128\186 fn. Bound here: x. Did you mean x?\nE_UNBOUND: b is not bound in g \226\128\186 fn. Bound here: x. Did you mean x?"
+check-error
 ## case 61 fusion=true
 program
   r0 = Input 0 1 0
@@ -1661,10 +1661,10 @@ program
   collecting true
 ## case 62 fusion=true
 refused E_PACKED_FORM 82..96 "Unsupported packed body form list."
-check-error "E_PACKED_FORM: Unsupported packed body form list."
+check-error
 ## case 62 fusion=false
 refused E_PACKED_FORM 82..96 "Unsupported packed body form list."
-check-error "E_PACKED_FORM: Unsupported packed body form list."
+check-error
 ## case 63 fusion=true
 program
   r0 = Input 0 1 0
@@ -1706,9 +1706,9 @@ program
   uniform_widths []
   collecting true
 ## case 64 fusion=true
-check-error "E_ARITY: iterate is (iterate n init (fn [x] body)) with an optional :until (fn [prev next] bool)."
+check-error
 ## case 64 fusion=false
-check-error "E_ARITY: iterate is (iterate n init (fn [x] body)) with an optional :until (fn [prev next] bool)."
+check-error
 ## case 65 fusion=true
 program
   r0 = Input 0 1 0
@@ -1792,79 +1792,79 @@ program
   r2 = Binary Add 0 1
   r3 = Const 0x1p+1
   r4 = Const -0x1p+0
-  r5 = Const 0x1.ep+5
-  r6 = Const 0x1.68p+8
-  r7 = Binary Mod 2 6
-  r8 = Binary Div 7 5
-  r9 = Const 0x1p+0
-  r10 = Binary Min 9 3
-  r11 = Const 0x0p+0
-  r12 = Binary Max 11 10
-  r13 = Binary Min 9 4
-  r14 = Binary Max 11 13
+  r5 = Const 0x1.68p+8
+  r6 = Binary Mod 2 5
+  r7 = Const 0x1.ep+5
+  r8 = Binary Div 6 7
+  r9 = Const 0x0p+0
+  r10 = Const 0x1p+0
+  r11 = Binary Min 10 3
+  r12 = Binary Max 9 11
+  r13 = Binary Min 10 4
+  r14 = Binary Max 9 13
   r15 = Binary Mul 3 14
-  r16 = Binary Sub 15 9
+  r16 = Binary Sub 15 10
   r17 = Unary Abs 16
-  r18 = Binary Sub 9 17
+  r18 = Binary Sub 10 17
   r19 = Binary Mul 18 12
   r20 = Binary Mod 8 3
-  r21 = Binary Sub 20 9
+  r21 = Binary Sub 20 10
   r22 = Unary Abs 21
-  r23 = Binary Sub 9 22
+  r23 = Binary Sub 10 22
   r24 = Binary Mul 19 23
   r25 = Binary Div 19 3
   r26 = Binary Sub 14 25
-  r27 = Const 0x1.4p+2
-  r28 = Binary Lt 8 27
-  r29 = Select 28 19 24
-  r30 = Const 0x1p+2
-  r31 = Binary Lt 8 30
-  r32 = Select 31 19 29
-  r33 = Const 0x1.8p+1
+  r27 = Binary Lt 8 10
+  r28 = Binary Lt 8 3
+  r29 = Const 0x1.8p+1
+  r30 = Binary Lt 8 29
+  r31 = Const 0x1p+2
+  r32 = Binary Lt 8 31
+  r33 = Const 0x1.4p+2
   r34 = Binary Lt 8 33
-  r35 = Select 34 24 32
-  r36 = Binary Lt 8 3
-  r37 = Select 36 11 35
-  r38 = Binary Lt 8 9
-  r39 = Select 38 11 37
-  r40 = Const 0x1.fep+7
-  r41 = Const 0x1p-1
-  r42 = Binary Add 39 26
-  r43 = Binary Min 9 42
-  r44 = Binary Max 11 43
-  r45 = Binary Mul 44 40
-  r46 = Binary Add 45 41
+  r35 = Select 34 24 19
+  r36 = Select 32 9 35
+  r37 = Select 30 9 36
+  r38 = Select 28 24 37
+  r39 = Select 27 19 38
+  r40 = Binary Add 39 26
+  r41 = Binary Min 10 40
+  r42 = Binary Max 9 41
+  r43 = Const 0x1.fep+7
+  r44 = Binary Mul 42 43
+  r45 = Const 0x1p-1
+  r46 = Binary Add 44 45
   r47 = Convert int 46
   r48 = Convert float 47
-  r49 = Binary Div 48 40
-  r50 = Select 28 11 11
-  r51 = Select 31 24 50
-  r52 = Select 34 19 51
-  r53 = Select 36 19 52
-  r54 = Select 38 24 53
+  r49 = Binary Div 48 43
+  r50 = Select 34 9 9
+  r51 = Select 32 24 50
+  r52 = Select 30 19 51
+  r53 = Select 28 19 52
+  r54 = Select 27 24 53
   r55 = Binary Add 54 26
-  r56 = Binary Min 9 55
-  r57 = Binary Max 11 56
-  r58 = Binary Mul 57 40
-  r59 = Binary Add 58 41
+  r56 = Binary Min 10 55
+  r57 = Binary Max 9 56
+  r58 = Binary Mul 57 43
+  r59 = Binary Add 58 45
   r60 = Convert int 59
   r61 = Convert float 60
-  r62 = Binary Div 61 40
-  r63 = Select 28 24 19
-  r64 = Select 31 11 63
-  r65 = Select 34 11 64
-  r66 = Select 36 24 65
-  r67 = Select 38 19 66
+  r62 = Binary Div 61 43
+  r63 = Select 34 19 24
+  r64 = Select 32 19 63
+  r65 = Select 30 24 64
+  r66 = Select 28 9 65
+  r67 = Select 27 9 66
   r68 = Binary Add 67 26
-  r69 = Binary Min 9 68
-  r70 = Binary Max 11 69
-  r71 = Binary Mul 70 40
-  r72 = Binary Add 71 41
+  r69 = Binary Min 10 68
+  r70 = Binary Max 9 69
+  r71 = Binary Mul 70 43
+  r72 = Binary Add 71 45
   r73 = Convert int 72
   r74 = Convert float 73
-  r75 = Binary Div 74 40
+  r75 = Binary Div 74 43
   widths [1]
-  output [75;62;49]
+  output [49;62;75]
   uniform_widths []
   collecting true
 ## case 67 fusion=false
@@ -1874,84 +1874,84 @@ program
   r2 = Binary Add 0 1
   r3 = Const 0x1p+1
   r4 = Const -0x1p+0
-  r5 = Const 0x1.ep+5
-  r6 = Const 0x1.68p+8
-  r7 = Binary Mod 2 6
-  r8 = Binary Div 7 5
-  r9 = Const 0x1p+0
-  r10 = Binary Min 9 3
-  r11 = Const 0x0p+0
-  r12 = Binary Max 11 10
-  r13 = Binary Min 9 4
-  r14 = Binary Max 11 13
+  r5 = Const 0x1.68p+8
+  r6 = Binary Mod 2 5
+  r7 = Const 0x1.ep+5
+  r8 = Binary Div 6 7
+  r9 = Const 0x0p+0
+  r10 = Const 0x1p+0
+  r11 = Binary Min 10 3
+  r12 = Binary Max 9 11
+  r13 = Binary Min 10 4
+  r14 = Binary Max 9 13
   r15 = Binary Mul 3 14
-  r16 = Binary Sub 15 9
+  r16 = Binary Sub 15 10
   r17 = Unary Abs 16
-  r18 = Binary Sub 9 17
+  r18 = Binary Sub 10 17
   r19 = Binary Mul 18 12
   r20 = Binary Mod 8 3
-  r21 = Binary Sub 20 9
+  r21 = Binary Sub 20 10
   r22 = Unary Abs 21
-  r23 = Binary Sub 9 22
+  r23 = Binary Sub 10 22
   r24 = Binary Mul 19 23
   r25 = Binary Div 19 3
   r26 = Binary Sub 14 25
-  r27 = Const 0x1.4p+2
-  r28 = Binary Lt 8 27
-  r29 = Select 28 19 24
-  r30 = Const 0x1p+2
-  r31 = Binary Lt 8 30
-  r32 = Select 31 19 29
-  r33 = Const 0x1.8p+1
+  r27 = Binary Lt 8 10
+  r28 = Binary Lt 8 3
+  r29 = Const 0x1.8p+1
+  r30 = Binary Lt 8 29
+  r31 = Const 0x1p+2
+  r32 = Binary Lt 8 31
+  r33 = Const 0x1.4p+2
   r34 = Binary Lt 8 33
-  r35 = Select 34 24 32
-  r36 = Binary Lt 8 3
-  r37 = Select 36 11 35
-  r38 = Binary Lt 8 9
-  r39 = Select 38 11 37
-  r40 = Const 0x1.fep+7
-  r41 = Const 0x1p-1
-  r42 = Binary Add 39 26
-  r43 = Binary Min 9 42
-  r44 = Binary Max 11 43
-  r45 = Binary Mul 44 40
-  r46 = Binary Add 45 41
+  r35 = Select 34 24 19
+  r36 = Select 32 9 35
+  r37 = Select 30 9 36
+  r38 = Select 28 24 37
+  r39 = Select 27 19 38
+  r40 = Binary Add 39 26
+  r41 = Binary Min 10 40
+  r42 = Binary Max 9 41
+  r43 = Const 0x1.fep+7
+  r44 = Binary Mul 42 43
+  r45 = Const 0x1p-1
+  r46 = Binary Add 44 45
   r47 = Convert int 46
   r48 = Convert float 47
-  r49 = Binary Div 48 40
-  r50 = Select 28 11 11
-  r51 = Select 31 24 50
-  r52 = Select 34 19 51
-  r53 = Select 36 19 52
-  r54 = Select 38 24 53
+  r49 = Binary Div 48 43
+  r50 = Select 34 9 9
+  r51 = Select 32 24 50
+  r52 = Select 30 19 51
+  r53 = Select 28 19 52
+  r54 = Select 27 24 53
   r55 = Binary Add 54 26
-  r56 = Binary Min 9 55
-  r57 = Binary Max 11 56
-  r58 = Binary Mul 57 40
-  r59 = Binary Add 58 41
+  r56 = Binary Min 10 55
+  r57 = Binary Max 9 56
+  r58 = Binary Mul 57 43
+  r59 = Binary Add 58 45
   r60 = Convert int 59
   r61 = Convert float 60
-  r62 = Binary Div 61 40
-  r63 = Select 28 24 19
-  r64 = Select 31 11 63
-  r65 = Select 34 11 64
-  r66 = Select 36 24 65
-  r67 = Select 38 19 66
+  r62 = Binary Div 61 43
+  r63 = Select 34 19 24
+  r64 = Select 32 19 63
+  r65 = Select 30 24 64
+  r66 = Select 28 9 65
+  r67 = Select 27 9 66
   r68 = Binary Add 67 26
-  r69 = Binary Min 9 68
-  r70 = Binary Max 11 69
-  r71 = Binary Mul 70 40
-  r72 = Binary Add 71 41
+  r69 = Binary Min 10 68
+  r70 = Binary Max 9 69
+  r71 = Binary Mul 70 43
+  r72 = Binary Add 71 45
   r73 = Convert int 72
   r74 = Convert float 73
-  r75 = Binary Div 74 40
+  r75 = Binary Div 74 43
   widths [1]
-  output [75;62;49]
+  output [49;62;75]
   uniform_widths []
   collecting true
 ## case 68 fusion=true
 refused E_PACKED_OPERATOR 98..115 "Dynamic operator array/float has no packed instruction for 2 arguments at width 1."
-check-error "E_PACKED_OPERATOR: Dynamic operator array/float has no packed instruction for 2 arguments at width 1."
+check-error
 ## case 68 fusion=false
 refused E_PACKED_OPERATOR 98..115 "Dynamic operator array/float has no packed instruction for 2 arguments at width 1."
-check-error "E_PACKED_OPERATOR: Dynamic operator array/float has no packed instruction for 2 arguments at width 1."
+check-error

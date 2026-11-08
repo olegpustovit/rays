@@ -74,13 +74,13 @@ kernel void incidence_partition(
   uint r49=(r27!=0.0f?r48:r41);
   threadgroup uint scan49[1024];
   {uint v=r49;scan49[lid]=v;for(uint d=1u;d<1024u;d<<=1u){threadgroup_barrier(mem_flags::mem_threadgroup);uint w=lid>=d?scan49[lid-d]:0u;threadgroup_barrier(mem_flags::mem_threadgroup);v+=w;scan49[lid]=v;}threadgroup_barrier(mem_flags::mem_threadgroup);scan49_before=v-r49;scan49_total=scan49[1024-1];}
-  uint r50=scan49_total;
-  uint r51=scan49_before;
+  uint r50=scan49_before;
+  uint r51=scan49_total;
   float r52=(r12==long(r7)?1.0f:0.0f);
   if(r52!=0.0f) {
     r54=(r14==long(r53)?1.0f:0.0f);
     if(r54!=0.0f) {
-      r55=(buffer3[uint(r13)]=r50,1u);
+      r55=(buffer3[uint(r13)]=r51,1u);
     }
     r56=(r54!=0.0f?r55:r53);
   }
@@ -89,7 +89,7 @@ kernel void incidence_partition(
     if(r58!=0.0f) {
       bool over59=r25>r22 && ulong(r25-r22)>4096uL;
       sb|=over59?1u:0u;
-      r60=r51;
+      r60=r50;
       for(r59=r22;r59<(over59?r22:r25);r59++){
   uint r65=0u;
   if(r52==0.0f) {
@@ -104,7 +104,7 @@ kernel void incidence_partition(
       }
       r69=(r14==long(r68)?1.0f:0.0f);
       if(r69!=0.0f) {
-        r72=(buffer3[((uint(r17)*r70))]=r50,1u);
+        r72=(buffer3[((uint(r17)*r70))]=r51,1u);
       }
       uint r73=(r69!=0.0f?r72:r68);
       r74=((r60)+r73);
@@ -112,7 +112,7 @@ kernel void incidence_partition(
     if(r58==0.0f) {
       r75=(r0<r8?1.0f:0.0f);
       if(r75!=0.0f) {
-        uint r78=(uint((long(buffer3[((uint(r17)+uint(r13)))*1+0])))+r51);
+        uint r78=(uint((long(buffer3[((uint(r17)+uint(r13)))*1+0])))+r50);
         r80=(long(r41)==long((1u))?1.0f:0.0f);
         if(r80==0.0f) {
           uint r84=(uint(r0)-r78);
