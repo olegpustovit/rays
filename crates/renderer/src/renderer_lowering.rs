@@ -227,7 +227,7 @@ pub struct t {
 
 pub fn create() -> t {
     t {
-        quad_cache: side_lru::create(lru::cache("renderer.quad"), true, (1i64 << 62) - 1, Box::new(|_, _| {}), 1024),
+        quad_cache: side_lru::create(lru::cache("renderer.quad"), true, 64 * 1024 * 1024, Box::new(|_, _| {}), 1024),
         quad_payload_cache: side_lru::create(lru::cache("renderer.quad_payload"), true, (1i64 << 62) - 1, Box::new(|_, _| {}), 256),
         out_slots: Vec::new(),
         out_list: Vec::new(),
@@ -396,9 +396,11 @@ fn quad(
             state: default_state(framebuffer, clip),
         },
     });
-    if sampled_texture_bytes(texture) <= snapshot_cache_entry_byte_capacity {
+    let bytes = sampled_texture_bytes(texture);
+    if bytes <= snapshot_cache_entry_byte_capacity {
         let item: Item = result.clone();
-        side_lru::add(&mut state_.quad_cache, 0, TableKey::Str(quad_key), item);
+        // Cached draws own their snapshots, including pixels from older image generations.
+        side_lru::add(&mut state_.quad_cache, bytes, TableKey::Str(quad_key), item);
     }
     result
 }
@@ -627,4 +629,35 @@ pub fn lower_scene2(
     let list: Vec<draw> = state_.out_slots[..number].to_vec();
     state_.out_list = list.clone();
     Ok(list)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn animated_quad_snapshots_obey_the_byte_budget() {
+        let mut state = create();
+        let destination = Rect { x: 0., y: 0., width: 512., height: 512. };
+        let transform = Transform { xx: 1., xy: 0., yx: 0., yy: 1., tx: 0., ty: 0. };
+        let viewport = (0, 0, 512, 512);
+        let mut snapshots = Vec::new();
+        for generation in 0..70 {
+            let pixels = new_bytes(vec![generation; 512 * 512 * 4]);
+            snapshots.push(Rc::downgrade(&pixels));
+            let texture = Rc::new(sampled_texture {
+                key: format!("image:frame:{generation}"),
+                levels: Rc::new(vec![texture_level { width: 512, height: 512, bytes: pixels }]),
+                sampler: ui_sampler(), gpu: None,
+            });
+            let draw = quad(&mut state, &texture, &destination, (0., 0., 1., 1.), &transform, viewport, viewport);
+            if generation == 69 {
+                let cached = quad(&mut state, &texture, &destination, (0., 0., 1., 1.), &transform, viewport, viewport);
+                assert!(Rc::ptr_eq(&draw, &cached), "unchanged snapshots should reuse their draw");
+            }
+            assert!(side_lru::bytes(&state.quad_cache) <= 64 * 1024 * 1024);
+        }
+        assert!(snapshots[..6].iter().all(|pixels| pixels.upgrade().is_none()), "old frame pixels stayed alive through cached quads");
+        assert_eq!(side_lru::length(&mut state.quad_cache), 64);
+    }
 }
