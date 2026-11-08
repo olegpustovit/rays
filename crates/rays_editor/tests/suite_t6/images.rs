@@ -802,11 +802,13 @@ pub fn cases() -> Vec<(&'static str, fn())> {
     ]
 }
 
-/// Exports need a real window (`Runtime.create` restores one); under SDL's dummy driver that is "not supported".
+/// Exports run the windowed sketch loop and save its screen, so they need a real window; this suite
+/// forces SDL's dummy driver (gpu_editor.rs), which has none: SDL says "not supported", or, creating
+/// a Metal window, "... not available in current SDL video driver (dummy) ...".
 fn export_or_skip(dir: &std::path::Path, doc: &editor_document::workspace_doc::T) -> bool {
     match workspace::export(Some("picture"), Some(60), dir.to_str().unwrap(), 2, doc) {
         Ok(()) => true,
-        Err(d) if d.message.contains("not supported") => {
+        Err(d) if d.message.contains("not supported") || d.message.contains("video driver (dummy)") => {
             println!("SKIPPED export half: {} (dummy video driver has no window)", d.message);
             false
         }
