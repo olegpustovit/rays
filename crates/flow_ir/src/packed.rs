@@ -1427,6 +1427,40 @@ macro_rules! finite {
     }};
 }
 
+/// `f[at + j] = op(f[a + j], f[b + j])` over `first..last`. `at`, `a` and `b` are register blocks,
+/// equal or disjoint.
+#[inline(always)]
+fn binary_lanes(f: &mut [f64], at: usize, a: usize, b: usize, first: usize, last: usize, op: impl Fn(f64, f64) -> f64) -> K<()> {
+    if last - first < 16 {
+        // a fold's lane at a time: the split costs more than it saves
+        for j in first..last {
+            f[at + j] = finite!(op(f[a + j], f[b + j]));
+        }
+        return Ok(());
+    }
+    wide_lanes(f, at, a, b, first, last, op)
+}
+
+/// `binary_lanes` over a block, then one finite check: a loop with no early exit or bounds check
+/// vectorises. Not inlined: in `texec` its copies slow the integer instructions' loops.
+#[inline(never)]
+fn wide_lanes(f: &mut [f64], at: usize, a: usize, b: usize, first: usize, last: usize, op: impl Fn(f64, f64) -> f64) -> K<()> {
+    let n = last - first;
+    let (low, high) = f.split_at_mut(at + first);
+    let (out, rest) = high.split_at_mut(n);
+    // a source block below the target is in `low`, one above it in `rest`
+    let source = |r: usize| -> Option<&[f64]> {
+        if r < at { Some(&low[r + first..r + last]) } else if r > at { Some(&rest[r - at - n..][..n]) } else { None }
+    };
+    match (source(a), source(b)) {
+        (Some(x), Some(y)) => out.iter_mut().zip(x.iter().zip(y)).for_each(|(o, (x, y))| *o = op(*x, *y)),
+        (None, Some(y)) => out.iter_mut().zip(y).for_each(|(o, y)| *o = op(*o, *y)),
+        (Some(x), None) => out.iter_mut().zip(x).for_each(|(o, x)| *o = op(*x, *o)),
+        (None, None) => out.iter_mut().for_each(|o| *o = op(*o, *o)),
+    }
+    if out.iter().all(|x| x.is_finite()) { Ok(()) } else { nonfinite() }
+}
+
 #[inline(always)]
 fn finite(x: f64) -> K<f64> {
     if x.is_finite() { Ok(x) } else { nonfinite() }
@@ -1971,37 +2005,16 @@ fn texec(
             );
             let f = &mut tc.floats;
             match operation {
-                Binary::Add => {
-                    for j in first..last {
-                        f[at + j] = finite!(f[a + j] + f[b + j]);
-                    }
-                }
-                Binary::Sub => {
-                    for j in first..last {
-                        f[at + j] = finite!(f[a + j] - f[b + j]);
-                    }
-                }
-                Binary::Mul => {
-                    for j in first..last {
-                        f[at + j] = finite!(f[a + j] * f[b + j]);
-                    }
-                }
-                Binary::Div => {
-                    for j in first..last {
-                        let y = f[b + j];
-                        f[at + j] = finite!(if y == 0.0 { 0.0 } else { f[a + j] / y });
-                    }
-                }
+                Binary::Add => binary_lanes(f, at, a, b, first, last, |x, y| x + y)?,
+                Binary::Sub => binary_lanes(f, at, a, b, first, last, |x, y| x - y)?,
+                Binary::Mul => binary_lanes(f, at, a, b, first, last, |x, y| x * y)?,
+                Binary::Div => binary_lanes(f, at, a, b, first, last, |x, y| if y == 0.0 { 0.0 } else { x / y })?,
                 _ if compare => {
                     for j in first..last {
                         f[at + j] = binary_apply(*operation, f[a + j], f[b + j]);
                     }
                 }
-                _ => {
-                    for j in first..last {
-                        f[at + j] = finite!(binary_apply(*operation, f[a + j], f[b + j]));
-                    }
-                }
+                _ => binary_lanes(f, at, a, b, first, last, |x, y| binary_apply(*operation, x, y))?,
             }
         }
         Instruction::Fma(a, b, c) if !banks[*a as usize] && !banks[*b as usize] && !banks[*c as usize] => {
@@ -4582,6 +4595,36 @@ mod tests {
 
     // Guard reuse: changing blocks, nested/truncated spans, checked projections and untaken failure
     // match the reference at one/four/eight domains.
+    // Binary lanes over whole blocks and over guarded spans that start inside a block (sources
+    // above and below the target register) match the reference; a lane that overflows fails.
+    #[test]
+    fn binary_lanes_match_the_reference() {
+        for body in [
+            "(map (fn [x] (if (< (mod x 64.0) 32.0) (+ (* x 3.0) (- t x)) (if (< x 0.0) (error \"E_UNTAKEN\" \"Inactive guarded instruction ran.\") (/ (- x t) (+ x 1.0))))) (array/range 5000))",
+            "(map (fn [x] (let* [a (* x x) b (+ a t)] (- (* b 0.5) (/ a (+ b 1.0))))) (array/range 3000))",
+        ] {
+            let (_, packed) = compile_body(body, true);
+            for time in [0.0, 0.25] {
+                let live = input::at_time(time);
+                let expected = reference_of(&packed, &live);
+                for domains in [1, 4] {
+                    at_domains(domains, &|| assert!(same(&force(&packed, &live, &strict()), &expected), "{body} at {time}"));
+                }
+            }
+        }
+        let (_, packed) = compile_body("(map (fn [x] (if (< x 4000.0) (* x t) (* (* (+ x t) 1e300) 1e300))) (array/range 5000))", true);
+        assert_eq!(force(&packed, &input::at_time(0.0), &strict()).unwrap_err().code, "E_NONFINITE");
+        // a span inside 64-lane blocks, the target between its sources, and in place
+        let bs = 64;
+        let block = |r: usize| (0..bs).map(|j| (r * 100 + j) as f64).collect::<Vec<f64>>();
+        let mut f: Vec<f64> = (0..3).flat_map(block).collect();
+        binary_lanes(&mut f, bs, 2 * bs, 0, 20, 60, |x, y| x - y).unwrap();
+        assert!((0..bs).all(|j| f[bs + j] == if (20..60).contains(&j) { 200.0 } else { (100 + j) as f64 }));
+        binary_lanes(&mut f, bs, bs, 2 * bs, 20, 60, |x, y| x + y).unwrap();
+        assert!((20..60).all(|j| f[bs + j] == (400 + j) as f64));
+        assert!(binary_lanes(&mut f, 0, 0, bs, 0, bs, |x, y| x * y * 1e308).is_err());
+    }
+
     #[test]
     fn guard_reuse_matches_the_reference() {
         let (_, packed) = compile_body(
