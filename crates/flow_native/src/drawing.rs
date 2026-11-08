@@ -24,7 +24,7 @@ static DRAWINGS: AtomicI64 = AtomicI64::new(0);
 /// A resident fold, and how a mark attribute over the arrays it kept after its loop is drawn
 /// (`Workspace_gpu::resident`): one host does both.
 pub type show = Rc<dyn Fn(&Packed, &Frame) -> Option<Option<G::Value>>>;
-pub type resident = (Arc<c::Resident>, show);
+pub type resident = (Arc<dyn c::Resident>, show);
 
 type Core = (c::Prepared, Option<ResidualId>, Buffers);
 

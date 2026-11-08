@@ -8,40 +8,37 @@ use sop::{context as ctx,edit_graph as edit,payload,session};
 use std::sync::{Arc,Mutex,atomic::{AtomicUsize,Ordering}};
 #[derive(Default)]
 struct Calls{dispatches:AtomicUsize,planes:AtomicUsize,time:Mutex<f64>}
-fn backend(cost:Option<f64>,calls:&Arc<Calls>)->Arc<Gpu::Backend>{
-    let c=calls.clone();
-    let owner=std::thread::current().id();
-    Arc::new(Gpu::Backend{
-        residency:Box::new(|_|None),cost:Box::new(move|_,_,_,_|cost),
-        prepare:Box::new(move|_,program|{
-            assert_eq!(std::thread::current().id(),owner,"prepare must stay on its owning domain");
-            let program=program.clone();let c=c.clone();let result:Arc<Mutex<Option<Vec<Value>>>>=Arc::new(Mutex::new(None));
-            let run_result=result.clone();let run_calls=c.clone();
-            let read_result=result.clone();
-            let read:Arc<dyn Fn(&Gpu::Value)->Result<Value,rays_diagnostic::Diagnostic>+Send+Sync>=Arc::new(move|v|{
-                let values=read_result.lock().unwrap();let value=&values.as_ref().unwrap()[v.output as usize];
-                let round=|xs:&Arc<Vec<f64>>|Arc::new(xs.iter().map(|x|(*x as f32)as f64).collect());
-                Ok(match value{Value::Float_array(xs)=>Value::Float_array(round(xs)),Value::Vec2_array(xs)=>Value::Vec2_array(round(xs)),Value::Vec3_array(xs)=>Value::Vec3_array(round(xs)),Value::Vec4_array(xs)=>Value::Vec4_array(round(xs)),_=>panic!("float output expected")})
-            });
-            let planes_read=read.clone();
-            Ok(Arc::new(Gpu::Kernel{
-                run:Box::new(move|inputs|{
-                    assert_eq!(std::thread::current().id(),owner,"dispatch must stay on its owning domain");let stamp=run_calls.dispatches.fetch_add(1,Ordering::SeqCst)+1;
-                    let count=inputs.count;let resolve=Arc::new(move|_:&Value|Ok(Value::Int(count)));
-                    let options=packed::ForceOptions{resolve:Some(resolve),..Default::default()};
-                    let values=packed::force_all(&program,&input::at_time(*run_calls.time.lock().unwrap()),&options)?;
-                    let width=match &values[0]{Value::Float_array(_)=>1,Value::Vec2_array(_)=>2,Value::Vec3_array(_)=>3,Value::Vec4_array(_)=>4,_=>panic!("float output expected")};
-                    *run_result.lock().unwrap()=Some(values);
-                    Ok(Gpu::Value{identity:1,count,width,output:0,stamp:stamp as i64,gpu_seconds:None})
-                }),
-                readback:Box::new(move|v|read(v)),
-                planes:Box::new(move|v|{c.planes.fetch_add(1,Ordering::SeqCst);Gpu::planes_of(&*planes_read,v)})
-            }))
-        })
-    })
+struct Mock{cost:Option<f64>,calls:Arc<Calls>,owner:std::thread::ThreadId}
+struct MockKernel{program:packed::T,calls:Arc<Calls>,owner:std::thread::ThreadId,result:Arc<Mutex<Option<Vec<Value>>>>}
+fn backend(cost:Option<f64>,calls:&Arc<Calls>)->Arc<dyn Gpu::Backend>{
+    Arc::new(Mock{cost,calls:calls.clone(),owner:std::thread::current().id()})
+}
+impl Gpu::Backend for Mock{
+    fn cost(&self,_:Option<&packed::Inputs>,_:bool,_:&packed::T,_:i64)->Option<f64>{self.cost}
+    fn prepare(&self,_:bool,program:&packed::T)->Result<Arc<dyn Gpu::Kernel>,rays_diagnostic::Diagnostic>{
+        assert_eq!(std::thread::current().id(),self.owner,"prepare must stay on its owning domain");
+        Ok(Arc::new(MockKernel{program:program.clone(),calls:self.calls.clone(),owner:self.owner,result:Arc::new(Mutex::new(None))}))
+    }
+}
+impl Gpu::Kernel for MockKernel{
+    fn run(&self,inputs:&packed::Inputs)->Result<Gpu::Value,rays_diagnostic::Diagnostic>{
+        assert_eq!(std::thread::current().id(),self.owner,"dispatch must stay on its owning domain");let stamp=self.calls.dispatches.fetch_add(1,Ordering::SeqCst)+1;
+        let count=inputs.count;let resolve=Arc::new(move|_:&Value|Ok(Value::Int(count)));
+        let options=packed::ForceOptions{resolve:Some(resolve),..Default::default()};
+        let values=packed::force_all(&self.program,&input::at_time(*self.calls.time.lock().unwrap()),&options)?;
+        let width=match &values[0]{Value::Float_array(_)=>1,Value::Vec2_array(_)=>2,Value::Vec3_array(_)=>3,Value::Vec4_array(_)=>4,_=>panic!("float output expected")};
+        *self.result.lock().unwrap()=Some(values);
+        Ok(Gpu::Value{identity:1,count,width,output:0,stamp:stamp as i64,gpu_seconds:None})
+    }
+    fn readback(&self,v:&Gpu::Value)->Result<Value,rays_diagnostic::Diagnostic>{
+        let values=self.result.lock().unwrap();let value=&values.as_ref().unwrap()[v.output as usize];
+        let round=|xs:&Arc<Vec<f64>>|Arc::new(xs.iter().map(|x|(*x as f32)as f64).collect());
+        Ok(match value{Value::Float_array(xs)=>Value::Float_array(round(xs)),Value::Vec2_array(xs)=>Value::Vec2_array(round(xs)),Value::Vec3_array(xs)=>Value::Vec3_array(round(xs)),Value::Vec4_array(xs)=>Value::Vec4_array(round(xs)),_=>panic!("float output expected")})
+    }
+    fn planes(&self,v:&Gpu::Value)->Result<Gpu::Planes,rays_diagnostic::Diagnostic>{self.calls.planes.fetch_add(1,Ordering::SeqCst);Gpu::planes_of(&|v|self.readback(v),v)}
 }
 fn ticks()->lower::Clock{let n=Arc::new(AtomicUsize::new(0));Arc::new(move||n.fetch_add(1,Ordering::SeqCst)as f64+1.)}
-fn positions(backend:Option<Arc<Gpu::Backend>>)->Float3::T{
+fn positions(backend:Option<Arc<dyn Gpu::Backend>>)->Float3::T{
     let text="(workspace g (graph g :context sop (sop/grid :counts \"Point counts\" :connectivity \"Points\" :columns 100 :rows 100 :size 3.0 :rotation 0.3)))";
     let gpu=backend.map_or_else(Gpu::default,|b|Gpu::Config{backend:Some(b),fast:true,..Gpu::default()});
     let(_,n)=lower_text(lower::Options{gpu,clock:ticks(),..Default::default()},text);

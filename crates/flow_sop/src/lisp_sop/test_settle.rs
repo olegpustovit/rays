@@ -25,44 +25,45 @@ struct Counters {
 }
 
 /// every output reads as 42s: a device result is recognisable, a CPU one is not
-fn backend(c: &Arc<Counters>) -> Arc<Gpu::Backend> {
-    let c = c.clone();
-    Arc::new(Gpu::Backend {
-        residency: Box::new(|_| None),
-        cost: Box::new(|_, _, _, _| Some(0.0)),
-        prepare: Box::new(move |_, _| {
-            let c = c.clone();
-            Ok(Arc::new(Gpu::Kernel {
-                run: Box::new(|inputs| Ok(Gpu::Value { identity: 1, count: inputs.count, width: 1, output: 0, stamp: 0, gpu_seconds: None })),
-                readback: Box::new(|_| Err(rays_diagnostic::error("E_GPU".into(), "no readback".into(), None, None, None, Vec::new(), Vec::new()))),
-                planes: Box::new(move |v: &Gpu::Value| {
-                    let (c1, c2, c3) = (c.clone(), c.clone(), c.clone());
-                    let (count, width) = (v.count, v.width);
-                    Ok(Gpu::Planes {
-                        count,
-                        width,
-                        materialise: Box::new(move || Ok((0..width).map(|_| vec![42.0; count as usize]).collect())),
-                        resident: None,
-                        settle: Box::new(move || {
-                            c1.settles.fetch_add(1, Ordering::SeqCst);
-                            if c1.fail.load(Ordering::SeqCst) {
-                                Err(rays_diagnostic::error("E_KERNEL".into(), "mock status".into(), None, None, None, Vec::new(), Vec::new()))
-                            } else {
-                                Ok(())
-                            }
-                        }),
-                        release: Box::new(move |_| {
-                            c2.releases.fetch_add(1, Ordering::SeqCst);
-                        }),
-                        bounds: Box::new(move || {
-                            c3.bounded.fetch_add(1, Ordering::SeqCst);
-                            if width == 3 { Some(vec![42.0; 6]) } else { None }
-                        }),
-                    })
-                }),
-            }))
-        }),
-    })
+fn backend(c: &Arc<Counters>) -> Arc<dyn Gpu::Backend> {
+    Arc::new(Mock(c.clone()))
+}
+
+struct Mock(Arc<Counters>);
+struct MockPlanes { c: Arc<Counters>, count: i64, width: i64 }
+
+impl Gpu::Backend for Mock {
+    fn cost(&self, _: Option<&flow_ir::packed::Inputs>, _: bool, _: &flow_ir::packed::T, _: i64) -> Option<f64> { Some(0.0) }
+    fn prepare(&self, _: bool, _: &flow_ir::packed::T) -> Result<Arc<dyn Gpu::Kernel>, rays_diagnostic::Diagnostic> { Ok(Arc::new(Mock(self.0.clone()))) }
+}
+
+impl Gpu::Kernel for Mock {
+    fn run(&self, inputs: &flow_ir::packed::Inputs) -> Result<Gpu::Value, rays_diagnostic::Diagnostic> {
+        Ok(Gpu::Value { identity: 1, count: inputs.count, width: 1, output: 0, stamp: 0, gpu_seconds: None })
+    }
+    fn readback(&self, _: &Gpu::Value) -> Result<flow_syntax::value::Value, rays_diagnostic::Diagnostic> {
+        Err(rays_diagnostic::error("E_GPU".into(), "no readback".into(), None, None, None, Vec::new(), Vec::new()))
+    }
+    fn planes(&self, v: &Gpu::Value) -> Result<Gpu::Planes, rays_diagnostic::Diagnostic> {
+        Ok(Gpu::Planes { count: v.count, width: v.width, resident: None, ops: Box::new(MockPlanes { c: self.0.clone(), count: v.count, width: v.width }) })
+    }
+}
+
+impl Gpu::PlanesOps for MockPlanes {
+    fn materialise(&self) -> Result<Vec<Vec<f64>>, rays_diagnostic::Diagnostic> { Ok((0..self.width).map(|_| vec![42.0; self.count as usize]).collect()) }
+    fn settle(&self) -> Result<(), rays_diagnostic::Diagnostic> {
+        self.c.settles.fetch_add(1, Ordering::SeqCst);
+        if self.c.fail.load(Ordering::SeqCst) {
+            Err(rays_diagnostic::error("E_KERNEL".into(), "mock status".into(), None, None, None, Vec::new(), Vec::new()))
+        } else {
+            Ok(())
+        }
+    }
+    fn release(&self, _: bool) { self.c.releases.fetch_add(1, Ordering::SeqCst); }
+    fn bounds(&self) -> Option<Vec<f64>> {
+        self.c.bounded.fetch_add(1, Ordering::SeqCst);
+        if self.width == 3 { Some(vec![42.0; 6]) } else { None }
+    }
 }
 
 fn node(gpu: Option<&Gpu::Config>, y: f64) -> sop::node::T {

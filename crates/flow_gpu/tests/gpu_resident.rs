@@ -5,7 +5,7 @@
 //! The owner-only wrong-domain Host.stats call is excluded by Host's checked !Send type;
 //! no owner handles are migrated. All remaining source runtime assertions run on native OGPU.
 mod common;
-use common::test_program as tp;
+use common::{test_program as tp, Observe, Seen};
 use flow_gpu::{host, pipelines, run};
 use flow_ir::{core_draw, core_exec as c, core_ir, core_lower, packed::host as phost};
 use flow_shader::emit;
@@ -41,7 +41,7 @@ fn draw_program(body: &str) -> (core_ir::Program, Option<ResidualId>) {
 fn prepare(p: &core_ir::Program) -> c::Prepared {
     c::prepare(p, false, true, &Default::default(), false)
 }
-fn points(prepared: &c::Prepared, root: Option<ResidualId>, resident: Option<Arc<c::Resident>>, t: f64) -> (i64, Vec<f64>) {
+fn points(prepared: &c::Prepared, root: Option<ResidualId>, resident: Option<Arc<dyn c::Resident>>, t: f64) -> (i64, Vec<f64>) {
     let buffers = c::Buffers::create();
     let mut live = input::at_time(t);
     live.size = (200, 100);
@@ -53,9 +53,6 @@ fn points(prepared: &c::Prepared, root: Option<ResidualId>, resident: Option<Arc
         }
         _ => panic!("resident fold: one point set expected: {table:?}"),
     }
-}
-fn unique(r: Arc<c::Resident>) -> c::Resident {
-    Arc::try_unwrap(r).unwrap_or_else(|_| panic!("new resident has another owner"))
 }
 fn array(v: &Value) -> &[f64] {
     match v {
@@ -69,31 +66,21 @@ fn fold_case(gpu: &renderer::renderer::Gpu, n: i64, levels: i64, keep: &str, slo
     let (program, root) = draw_program(&body);
     let expected = points(&prepare(&program), root, None, 0.0);
     let h = host::create(&|| 0.0, gpu);
-    let base = unique(host::resident(false, true, &h));
-    let invoke = base.invoke;
-    let capacity: Arc<dyn Fn(&Value) -> Option<i64> + Send + Sync> = Arc::from(base.capacity);
-    let invoke_capacity = capacity.clone();
+    let base = host::resident(false, true, &h);
+    let capacity = base.clone();
     let ran = Arc::new(AtomicUsize::new(0));
     let calls = ran.clone();
-    let resident = Arc::new(c::Resident {
-        invoke_all: Box::new(|_, _, _, _, _| Ok(None)),
-        invoke: Box::new(move |p, args, locals, live| {
-            let value = invoke(p, args, locals, live)?;
-            if let Some(v) = &value {
-                calls.fetch_add(1, Ordering::Relaxed);
-                let block = match v {
-                    Value::Int_array(a) => a.len(),
-                    Value::Float_array(a) | Value::Vec2_array(a) | Value::Vec3_array(a) | Value::Vec4_array(a) => a.len(),
-                    _ => usize::MAX,
-                };
-                assert!(block <= 4, "resident fold: a placeholder's block has its capacity");
-                assert!(invoke_capacity(v).is_some(), "resident fold: a placeholder has no capacity");
-            }
-            Ok(value)
-        }),
-        capacity: Box::new(move |v| capacity(v)),
-        ..base
-    });
+    let resident: Arc<dyn c::Resident> = Arc::new(Observe { base, one_by_one: true, seen: Box::new(move |seen| {
+        let Seen::Invoke(Some(v)) = seen else { return };
+        calls.fetch_add(1, Ordering::Relaxed);
+        let block = match v {
+            Value::Int_array(a) => a.len(),
+            Value::Float_array(a) | Value::Vec2_array(a) | Value::Vec3_array(a) | Value::Vec4_array(a) => a.len(),
+            _ => usize::MAX,
+        };
+        assert!(block <= 4, "resident fold: a placeholder's block has its capacity");
+        assert!(capacity.capacity(v).is_some(), "resident fold: a placeholder has no capacity");
+    }) });
     let actual = points(&prepare(&program), root, Some(resident), 0.0);
     assert!(ran.load(Ordering::Relaxed) > 0, "resident fold: no region ran on the device");
     assert!(mem::bytes(&mem::plan_in(mem::Pool::Device, "flow_gpu.resident")) > 0, "resident fold: its kept buffers have no owner");
@@ -108,9 +95,9 @@ fn fold_case(gpu: &renderer::renderer::Gpu, n: i64, levels: i64, keep: &str, slo
     let display = tp::fixtures(None, 4096).remove(0).1;
     let inputs = tp::ok(phost::prepare(&display, &phost::PrepareOptions { fast: true, ..Default::default() }, &input::at_time(1.0)));
     let backend = host::backend(&h);
-    let kernels: Vec<_> = (0..2).map(|_| tp::ok((backend.prepare)(true, &display))).collect();
+    let kernels: Vec<_> = (0..2).map(|_| tp::ok(backend.prepare(true, &display))).collect();
     for _ in 0..4 {
-        for kernel in &kernels { tp::ok((kernel.run)(&inputs)); }
+        for kernel in &kernels { tp::ok(kernel.run(&inputs)); }
         assert_eq!(points(&prepare(&program), root, Some(host::resident(false, true, &h)), 0.0), expected,
             "resident fold: a later draw's device points differ from CPU");
     }
@@ -138,17 +125,12 @@ fn resident_history() {
     let cuts = Arc::new(AtomicUsize::new(0));
     for t in [1.0, 6.0, 6.0, 2.0, 0.0, 1.0, 7.0, 8.0, 3.0, 8.0] {
         let expected = points(&prepare(&program), root, None, t);
-        let base = unique(host::resident(false, true, &h));
-        let finish = base.finish;
         let cuts = cuts.clone();
-        let resident = Arc::new(c::Resident {
-            finish: Box::new(move |v| {
-                let result = finish(v);
+        let resident: Arc<dyn c::Resident> = Arc::new(Observe { base: host::resident(false, true, &h), one_by_one: false, seen: Box::new(move |seen| {
+            if let Seen::Finish(_, result) = seen {
                 if result.as_ref().is_err_and(c::is_resident_overflow) { cuts.fetch_add(1, Ordering::Relaxed); }
-                result
-            }),
-            ..base
-        });
+            }
+        }) });
         assert_eq!(points(&prepared, root, Some(resident), t), expected, "resident history at t={t}");
     }
     assert!(cuts.load(Ordering::Relaxed) > 0, "resident history: no draw outgrew its slots");
@@ -172,21 +154,14 @@ fn resident_unfold() {
     for t in [0.0, 1.0, 2.0] {
         let live = input::at_time(t);
         let expected = tp::ok(c::execute(&prepared, &live, &c::Options { strict: true, ..Default::default() }));
-        let base = unique(host::resident(false, true, &h));
-        let unfold = base.unfold;
         let ran = Arc::new(AtomicUsize::new(0));
         let calls = ran.clone();
-        let resident = Arc::new(c::Resident {
-            unfold: Box::new(move |p, args, steps, source, locals, live| {
-                let value = unfold(p, args, steps, source, locals, live)?;
-                if value.is_some() { calls.fetch_add(1, Ordering::Relaxed); }
-                Ok(value)
-            }),
-            ..base
-        });
+        let resident: Arc<dyn c::Resident> = Arc::new(Observe { base: host::resident(false, true, &h), one_by_one: false, seen: Box::new(move |seen| {
+            if let Seen::Unfold(Some(_)) = seen { calls.fetch_add(1, Ordering::Relaxed); }
+        }) });
         let actual = tp::ok(c::execute(&prepared, &live, &c::Options { strict: true, resident: Some(resident.clone()), ..Default::default() }));
-        assert_eq!(tp::ok(c::host_value(&resident, &actual)), expected);
-        (resident.close)();
+        assert_eq!(tp::ok(c::host_value(&*resident, &actual)), expected);
+        resident.close();
         assert_eq!(ran.load(Ordering::Relaxed), 1,
             "an exact device-mapped head must unfold");
     }
@@ -210,7 +185,7 @@ fn resident_state() {
         let resident = host::resident(false, true, &h);
         last = tp::ok(c::execute(&prepared, &live, &c::Options { root: Some(root), strict: true, resident: Some(resident.clone()), ..Default::default() }));
         assert!(flow_eval::Device::held_by_device(&last));
-        (resident.close)();
+        resident.close();
         assert_eq!(host::stats(&h).payload_readback_bytes, 0, "state read back at frame {frame}");
         assert!(owner.bytes() - before <= 6 * run::size_class(262144 * 3 * 4), "old state buffers retained at frame {frame}: {} bytes", owner.bytes() - before);
     }
@@ -259,25 +234,13 @@ fn resident_value() {
             let before = host::stats(&h);
             let invoked = Arc::new(AtomicUsize::new(0));
             let reads = Arc::new(AtomicUsize::new(0));
-            let base = unique(r);
-            let invoke = base.invoke;
-            let finish = base.finish;
             let calls = invoked.clone();
             let read_calls = reads.clone();
-            let resident = Arc::new(c::Resident {
-                invoke_all: Box::new(|_, _, _, _, _| Ok(None)),
-                invoke: Box::new(move |p, args, locals, live| {
-                    let value = invoke(p, args, locals, live)?;
-                    if value.is_some() { calls.fetch_add(1, Ordering::Relaxed); }
-                    Ok(value)
-                }),
-                finish: Box::new(move |value| {
-                    let actual = finish(value)?;
-                    if !same_identity(&actual, value) { read_calls.fetch_add(1, Ordering::Relaxed); }
-                    Ok(actual)
-                }),
-                ..base
-            });
+            let resident: Arc<dyn c::Resident> = Arc::new(Observe { base: r, one_by_one: true, seen: Box::new(move |seen| match seen {
+                Seen::Invoke(Some(_)) => { calls.fetch_add(1, Ordering::Relaxed); }
+                Seen::Finish(value, Ok(actual)) if !same_identity(actual, value) => { read_calls.fetch_add(1, Ordering::Relaxed); }
+                _ => {}
+            }) });
             let live = input::at_time(count as f64);
             let result = tp::ok(c::execute(&prepared, &live, &c::Options { strict: true, resident: Some(resident.clone()), ..Default::default() }));
             if count >= 256 {
@@ -287,13 +250,13 @@ fn resident_value() {
             let published = host::stats(&h);
             assert_eq!(published.payload_readback_bytes, before.payload_readback_bytes);
             if count >= 256 { assert!(published.count_readback_bytes > before.count_readback_bytes); }
-            let materialised = tp::ok(c::host_value(&resident, &result));
+            let materialised = tp::ok(c::host_value(&*resident, &result));
             assert_eq!(materialised, tp::ok(flow_eval::Host::force_reference(value, &live, None, None, None)));
             let read = host::stats(&h);
             if count >= 256 { assert!(read.payload_readback_bytes > published.payload_readback_bytes); }
             assert_eq!(read.readback_bytes, read.payload_readback_bytes + read.bounds_readback_bytes);
             assert_eq!(read.status_readback_bytes, 4 * read.status_reads);
-            (resident.close)();
+            resident.close();
         }
     }
     host::close(&h);
@@ -389,15 +352,15 @@ fn host_counters() {
         let program = tp::fixtures(None, 1024).remove(0).1;
         let inputs = tp::ok(phost::prepare(&program, &Default::default(), &input::at_time(1.0)));
         let backend = host::backend(&h);
-        let first = tp::ok((backend.prepare)(false, &program));
-        let value = tp::ok((first.run)(&inputs));
-        tp::ok((first.readback)(&value));
+        let first = tp::ok(backend.prepare(false, &program));
+        let value = tp::ok(first.run(&inputs));
+        tp::ok(first.readback(&value));
         assert!(tp::ok(host::output(&h, &value)).is_some());
         let initial = host::stats(&h);
         assert_eq!((initial.runners_created, initial.runners_released, initial.status_reads), (1, 0, 1));
         for _ in 0..64 {
-            let kernel = tp::ok((backend.prepare)(false, &program));
-            tp::ok((kernel.run)(&inputs));
+            let kernel = tp::ok(backend.prepare(false, &program));
+            tp::ok(kernel.run(&inputs));
         }
         let evicted = host::stats(&h);
         assert!(evicted.runners_created >= 65);
@@ -410,7 +373,7 @@ fn host_counters() {
         assert_eq!(evicted.readback_bytes, initial.readback_bytes);
         assert_eq!(initial.readback_bytes, 4096);
         assert!(tp::ok(host::output(&h, &value)).is_none());
-        tp::ok((first.run)(&inputs));
+        tp::ok(first.run(&inputs));
         let renewed = host::stats(&h);
         assert_eq!(renewed.runners_created, evicted.runners_created + 1);
         assert_eq!(renewed.runners_released, evicted.runners_released + 1);

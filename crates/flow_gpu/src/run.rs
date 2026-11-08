@@ -529,7 +529,7 @@ fn kernel_status(flags: i32) -> Diagnostic {
     // The status word is an aggregate across parallel rows, so diagnostics have a stable class
     // priority rather than claiming CPU row-order precedence.
     if flags & 4 != 0 {
-        value::fail("E_RANGE", "Integer shift count must be within [0, 62].")
+        value::fail("E_RANGE", "Integer shift count must be within [0, 63].")
     } else if flags & 2 != 0 {
         value::fail("E_RANGE", "Integer division by zero.")
     } else if flags & 8 != 0 {
@@ -663,7 +663,7 @@ pub fn create_owned(pool_: Option<&Pool>, device: &Device, queue: &Queue, pipeli
     }))
 }
 
-pub fn create(pool_: Option<&Pool>, gpu_: &renderer::renderer::gpu, pipelines: &pipelines::T, kernel: &Kernel) -> T {
+pub fn create(pool_: Option<&Pool>, gpu_: &renderer::renderer::Gpu, pipelines: &pipelines::T, kernel: &Kernel) -> T {
     create_owned(pool_, &renderer::renderer::gpu_device(gpu_), &renderer::renderer::gpu_queue(gpu_), pipelines, kernel)
 }
 
@@ -1601,6 +1601,32 @@ fn token_planes(token: &Token) -> Result<Arc<Vec<Vec<f64>>>, String> {
     slot.take().unwrap()
 }
 
+/// A held output's planes: its token keeps the buffer alive, and every call reads the token's fate.
+struct Held(Arc<Token>);
+
+impl Gpu::PlanesOps for Held {
+    fn materialise(&self) -> Result<Vec<Vec<f64>>, Diagnostic> {
+        token_planes(&self.0).map(|planes| (*planes).clone()).map_err(|message| e_gpu(&message))
+    }
+    fn settle(&self) -> Result<(), Diagnostic> {
+        let t = &self.0;
+        if t.fate.planes().is_some() || t.fate.destroyed() {
+            return Ok(());
+        }
+        match kept_of(t.id) {
+            Some(k) if me() == t.owner => settle(&k.owner, k.epoch, &k.settled, &k.fate),
+            _ if t.settled.load(Ordering::SeqCst) => Ok(()),
+            _ => Err(e_gpu("A device output settles on its owner's domain.")),
+        }
+    }
+    fn release(&self, held: bool) {
+        release_kept(&self.0.shared, &self.0.fate, self.0.id, Arc::downgrade(&self.0), held)
+    }
+    fn bounds(&self) -> Option<Vec<f64>> {
+        kept_of(self.0.id).and_then(|k| bounds_of(&k))
+    }
+}
+
 fn hold(t: &T, uint32: bool, buffer: &Buffer, capacity: i64, count: i64, width: i64, epoch: i64, settled: bool) -> (Gpu::Planes, Rc<Kept>) {
     let d = &*t.0;
     mem::charge(&HELD_OWNER, capacity);
@@ -1639,35 +1665,7 @@ fn hold(t: &T, uint32: bool, buffer: &Buffer, capacity: i64, count: i64, width: 
         3 => Value::Vec3_array(placeholder),
         _ => Value::Vec4_array(placeholder),
     };
-    let (t1, t2, t4) = (token.clone(), token.clone(), token.clone());
-    // A release callback observes the fate, not the holder's liveness (as does a display pin).
-    let (release_shared, release_fate, release_token) = (token.shared.clone(), token.fate.clone(), Arc::downgrade(&token));
-    let owner_domain = d.domain;
-    let planes = Gpu::Planes {
-        count,
-        width,
-        materialise: Box::new(move || token_planes(&t1).map(|planes| (*planes).clone()).map_err(|message| e_gpu(&message))),
-        resident: if uint32 { None } else { Some(resident) },
-        settle: Box::new(move || {
-            if t2.fate.planes().is_some() || t2.fate.destroyed() {
-                return Ok(());
-            }
-            match kept_of(t2.id) {
-                Some(k) if me() == owner_domain => settle(&k.owner, k.epoch, &k.settled, &k.fate),
-                _ => {
-                    if t2.settled.load(Ordering::SeqCst) {
-                        Ok(())
-                    } else {
-                        Err(e_gpu("A device output settles on its owner's domain."))
-                    }
-                }
-            }
-        }),
-        release: Box::new(move |held| {
-            release_kept(&release_shared, &release_fate, id, release_token.clone(), held)
-        }),
-        bounds: Box::new(move || kept_of(t4.id).and_then(|k| bounds_of(&k))),
-    };
+    let planes = Gpu::Planes { count, width, resident: if uint32 { None } else { Some(resident) }, ops: Box::new(Held(token)) };
     (planes, kept)
 }
 
@@ -1717,20 +1715,7 @@ fn keep_storage(uint32: bool, index: Option<i64>, output: &Output) -> Result<(Gp
         None => {
             // an empty, unmapped or caller-encoded output is read now
             let read = self::planes(output, Some(index))?;
-            let read = Arc::new(read);
-            let r = read.clone();
-            Ok((
-                Gpu::Planes {
-                    count: output.count,
-                    width,
-                    materialise: Box::new(move || Ok((*r).clone())),
-                    resident: None,
-                    settle: Box::new(|| Ok(())),
-                    release: Box::new(|_| {}),
-                    bounds: Box::new(|| None),
-                },
-                None,
-            ))
+            Ok((Gpu::Planes { count: output.count, width, resident: None, ops: Box::new(Gpu::ReadPlanes(Arc::new(read))) }, None))
         }
     }
 }
@@ -1782,16 +1767,22 @@ pub struct Uint32Holder {
     pub pin: Arc<dyn Fn() -> Option<Pin> + Send + Sync>,
 }
 
+/// A holder's backend-neutral integers: `live` is its storage while that is still held.
+struct HolderIntegers { holder: Arc<Uint32Holder>, live: Option<(Arc<Fate>, Arc<AtomicBool>)> }
+
+impl Gpu::IntegersOps for HolderIntegers {
+    fn resident(&self) -> Option<Value> {
+        self.live.as_ref().filter(|(f, s)| s.load(Ordering::SeqCst) && !f.destroyed() && f.planes().is_none()).and_then(|_| self.holder.resident.clone())
+    }
+    fn materialise(&self) -> Result<Vec<i64>, Diagnostic> { (self.holder.materialise)() }
+    fn release(&self, held: bool) { (self.holder.release)(held) }
+}
+
 /// The same holder through the backend-neutral integer carrier, with shared ownership.
 pub fn integers(holder: &Uint32Holder) -> Gpu::Integers {
-    let (m, r) = (holder.materialise.clone(), holder.release.clone());
-    let resident = holder.resident.clone();
     let live = holder.input.as_ref().and_then(held_storage).map(|(kept, _)| (kept.fate.clone(), kept.settled.clone()));
-    Gpu::Integers {
-        count: holder.count,
-        resident: Box::new(move || live.as_ref().filter(|(f, s)| s.load(Ordering::SeqCst) && !f.destroyed() && f.planes().is_none()).and_then(|_| resident.clone())),
-        storage: Some(Arc::new(holder.clone())), materialise: Box::new(move || m()), release: Box::new(move |held| r(held)),
-    }
+    let holder = Arc::new(holder.clone());
+    Gpu::Integers { count: holder.count, storage: Some(holder.clone()), ops: Box::new(HolderIntegers { holder, live }) }
 }
 
 /// Borrow native UInt32 storage without materialising it. Other backend tokens decline.
@@ -1802,13 +1793,14 @@ pub fn pin_integers(holder: &Gpu::Integers) -> Option<Pin> {
 fn integer_holder(domain: ThreadId, planes: Gpu::Planes, kept: Option<Rc<Kept>>) -> Uint32Holder {
     let cache: Arc<Mutex<Option<Arc<Vec<i64>>>>> = Arc::new(Mutex::new(None));
     let kept_id = kept.as_ref().map(|k| k.id);
-    let Gpu::Planes { count, materialise, settle, release, .. } = planes;
+    let (count, ops): (i64, Arc<dyn Gpu::PlanesOps>) = (planes.count, Arc::from(planes.ops));
     let input = kept.as_ref().and_then(|k| k.placeholder.clone());
     let resident = kept_id.map(|id| {
         let values = Arc::new(vec![id]);
         flow_ir::packed::host::register_integer_input(&values, input.as_ref().unwrap());
         Value::Int_array(values)
     });
+    let (m, s) = (ops.clone(), ops.clone());
     Uint32Holder {
         count,
         resident,
@@ -1818,12 +1810,12 @@ fn integer_holder(domain: ThreadId, planes: Gpu::Planes, kept: Option<Rc<Kept>>)
             if let Some(values) = &*cache.lock().unwrap() {
                 return Ok((**values).clone());
             }
-            let values: Vec<i64> = materialise()?[0].iter().map(|v| *v as i64).collect();
+            let values: Vec<i64> = m.materialise()?[0].iter().map(|v| *v as i64).collect();
             *cache.lock().unwrap() = Some(Arc::new(values.clone()));
             Ok(values)
         }),
-        settle: Arc::from(settle),
-        release: Arc::from(release),
+        settle: Arc::new(move || s.settle()),
+        release: Arc::new(move |held| ops.release(held)),
         pin: Arc::new(move || {
             if me() != domain {
                 return None;
@@ -2546,7 +2538,7 @@ fn bytes_of(floats: &[f64]) -> Vec<u8> {
 /// times 0 and 1, clamped) when `caps` (default: the device's) has `ray_tracing_motion`; otherwise
 /// the scene is built at the shutter midpoint and `motion` is false. `release` destroys every
 /// structure and buffer.
-pub fn build_scene(caps: Option<&ogpu::caps::Caps>, gpu_: &renderer::renderer::gpu, d: &Description) -> Result<Built, Diagnostic> {
+pub fn build_scene(caps: Option<&ogpu::caps::Caps>, gpu_: &renderer::renderer::Gpu, d: &Description) -> Result<Built, Diagnostic> {
     use ogpu::backend::{AccelDescriptor, Border, Geometry, InstanceKind, InstanceRecord, Keyframe, Motion, MotionInstance};
     let device = renderer::renderer::gpu_device(gpu_);
     let queue = renderer::renderer::gpu_queue(gpu_);

@@ -43,32 +43,34 @@ fn ix(n: i64) -> usize { n as usize }
 
 /// A resident fold's device: inside a qualifying top-level loop of a drawing, a region's array may
 /// stay on the GPU, standing in the locals as a placeholder the device knows.
-pub struct Resident {
-    pub fill: Box<dyn Fn(&Ty, i64, &Value) -> Result<Option<Value>, Diagnostic> + Send + Sync>,
+/// The no-device default of every method declines (`Ok(None)`, `None`), finishes a value as itself and
+/// closes and settles nothing, so an implementation overrides what its device does.
+pub trait Resident: Send + Sync {
+    fn fill(&self, _ty: &Ty, _length: i64, _value: &Value) -> Result<Option<Value>, Diagnostic> { Ok(None) }
     /// run the region with these arguments on the device (`locals`: the draw's); None leaves it to the CPU
-    pub invoke: Box<dyn Fn(&Packed, &[Value], &[Value], &Frame) -> Result<Option<Value>, Diagnostic> + Send + Sync>,
+    fn invoke(&self, _region: &Packed, _args: &[Value], _locals: &[Value], _live: &Frame) -> Result<Option<Value>, Diagnostic> { Ok(None) }
     /// a region with several outputs (fused siblings) run once: a list of a value for each of the
     /// types; None runs them one by one
-    pub invoke_all: Box<dyn Fn(&Packed, &[Ty], &[Value], &[Value], &Frame) -> Result<Option<Value>, Diagnostic> + Send + Sync>,
+    fn invoke_all(&self, _region: &Packed, _tys: &[Ty], _args: &[Value], _locals: &[Value], _live: &Frame) -> Result<Option<Value>, Diagnostic> { Ok(None) }
     /// the region run `steps` passes in each lane over its one carried input, every pass kept
-    pub unfold: Box<dyn Fn(&Packed, &[Value], i64, &Value, &[Value], &Frame) -> Result<Option<Value>, Diagnostic> + Send + Sync>,
-    pub compact: Box<dyn Fn(&Value) -> Result<Option<Value>, Diagnostic> + Send + Sync>,
-    pub coerce: Box<dyn Fn(&Ty, &Value) -> Result<Option<Value>, Diagnostic> + Send + Sync>,
-    pub concat: Box<dyn Fn(&Value, &Value) -> Result<Option<Value>, Diagnostic> + Send + Sync>,
+    fn unfold(&self, _region: &Packed, _args: &[Value], _steps: i64, _source: &Value, _locals: &[Value], _live: &Frame) -> Result<Option<Value>, Diagnostic> { Ok(None) }
+    fn compact(&self, _value: &Value) -> Result<Option<Value>, Diagnostic> { Ok(None) }
+    fn coerce(&self, _ty: &Ty, _value: &Value) -> Result<Option<Value>, Diagnostic> { Ok(None) }
+    fn concat(&self, _a: &Value, _b: &Value) -> Result<Option<Value>, Diagnostic> { Ok(None) }
     /// the host array a placeholder stands for; any other value as it is
-    pub finish: Box<dyn Fn(&Value) -> Result<Value, Diagnostic> + Send + Sync>,
+    fn finish(&self, value: &Value) -> Result<Value, Diagnostic> { Ok(value.clone()) }
     /// a placeholder kept on the device past the scope; None: finish it
-    pub keep: Box<dyn Fn(&Value) -> Result<Option<Value>, Diagnostic> + Send + Sync>,
-    pub count: Box<dyn Fn(&Value) -> Result<Option<i64>, Diagnostic> + Send + Sync>,
-    pub capacity: Box<dyn Fn(&Value) -> Option<i64> + Send + Sync>,
-    pub close: Box<dyn Fn() + Send + Sync>,
-    pub settle: Box<dyn Fn() -> Result<(), Diagnostic> + Send + Sync>,
-    pub range: Box<dyn Fn(&Ty, &Value, i64, i64) -> Result<Option<Value>, Diagnostic> + Send + Sync>,
+    fn keep(&self, _value: &Value) -> Result<Option<Value>, Diagnostic> { Ok(None) }
+    fn count(&self, _value: &Value) -> Result<Option<i64>, Diagnostic> { Ok(None) }
+    fn capacity(&self, _value: &Value) -> Option<i64> { None }
+    fn close(&self) {}
+    fn settle(&self) -> Result<(), Diagnostic> { Ok(()) }
+    fn range(&self, _ty: &Ty, _value: &Value, _div: i64, _length: i64) -> Result<Option<Value>, Diagnostic> { Ok(None) }
 }
 
 /// Materialise placeholders recursively through records, lists, structs and source arguments.
-pub fn host_value(resident: &Resident, value: &Value) -> Result<Value, Diagnostic> {
-    fn fields(r: &Resident, fs: &[(String, Value)]) -> Result<Vec<(String, Value)>, Diagnostic> {
+pub fn host_value(resident: &dyn Resident, value: &Value) -> Result<Value, Diagnostic> {
+    fn fields(r: &dyn Resident, fs: &[(String, Value)]) -> Result<Vec<(String, Value)>, Diagnostic> {
         fs.iter().map(|(n, x)| Ok((n.clone(), host_value(r, x)?))).collect()
     }
     Ok(match value {
@@ -76,34 +78,34 @@ pub fn host_value(resident: &Resident, value: &Value) -> Result<Value, Diagnosti
         Value::List(xs) => Value::List(Arc::new(xs.iter().map(|x| host_value(resident, x)).collect::<Result<_, _>>()?)),
         Value::Source(g) => source_value(g.name.clone(), g.ty.clone(), fields(resident, &g.fields)?),
         Value::Struct(g) => struct_value(g.name.clone(), g.ty.clone(), fields(resident, &g.fields)?),
-        other => (resident.finish)(other)?,
+        other => resident.finish(other)?,
     })
 }
 
 /// A validated constant-array descriptor can be filled by the resident backend directly.
-pub fn fill_constant(resident: &Resident, value: &Value) -> Result<Option<Value>, Diagnostic> {
+pub fn fill_constant(resident: &dyn Resident, value: &Value) -> Result<Option<Value>, Diagnostic> {
     let Value::Source(g) = value else { return Ok(None) };
     let Some(operation) = g.name.strip_prefix("$core/constant-array/") else { return Ok(None) };
     let Value::Source(desc) = op::constant_array_descriptor(operation, &g.fields)? else { unreachable!() };
     if g.ty != desc.ty { return Err(v::fail("E_ARRAY_TYPE", "Constant array descriptor has the wrong declared type.")); }
     match desc.fields.as_slice() {
-        [(a, Value::Int(length)), (b, initial)] if a == "count" && b == "value" => (resident.fill)(&desc.ty, *length, initial),
+        [(a, Value::Int(length)), (b, initial)] if a == "count" && b == "value" => resident.fill(&desc.ty, *length, initial),
         _ => unreachable!("constant_array_descriptor validates the fields"),
     }
 }
 
 /// what a state stores from a resident run: device arrays stay there, the rest is read back
-fn kept_value(resident: &Resident, value: &Value) -> Result<Value, Diagnostic> {
-    fn fields(r: &Resident, fs: &[(String, Value)]) -> Result<Vec<(String, Value)>, Diagnostic> {
+fn kept_value(resident: &dyn Resident, value: &Value) -> Result<Value, Diagnostic> {
+    fn fields(r: &dyn Resident, fs: &[(String, Value)]) -> Result<Vec<(String, Value)>, Diagnostic> {
         fs.iter().map(|(n, x)| Ok((n.clone(), kept_value(r, x)?))).collect()
     }
     Ok(match value {
         Value::Record(fs) => Value::Record(fields(resident, fs)?),
         Value::List(xs) => Value::List(Arc::new(xs.iter().map(|x| kept_value(resident, x)).collect::<Result<_, _>>()?)),
         Value::Struct(g) => struct_value(g.name.clone(), g.ty.clone(), fields(resident, &g.fields)?),
-        other => match (resident.keep)(other)? {
+        other => match resident.keep(other)? {
             Some(kept) => kept,
-            None => (resident.finish)(other)?,
+            None => resident.finish(other)?,
         },
     })
 }
@@ -183,7 +185,7 @@ fn arena_kill(value: &mut Value) {
     // an array shared elsewhere is not ours to fill (the OCaml arena owns its arrays outright)
     match value {
         Value::Int_array(data) => {
-            if let Some(d) = Arc::get_mut(data) { d.iter_mut().for_each(|x| *x = OCAML_MIN_INT); }
+            if let Some(d) = Arc::get_mut(data) { d.iter_mut().for_each(|x| *x = i64::MIN); }
         }
         Value::Float_array(data) | Value::Vec2_array(data) | Value::Vec3_array(data) | Value::Vec4_array(data) => {
             if let Some(d) = Arc::get_mut(data) { d.iter_mut().for_each(|x| *x = f64::NAN); }
@@ -192,7 +194,6 @@ fn arena_kill(value: &mut Value) {
     }
 }
 /// OCaml's `min_int` (63-bit).
-const OCAML_MIN_INT: i64 = -(1i64 << 62);
 
 /// The carrier `Region::floats_for` recognises: only the data is reused, each result boxes its own
 /// width.
@@ -294,7 +295,7 @@ struct State {
     /// the table the draw statements of a draw program fill
     marks: Option<core_marks::Sink>,
     device: Option<DeviceFn>,
-    resident: Option<Arc<Resident>>,
+    resident: Option<Arc<dyn Resident>>,
     resident_on: bool,
     /// after a resident loop, the locals that may hold its device arrays (`resident_tail`)
     kept: Vec<i64>,
@@ -306,7 +307,7 @@ type Ex = Arc<dyn Fn(&mut State) -> Result<Value, Diagnostic> + Send + Sync>;
 /// an array's length; a placeholder's is its capacity, which its block does not say
 fn held_length(st: &State, value: &Value) -> Result<i64, Diagnostic> {
     if let Some(r) = &st.resident {
-        if let Some(n) = (r.capacity)(value) { return Ok(n); }
+        if let Some(n) = r.capacity(value) { return Ok(n); }
     }
     Ok(v::array_length(value)? as i64)
 }
@@ -987,10 +988,10 @@ pub fn resident_tail(program: &Program, s: &Statement, mark: &dyn Fn(i64) -> boo
 
 /// A kept tail goes back to the host when a region over it cannot run on the device, or another
 /// resident loop needs the slots.
-fn release_kept(r: &Resident, st: &mut State) -> Result<(), Diagnostic> {
+fn release_kept(r: &dyn Resident, st: &mut State) -> Result<(), Diagnostic> {
     let kept = std::mem::take(&mut st.kept);
     for n in kept {
-        let value = (r.finish)(&st.values[ix(n)])?;
+        let value = r.finish(&st.values[ix(n)])?;
         st.values[ix(n)] = value;
     }
     Ok(())
@@ -999,10 +1000,10 @@ fn release_kept(r: &Resident, st: &mut State) -> Result<(), Diagnostic> {
 /// A resident loop's run: the arrays later statements read come back once, as it ends, or with a
 /// `tail` stay for the rest of the draw. An overflow discards its work, and it runs again from its
 /// start, sized by its bounds from the cut region on.
-fn resident_run(r: &Resident, st: &mut State, run: &Run, live: &[i64], tail: &Option<Vec<i64>>) -> Result<(), Diagnostic> {
+fn resident_run(r: &dyn Resident, st: &mut State, run: &Run, live: &[i64], tail: &Option<Vec<i64>>) -> Result<(), Diagnostic> {
     if !st.kept.is_empty() {
         release_kept(r, st)?;
-        (r.close)();
+        r.close();
     }
     let start = st.values.clone();
     loop {
@@ -1011,12 +1012,12 @@ fn resident_run(r: &Resident, st: &mut State, run: &Run, live: &[i64], tail: &Op
             run(st)?;
             match tail {
                 Some(kept) => {
-                    (r.settle)()?;
+                    r.settle()?;
                     st.kept = kept.clone();
                 }
                 None => {
                     for n in live {
-                        let value = (r.finish)(&st.values[ix(*n)])?;
+                        let value = r.finish(&st.values[ix(*n)])?;
                         st.values[ix(*n)] = value;
                     }
                 }
@@ -1027,17 +1028,17 @@ fn resident_run(r: &Resident, st: &mut State, run: &Run, live: &[i64], tail: &Op
             Ok(()) => {
                 st.resident_on = false;
                 // kept arrays stay until the draw ends (`draw` closes)
-                if tail.is_none() { (r.close)(); }
+                if tail.is_none() { r.close(); }
                 return Ok(());
             }
             Err(d) if is_resident_overflow(&d) => {
                 st.resident_on = false;
-                (r.close)();
+                r.close();
                 for (i, value) in start.iter().enumerate() { st.values[i] = value.clone(); }
             }
             Err(d) => {
                 st.resident_on = false;
-                (r.close)();
+                r.close();
                 return Err(d);
             }
         }
@@ -1186,26 +1187,26 @@ fn prepare_invoke(packed_region: Packed, args: Vec<i64>, result: i64, on_device:
         let held = !st.kept.is_empty() && args.iter().any(|n| st.kept.contains(n));
         let argv = |st: &State| -> Vec<Value> { args.iter().map(|n| st.values[ix(*n)].clone()).collect() };
         let resident = match st.resident.clone() {
-            Some(r) if st.resident_on => match (r.invoke)(&region, &argv(st), &st.values, &st.live)? {
+            Some(r) if st.resident_on => match r.invoke(&region, &argv(st), &st.values, &st.live)? {
                 Some(value) => {
                     st.values[ix(result)] = value;
                     true
                 }
                 None => {
                     for n in &args {
-                        let value = host_value(&r, &st.values[ix(*n)])?;
+                        let value = host_value(&*r, &st.values[ix(*n)])?;
                         st.values[ix(*n)] = value;
                     }
                     false
                 }
             },
-            Some(r) if held && !on_device => match (r.invoke)(&region, &argv(st), &st.values, &st.live)? {
+            Some(r) if held && !on_device => match r.invoke(&region, &argv(st), &st.values, &st.live)? {
                 Some(value) => {
                     st.values[ix(result)] = value;
                     true
                 }
                 None => {
-                    release_kept(&r, st)?;
+                    release_kept(&*r, st)?;
                     false
                 }
             },
@@ -1233,7 +1234,7 @@ fn prepare_invoke(packed_region: Packed, args: Vec<i64>, result: i64, on_device:
         if device_done { return Ok(()); }
         if let Some(r) = st.resident.clone() {
             if held && !st.kept.is_empty() {
-                release_kept(&r, st)?;
+                release_kept(&*r, st)?;
                 bound_region = bind(st, None, &unbound)?;
             }
         }
@@ -1268,7 +1269,7 @@ fn prepare_first(group: Arc<core_draw::Group>, tys: Vec<Ty>, first: Run) -> Run 
     Arc::new(move |st: &mut State| {
         if let (true, Some(r)) = (st.resident_on, st.resident.clone()) {
             let args: Vec<Value> = group.args.iter().map(|a| st.values[ix(*a)].clone()).collect();
-            if let Some(Value::List(made)) = (r.invoke_all)(&group.region, &tys, &args, &st.values, &st.live)? {
+            if let Some(Value::List(made)) = r.invoke_all(&group.region, &tys, &args, &st.values, &st.live)? {
                 if made.len() == group.results.len() {
                     let regions = group.members.iter().map(|m| ix(*m) + 1).max().unwrap_or(0);
                     if st.fused_done.len() < regions { st.fused_done.resize(regions, false); }
@@ -1306,7 +1307,7 @@ fn prepare_group(group: Arc<core_draw::Group>, tys: Vec<Ty>, fallback: Vec<(Opti
         // a resident fold runs the siblings as one dispatch, each result its own placeholder
         if let (true, Some(r)) = (st.resident_on, st.resident.clone()) {
             let args: Vec<Value> = group.args.iter().map(|a| st.values[ix(*a)].clone()).collect();
-            return match (r.invoke_all)(&group.region, &tys, &args, &st.values, &st.live)? {
+            return match r.invoke_all(&group.region, &tys, &args, &st.values, &st.live)? {
                 Some(Value::List(made)) if made.len() == results.len() => {
                     for (result, value) in results.iter().zip(made.iter()) {
                         if !st.builders.is_empty() { st.builders[ix(*result)] = None; }
@@ -1506,7 +1507,7 @@ impl Ctx {
                             let mut given: Vec<(String, Value)> = Vec::new();
                             for (n, i) in &args {
                                 let value = st.values[ix(*i)].clone();
-                                given.push((n.clone(), match &st.resident { Some(r) => host_value(r, &value)?, None => value }));
+                                given.push((n.clone(), match &st.resident { Some(r) => host_value(&**r, &value)?, None => value }));
                             }
                             if name == "$core/complete" && ty == flow_syntax::ty::geometry() && given.len() == 1 && given[0].0 == "value" && given[0].1 == Value::No_geo {
                                 Ok(Value::No_geo)
@@ -1528,7 +1529,7 @@ impl Ctx {
                         if v::ty_of(&value) != ty { return Err(v::fail("E_ARRAY_TYPE", "Constant array descriptor has the wrong declared type.")); }
                         if let Some(resident) = &st.resident {
                             if st.resident_on {
-                                if let Some(made) = fill_constant(resident, &value)? { return Ok(made); }
+                                if let Some(made) = fill_constant(&**resident, &value)? { return Ok(made); }
                             }
                         }
                         Ok(value)
@@ -1574,10 +1575,10 @@ impl Ctx {
                             if let Some(name) = constant {
                                 let given: Vec<(String, Value)> = named_args.iter().map(|(name, n)| (name.clone(), st.values[ix(*n)].clone())).collect();
                                 let descriptor = op::constant_array_descriptor(name, &given)?;
-                                if let Some(made) = fill_constant(&r, &descriptor)? { return Ok(made); }
+                                if let Some(made) = fill_constant(&*r, &descriptor)? { return Ok(made); }
                             }
                             for n in &args {
-                                let value = host_value(&r, &st.values[ix(*n)])?;
+                                let value = host_value(&*r, &st.values[ix(*n)])?;
                                 st.values[ix(*n)] = value;
                             }
                         }
@@ -1686,7 +1687,7 @@ impl Ctx {
                         let tail = self.tails.iter().find(|(a, _)| *a == addr(s)).map(|(_, k)| k.clone());
                         let plain_run = run.clone();
                         Arc::new(move |st: &mut State| match st.resident.clone() {
-                            Some(r) if st.marks.is_some() => resident_run(&r, st, &plain_run, &live, &tail),
+                            Some(r) if st.marks.is_some() => resident_run(&*r, st, &plain_run, &live, &tail),
                             _ => plain_run(st),
                         })
                     }
@@ -1769,14 +1770,14 @@ impl Ctx {
                     let x = match st.resident.clone() {
                         Some(r) if st.resident_on => {
                             let made = match &op {
-                                Primitive::Array_compact => (r.compact)(&st.values[ix(arg)])?,
-                                Primitive::Coerce(ty) => (r.coerce)(ty, &st.values[ix(arg)])?,
+                                Primitive::Array_compact => r.compact(&st.values[ix(arg)])?,
+                                Primitive::Coerce(ty) => r.coerce(ty, &st.values[ix(arg)])?,
                                 _ => None,
                             };
                             match made {
                                 Some(x) => x,
                                 None => {
-                                    let done = (r.finish)(&st.values[ix(arg)])?;
+                                    let done = r.finish(&st.values[ix(arg)])?;
                                     st.values[ix(arg)] = done;
                                     value(st)?
                                 }
@@ -1795,7 +1796,7 @@ impl Ctx {
                 let n = ix(*n);
                 Arc::new(move |st| {
                     let x = match st.resident.clone() {
-                        Some(r) if st.resident_on => match (r.concat)(&st.values[ix(a)], &st.values[ix(b)])? {
+                        Some(r) if st.resident_on => match r.concat(&st.values[ix(a)], &st.values[ix(b)])? {
                             Some(x) => x,
                             None => value(st)?,
                         },
@@ -1823,14 +1824,14 @@ impl Ctx {
                             None
                         } else {
                             match &st.values[ix(count)] {
-                                Value::Int(length) => (r.range)(&program.locals[ix(n)], &st.values[ix(source)], div, *length)?,
+                                Value::Int(length) => r.range(&program.locals[ix(n)], &st.values[ix(source)], div, *length)?,
                                 _ => None,
                             }
                         };
                         match made {
                             Some(x) => st.values[ix(n)] = x,
                             None => {
-                                if !st.kept.is_empty() { release_kept(&r, st)?; }
+                                if !st.kept.is_empty() { release_kept(&*r, st)?; }
                                 st.values[ix(count)] = Value::Int(held_length(st, &st.values[ix(source)])? / div);
                                 let x = value(st)?;
                                 st.values[ix(n)] = x;
@@ -1849,7 +1850,7 @@ impl Ctx {
                     if let Some(r) = st.resident.clone() {
                         if st.resident_on && matches!(&program.locals[ix(n)], Ty::Array(t) if matches!(**t, Ty::Int | Ty::Float)) {
                             let length = op::array_count(Some(op::MAX_WOSIZE), "array/range", &st.values[ix(count)])? as i64;
-                            result = (r.range)(&program.locals[ix(n)], &Value::Int(length), 1, length)?;
+                            result = r.range(&program.locals[ix(n)], &Value::Int(length), 1, length)?;
                         }
                     }
                     let x = match result { Some(x) => x, None => value(st)? };
@@ -1868,7 +1869,7 @@ impl Ctx {
                         if st.resident_on {
                             let length = op::array_count(Some(op::MAX_WOSIZE), "array/int", &st.values[ix(count)])? as i64;
                             let initial = match initial { Some(i) => st.values[ix(i)].clone(), None => Value::Int(0) };
-                            made = (r.fill)(&program.locals[ix(n)], length, &initial)?;
+                            made = r.fill(&program.locals[ix(n)], length, &initial)?;
                         }
                     }
                     let x = match made { Some(x) => x, None => value(st)? };
@@ -1884,7 +1885,7 @@ impl Ctx {
                 Arc::new(move |st| {
                     let mut made = None;
                     if let Some(r) = st.resident.clone() {
-                        if st.resident_on { made = (r.count)(&st.values[ix(arg)])?; }
+                        if st.resident_on { made = r.count(&st.values[ix(arg)])?; }
                     }
                     let x = match made { Some(count) => Value::Int(count), None => value(st)? };
                     st.values[n] = x;
@@ -2035,7 +2036,7 @@ impl Ctx {
                 let (sequence, index, item, limit) = (ix(*sequence), ix(*index), ix(*item), *limit);
                 Arc::new(move |st| {
                     let source = match st.resident.clone() {
-                        Some(r) if st.resident_on => host_value(&r, &st.values[sequence])?,
+                        Some(r) if st.resident_on => host_value(&*r, &st.values[sequence])?,
                         _ => st.values[sequence].clone(),
                     };
                     let count = match &source {
@@ -2133,12 +2134,12 @@ impl Ctx {
                                 }
                             };
                             let un = if fits {
-                                (r.unfold)(region, &argv, length, &st.values[ix(u.head)], &st.values, &st.live)?
+                                r.unfold(region, &argv, length, &st.values[ix(u.head)], &st.values, &st.live)?
                             } else {
                                 None
                             };
                             let joined = match un {
-                                Some(history) => (r.concat)(&st.values[ix(u.points)], &history)?,
+                                Some(history) => r.concat(&st.values[ix(u.points)], &history)?,
                                 None => None,
                             };
                             match joined {
@@ -2204,7 +2205,7 @@ impl Ctx {
                         // a seed the device computed stays there (Flow.Eval.Device)
                         let r = s.resident.clone();
                         match r {
-                            Some(r) if s.resident_on => match kept_value(&r, &s.values[initial]) {
+                            Some(r) if s.resident_on => match kept_value(&*r, &s.values[initial]) {
                                 Ok(x) => x,
                                 Err(d) => {
                                     *failed.borrow_mut() = Some(d);
@@ -2242,7 +2243,7 @@ impl Ctx {
                     // a step the device computed stays there, its host copy read only when one is asked for
                     if let Some(r) = st.resident.clone() {
                         if st.resident_on {
-                            let kept = kept_value(&r, &st.values[value])?;
+                            let kept = kept_value(&*r, &st.values[value])?;
                             st.values[value] = kept;
                         }
                     }
@@ -2483,7 +2484,7 @@ pub struct Options {
     pub on_walk: Option<Arc<dyn Fn()>>,
     pub force: Option<ForceFn>,
     pub resolve: Option<ResolveFn>,
-    pub resident: Option<Arc<Resident>>,
+    pub resident: Option<Arc<dyn Resident>>,
     pub host_source: Option<HostSourceFn>,
 }
 impl Default for Options {
@@ -2539,7 +2540,7 @@ fn general_values(prepared: &Prepared, live: &Frame, o: &Options) -> Result<Valu
     let mut st = new_state(prepared, values, arena, live, o);
     let result = (|| -> Result<Value, Diagnostic> {
         (prepared.body)(&mut st)?;
-        if let Some(r) = &o.resident { (r.settle)()?; }
+        if let Some(r) = &o.resident { r.settle()?; }
         if program.results.len() != 1 { return Err(v::fail("E_CORE", "Expected one core result.")); }
         Ok(st.values[ix(program.results[0])].clone())
     })();
@@ -2559,7 +2560,7 @@ pub fn execute(prepared: &Prepared, live: &Frame, o: &Options) -> Result<Value, 
         _ => Box::new(|| {}),
     };
     let close = || {
-        if let Some(r) = &o.resident { (r.close)(); }
+        if let Some(r) = &o.resident { r.close(); }
     };
     let result = loop {
         match general(prepared, live, o) {
@@ -2603,7 +2604,7 @@ pub struct DrawOptions {
     pub force: Option<ForceFn>,
     pub resolve: Option<ResolveFn>,
     pub device: Option<DeviceFn>,
-    pub resident: Option<Arc<Resident>>,
+    pub resident: Option<Arc<dyn Resident>>,
     pub image: Option<ImageFn>,
 }
 impl Default for DrawOptions {
@@ -2626,7 +2627,7 @@ pub fn draw(prepared: &Prepared, live: &Frame, size: (i64, i64), buffers: &Buffe
     st.resident_on = false;
     // a resident loop's kept arrays live until the draw ends (closing an idle one is a no-op)
     let ran = (prepared.body)(&mut st);
-    if let Some(r) = &o.resident { (r.close)(); }
+    if let Some(r) = &o.resident { r.close(); }
     ran?;
     if let Some(mut a) = st.arena.take() {
         arena_finish(&mut a);

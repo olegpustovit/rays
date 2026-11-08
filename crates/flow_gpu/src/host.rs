@@ -2,10 +2,11 @@
 //! most 64 runners and 64 pipelines, the resident fold's buffers (`resident_scope`), the display
 //! storage pool and the topology validation status.
 //!
-//! Rust shape notes. OGPU handles are `Rc`, so the host lives on its creating thread. The closures
-//! a `Gpu::Backend`/`Resident` must be `Send + Sync`: they capture only an id (or an `Arc<Guard>`)
-//! and find the host (or fold scope) through a thread-local registry. Called from another thread
-//! they answer the OCaml "called from another domain" error (or decline, for the resident fold).
+//! Rust shape notes. OGPU handles are `Rc`, so the host lives on its creating thread. A
+//! `Gpu::Backend`/`Kernel`/`core_exec::Resident` must be `Send + Sync`: each holds only an id (or an
+//! `Arc<Guard>`) and finds the host (or fold scope) through a thread-local registry. Called from
+//! another thread they answer the OCaml "called from another domain" error (or decline, for the
+//! resident fold).
 use crate::kernels;
 use crate::pipelines::{self, is_vulkan};
 use crate::run::{self, gpu as gpu_r, Options, Uint32Holder};
@@ -187,7 +188,7 @@ struct Site {
 
 pub(crate) struct Data {
     id: i64,
-    gpu: renderer::renderer::gpu,
+    gpu: renderer::renderer::Gpu,
     pipelines: pipelines::T,
     runners: RefCell<List<String, Rc<Runner>>>,
     created: Cell<i64>,
@@ -274,7 +275,7 @@ fn e_gpu(message: &str) -> Diagnostic {
     value::fail("E_GPU", message)
 }
 
-pub fn create(_clock: &dyn Fn() -> f64, gpu_: &renderer::renderer::gpu) -> T {
+pub fn create(_clock: &dyn Fn() -> f64, gpu_: &renderer::renderer::Gpu) -> T {
     let created = Cell::new(0);
     let retired = Rc::new(RefCell::new(zero()));
     let discarding = Rc::new(Cell::new(false));
@@ -466,88 +467,79 @@ fn gpu_value(runner: &Runner, output: &run::Output) -> G::Value {
     }
 }
 
-fn standard_backend(t: &T) -> G::Backend {
-    let id = t.0.id;
-    G::Backend {
-        residency: Box::new(|_fast| None),
-        cost: Box::new(|_inputs, _fast, _packed, _count| None),
-        prepare: Box::new(move |fast, packed| {
-            let Some(t) = host_of(id).filter(live) else {
-                return error("GPU host is closed or called from another domain.");
-            };
-            // a range source (`index_sources`) is the host's index buffer, never uploaded
-            let index = phost::index_sources(packed);
-            let msl = emit::kernel(&emit::Options { spirv: is_vulkan(), fast, ..emit::Options::default() }, packed)?;
-            pipelines::get(&t.0.pipelines, &msl)?;
-            // Each prepared producer owns an output generation. Sharing only its shader source
-            // would overwrite an earlier drawing's borrowed output.
-            let key = NEXT.fetch_add(1, Ordering::SeqCst).to_string();
-            let make_runner = {
-                let (key, msl, packed) = (key.clone(), msl.clone(), packed.clone());
-                move |t: &T, inputs: Option<&phost::Inputs>| -> Result<Rc<Runner>, Diagnostic> {
-                    let uint32_inputs: Vec<i64> = inputs.into_iter().flat_map(|i| i.arrays.iter().enumerate()).filter_map(|(i, a)| run::uint32_input(a).then_some(i as i64)).collect();
-                    let uint32_tables: Vec<i64> = inputs.into_iter().flat_map(|i| i.tables.iter().enumerate()).filter_map(|(i, a)| run::uint32_input(a).then_some(i as i64)).collect();
-                    let typed = !uint32_inputs.is_empty() || !uint32_tables.is_empty();
-                    let key = if typed { format!("{key}:{uint32_inputs:?}:{uint32_tables:?}") } else { key.clone() };
-                    if let Some(r) = t.0.runners.borrow_mut().find(&|k, _| *k == key) {
-                        return Ok(r.clone());
-                    }
-                    let typed_msl;
-                    let msl = if typed {
-                        typed_msl = emit::kernel(&emit::Options { spirv: is_vulkan(), fast, uint32_inputs, uint32_tables, ..emit::Options::default() }, &packed)?;
-                        &typed_msl
-                    } else { &msl };
-                    let runner = Rc::new(Runner {
-                        identity: NEXT.fetch_add(1, Ordering::SeqCst),
-                        run: run::create(Some(&t.0.shared), &t.0.gpu, &t.0.pipelines, msl),
-                        stamp: Cell::new(0),
-                        output: RefCell::new(None),
-                    });
-                    t.0.created.set(t.0.created.get() + 1);
-                    t.0.runners.borrow_mut().add(key.clone(), runner.clone());
-                    Ok(runner)
-                }
-            };
-            let _ = make_runner(&t, None)?;
-            let (m1, m2) = (make_runner.clone(), make_runner);
-            Ok(Arc::new(G::Kernel {
-                run: Box::new(move |inputs| {
-                    let Some(t) = host_of(id).filter(live) else {
-                        return error("GPU host is closed or called from another domain.");
-                    };
-                    let runner = m1(&t, Some(inputs))?;
-                    *runner.output.borrow_mut() = None;
-                    if fast {
-                        admit(&t)?;
-                    }
-                    let t2 = t.clone();
-                    let index = &index; let count = inputs.count; let bound = move |i: i64| if index[i as usize] { iota(&t2, count) } else { None };
-                    let output = run::dispatch(&runner.run, &Options { wait: Some(!fast), ..Options::default() }, Some(&bound), None, inputs)?;
-                    if fast {
-                        record(&t, run::epoch(&output));
-                    }
-                    runner.stamp.set(runner.stamp.get() + 1);
-                    let v = gpu_value(&runner, &output);
-                    *runner.output.borrow_mut() = Some(output);
-                    Ok(v)
-                }),
-                readback: Box::new(move |value| {
-                    let Some(t) = host_of(id) else { return error("GPU output was closed or superseded.") };
-                    match output(&t, value)? {
-                        None => error("GPU output was closed or superseded."),
-                        Some(output) => run::readback(&output, None),
-                    }
-                }),
-                planes: Box::new(move |value| {
-                    let Some(t) = host_of(id) else { return error("GPU output was closed or superseded.") };
-                    let _ = &m2;
-                    match current(&t, value) {
-                        None => error("GPU output was closed or superseded."),
-                        Some((_, output)) => run::keep(&output, None),
-                    }
-                }),
-            }))
-        }),
+/// A prepared kernel. Its runners are the host's, found by `id`.
+struct HostKernel {
+    id: i64,
+    fast: bool,
+    index: Vec<bool>,
+    key: String,
+    msl: Kernel,
+    packed: Packed,
+}
+
+impl HostKernel {
+    fn runner(&self, t: &T, inputs: Option<&phost::Inputs>) -> Result<Rc<Runner>, Diagnostic> {
+        let fast = self.fast;
+        let uint32_inputs: Vec<i64> = inputs.into_iter().flat_map(|i| i.arrays.iter().enumerate()).filter_map(|(i, a)| run::uint32_input(a).then_some(i as i64)).collect();
+        let uint32_tables: Vec<i64> = inputs.into_iter().flat_map(|i| i.tables.iter().enumerate()).filter_map(|(i, a)| run::uint32_input(a).then_some(i as i64)).collect();
+        let typed = !uint32_inputs.is_empty() || !uint32_tables.is_empty();
+        let key = if typed { format!("{}:{uint32_inputs:?}:{uint32_tables:?}", self.key) } else { self.key.clone() };
+        if let Some(r) = t.0.runners.borrow_mut().find(&|k, _| *k == key) {
+            return Ok(r.clone());
+        }
+        let typed_msl;
+        let msl = if typed {
+            typed_msl = emit::kernel(&emit::Options { spirv: is_vulkan(), fast, uint32_inputs, uint32_tables, ..emit::Options::default() }, &self.packed)?;
+            &typed_msl
+        } else { &self.msl };
+        let runner = Rc::new(Runner {
+            identity: NEXT.fetch_add(1, Ordering::SeqCst),
+            run: run::create(Some(&t.0.shared), &t.0.gpu, &t.0.pipelines, msl),
+            stamp: Cell::new(0),
+            output: RefCell::new(None),
+        });
+        t.0.created.set(t.0.created.get() + 1);
+        t.0.runners.borrow_mut().add(key.clone(), runner.clone());
+        Ok(runner)
+    }
+}
+
+impl G::Kernel for HostKernel {
+    fn run(&self, inputs: &phost::Inputs) -> Result<G::Value, Diagnostic> {
+        let Some(t) = host_of(self.id).filter(live) else {
+            return error("GPU host is closed or called from another domain.");
+        };
+        let runner = self.runner(&t, Some(inputs))?;
+        *runner.output.borrow_mut() = None;
+        if self.fast {
+            admit(&t)?;
+        }
+        let t2 = t.clone();
+        let index = &self.index; let count = inputs.count; let bound = move |i: i64| if index[i as usize] { iota(&t2, count) } else { None };
+        let output = run::dispatch(&runner.run, &Options { wait: Some(!self.fast), ..Options::default() }, Some(&bound), None, inputs)?;
+        if self.fast {
+            record(&t, run::epoch(&output));
+        }
+        runner.stamp.set(runner.stamp.get() + 1);
+        let v = gpu_value(&runner, &output);
+        *runner.output.borrow_mut() = Some(output);
+        Ok(v)
+    }
+
+    fn readback(&self, value: &G::Value) -> Result<Value, Diagnostic> {
+        let Some(t) = host_of(self.id) else { return error("GPU output was closed or superseded.") };
+        match output(&t, value)? {
+            None => error("GPU output was closed or superseded."),
+            Some(output) => run::readback(&output, None),
+        }
+    }
+
+    fn planes(&self, value: &G::Value) -> Result<G::Planes, Diagnostic> {
+        let Some(t) = host_of(self.id) else { return error("GPU output was closed or superseded.") };
+        match current(&t, value) {
+            None => error("GPU output was closed or superseded."),
+            Some((_, output)) => run::keep(&output, None),
+        }
     }
 }
 
@@ -584,15 +576,6 @@ fn above(n: i64) -> i64 {
 
 /// a site keeps its first 64 ordinals' slots; a longer fold's later levels own theirs for one run
 const SITE_SLOTS: usize = 64;
-
-pub struct Residency {
-    pub executor: Arc<core_exec::Resident>,
-    pub retain_uint32: Box<dyn Fn(&Value) -> Option<Uint32Holder>>,
-    pub retain_float: Box<dyn Fn(&Value) -> Option<G::Planes>>,
-    pub pack_planes: Box<dyn Fn(&[Value; 3]) -> Result<Option<Value>, Diagnostic>>,
-    pub uint32_stream: Box<dyn Fn(&Value) -> Option<(Buffer, i64)>>,
-    pub ready: Box<dyn Fn() -> bool>,
-}
 
 /// An outgrown index buffer goes when nothing can read it. A scope may still encode with one it
 /// outgrew, so it is named at the next scope, by the newest dispatch then.
@@ -1742,7 +1725,7 @@ impl Scope {
     }
 
     fn host_of_planes(&self, holder: &SharedPlanes) -> Result<Value, Diagnostic> {
-        let planes = (holder.materialise)()?;
+        let planes = holder.ops.materialise()?;
         let (count, width) = (holder.count as usize, holder.width as usize);
         let data: Vec<f64> = (0..count * width).map(|i| planes[i % width][i / width]).collect();
         let a = Arc::new(data);
@@ -2207,11 +2190,8 @@ impl Scope {
                 self.s.borrow_mut().on_close.insert(0, Box::new(move || unpin()));
             }
         }
-        let holder = Arc::new(SharedPlanes {
-            count: holder.count, width: holder.width, resident: holder.resident,
-            materialise: Arc::from(holder.materialise), settle: Arc::from(holder.settle),
-            release: Arc::from(holder.release), bounds: Arc::from(holder.bounds),
-        });
+        let G::Planes { count, width, resident, ops } = holder;
+        let holder = Arc::new(SharedPlanes { count, width, resident, ops: Arc::from(ops) });
         {
             let mut s = self.s.borrow_mut();
             let mut fl: Vec<(usize, Arc<SharedPlanes>)> = aliases.iter().map(|a| (a.key, holder.clone())).collect();
@@ -2248,7 +2228,7 @@ impl Scope {
                 // creating thread (a CPU frame on a worker reads the planes the holder kept)
                 let _ = (id, slot_key);
                 // ponytail: `Device::add`'s reader cannot fail; the holder lives as long as the placeholder, so an Err is a broken invariant. Upgrade: a fallible reader in flow_eval.
-                let planes = (h.materialise)().expect("a state's device array is read while its holder lives");
+                let planes = h.materialise().expect("a state's device array is read while its holder lives");
                 let (c, w) = (count as usize, width as usize);
                 let xs: Vec<f64> = (0..c * w).map(|i| planes[i % w][i / w]).collect();
                 let a = Arc::new(xs);
@@ -2273,44 +2253,40 @@ fn run_same(a: &run::T, b_: &run::T) -> bool {
     run::same(a, b_)
 }
 
-/// Share callback ownership independently: retaining only release must not retain a reader.
+/// A retained float array, shared by every alias. A view holds `ops` only, never `resident`: the
+/// registry's reader (which holds a view) must not own the placeholder it is keyed by.
 struct SharedPlanes {
     count: i64,
     width: i64,
     resident: Option<Value>,
-    materialise: Arc<dyn Fn() -> Result<Vec<Vec<f64>>, Diagnostic> + Send + Sync>,
-    settle: Arc<dyn Fn() -> Result<(), Diagnostic> + Send + Sync>,
-    release: Arc<dyn Fn(bool) + Send + Sync>,
-    bounds: Arc<dyn Fn() -> Option<Vec<f64>> + Send + Sync>,
+    ops: Arc<dyn G::PlanesOps>,
 }
 
-fn share_planes(holder: &Arc<SharedPlanes>) -> G::Planes {
-    let (a, s, r, bd) = (holder.materialise.clone(), holder.settle.clone(), holder.release.clone(), holder.bounds.clone());
-    G::Planes {
-        count: holder.count,
-        width: holder.width,
-        materialise: Box::new(move || a()),
-        resident: holder.resident.clone(),
-        settle: Box::new(move || s()),
-        release: Box::new(move |held| r(held)),
-        bounds: Box::new(move || bd()),
-    }
+struct SharedOps(Arc<dyn G::PlanesOps>);
+
+impl G::PlanesOps for SharedOps {
+    fn materialise(&self) -> Result<Vec<Vec<f64>>, Diagnostic> { self.0.materialise() }
+    fn settle(&self) -> Result<(), Diagnostic> { self.0.settle() }
+    fn release(&self, held: bool) { self.0.release(held) }
+    fn bounds(&self) -> Option<Vec<f64>> { self.0.bounds() }
+}
+
+fn share_planes(holder: &SharedPlanes) -> G::Planes {
+    G::Planes { count: holder.count, width: holder.width, resident: holder.resident.clone(), ops: Box::new(SharedOps(holder.ops.clone())) }
 }
 
 #[cfg(test)]
 #[test]
-fn shared_release_does_not_retain_a_reader() {
-    let reader = Arc::new(());
-    let weak = Arc::downgrade(&reader);
-    let holder = Arc::new(SharedPlanes {
-        count: 0, width: 1, resident: None,
-        materialise: Arc::new(move || { let _keep = &reader; Ok(Vec::new()) }),
-        settle: Arc::new(|| Ok(())), release: Arc::new(|_| {}), bounds: Arc::new(|| None),
-    });
-    let G::Planes { release, .. } = share_planes(&holder);
+fn a_shared_view_does_not_own_the_placeholder() {
+    let placeholder = Arc::new(vec![0.0]);
+    let weak = Arc::downgrade(&placeholder);
+    let holder = SharedPlanes { count: 1, width: 1, resident: Some(Value::Float_array(placeholder)), ops: Arc::new(G::ReadPlanes(Arc::new(vec![vec![0.0]]))) };
+    let mut view = share_planes(&holder);
+    // what `keep` does before it registers a reader holding the view
+    view.resident.take();
     drop(holder);
     assert!(weak.upgrade().is_none());
-    release(false);
+    assert_eq!(view.materialise().unwrap(), vec![vec![0.0]]);
 }
 
 fn scope_by(id: i64) -> Option<Rc<Scope>> {
@@ -2359,89 +2335,115 @@ fn new_scope(t: &T, uint32: bool) -> (Rc<Scope>, Arc<Guard>) {
 /// and counts on the host between drawings (64 calls a site, 32 sites) and size its arrays by
 /// them; a count that outgrew one reruns the loop exactly. `uint32` uses exact unsigned words for
 /// integer arrays and captures, with device-generated integer ranges.
-pub fn resident_scope(uint32: bool, fast: bool, t: &T) -> Residency {
-    let (scope, g) = new_scope(t, uint32);
-    let _ = (fast, &scope);
-    macro_rules! with {
-        ($g:expr, $default:expr, |$s:ident| $body:expr) => {
-            match scope_of(&$g) {
-                Some($s) => $body,
-                None => $default,
-            }
-        };
-    }
-    let (g1, g2, g3, g4, g5, g6, g7, g8, g9, g10, g11, g12, g13) = (g.clone(), g.clone(), g.clone(), g.clone(), g.clone(), g.clone(), g.clone(), g.clone(), g.clone(), g.clone(), g.clone(), g.clone(), g.clone());
-    let executor = core_exec::Resident {
-        fill: Box::new(move |ty, length, v| with!(g1, Ok(None), |s| s.fill(ty, length, v))),
-        invoke: Box::new({
-            let g = g2.clone();
-            move |packed, args, locals, live_| with!(g, Ok(None), |s| s.invoke(0, None, packed, args, locals, live_))
-        }),
-        invoke_all: Box::new({
-            let g = g2.clone();
-            move |packed, tys, args, locals, live_| with!(g, Ok(None), |s| Ok(s.invoke_all(0, None, packed, tys, args, locals, live_)?.map(|vs| Value::List(Arc::new(vs)))))
-        }),
-        unfold: Box::new({
-            let g = g3.clone();
-            move |packed, args, steps, source, locals, live_| with!(g, Ok(None), |s| s.invoke(steps, Some(source), packed, args, locals, live_))
-        }),
-        compact: Box::new(move |mask| with!(g4, Ok(None), |s| s.compact(mask))),
-        coerce: Box::new(move |ty, v| with!(g5, Ok(None), |s| s.coerce(ty, v))),
-        concat: Box::new(move |a, b_| with!(g6, Ok(None), |s| s.concat(a, b_))),
-        finish: Box::new({
-            let g = g7.clone();
-            move |v| with!(g, Ok(v.clone()), |s| s.finish(v))
-        }),
-        keep: Box::new(move |v| with!(g8, Ok(None), |s| s.keep(v))),
-        count: Box::new(move |v| with!(g9, Ok(None), |s| s.count_value(v))),
-        capacity: Box::new(move |v| with!(g10, None, |s| s.capacity(v))),
-        close: Box::new({
-            let g = g11.clone();
-            move || {
-                if let Some(s) = scope_of(&g) {
-                    s.close();
-                    // the integers handed out are the host's; the scope is spent
-                    s.s.borrow_mut().integers.clear();
-                }
-            }
-        }),
-        settle: Box::new(move || {
-            with!(g12, Ok(()), |s| {
-                s.settle_inner()?;
-                s.s.borrow_mut().post = true;
-                s.t.0.showing.set(Some(s.id));
-                Ok(())
-            })
-        }),
-        range: Box::new(move |ty, v, div, length| with!(g13, Ok(None), |s| s.range(ty, v, div, length))),
-    };
-    let (ga, gb, gc, gd, ge) = (g.clone(), g.clone(), g.clone(), g.clone(), g.clone());
-    Residency {
-        executor: Arc::new(executor),
-        retain_uint32: Box::new(move |v| scope_of(&ga).and_then(|s| s.retain_uint32(v))),
-        retain_float: Box::new(move |v| scope_of(&gb).and_then(|s| s.retain_float(v))),
-        pack_planes: Box::new(move |v| scope_of(&ge).map_or(Ok(None), |s| s.pack_planes(v))),
-        uint32_stream: Box::new(move |v| {
-            let s = scope_of(&gc)?;
-            let p = s.find(v).filter(|p| p.uint32)?;
-            s.settle_inner().ok()?;
-            let c = s.count_of(&p).ok()?;
-            Some((p.buffer.0.clone(), c))
-        }),
-        ready: Box::new(move || scope_of(&gd).is_none_or(|s| s.ready())),
-    }
-    .keep_alive(g)
+pub fn resident_scope(uint32: bool, _fast: bool, t: &T) -> HostResidency {
+    let (_, guard) = new_scope(t, uint32);
+    HostResidency { executor: Arc::new(HostResident(guard.clone())), guard, id: t.0.id, t: t.clone() }
 }
 
-impl Residency {
-    /// The scope lives as long as the executor's closures (each holds the guard); this keeps the
-    /// guard of a residency that is dropped early honest.
-    fn keep_alive(self, _g: Arc<Guard>) -> Residency {
-        self
+/// The resident fold's device: the scope, found by its guard, which the last holder dropping ends.
+struct HostResident(Arc<Guard>);
+
+impl core_exec::Resident for HostResident {
+    fn fill(&self, ty: &Ty, length: i64, v: &Value) -> Result<Option<Value>, Diagnostic> {
+        scope_of(&self.0).map_or(Ok(None), |s| s.fill(ty, length, v))
+    }
+    fn invoke(&self, packed: &Packed, args: &[Value], locals: &[Value], live_: &Frame) -> Result<Option<Value>, Diagnostic> {
+        scope_of(&self.0).map_or(Ok(None), |s| s.invoke(0, None, packed, args, locals, live_))
+    }
+    fn invoke_all(&self, packed: &Packed, tys: &[Ty], args: &[Value], locals: &[Value], live_: &Frame) -> Result<Option<Value>, Diagnostic> {
+        scope_of(&self.0).map_or(Ok(None), |s| Ok(s.invoke_all(0, None, packed, tys, args, locals, live_)?.map(|vs| Value::List(Arc::new(vs)))))
+    }
+    fn unfold(&self, packed: &Packed, args: &[Value], steps: i64, source: &Value, locals: &[Value], live_: &Frame) -> Result<Option<Value>, Diagnostic> {
+        scope_of(&self.0).map_or(Ok(None), |s| s.invoke(steps, Some(source), packed, args, locals, live_))
+    }
+    fn compact(&self, mask: &Value) -> Result<Option<Value>, Diagnostic> {
+        scope_of(&self.0).map_or(Ok(None), |s| s.compact(mask))
+    }
+    fn coerce(&self, ty: &Ty, v: &Value) -> Result<Option<Value>, Diagnostic> {
+        scope_of(&self.0).map_or(Ok(None), |s| s.coerce(ty, v))
+    }
+    fn concat(&self, a: &Value, b_: &Value) -> Result<Option<Value>, Diagnostic> {
+        scope_of(&self.0).map_or(Ok(None), |s| s.concat(a, b_))
+    }
+    fn finish(&self, v: &Value) -> Result<Value, Diagnostic> {
+        scope_of(&self.0).map_or(Ok(v.clone()), |s| s.finish(v))
+    }
+    fn keep(&self, v: &Value) -> Result<Option<Value>, Diagnostic> {
+        scope_of(&self.0).map_or(Ok(None), |s| s.keep(v))
+    }
+    fn count(&self, v: &Value) -> Result<Option<i64>, Diagnostic> {
+        scope_of(&self.0).map_or(Ok(None), |s| s.count_value(v))
+    }
+    fn capacity(&self, v: &Value) -> Option<i64> {
+        scope_of(&self.0).and_then(|s| s.capacity(v))
+    }
+    fn close(&self) {
+        if let Some(s) = scope_of(&self.0) {
+            s.close();
+            // the integers handed out are the host's; the scope is spent
+            s.s.borrow_mut().integers.clear();
+        }
+    }
+    fn settle(&self) -> Result<(), Diagnostic> {
+        scope_of(&self.0).map_or(Ok(()), |s| {
+            s.settle_inner()?;
+            s.s.borrow_mut().post = true;
+            s.t.0.showing.set(Some(s.id));
+            Ok(())
+        })
+    }
+    fn range(&self, ty: &Ty, v: &Value, div: i64, length: i64) -> Result<Option<Value>, Diagnostic> {
+        scope_of(&self.0).map_or(Ok(None), |s| s.range(ty, v, div, length))
     }
 }
 
-pub fn resident(uint32: bool, fast: bool, t: &T) -> Arc<core_exec::Resident> {
+/// A resident scope as a backend-neutral residency; it and its executor share the scope's guard.
+pub struct HostResidency {
+    executor: Arc<dyn core_exec::Resident>,
+    guard: Arc<Guard>,
+    id: i64,
+    t: T,
+}
+
+impl HostResidency {
+    /// A settled uint32 stream's buffer and count, borrowed from the scope.
+    pub fn uint32_stream(&self, v: &Value) -> Option<(Buffer, i64)> {
+        let s = scope_of(&self.guard)?;
+        let p = s.find(v).filter(|p| p.uint32)?;
+        s.settle_inner().ok()?;
+        let c = s.count_of(&p).ok()?;
+        Some((p.buffer.0.clone(), c))
+    }
+}
+
+impl G::Residency for HostResidency {
+    fn executor(&self) -> &Arc<dyn core_exec::Resident> { &self.executor }
+    fn retain_uint32(&self, v: &Value) -> Option<G::Integers> {
+        scope_of(&self.guard).and_then(|s| s.retain_uint32(v)).map(|holder| run::integers(&holder))
+    }
+    fn retain_float(&self, v: &Value) -> Option<G::Planes> {
+        scope_of(&self.guard).and_then(|s| s.retain_float(v))
+    }
+    fn pack_planes(&self, v: &[Value; 3]) -> Result<Option<Value>, Diagnostic> {
+        scope_of(&self.guard).map_or(Ok(None), |s| s.pack_planes(v))
+    }
+    fn incidence(&self) -> G::IncidenceBuilder {
+        let id = self.id;
+        Arc::new(move |points, streams| match host_of(id).filter(live) {
+            Some(t) => build_incidence(&t, points, streams),
+            None => error("GPU host is closed or called from another domain."),
+        })
+    }
+    fn validate_topology(&self, point_count: i64, vertices: &Value, offsets: &Value, kinds: &Value, max_polygon_size: i64) -> Option<Result<(), Diagnostic>> {
+        match (self.uint32_stream(vertices), self.uint32_stream(offsets), self.uint32_stream(kinds)) {
+            (Some(v), Some(o), Some(k)) => Some(validate_topology(&self.t, (&v.0, v.1), (&o.0, o.1), (&k.0, k.1), point_count, max_polygon_size)),
+            _ => None,
+        }
+    }
+    fn ready(&self) -> bool { scope_of(&self.guard).is_none_or(|s| s.ready()) }
+}
+
+pub fn resident(uint32: bool, fast: bool, t: &T) -> Arc<dyn core_exec::Resident> {
     resident_scope(uint32, fast, t).executor
 }
 
@@ -2772,42 +2774,39 @@ fn build_incidence(t: &T, points: i64, streams: [Arc<G::Integers>; 3]) -> Result
     })();
     scope.close();
     for (_, _, _, unpin) in pins { unpin(); }
-    if result.is_err() { for stream in &retained { (stream.release)(false); } }
+    if result.is_err() { for stream in &retained { stream.release(false); } }
     result.map(Some)
 }
 
-pub fn backend(t: &T) -> G::Backend {
-    let id = t.0.id;
-    let standard = standard_backend(t);
-    G::Backend {
-        residency: Box::new(move |fast| {
-            let t = host_of(id).filter(live)?;
-            if !fast {
-                return None;
-            }
-            let scope = Rc::new(resident_scope(true, fast, &t));
-            let (s1, s2, s3, s4, s5) = (scope.clone(), scope.clone(), scope.clone(), scope.clone(), scope.clone());
-            let t2 = t.clone();
-            Some(G::Residency {
-                executor: scope.executor.clone(),
-                retain_uint32: Box::new(move |v| (s1.retain_uint32)(v).map(|holder| run::integers(&holder))),
-                retain_float: Box::new(move |v| (s2.retain_float)(v)),
-                pack_planes: Box::new(move |v| (s5.pack_planes)(v)),
-                incidence: Arc::new(move |points, streams| match host_of(id).filter(live) {
-                    Some(t) => build_incidence(&t, points, streams),
-                    None => error("GPU host is closed or called from another domain."),
-                }),
-                validate_topology: Box::new(move |point_count, vertices, offsets, kinds, max_polygon_size| {
-                    match ((s3.uint32_stream)(vertices), (s3.uint32_stream)(offsets), (s3.uint32_stream)(kinds)) {
-                        (Some(v), Some(o), Some(k)) => Some(validate_topology(&t2, (&v.0, v.1), (&o.0, o.1), (&k.0, k.1), point_count, max_polygon_size)),
-                        _ => None,
-                    }
-                }),
-                ready: Box::new(move || (s4.ready)()),
-            })
-        }),
-        ..standard
+/// The backend: found by its host's id, so it is `Send + Sync`. Residency is the fast path's.
+struct HostBackend(i64);
+
+impl G::Backend for HostBackend {
+    fn residency(&self, fast: bool) -> Option<Box<dyn G::Residency>> {
+        let t = host_of(self.0).filter(live)?;
+        fast.then(|| Box::new(resident_scope(true, fast, &t)) as Box<dyn G::Residency>)
     }
+
+    fn prepare(&self, fast: bool, packed: &Packed) -> Result<Arc<dyn G::Kernel>, Diagnostic> {
+        let id = self.0;
+        let Some(t) = host_of(id).filter(live) else {
+            return error("GPU host is closed or called from another domain.");
+        };
+        // a range source (`index_sources`) is the host's index buffer, never uploaded
+        let index = phost::index_sources(packed);
+        let msl = emit::kernel(&emit::Options { spirv: is_vulkan(), fast, ..emit::Options::default() }, packed)?;
+        pipelines::get(&t.0.pipelines, &msl)?;
+        // Each prepared producer owns an output generation. Sharing only its shader source
+        // would overwrite an earlier drawing's borrowed output.
+        let key = NEXT.fetch_add(1, Ordering::SeqCst).to_string();
+        let kernel = HostKernel { id, fast, index, key, msl, packed: packed.clone() };
+        let _ = kernel.runner(&t, None)?;
+        Ok(Arc::new(kernel))
+    }
+}
+
+pub fn backend(t: &T) -> Box<dyn G::Backend> {
+    Box::new(HostBackend(t.0.id))
 }
 
 /// Drops this thread's host and fold-scope registries (see `run::clear_thread_state`).

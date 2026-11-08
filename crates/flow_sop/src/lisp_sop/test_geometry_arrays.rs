@@ -306,8 +306,13 @@ fn deferred_source(result:&str)->String{
 fn attribute_writes(root:&node::T)->usize{fn visit(n:&node::T,seen:&mut std::collections::HashSet<i64>)->usize{if !seen.insert(node::id(n)){return 0}usize::from(node::operation(n)=="flow.with_attr")+node::inputs(n).iter().map(|n|visit(n,seen)).sum::<usize>()}visit(root,&mut Default::default())}
 #[test]
 fn deferred_static_mesh_writes_fold_without_frame_or_gpu_probes(){
+    struct NoGpu;
+    impl Gpu::Backend for NoGpu{
+        fn cost(&self,_:Option<&flow_ir::packed::Inputs>,_:bool,_:&flow_ir::packed::T,_:i64)->Option<f64>{panic!("static deferred data reached GPU cost")}
+        fn prepare(&self,_:bool,_:&flow_ir::packed::T)->Result<Arc<dyn Gpu::Kernel>,rays_diagnostic::Diagnostic>{panic!("static deferred data reached GPU prepare")}
+    }
     use flow_ir::flow_ir::Gpu;
-    let gpu=Gpu::Config{fast:true,backend:Some(Arc::new(Gpu::Backend{residency:Box::new(|_|None),cost:Box::new(|_,_,_,_|panic!("static deferred data reached GPU cost")),prepare:Box::new(|_,_|panic!("static deferred data reached GPU prepare"))})),..Gpu::default()};
+    let gpu=Gpu::Config{fast:true,backend:Some(Arc::new(NoGpu)),..Gpu::default()};
     let(l,n)=lower_text(lower::Options{defer:true,gpu:gpu.clone(),..Default::default()},&deferred_source("colored"));
     assert_eq!(attribute_writes(&n),0);let g=&l.graphs[0];assert!(g.network.frame_nodes.is_empty());
     let(_,moving)=lower_text(lower::Options{defer:true,..Default::default()},&deferred_source(r#"(sop/with_attr colored "heat" (exact (map (fn [(n : vec3)] (+ n.y t)) normals)) :owner "point" :type float)"#));assert_eq!(attribute_writes(&moving),2);

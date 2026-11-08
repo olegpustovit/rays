@@ -60,13 +60,14 @@ const DOCUMENT_TEXT: &str = r#"(workspace document
   (graph scene :context scene
     (scene/merge (scene/geometry (ref geo1) :name "geo1") (scene/camera :name "camera1"))))"#;
 
-fn test_backend() -> Arc<Gpu::Backend> {
-    Arc::new(Gpu::Backend {
-        residency: Box::new(|_| None),
-        cost: Box::new(|_, _, _, _| None),
-        prepare: Box::new(|_, _| Err(rays_diagnostic::error("E_TEST_GPU".to_owned(), "unused test backend".to_owned(), None, None, None, Vec::new(), Vec::new()))),
-    })
+struct UnusedBackend;
+impl Gpu::Backend for UnusedBackend {
+    fn prepare(&self, _: bool, _: &flow_ir::packed::T) -> Result<Arc<dyn Gpu::Kernel>, rays_diagnostic::Diagnostic> {
+        Err(rays_diagnostic::error("E_TEST_GPU".to_owned(), "unused test backend".to_owned(), None, None, None, Vec::new(), Vec::new()))
+    }
 }
+
+fn test_backend() -> Arc<dyn Gpu::Backend> { Arc::new(UnusedBackend) }
 
 #[test]
 fn document_boundary_validation_dump_preset_gpu() {

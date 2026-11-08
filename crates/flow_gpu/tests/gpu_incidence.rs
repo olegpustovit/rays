@@ -2,6 +2,7 @@
 mod common;
 use flow_gpu::{pipelines, run};
 use flow_ir::flow_ir::Executor;
+use flow_ir::flow_ir::Gpu::Residency as _;
 use flow_syntax::{ty::Ty, value::Value};
 use ogpu::{backend as b, types::{BufferDescriptor, BufferUsage}};
 
@@ -93,28 +94,28 @@ fn constant_arrays() {
             let evaluated = flow_eval::r#static(&ws, true, None).unwrap();
             let value = &evaluated.records.iter().find(|(p, _)| p == &["g", "tested"]).unwrap().1[0].1;
             let compiled = Executor::compile(value, &Executor::CompileOptions { strict: true, ..Default::default() }).unwrap();
-            let scope = ((flow_gpu::host::backend(&host)).residency)(true).unwrap();
+            let scope = flow_gpu::host::backend(&host).residency(true).unwrap();
             let before = flow_gpu::host::stats(&host);
-            let made = Executor::force(&compiled, &Executor::ForceOptions { strict: true, resident: Some(scope.executor.clone()), ..Default::default() }, &input::at_time(1.)).unwrap();
-            assert_eq!((scope.executor.count)(&made).unwrap(), Some(count));
-            let kept = (scope.retain_float)(&made).expect("constant array stayed on the CPU");
-            (scope.executor.close)();
+            let made = Executor::force(&compiled, &Executor::ForceOptions { strict: true, resident: Some(scope.executor().clone()), ..Default::default() }, &input::at_time(1.)).unwrap();
+            assert_eq!(scope.executor().count(&made).unwrap(), Some(count));
+            let kept = scope.retain_float(&made).expect("constant array stayed on the CPU");
+            scope.executor().close();
             let after = flow_gpu::host::stats(&host);
             assert_eq!(after.input_uploaded_bytes, before.input_uploaded_bytes);
             assert_eq!(after.payload_readback_bytes, before.payload_readback_bytes);
             assert_eq!((kept.count, kept.width), (count, row.len() as i64));
-            let planes = (kept.materialise)().unwrap();
+            let planes = kept.materialise().unwrap();
             for (column, expected) in planes.iter().zip(row) {
                 let expected = if kind == "range" { (0..count).map(|i| (i as f64).to_bits()).collect() } else { vec![f64::to_bits(expected); count as usize] };
                 assert_eq!(column.iter().map(|x| x.to_bits()).collect::<Vec<_>>(), expected);
             }
-            (kept.release)(false);
+            kept.release(false);
         }
     }
     let scope = flow_gpu::host::resident_scope(true, true, &host);
-    assert!((scope.executor.fill)(&Ty::Array(Box::new(Ty::Float)), 1, &Value::Float(f64::MAX)).unwrap().is_none());
-    assert!((scope.executor.fill)(&Ty::Array(Box::new(Ty::Text)), 1, &Value::Text(Vec::new())).unwrap().is_none());
-    (scope.executor.close)();
+    assert!(scope.executor().fill(&Ty::Array(Box::new(Ty::Float)), 1, &Value::Float(f64::MAX)).unwrap().is_none());
+    assert!(scope.executor().fill(&Ty::Array(Box::new(Ty::Text)), 1, &Value::Text(Vec::new())).unwrap().is_none());
+    scope.executor().close();
     flow_gpu::host::close(&host);
 }
 fn main() { common::window::run(&[("incidence", incidence), ("planes", planes), ("constant_arrays", constant_arrays)]); }

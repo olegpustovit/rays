@@ -3,10 +3,10 @@
 //! workers reach it through a proxy backend whose every call is queued here and served by `pump`.
 //!
 //! Rust shape notes. OGPU handles are `Rc`, so the owner's state lives in a thread-local registry
-//! (as `flow_gpu::host` does) and the `Send + Sync` closures of a `Gpu::Backend` hold only an id.
+//! (as `flow_gpu::host` does) and the `Send + Sync` `Gpu::Backend` holds only an id.
 //! A worker's call becomes a `Job` (a boxed `FnOnce` returning a boxed `Any`) that the owner runs
 //! in `pump`. A resident scope the owner makes for a worker stays in a thread-local table; the
-//! worker's proxy closures hold its id and route every call. `Domain.is_main_domain` is "the
+//! worker's proxy objects hold its id and route every call. `Domain.is_main_domain` is "the
 //! thread that created this service". The wake byte on a socket pair is a `Condvar`.
 use crate::drawing;
 use crate::marks_scene;
@@ -102,12 +102,14 @@ impl Drop for Finisher<'_> {
     }
 }
 
-/// Runs `f` on the owner: directly when called there, else queued for `pump` and waited for.
-fn route(shared: &Arc<Shared>, waits: bool, f: Work) -> Result<Box<dyn Any + Send>, Diagnostic> {
+/// Runs `f` on the owner: directly when called there, else queued for `pump` and waited for. The
+/// result crosses as a boxed `Any`, the one downcast of the queue.
+fn route<T: Send + 'static>(shared: &Arc<Shared>, waits: bool, f: impl FnOnce() -> T + Send + 'static) -> Result<T, Diagnostic> {
     if is_owner(shared) {
         return Ok(f());
     }
-    let job = Arc::new(Job { run: Mutex::new(Some(f)), slot: Mutex::new(None), finished: AtomicBool::new(false), waits });
+    let work: Work = Box::new(move || Box::new(f()) as Box<dyn Any + Send>);
+    let job = Arc::new(Job { run: Mutex::new(Some(work)), slot: Mutex::new(None), finished: AtomicBool::new(false), waits });
     let mut queue = shared.queue.lock().unwrap();
     if queue.closed {
         return Err(error("The workspace GPU service is closed."));
@@ -119,7 +121,7 @@ fn route(shared: &Arc<Shared>, waits: bool, f: Work) -> Result<Box<dyn Any + Sen
     }
     drop(queue);
     let result = job.slot.lock().unwrap().take();
-    result.unwrap_or_else(|| Err(error("The workspace GPU request was cancelled.")))
+    result.unwrap_or_else(|| Err(error("The workspace GPU request was cancelled."))).map(|b| *b.downcast::<T>().expect("route type"))
 }
 
 fn serve(shared: &Shared, job: &Arc<Job>) {
@@ -137,35 +139,6 @@ fn serve(shared: &Shared, job: &Arc<Job>) {
         drop(queue);
     }
     drop(finisher);
-}
-
-// Typed routes: one concrete function per result shape a proxy needs.
-
-fn route_value_opt(s: &Arc<Shared>, waits: bool, f: Box<dyn FnOnce() -> Result<Option<Value>, Diagnostic> + Send>) -> Result<Option<Value>, Diagnostic> {
-    route(s, waits, Box::new(move || Box::new(f()) as Box<dyn Any + Send>))
-        .and_then(|b| *b.downcast::<Result<Option<Value>, Diagnostic>>().expect("route type"))
-}
-fn route_value(s: &Arc<Shared>, f: Box<dyn FnOnce() -> Result<Value, Diagnostic> + Send>) -> Result<Value, Diagnostic> {
-    route(s, false, Box::new(move || Box::new(f()) as Box<dyn Any + Send>)).and_then(|b| *b.downcast::<Result<Value, Diagnostic>>().expect("route type"))
-}
-fn route_count(s: &Arc<Shared>, f: Box<dyn FnOnce() -> Result<Option<i64>, Diagnostic> + Send>) -> Result<Option<i64>, Diagnostic> {
-    route(s, false, Box::new(move || Box::new(f()) as Box<dyn Any + Send>)).and_then(|b| *b.downcast::<Result<Option<i64>, Diagnostic>>().expect("route type"))
-}
-fn route_unit_result(s: &Arc<Shared>, waits: bool, f: Box<dyn FnOnce() -> Result<(), Diagnostic> + Send>) -> Result<(), Diagnostic> {
-    route(s, waits, Box::new(move || Box::new(f()) as Box<dyn Any + Send>)).and_then(|b| *b.downcast::<Result<(), Diagnostic>>().expect("route type"))
-}
-fn route_unit(s: &Arc<Shared>, waits: bool, f: Box<dyn FnOnce() + Send>) -> Result<(), Diagnostic> {
-    route(s, waits, Box::new(move || {
-        f();
-        Box::new(()) as Box<dyn Any + Send>
-    }))
-    .map(|_| ())
-}
-fn route_i64_opt(s: &Arc<Shared>, f: Box<dyn FnOnce() -> Option<i64> + Send>) -> Result<Option<i64>, Diagnostic> {
-    route(s, false, Box::new(move || Box::new(f()) as Box<dyn Any + Send>)).map(|b| *b.downcast::<Option<i64>>().expect("route type"))
-}
-fn route_floats_opt(s: &Arc<Shared>, f: Box<dyn FnOnce() -> Option<Vec<f64>> + Send>) -> Result<Option<Vec<f64>>, Diagnostic> {
-    route(s, false, Box::new(move || Box::new(f()) as Box<dyn Any + Send>)).map(|b| *b.downcast::<Option<Vec<f64>>>().expect("route type"))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -210,8 +183,8 @@ pub struct Data {
     images: RefCell<List<String, image_sink::T>>,
     image_stats: Rc<RefCell<ImageStats>>,
     closed_host: RefCell<h::Stats>,
-    backend: RefCell<Option<Arc<G::Backend>>>,
-    proxy: RefCell<Option<Arc<G::Backend>>>,
+    backend: RefCell<Option<Arc<dyn G::Backend>>>,
+    proxy: RefCell<Option<Arc<dyn G::Backend>>>,
     closed: Rc<Cell<bool>>,
     policy: Cell<G::Policy>,
     measurement_ready: Cell<bool>,
@@ -237,7 +210,7 @@ pub struct t(pub Rc<Data>);
 
 thread_local! {
     static SERVICES: RefCell<HashMap<i64, Rc<Data>>> = RefCell::new(HashMap::new());
-    static SCOPES: RefCell<HashMap<i64, Rc<G::Residency>>> = RefCell::new(HashMap::new());
+    static SCOPES: RefCell<HashMap<i64, Rc<dyn G::Residency>>> = RefCell::new(HashMap::new());
 }
 
 fn service(id: i64) -> Option<Rc<Data>> {
@@ -400,7 +373,7 @@ fn measure(d: &Data, prepared: Option<&phost_inputs>, fast: bool, packed: &Packe
     let seconds = (|| -> Option<f64> {
         let (_, host) = owner(d).ok()?;
         let backend = h::backend(&host);
-        let kernel = (backend.prepare)(fast, packed).ok()?;
+        let kernel = backend.prepare(fast, packed).ok()?;
         let producer: RefCell<Option<i64>> = RefCell::new(None);
         let once = || -> Option<f64> {
             // Every sample pays its transfer: each runs on a new runner, whose upload cache is
@@ -409,11 +382,11 @@ fn measure(d: &Data, prepared: Option<&phost_inputs>, fast: bool, packed: &Packe
                 h::forget_producer(&host, p);
             }
             let start = (d.clock)();
-            let output = (kernel.run)(&inputs).ok()?;
+            let output = kernel.run(&inputs).ok()?;
             *producer.borrow_mut() = Some(output.identity);
-            let planes = (kernel.planes)(&output).ok()?;
-            let settled = (planes.settle)();
-            (planes.release)(false);
+            let planes = kernel.planes(&output).ok()?;
+            let settled = planes.settle();
+            planes.release(false);
             settled.ok()?;
             Some((d.clock)() - start)
         };
@@ -438,52 +411,55 @@ fn measure(d: &Data, prepared: Option<&phost_inputs>, fast: bool, packed: &Packe
 #[allow(non_camel_case_types)]
 type phost_inputs = flow_ir::packed::host::Inputs;
 
-fn backend(t_: &t) -> Arc<G::Backend> {
+/// The owner's real backend: it serves the service `0` on the owner thread only.
+struct OwnerBackend(i64);
+
+impl G::Backend for OwnerBackend {
+    fn residency(&self, fast: bool) -> Option<Box<dyn G::Residency>> {
+        if !fast {
+            return None;
+        }
+        let d = service(self.0)?;
+        match owner(&d) {
+            Ok((_, host)) => h::backend(&host).residency(fast),
+            Err(_) => None,
+        }
+    }
+    fn cost(&self, inputs: Option<&phost_inputs>, fast: bool, packed: &Packed, count: i64) -> Option<f64> {
+        let d = service(self.0)?;
+        measure(&d, inputs, fast, packed, count)
+    }
+    fn prepare(&self, fast: bool, packed: &Packed) -> Result<Arc<dyn G::Kernel>, Diagnostic> {
+        let d = service(self.0).ok_or_else(|| error("Workspace GPU resources require their open initial-domain owner."))?;
+        let (_, host) = owner(&d)?;
+        h::backend(&host).prepare(fast, packed)
+    }
+}
+
+fn backend(t_: &t) -> Arc<dyn G::Backend> {
     let d = &*t_.0;
     if let Some(b) = &*d.backend.borrow() {
         return b.clone();
     }
-    let id = d.id;
-    let unavailable = || error("Workspace GPU resources require their open initial-domain owner.");
-    let backend = Arc::new(G::Backend {
-        residency: Box::new(move |fast| {
-            if !fast {
-                return None;
-            }
-            let d = service(id)?;
-            match owner(&d) {
-                Ok((_, host)) => (h::backend(&host).residency)(fast),
-                Err(_) => None,
-            }
-        }),
-        cost: Box::new(move |inputs, fast, packed, count| {
-            let d = service(id)?;
-            measure(&d, inputs, fast, packed, count)
-        }),
-        prepare: Box::new(move |fast, packed| {
-            let d = service(id).ok_or_else(unavailable)?;
-            let (_, host) = owner(&d)?;
-            (h::backend(&host).prepare)(fast, packed)
-        }),
-    });
+    let backend: Arc<dyn G::Backend> = Arc::new(OwnerBackend(d.id));
     *d.backend.borrow_mut() = Some(backend.clone());
     backend
 }
 
 /// Replaces the real backend (and drops the proxy built over the old one).
-pub fn install_test_backend(t_: &t, backend_: G::Backend) {
+pub fn install_test_backend(t_: &t, backend_: Arc<dyn G::Backend>) {
     let d = &*t_.0;
     if !on_owner(d) || d.closed.get() {
         panic!("Workspace_gpu.Private.install_test_backend: open initial-domain owner required");
     }
-    *d.backend.borrow_mut() = Some(Arc::new(backend_));
+    *d.backend.borrow_mut() = Some(backend_);
     *d.proxy.borrow_mut() = None;
 }
 
 /// Runs `f` on the owner and waits for it (`waits`: the request blocks on the device, as a settle
 /// does). A closed service answers the typed diagnostic.
 pub fn on_owner_for_test(remote: &Remote, waits: bool, f: Box<dyn FnOnce() + Send>) -> Result<(), Diagnostic> {
-    route_unit(&remote.0, waits, f)
+    route(&remote.0, waits, f)
 }
 
 /// The `Send` half of a service: what a worker thread holds to queue requests for the owner.
@@ -494,7 +470,7 @@ pub fn remote(t_: &t) -> Remote {
     Remote(t_.0.shared.clone())
 }
 
-fn scope_of(id: i64) -> Result<Rc<G::Residency>, Diagnostic> {
+fn scope_of(id: i64) -> Result<Rc<dyn G::Residency>, Diagnostic> {
     SCOPES.with(|s| s.borrow().get(&id).cloned()).ok_or_else(|| error("The resident scope is closed."))
 }
 
@@ -518,16 +494,17 @@ fn ready_first(shared: &Arc<Shared>, id: i64) {
     if is_owner(shared) {
         return;
     }
-    loop {
-        let ready = route(shared, false, Box::new(move || Box::new(scope_of(id).map_or(true, |r| (r.ready)())) as Box<dyn Any + Send>));
-        match ready.map(|b| *b.downcast::<bool>().expect("route type")) {
-            Ok(false) => std::thread::sleep(Duration::from_micros(200)),
-            _ => return,
-        }
+    while !scope_ready(shared, id) {
+        std::thread::sleep(Duration::from_micros(200));
     }
 }
 
-/// Held by every closure of a proxy residency: the owner's scope goes when the last is dropped.
+/// Commits the scope's work and polls it on the owner; a closed scope or service counts as ready.
+fn scope_ready(shared: &Arc<Shared>, id: i64) -> bool {
+    route(shared, false, move || scope_of(id).map_or(true, |r| r.ready())).unwrap_or(true)
+}
+
+/// Held by every part of a proxy residency: the owner's scope goes when the last is dropped.
 struct ScopeGuard(i64);
 impl Drop for ScopeGuard {
     fn drop(&mut self) {
@@ -535,237 +512,223 @@ impl Drop for ScopeGuard {
     }
 }
 
-fn proxy_residency(shared: &Arc<Shared>, real: &Arc<G::Backend>, fast: bool) -> Option<G::Residency> {
-    let r = real.clone();
-    let made = route(
-        shared,
-        false,
-        Box::new(move || {
-            reap_scopes();
-            let scope = (r.residency)(fast).map(|scope| {
-                let id = NEXT_SCOPE.fetch_add(1, Ordering::SeqCst);
-                let incidence = scope.incidence.clone();
-                SCOPES.with(|s| s.borrow_mut().insert(id, Rc::new(scope)));
-                (id, incidence)
-            });
-            Box::new(scope) as Box<dyn Any + Send>
-        }),
-    )
-    .ok()?;
-    let (id, incidence) = (*made.downcast::<Option<(i64, G::IncidenceBuilder)>>().expect("route type"))?;
-    let guard = Arc::new(ScopeGuard(id));
-    let s = shared.clone();
-    let value_opt = |s: &Arc<Shared>, g: &Arc<ScopeGuard>| (s.clone(), g.clone());
-    let (s1, g1) = value_opt(&s, &guard);
-    let (s2, g2) = value_opt(&s, &guard);
-    let (s3, g3) = value_opt(&s, &guard);
-    let (s4, g4) = value_opt(&s, &guard);
-    let (s5, g5) = value_opt(&s, &guard);
-    let (s6, g6) = value_opt(&s, &guard);
-    let (s7, g7) = value_opt(&s, &guard);
-    let (s8, g8) = value_opt(&s, &guard);
-    let (s9, g9) = value_opt(&s, &guard);
-    let (s10, g10) = value_opt(&s, &guard);
-    let (s11, g11) = value_opt(&s, &guard);
-    let (s12, g12) = value_opt(&s, &guard);
-    let (s13, g13) = value_opt(&s, &guard);
-    let (s14, g14) = value_opt(&s, &guard);
-    let (s15, g15) = value_opt(&s, &guard);
-    let (s16, g16) = value_opt(&s, &guard);
-    let (s17, g17) = value_opt(&s, &guard);
-    let executor = c::Resident {
-        fill: Box::new(move |ty: &Ty, length: i64, value: &Value| {
-            let (ty, value, g) = (ty.clone(), value.clone(), g1.clone());
-            route_value_opt(&s1, false, Box::new(move || scope_of(g.0).and_then(|r| (r.executor.fill)(&ty, length, &value))))
-        }),
-        invoke: Box::new(move |packed: &Packed, values: &[Value], locals: &[Value], live: &Frame| {
-            let (packed, values, locals, live, g) = (packed.clone(), values.to_vec(), locals.to_vec(), live.clone(), g2.clone());
-            route_value_opt(&s2, false, Box::new(move || scope_of(g.0).and_then(|r| (r.executor.invoke)(&packed, &values, &locals, &live))))
-        }),
-        invoke_all: Box::new(move |packed: &Packed, tys: &[Ty], values: &[Value], locals: &[Value], live: &Frame| {
-            let (packed, tys, values, locals, live, g) = (packed.clone(), tys.to_vec(), values.to_vec(), locals.to_vec(), live.clone(), g17.clone());
-            route_value_opt(&s17, false, Box::new(move || scope_of(g.0).and_then(|r| (r.executor.invoke_all)(&packed, &tys, &values, &locals, &live))))
-        }),
-        unfold: Box::new(move |packed: &Packed, values: &[Value], steps: i64, source: &Value, locals: &[Value], live: &Frame| {
-            let (packed, values, source, locals, live, g) = (packed.clone(), values.to_vec(), source.clone(), locals.to_vec(), live.clone(), g3.clone());
-            route_value_opt(&s3, false, Box::new(move || scope_of(g.0).and_then(|r| (r.executor.unfold)(&packed, &values, steps, &source, &locals, &live))))
-        }),
-        compact: Box::new(move |value: &Value| {
-            let (value, g) = (value.clone(), g4.clone());
-            route_value_opt(&s4, false, Box::new(move || scope_of(g.0).and_then(|r| (r.executor.compact)(&value))))
-        }),
-        coerce: Box::new(move |ty: &Ty, value: &Value| {
-            let (ty, value, g) = (ty.clone(), value.clone(), g5.clone());
-            route_value_opt(&s5, false, Box::new(move || scope_of(g.0).and_then(|r| (r.executor.coerce)(&ty, &value))))
-        }),
-        concat: Box::new(move |a: &Value, b: &Value| {
-            let (a, b, g) = (a.clone(), b.clone(), g6.clone());
-            route_value_opt(&s6, false, Box::new(move || scope_of(g.0).and_then(|r| (r.executor.concat)(&a, &b))))
-        }),
-        finish: Box::new(move |value: &Value| {
-            let (value, g) = (value.clone(), g7.clone());
-            ready_first(&s7, g.0);
-            route_value(&s7, Box::new(move || scope_of(g.0).and_then(|r| (r.executor.finish)(&value))))
-        }),
-        keep: Box::new(move |value: &Value| {
-            let (value, g) = (value.clone(), g8.clone());
-            ready_first(&s8, g.0);
-            route_value_opt(&s8, false, Box::new(move || scope_of(g.0).and_then(|r| (r.executor.keep)(&value))))
-        }),
-        count: Box::new(move |value: &Value| {
-            let (value, g) = (value.clone(), g9.clone());
-            ready_first(&s9, g.0);
-            route_count(&s9, Box::new(move || scope_of(g.0).and_then(|r| (r.executor.count)(&value))))
-        }),
-        capacity: Box::new(move |value: &Value| {
-            let (value, g) = (value.clone(), g10.clone());
-            route_i64_opt(&s10, Box::new(move || scope_of(g.0).ok().and_then(|r| (r.executor.capacity)(&value)))).ok().flatten()
-        }),
-        close: Box::new(move || {
-            let g = g11.clone();
-            ready_first(&s11, g.0);
-            let _ = route_unit(&s11, false, Box::new(move || {
-                if let Ok(r) = scope_of(g.0) {
-                    (r.executor.close)()
-                }
-            }));
-        }),
-        settle: Box::new(move || {
-            let g = g12.clone();
-            ready_first(&s12, g.0);
-            route_unit_result(&s12, false, Box::new(move || scope_of(g.0).and_then(|r| (r.executor.settle)())))
-        }),
-        range: Box::new(move |ty: &Ty, value: &Value, div: i64, length: i64| {
-            let (ty, value, g) = (ty.clone(), value.clone(), g13.clone());
-            route_value_opt(&s13, false, Box::new(move || scope_of(g.0).and_then(|r| (r.executor.range)(&ty, &value, div, length))))
-        }),
-    };
-    Some(G::Residency {
-        executor: Arc::new(executor),
-        pack_planes: {
-            let (s, g) = value_opt(&s, &guard);
-            Box::new(move |values| {
-                let (values, g) = (values.clone(), g.clone());
-                ready_first(&s, g.0);
-                route_value_opt(&s, false, Box::new(move || scope_of(g.0).and_then(|r| (r.pack_planes)(&values))))
-            })
-        },
-        incidence: {
-            let s = s.clone();
-            Arc::new(move |points, streams| {
-                let incidence = incidence.clone();
-                route(&s, false, Box::new(move || Box::new(incidence(points, streams)) as Box<dyn Any + Send>))
-                    .and_then(|b| *b.downcast::<Result<Option<G::Incidence>, Diagnostic>>().expect("route type"))
-            })
-        },
-        retain_uint32: Box::new(move |value: &Value| {
-            let (value, g) = (value.clone(), g14.clone());
-            ready_first(&s14, g.0);
-            route(&s14, false, Box::new(move || Box::new(scope_of(g.0).ok().and_then(|r| (r.retain_uint32)(&value))) as Box<dyn Any + Send>))
-                .ok()
-                .and_then(|b| *b.downcast::<Option<G::Integers>>().expect("route type"))
-        }),
-        retain_float: Box::new(move |value: &Value| {
-            let (value, g) = (value.clone(), g15.clone());
-            ready_first(&s15, g.0);
-            route(&s15, false, Box::new(move || Box::new(scope_of(g.0).ok().and_then(|r| (r.retain_float)(&value))) as Box<dyn Any + Send>))
-                .ok()
-                .and_then(|b| *b.downcast::<Option<G::Planes>>().expect("route type"))
-        }),
-        validate_topology: Box::new(move |point_count: i64, vertices: &Value, offsets: &Value, kinds: &Value, max_polygon_size: i64| {
-            let (vertices, offsets, kinds, g) = (vertices.clone(), offsets.clone(), kinds.clone(), g16.clone());
-            ready_first(&s16, g.0);
-            match route(
-                &s16,
-                false,
-                Box::new(move || {
-                    Box::new(match scope_of(g.0) {
-                        Ok(r) => (r.validate_topology)(point_count, &vertices, &offsets, &kinds, max_polygon_size),
-                        Err(d) => Some(Err(d)),
-                    }) as Box<dyn Any + Send>
-                }),
-            ) {
-                Ok(b) => *b.downcast::<Option<Result<(), Diagnostic>>>().expect("route type"),
-                Err(d) => Some(Err(d)),
-            }
-        }),
-        ready: {
-            let (s, g) = (s.clone(), guard.clone());
-            Box::new(move || {
-                let g = g.clone();
-                route(&s, false, Box::new(move || Box::new(scope_of(g.0).map_or(true, |r| (r.ready)())) as Box<dyn Any + Send>))
-                    .map_or(true, |b| *b.downcast::<bool>().expect("route type"))
-            })
-        },
-    })
+/// `f` on the owner against the scope `guard` names; a closed scope or service is the diagnostic.
+fn in_scope<T: Send + 'static>(shared: &Arc<Shared>, guard: &ScopeGuard, f: impl FnOnce(&dyn G::Residency) -> Result<T, Diagnostic> + Send + 'static) -> Result<T, Diagnostic> {
+    let id = guard.0;
+    route(shared, false, move || scope_of(id).and_then(|r| f(&*r))).and_then(|r| r)
 }
 
-fn proxy_kernel(shared: &Arc<Shared>, kernel: Arc<G::Kernel>) -> G::Kernel {
-    let (s1, k1) = (shared.clone(), kernel.clone());
-    let (s2, k2) = (shared.clone(), kernel.clone());
-    let (s3, k3) = (shared.clone(), kernel);
-    G::Kernel {
-        run: Box::new(move |inputs| {
-            let (inputs, k) = (inputs.clone(), k1.clone());
-            route(&s1, false, Box::new(move || Box::new((k.run)(&inputs)) as Box<dyn Any + Send>)).and_then(|b| *b.downcast::<Result<G::Value, Diagnostic>>().expect("route type"))
-        }),
-        readback: Box::new(move |value| {
-            let (value, k) = (value.clone(), k2.clone());
-            route_value(&s2, Box::new(move || (k.readback)(&value)))
-        }),
-        planes: Box::new(move |value| {
-            let (value, k) = (value.clone(), k3.clone());
-            let planes = route(&s3, false, Box::new(move || Box::new((k.planes)(&value)) as Box<dyn Any + Send>))
-                .and_then(|b| *b.downcast::<Result<G::Planes, Diagnostic>>().expect("route type"))?;
-            let real = Arc::new(planes);
-            let (settle_real, settle_shared) = (real.clone(), s3.clone());
-            let (bounds_real, bounds_shared) = (real.clone(), s3.clone());
-            let (release_real, materialise_real) = (real.clone(), real.clone());
-            Ok(G::Planes {
-                count: real.count,
-                width: real.width,
-                materialise: Box::new(move || (materialise_real.materialise)()),
-                resident: real.resident.clone(),
-                settle: Box::new(move || {
-                    let p = settle_real.clone();
-                    route_unit_result(&settle_shared, true, Box::new(move || (p.settle)()))
-                }),
-                release: Box::new(move |held| (release_real.release)(held)),
-                bounds: Box::new(move || {
-                    let p = bounds_real.clone();
-                    route_floats_opt(&bounds_shared, Box::new(move || (p.bounds)())).ok().flatten()
-                }),
-            })
-        }),
+/// A cook worker's resident executor over an owner's scope: every call is served on the owner.
+struct ProxyResident {
+    shared: Arc<Shared>,
+    guard: Arc<ScopeGuard>,
+}
+
+impl c::Resident for ProxyResident {
+    fn fill(&self, ty: &Ty, length: i64, value: &Value) -> Result<Option<Value>, Diagnostic> {
+        let (ty, value) = (ty.clone(), value.clone());
+        in_scope(&self.shared, &self.guard, move |r| r.executor().fill(&ty, length, &value))
+    }
+    fn invoke(&self, region: &Packed, args: &[Value], locals: &[Value], live: &Frame) -> Result<Option<Value>, Diagnostic> {
+        let (region, args, locals, live) = (region.clone(), args.to_vec(), locals.to_vec(), live.clone());
+        in_scope(&self.shared, &self.guard, move |r| r.executor().invoke(&region, &args, &locals, &live))
+    }
+    fn invoke_all(&self, region: &Packed, tys: &[Ty], args: &[Value], locals: &[Value], live: &Frame) -> Result<Option<Value>, Diagnostic> {
+        let (region, tys, args, locals, live) = (region.clone(), tys.to_vec(), args.to_vec(), locals.to_vec(), live.clone());
+        in_scope(&self.shared, &self.guard, move |r| r.executor().invoke_all(&region, &tys, &args, &locals, &live))
+    }
+    fn unfold(&self, region: &Packed, args: &[Value], steps: i64, source: &Value, locals: &[Value], live: &Frame) -> Result<Option<Value>, Diagnostic> {
+        let (region, args, source, locals, live) = (region.clone(), args.to_vec(), source.clone(), locals.to_vec(), live.clone());
+        in_scope(&self.shared, &self.guard, move |r| r.executor().unfold(&region, &args, steps, &source, &locals, &live))
+    }
+    fn compact(&self, value: &Value) -> Result<Option<Value>, Diagnostic> {
+        let value = value.clone();
+        in_scope(&self.shared, &self.guard, move |r| r.executor().compact(&value))
+    }
+    fn coerce(&self, ty: &Ty, value: &Value) -> Result<Option<Value>, Diagnostic> {
+        let (ty, value) = (ty.clone(), value.clone());
+        in_scope(&self.shared, &self.guard, move |r| r.executor().coerce(&ty, &value))
+    }
+    fn concat(&self, a: &Value, b: &Value) -> Result<Option<Value>, Diagnostic> {
+        let (a, b) = (a.clone(), b.clone());
+        in_scope(&self.shared, &self.guard, move |r| r.executor().concat(&a, &b))
+    }
+    fn finish(&self, value: &Value) -> Result<Value, Diagnostic> {
+        ready_first(&self.shared, self.guard.0);
+        let value = value.clone();
+        in_scope(&self.shared, &self.guard, move |r| r.executor().finish(&value))
+    }
+    fn keep(&self, value: &Value) -> Result<Option<Value>, Diagnostic> {
+        ready_first(&self.shared, self.guard.0);
+        let value = value.clone();
+        in_scope(&self.shared, &self.guard, move |r| r.executor().keep(&value))
+    }
+    fn count(&self, value: &Value) -> Result<Option<i64>, Diagnostic> {
+        ready_first(&self.shared, self.guard.0);
+        let value = value.clone();
+        in_scope(&self.shared, &self.guard, move |r| r.executor().count(&value))
+    }
+    fn capacity(&self, value: &Value) -> Option<i64> {
+        let (id, value) = (self.guard.0, value.clone());
+        route(&self.shared, false, move || scope_of(id).ok().and_then(|r| r.executor().capacity(&value))).ok().flatten()
+    }
+    fn close(&self) {
+        let id = self.guard.0;
+        ready_first(&self.shared, id);
+        let _ = route(&self.shared, false, move || {
+            if let Ok(r) = scope_of(id) {
+                r.executor().close()
+            }
+        });
+    }
+    fn settle(&self) -> Result<(), Diagnostic> {
+        ready_first(&self.shared, self.guard.0);
+        in_scope(&self.shared, &self.guard, |r| r.executor().settle())
+    }
+    fn range(&self, ty: &Ty, value: &Value, div: i64, length: i64) -> Result<Option<Value>, Diagnostic> {
+        let (ty, value) = (ty.clone(), value.clone());
+        in_scope(&self.shared, &self.guard, move |r| r.executor().range(&ty, &value, div, length))
+    }
+}
+
+/// A cook worker's residency over an owner's scope. `executor` and every method hold `guard`.
+struct ProxyResidency {
+    shared: Arc<Shared>,
+    guard: Arc<ScopeGuard>,
+    executor: Arc<dyn c::Resident>,
+    incidence: G::IncidenceBuilder,
+}
+
+impl G::Residency for ProxyResidency {
+    fn executor(&self) -> &Arc<dyn c::Resident> {
+        &self.executor
+    }
+    fn retain_uint32(&self, value: &Value) -> Option<G::Integers> {
+        let (id, value) = (self.guard.0, value.clone());
+        ready_first(&self.shared, id);
+        route(&self.shared, false, move || scope_of(id).ok().and_then(|r| r.retain_uint32(&value))).ok().flatten()
+    }
+    fn retain_float(&self, value: &Value) -> Option<G::Planes> {
+        let (id, value) = (self.guard.0, value.clone());
+        ready_first(&self.shared, id);
+        route(&self.shared, false, move || scope_of(id).ok().and_then(|r| r.retain_float(&value))).ok().flatten()
+    }
+    fn pack_planes(&self, values: &[Value; 3]) -> Result<Option<Value>, Diagnostic> {
+        ready_first(&self.shared, self.guard.0);
+        let values = values.clone();
+        in_scope(&self.shared, &self.guard, move |r| r.pack_planes(&values))
+    }
+    fn incidence(&self) -> G::IncidenceBuilder {
+        self.incidence.clone()
+    }
+    fn validate_topology(&self, point_count: i64, vertices: &Value, offsets: &Value, kinds: &Value, max_polygon_size: i64) -> Option<Result<(), Diagnostic>> {
+        let (id, vertices, offsets, kinds) = (self.guard.0, vertices.clone(), offsets.clone(), kinds.clone());
+        ready_first(&self.shared, id);
+        route(&self.shared, false, move || match scope_of(id) {
+            Ok(r) => r.validate_topology(point_count, &vertices, &offsets, &kinds, max_polygon_size),
+            Err(d) => Some(Err(d)),
+        })
+        .unwrap_or_else(|d| Some(Err(d)))
+    }
+    fn ready(&self) -> bool {
+        scope_ready(&self.shared, self.guard.0)
+    }
+}
+
+/// The cook worker's planes over an owner's: `settle` and `bounds` run on the owner, which
+/// `settle` waits for (it blocks on the device); `materialise` and `release` run where called.
+struct ProxyPlanes {
+    shared: Arc<Shared>,
+    real: Arc<dyn G::PlanesOps>,
+}
+
+impl G::PlanesOps for ProxyPlanes {
+    fn materialise(&self) -> Result<Vec<Vec<f64>>, Diagnostic> {
+        self.real.materialise()
+    }
+    fn settle(&self) -> Result<(), Diagnostic> {
+        let p = self.real.clone();
+        route(&self.shared, true, move || p.settle()).and_then(|r| r)
+    }
+    fn release(&self, held: bool) {
+        self.real.release(held)
+    }
+    fn bounds(&self) -> Option<Vec<f64>> {
+        let p = self.real.clone();
+        route(&self.shared, false, move || p.bounds()).ok().flatten()
+    }
+}
+
+/// A prepared kernel of the owner's backend, run on the owner.
+struct ProxyKernel {
+    shared: Arc<Shared>,
+    kernel: Arc<dyn G::Kernel>,
+}
+
+impl G::Kernel for ProxyKernel {
+    fn run(&self, inputs: &phost_inputs) -> Result<G::Value, Diagnostic> {
+        let (inputs, k) = (inputs.clone(), self.kernel.clone());
+        route(&self.shared, false, move || k.run(&inputs)).and_then(|r| r)
+    }
+    fn readback(&self, value: &G::Value) -> Result<Value, Diagnostic> {
+        let (value, k) = (value.clone(), self.kernel.clone());
+        route(&self.shared, false, move || k.readback(&value)).and_then(|r| r)
+    }
+    fn planes(&self, value: &G::Value) -> Result<G::Planes, Diagnostic> {
+        let (value, k) = (value.clone(), self.kernel.clone());
+        let planes = route(&self.shared, false, move || k.planes(&value)).and_then(|r| r)?;
+        Ok(G::Planes { count: planes.count, width: planes.width, resident: planes.resident, ops: Box::new(ProxyPlanes { shared: self.shared.clone(), real: planes.ops.into() }) })
     }
 }
 
 /// The backend handed to cook workers: every call is served on the owner by `pump`.
-fn proxy(t_: &t) -> Arc<G::Backend> {
+struct ProxyBackend {
+    shared: Arc<Shared>,
+    real: Arc<dyn G::Backend>,
+}
+
+impl G::Backend for ProxyBackend {
+    fn residency(&self, fast: bool) -> Option<Box<dyn G::Residency>> {
+        let real = self.real.clone();
+        let (id, built) = route(&self.shared, false, move || {
+            reap_scopes();
+            real.residency(fast).map(|scope| {
+                let id = NEXT_SCOPE.fetch_add(1, Ordering::SeqCst);
+                let incidence = scope.incidence();
+                SCOPES.with(|s| s.borrow_mut().insert(id, Rc::from(scope)));
+                (id, incidence)
+            })
+        })
+        .ok()??;
+        let guard = Arc::new(ScopeGuard(id));
+        let shared = self.shared.clone();
+        let executor: Arc<dyn c::Resident> = Arc::new(ProxyResident { shared: shared.clone(), guard: guard.clone() });
+        let incidence: G::IncidenceBuilder = {
+            let shared = shared.clone();
+            Arc::new(move |points, streams| {
+                let built = built.clone();
+                route(&shared, false, move || built(points, streams)).and_then(|r| r)
+            })
+        };
+        Some(Box::new(ProxyResidency { shared, guard, executor, incidence }))
+    }
+    fn cost(&self, inputs: Option<&phost_inputs>, fast: bool, packed: &Packed, count: i64) -> Option<f64> {
+        let (inputs, packed, r) = (inputs.cloned(), packed.clone(), self.real.clone());
+        route(&self.shared, false, move || r.cost(inputs.as_ref(), fast, &packed, count)).ok().flatten()
+    }
+    fn prepare(&self, fast: bool, packed: &Packed) -> Result<Arc<dyn G::Kernel>, Diagnostic> {
+        let (packed, r) = (packed.clone(), self.real.clone());
+        let kernel = route(&self.shared, false, move || r.prepare(fast, &packed)).and_then(|r| r)?;
+        Ok(Arc::new(ProxyKernel { shared: self.shared.clone(), kernel }))
+    }
+}
+
+fn proxy(t_: &t) -> Arc<dyn G::Backend> {
     let d = &*t_.0;
     if let Some(p) = &*d.proxy.borrow() {
         return p.clone();
     }
-    let real = backend(t_);
-    let shared = d.shared.clone();
-    let (rs, rr) = (shared.clone(), real.clone());
-    let (cs, cr) = (shared.clone(), real.clone());
-    let (ps, pr) = (shared, real);
-    let proxy = Arc::new(G::Backend {
-        residency: Box::new(move |fast| proxy_residency(&rs, &rr, fast)),
-        cost: Box::new(move |inputs, fast, packed, count| {
-            let (inputs, packed, r) = (inputs.cloned(), packed.clone(), cr.clone());
-            route(&cs, false, Box::new(move || Box::new((r.cost)(inputs.as_ref(), fast, &packed, count)) as Box<dyn Any + Send>))
-                .ok()
-                .and_then(|b| *b.downcast::<Option<f64>>().expect("route type"))
-        }),
-        prepare: Box::new(move |fast, packed| {
-            let (packed, r) = (packed.clone(), pr.clone());
-            let prepared = route(&ps, false, Box::new(move || Box::new((r.prepare)(fast, &packed)) as Box<dyn Any + Send>))
-                .and_then(|b| *b.downcast::<Result<Arc<G::Kernel>, Diagnostic>>().expect("route type"))?;
-            Ok(Arc::new(proxy_kernel(&ps, prepared)))
-        }),
-    });
+    let proxy: Arc<dyn G::Backend> = Arc::new(ProxyBackend { shared: d.shared.clone(), real: backend(t_) });
     *d.proxy.borrow_mut() = Some(proxy.clone());
     proxy
 }

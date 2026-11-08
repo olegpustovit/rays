@@ -246,20 +246,20 @@ fn compute(
     let reference = plan.network.reference;
     if let Some(program) = &plan.states {
         // Device state owns its holders beyond this scope; host consumers read them on demand.
-        let scope = if gpu.fast && !reference { gpu.backend.as_ref().and_then(|b| (b.residency)(true)) } else { None };
+        let scope = if gpu.fast && !reference { gpu.backend.as_ref().and_then(|b| b.residency(true)) } else { None };
         match scope {
             Some(scope) => {
                 let outcome = Executor::force(
                     program,
                     &Executor::ForceOptions {
-                        resident: Some(scope.executor.clone()),
+                        resident: Some(scope.executor().clone()),
                         state: Some(state.clone()),
                         reference,
                         ..Executor::ForceOptions::default()
                     },
                     live,
                 );
-                (scope.executor.close)();
+                scope.executor().close();
                 outcome?;
             }
             None => {

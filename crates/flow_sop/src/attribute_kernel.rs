@@ -3330,7 +3330,7 @@ assert_eq!(bits(&output), bits(&with_attr(&original, owner, "aliased", pack(widt
         assert_eq!(Display_sink::priced(&[(100, 3.0), (1000, 2.0), (1_000_000, 0.5)], 400), Some(2.0 * 400.0));
         struct NoKernel;
         impl Gpu::Backend for NoKernel {
-            fn prepare(&self, _: bool, _: &flow_ir::Packed) -> Result<Arc<dyn Gpu::Kernel>, Diagnostic> { Err(fail("E_TEST", "no kernel")) }
+            fn prepare(&self, _: bool, _: &flow_ir::packed::T) -> Result<Arc<dyn Gpu::Kernel>, Diagnostic> { Err(fail("E_TEST", "no kernel")) }
         }
         let backend: Arc<dyn Gpu::Backend> = Arc::new(NoKernel);
         let live = Display_sink::live();

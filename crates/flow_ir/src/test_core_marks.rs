@@ -424,6 +424,28 @@ fn compatible_regions_group_into_one_fused_dispatch() {
     assert!(fail(Some(declining)) == cpu);
 }
 
+/// Records the inputs of each dispatch; nothing is read back.
+struct FusedBackend { seen: Arc<Mutex<Vec<Vec<Arc<Vec<f64>>>>>>, serial: Arc<AtomicI64> }
+struct FusedKernel { width: i64, seen: Arc<Mutex<Vec<Vec<Arc<Vec<f64>>>>>>, serial: Arc<AtomicI64> }
+
+impl Gpu::Backend for FusedBackend {
+    fn cost(&self, _inputs: Option<&packed::Inputs>, _fast: bool, _packed: &packed::T, _count: i64) -> Option<f64> { Some(0.) }
+    fn prepare(&self, _fast: bool, packed: &packed::T) -> Result<Arc<dyn Gpu::Kernel>, rays_diagnostic::Diagnostic> {
+        let width = host::view(packed).outputs[0].len() as i64;
+        Ok(Arc::new(FusedKernel { width, seen: self.seen.clone(), serial: self.serial.clone() }))
+    }
+}
+
+impl Gpu::Kernel for FusedKernel {
+    fn run(&self, inputs: &packed::Inputs) -> Result<Gpu::Value, rays_diagnostic::Diagnostic> {
+        self.seen.lock().unwrap().insert(0, inputs.arrays.clone());
+        let stamp = self.serial.fetch_add(1, Ordering::SeqCst) + 1;
+        Ok(Gpu::Value { identity: 1, output: 0, count: inputs.count, width: self.width, stamp, gpu_seconds: None })
+    }
+    fn readback(&self, _value: &Gpu::Value) -> Result<Value, rays_diagnostic::Diagnostic> { unreachable!("no readback in this test") }
+    fn planes(&self, _value: &Gpu::Value) -> Result<Gpu::Planes, rays_diagnostic::Diagnostic> { unreachable!("no planes in this test") }
+}
+
 #[test]
 fn fused_device_dispatches_share_their_inputs_and_follow_the_frame_count() {
     let seen: Arc<Mutex<Vec<Vec<Arc<Vec<f64>>>>>> = Arc::new(Mutex::new(Vec::new()));
@@ -431,24 +453,7 @@ fn fused_device_dispatches_share_their_inputs_and_follow_the_frame_count() {
     let backend = {
         let seen = seen.clone();
         let serial = serial.clone();
-        Gpu::Backend {
-            residency: Box::new(|_| None),
-            cost: Box::new(|_, _, _, _| Some(0.)),
-            prepare: Box::new(move |_fast, packed| {
-                let width = host::view(packed).outputs[0].len() as i64;
-                let seen = seen.clone();
-                let serial = serial.clone();
-                Ok(Arc::new(Gpu::Kernel {
-                    run: Box::new(move |inputs| {
-                        seen.lock().unwrap().insert(0, inputs.arrays.clone());
-                        let stamp = serial.fetch_add(1, Ordering::SeqCst) + 1;
-                        Ok(Gpu::Value { identity: 1, output: 0, count: inputs.count, width, stamp, gpu_seconds: None })
-                    }),
-                    readback: Box::new(|_| unreachable!("no readback in this test")),
-                    planes: Box::new(|_| unreachable!("no planes in this test")),
-                }))
-            }),
-        }
+        FusedBackend { seen, serial }
     };
     let gpu = Gpu::Config { backend: Some(Arc::new(backend)), fast: true, policy: Gpu::Policy::Qualification, readback_per_float: None };
     let display = Rc::new(Executor::region_display(Some(gpu), None, None));

@@ -2,7 +2,9 @@
 //! Arc-backed placeholders are immutable; exact publication/readback checks detect accidental host reads.
 mod common;
 use flow_gpu::{host as h,run};
-use flow_ir::{flow_ir::Gpu,core_exec};
+use common::{Observe,Seen};
+use flow_ir::{flow_ir::Gpu,core_exec,packed};
+use rays_diagnostic::Diagnostic;
 use flow_sop::{lower,value_lane,topology_kernel,topology_kernel_impl};
 use flow_syntax::{syntax,ty::Ty,value::Value};
 use rdk_core::cancel;
@@ -28,38 +30,48 @@ fn read(geometry:&g::T,count:i64,case:&str){
     assert_eq!(t.primitive_offsets.as_slice(),(0..=prims).map(|i|3*i).collect::<Vec<_>>());assert_eq!(t.primitive_kinds.as_ref(),vec![0;prims as usize]);
     for i in 0..3*count{assert_eq!(Float3::get(g::positions(geometry),i).unwrap(),(i as f64,0.,0.));}
 }
+/// A residency whose executor is another's; the rest is the base's.
+struct Wrapped{base:Box<dyn Gpu::Residency>,executor:Arc<dyn core_exec::Resident>}
+impl Gpu::Residency for Wrapped{
+    fn executor(&self)->&Arc<dyn core_exec::Resident>{&self.executor}
+    fn retain_uint32(&self,v:&Value)->Option<Gpu::Integers>{self.base.retain_uint32(v)}
+    fn retain_float(&self,v:&Value)->Option<Gpu::Planes>{self.base.retain_float(v)}
+    fn pack_planes(&self,v:&[Value;3])->Result<Option<Value>,Diagnostic>{self.base.pack_planes(v)}
+    fn incidence(&self)->Gpu::IncidenceBuilder{self.base.incidence()}
+    fn validate_topology(&self,n:i64,v:&Value,o:&Value,k:&Value,max:i64)->Option<Result<(),Diagnostic>>{self.base.validate_topology(n,v,o,k,max)}
+    fn ready(&self)->bool{self.base.ready()}
+}
+/// A backend whose residencies are observed: once the device has dispatched, `cancel_case` cancels
+/// the cook at its next settle or count, and a close is counted.
+struct Watched{base:Box<dyn Gpu::Backend>,cancel:Arc<cancel::T>,closes:Arc<AtomicUsize>,cancel_case:bool}
+impl Gpu::Backend for Watched{
+    fn residency(&self,fast:bool)->Option<Box<dyn Gpu::Residency>>{
+        let base=self.base.residency(fast)?;
+        // Retained-stream callbacks share this executor; observe it by delegation.
+        let dispatched=AtomicBool::new(false);let(cancel,closes,cancel_case)=(self.cancel.clone(),self.closes.clone(),self.cancel_case);
+        let executor=Arc::new(Observe{base:base.executor().clone(),one_by_one:true,seen:Box::new(move|seen|match seen{
+            Seen::Invoke(Some(_))=>dispatched.store(true,Ordering::SeqCst),
+            Seen::Settle|Seen::Count(Some(_)) if cancel_case&&dispatched.load(Ordering::SeqCst)=>cancel::cancel(&cancel),
+            Seen::Close if dispatched.load(Ordering::SeqCst)=>{closes.fetch_add(1,Ordering::SeqCst);}
+            _=>{}
+        })});
+        Some(Box::new(Wrapped{base,executor}))
+    }
+    fn cost(&self,inputs:Option<&packed::Inputs>,fast:bool,packed:&packed::T,count:i64)->Option<f64>{self.base.cost(inputs,fast,packed,count)}
+    fn prepare(&self,fast:bool,packed:&packed::T)->Result<Arc<dyn Gpu::Kernel>,Diagnostic>{self.base.prepare(fast,packed)}
+}
 fn run_case(test:&str,empty_offset:bool){
     assert!(common::gpu(),"native SOP mesh qualification requires a real GPU");common::release_keepalive();let baseline=ogpu::impl_::live_handles().unwrap();
     assert!(common::gpu());let gpu=common::lease();let host=h::create(&||0.,&gpu);
     let host_call=test.starts_with("host");let case=match test{"host"=>"valid","host_twice"=>"twice","host_cpu"=>"cpu","host_cancel"=>"cancel","host_negative"=>"negative","host_dynamic"=>"dynamic","host_overflow"=>"overflow","host_vertex"=>"vertex","host_points"=>"points",c=>c};
     let bad=!matches!(case,"valid"|"dynamic"|"cpu"|"cancel"|"twice"|"points"|"overflow");
     if empty_offset{
-        let backend=h::backend(&host);let scope=(backend.residency)(true).expect("native residency");let offset=(scope.executor.fill)(&Ty::Array(Box::new(Ty::Int)),1,&Value::Int(1)).unwrap().unwrap();
+        let backend=h::backend(&host);let scope=backend.residency(true).expect("native residency");let offset=scope.executor().fill(&Ty::Array(Box::new(Ty::Int)),1,&Value::Int(1)).unwrap().unwrap();
         let args=vec![("points".into(),Value::Vec3_array(Arc::new(vec![]))),("vertex_points".into(),Value::Int_array(Arc::new(vec![]))),("primitive_offsets".into(),offset),("kinds".into(),Value::Int_array(Arc::new(vec![])))];
-        let d=topology_kernel_impl::mesh_resident(None,&scope,&args).expect("resident path").err().expect("malformed empty offset accepted");assert_eq!((d.code.as_str(),d.message.as_str()),("E_TOPOLOGY","Topology: first primitive offset must be zero"));(scope.executor.close)();assert_eq!((h::stats(&host).payload_readback_bytes,h::stats(&host).validation_readback_bytes),(0,36));
+        let d=topology_kernel_impl::mesh_resident(None,&*scope,&args).expect("resident path").err().expect("malformed empty offset accepted");assert_eq!((d.code.as_str(),d.message.as_str()),("E_TOPOLOGY","Topology: first primitive offset must be zero"));scope.executor().close();assert_eq!((h::stats(&host).payload_readback_bytes,h::stats(&host).validation_readback_bytes),(0,36));
     }
-    let cancel=Arc::new(cancel::create());let closes=Arc::new(AtomicUsize::new(0));let backend=h::backend(&host);let residency=backend.residency;let cancel_wrap=cancel.clone();let closes_wrap=closes.clone();let cancel_case=case=="cancel";
-    let backend=Gpu::Backend{residency:Box::new(move|fast|residency(fast).map(|scope|{
-        // Retained-stream callbacks share this executor; observe it by delegation.
-        let dispatched=Arc::new(AtomicBool::new(false));let base=scope.executor;let invoke=base.clone();let settle=base.clone();let count=base.clone();let close=base.clone();
-        let inv=dispatched.clone();let set=dispatched.clone();let cnt=dispatched.clone();let cancel_set=cancel_wrap.clone();let cancel_count=cancel_wrap.clone();let closes=closes_wrap.clone();
-        let executor=core_exec::Resident{
-            invoke_all:Box::new(|_,_,_,_,_|Ok(None)),
-            invoke:Box::new(move|p,args,locals,live|{let result=(invoke.invoke)(p,args,locals,live)?;if result.is_some(){inv.store(true,Ordering::SeqCst);}Ok(result)}),
-            settle:Box::new(move||{(settle.settle)()?;if cancel_case&&set.load(Ordering::SeqCst){cancel::cancel(&cancel_set);}Ok(())}),
-            count:Box::new(move|v|{let n=(count.count)(v)?;if cancel_case&&cnt.load(Ordering::SeqCst)&&n.is_some(){cancel::cancel(&cancel_count);}Ok(n)}),
-            close:Box::new(move||{if dispatched.load(Ordering::SeqCst){closes.fetch_add(1,Ordering::SeqCst);}(close.close)()}),
-            fill:Box::new({let b=base.clone();move|ty,n,v|(b.fill)(ty,n,v)}),
-            unfold:Box::new({let b=base.clone();move|p,args,n,v,locals,live|(b.unfold)(p,args,n,v,locals,live)}),
-            compact:Box::new({let b=base.clone();move|v|(b.compact)(v)}),
-            coerce:Box::new({let b=base.clone();move|ty,v|(b.coerce)(ty,v)}),
-            concat:Box::new({let b=base.clone();move|a,c|(b.concat)(a,c)}),
-            finish:Box::new({let b=base.clone();move|v|(b.finish)(v)}),
-            keep:Box::new({let b=base.clone();move|v|(b.keep)(v)}),
-            capacity:Box::new({let b=base.clone();move|v|(b.capacity)(v)}),
-            range:Box::new(move|ty,v,div,n|(base.range)(ty,v,div,n))};
-        Gpu::Residency{executor:Arc::new(executor),..scope}
-    })),..backend};
+    let cancel=Arc::new(cancel::create());let closes=Arc::new(AtomicUsize::new(0));
+    let backend=Watched{base:h::backend(&host),cancel:cancel.clone(),closes:closes.clone(),cancel_case:case=="cancel"};
     let config=Gpu::Config{backend:Some(Arc::new(backend)),fast:true,policy:Gpu::Policy::Qualification,readback_per_float:None};
     let lowered=lower::workspace(None,vec![],lower::Options{defer:true,gpu:config.clone(),..Default::default()},&syntax::parse(&source(host_call,case)).unwrap()).unwrap_or_else(|d|panic!("{}",rays_diagnostic::to_string(&d)));
     let graph=&lowered.graphs[0];let resolved=value_lane::resolve(Some(&config),None,&value_lane::create(None),0.,&graph.network).unwrap();let root=edit::compile_node(&resolved.geometry,graph.root.unwrap()).unwrap();if host_call{assert_eq!(node::operation(&root),"flow.geometry_select");}
@@ -91,7 +103,7 @@ fn static_topology_stays_resident() {
     assert!(common::gpu());
     let gpu = common::lease();
     let host = h::create(&|| 0., &gpu);
-    let config = Gpu::Config { backend: Some(Arc::new(h::backend(&host))), fast: true, policy: Gpu::Policy::Qualification, ..Gpu::default() };
+    let config = Gpu::Config { backend: Some(h::backend(&host).into()), fast: true, policy: Gpu::Policy::Qualification, ..Gpu::default() };
     let text = "(workspace static_mesh (graph g :context sop (sop/mesh :points (exact (map (fn [(i : int)] [(+ (float i) t) 0. 0.]) (array/range 15000 :type int))) :vertex_points (exact (array/range 15000 :type int)) :primitive_offsets (exact (map (fn [(i : int)] (int/mul i 3)) (array/range 5001 :type int))) :kinds (array/int 5000))))";
     let lowered = lower::workspace(None, Vec::new(), lower::Options { gpu: config, defer: true, ..Default::default() }, &syntax::parse(text).unwrap()).unwrap();
     let graph = &lowered.graphs[0];

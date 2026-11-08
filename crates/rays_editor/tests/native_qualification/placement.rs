@@ -4,6 +4,7 @@ use flow_native::workspace_gpu as gpu;
 use flow_ir::{flow_ir::{Gpu, Executor, Profile, Cost, Placement, PlacementReason as Reason}, packed};
 use flow_sop::{lower, value_lane};
 use flow_syntax::value::Value;
+use rays_diagnostic::Diagnostic;
 use rdk_core::{geometry as g, packed::Float3};
 use rays::{canvas, scene3};
 use rays_math::vec3;
@@ -37,7 +38,7 @@ fn calibration() {
         assert_eq!(config.policy,Gpu::Policy::Measured);
         let backend = config.backend.as_ref().unwrap();
         let stats = || gpu::image_stats(owner).0;
-        let cost = |p: &packed::T, i: Option<&packed::Inputs>| (backend.cost)(i,true,p,32768);
+        let cost = |p: &packed::T, i: Option<&packed::Inputs>| backend.cost(i,true,p,32768);
         let before = stats();
         let seconds = cost(&program,None);
         assert!(seconds.is_some_and(|s| s.is_finite() && s>=0.));
@@ -91,10 +92,10 @@ fn calibration() {
         assert!(cost(&mixed,Some(&mixed_inputs)).is_some());
         let cpu_mix = stats();
         assert_eq!(cpu_mix.input_uploaded_bytes-before_cpu_mix.input_uploaded_bytes,4*2*32768*4);
-        let producer = ok((backend.prepare)(true,&ranged));
+        let producer = ok(backend.prepare(true,&ranged));
         let producer_inputs = inputs(&ranged,true,0.);
-        let kept = ok((producer.planes)(&ok((producer.run)(&producer_inputs))));
-        ok((kept.settle)());
+        let kept = ok(producer.planes(&ok(producer.run(&producer_inputs))));
+        ok(kept.settle());
         let placeholder = match kept.resident.as_ref().unwrap() { Value::Float_array(v)=>v.clone(),_=>panic!("float resident expected") };
         let held_inputs = packed::Inputs { arrays:vec![placeholder,mixed_inputs.arrays[1].clone()],..mixed_inputs.clone() };
         let before_held = stats();
@@ -105,8 +106,8 @@ fn calibration() {
         assert_eq!(held_done.payload_readback_bytes,before_held.payload_readback_bytes);
         assert_eq!(cost(&mixed,Some(&held_inputs)),held_cost);
         assert_eq!(stats(),held_done);
-        assert_eq!((kept.materialise)().unwrap()[0][32767],32767.);
-        (kept.release)(false);
+        assert_eq!(kept.materialise().unwrap()[0][32767],32767.);
+        kept.release(false);
         let recovered_kernel = compile("(if (> t 0.) (* (* (+ i 1.) 1e20) 1e20) 0.)");
         assert_eq!(cost(&recovered_kernel,Some(&inputs(&recovered_kernel,true,1.))),None);
         let good_frame = inputs(&recovered_kernel,true,0.);
@@ -172,13 +173,7 @@ fn chain_counterexamples() {
             let backend = config.backend.as_ref().unwrap();
             let device_ran = Arc::new(AtomicBool::new(false));
             let on_device = Arc::new(AtomicBool::new(false));
-            let (ran, on, original) = (device_ran.clone(),on_device.clone(),backend.clone());
-            let prepare_backend = backend.clone(); let cost_backend = backend.clone();
-            let wrapped = Arc::new(Gpu::Backend {
-                residency:Box::new(move |fast| {ran.store(true,Ordering::SeqCst);on.store(true,Ordering::SeqCst);(original.residency)(fast)}),
-                prepare:Box::new(move |fast,p| (prepare_backend.prepare)(fast,p)),
-                cost:Box::new(move |i,fast,p,n| (cost_backend.cost)(i,fast,p,n)),
-            });
+            let wrapped = Arc::new(Observed { ran: device_ran.clone(), on: on_device.clone(), inner: backend.clone() });
             let now = Mutex::new(0.);
             let lowered = ok(lower::workspace(None,vec![],lower::Options {
                 gpu:Gpu::Config {backend:Some(wrapped),..config.clone()},defer:true,
@@ -345,4 +340,12 @@ fn isogrid_generations() {
 }
 pub fn cases() -> Vec<(&'static str, fn())> {
     vec![("native_placement_calibration",calibration),("native_placement_chain_counterexamples",chain_counterexamples),("native_placement_retained_generations",retained_generations),("native_placement_isogrid_generations",isogrid_generations)]
+}
+
+/// A backend that records that a residency scope was opened, otherwise forwarding to `inner`.
+struct Observed { ran: Arc<AtomicBool>, on: Arc<AtomicBool>, inner: Arc<dyn Gpu::Backend> }
+impl Gpu::Backend for Observed {
+    fn residency(&self, fast: bool) -> Option<Box<dyn Gpu::Residency>> { self.ran.store(true,Ordering::SeqCst); self.on.store(true,Ordering::SeqCst); self.inner.residency(fast) }
+    fn cost(&self, i: Option<&packed::Inputs>, fast: bool, p: &packed::T, n: i64) -> Option<f64> { self.inner.cost(i,fast,p,n) }
+    fn prepare(&self, fast: bool, p: &packed::T) -> Result<Arc<dyn Gpu::Kernel>, Diagnostic> { self.inner.prepare(fast,p) }
 }

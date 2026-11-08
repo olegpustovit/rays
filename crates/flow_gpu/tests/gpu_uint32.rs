@@ -7,6 +7,7 @@ mod common;
 use common::test_program as tp;
 use flow_gpu::{host, pipelines, run};
 use flow_ir::flow_ir::{Executor, Gpu};
+use flow_ir::flow_ir::Gpu::Residency as _;
 use flow_ir::packed::{self, host as phost};
 use flow_shader::emit;
 use flow_syntax::ty::Ty;
@@ -35,6 +36,10 @@ fn force_strict(p: &packed::T, t: f64) -> Value {
     tp::ok(packed::force(p, &live(t), &packed::ForceOptions { strict: true, ..Default::default() }))
 }
 
+/// The native holder behind a backend-neutral integer stream.
+fn native(stream: &Gpu::Integers) -> &run::Uint32Holder {
+    stream.storage.as_ref().and_then(|s| s.downcast_ref()).expect("native uint32 storage")
+}
 fn ints(v: &Value) -> Vec<i64> {
     match v {
         Value::Int_array(a) => (**a).clone(),
@@ -42,7 +47,7 @@ fn ints(v: &Value) -> Vec<i64> {
     }
 }
 
-fn setup() -> Option<(renderer::renderer::gpu, pipelines::T)> {
+fn setup() -> Option<(renderer::renderer::Gpu, pipelines::T)> {
     if !common::gpu() {
         return None;
     }
@@ -51,7 +56,7 @@ fn setup() -> Option<(renderer::renderer::gpu, pipelines::T)> {
     Some((lease, pipes))
 }
 
-fn compaction(lease: &renderer::renderer::gpu, pipes: &pipelines::T, n: i64, limited: bool) {
+fn compaction(lease: &renderer::renderer::Gpu, pipes: &pipelines::T, n: i64, limited: bool) {
     let queue = renderer::renderer::gpu_queue(lease);
     let device = renderer::renderer::gpu_device(lease);
     let mut buffers: Vec<b::Buffer> = vec![];
@@ -115,58 +120,58 @@ fn resident_values() {
     for length in [0i64, 1, 1025, 2049] {
         let before = host::stats(&h).payload_readback_bytes;
         let scope = host::resident_scope(true, true, &h);
-        let resident = scope.executor.clone();
-        let range = (resident.range)(&int_array, &Value::Int(length), 1, length).unwrap().expect("range");
-        let kept = (resident.compact)(&range).unwrap().expect("compact");
-        let filled = (resident.fill)(&int_array, length, &Value::Int(4294967295)).unwrap().expect("fill");
-        assert!((resident.fill)(&int_array, length, &Value::Int(-1)).unwrap().is_none());
-        (resident.settle)().unwrap();
+        let resident = scope.executor().clone();
+        let range = resident.range(&int_array, &Value::Int(length), 1, length).unwrap().expect("range");
+        let kept = resident.compact(&range).unwrap().expect("compact");
+        let filled = resident.fill(&int_array, length, &Value::Int(4294967295)).unwrap().expect("fill");
+        assert!(resident.fill(&int_array, length, &Value::Int(-1)).unwrap().is_none());
+        resident.settle().unwrap();
         assert_eq!(host::stats(&h).payload_readback_bytes, before);
-        assert_eq!((resident.count)(&kept).unwrap(), Some((length - 1).max(0)));
-        let kept = (scope.retain_uint32)(&kept).expect("kept");
-        let range = (scope.retain_uint32)(&range).expect("range");
-        let filled = (scope.retain_uint32)(&filled).expect("filled");
-        assert!(!Arc::ptr_eq(&kept.materialise, &range.materialise) && !Arc::ptr_eq(&range.materialise, &filled.materialise));
-        (resident.close)();
+        assert_eq!(resident.count(&kept).unwrap(), Some((length - 1).max(0)));
+        let kept = scope.retain_uint32(&kept).expect("kept");
+        let range = scope.retain_uint32(&range).expect("range");
+        let filled = scope.retain_uint32(&filled).expect("filled");
+        assert!(!Arc::ptr_eq(&native(&kept).materialise, &native(&range).materialise) && !Arc::ptr_eq(&native(&range).materialise, &native(&filled).materialise));
+        resident.close();
         assert_eq!(host::stats(&h).payload_readback_bytes, before);
-        assert_eq!((kept.materialise)().unwrap(), (1..=(length - 1).max(0)).collect::<Vec<_>>());
-        assert_eq!((filled.materialise)().unwrap(), vec![4294967295; length as usize]);
-        assert_eq!((range.materialise)().unwrap(), (0..length).collect::<Vec<_>>());
+        assert_eq!(kept.materialise().unwrap(), (1..=(length - 1).max(0)).collect::<Vec<_>>());
+        assert_eq!(filled.materialise().unwrap(), vec![4294967295; length as usize]);
+        assert_eq!(range.materialise().unwrap(), (0..length).collect::<Vec<_>>());
     }
     for small_first in [false, true] {
         let before = host::stats(&h).payload_readback_bytes;
         let scope = host::resident_scope(true, true, &h);
-        let resident = scope.executor.clone();
-        let range = |count: i64| (resident.range)(&int_array, &Value::Int(count), 1, count).unwrap().expect("range");
+        let resident = scope.executor().clone();
+        let range = |count: i64| resident.range(&int_array, &Value::Int(count), 1, count).unwrap().expect("range");
         let large_value = range(1025);
         let small_value = range(17);
-        let first = (scope.retain_uint32)(if small_first { &small_value } else { &large_value }).unwrap();
-        let second = (scope.retain_uint32)(if small_first { &large_value } else { &small_value }).unwrap();
+        let first = scope.retain_uint32(if small_first { &small_value } else { &large_value }).unwrap();
+        let second = scope.retain_uint32(if small_first { &large_value } else { &small_value }).unwrap();
         let (small, large) = if small_first { (first, second) } else { (second, first) };
         assert!(small.count == 17 && large.count == 1025);
         for (holder, count) in [(&small, 17), (&large, 1025)] {
-            let input = phost::floats(holder.resident.as_ref().unwrap()).unwrap().unwrap();
+            let input = phost::floats(native(holder).resident.as_ref().unwrap()).unwrap().unwrap();
             assert!(run::uint32_input(&input));
             assert_eq!(run::held(&input).unwrap().1, count, "resident view lost its logical bound");
         }
-        assert!(Arc::ptr_eq(&(scope.retain_uint32)(&small_value).unwrap().materialise, &small.materialise));
-        assert_eq!((resident.count)(&small_value).unwrap(), Some(17));
-        assert_eq!((resident.count)(&large_value).unwrap(), Some(1025));
-        let (sb, sn, _, su) = (small.pin)().expect("small pin");
-        let (lb, ln, _, lu) = (large.pin)().expect("large pin");
+        assert!(Arc::ptr_eq(&native(&scope.retain_uint32(&small_value).unwrap()).materialise, &native(&small).materialise));
+        assert_eq!(resident.count(&small_value).unwrap(), Some(17));
+        assert_eq!(resident.count(&large_value).unwrap(), Some(1025));
+        let (sb, sn, _, su) = run::pin_integers(&small).expect("small pin");
+        let (lb, ln, _, lu) = run::pin_integers(&large).expect("large pin");
         assert!(b::buffer_id(&sb) == b::buffer_id(&lb) && sn == 17 && ln == 1025);
         su();
         lu();
-        let prefix = (small.materialise)().unwrap();
+        let prefix = small.materialise().unwrap();
         assert_eq!(prefix, (0..17).collect::<Vec<_>>());
-        (small.release)(false);
-        let copied = (resident.compact)(&large_value).unwrap().expect("compact");
-        assert_eq!((resident.count)(&copied).unwrap(), Some(1024));
-        let copied = (scope.retain_uint32)(&copied).unwrap();
-        (resident.close)();
-        assert_eq!((large.materialise)().unwrap(), (0..1025).collect::<Vec<_>>());
+        small.release(false);
+        let copied = resident.compact(&large_value).unwrap().expect("compact");
+        assert_eq!(resident.count(&copied).unwrap(), Some(1024));
+        let copied = scope.retain_uint32(&copied).unwrap();
+        resident.close();
+        assert_eq!(large.materialise().unwrap(), (0..1025).collect::<Vec<_>>());
         assert_eq!(host::stats(&h).payload_readback_bytes - before, 1025 * 4);
-        assert_eq!((copied.materialise)().unwrap(), (1..=1024).collect::<Vec<_>>());
+        assert_eq!(copied.materialise().unwrap(), (1..=1024).collect::<Vec<_>>());
     }
     host::close(&h);
 }
@@ -203,8 +208,8 @@ fn kinds_of_values() {
         let h = host::create(&|| 0.0, &lease);
         for time in [0.0, 1.0] {
             let before_run = host::stats(&h);
-            let scope = ((host::backend(&h)).residency)(true).expect("residency");
-            let resident = scope.executor.clone();
+            let scope = host::backend(&h).residency(true).expect("residency");
+            let resident = scope.executor().clone();
             let result = tp::ok(Executor::force(&compiled, &Executor::ForceOptions { strict: true, resident: Some(resident.clone()), ..Default::default() }, &live(time)));
             if no_read {
                 assert_eq!(host::stats(&h).payload_readback_bytes, before_run.payload_readback_bytes);
@@ -212,25 +217,25 @@ fn kinds_of_values() {
             if let Value::Record(fields) = &result {
                 let get = |n: &str| fields.iter().find(|(k, _)| k == n).map(|(_, v)| v.clone());
                 if let (Some(v), Some(o), Some(k)) = (get("vertex_points"), get("primitive_offsets"), get("kinds")) {
-                    tp::ok((scope.validate_topology)(1026, &v, &o, &k, 3).expect("streams"));
+                    tp::ok(scope.validate_topology(1026, &v, &o, &k, 3).expect("streams"));
                     assert_eq!(host::stats(&h).validation_readback_bytes, before_run.validation_readback_bytes + 36);
                 }
             }
-            fn capture(scope: &Gpu::Residency, v: &Value) -> Box<dyn Fn() -> Value> {
+            fn capture(scope: &dyn Gpu::Residency, v: &Value) -> Box<dyn Fn() -> Value> {
                 match v {
                     Value::Record(fields) => {
                         let fields: Vec<(String, Box<dyn Fn() -> Value>)> = fields.iter().map(|(k, v)| (k.clone(), capture(scope, v))).collect();
                         Box::new(move || Value::Record(fields.iter().map(|(k, make)| (k.clone(), make())).collect()))
                     }
                     Value::Int_array(_) => {
-                        let holder = (scope.retain_uint32)(v).expect("uint32 holder");
-                        Box::new(move || Value::Int_array(Arc::new((holder.materialise)().unwrap())))
+                        let holder = scope.retain_uint32(v).expect("uint32 holder");
+                        Box::new(move || Value::Int_array(Arc::new(holder.materialise().unwrap())))
                     }
                     Value::Float_array(_) | Value::Vec2_array(_) | Value::Vec3_array(_) | Value::Vec4_array(_) => {
-                        let holder = (scope.retain_float)(v).expect("float holder");
+                        let holder = scope.retain_float(v).expect("float holder");
                         let v = v.clone();
                         Box::new(move || {
-                            let planes = (holder.materialise)().unwrap();
+                            let planes = holder.materialise().unwrap();
                             let (c, w) = (holder.count as usize, holder.width as usize);
                             let values = Arc::new((0..c * w).map(|i| planes[i % w][i / w]).collect::<Vec<_>>());
                             match v {
@@ -247,8 +252,8 @@ fn kinds_of_values() {
                     }
                 }
             }
-            let materialise = capture(&scope, &result);
-            (resident.close)();
+            let materialise = capture(&*scope, &result);
+            resident.close();
             if no_read {
                 assert_eq!(host::stats(&h).payload_readback_bytes, before_run.payload_readback_bytes);
             }
@@ -274,11 +279,11 @@ fn holders() {
     let first = dispatch();
     let neutral = run::integers(&first);
     assert!(neutral.count == first.count);
-    assert!((neutral.resident)().is_none(), "an unsettled stream was published");
+    assert!(neutral.resident().is_none(), "an unsettled stream was published");
     assert!(run::pin_integers(&neutral).is_none());
     tp::ok((first.settle)());
-    let resident = run::integers(&first).resident;
-    assert!(resident().is_some());
+    let live = run::integers(&first);
+    assert!(live.resident().is_some());
     assert_eq!(run::Private::readback_bytes(&r), 0);
     let (_, count, valid, unpin) = run::pin_integers(&neutral).expect("pin");
     assert!(count == 1025 && valid());
@@ -292,7 +297,7 @@ fn holders() {
     }
     assert_eq!(run::Private::readback_bytes(&r), 1025 * 4);
     assert_eq!(run::Private::materialisations(&r), 1);
-    assert!(resident().is_none(), "a materialised stream retained an opaque device input");
+    assert!(live.resident().is_none(), "a materialised stream retained an opaque device input");
     assert!(valid());
     unpin();
     unpin();
@@ -551,7 +556,7 @@ fn resident_inputs() {
     let holder = tp::ok(run::keep_uint32(&output, None));
     tp::ok((holder.settle)());
     let native = run::integers(&holder);
-    let numeric = phost::floats(&(native.resident)().expect("resident integer input")).unwrap().unwrap();
+    let numeric = phost::floats(&native.resident().expect("resident integer input")).unwrap().unwrap();
     assert!(run::uint32_input(&numeric));
     let h = host::create(&|| 0., &lease);
     for gather in [false, true] {
@@ -568,9 +573,9 @@ fn resident_inputs() {
             inputs.tables[u] = numeric.clone();
         } else { inputs.arrays[0] = numeric.clone(); }
         let backend = host::backend(&h);
-        let kernel = tp::ok((backend.prepare)(true, &consumer));
-        let out = tp::ok((kernel.run)(&inputs));
-        let result = tp::ok((kernel.readback)(&out));
+        let kernel = tp::ok(backend.prepare(true, &consumer));
+        let out = tp::ok(kernel.run(&inputs));
+        let result = tp::ok(kernel.readback(&out));
         assert_eq!(result, Value::Float_array(Arc::new(vec![1.; 1025])), "resident gather={gather}");
         assert_eq!(run::Private::readback_bytes(&r), 0, "consumer read its integer producer back");
     }

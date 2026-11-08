@@ -149,9 +149,9 @@ fn carried() {
 
 
 const STATUS: [(&str, &str, bool, &str); 8] = [
-    ("shift-selected", "(map (fn [(x : int)] (if (> (+ (float x) t) 0.) (float (int/shr x (int/add 63 (int/mod (frame/index) 1)))) (float x))) (array/range 8 :type int))", true, "Integer shift count must be within [0, 62]."),
-    ("shift-untaken", "(map (fn [(x : int)] (if (< (+ (float x) t) 0.) (float (int/shr x (int/add 63 (int/mod (frame/index) 1)))) (float x))) (array/range 8 :type int))", false, ""),
-    ("negative-shift-selected", "(map (fn [(x : int)] (if (> (+ (float x) t) 0.) (float (int/shr x (int/sub (frame/index) (int/add (frame/index) 1)))) (float x))) (array/range 8 :type int))", true, "Integer shift count must be within [0, 62]."),
+    ("shift-selected", "(map (fn [(x : int)] (if (> (+ (float x) t) 0.) (float (int/shr x (int/add 64 (int/mod (frame/index) 1)))) (float x))) (array/range 8 :type int))", true, "Integer shift count must be within [0, 63]."),
+    ("shift-untaken", "(map (fn [(x : int)] (if (< (+ (float x) t) 0.) (float (int/shr x (int/add 64 (int/mod (frame/index) 1)))) (float x))) (array/range 8 :type int))", false, ""),
+    ("negative-shift-selected", "(map (fn [(x : int)] (if (> (+ (float x) t) 0.) (float (int/shr x (int/sub (frame/index) (int/add (frame/index) 1)))) (float x))) (array/range 8 :type int))", true, "Integer shift count must be within [0, 63]."),
     ("negative-shift-untaken", "(map (fn [(x : int)] (if (< (+ (float x) t) 0.) (float (int/shr x (int/sub (frame/index) (int/add (frame/index) 1)))) (float x))) (array/range 8 :type int))", false, ""),
     ("divide-selected", "(map (fn [(x : int)] (if (> (+ (float x) t) 0.) (float (int/div x (int/sub (frame/index) (frame/index)))) (float x))) (array/range 8 :type int))", true, "Integer division by zero."),
     ("divide-untaken", "(map (fn [(x : int)] (if (< (+ (float x) t) 0.) (float (int/div x (int/sub (frame/index) (frame/index)))) (float x))) (array/range 8 :type int))", false, ""),
@@ -184,8 +184,8 @@ fn statuses() {
                         Ok(()) => panic!("empty dispatch cleared an earlier resident GPU error"),
                     }
                     let h = host::create(&|| 0.0, &lease);
-                    let kernel = tp::ok((host::backend(&h).prepare)(true, &program));
-                    let value = tp::ok((kernel.run)(&inputs));
+                    let kernel = tp::ok(host::backend(&h).prepare(true, &program));
+                    let value = tp::ok(kernel.run(&inputs));
                     match host::output(&h, &value) {
                         Err(d) => assert!(d.code == "E_RANGE" && d.message == message),
                         Ok(_) => panic!("Host.output exposed a GPU buffer with a selected integer error"),
@@ -212,11 +212,11 @@ fn empty_and_outputs() {
     // a two-output kernel on a host: an empty run borrows nothing and reads no status
     let program = tp::two_outputs();
     let h = host::create(&|| 0.0, &lease);
-    let kernel = tp::ok((host::backend(&h).prepare)(false, &program));
+    let kernel = tp::ok(host::backend(&h).prepare(false, &program));
     let values = prepare(&program, false, 1.0);
-    let empty = tp::ok((kernel.run)(&phost::Inputs { count: 0, ..values }));
+    let empty = tp::ok(kernel.run(&phost::Inputs { count: 0, ..values }));
     let borrowed = tp::ok(host::output(&h, &empty)).expect("borrowed");
-    let read = tp::ok((kernel.readback)(&Gpu::Value { width: run::width(&borrowed), ..empty.clone() }));
+    let read = tp::ok(kernel.readback(&Gpu::Value { width: run::width(&borrowed), ..empty.clone() }));
     assert!(array(&read).is_empty() && host::stats(&h).status_reads == 0);
     host::close(&h);
     pipelines::close(&pipes);
@@ -266,7 +266,7 @@ fn gather_and_region() {
     println!("fast int32 and gather kernel matches the CPU at 4,096 elements");
     // a drawing's region read back from the device in fast precision, and declined in exact
     let h = host::create(&|| 0.0, &lease);
-    let config = Gpu::Config { backend: Some(Arc::new(host::backend(&h))), ..Gpu::default() };
+    let config = Gpu::Config { backend: Some(host::backend(&h).into()), ..Gpu::default() };
     let exact = Executor::region_readback(Some(config.clone()));
     assert!(tp::ok(exact.call(&program, &live(1.0))).is_none(), "exact precision sent a region to the device");
     let fast = Executor::region_readback(Some(Gpu::Config { fast: true, ..config }));
@@ -294,14 +294,14 @@ fn selected_outputs() {
     assert!(run::select_output(-1, &output).is_none());
     assert!(run::select_output(expected.len() as i64, &output).is_none());
     let h = host::create(&|| 0.0, &lease);
-    let kernel = tp::ok((host::backend(&h).prepare)(false, &program));
-    let value = tp::ok((kernel.run)(&prepare(&program, false, 1.0)));
+    let kernel = tp::ok(host::backend(&h).prepare(false, &program));
+    let value = tp::ok(kernel.run(&prepare(&program, false, 1.0)));
     for (out, e) in expected.iter().enumerate() {
         let width = phost::view(&program).outputs[out].len() as i64;
-        assert_eq!(array(&tp::ok((kernel.readback)(&Gpu::Value { output: out as i64, width, ..value.clone() }))), array(e));
+        assert_eq!(array(&tp::ok(kernel.readback(&Gpu::Value { output: out as i64, width, ..value.clone() }))), array(e));
     }
     assert!(tp::ok(host::output(&h, &Gpu::Value { output: expected.len() as i64, ..value.clone() })).is_none());
-    tp::ok((kernel.run)(&prepare(&program, false, 1.0)));
+    tp::ok(kernel.run(&prepare(&program, false, 1.0)));
     assert!(tp::ok(host::output(&h, &value)).is_none());
     host::close(&h);
     run::close(&r, false);

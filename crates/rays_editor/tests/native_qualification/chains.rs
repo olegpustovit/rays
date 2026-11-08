@@ -4,7 +4,9 @@ mod frames;
 #[path = "chains_scrub.rs"]
 mod scrub;
 pub fn scrub_child() -> bool { scrub::child() }
-use flow_ir::flow_ir::Gpu;
+use flow_ir::{flow_ir::Gpu, packed};
+use flow_syntax::value::Value;
+use rays_diagnostic::Diagnostic;
 use flow_native::workspace_gpu as wg;
 use flow_sop::{lower, value_lane};
 use rdk_core::{attribute as a, geometry as g, packed::Float3 as p};
@@ -50,16 +52,22 @@ fn same(a: &p::T, b: &p::T, tolerance: f64) {
     }
 }
 fn counted(config: &Gpu::Config, count: &Arc<AtomicUsize>) -> Gpu::Config {
-    let b = config.backend.as_ref().unwrap();
-    let (r,c,k) = (b.clone(),b.clone(),b.clone()); let count = count.clone();
-    Gpu::Config { backend: Some(Arc::new(Gpu::Backend {
-        residency: Box::new(move |fast| (r.residency)(fast)),
-        cost: Box::new(move |i,f,p,n| (c.cost)(i,f,p,n)),
-        prepare: Box::new(move |fast,p| { let kernel = (k.prepare)(fast,p)?; let (run,read,planes) = (kernel.clone(),kernel.clone(),kernel.clone()); let count=count.clone(); Ok(Arc::new(Gpu::Kernel {
-            run: Box::new(move |i| { count.fetch_add(1,Ordering::SeqCst); (run.run)(i) }),
-            readback: Box::new(move |v| (read.readback)(v)), planes: Box::new(move |v| (planes.planes)(v)),
-        })) }),
-    })), ..config.clone() }
+    Gpu::Config { backend: Some(Arc::new(Counted { inner: config.backend.clone().unwrap(), count: count.clone() })), ..config.clone() }
+}
+/// A backend whose kernels count their dispatches.
+struct Counted { inner: Arc<dyn Gpu::Backend>, count: Arc<AtomicUsize> }
+struct CountedKernel { inner: Arc<dyn Gpu::Kernel>, count: Arc<AtomicUsize> }
+impl Gpu::Backend for Counted {
+    fn residency(&self, fast: bool) -> Option<Box<dyn Gpu::Residency>> { self.inner.residency(fast) }
+    fn cost(&self, i: Option<&packed::Inputs>, f: bool, p: &packed::T, n: i64) -> Option<f64> { self.inner.cost(i,f,p,n) }
+    fn prepare(&self, fast: bool, p: &packed::T) -> Result<Arc<dyn Gpu::Kernel>, Diagnostic> {
+        Ok(Arc::new(CountedKernel { inner: self.inner.prepare(fast,p)?, count: self.count.clone() }))
+    }
+}
+impl Gpu::Kernel for CountedKernel {
+    fn run(&self, i: &packed::Inputs) -> Result<Gpu::Value, Diagnostic> { self.count.fetch_add(1,Ordering::SeqCst); self.inner.run(i) }
+    fn readback(&self, v: &Gpu::Value) -> Result<Value, Diagnostic> { self.inner.readback(v) }
+    fn planes(&self, v: &Gpu::Value) -> Result<Gpu::Planes, Diagnostic> { self.inner.planes(v) }
 }
 fn grid() {
     assert!(crate::common::gpu(), "native GPU required");

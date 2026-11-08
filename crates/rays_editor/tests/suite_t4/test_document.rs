@@ -21,11 +21,13 @@ pub fn run() {
     lap("start");
     let workspace = of_text(None, TEXT);
     let doc = lowering::of_workspace(&Default::default(), &workspace).unwrap_or_else(|d| panic!("{d:?}"));
-    let backend = Arc::new(Gpu::Backend {
-        residency: Box::new(|_| None),
-        cost: Box::new(|_, _, _, _| None),
-        prepare: Box::new(|_, _| Err(rays_diagnostic::error("E_TEST_GPU".into(), "unused test backend".into(), None, None, None, vec![], vec![]))),
-    });
+    struct Unused;
+    impl Gpu::Backend for Unused {
+        fn prepare(&self, _: bool, _: &flow_ir::packed::T) -> Result<Arc<dyn Gpu::Kernel>, rays_diagnostic::Diagnostic> {
+            Err(rays_diagnostic::error("E_TEST_GPU".into(), "unused test backend".into(), None, None, None, vec![], vec![]))
+        }
+    }
+    let backend: Arc<dyn Gpu::Backend> = Arc::new(Unused);
     let gpu = Gpu::Config { backend: Some(backend.clone()), fast: true, policy: Gpu::Policy::Qualification, readback_per_float: None };
     let carries_gpu = |d: &document::T| {
         let g = &d.workspace.lowered.gpu;

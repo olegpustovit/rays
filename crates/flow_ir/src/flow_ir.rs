@@ -50,21 +50,42 @@ pub mod Gpu {
     /// when a later kernel's source is it. `release(held)` says its owner dropped the result.
     /// `bounds` (a vec3 output, settled and unread) reduces it where it is to its per-component
     /// minima then maxima, six floats; `None` when the backend cannot.
+    pub trait PlanesOps: Send + Sync {
+        fn materialise(&self) -> Result<Vec<Vec<f64>>, Diagnostic>;
+        fn settle(&self) -> Result<(), Diagnostic>;
+        fn release(&self, held: bool);
+        fn bounds(&self) -> Option<Vec<f64>>;
+    }
+
     pub struct Planes {
         pub count: i64,
         pub width: i64,
-        pub materialise: Box<dyn Fn() -> Result<Vec<Vec<f64>>, Diagnostic> + Send + Sync>,
         pub resident: Option<super::Value>,
-        pub settle: Box<dyn Fn() -> Result<(), Diagnostic> + Send + Sync>,
-        pub release: Box<dyn Fn(bool) + Send + Sync>,
-        pub bounds: Box<dyn Fn() -> Option<Vec<f64>> + Send + Sync>,
+        pub ops: Box<dyn PlanesOps>,
     }
 
-    pub struct Kernel {
-        pub run: Box<dyn Fn(&packed::Inputs) -> Result<Value, Diagnostic> + Send + Sync>,
-        pub readback: Box<dyn Fn(&Value) -> Result<super::Value, Diagnostic> + Send + Sync>,
-        /// Keeps the output for a lazy planar store: nothing is read until it materialises.
-        pub planes: Box<dyn Fn(&Value) -> Result<Planes, Diagnostic> + Send + Sync>,
+    impl Planes {
+        pub fn materialise(&self) -> Result<Vec<Vec<f64>>, Diagnostic> { self.ops.materialise() }
+        pub fn settle(&self) -> Result<(), Diagnostic> { self.ops.settle() }
+        pub fn release(&self, held: bool) { self.ops.release(held) }
+        pub fn bounds(&self) -> Option<Vec<f64>> { self.ops.bounds() }
+    }
+
+    /// Planes already read: settled, nothing to release, no device bounds.
+    pub struct ReadPlanes(pub Arc<Vec<Vec<f64>>>);
+    impl PlanesOps for ReadPlanes {
+        fn materialise(&self) -> Result<Vec<Vec<f64>>, Diagnostic> { Ok((*self.0).clone()) }
+        fn settle(&self) -> Result<(), Diagnostic> { Ok(()) }
+        fn release(&self, _held: bool) {}
+        fn bounds(&self) -> Option<Vec<f64>> { None }
+    }
+
+    /// One prepared kernel: `run` dispatches it, `readback` reads an output to the host, `planes`
+    /// keeps the output for a lazy planar store (nothing is read until it materialises).
+    pub trait Kernel: Send + Sync {
+        fn run(&self, inputs: &packed::Inputs) -> Result<Value, Diagnostic>;
+        fn readback(&self, value: &Value) -> Result<super::Value, Diagnostic>;
+        fn planes(&self, value: &Value) -> Result<Planes, Diagnostic>;
     }
 
     /// `planes` from a `readback`, deinterleaving its array.
@@ -76,16 +97,7 @@ pub mod Gpu {
                 let planes: Vec<Vec<f64>> = (0..width)
                     .map(|c| (0..count).map(|i| data[(i * width + c) as usize]).collect())
                     .collect();
-                let planes = Arc::new(planes);
-                Ok(Planes {
-                    count,
-                    width,
-                    materialise: Box::new(move || Ok((*planes).clone())),
-                    resident: None,
-                    settle: Box::new(|| Ok(())),
-                    release: Box::new(|_| {}),
-                    bounds: Box::new(|| None),
-                })
+                Ok(Planes { count, width, resident: None, ops: Box::new(ReadPlanes(Arc::new(planes))) })
             }
             _ => Err(v::fail("E_GPU", "GPU output is not a float array.")),
         }
@@ -94,13 +106,23 @@ pub mod Gpu {
     /// Backend-owned integer storage token; no native handle crosses this boundary.
     pub type IntegerStorage = Arc<dyn std::any::Any + Send + Sync>;
 
+    pub trait IntegersOps: Send + Sync {
+        /// Unread, live device storage; a materialised or released stream declines.
+        fn resident(&self) -> Option<super::Value>;
+        fn materialise(&self) -> Result<Vec<i64>, Diagnostic>;
+        fn release(&self, held: bool);
+    }
+
     pub struct Integers {
         pub count: i64,
-        /// Unread, live device storage; a materialised or released stream declines.
-        pub resident: Box<dyn Fn() -> Option<super::Value> + Send + Sync>,
         pub storage: Option<IntegerStorage>,
-        pub materialise: Box<dyn Fn() -> Result<Vec<i64>, Diagnostic> + Send + Sync>,
-        pub release: Box<dyn Fn(bool) + Send + Sync>,
+        pub ops: Box<dyn IntegersOps>,
+    }
+
+    impl Integers {
+        pub fn resident(&self) -> Option<super::Value> { self.ops.resident() }
+        pub fn materialise(&self) -> Result<Vec<i64>, Diagnostic> { self.ops.materialise() }
+        pub fn release(&self, held: bool) { self.ops.release(held) }
     }
 
     pub struct Incidence {
@@ -115,27 +137,27 @@ pub mod Gpu {
 
     /// A backend-neutral resident value scope. Validate topology before retaining its fields;
     /// retain final streams before closing the executor. `None` declines an unsupported stream.
-    pub struct Residency {
-        pub executor: Arc<core_exec::Resident>,
-        pub retain_uint32: Box<dyn Fn(&super::Value) -> Option<Integers>>,
-        pub retain_float: Box<dyn Fn(&super::Value) -> Option<Planes>>,
-        pub pack_planes: Box<dyn Fn(&[super::Value; 3]) -> Result<Option<super::Value>, Diagnostic>>,
+    pub trait Residency {
+        fn executor(&self) -> &Arc<dyn core_exec::Resident>;
+        fn retain_uint32(&self, value: &super::Value) -> Option<Integers>;
+        fn retain_float(&self, value: &super::Value) -> Option<Planes>;
+        fn pack_planes(&self, values: &[super::Value; 3]) -> Result<Option<super::Value>, Diagnostic>;
         /// May be called after closing the executor; its retained input streams own the data.
-        pub incidence: IncidenceBuilder,
+        fn incidence(&self) -> IncidenceBuilder;
         /// point_count, vertices, offsets, kinds, max_polygon_size
-        pub validate_topology: Box<dyn Fn(i64, &super::Value, &super::Value, &super::Value, i64) -> Option<Result<(), Diagnostic>>>,
+        fn validate_topology(&self, point_count: i64, vertices: &super::Value, offsets: &super::Value, kinds: &super::Value, max_polygon_size: i64) -> Option<Result<(), Diagnostic>>;
         /// Commits the scope's encoded work and says, without waiting, whether the device has
         /// finished it. A cook worker asks this before a call that reads counts, so the owner thread
         /// (which draws frames) never blocks on the device for it.
-        pub ready: Box<dyn Fn() -> bool>,
+        fn ready(&self) -> bool;
     }
 
-    pub struct Backend {
-        pub residency: Box<dyn Fn(bool) -> Option<Residency> + Send + Sync>,
+    pub trait Backend: Send + Sync {
+        fn residency(&self, _fast: bool) -> Option<Box<dyn Residency>> { None }
         /// With prepared inputs, measure their actual layout, uniforms and frame values. Without
         /// them the backend may offer a shape estimate; callers recheck after preparation.
-        pub cost: Box<dyn Fn(Option<&packed::Inputs>, bool, &Packed, i64) -> Option<f64> + Send + Sync>,
-        pub prepare: Box<dyn Fn(bool, &Packed) -> Result<Arc<Kernel>, Diagnostic> + Send + Sync>,
+        fn cost(&self, _inputs: Option<&packed::Inputs>, _fast: bool, _packed: &Packed, _count: i64) -> Option<f64> { None }
+        fn prepare(&self, fast: bool, packed: &Packed) -> Result<Arc<dyn Kernel>, Diagnostic>;
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -143,7 +165,7 @@ pub mod Gpu {
 
     #[derive(Clone)]
     pub struct Config {
-        pub backend: Option<Arc<Backend>>,
+        pub backend: Option<Arc<dyn Backend>>,
         pub fast: bool,
         pub policy: Policy,
         /// Seconds to move one float between device and host, measured on this device. `None`
@@ -948,7 +970,7 @@ impl Qualifier {
             let placed = |inputs: Option<&packed::Inputs>, count: i64| -> bool {
                 if self.gpu.policy == Gpu::Policy::Qualification { return true; }
                 let cpu_seconds = Some(Cost::estimate(Cost::packed(count), count));
-                let device_seconds = (backend.cost)(inputs, fast, &packed, count).and_then(|seconds| {
+                let device_seconds = backend.cost(inputs, fast, &packed, count).and_then(|seconds| {
                     if !(seconds.is_finite() && seconds >= 0.0) { None } else { Some(seconds + Cost::outputs_readback(Some(&self.gpu), &packed, count)) }
                 });
                 let reason = Cost::choose(cpu_seconds, device_seconds, false, 1);
@@ -963,9 +985,9 @@ impl Qualifier {
             }
             let inputs = packed::host::prepare(&packed, &packed::host::PrepareOptions { fast, ..Default::default() }, &input::at_time(0.0)).ok()?;
             if !placed(Some(&inputs), inputs.count) { return None; }
-            let kernel = (backend.prepare)(fast, &packed).ok()?;
-            let output = (kernel.run)(&inputs).ok()?;
-            (kernel.readback)(&output).ok()
+            let kernel = backend.prepare(fast, &packed).ok()?;
+            let output = kernel.run(&inputs).ok()?;
+            kernel.readback(&output).ok()
         })
     }
 
@@ -1117,7 +1139,7 @@ pub mod Executor {
         profile: Option<Arc<Profile::T>>,
         approx: Paths,
         sink: Option<Sink>,
-        gpu_kernel: Mutex<Option<(Arc<Gpu::Backend>, bool, Packed, Arc<Gpu::Kernel>)>>,
+        gpu_kernel: Mutex<Option<(Arc<dyn Gpu::Backend>, bool, Packed, Arc<dyn Gpu::Kernel>)>>,
         record_region: std::sync::OnceLock<Option<(Vec<String>, Packed)>>,
     }
 
@@ -1488,7 +1510,7 @@ pub mod Executor {
 
     #[derive(Clone, Default)]
     pub struct ForceOptions {
-        pub resident: Option<Arc<core_exec::Resident>>,
+        pub resident: Option<Arc<dyn core_exec::Resident>>,
         pub state: Option<e::State>,
         pub elems: Option<Vec<(String, Value)>>,
         pub resolve: Option<core_exec::ResolveFn>,
@@ -1691,7 +1713,7 @@ pub mod Executor {
                 }
                 value if value.is_data_source() => {
                     if let Some(resident) = &self.o.resident {
-                        if let Some(made) = core_exec::fill_constant(resident, value)? { return Ok(made); }
+                        if let Some(made) = core_exec::fill_constant(&**resident, value)? { return Ok(made); }
                     }
                     let forced = reference(self, value, &state)?;
                     self.walk(&forced)
@@ -1884,7 +1906,7 @@ pub mod Executor {
         match force_impl(program, o, None, &Counters::default(), live) {
             Err(_) if o.resident.is_some() => {
                 // A failed field closed the shared scope: earlier fields' placeholders are invalid too.
-                (o.resident.as_ref().unwrap().close)();
+                o.resident.as_ref().unwrap().close();
                 let mut o = o.clone();
                 o.resident = None;
                 force_impl(program, &o, None, &Counters::default(), live)
@@ -1930,8 +1952,8 @@ pub mod Executor {
 
     /// The owner's one-kernel cache.
     pub struct KernelCache {
-        pub cached: Box<dyn Fn() -> Option<(Arc<Gpu::Backend>, bool, Packed, Arc<Gpu::Kernel>)>>,
-        pub store: Box<dyn Fn((Arc<Gpu::Backend>, bool, Packed, Arc<Gpu::Kernel>))>,
+        pub cached: Box<dyn Fn() -> Option<(Arc<dyn Gpu::Backend>, bool, Packed, Arc<dyn Gpu::Kernel>)>>,
+        pub store: Box<dyn Fn((Arc<dyn Gpu::Backend>, bool, Packed, Arc<dyn Gpu::Kernel>))>,
     }
 
     /// A packed region on the GPU when the backend takes it and measures it cheaper. `display` says
@@ -1974,7 +1996,7 @@ pub mod Executor {
         let cheaper = |inputs: Option<&packed::Inputs>, count: i64| -> bool {
             if gpu.policy == Gpu::Policy::Qualification { return true; }
             let cpu_seconds = Some(Cost::estimate(Cost::packed(count), count) + if readback { 0.0 } else { Cost::display_sink(Tier::Cpu_kernel, count) });
-            let device_seconds = (backend.cost)(inputs, fast, packed_region, count).and_then(|seconds| {
+            let device_seconds = backend.cost(inputs, fast, packed_region, count).and_then(|seconds| {
                 if !(seconds.is_finite() && seconds >= 0.0) {
                     None
                 } else {
@@ -2033,7 +2055,7 @@ pub mod Executor {
             Some((previous, previous_fast, p, kernel)) if Arc::ptr_eq(&previous, &backend) && previous_fast == fast && p.residual == packed_region.residual && Arc::ptr_eq(&p.code, &packed_region.code) => kernel,
             _ => {
                 let start = profile.as_ref().map(|p| (p.clock)());
-                let result = (backend.prepare)(fast, packed_region);
+                let result = backend.prepare(fast, packed_region);
                 if let Some(p) = profile {
                     let (_, path, iter) = packed::site(packed_region);
                     Profile::record(
@@ -2051,9 +2073,9 @@ pub mod Executor {
                 kernel
             }
         };
-        let output = timed(Tier::Gpu, &|o: &Gpu::Value| o.gpu_seconds, &mut || (kernel.run)(&inputs))?;
+        let output = timed(Tier::Gpu, &|o: &Gpu::Value| o.gpu_seconds, &mut || kernel.run(&inputs))?;
         if readback {
-            let value = timed_value(profile, packed_region, Tier::Gpu_readback, &mut || (kernel.readback)(&output))?;
+            let value = timed_value(profile, packed_region, Tier::Gpu_readback, &mut || kernel.readback(&output))?;
             Ok(Some(Displayed::Cpu(value)))
         } else {
             Ok(Some(Displayed::Gpu(output)))
@@ -2120,7 +2142,7 @@ pub mod Executor {
         gpu: Gpu::Config,
         profile: Option<Arc<Profile::T>>,
         approx: Paths,
-        kernels: Arc<Mutex<Vec<(bool, Arc<Gpu::Backend>, Packed, Arc<Gpu::Kernel>)>>>,
+        kernels: Arc<Mutex<Vec<(bool, Arc<dyn Gpu::Backend>, Packed, Arc<dyn Gpu::Kernel>)>>>,
         ranges: Arc<Mutex<HashMap<i64, Value>>>,
     }
 
@@ -2205,7 +2227,7 @@ pub mod Executor {
     /// ponytail: a fixed 4,096-element threshold, not the measured cost.
     pub struct RegionReadback {
         gpu: Gpu::Config,
-        kernels: Mutex<Vec<(bool, String, Arc<Gpu::Backend>, Arc<Gpu::Kernel>)>>,
+        kernels: Mutex<Vec<(bool, String, Arc<dyn Gpu::Backend>, Arc<dyn Gpu::Kernel>)>>,
     }
 
     pub fn region_readback(gpu: Option<Gpu::Config>) -> RegionReadback {
@@ -2225,16 +2247,16 @@ pub mod Executor {
             let kernel = match found {
                 Some(k) => k,
                 None => {
-                    let kernel = (backend.prepare)(gpu.fast, packed_region)?;
+                    let kernel = backend.prepare(gpu.fast, packed_region)?;
                     let mut kernels = self.kernels.lock().unwrap();
                     kernels.insert(0, (gpu.fast, key, backend.clone(), kernel.clone()));
                     kernels.truncate(16);
                     kernel
                 }
             };
-            let output = (kernel.run)(&inputs)?;
+            let output = kernel.run(&inputs)?;
             // the device carries integers as floats: an Int map comes back as the Int array it is
-            let value = (kernel.readback)(&output)?;
+            let value = kernel.readback(&output)?;
             Ok(Some(match (value, packed_region.term.ty()) {
                 (Value::Float_array(xs), Ty::Array(inner)) if **inner == Ty::Int => Value::Int_array(Arc::new(xs.iter().map(|x| *x as i64).collect())),
                 (value, _) => value,
@@ -2408,7 +2430,7 @@ pub mod Executor {
                     let device_seconds = if cpu_seconds.is_none() && (first.is_none() || held) {
                         None
                     } else {
-                        (backend.cost)(inputs, true, &merged, count).and_then(|seconds| {
+                        backend.cost(inputs, true, &merged, count).and_then(|seconds| {
                             if !(seconds.is_finite() && seconds >= 0.0) {
                                 None
                             } else {
@@ -2474,19 +2496,19 @@ pub mod Executor {
                     let kernel = match cached {
                         Some((b, true, p, kernel)) if Arc::ptr_eq(&b, &backend) && Arc::ptr_eq(&p.code, &merged.code) && p.residual == merged.residual => kernel,
                         _ => {
-                            let kernel = (backend.prepare)(true, &merged)?;
+                            let kernel = backend.prepare(true, &merged)?;
                             *program.gpu_kernel.lock().unwrap() = Some((backend.clone(), true, merged.clone(), kernel.clone()));
                             kernel
                         }
                     };
-                    let output = (kernel.run)(&inputs)?;
+                    let output = kernel.run(&inputs)?;
                     let mut values: Vec<(String, Gpu::Planes)> = Vec::new();
                     for (i, name) in names.iter().enumerate() {
-                        let planes = (kernel.planes)(&Gpu::Value { output: i as i64, width: merged.outputs[i].len() as i64, ..output.clone() });
+                        let planes = kernel.planes(&Gpu::Value { output: i as i64, width: merged.outputs[i].len() as i64, ..output.clone() });
                         match planes {
                             Ok(planes) => values.push((name.clone(), planes)),
                             Err(d) => {
-                                for (_, earlier) in &values { (earlier.release)(false); }
+                                for (_, earlier) in &values { earlier.release(false); }
                                 return Err(d);
                             }
                         }
@@ -2605,115 +2627,119 @@ mod tests {
         (value, program, prepared)
     }
 
+    /// Forwards to `inner`, except that `settle` fails once two invocations have been made.
+    struct FailingSettle { inner: Arc<dyn core_exec::Resident>, invokes: Arc<AtomicUsize> }
+
+    impl core_exec::Resident for FailingSettle {
+        fn settle(&self) -> Result<(), Diagnostic> {
+            if self.invokes.load(Ordering::SeqCst) >= 2 { return Err(v::fail("E_TEST_STATUS", "second field failed")); }
+            self.inner.settle()
+        }
+        fn fill(&self, a: &Ty, b: i64, c: &Value) -> Result<Option<Value>, Diagnostic> { self.inner.fill(a, b, c) }
+        fn invoke(&self, a: &Packed, b: &[Value], c: &[Value], d: &Frame) -> Result<Option<Value>, Diagnostic> { self.inner.invoke(a, b, c, d) }
+        fn invoke_all(&self, a: &Packed, b: &[Ty], c: &[Value], d: &[Value], e: &Frame) -> Result<Option<Value>, Diagnostic> { self.inner.invoke_all(a, b, c, d, e) }
+        fn unfold(&self, a: &Packed, b: &[Value], c: i64, d: &Value, e: &[Value], f: &Frame) -> Result<Option<Value>, Diagnostic> { self.inner.unfold(a, b, c, d, e, f) }
+        fn compact(&self, a: &Value) -> Result<Option<Value>, Diagnostic> { self.inner.compact(a) }
+        fn coerce(&self, a: &Ty, b: &Value) -> Result<Option<Value>, Diagnostic> { self.inner.coerce(a, b) }
+        fn concat(&self, a: &Value, b: &Value) -> Result<Option<Value>, Diagnostic> { self.inner.concat(a, b) }
+        fn finish(&self, a: &Value) -> Result<Value, Diagnostic> { self.inner.finish(a) }
+        fn keep(&self, a: &Value) -> Result<Option<Value>, Diagnostic> { self.inner.keep(a) }
+        fn count(&self, a: &Value) -> Result<Option<i64>, Diagnostic> { self.inner.count(a) }
+        fn capacity(&self, a: &Value) -> Option<i64> { self.inner.capacity(a) }
+        fn close(&self) { self.inner.close() }
+        fn range(&self, a: &Ty, b: &Value, c: i64, d: i64) -> Result<Option<Value>, Diagnostic> { self.inner.range(a, b, c, d) }
+    }
+
+    /// The device stand-in: `keep` hands out placeholders with excess capacity and deliberately wrong
+    /// contents, so only these callbacks read the actual values without a payload materialisation.
+    struct TestResident {
+        held: Arc<Mutex<Vec<(Value, Value)>>>,
+        invokes: Arc<AtomicUsize>,
+        reads: Arc<AtomicUsize>,
+        closes: Arc<AtomicUsize>,
+        overflow: Arc<AtomicBool>,
+        error: bool,
+        decline: bool,
+    }
+
+    impl TestResident {
+        fn actual(&self, value: &Value) -> Value {
+            self.held.lock().unwrap().iter().find(|(key, _)| core_exec::phys_eq(key, value)).map(|(_, x)| x.clone()).unwrap_or_else(|| value.clone())
+        }
+        fn kept(&self, value: &Value) -> Value {
+            let count = v::array_length(value).unwrap() + 3;
+            let placeholder = match value {
+                Value::Int_array(_) => Value::Int_array(Arc::new(vec![-999; count])),
+                Value::Vec3_array(_) => Value::Vec3_array(Arc::new(vec![-999.0; count * 3])),
+                _ => panic!("unexpected device value"),
+            };
+            self.held.lock().unwrap().insert(0, (placeholder.clone(), value.clone()));
+            placeholder
+        }
+    }
+
+    impl core_exec::Resident for TestResident {
+        fn invoke(&self, packed: &Packed, args: &[Value], _locals: &[Value], live: &Frame) -> Result<Option<Value>, Diagnostic> {
+            if !matches!(packed.term.ty(), Ty::Array(_)) { return Ok(None); }
+            let n = self.invokes.fetch_add(1, Ordering::SeqCst) + 1;
+            if self.decline && n % 2 == 0 { return Ok(None); }
+            let args: Vec<Value> = args.iter().map(|a| self.actual(a)).collect();
+            let bound = packed::host::bind_arguments(packed, &args, None)?;
+            let forced = packed::force(&bound, live, &packed::ForceOptions { strict: true, ..Default::default() })?;
+            Ok(Some(self.kept(&forced)))
+        }
+        fn compact(&self, mask: &Value) -> Result<Option<Value>, Diagnostic> {
+            match self.actual(mask) {
+                Value::Int_array(mask) => {
+                    let indices: Vec<i64> = (0..mask.len()).filter(|k| mask[*k] != 0).map(|k| k as i64).collect();
+                    Ok(Some(self.kept(&Value::Int_array(Arc::new(indices)))))
+                }
+                _ => Ok(None),
+            }
+        }
+        fn finish(&self, value: &Value) -> Result<Value, Diagnostic> {
+            let resolved = self.actual(value);
+            if !core_exec::phys_eq(&resolved, value) { self.reads.fetch_add(1, Ordering::SeqCst); }
+            Ok(resolved)
+        }
+        fn count(&self, value: &Value) -> Result<Option<i64>, Diagnostic> {
+            let resolved = self.actual(value);
+            if core_exec::phys_eq(&resolved, value) { return Ok(None); }
+            self.settle()?;
+            Ok(Some(v::array_length(&resolved)? as i64))
+        }
+        fn close(&self) {
+            self.closes.fetch_add(1, Ordering::SeqCst);
+            self.held.lock().unwrap().clear();
+        }
+        fn settle(&self) -> Result<(), Diagnostic> {
+            if self.overflow.swap(false, Ordering::SeqCst) { return Err(core_exec::resident_overflow()); }
+            if self.error { return Err(v::fail("E_TEST_STATUS", "device status")); }
+            Ok(())
+        }
+    }
+
     struct Device {
-        resident: Arc<core_exec::Resident>,
+        resident: Arc<dyn core_exec::Resident>,
         invokes: Arc<AtomicUsize>,
         reads: Arc<AtomicUsize>,
         closes: Arc<AtomicUsize>,
     }
 
-    /// Placeholders have excess capacity and deliberately wrong contents. Only the device
-    /// callbacks may read their actual values without a payload materialisation.
     fn device(decline: bool, overflow: bool, error: bool) -> Device {
         let held: Arc<Mutex<Vec<(Value, Value)>>> = Arc::new(Mutex::new(Vec::new()));
         let invokes = Arc::new(AtomicUsize::new(0));
         let reads = Arc::new(AtomicUsize::new(0));
         let closes = Arc::new(AtomicUsize::new(0));
         let overflow = Arc::new(AtomicBool::new(overflow));
-        let actual = {
-            let held = held.clone();
-            move |value: &Value| -> Value {
-                held.lock().unwrap().iter().find(|(key, _)| core_exec::phys_eq(key, value)).map(|(_, x)| x.clone()).unwrap_or_else(|| value.clone())
-            }
-        };
-        let keep = {
-            let held = held.clone();
-            move |value: &Value| -> Value {
-                let count = v::array_length(value).unwrap() + 3;
-                let placeholder = match value {
-                    Value::Int_array(_) => Value::Int_array(Arc::new(vec![-999; count])),
-                    Value::Vec3_array(_) => Value::Vec3_array(Arc::new(vec![-999.0; count * 3])),
-                    _ => panic!("unexpected device value"),
-                };
-                held.lock().unwrap().insert(0, (placeholder.clone(), value.clone()));
-                placeholder
-            }
-        };
-        let settle = {
-            let overflow = overflow.clone();
-            move || -> Result<(), Diagnostic> {
-                if overflow.swap(false, Ordering::SeqCst) { return Err(core_exec::resident_overflow()); }
-                if error { return Err(v::fail("E_TEST_STATUS", "device status")); }
-                Ok(())
-            }
-        };
-        let resident = core_exec::Resident {
-            invoke_all: Box::new(|_, _, _, _, _| Ok(None)),
-            invoke: Box::new({
-                let (actual, keep, invokes) = (actual.clone(), keep.clone(), invokes.clone());
-                move |packed, args, _locals, live| {
-                    if !matches!(packed.term.ty(), Ty::Array(_)) { return Ok(None); }
-                    let n = invokes.fetch_add(1, Ordering::SeqCst) + 1;
-                    if decline && n % 2 == 0 { return Ok(None); }
-                    let args: Vec<Value> = args.iter().map(|a| actual(a)).collect();
-                    let bound = packed::host::bind_arguments(packed, &args, None)?;
-                    let forced = packed::force(&bound, live, &packed::ForceOptions { strict: true, ..Default::default() })?;
-                    Ok(Some(keep(&forced)))
-                }
-            }),
-            compact: Box::new({
-                let (actual, keep) = (actual.clone(), keep.clone());
-                move |mask| match actual(mask) {
-                    Value::Int_array(mask) => {
-                        let indices: Vec<i64> = (0..mask.len()).filter(|k| mask[*k] != 0).map(|k| k as i64).collect();
-                        Ok(Some(keep(&Value::Int_array(Arc::new(indices)))))
-                    }
-                    _ => Ok(None),
-                }
-            }),
-            coerce: Box::new(|_, _| Ok(None)),
-            finish: Box::new({
-                let (actual, reads) = (actual.clone(), reads.clone());
-                move |value| {
-                    let resolved = actual(value);
-                    if !core_exec::phys_eq(&resolved, value) { reads.fetch_add(1, Ordering::SeqCst);  }
-                    Ok(resolved)
-                }
-            }),
-            count: Box::new({
-                let (actual, settle) = (actual.clone(), settle.clone());
-                move |value| {
-                    let resolved = actual(value);
-                    if core_exec::phys_eq(&resolved, value) {
-                        Ok(None)
-                    } else {
-                        settle()?;
-                        Ok(Some(v::array_length(&resolved)? as i64))
-                    }
-                }
-            }),
-            close: Box::new({
-                let (closes, held) = (closes.clone(), held.clone());
-                move || {
-                    closes.fetch_add(1, Ordering::SeqCst);
-                    held.lock().unwrap().clear();
-                }
-            }),
-            settle: Box::new(settle),
-            capacity: Box::new(|_| None),
-            range: Box::new(|_, _, _, _| Ok(None)),
-            fill: Box::new(|_, _, _| Ok(None)),
-            concat: Box::new(|_, _| Ok(None)),
-            unfold: Box::new(|_, _, _, _, _, _| Ok(None)),
-            keep: Box::new(|_| Ok(None)),
-        };
+        let resident = TestResident { held, invokes: invokes.clone(), reads: reads.clone(), closes: closes.clone(), overflow, error, decline };
         Device { resident: Arc::new(resident), invokes, reads, closes }
     }
 
     fn materialise(device: &Device, value: &Value) -> Value {
         match value {
             Value::Record(fields) => Value::Record(fields.iter().map(|(k, x)| (k.clone(), materialise(device, x))).collect()),
-            other => (device.resident.finish)(other).unwrap(),
+            other => device.resident.finish(other).unwrap(),
         }
     }
 
@@ -2754,7 +2780,7 @@ mod tests {
                             if cpu { ensure(d.reads.load(Ordering::SeqCst) > 0, "cpu readers read")?; }
                             let reference = e::Host::force_reference(&value, &live, None, None, None).map_err(|x| rays_diagnostic::to_string(&x))?;
                             ensure(materialise(&d, &result) == reference, "matches the reference")?;
-                            (d.resident.close)();
+                            d.resident.close();
                         }
                     }
                 }
@@ -2777,14 +2803,14 @@ mod tests {
         let result = ok(exec(&prepared, &live, &d));
         assert!(d.closes.load(Ordering::SeqCst) == 0 && d.reads.load(Ordering::SeqCst) == 0);
         assert_eq!(materialise(&d, &result), ok(e::Host::force_reference(&value, &live, None, None, None)));
-        (d.resident.close)();
+        d.resident.close();
 
         let (value, _, prepared) = compile_value(&body(false));
         let d = device(false, true, false);
         let result = ok(exec(&prepared, &live, &d));
         assert!(d.closes.load(Ordering::SeqCst) == 1 && d.reads.load(Ordering::SeqCst) == 0);
         assert_eq!(materialise(&d, &result), ok(e::Host::force_reference(&value, &live, None, None, None)));
-        (d.resident.close)();
+        d.resident.close();
 
         let d = device(false, false, true);
         match exec(&prepared, &live, &d) {
@@ -2827,28 +2853,7 @@ mod tests {
         let inner = d.resident.clone();
         let closes = d.closes.clone();
         let reads = d.reads.clone();
-        let resident = core_exec::Resident {
-            settle: Box::new({
-                let (inner, invokes) = (inner.clone(), invokes.clone());
-                move || {
-                    if invokes.load(Ordering::SeqCst) >= 2 { return Err(v::fail("E_TEST_STATUS", "second field failed")); }
-                    (inner.settle)()
-                }
-            }),
-            fill: Box::new({ let i = inner.clone(); move |a, b, c| (i.fill)(a, b, c) }),
-            invoke: Box::new({ let i = inner.clone(); move |a, b, c, d| (i.invoke)(a, b, c, d) }),
-            invoke_all: Box::new({ let i = inner.clone(); move |a, b, c, d, e| (i.invoke_all)(a, b, c, d, e) }),
-            unfold: Box::new({ let i = inner.clone(); move |a, b, c, d, e, f| (i.unfold)(a, b, c, d, e, f) }),
-            compact: Box::new({ let i = inner.clone(); move |a| (i.compact)(a) }),
-            coerce: Box::new({ let i = inner.clone(); move |a, b| (i.coerce)(a, b) }),
-            concat: Box::new({ let i = inner.clone(); move |a, b| (i.concat)(a, b) }),
-            finish: Box::new({ let i = inner.clone(); move |a| (i.finish)(a) }),
-            keep: Box::new({ let i = inner.clone(); move |a| (i.keep)(a) }),
-            count: Box::new({ let i = inner.clone(); move |a| (i.count)(a) }),
-            capacity: Box::new({ let i = inner.clone(); move |a| (i.capacity)(a) }),
-            close: Box::new({ let i = inner.clone(); move || (i.close)() }),
-            range: Box::new({ let i = inner.clone(); move |a, b, c, d| (i.range)(a, b, c, d) }),
-        };
+        let resident = FailingSettle { inner, invokes: invokes.clone() };
         let actual = ok(Executor::force(
             &program,
             &Executor::ForceOptions { strict: true, resident: Some(Arc::new(resident)), ..Default::default() },
@@ -3229,6 +3234,26 @@ mod tests {
         assert!(reasons_of(&qualified, &p(&["img", "a"])).iter().any(|d| d.code == "E_GPU_FORM"));
     }
 
+    /// A device that dispatches nothing: its "kernel" reads back on the CPU and counts its runs.
+    struct StaticBackend { width: i64, shape: Option<f64>, actual: Option<f64>, calls: Arc<AtomicUsize> }
+    struct StaticKernel { width: i64, actual: Option<f64>, calls: Arc<AtomicUsize>, region: Packed }
+
+    impl Gpu::Backend for StaticBackend {
+        fn cost(&self, inputs: Option<&packed::Inputs>, _fast: bool, _packed: &Packed, _count: i64) -> Option<f64> { if inputs.is_some() { self.actual } else { self.shape } }
+        fn prepare(&self, _fast: bool, packed: &Packed) -> Result<Arc<dyn Gpu::Kernel>, Diagnostic> {
+            Ok(Arc::new(StaticKernel { width: self.width, actual: self.actual, calls: self.calls.clone(), region: packed.clone() }))
+        }
+    }
+
+    impl Gpu::Kernel for StaticKernel {
+        fn run(&self, inputs: &packed::Inputs) -> Result<Gpu::Value, Diagnostic> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(Gpu::Value { identity: 1, output: 0, count: inputs.count, width: self.width, stamp: 0, gpu_seconds: self.actual })
+        }
+        fn readback(&self, _value: &Gpu::Value) -> Result<Value, Diagnostic> { packed::force(&self.region, &input::at_time(0.0), &packed::ForceOptions::default()) }
+        fn planes(&self, _value: &Gpu::Value) -> Result<Gpu::Planes, Diagnostic> { Err(v::fail("E_TEST", "static map uses readback, not planes")) }
+    }
+
     fn static_map_case(width: i64, readback_per_float: Option<f64>, shape: Option<f64>, actual: Option<f64>, expected: PlacementReason, dispatched: usize) {
         let host = |width: i64| {
             if width == 1 {
@@ -3242,24 +3267,7 @@ mod tests {
             let ws = host(width);
             let calls = Arc::new(AtomicUsize::new(0));
             let profile = Profile::create(Arc::new(|| 0.0));
-            let backend = Gpu::Backend {
-                residency: Box::new(|_| None),
-                cost: Box::new(move |inputs, _, _, _| if inputs.is_some() { actual } else { shape }),
-                prepare: Box::new({
-                    let calls = calls.clone();
-                    move |_, packed_region| {
-                        let (calls, readback_region) = (calls.clone(), packed_region.clone());
-                        Ok(Arc::new(Gpu::Kernel {
-                            run: Box::new(move |inputs| {
-                                calls.fetch_add(1, Ordering::SeqCst);
-                                Ok(Gpu::Value { identity: 1, output: 0, count: inputs.count, width, stamp: 0, gpu_seconds: actual })
-                            }),
-                            readback: Box::new(move |_| packed::force(&readback_region, &input::at_time(0.0), &packed::ForceOptions::default())),
-                            planes: Box::new(|_| Err(v::fail("E_TEST", "static map uses readback, not planes"))),
-                        }))
-                    }
-                }),
-            };
+            let backend = StaticBackend { width, shape, actual, calls: calls.clone() };
             let gpu = Gpu::Config { backend: Some(Arc::new(backend)), fast: true, policy: Gpu::Policy::Measured, readback_per_float };
             let result = Profile::sample(&profile, &mut || ok(qualify_workspace(&QualifyOptions { record: true, gpu: Some(gpu.clone()), ..Default::default() }, &ws)));
             let expected_value = if width == 1 {

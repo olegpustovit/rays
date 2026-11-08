@@ -161,14 +161,14 @@ fn fixture(name: &str, count: i64) -> packed::T {
 fn prepare(p: &packed::T) -> phost::Inputs { tp::ok(phost::prepare(p, &phost::PrepareOptions::default(), &input::at_time(1.0))) }
 fn dispatch(r: &run::T, v: &phost::Inputs) -> Result<run::Output, rays_diagnostic::Diagnostic> { run::dispatch(r, &run::Options::default(), None, None, v) }
 fn kept(r: &run::T, v: &phost::Inputs) -> Gpu::Planes { tp::ok(run::keep(&tp::ok(dispatch(r, v)), None)) }
-fn settled(r: &run::T, v: &phost::Inputs) -> Gpu::Planes { let p = kept(r, v); tp::ok((p.settle)()); p }
+fn settled(r: &run::T, v: &phost::Inputs) -> Gpu::Planes { let p = kept(r, v); tp::ok(p.settle()); p }
 fn len(p: Vec<Vec<f64>>) -> i64 { p.iter().map(|a| a.len() as i64).sum() }
-fn pinned(r: &run::T, v: &phost::Inputs) -> (Arc<Vec<f64>>, run::Pin, Box<dyn Fn(bool) + Send + Sync>) {
+fn pinned(r: &run::T, v: &phost::Inputs) -> (Arc<Vec<f64>>, run::Pin) {
     let p = settled(r, v);
-    let stand_in = match p.resident.unwrap() { Value::Float_array(a) | Value::Vec2_array(a) | Value::Vec3_array(a) | Value::Vec4_array(a) => a, _ => panic!("no stand-in") };
+    let stand_in = match p.resident.clone().unwrap() { Value::Float_array(a) | Value::Vec2_array(a) | Value::Vec3_array(a) | Value::Vec4_array(a) => a, _ => panic!("no stand-in") };
     let pin = run::pin(&stand_in).expect("pin");
-    (p.release)(true);
-    (stand_in, pin, p.release)
+    p.release(true);
+    (stand_in, pin)
 }
 struct Fixture {
     f: Rc<Faults>, device: b::Device, queue: b::Queue, cache: pipelines::T,
@@ -244,7 +244,7 @@ fn retired_holders_and_discard() {
         for i in 0..24 {
             let p = settled(r, values);
             if i == 0 { views = f.views.get(); }
-            (p.release)(true); drop(p);
+            p.release(true); drop(p);
         }
         assert_eq!(run::Private::materialisations(r), thaws);
         assert!(run::Private::held_buffers(r) <= 2);
@@ -252,17 +252,17 @@ fn retired_holders_and_discard() {
         assert!(f.views.get() == views && f.releases.get() > releases);
         f.working_set.set(Some(4));
         let oldest = settled(r, values); let expected = oldest.count * oldest.width;
-        (oldest.release)(true);
+        oldest.release(true);
         let before = run::Private::materialisations(r);
         let later: Vec<_> = (0..8).map(|_| settled(r, values)).collect();
         assert!(run::Private::materialisations(r) > before);
-        assert_eq!(len((oldest.materialise)().unwrap()), expected);
-        for p in later { (p.release)(false); }
+        assert_eq!(len(oldest.materialise().unwrap()), expected);
+        for p in later { p.release(false); }
         f.working_set.set(None);
         let thaws = run::Private::materialisations(r);
         let live = settled(r, values); run::close(r, true);
         assert_eq!(run::Private::materialisations(r), thaws);
-        assert!((live.materialise)().is_err());
+        assert!(live.materialise().is_err());
         run::close(r, false);
     });
 }
@@ -273,7 +273,7 @@ fn clobber_and_idle_ageing() {
         let free_before = mem::bytes(&free_owner);
         let pool = run::pool();
         let pooled = run::create_owned(Some(&pool), device, queue, cache, kernel);
-        let dead = settled(&pooled, values); (dead.release)(false); drop(dead);
+        let dead = settled(&pooled, values); dead.release(false); drop(dead);
         run::Private::pool_drain(&pool);
         let floats = run::Private::pool_free_floats(&pool); assert!(!floats.is_empty());
         for a in floats { assert!(a.borrow().iter().all(|x| x.is_nan())); }
@@ -291,10 +291,10 @@ fn native_free_budget_size_classes() {
         let pool = run::pool();
         let pooled = run::create_owned(Some(&pool), device, queue, cache, kernel);
         for _ in 0..5 { run::Private::pool_give(&pool, device, 64 << 20); }
-        let small = settled(&pooled, values); (small.release)(false); drop(small);
+        let small = settled(&pooled, values); small.release(false); drop(small);
         run::Private::pool_drain(&pool); assert_eq!(run::Private::pool_free_buffers(&pool), 6);
         for _ in 0..2 { run::Private::pool_give(&pool, device, 128 << 20); }
-        let over = settled(&pooled, values); (over.release)(false); drop(over);
+        let over = settled(&pooled, values); over.release(false); drop(over);
         run::Private::pool_drain(&pool); assert_eq!(run::Private::pool_free_buffers(&pool), 7);
         f.working_set.set(None); run::close(&pooled, true); run::close_pool(&pool);
     });
@@ -304,18 +304,18 @@ fn evicted_and_pinned_holders() {
         let pool = run::pool();
         let evicted = run::create_owned(Some(&pool), device, queue, cache, kernel);
         let retained = kept(&evicted, values); let unread = kept(&evicted, values);
-        (retained.release)(true); run::close(&evicted, false);
+        retained.release(true); run::close(&evicted, false);
         assert_eq!(run::Private::materialisations(&evicted), 0);
-        assert_eq!(len((retained.materialise)().unwrap()), retained.count * retained.width);
+        assert_eq!(len(retained.materialise().unwrap()), retained.count * retained.width);
         run::close_pool(&pool);
-        assert!((unread.materialise)().is_err());
+        assert!(unread.materialise().is_err());
         let pool = run::pool();
         let pooled = run::create_owned(Some(&pool), device, queue, cache, kernel);
-        let (stand_in, (_, _, valid, unpin), release) = pinned(&pooled, values);
+        let (stand_in, (_, _, valid, unpin)) = pinned(&pooled, values);
         assert!(run::pin(&stand_in).is_none());
         assert!(valid() && run::Private::pool_held(&pool) == 1);
-        unpin(); assert!(!valid() && run::Private::pool_held(&pool) == 0); release(true);
-        let (_, (_, _, valid, _), _) = pinned(&pooled, values);
+        unpin(); assert!(!valid() && run::Private::pool_held(&pool) == 0);
+        let (_, (_, _, valid, _)) = pinned(&pooled, values);
         assert!(valid()); run::close(&pooled, true); run::close_pool(&pool); assert!(!valid());
     });
 }
@@ -347,21 +347,20 @@ fn bounds_and_foreign_owned_readback() {
         let sea = run::create_owned(None, device, queue, cache, &tp::ok(emit::kernel(&emit::Options::default(), &packed)));
         let values = prepare(&packed);
         let first = settled(&sea, &values); let c0 = f.creates.get();
-        assert_eq!((first.bounds)(), Some(vec![0., 1., 0., 1023., 1., 0.]));
+        assert_eq!(first.bounds(), Some(vec![0., 1., 0., 1023., 1., 0.]));
         let read = run::Private::readback_bytes(&sea);
         assert_eq!((f.creates.get() - c0, read), (2, 24));
-        (first.bounds)(); assert_eq!(run::Private::readback_bytes(&sea), read);
+        first.bounds(); assert_eq!(run::Private::readback_bytes(&sea), read);
         let second = settled(&sea, &values); let c1 = f.creates.get();
-        (second.bounds)(); assert_eq!(f.creates.get(), c1);
+        second.bounds(); assert_eq!(f.creates.get(), c1);
         assert_eq!(run::Private::readback_bytes(&sea), 2 * read);
         assert_eq!(run::Private::bounds_readback_bytes(&sea), 2 * read);
         // The owner blocks in join: no Run::service/pumping may be necessary.
-        let materialise = first.materialise;
-        let materialise = std::thread::spawn(move || { let data = materialise().unwrap(); assert_eq!(len(data), 1024 * 3); materialise }).join().unwrap();
+        let first = std::thread::spawn(move || { let data = first.materialise().unwrap(); assert_eq!(len(data), 1024 * 3); first }).join().unwrap();
         assert_eq!(run::Private::readback_bytes(&sea), 2 * read + 1024 * 3 * 4);
-        materialise().unwrap(); assert_eq!(run::Private::readback_bytes(&sea), 2 * read + 1024 * 3 * 4);
+        first.materialise().unwrap(); assert_eq!(run::Private::readback_bytes(&sea), 2 * read + 1024 * 3 * 4);
         assert_eq!(run::Private::bounds_readback_bytes(&sea), 2 * read);
-        (first.release)(false); (second.release)(false); run::close(&sea, false);
+        first.release(false); second.release(false); run::close(&sea, false);
     });
 }
 
@@ -372,9 +371,9 @@ fn reduced_bounds_cover_every_point() {
             let sea = run::create_owned(None, device, queue, cache, &tp::ok(emit::kernel(&emit::Options::default(), &packed)));
             let output = settled(&sea, &prepare(&packed));
             let last = (count - 1) as f64;
-            assert_eq!((output.bounds)(), Some(vec![17. - last, 0., 1. - last, 17., last, 1.]), "count {count}");
+            assert_eq!(output.bounds(), Some(vec![17. - last, 0., 1. - last, 17., last, 1.]), "count {count}");
             assert_eq!(run::Private::bounds_readback_bytes(&sea), 24);
-            (output.release)(false);
+            output.release(false);
             run::close(&sea, false);
         }
     });

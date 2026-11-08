@@ -16,7 +16,6 @@ use rays_math::{color, vec3};
 use renderer::renderer as rr;
 use runtime_resources::Image as i;
 use std::rc::Rc;
-use std::sync::Arc;
 
 // Borrowed resources cannot cross a thread boundary in safe Rust; do not weaken that contract.
 const _: fn() = || {
@@ -159,7 +158,7 @@ fn qualified_publication() {
     let gpu = common::lease();
     let host = host::create(&|| 0.0, &gpu);
     let sink = tp::ok(s::create(&gpu));
-    let config = Gpu::Config { backend: Some(Arc::new(host::backend(&host))), policy: Gpu::Policy::Qualification, ..Gpu::default() };
+    let config = Gpu::Config { backend: Some(host::backend(&host).into()), policy: Gpu::Policy::Qualification, ..Gpu::default() };
     let produce = |time| {
         let value = match tp::ok(ex::try_display(None, None, false, &config, &program, &input::at_time(time))) { Some(ex::Displayed::Gpu(v)) => v, _ => panic!("qualified GPU image") };
         let output = tp::ok(host::output(&host, &value)).unwrap();

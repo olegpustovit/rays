@@ -7,11 +7,14 @@ use crate::workspace_gpu as wg;
 use flow_ir::core_exec::Resident;
 use flow_ir::flow_ir::Gpu as G;
 use flow_sop::{lower, value_lane};
+use flow_ir::packed;
 use flow_syntax::ty::Ty;
 use flow_syntax::value::Value;
+use rays_diagnostic::Diagnostic;
 use sop::{context, edit_graph as edit, payload, session};
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::thread::ThreadId;
 use std::time::{Duration, Instant};
 
 const COUNT: i64 = 2048;
@@ -53,10 +56,11 @@ fn cook(gpu: Option<&G::Config>, graph: &lower::Graph) -> Vec<f64> {
     flat
 }
 
-fn on_owner(main: std::thread::ThreadId) -> bool {
+fn on_owner(main: ThreadId) -> bool {
     std::thread::current().id() == main
 }
 
+#[derive(Clone)]
 struct Counters {
     costs: Arc<AtomicI64>,
     prepares: Arc<AtomicI64>,
@@ -64,134 +68,173 @@ struct Counters {
     reads: Arc<AtomicI64>,
 }
 
-fn backend(main: std::thread::ThreadId, counters: &Counters, flat: Arc<Vec<f64>>, cost: Option<f64>) -> G::Backend {
-    let (costs, prepares, runs, reads) = (counters.costs.clone(), counters.prepares.clone(), counters.runs.clone(), counters.reads.clone());
-    G::Backend {
-        residency: Box::new(|_| None),
-        cost: Box::new(move |_, _, _, _| {
-            costs.fetch_add(1, Ordering::SeqCst);
-            cost
-        }),
-        prepare: Box::new(move |_, _| {
-            assert!(on_owner(main));
-            prepares.fetch_add(1, Ordering::SeqCst);
-            let (runs, reads, flat2) = (runs.clone(), reads.clone(), flat.clone());
-            let rounded: Arc<Vec<f64>> = Arc::new(flat.iter().map(|x| (*x as f32) as f64).collect());
-            let readback_rounded = rounded.clone();
-            let readback = move |_: &G::Value| {
-                assert!(on_owner(main));
-                reads.fetch_add(1, Ordering::SeqCst);
-                Ok(Value::Vec3_array(readback_rounded.clone()))
-            };
-            let planes_rounded = rounded;
-            let _ = flat2;
-            Ok(Arc::new(G::Kernel {
-                run: Box::new(move |inputs| {
-                    assert!(on_owner(main));
-                    assert_eq!(inputs.count, COUNT);
-                    let n = runs.fetch_add(1, Ordering::SeqCst) + 1;
-                    Ok(G::Value { identity: 1, count: COUNT, width: 3, output: 0, stamp: n, gpu_seconds: None })
-                }),
-                readback: Box::new(readback.clone()),
-                planes: Box::new(move |value| {
-                    assert!(on_owner(main));
-                    let _ = &planes_rounded;
-                    G::planes_of(&readback, value)
-                }),
-            }))
-        }),
+fn counters() -> Counters {
+    Counters { costs: Arc::new(AtomicI64::new(0)), prepares: Arc::new(AtomicI64::new(0)), runs: Arc::new(AtomicI64::new(0)), reads: Arc::new(AtomicI64::new(0)) }
+}
+
+/// A device with no residency whose kernels answer `rounded`, counting what it is asked.
+struct Counting {
+    main: ThreadId,
+    counters: Counters,
+    rounded: Arc<Vec<f64>>,
+    cost: Option<f64>,
+}
+
+impl G::Backend for Counting {
+    fn cost(&self, _: Option<&packed::Inputs>, _: bool, _: &packed::T, _: i64) -> Option<f64> {
+        self.counters.costs.fetch_add(1, Ordering::SeqCst);
+        self.cost
+    }
+    fn prepare(&self, _: bool, _: &packed::T) -> Result<Arc<dyn G::Kernel>, Diagnostic> {
+        assert!(on_owner(self.main));
+        self.counters.prepares.fetch_add(1, Ordering::SeqCst);
+        Ok(Arc::new(CountingKernel { main: self.main, counters: self.counters.clone(), rounded: self.rounded.clone() }))
     }
 }
 
-fn counters() -> Counters {
-    Counters { costs: Arc::new(AtomicI64::new(0)), prepares: Arc::new(AtomicI64::new(0)), runs: Arc::new(AtomicI64::new(0)), reads: Arc::new(AtomicI64::new(0)) }
+struct CountingKernel {
+    main: ThreadId,
+    counters: Counters,
+    rounded: Arc<Vec<f64>>,
+}
+
+impl G::Kernel for CountingKernel {
+    fn run(&self, inputs: &packed::Inputs) -> Result<G::Value, Diagnostic> {
+        assert!(on_owner(self.main));
+        assert_eq!(inputs.count, COUNT);
+        let n = self.counters.runs.fetch_add(1, Ordering::SeqCst) + 1;
+        Ok(G::Value { identity: 1, count: COUNT, width: 3, output: 0, stamp: n, gpu_seconds: None })
+    }
+    fn readback(&self, _: &G::Value) -> Result<Value, Diagnostic> {
+        assert!(on_owner(self.main));
+        self.counters.reads.fetch_add(1, Ordering::SeqCst);
+        Ok(Value::Vec3_array(self.rounded.clone()))
+    }
+    fn planes(&self, value: &G::Value) -> Result<G::Planes, Diagnostic> {
+        assert!(on_owner(self.main));
+        G::planes_of(&|v: &G::Value| self.readback(v), value)
+    }
+}
+
+fn backend(main: ThreadId, counters: &Counters, flat: Arc<Vec<f64>>, cost: Option<f64>) -> Arc<dyn G::Backend> {
+    let rounded = Arc::new(flat.iter().map(|x| (*x as f32) as f64).collect());
+    Arc::new(Counting { main, counters: counters.clone(), rounded, cost })
+}
+
+/// Counts the stub's calls, each of which must arrive on the owner thread.
+#[derive(Clone)]
+struct Calls {
+    main: ThreadId,
+    count: Arc<AtomicUsize>,
+}
+
+impl Calls {
+    fn hit(&self) {
+        assert!(on_owner(self.main));
+        self.count.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+/// A resident scope with canned answers, for the proxy to route to.
+struct Stub(Calls);
+
+impl G::Backend for Stub {
+    fn residency(&self, fast: bool) -> Option<Box<dyn G::Residency>> {
+        self.0.hit();
+        assert!(fast);
+        Some(Box::new(StubResidency { calls: self.0.clone(), executor: Arc::new(StubResident(self.0.clone())) }))
+    }
+    fn prepare(&self, _: bool, _: &packed::T) -> Result<Arc<dyn G::Kernel>, Diagnostic> {
+        panic!("resident test dispatched ordinary kernel")
+    }
+}
+
+struct StubResidency {
+    calls: Calls,
+    executor: Arc<dyn Resident>,
+}
+
+impl G::Residency for StubResidency {
+    fn executor(&self) -> &Arc<dyn Resident> {
+        &self.executor
+    }
+    fn retain_uint32(&self, _: &Value) -> Option<G::Integers> {
+        self.calls.hit();
+        Some(G::Integers { count: 1, storage: None, ops: Box::new(StubIntegers) })
+    }
+    fn retain_float(&self, _: &Value) -> Option<G::Planes> {
+        self.calls.hit();
+        None
+    }
+    fn pack_planes(&self, _: &[Value; 3]) -> Result<Option<Value>, Diagnostic> {
+        Ok(None)
+    }
+    fn incidence(&self) -> G::IncidenceBuilder {
+        Arc::new(|_, _| Ok(None))
+    }
+    fn validate_topology(&self, _: i64, _: &Value, _: &Value, _: &Value, _: i64) -> Option<Result<(), Diagnostic>> {
+        self.calls.hit();
+        Some(Ok(()))
+    }
+    fn ready(&self) -> bool {
+        true
+    }
+}
+
+struct StubIntegers;
+
+impl G::IntegersOps for StubIntegers {
+    fn resident(&self) -> Option<Value> {
+        None
+    }
+    fn materialise(&self) -> Result<Vec<i64>, Diagnostic> {
+        Ok(vec![16777217])
+    }
+    fn release(&self, _: bool) {}
+}
+
+struct StubResident(Calls);
+
+impl Resident for StubResident {
+    fn fill(&self, _: &Ty, _: i64, _: &Value) -> Result<Option<Value>, Diagnostic> {
+        self.0.hit();
+        Ok(Some(Value::Int_array(Arc::new(vec![0]))))
+    }
+    fn compact(&self, value: &Value) -> Result<Option<Value>, Diagnostic> {
+        self.0.hit();
+        Ok(Some(value.clone()))
+    }
+    fn coerce(&self, _: &Ty, value: &Value) -> Result<Option<Value>, Diagnostic> {
+        self.0.hit();
+        Ok(Some(value.clone()))
+    }
+    fn finish(&self, value: &Value) -> Result<Value, Diagnostic> {
+        self.0.hit();
+        Ok(value.clone())
+    }
+    fn count(&self, _: &Value) -> Result<Option<i64>, Diagnostic> {
+        self.0.hit();
+        Ok(Some(1))
+    }
+    fn close(&self) {
+        self.0.hit();
+    }
+    fn settle(&self) -> Result<(), Diagnostic> {
+        self.0.hit();
+        Ok(())
+    }
+    fn range(&self, _: &Ty, _: &Value, _: i64, _: i64) -> Result<Option<Value>, Diagnostic> {
+        self.0.hit();
+        Ok(Some(Value::Int_array(Arc::new(vec![0]))))
+    }
 }
 
 #[test]
 fn a_worker_reaches_the_resident_scope_only_through_the_owner_pump() {
     let service = wg::create(None);
     let main = std::thread::current().id();
-    let calls = Arc::new(AtomicUsize::new(0));
-let owner: Arc<dyn Fn() + Send + Sync> = {        let calls = calls.clone();        Arc::new(move || {            assert!(on_owner(main));            calls.fetch_add(1, Ordering::SeqCst);        })    };    let ow = owner.clone();
-    let backend = G::Backend {
-        cost: Box::new(|_, _, _, _| None),
-        prepare: Box::new(|_, _| panic!("resident test dispatched ordinary kernel")),
-        residency: Box::new(move |fast| {
-            ow();
-            assert!(fast);
-let mut os: Vec<Arc<dyn Fn() + Send + Sync>> = (0..16).map(|_| owner.clone()).collect();            let (o16, o15, o14, o13, o12, o11, o10, o9, o8, o7, o6, o5, o4, o3, o2, o1) = (os.pop().unwrap(), os.pop().unwrap(), os.pop().unwrap(), os.pop().unwrap(), os.pop().unwrap(), os.pop().unwrap(), os.pop().unwrap(), os.pop().unwrap(), os.pop().unwrap(), os.pop().unwrap(), os.pop().unwrap(), os.pop().unwrap(), os.pop().unwrap(), os.pop().unwrap(), os.pop().unwrap(), os.pop().unwrap());
-            Some(G::Residency {
-                pack_planes: Box::new(|_| Ok(None)),
-                incidence: Arc::new(|_, _| Ok(None)),
-                executor: Arc::new(Resident {
-                    fill: Box::new(move |_, _, _| {
-                        o1();
-                        Ok(Some(Value::Int_array(Arc::new(vec![0]))))
-                    }),
-                    invoke_all: Box::new(|_, _, _, _, _| Ok(None)),
-                    invoke: Box::new(move |_, _, _, _| {
-                        o2();
-                        Ok(None)
-                    }),
-                    unfold: Box::new(move |_, _, _, _, _, _| {
-                        o3();
-                        Ok(None)
-                    }),
-                    keep: Box::new(move |_| {
-                        o4();
-                        Ok(None)
-                    }),
-                    compact: Box::new(move |value| {
-                        o5();
-                        Ok(Some(value.clone()))
-                    }),
-                    coerce: Box::new(move |_, value| {
-                        o6();
-                        Ok(Some(value.clone()))
-                    }),
-                    concat: Box::new(move |a, _| {
-                        o7();
-                        Ok(Some(a.clone()))
-                    }),
-                    finish: Box::new(move |value| {
-                        o8();
-                        Ok(value.clone())
-                    }),
-                    count: Box::new(move |_| {
-                        o9();
-                        Ok(Some(1))
-                    }),
-                    capacity: Box::new(move |_| {
-                        o10();
-                        Some(1)
-                    }),
-                    close: Box::new(move || o11()),
-                    settle: Box::new(move || {
-                        o12();
-                        Ok(())
-                    }),
-                    range: Box::new(move |_, _, _, _| {
-                        o13();
-                        Ok(Some(Value::Int_array(Arc::new(vec![0]))))
-                    }),
-                }),
-                retain_uint32: Box::new(move |_| {
-                    o14();
-                    Some(G::Integers { count: 1, resident: Box::new(|| None), storage: None, materialise: Box::new(|| Ok(vec![16777217])), release: Box::new(|_| {}) })
-                }),
-                retain_float: Box::new(move |_| {
-                    o15();
-                    None
-                }),
-                validate_topology: Box::new(move |_, _, _, _, _| {
-                    o16();
-                    Some(Ok(()))
-                }),
-                ready: Box::new(|| true),
-            })
-        }),
-    };
-    wg::install_test_backend(&service, backend);
+    let calls = Calls { main, count: Arc::new(AtomicUsize::new(0)) };
+    wg::install_test_backend(&service, Arc::new(Stub(calls.clone())));
     let gpu = wg::config(&service, false);
     let done = AtomicBool::new(false);
     std::thread::scope(|s| {
@@ -203,20 +246,20 @@ let mut os: Vec<Arc<dyn Fn() + Send + Sync>> = (0..16).map(|_| owner.clone()).co
                 }
             }
             let _finish = Finish(&done);
-            let scope = (gpu.backend.as_ref().unwrap().residency)(true).expect("residency");
-            let r = &scope.executor;
+            let scope = gpu.backend.as_ref().unwrap().residency(true).expect("residency");
+            let r = scope.executor();
             let value = Value::Int_array(Arc::new(vec![0]));
             let array_int = Ty::Array(Box::new(Ty::Int));
-            (r.settle)().unwrap();
-            assert_eq!((r.compact)(&value).unwrap(), Some(value.clone()));
-            assert_eq!((r.coerce)(&array_int, &value).unwrap(), Some(value.clone()));
-            assert!((r.finish)(&value).unwrap() == value && (r.count)(&value).unwrap() == Some(1));
-            assert_eq!((r.range)(&array_int, &Value::Int(1), 1, 1).unwrap(), Some(value.clone()));
-            assert_eq!((r.fill)(&array_int, 1, &Value::Int(0)).unwrap(), Some(value.clone()));
-            assert_eq!(((scope.retain_uint32)(&value).unwrap().materialise)().unwrap(), vec![16777217]);
-            assert!((scope.retain_float)(&value).is_none());
-            ok((scope.validate_topology)(1, &value, &value, &value, 3).expect("validated"));
-            (r.close)();
+            r.settle().unwrap();
+            assert_eq!(r.compact(&value).unwrap(), Some(value.clone()));
+            assert_eq!(r.coerce(&array_int, &value).unwrap(), Some(value.clone()));
+            assert!(r.finish(&value).unwrap() == value && r.count(&value).unwrap() == Some(1));
+            assert_eq!(r.range(&array_int, &Value::Int(1), 1, 1).unwrap(), Some(value.clone()));
+            assert_eq!(r.fill(&array_int, 1, &Value::Int(0)).unwrap(), Some(value.clone()));
+            assert_eq!(scope.retain_uint32(&value).unwrap().materialise().unwrap(), vec![16777217]);
+            assert!(scope.retain_float(&value).is_none());
+            ok(scope.validate_topology(1, &value, &value, &value, 3).expect("validated"));
+            r.close();
         });
         while !done.load(Ordering::SeqCst) {
             wg::pump(&service, true);
@@ -224,7 +267,7 @@ let mut os: Vec<Arc<dyn Fn() + Send + Sync>> = (0..16).map(|_| owner.clone()).co
         }
         worker.join().unwrap();
     });
-    assert_eq!(calls.load(Ordering::SeqCst), 12);
+    assert_eq!(calls.count.load(Ordering::SeqCst), 12);
     wg::close(&service);
 }
 
