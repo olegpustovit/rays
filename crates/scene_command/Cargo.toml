@@ -6,3 +6,6 @@ edition = "2021"
 [lib]
 name = "scene_command"
 path = "src/lib.rs"
+
+[dependencies]
+rays_math = { path = "../rays_math" }

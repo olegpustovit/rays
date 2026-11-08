@@ -809,7 +809,7 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("input", &[][..]),
         ("rays_math_sys", &[][..]),
         ("rays_math", &["rays_math_sys"][..]),
-        ("scene_command", &[][..]),
+        ("scene_command", &["rays_math"][..]),
         ("parallel", &[][..]),
         ("sdl3_sys", &["native_layer_token_sys"][..]),
         ("metal_sys", &[][..]),

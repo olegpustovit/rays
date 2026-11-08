@@ -128,8 +128,8 @@ pub fn scaling(value: Vec3) -> T {
 }
 
 pub fn rotation_x(angle: f64) -> T {
-    let cosine = angle.cos();
-    let sine = angle.sin();
+    let cosine = crate::libm::cos(angle);
+    let sine = crate::libm::sin(angle);
     of_rows(
         (1.0, 0.0, 0.0, 0.0),
         (0.0, cosine, -sine, 0.0),
@@ -139,8 +139,8 @@ pub fn rotation_x(angle: f64) -> T {
 }
 
 pub fn rotation_y(angle: f64) -> T {
-    let cosine = angle.cos();
-    let sine = angle.sin();
+    let cosine = crate::libm::cos(angle);
+    let sine = crate::libm::sin(angle);
     of_rows(
         (cosine, 0.0, sine, 0.0),
         (0.0, 1.0, 0.0, 0.0),
@@ -150,8 +150,8 @@ pub fn rotation_y(angle: f64) -> T {
 }
 
 pub fn rotation_z(angle: f64) -> T {
-    let cosine = angle.cos();
-    let sine = angle.sin();
+    let cosine = crate::libm::cos(angle);
+    let sine = crate::libm::sin(angle);
     of_rows(
         (cosine, -sine, 0.0, 0.0),
         (sine, cosine, 0.0, 0.0),
@@ -166,8 +166,8 @@ pub fn rotation(axis: Vec3, angle: f64) -> T {
     let x = axis.x;
     let y = axis.y;
     let z = axis.z;
-    let cosine = angle.cos();
-    let sine = angle.sin();
+    let cosine = crate::libm::cos(angle);
+    let sine = crate::libm::sin(angle);
     let one_minus = 1.0 - cosine;
     of_rows(
         (
@@ -208,7 +208,7 @@ pub fn perspective(fov_y: f64, aspect: f64, near: f64, far: f64) -> Result<T, St
     if !aspect.is_finite() || aspect <= 0.0 {
         return Err("Mat4.perspective: aspect must be finite and positive".to_owned());
     }
-    let focal = 1.0 / (fov_y / 2.0).tan();
+    let focal = 1.0 / crate::libm::tan(fov_y / 2.0);
     Ok(of_rows(
         (focal / aspect, 0.0, 0.0, 0.0),
         (0.0, focal, 0.0, 0.0),

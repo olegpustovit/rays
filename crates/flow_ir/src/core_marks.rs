@@ -457,7 +457,7 @@ pub fn compile(draw: &Draw) -> Compiled {
         }),
         Draw::Push(Transform::Rotate, i) => Box::new(move |vals, sink| {
             let a = v::fin("angle", v::num(&vals[i as usize])?)?;
-            let (c, s) = (a.cos(), a.sin());
+            let (c, s) = (rays_math::libm::cos(a), rays_math::libm::sin(a));
             push(sink, Entry::PushTransform { xx: c, xy: s, yx: -s, yy: c, tx: 0.0, ty: 0.0 })
         }),
         Draw::Push(Transform::Scale, i) => Box::new(move |vals, sink| {

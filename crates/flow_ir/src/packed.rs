@@ -202,7 +202,7 @@ fn binary_apply(op: Binary, x: f64, y: f64) -> f64 {
         Binary::Eq => if x == y { 1.0 } else { 0.0 },
         Binary::And => if x != 0.0 && y != 0.0 { 1.0 } else { 0.0 },
         Binary::Or => if x != 0.0 || y != 0.0 { 1.0 } else { 0.0 },
-        Binary::Atan2 => x.atan2(y),
+        Binary::Atan2 => rays_math::libm::atan2(x, y),
         Binary::Hypot => x.hypot(y),
         Binary::Ldexp => ldexp(x, y.trunc() as i64),
     }
@@ -211,14 +211,14 @@ fn binary_apply(op: Binary, x: f64, y: f64) -> f64 {
 #[inline(always)]
 fn unary_apply(op: Unary, x: f64) -> f64 {
     match op {
-        Unary::Sin => x.sin(),
-        Unary::Cos => x.cos(),
+        Unary::Sin => rays_math::libm::sin(x),
+        Unary::Cos => rays_math::libm::cos(x),
         Unary::Sqrt => x.abs().sqrt(),
         Unary::Abs => x.abs(),
         Unary::Not => if x == 0.0 { 1.0 } else { 0.0 },
-        Unary::Tan => x.tan(),
-        Unary::Asin => x.asin(),
-        Unary::Acos => x.acos(),
+        Unary::Tan => rays_math::libm::tan(x),
+        Unary::Asin => rays_math::libm::asin(x),
+        Unary::Acos => rays_math::libm::acos(x),
         Unary::Exp => x.exp(),
         Unary::Log => x.ln(),
         Unary::Sign => if x > 0.0 { 1.0 } else if x < 0.0 { -1.0 } else { x },

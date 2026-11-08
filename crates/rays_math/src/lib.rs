@@ -263,3 +263,4 @@ mod test_color;
 
 #[cfg(test)]
 mod test_clock;
+pub mod libm;

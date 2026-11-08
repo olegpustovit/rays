@@ -393,12 +393,12 @@ pub fn stroke(
         Ok(())
     };
     let fan = |vertices: &mut Vec<Point>, indices: &mut Vec<usize>, center: Point, radius: f64, start_angle: f64, delta: f64| -> Result<(), Error> {
-        let denominator = if tolerance >= radius { std::f64::consts::PI } else { 2.0 * (1.0 - (tolerance / radius)).max(-1.0).acos() };
+        let denominator = if tolerance >= radius { std::f64::consts::PI } else { 2.0 * rays_math::libm::acos((1.0 - (tolerance / radius)).max(-1.0)) };
         let steps = ((delta.abs() / denominator).ceil() as usize).clamp(1, 64);
-        let mut previous = offset(center, start_angle.cos(), start_angle.sin(), radius);
+        let mut previous = offset(center, rays_math::libm::cos(start_angle), rays_math::libm::sin(start_angle), radius);
         for i in 1..=steps {
             let angle = start_angle + delta * i as f64 / steps as f64;
-            let next = offset(center, angle.cos(), angle.sin(), radius);
+            let next = offset(center, rays_math::libm::cos(angle), rays_math::libm::sin(angle), radius);
             add_triangle(vertices, indices, center, previous, next)?;
             previous = next;
         }
@@ -435,8 +435,8 @@ pub fn stroke(
             match join {
                 Join::Bevel => add_triangle(vertices, indices, b, p0, p1),
                 Join::Round => {
-                    let a0 = n0y.atan2(n0x);
-                    let a1 = n1y.atan2(n1x);
+                    let a0 = rays_math::libm::atan2(n0y, n0x);
+                    let a1 = rays_math::libm::atan2(n1y, n1x);
                     let raw = a1 - a0;
                     let delta = if side > 0.0 && raw < 0.0 { raw + 2.0 * std::f64::consts::PI } else if side < 0.0 && raw > 0.0 { raw - 2.0 * std::f64::consts::PI } else { raw };
                     fan(vertices, indices, b, half, a0, delta)
@@ -469,7 +469,7 @@ pub fn stroke(
                     add_triangle(vertices, indices, inner0, outer1, outer0)
                 }
                 Cap::Round => {
-                    let angle = ny.atan2(nx);
+                    let angle = rays_math::libm::atan2(ny, nx);
                     fan(vertices, indices, point, half, angle, if at_start { std::f64::consts::PI } else { -std::f64::consts::PI })
                 }
             }

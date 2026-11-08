@@ -3588,7 +3588,7 @@ mod tests {
             Value::Floats(1, xs) => {
                 assert_eq!(xs.len(), 8192);
                 for (i, x) in xs.iter().enumerate() {
-                    assert_eq!(x.to_bits(), ((i as f64 * 0.25) + 1.25).sin().to_bits());
+                    assert_eq!(x.to_bits(), rays_math::libm::sin((i as f64 * 0.25) + 1.25).to_bits());
                 }
             }
             _ => panic!("CPU map did not return a packed array"),

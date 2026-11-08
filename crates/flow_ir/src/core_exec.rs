@@ -418,8 +418,8 @@ fn run_scalar(sc: &Scalar, live: &Frame) -> Option<f64> {
             6 => r[sc.a[i]] + r[sc.b[i]],
             7 => r[sc.a[i]] - r[sc.b[i]],
             8 => r[sc.a[i]] * r[sc.b[i]],
-            9 => r[sc.a[i]].sin(),
-            _ => r[sc.a[i]].cos(),
+            9 => rays_math::libm::sin(r[sc.a[i]]),
+            _ => rays_math::libm::cos(r[sc.a[i]]),
         };
         if !value.is_finite() { finite = false; break; }
         r[i] = value;
@@ -734,7 +734,7 @@ fn primitive(track: bool, locals: &[Ty], operation: &Primitive, args: &[(String,
             let sine = *operation == Unary::Sin;
             Arc::new(move |st| {
                 if let Value::Float(f) = &st.values[ix(x)] {
-                    let r = if sine { f.sin() } else { f.cos() };
+                    let r = if sine { rays_math::libm::sin(*f) } else { rays_math::libm::cos(*f) };
                     if r.is_finite() { return Ok(Value::Float(r)); }
                 }
                 slow(st)

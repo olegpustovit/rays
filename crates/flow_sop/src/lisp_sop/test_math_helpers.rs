@@ -38,12 +38,12 @@ fn matrices()->Vec<m::T>{vec![m::identity(),m::of_rows((2.,3.,-1.,4.),(5.,-2.,6.
 fn scalar_math_exact_bytes_and_nonfinite_refusals(){
     let tiny=f64::from_bits(1);
     let cases:Vec<(&str,fn(f64)->f64,Vec<f64>)>=vec![
-        ("tan",f64::tan,vec![0.,-0.,0.37,std::f64::consts::PI,1e19]),
-        ("asin",f64::asin,vec![-1.,-0.37,-0.,0.,0.37,1.]),("acos",f64::acos,vec![-1.,-0.37,-0.,0.,0.37,1.]),
+        ("tan",rays_math::libm::tan,vec![0.,-0.,0.37,std::f64::consts::PI,1e19]),
+        ("asin",rays_math::libm::asin,vec![-1.,-0.37,-0.,0.,0.37,1.]),("acos",rays_math::libm::acos,vec![-1.,-0.37,-0.,0.,0.37,1.]),
         ("exp",f64::exp,vec![-700.,-0.,0.,0.37,700.]),("log",f64::ln,vec![tiny,1e-300,1.,f64::MAX]),
         ("sign",|x|if x>0.{1.}else if x<0.{-1.}else{x},vec![-f64::MAX,-tiny,-0.,0.,tiny,f64::MAX])];
     for (name,op,xs) in cases{for x in xs{same(0,&[op(x)],call(name,&[num(x)]));}}
-    for (a,b) in [(0.,0.),(-0.,-0.),(0.,-0.),(-0.,0.),(1.,-1.),(-1.,-1.),(1e308,1e308),(1e-300,1e-300),(tiny,tiny)]{same(0,&[f64::atan2(a,b)],call("atan2",&[num(a),num(b)]));same(0,&[f64::hypot(a,b)],call("hypot",&[num(a),num(b)]));}
+    for (a,b) in [(0.,0.),(-0.,-0.),(0.,-0.),(-0.,0.),(1.,-1.),(-1.,-1.),(1e308,1e308),(1e-300,1e-300),(tiny,tiny)]{same(0,&[rays_math::libm::atan2(a,b)],call("atan2",&[num(a),num(b)]));same(0,&[f64::hypot(a,b)],call("hypot",&[num(a),num(b)]));}
     for body in ["(asin 1.0000000000000002)","(acos -1.0000000000000002)","(log 0.0)","(log -1.0)","(exp 1000.0)"]{assert_eq!(evaluate(body).unwrap_err().code,"E_NONFINITE","{body}");}
     for (name,n) in [("floor",-2),("ceil",-1),("round",-2)]{assert_eq!(call(name,&["-1.5".into()]),Value::Int(n));}
     for x in [0.,-0.,0.1,-0.1,1.5,-1.5,tiny,-tiny,4503599627370496.,-4503599627370496.,4503599627370496.0f64.next_down(),(-4503599627370496.0f64).next_up(),f64::MAX,-f64::MAX]{same(0,&[x.floor()],call("float_floor",&[num(x)]));same(0,&[x.ceil()],call("float_ceil",&[num(x)]));}

@@ -666,9 +666,9 @@ fn binary_op(name:&'static str,operation:fn(f64,f64)->f64)->Op{
 fn unary_math_ops()->Vec<Op>{
     let mut ops=Vec::new();
     let entries:[(&str,fn(f64)->f64);10]=[
-        ("tan",f64::tan),("asin",f64::asin),("acos",f64::acos),("log",f64::ln),
+        ("tan",rays_math::libm::tan),("asin",rays_math::libm::asin),("acos",rays_math::libm::acos),("log",f64::ln),
         ("sign",|x|if x>0.{1.}else if x<0.{-1.}else{x}),("rsqrt",|x|1./x.abs().sqrt()),
-        ("exp",f64::exp),("sin",f64::sin),("cos",f64::cos),("abs",f64::abs),
+        ("exp",f64::exp),("sin",rays_math::libm::sin),("cos",rays_math::libm::cos),("abs",f64::abs),
     ];
     for (name,f) in entries{
         let body:Body=Arc::new(move |_,_,a|{let x=num(a.get_arg("x")?)?;Ok(Value::Float(fin(name,f(x))?))});
@@ -705,7 +705,7 @@ fn ldexp_op()->Op{
 }
 fn special_value_ops()->Vec<Op>{
     let mut ops=Vec::new();
-    for (name,f) in [("atan2",f64::atan2 as fn(f64,f64)->f64),("hypot",f64::hypot)]{
+    for (name,f) in [("atan2",rays_math::libm::atan2 as fn(f64,f64)->f64),("hypot",f64::hypot)]{
         ops.push(value_op(name,vec![("a",Ty::Float),("b",Ty::Float)],vec![],None,vec![],Ty::Float,"Math",Arc::new(move |_,_,a|Ok(Value::Float(fin(name,f(num(a.get_arg("a")?)?,num(a.get_arg("b")?)?))?)))));
     }
     ops.push(ldexp_op());
@@ -742,7 +742,7 @@ fn special_value_ops()->Vec<Op>{
     ops.push(value_op("value/hsv",vec![("h",Ty::Float),("s",Ty::Float),("v",Ty::Float)],vec![],None,vec![],Ty::Vec3,"Math",Arc::new(|_,_,a|{let(r,g,b)=rays_math::color::hsv(num(a.get_arg("h")?)?,num(a.get_arg("s")?)?,num(a.get_arg("v")?)?);Ok(Value::Vec3(fin("value/hsv",r)?,fin("value/hsv",g)?,fin("value/hsv",b)?))})));
     let mut lerp=value_op("value/lerp",vec![("a",Ty::Float),("b",Ty::Float),("u",Ty::Float)],vec![],None,vec![],Ty::Float,"Math",Arc::new(|_,_,args|{let a=args.get_arg("a")?;let b=args.get_arg("b")?;let u=num(args.get_arg("u")?)?;if value::is_vec(a)||value::is_vec(b){let(ax,ay,az)=vec3(a)?;let(bx,by,bz)=vec3(b)?;let mix=|a:f64,b:f64|a*(1.-u)+b*u;Ok(Value::Vec3(fin("value/lerp",mix(ax,bx))?,fin("value/lerp",mix(ay,by))?,fin("value/lerp",mix(az,bz))?))}else{Ok(Value::Float(fin("value/lerp",num(a)?*(1.-u)+num(b)?*u)?))}}));
     lerp.any_num=true;lerp.out=Arc::new(|ts|Ok(if ts.iter().take(2).any(|t|*t==Ty::Vec3){Ty::Vec3}else{Ty::Float}));ops.push(lerp);
-    ops.push(value_op("value/polar",vec![("radius",Ty::Float),("angle",Ty::Float)],vec![("height",Ty::Float)],None,vec![],Ty::Vec3,"Math",Arc::new(|_,_,a|{let r=num(a.get_arg("radius")?)?;let t=num(a.get_arg("angle")?)?;Ok(Value::Vec3(fin("value/polar",r*t.cos())?,a.opt_arg("height").map(num).transpose()?.unwrap_or(0.),fin("value/polar",r*t.sin())?))})));
+    ops.push(value_op("value/polar",vec![("radius",Ty::Float),("angle",Ty::Float)],vec![("height",Ty::Float)],None,vec![],Ty::Vec3,"Math",Arc::new(|_,_,a|{let r=num(a.get_arg("radius")?)?;let t=num(a.get_arg("angle")?)?;Ok(Value::Vec3(fin("value/polar",r*rays_math::libm::cos(t))?,a.opt_arg("height").map(num).transpose()?.unwrap_or(0.),fin("value/polar",r*rays_math::libm::sin(t))?))})));
     ops
 }
 fn list_element_out(index:usize)->Out{Arc::new(move |ts|match ts.get(index){Some(Ty::List(e))=>Ok(e.as_ref().clone()),_=>Ok(Ty::Any)})}

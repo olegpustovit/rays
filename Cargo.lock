@@ -638,6 +638,9 @@ dependencies = [
 [[package]]
 name = "scene_command"
 version = "0.1.0"
+dependencies = [
+ "rays_math",
+]
 
 [[package]]
 name = "sdl3"

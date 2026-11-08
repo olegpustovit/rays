@@ -77,7 +77,7 @@ pub fn rounded_rect(width: f64, height: f64, radius: f64, fill: Option<i32>, str
 fn ellipse_points((cx, cy): (f64, f64), rx: f64, ry: f64) -> Vec<(f64, f64)> {
     (0..32).map(|index| {
         let angle = 2.0 * std::f64::consts::PI * index as f64 / 32.0;
-        (cx + rx * angle.cos(), cy + ry * angle.sin())
+        (cx + rx * rays_math::libm::cos(angle), cy + ry * rays_math::libm::sin(angle))
     }).collect()
 }
 pub fn ellipse(center: (f64, f64), rx: f64, ry: f64, fill: Option<i32>, stroke: Option<i32>) -> Result<Vec<Geometry>, String> {
