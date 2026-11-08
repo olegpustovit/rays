@@ -1,0 +1,9 @@
+Rays /Users/snowbear/WORK/GIT/rays dev. AGENTS.md ponytail. Wave B2 ONLY.
+
+Compare dev opt-level=0 vs 1 for OFF hot-path UI crates: rays_editor, pxui_graph, editor_document, flow_graph, flow_native per plan. Use [profile] package overrides in root Cargo.toml ONLY if a quick A/B shows codegen win without debug-run regression.
+
+Measure with ONE timed `cargo check -p rays_editor` cold+warm each config (document times in PROGRESS.md §B2, do not commit Cargo.toml change unless clear win).
+
+Commit "B2:" only if you keep a change. Update PROGRESS. No artifact.
+
+Return: times table, keep/revert decision.

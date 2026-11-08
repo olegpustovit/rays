@@ -11,7 +11,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | Wave | Done | Active | Pending |
 |------|------|--------|---------|
 | A | 8/8 | — | — |
-| B | 2/6 | — | 3 |
+| B | 3/6 | B2 | 2 |
 | M | 1/21 | — | 20 |
 | I | 0/1 | — | 1 |
 | C | 0/21 | — | 21 |
