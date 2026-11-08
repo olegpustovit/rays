@@ -42,7 +42,8 @@ pub fn run_ops() {
             Err(m) => fail(&format!("{label}: {m}")),
         }
     };
-    let tree = |e: &editor::Editor| shell_of(&build_ok(&editor::workspace(e))).tree;
+    // the shell the editor's own lowering made: lowering the workspace again only to read it doubled the case
+    let tree = |e: &editor::Editor| editor::private::shell(e).unwrap_or_else(|| fail("no editor graph")).tree;
     let sh = tree(&e);
     // resize
     let r = ok("Resize panel", L::SetLayoutSize { node: p(&["editor", "left"]), size: LSize::Ratio(0.3) });

@@ -141,6 +141,11 @@ pub mod editor {
             workspace_gpu::qualification(&value.host.borrow().gpu)
         }
 
+        /// The shell the editor's own lowering of its workspace made.
+        pub fn shell(value: &Editor) -> Option<editor_document::document::Shell> {
+            value.core.doc.shell.as_deref().cloned()
+        }
+
         pub fn resolved_scene(value: &Editor) -> kg::T {
             loop_model::resolved_scene(value)
         }
