@@ -136,6 +136,30 @@ Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s
 
 ## Session log
 
+- 2026-11-08: editor round 3, budget overruns.
+  - Commits:
+    - `2ac97b4d` perf: flow_sop inlined-node build cache 64 -> 1,024 entries. It thrashed (4,360 builds, 0 hits in run_ops), so every editor edit paid for it.
+    - `5d1d6ff0`: run_ops reads the editor's shell instead of re-lowering.
+    - `b6ae43d8`: `dump_line` uses `editor_loop::state_text` instead of writing a full crash dump.
+    - `28bfa1cb`: shattered_studio fractures once per domain count.
+  - Timings (RAYS_SLOW real time):
+
+    | Case | Before | After |
+    |---|---|---|
+    | run_ops | 9.8 s | 3.8 s |
+    | unbound_panels | 5.5 s | 3.5 s |
+    | panel_keys | 5.0 s | 2.9 s |
+    | run_editor | 5.1 s | 2.7 s |
+    | run_panels | 5.6 s | 3.7 s |
+    | shattered | 57 s | 22.8 s |
+    | sopcat_* | 5.4-9.6 s | 4.8-6.5 s |
+
+    All 51 `run_*` cases pass.
+  - Decided:
+    - window_runtime_render goes to ~300 frames (95% is `nextDrawable` compositor wait; still crosses the 240-frame uniform shrink).
+    - shattered_studio keeps a small-fixture 1/4-domain exact variant in the default suite; the full-sketch >=1000-piece check moves to RAYS_SLOW (exhaustive qualification).
+    - orrery, workspace_packed and sopcat_* go to the caching agent: `build_call` re-lowering and the `flow_check` prelude at ~3.5 s per process.
+
 - 2026-11-08: Flow round 2.
   - Fixed:
     - `882e12e1`: marks picture 19 golden was stale. It is a serialized-scene digest, and macOS 27 now matches the Windows value.
