@@ -8,6 +8,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use editor_document::document::{Home, Level};
+use editor_document::layout_by_path;
 use editor_document::workspace_doc;
 use flow_eval::Eval;
 use flow_graph::flow_edit::ArgKey;
@@ -137,6 +138,41 @@ pub fn view_node(value: t, path: &[String]) -> t {
     }
 }
 
+/// What the document keeps of each node, for the pane to ask (`scope::Saved`).
+struct DocSaved {
+    layout: layout_by_path::T,
+    probes: layout_by_path::PathMap<i64>,
+    imports: Vec<(String, Vec<Syntax>)>,
+}
+
+impl scope::Saved for DocSaved {
+    fn at(&self, path: &[String]) -> Option<(f64, f64)> {
+        self.layout.at.get(path).copied()
+    }
+    fn level(&self, path: &[String]) -> Option<(p::Level, bool)> {
+        match (self.layout.level.get(path), self.layout.pinned.get(path)) {
+            (None, None) => None,
+            (level, pinned) => Some((level.copied().unwrap_or(p::Level::Card), pinned.copied().unwrap_or(false))),
+        }
+    }
+    fn pin(&self, path: &[String], label: &str) -> Option<bool> {
+        self.layout.rows.get(path).and_then(|m| m.get(label)).copied()
+    }
+    // a function or loop starts open, its body in view: c folds it
+    fn collapsed(&self, path: &[String]) -> bool {
+        self.layout.collapsed.get(path) == Some(&true)
+    }
+    fn probe(&self, path: &[String]) -> i64 {
+        self.probes.get(path).copied().unwrap_or(0)
+    }
+    fn frames(&self, path: &[String]) -> Vec<scope::Frame3> {
+        self.layout.frames.get(path).map(|fs| fs.iter().map(|f| (f.title.clone(), f.at, f.size)).collect()).unwrap_or_default()
+    }
+    fn imported(&self, path: &[String]) -> Option<String> {
+        workspace_doc::imported_file(&self.imports, path)
+    }
+}
+
 /// Lay the workspace pane out again when the document, the probes or the graph changed; the
 /// footers are rebuilt when the recording evaluation, the cook's geometry counts or (a live
 /// document) the time changed. The evaluation is retained by lowering, never repeated by a pane
@@ -151,7 +187,7 @@ pub fn sync_scope(value: t) -> t {
         None => value,
     };
     let Some(name) = graph_name(&value) else { return value };
-    let Some(catalog) = value.flow_catalog.force().clone() else { return value };
+    let Some(catalog) = flow_catalog(&value) else { return value };
     let document = value.doc.clone();
     let workspace = &document.workspace;
     let (ws, lowered) = (&workspace.ws, &workspace.lowered);
@@ -238,7 +274,6 @@ pub fn sync_scope(value: t) -> t {
     let scope_view = if !moved {
         scope::with_arguments(&edits, pane_view(&value).clone())
     } else {
-        let layout = ws.layout.clone();
         let display = viewed_path(&value, &scope_proj);
         let layouts: Vec<String> = match &value.doc.shell {
             Some(sh) if sh.switch.is_some() && workspace_doc::editor_graph(&value.doc.workspace.ws).map(|g| g.name) == Some(name.clone()) => {
@@ -246,30 +281,8 @@ pub fn sync_scope(value: t) -> t {
             }
             _ => Vec::new(),
         };
-        let probes = value.probes.clone();
-        let (l_at, l_level, l_pinned, l_rows, l_collapsed, l_frames) =
-            (layout.clone(), layout.clone(), layout.clone(), layout.clone(), layout.clone(), layout.clone());
-        let opts = scope::ScopeOpts {
-            at: Rc::new(move |path: &[String]| l_at.at.get(path).copied()),
-            level: Rc::new(move |path: &[String]| match (l_level.level.get(path), l_pinned.pinned.get(path)) {
-                (None, None) => None,
-                (level, pinned) => Some((level.copied().unwrap_or(p::Level::Card), pinned.copied().unwrap_or(false))),
-            }),
-            pin: Rc::new(move |path: &[String], label: &str| l_rows.rows.get(path).and_then(|m| m.get(label)).copied()),
-            // a function or loop starts open, its body in view: c folds it
-            collapsed: Rc::new(move |path: &[String]| l_collapsed.collapsed.get(path) == Some(&true)),
-            probe: Rc::new(move |path: &[String]| probes.get(path).copied().unwrap_or(0)),
-            frames: Rc::new(move |path: &[String]| {
-                l_frames.frames.get(path).map(|fs| fs.iter().map(|f| (f.title.clone(), f.at, f.size)).collect()).unwrap_or_default()
-            }),
-            imported: {
-                let ws_imp = ws.clone();
-                Rc::new(move |path: &[String]| workspace_doc::imported_file(&ws_imp, path))
-            },
-            display,
-            layouts,
-        };
-        let _ = &layout;
+        let saved = Rc::new(DocSaved { layout: ws.layout.clone(), probes: value.probes.clone(), imports: ws.imports.clone() });
+        let opts = scope::ScopeOpts { saved, display, layouts };
         let _phase = phase_timer::measure("layout");
         scope::with_scope(opts, &name, scope_proj.clone(), pane_view(&value).clone())
     };
@@ -420,7 +433,7 @@ pub fn scene_target(value: &t, id: i64) -> Option<(scope_key, Path)> {
         Level::Inside(_) => &homes.layers,
     };
     let home = list.iter().find(|(i, _)| *i == id).map(|(_, h)| h.clone());
-    let catalog = value.flow_catalog.force().clone();
+    let catalog = flow_catalog(value);
     match (home, catalog) {
         (Some(Home::BoundAt(path)), Some(catalog)) if path.len() >= 2 => {
             let graph = path[0].clone();

@@ -180,7 +180,7 @@ fn scope_gestures_4() {
     let (title, at, (fw, fh)) = made.clone();
     let made2 = made.clone();
     let framed = scope::with_scope(
-        ScopeOpts { frames: Rc::new(move |q: &[String]| if q == ["flower".to_owned()] { vec![made2.clone()] } else { Vec::new() }), ..ScopeOpts::default() },
+        saved_opts(Saved { frames: vec![(path(&["flower"]), vec![made2.clone()])], ..Default::default() }),
         "flower",
         Rc::new(p::of_graph(&scope_catalog(), &w, "flower").expect("flower")),
         view,

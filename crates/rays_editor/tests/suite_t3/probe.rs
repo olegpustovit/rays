@@ -191,10 +191,18 @@ pub fn nested() {
     check(r.records(&key).len() == 6, "the whole product is 6 records");
 }
 
+/// every zone shows this iteration
+struct FixedProbe(i64);
+impl pxui_graph::scope_state::Saved for FixedProbe {
+    fn probe(&self, _: &[String]) -> i64 {
+        self.0
+    }
+}
+
 /// the hoist button of an invariant footer is one request
 pub fn hoist() {
     let w = load("sunflower");
-    let (view, _) = scope_view(ScopeOpts { probe: Rc::new(|_| 5), ..Default::default() }, &w, "sunflower");
+    let (view, _) = scope_view(ScopeOpts { saved: Rc::new(FixedProbe(5)), ..Default::default() }, &w, "sunflower");
     let mut ui = pg::new_ui();
     let (view, _) = pg::scope_step(&mut ui, view, &pg::frame0());
     let turn = path(&["sunflower", "seeds_each", "turn"]);

@@ -135,7 +135,7 @@ pub fn single_form(text: &str) -> Option<s::Syntax> {
 }
 
 pub fn context_items(t: &Pane, path: &[String]) -> Vec<(String, bool)> {
-    let imported = (t.imported)(path);
+    let imported = t.saved.imported(path);
     if let Some(file) = imported {
         return vec![(format!("Open {}", file), true)];
     }
@@ -153,7 +153,7 @@ pub fn context_items(t: &Pane, path: &[String]) -> Vec<(String, bool)> {
         _ => None,
     };
     let collapse_label = match zone {
-        Some(zn) => if (t.collapsed)(&zn.path) { "Expand zone" } else { "Collapse zone" },
+        Some(zn) => if t.saved.collapsed(&zn.path) { "Expand zone" } else { "Collapse zone" },
         None => "Collapse zone",
     };
     let delete_label = if parent == n.path { "Delete first arm" } else { "Delete arm" };
@@ -226,7 +226,7 @@ pub fn unfold_row(n: &p::Node, r: &p::Row) -> Vec<Change> {
 /// The footer of a card at the iterations pinned in its zones: its value is the ghost beside the out-port.
 pub fn footer_of(t: &Pane, records: &Rc<std::cell::RefCell<flow_graph::probe::Probe>>, n: &p::Node) -> Footer {
     let chain: Vec<Path> = t.chains.get(&n.path).cloned().unwrap_or_default();
-    let probes: Vec<i64> = chain.iter().map(|c| (t.probe)(c)).collect();
+    let probes: Vec<i64> = chain.iter().map(|c| t.saved.probe(c)).collect();
     records.borrow_mut().footer(n, &probes)
 }
 
@@ -357,7 +357,7 @@ pub fn tile_ports(t: &Pane, ui: &mut Ui, z: f64, fs: i64, pl: &Placed, tile: &Ui
                     }
                     if zn.kind != p::ZoneKind::Let && zn.kind != p::ZoneKind::State && zn.kind != p::ZoneKind::Branch {
                         // the selector of the label row: a button each side of the reading
-                        let (selx, sely, selw, selh, _) = sp::selector_geo(&mut |size, text| measure_ui(ui, t, size, text), z, fs, pl.w * z, count_of(t, &n.path), (t.probe)(&n.path));
+                        let (selx, sely, selw, selh, _) = sp::selector_geo(&mut |size, text| measure_ui(ui, t, size, text), z, fs, pl.w * z, count_of(t, &n.path), t.saved.probe(&n.path));
                         let (selx, sely, selw, selh) = (selx / z, sely / z, selw / z, selh / z);
                         let b = bxz(ui, z, "prev", (selx - 4.0, sely), (16.0, selh));
                         taps.push((b, Tap::Step(-1)));
@@ -875,7 +875,7 @@ pub fn context_step(t: Pane, ui: &mut Ui, tiles: &[Tile], canvas_signal: &Signal
             MenuResult::Open => {}
             MenuResult::Dismiss => t = Pane { context: None, ..t },
             MenuResult::Pick(i) => {
-                match (t.imported)(&path) {
+                match t.saved.imported(&path) {
                     Some(file) => emit.push(Change::Open_import(file)),
                     None => emit.extend(action_changes(&t, context_command(i))),
                 }
@@ -1103,7 +1103,7 @@ pub fn tile_gestures(t: Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), tiles: &[T
                     t = Pane { editing: Some(Editing::Name(pl.path.clone())), ..t };
                 }
                 // a folded function or loop opens in place; anything else follows what it references
-                Item::Item(n) if n.zone.is_some() && (t.collapsed)(&pl.path) => {
+                Item::Item(n) if n.zone.is_some() && t.saved.collapsed(&pl.path) => {
                     emit.push(Change::Zone_collapsed { zone: pl.path.clone(), collapsed: false });
                 }
                 Item::Item(n) if !n.synthetic => {
@@ -1158,8 +1158,8 @@ pub fn tile_gestures(t: Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), tiles: &[T
                     }
                     Tap::Step(d) if bs.clicked => {
                         let count = count_of(&t, &n.path);
-                        let index = 0.max((count - 1).min((t.probe)(&n.path) + d));
-                        if count > 0 && index != (t.probe)(&n.path) {
+                        let index = 0.max((count - 1).min(t.saved.probe(&n.path) + d));
+                        if count > 0 && index != t.saved.probe(&n.path) {
                             emit.push(Change::Probe_set { zone: n.path.clone(), index });
                         }
                     }
@@ -1169,7 +1169,7 @@ pub fn tile_gestures(t: Pane, ui: &mut Ui, z: f64, mouse: (f64, f64), tiles: &[T
                         if count > 0 && wd > 0.0 {
                             let px = if bs.released { bs.release_point.0 } else { bs.pointer.0 };
                             let index = 0.max((count - 1).min((((px - x) / wd) * count as f64) as i64));
-                            if index != (t.probe)(&n.path) {
+                            if index != t.saved.probe(&n.path) {
                                 emit.push(Change::Probe_set { zone: n.path.clone(), index });
                             }
                         }
@@ -1406,7 +1406,7 @@ pub fn frames_step(t: Pane, ui: &mut Ui, ctx: &mut Ctx, z: f64, canvas: &UiBox) 
     let mut frame_boxes: Vec<FrameBox> = Vec::new();
     let saved = ui.enter(canvas);
     for (scope, (ox, oy)) in t.geo.origins.iter() {
-        for (i, (title, (fx, fy), (fw, fh))) in (t.frames)(scope).iter().enumerate() {
+        for (i, (title, (fx, fy), (fw, fh))) in t.saved.frames(scope).iter().enumerate() {
             let x = sx(&t, ox + fx);
             let y = sy(&t, oy + fy);
             let wd = fw * z;
@@ -1426,7 +1426,7 @@ pub fn frames_step(t: Pane, ui: &mut Ui, ctx: &mut Ctx, z: f64, canvas: &UiBox) 
         let ts = ui.signal(&tb);
         let xs = ui.signal(&xb);
         let rs = ui.signal(&rb);
-        let all = (t.frames)(&scope);
+        let all = t.saved.frames(&scope);
         if let Some(Editing::Title(sp_, k)) = &t.editing {
             if *sp_ == scope && *k == i as i64 {
                 let saved = ui.enter(canvas);
@@ -1454,7 +1454,7 @@ pub fn frames_step(t: Pane, ui: &mut Ui, ctx: &mut Ctx, z: f64, canvas: &UiBox) 
                     // a drag by the title (a click or a double-click stays one): the nodes of the scope whose
                     // centres lie inside the frame travel with it
                     let (ox, oy) = t.geo.origins.iter().find(|(q, _)| *q == scope).map(|(_, o)| *o).unwrap_or((0.0, 0.0));
-                    let (_, (fx, fy), (fw, fh)) = (t.frames)(&scope)[i].clone();
+                    let (_, (fx, fy), (fw, fh)) = t.saved.frames(&scope)[i].clone();
                     let inside = |path: &Path| -> bool {
                         scope_of_path(path) == scope
                             && match box_at(&t, path) {
@@ -1541,12 +1541,9 @@ pub fn paint_frame(t: &Pane, ui: &mut Ui, z: f64, fs: i64, layer: &UiBox, canvas
         let snap = snapshot.clone();
         let zone_slots: Vec<usize> = zones.to_vec();
         let wires: Vec<usize> = wires_in_view.to_vec();
-        ui.draw(
-            layer,
-            Box::new(move |paint, rect| {
-                sp::paint_background(paint, &snap, rect, &wires, &zone_slots);
-            }),
-        );
+        ui.draw(layer, move |paint, rect| {
+            sp::paint_background(paint, &snap, rect, &wires, &zone_slots);
+        });
     }
     for tl in tiles {
         let (pl, ax, ay) = &t.geo.items[tl.slot];
@@ -1578,7 +1575,7 @@ pub fn paint_frame(t: &Pane, ui: &mut Ui, z: f64, fs: i64, layer: &UiBox, canvas
                 Some((rp, i)) if *rp == n.path => Some(*i),
                 _ => None,
             };
-            probe = (t.probe)(&n.path);
+            probe = t.saved.probe(&n.path);
             count = count_of(t, &n.path);
             // the chain of the selection stays; the rest of the cards recede
             recede = match chain {
@@ -1586,39 +1583,36 @@ pub fn paint_frame(t: &Pane, ui: &mut Ui, z: f64, fs: i64, layer: &UiBox, canvas
                 None => false,
             };
         }
-        ui.draw(
-            &tl.tile,
-            Box::new(move |paint, rect| {
-                let (pl, _, _) = &snap.geo.items[slot];
-                let (x, y, w, h) = rect;
-                match &pl.item {
-                    Item::Input(_) if pl.shown == Level::Point => sp::paint_point(paint, &snap, z, fs, pl, None, isel, rect),
-                    Item::Input(i) => sp::paint_input(paint, &snap, z, fs, i, isel, rect),
-                    Item::Return => {
-                        if let Some(s) = &snap.scope {
-                            sp::paint_return(paint, &snap, z, fs, s, isel, rect);
-                        }
-                    }
-                    Item::Item(n) => {
-                        match &n.zone {
-                            Some(zn) if !pl.collapsed => {
-                                sp::paint_zone_frame(paint, &snap, z, fs, footer.as_ref(), n, zn, isel, out_wired, rect, probe, count);
-                            }
-                            _ => {
-                                let o = sp::NodeOpts { footer: footer.clone(), lens_step, hovered, carry, out_wired, shown: pl.shown, failed: failed.clone() };
-                                sp::paint_node(paint, &snap, z, fs, &o, pl, n, isel, rh, rect);
-                                if dim {
-                                    paint.fill(x, y, w, h, color::with_alpha(snap.theme.panel, 150));
-                                }
-                            }
-                        }
-                        if recede {
-                            paint.fill(x, y, w, h, color::with_alpha(snap.theme.panel, 170));
-                        }
+        ui.draw(&tl.tile, move |paint, rect| {
+            let (pl, _, _) = &snap.geo.items[slot];
+            let (x, y, w, h) = rect;
+            match &pl.item {
+                Item::Input(_) if pl.shown == Level::Point => sp::paint_point(paint, &snap, z, fs, pl, None, isel, rect),
+                Item::Input(i) => sp::paint_input(paint, &snap, z, fs, i, isel, rect),
+                Item::Return => {
+                    if let Some(s) = &snap.scope {
+                        sp::paint_return(paint, &snap, z, fs, s, isel, rect);
                     }
                 }
-            }),
-        );
+                Item::Item(n) => {
+                    match &n.zone {
+                        Some(zn) if !pl.collapsed => {
+                            sp::paint_zone_frame(paint, &snap, z, fs, footer.as_ref(), n, zn, isel, out_wired, rect, probe, count);
+                        }
+                        _ => {
+                            let o = sp::NodeOpts { footer: footer.clone(), lens_step, hovered, carry, out_wired, shown: pl.shown, failed: failed.clone() };
+                            sp::paint_node(paint, &snap, z, fs, &o, pl, n, isel, rh, rect);
+                            if dim {
+                                paint.fill(x, y, w, h, color::with_alpha(snap.theme.panel, 150));
+                            }
+                        }
+                    }
+                    if recede {
+                        paint.fill(x, y, w, h, color::with_alpha(snap.theme.panel, 170));
+                    }
+                }
+            }
+        });
     }
     let drawn_items = tiles.len() as i64;
     let drawn_zones = zones.len() as i64;
@@ -1697,99 +1691,96 @@ pub fn paint_frame(t: &Pane, ui: &mut Ui, z: f64, fs: i64, layer: &UiBox, canvas
     };
     let snap = snapshot.clone();
     let press_point = canvas_signal.press_point;
-    ui.draw_over(
-        canvas,
-        Box::new(move |paint, rect| {
-            let (cx, cy, cw, ch) = rect;
-            let refused = theme::invalid();
-            let hint_chip = |paint: &mut pxui::ui::Paint, bg: color::T, at: (f64, f64), letter: &str| {
-                let letter = letter.to_uppercase();
-                let size = 8.max(font_size - 2);
-                let lw = 14.0f64.max(paint.text_width(Some(size), &letter) + 6.0);
-                paint.fill(at.0 - 7.0, at.1 - 7.0, lw, 14.0, bg);
-                let tw = paint.text_width(Some(size), &letter);
-                let ty = paint.text_top(Some(size), at.1 - 7.0, 14.0);
-                paint.text_s((at.0 - 7.0 + ((lw - tw) / 2.0), ty), size, snap.theme.foreground, &letter);
+    ui.draw_over(canvas, move |paint, rect| {
+        let (cx, cy, cw, ch) = rect;
+        let refused = theme::invalid();
+        let hint_chip = |paint: &mut pxui::ui::Paint, bg: color::T, at: (f64, f64), letter: &str| {
+            let letter = letter.to_uppercase();
+            let size = 8.max(font_size - 2);
+            let lw = 14.0f64.max(paint.text_width(Some(size), &letter) + 6.0);
+            paint.fill(at.0 - 7.0, at.1 - 7.0, lw, 14.0, bg);
+            let tw = paint.text_width(Some(size), &letter);
+            let ty = paint.text_top(Some(size), at.1 - 7.0, 14.0);
+            paint.text_s((at.0 - 7.0 + ((lw - tw) / 2.0), ty), size, snap.theme.foreground, &letter);
+        };
+        if let Some(ok) = canvas_hot {
+            paint.dashed_rect(cx + 1.5, cy + 1.5, cw - 3.0, ch - 3.0, if ok { snap.theme.accent } else { refused });
+        }
+        for ((x, y, w, h), letter, hot) in &marks {
+            let color = match hot {
+                Some(false) => refused,
+                _ => snap.theme.accent,
             };
-            if let Some(ok) = canvas_hot {
-                paint.dashed_rect(cx + 1.5, cy + 1.5, cw - 3.0, ch - 3.0, if ok { snap.theme.accent } else { refused });
+            // a drop target: a dashed accent edge on the card
+            if hot.is_some() {
+                paint.dashed_rect(x + 0.5, y + 0.5, w - 1.0, h - 1.0, color);
+            } else {
+                paint.stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, color);
             }
-            for ((x, y, w, h), letter, hot) in &marks {
-                let color = match hot {
-                    Some(false) => refused,
-                    _ => snap.theme.accent,
-                };
-                // a drop target: a dashed accent edge on the card
-                if hot.is_some() {
-                    paint.dashed_rect(x + 0.5, y + 0.5, w - 1.0, h - 1.0, color);
-                } else {
-                    paint.stroke(x + 0.5, y + 0.5, w - 1.0, h - 1.0, color);
-                }
-                // a letter of the key route: the hint colour under ink, at the card's top left (-7, -7)
-                if let Some(letter) = letter {
-                    hint_chip(paint, if *hot == Some(false) { refused } else { theme::ports(&snap.theme).hint }, (*x, *y), letter);
-                }
+            // a letter of the key route: the hint colour under ink, at the card's top left (-7, -7)
+            if let Some(letter) = letter {
+                hint_chip(paint, if *hot == Some(false) { refused } else { theme::ports(&snap.theme).hint }, (*x, *y), letter);
             }
-            // letter hints: a chip per target still matching what was typed, the rest of its letters shown
-            if let Some(h) = &snap.hinting {
-                for tg in &h.targets {
-                    if tg.label.starts_with(&h.typed) {
-                        let rest = &tg.label[h.typed.len()..];
-                        hint_chip(paint, theme::ports(&snap.theme).hint, (sx(&snap, tg.pos.0), sy(&snap, tg.pos.1)), rest);
-                    }
+        }
+        // letter hints: a chip per target still matching what was typed, the rest of its letters shown
+        if let Some(h) = &snap.hinting {
+            for tg in &h.targets {
+                if tg.label.starts_with(&h.typed) {
+                    let rest = &tg.label[h.typed.len()..];
+                    hint_chip(paint, theme::ports(&snap.theme).hint, (sx(&snap, tg.pos.0), sy(&snap, tg.pos.1)), rest);
                 }
             }
-            if let Some((fx, fy)) = live_tip {
+        }
+        if let Some((fx, fy)) = live_tip {
+            let size = 4.max(font_size - 2);
+            let label = "t  live: reads time or input, re-cooked every frame";
+            let tw = paint.text_width(Some(size), label) + 14.0;
+            sp::frame_in(paint, fx, fy, tw, 20.0, Some(snap.theme.input), theme::edge(&snap.theme));
+            let ty = paint.text_top(Some(size), fy, 20.0);
+            paint.text_s((fx + 7.0, ty), size, snap.theme.foreground, label);
+        }
+        // the displayed node's tip, once the pointer has rested on its flag
+        if tip_open {
+            if let Some((fx, fy)) = tip_at {
                 let size = 4.max(font_size - 2);
-                let label = "t  live: reads time or input, re-cooked every frame";
-                let tw = paint.text_width(Some(size), label) + 14.0;
+                let label = "displayed";
+                let key = "V";
+                let lw = paint.text_width(Some(size), label);
+                let kw = paint.text_width(Some(size), key);
+                let tw = 2.0 + 12.0 + lw + 6.0 + kw;
                 sp::frame_in(paint, fx, fy, tw, 20.0, Some(snap.theme.input), theme::edge(&snap.theme));
                 let ty = paint.text_top(Some(size), fy, 20.0);
                 paint.text_s((fx + 7.0, ty), size, snap.theme.foreground, label);
+                paint.text_s((fx + 7.0 + lw + 6.0, ty), size, theme::ink_3(&snap.theme), key);
             }
-            // the displayed node's tip, once the pointer has rested on its flag
-            if tip_open {
-                if let Some((fx, fy)) = tip_at {
-                    let size = 4.max(font_size - 2);
-                    let label = "displayed";
-                    let key = "V";
-                    let lw = paint.text_width(Some(size), label);
-                    let kw = paint.text_width(Some(size), key);
-                    let tw = 2.0 + 12.0 + lw + 6.0 + kw;
-                    sp::frame_in(paint, fx, fy, tw, 20.0, Some(snap.theme.input), theme::edge(&snap.theme));
-                    let ty = paint.text_top(Some(size), fy, 20.0);
-                    paint.text_s((fx + 7.0, ty), size, snap.theme.foreground, label);
-                    paint.text_s((fx + 7.0 + lw + 6.0, ty), size, theme::ink_3(&snap.theme), key);
-                }
+        }
+        for wi in &snap.highlighted {
+            let pts: Vec<(f64, f64)> = wi.pts.iter().map(|(x, y)| (sx(&snap, *x), sy(&snap, *y))).collect();
+            sp::paint_polyline((cx, cy, cw, ch), paint, 2.0, snap.theme.foreground, &pts);
+            for (x, y) in [wi.a, wi.b] {
+                paint.circle((sx(&snap, x), sy(&snap, y)), 6.0, None, Some(snap.theme.foreground));
             }
-            for wi in &snap.highlighted {
-                let pts: Vec<(f64, f64)> = wi.pts.iter().map(|(x, y)| (sx(&snap, *x), sy(&snap, *y))).collect();
-                sp::paint_polyline((cx, cy, cw, ch), paint, 2.0, snap.theme.foreground, &pts);
-                for (x, y) in [wi.a, wi.b] {
-                    paint.circle((sx(&snap, x), sy(&snap, y)), 6.0, None, Some(snap.theme.foreground));
-                }
+        }
+        if let Some(wg) = &band {
+            if let Some((a, b)) = clip_segment(wg.from, mouse, (cx, cy, cw, ch)) {
+                paint.line_w(a, b, 1.5, sp::ty_color(&snap, wg.ty.as_ref()));
             }
-            if let Some(wg) = &band {
-                if let Some((a, b)) = clip_segment(wg.from, mouse, (cx, cy, cw, ch)) {
-                    paint.line_w(a, b, 1.5, sp::ty_color(&snap, wg.ty.as_ref()));
-                }
+        }
+        if let Some(Drag::Marquee { .. }) = &snap.drag {
+            let (x0, y0) = press_point;
+            let (mx, my) = mouse;
+            sp::frame_in(paint, x0.min(mx), y0.min(my), (mx - x0).abs(), (my - y0).abs(), Some(theme::tint(&snap.theme)), snap.theme.accent);
+        }
+        if let Some((full, x, y)) = &hover_tip {
+            let size = 4.max(fs - 2);
+            let wd = paint.text_width(Some(size), full) + (12.0 * z);
+            if wd > sp::FIELD_W * z {
+                sp::frame_in(paint, *x, y + (2.0 * z), wd, 20.0 * z, Some(snap.theme.input), theme::edge(&snap.theme));
+                let ty = paint.text_top(Some(size), y + (2.0 * z), 20.0 * z);
+                paint.text_s((x + (6.0 * z), ty), size, snap.theme.foreground, full);
             }
-            if let Some(Drag::Marquee { .. }) = &snap.drag {
-                let (x0, y0) = press_point;
-                let (mx, my) = mouse;
-                sp::frame_in(paint, x0.min(mx), y0.min(my), (mx - x0).abs(), (my - y0).abs(), Some(theme::tint(&snap.theme)), snap.theme.accent);
-            }
-            if let Some((full, x, y)) = &hover_tip {
-                let size = 4.max(fs - 2);
-                let wd = paint.text_width(Some(size), full) + (12.0 * z);
-                if wd > sp::FIELD_W * z {
-                    sp::frame_in(paint, *x, y + (2.0 * z), wd, 20.0 * z, Some(snap.theme.input), theme::edge(&snap.theme));
-                    let ty = paint.text_top(Some(size), y + (2.0 * z), 20.0 * z);
-                    paint.text_s((x + (6.0 * z), ty), size, snap.theme.foreground, full);
-                }
-            }
-        }),
-    );
+        }
+    });
     (drawn_items, drawn_zones)
 }
 

@@ -65,7 +65,7 @@ fn conditional_arms() {
     }
     check(found, "conditional right-click Add arm did not emit edit");
     let imported = scope::with_scope(
-        ScopeOpts { imported: Rc::new(|_: &[String]| Some("lib.rays".to_owned())), ..ScopeOpts::default() },
+        saved_opts(Saved { imported: Some("lib.rays".to_owned()), ..Default::default() }),
         "import",
         Rc::new(p::of_graph(&scope_catalog(), &conditional, "g").expect("g")),
         view,
@@ -106,7 +106,7 @@ fn selector_steps() {
     // the iteration selector: buttons and track are hit-tested boxes
     let w = load_workspace("sunflower");
     let zone = path(&["sunflower", "seeds_each"]);
-    let (view, _) = scope_view(ScopeOpts { probe: Rc::new(|_: &[String]| 5), ..ScopeOpts::default() }, &w, "sunflower");
+    let (view, _) = scope_view(saved_opts(Saved { probe: vec![(zone.clone(), 5)], ..Default::default() }), &w, "sunflower");
     let (view, _) = scope_step(&mut ui, view, &frame0());
     let (prev, track, next) = scope::Inspect::selector(&view, &zone).expect("selector");
     let (_, changes) = scope_click(&mut ui, view.clone(), rect_center(next));
@@ -117,7 +117,7 @@ fn selector_steps() {
     let (_, pinned) = scope::run_command(view.clone(), Command::Probe_step(1));
     check(pinned.contains(&Change::Probe_set { zone: zone.clone(), index: 6 }), "[ ] with nothing selected did not step every zone");
     let inline = checked("(workspace w (graph g :context value (let* [ys (map (fn [(x : float)] (+ x 2.0)) (array/float 10003 1.0))] (array/count ys))))");
-    let (inline_view, _) = scope_view(ScopeOpts { probe: Rc::new(|_: &[String]| 9999), ..ScopeOpts::default() }, &inline, "g");
+    let (inline_view, _) = scope_view(saved_opts(Saved { probe: vec![(path(&["g", "ys#0"]), 9999)], ..Default::default() }), &inline, "g");
     let (inline_view, _) = scope_step(&mut ui, inline_view, &frame0());
     let inline_zone = path(&["g", "ys#0"]);
     let (_, inline_keys) = scope::run_command(scope::select(vec![inline_zone.clone()], inline_view.clone()), Command::Probe_step(1));
@@ -191,7 +191,7 @@ fn drawn_iterations() {
     let b = paint_hash(&mut ui, scope::with_records(reports, base));
     check(a != b, "execution badges did not change the graph's paint");
     let z3 = zone.clone();
-    let (collapsed_view, _) = scope_view(ScopeOpts { collapsed: Rc::new(move |q: &[String]| q == z3.as_slice()), ..ScopeOpts::default() }, &w, "sunflower");
+    let (collapsed_view, _) = scope_view(saved_opts(Saved { collapsed: vec![z3.clone()], ..Default::default() }), &w, "sunflower");
     let (collapsed_view, _) = scope_step(&mut ui, collapsed_view, &frame0());
     check(scope::stats(&collapsed_view).drawn_zones == 0, "a collapsed zone drew its body");
 }
@@ -262,16 +262,7 @@ fn loop_wire() {
     let mut ui = new_ui();
     // a wire inside a loop's body is hovered and selected like any other: its boxes lie over the zone's tile
     let lw = checked("(workspace l (graph g :context sop (let* [ring (for [i (range 3)] (let* [u (sop/uv_sphere) v (sop/transform u)] v)) m (sop/merge ring)] m)))");
-    let at = |q: &[String]| -> Option<(f64, f64)> {
-        if q == ["g", "ring", "u"] {
-            Some((0.0, 0.0))
-        } else if q == ["g", "ring", "v"] {
-            Some((480.0, 240.0))
-        } else {
-            None
-        }
-    };
-    let (lview, _) = scope_view(ScopeOpts { at: Rc::new(at), ..ScopeOpts::default() }, &lw, "g");
+    let (lview, _) = scope_view(saved_opts(Saved { at: vec![(path(&["g", "ring", "u"]), (0.0, 0.0)), (path(&["g", "ring", "v"]), (480.0, 240.0))], ..Default::default() }), &lw, "g");
     let (lview, _) = scope_step(&mut ui, lview, &frame0());
     let inner = path(&["g", "ring", "v"]);
     let wi = (0..scope::Inspect::wire_count(&lview)).find(|i| matches!(scope::Inspect::wire_target(&lview, *i), Some((q, _)) if q == inner)).expect("wire");

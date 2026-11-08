@@ -21,7 +21,7 @@ pub fn selector(t: &Pane, path: &[String]) -> Option<((f64, f64, f64, f64), (f64
     let visible = match node_of(t, path) {
         Some(n) => match &n.zone {
             Some(zn) if matches!(zn.kind, p::ZoneKind::Branch | p::ZoneKind::Let | p::ZoneKind::State) => false,
-            Some(_) => !(t.collapsed)(path),
+            Some(_) => !t.saved.collapsed(path),
             None => false,
         },
         None => false,
@@ -33,7 +33,7 @@ pub fn selector(t: &Pane, path: &[String]) -> Option<((f64, f64, f64, f64), (f64
     let z = t.zoom;
     let fs = font_of(z);
     let m = t.measure.clone();
-    let (sxx, syy, sw, sh, _) = sp::selector_geo(&mut |size, text| m(size, text), z, fs, w, count_of(t, path), (t.probe)(path));
+    let (sxx, syy, sw, sh, _) = sp::selector_geo(&mut |size, text| m(size, text), z, fs, w, count_of(t, path), t.saved.probe(path));
     let x = x + sxx;
     let y = y + syy;
     Some(((x - (4.0 * z), y, 16.0 * z, sh), (x + (12.0 * z), y, sw - (24.0 * z), sh), (x + sw - (12.0 * z), y, 16.0 * z, sh)))

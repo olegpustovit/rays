@@ -179,6 +179,38 @@ pub struct Hinting {
     pub armed: bool,
 }
 
+/// What the host keeps of each node by path: its saved layout (position, level, pinned rows, folds,
+/// frames), the iteration each zone shows, and the imported files that define graphs. The pane only
+/// asks; a host that keeps none of it uses `Nothing`.
+pub trait Saved {
+    fn at(&self, _path: &[String]) -> Option<(f64, f64)> {
+        None
+    }
+    /// a node's saved level and whether it is pinned
+    fn level(&self, _path: &[String]) -> Option<(Level, bool)> {
+        None
+    }
+    /// a node's row pinned onto (or off) its card, by label
+    fn pin(&self, _path: &[String], _label: &str) -> Option<bool> {
+        None
+    }
+    fn collapsed(&self, _path: &[String]) -> bool {
+        false
+    }
+    fn probe(&self, _path: &[String]) -> i64 {
+        0
+    }
+    fn frames(&self, _path: &[String]) -> Vec<Frame3> {
+        Vec::new()
+    }
+    fn imported(&self, _path: &[String]) -> Option<String> {
+        None
+    }
+}
+
+pub struct Nothing;
+impl Saved for Nothing {}
+
 pub type Chains = (PathSet, PathSet);
 pub type ChainCache = Option<(PathSet, Rc<Vec<Wire>>, Chains)>;
 
@@ -192,16 +224,10 @@ pub struct Pane {
     pub guide: bool,
     pub key: String,
     pub scope: Option<Rc<p::Scope>>,
-    pub imported: Rc<dyn Fn(&[String]) -> Option<String>>,
-    pub at: Rc<dyn Fn(&[String]) -> Option<(f64, f64)>>,
-    /// a node's saved level and whether it is pinned
-    pub level_at: Rc<dyn Fn(&[String]) -> Option<(Level, bool)>>,
-    /// a node's row pinned onto (or off) its card, by label
-    pub pin_at: Rc<dyn Fn(&[String], &str) -> Option<bool>>,
-    pub collapsed: Rc<dyn Fn(&[String]) -> bool>,
+    /// what the host keeps per node: saved layout, probes, imported files
+    pub saved: Rc<dyn Saved>,
     /// macro calls whose expansion panel is open, and its step
     pub lens: Vec<(Path, i64)>,
-    pub probe: Rc<dyn Fn(&[String]) -> i64>,
     pub records: Option<Rc<RefCell<Probe>>>,
     /// the iterating zones around each node
     pub chains: Rc<HashMap<Path, Vec<Path>>>,
@@ -209,7 +235,6 @@ pub struct Pane {
     pub folds: Rc<HashMap<(Path, usize), Path>>,
     /// iterations each zone ran, under the probes
     pub counts: Rc<HashMap<Path, i64>>,
-    pub frames: Rc<dyn Fn(&[String]) -> Vec<Frame3>>,
     /// the node the viewport shows instead of the graph's result
     pub display: Option<Path>,
     pub framed: bool,
@@ -292,18 +317,12 @@ pub fn create(width: Option<i64>, height: Option<i64>) -> Pane {
         guide: false,
         key: String::new(),
         scope: None,
-        imported: Rc::new(|_| None),
-        at: Rc::new(|_| None),
-        level_at: Rc::new(|_| None),
-        pin_at: Rc::new(|_, _| None),
-        collapsed: Rc::new(|_| false),
+        saved: Rc::new(Nothing),
         lens: Vec::new(),
-        probe: Rc::new(|_| 0),
         records: None,
         chains: Rc::new(HashMap::new()),
         folds: Rc::new(HashMap::new()),
         counts: Rc::new(HashMap::new()),
-        frames: Rc::new(|_| Vec::new()),
         display: None,
         framed: true,
         layout: Rc::new(p::Layout { placed: Vec::new(), w: 0.0, h: 0.0 }),
@@ -494,8 +513,7 @@ pub fn count_of(t: &Pane, path: &[String]) -> i64 {
 pub fn refresh(t: Pane) -> Pane {
     match (&t.scope, &t.records) {
         (Some(scope), Some(records)) => {
-            let probe = t.probe.clone();
-            let counts: HashMap<Path, i64> = records.borrow_mut().counts(scope, &*probe).into_iter().collect();
+            let counts: HashMap<Path, i64> = records.borrow_mut().counts(scope, &|path: &[String]| t.saved.probe(path)).into_iter().collect();
             Pane { counts: Rc::new(counts), ..t }
         }
         _ => Pane { counts: Rc::new(HashMap::new()), ..t },
@@ -511,10 +529,10 @@ pub fn lens_of(t: &Pane, path: &[String]) -> Option<i64> {
 }
 
 /// The cards reserve a footer row once the host has probe records to show.
-pub fn lay(t: &Pane, sticky: bool, scope: &p::Scope, at: Rc<dyn Fn(&[String]) -> Option<(f64, f64)>>, collapsed: Rc<dyn Fn(&[String]) -> bool>) -> p::Layout {
+pub fn lay(t: &Pane, saved: &Rc<dyn Saved>, sticky: bool, scope: &p::Scope) -> p::Layout {
     // the cards stay where they were (flow.md 6.1): an edit places only the nodes it adds; a card whose
     // saved position was dropped (an undone drag) is a full layout again
-    let sticky = sticky && !t.layout.placed.iter().any(|b| (t.at)(&b.path).is_some() && at(&b.path).is_none());
+    let sticky = sticky && !t.layout.placed.iter().any(|b| t.saved.at(&b.path).is_some() && saved.at(&b.path).is_none());
     let prev: Rc<dyn Fn(&[String]) -> Option<(f64, f64, f64, f64)>> = if !sticky || t.layout.placed.is_empty() {
         Rc::new(|_| None)
     } else {
@@ -525,19 +543,18 @@ pub fn lay(t: &Pane, sticky: bool, scope: &p::Scope, at: Rc<dyn Fn(&[String]) ->
         Rc::new(move |pth: &[String]| h.get(pth).copied())
     };
     let lens = t.lens.clone();
-    let level_at = t.level_at.clone();
     let mut o = p::LayoutOptions::new();
     o.foot = t.records.is_some();
-    o.at = at;
+    let s = saved.clone();
+    o.at = Rc::new(move |pth: &[String]| s.at(pth));
     o.prev = prev;
-    o.collapsed = collapsed;
+    let s = saved.clone();
+    o.collapsed = Rc::new(move |pth: &[String]| s.collapsed(pth));
     o.lens = Rc::new(move |pth: &[String]| lens.iter().find(|(x, _)| x.as_slice() == pth).map(|(_, s)| *s));
-    o.level = Rc::new(move |pth: &[String]| match level_at(pth) {
-        Some((l, _)) => l,
-        None => Level::Card,
-    });
-    let pin_at = t.pin_at.clone();
-    o.pin = Rc::new(move |pth: &[String], label: &str| pin_at(pth, label));
+    let s = saved.clone();
+    o.level = Rc::new(move |pth: &[String]| s.level(pth).map_or(Level::Card, |(l, _)| l));
+    let s = saved.clone();
+    o.pin = Rc::new(move |pth: &[String], label: &str| s.pin(pth, label));
     p::layout(&o, scope)
 }
 
@@ -641,37 +658,19 @@ pub fn switch_nodes(scope: &p::Scope) -> Vec<(Path, i64)> {
 /// The optional arguments of `with_scope`.
 #[derive(Clone)]
 pub struct ScopeOpts {
-    pub at: Rc<dyn Fn(&[String]) -> Option<(f64, f64)>>,
-    pub level: Rc<dyn Fn(&[String]) -> Option<(Level, bool)>>,
-    pub pin: Rc<dyn Fn(&[String], &str) -> Option<bool>>,
-    pub collapsed: Rc<dyn Fn(&[String]) -> bool>,
-    pub probe: Rc<dyn Fn(&[String]) -> i64>,
-    pub frames: Rc<dyn Fn(&[String]) -> Vec<Frame3>>,
-    pub imported: Rc<dyn Fn(&[String]) -> Option<String>>,
+    pub saved: Rc<dyn Saved>,
     pub display: Option<Path>,
     pub layouts: Vec<String>,
 }
 
 impl Default for ScopeOpts {
     fn default() -> ScopeOpts {
-        ScopeOpts {
-            at: Rc::new(|_| None),
-            level: Rc::new(|_| None),
-            pin: Rc::new(|_, _| None),
-            collapsed: Rc::new(|_| false),
-            probe: Rc::new(|_| 0),
-            frames: Rc::new(|_| Vec::new()),
-            imported: Rc::new(|_| None),
-            display: None,
-            layouts: Vec::new(),
-        }
+        ScopeOpts { saved: Rc::new(Nothing), display: None, layouts: Vec::new() }
     }
 }
 
-/// Lay a scope out. A new `key` (the graph's name) frames it and clears the selection; the same key
-/// keeps pan, zoom and selection.
-pub fn with_scope(o: ScopeOpts, key: &str, scope: Rc<p::Scope>, t: Pane) -> Pane {
-    let ScopeOpts { at, level, pin, collapsed, probe, frames, imported, display, layouts } = o;
+pub fn with_scope(o: ScopeOpts, key: &str, scope: Rc<p::Scope>, mut t: Pane) -> Pane {
+    let ScopeOpts { saved, display, layouts } = o;
     let scope: Rc<p::Scope> = if layouts.is_empty() {
         scope
     } else {
@@ -691,13 +690,12 @@ pub fn with_scope(o: ScopeOpts, key: &str, scope: Rc<p::Scope>, t: Pane) -> Pane
         }
         Rc::new(sc)
     };
-    let mut t = Pane { level_at: level, pin_at: pin, ..t };
     // letter hints, an open context menu and the hover name nodes and wires of the scope they were made over
     let same = matches!(&t.scope, Some(previous) if Rc::ptr_eq(previous, &scope));
     if !same {
         t = Pane { hinting: None, context: None, highlighted: Vec::new(), ..t };
     }
-    let layout = lay(&t, key == t.key, &scope, at.clone(), collapsed.clone());
+    let layout = lay(&t, &saved, key == t.key, &scope);
     let earlier: Vec<Placed> = if key == t.key { t.layout.placed.clone() } else { Vec::new() };
     let (n, z, r) = count_scope(&scope);
     let stats = Stats { nodes: n, zones: z, rows: r, ..t.stats };
@@ -705,7 +703,7 @@ pub fn with_scope(o: ScopeOpts, key: &str, scope: Rc<p::Scope>, t: Pane) -> Pane
     let folds = Rc::new(fold_sources(&scope));
     let switches = switch_nodes(&scope);
     let layout = Rc::new(layout);
-    let mut t = Pane { scope: Some(scope.clone()), imported, at, collapsed, probe, frames, display, layout: layout.clone(), switches, chains, folds, stats, ..t };
+    let mut t = Pane { scope: Some(scope.clone()), saved, display, layout: layout.clone(), switches, chains, folds, stats, ..t };
     t = regeo(t, &scope, &layout, &no_shift);
     // a card an edit added (an unfolded call lands a column left of its owner) that falls outside the view
     // brings the pane to it, nothing else moves
@@ -770,7 +768,7 @@ pub fn relayout(sticky: Option<bool>, t: Pane) -> Pane {
     match t.scope.clone() {
         None => t,
         Some(scope) => {
-            let layout = lay(&t, sticky.unwrap_or(true), &scope, t.at.clone(), t.collapsed.clone());
+            let layout = lay(&t, &t.saved, sticky.unwrap_or(true), &scope);
             let layout = Rc::new(layout);
             regeo(Pane { layout: layout.clone(), ..t }, &scope, &layout, &no_shift)
         }
@@ -858,7 +856,7 @@ pub fn node_of(t: &Pane, path: &[String]) -> Option<p::Node> {
 }
 
 pub fn collapsed_zone(t: &Pane, path: &[String]) -> bool {
-    (t.collapsed)(path) && matches!(node_of(t, path), Some(n) if n.zone.is_some())
+    t.saved.collapsed(path) && matches!(node_of(t, path), Some(n) if n.zone.is_some())
 }
 
 impl Pane {

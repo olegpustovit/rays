@@ -7,7 +7,7 @@ use flow_graph::projection as p;
 use input::{Event, Key, MouseButton, Platform};
 use pxui::ui::*;
 use pxui_graph::scope_pane as scope;
-use pxui_graph::scope_state::{Change, Pane, ScopeOpts};
+use pxui_graph::scope_state::{self, Change, Pane, ScopeOpts};
 use rays::frame as rframe;
 use rays::scene::Layer;
 use std::cell::RefCell;
@@ -231,6 +231,46 @@ pub mod g {
 }
 
 /// A path from its segments.
+/// What a test's host has saved: positions, levels, probes, frames, folds and imports.
+#[derive(Default)]
+pub struct Saved {
+    pub at: Vec<(Vec<String>, (f64, f64))>,
+    pub level: Vec<(Vec<String>, (p::Level, bool))>,
+    pub probe: Vec<(Vec<String>, i64)>,
+    pub frames: Vec<(Vec<String>, Vec<scope_state::Frame3>)>,
+    pub collapsed: Vec<Vec<String>>,
+    pub imported: Option<String>,
+}
+
+fn find<'a, V>(list: &'a [(Vec<String>, V)], path: &[String]) -> Option<&'a V> {
+    list.iter().find(|(k, _)| k.as_slice() == path).map(|(_, v)| v)
+}
+
+impl scope_state::Saved for Saved {
+    fn at(&self, path: &[String]) -> Option<(f64, f64)> {
+        find(&self.at, path).copied()
+    }
+    fn level(&self, path: &[String]) -> Option<(p::Level, bool)> {
+        find(&self.level, path).copied()
+    }
+    fn probe(&self, path: &[String]) -> i64 {
+        find(&self.probe, path).copied().unwrap_or(0)
+    }
+    fn frames(&self, path: &[String]) -> Vec<scope_state::Frame3> {
+        find(&self.frames, path).cloned().unwrap_or_default()
+    }
+    fn collapsed(&self, path: &[String]) -> bool {
+        self.collapsed.iter().any(|k| k.as_slice() == path)
+    }
+    fn imported(&self, _: &[String]) -> Option<String> {
+        self.imported.clone()
+    }
+}
+
+pub fn saved_opts(saved: Saved) -> ScopeOpts {
+    ScopeOpts { saved: Rc::new(saved), ..Default::default() }
+}
+
 pub fn path(parts: &[&str]) -> Vec<String> {
     parts.iter().map(|s| s.to_string()).collect()
 }

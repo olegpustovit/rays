@@ -169,9 +169,9 @@ fn second_name(f: &S) -> Option<String> {
     }
 }
 
-pub fn imported_file(t: &T, path: &[String]) -> Option<String> {
+pub fn imported_file(imports: &[(String, Vec<S>)], path: &[String]) -> Option<String> {
     let root = path.first()?;
-    t.imports.iter().find_map(|(file, forms)| {
+    imports.iter().find_map(|(file, forms)| {
         if forms.iter().any(|f| match second_name(f) {
             Some(name) => *root == name || *root == format!("def:{name}"),
             None => false,
@@ -618,7 +618,7 @@ fn edit_unchecked(catalog: &Catalog, t: &T, op: &Op) -> R<T> {
 /// `run` on a document whose imported forms the edit neither names nor rewrites.
 fn guarded(t: &T, paths: &[Vec<String>], run: &mut dyn FnMut() -> R<T>) -> R<T> {
     let refusal = |file: &str| Err(diag(None, "E_IMPORTED", &format!("Read-only imported form from {file}.")));
-    if let Some(file) = paths.iter().find_map(|p| imported_file(t, p)) {
+    if let Some(file) = paths.iter().find_map(|p| imported_file(&t.imports, p)) {
         return refusal(&file);
     }
     let next = run()?;

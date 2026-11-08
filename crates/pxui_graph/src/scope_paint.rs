@@ -40,7 +40,7 @@ fn wired(r: &p::Row) -> bool {
 
 /// ponytail: a private copy of `Scope_commands.frame_list` (the frames of a scope with a drag applied).
 fn frame_list(t: &Pane, scope: &[String]) -> Vec<Fr> {
-    let frames = (t.frames)(scope);
+    let frames = t.saved.frames(scope);
     match &t.drag {
         Some(st::Drag::Sizing { scope: s, index, dw, dh }) if s.as_slice() == scope => frames
             .into_iter()
@@ -776,7 +776,7 @@ pub fn paint_header(paint: &mut Paint, t: &Pane, z: f64, fs: i64, x: f64, y: f64
     // where the name and the kind meet, the kind yields; a value card has its field there instead
     let kind_text: Option<String> = match &o.failed {
         Some(code) => Some(code.clone()),
-        None => match (t.imported)(&n.path) {
+        None => match t.saved.imported(&n.path) {
             Some(file) => Some(file),
             None => {
                 if n.zone.is_none() && n.head != n.name && !p::value_card(n) {
@@ -1000,7 +1000,7 @@ pub fn paint_point(paint: &mut Paint, t: &Pane, z: f64, fs: i64, pl: &Placed, fa
 /// The execution report of a node at the zones' pinned iterations.
 fn execution_of(t: &Pane, n: &p::Node) -> Option<Execution> {
     let records = t.records.as_ref()?;
-    let chain: Vec<i64> = t.chains.get(&n.path).map(|c| c.iter().map(|x| (t.probe)(x)).collect()).unwrap_or_default();
+    let chain: Vec<i64> = t.chains.get(&n.path).map(|c| c.iter().map(|x| t.saved.probe(x)).collect()).unwrap_or_default();
     let r = records.borrow().execution(&n.path, &chain);
     r
 }
@@ -1482,7 +1482,7 @@ fn zone_taken(t: &Pane, node: &p::Node, zn: &p::Zone) -> bool {
     } else {
         arm[5..].parse::<i64>().unwrap_or(1) - 1
     };
-    let chain: Vec<i64> = t.chains.get(&parent.path).map(|c| c.iter().map(|x| (t.probe)(x)).collect()).unwrap_or_default();
+    let chain: Vec<i64> = t.chains.get(&parent.path).map(|c| c.iter().map(|x| t.saved.probe(x)).collect()).unwrap_or_default();
     let r = records.borrow_mut().taken_arm(&parent, &chain) == Some(index);
     r
 }

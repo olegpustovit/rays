@@ -170,7 +170,7 @@ pub fn scope_of_path(path: &[String]) -> Vec<String> {
 
 /// A frame's size while its corner is dragged.
 pub fn frame_list(t: &Pane, scope: &[String]) -> Vec<Fr> {
-    let frames = (t.frames)(scope);
+    let frames = t.saved.frames(scope);
     match &t.drag {
         Some(Drag::Sizing { scope: sc, index, dw, dh }) if sc.as_slice() == scope => frames
             .into_iter()
@@ -340,7 +340,7 @@ pub fn action_changes(t: &Pane, command: Command) -> Vec<Change> {
                 None if n.expr => Some(Change::Zone_collapsed { zone: outer_expr(t, &n.path), collapsed: true }),
                 Some(z) if z.kind == p::ZoneKind::Let => None,
                 None => None,
-                Some(_) => Some(Change::Zone_collapsed { zone: n.path.clone(), collapsed: !(t.collapsed)(&n.path) }),
+                Some(_) => Some(Change::Zone_collapsed { zone: n.path.clone(), collapsed: !t.saved.collapsed(&n.path) }),
             })
             .collect(),
         Command::Probe_step(delta) => {
@@ -358,7 +358,7 @@ pub fn action_changes(t: &Pane, command: Command) -> Vec<Change> {
                         if count <= 0 {
                             None
                         } else {
-                            let cur = (t.probe)(&n.path);
+                            let cur = t.saved.probe(&n.path);
                             let index = 0.max((count - 1).min(cur + delta));
                             if index == cur { None } else { Some(Change::Probe_set { zone: n.path.clone(), index }) }
                         }
@@ -700,7 +700,7 @@ pub fn run_command(t: Pane, command: Command) -> (Pane, Vec<Change>) {
         }
         Command::Make_frame => match new_frame(&t) {
             Some((scope, frame)) => {
-                let mut frames = (t.frames)(&scope);
+                let mut frames = t.saved.frames(&scope);
                 frames.push(frame);
                 (t, vec![Change::Frames_set { scope, frames }])
             }

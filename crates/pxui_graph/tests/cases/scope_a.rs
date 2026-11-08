@@ -14,9 +14,7 @@ use pxui_graph::scope_state::{Change, Command, Pane, ScopeOpts};
 use std::rc::Rc;
 
 fn at_of(pairs: Vec<(Path, (f64, f64))>) -> ScopeOpts {
-    let mut o = ScopeOpts::default();
-    o.at = Rc::new(move |q: &[String]| pairs.iter().find(|(k, _)| k.as_slice() == q).map(|(_, v)| *v));
-    o
+    saved_opts(Saved { at: pairs, ..Default::default() })
 }
 
 fn menu_requested(changes: &[Change]) -> bool {
@@ -41,8 +39,7 @@ fn scope_zoom_geometry() {
         (true, 0.45, |z| z < 0.5),
     ];
     for (pinned, factor, expect) in cases {
-        let mut o = ScopeOpts::default();
-        o.level = Rc::new(move |q: &[String]| if pinned && q == ["g", "b"] { Some((Level::Full, true)) } else { None });
+        let o = saved_opts(Saved { level: if pinned { vec![(path(&["g", "b"]), (Level::Full, true))] } else { Vec::new() }, ..Default::default() });
         let (view, _) = scope_view(o, &ws, "g");
         let (view, _) = scope_step(&mut ui, view, &frame0());
         let mouse = (500, 350);
@@ -443,8 +440,7 @@ fn scope_ghost_values() {
     let w = checked("(workspace w (graph g :context value (let* [k 6.0 ys (for [i (range 4)] (let* [a (* k (float i)) b (+ a 1.0)] b)) n (reduce (fn [acc x] (+ acc x)) 0.0 ys)] n)))");
     let sc = Rc::new(p::of_graph(&scope_catalog(), &w, "g").unwrap());
     let view = |index: i64| {
-        let mut o = ScopeOpts::default();
-        o.probe = Rc::new(move |_: &[String]| index);
+        let o = saved_opts(Saved { probe: sc.nodes.iter().filter(|n| n.zone.is_some()).map(|n| (n.path.clone(), index)).collect(), ..Default::default() });
         let v = scope::with_scope(o, "g", sc.clone(), scope::create(Some(1000), Some(700)));
         scope::with_records(recorded(&w), v)
     };

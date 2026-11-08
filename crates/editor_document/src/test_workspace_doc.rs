@@ -142,7 +142,7 @@ fn part_imports() {
     assert!(d.checked.graphs.len() == 2 && d.checked.defs.iter().filter(|g| g.name == "twice").count() == 1, "import children were not checked together");
     assert_eq!(doc::import_texts(&d), imports, "raw import text was lost (reload digest)");
     assert!(
-        doc::imported_file(&d, &p(&["shared", "@result"])) == Some("lib.rays".to_owned()) && doc::imported_file(&d, &p(&["def:twice"])) == Some("lib.rays".to_owned()),
+        doc::imported_file(&d.imports, &p(&["shared", "@result"])) == Some("lib.rays".to_owned()) && doc::imported_file(&d.imports, &p(&["def:twice"])) == Some("lib.rays".to_owned()),
         "import provenance was lost"
     );
     let printed = doc::to_text(&d).unwrap();
