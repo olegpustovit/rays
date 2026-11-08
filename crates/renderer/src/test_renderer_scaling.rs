@@ -4,8 +4,8 @@
 use crate::renderer::native;
 use crate::renderer_lowering::default_state;
 use crate::scene_execution::{empty_bytes, GeometryDraw, Mesh, MeshKey, PipelineFamily, SampledDraw};
-use ogpu::pipeline::Blend;
-use ogpu::render_pass::Primitive;
+use ogpu_core::pipeline::Blend;
+use ogpu_core::render_pass::Primitive;
 use runtime::{Change_flag, frame_facts};
 use std::rc::Rc;
 

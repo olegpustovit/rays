@@ -1,5 +1,5 @@
 use crate::impl_;
-use ogpu::{
+use ogpu_core::{
     backend,
     error::ErrorKind,
     impl_ as virtual_impl,

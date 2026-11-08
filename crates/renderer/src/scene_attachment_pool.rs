@@ -1,8 +1,8 @@
-use ogpu::backend::{self, Device, Texture};
-use ogpu::caps::{self, Feature};
-use ogpu::error::{self, Error, ErrorKind};
-use ogpu::surface::Configuration;
-use ogpu::types::{TextureDescriptor, TextureFormat, TextureUsage};
+use ogpu_core::backend::{self, Device, Texture};
+use ogpu_core::caps::{self, Feature};
+use ogpu_core::error::{self, Error, ErrorKind};
+use ogpu_core::surface::Configuration;
+use ogpu_core::types::{TextureDescriptor, TextureFormat, TextureUsage};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {

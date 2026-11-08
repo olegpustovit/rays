@@ -6,7 +6,7 @@ pub struct t {
 }
 
 fn message(operation: &str, error: &runtime_resources::error) -> String {
-    format!("{operation}: {}", ogpu::error::to_string(error))
+    format!("{operation}: {}", ogpu_core::error::to_string(error))
 }
 
 /// Opens the default playback device.

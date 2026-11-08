@@ -23,7 +23,7 @@ use flow_shader::emit::{self, Curves};
 use flow_syntax::ty::{FnSignature, Ty};
 use flow_syntax::value::{FnId, Value, source_value};
 use flow_syntax::{context, syntax};
-use ogpu::backend::{Accel, Buffer, Commands};
+use ogpu_core::backend::{Accel, Buffer, Commands};
 use rays_diagnostic::Diagnostic;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -453,7 +453,7 @@ thread_local! {
 const FRONT_ENTRIES: usize = 24;
 
 fn front_big(t: &T, name: &str) -> Result<FrontResult, String> {
-    let mut job = FrontJob { facts: t.facts.clone(), values: t.values.clone(), pixels: t.pixels.clone(), fns: t.fns.borrow().clone(), evals: std::mem::take(&mut *t.evals.borrow_mut()), vulkan: ogpu::impl_::backend().map(|b| b == "vulkan").unwrap_or(false) };
+    let mut job = FrontJob { facts: t.facts.clone(), values: t.values.clone(), pixels: t.pixels.clone(), fns: t.fns.borrow().clone(), evals: std::mem::take(&mut *t.evals.borrow_mut()), vulkan: ogpu_core::impl_::backend().map(|b| b == "vulkan").unwrap_or(false) };
     let name = name.to_string();
     let handle = std::thread::Builder::new()
         .stack_size(BIG_STACK)
@@ -472,7 +472,7 @@ fn front_big(t: &T, name: &str) -> Result<FrontResult, String> {
 }
 
 fn cached_front(t: &T, name: &str) -> Result<FrontResult, String> {
-    let key = format!("{:?}|{name}|{}", t.facts, ogpu::impl_::backend().unwrap_or_default());
+    let key = format!("{:?}|{name}|{}", t.facts, ogpu_core::impl_::backend().unwrap_or_default());
     if let Some(found) = FRONTS.with(|f| f.borrow().iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone())) {
         return Ok(found);
     }
@@ -603,7 +603,7 @@ pub fn gather_kernel(lease: &renderer::renderer::Gpu, pipes: &pipelines::T) -> R
     let term = e::Residual::residual_view(residual).map_err(|d| rays_diagnostic::to_string(&d))?.term;
     let template = packed::compile_template(&packed::CompileOptions::default(), residual, &term).ok_or("path tracer gather has no device template")?;
     let options = emit::Options {
-        spirv: ogpu::impl_::backend().map(|b| b == "vulkan").unwrap_or(false),
+        spirv: ogpu_core::impl_::backend().map(|b| b == "vulkan").unwrap_or(false),
         fast: true,
         uint32_scalars: true,
         uint32_inputs: vec![0],

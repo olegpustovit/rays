@@ -13,8 +13,8 @@ use flow_gpu::{image_sink, pipelines, run};
 use flow_ir::packed::{self, host as phost};
 use flow_shader::emit;
 use flow_syntax::value::Value;
-use ogpu::backend as b;
-use ogpu::types::{BufferDescriptor, BufferUsage};
+use ogpu_core::backend as b;
+use ogpu_core::types::{BufferDescriptor, BufferUsage};
 
 const RESOLVE_PREVIEW: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../crates/rays_pathtracer/resolve_preview.rays"));
 const HELPERS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../crates/rays_pathtracer/pathtrace_helpers.rays"));

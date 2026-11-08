@@ -3,9 +3,9 @@
 //! promotion bounds of the animated-affine loop (no OCaml GC here); the 100 frames still run.
 use ::renderer::renderer::{self, prepared_draw};
 use ::renderer::scene_execution::{self, GeometryDraw, Mesh, MeshKey, new_bytes, PipelineFamily, SampledTexture, State, TextureLevel};
-use ogpu::pipeline::Blend;
-use ogpu::render_pass::{Comparison, Cull, Load, Primitive};
-use ogpu::types::{AddressMode, MipFilter, SamplerDescriptor, SamplerFilter};
+use ogpu_core::pipeline::Blend;
+use ogpu_core::render_pass::{Comparison, Cull, Load, Primitive};
+use ogpu_core::types::{AddressMode, MipFilter, SamplerDescriptor, SamplerFilter};
 use std::rc::Rc;
 
 fn words(values: &[u32]) -> scene_execution::bytes {
@@ -36,7 +36,7 @@ pub fn run(runtime: &renderer::Renderer, mut before_draw: impl FnMut()) {
         before_draw();
         renderer::draw(None, runtime, draws)
     };
-    let live_handles = || ogpu::impl_::live_handles().unwrap();
+    let live_handles = || ogpu_core::impl_::live_handles().unwrap();
     // a quad's constants (marks.rays): the identity affine, a white ink, the clip square and the
     // whole texture
     let quad = Mesh {

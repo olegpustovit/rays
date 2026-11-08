@@ -1,12 +1,12 @@
 use crate::renderer_shaders as shaders;
 use crate::scene_execution::{self, PipelineFamily, PipelineFamily::*};
-use ogpu::backend::{self, Device, Pipeline};
-use ogpu::binding::{self, Kind as LayoutKind, LayoutEntry, Stage as LayoutStage};
-use ogpu::error::{self, Error, ErrorKind};
-use ogpu::pipeline::{Blend, ColorFormat, DepthFormat, RenderDescriptor};
-use ogpu::render_pass::Primitive;
-use ogpu::shader::{self, BindingKind, EntryPoint, Stage};
-use ogpu::surface::Configuration;
+use ogpu_core::backend::{self, Device, Pipeline};
+use ogpu_core::binding::{self, Kind as LayoutKind, LayoutEntry, Stage as LayoutStage};
+use ogpu_core::error::{self, Error, ErrorKind};
+use ogpu_core::pipeline::{Blend, ColorFormat, DepthFormat, RenderDescriptor};
+use ogpu_core::render_pass::Primitive;
+use ogpu_core::shader::{self, BindingKind, EntryPoint, Stage};
+use ogpu_core::surface::Configuration;
 use std::rc::Rc;
 
 

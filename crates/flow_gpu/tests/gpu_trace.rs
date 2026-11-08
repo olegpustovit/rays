@@ -63,7 +63,7 @@ fn cpu(program: &packed::T, time: f64) -> Vec<f64> {
 }
 
 struct Run {
-    caps: Option<ogpu::caps::Caps>,
+    caps: Option<ogpu_core::caps::Caps>,
     cpu_time: Option<f64>,
     tolerance: f64,
 }
@@ -130,7 +130,7 @@ fn skip() -> bool {
     if !common::gpu() {
         return true;
     }
-    let caps = ogpu::backend::capabilities(&renderer::renderer::gpu_device(&common::lease()));
+    let caps = ogpu_core::backend::capabilities(&renderer::renderer::gpu_device(&common::lease()));
     if !caps.ray_tracing || !caps.ray_tracing_motion {
         println!("SKIP: backend lacks ray tracing / motion");
         return true;
@@ -156,7 +156,7 @@ fn flat() {
     flow_sop::trace_scene::register(&SPHERES, &[], Some(&mesh(&ending)), 9, &mesh(&a)).expect("register moving");
     let moving = run::Description { triangles: vertex_bytes(&a), triangles_end: Some(vertex_bytes(&ending)), instances: vec![], sphere_data: sphere_data(), strand_data: vec![] };
     assert!(compare_runs(default_run(), "flat, vertex motion", 9, &moving, &[0.0, 0.35, 1.0, 1.5]).motion);
-    let mut caps = ogpu::backend::capabilities(&renderer::renderer::gpu_device(&lease));
+    let mut caps = ogpu_core::backend::capabilities(&renderer::renderer::gpu_device(&lease));
     caps.ray_tracing_motion = false;
     assert!(!compare_runs(Run { caps: Some(caps), cpu_time: Some(0.5), tolerance: 1e-5 }, "flat, shutter midpoint without motion", 9, &moving, &[0.0, 1.0]).motion);
     flow_sop::trace_scene::unregister(9);
@@ -174,7 +174,7 @@ fn stranded() {
     flow_sop::trace_scene::register(&SPHERES, &STRANDS, None, 13, &mesh(&a)).expect("register");
     let strand_data = floats(&STRANDS.iter().flat_map(|(ax, ay, az, bx, by, bz, r)| [*ax, *ay, *az, *r, *bx, *by, *bz, *r]).collect::<Vec<_>>());
     let description = run::Description { triangles: vertex_bytes(&a), triangles_end: None, instances: vec![], sphere_data: sphere_data(), strand_data };
-    let caps = ogpu::backend::capabilities(&renderer::renderer::gpu_device(&lease));
+    let caps = ogpu_core::backend::capabilities(&renderer::renderer::gpu_device(&lease));
     if caps.ray_tracing_curves {
         assert_eq!(compare_runs(Run { tolerance: 1e-4, ..default_run() }, "flat + native curve strands", 13, &description, &[1.0]).curves, Some(Curves::Native));
     } else {
@@ -241,7 +241,7 @@ fn instanced() {
     register(Some(&ends));
     let moving = description(&|k| Some(ends[k].clone()));
     assert!(compare_runs(default_run(), "instanced, instance motion", 11, &moving, &[0.0, 0.25, 0.7, 1.0]).motion);
-    let mut caps = ogpu::backend::capabilities(&renderer::renderer::gpu_device(&lease));
+    let mut caps = ogpu_core::backend::capabilities(&renderer::renderer::gpu_device(&lease));
     caps.ray_tracing_motion = false;
     assert!(!compare_runs(Run { caps: Some(caps), cpu_time: Some(0.5), tolerance: 1e-5 }, "instanced, shutter midpoint without motion", 11, &moving, &[0.3]).motion);
     flow_sop::trace_scene::unregister(11);

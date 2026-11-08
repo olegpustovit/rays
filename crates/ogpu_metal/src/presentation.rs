@@ -4,7 +4,7 @@ use crate::{
     present_source,
 };
 use metal::{LoadAction, RenderPassDescriptor, RenderEncoder, StoreAction};
-use ogpu::error::{Error, ErrorKind};
+use ogpu_core::error::{Error, ErrorKind};
 use std::cell::Cell;
 
 const OPERATION: &str = "Ogpu_metal.Presentation";

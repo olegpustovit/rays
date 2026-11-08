@@ -18,14 +18,14 @@ device's registry identifier remains `Device_lost`, with source operation
 
 ## Ownership and dependency direction
 
-The Rust `ogpu` crate holds the portable types, validation, the `backend` layer and the startup
-selection (`ogpu::impl_`, thread-local state, no default implementation). The backend factory record is
-`ogpu::backend::Implementation`; its `create_driver` returns a `Box<dyn Driver>`. A backend implements the
-driver *traits* in `ogpu::backend` (`Driver`, `DriverDevice`, `DriverQueue`, `DriverCommands`,
+The Rust `ogpu_core` crate holds the portable types, validation, the `backend` layer and the startup
+selection (`ogpu_core::impl_`, thread-local state, no default implementation). The backend factory record is
+`ogpu_core::backend::Implementation`; its `create_driver` returns a `Box<dyn Driver>`. A backend implements the
+driver *traits* in `ogpu_core::backend` (`Driver`, `DriverDevice`, `DriverQueue`, `DriverCommands`,
 `DriverRenderEncoder`, `DriverResource`, ... one trait per native object kind) instead of filling closure
 records: a driver object is one struct, an encoder is one boxed object rather than a boxed closure per
 operation, and the `backend` layer keeps its liveness/state guards around each `&self` call. Metal, Vulkan
-and mock depend only on `ogpu`; `native_layer_token` lives in `native_layer_token_sys::portable`.
+and mock depend only on `ogpu_core`; `native_layer_token` lives in `native_layer_token_sys::portable`.
 Thin crates were folded into their owners (C10): SDL3_image/ttf/mixer are `sdl3::{image,ttf,mixer}` over
 `sdl3_sys::{image,ttf,mixer}` (one build script), `runtime_input` is `runtime::runtime_input`, `cfmt_sys` is
 `cfmt::sys`, and the safe Vulkan wrapper is `ogpu_vulkan::vulkan`.
@@ -255,19 +255,20 @@ examples / sketches / pxui / editor / rdk_rays
                          |             rays_math
                          |
                          v
-                      rays ----------------------> runtime_input ---> sdl3
+                      rays ----------------------> input
                          |
                          v
-                  renderer
+                      renderer ---------------> runtime_resources
+                         |                             |
+                         v                             v
+                      runtime ------> sdl3::{image, ttf, mixer}
                          |
                          v
-                      runtime ------> sdl3     runtime_resources ---> sdl3,
-                         |                     (used by rays and      sdl3_image,
-                         v                      renderer)       sdl3_ttf, sdl3_mixer
-                     ogpu ---> native_layer_token_sys
+                    ogpu_core ---> native_layer_token_sys
 
-                    ogpu_metal (implementation) ---> ogpu_metal_native ---> metal
-                    ogpu_mock  (implementation) ---> ogpu
+                    ogpu_metal  ---> ogpu_core, metal
+                    ogpu_mock   ---> ogpu_core
+                    ogpu_vulkan ---> ogpu_core, vulkan_sys, native_layer_token_sys
 ```
 
 The RDK split currently puts packed identity, storage, topology, groups, and

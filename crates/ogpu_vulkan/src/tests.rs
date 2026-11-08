@@ -4,7 +4,7 @@
 //! test skips when no Vulkan device exists, and ends with zero live handles and zero validation
 //! messages. The SPIR-V comes from crates/ogpu_vulkan/tests/shaders/*.{comp,vert,frag}, built by build.rs.
 use crate::{backend::create_with_validation, impl_};
-use ogpu::{
+use ogpu_core::{
     acceleration::InstanceKind,
     backend::{
         self as be, Accel, AccelDescriptor, BatchDraw, Border, Buffer, ColorAttachment, CurveBasis,
@@ -210,9 +210,9 @@ fn encode_rows(format: TextureFormat, width: usize, texel: &dyn Fn(usize, usize,
 
 #[test]
 fn gpu_implementation_tag_and_handles() {
-    ogpu::impl_::select(impl_::implementation());
-    assert_eq!(ogpu::impl_::backend().unwrap(), "vulkan");
-    assert_eq!(ogpu::impl_::live_handles().unwrap(), 0);
+    ogpu_core::impl_::select(impl_::implementation());
+    assert_eq!(ogpu_core::impl_::backend().unwrap(), "vulkan");
+    assert_eq!(ogpu_core::impl_::live_handles().unwrap(), 0);
 }
 
 /// Capabilities, buffers, mapped buffers, texture upload and read, pixel formats, LOD sampling, a

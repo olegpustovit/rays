@@ -4,8 +4,8 @@
 //! counts only validation bytes; display normals of the result point at +z.
 mod common;
 use flow_gpu::{host, pipelines, run};
-use ogpu::backend as b;
-use ogpu::types::{BufferDescriptor, BufferUsage};
+use ogpu_core::backend as b;
+use ogpu_core::types::{BufferDescriptor, BufferUsage};
 use rdk_core::packed::Float3;
 use rdk_core::{error, geometry, topology};
 use rdk_ops::triangulate;

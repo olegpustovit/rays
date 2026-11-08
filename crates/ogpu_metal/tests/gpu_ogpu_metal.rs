@@ -6,7 +6,7 @@
 // target (common::run) runs the tests on it.
 mod common;
 use ogpu_metal::{backend, impl_};
-use ogpu::{
+use ogpu_core::{
     acceleration::InstanceKind,
     backend::{
         self as be, Accel, AccelDescriptor, BatchDraw, Border, Buffer, ColorAttachment, CurveBasis,
@@ -209,9 +209,9 @@ fn encode_rows(format: TextureFormat, width: usize, texel: &dyn Fn(usize, usize,
 
 
 fn gpu_implementation_tag_and_handles() {
-    ogpu::impl_::select(impl_::implementation());
-    assert_eq!(ogpu::impl_::backend().unwrap(), "metal");
-    assert_eq!(ogpu::impl_::live_handles().unwrap(), impl_::live_handles());
+    ogpu_core::impl_::select(impl_::implementation());
+    assert_eq!(ogpu_core::impl_::backend().unwrap(), "metal");
+    assert_eq!(ogpu_core::impl_::live_handles().unwrap(), impl_::live_handles());
 }
 
 /// Capabilities, buffers, mapped buffers, texture upload and read, pixel formats, LOD sampling, a

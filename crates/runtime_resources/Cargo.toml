@@ -6,7 +6,7 @@ license.workspace = true
 
 [dependencies]
 sdl3 = { path = "../sdl3" }
-ogpu = { path = "../ogpu" }
+ogpu_core = { path = "../ogpu_core" }
 
 [dev-dependencies]
 ogpu_mock = { path = "../ogpu_mock" }

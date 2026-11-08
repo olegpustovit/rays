@@ -1,5 +1,5 @@
-use ogpu::error::{self, Error, ErrorKind};
-use ogpu::surface;
+use ogpu_core::error::{self, Error, ErrorKind};
+use ogpu_core::surface;
 use sdl3::cursor::{Cursor, Shape};
 use sdl3::window::{Flag, Window};
 use sdl3::{DialogFilter, DialogKind, NativeView, Rect};

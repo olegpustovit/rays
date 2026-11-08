@@ -8,7 +8,7 @@ pub mod window;
 use flow_ir::core_exec::{self, Packed};
 use flow_syntax::{ty::Ty, value::Value};
 use input::Frame;
-use ogpu::error::{self, ErrorKind};
+use ogpu_core::error::{self, ErrorKind};
 use rays_diagnostic::Diagnostic;
 use std::sync::Arc;
 
@@ -29,15 +29,15 @@ pub fn lease() -> ::renderer::renderer::Gpu {
 }
 
 fn select() {
-    use ogpu::impl_::Impl;
+    use ogpu_core::impl_::Impl;
     #[cfg(windows)]
-    ogpu::impl_::select(Impl {
+    ogpu_core::impl_::select(Impl {
         backend: ogpu_vulkan::impl_::BACKEND.to_owned(),
         create_driver: Box::new(|| ogpu_vulkan::backend::create_with_validation((true, true))),
         live_handles: Box::new(ogpu_vulkan::impl_::live_handles),
     });
     #[cfg(target_os = "macos")]
-    ogpu::impl_::select(ogpu_metal::impl_::implementation());
+    ogpu_core::impl_::select(ogpu_metal::impl_::implementation());
     #[cfg(not(any(windows, target_os = "macos")))]
     let _ = Impl { backend: String::new(), create_driver: Box::new(|| panic!("no implementation")), live_handles: Box::new(|| 0) };
 }

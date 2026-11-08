@@ -4,10 +4,10 @@
 //! such as x + width are exact; see specification/marks.md. Every channel is compared.
 //! The OCaml loop over (density, kind) is split into one test fn per pair so each stays under 5 s.
 use crate::common;
-use ogpu::backend::{self, Buffer, Device};
-use ogpu::pipeline::Blend;
-use ogpu::render_pass::{Comparison, Cull, Load, Primitive};
-use ogpu::types::{BufferDescriptor, BufferUsage};
+use ogpu_core::backend::{self, Buffer, Device};
+use ogpu_core::pipeline::Blend;
+use ogpu_core::render_pass::{Comparison, Cull, Load, Primitive};
+use ogpu_core::types::{BufferDescriptor, BufferUsage};
 use ::renderer::renderer::{self, native};
 use ::renderer::scene_execution::{self, GeometryDraw, Mesh, MeshKey, new_bytes, PipelineFamily, State};
 use scene_command::render_ir::{self, Command};
@@ -302,7 +302,7 @@ fn painted(pixels: &[u8]) -> usize {
 }
 
 fn with_renderer(density: i64, body: &dyn Fn(&renderer::Renderer, &renderer::Gpu)) {
-    let baseline = ogpu::impl_::live_handles().unwrap();
+    let baseline = ogpu_core::impl_::live_handles().unwrap();
     let execution = renderer::create_offscreen(&renderer::Configuration {
         logical_width: WIDTH,
         logical_height: HEIGHT,
@@ -316,7 +316,7 @@ fn with_renderer(density: i64, body: &dyn Fn(&renderer::Renderer, &renderer::Gpu
     body(&execution, &gpu);
     renderer::release_gpu(&gpu);
     renderer::destroy(&execution).unwrap();
-    assert_eq!(ogpu::impl_::live_handles().unwrap(), baseline, "marks native handle delta");
+    assert_eq!(ogpu_core::impl_::live_handles().unwrap(), baseline, "marks native handle delta");
 }
 
 fn parity(density: i64, kind: Kind) {

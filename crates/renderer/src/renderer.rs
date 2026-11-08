@@ -5,10 +5,10 @@ use crate::renderer_pipeline;
 use crate::renderer_retained_plans::{self, Plan, Resource as retained_resource, Segment};
 use crate::scene_execution::{self, bytes, GeometryDraw, new_bytes, PreparedScene3, SampledDraw, SampledTexture, TextureLevel};
 use crate::side_lru::{self, Item, TableKey};
-use ogpu::backend::{self, Buffer, Device, Queue, Texture};
-use ogpu::error::{self as oerror, Error, ErrorKind};
-use ogpu::pipeline::Blend;
-use ogpu::types::{AddressMode, BufferDescriptor, BufferUsage, MipFilter, SamplerDescriptor, SamplerFilter};
+use ogpu_core::backend::{self, Buffer, Device, Queue, Texture};
+use ogpu_core::error::{self as oerror, Error, ErrorKind};
+use ogpu_core::pipeline::Blend;
+use ogpu_core::types::{AddressMode, BufferDescriptor, BufferUsage, MipFilter, SamplerDescriptor, SamplerFilter};
 use runtime::{frame_facts, presentation_facts};
 use runtime_resources::{Assets, Canvas, Image, Text};
 use scene_command::render_ir::{self as ir, Command, RenderIr};
@@ -450,7 +450,7 @@ fn acquire_device(_operation: &str) -> Result<(Device, bool, GpuOwner), Error> {
     if let Some((device, owner)) = existing {
         return Ok((device, false, owner));
     }
-    let driver = ogpu::impl_::create_driver()?;
+    let driver = ogpu_core::impl_::create_driver()?;
     let device = backend::create_device(driver)?;
     let owner = create_gpu_owner();
     HEADLESS_GPU.with(|cell| *cell.borrow_mut() = Some((device.clone(), owner.clone(), 1)));
@@ -516,7 +516,7 @@ fn finish_create(shared_device_lease: bool, owns_device_lease: bool, gpu_owner_:
 }
 
 fn backend_name() -> Result<String, Error> {
-    ogpu::impl_::backend()
+    ogpu_core::impl_::backend()
 }
 
 pub fn create(configuration_: &Configuration) -> Result<Renderer, Error> {
@@ -543,7 +543,7 @@ pub fn create(configuration_: &Configuration) -> Result<Renderer, Error> {
     };
     let gpu_owner_ = create_gpu_owner();
     let renderer = (|| -> Result<scene_execution::SceneExecution, Error> {
-        let driver = ogpu::impl_::create_driver()?;
+        let driver = ogpu_core::impl_::create_driver()?;
         renderer_pipeline::create_renderer(&backend_name()?, None, Some(gpu_owner_.scene_vertices.clone()), false, driver, &surface)
     })();
     match renderer {
@@ -586,7 +586,7 @@ pub fn create_offscreen(configuration_: &Configuration) -> Result<Renderer, Erro
         }
     };
     let renderer = (|| -> Result<scene_execution::SceneExecution, Error> {
-        let driver = ogpu::impl_::create_driver()?;
+        let driver = ogpu_core::impl_::create_driver()?;
         renderer_pipeline::create_renderer(&backend_name()?, Some(device), Some(gpu_owner_.scene_vertices.clone()), true, driver, &surface)
     })();
     match renderer {
@@ -854,7 +854,7 @@ fn snapshot(value: &Renderer, policy_: &lease_policy, density: i64, source: reta
                 Some((width, height, generation, texture)) if runtime::is_window(&value.0.runtime.borrow()) => {
                     let (device_id, _) = backend::texture_driver_token(&texture);
                     let device = scene_execution::device(&value.0.renderer.borrow());
-                    if ogpu::handle::device_id(backend::device_handle(&device)) == device_id {
+                    if ogpu_core::handle::device_id(backend::device_handle(&device)) == device_id {
                         Some((width, height, generation, texture))
                     } else {
                         None
@@ -896,7 +896,7 @@ fn lower_scene2_uncached(
                     && source.0.count.get() == marks::gpu_count(token) =>
             {
                 let device = scene_execution::device(&value.0.renderer.borrow());
-                if ogpu::handle::device_id(backend::device_handle(&source.0.gpu.0.device)) == ogpu::handle::device_id(backend::device_handle(&device)) {
+                if ogpu_core::handle::device_id(backend::device_handle(&source.0.gpu.0.device)) == ogpu_core::handle::device_id(backend::device_handle(&device)) {
                     Ok(Some(gpu_marks_key(&source)))
                 } else {
                     Err("GPU shapes belong to another device".to_owned())
@@ -1352,7 +1352,7 @@ fn lower_ui(submission_: &Submission, density: i64, resource_: &dyn Fn(i64) -> O
                         vertex_count: 4 * batch_.count,
                         indices: s.indices.clone(),
                         index_count: 6 * batch_.count,
-                        primitive: ogpu::render_pass::Primitive::TriangleList,
+                        primitive: ogpu_core::render_pass::Primitive::TriangleList,
                     },
                     state: scene_execution::State {
                         transform_uniforms: Some(s.affine.clone()),
@@ -1701,7 +1701,7 @@ pub mod native {
             }
         };
         let renderer = (|| -> Result<scene_execution::SceneExecution, Error> {
-            let driver = ogpu::impl_::create_driver()?;
+            let driver = ogpu_core::impl_::create_driver()?;
             renderer_pipeline::create_renderer(
                 &backend_name()?,
                 Some(gpu_.0.device.clone()),

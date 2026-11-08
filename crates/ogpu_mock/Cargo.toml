@@ -9,4 +9,4 @@ name = "ogpu_mock"
 path = "src/lib.rs"
 
 [dependencies]
-ogpu = { path = "../ogpu" }
+ogpu_core = { path = "../ogpu_core" }

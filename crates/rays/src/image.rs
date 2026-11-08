@@ -19,7 +19,7 @@ pub fn same(a: &t, b: &t) -> bool {
 }
 
 pub(crate) fn message(operation: &str, error: &runtime_resources::error) -> String {
-    format!("{operation}: {}", ogpu::error::to_string(error))
+    format!("{operation}: {}", ogpu_core::error::to_string(error))
 }
 
 pub fn of_resource(resource: Resource::t) -> Result<t, String> {

@@ -1,6 +1,6 @@
 //! lib/scene_execution/test_prepared_scene3.ml: validation and borrowed-resource ownership.
 use super::*;
-use ogpu::types::{AddressMode as SamplerAddress, MipFilter, SamplerFilter};
+use ogpu_core::types::{AddressMode as SamplerAddress, MipFilter, SamplerFilter};
 
 fn entry() -> SampledDraw {
     SampledDraw {

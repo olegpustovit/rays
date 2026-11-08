@@ -3,12 +3,12 @@
 //! clamps channels to [0,1] and rounds to nearest, ties to even. No pixels are read back.
 use crate::pipelines::is_vulkan;
 use crate::run::{self, gpu};
-use ogpu::backend::{self as b, Buffer, ColorAttachment, Commands, Device, Pipeline, Queue, RenderTarget, Texture};
-use ogpu::binding::{self, LayoutEntry};
-use ogpu::pipeline::{ColorFormat, DepthFormat, RenderDescriptor};
-use ogpu::render_pass::{Load, Primitive, Rect, Store};
-use ogpu::shader::{self as sh, Binding, BindingKind, EntryPoint, Stage};
-use ogpu::types::{BufferDescriptor, BufferUsage, TextureDescriptor, TextureFormat, TextureUsage};
+use ogpu_core::backend::{self as b, Buffer, ColorAttachment, Commands, Device, Pipeline, Queue, RenderTarget, Texture};
+use ogpu_core::binding::{self, LayoutEntry};
+use ogpu_core::pipeline::{ColorFormat, DepthFormat, RenderDescriptor};
+use ogpu_core::render_pass::{Load, Primitive, Rect, Store};
+use ogpu_core::shader::{self as sh, Binding, BindingKind, EntryPoint, Stage};
+use ogpu_core::types::{BufferDescriptor, BufferUsage, TextureDescriptor, TextureFormat, TextureUsage};
 use rays_diagnostic::Diagnostic;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -98,7 +98,7 @@ pub fn create_owned(device: &Device, queue: &Queue) -> Result<T, Diagnostic> {
             depth_format: DepthFormat::NoDepth,
             sample_count: 1,
         },
-        Some(ogpu::pipeline::Blend::Replace),
+        Some(ogpu_core::pipeline::Blend::Replace),
         Some(Primitive::TriangleList),
         Some(false),
     ) {
@@ -129,7 +129,7 @@ fn allocate(t: &T, width: i64, height: i64) -> Result<Storage, Diagnostic> {
         format: TextureFormat::Rgba8Unorm,
         usage: vec![TextureUsage::TextureBinding, TextureUsage::RenderAttachment, TextureUsage::TextureCopySrc],
     };
-    gpu(ogpu::validation::validate_texture(&b::capabilities(&t.0.device), &descriptor))?;
+    gpu(ogpu_core::validation::validate_texture(&b::capabilities(&t.0.device), &descriptor))?;
     let texture = gpu(b::create_texture(&t.0.device, descriptor))?;
     t.0.textures.set(t.0.textures.get() + 1);
     Ok(Storage { texture, width, height })

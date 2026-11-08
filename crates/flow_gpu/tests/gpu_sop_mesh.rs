@@ -61,7 +61,7 @@ impl Gpu::Backend for Watched{
     fn prepare(&self,fast:bool,packed:&packed::T)->Result<Arc<dyn Gpu::Kernel>,Diagnostic>{self.base.prepare(fast,packed)}
 }
 fn run_case(test:&str,empty_offset:bool){
-    assert!(common::gpu(),"native SOP mesh qualification requires a real GPU");common::release_keepalive();let baseline=ogpu::impl_::live_handles().unwrap();
+    assert!(common::gpu(),"native SOP mesh qualification requires a real GPU");common::release_keepalive();let baseline=ogpu_core::impl_::live_handles().unwrap();
     assert!(common::gpu());let gpu=common::lease();let host=h::create(&||0.,&gpu);
     let host_call=test.starts_with("host");let case=match test{"host"=>"valid","host_twice"=>"twice","host_cpu"=>"cpu","host_cancel"=>"cancel","host_negative"=>"negative","host_dynamic"=>"dynamic","host_overflow"=>"overflow","host_vertex"=>"vertex","host_points"=>"points",c=>c};
     let bad=!matches!(case,"valid"|"dynamic"|"cpu"|"cancel"|"twice"|"points"|"overflow");
@@ -93,7 +93,7 @@ fn run_case(test:&str,empty_offset:bool){
     }
     if case=="overflow"{assert!(replays>0,"counted mesh never replayed capacity");}
     parallel::run_unit(Some(4),&||parallel::for_(1,0,7,&|_|{for(geometry,count)in &held{read(geometry,*count,case)}Ok(())})).unwrap();let bytes=h::stats(&host).payload_readback_bytes;for(geometry,count)in &held{read(geometry,*count,case)}assert_eq!(h::stats(&host).payload_readback_bytes,bytes);
-    drop(held);session::close(&mut session);drop(root);drop(resolved);drop(lowered);drop(config);h::close(&host);drop(host);drop(gpu);common::release_keepalive();assert_eq!(ogpu::impl_::live_handles().unwrap(),baseline);
+    drop(held);session::close(&mut session);drop(root);drop(resolved);drop(lowered);drop(config);h::close(&host);drop(host);drop(gpu);common::release_keepalive();assert_eq!(ogpu_core::impl_::live_handles().unwrap(),baseline);
 }
 macro_rules! scenario{($name:ident,$case:literal)=>{fn $name(){run_case($case,false)}}}
 fn valid_01(){run_case("valid",true)}

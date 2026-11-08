@@ -6,9 +6,9 @@ use common::test_program as tp;
 use flow_gpu::{image_sink as s, pipelines, run};
 use flow_ir::packed::host as phost;
 use flow_shader::emit;
-use ogpu::backend::{self as b, Driver};
-use ogpu::error::{self, ErrorKind};
-use ogpu::types::{TextureFormat, TextureUsage};
+use ogpu_core::backend::{self as b, Driver};
+use ogpu_core::error::{self, ErrorKind};
+use ogpu_core::types::{TextureFormat, TextureUsage};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -80,18 +80,18 @@ impl b::DriverRenderEncoder for Wrapped<dyn b::DriverRenderEncoder> {
         set_stage_buffer(stage: b::ShaderStage, index: i64, offset: i64, buffer: b::Token) -> Result<(), E>;
         set_stage_texture(stage: b::ShaderStage, index: i64, texture: b::Token) -> Result<(), E>;
         set_stage_sampler(stage: b::ShaderStage, index: i64, sampler: b::Token) -> Result<(), E>;
-        set_viewport(rect: ogpu::render_pass::Rect) -> Result<(), E>;
-        set_scissor(rect: ogpu::render_pass::Rect) -> Result<(), E>;
-        set_cull(cull: ogpu::render_pass::Cull) -> Result<(), E>;
+        set_viewport(rect: ogpu_core::render_pass::Rect) -> Result<(), E>;
+        set_scissor(rect: ogpu_core::render_pass::Rect) -> Result<(), E>;
+        set_cull(cull: ogpu_core::render_pass::Cull) -> Result<(), E>;
         set_winding(winding: b::Winding) -> Result<(), E>;
         set_depth_state(state: Option<b::DepthState>) -> Result<(), E>;
-        draw_indexed(primitive: ogpu::render_pass::Primitive, index_type: ogpu::render_pass::IndexType, buffer: b::Token, offset: i64, count: i64, instances: i64) -> Result<(), E>;
-        draw_indexed_indirect(primitive: ogpu::render_pass::Primitive, index_type: ogpu::render_pass::IndexType, buffer: b::Token, offset: i64, arguments: b::Token, arguments_offset: i64) -> Result<(), E>;
+        draw_indexed(primitive: ogpu_core::render_pass::Primitive, index_type: ogpu_core::render_pass::IndexType, buffer: b::Token, offset: i64, count: i64, instances: i64) -> Result<(), E>;
+        draw_indexed_indirect(primitive: ogpu_core::render_pass::Primitive, index_type: ogpu_core::render_pass::IndexType, buffer: b::Token, offset: i64, arguments: b::Token, arguments_offset: i64) -> Result<(), E>;
         draw_batch(draws: &[b::DriverBatchDraw]) -> Result<(), E>;
         use_resources(resources: &[b::Token]) -> Result<(), E>;
         execute_icb(icb: b::Token, location: i64, length: i64) -> Result<(), E>;
     }
-    fn draw(&self, primitive: ogpu::render_pass::Primitive, first: i64, count: i64, instances: i64) -> Result<(), E> {
+    fn draw(&self, primitive: ogpu_core::render_pass::Primitive, first: i64, count: i64, instances: i64) -> Result<(), E> {
         self.st.order.borrow_mut().push("draw");
         assert_eq!((first, count), (0, 3));
         if self.st.fail_draw.get() { injected() } else { self.inner.draw(primitive, first, count, instances) }
@@ -142,37 +142,37 @@ impl b::DriverQueue for Wrapped<dyn b::DriverQueue> {
 }
 impl b::DriverDevice for Wrapped<dyn b::DriverDevice> {
     forward! {
-        device_handle() -> ogpu::handle::Device;
+        device_handle() -> ogpu_core::handle::Device;
         allocated_size() -> i64;
         recommended_working_set() -> i64;
-        create_mapped_buffer(descriptor: &ogpu::types::BufferDescriptor) -> Result<b::DriverMapped, E>;
-        create_depth_texture(descriptor: &ogpu::types::TextureDescriptor) -> Result<Box<dyn b::DriverResource>, E>;
-        create_memoryless_texture(depth: bool, descriptor: &ogpu::types::TextureDescriptor) -> Result<Box<dyn b::DriverResource>, E>;
-        create_library(shader: &ogpu::shader::Shader) -> Result<Box<dyn b::DriverLibrary>, E>;
-        warm_library(shader: &ogpu::shader::Shader) -> Option<b::Warm>;
+        create_mapped_buffer(descriptor: &ogpu_core::types::BufferDescriptor) -> Result<b::DriverMapped, E>;
+        create_depth_texture(descriptor: &ogpu_core::types::TextureDescriptor) -> Result<Box<dyn b::DriverResource>, E>;
+        create_memoryless_texture(depth: bool, descriptor: &ogpu_core::types::TextureDescriptor) -> Result<Box<dyn b::DriverResource>, E>;
+        create_library(shader: &ogpu_core::shader::Shader) -> Result<Box<dyn b::DriverLibrary>, E>;
+        warm_library(shader: &ogpu_core::shader::Shader) -> Option<b::Warm>;
         create_accel(descriptor: &b::DriverAccelDescriptor) -> Result<Box<dyn b::DriverAccel>, E>;
         instance_layout(kind: b::InstanceKind) -> Vec<i64>;
-        create_sampler(descriptor: &ogpu::types::SamplerDescriptor) -> Result<Box<dyn b::DriverSampler>, E>;
+        create_sampler(descriptor: &ogpu_core::types::SamplerDescriptor) -> Result<Box<dyn b::DriverSampler>, E>;
         create_icb(max_commands: i64) -> Result<Box<dyn b::DriverIcb>, E>;
         create_argument(pipeline: b::Token, stage: b::ShaderStage, index: i64) -> Result<Box<dyn b::DriverArgument>, E>;
-        create_surface(configuration: &ogpu::surface::Configuration) -> Result<Box<dyn b::DriverSurface>, E>;
+        create_surface(configuration: &ogpu_core::surface::Configuration) -> Result<Box<dyn b::DriverSurface>, E>;
         destroy_device() -> Result<(), E>;
     }
-    fn capabilities(&self) -> ogpu::caps::Caps {
+    fn capabilities(&self) -> ogpu_core::caps::Caps {
         let mut caps = self.inner.capabilities();
         if self.st.no_render.get() { caps.render_pipeline = false; }
         caps
     }
-    fn create_buffer(&self, memory: ogpu::types::Memory, descriptor: &ogpu::types::BufferDescriptor) -> Result<Box<dyn b::DriverResource>, E> {
+    fn create_buffer(&self, memory: ogpu_core::types::Memory, descriptor: &ogpu_core::types::BufferDescriptor) -> Result<Box<dyn b::DriverResource>, E> {
         Ok(wrap(self.inner.create_buffer(memory, descriptor)?, &self.st))
     }
-    fn create_render_pipeline(&self, options: b::RenderPipelineOptions, descriptor: &ogpu::pipeline::RenderDescriptor) -> Result<Box<dyn b::DriverPipeline>, E> {
+    fn create_render_pipeline(&self, options: b::RenderPipelineOptions, descriptor: &ogpu_core::pipeline::RenderDescriptor) -> Result<Box<dyn b::DriverPipeline>, E> {
         if self.st.fail_pipeline.get() { return injected(); }
         let pipeline = self.inner.create_render_pipeline(options, descriptor)?;
         self.st.pipelines.set(self.st.pipelines.get() + 1);
         Ok(wrap(pipeline, &self.st))
     }
-    fn create_texture(&self, descriptor: &ogpu::types::TextureDescriptor) -> Result<Box<dyn b::DriverResource>, E> {
+    fn create_texture(&self, descriptor: &ogpu_core::types::TextureDescriptor) -> Result<Box<dyn b::DriverResource>, E> {
         if self.st.fail_texture.get() { return injected(); }
         let inner = self.inner.create_texture(descriptor)?;
         Ok(Box::new(Wrapped { inner, st: self.st.clone(), texture: true }))
@@ -186,18 +186,18 @@ impl Driver for Wrap {
     fn create_device(&self) -> Result<Box<dyn b::DriverDevice>, E> { Ok(wrap(self.base.create_device()?, &self.st)) }
 }
 fn driver(state: Rc<State>) -> Box<dyn Driver> {
-    Box::new(Wrap { base: ogpu::impl_::create_driver().unwrap(), st: state })
+    Box::new(Wrap { base: ogpu_core::impl_::create_driver().unwrap(), st: state })
 }
 fn image_sink_transactions() {
     if !common::gpu() { return; }
-    let before = ogpu::impl_::live_handles().unwrap();
+    let before = ogpu_core::impl_::live_handles().unwrap();
     let unsupported = driver(Rc::new(State { no_render: Cell::new(true), ..State::default() }));
     let device = b::create_device(unsupported).unwrap();
     let queue = b::create_queue(&device).unwrap();
     assert!(s::create_owned(&device, &queue).is_err());
     b::destroy_queue(&queue).unwrap();
     b::destroy_device(&device).unwrap();
-    assert_eq!(ogpu::impl_::live_handles().unwrap(), before);
+    assert_eq!(ogpu_core::impl_::live_handles().unwrap(), before);
 
     let st = Rc::new(State::default());
     let device = b::create_device(driver(st.clone())).unwrap();
@@ -264,7 +264,7 @@ fn image_sink_transactions() {
     pipelines::close(&cache);
     b::destroy_queue(&queue).unwrap();
     b::destroy_device(&device).unwrap();
-    assert_eq!(ogpu::impl_::live_handles().unwrap(), before);
+    assert_eq!(ogpu_core::impl_::live_handles().unwrap(), before);
     assert_eq!(st.pipelines.get(), 0);
 }
 fn main() { common::window::run(&[("image_sink_transactions", image_sink_transactions)]); }

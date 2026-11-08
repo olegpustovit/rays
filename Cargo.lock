@@ -102,7 +102,7 @@ dependencies = [
  "lru",
  "mem",
  "mem_sys",
- "ogpu",
+ "ogpu_core",
  "ogpu_metal",
  "ogpu_mock",
  "ogpu_vulkan",
@@ -167,7 +167,7 @@ dependencies = [
  "input",
  "mem",
  "mem_sys",
- "ogpu",
+ "ogpu_core",
  "ogpu_metal",
  "ogpu_vulkan",
  "parallel",
@@ -191,7 +191,7 @@ dependencies = [
  "flow_eval",
  "flow_ir",
  "flow_syntax",
- "ogpu",
+ "ogpu_core",
  "rays_diagnostic",
  "rays_math",
 ]
@@ -315,7 +315,7 @@ name = "native_layer_token_sys"
 version = "0.1.0"
 
 [[package]]
-name = "ogpu"
+name = "ogpu_core"
 version = "0.1.0"
 dependencies = [
  "native_layer_token_sys",
@@ -326,14 +326,14 @@ name = "ogpu_metal"
 version = "0.1.0"
 dependencies = [
  "metal",
- "ogpu",
+ "ogpu_core",
 ]
 
 [[package]]
 name = "ogpu_mock"
 version = "0.1.0"
 dependencies = [
- "ogpu",
+ "ogpu_core",
 ]
 
 [[package]]
@@ -341,7 +341,7 @@ name = "ogpu_vulkan"
 version = "0.1.0"
 dependencies = [
  "native_layer_token_sys",
- "ogpu",
+ "ogpu_core",
  "vulkan_sys",
 ]
 
@@ -363,7 +363,7 @@ dependencies = [
  "cfmt",
  "input",
  "mem",
- "ogpu",
+ "ogpu_core",
  "ogpu_metal",
  "ogpu_vulkan",
  "param",
@@ -388,7 +388,7 @@ dependencies = [
  "flow_syntax",
  "input",
  "mem_sys",
- "ogpu",
+ "ogpu_core",
  "ogpu_metal",
  "ogpu_vulkan",
  "param",
@@ -409,7 +409,7 @@ dependencies = [
  "cfmt",
  "editor_core",
  "input",
- "ogpu",
+ "ogpu_core",
  "ogpu_metal",
  "ogpu_vulkan",
  "param",
@@ -428,7 +428,7 @@ dependencies = [
  "input",
  "lru",
  "mem",
- "ogpu",
+ "ogpu_core",
  "ogpu_metal",
  "ogpu_vulkan",
  "parallel",
@@ -456,7 +456,7 @@ dependencies = [
  "flow_sop",
  "flow_syntax",
  "mem",
- "ogpu",
+ "ogpu_core",
  "ogpu_metal",
  "ogpu_vulkan",
  "rays_diagnostic",
@@ -489,7 +489,7 @@ dependencies = [
  "lru",
  "mem",
  "mem_sys",
- "ogpu",
+ "ogpu_core",
  "ogpu_metal",
  "ogpu_vulkan",
  "parallel",
@@ -535,7 +535,7 @@ dependencies = [
  "flow_shader",
  "flow_syntax",
  "input",
- "ogpu",
+ "ogpu_core",
  "ogpu_metal",
  "ogpu_vulkan",
  "param",
@@ -606,7 +606,7 @@ dependencies = [
  "lru",
  "mem",
  "mem_sys",
- "ogpu",
+ "ogpu_core",
  "ogpu_metal",
  "ogpu_mock",
  "ogpu_vulkan",
@@ -621,7 +621,7 @@ name = "runtime"
 version = "0.1.0"
 dependencies = [
  "input",
- "ogpu",
+ "ogpu_core",
  "ogpu_mock",
  "sdl3",
 ]
@@ -630,7 +630,7 @@ dependencies = [
 name = "runtime_resources"
 version = "0.1.0"
 dependencies = [
- "ogpu",
+ "ogpu_core",
  "ogpu_mock",
  "sdl3",
 ]

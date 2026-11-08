@@ -457,7 +457,7 @@ fn capacity() {
 use runtime_resources::Image as I;
 
 fn handles() -> i64 {
-    ogpu::impl_::live_handles().expect("live handles")
+    ogpu_core::impl_::live_handles().expect("live handles")
 }
 
 fn frame_at(time: f64, size: (i64, i64), count: i64, pointer: (f64, f64)) -> rays::frame::t {
@@ -844,8 +844,8 @@ fn frame_for(time: f64, size: (i64, i64)) -> rays::frame::t {
     rays::frame::t { input: input::Frame { size, frame: time as i64, tick: time as i64, ..input::at_time(time) }, pixel_scale: (1., 1.), fps: 60., mouse_delta: (0., 0.) }
 }
 
-fn is_destroyed(r: Result<Option<(i64, i64, i64, ogpu::backend::Texture)>, ogpu::error::Error>) -> bool {
-    matches!(r, Err(e) if e.kind == ogpu::error::ErrorKind::Destroyed)
+fn is_destroyed(r: Result<Option<(i64, i64, i64, ogpu_core::backend::Texture)>, ogpu_core::error::Error>) -> bool {
+    matches!(r, Err(e) if e.kind == ogpu_core::error::ErrorKind::Destroyed)
 }
 
 /// Workspace GPU images: exact-first independent CPU snapshots, live display, mesh/image parity, replan/resize,

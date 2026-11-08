@@ -18,7 +18,7 @@ scene_command = { path = "../scene_command" }
 renderer = { path = "../renderer" }
 parallel = { path = "../parallel" }
 mem = { path = "../mem" }
-ogpu = { path = "../ogpu" }
+ogpu_core = { path = "../ogpu_core" }
 cfmt = { path = "../cfmt" }
 
 [target.'cfg(windows)'.dev-dependencies]

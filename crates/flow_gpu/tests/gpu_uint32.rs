@@ -12,8 +12,8 @@ use flow_ir::packed::{self, host as phost};
 use flow_shader::emit;
 use flow_syntax::ty::Ty;
 use flow_syntax::value::Value;
-use ogpu::backend as b;
-use ogpu::types::{BufferDescriptor, BufferUsage};
+use ogpu_core::backend as b;
+use ogpu_core::types::{BufferDescriptor, BufferUsage};
 use std::sync::Arc;
 
 fn program(expression: &str) -> packed::T {

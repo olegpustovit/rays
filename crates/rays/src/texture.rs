@@ -95,7 +95,7 @@ pub fn size(texture: &t) -> Result<(i64, i64), String> {
     match &texture.0.backing {
         backing::Cpu(data) => Ok((data.width, data.height)),
         backing::Borrowed(image) => {
-            Resource::size(image).map_err(|e| format!("Texture.size: {}", ogpu::error::to_string(&e)))
+            Resource::size(image).map_err(|e| format!("Texture.size: {}", ogpu_core::error::to_string(&e)))
         }
     }
 }
@@ -307,7 +307,7 @@ pub fn sample(texture: &t, u: f64, v: f64) -> Result<color::T, String> {
 
 pub fn of_image(image: &Resource::t) -> Result<t, String> {
     match Resource::gpu_snapshot(image) {
-        Err(error) => Err(format!("Texture.Private.of_image: {}", ogpu::error::to_string(&error))),
+        Err(error) => Err(format!("Texture.Private.of_image: {}", ogpu_core::error::to_string(&error))),
         Ok(None) => Err("Texture.Private.of_image: resident GPU image required".to_string()),
         Ok(Some(_)) => Ok(t(Rc::new(texture_data { backing: backing::Borrowed(image.clone()), id: fresh_id() }))),
     }

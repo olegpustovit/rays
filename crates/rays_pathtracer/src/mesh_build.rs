@@ -2,8 +2,8 @@
 //! (upload, primitive structure, compaction, instance structure) without waiting.
 use crate::frame_data::{buffer, gpu_err, put_f32, storage};
 use crate::mesh_data;
-use ogpu::backend::{self as b, Accel, AccelDescriptor, Buffer, Commands, Device, Geometry, Queue, Receipt};
-use ogpu::types::{BufferUsage, Memory};
+use ogpu_core::backend::{self as b, Accel, AccelDescriptor, Buffer, Commands, Device, Geometry, Queue, Receipt};
+use ogpu_core::types::{BufferUsage, Memory};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Shape {

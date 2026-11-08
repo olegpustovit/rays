@@ -4,7 +4,7 @@ use rays_editor::{Editor, Workspace};
 use std::time::Instant;
 
 fn main() {
-    ogpu::impl_::select(ogpu_metal::impl_::implementation());
+    ogpu_core::impl_::select(ogpu_metal::impl_::implementation());
     let frames: i64 = std::env::args().nth(1).and_then(|a| a.parse().ok()).unwrap_or(60);
     let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../sketches/isogrid.rays")).unwrap();
     let doc = Workspace::load(None, Vec::new(), None, &source).unwrap_or_else(|d| panic!("{d:?}"));

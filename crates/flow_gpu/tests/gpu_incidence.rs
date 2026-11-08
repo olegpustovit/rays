@@ -4,7 +4,7 @@ use flow_gpu::{pipelines, run};
 use flow_ir::flow_ir::Executor;
 use flow_ir::flow_ir::Gpu::Residency as _;
 use flow_syntax::{ty::Ty, value::Value};
-use ogpu::{backend as b, types::{BufferDescriptor, BufferUsage}};
+use ogpu_core::{backend as b, types::{BufferDescriptor, BufferUsage}};
 
 fn buffer(device: &b::Device, words: i64) -> b::Buffer {
     b::create_buffer(device, BufferDescriptor {

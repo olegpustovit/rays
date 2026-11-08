@@ -1,6 +1,6 @@
 //! Ogpu_metal.Buffer
 use crate::device::{fail, of_metal_error, Device};
-use ogpu::{
+use ogpu_core::{
     error::Error,
     error::ErrorKind,
     handle::{self, ResourceHandle},

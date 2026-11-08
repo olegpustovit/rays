@@ -8,12 +8,12 @@ fn window_scene2_argument() {
     if !common::gpu() {
         return;
     }
-    let before = ogpu::impl_::live_handles().unwrap();
+    let before = ogpu_core::impl_::live_handles().unwrap();
     // The retained-argument frame sweep measures rendering, not display pacing.
     let runtime = match renderer::create(&renderer::Configuration { logical_width: 4, logical_height: 4, drawable_width: 4, drawable_height: 4, vsync: false, ..renderer::default_configuration() }) {
         Ok(runtime) => runtime,
         Err(e) => {
-            println!("runtime-next scene2 retained argument: skipped ({})", ogpu::error::to_string(&e));
+            println!("runtime-next scene2 retained argument: skipped ({})", ogpu_core::error::to_string(&e));
             return;
         }
     };
@@ -25,7 +25,7 @@ fn window_scene2_argument() {
         runtime::runtime_input::drain(&mut input);
     });
     renderer::destroy(&runtime).unwrap();
-    assert_eq!(ogpu::impl_::live_handles().unwrap(), before, "scene2 retained argument live-handle delta");
+    assert_eq!(ogpu_core::impl_::live_handles().unwrap(), before, "scene2 retained argument live-handle delta");
 }
 
 pub const CASES: &[(&str, fn())] = &[("window_scene2_argument", window_scene2_argument)];

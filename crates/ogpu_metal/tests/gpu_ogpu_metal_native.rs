@@ -3,7 +3,7 @@
 // record on the real Metal device. Direct native module handles follow their last Rust owner; core
 // wrappers release driver payloads at logical destroy, even when dead wrappers remain in scope.
 mod common;
-use ogpu::{
+use ogpu_core::{
     backend::{self as be, DriverAccelDescriptor, DriverGeometry, Token},
     binding::{self, Kind as LayoutKind, LayoutEntry, Stage as LayoutStage},
     caps,
@@ -383,7 +383,7 @@ fn gpu_acceleration() {
         instances.write_bytes(
             &device,
             0,
-            &ogpu::acceleration::pack_instances(
+            &ogpu_core::acceleration::pack_instances(
                 &vec![68, 0, 48, 52, 60, 64, -1, -1, -1, -1, -1, -1],
                 &[(vec![1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0.], 0xFFFF_FFFF, 0, 7)],
             ),

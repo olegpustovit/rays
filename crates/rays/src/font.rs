@@ -63,7 +63,7 @@ fn text_cache() -> Table {
 }
 
 fn message(operation: &str, error: &runtime_resources::error) -> String {
-    format!("{operation}: {}", ogpu::error::to_string(error))
+    format!("{operation}: {}", ogpu_core::error::to_string(error))
 }
 
 fn make(resource: Result<RFont::t, runtime_resources::error>) -> Result<t, String> {

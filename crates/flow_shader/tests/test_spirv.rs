@@ -7,7 +7,7 @@ use flow_ir::kernel_layout;
 use flow_shader::emit::{self, Curves};
 use rays_math::hash::md5_hex;
 use flow_shader::spirv;
-use ogpu::shader;
+use ogpu_core::shader;
 use std::collections::HashMap;
 use std::fs;
 use support as tp;

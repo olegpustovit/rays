@@ -1,17 +1,17 @@
 //! lib/renderer/test_mock_backend.ml: the mock backend has no renderer shaders, and caps live allocations.
 use crate::renderer;
-use ogpu::backend as b;
-use ogpu::error::{self, ErrorKind};
-use ogpu::types::{BufferDescriptor, BufferUsage};
+use ogpu_core::backend as b;
+use ogpu_core::error::{self, ErrorKind};
+use ogpu_core::types::{BufferDescriptor, BufferUsage};
 
 fn select_mock() {
-    ogpu::impl_::select(ogpu_mock::impl_::implementation());
+    ogpu_core::impl_::select(ogpu_mock::impl_::implementation());
 }
 
 #[test]
 fn mock_renderer_returns_typed_unsupported() {
     select_mock();
-    assert_eq!(ogpu::impl_::backend().unwrap(), "mock", "mock renderer selected the wrong OGPU implementation");
+    assert_eq!(ogpu_core::impl_::backend().unwrap(), "mock", "mock renderer selected the wrong OGPU implementation");
     match renderer::create_offscreen(&renderer::default_configuration()) {
         Err(e) if e.kind == ErrorKind::Unsupported => {}
         Err(e) => panic!("{}", error::to_string(&e)),
@@ -26,7 +26,7 @@ fn mock_renderer_returns_typed_unsupported() {
 #[test]
 fn mock_caps_live_allocations() {
     select_mock();
-    let device = b::create_device(ogpu::impl_::create_driver().unwrap()).unwrap();
+    let device = b::create_device(ogpu_core::impl_::create_driver().unwrap()).unwrap();
     let descriptor = BufferDescriptor { label: None, size: 16, usage: vec![BufferUsage::Storage] };
     let held: Vec<b::Buffer> = (0..4096).map(|_| b::create_buffer(&device, descriptor.clone(), None).unwrap()).collect();
     match b::create_buffer(&device, descriptor.clone(), None) {

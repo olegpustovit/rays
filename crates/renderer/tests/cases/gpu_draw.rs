@@ -3,9 +3,9 @@
 use crate::common;
 use ::renderer::renderer::{self, MarksSource, native};
 use ::renderer::scene_execution::{self, new_bytes};
-use ogpu::backend as b;
-use ogpu::error::ErrorKind;
-use ogpu::types::{BufferDescriptor, BufferUsage};
+use ogpu_core::backend as b;
+use ogpu_core::error::ErrorKind;
+use ogpu_core::types::{BufferDescriptor, BufferUsage};
 use scene_command::marks;
 use scene_command::render_ir::{self, Blend, Command, Rect, RenderIr, Transform};
 use scene_command::ui_batch::{self, Table};
@@ -16,7 +16,7 @@ fn run(density: i64) {
     if !common::gpu() {
         return;
     }
-    let live = || ogpu::impl_::live_handles().unwrap();
+    let live = || ogpu_core::impl_::live_handles().unwrap();
     let baseline = live();
     let cfg = renderer::Configuration { logical_width: 32, logical_height: 24, drawable_width: 32 * density, drawable_height: 24 * density, title: "GPU drawing parity".into(), vsync: false, high_density: true };
     let execution = renderer::create_offscreen(&cfg).unwrap();

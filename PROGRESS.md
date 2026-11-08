@@ -16,7 +16,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 | B | B0-B5 | - | - |
 | M | M1-M21 implementation | empty-frame guard target | - |
 | I | I1-I6 | - | - |
-| C | C1-C9, C12-C21 | C10, C11 | - |
+| C | C1-C10, C12-C21 | C11 | - |
 | D | D2-D3 | D1, D4 (benchmark evidence missing) | D5-D6 |
 
 ## Items (commits)
@@ -52,7 +52,7 @@ A1-A8, B0-B4: see earlier rows below in git history (`6802a325` ... `96fab43d`);
 | C6 | done | `4cfcff4a` `7d7241ae` through `0f1033a6`, plus mutable lifecycle closure below: reducers/frame/source/viewport/carry updates mutate the stored model; `ModelView` borrows pane and transient state, including the carry's original document. `panel_map` is plain data. The native sketch loop keeps its model in storage and mutates it through callbacks; successful replacement callbacks are also supported. No per-frame whole-model copies remain; external Editor snapshots copy only when mutated. Panic/report regression, pointer guards, native editor run and consumer checks pass. Basic 2,509 -> 2,002 allocs/frame; empty 5,732 -> 4,335. Empty ~1,200 target remains a separate open regression-guard gap. |
 | C7, C8 | done | `8e6e0e51`, `69fe4afd` |
 | C9 | done | `e0afebff` |
-| C10 | partial | `d87c7c95` `625ffd0f` (crate kept named `ogpu`, not `ogpu_core`) `5b15cb29` `04b5ae16` `9bf5f9be`; `ocaml_int` deleted outright (I3) rather than moved to `int63` |
+| C10 | done | `d87c7c95` `625ffd0f` `5b15cb29` `04b5ae16` `9bf5f9be`, plus canonical-name closure below: the merged GPU API/backend package, library, directory, Cargo dependencies and Rust imports are `ogpu_core`. No alias/facade crate retained. The other thin owners remain folded; `ocaml_int` was deleted outright (I3), with only intentional frozen hashes retaining 63-bit mixing. |
 | C11 | partial | `51ebdf92` `rays::table` -> `renderer::side_lru`; `rays::idlist` not unified (identity-equality keys, cannot hash) |
 | C12, C13 | done | `34ea546d`; `b9816d3a` (7M floats identical) |
 | C14 | done | `f3b38af3` |
@@ -71,7 +71,7 @@ A1-A8, B0-B4: see earlier rows below in git history (`6802a325` ... `96fab43d`);
 
 ## Known failures / open risks
 
-- Resumed audit next work: C10/C11/D1/D4 audit, D5/D6, empty-frame allocation target and full qualification; C6/M3 implementation is closed. `fee04de1` and `23d4bb15` are completed stages, not completion of the full artifact plan.
+- Resumed audit next work: C11/D1/D4 audit, D5/D6, empty-frame allocation target and full qualification; C6/M3 implementation is closed. `fee04de1` and `23d4bb15` are completed stages, not completion of the full artifact plan.
 
 - `cargo t -p flow_sop` on the D2 tree: 700 tests, 696 pass; the 4 failures are the baseline ones below (`lend_session_tests` confirmed pre-existing by LowerClean at `11988707`). `cargo t -p rdk_core/rdk_geom/rdk_boolean/rdk_ops/sop`: 523 pass; `rdk_rays` 10 pass. Other full suites were **not** run on final HEAD under load (load avg 50-450). Focused runs per item passed (see worker reports in item rows).
 - Pre-existing at baseline `11988707` (bisected by LowerClean): `test_node_facts::declared_preserved_topology`, `test_keyword_ports::keyword_manifest_defaults_projection_checked_gestures` (E_SHADOW), `test_settle::in_flight_device_writes_settle_at_a_cooks_end`, `test_projection::snapshots_of_the_scene_fixtures`, `lend_session_tests::escaped_zone_nodes_own_only_their_cook_context`.
@@ -133,6 +133,11 @@ Policy (`AGENTS.md`, `docs/history/build-speed.md`, plan B0): one warm workspace
 Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s under load; this run is healthy (not stale).
 
 ## Session log
+
+- 2026-11-08: C10 closure: renamed the already-merged `ogpu` package/library/directory to `ogpu_core`, migrated Cargo dependencies and Rust callers, and updated dependency rules plus the current backend ownership documentation. No compatibility alias or new facade. All 22 core Rust source files are byte-identical across the directory rename; lockfile changes are exactly the package-name substitution. Native labels, shader sources, goldens, dependencies and profiles unchanged. The 28 dependency violations match the previous gate output exactly after normalizing the renamed package.
+  - Baseline `cargo check -p ogpu`: 0.07 s; `cargo t -p ogpu`: 16 pass / 2.672 s including build, slowest surface/discard 0.031 s. First `cargo check -p ogpu_core`: 0.97 s; warm 0.07 s. Warm renamed core test run: 16 pass / 0.255 s, slowest 0.030 s. No build-speed improvement claim.
+  - `cargo t -p ogpu_core -p ogpu_mock -p gate`: 28 pass / 4.762 s including rebuild, slowest dependency rule 0.033 s. `cargo check --workspace --all-targets`: pass / 10.478 s. `cargo t -p ogpu_metal -p ogpu_vulkan`: 14 Metal cases pass / 6.300 s including rebuild, slowest pipeline 0.313 s; Vulkan compiles on this Mac, native Windows execution remains unqualified. `cargo t -p rays -p rays_editor`: 101 pass / 27.007 s including the rename rebuild, slowest native sketch 1.147 s, GPU primitives 0.513 s. No checks exceed the existing per-case budget.
+  - Native `alloc_budget`: two pass / 12.109 s including feature rebuild, slowest basic 0.368 s; counts/bytes unchanged at basic 2,002 / 184,943 B and empty 4,335 / 184,728 B. Caps unchanged. `cargo run -p gate -- deps`: same 28 existing violations. `git diff --check`: clean. Evidence `/tmp/rays-c10-{check-before,tests-before,core-tests,workspace-check,backends,consumers,alloc,deps,check-warm,tests-warm}.log`, `/tmp/rays-c10-results.json`. Live artifact remains v5 with matching SHA-256. C11, remaining D work, allocation gap and qualification remain open.
 
 - 2026-11-08: C6/M3 closure: the native sketch lifecycle updates its stored model through `&mut dyn Any`, returning `None` for an in-place update or `Some(model)` for a completed replacement. The model never leaves storage while callbacks run. Functional replacements retain their previous state until success; an in-place callback's mutations remain available to the crash dump on panic. Editor loop/frame, viewport, source/reload/save, recovery and host edits now mutate state directly. Reduction metadata no longer carries a model. Before/after comparisons retain the document handle, prior pane level/map mode, held keys and pane keys. Borrowed document context handles carry navigation; settled pieces are passed directly for surface picking. Only explicit external Editor snapshots require COW, and close makes one terminal recovery snapshot. No dependency, profile, crate boundary or golden changes.
   - `rays::sketch::tests::model_updates_retain_state_for_crash_dump`: in-place buffer identity, successful replacement, failed replacement, partial in-place mutation and a real crash-report directory/model file all pass; focused run 6.403 s including rebuild, case 0.048 s. New original-document view regression verifies a carried reference resolves in the original document even when its graph is absent from the preview; pass / 6.532 s including rebuild, case 0.199 s.

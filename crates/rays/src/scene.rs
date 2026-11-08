@@ -9,7 +9,7 @@ use crate::scene3;
 use crate::scene3_native_lowering as lowering;
 use renderer::side_lru::{self, Table, TableKey};
 use crate::texture;
-use ogpu::types::{AddressMode, MipFilter, SamplerDescriptor, SamplerFilter};
+use ogpu_core::types::{AddressMode, MipFilter, SamplerDescriptor, SamplerFilter};
 use rays_math::color;
 use renderer::renderer::Resource as retained_resource;
 use renderer::scene_execution as se;
@@ -620,13 +620,13 @@ pub mod Layer {
     #[derive(Clone)]
     pub enum native_error {
         Message(String),
-        Resource(ogpu::error::Error),
+        Resource(ogpu_core::error::Error),
     }
 
     pub fn pp_native_error(formatter: &mut dyn std::fmt::Write, e: &native_error) {
         let _ = match e {
             native_error::Message(m) => formatter.write_str(m),
-            native_error::Resource(e) => formatter.write_str(&ogpu::error::to_string(e)),
+            native_error::Resource(e) => formatter.write_str(&ogpu_core::error::to_string(e)),
         };
     }
 
@@ -1126,7 +1126,7 @@ pub mod Layer {
         Ok((ir, resources))
     }
 
-    fn validate_native_resources(resources: &[(i64, retained_resource)]) -> Result<(), ogpu::error::Error> {
+    fn validate_native_resources(resources: &[(i64, retained_resource)]) -> Result<(), ogpu_core::error::Error> {
         for (_, r) in resources {
             if let retained_resource::Image(image) = r {
                 RImage::gpu_snapshot(image)?;
@@ -1135,7 +1135,7 @@ pub mod Layer {
         Ok(())
     }
 
-    fn validate_native_images(list: &[node]) -> Result<(), ogpu::error::Error> {
+    fn validate_native_images(list: &[node]) -> Result<(), ogpu_core::error::Error> {
         for n in list {
             match n {
                 node::Image(i) => {
@@ -1164,7 +1164,7 @@ pub mod Layer {
         lowering::resources {
             texture: Box::new(move |value: &scene3::texture_| {
                 let key = format!("texture:{}", texture::Private::identity(&value.value));
-                let source: Result<(String, Rc<Vec<se::TextureLevel>>, Option<ogpu::backend::Texture>), lowering::error> =
+                let source: Result<(String, Rc<Vec<se::TextureLevel>>, Option<ogpu_core::backend::Texture>), lowering::error> =
                     match texture::Private::image(&value.value) {
                         None => texture_levels(&value.value).map(|levels| (key.clone(), levels, None)).map_err(|_| lowering::error::Unsupported_texture),
                         Some(image) => match RImage::gpu_snapshot(&image) {

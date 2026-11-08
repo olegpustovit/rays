@@ -8,9 +8,9 @@ use crate::mesh;
 use crate::num::{fmax, fmin, int_of_float};
 use crate::scene3;
 use crate::world;
-use ogpu::pipeline::Blend;
-use ogpu::render_pass::{Comparison, Cull, Load, Primitive};
-use ogpu::types::{AddressMode, MipFilter, SamplerDescriptor, SamplerFilter};
+use ogpu_core::pipeline::Blend;
+use ogpu_core::render_pass::{Comparison, Cull, Load, Primitive};
+use ogpu_core::types::{AddressMode, MipFilter, SamplerDescriptor, SamplerFilter};
 use rays_math::color;
 use rays_math::mat4;
 use rays_math::vec3;
@@ -29,7 +29,7 @@ pub enum error {
     Too_many_lights,
     Invalid_mesh,
     Invalid_viewport,
-    Resource(ogpu::error::Error),
+    Resource(ogpu_core::error::Error),
 }
 
 pub struct resources {
@@ -292,10 +292,10 @@ struct caster_list_key(Vec<caster>);
 
 fn half_level(m: &world::map) -> TextureLevel {
     let mut out = vec![0u8; (m.width * m.height * 8) as usize];
-    let one = ogpu::types::half_of_float(1.) as u16;
+    let one = ogpu_core::types::half_of_float(1.) as u16;
     for i in 0..(m.width * m.height) as usize {
         for c in 0..3 {
-            let h = ogpu::types::half_of_float(fmin(65504., m.pixels[i * 3 + c])) as u16;
+            let h = ogpu_core::types::half_of_float(fmin(65504., m.pixels[i * 3 + c])) as u16;
             out[i * 8 + c * 2..i * 8 + c * 2 + 2].copy_from_slice(&h.to_le_bytes());
         }
         out[i * 8 + 6..i * 8 + 8].copy_from_slice(&one.to_le_bytes());

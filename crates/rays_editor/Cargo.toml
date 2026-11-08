@@ -43,7 +43,7 @@ flow_gpu = { path = "../flow_gpu" }
 
 [dev-dependencies]
 rdk_ops = { path = "../rdk_ops" }
-ogpu = { path = "../ogpu" }
+ogpu_core = { path = "../ogpu_core" }
 renderer = { path = "../renderer" }
 flow_sop = { path = "../flow_sop", features = ["test-support"] }
 runtime_resources = { path = "../runtime_resources" }

@@ -1,8 +1,8 @@
 #![allow(non_camel_case_types)]
 use crate::common;
-use ogpu::error::ErrorKind;
-use ogpu::pipeline::Blend;
-use ogpu::render_pass::{Comparison, Cull, Load, Primitive};
+use ogpu_core::error::ErrorKind;
+use ogpu_core::pipeline::Blend;
+use ogpu_core::render_pass::{Comparison, Cull, Load, Primitive};
 use ::renderer::renderer::{self, PipelineFamily, Renderer};
 use ::renderer::scene_execution::{GeometryDraw, Mesh, MeshKey, new_bytes, SampledDraw, State};
 use std::rc::Rc;

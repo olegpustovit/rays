@@ -10,7 +10,7 @@ use flow_gpu::{host, pipelines, run};
 use flow_ir::{core_draw, core_exec as c, core_ir, core_lower, packed::host as phost};
 use flow_shader::emit;
 use flow_syntax::value::{ResidualId, Value};
-use ogpu::{backend as b, types::{BufferDescriptor, BufferUsage}};
+use ogpu_core::{backend as b, types::{BufferDescriptor, BufferUsage}};
 use scene_command::marks::{Entry, Kind, PairAttr};
 use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 
@@ -345,7 +345,7 @@ fn host_counters() {
     let Some(gpu) = start() else { return };
     drop(gpu);
     common::release_keepalive();
-    let baseline = ogpu::impl_::live_handles().expect("native handles");
+    let baseline = ogpu_core::impl_::live_handles().expect("native handles");
     {
         let Some(gpu) = start() else { return };
         let h = host::create(&|| 0.0, &gpu);
@@ -391,13 +391,13 @@ fn host_counters() {
         assert_eq!(closed.input_uploaded_bytes, renewed.input_uploaded_bytes);
     }
     common::release_keepalive();
-    assert_eq!(ogpu::impl_::live_handles().expect("native handles"), baseline);
+    assert_eq!(ogpu_core::impl_::live_handles().expect("native handles"), baseline);
 }
 fn resident_scenarios() {
     let Some(gpu) = start() else { return };
     drop(gpu);
     common::release_keepalive();
-    let baseline = ogpu::impl_::live_handles().expect("native handles");
+    let baseline = ogpu_core::impl_::live_handles().expect("native handles");
     resident_fold();
     resident_history();
     resident_value();
@@ -405,7 +405,7 @@ fn resident_scenarios() {
     compaction();
     host_counters();
     common::release_keepalive();
-    assert_eq!(ogpu::impl_::live_handles().expect("native handles"), baseline);
+    assert_eq!(ogpu_core::impl_::live_handles().expect("native handles"), baseline);
 }
 fn main() {
     common::window::run(&[("resident_state", resident_state), ("resident_unfold", resident_unfold), ("resident_scenarios", resident_scenarios)]);

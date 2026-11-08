@@ -3,7 +3,7 @@
 // Not ported: the `Gc.allocated_bytes` / `Gc.quick_stat` ceilings, which measure OCaml's heap;
 // the storage hand-over they guard is checked by snapshot lifetime and pixels instead.
 mod common;
-use ogpu::error::ErrorKind;
+use ogpu_core::error::ErrorKind;
 use runtime_resources::*;
 
 // A canvas is written a pixel at a time: [0xRRGGBBAA] at every point.

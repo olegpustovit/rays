@@ -283,8 +283,8 @@ fn message<A>(result: Result<A, String>) -> Result<A, Diagnostic> {
     result.map_err(|m| error(&m))
 }
 
-fn pp_error(e: &ogpu::error::Error) -> String {
-    ogpu::error::to_string(e)
+fn pp_error(e: &ogpu_core::error::Error) -> String {
+    ogpu_core::error::to_string(e)
 }
 
 // -- entry table operations that release ---------------------------------------------------------
@@ -808,7 +808,7 @@ fn force_texture(slot: &TextureSlot) -> Result<texture::t, String> {
     }
 }
 
-fn publish(d: &Data, key: &str, entry: &EntryRef, width: i64, height: i64, source: Rc<dyn Fn() -> Option<ogpu::backend::Texture>>) -> Result<(), Diagnostic> {
+fn publish(d: &Data, key: &str, entry: &EntryRef, width: i64, height: i64, source: Rc<dyn Fn() -> Option<ogpu_core::backend::Texture>>) -> Result<(), Diagnostic> {
     let existing = entry.borrow().image.clone();
     let image_ = match existing {
         None => workspace_resources::image(&d.resources, key, &|| {
@@ -1260,7 +1260,7 @@ fn compute_entry(
                 Some(I::Displayed::Gpu(value)) => {
                     workspace_gpu::image(&d.gpu, key, width, height, &mut |output| {
                         let output = output.clone();
-                        let source: Rc<dyn Fn() -> Option<ogpu::backend::Texture>> = Rc::new(move || image_sink::texture(&output));
+                        let source: Rc<dyn Fn() -> Option<ogpu_core::backend::Texture>> = Rc::new(move || image_sink::texture(&output));
                         publish(d, key, &entry, width, height, source)
                     }, &value)?;
                 }

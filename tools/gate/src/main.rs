@@ -825,9 +825,9 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
             "input", "rays_math", "lru", "runtime_resources", "runtime", "scene_command", "renderer",
             "parallel",
         ][..]),
-        ("runtime", &["sdl3", "ogpu", "input"][..]),
-        ("runtime_resources", &["sdl3", "ogpu"][..]),
-        ("renderer", &["ogpu", "scene_command", "runtime", "lru", "rays_math", "runtime_resources"][..]),
+        ("runtime", &["sdl3", "ogpu_core", "input"][..]),
+        ("runtime_resources", &["sdl3", "ogpu_core"][..]),
+        ("renderer", &["ogpu_core", "scene_command", "runtime", "lru", "rays_math", "runtime_resources"][..]),
         ("flow_syntax", &["param", "rays_diagnostic", "input", "rays_math"][..]),
         ("flow_check", &["flow_syntax", "param", "rays_diagnostic", "input", "rays_math", "lru"][..]),
         ("flow_eval", &["flow_syntax", "flow_check", "param", "rays_diagnostic", "input", "rays_math"][..]),
@@ -835,9 +835,9 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
         ("flow_ir", &[
             "flow_syntax", "flow_check", "flow_eval", "param", "rays_math", "scene_command", "lru", "parallel",
         ][..]),
-        ("flow_shader", &["flow_syntax", "flow_check", "flow_eval", "flow_ir", "ogpu"][..]),
+        ("flow_shader", &["flow_syntax", "flow_check", "flow_eval", "flow_ir", "ogpu_core"][..]),
         ("flow_gpu", &[
-            "flow_syntax", "flow_check", "flow_eval", "flow_ir", "flow_shader", "param", "rays_math", "ogpu",
+            "flow_syntax", "flow_check", "flow_eval", "flow_ir", "flow_shader", "param", "rays_math", "ogpu_core",
             "renderer", "lru", "mem", "parallel",
         ][..]),
         ("flow_web", &[
@@ -853,14 +853,14 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
             "flow_graph", "flow_ir", "flow_gpu", "flow_sop", "scene_command", "renderer", "lru", "runtime_resources",
             "parallel", "sop",
         ][..]),
-        ("ogpu", &["native_layer_token_sys"][..]),
-        ("ogpu_mock", &["ogpu"][..]),
+        ("ogpu_core", &["native_layer_token_sys"][..]),
+        ("ogpu_mock", &["ogpu_core"][..]),
         // Rust merges OCaml's ogpu_metal_native into ogpu_metal.
-        ("ogpu_metal", &["ogpu_metal_native", "ogpu", "metal", "lru"][..]),
-        ("ogpu_metal_native", &["ogpu", "metal", "lru"][..]),
-        ("ogpu_vulkan", &["ogpu", "vulkan_sys", "native_layer_token_sys"][..]),
+        ("ogpu_metal", &["ogpu_metal_native", "ogpu_core", "metal", "lru"][..]),
+        ("ogpu_metal_native", &["ogpu_core", "metal", "lru"][..]),
+        ("ogpu_vulkan", &["ogpu_core", "vulkan_sys", "native_layer_token_sys"][..]),
         ("ogpu_native", &["ogpu_metal", "ogpu_vulkan"][..]),
-        ("scene_execution_fixtures", &["renderer", "ogpu"][..]),
+        ("scene_execution_fixtures", &["renderer", "ogpu_core"][..]),
         ("pxui", &["rays", "rays_math", "param", "mem"][..]),
         ("pxui_shell", &["rays", "rays_math", "editor_core", "pxui"][..]),
         ("pxui_graph", &[
@@ -872,7 +872,7 @@ fn direct_allowlist() -> HashMap<&'static str, &'static [&'static str]> {
             "param", "scene_command", "sdl3",
         ][..]),
         ("rays_pathtracer", &[
-            "rays", "ogpu", "renderer", "flow_syntax", "flow_check", "flow_eval", "flow_ir", "flow_gpu", "input",
+            "rays", "ogpu_core", "renderer", "flow_syntax", "flow_check", "flow_eval", "flow_ir", "flow_gpu", "input",
             "runtime_resources", "rays_math",
         ][..]),
         ("lisp_sop", &["flow_syntax", "flow_check", "flow_eval", "flow_sop", "sop", "rays_math"][..]),
@@ -914,7 +914,7 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
         "web_export", "rays_editor",
     ];
     let gpu = [
-        "sdl3", "metal", "vulkan_sys", "ogpu",
+        "sdl3", "metal", "vulkan_sys", "ogpu_core",
         "ogpu_mock", "ogpu_metal", "ogpu_metal_native", "ogpu_vulkan", "ogpu_native", "runtime",
         "runtime_resources", "renderer",
     ];
@@ -924,7 +924,7 @@ fn forbidden_reaches() -> HashMap<String, HashSet<String>> {
         "cfmt",
         "diagnostic", "rays_diagnostic", "native_layer_token_sys", "mem", "mem_sys",
         "lru", "param", "input", "rays_math", "rays_math_sys", "parallel", "scene_command", "sdl3",
-        "metal", "vulkan_sys", "ogpu",
+        "metal", "vulkan_sys", "ogpu_core",
         "rdk_core",
     ];
     for library in foundational {
@@ -1101,7 +1101,7 @@ fn ogpu_selection_errors(
                 })
             }).cloned().collect();
             let reaches_ogpu = selected.iter().any(|dependency| {
-                dependency == "ogpu" || dependency_path(dependency, "ogpu", graph).is_some()
+                dependency == "ogpu_core" || dependency_path(dependency, "ogpu_core", graph).is_some()
             });
             if !reaches_ogpu {
                 continue;
@@ -1120,7 +1120,7 @@ fn ogpu_selection_errors(
                 continue;
             }
             errors.push(format!(
-                "{path}: executable/test crate `{}` reaches `ogpu` on {platform}; select `ogpu_native` or exactly one explicit implementation (selected: {})",
+                "{path}: executable/test crate `{}` reaches `ogpu_core` on {platform}; select `ogpu_native` or exactly one explicit implementation (selected: {})",
                 package.crate_name,
                 if selected.is_empty() { "none".to_owned() } else { selected.join(", ") }
             ));
@@ -1557,10 +1557,10 @@ mod tests {
             has_binary: true,
             has_tests: false,
         };
-        let graph = HashMap::from([("rays".to_owned(), vec!["ogpu".to_owned()])]);
-        let missing = HashMap::from([("rays".to_owned(), vec!["ogpu".to_owned()])]);
+        let graph = HashMap::from([("rays".to_owned(), vec!["ogpu_core".to_owned()])]);
+        let missing = HashMap::from([("rays".to_owned(), vec!["ogpu_core".to_owned()])]);
         assert!(!ogpu_selection_errors(&[app.clone()], &graph, &missing, Path::new("rs")).is_empty());
-        let selected = HashMap::from([("rays".to_owned(), vec!["ogpu".to_owned(), "ogpu_native".to_owned()])]);
+        let selected = HashMap::from([("rays".to_owned(), vec!["ogpu_core".to_owned(), "ogpu_native".to_owned()])]);
         assert!(ogpu_selection_errors(&[app], &graph, &selected, Path::new("rs")).is_empty());
     }
 
@@ -1576,7 +1576,7 @@ mod tests {
             has_binary: true, has_tests: false,
         };
         let graph = HashMap::new();
-        let selected = HashMap::from([("app".into(), vec!["ogpu".into(), "ogpu_metal".into(), "ogpu_vulkan".into()])]);
+        let selected = HashMap::from([("app".into(), vec!["ogpu_core".into(), "ogpu_metal".into(), "ogpu_vulkan".into()])]);
         assert!(ogpu_selection_errors(&[app.clone()], &graph, &selected, Path::new("rs")).is_empty());
         app.deps[1].target = None;
         let errors = ogpu_selection_errors(&[app.clone()], &graph, &selected, Path::new("rs"));

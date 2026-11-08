@@ -11,7 +11,7 @@ use crate::scene::{self, Layer};
 use crate::sketch;
 use crate::texture;
 use input::{Event, Key, MouseButton};
-use ogpu::error::ErrorKind;
+use ogpu_core::error::ErrorKind;
 use rays_math::{color, mat4, noise, rand, vec3};
 use scene_command::path::{Command, Point};
 use scene_command::render_ir;
@@ -41,7 +41,7 @@ fn sketch_startup_result() {
     };
     match sketch::run_state(Some(config), None, None, None, program) {
         Err(error) if error.kind == ErrorKind::InvalidArgument => check(!called.get(), "invalid sketch configuration reached user callbacks"),
-        Err(error) => panic!("{}", ogpu::error::to_string(&error)),
+        Err(error) => panic!("{}", ogpu_core::error::to_string(&error)),
         Ok(_) => panic!("invalid sketch configuration succeeded"),
     }
 }

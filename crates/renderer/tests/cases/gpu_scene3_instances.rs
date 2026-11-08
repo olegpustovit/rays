@@ -1,9 +1,9 @@
 #![allow(non_camel_case_types)]
 use crate::common;
-use ogpu::backend::{self, Buffer};
-use ogpu::pipeline::Blend;
-use ogpu::render_pass::{Comparison, Cull, Load, Primitive};
-use ogpu::types::{BufferDescriptor, BufferUsage};
+use ogpu_core::backend::{self, Buffer};
+use ogpu_core::pipeline::Blend;
+use ogpu_core::render_pass::{Comparison, Cull, Load, Primitive};
+use ogpu_core::types::{BufferDescriptor, BufferUsage};
 use ::renderer::renderer::{self, PipelineFamily, Renderer};
 use ::renderer::scene_execution::{self, GeometryDraw, Mesh, MeshKey, new_bytes, SampledDraw, State};
 use std::{cell::Cell, rc::Rc};
@@ -320,9 +320,9 @@ fn gpu_scene3_borrowed_stream_guards() {
     if !common::gpu() { return; }
     // Match the source's owned-device lifetime, excluding the unrelated shared probe cache.
     common::release_keepalive();
-    use ogpu::error::ErrorKind;
+    use ogpu_core::error::ErrorKind;
     use ::renderer::renderer::native;
-    let baseline=ogpu::impl_::live_handles().unwrap();
+    let baseline=ogpu_core::impl_::live_handles().unwrap();
     let r=resident();
     let mut uniforms=uniform(true); set(&mut uniforms,79,1.);
     let e=device_entry(&r,r.key.clone(),uniforms,"indexed-attributes",r.f.attributes.clone());
@@ -375,7 +375,7 @@ fn gpu_scene3_borrowed_stream_guards() {
         Ok(_) => panic!("closed producer draw accepted"),
     }
     assert_eq!(backend::read_buffer(&r.positions,0,36).unwrap().len(),36,"closing registration destroyed producer storage");
-    let foreign=backend::create_device(ogpu::impl_::create_driver().unwrap()).unwrap();
+    let foreign=backend::create_device(ogpu_core::impl_::create_driver().unwrap()).unwrap();
     let source=scene_execution::register_gpu_vertices(&native::gpu_vertices_owner(&r.runtime),None,Some(12),None,Some((r.device_indices.clone(),3)),None,&r.key,&foreign,&r.positions,3,Box::new(|| true)).unwrap();
     match renderer::draw(None,&r.runtime,&[Rc::new(e)]) {
         Err(error) => assert_eq!(error.kind,ErrorKind::CrossDevice),
@@ -384,7 +384,7 @@ fn gpu_scene3_borrowed_stream_guards() {
     scene_execution::unregister_gpu_vertices(&source);
     backend::destroy_device(&foreign).unwrap();
     finish(r,Vec::new());
-    assert_eq!(ogpu::impl_::live_handles().unwrap(),baseline);
+    assert_eq!(ogpu_core::impl_::live_handles().unwrap(),baseline);
 }
 
 #[derive(Default)]
@@ -395,7 +395,7 @@ struct native_vertex_observation {
 }
 
 type Seen = Rc<std::cell::RefCell<native_vertex_observation>>;
-type E = ogpu::error::Error;
+type E = ogpu_core::error::Error;
 macro_rules! forward {
     ($($name:ident($($arg:ident: $ty:ty),*) -> $ret:ty;)*) => {
         $(fn $name(&self, $($arg: $ty),*) -> $ret { self.inner.$name($($arg),*) })*
@@ -420,14 +420,14 @@ impl backend::DriverRenderEncoder for Observed<dyn backend::DriverRenderEncoder>
         render_set_pipeline(pipeline: backend::Token) -> Result<(), E>;
         set_stage_texture(stage: backend::ShaderStage, index: i64, texture: backend::Token) -> Result<(), E>;
         set_stage_sampler(stage: backend::ShaderStage, index: i64, sampler: backend::Token) -> Result<(), E>;
-        set_viewport(rect: ogpu::render_pass::Rect) -> Result<(), E>;
-        set_scissor(rect: ogpu::render_pass::Rect) -> Result<(), E>;
+        set_viewport(rect: ogpu_core::render_pass::Rect) -> Result<(), E>;
+        set_scissor(rect: ogpu_core::render_pass::Rect) -> Result<(), E>;
         set_cull(cull: Cull) -> Result<(), E>;
         set_winding(winding: backend::Winding) -> Result<(), E>;
         set_depth_state(state: Option<backend::DepthState>) -> Result<(), E>;
         draw(primitive: Primitive, first: i64, count: i64, instances: i64) -> Result<(), E>;
-        draw_indexed(primitive: Primitive, index_type: ogpu::render_pass::IndexType, buffer: backend::Token, offset: i64, count: i64, instances: i64) -> Result<(), E>;
-        draw_indexed_indirect(primitive: Primitive, index_type: ogpu::render_pass::IndexType, buffer: backend::Token, offset: i64, arguments: backend::Token, arguments_offset: i64) -> Result<(), E>;
+        draw_indexed(primitive: Primitive, index_type: ogpu_core::render_pass::IndexType, buffer: backend::Token, offset: i64, count: i64, instances: i64) -> Result<(), E>;
+        draw_indexed_indirect(primitive: Primitive, index_type: ogpu_core::render_pass::IndexType, buffer: backend::Token, offset: i64, arguments: backend::Token, arguments_offset: i64) -> Result<(), E>;
         use_resources(resources: &[backend::Token]) -> Result<(), E>;
         execute_icb(icb: backend::Token, location: i64, length: i64) -> Result<(), E>;
         end_render() -> Result<(), E>;
@@ -479,26 +479,26 @@ impl backend::DriverQueue for Observed<dyn backend::DriverQueue> {
 }
 impl backend::DriverDevice for Observed<dyn backend::DriverDevice> {
     forward! {
-        device_handle() -> ogpu::handle::Device;
-        capabilities() -> ogpu::caps::Caps;
+        device_handle() -> ogpu_core::handle::Device;
+        capabilities() -> ogpu_core::caps::Caps;
         allocated_size() -> i64;
         recommended_working_set() -> i64;
         create_mapped_buffer(descriptor: &BufferDescriptor) -> Result<backend::DriverMapped, E>;
-        create_texture(descriptor: &ogpu::types::TextureDescriptor) -> Result<Box<dyn backend::DriverResource>, E>;
-        create_depth_texture(descriptor: &ogpu::types::TextureDescriptor) -> Result<Box<dyn backend::DriverResource>, E>;
-        create_memoryless_texture(depth: bool, descriptor: &ogpu::types::TextureDescriptor) -> Result<Box<dyn backend::DriverResource>, E>;
-        create_library(shader: &ogpu::shader::Shader) -> Result<Box<dyn backend::DriverLibrary>, E>;
-        warm_library(shader: &ogpu::shader::Shader) -> Option<backend::Warm>;
+        create_texture(descriptor: &ogpu_core::types::TextureDescriptor) -> Result<Box<dyn backend::DriverResource>, E>;
+        create_depth_texture(descriptor: &ogpu_core::types::TextureDescriptor) -> Result<Box<dyn backend::DriverResource>, E>;
+        create_memoryless_texture(depth: bool, descriptor: &ogpu_core::types::TextureDescriptor) -> Result<Box<dyn backend::DriverResource>, E>;
+        create_library(shader: &ogpu_core::shader::Shader) -> Result<Box<dyn backend::DriverLibrary>, E>;
+        warm_library(shader: &ogpu_core::shader::Shader) -> Option<backend::Warm>;
         create_accel(descriptor: &backend::DriverAccelDescriptor) -> Result<Box<dyn backend::DriverAccel>, E>;
         instance_layout(kind: backend::InstanceKind) -> Vec<i64>;
-        create_sampler(descriptor: &ogpu::types::SamplerDescriptor) -> Result<Box<dyn backend::DriverSampler>, E>;
-        create_render_pipeline(options: backend::RenderPipelineOptions, descriptor: &ogpu::pipeline::RenderDescriptor) -> Result<Box<dyn backend::DriverPipeline>, E>;
+        create_sampler(descriptor: &ogpu_core::types::SamplerDescriptor) -> Result<Box<dyn backend::DriverSampler>, E>;
+        create_render_pipeline(options: backend::RenderPipelineOptions, descriptor: &ogpu_core::pipeline::RenderDescriptor) -> Result<Box<dyn backend::DriverPipeline>, E>;
         create_icb(max_commands: i64) -> Result<Box<dyn backend::DriverIcb>, E>;
         create_argument(pipeline: backend::Token, stage: backend::ShaderStage, index: i64) -> Result<Box<dyn backend::DriverArgument>, E>;
-        create_surface(configuration: &ogpu::surface::Configuration) -> Result<Box<dyn backend::DriverSurface>, E>;
+        create_surface(configuration: &ogpu_core::surface::Configuration) -> Result<Box<dyn backend::DriverSurface>, E>;
         destroy_device() -> Result<(), E>;
     }
-    fn create_buffer(&self, memory: ogpu::types::Memory, descriptor: &BufferDescriptor) -> Result<Box<dyn backend::DriverResource>, E> {
+    fn create_buffer(&self, memory: ogpu_core::types::Memory, descriptor: &BufferDescriptor) -> Result<Box<dyn backend::DriverResource>, E> {
         let buffer = self.inner.create_buffer(memory, descriptor)?;
         if let Some(label) = &descriptor.label {
             self.seen.borrow_mut().buffers.insert(label.clone(), buffer.token());
@@ -530,14 +530,14 @@ fn observe_native_vertices(base: Box<dyn backend::Driver>, seen: Seen) -> Box<dy
 fn gpu_borrowed_vertex_encoder_observation() {
     if !common::gpu() { return; }
     use ::renderer::{renderer_pipeline, scene_execution as se};
-    use ogpu::surface::{Configuration, Format, PresentMode};
-    use ogpu::types::{AddressMode, MipFilter, SamplerDescriptor, SamplerFilter};
-    let baseline = ogpu::impl_::live_handles().unwrap();
+    use ogpu_core::surface::{Configuration, Format, PresentMode};
+    use ogpu_core::types::{AddressMode, MipFilter, SamplerDescriptor, SamplerFilter};
+    let baseline = ogpu_core::impl_::live_handles().unwrap();
     let seen = Rc::new(std::cell::RefCell::new(native_vertex_observation::default()));
-    let driver = observe_native_vertices(ogpu::impl_::create_driver().unwrap(), seen.clone());
+    let driver = observe_native_vertices(ogpu_core::impl_::create_driver().unwrap(), seen.clone());
     let cfg = Configuration { logical_width: 4, logical_height: 4, physical_width: 4, physical_height: 4, format: Format::Rgba8Unorm, present_mode: PresentMode::Immediate, max_acquired: 1, layer: None };
     let owner = se::create_gpu_vertices_owner();
-    let mut runtime = renderer_pipeline::create_renderer(&ogpu::impl_::backend().unwrap(), None, Some(owner.clone()), true, driver, &cfg).unwrap();
+    let mut runtime = renderer_pipeline::create_renderer(&ogpu_core::impl_::backend().unwrap(), None, Some(owner.clone()), true, driver, &cfg).unwrap();
     let device = se::device(&runtime);
     let upload = |label: &str, bytes: &[u8]| {
         let buffer = backend::create_buffer(&device, BufferDescriptor {
@@ -614,7 +614,7 @@ fn gpu_borrowed_vertex_encoder_observation() {
         }
         let mut releases = 0;
         let error = se::submit(None, &mut || releases += 1, None, &mut runtime, &[Rc::new(bad)]).unwrap_err();
-        assert_eq!(error.kind,ogpu::error::ErrorKind::InvalidArgument,"malformed variant {variant}");
+        assert_eq!(error.kind,ogpu_core::error::ErrorKind::InvalidArgument,"malformed variant {variant}");
         assert_eq!(releases,1,"malformed variant {variant} release hook");
         assert_eq!(se::upload_bytes(&runtime),uploaded);
         assert_eq!(seen.borrow().mesh_upload_bytes,48);
@@ -647,7 +647,7 @@ fn gpu_borrowed_vertex_encoder_observation() {
         backend::destroy_buffer(buffer).unwrap();
     }
     se::destroy(&mut runtime).unwrap();
-    assert_eq!(ogpu::impl_::live_handles().unwrap(),baseline);
+    assert_eq!(ogpu_core::impl_::live_handles().unwrap(),baseline);
 }
 
 pub const CASES: &[(&str, fn())] = &[

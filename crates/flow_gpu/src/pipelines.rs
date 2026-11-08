@@ -2,8 +2,8 @@
 use crate::small_lru::List;
 use flow_shader::emit::Kernel;
 use flow_syntax::value;
-use ogpu::backend::{self as b, Library, Pipeline};
-use ogpu::shader::{self, EntryPoint, Stage};
+use ogpu_core::backend::{self as b, Library, Pipeline};
+use ogpu_core::shader::{self, EntryPoint, Stage};
 use rays_diagnostic::Diagnostic;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -43,12 +43,12 @@ struct Specializing {
 #[derive(Clone)]
 pub struct T(Rc<Data>);
 
-pub fn diagnostic(error: &ogpu::error::Error) -> Diagnostic {
-    value::fail("E_GPU", &ogpu::error::to_string(error))
+pub fn diagnostic(error: &ogpu_core::error::Error) -> Diagnostic {
+    value::fail("E_GPU", &ogpu_core::error::to_string(error))
 }
 
 pub fn is_vulkan() -> bool {
-    ogpu::impl_::backend().map(|name| name == "vulkan").unwrap_or(false)
+    ogpu_core::impl_::backend().map(|name| name == "vulkan").unwrap_or(false)
 }
 
 pub fn create(_clock: &dyn Fn() -> f64, device: &b::Device) -> T {

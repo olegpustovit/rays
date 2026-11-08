@@ -1,10 +1,10 @@
 //! Port of lib/rays_pathtracer/frame_data.ml: the film's buffers and the camera's axes.
-use ogpu::backend::{self as b, Buffer, Texture};
-use ogpu::types::{BufferDescriptor, BufferUsage, Memory, TextureDescriptor, TextureFormat, TextureUsage};
+use ogpu_core::backend::{self as b, Buffer, Texture};
+use ogpu_core::types::{BufferDescriptor, BufferUsage, Memory, TextureDescriptor, TextureFormat, TextureUsage};
 use rays_math::vec3;
 
-pub fn gpu_err(e: ogpu::error::Error) -> String {
-    ogpu::error::to_string(&e)
+pub fn gpu_err(e: ogpu_core::error::Error) -> String {
+    ogpu_core::error::to_string(&e)
 }
 
 pub fn put_f32(bytes: &mut [u8], offset: usize, value: f64) {

@@ -12,8 +12,8 @@ use crate::frame_data::{self, allocate_film, camera_fov, color_tuple, destroy_fi
 use crate::lisp_kernel;
 use crate::mesh_build::{advance_build, destroy_gpu, discard_build, finish_build, GpuMesh, MeshBuild, mesh_shape, shared, Stage, submit_instances, table_buffers, upload_tables, wait, DeviceGpu};
 use crate::mesh_data;
-use ogpu::backend::{self as b, Accel, AccelDescriptor, Buffer, Commands, Device, Geometry, Queue, Receipt, Status, Texture};
-use ogpu::types::{BufferUsage, Memory};
+use ogpu_core::backend::{self as b, Accel, AccelDescriptor, Buffer, Commands, Device, Geometry, Queue, Receipt, Status, Texture};
+use ogpu_core::types::{BufferUsage, Memory};
 use rays_math::color::Linear;
 use rays_math::vec3;
 use std::rc::Rc;
@@ -242,14 +242,14 @@ fn vec3_tuple(v: &vec3::T) -> (f64, f64, f64) {
     (v.x, v.y, v.z)
 }
 
-fn renderer_err(e: &ogpu::error::Error) -> String {
+fn renderer_err(e: &ogpu_core::error::Error) -> String {
     let mut s = String::new();
     renderer::renderer::pp_error(&mut s, e);
     s
 }
 
 fn resources_err(e: &runtime_resources::error) -> String {
-    ogpu::error::to_string(e)
+    ogpu_core::error::to_string(e)
 }
 
 /// Analytic primitives share the material index space with the objects: sphere k's is `first_material + k`,
@@ -483,8 +483,8 @@ pub fn world_bytes(baked: &rays::world::baked) -> Result<(Vec<u8>, Vec<u8>), Str
 
 /// Resource helpers on the leased OGPU device. Scene geometry lives in shared memory (Apple silicon is
 /// unified); accumulation, history, and build scratch are device-local.
-pub fn unavailable(caps: &ogpu::caps::Caps) -> Option<String> {
-    if ogpu::caps::has(caps, &ogpu::caps::Feature::RayTracing) { None } else { Some("Path tracing is not available on this GPU.".to_string()) }
+pub fn unavailable(caps: &ogpu_core::caps::Caps) -> Option<String> {
+    if ogpu_core::caps::has(caps, &ogpu_core::caps::Feature::RayTracing) { None } else { Some("Path tracing is not available on this GPU.".to_string()) }
 }
 
 pub fn available() -> Option<String> {
@@ -525,7 +525,7 @@ fn create_tracer(o: &CreateOptions, width: i64, height: i64, scene_: &Scene) -> 
     let device = renderer::renderer::gpu_device(&lease);
     let queue = renderer::renderer::gpu_queue(&lease);
     let created = (|| -> Result<PathTracer, String> {
-        ogpu::caps::require(Some("Rays_pathtracer.create"), &b::capabilities(&device), &ogpu::caps::Feature::RayTracing).map_err(gpu_err)?;
+        ogpu_core::caps::require(Some("Rays_pathtracer.create"), &b::capabilities(&device), &ogpu_core::caps::Feature::RayTracing).map_err(gpu_err)?;
         let m = mesh(Some(&scene_.spheres), Some(&scene_.strands), &scene_.objects)?;
         // a device mesh is installed by [replace_mesh] once the tracer exists, over a stand-in
         let gpu_mesh_ = upload_mesh(
@@ -1617,7 +1617,7 @@ pub fn r#move(t: &mut PathTracer, matrices: &[rays_math::mat4::T]) -> Result<(),
 pub fn destroy(t: &mut PathTracer) {
     let trace = |step: &str| {
         if std::env::var_os("RAYS_PT_HANDLES").is_some() {
-            eprintln!("pt destroy {step}: {} live handles", ogpu::impl_::live_handles().unwrap_or(-1));
+            eprintln!("pt destroy {step}: {} live handles", ogpu_core::impl_::live_handles().unwrap_or(-1));
         }
     };
     trace("start");
@@ -1644,7 +1644,7 @@ pub fn destroy(t: &mut PathTracer) {
     for value in [&t.panels, &t.lights, &t.world_buffer, &t.cdf_buffer, &t.cell] {
         if let Err(e) = b::destroy_buffer(value)
             && std::env::var_os("RAYS_PT_HANDLES").is_some() {
-                eprintln!("pt destroy buffer: {}", ogpu::error::to_string(&e));
+                eprintln!("pt destroy buffer: {}", ogpu_core::error::to_string(&e));
             }
     }
     if let Some(f) = &t.film {

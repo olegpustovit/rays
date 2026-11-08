@@ -114,7 +114,7 @@ fn gpu_batch_merge() {
     if !common::gpu() {
         return;
     }
-    let baseline = ogpu::impl_::live_handles().unwrap();
+    let baseline = ogpu_core::impl_::live_handles().unwrap();
     let execution = renderer::create_offscreen(&renderer::Configuration {
         logical_width: WIDTH,
         logical_height: HEIGHT,
@@ -153,7 +153,7 @@ fn gpu_batch_merge() {
     renderer::release_gpu(&gpu);
     renderer::destroy(&execution).unwrap();
     assert_eq!(scene_execution::private::gpu_vertex_count_for_test(&owner), 0);
-    assert_eq!(ogpu::impl_::live_handles().unwrap(), baseline, "batch merge handle delta");
+    assert_eq!(ogpu_core::impl_::live_handles().unwrap(), baseline, "batch merge handle delta");
 }
 
 pub const CASES: &[(&str, fn())] = &[("gpu_batch_merge", gpu_batch_merge)];

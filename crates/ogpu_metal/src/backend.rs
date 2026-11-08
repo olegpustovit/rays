@@ -1,5 +1,5 @@
 //! Ogpu_metal.Backend: OGPU's driver traits over the Metal modules. Tokens name native objects;
-//! the checks live in `ogpu::backend`, as for Vulkan.
+//! the checks live in `ogpu_core::backend`, as for Vulkan.
 use crate::{
     acceleration::{self, Acceleration},
     blit_encoder, buffer,
@@ -14,7 +14,7 @@ use crate::{
     surface::{self, Acquire, Frame, PendingPresentation, Surface},
     texture::{self, Texture},
 };
-use ogpu::{
+use ogpu_core::{
     backend::{
         AccelSizes, Driver, DriverAccel, DriverAccelDescriptor, DriverAccelEncoder, DriverAcquire, DriverArgument,
         DriverBlitEncoder, DriverCommands, DriverComputeEncoder, DriverDevice, DriverFrame, DriverIcb,
@@ -324,9 +324,9 @@ fn create_library(dev: &Rc<Dev>, shader: &Shader) -> Result<Box<dyn DriverLibrar
     Ok(Box::new(MetalLibrary { dev: dev.clone(), value, id }))
 }
 
-fn warm_library(dev: &Rc<Dev>, shader: &Shader) -> Option<ogpu::backend::Warm> {
-    let source = std::str::from_utf8(ogpu::shader::bytes(shader)).ok()?;
-    let entry = &ogpu::shader::entry_points(shader).first()?.name;
+fn warm_library(dev: &Rc<Dev>, shader: &Shader) -> Option<ogpu_core::backend::Warm> {
+    let source = std::str::from_utf8(ogpu_core::shader::bytes(shader)).ok()?;
+    let entry = &ogpu_core::shader::entry_points(shader).first()?.name;
     let warm = metal::Library::warm(dev.device.metal(), source, entry).ok()?;
     Some(Box::new(move || warm.state()))
 }
@@ -939,7 +939,7 @@ impl DriverDevice for MetalDevice {
     fn create_library(&self, shader: &Shader) -> Result<Box<dyn DriverLibrary>, Error> {
         create_library(&self.dev, shader)
     }
-    fn warm_library(&self, shader: &Shader) -> Option<ogpu::backend::Warm> {
+    fn warm_library(&self, shader: &Shader) -> Option<ogpu_core::backend::Warm> {
         warm_library(&self.dev, shader)
     }
     fn create_accel(&self, descriptor: &DriverAccelDescriptor) -> Result<Box<dyn DriverAccel>, Error> {

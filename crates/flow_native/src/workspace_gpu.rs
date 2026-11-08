@@ -20,8 +20,8 @@ use flow_ir::packed::host as phost;
 use flow_syntax::ty::Ty;
 use flow_syntax::value::{self as v, Value};
 use input::Frame;
-use ogpu::backend as ob;
-use ogpu::types::{BufferDescriptor, BufferUsage};
+use ogpu_core::backend as ob;
+use ogpu_core::types::{BufferDescriptor, BufferUsage};
 use renderer::renderer as x;
 use rays_diagnostic::Diagnostic;
 use std::any::Any;
@@ -51,7 +51,7 @@ fn error(message: &str) -> Diagnostic {
     v::fail("E_GPU", message)
 }
 
-fn native<A>(result: Result<A, ogpu::error::Error>) -> Result<A, Diagnostic> {
+fn native<A>(result: Result<A, ogpu_core::error::Error>) -> Result<A, Diagnostic> {
     result.map_err(|e| error(&e.message))
 }
 
@@ -1182,7 +1182,7 @@ pub fn display(t_: &t, geometry: &rdk_core::geometry::T) -> Option<(String, bool
             count,
             Rc::new(move || !closed.get() && checks2.borrow().iter().all(|valid| valid())),
         )
-        .map_err(|e| ogpu::error::to_string(&e))?;
+        .map_err(|e| ogpu_core::error::to_string(&e))?;
         d.displays.set(d.displays.get() + 1);
         let releases2 = releases.clone();
         let unregister: Rc<dyn Fn()> = Rc::new(unregister);

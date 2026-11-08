@@ -3,19 +3,19 @@
 use crate::common;
 use ::renderer::renderer::{self, PipelineFamily, native};
 use ::renderer::scene_execution::{self, new_bytes, GeometryDraw, Mesh, MeshKey, State};
-use ogpu::render_pass::{Comparison, Cull, Load, Primitive};
+use ogpu_core::render_pass::{Comparison, Cull, Load, Primitive};
 
 fn window_runtime_render() {
     if !common::gpu() {
         return;
     }
-    let before = ogpu::impl_::live_handles().unwrap();
+    let before = ogpu_core::impl_::live_handles().unwrap();
     // Exercise all 600 frames without waiting for the display's refresh clock.
     let cfg = renderer::Configuration { logical_width: 4, logical_height: 4, drawable_width: 4, drawable_height: 4, vsync: false, ..renderer::default_configuration() };
     let value = match renderer::create(&cfg) {
         Ok(value) => value,
         Err(e) => {
-            println!("renderer: skipped (no window/native device: {})", ogpu::error::to_string(&e));
+            println!("renderer: skipped (no window/native device: {})", ogpu_core::error::to_string(&e));
             return;
         }
     };
@@ -74,9 +74,9 @@ fn window_runtime_render() {
     pump();
     assert!(renderer::draw(None, &value, &[prepared(resized_state)]).unwrap(), "resized runtime frame was not presented");
     renderer::destroy(&value).unwrap();
-    assert_eq!(ogpu::impl_::live_handles().unwrap(), before, "renderer native live-handle delta");
+    assert_eq!(ogpu_core::impl_::live_handles().unwrap(), before, "renderer native live-handle delta");
     let _ = scene_execution::empty_bytes;
-    println!("renderer: {} frames 1/2/60/600 and resize, zero delta", ogpu::impl_::backend().unwrap());
+    println!("renderer: {} frames 1/2/60/600 and resize, zero delta", ogpu_core::impl_::backend().unwrap());
 }
 
 pub const CASES: &[(&str, fn())] = &[("window_runtime_render", window_runtime_render)];

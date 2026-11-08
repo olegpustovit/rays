@@ -30,7 +30,7 @@ fn film() {
     assert_eq!(expected.len(), 48 * 32 * 4);
     assert_eq!(pt::live_handles(), baseline);
     let config = renderer::renderer::Configuration { logical_width: 48, logical_height: 32, drawable_width: 48, drawable_height: 32, title: "GPU film test".to_string(), ..renderer::renderer::default_configuration() };
-    let coordinator = renderer::renderer::create(&config).unwrap_or_else(|e| panic!("{}", ogpu::error::to_string(&e)));
+    let coordinator = renderer::renderer::create(&config).unwrap_or_else(|e| panic!("{}", ogpu_core::error::to_string(&e)));
     // A live shared lease keeps the window's device alive.
     let lease = renderer::renderer::acquire_gpu().unwrap();
     assert!(renderer::renderer::gpu_shared(&lease));
@@ -45,7 +45,7 @@ fn film() {
         _ => panic!("traced film was published through CPU image storage"),
     };
     let texture = snapshot(&image);
-    let direct = ogpu::backend::read_texture(&texture, 48 * 4).unwrap();
+    let direct = ogpu_core::backend::read_texture(&texture, 48 * 4).unwrap();
     assert_eq!(p::samples(&tracer), 1);
     assert!(direct == expected);
     assert!(pt::pixels(&tracer) == direct);
@@ -59,10 +59,10 @@ fn film() {
     let colors: std::collections::HashSet<u8> = direct.iter().step_by(4).cloned().collect();
     assert!(colors.len() > 1);
     let mut textures = std::collections::HashSet::new();
-    textures.insert(ogpu::backend::texture_id(&texture));
+    textures.insert(ogpu_core::backend::texture_id(&texture));
     for _ in 0..30 {
         pt::frame(&mut tracer, &camera);
-        textures.insert(ogpu::backend::texture_id(&snapshot(&image)));
+        textures.insert(ogpu_core::backend::texture_id(&snapshot(&image)));
     }
     assert_eq!(textures.len(), 3);
     // a tracer at rest: the film goes, the picture stays, and the next frame is a first one
@@ -73,7 +73,7 @@ fn film() {
     // Metal frees a buffer when its last Rust clone drops (ogpu_metal), not at destroy: the bytes are checked
     // where destroy frees them, and only printed on Metal
     println!("released {released} bytes (expected at least {})", 116 * 48 * 32);
-    assert!(released >= 116 * 48 * 32 || ogpu::impl_::backend().map(|b| b == "metal").unwrap_or(false));
+    assert!(released >= 116 * 48 * 32 || ogpu_core::impl_::backend().map(|b| b == "metal").unwrap_or(false));
     assert!(pt::pixels(&tracer) == shown);
     assert_eq!(p::samples(&tracer), 31);
     get(p::release_film(&mut tracer));
@@ -97,7 +97,7 @@ fn film() {
     assert!(before - after >= 116 * 320 * 180);
     p::destroy(&mut tracer);
     drop(tracer);
-    renderer::renderer::destroy(&coordinator).unwrap_or_else(|e| panic!("{}", ogpu::error::to_string(&e)));
+    renderer::renderer::destroy(&coordinator).unwrap_or_else(|e| panic!("{}", ogpu_core::error::to_string(&e)));
     drop(coordinator);
     drop(texture);
     drop(image);

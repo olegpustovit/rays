@@ -160,7 +160,7 @@ fn scenario(label: &str, instanced: bool, world: Option<&w::baked>) {
     println!("pathtrace.rays {label}: trace kernel {} lines, maxTotalThreads {threads} (pathtrace.metal 384)", lines.len());
     // the recorded limits (bound materials and bands): 448 flat, 384 instanced; a drop is a regression.
     // Metal only: another pipeline limit says nothing about this kernel's registers.
-    if ogpu::impl_::backend().map(|b| b == "metal").unwrap_or(false) {
+    if ogpu_core::impl_::backend().map(|b| b == "metal").unwrap_or(false) {
         assert!(threads >= if instanced { 384 } else { 448 });
     }
     p::destroy(&mut t);

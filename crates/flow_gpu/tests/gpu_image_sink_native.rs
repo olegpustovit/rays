@@ -9,8 +9,8 @@ use flow_ir::flow_ir::{Executor as ex, Gpu};
 use flow_ir::packed::{self, host as phost};
 use flow_shader::emit;
 use flow_syntax::value::Value;
-use ogpu::backend as b;
-use ogpu::error::ErrorKind;
+use ogpu_core::backend as b;
+use ogpu_core::error::ErrorKind;
 use rays::{canvas, image, scene, scene3, texture};
 use rays_math::{color, vec3};
 use renderer::renderer as rr;
@@ -312,7 +312,7 @@ fn expire(canvas: &canvas::t, current: &i::t, scenes: &[Vec<scene::node>]) {
 fn resident_consumers() {
     if !common::gpu() { return; }
     common::release_keepalive();
-    let before = ogpu::impl_::live_handles().unwrap();
+    let before = ogpu_core::impl_::live_handles().unwrap();
     assert!(common::gpu());
     let gpu = common::lease();
     let cache = pipelines::create(&|| 0.0, &rr::gpu_device(&gpu));
@@ -368,8 +368,8 @@ fn resident_consumers() {
     scenes = vec![image_scene(&resized_image), meshed, mixed(&resized_image, &view)];
     verify_resident(&canvas, &current, &scenes, &resized, 17, 5, 0.5);
     assert_eq!(&saved[..], &saved_copy[..]);
-    let device = b::create_device(ogpu::impl_::create_driver().unwrap()).unwrap();
-    let texture = b::create_texture(&device, ogpu::types::TextureDescriptor { label: None, width: 17, height: 5, depth: 1, mip_levels: 1, sample_count: 1, format: ogpu::types::TextureFormat::Rgba8Unorm, usage: vec![ogpu::types::TextureUsage::TextureBinding, ogpu::types::TextureUsage::TextureCopySrc] }).unwrap();
+    let device = b::create_device(ogpu_core::impl_::create_driver().unwrap()).unwrap();
+    let texture = b::create_texture(&device, ogpu_core::types::TextureDescriptor { label: None, width: 17, height: 5, depth: 1, mip_levels: 1, sample_count: 1, format: ogpu_core::types::TextureFormat::Rgba8Unorm, usage: vec![ogpu_core::types::TextureUsage::TextureBinding, ogpu_core::types::TextureUsage::TextureCopySrc] }).unwrap();
     let foreign = texture.clone();
     i::replace_gpu_source(&current, 17, 5, Rc::new(move || Some(foreign.clone()))).unwrap();
     for nodes in &scenes { assert!(matches!(canvas::render(None, &canvas, nodes), Err(message) if message.ends_with("GPU image belongs to another renderer"))); }
@@ -387,7 +387,7 @@ fn resident_consumers() {
     s::close(&sink);
     pipelines::close(&cache);
     common::release_keepalive();
-    assert_eq!(ogpu::impl_::live_handles().unwrap(), before);
+    assert_eq!(ogpu_core::impl_::live_handles().unwrap(), before);
 }
 fn main() {
     common::window::run(&[("native_pixel_parity", native_pixel_parity), ("qualified_publication", qualified_publication), ("resident_consumers", resident_consumers)]);

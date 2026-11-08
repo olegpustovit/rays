@@ -1,10 +1,10 @@
 use crate::renderer_retained_plans::Resource;
 use crate::scene_execution::{self, bytes, Draw, empty_bytes, Mesh, MeshKey, new_bytes, PipelineFamily, SampledDraw, SampledTexture, State, TextureLevel};
 use crate::side_lru::{self, Item, TableKey};
-use ogpu::error::{self, Error, ErrorKind};
-use ogpu::pipeline::Blend;
-use ogpu::render_pass::{Comparison, Cull, Load, Primitive};
-use ogpu::types::{AddressMode, MipFilter, SamplerDescriptor, SamplerFilter};
+use ogpu_core::error::{self, Error, ErrorKind};
+use ogpu_core::pipeline::Blend;
+use ogpu_core::render_pass::{Comparison, Cull, Load, Primitive};
+use ogpu_core::types::{AddressMode, MipFilter, SamplerDescriptor, SamplerFilter};
 use runtime::presentation_facts;
 use scene_command::render_ir::{self as ir, Command, Geometry, Rect, Transform};
 use scene_command::ui_batch::Table as Shapes;

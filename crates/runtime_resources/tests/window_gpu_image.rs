@@ -2,9 +2,9 @@
 // resize, CPU transitions, leases, domain and borrowed ownership. The `Gc.allocated_bytes`
 // ceilings are not ported (they measure the OCaml heap); zero CPU storage is checked separately.
 mod common;
-use ogpu::backend::{self as b, Driver, DriverDevice, DriverResource, Texture};
-use ogpu::error::{self, ErrorKind};
-use ogpu::types::{TextureDescriptor, TextureFormat, TextureUsage};
+use ogpu_core::backend::{self as b, Driver, DriverDevice, DriverResource, Texture};
+use ogpu_core::error::{self, ErrorKind};
+use ogpu_core::types::{TextureDescriptor, TextureFormat, TextureUsage};
 use runtime_resources::{Canvas, Image as I, error as Error};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -12,20 +12,20 @@ use std::rc::Rc;
 type State = (Rc<Cell<i64>>, Rc<RefCell<Option<Error>>>, Vec<u8>);
 struct Counted { inner: Box<dyn DriverResource>, reads: Rc<Cell<i64>>, error: Rc<RefCell<Option<Error>>> }
 impl Counted {
-    fn gate(&self) -> Result<(), ogpu::error::Error> {
+    fn gate(&self) -> Result<(), ogpu_core::error::Error> {
         self.reads.set(self.reads.get() + 1);
         match self.error.borrow().clone() { Some(error) => Err(error), None => Ok(()) }
     }
 }
 impl DriverResource for Counted {
     fn token(&self) -> b::Token { self.inner.token() }
-    fn write(&self, offset: i64, bytes: &[u8]) -> Result<(), ogpu::error::Error> { self.inner.write(offset, bytes) }
-    fn read(&self, offset: i64, length: usize) -> Result<Vec<u8>, ogpu::error::Error> { self.gate()?; self.inner.read(offset, length) }
-    fn read_into(&self, offset: i64, destination: &mut [u8], destination_offset: usize, length: usize) -> Result<(), ogpu::error::Error> {
+    fn write(&self, offset: i64, bytes: &[u8]) -> Result<(), ogpu_core::error::Error> { self.inner.write(offset, bytes) }
+    fn read(&self, offset: i64, length: usize) -> Result<Vec<u8>, ogpu_core::error::Error> { self.gate()?; self.inner.read(offset, length) }
+    fn read_into(&self, offset: i64, destination: &mut [u8], destination_offset: usize, length: usize) -> Result<(), ogpu_core::error::Error> {
         self.gate()?;
         self.inner.read_into(offset, destination, destination_offset, length)
     }
-    fn destroy(&self) -> Result<(), ogpu::error::Error> { self.inner.destroy() }
+    fn destroy(&self) -> Result<(), ogpu_core::error::Error> { self.inner.destroy() }
 }
 struct Dev { inner: Box<dyn DriverDevice>, state: Rc<State> }
 macro_rules! forward {
@@ -35,27 +35,27 @@ macro_rules! forward {
 }
 impl DriverDevice for Dev {
     forward! {
-        device_handle() -> ogpu::handle::Device;
-        capabilities() -> ogpu::caps::Caps;
+        device_handle() -> ogpu_core::handle::Device;
+        capabilities() -> ogpu_core::caps::Caps;
         allocated_size() -> i64;
         recommended_working_set() -> i64;
-        create_buffer(memory: ogpu::types::Memory, descriptor: &ogpu::types::BufferDescriptor) -> Result<Box<dyn DriverResource>, ogpu::error::Error>;
-        create_mapped_buffer(descriptor: &ogpu::types::BufferDescriptor) -> Result<b::DriverMapped, ogpu::error::Error>;
-        create_depth_texture(descriptor: &TextureDescriptor) -> Result<Box<dyn DriverResource>, ogpu::error::Error>;
-        create_memoryless_texture(depth: bool, descriptor: &TextureDescriptor) -> Result<Box<dyn DriverResource>, ogpu::error::Error>;
-        create_library(shader: &ogpu::shader::Shader) -> Result<Box<dyn b::DriverLibrary>, ogpu::error::Error>;
-        warm_library(shader: &ogpu::shader::Shader) -> Option<b::Warm>;
-        create_accel(descriptor: &b::DriverAccelDescriptor) -> Result<Box<dyn b::DriverAccel>, ogpu::error::Error>;
+        create_buffer(memory: ogpu_core::types::Memory, descriptor: &ogpu_core::types::BufferDescriptor) -> Result<Box<dyn DriverResource>, ogpu_core::error::Error>;
+        create_mapped_buffer(descriptor: &ogpu_core::types::BufferDescriptor) -> Result<b::DriverMapped, ogpu_core::error::Error>;
+        create_depth_texture(descriptor: &TextureDescriptor) -> Result<Box<dyn DriverResource>, ogpu_core::error::Error>;
+        create_memoryless_texture(depth: bool, descriptor: &TextureDescriptor) -> Result<Box<dyn DriverResource>, ogpu_core::error::Error>;
+        create_library(shader: &ogpu_core::shader::Shader) -> Result<Box<dyn b::DriverLibrary>, ogpu_core::error::Error>;
+        warm_library(shader: &ogpu_core::shader::Shader) -> Option<b::Warm>;
+        create_accel(descriptor: &b::DriverAccelDescriptor) -> Result<Box<dyn b::DriverAccel>, ogpu_core::error::Error>;
         instance_layout(kind: b::InstanceKind) -> Vec<i64>;
-        create_sampler(descriptor: &ogpu::types::SamplerDescriptor) -> Result<Box<dyn b::DriverSampler>, ogpu::error::Error>;
-        create_render_pipeline(options: b::RenderPipelineOptions, descriptor: &ogpu::pipeline::RenderDescriptor) -> Result<Box<dyn b::DriverPipeline>, ogpu::error::Error>;
-        create_icb(max_commands: i64) -> Result<Box<dyn b::DriverIcb>, ogpu::error::Error>;
-        create_argument(pipeline: b::Token, stage: b::ShaderStage, index: i64) -> Result<Box<dyn b::DriverArgument>, ogpu::error::Error>;
-        create_queue() -> Result<Box<dyn b::DriverQueue>, ogpu::error::Error>;
-        create_surface(configuration: &ogpu::surface::Configuration) -> Result<Box<dyn b::DriverSurface>, ogpu::error::Error>;
-        destroy_device() -> Result<(), ogpu::error::Error>;
+        create_sampler(descriptor: &ogpu_core::types::SamplerDescriptor) -> Result<Box<dyn b::DriverSampler>, ogpu_core::error::Error>;
+        create_render_pipeline(options: b::RenderPipelineOptions, descriptor: &ogpu_core::pipeline::RenderDescriptor) -> Result<Box<dyn b::DriverPipeline>, ogpu_core::error::Error>;
+        create_icb(max_commands: i64) -> Result<Box<dyn b::DriverIcb>, ogpu_core::error::Error>;
+        create_argument(pipeline: b::Token, stage: b::ShaderStage, index: i64) -> Result<Box<dyn b::DriverArgument>, ogpu_core::error::Error>;
+        create_queue() -> Result<Box<dyn b::DriverQueue>, ogpu_core::error::Error>;
+        create_surface(configuration: &ogpu_core::surface::Configuration) -> Result<Box<dyn b::DriverSurface>, ogpu_core::error::Error>;
+        destroy_device() -> Result<(), ogpu_core::error::Error>;
     }
-    fn create_texture(&self, descriptor: &TextureDescriptor) -> Result<Box<dyn DriverResource>, ogpu::error::Error> {
+    fn create_texture(&self, descriptor: &TextureDescriptor) -> Result<Box<dyn DriverResource>, ogpu_core::error::Error> {
         let resource = self.inner.create_texture(descriptor)?;
         if descriptor.width == 65 && descriptor.height == 3 {
             resource.write(0, &self.state.2)?;
@@ -65,7 +65,7 @@ impl DriverDevice for Dev {
 }
 struct Wrap { base: Box<dyn Driver>, state: Rc<State> }
 impl Driver for Wrap {
-    fn create_device(&self) -> Result<Box<dyn DriverDevice>, ogpu::error::Error> {
+    fn create_device(&self) -> Result<Box<dyn DriverDevice>, ogpu_core::error::Error> {
         Ok(Box::new(Dev { inner: self.base.create_device()?, state: self.state.clone() }))
     }
 }

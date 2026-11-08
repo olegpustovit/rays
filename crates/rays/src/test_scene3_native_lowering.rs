@@ -107,7 +107,7 @@ fn scene3_lowering_geometry_uniforms_texture_mips_world_depth_stable_pack() {
         let vertices = entry.draw.mesh.vertices.to_vec();
         assert!(vertices.len() == 72 && entry.draw.mesh.index_count == 3, "native Scene3 ABI cardinality");
         // blending an opaque draw keeps a tile-based GPU from dropping its hidden fragments
-        assert!(entry.blend == ogpu::pipeline::Blend::Replace, "an opaque default-blend draw kept blending");
+        assert!(entry.blend == ogpu_core::pipeline::Blend::Replace, "an opaque default-blend draw kept blending");
         assert!(word32(&vertices, 0) == -0.5, "native Scene3 vertex ABI");
         let attrs = entry.vertex_attributes.as_ref().expect("attributes").1.to_vec();
         assert!(u32::from_le_bytes([attrs[0], attrs[1], attrs[2], attrs[3]]) == 0xff0000ff, "native Scene3 vertex ABI");

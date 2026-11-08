@@ -74,7 +74,7 @@ fn run(density: i64) {
     let ui = new_batch(fill, stroke, accent, marker);
     let cfg = renderer::Configuration { logical_width: 64, logical_height: 40, drawable_width: 64 * density, drawable_height: 40 * density, title: "ui-pipeline".into(), vsync: false, high_density: true };
     let execution = renderer::create_offscreen(&cfg).unwrap();
-    let capture = |lower: &dyn Fn(&renderer::Submission) -> Result<renderer::Batch, ogpu::error::Error>| {
+    let capture = |lower: &dyn Fn(&renderer::Submission) -> Result<renderer::Batch, ogpu_core::error::Error>| {
         let submission = native::begin_submission(&execution).unwrap();
         let result = (|| {
             let batch = lower(&submission)?;

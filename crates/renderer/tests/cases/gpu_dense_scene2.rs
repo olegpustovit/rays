@@ -33,7 +33,7 @@ fn scene(reference: bool, count: i64, phase: f64) -> Rc<RenderIr> {
     Rc::new(render_ir::create(commands).unwrap())
 }
 
-fn capture(execution: &renderer::Renderer, lower: &dyn Fn(&renderer::Submission) -> Result<renderer::Batch, ogpu::error::Error>) -> Vec<u8> {
+fn capture(execution: &renderer::Renderer, lower: &dyn Fn(&renderer::Submission) -> Result<renderer::Batch, ogpu_core::error::Error>) -> Vec<u8> {
     let submission = native::begin_submission(execution).unwrap();
     let result = (|| {
         let batch = lower(&submission)?;
@@ -48,7 +48,7 @@ fn run(scale: i64) {
     if !common::gpu() {
         return;
     }
-    let baseline = ogpu::impl_::live_handles().unwrap();
+    let baseline = ogpu_core::impl_::live_handles().unwrap();
     let cfg = renderer::Configuration { logical_width: 64, logical_height: 48, drawable_width: 64 * scale, drawable_height: 48 * scale, title: "dense-scene2".into(), vsync: false, high_density: true };
     let execution = renderer::create_offscreen(&cfg).unwrap();
     let render = |ir: &Rc<RenderIr>| -> Vec<u8> {
@@ -125,7 +125,7 @@ fn run(scale: i64) {
     assert!(render_draws(&moved) != expected, "shifted geometry did not move");
     assert!(render_draws(&first) == expected, "geometry cache hit rewrote an earlier lowering's transform");
     renderer::destroy(&execution).unwrap();
-    assert_eq!(ogpu::impl_::live_handles().unwrap(), baseline, "dense scene2 handle delta");
+    assert_eq!(ogpu_core::impl_::live_handles().unwrap(), baseline, "dense scene2 handle delta");
     println!("dense scene2: exact {scale}x pixels, alpha/add, fractional transforms, alternating retained payloads, zero handles");
 }
 

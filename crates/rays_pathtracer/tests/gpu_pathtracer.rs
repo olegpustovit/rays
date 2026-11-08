@@ -62,8 +62,8 @@ fn lit() {
     if !common::gpu() {
         return;
     }
-    assert!(p::unavailable(&ogpu::caps::minimum_m1()).is_some());
-    let mut caps = ogpu::caps::minimum_m1();
+    assert!(p::unavailable(&ogpu_core::caps::minimum_m1()).is_some());
+    let mut caps = ogpu_core::caps::minimum_m1();
     caps.ray_tracing = true;
     assert!(p::unavailable(&caps).is_none());
     let initial_handles = pt::live_handles();

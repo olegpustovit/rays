@@ -13,7 +13,7 @@ use crate::scene::{self, Layer};
 use crate::time;
 use crate::world;
 use input::{Event, Key, MouseButton};
-use ogpu::error::{self as oerror, ErrorKind};
+use ogpu_core::error::{self as oerror, ErrorKind};
 use renderer::renderer::{self as rr, native};
 use rays_math::color;
 use std::any::Any;

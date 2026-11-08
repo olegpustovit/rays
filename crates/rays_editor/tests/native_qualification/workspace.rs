@@ -16,7 +16,7 @@ fn at(frame: i64) -> input::Frame { input::Frame { frame, ..input::at_time(frame
 fn value(id: i64) -> Value { Value::Deferred(ty::image(), id) }
 fn node_of<'a>(p: &'a l::T, kind: &str) -> &'a e::Node { p.plan.nodes.iter().find(|n| n.kind == kind).unwrap_or_else(|| panic!("missing {kind}")) }
 fn bytes(p: &si::T) -> Vec<u8> { si::rgba8(p).expect("RGBA8 payload").to_vec() }
-fn handles() -> i64 { ogpu::impl_::live_handles().unwrap() }
+fn handles() -> i64 { ogpu_core::impl_::live_handles().unwrap() }
 fn result(p: &l::T, name: &str) -> Value { p.evaluated.results.iter().find(|(n, _)| n == name).unwrap().1.clone() }
 struct Owner { images: wi::t, resources: wr::t, gpu: wg::t }
 impl Owner {

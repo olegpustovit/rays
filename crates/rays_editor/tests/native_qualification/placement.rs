@@ -26,11 +26,11 @@ fn inputs(program: &packed::T, index: bool, time: f64) -> packed::Inputs {
 }
 fn with_owner(run: impl Fn(&gpu::t,&Gpu::Config)) {
     assert!(crate::common::gpu(),"native qualification requires Vulkan");
-    let baseline = ogpu::impl_::live_handles().unwrap();
+    let baseline = ogpu_core::impl_::live_handles().unwrap();
     let owner = gpu::create(None);
     gpu::with_backend(&owner,true,&mut |config| run(&owner,config));
     gpu::close(&owner);
-    assert_eq!(ogpu::impl_::live_handles().unwrap(),baseline);
+    assert_eq!(ogpu_core::impl_::live_handles().unwrap(),baseline);
 }
 fn calibration() {
     let program = compile("(+ (sin (+ i t)) 0.25)");

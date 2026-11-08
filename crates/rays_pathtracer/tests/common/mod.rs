@@ -4,7 +4,7 @@
 #![allow(dead_code)]
 pub mod window;
 
-use ogpu::error::{self, ErrorKind};
+use ogpu_core::error::{self, ErrorKind};
 
 thread_local! {
     static KEEP: std::cell::RefCell<Option<::renderer::renderer::Gpu>> = const { std::cell::RefCell::new(None) };
@@ -23,15 +23,15 @@ pub fn lease() -> ::renderer::renderer::Gpu {
 }
 
 fn select() {
-    use ogpu::impl_::Impl;
+    use ogpu_core::impl_::Impl;
     #[cfg(windows)]
-    ogpu::impl_::select(Impl {
+    ogpu_core::impl_::select(Impl {
         backend: ogpu_vulkan::impl_::BACKEND.to_owned(),
         create_driver: Box::new(|| ogpu_vulkan::backend::create_with_validation((true, true))),
         live_handles: Box::new(ogpu_vulkan::impl_::live_handles),
     });
     #[cfg(target_os = "macos")]
-    ogpu::impl_::select(ogpu_metal::impl_::implementation());
+    ogpu_core::impl_::select(ogpu_metal::impl_::implementation());
     #[cfg(not(any(windows, target_os = "macos")))]
     let _ = Impl { backend: String::new(), create_driver: Box::new(|| panic!("no implementation")), live_handles: Box::new(|| 0) };
 }

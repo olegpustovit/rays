@@ -1,12 +1,12 @@
 //! Ogpu_metal.Surface: a CAMetalLayer-backed surface, its acquired frames and the bounded
 //! presentation slots that keep a presented source alive until its epoch completes.
-use ogpu::error::Error;
+use ogpu_core::error::Error;
 use crate::{
     device::{fail, of_metal_error, Device},
     presentation::{self, Presentation},
     texture::Texture,
 };
-use ogpu::{
+use ogpu_core::{
     error::ErrorKind,
     surface::{self as portable_surface, AcquireResult, Configuration, Format, PresentMode},
     types::{TextureFormat, TextureUsage},

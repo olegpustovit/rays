@@ -1,6 +1,6 @@
-//! The mock implementation of `ogpu::impl_`.
+//! The mock implementation of `ogpu_core::impl_`.
 use crate::backend_mock::{self, Control};
-use ogpu::backend::{Driver, Implementation as Impl};
+use ogpu_core::backend::{Driver, Implementation as Impl};
 use std::cell::RefCell;
 
 thread_local! {
@@ -30,7 +30,7 @@ pub fn live_handles() -> i64 {
     })
 }
 
-/// The record `ogpu::impl_::select` takes.
+/// The record `ogpu_core::impl_::select` takes.
 pub fn implementation() -> Impl {
     Impl {
         backend: BACKEND.to_owned(),

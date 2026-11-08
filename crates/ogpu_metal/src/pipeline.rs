@@ -1,11 +1,11 @@
 //! Ogpu_metal.Pipeline: compute pipelines from a shared library and owned render pipelines.
-use ogpu::error::Error;
+use ogpu_core::error::Error;
 use crate::{
     device::{fail, of_metal_error, Device},
     library::{self, Library},
 };
 use metal::{BlendFactor, BlendOperation, BlendState, ColorAttachment, PrimitiveTopology};
-use ogpu::{
+use ogpu_core::{
     error::ErrorKind,
     handle::{self, ResourceHandle},
     pipeline::{self, Blend, ColorFormat, RenderDescriptor},

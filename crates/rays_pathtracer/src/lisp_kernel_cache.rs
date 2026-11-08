@@ -8,7 +8,7 @@ use crate::lisp_kernel::{self, FrontResult, PREVIEWS, T};
 use flow_ir::packed::host as phost;
 use flow_shader::emit;
 use flow_syntax::ty::Ty;
-use ogpu::shader::{Binding, BindingKind, Stage};
+use ogpu_core::shader::{Binding, BindingKind, Stage};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, OnceLock};
@@ -152,7 +152,7 @@ impl<'a> Reader<'a> {
 }
 
 fn is_vulkan() -> bool {
-    ogpu::impl_::backend().map(|b| b == "vulkan").unwrap_or(false)
+    ogpu_core::impl_::backend().map(|b| b == "vulkan").unwrap_or(false)
 }
 
 fn encode(value: &FrontResult) -> Vec<u8> {
@@ -292,7 +292,7 @@ pub fn disk_cached(t: &T, name: &str, make: &dyn Fn() -> Result<FrontResult, Str
     let dir = CACHE_DIR.lock().unwrap().clone();
     let (Some(dir), Some(executable)) = (dir, executable()) else { return make() };
     let text = lisp_kernel::text(&t.facts, PREVIEWS.contains(&name));
-    let backend = ogpu::impl_::backend().unwrap_or_default();
+    let backend = ogpu_core::impl_::backend().unwrap_or_default();
     let key = [executable.as_str(), name, text.as_str(), format!("{:?}", t.facts).as_str(), backend.as_str()].join("\0");
     let file = Path::new(&dir).join(rays_math::hash::md5_hex(key.as_bytes()));
     if let Ok(data) = std::fs::read(&file)

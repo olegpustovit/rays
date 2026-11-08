@@ -6,7 +6,7 @@ use flow_gpu::{pipelines, run};
 use flow_ir::{flow_ir::Gpu, packed::{self, host as phost}};
 use flow_shader::emit;
 use flow_syntax::value::Value;
-use ogpu::{backend as b, error::{self, ErrorKind}};
+use ogpu_core::{backend as b, error::{self, ErrorKind}};
 use std::{cell::Cell, rc::Rc, sync::Arc};
 
 #[derive(Default)]
@@ -70,7 +70,7 @@ impl b::DriverPipeline for Faulty<dyn b::DriverPipeline> {
 }
 impl b::DriverLibrary for Faulty<dyn b::DriverLibrary> {
     forward! { destroy_library() -> Result<(), E>; }
-    fn create_compute_pipeline_in(&self, entry: &str, constants: &[(String, ogpu::shader::ConstantValue)], interface: &[ogpu::shader::Binding]) -> Result<Box<dyn b::DriverPipeline>, E> {
+    fn create_compute_pipeline_in(&self, entry: &str, constants: &[(String, ogpu_core::shader::ConstantValue)], interface: &[ogpu_core::shader::Binding]) -> Result<Box<dyn b::DriverPipeline>, E> {
         let pipeline = self.inner.create_compute_pipeline_in(entry, constants, interface)?;
         bump(&self.f.pipelines);
         Ok(Box::new(wrap(pipeline, &self.f, 0)))
@@ -105,36 +105,36 @@ impl b::DriverQueue for Faulty<dyn b::DriverQueue> {
 }
 impl b::DriverDevice for Faulty<dyn b::DriverDevice> {
     forward! {
-        device_handle() -> ogpu::handle::Device;
-        capabilities() -> ogpu::caps::Caps;
+        device_handle() -> ogpu_core::handle::Device;
+        capabilities() -> ogpu_core::caps::Caps;
         allocated_size() -> i64;
-        create_texture(descriptor: &ogpu::types::TextureDescriptor) -> Result<Box<dyn b::DriverResource>, E>;
-        create_depth_texture(descriptor: &ogpu::types::TextureDescriptor) -> Result<Box<dyn b::DriverResource>, E>;
-        create_memoryless_texture(depth: bool, descriptor: &ogpu::types::TextureDescriptor) -> Result<Box<dyn b::DriverResource>, E>;
-        warm_library(shader: &ogpu::shader::Shader) -> Option<b::Warm>;
+        create_texture(descriptor: &ogpu_core::types::TextureDescriptor) -> Result<Box<dyn b::DriverResource>, E>;
+        create_depth_texture(descriptor: &ogpu_core::types::TextureDescriptor) -> Result<Box<dyn b::DriverResource>, E>;
+        create_memoryless_texture(depth: bool, descriptor: &ogpu_core::types::TextureDescriptor) -> Result<Box<dyn b::DriverResource>, E>;
+        warm_library(shader: &ogpu_core::shader::Shader) -> Option<b::Warm>;
         create_accel(descriptor: &b::DriverAccelDescriptor) -> Result<Box<dyn b::DriverAccel>, E>;
         instance_layout(kind: b::InstanceKind) -> Vec<i64>;
-        create_sampler(descriptor: &ogpu::types::SamplerDescriptor) -> Result<Box<dyn b::DriverSampler>, E>;
-        create_render_pipeline(options: b::RenderPipelineOptions, descriptor: &ogpu::pipeline::RenderDescriptor) -> Result<Box<dyn b::DriverPipeline>, E>;
+        create_sampler(descriptor: &ogpu_core::types::SamplerDescriptor) -> Result<Box<dyn b::DriverSampler>, E>;
+        create_render_pipeline(options: b::RenderPipelineOptions, descriptor: &ogpu_core::pipeline::RenderDescriptor) -> Result<Box<dyn b::DriverPipeline>, E>;
         create_icb(max_commands: i64) -> Result<Box<dyn b::DriverIcb>, E>;
         create_argument(pipeline: b::Token, stage: b::ShaderStage, index: i64) -> Result<Box<dyn b::DriverArgument>, E>;
-        create_surface(configuration: &ogpu::surface::Configuration) -> Result<Box<dyn b::DriverSurface>, E>;
+        create_surface(configuration: &ogpu_core::surface::Configuration) -> Result<Box<dyn b::DriverSurface>, E>;
         destroy_device() -> Result<(), E>;
     }
     fn recommended_working_set(&self) -> i64 { self.f.working_set.get().unwrap_or_else(|| self.inner.recommended_working_set()) }
-    fn create_buffer(&self, memory: ogpu::types::Memory, descriptor: &ogpu::types::BufferDescriptor) -> Result<Box<dyn b::DriverResource>, E> {
+    fn create_buffer(&self, memory: ogpu_core::types::Memory, descriptor: &ogpu_core::types::BufferDescriptor) -> Result<Box<dyn b::DriverResource>, E> {
         bump(&self.f.creates);
         let r = self.inner.create_buffer(memory, descriptor)?;
         Ok(Box::new(wrap(r, &self.f, descriptor.size)))
     }
-    fn create_mapped_buffer(&self, descriptor: &ogpu::types::BufferDescriptor) -> Result<b::DriverMapped, E> {
+    fn create_mapped_buffer(&self, descriptor: &ogpu_core::types::BufferDescriptor) -> Result<b::DriverMapped, E> {
         let mapped = self.inner.create_mapped_buffer(descriptor)?;
         Ok(b::DriverMapped {
             mapped_resource: Box::new(wrap(mapped.mapped_resource, &self.f, descriptor.size)),
             mapping: Box::new(wrap(mapped.mapping, &self.f, descriptor.size)),
         })
     }
-    fn create_library(&self, shader: &ogpu::shader::Shader) -> Result<Box<dyn b::DriverLibrary>, E> {
+    fn create_library(&self, shader: &ogpu_core::shader::Shader) -> Result<Box<dyn b::DriverLibrary>, E> {
         Ok(Box::new(wrap(self.inner.create_library(shader)?, &self.f, 0)))
     }
     fn create_queue(&self) -> Result<Box<dyn b::DriverQueue>, E> {
@@ -148,7 +148,7 @@ impl b::Driver for FaultyDriver {
     }
 }
 fn driver(f: Rc<Faults>) -> Box<dyn b::Driver> {
-    Box::new(FaultyDriver { base: ogpu::impl_::create_driver().expect("native driver"), f })
+    Box::new(FaultyDriver { base: ogpu_core::impl_::create_driver().expect("native driver"), f })
 }
 fn fixture(name: &str, count: i64) -> packed::T {
     let body = match name {
@@ -177,7 +177,7 @@ struct Fixture {
 fn with_fixture(test: impl FnOnce(&Fixture)) {
     if !common::gpu() { return; }
     common::release_keepalive();
-    let baseline = ogpu::impl_::live_handles().expect("native handle count");
+    let baseline = ogpu_core::impl_::live_handles().expect("native handle count");
     let f = Rc::new(Faults::default());
     let device = b::create_device(driver(f.clone())).expect("device");
     let queue = b::create_queue(&device).expect("queue");
@@ -193,7 +193,7 @@ fn with_fixture(test: impl FnOnce(&Fixture)) {
     run::clear_thread_state();
     b::destroy_queue(&fixture.queue).expect("destroy queue");
     b::destroy_device(&fixture.device).expect("destroy device");
-    assert_eq!(ogpu::impl_::live_handles().expect("native handle count"), baseline);
+    assert_eq!(ogpu_core::impl_::live_handles().expect("native handle count"), baseline);
     assert_eq!(fixture.f.pipelines.get(), 0);
 }
 fn failed_commands_and_uploads() {

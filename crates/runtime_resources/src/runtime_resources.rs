@@ -1,14 +1,14 @@
 //! Target-neutral owned resource snapshots for the SDL3 migration.
-use ogpu::backend::{self, Texture};
-use ogpu::error as oerror;
-use ogpu::error::ErrorKind;
-use ogpu::types::{TextureFormat, TextureUsage};
+use ogpu_core::backend::{self, Texture};
+use ogpu_core::error as oerror;
+use ogpu_core::error::ErrorKind;
+use ogpu_core::types::{TextureFormat, TextureUsage};
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 use std::sync::atomic::{AtomicI64, Ordering};
 
 #[allow(non_camel_case_types)]
-pub type error = ogpu::error::Error;
+pub type error = ogpu_core::error::Error;
 
 /// A shared immutable byte buffer, compared by physical equality (`Rc::ptr_eq`) in the storage
 /// hand-over between canvases and images. Image and canvas storage is written in place only through

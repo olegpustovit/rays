@@ -7,7 +7,7 @@ fn window_runtime_visibility() {
     let mut runtime = match create(None, None, None, None, 32, 24) {
         Ok(runtime) => runtime,
         Err(e) => {
-            println!("runtime visibility: skipped ({})", ogpu::error::to_string(&e));
+            println!("runtime visibility: skipped ({})", ogpu_core::error::to_string(&e));
             return;
         }
     };

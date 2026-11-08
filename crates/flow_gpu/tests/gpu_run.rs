@@ -36,7 +36,7 @@ fn start() -> Option<(renderer::renderer::Gpu, pipelines::T)> {
         return None;
     }
     let lease = common::lease();
-    let caps = ogpu::backend::capabilities(&renderer::renderer::gpu_device(&lease));
+    let caps = ogpu_core::backend::capabilities(&renderer::renderer::gpu_device(&lease));
     if !caps.compute_pipeline {
         println!("SKIP: backend lacks Compute_pipeline");
         return None;
@@ -174,11 +174,11 @@ fn statuses() {
                 assert!(array(&tp::ok(run::readback(&empty, None))).is_empty() && run::Private::status_reads(&r) == 1);
                 if name == "divide-selected" {
                     let queue = renderer::renderer::gpu_queue(&lease);
-                    let commands = ogpu::backend::begin_commands(&queue).expect("commands");
+                    let commands = ogpu_core::backend::begin_commands(&queue).expect("commands");
                     tp::ok(run::dispatch(&r, &run::Options { commands: Some(commands.clone()), ..Default::default() }, None, None, &inputs));
                     let empty = tp::ok(dispatch_nowait(&r, &phost::Inputs { count: 0, ..inputs.clone() }));
                     assert!(array(&tp::ok(run::readback(&empty, None))).is_empty());
-                    let receipt = ogpu::backend::commit(&commands).expect("commit");
+                    let receipt = ogpu_core::backend::commit(&commands).expect("commit");
                     match run::Private::check_status(&r, receipt.epoch) {
                         Err(d) => assert!(d.code == "E_RANGE" && d.message == message),
                         Ok(()) => panic!("empty dispatch cleared an earlier resident GPU error"),
@@ -288,7 +288,7 @@ fn selected_outputs() {
     for (index, e) in expected.iter().enumerate() {
         let selected = run::select_output(index as i64, &output).expect("selected");
         assert_eq!(run::width(&selected), phost::view(&program).outputs[index].len() as i64);
-        assert_eq!(run::buffer(&selected, None).map(|b| ogpu::backend::buffer_id(&b)), run::buffer(&output, Some(index as i64)).map(|b| ogpu::backend::buffer_id(&b)));
+        assert_eq!(run::buffer(&selected, None).map(|b| ogpu_core::backend::buffer_id(&b)), run::buffer(&output, Some(index as i64)).map(|b| ogpu_core::backend::buffer_id(&b)));
         assert_eq!(array(&tp::ok(run::readback(&selected, None))), array(e));
     }
     assert!(run::select_output(-1, &output).is_none());
@@ -344,13 +344,13 @@ fn guarded_gather() {
     let shader=tp::ok(emit::kernel(&emit::Options {fast:true,uint32_tables:vec![0],..Default::default()},&program));
     assert_eq!(shader.gather_uint32,vec![true,true],"every guarded read of the table must retain its integer type");
     let device=renderer::renderer::gpu_device(&lease);
-    let table=ogpu::backend::create_buffer(&device,ogpu::types::BufferDescriptor {label:None,size:32,usage:vec![ogpu::types::BufferUsage::Storage,ogpu::types::BufferUsage::CopyDst]},None).unwrap();
-    ogpu::backend::write_buffer(&table,0,&[1u32.to_le_bytes();8].concat()).unwrap();
+    let table=ogpu_core::backend::create_buffer(&device,ogpu_core::types::BufferDescriptor {label:None,size:32,usage:vec![ogpu_core::types::BufferUsage::Storage,ogpu_core::types::BufferUsage::CopyDst]},None).unwrap();
+    ogpu_core::backend::write_buffer(&table,0,&[1u32.to_le_bytes();8].concat()).unwrap();
     let r=run::create(None,&lease,&pipes,&shader);
     let output=tp::ok(run::dispatch(&r,&Default::default(),None,Some(&|_|Some((table.clone(),8))),&prepare(&program,true,0.)));
     let actual=array(&tp::ok(run::readback(&output,None)));
     assert_eq!(actual,array(&force(&program,0.,false)));
-    run::close(&r,false);ogpu::backend::destroy_buffer(&table).unwrap();pipelines::close(&pipes);
+    run::close(&r,false);ogpu_core::backend::destroy_buffer(&table).unwrap();pipelines::close(&pipes);
 }
 
 fn main() {

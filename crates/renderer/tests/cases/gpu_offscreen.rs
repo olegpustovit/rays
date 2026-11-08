@@ -20,7 +20,7 @@ fn ir(commands: Vec<Command>) -> Rc<RenderIr> {
 }
 
 fn live_handles() -> i64 {
-    ogpu::impl_::live_handles().expect("live handles")
+    ogpu_core::impl_::live_handles().expect("live handles")
 }
 
 fn scene3_draw(key: &str, red: f64) -> Draw {
@@ -35,14 +35,14 @@ fn scene3_draw(key: &str, red: f64) -> Draw {
         attributes[index * 12..index * 12 + 4].copy_from_slice(&c.to_le_bytes());
     }
     let indices: Vec<u8> = [0u32, 1, 2].iter().flat_map(|v| v.to_le_bytes()).collect();
-    let m = Mesh { key: MeshKey::Host(key.to_owned()), vertices: new_bytes(vertices), shared_vertices: None, vertex_count: 3, indices: new_bytes(indices), index_count: 3, primitive: ogpu::render_pass::Primitive::TriangleList };
+    let m = Mesh { key: MeshKey::Host(key.to_owned()), vertices: new_bytes(vertices), shared_vertices: None, vertex_count: 3, indices: new_bytes(indices), index_count: 3, primitive: ogpu_core::render_pass::Primitive::TriangleList };
     let s = State {
         viewport: (0, 0, 5, 4),
         scissor: (0, 0, 5, 4),
-        cull: ogpu::render_pass::Cull::CullNone,
-        depth_compare: ogpu::render_pass::Comparison::Always,
+        cull: ogpu_core::render_pass::Cull::CullNone,
+        depth_compare: ogpu_core::render_pass::Comparison::Always,
         depth_write: false,
-        depth_load: ogpu::render_pass::Load::Clear,
+        depth_load: ogpu_core::render_pass::Load::Clear,
         depth_clear: 1.0,
         transform_uniforms: None,
     };
@@ -81,7 +81,7 @@ fn image_cmd(id: i64) -> Command {
     Command::Image(render_ir::Image { resource_id: id, source: rect(), destination: rect() })
 }
 
-fn lower(s: &renderer::Submission, resolve: &dyn Fn(i64) -> Option<res>, i: &Rc<RenderIr>) -> Result<renderer::native::Batch, ogpu::error::Error> {
+fn lower(s: &renderer::Submission, resolve: &dyn Fn(i64) -> Option<res>, i: &Rc<RenderIr>) -> Result<renderer::native::Batch, ogpu_core::error::Error> {
     native::lower_scene2(s, 1, resolve, i)
 }
 
@@ -361,12 +361,12 @@ fn gpu_offscreen_eviction() {
 fn execution_retained_eviction(textured: bool, frames: i32) {
     if !common::gpu() { return; }
     use ::renderer::scene_execution::{SampledTexture, TextureLevel};
-    use ogpu::types::{AddressMode, MipFilter, SamplerDescriptor, SamplerFilter};
+    use ogpu_core::types::{AddressMode, MipFilter, SamplerDescriptor, SamplerFilter};
     use ::renderer::{renderer_pipeline,scene_execution as se};
-    use ogpu::surface::{Configuration,Format,PresentMode};
+    use ogpu_core::surface::{Configuration,Format,PresentMode};
         let baseline = live_handles();
         let cfg=Configuration { logical_width:64,logical_height:64,physical_width:64,physical_height:64,format:Format::Rgba8Unorm,present_mode:PresentMode::Immediate,max_acquired:2,layer:None };
-        let mut e=renderer_pipeline::create_renderer(&ogpu::impl_::backend().unwrap(),None,None,true,ogpu::impl_::create_driver().unwrap(),&cfg).unwrap();
+        let mut e=renderer_pipeline::create_renderer(&ogpu_core::impl_::backend().unwrap(),None,None,true,ogpu_core::impl_::create_driver().unwrap(),&cfg).unwrap();
         let draws: Vec<Draw> = (0..300).map(|i| {
             let (vertices, indices, count) = if textured {
                 (common::floats(&[1.,0.,0.,0.,1.,0.,0.,0.,1.,1.,1.,1.,-1.,-1.,2.,2.,0.,0.,1.,1.]), common::words(&[0,1,2,0,2,3]), 4)
@@ -383,9 +383,9 @@ fn execution_retained_eviction(textured: bool, frames: i32) {
                 gpu: None,
                 sampler: SamplerDescriptor { label: None, min_filter: SamplerFilter::Nearest, mag_filter: SamplerFilter::Nearest, mip_filter: MipFilter::NoMip, address_u: AddressMode::ClampToEdge, address_v: AddressMode::ClampToEdge, lod_min: 0., lod_max: 0., max_anisotropy: 1 },
             }));
-            renderer::prepared_draw(if textured { renderer::PipelineFamily::Scene2Textured } else { renderer::PipelineFamily::Scene2 }, Some(ogpu::pipeline::Blend::Replace), texture, None, None, None, GeometryDraw {
-                mesh: Mesh { key: MeshKey::Host(format!("eviction-{i}")), vertices: new_bytes(vertices), shared_vertices: None, vertex_count: count, indices: new_bytes(indices), index_count: if textured { 6 } else { 3 }, primitive: ogpu::render_pass::Primitive::TriangleList },
-                state: State { viewport: (0,0,64,64), scissor: if textured { (0,0,64,64) } else { (i % 2,0,63,64) }, cull: ogpu::render_pass::Cull::CullNone, depth_compare: ogpu::render_pass::Comparison::Always, depth_write: false, depth_load: ogpu::render_pass::Load::Load, depth_clear: 1., transform_uniforms: None },
+            renderer::prepared_draw(if textured { renderer::PipelineFamily::Scene2Textured } else { renderer::PipelineFamily::Scene2 }, Some(ogpu_core::pipeline::Blend::Replace), texture, None, None, None, GeometryDraw {
+                mesh: Mesh { key: MeshKey::Host(format!("eviction-{i}")), vertices: new_bytes(vertices), shared_vertices: None, vertex_count: count, indices: new_bytes(indices), index_count: if textured { 6 } else { 3 }, primitive: ogpu_core::render_pass::Primitive::TriangleList },
+                state: State { viewport: (0,0,64,64), scissor: if textured { (0,0,64,64) } else { (i % 2,0,63,64) }, cull: ogpu_core::render_pass::Cull::CullNone, depth_compare: ogpu_core::render_pass::Comparison::Always, depth_write: false, depth_load: ogpu_core::render_pass::Load::Load, depth_clear: 1., transform_uniforms: None },
             })
         }).collect();
         let clear = Some((0.,0.,0.,1.));
@@ -417,9 +417,9 @@ fn gpu_execution_scratch_boundaries() {
         for (x,y) in [(-1f32,-1f32),(3.,-1.),(-1.,3.)] {
             vertices.extend(x.to_le_bytes()); vertices.extend(y.to_le_bytes()); vertices.extend(u32::MAX.to_le_bytes());
         }
-        renderer::prepared_draw(renderer::PipelineFamily::Scene2, Some(ogpu::pipeline::Blend::Replace), None, None, None, None, GeometryDraw {
-            mesh: Mesh { key: MeshKey::Host(key.into()), vertices: new_bytes(vertices), shared_vertices: None, vertex_count: 3, indices: new_bytes(common::words(&[0,1,2])), index_count: 3, primitive: ogpu::render_pass::Primitive::TriangleList },
-            state: State { viewport, scissor, cull: ogpu::render_pass::Cull::CullNone, depth_compare: ogpu::render_pass::Comparison::Always, depth_write: false, depth_load: ogpu::render_pass::Load::Load, depth_clear: 1., transform_uniforms: uniforms },
+        renderer::prepared_draw(renderer::PipelineFamily::Scene2, Some(ogpu_core::pipeline::Blend::Replace), None, None, None, None, GeometryDraw {
+            mesh: Mesh { key: MeshKey::Host(key.into()), vertices: new_bytes(vertices), shared_vertices: None, vertex_count: 3, indices: new_bytes(common::words(&[0,1,2])), index_count: 3, primitive: ogpu_core::render_pass::Primitive::TriangleList },
+            state: State { viewport, scissor, cull: ogpu_core::render_pass::Cull::CullNone, depth_compare: ogpu_core::render_pass::Comparison::Always, depth_write: false, depth_load: ogpu_core::render_pass::Load::Load, depth_clear: 1., transform_uniforms: uniforms },
         })
     };
     let clear = Some((0.,0.,0.,1.));
@@ -433,7 +433,7 @@ fn gpu_execution_scratch_boundaries() {
     assert!(renderer::capture(&e).unwrap().chunks_exact(4).all(|p| p == [0,0,0,255]));
     {
         use ::renderer::scene_execution::{SampledTexture,TextureLevel};
-        use ogpu::types::{SamplerDescriptor,SamplerFilter,MipFilter,AddressMode};
+        use ogpu_core::types::{SamplerDescriptor,SamplerFilter,MipFilter,AddressMode};
         let texture=Rc::new(SampledTexture { key:"viewport-halves".into(),levels:Rc::new(vec![TextureLevel { width:2,height:1,bytes:new_bytes(vec![255,0,0,255,0,255,0,255]) }]),gpu:None,sampler:SamplerDescriptor { label:None,min_filter:SamplerFilter::Nearest,mag_filter:SamplerFilter::Nearest,mip_filter:MipFilter::NoMip,address_u:AddressMode::ClampToEdge,address_v:AddressMode::ClampToEdge,lod_min:0.,lod_max:0.,max_anisotropy:1 } });
         for (x,expected) in [(0,[255,0,0,255]),(-64,[0,255,0,255])] {
             let mut d=(*plain(&format!("viewport-half-{x}"),(x,0,128,64),(0,0,64,64),None)).clone();
@@ -461,7 +461,7 @@ fn gpu_execution_scratch_boundaries() {
     }
     let too_many = vec![draws[0].clone(); 65_537];
     match renderer::draw(None, &e, &too_many) {
-        Err(error) => assert_eq!(error.kind, ogpu::error::ErrorKind::Capacity),
+        Err(error) => assert_eq!(error.kind, ogpu_core::error::ErrorKind::Capacity),
         Ok(_) => panic!("scratch accepted more than 65536 draws"),
     }
     renderer::destroy(&e).unwrap();
@@ -471,8 +471,8 @@ fn gpu_execution_scratch_boundaries() {
 fn gpu_execution_vertex_registration() {
     if !common::gpu() { return; }
     use ::renderer::scene_execution as se;
-    use ogpu::backend as b;
-    use ogpu::types::{BufferDescriptor, BufferUsage};
+    use ogpu_core::backend as b;
+    use ogpu_core::types::{BufferDescriptor, BufferUsage};
     let baseline = live_handles();
     let gpu = renderer::acquire_gpu().unwrap();
     let device = renderer::gpu_device(&gpu);
@@ -487,7 +487,7 @@ fn gpu_execution_vertex_registration() {
     };
     let source = register("ownership-test", 8).unwrap();
     for (key,count) in [("ownership-test",8),("",8),("negative",-1),("zero",0),("short",9),("huge",(1<<30)+1)] {
-        match register(key,count) { Err(e) => assert_eq!(e.kind, ogpu::error::ErrorKind::InvalidArgument), Ok(_) => panic!("invalid borrowed registration accepted") }
+        match register(key,count) { Err(e) => assert_eq!(e.kind, ogpu_core::error::ErrorKind::InvalidArgument), Ok(_) => panic!("invalid borrowed registration accepted") }
     }
     for (indirect,indices,colors) in [
         (Some((buffer.clone(),-1)),None,None),
@@ -499,7 +499,7 @@ fn gpu_execution_vertex_registration() {
         (None,None,Some((index_buffer.clone(),4))),
     ] {
         match se::register_gpu_vertices(&owner,None,Some(4),indirect,indices,colors,"malformed-stream",&device,&buffer,16,Box::new(|| true)) {
-            Err(e) => assert_eq!(e.kind,ogpu::error::ErrorKind::InvalidArgument),
+            Err(e) => assert_eq!(e.kind,ogpu_core::error::ErrorKind::InvalidArgument),
             Ok(_) => panic!("invalid borrowed stream accepted"),
         }
     }
@@ -520,7 +520,7 @@ fn gpu_execution_vertex_registration() {
     let mut held = Vec::new();
     for i in 1..128 { held.push(register(&format!("capacity:{i}"),4).unwrap()); }
     assert_eq!(se::private::gpu_vertex_count_for_test(&owner),128);
-    match register("overflow",4) { Err(e) => assert_eq!(e.kind, ogpu::error::ErrorKind::Capacity), Ok(_) => panic!("registration capacity exceeded") }
+    match register("overflow",4) { Err(e) => assert_eq!(e.kind, ogpu_core::error::ErrorKind::Capacity), Ok(_) => panic!("registration capacity exceeded") }
     let independent = se::register_gpu_vertices(&other,None,None,None,None,None,"independent",&device,&buffer,4,Box::new(|| true)).unwrap();
     assert_eq!(se::private::gpu_vertex_count_for_test(&other),1);
     se::unregister_gpu_vertices(&independent);
@@ -541,10 +541,10 @@ fn gpu_execution_vertex_registration() {
 fn gpu_execution_release_and_uniform_pages() {
     if !common::gpu() { return; }
     use ::renderer::{renderer_pipeline, scene_execution as se};
-    use ogpu::surface::{Configuration, Format, PresentMode};
+    use ogpu_core::surface::{Configuration, Format, PresentMode};
     let baseline = live_handles();
     let configuration = Configuration { logical_width: 64, logical_height: 64, physical_width: 64, physical_height: 64, format: Format::Rgba8Unorm, present_mode: PresentMode::Immediate, max_acquired: 2, layer: None };
-    let mut execution = renderer_pipeline::create_renderer(&ogpu::impl_::backend().unwrap(), None, None, true, ogpu::impl_::create_driver().unwrap(), &configuration).unwrap();
+    let mut execution = renderer_pipeline::create_renderer(&ogpu_core::impl_::backend().unwrap(), None, None, true, ogpu_core::impl_::create_driver().unwrap(), &configuration).unwrap();
     let mut surface = vec![0u8;5456];
     for m in 0..3 { for d in 0..4 {
         let at = ((m*16)+(d*5))*4; surface[at..at+4].copy_from_slice(&1f32.to_le_bytes());
@@ -563,7 +563,7 @@ fn gpu_execution_release_and_uniform_pages() {
     assert!(se::submit(None,&mut release,None,&mut execution,&[Rc::new(malformed)]).is_err());
     assert_eq!(releases.get(),2,"failed preparation releases once");
     {
-        use ogpu::types::{SamplerDescriptor,SamplerFilter,MipFilter,AddressMode};
+        use ogpu_core::types::{SamplerDescriptor,SamplerFilter,MipFilter,AddressMode};
         let texture=se::SampledTexture { key:"lease-release".into(),levels:Rc::new(vec![se::TextureLevel { width:1,height:1,bytes:new_bytes(vec![255;4]) }]),gpu:None,sampler:SamplerDescriptor { label:None,min_filter:SamplerFilter::Nearest,mag_filter:SamplerFilter::Nearest,mip_filter:MipFilter::NoMip,address_u:AddressMode::ClampToEdge,address_v:AddressMode::ClampToEdge,lod_min:0.,lod_max:0.,max_anisotropy:1 } };
         let mut d=base.clone(); d.family=renderer::PipelineFamily::Scene2Textured; d.vertex_attributes=None; d.draw.state.transform_uniforms=None;
         d.draw.mesh.key=MeshKey::Host("scratch-textured".into());
@@ -580,7 +580,7 @@ fn gpu_execution_release_and_uniform_pages() {
     let mut vertices=Vec::new();
     for (x,y) in [(-1f32,-1f32),(3.,-1.),(-1.,3.)] { vertices.extend(common::floats(&[x,y])); vertices.extend(u32::MAX.to_le_bytes()); }
     plain.draw.mesh.vertices=new_bytes(vertices);
-    let retained:Vec<_>=(0..10).map(|i| { let mut d=plain.clone(); d.blend=if i%2==0 { ogpu::pipeline::Blend::Replace } else { ogpu::pipeline::Blend::Alpha }; d.draw.mesh.key=MeshKey::Host(format!("scratch-retained-{i}")); Rc::new(d) }).collect();
+    let retained:Vec<_>=(0..10).map(|i| { let mut d=plain.clone(); d.blend=if i%2==0 { ogpu_core::pipeline::Blend::Replace } else { ogpu_core::pipeline::Blend::Alpha }; d.draw.mesh.key=MeshKey::Host(format!("scratch-retained-{i}")); Rc::new(d) }).collect();
     se::submit(Some(("scratch-retained".into(),7)),&mut || {},None,&mut execution,&retained).unwrap();
     assert_eq!(se::replay_prepared_sampled_resources(None,"scratch-retained",7,&mut execution).unwrap(),Some((true,10)));
     assert_eq!(se::replay_prepared_sampled_resources(None,"scratch-retained",8,&mut execution).unwrap(),None);
@@ -608,7 +608,7 @@ fn gpu_execution_texture_sampling() {
     // The source fixture owns its device; do not leave the probe's shared-device cache alive.
     common::release_keepalive();
     use ::renderer::scene_execution::{SampledTexture, TextureLevel};
-    use ogpu::types::{AddressMode, MipFilter, SamplerDescriptor, SamplerFilter};
+    use ogpu_core::types::{AddressMode, MipFilter, SamplerDescriptor, SamplerFilter};
     let baseline = live_handles();
     let e = renderer::create_offscreen(&config(4,4)).unwrap();
     let nearest = SamplerDescriptor { label: None, min_filter: SamplerFilter::Nearest, mag_filter: SamplerFilter::Nearest, mip_filter: MipFilter::NoMip, address_u: AddressMode::ClampToEdge, address_v: AddressMode::ClampToEdge, lod_min: 0., lod_max: 1., max_anisotropy: 1 };
@@ -620,7 +620,7 @@ fn gpu_execution_texture_sampling() {
     let mut repeat = nearest.clone(); repeat.address_u = AddressMode::Repeat;
     let mut mirror = nearest.clone(); mirror.address_u = AddressMode::MirrorRepeat;
     let mut mip = nearest.clone(); mip.mip_filter = MipFilter::NearestMip; mip.lod_min = 1.; mip.lod_max = 1.;
-    let linear_tolerance = u8::from(ogpu::impl_::backend().unwrap() == "vulkan");
+    let linear_tolerance = u8::from(ogpu_core::impl_::backend().unwrap() == "vulkan");
     for (i,(u,v,sampler,expected,tolerance)) in [
         (0.1,0.1,nearest.clone(),[255u8,0,0,255],0u8),
         (0.5,0.5,linear,[128,128,128,255],linear_tolerance),
@@ -648,7 +648,7 @@ fn gpu_execution_texture_sampling() {
             texture.key = format!("malformed-{i}"); texture.levels = Rc::new(malformed); bad.texture = Some(Rc::new(texture));
             let uploaded=renderer::stats(&e).unwrap().uploaded_bytes;
             match renderer::draw(None,&e,&[Rc::new(bad)]) {
-                Err(error) => assert_eq!(error.kind,ogpu::error::ErrorKind::InvalidArgument),
+                Err(error) => assert_eq!(error.kind,ogpu_core::error::ErrorKind::InvalidArgument),
                 Ok(_) => panic!("malformed texture accepted"),
             }
             assert_eq!(renderer::stats(&e).unwrap().uploaded_bytes,uploaded,"malformed texture rejection was not atomic");
@@ -702,19 +702,19 @@ fn gpu_execution_texture_sampling() {
 fn gpu_execution_offscreen_lifecycle() {
     if !common::gpu() { return; }
     use ::renderer::{renderer_pipeline, scene_execution as se};
-    use ogpu::surface::{Configuration, Format, PresentMode};
+    use ogpu_core::surface::{Configuration, Format, PresentMode};
     let baseline = live_handles();
     let cfg = Configuration { logical_width: 4, logical_height: 4, physical_width: 4, physical_height: 4, format: Format::Bgra8Unorm, present_mode: PresentMode::Fifo, max_acquired: 1, layer: None };
-    let mut e = renderer_pipeline::create_renderer(&ogpu::impl_::backend().unwrap(),None,None,true,ogpu::impl_::create_driver().unwrap(),&cfg).unwrap();
+    let mut e = renderer_pipeline::create_renderer(&ogpu_core::impl_::backend().unwrap(),None,None,true,ogpu_core::impl_::create_driver().unwrap(),&cfg).unwrap();
     assert!(se::submit(None,&mut || {},Some((0.125,0.25,0.5,1.)),&mut e,&[]).unwrap());
     assert_eq!(se::read_pixels(&mut e,16).unwrap(),[32,64,128,255].repeat(16));
     let mut vertices = Vec::new();
     for (x,y) in [(-1f32,-1f32),(3.,-1.),(-1.,3.)] {
         vertices.extend(x.to_le_bytes()); vertices.extend(y.to_le_bytes()); vertices.extend(u32::MAX.to_le_bytes());
     }
-    let d = renderer::prepared_draw(renderer::PipelineFamily::Scene2,Some(ogpu::pipeline::Blend::Replace),None,None,None,None,GeometryDraw {
-        mesh: Mesh { key: MeshKey::Host("offscreen-fullscreen".into()), vertices: new_bytes(vertices), shared_vertices: None, vertex_count: 3, indices: new_bytes(common::words(&[0,1,2])), index_count: 3, primitive: ogpu::render_pass::Primitive::TriangleList },
-        state: State { viewport: (0,0,4,4), scissor: (0,0,4,4), cull: ogpu::render_pass::Cull::CullNone, depth_compare: ogpu::render_pass::Comparison::Always, depth_write: false, depth_load: ogpu::render_pass::Load::Load, depth_clear: 1., transform_uniforms: None },
+    let d = renderer::prepared_draw(renderer::PipelineFamily::Scene2,Some(ogpu_core::pipeline::Blend::Replace),None,None,None,None,GeometryDraw {
+        mesh: Mesh { key: MeshKey::Host("offscreen-fullscreen".into()), vertices: new_bytes(vertices), shared_vertices: None, vertex_count: 3, indices: new_bytes(common::words(&[0,1,2])), index_count: 3, primitive: ogpu_core::render_pass::Primitive::TriangleList },
+        state: State { viewport: (0,0,4,4), scissor: (0,0,4,4), cull: ogpu_core::render_pass::Cull::CullNone, depth_compare: ogpu_core::render_pass::Comparison::Always, depth_write: false, depth_load: ogpu_core::render_pass::Load::Load, depth_clear: 1., transform_uniforms: None },
     });
     let clear = Some((0.,0.,0.,1.));
     for frame in 1..=600 {
@@ -744,7 +744,7 @@ fn gpu_execution_offscreen_lifecycle() {
     se::destroy(&mut e).unwrap();
     // test_automatic_scratch.ml: mixed families admit only after two identical frames.
     let mut cfg=cfg.clone(); cfg.logical_width=64; cfg.logical_height=64; cfg.physical_width=64; cfg.physical_height=64;
-    let mut mixed = renderer_pipeline::create_renderer(&ogpu::impl_::backend().unwrap(),None,None,true,ogpu::impl_::create_driver().unwrap(),&cfg).unwrap();
+    let mut mixed = renderer_pipeline::create_renderer(&ogpu_core::impl_::backend().unwrap(),None,None,true,ogpu_core::impl_::create_driver().unwrap(),&cfg).unwrap();
     let mut first=(*d).clone(); first.draw.state.viewport=(0,0,64,64); first.draw.state.scissor=(0,0,64,64);
     let first=Rc::new(first);
     let mut scene3 = (*execution_scene3_draw("mixed-scene3",0x4080bfff,(0.,0.))).clone();
@@ -775,10 +775,10 @@ fn gpu_execution_offscreen_lifecycle() {
 fn gpu_execution_gpu_film() {
     if !common::gpu() { return; }
     use ::renderer::{renderer_pipeline, scene_execution as se};
-    use ogpu::{backend as b, surface::{Configuration, Format, PresentMode}, types::*};
+    use ogpu_core::{backend as b, surface::{Configuration, Format, PresentMode}, types::*};
     let baseline=live_handles();
     let cfg=Configuration { logical_width:4,logical_height:4,physical_width:4,physical_height:4,format:Format::Rgba8Unorm,present_mode:PresentMode::Immediate,max_acquired:1,layer:None };
-    let mut e=renderer_pipeline::create_renderer(&ogpu::impl_::backend().unwrap(),None,None,true,ogpu::impl_::create_driver().unwrap(),&cfg).unwrap();
+    let mut e=renderer_pipeline::create_renderer(&ogpu_core::impl_::backend().unwrap(),None,None,true,ogpu_core::impl_::create_driver().unwrap(),&cfg).unwrap();
     let device=se::device(&e);
     let descriptor=TextureDescriptor { label:Some("gpu-film-test".into()),width:1,height:1,depth:1,mip_levels:1,sample_count:1,format:TextureFormat::Rgba8Unorm,usage:vec![TextureUsage::TextureBinding,TextureUsage::StorageBinding,TextureUsage::TextureCopyDst] };
     let film=b::create_texture(&device,descriptor.clone()).unwrap();
@@ -792,9 +792,9 @@ fn gpu_execution_gpu_film() {
     b::complete_through(&se::queue(&e),receipt.epoch).unwrap();
     b::destroy_buffer(&staging).unwrap();
     let texture=se::SampledTexture { key:"gpu-film".into(),levels:Rc::new(vec![se::TextureLevel { width:1,height:1,bytes:se::empty_bytes() }]),gpu:Some(film.clone()),sampler:SamplerDescriptor { label:None,min_filter:SamplerFilter::Nearest,mag_filter:SamplerFilter::Nearest,mip_filter:MipFilter::NoMip,address_u:AddressMode::ClampToEdge,address_v:AddressMode::ClampToEdge,lod_min:0.,lod_max:0.,max_anisotropy:1 } };
-    let draw=renderer::prepared_draw(renderer::PipelineFamily::Scene2Textured,Some(ogpu::pipeline::Blend::Replace),Some(Rc::new(texture.clone())),None,None,None,GeometryDraw {
-        mesh:Mesh { key:MeshKey::Host("film-quad".into()),vertices:new_bytes(common::floats(&[1.,0.,0.,0.,1.,0.,0.,0.,1.,1.,1.,1.,-1.,-1.,2.,2.,0.1,0.1,0.1,0.1])),shared_vertices:None,vertex_count:4,indices:new_bytes(common::words(&[0,1,2,0,2,3])),index_count:6,primitive:ogpu::render_pass::Primitive::TriangleList },
-        state:State { viewport:(0,0,4,4),scissor:(0,0,4,4),cull:ogpu::render_pass::Cull::CullNone,depth_compare:ogpu::render_pass::Comparison::Always,depth_write:false,depth_load:ogpu::render_pass::Load::Load,depth_clear:1.,transform_uniforms:None },
+    let draw=renderer::prepared_draw(renderer::PipelineFamily::Scene2Textured,Some(ogpu_core::pipeline::Blend::Replace),Some(Rc::new(texture.clone())),None,None,None,GeometryDraw {
+        mesh:Mesh { key:MeshKey::Host("film-quad".into()),vertices:new_bytes(common::floats(&[1.,0.,0.,0.,1.,0.,0.,0.,1.,1.,1.,1.,-1.,-1.,2.,2.,0.1,0.1,0.1,0.1])),shared_vertices:None,vertex_count:4,indices:new_bytes(common::words(&[0,1,2,0,2,3])),index_count:6,primitive:ogpu_core::render_pass::Primitive::TriangleList },
+        state:State { viewport:(0,0,4,4),scissor:(0,0,4,4),cull:ogpu_core::render_pass::Cull::CullNone,depth_compare:ogpu_core::render_pass::Comparison::Always,depth_write:false,depth_load:ogpu_core::render_pass::Load::Load,depth_clear:1.,transform_uniforms:None },
     });
     se::submit(None,&mut || {},None,&mut e,&[draw.clone()]).unwrap();
     let uploaded=se::upload_bytes(&e);
@@ -803,14 +803,14 @@ fn gpu_execution_gpu_film() {
     assert_eq!(se::upload_bytes(&e),uploaded,"GPU film crossed CPU staging");
     let mut malformed=texture.clone(); malformed.levels=Rc::new(vec![se::TextureLevel { width:2,height:1,bytes:se::empty_bytes() }]);
     let mut bad=(*draw).clone(); bad.texture=Some(Rc::new(malformed));
-    assert!(matches!(se::submit(None,&mut || {},None,&mut e,&[Rc::new(bad)]),Err(error) if error.kind==ogpu::error::ErrorKind::InvalidArgument));
-    let foreign_device=b::create_device(ogpu::impl_::create_driver().unwrap()).unwrap();
+    assert!(matches!(se::submit(None,&mut || {},None,&mut e,&[Rc::new(bad)]),Err(error) if error.kind==ogpu_core::error::ErrorKind::InvalidArgument));
+    let foreign_device=b::create_device(ogpu_core::impl_::create_driver().unwrap()).unwrap();
     let foreign=b::create_texture(&foreign_device,descriptor).unwrap();
     let mut bad=(*draw).clone(); let mut foreign_texture=texture.clone(); foreign_texture.gpu=Some(foreign.clone()); bad.texture=Some(Rc::new(foreign_texture));
-    assert!(matches!(se::submit(None,&mut || {},None,&mut e,&[Rc::new(bad)]),Err(error) if error.kind==ogpu::error::ErrorKind::CrossDevice));
+    assert!(matches!(se::submit(None,&mut || {},None,&mut e,&[Rc::new(bad)]),Err(error) if error.kind==ogpu_core::error::ErrorKind::CrossDevice));
     b::destroy_texture(&foreign).unwrap(); b::destroy_device(&foreign_device).unwrap();
     b::destroy_texture(&film).unwrap();
-    assert!(matches!(se::submit(None,&mut || {},None,&mut e,&[draw]),Err(error) if error.kind==ogpu::error::ErrorKind::InvalidArgument));
+    assert!(matches!(se::submit(None,&mut || {},None,&mut e,&[draw]),Err(error) if error.kind==ogpu_core::error::ErrorKind::InvalidArgument));
     se::destroy(&mut e).unwrap();
     assert_eq!(live_handles(),baseline);
 }
@@ -818,10 +818,10 @@ fn gpu_execution_gpu_film() {
 fn gpu_execution_blends_samples_resize() {
     if !common::gpu() { return; }
     use ::renderer::{renderer_pipeline, scene_execution as se};
-    use ogpu::{surface::{Configuration,Format,PresentMode},pipeline::Blend};
+    use ogpu_core::{surface::{Configuration,Format,PresentMode},pipeline::Blend};
     let baseline=live_handles();
     let mut cfg=Configuration { logical_width:4,logical_height:4,physical_width:4,physical_height:4,format:Format::Bgra8Unorm,present_mode:PresentMode::Fifo,max_acquired:2,layer:None };
-    let mut e=renderer_pipeline::create_renderer(&ogpu::impl_::backend().unwrap(),None,None,true,ogpu::impl_::create_driver().unwrap(),&cfg).unwrap();
+    let mut e=renderer_pipeline::create_renderer(&ogpu_core::impl_::backend().unwrap(),None,None,true,ogpu_core::impl_::create_driver().unwrap(),&cfg).unwrap();
     let mut plain=(*execution_scene3_draw("blend-plain",0xff0080ff,(0.,0.))).clone();
     plain.family=renderer::PipelineFamily::Scene2; plain.vertex_attributes=None; plain.draw.state.transform_uniforms=None;
     let mut vertices=Vec::new();
@@ -840,12 +840,12 @@ fn gpu_execution_blends_samples_resize() {
         }
     }
     let scene3=execution_scene3_draw("samples",0xff0080ff,(0.,0.));
-    let supported=ogpu::backend::capabilities(&se::device(&e)).limits.max_sample_count;
+    let supported=ogpu_core::backend::capabilities(&se::device(&e)).limits.max_sample_count;
     for samples in [1,4,9,16] {
         let mut d=(*scene3).clone(); d.samples=samples; let d=Rc::new(d);
         if samples>supported {
             let uploaded=se::upload_bytes(&e);
-            assert!(matches!(se::submit(None,&mut || {},None,&mut e,&[d]),Err(error) if error.kind==ogpu::error::ErrorKind::Unsupported));
+            assert!(matches!(se::submit(None,&mut || {},None,&mut e,&[d]),Err(error) if error.kind==ogpu_core::error::ErrorKind::Unsupported));
             assert_eq!(se::upload_bytes(&e),uploaded,"unsupported samples uploaded data");
         } else {
             for _ in 0..600 {

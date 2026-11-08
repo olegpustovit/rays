@@ -11,14 +11,14 @@ use std::rc::Rc;
 #[derive(Clone)]
 pub enum error {
     Stage(String),
-    Resource(ogpu::error::Error),
-    Begin(ogpu::error::Error),
-    Lower(ogpu::error::Error),
-    Step(ogpu::error::Error),
+    Resource(ogpu_core::error::Error),
+    Begin(ogpu_core::error::Error),
+    Lower(ogpu_core::error::Error),
+    Step(ogpu_core::error::Error),
 }
 
 pub fn pp_error(formatter: &mut dyn std::fmt::Write, e: &error) {
-    let text = |e: &ogpu::error::Error| ogpu::error::to_string(e);
+    let text = |e: &ogpu_core::error::Error| ogpu_core::error::to_string(e);
     let _ = match e {
         error::Stage(message) => write!(formatter, "native Scene staging: {message}"),
         error::Resource(e) => write!(formatter, "native Scene resource: {}", text(e)),
@@ -129,7 +129,7 @@ pub fn draws_of_prepared(staged: &Layer::staged_native, prepared: &Rc<se::Prepar
     draws
 }
 
-fn validate_images(resources: &[(i64, rr::Resource)]) -> Result<(), ogpu::error::Error> {
+fn validate_images(resources: &[(i64, rr::Resource)]) -> Result<(), ogpu_core::error::Error> {
     for (_, r) in resources {
         if let rr::Resource::Image(image) = r {
             runtime_resources::Image::gpu_snapshot(image)?;
@@ -138,7 +138,7 @@ fn validate_images(resources: &[(i64, rr::Resource)]) -> Result<(), ogpu::error:
     Ok(())
 }
 
-fn validate_layers(layers: &[Layer::native_layer]) -> Result<(), ogpu::error::Error> {
+fn validate_layers(layers: &[Layer::native_layer]) -> Result<(), ogpu_core::error::Error> {
     for layer in layers {
         match layer {
             Layer::native_layer::Scene2_layer(_, r) | Layer::native_layer::Scene2_segment(_, r) | Layer::native_layer::Ui_layer(_, r) => validate_images(r)?,
@@ -148,7 +148,7 @@ fn validate_layers(layers: &[Layer::native_layer]) -> Result<(), ogpu::error::Er
     Ok(())
 }
 
-fn validate_mesh_images(images: &[runtime_resources::Image::t]) -> Result<(), ogpu::error::Error> {
+fn validate_mesh_images(images: &[runtime_resources::Image::t]) -> Result<(), ogpu_core::error::Error> {
     for image in images {
         runtime_resources::Image::gpu_snapshot(image)?;
     }

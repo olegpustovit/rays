@@ -3,7 +3,7 @@
 //! The OCaml `'material t` is concrete here: the only instantiation is `material`.
 use crate::frame_data::{put_f32, put_u32};
 use crate::rays_pathtracer::Material;
-use ogpu::backend as b;
+use ogpu_core::backend as b;
 use rays_math::mat4;
 use std::sync::Arc;
 

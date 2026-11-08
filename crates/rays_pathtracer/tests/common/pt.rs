@@ -35,7 +35,7 @@ pub fn material(albedo: Linear::T) -> p::Material {
 }
 
 pub fn live_handles() -> i64 {
-    ogpu::impl_::live_handles().expect("live handles")
+    ogpu_core::impl_::live_handles().expect("live handles")
 }
 
 pub fn mean_red(bytes: &[u8]) -> f64 {

@@ -4,7 +4,7 @@ use crate::image;
 use crate::native_scene_lowering;
 use crate::scene::{self, Layer};
 use crate::world;
-use ogpu::backend::Texture;
+use ogpu_core::backend::Texture;
 use rays_math::color;
 use renderer::renderer as rr;
 use runtime_resources::Canvas as RCanvas;
@@ -27,11 +27,11 @@ pub struct canvas_data {
 pub struct t(Rc<canvas_data>);
 
 fn message(operation: &str, error: &runtime_resources::error) -> String {
-    format!("{operation}: {}", ogpu::error::to_string(error))
+    format!("{operation}: {}", ogpu_core::error::to_string(error))
 }
 
-fn renderer_message(operation: &str, error: &ogpu::error::Error) -> String {
-    format!("{operation}: {}", ogpu::error::to_string(error))
+fn renderer_message(operation: &str, error: &ogpu_core::error::Error) -> String {
+    format!("{operation}: {}", ogpu_core::error::to_string(error))
 }
 
 pub fn create(width: i64, height: i64) -> Result<t, String> {
@@ -174,7 +174,7 @@ pub fn gpu_source(value: &t) -> Result<(i64, i64, Box<dyn Fn() -> Option<Texture
                         return None;
                     }
                     match RCanvas::gpu_snapshot(&canvas.0.resource) {
-                        Some((_, _, current, source)) if current == generation && ogpu::backend::texture_id(&source) == ogpu::backend::texture_id(&texture) => {
+                        Some((_, _, current, source)) if current == generation && ogpu_core::backend::texture_id(&source) == ogpu_core::backend::texture_id(&texture) => {
                             Some(texture.clone())
                         }
                         _ => None,

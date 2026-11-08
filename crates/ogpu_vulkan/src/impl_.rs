@@ -1,6 +1,6 @@
-//! The Vulkan implementation of `ogpu::impl_`.
+//! The Vulkan implementation of `ogpu_core::impl_`.
 use crate::backend;
-use ogpu::backend::{Driver, Implementation as Impl};
+use ogpu_core::backend::{Driver, Implementation as Impl};
 
 pub const BACKEND: &str = "vulkan";
 
@@ -13,7 +13,7 @@ pub fn live_handles() -> i64 {
     backend::live_handles()
 }
 
-/// The record `ogpu::impl_::select` takes.
+/// The record `ogpu_core::impl_::select` takes.
 pub fn implementation() -> Impl {
     Impl {
         backend: BACKEND.to_owned(),

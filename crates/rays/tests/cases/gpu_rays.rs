@@ -18,7 +18,7 @@ use scene_command::ui_batch;
 use std::sync::Arc;
 
 fn live_handles() -> i64 {
-    ogpu::impl_::live_handles().expect("live handles")
+    ogpu_core::impl_::live_handles().expect("live handles")
 }
 
 fn require(condition: bool, message: &str) {

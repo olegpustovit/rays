@@ -201,14 +201,14 @@ fn run(owner: &gpu::t, config: &Gpu::Config, workspace: &editor_document::worksp
 fn viewport(recipe: i64) {
     assert!(crate::common::gpu(),"native qualification requires Vulkan");
     let workspace = workspace();
-    let baseline = ogpu::impl_::live_handles().unwrap();
+    let baseline = ogpu_core::impl_::live_handles().unwrap();
     let owner = gpu::create(None);
     gpu::with_backend(&owner,true,&mut |config| {
         let config = Gpu::Config { policy: Gpu::Policy::Qualification, ..config.clone() };
         run(&owner,&config,&workspace,recipe);
     });
     gpu::close(&owner);
-    assert_eq!(ogpu::impl_::live_handles().unwrap(),baseline);
+    assert_eq!(ogpu_core::impl_::live_handles().unwrap(),baseline);
     text();
 }
 pub fn cases() -> Vec<(&'static str, fn())> {

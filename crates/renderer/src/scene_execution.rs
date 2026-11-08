@@ -1,15 +1,15 @@
 use crate::scene_attachment_pool;
 use crate::side_lru::{self, Item, TableKey};
-use ogpu::backend::{
+use ogpu_core::backend::{
     self, Argument, BatchDraw, Buffer, ColorAttachment, DepthAttachment, DepthState, Device, Icb,
     Pipeline, Queue, RenderTarget, ResourceUse, Sampler, ShaderStage, Surface, Texture,
 };
-use ogpu::caps::{self, Feature};
-use ogpu::error::{self, Error, ErrorKind};
-use ogpu::pipeline::Blend;
-use ogpu::render_pass::{Comparison, Cull, IndexType, Load, Primitive, Rect, Store};
-use ogpu::surface::Configuration;
-use ogpu::types::{
+use ogpu_core::caps::{self, Feature};
+use ogpu_core::error::{self, Error, ErrorKind};
+use ogpu_core::pipeline::Blend;
+use ogpu_core::render_pass::{Comparison, Cull, IndexType, Load, Primitive, Rect, Store};
+use ogpu_core::surface::Configuration;
+use ogpu_core::types::{
     BufferDescriptor, BufferUsage, Extent, SamplerDescriptor, TextureDescriptor, TextureFormat,
     TextureUsage,
 };
@@ -666,7 +666,7 @@ pub fn target(value: &SceneExecution) -> Texture {
 }
 
 fn same_device(a: &Device, b: &Device) -> bool {
-    ogpu::handle::device_id(backend::device_handle(a)) == ogpu::handle::device_id(backend::device_handle(b))
+    ogpu_core::handle::device_id(backend::device_handle(a)) == ogpu_core::handle::device_id(backend::device_handle(b))
 }
 
 fn is_scene3_family(family: PipelineFamily) -> bool {
@@ -1457,7 +1457,7 @@ fn texel_format(texel: i64) -> TextureFormat {
 fn valid_texture(source: &SampledTexture) -> bool {
     !source.key.is_empty()
         && !source.levels.is_empty()
-        && ogpu::validation::validate_sampler(&source.sampler).is_ok()
+        && ogpu_core::validation::validate_sampler(&source.sampler).is_ok()
         && match &source.gpu {
             Some(texture) => {
                 let descriptor = backend::texture_descriptor(texture);
@@ -1537,7 +1537,7 @@ fn prepare_texture(value: &mut SceneExecution, defer: &mut Vec<Deferred>, source
         if !valid_texture(source) {
             return Err(failure_error("Scene_execution.prepare_texture", ErrorKind::InvalidArgument, "GPU image is malformed or destroyed"));
         }
-        if device_id != ogpu::handle::device_id(backend::device_handle(&value.device)) {
+        if device_id != ogpu_core::handle::device_id(backend::device_handle(&value.device)) {
             return Err(failure_error("Scene_execution.prepare_texture", ErrorKind::CrossDevice, "GPU image belongs to another renderer"));
         }
         return Ok(Rc::new(RefCell::new(CachedTexture {

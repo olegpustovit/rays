@@ -18,7 +18,7 @@ input = { path = "../input" }
 param = { path = "../param" }
 
 [dev-dependencies]
-ogpu = { path = "../ogpu" }
+ogpu_core = { path = "../ogpu_core" }
 renderer = { path = "../renderer" }
 sdl3 = { path = "../sdl3" }
 

@@ -27,7 +27,7 @@ sop = { path = "../sop" }
 mem = { path = "../mem" }
 runtime = { path = "../runtime" }
 rays_diagnostic = { path = "../rays_diagnostic" }
-ogpu = { path = "../ogpu" }
+ogpu_core = { path = "../ogpu_core" }
 
 [target.'cfg(windows)'.dependencies]
 ogpu_vulkan = { path = "../ogpu_vulkan" }

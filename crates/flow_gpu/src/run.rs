@@ -12,8 +12,8 @@ use crate::pipelines;
 use flow_ir::flow_ir::Gpu;
 use flow_shader::emit::Kernel;
 use flow_syntax::value::{self, Value};
-use ogpu::backend::{self as b, Accel, Buffer, Commands, ComputeEncoder, Device, Queue};
-use ogpu::types::{BufferDescriptor, BufferUsage, Memory};
+use ogpu_core::backend::{self as b, Accel, Buffer, Commands, ComputeEncoder, Device, Queue};
+use ogpu_core::types::{BufferDescriptor, BufferUsage, Memory};
 use rays_diagnostic::Diagnostic;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -34,10 +34,10 @@ static FREE_OWNER: LazyLock<mem::Owner> = LazyLock::new(|| mem::cache_in(mem::Po
 static SLOT_OWNER: LazyLock<mem::Owner> = LazyLock::new(|| mem::plan_in(mem::Pool::Device, "flow_gpu.slots"));
 static NEXT_KEPT: AtomicI64 = AtomicI64::new(0);
 
-pub fn diagnostic(error: &ogpu::error::Error) -> Diagnostic {
+pub fn diagnostic(error: &ogpu_core::error::Error) -> Diagnostic {
     pipelines::diagnostic(error)
 }
-pub(crate) fn gpu<X>(r: Result<X, ogpu::error::Error>) -> Result<X, Diagnostic> {
+pub(crate) fn gpu<X>(r: Result<X, ogpu_core::error::Error>) -> Result<X, Diagnostic> {
     r.map_err(|e| diagnostic(&e))
 }
 fn e_gpu(message: &str) -> Diagnostic {
@@ -1404,7 +1404,7 @@ fn materialise_owned(fate: &Fate, shared: &Shared, id: i64) -> Result<Arc<Vec<Ve
     let length = fate.count * fate.width;
     let mut readback = fate.readback.lock().unwrap();
     let bytes = (readback.as_ref().ok_or("Run.materialise: storage was released")?)(0, (length * 4) as usize)
-        .map_err(|error| ogpu::error::to_string(&error))?;
+        .map_err(|error| ogpu_core::error::to_string(&error))?;
     let mut planes = vec![vec![0.0; fate.count as usize]; fate.width as usize];
     for (i, word) in bytes.chunks_exact(4).enumerate() {
         let word = u32::from_le_bytes(word.try_into().unwrap());
@@ -2019,7 +2019,7 @@ pub fn close(t: &T, discard: bool) {
 pub mod Private {
     use super::*;
 
-    pub fn diagnostic(error: &ogpu::error::Error) -> Diagnostic {
+    pub fn diagnostic(error: &ogpu_core::error::Error) -> Diagnostic {
         super::diagnostic(error)
     }
     pub fn buffer_creations(t: &T) -> i64 {
@@ -2542,8 +2542,8 @@ fn bytes_of(floats: &[f64]) -> Vec<u8> {
 /// times 0 and 1, clamped) when `caps` (default: the device's) has `ray_tracing_motion`; otherwise
 /// the scene is built at the shutter midpoint and `motion` is false. `release` destroys every
 /// structure and buffer.
-pub fn build_scene(caps: Option<&ogpu::caps::Caps>, gpu_: &renderer::renderer::Gpu, d: &Description) -> Result<Built, Diagnostic> {
-    use ogpu::backend::{AccelDescriptor, Border, Geometry, InstanceKind, InstanceRecord, Keyframe, Motion, MotionInstance};
+pub fn build_scene(caps: Option<&ogpu_core::caps::Caps>, gpu_: &renderer::renderer::Gpu, d: &Description) -> Result<Built, Diagnostic> {
+    use ogpu_core::backend::{AccelDescriptor, Border, Geometry, InstanceKind, InstanceRecord, Keyframe, Motion, MotionInstance};
     let device = renderer::renderer::gpu_device(gpu_);
     let queue = renderer::renderer::gpu_queue(gpu_);
     let caps = caps.copied().unwrap_or_else(|| b::capabilities(&device));
