@@ -136,6 +136,10 @@ Budget reference (`build-speed.md` edit loop): flow_check warm check 0.4–0.5 s
 
 ## Session log
 
+- 2026-11-08: `5a575954` qual: `operators::parity` runs `LANES = 8193` (above packed's 4,096-lane threading threshold; 9 blocks / 5 chunks at 8 threads, with a partial last block) instead of 100,000/32,769. The 100,000-lane `random_three_outputs_match_native` keeps the 16-blocks-per-chunk cap. Parity: 37.1 -> 15.1 s summed; slowest case 1.90 -> 0.40 s.
+  - Full flow_sop with default caps: 709/709 in 59.9 s at load 6.4; timed out at 60.2 s (693/709, no failures) at load 6.7. 709/709 in 59.4 s with the cap lifted.
+  - The crate run sits at the 60 s whole-run cap and depends on machine load. Next lever: test_parallel_exact, 95 s summed (98 processes, each paying the library check).
+
 - 2026-11-08: `282695fa` perf: cooked-selection programs are prepared at first cook. Preparing is infallible and forced before the placement timer, so the workspace's discarded inlined copy no longer prepares. `4dd7baca`: regression checks a single body build in `root`/`card_node`, zero rebuilds over new inputs and one shared prepared program; it fails with either fix reverted. subdivide build: cold 1.10 s, warm 0.48 s. The remaining second build is a genuinely different program (workspace constants vs factory inputs). Deferring its fallible first compile would move lowering errors to cook time, so it was not done.
   - Full flow_sop: all 709 pass, 65.4 s wall / 261 s summed. Default-cap runs stop at 60 s after 602-623 cases with no failures.
   - Summed time: workspace checks ~50 s (library re-check per process ~27 s), lowerings ~31 s, `operators::parity` ~22 s. Parity is the current timeboxed target.
