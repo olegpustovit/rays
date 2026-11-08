@@ -6,6 +6,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use rdk_core::{cancel, error};
+use rdk_core::error::Code;
 use rdk_geom::implicit_point;
 use rdk_geom::planar_cdt;
 use rdk_geom::predicates::Sign;
@@ -31,8 +32,8 @@ pub fn create_workspace() -> Workspace {
     planar_cdt::View::create_workspace(Some(16), 16).expect("Planar CDT workspace of 16 points and triangles")
 }
 
-fn fail(code: &str, message: &str) -> error::T {
-    error::make(OPERATION.to_owned(), code.to_owned(), message.to_owned(), None).unwrap_or_else(|e| e)
+fn fail(code: Code, message: &str) -> error::T {
+    error::new(OPERATION, code, message.to_owned())
 }
 
 pub fn point_count(value: &T) -> i64 {
@@ -195,7 +196,7 @@ pub fn build(
     side: Side,
     triangle: i64,
 ) -> Result<T, error::T> {
-    cancel::check_opt(cancel_value).map_err(|_| fail("cancelled", "Boolean face CDT was cancelled"))?;
+    cancel::check_opt(cancel_value).map_err(|_| error::cancelled(OPERATION))?;
     let arrangement_count = arrangement_mod::point_count(arrangement) as usize;
     let mut points: Vec<implicit_point::T> = Vec::with_capacity(3 + arrangement_count);
     for local in 0..3 {
@@ -221,7 +222,7 @@ pub fn build(
     let source_winding = match orient_indices(0, 1, 2) {
         Sign::Positive => 1,
         Sign::Negative => -1,
-        Sign::Zero => return Err(fail("invalid_constraints", "degenerate source triangle during face CDT")),
+        Sign::Zero => return Err(fail(Code::InvalidConstraints, "degenerate source triangle during face CDT")),
     };
     let initial_triangle_points: [i64; 3] = if source_winding > 0 { [0, 1, 2] } else { [0, 2, 1] };
     let insert_points: Vec<i64> = (3..points.len() as i64).collect();
@@ -281,7 +282,7 @@ pub fn build(
     );
     match built {
         Err(message) => Err(fail(
-            "invalid_constraints",
+            Code::InvalidConstraints,
             &format!(
                 "{} (side={} source_triangle={} points={} constraints={})",
                 message,

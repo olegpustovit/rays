@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use rdk_core::{cancel, error, geometry, support};
+use rdk_core::error::Code;
 use rdk_geom::implicit_point::{self, Construction};
 
 use crate::boolean_constraints::{self as constraints_mod, Side};
@@ -32,13 +33,13 @@ pub struct T {
     edge_locals: Vec<u8>,
 }
 
-fn fail(code: &str, message: &str) -> error::T {
-    error::make(OPERATION.to_owned(), code.to_owned(), message.to_owned(), None).unwrap_or_else(|e| e)
+fn fail(code: Code, message: &str) -> error::T {
+    error::new(OPERATION, code, message.to_owned())
 }
 
 /// OCaml `Invalid_argument message` surfaces as `invalid_refinement`.
 fn invalid(message: &str) -> error::T {
-    fail("invalid_refinement", message)
+    fail(Code::InvalidRefinement, message)
 }
 
 pub fn vertex_count(value: &T) -> i64 {
@@ -232,7 +233,7 @@ fn face_of(refinement: &refinement_mod::T, side: Side, face: i64) -> Option<&cdt
 }
 
 fn poll(cancel_value: Option<&cancel::T>, index: i64, mask: i64) -> Result<(), error::T> {
-    cancel::poll(cancel_value, index, mask).map_err(|_| fail("cancelled", "Boolean complex assembly was cancelled"))
+    cancel::poll(cancel_value, index, mask).map_err(|_| error::cancelled(OPERATION))
 }
 
 /// Sorts `values` by `compare_points`: sorted runs of 2048 in parallel, then pairwise merges of

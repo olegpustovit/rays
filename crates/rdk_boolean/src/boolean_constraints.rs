@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use rdk_core::{cancel, error, geometry, packed, support, topology};
+use rdk_core::error::Code;
 use rdk_geom::implicit_point::{self, Error as PointError};
 use rdk_geom::predicates::{self, Sign};
 use rdk_geom::surface_index;
@@ -67,8 +68,8 @@ pub struct T {
     degenerate_pairs: i64,
 }
 
-fn fail(code: &str, message: &str) -> error::T {
-    error::make(OPERATION.to_owned(), code.to_owned(), message.to_owned(), None).unwrap_or_else(|e| e)
+fn fail(code: Code, message: &str) -> error::T {
+    error::new(OPERATION, code, message.to_owned())
 }
 
 pub fn point_count(value: &T) -> i64 {
@@ -451,7 +452,7 @@ fn opposite_duplicate(first_triangle: &[i64; 3], second_triangle: &[i64; 3]) -> 
 
 fn poll(cancel_value: Option<&cancel::T>, index: i64) -> Result<(), error::T> {
     cancel::poll(cancel_value, index, 4095)
-        .map_err(|_| fail("cancelled", "Boolean constraint planning was cancelled"))
+        .map_err(|_| error::cancelled(OPERATION))
 }
 
 fn triple(points: &[i64], index: i64) -> [i64; 3] {
@@ -462,7 +463,7 @@ fn triple(points: &[i64], index: i64) -> [i64; 3] {
 pub fn build(params: &Params, left: &geometry::T, right: &geometry::T) -> Result<T, error::T> {
     let cancel_value = params.cancel.as_deref();
     if params.grain <= 0 {
-        return Err(fail("invalid_parameter", "grain must be positive"));
+        return Err(fail(Code::InvalidParameter, "grain must be positive"));
     }
     let grain = params.grain;
     let left_surface = surface_index::create(cancel_value, Some(grain), None, None, None, left)?;
@@ -508,7 +509,7 @@ pub fn build(params: &Params, left: &geometry::T, right: &geometry::T) -> Result
     };
     let (left_offset, x, y, z) = concatenate_positions(left, right)?;
     let source = implicit_point::source(x.clone(), y.clone(), z.clone())
-        .map_err(|_| fail("invalid_geometry", "Boolean constraint source is invalid"))?;
+        .map_err(|_| fail(Code::InvalidGeometry, "Boolean constraint source is invalid"))?;
     let mut source_points = Vec::with_capacity(x.len());
     for point in 0..x.len() {
         source_points.push(implicit_point::explicit(&source, point as i64).unwrap());
@@ -633,7 +634,7 @@ pub fn build(params: &Params, left: &geometry::T, right: &geometry::T) -> Result
     }
     if first_error.is_some() {
         return Err(fail(
-            "exact_construction_failed",
+            Code::ExactConstructionFailed,
             "an exact triangle intersection point could not be constructed",
         ));
     }

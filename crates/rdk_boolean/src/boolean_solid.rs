@@ -2,6 +2,7 @@
 use std::sync::Arc;
 
 use rdk_core::{cancel, error, geometry};
+use rdk_core::error::Code;
 
 use crate::boolean_cells;
 use crate::boolean_complex;
@@ -57,13 +58,7 @@ pub mod View {
 
 fn shatter_error() -> error::T {
     // OCaml `invalid_arg`: an exception outside every `result`.
-    error::make(
-        OPERATION.to_owned(),
-        "invalid_argument".to_owned(),
-        "Shatter has no single product expression".to_owned(),
-        None,
-    )
-    .unwrap_or_else(|e| e)
+    error::new(OPERATION, Code::InvalidArgument, "Shatter has no single product expression".to_owned())
 }
 
 /// Construct and classify the shared two-operand arrangement once. Degenerate source triangle
@@ -90,13 +85,13 @@ pub fn prepare(
     let constraints = Arc::new(boolean_constraints::build(&params, left, right)?);
     let degenerate_pairs = boolean_constraints::degenerate_pair_count(&constraints);
     if degenerate_pairs != 0 {
-        return Err(error::make(
-            OPERATION.to_owned(),
-            "degenerate_triangle".to_owned(),
-            format!("{degenerate_pairs} candidate triangle pair(s) contain a degenerate source triangle"),
-            Some(vec!["remove or repair zero-area source triangles before solid Boolean".to_owned()]),
-        )
-        .unwrap_or_else(|e| e));
+        return Err(error::new(
+            OPERATION,
+            Code::DegenerateTriangle,
+            format!(
+                "{degenerate_pairs} candidate triangle pair(s) contain a degenerate source triangle (remove or repair zero-area source triangles before solid Boolean)"
+            ),
+        ));
     }
     let coplanar = boolean_coplanar::build(cx(cancel), grain, &constraints)?;
     let refinement = boolean_refinement::build(cx(cancel), Some(&coplanar), grain, &constraints)?;
@@ -427,7 +422,7 @@ mod tests {
         let degenerate = geometry_of(&[(0., 0., 0.), (0.5, 0., 0.), (1., 0., 0.)], vec![0, 1, 2]);
         let solid = tetra((0., 0., 0.), 1.);
         match prepare(None, None, None, None, None, 1, &degenerate, &solid) {
-            Err(failure) if matches!(error::code(&failure), "degenerate_triangle" | "invalid_surface") => {}
+            Err(failure) if matches!(error::kind(&failure), Code::DegenerateTriangle | Code::InvalidSurface) => {}
             Err(failure) => panic!("unexpected degenerate error: {}", error::to_string(&failure)),
             Ok(_) => panic!("degenerate source triangle entered the solid Boolean pipeline"),
         }
@@ -448,7 +443,7 @@ mod tests {
             &tetra((0., 0., 0.), 1.),
             &tetra((0.2, 0.2, 0.2), 1.),
         ) {
-            Err(failure) if error::code(&failure) == "cancelled" => {}
+            Err(failure) if error::is_cancelled(&failure) => {}
             Err(failure) => panic!("unexpected cancellation error: {}", error::to_string(&failure)),
             Ok(_) => panic!("cancelled Boolean preparation completed"),
         }

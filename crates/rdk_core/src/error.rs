@@ -147,6 +147,10 @@ pub fn operation(value: &T) -> &str {
     &value.operation
 }
 
+pub fn kind(value: &T) -> Code {
+    value.code
+}
+
 pub fn code(value: &T) -> &'static str {
     value.code.as_str()
 }

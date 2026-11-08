@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use rdk_core::{cancel, error};
+use rdk_core::error::Code;
 use rdk_geom::bounds2_index;
 use rdk_geom::implicit_point::{self, Projection};
 use rdk_geom::predicates::Sign;
@@ -23,13 +24,13 @@ pub struct T {
     segment_second: Vec<i64>,
 }
 
-fn fail(code: &str, message: &str) -> error::T {
-    error::make(OPERATION.to_owned(), code.to_owned(), message.to_owned(), None).unwrap_or_else(|e| e)
+fn fail(code: Code, message: &str) -> error::T {
+    error::new(OPERATION, code, message.to_owned())
 }
 
 /// OCaml `Invalid_argument message` surfaces as `invalid_constraints`.
 fn invalid(message: &str) -> error::T {
-    fail("invalid_constraints", message)
+    fail(Code::InvalidConstraints, message)
 }
 
 pub fn point_count(value: &T) -> i64 {
@@ -284,7 +285,7 @@ impl PartialEq for PointKey {
 impl Eq for PointKey {}
 
 fn poll(cancel_value: Option<&cancel::T>, index: i64, mask: i64) -> Result<(), error::T> {
-    cancel::poll(cancel_value, index, mask).map_err(|_| fail("cancelled", "Boolean face arrangement was cancelled"))
+    cancel::poll(cancel_value, index, mask).map_err(|_| error::cancelled(OPERATION))
 }
 
 fn projected_bounds(points: &[implicit_point::T], point_count: usize, projection: i64) -> Planes {

@@ -6,6 +6,7 @@ use std::cmp::Ordering;
 use std::sync::{Arc, Mutex};
 
 use rdk_core::{cancel, error};
+use rdk_core::error::Code;
 use rdk_geom::implicit_point::{self, AxisRayTriangle, SymbolicRayTriangle};
 use rdk_geom::point_grid::{float_max, float_min};
 use rdk_geom::predicates::Sign;
@@ -56,7 +57,7 @@ enum Fail {
 
 impl From<error::T> for Fail {
     fn from(value: error::T) -> Fail {
-        if error::code(&value) == "cancelled" { Fail::Cancelled } else { Fail::Rdk(value) }
+        if error::is_cancelled(&value) { Fail::Cancelled } else { Fail::Rdk(value) }
     }
 }
 
@@ -64,8 +65,8 @@ fn invalid_fail(message: &str) -> Fail {
     Fail::Invalid(message.to_owned())
 }
 
-fn make(code: &str, message: String) -> error::T {
-    error::make(OPERATION.to_owned(), code.to_owned(), message, None).unwrap_or_else(|bad| bad)
+fn make(code: Code, message: String) -> error::T {
+    error::new(OPERATION, code, message)
 }
 
 pub fn shell_count(value: &T) -> i64 {
@@ -530,12 +531,12 @@ fn classify_operand_symbolic(
 
 fn finish_fail(failure: Fail) -> error::T {
     match failure {
-        Fail::Cancelled => make("cancelled", "Boolean cell classification was cancelled".to_owned()),
+        Fail::Cancelled => error::cancelled(OPERATION),
         Fail::Ambiguous(facet, reason) => make(
-            "ambiguous_classification",
+            Code::AmbiguousClassification,
             format!("could not classify refined seed facet {facet}: {reason}"),
         ),
-        Fail::Invalid(message) => make("invalid_complex", message),
+        Fail::Invalid(message) => make(Code::InvalidComplex, message),
         Fail::Rdk(failure) => failure,
     }
 }

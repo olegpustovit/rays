@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use rdk_core::{cancel, error, support};
+use rdk_core::error::Code;
 use rdk_geom::implicit_point::{self, Projection};
 use rdk_geom::predicates::Sign;
 
@@ -37,8 +38,8 @@ pub struct T {
     right_pairs: Vec<i64>,
 }
 
-fn fail(code: &str, message: &str) -> error::T {
-    error::make(OPERATION.to_owned(), code.to_owned(), message.to_owned(), None).unwrap_or_else(|e| e)
+fn fail(code: Code, message: &str) -> error::T {
+    error::new(OPERATION, code, message.to_owned())
 }
 
 fn empty() -> Overlap {
@@ -365,9 +366,9 @@ pub fn build(
     constraints: &Arc<constraints_mod::T>,
 ) -> Result<T, error::T> {
     if grain <= 0 {
-        return Err(fail("invalid_parameter", "grain must be positive"));
+        return Err(fail(Code::InvalidParameter, "grain must be positive"));
     }
-    let cancelled = |_: error::T| fail("cancelled", "Coplanar Boolean arrangement was cancelled");
+    let cancelled = |_: error::T| error::cancelled(OPERATION);
     cancel::check_opt(cancel_value).map_err(cancelled)?;
     let count = constraints_mod::coplanar_pair_count(constraints);
     // Each pair owns its output slot, written in place.
@@ -390,7 +391,7 @@ pub fn build(
             Some(overlap) => overlaps.push(overlap),
             None => {
                 return Err(fail(
-                    "exact_construction_failed",
+                    Code::ExactConstructionFailed,
                     &format!("coplanar pair {} could not be arranged exactly", overlaps.len()),
                 ));
             }

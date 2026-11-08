@@ -7,6 +7,7 @@ use std::sync::Arc;
 use rdk_core::packed;
 use rdk_core::topology::PrimitiveKind;
 use rdk_core::{cancel, error, geometry, support, topology, topology_index};
+use rdk_core::error::Code;
 use rdk_geom::implicit_point;
 use rdk_geom::linear_piece_index;
 use rdk_geom::predicates::{self, SegmentSegment};
@@ -34,8 +35,8 @@ pub struct T {
     curve_kinds: Vec<u8>,
 }
 
-fn make(code: &str, message: String) -> error::T {
-    error::make(OPERATION.to_owned(), code.to_owned(), message, None).unwrap_or_else(|bad| bad)
+fn make(code: Code, message: String) -> error::T {
+    error::new(OPERATION, code, message)
 }
 
 enum Fail {
@@ -46,7 +47,7 @@ enum Fail {
 
 impl From<error::T> for Fail {
     fn from(value: error::T) -> Fail {
-        if error::code(&value) == "cancelled" { Fail::Cancelled } else { Fail::Rdk(value) }
+        if error::is_cancelled(&value) { Fail::Cancelled } else { Fail::Rdk(value) }
     }
 }
 
@@ -253,9 +254,9 @@ pub fn verify_curves(
     curves_value: &geometry::T,
 ) -> Result<(), error::T> {
     if grain <= 0 {
-        return Err(make("invalid_parameter", "grain must be positive".to_owned()));
+        return Err(make(Code::InvalidParameter, "grain must be positive".to_owned()));
     }
-    let cancelled = || make("cancelled", "Boolean seam verification was cancelled".to_owned());
+    let cancelled = || error::cancelled(OPERATION);
     let topology_value = geometry::topology(curves_value);
     for primitive in 0..topology::primitive_count(topology_value) {
         cancel::poll(cancel_value, primitive, 4095).map_err(|_| cancelled())?;
@@ -273,20 +274,17 @@ pub fn verify_curves(
             _ => None,
         };
         if let Some(message) = message {
-            return Err(make("invalid_output", message));
+            return Err(make(Code::InvalidOutput, message));
         }
     }
     let index = match linear_piece_index::create(cancel_value, Some(grain), None, curves_value) {
         Ok(index) => index,
-        Err(failure) if error::code(&failure) == "cancelled" => return Err(cancelled()),
+        Err(failure) if error::is_cancelled(&failure) => return Err(cancelled()),
         Err(failure) => {
-            return Err(error::make(
-                OPERATION.to_owned(),
-                "invalid_output".to_owned(),
-                "Boolean seam curves could not be indexed for verification".to_owned(),
-                Some(vec![error::to_string(&failure)]),
-            )
-            .unwrap_or_else(|bad| bad));
+            return Err(make(
+                Code::InvalidOutput,
+                format!("Boolean seam curves could not be indexed for verification ({})", error::to_string(&failure)),
+            ));
         }
     };
     let positions = linear_piece_index::View::positions(&index);
@@ -319,7 +317,7 @@ pub fn verify_curves(
         &invalid_pair,
     )
     .map_err(|failure| {
-        if error::code(&failure) == "cancelled" { cancelled() } else { failure }
+        if error::is_cancelled(&failure) { cancelled() } else { failure }
     })?;
     match found {
         None => Ok(()),
@@ -328,15 +326,12 @@ pub fn verify_curves(
             let right_primitive = linear_piece_index::View::primitive(&index, right);
             let left_local = linear_piece_index::View::local(&index, left);
             let right_local = linear_piece_index::View::local(&index, right);
-            Err(error::make(
-                OPERATION.to_owned(),
-                "seam_self_intersection".to_owned(),
+            Err(make(
+                Code::SeamSelfIntersection,
                 format!(
-                    "rounded seam curve {left_primitive} segment {left_local} intersects curve {right_primitive} segment {right_local}"
+                    "rounded seam curve {left_primitive} segment {left_local} intersects curve {right_primitive} segment {right_local} (reduce the cleanup tolerance or inspect the reported curve segments)"
                 ),
-                Some(vec!["reduce the cleanup tolerance or inspect the reported curve segments".to_owned()]),
-            )
-            .unwrap_or_else(|bad| bad))
+            ))
         }
     }
 }
@@ -635,14 +630,14 @@ pub fn build(
     c: &Arc<complex::T>,
 ) -> Result<T, error::T> {
     if options.grain <= 0 {
-        return Err(make("invalid_parameter", "grain must be positive".to_owned()));
+        return Err(make(Code::InvalidParameter, "grain must be positive".to_owned()));
     }
     if options.parallel_cutoff <= 0 {
-        return Err(make("invalid_parameter", "parallel_cutoff must be positive".to_owned()));
+        return Err(make(Code::InvalidParameter, "parallel_cutoff must be positive".to_owned()));
     }
     build_inner(cancel_value, options, c).map_err(|failure| match failure {
-        Fail::Cancelled => make("cancelled", "Boolean seam extraction was cancelled".to_owned()),
-        Fail::Invalid(message) => make("invalid_output", message),
+        Fail::Cancelled => error::cancelled(OPERATION),
+        Fail::Invalid(message) => make(Code::InvalidOutput, message),
         Fail::Rdk(failure) => failure,
     })
 }
@@ -1031,7 +1026,7 @@ mod tests {
         let token = cancel::create();
         cancel::cancel(&token);
         match verify_curves(Some(&token), 1, &branch) {
-            Err(failure) if error::code(&failure) == "cancelled" => {}
+            Err(failure) if error::is_cancelled(&failure) => {}
             Err(failure) => panic!("unexpected seam verification cancellation: {}", error::to_string(&failure)),
             Ok(()) => panic!("cancelled seam verification completed"),
         }

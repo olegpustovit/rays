@@ -5,6 +5,7 @@ use std::cmp::Ordering;
 use std::sync::Arc;
 
 use rdk_core::{cancel, error};
+use rdk_core::error::Code;
 use rdk_geom::implicit_point;
 use rdk_geom::predicates::Sign;
 
@@ -19,9 +20,8 @@ pub struct T {
     locals: Vec<u8>,
 }
 
-fn fail(code: &str, message: &str) -> error::T {
-    error::make(OPERATION.to_owned(), code.to_owned(), message.to_owned(), None)
-        .unwrap_or_else(|bad| bad)
+fn fail(code: Code, message: &str) -> error::T {
+    error::new(OPERATION, code, message.to_owned())
 }
 
 pub fn incident_range(value: &T, edge: i64) -> (i64, i64) {
@@ -50,8 +50,8 @@ fn opposite_vertex(c: &complex::T, facet: i64, local: i64) -> i64 {
 }
 
 fn cancelled(failure: error::T) -> error::T {
-    if error::code(&failure) == "cancelled" {
-        fail("cancelled", "Boolean radial ordering was cancelled")
+    if error::is_cancelled(&failure) {
+        error::cancelled(OPERATION)
     } else {
         failure
     }
@@ -141,7 +141,7 @@ fn radial_order(c: &complex::T, edge: i64, first: i64, count: i64) -> Result<Vec
         })
         .collect();
     if invalid.get() {
-        return Err(fail("invalid_complex", "radial chart opposite point lies on its edge"));
+        return Err(fail(Code::InvalidComplex, "radial chart opposite point lies on its edge"));
     }
     let mut order: Vec<i64> = (0..count).collect();
     order.sort_by(|&left, &right| {

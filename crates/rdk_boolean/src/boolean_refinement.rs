@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use rdk_core::{cancel, error, support};
+use rdk_core::error::Code;
 
 use crate::boolean_constraints::{self as constraints_mod, Side};
 use crate::boolean_coplanar as coplanar_mod;
@@ -19,8 +20,8 @@ pub struct T {
     right: Vec<Option<cdt_mod::T>>,
 }
 
-fn fail(code: &str, message: &str) -> error::T {
-    error::make(OPERATION.to_owned(), code.to_owned(), message.to_owned(), None).unwrap_or_else(|e| e)
+fn fail(code: Code, message: &str) -> error::T {
+    error::new(OPERATION, code, message.to_owned())
 }
 
 pub fn left_face(value: &T, face: i64) -> Option<&cdt_mod::T> {
@@ -59,7 +60,7 @@ fn build_side(
         let mut workspace = cdt_mod::create_workspace();
         for (face, slot) in (first_face..last_face).zip(windows.take(range)) {
             cancel::poll(cancel_value, face, 255)
-                .map_err(|_| fail("cancelled", "Boolean refinement was cancelled"))?;
+                .map_err(|_| error::cancelled(OPERATION))?;
             let (first, last) = match side {
                 Side::Left => constraints_mod::left_constraint_range(constraints_ref, face),
                 Side::Right => constraints_mod::right_constraint_range(constraints_ref, face),
@@ -100,7 +101,7 @@ pub fn build(
     constraints: &Arc<constraints_mod::T>,
 ) -> Result<T, error::T> {
     if grain <= 0 {
-        return Err(fail("invalid_parameter", "grain must be positive"));
+        return Err(fail(Code::InvalidParameter, "grain must be positive"));
     }
     let left_count = constraints_mod::left_triangle_count(constraints);
     let right_count = constraints_mod::right_triangle_count(constraints);

@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use rays_math::text_array::TextArray;
 use rdk_core::attribute::{self, Owner as AttributeOwner, Storage};
 use rdk_core::{cancel, edge_group, error, geometry, group, packed, topology, topology_index};
+use rdk_core::error::Code;
 
 use crate::boolean_constraints::Side;
 use crate::boolean_extract::{self as extract, View as extract_view};
@@ -50,15 +51,15 @@ enum Fail {
 
 impl From<error::T> for Fail {
     fn from(value: error::T) -> Fail {
-        if error::code(&value) == "cancelled" { Fail::Cancelled } else { Fail::Rdk(value) }
+        if error::is_cancelled(&value) { Fail::Cancelled } else { Fail::Rdk(value) }
     }
 }
 
-fn make(code: &str, message: String) -> error::T {
-    error::make(OPERATION.to_owned(), code.to_owned(), message, None).unwrap_or_else(|bad| bad)
+fn make(code: Code, message: String) -> error::T {
+    error::new(OPERATION, code, message)
 }
 
-fn payload_fail(code: &str, message: String) -> Fail {
+fn payload_fail(code: Code, message: String) -> Fail {
     Fail::Rdk(make(code, message))
 }
 
@@ -66,10 +67,10 @@ fn invalid_fail(message: &str) -> Fail {
     Fail::Invalid(message.to_owned())
 }
 
-fn finish_fail(cancelled: &str, failure: Fail) -> error::T {
+fn finish_fail(failure: Fail) -> error::T {
     match failure {
-        Fail::Cancelled => make("cancelled", cancelled.to_owned()),
-        Fail::Invalid(message) => make("invalid_payload", message),
+        Fail::Cancelled => error::cancelled(OPERATION),
+        Fail::Invalid(message) => make(Code::InvalidPayload, message),
         Fail::Rdk(failure) => failure,
     }
 }
@@ -124,7 +125,7 @@ fn collect_attributes(
                 Some(&slot) => {
                     let pair = &mut pairs[slot];
                     if pair.kind != kind {
-                        return Err(payload_fail("attribute_storage_mismatch", format!(
+                        return Err(payload_fail(Code::AttributeStorageMismatch, format!(
                                 "{} attribute {:?} has different storage on the Boolean operands",
                                 owner_name(owner),
                                 name
@@ -346,7 +347,7 @@ fn interpolate_fixed(
         }
         return Ok(Storage::Text(Arc::new(output)));
     }
-    Err(payload_fail("unsupported_storage", format!(
+    Err(payload_fail(Code::UnsupportedStorage, format!(
             "{} attribute {:?} uses CSR storage not yet handled by the fixed-width interpolator",
             if pair.source_owner == AttributeOwner::Point { "point" } else { "vertex" },
             pair.name
@@ -478,7 +479,7 @@ fn first_corners(vertex_points: &[i64], point_count: usize) -> Vec<i64> {
 
 fn conflict_fail(name: &str, point: usize) -> Fail {
     payload_fail(
-        "point_payload_conflict",
+        Code::PointPayloadConflict,
         format!(
             "point payload {name:?} disagrees across incident Boolean corners at output point {point}; use Promote_to_vertex or split the schema"
         ),
@@ -706,7 +707,7 @@ fn copy_group(
             if corner as i64 == representative {
                 points[point as usize] = value;
             } else if value != points[point as usize] {
-                return Err(payload_fail("point_group_conflict", format!(
+                return Err(payload_fail(Code::PointGroupConflict, format!(
                         "point group {:?} disagrees across incident Boolean corners at output point {}; use Promote_to_vertex or split the group",
                         pair.group_name, point
                     )));
@@ -808,15 +809,15 @@ pub fn copy_points_and_vertices(
     base: &geometry::T,
 ) -> Result<geometry::T, error::T> {
     if grain <= 0 {
-        return Err(make("invalid_parameter", "grain must be positive".to_owned()));
+        return Err(make(Code::InvalidParameter, "grain must be positive".to_owned()));
     }
     if !point_tolerance.is_finite() || point_tolerance < 0.0 {
         return Err(make(
-            "invalid_parameter",
+            Code::InvalidParameter,
             "point_tolerance must be finite and non-negative".to_owned(),
         ));
     }
-    copy_points_inner(cancel_value, grain, point_conflict, point_tolerance, ancestry, base).map_err(|f| finish_fail("Boolean corner payload transfer was cancelled", f))
+    copy_points_inner(cancel_value, grain, point_conflict, point_tolerance, ancestry, base).map_err(|f| finish_fail(f))
 }
 
 fn copy_points_inner(
@@ -835,7 +836,7 @@ fn copy_points_inner(
             != topology::data_id(geometry::topology(ancestry_base))
     {
         return Err(Fail::Rdk(make(
-            "geometry_mismatch",
+            Code::GeometryMismatch,
             "corner payload target does not share the Boolean ancestry topology".to_owned(),
         )));
     }
@@ -863,7 +864,7 @@ fn copy_points_inner(
     if point_conflict == PointConflict::PromoteToVertex {
         for pair in &point_attributes {
             if vertex_attributes.iter().any(|other| other.name == pair.name) {
-                return Err(payload_fail("promotion_collision", format!(
+                return Err(payload_fail(Code::PromotionCollision, format!(
                         "point attribute {:?} cannot be promoted because a vertex attribute has the same name",
                         pair.name
                     )));
@@ -871,7 +872,7 @@ fn copy_points_inner(
         }
         for pair in &point_groups {
             if vertex_groups.iter().any(|other| other.group_name == pair.group_name) {
-                return Err(payload_fail("promotion_collision", format!(
+                return Err(payload_fail(Code::PromotionCollision, format!(
                         "point group {:?} cannot be promoted because a vertex group has the same name",
                         pair.group_name
                     )));
@@ -945,7 +946,7 @@ fn copy_points_inner(
         Some(all_groups),
         Some(all_edge_groups),
     )
-    .map_err(|failure| Fail::Rdk(make("invalid_output", error::message(&failure).to_owned())))
+    .map_err(|failure| Fail::Rdk(make(Code::InvalidOutput, error::message(&failure).to_owned())))
 }
 
 fn selected_primitive(ancestry: &extract::Ancestry, primitive: usize) -> (bool, usize) {
@@ -1096,9 +1097,9 @@ pub fn copy_primitives(
     ancestry: &extract::Ancestry,
 ) -> Result<geometry::T, error::T> {
     if grain <= 0 {
-        return Err(make("invalid_parameter", "grain must be positive".to_owned()));
+        return Err(make(Code::InvalidParameter, "grain must be positive".to_owned()));
     }
-    copy_primitives_inner(cancel_value, grain, ancestry).map_err(|f| finish_fail("Boolean primitive payload transfer was cancelled", f))
+    copy_primitives_inner(cancel_value, grain, ancestry).map_err(|f| finish_fail(f))
 }
 
 fn copy_primitives_inner(
@@ -1174,7 +1175,7 @@ fn copy_primitives_inner(
         Some(all_groups),
         Some(geometry::edge_groups(base)),
     )
-    .map_err(|failure| Fail::Rdk(make("invalid_output", error::message(&failure).to_owned())))
+    .map_err(|failure| Fail::Rdk(make(Code::InvalidOutput, error::message(&failure).to_owned())))
 }
 
 fn planes_of_storage(storage: Option<&Storage>) -> Result<Option<Vec<&[f64]>>, Fail> {

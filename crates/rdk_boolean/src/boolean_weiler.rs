@@ -2,6 +2,7 @@
 use std::sync::Arc;
 
 use rdk_core::{cancel, error};
+use rdk_core::error::Code;
 
 use crate::boolean_complex as complex;
 use crate::boolean_constraints::Side as OperandSide;
@@ -23,9 +24,8 @@ pub struct T {
     right_winding: Vec<i64>,
 }
 
-fn fail(code: &str, message: &str) -> error::T {
-    error::make(OPERATION.to_owned(), code.to_owned(), message.to_owned(), None)
-        .unwrap_or_else(|bad| bad)
+fn fail(code: Code, message: &str) -> error::T {
+    error::new(OPERATION, code, message.to_owned())
 }
 
 pub fn half_facet(facet: i64, side: Side) -> i64 {
@@ -88,15 +88,15 @@ fn unite(parent: &mut [i64], left: i64, right: i64) {
 }
 
 fn cancelled(failure: error::T) -> error::T {
-    if error::code(&failure) == "cancelled" {
-        fail("cancelled", "Weiler adjacency construction was cancelled")
+    if error::is_cancelled(&failure) {
+        error::cancelled(OPERATION)
     } else {
         failure
     }
 }
 
 fn invalid(message: &str) -> error::T {
-    fail("invalid_complex", message)
+    fail(Code::InvalidComplex, message)
 }
 
 pub fn build(

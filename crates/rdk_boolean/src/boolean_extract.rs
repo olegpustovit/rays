@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use rdk_core::packed;
 use rdk_core::{cancel, error, geometry, topology, topology_index};
+use rdk_core::error::Code;
 use rdk_geom::implicit_point::{self, Construction};
 use rdk_geom::predicates::{self, Sign};
 use rdk_geom::surface_index;
@@ -53,8 +54,8 @@ pub fn xor() -> Expression {
     Expression::Xor(Box::new(Expression::Left), Box::new(Expression::Right))
 }
 
-fn make(code: &str, message: String) -> error::T {
-    error::make(OPERATION.to_owned(), code.to_owned(), message, None).unwrap_or_else(|bad| bad)
+fn make(code: Code, message: String) -> error::T {
+    error::new(OPERATION, code, message)
 }
 
 enum Fail {
@@ -65,7 +66,7 @@ enum Fail {
 
 impl From<error::T> for Fail {
     fn from(value: error::T) -> Fail {
-        if error::code(&value) == "cancelled" { Fail::Cancelled } else { Fail::Rdk(value) }
+        if error::is_cancelled(&value) { Fail::Cancelled } else { Fail::Rdk(value) }
     }
 }
 
@@ -73,10 +74,10 @@ fn invalid_fail(message: &str) -> Fail {
     Fail::Invalid(message.to_owned())
 }
 
-fn finish_fail(cancelled: &str, failure: Fail) -> error::T {
+fn finish_fail(failure: Fail) -> error::T {
     match failure {
-        Fail::Cancelled => make("cancelled", cancelled.to_owned()),
-        Fail::Invalid(message) => make("invalid_output", message),
+        Fail::Cancelled => error::cancelled(OPERATION),
+        Fail::Invalid(message) => make(Code::InvalidOutput, message),
         Fail::Rdk(failure) => failure,
     }
 }
@@ -225,7 +226,7 @@ pub fn piece_ids(
             weiler::Side::Positive
         } else {
             return Err(make(
-                "invalid_output",
+                Code::InvalidOutput,
                 "Boolean output ancestry lost facet orientation".to_owned(),
             ));
         };
@@ -269,12 +270,12 @@ pub fn validate_positions(x: &[f64], y: &[f64], z: &[f64]) -> Result<(), error::
     let points = x.len();
     if y.len() != points || z.len() != points {
         return Err(make(
-            "rounding_cardinality",
+            Code::RoundingCardinality,
             "materialized coordinate planes have different lengths".to_owned(),
         ));
     }
     let capacity = table_capacity(points, "Boolean materialization coordinate table exceeds array limits")
-        .map_err(|message| make("invalid_output", message))?;
+        .map_err(|message| make(Code::InvalidOutput, message))?;
     let mut slots = vec![-1_i64; capacity];
     let mask = capacity - 1;
     for point in 0..points {
@@ -289,7 +290,7 @@ pub fn validate_positions(x: &[f64], y: &[f64], z: &[f64]) -> Result<(), error::
             let o = other as usize;
             if x[o] == x[point] && y[o] == y[point] && z[o] == z[point] {
                 return Err(make(
-                    "rounding_collision",
+                    Code::RoundingCollision,
                     format!(
                         "exact output vertices {other} and {point} round to the same binary64 coordinate"
                     ),
@@ -311,7 +312,7 @@ pub fn validate_materialized(
     let points = x.len() as i64;
     if vertex_points.len() % 3 != 0 {
         return Err(make(
-            "rounding_cardinality",
+            Code::RoundingCardinality,
             "materialized triangle corners are not divisible by three".to_owned(),
         ));
     }
@@ -330,7 +331,7 @@ pub fn validate_materialized(
         let c = vertex_points[offset + 2];
         if a < 0 || a >= points || b < 0 || b >= points || c < 0 || c >= points {
             return Err(make(
-                "rounding_cardinality",
+                Code::RoundingCardinality,
                 format!("materialized triangle {triangle} references an invalid point"),
             ));
         }
@@ -362,7 +363,7 @@ pub fn validate_materialized(
             && projected(third, a, b, c) == Sign::Zero
         {
             return Err(make(
-                "rounding_degenerate",
+                Code::RoundingDegenerate,
                 format!("exact output triangle {triangle} becomes collinear in binary64"),
             ));
         }
@@ -371,7 +372,7 @@ pub fn validate_materialized(
 }
 
 pub fn validate_closed_topology(topology_value: &topology::T) -> Result<(), error::T> {
-    validate_closed_inner(topology_value).map_err(|f| finish_fail("Boolean closed-topology validation was cancelled", f))
+    validate_closed_inner(topology_value).map_err(|f| finish_fail(f))
 }
 
 fn validate_closed_inner(topology_value: &topology::T) -> Result<(), Fail> {
@@ -387,7 +388,7 @@ fn validate_closed_inner(topology_value: &topology::T) -> Result<(), Fail> {
         }
     }
     if !triangle_only {
-        return Err(Fail::Rdk(make("invalid_output", "solid Boolean output is not triangle-only".to_owned())));
+        return Err(Fail::Rdk(make(Code::InvalidOutput, "solid Boolean output is not triangle-only".to_owned())));
     }
     let edge_count = primitive_count * 3;
     let mut keys = vec![0_i64; edge_count];
@@ -411,7 +412,7 @@ fn validate_closed_inner(topology_value: &topology::T) -> Result<(), Fail> {
         let incidence = last - first;
         if incidence < 2 || incidence & 1 != 0 {
             return Err(Fail::Rdk(make(
-                "open_output",
+                Code::OpenOutput,
                 format!(
                     "solid Boolean output edge key {} has invalid incidence {}",
                     keys[first], incidence
@@ -953,7 +954,7 @@ fn build_internal(
         validate_materialized(internal.defer_rounded_slivers, &x, &y, &z, &vertex_points)
     {
         return Err(Fail::Rdk(make(
-            error::code(&failure),
+            error::kind(&failure),
             format!("post-coalescing extraction validation failed: {}", error::to_string(&failure)),
         )));
     }
@@ -962,7 +963,7 @@ fn build_internal(
         match topology::polygons_owned(point_count, vertex_points, primitive_offsets) {
             Ok(value) => value,
             Err(failure) => {
-                return Err(Fail::Rdk(make("invalid_output", error::message(&failure).to_owned())));
+                return Err(Fail::Rdk(make(Code::InvalidOutput, error::message(&failure).to_owned())));
             }
         };
     if internal.require_closed {
@@ -995,7 +996,7 @@ fn build_internal(
             edge_source_sides: edge_source_sides.into(),
             edge_source_edges: edge_source_edges.into(),
         }),
-        Err(failure) => Err(Fail::Rdk(make("invalid_output", error::message(&failure).to_owned()))),
+        Err(failure) => Err(Fail::Rdk(make(Code::InvalidOutput, error::message(&failure).to_owned()))),
     }
 }
 
@@ -1013,7 +1014,7 @@ pub fn build_with_ancestry(
         preferred_side: None,
         with_corner_payload: options.corner_payload,
     };
-    build_internal(cancel_value, None, &internal, expression, c, weiler_value, cells_value, None).map_err(|f| finish_fail("Boolean extraction was cancelled", f))
+    build_internal(cancel_value, None, &internal, expression, c, weiler_value, cells_value, None).map_err(|f| finish_fail(f))
 }
 
 /// Materialize the exact facets selected by packed orientation bytes: zero omits, one keeps
@@ -1036,7 +1037,7 @@ pub fn build_selected_with_ancestry(
         preferred_side: Some(side),
         with_corner_payload: corner_payload,
     };
-    build_internal(cancel_value, Some(selection), &internal, &Expression::Left, c, weiler_value, cells_value, barycentric_cache).map_err(|f| finish_fail("Boolean extraction was cancelled", f))
+    build_internal(cancel_value, Some(selection), &internal, &Expression::Left, c, weiler_value, cells_value, barycentric_cache).map_err(|f| finish_fail(f))
 }
 
 #[allow(non_snake_case)]
@@ -1146,7 +1147,7 @@ pub mod View {
 }
 
 fn reverse_ancestry(cancel_value: Option<&cancel::T>, value: &Ancestry) -> Result<Ancestry, error::T> {
-    reverse_inner(cancel_value, value).map_err(|f| finish_fail("Boolean ancestry reversal was cancelled", f))
+    reverse_inner(cancel_value, value).map_err(|f| finish_fail(f))
 }
 
 fn reverse_inner(cancel_value: Option<&cancel::T>, value: &Ancestry) -> Result<Ancestry, Fail> {
@@ -1218,10 +1219,10 @@ fn reverse_inner(cancel_value: Option<&cancel::T>, value: &Ancestry) -> Result<A
         vertex_points,
         primitive_offsets,
     )
-    .map_err(|failure| Fail::Rdk(make("invalid_output", error::message(&failure).to_owned())))?;
+    .map_err(|failure| Fail::Rdk(make(Code::InvalidOutput, error::message(&failure).to_owned())))?;
     let geometry_value =
         geometry::create(geometry::positions(&value.geometry).clone(), topology_value, None, None, None)
-            .map_err(|failure| Fail::Rdk(make("invalid_output", error::message(&failure).to_owned())))?;
+            .map_err(|failure| Fail::Rdk(make(Code::InvalidOutput, error::message(&failure).to_owned())))?;
     let mut result = value.clone();
     result.geometry = geometry_value;
     result.corner_complex_vertices = corner_complex_vertices.into();
@@ -1241,7 +1242,7 @@ fn concatenate_ancestries(
     cancel_value: Option<&cancel::T>,
     values: &[Ancestry],
 ) -> Result<Ancestry, error::T> {
-    concatenate_inner(cancel_value, values).map_err(|f| finish_fail("Boolean product concatenation was cancelled", f))
+    concatenate_inner(cancel_value, values).map_err(|f| finish_fail(f))
 }
 
 fn concatenate_inner(cancel_value: Option<&cancel::T>, values: &[Ancestry]) -> Result<Ancestry, Fail> {
@@ -1362,11 +1363,11 @@ fn concatenate_inner(cancel_value: Option<&cancel::T>, values: &[Ancestry]) -> R
     let primitive_offsets: Vec<i64> =
         (0..=total_primitives as i64).map(|primitive| primitive * 3).collect();
     let topology_value = topology::polygons_owned(point_count, vertex_points, primitive_offsets)
-        .map_err(|failure| Fail::Rdk(make("invalid_output", error::message(&failure).to_owned())))?;
+        .map_err(|failure| Fail::Rdk(make(Code::InvalidOutput, error::message(&failure).to_owned())))?;
     let positions = packed::Float3::View::of_owned_exn(x, y, z)
-        .map_err(|failure| Fail::Rdk(make("invalid_output", error::message(&failure).to_owned())))?;
+        .map_err(|failure| Fail::Rdk(make(Code::InvalidOutput, error::message(&failure).to_owned())))?;
     let geometry_value = geometry::create(positions, topology_value, None, None, None)
-        .map_err(|failure| Fail::Rdk(make("invalid_output", error::message(&failure).to_owned())))?;
+        .map_err(|failure| Fail::Rdk(make(Code::InvalidOutput, error::message(&failure).to_owned())))?;
     Ok(Ancestry {
         complex: Arc::clone(c),
         geometry: geometry_value,

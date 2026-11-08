@@ -2,6 +2,7 @@
 use std::sync::Arc;
 
 use rdk_core::{attribute, cancel, error, geometry, group};
+use rdk_core::error::Code;
 
 use crate::boolean_extract;
 use crate::boolean_materialization::{self, Detriangulation};
@@ -21,16 +22,16 @@ pub enum SeamOutput {
     CoincidentPatches,
 }
 
-fn make(operation: &str, code: &str, message: String) -> error::T {
-    error::make(operation.to_owned(), code.to_owned(), message, None).unwrap_or_else(|e| e)
+fn make(operation: &str, code: Code, message: String) -> error::T {
+    error::new(operation, code, message)
 }
 
-fn fail_with(code: &str, message: &str) -> error::T {
+fn fail_with(code: Code, message: &str) -> error::T {
     make("boolean", code, message.to_owned())
 }
 
 fn invalid_output(operation: &str, failure: &error::T) -> error::T {
-    make(operation, "invalid_output", error::message(failure).to_owned())
+    make(operation, Code::InvalidOutput, error::message(failure).to_owned())
 }
 
 /// OCaml `String.trim`.
@@ -84,20 +85,20 @@ pub struct Params {
 /// emits A-only, overlap, and B-only boundaries in that stable order.
 pub fn run(params: &Params, left: &geometry::T) -> Result<geometry::T, error::T> {
     if params.grain <= 0 {
-        return Err(fail_with("invalid_parameter", "grain must be positive"));
+        return Err(fail_with(Code::InvalidParameter, "grain must be positive"));
     }
     if !params.point_tolerance.is_finite() || params.point_tolerance < 0. {
-        return Err(fail_with("invalid_parameter", "point_tolerance must be finite and non-negative"));
+        return Err(fail_with(Code::InvalidParameter, "point_tolerance must be finite and non-negative"));
     }
     if !params.tiny_seam_threshold.is_finite() || params.tiny_seam_threshold < 0. {
-        return Err(fail_with("invalid_parameter", "tiny_seam_threshold must be finite and non-negative"));
+        return Err(fail_with(Code::InvalidParameter, "tiny_seam_threshold must be finite and non-negative"));
     }
     if params.cleanup_max_batches <= 0 {
-        return Err(fail_with("invalid_parameter", "cleanup_max_batches must be positive"));
+        return Err(fail_with(Code::InvalidParameter, "cleanup_max_batches must be positive"));
     }
     if let Some(name) = &params.piece_attribute {
         if trimmed_empty(name) {
-            return Err(fail_with("invalid_parameter", "piece attribute name must not be empty"));
+            return Err(fail_with(Code::InvalidParameter, "piece attribute name must not be empty"));
         }
     }
     let group_names: Vec<String> = [&params.left_piece_group, &params.overlap_piece_group, &params.right_piece_group]
@@ -107,10 +108,10 @@ pub fn run(params: &Params, left: &geometry::T) -> Result<geometry::T, error::T>
         .collect();
     let shatter = params.operation == Operation::Shatter;
     if shatter && group_names.iter().any(|name| trimmed_empty(name)) {
-        return Err(fail_with("invalid_parameter", "shatter group names must not be empty"));
+        return Err(fail_with(Code::InvalidParameter, "shatter group names must not be empty"));
     }
     if shatter && has_duplicate(&group_names) {
-        return Err(fail_with("invalid_parameter", "shatter group names must be distinct"));
+        return Err(fail_with(Code::InvalidParameter, "shatter group names must be distinct"));
     }
     let left_kind = params.left_treatment;
     let right_kind = params.right_treatment;
@@ -128,7 +129,7 @@ pub fn run(params: &Params, left: &geometry::T) -> Result<geometry::T, error::T>
         || (operation == Operation::Xor && left_kind != right_kind)
         || operation == Operation::Shatter;
     if shatter && (left_kind != Treatment::Solid || right_kind != Treatment::Solid) {
-        return Err(fail_with("invalid_parameter", "shatter currently requires two solid operands"));
+        return Err(fail_with(Code::InvalidParameter, "shatter currently requires two solid operands"));
     }
     let cancel_arc = params.cancel.as_ref();
     let cancel_ref = params.cancel.as_deref();
@@ -333,7 +334,7 @@ pub fn default_seam_params(right: geometry::T) -> SeamParams {
 /// can receive one complete primitive group. No approximate proximity edge is introduced.
 pub fn seam(params: &SeamParams, left: &geometry::T) -> Result<geometry::T, error::T> {
     if params.grain <= 0 {
-        return Err(fail_with("invalid_parameter", "grain must be positive"));
+        return Err(fail_with(Code::InvalidParameter, "grain must be positive"));
     }
     let names: Vec<String> = match params.output {
         SeamOutput::SeamCurves => {
@@ -346,10 +347,10 @@ pub fn seam(params: &SeamParams, left: &geometry::T) -> Result<geometry::T, erro
         SeamOutput::CoincidentPatches => params.coincident_group.iter().cloned().collect(),
     };
     if names.iter().any(|name| trimmed_empty(name)) {
-        return Err(fail_with("invalid_parameter", "Boolean seam group names must not be empty"));
+        return Err(fail_with(Code::InvalidParameter, "Boolean seam group names must not be empty"));
     }
     if has_duplicate(&names) {
-        return Err(fail_with("invalid_parameter", "Boolean seam group names must be distinct"));
+        return Err(fail_with(Code::InvalidParameter, "Boolean seam group names must be distinct"));
     }
     let cancel_arc = params.cancel.as_ref();
     let grain = params.grain;
