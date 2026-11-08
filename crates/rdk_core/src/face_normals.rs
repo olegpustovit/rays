@@ -1,4 +1,5 @@
 use crate::{cancel, error, geometry, group, packed, topology};
+use crate::error::Code;
 
 fn selected(selection: Option<&group::T>, primitive: i64) -> bool {
     match selection {
@@ -7,11 +8,11 @@ fn selected(selection: Option<&group::T>, primitive: i64) -> bool {
     }
 }
 fn invalid(operation: &str, message: String) -> error::T {
-    error::internal(operation, "invalid_topology", message)
+    error::new(operation, Code::InvalidTopology, message)
 }
 
 fn cancelled(operation: &str) -> error::T {
-    error::internal(operation, "cancelled", "geometry operation was cancelled".to_owned())
+    error::new(operation, Code::Cancelled, "geometry operation was cancelled".to_owned())
 }
 
 fn poll(cancel_value: Option<&cancel::T>, operation: &str, index: i64, mask: i64) -> Result<(), error::T> {

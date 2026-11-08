@@ -1,4 +1,5 @@
 use crate::{attribute, edge_group, error, geometry, group, topology, topology_index};
+use crate::error::Code;
 
 pub fn signed_volume(geometry_value: &geometry::T) -> Result<f64, error::T> {
     let topology_value = geometry::topology(geometry_value);
@@ -110,13 +111,13 @@ impl DisjointSet {
 }
 
 fn make_error(message: String) -> error::T {
-    error::internal("connectivity", "invalid_connectivity", message)
+    error::new("connectivity", Code::InvalidConnectivity, message)
 }
 fn connectivity_error(value: error::T) -> error::T {
     if error::code(&value) == "cancelled" {
-        error::internal(
+        error::new(
             "connectivity",
-            "cancelled",
+            Code::Cancelled,
             "connectivity classification was cancelled".to_owned(),
         )
     } else {

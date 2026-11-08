@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::{error, packed, support};
+use crate::error::Code;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Owner {
@@ -65,7 +66,7 @@ pub struct T {
 }
 
 fn invalid_attribute(operation: &str, message: &str) -> error::T {
-    error::internal(operation, "invalid_attribute", message.to_owned())
+    error::new(operation, Code::InvalidAttribute, message.to_owned())
 }
 
 

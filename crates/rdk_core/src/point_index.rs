@@ -1,6 +1,7 @@
 use std::sync::{Arc, LazyLock};
 
 use crate::{cancel, error, support, topology};
+use crate::error::Code;
 
 struct Data {
     primitive_of_vertex: Arc<[i64]>,
@@ -16,9 +17,9 @@ pub struct T {
 pub type Index = T;
 
 fn cancelled_error() -> error::T {
-    error::internal(
+    error::new(
         "Point_index.create",
-        "cancelled",
+        Code::Cancelled,
         "geometry operation was cancelled".to_owned(),
     )
 }
@@ -112,9 +113,9 @@ pub fn create(
     })?;
     match value {
         support::IdentityValue::PointIndex(index) => Ok(index),
-        support::IdentityValue::TopologyIndex(_) => Err(error::internal(
+        support::IdentityValue::TopologyIndex(_) => Err(error::new(
             "Point_index.create",
-            "invalid_point_index",
+            Code::InvalidPointIndex,
             "Point_index cache contained a topology index".to_owned(),
         )),
     }

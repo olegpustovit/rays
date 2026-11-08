@@ -1,6 +1,7 @@
 use std::sync::{Arc, LazyLock};
 
 use crate::{cancel, error, point_index, support, topology};
+use crate::error::Code;
 
 struct Data {
     topology_id: i64,
@@ -29,15 +30,15 @@ pub struct T {
 pub type Index = T;
 
 fn cancelled_error() -> error::T {
-    error::internal(
+    error::new(
         "Topology_index.create",
-        "cancelled",
+        Code::Cancelled,
         "geometry operation was cancelled".to_owned(),
     )
 }
 
 fn table_error(message: &str) -> error::T {
-    error::internal("Topology_index.create", "invalid_topology_index", message.to_owned())
+    error::new("Topology_index.create", Code::InvalidTopologyIndex, message.to_owned())
 }
 
 fn next_power_of_two(value: usize) -> Result<usize, error::T> {
@@ -271,9 +272,9 @@ pub fn create(
     })?;
     match value {
         support::IdentityValue::TopologyIndex(index) => Ok(index),
-        support::IdentityValue::PointIndex(_) => Err(error::internal(
+        support::IdentityValue::PointIndex(_) => Err(error::new(
             "Topology_index.create",
-            "invalid_topology_index",
+            Code::InvalidTopologyIndex,
             "Topology_index cache contained a point index".to_owned(),
         )),
     }
@@ -297,9 +298,9 @@ fn get(name: &str, values: &[i64], index: i64) -> Result<i64, error::T> {
         .filter(|&index| index < values.len())
     else {
         let operation = format!("Topology_index.{name}");
-        return Err(error::internal(
+        return Err(error::new(
             &operation,
-            "invalid_topology_index",
+            Code::InvalidTopologyIndex,
             format!("Topology_index.{name}: index out of bounds"),
         ));
     };
@@ -357,9 +358,9 @@ pub fn edge_incidence_count(value: &T, edge: i64) -> Result<i64, error::T> {
         .ok()
         .filter(|&edge| edge < value.data.edge_a.len())
         .ok_or_else(|| {
-            error::internal(
+            error::new(
                 "Topology_index.edge_incidence_count",
-                "invalid_topology_index",
+                Code::InvalidTopologyIndex,
                 "Topology_index.edge_incidence_count: index out of bounds".to_owned(),
             )
         })?;
@@ -369,9 +370,9 @@ pub fn edge_incidence_count(value: &T, edge: i64) -> Result<i64, error::T> {
 pub fn edge_vertex(value: &T, edge: i64, local: i64) -> Result<i64, error::T> {
     let count = edge_incidence_count(value, edge)?;
     if local < 0 || local >= count {
-        return Err(error::internal(
+        return Err(error::new(
             "Topology_index.edge_vertex",
-            "invalid_topology_index",
+            Code::InvalidTopologyIndex,
             "Topology_index.edge_vertex: local index out of bounds".to_owned(),
         ));
     }
@@ -381,9 +382,9 @@ pub fn edge_vertex(value: &T, edge: i64, local: i64) -> Result<i64, error::T> {
 
 pub fn point_incidence_count(value: &T, point: i64) -> Result<i64, error::T> {
     if point < 0 || point >= value.data.point_count {
-        return Err(error::internal(
+        return Err(error::new(
             "Topology_index.point_incidence_count",
-            "invalid_topology_index",
+            Code::InvalidTopologyIndex,
             "Topology_index.point_incidence_count: point out of bounds".to_owned(),
         ));
     }
@@ -393,9 +394,9 @@ pub fn point_incidence_count(value: &T, point: i64) -> Result<i64, error::T> {
 pub fn point_vertex(value: &T, point: i64, local: i64) -> Result<i64, error::T> {
     let count = point_incidence_count(value, point)?;
     if local < 0 || local >= count {
-        return Err(error::internal(
+        return Err(error::new(
             "Topology_index.point_vertex",
-            "invalid_topology_index",
+            Code::InvalidTopologyIndex,
             "Topology_index.point_vertex: local index out of bounds".to_owned(),
         ));
     }
@@ -404,9 +405,9 @@ pub fn point_vertex(value: &T, point: i64, local: i64) -> Result<i64, error::T> 
 
 pub fn point_edge_count(value: &T, point: i64) -> Result<i64, error::T> {
     if point < 0 || point >= value.data.point_count {
-        return Err(error::internal(
+        return Err(error::new(
             "Topology_index.point_edge_count",
-            "invalid_topology_index",
+            Code::InvalidTopologyIndex,
             "Topology_index.point_edge_count: point out of bounds".to_owned(),
         ));
     }
@@ -419,9 +420,9 @@ pub fn point_edge_count(value: &T, point: i64) -> Result<i64, error::T> {
 pub fn point_edge(value: &T, point: i64, local: i64) -> Result<i64, error::T> {
     let count = point_edge_count(value, point)?;
     if local < 0 || local >= count {
-        return Err(error::internal(
+        return Err(error::new(
             "Topology_index.point_edge",
-            "invalid_topology_index",
+            Code::InvalidTopologyIndex,
             "Topology_index.point_edge: local index out of bounds".to_owned(),
         ));
     }

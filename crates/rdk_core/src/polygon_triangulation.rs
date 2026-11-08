@@ -1,12 +1,13 @@
 use crate::{cancel, error, packed, topology};
+use crate::error::Code;
 fn invalid_polygon(message: String) -> error::T {
-    error::internal("polygon_triangulation", "invalid_polygon", message)
+    error::new("polygon_triangulation", Code::InvalidPolygon, message)
 }
 
 fn cancelled_error() -> error::T {
-    error::internal(
+    error::new(
         "polygon_triangulation",
-        "cancelled",
+        Code::Cancelled,
         "polygon triangulation was cancelled".to_owned(),
     )
 }

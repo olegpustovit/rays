@@ -2,6 +2,7 @@ use crate::{
     attribute, cancel, element_selection, error, face_normals, geometry, group, packed, point_index,
     topology,
 };
+use crate::error::Code;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Weighting {
@@ -38,8 +39,8 @@ fn max_abs3(x: f64, y: f64, z: f64) -> f64 {
     x.abs().max(y.abs()).max(z.abs())
 }
 
-fn make_error(code: &str, message: String) -> error::T {
-    error::internal("normals", code, message)
+fn make_error(code: Code, message: String) -> error::T {
+    error::new("normals", code, message)
 }
 
 fn blank_attribute_name(name: &str) -> bool {
@@ -50,15 +51,15 @@ fn blank_attribute_name(name: &str) -> bool {
 
 fn remap_error(value: error::T) -> error::T {
     if error::code(&value) == "cancelled" {
-        make_error("cancelled", "geometry operation was cancelled".to_owned())
+        make_error(Code::Cancelled, "geometry operation was cancelled".to_owned())
     } else {
-        make_error("invalid_topology", error::message(&value).to_owned())
+        make_error(Code::InvalidTopology, error::message(&value).to_owned())
     }
 }
 
 fn poll(cancel_value: Option<&cancel::T>, index: i64, mask: i64) -> Result<(), error::T> {
     cancel::poll(cancel_value, index, mask)
-        .map_err(|_| make_error("cancelled", "geometry operation was cancelled".to_owned()))
+        .map_err(|_| make_error(Code::Cancelled, "geometry operation was cancelled".to_owned()))
 }
 
 fn validate_primitives(
@@ -70,13 +71,13 @@ fn validate_primitives(
     };
     if group::owner(value) != group::Owner::Primitive {
         return Err(make_error(
-            "invalid_topology",
+            Code::InvalidTopology,
             format!("{OPERATION}: contribution selection must own primitives"),
         ));
     }
     if group::length(value) != topology::primitive_count(topology_value) {
         return Err(make_error(
-            "invalid_topology",
+            Code::InvalidTopology,
             format!("{OPERATION}: contribution selection length does not match primitive count"),
         ));
     }
@@ -150,7 +151,7 @@ fn accumulate_points(
     let positions = packed::Float3::View::view(geometry::positions(geometry_value))
         .map_err(remap_error)?;
     let count = usize::try_from(topology.point_count)
-        .map_err(|_| make_error("invalid_topology", format!("{OPERATION}: invalid point count")))?;
+        .map_err(|_| make_error(Code::InvalidTopology, format!("{OPERATION}: invalid point count")))?;
     let mut x = vec![0.0; count];
     let mut y = vec![0.0; count];
     let mut z = vec![0.0; count];
@@ -243,7 +244,7 @@ fn existing_planes(
                 attribute::Owner::Detail => "detail",
             };
             Err(make_error(
-                "invalid_topology",
+                Code::InvalidTopology,
                 format!("{OPERATION}: {owner_name} {name} must have float3 storage"),
             ))
         }
@@ -319,7 +320,7 @@ fn write_points(
         }
     }
     if let Some(point) = first_error(errors) {
-        Err(make_error("invalid_topology", format!("{OPERATION}: non-finite point normal at {point}")))
+        Err(make_error(Code::InvalidTopology, format!("{OPERATION}: non-finite point normal at {point}")))
     } else {
         Ok(())
     }
@@ -349,7 +350,7 @@ fn write_smooth_vertices(
         }
     }
     if let Some(vertex) = first_error(errors) {
-        Err(make_error("invalid_topology", format!("{OPERATION}: non-finite vertex normal at {vertex}")))
+        Err(make_error(Code::InvalidTopology, format!("{OPERATION}: non-finite vertex normal at {vertex}")))
     } else {
         Ok(())
     }
@@ -432,7 +433,7 @@ fn write_cusped_vertices(
         }
     }
     if let Some(vertex) = first_error(errors) {
-        Err(make_error("invalid_topology", format!("{OPERATION}: non-finite vertex normal at {vertex}")))
+        Err(make_error(Code::InvalidTopology, format!("{OPERATION}: non-finite vertex normal at {vertex}")))
     } else {
         Ok(())
     }
@@ -476,7 +477,7 @@ fn fast_point_area(
     )
     .map_err(remap_error)?;
     let point_count = usize::try_from(topology.point_count)
-        .map_err(|_| make_error("invalid_topology", format!("{OPERATION}: invalid point count")))?;
+        .map_err(|_| make_error(Code::InvalidTopology, format!("{OPERATION}: invalid point count")))?;
     let mut x = vec![0.0; point_count];
     let mut y = vec![0.0; point_count];
     let mut z = vec![0.0; point_count];
@@ -517,7 +518,7 @@ fn fast_point_area(
     }
     if let Some(point) = first_error(errors) {
         return Err(make_error(
-            "invalid_topology",
+            Code::InvalidTopology,
             format!("{OPERATION}: non-finite point normal at {point}"),
         ));
     }
@@ -528,22 +529,22 @@ pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T,
     let grain = params.grain.unwrap_or(16_384);
     let cancel_value = params.cancel.as_ref();
     if grain <= 0 {
-        return Err(make_error("invalid_topology", format!("{OPERATION}: grain must be positive")));
+        return Err(make_error(Code::InvalidTopology, format!("{OPERATION}: grain must be positive")));
     }
     if blank_attribute_name(&params.attribute) {
-        return Err(make_error("invalid_topology", format!("{OPERATION}: attribute name must not be empty")));
+        return Err(make_error(Code::InvalidTopology, format!("{OPERATION}: attribute name must not be empty")));
     }
     if !params.cusp_angle.is_finite()
         || params.cusp_angle < 0.0
         || params.cusp_angle > std::f64::consts::PI
     {
         return Err(make_error(
-            "invalid_topology",
+            Code::InvalidTopology,
             format!("{OPERATION}: cusp angle must be finite and in [0, pi]"),
         ));
     }
     cancel::check_opt(cancel_value)
-        .map_err(|_| make_error("cancelled", "geometry operation was cancelled".to_owned()))?;
+        .map_err(|_| make_error(Code::Cancelled, "geometry operation was cancelled".to_owned()))?;
     let topology_value = geometry::topology(geometry_value);
     element_selection::validate("normals", topology_value, params.selection.as_ref())
         .map_err(remap_error)?;
@@ -597,7 +598,7 @@ pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T,
         attribute::Owner::Point => {
             let sums = accumulate_points(cancel_value, params.weighting, geometry_value, &faces)?;
             let count = usize::try_from(geometry::point_count(geometry_value))
-                .map_err(|_| make_error("invalid_topology", format!("{OPERATION}: invalid point count")))?;
+                .map_err(|_| make_error(Code::InvalidTopology, format!("{OPERATION}: invalid point count")))?;
             let mut output = if effective_selection.is_none() {
                 initial(count, None)
             } else {
@@ -614,7 +615,7 @@ pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T,
         }
         attribute::Owner::Vertex => {
             let count = usize::try_from(geometry::vertex_count(geometry_value))
-                .map_err(|_| make_error("invalid_topology", format!("{OPERATION}: invalid vertex count")))?;
+                .map_err(|_| make_error(Code::InvalidTopology, format!("{OPERATION}: invalid vertex count")))?;
             let mut output = initial(count, existing.as_ref());
             let write_smooth = |selection: Option<&group::T>,
                                 output: &mut Planes|
@@ -658,7 +659,7 @@ pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T,
         }
         attribute::Owner::Primitive => {
             let count = usize::try_from(geometry::primitive_count(geometry_value))
-                .map_err(|_| make_error("invalid_topology", format!("{OPERATION}: invalid primitive count")))?;
+                .map_err(|_| make_error(Code::InvalidTopology, format!("{OPERATION}: invalid primitive count")))?;
             let mut output = if effective_selection.is_none() {
                 initial(count, None)
             } else {
@@ -684,7 +685,7 @@ pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T,
             }
             if let Some(primitive) = first_error(errors) {
                 return Err(make_error(
-                    "invalid_topology",
+                    Code::InvalidTopology,
                     format!("{OPERATION}: non-finite primitive normal at {primitive}"),
                 ));
             }
@@ -703,7 +704,7 @@ pub fn run(params: &Params, geometry_value: &geometry::T) -> Result<geometry::T,
             let mut output = initial(1, existing.as_ref());
             if !store(&mut output, 0, sx, sy, sz) {
                 return Err(make_error(
-                    "invalid_topology",
+                    Code::InvalidTopology,
                     format!("{OPERATION}: non-finite detail normal"),
                 ));
             }

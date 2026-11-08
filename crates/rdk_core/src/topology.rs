@@ -1,6 +1,7 @@
 use std::sync::{Arc, OnceLock};
 
 use crate::{error, packed::Deferred, support};
+use crate::error::Code;
 
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -92,39 +93,39 @@ fn validate(
     primitive_kinds: &[u8],
 ) -> Result<(), error::T> {
     if point_count < 0 {
-        return Err(error::internal(
+        return Err(error::new(
             operation,
-            "invalid_topology",
+            Code::InvalidTopology,
             "Topology: point count is negative".to_owned(),
         ));
     }
     if primitive_offsets.is_empty() {
-        return Err(error::internal(
+        return Err(error::new(
             operation,
-            "invalid_topology",
+            Code::InvalidTopology,
             "Topology: primitive offsets must contain the initial zero".to_owned(),
         ));
     }
     if primitive_offsets[0] != 0 {
-        return Err(error::internal(
+        return Err(error::new(
             operation,
-            "invalid_topology",
+            Code::InvalidTopology,
             "Topology: first primitive offset must be zero".to_owned(),
         ));
     }
     if primitive_offsets[primitive_offsets.len() - 1]
         != i64::try_from(vertex_points.len()).expect("Topology: too many vertices")
     {
-        return Err(error::internal(
+        return Err(error::new(
             operation,
-            "invalid_topology",
+            Code::InvalidTopology,
             "Topology: final primitive offset must equal vertex count".to_owned(),
         ));
     }
     if primitive_kinds.len() != primitive_offsets.len() - 1 {
-        return Err(error::internal(
+        return Err(error::new(
             operation,
-            "invalid_topology",
+            Code::InvalidTopology,
             "Topology: primitive kind count must match primitive count".to_owned(),
         ));
     }
@@ -132,16 +133,16 @@ fn validate(
         .iter()
         .any(|&point| point < 0 || point >= point_count)
     {
-        return Err(error::internal(
+        return Err(error::new(
             operation,
-            "invalid_topology",
+            Code::InvalidTopology,
             "Topology: vertex references an invalid point".to_owned(),
         ));
     }
     if primitive_offsets.windows(2).any(|offsets| offsets[1] < offsets[0]) {
-        return Err(error::internal(
+        return Err(error::new(
             operation,
-            "invalid_topology",
+            Code::InvalidTopology,
             "Topology: primitive offsets are not ordered".to_owned(),
         ));
     }
@@ -158,9 +159,9 @@ fn validate(
             PrimitiveKind::Polygon | PrimitiveKind::ClosedPolyline => 3,
         };
         if size < minimum {
-            return Err(error::internal(
+            return Err(error::new(
                 operation,
-                "invalid_topology",
+                Code::InvalidTopology,
                 "Topology: primitive has too few vertices for its kind".to_owned(),
             ));
         }
@@ -169,7 +170,7 @@ fn validate(
 }
 
 fn invalid_topology(operation: &str, message: &str) -> error::T {
-    error::internal(operation, "invalid_topology", message.to_owned())
+    error::new(operation, Code::InvalidTopology, message.to_owned())
 }
 
 pub fn empty(point_count: i64) -> Result<T, error::T> {
@@ -258,9 +259,9 @@ pub fn point_of_vertex(value: &T, vertex: i64) -> Result<i64, error::T> {
         .ok()
         .filter(|&vertex| vertex < planes.vertex_points.len())
         .ok_or_else(|| {
-            error::internal(
+            error::new(
                 "Topology.point_of_vertex",
-                "invalid_topology",
+                Code::InvalidTopology,
                 "Topology.point_of_vertex: index out of bounds".to_owned(),
             )
         })?;
@@ -273,9 +274,9 @@ pub fn primitive_vertex_range(value: &T, primitive: i64) -> Result<(i64, i64), e
         .ok()
         .filter(|&primitive| primitive < planes.primitive_kinds.len())
         .ok_or_else(|| {
-            error::internal(
+            error::new(
                 "Topology.primitive_vertex_range",
-                "invalid_topology",
+                Code::InvalidTopology,
                 "Topology.primitive_vertex_range: index out of bounds".to_owned(),
             )
         })?;
@@ -296,9 +297,9 @@ pub fn primitive_kind(value: &T, primitive: i64) -> Result<PrimitiveKind, error:
         .ok()
         .filter(|&primitive| primitive < planes.primitive_kinds.len())
         .ok_or_else(|| {
-            error::internal(
+            error::new(
                 "Topology.primitive_kind",
-                "invalid_topology",
+                Code::InvalidTopology,
                 "Topology.primitive_kind: index out of bounds".to_owned(),
             )
         })?;
@@ -477,30 +478,30 @@ pub mod Builder {
         let vertex_capacity = vertex_capacity.unwrap_or(0);
         let primitive_capacity = primitive_capacity.unwrap_or(0);
         if point_count < 0 || vertex_capacity < 0 || primitive_capacity < 0 {
-            return Err(error::internal(
+            return Err(error::new(
                 "Topology.Builder.create",
-                "invalid_argument",
+                Code::InvalidArgument,
                 "Topology.Builder.create: negative count".to_owned(),
             ));
         }
         let vertex_capacity = usize::try_from(vertex_capacity).map_err(|_| {
-            error::internal(
+            error::new(
                 "Topology.Builder.create",
-                "invalid_argument",
+                Code::InvalidArgument,
                 "Topology.Builder.create: vertex capacity exceeds array limits".to_owned(),
             )
         })?;
         let primitive_capacity = usize::try_from(primitive_capacity).map_err(|_| {
-            error::internal(
+            error::new(
                 "Topology.Builder.create",
-                "invalid_argument",
+                Code::InvalidArgument,
                 "Topology.Builder.create: primitive capacity exceeds array limits".to_owned(),
             )
         })?;
         let offset_capacity = primitive_capacity.checked_add(1).ok_or_else(|| {
-            error::internal(
+            error::new(
                 "Topology.Builder.create",
-                "invalid_argument",
+                Code::InvalidArgument,
                 "Topology.Builder.create: primitive capacity exceeds array limits".to_owned(),
             )
         })?;
@@ -508,9 +509,9 @@ pub mod Builder {
         vertex_points
             .try_reserve_exact(vertex_capacity)
             .map_err(|_| {
-                error::internal(
+                error::new(
                     "Topology.Builder.create",
-                    "invalid_argument",
+                    Code::InvalidArgument,
                     "Topology.Builder.create: vertex capacity exceeds array limits".to_owned(),
                 )
             })?;
@@ -518,9 +519,9 @@ pub mod Builder {
         primitive_offsets
             .try_reserve_exact(offset_capacity)
             .map_err(|_| {
-                error::internal(
+                error::new(
                     "Topology.Builder.create",
-                    "invalid_argument",
+                    Code::InvalidArgument,
                     "Topology.Builder.create: primitive capacity exceeds array limits".to_owned(),
                 )
             })?;
@@ -528,9 +529,9 @@ pub mod Builder {
         primitive_kinds
             .try_reserve_exact(primitive_capacity)
             .map_err(|_| {
-                error::internal(
+                error::new(
                     "Topology.Builder.create",
-                    "invalid_argument",
+                    Code::InvalidArgument,
                     "Topology.Builder.create: primitive capacity exceeds array limits".to_owned(),
                 )
             })?;
@@ -552,16 +553,16 @@ pub mod Builder {
         points: &[i64],
     ) -> Result<(), error::T> {
         if builder.frozen {
-            return Err(error::internal(
+            return Err(error::new(
                 "Topology.Builder",
-                "invalid_argument",
+                Code::InvalidArgument,
                 "Topology.Builder: builder is frozen".to_owned(),
             ));
         }
         if points.len() < minimum {
-            return Err(error::internal(
+            return Err(error::new(
                 "Topology.Builder",
-                "invalid_topology",
+                Code::InvalidTopology,
                 "Topology.Builder: primitive has too few vertices".to_owned(),
             ));
         }
@@ -569,9 +570,9 @@ pub mod Builder {
             .iter()
             .any(|&point| point < 0 || point >= builder.point_count)
         {
-            return Err(error::internal(
+            return Err(error::new(
                 "Topology.Builder",
-                "invalid_topology",
+                Code::InvalidTopology,
                 "Topology.Builder.add_polygon: invalid point".to_owned(),
             ));
         }
@@ -581,9 +582,9 @@ pub mod Builder {
             .checked_add(points.len())
             .and_then(|count| i64::try_from(count).ok())
             .ok_or_else(|| {
-                error::internal(
+                error::new(
                     "Topology.Builder",
-                    "invalid_topology",
+                    Code::InvalidTopology,
                     "Topology.Builder: too many vertices".to_owned(),
                 )
             })?;
@@ -591,23 +592,23 @@ pub mod Builder {
             .vertex_points
             .try_reserve(points.len())
             .map_err(|_| {
-                error::internal(
+                error::new(
                     "Topology.Builder",
-                    "invalid_topology",
+                    Code::InvalidTopology,
                     "Topology.Builder: too many vertices".to_owned(),
                 )
             })?;
         builder.primitive_offsets.try_reserve(1).map_err(|_| {
-            error::internal(
+            error::new(
                 "Topology.Builder",
-                "invalid_topology",
+                Code::InvalidTopology,
                 "Topology.Builder: too many primitives".to_owned(),
             )
         })?;
         builder.primitive_kinds.try_reserve(1).map_err(|_| {
-            error::internal(
+            error::new(
                 "Topology.Builder",
-                "invalid_topology",
+                Code::InvalidTopology,
                 "Topology.Builder: too many primitives".to_owned(),
             )
         })?;
@@ -627,9 +628,9 @@ pub mod Builder {
 
     pub fn freeze(builder: &mut T) -> Result<super::T, error::T> {
         if builder.frozen {
-            return Err(error::internal(
+            return Err(error::new(
                 "Topology.Builder",
-                "invalid_argument",
+                Code::InvalidArgument,
                 "Topology.Builder: builder is frozen".to_owned(),
             ));
         }
@@ -665,17 +666,17 @@ pub mod View {
             });
         }
         let Some(deferred) = value.inner.deferred.as_ref() else {
-            return Err(error::internal(
+            return Err(error::new(
                 "Topology.View.view",
-                "invalid_topology",
+                Code::InvalidTopology,
                 "Topology: missing payload".to_owned(),
             ));
         };
         match Deferred::force(deferred)? {
             Deferred::Value::Topology(materialised) => view(&materialised),
-            _ => Err(error::internal(
+            _ => Err(error::new(
                 "Topology.View.view",
-                "invalid_topology",
+                Code::InvalidTopology,
                 "Topology.deferred: materialiser returned an invalid value".to_owned(),
             )),
         }

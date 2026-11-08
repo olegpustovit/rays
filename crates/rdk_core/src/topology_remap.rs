@@ -2,13 +2,14 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::{attribute, cancel, edge_group, error, geometry, group, packed, ragged_ops, support, topology, topology_edge_lookup, topology_index};
+use crate::error::Code;
 
 fn invalid_remap(message: String) -> error::T {
-    error::internal("topology_remap", "invalid_remap", message)
+    error::new("topology_remap", Code::InvalidRemap, message)
 }
 
 fn cancelled_error() -> error::T {
-    error::internal("topology_remap", "cancelled", "topology remap was cancelled".to_owned())
+    error::new("topology_remap", Code::Cancelled, "topology remap was cancelled".to_owned())
 }
 fn run_indexed_ranges(
     grain: i64,
@@ -693,7 +694,7 @@ mod tests {
     }
     #[test]
     fn range_worker_errors_are_not_reclassified_as_cancellation() {
-        let worker_error = error::internal("worker", "worker_failure", "range failure".to_owned());
+        let worker_error = error::new("worker", Code::WorkerFailure, "range failure".to_owned());
         let result = run_indexed_ranges(1, 1, &|_, _, _| Err(worker_error.clone()));
         let error = result.unwrap_err();
         assert_eq!(error::code(&error), "worker_failure");

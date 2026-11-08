@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::{attribute, edge_group, error, group, packed, support, topology};
+use crate::error::Code;
 
 #[derive(Clone)]
 pub struct T {
@@ -31,7 +32,7 @@ fn group_count(value: &topology::T, owner: group::Owner) -> i64 {
 }
 
 fn geometry_error(message: String) -> error::T {
-    error::internal("geometry", "invalid_geometry", message)
+    error::new("geometry", Code::InvalidGeometry, message)
 }
 
 fn attribute_owner_tag(owner: attribute::Owner) -> u8 {

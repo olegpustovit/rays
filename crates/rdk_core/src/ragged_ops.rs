@@ -1,15 +1,16 @@
 use std::mem::take;
 
 use crate::{cancel, error, packed, support};
+use crate::error::Code;
 
 const DEFAULT_GRAIN: i64 = 16_384;
 
 fn invalid_ragged(message: String) -> error::T {
-    error::internal("ragged_ops", "invalid_ragged", message)
+    error::new("ragged_ops", Code::InvalidRagged, message)
 }
 
 fn cancelled_error() -> error::T {
-    error::internal("ragged_ops", "cancelled", "ragged operation was cancelled".to_owned())
+    error::new("ragged_ops", Code::Cancelled, "ragged operation was cancelled".to_owned())
 }
 fn run_indexed_ranges(
     grain: i64,
@@ -264,7 +265,7 @@ mod tests {
     }
     #[test]
     fn range_worker_errors_are_preserved() {
-        let worker_error = error::internal("worker", "worker_failure", "range failure".to_owned());
+        let worker_error = error::new("worker", Code::WorkerFailure, "range failure".to_owned());
         let result = run_indexed_ranges(1, 1, &|_, _, _| Err(worker_error.clone()));
         let error = result.unwrap_err();
         assert_eq!(error::code(&error), "worker_failure");

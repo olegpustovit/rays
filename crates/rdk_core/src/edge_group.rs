@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use crate::{cancel, error, support, topology, topology_index};
+use crate::error::Code;
 
 pub struct T {
     topology_id: i64,
@@ -43,7 +44,7 @@ fn require_name(operation: &str, name: &str) -> Result<(), error::T> {
     }
 }
 fn invalid_edge_group(operation: &str, message: &str) -> error::T {
-    error::internal(operation, "invalid_edge_group", message.to_owned())
+    error::new(operation, Code::InvalidEdgeGroup, message.to_owned())
 }
 
 fn require_index(
@@ -330,9 +331,9 @@ pub mod View {
 }
 
 fn cancelled_error(operation: &str) -> error::T {
-    error::internal(
+    error::new(
         operation,
-        "cancelled",
+        Code::Cancelled,
         "geometry operation was cancelled".to_owned(),
     )
 }

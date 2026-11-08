@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use crate::{cancel, error, support};
+use crate::error::Code;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Owner {
@@ -41,7 +42,7 @@ fn require_name(operation: &str, name: &str) -> Result<(), error::T> {
 }
 
 fn invalid_group(operation: &str, message: &str) -> error::T {
-    error::internal(operation, "invalid_group", message.to_owned())
+    error::new(operation, Code::InvalidGroup, message.to_owned())
 }
 
 fn new(owner: Owner, name: String, length: i64, bits: Vec<u8>, order: Option<Vec<i64>>) -> T {
@@ -375,9 +376,9 @@ pub fn union_many(
     };
     support::parallel_for(cancel_value, chunk, count, &work).map_err(|failure| {
         if error::code(&failure) == "cancelled" {
-            error::internal(
+            error::new(
                 "Group.union_many",
-                "cancelled",
+                Code::Cancelled,
                 error::message(&failure).to_owned(),
             )
         } else {
@@ -423,6 +424,7 @@ pub fn symmetric_difference(left: &T, right: &T) -> Result<T, error::T> {
 #[allow(non_snake_case)]
 pub mod Builder {
     use super::{byte_count, error, new, require_name, Owner};
+    use crate::error::Code;
 
     pub struct T {
         owner: Owner,
@@ -435,9 +437,9 @@ pub mod Builder {
     pub fn create(owner: Owner, name: &str, length: i64) -> Result<T, error::T> {
         require_name("Group.Builder.create", name)?;
         if length < 0 {
-            return Err(error::internal(
+            return Err(error::new(
                 "Group.Builder.create",
-                "invalid_group",
+                Code::InvalidGroup,
                 "Group.Builder.create: negative length".to_owned(),
             ));
         }
@@ -452,16 +454,16 @@ pub mod Builder {
 
     pub fn set(value: &mut T, index: i64, member: bool) -> Result<(), error::T> {
         if value.frozen {
-            return Err(error::internal(
+            return Err(error::new(
                 "Group.Builder.set",
-                "invalid_group",
+                Code::InvalidGroup,
                 "Group.Builder.set: builder is frozen".to_owned(),
             ));
         }
         if index < 0 || index >= value.length {
-            return Err(error::internal(
+            return Err(error::new(
                 "Group.Builder.set",
-                "invalid_group",
+                Code::InvalidGroup,
                 "Group.Builder.set: invalid index".to_owned(),
             ));
         }
@@ -478,9 +480,9 @@ pub mod Builder {
 
     pub fn freeze(value: &mut T) -> Result<Group, error::T> {
         if value.frozen {
-            return Err(error::internal(
+            return Err(error::new(
                 "Group.Builder.freeze",
-                "invalid_group",
+                Code::InvalidGroup,
                 "Group.Builder.freeze: already frozen".to_owned(),
             ));
         }

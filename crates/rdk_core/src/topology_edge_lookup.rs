@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::{cancel, error, topology, topology_index};
+use crate::error::Code;
 
 pub struct T {
     point_count: i64,
@@ -10,17 +11,17 @@ pub struct T {
 }
 
 fn cancelled_error() -> error::T {
-    error::internal(
+    error::new(
         "Topology_edge_lookup.create",
-        "cancelled",
+        Code::Cancelled,
         "geometry operation was cancelled".to_owned(),
     )
 }
 
 fn invalid_table_error(message: &str) -> error::T {
-    error::internal(
+    error::new(
         "Topology_edge_lookup.create",
-        "invalid_topology_edge_lookup",
+        Code::InvalidTopologyEdgeLookup,
         message.to_owned(),
     )
 }
@@ -114,9 +115,9 @@ pub fn endpoints(value: &T, edge: i64) -> Result<(i64, i64), error::T> {
         .ok()
         .filter(|&edge| edge < value.edge_a.len())
         .ok_or_else(|| {
-            error::internal(
+            error::new(
                 "Topology_edge_lookup.endpoints",
-                "invalid_topology_edge_lookup",
+                Code::InvalidTopologyEdgeLookup,
                 "Topology_edge_lookup.endpoints: index out of bounds".to_owned(),
             )
         })?;

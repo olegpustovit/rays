@@ -1,7 +1,7 @@
-use crate::error;
+use crate::error::{self, Code};
 
 fn invalid_pattern(message: String) -> error::T {
-    error::internal("attribute_pattern", "invalid_pattern", message)
+    error::new("attribute_pattern", Code::InvalidPattern, message)
 }
 #[derive(Clone, PartialEq)]
 enum Atom {

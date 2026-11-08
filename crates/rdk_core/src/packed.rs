@@ -1,14 +1,14 @@
 use std::sync::{Arc, Mutex, OnceLock};
 
-use crate::error;
+use crate::error::{self, Code};
 
 fn same_length(name: &str, expected: i64, actual: i64) -> Result<(), error::T> {
     if expected == actual {
         Ok(())
     } else {
-        Err(error::internal(
+        Err(error::new(
             name,
-            "invalid_argument",
+            Code::InvalidArgument,
             format!("{name}: plane lengths differ ({expected} and {actual})"),
         ))
     }
@@ -30,9 +30,9 @@ fn validate_offsets(name: &str, offsets: &[i64], value_count: i64) -> Result<(),
         None
     };
     match failure {
-        Some(message) => Err(error::internal(
+        Some(message) => Err(error::new(
             &format!("Packed.{name}"),
-            "invalid_offsets",
+            Code::InvalidOffsets,
             format!("Packed.{name}: {message}"),
         )),
         None => Ok(()),
@@ -42,30 +42,30 @@ fn validate_offsets(name: &str, offsets: &[i64], value_count: i64) -> Result<(),
 fn row_range(name: &str, offsets: &[i64], index: i64) -> Result<(usize, usize), error::T> {
     let length = i64::try_from(offsets.len()).unwrap_or(i64::MAX) - 1;
     if index < 0 || index >= length {
-        return Err(error::internal(
+        return Err(error::new(
             &format!("Packed.{name}.row_range"),
-            "invalid_argument",
+            Code::InvalidArgument,
             "index out of bounds".to_owned(),
         ));
     }
     let index = usize::try_from(index).map_err(|_| {
-        error::internal(
+        error::new(
             &format!("Packed.{name}.row_range"),
-            "invalid_argument",
+            Code::InvalidArgument,
             "index out of bounds".to_owned(),
         )
     })?;
     let first = usize::try_from(offsets[index]).map_err(|_| {
-        error::internal(
+        error::new(
             &format!("Packed.{name}.row_range"),
-            "invalid_offsets",
+            Code::InvalidOffsets,
             "negative row offset".to_owned(),
         )
     })?;
     let last = usize::try_from(offsets[index + 1]).map_err(|_| {
-        error::internal(
+        error::new(
             &format!("Packed.{name}.row_range"),
-            "invalid_offsets",
+            Code::InvalidOffsets,
             "negative row offset".to_owned(),
         )
     })?;
@@ -223,7 +223,7 @@ pub mod FloatArray {
 #[allow(non_snake_case)]
 pub mod Float2 {
     use super::same_length;
-    use crate::error;
+    use crate::error::{self, Code};
     use std::sync::Arc;
 
     #[derive(Clone)]
@@ -267,7 +267,7 @@ pub mod Float2 {
 
     pub fn get(value: &T, index: i64) -> Result<(f64, f64), error::T> {
         let index = usize::try_from(index).ok().filter(|&i| i < value.x.len()).ok_or_else(|| {
-            error::internal("Packed.Float2", "invalid_argument", "index out of bounds".to_owned())
+            error::new("Packed.Float2", Code::InvalidArgument, "index out of bounds".to_owned())
         })?;
         Ok((value.x[index], value.y[index]))
     }
@@ -351,9 +351,9 @@ pub mod Deferred {
         let Some(make) = make else {
             return match value.0.value.get() {
                 Some(forced) => Ok(forced),
-                None => Err(error::internal(
+                None => Err(error::new(
                     "Packed.Deferred.force",
-                    "invalid_state",
+                    Code::InvalidState,
                     "unforced value has no materialiser".to_owned(),
                 )),
             };
@@ -374,9 +374,9 @@ pub mod Deferred {
             .take();
         match value.0.value.get() {
             Some(forced) => Ok(forced),
-            None => Err(error::internal(
+            None => Err(error::new(
                 "Packed.Deferred.force",
-                "invalid_state",
+                Code::InvalidState,
                 "materialisation did not publish a value".to_owned(),
             )),
         }
@@ -411,7 +411,7 @@ pub mod Deferred {
 #[allow(non_snake_case)]
 pub mod Float3 {
     use super::{Deferred, same_length};
-    use crate::error;
+    use crate::error::{self, Code};
     use std::sync::Arc;
 
     #[derive(Clone)]
@@ -470,9 +470,9 @@ pub mod Float3 {
             None => Ok([&value.planes.x, &value.planes.y, &value.planes.z]),
             Some(deferred) => match Deferred::force_ref(deferred)? {
                 Deferred::Value::Float3Planes(planes) => Ok([&planes[0], &planes[1], &planes[2]]),
-                _ => Err(error::internal(
+                _ => Err(error::new(
                     "Packed.Float3.deferred",
-                    "invalid_state",
+                    Code::InvalidState,
                     "deferred value is not Float3 planes".to_owned(),
                 )),
             },
@@ -488,9 +488,9 @@ pub mod Float3 {
             ]),
             Some(deferred) => match Deferred::force(deferred)? {
                 Deferred::Value::Float3Planes(planes) => Ok(planes),
-                _ => Err(error::internal(
+                _ => Err(error::new(
                     "Packed.Float3.deferred",
-                    "invalid_state",
+                    Code::InvalidState,
                     "deferred value is not Float3 planes".to_owned(),
                 )),
             },
@@ -532,7 +532,7 @@ pub mod Float3 {
             .ok()
             .filter(|&i| i < usize::try_from(value.length).unwrap_or(usize::MAX))
             .ok_or_else(|| {
-                error::internal("Packed.Float3", "invalid_argument", "index out of bounds".to_owned())
+                error::new("Packed.Float3", Code::InvalidArgument, "index out of bounds".to_owned())
             })?;
         let [x, y, z] = plane_slices(value)?;
         Ok((x[index], y[index], z[index]))
@@ -557,9 +557,9 @@ pub mod Float3 {
         materialise: Materialise,
     ) -> Result<T, error::T> {
         if length < 0 {
-            return Err(error::internal(
+            return Err(error::new(
                 "Packed.Float3.deferred",
-                "invalid_argument",
+                Code::InvalidArgument,
                 "negative length".to_owned(),
             ));
         }
@@ -570,16 +570,16 @@ pub mod Float3 {
                     i64::try_from(plane.len()).unwrap_or(i64::MAX) != length
                 })
             {
-                return Err(error::internal(
+                return Err(error::new(
                     "Packed.Float3.deferred",
-                    "invalid_argument",
+                    Code::InvalidArgument,
                     "materialised planes changed shape".to_owned(),
                 ));
             }
             let [x, y, z] = <[Vec<f64>; 3]>::try_from(planes).map_err(|_| {
-                error::internal(
+                error::new(
                     "Packed.Float3.deferred",
-                    "invalid_argument",
+                    Code::InvalidArgument,
                     "materialised planes changed shape".to_owned(),
                 )
             })?;
@@ -640,7 +640,7 @@ pub mod Float3 {
     #[allow(non_snake_case)]
     pub mod Builder {
         use super::{make, View};
-        use crate::error;
+        use crate::error::{self, Code};
         use std::sync::Arc;
 
         pub struct T {
@@ -652,16 +652,16 @@ pub mod Float3 {
 
         pub fn create(count: i64) -> Result<T, error::T> {
             if count < 0 {
-                return Err(error::internal(
+                return Err(error::new(
                     "Packed.Float3.Builder.create",
-                    "invalid_argument",
+                    Code::InvalidArgument,
                     "negative length".to_owned(),
                 ));
             }
             let count = usize::try_from(count).map_err(|_| {
-                error::internal(
+                error::new(
                     "Packed.Float3.Builder.create",
-                    "invalid_argument",
+                    Code::InvalidArgument,
                     "length is out of range".to_owned(),
                 )
             })?;
@@ -675,9 +675,9 @@ pub mod Float3 {
 
         pub fn set(value: &mut T, index: i64, x: f64, y: f64, z: f64) -> Result<(), error::T> {
             if value.frozen {
-                return Err(error::internal(
+                return Err(error::new(
                     "Packed.Float3.Builder.set",
-                    "invalid_state",
+                    Code::InvalidState,
                     "builder is frozen".to_owned(),
                 ));
             }
@@ -685,9 +685,9 @@ pub mod Float3 {
                 .ok()
                 .filter(|&index| index < value.x.len())
                 .ok_or_else(|| {
-                    error::internal(
+                    error::new(
                         "Packed.Float3.Builder.set",
-                        "invalid_argument",
+                        Code::InvalidArgument,
                         "index out of bounds".to_owned(),
                     )
                 })?;
@@ -699,9 +699,9 @@ pub mod Float3 {
 
         pub fn freeze(value: &mut T) -> Result<super::T, error::T> {
             if value.frozen {
-                return Err(error::internal(
+                return Err(error::new(
                     "Packed.Float3.Builder.freeze",
-                    "invalid_state",
+                    Code::InvalidState,
                     "already frozen".to_owned(),
                 ));
             }
@@ -718,7 +718,7 @@ pub mod Float3 {
 #[allow(non_snake_case)]
 pub mod Float4 {
     use super::same_length;
-    use crate::error;
+    use crate::error::{self, Code};
     use std::sync::Arc;
 
     #[derive(Clone)]
@@ -768,7 +768,7 @@ pub mod Float4 {
 
     pub fn get(value: &T, index: i64) -> Result<(f64, f64, f64, f64), error::T> {
         let index = usize::try_from(index).ok().filter(|&i| i < value.x.len()).ok_or_else(|| {
-            error::internal("Packed.Float4", "invalid_argument", "index out of bounds".to_owned())
+            error::new("Packed.Float4", Code::InvalidArgument, "index out of bounds".to_owned())
         })?;
         Ok((value.x[index], value.y[index], value.z[index], value.w[index]))
     }

@@ -1,4 +1,5 @@
 use crate::{cancel, edge_group, error, group, point_index, topology, topology_index};
+use crate::error::Code;
 
 pub enum T {
     SelectedPoints(group::T),
@@ -7,13 +8,13 @@ pub enum T {
     SelectedEdges(edge_group::T),
 }
 fn selection_error(operation: &str, message: String) -> error::T {
-    error::internal(operation, "invalid_selection", message)
+    error::new(operation, Code::InvalidSelection, message)
 }
 
 fn cancelled_error() -> error::T {
-    error::internal(
+    error::new(
         "element selection",
-        "cancelled",
+        Code::Cancelled,
         "element selection was cancelled".to_owned(),
     )
 }

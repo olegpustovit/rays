@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicI64, AtomicU64, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex, Weak};
 
 use crate::{cancel, error};
+use crate::error::Code;
 
 static NEXT_DATA_ID: AtomicI64 = AtomicI64::new(0);
 static NEXT_CACHE_ID: AtomicU64 = AtomicU64::new(0);
@@ -128,16 +129,16 @@ impl IdentityCache {
         capacity: i64,
     ) -> Result<Arc<IdentityCache>, error::T> {
         if capacity <= 0 {
-            return Err(error::internal(
+            return Err(error::new(
                 "Support.Identity_cache.create",
-                "invalid_argument",
+                Code::InvalidArgument,
                 "Identity_cache.create: capacity must be positive".to_owned(),
             ));
         }
         let capacity = usize::try_from(capacity).map_err(|_| {
-            error::internal(
+            error::new(
                 "Support.Identity_cache.create",
-                "invalid_argument",
+                Code::InvalidArgument,
                 "Identity_cache.create: capacity is out of range".to_owned(),
             )
         })?;
@@ -330,9 +331,9 @@ pub fn select(
             .iter()
             .any(|&index| index < 0 || index >= key_len)
     {
-        return Err(error::internal(
+        return Err(error::new(
             "Support.select",
-            "invalid_argument",
+            Code::InvalidArgument,
             "selection range or index out of bounds".to_owned(),
         ));
     }
@@ -340,9 +341,9 @@ pub fn select(
     let mut upper = last;
     while lower < upper {
         cancel::check_opt(cancel_value).map_err(|_| {
-            error::internal(
+            error::new(
                 "Support.select",
-                "cancelled",
+                Code::Cancelled,
                 "geometry operation was cancelled".to_owned(),
             )
         })?;
@@ -389,9 +390,9 @@ pub fn select(
 
 pub fn ceiling_div(value: i64, divisor: i64) -> Result<i64, error::T> {
     if value < 0 || divisor <= 0 {
-        return Err(error::internal(
+        return Err(error::new(
             "Support.ceiling_div",
-            "invalid_argument",
+            Code::InvalidArgument,
             "ceiling_div requires a nonnegative value and positive divisor".to_owned(),
         ));
     }
@@ -427,7 +428,7 @@ fn run_tasks(
     match lock_failure(&failure).take() {
         Some((_, error)) => Err(error),
         None => result.map_err(|message| {
-            error::internal("Support.run_ranges", "parallel_error", message)
+            error::new("Support.run_ranges", Code::ParallelError, message)
         }),
     }
 }
@@ -442,7 +443,7 @@ fn lock_failure(
 
 
 fn cancelled(operation: &str) -> error::T {
-    error::internal(operation, "cancelled", "geometry operation was cancelled".to_owned())
+    error::new(operation, Code::Cancelled, "geometry operation was cancelled".to_owned())
 }
 
 pub fn parallel_for(
@@ -534,9 +535,9 @@ pub fn run_indexed_ranges(
     operation: &(dyn Fn(i64, i64, i64) -> Result<(), error::T> + Sync),
 ) -> Result<(), error::T> {
     if grain <= 0 {
-        return Err(error::internal(
+        return Err(error::new(
             "Support.run_ranges",
-            "invalid_argument",
+            Code::InvalidArgument,
             "grain must be positive".to_owned(),
         ));
     }
@@ -664,9 +665,9 @@ mod tests {
             *result.lock().unwrap() = Some(run_tasks(3, &|range| {
                 if range == 0 {
                     std::thread::sleep(std::time::Duration::from_millis(40));
-                    Err(error::internal("test.run_tasks", "invalid_argument", "range 0".to_owned()))
+                    Err(error::new("test.run_tasks", Code::InvalidArgument, "range 0".to_owned()))
                 } else if range == 1 {
-                    Err(error::internal("test.run_tasks", "invalid_argument", "range 1".to_owned()))
+                    Err(error::new("test.run_tasks", Code::InvalidArgument, "range 1".to_owned()))
                 } else {
                     Ok(())
                 }
