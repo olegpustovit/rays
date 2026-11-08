@@ -225,9 +225,31 @@ pub fn depends(op: Option<&str>, inputs: &[(String, Value)], defs: &[Graph], gra
 /// The graph with its context operators replaced by the context's values. A seed without a literal
 /// namespace is OCaml's `Invalid_argument "E_SEED_NAMESPACE: ..."`, here its message as `Err`.
 pub fn specialize(provenance: Option<i64>, context: &sop::context::T, label: &str, graph: &Graph) -> Result<Graph, String> {
+    // Term arenas are immutable and their identities never reused: a graph specialized for the same
+    // provenance, context facts and label is the same graph (a parameter edit rebuilds a Lisp node
+    // body under the default context, frame after frame).
+    type Key = ((String, &'static str, (u64, u32)), (u64, u32), Vec<(String, String, Option<(u64, u32)>)>, i64, i64, i64, u64, String);
+    static SPECIALIZED: std::sync::LazyLock<lru::Memo<Key, Result<Graph, String>>> = std::sync::LazyLock::new(|| lru::Memo::new("flow_sop.specialized", 256));
     let provenance = provenance.unwrap_or(-1);
-    let refused: RefCell<Option<String>> = RefCell::new(None);
     let seed = sop::context::seed(context);
+    let key: Key = (
+        (graph.name.clone(), context::name(graph.context), graph.form.identity()),
+        graph.body.identity(),
+        graph.inputs.iter().map(|(name, ty, default)| (name.clone(), flow_syntax::ty::to_string(ty), default.as_ref().map(Term::identity))).collect(),
+        provenance,
+        seed,
+        sop::context::frame(context),
+        sop::context::time(context).to_bits(),
+        label.to_owned(),
+    );
+    if let Some(hit) = SPECIALIZED.get(&key) { return (*hit).clone(); }
+    let result = specialize_uncached(provenance, seed, context, label, graph);
+    SPECIALIZED.insert(key, result.clone());
+    result
+}
+
+fn specialize_uncached(provenance: i64, seed: i64, context: &sop::context::T, label: &str, graph: &Graph) -> Result<Graph, String> {
+    let refused: RefCell<Option<String>> = RefCell::new(None);
     let mut builder = TermBuilder::new();
     let mut transform = |builder: &mut TermBuilder, _: &Term, draft: Draft| -> Draft {
         let Draft::Op { op: name, args, skip } = draft else { return draft };
@@ -624,4 +646,24 @@ pub fn label_context(label: &str, graph: &Graph) -> (Graph, Vec<(String, String)
     graph.inputs.extend(inputs.iter().map(|(_, name, _, call)| (name.clone(), arena.handle(*call).ty().clone(), Some(arena.handle(*call)))));
     let ops = inputs.into_iter().map(|(_, name, op, _)| (name, op)).collect();
     (graph, ops)
+}
+
+#[cfg(test)]
+mod tests {
+    use flow_check::catalog::Catalog;
+    use flow_check::workspace as W;
+    use flow_syntax::syntax;
+
+    #[test]
+    fn a_specialization_is_shared_until_a_context_fact_changes() {
+        let forms = syntax::parse("(workspace w (graph g :context value (+ 1.0 2.0)))").unwrap();
+        let (checked, ds) = W::check(crate::operators::all(), false, false, None, &Catalog { version: 1, kinds: vec![] }, &forms);
+        let graph = checked.unwrap_or_else(|| panic!("{}", ds.iter().map(rays_diagnostic::to_string).collect::<Vec<_>>().join("; "))).graphs[0].clone();
+        let at = |frame: i64| sop::context::create(sop::context::Options { frame: Some(frame), ..Default::default() }).unwrap();
+        let first = super::specialize(Some(3), &at(2), "n", &graph).unwrap();
+        assert_eq!(super::specialize(Some(3), &at(2), "n", &graph).unwrap().body.identity(), first.body.identity());
+        let later = super::specialize(Some(3), &at(5), "n", &graph).unwrap();
+        assert_ne!(later.body.identity(), first.body.identity());
+        assert_ne!(super::specialize(Some(4), &at(2), "n", &graph).unwrap().body.identity(), first.body.identity());
+    }
 }
