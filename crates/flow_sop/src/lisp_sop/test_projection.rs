@@ -115,7 +115,7 @@ fn noise3_rows_edit_and_survive_reload() {
 
 fn snapshot_of(name: &str) -> Vec<(&'static str, (usize, usize, usize))> {
     match name {
-        "bloom" => vec![("flower", (13, 1, 86)), ("scene", (6, 0, 60)), ("world", (2, 0, 11)), ("settings", (2, 0, 7)), ("editor", (10, 0, 29)), ("half", (1, 0, 2)), ("petal", (2, 0, 53))],
+        "bloom" => vec![("flower", (13, 1, 86)), ("scene", (6, 0, 62)), ("world", (2, 0, 11)), ("settings", (2, 0, 7)), ("editor", (10, 0, 29)), ("half", (1, 0, 2)), ("petal", (2, 0, 53))],
         "facade" => vec![("facade", (18, 2, 97))],
         "garland" => vec![("garland", (23, 5, 98)), ("ring", (7, 1, 47))],
         // inline functions and nested maps
@@ -127,7 +127,7 @@ fn snapshot_of(name: &str) -> Vec<(&'static str, (usize, usize, usize))> {
         "tiles" => vec![("tiles", (17, 1, 84))],
         "tree" => vec![("tree", (9, 1, 184))],
         "tunnel" => vec![("rings", (5, 1, 63))],
-        "variations" => vec![("garden", (6, 0, 70)), ("scene", (1, 0, 9)), ("editor", (8, 0, 22))],
+        "variations" => vec![("garden", (6, 0, 70)), ("scene", (1, 0, 10)), ("editor", (8, 0, 22))],
         "wave" => vec![("wave", (7, 2, 46))],
         _ => panic!("no snapshot"),
     }

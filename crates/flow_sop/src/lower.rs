@@ -1824,8 +1824,9 @@ pub fn build_call(
             if let Some(value) = value { call_args.push(value); }
         }
         let call_id = builder.push(None, &ty::geometry(), blank, Draft::Call { kind: definition.kind.qualified.clone(), ctx: fctx::sop(), args: call_args });
-        let inputs: Vec<_> = body.inputs.iter().map(|(name, ty, default)| (name.clone(), ty.clone(), default.as_ref().map(|term| builder.import(term)))).collect();
+        // the cooked node inputs, not the graph's parameter inputs shadowed below
         let input_count = inputs.len();
+        let inputs: Vec<_> = body.inputs.iter().map(|(name, ty, default)| (name.clone(), ty.clone(), default.as_ref().map(|term| builder.import(term)))).collect();
         let arena = builder.freeze();
         let call = WGraph {
             body: arena.handle(call_id),
@@ -2533,7 +2534,8 @@ impl CookServices {
             }
         }
         let n = build_fn()?;
-        BUILT.insert(key, (self.o.gpu.backend.clone(), n.clone()));
+        // a hit rebuilds over its own inputs: keeping this cook's would pin its whole input graph
+        BUILT.insert(key, (self.o.gpu.backend.clone(), build::without_inputs(&n)));
         Ok(n)
     }
 

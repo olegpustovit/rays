@@ -487,6 +487,14 @@ pub mod build {
         T(Arc::new(data))
     }
 
+    /// The node with no inputs: what a cache keeps when every reuse supplies its own
+    /// (`rebuild_with_inputs`), so the cache never owns an input graph.
+    pub fn without_inputs(value: &T) -> T {
+        let mut data = (*value.0).clone();
+        data.inputs = Vec::new();
+        T(Arc::new(data))
+    }
+
     /// Rebuild a parameterized node against new inputs so input-dependent schemas stay current.
     /// The logical id is retained. Unparameterized nodes only swap their inputs.
     pub fn rebuild_with_inputs(value: &T, inputs: &[T]) -> T {
