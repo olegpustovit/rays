@@ -627,12 +627,27 @@ fn literal_case(x: &flow_syntax::syntax::Syntax) -> Result<Value, Diagnostic> {
         _ => eval_error("E_CASE", "case matches literal numbers, text or booleans."),
     }
 }
-fn field(v:Value,name:&str,form:&str)->Result<Value,Diagnostic>{match v{
-    Value::Vec2(x,_) if name=="x"=>Ok(Value::Float(x)),Value::Vec2(_,y) if name=="y"=>Ok(Value::Float(y)),
-    Value::Vec3(x,_,_) if name=="x"=>Ok(Value::Float(x)),Value::Vec3(_,y,_) if name=="y"=>Ok(Value::Float(y)),Value::Vec3(_,_,z) if name=="z"=>Ok(Value::Float(z)),
-    Value::Vec4(x,_,_,_) if name=="x"=>Ok(Value::Float(x)),Value::Vec4(_,y,_,_) if name=="y"=>Ok(Value::Float(y)),Value::Vec4(_,_,z,_) if name=="z"=>Ok(Value::Float(z)),Value::Vec4(_,_,_,w) if name=="w"=>Ok(Value::Float(w)),
-    Value::Record(fs)=>fs.iter().find(|(n,_)|n==name).map(|(_,v)|v.clone()).ok_or_else(||errorf("E_FIELD",format!("{} has no field {}.",form,name))),
-    _=>Err(errorf("E_FIELD",format!("{} has no output {}. A vec3 has .x .y .z; a record has its fields.",form,name)))}}
+fn field<F: FnOnce() -> String>(v: Value, name: &str, form: F) -> Result<Value, Diagnostic> {
+    match v {
+        Value::Vec2(x, _) if name == "x" => Ok(Value::Float(x)),
+        Value::Vec2(_, y) if name == "y" => Ok(Value::Float(y)),
+        Value::Vec3(x, _, _) if name == "x" => Ok(Value::Float(x)),
+        Value::Vec3(_, y, _) if name == "y" => Ok(Value::Float(y)),
+        Value::Vec3(_, _, z) if name == "z" => Ok(Value::Float(z)),
+        Value::Vec4(x, _, _, _) if name == "x" => Ok(Value::Float(x)),
+        Value::Vec4(_, y, _, _) if name == "y" => Ok(Value::Float(y)),
+        Value::Vec4(_, _, z, _) if name == "z" => Ok(Value::Float(z)),
+        Value::Vec4(_, _, _, w) if name == "w" => Ok(Value::Float(w)),
+        Value::Record(fs) => fs.iter().find(|(n, _)| n == name).map(|(_, v)| v.clone()).ok_or_else(|| {
+            let form = form();
+            errorf("E_FIELD", format!("{} has no field {}.", form, name))
+        }),
+        _ => {
+            let form = form();
+            Err(errorf("E_FIELD", format!("{} has no output {}. A vec3 has .x .y .z; a record has its fields.", form, name)))
+        }
+    }
+}
 fn elem_type(vs:&[Value])->Ty{value::elem_ty(vs)}
 fn join_list(vs:Vec<Value>)->Value{let ty=elem_type(&vs);Value::List(Arc::new(vs.iter().map(|v|coerce(&ty,v).unwrap_or_else(|_|v.clone())).collect()))}
 fn live_in(v:&Value,a:&Arena)->bool{match v{Value::Residual(_)|Value::Source(..)=>true,Value::Struct(_,Ty::Array(_),_)=>true,Value::List(v)=>v.iter().any(|x|live_in(x,a)),Value::Record(fs)|Value::Struct(_,_,fs)=>fs.iter().any(|(_,v)|live_in(v,a)),_=>false}}
@@ -665,9 +680,10 @@ fn bind_packed(a: &mut Arena, c: &ExecCtx, env: &mut Env, arena: &TermArena, pat
         }
         PatternNode::Keys(range) => {
             let value = concrete(a, value)?;
+            let pattern_name = packed_pattern_name(arena, pattern);
             for name in arena.name_ids(range) {
                 let name = arena.name(*name);
-                let field = field(value.clone(), name, &packed_pattern_name(arena, pattern))?;
+                let field = field(value.clone(), name, || pattern_name.clone())?;
                 if let Some(mk) = mk { note(a, c, mk(name), field.clone()); }
                 env.bind(intern(a, name), field);
             }
@@ -694,11 +710,14 @@ fn record_packed(a: &mut Arena, c: &ExecCtx, zone: &Path, arena: &TermArena, pat
             if values.len() < patterns.len() { return Err(errorf("E_PATTERN", format!("{} needs {} elements; the list has {}.", packed_pattern_name(arena, pattern), patterns.len(), values.len()))); }
             for (pattern, value) in patterns.iter().zip(values.iter()) { record_packed(a, c, zone, arena, *pattern, value)?; }
         }
-        PatternNode::Keys(range) => for name in arena.name_ids(range) {
-            let name = arena.name(*name);
-            let value = field(value.clone(), name, &packed_pattern_name(arena, pattern))?;
-            let mut path = zone.clone(); path.push(format!(":{name}")); note(a, c, path, value);
-        },
+        PatternNode::Keys(range) => {
+            let pattern_name = packed_pattern_name(arena, pattern);
+            for name in arena.name_ids(range) {
+                let name = arena.name(*name);
+                let value = field(value.clone(), name, || pattern_name.clone())?;
+                let mut path = zone.clone(); path.push(format!(":{name}")); note(a, c, path, value);
+            }
+        }
     }
     Ok(())
 }
@@ -1449,8 +1468,19 @@ fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Valu
             let fields = arena.name_ids(node.fields);
             if fields.is_empty() && name.starts_with("$elem:") { return a.elems.get(name).cloned().ok_or_else(|| error("E_ELEMENT", "A geometry element is not bound.")); }
             let mut value = env.get(name).ok_or_else(|| errorf("E_UNBOUND", format!("{} is not bound.", name)))?;
-            let mut path = name.to_owned();
-            for field_name in fields { let field_name = t.name(*field_name); value = field(concrete(a, value)?, field_name, &path)?; path = format!("{}.{}", path, field_name); }
+            let mut walked: Vec<&str> = Vec::new();
+            for field_name in fields {
+                let field_name = t.name(*field_name);
+                value = field(concrete(a, value)?, field_name, || {
+                    let mut path = String::from(name);
+                    for prefix in &walked {
+                        path.push('.');
+                        path.push_str(prefix);
+                    }
+                    path
+                })?;
+                walked.push(field_name);
+            }
             Ok(value)
         })(),
         TermNode::Call(id) => (|| -> Result<Value, Diagnostic> {
@@ -1669,7 +1699,7 @@ fn eval_raw_body(a: &mut Arena, c: &ExecCtx, env: &Env, t: &Term) -> Result<Valu
             for field in fields { let name = t.name(field.name); values.push((name.to_owned(), eval_named(a, c, name, env, &t.child(field.term))?)); }
             Ok(Value::Record(values))
         })(),
-        TermNode::Get(id) => { let node = arena.get(id); field(eval_concrete(a, c, env, &t.child(node.value))?, t.name(node.name), "value") },
+        TermNode::Get(id) => { let node = arena.get(id); field(eval_concrete(a, c, env, &t.child(node.value))?, t.name(node.name), || "value".into()) },
         TermNode::Assoc(id) => (|| -> Result<Value, Diagnostic> {
             let node = arena.assoc(id);
             let Value::Record(mut fields) = eval_concrete(a, c, env, &t.child(node.value))? else { return eval_error("E_TYPE", "assoc updates a record."); };
@@ -4114,7 +4144,7 @@ impl Run {
             if matches!(at, Value::Residual(_) | Value::Source(..) | Value::Struct(_, Ty::Array(_), _)) { return Err(Abandon); }
             match at {
                 Value::Record(entries) => at = &entries.iter().find(|(name, _)| name == field_name).ok_or(Abandon)?.1,
-                other => { owned = field(other.clone(), field_name, "").map_err(|_| Abandon)?; at = &owned; }
+                other => { owned = field(other.clone(), field_name, String::new).map_err(|_| Abandon)?; at = &owned; }
             }
         }
         Ok(at.clone())
