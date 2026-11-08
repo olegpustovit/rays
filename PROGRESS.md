@@ -10,7 +10,7 @@ Repo mirror: `docs/history/port-simplification/index.html`
 
 | Wave | Done | Active | Pending |
 |------|------|--------|---------|
-| A | 1/8 | A2,A3 | 6 |
+| A | 2/8 | A2 | 5 |
 | B | 0/6 | — | 6 |
 | M | 0/21 | — | 21 |
 | I | 0/1 | — | 1 |
@@ -23,8 +23,9 @@ Repo mirror: `docs/history/port-simplification/index.html`
 |----|--------|-------------------|
 | A1 | done | `6802a325` — delete `rays_collections` / `rays_hash`; gate bans generics |
 | A2 | active | `e10bff22` edge_transport; `5a6e7269` −297 lines support (more dead fns / rdk re-exports remain) |
-| A3 | active | `10a405ae`/`1a8ee31b` — rdk `MAX_ARRAY_LENGTH` gone except `boolean_materialization` packing |
-| A4 | pending | |
+| A3 | done | `1a8ee31b` — rdk `MAX_ARRAY_LENGTH` trimmed; `boolean_materialization` packing kept |
+| A4 | done | `a60fcced` — `md5_hex` in `rays_math::hash`; 5 duplicate modules removed |
+| A6 | active | `09ce8574` — unused deps on rays_bin / UI (pxui still has `ocaml_int`) |
 | A5 | pending | |
 | A6 | pending | |
 | A7 | pending | |
@@ -41,3 +42,6 @@ Repo mirror: `docs/history/port-simplification/index.html`
 - 2026-11-08: `3c86b2a1` — gpu_suite sharding removed.
 - 2026-11-08: `e10bff22` / `10a405ae` / `1a8ee31b` — A2 edge_transport; A3 rdk array limits.
 - 2026-11-08: `5a6e7269` — A2 sop::support dead helpers (−297 lines); `cargo t -p sop` 52 tests.
+- 2026-11-08: `1a8ee31b` / `a60fcced` — A3 closed for rdk; A4 MD5 merge.
+- 2026-11-08: `09ce8574` — A6 partial dep hygiene.
+- 2026-11-08: Wave A runbook: gpu_suite sharding (`3c86b2a1`).
